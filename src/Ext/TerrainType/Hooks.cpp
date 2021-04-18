@@ -98,3 +98,108 @@ DEFINE_HOOK(71C8D7, TerrainTypeClass_Context_Unset, 5)
 
 	return 0;
 }
+
+DEFINE_HOOK(71C871, TerrainTypeClass_Update_bug, 5)
+{
+		GET(TerrainTypeClass*, pTypeTerrain, ECX); // v9 <- in theory this provokes a crash
+		// In psudocode:
+		// v6 = *(__int16 *)(((int (__thiscall *)(TerrainTypeClass *))v9->vt->GetImage)(v9) + 6) / 2;
+		GET(int *, v6, EAX); // v6
+		auto object = pTypeTerrain->GetImage();
+		if (object && v6 != nullptr)
+		{
+			return 0;
+		}
+		else
+		{
+			Debug::Log("AAAAA Peta\n");
+			return 0x71C8D5;
+		}
+}
+
+DEFINE_HOOK(5657A4, MapClass_Coord_Cell_bug, 5)
+{
+	GET(CellStruct *, pCell, EDX); // v9 <- in theory this provokes a crash
+	// In psudocode:
+	// v6 = *(__int16 *)(((int (__thiscall *)(TerrainTypeClass *))v9->vt->GetImage)(v9) + 6) / 2;
+	//GET(int, tibIndex, EAX); // v6
+	//GET(MapClass *, pThis, ECX); // this
+	//auto object = pTypeTerrain->GetImage();
+	try
+	{
+
+		Debug::Log("PRE-AAAA Y: %d\n", pCell->Y);
+	}
+	catch (...)
+	{
+		Debug::Log("POST-AAAA. crashed\n");
+		pCell = new CellStruct();
+		pCell->X = 0;
+		pCell->Y = 0;
+
+		return 0x5657D5;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(5FDD3A, MapClass_Coord_Cell_bug2, 6)
+{
+	GET(OverlayTypeClass *, pTypeOverlay, EAX); // v9 <- in theory this provokes a crash
+	try
+	{
+		Debug::Log("PRE-BBBB Overlay->Tiberium: %d\n", pTypeOverlay->Tiberium);
+	}
+	catch (...)
+	{
+		Debug::Log("POST-BBBB. crashed\n");
+
+		return 0x5FDDD5;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(7231B4, MapClass_Coord_Cell_bug3, 6)
+{
+	GET(int, value_EAX, EAX);
+	GET(int, value_EBX, EBX);
+	GET(int, value_ECX, ECX);
+
+	try
+	{
+		Debug::Log("AAA3 value_ECX: %d\n", value_ECX);
+		Debug::Log("AAA3 value_EAX: %d\n", value_EAX);
+		Debug::Log("AAA3 value_EBX: %d\n", value_EBX);
+	}
+	catch (...)
+	{
+		Debug::Log("POST-BBB3. crashed\n");
+
+		return 0x72324E;// 723255;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(72318D, MapClass_Coord_Cell_bug4, 6)
+{
+	GET(int, value_EAX, EAX);
+	GET(int, value_EDX, EDX);
+	GET(int, value_ECX, ECX);
+
+	try
+	{
+		Debug::Log("CCC4 value_ECX: %d\n", value_ECX);
+		Debug::Log("CCC4 value_EAX: %d\n", value_EAX);
+		Debug::Log("CCC4 value_EDX: %d\n", value_EDX);
+	}
+	catch (...)
+	{
+		Debug::Log("POST-DDD4. crashed\n");
+		
+		return 0x72324E;
+	}
+
+	return 0;
+}
