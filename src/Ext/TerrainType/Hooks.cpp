@@ -3,6 +3,7 @@
 #include <ScenarioClass.h>
 #include <TiberiumClass.h>
 #include <OverlayTypeClass.h>
+#include <CellClass.h>
 
 #include "../../Utilities/GeneralUtils.h"
 #include "../../Utilities/Macro.h"
@@ -127,17 +128,14 @@ DEFINE_HOOK(5657A4, MapClass_Coord_Cell_bug, 5)
 	//auto object = pTypeTerrain->GetImage();
 	try
 	{
-
-		Debug::Log("PRE-AAAA Y: %d\n", pCell->Y);
+		pCell->Y *= 1;
+		//Debug::Log("PRE-AAAA Y: %d\n", pCell->Y);
 	}
 	catch (...)
 	{
 		Debug::Log("POST-AAAA. crashed\n");
-		pCell = new CellStruct();
-		pCell->X = 0;
-		pCell->Y = 0;
-
-		return 0x5657D5;
+		
+		return 0x5657C8;//5657D5;
 	}
 
 	return 0;
@@ -148,7 +146,12 @@ DEFINE_HOOK(5FDD3A, MapClass_Coord_Cell_bug2, 6)
 	GET(OverlayTypeClass *, pTypeOverlay, EAX); // v9 <- in theory this provokes a crash
 	try
 	{
-		Debug::Log("PRE-BBBB Overlay->Tiberium: %d\n", pTypeOverlay->Tiberium);
+		bool baux = pTypeOverlay->Tiberium;
+		if (baux == true)
+		{
+			baux = true;
+		}
+		//Debug::Log("PRE-BBBB Overlay->Tiberium: %d\n", pTypeOverlay->Tiberium);
 	}
 	catch (...)
 	{
@@ -168,13 +171,13 @@ DEFINE_HOOK(7231B4, MapClass_Coord_Cell_bug3, 6)
 
 	try
 	{
-		Debug::Log("AAA3 value_ECX: %d\n", value_ECX);
-		Debug::Log("AAA3 value_EAX: %d\n", value_EAX);
-		Debug::Log("AAA3 value_EBX: %d\n", value_EBX);
+		Debug::Log("CCCC value_ECX: %d\n", value_ECX);
+		Debug::Log("CCCC value_EAX: %d\n", value_EAX);
+		Debug::Log("CCCC value_EBX: %d\n", value_EBX);
 	}
 	catch (...)
 	{
-		Debug::Log("POST-BBB3. crashed\n");
+		Debug::Log("POST-CCCC. crashed\n");
 
 		return 0x72324E;// 723255;
 	}
@@ -190,16 +193,100 @@ DEFINE_HOOK(72318D, MapClass_Coord_Cell_bug4, 6)
 
 	try
 	{
-		Debug::Log("CCC4 value_ECX: %d\n", value_ECX);
-		Debug::Log("CCC4 value_EAX: %d\n", value_EAX);
-		Debug::Log("CCC4 value_EDX: %d\n", value_EDX);
+		Debug::Log("DDDD value_ECX: %d\n", value_ECX);
+		Debug::Log("DDDD value_EAX: %d\n", value_EAX);
+		Debug::Log("DDDD value_EDX: %d\n", value_EDX);
 	}
 	catch (...)
 	{
-		Debug::Log("POST-DDD4. crashed\n");
+		Debug::Log("POST-DDDD. crashed\n");
 		
 		return 0x72324E;
 	}
 
 	return 0;
+}
+
+DEFINE_HOOK(722C82, MapClass_sub_722C40, 5)
+{
+	//GET(TiberiumClass *, pTib, ECX);
+	GET(int, field_124, EAX);
+	GET(int, field_11C, EDI);
+	//Debug::Log("CCC4 value_EDX: %d\n", pTib->);
+	Debug::Log("----\n");
+	Debug::Log("EEEE value_EDI: %d\n", field_11C);
+	Debug::Log("EEEE value_EAX: %d\n", field_124);
+	Debug::Log("----\n");
+
+	return 0;
+}
+
+DEFINE_HOOK(7230D0, crash_in_sub_722F00, 5)
+{
+	GET(int, value_ebp_v20, EBP); // v20
+	GET(int, value_ebx_v21, EBX); // v21 <- in theory this provokes a crash
+	//auto object = pTypeTerrain->GetImage();
+	try
+	{
+		Debug::Log("AAAA value_ebx_v20: %d\n", value_ebp_v20);
+		Debug::Log("AAAA value_ebx_v21: %d\n", value_ebx_v21);
+		value_ebx_v21 *= 1;
+		//Debug::Log("PRE-AAAA Y: %d\n", pCell->Y);
+
+	}
+	catch (...)
+	{
+		Debug::Log("POST-AAAA-crash_in_sub_722F00. crashed\n");
+
+		return 0x72324E;
+	}
+
+	return 0x7230EB;//return 0;
+}
+
+DEFINE_HOOK(5657AC, crash_in_MapClass__Coord_Cell, 5)
+{
+	GET(int *, value_esi_X, ESI);
+	GET(int *, value_eax_Y, EAX);
+
+	try
+	{
+		Debug::Log("FFFF-start.\n");
+		Debug::Log("FFFF value_esi_X: %d\n", value_esi_X);
+		Debug::Log("FFFF value_eax_Y: %d\n", value_eax_Y);
+		//Debug::Log("PRE-FFFF Y: %d\n", pCell->Y);
+
+	}
+	catch (...)
+	{
+
+	}
+	
+	return 0;
+}
+
+// rewrite of Coord_Cell
+// 5657A0, 6... well, better 5657A4 and size 5 and we get coords in ECX
+DEFINE_HOOK(5657B2, MapClass_Coord_Cell_rewrite, 7)
+{
+	GET(short, value_esi_X, ESI);
+	GET(short, value_eax_Y, EAX);
+
+	CellStruct *cellToCheck = new CellStruct();
+	cellToCheck->X = value_esi_X;
+	cellToCheck->Y = value_eax_Y;
+
+	auto cell = MapClass::Instance->TryGetCellAt(*cellToCheck);
+
+	Debug::Log("Valid Cell ?\n");
+	if (!cell)
+	{
+		cellToCheck->X = 0;
+		cellToCheck->Y = 0;
+		Debug::Log("No valid Cell\n");
+		cell = MapClass::Instance->TryGetCellAt(*cellToCheck);
+		Debug::Log("Trying to return cell 0,0\n");
+	}
+	R->EAX(&cell);
+	return 0x5657D5;
 }
