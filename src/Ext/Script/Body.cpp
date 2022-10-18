@@ -243,6 +243,9 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 		// Start Timed Jump that jumps to the same line when the countdown finish (in frames)
 		ScriptExt::Set_ForceJump_Countdown(pTeam, true, -1);
 		break;
+	case PhobosScripts::ForceGlobalOnlyTargetHouseEnemy:
+		ScriptExt::ForceGlobalOnlyTargetHouseEnemy(pTeam, -1);
+		break;
 	case PhobosScripts::AbortActionAfterSuccessKill:
 		ScriptExt::SetAbortActionAfterSuccessKill(pTeam, -1);
 		break;
@@ -609,6 +612,14 @@ void ScriptExt::Mission_Attack(TeamClass *pTeam, bool repeatAction = true, int c
 		return;
 	}
 
+	auto pHouseExt = HouseExt::ExtMap.Find(pTeam->Owner);
+	if (!pHouseExt)
+	{
+		// This action finished
+		pTeam->StepCompleted = true;
+		return;
+	}
+
 	// When the new target wasn't found it sleeps some few frames before the new attempt. This can save cycles and cycles of unnecessary executed lines.
 	if (pTeamData->WaitNoTargetCounter > 0)
 	{
@@ -849,6 +860,11 @@ void ScriptExt::Mission_Attack(TeamClass *pTeam, bool repeatAction = true, int c
 			}
 		}
 	}
+
+	bool onlyTargetHouseEnemy = pTeam->Type->OnlyTargetHouseEnemy;
+
+	if (pHouseExt->ForceOnlyTargetHouseEnemyMode != -1)
+		onlyTargetHouseEnemy = pHouseExt->ForceOnlyTargetHouseEnemy;
 
 	bool onlyTargetHouseEnemy = pTeam->Type->OnlyTargetHouseEnemy;
 
@@ -2349,7 +2365,7 @@ TechnoClass* ScriptExt::FindBestObject(TechnoClass *pTechno, int method, int cal
 	if (!pickAllies && pTechno->BelongsToATeam())
 	{
 		auto pFoot = abstract_cast<FootClass*>(pTechno);
-		if (pFoot)
+		if (pFoot && pFoot->Team)
 		{
 			int enemyHouseIndex = pFoot->Team->FirstUnit->Owner->EnemyHouseIndex;
 			bool onlyTargetHouseEnemy = pFoot->Team->Type->OnlyTargetHouseEnemy;
@@ -2363,11 +2379,8 @@ TechnoClass* ScriptExt::FindBestObject(TechnoClass *pTechno, int method, int cal
 				}
 			}
 
-			if (onlyTargetHouseEnemy
-				&& enemyHouseIndex >= 0)
-			{
+			if (onlyTargetHouseEnemy && enemyHouseIndex >= 0)
 				enemyHouse = HouseClass::Array->GetItem(enemyHouseIndex);
-			}
 		}
 	}
 
@@ -4148,6 +4161,31 @@ void ScriptExt::Stop_ForceJump_Countdown(TeamClass *pTeam)
 	// This action finished
 	pTeam->StepCompleted = true;
 	Debug::Log("DEBUG: [%s] [%s](line: %d = %d,%d): Stopped Timed Jump\n", pTeam->Type->ID, pScript->Type->ID, pScript->CurrentMission, pScript->Type->ScriptActions[pScript->CurrentMission].Action, pScript->Type->ScriptActions[pScript->CurrentMission].Argument);
+}
+
+void ScriptExt::ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode = -1)
+{
+	if (!pTeam)
+		return;
+
+	auto pHouseExt = HouseExt::ExtMap.Find(pTeam->Owner);
+	if (!pHouseExt)
+	{
+		// This action finished
+		pTeam->StepCompleted = true;
+		return;
+	}
+
+	if (mode < 0 || mode > 2)
+		mode = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
+
+	if (mode < -1 || mode > 2)
+		mode = -1;
+
+	HouseExt::ForceOnlyTargetHouseEnemy(pTeam->Owner, mode);
+
+	// This action finished
+	pTeam->StepCompleted = true;
 }
 
 // 1-based like the original action '6,n' (so the first script line is n=1)
