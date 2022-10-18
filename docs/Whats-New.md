@@ -252,6 +252,7 @@ New:
 - Building airstrike target eligibility customization (by Starkku)
 - IvanBomb detonation & image display centered on buildings (by Starkku)
 - Forcing specific weapon against cloaked or disguised targets (by Starkku)
+- Override target under EMP attack behavior (By FS-21)
 - Repair Legless Cyborgs In Transports (by FS-21)
 - Mind Control Threshold (by FS-21)
 - Script action for  enabling & disabling AI Triggers (by FS-21)
