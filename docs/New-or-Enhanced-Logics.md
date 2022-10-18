@@ -457,6 +457,37 @@ Shrapnel.AffectsGround=false     ; boolean
 Shrapnel.AffectsBuildings=false  ; boolean
 ```
 
+### `500 - 523` Edit Variable
+- Operate a variable's value
+    - The variable's value type is int16 instead of int32 in trigger actions for some reason, which means it ranges from -2^15 to 2^15-1.
+        - Any numbers exceeding this limit will lead to unexpected results!
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=i,n             ; where 500 <= i <= 523, n is made up of two parts, the low 16 bits is being used to store the variable index, the high 16 bits is being used for storing the param value.
+```
+
+### `524 - 547` Edit Variable by Local Variable
+- Operate a variable's value by a local variable's value
+    - Similar to 500-523, but the number to operate the value is being read from a local variable
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=i,n             ; where 524 <= i <= 547, n is made up of two parts, the low 16 bits is being used to store the variable index, the high 16 bits is being used for storing the local variable index.
+```
+
+### `548 - 571` Edit Variable by Global Variable
+- Operate a variable's value by a global variable's value
+    - Similar to 500-523, but the number to operate the value is being read from a global variable
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=i,n             ; where 548 <= i <= 571, n is made up of two parts, the low 16 bits is being used to store the variable index, the high 16 bits is being used for storing the global variable index.
+```
+
 ## Super Weapons
 
 ### LimboDelivery
