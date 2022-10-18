@@ -925,6 +925,9 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->OriginalPassengerOwner)
 		.Process(this->IsLeggedCyborg)
 		.Process(this->CurrentLaserWeaponIndex)
+		.Process(this->DelayedFire_Anim)
+		.Process(this->DelayedFire_Anim_LoopCount)
+		.Process(this->DelayedFire_DurationTimer)
 		;
 }
 
