@@ -30,6 +30,7 @@ public:
 		int LastWarpDistance;
 		CDTimerClass AutoDeathTimer;
 		AnimTypeClass* MindControlRingAnimType;
+		bool IsLeggedCyborg;
 		OptionalStruct<int, false> DamageNumberOffset;
 		OptionalStruct<int, true> CurrentLaserWeaponIndex;
 
@@ -51,6 +52,7 @@ public:
 			, MindControlRingAnimType { nullptr }
 			, DamageNumberOffset {}
 			, OriginalPassengerOwner {}
+			, IsLeggedCyborg { false }
 			, CurrentLaserWeaponIndex {}
 		{ }
 

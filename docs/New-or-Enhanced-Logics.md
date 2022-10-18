@@ -805,6 +805,15 @@ EVA.Sold=       ; EVA entry
 SellSound=      ; sound entry
 ```
 
+### Repair Legless Cyborgs in transports
+
+- Now transports can restore cyborg legs when the damaged soldier enter into the transport.
+
+In `rulesmd.ini`:
+```ini
+[SOME_TRANSPORT]                  ; TechnoType
+CanRepairCyborgLegs=false         ; boolean
+```
 
 ## Terrain
 

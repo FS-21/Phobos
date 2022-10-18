@@ -252,6 +252,7 @@ New:
 - Building airstrike target eligibility customization (by Starkku)
 - IvanBomb detonation & image display centered on buildings (by Starkku)
 - Forcing specific weapon against cloaked or disguised targets (by Starkku)
+- Repair Legless Cyborgs In Transports (by FS-21)
 - Mind Control Threshold (by FS-21)
 - Script action for  enabling & disabling AI Triggers (by FS-21)
 - Script Action 14004 for forcing all new actions to target only the main owner's enemy (by FS-21)
@@ -259,6 +260,7 @@ New:
 
 Vanilla fixes:
 - Allow AI to repair structures built from base nodes/trigger action 125/SW delivery in single player missions (by Trsdy)
+- Fixed bug that restored cyborg legs when the soldier leave transports (by FS-21)
 </details>
 
 

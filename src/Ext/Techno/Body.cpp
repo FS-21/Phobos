@@ -923,6 +923,7 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->AutoDeathTimer)
 		.Process(this->MindControlRingAnimType)
 		.Process(this->OriginalPassengerOwner)
+		.Process(this->IsLeggedCyborg)
 		.Process(this->CurrentLaserWeaponIndex)
 		;
 }
