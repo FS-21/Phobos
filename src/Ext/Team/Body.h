@@ -27,6 +27,8 @@ public:
 		int ForceJump_InitialCountdown;
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
+		int TriggersSideIdx;
+		int TriggersHouseIdx;
 		int AngerNodeModifier;
 		bool OnlyTargetHouseEnemy;
 		int OnlyTargetHouseEnemyMode;
@@ -52,6 +54,8 @@ public:
 			, ForceJump_InitialCountdown { -1 }
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
+			, TriggersSideIdx { -1 }
+			, TriggersHouseIdx { -1 }
 			, AngerNodeModifier { 5000 }
 			, OnlyTargetHouseEnemy { false }
 			, OnlyTargetHouseEnemyMode { -1 }

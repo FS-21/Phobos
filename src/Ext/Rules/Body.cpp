@@ -64,6 +64,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	const char* sectionAITargetTypes = "AITargetTypes";
 	const char* sectionAIScriptsList = "AIScriptsList";
+	const char* sectionAITriggersList = "AITriggersList";
 	const char* sectionAIHousesList = "AIHousesList";
 
 	INI_EX exINI(pINI);
@@ -141,6 +142,25 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 		}
 
 		AIScriptsLists.AddItem(objectsList);
+		objectsList.Clear();
+	}
+
+	// Section AITriggersList
+	int triggerItemsCount = pINI->GetKeyCount(sectionAITriggersList);
+	for (int i = 0; i < triggerItemsCount; ++i)
+	{
+		DynamicVectorClass<AITriggerTypeClass*> objectsList;
+
+		char* context = nullptr;
+		pINI->ReadString(sectionAITriggersList, pINI->GetKeyName(sectionAITriggersList, i), "", Phobos::readBuffer);
+
+		for (char *cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			AITriggerTypeClass* pNewTrigger = GameCreate<AITriggerTypeClass>(cur);
+			objectsList.AddItem(pNewTrigger);
+		}
+
+		AITriggersLists.AddItem(objectsList);
 		objectsList.Clear();
 	}
 
@@ -240,6 +260,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->Pips_SelfHeal_Infantry_Offset)
 		.Process(this->Pips_SelfHeal_Units_Offset)
 		.Process(this->Pips_SelfHeal_Buildings_Offset)
+		.Process(this->AITriggersLists)
 		.Process(Phobos::Config::AllowParallelAIQueues)
 		.Process(this->ForbidParallelAIQueues_Aircraft)
 		.Process(this->ForbidParallelAIQueues_Building)

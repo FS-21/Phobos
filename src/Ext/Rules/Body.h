@@ -2,6 +2,7 @@
 
 #include <CCINIClass.h>
 #include <RulesClass.h>
+#include <AITriggerTypeClass.h>
 
 #include <Utilities/Container.h>
 #include <Utilities/Constructs.h>
@@ -26,6 +27,7 @@ public:
 	public:
 		DynamicVectorClass<DynamicVectorClass<TechnoTypeClass*>> AITargetTypesLists;
 		DynamicVectorClass<DynamicVectorClass<ScriptTypeClass*>> AIScriptsLists;
+		DynamicVectorClass<DynamicVectorClass<AITriggerTypeClass*>> AITriggersLists;
 		DynamicVectorClass<DynamicVectorClass<HouseTypeClass*>> AIHousesLists;
 		DynamicVectorClass<TechnoTypeClass*> HarvesterTypes;
 
