@@ -884,10 +884,14 @@ void ScriptExt::Mission_Attack(TeamClass *pTeam, bool repeatAction = true, int c
 
 	bool onlyTargetHouseEnemy = pTeam->Type->OnlyTargetHouseEnemy;
 
-	if (pHouseExt->ForceOnlyTargetHouseEnemyMode != -1)
+	if (pTeamData->OnlyTargetHouseEnemyMode != -1)
+	{
+		onlyTargetHouseEnemy = pTeamData->OnlyTargetHouseEnemy;
+	}
+	else if (pHouseExt->ForceOnlyTargetHouseEnemyMode != -1)
+	{
 		onlyTargetHouseEnemy = pHouseExt->ForceOnlyTargetHouseEnemy;
-
-	bool onlyTargetHouseEnemy = pTeam->Type->OnlyTargetHouseEnemy;
+	}
 
 	if (pTeamData->OnlyTargetHouseEnemyMode != -1)
 	{
@@ -2394,9 +2398,15 @@ TechnoClass* ScriptExt::FindBestObject(TechnoClass *pTechno, int method, int cal
 			auto pTeamData = TeamExt::ExtMap.Find(pFoot->Team);
 			if (pTeamData)
 			{
+				auto pHouseExt = HouseExt::ExtMap.Find(pFoot->Team->Owner);
+
 				if (pTeamData->OnlyTargetHouseEnemyMode != -1)
 				{
 					onlyTargetHouseEnemy = pTeamData->OnlyTargetHouseEnemy;
+				}
+				else if (pHouseExt && pHouseExt->ForceOnlyTargetHouseEnemyMode != -1)
+				{
+					onlyTargetHouseEnemy = pHouseExt->ForceOnlyTargetHouseEnemy;
 				}
 			}
 
