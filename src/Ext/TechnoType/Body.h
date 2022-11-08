@@ -272,7 +272,6 @@ public:
 			, DeployedPrimaryFireFLH { }
 			, DeployedSecondaryFireFLH { }
 			, CanRepairCyborgLegs { false }
-			, InitialStrength_Cloning { { 1.0, 0.0 } }
 			, IronCurtain_KeptOnDeploy{ }
 			, Explodes_KillPassengers { true }
 		{ }

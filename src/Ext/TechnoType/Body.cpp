@@ -215,7 +215,6 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->IronCurtain_KeptOnDeploy.Read(exINI, pSection, "IronCurtain.KeptOnDeploy");
 
-	this->InitialStrength_Cloning.Read(exINI, pSection, "InitialStrength.Cloning");
 	this->CanRepairCyborgLegs.Read(exINI, pSection, "CanRepairCyborgLegs");
 
 	this->Explodes_KillPassengers.Read(exINI, pSection, "Explodes.KillPassengers");
@@ -399,7 +398,6 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->EliteDeployedWeaponBurstFLHs)
 
 		.Process(this->IronCurtain_KeptOnDeploy)
-		.Process(this->InitialStrength_Cloning)
 		.Process(this->CanRepairCyborgLegs)
 		.Process(this->Explodes_KillPassengers)
 		;
