@@ -59,6 +59,7 @@ enum class PhobosScripts : unsigned int
 	WaitUntilFullAmmo = 10101,
 	GatherAroundLeader = 10102,
 	LoadIntoTransports = 10103,
+	RepairDestroyedBridge = 10104,
 
 	// Range 12000-12999 are suplementary/setup pre-actions
 	WaitIfNoTarget = 12000,
@@ -288,6 +289,8 @@ public:
 	static void SetHouseIdxForManagingTriggers(TeamClass* pTeam, int houseIdx);
 	static void ManageAITriggers(TeamClass* pTeam, int enabled);
 	static void ManageTriggersWithObjects(TeamClass* pTeam, int idxAITargetType, bool isEnabled);
+	static void RepairDestroyedBridge(TeamClass* pTeam, int mode);
+	static bool FindLinkedPath(TeamClass* pTeam, TechnoClass* pThis, TechnoClass* pTarget);
 
 
 	static ExtContainer ExtMap;

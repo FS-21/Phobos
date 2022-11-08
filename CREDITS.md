@@ -124,6 +124,7 @@ This page lists all the individual contributions to the project by their author.
   - Delayed fire animation
   - Script actions for modifying AI anger against other houses
   - Script actions for manipulating script flows with conditional jumps
+  - Script action for repairing destroyed bridges
 - **Starkku**:
   - Warhead shield penetration & breaking
   - Strafing aircraft weapon customization

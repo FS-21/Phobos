@@ -35,6 +35,14 @@ void TeamExt::ExtData::Serialize(T& Stm)
 		.Process(this->AbortActionAfterKilling)
 		.Process(this->ConditionalJump_Index)
 		.Process(this->ConditionalJump_ResetVariablesIfJump)
+		.Process(this->MapPath_Grid)
+		.Process(this->MapPath_Queue)
+		.Process(this->MapPath_InProgress)
+		.Process(this->MapPath_StartTechno)
+		.Process(this->MapPath_EndTechno)
+		.Process(this->MapPath_BridgeRepairHuts)
+		.Process(this->MapPath_ValidBridgeRepairHuts)
+		.Process(this->MapPath_CheckedBridgeRepairHuts)
 		;
 }
 

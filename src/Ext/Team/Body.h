@@ -5,6 +5,7 @@
 #include <Helpers/Macro.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
+#include <Ext/Techno/Body.h>
 #include <Phobos.h>
 
 class TeamExt
@@ -40,6 +41,14 @@ public:
 		bool AbortActionAfterKilling;
 		bool ConditionalJump_EnabledKillsCount;
 		bool ConditionalJump_ResetVariablesIfJump;
+		std::vector<std::vector<bool>> MapPath_Grid; // Used for marking visited/analyzed cells
+		std::vector<MapPathCellElement> MapPath_Queue; // Cells that will be analyzed for finding a path
+		bool MapPath_InProgress;
+		TechnoClass* MapPath_StartTechno;
+		TechnoClass* MapPath_EndTechno;
+		DynamicVectorClass<TechnoClass*> MapPath_BridgeRepairHuts;
+		DynamicVectorClass<TechnoClass*> MapPath_ValidBridgeRepairHuts;
+		DynamicVectorClass<TechnoClass*> MapPath_CheckedBridgeRepairHuts;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -67,6 +76,14 @@ public:
 			, ConditionalJump_Index { -1000000 }
 			, ConditionalJump_EnabledKillsCount { false }
 			, ConditionalJump_ResetVariablesIfJump { false }
+			, MapPath_Grid { }
+			, MapPath_Queue { }
+			, MapPath_InProgress { false }
+			, MapPath_StartTechno { nullptr }
+			, MapPath_EndTechno { nullptr }
+			, MapPath_BridgeRepairHuts { }
+			, MapPath_ValidBridgeRepairHuts { }
+			, MapPath_CheckedBridgeRepairHuts { }
 		{ }
 
 		virtual ~ExtData() = default;
