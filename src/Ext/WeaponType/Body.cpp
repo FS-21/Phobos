@@ -43,6 +43,7 @@ void WeaponTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->DelayedFire_Anim_LoopCount.Read(exINI, pSection, "DelayedFire.Anim.LoopCount");
 	this->DelayedFire_Anim_UseFLH.Read(exINI, pSection, "DelayedFire.Anim.UseFLH");
 	this->DelayedFire_DurationTimer.Read(exINI, pSection, "DelayedFire.DurationTimer");
+	this->ROF_RandomDelay.Read(exINI, pSection, "ROF.RandomDelay");
 }
 
 template <typename T>
@@ -67,6 +68,7 @@ void WeaponTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DelayedFire_Anim_LoopCount)
 		.Process(this->DelayedFire_Anim_UseFLH)
 		.Process(this->DelayedFire_DurationTimer)
+		.Process(this->ROF_RandomDelay)
 		;
 };
 

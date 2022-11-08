@@ -35,6 +35,7 @@ public:
 		Valueable<int> DelayedFire_Anim_LoopCount;
 		Valueable<bool> DelayedFire_Anim_UseFLH;
 		Valueable<int> DelayedFire_DurationTimer;
+		Nullable<PartialVector2D<int>> ROF_RandomDelay;
 
 		ExtData(WeaponTypeClass* OwnerObject) : Extension<WeaponTypeClass>(OwnerObject)
 			, DiskLaser_Radius { 38.2 }
@@ -55,6 +56,7 @@ public:
 			, DelayedFire_Anim_LoopCount { 1 }
 			, DelayedFire_Anim_UseFLH { true }
 			, DelayedFire_DurationTimer { 0 }
+			, ROF_RandomDelay {}
 		{ }
 
 		virtual ~ExtData() = default;

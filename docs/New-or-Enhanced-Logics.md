@@ -686,7 +686,13 @@ InitialStrength=  ; integer
 In `rulesmd.ini`:
 ```ini
 [SOMEBUILDING]            ; BuildingType
-InitialStrength.Cloning=  ; single double/percentage or comma-sep. range
+InitialStrength.Cloning=  ; floating point value - single or comma-sep. range (percentages)
+```
+
+```{note}
+
+Both `InitialStrength` and `InitialStrength.Cloning` never surpass the type's `Strength`, even if your values are bigger than it.
+
 ```
 
 ### Kill Object Automatically
@@ -710,11 +716,17 @@ If the object enters transport, the countdown will continue, but it will not sel
 
 In `rulesmd.ini`:
 ```ini
-[SOMETECHNO]                  ; TechnoType
-AutoDeath.Behavior=           ; enumeration (kill | vanish | sell), default not set
+[SOMETECHNO]                             ; TechnoType
+AutoDeath.Behavior=                      ; enumeration (kill | vanish | sell), default not set
 
-AutoDeath.OnAmmoDepletion=no  ; boolean
-AutoDeath.AfterDelay=0        ; positive integer
+AutoDeath.OnAmmoDepletion=no             ; boolean
+AutoDeath.AfterDelay=0                   ; positive integer
+AutoDeath.TechnosDontExist=              ; list of TechnoType names
+AutoDeath.TechnosDontExist.Any=false     ; boolean
+AutoDeath.TechnosDontExist.Houses=owner  ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all)
+AutoDeath.TechnosExist=                  ; list of TechnoType names
+AutoDeath.TechnosExist.Any=true          ; boolean
+AutoDeath.TechnosExist.Houses=owner      ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all)
 ```
 
 ### Mind Control enhancement
