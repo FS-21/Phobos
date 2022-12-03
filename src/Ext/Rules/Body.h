@@ -72,6 +72,19 @@ public:
 
 		Valueable<AffectedHouse> RadialIndicatorVisibility;
 
+		DynamicVectorClass<DynamicVectorClass<int>> GenericPrerequisites;
+		DynamicVectorClass<char*> GenericPrerequisitesNames;
+
+		Valueable<bool> NewTeamsSelector;
+		Valueable<bool> NewTeamsSelector_SplitTriggersByCategory;
+		Valueable<bool> NewTeamsSelector_EnableFallback;
+		Valueable<int> NewTeamsSelector_MergeUnclassifiedCategoryWith;
+		Valueable<double> NewTeamsSelector_UnclassifiedCategoryPercentage;
+		Valueable<double> NewTeamsSelector_GroundCategoryPercentage;
+		Valueable<double> NewTeamsSelector_NavalCategoryPercentage;
+		Valueable<double> NewTeamsSelector_AirCategoryPercentage;
+
+
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
 			, InfantryGainSelfHealCap {}
@@ -109,6 +122,16 @@ public:
 			, ToolTip_Background_Opacity { 100 }
 			, ToolTip_Background_BlurSize { 0.0f }
 			, RadialIndicatorVisibility { AffectedHouse::Allies }
+			, GenericPrerequisites { }
+			, GenericPrerequisitesNames { }
+			, NewTeamsSelector { false }
+			, NewTeamsSelector_SplitTriggersByCategory { true }
+			, NewTeamsSelector_EnableFallback { false }
+			, NewTeamsSelector_MergeUnclassifiedCategoryWith { -1 }
+			, NewTeamsSelector_UnclassifiedCategoryPercentage { 0.25 }
+			, NewTeamsSelector_GroundCategoryPercentage { 0.25 }
+			, NewTeamsSelector_NavalCategoryPercentage { 0.25 }
+			, NewTeamsSelector_AirCategoryPercentage { 0.25 }
 		{ }
 
 		virtual ~ExtData() = default;
@@ -162,4 +185,5 @@ public:
 
 	static bool DetailsCurrentlyEnabled();
 	static bool DetailsCurrentlyEnabled(int minDetailLevel);
+	static void FillDefaultPrerequisites();
 };

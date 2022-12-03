@@ -87,6 +87,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed projectiles with `Inviso=true` suffering from potential inaccuracy problems if combined with `Airburst=yes` or Warhead with `EMEffect=true`.
 - Fixed the bug when `MakeInfantry` logic on BombClass resulted in `Neutral` side infantry.
 - Observers can now see cloaked objects owned by non-allied houses.
+- In singleplayer missions, the player can now see cloaked objects owned by allied houses.
 - IvanBomb images now display and the bombs detonate at center of buildings instead of in top-leftmost cell of the building foundation.
 - Fixed BibShape drawing for a couple of frames during buildup for buildings with long buildup animations.
 - Animation with `Tiled=yes` now supports `CustomPalette`.
@@ -321,7 +322,6 @@ JumpjetAllowLayerDeviation=true  ; boolean
 *Jumpjet turning to target applied in [Robot Storm X](https://www.moddb.com/mods/cc-robot-storm-x)*
 
 - Allows jumpjet units to face towards the target when firing from different directions. Set `[JumpjetControls] -> TurnToTarget=yes` to enable it for all jumpjet locomotor units. This behavior can be overriden by setting `[UnitType] -> JumpjetTurnToTarget` for specific units.
-- This behavior does not apply to `TurretSpins=yes` units for obvious reasons.
 
 In `rulesmd.ini`:
 ```ini
