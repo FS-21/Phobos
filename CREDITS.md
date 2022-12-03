@@ -125,6 +125,7 @@ This page lists all the individual contributions to the project by their author.
   - Script actions for modifying AI anger against other houses
   - Script actions for manipulating script flows with conditional jumps
   - Script action for repairing destroyed bridges
+  - New AI teams selector
 - **Starkku**:
   - Warhead shield penetration & breaking
   - Strafing aircraft weapon customization
