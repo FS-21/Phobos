@@ -140,8 +140,9 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 		{
-			ScriptTypeClass* pNewScript = GameCreate<ScriptTypeClass>(cur);
-			objectsList.AddItem(pNewScript);
+			ScriptTypeClass* pNewScript = ScriptTypeClass::Find(cur);//GameCreate<ScriptTypeClass>(cur);
+			if (pNewScript)
+				objectsList.AddItem(pNewScript);
 		}
 
 		AIScriptsLists.AddItem(objectsList);
@@ -159,8 +160,9 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 		for (char *cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 		{
-			AITriggerTypeClass* pNewTrigger = GameCreate<AITriggerTypeClass>(cur);
-			objectsList.AddItem(pNewTrigger);
+			AITriggerTypeClass* pNewTrigger = AITriggerTypeClass::Find(cur);//GameCreate<AITriggerTypeClass>(cur);
+			if (pNewTrigger)
+				objectsList.AddItem(pNewTrigger);
 		}
 
 		AITriggersLists.AddItem(objectsList);
@@ -178,8 +180,9 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 		for (char *cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 		{
-			HouseTypeClass* pNewHouse = GameCreate<HouseTypeClass>(cur);
-			objectsList.AddItem(pNewHouse);
+			HouseTypeClass* pNewHouse = HouseTypeClass::Find(cur);//GameCreate<HouseTypeClass>(cur);
+			if (pNewHouse)
+				objectsList.AddItem(pNewHouse);
 		}
 
 		AIHousesLists.AddItem(objectsList);
