@@ -2129,8 +2129,8 @@ void ScriptExt::PickRandomScript(TeamClass* pTeam, int idxScriptsList = -1)
 			{
 				int IdxSelectedObject = ScenarioClass::Instance->Random.RandomRanged(0, objectsList.Count - 1);
 
-				ScriptTypeClass* pNewScript = objectsList.GetItem(IdxSelectedObject);
-				if (pNewScript->ActionsCount > 0)
+				ScriptTypeClass* pNewScript = ScriptTypeClass::Find(objectsList.GetItem(IdxSelectedObject)->ID);
+				if (pNewScript && pNewScript->ActionsCount > 0)
 				{
 					changeFailed = false;
 					pTeam->CurrentScript = nullptr;

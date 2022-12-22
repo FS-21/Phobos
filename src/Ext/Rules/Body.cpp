@@ -140,7 +140,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 		{
-			ScriptTypeClass* pNewScript = ScriptTypeClass::Find(cur);//GameCreate<ScriptTypeClass>(cur);
+			ScriptTypeClass* pNewScript = GameCreate<ScriptTypeClass>(cur);
 			if (pNewScript)
 				objectsList.AddItem(pNewScript);
 		}
@@ -160,7 +160,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 		for (char *cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 		{
-			AITriggerTypeClass* pNewTrigger = AITriggerTypeClass::Find(cur);//GameCreate<AITriggerTypeClass>(cur);
+			AITriggerTypeClass* pNewTrigger = GameCreate<AITriggerTypeClass>(cur);
 			if (pNewTrigger)
 				objectsList.AddItem(pNewTrigger);
 		}
