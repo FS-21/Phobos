@@ -301,3 +301,62 @@ DEFINE_HOOK(0x4575A2, BuildingClass_Infiltrate_AfterAres, 0xE)
 	return 0;
 }
 #undef INFILTRATE_HOOK_MAGIC
+
+// This fix will be discarded when Starkku merge his (good) implementation of the naval production fix
+DEFINE_HOOK(0x450319, HouseClass_SuggestNewObject_TemporalNavalFix, 0x6)
+{
+	GET(BuildingClass*, pThis, ESI);
+
+	if (!pThis)
+		return 0;
+
+	if (pThis->Owner->ProducingUnitTypeIndex >= 0 && UnitTypeClass::Array->GetItem(pThis->Owner->ProducingUnitTypeIndex)->Naval)
+		pThis->Owner->ProducingUnitTypeIndex = -1;
+
+	if (pThis->Type->Naval && (pThis->IsPrimaryFactory || Phobos::Config::AllowParallelAIQueues))
+	{
+		auto pTechno = static_cast<TechnoClass*>(pThis);
+		TechnoTypeClass* navalToBuild = nullptr;
+
+		for (auto const pRunningTeam : *TeamClass::Array)
+		{
+			if (navalToBuild)
+				break;
+
+			if (pRunningTeam->Owner != pThis->Owner)
+				continue;
+
+			// Check from the Teams queue what naval unit is required
+			if (pRunningTeam->IsUnderStrength && !pRunningTeam->IsMoving)
+			{
+				int i = 0;
+
+				for (auto entry : pRunningTeam->Type->TaskForce->Entries)
+				{
+					if (entry.Amount > 0)
+					{
+						if (entry.Type->Naval && pRunningTeam->CountObjects[i] < entry.Amount)
+						{
+							navalToBuild = entry.Type;
+							break;
+						}
+					}
+					else
+					{
+						break;
+					}
+
+					i++;
+				}
+			}
+		}
+
+		if (navalToBuild)
+		{
+			R->EAX<TechnoTypeClass*>(navalToBuild);
+			return 0x450332;
+		}
+	}
+
+	return 0;
+}
