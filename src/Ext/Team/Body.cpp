@@ -678,7 +678,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 									continue;
 
 								TechnoTypeClass* object = entry.Type;
-								bool canBeBuilt = HouseExt::PrerequisitesMet(pHouse, object, ownedBuildingTypes);
+								bool canBeBuilt = HouseExt::PrerequisitesMet(pHouse, object, ownedBuildingTypes, false);
 
 								if (!canBeBuilt)
 								{

@@ -257,7 +257,7 @@ void HouseExt::ForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode = -1)
 	}
 }
 
-bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const DynamicVectorClass<BuildingTypeClass*> ownedBuildingTypes)
+bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const DynamicVectorClass<BuildingTypeClass*> ownedBuildingTypes, bool skipSecretLabChecks)
 {
 	if (!pThis || !pItem)
 		return false;
@@ -268,6 +268,15 @@ bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const 
 
 	auto pItemExt = TechnoTypeExt::ExtMap.Find(pItem);
 	if (!pItemExt)
+		return false;
+
+	// If the unit is available after capturing a SecretLab=yes must be evaluated if meets the prerequisite
+	if (!skipSecretLabChecks && pItemExt->ConsideredSecretLabTech && !pThis->HasFromSecretLab(pItem))
+		return false;
+
+	// Check if it appears in Owner=, RequiredHouses= and ForbiddenHouses=
+	// Note: if RequiredHouses = tag doesn't exist InRequiredHouses() always returns TRUE
+	if (!pThis->InOwners(pItem) || !pThis->InRequiredHouses(pItem) || pThis->InForbiddenHouses(pItem))
 		return false;
 
 	// Prerequisite.RequiredTheaters check
@@ -326,6 +335,10 @@ bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const 
 			}
 		}
 	}
+
+	// Main prerequisite checks are skipped if a new secret lab object is in process to be unlocked
+	if (skipSecretLabChecks)
+		return true;
 
 	DynamicVectorClass<int> prerequisiteOverride = pItem->PrerequisiteOverride;
 

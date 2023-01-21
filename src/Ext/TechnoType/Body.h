@@ -163,6 +163,9 @@ public:
 		Valueable<bool> CanRepairCyborgLegs;
 		Nullable<bool> ConsideredNaval;
 		Nullable<bool> ConsideredVehicle;
+		Valueable<bool> ConsideredSecretLabTech;
+		std::vector<std::string> Secret_RequiredHouses;
+		std::vector<std::string> Secret_ForbiddenHouses;
 
 		// Ares 0.1
 		ValueableVector<int> Prerequisite_RequiredTheaters;
@@ -288,6 +291,9 @@ public:
 			, Prerequisite_Lists { 0 }
 			, ConsideredNaval { }
 			, ConsideredVehicle { }
+			, ConsideredSecretLabTech { false }
+			, Secret_RequiredHouses { }
+			, Secret_ForbiddenHouses { }
 		{ }
 
 		virtual ~ExtData() = default;

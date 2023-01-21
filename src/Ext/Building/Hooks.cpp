@@ -315,7 +315,6 @@ DEFINE_HOOK(0x450319, HouseClass_SuggestNewObject_TemporalNavalFix, 0x6)
 
 	if (pThis->Type->Naval && (pThis->IsPrimaryFactory || Phobos::Config::AllowParallelAIQueues))
 	{
-		auto pTechno = static_cast<TechnoClass*>(pThis);
 		TechnoTypeClass* navalToBuild = nullptr;
 
 		for (auto const pRunningTeam : *TeamClass::Array)
@@ -356,6 +355,19 @@ DEFINE_HOOK(0x450319, HouseClass_SuggestNewObject_TemporalNavalFix, 0x6)
 			R->EAX<TechnoTypeClass*>(navalToBuild);
 			return 0x450332;
 		}
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(0x445F80, BuildingClass_GrandOpening_UpdateSecretLabAI, 0x5)
+{
+	GET(BuildingClass*, pThis, ECX);
+
+	if (pThis->Type->SecretLab && !pThis->Owner->IsControlledByHuman())
+	{
+		auto pExt = BuildingExt::ExtMap.Find(pThis);
+		pExt->UpdateSecretLabAI();
 	}
 
 	return 0;

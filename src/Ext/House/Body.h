@@ -81,7 +81,7 @@ public:
 	static HouseClass* GetHouseKind(OwnerHouseKind kind, bool allowRandom, HouseClass* pDefault, HouseClass* pInvoker = nullptr, HouseClass* pVictim = nullptr);
 	static int GetHouseIndex(int param, TeamClass* pTeam, TActionClass* pTAction);
 	static void HouseExt::ForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode);
-	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const DynamicVectorClass<BuildingTypeClass*> ownedBuildingTypes);
+	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const DynamicVectorClass<BuildingTypeClass*> ownedBuildingTypes, bool skipSecretLabChecks);
 	static bool HasGenericPrerequisite(int idx, const DynamicVectorClass<BuildingTypeClass*> ownedBuildingTypes);
 	static int FindGenericPrerequisite(const char* id);
 };
