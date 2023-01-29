@@ -302,7 +302,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
 		std::string item(cur);
-		this->Secret_RequiredHouses.push_back(item);
+		this->Secret_ForbiddenHouses.push_back(item);
 	}
 
 	key = nullptr;

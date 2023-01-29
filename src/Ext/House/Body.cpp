@@ -314,9 +314,6 @@ bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const 
 	{
 		for (int idx : pItemExt->Prerequisite_Negative)
 		{
-			if (prerequisiteNegativeMet)
-				return false;
-
 			if (idx < 0) // Can be used generic prerequisites in this Ares tag? I have to investigate it but for now we support it...
 			{
 				// Default prerequisites like POWER, PROC, BARRACKS, FACTORY, ...
@@ -333,6 +330,9 @@ bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const 
 						prerequisiteNegativeMet = true;
 				}
 			}
+
+			if (prerequisiteNegativeMet)
+				return false;
 		}
 	}
 
@@ -458,6 +458,7 @@ bool HouseExt::HasGenericPrerequisite(int idx, const DynamicVectorClass<Building
 		return false;
 
 	DynamicVectorClass<int> selectedPrerequisite = RulesExt::Global()->GenericPrerequisites.GetItem(std::abs(idx));
+	//auto selectedPrerequisiteName = RulesExt::Global()->GenericPrerequisitesNames.GetItem(std::abs(idx));// Only used for easy debug
 
 	if (selectedPrerequisite.Count == 0)
 		return false;
