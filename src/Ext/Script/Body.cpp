@@ -366,6 +366,13 @@ void ScriptExt::LoadIntoTransports(TeamClass* pTeam)
 					transports.AddItem(pUnit);
 	}
 
+	if (transports.Count == 0)
+	{
+		// This action finished
+		pTeam->StepCompleted = true;
+		return;
+	}
+
 	// Now load units into transports
 	for (auto pTransport : transports)
 	{
@@ -414,9 +421,6 @@ void ScriptExt::LoadIntoTransports(TeamClass* pTeam)
 	}
 
 	// This action finished
-	if (pTeam->CurrentScript->HasNextMission())
-		++pTeam->CurrentScript->CurrentMission;
-
 	pTeam->StepCompleted = true;
 }
 
