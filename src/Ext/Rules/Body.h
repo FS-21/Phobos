@@ -77,6 +77,12 @@ public:
 
 		Valueable<bool> CrateOnlyOnLand;
 		Valueable<AffectedHouse> RadialIndicatorVisibility;
+		Valueable<bool> AILearning;
+		Nullable<int> AILearning_Weight_Max;
+		Nullable<int> AILearning_Weight_Min;
+		Nullable<int> AILearning_Weight_Increment;
+		Nullable<int> AILearning_Weight_Decrement;
+		std::string AILearning_FileName;
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
@@ -120,6 +126,12 @@ public:
 			, DisplayIncome_Houses { AffectedHouse::All }
 			, CrateOnlyOnLand { false }
 			, RadialIndicatorVisibility { AffectedHouse::Allies }
+			, AILearning { false }
+			, AILearning_Weight_Max { }
+			, AILearning_Weight_Min { }
+			, AILearning_Weight_Increment { }
+			, AILearning_Weight_Decrement { }
+			, AILearning_FileName { }
 		{ }
 
 		virtual ~ExtData() = default;
