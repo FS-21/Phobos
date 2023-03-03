@@ -84,6 +84,13 @@ public:
 		Valueable<double> NewTeamsSelector_NavalCategoryPercentage;
 		Valueable<double> NewTeamsSelector_AirCategoryPercentage;
 
+		Valueable<bool> AILearning;
+		Nullable<int> AILearning_Weight_Max;
+		Nullable<int> AILearning_Weight_Min;
+		Nullable<int> AILearning_Weight_Increment;
+		Nullable<int> AILearning_Weight_Decrement;
+		std::string AILearning_FileName;
+
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
@@ -132,6 +139,12 @@ public:
 			, NewTeamsSelector_GroundCategoryPercentage { 0.25 }
 			, NewTeamsSelector_NavalCategoryPercentage { 0.25 }
 			, NewTeamsSelector_AirCategoryPercentage { 0.25 }
+			, AILearning { false }
+			, AILearning_Weight_Max { }
+			, AILearning_Weight_Min { }
+			, AILearning_Weight_Increment { }
+			, AILearning_Weight_Decrement { }
+			, AILearning_FileName { }
 		{ }
 
 		virtual ~ExtData() = default;

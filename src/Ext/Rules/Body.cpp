@@ -108,6 +108,22 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->IronCurtain_KeptOnDeploy.Read(exINI, GameStrings::CombatDamage, "IronCurtain.KeptOnDeploy");
 	this->ROF_RandomDelay.Read(exINI, GameStrings::CombatDamage, "ROF.RandomDelay");
 
+	this->AILearning.Read(exINI, "AI", "AILearning");
+	this->AILearning_Weight_Max.Read(exINI, "AI", "AILearning.Weight.Max");
+	this->AILearning_Weight_Min.Read(exINI, "AI", "AILearning.Weight.Min");
+	this->AILearning_Weight_Increment.Read(exINI, "AI", "AILearning.Weight.Increment");
+	this->AILearning_Weight_Decrement.Read(exINI, "AI", "AILearning.Weight.Decrement");
+
+	// [AI] -> AILearning.FileName
+	const char* key = "AILearning.FileName";
+	char* context = nullptr;
+	pINI->ReadString("AI", key, "", Phobos::readBuffer);
+
+	if (std::string(Phobos::readBuffer).length() > 0)
+		this->AILearning_FileName = std::string(Phobos::readBuffer);
+
+	key = nullptr;
+
 	// Section AITargetTypes
 	int itemsCount = pINI->GetKeyCount(sectionAITargetTypes);
 	for (int i = 0; i < itemsCount; ++i)
@@ -357,6 +373,12 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->NewTeamsSelector_GroundCategoryPercentage)
 		.Process(this->NewTeamsSelector_AirCategoryPercentage)
 		.Process(this->NewTeamsSelector_NavalCategoryPercentage)
+		.Process(this->AILearning)
+		.Process(this->AILearning_Weight_Max)
+		.Process(this->AILearning_Weight_Min)
+		.Process(this->AILearning_Weight_Increment)
+		.Process(this->AILearning_Weight_Decrement)
+		.Process(this->AILearning_FileName)
 		;
 }
 
