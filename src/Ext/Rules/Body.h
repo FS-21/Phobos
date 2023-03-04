@@ -90,6 +90,7 @@ public:
 		Nullable<int> AILearning_Weight_Increment;
 		Nullable<int> AILearning_Weight_Decrement;
 		std::string AILearning_FileName;
+		Valueable<bool> AILearning_OnlySupportedMaps;
 
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
@@ -145,6 +146,7 @@ public:
 			, AILearning_Weight_Increment { }
 			, AILearning_Weight_Decrement { }
 			, AILearning_FileName { }
+			, AILearning_OnlySupportedMaps { true }
 		{ }
 
 		virtual ~ExtData() = default;
