@@ -118,7 +118,7 @@ DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 	return 0;
 }
 
-DEFINE_HOOK_AGAIN(0x68657F, AILearning_Save, 0x6) //DoAbort_AILearning5 // Delete this Hook line after doing AI only tests!!
+//DEFINE_HOOK_AGAIN(0x68657F, AILearning_Save, 0x6) //DoAbort_AILearning5 // Delete this Hook line after doing AI only tests!!
 DEFINE_HOOK_AGAIN(0x6856A5, AILearning_Save, 0x7) // void Do_Win(void)
 DEFINE_HOOK(0x685DE7, AILearning_Save, 0x5) // void Do_Lose(void)
 {
