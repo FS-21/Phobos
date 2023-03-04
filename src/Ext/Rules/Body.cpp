@@ -114,6 +114,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->DisplayIncome_AllowAI.Read(exINI, GameStrings::AudioVisual, "DisplayIncome.AllowAI");
 
 	this->AILearning.Read(exINI, "AI", "AILearning");
+	this->AILearning_OnlySupportedMaps.Read(exINI, "AI", "AILearning.OnlySupportedMaps");
 	this->AILearning_Weight_Max.Read(exINI, "AI", "AILearning.Weight.Max");
 	this->AILearning_Weight_Min.Read(exINI, "AI", "AILearning.Weight.Min");
 	this->AILearning_Weight_Increment.Read(exINI, "AI", "AILearning.Weight.Increment");
@@ -245,6 +246,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->AILearning_Weight_Increment)
 		.Process(this->AILearning_Weight_Decrement)
 		.Process(this->AILearning_FileName)
+		.Process(this->AILearning_OnlySupportedMaps)
 		;
 }
 
