@@ -121,7 +121,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	pINI->ReadString("AI", key, "", Phobos::readBuffer);
 
 	if (std::string(Phobos::readBuffer).length() > 0)
-		this->AILearning_FileName = std::string(Phobos::readBuffer);
+		this->AILearning_ScenarioName = std::string(Phobos::readBuffer);
 
 	key = nullptr;
 
@@ -379,7 +379,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->AILearning_Weight_Min)
 		.Process(this->AILearning_Weight_Increment)
 		.Process(this->AILearning_Weight_Decrement)
-		.Process(this->AILearning_FileName)
+		.Process(this->AILearning_ScenarioName)
 		.Process(this->AILearning_OnlySupportedMaps)
 		;
 }

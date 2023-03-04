@@ -63,6 +63,13 @@ DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 	if (!RulesExt::Global()->AILearning)
 		return 0;
 
+	// If "only supported maps" the tag "AILearning.FileName" must containg a valid filename string
+	if (RulesExt::Global()->AILearning_OnlySupportedMaps.Get()
+		&& RulesExt::Global()->AILearning_ScenarioName.length() == 0)
+	{
+		return 0;
+	}
+
 	// Save original AI Trigger values for comparations in the save process
 	if (RulesExt::Global()->AILearning_Weight_Increment.isset() || RulesExt::Global()->AILearning_Weight_Decrement.isset())
 	{
@@ -74,8 +81,8 @@ DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 
 	std::string fileName = "./AI/";
 
-	if (RulesExt::Global()->AILearning_FileName.length() > 0)
-		fileName += RulesExt::Global()->AILearning_FileName.c_str();
+	if (RulesExt::Global()->AILearning_ScenarioName.length() > 0)
+		fileName += RulesExt::Global()->AILearning_ScenarioName.c_str();
 	else
 		fileName += std::string(ScenarioClass::Instance->FileName); // Caution with XNAClient: all multiplayer maps are called "spawnmap.ini"
 
@@ -118,14 +125,21 @@ DEFINE_HOOK(0x685DE7, AILearning_Save, 0x5) // void Do_Lose(void)
 	if (!RulesExt::Global()->AILearning)
 		return 0;
 
+	// If "only supported maps" the tag "AILearning.FileName" must containg a valid filename string
+	if (RulesExt::Global()->AILearning_OnlySupportedMaps.Get()
+		&& RulesExt::Global()->AILearning_ScenarioName.length() == 0)
+	{
+		return 0;
+	}
+
 	//CreateDirectory("AI", NULL); // Looks fine...
 	if (std::filesystem::create_directories("./AI"))
 		Debug::Log("AI Learning - Created game folder for AI learning called \"AI\".\n");
 
 	std::string fileName = "./AI/";
 
-	if (RulesExt::Global()->AILearning_FileName.length() > 0)
-		fileName += RulesExt::Global()->AILearning_FileName.c_str();
+	if (RulesExt::Global()->AILearning_ScenarioName.length() > 0)
+		fileName += RulesExt::Global()->AILearning_ScenarioName.c_str();
 	else
 		fileName += std::string(ScenarioClass::Instance->FileName); // Caution with XNAClient: all multiplayer maps are renamed as "spawnmap.ini"
 
@@ -137,7 +151,7 @@ DEFINE_HOOK(0x685DE7, AILearning_Save, 0x5) // void Do_Lose(void)
 		double decrement = RulesExt::Global()->AILearning_Weight_Decrement.isset() ? RulesExt::Global()->AILearning_Weight_Decrement.Get() : 0;
 		decrement = decrement < 0 ? 0 : decrement;
 
-		for (int i = 0; i < AITriggerTypeClass::Array->Count; i++)//   auto const pTrigger : *AITriggerTypeClass::Array)
+		for (int i = 0; i < AITriggerTypeClass::Array->Count; i++)
 		{
 			auto pTrigger = AITriggerTypeClass::Array->GetItem(i);
 
