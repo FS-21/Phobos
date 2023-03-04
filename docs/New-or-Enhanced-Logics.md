@@ -6,7 +6,7 @@ This page describes all the engine features that are either new and introduced b
 
 ### AI Learning
 
-- Save all the AI trigger `current weight` values at the end of the battle and loads the same values at the beginning of the next battle on the same map.
+- Save all the AI triggers `current weight` value at the end of the battle and loads the same values at the beginning of the next battle on the same map.
 - Each map save/load its own data in the folder `AI`.
 - This feature is designed having the offline gaming in mind.
 - By default `AILearning.OnlySupportedMaps` is set to true. This makes game always read `AILearning.ScenarioName` inside maps and if isn't present' won't save the AI data'. This is done this way because XNA CnCNet client doesn't save the multiplayer scenario name in `spawn.ini`.
