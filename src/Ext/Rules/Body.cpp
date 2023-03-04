@@ -115,9 +115,8 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->AILearning_Weight_Increment.Read(exINI, "AI", "AILearning.Weight.Increment");
 	this->AILearning_Weight_Decrement.Read(exINI, "AI", "AILearning.Weight.Decrement");
 
-	// [AI] -> AILearning.FileName
-	const char* key = "AILearning.FileName";
-	char* context = nullptr;
+	// [AI] -> AILearning.ScenarioName
+	const char* key = "AILearning.ScenarioName";
 	pINI->ReadString("AI", key, "", Phobos::readBuffer);
 
 	if (std::string(Phobos::readBuffer).length() > 0)
