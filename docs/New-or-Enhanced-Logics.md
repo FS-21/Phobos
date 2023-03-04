@@ -29,6 +29,13 @@ In the map:
 AILearning.ScenarioName=  ; filename string, valid characters by the Windows filesystem, recommended ANSI characters
 ```
 
+```{warning}
+AI adjusts the current weight of the affected AI trigger value by using:
+- Script action 49,0 (at the end of the team execution it increases the current weight by adding `AITriggerSuccessWeightDelta` value).
+- Script action 14003,0 (at the end of the team execution it decreases the current weight by substracting `AITriggerFailureWeightDelta` value).
+- Script actions: 14000, 14001, 14002.
+```
+
 ## New types / ingame entities
 
 ### Custom Radiation Types
