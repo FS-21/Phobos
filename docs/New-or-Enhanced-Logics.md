@@ -2,6 +2,33 @@
 
 This page describes all the engine features that are either new and introduced by Phobos or significantly extended or expanded.
 
+## AI
+
+### AI Learning
+
+- Save all the AI trigger `current weight` values at the end of the battle and loads the same values at the beginning of the next battle on the same map.
+- Each map save/load its own data in the folder `AI`.
+- This feature is designed having the offline gaming in mind.
+- By default `AILearning.OnlySupportedMaps` is set to true. This makes game always read `AILearning.ScenarioName` inside maps and if isn't present' won't save the AI data'. This is done this way because XNA CnCNet client doesn't save the multiplayer scenario name in `spawn.ini`.
+- If `AILearning.OnlySupportedMaps` is set to false and the map doesn't have `AILearning.ScenarioName` a common generic file name will be used for saving/loading the current AI values.
+
+In `rulesmd.ini`:
+```ini
+[AI]
+AILearning=false                   ; boolean
+AILearning.Weight.Max=             ; integer, value <= 5000
+AILearning.Weight.Min=             ; integer, value >= 0
+AILearning.Weight.Increment=       ; integer, value > 0
+AILearning.Weight.Decrement=       ; integer, value > 0
+AILearning.OnlySupportedMaps=true  ; boolean
+```
+
+In the map:
+```ini
+[AI]
+AILearning.ScenarioName=  ; filename string, valid characters by the Windows filesystem, recommended ANSI characters
+```
+
 ## New types / ingame entities
 
 ### Custom Radiation Types

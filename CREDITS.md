@@ -126,6 +126,7 @@ This page lists all the individual contributions to the project by their author.
   - Script actions for manipulating script flows with conditional jumps
   - Script action for repairing destroyed bridges
   - New AI teams selector
+  - AI Learning
 - **Starkku**:
   - Warhead shield penetration & breaking
   - Strafing aircraft weapon customization
