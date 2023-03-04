@@ -63,7 +63,7 @@ DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 	if (!RulesExt::Global()->AILearning)
 		return 0;
 
-	// If "only supported maps" the tag "AILearning.FileName" must containg a valid filename string
+	// If "only supported maps" the tag "AILearning.ScenarioName" must containg a valid filename string
 	if (RulesExt::Global()->AILearning_OnlySupportedMaps.Get()
 		&& RulesExt::Global()->AILearning_ScenarioName.length() == 0)
 	{
@@ -125,7 +125,7 @@ DEFINE_HOOK(0x685DE7, AILearning_Save, 0x5) // void Do_Lose(void)
 	if (!RulesExt::Global()->AILearning)
 		return 0;
 
-	// If "only supported maps" the tag "AILearning.FileName" must containg a valid filename string
+	// If "only supported maps" the tag "AILearning.ScenarioName" must containg a valid filename string
 	if (RulesExt::Global()->AILearning_OnlySupportedMaps.Get()
 		&& RulesExt::Global()->AILearning_ScenarioName.length() == 0)
 	{
