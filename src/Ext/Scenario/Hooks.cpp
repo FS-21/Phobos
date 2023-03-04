@@ -60,7 +60,7 @@ DEFINE_HOOK(0x6856A5, DoWin_AILearning7, 0x7)
 
 DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 {
-	if (!RulesExt::Global()->AILearning)
+	if (!RulesExt::Global()->AILearning)// || !SessionClass::IsSingleplayer())
 		return 0;
 
 	// If "only supported maps" the tag "AILearning.ScenarioName" must containg a valid filename string
@@ -122,7 +122,7 @@ DEFINE_HOOK_AGAIN(0x68657F, AILearning_Save, 0x6) //DoAbort_AILearning5 // Delet
 DEFINE_HOOK_AGAIN(0x6856A5, AILearning_Save, 0x7) // void Do_Win(void)
 DEFINE_HOOK(0x685DE7, AILearning_Save, 0x5) // void Do_Lose(void)
 {
-	if (!RulesExt::Global()->AILearning)
+	if (!RulesExt::Global()->AILearning)// || !SessionClass::IsSingleplayer())
 		return 0;
 
 	// If "only supported maps" the tag "AILearning.ScenarioName" must containg a valid filename string
