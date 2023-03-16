@@ -46,6 +46,10 @@ void BulletTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Shrapnel_AffectsGround.Read(exINI, pSection, "Shrapnel.AffectsGround");
 	this->Shrapnel_AffectsBuildings.Read(exINI, pSection, "Shrapnel.AffectsBuildings");
 
+	// Ares 0.7
+	this->BallisticScatter_Min.Read(exINI, pSection, "BallisticScatter.Min");
+	this->BallisticScatter_Max.Read(exINI, pSection, "BallisticScatter.Max");
+
 	INI_EX exArtINI(CCINIClass::INI_Art);
 
 	if (strlen(pThis->ImageFile))
@@ -66,6 +70,8 @@ void BulletTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->LaserTrail_Types)
 		.Process(this->Gravity)
 		.Process(this->Trajectory_Speed)
+		.Process(this->BallisticScatter_Min)
+		.Process(this->BallisticScatter_Max)
 		.Process(this->Shrapnel_AffectsGround)
 		.Process(this->Shrapnel_AffectsBuildings)
 		;
