@@ -63,9 +63,6 @@ public:
 	virtual void OnAIVelocity(BulletClass* pBullet, BulletVelocity* pSpeed, BulletVelocity* pPosition) override;
 	virtual TrajectoryCheckReturnType OnAITargetCoordCheck(BulletClass* pBullet) override;
 	virtual TrajectoryCheckReturnType OnAITechnoCheck(BulletClass* pBullet, TechnoClass* pTechno) override;
-	virtual int GetVelocityZ(BulletClass* pBullet);
-	virtual int GetFirerZPosition(BulletClass* pBullet);
-	virtual int GetTargetZPosition(BulletClass* pBullet);
 
 	// Your properties
 	//bool IsFalling;
