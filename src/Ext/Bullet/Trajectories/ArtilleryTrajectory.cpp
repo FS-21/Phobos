@@ -80,16 +80,13 @@ void ArtilleryTrajectory::OnUnlimbo(BulletClass* pBullet, CoordStruct* pCoord, B
 
 	//double currentBulletDistance = initialSourceLocation.DistanceFrom(bulletCoords);
 
-	double maxHeight = this->GetTrajectoryType<ArtilleryTrajectoryType>(pBullet)->MaxHeight;
-	int zDelta = this->InitialTargetLocation.Z > this->InitialSourceLocation.Z ? this->InitialTargetLocation.Z : this->InitialSourceLocation.Z;
-	maxHeight += zDelta;
+
 	//CoordStruct initialSourceLocation = this->InitialSourceLocation; // Obsolete
 	//initialSourceLocation.Z = 0;
 
-	pBullet->Velocity.X = static_cast<double>(this->InitialTargetLocation.X - pBullet->SourceCoords.X);
-	pBullet->Velocity.Y = static_cast<double>(this->InitialTargetLocation.Y - pBullet->SourceCoords.Y);
-	pBullet->Velocity.Z = 21; // 21 because "yes", ok? just a low number...// static_cast<double>(this->GetFirerZPosition(pBullet));
-	//pBullet->Velocity.Z = maxHeight/10.0;
+	//pBullet->Velocity.X = static_cast<double>(pBullet->TargetCoords.X - pBullet->SourceCoords.X);
+	//pBullet->Velocity.Y = static_cast<double>(pBullet->TargetCoords.Y - pBullet->SourceCoords.Y);
+	//pBullet->Velocity.Z = static_cast<double>(pBullet->TargetCoords.Z - pBullet->SourceCoords.Z);
 	pBullet->Velocity *= this->GetTrajectorySpeed(pBullet) / pBullet->Velocity.Magnitude();
 
 	return;
@@ -98,110 +95,85 @@ void ArtilleryTrajectory::OnUnlimbo(BulletClass* pBullet, CoordStruct* pCoord, B
 // Some early checks here, returns whether or not to detonate the bullet
 bool ArtilleryTrajectory::OnAI(BulletClass* pBullet)
 {
-	CoordStruct targetLocationXY = this->InitialTargetLocation;
-	targetLocationXY.Z = 0;
+	//CoordStruct targetLocationXY = this->InitialTargetLocation;
+	//targetLocationXY.Z = 0;
 	CoordStruct sourceLocationXY = this->InitialSourceLocation;
 	sourceLocationXY.Z = 0;
 	CoordStruct bulletCoordsXY = pBullet->Location;
 	bulletCoordsXY.Z = 0;
 
-	double fullInitialDistance = sourceLocationXY.DistanceFrom(targetLocationXY);
-	double halfInitialDistance = fullInitialDistance / 2;
+	double fullInitialDistance = this->TotalDistance;//sourceLocationXY.DistanceFrom(targetLocationXY);
+	double halfInitialDistance = this->HalfDistance;//fullInitialDistance / 2;
 	double currentBulletDistance = sourceLocationXY.DistanceFrom(bulletCoordsXY);
 
-	//if (currentBulletDistance > fullInitialDistance)
-		//return true;
-
-	double gravityFall = 24;// 18;//RulesClass::Instance()->Gravity * 2;
-	double gravityElevation = 30;//24;
+	double gravityFall = 24;
+	double gravityElevation = 200;
 	double maxHeight = this->GetTrajectoryType<ArtilleryTrajectoryType>(pBullet)->MaxHeight;
 	int zDelta = this->InitialTargetLocation.Z > this->InitialSourceLocation.Z ? this->InitialTargetLocation.Z : this->InitialSourceLocation.Z;
 	maxHeight += zDelta;
 
-	if (currentBulletDistance <= 0)
-		return false;
-
-	double halfDistancePercentage = (currentBulletDistance) / halfInitialDistance;
-	double halfDistanceMultiplier = 4.0 * (1 - halfDistancePercentage);
-	double finalDistancePercentage = (currentBulletDistance - halfInitialDistance) / (fullInitialDistance / 2);
-	double finalDistanceMultiplier = 8.0 * (finalDistancePercentage);
-
-	double currentHeightPercentage = (pBullet->Location.Z / maxHeight);
-	currentHeightPercentage = currentHeightPercentage > 1.0 ? 1.0 : currentHeightPercentage;
-
-	double aaa;
-
-	if (currentBulletDistance <= halfInitialDistance)
-		aaa = maxHeight * (1.0 - (currentHeightPercentage < halfDistancePercentage ? halfDistancePercentage : currentHeightPercentage));
-	else
-		aaa = maxHeight * (finalDistancePercentage);
-
-	//double aaa = maxHeight * (1.0 - currentHeightPercentage);
-	double bbb = Math::sqrt(aaa);
-	double ccc = bbb;
-	double extraZAsc = ccc + (ccc * halfDistanceMultiplier);
-	double extraZDesc = ccc + (ccc * finalDistanceMultiplier * 0.5);
-
-	// Tuning projectile falling & the target is in lower location
-	if (this->InitialTargetLocation.Z < this->InitialSourceLocation.Z && finalDistancePercentage > 0.50)
-		extraZDesc += gravityFall;
-	//double newBulletHeight = pBullet->Location.Z + extraZ;
-
-	// Tuning projectile falling & the target is in upper location
-	if (this->InitialTargetLocation.Z > this->InitialSourceLocation.Z && finalDistancePercentage > 0.50)
-		extraZDesc = ccc + (ccc * finalDistanceMultiplier * 0.25) - gravityElevation;
-
-	if (pBullet->Location.Z > maxHeight)
-		pBullet->Location.Z = maxHeight;
-
-	//pBullet->Velocity.Z = currentBulletHeight;//static_cast<double>(maxHeight - pBullet->Location.Z) / 0.5;
-
-	if (currentBulletDistance <= halfInitialDistance)
-		pBullet->Location.Z = pBullet->Location.Z + static_cast<int>(extraZAsc);
-	else
-		pBullet->Location.Z = pBullet->Location.Z - static_cast<int>(extraZDesc);
-
-
-	int a = 0;
-
-
-
 	// Trajectory angle
-	//int sinDecimalAngle = 45;
-	//double sinRadianAngle = Math::sin(Math::deg2rad(sinDecimalAngle));
+	int sinDecimalAngle = 90;
+	double sinRadianAngle = Math::sin(Math::deg2rad(sinDecimalAngle));
 
 	// Angle of the projectile in the current location
-	//double angle = (currentBulletDistance * sinDecimalAngle) / halfInitialDistance;
+	double angle = (currentBulletDistance * sinDecimalAngle) / halfInitialDistance;
 
 	//if (angle > 90)
 		//angle += 12.5;
 
-	//double sinAngle = Math::sin(Math::deg2rad(angle));
+	double sinAngle = Math::sin(Math::deg2rad(angle));
 
 	// Height of the flying projectile in the current location
-	//double currHeight = (sinAngle * maxHeight) / sinRadianAngle;
-	return false;
-	// % of the current height compared to the max height the bullet can reach
-	//double currentHeightPercentage = (pBullet->Location.Z / maxHeight);
-	//currentHeightPercentage = currentHeightPercentage > 1.0 ? 1.0 : currentHeightPercentage;
-	//double extraZ = maxHeight * (1.0 - currentHeightPercentage) * 0.5;
-	//double newBulletHeight = pBullet->Location.Z + extraZ;
-
-	//double gravity = RulesClass::Instance()->Gravity;
-	//pBullet->Velocity.Z = currentBulletHeight;//static_cast<double>(maxHeight - pBullet->Location.Z) / 0.5;
-
-	//if (currentBulletDistance <= halfInitialDistance)
-		//pBullet->Location.Z += extraZ;
-	//else
-		//pBullet->Location.Z -= extraZ;
+	double currHeight = (sinAngle * maxHeight) / sinRadianAngle;
 
 	//if (currHeight != 0)
 		//pBullet->Location.Z = this->AttackerHeight + (int)currHeight;// this->InitialSourceLocation.Z + (int)currHeight;
-	//pBullet->Velocity.Z = GetVelocityZ(pBullet);
 
-	//int a = 0;
+	pBullet->Location.Z = (int)currHeight + this->AttackerHeight;
 
+	if (angle > 90)
+	{
+		// Bullet is falling, do bullet corrections for the special cases
+		double finalDistancePercentage = (currentBulletDistance - halfInitialDistance) / (fullInitialDistance / 2);
+		double finalDistanceMultiplier = 8.0 * (finalDistancePercentage);
 
+		double finalDistancePercentage2 = 0.0;
+
+		if (currentBulletDistance > halfInitialDistance)
+			finalDistancePercentage2 = 1.0 - (fullInitialDistance - currentBulletDistance) / (fullInitialDistance / 2);
+
+		double aaa = maxHeight * (finalDistancePercentage);
+		double bbb = Math::sqrt(aaa);
+		double ccc = bbb;
+		double extraZDesc = 0;// ccc + (ccc * finalDistanceMultiplier * 0.5);
+
+		int cliffHeightMultiplier = zDelta / 416; // I think 416 is the height of 1 cliff
+		// Adjusting projectile fall if the target is in lower location
+		//if (this->InitialTargetLocation.Z < this->InitialSourceLocation.Z && finalDistancePercentage > 0.50)
+			//extraZDesc += gravityFall;
+		//double newBulletHeight = pBullet->Location.Z + extraZ;
+		if (currentBulletDistance > halfInitialDistance)
+			extraZDesc += ((416) * (finalDistancePercentage2));
+		// Adjusting projectile fall if the target is in upper location
+		if (this->InitialTargetLocation.Z > this->InitialSourceLocation.Z)// && finalDistancePercentage > 0.50)
+			extraZDesc = -gravityElevation * finalDistancePercentage2 * cliffHeightMultiplier;
+		//extraZDesc = ccc + (ccc * finalDistanceMultiplier * 0.25) - gravityElevation;
+		if (this->InitialTargetLocation.Z < this->InitialSourceLocation.Z)// && finalDistancePercentage > 0.50)
+			extraZDesc += (gravityElevation * 2) * finalDistancePercentage2 * cliffHeightMultiplier;
+		//if (pBullet->Location.Z > maxHeight)
+			//pBullet->Location.Z = maxHeight;
+		if (currentBulletDistance > halfInitialDistance)
+			pBullet->Location.Z = pBullet->Location.Z - static_cast<int>(extraZDesc);
+
+		int a = 0; // Delete this, is just a placeholder for debugging
+	}
+	/*if (currentBulletDistance >= halfInitialDistance)
+	{
+		pBullet->Velocity.X = pBullet->Velocity.X * 0.75;
+		pBullet->Velocity.Y = pBullet->Velocity.Y * 0.75;
+		//pBullet->Velocity.Z = 0.0;
+	}*/
 
 
 	/*double closeEnough = pBullet->TargetCoords.DistanceFrom(pBullet->Location);
@@ -214,6 +186,7 @@ bool ArtilleryTrajectory::OnAI(BulletClass* pBullet)
 	}*/
 
 
+	return false;
 
 	//f(x) = X^2
 	/*
@@ -418,11 +391,6 @@ bool ArtilleryTrajectory::OnAI(BulletClass* pBullet)
 // pPosition: Current position of the proj, and in the next frame it will be *pSpeed + *pPosition
 void ArtilleryTrajectory::OnAIVelocity(BulletClass* pBullet, BulletVelocity* pSpeed, BulletVelocity* pPosition)
 {
-
-
-
-
-
 	/*
 	double maxHeight = this->GetTrajectoryType<ArtilleryTrajectoryType>(pBullet)->MaxHeight;
 	int zDelta = this->InitialTargetLocation.Z - this->InitialSourceLocation.Z;
@@ -472,47 +440,4 @@ TrajectoryCheckReturnType ArtilleryTrajectory::OnAITechnoCheck(BulletClass* pBul
 {
 	//return TrajectoryCheckReturnType::ExecuteGameCheck; // Execute game checks.
 	return TrajectoryCheckReturnType::SkipGameCheck; // Bypass game checks entirely.
-}
-
-int ArtilleryTrajectory::GetVelocityZ(BulletClass* pBullet)
-{
-	int velocity = GetTargetZPosition(pBullet) - pBullet->Location.Z;
-
-	return velocity;
-}
-
-int ArtilleryTrajectory::GetFirerZPosition(BulletClass* pBullet)
-{
-	if (!pBullet)
-		return 0;
-
-	auto coords = pBullet->SourceCoords;
-
-	if (pBullet->Owner)
-	{
-		auto const pCell = pBullet->Owner->GetCell();
-
-		if (pCell)
-			coords = pCell->GetCoordsWithBridge();
-	}
-
-	return coords.Z;
-}
-
-int ArtilleryTrajectory::GetTargetZPosition(BulletClass* pBullet)
-{
-	if (!pBullet)
-		return 0;
-
-	auto coords = pBullet->TargetCoords;
-
-	if (pBullet->Target)
-	{
-		auto const pCell = MapClass::Instance()->TryGetCellAt(pBullet->Target->GetCoords());
-
-		if (pCell)
-			coords = pCell->GetCoordsWithBridge();
-	}
-
-	return coords.Z;
 }
