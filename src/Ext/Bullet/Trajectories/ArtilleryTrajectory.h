@@ -30,29 +30,20 @@ class ArtilleryTrajectory final : public PhobosTrajectory
 public:
 	// This constructor is for Save & Load
 	ArtilleryTrajectory() : PhobosTrajectory(TrajectoryFlag::Artillery)
-		//, IsFalling { false }
 		, InitialTargetLocation { CoordStruct::Empty }
 		, InitialSourceLocation { CoordStruct::Empty }
-		, LastLocation { CoordStruct::Empty }
-		, CurrentBulletHeight { 0 }
-		, CurrentBulletDistance { 0 }
 		, TotalDistance { 0.0 }
 		, HalfDistance { 0.0 }
 		, AttackerHeight { 0 }
-		, Stage { 0 }
 	{}
 
 	ArtilleryTrajectory(PhobosTrajectoryType* pType) : PhobosTrajectory(TrajectoryFlag::Artillery)
 		//, IsFalling { false }
 		, InitialTargetLocation { CoordStruct::Empty }
 		, InitialSourceLocation { CoordStruct::Empty }
-		, LastLocation { CoordStruct::Empty }
-		, CurrentBulletHeight { 0 }
-		, CurrentBulletDistance { 0 }
 		, TotalDistance { 0.0 }
 		, HalfDistance { 0.0 }
 		, AttackerHeight { 0 }
-		, Stage { 0 }
 	{}
 
 	virtual bool Load(PhobosStreamReader& Stm, bool RegisterForChange) override;
@@ -65,14 +56,9 @@ public:
 	virtual TrajectoryCheckReturnType OnAITechnoCheck(BulletClass* pBullet, TechnoClass* pTechno) override;
 
 	// Your properties
-	//bool IsFalling;
 	CoordStruct InitialTargetLocation;
 	CoordStruct InitialSourceLocation;
-	CoordStruct LastLocation;
-	int CurrentBulletHeight;
-	int CurrentBulletDistance;
 	double TotalDistance;
 	double HalfDistance;
 	int AttackerHeight;
-	int Stage;
 };
