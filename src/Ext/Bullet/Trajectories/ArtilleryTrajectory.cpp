@@ -111,7 +111,7 @@ bool ArtilleryTrajectory::OnAI(BulletClass* pBullet)
 		double extraZDesc = 0.0;
 		double finalDistancePercentage = 0.0;
 		int cliffHeight = 416; // Note: I think 416 is the height of 1 cliff
-		int cliffHeightMultiplier = zDelta / cliffHeight;
+		double cliffHeightMultiplier = zDelta / cliffHeight;
 
 		if (currentBulletDistance > halfInitialDistance)
 		{
