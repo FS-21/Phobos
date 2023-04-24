@@ -58,10 +58,32 @@ DEFINE_HOOK(0x6856A5, DoWin_AILearning7, 0x7)
 	return 0;
 }*/
 
-DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
+//DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
+//DEFINE_HOOK(0x686B0E, AILearning_Load, 0x6)
+DEFINE_HOOK(0x687C9B, AILearning_Load, 0x7)
 {
-	if (!RulesExt::Global()->AILearning)// || !SessionClass::IsSingleplayer())
+	if (!RulesExt::Global()->AILearning || !SessionClass::IsSingleplayer())
 		return 0;
+
+	// Disabled for now, more tests needed:
+	// In online games only the game's host player (player 0) should load the triggers
+	if (SessionClass::Instance->GameMode == GameMode::Internet || SessionClass::Instance->GameMode == GameMode::LAN)
+	{
+		bool isHostPlayer = HouseClass::Array->GetItem(0)->IsCurrentPlayer();
+
+		/*int nPlayer = 0;
+		for (auto house : *HouseClass::Array)
+		{
+
+			Debug::Log("Player[%d] (%s) -> is from this PC? %d, hIdx: %d\n", nPlayer, house->Type->ID, house->IsCurrentPlayer(), house->ArrayIndex);
+			nPlayer++;
+		}*/
+
+		Debug::Log("DEBUG: Is the HOST player of this game? %s\n", (isHostPlayer ? "True" : "False"));
+
+		if (!isHostPlayer)
+			return 0;
+	}
 
 	// If "only supported maps" the tag "AILearning.ScenarioName" must containg a valid filename string
 	if (RulesExt::Global()->AILearning_OnlySupportedMaps.Get()
@@ -122,7 +144,7 @@ DEFINE_HOOK_AGAIN(0x68657F, AILearning_Save, 0x6) //DoAbort_AILearning5 // Delet
 DEFINE_HOOK_AGAIN(0x6856A5, AILearning_Save, 0x7) // void Do_Win(void)
 DEFINE_HOOK(0x685DE7, AILearning_Save, 0x5) // void Do_Lose(void)
 {
-	if (!RulesExt::Global()->AILearning)// || !SessionClass::IsSingleplayer())
+	if (!RulesExt::Global()->AILearning || !SessionClass::IsSingleplayer())
 		return 0;
 
 	// If "only supported maps" the tag "AILearning.ScenarioName" must containg a valid filename string
