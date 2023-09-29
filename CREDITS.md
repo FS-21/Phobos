@@ -140,6 +140,7 @@ This page lists all the individual contributions to the project by their author.
   - New AI teams selector
   - Mind Control Threshold
   - AI learning
+  - Script actions for manipulating script flows with conditional jumps
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

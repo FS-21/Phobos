@@ -25,6 +25,14 @@ void TeamExt::ExtData::Serialize(T& Stm)
 		.Process(this->AngerNodeModifier)
 		.Process(this->OnlyTargetHouseEnemy)
 		.Process(this->OnlyTargetHouseEnemyMode)
+		.Process(this->ConditionalJump_Evaluation)
+		.Process(this->ConditionalJump_ComparatorMode)
+		.Process(this->ConditionalJump_ComparatorValue)
+		.Process(this->ConditionalJump_EnabledKillsCount)
+		.Process(this->ConditionalJump_Counter)
+		.Process(this->AbortActionAfterKilling)
+		.Process(this->ConditionalJump_Index)
+		.Process(this->ConditionalJump_ResetVariablesIfJump)
 		;
 }
 

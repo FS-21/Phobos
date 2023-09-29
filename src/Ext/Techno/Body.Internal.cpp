@@ -4,6 +4,7 @@
 
 #include <Misc/FlyingStrings.h>
 #include <Utilities/EnumFunctions.h>
+#include <Ext/Script/Body.h>
 
 // Unsorted methods
 
@@ -28,16 +29,68 @@ void TechnoExt::ExtData::InitializeLaserTrails()
 
 void TechnoExt::ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller)
 {
-	TechnoClass* pObjectKiller = ((pKiller->GetTechnoType()->Spawned || pKiller->GetTechnoType()->MissileSpawn) && pKiller->SpawnOwner) ?
+	if (!pVictim || !pKiller)
+		return;
+
+	auto pVictimExt = TechnoExt::ExtMap.Find(pVictim);
+	if (!pVictimExt)
+		return;
+
+	TechnoClass* pRealKiller = ((pKiller->GetTechnoType()->Spawned || pKiller->GetTechnoType()->MissileSpawn) && pKiller->SpawnOwner) ?
 		pKiller->SpawnOwner : pKiller;
 
-	if (pObjectKiller && pObjectKiller->BelongsToATeam())
+	if (!pRealKiller->BelongsToATeam())
+		return;
+
+	auto pKillerExt = TechnoExt::ExtMap.Find(pRealKiller);
+	if (!pKillerExt)
+		return;
+
+	auto const pFootKiller = static_cast<FootClass*>(pRealKiller);
+	auto const pFocus = static_cast<TechnoClass*>(pFootKiller->Team->Focus);
+
+	/*Debug::Log("DEBUG: pRealKiller -> [%s] [%s] registered a kill of the type [%s]\n",
+		pFootKiller->Team->Type->ID, pRealKiller->get_ID(), pVictim->get_ID());*/
+
+	pKillerExt->LastKillWasTeamTarget = false;
+
+	if (pFocus && pFocus->GetTechnoType() == pVictim->GetTechnoType())
+		pKillerExt->LastKillWasTeamTarget = true;
+
+	// Conditional Jump Script Action stuff
+	auto pKillerTeamExt = TeamExt::ExtMap.Find(pFootKiller->Team);
+	if (!pKillerTeamExt)
+		return;
+
+	if (pKillerTeamExt->ConditionalJump_EnabledKillsCount)
 	{
-		if (auto const pFootKiller = generic_cast<FootClass*>(pObjectKiller))
-		{
-			auto pKillerTechnoData = TechnoExt::ExtMap.Find(pObjectKiller);
-			pKillerTechnoData->LastKillWasTeamTarget = pFootKiller->Team->Focus == pVictim;
-		}
+		bool isValidKill = pKillerTeamExt->ConditionalJump_Index < 0 ? false : ScriptExt::EvaluateObjectWithMask(pVictim, pKillerTeamExt->ConditionalJump_Index, -1, -1, pKiller);
+
+		if (isValidKill || pKillerExt->LastKillWasTeamTarget)
+			pKillerTeamExt->ConditionalJump_Counter++;
+	}
+
+	// Special case for interrupting current action
+	if (pKillerTeamExt->AbortActionAfterKilling
+		&& pKillerExt->LastKillWasTeamTarget)
+	{
+		pKillerTeamExt->AbortActionAfterKilling = false;
+		auto pTeam = pFootKiller->Team;
+
+		Debug::Log("DEBUG: [%s] [%s] %d = %d,%d - Force next script action after successful kill: %d = %d,%d\n"
+			, pTeam->Type->ID
+			, pTeam->CurrentScript->Type->ID
+			, pTeam->CurrentScript->CurrentMission
+			, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action
+			, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument
+			, pTeam->CurrentScript->CurrentMission + 1
+			, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission + 1].Action
+			, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission + 1].Argument);
+
+		// Jumping to the next line of the script list
+		pTeam->StepCompleted = true;
+
+		return;
 	}
 }
 

@@ -98,6 +98,14 @@ public:
 		int AngerNodeModifier;
 		bool OnlyTargetHouseEnemy;
 		int OnlyTargetHouseEnemyMode;
+		bool ConditionalJump_Evaluation;
+		int ConditionalJump_ComparatorMode;
+		int ConditionalJump_ComparatorValue;
+		int ConditionalJump_Counter;
+		int ConditionalJump_Index;
+		bool AbortActionAfterKilling;
+		bool ConditionalJump_EnabledKillsCount;
+		bool ConditionalJump_ResetVariablesIfJump;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -116,6 +124,14 @@ public:
 			, AngerNodeModifier { 5000 }
 			, OnlyTargetHouseEnemy { false }
 			, OnlyTargetHouseEnemyMode { -1 }
+			, ConditionalJump_Evaluation { false }
+			, ConditionalJump_ComparatorMode { 3 }
+			, ConditionalJump_ComparatorValue { 1 }
+			, ConditionalJump_Counter { 0 }
+			, AbortActionAfterKilling { false }
+			, ConditionalJump_Index { -1000000 }
+			, ConditionalJump_EnabledKillsCount { false }
+			, ConditionalJump_ResetVariablesIfJump { false }
 		{ }
 
 		virtual ~ExtData() = default;
