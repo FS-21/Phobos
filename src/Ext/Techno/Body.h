@@ -6,6 +6,7 @@
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
 #include <Utilities/Macro.h>
+#include <Utilities/EnumFunctions.h>
 #include <New/Entity/ShieldClass.h>
 #include <New/Entity/LaserTrailClass.h>
 
@@ -76,6 +77,8 @@ public:
 		CDTimerClass DeployFireTimer;
 		bool ForceFullRearmDelay;
 		int WHAnimRemainingCreationInterval;
+		AbstractClass* OriginalTarget;
+		TechnoClass* CurrentRandomTarget;
 
 		// Used for Passengers.SyncOwner.RevertOnExit instead of TechnoClass::InitialOwner / OriginallyOwnedByHouse,
 		// as neither is guaranteed to point to the house the TechnoClass had prior to entering transport and cannot be safely overridden.
@@ -100,6 +103,8 @@ public:
 			, DeployFireTimer {}
 			, ForceFullRearmDelay { false }
 			, WHAnimRemainingCreationInterval { 0 }
+			, OriginalTarget { nullptr }
+			, CurrentRandomTarget { nullptr }
 		{ }
 
 		void ApplyInterceptor();
@@ -113,6 +118,7 @@ public:
 		void UpdateLaserTrails();
 		void InitializeLaserTrails();
 		void UpdateMindControlAnim();
+		void RefreshRandomTargets();
 
 		virtual ~ExtData() override;
 
@@ -182,6 +188,8 @@ public:
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
 	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
+	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
+	static TechnoClass* GetRandomTarget(TechnoClass* pThis = nullptr);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
 	static CoordStruct PassengerKickOutLocation(TechnoClass* pThis, FootClass* pPassenger);
 

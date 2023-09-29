@@ -8,6 +8,7 @@
 #include <Ext/Bullet/Body.h>
 #include <Ext/WarheadType/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <Ext/Script/Body.h>
 #include <Utilities/EnumFunctions.h>
 
 #pragma region TechnoClass_SelectWeapon
@@ -888,3 +889,126 @@ DEFINE_JUMP(CALL6, 0x6F8CE3, GET_OFFSET(TechnoClass_EvaluateCellGetWeaponWrapper
 DEFINE_JUMP(CALL6, 0x6F8DD2, GET_OFFSET(TechnoClass_EvaluateCellGetWeaponRangeWrapper));
 
 #pragma endregion
+
+DEFINE_HOOK(0x736F61, UnitClass_FiringAI_BurstRandomTarget_Setup, 0x6)
+{
+	GET(TechnoClass*, pThis, ESI);
+
+	TechnoExt::UpdateRandomTarget(pThis);
+
+	return 0;
+}
+
+DEFINE_HOOK(0x4D4E8A, FootClass_FiringAI_BurstRandomTarget_Setup, 0x6)
+{
+	GET(TechnoClass*, pThis, ESI);
+
+	TechnoExt::UpdateRandomTarget(pThis);
+
+	return 0;
+}
+
+DEFINE_HOOK(0x44AFF8, TechnoClass_FireAt_BurstRandomTarget_Setup, 0x6)
+{
+	GET(TechnoClass*, pThis, ESI);
+
+	TechnoExt::UpdateRandomTarget(pThis);
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6B770D, SpawnerManagerClassAI_SwitchCase3, 0xB)
+{
+	GET(SpawnManagerClass *, pThis, ESI);
+
+	bool skip = false;
+
+	for (auto pItem : pThis->SpawnedNodes)
+	{
+		const auto pSpawnExt = TechnoExt::ExtMap.Find(pItem->Unit);
+		if (!pSpawnExt)
+			continue;
+
+		if (pSpawnExt->CurrentRandomTarget && ScriptExt::IsUnitAvailable(pSpawnExt->CurrentRandomTarget, true))
+		{
+			skip = true;
+			pItem->Unit->Target = pSpawnExt->CurrentRandomTarget;
+		}
+		else
+		{
+			pSpawnExt->CurrentRandomTarget = nullptr;
+		}
+	}
+
+	if (skip)
+		return 0x6B771E;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6B776E, SpawnerManagerClassAI_SwitchCase4, 0x6) // Note: Not sure in which cases the game enters in this hook, maybe not necessary :-/
+{
+	GET(AircraftClass*, pThis, ECX);
+
+	const auto pSpawnExt = TechnoExt::ExtMap.Find(pThis);
+	if (!pSpawnExt)
+		return 0;
+
+	if (pSpawnExt->CurrentRandomTarget && ScriptExt::IsUnitAvailable(pSpawnExt->CurrentRandomTarget, true))
+	{
+		pThis->Target = pSpawnExt->CurrentRandomTarget;
+		return 0x6B777A;
+	}
+	else
+	{
+		pSpawnExt->CurrentRandomTarget = nullptr;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6B7AE3, SpawnerManagerClassAI_SpawnControlStatus3, 0x6)
+{
+	GET(AircraftClass*, pThis, ECX);
+
+	const auto pSpawnExt = TechnoExt::ExtMap.Find(pThis);
+	if (!pSpawnExt)
+		return 0;
+
+	if (pSpawnExt->CurrentRandomTarget && ScriptExt::IsUnitAvailable(pSpawnExt->CurrentRandomTarget, true))
+	{
+		pThis->Target = pSpawnExt->CurrentRandomTarget;
+		return 0x6B7AEF;
+	}
+	else
+	{
+		pSpawnExt->CurrentRandomTarget = nullptr;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(0x730F00, AIMissionClassUAEXXZ_StopSelected, 0x5)
+{
+	// Makes technos with random targets stop targeting
+	for (auto pObj : ObjectClass::CurrentObjects())
+	{
+		auto pTechno = abstract_cast<TechnoClass*>(pObj);
+		if (!pTechno)
+			continue;
+
+		auto pExt = TechnoExt::ExtMap.Find(pTechno);
+		if (!pExt)
+			continue;
+
+		if (pExt->CurrentRandomTarget && pTechno->CurrentMission == Mission::Attack)
+		{
+			pExt->CurrentRandomTarget = nullptr;
+			pExt->OriginalTarget = nullptr;
+			pTechno->Target = nullptr;
+			pTechno->QueueMission(Mission::Guard, 0);
+		}
+	}
+
+	return 0;
+}
