@@ -137,6 +137,7 @@ This page lists all the individual contributions to the project by their author.
   - Reset timer tags for SW
   - Delayed fire animation
   - New AI teams selector
+  - Mind Control Threshold
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
