@@ -350,6 +350,7 @@ New:
 - Allow toggling `Infantry/UnitsGainSelfHeal` for `MultiplayPassive=true` houses (by Starkku)
 - Customizable straight trajectory detonation & snap distance and pass-through option (by Starkku)
 - Airstrike & spy plane fixed spawn distance & height (by Starkku)
+- Remove parasites in any warhead (by FS-21)
 - Script action for repairing destroyed bridges (by FS-21)
 
 Vanilla fixes:
