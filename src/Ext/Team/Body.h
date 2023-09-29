@@ -94,6 +94,8 @@ public:
 		int ForceJump_InitialCountdown;
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
+		int TriggersSideIdx;
+		int TriggersHouseIdx;
 		std::vector<TechnoClass*> BridgeRepairHuts;
 		int AngerNodeModifier;
 		bool OnlyTargetHouseEnemy;
@@ -120,6 +122,8 @@ public:
 			, ForceJump_InitialCountdown { -1 }
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
+			, TriggersSideIdx { -1 }
+			, TriggersHouseIdx { -1 }
 			, BridgeRepairHuts { }
 			, AngerNodeModifier { 5000 }
 			, OnlyTargetHouseEnemy { false }
