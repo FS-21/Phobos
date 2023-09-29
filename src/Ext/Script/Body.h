@@ -13,6 +13,7 @@
 #include <WarheadTypeClass.h>
 #include <SpawnManagerClass.h>
 
+#include <Ext/House/Body.h>
 #include <Ext/Team/Body.h>
 #include <Utilities/Container.h>
 #include <Phobos.h>
@@ -70,6 +71,7 @@ enum class PhobosScripts : unsigned int
 	IncreaseCurrentAITriggerWeight = 14001,
 	DecreaseCurrentAITriggerWeight = 14002,
 	UnregisterGreatSuccess = 14003,
+	ForceGlobalOnlyTargetHouseEnemy = 14004,
 	OverrideOnlyTargetHouseEnemy = 14005,
 	SetHouseAngerModifier = 14006,
 	ModifyHateHouseIndex = 14007,
@@ -80,6 +82,7 @@ enum class PhobosScripts : unsigned int
 	SetTheMostHatedHouseRandom = 14012,
 	ResetAngerAgainstHouses = 14013,
 	AggroHouse = 14014,
+
 
 	// Range 16000-16999 are flow control actions (jumps, change script, loops, breaks, etc)
 	SameLineForceJumpCountdown = 16000,
@@ -218,6 +221,8 @@ public:
 	static void Set_ForceJump_Countdown(TeamClass* pTeam, bool repeatLine, int count);
 	static void Stop_ForceJump_Countdown(TeamClass* pTeam);
 	static void ChronoshiftToEnemyBase(TeamClass* pTeam, int extraDistance);
+
+	static void ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode);
 
 	static void ResetAngerAgainstHouses(TeamClass* pTeam);
 	static void SetHouseAngerModifier(TeamClass* pTeam, int modifier);

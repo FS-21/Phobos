@@ -362,6 +362,25 @@ In `aimd.ini`:
 x=14003,0
 ```
 
+### `14004` Force Global OnlyTargetHouseEnemy value in Teams
+
+- Sets the TeamType tag value for `OnlyTargetHouseEnemy` tag. Only affects the new attack / move actions.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14004,n           ; integer
+```
+
+- The possible argument values are:
+
+| *Argument* | *Description*                                                            |
+| :--------: | :----------------------------------------------------------------------: |
+| -1         | Disable Global value for Force `OnlyTargetHouseEnemy` tag. Default value |
+| 0          | Force `OnlyTargetHouseEnemy` = false                                     |
+| 1          | Force `OnlyTargetHouseEnemy` = true                                      |
+| 2          | Force random boolean value                                               |
+
 ### `14005` Override OnlyTargetHouseEnemy Value
 
 - The value of the tag `OnlyTargetHouseEnemy` in AI triggers can be modified for the new attack & move actions. Only affects the next new attack or move action script.
