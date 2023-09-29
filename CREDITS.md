@@ -129,6 +129,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Script action for repairing destroyed bridges
+  - Script actions for modifying AI anger against other houses
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
