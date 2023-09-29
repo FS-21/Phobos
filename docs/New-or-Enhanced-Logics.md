@@ -1361,6 +1361,27 @@ RandomTarget=0.0                            ; double or percentage
 RandomTarget.Spawners.MultipleTargets=false ; boolean
 ```
 
+### Delayed fire animation
+
+![image](_static/images/delayedfireweapon.gif)
+*Delayed fire animation example in [C&C: Reloaded](https://www.moddb.com/mods/cncreloaded)*
+
+- Now a weapon attack can be delayed if an animation is set in `DelayedFire.Anim`.
+- Optionally `DelayedFire.PostAnim` replaces `DelayedFire.Anim` when the weapon is fired.
+- By default the animation will be placed in the weapon FLH location but the animation can be moved to the center of the object with `DelayedFire.Anim.UseFLH=false`.
+- `DelayedFire.Duration` > 0 will interrupt the animation (and allow weapon fire) when the countdown ends.
+- `DelayedFire.Suicide` will provoke the same effect of the original tag `Suicide` without the side effect explosion when the unit is killed by something.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWEAPON]                 ; WeaponType
+DelayedFire.Anim=            ; Animation
+DelayedFire.PostAnim=        ; Animation
+DelayedFire.Anim.UseFLH=true ; boolean - disabling this will create the animation at the center of the unit instead of its FLH coordinates
+DelayedFire.Duration=0       ; integer - in-game frames.
+DelayedFire.Suicide=false    ; boolean
+```
+
 ### Feedback weapon
 
 ![image](_static/images/feedbackweapon.gif)

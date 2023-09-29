@@ -61,6 +61,11 @@ void WeaponTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->ExtraWarheads_DamageOverrides.Read(exINI, pSection, "ExtraWarheads.DamageOverrides");
 	this->RandomTarget.Read(exINI, pSection, "RandomTarget");
 	this->RandomTarget_Spawners_MultipleTargets.Read(exINI, pSection, "RandomTarget.Spawners.MultipleTargets");
+	this->DelayedFire_Anim.Read(exINI, pSection, "DelayedFire.Anim");
+	this->DelayedFire_PostAnim.Read(exINI, pSection, "DelayedFire.PostAnim");
+	this->DelayedFire_Anim_UseFLH.Read(exINI, pSection, "DelayedFire.Anim.UseFLH");
+	this->DelayedFire_Duration.Read(exINI, pSection, "DelayedFire.Duration");
+	this->DelayedFire_Suicide.Read(exINI, pSection, "DelayedFire.Suicide");
 }
 
 template <typename T>
@@ -88,6 +93,11 @@ void WeaponTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->ExtraWarheads_DamageOverrides)
 		.Process(this->RandomTarget)
 		.Process(this->RandomTarget_Spawners_MultipleTargets)
+		.Process(this->DelayedFire_Anim)
+		.Process(this->DelayedFire_PostAnim)
+		.Process(this->DelayedFire_Anim_UseFLH)
+		.Process(this->DelayedFire_Duration)
+		.Process(this->DelayedFire_Suicide)
 		;
 };
 

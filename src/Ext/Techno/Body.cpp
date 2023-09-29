@@ -967,6 +967,13 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->WebbyAnim)
 		.Process(this->WebbyLastTarget)
 		.Process(this->WebbyLastMission)
+		.Process(this->DelayedFire_Charging)
+		.Process(this->DelayedFire_Charged)
+		.Process(this->DelayedFire_Anim)
+		.Process(this->DelayedFire_PostAnim)
+		.Process(this->DelayedFire_Duration)
+		.Process(this->DelayedFire_WeaponIndex)
+		.Process(this->DelayedFire_DurationTimer)
 		;
 }
 
