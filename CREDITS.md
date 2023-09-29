@@ -139,6 +139,7 @@ This page lists all the individual contributions to the project by their author.
   - Delayed fire animation
   - New AI teams selector
   - Mind Control Threshold
+  - AI learning
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
