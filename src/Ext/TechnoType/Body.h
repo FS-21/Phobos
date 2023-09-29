@@ -184,6 +184,11 @@ public:
 		Nullable<Leptons> SpawnDistanceFromTarget;
 		Nullable<int> SpawnHeight;
 
+		ValueableVector<AnimTypeClass*> Webby_Anims;
+		Valueable<bool> ImmuneToWeb;
+		Valueable<int> Webby_Duration;
+		Valueable<int> Webby_DurationVariation;
+
 		struct LaserTrailDataEntry
 		{
 			ValueableIdx<LaserTrailTypeClass> idxType;
@@ -365,6 +370,11 @@ public:
 
 			, SpawnDistanceFromTarget {}
 			, SpawnHeight {}
+
+			, Webby_Anims {}
+			, ImmuneToWeb { false }
+			, Webby_Duration { 0 }
+			, Webby_DurationVariation { 0 }
 		{ }
 
 		virtual ~ExtData() = default;

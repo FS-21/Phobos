@@ -276,6 +276,11 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->SpawnDistanceFromTarget.Read(exINI, pSection, "SpawnDistanceFromTarget");
 	this->SpawnHeight.Read(exINI, pSection, "SpawnHeight");
 
+	this->Webby_Anims.Read(exINI, pSection, "Webby.Anims");
+	this->ImmuneToWeb.Read(exINI, pSection, "ImmuneToWeb");
+	this->Webby_Duration.Read(exINI, pSection, "Webby.Duration");
+	this->Webby_DurationVariation.Read(exINI, pSection, "Webby.DurationVariation");
+
 	// Ares 0.2
 	this->RadarJamRadius.Read(exINI, pSection, "RadarJamRadius");
 	this->ImmuneToEMP.Read(exINI, pSection, "ImmuneToEMP");
@@ -576,6 +581,10 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 
 		.Process(this->SpawnDistanceFromTarget)
 		.Process(this->SpawnHeight)
+		.Process(this->Webby_Anims)
+		.Process(this->ImmuneToWeb)
+		.Process(this->Webby_Duration)
+		.Process(this->Webby_DurationVariation)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

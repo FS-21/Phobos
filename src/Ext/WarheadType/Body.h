@@ -115,6 +115,12 @@ public:
 		Valueable<bool> InflictLocomotor;
 		Valueable<bool> RemoveInflictedLocomotor;
 
+		Valueable<bool> Webby;
+		ValueableVector<AnimTypeClass*> Webby_Anims;
+		Valueable<int> Webby_Duration;
+		Valueable<int> Webby_DurationVariation;
+		Valueable<int> Webby_Cap;
+
 		// Ares tags
 		// http://ares-developers.github.io/Ares-docs/new/warheads/general.html
 		Valueable<bool> AffectsEnemies;
@@ -249,6 +255,12 @@ public:
 			, CanRemoveParasites_KickOut_Paralysis { 15 }
 			, CanRemoveParasites_ReportSound { }
 			, CanRemoveParasites_KickOut_Anim { nullptr }
+
+			, Webby { false }
+			, Webby_Anims {}
+			, Webby_Duration { 0 }
+			, Webby_DurationVariation { 0 }
+			, Webby_Cap { -1 }
 		{ }
 
 	private:

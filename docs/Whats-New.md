@@ -353,6 +353,7 @@ New:
 - `Burst.Retarget` for assigning a new target in each projectile (by FS-21)
 - Remove parasites in any warhead (by FS-21)
 - Script action for repairing destroyed bridges (by FS-21)
+- Web logic against infantry (FS-21)
 
 Vanilla fixes:
 - Allow AI to repair structures built from base nodes/trigger action 125/SW delivery in single player missions (by Trsdy)

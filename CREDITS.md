@@ -133,6 +133,7 @@ This page lists all the individual contributions to the project by their author.
   - Repair legless cyborgs In transports
   - Script action for repairing destroyed bridges
   - Script actions for modifying AI anger against other houses
+  - Web logic against infantry
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
