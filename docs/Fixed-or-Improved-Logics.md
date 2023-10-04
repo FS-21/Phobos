@@ -138,6 +138,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Wall overlays are now drawn with the custom palette defined in `Palette` in `artmd.ini` if possible.
 - `Secondary` will now be used against walls if `Primary` weapon Warhead has `Wall=false`, `Secondary` has `Wall=true` and the firer does not have `NoSecondaryWeaponFallback` set to true.
 - Setting `ReloadInTransport` to true on units with `Ammo` will allow the ammo to be reloaded according to `Reload` or `EmptyReload` timers even while the unit is inside a transport.
+- It is now possible to enable `Verses` and `PercentAtMax` to be applied on negative damage by setting `ApplyModifiersOnNegativeDamage` to true on the Warhead.
 
 ## Fixes / interactions with other extensions
 
@@ -461,6 +462,17 @@ In `rulesmd.ini`:
 ```ini
 [SOMETECHNO]             ; TechnoType
 TargetZoneScanType=same  ; target zone scan enumeration (same|any|inrange)
+```
+
+### Customizable disguised target evaluation behaviour in new ScriptType attack actions
+
+- By default, any unit with `DetectDisguise=yes` seeking targets via new [attack team missions introduced in Phobos](AI-Scripting-and-Mapping.md#10000-10049-attack-actions) always detects the disguised units. The probability to detect a disguised object now can be customized.
+- `DetectDisguise.Percent` values represent the probabilities in hard, medium & easy difficulty, in that order.
+
+In `rulesmd.ini`:
+```ini
+[SOMETECHNO]                          ; TechnoType
+DetectDisguise.Percent=1.0, 1.0, 1.0  ; float, percents or absolute
 ```
 
 ### Customizable unit image in art

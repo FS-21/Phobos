@@ -361,6 +361,8 @@ New:
 - Script action for repairing destroyed bridges (by FS-21)
 - Web logic against infantry (FS-21)
 - Delayed fire animation (by FS-21)
+- Allow enabling application of `Verses` and `PercentAtMax` for negative damage (by Starkku)
+- Customizable disguised target evaluation behaviour in new ScriptType attack actions (by FS-21)
 
 Vanilla fixes:
 - Allow AI to repair structures built from base nodes/trigger action 125/SW delivery in single player missions (by Trsdy)
@@ -435,6 +437,8 @@ Phobos fixes:
 - Optimized performance for map trigger retint action light source fix (by Starkku)
 - Fixed a number of issues with Warhead Shield respawn / self heal rate modifiers like timers getting reset unnecessarily, the timer being adjusted wrong after the Warhead effect runs out etc. (by Starkku)
 - Fixed a problem with disguise visibility logic that could cause game to crash on loading a map (by Starkku)
+- Fixed owned `LimboDelivery` buildings not being saved correctly in savegames (by Starkku)
+- Fixed a typo in weapon selector code causing issues with `NoAmmoWeapon` and related checks (by Starkku)
 
 Fixes / interactions with other extensions:
 - Fixed an issue introduced by Ares that caused `Grinding=true` building `ActiveAnim` to be incorrectly restored while `SpecialAnim` was playing and the building was sold, erased or destroyed (by Starkku)

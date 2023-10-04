@@ -142,6 +142,7 @@ This page lists all the individual contributions to the project by their author.
   - Mind Control Threshold
   - AI learning
   - Script actions for manipulating script flows with conditional jumps
+  - Customizable disguised target evaluation behaviour in new ScriptType attack actions
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
@@ -227,6 +228,7 @@ This page lists all the individual contributions to the project by their author.
   - Reloading ammo in transports
   - Straight projectile trajectory additions
   - Airstrike & spy plane fixed spawn distance & height
+  - Negative damage `Verses/PercentAtMax` toggle
 - **Morton (MortonPL)**:
   - `XDrawOffset` for animations
   - Shield passthrough & absorption

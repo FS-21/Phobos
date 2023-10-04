@@ -189,6 +189,8 @@ public:
 		Valueable<int> Webby_Duration;
 		Valueable<int> Webby_DurationVariation;
 
+		ValueableVector<double> DetectDisguise_Percent;
+
 		struct LaserTrailDataEntry
 		{
 			ValueableIdx<LaserTrailTypeClass> idxType;
@@ -396,6 +398,7 @@ public:
 			, ImmuneToWeb { false }
 			, Webby_Duration { 0 }
 			, Webby_DurationVariation { 0 }
+			, DetectDisguise_Percent {}
 		{ }
 
 		virtual ~ExtData() = default;
