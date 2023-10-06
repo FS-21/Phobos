@@ -155,6 +155,8 @@ public:
 			AnnounceInvalidPointer(WebbyLastTarget, ptr);
 			AnnounceInvalidPointer(DelayedFire_Anim, ptr);
 			AnnounceInvalidPointer(DelayedFire_PostAnim, ptr);
+			AnnounceInvalidPointer(CurrentRandomTarget, ptr);
+			AnnounceInvalidPointer(OriginalTarget, ptr);
 		}
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;

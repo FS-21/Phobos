@@ -914,15 +914,13 @@ DEFINE_HOOK(0x44AFF8, BuildingClass_FireAt_BurstRandomTarget_Setup, 0x6)
 {
 	GET(TechnoClass*, pThis, ESI);
 
-	if (!pThis->Target)
-		return 0;
-
 	auto pOriginalTarget = pThis->Target;
 
 	TechnoExt::UpdateRandomTarget(pThis);
 
 	int weaponIndex = pThis->SelectWeapon(pThis->Target);
 	auto pWeapon = pThis->GetWeapon(weaponIndex)->WeaponType;
+
 	if (!pWeapon || pWeapon->IsLaser || pWeapon->Spawner)
 		return 0;
 
