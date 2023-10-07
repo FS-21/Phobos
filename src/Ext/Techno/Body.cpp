@@ -902,8 +902,6 @@ TechnoClass* TechnoExt::GetRandomTarget(TechnoClass* pThis)
 	// Looking for all valid targeting candidates
 	for (auto pCandidate : *TechnoClass::Array)
 	{
-		auto debugType = pCandidate->GetTechnoType();
-
 		if (pCandidate == pThis
 			|| !ScriptExt::IsUnitAvailable(pCandidate, true)
 			|| pThisType->Immune
