@@ -32,10 +32,6 @@ void TechnoExt::ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller)
 	if (!pVictim || !pKiller)
 		return;
 
-	auto pVictimExt = TechnoExt::ExtMap.Find(pVictim);
-	if (!pVictimExt)
-		return;
-
 	TechnoClass* pRealKiller = ((pKiller->GetTechnoType()->Spawned || pKiller->GetTechnoType()->MissileSpawn) && pKiller->SpawnOwner) ?
 		pKiller->SpawnOwner : pKiller;
 
@@ -47,14 +43,22 @@ void TechnoExt::ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller)
 		return;
 
 	auto const pFootKiller = static_cast<FootClass*>(pRealKiller);
-	auto const pFocus = static_cast<TechnoClass*>(pFootKiller->Team->Focus);
+	TechnoClass* pFocus = nullptr;
 
-	/*Debug::Log("DEBUG: pRealKiller -> [%s] [%s] registered a kill of the type [%s]\n",
-		pFootKiller->Team->Type->ID, pRealKiller->get_ID(), pVictim->get_ID());*/
+	if (pFootKiller->Team->Focus->WhatAmI() == AbstractType::Unit
+		|| pFootKiller->Team->Focus->WhatAmI() == AbstractType::Aircraft
+		|| pFootKiller->Team->Focus->WhatAmI() == AbstractType::Infantry
+		|| pFootKiller->Team->Focus->WhatAmI() == AbstractType::Building)
+	{
+		pFocus = static_cast<TechnoClass*>(pFootKiller->Team->Focus);
+	}
+
+	/*Debug::Log("ObjectKilledBy() -> [%s] [%s](UID: %d) registered a kill of the type [%s](UID: %d)\n",
+		pFootKiller->Team->Type->ID, pRealKiller->GetTechnoType()->ID, pRealKiller->UniqueID, pVictim->GetTechnoType()->ID, pVictim->UniqueID);*/
 
 	pKillerExt->LastKillWasTeamTarget = false;
 
-	if (pFocus && pFocus->GetTechnoType() == pVictim->GetTechnoType())
+	if (pFocus && (pFocus->GetTechnoType() == pVictim->GetTechnoType()))
 		pKillerExt->LastKillWasTeamTarget = true;
 
 	// Conditional Jump Script Action stuff
@@ -77,7 +81,7 @@ void TechnoExt::ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller)
 		pKillerTeamExt->AbortActionAfterKilling = false;
 		auto pTeam = pFootKiller->Team;
 
-		Debug::Log("DEBUG: [%s] [%s] %d = %d,%d - Force next script action after successful kill: %d = %d,%d\n"
+		Debug::Log("[%s] [%s] %d = %d,%d - Force next script action (AbortActionAfterKilling=true): %d = %d,%d\n"
 			, pTeam->Type->ID
 			, pTeam->CurrentScript->Type->ID
 			, pTeam->CurrentScript->CurrentMission
@@ -89,8 +93,6 @@ void TechnoExt::ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller)
 
 		// Jumping to the next line of the script list
 		pTeam->StepCompleted = true;
-
-		return;
 	}
 }
 
