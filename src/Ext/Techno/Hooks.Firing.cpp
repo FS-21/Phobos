@@ -1105,8 +1105,8 @@ DEFINE_HOOK(0x6FDDC0, TechnoClass_FireAt_DelayedFire, 0x6) //0x6FDD93
 
 	if (pExt->DelayedFire_Charged)
 	{
-		pExt->DelayedFire_Charging = false;
 		pExt->DelayedFire_Charged = false;
+		pExt->DelayedFire_Charging = false;
 
 		return continueFireAt;
 	}
@@ -1133,10 +1133,6 @@ DEFINE_HOOK(0x6FDDC0, TechnoClass_FireAt_DelayedFire, 0x6) //0x6FDD93
 
 		return skipFireAt;
 	}
-
-	//auto pWeaponTypeExt = WeaponTypeExt::ExtMap.Find(pWeaponType);
-	//if (!pWeaponTypeExt)
-		//return continueFireAt;
 
 	if (pExt->DelayedFire_Charging)
 		return skipFireAt;
