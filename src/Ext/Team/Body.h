@@ -10,6 +10,7 @@
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
 #include <Ext/TechnoType/Body.h>
+#include <Ext/Techno/Body.h>
 #include <Phobos.h>
 
 enum teamCategory
@@ -93,6 +94,7 @@ public:
 		int ForceJump_InitialCountdown;
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
+		std::vector<TechnoClass*> BridgeRepairHuts;
 		int TriggersSideIdx;
 		int TriggersHouseIdx;
 		bool ConditionalJump_Evaluation;
@@ -120,6 +122,7 @@ public:
 			, ForceJump_InitialCountdown { -1 }
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
+			, BridgeRepairHuts { }
 			, TriggersSideIdx { -1 }
 			, TriggersHouseIdx { -1 }
 			, ConditionalJump_Evaluation { false }

@@ -62,6 +62,7 @@ enum class PhobosScripts : unsigned int
 	GatherAroundLeader = 10102,
 	LoadIntoTransports = 10103,
 	ChronoshiftToEnemyBase = 10104,
+	RepairDestroyedBridge = 10105,
 
 	// Range 12000-12999 are suplementary/setup pre-actions
 	WaitIfNoTarget = 12000,
@@ -273,6 +274,7 @@ public:
 	static void ManageAITriggers(TeamClass* pTeam, int enabled);
 	static void ManageTriggersWithObjects(TeamClass* pTeam, int idxAITargetType, bool isEnabled);
 	static void Log(const char* pFormat, ...);
+	static void RepairDestroyedBridge(TeamClass* pTeam, int mode);
 
 	// ConditionalJump.cpp
 	static void ConditionalJumpIfTrue(TeamClass* pTeam, int newScriptLine);
