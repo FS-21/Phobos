@@ -203,6 +203,12 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->DetonateOnAllMapObjects_AffectTypes.Read(exINI, pSection, "DetonateOnAllMapObjects.AffectTypes");
 	this->DetonateOnAllMapObjects_IgnoreTypes.Read(exINI, pSection, "DetonateOnAllMapObjects.IgnoreTypes");
 
+	this->CanRemoveParasites.Read(exINI, pSection, "CanRemoveParasites");
+	this->CanRemoveParasites_KickOut.Read(exINI, pSection, "CanRemoveParasites.KickOut");
+	this->CanRemoveParasites_KickOut_Paralysis.Read(exINI, pSection, "CanRemoveParasites.KickOut.Paralysis");
+	this->CanRemoveParasites_ReportSound.Read(exINI, pSection, "CanRemoveParasites.ReportSound");
+	this->CanRemoveParasites_KickOut_Anim.Read(exINI, pSection, "CanRemoveParasites.KickOut.Anim");
+
 	this->Webby.Read(exINI, pSection, "Webby");
 	this->Webby_Anims.Read(exINI, pSection, "Webby.Anims");
 	this->Webby_Duration.Read(exINI, pSection, "Webby.Duration");
@@ -408,6 +414,12 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->WasDetonatedOnAllMapObjects)
 		.Process(this->RemainingAnimCreationInterval)
 		.Process(this->PossibleCellSpreadDetonate)
+
+		.Process(this->CanRemoveParasites)
+		.Process(this->CanRemoveParasites_KickOut)
+		.Process(this->CanRemoveParasites_KickOut_Paralysis)
+		.Process(this->CanRemoveParasites_ReportSound)
+		.Process(this->CanRemoveParasites_KickOut_Anim)
 		;
 }
 

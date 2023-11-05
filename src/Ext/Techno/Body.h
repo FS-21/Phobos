@@ -181,6 +181,7 @@ public:
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
 	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
+	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
 	static void WebbyUpdate(TechnoClass* pThis);
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* GetRandomTarget(TechnoClass* pThis = nullptr);
