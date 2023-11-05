@@ -128,6 +128,7 @@ This page lists all the individual contributions to the project by their author.
   - Shared ammo logic
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
+  - New AI teams selector
   - Delayed fire animation
   - Script actions for manipulating script flows with conditional jumps
   - `Burst.Retarget` for projectile retargeting
