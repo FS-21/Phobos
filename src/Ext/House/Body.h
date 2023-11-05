@@ -25,6 +25,9 @@ public:
 		std::vector<BuildingClass*> OwnedLimboDeliveredBuildings;
 		std::vector<TechnoExt::ExtData*> OwnedAutoDeathObjects;
 		std::vector<TechnoExt::ExtData*> OwnedTransportReloaders; // Objects that can reload ammo in limbo
+		std::vector<TechnoExt::ExtData*> OwnedTimedAutoDeathObjects;
+		bool ForceOnlyTargetHouseEnemy;
+		int ForceOnlyTargetHouseEnemyMode;
 
 		CounterClass LimboAircraft;  // Currently owned aircraft in limbo
 		CounterClass LimboBuildings; // Currently owned buildings in limbo
@@ -62,6 +65,8 @@ public:
 			, RepairBaseNodes { false,false,false }
 			, LastBuiltNavalVehicleType { -1 }
 			, ProducingNavalUnitTypeIndex { -1 }
+			, ForceOnlyTargetHouseEnemy { false }
+			, ForceOnlyTargetHouseEnemyMode { -1 }
 		{ }
 
 		bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding);
@@ -120,6 +125,7 @@ public:
 	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const std::map<TechnoTypeClass*, int> ownedBuildings, bool skipSecretLabChecks);
 	static bool HasGenericPrerequisite(int idx, std::map<TechnoTypeClass*, int> ownedBuildings);
 	static int FindGenericPrerequisite(const char* id);
+	static void ForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode);
 
 	static void SetSkirmishHouseName(HouseClass* pHouse);
 

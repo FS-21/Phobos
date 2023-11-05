@@ -701,6 +701,42 @@ int HouseExt::ExtData::CountOwnedPresentAndLimboed(TechnoTypeClass* pTechnoType)
 	return count;
 }
 
+void HouseExt::ForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode = -1)
+{
+	if (!pThis)
+		return;
+
+	auto pHouseExt = HouseExt::ExtMap.Find(pThis);
+	if (!pHouseExt)
+		return;
+
+	if (mode < 0 || mode > 2)
+		mode = -1;
+
+	enum { ForceFalse = 0, ForceTrue = 1, ForceRandom = 2, UseDefault = -1 };
+
+	pHouseExt->ForceOnlyTargetHouseEnemyMode = mode;
+
+	switch (mode)
+	{
+		case ForceFalse:
+			pHouseExt->ForceOnlyTargetHouseEnemy = false;
+			break;
+
+		case ForceTrue:
+			pHouseExt->ForceOnlyTargetHouseEnemy = true;
+			break;
+
+		case ForceRandom:
+			pHouseExt->ForceOnlyTargetHouseEnemy = (bool)ScenarioClass::Instance->Random.RandomRanged(0, 1);;
+			break;
+
+		default:
+			pHouseExt->ForceOnlyTargetHouseEnemy = false;
+			break;
+	}
+}
+
 int HouseExt::GetHouseIndex(int param, TeamClass* pTeam = nullptr, TActionClass* pTAction = nullptr)
 {
 	if ((pTeam && pTAction) || (param == 8997 && !pTeam && !pTAction))
@@ -888,6 +924,8 @@ void HouseExt::ExtData::Serialize(T& Stm)
 		.Process(this->RepairBaseNodes)
 		.Process(this->LastBuiltNavalVehicleType)
 		.Process(this->ProducingNavalUnitTypeIndex)
+		.Process(this->ForceOnlyTargetHouseEnemy)
+		.Process(this->ForceOnlyTargetHouseEnemyMode)
 		.Process(this->AITriggers_ValidList)
 		;
 }

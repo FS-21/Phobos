@@ -213,6 +213,9 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 		// Chronoshift to enemy base, argument is additional distance modifier
 		ScriptExt::ChronoshiftToEnemyBase(pTeam, argument);
 		break;
+	case PhobosScripts::ForceGlobalOnlyTargetHouseEnemy:
+		ScriptExt::ForceGlobalOnlyTargetHouseEnemy(pTeam, -1);
+		break;
 	case PhobosScripts::SetSideIdxForManagingTriggers:
 		ScriptExt::SetSideIdxForManagingTriggers(pTeam, -1);
 		break;
@@ -1361,6 +1364,31 @@ void ScriptExt::Log(const char* pFormat, ...)
 	va_start(args, pFormat);
 	Debug::LogWithVArgs(pFormat, args);
 	va_end(args);
+}
+
+void ScriptExt::ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode = -1)
+{
+	if (!pTeam)
+		return;
+
+	auto pHouseExt = HouseExt::ExtMap.Find(pTeam->Owner);
+	if (!pHouseExt)
+	{
+		// This action finished
+		pTeam->StepCompleted = true;
+		return;
+	}
+
+	if (mode < 0 || mode > 2)
+		mode = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
+
+	if (mode < -1 || mode > 2)
+		mode = -1;
+
+	HouseExt::ForceOnlyTargetHouseEnemy(pTeam->Owner, mode);
+
+	// This action finished
+	pTeam->StepCompleted = true;
 }
 
 void ScriptExt::ManageTriggersFromList(TeamClass* pTeam, int idxAITriggerType = -1, bool isEnabled = false)

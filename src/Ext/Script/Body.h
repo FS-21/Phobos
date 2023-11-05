@@ -73,6 +73,8 @@ enum class PhobosScripts : unsigned int
 	IncreaseCurrentAITriggerWeight = 14001,
 	DecreaseCurrentAITriggerWeight = 14002,
 	UnregisterGreatSuccess = 14003,
+	ForceGlobalOnlyTargetHouseEnemy = 14004,
+
 
 	// Range 16000-16999 are flow control actions (jumps, change script, loops, breaks, etc)
 	SameLineForceJumpCountdown = 16000,
@@ -235,6 +237,8 @@ public:
 	static void ChronoshiftToEnemyBase(TeamClass* pTeam, int extraDistance);
 	static void ManageTriggersFromList(TeamClass* pTeam, int idxAITriggerType, bool isEnabled);
 	static void ManageAllTriggersFromHouse(TeamClass* pTeam, HouseClass* pHouse, int sideIdx, int houseIdx, bool isEnabled);
+
+	static void ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode);
 
 	static bool IsExtVariableAction(int action);
 	static void VariablesHandler(TeamClass* pTeam, PhobosScripts eAction, int nArg);

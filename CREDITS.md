@@ -117,6 +117,7 @@ This page lists all the individual contributions to the project by their author.
   - Majority of ScriptType actions
   - `Powered.KillSpawns`
   - `Spawner.LimitRange`
+  - Majority of ScriptType actions
   - MC deployer fixes
   - Help with docs
   - Automatic Passenger Deletion logic
