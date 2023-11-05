@@ -129,6 +129,7 @@ This page lists all the individual contributions to the project by their author.
   - Shared ammo logic
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
+  - Reset timer tags for SW
   - Mind Control Threshold
   - AI learning
   - Map event `There are no technos of the specified houses list`

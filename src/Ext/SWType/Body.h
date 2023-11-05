@@ -7,6 +7,7 @@
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
 
+#include <Ext/SW/Body.h>
 #include <Ext/Building/Body.h>
 #include <Misc/TypeConvertHelper.h>
 
@@ -63,6 +64,15 @@ public:
 
 		std::vector<TypeConvertGroup> Convert_Pairs;
 
+		Valueable<bool> TimerRestarted;
+		Valueable<bool> SW_FirstClickRestartsTimer;
+		Valueable<int> SW_FirstClickRestartsTimer_Cost;
+		Valueable<bool> SW_FirstClickRestartsTimer_AutoFire;
+		Valueable<bool> SW_FirstClickRestartsTimer_RefundIfAborted;
+		Valueable<CSFText> Message_InsufficientFunds;
+		Valueable<CSFText> Message_RestartedTimer;
+		NullableIdx<VoxClass> EVA_RestartedTimer;
+
 		ExtData(SuperWeaponTypeClass* OwnerObject) : Extension<SuperWeaponTypeClass>(OwnerObject)
 			, Money_Amount { 0 }
 			, SW_Inhibitors {}
@@ -98,6 +108,14 @@ public:
 			, ShowTimer_Priority { 0 }
 			, Convert_Pairs {}
 			, ShowDesignatorRange { true }
+			, SW_FirstClickRestartsTimer { false }
+			, SW_FirstClickRestartsTimer_Cost { 0 }
+			, SW_FirstClickRestartsTimer_AutoFire { false }
+			, SW_FirstClickRestartsTimer_RefundIfAborted { false }
+			, Message_RestartedTimer {}
+			, Message_InsufficientFunds {}
+			, EVA_RestartedTimer {}
+			, TimerRestarted { false }
 		{ }
 
 		// Ares 0.A functions
