@@ -2,6 +2,7 @@
 
 #include <Utilities/EnumFunctions.h>
 #include <Ext/Techno/Body.h>
+#include <Ext/AnimType/Body.h>
 
 class TypeConvertGroup
 {
@@ -20,5 +21,7 @@ private:
 
 namespace TypeConvertHelper
 {
-	void Convert(FootClass* pTargetFoot, const std::vector<TypeConvertGroup>& convertPairs, HouseClass* pOwner);
+	typedef std::vector<std::tuple<ValueableVector<TechnoTypeClass*>, NullableIdx<TechnoTypeClass>, Nullable<AffectedHouse>>> ConvertPairs;
+
+	void Convert(FootClass* pTargetFoot, const std::vector<TypeConvertGroup>& convertPairs, HouseClass* pOwner, AnimTypeClass* pTypeAnim);
 }

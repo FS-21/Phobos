@@ -63,6 +63,7 @@ public:
 		std::vector<ValueableVector<int>> SW_Next_RandomWeightsData;
 
 		std::vector<TypeConvertGroup> Convert_Pairs;
+		Nullable<AnimTypeClass*> Convert_Anim;
 
 		Valueable<bool> TimerRestarted;
 		Valueable<bool> SW_FirstClickRestartsTimer;
@@ -107,6 +108,7 @@ public:
 			, SW_Next_RandomWeightsData {}
 			, ShowTimer_Priority { 0 }
 			, Convert_Pairs {}
+			, Convert_Anim {}
 			, ShowDesignatorRange { true }
 			, SW_FirstClickRestartsTimer { false }
 			, SW_FirstClickRestartsTimer_Cost { 0 }
