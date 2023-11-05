@@ -39,6 +39,8 @@ public:
 		Valueable<bool> OmniFire_TurnToTarget;
 		ValueableVector<WarheadTypeClass*> ExtraWarheads;
 		ValueableVector<int> ExtraWarheads_DamageOverrides;
+		Valueable<double> RandomTarget;
+		Valueable<bool> RandomTarget_Spawners_MultipleTargets;
 		Nullable<AnimTypeClass*> DelayedFire_Anim;
 		Nullable<AnimTypeClass*> DelayedFire_PostAnim;
 		Valueable<bool> DelayedFire_Anim_UseFLH;
@@ -65,6 +67,8 @@ public:
 			, OmniFire_TurnToTarget { false }
 			, ExtraWarheads {}
 			, ExtraWarheads_DamageOverrides {}
+			, RandomTarget { 0.0 }
+			, RandomTarget_Spawners_MultipleTargets { false }
 			, DelayedFire_Anim { }
 			, DelayedFire_PostAnim { }
 			, DelayedFire_Anim_UseFLH { true }

@@ -6,6 +6,7 @@
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
 #include <Utilities/Macro.h>
+#include <Utilities/EnumFunctions.h>
 #include <New/Entity/ShieldClass.h>
 #include <New/Entity/LaserTrailClass.h>
 
@@ -38,6 +39,8 @@ public:
 		CDTimerClass DeployFireTimer;
 		bool ForceFullRearmDelay;
 		int WHAnimRemainingCreationInterval;
+		AbstractClass* OriginalTarget;
+		TechnoClass* CurrentRandomTarget;
 		bool DelayedFire_Charging;
 		bool DelayedFire_Charged;
 		AnimClass* DelayedFire_Anim;
@@ -68,6 +71,8 @@ public:
 			, DeployFireTimer {}
 			, ForceFullRearmDelay { false }
 			, WHAnimRemainingCreationInterval { 0 }
+			, OriginalTarget { nullptr }
+			, CurrentRandomTarget { nullptr }
 			, DelayedFire_Charging { false }
 			, DelayedFire_Charged { false }
 			, DelayedFire_Anim { nullptr }
@@ -89,6 +94,7 @@ public:
 		void InitializeLaserTrails();
 		void UpdateMindControlAnim();
 		void UpdateDelayFire();
+		void RefreshRandomTargets();
 
 		virtual ~ExtData() override;
 
@@ -97,6 +103,8 @@ public:
 			AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
 			AnnounceInvalidPointer(DelayedFire_Anim, ptr);
 			AnnounceInvalidPointer(DelayedFire_PostAnim, ptr);
+			AnnounceInvalidPointer(CurrentRandomTarget, ptr);
+			AnnounceInvalidPointer(OriginalTarget, ptr);
 		}
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
@@ -160,6 +168,8 @@ public:
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
 	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
+	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
+	static TechnoClass* GetRandomTarget(TechnoClass* pThis = nullptr);
 
 	// WeaponHelpers.cpp
 	static int PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback = true, bool allowAAFallback = true);
