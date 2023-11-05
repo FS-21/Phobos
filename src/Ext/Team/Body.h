@@ -103,6 +103,9 @@ public:
 		bool AbortActionAfterKilling;
 		bool ConditionalJump_EnabledKillsCount;
 		bool ConditionalJump_ResetVariablesIfJump;
+		int AngerNodeModifier;
+		bool OnlyTargetHouseEnemy;
+		int OnlyTargetHouseEnemyMode;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -127,6 +130,9 @@ public:
 			, ConditionalJump_Index { -1000000 }
 			, ConditionalJump_EnabledKillsCount { false }
 			, ConditionalJump_ResetVariablesIfJump { false }
+			, AngerNodeModifier { 5000 }
+			, OnlyTargetHouseEnemy { false }
+			, OnlyTargetHouseEnemyMode { -1 }
 		{ }
 
 		virtual ~ExtData() = default;
