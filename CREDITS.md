@@ -131,6 +131,7 @@ This page lists all the individual contributions to the project by their author.
   - Delayed fire animation
   - Script actions for manipulating script flows with conditional jumps
   - `Burst.Retarget` for projectile retargeting
+  - Customizable disguised target evaluation behaviour in new ScriptType attack actions
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

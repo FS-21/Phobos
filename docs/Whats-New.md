@@ -351,6 +351,7 @@ New:
 - Delayed fire animation (by FS-21)
 - Script actions for manipulating script flows with conditional jumps (by FS-21)
 - `Burst.Retarget` for assigning a new target in each projectile (by FS-21)
+- Customizable disguised target evaluation behaviour in new ScriptType attack actions (by FS-21)
 
 Vanilla fixes:
 - Allow AI to repair structures built from base nodes/trigger action 125/SW delivery in single player missions (by Trsdy)
