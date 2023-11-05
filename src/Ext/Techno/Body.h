@@ -53,6 +53,12 @@ public:
 		// as neither is guaranteed to point to the house the TechnoClass had prior to entering transport and cannot be safely overridden.
 		HouseClass* OriginalPassengerOwner;
 
+		int	WebbyDurationCountDown;
+		CDTimerClass WebbyDurationTimer;
+		AnimClass* WebbyAnim;
+		AbstractClass* WebbyLastTarget;
+		Mission WebbyLastMission;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -71,6 +77,11 @@ public:
 			, DeployFireTimer {}
 			, ForceFullRearmDelay { false }
 			, WHAnimRemainingCreationInterval { 0 }
+			, WebbyDurationCountDown { -1 }
+			, WebbyDurationTimer {}
+			, WebbyAnim { nullptr }
+			, WebbyLastTarget { nullptr }
+			, WebbyLastMission { Mission::Sleep }
 			, OriginalTarget { nullptr }
 			, CurrentRandomTarget { nullptr }
 			, DelayedFire_Charging { false }
@@ -93,6 +104,7 @@ public:
 		void UpdateLaserTrails();
 		void InitializeLaserTrails();
 		void UpdateMindControlAnim();
+		void WebbyUpdate();
 		void UpdateDelayFire();
 		void RefreshRandomTargets();
 
@@ -101,6 +113,7 @@ public:
 		virtual void InvalidatePointer(void* ptr, bool bRemoved) override
 		{
 			AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
+			AnnounceInvalidPointer(WebbyLastTarget, ptr);
 			AnnounceInvalidPointer(DelayedFire_Anim, ptr);
 			AnnounceInvalidPointer(DelayedFire_PostAnim, ptr);
 			AnnounceInvalidPointer(CurrentRandomTarget, ptr);
@@ -168,6 +181,7 @@ public:
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
 	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
+	static void WebbyUpdate(TechnoClass* pThis);
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* GetRandomTarget(TechnoClass* pThis = nullptr);
 
