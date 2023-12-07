@@ -410,6 +410,7 @@ Vanilla fixes:
 - `EMPulseCannon=yes` building weapons now respect `Floater` and Phobos-added `Gravity` setting (by Starkku)
 - Fixed position and layer of info tip and reveal production cameo on selected building (by Belonit)
 - Fixed `TurretOffset` to be supported for SHP vehicles (by TwinkleStar)
+- New `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
 - Reset timer tags for SW (by FS-21)
 - Map event `There are no technos of the specified houses list` (by FS-21)
 

@@ -45,6 +45,7 @@ void ShieldTypeClass::LoadFromINI(CCINIClass* pINI)
 
 	this->SelfHealing_RestartInCombat.Read(exINI, pSection, "SelfHealing.RestartInCombat");
 	this->SelfHealing_RestartInCombatDelay.Read(exINI, pSection, "SelfHealing.RestartInCombatDelay");
+	this->SelfHealing_EnabledBy.Read(exINI, pSection, "SelfHealing.EnabledBy");
 
 	this->AbsorbOverDamage.Read(exINI, pSection, "AbsorbOverDamage");
 	this->BracketDelta.Read(exINI, pSection, "BracketDelta");
@@ -70,6 +71,7 @@ void ShieldTypeClass::LoadFromINI(CCINIClass* pINI)
 	this->Pips_Background.Read(exINI, pSection, "Pips.Background");
 	this->Pips_Building.Read(exINI, pSection, "Pips.Building");
 	this->Pips_Building_Empty.Read(exINI, pSection, "Pips.Building.Empty");
+	this->Pips_HideIfNoStrength.Read(exINI, pSection, "Pips.HideIfNoStrength");
 
 	this->ImmuneToBerserk.Read(exINI, pSection, "ImmuneToBerserk");
 	this->ImmuneToCrit.Read(exINI, pSection, "ImmuneToCrit");
@@ -90,6 +92,7 @@ void ShieldTypeClass::Serialize(T& Stm)
 		.Process(this->SelfHealing_Rate)
 		.Process(this->SelfHealing_RestartInCombat)
 		.Process(this->SelfHealing_RestartInCombatDelay)
+		.Process(this->SelfHealing_EnabledBy)
 		.Process(this->AbsorbOverDamage)
 		.Process(this->BracketDelta)
 		.Process(this->ReceivedDamage_Minimum)
@@ -107,6 +110,7 @@ void ShieldTypeClass::Serialize(T& Stm)
 		.Process(this->Pips_Background)
 		.Process(this->Pips_Building)
 		.Process(this->Pips_Building_Empty)
+		.Process(this->Pips_HideIfNoStrength)
 		.Process(this->ImmuneToBerserk)
 		.Process(this->ImmuneToCrit)
 		;
