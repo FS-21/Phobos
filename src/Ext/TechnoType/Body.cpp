@@ -420,6 +420,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->ConsideredSecretLabTech.Read(exINI, pSection, "ConsideredSecretLabTech");
 
 	// Secret.RequiredHouses contains a list of HouseTypeClass indexes
+	this->Secret_RequiredHouses.clear();
 	const char* key = "SecretLab.RequiredHouses";
 	char* context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
@@ -433,6 +434,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	key = nullptr;
 
 	// Secret.ForbiddenHouses contains a list of HouseTypeClass indexes
+	this->Secret_ForbiddenHouses.clear();
 	key = "SecretLab.ForbiddenHouses";
 	context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
@@ -537,7 +539,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 				}
 			}
 
-			Prerequisite_ListVector.push_back(objectsList);
+			this->Prerequisite_ListVector.push_back(objectsList);
 			objectsList.Clear();
 		}
 	}
