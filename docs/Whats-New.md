@@ -410,9 +410,9 @@ Vanilla fixes:
 - `EMPulseCannon=yes` building weapons now respect `Floater` and Phobos-added `Gravity` setting (by Starkku)
 - Fixed position and layer of info tip and reveal production cameo on selected building (by Belonit)
 - Fixed `TurretOffset` to be supported for SHP vehicles (by TwinkleStar)
-- New `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
-- Reset timer tags for SW (by FS-21)
-- Map event `There are no technos of the specified houses list` (by FS-21)
+- `Powered`/`PoweredSpecial` buildings' powered anims will update as usual when being captured by enemies (by Trsdy)
+- Fixed a glitch related to incorrect target setting for missiles (by Belonit)
+- Skipped parsing `[Header]` section of compaign maps which led to occasional crashes on Linux (by Trsdy)
 
 Phobos fixes:
 - Fixed a few errors of calling for superweapon launch by `LaunchSW` or building infiltration (by Trsdy)
@@ -442,6 +442,7 @@ Phobos fixes:
 - Fixed a typo in weapon selector code causing issues with `NoAmmoWeapon` and related checks (by Starkku)
 - Fixed `DetonateOnAllMapObjects` behaving erratically or potentially crashing if it destroys buildings using Ares' advanced rubble (by Starkku)
 - Fixed game crashing on loading save games if the saved game state had active radiation sites (by Starkku)
+- Fixed a desync error caused by air/top layer sorting (by Starkku)
 
 Fixes / interactions with other extensions:
 - All forms of type conversion (including Ares') now correctly update `OpenTopped` state of passengers in transport that is converted (by Starkku)

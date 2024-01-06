@@ -22,6 +22,7 @@ This page lists all the individual contributions to the project by their author.
   - Building Placement Preview Adjustment
   - Check for Changelog/Documentation/Credits in Pull Requests
   - Fix position and layer of info tip and reveal production cameo on selected building
+  - Fix a glitch related to incorrect target setting for missiles
 - **Kerbiter (Metadorius)**:
   - SHP debris respect `Shadow` fix
   - Building upgrades enhancement
@@ -293,7 +294,9 @@ This page lists all the individual contributions to the project by their author.
    - Remove sound events when mind-controlled vehicles deploy into buildings or when buildings considered as vehicles get captured
    - Building LightSource tint S/L fix
    - Permanent healthbar display on units targeted by temporal weapons fix
+   - Powered anims on buildings cease playing upon capture by different house fix
    - TechnoType conversion placeholder
+   - EIP 00529A14 crash fix on Linux 
    - Misc code refactor & maintenance, CN doc fixes, bugfixes
 - **FlyStar**
    - Campaign load screen PCX support

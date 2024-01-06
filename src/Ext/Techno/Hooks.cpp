@@ -99,16 +99,6 @@ DEFINE_HOOK(0x4DBF13, FootClass_SetOwningHouse, 0x6)
 	return 0;
 }
 
-DEFINE_HOOK(0x4483C0, BuildingClass_SetOwningHouse_MuteSound, 0x6)
-{
-	GET(BuildingClass* const, pThis, ESI);
-	REF_STACK(bool, announce, STACK_OFFSET(0x60, 0x8));
-
-	announce = announce && !pThis->Type->IsVehicle();
-
-	return 0;
-}
-
 DEFINE_HOOK_AGAIN(0x7355C0, TechnoClass_Init_InitialStrength, 0x6) // UnitClass_Init
 DEFINE_HOOK_AGAIN(0x517D69, TechnoClass_Init_InitialStrength, 0x6) // InfantryClass_Init
 DEFINE_HOOK_AGAIN(0x442C7B, TechnoClass_Init_InitialStrength, 0x6) // BuildingClass_Init
@@ -516,7 +506,7 @@ DEFINE_HOOK(0x70EFE0, TechnoClass_GetMaxSpeed, 0x6)
 	return SkipGameCode;
 }
 
-#pragma region Fly_Layer_Update
+#pragma region Fly Layer Update
 
 // Update attached anim layers after parent unit changes layer.
 void __fastcall DisplayClass_Submit_Wrapper(DisplayClass* pThis, void* _, ObjectClass* pObject)
