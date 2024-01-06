@@ -69,6 +69,8 @@ bool TActionExt::Execute(TActionClass* pThis, HouseClass* pHouse, ObjectClass* p
 
 	case PhobosTriggerAction::ToggleMCVRedeploy:
 		return TActionExt::ToggleMCVRedeploy(pThis, pHouse, pObject, pTrigger, location);
+	case PhobosTriggerAction::PrintDebugLine:
+		return TActionExt::PrintDebugLine(pThis, pHouse, pObject, pTrigger, location);
 
 	default:
 		bHandled = false;
@@ -437,6 +439,17 @@ bool TActionExt::RunSuperWeaponAt(TActionClass* pThis, int X, int Y)
 bool TActionExt::ToggleMCVRedeploy(TActionClass* pThis, HouseClass* pHouse, ObjectClass* pObject, TriggerClass* pTrigger, CellStruct const& location)
 {
 	GameModeOptionsClass::Instance->MCVRedeploy = pThis->Param3 != 0;
+	return true;
+}
+
+bool TActionExt::PrintDebugLine(TActionClass* pThis, HouseClass* pHouse, ObjectClass* pObject, TriggerClass* pTrigger, CellStruct const& location)
+{
+	if (!pThis)
+		return true;
+
+	int nValue = pThis->Param6;
+	Debug::Log("===> Action Debug value: %d\n", nValue);
+
 	return true;
 }
 
