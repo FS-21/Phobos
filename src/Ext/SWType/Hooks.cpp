@@ -93,7 +93,7 @@ DEFINE_HOOK(0x6AAEAC, SuperClass_Place_ResetTimer, 0x6)
 	if (!pTypeData)
 		return 0;
 
-	if (!pSuper->IsCharged)
+	if (!pSuper->IsReady)
 		return 0;
 
 	if (!pTypeData->SW_FirstClickRestartsTimer)
@@ -139,7 +139,7 @@ DEFINE_HOOK(0x6CBD13, SuperClass_Place_ResetTimer_AutoFire, 0x6)
 	if (!pTypeData)
 		return 0;
 
-	if (!pSuper->IsCharged)
+	if (!pSuper->IsReady)
 		return 0;
 
 	if (!pTypeData->SW_FirstClickRestartsTimer)
@@ -178,7 +178,7 @@ DEFINE_HOOK(0x6CBCD4, SuperClass_AI_ResetTimer_Update, 0x5)
 	if (!pTypeData)
 		return 0;
 
-	if (pTypeData->SW_FirstClickRestartsTimer && pExt->TimerRestarted && !pSuper->Granted)
+	if (pTypeData->SW_FirstClickRestartsTimer && pExt->TimerRestarted && !pSuper->IsPresent)
 	{
 		pExt->TimerRestarted = false;
 
