@@ -46,6 +46,8 @@ public:
 		Valueable<bool> DelayedFire_Anim_UseFLH;
 		Valueable<int> DelayedFire_Duration;
 		Valueable<bool> DelayedFire_Suicide;
+		Nullable<WarheadTypeClass*> AmbientDamage_Warhead;
+		Valueable<bool> AmbientDamage_IgnoreTarget;
 
 		ExtData(WeaponTypeClass* OwnerObject) : Extension<WeaponTypeClass>(OwnerObject)
 			, DiskLaser_Radius { DiskLaserClass::Radius }
@@ -74,6 +76,8 @@ public:
 			, DelayedFire_Anim_UseFLH { true }
 			, DelayedFire_Duration { 0 }
 			, DelayedFire_Suicide { false }
+			, AmbientDamage_Warhead {}
+			, AmbientDamage_IgnoreTarget { false }
 		{ }
 
 		int GetBurstDelay(int burstIndex);

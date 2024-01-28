@@ -44,7 +44,7 @@ void WeaponTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->Bolt_Arcs.Read(exINI, pSection, "Bolt.Arcs");
 
-	this->RadType.Read(exINI, pSection, "RadType", true);
+	this->RadType.Read<true>(exINI, pSection, "RadType");
 
 	this->Strafing_Shots.Read(exINI, pSection, "Strafing.Shots");
 	this->Strafing_SimulateBurst.Read(exINI, pSection, "Strafing.SimulateBurst");
@@ -53,7 +53,7 @@ void WeaponTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Burst_Delays.Read(exINI, pSection, "Burst.Delays");
 	this->Burst_FireWithinSequence.Read(exINI, pSection, "Burst.FireWithinSequence");
 	this->AreaFire_Target.Read(exINI, pSection, "AreaFire.Target");
-	this->FeedbackWeapon.Read(exINI, pSection, "FeedbackWeapon", true);
+	this->FeedbackWeapon.Read<true>(exINI, pSection, "FeedbackWeapon");
 	this->Laser_IsSingleColor.Read(exINI, pSection, "IsSingleColor");
 	this->ROF_RandomDelay.Read(exINI, pSection, "ROF.RandomDelay");
 	this->OmniFire_TurnToTarget.Read(exINI, pSection, "OmniFire.TurnToTarget");
@@ -66,6 +66,8 @@ void WeaponTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->DelayedFire_Anim_UseFLH.Read(exINI, pSection, "DelayedFire.Anim.UseFLH");
 	this->DelayedFire_Duration.Read(exINI, pSection, "DelayedFire.Duration");
 	this->DelayedFire_Suicide.Read(exINI, pSection, "DelayedFire.Suicide");
+	this->AmbientDamage_Warhead.Read(exINI, pSection, "AmbientDamage.Warhead");
+	this->AmbientDamage_IgnoreTarget.Read(exINI, pSection, "AmbientDamage.IgnoreTarget");
 }
 
 template <typename T>
@@ -98,6 +100,8 @@ void WeaponTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DelayedFire_Anim_UseFLH)
 		.Process(this->DelayedFire_Duration)
 		.Process(this->DelayedFire_Suicide)
+		.Process(this->AmbientDamage_Warhead)
+		.Process(this->AmbientDamage_IgnoreTarget)
 		;
 };
 
