@@ -472,7 +472,7 @@ bool TechnoExt::UpdateRandomTarget(TechnoClass* pThis)
 	if (pExt->CurrentRandomTarget && ScriptExt::IsUnitAvailable(pExt->CurrentRandomTarget, false) && pThis->SpawnManager)
 		return false;
 
-	if (!pThis->Target || !ScriptExt::IsUnitAvailable(abstract_cast<TechnoClass*>(pExt->OriginalTarget), false))
+	if (!pThis->Target || (pExt->OriginalTarget && !ScriptExt::IsUnitAvailable(abstract_cast<TechnoClass*>(pExt->OriginalTarget), false)))
 	{
 		pExt->OriginalTarget = nullptr;
 		pThis->Target = nullptr;

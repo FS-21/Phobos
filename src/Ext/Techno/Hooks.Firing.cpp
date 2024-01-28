@@ -880,6 +880,18 @@ DEFINE_HOOK(0x736F61, UnitClass_FiringAI_BurstRandomTarget_Setup, 0x6)
 {
 	GET(TechnoClass*, pThis, ESI);
 
+	if (!pThis->Target)
+		return 0;
+
+	int weaponIndex = pThis->SelectWeapon(pThis->Target);
+	auto pWeapon = pThis->GetWeapon(weaponIndex)->WeaponType;
+	if (!pWeapon)
+		return 0;
+
+	const auto pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
+	if (!pWeaponExt || pWeaponExt->RandomTarget <= 0.0)
+		return 0;
+
 	TechnoExt::UpdateRandomTarget(pThis);
 
 	return 0;
@@ -888,6 +900,18 @@ DEFINE_HOOK(0x736F61, UnitClass_FiringAI_BurstRandomTarget_Setup, 0x6)
 DEFINE_HOOK(0x4D4E8A, FootClass_FiringAI_BurstRandomTarget_Setup, 0x6)
 {
 	GET(TechnoClass*, pThis, ESI);
+
+	if (!pThis->Target)
+		return 0;
+
+	int weaponIndex = pThis->SelectWeapon(pThis->Target);
+	auto pWeapon = pThis->GetWeapon(weaponIndex)->WeaponType;
+	if (!pWeapon)
+		return 0;
+
+	const auto pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
+	if (!pWeaponExt || pWeaponExt->RandomTarget <= 0.0)
+		return 0;
 
 	TechnoExt::UpdateRandomTarget(pThis);
 
@@ -898,14 +922,23 @@ DEFINE_HOOK(0x44AFF8, BuildingClass_FireAt_BurstRandomTarget_Setup, 0x6)
 {
 	GET(TechnoClass*, pThis, ESI);
 
+	if (!pThis->Target)
+		return 0;
+
+	int weaponIndex = pThis->SelectWeapon(pThis->Target);
+	auto pWeapon = pThis->GetWeapon(weaponIndex)->WeaponType;
+	if (!pWeapon)
+		return 0;
+
+	const auto pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
+	if (!pWeaponExt || pWeaponExt->RandomTarget <= 0.0)
+		return 0;
+
 	auto pOriginalTarget = pThis->Target;
 
 	TechnoExt::UpdateRandomTarget(pThis);
 
-	int weaponIndex = pThis->SelectWeapon(pThis->Target);
-	auto pWeapon = pThis->GetWeapon(weaponIndex)->WeaponType;
-
-	if (!pWeapon || pWeapon->IsLaser || pWeapon->Spawner)
+	if (pWeapon->IsLaser || pWeapon->Spawner)
 		return 0;
 
 	if (pThis->Target)
