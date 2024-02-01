@@ -476,6 +476,7 @@ bool TechnoExt::UpdateRandomTarget(TechnoClass* pThis)
 	{
 		pExt->OriginalTarget = nullptr;
 		pThis->Target = nullptr;
+
 		return false;
 	}
 
@@ -491,7 +492,7 @@ bool TechnoExt::UpdateRandomTarget(TechnoClass* pThis)
 		return false;
 	}
 
-	if (!pThis->Target)
+	if (!pThis->Target || !ScriptExt::IsUnitAvailable(abstract_cast<TechnoClass*>(pThis->Target), false))
 		return false;
 
 	if (pThis->DistanceFrom(pExt->OriginalTarget) > pWeapon->Range)
@@ -565,7 +566,7 @@ TechnoClass* TechnoExt::GetRandomTarget(TechnoClass* pThis)
 {
 	TechnoClass* selection = nullptr;
 
-	if (!pThis && !pThis->Target)
+	if (!pThis || !pThis->Target)
 		return selection;
 
 	int weaponIndex = pThis->SelectWeapon(pThis->Target);
@@ -599,7 +600,8 @@ TechnoClass* TechnoExt::GetRandomTarget(TechnoClass* pThis)
 	// Looking for all valid targeting candidates
 	for (auto pCandidate : *TechnoClass::Array)
 	{
-		if (pCandidate == pThis
+		if (!pCandidate
+			|| pCandidate == pThis
 			|| !ScriptExt::IsUnitAvailable(pCandidate, true)
 			|| pThisType->Immune
 			|| !EnumFunctions::IsTechnoEligible(pCandidate, pWeaponExt->CanTarget, true)
