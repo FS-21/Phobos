@@ -43,6 +43,10 @@ public:
 		// as neither is guaranteed to point to the house the TechnoClass had prior to entering transport and cannot be safely overridden.
 		HouseClass* OriginalPassengerOwner;
 
+		AnimClass* DeployAnim;
+		bool Convert_UniversalDeploy_InProgress;
+		bool Convert_UniversalDeploy_MakeInvisible;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -61,6 +65,10 @@ public:
 			, DeployFireTimer {}
 			, ForceFullRearmDelay { false }
 			, WHAnimRemainingCreationInterval { 0 }
+
+			, DeployAnim { nullptr }
+			, Convert_UniversalDeploy_InProgress { false }
+			, Convert_UniversalDeploy_MakeInvisible { false }
 		{ }
 
 		void ApplyInterceptor();
@@ -157,4 +165,9 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, BuildingSelectBracketPosition bracketPosition);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue);
+
+	static TechnoClass* UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pNewTechnoType);
+	static void StartUniversalDeployAnim(TechnoClass* pThis);
+	static void UpdateUniversalDeploy(TechnoClass* pThis);
+	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
 };

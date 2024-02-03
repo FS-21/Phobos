@@ -404,6 +404,37 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	{
 		this->InterceptorType.reset();
 	}
+
+	this->Convert_UniversalDeploy.Read(exINI, pSection, "Convert.UniversalDeploy");
+	this->Convert_DeployToLand.Read(exINI, pSection, "Convert.DeployToLand");
+	this->Convert_AnimFX.Read(exINI, pSection, "Convert.AnimFX");
+	this->Convert_AnimFX_FollowDeployer.Read(exINI, pSection, "Convert.AnimFX.FollowDeployer");
+	this->Convert_DeployingAnim.Read(exINI, pSection, "Convert.DeployingAnim");
+	this->Convert_DeploySound.Read(exINI, pSection, "Convert.DeploySound");
+	this->Convert_DeployDir.Read(exINI, pSection, "Convert.DeployDir");
+	this->Convert_TransferPassengers.Read(exINI, pSection, "Convert.TransferPassengers");
+	this->Convert_TransferPassengers_IgnoreInvalidOccupiers.Read(exINI, pSection, "Convert.TransferPassengers.IgnoreInvalidOccupiers");
+	this->Convert_TransferVeterancy.Read(exINI, pSection, "Convert.TransferVeterancy");
+
+
+
+	if (this->Convert_UniversalDeploy.size() > 0 && !pThis->UndeploysInto)
+	{
+		for (auto techno : *TechnoTypeClass::Array)
+		{
+			if (techno->WhatAmI() == AbstractType::UnitType)
+			{
+				/* Note:
+				"Building into vehicle" logic uses UndeploysInto for creating a new unit at the end.
+				Every mod have units in [VehicleTypes], so this hack uses the first object of
+				that vehicles list for making this possible.
+				Now we can undeploy the structure clicking in any valid part of the map.
+				*/
+				pThis->UndeploysInto = static_cast<UnitTypeClass*>(techno);
+				break;
+			}
+		}
+	}
 }
 
 template <typename T>
@@ -569,6 +600,17 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 
 		.Process(this->SpawnDistanceFromTarget)
 		.Process(this->SpawnHeight)
+
+		.Process(this->Convert_UniversalDeploy)
+		.Process(this->Convert_DeployToLand)
+		.Process(this->Convert_AnimFX)
+		.Process(this->Convert_AnimFX_FollowDeployer)
+		.Process(this->Convert_DeployingAnim)
+		.Process(this->Convert_DeploySound)
+		.Process(this->Convert_DeployDir)
+		.Process(this->Convert_TransferPassengers)
+		.Process(this->Convert_TransferPassengers_IgnoreInvalidOccupiers)
+		.Process(this->Convert_TransferVeterancy)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)
