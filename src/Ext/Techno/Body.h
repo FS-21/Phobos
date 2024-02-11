@@ -97,6 +97,10 @@ public:
 		AbstractClass* WebbyLastTarget;
 		Mission WebbyLastMission;
 
+		AnimClass* DeployAnim;
+		bool Convert_UniversalDeploy_InProgress;
+		bool Convert_UniversalDeploy_MakeInvisible;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -130,6 +134,9 @@ public:
 			, DelayedFire_Duration { -1 }
 			, DelayedFire_WeaponIndex { -1 }
 			, DelayedFire_DurationTimer {}
+			, DeployAnim { nullptr }
+			, Convert_UniversalDeploy_InProgress { false }
+			, Convert_UniversalDeploy_MakeInvisible { false }
 		{ }
 
 		void ApplyInterceptor();
@@ -218,7 +225,7 @@ public:
 	static bool AllowedTargetByZone(TechnoClass* pThis, TechnoClass* pTarget, TargetZoneScanType zoneScanType, WeaponTypeClass* pWeapon = nullptr, bool useZone = false, int zone = -1);
 	static void UpdateAttachedAnimLayers(TechnoClass* pThis);
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
-	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
+	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false, BuildingTypeClass* pBuildingType = nullptr);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
 	static void WebbyUpdate(TechnoClass* pThis);
@@ -238,4 +245,9 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, BuildingSelectBracketPosition bracketPosition);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue);
+
+	static TechnoClass* UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pNewTechnoType = nullptr);
+	static void StartUniversalDeployAnim(TechnoClass* pThis);
+	static void UpdateUniversalDeploy(TechnoClass* pThis);
+	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
 };

@@ -229,6 +229,17 @@ public:
 		Valueable<int> Prerequisite_Lists;
 		std::vector<DynamicVectorClass<int>> Prerequisite_ListVector;
 
+		ValueableVector<TechnoTypeClass*> Convert_UniversalDeploy;
+		Valueable<bool> Convert_DeployToLand;
+		Nullable<AnimTypeClass*> Convert_AnimFX;
+		Valueable<bool> Convert_AnimFX_FollowDeployer;
+		Nullable<AnimTypeClass*> Convert_DeployingAnim;
+		NullableIdx<VocClass> Convert_DeploySound;
+		Valueable<int> Convert_DeployDir;
+		Valueable<bool> Convert_TransferPassengers;
+		Valueable<bool> Convert_TransferPassengers_IgnoreInvalidOccupiers;
+		Valueable<bool> Convert_TransferVeterancy;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, UIDescription {}
@@ -395,6 +406,17 @@ public:
 			, Webby_Duration { 0 }
 			, Webby_DurationVariation { 0 }
 			, DetectDisguise_Percent {}
+
+			, Convert_UniversalDeploy {}
+			, Convert_DeployToLand { false }
+			, Convert_AnimFX {}
+			, Convert_AnimFX_FollowDeployer { false }
+			, Convert_DeployingAnim {}
+			, Convert_DeploySound {}
+			, Convert_DeployDir { RulesClass::Instance->DeployDir }
+			, Convert_TransferPassengers { true }
+			, Convert_TransferPassengers_IgnoreInvalidOccupiers { false }
+			, Convert_TransferVeterancy { true }
 		{ }
 
 		virtual ~ExtData() = default;
