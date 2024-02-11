@@ -127,18 +127,16 @@ DEFINE_HOOK(0x740134, UnitClass_WhatAction_Grinding, 0x0)
 		}
 	}
 
-	// Show the deploy icon in units with UniversalDeploy logic
-	if (auto pTechno = abstract_cast<TechnoClass*>(pThis))
-	{
-		if (pTechno == pTarget)
-		{
-			if (auto pTypeExt = TechnoTypeExt::ExtMap.Find(pTechno->GetTechnoType()))
-			{
-				if (pTypeExt->Convert_UniversalDeploy.size() > 0)
-					R->EBX(Action::Self_Deploy);
-			}
-		}
-	}
+	// Show the deploy icon when the cursor is over one selected unit with this UniversalDeploy logic
+	auto const pTechno = abstract_cast<TechnoClass*>(pThis);
+	if (!pTechno || pTechno != pTarget)
+		return Continue;
+
+	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pTechno->GetTechnoType());
+	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
+		return Continue;
+
+	R->EBX(Action::Self_Deploy);
 
 	return Continue;
 }
