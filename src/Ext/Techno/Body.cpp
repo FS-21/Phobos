@@ -317,12 +317,13 @@ bool TechnoExt::ConvertToType(FootClass* pThis, TechnoTypeClass* pToType)
 }
 
 // Checks if vehicle can deploy into a building at its current location. If unit has no DeploysInto set returns noDeploysIntoDefaultValue (def = false) instead.
-bool TechnoExt::CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue)
+// If a building is specified then it will be used by default.
+bool TechnoExt::CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue, BuildingTypeClass* pBuildingType)
 {
 	if (!pThis)
 		return false;
 
-	auto const pDeployType = pThis->Type->DeploysInto;
+	auto const pDeployType = !pBuildingType ? pThis->Type->DeploysInto : pBuildingType;
 
 	if (!pDeployType)
 		return noDeploysIntoDefaultValue;
@@ -537,7 +538,9 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	}
 }
 
-TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pNewTechnoType = nullptr)
+// This method transfer all settings from the old object to the new.
+// If a new object isn't defined then it will be picked from a list.
+TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pNewTechnoType)
 {
 	if (!pThis)
 		return nullptr;
@@ -550,14 +553,16 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pN
 	if (!pOldTechnoTypeExt)
 		return nullptr;
 
-	auto newLocation = pThis->Location;
 	auto pOldTechno = pThis;
+	auto newLocation = pOldTechno->Location;
 
+	// If the new object isn't defined then it will be picked from a list
 	if (!pNewTechnoType)
 	{
 		if (pOldTechnoTypeExt->Convert_UniversalDeploy.size() > 0)
 		{
 			// TO-DO: having multiple deploy candidate IDs it should pick randomly from the list
+			// Probably a new tag should enable this random behaviour...
 			int index = 0; //ScenarioClass::Instance->Random.RandomRanged(0, pOldTechnoTypeExt->Convert_UniversalDeploy.size() - 1);
 			pNewTechnoType = pOldTechnoTypeExt->Convert_UniversalDeploy.at(index);
 		}
@@ -567,23 +572,29 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pN
 		}
 	}
 
+	auto pOldTechnoExt = TechnoExt::ExtMap.Find(pOldTechno);
+
 	// The "Infantry -> Vehicle" case we need to check if the cell is free of soldiers
-	if (pOldTechnoType->WhatAmI() != AbstractType::Building && pNewTechnoType->WhatAmI() != AbstractType::Building)
+	if (pOldTechnoType->WhatAmI() != AbstractType::Building
+		&& pNewTechnoType->WhatAmI() != AbstractType::Building)
 	{
-		int nObjects = 0;
+		int nObjectsInCell = 0;
 
 		for (auto pObject = pOldTechno->GetCell()->FirstObject; pObject; pObject = pObject->NextObject)
 		{
 			auto const pItem = static_cast<TechnoClass*>(pObject);
 
 			if (pItem && pItem != pOldTechno)
-				nObjects++;
+				nObjectsInCell++;
 		}
 
-		if (nObjects > 0)
+		if (nObjectsInCell > 0)
 		{
+			pOldTechnoExt->Convert_UniversalDeploy_InProgress = false;
+			pThis->IsFallingDown = false;
 			CoordStruct loc = CoordStruct::Empty;
 			pOldTechno->Scatter(loc, true, false);
+
 			return nullptr;
 		}
 	}
@@ -592,10 +603,20 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pN
 	auto pNewTechno = static_cast<TechnoClass*>(pNewTechnoType->CreateObject(pOwner));
 
 	if (!pNewTechno)
+	{
+		pOldTechnoExt->Convert_UniversalDeploy_InProgress = false;
+		pThis->IsFallingDown = false;
+		//CoordStruct loc = CoordStruct::Empty;
+		//pOldTechno->Scatter(loc, true, false);
+
 		return nullptr;
+	}
+
+	auto pNewTechnoExt = TechnoExt::ExtMap.Find(pNewTechno);
 
 	// Transfer enemies target (part 1/2)
 	DynamicVectorClass<TechnoClass*> enemiesTargetingMeList;
+
 	for (auto pEnemy : *TechnoClass::Array)
 	{
 		if (pEnemy->Target == pOldTechno)
@@ -609,9 +630,6 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pN
 	pNewTechno->EstimatedHealth = pNewTechno->Health;
 
 	// Shield update
-	auto pOldTechnoExt = TechnoExt::ExtMap.Find(pOldTechno);
-	auto pNewTechnoExt = TechnoExt::ExtMap.Find(pNewTechno);
-
 	if (pOldTechnoExt && pNewTechnoExt)
 	{
 		if (auto pOldShieldData = pOldTechnoExt->Shield.get())
@@ -693,7 +711,11 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pN
 	// Some vodoo magic
 	pOldTechno->Limbo();
 
-	if (!pNewTechno->Unlimbo(newLocation, oldPrimaryFacingDir))
+	++Unsorted::IKnowWhatImDoing;
+	bool limboed = pNewTechno->Unlimbo(newLocation, oldPrimaryFacingDir);
+	--Unsorted::IKnowWhatImDoing;
+
+	if (!limboed)
 	{
 		// Abort operation, restoring old object
 		pOldTechno->Unlimbo(newLocation, oldPrimaryFacingDir);
@@ -702,8 +724,11 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pN
 		if (isSelected)
 			pOldTechno->Select();
 
-		if (auto pExt = TechnoExt::ExtMap.Find(pOldTechno))
-			pOldTechno->IsFallingDown = false;
+		//if (auto pExt = TechnoExt::ExtMap.Find(pOldTechno))
+			//pOldTechno->IsFallingDown = false;
+
+		pOldTechnoExt->Convert_UniversalDeploy_InProgress = false;
+		pOldTechno->IsFallingDown = false;
 
 		return nullptr;
 	}
@@ -711,6 +736,22 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pN
 	// Recover turret direction
 	if (pOldTechnoType->Turret && pNewTechnoType->Turret && !pNewTechnoType->TurretSpins)
 		pNewTechno->SecondaryFacing.SetCurrent(oldSecondaryFacing);
+	
+	// Inherit other stuff
+	pNewTechno->WasFallingDown = pOldTechno->WasFallingDown;
+	pNewTechno->WarpingOut = pOldTechno->WarpingOut;
+	pNewTechno->unknown_280 = pOldTechno->unknown_280; // sth related to teleport
+	pNewTechno->BeingWarpedOut = pOldTechno->BeingWarpedOut;
+	pNewTechno->Deactivated = pOldTechno->Deactivated;
+	pNewTechno->Flash(pOldTechno->Flashing.DurationRemaining);
+	pNewTechno->IdleActionTimer = pOldTechno->IdleActionTimer;
+	pNewTechno->ChronoLockRemaining = pOldTechno->ChronoLockRemaining;
+	pNewTechno->Berzerk = pOldTechno->Berzerk;
+	pNewTechno->BerzerkDurationLeft = pOldTechno->BerzerkDurationLeft;
+	pNewTechno->ChronoWarpedByHouse = pOldTechno->ChronoWarpedByHouse;
+	pNewTechno->EMPLockRemaining = pOldTechno->EMPLockRemaining;
+	pNewTechno->ShouldLoseTargetNow = pOldTechno->ShouldLoseTargetNow;
+	pNewTechno->SetOwningHouse(pOldTechno->GetOwningHouse(), false);// Is really necessary? the object was created with the final owner by default...
 
 	// Jumpjet tricks
 	if (pNewTechnoType->JumpJet || pNewTechnoType->BalloonHover)

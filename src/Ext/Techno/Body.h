@@ -149,7 +149,7 @@ public:
 	static bool AllowedTargetByZone(TechnoClass* pThis, TechnoClass* pTarget, TargetZoneScanType zoneScanType, WeaponTypeClass* pWeapon = nullptr, bool useZone = false, int zone = -1);
 	static void UpdateAttachedAnimLayers(TechnoClass* pThis);
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
-	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
+	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false, BuildingTypeClass* pBuildingType = nullptr);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
 
 	// WeaponHelpers.cpp
@@ -166,7 +166,7 @@ public:
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue);
 
-	static TechnoClass* UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pNewTechnoType);
+	static TechnoClass* UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pNewTechnoType = nullptr);
 	static void StartUniversalDeployAnim(TechnoClass* pThis);
 	static void UpdateUniversalDeploy(TechnoClass* pThis);
 	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
