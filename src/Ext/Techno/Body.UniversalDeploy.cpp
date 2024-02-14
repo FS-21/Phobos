@@ -608,6 +608,9 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 	// Transfer Iron Courtain effect, if applied
 	TechnoExt::SyncIronCurtainStatus(pOld, pNew);
 
+	// Transfer passengers/garrisoned units from old object to the new, if possible
+	TechnoExt::PassengersTransfer(pOld, pNew);
+
 	// Transfer parasite, if possible
 	if (auto const pOldFoot = abstract_cast<FootClass*>(pOld))
 	{
@@ -625,8 +628,7 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 		}
 	}
 
-	// Transfer passengers/garrisoned units from old object to the new, if possible
-	TechnoExt::PassengersTransfer(pOld, pNew);
+	// Transfer AttachEffect (Reminder: add a new tag) - TO-DO: There is a Phobos PR that I should support once is merged into develop branch
 
 	// If the object was selected it should remain selected
 	if (pOld->IsSelected)
