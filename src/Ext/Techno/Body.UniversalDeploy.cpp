@@ -180,6 +180,164 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 // This method transfer all settings from the old object to the new.
 // If a new object isn't defined then it will be picked from a list.
+TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pOld, TechnoTypeClass* pNewType)
+{
+	if (!pOld || !ScriptExt::IsUnitAvailable(pOld, false))
+		return nullptr;
+
+	auto pOldExt = TechnoExt::ExtMap.Find(pOld); // I'll consider this never gets nullptr
+
+	auto pOldType = pOld->GetTechnoType();
+	if (!pOldType)
+		return nullptr;
+
+	auto pOldTypeExt = TechnoTypeExt::ExtMap.Find(pOldType);
+
+	// If the new object isn't defined then it will be picked from a list
+	if (!pNewType)
+	{
+		if (pOldTypeExt->Convert_UniversalDeploy.size() == 0)
+			return nullptr;
+
+		// TO-DO: having multiple deploy candidate IDs it should pick randomly from the list
+		// Probably a new tag should enable this random behaviour...
+		int index = 0; //ScenarioClass::Instance->Random.RandomRanged(0, pOldTechnoTypeExt->Convert_UniversalDeploy.size() - 1);
+		pNewType = pOldTypeExt->Convert_UniversalDeploy.at(index);
+	}
+
+	auto pNewTypeExt = TechnoTypeExt::ExtMap.Find(pNewType); // I'll consider this never gets nullptr
+	auto newLocation = pOld->Location;
+	auto const pOwner = pOld->Owner;
+
+	bool isOldBuilding = pOldType->WhatAmI() == AbstractType::BuildingType;
+	bool isNewBuilding = pNewType->WhatAmI() == AbstractType::BuildingType;
+	bool isOldInfantry = pOldType->WhatAmI() == AbstractType::InfantryType;
+	bool isNewInfantry = pNewType->WhatAmI() == AbstractType::InfantryType;
+	bool isOldAircraft = pOldType->WhatAmI() == AbstractType::AircraftType;
+	bool isNewAircraft = pNewType->WhatAmI() == AbstractType::AircraftType;
+	bool isOldUnit = pOldType->WhatAmI() == AbstractType::UnitType;
+	bool isNewUnit = pNewType->WhatAmI() == AbstractType::UnitType;
+	bool oldTechnoIsUnit = isOldInfantry || isOldUnit || isOldAircraft;
+
+	// "Non-building into non-Building" check: abort if 2 o more units are placed in the same cell
+	if (!isOldBuilding && !isNewBuilding)
+	{
+		bool inf2inf = isOldInfantry && isNewInfantry;
+		int nObjectsInCell = 0;
+
+		for (auto pObject = pOld->GetCell()->FirstObject; pObject; pObject = pObject->NextObject)
+		{
+			auto const pItem = static_cast<TechnoClass*>(pObject);
+
+			if (pItem && pItem != pOld)
+				nObjectsInCell++;
+
+			// Special case: infantry uses sub-locations, can be placed multiple solders in the same cell but not in the same location
+			if (inf2inf && pItem != pOld)
+			{
+				if (pItem->Location.X == pOld->Location.X && pItem->Location.Y == pOld->Location.Y)
+					inf2inf = false;
+			}
+		}
+
+		if (nObjectsInCell > 0 && !inf2inf)
+		{
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+			pOld->IsFallingDown = false;
+			CoordStruct loc = CoordStruct::Empty;
+			pOld->Scatter(loc, true, false);
+
+			return nullptr;
+		}
+	}
+
+	// The "Unit into a building" conversion, check if the structure can be placed
+
+
+	if (oldTechnoIsUnit && isNewBuilding)
+	{
+		auto pFoot = static_cast<FootClass*>(pOld);
+		auto pBuildingType = static_cast<BuildingTypeClass*>(pNewType);
+		bool canDeployIntoStructure = pNewType->CanCreateHere(CellClass::Coord2Cell(pOld->GetCoords()), pOld->Owner);//pNewType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
+
+		if (!canDeployIntoStructure)
+		{
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+			pOld->IsFallingDown = false;
+			CoordStruct loc = CoordStruct::Empty;
+			pOld->Scatter(loc, true, false);
+
+			return 0;
+		}
+	}
+	
+	auto pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
+
+	if (!pNew)
+	{
+		pOldExt->Convert_UniversalDeploy_InProgress = false;
+		pOld->IsFallingDown = false;
+		//CoordStruct loc = CoordStruct::Empty;
+		//pOldTechno->Scatter(loc, true, false);
+
+		return nullptr;
+	}
+
+	// Facing update
+	DirStruct oldPrimaryFacing;
+	DirStruct oldSecondaryFacing;
+
+	if (pOldTypeExt->Convert_DeployDir >= 0)
+	{
+		DirType desiredDir = (static_cast<DirType>(pOldTypeExt->Convert_DeployDir * 32));
+		oldPrimaryFacing.SetDir(desiredDir);
+		oldSecondaryFacing.SetDir(desiredDir);
+	}
+	else
+	{
+		oldPrimaryFacing = pOld->PrimaryFacing.Current();
+		oldSecondaryFacing = pOld->SecondaryFacing.Current();
+	}
+
+	DirType oldPrimaryFacingDir = oldPrimaryFacing.GetDir(); // Returns current position in format [0 - 7] x 32
+
+	// Some vodoo magic
+	pOld->Limbo();
+
+	++Unsorted::IKnowWhatImDoing;
+	bool unlimboed = pNew->Unlimbo(newLocation, oldPrimaryFacingDir);
+	--Unsorted::IKnowWhatImDoing;
+
+	if (!unlimboed)
+	{
+		// Abort operation, restoring old object
+		pOld->Unlimbo(newLocation, oldPrimaryFacingDir);
+		pNew->UnInit();
+
+		pOldExt->Convert_UniversalDeploy_InProgress = false;
+		pOld->IsFallingDown = false;
+
+		return nullptr;
+	}
+
+	TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
+
+	if (pOld->InLimbo)
+	{
+		pOwner->RegisterLoss(pOld, false);
+		pOld->UnInit();
+	}
+
+	//if (!pNewTechno->InLimbo)
+	pOwner->RegisterGain(pNew, true);
+	pNew->Owner->RecheckTechTree = true;
+
+	return pNew;
+}
+
+/*
+
+
 TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pNewTechnoType)
 {
 	if (!pThis || !ScriptExt::IsUnitAvailable(pThis, false))
@@ -465,6 +623,8 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pN
 
 	return pNewTechno;
 }
+
+*/
 
 bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* pNew)
 {
