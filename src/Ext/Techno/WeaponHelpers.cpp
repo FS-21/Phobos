@@ -2,11 +2,14 @@
 
 #include <Ext/WeaponType/Body.h>
 #include <Utilities/EnumFunctions.h>
+#include <Ext/Script/Body.h>
 
 // Compares two weapons and returns index of which one is eligible to fire against current target (0 = first, 1 = second), or -1 if neither works.
 int TechnoExt::PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback, bool allowAAFallback)
 {
 	CellClass* pTargetCell = nullptr;
+	if (!pTarget || !ScriptExt::IsUnitAvailable(abstract_cast<TechnoClass*>(pTarget), false))
+		return 0;
 
 	// Ignore target cell for airborne target technos.
 	if (!pTargetTechno || !pTargetTechno->IsInAir())

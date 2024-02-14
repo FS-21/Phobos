@@ -35,6 +35,7 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_AI, 0x5)
 	pExt->UpdateLaserTrails();
 	pExt->DepletedAmmoActions();
 	pExt->WebbyUpdate();
+	TechnoExt::UpdateUniversalDeploy(pThis);
 
 	TechnoExt::ApplyMindControlRangeLimit(pThis);
 	pExt->UpdateDelayFire();
