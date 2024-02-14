@@ -468,7 +468,7 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pN
 
 bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* pNew)
 {
-	if (!pOld || pNew || !ScriptExt::IsUnitAvailable(pOld, false) || !ScriptExt::IsUnitAvailable(pNew, false))
+	if (!pOld || !pNew || !ScriptExt::IsUnitAvailable(pOld, false) || !ScriptExt::IsUnitAvailable(pNew, false))
 		return false;
 
 	auto pOldExt = TechnoExt::ExtMap.Find(pOld);
