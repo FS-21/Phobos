@@ -46,135 +46,596 @@ void TechnoExt::StartUniversalDeployAnim(TechnoClass* pThis)
 
 void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 {
-	if (!pThis)
+	if (!pThis || !ScriptExt::IsUnitAvailable(pThis, false))
 		return;
 
-	if (auto pExt = TechnoExt::ExtMap.Find(pThis))
+	auto pThisExt = TechnoExt::ExtMap.Find(pThis);
+	if (!pThisExt || !pThisExt->Convert_UniversalDeploy_InProgress)
+		return;
+
+	int isOriginalDeployer = pThisExt->Convert_UniversalDeploy_IsOriginalDeployer;
+	TechnoClass* pOld = !isOriginalDeployer ? pThisExt->Convert_TemporalTechno : pThis;
+
+	auto pOldExt = TechnoExt::ExtMap.Find(pOld);
+	if (!pOldExt)
+		return;
+
+	auto pOldType = pOld->GetTechnoType();
+	if (!pOldType)
+		return;
+
+	auto pOldTypeExt = TechnoTypeExt::ExtMap.Find(pOldType);
+	if (!pOldTypeExt)
+		return;
+
+	auto const pNewType = !isOriginalDeployer ? pThis->GetTechnoType() : pOldTypeExt->Convert_UniversalDeploy.at(0);
+
+	auto pNewTypeExt = TechnoTypeExt::ExtMap.Find(pNewType);
+	if (!pNewTypeExt)
+		return;
+
+	TechnoClass* pNew = !isOriginalDeployer ? pThis : nullptr;
+	auto const pOwner = pOld->Owner;
+	bool canDeployIntoStructure = false;
+	bool deployToLand = pOldTypeExt->Convert_DeployToLand;
+	auto pOldFoot = static_cast<FootClass*>(pOld);
+	CoordStruct deployLocation = pOld->GetCoords();
+	DirType currentDir = pOld->PrimaryFacing.Current().GetDir(); // Returns current position in format [0 - 7] x 32
+
+	bool isOldBuilding = pOldType->WhatAmI() == AbstractType::BuildingType;
+	bool isNewBuilding = pNewType->WhatAmI() == AbstractType::BuildingType;
+	bool isOldInfantry = pOldType->WhatAmI() == AbstractType::InfantryType;
+	bool isNewInfantry = pNewType->WhatAmI() == AbstractType::InfantryType;
+	bool isOldAircraft = pOldType->WhatAmI() == AbstractType::AircraftType;
+	bool isNewAircraft = pNewType->WhatAmI() == AbstractType::AircraftType;
+	bool isOldUnit = pOldType->WhatAmI() == AbstractType::UnitType;
+	bool isNewUnit = pNewType->WhatAmI() == AbstractType::UnitType;
+	bool oldTechnoIsUnit = isOldInfantry || isOldUnit || isOldAircraft;
+	bool newTechnoIsUnit = isNewInfantry || isNewUnit || isNewAircraft;
+
+	if (oldTechnoIsUnit && !pNew)
 	{
-		if (!pExt->Convert_UniversalDeploy_InProgress)
+		// Deployment to land check: Make sure the object will fall into ground (if some external factor change it it restores the fall)
+		if (deployToLand)
+			pOld->IsFallingDown = true;
+
+		if (!pOld->IsFallingDown && pOldFoot->Locomotor->Is_Really_Moving_Now())
 			return;
 
-		if (pThis->WhatAmI() == AbstractType::Building)
-			return;
-
-		auto pFoot = static_cast<FootClass*>(pThis);
-		if (!pFoot)
-			return;
-
-		TechnoClass* pDeployed = nullptr;
-
-		auto pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
-		if (!pTypeExt)
-			return;
-
-		bool deployToLand = pTypeExt->Convert_DeployToLand;
-
-		if (pExt->Convert_UniversalDeploy_InProgress && deployToLand)
-			pThis->IsFallingDown = true;
-
-		if (!pThis->IsFallingDown && pFoot->Locomotor->Is_Really_Moving_Now())
-			return;
-
-		if (pThis->WhatAmI() != AbstractType::Infantry)
+		// Deployment to land check: Update InAir information & let it fall into ground
+		if (deployToLand && pOld->GetHeight() <= 20)
 		{
-			// Turn the unit to the right deploy facing
-			if (!pExt->DeployAnim && pTypeExt->Convert_DeployDir >= 0)
-			{
-				DirType currentDir = pThis->PrimaryFacing.Current().GetDir(); // Returns current position in format [0 - 7] x 32
-				DirType desiredDir = (static_cast<DirType>(pTypeExt->Convert_DeployDir * 32));
-				DirStruct desiredFacing;
-				desiredFacing.SetDir(desiredDir);
-
-				if (currentDir != desiredDir)
-				{
-					pFoot->Locomotor->Move_To(CoordStruct::Empty);
-					pThis->PrimaryFacing.SetDesired(desiredFacing);
-
-					return;
-				}
-			}
+			pOld->SetHeight(0);
+			//pOld->Location.Z = 0;
 		}
 
-		AnimTypeClass* pDeployAnimType = pTypeExt->Convert_DeployingAnim.isset() ? pTypeExt->Convert_DeployingAnim.Get() : nullptr;
-		bool hasValidDeployAnim = pDeployAnimType ? true : false;
-		bool isDeployAnimPlaying = pExt->DeployAnim ? true : false;
-		bool hasDeployAnimFinished = (isDeployAnimPlaying && (pExt->DeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
-		int convert_DeploySoundIndex = pTypeExt->Convert_DeploySound.isset() ? pTypeExt->Convert_DeploySound.Get() : -1;
-		AnimTypeClass* pAnimFXType = pTypeExt->Convert_AnimFX.isset() ? pTypeExt->Convert_AnimFX.Get() : nullptr;
-		bool animFX_FollowDeployer = pTypeExt->Convert_AnimFX_FollowDeployer;
-
-		// Update InAir information
-		if (deployToLand && pThis->GetHeight() <= 20)
-			pThis->SetHeight(0);
-
-		pThis->InAir = (pThis->GetHeight() > 0);// Force the update
+		pOld->InAir = (pOld->GetHeight() > 0);// Force the update
 
 		if (deployToLand)
 		{
-			if (pThis->InAir)
+			if (pOld->InAir)
 				return;
 
-			pFoot->StopMoving();
-			pFoot->ParalysisTimer.Start(15);
+			pOldFoot->StopMoving();
+			pOldFoot->ParalysisTimer.Start(15);
 		}
+	}
 
-		CoordStruct deployLocation = pThis->GetCoords();
-
-		// Before the conversion we need to play the full deploy animation
-		if (hasValidDeployAnim && !isDeployAnimPlaying)
+	// Unit direction check: Update the direction of the unit until it reaches the desired one, if specified
+	// TO-DO: Maybe support structures... instead of PrimaryFacing it would check SecondaryFacing (the turret). Maybe it already supports it but I have to do tests
+	if (isOldUnit || isOldAircraft) // TO-DO: I have to test aircraft behaviour here...
+	{
+		// Turn the unit to the right deploy facing
+		if (!pOldExt->DeployAnim && pOldTypeExt->Convert_DeployDir >= 0)
 		{
-			TechnoExt::StartUniversalDeployAnim(pThis);
-			return;
-		}
+			DirType desiredDir = (static_cast<DirType>(pOldTypeExt->Convert_DeployDir * 32));
+			DirStruct desiredFacing;
+			desiredFacing.SetDir(desiredDir);
 
-		// Hack for making the Voxel invisible during a deploy
-		if (hasValidDeployAnim)
-			pExt->Convert_UniversalDeploy_MakeInvisible = true;
-
-		// The unit should remain paralyzed during a deploy animation
-		if (isDeployAnimPlaying)
-			pFoot->ParalysisTimer.Start(15);
-
-		// Necessary for skipping the passengers ejection
-		pFoot->CurrentMission = Mission::None;
-
-		if (hasValidDeployAnim && !hasDeployAnimFinished)
-			return;
-
-		/*if (pThis->DeployAnim)
-		{
-			pThis->DeployAnim->Limbo();
-			pThis->DeployAnim->UnInit();
-			pThis->DeployAnim = nullptr;
-		}*/
-
-		// Time for the object conversion
-		pDeployed = TechnoExt::UniversalConvert(pThis, nullptr);
-
-		if (pDeployed)
-		{
-			if (convert_DeploySoundIndex >= 0)
-				VocClass::PlayAt(convert_DeploySoundIndex, deployLocation);
-
-			if (pAnimFXType)
+			if (currentDir != desiredDir)
 			{
-				if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deployLocation))
-				{
-					if (animFX_FollowDeployer)
-						pAnim->SetOwnerObject(pDeployed);
+				pOldFoot->Locomotor->Move_To(CoordStruct::Empty);
+				pOld->PrimaryFacing.SetDesired(desiredFacing);
 
-					pAnim->Owner = pDeployed->Owner;
+				return;
+			}
+		}
+	}
+
+	/*if (isNewBuilding)
+	{
+		pOld->Location.Z = 0; // No flying structures available in this game
+		deployLocation.Z = 0;
+		canDeployIntoStructure = pNewType->CanCreateHere(CellClass::Coord2Cell(pOld->GetCoords()), pOld->Owner);
+
+		if (!canDeployIntoStructure)
+		{
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+			pOld->IsFallingDown = false;
+			// TO-DO: Play EVA: "Can not deploy here"
+
+			return;
+		}
+	}*/
+
+	// Here we go, the real conversions! There are 3 cases, being the 3º one the generic
+ 
+	// Case 1: "Unit into building" deploy.
+	// Unit should loose the shape and get the structure shape.
+	// This also prevents other units enter inside the structure foundation.
+	if (oldTechnoIsUnit && isNewBuilding)
+	{
+		bool selected = false;
+		if (pOld->IsSelected)
+			selected = true;
+
+		if (!pOld->InLimbo)
+			pOld->Limbo();
+
+		// Create & save it for later.
+		// Note: Remember to delete it in case of deployment failure
+		if (!pOldExt->Convert_TemporalTechno)
+		{
+			pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
+
+			if (!pNew)
+			{
+				pOldExt->Convert_TemporalTechno = nullptr;
+				pOldExt->Convert_UniversalDeploy_Stage = true;
+				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
+				pOldExt->Convert_UniversalDeploy_InProgress = false;
+				pOld->IsFallingDown = false;
+
+				++Unsorted::IKnowWhatImDoing;
+				pOld->Unlimbo(deployLocation, currentDir);
+				--Unsorted::IKnowWhatImDoing;
+
+				if (selected)
+					pOld->Select();
+
+				return;
+			}
+
+			pOldExt->Convert_TemporalTechno = pNew;
+			bool unlimboed = pNew->Unlimbo(deployLocation, currentDir);
+
+			// Failed deployment: restore the old object and abort operation
+			if (!unlimboed)
+			{
+				pOldExt->Convert_TemporalTechno = nullptr;
+				pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
+				pOldExt->Convert_UniversalDeploy_InProgress = false;
+				pOld->IsFallingDown = false;
+
+				++Unsorted::IKnowWhatImDoing;
+				pOld->Unlimbo(deployLocation, currentDir);
+				--Unsorted::IKnowWhatImDoing;
+
+				pOldFoot->ParalysisTimer.Stop();
+				pOld->ForceMission(Mission::Guard);
+
+				pNew->UnInit();
+
+				if (selected)
+					pOld->Select();
+
+				return;
+			}
+
+			if (auto pBuildingNew = static_cast<BuildingClass*>(pNew))
+			{
+				pBuildingNew->HasPower = false;
+
+				if (pBuildingNew->Factory)
+				{
+					pBuildingNew->IsPrimaryFactory = false;
+					pBuildingNew->Factory->IsSuspended = true;
 				}
 			}
 		}
-		else
+
+		// At this point the new object exists & is visible.
+		// If exists a deploy animation it must dissappear until the animation finished
+		pNew = !isOriginalDeployer ? pThis : pOldExt->Convert_TemporalTechno;
+		pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+		auto pNewExt = TechnoExt::ExtMap.Find(pNew);
+		pNewExt->Convert_TemporalTechno = pOld;
+		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
+		pNewExt->Convert_UniversalDeploy_InProgress = true;
+
+		// Setting the build up animation, if any.
+		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
+
+		if (selected)
+			pNew->Select();
+
+		if (pDeployAnimType)
 		{
-			pFoot->ParalysisTimer.Stop();
-			pThis->IsFallingDown = false;
-			pThis->ForceMission(Mission::Guard);
-			pExt->Convert_UniversalDeploy_InProgress = false;
-			pExt->Convert_UniversalDeploy_MakeInvisible = false;
+			bool isDeployAnimPlaying = pOldExt->DeployAnim ? true : false;
+			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pOldExt->DeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
+
+			// Hack for making the object invisible during a deploy
+			pNewExt->Convert_UniversalDeploy_MakeInvisible = true;
+
+			// The conversion process won't start until the deploy animation ends
+			if (!isDeployAnimPlaying)
+			{
+				TechnoExt::StartUniversalDeployAnim(pOld);
+				return;
+			}
+
+			if (!hasDeployAnimFinished)
+				return;
+
+			// Should I uninit() the finished animation?
 		}
+
+		// The build up animation finished (if any).
+		// In this case we only have to transfer properties to the new object
+		pNewExt->Convert_UniversalDeploy_MakeInvisible = false;
+		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
+		pNewExt->Convert_UniversalDeploy_ForceRedraw = true;
+
+		if (auto pBuildingNew = static_cast<BuildingClass*>(pNew))
+		{
+			pBuildingNew->HasPower = true;
+
+			if (pBuildingNew->Factory)
+				pBuildingNew->Factory->IsSuspended = false;
+		}
+
+		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
+		pNew->MarkForRedraw();
+
+		// Play post-deploy sound
+		int convert_DeploySoundIndex = pOldTypeExt->Convert_DeploySound.isset() ? pOldTypeExt->Convert_DeploySound.Get() : -1;
+		AnimTypeClass* pAnimFXType = pOldTypeExt->Convert_AnimFX.isset() ? pOldTypeExt->Convert_AnimFX.Get() : nullptr;
+		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
+
+		if (convert_DeploySoundIndex >= 0)
+			VocClass::PlayAt(convert_DeploySoundIndex, deployLocation);
+
+		// Play post-deploy animation
+		if (pAnimFXType)
+		{
+			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deployLocation))
+			{
+				if (animFX_FollowDeployer)
+					pAnim->SetOwnerObject(pNew);
+
+				pAnim->Owner = pNew->Owner;
+			}
+		}
+
+		// The conversion process finished. Clean values
+		if (pOld->InLimbo)
+		{
+			pOldExt->Convert_TemporalTechno = nullptr;
+			pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+			pNewExt->Convert_TemporalTechno = nullptr;
+			pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
+			pNewExt->Convert_UniversalDeploy_InProgress = false;
+			
+			pOld->UnInit();
+		}
+
+		if (newTechnoIsUnit)
+		{
+			// Jumpjet tricks: if they are in the ground make air units fly
+			if (pNewType->JumpJet || pNewType->BalloonHover)
+			{
+				// Jumpjets should fly if
+				auto pFoot = static_cast<FootClass*>(pNew);
+				pFoot->Scatter(CoordStruct::Empty, true, false);
+			}
+			else
+			{
+				if (pNewType->MovementZone == MovementZone::Fly)
+					pNew->IsFallingDown = false; // Probably isn't necessary since the new object should not have this "true"
+			}
+		}
+
+		pNew->Owner->RecheckTechTree = true;
+		pNew->Owner->RecheckPower = true;
+		pNew->Owner->RecheckRadar = true;
+		pOwner->RegisterGain(pNew, true);
+
+		return;
+	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+	// Case 2: Building into something deploy
+	// Structure foundation should remain until the deploy animation ends (if any).
+	// This also prevents other units enter inside the structure foundation.
+	// This case should cover the "structure into structure".
+
+
+
+
+
+	if (isOldBuilding)
+	{
+		// Create & save it for later.
+		// Note: Remember to delete it in case of deployment failure
+		if (!pOldExt->Convert_TemporalTechno)
+		{
+			pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
+
+			if (!pNew)
+			{
+				pOldExt->Convert_TemporalTechno = nullptr;
+				pOldExt->Convert_UniversalDeploy_Stage = -1;
+				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
+				pOldExt->Convert_UniversalDeploy_InProgress = false;
+				pOld->IsFallingDown = false;
+
+				return;
+			}
+
+			pOldExt->Convert_TemporalTechno = pNew;
+		}
+
+		// At this point the new object exists & will visible at the end.
+		// If exists a deploy animation the old object must dissappear until the animation finished
+		pNew = pOldExt->Convert_TemporalTechno;
+		pOldExt->Convert_UniversalDeploy_Stage == 0;
+		auto pNewExt = TechnoExt::ExtMap.Find(pNew);
+		pNewExt->Convert_TemporalTechno == pOld;
+		pNewExt->Convert_UniversalDeploy_Stage == 1;
+		pNewExt->Convert_UniversalDeploy_InProgress = true;
+
+		// Setting the build up animation, if any.
+		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
+
+		if (pDeployAnimType)
+		{
+			bool isDeployAnimPlaying = pOldExt->DeployAnim ? true : false;
+			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pOldExt->DeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
+
+			// Hack for making the object invisible during a deploy
+			pOldExt->Convert_UniversalDeploy_MakeInvisible = true;
+
+			// The conversion process won't start until the deploy animation ends
+			if (!isDeployAnimPlaying)
+			{
+				TechnoExt::StartUniversalDeployAnim(pOld);
+				return;
+			}
+
+			if (!hasDeployAnimFinished)
+				return;
+
+			// Should I uninit() the finished animation?
+		}
+
+		// When deploy animation finished (if any) then we replace the old object with the new
+		if (!pOld->InLimbo)
+			pOld->Limbo();
+
+		bool unlimboed = pNew->Unlimbo(deployLocation, currentDir);
+
+		// Failed deployment: restore the old object and abort operation
+		if (!unlimboed)
+		{
+			pOldExt->Convert_TemporalTechno = nullptr;
+			pOldExt->Convert_UniversalDeploy_Stage = -1;
+			pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+			pOld->IsFallingDown = false;
+
+			++Unsorted::IKnowWhatImDoing;
+			pOld->Unlimbo(deployLocation, currentDir);
+			--Unsorted::IKnowWhatImDoing;
+
+			//pOldFoot->ParalysisTimer.Stop();
+			//pOld->ForceMission(Mission::Guard);
+
+			pNew->UnInit();
+
+			return;
+		}
+
+		// The build up animation finished (if any).
+		// In this case we only have to transfer properties to the new object
+		//pNewExt->Convert_UniversalDeploy_MakeInvisible = false;
+
+		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
+
+		// Play post-deploy sound
+		int convert_DeploySoundIndex = pOldTypeExt->Convert_DeploySound.isset() ? pOldTypeExt->Convert_DeploySound.Get() : -1;
+		AnimTypeClass* pAnimFXType = pOldTypeExt->Convert_AnimFX.isset() ? pOldTypeExt->Convert_AnimFX.Get() : nullptr;
+		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
+
+		if (convert_DeploySoundIndex >= 0)
+			VocClass::PlayAt(convert_DeploySoundIndex, deployLocation);
+
+		// Play post-deploy animation
+		if (pAnimFXType)
+		{
+			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deployLocation))
+			{
+				if (animFX_FollowDeployer)
+					pAnim->SetOwnerObject(pNew);
+
+				pAnim->Owner = pNew->Owner;
+			}
+		}
+
+		// The conversion process finished. Clean values
+		if (pOld->InLimbo)
+		{
+			pOldExt->Convert_TemporalTechno = nullptr;
+			pOldExt->Convert_UniversalDeploy_Stage = -1;
+			pNewExt->Convert_UniversalDeploy_InProgress = false;
+
+			//++Unsorted::IKnowWhatImDoing;
+			//pOld->Unlimbo(deployLocation, currentDir);
+			//--Unsorted::IKnowWhatImDoing;
+
+			//pNewFoot->ParalysisTimer.Stop();
+			//pNew->ForceMission(Mission::Guard);
+
+			pOld->UnInit();
+		}
+
+		return;
+	}
+
+	if (oldTechnoIsUnit && newTechnoIsUnit) // Creo que este caso es redundante porque caso 1 cubre esto...  si es así hay que quitar "isNewBuilding"  en caso 1...
+	{
+		if (!pOld->InLimbo)
+			pOld->Limbo();
+
+		// Create & save it for later.
+		// Note: Remember to delete it in case of deployment failure
+		if (!pOldExt->Convert_TemporalTechno)
+		{
+			pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
+
+			if (!pNew)
+			{
+				pOldExt->Convert_TemporalTechno = nullptr;
+				pOldExt->Convert_UniversalDeploy_Stage = -1;
+				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
+				pOldExt->Convert_UniversalDeploy_InProgress = false;
+				pOld->IsFallingDown = false;
+
+				return;
+			}
+
+			pOldExt->Convert_TemporalTechno = pNew;
+			bool unlimboed = pNew->Unlimbo(deployLocation, currentDir);
+
+			// Failed deployment: restore the old object and abort operation
+			if (!unlimboed)
+			{
+				pOldExt->Convert_TemporalTechno = nullptr;
+				pOldExt->Convert_UniversalDeploy_Stage = -1;
+				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
+				pOldExt->Convert_UniversalDeploy_InProgress = false;
+				pOld->IsFallingDown = false;
+
+				++Unsorted::IKnowWhatImDoing;
+				pOld->Unlimbo(deployLocation, currentDir);
+				--Unsorted::IKnowWhatImDoing;
+
+				pOldFoot->ParalysisTimer.Stop();
+				pOld->ForceMission(Mission::Guard);
+
+				pNew->UnInit();
+
+				return;
+			}
+		}
+
+		// At this point the new object exists & is visible.
+		// If exists a deploy animation it must dissappear until the animation finished
+		pNew = pOldExt->Convert_TemporalTechno;
+		pOldExt->Convert_UniversalDeploy_Stage == 0;
+		auto pNewExt = TechnoExt::ExtMap.Find(pNew);
+		pNewExt->Convert_TemporalTechno == pOld;
+		pNewExt->Convert_UniversalDeploy_Stage == 1;
+		pNewExt->Convert_UniversalDeploy_InProgress = true;
+
+		// Setting the build up animation, if any.
+		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
+
+		if (pDeployAnimType)
+		{
+			bool isDeployAnimPlaying = pOldExt->DeployAnim ? true : false;
+			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pOldExt->DeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
+
+			// Hack for making the object invisible during a deploy
+			pNewExt->Convert_UniversalDeploy_MakeInvisible = true;
+
+			// The conversion process won't start until the deploy animation ends
+			if (!isDeployAnimPlaying)
+			{
+				TechnoExt::StartUniversalDeployAnim(pOld);
+				return;
+			}
+
+			if (!hasDeployAnimFinished)
+				return;
+
+			// Should I uninit() the finished animation?
+		}
+
+		// The build up animation finished (if any).
+		// In this case we only have to transfer properties to the new object
+		pNewExt->Convert_UniversalDeploy_MakeInvisible = false;
+		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
+
+		// Play post-deploy sound
+		int convert_DeploySoundIndex = pOldTypeExt->Convert_DeploySound.isset() ? pOldTypeExt->Convert_DeploySound.Get() : -1;
+		AnimTypeClass* pAnimFXType = pOldTypeExt->Convert_AnimFX.isset() ? pOldTypeExt->Convert_AnimFX.Get() : nullptr;
+		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
+
+		if (convert_DeploySoundIndex >= 0)
+			VocClass::PlayAt(convert_DeploySoundIndex, deployLocation);
+
+		// Play post-deploy animation
+		if (pAnimFXType)
+		{
+			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deployLocation))
+			{
+				if (animFX_FollowDeployer)
+					pAnim->SetOwnerObject(pNew);
+
+				pAnim->Owner = pNew->Owner;
+			}
+		}
+
+		if (newTechnoIsUnit)
+		{
+			// Jumpjet tricks: if they are in the ground make air units fly
+			if (pNewType->JumpJet || pNewType->BalloonHover)
+			{
+				// Jumpjets should fly if
+				auto pFoot = static_cast<FootClass*>(pNew);
+				pFoot->Scatter(CoordStruct::Empty, true, false);
+				//pFoot->Locomotor->Move_To(CoordStruct::Empty);
+				//pFoot->Locomotor->Do_Turn(oldPrimaryFacing);
+				//pNew->PrimaryFacing.SetDesired(oldPrimaryFacing);
+			}
+			else
+			{
+				if (pNewType->MovementZone == MovementZone::Fly)
+					pNew->IsFallingDown = false; // Probably isn't necessary since the new object should not have this "true"
+			}
+		}
+
+		// The conversion process finished. Clean values
+		if (pOld->InLimbo)
+		{
+			pOldExt->Convert_TemporalTechno = nullptr;
+			pOldExt->Convert_UniversalDeploy_Stage = -1;
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+
+			//++Unsorted::IKnowWhatImDoing;
+			//pOld->Unlimbo(deployLocation, currentDir);
+			//--Unsorted::IKnowWhatImDoing;
+
+			//pNewFoot->ParalysisTimer.Stop();
+			//pNew->ForceMission(Mission::Guard);
+
+			pOld->UnInit();
+		}
+
+		return;
 	}
 }
 
@@ -252,8 +713,6 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pOld, TechnoTypeClass* pNe
 	}
 
 	// The "Unit into a building" conversion, check if the structure can be placed
-
-
 	if (oldTechnoIsUnit && isNewBuilding)
 	{
 		auto pFoot = static_cast<FootClass*>(pOld);
@@ -734,7 +1193,7 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 		pNew->SecondaryFacing.SetCurrent(newDesiredFacing); // Turret
 	}
 
-	// Jumpjet tricks
+	// Jumpjet tricks: if they are in the ground make air units fly
 	if (pNewType->JumpJet || pNewType->BalloonHover)
 	{
 		// Jumpjets should fly if

@@ -209,7 +209,7 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 	auto const pOldTechnoTypeExt = TechnoTypeExt::ExtMap.Find(pOldTechno->GetTechnoType());
 	if (!pOldTechnoTypeExt)
 		return 0;
-
+	
 	auto const pNewTechnoType = pOldTechnoTypeExt->Convert_UniversalDeploy.at(0);
 	bool pTechnoIsFlying = pOldTechno->GetTechnoType()->MovementZone == MovementZone::Fly;
 	auto pCell = pOldTechno->GetCell();
@@ -595,6 +595,67 @@ DEFINE_HOOK(0x518FBC, InfantryClass_DrawIt_UniversalDeploy_DontRenderObject, 0x6
 	// Here enters SHP units when deploy
 	if (pExt->Convert_UniversalDeploy_MakeInvisible)
 		return Skip;
+
+	return 0;
+}
+
+// Make object graphics invisible because they aren't rendered
+DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD)
+{
+	enum { Skip = 0x43D688 };
+
+	GET(BuildingClass*, pThis, ESI);
+
+	if (!pThis)
+		return 0;
+
+	auto pTechno = static_cast<TechnoClass*>(pThis);
+	if (!pTechno)
+		return 0;
+
+	auto pExt = TechnoExt::ExtMap.Find(pTechno);
+	if (!pExt)
+		return 0;
+
+	// Here enters SHP units when deploy
+	if (pExt->Convert_UniversalDeploy_MakeInvisible)
+	{
+		// Hide building anims
+		for (auto pAnim : pThis->Anims)
+		{
+			if (pAnim)
+			{
+				pAnim->Invisible = true;
+			}
+		}
+
+		return Skip;
+	}
+
+	// Reset?
+	if (pExt->Convert_UniversalDeploy_ForceRedraw)
+	{
+		for (auto pAnim : pThis->Anims)
+		{
+			if (pAnim)
+			{
+				pAnim->Invisible = false;
+			}
+		}
+
+		pExt->Convert_UniversalDeploy_ForceRedraw = false;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(0x4494DC, BuildingClass_CanDemolish_UniversalDeploy, 0x6)
+{
+	GET(BuildingClass*, pThis, ESI);
+
+	auto const pExt = TechnoExt::ExtMap.Find(pThis);
+	if (pExt && pExt->Convert_UniversalDeploy_InProgress)
+		return 0x449536;
 
 	return 0;
 }

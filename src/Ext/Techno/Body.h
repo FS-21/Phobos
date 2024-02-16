@@ -100,6 +100,10 @@ public:
 		AnimClass* DeployAnim;
 		bool Convert_UniversalDeploy_InProgress;
 		bool Convert_UniversalDeploy_MakeInvisible;
+		TechnoClass* Convert_TemporalTechno;
+		int Convert_UniversalDeploy_Stage;
+		bool Convert_UniversalDeploy_ForceRedraw;
+		bool Convert_UniversalDeploy_IsOriginalDeployer;
 
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
@@ -137,6 +141,10 @@ public:
 			, DeployAnim { nullptr }
 			, Convert_UniversalDeploy_InProgress { false }
 			, Convert_UniversalDeploy_MakeInvisible { false }
+			, Convert_TemporalTechno { nullptr }
+			, Convert_UniversalDeploy_Stage { -1 }
+			, Convert_UniversalDeploy_ForceRedraw { false }
+			, Convert_UniversalDeploy_IsOriginalDeployer { true }
 		{ }
 
 		void ApplyInterceptor();
@@ -164,6 +172,7 @@ public:
 			AnnounceInvalidPointer(DelayedFire_PostAnim, ptr);
 			AnnounceInvalidPointer(CurrentRandomTarget, ptr);
 			AnnounceInvalidPointer(OriginalTarget, ptr);
+			AnnounceInvalidPointer(Convert_TemporalTechno, ptr);
 		}
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;

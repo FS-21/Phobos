@@ -35,10 +35,10 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_AI, 0x5)
 	pExt->UpdateLaserTrails();
 	pExt->DepletedAmmoActions();
 	pExt->WebbyUpdate();
-	TechnoExt::UpdateUniversalDeploy(pThis);
 
 	TechnoExt::ApplyMindControlRangeLimit(pThis);
 	pExt->UpdateDelayFire();
+	TechnoExt::UpdateUniversalDeploy(pThis);
 
 	return 0;
 }
@@ -520,9 +520,10 @@ DEFINE_HOOK(0x51BAFB, InfantryClass_ChronoSparkleDelay, 0x5)
 	return 0x51BB00;
 }
 
-DEFINE_HOOK(0x518FBC, InfantryClass_DrawIt_DontRenderSHP, 0x6)
+// Make object graphics invisible because they aren't rendered
+/*DEFINE_HOOK(0x518FBC, InfantryClass_DrawIt_UniversalDeploy_DontRenderObject, 0x6)
 {
-	enum { SkipDrawCode = 0x5192B5 };
+	enum { Skip = 0x5192B5 };
 
 	GET(InfantryClass*, pThis, EBP);
 
@@ -537,11 +538,12 @@ DEFINE_HOOK(0x518FBC, InfantryClass_DrawIt_DontRenderSHP, 0x6)
 	if (!pExt)
 		return 0;
 
-	if (pExt->WebbyDurationCountDown > 0)
-		return SkipDrawCode;
+	// Here enters SHP units when deploy
+	if (pExt->Convert_UniversalDeploy_MakeInvisible)
+		return Skip;
 
 	return 0;
-}
+}*/
 
 DEFINE_HOOK(0x518016, InfantryClass_TakeDamage_Webby, 0x7)
 {
