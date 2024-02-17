@@ -317,7 +317,173 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pNewExt->Convert_TemporalTechno = nullptr;
 			pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 			pNewExt->Convert_UniversalDeploy_InProgress = false;
-			
+
+			pOwner->RegisterLoss(pOld, false);
+			pOld->UnInit();
+		}
+
+		pNew->Owner->RecheckTechTree = true;
+		pNew->Owner->RecheckPower = true;
+		pNew->Owner->RecheckRadar = true;
+		pOwner->RegisterGain(pNew, true);
+
+		return;
+	}
+
+	// Case 2: Building into something deploy
+	// Structure foundation should remain until the deploy animation ends (if any).
+	// This also prevents other units enter inside the structure foundation.
+	// This case should cover the "structure into structure".
+	if (isOldBuilding)
+	{
+		bool selected = false;
+		if (pOld->IsSelected)
+			selected = true;
+
+		// Create & save it for later.
+		// Note: Remember to delete it in case of deployment failure
+		if (!pOldExt->Convert_TemporalTechno)
+		{
+			pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
+
+			if (!pNew)
+			{
+				pOldExt->Convert_TemporalTechno = nullptr;
+				pOldExt->Convert_UniversalDeploy_Stage = true;
+				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
+				pOldExt->Convert_UniversalDeploy_InProgress = false;
+				pOldExt->Convert_UniversalDeploy_ForceRedraw = true;
+				pOld->IsFallingDown = false;
+
+				++Unsorted::IKnowWhatImDoing;
+				pOld->Unlimbo(deployLocation, currentDir);
+				--Unsorted::IKnowWhatImDoing;
+
+				if (selected)
+					pOld->Select();
+
+				return;
+			}
+
+			pOldExt->Convert_TemporalTechno = pNew;
+
+			if (auto pBuildingOld = static_cast<BuildingClass*>(pOld))
+			{
+				pBuildingOld->HasPower = false;
+
+				if (pBuildingOld->Factory)
+				{
+					pBuildingOld->IsPrimaryFactory = false;
+					pBuildingOld->Factory->IsSuspended = true;
+				}
+			}
+		}
+
+		// At this point the new object exists & is visible.
+		// If exists a deploy animation it must dissappear until the animation finished
+		pNew = !isOriginalDeployer ? pThis : pOldExt->Convert_TemporalTechno;
+		pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+		auto pNewExt = TechnoExt::ExtMap.Find(pNew);
+		pNewExt->Convert_TemporalTechno = pOld;
+		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
+		pNewExt->Convert_UniversalDeploy_InProgress = true;
+
+		// Setting the build up animation, if any.
+		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
+
+		if (pDeployAnimType)
+		{
+			bool isDeployAnimPlaying = pOldExt->DeployAnim ? true : false;
+			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pOldExt->DeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
+
+			// Hack for making the object invisible during a deploy
+			pOldExt->Convert_UniversalDeploy_MakeInvisible = true;
+
+			// The conversion process won't start until the deploy animation ends
+			if (!isDeployAnimPlaying)
+			{
+				TechnoExt::StartUniversalDeployAnim(pOld);
+				return;
+			}
+
+			if (!hasDeployAnimFinished)
+				return;
+
+			// Should I uninit() the finished animation?
+		}
+
+		// The build up animation finished (if any).
+		if (!pOld->InLimbo)
+			pOld->Limbo();
+
+		bool unlimboed = pNew->Unlimbo(deployLocation, currentDir);
+
+		// Failed deployment: restore the old object and abort operation
+		if (!unlimboed)
+		{
+			pOldExt->Convert_TemporalTechno = nullptr;
+			pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+			pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+			pOldExt->Convert_UniversalDeploy_ForceRedraw = true;
+			pOld->IsFallingDown = false;
+
+			++Unsorted::IKnowWhatImDoing;
+			pOld->Unlimbo(deployLocation, currentDir);
+			--Unsorted::IKnowWhatImDoing;
+
+			pOldFoot->ParalysisTimer.Stop();
+			pOld->ForceMission(Mission::Guard);
+
+			if (auto pBuildingOld = static_cast<BuildingClass*>(pOld))
+			{
+				pBuildingOld->HasPower = true;
+
+				if (pBuildingOld->Factory)
+					pBuildingOld->Factory->IsSuspended = false;
+			}
+
+			pNew->UnInit();
+
+			if (selected)
+				pOld->Select();
+
+			return;
+		}
+
+		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
+
+		// Play post-deploy sound
+		int convert_DeploySoundIndex = pOldTypeExt->Convert_DeploySound.isset() ? pOldTypeExt->Convert_DeploySound.Get() : -1;
+		AnimTypeClass* pAnimFXType = pOldTypeExt->Convert_AnimFX.isset() ? pOldTypeExt->Convert_AnimFX.Get() : nullptr;
+		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
+
+		if (convert_DeploySoundIndex >= 0)
+			VocClass::PlayAt(convert_DeploySoundIndex, deployLocation);
+
+		// Play post-deploy animation
+		if (pAnimFXType)
+		{
+			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deployLocation))
+			{
+				if (animFX_FollowDeployer)
+					pAnim->SetOwnerObject(pNew);
+
+				pAnim->Owner = pNew->Owner;
+			}
+		}
+
+		// The conversion process finished. Clean values
+		if (pOld->InLimbo)
+		{
+			pOldExt->Convert_TemporalTechno = nullptr;
+			pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+			pNewExt->Convert_TemporalTechno = nullptr;
+			pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
+			pNewExt->Convert_UniversalDeploy_InProgress = false;
+
+			pOwner->RegisterLoss(pOld, false);
 			pOld->UnInit();
 		}
 
@@ -357,142 +523,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 
 
-	// Case 2: Building into something deploy
-	// Structure foundation should remain until the deploy animation ends (if any).
-	// This also prevents other units enter inside the structure foundation.
-	// This case should cover the "structure into structure".
-
-
-
-
-
-	if (isOldBuilding)
-	{
-		// Create & save it for later.
-		// Note: Remember to delete it in case of deployment failure
-		if (!pOldExt->Convert_TemporalTechno)
-		{
-			pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
-
-			if (!pNew)
-			{
-				pOldExt->Convert_TemporalTechno = nullptr;
-				pOldExt->Convert_UniversalDeploy_Stage = -1;
-				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
-				pOldExt->Convert_UniversalDeploy_InProgress = false;
-				pOld->IsFallingDown = false;
-
-				return;
-			}
-
-			pOldExt->Convert_TemporalTechno = pNew;
-		}
-
-		// At this point the new object exists & will visible at the end.
-		// If exists a deploy animation the old object must dissappear until the animation finished
-		pNew = pOldExt->Convert_TemporalTechno;
-		pOldExt->Convert_UniversalDeploy_Stage == 0;
-		auto pNewExt = TechnoExt::ExtMap.Find(pNew);
-		pNewExt->Convert_TemporalTechno == pOld;
-		pNewExt->Convert_UniversalDeploy_Stage == 1;
-		pNewExt->Convert_UniversalDeploy_InProgress = true;
-
-		// Setting the build up animation, if any.
-		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
-
-		if (pDeployAnimType)
-		{
-			bool isDeployAnimPlaying = pOldExt->DeployAnim ? true : false;
-			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pOldExt->DeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
-
-			// Hack for making the object invisible during a deploy
-			pOldExt->Convert_UniversalDeploy_MakeInvisible = true;
-
-			// The conversion process won't start until the deploy animation ends
-			if (!isDeployAnimPlaying)
-			{
-				TechnoExt::StartUniversalDeployAnim(pOld);
-				return;
-			}
-
-			if (!hasDeployAnimFinished)
-				return;
-
-			// Should I uninit() the finished animation?
-		}
-
-		// When deploy animation finished (if any) then we replace the old object with the new
-		if (!pOld->InLimbo)
-			pOld->Limbo();
-
-		bool unlimboed = pNew->Unlimbo(deployLocation, currentDir);
-
-		// Failed deployment: restore the old object and abort operation
-		if (!unlimboed)
-		{
-			pOldExt->Convert_TemporalTechno = nullptr;
-			pOldExt->Convert_UniversalDeploy_Stage = -1;
-			pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
-			pOldExt->Convert_UniversalDeploy_InProgress = false;
-			pOld->IsFallingDown = false;
-
-			++Unsorted::IKnowWhatImDoing;
-			pOld->Unlimbo(deployLocation, currentDir);
-			--Unsorted::IKnowWhatImDoing;
-
-			//pOldFoot->ParalysisTimer.Stop();
-			//pOld->ForceMission(Mission::Guard);
-
-			pNew->UnInit();
-
-			return;
-		}
-
-		// The build up animation finished (if any).
-		// In this case we only have to transfer properties to the new object
-		//pNewExt->Convert_UniversalDeploy_MakeInvisible = false;
-
-		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
-
-		// Play post-deploy sound
-		int convert_DeploySoundIndex = pOldTypeExt->Convert_DeploySound.isset() ? pOldTypeExt->Convert_DeploySound.Get() : -1;
-		AnimTypeClass* pAnimFXType = pOldTypeExt->Convert_AnimFX.isset() ? pOldTypeExt->Convert_AnimFX.Get() : nullptr;
-		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
-
-		if (convert_DeploySoundIndex >= 0)
-			VocClass::PlayAt(convert_DeploySoundIndex, deployLocation);
-
-		// Play post-deploy animation
-		if (pAnimFXType)
-		{
-			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deployLocation))
-			{
-				if (animFX_FollowDeployer)
-					pAnim->SetOwnerObject(pNew);
-
-				pAnim->Owner = pNew->Owner;
-			}
-		}
-
-		// The conversion process finished. Clean values
-		if (pOld->InLimbo)
-		{
-			pOldExt->Convert_TemporalTechno = nullptr;
-			pOldExt->Convert_UniversalDeploy_Stage = -1;
-			pNewExt->Convert_UniversalDeploy_InProgress = false;
-
-			//++Unsorted::IKnowWhatImDoing;
-			//pOld->Unlimbo(deployLocation, currentDir);
-			//--Unsorted::IKnowWhatImDoing;
-
-			//pNewFoot->ParalysisTimer.Stop();
-			//pNew->ForceMission(Mission::Guard);
-
-			pOld->UnInit();
-		}
-
-		return;
-	}
 
 	if (oldTechnoIsUnit && newTechnoIsUnit) // Creo que este caso es redundante porque caso 1 cubre esto...  si es así hay que quitar "isNewBuilding"  en caso 1...
 	{
