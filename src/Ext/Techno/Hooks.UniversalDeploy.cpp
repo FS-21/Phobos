@@ -649,6 +649,7 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 	return 0;
 }
 
+// Avoid the sell cursor while the structure is being deployed with the UniversalDeploy
 DEFINE_HOOK(0x4494DC, BuildingClass_CanDemolish_UniversalDeploy, 0x6)
 {
 	GET(BuildingClass*, pThis, ESI);
@@ -656,6 +657,18 @@ DEFINE_HOOK(0x4494DC, BuildingClass_CanDemolish_UniversalDeploy, 0x6)
 	auto const pExt = TechnoExt::ExtMap.Find(pThis);
 	if (pExt && pExt->Convert_UniversalDeploy_InProgress)
 		return 0x449536;
+
+	return 0;
+}
+
+// Skip voxel turret drawing while the structure is being deployed with the UniversalDeploy
+DEFINE_HOOK(0x43DF6E, BuildingClass_Draw_UniversalDeploy, 0x6)
+{
+	GET(BuildingClass*, pThis, EBP);
+
+	auto const pExt = TechnoExt::ExtMap.Find(pThis);
+	if (pExt && pExt->Convert_UniversalDeploy_InProgress)
+		return 0x43E795;
 
 	return 0;
 }
