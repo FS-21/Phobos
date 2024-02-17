@@ -624,9 +624,7 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 		for (auto pAnim : pThis->Anims)
 		{
 			if (pAnim)
-			{
 				pAnim->Invisible = true;
-			}
 		}
 
 		return Skip;
@@ -638,9 +636,7 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 		for (auto pAnim : pThis->Anims)
 		{
 			if (pAnim)
-			{
 				pAnim->Invisible = false;
-			}
 		}
 
 		pExt->Convert_UniversalDeploy_ForceRedraw = false;
