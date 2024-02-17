@@ -68,19 +68,12 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	if (!pOldTypeExt)
 		return;
 
+	TechnoClass* pNew = !isOriginalDeployer ? pThis : nullptr;
 	auto const pNewType = !isOriginalDeployer ? pThis->GetTechnoType() : pOldTypeExt->Convert_UniversalDeploy.at(0);
 
 	auto pNewTypeExt = TechnoTypeExt::ExtMap.Find(pNewType);
 	if (!pNewTypeExt)
 		return;
-
-	TechnoClass* pNew = !isOriginalDeployer ? pThis : nullptr;
-	auto const pOwner = pOld->Owner;
-	bool canDeployIntoStructure = false;
-	bool deployToLand = pOldTypeExt->Convert_DeployToLand;
-	auto pOldFoot = static_cast<FootClass*>(pOld);
-	CoordStruct deployLocation = pOld->GetCoords();
-	DirType currentDir = pOld->PrimaryFacing.Current().GetDir(); // Returns current position in format [0 - 7] x 32
 
 	bool isOldBuilding = pOldType->WhatAmI() == AbstractType::BuildingType;
 	bool isNewBuilding = pNewType->WhatAmI() == AbstractType::BuildingType;
@@ -92,6 +85,15 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	bool isNewUnit = pNewType->WhatAmI() == AbstractType::UnitType;
 	bool oldTechnoIsUnit = isOldInfantry || isOldUnit || isOldAircraft;
 	bool newTechnoIsUnit = isNewInfantry || isNewUnit || isNewAircraft;
+
+
+	auto const pOwner = pOld->Owner;
+	bool canDeployIntoStructure = false;
+	bool deployToLand = pOldTypeExt->Convert_DeployToLand;
+	auto pOldFoot = static_cast<FootClass*>(pOld);
+	CoordStruct deployerLocation = pOld->GetCoords();
+	CoordStruct deploymentLocation = isOldInfantry && isNewInfantry ? deployerLocation : pOld->GetCell()->GetCenterCoords();
+	DirType currentDir = pOld->PrimaryFacing.Current().GetDir(); // Returns current position in format [0 - 7] x 32
 
 	if (oldTechnoIsUnit && !pNew)
 	{
@@ -167,7 +169,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	// Case 1: "Unit into building" deploy.
 	// Unit should loose the shape and get the structure shape.
 	// This also prevents other units enter inside the structure foundation.
-	if (oldTechnoIsUnit && isNewBuilding)
+	if (oldTechnoIsUnit)// && isNewBuilding)
 	{
 		if (!pOld->InLimbo)
 			pOld->Limbo();
@@ -187,7 +189,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOld->IsFallingDown = false;
 
 				++Unsorted::IKnowWhatImDoing;
-				pOld->Unlimbo(deployLocation, currentDir);
+				pOld->Unlimbo(deployerLocation, currentDir);
 				--Unsorted::IKnowWhatImDoing;
 
 				if (selected)
@@ -197,7 +199,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			}
 
 			pOldExt->Convert_TemporalTechno = pNew;
-			bool unlimboed = pNew->Unlimbo(deployLocation, currentDir);
+			bool unlimboed = pNew->Unlimbo(deploymentLocation, currentDir);
 
 			// Failed deployment: restore the old object and abort operation
 			if (!unlimboed)
@@ -209,7 +211,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOld->IsFallingDown = false;
 
 				++Unsorted::IKnowWhatImDoing;
-				pOld->Unlimbo(deployLocation, currentDir);
+				pOld->Unlimbo(deployerLocation, currentDir);
 				--Unsorted::IKnowWhatImDoing;
 
 				pOldFoot->ParalysisTimer.Stop();
@@ -294,12 +296,12 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
 
 		if (convert_DeploySoundIndex >= 0)
-			VocClass::PlayAt(convert_DeploySoundIndex, deployLocation);
+			VocClass::PlayAt(convert_DeploySoundIndex, deploymentLocation);
 
 		// Play post-deploy animation
 		if (pAnimFXType)
 		{
-			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deployLocation))
+			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deploymentLocation))
 			{
 				if (animFX_FollowDeployer)
 					pAnim->SetOwnerObject(pNew);
@@ -352,7 +354,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOld->IsFallingDown = false;
 
 				++Unsorted::IKnowWhatImDoing;
-				pOld->Unlimbo(deployLocation, currentDir);
+				pOld->Unlimbo(deployerLocation, currentDir);
 				--Unsorted::IKnowWhatImDoing;
 
 				if (selected)
@@ -413,7 +415,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		if (!pOld->InLimbo)
 			pOld->Limbo();
 
-		bool unlimboed = pNew->Unlimbo(deployLocation, currentDir);
+		bool unlimboed = pNew->Unlimbo(deploymentLocation, currentDir);
 
 		// Failed deployment: restore the old object and abort operation
 		if (!unlimboed)
@@ -426,7 +428,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pOld->IsFallingDown = false;
 
 			++Unsorted::IKnowWhatImDoing;
-			pOld->Unlimbo(deployLocation, currentDir);
+			pOld->Unlimbo(deployerLocation, currentDir);
 			--Unsorted::IKnowWhatImDoing;
 
 			pOldFoot->ParalysisTimer.Stop();
@@ -459,12 +461,12 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
 
 		if (convert_DeploySoundIndex >= 0)
-			VocClass::PlayAt(convert_DeploySoundIndex, deployLocation);
+			VocClass::PlayAt(convert_DeploySoundIndex, deploymentLocation);
 
 		// Play post-deploy animation
 		if (pAnimFXType)
 		{
-			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deployLocation))
+			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deploymentLocation))
 			{
 				if (animFX_FollowDeployer)
 					pAnim->SetOwnerObject(pNew);
@@ -505,6 +507,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 		pNewExt->Convert_UniversalDeploy_InProgress = false;
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
+		pNew->MarkForRedraw();
 		pNew->Owner->RecheckTechTree = true;
 		pNew->Owner->RecheckPower = true;
 		pNew->Owner->RecheckRadar = true;
@@ -514,6 +517,20 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	}
 
 	return; // Debug first the first 2 cases!
+
+	// Case 3: Anything into anything (generic case)
+	// Takes the foundation of the new object to prevent problems with other units
+	if (oldTechnoIsUnit && newTechnoIsUnit)
+	{
+		if (!pOld->InLimbo)
+			pOld->Limbo();
+
+
+
+
+	}
+
+
 
 
 
@@ -549,7 +566,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			}
 
 			pOldExt->Convert_TemporalTechno = pNew;
-			bool unlimboed = pNew->Unlimbo(deployLocation, currentDir);
+			bool unlimboed = pNew->Unlimbo(deploymentLocation, currentDir);
 
 			// Failed deployment: restore the old object and abort operation
 			if (!unlimboed)
@@ -561,7 +578,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOld->IsFallingDown = false;
 
 				++Unsorted::IKnowWhatImDoing;
-				pOld->Unlimbo(deployLocation, currentDir);
+				pOld->Unlimbo(deployerLocation, currentDir);
 				--Unsorted::IKnowWhatImDoing;
 
 				pOldFoot->ParalysisTimer.Stop();
@@ -617,12 +634,12 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
 
 		if (convert_DeploySoundIndex >= 0)
-			VocClass::PlayAt(convert_DeploySoundIndex, deployLocation);
+			VocClass::PlayAt(convert_DeploySoundIndex, deploymentLocation);
 
 		// Play post-deploy animation
 		if (pAnimFXType)
 		{
-			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deployLocation))
+			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deploymentLocation))
 			{
 				if (animFX_FollowDeployer)
 					pAnim->SetOwnerObject(pNew);

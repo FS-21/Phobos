@@ -142,7 +142,7 @@ public:
 			, Convert_UniversalDeploy_InProgress { false }
 			, Convert_UniversalDeploy_MakeInvisible { false }
 			, Convert_TemporalTechno { nullptr }
-			, Convert_UniversalDeploy_Stage { -1 }
+			, Convert_UniversalDeploy_Stage { -1 } // delete this
 			, Convert_UniversalDeploy_ForceRedraw { false }
 			, Convert_UniversalDeploy_IsOriginalDeployer { true }
 		{ }

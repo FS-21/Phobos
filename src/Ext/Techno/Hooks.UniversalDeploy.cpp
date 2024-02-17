@@ -35,7 +35,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	{
 		const auto pUnit = abstract_cast<UnitClass*>(pThis);
 		const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.at(0)->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.at(0)) : nullptr;
-		bool canDeployIntoStructure = pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pThis->GetCoords()), pThis->Owner);//pNewTechnoType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
+		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pThis->GetCoords()), pThis->Owner) : false;//pNewTechnoType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
 		//bool canDeployIntoStructure = pIntoBuildingType ? TechnoExt::CanDeployIntoBuilding(pUnit, false, pIntoBuildingType) : false;
 		auto pCell = pThis->GetCell();// MapClass::Instance->GetCellAt(pThis->Location);
 		int nObjectsInCell = 0;
@@ -50,7 +50,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		}
 
 		// Abort if the cell is occupied with objects or can not be deployed into structure. And move the unit to a different nearby location.
-		if ((nObjectsInCell > 0 && !pIntoBuildingType) || !canDeployIntoStructure)
+		if ((nObjectsInCell > 0 && !pIntoBuildingType) || pIntoBuildingType && !canDeployIntoStructure)
 		{
 			pExt->Convert_UniversalDeploy_InProgress = false;
 			pThis->IsFallingDown = false;
@@ -448,6 +448,9 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		pNewTechnoType->MovementZone == MovementZone::AmphibiousDestroyer;
 	bool isNewTechnoAircraft = pNewTechnoType->ConsideredAircraft || pNewTechnoType->MovementZone == MovementZone::Fly;
 
+	if (pTechno->WhatAmI() == AbstractType::Infantry)
+		return 0; //Checked in another hook
+
 	// If the deployer is over a water cell and the future deployed object doesn't support water cells abort the operation
 	if (cellIsOnWater && !(isNewTechnoAmphibious || pNewTechnoType->Naval || isNewTechnoAircraft))
 	{
@@ -476,7 +479,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	{
 		const auto pUnit = abstract_cast<UnitClass*>(pTechno);
 		const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.at(0)->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.at(0)) : nullptr;
-		bool canDeployIntoStructure = pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pUnit->GetCoords()), pUnit->Owner);//pNewTechnoType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
+		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pUnit->GetCoords()), pUnit->Owner): false;//pNewTechnoType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
 		//bool canDeployIntoStructure = pIntoBuildingType ? TechnoExt::CanDeployIntoBuilding(pUnit, false, pIntoBuildingType) : false;
 		int nObjectsInCell = 0;
 
@@ -490,7 +493,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		}
 
 		// Abort if the cell is occupied with objects or can not be deployed into structure. And move the unit to a different nearby location.
-		if ((nObjectsInCell > 0 && !pIntoBuildingType) || !canDeployIntoStructure)
+		if ((nObjectsInCell > 0 && !pIntoBuildingType) || pIntoBuildingType && !canDeployIntoStructure)
 		{
 			pExt->Convert_UniversalDeploy_InProgress = false;
 			pTechno->IsFallingDown = false;
