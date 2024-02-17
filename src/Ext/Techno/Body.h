@@ -101,7 +101,6 @@ public:
 		bool Convert_UniversalDeploy_InProgress;
 		bool Convert_UniversalDeploy_MakeInvisible;
 		TechnoClass* Convert_TemporalTechno;
-		int Convert_UniversalDeploy_Stage;
 		bool Convert_UniversalDeploy_ForceRedraw;
 		bool Convert_UniversalDeploy_IsOriginalDeployer;
 
@@ -142,7 +141,6 @@ public:
 			, Convert_UniversalDeploy_InProgress { false }
 			, Convert_UniversalDeploy_MakeInvisible { false }
 			, Convert_TemporalTechno { nullptr }
-			, Convert_UniversalDeploy_Stage { -1 } // delete this
 			, Convert_UniversalDeploy_ForceRedraw { false }
 			, Convert_UniversalDeploy_IsOriginalDeployer { true }
 		{ }

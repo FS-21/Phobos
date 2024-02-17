@@ -183,7 +183,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!pNew)
 			{
 				pOldExt->Convert_TemporalTechno = nullptr;
-				pOldExt->Convert_UniversalDeploy_Stage = true;
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOld->IsFallingDown = false;
@@ -347,7 +346,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!pNew)
 			{
 				pOldExt->Convert_TemporalTechno = nullptr;
-				pOldExt->Convert_UniversalDeploy_Stage = true;
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOldExt->Convert_UniversalDeploy_ForceRedraw = true;
@@ -557,7 +555,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!pNew)
 			{
 				pOldExt->Convert_TemporalTechno = nullptr;
-				pOldExt->Convert_UniversalDeploy_Stage = -1;
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOld->IsFallingDown = false;
@@ -572,7 +569,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!unlimboed)
 			{
 				pOldExt->Convert_TemporalTechno = nullptr;
-				pOldExt->Convert_UniversalDeploy_Stage = -1;
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOld->IsFallingDown = false;
@@ -593,10 +589,8 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		// At this point the new object exists & is visible.
 		// If exists a deploy animation it must dissappear until the animation finished
 		pNew = pOldExt->Convert_TemporalTechno;
-		pOldExt->Convert_UniversalDeploy_Stage == 0;
 		auto pNewExt = TechnoExt::ExtMap.Find(pNew);
 		pNewExt->Convert_TemporalTechno == pOld;
-		pNewExt->Convert_UniversalDeploy_Stage == 1;
 		pNewExt->Convert_UniversalDeploy_InProgress = true;
 
 		// Setting the build up animation, if any.
@@ -671,15 +665,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		if (pOld->InLimbo)
 		{
 			pOldExt->Convert_TemporalTechno = nullptr;
-			pOldExt->Convert_UniversalDeploy_Stage = -1;
 			pOldExt->Convert_UniversalDeploy_InProgress = false;
-
-			//++Unsorted::IKnowWhatImDoing;
-			//pOld->Unlimbo(deployLocation, currentDir);
-			//--Unsorted::IKnowWhatImDoing;
-
-			//pNewFoot->ParalysisTimer.Stop();
-			//pNew->ForceMission(Mission::Guard);
 
 			pOld->UnInit();
 		}

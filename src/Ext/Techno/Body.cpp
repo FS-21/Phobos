@@ -737,7 +737,6 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_UniversalDeploy_InProgress)
 		.Process(this->Convert_UniversalDeploy_MakeInvisible)
 		.Process(this->Convert_TemporalTechno)
-		.Process(this->Convert_UniversalDeploy_Stage)
 		.Process(this->Convert_UniversalDeploy_ForceRedraw)
 		.Process(this->Convert_UniversalDeploy_IsOriginalDeployer)
 		;
