@@ -53,7 +53,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	if (!pThisExt || !pThisExt->Convert_UniversalDeploy_InProgress)
 		return;
 
-	int isOriginalDeployer = pThisExt->Convert_UniversalDeploy_IsOriginalDeployer;
+	bool isOriginalDeployer = pThisExt->Convert_UniversalDeploy_IsOriginalDeployer;
 	TechnoClass* pOld = !isOriginalDeployer ? pThisExt->Convert_TemporalTechno : pThis;
 
 	auto pOldExt = TechnoExt::ExtMap.Find(pOld);
@@ -158,6 +158,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		}
 	}*/
 
+	bool selected = false;
+	if (pOld->IsSelected)
+		selected = true;
+
 	// Here we go, the real conversions! There are 3 cases, being the 3º one the generic
  
 	// Case 1: "Unit into building" deploy.
@@ -165,10 +169,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	// This also prevents other units enter inside the structure foundation.
 	if (oldTechnoIsUnit && isNewBuilding)
 	{
-		bool selected = false;
-		if (pOld->IsSelected)
-			selected = true;
-
 		if (!pOld->InLimbo)
 			pOld->Limbo();
 
@@ -336,10 +336,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	// This case should cover the "structure into structure".
 	if (isOldBuilding)
 	{
-		bool selected = false;
-		if (pOld->IsSelected)
-			selected = true;
-
 		// Create & save it for later.
 		// Note: Remember to delete it in case of deployment failure
 		if (!pOldExt->Convert_TemporalTechno)
@@ -398,6 +394,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 			// Hack for making the object invisible during a deploy
 			pOldExt->Convert_UniversalDeploy_MakeInvisible = true;
+			pOld->MarkForRedraw();
 
 			// The conversion process won't start until the deploy animation ends
 			if (!isDeployAnimPlaying)
@@ -451,6 +448,9 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			return;
 		}
 
+		if (selected)
+			pNew->Select();
+
 		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
 
 		// Play post-deploy sound
@@ -477,7 +477,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		if (pOld->InLimbo)
 		{
 			pOldExt->Convert_TemporalTechno = nullptr;
-			pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+			pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 			pOldExt->Convert_UniversalDeploy_InProgress = false;
 			pNewExt->Convert_TemporalTechno = nullptr;
 			pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
@@ -503,6 +503,8 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			}
 		}
 
+		pNewExt->Convert_UniversalDeploy_InProgress = false;
+		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNew->Owner->RecheckTechTree = true;
 		pNew->Owner->RecheckPower = true;
 		pNew->Owner->RecheckRadar = true;
@@ -511,7 +513,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		return;
 	}
 
-
+	return; // Debug first the first 2 cases!
 
 
 

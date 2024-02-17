@@ -23,8 +23,9 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	if (pThis->WhatAmI() == AbstractType::Building)
 	{
 		pThis->MissionStatus = 0;
-		pThis->CurrentMission = Mission::Selling;
+		//pTechno->CurrentMission = Mission::Selling;
 		pExt->Convert_UniversalDeploy_InProgress = true;
+		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 
 		return 0x730C10;
 	}
@@ -95,6 +96,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		}
 
 		// Set the deployment signal, indicating the process hasn't finished
+		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 		pExt->Convert_UniversalDeploy_InProgress = true;
 
 		return 0x730C10;
@@ -288,12 +290,39 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 		pThis->IsFallingDown = true;
 	}
 
+	pOldTechnoExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 	pOldTechnoExt->Convert_UniversalDeploy_InProgress = true;
 
 	return 0;
 }
 
-DEFINE_HOOK(0x449E6B, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x5)
+DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
+{
+	GET(BuildingClass*, pBuilding, ECX);
+
+	if (!pBuilding)
+		return 0;
+
+	// Check if is the UniversalDeploy or a standard deploy
+	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
+	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
+		return 0;
+
+	auto pExt = TechnoExt::ExtMap.Find(pBuilding);
+	if (!pExt)
+		return 0;
+
+	// Start the UniversalDeploy process
+	pExt->Convert_UniversalDeploy_InProgress = true;
+	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+	pBuilding->CurrentMission = Mission::Sleep;
+
+	return 0x449E00;
+}
+
+
+// ATENCIÓN: DEJAR OBSOLETO ESTE VIEJO CÓDIGO
+/*DEFINE_HOOK(0x449E6B, BuildingClass_MissionDeconstruction_UniversalDeploy__, 0x5)
 {
 	GET(UnitClass*, pUnit, EBX);
 	GET(BuildingClass*, pBuilding, ECX);
@@ -347,7 +376,7 @@ DEFINE_HOOK(0x449E6B, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x5)
 	}
 
 	return 0;
-}
+}*/
 
 DEFINE_HOOK(0x44725F, BuildingClass_WhatAction_UniversalDeploy_EnableDeployIcon, 0x5)
 {
@@ -435,8 +464,9 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	{
 		R->EBX(Action::None);
 		pTechno->MissionStatus = 0;
-		pTechno->CurrentMission = Mission::Selling;
+		//pTechno->CurrentMission = Mission::Selling;
 		pExt->Convert_UniversalDeploy_InProgress = true;
+		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 
 		return 0;
 	}
@@ -504,6 +534,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		}
 
 		// Set the deployment signal, indicating the process hasn't finished
+		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 		pExt->Convert_UniversalDeploy_InProgress = true;
 	}
 
