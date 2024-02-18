@@ -1064,7 +1064,7 @@ void TechnoExt::PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechn
 				forceEject = true;
 
 			// To bunkered infantry
-			if (pTechnoTo->WhatAmI() == AbstractType::Building)
+			if (pTechnoTo && pTechnoTo->WhatAmI() == AbstractType::Building)
 			{
 				auto pBuildingTo = static_cast<BuildingClass*>(pTechnoTo);
 				int nOccupants = pBuildingTo->Occupants.Count;
