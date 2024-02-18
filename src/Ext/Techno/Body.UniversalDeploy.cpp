@@ -782,9 +782,6 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 		// Jumpjets should fly if
 		auto pFoot = static_cast<FootClass*>(pNew);
 		pFoot->Scatter(CoordStruct::Empty, true, false);
-		//pFoot->Locomotor->Move_To(CoordStruct::Empty);
-		//pFoot->Locomotor->Do_Turn(oldPrimaryFacing);
-		//pNew->PrimaryFacing.SetDesired(oldPrimaryFacing);
 	}
 	else
 	{
