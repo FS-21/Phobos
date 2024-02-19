@@ -361,6 +361,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				return;
 			}
 
+			pNew->ForceMission(Mission::Guard);
 			pOldExt->Convert_TemporalTechno = pNew;
 
 			if (auto pBuildingOld = static_cast<BuildingClass*>(pOld))
@@ -451,6 +452,14 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		if (selected)
 			pNew->Select();
 
+		// Repaint the building graphics. Needed
+		if (auto pBuildingNew = static_cast<BuildingClass*>(pNew))
+		{
+			pBuildingNew->BeginMode(BStateType::Active);
+			pNew->CurrentMission = Mission::Guard;
+			pBuildingNew->MarkForRedraw();
+		}
+
 		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
 
 		// Play post-deploy sound
@@ -482,6 +491,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pNewExt->Convert_TemporalTechno = nullptr;
 			pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 			pNewExt->Convert_UniversalDeploy_InProgress = false;
+			pNewExt->Convert_UniversalDeploy_ForceRedraw = true;
 
 			pOwner->RegisterLoss(pOld, false);
 			pOld->UnInit();
@@ -809,6 +819,11 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 	pNew->AttachedTag = pOld->AttachedTag;
 	pNew->AttachedBomb = pOld->AttachedBomb;
 
+	/*if (pOld->Target)
+	{
+		pNew->SetTarget(pOld->Target);
+		pNew->QueueMission(pOld->CurrentMission, true);
+	}*/
 
 	// Transfer Iron Courtain effect, if applied
 	TechnoExt::SyncIronCurtainStatus(pOld, pNew);

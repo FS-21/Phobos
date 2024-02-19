@@ -22,7 +22,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	// Building case, send the undeploy signal
 	if (pThis->WhatAmI() == AbstractType::Building)
 	{
-		pThis->MissionStatus = 0;
+		//pThis->MissionStatus = 0;
 		//pTechno->CurrentMission = Mission::Selling;
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
@@ -312,6 +312,9 @@ DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
 	if (!pExt)
 		return 0;
 
+	if (pExt->Convert_UniversalDeploy_InProgress)
+		return 0;
+
 	// Start the UniversalDeploy process
 	pExt->Convert_UniversalDeploy_InProgress = true;
 	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
@@ -466,7 +469,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	if (pTechno->WhatAmI() == AbstractType::Building)
 	{
 		R->EBX(Action::None);
-		pTechno->MissionStatus = 0;
+		//pTechno->MissionStatus = 0;
 		//pTechno->CurrentMission = Mission::Selling;
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
@@ -655,8 +658,16 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 	if (pExt->Convert_UniversalDeploy_MakeInvisible)
 	{
 		// Hide building anims
+		bool isDeployAnim = true;
+
 		for (auto pAnim : pThis->Anims)
 		{
+			if (isDeployAnim) // Build up anim?
+			{
+				isDeployAnim = false;
+				continue;
+			}
+
 			if (pAnim)
 				pAnim->Invisible = true;
 		}
@@ -667,13 +678,26 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 	// Reset?
 	if (pExt->Convert_UniversalDeploy_ForceRedraw)
 	{
+		bool isDeployAnim = true;
+
 		for (auto pAnim : pThis->Anims)
 		{
+			if (isDeployAnim) // Build up anim?
+			{
+				isDeployAnim = false;
+				continue;
+			}
+
 			if (pAnim)
 				pAnim->Invisible = false;
 		}
 
 		pExt->Convert_UniversalDeploy_ForceRedraw = false;
+
+		// Repaint the building graphics. Needed
+		//pThis->BeginMode(BStateType::Active);
+		//pNew->CurrentMission = Mission::Guard;
+		//pThis->MarkForRedraw();
 	}
 
 	return 0;
