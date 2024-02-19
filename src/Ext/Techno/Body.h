@@ -254,8 +254,10 @@ public:
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue);
 
-	static TechnoClass* UniversalConvert(TechnoClass* pThis, TechnoTypeClass* pNewTechnoType = nullptr);
-	static void StartUniversalDeployAnim(TechnoClass* pThis);
+	static TechnoClass* UniversalDeployConversion(TechnoClass* pThis, TechnoTypeClass* pNewType = nullptr);
+	static void RunStructureIntoTechnoConversion(TechnoClass* pOld, TechnoTypeClass* pNewType = nullptr);
+	static void RunTechnoIntoStructureConversion(TechnoClass* pOld, TechnoTypeClass* pNewType = nullptr);
+	static void CreateUniversalDeployAnimation(TechnoClass* pThis);
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	static void UpdateUniversalDeploy(TechnoClass* pThis);
 	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);

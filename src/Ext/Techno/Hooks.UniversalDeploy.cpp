@@ -52,8 +52,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		{
 			pExt->Convert_UniversalDeploy_InProgress = false;
 			pThis->IsFallingDown = false;
-			CoordStruct loc = CoordStruct::Empty;
-			pThis->Scatter(loc, true, false);
+			pThis->Scatter(CoordStruct::Empty, true, false);
 			
 			return 0;
 		}
@@ -63,8 +62,6 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		// Stop the deployable unit, can not be converted if the object is moving
 		if (!pThis->IsFallingDown && pThis->CurrentMission != Mission::Guard)
 		{
-			//pFoot->SetDestination(pThis, false);
-			//pFoot->Locomotor->Stop_Moving();
 			// Reset previous command
 			pFoot->SetTarget(nullptr);
 			pFoot->SetDestination(nullptr, false);
@@ -75,16 +72,15 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		if (pTypeExt->Convert_DeployToLand)
 		{
 			//auto pCell = MapClass::Instance->GetCellAt(pThis->Location);
-			bool isFlying = pThis->GetTechnoType()->MovementZone == MovementZone::Fly;
+			bool isFlyingUnit = pThis->GetTechnoType()->MovementZone == MovementZone::Fly || pThis->GetTechnoType()->ConsideredAircraft;
 
 			// If the cell is occupied abort operation
 			//if (pThis->GetHeight() > 0 && pThis->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
-			if (isFlying && pThis->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
+			if (isFlyingUnit && pThis->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			{
 				pExt->Convert_UniversalDeploy_InProgress = false;
 				pThis->IsFallingDown = false;
-				CoordStruct loc = CoordStruct::Empty;
-				pThis->Scatter(loc, true, false);
+				pThis->Scatter(CoordStruct::Empty, true, false);
 
 				return 0;
 			}
@@ -110,92 +106,88 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 	if (!pThis)
 		return 0;
 
-	auto pOldTechno = static_cast<TechnoClass*>(pThis);
-	if (!pOldTechno)
+	auto pOld = static_cast<TechnoClass*>(pThis);
+	if (!pOld)
 		return 0;
 
-	auto const pOldTechnoExt = TechnoExt::ExtMap.Find(pOldTechno);
-	if (!pOldTechnoExt)
+	auto const pOldExt = TechnoExt::ExtMap.Find(pOld);
+	if (!pOldExt)
 		return 0;
 
-	if (pOldTechnoExt->Convert_UniversalDeploy_InProgress)
+	if (pOldExt->Convert_UniversalDeploy_InProgress)
 		return 0;
 
-	auto const pOldTechnoTypeExt = TechnoTypeExt::ExtMap.Find(pOldTechno->GetTechnoType());
-	if (!pOldTechnoTypeExt)
+	auto const pOldTypeExt = TechnoTypeExt::ExtMap.Find(pOld->GetTechnoType());
+	if (!pOldTypeExt)
 		return 0;
 	
-	auto const pNewTechnoType = pOldTechnoTypeExt->Convert_UniversalDeploy.at(0);
-	bool pTechnoIsFlying = pOldTechno->GetTechnoType()->MovementZone == MovementZone::Fly;
-	auto pCell = pOldTechno->GetCell();
+	auto const pNewType = pOldTypeExt->Convert_UniversalDeploy.at(0);
+	bool oldIsFlyingUnit = pThis->GetTechnoType()->MovementZone == MovementZone::Fly || pThis->GetTechnoType()->ConsideredAircraft;
+	auto pCell = pOld->GetCell();
 	bool cellIsOnWater = (pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach);
-	bool isNewTechnoAmphibious = pNewTechnoType->MovementZone == MovementZone::Amphibious || pNewTechnoType->MovementZone == MovementZone::AmphibiousCrusher ||	pNewTechnoType->MovementZone == MovementZone::AmphibiousDestroyer;
-	bool isNewTechnoAircraft = pNewTechnoType->ConsideredAircraft || pNewTechnoType->MovementZone == MovementZone::Fly;
+	bool isNewTechnoAmphibious = pNewType->MovementZone == MovementZone::Amphibious || pNewType->MovementZone == MovementZone::AmphibiousCrusher ||	pNewType->MovementZone == MovementZone::AmphibiousDestroyer;
+	bool isNewTechnoAircraft = pNewType->ConsideredAircraft || pNewType->MovementZone == MovementZone::Fly;
 
 	// If the deployer is over a water cell and the future deployed object doesn't support water cells abort the operation
-	if (cellIsOnWater && !(isNewTechnoAmphibious || pNewTechnoType->Naval || isNewTechnoAircraft))
+	if (cellIsOnWater && !(isNewTechnoAmphibious || pNewType->Naval || isNewTechnoAircraft))
 	{
-		pOldTechnoExt->Convert_UniversalDeploy_InProgress = false;
-		pOldTechno->IsFallingDown = false;
-		CoordStruct loc = CoordStruct::Empty;
-		pOldTechno->Scatter(loc, true, false);
+		pOldExt->Convert_UniversalDeploy_InProgress = false;
+		pOld->IsFallingDown = false;
+		pOld->Scatter(CoordStruct::Empty, true, false);
 
 		return 0;
 	}
 
-	if (pNewTechnoType->WhatAmI() == AbstractType::BuildingType)
+	if (pNewType->WhatAmI() == AbstractType::BuildingType)
 	{
 		auto pFoot = static_cast<FootClass*>(pThis);
-		auto pBuildingType = static_cast<BuildingTypeClass*>(pNewTechnoType);
-		bool canDeployIntoStructure = pNewTechnoType->CanCreateHere(CellClass::Coord2Cell(pFoot->GetCoords()), pFoot->Owner);//pNewTechnoType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
-		//bool canDeployIntoStructure = pNewTechnoType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
+		auto pBuildingType = static_cast<BuildingTypeClass*>(pNewType);
+		bool canDeployIntoStructure = pNewType->CanCreateHere(CellClass::Coord2Cell(pFoot->GetCoords()), pFoot->Owner);//pNewType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
+		//bool canDeployIntoStructure = pNewType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
 
 		if (!canDeployIntoStructure)
 		{
-			pOldTechnoExt->Convert_UniversalDeploy_InProgress = false;
-			pOldTechno->IsFallingDown = false;
-			CoordStruct loc = CoordStruct::Empty;
-			pOldTechno->Scatter(loc, true, false);
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+			pOld->IsFallingDown = false;
+			pOld->Scatter(CoordStruct::Empty, true, false);
 
 			return 0;
 		}
 	}
 
 	// Preparing UniversalDeploy logic
-	bool inf2inf = pNewTechnoType->WhatAmI() == AbstractType::InfantryType;
+	bool inf2inf = pNewType->WhatAmI() == AbstractType::InfantryType;
 
 	int nObjectsInCell = 0;
 
-	for (auto pObject = pOldTechno->GetCell()->FirstObject; pObject; pObject = pObject->NextObject)
+	for (auto pObject = pOld->GetCell()->FirstObject; pObject; pObject = pObject->NextObject)
 	{
 		auto const pItem = static_cast<TechnoClass*>(pObject);
 
-		if (pItem && pItem != pOldTechno)
+		if (pItem && pItem != pOld)
 			nObjectsInCell++;
 	}
 
 	// It the cell is occupied and isn't a infantry to infantry conversion the operation is aborted
 	if (nObjectsInCell > 0 && !inf2inf)
 	{
-		pOldTechnoExt->Convert_UniversalDeploy_InProgress = false;
-		pOldTechno->IsFallingDown = false;
-		CoordStruct loc = CoordStruct::Empty;
-		pOldTechno->Scatter(loc, true, false);
+		pOldExt->Convert_UniversalDeploy_InProgress = false;
+		pOld->IsFallingDown = false;
+		pOld->Scatter(CoordStruct::Empty, true, false);
 
 		return 0;
 	}
 
-	if (pOldTechnoTypeExt->Convert_DeployToLand)
+	if (pOldTypeExt->Convert_DeployToLand)
 	{
 		auto newCell = MapClass::Instance->GetCellAt(pThis->Location);
 
 		// If the cell is occupied abort operation
-		if (pTechnoIsFlying && pThis->IsCellOccupied(newCell, FacingType::None, -1, nullptr, false) != Move::OK)
+		if (oldIsFlyingUnit && pThis->IsCellOccupied(newCell, FacingType::None, -1, nullptr, false) != Move::OK)
 		{
-			pOldTechnoExt->Convert_UniversalDeploy_InProgress = false;
-			pOldTechno->IsFallingDown = false;
-			CoordStruct loc = CoordStruct::Empty;
-			pOldTechno->Scatter(loc, true, false);
+			pOldExt->Convert_UniversalDeploy_InProgress = false;
+			pOld->IsFallingDown = false;
+			pOld->Scatter(CoordStruct::Empty, true, false);
 
 			return 0;
 		}
@@ -203,8 +195,8 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 		pThis->IsFallingDown = true;
 	}
 
-	pOldTechnoExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
-	pOldTechnoExt->Convert_UniversalDeploy_InProgress = true;
+	pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+	pOldExt->Convert_UniversalDeploy_InProgress = true;
 
 	return 0;
 }
@@ -299,7 +291,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		return 0;
 
 	auto const pNewTechnoType = pTypeExt->Convert_UniversalDeploy.at(0);
-	bool pTechnoIsFlying = pTechno->GetTechnoType()->MovementZone == MovementZone::Fly;
+	bool oldIsFlyingUnit = pTechno->GetTechnoType()->MovementZone == MovementZone::Fly || pTechno->GetTechnoType()->ConsideredAircraft;
 	auto pCell = pTechno->GetCell();
 	bool cellIsOnWater = (pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach);
 	bool isNewTechnoAmphibious = pNewTechnoType->MovementZone == MovementZone::Amphibious || pNewTechnoType->MovementZone == MovementZone::AmphibiousCrusher ||
@@ -314,8 +306,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	{
 		pExt->Convert_UniversalDeploy_InProgress = false;
 		pTechno->IsFallingDown = false;
-		CoordStruct loc = CoordStruct::Empty;
-		pTechno->Scatter(loc, true, false);
+		pTechno->Scatter(CoordStruct::Empty, true, false);
 
 		return 0;
 	}
@@ -353,8 +344,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		{
 			pExt->Convert_UniversalDeploy_InProgress = false;
 			pTechno->IsFallingDown = false;
-			CoordStruct loc = CoordStruct::Empty;
-			pTechno->Scatter(loc, true, false);
+			pTechno->Scatter(CoordStruct::Empty, true, false);
 
 			return 0;
 		}
@@ -377,12 +367,11 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 			//auto pCell = MapClass::Instance->GetCellAt(pThis->Location);
 			// If the cell is occupied abort operation
 			//if (pTechno->GetHeight() > 0 && pTechno->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
-			if (pTechnoIsFlying && pTechno->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
+			if (oldIsFlyingUnit && pTechno->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			{
 				pExt->Convert_UniversalDeploy_InProgress = false;
 				pTechno->IsFallingDown = false;
-				CoordStruct loc = CoordStruct::Empty;
-				pTechno->Scatter(loc, true, false);
+				pTechno->Scatter(CoordStruct::Empty, true, false);
 
 				return 0;
 			}
@@ -527,11 +516,6 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 		}
 
 		pExt->Convert_UniversalDeploy_ForceRedraw = false;
-
-		// Repaint the building graphics. Needed
-		//pThis->BeginMode(BStateType::Active);
-		//pNew->CurrentMission = Mission::Guard;
-		//pThis->MarkForRedraw();
 	}
 
 	return 0;

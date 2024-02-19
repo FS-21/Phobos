@@ -2,7 +2,7 @@
 
 #include <Ext/Script/Body.h>
 
-void TechnoExt::StartUniversalDeployAnim(TechnoClass* pThis)
+void TechnoExt::CreateUniversalDeployAnimation(TechnoClass* pThis)
 {
 	if (!pThis)
 		return;
@@ -76,16 +76,16 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		return;
 
 	bool isOldBuilding = pOldType->WhatAmI() == AbstractType::BuildingType;
-	bool isNewBuilding = pNewType->WhatAmI() == AbstractType::BuildingType;
 	bool isOldInfantry = pOldType->WhatAmI() == AbstractType::InfantryType;
-	bool isNewInfantry = pNewType->WhatAmI() == AbstractType::InfantryType;
-	bool isOldAircraft = pOldType->WhatAmI() == AbstractType::AircraftType;
-	bool isNewAircraft = pNewType->WhatAmI() == AbstractType::AircraftType;
+	bool isOldAircraft = pOldType->WhatAmI() == AbstractType::AircraftType || pOldType->ConsideredAircraft;
 	bool isOldUnit = pOldType->WhatAmI() == AbstractType::UnitType;
-	bool isNewUnit = pNewType->WhatAmI() == AbstractType::UnitType;
 	bool oldTechnoIsUnit = isOldInfantry || isOldUnit || isOldAircraft;
-	bool newTechnoIsUnit = isNewInfantry || isNewUnit || isNewAircraft;
 
+	bool isNewBuilding = pNewType->WhatAmI() == AbstractType::BuildingType;
+	bool isNewInfantry = pNewType->WhatAmI() == AbstractType::InfantryType;
+	bool isNewAircraft = pNewType->WhatAmI() == AbstractType::AircraftType || pNewType->ConsideredAircraft;
+	bool isNewUnit = pNewType->WhatAmI() == AbstractType::UnitType;
+	bool newTechnoIsUnit = isNewInfantry || isNewUnit || isNewAircraft;
 
 	auto const pOwner = pOld->Owner;
 	bool canDeployIntoStructure = false;
@@ -111,7 +111,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			//pOld->Location.Z = 0;
 		}
 
-		pOld->InAir = (pOld->GetHeight() > 0);// Force the update
+		pOld->InAir = pOld->GetHeight() > 0; // Force the update
 
 		if (deployToLand)
 		{
@@ -119,7 +119,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				return;
 
 			pOldFoot->StopMoving();
-			pOldFoot->ParalysisTimer.Start(15);
+			pOldFoot->ParalysisTimer.Start(15); // Be quiet old unit and let me change you...
 		}
 	}
 
@@ -164,13 +164,16 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	if (pOld->IsSelected)
 		selected = true;
 
-	// Here we go, the real conversions! There are 3 cases, being the 3º one the generic
- 
-	// Case 1: "Unit into building" deploy.
+	// Here we go, the real conversions! There are 2 cases
+
+	// Case 1: "Unit into something" deploy.
 	// Unit should loose the shape and get the structure shape.
 	// This also prevents other units enter inside the structure foundation.
+
 	if (oldTechnoIsUnit)// && isNewBuilding)
 	{
+		//TechnoExt::RunStructureIntoTechnoConversion(pOld, pNewType);
+
 		if (!pOld->InLimbo)
 			pOld->Limbo();
 
@@ -262,7 +265,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			// The conversion process won't start until the deploy animation ends
 			if (!isDeployAnimPlaying)
 			{
-				TechnoExt::StartUniversalDeployAnim(pOld);
+				TechnoExt::CreateUniversalDeployAnimation(pOld);
 				return;
 			}
 
@@ -331,7 +334,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		return;
 	}
 
-	// Case 2: Building into something deploy
+	// Case 2: "Building into something" deploy
 	// Structure foundation should remain until the deploy animation ends (if any).
 	// This also prevents other units enter inside the structure foundation.
 	// This case should cover the "structure into structure".
@@ -400,7 +403,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			// The conversion process won't start until the deploy animation ends
 			if (!isDeployAnimPlaying)
 			{
-				TechnoExt::StartUniversalDeployAnim(pOld);
+				TechnoExt::CreateUniversalDeployAnimation(pOld);
 				return;
 			}
 
@@ -499,17 +502,25 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 		if (newTechnoIsUnit)
 		{
+			auto pCell = pNew->GetCell();
+			bool cellIsOnWater = (pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach);
+
 			// Jumpjet tricks: if they are in the ground make air units fly
-			if (pNewType->JumpJet || pNewType->BalloonHover)
+			if ((!pNew->InAir || cellIsOnWater) && (pNewType->JumpJet || pNewType->BalloonHover))
 			{
 				// Jumpjets should fly if
 				auto pFoot = static_cast<FootClass*>(pNew);
 				pFoot->Scatter(CoordStruct::Empty, true, false);
+				pNew->IsFallingDown = false; // Probably isn't necessary since the new object should not have this "true"
 			}
 			else
 			{
-				if (pNewType->MovementZone == MovementZone::Fly)
+				if (isNewAircraft && cellIsOnWater)
+				{
+					auto pFoot = static_cast<FootClass*>(pNew);
+					pFoot->Scatter(CoordStruct::Empty, true, false);
 					pNew->IsFallingDown = false; // Probably isn't necessary since the new object should not have this "true"
+				}
 			}
 		}
 
@@ -525,7 +536,137 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 // This method transfer all settings from the old object to the new.
 // If a new object isn't defined then it will be picked from a list.
-TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pOld, TechnoTypeClass* pNewType)
+// It will have less checks than the Update
+TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
+{
+	if (!pOld || !ScriptExt::IsUnitAvailable(pOld, false))
+		return nullptr;
+
+	auto pOldExt = TechnoExt::ExtMap.Find(pOld);
+	if (pOldExt->Convert_UniversalDeploy_InProgress)// TO-DO: handle interference between a conversion in progress and this method
+		return nullptr;
+
+	auto pOldType = pOld->GetTechnoType();
+	if (!pOldType)
+		return nullptr;
+
+	auto pOldTypeExt = TechnoTypeExt::ExtMap.Find(pOldType);
+
+	// If the new object isn't defined then it will be picked from a list
+	if (!pNewType)
+	{
+		if (pOldTypeExt->Convert_UniversalDeploy.size() == 0)
+			return nullptr;
+
+		// TO-DO: having multiple deploy candidate IDs it should pick randomly from the list
+		// Probably a new tag should enable this random behaviour...
+		int index = 0; //ScenarioClass::Instance->Random.RandomRanged(0, pOldTechnoTypeExt->Convert_UniversalDeploy.size() - 1);
+		pNewType = pOldTypeExt->Convert_UniversalDeploy.at(index);
+	}
+
+	bool isOldBuilding = pOldType->WhatAmI() == AbstractType::BuildingType;
+	bool isOldInfantry = pOldType->WhatAmI() == AbstractType::InfantryType;
+	bool isOldAircraft = pOldType->WhatAmI() == AbstractType::AircraftType || pOldType->ConsideredAircraft;
+	bool isOldUnit = pOldType->WhatAmI() == AbstractType::UnitType;
+	bool oldTechnoIsUnit = isOldInfantry || isOldUnit || isOldAircraft;
+
+	bool isNewBuilding = pNewType->WhatAmI() == AbstractType::BuildingType;
+	bool isNewInfantry = pNewType->WhatAmI() == AbstractType::InfantryType;
+	bool isNewAircraft = pNewType->WhatAmI() == AbstractType::AircraftType || pNewType->ConsideredAircraft;
+	bool isNewUnit = pNewType->WhatAmI() == AbstractType::UnitType;
+	bool newTechnoIsUnit = isNewInfantry || isNewUnit || isNewAircraft;
+
+	auto pNewTypeExt = TechnoTypeExt::ExtMap.Find(pNewType);
+	auto const pOwner = pOld->Owner;
+	pOld->InAir = (pOld->GetHeight() > 0); // Force the update
+	CoordStruct deployerLocation = pOld->GetCoords();
+	CoordStruct deploymentLocation = isOldInfantry && isNewInfantry ? deployerLocation : pOld->GetCell()->GetCenterCoords(); // infantry into infantry allows unlimbo into a sub-cell
+	DirType currentDir = pOld->PrimaryFacing.Current().GetDir(); // Returns current position in format [0 - 7] x 32
+
+	if (isNewBuilding && pOld->InAir)
+		return nullptr;
+
+	TechnoClass* pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
+	if (!pNew)
+		return nullptr;
+
+	pNew->ForceMission(Mission::Guard);
+
+	bool selected = false;
+	if (pOld->IsSelected)
+		pOld->Select();
+
+	++Unsorted::IKnowWhatImDoing;
+	pOld->Limbo();
+	bool unlimboed = pNew->Unlimbo(deploymentLocation, currentDir);
+	--Unsorted::IKnowWhatImDoing;
+
+	if (!unlimboed)
+	{
+		// I think here won't enter I avoided checks
+		++Unsorted::IKnowWhatImDoing;
+		pNew->UnInit();
+		pOld->Unlimbo(deployerLocation, currentDir);
+		--Unsorted::IKnowWhatImDoing;
+	}
+
+	// If I interrumped an UniversalDeploy process...
+	//pOldExt->Convert_TemporalTechno = nullptr;
+	//pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
+	//pOldExt->Convert_UniversalDeploy_InProgress = false;
+	//pOldExt->Convert_UniversalDeploy_ForceRedraw = false;
+	//pOld->IsFallingDown = false;
+
+	pNew->InAir = (pOld->GetHeight() > 0); // Force the update
+
+	if (pNew->InAir && !isNewAircraft) // Fall...
+		pNew->Scatter(CoordStruct::Empty, true, false);
+
+	if (newTechnoIsUnit)
+	{
+		auto pCell = pNew->GetCell();
+		bool cellIsOnWater = (pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach);
+
+		// Jumpjet tricks: if they are in the ground make air units fly
+		if ((!pNew->InAir || cellIsOnWater) && (pNewType->JumpJet || pNewType->BalloonHover))
+		{
+			// Jumpjets should fly if
+			auto pFoot = static_cast<FootClass*>(pNew);
+			pFoot->Scatter(CoordStruct::Empty, true, false);
+			pNew->IsFallingDown = false; // Probably isn't necessary since the new object should not have this "true"
+		}
+		else
+		{
+			if (isNewAircraft && cellIsOnWater)
+			{
+				auto pFoot = static_cast<FootClass*>(pNew);
+				pFoot->Scatter(CoordStruct::Empty, true, false);
+				pNew->IsFallingDown = false; // Probably isn't necessary since the new object should not have this "true"
+			}
+		}
+	}
+
+	// Transfer all the important details
+	TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
+
+	pOwner->RegisterLoss(pOld, false);
+	pOwner->RegisterGain(pNew, true);
+	pNew->MarkForRedraw();
+	pNew->Owner->RecheckTechTree = true;
+	pNew->Owner->RecheckPower = true;
+	pNew->Owner->RecheckRadar = true;
+	pOwner->RegisterGain(pNew, true);
+
+	pOld->UnInit();
+
+	return pNew;
+}
+
+/*
+// This method transfer all settings from the old object to the new.
+// If a new object isn't defined then it will be picked from a list.
+// It will have less checks than the Update
+TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
 {
 	if (!pOld || !ScriptExt::IsUnitAvailable(pOld, false))
 		return nullptr;
@@ -550,7 +691,7 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pOld, TechnoTypeClass* pNe
 		pNewType = pOldTypeExt->Convert_UniversalDeploy.at(index);
 	}
 
-	auto pNewTypeExt = TechnoTypeExt::ExtMap.Find(pNewType); // I'll consider this never gets nullptr
+	auto pNewTypeExt = TechnoTypeExt::ExtMap.Find(pNewType);
 	auto newLocation = pOld->Location;
 	auto const pOwner = pOld->Owner;
 
@@ -559,9 +700,7 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pOld, TechnoTypeClass* pNe
 	bool isOldInfantry = pOldType->WhatAmI() == AbstractType::InfantryType;
 	bool isNewInfantry = pNewType->WhatAmI() == AbstractType::InfantryType;
 	bool isOldAircraft = pOldType->WhatAmI() == AbstractType::AircraftType;
-	bool isNewAircraft = pNewType->WhatAmI() == AbstractType::AircraftType;
 	bool isOldUnit = pOldType->WhatAmI() == AbstractType::UnitType;
-	bool isNewUnit = pNewType->WhatAmI() == AbstractType::UnitType;
 	bool oldTechnoIsUnit = isOldInfantry || isOldUnit || isOldAircraft;
 
 	// "Non-building into non-Building" check: abort if 2 o more units are placed in the same cell
@@ -613,7 +752,7 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pOld, TechnoTypeClass* pNe
 			return 0;
 		}
 	}
-	
+
 	auto pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
 
 	if (!pNew)
@@ -677,6 +816,7 @@ TechnoClass* TechnoExt::UniversalConvert(TechnoClass* pOld, TechnoTypeClass* pNe
 
 	return pNew;
 }
+*/
 
 bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* pNew)
 {
@@ -787,16 +927,25 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 	}
 
 	// Jumpjet tricks: if they are in the ground make air units fly
-	if (pNewType->JumpJet || pNewType->BalloonHover)
+	auto pCell = pNew->GetCell();
+	bool cellIsOnWater = (pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach);
+
+	// Jumpjet tricks: if they are in the ground make air units fly
+	if ((!pNew->InAir || cellIsOnWater) && (pNewType->JumpJet || pNewType->BalloonHover))
 	{
 		// Jumpjets should fly if
 		auto pFoot = static_cast<FootClass*>(pNew);
 		pFoot->Scatter(CoordStruct::Empty, true, false);
+		pNew->IsFallingDown = false; // Probably isn't necessary since the new object should not have this "true"
 	}
 	else
 	{
-		if (pNewType->MovementZone == MovementZone::Fly)
+		if (isNewAircraft && cellIsOnWater)
+		{
+			auto pFoot = static_cast<FootClass*>(pNew);
+			pFoot->Scatter(CoordStruct::Empty, true, false);
 			pNew->IsFallingDown = false; // Probably isn't necessary since the new object should not have this "true"
+		}
 	}
 
 	// Inherit other stuff
@@ -964,4 +1113,14 @@ void TechnoExt::PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechn
 			}
 		}
 	}
+}
+
+void TechnoExt::RunStructureIntoTechnoConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
+{
+
+}
+
+void TechnoExt::RunTechnoIntoStructureConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
+{
+
 }
