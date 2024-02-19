@@ -22,8 +22,6 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	// Building case, send the undeploy signal
 	if (pThis->WhatAmI() == AbstractType::Building)
 	{
-		//pThis->MissionStatus = 0;
-		//pTechno->CurrentMission = Mission::Selling;
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 
@@ -37,7 +35,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.at(0)->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.at(0)) : nullptr;
 		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pThis->GetCoords()), pThis->Owner) : false;//pNewTechnoType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
 		//bool canDeployIntoStructure = pIntoBuildingType ? TechnoExt::CanDeployIntoBuilding(pUnit, false, pIntoBuildingType) : false;
-		auto pCell = pThis->GetCell();// MapClass::Instance->GetCellAt(pThis->Location);
+		auto pCell = pThis->GetCell();
 		int nObjectsInCell = 0;
 
 		// Count objects located in the desired cell
@@ -105,91 +103,6 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	return 0;
 }
 
-/*DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
-{
-	GET(InfantryClass*, pThis, ECX);
-
-	if (!pThis || !ScriptExt::IsUnitAvailable(pThis, false))
-		return 0;
-
-	auto const pTechno = static_cast<TechnoClass*>(pThis);
-	if (!pTechno)
-		return 0;
-
-	auto const pExt = TechnoExt::ExtMap.Find(pTechno);
-	if (!pExt || pExt->Convert_UniversalDeploy_InProgress)
-		return 0;
-
-	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
-		return 0;
-
-	// Preparing UniversalDeploy logic
-	//const auto pUnit = abstract_cast<UnitClass*>(pTechno);
-	const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy[0]->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy[0]) : nullptr;
-	//bool canDeployIntoStructure = pIntoBuildingType ? TechnoExt::CanDeployIntoBuilding(pUnit, false, pIntoBuildingType) : false;
-	auto pCell = pThis->GetCell();// MapClass::Instance->GetCellAt(pThis->Location);
-	int nObjectsInCell = 0;
-
-	for (auto pObject = pTechno->GetCell()->FirstObject; pObject; pObject = pObject->NextObject)
-	{
-		auto const pItem = static_cast<TechnoClass*>(pObject);
-
-		if (pItem && pItem != pTechno)
-			nObjectsInCell++;
-	}
-
-	// Abort if the cell is occupied with objects or can not be deployed into structure. And move the unit to a different nearby location.
-	if (nObjectsInCell > 0)// && !pIntoBuildingType) || !canDeployIntoStructure)
-	{
-		pExt->Convert_UniversalDeploy_InProgress = false;
-		pThis->IsFallingDown = false;
-		CoordStruct loc = CoordStruct::Empty;
-		pTechno->Scatter(loc, true, false);
-
-		return 0;
-	}
-
-	auto const pFoot = static_cast<FootClass*>(pThis);
-
-	// Stop the deployable unit, can not be converted if the object is moving
-	if (!pThis->IsFallingDown && pThis->CurrentMission != Mission::Guard)
-	{
-		//pFoot->SetDestination(pThis, false);
-		//pFoot->Locomotor->Stop_Moving();
-		// Reset previous command
-		pFoot->SetTarget(nullptr);
-		pFoot->SetDestination(nullptr, false);
-		pFoot->ForceMission(Mission::Guard);
-	}
-
-	// If is set DeployToLand then is probably a flying unit that only can be deployed in ground
-	if (pTypeExt->Convert_DeployToLand)
-	{
-		//auto pCell = MapClass::Instance->GetCellAt(pThis->Location);
-		bool isFlying = pThis->GetTechnoType()->MovementZone == MovementZone::Fly;
-
-		// If the cell is occupied abort operation
-			//if (pThis->GetHeight() > 0 && pThis->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
-		if (isFlying && pThis->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
-		{
-			pExt->Convert_UniversalDeploy_InProgress = false;
-			pThis->IsFallingDown = false;
-			CoordStruct loc = CoordStruct::Empty;
-			pThis->Scatter(loc, true, false);
-
-			return 0;
-		}
-
-		// I don't know if is the right action to force air units to land, including units with BalloonHover=yes
-		pThis->IsFallingDown = true;
-	}
-
-	// Set the deployment signal, indicating the process hasn't finished
-	pExt->Convert_UniversalDeploy_InProgress = true;
-
-	return 0;
-}*/
 DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 {
 	GET(InfantryClass*, pThis, ECX);
@@ -323,64 +236,6 @@ DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
 	return 0x449E00;
 }
 
-
-// ATENCIÓN: DEJAR OBSOLETO ESTE VIEJO CÓDIGO
-/*DEFINE_HOOK(0x449E6B, BuildingClass_MissionDeconstruction_UniversalDeploy__, 0x5)
-{
-	GET(UnitClass*, pUnit, EBX);
-	GET(BuildingClass*, pBuilding, ECX);
-
-	if (!pUnit || !pBuilding)
-		return 0;
-
-	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
-		return 0;
-
-	pUnit->Limbo();
-
-	auto pOldTechno = static_cast<TechnoClass*>(pBuilding);
-	if (!pOldTechno)
-		return 0;
-
-	CoordStruct deployLocation = pOldTechno->GetCoords();
-	auto deployed = TechnoExt::UniversalConvert(pOldTechno);
-
-	if (deployed)
-	{
-		if (pTypeExt->Convert_AnimFX.isset())
-		{
-			const auto pAnimType = pTypeExt->Convert_AnimFX.Get();
-
-			if (auto const pAnim = GameCreate<AnimClass>(pAnimType, deployLocation))
-			{
-				if (pTypeExt->Convert_AnimFX_FollowDeployer)
-					pAnim->SetOwnerObject(deployed);
-
-				pAnim->Owner = deployed->Owner;
-			}
-		}
-
-		pUnit->UnInit();
-
-		return 0x44A1D8;
-	}
-
-	// Restoring unit after a failed deploy attempt. I don't know if this can happen.
-	if (pTypeExt->Convert_DeployDir >= 0)
-	{
-		DirStruct desiredFacing;
-		desiredFacing.SetDir(static_cast<DirType>(pTypeExt->Convert_DeployDir * 32));
-		pUnit->PrimaryFacing.SetCurrent(desiredFacing);
-	}
-	else
-	{
-		pUnit->Unlimbo(pUnit->Location, DirType::North);
-	}
-
-	return 0;
-}*/
-
 DEFINE_HOOK(0x44725F, BuildingClass_WhatAction_UniversalDeploy_EnableDeployIcon, 0x5)
 {
 	GET(BuildingClass*, pBuilding, ESI);
@@ -469,8 +324,6 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	if (pTechno->WhatAmI() == AbstractType::Building)
 	{
 		R->EBX(Action::None);
-		//pTechno->MissionStatus = 0;
-		//pTechno->CurrentMission = Mission::Selling;
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 
@@ -570,25 +423,6 @@ DEFINE_HOOK(0x73B4DA, UnitClass_DrawVoxel_UniversalDeploy_DontRenderObject, 0x6)
 
 	return 0;
 }
-
-// Probably obsolete since I hooked DrawVoxel
-/*DEFINE_HOOK(0x5F4CF1, ObjectClass_Render_UniversalDeploy_DontRenderObject, 0x9)
-{
-	enum { Skip = 0x5F4D09 };
-	GET(ObjectClass*, pThis, ECX);
-	if (!pThis)
-		return 0;
-	auto pTechno = static_cast<TechnoClass*>(pThis);
-	if (!pTechno)
-		return 0;
-	auto pExt = TechnoExt::ExtMap.Find(pTechno);
-	if (!pExt)
-		return 0;
-	// Some objects won't draw graphics when deploy
-	if (pExt->Convert_UniversalDeploy_MakeInvisible)
-		return Skip;
-	return 0;
-}*/
 
 // Make object graphics invisible because they aren't rendered
 DEFINE_HOOK(0x73C602, TechnoClass_DrawObject_UniversalDeploy_DontRenderObject, 0x6)
