@@ -35,6 +35,40 @@ void TypeConvertHelper::Convert(FootClass* pTargetFoot, const std::vector<TypeCo
 	}
 }
 
+void TypeConvertHelper::UniversalConvert(TechnoClass* pTarget, const std::vector<TypeConvertGroup>& convertPairs, HouseClass* pOwner, AnimTypeClass* pTypeAnim = nullptr)
+{
+	for (const auto& [fromTypes, toType, affectedHouses] : convertPairs)
+	{
+		if (!toType.isset() || !toType.Get()) continue;
+
+		if (!EnumFunctions::CanTargetHouse(affectedHouses, pOwner, pTarget->Owner))
+			continue;
+
+		if (fromTypes.size())
+		{
+			for (const auto& from : fromTypes)
+			{
+				// Check if the target matches upgrade-from TechnoType and it has something to upgrade to
+				if (from == pTarget->GetTechnoType())
+				{
+					bool converted = TechnoExt::UniversalDeployConversion(pTarget, toType) ? true : false;
+
+					if (converted && pTypeAnim)
+					{
+						if (auto pAnim = GameCreate<AnimClass>(pTypeAnim, pTarget->Location))
+							pAnim->SetOwnerObject(pTarget);
+					}
+
+					break;
+				}
+			}
+		}
+		else
+		{
+			TechnoExt::UniversalDeployConversion(pTarget, toType);
+		}
+	}
+}
 
 bool TypeConvertGroup::Load(PhobosStreamReader& stm, bool registerForChange)
 {

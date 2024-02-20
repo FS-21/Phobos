@@ -74,6 +74,8 @@ public:
 		Valueable<CSFText> Message_RestartedTimer;
 		NullableIdx<VoxClass> EVA_RestartedTimer;
 
+		Valueable<bool> Convert_UseUniversalDeploy;
+
 		ExtData(SuperWeaponTypeClass* OwnerObject) : Extension<SuperWeaponTypeClass>(OwnerObject)
 			, Money_Amount { 0 }
 			, SW_Inhibitors {}
@@ -118,6 +120,7 @@ public:
 			, Message_InsufficientFunds {}
 			, EVA_RestartedTimer {}
 			, TimerRestarted { false }
+			, Convert_UseUniversalDeploy { false }
 		{ }
 
 		// Ares 0.A functions

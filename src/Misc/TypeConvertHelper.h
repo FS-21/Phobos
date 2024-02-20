@@ -24,4 +24,5 @@ namespace TypeConvertHelper
 	typedef std::vector<std::tuple<ValueableVector<TechnoTypeClass*>, NullableIdx<TechnoTypeClass>, Nullable<AffectedHouse>>> ConvertPairs;
 
 	void Convert(FootClass* pTargetFoot, const std::vector<TypeConvertGroup>& convertPairs, HouseClass* pOwner, AnimTypeClass* pTypeAnim);
+	void UniversalConvert(TechnoClass* pTargetFoot, const std::vector<TypeConvertGroup>& convertPairs, HouseClass* pOwner, AnimTypeClass* pTypeAnim);
 }

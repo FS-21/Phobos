@@ -215,6 +215,8 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Webby_DurationVariation.Read(exINI, pSection, "Webby.DurationVariation");
 	this->Webby_Cap.Read(exINI, pSection, "Webby.Cap");
 
+	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
+
 	char tempBuffer[32];
 	// Convert.From & Convert.To
 	for (size_t i = 0; ; ++i)
@@ -422,6 +424,8 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->CanRemoveParasites_KickOut_Paralysis)
 		.Process(this->CanRemoveParasites_ReportSound)
 		.Process(this->CanRemoveParasites_KickOut_Anim)
+
+		.Process(this->Convert_UseUniversalDeploy)
 		;
 }
 

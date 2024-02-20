@@ -313,6 +313,14 @@ void SWTypeExt::ExtData::ApplyTypeConversion(SuperClass* pSW)
 
 	AnimTypeClass* pAnim = this->Convert_Anim.isset() ? this->Convert_Anim.Get() : nullptr;
 
+	if (this->Convert_UseUniversalDeploy.Get())
+	{
+		for (const auto pTarget : *TechnoClass::Array)
+			TypeConvertHelper::UniversalConvert(pTarget, this->Convert_Pairs, pSW->Owner, pAnim);
+
+		return;
+	}
+
 	for (const auto pTargetFoot : *FootClass::Array)
 		TypeConvertHelper::Convert(pTargetFoot, this->Convert_Pairs, pSW->Owner, pAnim);
 }

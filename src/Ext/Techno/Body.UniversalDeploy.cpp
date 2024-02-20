@@ -323,13 +323,15 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pNewExt->Convert_UniversalDeploy_InProgress = false;
 
 			pOwner->RegisterLoss(pOld, false);
+			pOwner->RemoveTracking(pOld);
 			pOld->UnInit();
 		}
 
+		pOwner->AddTracking(pNew);
+		pOwner->RegisterGain(pNew, false);
 		pNew->Owner->RecheckTechTree = true;
 		pNew->Owner->RecheckPower = true;
 		pNew->Owner->RecheckRadar = true;
-		pOwner->RegisterGain(pNew, true);
 
 		return;
 	}
@@ -497,6 +499,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pNewExt->Convert_UniversalDeploy_ForceRedraw = true;
 
 			pOwner->RegisterLoss(pOld, false);
+			pOwner->RemoveTracking(pOld);
 			pOld->UnInit();
 		}
 
@@ -527,10 +530,11 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		pNewExt->Convert_UniversalDeploy_InProgress = false;
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNew->MarkForRedraw();
+		pOwner->AddTracking(pNew);
+		pOwner->RegisterGain(pNew, false);
 		pNew->Owner->RecheckTechTree = true;
 		pNew->Owner->RecheckPower = true;
 		pNew->Owner->RecheckRadar = true;
-		pOwner->RegisterGain(pNew, true);
 	}
 }
 
@@ -648,14 +652,15 @@ TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeC
 
 	// Transfer all the important details
 	TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
-
+	
+	pOwner->RemoveTracking(pOld);
 	pOwner->RegisterLoss(pOld, false);
-	pOwner->RegisterGain(pNew, true);
+	pOwner->AddTracking(pNew);
+	pOwner->RegisterGain(pNew, false);
 	pNew->MarkForRedraw();
 	pNew->Owner->RecheckTechTree = true;
 	pNew->Owner->RecheckPower = true;
 	pNew->Owner->RecheckRadar = true;
-	pOwner->RegisterGain(pNew, true);
 
 	pOld->UnInit();
 
@@ -964,6 +969,11 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 	pNew->SetOwningHouse(pOld->GetOwningHouse(), false);// Is really necessary? the object was created with the final owner by default... I have to try without this tag
 	pNew->AttachedTag = pOld->AttachedTag;
 	pNew->AttachedBomb = pOld->AttachedBomb;
+
+	// Detach CLEG targeting
+	auto tempUsing = pOld->TemporalImUsing;
+	if (tempUsing && tempUsing->Target)
+		tempUsing->Detach();
 
 	/*if (pOld->Target)
 	{

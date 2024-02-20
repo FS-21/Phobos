@@ -54,6 +54,7 @@ void SWTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Message_RestartedTimer)
 		.Process(this->EVA_RestartedTimer)
 		.Process(this->TimerRestarted)
+		.Process(this->Convert_UseUniversalDeploy)
 		;
 }
 
@@ -197,6 +198,8 @@ void SWTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->EVA_RestartedTimer.Read(exINI, pSection, "EVA.RestartedTimer");
 	this->SW_FirstClickRestartsTimer_AutoFire.Read(exINI, pSection, "SW.FirstClickRestartsTimer.AutoFire");
 	this->SW_FirstClickRestartsTimer_RefundIfAborted.Read(exINI, pSection, "SW.FirstClickRestartsTimer.RefundIfAborted");
+
+	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
 }
 
 void SWTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)
