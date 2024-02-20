@@ -413,7 +413,7 @@ public:
 			, Convert_AnimFX_FollowDeployer { false }
 			, Convert_DeployingAnim {}
 			, Convert_DeploySound {}
-			, Convert_DeployDir { RulesClass::Instance->DeployDir }
+			, Convert_DeployDir { -1 }
 			, Convert_TransferPassengers { true }
 			, Convert_TransferPassengers_IgnoreInvalidOccupiers { false }
 			, Convert_TransferVeterancy { true }

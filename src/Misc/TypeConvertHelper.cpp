@@ -51,6 +51,12 @@ void TypeConvertHelper::UniversalConvert(TechnoClass* pTarget, const std::vector
 				// Check if the target matches upgrade-from TechnoType and it has something to upgrade to
 				if (from == pTarget->GetTechnoType())
 				{
+					if (pTarget->Target)
+					{
+						auto pTargetExt = TechnoExt::ExtMap.Find(pTarget);
+						pTargetExt->Convert_UniversalDeploy_RememberTarget = pTarget->Target;
+					}
+
 					bool converted = TechnoExt::UniversalDeployConversion(pTarget, toType) ? true : false;
 
 					if (converted && pTypeAnim)

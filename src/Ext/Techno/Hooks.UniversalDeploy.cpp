@@ -25,6 +25,9 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 
+		if (pThis->Target)
+			pExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
+
 		return 0x730C10;
 	}
 
@@ -50,6 +53,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		// Abort if the cell is occupied with objects or can not be deployed into structure. And move the unit to a different nearby location.
 		if ((nObjectsInCell > 0 && !pIntoBuildingType) || pIntoBuildingType && !canDeployIntoStructure)
 		{
+			pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 			pExt->Convert_UniversalDeploy_InProgress = false;
 			pThis->IsFallingDown = false;
 			pThis->Scatter(CoordStruct::Empty, true, false);
@@ -62,6 +66,8 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		// Stop the deployable unit, can not be converted if the object is moving
 		if (!pThis->IsFallingDown && pThis->CurrentMission != Mission::Guard)
 		{
+			pExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
+
 			// Reset previous command
 			pFoot->SetTarget(nullptr);
 			pFoot->SetDestination(nullptr, false);
@@ -78,6 +84,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 			//if (pThis->GetHeight() > 0 && pThis->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			if (isFlyingUnit && pThis->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			{
+				pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 				pExt->Convert_UniversalDeploy_InProgress = false;
 				pThis->IsFallingDown = false;
 				pThis->Scatter(CoordStruct::Empty, true, false);
@@ -92,6 +99,9 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		// Set the deployment signal, indicating the process hasn't finished
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 		pExt->Convert_UniversalDeploy_InProgress = true;
+
+		if (pThis->Target)
+			pExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
 
 		return 0x730C10;
 	}
@@ -131,6 +141,7 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 	// If the deployer is over a water cell and the future deployed object doesn't support water cells abort the operation
 	if (cellIsOnWater && !(isNewTechnoAmphibious || pNewType->Naval || isNewTechnoAircraft))
 	{
+		pOldExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 		pOldExt->Convert_UniversalDeploy_InProgress = false;
 		pOld->IsFallingDown = false;
 		pOld->Scatter(CoordStruct::Empty, true, false);
@@ -147,6 +158,7 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 
 		if (!canDeployIntoStructure)
 		{
+			pOldExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 			pOldExt->Convert_UniversalDeploy_InProgress = false;
 			pOld->IsFallingDown = false;
 			pOld->Scatter(CoordStruct::Empty, true, false);
@@ -171,6 +183,7 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 	// It the cell is occupied and isn't a infantry to infantry conversion the operation is aborted
 	if (nObjectsInCell > 0 && !inf2inf)
 	{
+		pOldExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 		pOldExt->Convert_UniversalDeploy_InProgress = false;
 		pOld->IsFallingDown = false;
 		pOld->Scatter(CoordStruct::Empty, true, false);
@@ -185,6 +198,7 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 		// If the cell is occupied abort operation
 		if (oldIsFlyingUnit && pThis->IsCellOccupied(newCell, FacingType::None, -1, nullptr, false) != Move::OK)
 		{
+			pOldExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 			pOldExt->Convert_UniversalDeploy_InProgress = false;
 			pOld->IsFallingDown = false;
 			pOld->Scatter(CoordStruct::Empty, true, false);
@@ -197,6 +211,9 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 
 	pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 	pOldExt->Convert_UniversalDeploy_InProgress = true;
+
+	if (pThis->Target)
+		pOldExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
 
 	return 0;
 }
@@ -221,6 +238,9 @@ DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
 		return 0;
 
 	// Start the UniversalDeploy process
+	if (pBuilding->Target)
+		pExt->Convert_UniversalDeploy_RememberTarget = pBuilding->Target;
+
 	pExt->Convert_UniversalDeploy_InProgress = true;
 	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 	pBuilding->CurrentMission = Mission::Sleep;
@@ -256,6 +276,7 @@ DEFINE_HOOK(0x44725F, BuildingClass_WhatAction_UniversalDeploy_EnableDeployIcon,
 	return 0;
 }
 
+// Probably obsolete since I added a new hook
 DEFINE_HOOK(0x457DE9, BuildingClass_EvictOccupiers_UniversalDeploy_DontEjectOccupiers, 0xC)
 {
 	GET(BuildingClass*, pBuilding, ECX);
@@ -299,11 +320,12 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	bool isNewTechnoAircraft = pNewTechnoType->ConsideredAircraft || pNewTechnoType->MovementZone == MovementZone::Fly;
 
 	if (pTechno->WhatAmI() == AbstractType::Infantry)
-		return 0; //Checked in another hook
+		return 0; //Checked in another hook. Or should I prevent the execution of that hook and put the code here?
 
 	// If the deployer is over a water cell and the future deployed object doesn't support water cells abort the operation
 	if (cellIsOnWater && !(isNewTechnoAmphibious || pNewTechnoType->Naval || isNewTechnoAircraft))
 	{
+		pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 		pExt->Convert_UniversalDeploy_InProgress = false;
 		pTechno->IsFallingDown = false;
 		pTechno->Scatter(CoordStruct::Empty, true, false);
@@ -317,6 +339,9 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		R->EBX(Action::None);
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+
+		if (pTechno->Target)
+			pExt->Convert_UniversalDeploy_RememberTarget = pTechno->Target;
 
 		return 0;
 	}
@@ -342,6 +367,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		// Abort if the cell is occupied with objects or can not be deployed into structure. And move the unit to a different nearby location.
 		if ((nObjectsInCell > 0 && !pIntoBuildingType) || pIntoBuildingType && !canDeployIntoStructure)
 		{
+			pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 			pExt->Convert_UniversalDeploy_InProgress = false;
 			pTechno->IsFallingDown = false;
 			pTechno->Scatter(CoordStruct::Empty, true, false);
@@ -356,6 +382,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		{
 			//pFoot->SetDestination(pTechno, false);
 			//pFoot->Locomotor->Stop_Moving();
+			pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 			// Reset previous command
 			pFoot->SetTarget(nullptr);
 			pFoot->SetDestination(nullptr, false);
@@ -369,6 +396,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 			//if (pTechno->GetHeight() > 0 && pTechno->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			if (oldIsFlyingUnit && pTechno->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			{
+				pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 				pExt->Convert_UniversalDeploy_InProgress = false;
 				pTechno->IsFallingDown = false;
 				pTechno->Scatter(CoordStruct::Empty, true, false);
@@ -384,7 +412,34 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		// Set the deployment signal, indicating the process hasn't finished
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 		pExt->Convert_UniversalDeploy_InProgress = true;
+
+		if (pTechno->Target)
+			pExt->Convert_UniversalDeploy_RememberTarget = pTechno->Target;
 	}
+
+	return 0;
+}
+
+// Avoid the sell cursor while the structure is being deployed with the UniversalDeploy
+DEFINE_HOOK(0x4494DC, BuildingClass_CanDemolish_UniversalDeploy, 0x6)
+{
+	GET(BuildingClass*, pThis, ESI);
+
+	auto const pExt = TechnoExt::ExtMap.Find(pThis);
+	if (pExt && pExt->Convert_UniversalDeploy_InProgress)
+		return 0x449536;
+
+	return 0;
+}
+
+// Skip voxel turret drawing while the structure is being deployed with the UniversalDeploy
+DEFINE_HOOK(0x43DF6E, BuildingClass_Draw_UniversalDeploy, 0x6)
+{
+	GET(BuildingClass*, pThis, EBP);
+
+	auto const pExt = TechnoExt::ExtMap.Find(pThis);
+	if (pExt && pExt->Convert_UniversalDeploy_InProgress)
+		return 0x43E795;
 
 	return 0;
 }
@@ -517,30 +572,6 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 
 		pExt->Convert_UniversalDeploy_ForceRedraw = false;
 	}
-
-	return 0;
-}
-
-// Avoid the sell cursor while the structure is being deployed with the UniversalDeploy
-DEFINE_HOOK(0x4494DC, BuildingClass_CanDemolish_UniversalDeploy, 0x6)
-{
-	GET(BuildingClass*, pThis, ESI);
-
-	auto const pExt = TechnoExt::ExtMap.Find(pThis);
-	if (pExt && pExt->Convert_UniversalDeploy_InProgress)
-		return 0x449536;
-
-	return 0;
-}
-
-// Skip voxel turret drawing while the structure is being deployed with the UniversalDeploy
-DEFINE_HOOK(0x43DF6E, BuildingClass_Draw_UniversalDeploy, 0x6)
-{
-	GET(BuildingClass*, pThis, EBP);
-
-	auto const pExt = TechnoExt::ExtMap.Find(pThis);
-	if (pExt && pExt->Convert_UniversalDeploy_InProgress)
-		return 0x43E795;
 
 	return 0;
 }
