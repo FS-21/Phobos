@@ -149,7 +149,7 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 		return 0;
 	}
 
-	if (pNewType->WhatAmI() == AbstractType::BuildingType)
+	/*if (pNewType->WhatAmI() == AbstractType::BuildingType)
 	{
 		auto pFoot = static_cast<FootClass*>(pThis);
 		auto pBuildingType = static_cast<BuildingTypeClass*>(pNewType);
@@ -165,7 +165,7 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 
 			return 0;
 		}
-	}
+	}*/
 
 	// Preparing UniversalDeploy logic
 	bool inf2inf = pNewType->WhatAmI() == AbstractType::InfantryType;
@@ -250,27 +250,52 @@ DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
 
 DEFINE_HOOK(0x44725F, BuildingClass_WhatAction_UniversalDeploy_EnableDeployIcon, 0x5)
 {
-	GET(BuildingClass*, pBuilding, ESI);
+	GET(BuildingClass*, pThis, ESI);
 	GET_STACK(FootClass*, pFoot, 0x1C);
 
-	if (!pBuilding || !pFoot)
+	if (!pThis || !pFoot)
 		return 0;
 
 	auto pFootTechno = static_cast<TechnoClass*>(pFoot);
 	if (!pFootTechno)
 		return 0;
 
-	if (pFoot->Location == pBuilding->Location)
-	{
-		auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
-		if (!pTypeExt)
-			return 0;
+	if (pFoot->Location != pThis->Location)
+		return 0;
 
-		if (pTypeExt->Convert_UniversalDeploy.size() > 0)
+	auto pBldExt = TechnoExt::ExtMap.Find(pThis);
+	if (!pBldExt)
+		return 0;
+
+	if (pBldExt->Convert_UniversalDeploy_InProgress)
+	{
+		R->EAX(Action::NoDeploy);
+		return 0x447273;
+	}
+
+	auto pBldTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+	if (!pBldTypeExt)
+		return 0;
+
+	if (pBldTypeExt->Convert_UniversalDeploy.size() > 0)
+	{
+		auto const pNewType = pBldTypeExt->Convert_UniversalDeploy.at(0);
+
+		// If target deploy is a structure we can show the "No Deploy" icon if the foundation has obstacles
+		if (pNewType->WhatAmI() == AbstractType::BuildingType)
 		{
-			R->EAX(Action::Self_Deploy);
-			return 0x447273;
+			auto pNewBldType = static_cast<BuildingTypeClass*>(pNewType);
+			bool canDeployIntoStructure = TechnoExt::CanDeployIntoBuilding(pThis, false, pNewBldType);//pNewType->CanCreateHere(CellClass::Coord2Cell(pFoot->GetCoords()), pFoot->Owner);
+
+			if (!canDeployIntoStructure)
+			{
+				R->EAX(Action::NoDeploy);
+				return 0x447273;
+			}
 		}
+
+		R->EAX(Action::Self_Deploy);
+		return 0x447273;
 	}
 
 	return 0;
@@ -336,6 +361,19 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	// Building case, send the undeploy signal
 	if (pTechno->WhatAmI() == AbstractType::Building)
 	{
+		auto pBld = static_cast<BuildingClass*>(pTechno);
+		auto pBldType = static_cast<BuildingTypeClass*>(pNewTechnoType);
+		bool canDeployIntoStructure = TechnoExt::CanDeployIntoBuilding(pBld, false, pBldType); //ThisBuildingCanDeployHere(pTechno, pNewTechnoType, pTechno->Owner, pTechno->Location) ? true : false;
+		if (!canDeployIntoStructure)
+		{
+			pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
+			pExt->Convert_UniversalDeploy_InProgress = false;
+			pTechno->IsFallingDown = false;
+			pTechno->Scatter(CoordStruct::Empty, true, false);
+
+			return 0;
+		}
+
 		R->EBX(Action::None);
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;

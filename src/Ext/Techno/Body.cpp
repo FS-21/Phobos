@@ -392,6 +392,38 @@ bool TechnoExt::CanDeployIntoBuilding(FootClass* pThis, bool noDeploysIntoDefaul
 	pThis->Mark(MarkType::Down);
 
 	return canDeploy;
+}// Checks if vehicle can deploy into a building at its current location. If unit has no DeploysInto set returns noDeploysIntoDefaultValue (def = false) instead.
+// If a building is specified then it will be used by default.
+bool TechnoExt::CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue, BuildingTypeClass* pBuildingType)
+{
+	if (!pThis)
+		return false;
+
+	auto const pDeployType = pBuildingType;
+
+	if (!pDeployType)
+		return noDeploysIntoDefaultValue;
+
+	bool canDeploy = true;
+	auto mapCoords = CellClass::Coord2Cell(pThis->GetCoords());
+
+	if (pDeployType->GetFoundationWidth() > 2 || pDeployType->GetFoundationHeight(false) > 2)
+		mapCoords += CellStruct { -1, -1 };
+
+	bool selected = pThis->IsSelected;
+	pThis->Limbo();
+
+	if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
+		canDeploy = false;
+
+	++Unsorted::IKnowWhatImDoing;
+	pThis->Unlimbo(pThis->Location, pThis->PrimaryFacing.Current().GetDir());
+	--Unsorted::IKnowWhatImDoing;
+
+	if (selected)
+		pThis->Select();
+
+	return canDeploy;
 }
 
 bool TechnoExt::IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource)

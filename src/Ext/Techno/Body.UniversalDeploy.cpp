@@ -166,11 +166,11 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 	// Here we go, the real conversions! There are 2 cases
 
-	// Case 1: "Unit into something" deploy.
-	// Unit should loose the shape and get the structure shape.
+	// Case 1: "Unit into something" deploy, includes the case "Unit into Structure".
+	// Unit should loose the shape and get the structure shape for reserving the foundation space.
 	// This also prevents other units enter inside the structure foundation.
-
-	if (oldTechnoIsUnit)// && isNewBuilding)
+	// This case should cover the "structure into structure".
+	if (oldTechnoIsUnit || isNewBuilding)
 	{
 		//TechnoExt::RunStructureIntoTechnoConversion(pOld, pNewType);
 
@@ -344,7 +344,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	// Case 2: "Building into something" deploy
 	// Structure foundation should remain until the deploy animation ends (if any).
 	// This also prevents other units enter inside the structure foundation.
-	// This case should cover the "structure into structure".
 	if (isOldBuilding)
 	{
 		// Create & save it for later.
@@ -374,8 +373,9 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pNew->ForceMission(Mission::Guard);
 			pOldExt->Convert_UniversalDeploy_TemporalTechno = pNew;
 
-			if (auto pBuildingOld = static_cast<BuildingClass*>(pOld))
+			if (isOldBuilding)
 			{
+				auto pBuildingOld = static_cast<BuildingClass*>(pOld);
 				pBuildingOld->HasPower = false;
 
 				if (pBuildingOld->Factory)
@@ -444,8 +444,9 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pOldFoot->ParalysisTimer.Stop();
 			pOld->ForceMission(Mission::Guard);
 
-			if (auto pBuildingOld = static_cast<BuildingClass*>(pOld))
+			if (isOldBuilding)
 			{
+				auto pBuildingOld = static_cast<BuildingClass*>(pOld);
 				pBuildingOld->HasPower = true;
 
 				if (pBuildingOld->Factory)
@@ -882,8 +883,10 @@ void TechnoExt::PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechn
 	DynamicVectorClass<FootClass*> passengersList;
 
 	// From bunkered infantry
-	if (auto pBuildingFrom = static_cast<BuildingClass*>(pTechnoFrom))
+	if (pTechnoFrom->WhatAmI() == AbstractType::Building)
 	{
+		auto pBuildingFrom = static_cast<BuildingClass*>(pTechnoFrom);
+
 		for (int i = 0; i < pBuildingFrom->Occupants.Count; i++)
 		{
 			InfantryClass* pPassenger = pBuildingFrom->Occupants.GetItem(i);
