@@ -549,31 +549,41 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Convert_DeployToLand.Read(exINI, pSection, "Convert.DeployToLand");
 	this->Convert_AnimFX.Read(exINI, pSection, "Convert.AnimFX");
 	this->Convert_AnimFX_FollowDeployer.Read(exINI, pSection, "Convert.AnimFX.FollowDeployer");
-	this->Convert_DeployingAnim.Read(exINI, pSection, "Convert.DeployingAnim");
 	this->Convert_DeploySound.Read(exINI, pSection, "Convert.DeploySound");
 	this->Convert_DeployDir.Read(exINI, pSection, "Convert.DeployDir");
 	this->Convert_TransferPassengers.Read(exINI, pSection, "Convert.TransferPassengers");
 	this->Convert_TransferPassengers_IgnoreInvalidOccupiers.Read(exINI, pSection, "Convert.TransferPassengers.IgnoreInvalidOccupiers");
 	this->Convert_TransferVeterancy.Read(exINI, pSection, "Convert.TransferVeterancy");
 
+	// A structure deploy animation takes priority
+	this->Convert_DeployingAnim.Read(exINI, pSection, "Convert.DeployingAnim");
+	CCINIClass::INI_Art->ReadString(pArtSection, "Convert.DeployingAnim", "", Phobos::readBuffer);
 
-
-	if (this->Convert_UniversalDeploy.size() > 0 && !pThis->UndeploysInto)
+	if (strlen(Phobos::readBuffer))
 	{
-		for (auto techno : *TechnoTypeClass::Array)
-		{
-			if (techno->WhatAmI() == AbstractType::UnitType)
-			{
-				/* Note:
-				"Building into vehicle" logic uses UndeploysInto for creating a new unit at the end.
-				Every mod have units in [VehicleTypes], so this hack uses the first object of the vehicles list as a dummy object for enabling a feature:
-				Now we can undeploy the structure clicking in any valid part of the map.
-				*/
-				pThis->UndeploysInto = static_cast<UnitTypeClass*>(techno);
-				break;
-			}
-		}
+		auto const pDeployAnimType = AnimTypeClass::Find(Phobos::readBuffer);
+
+		if (pDeployAnimType)
+			this->Convert_DeployingAnim = pDeployAnimType;
 	}
+
+	//// This enables the move cursor for undeploying structures into units...
+	//if (this->Convert_UniversalDeploy.size() > 0 && !pThis->UndeploysInto)
+	//{
+	//	for (auto techno : *TechnoTypeClass::Array)
+	//	{
+	//		if (techno->WhatAmI() == AbstractType::UnitType)
+	//		{
+	//			/* Note:
+	//			"Building into vehicle" logic uses UndeploysInto for creating a new unit at the end.
+	//			Every mod have units in [VehicleTypes], so this hack uses the first object of the /vehicles/ //listas a /dummy /object for enabling a feature:
+	//			Now we can undeploy the structure clicking in any valid part of the map.
+	//			*/
+	//			pThis->UndeploysInto = static_cast<UnitTypeClass*>(techno);
+	//			break;
+	//		}
+	//	}
+	//}
 }
 
 template <typename T>

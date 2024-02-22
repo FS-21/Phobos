@@ -19,6 +19,9 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
 		return 0;
 
+	if (pThis->WhatAmI() == AbstractType::Infantry) // Check done in another hook
+		return 0;
+
 	// Building case, send the undeploy signal
 	if (pThis->WhatAmI() == AbstractType::Building)
 	{
@@ -218,12 +221,10 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 	return 0;
 }
 
-DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
-{
-	GET(BuildingClass*, pBuilding, ECX);
 
-	if (!pBuilding)
-		return 0;
+/*DEFINE_HOOK(0x44F5D1, BuildingClass_CanPlayerMove_UniversalDeploy, 0xE)
+{
+	GET(BuildingClass*, pBuilding, ESI);
 
 	// Check if is the UniversalDeploy or a standard deploy
 	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
@@ -235,18 +236,40 @@ DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
 		return 0;
 
 	if (pExt->Convert_UniversalDeploy_InProgress)
-		return 0;
+		return 0x44F61E;
 
-	// Start the UniversalDeploy process
-	if (pBuilding->Target)
-		pExt->Convert_UniversalDeploy_RememberTarget = pBuilding->Target;
+	return 0x44F5DF;
+}*/
 
-	pExt->Convert_UniversalDeploy_InProgress = true;
-	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
-	pBuilding->CurrentMission = Mission::Sleep;
-
-	return 0x449E00;
-}
+//DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
+//{
+//	GET(BuildingClass*, pBuilding, ECX);
+//
+//	if (!pBuilding)
+//		return 0;
+//
+//	// Check if is the UniversalDeploy or a standard deploy
+//	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
+//	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
+//		return 0;
+//
+//	auto pExt = TechnoExt::ExtMap.Find(pBuilding);
+//	if (!pExt)
+//		return 0;
+//
+//	if (pExt->Convert_UniversalDeploy_InProgress)
+//		return 0;
+//
+//	// Start the UniversalDeploy process
+//	/*if (pBuilding->Target)
+//		pExt->Convert_UniversalDeploy_RememberTarget = pBuilding->Target;
+//
+//	pExt->Convert_UniversalDeploy_InProgress = true;
+//	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+//	pBuilding->CurrentMission = Mission::Sleep;
+//
+//	return 0x449E00;*/
+//}
 
 DEFINE_HOOK(0x44725F, BuildingClass_WhatAction_UniversalDeploy_EnableDeployIcon, 0x5)
 {
@@ -324,7 +347,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 
 	if (!pTechno || !pTechno->IsSelected || !ScriptExt::IsUnitAvailable(pTechno, false))
 		return 0;
-	
+
 	if (actionType != Action::Self_Deploy)
 		return 0;
 
