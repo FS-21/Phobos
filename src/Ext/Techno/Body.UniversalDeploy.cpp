@@ -91,6 +91,9 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	bool canDeployIntoStructure = false;
 	bool deployToLand = pOldTypeExt->Convert_DeployToLand;
 	auto pOldFoot = static_cast<FootClass*>(pOld);
+	BuildingClass* pBuildingOld = nullptr;
+	BuildingClass* pBuildingNew = nullptr;
+
 	CoordStruct deployerLocation = pOld->GetCoords();
 	CoordStruct deploymentLocation = isOldInfantry && isNewInfantry ? deployerLocation : pOld->GetCell()->GetCenterCoords();
 	DirType currentDir = pOld->PrimaryFacing.Current().GetDir(); // Returns current position in format [0 - 7] x 32
@@ -231,7 +234,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 			if (isNewBuilding)
 			{
-				auto pBuildingNew = static_cast<BuildingClass*>(pNew);
+				pBuildingNew = static_cast<BuildingClass*>(pNew);
 				pBuildingNew->HasPower = false;
 
 				if (pBuildingNew->Factory)
@@ -241,15 +244,37 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				}
 			}
 		}
-
+		
 		// At this point the new object exists & is visible.
 		// If exists a deploy animation it must dissappear until the animation finished
 		pNew = !isOriginalDeployer ? pThis : pOldExt->Convert_UniversalDeploy_TemporalTechno;
 		pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+		pOldExt->Convert_UniversalDeploy_MakeInvisible = true;
 		auto pNewExt = TechnoExt::ExtMap.Find(pNew);
 		pNewExt->Convert_UniversalDeploy_TemporalTechno = pOld;
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNewExt->Convert_UniversalDeploy_InProgress = true;
+		pNewExt->Convert_UniversalDeploy_MakeInvisible = true;
+
+		if (isOldBuilding)
+		{
+			if (!pBuildingOld)
+				pBuildingOld = static_cast<BuildingClass*>(pOld);
+
+			pBuildingOld->UpdateAnimations();
+		}
+
+		if (isNewBuilding)
+		{
+			if (!pBuildingNew)
+				pBuildingNew = static_cast<BuildingClass*>(pNew);
+
+			pBuildingNew->UpdateAnimations();
+		}
+
+		// Play deploy sound, if set
+		if (pOldType->DeploySound >= 0 && !pOldExt->DeployAnim)
+			VocClass::PlayAt(pOldType->DeploySound, deploymentLocation);
 
 		// Setting the build up animation, if any.
 		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
@@ -275,7 +300,11 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!hasDeployAnimFinished)
 				return;
 
-			// Should I uninit() the finished animation?
+			if (pOldExt->DeployAnim && !pOldExt->DeployAnim->InLimbo)
+			{
+				pOldExt->DeployAnim->UnInit();
+				pOldExt->DeployAnim = nullptr;
+			}
 		}
 
 		// The build up animation finished (if any).
@@ -623,13 +652,6 @@ TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeC
 		pOld->Unlimbo(deployerLocation, currentDir);
 		--Unsorted::IKnowWhatImDoing;
 	}
-
-	// If I interrumped an UniversalDeploy process...
-	//pOldExt->Convert_UniversalDeploy_TemporalTechno = nullptr;
-	//pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
-	//pOldExt->Convert_UniversalDeploy_InProgress = false;
-	//pOldExt->Convert_UniversalDeploy_ForceRedraw = false;
-	//pOld->IsFallingDown = false;
 
 	pNew->InAir = (pOld->GetHeight() > 0); // Force the update
 

@@ -664,7 +664,7 @@ DEFINE_HOOK(0x518FBC, InfantryClass_DrawIt_UniversalDeploy_DontRenderObject, 0x6
 	return 0;
 }
 
-// Make object graphics invisible because they aren't rendered
+// Make object graphics invisible because shouldn't be rendered in the middle of a deployment
 DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD)
 {
 	enum { Skip = 0x43D688 };
@@ -682,45 +682,55 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 	if (!pExt)
 		return 0;
 
-	// Here enters SHP units when deploy
+	// Here enters SHP objects, voxel turrets
+	if (pExt->Convert_UniversalDeploy_MakeInvisible)
+		return Skip;
+
+	return 0;
+}
+
+// Make building animations invisible because shouldn't be rendered in the middle of a deployment
+DEFINE_HOOK(0x4509DE, BuildingClass_AnimationAI_UniversalDeploy, 0x6)
+{
+	GET(BuildingClass*, pThis, ESI);
+
+	if (!pThis)
+		return 0;
+
+	auto pTechno = static_cast<TechnoClass*>(pThis);
+	if (!pTechno)
+		return 0;
+
+	auto pExt = TechnoExt::ExtMap.Find(pTechno);
+	if (!pExt)
+		return 0;
+
+	if (!pExt->Convert_UniversalDeploy_InProgress)
+		return 0;
+
 	if (pExt->Convert_UniversalDeploy_MakeInvisible)
 	{
-		// Hide building anims
-		bool isDeployAnim = true;
-
+		// Hide building animations
 		for (auto pAnim : pThis->Anims)
 		{
-			if (isDeployAnim) // Build up anim?
-			{
-				isDeployAnim = false;
+			if (!pAnim)
 				continue;
-			}
 
-			if (pAnim)
-				pAnim->Invisible = true;
+			pAnim->NeedsRedraw = true;
+			pAnim->Invisible = true;
 		}
 
-		return Skip;
+		return 0;
 	}
 
-	// Reset?
-	if (pExt->Convert_UniversalDeploy_ForceRedraw)
+	// Show building animations
+	for (auto pAnim : pThis->Anims)
 	{
-		bool isDeployAnim = true;
+		if (!pAnim)
+			continue;
 
-		for (auto pAnim : pThis->Anims)
-		{
-			if (isDeployAnim) // Build up anim?
-			{
-				isDeployAnim = false;
-				continue;
-			}
-
-			if (pAnim)
-				pAnim->Invisible = false;
-		}
-
-		pExt->Convert_UniversalDeploy_ForceRedraw = false;
+		pAnim->NeedsRedraw = true;
+		pAnim->Invisible = false;
 	}
 
 	return 0;
