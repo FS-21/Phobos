@@ -188,6 +188,22 @@ DEFINE_HOOK(0x44377E, BuildingClass_ActiveClickWith, 0x6)
 	else if (pThis->IsUnitFactory())
 		pThis->SetRallypoint(pCell, true);
 
+	/*auto pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
+		return 0x4437AD;
+
+	auto pExt = TechnoExt::ExtMap.Find(pThis);
+	if (!pExt || pExt->Convert_UniversalDeploy_InProgress)
+		return 0x4437AD;
+
+	// Start the UniversalDeploy process
+	if (pThis->Target)
+		pExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
+
+	pExt->Convert_UniversalDeploy_InProgress = true;
+	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+	pThis->CurrentMission = Mission::Sleep;*/
+
 	return 0x4437AD;
 }
 

@@ -407,21 +407,55 @@ bool TechnoExt::CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDe
 	bool canDeploy = true;
 	auto mapCoords = CellClass::Coord2Cell(pThis->GetCoords());
 
-	if (pDeployType->GetFoundationWidth() > 2 || pDeployType->GetFoundationHeight(false) > 2)
-		mapCoords += CellStruct { -1, -1 };
+	pThis->Mark(MarkType::Up);
 
-	bool selected = pThis->IsSelected;
-	pThis->Limbo();
+	//pThis->Locomotor->Mark_All_Occupation_Bits(MarkType::Up);
 
 	if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
 		canDeploy = false;
 
-	++Unsorted::IKnowWhatImDoing;
-	pThis->Unlimbo(pThis->Location, pThis->PrimaryFacing.Current().GetDir());
+	//pThis->Locomotor->Mark_All_Occupation_Bits(MarkType::Down);
+	pThis->Mark(MarkType::Down);
+
+
+
+
+	/*++Unsorted::IKnowWhatImDoing;
+	bool selected = pThis->IsSelected;
+	bool canDeploy = true;
+	auto mapCoords = CellClass::Coord2Cell(pThis->GetCoords());
+
+	auto pBuildingNew = static_cast<BuildingClass*>(pDeployType->CreateObject(pThis->Owner));
+
+	if (pDeployType->GetFoundationWidth() > 2 || pDeployType->GetFoundationHeight(false) > 2)
+		mapCoords += CellStruct { -1, -1 };
+
+	pThis->Limbo();
+
+	pBuildingNew->HasPower = false;
+
+	if (pBuildingNew->Factory)
+	{
+		pBuildingNew->IsPrimaryFactory = false;
+		pBuildingNew->Factory->IsSuspended = true;
+	}
+
+	//if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
+		//canDeploy = false;
 	--Unsorted::IKnowWhatImDoing;
 
+	if (!pBuildingNew->Unlimbo(pThis->Location, pThis->PrimaryFacing.Current().GetDir()))
+		canDeploy = false;
+
+	++Unsorted::IKnowWhatImDoing;
+	pBuildingNew->Limbo();
+	pBuildingNew->UnInit();
+	pThis->Unlimbo(pThis->Location, pThis->PrimaryFacing.Current().GetDir());
+	
 	if (selected)
 		pThis->Select();
+
+	--Unsorted::IKnowWhatImDoing;*/
 
 	return canDeploy;
 }

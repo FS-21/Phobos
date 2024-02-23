@@ -556,8 +556,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Convert_TransferVeterancy.Read(exINI, pSection, "Convert.TransferVeterancy");
 
 	// A structure deploy animation takes priority
-	this->Convert_DeployingAnim.Read(exINI, pSection, "Convert.DeployingAnim");
-	CCINIClass::INI_Art->ReadString(pArtSection, "Convert.DeployingAnim", "", Phobos::readBuffer);
+	//this->Convert_DeployingAnim.Read(exINI, pSection, "Convert.DeployingAnim");
+	pINI->ReadString(pSection, "Convert.DeployingAnim", "", Phobos::readBuffer);
 
 	if (strlen(Phobos::readBuffer))
 	{
@@ -567,7 +567,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 			this->Convert_DeployingAnim = pDeployAnimType;
 	}
 
-	//// This enables the move cursor for undeploying structures into units...
+	// This enables the move cursor for undeploying structures into units...
 	//if (this->Convert_UniversalDeploy.size() > 0 && !pThis->UndeploysInto)
 	//{
 	//	for (auto techno : *TechnoTypeClass::Array)
@@ -576,7 +576,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	//		{
 	//			/* Note:
 	//			"Building into vehicle" logic uses UndeploysInto for creating a new unit at the end.
-	//			Every mod have units in [VehicleTypes], so this hack uses the first object of the /vehicles/ //listas a /dummy /object for enabling a feature:
+	//			Every mod have units in [VehicleTypes], so this hack uses the first object of the /vehicles/ ////listas a /dummy /object for enabling a feature:
 	//			Now we can undeploy the structure clicking in any valid part of the map.
 	//			*/
 	//			pThis->UndeploysInto = static_cast<UnitTypeClass*>(techno);
