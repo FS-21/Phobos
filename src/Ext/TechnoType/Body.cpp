@@ -547,16 +547,17 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->Convert_UniversalDeploy.Read(exINI, pSection, "Convert.UniversalDeploy");
 	this->Convert_DeployToLand.Read(exINI, pSection, "Convert.DeployToLand");
-	this->Convert_AnimFX.Read(exINI, pSection, "Convert.AnimFX");
-	this->Convert_AnimFX_FollowDeployer.Read(exINI, pSection, "Convert.AnimFX.FollowDeployer");
-	this->Convert_DeploySound.Read(exINI, pSection, "Convert.DeploySound");
+	this->Convert_PreDeploy_AnimFX.Read(exINI, pSection, "Convert.PreDeploy.AnimFX");
+	this->Convert_PreDeploy_AnimFX_FollowDeployer.Read(exINI, pSection, "Convert.PreDeploy.AnimFX.FollowDeployer");
+	this->Convert_PostDeploy_AnimFX.Read(exINI, pSection, "Convert.PostDeploy.AnimFX");
+	this->Convert_PostDeploy_AnimFX_FollowDeployer.Read(exINI, pSection, "Convert.PostDeploy.AnimFX.FollowDeployer");
+	this->Convert_PostDeploySound.Read(exINI, pSection, "Convert.PostDeploySound");
 	this->Convert_DeployDir.Read(exINI, pSection, "Convert.DeployDir");
 	this->Convert_TransferPassengers.Read(exINI, pSection, "Convert.TransferPassengers");
 	this->Convert_TransferPassengers_IgnoreInvalidOccupiers.Read(exINI, pSection, "Convert.TransferPassengers.IgnoreInvalidOccupiers");
-	this->Convert_TransferVeterancy.Read(exINI, pSection, "Convert.TransferVeterancy");
+	this->Convert_ForceVeterancyTransfer.Read(exINI, pSection, "Convert.ForceVeterancyTransfer");
 
 	// A structure deploy animation takes priority
-	//this->Convert_DeployingAnim.Read(exINI, pSection, "Convert.DeployingAnim");
 	pINI->ReadString(pSection, "Convert.DeployingAnim", "", Phobos::readBuffer);
 
 	if (strlen(Phobos::readBuffer))
@@ -566,24 +567,6 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		if (pDeployAnimType)
 			this->Convert_DeployingAnim = pDeployAnimType;
 	}
-
-	// This enables the move cursor for undeploying structures into units...
-	//if (this->Convert_UniversalDeploy.size() > 0 && !pThis->UndeploysInto)
-	//{
-	//	for (auto techno : *TechnoTypeClass::Array)
-	//	{
-	//		if (techno->WhatAmI() == AbstractType::UnitType)
-	//		{
-	//			/* Note:
-	//			"Building into vehicle" logic uses UndeploysInto for creating a new unit at the end.
-	//			Every mod have units in [VehicleTypes], so this hack uses the first object of the /vehicles/ ////listas a /dummy /object for enabling a feature:
-	//			Now we can undeploy the structure clicking in any valid part of the map.
-	//			*/
-	//			pThis->UndeploysInto = static_cast<UnitTypeClass*>(techno);
-	//			break;
-	//		}
-	//	}
-	//}
 }
 
 template <typename T>
@@ -770,14 +753,16 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 
 		.Process(this->Convert_UniversalDeploy)
 		.Process(this->Convert_DeployToLand)
-		.Process(this->Convert_AnimFX)
-		.Process(this->Convert_AnimFX_FollowDeployer)
+		.Process(this->Convert_PreDeploy_AnimFX)
+		.Process(this->Convert_PreDeploy_AnimFX_FollowDeployer)
+		.Process(this->Convert_PostDeploy_AnimFX)
+		.Process(this->Convert_PostDeploy_AnimFX_FollowDeployer)
 		.Process(this->Convert_DeployingAnim)
-		.Process(this->Convert_DeploySound)
+		.Process(this->Convert_PostDeploySound)
 		.Process(this->Convert_DeployDir)
 		.Process(this->Convert_TransferPassengers)
 		.Process(this->Convert_TransferPassengers_IgnoreInvalidOccupiers)
-		.Process(this->Convert_TransferVeterancy)
+		.Process(this->Convert_ForceVeterancyTransfer)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

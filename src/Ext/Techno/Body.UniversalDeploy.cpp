@@ -121,7 +121,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				return;
 
 			pOldFoot->StopMoving();
-			pOldFoot->ParalysisTimer.Start(15); // Be quiet old unit and let me change you...
+			pOldFoot->ParalysisTimer.Start(15);
 		}
 	}
 
@@ -256,6 +256,21 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		if (pOldType->DeploySound >= 0 && !pOldExt->DeployAnim)
 			VocClass::PlayAt(pOldType->DeploySound, deploymentLocation);
 
+		// Play pre-deploy FX animation
+		AnimTypeClass* pPreDeployAnimFXType = pOldTypeExt->Convert_PreDeploy_AnimFX.isset() ? pOldTypeExt->Convert_PreDeploy_AnimFX.Get() : nullptr;
+		bool preDeploy_AnimFX_FollowDeployer = pOldTypeExt->Convert_PreDeploy_AnimFX_FollowDeployer;
+
+		if (pPreDeployAnimFXType)
+		{
+			if (auto const pAnim = GameCreate<AnimClass>(pPreDeployAnimFXType, deploymentLocation))
+			{
+				if (preDeploy_AnimFX_FollowDeployer)
+					pAnim->SetOwnerObject(pNew);
+
+				pAnim->Owner = pNew->Owner;
+			}
+		}
+
 		// Setting the build up animation, if any.
 		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
 
@@ -306,19 +321,20 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		pNew->MarkForRedraw();
 
 		// Play post-deploy sound
-		int convert_DeploySoundIndex = pOldTypeExt->Convert_DeploySound.isset() ? pOldTypeExt->Convert_DeploySound.Get() : -1;
-		AnimTypeClass* pAnimFXType = pOldTypeExt->Convert_AnimFX.isset() ? pOldTypeExt->Convert_AnimFX.Get() : nullptr;
-		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
+		int convert_PostDeploySoundIndex = pOldTypeExt->Convert_PostDeploySound.isset() ? pOldTypeExt->Convert_PostDeploySound.Get() : -1;
 
-		if (convert_DeploySoundIndex >= 0)
-			VocClass::PlayAt(convert_DeploySoundIndex, deploymentLocation);
+		if (convert_PostDeploySoundIndex >= 0)
+			VocClass::PlayAt(convert_PostDeploySoundIndex, deploymentLocation);
 
-		// Play post-deploy animation
-		if (pAnimFXType)
+		// Play post-deploy FX animation
+		AnimTypeClass* pPostDeployAnimFXType = pOldTypeExt->Convert_PostDeploy_AnimFX.isset() ? pOldTypeExt->Convert_PostDeploy_AnimFX.Get() : nullptr;
+		bool postDeploy_AnimFX_FollowDeployer = pOldTypeExt->Convert_PostDeploy_AnimFX_FollowDeployer;
+
+		if (pPostDeployAnimFXType)
 		{
-			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deploymentLocation))
+			if (auto const pAnim = GameCreate<AnimClass>(pPostDeployAnimFXType, deploymentLocation))
 			{
-				if (animFX_FollowDeployer)
+				if (postDeploy_AnimFX_FollowDeployer)
 					pAnim->SetOwnerObject(pNew);
 
 				pAnim->Owner = pNew->Owner;
@@ -404,6 +420,25 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNewExt->Convert_UniversalDeploy_InProgress = true;
 
+		// Play deploy sound, if set
+		if (pOldType->DeploySound >= 0 && !pOldExt->DeployAnim)
+			VocClass::PlayAt(pOldType->DeploySound, deploymentLocation);
+
+		// Play pre-deploy FX animation
+		AnimTypeClass* pPreDeployAnimFXType = pOldTypeExt->Convert_PreDeploy_AnimFX.isset() ? pOldTypeExt->Convert_PreDeploy_AnimFX.Get() : nullptr;
+		bool preDeploy_AnimFX_FollowDeployer = pOldTypeExt->Convert_PreDeploy_AnimFX_FollowDeployer;
+
+		if (pPreDeployAnimFXType)
+		{
+			if (auto const pAnim = GameCreate<AnimClass>(pPreDeployAnimFXType, deploymentLocation))
+			{
+				if (preDeploy_AnimFX_FollowDeployer)
+					pAnim->SetOwnerObject(pNew);
+
+				pAnim->Owner = pNew->Owner;
+			}
+		}
+
 		// Setting the build up animation, if any.
 		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
 
@@ -485,19 +520,20 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
 
 		// Play post-deploy sound
-		int convert_DeploySoundIndex = pOldTypeExt->Convert_DeploySound.isset() ? pOldTypeExt->Convert_DeploySound.Get() : -1;
-		AnimTypeClass* pAnimFXType = pOldTypeExt->Convert_AnimFX.isset() ? pOldTypeExt->Convert_AnimFX.Get() : nullptr;
-		bool animFX_FollowDeployer = pOldTypeExt->Convert_AnimFX_FollowDeployer;
+		int convert_PostDeploySoundIndex = pOldTypeExt->Convert_PostDeploySound.isset() ? pOldTypeExt->Convert_PostDeploySound.Get() : -1;
 
-		if (convert_DeploySoundIndex >= 0)
-			VocClass::PlayAt(convert_DeploySoundIndex, deploymentLocation);
+		if (convert_PostDeploySoundIndex >= 0)
+			VocClass::PlayAt(convert_PostDeploySoundIndex, deploymentLocation);
 
-		// Play post-deploy animation
-		if (pAnimFXType)
+		// Play post-deploy FX animation
+		AnimTypeClass* pPostDeployAnimFXType = pOldTypeExt->Convert_PostDeploy_AnimFX.isset() ? pOldTypeExt->Convert_PostDeploy_AnimFX.Get() : nullptr;
+		bool postDeploy_AnimFX_FollowDeployer = pOldTypeExt->Convert_PostDeploy_AnimFX_FollowDeployer;
+
+		if (pPostDeployAnimFXType)
 		{
-			if (auto const pAnim = GameCreate<AnimClass>(pAnimFXType, deploymentLocation))
+			if (auto const pAnim = GameCreate<AnimClass>(pPostDeployAnimFXType, deploymentLocation))
 			{
-				if (animFX_FollowDeployer)
+				if (postDeploy_AnimFX_FollowDeployer)
 					pAnim->SetOwnerObject(pNew);
 
 				pAnim->Owner = pNew->Owner;
@@ -722,6 +758,8 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 			pEnemy->SetTarget(pNew);
 	}
 
+	++Unsorted::IKnowWhatImDoing;
+
 	// Transfer some stats from the old object to the new:
 	// Health update
 	double nHealthPercent = (double)(1.0 * pOld->Health / pOldType->Strength);
@@ -745,7 +783,8 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 	}
 
 	// Veterancy update
-	if (pOldTypeExt->Convert_TransferVeterancy)
+
+	if (pNewType->Trainable || pOldTypeExt->Convert_ForceVeterancyTransfer)
 	{
 		VeterancyStruct nVeterancy = pOld->Veterancy;
 		pNew->Veterancy = nVeterancy;
@@ -768,7 +807,7 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 	if (pOld->IsMindControlled())
 		TechnoExt::TransferMindControlOnDeploy(pOld, pNew);
 
-	// Initial mission update
+	// Initial mission update (it can change if the deployer object has a target)
 	pNew->QueueMission(Mission::Guard, true);
 
 	// Cloak update
@@ -862,6 +901,8 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 	}
 
 	// Transfer AttachEffect (Reminder: add a new tag) - TO-DO: There is a Phobos PR that I should support once is merged into develop branch
+
+	--Unsorted::IKnowWhatImDoing;
 
 	// If the object was selected it should remain selected
 	if (pOld->IsSelected)

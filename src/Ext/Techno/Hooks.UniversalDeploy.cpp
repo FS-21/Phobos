@@ -37,10 +37,9 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	// Unit case, send the undeploy signal only if meets the all the requisites
 	if (pThis->WhatAmI() == AbstractType::Unit)
 	{
-		const auto pUnit = abstract_cast<UnitClass*>(pThis);
+		//const auto pUnit = abstract_cast<UnitClass*>(pThis);
 		const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.at(0)->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.at(0)) : nullptr;
-		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pThis->GetCoords()), pThis->Owner) : false;//pNewTechnoType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
-		//bool canDeployIntoStructure = pIntoBuildingType ? TechnoExt::CanDeployIntoBuilding(pUnit, false, pIntoBuildingType) : false;
+		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pThis->GetCoords()), pThis->Owner) : false;
 		auto pCell = pThis->GetCell();
 		int nObjectsInCell = 0;
 
@@ -84,7 +83,6 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 			bool isFlyingUnit = pThis->GetTechnoType()->MovementZone == MovementZone::Fly || pThis->GetTechnoType()->ConsideredAircraft;
 
 			// If the cell is occupied abort operation
-			//if (pThis->GetHeight() > 0 && pThis->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			if (isFlyingUnit && pThis->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			{
 				pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
@@ -124,10 +122,7 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 		return 0;
 
 	auto const pOldExt = TechnoExt::ExtMap.Find(pOld);
-	if (!pOldExt)
-		return 0;
-
-	if (pOldExt->Convert_UniversalDeploy_InProgress)
+	if (!pOldExt || pOldExt->Convert_UniversalDeploy_InProgress)
 		return 0;
 
 	auto const pOldTypeExt = TechnoTypeExt::ExtMap.Find(pOld->GetTechnoType());
@@ -151,24 +146,6 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 
 		return 0;
 	}
-
-	/*if (pNewType->WhatAmI() == AbstractType::BuildingType)
-	{
-		auto pFoot = static_cast<FootClass*>(pThis);
-		auto pBuildingType = static_cast<BuildingTypeClass*>(pNewType);
-		bool canDeployIntoStructure = pNewType->CanCreateHere(CellClass::Coord2Cell(pFoot->GetCoords()), pFoot->Owner);//pNewType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
-		//bool canDeployIntoStructure = pNewType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
-
-		if (!canDeployIntoStructure)
-		{
-			pOldExt->Convert_UniversalDeploy_RememberTarget = nullptr;
-			pOldExt->Convert_UniversalDeploy_InProgress = false;
-			pOld->IsFallingDown = false;
-			pOld->Scatter(CoordStruct::Empty, true, false);
-
-			return 0;
-		}
-	}*/
 
 	// Preparing UniversalDeploy logic
 	bool inf2inf = pNewType->WhatAmI() == AbstractType::InfantryType;
@@ -221,82 +198,6 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 	return 0;
 }
 
-
-/*DEFINE_HOOK(0x44F5D1, BuildingClass_CanPlayerMove_UniversalDeploy, 0xE)
-{
-	GET(BuildingClass*, pBuilding, ESI);
-
-	// Check if is the UniversalDeploy or a standard deploy
-	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
-		return 0;
-
-	auto pExt = TechnoExt::ExtMap.Find(pBuilding);
-	if (!pExt)
-		return 0;
-
-	if (pExt->Convert_UniversalDeploy_InProgress)
-		return 0x44F61E;
-
-	return 0x44F5DF;
-}*/
-
-/*DEFINE_HOOK(0x44AA3D, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
-{
-	GET(BuildingClass*, pBuilding, EBP);
-
-	//if (!pBuilding->Type->UndeploysInto)
-		//return 0;
-
-	// Este código se ejecuta solo cuando se está la estructura con pBuilding->Type->UndeploysInto se "despliega"
-	//Entonces si está mis tags activar mi nueva lógica y salir en  0x44ABB6
-	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
-		return 0;
-
-	auto pExt = TechnoExt::ExtMap.Find(pBuilding);
-	if (!pExt || pExt->Convert_UniversalDeploy_InProgress)
-		return 0;
-
-	// Start the UniversalDeploy process
-	if (pBuilding->Target)
-		pExt->Convert_UniversalDeploy_RememberTarget = pBuilding->Target;
-
-	pExt->Convert_UniversalDeploy_InProgress = true;
-	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
-	pBuilding->CurrentMission = Mission::Sleep;
-
-	return 0x44ABB6;
-}*/
-/*DEFINE_HOOK(0x44A7A9, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
-{
-	GET(BuildingClass*, pBuilding, EBP);
-
-	//if (!pBuilding->Type->UndeploysInto)
-		//return 0;
-
-	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
-		return 0;
-
-	auto pExt = TechnoExt::ExtMap.Find(pBuilding);
-	if (!pExt)
-		return 0;
-
-	if (pExt->Convert_UniversalDeploy_InProgress)
-		return 0;
-
-	// Start the UniversalDeploy process
-	if (pBuilding->Target)
-		pExt->Convert_UniversalDeploy_RememberTarget = pBuilding->Target;
-
-	pExt->Convert_UniversalDeploy_InProgress = true;
-	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
-	pBuilding->CurrentMission = Mission::Sleep;
-
-	return 0x44ABB6;
-}*/
-
 DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
 {
 	GET(BuildingClass*, pBuilding, ECX);
@@ -317,62 +218,18 @@ DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
 		return 0x449E00;
 
 	return 0;
-
-	// Start the UniversalDeploy process
-	/*if (pBuilding->Target)
-		pExt->Convert_UniversalDeploy_RememberTarget = pBuilding->Target;
-
-	pExt->Convert_UniversalDeploy_InProgress = true;
-	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
-	pBuilding->CurrentMission = Mission::Sleep;
-
-	return 0x449E00;*/
 }
-
-// 
-//DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
-//{
-//	GET(BuildingClass*, pBuilding, ECX);
-//
-//	if (!pBuilding)
-//		return 0;
-//
-//	// Check if is the UniversalDeploy or a standard deploy
-//	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
-//	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
-//		return 0;
-//
-//	auto pExt = TechnoExt::ExtMap.Find(pBuilding);
-//	if (!pExt)
-//		return 0;
-//
-//	if (pExt->Convert_UniversalDeploy_InProgress)
-//		return 0;
-//
-//	// Start the UniversalDeploy process
-//	/*if (pBuilding->Target)
-//		pExt->Convert_UniversalDeploy_RememberTarget = pBuilding->Target;
-//
-//	pExt->Convert_UniversalDeploy_InProgress = true;
-//	pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
-//	pBuilding->CurrentMission = Mission::Sleep;
-//
-//	return 0x449E00;*/
-//}
 
 DEFINE_HOOK(0x44725F, BuildingClass_WhatAction_UniversalDeploy_EnableDeployIcon, 0x5)
 {
 	GET(BuildingClass*, pThis, ESI);
 	GET_STACK(FootClass*, pFoot, 0x1C);
 
-	if (!pThis || !pFoot)
+	if (!pThis || !pFoot || pFoot->Location != pThis->Location)
 		return 0;
 
 	auto pFootTechno = static_cast<TechnoClass*>(pFoot);
 	if (!pFootTechno)
-		return 0;
-
-	if (pFoot->Location != pThis->Location)
 		return 0;
 
 	auto pBldExt = TechnoExt::ExtMap.Find(pThis);
@@ -389,28 +246,26 @@ DEFINE_HOOK(0x44725F, BuildingClass_WhatAction_UniversalDeploy_EnableDeployIcon,
 	if (!pBldTypeExt)
 		return 0;
 
-	if (pBldTypeExt->Convert_UniversalDeploy.size() > 0)
+	if (pBldTypeExt->Convert_UniversalDeploy.size() == 0)
+		return 0;
+
+	auto const pNewType = pBldTypeExt->Convert_UniversalDeploy.at(0);
+
+	// If target deploy is a structure we can show the "No Deploy" icon if the foundation has obstacles
+	if (pNewType->WhatAmI() == AbstractType::BuildingType)
 	{
-		auto const pNewType = pBldTypeExt->Convert_UniversalDeploy.at(0);
+		auto pNewBldType = static_cast<BuildingTypeClass*>(pNewType);
+		bool canDeployIntoStructure = TechnoExt::CanDeployIntoBuilding(pThis, false, pNewBldType);//pNewType->CanCreateHere(CellClass::Coord2Cell(pFoot->GetCoords()), pFoot->Owner);
 
-		// If target deploy is a structure we can show the "No Deploy" icon if the foundation has obstacles
-		if (pNewType->WhatAmI() == AbstractType::BuildingType)
+		if (!canDeployIntoStructure)
 		{
-			auto pNewBldType = static_cast<BuildingTypeClass*>(pNewType);
-			bool canDeployIntoStructure = TechnoExt::CanDeployIntoBuilding(pThis, false, pNewBldType);//pNewType->CanCreateHere(CellClass::Coord2Cell(pFoot->GetCoords()), pFoot->Owner);
-
-			if (!canDeployIntoStructure)
-			{
-				R->EAX(Action::NoDeploy);
-				return 0x447273;
-			}
+			R->EAX(Action::NoDeploy);
+			return 0x447273;
 		}
-
-		R->EAX(Action::Self_Deploy);
-		return 0x447273;
 	}
 
-	return 0;
+	R->EAX(Action::Self_Deploy);
+	return 0x447273;
 }
 
 // Probably obsolete since I added a new hook
@@ -434,10 +289,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	GET(TechnoClass* const, pTechno, ESI);
 	GET(Action const, actionType, EBX);
 
-	if (!pTechno || !pTechno->IsSelected || !ScriptExt::IsUnitAvailable(pTechno, false))
-		return 0;
-
-	if (actionType != Action::Self_Deploy)
+	if (actionType != Action::Self_Deploy || !pTechno || !pTechno->IsSelected || !ScriptExt::IsUnitAvailable(pTechno, false))
 		return 0;
 
 	auto pExt = TechnoExt::ExtMap.Find(pTechno);
@@ -457,7 +309,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	bool isNewTechnoAircraft = pNewTechnoType->ConsideredAircraft || pNewTechnoType->MovementZone == MovementZone::Fly;
 
 	if (pTechno->WhatAmI() == AbstractType::Infantry)
-		return 0; //Checked in another hook. Or should I prevent the execution of that hook and put the code here?
+		return 0; // Checked in another hook. Or should I prevent the execution of that hook and put the code here?
 
 	// If the deployer is over a water cell and the future deployed object doesn't support water cells abort the operation
 	if (cellIsOnWater && !(isNewTechnoAmphibious || pNewTechnoType->Naval || isNewTechnoAircraft))
@@ -475,7 +327,8 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	{
 		auto pBld = static_cast<BuildingClass*>(pTechno);
 		auto pBldType = static_cast<BuildingTypeClass*>(pNewTechnoType);
-		bool canDeployIntoStructure = TechnoExt::CanDeployIntoBuilding(pBld, false, pBldType); //ThisBuildingCanDeployHere(pTechno, pNewTechnoType, pTechno->Owner, pTechno->Location) ? true : false;
+		bool canDeployIntoStructure = TechnoExt::CanDeployIntoBuilding(pBld, false, pBldType);
+
 		if (!canDeployIntoStructure)
 		{
 			pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
@@ -501,8 +354,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	{
 		const auto pUnit = abstract_cast<UnitClass*>(pTechno);
 		const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.at(0)->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.at(0)) : nullptr;
-		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pUnit->GetCoords()), pUnit->Owner): false;//pNewTechnoType ? TechnoExt::CanDeployIntoBuilding(pFoot, false, pBuildingType) : false;
-		//bool canDeployIntoStructure = pIntoBuildingType ? TechnoExt::CanDeployIntoBuilding(pUnit, false, pIntoBuildingType) : false;
+		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pUnit->GetCoords()), pUnit->Owner): false;
 		int nObjectsInCell = 0;
 
 		// Count objects located in the desired cell
@@ -530,10 +382,8 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		// Stop the deployable unit, can not be converted if the object is moving
 		if (!pTechno->IsFallingDown && pTechno->CurrentMission != Mission::Guard)
 		{
-			//pFoot->SetDestination(pTechno, false);
-			//pFoot->Locomotor->Stop_Moving();
-			pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 			// Reset previous command
+			pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 			pFoot->SetTarget(nullptr);
 			pFoot->SetDestination(nullptr, false);
 			pFoot->ForceMission(Mission::Guard);
@@ -541,9 +391,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 
 		if (pTypeExt->Convert_DeployToLand)
 		{
-			//auto pCell = MapClass::Instance->GetCellAt(pThis->Location);
 			// If the cell is occupied abort operation
-			//if (pTechno->GetHeight() > 0 && pTechno->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			if (oldIsFlyingUnit && pTechno->IsCellOccupied(pCell, FacingType::None, -1, nullptr, false) != Move::OK)
 			{
 				pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
