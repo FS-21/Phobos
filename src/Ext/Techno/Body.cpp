@@ -321,13 +321,12 @@ bool TechnoExt::ConvertToType(FootClass* pThis, TechnoTypeClass* pToType)
 }
 
 // Checks if vehicle can deploy into a building at its current location. If unit has no DeploysInto set returns noDeploysIntoDefaultValue (def = false) instead.
-// If a building is specified then it will be used by default.
-bool TechnoExt::CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue, BuildingTypeClass* pBuildingType)
+bool TechnoExt::CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue)
 {
 	if (!pThis)
 		return false;
 
-	auto const pDeployType = !pBuildingType ? pThis->Type->DeploysInto : pBuildingType;
+	auto const pDeployType = pThis->Type->DeploysInto;
 
 	if (!pDeployType)
 		return noDeploysIntoDefaultValue;
@@ -351,55 +350,23 @@ bool TechnoExt::CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaul
 	return canDeploy;
 }
 
-// Checks if the unit can deploy into a building at its current location. If unit has no DeploysInto set returns noDeploysIntoDefaultValue (def = false) instead.
-// If a building is specified then it will be used by default.
-bool TechnoExt::CanDeployIntoBuilding(FootClass* pThis, bool noDeploysIntoDefaultValue, BuildingTypeClass* pBuildingType)
-{
-	if (!pThis)
-		return false;
-
-	if (!pBuildingType)
-		return noDeploysIntoDefaultValue;
-
-	auto const pDeployType = pBuildingType;
-
-	bool canDeploy = true;
-	auto mapCoords = CellClass::Coord2Cell(pThis->GetCoords());
-
-	if (pDeployType->GetFoundationWidth() > 2 || pDeployType->GetFoundationHeight(false) > 2)
-		mapCoords += CellStruct { -1, -1 };
-
-	pThis->Mark(MarkType::Up);
-
-	pThis->Locomotor->Mark_All_Occupation_Bits(MarkType::Up);
-
-	if (!pThis->InLimbo)
-	{
-		pThis->Limbo();
-
-		if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
-			canDeploy = false;
-
-		pThis->Unlimbo(pThis->Location, pThis->PrimaryFacing.Current().GetDir());
-	}
-	else
-	{
-		if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
-			canDeploy = false;
-	}
-
-	pThis->Locomotor->Mark_All_Occupation_Bits(MarkType::Down);
-	pThis->Mark(MarkType::Down);
-
-	return canDeploy;
-}// Checks if vehicle can deploy into a building at its current location. If unit has no DeploysInto set returns noDeploysIntoDefaultValue (def = false) instead.
+// Checks if a structure can deploy into another at its current location. If the building has problems forplacing the new one returns noDeploysIntoDefaultValue (def = false) instead.
 // If a building is specified then it will be used by default.
 bool TechnoExt::CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue, BuildingTypeClass* pBuildingType)
 {
 	if (!pThis)
 		return false;
 
-	auto const pDeployType = pBuildingType;
+	auto pDeployType = pBuildingType;
+
+	if (!pDeployType)
+	{
+		auto pBldTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+		if (!pBldTypeExt || pBldTypeExt->Convert_UniversalDeploy.size() == 0)
+			return noDeploysIntoDefaultValue;
+
+		pDeployType = static_cast<BuildingTypeClass*>(pBldTypeExt->Convert_UniversalDeploy.at(0));
+	}
 
 	if (!pDeployType)
 		return noDeploysIntoDefaultValue;
@@ -409,53 +376,10 @@ bool TechnoExt::CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDe
 
 	pThis->Mark(MarkType::Up);
 
-	//pThis->Locomotor->Mark_All_Occupation_Bits(MarkType::Up);
-
 	if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
 		canDeploy = false;
 
-	//pThis->Locomotor->Mark_All_Occupation_Bits(MarkType::Down);
 	pThis->Mark(MarkType::Down);
-
-
-
-
-	/*++Unsorted::IKnowWhatImDoing;
-	bool selected = pThis->IsSelected;
-	bool canDeploy = true;
-	auto mapCoords = CellClass::Coord2Cell(pThis->GetCoords());
-
-	auto pBuildingNew = static_cast<BuildingClass*>(pDeployType->CreateObject(pThis->Owner));
-
-	if (pDeployType->GetFoundationWidth() > 2 || pDeployType->GetFoundationHeight(false) > 2)
-		mapCoords += CellStruct { -1, -1 };
-
-	pThis->Limbo();
-
-	pBuildingNew->HasPower = false;
-
-	if (pBuildingNew->Factory)
-	{
-		pBuildingNew->IsPrimaryFactory = false;
-		pBuildingNew->Factory->IsSuspended = true;
-	}
-
-	//if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
-		//canDeploy = false;
-	--Unsorted::IKnowWhatImDoing;
-
-	if (!pBuildingNew->Unlimbo(pThis->Location, pThis->PrimaryFacing.Current().GetDir()))
-		canDeploy = false;
-
-	++Unsorted::IKnowWhatImDoing;
-	pBuildingNew->Limbo();
-	pBuildingNew->UnInit();
-	pThis->Unlimbo(pThis->Location, pThis->PrimaryFacing.Current().GetDir());
-	
-	if (selected)
-		pThis->Select();
-
-	--Unsorted::IKnowWhatImDoing;*/
 
 	return canDeploy;
 }

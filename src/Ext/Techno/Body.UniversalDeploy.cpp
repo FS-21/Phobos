@@ -53,6 +53,8 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	if (!pThisExt || !pThisExt->Convert_UniversalDeploy_InProgress)
 		return;
 
+	// We have to know if the object that ran this method is the old deployer or the new object.
+	// The stored object is the opposite of who entered here.
 	bool isOriginalDeployer = pThisExt->Convert_UniversalDeploy_IsOriginalDeployer;
 	TechnoClass* pOld = !isOriginalDeployer ? pThisExt->Convert_UniversalDeploy_TemporalTechno : pThis;
 
@@ -95,12 +97,12 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	BuildingClass* pBuildingNew = nullptr;
 
 	CoordStruct deployerLocation = pOld->GetCoords();
-	CoordStruct deploymentLocation = isOldInfantry && isNewInfantry ? deployerLocation : pOld->GetCell()->GetCenterCoords();
+	CoordStruct deploymentLocation = isOldInfantry && isNewInfantry ? deployerLocation : pOld->GetCell()->GetCenterCoords(); // Only infantry can use sub-cell locations
 	DirType currentDir = pOld->PrimaryFacing.Current().GetDir(); // Returns current position in format [0 - 7] x 32
 
 	if (oldTechnoIsUnit && !pNew)
 	{
-		// Deployment to land check: Make sure the object will fall into ground (if some external factor change it it restores the fall)
+		// Deployment to land check: Make sure the object will fall into ground (if some external factor changes it it restores the fall)
 		if (deployToLand)
 			pOld->IsFallingDown = true;
 
@@ -109,10 +111,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 		// Deployment to land check: Update InAir information & let it fall into ground
 		if (deployToLand && pOld->GetHeight() <= 20)
-		{
 			pOld->SetHeight(0);
-			//pOld->Location.Z = 0;
-		}
 
 		pOld->InAir = pOld->GetHeight() > 0; // Force the update
 
@@ -127,8 +126,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	}
 
 	// Unit direction check: Update the direction of the unit until it reaches the desired one, if specified
-	// TO-DO: Maybe support structures... instead of PrimaryFacing it would check SecondaryFacing (the turret). Maybe it already supports it but I have to do tests
-	if (isOldUnit || isOldAircraft) // TO-DO: I have to test aircraft behaviour here...
+	if (isOldUnit || isOldAircraft)
 	{
 		// Turn the unit to the right deploy facing
 		if (!pOldExt->DeployAnim && pOldTypeExt->Convert_DeployDir >= 0)
@@ -147,22 +145,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		}
 	}
 
-	/*if (isNewBuilding)
-	{
-		pOld->Location.Z = 0; // No flying structures available in this game
-		deployLocation.Z = 0;
-		canDeployIntoStructure = pNewType->CanCreateHere(CellClass::Coord2Cell(pOld->GetCoords()), pOld->Owner);
-
-		if (!canDeployIntoStructure)
-		{
-			pOldExt->Convert_UniversalDeploy_InProgress = false;
-			pOld->IsFallingDown = false;
-			// TO-DO: Play EVA: "Can not deploy here"
-
-			return;
-		}
-	}*/
-
 	bool selected = false;
 	if (pOld->IsSelected)
 		selected = true;
@@ -175,13 +157,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	// This case should cover the "structure into structure".
 	if (oldTechnoIsUnit || isNewBuilding)
 	{
-		//TechnoExt::RunStructureIntoTechnoConversion(pOld, pNewType);
-
 		if (!pOld->InLimbo)
 			pOld->Limbo();
 
 		// Create & save it for later.
-		// Note: Remember to delete it in case of deployment failure
 		if (!pOldExt->Convert_UniversalDeploy_TemporalTechno)
 		{
 			pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
@@ -232,6 +211,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				return;
 			}
 
+			// Because is too soon don't check the building stuff like energy, factory logic in the sidebar, etc
 			if (isNewBuilding)
 			{
 				pBuildingNew = static_cast<BuildingClass*>(pNew);
