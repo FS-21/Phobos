@@ -101,7 +101,6 @@ public:
 		bool Convert_UniversalDeploy_InProgress;
 		bool Convert_UniversalDeploy_MakeInvisible;
 		TechnoClass* Convert_UniversalDeploy_TemporalTechno;
-		bool Convert_UniversalDeploy_ForceRedraw;
 		bool Convert_UniversalDeploy_IsOriginalDeployer;
 		AbstractClass* Convert_UniversalDeploy_RememberTarget;
 		int Convert_UniversalDeploy_SelectedIdx;
@@ -143,7 +142,6 @@ public:
 			, Convert_UniversalDeploy_InProgress { false }
 			, Convert_UniversalDeploy_MakeInvisible { false }
 			, Convert_UniversalDeploy_TemporalTechno { nullptr }
-			, Convert_UniversalDeploy_ForceRedraw { false }
 			, Convert_UniversalDeploy_IsOriginalDeployer { true }
 			, Convert_UniversalDeploy_RememberTarget { nullptr }
 			, Convert_UniversalDeploy_SelectedIdx { -1 }

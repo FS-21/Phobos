@@ -323,7 +323,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		// In this case we only have to transfer properties to the new object
 		pNewExt->Convert_UniversalDeploy_MakeInvisible = false;
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
-		pNewExt->Convert_UniversalDeploy_ForceRedraw = true;
 		pNewExt->Convert_UniversalDeploy_TemporalTechno = nullptr;
 		pNewExt->Convert_UniversalDeploy_InProgress = false;
 
@@ -383,7 +382,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	if (isOldBuilding)
 	{
 		// Create & save it for later.
-		// Note: Remember to delete it in case of deployment failure
 		if (!pOldExt->Convert_UniversalDeploy_TemporalTechno)
 		{
 			pNew = static_cast<TechnoClass*>(pNewType->CreateObject(pOwner));
@@ -393,7 +391,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOldExt->Convert_UniversalDeploy_TemporalTechno = nullptr;
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
-				pOldExt->Convert_UniversalDeploy_ForceRedraw = true;
 				pOld->IsFallingDown = false;
 				pOldExt->Convert_UniversalDeploy_SelectedIdx = -1;
 
@@ -494,7 +491,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 			pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 			pOldExt->Convert_UniversalDeploy_InProgress = false;
-			pOldExt->Convert_UniversalDeploy_ForceRedraw = true;
 			pOld->IsFallingDown = false;
 			pOldExt->Convert_UniversalDeploy_SelectedIdx = -1;
 
@@ -563,7 +559,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pNewExt->Convert_UniversalDeploy_TemporalTechno = nullptr;
 			pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 			pNewExt->Convert_UniversalDeploy_InProgress = false;
-			pNewExt->Convert_UniversalDeploy_ForceRedraw = true;
 
 			pOwner->RegisterLoss(pOld, false);
 			pOwner->RemoveTracking(pOld);
