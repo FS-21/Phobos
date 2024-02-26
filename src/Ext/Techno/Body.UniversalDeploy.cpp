@@ -274,7 +274,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!pBuildingOld)
 				pBuildingOld = static_cast<BuildingClass*>(pOld);
 
-			TechnoExt::HideBuildingAnimations(pBuildingOld);
+			BuildingExt::HideBuildingAnimations(pBuildingOld);
 			pBuildingOld->UpdateAnimations();
 		}
 
@@ -283,7 +283,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!pBuildingNew)
 				pBuildingNew = static_cast<BuildingClass*>(pNew);
 
-			TechnoExt::HideBuildingAnimations(pBuildingNew);
+			BuildingExt::HideBuildingAnimations(pBuildingNew);
 			pBuildingNew->UpdateAnimations();
 		}
 
@@ -337,11 +337,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			}
 
 			pNewExt->DeployAnim = nullptr;
-			/*if (pNewExt->DeployAnim && !pNewExt->DeployAnim->InLimbo)
-			{
-				pNewExt->DeployAnim->UnInit();
-				pNewExt->DeployAnim = nullptr;
-			}*/
 		}
 
 		// The build up animation finished (if any).
@@ -355,7 +350,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		if (isNewBuilding)
 		{
 			auto pBuildingNew = static_cast<BuildingClass*>(pNew);
-			TechnoExt::UnhideBuildingAnimations(pBuildingNew);
+			BuildingExt::UnhideBuildingAnimations(pBuildingNew);
 			pBuildingNew->UpdateAnimations();
 			pBuildingNew->HasPower = true;
 
@@ -510,11 +505,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			}
 
 			pOldExt->DeployAnim = nullptr;
-			/*if (pOldExt->DeployAnim && !pOldExt->DeployAnim->InLimbo)
-			{
-				pOldExt->DeployAnim->UnInit();
-				pOldExt->DeployAnim = nullptr;
-			}*/
 		}
 
 		// Transfer enemies target (part 1/2)
@@ -1101,37 +1091,4 @@ void TechnoExt::RunStructureIntoTechnoConversion(TechnoClass* pOld, TechnoTypeCl
 void TechnoExt::RunTechnoIntoStructureConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
 {
 	// TO-DO : Copy the block of code
-}
-
-
-void TechnoExt::HideBuildingAnimations(BuildingClass* pThis)
-{
-	if (!pThis)
-		return;
-
-	// Hide building animations
-	for (auto pAnim : pThis->Anims)
-	{
-		if (!pAnim)
-			continue;
-
-		pAnim->Invisible = true;
-		pAnim->NeedsRedraw = true;
-	}
-}
-
-void TechnoExt::UnhideBuildingAnimations(BuildingClass* pThis)
-{
-	if (!pThis)
-		return;
-
-	// Show building animations
-	for (auto pAnim : pThis->Anims)
-	{
-		if (!pAnim)
-			continue;
-
-		pAnim->Invisible = false;
-		pAnim->NeedsRedraw = true;
-	}
 }
