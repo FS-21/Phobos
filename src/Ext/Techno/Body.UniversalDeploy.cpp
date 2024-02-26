@@ -2,9 +2,9 @@
 
 #include <Ext/Script/Body.h>
 
-void TechnoExt::CreateUniversalDeployAnimation(TechnoClass* pThis)
+void TechnoExt::CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType)
 {
-	if (!pThis)
+	if (!pThis || !pAnimType)
 		return;
 
 	auto pExt = TechnoExt::ExtMap.Find(pThis);
@@ -17,30 +17,18 @@ void TechnoExt::CreateUniversalDeployAnimation(TechnoClass* pThis)
 		pExt->DeployAnim = nullptr;
 	}
 
-	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
-	if (!pTypeExt)
-		return;
-
-	if (pTypeExt->Convert_DeployingAnim.isset())
+	if (auto pAnim = GameCreate<AnimClass>(pAnimType, pThis->Location))
 	{
-		if (auto deployAnimType = pTypeExt->Convert_DeployingAnim.Get())
-		{
-			if (auto pAnim = GameCreate<AnimClass>(deployAnimType, pThis->Location))
-			{
-				pExt->DeployAnim = pAnim;
-				pExt->DeployAnim->SetOwnerObject(pThis);
+		pExt->DeployAnim = pAnim;
+		pExt->DeployAnim->SetOwnerObject(pThis);
 
-				pExt->Convert_UniversalDeploy_MakeInvisible = true;
-
-				// Use the unit palette in the animation
-				auto lcc = pThis->GetDrawer();
-				pExt->DeployAnim->LightConvert = lcc;
-			}
-			else
-			{
-				Debug::Log("ERROR! [%s] Deploy animation %s can't be created.\n", pThis->GetTechnoType()->ID, deployAnimType->ID);
-			}
-		}
+		// Use the unit palette in the animation
+		auto lcc = pThis->GetDrawer();
+		pExt->DeployAnim->LightConvert = lcc;
+	}
+	else
+	{
+		Debug::Log("ERROR! [%s] Deploy animation %s can't be created.\n", pThis->GetTechnoType()->ID, pAnimType->ID);
 	}
 }
 
@@ -85,6 +73,8 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	TechnoClass* pNew = !isOriginalDeployer ? pThis : nullptr;
 	auto const pNewType = !isOriginalDeployer ? pThis->GetTechnoType() : pOldTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx);
 
+	auto pNewExt = pNew ? TechnoExt::ExtMap.Find(pNew) : nullptr;
+
 	auto pNewTypeExt = TechnoTypeExt::ExtMap.Find(pNewType);
 	if (!pNewTypeExt)
 		return;
@@ -107,6 +97,9 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	auto pOldFoot = static_cast<FootClass*>(pOld);
 	BuildingClass* pBuildingOld = nullptr;
 	BuildingClass* pBuildingNew = nullptr;
+
+	AnimClass* pDeployAnim = pOldExt->DeployAnim ? pOldExt->DeployAnim : nullptr;
+	pDeployAnim = pNewExt && pNewExt->DeployAnim ? pNewExt->DeployAnim : pDeployAnim;
 
 	CoordStruct deployerLocation = pOld->GetCoords();
 	CoordStruct deploymentLocation = isOldInfantry && isNewInfantry ? deployerLocation : pOld->GetCell()->GetCenterCoords(); // Only infantry can use sub-cell locations
@@ -141,7 +134,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	if (isOldUnit || isOldAircraft)
 	{
 		// Turn the unit to the right deploy facing
-		if (!pOldExt->DeployAnim && pOldTypeExt->Convert_DeployDir >= 0)
+		if (!pDeployAnim && pOldTypeExt->Convert_DeployDir >= 0)
 		{
 			DirType desiredDir = (static_cast<DirType>(pOldTypeExt->Convert_DeployDir * 32));
 			DirStruct desiredFacing;
@@ -228,6 +221,11 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				return;
 			}
 
+			// Transfer Health stats from the old object to the new
+			double nHealthPercent = (double)(1.0 * pOld->Health / pOldType->Strength);
+			pNew->Health = (int)round(pNewType->Strength * nHealthPercent);
+			pNew->EstimatedHealth = pNew->Health;
+
 			// Because is too soon don't check the building stuff like energy, factory logic in the sidebar, etc
 			if (isNewBuilding)
 			{
@@ -247,7 +245,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		pNew = !isOriginalDeployer ? pThis : pOldExt->Convert_UniversalDeploy_TemporalTechno;
 		pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 		pOldExt->Convert_UniversalDeploy_MakeInvisible = true;
-		auto pNewExt = TechnoExt::ExtMap.Find(pNew);
+
+		if (!pNewExt)
+			pNewExt = TechnoExt::ExtMap.Find(pNew);
+
 		pNewExt->Convert_UniversalDeploy_TemporalTechno = pOld;
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNewExt->Convert_UniversalDeploy_InProgress = true;
@@ -270,7 +271,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		}
 
 		// Play deploy sound, if set
-		if (pOldType->DeploySound >= 0 && !pOldExt->DeployAnim)
+		if (pOldType->DeploySound >= 0 && !pDeployAnim)
 			VocClass::PlayAt(pOldType->DeploySound, deploymentLocation);
 
 		// Play pre-deploy FX animation
@@ -288,16 +289,16 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			}
 		}
 
-		// Setting the build up animation, if any.
-		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
-
 		if (selected)
 			pNew->Select();
 
+		// Setting the build up animation, if any.
+		AnimTypeClass* pDeployAnimType = pOldTypeExt->Convert_DeployingAnim.isset() ? pOldTypeExt->Convert_DeployingAnim.Get() : nullptr;
+
 		if (pDeployAnimType)
 		{
-			bool isDeployAnimPlaying = pOldExt->DeployAnim ? true : false;
-			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pOldExt->DeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
+			bool isDeployAnimPlaying = pDeployAnim ? true : false;
+			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pDeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
 
 			// Hack for making the object invisible during a deploy
 			pNewExt->Convert_UniversalDeploy_MakeInvisible = true;
@@ -305,17 +306,17 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			// The conversion process won't start until the deploy animation ends
 			if (!isDeployAnimPlaying)
 			{
-				TechnoExt::CreateUniversalDeployAnimation(pOld);
+				TechnoExt::CreateUniversalDeployAnimation(pNew, pDeployAnimType);
 				return;
 			}
 
 			if (!hasDeployAnimFinished)
 				return;
 
-			if (pOldExt->DeployAnim && !pOldExt->DeployAnim->InLimbo)
+			if (pNewExt->DeployAnim && !pNewExt->DeployAnim->InLimbo)
 			{
-				pOldExt->DeployAnim->UnInit();
-				pOldExt->DeployAnim = nullptr;
+				pNewExt->DeployAnim->UnInit();
+				pNewExt->DeployAnim = nullptr;
 			}
 		}
 
@@ -335,6 +336,8 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pBuildingNew->Factory->IsSuspended = false;
 		}
 
+		// Transfer properties from the old object to the new one
+		EnemyTargetingTransfer(pOld, pNew);
 		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
 		pNew->MarkForRedraw();
 
@@ -429,8 +432,13 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNewExt->Convert_UniversalDeploy_InProgress = true;
 
+		// Transfer Health stats from the old object to the new
+		double nHealthPercent = (double)(1.0 * pOld->Health / pOldType->Strength);
+		pNew->Health = (int)round(pNewType->Strength * nHealthPercent);
+		pNew->EstimatedHealth = pNew->Health;
+
 		// Play deploy sound, if set
-		if (pOldType->DeploySound >= 0 && !pOldExt->DeployAnim)
+		if (pOldType->DeploySound >= 0 && !pDeployAnim)
 			VocClass::PlayAt(pOldType->DeploySound, deploymentLocation);
 
 		// Play pre-deploy FX animation
@@ -453,8 +461,8 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 		if (pDeployAnimType)
 		{
-			bool isDeployAnimPlaying = pOldExt->DeployAnim ? true : false;
-			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pOldExt->DeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
+			bool isDeployAnimPlaying = pDeployAnim ? true : false;
+			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pDeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
 
 			// Hack for making the object invisible during a deploy
 			pOldExt->Convert_UniversalDeploy_MakeInvisible = true;
@@ -463,7 +471,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			// The conversion process won't start until the deploy animation ends
 			if (!isDeployAnimPlaying)
 			{
-				TechnoExt::CreateUniversalDeployAnimation(pOld);
+				TechnoExt::CreateUniversalDeployAnimation(pOld, pDeployAnimType);
 				return;
 			}
 
@@ -530,7 +538,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pBuildingNew->MarkForRedraw();
 		}
 
+		// Transfer properties from the old object to the new one
+		EnemyTargetingTransfer(pOld, pNew);
 		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
+
 
 		// Play post-deploy sound
 		int convert_PostDeploySoundIndex = pOldTypeExt->Convert_PostDeploySound.isset() ? pOldTypeExt->Convert_PostDeploySound.Get() : -1;
@@ -709,6 +720,9 @@ TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeC
 	// Transfer all the important details
 	TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
 
+	// Transfer enemies's target from the old object to the new one
+	EnemyTargetingTransfer(pOld, pNew);
+
 	pOldExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 	pOwner->RemoveTracking(pOld);
 	pOwner->RegisterLoss(pOld, false);
@@ -758,13 +772,6 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 	bool isNewAircraft = pNew->WhatAmI() == AbstractType::Aircraft;
 	bool isOldUnit = pOld->WhatAmI() == AbstractType::Unit;
 	bool isNewUnit = pNew->WhatAmI() == AbstractType::Unit;
-
-	// Transfer enemies's target from the old object to the new one
-	for (auto pEnemy : *TechnoClass::Array)
-	{
-		if (pEnemy->Target == pOld)
-			pEnemy->SetTarget(pNew);
-	}
 
 	++Unsorted::IKnowWhatImDoing;
 
@@ -1026,6 +1033,19 @@ void TechnoExt::PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechn
 				}
 			}
 		}
+	}
+}
+
+void TechnoExt::EnemyTargetingTransfer(TechnoClass* pOld, TechnoClass* pNew)
+{
+	if (!pOld || !pNew || !pNew->IsAlive || pNew->Health <= 0)
+		return;
+
+	// Transfer enemies's target from the old object to the new one
+	for (auto pEnemy : *TechnoClass::Array)
+	{
+		if (pEnemy->Target == pOld)
+			pEnemy->SetTarget(pNew);
 	}
 }
 

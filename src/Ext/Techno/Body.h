@@ -261,8 +261,9 @@ public:
 	static TechnoClass* UniversalDeployConversion(TechnoClass* pThis, TechnoTypeClass* pNewType = nullptr);
 	static void RunStructureIntoTechnoConversion(TechnoClass* pOld, TechnoTypeClass* pNewType = nullptr);
 	static void RunTechnoIntoStructureConversion(TechnoClass* pOld, TechnoTypeClass* pNewType = nullptr);
-	static void CreateUniversalDeployAnimation(TechnoClass* pThis);
+	static void CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType = nullptr);
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	static void UpdateUniversalDeploy(TechnoClass* pThis);
+	static void EnemyTargetingTransfer(TechnoClass* pOld = nullptr, TechnoClass* pNew = nullptr);
 	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
 };
