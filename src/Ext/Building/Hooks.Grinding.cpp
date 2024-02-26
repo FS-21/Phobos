@@ -133,7 +133,7 @@ DEFINE_HOOK(0x740134, UnitClass_WhatAction_Grinding, 0x0)
 		return Continue;
 
 	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pTechno->GetTechnoType());
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
+	if (!pTypeExt || !pTypeExt->Convert_UniversalDeploy.isset())
 		return Continue;
 
 	R->EBX(Action::Self_Deploy);

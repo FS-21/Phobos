@@ -41,17 +41,9 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	if (!pThisExt || !pThisExt->Convert_UniversalDeploy_InProgress)
 		return;
 
-	/*if (!ScriptExt::IsUnitAvailable(pThis, false))
-	{
-		if (pThisExt->DeployAnim && !pThisExt->DeployAnim->InLimbo)
-		{
-			pThisExt->DeployAnim->UnInit();
-			pThisExt->DeployAnim = nullptr;
-		}
-	}*/
-
 	// We have to know if the object that ran this method is the old deployer or the new object.
-	// The stored object is the opposite of who entered here.
+	// If this method was executed by the new object then the stored object is the limboed original deployer and vice-versa.
+	// Is done in this way because limboed technos are ignored by the system and we want to continue the unfinished deployment logic like in the previous game frame.
 	bool isOriginalDeployer = pThisExt->Convert_UniversalDeploy_IsOriginalDeployer;
 	TechnoClass* pOld = !isOriginalDeployer ? pThisExt->Convert_UniversalDeploy_TemporalTechno : pThis;
 
@@ -67,12 +59,8 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	if (!pOldTypeExt)
 		return;
 
-	// Rare feature: If there are multiple deployment candidates will be picked 1 random object until the process ends successfully, in this case will be stored the candidate for all the deployment operation
-	int selectedDeployIdx = pOldExt->Convert_UniversalDeploy_SelectedIdx < 0 ? ScenarioClass::Instance->Random.RandomRanged(0, pOldTypeExt->Convert_UniversalDeploy.size() - 1) : pOldExt->Convert_UniversalDeploy_SelectedIdx;
-
 	TechnoClass* pNew = !isOriginalDeployer ? pThis : nullptr;
-	auto const pNewType = !isOriginalDeployer ? pThis->GetTechnoType() : pOldTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx);
-
+	auto const pNewType = !isOriginalDeployer ? pThis->GetTechnoType() : pOldTypeExt->Convert_UniversalDeploy.Get();
 	auto pNewExt = pNew ? TechnoExt::ExtMap.Find(pNew) : nullptr;
 
 	auto pNewTypeExt = TechnoTypeExt::ExtMap.Find(pNewType);
@@ -103,6 +91,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 	CoordStruct deployerLocation = pOld->GetCoords();
 	CoordStruct deploymentLocation = isOldInfantry && isNewInfantry ? deployerLocation : pOld->GetCell()->GetCenterCoords(); // Only infantry can use sub-cell locations
+	deploymentLocation = !deployToLand && pOld->GetHeight() > 0 && isNewAircraft ? pOld->Location : deploymentLocation;
 	DirType currentDir = pOld->PrimaryFacing.Current().GetDir(); // Returns current position in format [0 - 7] x 32
 
 	if (oldTechnoIsUnit && !pNew)
@@ -150,9 +139,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		}
 	}
 
-	// Save permanently the selected deployment object
-	pOldExt->Convert_UniversalDeploy_SelectedIdx = selectedDeployIdx;
-
 	bool selected = false;
 	if (pOld->IsSelected)
 		selected = true;
@@ -188,7 +174,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOld->IsFallingDown = false;
-				pOldExt->Convert_UniversalDeploy_SelectedIdx = -1;
 
 				++Unsorted::IKnowWhatImDoing;
 				pOld->Unlimbo(deployerLocation, currentDir);
@@ -212,7 +197,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOld->IsFallingDown = false;
-				pOldExt->Convert_UniversalDeploy_SelectedIdx = -1;
 
 				++Unsorted::IKnowWhatImDoing;
 				pOld->Unlimbo(deployerLocation, currentDir);
@@ -318,7 +302,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			bool hasDeployAnimFinished = (isDeployAnimPlaying && (pDeployAnim->Animation.Value >= (pDeployAnimType->End + pDeployAnimType->Start - 1))) ? true : false;
 
 			// Hack for making the object invisible during a deploy
-			pNewExt->Convert_UniversalDeploy_MakeInvisible = true;
+			//pNewExt->Convert_UniversalDeploy_MakeInvisible = true;
 
 			// The conversion process won't start until the deploy animation ends
 			if (!isDeployAnimPlaying)
@@ -342,7 +326,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		// The build up animation finished (if any).
 		// In this case we only have to transfer properties to the new object
 		pNewExt->Convert_UniversalDeploy_MakeInvisible = false;
-		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
+		//pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNewExt->Convert_UniversalDeploy_TemporalTechno = nullptr;
 		pNewExt->Convert_UniversalDeploy_InProgress = false;
 		pNew->MarkForRedraw();
@@ -390,6 +374,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pOld->UnInit();
 		}
 
+		// Register the new object
 		pOwner->AddTracking(pNew);
 		pOwner->RegisterGain(pNew, false);
 		pNew->Owner->RecheckTechTree = true;
@@ -415,7 +400,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOld->IsFallingDown = false;
-				pOldExt->Convert_UniversalDeploy_SelectedIdx = -1;
 
 				++Unsorted::IKnowWhatImDoing;
 				pOld->Unlimbo(deployerLocation, currentDir);
@@ -445,9 +429,12 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 
 		// At this point the new object exists & is visible.
 		// If exists a deploy animation it must dissappear until the animation finished
-		pNew = !isOriginalDeployer ? pThis : pOldExt->Convert_UniversalDeploy_TemporalTechno;
 		pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
-		auto pNewExt = TechnoExt::ExtMap.Find(pNew);
+		pNew = !isOriginalDeployer ? pThis : pOldExt->Convert_UniversalDeploy_TemporalTechno;
+
+		if (!pNewExt)
+			pNewExt = TechnoExt::ExtMap.Find(pNew);
+
 		pNewExt->Convert_UniversalDeploy_TemporalTechno = pOld;
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNewExt->Convert_UniversalDeploy_InProgress = true;
@@ -530,7 +517,6 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 			pOldExt->Convert_UniversalDeploy_InProgress = false;
 			pOld->IsFallingDown = false;
-			pOldExt->Convert_UniversalDeploy_SelectedIdx = -1;
 
 			++Unsorted::IKnowWhatImDoing;
 			pOld->Unlimbo(deployerLocation, currentDir);
@@ -639,6 +625,8 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		pNewExt->Convert_UniversalDeploy_InProgress = false;
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNew->MarkForRedraw();
+
+		// Register the new object
 		pOwner->AddTracking(pNew);
 		pOwner->RegisterGain(pNew, false);
 		pNew->Owner->RecheckTechTree = true;
@@ -664,16 +652,13 @@ TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeC
 
 	auto pOldTypeExt = TechnoTypeExt::ExtMap.Find(pOldType);
 
-	// Rare feature: If there are multiple deployment candidates will be picked 1 random object until the process ends successfully
-	int selectedDeployIdx = ScenarioClass::Instance->Random.RandomRanged(0, pOldTypeExt->Convert_UniversalDeploy.size() - 1);
-
 	// If the new object isn't defined then it will be picked from a list
 	if (!pNewType)
 	{
-		if (pOldTypeExt->Convert_UniversalDeploy.size() == 0)
+		if (!pOldTypeExt->Convert_UniversalDeploy.isset())
 			return nullptr;
 
-		pNewType = pOldTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx);
+		pNewType = pOldTypeExt->Convert_UniversalDeploy.Get();
 	}
 
 	bool isOldBuilding = pOldType->WhatAmI() == AbstractType::BuildingType;

@@ -362,14 +362,10 @@ bool TechnoExt::CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDe
 	if (!pDeployType)
 	{
 		auto pBldTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
-		if (!pBldTypeExt || pBldTypeExt->Convert_UniversalDeploy.size() == 0)
+		if (!pBldTypeExt || !pBldTypeExt->Convert_UniversalDeploy.isset())
 			return noDeploysIntoDefaultValue;
 
-		auto pBldExt = TechnoExt::ExtMap.Find(pThis);
-		if (!pBldExt || pBldExt->Convert_UniversalDeploy_SelectedIdx < 0)
-			return noDeploysIntoDefaultValue;
-
-		pDeployType = static_cast<BuildingTypeClass*>(pBldTypeExt->Convert_UniversalDeploy.at(pBldExt->Convert_UniversalDeploy_SelectedIdx));
+		pDeployType = static_cast<BuildingTypeClass*>(pBldTypeExt->Convert_UniversalDeploy.Get());
 	}
 
 	if (!pDeployType)
@@ -733,7 +729,6 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_UniversalDeploy_TemporalTechno)
 		.Process(this->Convert_UniversalDeploy_IsOriginalDeployer)
 		.Process(this->Convert_UniversalDeploy_RememberTarget)
-		.Process(this->Convert_UniversalDeploy_SelectedIdx)
 		;
 }
 

@@ -229,7 +229,7 @@ public:
 		Valueable<int> Prerequisite_Lists;
 		std::vector<DynamicVectorClass<int>> Prerequisite_ListVector;
 
-		ValueableVector<TechnoTypeClass*> Convert_UniversalDeploy;
+		Nullable<TechnoTypeClass*> Convert_UniversalDeploy;
 		Valueable<bool> Convert_DeployToLand;
 		Nullable<AnimTypeClass*> Convert_PreDeploy_AnimFX;
 		Valueable<bool> Convert_PreDeploy_AnimFX_FollowDeployer;

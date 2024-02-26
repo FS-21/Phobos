@@ -15,11 +15,12 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	if (!pExt || pExt->Convert_UniversalDeploy_InProgress)
 		return 0;
 
-	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
+	// Infantry checks are done in another hook
+	if (pThis->WhatAmI() == AbstractType::Infantry)
 		return 0;
 
-	if (pThis->WhatAmI() == AbstractType::Infantry) // Check done in another hook
+	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+	if (!pTypeExt || !pTypeExt->Convert_UniversalDeploy.isset())
 		return 0;
 
 	// Building case, send the undeploy signal
@@ -39,9 +40,6 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		return 0x730C10;
 	}
 
-	// Rare feature: If there are multiple deployment candidates will be picked 1 random object until the process ends successfully, in this case will be stored the candidate for all the deployment operation
-	int selectedDeployIdx = pExt->Convert_UniversalDeploy_SelectedIdx < 0 ? ScenarioClass::Instance->Random.RandomRanged(0, pTypeExt->Convert_UniversalDeploy.size() - 1) : pExt->Convert_UniversalDeploy_SelectedIdx;
-
 	// Unit case, send the undeploy signal only if this object meets the all the requisites
 	if (pThis->WhatAmI() == AbstractType::Unit)
 	{
@@ -50,7 +48,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		if (pUnit->Undeploying || pUnit->Deploying || pUnit->IsDeploying)
 			return 0;
 		
-		const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx)->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx)) : nullptr;
+		auto const pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.Get()->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.Get()) : nullptr;
 		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pThis->GetCoords()), pThis->Owner) : false;
 		auto pCell = pThis->GetCell();
 		int nObjectsInCell = 0;
@@ -111,7 +109,6 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		// Set the deployment signal, indicating the process hasn't finished
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 		pExt->Convert_UniversalDeploy_InProgress = true;
-		pExt->Convert_UniversalDeploy_SelectedIdx = selectedDeployIdx;
 
 		if (pThis->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
@@ -144,11 +141,8 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 	// Is the infantry in the middle of a deployment?
 	if (pThis->IsDeploying)
 		return 0;
-
-	// Rare feature: If there are multiple deployment candidates will be picked 1 random object until the process ends successfully, in this case will be stored the candidate for all the deployment operation
-	int selectedDeployIdx = pOldExt->Convert_UniversalDeploy_SelectedIdx < 0 ? ScenarioClass::Instance->Random.RandomRanged(0, pOldTypeExt->Convert_UniversalDeploy.size() - 1) : pOldExt->Convert_UniversalDeploy_SelectedIdx;
 	
-	auto const pNewType = pOldTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx);
+	auto const pNewType = pOldTypeExt->Convert_UniversalDeploy.Get();
 	bool oldIsFlyingUnit = pThis->GetTechnoType()->MovementZone == MovementZone::Fly || pThis->GetTechnoType()->ConsideredAircraft;
 	auto pCell = pOld->GetCell();
 	bool cellIsOnWater = (pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach);
@@ -210,7 +204,6 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 
 	pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 	pOldExt->Convert_UniversalDeploy_InProgress = true;
-	pOldExt->Convert_UniversalDeploy_SelectedIdx = selectedDeployIdx;
 
 	if (pThis->Target)
 		pOldExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
@@ -229,7 +222,7 @@ DEFINE_HOOK(0x449C47, BuildingClass_MissionDeconstruction_UniversalDeploy, 0x6)
 
 	// Check if is the UniversalDeploy or a standard deploy
 	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->GetTechnoType());
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
+	if (!pTypeExt || !pTypeExt->Convert_UniversalDeploy.isset())
 		return 0;
 
 	auto pExt = TechnoExt::ExtMap.Find(pBuilding);
@@ -266,16 +259,10 @@ DEFINE_HOOK(0x44725F, BuildingClass_WhatAction_UniversalDeploy_EnableDeployIcon,
 	}
 
 	auto pBldTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
-	if (!pBldTypeExt)
+	if (!pBldTypeExt || !pBldTypeExt->Convert_UniversalDeploy.isset())
 		return 0;
 
-	if (pBldTypeExt->Convert_UniversalDeploy.size() == 0)
-		return 0;
-
-	// Rare feature: If there are multiple deployment candidates will be picked 1 random object until the process ends successfully, in this case will be stored the candidate for all the deployment operation
-	int selectedDeployIdx = pBldExt->Convert_UniversalDeploy_SelectedIdx < 0 ? ScenarioClass::Instance->Random.RandomRanged(0, pBldTypeExt->Convert_UniversalDeploy.size() - 1) : pBldExt->Convert_UniversalDeploy_SelectedIdx;
-
-	auto const pNewType = pBldTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx);
+	auto const pNewType = pBldTypeExt->Convert_UniversalDeploy.Get();
 
 	// If target deploy is a structure we can show the "No Deploy" icon if the foundation has obstacles
 	if (pNewType->WhatAmI() == AbstractType::BuildingType)
@@ -285,7 +272,6 @@ DEFINE_HOOK(0x44725F, BuildingClass_WhatAction_UniversalDeploy_EnableDeployIcon,
 
 		if (!canDeployIntoStructure)
 		{
-			pBldExt->Convert_UniversalDeploy_SelectedIdx = selectedDeployIdx; // Avoid possible cursor blinking forcing the deployment selection
 			R->EAX(Action::NoDeploy);
 			return 0x447273;
 		}
@@ -305,7 +291,7 @@ DEFINE_HOOK(0x457DE9, BuildingClass_EvictOccupiers_UniversalDeploy_DontEjectOccu
 		return 0;
 
 	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pBuilding->Type);
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
+	if (!pTypeExt || !pTypeExt->Convert_UniversalDeploy.isset())
 		return 0;
 
 	// Don't eject the infantry if the UniversalDeploy is being used. UniversalDeploy Manages that operation
@@ -333,13 +319,10 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	}
 
 	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pTechno->GetTechnoType());
-	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
+	if (!pTypeExt || !pTypeExt->Convert_UniversalDeploy.isset())
 		return 0;
 
-	// Rare feature: If there are multiple deployment candidates will be picked 1 random object until the process ends successfully, in this case will be stored the candidate for all the deployment operation
-	int selectedDeployIdx = pExt->Convert_UniversalDeploy_SelectedIdx < 0 ? ScenarioClass::Instance->Random.RandomRanged(0, pTypeExt->Convert_UniversalDeploy.size() - 1) : pExt->Convert_UniversalDeploy_SelectedIdx;
-
-	auto const pNewTechnoType = pTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx);
+	auto const pNewTechnoType = pTypeExt->Convert_UniversalDeploy.Get();
 	bool oldIsFlyingUnit = pTechno->GetTechnoType()->MovementZone == MovementZone::Fly || pTechno->GetTechnoType()->ConsideredAircraft;
 	auto pCell = pTechno->GetCell();
 	bool cellIsOnWater = (pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach);
@@ -381,7 +364,6 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		R->EBX(Action::None);
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
-		pExt->Convert_UniversalDeploy_SelectedIdx = selectedDeployIdx;
 
 		if (pTechno->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pTechno->Target;
@@ -393,7 +375,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	if (pTechno->WhatAmI() == AbstractType::Unit)
 	{
 		const auto pUnit = abstract_cast<UnitClass*>(pTechno);
-		const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx)->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx)) : nullptr;
+		const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.Get()->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.Get()) : nullptr;
 		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pUnit->GetCoords()), pUnit->Owner): false;
 		int nObjectsInCell = 0;
 
@@ -422,6 +404,9 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		// Stop the deployable unit, can not be converted if the object is moving
 		if (!pTechno->IsFallingDown && pTechno->CurrentMission != Mission::Guard)
 		{
+			if (pTechno->Target)
+				pExt->Convert_UniversalDeploy_RememberTarget = pTechno->Target;
+
 			// Reset previous command
 			pExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 			pFoot->SetTarget(nullptr);
@@ -450,7 +435,6 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		// Set the deployment signal, indicating the process hasn't finished
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 		pExt->Convert_UniversalDeploy_InProgress = true;
-		pExt->Convert_UniversalDeploy_SelectedIdx = selectedDeployIdx;
 
 		if (pTechno->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pTechno->Target;
@@ -497,14 +481,11 @@ DEFINE_HOOK(0x73B4DA, UnitClass_DrawVoxel_UniversalDeploy_DontRenderObject, 0x6)
 		return 0;
 
 	auto pExt = TechnoExt::ExtMap.Find(pTechno);
-	if (!pExt)
+	if (!pExt || !pExt->Convert_UniversalDeploy_MakeInvisible)
 		return 0;
 
 	// VXL units won't draw graphics when deploy
-	if (pExt->Convert_UniversalDeploy_MakeInvisible)
-		return Skip;
-
-	return 0;
+	return Skip;
 }
 
 // Make object graphics invisible because they aren't rendered
@@ -518,14 +499,11 @@ DEFINE_HOOK(0x73C602, TechnoClass_DrawObject_UniversalDeploy_DontRenderObject, 0
 		return 0;
 
 	auto pExt = TechnoExt::ExtMap.Find(pThis);
-	if (!pExt)
+	if (!pExt || !pExt->Convert_UniversalDeploy_MakeInvisible)
 		return 0;
 
 	// SHP units won't draw graphics when deploy
-	if (pExt->Convert_UniversalDeploy_MakeInvisible)
-		return Skip;
-
-	return 0;
+	return Skip;
 }
 
 // Make object graphics invisible because they aren't rendered
@@ -543,14 +521,11 @@ DEFINE_HOOK(0x518FBC, InfantryClass_DrawIt_UniversalDeploy_DontRenderObject, 0x6
 		return 0;
 
 	auto pExt = TechnoExt::ExtMap.Find(pTechno);
-	if (!pExt)
+	if (!pExt || !pExt->Convert_UniversalDeploy_MakeInvisible)
 		return 0;
 
 	// Here enters SHP units when deploy
-	if (pExt->Convert_UniversalDeploy_MakeInvisible)
-		return Skip;
-
-	return 0;
+	return Skip;
 }
 
 // Make object graphics invisible because shouldn't be rendered in the middle of a deployment
@@ -568,59 +543,9 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 		return 0;
 
 	auto pExt = TechnoExt::ExtMap.Find(pTechno);
-	if (!pExt)
+	if (!pExt || !pExt->Convert_UniversalDeploy_MakeInvisible)
 		return 0;
 
 	// Here enters SHP objects, voxel turrets
-	if (pExt->Convert_UniversalDeploy_MakeInvisible)
-		return Skip;
-
-	return 0;
+	return Skip;
 }
-
-// Make building animations invisible because shouldn't be rendered in the middle of a deployment
-/*DEFINE_HOOK(0x4509DE, BuildingClass_AnimationAI_UniversalDeploy, 0x6)
-{
-	GET(BuildingClass*, pThis, ESI);
-
-	if (!pThis)
-		return 0;
-
-	auto pTechno = static_cast<TechnoClass*>(pThis);
-	if (!pTechno)
-		return 0;
-
-	auto pExt = TechnoExt::ExtMap.Find(pTechno);
-	if (!pExt)
-		return 0;
-
-	if (!pExt->Convert_UniversalDeploy_InProgress)
-		return 0;
-
-	if (pExt->Convert_UniversalDeploy_MakeInvisible)
-	{
-		// Hide building animations
-		for (auto pAnim : pThis->Anims)
-		{
-			if (!pAnim)
-				continue;
-
-			pAnim->NeedsRedraw = true;
-			pAnim->Invisible = true;
-		}
-
-		return 0;
-	}
-
-	// Show building animations
-	for (auto pAnim : pThis->Anims)
-	{
-		if (!pAnim)
-			continue;
-
-		pAnim->NeedsRedraw = true;
-		pAnim->Invisible = false;
-	}
-
-	return 0;
-}*/

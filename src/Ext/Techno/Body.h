@@ -103,7 +103,6 @@ public:
 		TechnoClass* Convert_UniversalDeploy_TemporalTechno;
 		bool Convert_UniversalDeploy_IsOriginalDeployer;
 		AbstractClass* Convert_UniversalDeploy_RememberTarget;
-		int Convert_UniversalDeploy_SelectedIdx;
 
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
@@ -144,7 +143,6 @@ public:
 			, Convert_UniversalDeploy_TemporalTechno { nullptr }
 			, Convert_UniversalDeploy_IsOriginalDeployer { true }
 			, Convert_UniversalDeploy_RememberTarget { nullptr }
-			, Convert_UniversalDeploy_SelectedIdx { -1 }
 		{ }
 
 		void ApplyInterceptor();
