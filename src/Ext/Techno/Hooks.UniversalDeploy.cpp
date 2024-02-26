@@ -557,7 +557,7 @@ DEFINE_HOOK(0x43D29D, BuildingClass_DrawIt_UniversalDeploy_DontRenderObject, 0xD
 }
 
 // Make building animations invisible because shouldn't be rendered in the middle of a deployment
-DEFINE_HOOK(0x4509DE, BuildingClass_AnimationAI_UniversalDeploy, 0x6)
+/*DEFINE_HOOK(0x4509DE, BuildingClass_AnimationAI_UniversalDeploy, 0x6)
 {
 	GET(BuildingClass*, pThis, ESI);
 
@@ -601,4 +601,4 @@ DEFINE_HOOK(0x4509DE, BuildingClass_AnimationAI_UniversalDeploy, 0x6)
 	}
 
 	return 0;
-}
+}*/

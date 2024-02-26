@@ -264,6 +264,7 @@ public:
 	static void CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType = nullptr);
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	static void UpdateUniversalDeploy(TechnoClass* pThis);
-	static void EnemyTargetingTransfer(TechnoClass* pOld = nullptr, TechnoClass* pNew = nullptr);
+	static void HideBuildingAnimations(BuildingClass* pThis = nullptr);
+	static void UnhideBuildingAnimations(BuildingClass* pThis = nullptr);
 	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
 };

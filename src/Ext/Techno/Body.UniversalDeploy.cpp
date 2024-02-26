@@ -41,14 +41,14 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	if (!pThisExt || !pThisExt->Convert_UniversalDeploy_InProgress)
 		return;
 
-	if (!ScriptExt::IsUnitAvailable(pThis, false))
+	/*if (!ScriptExt::IsUnitAvailable(pThis, false))
 	{
 		if (pThisExt->DeployAnim && !pThisExt->DeployAnim->InLimbo)
 		{
 			pThisExt->DeployAnim->UnInit();
 			pThisExt->DeployAnim = nullptr;
 		}
-	}
+	}*/
 
 	// We have to know if the object that ran this method is the old deployer or the new object.
 	// The stored object is the opposite of who entered here.
@@ -165,6 +165,14 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 	// This case should cover the "structure into structure".
 	if (oldTechnoIsUnit || isNewBuilding)
 	{
+		// Transfer enemies target (part 1/2)
+		DynamicVectorClass<TechnoClass*> enemiesTargetingMeList;
+		for (auto pEnemy : *TechnoClass::Array)
+		{
+			if (pEnemy->Target == pOld)
+				enemiesTargetingMeList.AddItem(pEnemy);
+		}
+
 		if (!pOld->InLimbo)
 			pOld->Limbo();
 
@@ -221,6 +229,13 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				return;
 			}
 
+			// Transfer enemies target (part 2/2)
+			for (auto pEnemy : enemiesTargetingMeList)
+			{
+				//pEnemy->SetDestination(pNew, false);
+				pEnemy->SetTarget(pNew);
+			}
+
 			// Transfer Health stats from the old object to the new
 			double nHealthPercent = (double)(1.0 * pOld->Health / pOldType->Strength);
 			pNew->Health = (int)round(pNewType->Strength * nHealthPercent);
@@ -259,6 +274,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!pBuildingOld)
 				pBuildingOld = static_cast<BuildingClass*>(pOld);
 
+			TechnoExt::HideBuildingAnimations(pBuildingOld);
 			pBuildingOld->UpdateAnimations();
 		}
 
@@ -267,6 +283,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!pBuildingNew)
 				pBuildingNew = static_cast<BuildingClass*>(pNew);
 
+			TechnoExt::HideBuildingAnimations(pBuildingNew);
 			pBuildingNew->UpdateAnimations();
 		}
 
@@ -313,11 +330,18 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!hasDeployAnimFinished)
 				return;
 
-			if (pNewExt->DeployAnim && !pNewExt->DeployAnim->InLimbo)
+			if (pNewExt->DeployAnim->Type) // If this anim doesn't have a type pointer, just detach it
+			{
+				pNewExt->DeployAnim->TimeToDie = true;
+				pNewExt->DeployAnim->UnInit();
+			}
+
+			pNewExt->DeployAnim = nullptr;
+			/*if (pNewExt->DeployAnim && !pNewExt->DeployAnim->InLimbo)
 			{
 				pNewExt->DeployAnim->UnInit();
 				pNewExt->DeployAnim = nullptr;
-			}
+			}*/
 		}
 
 		// The build up animation finished (if any).
@@ -326,20 +350,21 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		pNewExt->Convert_UniversalDeploy_IsOriginalDeployer = false;
 		pNewExt->Convert_UniversalDeploy_TemporalTechno = nullptr;
 		pNewExt->Convert_UniversalDeploy_InProgress = false;
+		pNew->MarkForRedraw();
 
 		if (isNewBuilding)
 		{
 			auto pBuildingNew = static_cast<BuildingClass*>(pNew);
+			TechnoExt::UnhideBuildingAnimations(pBuildingNew);
+			pBuildingNew->UpdateAnimations();
 			pBuildingNew->HasPower = true;
 
 			if (pBuildingNew->Factory)
 				pBuildingNew->Factory->IsSuspended = false;
 		}
-
+		
 		// Transfer properties from the old object to the new one
-		EnemyTargetingTransfer(pOld, pNew);
 		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
-		pNew->MarkForRedraw();
 
 		// Play post-deploy sound
 		int convert_PostDeploySoundIndex = pOldTypeExt->Convert_PostDeploySound.isset() ? pOldTypeExt->Convert_PostDeploySound.Get() : -1;
@@ -478,11 +503,26 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			if (!hasDeployAnimFinished)
 				return;
 
-			if (pOldExt->DeployAnim && !pOldExt->DeployAnim->InLimbo)
+			if (pOldExt->DeployAnim->Type) // If this anim doesn't have a type pointer, just detach it
+			{
+				pOldExt->DeployAnim->TimeToDie = true;
+				pOldExt->DeployAnim->UnInit();
+			}
+
+			pOldExt->DeployAnim = nullptr;
+			/*if (pOldExt->DeployAnim && !pOldExt->DeployAnim->InLimbo)
 			{
 				pOldExt->DeployAnim->UnInit();
 				pOldExt->DeployAnim = nullptr;
-			}
+			}*/
+		}
+
+		// Transfer enemies target (part 1/2)
+		DynamicVectorClass<TechnoClass*> enemiesTargetingMeList;
+		for (auto pEnemy : *TechnoClass::Array)
+		{
+			if (pEnemy->Target == pOld)
+				enemiesTargetingMeList.AddItem(pEnemy);
 		}
 
 		// The build up animation finished (if any).
@@ -526,6 +566,13 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			return;
 		}
 
+		// Transfer enemies target (part 2/2)
+		for (auto pEnemy : enemiesTargetingMeList)
+		{
+			pEnemy->SetDestination(pNew, false);
+			pEnemy->SetTarget(pNew);
+		}
+
 		if (selected)
 			pNew->Select();
 
@@ -539,9 +586,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 		}
 
 		// Transfer properties from the old object to the new one
-		EnemyTargetingTransfer(pOld, pNew);
 		TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
-
 
 		// Play post-deploy sound
 		int convert_PostDeploySoundIndex = pOldTypeExt->Convert_PostDeploySound.isset() ? pOldTypeExt->Convert_PostDeploySound.Get() : -1;
@@ -674,6 +719,14 @@ TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeC
 	if (pOld->IsSelected)
 		pOld->Select();
 
+	// Transfer enemies target (part 1/2)
+	DynamicVectorClass<TechnoClass*> enemiesTargetingMeList;
+	for (auto pEnemy : *TechnoClass::Array)
+	{
+		if (pEnemy->Target == pOld)
+			enemiesTargetingMeList.AddItem(pEnemy);
+	}
+
 	++Unsorted::IKnowWhatImDoing;
 	pOld->Limbo();
 	bool unlimboed = pNew->Unlimbo(deploymentLocation, currentDir);
@@ -681,11 +734,18 @@ TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeC
 
 	if (!unlimboed)
 	{
-		// I think here won't enter I avoided checks
+		// I think here won't enter because I avoided checks
 		++Unsorted::IKnowWhatImDoing;
 		pNew->UnInit();
 		pOld->Unlimbo(deployerLocation, currentDir);
 		--Unsorted::IKnowWhatImDoing;
+	}
+
+	// Transfer enemies target (part 2/2)
+	for (auto pEnemy : enemiesTargetingMeList)
+	{
+		pEnemy->SetDestination(pNew, false);
+		pEnemy->SetTarget(pNew);
 	}
 
 	pNew->InAir = (pOld->GetHeight() > 0); // Force the update
@@ -719,9 +779,6 @@ TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeC
 
 	// Transfer all the important details
 	TechnoExt::Techno2TechnoPropertiesTransfer(pOld, pNew);
-
-	// Transfer enemies's target from the old object to the new one
-	EnemyTargetingTransfer(pOld, pNew);
 
 	pOldExt->Convert_UniversalDeploy_RememberTarget = nullptr;
 	pOwner->RemoveTracking(pOld);
@@ -1036,19 +1093,6 @@ void TechnoExt::PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechn
 	}
 }
 
-void TechnoExt::EnemyTargetingTransfer(TechnoClass* pOld, TechnoClass* pNew)
-{
-	if (!pOld || !pNew || !pNew->IsAlive || pNew->Health <= 0)
-		return;
-
-	// Transfer enemies's target from the old object to the new one
-	for (auto pEnemy : *TechnoClass::Array)
-	{
-		if (pEnemy->Target == pOld)
-			pEnemy->SetTarget(pNew);
-	}
-}
-
 void TechnoExt::RunStructureIntoTechnoConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
 {
 	// TO-DO : Copy the block of code
@@ -1057,4 +1101,37 @@ void TechnoExt::RunStructureIntoTechnoConversion(TechnoClass* pOld, TechnoTypeCl
 void TechnoExt::RunTechnoIntoStructureConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
 {
 	// TO-DO : Copy the block of code
+}
+
+
+void TechnoExt::HideBuildingAnimations(BuildingClass* pThis)
+{
+	if (!pThis)
+		return;
+
+	// Hide building animations
+	for (auto pAnim : pThis->Anims)
+	{
+		if (!pAnim)
+			continue;
+
+		pAnim->Invisible = true;
+		pAnim->NeedsRedraw = true;
+	}
+}
+
+void TechnoExt::UnhideBuildingAnimations(BuildingClass* pThis)
+{
+	if (!pThis)
+		return;
+
+	// Show building animations
+	for (auto pAnim : pThis->Anims)
+	{
+		if (!pAnim)
+			continue;
+
+		pAnim->Invisible = false;
+		pAnim->NeedsRedraw = true;
+	}
 }
