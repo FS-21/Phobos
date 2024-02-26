@@ -25,6 +25,11 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	// Building case, send the undeploy signal
 	if (pThis->WhatAmI() == AbstractType::Building)
 	{
+		// Is the building in the middle of a deployment?
+		auto const pBuilding = static_cast<BuildingClass*>(pThis);
+		if (pBuilding->BState == (int)BStateType::Construction)
+			return 0;
+
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 
@@ -40,6 +45,11 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 	// Unit case, send the undeploy signal only if this object meets the all the requisites
 	if (pThis->WhatAmI() == AbstractType::Unit)
 	{
+		// Is the unit in the middle of a deployment?
+		auto const pUnit = static_cast<UnitClass*>(pThis);
+		if (pUnit->Undeploying || pUnit->Deploying || pUnit->IsDeploying)
+			return 0;
+		
 		const auto pIntoBuildingType = pTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx)->WhatAmI() == AbstractType::Building ? abstract_cast<BuildingTypeClass*>(pTypeExt->Convert_UniversalDeploy.at(selectedDeployIdx)) : nullptr;
 		bool canDeployIntoStructure = pIntoBuildingType ? pIntoBuildingType->CanCreateHere(CellClass::Coord2Cell(pThis->GetCoords()), pThis->Owner) : false;
 		auto pCell = pThis->GetCell();
@@ -129,6 +139,10 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 
 	auto const pOldTypeExt = TechnoTypeExt::ExtMap.Find(pOld->GetTechnoType());
 	if (!pOldTypeExt)
+		return 0;
+
+	// Is the infantry in the middle of a deployment?
+	if (pThis->IsDeploying)
 		return 0;
 
 	// Rare feature: If there are multiple deployment candidates will be picked 1 random object until the process ends successfully, in this case will be stored the candidate for all the deployment operation
@@ -309,6 +323,14 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	auto pExt = TechnoExt::ExtMap.Find(pTechno);
 	if (!pExt || pExt->Convert_UniversalDeploy_InProgress)
 		return 0;
+
+	if (pTechno->WhatAmI() == AbstractType::Building)
+	{
+		// Is the building in the middle of a deployment?
+		auto const pBuilding = static_cast<BuildingClass*>(pTechno);
+		if (pBuilding->BState == (int)BStateType::Construction)
+			return 0;
+	}
 
 	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pTechno->GetTechnoType());
 	if (!pTypeExt || pTypeExt->Convert_UniversalDeploy.size() == 0)
