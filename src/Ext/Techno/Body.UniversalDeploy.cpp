@@ -1067,13 +1067,3 @@ void TechnoExt::PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechn
 		}
 	}
 }
-
-void TechnoExt::RunStructureIntoTechnoConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
-{
-	// TO-DO : Copy the block of code
-}
-
-void TechnoExt::RunTechnoIntoStructureConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
-{
-	// TO-DO : Copy the block of code
-}
