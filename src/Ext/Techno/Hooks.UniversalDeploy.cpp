@@ -1,6 +1,7 @@
 #include "Body.h"
 
 #include <Ext/Script/Body.h>
+#include <Ext/Scenario/Body.h>
 
 DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 {
@@ -33,6 +34,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+		ScenarioExt::Global()->UniversalDeployers.push_back(pThis);
 
 		if (pThis->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
@@ -109,6 +111,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		// Set the deployment signal, indicating the process hasn't finished
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 		pExt->Convert_UniversalDeploy_InProgress = true;
+		ScenarioExt::Global()->UniversalDeployers.push_back(pThis);
 
 		if (pThis->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
@@ -204,6 +207,7 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 
 	pOldExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 	pOldExt->Convert_UniversalDeploy_InProgress = true;
+	ScenarioExt::Global()->UniversalDeployers.push_back(pOld);
 
 	if (pThis->Target)
 		pOldExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
@@ -364,6 +368,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		R->EBX(Action::None);
 		pExt->Convert_UniversalDeploy_InProgress = true;
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
+		ScenarioExt::Global()->UniversalDeployers.push_back(pTechno);
 
 		if (pTechno->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pTechno->Target;
@@ -435,6 +440,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		// Set the deployment signal, indicating the process hasn't finished
 		pExt->Convert_UniversalDeploy_IsOriginalDeployer = true;
 		pExt->Convert_UniversalDeploy_InProgress = true;
+		ScenarioExt::Global()->UniversalDeployers.push_back(pTechno);
 
 		if (pTechno->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pTechno->Target;

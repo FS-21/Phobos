@@ -2,6 +2,7 @@
 
 #include <Ext/Script/Body.h>
 #include <Ext/Building/Body.h>
+#include <Ext/Scenario/Body.h>
 
 void TechnoExt::CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType)
 {
@@ -176,6 +177,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOld->IsFallingDown = false;
 
+				// Remove techno from list of UniversalDeploy in progress
+				auto& vec = ScenarioExt::Global()->UniversalDeployers;
+				vec.erase(std::remove(vec.begin(), vec.end(), pOld), vec.end());
+
 				++Unsorted::IKnowWhatImDoing;
 				pOld->Unlimbo(deployerLocation, currentDir);
 				--Unsorted::IKnowWhatImDoing;
@@ -198,6 +203,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOld->IsFallingDown = false;
+
+				// Remove techno from list of UniversalDeploy in progress
+				auto& vec = ScenarioExt::Global()->UniversalDeployers;
+				vec.erase(std::remove(vec.begin(), vec.end(), pOld), vec.end());
 
 				++Unsorted::IKnowWhatImDoing;
 				pOld->Unlimbo(deployerLocation, currentDir);
@@ -367,6 +376,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			}
 		}
 
+		// Remove techno from list of UniversalDeploy in progress
+		auto& vec = ScenarioExt::Global()->UniversalDeployers;
+		vec.erase(std::remove(vec.begin(), vec.end(), pOld), vec.end());
+
 		// The conversion process finished. Clean values
 		if (pOld->InLimbo)
 		{
@@ -401,6 +414,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pOldExt->Convert_UniversalDeploy_MakeInvisible = false;
 				pOldExt->Convert_UniversalDeploy_InProgress = false;
 				pOld->IsFallingDown = false;
+
+				// Remove techno from list of UniversalDeploy in progress
+				auto& vec = ScenarioExt::Global()->UniversalDeployers;
+				vec.erase(std::remove(vec.begin(), vec.end(), pOld), vec.end());
 
 				++Unsorted::IKnowWhatImDoing;
 				pOld->Unlimbo(deployerLocation, currentDir);
@@ -519,6 +536,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 			pOldExt->Convert_UniversalDeploy_InProgress = false;
 			pOld->IsFallingDown = false;
 
+			// Remove techno from list of UniversalDeploy in progress
+			auto& vec = ScenarioExt::Global()->UniversalDeployers;
+			vec.erase(std::remove(vec.begin(), vec.end(), pOld), vec.end());
+
 			++Unsorted::IKnowWhatImDoing;
 			pOld->Unlimbo(deployerLocation, currentDir);
 			--Unsorted::IKnowWhatImDoing;
@@ -585,6 +606,10 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 				pAnim->Owner = pNew->Owner;
 			}
 		}
+
+		// Remove techno from list of UniversalDeploy in progress
+		auto& vec = ScenarioExt::Global()->UniversalDeployers;
+		vec.erase(std::remove(vec.begin(), vec.end(), pOld), vec.end());
 
 		// The conversion process finished. Clean values
 		if (pOld->InLimbo)

@@ -1,4 +1,5 @@
 #include <Ext/Scenario/Body.h>
+#include <Ext/Techno/Body.h>
 #include <Helpers/Macro.h>
 #include <Utilities/Debug.h>
 
@@ -24,4 +25,14 @@ DEFINE_HOOK(0x6870D7, ReadScenario_LoadingScreens, 0x5)
 	pINI->ReadString(scenarioName, "LS800BkgdPal", pScenario->LS800BkgdPal, pScenario->LS800BkgdPal, 64);
 
 	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x55BA77, ScenarioClass_UniversalDeploy, 0x5)
+{
+	for (auto pTechno : ScenarioExt::Global()->UniversalDeployers)
+	{
+		TechnoExt::UpdateUniversalDeploy(pTechno);
+	}
+
+	return 0;
 }

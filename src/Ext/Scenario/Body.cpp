@@ -137,6 +137,7 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(SessionClass::Instance->Config)
 		.Process(this->ShowBriefing)
 		.Process(this->BriefingTheme)
+		.Process(this->UniversalDeployers)
 		;
 }
 
