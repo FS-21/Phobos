@@ -39,6 +39,8 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 		if (pThis->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
 
+		TechnoExt::SendUniversalDeployCommand(pThis); // Net event!
+
 		return 0x730C10;
 	}
 
@@ -115,6 +117,8 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 
 		if (pThis->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
+
+		TechnoExt::SendUniversalDeployCommand(pThis); // Net event!
 
 		return 0x730C10;
 	}
@@ -211,6 +215,8 @@ DEFINE_HOOK(0x522510, InfantryClass_UniversalDeploy_DoingDeploy, 0x6)
 
 	if (pThis->Target)
 		pOldExt->Convert_UniversalDeploy_RememberTarget = pThis->Target;
+
+	TechnoExt::SendUniversalDeployCommand(pOld); // Net event!
 
 	return 0;
 }
@@ -373,6 +379,8 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 		if (pTechno->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pTechno->Target;
 
+		TechnoExt::SendUniversalDeployCommand(pTechno); // Net event!
+
 		return 0;
 	}
 
@@ -444,6 +452,8 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 
 		if (pTechno->Target)
 			pExt->Convert_UniversalDeploy_RememberTarget = pTechno->Target;
+
+		TechnoExt::SendUniversalDeployCommand(pTechno); // Net event!
 	}
 
 	return 0;

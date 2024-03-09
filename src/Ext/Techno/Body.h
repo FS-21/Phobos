@@ -8,6 +8,7 @@
 #include <Utilities/Macro.h>
 #include <New/Entity/ShieldClass.h>
 #include <New/Entity/LaserTrailClass.h>
+#include <Ext/Event/Body.h>
 
 class BulletClass;
 
@@ -180,4 +181,6 @@ public:
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	static void UpdateUniversalDeploy(TechnoClass* pThis);
 	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
+	static void SendUniversalDeployCommand(TechnoClass* pThis);
+	static void HandleUniversalDeploy(EventExt* event);
 };

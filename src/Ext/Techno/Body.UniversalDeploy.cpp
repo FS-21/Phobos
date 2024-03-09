@@ -3,6 +3,7 @@
 #include <Ext/Script/Body.h>
 #include <Ext/Building/Body.h>
 #include <Ext/Scenario/Body.h>
+#include <Ext/Event/Body.h>
 
 void TechnoExt::CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType)
 {
@@ -1092,4 +1093,40 @@ void TechnoExt::PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechn
 			}
 		}
 	}
+}
+
+void TechnoExt::SendUniversalDeployCommand(TechnoClass* pThis)
+{
+	//if (!pThis || !pThis->IsAlive || pThis->Health <= 0)
+		//return;
+
+	static int NextSendFrame = 6 * 30; // SendResponseTimeInterval is 30 in the SendResponseTime2 example
+	int currentFrame = Unsorted::CurrentFrame;
+
+	if (NextSendFrame >= currentFrame)
+		return;
+
+	EventExt event;
+	event.Type = EventTypeExt::DoUniversalDeploy;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = currentFrame + Game::Network::MaxAhead;
+	event.DoUniversalDeploy.Deployer = pThis;
+
+	if (event.AddEvent())
+	{
+		Debug::Log("[Phobos] Player %d sending UniversalDeploy response of [%s] (UID: %d).\n"
+			, event.HouseIndex
+			, pThis->GetTechnoType()->ID
+			, pThis->UniqueID
+		);
+	}
+}
+
+void TechnoExt::HandleUniversalDeploy(EventExt* event)
+{
+	TechnoClass* pDeployer = event->DoUniversalDeploy.Deployer;
+	if (!pDeployer || !pDeployer->IsAlive || pDeployer->Health <= 0)
+		return;
+
+	UpdateUniversalDeploy(pDeployer);
 }

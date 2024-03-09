@@ -1,5 +1,6 @@
-/*
 #include "Body.h"
+
+#include <Techno/Body.h>
 
 #include <Helpers/Macro.h>
 #include <EventClass.h>
@@ -13,8 +14,8 @@ void EventExt::RespondEvent()
 {
 	switch (this->Type)
 	{
-	case EventTypeExt::Sample:
-		// Place the handler here
+	case EventTypeExt::DoUniversalDeploy:
+		TechnoExt::HandleUniversalDeploy(this);
 		break;
 	}
 }
@@ -23,8 +24,8 @@ size_t EventExt::GetDataSize(EventTypeExt type)
 {
 	switch (type)
 	{
-	case EventTypeExt::Sample:
-		return sizeof(EventExt::Sample);
+	case EventTypeExt::DoUniversalDeploy:
+		return sizeof(EventExt::DoUniversalDeploy);
 	}
 
 	return 0;
@@ -98,4 +99,4 @@ DEFINE_HOOK(0x64C30E, sub_64BDD0_GetEventSize2, 0x6)
 
 	return 0;
 }
-*/
+

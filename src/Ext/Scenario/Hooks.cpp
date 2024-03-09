@@ -27,12 +27,44 @@ DEFINE_HOOK(0x6870D7, ReadScenario_LoadingScreens, 0x5)
 	return SkipGameCode;
 }
 
-DEFINE_HOOK(0x55BA77, ScenarioClass_UniversalDeploy, 0x5)
+// Note: same address used by the Ares hook "LogicClass_Update"
+//DEFINE_HOOK(0x55AFB3, LogicClass_AI_UniversalDeploy, 0x6)
+DEFINE_HOOK(0x55DCA3, LogicClass_AI_UniversalDeploy, 0x5)
+
 {
-	for (auto pTechno : ScenarioExt::Global()->UniversalDeployers)
+	auto& vec = ScenarioExt::Global()->UniversalDeployers;
+	int originalSize = vec.size();
+
+	for (int i = 0; i < vec.size(); i++)
+	{
+		//TechnoExt::UpdateUniversalDeploy(vec.at(i));
+
+		auto pOld = vec.at(i);
+		// Remove techno from list of UniversalDeploy in progress
+		vec.erase(std::remove(vec.begin(), vec.end(), pOld), vec.end());
+
+		pOld->Limbo();
+		pOld->Owner->Buildings.Remove(static_cast<BuildingClass*>(pOld));
+		pOld->Owner->RemoveTracking(pOld);
+		pOld->Owner->RegisterLoss(pOld, false);
+		pOld->Owner->UpdatePower();
+		pOld->Owner->RecheckTechTree = true;
+		pOld->Owner->RecheckPower = true;
+		pOld->Owner->RecheckRadar = true;
+		//TechnoClass::Array->Remove(pOld);
+		pOld->UnInit();
+		break;
+		int currentSize = vec.size();
+		if (currentSize < originalSize)
+			i--;
+	}
+
+	/*for (auto pTechno : ScenarioExt::Global()->UniversalDeployers)
 	{
 		TechnoExt::UpdateUniversalDeploy(pTechno);
-	}
+	}*/
+
+
 
 	return 0;
 }
