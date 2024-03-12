@@ -356,6 +356,7 @@ New:
 - Customizable straight trajectory detonation & snap distance and pass-through option (by Starkku)
 - Airstrike & spy plane fixed spawn distance & height (by Starkku)
 - Script action for repairing destroyed bridges (by FS-21)
+- Remove parasites in any warhead (by FS-21)
 - Allow enabling application of `Verses` and `PercentAtMax` for negative damage (by Starkku)
 - `Burst.Retarget` for assigning a new target in each projectile (by FS-21)
 - Script actions for manipulating script flows with conditional jumps (by FS-21)
