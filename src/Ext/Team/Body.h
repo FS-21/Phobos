@@ -93,6 +93,8 @@ public:
 		int ForceJump_InitialCountdown;
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
+		int TriggersSideIdx;
+		int TriggersHouseIdx;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -107,6 +109,8 @@ public:
 			, ForceJump_InitialCountdown { -1 }
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
+			, TriggersSideIdx { -1 }
+			, TriggersHouseIdx { -1 }
 		{ }
 
 		virtual ~ExtData() = default;
