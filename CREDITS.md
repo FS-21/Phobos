@@ -132,6 +132,7 @@ This page lists all the individual contributions to the project by their author.
   - Initial strength for cloned infantry
   - `Burst.Retarget` for projectile retargeting
   - New AI teams selector
+  - Mind Control Threshold
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
