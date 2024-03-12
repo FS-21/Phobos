@@ -135,6 +135,7 @@ This page lists all the individual contributions to the project by their author.
   - Mind Control Threshold
   - Map event `There are no technos of the specified houses list`
   - AI learning
+  - Grant new superweapons in superweapons
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
