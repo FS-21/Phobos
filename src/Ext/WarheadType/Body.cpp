@@ -209,6 +209,12 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->CanRemoveParasites_ReportSound.Read(exINI, pSection, "CanRemoveParasites.ReportSound");
 	this->CanRemoveParasites_KickOut_Anim.Read(exINI, pSection, "CanRemoveParasites.KickOut.Anim");
 
+	this->Webby.Read(exINI, pSection, "Webby");
+	this->Webby_Anims.Read(exINI, pSection, "Webby.Anims");
+	this->Webby_Duration.Read(exINI, pSection, "Webby.Duration");
+	this->Webby_DurationVariation.Read(exINI, pSection, "Webby.DurationVariation");
+	this->Webby_Cap.Read(exINI, pSection, "Webby.Cap");
+
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
 
@@ -361,6 +367,12 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 
 		.Process(this->InflictLocomotor)
 		.Process(this->RemoveInflictedLocomotor)
+
+		.Process(this->Webby)
+		.Process(this->Webby_Anims)
+		.Process(this->Webby_Duration)
+		.Process(this->Webby_DurationVariation)
+		.Process(this->Webby_Cap)
 
 		// Ares tags
 		.Process(this->AffectsEnemies)

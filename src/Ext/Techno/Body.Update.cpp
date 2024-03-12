@@ -94,6 +94,46 @@ void TechnoExt::ExtData::ApplyInterceptor()
 	}
 }
 
+void TechnoExt::ExtData::WebbyUpdate()
+{
+	auto const pThis = this->OwnerObject();
+
+	if (!TechnoExt::IsActive(pThis) || pThis->WhatAmI() != AbstractType::Infantry)
+		return;
+
+	auto pExt = TechnoExt::ExtMap.Find(pThis);
+	if (!pExt)
+		return;
+
+	if (pExt->WebbyDurationCountDown < 0)
+	{
+		if (pExt->WebbyAnim)
+			pExt->WebbyAnim->Limbo();
+
+		pExt->WebbyAnim = nullptr;
+
+		return;
+	}
+
+	if (pExt->WebbyDurationTimer.Completed())
+	{
+		pExt->WebbyDurationCountDown = -1;
+		pExt->WebbyDurationTimer.Stop();
+
+		if (pExt->WebbyAnim)
+			pExt->WebbyAnim->Limbo();
+
+		pExt->WebbyAnim = nullptr;
+
+		// Restore previous action
+		pThis->SetDestination(pExt->WebbyLastTarget, false);
+		pThis->SetTarget(pExt->WebbyLastTarget);
+		pThis->QueueMission(pExt->WebbyLastMission, true);
+		pExt->WebbyLastTarget = nullptr;
+		pExt->WebbyLastMission = Mission::Sleep;
+	}
+}
+
 void TechnoExt::ExtData::DepletedAmmoActions()
 {
 	auto const pThis = specific_cast<UnitClass*>(this->OwnerObject());

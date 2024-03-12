@@ -84,6 +84,12 @@ public:
 		// as neither is guaranteed to point to the house the TechnoClass had prior to entering transport and cannot be safely overridden.
 		HouseClass* OriginalPassengerOwner;
 
+		int	WebbyDurationCountDown;
+		CDTimerClass WebbyDurationTimer;
+		AnimClass* WebbyAnim;
+		AbstractClass* WebbyLastTarget;
+		Mission WebbyLastMission;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -105,6 +111,11 @@ public:
 			, WHAnimRemainingCreationInterval { 0 }
 			, OriginalTarget { nullptr }
 			, CurrentRandomTarget { nullptr }
+			, WebbyDurationCountDown { -1 }
+			, WebbyDurationTimer {}
+			, WebbyAnim { nullptr }
+			, WebbyLastTarget { nullptr }
+			, WebbyLastMission { Mission::Sleep }
 		{ }
 
 		void OnEarlyUpdate();
@@ -121,6 +132,7 @@ public:
 		void InitializeLaserTrails();
 		void UpdateMindControlAnim();
 		void UpdateRandomTargets();
+		void WebbyUpdate();
 
 		virtual ~ExtData() override;
 
@@ -129,6 +141,7 @@ public:
 			AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
 			AnnounceInvalidPointer(CurrentRandomTarget, ptr);
 			AnnounceInvalidPointer(OriginalTarget, ptr);
+			AnnounceInvalidPointer(WebbyLastTarget, ptr);
 		}
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
@@ -196,6 +209,7 @@ public:
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
 	static CoordStruct PassengerKickOutLocation(TechnoClass* pThis, FootClass* pPassenger);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
+	static void WebbyUpdate(TechnoClass* pThis);
 
 	// WeaponHelpers.cpp
 	static int PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback = true, bool allowAAFallback = true);
