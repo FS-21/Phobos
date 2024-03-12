@@ -9,6 +9,7 @@
 
 #include "BombardTrajectory.h"
 #include "StraightTrajectory.h"
+#include "ArtilleryTrajectory.h"
 
 bool PhobosTrajectoryType::Load(PhobosStreamReader& Stm, bool RegisterForChange)
 {
@@ -34,6 +35,8 @@ void PhobosTrajectoryType::CreateType(PhobosTrajectoryType*& pType, CCINIClass* 
 		pNewType = DLLCreate<StraightTrajectoryType>();
 	else if (_stricmp(Phobos::readBuffer, "Bombard") == 0)
 		pNewType = DLLCreate<BombardTrajectoryType>();
+	else if (_stricmp(Phobos::readBuffer, "Artillery") == 0)
+		pNewType = DLLCreate<ArtilleryTrajectoryType>();
 	else
 		bUpdateType = false;
 
@@ -64,6 +67,9 @@ PhobosTrajectoryType* PhobosTrajectoryType::LoadFromStream(PhobosStreamReader& S
 			break;
 		case TrajectoryFlag::Bombard:
 			pType = DLLCreate<BombardTrajectoryType>();
+			break;
+		case TrajectoryFlag::Artillery:
+			pType = DLLCreate<ArtilleryTrajectoryType>();
 			break;
 		default:
 			return nullptr;
@@ -132,6 +138,10 @@ PhobosTrajectory* PhobosTrajectory::CreateInstance(PhobosTrajectoryType* pType, 
 	case TrajectoryFlag::Bombard:
 		pRet = DLLCreate<BombardTrajectory>(pType);
 		break;
+
+	case TrajectoryFlag::Artillery:
+		pRet = DLLCreate<ArtilleryTrajectory>(pType);
+		break;
 	}
 
 	if (pRet)
@@ -157,6 +167,9 @@ PhobosTrajectory* PhobosTrajectory::LoadFromStream(PhobosStreamReader& Stm)
 			break;
 		case TrajectoryFlag::Bombard:
 			pTraj = DLLCreate<BombardTrajectory>();
+			break;
+		case TrajectoryFlag::Artillery:
+			pTraj = DLLCreate<ArtilleryTrajectory>();
 			break;
 		default:
 			return nullptr;
