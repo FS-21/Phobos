@@ -150,6 +150,22 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->Vehicles_DefaultDigitalDisplayTypes.Read(exINI, GameStrings::AudioVisual, "Vehicles.DefaultDigitalDisplayTypes");
 	this->Aircraft_DefaultDigitalDisplayTypes.Read(exINI, GameStrings::AudioVisual, "Aircraft.DefaultDigitalDisplayTypes");
 
+	this->AILearning.Read(exINI, "AI", "AILearning");
+	this->AILearning_OnlySupportedMaps.Read(exINI, "AI", "AILearning.OnlySupportedMaps");
+	this->AILearning_Weight_Max.Read(exINI, "AI", "AILearning.Weight.Max");
+	this->AILearning_Weight_Min.Read(exINI, "AI", "AILearning.Weight.Min");
+	this->AILearning_Weight_Increment.Read(exINI, "AI", "AILearning.Weight.Increment");
+	this->AILearning_Weight_Decrement.Read(exINI, "AI", "AILearning.Weight.Decrement");
+
+	// [AI] -> AILearning.ScenarioName
+	const char* key = "AILearning.ScenarioName";
+	pINI->ReadString("AI", key, "", Phobos::readBuffer);
+
+	if (std::string(Phobos::readBuffer).length() > 0)
+		this->AILearning_ScenarioName = std::string(Phobos::readBuffer);
+
+	key = nullptr;
+
 	// Section AITargetTypes
 	int itemsCount = pINI->GetKeyCount(sectionAITargetTypes);
 	for (int i = 0; i < itemsCount; ++i)
@@ -402,6 +418,13 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->NewTeamsSelector_AirCategoryPercentage)
 		.Process(this->NewTeamsSelector_NavalCategoryPercentage)
 		.Process(this->AIHousesLists)
+		.Process(this->AILearning)
+		.Process(this->AILearning_Weight_Max)
+		.Process(this->AILearning_Weight_Min)
+		.Process(this->AILearning_Weight_Increment)
+		.Process(this->AILearning_Weight_Decrement)
+		.Process(this->AILearning_ScenarioName)
+		.Process(this->AILearning_OnlySupportedMaps)
 		.Process(this->DropPodTrailer)
 		.Process(this->PodImage)
 		;
