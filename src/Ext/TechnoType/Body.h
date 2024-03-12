@@ -214,6 +214,8 @@ public:
 		std::vector<std::vector<CoordStruct>> DeployedWeaponBurstFLHs;
 		std::vector<std::vector<CoordStruct>> EliteDeployedWeaponBurstFLHs;
 
+		Valueable<bool> CanRepairCyborgLegs;
+
 		Nullable<bool> ConsideredNaval;
 		Nullable<bool> ConsideredVehicle;
 		Valueable<bool> ConsideredSecretLabTech;
@@ -345,7 +347,7 @@ public:
 			, IronCurtain_KeptOnDeploy {}
 			, IronCurtain_Effect {}
 			, IronCurtain_KillWarhead {}
-
+			, CanRepairCyborgLegs { false }
 			, Explodes_KillPassengers { true }
 			, Prerequisite { }
 			, Prerequisite_Negative { }

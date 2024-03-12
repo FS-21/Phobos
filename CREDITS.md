@@ -144,6 +144,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable disguised target evaluation behaviour in new ScriptType attack actions
   - Script action for repairing destroyed bridges
   - Script actions for modifying AI anger against other houses
+  - Repair legless cyborgs In transports
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
