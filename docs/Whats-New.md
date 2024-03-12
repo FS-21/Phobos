@@ -282,6 +282,7 @@ New:
 - Mind Control Threshold (by FS-21)
 - Script action for  enabling & disabling AI Triggers (by FS-21)
 - Script Action 14004 for forcing all new actions to target only the main owner's enemy (by FS-21)
+- Override target under EMP attack behavior (By FS-21)
 - Customizable ROF random delay (by Starkku)
 - Animation with `Tiled=yes` now supports `CustomPalette` (by ststl)
 - New AI teams selector (by FS-21)
