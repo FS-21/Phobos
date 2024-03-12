@@ -63,6 +63,7 @@ public:
 		std::vector<ValueableVector<int>> SW_GrantOneTime_RandomWeightsData;
 
 		std::vector<TypeConvertGroup> Convert_Pairs;
+		Nullable<AnimTypeClass*> Convert_Anim;
 
 		ValueableIdxVector<SuperWeaponTypeClass> SW_GrantOneTime;
 		Nullable<bool> SW_GrantOneTime_InitialReady;
@@ -104,6 +105,7 @@ public:
 			, SW_Next_RandomWeightsData {}
 			, ShowTimer_Priority { 0 }
 			, Convert_Pairs {}
+			, Convert_Anim {}
 			, ShowDesignatorRange { true }
 			, SW_GrantOneTime {}
 			, SW_GrantOneTime_InitialReady {}
