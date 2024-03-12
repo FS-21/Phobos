@@ -372,6 +372,7 @@ New:
 - Flashing Technos on selecting (by Fryone)
 - Customizable DropPod properties on a per-InfantryType basis (by Trsdy)
 - Projectile return weapon (by Starkku)
+- Universal deploy from any techno into any techno (by FS-21)
 - Allow customizing aircraft landing direction per aircraft or per dock (by Starkku)
 - Allow animations to play sounds detached from audio event handler (by Starkku)
 - Game save option when starting campaigns (by Trsdy)

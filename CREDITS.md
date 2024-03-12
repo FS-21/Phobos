@@ -146,6 +146,7 @@ This page lists all the individual contributions to the project by their author.
   - Script actions for modifying AI anger against other houses
   - Repair legless cyborgs In transports
   - Web logic against infantry
+  - Universal deploy from any techno into any techno
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

@@ -71,6 +71,8 @@ public:
 		Valueable<CSFText> Message_GrantOneTimeLaunched;
 		NullableIdx<VoxClass> EVA_GrantOneTimeLaunched;
 
+		Valueable<bool> Convert_UseUniversalDeploy;
+
 		ExtData(SuperWeaponTypeClass* OwnerObject) : Extension<SuperWeaponTypeClass>(OwnerObject)
 			, Money_Amount { 0 }
 			, SW_Inhibitors {}
@@ -113,6 +115,7 @@ public:
 			, SW_GrantOneTime_RandomWeightsData {}
 			, Message_GrantOneTimeLaunched {}
 			, EVA_GrantOneTimeLaunched {}
+			, Convert_UseUniversalDeploy { false }
 		{ }
 
 		// Ares 0.A functions

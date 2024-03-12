@@ -52,6 +52,7 @@ void SWTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->SW_GrantOneTime_RollChances)
 		.Process(this->Message_GrantOneTimeLaunched)
 		.Process(this->EVA_GrantOneTimeLaunched)
+		.Process(this->Convert_UseUniversalDeploy)
 		;
 }
 
@@ -181,6 +182,8 @@ void SWTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		else
 			this->SW_GrantOneTime_RandomWeightsData.push_back(std::move(weights3));
 	}
+
+	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
 }
 
 void SWTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)
