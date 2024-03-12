@@ -140,6 +140,7 @@ This page lists all the individual contributions to the project by their author.
   - Grant new superweapons in superweapons
   - `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
   - Script actions for manipulating script flows with conditional jumps
+  - Customizable disguised target evaluation behaviour in new ScriptType attack actions
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
