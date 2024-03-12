@@ -75,6 +75,16 @@ enum class PhobosScripts : unsigned int
 	DecreaseCurrentAITriggerWeight = 14002,
 	UnregisterGreatSuccess = 14003,
 	ForceGlobalOnlyTargetHouseEnemy = 14004,
+	OverrideOnlyTargetHouseEnemy = 14005,
+	SetHouseAngerModifier = 14006,
+	ModifyHateHouseIndex = 14007,
+	ModifyHateHousesList = 14008,
+	ModifyHateHousesList1Random = 14009,
+	SetTheMostHatedHouseMinorNoRandom = 14010,
+	SetTheMostHatedHouseMajorNoRandom = 14011,
+	SetTheMostHatedHouseRandom = 14012,
+	ResetAngerAgainstHouses = 14013,
+	AggroHouse = 14014,
 
 
 	// Range 16000-16999 are flow control actions (jumps, change script, loops, breaks, etc)
@@ -241,6 +251,17 @@ public:
 
 	static void ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode);
 
+	static void ResetAngerAgainstHouses(TeamClass* pTeam);
+	static void SetHouseAngerModifier(TeamClass* pTeam, int modifier);
+	static void ModifyHateHouses_List(TeamClass* pTeam, int idxHousesList);
+	static void ModifyHateHouses_List1Random(TeamClass* pTeam, int idxHousesList);
+	static void ModifyHateHouse_Index(TeamClass* pTeam, int idxHouse);
+	static void SetTheMostHatedHouse(TeamClass* pTeam, int mask, int mode, bool random);
+	static void OverrideOnlyTargetHouseEnemy(TeamClass* pTeam, int mode);
+	static void AggroHouse(TeamClass* pTeam, int index);
+	static HouseClass* GetTheMostHatedHouse(TeamClass* pTeam, int mask, int mode);
+	static void DebugAngerNodesData();
+
 	static bool IsExtVariableAction(int action);
 	static void VariablesHandler(TeamClass* pTeam, PhobosScripts eAction, int nArg);
 	template<bool IsGlobal, class _Pr>
@@ -293,4 +314,5 @@ private:
 	static bool MoveMissionEndStatus(TeamClass* pTeam, TechnoClass* pFocus, FootClass* pLeader, int mode);
 	static void ChronoshiftTeamToTarget(TeamClass* pTeam, TechnoClass* pTeamLeader, AbstractClass* pTarget);
 	static bool ConditionalJump_MakeEvaluation(int comparatorMode, int studiedValue, int comparatorValue);
+	static void UpdateEnemyHouseIndex(HouseClass* pHouse);
 };
