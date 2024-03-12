@@ -10,6 +10,7 @@
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
 #include <Ext/TechnoType/Body.h>
+#include <Ext/Techno/Body.h>
 #include <Phobos.h>
 
 enum teamCategory
@@ -103,6 +104,7 @@ public:
 		bool AbortActionAfterKilling;
 		bool ConditionalJump_EnabledKillsCount;
 		bool ConditionalJump_ResetVariablesIfJump;
+		std::vector<TechnoClass*> BridgeRepairHuts;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -127,6 +129,7 @@ public:
 			, ConditionalJump_Index { -1000000 }
 			, ConditionalJump_EnabledKillsCount { false }
 			, ConditionalJump_ResetVariablesIfJump { false }
+			, BridgeRepairHuts { }
 		{ }
 
 		virtual ~ExtData() = default;

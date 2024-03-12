@@ -141,6 +141,7 @@ This page lists all the individual contributions to the project by their author.
   - `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
   - Script actions for manipulating script flows with conditional jumps
   - Customizable disguised target evaluation behaviour in new ScriptType attack actions
+  - Script action for repairing destroyed bridges
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
