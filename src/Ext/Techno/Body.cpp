@@ -7,6 +7,7 @@
 #include <Ext/House/Body.h>
 #include <Ext/WeaponType/Body.h>
 #include <Ext/Script/Body.h>
+#include <Ext/Team/Body.h>
 
 #include <Utilities/AresFunctions.h>
 
