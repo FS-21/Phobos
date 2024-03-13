@@ -224,7 +224,6 @@ public:
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
-	static CoordStruct PassengerKickOutLocation(TechnoClass* pThis, FootClass* pPassenger);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
 	static void WebbyUpdate(TechnoClass* pThis);
 

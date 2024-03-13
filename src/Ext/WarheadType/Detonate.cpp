@@ -348,14 +348,13 @@ void WarheadTypeExt::ExtData::ApplyConvert(HouseClass* pHouse, TechnoClass* pTar
 	if (!pTargetFoot || this->Convert_Pairs.size() == 0)
 		return;
 
-	TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pHouse, this->Convert_Anim);
 	if (this->Convert_UseUniversalDeploy.Get())
 	{
 		TypeConvertGroup::UniversalConvert(pTarget, this->Convert_Pairs, pHouse);
 		return;
 	}
 
-	TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pHouse);
+	TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pHouse, this->Convert_Anim);
 }
 
 void WarheadTypeExt::ExtData::ApplyLocomotorInfliction(TechnoClass* pTarget)
