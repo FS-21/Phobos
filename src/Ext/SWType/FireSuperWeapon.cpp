@@ -288,7 +288,7 @@ void SWTypeExt::ExtData::ApplyTypeConversion(SuperClass* pSW)
 	if (this->Convert_UseUniversalDeploy.Get())
 	{
 		for (const auto pTarget : *TechnoClass::Array)
-			TypeConvertGroup::UniversalConvert(pTarget, this->Convert_Pairs, pSW->Owner);
+			TypeConvertGroup::UniversalConvert(pTarget, this->Convert_Pairs, pSW->Owner, pAnimType);
 
 		return;
 	}
