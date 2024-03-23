@@ -73,6 +73,11 @@ public:
 
 		Valueable<bool> Convert_UseUniversalDeploy;
 
+		Valueable<bool> UseWeeds;
+		Valueable<int> UseWeeds_Amount;
+		Valueable<bool> UseWeeds_StorageTimer;
+		Valueable<double> UseWeeds_ReadinessAnimationPercentage;
+
 		ExtData(SuperWeaponTypeClass* OwnerObject) : Extension<SuperWeaponTypeClass>(OwnerObject)
 			, Money_Amount { 0 }
 			, SW_Inhibitors {}
@@ -116,6 +121,10 @@ public:
 			, Message_GrantOneTimeLaunched {}
 			, EVA_GrantOneTimeLaunched {}
 			, Convert_UseUniversalDeploy { false }
+			, UseWeeds { false }
+			, UseWeeds_Amount { RulesClass::Instance->WeedCapacity }
+			, UseWeeds_StorageTimer { false }
+			, UseWeeds_ReadinessAnimationPercentage { 0.9 }
 		{ }
 
 		// Ares 0.A functions
