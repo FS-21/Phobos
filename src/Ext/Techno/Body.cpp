@@ -431,7 +431,7 @@ bool TechnoExt::UpdateRandomTarget(TechnoClass* pThis)
 	if (!pExt)
 		return false;
 
-	if (pThis->GetCurrentMission() == Mission::Move)
+	if (pThis->CurrentMission == Mission::Move)
 	{
 		pExt->CurrentRandomTarget = nullptr;
 		pExt->OriginalTarget = nullptr;
@@ -439,31 +439,43 @@ bool TechnoExt::UpdateRandomTarget(TechnoClass* pThis)
 		return false;
 	}
 
-	if (pExt->CurrentRandomTarget && IsUnitAvailable(pExt->CurrentRandomTarget, false) && pThis->SpawnManager)
-		return false;
+	if (!IsValidTechno(pExt->CurrentRandomTarget))
+		pExt->CurrentRandomTarget = nullptr;
 
-	if (!pThis->Target && !IsUnitAvailable(abstract_cast<TechnoClass*>(pExt->OriginalTarget), false))
-	{
+	if (pExt->OriginalTarget && !IsValidTechno(static_cast<TechnoClass*>(pExt->OriginalTarget)))
 		pExt->OriginalTarget = nullptr;
-		return false;
-	}
 
-	if (pExt->OriginalTarget && !IsUnitAvailable(abstract_cast<TechnoClass*>(pExt->OriginalTarget), false))
+	if (pThis->Target && !IsValidTechno(static_cast<TechnoClass*>(pThis->Target)))
+		pThis->SetTarget(nullptr);
+
+	if (pThis->Target && pExt->CurrentRandomTarget && pThis->CurrentMission == Mission::Guard)
+		pThis->ForceMission(Mission::Attack);
+
+	if (pExt->CurrentRandomTarget && pThis->SpawnManager)
+		return false;
+
+	if (!pThis->Target && !pExt->OriginalTarget)
+		return false;
+
+	if (!pExt->OriginalTarget)
 	{
 		pExt->CurrentRandomTarget = nullptr;
 		pExt->OriginalTarget = nullptr;
 	}
 
-	if (pThis->GetCurrentMission() != Mission::Attack)
+	if (pExt->CurrentRandomTarget && pThis->GetCurrentMission() != Mission::Attack)
 	{
+		pExt->CurrentRandomTarget = nullptr;
+		pThis->SetTarget(pExt->OriginalTarget ? pExt->OriginalTarget : nullptr);
 		pExt->OriginalTarget = nullptr;
+
 		return false;
 	}
 
 	if (!pThis->Target)
 		return false;
 
-	if (pThis->DistanceFrom(pExt->OriginalTarget) > pWeapon->Range)
+	if (pThis->DistanceFrom(pExt->OriginalTarget) > pWeapon->Range || pThis->DistanceFrom(pThis->Target) > pWeapon->Range)
 	{
 		if (pThis->WhatAmI() == AbstractType::Building)
 		{
@@ -475,12 +487,6 @@ bool TechnoExt::UpdateRandomTarget(TechnoClass* pThis)
 		}
 
 		pThis->SetTarget(pExt->OriginalTarget);
-	}
-
-	if (pThis->DistanceFrom(pThis->Target) > pWeapon->Range)
-	{
-		pThis->SetTarget(pExt->OriginalTarget);
-		return false;
 	}
 
 	auto pRandomTarget = FindRandomTarget(pThis);
@@ -519,7 +525,7 @@ bool TechnoExt::UpdateRandomTarget(TechnoClass* pThis)
 				pSpawnTarget = FindRandomTarget(pThis);
 
 				if (!pSpawnTarget)
-					pSpawnTarget = abstract_cast<TechnoClass*>(pExt->OriginalTarget);
+					pSpawnTarget = static_cast<TechnoClass*>(pExt->OriginalTarget);
 			}
 
 			pSpawnExt->CurrentRandomTarget = pSpawnTarget;
@@ -535,7 +541,7 @@ TechnoClass* TechnoExt::FindRandomTarget(TechnoClass* pThis)
 {
 	TechnoClass* selection = nullptr;
 
-	if (!pThis && !pThis->Target)
+	if (!pThis || !pThis->Target)
 		return selection;
 
 	int weaponIndex = pThis->SelectWeapon(pThis->Target);
@@ -543,44 +549,47 @@ TechnoClass* TechnoExt::FindRandomTarget(TechnoClass* pThis)
 	if (!pWeapon)
 		return selection;
 
-	const auto pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
-	if (!pWeaponExt || pWeaponExt->RandomTarget <= 0.0)
+	auto const pExt = TechnoExt::ExtMap.Find(pThis);
+	auto const pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
+	if (!pExt || !pWeaponExt || pWeaponExt->RandomTarget <= 0.0)
 		return selection;
 
-	const auto pExt = TechnoExt::ExtMap.Find(pThis);
-	if (!pExt)
+	auto const originalTarget = static_cast<TechnoClass*>(pExt->OriginalTarget ? pExt->OriginalTarget : pThis->Target);
+	if (!IsValidTechno(originalTarget))
 		return selection;
 
 	int retargetProbability = std::min((int)round(pWeaponExt->RandomTarget * 100), 100);
 	int dice = ScenarioClass::Instance->Random.RandomRanged(1, 100);
 
 	if (retargetProbability < dice)
-		return selection;
+		return originalTarget;
 
+	bool friendlyFire = pThis->Owner->IsAlliedWith(originalTarget->Owner);
 	auto pThisType = pThis->GetTechnoType();
 	int minimumRange = pWeapon->MinimumRange;
 	int range = pWeapon->Range;
 	int airRange = pWeapon->Range + pThisType->AirRangeBonus;
-	bool omniFire = pWeapon->OmniFire;
 	std::vector<TechnoClass*> candidates;
-	auto originalTarget = abstract_cast<TechnoClass*>(!pExt->OriginalTarget ? pThis->Target : pExt->OriginalTarget);
-	bool friendlyFire = pThis->Owner->IsAlliedWith(originalTarget);
+	candidates.push_back(originalTarget);
 
 	// Looking for all valid targeting candidates
 	for (auto pCandidate : *TechnoClass::Array)
 	{
+		auto const pCandidateType = pCandidate->GetTechnoType();
+
 		if (pCandidate == pThis
-			|| !IsUnitAvailable(pCandidate, true)
-			|| pThisType->Immune
+			|| pCandidate == originalTarget
+			|| !IsValidTechno(pCandidate)
+			|| pCandidateType->Immune
 			|| !EnumFunctions::IsTechnoEligible(pCandidate, pWeaponExt->CanTarget, true)
 			|| (!pWeapon->Projectile->AA && pCandidate->IsInAir())
 			|| (!pWeapon->Projectile->AG && !pCandidate->IsInAir())
 			|| (!friendlyFire && (pThis->Owner->IsAlliedWith(pCandidate) || ScriptExt::IsUnitMindControlledFriendly(pThis->Owner, pCandidate)))
 			|| pCandidate->TemporalTargetingMe
 			|| pCandidate->BeingWarpedOut
-			|| (pCandidate->GetTechnoType()->Underwater && pCandidate->GetTechnoType()->NavalTargeting == NavalTargetingType::Underwater_Never)
-			|| (pCandidate->GetTechnoType()->Naval && pCandidate->GetTechnoType()->NavalTargeting == NavalTargetingType::Naval_None)
-			|| (pCandidate->CloakState == CloakState::Cloaked && !pThisType->Naval)
+			|| (pCandidateType->Underwater && pCandidateType->NavalTargeting == NavalTargetingType::Underwater_Never)
+			|| (pCandidateType->Naval && pCandidateType->NavalTargeting == NavalTargetingType::Naval_None)
+			|| (pCandidate->CloakState == CloakState::Cloaked && !pCandidateType->Naval)
 			|| (pCandidate->InWhichLayer() == Layer::Underground))
 		{
 			continue;
@@ -590,7 +599,7 @@ TechnoClass* TechnoExt::FindRandomTarget(TechnoClass* pThis)
 		if (distanceFromAttacker < minimumRange)
 			continue;
 
-		if (omniFire)
+		if (pWeapon->OmniFire)
 		{
 			if (pCandidate->IsInAir())
 				range = airRange;
@@ -619,6 +628,22 @@ TechnoClass* TechnoExt::FindRandomTarget(TechnoClass* pThis)
 	selection = candidates.at(dice);
 
 	return selection;
+}
+
+bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
+{
+	if (!pTechno)
+		return false;
+
+	bool isValid = !pTechno->Dirty
+		&& TechnoExt::IsUnitAvailable(pTechno, true)
+		&& pTechno->Owner
+		&& (pTechno->WhatAmI() == AbstractType::Infantry
+			|| pTechno->WhatAmI() == AbstractType::Unit
+			|| pTechno->WhatAmI() == AbstractType::Building
+			|| pTechno->WhatAmI() == AbstractType::Aircraft);
+
+	return isValid;
 }
 
 void TechnoExt::RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh)
@@ -721,6 +746,7 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->ForceFullRearmDelay)
 		.Process(this->WHAnimRemainingCreationInterval)
 		.Process(this->OriginalTarget)
+		.Process(this->ResetRandomTarget)
 		.Process(this->CurrentRandomTarget)
 		.Process(this->WebbyDurationCountDown)
 		.Process(this->WebbyDurationTimer)

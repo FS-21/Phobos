@@ -34,6 +34,7 @@ void TechnoExt::ExtData::OnEarlyUpdate()
 	this->ApplySpawnLimitRange();
 	this->UpdateLaserTrails();
 	this->DepletedAmmoActions();
+	this->UpdateRandomTargets();
 
 	if (this->WebbyAnim)
 		this->WebbyUpdate();
@@ -122,11 +123,14 @@ void TechnoExt::ExtData::WebbyUpdate()
 		pExt->WebbyAnim = nullptr;
 
 		// Restore previous action
-		pThis->SetDestination(pExt->WebbyLastTarget, false);
-		pThis->SetTarget(pExt->WebbyLastTarget);
-		pThis->QueueMission(pExt->WebbyLastMission, true);
-		pExt->WebbyLastTarget = nullptr;
-		pExt->WebbyLastMission = Mission::Sleep;
+		if (pExt->WebbyLastTarget)
+		{
+			pThis->SetDestination(pExt->WebbyLastTarget, false);
+			pThis->SetTarget(pExt->WebbyLastTarget);
+			pThis->QueueMission(pExt->WebbyLastMission, true);
+			pExt->WebbyLastTarget = nullptr;
+			pExt->WebbyLastMission = Mission::Sleep;
+		}
 	}
 }
 
@@ -792,6 +796,20 @@ void TechnoExt::ExtData::UpdateRandomTargets()
 	const auto pExt = TechnoExt::ExtMap.Find(pThis);
 	if (!pExt)
 		return;
+
+	if (pExt->CurrentRandomTarget)
+	{
+		auto const pCurrRandTarget = pExt->CurrentRandomTarget;
+		bool isValidTechno = pCurrRandTarget && pCurrRandTarget->IsAlive && pCurrRandTarget->Health > 0 && TechnoExt::IsUnitAvailable(pCurrRandTarget, true) && (pCurrRandTarget->WhatAmI() == AbstractType::Infantry || pCurrRandTarget->WhatAmI() == AbstractType::Unit || pCurrRandTarget->WhatAmI() == AbstractType::Building || pCurrRandTarget->WhatAmI() == AbstractType::Aircraft);
+
+		if (!isValidTechno)
+		{
+			auto const pOrigTarget = pExt->OriginalTarget;
+			pExt->CurrentRandomTarget = nullptr;
+			pThis->SetTarget(pOrigTarget && !pOrigTarget->Dirty ? pExt->OriginalTarget : nullptr);
+			pExt->OriginalTarget = nullptr;
+		}
+	}
 
 	if (pThis->Target
 		&& pThis->SpawnManager

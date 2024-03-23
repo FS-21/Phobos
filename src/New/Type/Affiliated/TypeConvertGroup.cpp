@@ -48,7 +48,7 @@ void TypeConvertGroup::UniversalConvert(TechnoClass* pTarget, const std::vector<
 	{
 		if (!toType.isset() || !toType.Get()) continue;
 
-		bool isValidTechno = pTarget->WhatAmI() == AbstractType::Infantry || pTarget->WhatAmI() == AbstractType::Unit || pTarget->WhatAmI() == AbstractType::Building || pTarget->WhatAmI() == AbstractType::Aircraft;
+		bool isValidTechno = pTarget && pTarget->IsAlive && pTarget->Health > 0 && (pTarget->WhatAmI() == AbstractType::Infantry || pTarget->WhatAmI() == AbstractType::Unit || pTarget->WhatAmI() == AbstractType::Building || pTarget->WhatAmI() == AbstractType::Aircraft);
 		isValidTechno &= TechnoExt::IsUnitAvailable(pTarget, false);
 
 		if (!isValidTechno) continue;

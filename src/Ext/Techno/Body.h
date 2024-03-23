@@ -78,6 +78,7 @@ public:
 		bool ForceFullRearmDelay;
 		int WHAnimRemainingCreationInterval;
 		AbstractClass* OriginalTarget;
+		bool ResetRandomTarget;
 		TechnoClass* CurrentRandomTarget;
 
 		// Used for Passengers.SyncOwner.RevertOnExit instead of TechnoClass::InitialOwner / OriginallyOwnedByHouse,
@@ -117,6 +118,7 @@ public:
 			, ForceFullRearmDelay { false }
 			, WHAnimRemainingCreationInterval { 0 }
 			, OriginalTarget { nullptr }
+			, ResetRandomTarget { false }
 			, CurrentRandomTarget { nullptr }
 			, WebbyDurationCountDown { -1 }
 			, WebbyDurationTimer {}
@@ -224,6 +226,7 @@ public:
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
+	static bool IsValidTechno(TechnoClass* pTechno);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
 	static void WebbyUpdate(TechnoClass* pThis);
 
