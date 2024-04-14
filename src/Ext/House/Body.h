@@ -122,8 +122,8 @@ public:
 	static HouseClass* GetHouseKind(OwnerHouseKind kind, bool allowRandom, HouseClass* pDefault, HouseClass* pInvoker = nullptr, HouseClass* pVictim = nullptr);
 	static int GetHouseIndex(int param, TeamClass* pTeam, TActionClass* pTAction);
 	static CellClass* GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass* pCurrentHouse, CoordStruct defaultCurrentCoords, SpeedType speedTypeZone, int extraDistance = 0);
-	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const std::map<TechnoTypeClass*, int> ownedBuildings, bool skipSecretLabChecks);
-	static bool HasGenericPrerequisite(int idx, std::map<TechnoTypeClass*, int> ownedBuildings);
+	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const std::map<BuildingTypeClass*, int> ownedBuildings, bool skipSecretLabChecks);
+	static bool HasGenericPrerequisite(int idx, std::map<BuildingTypeClass*, int> ownedBuildings);
 	static int FindGenericPrerequisite(const char* id);
 	static void ForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode);
 

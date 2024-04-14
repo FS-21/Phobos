@@ -722,6 +722,470 @@ void TechnoExt::RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, Warh
 	return;
 }
 
+void TechnoExt::SendTechnoTarAndNavSync(TechnoClass* pThis)
+{
+	//static int NextSendFrame = 6 * 30; // SendResponseTimeInterval is 30 in the SendResponseTime2 example
+	//int currentFrame = Unsorted::CurrentFrame;
+
+	//if (NextSendFrame >= currentFrame)
+		//return;
+
+	auto pFoot = abstract_cast<FootClass*>(pThis);
+
+	EventExt event;
+	event.Type = EventTypeExt::SyncTechnoTargetingAndNav;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncTechnoTargetingAndNav.Target = pThis->Target;
+	event.SyncTechnoTargetingAndNav.Destination = pFoot ? pFoot->Destination : nullptr;
+	event.SyncTechnoTargetingAndNav.Mission = pThis->CurrentMission;
+	event.SyncTechnoTargetingAndNav.TechnoUniqueID = pThis->UniqueID;
+
+	event.AddEvent();
+	//if (event.AddEvent())
+	//{
+	//	Debug::Log("[Phobos] Player %d sending SendTechnoTarAndNavSync response of [%s] (UID: %d).\n"
+	//		, event.HouseIndex
+	//		, pThis->GetTechnoType()->ID
+	//		, pThis->UniqueID
+	//	);
+	//}
+}
+
+void TechnoExt::HandleTechnoTargetingAndNavSync(EventExt* event)
+{
+	TechnoClass* pThis = nullptr;
+	int technoUniqueID = event->SyncTechnoTargetingAndNav.TechnoUniqueID;
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			auto pFoot = abstract_cast<FootClass*>(pTechno);
+
+			pTechno->Target = event->SyncTechnoTargetingAndNav.Target;
+			pFoot->Destination = event->SyncTechnoTargetingAndNav.Destination;
+			pTechno->CurrentMission = event->SyncTechnoTargetingAndNav.Mission;
+			break;
+		}
+	}
+}
+
+void TechnoExt::SendTechnoSetTarget(TechnoClass* pThis, AbstractClass* pTarget)
+{
+	EventExt event;
+	event.Type = EventTypeExt::SyncTechnoSetTarget;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncTechnoSetTarget.Target = pThis->Target;
+	event.SyncTechnoSetTarget.TechnoUniqueID = pThis->UniqueID;
+
+	event.AddEvent();
+}
+
+void TechnoExt::HandleTechnoSetTarget(EventExt* event)
+{
+	int technoUniqueID = event->SyncTechnoSetTarget.TechnoUniqueID;
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			pTechno->SetTarget(event->SyncTechnoSetTarget.Target);
+			break;
+		}
+	}
+}
+
+void TechnoExt::SendTechnoTarget(TechnoClass* pThis, AbstractClass* pTarget)
+{
+	EventExt event;
+	event.Type = EventTypeExt::SyncTechnoTarget;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncTechnoTarget.Target = pThis->Target;
+	event.SyncTechnoTarget.TechnoUniqueID = pThis->UniqueID;
+
+	event.AddEvent();
+}
+
+void TechnoExt::HandleTechnoTarget(EventExt* event)
+{
+	int technoUniqueID = event->SyncTechnoTarget.TechnoUniqueID;
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			pTechno->Target = event->SyncTechnoTarget.Target;
+			break;
+		}
+	}
+}
+
+void TechnoExt::SendTechnoSetDestination(TechnoClass* pThis, AbstractClass* pDestination, bool runNow)
+{
+	EventExt event;
+	event.Type = EventTypeExt::SyncTechnoSetDestination;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncTechnoSetDestination.Destination = pDestination;
+	event.SyncTechnoSetDestination.RunNow = runNow;
+	event.SyncTechnoSetDestination.TechnoUniqueID = pThis->UniqueID;
+
+	event.AddEvent();
+}
+
+void TechnoExt::HandleTechnoSetDestination(EventExt* event)
+{
+	int technoUniqueID = event->SyncTechnoSetDestination.TechnoUniqueID;
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			pTechno->SetDestination(event->SyncTechnoSetDestination.Destination, event->SyncTechnoSetDestination.RunNow);
+			break;
+		}
+	}
+}
+
+void TechnoExt::SendTechnoDestination(TechnoClass* pThis, AbstractClass* pDestination)
+{
+	EventExt event;
+	event.Type = EventTypeExt::SyncTechnoDestination;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncTechnoDestination.Destination = pDestination;
+	event.SyncTechnoDestination.TechnoUniqueID = pThis->UniqueID;
+
+	event.AddEvent();
+}
+
+void TechnoExt::HandleTechnoDestination(EventExt* event)
+{
+	int technoUniqueID = event->SyncTechnoDestination.TechnoUniqueID;
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			auto pFoot = abstract_cast<FootClass*>(pTechno);
+			pFoot->Destination = event->SyncTechnoDestination.Destination;
+			break;
+		}
+	}
+}
+
+void TechnoExt::SendEngineerGuardDestination(TechnoClass* pThis, AbstractClass* pDestination)
+{
+	EventExt event;
+	event.Type = EventTypeExt::SyncEngineerGuardDestination;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncEngineerGuardDestination.GuardDestination = pDestination;
+	event.SyncEngineerGuardDestination.TechnoUniqueID = pThis->UniqueID;
+
+	event.AddEvent();
+}
+
+void TechnoExt::HandleEngineerGuardDestination(EventExt* event)
+{
+	int technoUniqueID = event->SyncEngineerGuardDestination.TechnoUniqueID;
+	auto guardDestination = static_cast<TechnoClass*>(event->SyncEngineerGuardDestination.GuardDestination);
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			auto const pExt = TechnoExt::ExtMap.Find(pTechno);
+
+			if (TechnoExt::IsValidTechno(guardDestination))
+				pExt->WeaponizedEngineer_GuardDestination = guardDestination;
+			else
+				pExt->WeaponizedEngineer_GuardDestination = nullptr;
+
+			break;
+		}
+	}
+}
+
+void TechnoExt::SendTechnoStopMoving(TechnoClass* pThis)
+{
+	EventExt event;
+	event.Type = EventTypeExt::SyncTechnoStopMoving;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncTechnoStopMoving.TechnoUniqueID = pThis->UniqueID;
+
+	event.AddEvent();
+}
+
+void TechnoExt::HandleTechnoStopMoving(EventExt* event)
+{
+	int technoUniqueID = event->SyncTechnoStopMoving.TechnoUniqueID;
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			auto pFoot = abstract_cast<FootClass*>(pTechno);
+			pFoot->StopMoving();
+			break;
+		}
+	}
+}
+
+void TechnoExt::SendTechnoCurrentMission(TechnoClass* pThis, Mission currentMission)
+{
+	auto pFoot = abstract_cast<FootClass*>(pThis);
+
+	EventExt event;
+	event.Type = EventTypeExt::SyncTechnoCurrentMission;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncTechnoCurrentMission.TechnoUniqueID = pThis->UniqueID;
+	event.SyncTechnoCurrentMission.CurrentMission = currentMission;
+
+	event.AddEvent();
+}
+
+void TechnoExt::HandleTechnoCurrentMission(EventExt* event)
+{
+	int technoUniqueID = event->SyncTechnoCurrentMission.TechnoUniqueID;
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			pTechno->CurrentMission = event->SyncTechnoCurrentMission.CurrentMission;
+			break;
+		}
+	}
+}
+
+void TechnoExt::SendWeaponizedEngineerGuard(TechnoClass* pThis)
+{
+	auto pFoot = abstract_cast<FootClass*>(pThis);
+
+	EventExt event;
+	event.Type = EventTypeExt::SyncWeaponizedEngineerGuard;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncWeaponizedEngineerGuard.TechnoUniqueID = pThis->UniqueID;
+
+	event.AddEvent();
+}
+
+void TechnoExt::HandleWeaponizedEngineerGuard(EventExt* event)
+{
+	int technoUniqueID = event->SyncWeaponizedEngineerGuard.TechnoUniqueID;
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			TechnoExt::ProcessWeaponizedEngineerGuard(pTechno);
+			break;
+		}
+	}
+}
+
+void TechnoExt::SendStopTarNav(TechnoClass* pThis)
+{
+	auto pFoot = abstract_cast<FootClass*>(pThis);
+
+	EventExt event;
+	event.Type = EventTypeExt::SyncStopTarNav;
+	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
+	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+
+	event.SyncWeaponizedEngineerGuard.TechnoUniqueID = pThis->UniqueID;
+
+	event.AddEvent();
+}
+
+void TechnoExt::HandleStopTarNav(EventExt* event)
+{
+	int technoUniqueID = event->SyncStopTarNav.TechnoUniqueID;
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == technoUniqueID)
+		{
+			auto const pExt = TechnoExt::ExtMap.Find(pTechno);
+			pExt->WeaponizedEngineer_GuardDestination = nullptr;
+
+			pTechno->SetTarget(nullptr);
+			pExt->CurrentRandomTarget = nullptr;
+			pExt->OriginalTarget = nullptr;
+			pTechno->SetDestination(nullptr, true);
+
+			auto pFoot = abstract_cast<FootClass*>(pTechno);
+
+			if (pFoot->Locomotor->Is_Moving_Now())
+				pFoot->StopMoving();
+
+			pTechno->QueueMission(Mission::Guard, false);
+			break;
+		}
+	}
+}
+
+void TechnoExt::ProcessWeaponizedEngineerGuard(TechnoClass* pThis)
+{
+	if (!pThis || !TechnoExt::IsValidTechno(pThis))
+		return;
+
+	auto const pType = pThis->GetTechnoType();
+	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
+
+	if (!pTypeExt || !pTypeExt->Engineer_CheckFriendlyWeapons)
+		return;
+
+	auto const pExt = TechnoExt::ExtMap.Find(pThis);
+
+	if (pThis->CurrentMission != Mission::Area_Guard && pThis->CurrentMission != Mission::Guard && pExt->WeaponizedEngineer_GuardDestination)
+		pExt->WeaponizedEngineer_GuardDestination = nullptr;
+
+	auto pFoot = abstract_cast<FootClass*>(pThis);
+
+	// Move to the target until the unit reaches the weapons's range
+	if (pFoot->Destination && pThis->Owner->IsAlliedWith(pFoot->Destination))
+	{
+		if (pThis->CurrentMission == Mission::Capture)
+			return;
+
+		auto const pCurrentTarget = pThis->Target;
+
+		if (pThis->IsCloseEnoughToAttack(pFoot->Destination))
+		{
+			auto const pCurrentMission = pThis->CurrentMission;
+			//pFoot->StopMoving();
+			pThis->CurrentMission = pCurrentMission;
+			pFoot->Destination = nullptr;
+		}
+
+		pThis->Target = pCurrentTarget; // Since SetTarget(...) isn't used here the target's info won't dissappear in the next frames so maybe I should remove this line and "pFoot->StopMoving()" doesn't look that triggers this weird "bug".
+
+		return;
+	}
+
+	TechnoClass* const pTarget = pThis->Target ? abstract_cast<TechnoClass*>(pThis->Target) : nullptr;
+
+	// Stop the unit movement if is inside the weapon's range so it can start attacking the target
+	/*if (pTarget && pThis->IsCloseEnoughToAttack(pTarget))
+	{
+		if (pFoot->Locomotor->Is_Moving_Now())
+			pFoot->StopMoving();
+
+		pThis->Target = pTarget;
+
+		return;
+	}*/
+	if (pTarget)
+	{
+		if (pThis->IsCloseEnoughToAttack(pTarget))
+		{
+			if (pFoot->Locomotor->Is_Moving_Now())
+				pFoot->StopMoving();
+
+			pThis->Target = pTarget;
+		}
+		else
+		{
+			if (!pFoot->Locomotor->Is_Moving_Now() && !pFoot->Destination)
+			{
+				// If the unit must move for reaching the target then pick the closest cell around the target
+				auto pCell = pThis->GetCell();
+				bool allowBridges = GroundType::Array[static_cast<int>(LandType::Clear)].Cost[static_cast<int>(pType->SpeedType)] > 0.0;
+				bool isBridge = allowBridges && pCell->ContainsBridge();
+				auto nCell = MapClass::Instance->NearByLocation(CellClass::Coord2Cell(pTarget->Location), pType->SpeedType, -1, pType->MovementZone, isBridge, 1, 1, true, false, false, isBridge, CellStruct::Empty, false, false);
+				pCell = MapClass::Instance->TryGetCellAt(nCell);
+				pThis->SetDestination(pCell, false);
+				pThis->Target = nullptr;
+			}
+		}
+
+		return;
+	}
+	
+	// The search function only works if the unit is awaiting orders in guard mode
+	if (pThis->CurrentMission != Mission::Area_Guard && pThis->CurrentMission != Mission::Guard)
+		return;
+
+	TechnoClass* seletedTarget = nullptr;
+	int bestVal = -1;
+	int range = -1;
+
+	// Looks for the closest valid target
+	for (auto const pTechno : *TechnoClass::Array)
+	{
+		int value = pThis->DistanceFrom(pTechno); // Note: distance is in leptons (*256)
+		int weaponIndex = pThis->SelectWeapon(pTechno);
+		auto weaponType = pThis->GetWeapon(weaponIndex)->WeaponType;
+		auto const pWHExt = WarheadTypeExt::ExtMap.Find(weaponType->Warhead);
+		bool canDisarmBombs = pWHExt->CanDisarmBombs && pTechno->AttachedBomb && pThis->Owner->IsAlliedWith(pTechno);
+		double versusArmor = GeneralUtils::GetWarheadVersusArmor(weaponType->Warhead, pTechno->GetTechnoType()->Armor);
+		int realDamage = static_cast<int>(weaponType->Damage * versusArmor * pThis->FirepowerMultiplier);
+		bool isHealerWeapon = realDamage < 0;
+		bool healingCondition = (isHealerWeapon && pTechno->Health < pTechno->GetTechnoType()->Strength && pThis->Owner->IsAlliedWith(pTechno));
+		//bool offensiveCondition = (!isHealerWeapon && !pThis->Owner->IsAlliedWith(pTechno));
+		int guardRange = pThis->CurrentMission == Mission::Area_Guard || pType->DefaultToGuardArea ? pThis->GetGuardRange(1) : weaponType->Range;
+
+		if ((pTechno != pThis
+			&& pTechno->IsAlive
+			&& pTechno->Health > 0
+			&& !pTechno->InLimbo
+			&& value <= guardRange
+			&& (healingCondition || canDisarmBombs)// || !offensiveCondition
+			&& !pTechno->GetTechnoType()->Immune
+			&& !pTechno->BeingWarpedOut
+			&& !pTechno->TemporalTargetingMe
+			&& pTechno->InWhichLayer() != Layer::Underground
+			))
+		{
+			if (value < bestVal || bestVal < 0)
+			{
+				bestVal = value;
+				seletedTarget = pTechno;
+			}
+		}
+	}
+
+	if (!seletedTarget && !pFoot->Destination && pExt->WeaponizedEngineer_GuardDestination)
+		seletedTarget = static_cast<TechnoClass*>(pExt->WeaponizedEngineer_GuardDestination);
+
+	if (seletedTarget && seletedTarget != pThis->Target)
+	{
+		pThis->SetTarget(seletedTarget);
+
+		// Prevent involuntary movement produced by SetTarget() method if the unit is in weapon's range
+		if (pThis->IsCloseEnoughToAttack(seletedTarget))
+		{
+			pThis->SetDestination(nullptr, true);
+			return;
+		}
+
+		// If the unit must move for reaching the target then pick the closest cell around the target
+		auto pCell = pThis->GetCell();
+		bool allowBridges = GroundType::Array[static_cast<int>(LandType::Clear)].Cost[static_cast<int>(pType->SpeedType)] > 0.0;
+		bool isBridge = allowBridges && pCell->ContainsBridge();
+		auto nCell = MapClass::Instance->NearByLocation(CellClass::Coord2Cell(seletedTarget->Location), pType->SpeedType, -1, pType->MovementZone, isBridge, 1, 1, true, false, false, isBridge, CellStruct::Empty, false, false);
+		pCell = MapClass::Instance->TryGetCellAt(nCell);
+		pThis->SetDestination(pCell, false);
+	}
+}
+
 // =============================
 // load / save
 

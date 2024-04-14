@@ -1015,11 +1015,12 @@ DEFINE_HOOK(0x730F00, AIMissionClassUAEXXZ_StopSelected_ClearRetargets, 0x5)
 		if (!pExt)
 			continue;
 
-		if (pExt->CurrentRandomTarget && pTechno->CurrentMission == Mission::Attack)
+		if (pExt->CurrentRandomTarget || pExt->WeaponizedEngineer_GuardDestination)// && pTechno->CurrentMission == Mission::Attack)
 		{
-			pExt->CurrentRandomTarget = nullptr;
-			pExt->OriginalTarget = nullptr;
-			pTechno->Target = nullptr;
+			TechnoExt::SendStopTarNav(pTechno);
+			//pExt->CurrentRandomTarget = nullptr;
+			//pExt->OriginalTarget = nullptr;
+			//pTechno->Target = nullptr;
 			//pTechno->QueueMission(Mission::Guard, 0);
 		}
 	}
@@ -1115,7 +1116,7 @@ DEFINE_HOOK(0x6FF8F1, TechnoClass_FireAt_ResetRandomTarget, 0x6)
 	if (!pExt)
 		return 0;
 
-	if (pExt->ResetRandomTarget)
+	if (pExt->ResetRandomTarget || (pExt->CurrentRandomTarget && !TechnoExt::IsValidTechno(pExt->CurrentRandomTarget)))
 	{
 		pExt->ResetRandomTarget = false;
 		pExt->CurrentRandomTarget = TechnoExt::FindRandomTarget(pThis);

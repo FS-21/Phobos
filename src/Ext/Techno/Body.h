@@ -9,6 +9,7 @@
 #include <Utilities/EnumFunctions.h>
 #include <New/Entity/ShieldClass.h>
 #include <New/Entity/LaserTrailClass.h>
+#include <Ext/Event/Body.h>
 
 struct MapPathCellElement
 {
@@ -98,6 +99,8 @@ public:
 		bool Convert_UniversalDeploy_IsOriginalDeployer;
 		AbstractClass* Convert_UniversalDeploy_RememberTarget;
 
+		AbstractClass* WeaponizedEngineer_GuardDestination;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -131,6 +134,7 @@ public:
 			, Convert_UniversalDeploy_TemporalTechno { nullptr }
 			, Convert_UniversalDeploy_IsOriginalDeployer { true }
 			, Convert_UniversalDeploy_RememberTarget { nullptr }
+			, WeaponizedEngineer_GuardDestination { nullptr }
 		{ }
 
 		void OnEarlyUpdate();
@@ -148,6 +152,7 @@ public:
 		void UpdateMindControlAnim();
 		void UpdateRandomTargets();
 		void WebbyUpdate();
+		void UpdateWeaponizedEngineerGuard();
 
 		virtual ~ExtData() override;
 
@@ -228,7 +233,7 @@ public:
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
 	static bool IsValidTechno(TechnoClass* pTechno);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
-	static void WebbyUpdate(TechnoClass* pThis);
+	static void ProcessWeaponizedEngineerGuard(TechnoClass* pThis);
 
 	// WeaponHelpers.cpp
 	static int PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback = true, bool allowAAFallback = true);
@@ -249,4 +254,25 @@ public:
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	//static void UpdateUniversalDeploy(TechnoClass* pThis);
 	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
+
+	static void SendTechnoTarAndNavSync(TechnoClass* pThis);
+	static void HandleTechnoTargetingAndNavSync(EventExt* event);
+	static void SendTechnoSetTarget(TechnoClass* pThis, AbstractClass* pTarget);
+	static void HandleTechnoSetTarget(EventExt* event);
+	static void SendTechnoTarget(TechnoClass* pThis, AbstractClass* pTarget);
+	static void HandleTechnoTarget(EventExt* event);
+	static void SendTechnoSetDestination(TechnoClass* pThis, AbstractClass* pDestination, bool runNow);
+	static void HandleTechnoSetDestination(EventExt* event);
+	static void SendTechnoDestination(TechnoClass* pThis, AbstractClass* pDestination);
+	static void HandleTechnoDestination(EventExt* event);
+	static void SendEngineerGuardDestination(TechnoClass* pThis, AbstractClass* pDestination);
+	static void HandleEngineerGuardDestination(EventExt* event);
+	static void SendTechnoStopMoving(TechnoClass* pThis);
+	static void HandleTechnoStopMoving(EventExt* event);
+	static void SendTechnoCurrentMission(TechnoClass* pThis, Mission currentMission);
+	static void HandleTechnoCurrentMission(EventExt* event);
+	static void SendWeaponizedEngineerGuard(TechnoClass* pThis);
+	static void HandleWeaponizedEngineerGuard(EventExt* event);
+	static void SendStopTarNav(TechnoClass* pThis);
+	static void HandleStopTarNav(EventExt* event);
 };

@@ -148,6 +148,8 @@ public:
 
 		Valueable<bool> Convert_UseUniversalDeploy;
 
+		Valueable<bool> CanDisarmBombs;
+
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
 		Valueable<double> Shield_SelfHealing_Rate_InMinutes;
@@ -279,6 +281,8 @@ public:
 			, Webby_Cap { -1 }
 
 			, Convert_UseUniversalDeploy { false }
+
+			, CanDisarmBombs { false }
 		{ }
 
 	private:

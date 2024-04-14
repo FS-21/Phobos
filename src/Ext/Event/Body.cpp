@@ -1,5 +1,6 @@
-/*
 #include "Body.h"
+
+#include <Ext/Techno/Body.h>
 
 #include <Helpers/Macro.h>
 #include <EventClass.h>
@@ -13,8 +14,35 @@ void EventExt::RespondEvent()
 {
 	switch (this->Type)
 	{
-	case EventTypeExt::Sample:
-		// Place the handler here
+	case EventTypeExt::SyncTechnoTargetingAndNav:
+		TechnoExt::HandleTechnoTargetingAndNavSync(this);
+		break;
+	case EventTypeExt::SyncTechnoSetTarget:
+		TechnoExt::HandleTechnoSetTarget(this);
+		break;
+	case EventTypeExt::SyncTechnoTarget:
+		TechnoExt::HandleTechnoTarget(this);
+		break;
+	case EventTypeExt::SyncTechnoSetDestination:
+		TechnoExt::HandleTechnoSetDestination(this);
+		break;
+	case EventTypeExt::SyncTechnoDestination:
+		TechnoExt::HandleTechnoDestination(this);
+		break;
+	case EventTypeExt::SyncEngineerGuardDestination:
+		TechnoExt::HandleEngineerGuardDestination(this);
+		break;
+	case EventTypeExt::SyncTechnoStopMoving:
+		TechnoExt::HandleTechnoStopMoving(this);
+		break;
+	case EventTypeExt::SyncTechnoCurrentMission:
+		TechnoExt::HandleTechnoCurrentMission(this);
+		break;
+	case EventTypeExt::SyncWeaponizedEngineerGuard:
+		TechnoExt::HandleWeaponizedEngineerGuard(this);
+		break;
+	case EventTypeExt::SyncStopTarNav:
+		TechnoExt::HandleStopTarNav(this);
 		break;
 	}
 }
@@ -23,8 +51,26 @@ size_t EventExt::GetDataSize(EventTypeExt type)
 {
 	switch (type)
 	{
-	case EventTypeExt::Sample:
-		return sizeof(EventExt::Sample);
+	case EventTypeExt::SyncTechnoTargetingAndNav:
+		return sizeof(EventExt::SyncTechnoTargetingAndNav);
+	case EventTypeExt::SyncTechnoSetTarget:
+		return sizeof(EventExt::SyncTechnoSetTarget);
+	case EventTypeExt::SyncTechnoTarget:
+		return sizeof(EventExt::SyncTechnoTarget);
+	case EventTypeExt::SyncTechnoSetDestination:
+		return sizeof(EventExt::SyncTechnoSetDestination);
+	case EventTypeExt::SyncTechnoDestination:
+		return sizeof(EventExt::SyncTechnoDestination);
+	case EventTypeExt::SyncEngineerGuardDestination:
+		return sizeof(EventExt::SyncEngineerGuardDestination);
+	case EventTypeExt::SyncTechnoStopMoving:
+		return sizeof(EventExt::SyncTechnoStopMoving);
+	case EventTypeExt::SyncTechnoCurrentMission:
+		return sizeof(EventExt::SyncTechnoCurrentMission);
+	case EventTypeExt::SyncWeaponizedEngineerGuard:
+		return sizeof(EventExt::SyncWeaponizedEngineerGuard);
+	case EventTypeExt::SyncStopTarNav:
+		return sizeof(EventExt::SyncStopTarNav);
 	}
 
 	return 0;
@@ -98,4 +144,3 @@ DEFINE_HOOK(0x64C30E, sub_64BDD0_GetEventSize2, 0x6)
 
 	return 0;
 }
-*/

@@ -247,6 +247,8 @@ public:
 		Valueable<bool> Convert_TransferPassengers_IgnoreInvalidOccupiers;
 		Valueable<bool> Convert_ForceVeterancyTransfer;
 
+		Valueable<bool> Engineer_CheckFriendlyWeapons;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, UIDescription {}
@@ -433,6 +435,8 @@ public:
 			, Convert_TransferPassengers { true }
 			, Convert_TransferPassengers_IgnoreInvalidOccupiers { false }
 			, Convert_ForceVeterancyTransfer { false }
+
+			, Engineer_CheckFriendlyWeapons { false }
 		{ }
 
 		virtual ~ExtData() = default;

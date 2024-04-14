@@ -1,7 +1,8 @@
 #pragma once
-/*
 #include <cstddef>
 #include <stdint.h>
+#include <TechnoClass.h>
+#include <FootClass.h>
 
 enum class EventTypeExt : uint8_t
 {
@@ -9,10 +10,19 @@ enum class EventTypeExt : uint8_t
 	// CnCNet reserved Events from 0x30 to 0x3F
 	// Ares used Events 0x60 and 0x61
 
-	Sample = 0x40, // Sample event, remove it when Phobos needs its own events
+	SyncTechnoTargetingAndNav = 0x40,
+	SyncTechnoSetTarget = 0x41,
+	SyncTechnoTarget = 0x42,
+	SyncTechnoSetDestination = 0x43,
+	SyncTechnoDestination = 0x44,
+	SyncEngineerGuardDestination = 0x45,
+	SyncTechnoStopMoving = 0x46,
+	SyncTechnoCurrentMission = 0x47,
+	SyncWeaponizedEngineerGuard = 0x48,
+	SyncStopTarNav = 0x49,
 
-	FIRST = Sample,
-	LAST = Sample
+	FIRST = SyncTechnoTargetingAndNav,
+	LAST = SyncStopTarNav
 };
 
 #pragma pack(push, 1)
@@ -27,10 +37,65 @@ public:
 	{
 		char DataBuffer[104];
 
-		struct Sample
+		struct SyncTechnoTargetingAndNav
 		{
-			char DataBuffer[104];
-		} Sample;
+			int TechnoUniqueID;
+			AbstractClass* Target;
+			AbstractClass* Destination;
+			Mission Mission;
+		} SyncTechnoTargetingAndNav;
+
+		struct SyncTechnoSetTarget
+		{
+			int TechnoUniqueID;
+			AbstractClass* Target;
+		} SyncTechnoSetTarget;
+
+		struct SyncTechnoTarget
+		{
+			int TechnoUniqueID;
+			AbstractClass* Target;
+		} SyncTechnoTarget;
+
+		struct SyncTechnoSetDestination
+		{
+			int TechnoUniqueID;
+			AbstractClass* Destination;
+			bool RunNow;
+		} SyncTechnoSetDestination;
+
+		struct SyncTechnoDestination
+		{
+			int TechnoUniqueID;
+			AbstractClass* Destination;
+		} SyncTechnoDestination;
+
+		struct SyncEngineerGuardDestination
+		{
+			int TechnoUniqueID;
+			AbstractClass* GuardDestination;
+		} SyncEngineerGuardDestination;
+
+		struct SyncTechnoStopMoving
+		{
+			int TechnoUniqueID;
+		} SyncTechnoStopMoving;
+
+		struct SyncTechnoCurrentMission
+		{
+			int TechnoUniqueID;
+			Mission CurrentMission;
+		} SyncTechnoCurrentMission;
+
+		struct SyncWeaponizedEngineerGuard
+		{
+			int TechnoUniqueID;
+		} SyncWeaponizedEngineerGuard;
+
+		struct SyncStopTarNav
+		{
+			int TechnoUniqueID;
+		} SyncStopTarNav;
 	};
 
 	bool AddEvent();
@@ -43,4 +108,3 @@ public:
 static_assert(sizeof(EventExt) == 111);
 static_assert(offsetof(EventExt, DataBuffer) == 7);
 #pragma pack(pop)
-*/
