@@ -38,7 +38,8 @@ public:
 
 		Valueable<PartialVector3D<int>> TurretOffset;
 		Nullable<bool> TurretShadow;
-		ValueableVector<int> ShadowIndices;
+		Valueable<int> ShadowIndex_Frame;
+		std::map<int, int> ShadowIndices;
 		Valueable<bool> Spawner_LimitRange;
 		Valueable<int> Spawner_ExtraLimitRange;
 		Nullable<int> Spawner_DelayFrames;
@@ -127,6 +128,7 @@ public:
 		Valueable<int> NoAmmoAmount;
 
 		Valueable<bool> JumpjetRotateOnCrash;
+		Nullable<int> ShadowSizeCharacteristicHeight;
 
 		Valueable<bool> DeployingAnim_AllowAnyDirection;
 		Valueable<bool> DeployingAnim_KeepUnitVisible;
@@ -151,6 +153,7 @@ public:
 		Nullable<IronCurtainEffect> IronCurtain_Effect;
 		Nullable<WarheadTypeClass*> IronCurtain_KillWarhead;
 		Valueable<bool> Explodes_KillPassengers;
+		Valueable<bool> Explodes_DuringBuildup;
 		Nullable<int> DeployFireWeapon;
 		Valueable<TargetZoneScanType> TargetZoneScanType;
 
@@ -193,6 +196,9 @@ public:
 		Valueable<bool> ImmuneToWeb;
 		Valueable<int> Webby_Duration;
 		Valueable<int> Webby_DurationVariation;
+
+		Valueable<TechnoTypeClass*> Convert_HumanToComputer;
+		Valueable<TechnoTypeClass*> Convert_ComputerToHuman;
 
 		struct LaserTrailDataEntry
 		{
@@ -264,6 +270,7 @@ public:
 			, TurretOffset { { 0, 0, 0 } }
 			, TurretShadow { }
 			, ShadowIndices { }
+			, ShadowIndex_Frame { 0 }
 			, Spawner_LimitRange { false }
 			, Spawner_ExtraLimitRange { 0 }
 			, Spawner_DelayFrames {}
@@ -315,7 +322,7 @@ public:
 			, NoAmmoWeapon { -1 }
 			, NoAmmoAmount { 0 }
 			, JumpjetRotateOnCrash { true }
-
+			, ShadowSizeCharacteristicHeight { }
 			, DeployingAnim_AllowAnyDirection { false }
 			, DeployingAnim_KeepUnitVisible { false }
 			, DeployingAnim_ReverseForUndeploy { true }
@@ -380,6 +387,7 @@ public:
 			, ConsideredSecretLabTech { false }
 			, Secret_RequiredHouses { }
 			, Secret_ForbiddenHouses { }
+			, Explodes_DuringBuildup { true }
 			, DeployFireWeapon {}
 			, TargetZoneScanType { TargetZoneScanType::Same }
 
@@ -437,6 +445,8 @@ public:
 			, Convert_ForceVeterancyTransfer { false }
 
 			, Engineer_CheckFriendlyWeapons { false }
+			, Convert_HumanToComputer { }
+			, Convert_ComputerToHuman { }
 		{ }
 
 		virtual ~ExtData() = default;

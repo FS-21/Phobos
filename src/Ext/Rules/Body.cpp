@@ -121,6 +121,13 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->AnimRemapDefaultColorScheme.Read(exINI, GameStrings::AudioVisual, "AnimRemapDefaultColorScheme");
 	this->TimerBlinkColorScheme.Read(exINI, GameStrings::AudioVisual, "TimerBlinkColorScheme");
 	this->ShowDesignatorRange.Read(exINI, GameStrings::AudioVisual, "ShowDesignatorRange");
+	Nullable<double>AirShadowBaseScale;
+	AirShadowBaseScale.Read(exINI, GameStrings::AudioVisual, "AirShadowBaseScale");
+	if (AirShadowBaseScale.isset() && AirShadowBaseScale.Get() > 0)
+		this->AirShadowBaseScale_log = -std::log(std::min(AirShadowBaseScale.Get(), 1.0));
+
+	this->HeightShadowScaling.Read(exINI, GameStrings::AudioVisual, "HeightShadowScaling");
+	this->HeightShadowScaling_MinScale.Read(exINI, GameStrings::AudioVisual, "HeightShadowScaling.MinScale");
 
 	this->AllowParallelAIQueues.Read(exINI, "GlobalControls", "AllowParallelAIQueues");
 	this->ForbidParallelAIQueues_Aircraft.Read(exINI, "GlobalControls", "ForbidParallelAIQueues.Infantry");
@@ -343,11 +350,11 @@ void RulesExt::FillDefaultPrerequisites()
 			auto list = RulesExt::Global()->GenericPrerequisites.GetItem(i);
 			const auto listName = RulesExt::Global()->GenericPrerequisitesNames[i];
 
-			for (int j : list)
+			/*for (int j : list)
 			{
 				auto pTypeName = BuildingTypeClass::Array->GetItem(j)->ID;
 				Debug::Log("[GenericPrerequisites][%s](%d) -> [%s](%d)\n", listName, i, pTypeName, j);
-			}
+			}*/
 		}
 	}
 }
@@ -405,6 +412,9 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->Pips_Tiberiums_DisplayOrder)
 		.Process(this->Pips_Tiberiums_WeedFrame)
 		.Process(this->Pips_Tiberiums_WeedEmptyFrame)
+		.Process(this->AirShadowBaseScale_log)
+		.Process(this->HeightShadowScaling)
+		.Process(this->HeightShadowScaling_MinScale)
 		.Process(this->AllowParallelAIQueues)
 		.Process(this->ForbidParallelAIQueues_Aircraft)
 		.Process(this->ForbidParallelAIQueues_Building)

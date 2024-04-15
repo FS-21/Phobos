@@ -82,6 +82,10 @@ public:
 		Valueable<int> Pips_Tiberiums_WeedFrame;
 		Valueable<int> Pips_Tiberiums_WeedEmptyFrame;
 
+		Valueable<bool> HeightShadowScaling;
+		Valueable<double> HeightShadowScaling_MinScale;
+		double AirShadowBaseScale_log;
+
 		Valueable<bool> AllowParallelAIQueues;
 		Valueable<bool> ForbidParallelAIQueues_Aircraft;
 		Valueable<bool> ForbidParallelAIQueues_Building;
@@ -182,6 +186,11 @@ public:
 			, Pips_Tiberiums_DisplayOrder {}
 			, Pips_Tiberiums_WeedFrame { 1 }
 			, Pips_Tiberiums_WeedEmptyFrame { 0 }
+
+			, HeightShadowScaling { false }
+			, HeightShadowScaling_MinScale { 0.0 }
+			, AirShadowBaseScale_log { 0.693376137 }
+
 			, AllowParallelAIQueues { true }
 			, ForbidParallelAIQueues_Aircraft { false }
 			, ForbidParallelAIQueues_Building { false }
