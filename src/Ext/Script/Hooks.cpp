@@ -7,7 +7,7 @@
 DEFINE_HOOK(0x6E9443, TeamClass_AI, 0x8) {
 	GET(TeamClass *, pTeam, ESI);
 
-	if (!pTeam)
+	if (!pTeam || !pTeam->Type || !pTeam->Owner || pTeam->WhatAmI() != AbstractType::Team)
 		return 0;
 
 	auto pTeamData = TeamExt::ExtMap.Find(pTeam);

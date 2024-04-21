@@ -245,6 +245,12 @@ TechnoClass* ScriptExt::FindBestObject(TechnoClass* pTechno, int method, int cal
 		if (!object || !objectType || !pTechnoType)
 			continue;
 
+		// Discard invisible structures
+		BuildingTypeClass* pTypeBuilding = pTechno->WhatAmI() == AbstractType::Building ? static_cast<BuildingTypeClass*>(pTechnoType) : nullptr;
+
+		if (pTypeBuilding && pTypeBuilding->InvisibleInGame)
+			continue;
+
 		if (enemyHouse && enemyHouse != object->Owner)
 			continue;
 
