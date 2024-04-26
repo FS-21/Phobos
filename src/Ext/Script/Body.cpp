@@ -949,11 +949,11 @@ void ScriptExt::SkipNextAction(TeamClass* pTeam, int successPercentage = 0)
 	if (!pTeam)
 	{
 		// This action finished
-		pTeam->StepCompleted = true;
-		ScriptExt::Log("AI Scripts - SkipNextAction: [%s] [%s] (line: %d) Jump to next line: %d = %d,%d -> (No team members alive)\n",
-			pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument,
-			pTeam->CurrentScript->CurrentMission + 1, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission + 1].Action,
-			pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission + 1].Argument);
+		//pTeam->StepCompleted = true;
+		//ScriptExt::Log("AI Scripts - SkipNextAction: [%s] [%s] (line: %d) Jump to next line: %d = %d,%d -> (No team members alive)\n",
+			//pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument,
+			//pTeam->CurrentScript->CurrentMission + 1, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission + 1].Action,
+			//pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission + 1].Argument);
 
 		return;
 	}
@@ -988,7 +988,7 @@ void ScriptExt::ResetAngerAgainstHouses(TeamClass* pTeam)
 	if (!pTeam)
 	{
 		// This action finished
-		pTeam->StepCompleted = true;
+		//pTeam->StepCompleted = true;
 		return;
 	}
 
@@ -998,7 +998,7 @@ void ScriptExt::ResetAngerAgainstHouses(TeamClass* pTeam)
 	}
 
 	pTeam->Owner->EnemyHouseIndex = -1;
-	ScriptExt::DebugAngerNodesData();
+	//ScriptExt::DebugAngerNodesData();
 
 	// This action finished
 	pTeam->StepCompleted = true; // This action finished - FS-21
@@ -1006,9 +1006,15 @@ void ScriptExt::ResetAngerAgainstHouses(TeamClass* pTeam)
 
 void ScriptExt::SetHouseAngerModifier(TeamClass* pTeam, int modifier = 0)
 {
-	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeam)
+	{
+		// This action finished
+		//pTeam->StepCompleted = true;
+		return;
+	}
 
-	if (!pTeam || !pTeamData)
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
 	{
 		// This action finished
 		pTeam->StepCompleted = true;
@@ -1029,15 +1035,22 @@ void ScriptExt::SetHouseAngerModifier(TeamClass* pTeam, int modifier = 0)
 
 void ScriptExt::ModifyHateHouses_List(TeamClass* pTeam, int idxHousesList = -1)
 {
-	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
-	bool changeFailed = true;
+	if (!pTeam)
+	{
+		// This action finished
+		//pTeam->StepCompleted = true;
+		return;
+	}
 
-	if (!pTeam || !pTeamData)
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
 	{
 		// This action finished
 		pTeam->StepCompleted = true;
 		return;
 	}
+
+	bool changeFailed = true;
 
 	if (idxHousesList <= 0)
 		idxHousesList = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
@@ -1074,11 +1087,11 @@ void ScriptExt::ModifyHateHouses_List(TeamClass* pTeam, int idxHousesList = -1)
 	if (changeFailed)
 	{
 		pTeam->StepCompleted = true;
-		Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Failed to modify hate values against other houses\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument);
+		ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Failed to modify hate values against other houses\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument);
 	}
 
 	ScriptExt::UpdateEnemyHouseIndex(pTeam->Owner);
-	ScriptExt::DebugAngerNodesData();
+	//ScriptExt::DebugAngerNodesData();
 
 	// This action finished
 	pTeam->StepCompleted = true;
@@ -1086,15 +1099,22 @@ void ScriptExt::ModifyHateHouses_List(TeamClass* pTeam, int idxHousesList = -1)
 
 void ScriptExt::ModifyHateHouses_List1Random(TeamClass* pTeam, int idxHousesList = -1)
 {
-	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
-	int changes = 0;
+	if (!pTeam)
+	{
+		// This action finished
+		//pTeam->StepCompleted = true;
+		return;
+	}
 
-	if (!pTeam || !pTeamData)
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
 	{
 		// This action finished
 		pTeam->StepCompleted = true;
 		return;
 	}
+
+	int changes = 0;
 
 	if (idxHousesList <= 0)
 		idxHousesList = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
@@ -1131,11 +1151,11 @@ void ScriptExt::ModifyHateHouses_List1Random(TeamClass* pTeam, int idxHousesList
 	if (changes == 0)
 	{
 		pTeam->StepCompleted = true;
-		Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Failed to modify hate values against other houses\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument);
+		ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Failed to modify hate values against other houses\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument);
 	}
 
 	ScriptExt::UpdateEnemyHouseIndex(pTeam->Owner);
-	ScriptExt::DebugAngerNodesData();
+	//ScriptExt::DebugAngerNodesData();
 
 	// This action finished
 	pTeam->StepCompleted = true;
@@ -1143,9 +1163,15 @@ void ScriptExt::ModifyHateHouses_List1Random(TeamClass* pTeam, int idxHousesList
 
 void ScriptExt::SetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int mode = 1, bool random = false)
 {
-	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeam)
+	{
+		// This action finished
+		//pTeam->StepCompleted = true;
+		return;
+	}
 
-	if (!pTeam || !pTeamData)
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
 	{
 		// This action finished
 		pTeam->StepCompleted = true;
@@ -1220,7 +1246,7 @@ void ScriptExt::SetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int mode = 
 			if (angerNode.House == selectedHouse)
 			{
 				angerNode.AngerLevel = newHateLevel;
-				Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Picked a new house as enemy [%s]\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, angerNode.House->Type->ID);
+				ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Picked a new house as enemy [%s]\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, angerNode.House->Type->ID);
 			}
 		}
 
@@ -1228,7 +1254,7 @@ void ScriptExt::SetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int mode = 
 	}
 	else
 	{
-		Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Failed to pick a new hated house\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument);
+		ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Failed to pick a new hated house\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument);
 	}
 
 	// This action finished
@@ -1237,15 +1263,15 @@ void ScriptExt::SetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int mode = 
 
 HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int mode = 1)
 {
-	if (!pTeam || pTeam->Owner || mask == 0)
+	if (!pTeam)
 	{
 		// This action finished
-		pTeam->StepCompleted = true;
+		//pTeam->StepCompleted = true;
 		return nullptr;
 	}
 
 	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
-	if (!pTeamData)
+	if (!pTeamData || !pTeam->Owner || mask == 0)
 	{
 		// This action finished
 		pTeam->StepCompleted = true;
@@ -1315,7 +1341,7 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 		}
 
 		if (enemyHouse)
-			Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
+			ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
 
 		return enemyHouse;
 	}
@@ -1362,7 +1388,7 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 		}
 
 		if (enemyHouse)
-			Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
+			ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
 
 		return enemyHouse;
 	}
@@ -1413,7 +1439,7 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 		}
 
 		if (enemyHouse)
-			Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
+			ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
 
 		return enemyHouse;
 	}
@@ -1455,7 +1481,7 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 		}
 
 		if (enemyHouse)
-			Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
+			ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
 
 		return enemyHouse;
 	}
@@ -1510,7 +1536,7 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 		}
 
 		if (enemyHouse)
-			Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
+			ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
 
 		return enemyHouse;
 	}
@@ -1552,7 +1578,7 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 		}
 
 		if (enemyHouse)
-			Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
+			ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
 
 		return enemyHouse;
 	}
@@ -1594,7 +1620,7 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 		}
 
 		if (enemyHouse)
-			Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
+			ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
 
 		return enemyHouse;
 	}
@@ -1688,15 +1714,22 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 	}
 
 	if (enemyHouse)
-		Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
+		ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): selected House [%s] (index: %d)\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, enemyHouse->Type->ID, enemyHouse->ArrayIndex);
 
 	return enemyHouse;
 }
 
 void ScriptExt::OverrideOnlyTargetHouseEnemy(TeamClass* pTeam, int mode = -1)
 {
+	if (!pTeam)
+	{
+		// This action finished
+		//pTeam->StepCompleted = true;
+		return;
+	}
+
 	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
-	if (!pTeam || !pTeamData)
+	if (!pTeamData)
 	{
 		// This action finished
 		pTeam->StepCompleted = true;
@@ -1738,16 +1771,22 @@ void ScriptExt::OverrideOnlyTargetHouseEnemy(TeamClass* pTeam, int mode = -1)
 		break;
 	}
 
-	Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): New Team -> OnlyTargetHouseEnemy value: %d\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, pTeamData->OnlyTargetHouseEnemy);
+	ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): New Team -> OnlyTargetHouseEnemy value: %d\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, pTeamData->OnlyTargetHouseEnemy);
 	// This action finished
 	pTeam->StepCompleted = true;
 }
 
 void ScriptExt::ModifyHateHouse_Index(TeamClass* pTeam, int idxHouse = -1)
 {
-	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeam)
+	{
+		// This action finished
+		//pTeam->StepCompleted = true;
+		return;
+	}
 
-	if (!pTeam || !pTeamData)
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
 	{
 		// This action finished
 		pTeam->StepCompleted = true;
@@ -1772,13 +1811,13 @@ void ScriptExt::ModifyHateHouse_Index(TeamClass* pTeam, int idxHouse = -1)
 				&& !angerNode.House->IsObserver())
 			{
 				angerNode.AngerLevel += pTeamData->AngerNodeModifier;
-				Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Modified anger level against [%s](index: %d) with value: %d\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, angerNode.House->Type->ID, angerNode.House->ArrayIndex, angerNode.AngerLevel);
+				ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Modified anger level against [%s](index: %d) with value: %d\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, angerNode.House->Type->ID, angerNode.House->ArrayIndex, angerNode.AngerLevel);
 			}
 		}
 	}
 
 	ScriptExt::UpdateEnemyHouseIndex(pTeam->Owner);
-	ScriptExt::DebugAngerNodesData();
+	//ScriptExt::DebugAngerNodesData();
 
 	// This action finished
 	pTeam->StepCompleted = true;
@@ -1787,9 +1826,15 @@ void ScriptExt::ModifyHateHouse_Index(TeamClass* pTeam, int idxHouse = -1)
 // The selected house will become the most hated of the map (the effects are only visible if the other houses are enemy of the selected house)
 void ScriptExt::AggroHouse(TeamClass* pTeam, int index = -1)
 {
-	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeam)
+	{
+		// This action finished
+		//pTeam->StepCompleted = true;
+		return;
+	}
 
-	if (!pTeam || !pTeamData)
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
 	{
 		// This action finished
 		pTeam->StepCompleted = true;
@@ -1887,10 +1932,10 @@ void ScriptExt::AggroHouse(TeamClass* pTeam, int index = -1)
 	}
 	else
 	{
-		Debug::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Failed to pick a new hated house with index: %d\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, index);
+		ScriptExt::Log("DEBUG: [%s] [%s] (line: %d = %d,%d): Failed to pick a new hated house with index: %d\n", pTeam->Type->ID, pTeam->CurrentScript->Type->ID, pTeam->CurrentScript->CurrentMission, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument, index);
 	}
 
-	ScriptExt::DebugAngerNodesData();
+	//ScriptExt::DebugAngerNodesData();
 
 	// This action finished
 	pTeam->StepCompleted = true;
@@ -2146,32 +2191,32 @@ bool ScriptExt::IsExtVariableAction(int action)
 
 void ScriptExt::DebugAngerNodesData()
 {
-	Debug::Log("DEBUG: Updated AngerNodes lists of every playable House:\n");
+	ScriptExt::Log("DEBUG: Updated AngerNodes lists of every playable House:\n");
 
 	for (auto pHouse : *HouseClass::Array)
 	{
 		if (pHouse->IsObserver())
-			Debug::Log("Player %d [Observer] ", pHouse->ArrayIndex);
+			ScriptExt::Log("Player %d [Observer] ", pHouse->ArrayIndex);
 		else
-			Debug::Log("Player %d [%s]: ", pHouse->ArrayIndex, pHouse->Type->ID);
+			ScriptExt::Log("Player %d [%s]: ", pHouse->ArrayIndex, pHouse->Type->ID);
 
 		int i = 0;
 
 		for (auto& angerNode : pHouse->AngerNodes)
 		{
 			if (!pHouse->IsObserver())
-			Debug::Log("%d:%d", angerNode.House->ArrayIndex, angerNode.AngerLevel);
+				ScriptExt::Log("%d:%d", angerNode.House->ArrayIndex, angerNode.AngerLevel);
 
 			if (i < HouseClass::Array->Count - 2 && !pHouse->IsObserver())
-				Debug::Log(", ");
+				ScriptExt::Log(", ");
 
 			i++;
 		}
 
 		if (!pHouse->IsObserver())
-			Debug::Log(" -> Main Enemy House: %d\n", pHouse->EnemyHouseIndex);
+			ScriptExt::Log(" -> Main Enemy House: %d\n", pHouse->EnemyHouseIndex);
 		else
-			Debug::Log("\n");
+			ScriptExt::Log("\n");
 	}
 }
 
