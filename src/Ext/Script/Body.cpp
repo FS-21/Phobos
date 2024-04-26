@@ -1237,7 +1237,7 @@ void ScriptExt::SetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int mode = 
 
 HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int mode = 1)
 {
-	if (!pTeam || mask == 0)
+	if (!pTeam || pTeam->Owner || mask == 0)
 	{
 		// This action finished
 		pTeam->StepCompleted = true;
