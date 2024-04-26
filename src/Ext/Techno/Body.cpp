@@ -40,6 +40,7 @@ bool TechnoExt::IsActive(TechnoClass* pThis)
 {
 	return
 		pThis &&
+		pThis->WhatAmI() != AbstractType::None &&
 		!pThis->TemporalTargetingMe &&
 		!pThis->BeingWarpedOut &&
 		!pThis->IsUnderEMP() &&

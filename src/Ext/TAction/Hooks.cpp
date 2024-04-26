@@ -10,6 +10,8 @@
 #include <RadSiteClass.h>
 #include <VocClass.h>
 #include <ScenarioClass.h>
+#include <TriggerClass.h>
+#include <TriggerTypeClass.h>
 
 #include <Utilities/Macro.h>
 
@@ -22,7 +24,7 @@ DEFINE_HOOK(0x6DD8B0, TActionClass_Execute, 0x6)
 	GET_STACK(CellStruct const*, pLocation, 0x10);
 
 	bool handled;
-
+	Debug::Log("Main Trigger: [%s], Action: %d, House: %s (idx: %d), P2: %s , P3: %d, P4: %d, P5: %d, P6: %d, Loc: %d,%d\n", pTrigger->Type->ID, static_cast<PhobosTriggerAction>(pThis->ActionKind), pHouse->Type->ID, pHouse->ArrayIndex, pThis->TriggerType ? pThis->TriggerType->ID : "<none>", pThis->Param3, pThis->Param4, pThis->Param5, pThis->Param6, pLocation->X, pLocation->Y, pThis->Value);
 	R->AL(TActionExt::Execute(pThis, pHouse, pObject, pTrigger, *pLocation, handled));
 
 	return handled ? 0x6DD910 : 0;
