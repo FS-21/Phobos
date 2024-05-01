@@ -32,6 +32,7 @@
     <ClCompile Include="src\Ext\Anim\Hooks.cpp" />
     <ClCompile Include="src\Ext\Anim\Hooks.AnimCreateUnit.cpp" />
     <ClCompile Include="src\Ext\Bullet\Hooks.DetonateLogics.cpp" />
+    <ClCompile Include="src\Ext\Bullet\Trajectories\ArtilleryTrajectory.cpp" />
     <ClCompile Include="src\Ext\Bullet\Trajectories\BombardTrajectory.cpp" />
     <ClCompile Include="src\Ext\Bullet\Trajectories\PhobosTrajectory.cpp" />
     <ClCompile Include="src\Ext\Bullet\Trajectories\StraightTrajectory.cpp" />
@@ -192,6 +193,7 @@
     <ClInclude Include="src\Commands\ToggleDesignatorRange.h" />
     <ClInclude Include="src\Commands\ToggleDigitalDisplay.h" />
     <ClInclude Include="src\Commands\SaveVariablesToFile.h" />
+    <ClInclude Include="src\Ext\Bullet\Trajectories\ArtilleryTrajectory.h" />
     <ClInclude Include="src\Ext\Bullet\Trajectories\BombardTrajectory.h" />
     <ClInclude Include="src\Ext\Bullet\Trajectories\PhobosTrajectory.h" />
     <ClInclude Include="src\Ext\Bullet\Trajectories\StraightTrajectory.h" />
