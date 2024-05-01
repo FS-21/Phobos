@@ -35,6 +35,9 @@ public:
 		int ForceJump_InitialCountdown;
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
+		int AngerNodeModifier;
+		bool OnlyTargetHouseEnemy;
+		int OnlyTargetHouseEnemyMode;
 		bool ConditionalJump_Evaluation;
 		int ConditionalJump_ComparatorMode;
 		int ConditionalJump_ComparatorValue;
@@ -57,6 +60,9 @@ public:
 			, ForceJump_InitialCountdown { -1 }
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
+			, AngerNodeModifier { 5000 }
+			, OnlyTargetHouseEnemy { false }
+			, OnlyTargetHouseEnemyMode { -1 }
 			, ConditionalJump_Evaluation { false }
 			, ConditionalJump_ComparatorMode { 3 }
 			, ConditionalJump_ComparatorValue { 1 }

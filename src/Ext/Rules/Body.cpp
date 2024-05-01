@@ -4,6 +4,7 @@
 #include <FPSCounter.h>
 #include <GameOptionsClass.h>
 #include <HouseTypeClass.h>
+#include <GameStrings.h>
 
 #include <New/Type/RadTypeClass.h>
 #include <New/Type/ShieldTypeClass.h>
@@ -331,6 +332,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 	Stm
 		.Process(this->AITargetTypesLists)
 		.Process(this->AIScriptsLists)
+		.Process(this->AIHousesLists)
 		.Process(this->HarvesterTypes)
 		.Process(this->Storage_TiberiumIndex)
 		.Process(this->InfantryGainSelfHealCap)
