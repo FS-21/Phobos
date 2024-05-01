@@ -137,6 +137,7 @@ This page lists all the individual contributions to the project by their author.
   - Script actions for manipulating script flows with conditional jumps
   - New AI teams selector
   - Web logic against infantry
+  - Map Events 604 & 605 for checking if a specific Techno enters in a cell
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
