@@ -140,6 +140,7 @@ This page lists all the individual contributions to the project by their author.
   - Web logic against infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
   - Warheads can remove parasites
+  - Grant new superweapons in superweapons
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
