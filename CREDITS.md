@@ -142,6 +142,7 @@ This page lists all the individual contributions to the project by their author.
   - Warheads can remove parasites
   - Grant new superweapons in superweapons
   - Script action for repairing destroyed bridges
+  - AI learning
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

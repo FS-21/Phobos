@@ -324,6 +324,7 @@ New:
 - Default campaign game speed override and custom campaign game speed FPS (by Morton)
 - Trigger actions that allow/forbid MCV to redeploy in game (by Trsdy)
 - `AnimList` on zero damage Warheads toggle via `AnimList.ShowOnZeroDamage` (by Starkku)
+- AI learning (by FS-21)
 - Including INI files and inheriting INI sections (by Morton)
 - Additions to automatic passenger deletion (by Starkku)
 - Buildings considered as vehicles (by Starkku)

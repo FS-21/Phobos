@@ -5,6 +5,7 @@
 #include <Helpers/Macro.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
+#include <AITriggerTypeClass.h>
 
 #include <map>
 
@@ -30,12 +31,14 @@ public:
 
 		std::map<int, CellStruct> Waypoints;
 		std::map<int, ExtendedVariable> Variables[2]; // 0 for local, 1 for global
-
+		std::vector<double> AITriggerWeigths;
+		
 		ExtData(ScenarioClass* OwnerObject) : Extension<ScenarioClass>(OwnerObject)
 			, ShowBriefing { false }
 			, BriefingTheme { -1 }
 			, Waypoints { }
 			, Variables { }
+			, AITriggerWeigths { }
 		{ }
 
 		void SetVariableToByID(bool bIsGlobal, int nIndex, char bState);
