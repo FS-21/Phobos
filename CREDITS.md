@@ -130,6 +130,7 @@ This page lists all the individual contributions to the project by their author.
   - Shared ammo logic
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
+  - `Burst.Retarget` for projectile retargeting
   - Script actions for modifying AI anger against other houses
   - Map event `There are no technos of the specified houses list`
   - Script actions for manipulating script flows with conditional jumps
