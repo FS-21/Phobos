@@ -62,6 +62,7 @@ enum class PhobosScripts : unsigned int
 	GatherAroundLeader = 10102,
 	LoadIntoTransports = 10103,
 	ChronoshiftToEnemyBase = 10104,
+	RepairDestroyedBridge = 10105,
 
 	// Range 12000-12999 are suplementary/setup pre-actions
 	WaitIfNoTarget = 12000,
@@ -259,6 +260,7 @@ public:
 	template<bool IsSrcGlobal, bool IsGlobal, class _Pr>
 	static void VariableBinaryOperationHandler(TeamClass* pTeam, int nVariable, int nVarToOperate);
 	static void Log(const char* pFormat, ...);
+	static void RepairDestroyedBridge(TeamClass* pTeam, int mode);
 
 	// ConditionalJump.cpp
 	static void ConditionalJumpIfTrue(TeamClass* pTeam, int newScriptLine);
