@@ -205,6 +205,12 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
 
+	this->CanRemoveParasites.Read(exINI, pSection, "CanRemoveParasites");
+	this->CanRemoveParasites_KickOut.Read(exINI, pSection, "CanRemoveParasites.KickOut");
+	this->CanRemoveParasites_KickOut_Paralysis.Read(exINI, pSection, "CanRemoveParasites.KickOut.Paralysis");
+	this->CanRemoveParasites_ReportSound.Read(exINI, pSection, "CanRemoveParasites.ReportSound");
+	this->CanRemoveParasites_KickOut_Anim.Read(exINI, pSection, "CanRemoveParasites.KickOut.Anim");
+
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
 	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
@@ -366,6 +372,12 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->PossibleCellSpreadDetonate)
 
 		.Process(this->Convert_UseUniversalDeploy)
+
+		.Process(this->CanRemoveParasites)
+		.Process(this->CanRemoveParasites_KickOut)
+		.Process(this->CanRemoveParasites_KickOut_Paralysis)
+		.Process(this->CanRemoveParasites_ReportSound)
+		.Process(this->CanRemoveParasites_KickOut_Anim)
 		;
 }
 

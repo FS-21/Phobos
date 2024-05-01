@@ -190,6 +190,7 @@ public:
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
 	static void WebbyUpdate(TechnoClass* pThis);
+	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
 
 	// WeaponHelpers.cpp
 	static int PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback = true, bool allowAAFallback = true);

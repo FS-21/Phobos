@@ -1293,6 +1293,20 @@ Webby.DurationVariation=0  ; integer
 `Webby.Anims` animations must be played in infinite loop with `LoopCount=-1` in artmd.ini
 ```
 
+### Remove parasites
+- Warheads are now able to use this logic for removing parasites or kick them out into the battlefield.
+- If `CanRemoveParasites.KickOut.Paralysis` is a negative value it will work as `CanRemoveParasites.KickOut.Paralysis=15`.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]            ; Warhead
+CanRemoveParasites=no                   ; boolean
+CanRemoveParasites.ReportSound=         ; Sound
+CanRemoveParasites.KickOut=no           ; boolean
+CanRemoveParasites.KickOut.Paralysis=15 ; integer, game frames
+CanRemoveParasites.KickOut.Anim=        ; Animation
+```
+
 ## Weapons
 
 ### AreaFire target customization

@@ -139,6 +139,7 @@ This page lists all the individual contributions to the project by their author.
   - New AI teams selector
   - Web logic against infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - Warheads can remove parasites
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
