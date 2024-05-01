@@ -48,6 +48,13 @@ public:
 		// as neither is guaranteed to point to the house the TechnoClass had prior to entering transport and cannot be safely overridden.
 		HouseClass* OriginalPassengerOwner;
 
+		AnimClass* Convert_UniversalDeploy_DeployAnim;
+		bool Convert_UniversalDeploy_InProgress;
+		bool Convert_UniversalDeploy_MakeInvisible;
+		TechnoClass* Convert_UniversalDeploy_TemporalTechno;
+		bool Convert_UniversalDeploy_IsOriginalDeployer;
+		AbstractClass* Convert_UniversalDeploy_RememberTarget;
+
 		int	WebbyDurationCountDown;
 		CDTimerClass WebbyDurationTimer;
 		AnimClass* WebbyAnim;
@@ -72,6 +79,12 @@ public:
 			, DeployFireTimer {}
 			, ForceFullRearmDelay { false }
 			, WHAnimRemainingCreationInterval { 0 }
+			, Convert_UniversalDeploy_DeployAnim { nullptr }
+			, Convert_UniversalDeploy_InProgress { false }
+			, Convert_UniversalDeploy_MakeInvisible { false }
+			, Convert_UniversalDeploy_TemporalTechno { nullptr }
+			, Convert_UniversalDeploy_IsOriginalDeployer { true }
+			, Convert_UniversalDeploy_RememberTarget { nullptr }
 			, OriginalTarget { nullptr }
 			, ResetRandomTarget { false }
 			, CurrentRandomTarget { nullptr }
@@ -103,6 +116,9 @@ public:
 		virtual void InvalidatePointer(void* ptr, bool bRemoved) override
 		{
 			AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
+			AnnounceInvalidPointer(Convert_UniversalDeploy_TemporalTechno, ptr);
+			AnnounceInvalidPointer(Convert_UniversalDeploy_DeployAnim, ptr);
+			AnnounceInvalidPointer(Convert_UniversalDeploy_RememberTarget, ptr);
 			AnnounceInvalidPointer(CurrentRandomTarget, ptr);
 			AnnounceInvalidPointer(OriginalTarget, ptr);
 			AnnounceInvalidPointer(WebbyLastTarget, ptr);
@@ -163,11 +179,12 @@ public:
 	static void DrawInsignia(TechnoClass* pThis, Point2D* pLocation, RectangleStruct* pBounds);
 	static void ApplyGainedSelfHeal(TechnoClass* pThis);
 	static void SyncIronCurtainStatus(TechnoClass* pFrom, TechnoClass* pTo);
-	static CoordStruct PassengerKickOutLocation(TechnoClass* pThis, FootClass* pPassenger, int maxAttempts);
+	static CoordStruct PassengerKickOutLocation(TechnoClass* pThis, FootClass* pPassenger, int maxAttempts = 1);
 	static bool AllowedTargetByZone(TechnoClass* pThis, TechnoClass* pTarget, TargetZoneScanType zoneScanType, WeaponTypeClass* pWeapon = nullptr, bool useZone = false, int zone = -1);
 	static void UpdateAttachedAnimLayers(TechnoClass* pThis);
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
 	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
+	static bool CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue = false, BuildingTypeClass* pBuildingType = nullptr);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
 	static bool IsValidTechno(TechnoClass* pTechno);
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
@@ -187,6 +204,12 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, BuildingSelectBracketPosition bracketPosition);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue);
+
+	static TechnoClass* UniversalDeployConversion(TechnoClass* pThis, TechnoTypeClass* pNewType = nullptr);
+	//static void CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType = nullptr);
+	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
+	//static void UpdateUniversalDeploy(TechnoClass* pThis);
+	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
 
 	static void SendStopTarNav(TechnoClass* pThis);
 	static void HandleStopTarNav(EventExt* event);

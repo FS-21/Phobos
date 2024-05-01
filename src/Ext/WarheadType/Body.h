@@ -111,6 +111,7 @@ public:
 		ValueableVector<TechnoTypeClass*> DetonateOnAllMapObjects_IgnoreTypes;
 
 		std::vector<TypeConvertGroup> Convert_Pairs;
+		Nullable<AnimTypeClass*> Convert_Anim;
 
 		Valueable<bool> InflictLocomotor;
 		Valueable<bool> RemoveInflictedLocomotor;
@@ -132,6 +133,8 @@ public:
 		bool Splashed;
 		int RemainingAnimCreationInterval;
 		bool PossibleCellSpreadDetonate;
+
+		Valueable<bool> Convert_UseUniversalDeploy;
 
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
@@ -230,6 +233,7 @@ public:
 			, DetonateOnAllMapObjects_IgnoreTypes {}
 
 			, Convert_Pairs {}
+			, Convert_Anim {}
 
 			, InflictLocomotor { false }
 			, RemoveInflictedLocomotor { false }
@@ -249,6 +253,8 @@ public:
 			, Webby_Duration { 0 }
 			, Webby_DurationVariation { 0 }
 			, Webby_Cap { -1 }
+
+			, Convert_UseUniversalDeploy { false }
 		{ }
 
 	private:
