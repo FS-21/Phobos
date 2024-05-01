@@ -640,7 +640,7 @@ void TechnoExt::UpdateUniversalDeploy(TechnoClass* pThis)
 // If a new object isn't defined then it will be picked from a list.
 TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeClass* pNewType)
 {
-	if (!pOld || !ScriptExt::IsUnitAvailable(pOld, false))
+	if (!pOld || !TechnoExt::IsUnitAvailable(pOld, false))
 		return nullptr;
 
 	auto pOldExt = TechnoExt::ExtMap.Find(pOld);
