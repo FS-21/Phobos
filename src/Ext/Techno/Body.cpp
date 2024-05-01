@@ -675,6 +675,11 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->OriginalTarget)
 		.Process(this->ResetRandomTarget)
 		.Process(this->CurrentRandomTarget)
+		.Process(this->WebbyDurationCountDown)
+		.Process(this->WebbyDurationTimer)
+		.Process(this->WebbyAnim)
+		.Process(this->WebbyLastTarget)
+		.Process(this->WebbyLastMission)
 		;
 }
 

@@ -48,6 +48,12 @@ public:
 		// as neither is guaranteed to point to the house the TechnoClass had prior to entering transport and cannot be safely overridden.
 		HouseClass* OriginalPassengerOwner;
 
+		int	WebbyDurationCountDown;
+		CDTimerClass WebbyDurationTimer;
+		AnimClass* WebbyAnim;
+		AbstractClass* WebbyLastTarget;
+		Mission WebbyLastMission;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -69,6 +75,11 @@ public:
 			, OriginalTarget { nullptr }
 			, ResetRandomTarget { false }
 			, CurrentRandomTarget { nullptr }
+			, WebbyDurationCountDown { -1 }
+			, WebbyDurationTimer {}
+			, WebbyAnim { nullptr }
+			, WebbyLastTarget { nullptr }
+			, WebbyLastMission { Mission::Sleep }
 		{ }
 
 		void OnEarlyUpdate();
@@ -85,6 +96,7 @@ public:
 		void InitializeLaserTrails();
 		void UpdateMindControlAnim();
 		void UpdateRandomTargets();
+		void WebbyUpdate();
 
 		virtual ~ExtData() override;
 
@@ -93,6 +105,7 @@ public:
 			AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
 			AnnounceInvalidPointer(CurrentRandomTarget, ptr);
 			AnnounceInvalidPointer(OriginalTarget, ptr);
+			AnnounceInvalidPointer(WebbyLastTarget, ptr);
 		}
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
@@ -159,6 +172,7 @@ public:
 	static bool IsValidTechno(TechnoClass* pTechno);
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
+	static void WebbyUpdate(TechnoClass* pThis);
 
 	// WeaponHelpers.cpp
 	static int PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback = true, bool allowAAFallback = true);

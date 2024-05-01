@@ -136,6 +136,7 @@ This page lists all the individual contributions to the project by their author.
   - Map event `There are no technos of the specified houses list`
   - Script actions for manipulating script flows with conditional jumps
   - New AI teams selector
+  - Web logic against infantry
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
