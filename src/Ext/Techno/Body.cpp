@@ -371,7 +371,7 @@ bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
 		return false;
 
 	bool isValid = !pTechno->Dirty
-		&& ScriptExt::IsUnitAvailable(pTechno, true)
+		&& TechnoExt::IsUnitAvailable(pTechno, true)
 		&& pTechno->Owner
 		&& (pTechno->WhatAmI() == AbstractType::Infantry
 			|| pTechno->WhatAmI() == AbstractType::Unit
