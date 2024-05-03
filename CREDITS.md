@@ -146,6 +146,7 @@ This page lists all the individual contributions to the project by their author.
   - Script action for repairing destroyed bridges
   - AI learning
   - Mind Control Threshold
+  - Customizable disguised target evaluation behaviour in new ScriptType attack actions
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
