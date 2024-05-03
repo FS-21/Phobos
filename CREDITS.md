@@ -131,6 +131,7 @@ This page lists all the individual contributions to the project by their author.
   - Shared ammo logic
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
+  - Repair legless cyborgs In transports
   - Universal deploy from any techno into any techno
   - `Burst.Retarget` for projectile retargeting
   - Script actions for modifying AI anger against other houses

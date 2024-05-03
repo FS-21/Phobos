@@ -221,6 +221,8 @@ public:
 		std::vector<std::vector<CoordStruct>> DeployedWeaponBurstFLHs;
 		std::vector<std::vector<CoordStruct>> EliteDeployedWeaponBurstFLHs;
 
+		Valueable<bool> CanRepairCyborgLegs;
+
 		Nullable<TechnoTypeClass*> Convert_UniversalDeploy;
 		Valueable<bool> Convert_DeployToLand;
 		Nullable<AnimTypeClass*> Convert_PreDeploy_AnimFX;
@@ -367,7 +369,7 @@ public:
 			, IronCurtain_KeptOnDeploy {}
 			, IronCurtain_Effect {}
 			, IronCurtain_KillWarhead {}
-
+			, CanRepairCyborgLegs { false }
 			, Explodes_KillPassengers { true }
 			, Explodes_DuringBuildup { true }
 			, Prerequisite { }
