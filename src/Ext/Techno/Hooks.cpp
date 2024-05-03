@@ -19,7 +19,6 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_AI, 0x5)
 	auto pExt = TechnoExt::ExtMap.Find(pThis);
 	pExt->OnEarlyUpdate();
 
-	TechnoExt::ApplyMindControlRangeLimit(pThis);
 	//TechnoExt::UpdateUniversalDeploy(pThis);
 
 	return 0;

@@ -41,6 +41,7 @@ void TechnoExt::ExtData::OnEarlyUpdate()
 	this->ApplySpawnLimitRange();
 	this->UpdateLaserTrails();
 	this->DepletedAmmoActions();
+	ApplyMindControlRangeLimit(this->OwnerObject());
 	this->UpdateRandomTargets();
 
 	if (this->WebbyAnim)
