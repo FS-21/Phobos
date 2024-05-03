@@ -246,6 +246,27 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 		// Chronoshift to enemy base, argument is additional distance modifier
 		ScriptExt::ChronoshiftToEnemyBase(pTeam, argument);
 		break;
+	case PhobosScripts::SetSideIdxForManagingTriggers:
+		ScriptExt::SetSideIdxForManagingTriggers(pTeam, -1);
+		break;
+	case PhobosScripts::SetHouseIdxForManagingTriggers:
+		ScriptExt::SetHouseIdxForManagingTriggers(pTeam, 1000000);
+		break;
+	case PhobosScripts::ManageAllAITriggers:
+		ScriptExt::ManageAITriggers(pTeam, -1);
+		break;
+	case PhobosScripts::EnableTriggersFromList:
+		ScriptExt::ManageTriggersFromList(pTeam, -1, true);
+		break;
+	case PhobosScripts::DisableTriggersFromList:
+		ScriptExt::ManageTriggersFromList(pTeam, -1, false);
+		break;
+	case PhobosScripts::EnableTriggersWithObjects:
+		ScriptExt::ManageTriggersWithObjects(pTeam, -1, true);
+		break;
+	case PhobosScripts::DisableTriggersWithObjects:
+		ScriptExt::ManageTriggersWithObjects(pTeam, -1, false);
+		break;
 	case PhobosScripts::RepairDestroyedBridge:
 		// Start Timed Jump that jumps to the same line when the countdown finish (in frames)
 		ScriptExt::RepairDestroyedBridge(pTeam, -1);
