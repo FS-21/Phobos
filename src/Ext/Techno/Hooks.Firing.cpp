@@ -1067,10 +1067,60 @@ DEFINE_HOOK(0x4D4256, Mission_Move_ClearRetargets, 0x9)
 	return 0;
 }
 
+/*DEFINE_HOOK(0x6FE460, TechnoClass_FireAt_LaserNewTarget, 0x6)
+{
+	GET(TechnoClass*, pThis, ESI);
+	GET(WeaponTypeClass*, pWeaponType, EBX);
+
+	if (!pThis || !pWeaponType)
+		return 0;
+
+	bool isSpecialWeapon = pWeaponType->DiskLaser
+		|| pWeaponType->IsBigLaser
+		|| pWeaponType->IsLaser
+		|| pWeaponType->IsElectricBolt
+		|| pWeaponType->IsRadBeam;
+
+	if (!isSpecialWeapon)
+		return 0;
+
+	auto pExt = TechnoExt::ExtMap.Find(pThis);
+	if (!pExt)
+		return 0;
+
+	const auto pWeaponTypeExt = WeaponTypeExt::ExtMap.Find(pWeaponType);
+	if (!pWeaponTypeExt)
+		return 0;
+
+	if (pWeaponTypeExt->RandomTarget > 0.0)
+	{
+		if (pWeaponTypeExt->RandomTarget_DistributeBurst)
+		{
+			// Reset!
+			if (pExt->OriginalTarget)
+				pThis->SetTarget(pExt->OriginalTarget);
+
+			pExt->CurrentRandomTarget = nullptr;
+			pExt->OriginalTarget = nullptr;
+		}
+
+		auto pTarget = static_cast<TechnoClass*>(pThis->Target);
+		if (pTarget && TechnoExt::IsValidTechno(pTarget))
+		{
+			auto ptargetType = pTarget->GetTechnoType();
+			TechnoExt::UpdateRandomTarget(pThis);
+			int a = 111;
+		}
+	}
+
+	return 0;
+}*/
+
 DEFINE_HOOK(0x6FE562, TechnoClass_FireAt_BulletNewTarget, 0x6)
 {
 	GET(TechnoClass*, pThis, ESI);
 	GET(BulletClass*, pBullet, EAX);
+	GET_BASE(AbstractClass*, pTarget, 0x8);
 
 	if (!pBullet)
 		return 0;
@@ -1081,6 +1131,9 @@ DEFINE_HOOK(0x6FE562, TechnoClass_FireAt_BulletNewTarget, 0x6)
 
 	if (pExt->CurrentRandomTarget)
 	{
+		//if (pExt->RandomTarget_DistributeBurst)
+			//TechnoExt::UpdateRandomTarget(pThis);
+
 		auto const pCurrRandTarget = pExt->CurrentRandomTarget;
 		bool isValidRandTechno = pCurrRandTarget
 			&& pCurrRandTarget->IsAlive
@@ -1118,6 +1171,7 @@ DEFINE_HOOK(0x6FE562, TechnoClass_FireAt_BulletNewTarget, 0x6)
 		}
 
 		pBullet->Target = pExt->CurrentRandomTarget;
+		//pTarget = pExt->CurrentRandomTarget;
 
 		int weaponIndex = pThis->SelectWeapon(pThis->Target);
 		const auto pWeaponType = pThis->GetWeapon(weaponIndex)->WeaponType;

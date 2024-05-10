@@ -455,6 +455,16 @@ bool TechnoExt::UpdateRandomTarget(TechnoClass* pThis)
 		return false;
 	}
 
+	// Force reset!
+	/*if (pWeaponExt->RandomTarget_DistributeBurst)
+	{
+		if (pExt->OriginalTarget)
+			pThis->Target = pExt->OriginalTarget;
+
+		pExt->CurrentRandomTarget = nullptr;
+		pExt->OriginalTarget = nullptr;
+	}*/
+
 	if (!IsValidTechno(pExt->CurrentRandomTarget))
 		pExt->CurrentRandomTarget = nullptr;
 

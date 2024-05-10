@@ -153,6 +153,22 @@ void ScriptExt::RepairDestroyedBridge(TeamClass* pTeam, int mode = -1)
 			}
 		}
 
+		if (validHuts.size() == 0)
+		{
+			ScriptExt::Log("[%s][%s] (line: %d = %d,%d) Jump to next line: %d = %d,%d (Reason: Can not select a bridge repair hut).\n",
+			pTeam->Type->ID,
+			pScript->Type->ID,
+			currentMission,
+			pScript->Type->ScriptActions[currentMission].Action,
+			pScript->Type->ScriptActions[currentMission].Argument,
+			currentMission + 1,
+			pScript->Type->ScriptActions[currentMission + 1].Action,
+			pScript->Type->ScriptActions[currentMission + 1].Argument);
+
+			pTeam->StepCompleted = true;
+			return;
+		}
+
 		// Find the best repair hut
 		int bestVal = -1;
 
@@ -189,7 +205,7 @@ void ScriptExt::RepairDestroyedBridge(TeamClass* pTeam, int mode = -1)
 
 	if (!selectedTarget)
 	{
-		ScriptExt::Log("[%s][%s] (line: %d = %d,%d) Jump to next line: %d = %d,%d (Reason: Can not select a bridge repair hut).\n",
+		ScriptExt::Log("[%s][%s] (line: %d = %d,%d) Jump to next line: %d = %d,%d (Reason: No repairable bridges were destroyed).\n",
 			pTeam->Type->ID,
 			pScript->Type->ID,
 			currentMission,
