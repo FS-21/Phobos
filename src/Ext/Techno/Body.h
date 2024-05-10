@@ -41,6 +41,7 @@ public:
 		CDTimerClass DeployFireTimer;
 		bool ForceFullRearmDelay;
 		int WHAnimRemainingCreationInterval;
+		bool CanCurrentlyDeployIntoBuilding; // Only set on UnitClass technos with DeploysInto set in multiplayer games, recalculated once per frame so no need to serialize.
 		AbstractClass* OriginalTarget;
 		bool ResetRandomTarget;
 		TechnoClass* CurrentRandomTarget;
@@ -81,6 +82,7 @@ public:
 			, DeployFireTimer {}
 			, ForceFullRearmDelay { false }
 			, WHAnimRemainingCreationInterval { 0 }
+			, CanCurrentlyDeployIntoBuilding { false }
 			, Convert_UniversalDeploy_DeployAnim { nullptr }
 			, Convert_UniversalDeploy_InProgress { false }
 			, Convert_UniversalDeploy_MakeInvisible { false }
