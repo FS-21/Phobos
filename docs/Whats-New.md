@@ -409,6 +409,7 @@ New:
 - Toggle for `Explodes=true` BuildingTypes to not explode during buildup or being sold (by Starkku)
 - Toggleable height-based shadow scaling for voxel air units (by Trsdy & Starkku)
 - User setting toggles for harvester counter & power delta indicator (by Starkku)
+- Shrapnel weapon target filtering toggle (by Starkku)
 - Map events `604-605` for checking if a specific Techno enters in a cell (by FS-21)
 
 Vanilla fixes:
