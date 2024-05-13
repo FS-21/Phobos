@@ -364,19 +364,6 @@ bool TechnoExt::IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource)
 	return false;
 }
 
-bool TechnoExt::IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed)
-{
-	if (!pTechno)
-		return false;
-
-	bool isAvailable = pTechno->IsAlive && pTechno->Health > 0 && !pTechno->InLimbo && pTechno->IsOnMap;
-
-	if (checkIfInTransportOrAbsorbed)
-		isAvailable &= !pTechno->Absorbed && !pTechno->Transporter;
-
-	return isAvailable;
-}
-
 bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
 {
 	if (!pTechno)
@@ -391,6 +378,19 @@ bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
 			|| pTechno->WhatAmI() == AbstractType::Aircraft);
 
 	return isValid;
+}
+
+bool TechnoExt::IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed)
+{
+	if (!pTechno)
+		return false;
+
+	bool isAvailable = pTechno->IsAlive && pTechno->Health > 0 && !pTechno->InLimbo && pTechno->IsOnMap;
+
+	if (checkIfInTransportOrAbsorbed)
+		isAvailable &= !pTechno->Absorbed && !pTechno->Transporter;
+
+	return isAvailable;
 }
 
 void TechnoExt::SendStopTarNav(TechnoClass* pThis)
