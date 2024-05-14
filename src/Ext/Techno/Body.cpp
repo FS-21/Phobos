@@ -658,44 +658,6 @@ TechnoClass* TechnoExt::FindRandomTarget(TechnoClass* pThis)
 	return selection;
 }
 
-void TechnoExt::SendStopTarNav(TechnoClass* pThis)
-{
-	auto pFoot = abstract_cast<FootClass*>(pThis);
-
-	EventExt event;
-	event.Type = EventTypeExt::SyncStopTarNav;
-	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
-	event.Frame = Unsorted::CurrentFrame;
-
-	event.AddEvent();
-}
-
-void TechnoExt::HandleStopTarNav(EventExt* event)
-{
-	int technoUniqueID = event->SyncStopTarNav.TechnoUniqueID;
-
-	for (auto pTechno : *TechnoClass::Array)
-	{
-		if (pTechno && pTechno->UniqueID == technoUniqueID)
-		{
-			auto const pExt = TechnoExt::ExtMap.Find(pTechno);
-
-			pTechno->SetTarget(nullptr);
-			pExt->CurrentRandomTarget = nullptr;
-			pExt->OriginalTarget = nullptr;
-			pTechno->SetDestination(nullptr, true);
-
-			auto pFoot = abstract_cast<FootClass*>(pTechno);
-
-			if (pFoot->Locomotor->Is_Moving_Now())
-				pFoot->StopMoving();
-
-			pTechno->QueueMission(Mission::Guard, false);
-			break;
-		}
-	}
-}
-
 void TechnoExt::RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh)
 {
 	if (!pThis || !wh)
@@ -772,35 +734,6 @@ void TechnoExt::RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, Warh
 	return;
 }
 
-bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
-{
-	if (!pTechno)
-		return false;
-
-	bool isValid = !pTechno->Dirty
-		&& TechnoExt::IsUnitAvailable(pTechno, true)
-		&& pTechno->Owner
-		&& (pTechno->WhatAmI() == AbstractType::Infantry
-			|| pTechno->WhatAmI() == AbstractType::Unit
-			|| pTechno->WhatAmI() == AbstractType::Building
-			|| pTechno->WhatAmI() == AbstractType::Aircraft);
-
-	return isValid;
-}
-
-bool TechnoExt::IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed)
-{
-	if (!pTechno)
-		return false;
-
-	bool isAvailable = pTechno->IsAlive && pTechno->Health > 0 && !pTechno->InLimbo && pTechno->IsOnMap;
-
-	if (checkIfInTransportOrAbsorbed)
-		isAvailable &= !pTechno->Absorbed && !pTechno->Transporter;
-
-	return isAvailable;
-}
-
 void TechnoExt::SendStopTarNav(TechnoClass* pThis)
 {
 	auto pFoot = abstract_cast<FootClass*>(pThis);
@@ -827,8 +760,8 @@ void TechnoExt::HandleStopTarNav(EventExt* event)
 			pExt->WeaponizedEngineer_GuardDestination = nullptr;
 
 			pTechno->SetTarget(nullptr);
-			//pExt->CurrentRandomTarget = nullptr;
-			//pExt->OriginalTarget = nullptr;
+			pExt->CurrentRandomTarget = nullptr;
+			pExt->OriginalTarget = nullptr;
 			pTechno->SetDestination(nullptr, true);
 
 			auto pFoot = abstract_cast<FootClass*>(pTechno);
