@@ -197,10 +197,7 @@ public:
 	static bool IsValidTechno(TechnoClass* pTechno);
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
-	static void WebbyUpdate(TechnoClass* pThis);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
-	static bool IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed);
-	static bool IsValidTechno(TechnoClass* pTechno);
 	static void ProcessWeaponizedEngineerGuard(TechnoClass* pThis);
 
 	// WeaponHelpers.cpp
@@ -222,9 +219,6 @@ public:
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	//static void UpdateUniversalDeploy(TechnoClass* pThis);
 	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
-
-	static void SendStopTarNav(TechnoClass* pThis);
-	static void HandleStopTarNav(EventExt* event);
 
 	static void SendStopTarNav(TechnoClass* pThis);
 	static void HandleStopTarNav(EventExt* event);
