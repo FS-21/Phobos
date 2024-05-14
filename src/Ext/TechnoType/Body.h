@@ -225,6 +225,8 @@ public:
 		std::vector<std::vector<CoordStruct>> DeployedWeaponBurstFLHs;
 		std::vector<std::vector<CoordStruct>> EliteDeployedWeaponBurstFLHs;
 
+		Valueable<bool> Engineer_CheckFriendlyWeapons;
+
 		Valueable<bool> CanRepairCyborgLegs;
 
 		Nullable<TechnoTypeClass*> Convert_UniversalDeploy;
@@ -430,6 +432,8 @@ public:
 			, DroppodType {}
 			, Convert_HumanToComputer { }
 			, Convert_ComputerToHuman { }
+
+			, Engineer_CheckFriendlyWeapons { false }
 
 			, Convert_UniversalDeploy {}
 			, Convert_DeployToLand { false }

@@ -8,6 +8,7 @@
 #include <Ext/Bullet/Body.h>
 #include <Ext/House/Body.h>
 #include <Ext/Script/Body.h>
+#include <Ext/WarheadType/Body.h>
 #include <Utilities/EnumFunctions.h>
 #include <Utilities/AresFunctions.h>
 
@@ -41,6 +42,7 @@ void TechnoExt::ExtData::OnEarlyUpdate()
 	this->ApplySpawnLimitRange();
 	this->UpdateLaserTrails();
 	this->DepletedAmmoActions();
+	//this->UpdateWeaponizedEngineerGuard();
 	ApplyMindControlRangeLimit(this->OwnerObject());
 	this->UpdateRandomTargets();
 
@@ -865,3 +867,119 @@ void TechnoExt::ExtData::UpdateRandomTargets()
 	}
 }
 
+
+// Area guard logic for engineers with repair weapons (the standard logic in this case is borked so this is a remake).
+// The good part is that we can monitor new details the original logic doesn't check like attached Ivan's bombs
+// TO-DO: Allow offensive weapons
+void TechnoExt::ExtData::UpdateWeaponizedEngineerGuard()
+{
+	auto const pThis = this->OwnerObject();
+	if (!pThis || !IsValidTechno(pThis))
+		return;
+
+	auto const pType = pThis->GetTechnoType();
+	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
+
+	if (!pTypeExt || !pTypeExt->Engineer_CheckFriendlyWeapons)
+		return;
+
+	/*TechnoExt::SendWeaponizedEngineerGuard(pThis); */
+	auto pFoot = abstract_cast<FootClass*>(pThis);
+
+	// Move to the target until the unit reaches the weapons's range
+	if (pFoot->Destination && pThis->Owner->IsAlliedWith(pFoot->Destination))
+	{
+		if (pThis->CurrentMission == Mission::Capture)
+			return;
+
+		auto const pCurrentTarget = pThis->Target;
+
+		if (pThis->IsCloseEnoughToAttack(pFoot->Destination))
+		{
+			auto const pCurrentMission = pThis->CurrentMission;
+			pFoot->StopMoving();
+			pThis->CurrentMission = pCurrentMission;
+			pFoot->Destination = nullptr;
+		}
+
+		pThis->Target = pCurrentTarget; // Since SetTarget(...) isn't used here the target's info won't dissappear in the next frames so maybe I should remove this line and "pFoot->StopMoving()" doesn't look that triggers this weird "bug".
+
+		return;
+	}
+
+	TechnoClass* const pTarget = pThis->Target ? abstract_cast<TechnoClass*>(pThis->Target) : nullptr;
+
+	// Stop the unit movement if is inside the weapon's range so it can start attacking the target
+	if (pTarget && pThis->IsCloseEnoughToAttack(pTarget))
+	{
+		if (pFoot->Locomotor->Is_Moving_Now())
+			pFoot->StopMoving();
+
+		pThis->Target = pTarget;
+
+		return;
+	}
+
+	// The search function only works if the unit is awaiting orders in guard mode
+	if (pThis->CurrentMission != Mission::Area_Guard && pThis->CurrentMission != Mission::Guard)
+		return;
+
+	TechnoClass* seletedTarget = nullptr;
+	int bestVal = -1;
+	int range = -1;
+
+	// Looks for the closest valid target
+	for (auto const pTechno : *TechnoClass::Array)
+	{
+		int value = pThis->DistanceFrom(pTechno); // Note: distance is in leptons (*256)
+		int weaponIndex = pThis->SelectWeapon(pTechno);
+		auto weaponType = pThis->GetWeapon(weaponIndex)->WeaponType;
+		auto const pWHExt = WarheadTypeExt::ExtMap.Find(weaponType->Warhead);
+		bool canDisarmBombs = pWHExt->CanDisarmBombs && pTechno->AttachedBomb && pThis->Owner->IsAlliedWith(pTechno);
+		double versusArmor = GeneralUtils::GetWarheadVersusArmor(weaponType->Warhead, pTechno->GetTechnoType()->Armor);
+		int realDamage = static_cast<int>(weaponType->Damage * versusArmor * pThis->FirepowerMultiplier);
+		bool isHealerWeapon = realDamage < 0;
+		bool healingCondition = (isHealerWeapon && pTechno->Health < pTechno->GetTechnoType()->Strength && pThis->Owner->IsAlliedWith(pTechno));
+		//bool offensiveCondition = (!isHealerWeapon && !pThis->Owner->IsAlliedWith(pTechno));
+		int guardRange = pThis->CurrentMission == Mission::Area_Guard || pType->DefaultToGuardArea ? pThis->GetGuardRange(1) : weaponType->Range;
+
+		if ((pTechno != pThis
+			&& pTechno->IsAlive
+			&& pTechno->Health > 0
+			&& !pTechno->InLimbo
+			&& value <= guardRange
+			&& (healingCondition || canDisarmBombs)// || !offensiveCondition
+			&& !pTechno->GetTechnoType()->Immune
+			&& !pTechno->BeingWarpedOut
+			&& !pTechno->TemporalTargetingMe
+			&& pTechno->InWhichLayer() != Layer::Underground
+			))
+		{
+			if (value < bestVal || bestVal < 0)
+			{
+				bestVal = value;
+				seletedTarget = pTechno;
+			}
+		}
+	}
+
+	if (seletedTarget && seletedTarget != pThis->Target)
+	{
+		pThis->SetTarget(seletedTarget);
+
+		// Prevent involuntary movement produced by SetTarget() method if the unit is in weapon's range
+		if (pThis->IsCloseEnoughToAttack(seletedTarget))
+		{
+			pThis->SetDestination(nullptr, true);
+			return;
+		}
+
+		// If the unit must move for reaching the target then pick the closest cell around the target
+		auto pCell = pThis->GetCell();
+		bool allowBridges = GroundType::Array[static_cast<int>(LandType::Clear)].Cost[static_cast<int>(pType->SpeedType)] > 0.0;
+		bool isBridge = allowBridges && pCell->ContainsBridge();
+		auto nCell = MapClass::Instance->NearByLocation(CellClass::Coord2Cell(seletedTarget->Location), pType->SpeedType, -1, pType->MovementZone, isBridge, 1, 1, true, false, false, isBridge, CellStruct::Empty, false, false);
+		pCell = MapClass::Instance->TryGetCellAt(nCell);
+		pThis->SetDestination(pCell, false);
+	}
+}

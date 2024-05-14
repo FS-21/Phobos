@@ -148,6 +148,8 @@ public:
 		NullableIdx<VocClass> CanRemoveParasites_ReportSound;
 		Nullable<AnimTypeClass*> CanRemoveParasites_KickOut_Anim;
 
+		Valueable<bool> CanDisarmBombs;
+
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
 		Valueable<double> Shield_SelfHealing_Rate_InMinutes;
@@ -279,6 +281,8 @@ public:
 			, CanRemoveParasites_KickOut_Paralysis { 15 }
 			, CanRemoveParasites_ReportSound { }
 			, CanRemoveParasites_KickOut_Anim { nullptr }
+
+			, CanDisarmBombs { false }
 		{ }
 
 	private:

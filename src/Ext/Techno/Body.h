@@ -63,6 +63,8 @@ public:
 		AbstractClass* WebbyLastTarget;
 		Mission WebbyLastMission;
 
+		AbstractClass* WeaponizedEngineer_GuardDestination;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -97,6 +99,7 @@ public:
 			, WebbyAnim { nullptr }
 			, WebbyLastTarget { nullptr }
 			, WebbyLastMission { Mission::Sleep }
+			, WeaponizedEngineer_GuardDestination { nullptr }
 		{ }
 
 		void OnEarlyUpdate();
@@ -114,6 +117,7 @@ public:
 		void UpdateMindControlAnim();
 		void UpdateRandomTargets();
 		void WebbyUpdate();
+		void UpdateWeaponizedEngineerGuard();
 
 		virtual ~ExtData() override;
 
@@ -195,6 +199,9 @@ public:
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
 	static void WebbyUpdate(TechnoClass* pThis);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
+	static bool IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed);
+	static bool IsValidTechno(TechnoClass* pTechno);
+	static void ProcessWeaponizedEngineerGuard(TechnoClass* pThis);
 
 	// WeaponHelpers.cpp
 	static int PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback = true, bool allowAAFallback = true);
@@ -218,4 +225,11 @@ public:
 
 	static void SendStopTarNav(TechnoClass* pThis);
 	static void HandleStopTarNav(EventExt* event);
+
+	static void SendStopTarNav(TechnoClass* pThis);
+	static void HandleStopTarNav(EventExt* event);
+	static void SendEngineerGuardDestination(TechnoClass* pThis, AbstractClass* pDestination);
+	static void HandleEngineerGuardDestination(EventExt* event);
+	static void SendWeaponizedEngineerGuard(TechnoClass* pThis);
+	static void HandleWeaponizedEngineerGuard(EventExt* event);
 };

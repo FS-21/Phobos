@@ -599,6 +599,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	{
 		this->DroppodType.reset();
 	}
+
+	this->Engineer_CheckFriendlyWeapons.Read(exINI, pSection, "Engineer.CheckFriendlyWeapons");
 }
 
 template <typename T>
@@ -802,6 +804,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_TransferPassengers)
 		.Process(this->Convert_TransferPassengers_IgnoreInvalidOccupiers)
 		.Process(this->Convert_ForceVeterancyTransfer)
+
+		.Process(this->Engineer_CheckFriendlyWeapons)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)
