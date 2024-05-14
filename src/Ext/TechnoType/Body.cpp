@@ -290,6 +290,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->DetectDisguise_Percent.Read(exINI, pSection, "DetectDisguise.Percent");
 
+	this->CrateGoodie_RerollChance.Read(exINI, pSection, "CrateGoodie.RerollChance");
+
 	// Ares 0.2
 	this->RadarJamRadius.Read(exINI, pSection, "RadarJamRadius");
 	this->ImmuneToEMP.Read(exINI, pSection, "ImmuneToEMP");
@@ -806,6 +808,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_ForceVeterancyTransfer)
 
 		.Process(this->Engineer_CheckFriendlyWeapons)
+
+		.Process(this->CrateGoodie_RerollChance)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

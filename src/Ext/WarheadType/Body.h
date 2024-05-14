@@ -78,6 +78,9 @@ public:
 		Valueable<int> Shield_SelfHealing_RestartInCombatDelay;
 		Valueable<bool> Shield_SelfHealing_RestartTimer;
 
+		std::vector<Powerup> SpawnsCrate_Types;
+		std::vector<int> SpawnsCrate_Weights;
+
 		ValueableVector<ShieldTypeClass*> Shield_AttachTypes;
 		ValueableVector<ShieldTypeClass*> Shield_RemoveTypes;
 		Valueable<bool> Shield_ReplaceOnly;
@@ -225,6 +228,9 @@ public:
 			, Shield_Break_Types {}
 			, Shield_Respawn_Types {}
 			, Shield_SelfHealing_Types {}
+
+			, SpawnsCrate_Types {}
+			, SpawnsCrate_Weights {}
 
 			, NotHuman_DeathSequence { -1 }
 			, LaunchSW {}

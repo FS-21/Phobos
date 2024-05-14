@@ -200,6 +200,8 @@ public:
 
 		ValueableVector<double> DetectDisguise_Percent;
 
+		Valueable<double> CrateGoodie_RerollChance;
+
 		struct LaserTrailDataEntry
 		{
 			ValueableIdx<LaserTrailTypeClass> idxType;
@@ -447,6 +449,8 @@ public:
 			, Convert_TransferPassengers { true }
 			, Convert_TransferPassengers_IgnoreInvalidOccupiers { false }
 			, Convert_ForceVeterancyTransfer { false }
+
+			, CrateGoodie_RerollChance { 0.0 }
 		{ }
 
 		virtual ~ExtData() = default;
