@@ -452,13 +452,15 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 	// Obtain houses
 	int param3 = pThis->Param3;
 
-	if (pThis->Param3 - HouseClass::PlayerAtA >= 0)
+	if (pThis->Param3 - HouseClass::PlayerAtA >= 0 && pThis->Param3 - HouseClass::PlayerAtA < 8997)
 	{
+		// Multiplayer house index (Player@A - Player@H)
 		param3 = pThis->Param3 - HouseClass::PlayerAtA;
 	}
 	else if (pThis->Param3 - 8997 == 0)
 	{
-		param3 = pThis->TeamType->Owner->ArrayIndex;
+		// House specified in Trigger
+		param3 = pThis->TeamType ? pThis->TeamType->Owner->ArrayIndex : pHouse->ArrayIndex;
 	}
 	else if (pThis->Param3 > 8997)
 	{
@@ -472,8 +474,8 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 	}
 	else
 	{
-		// Pick a list of houses from [AIHousesList].
-		// Any house of teh same type of the listed at [AIHousesList] will be included here
+		// Pick a group of countries from [AIHousesList].
+		// Any house of the same type of the listed at [AIHousesList] will be included here
 		const int listIdx = pThis->Param4;
 
 		if (RulesExt::Global()->AIHousesLists.size() == 0)
@@ -508,7 +510,8 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 	}
 
 	// Read the ID list of technos
-	const int listIdx = pThis->Param5;
+	int listIdx = std::abs(pThis->Param5);
+	bool isGlobalCount = pThis->Param5 < 0 ? true : false;
 
 	if (RulesExt::Global()->AITargetTypesLists.size() == 0
 		|| RulesExt::Global()->AITargetTypesLists[listIdx].size() == 0)
@@ -519,6 +522,7 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 
 	std::vector<TechnoTypeClass*> technosList = RulesExt::Global()->AITargetTypesLists[listIdx];
 	std::vector<int> technosRemaining;
+	int globalRemaining = 0;
 
 	// Count all valid instances
 	for (auto const pType : technosList)
@@ -533,7 +537,10 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 			for (const auto pHouse : pHousesList)
 			{
 				if (pTechno->Owner == pHouse)
+				{
+					globalRemaining++;
 					nRemaining++;
+				}
 			}
 		}
 
@@ -543,19 +550,34 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 	bool textToShow = false;
 	float messageDelay = pThis->Param6 <= 0 ? RulesClass::Instance->MessageDelay : pThis->Param6 / 60.0; // seconds / 60 = message delay in minutes
 	wchar_t message[2048] = { 0 };
-	wcscpy_s(message, StringTable::TryFetchString(pThis->Text, L"Remaining:\n"));
+	wcscpy_s(message, StringTable::TryFetchString(pThis->Text, L"Remaining: "));
 
-	for (int i = 0; i < technosRemaining.size(); i++)
+	if (isGlobalCount)
 	{
-		if (technosRemaining[i] == 0)
-			continue;
+		if (globalRemaining > 0)
+		{
+			wchar_t strInteger[24] = { 0 };
+			swprintf_s(strInteger, L"%d", globalRemaining);
+			wcscat_s(message, strInteger);
+			textToShow = true;
+		}
+	}
+	else
+	{
+		wcscat_s(message, L"\n");
 
-		textToShow = true;
-		wcscat_s(message, technosList[i]->UIName);
-		wcscat_s(message, L": ");
-		wchar_t strInteger[24] = { 0 };
-		swprintf_s(strInteger, L"%d", technosRemaining[i]);
-		wcscat_s(message, strInteger);
+		for (int i = 0; i < technosRemaining.size(); i++)
+		{
+			if (technosRemaining[i] == 0)
+				continue;
+
+			textToShow = true;
+			wcscat_s(message, technosList[i]->UIName);
+			wcscat_s(message, L": ");
+			wchar_t strInteger[24] = { 0 };
+			swprintf_s(strInteger, L"%d", technosRemaining[i]);
+			wcscat_s(message, strInteger);
+		}
 	}
 
 	if (textToShow)
