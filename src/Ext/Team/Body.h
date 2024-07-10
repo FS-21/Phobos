@@ -50,6 +50,7 @@ public:
 		std::vector<TechnoClass*> BridgeRepairHuts;
 		int TriggersSideIdx;
 		int TriggersHouseIdx;
+		int MinAmmoThreshold;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -78,6 +79,7 @@ public:
 			, BridgeRepairHuts { }
 			, TriggersSideIdx { -1 }
 			, TriggersHouseIdx { -1 }
+			, MinAmmoThreshold { 0 }
 		{ }
 
 		virtual ~ExtData() = default;

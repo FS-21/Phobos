@@ -319,6 +319,12 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 	case PhobosScripts::ConditionalJumpManageResetIfJump:
 		ScriptExt::ConditionalJump_ManageResetIfJump(pTeam, -1);
 		break;
+	case PhobosScripts::AttackWaypoint:
+		ScriptExt::AttackWaypoint(pTeam, -100000000);
+		break;
+	case PhobosScripts::SetMinimumAmmoThreshold:
+		ScriptExt::SetMinimumAmmoThreshold(pTeam, -2);
+			break;
 	default:
 		// Do nothing because or it is a wrong Action number or it is an Ares/YR action...
 		if (action > 70 && !IsExtVariableAction(action))
@@ -450,7 +456,10 @@ void ScriptExt::WaitUntilFullAmmoAction(TeamClass* pTeam)
 						pUnit->LastTarget = nullptr;
 						// Fix YR bug (when returns from the last attack the aircraft switch in loop between Mission::Enter & Mission::Guard, making it impossible to land in the dock)
 						if (pUnit->IsInAir() && pUnit->CurrentMission != Mission::Enter)
+						{
 							pUnit->QueueMission(Mission::Enter, true);
+							pUnit->MissionStatus = (int)AirAttackStatus::ReturnToBase;
+						}
 
 						return;
 					}
@@ -1408,6 +1417,119 @@ void ScriptExt::ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode = -1)
 		mode = -1;
 
 	HouseExt::ForceOnlyTargetHouseEnemy(pTeam->Owner, mode);
+
+	// This action finished
+	pTeam->StepCompleted = true;
+}
+
+void ScriptExt::AttackWaypoint(TeamClass* pTeam, int nWaypoint = -100000000)
+{
+	if (!pTeam)
+		return;
+
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
+	{
+		pTeam->StepCompleted = true;
+		return;
+	}
+
+	auto pScript = pTeam->CurrentScript;
+
+	if (nWaypoint <= -100000000)
+		nWaypoint = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
+
+	//bool onlyOneAttack = nWaypoint < 0 ? true : false;
+	
+	if (nWaypoint < 0)
+	{
+		pTeam->StepCompleted = true;
+		ScriptExt::Log("AI Scripts - AttackWaypoint: [%s] [%s](line: %d = %d,%d) - Skipped invalid Waypoint.\n",
+			pTeam->Type->ID,
+			pScript->Type->ID,
+			pScript->CurrentMission,
+			pScript->Type->ScriptActions[pScript->CurrentMission].Action,
+			pScript->Type->ScriptActions[pScript->CurrentMission].Argument);
+	}
+
+	auto& waypoints = ScenarioExt::Global()->Waypoints;
+
+	// Check if is a valid Waypoint
+	if (nWaypoint >= 0 && waypoints.find(nWaypoint) != waypoints.end() && waypoints[nWaypoint].X && waypoints[nWaypoint].Y)
+	{
+		auto const selectedWP = waypoints[nWaypoint];
+		auto pCell = MapClass::Instance->TryGetCellAt(selectedWP);
+
+		if (!pCell)
+		{
+			pTeam->StepCompleted = true;
+			return;
+		}
+
+		bool SomeoneWithoutRequiredAmmo = false;
+
+		for (auto pFoot = pTeam->FirstUnit; pFoot; pFoot = pFoot->NextTeamMember)
+		{
+			if (!pFoot->IsAlive || pFoot->InLimbo || pFoot->IsCrashing || pFoot->WhatAmI() != AbstractType::Aircraft)
+				continue;
+
+			// The number of times it can shoot is limited by a temporal ammo threshold or when the aircraft has no ammo
+			if (pFoot->Ammo <= 0 || pFoot->Ammo <= pTeamData->MinAmmoThreshold)
+			{
+				SomeoneWithoutRequiredAmmo = true;
+				pFoot->SetDestination(pFoot, false);
+				pFoot->MissionStatus = (int)AirAttackStatus::ReturnToBase;
+				continue;
+			}
+
+			pFoot->Target = pCell;
+
+			if (pFoot->Destination != pCell)
+				pFoot->SetDestination(pCell, false);
+
+			if (pFoot->CurrentMission != Mission::Attack)
+				pFoot->ForceMission(Mission::Attack);
+
+			bool bIsStrafing = pFoot->MissionStatus == (int)AirAttackStatus::FlyToPosition
+				|| pFoot->MissionStatus == (int)AirAttackStatus::FireAtTarget2_Strafe
+				|| pFoot->MissionStatus == (int)AirAttackStatus::FireAtTarget3_Strafe
+				|| pFoot->MissionStatus == (int)AirAttackStatus::FireAtTarget4_Strafe
+				|| pFoot->MissionStatus == (int)AirAttackStatus::FireAtTarget5_Strafe;
+
+			bool bMissionStatusUpdate = pFoot->MissionStatus != (int)AirAttackStatus::PickAttackLocation;// || pFoot->MissionStatus != (int)AirAttackStatus::FireAtTarget;
+
+			if (bMissionStatusUpdate && !bIsStrafing)
+				pFoot->MissionStatus = (int)AirAttackStatus::FireAtTarget;
+		}
+
+		// If all the team members can continue firing the attack mission can not end, yet
+		if (!SomeoneWithoutRequiredAmmo)
+			return;
+	}
+
+	// Each instance of this ScriptType action must have set the minimum ammo threshold, if needed.
+	pTeamData->MinAmmoThreshold = 0;
+
+	// This action finished
+	pTeam->StepCompleted = true;
+}
+
+void ScriptExt::SetMinimumAmmoThreshold(TeamClass* pTeam, int newValue = -2)
+{
+	if (!pTeam)
+		return;
+
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
+	{
+		pTeam->StepCompleted = true;
+		return;
+	}
+
+	if (newValue < -1)
+		newValue = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
+
+	pTeamData->MinAmmoThreshold = newValue < 0 ? 0 : newValue;
 
 	// This action finished
 	pTeam->StepCompleted = true;
