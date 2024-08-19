@@ -159,6 +159,101 @@ void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass*
 	if (this->AttachEffect_AttachTypes.size() > 0 || this->AttachEffect_RemoveTypes.size() > 0 || this->AttachEffect_RemoveGroups.size() > 0)
 		this->ApplyAttachEffects(pTarget, pHouse, pOwner);
 
+	// ------- TO-DO ------- FS-21
+	if (this->KickOutKickablePassengers)
+	{
+		const auto pTargetTypeExt = TechnoTypeExt::ExtMap.Find(pTarget->GetTechnoType());
+
+		if (pTarget->Passengers.NumPassengers > 0 && !pTargetTypeExt->NoManualUnload.Get(false))
+		{
+			if (pTarget->Passengers.NumPassengers > 0)
+			{
+				// Passengers / CargoClass is essentially a stack, last in, first out (LIFO) kind of data structure
+				FootClass* pPassenger = nullptr;          // Passenger to potentially delete
+				FootClass* pPreviousPassenger = nullptr;  // Passenger immediately prior to the deleted one in the stack
+				ObjectClass* pLastPassenger = nullptr;    // Passenger that is last in the stack
+				auto pCurrentPassenger = pTarget->Passengers.GetFirstPassenger();
+
+				// Find the first entered passenger that is eligible for ejection.
+				while (pCurrentPassenger)
+				{
+					pPreviousPassenger = abstract_cast<FootClass*>(pLastPassenger);
+					pPassenger = pCurrentPassenger;
+					pLastPassenger = pCurrentPassenger;
+					pCurrentPassenger = abstract_cast<FootClass*>(pCurrentPassenger->NextObject);
+				}
+
+				if (!pPassenger)
+					return;
+
+				--pTarget->Passengers.NumPassengers;
+
+				if (pLastPassenger)
+					pLastPassenger->NextObject = nullptr;
+
+				if (pPreviousPassenger)
+					pPreviousPassenger->NextObject = pPassenger->NextObject;
+
+				if (pTarget->Passengers.NumPassengers <= 0)
+					pTarget->Passengers.FirstPassenger = nullptr;
+
+
+
+				// Handle gunner change.
+				if (pTarget->GetTechnoType()->Gunner)
+				{
+					if (auto const pFoot = abstract_cast<FootClass*>(pTarget))
+					{
+						pFoot->RemoveGunner(pPassenger);
+
+						if (pTarget->Passengers.NumPassengers > 0)
+						{
+							FootClass* pGunner = nullptr;
+
+							for (auto pNext = pTarget->Passengers.FirstPassenger; pNext; pNext = abstract_cast<FootClass*>(pNext->NextObject))
+								pGunner = pNext;
+
+							pFoot->ReceiveGunner(pGunner);
+						}
+					}
+				}
+
+				auto pSource = pTarget;
+				pPassenger->KillPassengers(pSource);
+				pPassenger->RegisterDestruction(pSource);
+				pPassenger->UnInit();
+			}
+
+
+
+
+
+
+
+
+
+			// -------------------------
+			TechnoExt::PassengerKickOutLocation(pTarget, FootClass * pPassenger, 4);
+
+			for (NextObject obj(pTarget->Passengers.FirstPassenger->NextObject); obj; ++obj)
+			{
+				auto const passenger = abstract_cast<FootClass*>(*obj);
+				bool passengerWeaponsHaveAG = false;
+				bool passengerWeaponsHaveAA = false;
+
+				leaderWeaponsHaveAG |= passengerWeaponsHaveAG;
+				leaderWeaponsHaveAA |= passengerWeaponsHaveAA;
+			}
+
+
+
+			
+
+
+			pTarget->Passengers.RemoveFirstPassenger
+		}
+	}
+
 #ifdef LOCO_TEST_WARHEADS
 	if (this->InflictLocomotor)
 		this->ApplyLocomotorInfliction(pTarget);
