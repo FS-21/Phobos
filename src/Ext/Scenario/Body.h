@@ -7,6 +7,8 @@
 #include <Utilities/TemplateDef.h>
 #include <AITriggerTypeClass.h>
 
+#include <Ext/Techno/Body.h>
+
 #include <map>
 
 struct ExtendedVariable
@@ -31,6 +33,10 @@ public:
 
 		std::map<int, CellStruct> Waypoints;
 		std::map<int, ExtendedVariable> Variables[2]; // 0 for local, 1 for global
+
+		std::vector<TechnoExt::ExtData*> AutoDeathObjects;
+		std::vector<TechnoExt::ExtData*> TransportReloaders; // Objects that can reload ammo in limbo
+
 		std::vector<double> AITriggerWeigths;
 		
 		ExtData(ScenarioClass* OwnerObject) : Extension<ScenarioClass>(OwnerObject)
@@ -38,6 +44,8 @@ public:
 			, BriefingTheme { -1 }
 			, Waypoints { }
 			, Variables { }
+			, AutoDeathObjects {}
+			, TransportReloaders {}
 			, AITriggerWeigths { }
 		{ }
 
@@ -54,6 +62,9 @@ public:
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 		virtual void SaveToStream(PhobosStreamWriter& Stm) override;
+
+		void UpdateAutoDeathObjectsInLimbo();
+		void UpdateTransportReloaders();
 	private:
 		template <typename T>
 		void Serialize(T& Stm);
