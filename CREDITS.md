@@ -134,6 +134,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - New AI teams selector
   - `Burst.Retarget` for projectile retargeting
   - Warheads can remove parasites
   - Script actions for modifying AI anger against other houses

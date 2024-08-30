@@ -710,7 +710,6 @@ void HouseExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		for (size_t i = 0; i < 3; i++)
 			this->RepairBaseNodes[i] = readBaseNodeRepairInfo[i < nWritten ? i : nWritten - 1];
 	}
-
 }
 
 // =============================
@@ -743,6 +742,7 @@ void HouseExt::ExtData::Serialize(T& Stm)
 		.Process(this->NumShipyards_NonMFB)
 		.Process(this->ForceOnlyTargetHouseEnemy)
 		.Process(this->ForceOnlyTargetHouseEnemyMode)
+		.Process(this->AITriggers_ValidList)
 		;
 }
 
