@@ -331,6 +331,7 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->AttachEffect_AttachTypes.size() > 0
 		|| this->AttachEffect_RemoveTypes.size() > 0
 		|| this->AttachEffect_RemoveGroups.size() > 0
+		|| this->KickOutKickablePassengers
 	);
 
 	char tempBuffer[32];
@@ -370,6 +371,8 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		else
 			this->SpawnsCrate_Weights.push_back(weight);
 	}
+
+	this->KickOutKickablePassengers.Read(exINI, pSection, "KickOutKickablePassengers");
 }
 
 template <typename T>
@@ -521,6 +524,8 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->PossibleCellSpreadDetonate)
 		.Process(this->Reflected)
 		.Process(this->DamageAreaTarget)
+
+		.Process(this->KickOutKickablePassengers)
 
 		.Process(this->CanRemoveParasites)
 		.Process(this->CanRemoveParasites_KickOut)

@@ -176,6 +176,8 @@ public:
 		bool PossibleCellSpreadDetonate;
 		TechnoClass* DamageAreaTarget;
 
+		Valueable<bool> KickOutKickablePassengers;
+
 		Valueable<bool> CanRemoveParasites;
 		Valueable<bool> CanRemoveParasites_KickOut;
 		Valueable<int> CanRemoveParasites_KickOut_Paralysis;
@@ -334,6 +336,8 @@ public:
 			, RemainingAnimCreationInterval { 0 }
 			, PossibleCellSpreadDetonate {false}
 			, DamageAreaTarget {}
+
+			, KickOutKickablePassengers { false }
 
 			, CanRemoveParasites { false }
 			, CanRemoveParasites_KickOut { false }

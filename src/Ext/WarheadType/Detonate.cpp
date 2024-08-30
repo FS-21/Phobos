@@ -170,6 +170,14 @@ void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass*
 	if (this->AttachEffect_AttachTypes.size() > 0 || this->AttachEffect_RemoveTypes.size() > 0 || this->AttachEffect_RemoveGroups.size() > 0)
 		this->ApplyAttachEffects(pTarget, pHouse, pOwner);
 
+	if (this->KickOutKickablePassengers)
+	{
+		const auto pTargetTypeExt = TechnoTypeExt::ExtMap.Find(pTarget->GetTechnoType());
+
+		if (pTarget->Passengers.NumPassengers > 0 && !pTargetTypeExt->NoManualUnload.Get(false))
+			TechnoExt::PassengersTransfer(pTarget, nullptr, true, true);
+	}
+
 #ifdef LOCO_TEST_WARHEADS
 	if (this->InflictLocomotor)
 		this->ApplyLocomotorInfliction(pTarget);
