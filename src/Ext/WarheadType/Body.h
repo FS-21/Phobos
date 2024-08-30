@@ -120,6 +120,12 @@ public:
 		NullableVector<AnimTypeClass*> DebrisAnims;
 		Valueable<bool> Debris_Conventional;
 
+		Valueable<double> MindControl_Threshold;
+		Valueable<bool> MindControl_Threshold_Inverse;
+		Nullable<int> MindControl_AlternateDamage;
+		Nullable<WarheadTypeClass*> MindControl_AlternateWarhead;
+		Valueable<bool> MindControl_CanKill;
+
 		Valueable<bool> DetonateOnAllMapObjects;
 		Valueable<bool> DetonateOnAllMapObjects_Full;
 		Valueable<bool> DetonateOnAllMapObjects_RequireVerses;
@@ -280,6 +286,12 @@ public:
 			, AllowDamageOnSelf { false }
 			, DebrisAnims {}
 			, Debris_Conventional { false }
+
+			, MindControl_Threshold { 1.0 }
+			, MindControl_Threshold_Inverse { false }
+			, MindControl_AlternateDamage {}
+			, MindControl_AlternateWarhead {}
+			, MindControl_CanKill { false }
 
 			, DetonateOnAllMapObjects { false }
 			, DetonateOnAllMapObjects_Full { true }

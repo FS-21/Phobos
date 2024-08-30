@@ -346,6 +346,7 @@ New:
 - Building airstrike target eligibility customization (by Starkku)
 - IvanBomb detonation & image display centered on buildings (by Starkku)
 - Forcing specific weapon against cloaked or disguised targets (by Starkku)
+- Mind Control Threshold (by FS-21)
 - Override target under EMP attack behavior (By FS-21)
 - Script Action 14004 for forcing all new actions to target only the main owner's enemy (by FS-21)
 - Script action for enabling & disabling AI Triggers (by FS-21)

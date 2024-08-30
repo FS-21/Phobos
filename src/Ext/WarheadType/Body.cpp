@@ -242,6 +242,12 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->DebrisAnims.Read(exINI, pSection, "DebrisAnims");
 	this->Debris_Conventional.Read(exINI, pSection, "Debris.Conventional");
 
+	this->MindControl_Threshold.Read(exINI, pSection, "MindControl.Threshold");
+	this->MindControl_Threshold_Inverse.Read(exINI, pSection, "MindControl.Threshold.Inverse");
+	this->MindControl_AlternateDamage.Read(exINI, pSection, "MindControl.AlternateDamage");
+	this->MindControl_AlternateWarhead.Read(exINI, pSection, "MindControl.AlternateWarhead");
+	this->MindControl_CanKill.Read(exINI, pSection, "MindControl.CanKill");
+
 	this->DetonateOnAllMapObjects.Read(exINI, pSection, "DetonateOnAllMapObjects");
 	this->DetonateOnAllMapObjects_Full.Read(exINI, pSection, "DetonateOnAllMapObjects.Full");
 	this->DetonateOnAllMapObjects_RequireVerses.Read(exINI, pSection, "DetonateOnAllMapObjects.RequireVerses");
@@ -465,6 +471,12 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->AllowDamageOnSelf)
 		.Process(this->DebrisAnims)
 		.Process(this->Debris_Conventional)
+
+		.Process(this->MindControl_Threshold)
+		.Process(this->MindControl_Threshold_Inverse)
+		.Process(this->MindControl_AlternateDamage)
+		.Process(this->MindControl_AlternateWarhead)
+		.Process(this->MindControl_CanKill)
 
 		.Process(this->DetonateOnAllMapObjects)
 		.Process(this->DetonateOnAllMapObjects_Full)
