@@ -5,6 +5,7 @@
 #include <Helpers/Macro.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
+#include <AITriggerTypeClass.h>
 
 #include <Ext/Techno/Body.h>
 
@@ -36,6 +37,8 @@ public:
 		std::vector<TechnoExt::ExtData*> AutoDeathObjects;
 		std::vector<TechnoExt::ExtData*> TransportReloaders; // Objects that can reload ammo in limbo
 
+		std::vector<double> AITriggerWeigths;
+		
 		ExtData(ScenarioClass* OwnerObject) : Extension<ScenarioClass>(OwnerObject)
 			, ShowBriefing { false }
 			, BriefingTheme { -1 }
@@ -43,6 +46,7 @@ public:
 			, Variables { }
 			, AutoDeathObjects {}
 			, TransportReloaders {}
+			, AITriggerWeigths { }
 		{ }
 
 		void SetVariableToByID(bool bIsGlobal, int nIndex, char bState);
