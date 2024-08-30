@@ -284,6 +284,8 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
 
+	this->CanDisarmBombs.Read(exINI, pSection, "CanDisarmBombs");
+
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
 	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
@@ -549,6 +551,8 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->CanRemoveParasites_KickOut_Anim)
 
 		.Process(this->Convert_UseUniversalDeploy)
+
+		.Process(this->CanDisarmBombs)
 		;
 }
 

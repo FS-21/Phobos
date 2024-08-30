@@ -301,6 +301,8 @@ public:
 
 		Nullable<Powerup> DropCrate;
 
+		Valueable<bool> Engineer_CheckFriendlyWeapons;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, UIDescription {}
@@ -540,6 +542,8 @@ public:
 			, Convert_ForceVeterancyTransfer { false }
 
 			, DropCrate { }
+
+			, Engineer_CheckFriendlyWeapons { false }
 		{ }
 
 		virtual ~ExtData() = default;

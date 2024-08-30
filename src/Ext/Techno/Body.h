@@ -62,6 +62,8 @@ public:
 		int DropCrate; // Drop crate on death, modified by map action
 		Powerup DropCrateType;
 
+		AbstractClass* WeaponizedEngineer_GuardDestination;
+
 		int	WebbyDurationCountDown;
 		CDTimerClass WebbyDurationTimer;
 		AnimClass* WebbyAnim;
@@ -104,6 +106,7 @@ public:
 			, HasRemainingWarpInDelay { false }
 			, LastWarpInDelay { 0 }
 			, IsBeingChronoSphered { false}
+			, WeaponizedEngineer_GuardDestination { nullptr }
 			, WebbyDurationCountDown { -1 }
 			, WebbyDurationTimer {}
 			, WebbyAnim { nullptr }
@@ -143,6 +146,7 @@ public:
 		void UpdateSelfOwnedAttachEffects();
 		bool HasAttachedEffects(std::vector<AttachEffectTypeClass*> attachEffectTypes, bool requireAll, bool ignoreSameSource, TechnoClass* pInvoker, AbstractClass* pSource, std::vector<int> const* minCounts, std::vector<int> const* maxCounts) const;
 		int GetAttachedEffectCumulativeCount(AttachEffectTypeClass* pAttachEffectType, bool ignoreSameSource = false, TechnoClass* pInvoker = nullptr, AbstractClass* pSource = nullptr) const;
+		void UpdateWeaponizedEngineerGuard();
 		void WebbyUpdate();
 		void UpdateRandomTargets();
 
@@ -219,6 +223,7 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, BuildingSelectBracketPosition bracketPosition);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue);
+	static void ProcessWeaponizedEngineerGuard(TechnoClass* pThis);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
@@ -245,4 +250,9 @@ public:
 	//static void UpdateUniversalDeploy(TechnoClass* pThis);
 
 	static bool TryToCreateCrate(CoordStruct location, Powerup selectedPowerup = Powerup::Money, int maxCellRange = 10);
+
+	static void SendEngineerGuardDestination(TechnoClass* pThis, AbstractClass* pDestination);
+	static void HandleEngineerGuardDestination(EventExt* event);
+	static void SendWeaponizedEngineerGuard(TechnoClass* pThis);
+	static void HandleWeaponizedEngineerGuard(EventExt* event);
 };

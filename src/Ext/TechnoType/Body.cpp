@@ -646,6 +646,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->NoManualUnload.Read(exINI, pSection, "NoManualUnload");
 	
 	DropCrate.Read(exINI, pSection, "DropCrate");
+
+	this->Engineer_CheckFriendlyWeapons.Read(exINI, pSection, "Engineer.CheckFriendlyWeapons");
 }
 
 template <typename T>
@@ -897,6 +899,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_ForceVeterancyTransfer)
 
 		.Process(this->DropCrate)
+
+		.Process(this->Engineer_CheckFriendlyWeapons)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

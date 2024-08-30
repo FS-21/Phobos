@@ -10,9 +10,11 @@ enum class EventTypeExt : uint8_t
 	// CnCNet reserved Events from 0x30 to 0x3F
 	// Ares used Events 0x60 and 0x61
 
+	SyncEngineerGuardDestination = 0x45,
+	SyncWeaponizedEngineerGuard = 0x48,
 	SyncStopTarNav = 0x49,
 
-	FIRST = SyncStopTarNav,
+	FIRST = SyncEngineerGuardDestination,
 	LAST = SyncStopTarNav
 };
 
@@ -32,6 +34,17 @@ public:
 		{
 			int TechnoUniqueID;
 		} SyncStopTarNav;
+
+		struct SyncWeaponizedEngineerGuard
+		{
+			int TechnoUniqueID;
+		} SyncWeaponizedEngineerGuard;
+
+		struct SyncEngineerGuardDestination
+		{
+			int TechnoUniqueID;
+			AbstractClass* GuardDestination;
+		} SyncEngineerGuardDestination;
 	};
 
 	bool AddEvent();
