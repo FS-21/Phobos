@@ -292,7 +292,7 @@ void SWTypeExt::ExtData::ApplyTypeConversion(SuperClass* pSW)
 	}
 
 	for (const auto pTargetFoot : *FootClass::Array)
-		TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pSW->Owner);
+		TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pSW->Owner, pAnimType);
 }
 
 void SWTypeExt::ExtData::GrantOneTimeFromList(SuperClass* pSW)
