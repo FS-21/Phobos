@@ -360,6 +360,40 @@ bool TechnoExt::CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaul
 	return canDeploy;
 }
 
+// Checks if a structure can deploy into another at its current location. If the building has problems forplacing the new one returns noDeploysIntoDefaultValue (def = false) instead.
+// If a building is specified then it will be used by default.
+bool TechnoExt::CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue, BuildingTypeClass* pBuildingType)
+{
+	if (!pThis)
+		return false;
+
+	auto pDeployType = pBuildingType;
+
+	if (!pDeployType)
+	{
+		auto pBldTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+		if (!pBldTypeExt || !pBldTypeExt->Convert_UniversalDeploy.isset())
+			return noDeploysIntoDefaultValue;
+
+		pDeployType = static_cast<BuildingTypeClass*>(pBldTypeExt->Convert_UniversalDeploy.Get());
+	}
+
+	if (!pDeployType)
+		return noDeploysIntoDefaultValue;
+
+	bool canDeploy = true;
+	auto mapCoords = CellClass::Coord2Cell(pThis->GetCoords());
+
+	pThis->Mark(MarkType::Up);
+
+	if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
+		canDeploy = false;
+
+	pThis->Mark(MarkType::Down);
+
+	return canDeploy;
+}
+
 bool TechnoExt::IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource)
 {
 	if (!pThis || !pSource)
@@ -1012,6 +1046,12 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->OriginalTarget)
 		.Process(this->ResetRandomTarget)
 		.Process(this->CurrentRandomTarget)
+		.Process(this->Convert_UniversalDeploy_DeployAnim)
+		.Process(this->Convert_UniversalDeploy_InProgress)
+		.Process(this->Convert_UniversalDeploy_MakeInvisible)
+		.Process(this->Convert_UniversalDeploy_TemporalTechno)
+		.Process(this->Convert_UniversalDeploy_IsOriginalDeployer)
+		.Process(this->Convert_UniversalDeploy_RememberTarget)
 		;
 }
 

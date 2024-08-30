@@ -66,6 +66,13 @@ public:
 		AbstractClass* WebbyLastTarget;
 		Mission WebbyLastMission;
 
+		AnimClass* Convert_UniversalDeploy_DeployAnim;
+		bool Convert_UniversalDeploy_InProgress;
+		bool Convert_UniversalDeploy_MakeInvisible;
+		TechnoClass* Convert_UniversalDeploy_TemporalTechno;
+		bool Convert_UniversalDeploy_IsOriginalDeployer;
+		AbstractClass* Convert_UniversalDeploy_RememberTarget;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -103,6 +110,12 @@ public:
 			, OriginalTarget { nullptr }
 			, ResetRandomTarget { false }
 			, CurrentRandomTarget { nullptr }
+			, Convert_UniversalDeploy_DeployAnim { nullptr }
+			, Convert_UniversalDeploy_InProgress { false }
+			, Convert_UniversalDeploy_MakeInvisible { false }
+			, Convert_UniversalDeploy_TemporalTechno { nullptr }
+			, Convert_UniversalDeploy_IsOriginalDeployer { true }
+			, Convert_UniversalDeploy_RememberTarget { nullptr }
 		{ }
 
 		void OnEarlyUpdate();
@@ -138,6 +151,10 @@ public:
 			AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
 			AnnounceInvalidPointer(CurrentRandomTarget, ptr);
 			AnnounceInvalidPointer(OriginalTarget, ptr);
+			AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
+			AnnounceInvalidPointer(Convert_UniversalDeploy_TemporalTechno, ptr);
+			AnnounceInvalidPointer(Convert_UniversalDeploy_DeployAnim, ptr);
+			AnnounceInvalidPointer(Convert_UniversalDeploy_RememberTarget, ptr);
 		}
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
@@ -187,6 +204,7 @@ public:
 	static void UpdateAttachedAnimLayers(TechnoClass* pThis);
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
 	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
+	static bool CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue = false, BuildingTypeClass* pBuildingType = nullptr);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource);
 	static int GetTintColor(TechnoClass* pThis, bool invulnerability, bool airstrike, bool berserk);
 	static int GetCustomTintColor(TechnoClass* pThis);
@@ -200,6 +218,7 @@ public:
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
+	static bool IsValidTechno(TechnoClass* pTechno);
 	static bool IsValidTechno(TechnoClass* pTechno);
 
 	// WeaponHelpers.cpp
@@ -216,4 +235,10 @@ public:
 	static void HandleStopTarNav(EventExt* event);
 
 	static void PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo = nullptr, bool forceFullTransfer = true, bool dontCheckInvalidOccupiers = true);
+
+	static TechnoClass* UniversalDeployConversion(TechnoClass* pThis, TechnoTypeClass* pNewType = nullptr);
+	//static void CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType = nullptr);
+	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
+	//static void UpdateUniversalDeploy(TechnoClass* pThis);
+	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
 };
