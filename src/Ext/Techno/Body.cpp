@@ -828,22 +828,6 @@ void TechnoExt::HandleStopTarNav(EventExt* event)
 	}
 }
 
-bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
-{
-	if (!pTechno)
-		return false;
-
-	bool isValid = !pTechno->Dirty
-		&& ScriptExt::IsUnitAvailable(pTechno, true)
-		&& pTechno->Owner
-		&& (pTechno->WhatAmI() == AbstractType::Infantry
-			|| pTechno->WhatAmI() == AbstractType::Unit
-			|| pTechno->WhatAmI() == AbstractType::Building
-			|| pTechno->WhatAmI() == AbstractType::Aircraft);
-
-	return isValid;
-}
-
 // =============================
 // load / save
 
