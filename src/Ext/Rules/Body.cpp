@@ -3,6 +3,7 @@
 #include <Utilities/TemplateDef.h>
 #include <FPSCounter.h>
 #include <GameOptionsClass.h>
+#include <HouseTypeClass.h>
 
 #include <New/Type/RadTypeClass.h>
 #include <New/Type/ShieldTypeClass.h>
@@ -63,6 +64,10 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	if (!pData)
 		return;
+
+	const char* sectionAITargetTypes = "AITargetTypes";
+	const char* sectionAIScriptsList = "AIScriptsList";
+	const char* sectionAIHousesList = "AIHousesList";
 
 	INI_EX exINI(pINI);
 
@@ -244,6 +249,24 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 		this->AIScriptsLists.emplace_back(std::move(objectsList));
 	}
 
+	// Section AIHousesList
+	int houseItemsCount = pINI->GetKeyCount(sectionAIHousesList);
+	for (int i = 0; i < houseItemsCount; ++i)
+	{
+		std::vector<HouseTypeClass*> objectsList;
+
+		char* context = nullptr;
+		pINI->ReadString(sectionAIHousesList, pINI->GetKeyName(sectionAIHousesList, i), "", Phobos::readBuffer);
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			if (const auto pNewHouse = HouseTypeClass::Find(cur))
+				objectsList.emplace_back(pNewHouse);
+		}
+
+		this->AIHousesLists.emplace_back(std::move(objectsList));
+	}
+
 	// Section AITriggersList
 	int triggerItemsCount = pINI->GetKeyCount("AITriggersList");
 	for (int i = 0; i < triggerItemsCount; ++i)
@@ -291,6 +314,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 	Stm
 		.Process(this->AITargetTypesLists)
 		.Process(this->AIScriptsLists)
+		.Process(this->AIHousesLists)
 		.Process(this->AITriggersLists)
 		.Process(this->HarvesterTypes)
 		.Process(this->Storage_TiberiumIndex)
