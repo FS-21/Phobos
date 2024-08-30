@@ -366,7 +366,7 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 
 					for (const auto& pUnit : *TechnoClass::Array)
 					{
-						if (ScriptExt::IsUnitAvailable(pUnit, false)
+						if (TechnoExt::IsUnitAvailable(pUnit, false)
 							&& pUnit->Owner == pHouse
 							&& ScriptExt::EvaluateObjectWithMask(pUnit, 31, -1, -1, nullptr))
 						{
@@ -413,7 +413,7 @@ HouseClass* ScriptExt::GetTheMostHatedHouse(TeamClass* pTeam, int mask = 0, int 
 		{
 			HouseClass* pHouse = pTechno->Owner;
 
-			if (!ScriptExt::IsUnitAvailable(pTechno, false)
+			if (!TechnoExt::IsUnitAvailable(pTechno, false)
 				|| pHouse->Defeated
 				|| pHouse == pTeam->Owner
 				|| pHouse->IsAlliedWith(pTeam->Owner)

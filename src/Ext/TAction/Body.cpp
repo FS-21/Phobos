@@ -512,7 +512,7 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 
 		for (const auto pTechno : *TechnoClass::Array)
 		{
-			if (!ScriptExt::IsUnitAvailable(pTechno, false) || pTechno->GetTechnoType() != pType)
+			if (!TechnoExt::IsUnitAvailable(pTechno, false) || pTechno->GetTechnoType() != pType)
 				continue;
 
 			for (const auto pItem : housesList)
