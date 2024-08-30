@@ -59,6 +59,8 @@ public:
 		bool HasRemainingWarpInDelay;          // Converted from object with Teleport Locomotor to one with a different Locomotor while still phasing in OR set if ChronoSphereDelay > 0.
 		int LastWarpInDelay;                   // Last-warp in delay for this unit, used by HasCarryoverWarpInDelay.
 		bool IsBeingChronoSphered;             // Set to true on units currently being ChronoSphered, does not apply to Ares-ChronoSphere'd buildings or Chrono reinforcements.
+		int DropCrate; // Drop crate on death, modified by map action
+		Powerup DropCrateType;
 
 		int	WebbyDurationCountDown;
 		CDTimerClass WebbyDurationTimer;
@@ -116,6 +118,8 @@ public:
 			, Convert_UniversalDeploy_TemporalTechno { nullptr }
 			, Convert_UniversalDeploy_IsOriginalDeployer { true }
 			, Convert_UniversalDeploy_RememberTarget { nullptr }
+			, DropCrate { -1 }
+			, DropCrateType { Powerup::Money }
 		{ }
 
 		void OnEarlyUpdate();
@@ -239,4 +243,6 @@ public:
 	//static void CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType = nullptr);
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	//static void UpdateUniversalDeploy(TechnoClass* pThis);
+
+	static bool TryToCreateCrate(CoordStruct location, Powerup selectedPowerup = Powerup::Money, int maxCellRange = 10);
 };

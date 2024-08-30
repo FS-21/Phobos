@@ -297,6 +297,8 @@ public:
 		Valueable<bool> Convert_TransferPassengers_IgnoreInvalidOccupiers;
 		Valueable<bool> Convert_ForceVeterancyTransfer;
 
+		Nullable<Powerup> DropCrate;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, UIDescription {}
@@ -532,6 +534,8 @@ public:
 			, Convert_TransferPassengers { true }
 			, Convert_TransferPassengers_IgnoreInvalidOccupiers { false }
 			, Convert_ForceVeterancyTransfer { false }
+
+			, DropCrate { }
 		{ }
 
 		virtual ~ExtData() = default;
