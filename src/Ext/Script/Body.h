@@ -39,6 +39,7 @@ enum class PhobosScripts : unsigned int
 	SingleAttackFartherThreat = 10015,
 	RepeatAttackTypeFartherThreat = 10016,
 	SingleAttackTypeFartherThreat = 10017,
+	AttackWaypoint = 10018,
 	// Sub-range 10050-10099 is for "Move to" actions
 	MoveToEnemyCloser = 10050,
 	MoveToTypeEnemyCloser = 10051,
@@ -63,6 +64,7 @@ enum class PhobosScripts : unsigned int
 	WaitIfNoTarget = 12000,
 	ModifyTargetDistance = 12001,
 	SetMoveMissionEndMode = 12002,
+	SetMinimumAmmoThreshold = 12003,
 
 	// Range 14000-14999 are utility actions (angernodes manipulation, Team manipulation, etc)
 	TeamWeightReward = 14000,
@@ -227,6 +229,7 @@ public:
 	static void CheckUnitTargetingCapabilities(TechnoClass* pTechno, bool& hasAntiGround, bool& hasAntiAir, bool agentMode);
 	static bool IsUnitArmed(TechnoClass* pTechno);
 	static bool IsUnitMindControlledFriendly(HouseClass* pHouse, TechnoClass* pTechno);
+	static void AttackWaypoint(TeamClass* pTeam, int nWaypoint);
 
 	// Mission.Move.cpp
 	static void Mission_Move(TeamClass* pTeam, int calcThreatMode, bool pickAllies, int attackAITargetType, int idxAITargetTypeItem);
@@ -238,4 +241,5 @@ private:
 	static void ModifyCurrentTriggerWeight(TeamClass* pTeam, bool forceJumpLine, double modifier);
 	static bool MoveMissionEndStatus(TeamClass* pTeam, TechnoClass* pFocus, FootClass* pLeader, int mode);
 	static void ChronoshiftTeamToTarget(TeamClass* pTeam, TechnoClass* pTeamLeader, AbstractClass* pTarget);
+	static void SetMinimumAmmoThreshold(TeamClass* pTeam, int newValue);
 };

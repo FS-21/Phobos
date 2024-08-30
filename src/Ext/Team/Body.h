@@ -32,6 +32,7 @@ public:
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
 		std::vector<ScriptClass*> PreviousScriptList;
+		int MinAmmoThreshold;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -47,6 +48,7 @@ public:
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
 			, PreviousScriptList { }
+			, MinAmmoThreshold { 0 }
 		{ }
 
 		virtual ~ExtData() = default;
