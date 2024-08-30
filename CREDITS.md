@@ -133,6 +133,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - Allow cyborg legs to be repaired when they enter into transports or structures
   - AI learning
 - **Starkku**:
   - Misc. minor bugfixes & improvements
@@ -242,6 +243,7 @@ This page lists all the individual contributions to the project by their author.
   - Allowed and disallowed types for `FactoryPlant`
   - Forbidding parallel AI queues for specific TechnoTypes
   - Nonprovocative Warheads
+  - Cyborg legs being restored when the soldier enters into transports or structures
 - **Morton (MortonPL)**:
   - `XDrawOffset` for animations
   - Shield passthrough & absorption
