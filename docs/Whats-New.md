@@ -417,6 +417,7 @@ New:
 - Airstrike & spy plane fixed spawn distance & height (by Starkku)
 - Remove parasites in any warhead (by FS-21)
 - Allow enabling application of `Verses` and `PercentAtMax` for negative damage (by Starkku)
+- Script actions for manipulating script flows with conditional jumps (by FS-21)
 - Customizable disguised target evaluation behaviour in new ScriptType attack actions (by FS-21)
 - In addition to `PlacementGrid.Translucency`, allow to set the transparency of the grid when PlacementPreview is enabled, using the `PlacementGrid.TranslucencyWithPreview` tag (by Belonit).
 - Show briefing screen on singleplayer mission start (by Starkku)
