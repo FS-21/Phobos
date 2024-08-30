@@ -121,6 +121,7 @@ This page lists all the individual contributions to the project by their author.
   - Majority of ScriptType actions
   - `Powered.KillSpawns`
   - `Spawner.LimitRange`
+  - ScriptType Action 14004: Force Global OnlyTargetHouseEnemy value in Teams
   - MC deployer fixes
   - Help with docs
   - Automatic Passenger Deletion logic
