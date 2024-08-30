@@ -133,6 +133,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - Grant new superweapons in superweapons
   - Customizable disguised target evaluation behaviour in new ScriptType attack actions
   - Allow cyborg legs to be repaired when they enter into transports or structures
   - AI learning
