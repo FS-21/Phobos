@@ -724,19 +724,6 @@ void TechnoExt::RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, Warh
 	return;
 }
 
-bool TechnoExt::IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed)
-{
-	if (!pTechno)
-		return false;
-
-	bool isAvailable = pTechno->IsAlive && pTechno->Health > 0 && !pTechno->InLimbo && pTechno->IsOnMap;
-
-	if (checkIfInTransportOrAbsorbed)
-		isAvailable &= !pTechno->Absorbed && !pTechno->Transporter;
-
-	return isAvailable;
-}
-
 bool TechnoExt::UpdateRandomTarget(TechnoClass* pThis)
 {
 	if (!pThis)
@@ -954,58 +941,6 @@ TechnoClass* TechnoExt::FindRandomTarget(TechnoClass* pThis)
 	return selection;
 }
 
-bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
-{
-	if (!pTechno)
-		return false;
-
-	bool isValid = !pTechno->Dirty
-		&& TechnoExt::IsUnitAvailable(pTechno, true)
-		&& pTechno->Owner
-		&& (pTechno->WhatAmI() == AbstractType::Infantry
-			|| pTechno->WhatAmI() == AbstractType::Unit
-			|| pTechno->WhatAmI() == AbstractType::Building
-			|| pTechno->WhatAmI() == AbstractType::Aircraft);
-
-	return isValid;
-}
-
-void TechnoExt::SendStopTarNav(TechnoClass* pThis)
-{
-	auto pFoot = abstract_cast<FootClass*>(pThis);
-
-	EventExt event;
-	event.Type = EventTypeExt::SyncStopTarNav;
-	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
-	event.Frame = Unsorted::CurrentFrame;
-
-	event.AddEvent();
-}
-
-void TechnoExt::HandleStopTarNav(EventExt* event)
-{
-	int technoUniqueID = event->SyncStopTarNav.TechnoUniqueID;
-
-	for (auto pTechno : *TechnoClass::Array)
-	{
-		if (pTechno && pTechno->UniqueID == technoUniqueID)
-		{
-			auto const pExt = TechnoExt::ExtMap.Find(pTechno);
-
-			pExt->CurrentRandomTarget = nullptr;
-			pExt->OriginalTarget = nullptr;
-			pTechno->ForceMission(Mission::Guard);
-
-			auto pFoot = abstract_cast<FootClass*>(pTechno);
-
-			if (pFoot->Locomotor->Is_Moving_Now())
-				pFoot->StopMoving();
-
-			break;
-		}
-	}
-}
-
 // Check adjacent cells from the center
 // The current MapClass::Instance->PlacePowerupCrate(...) doesn't like slopes and maybe other cases
 bool TechnoExt::TryToCreateCrate(CoordStruct location, Powerup selectedPowerup, int maxCellRange)
@@ -1119,7 +1054,7 @@ void TechnoExt::SendStopTarNav(TechnoClass* pThis)
 	EventExt event;
 	event.Type = EventTypeExt::SyncStopTarNav;
 	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
-	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+	event.Frame = Unsorted::CurrentFrame;
 
 	event.SyncWeaponizedEngineerGuard.TechnoUniqueID = pThis->UniqueID;
 
@@ -1137,17 +1072,18 @@ void TechnoExt::HandleStopTarNav(EventExt* event)
 			auto const pExt = TechnoExt::ExtMap.Find(pTechno);
 			pExt->WeaponizedEngineer_GuardDestination = nullptr;
 
-			pTechno->SetTarget(nullptr);
-			//pExt->CurrentRandomTarget = nullptr;
-			//pExt->OriginalTarget = nullptr;
-			pTechno->SetDestination(nullptr, true);
+			pExt->CurrentRandomTarget = nullptr;
+			pExt->OriginalTarget = nullptr;
+			//pTechno->SetDestination(nullptr, true);
+			pTechno->ForceMission(Mission::Guard);
 
 			auto pFoot = abstract_cast<FootClass*>(pTechno);
 
 			if (pFoot->Locomotor->Is_Moving_Now())
 				pFoot->StopMoving();
 
-			pTechno->QueueMission(Mission::Guard, false);
+			//pTechno->QueueMission(Mission::Guard, false);
+
 			break;
 		}
 	}
