@@ -135,6 +135,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - Penetration damage on garrisonable structures
   - Map Action 600 for overwriting DropCrate behaviour in attached Technos
   - `DropCrate` for setting what crate drop when Techno is destroyed
   - Universal deploy from any techno into any techno
