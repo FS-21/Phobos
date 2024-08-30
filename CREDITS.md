@@ -144,6 +144,7 @@ This page lists all the individual contributions to the project by their author.
   - AI learning
   - Script actions for manipulating script flows with conditional jumps
   - Map action 507 for printing a message with the remaining map objects
+  - Web logic against infantry
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

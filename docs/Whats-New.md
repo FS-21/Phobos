@@ -416,6 +416,7 @@ New:
 - Customizable straight trajectory detonation & snap distance and pass-through option (by Starkku)
 - Airstrike & spy plane fixed spawn distance & height (by Starkku)
 - Remove parasites in any warhead (by FS-21)
+- Web logic against infantry (FS-21)
 - Allow enabling application of `Verses` and `PercentAtMax` for negative damage (by Starkku)
 - Script actions for manipulating script flows with conditional jumps (by FS-21)
 - Customizable disguised target evaluation behaviour in new ScriptType attack actions (by FS-21)
