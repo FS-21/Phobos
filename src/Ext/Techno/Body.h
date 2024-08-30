@@ -219,7 +219,6 @@ public:
 	static bool UpdateRandomTarget(TechnoClass* pThis = nullptr);
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
 	static bool IsValidTechno(TechnoClass* pTechno);
-	static bool IsValidTechno(TechnoClass* pTechno);
 
 	// WeaponHelpers.cpp
 	static int PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback = true, bool allowAAFallback = true);
@@ -240,5 +239,4 @@ public:
 	//static void CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType = nullptr);
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	//static void UpdateUniversalDeploy(TechnoClass* pThis);
-	static void PassengersTransfer(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
 };

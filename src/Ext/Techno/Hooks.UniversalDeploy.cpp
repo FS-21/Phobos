@@ -8,7 +8,7 @@ DEFINE_HOOK(0x730B8F, DeployCommand_UniversalDeploy, 0x6)
 
 	TechnoClass* pThis = static_cast<TechnoClass*>(ObjectClass::CurrentObjects->GetItem(index));
 
-	if (!pThis || !ScriptExt::IsUnitAvailable(pThis, false))
+	if (!pThis || !TechnoExt::IsUnitAvailable(pThis, false))
 		return 0;
 
 	auto pExt = TechnoExt::ExtMap.Find(pThis);
@@ -303,7 +303,7 @@ DEFINE_HOOK(0x4ABEE9, BuildingClass_MouseLeftRelease_UniversalDeploy_ExecuteDepl
 	GET(TechnoClass* const, pTechno, ESI);
 	GET(Action const, actionType, EBX);
 
-	if (actionType != Action::Self_Deploy || !pTechno || !pTechno->IsSelected || !ScriptExt::IsUnitAvailable(pTechno, false))
+	if (actionType != Action::Self_Deploy || !pTechno || !pTechno->IsSelected || !TechnoExt::IsUnitAvailable(pTechno, false))
 		return 0;
 
 	auto pExt = TechnoExt::ExtMap.Find(pTechno);
