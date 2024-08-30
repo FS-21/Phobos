@@ -215,12 +215,14 @@ SaveGameOnScenarioStart=true     ; boolean
   BuiltInType=5
   
   [ScriptsRA2]
+  10018=Attack waypoint,2,0,1,Designed for aircrafts, when remaining ammo reaches a specified ammount this action ends. This threshold can be set with script action 12003.
   10100=Timed Area Guard,20,0,1,[LONG DESC]
   10101=Wait until ammo is full,0,0,1,[LONG DESC]
   10102=Regroup Temporarily Around the Team Leader,20,0,1,[LONG DESC]
   10103=Load Onto Transports,0,0,1,[LONG DESC]
   10104=Chronoshift to Enemy Base,20,0,1,[LONG DESC]
   10105=Repair Destroyed Bridge,20,0,1,[LONG DESC]
+  12003=Set Minimum Ammo Threshold,20,0,1,Sets the ammo threshold for script action 10018.
   14004=Force Global OnlyTargetHouseEnemy value in Teams,20,0,1,[LONG DESC]
   14006=Set House Hate Value Modifier,20,0,1,[LONG DESC]
   14007=Modify House Hate Using House Index,20,0,1,[LONG DESC]
@@ -493,6 +495,7 @@ New:
 - Forbidding parallel AI queues for specific TechnoTypes (by Starkku)
 - Nonprovocative Warheads (by Starkku)
 - Map action 507 for printing a message with the remaining map objects (by FS-21)
+- ScriptType actions `10018` & `12003` for aircrafts attacks (by FS-21)
 
 Vanilla fixes:
 - Allow AI to repair structures built from base nodes/trigger action 125/SW delivery in single player missions (by Trsdy)
