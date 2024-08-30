@@ -48,6 +48,7 @@
     <ClCompile Include="src\Ext\Scenario\Hooks.AILearning.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.Variables.cpp" />
+    <ClCompile Include="src\Ext\Script\Body.AngerNodes.cpp" />
     <ClCompile Include="src\Ext\Script\Body.ManageAITriggers.cpp" />
     <ClCompile Include="src\Ext\Sidebar\Body.cpp" />
     <ClCompile Include="src\Ext\Sidebar\Hooks.cpp" />

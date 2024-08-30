@@ -32,6 +32,9 @@ public:
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
 		std::vector<ScriptClass*> PreviousScriptList;
+		int AngerNodeModifier;
+		bool OnlyTargetHouseEnemy;
+		int OnlyTargetHouseEnemyMode;
 		int TriggersSideIdx;
 		int TriggersHouseIdx;
 
@@ -49,6 +52,9 @@ public:
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
 			, PreviousScriptList { }
+			, AngerNodeModifier { 5000 }
+			, OnlyTargetHouseEnemy { false }
+			, OnlyTargetHouseEnemyMode { -1 }
 			, TriggersSideIdx { -1 }
 			, TriggersHouseIdx { -1 }
 		{ }
