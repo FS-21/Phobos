@@ -10,6 +10,7 @@
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
 #include <Ext/TechnoType/Body.h>
+#include <Ext/Techno/Body.h>
 #include <Phobos.h>
 
 class TeamExt
@@ -37,6 +38,7 @@ public:
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
 		std::vector<ScriptClass*> PreviousScriptList;
+		std::vector<TechnoClass*> BridgeRepairHuts;
 		int AngerNodeModifier;
 		bool OnlyTargetHouseEnemy;
 		int OnlyTargetHouseEnemyMode;
@@ -65,6 +67,7 @@ public:
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
 			, PreviousScriptList { }
+			, BridgeRepairHuts { }
 			, AngerNodeModifier { 5000 }
 			, OnlyTargetHouseEnemy { false }
 			, OnlyTargetHouseEnemyMode { -1 }
