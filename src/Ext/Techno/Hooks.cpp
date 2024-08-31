@@ -750,6 +750,10 @@ DEFINE_HOOK(0x6F9FA9, TechnoClass_AI_PromoteAnim, 0x6)
 	return aresProcess();
 }
 
+// TunnelLocomotionClass_IsToHaveShadow, skip shadow on all but idle.
+// TODO: Investigate if it is possible to fix the shadows not tilting on the burrowing etc. states.
+DEFINE_JUMP(LJMP, 0x72A070, 0x72A07F);
+
 DEFINE_HOOK(0x51E440, InfantryClass_AI_WhatAction2_EngineerRepairWeapon, 0x8)
 {
 	enum { Skip = 0x51E458 };
