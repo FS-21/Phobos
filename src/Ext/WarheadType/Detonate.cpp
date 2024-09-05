@@ -12,6 +12,7 @@
 #include <Utilities/Helpers.Alex.h>
 #include <Ext/Bullet/Body.h>
 #include <Ext/BulletType/Body.h>
+#include <Ext/WeaponType/Body.h>
 #include <Ext/SWType/Body.h>
 #include <Misc/FlyingStrings.h>
 #include <Utilities/EnumFunctions.h>
@@ -163,6 +164,9 @@ void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass*
 
 	if (this->Crit_CurrentChance > 0.0 && (!this->Crit_SuppressWhenIntercepted || !bulletWasIntercepted))
 		this->ApplyCrit(pHouse, pTarget, pOwner, pTargetExt);
+
+	if (this->AmmoModifier != 0)
+		ApplyAmmoModifier(pTarget, pHouse, pBulletExt);
 
 	if (this->Convert_Pairs.size() > 0)
 		this->ApplyConvert(pHouse, pTarget);
@@ -583,4 +587,29 @@ void WarheadTypeExt::ExtData::ApplyGarrisonPenetration(HouseClass* pInvokerHouse
 	// Building fully cleaned!
 	if (!pBuilding->Occupants.Count && GarrisonPenetration_CleanSound.isset())
 		VocClass::PlayAt(GarrisonPenetration_CleanSound.Get(), pInvoker->Location);
+}
+
+void WarheadTypeExt::ExtData::ApplyAmmoModifier(TechnoClass* pTarget, HouseClass* pInvokerHouse, BulletExt::ExtData* pBulletExt)
+{
+	if (!pTarget)
+		return;
+
+	auto const pWeapon = pBulletExt ? pBulletExt->OwnerObject()->WeaponType : nullptr;
+
+	if (pWeapon)
+	{
+		auto const pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
+
+		if (!EnumFunctions::IsTechnoEligible(pTarget, pWeaponExt->CanTarget)
+			|| (pInvokerHouse && !EnumFunctions::CanTargetHouse(pWeaponExt->CanTargetHouses, pInvokerHouse, pTarget->Owner)))
+		{
+			return;
+		}
+	}
+
+	int maxAmmo = pTarget->GetTechnoType()->Ammo;
+	int newCurrentAmmo = this->AmmoModifier + pTarget->Ammo;
+
+	newCurrentAmmo = newCurrentAmmo < 0 ? 0 : newCurrentAmmo;
+	pTarget->Ammo = newCurrentAmmo > maxAmmo ? maxAmmo : newCurrentAmmo;
 }

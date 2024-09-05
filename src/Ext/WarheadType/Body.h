@@ -194,6 +194,8 @@ public:
 
 		Valueable<bool> CanDisarmBombs;
 
+		Valueable<int> AmmoModifier;
+
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
 		Valueable<double> Shield_SelfHealing_Rate_InMinutes;
@@ -370,6 +372,8 @@ public:
 			, Convert_UseUniversalDeploy { false }
 
 			, CanDisarmBombs { false }
+
+			, AmmoModifier { 0 }
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);
@@ -405,6 +409,7 @@ public:
 		void ApplyAttachEffects(TechnoClass* pTarget, HouseClass* pInvokerHouse, TechnoClass* pInvoker);
 		double GetCritChance(TechnoClass* pFirer) const;
 		void ApplyGarrisonPenetration(HouseClass* pInvokerHouse, TechnoClass* pTarget, TechnoClass* pInvoker, BulletExt::ExtData* pBulletExt);
+		void ApplyAmmoModifier(TechnoClass* pTarget, HouseClass* pInvokerHouse, BulletExt::ExtData* pBulletExt = nullptr);
 	};
 
 	class ExtContainer final : public Container<WarheadTypeExt>

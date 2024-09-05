@@ -516,10 +516,12 @@ TechnoClass* ScriptExt::GreatestThreat(TechnoClass* pTechno, int method, int cal
 		// Check map zone
 		if (!TechnoExt::AllowedTargetByZone(pTechno, object, pTypeExt->TargetZoneScanType, weaponType))
 			continue;
-
+		auto const pBuilding = abstract_cast<BuildingClass*>(object);
+		bool isBuildingCapturable = objectType->Immune && pBuilding && pBuilding->Type->Capturable && agentMode;
+		
 		if (object != pTechno
 			&& TechnoExt::IsUnitAvailable(object, true)
-			&& !objectType->Immune
+			&& (!objectType->Immune || isBuildingCapturable)
 			&& !object->TemporalTargetingMe
 			&& !object->BeingWarpedOut
 			&& object->Owner != pTechno->Owner

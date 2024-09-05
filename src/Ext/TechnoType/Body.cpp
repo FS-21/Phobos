@@ -482,7 +482,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->ConsideredSecretLabTech.Read(exINI, pSection, "ConsideredSecretLabTech");
 
 	// Secret.RequiredHouses contains a list of HouseTypeClass indexes
-	this->Secret_RequiredHouses.clear();
+	//this->Secret_RequiredHouses.clear();
 	const char* key = "SecretLab.RequiredHouses";
 	char* context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
@@ -496,7 +496,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	key = nullptr;
 
 	// Secret.ForbiddenHouses contains a list of HouseTypeClass indexes
-	this->Secret_ForbiddenHouses.clear();
+	//this->Secret_ForbiddenHouses.clear();
 	key = "SecretLab.ForbiddenHouses";
 	context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
@@ -526,7 +526,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	// Prerequisite with Generic Prerequistes support.
 	// Note: I have no idea of what could happen in all the game engine logics if I push the negative indexes of the Ares generic prerequisites directly into the original Prerequisite tag... for that reason this tag is duplicated for working with it
-	this->Prerequisite.clear();
+	//this->Prerequisite.clear();
 	key = "Prerequisite";
 	context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
@@ -549,7 +549,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	key = nullptr;
 
 	// Prerequisite.Negative with Generic Prerequistes support
-	this->Prerequisite_Negative.clear();
+	//this->Prerequisite_Negative.clear();
 	key = "Prerequisite.Negative";
 	context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
@@ -572,7 +572,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	key = nullptr;
 
 	// Prerequisite.ListX with Generic Prerequistes support
-	this->Prerequisite_ListVector.clear();
+	//this->Prerequisite_ListVector.clear();
 	this->Prerequisite_Lists.Read(exINI, pSection, "Prerequisite.Lists");
 
 	if (Prerequisite_Lists.Get() > 0)
