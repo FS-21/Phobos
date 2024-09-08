@@ -1023,13 +1023,13 @@ bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
 	if (!pTechno)
 		return false;
 
-	bool isValid = (pTechno->WhatAmI() == AbstractType::Infantry
+	bool isValid = !pTechno->Dirty
+		&& TechnoExt::IsUnitAvailable(pTechno, true)
+		&& pTechno->Owner
+		&& (pTechno->WhatAmI() == AbstractType::Infantry
 			|| pTechno->WhatAmI() == AbstractType::Unit
 			|| pTechno->WhatAmI() == AbstractType::Building
-			|| pTechno->WhatAmI() == AbstractType::Aircraft)
-		&& !pTechno->Dirty
-		&& TechnoExt::IsUnitAvailable(pTechno, true)
-		&& pTechno->Owner;
+			|| pTechno->WhatAmI() == AbstractType::Aircraft);
 
 	return isValid;
 }
