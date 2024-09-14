@@ -754,6 +754,26 @@ DEFINE_HOOK(0x6F9FA9, TechnoClass_AI_PromoteAnim, 0x6)
 // TODO: Investigate if it is possible to fix the shadows not tilting on the burrowing etc. states.
 DEFINE_JUMP(LJMP, 0x72A070, 0x72A07F);
 
+
+DEFINE_HOOK(0x51B20E, InfantryClass_AssignTarget_FireOnce, 0x6)
+{
+	enum { SkipGameCode = 0x51B255 };
+
+	GET(InfantryClass*, pThis, ESI);
+	GET(AbstractClass*, pTarget, EBX);
+
+	auto const pExt = TechnoExt::ExtMap.Find(pThis);
+
+	if (!pTarget && pExt->SkipTargetChangeResetSequence)
+	{
+		pThis->IsFiring = false;
+		pExt->SkipTargetChangeResetSequence = false;
+		return SkipGameCode;
+	}
+
+	return 0;
+}
+
 DEFINE_HOOK(0x51E440, InfantryClass_AI_WhatAction2_EngineerRepairWeapon, 0x8)
 {
 	enum { Skip = 0x51E458 };
