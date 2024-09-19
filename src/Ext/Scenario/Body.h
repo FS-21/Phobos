@@ -38,6 +38,8 @@ public:
 		std::vector<TechnoExt::ExtData*> TransportReloaders; // Objects that can reload ammo in limbo
 
 		std::vector<double> AITriggerWeigths;
+
+		char ScenarioFileName[260];
 		
 		ExtData(ScenarioClass* OwnerObject) : Extension<ScenarioClass>(OwnerObject)
 			, ShowBriefing { false }
@@ -47,6 +49,7 @@ public:
 			, AutoDeathObjects {}
 			, TransportReloaders {}
 			, AITriggerWeigths { }
+			, ScenarioFileName { "" }
 		{ }
 
 		void SetVariableToByID(bool bIsGlobal, int nIndex, char bState);
