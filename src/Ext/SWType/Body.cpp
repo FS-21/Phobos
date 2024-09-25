@@ -49,6 +49,7 @@ void SWTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_Anim)
 		.Process(this->ShowDesignatorRange)
 		.Process(this->Convert_UseUniversalDeploy)
+		.Process(this->TabIndex)
 		.Process(this->UseWeeds)
 		.Process(this->UseWeeds_Amount)
 		.Process(this->UseWeeds_StorageTimer)
@@ -204,6 +205,9 @@ void SWTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->ShowDesignatorRange.Read(exINI, pSection, "ShowDesignatorRange");
 
 	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
+
+	this->TabIndex.Read(exINI, pSection, "TabIndex");
+	GeneralUtils::IntValidCheck(&this->TabIndex, pSection, "TabIndex", 1, 0, 3);
 
 	this->UseWeeds.Read(exINI, pSection, "UseWeeds");
 	this->UseWeeds_Amount.Read(exINI, pSection, "UseWeeds.Amount");

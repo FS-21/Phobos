@@ -60,6 +60,8 @@ public:
 		Valueable<bool> Detonate_AtFirer;
 		Valueable<bool> ShowDesignatorRange;
 
+		Valueable<int> TabIndex;
+
 		std::vector<ValueableVector<int>> LimboDelivery_RandomWeightsData;
 		std::vector<ValueableVector<int>> SW_Next_RandomWeightsData;
 		std::vector<ValueableVector<int>> SW_GrantOneTime_RandomWeightsData;
@@ -121,6 +123,7 @@ public:
 			, Convert_Anim {}
 			, ShowDesignatorRange { true }
 			, Convert_UseUniversalDeploy { false }
+			, TabIndex { 1 }
 			, UseWeeds { false }
 			, UseWeeds_Amount { RulesClass::Instance->WeedCapacity }
 			, UseWeeds_StorageTimer { false }
