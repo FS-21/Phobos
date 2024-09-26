@@ -39,6 +39,7 @@ public:
 		BuildingClass* Factory_AircraftType;
 
 		CDTimerClass AISuperWeaponDelayTimer;
+		CDTimerClass AIFireSaleDelayTimer;
 
 		std::vector<int> AITriggers_ValidList;
 
@@ -80,6 +81,7 @@ public:
 			, NumWarFactories_NonMFB { 0 }
 			, NumConYards_NonMFB { 0 }
 			, NumShipyards_NonMFB { 0 }
+			, AIFireSaleDelayTimer {}
 			, ForceOnlyTargetHouseEnemy { false }
 			, ForceOnlyTargetHouseEnemyMode { -1 }
 		{ }
