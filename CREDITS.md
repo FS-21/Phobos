@@ -267,6 +267,7 @@ This page lists all the individual contributions to the project by their author.
   - Forbidding parallel AI queues for specific TechnoTypes
   - Nonprovocative Warheads
   - Cyborg legs being restored when the soldier enters into transports or structures
+  - Customizing effect of level lighting on air units
 - **Morton (MortonPL)**:
   - `XDrawOffset` for animations
   - Shield passthrough & absorption
