@@ -281,6 +281,8 @@ void AnimExt::InvalidateTechnoPointers(TechnoClass* pTechno)
 	for (auto const& pAnim : *AnimClass::Array)
 	{
 		auto const pExt = AnimExt::ExtMap.Find(pAnim);
+		if (!pExt)
+			continue;
 
 		if (pExt->Invoker == pTechno)
 			pExt->Invoker = nullptr;
