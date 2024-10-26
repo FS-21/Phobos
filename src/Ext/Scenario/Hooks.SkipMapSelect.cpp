@@ -45,6 +45,9 @@ DEFINE_HOOK(0x6859AB, ScenarioClass_DoWin_SkipMapSelect_PreFix, 0x6)
 		strcpy_s(ScenarioExt::Global()->ScenarioFileName, pThis->NextScenario);
 	}
 
+	//pThis->ReadScenarioINI(ScenarioExt::Global()->ScenarioFileName);
+	//--pThis->TechLevel;
+
 	return 0;
 }
 
@@ -74,7 +77,78 @@ DEFINE_HOOK(0x686C36, ScenarioClass_ReadScenarioINI_SkipMapSelect_ScenarioFileNa
 		return 0;
 
 	// Update scenario file name
+	//pThis->ReadScenarioINI(ScenarioExt::Global()->ScenarioFileName); // Infinite loop
 	strcpy_s(pThis->FileName, ScenarioExt::Global()->ScenarioFileName);
 
 	return 0;
 }
+
+/*
+DEFINE_HOOK(0x683D21, ScenarioClass_ReadScenarioINI_SkipMapSelect_ScenarioFileName_000, 0x5)
+{
+	GET(char*, root, EBP);
+	GET(char*, root2, ECX);
+
+	ScenarioClass* pThis = ScenarioClass::Instance;
+
+	R->EBP(pThis->FileName);
+	R->ECX(pThis->FileName);
+
+	return 0;
+}*/
+
+
+/*DEFINE_HOOK(0x684630, ScenarioClass_ReadScenarioINI_SkipMapSelect_ScenarioFileName_0000000, 0x5)
+{
+	//REF_STACK(float, amount, 0x1C);
+	GET(char*, root, EBP);
+	GET(char*, root2, ECX);
+
+	ScenarioClass* pThis = ScenarioClass::Instance;
+
+	//R->EBP(pThis->FileName);
+	//R->ECX(pThis->FileName);
+
+	return 0;
+}*/
+
+/*DEFINE_HOOK(0x683D02, ScenarioClass_ReadScenarioINI_SkipMapSelect_ScenarioFileName_0000000, 0x8)
+{
+	//REF_STACK(float, amount, 0x1C);
+	//GET(char*, root, EBP);
+	//GET(char*, root2, ECX);
+	GET(char*, v3, EBP);
+
+	ScenarioClass* pThis = ScenarioClass::Instance;
+	
+	//R->EBP(pThis->FileName);
+	//R->ECX(pThis->FileName);
+
+	return 0;
+}*/
+
+/*DEFINE_HOOK(0x683AB8, ScenarioClass_StartScenario_ScenarioFileName, 0x8)
+{
+	//REF_STACK(float, amount, 0x1C);
+	//GET(char*, root, EBP);
+	GET(char*, root, ECX);
+	GET(char*, v3, EBP);
+
+	ScenarioClass* pThis = ScenarioClass::Instance;
+
+	//R->EBP(pThis->FileName);
+	//R->ECX(pThis->FileName);
+
+	return 0;
+}*/
+
+/*DEFINE_HOOK(0x686D7F, ScenarioClass_ReadScenarioINI_ScenarioFileName00000, 0x6)
+{
+	ScenarioClass* pThis = ScenarioClass::Instance;
+	GET(char*, root, ECX);
+	GET(char*, root2, EDX);
+	GET(char*, root3, EAX);
+
+
+	return 0;
+}*/

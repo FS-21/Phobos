@@ -263,11 +263,11 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 			onlyPickDefensiveTeams = true;
 
 		if (hasReachedMaxDefensiveTeamsLimit)
-			Debug::Log("DEBUG: House [%s] (idx: %d) reached the MaximumAIDefensiveTeams value!\n", pHouse->Type->ID, pHouse->ArrayIndex);
+			Debug::Log("AITeamsSelector - House [%s] (idx: %d) reached the MaximumAIDefensiveTeams value!\n", pHouse->Type->ID, pHouse->ArrayIndex);
 
 		if (hasReachedMaxTeamsLimit)
 		{
-			Debug::Log("DEBUG: House [%s] (idx: %d) reached the TotalAITeamCap value!\n", pHouse->Type->ID, pHouse->ArrayIndex);
+			Debug::Log("AITeamsSelector - House [%s] (idx: %d) reached the TotalAITeamCap value!\n", pHouse->Type->ID, pHouse->ArrayIndex);
 			return SkipCode;
 		}
 
@@ -341,6 +341,18 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 			// Ignore the deactivated triggers
 			if (pTrigger->IsEnabled)
 			{
+				//pTrigger->OwnerHouseType;
+				if (pTrigger->TechLevel > pHouse->TechLevel)
+					continue;
+
+				// ignore it if isn't set for the house AI difficulty
+				if ((int)houseDifficulty == 0 && !pTrigger->Enabled_Hard
+					|| (int)houseDifficulty == 1 && !pTrigger->Enabled_Normal
+					|| (int)houseDifficulty == 2 && !pTrigger->Enabled_Easy)
+				{
+					continue;
+				}
+
 				// The trigger must be compatible with the owner
 				if ((triggerHouse == -1 || houseTypeIdx == triggerHouse) && (triggerSide == 0 || sideTypeIdx == triggerSide))
 				{
@@ -369,6 +381,30 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 							std::vector<TechnoTypeClass*> list;
 							list.push_back(pTrigger->ConditionObject);
 							bool isConditionMet = TeamExt::HouseOwns(pTrigger, pHouse, false, list);
+
+							if (!isConditionMet)
+								continue;
+						}// TO-DO: Case 2 & 3: https://modenc.renegadeprojects.com/AITriggerTypes
+						else if ((int)pTrigger->ConditionType == 4)
+						{
+							// Simulate case 5: "Enemy house economy threshold?"
+							bool isConditionMet = pTrigger->HouseCredits(nullptr, targetHouse);
+
+							if (!isConditionMet)
+								continue;
+						}
+						else if ((int)pTrigger->ConditionType == 5)
+						{
+							// Simulate case 5: "Iron Courtain is charged?"
+							bool isConditionMet = pTrigger->IronCurtainCharged(pHouse, nullptr);
+
+							if (!isConditionMet)
+								continue;
+						}
+						else if ((int)pTrigger->ConditionType == 6)
+						{
+							// Simulate case 6: "Chronosphere is charged?"
+							bool isConditionMet = pTrigger->ChronoSphereCharged(pHouse, nullptr);
 
 							if (!isConditionMet)
 								continue;
@@ -796,30 +832,30 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 			switch (validCategory)
 			{
 			case teamCategory::Ground:
-				Debug::Log("DEBUG: This time only will be picked GROUND teams.\n");
+				Debug::Log("AITeamsSelector - This time only will be picked GROUND teams.\n");
 				break;
 
 			case teamCategory::Unclassified:
-				Debug::Log("DEBUG: This time only will be picked MIXED teams.\n");
+				Debug::Log("AITeamsSelector - This time only will be picked MIXED teams.\n");
 				break;
 
 			case teamCategory::Naval:
-				Debug::Log("DEBUG: This time only will be picked NAVAL teams.\n");
+				Debug::Log("AITeamsSelector - This time only will be picked NAVAL teams.\n");
 				break;
 
 			case teamCategory::Air:
-				Debug::Log("DEBUG: This time only will be picked AIR teams.\n");
+				Debug::Log("AITeamsSelector - This time only will be picked AIR teams.\n");
 				break;
 
 			default:
-				Debug::Log("DEBUG: This time teams categories are DISABLED.\n");
+				Debug::Log("AITeamsSelector - This time teams categories are DISABLED.\n");
 				break;
 			}
 		}
 
 		if (validTriggerCandidates.Count == 0)
 		{
-			Debug::Log("DEBUG: [%s] (idx: %d) No valid triggers for now. A new attempt will be done later...\n", pHouse->Type->ID, pHouse->ArrayIndex);
+			Debug::Log("AITeamsSelector - [%s] (idx: %d) No valid triggers for now. A new attempt will be done later...\n", pHouse->Type->ID, pHouse->ArrayIndex);
 			return SkipCode;
 		}
 
@@ -828,12 +864,12 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 			|| (validCategory == teamCategory::Air && totalAirCategoryTriggers == 0)
 			|| (validCategory == teamCategory::Naval && totalNavalCategoryTriggers == 0))
 		{
-			Debug::Log("DEBUG: [%s] (idx: %d) No valid triggers of this category. A new attempt should be done later...\n", pHouse->Type->ID, pHouse->ArrayIndex);
+			Debug::Log("AITeamsSelector - [%s] (idx: %d) No valid triggers of this category. A new attempt should be done later...\n", pHouse->Type->ID, pHouse->ArrayIndex);
 
 			if (!isFallbackEnabled)
 				return SkipCode;
 
-			Debug::Log("... but fallback mode is enabled so now will be checked all available triggers.\n");
+			Debug::Log("... but FALLBACK MODE is enabled so now will be checked all available triggers.\n");
 			validCategory = teamCategory::None;
 		}
 
@@ -846,7 +882,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 		{
 		case teamCategory::None:
 			weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeight) * 1.0;
-			Debug::Log("Weight Dice: %f\n", weightDice);
+			Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
 
 			// Debug
 			/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
@@ -869,7 +905,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 		case teamCategory::Ground:
 			weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeightGroundOnly) * 1.0;
-			Debug::Log("Weight Dice: %f\n", weightDice);
+			Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
 
 			// Debug
 			/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
@@ -892,7 +928,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 		case teamCategory::Unclassified:
 			weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeightUnclassifiedOnly) * 1.0;
-			Debug::Log("Weight Dice: %f\n", weightDice);
+			Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
 
 			// Debug
 			/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
@@ -915,7 +951,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 		case teamCategory::Naval:
 			weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeightNavalOnly) * 1.0;
-			Debug::Log("Weight Dice: %f\n", weightDice);
+			Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
 
 			// Debug
 			/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
@@ -938,7 +974,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 		case teamCategory::Air:
 			weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeightAirOnly) * 1.0;
-			Debug::Log("Weight Dice: %f\n", weightDice);
+			Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
 
 			// Debug
 			/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
@@ -965,7 +1001,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 		if (!selectedTrigger)
 		{
-			Debug::Log("AI Team Selector: House [%s] (idx: %d) failed to select Trigger. A new attempt Will be done later...\n", pHouse->Type->ID, pHouse->ArrayIndex);
+			Debug::Log("AITeamsSelector - House [%s] (idx: %d) failed to select Trigger. A new attempt Will be done later...\n", pHouse->Type->ID, pHouse->ArrayIndex);
 			return SkipCode;
 		}
 
@@ -977,7 +1013,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 		}
 
 		// We have a winner trigger here
-		Debug::Log("AI Team Selector: House [%s] (idx: %d) selected trigger [%s]: %s.\n", pHouse->Type->ID, pHouse->ArrayIndex, selectedTrigger->ID, selectedTrigger->Team1->Name);
+		Debug::Log("AITeamsSelector - House [%s] (idx: %d) selected trigger [%s]: %s.\n", pHouse->Type->ID, pHouse->ArrayIndex, selectedTrigger->ID, selectedTrigger->Team1->Name);
 
 		// Team 1 creation
 		auto pTriggerTeam1Type = selectedTrigger->Team1;
