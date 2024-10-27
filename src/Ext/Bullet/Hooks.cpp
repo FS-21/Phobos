@@ -107,13 +107,12 @@ DEFINE_HOOK(0x466897, BulletClass_AI_Trailer, 0x6)
 	GET(BulletClass*, pThis, EBP);
 	GET_STACK(CoordStruct, coords, STACK_OFFSET(0x1A8, -0x184));
 
-	if (auto const pTrailerAnim = GameCreate<AnimClass>(pThis->Type->Trailer, coords, 1, 1))
-	{
-		auto const pTrailerAnimExt = AnimExt::ExtMap.Find(pTrailerAnim);
-		auto const pOwner = pThis->Owner ? pThis->Owner->Owner : BulletAITemp::ExtData->FirerHouse;
-		AnimExt::SetAnimOwnerHouseKind(pTrailerAnim, pOwner, nullptr, false, true);
-		pTrailerAnimExt->SetInvoker(pThis->Owner);
-	}
+	auto const pTrailerAnim = GameCreate<AnimClass>(pThis->Type->Trailer, coords, 1, 1);
+
+	auto const pTrailerAnimExt = AnimExt::ExtMap.Find(pTrailerAnim);
+	auto const pOwner = pThis->Owner ? pThis->Owner->Owner : BulletAITemp::ExtData->FirerHouse;
+	AnimExt::SetAnimOwnerHouseKind(pTrailerAnim, pOwner, nullptr, false, true);
+	pTrailerAnimExt->SetInvoker(pThis->Owner);
 
 	return SkipGameCode;
 }
@@ -309,9 +308,9 @@ DEFINE_HOOK(0x467CCA, BulletClass_AI_TargetSnapChecks, 0x6)
 	}
 	else if (auto const pExt = BulletAITemp::ExtData)
 	{
-		if (pExt->Trajectory)
+		if (auto pTraj = pExt->Trajectory.get())
 		{
-			if (pExt->Trajectory->Flag == TrajectoryFlag::Straight)
+			if (pTraj->Flag() == TrajectoryFlag::Straight)
 			{
 				R->EAX(pThis->Type);
 				return SkipChecks;
@@ -340,7 +339,7 @@ DEFINE_HOOK(0x468E61, BulletClass_Explode_TargetSnapChecks1, 0x6)
 	}
 	else if (auto const pExt = BulletExt::ExtMap.Find(pThis))
 	{
-		if (pExt->Trajectory && pExt->Trajectory->Flag == TrajectoryFlag::Straight && !pExt->SnappedToTarget)
+		if (pExt->Trajectory && pExt->Trajectory->Flag() == TrajectoryFlag::Straight && !pExt->SnappedToTarget)
 		{
 			R->EAX(pThis->Type);
 			return SkipChecks;
@@ -371,7 +370,7 @@ DEFINE_HOOK(0x468E9F, BulletClass_Explode_TargetSnapChecks2, 0x6)
 	// Fixes issues with walls etc.
 	if (auto const pExt = BulletExt::ExtMap.Find(pThis))
 	{
-		if (pExt->Trajectory && pExt->Trajectory->Flag == TrajectoryFlag::Straight && !pExt->SnappedToTarget)
+		if (pExt->Trajectory && pExt->Trajectory->Flag() == TrajectoryFlag::Straight && !pExt->SnappedToTarget)
 			return SkipSetCoordinate;
 	}
 
@@ -386,7 +385,7 @@ DEFINE_HOOK(0x468D3F, BulletClass_ShouldExplode_AirTarget, 0x6)
 
 	if (auto const pExt = BulletExt::ExtMap.Find(pThis))
 	{
-		if (pExt->Trajectory && pExt->Trajectory->Flag == TrajectoryFlag::Straight)
+		if (pExt->Trajectory && pExt->Trajectory->Flag() == TrajectoryFlag::Straight)
 			return SkipCheck;
 	}
 
