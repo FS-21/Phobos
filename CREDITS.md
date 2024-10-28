@@ -136,6 +136,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - Allow cyborg legs to be repaired when they enter into transports or structures
   - Mind Control Threshold
   - Web logic against infantry
   - ScriptType actions `10018` & `12003` for aircrafts attacks
@@ -270,6 +271,7 @@ This page lists all the individual contributions to the project by their author.
   - Build area customizations
   - `Scorch` / `Flamer` fire animation customization
   - EM Pulse cannon logic improvements
+  - Cyborg legs being restored when the soldier enters into transports or structures
 - **Morton (MortonPL)**:
   - `XDrawOffset` for animations
   - Shield passthrough & absorption
