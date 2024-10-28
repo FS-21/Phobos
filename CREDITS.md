@@ -134,6 +134,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - Script actions for manipulating script flows with conditional jumps
   - `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
   - Grant new superweapons in superweapons
   - Penetration damage on garrisonable structures
