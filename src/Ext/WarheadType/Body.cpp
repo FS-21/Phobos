@@ -323,6 +323,7 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->AttachEffects.AttachTypes.size() > 0
 		|| this->AttachEffects.RemoveTypes.size() > 0
 		|| this->AttachEffects.RemoveGroups.size() > 0
+		|| this->AmmoModifier
 		|| this->KickOutKickablePassengers
 	);
 
@@ -363,6 +364,8 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		else
 			this->SpawnsCrate_Weights.push_back(weight);
 	}
+
+	this->AmmoModifier.Read(exINI, pSection, "AmmoModifier");
 }
 
 template <typename T>
@@ -506,6 +509,8 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->PossibleCellSpreadDetonate)
 		.Process(this->Reflected)
 		.Process(this->DamageAreaTarget)
+
+		.Process(this->AmmoModifier)
 
 		.Process(this->Convert_UseUniversalDeploy)
 

@@ -168,6 +168,8 @@ public:
 		bool PossibleCellSpreadDetonate;
 		TechnoClass* DamageAreaTarget;
 
+		Valueable<int> AmmoModifier;
+
 		Valueable<bool> Convert_UseUniversalDeploy;
 
 		Valueable<bool> KickOutKickablePassengers;
@@ -323,6 +325,8 @@ public:
 			, PossibleCellSpreadDetonate { false }
 			, DamageAreaTarget {}
 
+			, AmmoModifier { 0 }
+
 			, Convert_UseUniversalDeploy { false }
 
 			, KickOutKickablePassengers { false }
@@ -360,6 +364,7 @@ public:
 		void ApplyShieldModifiers(TechnoClass* pTarget, TechnoExt::ExtData* pTargetExt);
 		void ApplyAttachEffects(TechnoClass* pTarget, HouseClass* pInvokerHouse, TechnoClass* pInvoker);
 		double GetCritChance(TechnoClass* pFirer) const;
+		void ApplyAmmoModifier(TechnoClass* pTarget, HouseClass* pInvokerHouse, BulletExt::ExtData* pBulletExt = nullptr);
 	};
 
 	class ExtContainer final : public Container<WarheadTypeExt>
