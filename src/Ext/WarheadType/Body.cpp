@@ -323,6 +323,7 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->AttachEffects.AttachTypes.size() > 0
 		|| this->AttachEffects.RemoveTypes.size() > 0
 		|| this->AttachEffects.RemoveGroups.size() > 0
+		|| this->GarrisonPenetration
 		|| this->AmmoModifier
 		|| this->KickOutKickablePassengers
 	);
@@ -364,6 +365,11 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		else
 			this->SpawnsCrate_Weights.push_back(weight);
 	}
+
+	this->GarrisonPenetration.Read(exINI, pSection, "GarrisonPenetration");
+	this->GarrisonPenetration_RandomTarget.Read(exINI, pSection, "GarrisonPenetration.RandomTarget");
+	this->GarrisonPenetration_DamageMultiplier.Read(exINI, pSection, "GarrisonPenetration.DamageMultiplier");
+	this->GarrisonPenetration_CleanSound.Read(exINI, pSection, "GarrisonPenetration.CleanSound");
 
 	this->AmmoModifier.Read(exINI, pSection, "AmmoModifier");
 }
@@ -509,6 +515,11 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->PossibleCellSpreadDetonate)
 		.Process(this->Reflected)
 		.Process(this->DamageAreaTarget)
+
+		.Process(this->GarrisonPenetration)
+		.Process(this->GarrisonPenetration_RandomTarget)
+		.Process(this->GarrisonPenetration_DamageMultiplier)
+		.Process(this->GarrisonPenetration_CleanSound)
 
 		.Process(this->AmmoModifier)
 

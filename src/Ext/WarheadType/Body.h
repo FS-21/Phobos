@@ -168,6 +168,11 @@ public:
 		bool PossibleCellSpreadDetonate;
 		TechnoClass* DamageAreaTarget;
 
+		Valueable<bool> GarrisonPenetration;
+		Valueable<bool> GarrisonPenetration_RandomTarget;
+		Valueable<PartialVector2D<double>> GarrisonPenetration_DamageMultiplier;
+		NullableIdx<VocClass> GarrisonPenetration_CleanSound;
+
 		Valueable<int> AmmoModifier;
 
 		Valueable<bool> Convert_UseUniversalDeploy;
@@ -325,6 +330,11 @@ public:
 			, PossibleCellSpreadDetonate { false }
 			, DamageAreaTarget {}
 
+			, GarrisonPenetration { false }
+			, GarrisonPenetration_RandomTarget { true }
+			, GarrisonPenetration_DamageMultiplier { { 1.0, 1.0 } }
+			, GarrisonPenetration_CleanSound { }
+
 			, AmmoModifier { 0 }
 
 			, Convert_UseUniversalDeploy { false }
@@ -364,6 +374,7 @@ public:
 		void ApplyShieldModifiers(TechnoClass* pTarget, TechnoExt::ExtData* pTargetExt);
 		void ApplyAttachEffects(TechnoClass* pTarget, HouseClass* pInvokerHouse, TechnoClass* pInvoker);
 		double GetCritChance(TechnoClass* pFirer) const;
+		void ApplyGarrisonPenetration(HouseClass* pInvokerHouse, TechnoClass* pTarget, TechnoClass* pInvoker, BulletExt::ExtData* pBulletExt);
 		void ApplyAmmoModifier(TechnoClass* pTarget, HouseClass* pInvokerHouse, BulletExt::ExtData* pBulletExt = nullptr);
 	};
 
