@@ -128,6 +128,13 @@ public:
 		Valueable<bool> DrawTurretShadow;
 		ValueableIdx<ColorScheme> AnimRemapDefaultColorScheme;
 		ValueableIdx<ColorScheme> TimerBlinkColorScheme;
+		Valueable<bool> AILearning;
+		Nullable<int> AILearning_Weight_Max;
+		Nullable<int> AILearning_Weight_Min;
+		Nullable<int> AILearning_Weight_Increment;
+		Nullable<int> AILearning_Weight_Decrement;
+		std::string AILearning_ScenarioName;
+		Valueable<bool> AILearning_OnlySupportedMaps;
 
 		ValueableVector<DigitalDisplayTypeClass*> Buildings_DefaultDigitalDisplayTypes;
 		ValueableVector<DigitalDisplayTypeClass*> Infantry_DefaultDigitalDisplayTypes;
@@ -279,6 +286,13 @@ public:
 			, Vehicles_DefaultDigitalDisplayTypes {}
 			, Aircraft_DefaultDigitalDisplayTypes {}
 			, ShowDesignatorRange { true }
+			, AILearning { false }
+			, AILearning_Weight_Max { }
+			, AILearning_Weight_Min { }
+			, AILearning_Weight_Increment { }
+			, AILearning_Weight_Decrement { }
+			, AILearning_ScenarioName { }
+			, AILearning_OnlySupportedMaps { true }
 			, GenericPrerequisites { }
 			, GenericPrerequisitesNames { }
 			, NewTeamsSelector { false }
