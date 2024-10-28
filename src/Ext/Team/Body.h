@@ -37,6 +37,9 @@ public:
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
 		std::vector<ScriptClass*> PreviousScriptList;
+		int AngerNodeModifier;
+		bool OnlyTargetHouseEnemy;
+		int OnlyTargetHouseEnemyMode;
 		bool ConditionalJump_Evaluation;
 		int ConditionalJump_ComparatorMode;
 		int ConditionalJump_ComparatorValue;
@@ -60,6 +63,9 @@ public:
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
 			, PreviousScriptList { }
+			, AngerNodeModifier { 5000 }
+			, OnlyTargetHouseEnemy { false }
+			, OnlyTargetHouseEnemyMode { -1 }
 			, ConditionalJump_Evaluation { false }
 			, ConditionalJump_ComparatorMode { 3 }
 			, ConditionalJump_ComparatorValue { 1 }
