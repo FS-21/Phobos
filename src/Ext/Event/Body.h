@@ -12,10 +12,10 @@ enum class EventTypeExt : uint8_t
 
 	SyncEngineerGuardDestination = 0x45,
 	SyncWeaponizedEngineerGuard = 0x48,
-	SyncStopTarNav = 0x49,
+	SyncEngineerGuardStopTarNav = 0x4A,
 
 	FIRST = SyncEngineerGuardDestination,
-	LAST = SyncStopTarNav
+	LAST = SyncEngineerGuardStopTarNav
 };
 
 #pragma pack(push, 1)
@@ -30,10 +30,10 @@ public:
 	{
 		char DataBuffer[104];
 
-		struct SyncStopTarNav
+		struct SyncEngineerGuardStopTarNav
 		{
 			int TechnoUniqueID;
-		} SyncStopTarNav;
+		} SyncEngineerGuardStopTarNav;
 
 		struct SyncWeaponizedEngineerGuard
 		{

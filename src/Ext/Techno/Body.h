@@ -188,8 +188,8 @@ public:
 	static WeaponTypeClass* GetCurrentWeapon(TechnoClass* pThis, bool getSecondary = false);
 	static int GetWeaponIndexAgainstWall(TechnoClass* pThis, OverlayTypeClass* pWallOverlayType);
 
-	static void SendStopTarNav(TechnoClass* pThis);
-	static void HandleStopTarNav(EventExt* event);
+	static void SendEngineerGuardStopTarNav(TechnoClass* pThis);
+	static void HandleEngineerGuardStopTarNav(EventExt* event);
 	static void SendEngineerGuardDestination(TechnoClass* pThis, AbstractClass* pDestination);
 	static void HandleEngineerGuardDestination(EventExt* event);
 	static void SendWeaponizedEngineerGuard(TechnoClass* pThis);

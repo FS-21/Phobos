@@ -14,8 +14,8 @@ void EventExt::RespondEvent()
 {
 	switch (this->Type)
 	{
-	case EventTypeExt::SyncStopTarNav:
-		TechnoExt::HandleStopTarNav(this);
+	case EventTypeExt::SyncEngineerGuardStopTarNav:
+		TechnoExt::HandleEngineerGuardStopTarNav(this);
 		break;
 	case EventTypeExt::SyncEngineerGuardDestination:
 		TechnoExt::HandleEngineerGuardDestination(this);
@@ -30,8 +30,8 @@ size_t EventExt::GetDataSize(EventTypeExt type)
 {
 	switch (type)
 	{
-	case EventTypeExt::SyncStopTarNav:
-		return sizeof(EventExt::SyncStopTarNav);
+	case EventTypeExt::SyncEngineerGuardStopTarNav:
+		return sizeof(EventExt::SyncEngineerGuardStopTarNav);
 	case EventTypeExt::SyncEngineerGuardDestination:
 		return sizeof(EventExt::SyncEngineerGuardDestination);
 	case EventTypeExt::SyncWeaponizedEngineerGuard:
