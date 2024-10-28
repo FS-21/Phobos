@@ -136,6 +136,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - Mind Control Threshold
   - Web logic against infantry
   - ScriptType actions `10018` & `12003` for aircrafts attacks
   - Map Action 600 for overwriting DropCrate behaviour in attached Technos
