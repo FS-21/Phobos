@@ -38,6 +38,8 @@ public:
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
 		std::vector<ScriptClass*> PreviousScriptList;
+		int TriggersSideIdx;
+		int TriggersHouseIdx;
 		int MinAmmoThreshold;
 		std::vector<TechnoClass*> BridgeRepairHuts;
 		int AngerNodeModifier;
@@ -66,6 +68,8 @@ public:
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
 			, PreviousScriptList { }
+			, TriggersSideIdx { -1 }
+			, TriggersHouseIdx { -1 }
 			, MinAmmoThreshold { 0 }
 			, BridgeRepairHuts { }
 			, AngerNodeModifier { 5000 }
