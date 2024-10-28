@@ -218,6 +218,7 @@ HideLightFlashEffects=false      ; boolean
   10102=Regroup Temporarily Around the Team Leader,20,0,1,[LONG DESC]
   10103=Load Onto Transports,0,0,1,[LONG DESC]
   10104=Chronoshift to Enemy Base,20,0,1,[LONG DESC]
+  10105=Repair Destroyed Bridge,20,0,1,[LONG DESC]
   14006=Set House Hate Value Modifier,20,0,1,[LONG DESC]
   14007=Modify House Hate Using House Index,20,0,1,[LONG DESC]
   14008=Modify Hate Values From A List Of Countries,28,0,1,[LONG DESC]
@@ -400,6 +401,7 @@ New:
 - Allow toggling `Infantry/UnitsGainSelfHeal` for `MultiplayPassive=true` houses (by Starkku)
 - Customizable straight trajectory detonation & snap distance and pass-through option (by Starkku)
 - Airstrike & spy plane fixed spawn distance & height (by Starkku)
+- Script action for repairing destroyed bridges (by FS-21)
 - Allow enabling application of `Verses` and `PercentAtMax` for negative damage (by Starkku)
 - Script actions for manipulating script flows with conditional jumps (by FS-21)
 - In addition to `PlacementGrid.Translucency`, allow to set the transparency of the grid when PlacementPreview is enabled, using the `PlacementGrid.TranslucencyWithPreview` tag (by Belonit).
