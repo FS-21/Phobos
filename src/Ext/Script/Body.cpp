@@ -344,9 +344,19 @@ void ScriptExt::WaitUntilFullAmmoAction(TeamClass* pTeam)
 						// Reset last target, at long term battles this prevented the aircraft to pick a new target (rare vanilla YR bug)
 						pUnit->SetTarget(nullptr);
 						pUnit->LastTarget = nullptr;
+
 						// Fix YR bug (when returns from the last attack the aircraft switch in loop between Mission::Enter & Mission::Guard, making it impossible to land in the dock)
 						if (pUnit->IsInAir() && pUnit->CurrentMission != Mission::Enter)
-							pUnit->QueueMission(Mission::Enter, true);
+						{
+							//pUnit->QueueMission(Mission::Enter, true);
+							pAircraft->IsLocked = false;
+							pAircraft->MissionStatus = (int)AirAttackStatus::ReturnToBase;
+
+							if (pAircraft->vt_entry_4C4())
+								pAircraft->vt_entry_4A8();
+
+							pAircraft->EnterIdleMode(false, true);
+						}
 
 						return;
 					}
