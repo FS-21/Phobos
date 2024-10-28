@@ -151,6 +151,12 @@ public:
 		Valueable<bool> SuppressReflectDamage;
 		ValueableVector<AttachEffectTypeClass*> SuppressReflectDamage_Types;
 
+		Valueable<bool> Webby;
+		ValueableVector<AnimTypeClass*> Webby_Anims;
+		Valueable<int> Webby_Duration;
+		Valueable<int> Webby_DurationVariation;
+		Valueable<int> Webby_Cap;
+
 		// Ares tags
 		// http://ares-developers.github.io/Ares-docs/new/warheads/general.html
 		Valueable<bool> AffectsEnemies;
@@ -329,6 +335,12 @@ public:
 			, RemainingAnimCreationInterval { 0 }
 			, PossibleCellSpreadDetonate { false }
 			, DamageAreaTarget {}
+
+			, Webby { false }
+			, Webby_Anims {}
+			, Webby_Duration { 0 }
+			, Webby_DurationVariation { 0 }
+			, Webby_Cap { -1 }
 
 			, GarrisonPenetration { false }
 			, GarrisonPenetration_RandomTarget { true }

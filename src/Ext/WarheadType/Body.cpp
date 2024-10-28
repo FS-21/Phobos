@@ -266,6 +266,12 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->SuppressReflectDamage.Read(exINI, pSection, "SuppressReflectDamage");
 	this->SuppressReflectDamage_Types.Read(exINI, pSection, "SuppressReflectDamage.Types");
 
+	this->Webby.Read(exINI, pSection, "Webby");
+	this->Webby_Anims.Read(exINI, pSection, "Webby.Anims");
+	this->Webby_Duration.Read(exINI, pSection, "Webby.Duration");
+	this->Webby_DurationVariation.Read(exINI, pSection, "Webby.DurationVariation");
+	this->Webby_Cap.Read(exINI, pSection, "Webby.Cap");
+
 	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
 
 	// Convert.From & Convert.To
@@ -504,6 +510,12 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->CombatLightChance)
 		.Process(this->CLIsBlack)
 		.Process(this->Particle_AlphaImageIsLightFlash)
+
+		.Process(this->Webby)
+		.Process(this->Webby_Anims)
+		.Process(this->Webby_Duration)
+		.Process(this->Webby_DurationVariation)
+		.Process(this->Webby_Cap)
 
 		// Ares tags
 		.Process(this->AffectsEnemies)

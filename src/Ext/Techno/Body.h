@@ -59,6 +59,12 @@ public:
 		int DropCrate; // Drop crate on death, modified by map action
 		Powerup DropCrateType;
 
+		int	WebbyDurationCountDown;
+		CDTimerClass WebbyDurationTimer;
+		AnimClass* WebbyAnim;
+		AbstractClass* WebbyLastTarget;
+		Mission WebbyLastMission;
+
 		AnimClass* Convert_UniversalDeploy_DeployAnim;
 		bool Convert_UniversalDeploy_InProgress;
 		bool Convert_UniversalDeploy_MakeInvisible;
@@ -97,6 +103,11 @@ public:
 			, HasRemainingWarpInDelay { false }
 			, LastWarpInDelay { 0 }
 			, IsBeingChronoSphered { false }
+			, WebbyDurationCountDown { -1 }
+			, WebbyDurationTimer {}
+			, WebbyAnim { nullptr }
+			, WebbyLastTarget { nullptr }
+			, WebbyLastMission { Mission::Sleep }
 			, DropCrate { -1 }
 			, DropCrateType { Powerup::Money }
 			, Convert_UniversalDeploy_DeployAnim { nullptr }
@@ -128,6 +139,7 @@ public:
 		void UpdateSelfOwnedAttachEffects();
 		bool HasAttachedEffects(std::vector<AttachEffectTypeClass*> attachEffectTypes, bool requireAll, bool ignoreSameSource, TechnoClass* pInvoker, AbstractClass* pSource, std::vector<int> const* minCounts, std::vector<int> const* maxCounts) const;
 		int GetAttachedEffectCumulativeCount(AttachEffectTypeClass* pAttachEffectType, bool ignoreSameSource = false, TechnoClass* pInvoker = nullptr, AbstractClass* pSource = nullptr) const;
+		void WebbyUpdate();
 
 		virtual ~ExtData() override;
 
@@ -137,8 +149,9 @@ public:
 			AnnounceInvalidPointer(Convert_UniversalDeploy_TemporalTechno, ptr);
 			AnnounceInvalidPointer(Convert_UniversalDeploy_DeployAnim, ptr);
 			AnnounceInvalidPointer(Convert_UniversalDeploy_RememberTarget, ptr);
+			AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
+			AnnounceInvalidPointer(WebbyLastTarget, ptr);
 		}
-
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 		virtual void SaveToStream(PhobosStreamWriter& Stm) override;
 
