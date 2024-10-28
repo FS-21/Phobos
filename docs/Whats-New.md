@@ -470,6 +470,7 @@ New:
 - `Scorch` / `Flamer` fire animation customization (by Starkku)
 - Warheads parasite removal customization (by Starkku)
 - Allow infantry to use land sequences in water (by Starkku)
+- Map action 507 for printing a message with the remaining map objects (by FS-21)
 - Modify Ammo on impact (by FS-21)
 
 Vanilla fixes:
