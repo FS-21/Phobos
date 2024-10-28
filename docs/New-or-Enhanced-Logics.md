@@ -875,6 +875,20 @@ EMPulse.SuspendOthers=false  ; boolean
 `Type=EMPulse` superweapon and any associated keys are [Ares features](https://ares-developers.github.io/Ares-docs/new/superweapons/types/empulse.html).
 ```
 
+### Universal deploy from any techno into any techno
+- Extension of the above logic. Replaces the internal logic (Ares code) by a new implementation capable to convert any techno into any techno. Only valid in warheads and superweapons.
+- `Convert.Anim` plays an animation on the converted techno using `Convert.UseUniversalDeploy`.
+
+```
+[SOMEWARHEAD]                     ; Warhead
+Convert.UseUniversalDeploy=false  ; Boolean
+Convert.Anim=                     ; Animation
+
+[SOMESW]                          ; Superweapon
+Convert.UseUniversalDeploy=false  ; Boolean
+Convert.Anim=                     ; Animation
+```
+
 ### LimboDelivery
 
 - Superweapons can now deliver off-map buildings that act as if they were on the field.

@@ -133,6 +133,7 @@ public:
 		ValueableVector<TechnoTypeClass*> DetonateOnAllMapObjects_IgnoreTypes;
 
 		std::vector<TypeConvertGroup> Convert_Pairs;
+		Nullable<AnimTypeClass*> Convert_Anim;
 		AEAttachInfoTypeClass AttachEffects;
 
 		Valueable<bool> InflictLocomotor;
@@ -166,6 +167,8 @@ public:
 		int RemainingAnimCreationInterval;
 		bool PossibleCellSpreadDetonate;
 		TechnoClass* DamageAreaTarget;
+
+		Valueable<bool> Convert_UseUniversalDeploy;
 
 		Valueable<bool> KickOutKickablePassengers;
 
@@ -287,6 +290,7 @@ public:
 			, DetonateOnAllMapObjects_IgnoreTypes {}
 
 			, Convert_Pairs {}
+			, Convert_Anim {}
 			, AttachEffects {}
 
 			, InflictLocomotor { false }
@@ -318,6 +322,8 @@ public:
 			, RemainingAnimCreationInterval { 0 }
 			, PossibleCellSpreadDetonate { false }
 			, DamageAreaTarget {}
+
+			, Convert_UseUniversalDeploy { false }
 
 			, KickOutKickablePassengers { false }
 		{ }

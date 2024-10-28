@@ -11,6 +11,7 @@
 #include <Ext/Script/Body.h>
 
 #include <Utilities/AresFunctions.h>
+#include <Ext/CaptureManager/Body.h>
 
 TechnoExt::ExtContainer TechnoExt::ExtMap;
 
@@ -34,6 +35,72 @@ TechnoExt::ExtData::~ExtData()
 	}
 
 	AnimExt::InvalidateTechnoPointers(pThis);
+}
+
+void TechnoExt::TransferMindControlOnDeploy(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo)
+{
+	auto pAnimType = pTechnoFrom->MindControlRingAnim ?
+		pTechnoFrom->MindControlRingAnim->Type : TechnoExt::ExtMap.Find(pTechnoFrom)->MindControlRingAnimType;
+
+	if (auto Controller = pTechnoFrom->MindControlledBy)
+	{
+		if (auto Manager = Controller->CaptureManager)
+		{
+			CaptureManagerExt::FreeUnit(Manager, pTechnoFrom, true);
+
+			if (CaptureManagerExt::CaptureUnit(Manager, pTechnoTo, false, pAnimType, true))
+			{
+				if (auto pBld = abstract_cast<BuildingClass*>(pTechnoTo))
+				{
+					// Capturing the building after unlimbo before buildup has finished or even started appears to throw certain things off,
+					// Hopefully this is enough to fix most of it like anims playing prematurely etc.
+					pBld->ActuallyPlacedOnMap = false;
+					pBld->DestroyNthAnim(BuildingAnimSlot::All);
+
+					pBld->BeginMode(BStateType::Construction);
+					pBld->QueueMission(Mission::Construction, false);
+				}
+			}
+			else
+			{
+				int nSound = pTechnoTo->GetTechnoType()->MindClearedSound;
+				if (nSound == -1)
+					nSound = RulesClass::Instance->MindClearedSound;
+
+				if (nSound != -1)
+					VocClass::PlayIndexAtPos(nSound, pTechnoTo->Location);
+			}
+		}
+	}
+	else if (auto MCHouse = pTechnoFrom->MindControlledByHouse)
+	{
+		pTechnoTo->MindControlledByHouse = MCHouse;
+		pTechnoFrom->MindControlledByHouse = nullptr;
+	}
+	else if (pTechnoFrom->MindControlledByAUnit) // Perma MC
+	{
+		pTechnoTo->MindControlledByAUnit = true;
+
+		auto const pBuilding = abstract_cast<BuildingClass*>(pTechnoTo);
+		CoordStruct location = pTechnoTo->GetCoords();
+
+		location.Z += pBuilding
+			? pBuilding->Type->Height * Unsorted::LevelHeight
+			: pTechnoTo->GetTechnoType()->MindControlRingOffset;
+
+		auto const pAnim = pAnimType
+			? GameCreate<AnimClass>(pAnimType, location, 0, 1)
+			: nullptr;
+
+		if (pAnim)
+		{
+			if (pBuilding)
+				pAnim->ZAdjust = -1024;
+
+			pTechnoTo->MindControlRingAnim = pAnim;
+			pAnim->SetOwnerObject(pTechnoTo);
+		}
+	}
 }
 
 bool TechnoExt::IsActive(TechnoClass* pThis)
@@ -126,7 +193,7 @@ double TechnoExt::GetCurrentSpeedMultiplier(FootClass* pThis)
 		(pThis->HasAbility(Ability::Faster) ? RulesClass::Instance->VeteranSpeed : 1.0);
 }
 
-CoordStruct TechnoExt::PassengerKickOutLocation(TechnoClass* pThis, FootClass* pPassenger, int maxAttempts = 1)
+CoordStruct TechnoExt::PassengerKickOutLocation(TechnoClass* pThis, FootClass* pPassenger, int maxAttempts)
 {
 	if (!pThis || !pPassenger)
 		return CoordStruct::Empty;
@@ -353,6 +420,40 @@ bool TechnoExt::CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaul
 		canDeploy = false;
 
 	pThis->Locomotor->Mark_All_Occupation_Bits(MarkType::Down);
+	pThis->Mark(MarkType::Down);
+
+	return canDeploy;
+}
+
+// Checks if a structure can deploy into another at its current location. If the building has problems forplacing the new one returns noDeploysIntoDefaultValue (def = false) instead.
+// If a building is specified then it will be used by default.
+bool TechnoExt::CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue, BuildingTypeClass* pBuildingType)
+{
+	if (!pThis)
+		return false;
+
+	auto pDeployType = pBuildingType;
+
+	if (!pDeployType)
+	{
+		auto pBldTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+		if (!pBldTypeExt || !pBldTypeExt->Convert_UniversalDeploy.isset())
+			return noDeploysIntoDefaultValue;
+
+		pDeployType = static_cast<BuildingTypeClass*>(pBldTypeExt->Convert_UniversalDeploy.Get());
+	}
+
+	if (!pDeployType)
+		return noDeploysIntoDefaultValue;
+
+	bool canDeploy = true;
+	auto mapCoords = CellClass::Coord2Cell(pThis->GetCoords());
+
+	pThis->Mark(MarkType::Up);
+
+	if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
+		canDeploy = false;
+
 	pThis->Mark(MarkType::Down);
 
 	return canDeploy;
@@ -662,6 +763,12 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->HasRemainingWarpInDelay)
 		.Process(this->LastWarpInDelay)
 		.Process(this->IsBeingChronoSphered)
+		.Process(this->Convert_UniversalDeploy_DeployAnim)
+		.Process(this->Convert_UniversalDeploy_InProgress)
+		.Process(this->Convert_UniversalDeploy_MakeInvisible)
+		.Process(this->Convert_UniversalDeploy_TemporalTechno)
+		.Process(this->Convert_UniversalDeploy_IsOriginalDeployer)
+		.Process(this->Convert_UniversalDeploy_RememberTarget)
 		;
 }
 
