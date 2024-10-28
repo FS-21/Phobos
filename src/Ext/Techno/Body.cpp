@@ -523,17 +523,18 @@ void TechnoExt::HandleStopTarNav(EventExt* event)
 			auto const pExt = TechnoExt::ExtMap.Find(pTechno);
 			pExt->WeaponizedEngineer_GuardDestination = nullptr;
 
-			pTechno->SetTarget(nullptr);
 			//pExt->CurrentRandomTarget = nullptr;
 			//pExt->OriginalTarget = nullptr;
 			pTechno->SetDestination(nullptr, true);
+			pTechno->ForceMission(Mission::Guard);
 
-			auto pFoot = abstract_cast<FootClass*>(pTechno);
+			//auto pFoot = abstract_cast<FootClass*>(pTechno);
 
-			if (pFoot->Locomotor->Is_Moving_Now())
-				pFoot->StopMoving();
+			//if (pFoot->Locomotor->Is_Moving_Now())
+				//pFoot->StopMoving();
 
-			pTechno->QueueMission(Mission::Guard, false);
+			//pTechno->QueueMission(Mission::Guard, false);
+
 			break;
 		}
 	}
@@ -544,20 +545,27 @@ void TechnoExt::SendEngineerGuardDestination(TechnoClass* pThis, AbstractClass* 
 	EventExt event;
 	event.Type = EventTypeExt::SyncEngineerGuardDestination;
 	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
-	event.Frame = Unsorted::CurrentFrame;//currentFrame + Game::Network::MaxAhead;
+	event.Frame = Unsorted::CurrentFrame;
 
-	event.SyncEngineerGuardDestination.GuardDestination = pDestination;
+	//event.SyncEngineerGuardDestination.GuardDestination = pDestination;
 	event.SyncEngineerGuardDestination.TechnoUniqueID = pThis->UniqueID;
+	event.SyncEngineerGuardDestination.GuardDestinationID = pDestination->UniqueID;
 
-	event.AddEvent();
+	if (pDestination)
+		event.AddEvent();
 }
 
 void TechnoExt::HandleEngineerGuardDestination(EventExt* event)
 {
 	int technoUniqueID = event->SyncEngineerGuardDestination.TechnoUniqueID;
-	auto guardDestination = static_cast<TechnoClass*>(event->SyncEngineerGuardDestination.GuardDestination);
+	int guardDestinationID = event->SyncEngineerGuardDestination.GuardDestinationID;
+	//AbstractClass* pAbstract = event->SyncEngineerGuardDestination.GuardDestination;
 
-	for (auto pTechno : *TechnoClass::Array)
+	//auto guardDestination = static_cast<TechnoClass*>(pAbstract);
+	//if (!guardDestination)
+		//return;
+
+	/*for (auto pTechno : *TechnoClass::Array)
 	{
 		if (pTechno && pTechno->UniqueID == technoUniqueID)
 		{
@@ -565,6 +573,21 @@ void TechnoExt::HandleEngineerGuardDestination(EventExt* event)
 
 			if (TechnoExt::IsValidTechno(guardDestination))
 				pExt->WeaponizedEngineer_GuardDestination = guardDestination;
+			else
+				pExt->WeaponizedEngineer_GuardDestination = nullptr;
+
+			break;
+		}
+	}*/
+
+	for (auto pTechno : *TechnoClass::Array)
+	{
+		if (pTechno && pTechno->UniqueID == guardDestinationID)
+		{
+			auto const pExt = TechnoExt::ExtMap.Find(pTechno);
+
+			if (TechnoExt::IsValidTechno(pTechno))
+				pExt->WeaponizedEngineer_GuardDestination = pTechno;
 			else
 				pExt->WeaponizedEngineer_GuardDestination = nullptr;
 

@@ -43,7 +43,7 @@ public:
 		struct SyncEngineerGuardDestination
 		{
 			int TechnoUniqueID;
-			AbstractClass* GuardDestination;
+			int GuardDestinationID;
 		} SyncEngineerGuardDestination;
 	};
 
