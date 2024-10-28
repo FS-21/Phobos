@@ -272,6 +272,12 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->SuppressReflectDamage.Read(exINI, pSection, "SuppressReflectDamage");
 	this->SuppressReflectDamage_Types.Read(exINI, pSection, "SuppressReflectDamage.Types");
 
+	this->CanRemoveParasites.Read(exINI, pSection, "CanRemoveParasites");
+	this->CanRemoveParasites_KickOut.Read(exINI, pSection, "CanRemoveParasites.KickOut");
+	this->CanRemoveParasites_KickOut_Paralysis.Read(exINI, pSection, "CanRemoveParasites.KickOut.Paralysis");
+	this->CanRemoveParasites_ReportSound.Read(exINI, pSection, "CanRemoveParasites.ReportSound");
+	this->CanRemoveParasites_KickOut_Anim.Read(exINI, pSection, "CanRemoveParasites.KickOut.Anim");
+
 	this->Webby.Read(exINI, pSection, "Webby");
 	this->Webby_Anims.Read(exINI, pSection, "Webby.Anims");
 	this->Webby_Duration.Read(exINI, pSection, "Webby.Duration");
@@ -539,6 +545,12 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->PossibleCellSpreadDetonate)
 		.Process(this->Reflected)
 		.Process(this->DamageAreaTarget)
+
+		.Process(this->CanRemoveParasites)
+		.Process(this->CanRemoveParasites_KickOut)
+		.Process(this->CanRemoveParasites_KickOut_Paralysis)
+		.Process(this->CanRemoveParasites_ReportSound)
+		.Process(this->CanRemoveParasites_KickOut_Anim)
 
 		.Process(this->GarrisonPenetration)
 		.Process(this->GarrisonPenetration_RandomTarget)

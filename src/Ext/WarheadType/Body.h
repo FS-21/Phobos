@@ -180,6 +180,12 @@ public:
 		bool PossibleCellSpreadDetonate;
 		TechnoClass* DamageAreaTarget;
 
+		Valueable<bool> CanRemoveParasites;
+		Valueable<bool> CanRemoveParasites_KickOut;
+		Valueable<int> CanRemoveParasites_KickOut_Paralysis;
+		NullableIdx<VocClass> CanRemoveParasites_ReportSound;
+		Nullable<AnimTypeClass*> CanRemoveParasites_KickOut_Anim;
+
 		Valueable<bool> GarrisonPenetration;
 		Valueable<bool> GarrisonPenetration_RandomTarget;
 		Valueable<PartialVector2D<double>> GarrisonPenetration_DamageMultiplier;
@@ -347,6 +353,12 @@ public:
 			, RemainingAnimCreationInterval { 0 }
 			, PossibleCellSpreadDetonate { false }
 			, DamageAreaTarget {}
+
+			, CanRemoveParasites { false }
+			, CanRemoveParasites_KickOut { false }
+			, CanRemoveParasites_KickOut_Paralysis { 15 }
+			, CanRemoveParasites_ReportSound { }
+			, CanRemoveParasites_KickOut_Anim { nullptr }
 
 			, Webby { false }
 			, Webby_Anims {}
