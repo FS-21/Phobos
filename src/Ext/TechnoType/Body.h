@@ -248,6 +248,7 @@ public:
 		std::vector<std::vector<CoordStruct>> DeployedWeaponBurstFLHs;
 		std::vector<std::vector<CoordStruct>> EliteDeployedWeaponBurstFLHs;
 
+		Nullable<bool> NoManualUnload;
 		Nullable<bool> ConsideredNaval;
 		Nullable<bool> ConsideredVehicle;
 		Valueable<bool> ConsideredSecretLabTech;
@@ -470,6 +471,8 @@ public:
 			, Wake { }
 			, Wake_Grapple { }
 			, Wake_Sinking { }
+
+			, NoManualUnload { }
 		{ }
 
 		virtual ~ExtData() = default;
