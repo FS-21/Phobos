@@ -135,6 +135,8 @@ This page lists all the individual contributions to the project by their author.
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - Map Action 600 for overwriting DropCrate behaviour in attached Technos
+  - `DropCrate` for setting what crate drop when Techno is destroyed
   - Map event `There are no technos of the specified houses list`
   - Script action for repairing destroyed bridges
   - Script actions for modifying AI anger against other houses

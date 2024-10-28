@@ -56,6 +56,8 @@ public:
 		bool HasRemainingWarpInDelay;          // Converted from object with Teleport Locomotor to one with a different Locomotor while still phasing in OR set if ChronoSphereDelay > 0.
 		int LastWarpInDelay;                   // Last-warp in delay for this unit, used by HasCarryoverWarpInDelay.
 		bool IsBeingChronoSphered;             // Set to true on units currently being ChronoSphered, does not apply to Ares-ChronoSphere'd buildings or Chrono reinforcements.
+		int DropCrate; // Drop crate on death, modified by map action
+		Powerup DropCrateType;
 
 		AnimClass* Convert_UniversalDeploy_DeployAnim;
 		bool Convert_UniversalDeploy_InProgress;
@@ -95,6 +97,8 @@ public:
 			, HasRemainingWarpInDelay { false }
 			, LastWarpInDelay { 0 }
 			, IsBeingChronoSphered { false }
+			, DropCrate { -1 }
+			, DropCrateType { Powerup::Money }
 			, Convert_UniversalDeploy_DeployAnim { nullptr }
 			, Convert_UniversalDeploy_InProgress { false }
 			, Convert_UniversalDeploy_MakeInvisible { false }
@@ -204,6 +208,8 @@ public:
 	static WeaponTypeClass* GetCurrentWeapon(TechnoClass* pThis, int& weaponIndex, bool getSecondary = false);
 	static WeaponTypeClass* GetCurrentWeapon(TechnoClass* pThis, bool getSecondary = false);
 	static int GetWeaponIndexAgainstWall(TechnoClass* pThis, OverlayTypeClass* pWallOverlayType);
+
+	static bool TryToCreateCrate(CoordStruct location, Powerup selectedPowerup = Powerup::Money, int maxCellRange = 10);
 
 	static TechnoClass* UniversalDeployConversion(TechnoClass* pThis, TechnoTypeClass* pNewType = nullptr);
 	//static void CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType = nullptr);

@@ -20,6 +20,7 @@ enum class PhobosTriggerAction : unsigned int
 	RunSuperWeaponAtWaypoint = 506,
 	PrintMessageRemainingTechnos = 507,
 	ToggleMCVRedeploy = 510,
+	SetDropCrate = 600, // Only change this number if the PR is merged into develop!
 };
 
 class TActionExt
@@ -65,6 +66,7 @@ public:
 	ACTION_FUNC(RunSuperWeaponAtWaypoint);
 	ACTION_FUNC(PrintMessageRemainingTechnos);
 	ACTION_FUNC(ToggleMCVRedeploy);
+	ACTION_FUNC(SetDropCrate);
 
 	static bool RunSuperWeaponAt(TActionClass* pThis, int X, int Y);
 
