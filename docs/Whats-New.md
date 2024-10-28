@@ -519,6 +519,7 @@ Vanilla fixes:
 - `Arcing=true` projectile elevation inaccuracy can now be fixed by setting `Arcing.AllowElevationInaccuracy=false` (by Starkku)
 - Fixed position and layer of info tip and reveal production cameo on selected building (by Belonit)
 - Fixed `TurretOffset` to be supported for SHP vehicles (by TwinkleStar)
+- New `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
 - `Powered`/`PoweredSpecial` buildings' powered anims will update as usual when being captured by enemies (by Trsdy)
 - Fixed a glitch related to incorrect target setting for missiles (by Belonit)
 - Skipped parsing `[Header]` section of compaign maps which led to occasional crashes on Linux (by Trsdy)
