@@ -23,6 +23,8 @@ public:
 	public:
 		std::map<BuildingTypeExt::ExtData*, int> PowerPlantEnhancers;
 		std::vector<BuildingClass*> OwnedLimboDeliveredBuildings;
+		bool ForceOnlyTargetHouseEnemy;
+		int ForceOnlyTargetHouseEnemyMode;
 
 		CounterClass LimboAircraft;  // Currently owned aircraft in limbo
 		CounterClass LimboBuildings; // Currently owned buildings in limbo
@@ -89,6 +91,8 @@ public:
 			, AIFireSaleDelayTimer {}
 			, SuspendedEMPulseSWs {}
 			, SuperExts(SuperWeaponTypeClass::Array->Count)
+			, ForceOnlyTargetHouseEnemy { false }
+			, ForceOnlyTargetHouseEnemyMode { -1 }
 		{ }
 
 		bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding);
@@ -146,6 +150,8 @@ public:
 	static HouseClass* GetHouseKind(OwnerHouseKind kind, bool allowRandom, HouseClass* pDefault, HouseClass* pInvoker = nullptr, HouseClass* pVictim = nullptr);
 	static CellClass* GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass* pCurrentHouse, CoordStruct defaultCurrentCoords, SpeedType speedTypeZone, int extraDistance = 0);
 	static void GetAIChronoshiftSupers(HouseClass* pThis, SuperClass*& pSuperCSphere, SuperClass*& pSuperCWarp);
+	static void ForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode = -1);
+
 	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const std::map<BuildingTypeClass*, int> ownedBuildings, bool skipSecretLabChecks);
 	static bool HasGenericPrerequisite(int idx, std::map<BuildingTypeClass*, int> ownedBuildings);
 	static int FindGenericPrerequisite(const char* id);
