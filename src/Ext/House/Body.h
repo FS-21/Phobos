@@ -38,6 +38,8 @@ public:
 		CDTimerClass AISuperWeaponDelayTimer;
 		CDTimerClass AIFireSaleDelayTimer;
 
+		std::vector<int> AITriggers_ValidList;
+
 		//Read from INI
 		Nullable<bool> RepairBaseNodes[3];
 
@@ -144,6 +146,10 @@ public:
 	static HouseClass* GetHouseKind(OwnerHouseKind kind, bool allowRandom, HouseClass* pDefault, HouseClass* pInvoker = nullptr, HouseClass* pVictim = nullptr);
 	static CellClass* GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass* pCurrentHouse, CoordStruct defaultCurrentCoords, SpeedType speedTypeZone, int extraDistance = 0);
 	static void GetAIChronoshiftSupers(HouseClass* pThis, SuperClass*& pSuperCSphere, SuperClass*& pSuperCWarp);
+	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const std::map<BuildingTypeClass*, int> ownedBuildings, bool skipSecretLabChecks);
+	static bool HasGenericPrerequisite(int idx, std::map<BuildingTypeClass*, int> ownedBuildings);
+	static int FindGenericPrerequisite(const char* id);
+
 	static void SetSkirmishHouseName(HouseClass* pHouse);
 
 	static bool IsDisabledFromShell(

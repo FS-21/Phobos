@@ -7,6 +7,8 @@
 #include <Ext/Anim/Body.h>
 #include <Ext/Scenario/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <Ext/House/Body.h>
+#include <Ext/Script/Body.h>
 
 #include <Utilities/AresFunctions.h>
 
@@ -464,6 +466,22 @@ int TechnoExt::ExtData::GetAttachedEffectCumulativeCount(AttachEffectTypeClass* 
 	}
 
 	return foundCount;
+}
+
+bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
+{
+	if (!pTechno)
+		return false;
+
+	bool isValid = !pTechno->Dirty
+		&& ScriptExt::IsUnitAvailable(pTechno, true)
+		&& pTechno->Owner
+		&& (pTechno->WhatAmI() == AbstractType::Infantry
+			|| pTechno->WhatAmI() == AbstractType::Unit
+			|| pTechno->WhatAmI() == AbstractType::Building
+			|| pTechno->WhatAmI() == AbstractType::Aircraft);
+
+	return isValid;
 }
 
 // =============================
