@@ -272,6 +272,8 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	// AttachEffect
 	this->AttachEffects.LoadFromINI(pINI, pSection);
 
+	this->KickOutKickablePassengers.Read(exINI, pSection, "KickOutKickablePassengers");
+
 #ifdef LOCO_TEST_WARHEADS // Enable warheads parsing
 	this->InflictLocomotor.Read(exINI, pSection, "InflictLocomotor");
 	this->RemoveInflictedLocomotor.Read(exINI, pSection, "RemoveInflictedLocomotor");
@@ -318,6 +320,7 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->AttachEffects.AttachTypes.size() > 0
 		|| this->AttachEffects.RemoveTypes.size() > 0
 		|| this->AttachEffects.RemoveGroups.size() > 0
+		|| this->KickOutKickablePassengers
 	);
 
 	char tempBuffer[32];
@@ -499,6 +502,8 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->PossibleCellSpreadDetonate)
 		.Process(this->Reflected)
 		.Process(this->DamageAreaTarget)
+
+		.Process(this->KickOutKickablePassengers)
 		;
 }
 
