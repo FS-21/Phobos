@@ -472,6 +472,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Wake_Grapple.Read(exINI, pSection, "Wake.Grapple");
 	this->Wake_Sinking.Read(exINI, pSection, "Wake.Sinking");
 
+	this->DetectDisguise_Percent.Read(exINI, pSection, "DetectDisguise.Percent");
+
 	// Ares 0.2
 	this->RadarJamRadius.Read(exINI, pSection, "RadarJamRadius");
 
@@ -982,6 +984,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 
 		.Process(this->SpawnDistanceFromTarget)
 		.Process(this->SpawnHeight)
+
+		.Process(this->DetectDisguise_Percent)
 		.Process(this->Webby_Anims)
 		.Process(this->ImmuneToWeb)
 		.Process(this->Webby_Duration)

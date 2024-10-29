@@ -236,6 +236,8 @@ public:
 		Nullable<AnimTypeClass*> Wake_Grapple;
 		Nullable<AnimTypeClass*> Wake_Sinking;
 
+		ValueableVector<double> DetectDisguise_Percent;
+
 		struct LaserTrailDataEntry
 		{
 			ValueableIdx<LaserTrailTypeClass> idxType;
@@ -465,6 +467,7 @@ public:
 
 			, SpawnDistanceFromTarget {}
 			, SpawnHeight {}
+			, DetectDisguise_Percent {}
 
 			, Webby_Anims {}
 			, ImmuneToWeb { false }
