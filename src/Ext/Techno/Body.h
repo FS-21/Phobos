@@ -9,6 +9,7 @@
 #include <New/Entity/ShieldClass.h>
 #include <New/Entity/LaserTrailClass.h>
 #include <New/Entity/AttachEffectClass.h>
+#include <Ext/Event/Body.h>
 
 class BulletClass;
 
@@ -59,6 +60,8 @@ public:
 		int DropCrate; // Drop crate on death, modified by map action
 		Powerup DropCrateType;
 
+		AbstractClass* WeaponizedEngineer_GuardDestination;
+
 		int	WebbyDurationCountDown;
 		CDTimerClass WebbyDurationTimer;
 		AnimClass* WebbyAnim;
@@ -103,6 +106,7 @@ public:
 			, HasRemainingWarpInDelay { false }
 			, LastWarpInDelay { 0 }
 			, IsBeingChronoSphered { false }
+			, WeaponizedEngineer_GuardDestination { nullptr }
 			, WebbyDurationCountDown { -1 }
 			, WebbyDurationTimer {}
 			, WebbyAnim { nullptr }
@@ -139,6 +143,7 @@ public:
 		void UpdateSelfOwnedAttachEffects();
 		bool HasAttachedEffects(std::vector<AttachEffectTypeClass*> attachEffectTypes, bool requireAll, bool ignoreSameSource, TechnoClass* pInvoker, AbstractClass* pSource, std::vector<int> const* minCounts, std::vector<int> const* maxCounts) const;
 		int GetAttachedEffectCumulativeCount(AttachEffectTypeClass* pAttachEffectType, bool ignoreSameSource = false, TechnoClass* pInvoker = nullptr, AbstractClass* pSource = nullptr) const;
+		void UpdateWeaponizedEngineerGuard();
 		void WebbyUpdate();
 
 		virtual ~ExtData() override;
@@ -210,6 +215,8 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, BuildingSelectBracketPosition bracketPosition);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue);
+	static bool IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed);
+	static void ProcessWeaponizedEngineerGuard(TechnoClass* pThis);
 	static void RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh);
 	static bool IsValidTechno(TechnoClass* pTechno);
 
@@ -230,4 +237,11 @@ public:
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	//static void UpdateUniversalDeploy(TechnoClass* pThis);
 	static void PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo = nullptr, bool forceFullTransfer = true, bool dontCheckInvalidOccupiers = true);
+
+	static void SendEngineerGuardStopTarNav(TechnoClass* pThis);
+	static void HandleEngineerGuardStopTarNav(EventExt* event);
+	static void SendEngineerGuardDestination(TechnoClass* pThis, AbstractClass* pDestination);
+	static void HandleEngineerGuardDestination(EventExt* event);
+	static void SendWeaponizedEngineerGuard(TechnoClass* pThis);
+	static void HandleWeaponizedEngineerGuard(EventExt* event);
 };

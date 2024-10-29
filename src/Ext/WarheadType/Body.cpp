@@ -272,6 +272,8 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->SuppressReflectDamage.Read(exINI, pSection, "SuppressReflectDamage");
 	this->SuppressReflectDamage_Types.Read(exINI, pSection, "SuppressReflectDamage.Types");
 
+	this->CanDisarmBombs.Read(exINI, pSection, "CanDisarmBombs");
+
 	this->CanRemoveParasites.Read(exINI, pSection, "CanRemoveParasites");
 	this->CanRemoveParasites_KickOut.Read(exINI, pSection, "CanRemoveParasites.KickOut");
 	this->CanRemoveParasites_KickOut_Paralysis.Read(exINI, pSection, "CanRemoveParasites.KickOut.Paralysis");
@@ -547,6 +549,8 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->PossibleCellSpreadDetonate)
 		.Process(this->Reflected)
 		.Process(this->DamageAreaTarget)
+
+		.Process(this->CanDisarmBombs)
 
 		.Process(this->CanRemoveParasites)
 		.Process(this->CanRemoveParasites_KickOut)

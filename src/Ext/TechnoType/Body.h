@@ -257,6 +257,7 @@ public:
 		std::vector<std::vector<CoordStruct>> DeployedWeaponBurstFLHs;
 		std::vector<std::vector<CoordStruct>> EliteDeployedWeaponBurstFLHs;
 
+		Valueable<bool> Engineer_CheckFriendlyWeapons;
 		Valueable<bool> FixEnteringCyborgLegs;
 		Nullable<Powerup> DropCrate;
 		Valueable<bool> ImmuneToGarrisonPenetration;
@@ -503,6 +504,8 @@ public:
 			, Wake { }
 			, Wake_Grapple { }
 			, Wake_Sinking { }
+
+			, Engineer_CheckFriendlyWeapons { false }
 			, FixEnteringCyborgLegs { false }
 
 			, DropCrate { }

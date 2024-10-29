@@ -9,6 +9,7 @@
 #include <Ext/BuildingType/Body.h>
 #include <Ext/Bullet/Body.h>
 #include <Ext/BulletType/Body.h>
+#include <Ext/Event/Body.h>
 #include <Ext/House/Body.h>
 #include <Ext/OverlayType/Body.h>
 #include <Ext/HouseType/Body.h>
@@ -204,6 +205,7 @@ using PhobosTypeRegistry = TypeRegistry <
 	BuildingTypeExt,
 	BulletExt,
 	BulletTypeExt,
+	EventExt,
 	HouseExt,
 	OverlayTypeExt,
 	HouseTypeExt,
