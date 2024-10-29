@@ -502,7 +502,7 @@ void TechnoExt::PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo, bool fo
 			passengersList.AddItem(pPassenger);
 		}
 	}
-	
+
 	if (passengersList.Count == 0) // Nothing to transfer
 		return;
 
@@ -523,7 +523,7 @@ void TechnoExt::PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo, bool fo
 
 		pPassenger = passengersList.GetItem(passengerIndex);
 		passengersList.RemoveItem(passengerIndex);
-		
+
 		// Garrison infantry in building
 		if (pBuildingTo)
 		{
@@ -582,7 +582,7 @@ void TechnoExt::PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo, bool fo
 					pPassenger->SetLocation(pTo->Location);
 					pTo->EnteredOpenTopped(pPassenger);
 				}
-				else if(pToType->Gunner && pGunner)
+				else if (pToType->Gunner && pGunner)
 				{
 					pGunner->ReceiveGunner(pPassenger);
 				}

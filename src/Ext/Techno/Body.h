@@ -169,6 +169,7 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, BuildingSelectBracketPosition bracketPosition);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue);
+	static void PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo = nullptr, bool forceFullTransfer = true, bool dontCheckInvalidOccupiers = true);
 
 	// WeaponHelpers.cpp
 	static int PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback = true, bool allowAAFallback = true);
@@ -179,6 +180,4 @@ public:
 	static WeaponTypeClass* GetCurrentWeapon(TechnoClass* pThis, int& weaponIndex, bool getSecondary = false);
 	static WeaponTypeClass* GetCurrentWeapon(TechnoClass* pThis, bool getSecondary = false);
 	static int GetWeaponIndexAgainstWall(TechnoClass* pThis, OverlayTypeClass* pWallOverlayType);
-
-	static void PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo = nullptr, bool forceFullTransfer = true, bool dontCheckInvalidOccupiers = true);
 };
