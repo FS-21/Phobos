@@ -290,6 +290,8 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
 	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
 
+	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
+
 	// AttachEffect
 	this->AttachEffects.LoadFromINI(pINI, pSection);
 

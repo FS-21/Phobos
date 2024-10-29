@@ -434,6 +434,7 @@ void WarheadTypeExt::ExtData::ApplyConvert(HouseClass* pHouse, TechnoClass* pTar
 	{
 		TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pHouse);
 	}
+	TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pHouse, this->Convert_Anim);
 }
 
 void WarheadTypeExt::ExtData::ApplyLocomotorInfliction(TechnoClass* pTarget)
