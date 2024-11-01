@@ -10,6 +10,7 @@
 #include <Ext/WeaponType/Body.h>
 #include <Ext/Scenario/Body.h>
 #include <Ext/WarheadType/Body.h>
+#include <Ext/Script/Body.h>
 #include <Utilities/EnumFunctions.h>
 #include <Utilities/AresFunctions.h>
 
@@ -44,6 +45,7 @@ void TechnoExt::ExtData::OnEarlyUpdate()
 	this->UpdateLaserTrails();
 	this->DepletedAmmoActions();
 	this->UpdateAttachEffects();
+	this->UpdateRandomTargets();
 	//this->UpdateWeaponizedEngineerGuard();
 
 	if (this->WebbyAnim)
@@ -1173,5 +1175,117 @@ void TechnoExt::ExtData::UpdateWeaponizedEngineerGuard()
 		auto nCell = MapClass::Instance->NearByLocation(CellClass::Coord2Cell(seletedTarget->Location), pType->SpeedType, -1, pType->MovementZone, isBridge, 1, 1, true, false, false, isBridge, CellStruct::Empty, false, false);
 		pCell = MapClass::Instance->TryGetCellAt(nCell);
 		pThis->SetDestination(pCell, false);
+	}
+}
+
+// Checking & cleanning RandomTargets data, if necessary
+void TechnoExt::ExtData::UpdateRandomTargets()
+{
+	auto pThis = this->OwnerObject();
+	
+	if (!pThis || pThis->RearmTimer.GetTimeLeft() > 0)// || !pThis->Target)
+		return;
+
+	bool hasWeapons = ScriptExt::IsUnitArmed(pThis);
+	if (!hasWeapons)
+		return;
+
+	auto pExt = this;
+	bool isBuilding = pThis->WhatAmI() != AbstractType::Building;
+	auto const pType = this->TypeExtData->OwnerObject();
+	auto const pTypeExt = this->TypeExtData;
+	int weaponIndex = pExt->OriginalTargetWeaponIndex;
+
+	if (weaponIndex < 0)
+		return;
+
+	// Distance & weapon checks
+	auto const pWeapon = pThis->GetWeapon(weaponIndex)->WeaponType;
+	if (!pWeapon)
+		return;
+
+	auto const pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
+	if (!pWeaponExt || pWeaponExt->RandomTarget <= 0.0)
+		return;
+
+	if (!IsValidTechno(pExt->CurrentRandomTarget))
+	{
+		pExt->ResetRandomTarget = false;
+		pExt->CurrentRandomTarget = nullptr;
+	}
+
+	// Make sure random targets are off if original target is destroyed or not exists
+	if (!IsValidTechno(pExt->OriginalTarget))
+	{
+		pExt->ResetRandomTarget = false;
+		pExt->CurrentRandomTarget = nullptr;
+		pExt->OriginalTarget = nullptr;
+
+		if (pExt->OriginalTargetWeaponIndex >= 0)
+			pThis->SetTarget(nullptr);
+
+		pExt->OriginalTargetWeaponIndex = -1;
+
+		if (pThis->SpawnManager)
+			pThis->SpawnManager->ResetTarget();
+
+		return;
+	}
+
+	// Check: force if the target must be reset or the object's target differs from the current random target
+	if (pExt->ResetRandomTarget || weaponIndex < 0 || (pExt->CurrentRandomTarget && pExt->CurrentRandomTarget != pThis->Target))
+	{
+		pExt->ResetRandomTarget = false;
+		pExt->CurrentRandomTarget = nullptr;
+		//pExt->OriginalTargetWeaponIndex = -1;
+		pThis->Target = pExt->OriginalTarget;
+
+		if (pThis->SpawnManager)
+			pThis->SpawnManager->ResetTarget();
+
+		return;
+	}
+
+	int minimumRange = pWeapon->MinimumRange;
+	int range = pWeapon->Range;
+	range += pExt->OriginalTarget->IsInAir() ? pType->AirRangeBonus : 0;
+	int distanceToOriginalTarget = pThis->DistanceFrom(pExt->OriginalTarget);
+	int distanceToCurrentRandomTarget = pExt->CurrentRandomTarget ? pThis->DistanceFrom(pExt->CurrentRandomTarget) : 0;
+	int isInvalidRangeForTheBuilding = distanceToCurrentRandomTarget > range || distanceToCurrentRandomTarget < minimumRange;
+
+	if (distanceToOriginalTarget < minimumRange
+		|| distanceToOriginalTarget > range
+		|| (isBuilding && pExt->CurrentRandomTarget) && isInvalidRangeForTheBuilding)
+	{
+		pExt->ResetRandomTarget = false;
+		pExt->CurrentRandomTarget = nullptr;
+		pThis->SetTarget(pExt->OriginalTarget);
+		pExt->OriginalTarget = nullptr;
+		pExt->OriginalTargetWeaponIndex = -1;
+		//pThis->SetTarget(nullptr);
+	}
+
+	if (pThis->SpawnManager)
+	{
+		if (!pExt->OriginalTarget)
+			pThis->SpawnManager->ResetTarget();
+
+		for (auto pSpawn : pThis->SpawnManager->SpawnedNodes)
+		{
+			if (!pSpawn->Unit || pSpawn->IsSpawnMissile)
+				continue;
+
+			auto pSpawnExt = TechnoExt::ExtMap.Find(pSpawn->Unit);
+			pSpawnExt->OriginalTarget = pExt->OriginalTarget;
+
+			if (!pSpawnExt->OriginalTarget)
+			{
+				pSpawnExt->ResetRandomTarget = false;
+				pSpawnExt->CurrentRandomTarget = nullptr;
+				pSpawnExt->OriginalTarget = nullptr;
+				pSpawnExt->OriginalTargetWeaponIndex = -1;
+				pSpawn->Unit->SetTarget(nullptr);
+			}
+		}
 	}
 }

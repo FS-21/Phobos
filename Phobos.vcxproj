@@ -18,6 +18,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Ext\Techno\Body.RandomTarget.cpp" />
+    <ClCompile Include="src\Ext\Techno\Hooks.RandomTarget.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.AdvancedGuard.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.SkipMapSelect.cpp" />
     <ClCompile Include="src\New\Entity\AttachEffectClass.cpp" />
@@ -215,6 +217,7 @@
     <ClInclude Include="src\Ext\Bullet\Trajectories\BombardTrajectory.h" />
     <ClInclude Include="src\Ext\Bullet\Trajectories\PhobosTrajectory.h" />
     <ClInclude Include="src\Ext\Bullet\Trajectories\StraightTrajectory.h" />
+    <ClInclude Include="src\Ext\Event\Body.h" />
     <ClInclude Include="src\Ext\OverlayType\Body.h" />
     <ClInclude Include="src\Ext\ParticleType\Body.h" />
     <ClInclude Include="src\Ext\HouseType\Body.h" />
@@ -247,7 +250,6 @@
     <ClInclude Include="src\Ext\Building\Body.h" />
     <ClInclude Include="src\Ext\BulletType\Body.h" />
     <ClInclude Include="src\Ext\Bullet\Body.h" />
-    <ClInclude Include="src\Ext\Event\Body.h" />
     <ClInclude Include="src\Ext\House\Body.h" />
     <ClInclude Include="src\Ext\ParticleSystemType\Body.h" />
     <ClInclude Include="src\Ext\RadSite\Body.h" />

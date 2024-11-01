@@ -59,6 +59,9 @@ public:
 		Valueable<bool> AttachEffect_CheckOnFirer;
 		Valueable<bool> AttachEffect_IgnoreFromSameSource;
 		Valueable<bool> KickOutPassengers;
+		Valueable<double> RandomTarget;
+		//Valueable<bool> RandomTarget_DistributeBurst;
+		Valueable<bool> RandomTarget_Spawners_MultipleTargets;
 
 		ExtData(WeaponTypeClass* OwnerObject) : Extension<WeaponTypeClass>(OwnerObject)
 			, DiskLaser_Radius { DiskLaserClass::Radius }
@@ -99,6 +102,9 @@ public:
 			, AttachEffect_CheckOnFirer { false }
 			, AttachEffect_IgnoreFromSameSource { false }
 			, KickOutPassengers { true }
+			, RandomTarget { 0.0 }
+			//, RandomTarget_DistributeBurst { true }
+			, RandomTarget_Spawners_MultipleTargets { false }
 		{ }
 
 		int GetBurstDelay(int burstIndex) const;

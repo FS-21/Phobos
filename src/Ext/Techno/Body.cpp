@@ -737,22 +737,6 @@ bool TechnoExt::TryToCreateCrate(CoordStruct location, Powerup selectedPowerup, 
 	return placed;
 }
 
-bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
-{
-	if (!pTechno)
-		return false;
-
-	bool isValid = !pTechno->Dirty
-		&& ScriptExt::IsUnitAvailable(pTechno, true)
-		&& pTechno->Owner
-		&& (pTechno->WhatAmI() == AbstractType::Infantry
-			|| pTechno->WhatAmI() == AbstractType::Unit
-			|| pTechno->WhatAmI() == AbstractType::Building
-			|| pTechno->WhatAmI() == AbstractType::Aircraft);
-
-	return isValid;
-}
-
 void TechnoExt::PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo, bool forceFullTransfer, bool dontCheckInvalidOccupiers)
 {
 	if (!pFrom || (pFrom == pTo))
@@ -897,6 +881,27 @@ void TechnoExt::PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo, bool fo
 	}
 }
 
+bool TechnoExt::IsValidTechno(AbstractClass* pObject)
+{
+	return IsValidTechno(abstract_cast<TechnoClass*>(pObject));
+}
+
+bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
+{
+	if (!pTechno)
+		return false;
+
+	bool isValid = !pTechno->Dirty
+		&& ScriptExt::IsUnitAvailable(pTechno, true)
+		&& pTechno->Owner
+		&& (pTechno->WhatAmI() == AbstractType::Infantry
+			|| pTechno->WhatAmI() == AbstractType::Unit
+			|| pTechno->WhatAmI() == AbstractType::Building
+			|| pTechno->WhatAmI() == AbstractType::Aircraft);
+
+	return isValid;
+}
+
 // =============================
 // load / save
 
@@ -944,6 +949,10 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_UniversalDeploy_TemporalTechno)
 		.Process(this->Convert_UniversalDeploy_IsOriginalDeployer)
 		.Process(this->Convert_UniversalDeploy_RememberTarget)
+		.Process(this->OriginalTargetWeaponIndex)
+		.Process(this->OriginalTarget)
+		.Process(this->ResetRandomTarget)
+		.Process(this->CurrentRandomTarget)
 		;
 }
 

@@ -158,6 +158,7 @@ This page lists all the individual contributions to the project by their author.
   - Modify Ammo on impact
   - Universal deploy from any techno into any techno
   - New AI teams selector
+  - `RandomTarget` for random projectile retargeting
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

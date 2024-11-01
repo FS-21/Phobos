@@ -12,6 +12,7 @@ enum class EventTypeExt : uint8_t
 
 	SyncEngineerGuardDestination = 0x45,
 	SyncWeaponizedEngineerGuard = 0x48,
+	SyncStopRandomTargetTarNav = 0x49,
 	SyncEngineerGuardStopTarNav = 0x4A,
 
 	FIRST = SyncEngineerGuardDestination,
@@ -30,10 +31,10 @@ public:
 	{
 		char DataBuffer[104];
 
-		struct SyncEngineerGuardStopTarNav
+		struct SyncStopRandomTargetTarNav
 		{
 			int TechnoUniqueID;
-		} SyncEngineerGuardStopTarNav;
+		} SyncStopRandomTargetTarNav;
 
 		struct SyncWeaponizedEngineerGuard
 		{
@@ -45,6 +46,11 @@ public:
 			int TechnoUniqueID;
 			int GuardDestinationID;
 		} SyncEngineerGuardDestination;
+
+		struct SyncEngineerGuardStopTarNav
+		{
+			int TechnoUniqueID;
+		} SyncEngineerGuardStopTarNav;
 	};
 
 	bool AddEvent();
