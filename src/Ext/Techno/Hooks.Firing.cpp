@@ -324,6 +324,9 @@ DEFINE_HOOK(0x6FC339, TechnoClass_CanFire, 0x6)
 				return CannotFire;
 			}
 
+			if (!pWeaponExt->CanOnlyTargetTheseTechnos(pTechno->GetTechnoType()))
+				return CannotFire;
+
 			if (!pWeaponExt->HasRequiredAttachedEffects(pTechno, pThis))
 				return CannotFire;
 		}

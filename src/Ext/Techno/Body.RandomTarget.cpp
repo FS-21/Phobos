@@ -193,6 +193,7 @@ TechnoClass* TechnoExt::FindRandomTarget(TechnoClass* pThis)
 			|| pCandidateType->Immune
 			|| (pBuilding && pBuilding->Type->InvisibleInGame)
 			|| !EnumFunctions::IsTechnoEligible(pCandidate, pWeaponExt->CanTarget, true)
+			|| !pWeaponExt->CanOnlyTargetTheseTechnos(pCandidateType)
 			|| (!pWeapon->Projectile->AA && pCandidate->IsInAir())
 			|| (!pWeapon->Projectile->AG && !pCandidate->IsInAir())
 			|| (!friendlyFire && (pThis->Owner->IsAlliedWith(pCandidate) || ScriptExt::IsUnitMindControlledFriendly(pThis->Owner, pCandidate)))

@@ -612,7 +612,8 @@ void WarheadTypeExt::ExtData::ApplyAmmoModifier(TechnoClass* pTarget, HouseClass
 		auto const pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
 
 		if (!EnumFunctions::IsTechnoEligible(pTarget, pWeaponExt->CanTarget)
-			|| (pInvokerHouse && !EnumFunctions::CanTargetHouse(pWeaponExt->CanTargetHouses, pInvokerHouse, pTarget->Owner)))
+			|| (pInvokerHouse && !EnumFunctions::CanTargetHouse(pWeaponExt->CanTargetHouses, pInvokerHouse, pTarget->Owner))
+			|| !pWeaponExt->CanOnlyTargetTheseTechnos(pTarget->GetTechnoType()))
 		{
 			return;
 		}
