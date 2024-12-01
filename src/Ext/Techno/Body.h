@@ -35,6 +35,7 @@ public:
 		CDTimerClass PassengerDeletionTimer;
 		ShieldTypeClass* CurrentShieldType;
 		int LastWarpDistance;
+		CDTimerClass ChargeTurretTimer; // Used for charge turrets instead of RearmTimer if weapon has ChargeTurret.Delays set.
 		CDTimerClass AutoDeathTimer;
 		AnimTypeClass* MindControlRingAnimType;
 		int DamageNumberOffset;
@@ -46,6 +47,7 @@ public:
 		CDTimerClass DeployFireTimer;
 		bool SkipTargetChangeResetSequence;
 		bool ForceFullRearmDelay;
+		bool LastRearmWasFullDelay;
 		bool CanCloakDuringRearm; // Current rearm timer was started by DecloakToFire=no weapon.
 		int WHAnimRemainingCreationInterval;
 		bool CanCurrentlyDeployIntoBuilding; // Only set on UnitClass technos with DeploysInto set in multiplayer games, recalculated once per frame so no need to serialize.
@@ -91,6 +93,7 @@ public:
 			, PassengerDeletionTimer {}
 			, CurrentShieldType { nullptr }
 			, LastWarpDistance {}
+			, ChargeTurretTimer {}
 			, AutoDeathTimer {}
 			, MindControlRingAnimType { nullptr }
 			, DamageNumberOffset { INT32_MIN }
@@ -102,6 +105,7 @@ public:
 			, DeployFireTimer {}
 			, SkipTargetChangeResetSequence { false }
 			, ForceFullRearmDelay { false }
+			, LastRearmWasFullDelay { false }
 			, CanCloakDuringRearm { false }
 			, WHAnimRemainingCreationInterval { 0 }
 			, CanCurrentlyDeployIntoBuilding { false }

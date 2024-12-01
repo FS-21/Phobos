@@ -49,6 +49,7 @@ public:
 		Valueable<int> ChronoSphereDelay;
 		ValueableIdx<SuperWeaponTypeClass> AIChronoSphereSW;
 		ValueableIdx<SuperWeaponTypeClass> AIChronoWarpSW;
+		int SubterraneanSpeed;
 		Valueable<int> SubterraneanHeight;
 		Nullable<int> AISuperWeaponDelay;
 		Valueable<bool> UseGlobalRadApplicationDelay;
@@ -201,6 +202,7 @@ public:
 			, ChronoSphereDelay { 0 }
 			, AIChronoSphereSW {}
 			, AIChronoWarpSW {}
+			, SubterraneanSpeed { 19 }
 			, SubterraneanHeight { -256 }
 			, AISuperWeaponDelay {}
 			, UseGlobalRadApplicationDelay { true }
