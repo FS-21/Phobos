@@ -701,7 +701,7 @@ DEFINE_HOOK(0x51E440, InfantryClass_AI_WhatAction2_EngineerRepairWeapon, 0x8)
 		auto const pWeaponType = pThis->GetWeapon(weaponIndex_)->WeaponType;
 		auto const pWeaponTypeEx = WeaponTypeExt::ExtMap.Find(pWeaponType);
 
-		if (pWeaponTypeEx->OnlyTargetTechnos.size() > 0 && pWeaponTypeEx->CanOnlyTargetTheseTechnos(pTarget->GetTechnoType()))
+		if (pWeaponTypeEx && pWeaponTypeEx->OnlyTargetTechnos.size() > 0 && pWeaponTypeEx->CanOnlyTargetTheseTechnos(pTarget->GetTechnoType()))
 		{
 			R->EAX(Action::Attack);
 			return Skip;
