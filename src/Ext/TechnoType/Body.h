@@ -235,7 +235,13 @@ public:
 			ValueableIdx<LaserTrailTypeClass> idxType;
 			Valueable<CoordStruct> FLH;
 			Valueable<bool> IsOnTurret;
-			LaserTrailTypeClass* GetType() const { return &LaserTrailTypeClass::Array[idxType]; }
+
+			bool Load(PhobosStreamReader& stm, bool registerForChange);
+			bool Save(PhobosStreamWriter& stm) const;
+
+		private:
+			template <typename T>
+			bool Serialize(T& stm);
 		};
 
 		std::vector<LaserTrailDataEntry> LaserTrailData;
