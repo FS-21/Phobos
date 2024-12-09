@@ -1,24 +1,29 @@
 #pragma once
 
+#include <Phobos.CRT.h>
 #include "Savegame.h"
 #include "Constructs.h"
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
+#include <ArrayClasses.h>
 #include <CCINIClass.h>
 #include "Swizzle.h"
 
 template <typename T> class Enumerable
 {
+	typedef std::vector<std::unique_ptr<T>> container_t;
+
 public:
-	inline static std::vector<T> Array;
+	static container_t Array;
 
 	static int FindIndex(const char* Title)
 	{
-		auto result = std::find_if(Array.begin(), Array.end(), [Title](const T& Item)
+		auto result = std::find_if(Array.begin(), Array.end(), [Title](std::unique_ptr<T>& Item)
 			{
-				return !_strcmpi(Item.Name, Title);
+				return !_strcmpi(Item->Name, Title);
 			});
 
 		if (result == Array.end())
@@ -30,17 +35,17 @@ public:
 	static T* Find(const char* Title)
 	{
 		auto result = FindIndex(Title);
-		return (result < 0) ? nullptr : &Array[static_cast<size_t>(result)];
+		return (result < 0) ? nullptr : Array[static_cast<size_t>(result)].get();
 	}
 
 	static T* FindOrAllocate(const char* Title)
 	{
-		if (T* found = Find(Title))
-			return found;
-		static_assert(std::constructible_from<T, const char*>);
-		Array.emplace_back(Title);
+		if (T* find = Find(Title))
+			return find;
 
-		return &Array.back();
+		Array.push_back(std::make_unique<T>(Title));
+
+		return Array.back().get();
 	}
 
 	static void Clear()
@@ -59,8 +64,8 @@ public:
 				FindOrAllocate(Phobos::readBuffer);
 		}
 
-		for (auto& item : Array)
-			item.LoadFromINI(pINI);
+		for (const auto& item : Array)
+			item->LoadFromINI(pINI);
 	}
 
 	static bool LoadGlobals(PhobosStreamReader& Stm)
@@ -93,12 +98,12 @@ public:
 	{
 		Stm.Save(Array.size());
 
-		for (auto& item : Array)
+		for (const auto& item : Array)
 		{
 			// write old pointer and name, then delegate
-			Stm.Save(&item);
-			Stm.Save(item.Name);
-			item.SaveToStream(Stm);
+			Stm.Save(item.get());
+			Stm.Save(item->Name);
+			item->SaveToStream(Stm);
 		}
 
 		return true;
@@ -119,3 +124,6 @@ public:
 
 	PhobosFixedString<32> Name;
 };
+
+template <typename T>
+Enumerable<T>::container_t Enumerable<T>::Array;

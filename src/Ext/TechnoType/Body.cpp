@@ -197,6 +197,7 @@ TechnoClass* TechnoTypeExt::CreateUnit(TechnoTypeClass* pType, CoordStruct locat
 				{
 					if (!alwaysOnGround)
 					{
+						inAir = pTechno->IsInAir();
 						if (auto const pFlyLoco = locomotion_cast<FlyLocomotionClass*>(pTechno->Locomotor))
 						{
 							pTechno->SetLocation(location);
@@ -1052,6 +1053,26 @@ void TechnoTypeExt::ExtData::SaveToStream(PhobosStreamWriter& Stm)
 {
 	Extension<TechnoTypeClass>::SaveToStream(Stm);
 	this->Serialize(Stm);
+}
+
+bool TechnoTypeExt::ExtData::LaserTrailDataEntry::Load(PhobosStreamReader& stm, bool registerForChange)
+{
+	return this->Serialize(stm);
+}
+
+bool TechnoTypeExt::ExtData::LaserTrailDataEntry::Save(PhobosStreamWriter& stm) const
+{
+	return const_cast<LaserTrailDataEntry*>(this)->Serialize(stm);
+}
+
+template <typename T>
+bool TechnoTypeExt::ExtData::LaserTrailDataEntry::Serialize(T& stm)
+{
+	return stm
+		.Process(this->idxType)
+		.Process(this->FLH)
+		.Process(this->IsOnTurret)
+		.Success();
 }
 
 // =============================
