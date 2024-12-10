@@ -2,6 +2,40 @@
 
 This page describes all the engine features that are either new and introduced by Phobos or significantly extended or expanded.
 
+## AI
+
+### AI Learning
+
+- Save all the AI triggers `current weight` value at the end of the battle and loads the same values at the beginning of the next battle on the same map.
+- Each map save/load its own data in the folder `AI`.
+- This feature is designed having the offline gaming in mind, so only skirmish and campaign battles.
+- By default `AILearning.OnlySupportedMaps` is set to true. This makes game always read `AILearning.ScenarioName` inside maps and if isn't present' won't save the AI data'. This is done this way because XNA CnCNet client doesn't save the multiplayer scenario name in `spawn.ini`.
+- If `AILearning.OnlySupportedMaps` is set to false and the map doesn't have `AILearning.ScenarioName` a common generic file name will be used for saving/loading the current AI values.
+
+In `rulesmd.ini`:
+```ini
+[AI]
+AILearning=false                   ; boolean
+AILearning.Weight.Max=             ; integer, value <= 5000
+AILearning.Weight.Min=             ; integer, value >= 0
+AILearning.Weight.Increment=       ; integer, value > 0
+AILearning.Weight.Decrement=       ; integer, value > 0
+AILearning.OnlySupportedMaps=true  ; boolean
+```
+
+In the map:
+```ini
+[AI]
+AILearning.ScenarioName=  ; filename string, valid characters by the Windows filesystem, recommended ANSI characters
+```
+
+```{warning}
+AI adjusts the current weight of the affected AI trigger value by using:
+- Script action 49,0 (at the end of the team execution it increases the current weight by adding `AITriggerSuccessWeightDelta` value).
+- Script action 14003,0 (at the end of the team execution it decreases the current weight by substracting `AITriggerFailureWeightDelta` value).
+- Script actions: 14000, 14001, 14002.
+```
+
 ## New types / ingame entities
 
 ### Attached effects
@@ -285,6 +319,7 @@ SelfHealing=0.0                             ; floating point value, percents or 
 SelfHealing.Rate=0.0                        ; floating point value, ingame minutes
 SelfHealing.RestartInCombat=true            ; boolean
 SelfHealing.RestartInCombatDelay=0          ; integer, game frames
+SelfHealing.EnabledBy=                      ; List of BuildingType names
 Respawn=0.0                                 ; floating point value, percents or absolute
 Respawn.Rate=0.0                            ; floating point value, ingame minutes
 BracketDelta=0                              ; integer - pixels
@@ -292,6 +327,7 @@ Pips=-1,-1,-1                               ; integer, frames of pips.shp (zero-
 Pips.Building=-1,-1,-1                      ; integer, frames of pips.shp (zero-based) for Green, Yellow, Red
 Pips.Background=                            ; filename - including the .shp/.pcx extension
 Pips.Building.Empty=                        ; integer, frame of pips.shp (zero-based) for empty building pip
+Pips.HideIfNoStrength=false                 ; boolean
 IdleAnim=                                   ; Animation
 IdleAnim.ConditionYellow=                   ; Animation
 IdleAnim.ConditionRed=                      ; Animation
@@ -372,6 +408,7 @@ Shield.InheritStateOnReplace=false          ; boolean
   - This also works with Ares' `Convert.*`.
 - `Powered` controls whether or not the shield is active when a unit is running low on power or it is affected by EMP.
   - Attention, if TechnoType itself is not `Powered`, then the shield won't be offline when low power.
+- `PoweredBy` can be used to control the self-heal of the shield. If the owner has no structures from this list then the shield won't self-heal.
 - `AbsorbOverDamage` controls whether or not the shield absorbs damage dealt beyond shield's current strength when the shield breaks.
 - `SelfHealing` and `Respawn` respect the following settings: 0.0 disables the feature, 1%-100% recovers/respawns the shield strength in percentage, other number recovers/respawns the shield strength directly. Specially, `SelfHealing` with a negative number deducts the shield strength.
   - If you want shield recovers/respawns 1 HP per time, currently you need to set tag value to any number between 1 and 2, like `1.1`.
@@ -400,6 +437,7 @@ Shield.InheritStateOnReplace=false          ; boolean
   - `Pips.Shield` can be used to specify which pip frame should be used as shield strength. If only 1 digit is set, then it will always display that frame, or if 3 digits are set, it will use those if shield's current strength is at or below `ConditionYellow` and `ConditionRed`, respectively. `Pips.Shield.Building` is used for BuildingTypes. -1 as value will use the default frame, whether it is fallback to first value or the aforementioned hardcoded defaults.
   - `Pips.Shield.Background` can be used to set the background or 'frame' for non-building pips, which defaults to `pipbrd.shp`. 4th frame is used to display an infantry's shield strength and the 3th frame for other units, or 2nd and 1st respectively if not enough frames are available.
   - `Pips.Shield.Building.Empty` can be used to set the frame of `pips.shp` displayed for empty building strength pips, defaults to 1st frame of `pips.shp`.
+  - `Pips.HideIfNoStrength` can be used to hide the shield's pip frame if the `Strength` is 0.
   - The above customizations are also available on per ShieldType basis, e.g `[ShieldType]`->`Pips` instead of `[AudioVisual]`->`Pips.Shield` and so on. ShieldType settings take precedence over the global ones, but will fall back to them if not set.
   - `BracketDelta` can be used as additional vertical offset (negative shifts it up) for shield strength bar. Much like `PixelSelectionBracketDelta`, it is not applied on buildings.
 - Warheads have new options that interact with shields. Note that all of these that do not by their very nature require ability to target the shield (such as modifiers like `Shield.Break` or removing / attaching) still require Warhead `Verses` to affect the target unless `EffectsRequireVerses` is set to false on the Warhead.
@@ -830,6 +868,7 @@ AISuperWeaponDelay=  ; integer, game frames
   - `ConvertN.AffectedHouses` specifies whose units can be converted.
   - `Convert.From`, `Convert.To` and `Convert.AffectedHouses` (without numbers) are a valid alternative to `Convert0.From`, `Convert0.To` and `Convert0.AffectedHouses` if only one pair is specified.
   - Conversion affects *all* existing units of set TechnoTypes, this includes units in: transports, occupied buildings, buildings with `InfantryAbsorb=yes` or `UnitAbsorb=yes`, buildings with `Bunker=yes`.
+ - `Convert.Anim` specifies the animation that will appear in the unit after a successful conversion.
 
 In example, this superweapon would convert all owned and friendly `SOLDIERA` and `SOLDIERB` to `NEWSOLDIER`:
 ```ini
@@ -850,11 +889,13 @@ This feature requires Ares 3.0 or higher to function! When Ares 3.0+ is not dete
 In `rulesmd.ini`:
 ```ini
 [SOMESW]                        ; SuperWeapon
+Convert.Anim=                   ; Animation
 ConvertN.From=                  ; list of TechnoTypes
 ConvertN.To=                    ; TechnoType
 ConvertN.AffectedHouses=owner   ; list of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all)
 ; where N = 0, 1, 2, ...
 ; or
+Convert.Anim=                   ; Animation
 Convert.From=                   ; list of TechnoTypes
 Convert.To=                     ; TechnoType
 Convert.AffectedHouses=owner    ; list of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all)
@@ -876,6 +917,20 @@ EMPulse.SuspendOthers=false  ; boolean
 
 ```{note}
 `Type=EMPulse` superweapon and any associated keys are [Ares features](https://ares-developers.github.io/Ares-docs/new/superweapons/types/empulse.html).
+```
+
+### Universal deploy from any techno into any techno
+- Extension of the above logic. Replaces the internal logic (Ares code) by a new implementation capable to convert any techno into any techno. Only valid in warheads and superweapons.
+- `Convert.Anim` plays an animation on the converted techno using `Convert.UseUniversalDeploy`.
+
+```
+[SOMEWARHEAD]                     ; Warhead
+Convert.UseUniversalDeploy=false  ; Boolean
+Convert.Anim=                     ; Animation
+
+[SOMESW]                          ; Superweapon
+Convert.UseUniversalDeploy=false  ; Boolean
+Convert.Anim=                     ; Animation
 ```
 
 ### LimboDelivery
@@ -962,6 +1017,31 @@ In `rulesmd.ini`:
 ```ini
 [SOMESW]    ; Super Weapon
 TabIndex=1  ; integer
+```
+
+### Grant new superweapons in superweapons
+
+- Superweapons can add 1-time superweapons to the firer like the nuke crate. Granted types can be additionally randomized using the same rules as with LimboDelivery (see above).
+- `SW.GrantOneTime.InitialReady` specifies if all new granted superweapons will be ready for launch. If not set this behaviour will be managed by `SW.InitialReady` of the granted superweapon.
+- `SW.GrantOneTime.ReadyIfExists` specifies if superweapons should be ready for launch if already exists. If not set this behaviour will be managed by `SW.GrantOneTime.InitialReady` or `SW.InitialReady` of the granted superweapon.
+- `SW.GrantOneTime.ResetIfExists` specifies if superweapons timers should be reset if already exists. Takes precedence over `SW.GrantOneTime.ReadyIfExists`, `SW.GrantOneTime.InitialReady` and `SW.InitialReady`.
+- `Message.GrantOneTimeLaunched` will be displayed to the firer when the main superweapon is launched.
+- `EVA.GrantOneTimeLaunched` will be played to the firer when the main superweapon is launched.
+- These superweapons can be made random with these optional tags. The game will randomly choose only a single superweapon from the list for each roll chance provided.
+  - `SW.GrantOneTime.RollChances` lists chances of each "dice roll" happening. Valid values range from 0% (never happens) to 100% (always happens). Defaults to a single sure roll.
+  - `SW.GrantOneTime.RandomWeightsN` lists the weights for each "dice roll" that increase the probability of picking a specific superweapon. Valid values are 0 (don't pick) and above (the higher value, the bigger the likelyhood). `RandomWeights` are a valid alias for `RandomWeights0`. If a roll attempt doesn't have weights specified, the last weights will be used.
+
+In `rulesmd.ini`:
+```ini
+[SOMESW]                             ; Super Weapon
+SW.GrantOneTime=                     ; List of super weapons
+SW.GrantOneTime.RollChances=         ; List of percentages.
+SW.GrantOneTime.RandomWeightsN=      ; List of integers.
+SW.GrantOneTime.InitialReady=        ; boolean
+SW.GrantOneTime.ReadyIfExists=       ; boolean
+SW.GrantOneTime.ResetIfExists=false  ; boolean
+Message.GrantOneTimeLaunched=        ; CSF entry key
+EVA.GrantOneTimeLaunched=            ; EVA entry
 ```
 
 ## Technos
@@ -1125,6 +1205,19 @@ DisguiseBlinkingVisibility=owner  ; list of Affected House Enumeration (none|own
 UseDisguiseMovementSpeed=false    ; boolean
 ```
 
+### Drop crates on death
+
+![image](_static/images/dropcrate-01.gif)
+*Drop crates on infantry and vehicles example in [C&C: Reloaded](https://www.moddb.com/mods/cncreloaded)*
+
+- Ìf `DropCrate` is declared then the specified crate will be spawned when the object is destroyed.
+
+In `rulesmd.ini`:
+```ini
+[SOMETECHNO]  ; TechnoType
+DropCrate=    ; Powerup crate type enum (money|unit|healbase|cloak|explosion|napalm|squad|reveal|armor|speed|firepower|icbm|invulnerability|veteran|ionstorm|gas|tiberium|pod)
+```
+
 ### Firing offsets for specific Burst shots
 
 - You can now specify separate firing offsets for each of the shots fired by weapon with `Burst` via using `(Elite)(Prone/Deployed)PrimaryFire|SecondaryFire|WeaponX|FLH.BurstN` keys, depending on which weapons your TechnoType makes use of. *N* in `BurstN` is zero-based burst shot index, and the values are parsed sequentially until no value for either regular or elite weapon is present, with elite weapon defaulting to regular weapon FLH if only it is missing. If no burst-index specific value is available, value from the base key (f.ex `PrimaryFireFLH`) is used.
@@ -1152,6 +1245,19 @@ In `rulesmd.ini`:
 ForceWeapon.Naval.Decloaked=-1  ; integer. 0 for primary weapon, 1 for secondary weapon, -1 to disable
 ForceWeapon.Cloaked=-1          ; integer. 0 for primary weapon, 1 for secondary weapon, -1 to disable
 ForceWeapon.Disguised=-1        ; integer. 0 for primary weapon, 1 for secondary weapon, -1 to disable
+```
+
+### Override Target under EMP attack behavior
+
+![image](_static/images/forceweapon_emp.gif)
+*Enemy behavior against EMP targets in [C&C: Reloaded](https://www.moddb.com/mods/cncreloaded)*
+
+- Overrides a part of the vanilla YR logic for allowing units to use a different weapon if the target is under EMP effect.
+
+In `rulesmd.ini`:
+```ini
+[SOMETECHNO]             ; TechnoType
+ForceWeapon.UnderEMP=-1  ; integer. 0 for primary weapon, 1 for secondary weapon, -1 to disable
 ```
 
 ### Make units try turning to target when firing with `OmniFire=yes`
@@ -1401,6 +1507,22 @@ In `rulesmd.ini`:
 RemoveMindControl=false  ; boolean
 ```
 
+### Mind Control Threshold
+
+- Now if the victim's health is over the threshold the Mind Control Warhead & Damage tags will be replaced by alternative Warhead and Damage values.
+- Mind Control will be used if the health's victim is under or equal the threshold.
+- If `MindControl.CanKill` is enabled the offensive warheads can kill the victims if they are weak.
+- If `MindControl.Threshold.Inverse` is true then the logic is inverted: Mind Control if health's victim is over the threshold and damage the target if below the threshold.
+
+In `rulesmd.ini`:
+```ini
+MindControl.Threshold=100% or 1.0   ; positive percentage. Represents a percentage from 0% to 100%
+MindControl.AlternateDamage=      ; integer
+MindControl.AlternateWarhead=     ; warhead
+MindControl.CanKill=false           ; boolean
+MindControl.Threshold.Inverse=false ; boolean
+```
+
 ### Chance-based extra damage or Warhead detonation / 'critical hits'
 
 - Warheads can now apply additional chance-based damage or Warhead detonation ('critical hits') with the ability to customize chance, damage, affected targets, affected target HP threshold and animations of critical hit.
@@ -1582,6 +1704,16 @@ LaunchSW.DisplayMoney.Houses=all  ; Affected House Enumeration (none|owner/self|
 LaunchSW.DisplayMoney.Offset=0,0  ; X,Y, pixels relative to default
 ```
 
+### Modify Ammo on impact
+
+- Warheads can now modify ammo of the affected objects.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]   ; Warhead
+AmmoModifier=0  ; integer
+```
+
 ### Parasite removal
 
 - By default if unit takes negative damage from a Warhead (before `Verses` are calculated), any parasites infecting it are removed and deleted. This behaviour can now be customized to disable the removal for negative damage, or enable it for any arbitrary warhead.
@@ -1590,6 +1722,30 @@ In `rulesmd.ini`:
 ```ini
 [SOMEWARHEAD]     ; Warhead
 RemoveParasite=  ; boolean
+```
+
+### Penetration damage on garrisonable structures
+
+![image](_static/images/garrison-penetration-01.gif)
+*Penetration damage on garrisoned structures example in [C&C: Reloaded](https://www.moddb.com/mods/cncreloaded)*
+
+- Warheads can now damage garrisoned infantry at impact.
+- `GarrisonPenetration` Enables the logic.
+  - `GarrisonPenetration.RandomTarget` specifies if the damage will go at some random garrisoned soldier or if all infantry should be damaged at the same time.
+  - `GarrisonPenetration.DamageMultiplier` can be used to modify the damage applied against the garrisoned infantry. A random percentage value will be picked between the specified range.
+  - `GarrisonPenetration.CleanSound` can be used to specify a sound to play when the structure lost all the garrisoned soldiers with this logic.
+  - `ImmuneToGarrisonPenetration` can be set on garrisonable buildings to protect the garrisoned infantry. If used on infantry these units won't affected by this logic.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]                                 ; Warhead
+GarrisonPenetration=false                     ; boolean
+GarrisonPenetration.RandomTarget=true         ; boolean
+GarrisonPenetration.DamageMultiplier=1.0,1.0  ; floating point value - single or comma-sep. range (percentages)
+GarrisonPenetration.CleanSound=               ; sound entry
+
+[SOMETECHNO]                                  ; TechnoType
+ImmuneToGarrisonPenetration=false             ; boolean
 ```
 
 ### Remove disguise on impact
@@ -1647,6 +1803,58 @@ In `rulesmd.ini`:
 NotHuman.DeathSequence=  ; integer (1 to 5)
 ```
 
+### Remove parasites
+- Warheads are now able to use this logic for removing parasites or kick them out into the battlefield.
+- If `CanRemoveParasites.KickOut.Paralysis` is a negative value it will work as `CanRemoveParasites.KickOut.Paralysis=15`.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]            ; Warhead
+CanRemoveParasites=no                   ; boolean
+CanRemoveParasites.ReportSound=         ; Sound
+CanRemoveParasites.KickOut=no           ; boolean
+CanRemoveParasites.KickOut.Paralysis=15 ; integer, game frames
+CanRemoveParasites.KickOut.Anim=        ; Animation
+```
+
+### Web logic against infantry
+
+- Infantry will be temporally paralyzed by warheads with `Webby=true`.
+- `Webby.Duration` specifies the duration, in frames, of the warhead's web effect.
+- `Webby.DurationVariation` allows for random variance to the duration of the warhead's web effect.
+- When `Webby.Anims` contains more than 1 animation then the new animation will be picked randomly.
+- `Webby.Cap` works like in EMP logic developed by Ares.
+  -  `Webby.Cap=-1` case: The target’s web counter is set to this absolute number of frames specified by `Web.Duration`, unless the target’s web counter is already greater than this.
+  -  `Webby.Cap=0` case: Makes this web effect stackable, but uncapped.
+  -  `Webby.Cap >0` case: Makes this web effect stackable, but maximum value capped to `Webby.Cap` value.
+- Infantry can have custom values for the web logic.
+- Infantry with `ImmuneToWeb=true` are not affected by `Webby=true` warheads.
+- No damage is done by the weapons warhead.
+- `ForceWeapon.Webby` specify what weapon should use the attacker against the affected unit.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]              ; Warhead
+Webby=false                ; boolean
+Webby.Anims=               ; list of animations
+Webby.Duration=0           ; integer, game frames
+Webby.DurationVariation=0  ; integer
+Webby.Cap=-1               ; integer
+
+[SOMEINFANTRY]             ; InfantryType
+ImmuneToWeb=false          ; boolean
+Webby.Anims=               ; list of animations
+Webby.Duration=0           ; integer, game frames
+Webby.DurationVariation=0  ; integer
+
+[SOMETECHNO]               ; TechnoType
+ForceWeapon.Webby=-1       ; integer
+```
+
+```{warning}
+`Webby.Anims` animations must be played in infinite loop with `LoopCount=-1` in artmd.ini
+```
+
 ## Weapons
 
 ### AreaFire target customization
@@ -1695,6 +1903,22 @@ ExtraWarheads.DetonationChances=  ; list of floating-point values (percentage or
 ExtraWarheads.FullDetonation=     ; list of booleans
 ```
 
+### Projectile's random target
+- The firer will pick targets randomly.
+- Works with missiles (no splits, airbusts, etc), cannons, lasers & spawners.
+- A valid techno is required for trigger the logic.
+- `OmniFire=yes` will make selectable any targets around the firer, limited by the weapon range.
+- `OmniFire=no` will force the firer to pick targets in an area composed by the firer's weapon range around the original target intersected with the firer's weapon range around the firer.
+- `RandomTarget.Spawners.MultipleTargets=true` gives each spawner it's own target.
+- This logic should be used only in one weapon of the object.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWEAPON]                                ; WeaponType
+RandomTarget=0.0                            ; double or percentage
+RandomTarget.Spawners.MultipleTargets=false ; boolean
+```
+
 ### Feedback weapon
 
 ![image](_static/images/feedbackweapon.gif)
@@ -1713,7 +1937,10 @@ FeedbackWeapon=  ; WeaponType
 
 - In addition to allowing custom radiation types, several enhancements are also available to the default radiation type defined in `[Radiation]`, such as ability to set owner & invoker or deal damage against buildings. See [Custom Radiation Types](#custom-radiation-types) for more details.
 
-### Strafing aircraft weapon customization
+### `500 - 523` Edit Variable
+- Operate a variable's value
+    - The variable's value type is int16 instead of int32 in trigger actions for some reason, which means it ranges from -2^15 to 2^15-1.
+        - Any numbers exceeding this limit will lead to unexpected results!
 
 ![image](_static/images/strafing-01.gif)
 *Strafing aircraft weapon customization in [Project Phantom](https://www.moddb.com/mods/project-phantom)*

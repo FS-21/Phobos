@@ -124,6 +124,12 @@ public:
 		NullableVector<AnimTypeClass*> DebrisAnims;
 		Valueable<bool> Debris_Conventional;
 
+		Valueable<double> MindControl_Threshold;
+		Valueable<bool> MindControl_Threshold_Inverse;
+		Nullable<int> MindControl_AlternateDamage;
+		Nullable<WarheadTypeClass*> MindControl_AlternateWarhead;
+		Valueable<bool> MindControl_CanKill;
+
 		Valueable<bool> DetonateOnAllMapObjects;
 		Valueable<bool> DetonateOnAllMapObjects_Full;
 		Valueable<bool> DetonateOnAllMapObjects_RequireVerses;
@@ -133,6 +139,7 @@ public:
 		ValueableVector<TechnoTypeClass*> DetonateOnAllMapObjects_IgnoreTypes;
 
 		std::vector<TypeConvertGroup> Convert_Pairs;
+		Nullable<AnimTypeClass*> Convert_Anim;
 		AEAttachInfoTypeClass AttachEffects;
 
 		Valueable<bool> InflictLocomotor;
@@ -149,6 +156,12 @@ public:
 		ValueableVector<WeaponTypeClass*> SuppressRevengeWeapons_Types;
 		Valueable<bool> SuppressReflectDamage;
 		ValueableVector<AttachEffectTypeClass*> SuppressReflectDamage_Types;
+
+		Valueable<bool> Webby;
+		ValueableVector<AnimTypeClass*> Webby_Anims;
+		Valueable<int> Webby_Duration;
+		Valueable<int> Webby_DurationVariation;
+		Valueable<int> Webby_Cap;
 
 		// Ares tags
 		// http://ares-developers.github.io/Ares-docs/new/warheads/general.html
@@ -168,6 +181,23 @@ public:
 		TechnoClass* DamageAreaTarget;
 
 		Valueable<bool> CanDisarmBombs;
+
+		Valueable<bool> CanRemoveParasites;
+		Valueable<bool> CanRemoveParasites_KickOut;
+		Valueable<int> CanRemoveParasites_KickOut_Paralysis;
+		NullableIdx<VocClass> CanRemoveParasites_ReportSound;
+		Nullable<AnimTypeClass*> CanRemoveParasites_KickOut_Anim;
+
+		Valueable<bool> GarrisonPenetration;
+		Valueable<bool> GarrisonPenetration_RandomTarget;
+		Valueable<PartialVector2D<double>> GarrisonPenetration_DamageMultiplier;
+		NullableIdx<VocClass> GarrisonPenetration_CleanSound;
+
+		Valueable<int> AmmoModifier;
+
+		Valueable<bool> Convert_UseUniversalDeploy;
+
+		Valueable<bool> KickOutKickablePassengers;
 
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
@@ -278,6 +308,12 @@ public:
 			, DebrisAnims {}
 			, Debris_Conventional { false }
 
+			, MindControl_Threshold { 1.0 }
+			, MindControl_Threshold_Inverse { false }
+			, MindControl_AlternateDamage {}
+			, MindControl_AlternateWarhead {}
+			, MindControl_CanKill { false }
+
 			, DetonateOnAllMapObjects { false }
 			, DetonateOnAllMapObjects_Full { true }
 			, DetonateOnAllMapObjects_RequireVerses { false }
@@ -287,6 +323,7 @@ public:
 			, DetonateOnAllMapObjects_IgnoreTypes {}
 
 			, Convert_Pairs {}
+			, Convert_Anim {}
 			, AttachEffects {}
 
 			, InflictLocomotor { false }
@@ -320,6 +357,29 @@ public:
 			, DamageAreaTarget {}
 
 			, CanDisarmBombs { false }
+
+			, CanRemoveParasites { false }
+			, CanRemoveParasites_KickOut { false }
+			, CanRemoveParasites_KickOut_Paralysis { 15 }
+			, CanRemoveParasites_ReportSound { }
+			, CanRemoveParasites_KickOut_Anim { nullptr }
+
+			, Webby { false }
+			, Webby_Anims {}
+			, Webby_Duration { 0 }
+			, Webby_DurationVariation { 0 }
+			, Webby_Cap { -1 }
+
+			, GarrisonPenetration { false }
+			, GarrisonPenetration_RandomTarget { true }
+			, GarrisonPenetration_DamageMultiplier { { 1.0, 1.0 } }
+			, GarrisonPenetration_CleanSound { }
+
+			, AmmoModifier { 0 }
+
+			, Convert_UseUniversalDeploy { false }
+
+			, KickOutKickablePassengers { false }
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);
@@ -347,13 +407,15 @@ public:
 		void InterceptBullets(TechnoClass* pOwner, WeaponTypeClass* pWeapon, CoordStruct coords);
 		DamageAreaResult DamageAreaWithTarget(const CoordStruct& coords, int damage, TechnoClass* pSource, WarheadTypeClass* pWH, bool affectsTiberium, HouseClass* pSourceHouse, TechnoClass* pTarget);
 	private:
-		void DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* pOwner = nullptr, bool bulletWasIntercepted = false);
+		void DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* pOwner = nullptr, bool bulletWasIntercepted = false, BulletExt::ExtData* pBulletExt = nullptr);
 		void ApplyRemoveDisguise(HouseClass* pHouse, TechnoClass* pTarget);
 		void ApplyRemoveMindControl(TechnoClass* pTarget);
 		void ApplyCrit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* Owner, TechnoExt::ExtData* pTargetExt);
 		void ApplyShieldModifiers(TechnoClass* pTarget, TechnoExt::ExtData* pTargetExt);
 		void ApplyAttachEffects(TechnoClass* pTarget, HouseClass* pInvokerHouse, TechnoClass* pInvoker);
 		double GetCritChance(TechnoClass* pFirer) const;
+		void ApplyGarrisonPenetration(HouseClass* pInvokerHouse, TechnoClass* pTarget, TechnoClass* pInvoker, BulletExt::ExtData* pBulletExt);
+		void ApplyAmmoModifier(TechnoClass* pTarget, HouseClass* pInvokerHouse, BulletExt::ExtData* pBulletExt = nullptr);
 	};
 
 	class ExtContainer final : public Container<WarheadTypeExt>

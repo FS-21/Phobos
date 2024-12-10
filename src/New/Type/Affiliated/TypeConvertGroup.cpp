@@ -1,7 +1,8 @@
 #include <Ext/Techno/Body.h>
+#include <Ext/Script/Body.h>
 #include "TypeConvertGroup.h"
 
-void TypeConvertGroup::Convert(FootClass* pTargetFoot, const std::vector<TypeConvertGroup>& convertPairs, HouseClass* pOwner)
+void TypeConvertGroup::Convert(FootClass* pTargetFoot, const std::vector<TypeConvertGroup>& convertPairs, HouseClass* pOwner, AnimTypeClass* pAnimType)
 {
 	for (const auto& [fromTypes, toType, affectedHouses] : convertPairs)
 	{
@@ -17,18 +18,89 @@ void TypeConvertGroup::Convert(FootClass* pTargetFoot, const std::vector<TypeCon
 				// Check if the target matches upgrade-from TechnoType and it has something to upgrade to
 				if (from == pTargetFoot->GetTechnoType())
 				{
-					TechnoExt::ConvertToType(pTargetFoot, toType);
+					bool converted = TechnoExt::ConvertToType(pTargetFoot, toType);
+
+					if (converted && pAnimType)
+					{
+						if (auto pAnim = GameCreate<AnimClass>(pAnimType, pTargetFoot->Location))
+							pAnim->SetOwnerObject(pTargetFoot);
+					}
+
 					break;
 				}
 			}
 		}
 		else
 		{
-			TechnoExt::ConvertToType(pTargetFoot, toType);
+			bool converted = TechnoExt::ConvertToType(pTargetFoot, toType);
+
+			if (converted && pAnimType)
+			{
+				if (auto pAnim = GameCreate<AnimClass>(pAnimType, pTargetFoot->Location))
+					pAnim->SetOwnerObject(pTargetFoot);
+			}
 		}
 	}
 }
 
+void TypeConvertGroup::UniversalConvert(TechnoClass* pTarget, const std::vector<TypeConvertGroup>& convertPairs, HouseClass* pOwner, AnimTypeClass* pAnimType)
+{
+	if (!pTarget)
+		return;
+
+	for (const auto& [fromTypes, toType, affectedHouses] : convertPairs)
+	{
+		if (!toType.isset() || !toType.Get()) continue;
+
+		bool isValidTechno = TechnoExt::IsValidTechno(pTarget);
+
+		if (!isValidTechno) continue;
+
+		auto const pTargetType = pTarget->GetTechnoType();
+
+		if (!pTargetType || !pTarget->Owner) continue;
+
+		if (pOwner && !EnumFunctions::CanTargetHouse(affectedHouses, pOwner, pTarget->Owner))
+			continue;
+
+		if (fromTypes.size())
+		{
+			for (const auto& from : fromTypes)
+			{
+				// Check if the target matches upgrade-from TechnoType and it has something to upgrade to
+				if (from == pTarget->GetTechnoType())
+				{
+					if (pTarget->Target
+						&& !(from->WhatAmI() == AbstractType::BuildingType && toType->WhatAmI() == AbstractType::BuildingType))
+					{
+						auto pTargetExt = TechnoExt::ExtMap.Find(pTarget);
+						pTargetExt->Convert_UniversalDeploy_RememberTarget = pTarget->Target;
+					}
+
+					auto pConverted = TechnoExt::UniversalDeployConversion(pTarget, toType);
+
+					if (pConverted && pAnimType)
+					{
+						if (auto pAnim = GameCreate<AnimClass>(pAnimType, pConverted->Location))
+							pAnim->SetOwnerObject(pConverted);
+					}
+
+					break;
+				}
+			}
+		}
+		else
+		{
+			auto pConverted = TechnoExt::UniversalDeployConversion(pTarget, toType);
+
+			if (pConverted && pAnimType)
+			{
+				if (auto pAnim = GameCreate<AnimClass>(pAnimType, pConverted->Location))
+					pAnim->SetOwnerObject(pConverted);
+			}
+		}
+	}
+}
 
 bool TypeConvertGroup::Load(PhobosStreamReader& stm, bool registerForChange)
 {

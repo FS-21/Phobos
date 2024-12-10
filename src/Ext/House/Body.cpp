@@ -579,6 +579,101 @@ float HouseExt::ExtData::GetRestrictedFactoryPlantMult(TechnoTypeClass* pTechnoT
 	return 1.0f - ((1.0f - mult) * pTechnoTypeExt->FactoryPlant_Multiplier);
 }
 
+int HouseExt::GetHouseIndex(int param, TeamClass* pTeam = nullptr, TActionClass* pTAction = nullptr)
+{
+	if ((pTeam && pTAction) || (param == 8997 && !pTeam && !pTAction))
+		return -1;
+
+	int houseIdx = -1;
+	std::vector<int> housesListIdx;
+
+	// Check special cases
+	if (param < 0)
+	{
+		if (param < -3)
+			return -1;
+
+		for (auto pHouse : *HouseClass::Array)
+		{
+			if (param == -2 && pHouse->IsNeutral())
+			{
+				houseIdx = pHouse->ArrayIndex;
+				break;
+			}
+			else if (!pHouse->Defeated && !pHouse->IsObserver())
+			{
+				if ((param == -1 && !pHouse->Type->MultiplayPassive) // Random non-neutral player
+					|| (param == -3 && !pHouse->IsObserver())) // Random human player
+				{
+					housesListIdx.push_back(pHouse->ArrayIndex);
+				}
+
+				if (housesListIdx.size() > 0)
+					houseIdx = housesListIdx.at(ScenarioClass::Instance->Random.RandomRanged(0, housesListIdx.size() - 1));
+				else
+					return -1;
+			}
+		}
+
+		return houseIdx;
+	}
+
+	// Check a specific house of the map
+	if (param >= HouseClass::PlayerAtA && param <= HouseClass::PlayerAtH)
+	{
+		// Is a multiplayer house index (Player@A - Player@H) ?
+		houseIdx = param - HouseClass::PlayerAtA;
+	}
+	else if (param == 8997)
+	{
+		// Is the owner of the trigger ?
+		houseIdx = pTeam ? pTeam->Owner->ArrayIndex : pTAction->TeamType->Owner->ArrayIndex;
+	}
+	else if (param > 8997 || HouseClass::Array()->Count <= param)
+	{
+		// Is a invalid index value
+		if (pTAction)
+			Debug::Log(__FUNCTION__": Invalid house index '%d'. This action could be skipped.\n", (int)pTAction->ActionKind, param);
+
+		return -1;
+	}
+
+	HouseClass* pHouse = HouseClass::Array->GetItem(houseIdx);
+
+	if (!pHouse->Defeated && !pHouse->IsObserver())
+		return houseIdx;
+}
+
+void HouseExt::ForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode)
+{
+	auto pHouseExt = HouseExt::ExtMap.Find(pThis);
+
+	if (mode < 0 || mode > 2)
+		mode = -1;
+
+	enum { ForceFalse = 0, ForceTrue = 1, ForceRandom = 2, UseDefault = -1 };
+	pHouseExt->ForceOnlyTargetHouseEnemyMode = mode;
+
+	switch (mode)
+	{
+		case ForceFalse:
+			pHouseExt->ForceOnlyTargetHouseEnemy = false;
+			break;
+
+		case ForceTrue:
+			pHouseExt->ForceOnlyTargetHouseEnemy = true;
+			break;
+
+		case ForceRandom:
+			pHouseExt->ForceOnlyTargetHouseEnemy = (bool)ScenarioClass::Instance->Random.RandomRanged(0, 1);;
+			break;
+
+		default:
+			pHouseExt->ForceOnlyTargetHouseEnemy = false;
+			break;
+	}
+}
+
 void HouseExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 {
 	const char* pSection = this->OwnerObject()->PlainName;
@@ -629,6 +724,9 @@ void HouseExt::ExtData::Serialize(T& Stm)
 		.Process(this->AIFireSaleDelayTimer)
 		.Process(this->SuspendedEMPulseSWs)
 		.Process(this->SuperExts)
+		.Process(this->ForceOnlyTargetHouseEnemy)
+		.Process(this->ForceOnlyTargetHouseEnemyMode)
+		.Process(this->AITriggers_ValidList)
 		;
 }
 

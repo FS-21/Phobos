@@ -73,7 +73,7 @@ void ScriptExt::Mission_Move(TeamClass* pTeam, int calcThreatMode = 0, bool pick
 	// Find the Leader
 	pLeaderUnit = pTeamData->TeamLeader;
 
-	if (!IsUnitAvailable(pLeaderUnit, true))
+	if (!ScriptExt::IsUnitAvailable(pLeaderUnit, true))
 	{
 		pLeaderUnit = FindTheTeamLeader(pTeam);
 		pTeamData->TeamLeader = pLeaderUnit;
@@ -125,7 +125,7 @@ void ScriptExt::Mission_Move(TeamClass* pTeam, int calcThreatMode = 0, bool pick
 
 				auto const pTechnoType = pFoot->GetTechnoType();
 
-				if (IsUnitAvailable(pFoot, true))
+				if (ScriptExt::IsUnitAvailable(pFoot, true))
 				{
 					if (pTechnoType->Underwater && pTechnoType->LandTargeting == LandTargetingType::Land_Not_OK && selectedTarget->GetCell()->LandType != LandType::Water) // Land not OK for the Naval unit
 					{
@@ -223,8 +223,13 @@ TechnoClass* ScriptExt::FindBestObject(TechnoClass* pTechno, int method, int cal
 		if (pFoot)
 		{
 			int enemyHouseIndex = pFoot->Team->FirstUnit->Owner->EnemyHouseIndex;
+			bool onlyTargetHouseEnemy = pFoot->Team->Type->OnlyTargetHouseEnemy;
+			auto pHouseExt = HouseExt::ExtMap.Find(pFoot->Team->Owner);
 
-			if (pFoot->Team->Type->OnlyTargetHouseEnemy && enemyHouseIndex >= 0)
+			if (pHouseExt && pHouseExt->ForceOnlyTargetHouseEnemyMode != -1)
+				onlyTargetHouseEnemy = pHouseExt->ForceOnlyTargetHouseEnemy;
+
+			if (onlyTargetHouseEnemy && enemyHouseIndex >= 0)
 				enemyHouse = HouseClass::Array->GetItem(enemyHouseIndex);
 		}
 	}
@@ -240,6 +245,12 @@ TechnoClass* ScriptExt::FindBestObject(TechnoClass* pTechno, int method, int cal
 			continue;
 
 		if (enemyHouse && enemyHouse != object->Owner)
+			continue;
+
+		// Discard invisible structures
+		BuildingTypeClass* pTypeBuilding = object->WhatAmI() == AbstractType::Building ? static_cast<BuildingTypeClass*>(objectType) : nullptr;
+
+		if (pTypeBuilding && pTypeBuilding->InvisibleInGame)
 			continue;
 
 		// Stealth ground unit check
@@ -264,7 +275,7 @@ TechnoClass* ScriptExt::FindBestObject(TechnoClass* pTechno, int method, int cal
 		}
 
 		if (object != pTechno
-			&& IsUnitAvailable(object, true)
+			&& ScriptExt::IsUnitAvailable(object, true)
 			&& ((pickAllies && pTechno->Owner->IsAlliedWith(object))
 				|| (!pickAllies && !pTechno->Owner->IsAlliedWith(object))))
 		{
@@ -407,7 +418,7 @@ void ScriptExt::Mission_Move_List1Random(TeamClass* pTeam, int calcThreatMode, b
 					auto objectFromList = objectsList[j];
 
 					if (pTechnoType == objectFromList
-						&& IsUnitAvailable(pTechno, true)
+						&& ScriptExt::IsUnitAvailable(pTechno, true)
 						&& ((pickAllies
 							&& pTeam->FirstUnit->Owner->IsAlliedWith(pTechno))
 							|| (!pickAllies

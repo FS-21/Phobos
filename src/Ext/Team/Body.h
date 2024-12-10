@@ -1,10 +1,16 @@
 #pragma once
 #include <TeamClass.h>
+#include <AITriggerTypeClass.h>
 
 #include <Helpers/Enumerators.h>
 #include <Helpers/Macro.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
+#include <Ext/Techno/Body.h>
+#include <Ext/HouseType/Body.h>
+#include <Ext/House/Body.h>
+#include <Ext/Rules/Body.h>
+#include <Ext/TechnoType/Body.h>
 #include <Phobos.h>
 
 class TeamExt
@@ -32,6 +38,21 @@ public:
 		bool ForceJump_RepeatMode;
 		FootClass* TeamLeader;
 		std::vector<ScriptClass*> PreviousScriptList;
+		int TriggersSideIdx;
+		int TriggersHouseIdx;
+		int MinAmmoThreshold;
+		std::vector<TechnoClass*> BridgeRepairHuts;
+		int AngerNodeModifier;
+		bool OnlyTargetHouseEnemy;
+		int OnlyTargetHouseEnemyMode;
+		bool ConditionalJump_Evaluation;
+		int ConditionalJump_ComparatorMode;
+		int ConditionalJump_ComparatorValue;
+		int ConditionalJump_Counter;
+		int ConditionalJump_Index;
+		bool AbortActionAfterKilling;
+		bool ConditionalJump_EnabledKillsCount;
+		bool ConditionalJump_ResetVariablesIfJump;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -47,6 +68,21 @@ public:
 			, ForceJump_RepeatMode { false }
 			, TeamLeader { nullptr }
 			, PreviousScriptList { }
+			, TriggersSideIdx { -1 }
+			, TriggersHouseIdx { -1 }
+			, MinAmmoThreshold { 0 }
+			, BridgeRepairHuts { }
+			, AngerNodeModifier { 5000 }
+			, OnlyTargetHouseEnemy { false }
+			, OnlyTargetHouseEnemyMode { -1 }
+			, ConditionalJump_Evaluation { false }
+			, ConditionalJump_ComparatorMode { 3 }
+			, ConditionalJump_ComparatorValue { 1 }
+			, ConditionalJump_Counter { 0 }
+			, AbortActionAfterKilling { false }
+			, ConditionalJump_Index { -1000000 }
+			, ConditionalJump_EnabledKillsCount { false }
+			, ConditionalJump_ResetVariablesIfJump { false }
 		{ }
 
 		virtual ~ExtData() = default;
@@ -84,5 +120,13 @@ public:
 	};
 
 	static ExtContainer ExtMap;
+
+	static bool HouseOwns(AITriggerTypeClass* pThis, HouseClass* pHouse, bool allies, std::vector<TechnoTypeClass*> list);
+	static bool HouseOwnsAll(AITriggerTypeClass* pThis, HouseClass* pHouse, std::vector<TechnoTypeClass*> list);
+	static bool EnemyOwns(AITriggerTypeClass* pThis, HouseClass* pHouse, HouseClass* pEnemy, bool onlySelectedEnemy, std::vector<TechnoTypeClass*> list);
+	static bool EnemyOwnsAll(AITriggerTypeClass* pThis, HouseClass* pHouse, HouseClass* pEnemy, std::vector<TechnoTypeClass*> list);
+	static bool NeutralOwns(AITriggerTypeClass* pThis, std::vector<TechnoTypeClass*> list);
+	static bool NeutralOwnsAll(AITriggerTypeClass* pThis, std::vector<TechnoTypeClass*> list);
+	static bool CountConditionMet(AITriggerTypeClass* pThis, int nObjects);
 
 };

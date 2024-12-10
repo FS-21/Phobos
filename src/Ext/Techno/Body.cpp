@@ -8,10 +8,12 @@
 #include <Ext/Scenario/Body.h>
 #include <Ext/WeaponType/Body.h>
 #include <Ext/House/Body.h>
-#include <Ext/WarheadType/Body.h>
+#include <Ext/Team/Body.h>
 #include <Ext/Script/Body.h>
+#include <Ext/WarheadType/Body.h>
 
 #include <Utilities/AresFunctions.h>
+#include <Ext/CaptureManager/Body.h>
 
 TechnoExt::ExtContainer TechnoExt::ExtMap;
 
@@ -35,6 +37,72 @@ TechnoExt::ExtData::~ExtData()
 	}
 
 	AnimExt::InvalidateTechnoPointers(pThis);
+}
+
+void TechnoExt::TransferMindControlOnDeploy(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo)
+{
+	auto pAnimType = pTechnoFrom->MindControlRingAnim ?
+		pTechnoFrom->MindControlRingAnim->Type : TechnoExt::ExtMap.Find(pTechnoFrom)->MindControlRingAnimType;
+
+	if (auto Controller = pTechnoFrom->MindControlledBy)
+	{
+		if (auto Manager = Controller->CaptureManager)
+		{
+			CaptureManagerExt::FreeUnit(Manager, pTechnoFrom, true);
+
+			if (CaptureManagerExt::CaptureUnit(Manager, pTechnoTo, false, pAnimType, true))
+			{
+				if (auto pBld = abstract_cast<BuildingClass*>(pTechnoTo))
+				{
+					// Capturing the building after unlimbo before buildup has finished or even started appears to throw certain things off,
+					// Hopefully this is enough to fix most of it like anims playing prematurely etc.
+					pBld->ActuallyPlacedOnMap = false;
+					pBld->DestroyNthAnim(BuildingAnimSlot::All);
+
+					pBld->BeginMode(BStateType::Construction);
+					pBld->QueueMission(Mission::Construction, false);
+				}
+			}
+			else
+			{
+				int nSound = pTechnoTo->GetTechnoType()->MindClearedSound;
+				if (nSound == -1)
+					nSound = RulesClass::Instance->MindClearedSound;
+
+				if (nSound != -1)
+					VocClass::PlayIndexAtPos(nSound, pTechnoTo->Location);
+			}
+		}
+	}
+	else if (auto MCHouse = pTechnoFrom->MindControlledByHouse)
+	{
+		pTechnoTo->MindControlledByHouse = MCHouse;
+		pTechnoFrom->MindControlledByHouse = nullptr;
+	}
+	else if (pTechnoFrom->MindControlledByAUnit) // Perma MC
+	{
+		pTechnoTo->MindControlledByAUnit = true;
+
+		auto const pBuilding = abstract_cast<BuildingClass*>(pTechnoTo);
+		CoordStruct location = pTechnoTo->GetCoords();
+
+		location.Z += pBuilding
+			? pBuilding->Type->Height * Unsorted::LevelHeight
+			: pTechnoTo->GetTechnoType()->MindControlRingOffset;
+
+		auto const pAnim = pAnimType
+			? GameCreate<AnimClass>(pAnimType, location, 0, 1)
+			: nullptr;
+
+		if (pAnim)
+		{
+			if (pBuilding)
+				pAnim->ZAdjust = -1024;
+
+			pTechnoTo->MindControlRingAnim = pAnim;
+			pAnim->SetOwnerObject(pTechnoTo);
+		}
+	}
 }
 
 bool TechnoExt::IsActive(TechnoClass* pThis)
@@ -127,7 +195,7 @@ double TechnoExt::GetCurrentSpeedMultiplier(FootClass* pThis)
 		(pThis->HasAbility(Ability::Faster) ? RulesClass::Instance->VeteranSpeed : 1.0);
 }
 
-CoordStruct TechnoExt::PassengerKickOutLocation(TechnoClass* pThis, FootClass* pPassenger, int maxAttempts = 1)
+CoordStruct TechnoExt::PassengerKickOutLocation(TechnoClass* pThis, FootClass* pPassenger, int maxAttempts)
 {
 	if (!pThis || !pPassenger)
 		return CoordStruct::Empty;
@@ -359,6 +427,40 @@ bool TechnoExt::CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaul
 	return canDeploy;
 }
 
+// Checks if a structure can deploy into another at its current location. If the building has problems forplacing the new one returns noDeploysIntoDefaultValue (def = false) instead.
+// If a building is specified then it will be used by default.
+bool TechnoExt::CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue, BuildingTypeClass* pBuildingType)
+{
+	if (!pThis)
+		return false;
+
+	auto pDeployType = pBuildingType;
+
+	if (!pDeployType)
+	{
+		auto pBldTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+		if (!pBldTypeExt || !pBldTypeExt->Convert_UniversalDeploy.isset())
+			return noDeploysIntoDefaultValue;
+
+		pDeployType = static_cast<BuildingTypeClass*>(pBldTypeExt->Convert_UniversalDeploy.Get());
+	}
+
+	if (!pDeployType)
+		return noDeploysIntoDefaultValue;
+
+	bool canDeploy = true;
+	auto mapCoords = CellClass::Coord2Cell(pThis->GetCoords());
+
+	pThis->Mark(MarkType::Up);
+
+	if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
+		canDeploy = false;
+
+	pThis->Mark(MarkType::Down);
+
+	return canDeploy;
+}
+
 bool TechnoExt::IsTypeImmune(TechnoClass* pThis, TechnoClass* pSource)
 {
 	if (!pThis || !pSource)
@@ -469,22 +571,6 @@ int TechnoExt::ExtData::GetAttachedEffectCumulativeCount(AttachEffectTypeClass* 
 	return foundCount;
 }
 
-bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
-{
-	if (!pTechno)
-		return false;
-
-	bool isValid = !pTechno->Dirty
-		&& TechnoExt::IsUnitAvailable(pTechno, true)
-		&& pTechno->Owner
-		&& (pTechno->WhatAmI() == AbstractType::Infantry
-			|| pTechno->WhatAmI() == AbstractType::Unit
-			|| pTechno->WhatAmI() == AbstractType::Building
-			|| pTechno->WhatAmI() == AbstractType::Aircraft);
-
-	return isValid;
-}
-
 bool TechnoExt::IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed)
 {
 	if (!pTechno)
@@ -496,6 +582,324 @@ bool TechnoExt::IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrA
 		isAvailable &= !pTechno->Absorbed && !pTechno->Transporter;
 
 	return isAvailable;
+}
+
+void TechnoExt::RemoveParasite(TechnoClass* pThis, HouseClass* sourceHouse, WarheadTypeClass* wh)
+{
+	if (!pThis || !wh)
+		return;
+
+	const auto pFoot = abstract_cast<FootClass*>(pThis);
+	if (!pFoot)
+		return;
+
+	bool isParasiteEatingMe = pFoot->ParasiteEatingMe && pThis->WhatAmI() != AbstractType::Infantry	&& pThis->WhatAmI() != AbstractType::Building;
+
+	// Ignore other cases that aren't useful for this logic
+	if (!isParasiteEatingMe)
+		return;
+
+	const auto pWHExt = WarheadTypeExt::ExtMap.Find(wh);
+	auto parasite = pFoot->ParasiteEatingMe;
+
+	if (!pWHExt || !pWHExt->CanRemoveParasites.Get() || !pWHExt->CanTargetHouse(parasite->Owner, pThis))
+		return;
+
+	if (pWHExt->CanRemoveParasites_ReportSound.isset() && pWHExt->CanRemoveParasites_ReportSound.Get() >= 0)
+		VocClass::PlayAt(pWHExt->CanRemoveParasites_ReportSound.Get(), parasite->GetCoords());
+
+	// Kill the parasite
+	CoordStruct coord = TechnoExt::PassengerKickOutLocation(pThis, parasite, 10);
+
+	auto deleteParasite = [parasite]()
+	{
+		auto parasiteOwner = parasite->Owner;
+		parasite->IsAlive = false;
+		parasite->IsOnMap = false;
+		parasite->Health = 0;
+
+		parasiteOwner->RegisterLoss(parasite, false);
+		parasiteOwner->RemoveTracking(parasite);
+		parasite->UnInit();
+	};
+
+	if (!pWHExt->CanRemoveParasites_KickOut.Get() || coord == CoordStruct::Empty)
+	{
+		deleteParasite;
+		return;
+	}
+
+	// Kick the parasite outside
+	pFoot->ParasiteEatingMe = nullptr;
+
+	if (!parasite->Unlimbo(coord, parasite->PrimaryFacing.Current().GetDir()))
+	{
+		// Failed to kick out the parasite, remove it instead
+		deleteParasite;
+		return;
+	}
+
+	parasite->Target = nullptr;
+	int paralysisCountdown = pWHExt->CanRemoveParasites_KickOut_Paralysis.Get() < 0 ? 15 : pWHExt->CanRemoveParasites_KickOut_Paralysis.Get();
+
+	if (paralysisCountdown > 0)
+	{
+		parasite->ParalysisTimer.Start(paralysisCountdown);
+		parasite->RearmTimer.Start(paralysisCountdown);
+	}
+
+	if (pWHExt->CanRemoveParasites_KickOut_Anim.isset())
+	{
+		if (auto const pAnim = GameCreate<AnimClass>(pWHExt->CanRemoveParasites_KickOut_Anim.Get(), parasite->GetCoords()))
+		{
+			pAnim->Owner = sourceHouse ? sourceHouse : parasite->Owner;
+			pAnim->SetOwnerObject(parasite);
+		}
+	}
+
+	return;
+}
+
+// Check adjacent cells from the center
+// The current MapClass::Instance->PlacePowerupCrate(...) doesn't like slopes and maybe other cases
+bool TechnoExt::TryToCreateCrate(CoordStruct location, Powerup selectedPowerup, int maxCellRange)
+{
+	CellStruct centerCell = CellClass::Coord2Cell(location);
+	int currentRange = 0;
+	bool placed = false;
+
+	do
+	{
+		int x = -currentRange;
+		int y = -currentRange;
+
+		CellStruct checkedCell;
+		checkedCell.Y = centerCell.Y + y;
+
+		// Check upper line
+		for (int i = -currentRange; i <= currentRange; i++)
+		{
+			checkedCell.X = centerCell.X + i;
+
+			if (placed = MapClass::Instance->PlacePowerupCrate(checkedCell, selectedPowerup))
+				break;
+		}
+
+		if (placed)
+			break;
+
+		checkedCell.Y = centerCell.Y + std::abs(y);
+
+		// Check lower line
+		for (int i = -currentRange; i <= currentRange; i++)
+		{
+			checkedCell.X = centerCell.X + i;
+
+			if (placed = MapClass::Instance->PlacePowerupCrate(checkedCell, selectedPowerup))
+				break;
+		}
+
+		if (placed)
+			break;
+
+		checkedCell.X = centerCell.X + x;
+
+		// Check left line
+		for (int j = -currentRange + 1; j < currentRange; j++)
+		{
+			checkedCell.Y = centerCell.Y + j;
+
+			if (placed = MapClass::Instance->PlacePowerupCrate(checkedCell, selectedPowerup))
+				break;
+		}
+
+		if (placed)
+			break;
+
+		checkedCell.X = centerCell.X + std::abs(x);
+
+		// Check right line
+		for (int j = -currentRange + 1; j < currentRange; j++)
+		{
+			checkedCell.Y = centerCell.Y + j;
+
+			if (placed = MapClass::Instance->PlacePowerupCrate(checkedCell, selectedPowerup))
+				break;
+		}
+
+		currentRange++;
+	}
+	while (!placed && currentRange < maxCellRange);
+
+	if (!placed)
+		Debug::Log(__FUNCTION__": Failed to place a crate in the cell (%d,%d) and around that location.\n", centerCell.X, centerCell.Y, maxCellRange);
+
+	return placed;
+}
+
+void TechnoExt::PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo, bool forceFullTransfer, bool dontCheckInvalidOccupiers)
+{
+	if (!pFrom || (pFrom == pTo))
+		return;
+
+	// Without a valid target this method will be used for ejecting passengers
+	bool kickOutAll = !pTo || !forceFullTransfer ? true : false;
+
+	auto pBuildingFrom = abstract_cast<BuildingClass*>(pFrom);
+	auto pBuildingTo = pTo ? abstract_cast<BuildingClass*>(pTo) : nullptr;
+
+	DynamicVectorClass<FootClass*> passengersList; // Temporal list
+
+	// The method for extranting the passengers changes if is a building or an unit
+	if (pBuildingFrom)
+	{
+		for (int i = 0; i < pBuildingFrom->Occupants.Count; i++)
+		{
+			InfantryClass* pPassenger = pBuildingFrom->Occupants.GetItem(i);
+			auto pFooter = static_cast<FootClass*>(pPassenger);
+			passengersList.AddItem(pFooter);
+		}
+	}
+	else
+	{
+		while (pFrom->Passengers.NumPassengers > 0)
+		{
+			FootClass* pPassenger = pFrom->Passengers.RemoveFirstPassenger();
+			pPassenger->Transporter = nullptr;
+			pPassenger->ShouldEnterOccupiable = false;
+			pPassenger->ShouldGarrisonStructure = false;
+			pPassenger->InOpenToppedTransport = false;
+			pPassenger->QueueMission(Mission::Guard, false);
+			passengersList.AddItem(pPassenger);
+		}
+	}
+
+	if (passengersList.Count == 0) // Nothing to transfer
+		return;
+
+	const auto pFromType = pFrom->GetTechnoType();
+	const auto pToType = pTo ? pTo->GetTechnoType() : nullptr;
+
+	double nToPassengersSizeLimit = pToType ? pToType->SizeLimit : 0;
+	int nToPassengersLimit = pToType ? pToType->Passengers : 0;
+	int nToPassengers = pToType ? pTo->Passengers.NumPassengers : 0;
+	TechnoClass* pTransportReference = pTo ? pTo : pFrom;
+
+	while (passengersList.Count > 0)
+	{
+		FootClass* pPassenger = nullptr;
+
+		// Note: The insertion order is different in buildings
+		int passengerIndex = pBuildingTo ? 0 : passengersList.Count - 1;
+
+		pPassenger = passengersList.GetItem(passengerIndex);
+		passengersList.RemoveItem(passengerIndex);
+
+		// Garrison infantry in building
+		if (pBuildingTo)
+		{
+			int nOccupants = pBuildingTo->Occupants.Count;
+			int maxNumberOccupants = pBuildingTo->Type->MaxNumberOccupants;
+
+			InfantryClass* pInf = abstract_cast<InfantryClass*>(pPassenger);
+			bool isOccupier = pInf && (pInf->Type->Occupier || dontCheckInvalidOccupiers) ? true : false;
+
+			// invalid infantry could enter here but is mandatory respect the number of occupants
+			if (!kickOutAll && isOccupier && maxNumberOccupants > 0 && nOccupants < maxNumberOccupants)
+			{
+				pBuildingTo->Occupants.AddItem(pInf);
+			}
+			else
+			{
+				// Not enough space inside the garrisonable building, eject the passenger outside
+				CoordStruct newLocation = PassengerKickOutLocation(pTransportReference, pPassenger); //pTransportReference->GetCoords();
+				auto pCell = MapClass::Instance->TryGetCellAt(CellClass::Coord2Cell(newLocation));
+				int bridgeZ = pCell->ContainsBridge() ? CellClass::BridgeHeight : 0;
+				int baseHeight = pTransportReference->GetCoords().Z;
+				newLocation.Z = Math::max(MapClass::Instance->GetCellFloorHeight(newLocation) + bridgeZ, baseHeight);
+				bool inAir = newLocation.Z >= Unsorted::CellHeight * 2; // If the source is flying and must eject passengers they should be parachuted
+
+				pPassenger->LastMapCoords = pCell->MapCoords;
+
+				++Unsorted::IKnowWhatImDoing;
+
+				if (inAir)
+					pPassenger->SpawnParachuted(newLocation);
+				else
+					pPassenger->Unlimbo(newLocation, DirType::North);
+
+				--Unsorted::IKnowWhatImDoing;
+			}
+		}
+		else
+		{
+			FootClass* pGunner = abstract_cast<FootClass*>(pTo);
+			double nToPassengerSize = pPassenger->GetTechnoType()->Size;
+
+			CoordStruct newLocation = PassengerKickOutLocation(pTransportReference, pPassenger); //pTransportReference->GetCoords();
+			auto pCell = MapClass::Instance->TryGetCellAt(CellClass::Coord2Cell(newLocation));
+			int bridgeZ = pCell->ContainsBridge() ? CellClass::BridgeHeight : 0;
+			int baseHeight = pTransportReference->GetCoords().Z;
+			newLocation.Z = Math::max(MapClass::Instance->GetCellFloorHeight(newLocation) + bridgeZ, baseHeight);
+			bool inAir = newLocation.Z >= Unsorted::CellHeight * 2; // If the source is flying and must eject passengers they should be parachuted
+
+			if (!kickOutAll && nToPassengerSize > 0 && (nToPassengersLimit - nToPassengers - nToPassengerSize >= 0) && nToPassengerSize <= nToPassengersSizeLimit)
+			{
+				pPassenger->Transporter = pTo;
+				nToPassengers += (int)nToPassengerSize;
+
+				if (pToType->OpenTopped)
+				{
+					pPassenger->SetLocation(pTo->Location);
+					pTo->EnteredOpenTopped(pPassenger);
+				}
+				else if (pToType->Gunner && pGunner)
+				{
+					pGunner->ReceiveGunner(pPassenger);
+				}
+				else
+				{
+					pTo->AddPassenger(pPassenger);
+				}
+			}
+			else
+			{
+				// Not enough space inside the new transport, eject the passenger
+				CellClass* pCell = MapClass::Instance->TryGetCellAt(newLocation);
+				pPassenger->LastMapCoords = pCell->MapCoords;
+
+				++Unsorted::IKnowWhatImDoing;
+
+				if (inAir)
+					pPassenger->SpawnParachuted(newLocation);
+				else
+					pPassenger->Unlimbo(newLocation, DirType::North);
+
+				--Unsorted::IKnowWhatImDoing;
+			}
+		}
+	}
+}
+
+bool TechnoExt::IsValidTechno(AbstractClass* pObject)
+{
+	return IsValidTechno(abstract_cast<TechnoClass*>(pObject));
+}
+
+bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
+{
+	if (!pTechno)
+		return false;
+
+	bool isValid = !pTechno->Dirty
+		&& ScriptExt::IsUnitAvailable(pTechno, true)
+		&& pTechno->Owner
+		&& (pTechno->WhatAmI() == AbstractType::Infantry
+			|| pTechno->WhatAmI() == AbstractType::Unit
+			|| pTechno->WhatAmI() == AbstractType::Building
+			|| pTechno->WhatAmI() == AbstractType::Aircraft);
+
+	return isValid;
 }
 
 // =============================
@@ -534,6 +938,23 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->HasRemainingWarpInDelay)
 		.Process(this->LastWarpInDelay)
 		.Process(this->IsBeingChronoSphered)
+		.Process(this->WebbyDurationCountDown)
+		.Process(this->WebbyDurationTimer)
+		.Process(this->WebbyAnim)
+		.Process(this->WebbyLastTarget)
+		.Process(this->WebbyLastMission)
+		.Process(this->DropCrate)
+		.Process(this->DropCrateType)
+		.Process(this->Convert_UniversalDeploy_DeployAnim)
+		.Process(this->Convert_UniversalDeploy_InProgress)
+		.Process(this->Convert_UniversalDeploy_MakeInvisible)
+		.Process(this->Convert_UniversalDeploy_TemporalTechno)
+		.Process(this->Convert_UniversalDeploy_IsOriginalDeployer)
+		.Process(this->Convert_UniversalDeploy_RememberTarget)
+		.Process(this->OriginalTargetWeaponIndex)
+		.Process(this->OriginalTarget)
+		.Process(this->ResetRandomTarget)
+		.Process(this->CurrentRandomTarget)
 		;
 }
 

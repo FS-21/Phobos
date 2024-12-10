@@ -119,9 +119,11 @@ This page lists all the individual contributions to the project by their author.
   - Extension class optimization
 - **FS-21**:
   - Dump Object Info enhancements
+  - Majority of ScriptType actions
   - `Powered.KillSpawns`
   - `Spawner.LimitRange`
   - Majority of ScriptType actions
+  - ScriptType Action 14004: Force Global OnlyTargetHouseEnemy value in Teams
   - MC deployer fixes
   - Help with docs
   - Automatic Passenger Deletion logic
@@ -129,11 +131,34 @@ This page lists all the individual contributions to the project by their author.
   - Kill Object Automatically logic prototype
   - Customizable resource storage
   - Override uncloaked underwater attack behavior
+  - Override target under EMP attack behavior
   - AI Aircraft docks fix
   - Shared ammo logic
   - Customizable FLH when infantry is prone or deployed
   - Initial strength for cloned infantry
   - Map Events 604 & 605 for checking if a specific Techno enters in a cell
+  - Additional conversion animation
+  - Customizable disguised target evaluation behaviour in new ScriptType attack actions
+  - Warheads can remove parasites
+  - Allow cyborg legs to be repaired when they enter into transports or structures
+  - Mind Control Threshold
+  - Web logic against infantry
+  - ScriptType actions `10018` & `12003` for aircrafts attacks
+  - Map Action 600 for overwriting DropCrate behaviour in attached Technos
+  - `DropCrate` for setting what crate drop when Techno is destroyed
+  - Map event `There are no technos of the specified houses list`
+  - Script action for repairing destroyed bridges
+  - Script actions for modifying AI anger against other houses
+  - Script actions for manipulating script flows with conditional jumps
+  - `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
+  - Grant new superweapons in superweapons
+  - Penetration damage on garrisonable structures
+  - Map action 507 for printing a message with the remaining map objects
+  - AI learning
+  - Modify Ammo on impact
+  - Universal deploy from any techno into any techno
+  - New AI teams selector
+  - `RandomTarget` for random projectile retargeting
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
@@ -251,6 +276,7 @@ This page lists all the individual contributions to the project by their author.
   - Build area customizations
   - `Scorch` / `Flamer` fire animation customization
   - EM Pulse cannon logic improvements
+  - Cyborg legs being restored when the soldier enters into transports or structures
   - `<Player @ X>` as owner for pre-placed objects
 - **Morton (MortonPL)**:
   - `XDrawOffset` for animations

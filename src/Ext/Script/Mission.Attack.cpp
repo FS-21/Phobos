@@ -20,6 +20,7 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, bool repeatAction = true, int c
 	bool agentMode = false;
 	bool pacifistTeam = true;
 	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	std::vector<double> disguiseDetection = {};
 
 	if (!pScript)
 		return;
@@ -29,6 +30,14 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, bool repeatAction = true, int c
 		pTeam->StepCompleted = true;
 		ScriptExt::Log("AI Scripts - Attack: [%s] [%s] (line: %d = %d,%d) Jump to next line: %d = %d,%d -> (Reason: ExtData found)\n", pTeam->Type->ID, pScript->Type->ID, pScript->CurrentMission, pScript->Type->ScriptActions[pScript->CurrentMission].Action, pScript->Type->ScriptActions[pScript->CurrentMission].Argument, pScript->CurrentMission + 1, pScript->Type->ScriptActions[pScript->CurrentMission + 1].Action, pScript->Type->ScriptActions[pScript->CurrentMission + 1].Argument);
 
+		return;
+	}
+
+	auto pHouseExt = HouseExt::ExtMap.Find(pTeam->Owner);
+	if (!pHouseExt)
+	{
+		// This action finished
+		pTeam->StepCompleted = true;
 		return;
 	}
 
@@ -61,7 +70,7 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, bool repeatAction = true, int c
 
 	pFocus = abstract_cast<TechnoClass*>(pTeam->Focus);
 
-	if (!IsUnitAvailable(pFocus, true))
+	if (!ScriptExt::IsUnitAvailable(pFocus, true))
 	{
 		pTeam->Focus = nullptr;
 		pFocus = nullptr;
@@ -115,7 +124,7 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, bool repeatAction = true, int c
 
 	for (auto pFoot = pTeam->FirstUnit; pFoot; pFoot = pFoot->NextTeamMember)
 	{
-		if (IsUnitAvailable(pFoot, true))
+		if (ScriptExt::IsUnitAvailable(pFoot, true))
 		{
 			auto const pTechnoType = pFoot->GetTechnoType();
 
@@ -137,13 +146,26 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, bool repeatAction = true, int c
 				if ((pTypeInf->Agent && pTypeInf->Infiltrate) || pTypeInf->Engineer)
 					agentMode = true;
 			}
+
+			auto pTechnoData = TechnoTypeExt::ExtMap.Find(pTechnoType);
+			if (pTechnoType->DetectDisguise)
+			{
+				auto const AIDifficulty = static_cast<int>(pFoot->Owner->GetAIDifficultyIndex());
+				double detectionValue = 1.0;
+
+				if (pTechnoData->DetectDisguise_Percent.size() == 3)
+					detectionValue = pTechnoData->DetectDisguise_Percent[AIDifficulty];
+
+				detectionValue = detectionValue > 0.0 ? detectionValue : 1.0;
+				disguiseDetection.push_back(detectionValue);
+			}
 		}
 	}
 
 	// Find the Leader
 	pLeaderUnit = pTeamData->TeamLeader;
 
-	if (!IsUnitAvailable(pLeaderUnit, true))
+	if (!ScriptExt::IsUnitAvailable(pLeaderUnit, true))
 	{
 		pLeaderUnit = FindTheTeamLeader(pTeam);
 		pTeamData->TeamLeader = pLeaderUnit;
@@ -189,13 +211,17 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, bool repeatAction = true, int c
 	if (!pFocus && !bAircraftsWithoutAmmo)
 	{
 		// This part of the code is used for picking a new target.
+		bool onlyTargetHouseEnemy = pTeam->Type->OnlyTargetHouseEnemy;
+
+		if (pHouseExt->ForceOnlyTargetHouseEnemyMode != -1)
+			onlyTargetHouseEnemy = pHouseExt->ForceOnlyTargetHouseEnemy;
 
 		// Favorite Enemy House case. If set, AI will focus against that House
-		if (pTeam->Type->OnlyTargetHouseEnemy && pLeaderUnit->Owner->EnemyHouseIndex >= 0)
+		if (onlyTargetHouseEnemy && pLeaderUnit->Owner->EnemyHouseIndex >= 0)
 			enemyHouse = HouseClass::Array->GetItem(pLeaderUnit->Owner->EnemyHouseIndex);
 
 		int targetMask = scriptArgument;
-		selectedTarget = GreatestThreat(pLeaderUnit, targetMask, calcThreatMode, enemyHouse, attackAITargetType, idxAITargetTypeItem, agentMode);
+		selectedTarget = GreatestThreat(pLeaderUnit, targetMask, calcThreatMode, enemyHouse, attackAITargetType, idxAITargetTypeItem, agentMode, disguiseDetection);
 
 		if (selectedTarget)
 		{
@@ -299,7 +325,7 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, bool repeatAction = true, int c
 		bool isAirOK = pFocus->IsInAir() && leaderWeaponsHaveAA;
 		bool isGroundOK = !pFocus->IsInAir() && leaderWeaponsHaveAG;
 
-		if (IsUnitAvailable(pFocus, true)
+		if (ScriptExt::IsUnitAvailable(pFocus, true)
 			&& !pFocus->GetTechnoType()->Immune
 			&& (isAirOK || isGroundOK)
 			&& (!pLeaderUnit->Owner->IsAlliedWith(pFocus) || IsUnitMindControlledFriendly(pLeaderUnit->Owner, pFocus)))
@@ -310,7 +336,7 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, bool repeatAction = true, int c
 			{
 				auto const pTechnoType = pFoot->GetTechnoType();
 
-				if (IsUnitAvailable(pFoot, true))
+				if (ScriptExt::IsUnitAvailable(pFoot, true))
 				{
 					// Aircraft case 1
 					if ((pFoot->WhatAmI() == AbstractType::Aircraft
@@ -400,7 +426,7 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, bool repeatAction = true, int c
 	}
 }
 
-TechnoClass* ScriptExt::GreatestThreat(TechnoClass* pTechno, int method, int calcThreatMode = 0, HouseClass* onlyTargetThisHouseEnemy = nullptr, int attackAITargetType = -1, int idxAITargetTypeItem = -1, bool agentMode = false)
+TechnoClass* ScriptExt::GreatestThreat(TechnoClass* pTechno, int method, int calcThreatMode = 0, HouseClass* onlyTargetThisHouseEnemy = nullptr, int attackAITargetType = -1, int idxAITargetTypeItem = -1, bool agentMode = false, std::vector<double> disguiseDetection = {})
 {
 	TechnoClass* bestObject = nullptr;
 	double bestVal = -1;
@@ -420,6 +446,12 @@ TechnoClass* ScriptExt::GreatestThreat(TechnoClass* pTechno, int method, int cal
 		auto pTechnoType = pTechno->GetTechnoType();
 
 		if (!object)
+			continue;
+
+		// Discard invisible structures
+		BuildingTypeClass* pTypeBuilding = object->WhatAmI() == AbstractType::Building ? static_cast<BuildingTypeClass*>(objectType) : nullptr;
+
+		if (pTypeBuilding && pTypeBuilding->InvisibleInGame)
 			continue;
 
 		// Note: the TEAM LEADER is picked for this task, be careful with leadership values in your mod
@@ -485,14 +517,40 @@ TechnoClass* ScriptExt::GreatestThreat(TechnoClass* pTechno, int method, int cal
 		if (!TechnoExt::AllowedTargetByZone(pTechno, object, pTypeExt->TargetZoneScanType, weaponType))
 			continue;
 
+		auto const pBuilding = abstract_cast<BuildingClass*>(object);
+		bool isBuildingCapturable = objectType->Immune && pBuilding && pBuilding->Type->Capturable && agentMode;
+
 		if (object != pTechno
-			&& IsUnitAvailable(object, true)
-			&& !objectType->Immune
+			&& ScriptExt::IsUnitAvailable(object, true)
+			&& (!objectType->Immune || isBuildingCapturable)
 			&& !object->TemporalTargetingMe
 			&& !object->BeingWarpedOut
 			&& object->Owner != pTechno->Owner
 			&& (!pTechno->Owner->IsAlliedWith(object) || IsUnitMindControlledFriendly(pTechno->Owner, object)))
 		{
+			if (object->IsDisguised())
+			{
+				if (disguiseDetection.size() == 0)
+					continue;
+
+				bool detected = false;
+
+				for (double item : disguiseDetection)
+				{
+					int dice = ScenarioClass::Instance->Random.RandomRanged(0, 99);
+					int detectionValue = std::round(item * 100.0);
+
+					if (detectionValue > dice)
+					{
+						detected = true;
+						break;
+					}
+				}
+
+				if (!detected)
+					continue;
+			}
+
 			double value = 0;
 
 			if (EvaluateObjectWithMask(object, method, attackAITargetType, idxAITargetTypeItem, pTechno))
@@ -1168,7 +1226,7 @@ void ScriptExt::Mission_Attack_List1Random(TeamClass* pTeam, bool repeatAction, 
 					auto const pFirstUnit = pTeam->FirstUnit;
 
 					if (pTechnoType == objectFromList
-						&& IsUnitAvailable(pTechno, true)
+						&& ScriptExt::IsUnitAvailable(pTechno, true)
 						&& (!pFirstUnit->Owner->IsAlliedWith(pTechno) || IsUnitMindControlledFriendly(pFirstUnit->Owner, pTechno)))
 					{
 						validIndexes.push_back(j);

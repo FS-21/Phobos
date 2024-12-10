@@ -10,6 +10,9 @@
 #include <Ext/House/Body.h>
 #include <Ext/WarheadType/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <Ext/TechnoType/Body.h>
+#include <Ext/BuildingType/Body.h>
+#include <Ext/Script/Body.h>
 #include <Utilities/EnumFunctions.h>
 
 #pragma region Update
@@ -21,6 +24,7 @@ DEFINE_HOOK(0x6F9E50, TechnoClass_AI, 0x5)
 	// Do not search this up again in any functions called here because it is costly for performance - Starkku
 	TechnoExt::ExtMap.Find(pThis)->OnEarlyUpdate();
 	TechnoExt::ApplyMindControlRangeLimit(pThis);
+	//TechnoExt::UpdateUniversalDeploy(pThis);
 
 	return 0;
 }
@@ -203,6 +207,17 @@ DEFINE_HOOK(0x6F6AC4, TechnoClass_Limbo, 0x5)
 	return 0;
 }
 
+DEFINE_HOOK(0x702D6D, TechnoClass_RegisterDestruction_SaveKillerInfo, 0x6)
+{
+	GET(TechnoClass*, pKiller, EDI);
+	GET(TechnoClass*, pVictim, ESI);
+
+	if (pKiller && pVictim)
+		TechnoExt::ObjectKilledBy(pVictim, pKiller);
+
+	return 0;
+}
+
 bool __fastcall TechnoClass_Limbo_Wrapper(TechnoClass* pThis)
 {
 	auto const pExt = TechnoExt::ExtMap.Find(pThis);
@@ -304,6 +319,31 @@ DEFINE_HOOK(0x4DB218, FootClass_GetMovementSpeed_SpeedMultiplier, 0x6)
 	auto const pExt = TechnoExt::ExtMap.Find(pThis);
 	speed = static_cast<int>(speed * pExt->AE.SpeedMultiplier);
 	R->EAX(speed);
+
+	// Drop crate if is dead
+	if (!pThis->Health)
+	{
+		const auto pExt = TechnoExt::ExtMap.Find(pThis);
+		const auto pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+
+		int nSelectedPowerup = -1;
+
+		if (pExt->DropCrate >= 0)
+		{
+			if (pExt->DropCrate == 1)
+				nSelectedPowerup = static_cast<int>(pExt->DropCrateType);
+		}
+		else if (pTypeExt->DropCrate.isset())
+		{
+			nSelectedPowerup = pTypeExt->DropCrate.isset() ? static_cast<int>(pTypeExt->DropCrate.Get()) : -1;
+		}
+
+		if (nSelectedPowerup < 0)
+			return 0;
+
+		Powerup selectedPowerup = static_cast<Powerup>(nSelectedPowerup);
+		TechnoExt::TryToCreateCrate(pThis->Location, selectedPowerup);
+	}
 
 	return 0;
 }
@@ -423,17 +463,6 @@ DEFINE_HOOK(0x7060A9, TechnoClas_DrawObject_DisguisePalette, 0x6)
 
 #pragma endregion
 
-DEFINE_HOOK(0x702E4E, TechnoClass_RegisterDestruction_SaveKillerInfo, 0x6)
-{
-	GET(TechnoClass*, pKiller, EDI);
-	GET(TechnoClass*, pVictim, ECX);
-
-	if (pKiller && pVictim)
-		TechnoExt::ObjectKilledBy(pVictim, pKiller);
-
-	return 0;
-}
-
 DEFINE_HOOK(0x71067B, TechnoClass_EnterTransport_LaserTrails, 0x7)
 {
 	GET(TechnoClass*, pTechno, EDI);
@@ -453,7 +482,7 @@ DEFINE_HOOK(0x71067B, TechnoClass_EnterTransport_LaserTrails, 0x7)
 }
 
 // I don't think buildings should have laser-trails
-DEFINE_HOOK(0x4D7221, FootClass_Unlimbo_LaserTrails, 0x6)
+DEFINE_HOOK(0x4D7221, FootClass_Unlimbo, 0x6)
 {
 	GET(FootClass*, pTechno, ESI);
 
@@ -546,12 +575,138 @@ DEFINE_HOOK(0x70EFE0, TechnoClass_GetMaxSpeed, 0x6)
 }
 
 
+DEFINE_HOOK(0x518FBC, InfantryClass_DrawIt_DontRenderSHP, 0x6)
+{
+	enum { SkipDrawCode = 0x5192B5 };
+
+	GET(InfantryClass*, pThis, EBP);
+
+	if (!pThis)
+		return 0;
+
+	auto pTechno = static_cast<TechnoClass*>(pThis);
+	if (!pTechno)
+		return 0;
+
+	auto pExt = TechnoExt::ExtMap.Find(pTechno);
+	if (!pExt)
+		return 0;
+
+	if (pExt->WebbyDurationCountDown > 0)
+		return SkipDrawCode;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x518016, InfantryClass_TakeDamage_Webby, 0x7)
+{
+	GET(InfantryClass* const, pThis, ESI);
+	REF_STACK(args_ReceiveDamage const, receiveDamageArgs, STACK_OFFSET(0xD0, 0x4));
+
+	if (!receiveDamageArgs.WH)
+		return 0;
+
+	auto const pWarheadExt = WarheadTypeExt::ExtMap.Find(receiveDamageArgs.WH);
+	if (!pWarheadExt || !pWarheadExt->Webby || pWarheadExt->Webby_Duration == 0 || pWarheadExt->Webby_Anims.size() == 0)
+		return 0;
+
+	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+	if (!pTypeExt)
+		return 0;
+
+	if (pTypeExt->ImmuneToWeb.Get())
+		return 0;
+
+	auto const pExt = TechnoExt::ExtMap.Find(pThis);
+	if (!pExt)
+		return 0;
+
+	if (!pExt->WebbyAnim)
+	{
+		bool hasCustomAnims = pTypeExt->Webby_Anims.size() > 0;
+		int max = hasCustomAnims ? pTypeExt->Webby_Anims.size() - 1 : pWarheadExt->Webby_Anims.size() - 1;
+		int selectedIndex = ScenarioClass::Instance->Random.RandomRanged(0, max);
+		auto const pAnimType = hasCustomAnims ? pTypeExt->Webby_Anims[selectedIndex] : pWarheadExt->Webby_Anims[selectedIndex];
+		auto const pAnim = GameCreate<AnimClass>(pAnimType, pThis->Location, 0, 1, 0x600, 0, false);
+
+		if (pAnim)
+		{
+			pExt->WebbyAnim = pAnim;
+			pExt->WebbyAnim->SetOwnerObject(pThis);
+		}
+	}
+
+	int duration = pTypeExt->Webby_Duration.Get() > 0 ? pTypeExt->Webby_Duration.Get() : pWarheadExt->Webby_Duration.Get();
+	int durationVariation = pTypeExt->Webby_DurationVariation.Get() > 0 ? pTypeExt->Webby_DurationVariation.Get() : pWarheadExt->Webby_DurationVariation.Get();
+	durationVariation = durationVariation < 0 ? 0 : durationVariation;
+	int minDuration = duration - durationVariation;
+	minDuration = minDuration <= 0 ? 0 : minDuration;
+	int maxDuration = duration + durationVariation;
+
+	duration = ScenarioClass::Instance->Random.RandomRanged(minDuration, maxDuration);
+
+	int cap = pWarheadExt->Webby_Cap;
+	int webbyCountDown = pExt->WebbyDurationTimer.GetTimeLeft();
+
+	if (cap == 0)
+	{
+		// Makes this Web effect stackable, but uncapped
+		duration += webbyCountDown;
+	}
+	else if (cap > 0)
+	{
+		if (webbyCountDown > cap)
+		{
+			// If current duration effect is greater than the new attempt don't change the values
+			duration = webbyCountDown;
+		}
+		else
+		{
+			// Makes this Web effect stackable, but capped
+			duration += webbyCountDown;
+			duration = duration > cap ? cap : duration;
+		}
+	}
+	else
+	{
+		// Cap=-1 case: The target’s Web counter is set to this absolute number of frames specified by Web.Duration, unless the target’s Web counter is already greater than this
+		if (webbyCountDown > duration)
+			duration = webbyCountDown;
+	}
+
+	pExt->WebbyLastTarget = pThis->Target;
+	pExt->WebbyLastMission = pThis->CurrentMission;
+
+	pExt->WebbyDurationCountDown = duration;
+	pExt->WebbyDurationTimer.Start(duration);
+
+	if (pThis->Locomotor && pThis->Locomotor->Is_Moving())
+		pThis->Locomotor->Stop_Moving();
+
+	pThis->ParalysisTimer.Start(duration);
+
+	return 0x51804E;
+}
+
 DEFINE_HOOK(0x51E440, InfantryClass_AI_WhatAction2_EngineerRepairWeapon, 0x8)
 {
 	enum { Skip = 0x51E458 };
 
 	GET(InfantryClass*, pThis, EDI);
 	GET_STACK(TechnoClass*, pTarget, STACK_OFFSET(0x38, 0x4));
+
+	if (TechnoExt::IsValidTechno(pTarget))
+	{
+		int weaponIndex_ = pThis->SelectWeapon(pTarget);
+		auto const pWeaponType = pThis->GetWeapon(weaponIndex_)->WeaponType;
+		auto const pWeaponTypeEx = WeaponTypeExt::ExtMap.Find(pWeaponType);
+
+		if (pWeaponTypeEx && pWeaponTypeEx->OnlyTargetTechnos.size() > 0 && pWeaponTypeEx->CanOnlyTargetTheseTechnos(pTarget->GetTechnoType()))
+		{
+			R->EAX(Action::Attack);
+			return Skip;
+		}
+	}
 
 	if (!pThis->IsEngineer() || !TechnoExt::IsValidTechno(pTarget))// || pTarget->Owner->WhatAmI() != AbstractType::House || pTarget->WhatAmI() != AbstractType::Building)
 		return 0;

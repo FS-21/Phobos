@@ -2,6 +2,9 @@
 
 #include <CCINIClass.h>
 #include <RulesClass.h>
+#include <GameStrings.h>
+#include <AITriggerTypeClass.h>
+
 #include <Utilities/Container.h>
 #include <Utilities/Constructs.h>
 #include <Utilities/Template.h>
@@ -30,6 +33,8 @@ public:
 	public:
 		std::vector<std::vector<TechnoTypeClass*>> AITargetTypesLists;
 		std::vector<std::vector<ScriptTypeClass*>> AIScriptsLists;
+		std::vector<std::vector<AITriggerTypeClass*>> AITriggersLists;
+		std::vector<std::vector<HouseTypeClass*>> AIHousesLists;
 		ValueableVector<TechnoTypeClass*> HarvesterTypes;
 
 		Valueable<int> Storage_TiberiumIndex;
@@ -129,6 +134,13 @@ public:
 		Valueable<bool> DrawTurretShadow;
 		ValueableIdx<ColorScheme> AnimRemapDefaultColorScheme;
 		ValueableIdx<ColorScheme> TimerBlinkColorScheme;
+		Valueable<bool> AILearning;
+		Nullable<int> AILearning_Weight_Max;
+		Nullable<int> AILearning_Weight_Min;
+		Nullable<int> AILearning_Weight_Increment;
+		Nullable<int> AILearning_Weight_Decrement;
+		std::string AILearning_ScenarioName;
+		Valueable<bool> AILearning_OnlySupportedMaps;
 
 		ValueableVector<DigitalDisplayTypeClass*> Buildings_DefaultDigitalDisplayTypes;
 		ValueableVector<DigitalDisplayTypeClass*> Infantry_DefaultDigitalDisplayTypes;
@@ -164,6 +176,18 @@ public:
 		Valueable<bool> WarheadParticleAlphaImageIsLightFlash;
 		Valueable<int> CombatLightDetailLevel;
 		Valueable<int> LightFlashAlphaImageDetailLevel;
+
+		DynamicVectorClass<DynamicVectorClass<int>> GenericPrerequisites;
+		DynamicVectorClass<const char*> GenericPrerequisitesNames;
+
+		Valueable<bool> NewTeamsSelector;
+		Valueable<bool> NewTeamsSelector_SplitTriggersByCategory;
+		Valueable<bool> NewTeamsSelector_EnableFallback;
+		Valueable<int> NewTeamsSelector_MergeUnclassifiedCategoryWith;
+		Valueable<double> NewTeamsSelector_UnclassifiedCategoryPercentage;
+		Valueable<double> NewTeamsSelector_GroundCategoryPercentage;
+		Valueable<double> NewTeamsSelector_NavalCategoryPercentage;
+		Valueable<double> NewTeamsSelector_AirCategoryPercentage;
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
@@ -269,6 +293,23 @@ public:
 			, Vehicles_DefaultDigitalDisplayTypes {}
 			, Aircraft_DefaultDigitalDisplayTypes {}
 			, ShowDesignatorRange { true }
+			, AILearning { false }
+			, AILearning_Weight_Max { }
+			, AILearning_Weight_Min { }
+			, AILearning_Weight_Increment { }
+			, AILearning_Weight_Decrement { }
+			, AILearning_ScenarioName { }
+			, AILearning_OnlySupportedMaps { true }
+			, GenericPrerequisites { }
+			, GenericPrerequisitesNames { }
+			, NewTeamsSelector { false }
+			, NewTeamsSelector_SplitTriggersByCategory { true }
+			, NewTeamsSelector_EnableFallback { false }
+			, NewTeamsSelector_MergeUnclassifiedCategoryWith { -1 }
+			, NewTeamsSelector_UnclassifiedCategoryPercentage { 0.25 }
+			, NewTeamsSelector_GroundCategoryPercentage { 0.25 }
+			, NewTeamsSelector_NavalCategoryPercentage { 0.25 }
+			, NewTeamsSelector_AirCategoryPercentage { 0.25 }
 			, DropPodTrailer { }
 			, PodImage { }
 			, AircraftLevelLightMultiplier { 1.0 }
@@ -334,4 +375,5 @@ public:
 		Global()->InvalidatePointer(ptr, removed);
 	}
 
+	static void FillDefaultPrerequisites();
 };

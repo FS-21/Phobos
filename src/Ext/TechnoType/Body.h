@@ -150,6 +150,8 @@ public:
 		Valueable<int> ForceWeapon_Naval_Decloaked;
 		Valueable<int> ForceWeapon_Cloaked;
 		Valueable<int> ForceWeapon_Disguised;
+		Valueable<int> ForceWeapon_UnderEMP;
+		Valueable<int> ForceWeapon_Webby;
 
 		Valueable<bool> Ammo_Shared;
 		Valueable<int> Ammo_Shared_Group;
@@ -202,6 +204,11 @@ public:
 		Nullable<int> SpawnHeight;
 		Nullable<int> LandingDir;
 
+		ValueableVector<AnimTypeClass*> Webby_Anims;
+		Valueable<bool> ImmuneToWeb;
+		Valueable<int> Webby_Duration;
+		Valueable<int> Webby_DurationVariation;
+
 		Valueable<TechnoTypeClass*> Convert_HumanToComputer;
 		Valueable<TechnoTypeClass*> Convert_ComputerToHuman;
 
@@ -230,12 +237,20 @@ public:
 		Nullable<AnimTypeClass*> Wake_Grapple;
 		Nullable<AnimTypeClass*> Wake_Sinking;
 
+		ValueableVector<double> DetectDisguise_Percent;
+
 		struct LaserTrailDataEntry
 		{
 			ValueableIdx<LaserTrailTypeClass> idxType;
 			Valueable<CoordStruct> FLH;
 			Valueable<bool> IsOnTurret;
-			LaserTrailTypeClass* GetType() const { return &LaserTrailTypeClass::Array[idxType]; }
+
+			bool Load(PhobosStreamReader& stm, bool registerForChange);
+			bool Save(PhobosStreamWriter& stm) const;
+
+		private:
+			template <typename T>
+			bool Serialize(T& stm);
 		};
 
 		std::vector<LaserTrailDataEntry> LaserTrailData;
@@ -250,6 +265,34 @@ public:
 		std::vector<std::vector<CoordStruct>> EliteDeployedWeaponBurstFLHs;
 
 		Valueable<bool> Engineer_CheckFriendlyWeapons;
+		Valueable<bool> FixEnteringCyborgLegs;
+		Nullable<Powerup> DropCrate;
+		Valueable<bool> ImmuneToGarrisonPenetration;
+		Nullable<TechnoTypeClass*> Convert_UniversalDeploy;
+		Valueable<bool> Convert_DeployToLand;
+		Nullable<AnimTypeClass*> Convert_PreDeploy_AnimFX;
+		Valueable<bool> Convert_PreDeploy_AnimFX_FollowDeployer;
+		Nullable<AnimTypeClass*> Convert_PostDeploy_AnimFX;
+		Valueable<bool> Convert_PostDeploy_AnimFX_FollowDeployer;
+		Nullable<AnimTypeClass*> Convert_DeployingAnim;
+		NullableIdx<VocClass> Convert_PostDeploySound;
+		Valueable<int> Convert_DeployDir;
+		Valueable<bool> Convert_TransferPassengers;
+		Valueable<bool> Convert_TransferPassengers_IgnoreInvalidOccupiers;
+		Valueable<bool> Convert_ForceVeterancyTransfer;
+		Nullable<bool> NoManualUnload;
+		Nullable<bool> ConsideredNaval;
+		Nullable<bool> ConsideredVehicle;
+		Valueable<bool> ConsideredSecretLabTech;
+		std::vector<std::string> Secret_RequiredHouses;
+		std::vector<std::string> Secret_ForbiddenHouses;
+
+		// Ares 0.1
+		ValueableVector<int> Prerequisite_RequiredTheaters;
+		ValueableVector<int> Prerequisite;
+		ValueableVector<int> Prerequisite_Negative;
+		Valueable<int> Prerequisite_Lists;
+		std::vector<DynamicVectorClass<int>> Prerequisite_ListVector;
 
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
@@ -365,6 +408,8 @@ public:
 			, ForceWeapon_Naval_Decloaked { -1 }
 			, ForceWeapon_Cloaked { -1 }
 			, ForceWeapon_Disguised { -1 }
+			, ForceWeapon_UnderEMP { -1 }
+			, ForceWeapon_Webby { -1 }
 
 			, Ammo_Shared { false }
 			, Ammo_Shared_Group { -1 }
@@ -389,6 +434,14 @@ public:
 
 			, Explodes_KillPassengers { true }
 			, Explodes_DuringBuildup { true }
+			, Prerequisite { }
+			, Prerequisite_Negative { }
+			, Prerequisite_Lists { 0 }
+			, ConsideredNaval { }
+			, ConsideredVehicle { }
+			, ConsideredSecretLabTech { false }
+			, Secret_RequiredHouses { }
+			, Secret_ForbiddenHouses { }
 			, DeployFireWeapon {}
 			, TargetZoneScanType { TargetZoneScanType::Same }
 
@@ -423,6 +476,12 @@ public:
 
 			, SpawnDistanceFromTarget {}
 			, SpawnHeight {}
+			, DetectDisguise_Percent {}
+
+			, Webby_Anims {}
+			, ImmuneToWeb { false }
+			, Webby_Duration { 0 }
+			, Webby_DurationVariation { 0 }
 			, LandingDir {}
 			, DroppodType {}
 
@@ -455,6 +514,26 @@ public:
 			, Wake_Sinking { }
 
 			, Engineer_CheckFriendlyWeapons { false }
+			, FixEnteringCyborgLegs { false }
+
+			, DropCrate { }
+
+			, ImmuneToGarrisonPenetration { false }
+
+			, Convert_UniversalDeploy {}
+			, Convert_DeployToLand { false }
+			, Convert_PreDeploy_AnimFX {}
+			, Convert_PreDeploy_AnimFX_FollowDeployer { false }
+			, Convert_PostDeploy_AnimFX {}
+			, Convert_PostDeploy_AnimFX_FollowDeployer { false }
+			, Convert_DeployingAnim {}
+			, Convert_PostDeploySound {}
+			, Convert_DeployDir { -1 }
+			, Convert_TransferPassengers { true }
+			, Convert_TransferPassengers_IgnoreInvalidOccupiers { false }
+			, Convert_ForceVeterancyTransfer { false }
+
+			, NoManualUnload { }
 		{ }
 
 		virtual ~ExtData() = default;

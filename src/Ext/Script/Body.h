@@ -5,6 +5,7 @@
 #include <TeamClass.h>
 #include <AITriggerTypeClass.h>
 
+#include <TechnoClass.h>
 #include <HouseClass.h>
 #include <AircraftClass.h>
 #include <MapClass.h>
@@ -13,8 +14,11 @@
 #include <WarheadTypeClass.h>
 #include <SpawnManagerClass.h>
 
+#include <Ext/House/Body.h>
+#include <Ext/Rules/Body.h>
 #include <Ext/Team/Body.h>
 #include <Utilities/Container.h>
+
 #include <Phobos.h>
 
 enum class PhobosScripts : unsigned int
@@ -39,6 +43,7 @@ enum class PhobosScripts : unsigned int
 	SingleAttackFartherThreat = 10015,
 	RepeatAttackTypeFartherThreat = 10016,
 	SingleAttackTypeFartherThreat = 10017,
+	AttackWaypoint = 10018,
 	// Sub-range 10050-10099 is for "Move to" actions
 	MoveToEnemyCloser = 10050,
 	MoveToTypeEnemyCloser = 10051,
@@ -58,17 +63,31 @@ enum class PhobosScripts : unsigned int
 	GatherAroundLeader = 10102,
 	LoadIntoTransports = 10103,
 	ChronoshiftToEnemyBase = 10104,
+	RepairDestroyedBridge = 10105,
 
 	// Range 12000-12999 are suplementary/setup pre-actions
 	WaitIfNoTarget = 12000,
 	ModifyTargetDistance = 12001,
 	SetMoveMissionEndMode = 12002,
+	SetMinimumAmmoThreshold = 12003,
 
 	// Range 14000-14999 are utility actions (angernodes manipulation, Team manipulation, etc)
 	TeamWeightReward = 14000,
 	IncreaseCurrentAITriggerWeight = 14001,
 	DecreaseCurrentAITriggerWeight = 14002,
 	UnregisterGreatSuccess = 14003,
+	ForceGlobalOnlyTargetHouseEnemy = 14004,
+	OverrideOnlyTargetHouseEnemy = 14005,
+	SetHouseAngerModifier = 14006,
+	ModifyHateHouseIndex = 14007,
+	ModifyHateHousesList = 14008,
+	ModifyHateHousesList1Random = 14009,
+	SetTheMostHatedHouseMinorNoRandom = 14010,
+	SetTheMostHatedHouseMajorNoRandom = 14011,
+	SetTheMostHatedHouseRandom = 14012,
+	ResetAngerAgainstHouses = 14013,
+	AggroHouse = 14014,
+
 
 	// Range 16000-16999 are flow control actions (jumps, change script, loops, breaks, etc)
 	SameLineForceJumpCountdown = 16000,
@@ -77,6 +96,28 @@ enum class PhobosScripts : unsigned int
 	RandomSkipNextAction = 16003,
 	PickRandomScript = 16004,
 	JumpBackToPreviousScript = 16005,
+	SetHouseIdxForManagingTriggers = 16006,
+	ManageAllAITriggers = 16007,
+	EnableTriggersFromList = 16008,
+	DisableTriggersFromList = 16009,
+	DisableTriggersWithObjects = 16010,
+	EnableTriggersWithObjects = 16011,
+	SetSideIdxForManagingTriggers = 16012,
+	ConditionalJumpManageResetIfJump = 16013,
+	AbortActionAfterSuccessKill = 16014,
+	ConditionalJumpManageKillsCounter = 16015,
+	ConditionalJumpSetCounter = 16016,
+	ConditionalJumpSetComparatorMode = 16017,
+	ConditionalJumpSetComparatorValue = 16018,
+	ConditionalJumpSetIndex = 16019,
+	ConditionalJumpIfFalse = 16020,
+	ConditionalJumpIfTrue = 16021,
+	ConditionalJumpKillEvaluation = 16022,
+	ConditionalJumpCheckCount = 16023,
+	ConditionalJumpCheckAliveHumans = 16024,
+	ConditionalJumpCheckObjects = 16025,
+	ConditionalJumpCheckHumanIsMostHated = 16026,
+	ConditionalJumpResetVariables = 16027,
 
 	// Range 18000-18999 are variable actions
 	LocalVariableSet = 18000,
@@ -208,6 +249,20 @@ public:
 	static void Stop_ForceJump_Countdown(TeamClass* pTeam);
 	static void JumpBackToPreviousScript(TeamClass* pTeam);
 	static void ChronoshiftToEnemyBase(TeamClass* pTeam, int extraDistance);
+	static void ManageTriggersFromList(TeamClass* pTeam, int idxAITriggerType, bool isEnabled);
+	static void ManageAllTriggersFromHouse(TeamClass* pTeam, HouseClass* pHouse, int sideIdx, int houseIdx, bool isEnabled);
+
+	static void ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode);
+
+	static void ResetAngerAgainstHouses(TeamClass* pTeam);
+	static void SetHouseAngerModifier(TeamClass* pTeam, int modifier);
+	static void ModifyHateHouses_List(TeamClass* pTeam, int idxHousesList);
+	static void ModifyHateHouses_List1Random(TeamClass* pTeam, int idxHousesList);
+	static void ModifyHateHouse_Index(TeamClass* pTeam, int idxHouse);
+	static void SetTheMostHatedHouse(TeamClass* pTeam, int mask, int mode, bool random);
+	static void OverrideOnlyTargetHouseEnemy(TeamClass* pTeam, int mode);
+	static void AggroHouse(TeamClass* pTeam, int index);
+	static HouseClass* GetTheMostHatedHouse(TeamClass* pTeam, int mask, int mode);
 
 	static bool IsExtVariableAction(int action);
 	static void VariablesHandler(TeamClass* pTeam, PhobosScripts eAction, int nArg);
@@ -216,16 +271,41 @@ public:
 	template<bool IsSrcGlobal, bool IsGlobal, class _Pr>
 	static void VariableBinaryOperationHandler(TeamClass* pTeam, int nVariable, int nVarToOperate);
 	static bool IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed);
+	static void SetSideIdxForManagingTriggers(TeamClass* pTeam, int sideIdx);
+	static void SetHouseIdxForManagingTriggers(TeamClass* pTeam, int houseIdx);
+	static void ManageAITriggers(TeamClass* pTeam, int enabled);
+	static void ManageTriggersWithObjects(TeamClass* pTeam, int idxAITargetType, bool isEnabled);
 	static void Log(const char* pFormat, ...);
+	static void RepairDestroyedBridge(TeamClass* pTeam, int mode);
+
+
+	// ConditionalJump.cpp
+	static void ConditionalJumpIfTrue(TeamClass* pTeam, int newScriptLine);
+	static void ConditionalJumpIfFalse(TeamClass* pTeam, int newScriptLine);
+	static void ConditionalJump_KillEvaluation(TeamClass* pTeam);
+	static void ConditionalJump_ManageKillsCounter(TeamClass* pTeam, int enable);
+	static void ConditionalJump_SetIndex(TeamClass* pTeam, int index);
+	static void ConditionalJump_SetComparatorValue(TeamClass* pTeam, int value);
+	static void ConditionalJump_SetComparatorMode(TeamClass* pTeam, int value);
+	static void ConditionalJump_SetCounter(TeamClass* pTeam, int value);
+	static void SetAbortActionAfterSuccessKill(TeamClass* pTeam, int enable);
+	static void ConditionalJump_ResetVariables(TeamClass* pTeam);
+	static void ConditionalJump_CheckHumanIsMostHated(TeamClass* pTeam);
+	static void ConditionalJump_CheckAliveHumans(TeamClass* pTeam, int mode);
+	static void ConditionalJump_CheckObjects(TeamClass* pTeam);
+	static void ConditionalJump_CheckCount(TeamClass* pTeam, int modifier);
+	static void ConditionalJump_ManageResetIfJump(TeamClass* pTeam, int enable);
+
 	// Mission.Attack.cpp
 	static void Mission_Attack(TeamClass* pTeam, bool repeatAction, int calcThreatMode, int attackAITargetType, int IdxAITargetTypeItem);
-	static TechnoClass* GreatestThreat(TechnoClass* pTechno, int method, int calcThreatMode, HouseClass* onlyTargetThisHouseEnemy, int attackAITargetType, int idxAITargetTypeItem, bool agentMode);
+	static TechnoClass* GreatestThreat(TechnoClass* pTechno, int method, int calcThreatMode, HouseClass* onlyTargetThisHouseEnemy, int attackAITargetType, int idxAITargetTypeItem, bool agentMode, std::vector<double> disguiseDetection);
 	static bool EvaluateObjectWithMask(TechnoClass* pTechno, int mask, int attackAITargetType, int idxAITargetTypeItem, TechnoClass* pTeamLeader);
 	static void Mission_Attack_List(TeamClass* pTeam, bool repeatAction, int calcThreatMode, int attackAITargetType);
 	static void Mission_Attack_List1Random(TeamClass* pTeam, bool repeatAction, int calcThreatMode, int attackAITargetType);
 	static void CheckUnitTargetingCapabilities(TechnoClass* pTechno, bool& hasAntiGround, bool& hasAntiAir, bool agentMode);
 	static bool IsUnitArmed(TechnoClass* pTechno);
 	static bool IsUnitMindControlledFriendly(HouseClass* pHouse, TechnoClass* pTechno);
+	static void AttackWaypoint(TeamClass* pTeam, int nWaypoint);
 
 	// Mission.Move.cpp
 	static void Mission_Move(TeamClass* pTeam, int calcThreatMode, bool pickAllies, int attackAITargetType, int idxAITargetTypeItem);
@@ -237,4 +317,7 @@ private:
 	static void ModifyCurrentTriggerWeight(TeamClass* pTeam, bool forceJumpLine, double modifier);
 	static bool MoveMissionEndStatus(TeamClass* pTeam, TechnoClass* pFocus, FootClass* pLeader, int mode);
 	static void ChronoshiftTeamToTarget(TeamClass* pTeam, TechnoClass* pTeamLeader, AbstractClass* pTarget);
+	static void SetMinimumAmmoThreshold(TeamClass* pTeam, int newValue);
+	static void UpdateEnemyHouseIndex(HouseClass* pHouse);
+	static bool ConditionalJump_MakeEvaluation(int comparatorMode, int studiedValue, int comparatorValue);
 };

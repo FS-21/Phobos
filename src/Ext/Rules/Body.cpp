@@ -3,6 +3,8 @@
 #include <Utilities/TemplateDef.h>
 #include <FPSCounter.h>
 #include <GameOptionsClass.h>
+#include <HouseTypeClass.h>
+#include <GameStrings.h>
 
 #include <New/Type/RadTypeClass.h>
 #include <New/Type/ShieldTypeClass.h>
@@ -63,6 +65,10 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	if (!pData)
 		return;
+
+	const char* sectionAITargetTypes = "AITargetTypes";
+	const char* sectionAIScriptsList = "AIScriptsList";
+	const char* sectionAIHousesList = "AIHousesList";
 
 	INI_EX exINI(pINI);
 
@@ -207,6 +213,22 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->CombatLightDetailLevel.Read(exINI, GameStrings::AudioVisual, "CombatLightDetailLevel");
 	this->LightFlashAlphaImageDetailLevel.Read(exINI, GameStrings::AudioVisual, "LightFlashAlphaImageDetailLevel");
 
+	this->AILearning.Read(exINI, "AI", "AILearning");
+	this->AILearning_OnlySupportedMaps.Read(exINI, "AI", "AILearning.OnlySupportedMaps");
+	this->AILearning_Weight_Max.Read(exINI, "AI", "AILearning.Weight.Max");
+	this->AILearning_Weight_Min.Read(exINI, "AI", "AILearning.Weight.Min");
+	this->AILearning_Weight_Increment.Read(exINI, "AI", "AILearning.Weight.Increment");
+	this->AILearning_Weight_Decrement.Read(exINI, "AI", "AILearning.Weight.Decrement");
+
+	// [AI] -> AILearning.ScenarioName
+	const char* key = "AILearning.ScenarioName";
+	pINI->ReadString("AI", key, "", Phobos::readBuffer);
+
+	if (std::string(Phobos::readBuffer).length() > 0)
+		this->AILearning_ScenarioName = std::string(Phobos::readBuffer);
+
+	key = nullptr;
+
 	// Section AITargetTypes
 	int itemsCount = pINI->GetKeyCount("AITargetTypes");
 	for (int i = 0; i < itemsCount; ++i)
@@ -244,6 +266,54 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 		this->AIScriptsLists.emplace_back(std::move(objectsList));
 	}
+
+	// Section AITriggersList
+	int triggerItemsCount = pINI->GetKeyCount("AITriggersList");
+	for (int i = 0; i < triggerItemsCount; ++i)
+	{
+		std::vector<AITriggerTypeClass*> objectsList;
+
+		char* context = nullptr;
+		pINI->ReadString("AITriggersList", pINI->GetKeyName("AITriggersList", i), "", Phobos::readBuffer);
+
+		for (char *cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			AITriggerTypeClass* pNewTrigger = GameCreate<AITriggerTypeClass>(cur); // Note: Don't use ::FindOrAllocate(cur) here...
+			objectsList.emplace_back(pNewTrigger);
+		}
+
+		this->AITriggersLists.emplace_back(std::move(objectsList));
+	}
+
+	// Section AIHousesList
+	int houseItemsCount = pINI->GetKeyCount("AIHousesList");
+	for (int i = 0; i < houseItemsCount; ++i)
+	{
+		std::vector<HouseTypeClass*> objectsList;
+
+		char* context = nullptr;
+		pINI->ReadString("AIHousesList", pINI->GetKeyName("AIHousesList", i), "", Phobos::readBuffer);
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			if (const auto pNewHouse = HouseTypeClass::Find(cur))
+				objectsList.emplace_back(pNewHouse);
+		}
+
+		this->AIHousesLists.emplace_back(std::move(objectsList));
+	}
+
+	this->NewTeamsSelector.Read(exINI, "AI", "NewTeamsSelector");
+	this->NewTeamsSelector_SplitTriggersByCategory.Read(exINI, "AI", "NewTeamsSelector.SplitTriggersByCategory");
+	this->NewTeamsSelector_EnableFallback.Read(exINI, "AI", "NewTeamsSelector.EnableFallback");
+	this->NewTeamsSelector_MergeUnclassifiedCategoryWith.Read(exINI, "AI", "NewTeamsSelector.MergeUnclassifiedCategoryWith");
+	this->NewTeamsSelector_UnclassifiedCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.UnclassifiedCategoryPercentage");
+	this->NewTeamsSelector_GroundCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.GroundCategoryPercentage");
+	this->NewTeamsSelector_AirCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.AirCategoryPercentage");
+	this->NewTeamsSelector_NavalCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.NavalCategoryPercentage");
+
+	// Section Generic Prerequisites
+	FillDefaultPrerequisites();
 }
 
 // this runs between the before and after type data loading methods for rules ini
@@ -265,6 +335,83 @@ void RulesExt::ExtData::LoadAfterTypeData(RulesClass* pThis, CCINIClass* pINI)
 	INI_EX exINI(pINI);
 }
 
+void RulesExt::FillDefaultPrerequisites()
+{
+	if (RulesExt::Global()->GenericPrerequisitesNames.Count != 0)
+		return;
+
+	CCINIClass::INI_Rules;
+	DynamicVectorClass<int> empty;
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("-"); // Official index: 0
+	RulesExt::Global()->GenericPrerequisites.AddItem(empty);
+
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("POWER"); // Official index: -1
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisitePower);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("FACTORY"); // -2
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteFactory);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("BARRACKS"); // -3
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteBarracks);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("RADAR"); // -4
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteRadar);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("TECH"); // -5
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteTech);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("PROC"); // -6
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteProc);
+
+	// If [GenericPrerequisites] is present will be added after these.
+	// Also the originals can be replaced by new ones
+	int genericPreqsCount = CCINIClass::INI_Rules->GetKeyCount("GenericPrerequisites");
+
+	for (int i = 0; i < genericPreqsCount; ++i)
+	{
+		DynamicVectorClass<int> objectsList;
+		char* context = nullptr;
+		CCINIClass::INI_Rules->ReadString("GenericPrerequisites", CCINIClass::INI_Rules->GetKeyName("GenericPrerequisites", i), "", Phobos::readBuffer);
+		char* name = (char*)CCINIClass::INI_Rules->GetKeyName("GenericPrerequisites", i);
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			int idx = BuildingTypeClass::FindIndex(cur);
+			if (idx >= 0)
+				objectsList.AddItem(idx);
+		}
+
+		int index = RulesExt::Global()->GenericPrerequisitesNames.FindItemIndex(name);
+		if (index < 7 && index > 0)
+		{
+			// Overwrites a vanilla generic prerequisite
+			RulesExt::Global()->GenericPrerequisites[index] = objectsList;
+		}
+		else
+		{
+			// New generic prerequisite
+			RulesExt::Global()->GenericPrerequisitesNames.AddItem(name);
+			RulesExt::Global()->GenericPrerequisites.AddItem(objectsList);
+		}
+
+		objectsList.Clear();
+	}
+
+	// Debug
+	/*if (RulesExt::Global()->GenericPrerequisites.Count > 0)
+	{
+		Debug::Log("[GenericPrerequisites] = %d\n", RulesExt::Global()->GenericPrerequisites.Count);
+		Debug::Log("[GenericPrerequisites] (ID names) = %d\n\n", RulesExt::Global()->GenericPrerequisitesNames.Count);
+
+		for (int i = 0; i < RulesExt::Global()->GenericPrerequisites.Count; i++)
+		{
+			auto list = RulesExt::Global()->GenericPrerequisites.GetItem(i);
+			const auto listName = RulesExt::Global()->GenericPrerequisitesNames[i];
+
+			for (int j : list)
+			{
+				auto pTypeName = BuildingTypeClass::Array->GetItem(j)->ID;
+				Debug::Log("[GenericPrerequisites][%s](%d) -> [%s](%d)\n", listName, i, pTypeName, j);
+			}
+		}
+	}*/
+}
+
 // =============================
 // load / save
 
@@ -274,6 +421,8 @@ void RulesExt::ExtData::Serialize(T& Stm)
 	Stm
 		.Process(this->AITargetTypesLists)
 		.Process(this->AIScriptsLists)
+		.Process(this->AITriggersLists)
+		.Process(this->AIHousesLists)
 		.Process(this->HarvesterTypes)
 		.Process(this->Storage_TiberiumIndex)
 		.Process(this->InfantryGainSelfHealCap)
@@ -374,6 +523,23 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->Vehicles_DefaultDigitalDisplayTypes)
 		.Process(this->Aircraft_DefaultDigitalDisplayTypes)
 		.Process(this->ShowDesignatorRange)
+		.Process(this->AILearning)
+		.Process(this->AILearning_Weight_Max)
+		.Process(this->AILearning_Weight_Min)
+		.Process(this->AILearning_Weight_Increment)
+		.Process(this->AILearning_Weight_Decrement)
+		.Process(this->AILearning_ScenarioName)
+		.Process(this->AILearning_OnlySupportedMaps)
+		.Process(this->GenericPrerequisites)
+		.Process(this->GenericPrerequisitesNames)
+		.Process(this->NewTeamsSelector)
+		.Process(this->NewTeamsSelector_SplitTriggersByCategory)
+		.Process(this->NewTeamsSelector_EnableFallback)
+		.Process(this->NewTeamsSelector_MergeUnclassifiedCategoryWith)
+		.Process(this->NewTeamsSelector_UnclassifiedCategoryPercentage)
+		.Process(this->NewTeamsSelector_GroundCategoryPercentage)
+		.Process(this->NewTeamsSelector_AirCategoryPercentage)
+		.Process(this->NewTeamsSelector_NavalCategoryPercentage)
 		.Process(this->DropPodTrailer)
 		.Process(this->PodImage)
 		.Process(this->AircraftLevelLightMultiplier)

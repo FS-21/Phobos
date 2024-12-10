@@ -246,6 +246,12 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->DebrisAnims.Read(exINI, pSection, "DebrisAnims");
 	this->Debris_Conventional.Read(exINI, pSection, "Debris.Conventional");
 
+	this->MindControl_Threshold.Read(exINI, pSection, "MindControl.Threshold");
+	this->MindControl_Threshold_Inverse.Read(exINI, pSection, "MindControl.Threshold.Inverse");
+	this->MindControl_AlternateDamage.Read(exINI, pSection, "MindControl.AlternateDamage");
+	this->MindControl_AlternateWarhead.Read(exINI, pSection, "MindControl.AlternateWarhead");
+	this->MindControl_CanKill.Read(exINI, pSection, "MindControl.CanKill");
+
 	this->DetonateOnAllMapObjects.Read(exINI, pSection, "DetonateOnAllMapObjects");
 	this->DetonateOnAllMapObjects_Full.Read(exINI, pSection, "DetonateOnAllMapObjects.Full");
 	this->DetonateOnAllMapObjects_RequireVerses.Read(exINI, pSection, "DetonateOnAllMapObjects.RequireVerses");
@@ -268,11 +274,30 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->CanDisarmBombs.Read(exINI, pSection, "CanDisarmBombs");
 
+	this->CanRemoveParasites.Read(exINI, pSection, "CanRemoveParasites");
+	this->CanRemoveParasites_KickOut.Read(exINI, pSection, "CanRemoveParasites.KickOut");
+	this->CanRemoveParasites_KickOut_Paralysis.Read(exINI, pSection, "CanRemoveParasites.KickOut.Paralysis");
+	this->CanRemoveParasites_ReportSound.Read(exINI, pSection, "CanRemoveParasites.ReportSound");
+	this->CanRemoveParasites_KickOut_Anim.Read(exINI, pSection, "CanRemoveParasites.KickOut.Anim");
+
+	this->Webby.Read(exINI, pSection, "Webby");
+	this->Webby_Anims.Read(exINI, pSection, "Webby.Anims");
+	this->Webby_Duration.Read(exINI, pSection, "Webby.Duration");
+	this->Webby_DurationVariation.Read(exINI, pSection, "Webby.DurationVariation");
+	this->Webby_Cap.Read(exINI, pSection, "Webby.Cap");
+
+	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
+
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
+	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
+
+	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
 
 	// AttachEffect
 	this->AttachEffects.LoadFromINI(pINI, pSection);
+
+	this->KickOutKickablePassengers.Read(exINI, pSection, "KickOutKickablePassengers");
 
 #ifdef LOCO_TEST_WARHEADS // Enable warheads parsing
 	this->InflictLocomotor.Read(exINI, pSection, "InflictLocomotor");
@@ -320,6 +345,9 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->AttachEffects.AttachTypes.size() > 0
 		|| this->AttachEffects.RemoveTypes.size() > 0
 		|| this->AttachEffects.RemoveGroups.size() > 0
+		|| this->GarrisonPenetration
+		|| this->AmmoModifier
+		|| this->KickOutKickablePassengers
 	);
 
 	char tempBuffer[32];
@@ -359,6 +387,13 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		else
 			this->SpawnsCrate_Weights.push_back(weight);
 	}
+
+	this->GarrisonPenetration.Read(exINI, pSection, "GarrisonPenetration");
+	this->GarrisonPenetration_RandomTarget.Read(exINI, pSection, "GarrisonPenetration.RandomTarget");
+	this->GarrisonPenetration_DamageMultiplier.Read(exINI, pSection, "GarrisonPenetration.DamageMultiplier");
+	this->GarrisonPenetration_CleanSound.Read(exINI, pSection, "GarrisonPenetration.CleanSound");
+
+	this->AmmoModifier.Read(exINI, pSection, "AmmoModifier");
 }
 
 template <typename T>
@@ -465,6 +500,12 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DebrisAnims)
 		.Process(this->Debris_Conventional)
 
+		.Process(this->MindControl_Threshold)
+		.Process(this->MindControl_Threshold_Inverse)
+		.Process(this->MindControl_AlternateDamage)
+		.Process(this->MindControl_AlternateWarhead)
+		.Process(this->MindControl_CanKill)
+
 		.Process(this->DetonateOnAllMapObjects)
 		.Process(this->DetonateOnAllMapObjects_Full)
 		.Process(this->DetonateOnAllMapObjects_RequireVerses)
@@ -474,6 +515,7 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DetonateOnAllMapObjects_IgnoreTypes)
 
 		.Process(this->Convert_Pairs)
+		.Process(this->Convert_Anim)
 		.Process(this->AttachEffects)
 
 		.Process(this->SuppressRevengeWeapons)
@@ -491,6 +533,12 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->CLIsBlack)
 		.Process(this->Particle_AlphaImageIsLightFlash)
 
+		.Process(this->Webby)
+		.Process(this->Webby_Anims)
+		.Process(this->Webby_Duration)
+		.Process(this->Webby_DurationVariation)
+		.Process(this->Webby_Cap)
+
 		// Ares tags
 		.Process(this->AffectsEnemies)
 		.Process(this->AffectsOwner)
@@ -503,6 +551,23 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DamageAreaTarget)
 
 		.Process(this->CanDisarmBombs)
+
+		.Process(this->CanRemoveParasites)
+		.Process(this->CanRemoveParasites_KickOut)
+		.Process(this->CanRemoveParasites_KickOut_Paralysis)
+		.Process(this->CanRemoveParasites_ReportSound)
+		.Process(this->CanRemoveParasites_KickOut_Anim)
+
+		.Process(this->GarrisonPenetration)
+		.Process(this->GarrisonPenetration_RandomTarget)
+		.Process(this->GarrisonPenetration_DamageMultiplier)
+		.Process(this->GarrisonPenetration_CleanSound)
+
+		.Process(this->AmmoModifier)
+
+		.Process(this->Convert_UseUniversalDeploy)
+
+		.Process(this->KickOutKickablePassengers)
 		;
 }
 

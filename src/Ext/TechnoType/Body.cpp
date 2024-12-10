@@ -11,6 +11,7 @@
 #include <Ext/BuildingType/Body.h>
 #include <Ext/BulletType/Body.h>
 #include <Ext/Techno/Body.h>
+#include <Ext/House/Body.h>
 
 #include <Utilities/GeneralUtils.h>
 
@@ -385,6 +386,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->ForceWeapon_Naval_Decloaked.Read(exINI, pSection, "ForceWeapon.Naval.Decloaked");
 	this->ForceWeapon_Cloaked.Read(exINI, pSection, "ForceWeapon.Cloaked");
 	this->ForceWeapon_Disguised.Read(exINI, pSection, "ForceWeapon.Disguised");
+	this->ForceWeapon_UnderEMP.Read(exINI, pSection, "ForceWeapon.UnderEMP");
+	this->ForceWeapon_Webby.Read(exINI, pSection, "ForceWeapon.Webby");
 	this->Ammo_Shared.Read(exINI, pSection, "Ammo.Shared");
 	this->Ammo_Shared_Group.Read(exINI, pSection, "Ammo.Shared.Group");
 	this->SelfHealGainType.Read(exINI, pSection, "SelfHealGainType");
@@ -397,6 +400,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->ForceShield_KeptOnDeploy.Read(exINI, pSection, "ForceShield.KeptOnDeploy");
 	this->ForceShield_Effect.Read(exINI, pSection, "ForceShield.Effect");
 	this->ForceShield_KillWarhead.Read<true>(exINI, pSection, "ForceShield.KillWarhead");
+
+	this->FixEnteringCyborgLegs.Read(exINI, pSection, "FixEnteringCyborgLegs");
 
 	this->Explodes_KillPassengers.Read(exINI, pSection, "Explodes.KillPassengers");
 	this->Explodes_DuringBuildup.Read(exINI, pSection, "Explodes.DuringBuildup");
@@ -433,6 +438,11 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->SpawnHeight.Read(exINI, pSection, "SpawnHeight");
 	this->LandingDir.Read(exINI, pSection, "LandingDir");
 
+	this->Webby_Anims.Read(exINI, pSection, "Webby.Anims");
+	this->ImmuneToWeb.Read(exINI, pSection, "ImmuneToWeb");
+	this->Webby_Duration.Read(exINI, pSection, "Webby.Duration");
+	this->Webby_DurationVariation.Read(exINI, pSection, "Webby.DurationVariation");
+
 	this->Convert_HumanToComputer.Read(exINI, pSection, "Convert.HumanToComputer");
 	this->Convert_ComputerToHuman.Read(exINI, pSection, "Convert.ComputerToHuman");
 
@@ -457,6 +467,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Wake.Read(exINI, pSection, "Wake");
 	this->Wake_Grapple.Read(exINI, pSection, "Wake.Grapple");
 	this->Wake_Sinking.Read(exINI, pSection, "Wake.Sinking");
+
+	this->DetectDisguise_Percent.Read(exINI, pSection, "DetectDisguise.Percent");
 
 	// Ares 0.2
 	this->RadarJamRadius.Read(exINI, pSection, "RadarJamRadius");
@@ -500,6 +512,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 			this->InsigniaFrames_Weapon[i] = frames;
 		}
 	}
+
+	this->ImmuneToGarrisonPenetration.Read(exINI, pSection, "ImmuneToGarrisonPenetration");
 
 	// Art tags
 	INI_EX exArtINI(CCINIClass::INI_Art);
@@ -604,6 +618,158 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		this->InterceptorType.reset();
 	}
 
+	this->Convert_UniversalDeploy.Read(exINI, pSection, "Convert.UniversalDeploy");
+	this->Convert_DeployToLand.Read(exINI, pSection, "Convert.DeployToLand");
+	this->Convert_PreDeploy_AnimFX.Read(exINI, pSection, "Convert.PreDeploy.AnimFX");
+	this->Convert_PreDeploy_AnimFX_FollowDeployer.Read(exINI, pSection, "Convert.PreDeploy.AnimFX.FollowDeployer");
+	this->Convert_PostDeploy_AnimFX.Read(exINI, pSection, "Convert.PostDeploy.AnimFX");
+	this->Convert_PostDeploy_AnimFX_FollowDeployer.Read(exINI, pSection, "Convert.PostDeploy.AnimFX.FollowDeployer");
+	this->Convert_PostDeploySound.Read(exINI, pSection, "Convert.PostDeploySound");
+	this->Convert_DeployDir.Read(exINI, pSection, "Convert.DeployDir");
+	this->Convert_TransferPassengers.Read(exINI, pSection, "Convert.TransferPassengers");
+	this->Convert_TransferPassengers_IgnoreInvalidOccupiers.Read(exINI, pSection, "Convert.TransferPassengers.IgnoreInvalidOccupiers");
+	this->Convert_ForceVeterancyTransfer.Read(exINI, pSection, "Convert.ForceVeterancyTransfer");
+
+	// A structure deploy animation takes priority
+	pINI->ReadString(pSection, "Convert.DeployingAnim", "", Phobos::readBuffer);
+
+	if (strlen(Phobos::readBuffer))
+	{
+		auto const pDeployAnimType = AnimTypeClass::Find(Phobos::readBuffer);
+
+		if (pDeployAnimType)
+			this->Convert_DeployingAnim = pDeployAnimType;
+	}
+
+	this->ConsideredNaval.Read(exINI, pSection, "ConsideredNaval");
+	this->ConsideredVehicle.Read(exINI, pSection, "ConsideredVehicle");
+	this->ConsideredSecretLabTech.Read(exINI, pSection, "ConsideredSecretLabTech");
+
+	// Secret.RequiredHouses contains a list of HouseTypeClass indexes
+	//this->Secret_RequiredHouses.clear();
+	const char* key = "SecretLab.RequiredHouses";
+	char* context = nullptr;
+	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+
+	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+	{
+		std::string item(cur);
+		this->Secret_RequiredHouses.push_back(item);
+	}
+
+	key = nullptr;
+
+	// Secret.ForbiddenHouses contains a list of HouseTypeClass indexes
+	//this->Secret_ForbiddenHouses.clear();
+	key = "SecretLab.ForbiddenHouses";
+	context = nullptr;
+	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+
+	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+	{
+		std::string item(cur);
+		this->Secret_ForbiddenHouses.push_back(item);
+	}
+
+	key = nullptr;
+
+	// Prerequisite.RequiredTheaters contains a list of theader names
+	this->Prerequisite_RequiredTheaters.clear();
+	key = "Prerequisite.RequiredTheaters";
+	context = nullptr;
+	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+
+	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+	{
+		int index = Theater::FindIndex(cur);
+		if (index != -1)
+			this->Prerequisite_RequiredTheaters.push_back(index);
+	}
+
+	key = nullptr;
+
+	// Prerequisite with Generic Prerequistes support.
+	// Note: I have no idea of what could happen in all the game engine logics if I push the negative indexes of the Ares generic prerequisites directly into the original Prerequisite tag... for that reason this tag is duplicated for working with it
+	//this->Prerequisite.clear();
+	key = "Prerequisite";
+	context = nullptr;
+	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+
+	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+	{
+		int idx = TechnoTypeClass::FindIndex(cur);
+		if (idx >= 0)
+		{
+			this->Prerequisite.push_back(idx);
+		}
+		else
+		{
+			int index = HouseExt::FindGenericPrerequisite(cur);
+			if (index < 0)
+				this->Prerequisite.push_back(index);
+		}
+	}
+
+	key = nullptr;
+
+	// Prerequisite.Negative with Generic Prerequistes support
+	//this->Prerequisite_Negative.clear();
+	key = "Prerequisite.Negative";
+	context = nullptr;
+	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+
+	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+	{
+		int idx = TechnoTypeClass::FindIndex(cur);
+		if (idx >= 0)
+		{
+			this->Prerequisite_Negative.push_back(idx);
+		}
+		else
+		{
+			int index = HouseExt::FindGenericPrerequisite(cur);
+			if (index < 0)
+				this->Prerequisite_Negative.push_back(index);
+		}
+	}
+
+	key = nullptr;
+
+	// Prerequisite.ListX with Generic Prerequistes support
+	//this->Prerequisite_ListVector.clear();
+	this->Prerequisite_Lists.Read(exINI, pSection, "Prerequisite.Lists");
+
+	if (Prerequisite_Lists.Get() > 0)
+	{
+		for (int i = 1; i <= Prerequisite_Lists.Get(); i++)
+		{
+			char keySection[32];
+			_snprintf_s(keySection, sizeof(keySection), "Prerequisite.List%d", i);
+
+			DynamicVectorClass<int> objectsList;
+			char* context2 = nullptr;
+			pINI->ReadString(pSection, keySection, "", Phobos::readBuffer);
+
+			for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context2); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context2))
+			{
+				int idx = TechnoTypeClass::FindIndex(cur);
+				if (idx >= 0)
+				{
+					objectsList.AddItem(idx);
+				}
+				else
+				{
+					int index = HouseExt::FindGenericPrerequisite(cur);
+					if (index < 0)
+						objectsList.AddItem(index);
+				}
+			}
+
+			this->Prerequisite_ListVector.push_back(objectsList);
+			objectsList.Clear();
+		}
+	}
+
 	if (this->OwnerObject()->WhatAmI() == AbstractType::InfantryType)
 	{
 		if (this->DroppodType == nullptr)
@@ -619,6 +785,10 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		Debug::Log("[Developer warning] [%s] has Palette=%s set but no palette file was loaded (missing file or wrong filename). Missing palettes cause issues with lighting recalculations.\n", pArtSection, pThis->PaletteFile);
 
 	this->Engineer_CheckFriendlyWeapons.Read(exINI, pSection, "Engineer.CheckFriendlyWeapons");
+	
+	DropCrate.Read(exINI, pSection, "DropCrate");
+
+	this->NoManualUnload.Read(exINI, pSection, "NoManualUnload");
 }
 
 template <typename T>
@@ -740,6 +910,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->ForceWeapon_Naval_Decloaked)
 		.Process(this->ForceWeapon_Cloaked)
 		.Process(this->ForceWeapon_Disguised)
+		.Process(this->ForceWeapon_UnderEMP)
+		.Process(this->ForceWeapon_Webby)
 		.Process(this->Ammo_Shared)
 		.Process(this->Ammo_Shared_Group)
 		.Process(this->SelfHealGainType)
@@ -766,6 +938,17 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 
 		.Process(this->Explodes_KillPassengers)
 		.Process(this->Explodes_DuringBuildup)
+		.Process(this->Prerequisite_RequiredTheaters)
+		.Process(this->Prerequisite)
+		.Process(this->Prerequisite_Negative)
+		.Process(this->Prerequisite_Lists)
+		.Process(this->Prerequisite_ListVector)
+		.Process(this->ConsideredNaval)
+		.Process(this->ConsideredVehicle)
+		.Process(this->ConsideredSecretLabTech)
+		.Process(this->Secret_RequiredHouses)
+		.Process(this->Secret_ForbiddenHouses)
+
 		.Process(this->DeployFireWeapon)
 		.Process(this->TargetZoneScanType)
 
@@ -800,6 +983,12 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 
 		.Process(this->SpawnDistanceFromTarget)
 		.Process(this->SpawnHeight)
+
+		.Process(this->DetectDisguise_Percent)
+		.Process(this->Webby_Anims)
+		.Process(this->ImmuneToWeb)
+		.Process(this->Webby_Duration)
+		.Process(this->Webby_DurationVariation)
 		.Process(this->LandingDir)
 		.Process(this->DroppodType)
 
@@ -832,6 +1021,26 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Wake_Sinking)
 
 		.Process(this->Engineer_CheckFriendlyWeapons)
+		.Process(this->FixEnteringCyborgLegs)
+
+		.Process(this->DropCrate)
+
+		.Process(this->ImmuneToGarrisonPenetration)
+
+		.Process(this->Convert_UniversalDeploy)
+		.Process(this->Convert_DeployToLand)
+		.Process(this->Convert_PreDeploy_AnimFX)
+		.Process(this->Convert_PreDeploy_AnimFX_FollowDeployer)
+		.Process(this->Convert_PostDeploy_AnimFX)
+		.Process(this->Convert_PostDeploy_AnimFX_FollowDeployer)
+		.Process(this->Convert_DeployingAnim)
+		.Process(this->Convert_PostDeploySound)
+		.Process(this->Convert_DeployDir)
+		.Process(this->Convert_TransferPassengers)
+		.Process(this->Convert_TransferPassengers_IgnoreInvalidOccupiers)
+		.Process(this->Convert_ForceVeterancyTransfer)
+
+		.Process(this->NoManualUnload)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)
@@ -844,6 +1053,26 @@ void TechnoTypeExt::ExtData::SaveToStream(PhobosStreamWriter& Stm)
 {
 	Extension<TechnoTypeClass>::SaveToStream(Stm);
 	this->Serialize(Stm);
+}
+
+bool TechnoTypeExt::ExtData::LaserTrailDataEntry::Load(PhobosStreamReader& stm, bool registerForChange)
+{
+	return this->Serialize(stm);
+}
+
+bool TechnoTypeExt::ExtData::LaserTrailDataEntry::Save(PhobosStreamWriter& stm) const
+{
+	return const_cast<LaserTrailDataEntry*>(this)->Serialize(stm);
+}
+
+template <typename T>
+bool TechnoTypeExt::ExtData::LaserTrailDataEntry::Serialize(T& stm)
+{
+	return stm
+		.Process(this->idxType)
+		.Process(this->FLH)
+		.Process(this->IsOnTurret)
+		.Success();
 }
 
 // =============================

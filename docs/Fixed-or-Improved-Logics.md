@@ -66,6 +66,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Both voxel and SHP vehicle units should now correctly respect custom palette set through `Palette`.
 - Setting `RadarInvisible` to true on TerrainTypes now hides them from minimap display.
 - Mind control indicator animations will now correctly restore on mind controlled objects when uncloaked.
+- Fixed the bug that restored cyborg legs when the soldier left transport. Old behavior can be enabled back with `rulesmd.ini->[SOMETECHNO]->FixEnteringCyborgLegs=true`.
 - Animations from Warhead `AnimList` & `SplashList` etc. as well as animations created through map trigger `41 Play Anim At` now have the appropriate house set as owner of the animation by default.
 - Nuke carrier & payload weapons now respect `Bright` setting on the weapons always when appropriate (previously only payload did and only if Superweapon had `Nuke.SiloLaunch=false` *(Ares feature)*).
 - Self-healing pips from `InfantryGainSelfHeal` & `UnitsGainSelfHeal` now respect unit's `PixelSelectionBracketDelta` like health bar pips do.
@@ -712,6 +713,17 @@ In `rulesmd.ini`:
 ```ini
 [SOMETECHNO]             ; TechnoType
 TargetZoneScanType=same  ; target zone scan enumeration (same|any|inrange)
+```
+
+### Customizable disguised target evaluation behaviour in new ScriptType attack actions
+
+- By default, any unit with `DetectDisguise=yes` seeking targets via new [attack team missions introduced in Phobos](AI-Scripting-and-Mapping.md#10000-10049-attack-actions) always detects the disguised units. The probability to detect a disguised object now can be customized.
+- `DetectDisguise.Percent` values represent the probabilities in hard, medium & easy difficulty, in that order.
+
+In `rulesmd.ini`:
+```ini
+[SOMETECHNO]                          ; TechnoType
+DetectDisguise.Percent=1.0, 1.0, 1.0  ; float, percents or absolute
 ```
 
 ### Customizable unit image in art
@@ -1448,6 +1460,16 @@ In `rulesmd.ini`:
 [SOMEWARHEAD]                   ; WarheadType
 Rocker.AmplitudeMultiplier=1.0  ; double
 Rocker.AmplitudeOverride=       ; integer
+```
+
+### Kick out ejectable passengers
+
+- Affected transport will eject all the passengers.
+
+In `rulesmd.ini`
+```ini
+[SOMEWARHEAD]                    ; WarheadType
+KickOutKickablePassengers=false  ; boolean
 ```
 
 ## Weapons

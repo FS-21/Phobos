@@ -48,8 +48,10 @@ void SWTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->SW_Next_RollChances)
 		.Process(this->ShowTimer_Priority)
 		.Process(this->Convert_Pairs)
+		.Process(this->Convert_Anim)
 		.Process(this->ShowDesignatorRange)
 		.Process(this->TabIndex)
+		.Process(this->Convert_UseUniversalDeploy)
 		.Process(this->UseWeeds)
 		.Process(this->UseWeeds_Amount)
 		.Process(this->UseWeeds_StorageTimer)
@@ -58,6 +60,14 @@ void SWTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->EMPulse_SuspendOthers)
 		.Process(this->EMPulse_Cannons)
 		.Process(this->EMPulse_TargetSelf)
+		.Process(this->SW_GrantOneTime)
+		.Process(this->SW_GrantOneTime_InitialReady)
+		.Process(this->SW_GrantOneTime_ReadyIfExists)
+		.Process(this->SW_GrantOneTime_ResetIfExists)
+		.Process(this->SW_GrantOneTime_RandomWeightsData)
+		.Process(this->SW_GrantOneTime_RollChances)
+		.Process(this->Message_GrantOneTimeLaunched)
+		.Process(this->EVA_GrantOneTimeLaunched)
 		;
 }
 
@@ -163,6 +173,36 @@ void SWTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 			this->SW_Next_RandomWeightsData.push_back(std::move(weights2));
 	}
 
+	this->SW_GrantOneTime.Read(exINI, pSection, "SW.GrantOneTime");
+	this->SW_GrantOneTime_InitialReady.Read(exINI, pSection, "SW.GrantOneTime.InitialReady");
+	this->SW_GrantOneTime_ReadyIfExists.Read(exINI, pSection, "SW.GrantOneTime.ReadyIfExists");
+	this->SW_GrantOneTime_ResetIfExists.Read(exINI, pSection, "SW.GrantOneTime.ResetIfExists");
+	this->Message_GrantOneTimeLaunched.Read(exINI, pSection, "Message.GrantOneTimeLaunched");
+	this->EVA_GrantOneTimeLaunched.Read(exINI, pSection, "EVA.GrantOneTimeLaunched");
+	this->SW_GrantOneTime_RollChances.Read(exINI, pSection, "SW.GrantOneTime.RollChances");
+
+	// SW.GrantOneTime.RandomWeights
+	for (size_t i = 0; ; ++i)
+	{
+		ValueableVector<int> weights3;
+		_snprintf_s(tempBuffer, sizeof(tempBuffer), "SW.GrantOneTime.RandomWeights%d", i);
+		weights3.Read(exINI, pSection, tempBuffer);
+
+		if (!weights3.size())
+			break;
+
+		this->SW_GrantOneTime_RandomWeightsData.push_back(std::move(weights3));
+	}
+	ValueableVector<int> weights3;
+	weights3.Read(exINI, pSection, "SW.GrantOneTime.RandomWeights");
+	if (weights3.size())
+	{
+		if (this->SW_GrantOneTime_RandomWeightsData.size())
+			this->SW_GrantOneTime_RandomWeightsData[0] = std::move(weights3);
+		else
+			this->SW_GrantOneTime_RandomWeightsData.push_back(std::move(weights3));
+	}
+
 	this->Detonate_Warhead.Read<true>(exINI, pSection, "Detonate.Warhead");
 	this->Detonate_Weapon.Read<true>(exINI, pSection, "Detonate.Weapon");
 	this->Detonate_Damage.Read(exINI, pSection, "Detonate.Damage");
@@ -171,11 +211,16 @@ void SWTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::Owner);
+	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
+
+	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
 
 	this->ShowDesignatorRange.Read(exINI, pSection, "ShowDesignatorRange");
 
 	this->TabIndex.Read(exINI, pSection, "TabIndex");
 	GeneralUtils::IntValidCheck(&this->TabIndex, pSection, "TabIndex", 1, 0, 3);
+
+	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
 
 	this->UseWeeds.Read(exINI, pSection, "UseWeeds");
 	this->UseWeeds_Amount.Read(exINI, pSection, "UseWeeds.Amount");

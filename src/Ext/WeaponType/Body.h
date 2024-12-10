@@ -34,6 +34,7 @@ public:
 		Valueable<bool> Strafing_UseAmmoPerShot;
 		Valueable<AffectedTarget> CanTarget;
 		Valueable<AffectedHouse> CanTargetHouses;
+		ValueableVector<TechnoTypeClass*> OnlyTargetTechnos;
 		ValueableVector<int> Burst_Delays;
 		Valueable<bool> Burst_FireWithinSequence;
 		Valueable<AreaFireTarget> AreaFire_Target;
@@ -60,6 +61,9 @@ public:
 		Valueable<bool> AttachEffect_CheckOnFirer;
 		Valueable<bool> AttachEffect_IgnoreFromSameSource;
 		Valueable<bool> KickOutPassengers;
+		Valueable<double> RandomTarget;
+		//Valueable<bool> RandomTarget_DistributeBurst;
+		Valueable<bool> RandomTarget_Spawners_MultipleTargets;
 
 		ExtData(WeaponTypeClass* OwnerObject) : Extension<WeaponTypeClass>(OwnerObject)
 			, DiskLaser_Radius { DiskLaserClass::Radius }
@@ -75,6 +79,7 @@ public:
 			, Strafing_UseAmmoPerShot { false }
 			, CanTarget { AffectedTarget::All }
 			, CanTargetHouses { AffectedHouse::All }
+			, OnlyTargetTechnos {}
 			, Burst_Delays {}
 			, Burst_FireWithinSequence { false }
 			, AreaFire_Target { AreaFireTarget::Base }
@@ -101,11 +106,15 @@ public:
 			, AttachEffect_CheckOnFirer { false }
 			, AttachEffect_IgnoreFromSameSource { false }
 			, KickOutPassengers { true }
+			, RandomTarget { 0.0 }
+			//, RandomTarget_DistributeBurst { true }
+			, RandomTarget_Spawners_MultipleTargets { false }
 		{ }
 
 		int GetBurstDelay(int burstIndex) const;
 
 		bool HasRequiredAttachedEffects(TechnoClass* pTechno, TechnoClass* pFirer) const;
+		bool CanOnlyTargetTheseTechnos(TechnoTypeClass* pType) const;
 
 		virtual ~ExtData() = default;
 

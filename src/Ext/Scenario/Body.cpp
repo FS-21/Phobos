@@ -158,10 +158,12 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(this->Waypoints)
 		.Process(this->Variables[0])
 		.Process(this->Variables[1])
+		.Process(this->AITriggerWeigths)
 		.Process(this->ShowBriefing)
 		.Process(this->BriefingTheme)
 		.Process(this->AutoDeathObjects)
 		.Process(this->TransportReloaders)
+		.Process(this->ScenarioFileName)
 		;
 }
 
@@ -189,6 +191,7 @@ DEFINE_HOOK(0x683549, ScenarioClass_CTOR, 0x9)
 	ScenarioExt::Global()->Waypoints.clear();
 	ScenarioExt::Global()->Variables[0].clear();
 	ScenarioExt::Global()->Variables[1].clear();
+	ScenarioExt::Global()->AITriggerWeigths.clear();
 
 	return 0;
 }

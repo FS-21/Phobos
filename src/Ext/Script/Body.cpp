@@ -196,6 +196,39 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 	case PhobosScripts::RandomSkipNextAction:
 		ScriptExt::SkipNextAction(pTeam, -1);
 		break;
+	case PhobosScripts::SetHouseAngerModifier:
+		ScriptExt::SetHouseAngerModifier(pTeam, 0);
+		break;
+	case PhobosScripts::OverrideOnlyTargetHouseEnemy:
+		ScriptExt::OverrideOnlyTargetHouseEnemy(pTeam, -1);
+		break;
+	case PhobosScripts::ModifyHateHouseIndex:
+		ScriptExt::ModifyHateHouse_Index(pTeam, -1);
+		break;
+	case PhobosScripts::ModifyHateHousesList:
+		ScriptExt::ModifyHateHouses_List(pTeam, -1);
+		break;
+	case PhobosScripts::ModifyHateHousesList1Random:
+		ScriptExt::ModifyHateHouses_List1Random(pTeam, -1);
+		break;
+	case PhobosScripts::SetTheMostHatedHouseMinorNoRandom:
+		// <, no random
+		ScriptExt::SetTheMostHatedHouse(pTeam, 0, 0, false);
+		break;
+	case PhobosScripts::SetTheMostHatedHouseMajorNoRandom:
+		// >, no random
+		ScriptExt::SetTheMostHatedHouse(pTeam, 0, 1, false);
+		break;
+	case PhobosScripts::SetTheMostHatedHouseRandom:
+		// random
+		ScriptExt::SetTheMostHatedHouse(pTeam, 0, 0, true);
+		break;
+	case PhobosScripts::ResetAngerAgainstHouses:
+		ScriptExt::ResetAngerAgainstHouses(pTeam);
+		break;
+	case PhobosScripts::AggroHouse:
+		ScriptExt::AggroHouse(pTeam, -1);
+		break;
 	case PhobosScripts::StopForceJumpCountdown:
 		// Stop Timed Jump
 		ScriptExt::Stop_ForceJump_Countdown(pTeam);
@@ -214,6 +247,85 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 	case PhobosScripts::ChronoshiftToEnemyBase:
 		// Chronoshift to enemy base, argument is additional distance modifier
 		ScriptExt::ChronoshiftToEnemyBase(pTeam, argument);
+		break;
+	case PhobosScripts::SetSideIdxForManagingTriggers:
+		ScriptExt::SetSideIdxForManagingTriggers(pTeam, -1);
+		break;
+	case PhobosScripts::SetHouseIdxForManagingTriggers:
+		ScriptExt::SetHouseIdxForManagingTriggers(pTeam, 2147483647);
+		break;
+	case PhobosScripts::ManageAllAITriggers:
+		ScriptExt::ManageAITriggers(pTeam, -1);
+		break;
+	case PhobosScripts::EnableTriggersFromList:
+		ScriptExt::ManageTriggersFromList(pTeam, -1, true);
+		break;
+	case PhobosScripts::DisableTriggersFromList:
+		ScriptExt::ManageTriggersFromList(pTeam, -1, false);
+		break;
+	case PhobosScripts::EnableTriggersWithObjects:
+		ScriptExt::ManageTriggersWithObjects(pTeam, -1, true);
+		break;
+	case PhobosScripts::DisableTriggersWithObjects:
+		ScriptExt::ManageTriggersWithObjects(pTeam, -1, false);
+		break;
+	case PhobosScripts::AttackWaypoint:
+		ScriptExt::AttackWaypoint(pTeam, -2147483647);
+		break;
+	case PhobosScripts::SetMinimumAmmoThreshold:
+		ScriptExt::SetMinimumAmmoThreshold(pTeam, -2);
+		break;
+	case PhobosScripts::ForceGlobalOnlyTargetHouseEnemy:
+		ScriptExt::ForceGlobalOnlyTargetHouseEnemy(pTeam, -1);
+		break;
+	case PhobosScripts::RepairDestroyedBridge:
+		// Start Timed Jump that jumps to the same line when the countdown finish (in frames)
+		ScriptExt::RepairDestroyedBridge(pTeam, -1);
+		break;
+	case PhobosScripts::AbortActionAfterSuccessKill:
+		ScriptExt::SetAbortActionAfterSuccessKill(pTeam, -1);
+		break;
+	case PhobosScripts::ConditionalJumpSetCounter:
+		ScriptExt::ConditionalJump_SetCounter(pTeam, -100000000);
+		break;
+	case PhobosScripts::ConditionalJumpSetComparatorMode:
+		ScriptExt::ConditionalJump_SetComparatorMode(pTeam, -1);
+		break;
+	case PhobosScripts::ConditionalJumpSetComparatorValue:
+		ScriptExt::ConditionalJump_SetComparatorValue(pTeam, -1);
+		break;
+	case PhobosScripts::ConditionalJumpSetIndex:
+		ScriptExt::ConditionalJump_SetIndex(pTeam, -1000000);
+		break;
+	case PhobosScripts::ConditionalJumpResetVariables:
+		ScriptExt::ConditionalJump_ResetVariables(pTeam);
+		break;
+	case PhobosScripts::ConditionalJumpIfFalse:
+		ScriptExt::ConditionalJumpIfFalse(pTeam, -1);
+		break;
+	case PhobosScripts::ConditionalJumpIfTrue:
+		ScriptExt::ConditionalJumpIfTrue(pTeam, -1);
+		break;
+	case PhobosScripts::ConditionalJumpManageKillsCounter:
+		ScriptExt::ConditionalJump_ManageKillsCounter(pTeam, -1);
+		break;
+	case PhobosScripts::ConditionalJumpCheckAliveHumans:
+		ScriptExt::ConditionalJump_CheckAliveHumans(pTeam, -1);
+		break;
+	case PhobosScripts::ConditionalJumpCheckHumanIsMostHated:
+		ScriptExt::ConditionalJump_CheckHumanIsMostHated(pTeam);
+		break;
+	case PhobosScripts::ConditionalJumpKillEvaluation:
+		ScriptExt::ConditionalJump_KillEvaluation(pTeam);
+		break;
+	case PhobosScripts::ConditionalJumpCheckObjects:
+		ScriptExt::ConditionalJump_CheckObjects(pTeam);
+		break;
+	case PhobosScripts::ConditionalJumpCheckCount:
+		ScriptExt::ConditionalJump_CheckCount(pTeam, 0);
+		break;
+	case PhobosScripts::ConditionalJumpManageResetIfJump:
+		ScriptExt::ConditionalJump_ManageResetIfJump(pTeam, -1);
 		break;
 	default:
 		// Do nothing because or it is a wrong Action number or it is an Ares/YR action...
@@ -344,9 +456,19 @@ void ScriptExt::WaitUntilFullAmmoAction(TeamClass* pTeam)
 						// Reset last target, at long term battles this prevented the aircraft to pick a new target (rare vanilla YR bug)
 						pUnit->SetTarget(nullptr);
 						pUnit->LastTarget = nullptr;
+
 						// Fix YR bug (when returns from the last attack the aircraft switch in loop between Mission::Enter & Mission::Guard, making it impossible to land in the dock)
 						if (pUnit->IsInAir() && pUnit->CurrentMission != Mission::Enter)
-							pUnit->QueueMission(Mission::Enter, true);
+						{
+							//pUnit->QueueMission(Mission::Enter, true);
+							pAircraft->IsLocked = false;
+							pAircraft->MissionStatus = (int)AirAttackStatus::ReturnToBase;
+
+							if (pAircraft->vt_entry_4C4())
+								pAircraft->vt_entry_4A8();
+
+							pAircraft->EnterIdleMode(false, true);
+						}
 
 						return;
 					}
@@ -419,7 +541,7 @@ void ScriptExt::Mission_Gather_NearTheLeader(TeamClass* pTeam, int countdown = -
 		// Find the Leader
 		pLeaderUnit = pExt->TeamLeader;
 
-		if (!IsUnitAvailable(pLeaderUnit, true))
+		if (!ScriptExt::IsUnitAvailable(pLeaderUnit, true))
 		{
 			pLeaderUnit = FindTheTeamLeader(pTeam);
 			pExt->TeamLeader = pLeaderUnit;
@@ -454,7 +576,7 @@ void ScriptExt::Mission_Gather_NearTheLeader(TeamClass* pTeam, int countdown = -
 		// Check if units are around the leader
 		for (auto pUnit = pTeam->FirstUnit; pUnit; pUnit = pUnit->NextTeamMember)
 		{
-			if (!IsUnitAvailable(pUnit, true))
+			if (!ScriptExt::IsUnitAvailable(pUnit, true))
 			{
 				auto pTypeUnit = pUnit->GetTechnoType();
 
@@ -687,15 +809,17 @@ void ScriptExt::SetCloseEnoughDistance(TeamClass* pTeam, double distance = -1)
 	if (distance <= 0)
 		distance = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
 
-	auto const pTeamData = TeamExt::ExtMap.Find(pTeam);
-
-	if (pTeamData)
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
 	{
-		if (distance > 0)
-			pTeamData->CloseEnough = distance;
+		// This action finished
+		pTeam->StepCompleted = true;
+		return;
 	}
 
-	if (distance <= 0)
+	if (distance > 0)
+		pTeamData->CloseEnough = distance;
+	else
 		pTeamData->CloseEnough = RulesClass::Instance->CloseEnough / 256.0;
 
 	// This action finished
@@ -753,7 +877,7 @@ bool ScriptExt::MoveMissionEndStatus(TeamClass* pTeam, TechnoClass* pFocus, Foot
 	// Team already have a focused target
 	for (auto pUnit = pTeam->FirstUnit; pUnit; pUnit = pUnit->NextTeamMember)
 	{
-		if (IsUnitAvailable(pUnit, true)
+		if (ScriptExt::IsUnitAvailable(pUnit, true)
 			&& !pUnit->TemporalTargetingMe
 			&& !pUnit->BeingWarpedOut)
 		{
@@ -1085,7 +1209,7 @@ FootClass* ScriptExt::FindTheTeamLeader(TeamClass* pTeam)
 	// Find the Leader or promote a new one
 	for (auto pUnit = pTeam->FirstUnit; pUnit; pUnit = pUnit->NextTeamMember)
 	{
-		if (!IsUnitAvailable(pUnit, true) || !(pUnit->IsInitiated || pUnit->WhatAmI() == AbstractType::Aircraft))
+		if (!ScriptExt::IsUnitAvailable(pUnit, true) || !(pUnit->IsInitiated || pUnit->WhatAmI() == AbstractType::Aircraft))
 			continue;
 
 		// The team Leader will be used for selecting targets, if there are living Team Members then always exists 1 Leader.
@@ -1107,7 +1231,7 @@ bool ScriptExt::IsExtVariableAction(int action)
 	return eAction >= PhobosScripts::LocalVariableAdd && eAction <= PhobosScripts::GlobalVariableAndByGlobal;
 }
 
-void ScriptExt::Set_ForceJump_Countdown(TeamClass* pTeam, bool repeatLine = false, int count = 0)
+void ScriptExt::Set_ForceJump_Countdown(TeamClass *pTeam, bool repeatLine = false, int count = 0)
 {
 	if (!pTeam)
 		return;
@@ -1298,4 +1422,135 @@ void ScriptExt::Log(const char* pFormat, ...)
 	va_start(args, pFormat);
 	Debug::LogWithVArgs(pFormat, args);
 	va_end(args);
+}
+
+void ScriptExt::AttackWaypoint(TeamClass* pTeam, int nWaypoint = -2147483647)
+{
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
+	{
+		pTeam->StepCompleted = true;
+		return;
+	}
+
+	auto pScript = pTeam->CurrentScript;
+
+	// The default value is a magic value the game will never be able to use due to limitations
+	if (nWaypoint <= -2147483647)
+		nWaypoint = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
+
+	if (nWaypoint < 0)
+	{
+		pTeam->StepCompleted = true;
+		ScriptExt::Log("AI Scripts - AttackWaypoint: [%s] [%s](line: %d = %d,%d) - Skipped invalid Waypoint.\n",
+			pTeam->Type->ID,
+			pScript->Type->ID,
+			pScript->CurrentMission,
+			pScript->Type->ScriptActions[pScript->CurrentMission].Action,
+			pScript->Type->ScriptActions[pScript->CurrentMission].Argument);
+	}
+
+	auto& waypoints = ScenarioExt::Global()->Waypoints;
+
+	// Check if is a valid Waypoint
+	if (nWaypoint >= 0 && waypoints.find(nWaypoint) != waypoints.end() && waypoints[nWaypoint].X && waypoints[nWaypoint].Y)
+	{
+		auto const selectedWP = waypoints[nWaypoint];
+		auto const pCell = MapClass::Instance->TryGetCellAt(selectedWP);
+
+		if (!pCell)
+		{
+			pTeam->StepCompleted = true;
+			return;
+		}
+
+		bool someoneWithoutRequiredAmmo = false;
+
+		for (auto pFoot = pTeam->FirstUnit; pFoot; pFoot = pFoot->NextTeamMember)
+		{
+			if (!pFoot->IsAlive || pFoot->InLimbo || pFoot->IsCrashing || pFoot->WhatAmI() != AbstractType::Aircraft)
+				continue;
+
+			// The number of times it can shoot is limited by a temporal ammo threshold or when the aircraft has no ammo
+			if (pFoot->Ammo <= 0 || pFoot->Ammo <= pTeamData->MinAmmoThreshold)
+			{
+				someoneWithoutRequiredAmmo = true;
+				pFoot->SetDestination(pFoot, false);
+				pFoot->MissionStatus = (int)AirAttackStatus::ReturnToBase;
+				continue;
+			}
+
+			pFoot->Target = pCell;
+
+			if (pFoot->Destination != pCell)
+				pFoot->SetDestination(pCell, false);
+
+			if (pFoot->CurrentMission != Mission::Attack)
+				pFoot->ForceMission(Mission::Attack);
+
+			bool bIsStrafing = pFoot->MissionStatus == (int)AirAttackStatus::FlyToPosition
+				|| pFoot->MissionStatus == (int)AirAttackStatus::FireAtTarget2_Strafe
+				|| pFoot->MissionStatus == (int)AirAttackStatus::FireAtTarget3_Strafe
+				|| pFoot->MissionStatus == (int)AirAttackStatus::FireAtTarget4_Strafe
+				|| pFoot->MissionStatus == (int)AirAttackStatus::FireAtTarget5_Strafe;
+
+			bool bMissionStatusUpdate = pFoot->MissionStatus != (int)AirAttackStatus::PickAttackLocation;
+
+			if (bMissionStatusUpdate && !bIsStrafing)
+				pFoot->MissionStatus = (int)AirAttackStatus::FireAtTarget;
+		}
+
+		// If all the team members can continue firing the attack mission can not end, yet
+		if (!someoneWithoutRequiredAmmo)
+			return;
+	}
+
+	// Each instance of this ScriptType action must have set the minimum ammo threshold, if needed.
+	pTeamData->MinAmmoThreshold = 0;
+
+	// This action finished
+	pTeam->StepCompleted = true;
+}
+
+void ScriptExt::SetMinimumAmmoThreshold(TeamClass* pTeam, int newValue = -2)
+{
+	auto pTeamData = TeamExt::ExtMap.Find(pTeam);
+	if (!pTeamData)
+	{
+		pTeam->StepCompleted = true;
+		return;
+	}
+
+	if (newValue < -1)
+		newValue = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
+
+	pTeamData->MinAmmoThreshold = newValue < 0 ? 0 : newValue;
+
+	// This action finished
+	pTeam->StepCompleted = true;
+}
+
+void ScriptExt::ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode)
+{
+	if (!pTeam)
+		return;
+
+	auto pHouseExt = HouseExt::ExtMap.Find(pTeam->Owner);
+	if (!pHouseExt)
+	{
+		// This action finished
+		pTeam->StepCompleted = true;
+		return;
+	}
+
+	if (mode < 0 || mode > 2)
+		mode = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
+
+	if (mode < -1 || mode > 2)
+		mode = -1;
+
+	HouseExt::ForceOnlyTargetHouseEnemy(pTeam->Owner, mode);
+
+	// This action finished
+	pTeam->StepCompleted = true;
 }

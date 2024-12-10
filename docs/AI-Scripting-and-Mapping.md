@@ -116,6 +116,75 @@ In `RA2MD.ini`:
 ShowBriefing=true  ; boolean
 ```
 
+## New AI Teams Selector
+
+- New AI system for selecting valid triggers in multiplayer randomly. Unlike the original method this one checks prerequisites and take care of other details.
+- It can split the valid triggers into 4 categories: ground, air, naval & mixed categories. If set, AI picks a random trigger in a random category.
+- Categories can have different chance probabilities. It can be set globally or customized per house. by default each category has a 25% chance to be selected.
+- `NewTeamsSelector.MergeUnclassifiedCategoryWith` can be used for merging the mixed category (units are from different categories) into one of the main categories.
+- In case of picking a category without valid triggers exist a fallback mode that allow picking a trigger from all valid triggers like if categories were disabled.
+- if `Autocreate=yes` AI will care about all units prerequisites so if the house's tech tree is incomplete for the trigger it gets discarded. It understand Ares tags like  `Prerequisite.RequiredTheaters`, `Prerequisite.Negative`, `Prerequisite.Lists` & `Generic prerequisites` section.
+- If it finds a trigger with 5000 current probability weight then discard valid triggers all and start searching all valid triggers with weight 5000. AI will pick 1 randomly and decrease by 1 the current weight of the selected trigger (so if nothing happens in the next teams selection loop it won't appear in this special list). Under this scenario categories are disabled.
+- Units can override the category using `ConsideredVehicle` and `ConsideredNaval` boolean tags.
+- AI is be able to use unlocked units in captured Secret Labs.
+
+In `rulesmd.ini`:
+```ini
+[AI]
+NewTeamsSelector=false                               ; boolean
+NewTeamsSelector.SplitTriggersByCategory=true        ; boolean
+NewTeamsSelector.EnableFallback=false                ; boolean
+NewTeamsSelector.GroundCategoryPercentage=0.25       ; floating point value, percents or absolute
+NewTeamsSelector.NavalCategoryPercentage=0.25        ; floating point value, percents or absolute
+NewTeamsSelector.AirCategoryPercentage=0.25          ; floating point value, percents or absolute
+NewTeamsSelector.UnclassifiedCategoryPercentage=0.25 ; floating point value, percents or absolute
+NewTeamsSelector.MergeUnclassifiedCategoryWith=-1    ; Integer - Ground: 1, Air: 2, Naval: 3
+
+[SOMEHOUSE]                                       ; HouseType
+NewTeamsSelector.MergeUnclassifiedCategoryWith=   ; boolean
+NewTeamsSelector.UnclassifiedCategoryPercentage=  ; floating point value, percents or absolute
+NewTeamsSelector.GroundCategoryPercentage=        ; floating point value, percents or absolute
+NewTeamsSelector.AirCategoryPercentage            ; floating point value, percents or absolute
+NewTeamsSelector.NavalCategoryPercentage          ; floating point value, percents or absolute
+
+[SOMETECHNO]        ; TechnoType
+ConsideredNaval=    ; boolean
+ConsideredVehicle=  ; boolean
+```
+
+- Modified slightly AI Trigger conditions 0 (enemy owns ...), 1 (house owns ...) and 7 (civilian owns ...) and added 10 new conditions (from 8 to 17) that check lists of objects instead of only 1 unit. The first 3 were modified because the objects counters weren't updated in real-time. The possible modified and new cases are:
+
+| *Condition* | *List of objects* | *Description*                                   |
+| :---------: | :---------------: | :---------------------------------------------: |
+| 0 (changed) | No                | Count objects of the main enemy. If AI house doesn't have a main enemy It will search in all enemies. In vanilla YR if house doesn't have a main enemy this condition fail |
+| 1 (changed) | No                | Count own objects |
+| 7 (changed) | No                | Count civilian objects |
+| 8           | No                | Count enemy objects. It will search in all enemies |
+| 9           | Yes               | Count enemy objects. If AI house doesn't have a main enemy It will search in all enemies. |
+| 10          | Yes               | Count own objects |
+| 11          | Yes               | Count civilian objects |
+| 12          | Yes               | Count enemy objects. It will search in all enemies |
+| 13          | Yes               | Count objects from allies |
+| 14          | Yes               | Count enemy objects. If AI house doesn't have a main enemy It will search in all enemies. It uses `AND` comparator so each object must obey the same comparations |
+| 15          | Yes               | Count own objects. It uses `AND` comparator so each object must obey the same comparations |
+| 16          | Yes               | Count civilian objects. It uses `AND` comparator so each object must obey the same comparations |
+| 17          | Yes               | Count enemy objects. It will search in all enemies. It uses `AND` comparator so each object must obey the same comparations |
+| 18          | No                | Count structures with `BridgeRepairHut=yes` linked with destroyed bridges |
+| 19          | No                | Count structures with `BridgeRepairHut=yes` linked with undamaged bridges |
+
+- Some trigger conditions need to specify a 0-based list from `[AITargetTypes]`. The index of the list is written in hexadecimal and in little endian format. The value must be written at the end of the trigger:
+`00000000000000000000000000000000000000000000000000000000AABBCCDD`
+For example: list 0 is written 00 (put it in AA), list 1 is written 01 (put it in AA), list 10 is written 0A (put it in AA), 255 is 0xFF (put it in AA) and 256 is 0x0001 (put it in AABB), etc.
+- The *`AITargetTypes` index#* values are obtained in the new `AITargetTypes` section that must be declared in `rulesmd.ini`:
+
+In `rulesmd.ini`:
+```ini
+[AITargetTypes]  ; List of TechnoType lists
+0=SOMETECHNOTYPE,SOMEOTHERTECHNOTYPE,SAMPLETECHNOTYPE
+1=ANOTHERTECHNOTYPE,YETANOTHERTECHNOTYPE
+; ...
+```
+
 ## Script Actions
 
 ### `10000-10999` Ingame Actions
@@ -207,6 +276,17 @@ In `rulesmd.ini`:
 ; ...
 ```
 
+##### `10018` Attack at specified Waypoint
+
+- Designed for aircrafts in mind this script action is more stable than the original script action `1` and won't crash the aircrafts.
+- Aircrafts team will attack until a member's ammo decreases under a specific threshold. By default the available ammo threshold value is 0 (use all the weapon until is empty). This threshold can be changed with the script action `12003` and each time this script action ends this ammo threshold is set to 0.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=10018,n            ; integer, waypoint index
+```
+
 #### `10050-10099` Move Team to Techno Location actions
 
 - These actions instructs the TeamType to use the TaskForce to approach the target specified by the second parameter. Look at the tables below for the possible actions (first parameter value).
@@ -243,6 +323,7 @@ In `aimd.ini`:
 [SOMESCRIPTTYPE]  ; ScriptType
 x=10100,n            ; integer, time in ingame seconds
 ```
+
 ##### `10101` Wait Until Ammo is Full
 
 - If the TaskForce contains unit(s) that use ammo then the the script will not continue until all these units have fully refilled the ammo.
@@ -252,6 +333,7 @@ In `aimd.ini`:
 [SOMESCRIPTTYPE]  ; ScriptType
 x=10101,0
 ```
+
 ##### `10102` Regroup Temporarily Around the Team Leader
 
 - Puts the TaskForce into Area Guard mode for the given amount of time around the Team Leader (this unit remains almost immobile until the action ends). The default radius around the leader is `[General] > CloseEnough` and the units will not leave that area.
@@ -281,6 +363,24 @@ In `aimd.ini`:
 [SOMESCRIPTTYPE]  ; ScriptType
 x=10104,n         ; integer, additional distance in cells
 ```
+
+##### `10105` Repair Destroyed Bridge
+
+- Picks a Bridge Repair Hut from the map that is linked with a bridge with destroyed sections and is reachable by engineers and then send the Taskforce against it.
+- Puts nonengineers into Area Guard mode when they arrive near the Bridge Repair Hut location.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=10105,n         ; integer, mode for selecting Bridge Repair Huts
+```
+- The possible argument values are:
+
+| *Argument* | *Target priority*  |
+| :--------: | :----------------: |
+| 0          | Pick the closest   |
+| 1          | Pick the Farthest  |
+| -1         | Pick Random        |
 
 ### `12000-12999` Suplementary/Setup Pre-actions
 
@@ -321,6 +421,17 @@ x=12002,n
 | 0          | Team Leader reaches the minimum distance      |
 | 1          | One unit reaches the minimum distance         |
 | 2          | All team members reached the minimum distance |
+
+##### `12003` Set Minimum Ammo Threshold
+
+- When executed before the script action `10018` a minimum available ammo value is set as a threshold.
+- Once any team member reaches this value the script action `10018` ends and this value is set again with value 0.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=12003,n         ; integer
+```
 
 ### `14000-14999` Utility Actions
 
@@ -363,6 +474,193 @@ In `aimd.ini`:
 [SOMESCRIPTTYPE]  ; ScriptType
 x=14003,0
 ```
+
+### `14004` Force Global OnlyTargetHouseEnemy value in Teams
+
+- Sets the TeamType tag value for `OnlyTargetHouseEnemy` tag. Only affects the new attack / move actions.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14004,n           ; integer
+```
+
+- The possible argument values are:
+
+| *Argument* | *Description*                                                            |
+| :--------: | :----------------------------------------------------------------------: |
+| -1         | Disable Global value for Force `OnlyTargetHouseEnemy` tag. Default value |
+| 0          | Force `OnlyTargetHouseEnemy` = false                                     |
+| 1          | Force `OnlyTargetHouseEnemy` = true                                      |
+| 2          | Force random boolean value                                               |
+
+### `14005` Override OnlyTargetHouseEnemy Value
+
+- The value of the tag `OnlyTargetHouseEnemy` in AI triggers can be modified for the new attack & move actions. Only affects the next new attack or move action script.
+- These anger values are applied only in the house owner of the team.
+- Only works for new Phobos actions, not vanilla YR or Ares actions.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14005,n         ; integer n=-1
+```
+
+- The possible argument values are:
+
+| *Argument* | *Description*                                 |
+| :--------: | :-------------------------------------------: |
+| -1         | Use default value specified in `OnlyTargetHouseEnemy` |
+| 0          | Force `OnlyTargetHouseEnemy` value to `FALSE` |
+| 1          | Force `OnlyTargetHouseEnemy` value to `TRUE`  |
+| 2          | Force `OnlyTargetHouseEnemy` value to `TRUE` or `FALSE` randomly |
+
+### `14006` Set House Hate Value Modifier
+
+- Affects how much hate applies to a selected house (depends of the script action).
+- Positive values increase hate and negative values decrease hate.
+- Affects script actions: `14007`, `14008`, `14009`, `14010`, `14011` & `14012`.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14006,n         ; integer n=0
+```
+
+### `14007` Modify House Hate Using House Index
+
+- Modifies the team's hate towards a specific house using its house index.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14007,n         ; integer n >= 0
+```
+
+### `14008` Modify Hate Values From A List Of Countries
+
+- The house team picks a list of countries from the `rulesmd.ini` section called `[AIHousesList]`.
+- The house team modify the hate towards all houses in the map that use the countries in that list.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14008,n         ; integer n >= 0
+```
+
+The second parameter is a 0-based index for the `AIHousesList` section that specifies the list of possible `Countries` that can be evaluated. The new `AIHousesList` section must be declared in `rulesmd.ini` for making this script work:
+
+In `rulesmd.ini`:
+```ini
+[AIHousesList]  ; List of Countries lists
+0=SOMECOUNTRY,SOMEOTHERCOUNTRY,SAMPLECOUNTRY
+1=ANOTHERCOUNTRY,YETANOTHERCOUNTRY
+; ...
+```
+
+### `14009` Modify Hate Value Against A Random Country From A List Of Countries
+
+- Like action `14008` but the house owner of the Team only picks 1 house randomly from the specified list of countries.
+- The house team modify the hate towards all houses in the map that use the selected country.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14009,n         ; integer n >= 0
+```
+
+### `14010` Set The Most Hated House ("<" Comparison)
+
+- Increases the team house hate against an enemy house making that enemy house as the main target.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14010,n         ; integer
+```
+
+The possible argument values are:
+
+| *Argument* | *Description*                        |
+| :------: | :-------------------------------------------: |
+| -10      | The house with less factories is selected (excluded the aircraft factories) |
+| -9       | The house with less aircraft docks is selected |
+| -8       | The house with less naval units is selected |
+| -7       | The house with less house kills is selected |
+| -6       | The house with less free power (free = production - consumption) is selected |
+| -5       | The house with less power production is selected |
+| -4       | The house with less power consumption is selected |
+| -3       | The nearest enemy Human base is selected |
+| -2       | The poorest house is selected |
+| -1       | The enemy house with nearest unit to the Team Leader is selected |
+| > 0      | *Target Type#* index. The house with less threat of the selected *Target Type#* (sum of all the units of the same checked type * threat value) |
+
+### `14011` Set The Most Hated House (">" Comparison)
+
+- Increases the team house hate against an enemy house making that enemy house as the main target.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14011,n         ; integer
+```
+
+The possible argument values are:
+
+| *Argument* | *Description*                        |
+| :--------: | :-------------------------------------------: |
+| -10        | The house with more factories is selected (excluded the aircraft factories) |
+| -9         | The house with more aircraft docks is selected |
+| -8         | The house with more naval units is selected |
+| -7         | The house with more kills is selected |
+| -6         | The house with more free power (free = production - consumption) is selected |
+| -5         | The house with more power production is selected |
+| -4         | The house with more power consumption is selected |
+| -3         | The farthest enemy Human base is selected |
+| -2         | The richest house is selected |
+| -1         | The enemy house with farthest unit to the Team Leader is selected |
+| > 0        | *Target Type#* index. The house with more threat of the selected *Target Type#* (sum of all the units of the same checked type * threat value) |
+
+### `14012` Set The Most Hated House Randomly
+
+- Increases the Team house hate against an enemy house picked randomly.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14012,0
+```
+
+### `14013` Reset Hate Against Other Houses
+
+- All hate levels in the team house against every House are set to 0.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14013,0
+```
+
+### `14014` Set A House As The Most Hated House Of The Map
+
+- A House will become the most hated House of the map (the effects are only visible if the other houses are enemies of the selected house)
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=14014,n         ; integer
+```
+
+The possible argument values are:
+
+| *Argument* | *Description*                                 |
+| :--------: | :-------------------------------------------: |
+| -5         | Selects a random House, including civilians. The own house is excluded in the selection of the most hated by everyone |
+| -4         | Any random civilian house   |
+| -3         | All Human players will be hated by everyone   |
+| -2         | The Team House will be the most hated by everyone (allies won't pick allies as enemies) |
+| -1         | Selects a random House. The own house & civilians are excluded in the selection of the most hated by everyone |
+| >= 0       | House index that will be hated by everyone    |
 
 ### `16000-16999` Flow Control
 
@@ -424,6 +722,7 @@ In `rulesmd.ini`:
 0=SOMESCRIPTTYPE,SOMEOTHERSCRIPTTYPE,SAMPLESCRIPTTYPE
 1=ANOTHERSCRIPTTYPE,YETANOTHERSCRIPTTYPE
 ; ...
+
 ```
 
 ### `16005` Jump Back To Previous Script
@@ -434,6 +733,255 @@ In `aimd.ini`:
 ```ini
 [SOMESCRIPTTYPE]  ; ScriptType
 x=16005,0
+```
+
+### `16006` Set House Index For Managing AI Triggers
+
+- Set the house index for enabling and disabling triggers. The indexes aren't the ones used in [Countries], these are internal in-game House indexes.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16006,n           ; integer
+```
+
+- The possible argument values are:
+
+| *Argument* | *Description*                          |
+| :--------: | :-------------------------------------------: |
+| 4475-4482  | Multiplayer start location indexes |
+| 8997       | Special case that returns the house index of the Team object |
+| >= 0       | House index. Neutral houses can be used |
+| -1         | Random non-neutral House |
+| -2         | Find the first Neutral house available |
+| -3         | Random Human Player alive |
+
+### `16007` Enable Or Disable All AI Triggers
+
+- All AI triggers will be enabled or disabled.
+You must set the affected side with action `16012` and house with action `16006`.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16007,n           ; integer, 1 == enable, 0 == disable
+```
+
+### `16008` Enable AI Triggers From List
+
+- When executed this action enable all AI trigger types from the selected list in `AITriggersList`. The second parameter is a 0-based index from the new section `AITriggersList` explained below.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16008,n
+```
+
+The second parameter is a 0-based index for the `AITriggersList` section that specifies the list of possible `AITriggerTypes` that can be evaluated. The new `AITriggersList` section must be declared in `rulesmd.ini` for making this script work:
+
+In `rulesmd.ini`:
+```ini
+[AITriggersList]  ; List of AITriggerTypes lists
+0=SOMEAITRIGGERTYPE,SOMEOTHERAITRIGGERTYPE,SAMPLETRIGGERTYPE
+1=ANOTHERTRIGGERTYPE,YETANOTHERTRIGGERTYPE
+; ...
+```
+
+### `16009` Disable AI Triggers From List
+
+- Works silimar to the Action `16008`. When executed this action disable all AI trigger types from the selected list in `AITriggersList`. The second parameter is a 0-based index from the new section `AITriggersList`.
+
+### `16010` Disable AI Triggers If Contains Any Objects From the List
+
+- Works silimar to the Action `16011`. When executed this action all AI Trigger Types that contains any unit of the selected list in `AITargetTypes` will be disabled. The second parameter is a 0-based index from the new section `AITargetTypes`.
+
+### `16011` Enable AI Triggers If Contains Any Objects From the List
+
+- When executed this action all AI trigger types that contains any unit of the selected list in `AITargetTypes` will be enabled. The second parameter is a 0-based index from the new section `AITargetTypes`.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16011,n
+```
+
+### `16012` Set Side Index For Managing AI Triggers
+
+- Set the side index for enabling and disabling triggers.
+0 means any side.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16012,n           ; integer, where 0 > n, default -1
+```
+
+### `16013` Conditional Jump, Manage Variables Reset If The Jump Is Successful
+- By default the conditional jump variables are cleaned after a successful jump.
+- This action enables the ability to retain variables value after the jump.
+- This action behavior isn't affected by the action `16027` "Clear Variables".
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16013,0         ; Integer, 1 = true, 0 = false
+```
+
+### `16014` Action Abortion After Success Kill
+- If the team kills a target and this option is enabled the current action is interrumped and jumps to the next script line.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16014,0         ; integer, 0 for disable it, 1 for enable it
+```
+
+### `16015` Conditional Jump, Manage Kills Counter
+- The team kills counter will work if this action enables it.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16015,0         ; integer, 0 for disable it, 1 for enable it
+```
+
+### `16016` Conditional Jump, Reset Counter
+- Sets the team's counter to any initial value. It can be used for counting kills.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16016,n         ; integer
+```
+
+### `16017` Conditional Jump, Set Comparator Mode
+- Sets the comparator used in conditional jumps.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16017,3         ; integer, from 0 to 5, default to 3 (>=)
+```
+
+- The possible comparator values:
+
+| *Argument* | *Comparator type* |
+| :--------: | :---------------: |
+| 0          | <                 |
+| 1          | <=                |
+| 2          | =                 |
+| 3          | >=                |
+| 4          | >                 |
+| 5          | !=                |
+
+### `16018` Conditional Jump, Set Comparator Value
+- Sets the value used in conditional jumps comparisons.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16018,1         ; integer
+```
+
+### `16019` Conditional Jump, Set Index
+- Sets the index of a list used in conditional jumps comparisons. Depends of the conditional jump action.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16019,n         ; integer
+```
+
+### `16020` Conditional Jump, Jump If False
+- Check the conditional jump evaluation and jumps to the specified line if the value is false. Like in the script action `6,x` the line number is 1-based.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16020,n         ; integer, n > 0
+```
+
+### `16021` Conditional Jump, Jump If True
+- Check the conditional jump evaluation and jumps to the specified line if the value is true. Like in the script action `6,x` the line number is 1-based.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16021,n         ; integer, n > 0
+```
+
+### `16022` Conditional Jump, Check Kills Count
+- Checks the team kills count and saves the result for the conditional jump evaluation.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16022,0
+```
+
+### `16023` Conditional Jump, Check Simple Count
+- Increases or decreases the conditional jump counter with the specified value by the Action argument and saves the comparison result for the conditional jump evaluation.
+- The count can be reseted using the script action `16016`.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16023,n         ; Integer
+```
+
+### `16024` Conditional Jump, Check If Exist Alive Human Players
+- Checks if exist human players in the map and saves the result for the conditional jump evaluation.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16024,n         ; integer n = 0, 2 <= n >= 0
+```
+
+- The possible argument values:
+
+| *Operation* | *Description*                                |
+| :---------: | :------------------------------------------: |
+| 0           | Any human house (including the team's owner) |
+| 1           | Enemy human house                            |
+| 2           | Friendly house                               |
+
+### `16025` Conditional Jump, Check Enemy Objects Count
+- Count the number of enemy living object instances and saves the result for the conditional jump evaluation.
+- The list of objects that will be used by this Action is selected by the Script Action `16019`.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16025,0
+```
+
+- This action use a 0-based index for the `AITargetTypes` section and specifies the list of possible `VehicleTypes`, `AircraftTypes`, `InfantryTypes` and `BuildingTypes` that can be evaluated. The new `AITargetTypes` section must be declared in `rulesmd.ini` for making this script work:
+
+In `rulesmd.ini`:
+```ini
+[AITargetTypes]  ; List of TechnoType lists
+0=SOMETECHNOTYPE,SOMEOTHERTECHNOTYPE,SAMPLETECHNOTYPE
+1=ANOTHERTECHNOTYPE,YETANOTHERTECHNOTYPE
+; ...
+```
+
+### `16026` Conditional Jump, Check If The Most Hated Enemy Is Human
+- Checks if the major team's enemy is human player and saves the result for the conditional jump evaluation.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16026,0
+```
+
+### `16027` Conditional Jump, Clear Variables
+- Reset all variables related to conditional jumps.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=16027,0
 ```
 
 ### `18000-18999` Variable Manipulation
@@ -590,6 +1138,28 @@ ID=ActionCount,[Action1],506,0,0,[SuperWeaponTypesIndex],[HouseIndex],[WaypointI
 ...
 ```
 
+### `507` Printing a message with the remaining map objects
+- A message will be printed with a list of alive map objects. If there are 0 remaining objects no message will be printed.
+- If no `CSFKey` is mentioned (value `0`) it will use the default header text `Remaining: `.
+- `HouseIndex` points to any house index of the map. Multiplayer 4475-4482 & 8997 indexes are valid.
+- If `HouseIndex` is set `-1` then `[AIHousesListsIndex]` will be used as index of a list of countries in the `[AIHousesList]` section located in `rulesmd.ini`. If any map object match the ownership with one of the list it will be counted.
+- `[AITargetTypesIndex]` is the index of an entry in the `[AITargetTypes]` section located in `rulesmd.ini`. Each alive map object listed here will be counted.
+- If `[AITargetTypesIndex]` is negative this value will be evaluated as a positive index in `[AITargetTypesIndex]` but instead of printing a list of alive map objects and the respective count it will appear as an unique global count of all the alive map objects listed in `[AITargetTypes]`.
+- `MesageDelay` is the time (in minutes) of the message displayed. If the value is 0 then the duration of the message will be the default `MesageDelay` value specified in `rulesmd.ini`.
+- Be aware a message can't show more than 6 lines so if `[AITargetTypes]` contains more than 5 map objects then the first lines won't appear.
+
+In `mycampaign.map`:
+```ini
+[Actions]
+...
+ID=ActionCount,[Action1],507,4,[CSFKey],[HouseIndex],[AIHousesListsIndex],[AITargetTypesIndex],[MesageDelay],A,[ActionX]
+...
+```
+
+```{warning}
+- Don't write multiple times the same object ID in the `[AITargetTypes]` list.
+```
+
 ### `510` Toggle MCV redeployablility
 
 - Force MCV's redeployablility by setting the third parameter.
@@ -601,6 +1171,24 @@ In `mycampaign.map`:
 ID=ActionCount,[Action1],510,0,0,[MCVRedeploy],0,0,0,A,[ActionX]
 ...
 ```
+
+### `600` Configure Drop Crate
+- Set or overwrite the `DropCrate` of the affected objects.
+- Only functions when used as attached triggers within objects.
+
+In `mycampaign.map`:
+```ini
+[Actions]
+...
+ID=ActionCount,[Action1],600,0,[Behaviour],[index of the powerup],0,0,0,A,[ActionX]
+...
+```
+
+| *Behaviour* | *Description*               |
+| :---------: | :-------------------------: |
+| -1          | Use default Techno settings |
+| 0           | Clear `DropCrate` type      |
+| 1           | Overwrite `DropCrate` type  |
 
 ## Trigger events
 
@@ -707,6 +1295,27 @@ In `mycampaign.map`:
 ...
 ID=EventCount,...,[EVENTID],2,[HouseIndex],[TechnoType],...
 ...
+```
+
+### `603` There are no technos of the specified houses list
+
+- Returns `True` if there are no technos of the specified houses in the map.
+- The second parameter is a 0-based index for the `AIHousesList` section that specifies the list of possible `Countries` that can be evaluated. The new `AIHousesList` section must be declared in `rulesmd.ini` for making this script work:
+
+In `mycampaign.map`:
+```ini
+[Events]
+...
+ID=EventCount,...,603,0,[Index],...
+...
+```
+
+In `rulesmd.ini`:
+```ini
+[AIHousesList]  ; List of HouseType lists
+0=SOMEHOUSETYPE,SOMEOTHERHOUSETYPE,SAMPLEHOUSETYPE
+1=ANOTHERHOUSETYPE,YETANOTHERHOUSETYPE
+; ...
 ```
 
 ### `604-605` Checking if a specific Techno enters in a cell

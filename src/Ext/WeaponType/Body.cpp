@@ -59,6 +59,22 @@ int WeaponTypeExt::ExtData::GetBurstDelay(int burstIndex) const
 	return burstDelay;
 }
 
+bool WeaponTypeExt::ExtData::CanOnlyTargetTheseTechnos(TechnoTypeClass* pType) const
+{
+	if (!pType)
+		return false;
+
+	if (this->OnlyTargetTechnos.size() > 0)
+	{
+		if (this->OnlyTargetTechnos.Contains(pType))
+			return true;
+		else
+			return false;
+	}
+
+	return true;
+}
+
 // =============================
 // load / save
 
@@ -89,6 +105,7 @@ void WeaponTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Strafing_UseAmmoPerShot.Read(exINI, pSection, "Strafing.UseAmmoPerShot");
 	this->CanTarget.Read(exINI, pSection, "CanTarget");
 	this->CanTargetHouses.Read(exINI, pSection, "CanTargetHouses");
+	this->OnlyTargetTechnos.Read(exINI, pSection, "OnlyTargetTechnos");
 	this->Burst_Delays.Read(exINI, pSection, "Burst.Delays");
 	this->Burst_FireWithinSequence.Read(exINI, pSection, "Burst.FireWithinSequence");
 	this->AreaFire_Target.Read(exINI, pSection, "AreaFire.Target");
@@ -115,6 +132,9 @@ void WeaponTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->AttachEffect_CheckOnFirer.Read(exINI, pSection, "AttachEffect.CheckOnFirer");
 	this->AttachEffect_IgnoreFromSameSource.Read(exINI, pSection, "AttachEffect.IgnoreFromSameSource");
 	this->KickOutPassengers.Read(exINI, pSection, "KickOutPassengers");
+	this->RandomTarget.Read(exINI, pSection, "RandomTarget");
+	//this->RandomTarget_DistributeBurst.Read(exINI, pSection, "RandomTarget.DistributeBurst");
+	this->RandomTarget_Spawners_MultipleTargets.Read(exINI, pSection, "RandomTarget.Spawners.MultipleTargets");
 }
 
 template <typename T>
@@ -133,6 +153,7 @@ void WeaponTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Strafing_UseAmmoPerShot)
 		.Process(this->CanTarget)
 		.Process(this->CanTargetHouses)
+		.Process(this->OnlyTargetTechnos)
 		.Process(this->RadType)
 		.Process(this->Burst_Delays)
 		.Process(this->Burst_FireWithinSequence)
@@ -160,6 +181,9 @@ void WeaponTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->AttachEffect_CheckOnFirer)
 		.Process(this->AttachEffect_IgnoreFromSameSource)
 		.Process(this->KickOutPassengers)
+		.Process(this->RandomTarget)
+		//.Process(this->RandomTarget_DistributeBurst)
+		.Process(this->RandomTarget_Spawners_MultipleTargets)
 		;
 };
 

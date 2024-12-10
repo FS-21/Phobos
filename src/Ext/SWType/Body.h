@@ -67,8 +67,12 @@ public:
 
 		std::vector<ValueableVector<int>> LimboDelivery_RandomWeightsData;
 		std::vector<ValueableVector<int>> SW_Next_RandomWeightsData;
+		std::vector<ValueableVector<int>> SW_GrantOneTime_RandomWeightsData;
 
 		std::vector<TypeConvertGroup> Convert_Pairs;
+		Nullable<AnimTypeClass*> Convert_Anim;
+
+		Valueable<bool> Convert_UseUniversalDeploy;
 
 		Valueable<bool> UseWeeds;
 		Valueable<int> UseWeeds_Amount;
@@ -79,6 +83,14 @@ public:
 		Valueable<bool> EMPulse_SuspendOthers;
 		ValueableVector<BuildingTypeClass*> EMPulse_Cannons;
 		Valueable<bool> EMPulse_TargetSelf;
+
+		ValueableIdxVector<SuperWeaponTypeClass> SW_GrantOneTime;
+		Nullable<bool> SW_GrantOneTime_InitialReady;
+		Nullable<bool> SW_GrantOneTime_ReadyIfExists;
+		Valueable<bool> SW_GrantOneTime_ResetIfExists;
+		ValueableVector<float> SW_GrantOneTime_RollChances;
+		Valueable<CSFText> Message_GrantOneTimeLaunched;
+		NullableIdx<VoxClass> EVA_GrantOneTimeLaunched;
 
 		ExtData(SuperWeaponTypeClass* OwnerObject) : Extension<SuperWeaponTypeClass>(OwnerObject)
 			, Money_Amount { 0 }
@@ -118,8 +130,10 @@ public:
 			, SW_Next_RandomWeightsData {}
 			, ShowTimer_Priority { 0 }
 			, Convert_Pairs {}
+			, Convert_Anim {}
 			, ShowDesignatorRange { true }
 			, TabIndex { 1 }
+			, Convert_UseUniversalDeploy { false }
 			, UseWeeds { false }
 			, UseWeeds_Amount { RulesClass::Instance->WeedCapacity }
 			, UseWeeds_StorageTimer { false }
@@ -128,6 +142,14 @@ public:
 			, EMPulse_SuspendOthers { false }
 			, EMPulse_Cannons {}
 			, EMPulse_TargetSelf { false }
+			, SW_GrantOneTime {}
+			, SW_GrantOneTime_InitialReady {}
+			, SW_GrantOneTime_ReadyIfExists {}
+			, SW_GrantOneTime_ResetIfExists { false }
+			, SW_GrantOneTime_RollChances {}
+			, SW_GrantOneTime_RandomWeightsData {}
+			, Message_GrantOneTimeLaunched {}
+			, EVA_GrantOneTimeLaunched {}
 		{ }
 
 		// Ares 0.A functions
@@ -150,6 +172,8 @@ public:
 		void HandleEMPulseLaunch(SuperClass* pSW, const CellStruct& cell) const;
 		std::vector<BuildingClass*> GetEMPulseCannons(HouseClass* pOwner, const CellStruct& cell) const;
 		std::pair<double, double> GetEMPulseCannonRange(BuildingClass* pBuilding) const;
+
+		void GrantOneTimeFromList(SuperClass* pSW);
 
 		virtual void LoadFromINIFile(CCINIClass* pINI) override;
 		virtual ~ExtData() = default;

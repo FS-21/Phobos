@@ -12,6 +12,7 @@
 #include <Ext/Anim/Body.h>
 #include <Ext/Bullet/Body.h>
 #include <Ext/BulletType/Body.h>
+#include <Ext/WeaponType/Body.h>
 #include <Ext/SWType/Body.h>
 #include <Misc/FlyingStrings.h>
 #include <Utilities/Helpers.Alex.h>
@@ -20,7 +21,7 @@
 void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, BulletExt::ExtData* pBulletExt, CoordStruct coords)
 {
 	auto const pBullet = pBulletExt ? pBulletExt->OwnerObject() : nullptr;
-
+	
 	if (pOwner && pBulletExt)
 	{
 		auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pOwner->GetTechnoType());
@@ -123,7 +124,7 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 		if (cellSpread)
 		{
 			for (auto pTarget : Helpers::Alex::getCellSpreadItems(coords, cellSpread, true))
-				this->DetonateOnOneUnit(pHouse, pTarget, pOwner, bulletWasIntercepted);
+				this->DetonateOnOneUnit(pHouse, pTarget, pOwner, bulletWasIntercepted, pBulletExt);
 		}
 		else if (pBullet)
 		{
@@ -132,7 +133,7 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 				// Starkku: We should only detonate on the target if the bullet, at the moment of detonation is within acceptable distance of the target.
 				// Ares uses 64 leptons / quarter of a cell as a tolerance, so for sake of consistency we're gonna do the same here.
 				if (pBullet->DistanceFrom(pTarget) < Unsorted::LeptonsPerCell / 4)
-					this->DetonateOnOneUnit(pHouse, pTarget, pOwner, bulletWasIntercepted);
+					this->DetonateOnOneUnit(pHouse, pTarget, pOwner, bulletWasIntercepted, pBulletExt);
 			}
 		}
 		else if (this->DamageAreaTarget)
@@ -143,7 +144,7 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 	}
 }
 
-void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* pOwner, bool bulletWasIntercepted)
+void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* pOwner, bool bulletWasIntercepted, BulletExt::ExtData* pBulletExt)
 {
 	if (!pTarget || pTarget->InLimbo || !pTarget->IsAlive || !pTarget->Health || pTarget->IsSinking || pTarget->BeingWarpedOut)
 		return;
@@ -164,11 +165,25 @@ void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass*
 	if (this->Crit_CurrentChance > 0.0 && (!this->Crit_SuppressWhenIntercepted || !bulletWasIntercepted))
 		this->ApplyCrit(pHouse, pTarget, pOwner, pTargetExt);
 
+	if (this->AmmoModifier != 0)
+		ApplyAmmoModifier(pTarget, pHouse, pBulletExt);
+
 	if (this->Convert_Pairs.size() > 0)
 		this->ApplyConvert(pHouse, pTarget);
 
 	if (this->AttachEffects.AttachTypes.size() > 0 || this->AttachEffects.RemoveTypes.size() > 0 || this->AttachEffects.RemoveGroups.size() > 0)
 		this->ApplyAttachEffects(pTarget, pHouse, pOwner);
+
+	if (this->GarrisonPenetration)
+		this->ApplyGarrisonPenetration(pHouse, pTarget, pOwner, pBulletExt);
+	
+	if (this->KickOutKickablePassengers)
+	{
+		const auto pTargetTypeExt = TechnoTypeExt::ExtMap.Find(pTarget->GetTechnoType());
+
+		if (pTarget->Passengers.NumPassengers > 0 && !pTargetTypeExt->NoManualUnload.Get(false))
+			TechnoExt::PassengersTransfer(pTarget, nullptr, true, true);
+	}
 
 #ifdef LOCO_TEST_WARHEADS
 	if (this->InflictLocomotor)
@@ -404,11 +419,21 @@ void WarheadTypeExt::ExtData::InterceptBullets(TechnoClass* pOwner, WeaponTypeCl
 void WarheadTypeExt::ExtData::ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget)
 {
 	auto pTargetFoot = abstract_cast<FootClass*>(pTarget);
+	auto pTargetBuilding = abstract_cast<BuildingClass*>(pTarget);
+	bool bUniversalDeploy = this->Convert_UseUniversalDeploy.Get();
 
-	if (!pTargetFoot || this->Convert_Pairs.size() == 0)
+	if ((bUniversalDeploy && !pTargetFoot && !pTargetBuilding) || (!bUniversalDeploy && !pTargetFoot) || this->Convert_Pairs.size() == 0)
 		return;
 
-	TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pHouse);
+	if (bUniversalDeploy)
+	{
+		TypeConvertGroup::UniversalConvert(pTarget, this->Convert_Pairs, pHouse, this->Convert_Anim);
+		return;
+	}
+	else
+	{
+		TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pHouse, this->Convert_Anim);
+	}
 }
 
 void WarheadTypeExt::ExtData::ApplyLocomotorInfliction(TechnoClass* pTarget)
@@ -500,4 +525,103 @@ double WarheadTypeExt::ExtData::GetCritChance(TechnoClass* pFirer) const
 	}
 
 	return critChance + extraChance;
+}
+
+void WarheadTypeExt::ExtData::ApplyGarrisonPenetration(HouseClass* pInvokerHouse, TechnoClass* pTarget, TechnoClass* pInvoker, BulletExt::ExtData* pBulletExt)
+{
+	auto pBuilding = abstract_cast<BuildingClass*>(pTarget);
+	if (!pBuilding || !pBuilding->Occupants.Count || !pBulletExt)
+		return;
+
+	auto const pTargetTypeExt = TechnoTypeExt::ExtMap.Find(pTarget->GetTechnoType());
+	if (pTargetTypeExt->ImmuneToGarrisonPenetration)
+		return;
+
+	auto const pBullet = pBulletExt->OwnerObject();
+	double multiplierPercentage = GeneralUtils::GetRangedRandomOrSingleValue(this->GarrisonPenetration_DamageMultiplier);
+	int damage = static_cast<int>(std::round(pBullet->WeaponType->Damage * multiplierPercentage));
+	WarheadTypeClass* pWH = this->OwnerObject();
+
+	if (multiplierPercentage <= 0.0)
+		return;
+
+	int occupantIndex = this->GarrisonPenetration_RandomTarget ? ScenarioClass::Instance->Random.RandomRanged(0, pBuilding->Occupants.Count - 1) : -1;
+
+	auto DoDamage = [=](InfantryClass* pPassenger, int damage)
+	{
+		auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pPassenger->GetTechnoType());
+		if (pTypeExt->ImmuneToGarrisonPenetration)
+			return;
+
+		damage = MapClass::GetTotalDamage(damage, pWH, pPassenger->Type->Armor, 0);
+
+		pPassenger->Health = pPassenger->Health - damage;
+		pPassenger->Health = pPassenger->Health < 0 ? 0 : pPassenger->Health;
+		pPassenger->IsAlive = !pPassenger->Health ? false : pPassenger->IsAlive;
+
+		if (!pPassenger->Health)
+		{
+			if (pPassenger->Type->VoiceDie.Count)
+			{
+				// Play a new death sound.
+				int soundIndex = pPassenger->Type->VoiceDie[Randomizer::Global->Random() % pPassenger->Type->VoiceDie.Count];
+				VocClass::PlayAt(soundIndex, pInvoker->Location);
+			}
+			else if (pPassenger->Type->DieSound.Count)
+			{
+				// Play a new fallback death sound.
+				int soundIndex = pPassenger->Type->DieSound[Randomizer::Global->Random() % pPassenger->Type->DieSound.Count];
+				VocClass::PlayAt(soundIndex, pInvoker->Location);
+			}
+
+			pInvoker->KillPassengers(pPassenger);
+			pInvoker->RegisterDestruction(pPassenger);
+			pPassenger->UnInit();
+		}
+	};
+
+	// Victim's death sound
+	if (occupantIndex < 0)
+	{
+		for (int i = 0; i < pBuilding->Occupants.Count; i++)
+		{
+			InfantryClass* pPassenger = pBuilding->Occupants.GetItem(i);
+			DoDamage(pPassenger, damage);
+		}
+	}
+	else
+	{
+		InfantryClass* pPassenger = pBuilding->Occupants.GetItem(occupantIndex);
+		DoDamage(pPassenger, damage);
+	}
+
+	// Building fully cleaned!
+	if (!pBuilding->Occupants.Count && GarrisonPenetration_CleanSound.isset())
+		VocClass::PlayAt(GarrisonPenetration_CleanSound.Get(), pInvoker->Location);
+}
+
+void WarheadTypeExt::ExtData::ApplyAmmoModifier(TechnoClass* pTarget, HouseClass* pInvokerHouse, BulletExt::ExtData* pBulletExt)
+{
+	if (!pTarget)
+		return;
+
+	auto const pWeapon = pBulletExt ? pBulletExt->OwnerObject()->WeaponType : nullptr;
+
+	if (pWeapon)
+	{
+		auto const pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
+
+		if (!EnumFunctions::IsTechnoEligible(pTarget, pWeaponExt->CanTarget)
+			|| (pInvokerHouse && !EnumFunctions::CanTargetHouse(pWeaponExt->CanTargetHouses, pInvokerHouse, pTarget->Owner))
+			|| !pWeaponExt->CanOnlyTargetTheseTechnos(pTarget->GetTechnoType()))
+		{
+			return;
+		}
+	}
+
+	int maxAmmo = pTarget->GetTechnoType()->Ammo;
+	int newCurrentAmmo = this->AmmoModifier + pTarget->Ammo;
+
+	newCurrentAmmo = newCurrentAmmo < 0 ? 0 : newCurrentAmmo;
+	pTarget->Ammo = newCurrentAmmo > maxAmmo ? maxAmmo : newCurrentAmmo;
 }

@@ -115,6 +115,8 @@ HideLightFlashEffects=false      ; boolean
   68=House,1,2
   69=Non-inert,10
   70=AITargetTypes index,0
+  71=DropCrate Behavior,0
+  71=AIHousesList index,501
 
   [EventsRA2]
   500=Local variable is greater than,48,6,0,0,[LONG DESC],0,1,500,1
@@ -156,6 +158,7 @@ HideLightFlashEffects=false      ; boolean
   600=Shield of the attached object is broken,0,0,0,0,[LONG DESC],0,1,600,1
   601=House owns Techno Type,68,46,0,0,[LONG DESC],0,1,601,1
   602=House doesn't own Techno Type,68,46,0,0,[LONG DESC],0,1,602,1
+  603=There are no technos of the specified houses list,0,71,0,0,[LONG DESC],0,1,603,1
   604=Techno Type Entered Cell,68,46,0,0,[LONG DESC],0,1,604,1
   605=AI Target Type Entered Cell,68,70,0,0,[LONG DESC],0,1,605,1
 
@@ -170,6 +173,10 @@ HideLightFlashEffects=false      ; boolean
   505=Fire Super Weapon at specified location (Phobos),0,0,20,2,21,22,0,0,0,Launch a Super Weapon from [SuperWeaponTypes] list at a specified location. House=-1 means random target that isn't neutral. House=-2 means the first neutral house. House=-3 means random human target. Coordinate X=-1 means random. Coordinate Y=-1 means random,0,1,505
   506=Fire Super Weapon at specified waypoint (Phobos),0,0,20,2,30,0,0,0,0,Launch a Super Weapon from [SuperWeaponTypes] list at a specified waypoint. House=-1 means random target that isn't neutral. House=-2 means the first neutral house. House=-3 means random human target. Coordinate X=-1 means random. Coordinate Y=-1 means random,0,1,506
   510=Toggle MCV Redeployablility (Phobos),0,0,15,0,0,0,0,0,0, Set MCVRedeploys to the given value,0,1,510
+  600=Configure dropped crate (Phobos),0,71,31,0,0,0,0,0,0,Set or overwrite what crate is dropped when they die. Only functions when used as attached triggers within objects. Behaviour -1=default. 1=Overwrites current crate. 0=Clear current crate,0,1,600
+
+  [TriggerParamTypes]
+  501=AIHousesList,1,1
 
   ; FOLLOWING ENTRIES REQUIRE FA2SP.DLL (by secsome)
   [ScriptTypeLists]
@@ -213,13 +220,33 @@ HideLightFlashEffects=false      ; boolean
 
   [ScriptExtType_GlobalVariables]
   BuiltInType=5
-
+  
   [ScriptsRA2]
+  10018=Attack waypoint,2,0,1,Designed for aircrafts, when remaining ammo reaches a specified ammount this action ends. This threshold can be set with script action 12003.
   10100=Timed Area Guard,20,0,1,[LONG DESC]
   10101=Wait until ammo is full,0,0,1,[LONG DESC]
   10102=Regroup Temporarily Around the Team Leader,20,0,1,[LONG DESC]
   10103=Load Onto Transports,0,0,1,[LONG DESC]
   10104=Chronoshift to Enemy Base,20,0,1,[LONG DESC]
+  12003=Set Minimum Ammo Threshold,20,0,1,Sets the ammo threshold for script action 10018.
+  14004=Force Global OnlyTargetHouseEnemy value in Teams,20,0,1,[LONG DESC]
+  10105=Repair Destroyed Bridge,20,0,1,[LONG DESC]
+  14006=Set House Hate Value Modifier,20,0,1,[LONG DESC]
+  14007=Modify House Hate Using House Index,20,0,1,[LONG DESC]
+  14008=Modify Hate Values From A List Of Countries,28,0,1,[LONG DESC]
+  14009=Modify Hate Value Against A Random Country From A List Of Countries,28,0,1,[LONG DESC]
+  14010=Set The Most Hated House ("<" Comparison),20,0,1,[LONG DESC]
+  14011=Set The Most Hated House (">" Comparison),20,0,1,[LONG DESC]
+  14012=Set The Most Hated House Randomly,0,0,1,[LONG DESC]
+  14013=Reset Hate Against Other Houses,0,0,1,[LONG DESC]
+  14014=Set A House As The Most Hated House Of The Map,20,0,1,[LONG DESC]
+  16006=Set House Index For Managing AI Triggers,20,0,1,[LONG DESC]
+  16007=Enable Or Disable All AI Triggers,21,0,1,[LONG DESC]
+  16008=Enable AI Triggers From List,28,0,1,[LONG DESC]
+  16009=Disable AI Triggers From List,28,0,1,[LONG DESC]
+  16010=Disable AI Triggers If Contains Any Objects From the List,29,0,1,[LONG DESC]
+  16011=Enable AI Triggers If Contains Any Objects From the List,29,0,1,[LONG DESC]
+  16012=Set Side Index For Managing AI Triggers,20,0,1,[LONG DESC]
   18000=Local variable set,22,0,1,[LONG DESC]
   18001=Local variable add,22,0,1,[LONG DESC]
   18002=Local variable minus,22,0,1,[LONG DESC]
@@ -300,6 +327,14 @@ HideLightFlashEffects=false      ; boolean
   25=Local variables,-4
   26=Global variables,-5
   27=Global variables,-6
+  28=AI Houses List, -7
+  28=AI Scripts List, -7
+  29=AI Target Type,-8
+
+  [ScriptParamTypes]
+  7=AIScriptsList,1,1,0
+  7=AIHousesList,1,1,0
+  8=AITargetTypes,1,1,0
   ```
 </details>
 
@@ -318,8 +353,13 @@ New:
 - Building airstrike target eligibility customization (by Starkku)
 - IvanBomb detonation & image display centered on buildings (by Starkku)
 - Forcing specific weapon against cloaked or disguised targets (by Starkku)
+- Override target under EMP attack behavior (By FS-21)
+- Mind Control Threshold (by FS-21)
+- Script action for enabling & disabling AI Triggers (by FS-21)
+- Script Action 14004 for forcing all new actions to target only the main owner's enemy (by FS-21)
 - Customizable ROF random delay (by Starkku)
 - Animation with `Tiled=yes` now supports `CustomPalette` (by ststl)
+- New AI teams selector (by FS-21)
 - Toggleable DieSound when grinding (by Trsdy)
 - Shields can inherit Techno ArmorType (by Starkku)
 - Income money flying-string display when harvesters or slaves are docking to refineries or when spies steal credits (by Trsdy)
@@ -341,6 +381,7 @@ New:
 - Default campaign game speed override and custom campaign game speed FPS (by Morton)
 - Trigger actions that allow/forbid MCV to redeploy in game (by Trsdy)
 - `AnimList` on zero damage Warheads toggle via `AnimList.ShowOnZeroDamage` (by Starkku)
+- AI learning (by FS-21)
 - Including INI files and inheriting INI sections (by Morton)
 - Additions to automatic passenger deletion (by Starkku)
 - Buildings considered as vehicles (by Starkku)
@@ -360,6 +401,7 @@ New:
 - Allow overriding `Shield.AffectTypes` for each Warhead shield interaction (by Starkku)
 - TechnoType conversion warhead & superweapon (by Morton)
 - TechnoType conversion on ownership change (by Trsdy)
+- Animation for the technoType conversion warhead & superweapon (by FS-21)
 - Unlimited skirmish colors (by Morton)
 - Example custom locomotor that circles around the target (*NOTE: For developer use only*) (by Kerbiter, CCHyper, with help from Otamaa; based on earlier experiment by CnCVK)
 - Vehicle voxel turret shadows & body multi-section shadows (by TwinkleStar & Trsdy)
@@ -386,16 +428,24 @@ New:
 - Allow toggling `Infantry/UnitsGainSelfHeal` for `MultiplayPassive=true` houses (by Starkku)
 - Customizable straight trajectory detonation & snap distance and pass-through option (by Starkku)
 - Airstrike & spy plane fixed spawn distance & height (by Starkku)
+- Remove parasites in any warhead (by FS-21)
+- Web logic against infantry (FS-21)
+- Script action for repairing destroyed bridges (by FS-21)
 - Allow enabling application of `Verses` and `PercentAtMax` for negative damage (by Starkku)
+- Customizable disguised target evaluation behaviour in new ScriptType attack actions (by FS-21)
+- Script actions for manipulating script flows with conditional jumps (by FS-21)
+- `RandomTarget` for assigning a new target in each projectile (by FS-21)
 - In addition to `PlacementGrid.Translucency`, allow to set the transparency of the grid when PlacementPreview is enabled, using the `PlacementGrid.TranslucencyWithPreview` tag (by Belonit).
 - Show briefing screen on singleplayer mission start (by Starkku)
 - Allow setting mission par times and related messages in `missionmd.ini` (by Starkku)
 - Allow setting default singleplayer map loading screen and briefing offsets (by Starkku)
 - Allow toggling whether or not fire particle systems adjust target coordinates when firer rotates (by Starkku)
 - `AmbientDamage` warhead & main target ignore customization (by Starkku)
+- Grant new superweapons in superweapons (by FS-21).
 - Flashing Technos on selecting (by Fryone)
 - Customizable DropPod properties on a per-InfantryType basis (by Trsdy)
 - Projectile return weapon (by Starkku)
+- Universal deploy from any techno into any techno (by FS-21)
 - Allow customizing aircraft landing direction per aircraft or per dock (by Starkku)
 - Allow animations to play sounds detached from audio event handler (by Starkku)
 - Game save option when starting campaigns (by Trsdy)
@@ -404,6 +454,7 @@ New:
 - Re-enable the Veinhole Monster and Weeds from TS (by ZivDero)
 - Recreate the weed-charging of SWs like the TS Chemical Missile (by ZivDero)
 - Allow to change the speed of gas particles (by ZivDero)
+- Universal deploy from any techno into any techno (by FS-21)
 - Allow upgrade animations to use `Powered` & `PoweredLight/Effect/Special` keys (by Starkku)
 - Toggle for `Explodes=true` BuildingTypes to not explode during buildup or being sold (by Starkku)
 - Toggleable height-based shadow scaling for voxel air units (by Trsdy & Starkku)
@@ -467,12 +518,17 @@ New:
 - `Scorch` / `Flamer` fire animation customization (by Starkku)
 - Warheads parasite removal customization (by Starkku)
 - Allow infantry to use land sequences in water (by Starkku)
+- ScriptType actions `10018` & `12003` for aircrafts attacks (by FS-21)
+- Penetration damage on garrisonable structures (by FS-21)
+- Map action 507 for printing a message with the remaining map objects (by FS-21)
+- Modify Ammo on impact (by FS-21)
 - `<Player @ X>` can now be used as owner for pre-placed objects on skirmish and multiplayer maps (by Starkku)
 - Allow customizing charge turret delays per burst on a weapon (by Starkku)
 - Unit `Speed` setting now accepts floating point values (by Starkku)
 
 Vanilla fixes:
 - Allow AI to repair structures built from base nodes/trigger action 125/SW delivery in single player missions (by Trsdy)
+- Fixed the bug that restored cyborg legs when the soldier left transport (by FS-21)
 - Allow usage of `AlternateFLH%d` of vehicles in `OpenTopped` transport. (by Trsdy)
 - Improved the statistic distribution of the spawned crates over the visible area of the map. (by Trsdy, based on TwinkleStar's work)
 - Teams spawned by trigger action 7,80,107 can use IFV and `OpenTopped` logic normally (by Trsdy)
@@ -515,6 +571,8 @@ Vanilla fixes:
 - `Arcing=true` projectile elevation inaccuracy can now be fixed by setting `Arcing.AllowElevationInaccuracy=false` (by Starkku)
 - Fixed position and layer of info tip and reveal production cameo on selected building (by Belonit)
 - Fixed `TurretOffset` to be supported for SHP vehicles (by TwinkleStar)
+- Map event `There are no technos of the specified houses list` (by FS-21)
+- New `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
 - `Powered`/`PoweredSpecial` buildings' powered anims will update as usual when being captured by enemies (by Trsdy)
 - Fixed a glitch related to incorrect target setting for missiles (by Belonit)
 - Skipped parsing `[Header]` section of compaign maps which led to occasional crashes on Linux (by Trsdy)
@@ -598,6 +656,7 @@ Phobos fixes:
 - Fixed `SelfHealGainType=none` not working (changed to `noheal`) (by Starkku)
 - Fixed AircraftTypes gaining self-healing from `UnitsGainSelfHeal` by default (while not displaying the pip) when they should not (by Starkku)
 - Fixed `LaunchSW.IgnoreInhibitors` and `SW.Next.IgnoreInhibitors` overriding corresponding `IgnoreDesignators` settings (by Ollerus)
+- Fixed an issue that caused new attack and move script actions to pick buildings with `InvisibleInGame=yes` as targets (FS-21)
 
 Fixes / interactions with other extensions:
 - Weapons fired by EMPulse superweapons *(Ares feature)* now fully respect the firing building's FLH.
@@ -688,6 +747,7 @@ New:
 - Script action to regroup temporarily around the Team Leader (by FS-21)
 - Script action to randomly skip next action (by FS-21)
 - Script action for timed script action jumps (by FS-21)
+- Script action for modifying AI anger against other houses (by FS-21)
 - ObjectInfo now shows current Target and AI Trigger data (by FS-21)
 - Shield absorption and passthrough customization (by Morton)
 - Limbo Delivery of buildings (by Morton)
