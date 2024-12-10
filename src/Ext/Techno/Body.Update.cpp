@@ -691,6 +691,13 @@ void TechnoExt::KillSelf(TechnoClass* pThis, AutoDeathBehavior deathOption, Anim
 				pFoot->ParasiteImUsing->ExitUnit();
 		}
 
+		// Remove limbo buildings' tracking here because their are not truely InLimbo
+		if (auto const pBuilding = abstract_cast<BuildingClass*>(pThis))
+		{
+			if (!pBuilding->InLimbo && !pBuilding->Type->Insignificant && !pBuilding->Type->DontScore)
+				HouseExt::ExtMap.Find(pBuilding->Owner)->RemoveFromLimboTracking(pBuilding->Type);
+		}
+
 		pThis->RegisterKill(pThis->Owner);
 		pThis->UnInit();
 		return;
@@ -740,14 +747,14 @@ void TechnoExt::KillSelf(TechnoClass* pThis, AutoDeathBehavior deathOption, Anim
 	}
 
 	default: //must be AutoDeathBehavior::Kill
-		if (IS_ARES_FUN_AVAILABLE(SpawnSurvivors))
+		if (AresFunctions::SpawnSurvivors)
 		{
 			switch (pThis->WhatAmI())
 			{
 			case AbstractType::Unit:
 			case AbstractType::Aircraft:
 				AresFunctions::SpawnSurvivors(static_cast<FootClass*>(pThis), nullptr, false, false);
-			default:break;
+			default:;
 			}
 		}
 		pThis->ReceiveDamage(&pThis->Health, 0, RulesClass::Instance->C4Warhead, nullptr, true, false, pThis->Owner);
@@ -985,6 +992,7 @@ void TechnoExt::ExtData::RecalculateStatMultipliers()
 	bool hasTint = false;
 	bool reflectsDamage = false;
 	bool hasOnFireDiscardables = false;
+	bool hasRestrictedArmorMultipliers = false;
 
 	for (const auto& attachEffect : this->AttachedEffects)
 	{
@@ -1003,6 +1011,7 @@ void TechnoExt::ExtData::RecalculateStatMultipliers()
 		hasTint |= type->HasTint();
 		reflectsDamage |= type->ReflectDamage;
 		hasOnFireDiscardables |= (type->DiscardOn & DiscardCondition::Firing) != DiscardCondition::None;
+		hasRestrictedArmorMultipliers |= (type->ArmorMultiplier != 1.0 && (type->ArmorMultiplier_AllowWarheads.size() > 0 || type->ArmorMultiplier_DisallowWarheads.size() > 0));
 	}
 
 	this->AE.FirepowerMultiplier = firepower;
@@ -1016,6 +1025,7 @@ void TechnoExt::ExtData::RecalculateStatMultipliers()
 	this->AE.HasTint = hasTint;
 	this->AE.ReflectDamage = reflectsDamage;
 	this->AE.HasOnFireDiscardables = hasOnFireDiscardables;
+	this->AE.HasRestrictedArmorMultipliers = hasRestrictedArmorMultipliers;
 
 	if (forceDecloak && pThis->CloakState == CloakState::Cloaked)
 		pThis->Uncloak(true);
