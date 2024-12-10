@@ -1,4 +1,6 @@
 #include <AircraftClass.h>
+#include <ScenarioClass.h>
+#include <BombClass.h>
 #include "Body.h"
 
 #include <ScenarioClass.h>
@@ -543,3 +545,179 @@ DEFINE_HOOK(0x70EFE0, TechnoClass_GetMaxSpeed, 0x6)
 	return SkipGameCode;
 }
 
+
+DEFINE_HOOK(0x51E440, InfantryClass_AI_WhatAction2_EngineerRepairWeapon, 0x8)
+{
+	enum { Skip = 0x51E458 };
+
+	GET(InfantryClass*, pThis, EDI);
+	GET_STACK(TechnoClass*, pTarget, STACK_OFFSET(0x38, 0x4));
+
+	if (!pThis->IsEngineer() || !TechnoExt::IsValidTechno(pTarget))// || pTarget->Owner->WhatAmI() != AbstractType::House || pTarget->WhatAmI() != AbstractType::Building)
+		return 0;
+
+	int weaponIndex = pThis->SelectWeapon(pTarget);
+	auto const weaponType = pThis->GetWeapon(weaponIndex)->WeaponType;
+	auto const pWHExt = WarheadTypeExt::ExtMap.Find(weaponType->Warhead);
+	bool canDisarmBombs = pWHExt->CanDisarmBombs.Get() && pTarget->AttachedBomb && pTarget->Owner->IsAlliedWith(pTarget->AttachedBomb->OwnerHouse);
+	auto const pTargetType = pTarget->GetTechnoType();
+
+	if (pWHExt->CanDisarmBombs.Get() && pTarget->AttachedBomb)
+	{
+		if (pTarget->Owner->IsAlliedWith(pTarget->AttachedBomb->OwnerHouse))
+			R->EAX(Action::DisarmBomb);
+
+		return Skip;
+	}
+
+	auto const pBuilding = abstract_cast<BuildingClass*>(pTarget);
+	bool isTargetNeutral = pTarget->Owner->IsNeutral();
+	bool isTargetEnemy = !pThis->Owner->IsAlliedWith(pTarget);
+	bool isTargetBridgeHut = pBuilding ? pBuilding->Type->BridgeRepairHut : false;
+
+	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->Type);
+	if (!pTypeExt || !pTypeExt->Engineer_CheckFriendlyWeapons || isTargetNeutral || isTargetEnemy || isTargetBridgeHut)
+		return 0;
+
+	double versusArmor = GeneralUtils::GetWarheadVersusArmor(weaponType->Warhead, pTargetType->Armor);
+	int realDamage = static_cast<int>(weaponType->Damage * versusArmor * pThis->FirepowerMultiplier);
+	bool isHealerWeapon = realDamage < 0;
+	bool healingCondition = (isHealerWeapon && pTarget->Health < pTargetType->Strength) && pThis->Owner->IsAlliedWith(pTarget);
+	//bool offensiveCondition = (!isHealerWeapon && !pThis->Owner->IsAlliedWith(pTarget));
+
+	if (!healingCondition || pThis == pTarget)
+	{
+		// Targte must have any damage
+		if (pTarget->Health < pTargetType->Strength)
+			return 0;
+
+		R->EAX(Action::GuardArea);
+	}
+	else
+	{
+		if (pThis->Owner->IsAlliedWith(pTarget))
+			R->EAX(Action::Heal);
+		else
+			R->EAX(Action::Attack);
+	}
+
+	return Skip;
+}
+
+DEFINE_HOOK(0x6FCB8D, TechnoClass_CanFire_DisarmBombs, 0x6)
+{
+	GET(WarheadTypeClass*, pWH, EDI);
+	GET(TechnoClass*, pTechno, EBP);
+
+	auto const pBombOwner = pTechno->AttachedBomb ? pTechno->AttachedBomb->OwnerHouse : nullptr;
+	auto const pWHExt = WarheadTypeExt::ExtMap.Find(pWH);
+	bool canDisarmBombs = pWHExt->CanDisarmBombs.Get() && pTechno->AttachedBomb;
+
+	if (pBombOwner)
+		canDisarmBombs &= pBombOwner->IsAlliedWith(pTechno);
+
+	// Warheads with the new tag CanDisarmBombs are allowed to fire as usual against friendly targets
+	if (canDisarmBombs)
+		return 0x6FCB9E;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x51C8B8, InfantryClass_CanFire_DisarmBombs, 0x6)
+{
+	GET(InfantryClass*, pThis, ECX);
+	GET_STACK(UnitClass*, pTarget, STACK_OFFSET(0x20, 0x4));
+
+	if (!pTarget)
+		return 0;
+
+	auto const pTechnoTarget = abstract_cast<TechnoClass*>(pTarget);
+	int weaponIndex = pThis->SelectWeapon(pTarget);
+	auto const weaponType = pThis->GetWeapon(weaponIndex)->WeaponType;
+
+	if (!weaponType)
+		return 0;
+
+	auto const pBombOwner = pTechnoTarget && pTechnoTarget->AttachedBomb ? pTechnoTarget->AttachedBomb->OwnerHouse : nullptr;
+	auto const pWHExt = WarheadTypeExt::ExtMap.Find(weaponType->Warhead);
+	bool canDisarmBombs = pWHExt->CanDisarmBombs.Get() && pTechnoTarget && pTechnoTarget->AttachedBomb && pThis->Owner->IsAlliedWith(pTechnoTarget->AttachedBomb->OwnerHouse);
+
+	if (pBombOwner)
+		canDisarmBombs &= pBombOwner->IsAlliedWith(pTechnoTarget->Owner);
+
+	// Warheads with the new tag CanDisarmBombs are allowed to fire as usual against friendly targets
+	if (canDisarmBombs)
+	{
+		R->EAX(FireError::OK);
+		return 0x51CB8C;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(0x51F1AC, InfantryClass_ActiveClickWith_EngineerRepairWeapon, 0x8)
+{
+	enum { Skip = 0x51F1C7 };
+
+	GET(InfantryClass*, pThis, ESI);
+	GET(ObjectClass*, pObject, EDI);
+
+	auto const pTechno = abstract_cast<TechnoClass*>(pObject);
+	if (!pTechno || !pTechno->Owner || !pThis->Owner->IsAlliedWith(pTechno->Owner))
+		return 0;
+
+	// Only weaponized engineers allowed (TO-DO: allow offensive weapons, not only repair/heal weapons)
+	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->Type);
+	if (!pTypeExt || !pTypeExt->Engineer_CheckFriendlyWeapons)
+		return 0;
+
+	auto const pTechnoType = pTechno->GetTechnoType();
+	auto const pBuilding = abstract_cast<BuildingClass*>(pTechno);
+	int weaponIndex = pThis->SelectWeapon(pTechno);
+	auto weaponType = pThis->GetWeapon(weaponIndex)->WeaponType;
+	double versusArmor = GeneralUtils::GetWarheadVersusArmor(weaponType->Warhead, pTechnoType->Armor);
+	int realDamage = static_cast<int>(weaponType->Damage * versusArmor * pThis->FirepowerMultiplier);
+	bool isHealerWeapon = realDamage < 0;
+	bool healingCondition = (isHealerWeapon && pTechno->Health < pTechnoType->Strength && pThis->Owner->IsAlliedWith(pTechno));
+
+	if (healingCondition || (pBuilding && ((pBuilding->Type->Capturable && pTechno->Health < pTechnoType->Strength) || (pBuilding->Type->BridgeRepairHut && pBuilding->Type->Repairable))))
+		return 0;
+
+	//R->EAX(Action::GuardArea);
+	//return Skip;
+
+	// Set destination in a free cell
+	auto const pType = pThis->GetTechnoType();
+	auto pCell = pThis->GetCell();
+	bool allowBridges = GroundType::Array[static_cast<int>(LandType::Clear)].Cost[static_cast<int>(pType->SpeedType)] > 0.0;
+	bool isBridge = allowBridges && pCell->ContainsBridge();
+	auto nCell = MapClass::Instance->NearByLocation(CellClass::Coord2Cell(pTechno->Location), pType->SpeedType, -1, pType->MovementZone, isBridge, 1, 1, true, false, false, isBridge, CellStruct::Empty, false, false);
+	pCell = MapClass::Instance->TryGetCellAt(nCell);
+	//pThis->SetDestination(pCell, 0);
+
+	//TechnoExt::SendTechnoSetDestination(pThis, pCell, false);
+	TechnoExt::SendEngineerGuardDestination(pThis, pObject);
+
+	R->EAX(Action::GuardArea);
+	return Skip;
+}
+
+DEFINE_HOOK(0x4D6B8D, FootClass_MissionGuardArea_EngineerRepairWeapon, 0x6)
+{
+	enum { Skip = 0x4D6ABF };
+
+	GET(FootClass*, pThis, ESI);
+
+	if (!pThis || !TechnoExt::IsValidTechno(pThis))
+		return 0;
+
+	auto const pType = pThis->GetTechnoType();
+	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
+
+	if (!pTypeExt || !pTypeExt->Engineer_CheckFriendlyWeapons)
+		return 0;
+
+	TechnoExt::ProcessWeaponizedEngineerGuard(pThis);
+
+	return Skip;
+}

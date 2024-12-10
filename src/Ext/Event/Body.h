@@ -1,7 +1,8 @@
 #pragma once
-/*
 #include <cstddef>
 #include <stdint.h>
+#include <TechnoClass.h>
+#include <FootClass.h>
 
 enum class EventTypeExt : uint8_t
 {
@@ -9,10 +10,12 @@ enum class EventTypeExt : uint8_t
 	// CnCNet reserved Events from 0x30 to 0x3F
 	// Ares used Events 0x60 and 0x61
 
-	Sample = 0x40, // Sample event, remove it when Phobos needs its own events
+	SyncEngineerGuardDestination = 0x45,
+	SyncWeaponizedEngineerGuard = 0x48,
+	SyncEngineerGuardStopTarNav = 0x4A,
 
-	FIRST = Sample,
-	LAST = Sample
+	FIRST = SyncEngineerGuardDestination,
+	LAST = SyncEngineerGuardStopTarNav
 };
 
 #pragma pack(push, 1)
@@ -27,10 +30,21 @@ public:
 	{
 		char DataBuffer[104];
 
-		struct Sample
+		struct SyncEngineerGuardStopTarNav
 		{
-			char DataBuffer[104];
-		} Sample;
+			int TechnoUniqueID;
+		} SyncEngineerGuardStopTarNav;
+
+		struct SyncWeaponizedEngineerGuard
+		{
+			int TechnoUniqueID;
+		} SyncWeaponizedEngineerGuard;
+
+		struct SyncEngineerGuardDestination
+		{
+			int TechnoUniqueID;
+			int GuardDestinationID;
+		} SyncEngineerGuardDestination;
 	};
 
 	bool AddEvent();
@@ -43,4 +57,3 @@ public:
 static_assert(sizeof(EventExt) == 111);
 static_assert(offsetof(EventExt, DataBuffer) == 7);
 #pragma pack(pop)
-*/
