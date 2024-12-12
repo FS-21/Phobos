@@ -650,6 +650,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	const char* key = "SecretLab.RequiredHouses";
 	char* context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+	this->Secret_RequiredHouses.clear();
 
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
@@ -664,6 +665,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	key = "SecretLab.ForbiddenHouses";
 	context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+	this->Secret_ForbiddenHouses.clear();
 
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
@@ -678,6 +680,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	key = "Prerequisite.RequiredTheaters";
 	context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+	this->Prerequisite_RequiredTheaters.clear();
 
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
@@ -694,6 +697,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	key = "Prerequisite";
 	context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+	this->Prerequisite.clear();
 
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
@@ -717,6 +721,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	key = "Prerequisite.Negative";
 	context = nullptr;
 	pINI->ReadString(pSection, key, "", Phobos::readBuffer);
+	this->Prerequisite_Negative.clear();
 
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
@@ -738,6 +743,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	// Prerequisite.ListX with Generic Prerequistes support
 	//this->Prerequisite_ListVector.clear();
 	this->Prerequisite_Lists.Read(exINI, pSection, "Prerequisite.Lists");
+	this->Prerequisite_ListVector.clear();
 
 	if (Prerequisite_Lists.Get() > 0)
 	{
