@@ -111,6 +111,9 @@ DEFINE_HOOK(0x42453E, AnimClass_AI_Damage, 0x6)
 		}
 	}
 
+	if (pTypeExt->Damage_DealtByAnimOwner)
+		pOwner = pThis->Owner;
+
 	if (pTypeExt->Weapon)
 	{
 		WeaponTypeExt::DetonateAt(pTypeExt->Weapon, pThis->GetCoords(), pInvoker, appliedDamage, pOwner);

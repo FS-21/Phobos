@@ -49,7 +49,29 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 
 		if (this->SpySat)
 			MapClass::Instance->Reveal(pHouse);
+		
+		if (this->RevealAreaRadius.isset() && this->RevealAreaRadius.Get() > 0)
+		{
+			const auto cellStruct = CellClass::Coord2Cell(coords);
+			int radius = this->RevealAreaRadius.Get();
+			auto pFirer = pBulletExt->FirerHouse;
 
+			for (auto pOtherHouse : *HouseClass::Array)
+			{
+				auto pHouse = pFirer ? pFirer : pOtherHouse;
+
+				if (pOtherHouse->IsControlledByHuman() && // Not AI
+					!pOtherHouse->IsObserver() &&         // Not Observer
+					!pOtherHouse->Defeated &&             // Not Defeated
+					pHouse->IsAlliedWith(pOtherHouse))    // Not Allied
+				{
+					// Ares used this function like this:
+					MapClass::Instance->RevealArea2(&coords, radius, pOtherHouse, 0, 0, 0, 0, 0);
+					MapClass::Instance->RevealArea2(&coords, radius, pOtherHouse, 0, 0, 0, 0, 1);
+				}
+			}
+		}
+		
 		if (this->TransactMoney)
 		{
 			pHouse->TransactMoney(this->TransactMoney);

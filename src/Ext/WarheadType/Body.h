@@ -23,6 +23,7 @@ public:
 
 		Valueable<bool> SpySat;
 		Valueable<bool> BigGap;
+		Nullable<int> RevealAreaRadius;
 		Valueable<int> TransactMoney;
 		Valueable<bool> TransactMoney_Display;
 		Valueable<AffectedHouse> TransactMoney_Display_Houses;
@@ -207,6 +208,7 @@ public:
 		ExtData(WarheadTypeClass* OwnerObject) : Extension<WarheadTypeClass>(OwnerObject)
 			, SpySat { false }
 			, BigGap { false }
+			, RevealAreaRadius {}
 			, TransactMoney { 0 }
 			, TransactMoney_Display { false }
 			, TransactMoney_Display_Houses { AffectedHouse::All }

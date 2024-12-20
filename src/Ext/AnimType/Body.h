@@ -39,6 +39,7 @@ public:
 		Valueable<WeaponTypeClass*> Weapon;
 		Valueable<int> Damage_Delay;
 		Valueable<bool> Damage_DealtByInvoker;
+		Valueable<bool> Damage_DealtByAnimOwner;
 		Valueable<bool> Damage_ApplyOncePerLoop;
 		Valueable<bool> ExplodeOnWater;
 		Valueable<bool> Warhead_Detonate;
@@ -88,6 +89,7 @@ public:
 			, Weapon {}
 			, Damage_Delay { 0 }
 			, Damage_DealtByInvoker { false }
+			, Damage_DealtByAnimOwner { false }
 			, Damage_ApplyOncePerLoop { false }
 			, ExplodeOnWater { false }
 			, Warhead_Detonate { false }
