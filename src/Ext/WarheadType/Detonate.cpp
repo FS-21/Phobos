@@ -52,7 +52,6 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 		
 		if (this->RevealAreaRadius.isset() && this->RevealAreaRadius.Get() > 0)
 		{
-			const auto cellStruct = CellClass::Coord2Cell(coords);
 			int radius = this->RevealAreaRadius.Get();
 			auto pFirer = pBulletExt->FirerHouse;
 
