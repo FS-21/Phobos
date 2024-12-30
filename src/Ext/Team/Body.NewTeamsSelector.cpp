@@ -328,9 +328,14 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 		bool onlyCheckImportantTriggers = false;
 		bool ignoreGlobalAITriggers = ScenarioClass::Instance->IgnoreGlobalAITriggers;
 
+		const auto pHouseExt = HouseExt::ExtMap.Find(pHouse);
+
 		// Gather all the trigger candidates into one place for posterior fast calculations
-		for (auto const pTrigger : *AITriggerTypeClass::Array)
+		//for (auto const pTrigger : *AITriggerTypeClass::Array)
+		for (int triggerIdx : pHouseExt->AITriggers_ValidList)
 		{
+			const auto pTrigger = AITriggerTypeClass::Array->GetItem(triggerIdx);
+
 			if (!pTrigger || ignoreGlobalAITriggers == pTrigger->IsGlobal || !pTrigger->Team1)
 				continue;
 
@@ -345,7 +350,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 			if (pTrigger->IsEnabled)
 			{
 				//pTrigger->OwnerHouseType;
-				if (pTrigger->TechLevel > pHouse->TechLevel)
+				if (pTrigger->Team1->TechLevel > pHouse->TechLevel)
 					continue;
 
 				// ignore it if isn't set for the house AI difficulty
