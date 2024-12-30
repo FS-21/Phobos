@@ -883,7 +883,9 @@ void TechnoExt::PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo, bool fo
 
 bool TechnoExt::IsValidTechno(AbstractClass* pObject)
 {
-	return IsValidTechno(abstract_cast<TechnoClass*>(pObject));
+	const auto pTechno = abstract_cast<TechnoClass*>(pObject);
+
+	return pTechno ? IsValidTechno(pTechno) : false;
 }
 
 bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
