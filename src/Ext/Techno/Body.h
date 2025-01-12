@@ -268,4 +268,7 @@ public:
 
 	static void SendStopRandomTargetTarNav(TechnoClass* pThis);
 	static void HandleStopRandomTargetTarNav(EventExt* event);
+
+	static void SendStopPassengersTar(TechnoClass* pThis);
+	static void HandleStopPassengersTar(EventExt* event);
 };

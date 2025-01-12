@@ -26,6 +26,9 @@ void EventExt::RespondEvent()
 	case EventTypeExt::SyncWeaponizedEngineerGuard:
 		TechnoExt::HandleWeaponizedEngineerGuard(this);
 		break;
+	case EventTypeExt::SyncPassengersTar:
+		TechnoExt::HandleStopPassengersTar(this);
+		break;
 	}
 }
 
@@ -41,6 +44,8 @@ size_t EventExt::GetDataSize(EventTypeExt type)
 		return sizeof(EventExt::SyncEngineerGuardDestination);
 	case EventTypeExt::SyncWeaponizedEngineerGuard:
 		return sizeof(EventExt::SyncWeaponizedEngineerGuard);
+	case EventTypeExt::SyncPassengersTar:
+		return sizeof(EventExt::SyncPassengersTar);
 	}
 
 	return 0;

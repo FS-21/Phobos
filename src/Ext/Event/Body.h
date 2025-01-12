@@ -14,6 +14,7 @@ enum class EventTypeExt : uint8_t
 	SyncWeaponizedEngineerGuard = 0x48,
 	SyncStopRandomTargetTarNav = 0x49,
 	SyncEngineerGuardStopTarNav = 0x4A,
+	SyncPassengersTar = 0x4B,
 
 	FIRST = SyncEngineerGuardDestination,
 	LAST = SyncEngineerGuardStopTarNav
@@ -51,6 +52,11 @@ public:
 		{
 			int TechnoUniqueID;
 		} SyncEngineerGuardStopTarNav;
+
+		struct SyncPassengersTar
+		{
+			int TechnoUniqueID;
+		} SyncPassengersTar;
 	};
 
 	bool AddEvent();
