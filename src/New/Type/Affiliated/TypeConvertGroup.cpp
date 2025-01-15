@@ -52,7 +52,7 @@ void TypeConvertGroup::UniversalConvert(TechnoClass* pTarget, const std::vector<
 	{
 		if (!toType.isset() || !toType.Get()) continue;
 
-		bool isValidTechno = TechnoExt::IsValidTechno(pTarget);
+		bool isValidTechno = TechnoExt::IsValidTechno(pTarget, false);
 
 		if (!isValidTechno) continue;
 

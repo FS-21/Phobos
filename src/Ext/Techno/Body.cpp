@@ -881,20 +881,20 @@ void TechnoExt::PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo, bool fo
 	}
 }
 
-bool TechnoExt::IsValidTechno(AbstractClass* pObject)
+bool TechnoExt::IsValidTechno(AbstractClass* pObject, bool checkIfInTransportOrAbsorbed)
 {
 	const auto pTechno = abstract_cast<TechnoClass*>(pObject);
 
-	return pTechno ? IsValidTechno(pTechno) : false;
+	return pTechno ? IsValidTechno(pTechno, checkIfInTransportOrAbsorbed) : false;
 }
 
-bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
+bool TechnoExt::IsValidTechno(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed)
 {
 	if (!pTechno)
 		return false;
 
 	bool isValid = !pTechno->Dirty
-		&& ScriptExt::IsUnitAvailable(pTechno, true)
+		&& ScriptExt::IsUnitAvailable(pTechno, checkIfInTransportOrAbsorbed)
 		&& pTechno->Owner
 		&& (pTechno->WhatAmI() == AbstractType::Infantry
 			|| pTechno->WhatAmI() == AbstractType::Unit
