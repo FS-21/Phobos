@@ -630,6 +630,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Convert_TransferPassengers.Read(exINI, pSection, "Convert.TransferPassengers");
 	this->Convert_TransferPassengers_IgnoreInvalidOccupiers.Read(exINI, pSection, "Convert.TransferPassengers.IgnoreInvalidOccupiers");
 	this->Convert_ForceVeterancyTransfer.Read(exINI, pSection, "Convert.ForceVeterancyTransfer");
+	this->Convert_RefillWithPassengers.Read(exINI, pSection, "Convert.RefillWithPassengers");
 
 	// A structure deploy animation takes priority
 	pINI->ReadString(pSection, "Convert.DeployingAnim", "", Phobos::readBuffer);
@@ -1047,6 +1048,7 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_TransferPassengers)
 		.Process(this->Convert_TransferPassengers_IgnoreInvalidOccupiers)
 		.Process(this->Convert_ForceVeterancyTransfer)
+		.Process(this->Convert_RefillWithPassengers)
 
 		.Process(this->NoManualUnload)
 		;

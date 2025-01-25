@@ -18,6 +18,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Ext\Techno\Body.ConvertRefillPassengers.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.RandomTarget.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.StopEvent.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.RandomTarget.cpp" />

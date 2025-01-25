@@ -251,6 +251,8 @@ public:
 	static WeaponTypeClass* GetCurrentWeapon(TechnoClass* pThis, bool getSecondary = false);
 	static int GetWeaponIndexAgainstWall(TechnoClass* pThis, OverlayTypeClass* pWallOverlayType);
 
+	static void ConvertRefillWithPassengers(TechnoClass* pThis);
+
 	static bool TryToCreateCrate(CoordStruct location, Powerup selectedPowerup = Powerup::Money, int maxCellRange = 10);
 
 	static TechnoClass* UniversalDeployConversion(TechnoClass* pThis, TechnoTypeClass* pNewType = nullptr);

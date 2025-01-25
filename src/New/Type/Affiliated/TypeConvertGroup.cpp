@@ -23,8 +23,45 @@ void TypeConvertGroup::Convert(FootClass* pTargetFoot, const std::vector<TypeCon
 					if (converted && pAnimType)
 					{
 						if (auto pAnim = GameCreate<AnimClass>(pAnimType, pTargetFoot->Location))
-							pAnim->SetOwnerObject(pTargetFoot);
+						pAnim->SetOwnerObject(pTargetFoot);
 					}
+
+					/*if (converted && pTargetFoot->SpawnManager)
+					{
+						int currentSpawnCount = pTargetFoot->SpawnManager->SpawnCount;
+						int newSpawnCount = toType->SpawnsNumber;
+
+						pTargetFoot->SpawnManager->UpdateTimer.Start(toType->SpawnRegenRate);
+						pTargetFoot->SpawnManager->SpawnTimer.Start(toType->SpawnRegenRate);
+						pTargetFoot->SpawnManager->SpawnCount = newSpawnCount;
+						pTargetFoot->SpawnManager->SpawnType = toType->Spawns;
+						pTargetFoot->SpawnManager->Target = nullptr;
+						pTargetFoot->SpawnManager->NewTarget = pTargetFoot->Target;
+
+						while (currentSpawnCount < newSpawnCount)
+						{
+							SpawnControl* newSpawnControl = new SpawnControl();
+
+							newSpawnControl->Unit = static_cast<AircraftClass*>(toType->Spawns->CreateObject(pOwner));
+							newSpawnControl->IsSpawnMissile = toType->Spawns->MissileSpawn;
+							newSpawnControl->Unit->Limbo();
+							newSpawnControl->Unit->SpawnOwner = pTargetFoot;
+							newSpawnControl->Status = SpawnNodeStatus::Dead;
+							newSpawnControl->SpawnTimer.Start(toType->SpawnRegenRate);
+							newSpawnControl->Unit->ReceiveDamage(&newSpawnControl->Unit->Health, 0, RulesClass::Instance->C4Warhead, nullptr, true, false, pOwner);
+
+							//newSpawnControl->Unit->SetTarget(pTargetFoot->Target);
+							//newSpawnControl->Unit->QueueMission(Mission::Attack, true);
+							//newSpawnControl->Unit->IsReturningFromAttackRun = false;
+
+							pTargetFoot->SpawnManager->SpawnedNodes.AddItem(newSpawnControl);
+
+							currentSpawnCount++;
+						}
+					}*/
+
+					//if (converted)
+						//TechnoExt::ConvertRefillWithPassengers(pTargetFoot);
 
 					break;
 				}
