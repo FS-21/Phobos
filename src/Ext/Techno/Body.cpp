@@ -37,7 +37,7 @@ TechnoExt::ExtData::~ExtData()
 	AnimExt::InvalidateTechnoPointers(pThis);
 }
 
-bool TechnoExt::IsActive(TechnoClass* pThis)
+bool TechnoExt::IsActiveIgnoreEMP(TechnoClass* pThis)
 {
 	return pThis
 		&& pThis->IsAlive
@@ -45,6 +45,13 @@ bool TechnoExt::IsActive(TechnoClass* pThis)
 		&& !pThis->InLimbo
 		&& !pThis->TemporalTargetingMe
 		&& !pThis->BeingWarpedOut
+		;
+}
+
+bool TechnoExt::IsActive(TechnoClass* pThis)
+{
+	return TechnoExt::IsActiveIgnoreEMP(pThis)
+		&& !pThis->Deactivated
 		&& !pThis->IsUnderEMP()
 		;
 }
@@ -534,6 +541,7 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->HasRemainingWarpInDelay)
 		.Process(this->LastWarpInDelay)
 		.Process(this->IsBeingChronoSphered)
+		.Process(this->KeepTargetOnMove)
 		;
 }
 

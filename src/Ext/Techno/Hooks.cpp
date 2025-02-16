@@ -1,8 +1,8 @@
-#include <AircraftClass.h>
-#include <ScenarioClass.h>
 #include <BombClass.h>
 #include "Body.h"
 
+#include <AircraftClass.h>
+#include <EventClass.h>
 #include <ScenarioClass.h>
 #include <TunnelLocomotionClass.h>
 
@@ -10,7 +10,9 @@
 #include <Ext/House/Body.h>
 #include <Ext/WarheadType/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <Ext/TechnoType/Body.h>
 #include <Utilities/EnumFunctions.h>
+#include <Utilities/AresHelper.h>
 
 #pragma region Update
 
@@ -81,7 +83,9 @@ DEFINE_HOOK(0x6F9FA9, TechnoClass_AI_PromoteAnim, 0x6)
 			promAnim = GameCreate<AnimClass>(RulesExt::Global()->Promote_VeteranAnimation, pThis->GetCenterCoords());
 		else if (RulesExt::Global()->Promote_EliteAnimation)
 			promAnim = GameCreate<AnimClass>(RulesExt::Global()->Promote_EliteAnimation, pThis->GetCenterCoords());
-		promAnim->SetOwnerObject(pThis);
+
+		if(promAnim)
+			promAnim->SetOwnerObject(pThis);
 	}
 
 	return aresProcess();
