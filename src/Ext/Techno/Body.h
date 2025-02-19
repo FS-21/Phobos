@@ -211,4 +211,5 @@ public:
 
 	static void SendStopRandomTargetTarNav(TechnoClass* pThis);
 	static void HandleStopRandomTargetTarNav(EventExt* event);
+	static void PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo = nullptr, bool forceFullTransfer = true, bool dontCheckInvalidOccupiers = true);
 };
