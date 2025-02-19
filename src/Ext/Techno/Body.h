@@ -6,9 +6,11 @@
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
 #include <Utilities/Macro.h>
+#include <Utilities/EnumFunctions.h>
 #include <New/Entity/ShieldClass.h>
 #include <New/Entity/LaserTrailClass.h>
 #include <New/Entity/AttachEffectClass.h>
+#include <Ext/Event/Body.h>
 
 class BulletClass;
 
@@ -51,6 +53,10 @@ public:
 		bool CanCurrentlyDeployIntoBuilding; // Only set on UnitClass technos with DeploysInto set in multiplayer games, recalculated once per frame so no need to serialize.
 		CellClass* FiringObstacleCell; // Set on firing if there is an obstacle cell between target and techno, used for updating WaveClass target etc.
 		bool IsDetachingForCloak; // Used for checking animation detaching, set to true before calling Detach_All() on techno when this anim is attached to and to false after when cloaking only.
+		int OriginalTargetWeaponIndex;
+		AbstractClass* OriginalTarget;
+		bool ResetRandomTarget;
+		TechnoClass* CurrentRandomTarget;
 
 		// Used for Passengers.SyncOwner.RevertOnExit instead of TechnoClass::InitialOwner / OriginallyOwnedByHouse,
 		// as neither is guaranteed to point to the house the TechnoClass had prior to entering transport and cannot be safely overridden.
@@ -94,6 +100,10 @@ public:
 			, LastWarpInDelay { 0 }
 			, IsBeingChronoSphered { false }
 			, KeepTargetOnMove { false }
+			, OriginalTarget { nullptr }
+			, ResetRandomTarget { false }
+			, CurrentRandomTarget { nullptr }
+			, OriginalTargetWeaponIndex { -1 }
 		{ }
 
 		void OnEarlyUpdate();
@@ -117,9 +127,17 @@ public:
 		void UpdateSelfOwnedAttachEffects();
 		bool HasAttachedEffects(std::vector<AttachEffectTypeClass*> attachEffectTypes, bool requireAll, bool ignoreSameSource, TechnoClass* pInvoker, AbstractClass* pSource, std::vector<int> const* minCounts, std::vector<int> const* maxCounts) const;
 		int GetAttachedEffectCumulativeCount(AttachEffectTypeClass* pAttachEffectType, bool ignoreSameSource = false, TechnoClass* pInvoker = nullptr, AbstractClass* pSource = nullptr) const;
+		void UpdateRandomTargets();
 
 		virtual ~ExtData() override;
-		virtual void InvalidatePointer(void* ptr, bool bRemoved) override { }
+
+		virtual void InvalidatePointer(void* ptr, bool bRemoved) override
+		{
+			AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
+			AnnounceInvalidPointer(CurrentRandomTarget, ptr);
+			AnnounceInvalidPointer(OriginalTarget, ptr);
+		}
+
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 		virtual void SaveToStream(PhobosStreamWriter& Stm) override;
 
@@ -176,6 +194,10 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, BuildingSelectBracketPosition bracketPosition);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue);
+	static void NewRandomTarget(TechnoClass* pThis = nullptr);
+	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
+	static bool IsValidTechno(TechnoClass* pTechno);
+	static bool IsValidTechno(AbstractClass* pObject);
 
 	// WeaponHelpers.cpp
 	static int PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, AbstractClass* pTarget, int weaponIndexOne, int weaponIndexTwo, bool allowFallback = true, bool allowAAFallback = true);
@@ -186,4 +208,7 @@ public:
 	static WeaponTypeClass* GetCurrentWeapon(TechnoClass* pThis, int& weaponIndex, bool getSecondary = false);
 	static WeaponTypeClass* GetCurrentWeapon(TechnoClass* pThis, bool getSecondary = false);
 	static int GetWeaponIndexAgainstWall(TechnoClass* pThis, OverlayTypeClass* pWallOverlayType);
+
+	static void SendStopRandomTargetTarNav(TechnoClass* pThis);
+	static void HandleStopRandomTargetTarNav(EventExt* event);
 };

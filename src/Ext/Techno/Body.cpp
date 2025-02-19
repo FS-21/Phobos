@@ -7,6 +7,7 @@
 #include <Ext/Anim/Body.h>
 #include <Ext/Scenario/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <Ext/Script/Body.h>
 
 #include <Utilities/AresFunctions.h>
 
@@ -473,6 +474,27 @@ int TechnoExt::ExtData::GetAttachedEffectCumulativeCount(AttachEffectTypeClass* 
 	return foundCount;
 }
 
+bool TechnoExt::IsValidTechno(AbstractClass* pObject)
+{
+	return IsValidTechno(abstract_cast<TechnoClass*>(pObject));
+}
+
+bool TechnoExt::IsValidTechno(TechnoClass* pTechno)
+{
+	if (!pTechno)
+		return false;
+
+	bool isValid = !pTechno->Dirty
+		&& ScriptExt::IsUnitAvailable(pTechno, true)
+		&& pTechno->Owner
+		&& (pTechno->WhatAmI() == AbstractType::Infantry
+			|| pTechno->WhatAmI() == AbstractType::Unit
+			|| pTechno->WhatAmI() == AbstractType::Building
+			|| pTechno->WhatAmI() == AbstractType::Aircraft);
+
+	return isValid;
+}
+
 // =============================
 // load / save
 
@@ -510,6 +532,10 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->LastWarpInDelay)
 		.Process(this->IsBeingChronoSphered)
 		.Process(this->KeepTargetOnMove)
+		.Process(this->OriginalTargetWeaponIndex)
+		.Process(this->OriginalTarget)
+		.Process(this->ResetRandomTarget)
+		.Process(this->CurrentRandomTarget)
 		;
 }
 
