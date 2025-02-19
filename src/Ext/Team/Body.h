@@ -41,6 +41,8 @@ public:
 		int AngerNodeModifier;
 		bool OnlyTargetHouseEnemy;
 		int OnlyTargetHouseEnemyMode;
+		int TriggersSideIdx;
+		int TriggersHouseIdx;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -60,6 +62,8 @@ public:
 			, AngerNodeModifier { 5000 }
 			, OnlyTargetHouseEnemy { false }
 			, OnlyTargetHouseEnemyMode { -1 }
+			, TriggersSideIdx { -1 }
+			, TriggersHouseIdx { -1 }
 		{ }
 
 		virtual ~ExtData() = default;
