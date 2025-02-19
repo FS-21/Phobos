@@ -154,6 +154,7 @@ This page lists all the individual contributions to the project by their author.
   - Map event `There are no technos of the specified houses list`
   - Script action for repairing destroyed bridges
   - Web logic against infantry
+  - Customizable disguised target evaluation behaviour in new ScriptType attack actions
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

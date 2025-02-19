@@ -482,6 +482,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->Power.Read(exINI, pSection, "Power");
 
+	this->DetectDisguise_Percent.Read(exINI, pSection, "DetectDisguise.Percent");
+
 	// Ares 0.2
 	this->RadarJamRadius.Read(exINI, pSection, "RadarJamRadius");
 
@@ -1012,6 +1014,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->ImmuneToWeb)
 		.Process(this->Webby_Duration)
 		.Process(this->Webby_DurationVariation)
+
+		.Process(this->DetectDisguise_Percent)
 		.Process(this->LandingDir)
 		.Process(this->DroppodType)
 
