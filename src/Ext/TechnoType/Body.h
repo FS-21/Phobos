@@ -135,6 +135,7 @@ public:
 		Valueable<bool> OpenTopped_ShareTransportTarget;
 		Valueable<bool> OpenTopped_UseTransportRangeModifiers;
 		Valueable<bool> OpenTopped_CheckTransportDisableWeapons;
+		Valueable<bool> OpenTopped_TransferPassengerStopCommand;
 
 		Valueable<bool> AutoFire;
 		Valueable<bool> AutoFire_TargetSelf;
@@ -346,6 +347,7 @@ public:
 			, OpenTopped_ShareTransportTarget { true }
 			, OpenTopped_UseTransportRangeModifiers { false }
 			, OpenTopped_CheckTransportDisableWeapons { false }
+			, OpenTopped_TransferPassengerStopCommand { false }
 
 			, AutoFire { false }
 			, AutoFire_TargetSelf { false }

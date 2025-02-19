@@ -229,6 +229,9 @@ public:
 	static WeaponTypeClass* GetCurrentWeapon(TechnoClass* pThis, bool getSecondary = false);
 	static int GetWeaponIndexAgainstWall(TechnoClass* pThis, OverlayTypeClass* pWallOverlayType);
 
+	static void SendStopPassengersTar(TechnoClass* pThis);
+	static void HandleStopPassengersTar(EventExt* event);
+
 	static void SendStopRandomTargetTarNav(TechnoClass* pThis);
 	static void HandleStopRandomTargetTarNav(EventExt* event);
 	static void PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo = nullptr, bool forceFullTransfer = true, bool dontCheckInvalidOccupiers = true);
