@@ -213,7 +213,7 @@ HideLightFlashEffects=false      ; boolean
 
   [ScriptExtType_GlobalVariables]
   BuiltInType=5
-
+  
   [ScriptsRA2]
   10018=Attack waypoint,2,0,1,Designed for aircrafts, when remaining ammo reaches a specified ammount this action ends. This threshold can be set with script action 12003.
   10100=Timed Area Guard,20,0,1,[LONG DESC]
@@ -222,6 +222,7 @@ HideLightFlashEffects=false      ; boolean
   10103=Load Onto Transports,0,0,1,[LONG DESC]
   10104=Chronoshift to Enemy Base,20,0,1,[LONG DESC]
   12003=Set Minimum Ammo Threshold,20,0,1,Sets the ammo threshold for script action 10018.
+  14004=Force Global OnlyTargetHouseEnemy value in Teams,20,0,1,[LONG DESC]
   18000=Local variable set,22,0,1,[LONG DESC]
   18001=Local variable add,22,0,1,[LONG DESC]
   18002=Local variable minus,22,0,1,[LONG DESC]
@@ -355,6 +356,7 @@ New:
 - Building airstrike target eligibility customization (by Starkku)
 - IvanBomb detonation & image display centered on buildings (by Starkku)
 - Forcing specific weapon against cloaked or disguised targets (by Starkku)
+- Script Action 14004 for forcing all new actions to target only the main owner's enemy (by FS-21)
 - Customizable ROF random delay (by Starkku)
 - Animation with `Tiled=yes` now supports `CustomPalette` (by ststl)
 - New AI teams selector (by FS-21)

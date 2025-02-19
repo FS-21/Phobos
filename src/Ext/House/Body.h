@@ -23,6 +23,8 @@ public:
 	public:
 		std::map<int, int> PowerPlantEnhancers;
 		std::vector<BuildingClass*> OwnedLimboDeliveredBuildings;
+		bool ForceOnlyTargetHouseEnemy;
+		int ForceOnlyTargetHouseEnemyMode;
 
 		CounterClass LimboAircraft;  // Currently owned aircraft in limbo
 		CounterClass LimboBuildings; // Currently owned buildings in limbo
@@ -91,6 +93,8 @@ public:
 			, AIFireSaleDelayTimer {}
 			, SuspendedEMPulseSWs {}
 			, SuperExts(SuperWeaponTypeClass::Array->Count)
+			, ForceOnlyTargetHouseEnemy { false }
+			, ForceOnlyTargetHouseEnemyMode { -1 }
 		{ }
 
 		bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding);
@@ -151,6 +155,9 @@ public:
 	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, const std::map<BuildingTypeClass*, int> ownedBuildings, bool skipSecretLabChecks);
 	static bool HasGenericPrerequisite(int idx, std::map<BuildingTypeClass*, int> ownedBuildings);
 	static int FindGenericPrerequisite(const char* id);
+
+	static void ForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode = -1);
+	static void SetSkirmishHouseName(HouseClass* pHouse);
 
 	static bool IsDisabledFromShell(
 	HouseClass const* pHouse, BuildingTypeClass const* pItem);
