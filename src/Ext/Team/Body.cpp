@@ -23,6 +23,9 @@ void TeamExt::ExtData::Serialize(T& Stm)
 		.Process(this->TeamLeader)
 		.Process(this->PreviousScriptList)
 		.Process(this->MinAmmoThreshold)
+		.Process(this->AngerNodeModifier)
+		.Process(this->OnlyTargetHouseEnemy)
+		.Process(this->OnlyTargetHouseEnemyMode)
 		;
 }
 

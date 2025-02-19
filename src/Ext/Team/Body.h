@@ -38,6 +38,9 @@ public:
 		FootClass* TeamLeader;
 		std::vector<ScriptClass*> PreviousScriptList;
 		int MinAmmoThreshold;
+		int AngerNodeModifier;
+		bool OnlyTargetHouseEnemy;
+		int OnlyTargetHouseEnemyMode;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -54,6 +57,9 @@ public:
 			, TeamLeader { nullptr }
 			, PreviousScriptList { }
 			, MinAmmoThreshold { 0 }
+			, AngerNodeModifier { 5000 }
+			, OnlyTargetHouseEnemy { false }
+			, OnlyTargetHouseEnemyMode { -1 }
 		{ }
 
 		virtual ~ExtData() = default;
