@@ -10,10 +10,13 @@ enum class EventTypeExt : uint8_t
 	// CnCNet reserved Events from 0x30 to 0x3F
 	// Ares used Events 0x60 and 0x61
 
-	SyncPassengersTar = 0x4B,
+	SyncEngineerGuardDestination = 0x45,
+	SyncWeaponizedEngineerGuard = 0x48,
 	SyncStopRandomTargetTarNav = 0x49,
+	SyncEngineerGuardStopTarNav = 0x4A,
+	SyncPassengersTar = 0x4B,
 
-	FIRST = SyncPassengersTar,
+	FIRST = SyncEngineerGuardDestination,
 	LAST = SyncStopRandomTargetTarNav
 };
 
@@ -30,6 +33,7 @@ public:
 		char DataBuffer[104];
 
 		struct SyncStopRandomTargetTarNav
+		struct SyncEngineerGuardStopTarNav
 		{
 			int TechnoUniqueID;
 		} SyncStopRandomTargetTarNav;
@@ -38,6 +42,19 @@ public:
 		{
 			int TechnoUniqueID;
 		} SyncPassengersTar;
+			int TechnoUniqueID;
+		} SyncEngineerGuardStopTarNav;
+
+		struct SyncWeaponizedEngineerGuard
+		{
+			int TechnoUniqueID;
+		} SyncWeaponizedEngineerGuard;
+
+		struct SyncEngineerGuardDestination
+		{
+			int TechnoUniqueID;
+			int GuardDestinationID;
+		} SyncEngineerGuardDestination;
 	};
 
 	bool AddEvent();

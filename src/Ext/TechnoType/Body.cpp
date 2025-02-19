@@ -793,6 +793,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		Debug::Log("[Developer warning] [%s] has Palette=%s set but no palette file was loaded (missing file or wrong filename). Missing palettes cause issues with lighting recalculations.\n", pArtSection, pThis->PaletteFile);
 
 	this->NoManualUnload.Read(exINI, pSection, "NoManualUnload");
+
+	this->Engineer_CheckFriendlyWeapons.Read(exINI, pSection, "Engineer.CheckFriendlyWeapons");
 }
 
 template <typename T>
@@ -1044,6 +1046,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_TransferPassengers)
 		.Process(this->Convert_TransferPassengers_IgnoreInvalidOccupiers)
 		.Process(this->Convert_ForceVeterancyTransfer)
+
+		.Process(this->Engineer_CheckFriendlyWeapons)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

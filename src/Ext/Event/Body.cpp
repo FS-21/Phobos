@@ -18,6 +18,14 @@ void EventExt::RespondEvent()
 		TechnoExt::HandleStopRandomTargetTarNav(this);
 	case EventTypeExt::SyncPassengersTar:
 		TechnoExt::HandleStopPassengersTar(this);
+	case EventTypeExt::SyncEngineerGuardStopTarNav:
+		TechnoExt::HandleEngineerGuardStopTarNav(this);
+		break;
+	case EventTypeExt::SyncEngineerGuardDestination:
+		TechnoExt::HandleEngineerGuardDestination(this);
+		break;
+	case EventTypeExt::SyncWeaponizedEngineerGuard:
+		TechnoExt::HandleWeaponizedEngineerGuard(this);
 		break;
 	}
 }
@@ -30,6 +38,12 @@ size_t EventExt::GetDataSize(EventTypeExt type)
 		return sizeof(EventExt::SyncStopRandomTargetTarNav);
 	case EventTypeExt::SyncPassengersTar:
 		return sizeof(EventExt::SyncPassengersTar);
+	case EventTypeExt::SyncEngineerGuardStopTarNav:
+		return sizeof(EventExt::SyncEngineerGuardStopTarNav);
+	case EventTypeExt::SyncEngineerGuardDestination:
+		return sizeof(EventExt::SyncEngineerGuardDestination);
+	case EventTypeExt::SyncWeaponizedEngineerGuard:
+			return sizeof(EventExt::SyncWeaponizedEngineerGuard);
 	}
 
 	return 0;

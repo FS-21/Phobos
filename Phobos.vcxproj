@@ -24,6 +24,7 @@
     <ClCompile Include="src\Ext\TechnoType\Hooks.MatrixOp.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.SkipMapSelect.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.StopEvent.cpp" />
+    <ClCompile Include="src\Ext\Techno\Body.AdvancedGuard.cpp" />
     <ClCompile Include="src\New\Entity\AttachEffectClass.cpp" />
     <ClCompile Include="src\New\Type\AttachEffectTypeClass.cpp" />
     <ClCompile Include="src\Commands\Commands.cpp" />

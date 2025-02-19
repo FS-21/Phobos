@@ -8,6 +8,7 @@
 #include <Ext/Scenario/Body.h>
 #include <Ext/WeaponType/Body.h>
 #include <Ext/House/Body.h>
+#include <Ext/WarheadType/Body.h>
 #include <Ext/Script/Body.h>
 
 #include <Utilities/AresFunctions.h>
@@ -740,6 +741,19 @@ bool TechnoExt::IsValidTechno(TechnoClass* pTechno, bool checkIfInTransportOrAbs
 			|| pTechno->WhatAmI() == AbstractType::Aircraft);
 
 	return isValid;
+}
+
+bool TechnoExt::IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed)
+{
+	if (!pTechno)
+		return false;
+
+	bool isAvailable = pTechno->IsAlive && pTechno->Health > 0 && !pTechno->InLimbo && pTechno->IsOnMap;
+
+	if (checkIfInTransportOrAbsorbed)
+		isAvailable &= !pTechno->Absorbed && !pTechno->Transporter;
+
+	return isAvailable;
 }
 
 // =============================

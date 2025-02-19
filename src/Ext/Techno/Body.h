@@ -73,6 +73,8 @@ public:
 		bool Convert_UniversalDeploy_IsOriginalDeployer;
 		AbstractClass* Convert_UniversalDeploy_RememberTarget;
 
+		AbstractClass* WeaponizedEngineer_GuardDestination;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -117,6 +119,7 @@ public:
 			, Convert_UniversalDeploy_TemporalTechno { nullptr }
 			, Convert_UniversalDeploy_IsOriginalDeployer { true }
 			, Convert_UniversalDeploy_RememberTarget { nullptr }
+			, WeaponizedEngineer_GuardDestination { nullptr }
 		{ }
 
 		void OnEarlyUpdate();
@@ -141,6 +144,7 @@ public:
 		bool HasAttachedEffects(std::vector<AttachEffectTypeClass*> attachEffectTypes, bool requireAll, bool ignoreSameSource, TechnoClass* pInvoker, AbstractClass* pSource, std::vector<int> const* minCounts, std::vector<int> const* maxCounts) const;
 		int GetAttachedEffectCumulativeCount(AttachEffectTypeClass* pAttachEffectType, bool ignoreSameSource = false, TechnoClass* pInvoker = nullptr, AbstractClass* pSource = nullptr) const;
 		void UpdateRandomTargets();
+		void UpdateWeaponizedEngineerGuard();
 
 		virtual ~ExtData() override;
 
@@ -217,6 +221,8 @@ public:
 	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
 	static bool IsValidTechno(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed = true);
 	static bool IsValidTechno(AbstractClass* pObject, bool checkIfInTransportOrAbsorbed = true);
+	static bool IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed);
+	static void ProcessWeaponizedEngineerGuard(TechnoClass* pThis);
 
 
 	// WeaponHelpers.cpp
@@ -242,4 +248,11 @@ public:
 	//static void CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType = nullptr);
 	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
 	//static void UpdateUniversalDeploy(TechnoClass* pThis);
+
+	static void SendEngineerGuardStopTarNav(TechnoClass* pThis);
+	static void HandleEngineerGuardStopTarNav(EventExt* event);
+	static void SendEngineerGuardDestination(TechnoClass* pThis, AbstractClass* pDestination);
+	static void HandleEngineerGuardDestination(EventExt* event);
+	static void SendWeaponizedEngineerGuard(TechnoClass* pThis);
+	static void HandleWeaponizedEngineerGuard(EventExt* event);
 };

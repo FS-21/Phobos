@@ -291,6 +291,8 @@ public:
 		Valueable<int> Prerequisite_Lists;
 		std::vector<DynamicVectorClass<int>> Prerequisite_ListVector;
 
+		Valueable<bool> Engineer_CheckFriendlyWeapons;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, UIDescription {}
@@ -532,6 +534,8 @@ public:
 			, Convert_TransferPassengers_IgnoreInvalidOccupiers { false }
 			, Convert_ForceVeterancyTransfer { false }
 			, Convert_RefillWithPassengers {}
+
+			, Engineer_CheckFriendlyWeapons { false }
 		{ }
 
 		virtual ~ExtData() = default;
