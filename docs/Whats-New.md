@@ -513,6 +513,7 @@ New:
 - Unit `Speed` setting now accepts floating point values (by Starkku)
 - Extending `Power` to all TechnoTypes (by Morton)
 - Warhead activation target health thresholds (by FS-21, Kerbiter)
+- Modify Ammo on impact (by FS-21)
 
 Vanilla fixes:
 - Allow AI to repair structures built from base nodes/trigger action 125/SW delivery in single player missions (by Trsdy)

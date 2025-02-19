@@ -182,6 +182,8 @@ public:
 
 		Valueable<bool> CanDisarmBombs;
 
+		Valueable<int> AmmoModifier;
+
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
 		Valueable<double> Shield_SelfHealing_Rate_InMinutes;
@@ -346,6 +348,8 @@ public:
 			, Convert_UseUniversalDeploy { false }
 
 			, CanDisarmBombs { false }
+
+			, AmmoModifier { 0 }
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);
@@ -374,13 +378,14 @@ public:
 		void InterceptBullets(TechnoClass* pOwner, WeaponTypeClass* pWeapon, CoordStruct coords);
 		DamageAreaResult DamageAreaWithTarget(const CoordStruct& coords, int damage, TechnoClass* pSource, WarheadTypeClass* pWH, bool affectsTiberium, HouseClass* pSourceHouse, TechnoClass* pTarget);
 	private:
-		void DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* pOwner = nullptr, bool bulletWasIntercepted = false);
+		void DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* pOwner = nullptr, bool bulletWasIntercepted = false, BulletExt::ExtData* pBulletExt = nullptr);
 		void ApplyRemoveDisguise(HouseClass* pHouse, TechnoClass* pTarget);
 		void ApplyRemoveMindControl(TechnoClass* pTarget);
 		void ApplyCrit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* Owner, TechnoExt::ExtData* pTargetExt);
 		void ApplyShieldModifiers(TechnoClass* pTarget, TechnoExt::ExtData* pTargetExt);
 		void ApplyAttachEffects(TechnoClass* pTarget, HouseClass* pInvokerHouse, TechnoClass* pInvoker);
 		double GetCritChance(TechnoClass* pFirer) const;
+		void ApplyAmmoModifier(TechnoClass* pTarget, HouseClass* pInvokerHouse, BulletExt::ExtData* pBulletExt = nullptr);
 	};
 
 	class ExtContainer final : public Container<WarheadTypeExt>

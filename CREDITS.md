@@ -142,6 +142,7 @@ This page lists all the individual contributions to the project by their author.
   - Reveal area on impact
   - New AI teams selector
   - Kick out ejectable passengers in warheads
+  - Modify Ammo on impact
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

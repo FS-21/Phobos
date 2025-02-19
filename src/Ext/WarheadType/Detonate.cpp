@@ -12,6 +12,7 @@
 #include <Ext/Anim/Body.h>
 #include <Ext/Bullet/Body.h>
 #include <Ext/BulletType/Body.h>
+#include <Ext/WeaponType/Body.h>
 #include <Ext/SWType/Body.h>
 #include <Misc/FlyingStrings.h>
 #include <Utilities/Helpers.Alex.h>
@@ -144,7 +145,7 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 		if (cellSpread)
 		{
 			for (auto pTarget : Helpers::Alex::getCellSpreadItems(coords, cellSpread, true))
-				this->DetonateOnOneUnit(pHouse, pTarget, pOwner, bulletWasIntercepted);
+				this->DetonateOnOneUnit(pHouse, pTarget, pOwner, bulletWasIntercepted, pBulletExt);
 		}
 		else if (pBullet)
 		{
@@ -153,7 +154,7 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 				// Starkku: We should only detonate on the target if the bullet, at the moment of detonation is within acceptable distance of the target.
 				// Ares uses 64 leptons / quarter of a cell as a tolerance, so for sake of consistency we're gonna do the same here.
 				if (pBullet->DistanceFrom(pTarget) < Unsorted::LeptonsPerCell / 4)
-					this->DetonateOnOneUnit(pHouse, pTarget, pOwner, bulletWasIntercepted);
+					this->DetonateOnOneUnit(pHouse, pTarget, pOwner, bulletWasIntercepted, pBulletExt);
 			}
 		}
 		else if (this->DamageAreaTarget)
@@ -164,7 +165,7 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 	}
 }
 
-void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* pOwner, bool bulletWasIntercepted)
+void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* pOwner, bool bulletWasIntercepted, BulletExt::ExtData* pBulletExt)
 {
 	if (!pTarget || pTarget->InLimbo || !pTarget->IsAlive || !pTarget->Health || pTarget->IsSinking || pTarget->BeingWarpedOut)
 		return;
@@ -184,6 +185,9 @@ void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass*
 
 	if (this->Crit_CurrentChance > 0.0 && (!this->Crit_SuppressWhenIntercepted || !bulletWasIntercepted))
 		this->ApplyCrit(pHouse, pTarget, pOwner, pTargetExt);
+
+	if (this->AmmoModifier != 0)
+		ApplyAmmoModifier(pTarget, pHouse, pBulletExt);
 
 	if (this->Convert_Pairs.size() > 0)
 		this->ApplyConvert(pHouse, pTarget);
@@ -539,4 +543,29 @@ double WarheadTypeExt::ExtData::GetCritChance(TechnoClass* pFirer) const
 	}
 
 	return critChance + extraChance;
+}
+
+void WarheadTypeExt::ExtData::ApplyAmmoModifier(TechnoClass* pTarget, HouseClass* pInvokerHouse, BulletExt::ExtData* pBulletExt)
+{
+	if (!pTarget)
+		return;
+
+	auto const pWeapon = pBulletExt ? pBulletExt->OwnerObject()->WeaponType : nullptr;
+
+	if (pWeapon)
+	{
+		auto const pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
+
+		if (!EnumFunctions::IsTechnoEligible(pTarget, pWeaponExt->CanTarget)
+			|| (pInvokerHouse && !EnumFunctions::CanTargetHouse(pWeaponExt->CanTargetHouses, pInvokerHouse, pTarget->Owner)))
+		{
+			return;
+		}
+	}
+
+	int maxAmmo = pTarget->GetTechnoType()->Ammo;
+	int newCurrentAmmo = this->AmmoModifier + pTarget->Ammo;
+
+	newCurrentAmmo = newCurrentAmmo < 0 ? 0 : newCurrentAmmo;
+	pTarget->Ammo = newCurrentAmmo > maxAmmo ? maxAmmo : newCurrentAmmo;
 }
