@@ -70,7 +70,13 @@ void TypeConvertGroup::Convert(FootClass* pTargetFoot, const std::vector<TypeCon
 		}
 		else
 		{
-			TechnoExt::ConvertToType(pTargetFoot, toType);
+			bool converted = TechnoExt::ConvertToType(pTargetFoot, toType);
+
+			if (converted && pAnimType)
+			{
+				if (auto pAnim = GameCreate<AnimClass>(pAnimType, pTargetFoot->Location))
+					pAnim->SetOwnerObject(pTargetFoot);
+			}
 			break;
 		}
 	}
