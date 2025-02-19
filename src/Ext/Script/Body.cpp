@@ -352,8 +352,8 @@ void ScriptExt::WaitUntilFullAmmoAction(TeamClass* pTeam)
 							pAircraft->IsLocked = false;
 							pAircraft->MissionStatus = (int)AirAttackStatus::ReturnToBase;
 
-							if (pAircraft->vt_entry_4C4())
-								pAircraft->vt_entry_4A8();
+							if (pAircraft->MegaMissionIsAttackMove())
+								pAircraft->ClearMegaMissionData();
 
 							pAircraft->EnterIdleMode(false, true);
 						}
