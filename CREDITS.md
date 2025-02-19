@@ -153,6 +153,7 @@ This page lists all the individual contributions to the project by their author.
   - Script actions for modifying AI anger against other houses
   - Map event `There are no technos of the specified houses list`
   - Script action for repairing destroyed bridges
+  - Web logic against infantry
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

@@ -395,6 +395,7 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->ForceWeapon_Cloaked.Read(exINI, pSection, "ForceWeapon.Cloaked");
 	this->ForceWeapon_Disguised.Read(exINI, pSection, "ForceWeapon.Disguised");
 	this->ForceWeapon_UnderEMP.Read(exINI, pSection, "ForceWeapon.UnderEMP");
+	this->ForceWeapon_Webby.Read(exINI, pSection, "ForceWeapon.Webby");
 	this->Ammo_Shared.Read(exINI, pSection, "Ammo.Shared");
 	this->Ammo_Shared_Group.Read(exINI, pSection, "Ammo.Shared.Group");
 	this->SelfHealGainType.Read(exINI, pSection, "SelfHealGainType");
@@ -444,6 +445,11 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->SpawnDistanceFromTarget.Read(exINI, pSection, "SpawnDistanceFromTarget");
 	this->SpawnHeight.Read(exINI, pSection, "SpawnHeight");
 	this->LandingDir.Read(exINI, pSection, "LandingDir");
+
+	this->Webby_Anims.Read(exINI, pSection, "Webby.Anims");
+	this->ImmuneToWeb.Read(exINI, pSection, "ImmuneToWeb");
+	this->Webby_Duration.Read(exINI, pSection, "Webby.Duration");
+	this->Webby_DurationVariation.Read(exINI, pSection, "Webby.DurationVariation");
 
 	this->Convert_HumanToComputer.Read(exINI, pSection, "Convert.HumanToComputer");
 	this->Convert_ComputerToHuman.Read(exINI, pSection, "Convert.ComputerToHuman");
@@ -930,6 +936,7 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->ForceWeapon_Cloaked)
 		.Process(this->ForceWeapon_Disguised)
 		.Process(this->ForceWeapon_UnderEMP)
+		.Process(this->ForceWeapon_Webby)
 		.Process(this->Ammo_Shared)
 		.Process(this->Ammo_Shared_Group)
 		.Process(this->SelfHealGainType)
@@ -1001,6 +1008,10 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 
 		.Process(this->SpawnDistanceFromTarget)
 		.Process(this->SpawnHeight)
+		.Process(this->Webby_Anims)
+		.Process(this->ImmuneToWeb)
+		.Process(this->Webby_Duration)
+		.Process(this->Webby_DurationVariation)
 		.Process(this->LandingDir)
 		.Process(this->DroppodType)
 

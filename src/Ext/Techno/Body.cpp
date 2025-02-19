@@ -883,6 +883,11 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_UniversalDeploy_RememberTarget)
 		.Process(this->DropCrate)
 		.Process(this->DropCrateType)
+		.Process(this->WebbyDurationCountDown)
+		.Process(this->WebbyDurationTimer)
+		.Process(this->WebbyAnim)
+		.Process(this->WebbyLastTarget)
+		.Process(this->WebbyLastMission)
 		;
 }
 

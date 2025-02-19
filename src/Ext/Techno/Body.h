@@ -77,6 +77,12 @@ public:
 
 		AbstractClass* WeaponizedEngineer_GuardDestination;
 
+		int	WebbyDurationCountDown;
+		CDTimerClass WebbyDurationTimer;
+		AnimClass* WebbyAnim;
+		AbstractClass* WebbyLastTarget;
+		Mission WebbyLastMission;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -124,6 +130,11 @@ public:
 			, WeaponizedEngineer_GuardDestination { nullptr }
 			, DropCrate { -1 }
 			, DropCrateType { Powerup::Money }
+			, WebbyDurationCountDown { -1 }
+			, WebbyDurationTimer {}
+			, WebbyAnim { nullptr }
+			, WebbyLastTarget { nullptr }
+			, WebbyLastMission { Mission::Sleep }
 		{ }
 
 		void OnEarlyUpdate();
@@ -149,6 +160,7 @@ public:
 		int GetAttachedEffectCumulativeCount(AttachEffectTypeClass* pAttachEffectType, bool ignoreSameSource = false, TechnoClass* pInvoker = nullptr, AbstractClass* pSource = nullptr) const;
 		void UpdateRandomTargets();
 		void UpdateWeaponizedEngineerGuard();
+		void WebbyUpdate();
 
 		virtual ~ExtData() override;
 
@@ -160,6 +172,7 @@ public:
 			AnnounceInvalidPointer(Convert_UniversalDeploy_TemporalTechno, ptr);
 			AnnounceInvalidPointer(Convert_UniversalDeploy_DeployAnim, ptr);
 			AnnounceInvalidPointer(Convert_UniversalDeploy_RememberTarget, ptr);
+			AnnounceInvalidPointer(WebbyLastTarget, ptr);
 		}
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
