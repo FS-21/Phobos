@@ -146,6 +146,8 @@ This page lists all the individual contributions to the project by their author.
   - Modify Ammo on impact
   - ScriptType actions `10018` & `12003` for aircrafts attacks
   - Allow cyborg legs to be repaired when they enter into transports or structures
+  - Map Action 600 for overwriting DropCrate behaviour in attached Technos
+  - `DropCrate` for setting what crate drop when Techno is destroyed
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

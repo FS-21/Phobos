@@ -295,6 +295,8 @@ public:
 
 		Valueable<bool> FixEnteringCyborgLegs;
 
+		Nullable<Powerup> DropCrate;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, UIDescription {}
@@ -539,6 +541,8 @@ public:
 
 			, Engineer_CheckFriendlyWeapons { false }
 			, FixEnteringCyborgLegs { false }
+
+			, DropCrate { }
 		{ }
 
 		virtual ~ExtData() = default;

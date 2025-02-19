@@ -65,6 +65,8 @@ public:
 		int LastWarpInDelay;                   // Last-warp in delay for this unit, used by HasCarryoverWarpInDelay.
 		bool IsBeingChronoSphered;             // Set to true on units currently being ChronoSphered, does not apply to Ares-ChronoSphere'd buildings or Chrono reinforcements.
 		bool KeepTargetOnMove;
+		int DropCrate; // Drop crate on death, modified by map action
+		Powerup DropCrateType;
 
 		AnimClass* Convert_UniversalDeploy_DeployAnim;
 		bool Convert_UniversalDeploy_InProgress;
@@ -120,6 +122,8 @@ public:
 			, Convert_UniversalDeploy_IsOriginalDeployer { true }
 			, Convert_UniversalDeploy_RememberTarget { nullptr }
 			, WeaponizedEngineer_GuardDestination { nullptr }
+			, DropCrate { -1 }
+			, DropCrateType { Powerup::Money }
 		{ }
 
 		void OnEarlyUpdate();
@@ -255,4 +259,6 @@ public:
 	static void HandleEngineerGuardDestination(EventExt* event);
 	static void SendWeaponizedEngineerGuard(TechnoClass* pThis);
 	static void HandleWeaponizedEngineerGuard(EventExt* event);
+
+	static bool TryToCreateCrate(CoordStruct location, Powerup selectedPowerup = Powerup::Money, int maxCellRange = 10);
 };
