@@ -275,6 +275,17 @@ In `rulesmd.ini`:
 ; ...
 ```
 
+##### `10018` Attack at specified Waypoint
+
+- Designed for aircrafts in mind this script action is more stable than the original script action `1` and won't crash the aircrafts.
+- Aircrafts team will attack until a member's ammo decreases under a specific threshold. By default the available ammo threshold value is 0 (use all the weapon until is empty). This threshold can be changed with the script action `12003` and each time this script action ends this ammo threshold is set to 0.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=10018,n            ; integer, waypoint index
+```
+
 #### `10050-10099` Move Team to Techno Location actions
 
 - These actions instructs the TeamType to use the TaskForce to approach the target specified by the second parameter. Look at the tables below for the possible actions (first parameter value).
@@ -391,6 +402,17 @@ x=12002,n
 | 0          | Team Leader reaches the minimum distance      |
 | 1          | One unit reaches the minimum distance         |
 | 2          | All team members reached the minimum distance |
+
+##### `12003` Set Minimum Ammo Threshold
+
+- When executed before the script action `10018` a minimum available ammo value is set as a threshold.
+- Once any team member reaches this value the script action `10018` ends and this value is set again with value 0.
+
+In `aimd.ini`:
+```ini
+[SOMESCRIPTTYPE]  ; ScriptType
+x=12003,n         ; integer
+```
 
 ### `14000-14999` Utility Actions
 

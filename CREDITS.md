@@ -143,6 +143,7 @@ This page lists all the individual contributions to the project by their author.
   - New AI teams selector
   - Kick out ejectable passengers in warheads
   - Modify Ammo on impact
+  - ScriptType actions `10018` & `12003` for aircrafts attacks
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
