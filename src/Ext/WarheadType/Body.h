@@ -171,6 +171,7 @@ public:
 		TechnoClass* DamageAreaTarget;
 
 		Valueable<bool> KickOutKickablePassengers;
+		Valueable<bool> CanKill;
 
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
@@ -326,6 +327,7 @@ public:
 			, DamageAreaTarget {}
 
 			, KickOutKickablePassengers { false }
+			, CanKill { true }
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);

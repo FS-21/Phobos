@@ -268,6 +268,8 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->CombatAlert_Suppress.Read(exINI, pSection, "CombatAlert.Suppress");
 
+	this->CanKill.Read(exINI, pSection, "CanKill");
+
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
 
@@ -510,6 +512,8 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DamageAreaTarget)
 
 		.Process(this->KickOutKickablePassengers)
+
+		.Process(this->CanKill)
 		;
 }
 

@@ -16,12 +16,16 @@ namespace ReceiveDamageTemp
 // #issue 88 : shield logic
 DEFINE_HOOK(0x701900, TechnoClass_ReceiveDamage_Shield, 0x6)
 {
+	enum { SkipGameCode = 0x701A38 };
+
 	GET(TechnoClass*, pThis, ECX);
 	LEA_STACK(args_ReceiveDamage*, args, 0x4);
 
 	const auto pRules = RulesExt::Global();
 	const auto pExt = TechnoExt::ExtMap.Find(pThis);
 	int nDamageLeft = *args->Damage;
+	int nDamageTotal = MapClass::GetTotalDamage(nDamageLeft, args->WH, pThis->GetTechnoType()->Armor, 0);
+	auto const pWHExt = WarheadTypeExt::ExtMap.Find(args->WH);
 
 	// Raise Combat Alert
 	if (pRules->CombatAlert && nDamageLeft > 1)
@@ -91,7 +95,18 @@ DEFINE_HOOK(0x701900, TechnoClass_ReceiveDamage_Shield, 0x6)
 		if (const auto pShieldData = pExt->Shield.get())
 		{
 			if (!pShieldData->IsActive())
+			{
+				// Check if the warhead can not kill targets
+				if (pThis->Health > 0 && !pWHExt->CanKill && nDamageTotal >= pThis->Health)
+				{
+					*args->Damage = 0;
+					pThis->Health = 1;
+					pThis->EstimatedHealth = 1;
+					ReceiveDamageTemp::SkipLowDamageCheck = true;
+				}
+
 				return 0;
+			}
 
 			nDamageLeft = pShieldData->ReceiveDamage(args);
 
@@ -106,6 +121,17 @@ DEFINE_HOOK(0x701900, TechnoClass_ReceiveDamage_Shield, 0x6)
 			if (nDamageLeft == 0)
 				ReceiveDamageTemp::SkipLowDamageCheck = true;
 		}
+	}
+
+	// Update remaining damage and check if the target will die and should be avoided
+	nDamageTotal = MapClass::GetTotalDamage(nDamageLeft, args->WH, pThis->GetTechnoType()->Armor, 0);
+
+	if (pThis->Health > 0 && !pWHExt->CanKill && nDamageTotal >= pThis->Health)
+	{
+		*args->Damage = 0;
+		pThis->Health = 1;
+		pThis->EstimatedHealth = 1;
+		ReceiveDamageTemp::SkipLowDamageCheck = true;
 	}
 
 	return 0;
