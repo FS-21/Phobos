@@ -289,8 +289,12 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	if (this->AffectsAbovePercent > this->AffectsBelowPercent)
 		Debug::Log("[Developer warning][%s] AffectsAbovePercent is bigger than AffectsBelowPercent, the warhead will never activate!\n", pSection);
 
+
+	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
+
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
+	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
 
 	// AttachEffect
 	this->AttachEffects.LoadFromINI(pINI, pSection);
@@ -499,6 +503,7 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DetonateOnAllMapObjects_IgnoreTypes)
 
 		.Process(this->Convert_Pairs)
+		.Process(this->Convert_Anim)
 		.Process(this->AttachEffects)
 
 		.Process(this->SuppressRevengeWeapons)
@@ -536,6 +541,8 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->KickOutKickablePassengers)
 
 		.Process(this->CanKill)
+
+		.Process(this->Convert_UseUniversalDeploy)
 		;
 }
 

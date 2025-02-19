@@ -133,6 +133,7 @@ public:
 		ValueableVector<TechnoTypeClass*> DetonateOnAllMapObjects_IgnoreTypes;
 
 		std::vector<TypeConvertGroup> Convert_Pairs;
+		Nullable<AnimTypeClass*> Convert_Anim;
 		AEAttachInfoTypeClass AttachEffects;
 
 		Valueable<bool> InflictLocomotor;
@@ -175,6 +176,8 @@ public:
 
 		Valueable<bool> KickOutKickablePassengers;
 		Valueable<bool> CanKill;
+
+		Valueable<bool> Convert_UseUniversalDeploy;
 
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
@@ -294,6 +297,7 @@ public:
 			, DetonateOnAllMapObjects_IgnoreTypes {}
 
 			, Convert_Pairs {}
+			, Convert_Anim {}
 			, AttachEffects {}
 
 			, InflictLocomotor { false }
@@ -334,6 +338,8 @@ public:
 
 			, KickOutKickablePassengers { false }
 			, CanKill { true }
+
+			, Convert_UseUniversalDeploy { false }
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);

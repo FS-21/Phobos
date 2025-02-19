@@ -138,6 +138,7 @@ This page lists all the individual contributions to the project by their author.
   - Warhead that can not kill
   - `RandomTarget` for random projectile retargeting
   - Warhead activation target health thresholds enhancements
+  - Universal deploy from any techno into any techno
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

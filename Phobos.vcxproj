@@ -18,6 +18,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Ext\Techno\Body.ConvertRefillPassengers.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.RandomTarget.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.RandomTarget.cpp" />
     <ClCompile Include="src\Ext\TechnoType\Hooks.MatrixOp.cpp" />
@@ -60,8 +61,10 @@
     <ClCompile Include="src\Ext\TAction\Hooks.cpp" />
     <ClCompile Include="src\Ext\Team\Body.cpp" />
     <ClCompile Include="src\Ext\Team\Hooks.cpp" />
+    <ClCompile Include="src\Ext\Techno\Body.UniversalDeploy.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.Pips.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.Visuals.cpp" />
+    <ClCompile Include="src\Ext\Techno\Hooks.UniversalDeploy.cpp" />
     <ClCompile Include="src\Ext\TEvent\Hooks.cpp" />
     <ClCompile Include="src\Ext\TEvent\Body.cpp" />
     <ClCompile Include="src\Ext\Trigger\Hooks.cpp" />
