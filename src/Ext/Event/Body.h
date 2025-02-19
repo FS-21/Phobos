@@ -17,7 +17,7 @@ enum class EventTypeExt : uint8_t
 	SyncPassengersTar = 0x4B,
 
 	FIRST = SyncEngineerGuardDestination,
-	LAST = SyncStopRandomTargetTarNav
+	LAST = SyncPassengersTar
 };
 
 #pragma pack(push, 1)
@@ -33,7 +33,6 @@ public:
 		char DataBuffer[104];
 
 		struct SyncStopRandomTargetTarNav
-		struct SyncEngineerGuardStopTarNav
 		{
 			int TechnoUniqueID;
 		} SyncStopRandomTargetTarNav;
@@ -42,6 +41,9 @@ public:
 		{
 			int TechnoUniqueID;
 		} SyncPassengersTar;
+
+		struct SyncEngineerGuardStopTarNav
+		{
 			int TechnoUniqueID;
 		} SyncEngineerGuardStopTarNav;
 
