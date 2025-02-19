@@ -5,6 +5,7 @@
 #include <TeamClass.h>
 #include <AITriggerTypeClass.h>
 
+#include <TechnoClass.h>
 #include <HouseClass.h>
 #include <AircraftClass.h>
 #include <MapClass.h>
@@ -14,8 +15,10 @@
 #include <SpawnManagerClass.h>
 
 #include <Ext/House/Body.h>
+#include <Ext/Rules/Body.h>
 #include <Ext/Team/Body.h>
 #include <Utilities/Container.h>
+
 #include <Phobos.h>
 
 enum class PhobosScripts : unsigned int
@@ -100,6 +103,21 @@ enum class PhobosScripts : unsigned int
 	DisableTriggersWithObjects = 16010,
 	EnableTriggersWithObjects = 16011,
 	SetSideIdxForManagingTriggers = 16012,
+	ConditionalJumpManageResetIfJump = 16013,
+	AbortActionAfterSuccessKill = 16014,
+	ConditionalJumpManageKillsCounter = 16015,
+	ConditionalJumpSetCounter = 16016,
+	ConditionalJumpSetComparatorMode = 16017,
+	ConditionalJumpSetComparatorValue = 16018,
+	ConditionalJumpSetIndex = 16019,
+	ConditionalJumpIfFalse = 16020,
+	ConditionalJumpIfTrue = 16021,
+	ConditionalJumpKillEvaluation = 16022,
+	ConditionalJumpCheckCount = 16023,
+	ConditionalJumpCheckAliveHumans = 16024,
+	ConditionalJumpCheckObjects = 16025,
+	ConditionalJumpCheckHumanIsMostHated = 16026,
+	ConditionalJumpResetVariables = 16027,
 
 	// Range 18000-18999 are variable actions
 	LocalVariableSet = 18000,
@@ -260,6 +278,24 @@ public:
 	static void Log(const char* pFormat, ...);
 	static void RepairDestroyedBridge(TeamClass* pTeam, int mode);
 
+
+	// ConditionalJump.cpp
+	static void ConditionalJumpIfTrue(TeamClass* pTeam, int newScriptLine);
+	static void ConditionalJumpIfFalse(TeamClass* pTeam, int newScriptLine);
+	static void ConditionalJump_KillEvaluation(TeamClass* pTeam);
+	static void ConditionalJump_ManageKillsCounter(TeamClass* pTeam, int enable);
+	static void ConditionalJump_SetIndex(TeamClass* pTeam, int index);
+	static void ConditionalJump_SetComparatorValue(TeamClass* pTeam, int value);
+	static void ConditionalJump_SetComparatorMode(TeamClass* pTeam, int value);
+	static void ConditionalJump_SetCounter(TeamClass* pTeam, int value);
+	static void SetAbortActionAfterSuccessKill(TeamClass* pTeam, int enable);
+	static void ConditionalJump_ResetVariables(TeamClass* pTeam);
+	static void ConditionalJump_CheckHumanIsMostHated(TeamClass* pTeam);
+	static void ConditionalJump_CheckAliveHumans(TeamClass* pTeam, int mode);
+	static void ConditionalJump_CheckObjects(TeamClass* pTeam);
+	static void ConditionalJump_CheckCount(TeamClass* pTeam, int modifier);
+	static void ConditionalJump_ManageResetIfJump(TeamClass* pTeam, int enable);
+
 	// Mission.Attack.cpp
 	static void Mission_Attack(TeamClass* pTeam, bool repeatAction, int calcThreatMode, int attackAITargetType, int IdxAITargetTypeItem);
 	static TechnoClass* GreatestThreat(TechnoClass* pTechno, int method, int calcThreatMode, HouseClass* onlyTargetThisHouseEnemy, int attackAITargetType, int idxAITargetTypeItem, bool agentMode, std::vector<double> disguiseDetection);
@@ -283,4 +319,5 @@ private:
 	static void ChronoshiftTeamToTarget(TeamClass* pTeam, TechnoClass* pTeamLeader, AbstractClass* pTarget);
 	static void SetMinimumAmmoThreshold(TeamClass* pTeam, int newValue);
 	static void UpdateEnemyHouseIndex(HouseClass* pHouse);
+	static bool ConditionalJump_MakeEvaluation(int comparatorMode, int studiedValue, int comparatorValue);
 };

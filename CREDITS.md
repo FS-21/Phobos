@@ -156,6 +156,7 @@ This page lists all the individual contributions to the project by their author.
   - Web logic against infantry
   - Customizable disguised target evaluation behaviour in new ScriptType attack actions
   - `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
+  - Script actions for manipulating script flows with conditional jumps
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
