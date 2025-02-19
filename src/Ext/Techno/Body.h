@@ -111,7 +111,6 @@ public:
 			, ResetRandomTarget { false }
 			, CurrentRandomTarget { nullptr }
 			, OriginalTargetWeaponIndex { -1 }
-			, KeepTargetOnMove { false }
 			, Convert_UniversalDeploy_DeployAnim { nullptr }
 			, Convert_UniversalDeploy_InProgress { false }
 			, Convert_UniversalDeploy_MakeInvisible { false }
