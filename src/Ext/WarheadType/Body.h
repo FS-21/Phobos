@@ -190,6 +190,11 @@ public:
 
 		Valueable<int> AmmoModifier;
 
+		Valueable<bool> GarrisonPenetration;
+		Valueable<bool> GarrisonPenetration_RandomTarget;
+		Valueable<PartialVector2D<double>> GarrisonPenetration_DamageMultiplier;
+		NullableIdx<VocClass> GarrisonPenetration_CleanSound;
+
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
 		Valueable<double> Shield_SelfHealing_Rate_InMinutes;
@@ -362,6 +367,11 @@ public:
 			, Webby_Duration { 0 }
 			, Webby_DurationVariation { 0 }
 			, Webby_Cap { -1 }
+
+			, GarrisonPenetration { false }
+			, GarrisonPenetration_RandomTarget { true }
+			, GarrisonPenetration_DamageMultiplier { { 1.0, 1.0 } }
+			, GarrisonPenetration_CleanSound { }
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);
@@ -398,6 +408,7 @@ public:
 		void ApplyAttachEffects(TechnoClass* pTarget, HouseClass* pInvokerHouse, TechnoClass* pInvoker);
 		double GetCritChance(TechnoClass* pFirer) const;
 		void ApplyAmmoModifier(TechnoClass* pTarget, HouseClass* pInvokerHouse, BulletExt::ExtData* pBulletExt = nullptr);
+		void ApplyGarrisonPenetration(HouseClass* pInvokerHouse, TechnoClass* pTarget, TechnoClass* pInvoker, BulletExt::ExtData* pBulletExt);
 	};
 
 	class ExtContainer final : public Container<WarheadTypeExt>

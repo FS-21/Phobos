@@ -359,6 +359,7 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->AttachEffects.RemoveGroups.size() > 0
 		|| this->KickOutKickablePassengers
 		|| this->AmmoModifier
+		|| this->GarrisonPenetration
 	);
 
 	char tempBuffer[32];
@@ -400,6 +401,11 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	}
 
 	this->AmmoModifier.Read(exINI, pSection, "AmmoModifier");
+
+	this->GarrisonPenetration.Read(exINI, pSection, "GarrisonPenetration");
+	this->GarrisonPenetration_RandomTarget.Read(exINI, pSection, "GarrisonPenetration.RandomTarget");
+	this->GarrisonPenetration_DamageMultiplier.Read(exINI, pSection, "GarrisonPenetration.DamageMultiplier");
+	this->GarrisonPenetration_CleanSound.Read(exINI, pSection, "GarrisonPenetration.CleanSound");
 }
 
 template <typename T>
@@ -566,6 +572,11 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->CanDisarmBombs)
 
 		.Process(this->AmmoModifier)
+
+		.Process(this->GarrisonPenetration)
+		.Process(this->GarrisonPenetration_RandomTarget)
+		.Process(this->GarrisonPenetration_DamageMultiplier)
+		.Process(this->GarrisonPenetration_CleanSound)
 		;
 }
 

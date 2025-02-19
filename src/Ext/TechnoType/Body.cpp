@@ -527,6 +527,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		}
 	}
 
+	this->ImmuneToGarrisonPenetration.Read(exINI, pSection, "ImmuneToGarrisonPenetration");
+
 	// Art tags
 	INI_EX exArtINI(CCINIClass::INI_Art);
 	auto pArtSection = pThis->ImageFile;
@@ -1072,6 +1074,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->FixEnteringCyborgLegs)
 
 		.Process(this->DropCrate)
+
+		.Process(this->ImmuneToGarrisonPenetration)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

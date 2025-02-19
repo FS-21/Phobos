@@ -158,6 +158,7 @@ This page lists all the individual contributions to the project by their author.
   - `Pips.HideIfNoStrength` and `SelfHealing.EnabledBy` additions for shields. 
   - Script actions for manipulating script flows with conditional jumps
   - Grant new superweapons in superweapons
+  - Penetration damage on garrisonable structures
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

@@ -306,6 +306,8 @@ public:
 
 		Nullable<Powerup> DropCrate;
 
+		Valueable<bool> ImmuneToGarrisonPenetration;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, UIDescription {}
@@ -560,6 +562,8 @@ public:
 			, FixEnteringCyborgLegs { false }
 
 			, DropCrate { }
+
+			, ImmuneToGarrisonPenetration { false }
 		{ }
 
 		virtual ~ExtData() = default;
