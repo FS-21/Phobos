@@ -5,6 +5,7 @@
 #include <Helpers/Macro.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
+#include <AITriggerTypeClass.h>
 
 #include <Ext/Techno/Body.h>
 
@@ -38,6 +39,8 @@ public:
 
 		char ScenarioFileName[260];
 
+		std::vector<double> AITriggerWeigths;
+		
 		ExtData(ScenarioClass* OwnerObject) : Extension<ScenarioClass>(OwnerObject)
 			, ShowBriefing { false }
 			, BriefingTheme { -1 }
@@ -46,6 +49,7 @@ public:
 			, AutoDeathObjects {}
 			, TransportReloaders {}
 			, ScenarioFileName { "" }
+			, AITriggerWeigths { }
 		{ }
 
 		void SetVariableToByID(bool bIsGlobal, int nIndex, char bState);
