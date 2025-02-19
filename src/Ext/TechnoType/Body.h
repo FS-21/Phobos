@@ -293,6 +293,8 @@ public:
 
 		Valueable<bool> Engineer_CheckFriendlyWeapons;
 
+		Valueable<bool> FixEnteringCyborgLegs;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, UIDescription {}
@@ -536,6 +538,7 @@ public:
 			, Convert_RefillWithPassengers {}
 
 			, Engineer_CheckFriendlyWeapons { false }
+			, FixEnteringCyborgLegs { false }
 		{ }
 
 		virtual ~ExtData() = default;

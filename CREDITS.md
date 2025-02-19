@@ -144,6 +144,7 @@ This page lists all the individual contributions to the project by their author.
   - Kick out ejectable passengers in warheads
   - Modify Ammo on impact
   - ScriptType actions `10018` & `12003` for aircrafts attacks
+  - Allow cyborg legs to be repaired when they enter into transports or structures
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
@@ -264,6 +265,7 @@ This page lists all the individual contributions to the project by their author.
   - `<Player @ X>` as owner for pre-placed objects
   - Custom exit cell for infantry factory
   - Vehicles keeping target on move command
+  - Cyborg legs being restored when the soldier enters into transports or structures
 - **Morton (MortonPL)**:
   - `XDrawOffset` for animations
   - Shield passthrough & absorption

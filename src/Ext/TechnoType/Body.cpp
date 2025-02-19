@@ -407,6 +407,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->ForceShield_Effect.Read(exINI, pSection, "ForceShield.Effect");
 	this->ForceShield_KillWarhead.Read<true>(exINI, pSection, "ForceShield.KillWarhead");
 
+	this->FixEnteringCyborgLegs.Read(exINI, pSection, "FixEnteringCyborgLegs");
+
 	this->Explodes_KillPassengers.Read(exINI, pSection, "Explodes.KillPassengers");
 	this->Explodes_DuringBuildup.Read(exINI, pSection, "Explodes.DuringBuildup");
 	this->DeployFireWeapon.Read(exINI, pSection, "DeployFireWeapon");
@@ -1048,6 +1050,7 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_ForceVeterancyTransfer)
 
 		.Process(this->Engineer_CheckFriendlyWeapons)
+		.Process(this->FixEnteringCyborgLegs)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)
