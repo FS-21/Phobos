@@ -35,6 +35,9 @@ bool WarheadTypeExt::ExtData::CanAffectTarget(TechnoClass* pTarget, TechnoExt::E
 	if (!pTarget)
 		return false;
 
+	if (!IsHealthInThreshold(pTarget))
+		return false;
+
 	if (!this->EffectsRequireVerses)
 		return true;
 
@@ -56,6 +59,16 @@ bool WarheadTypeExt::ExtData::CanAffectTarget(TechnoClass* pTarget, TechnoExt::E
 	}
 
 	return GeneralUtils::GetWarheadVersusArmor(this->OwnerObject(), armorType) != 0.0;
+}
+
+bool WarheadTypeExt::ExtData::IsHealthInThreshold(TechnoClass* pTarget) const
+{
+	// Check if the WH should affect the techno target or skip it
+	double hp = pTarget->GetHealthPercentage();
+	bool hpBelowPercent = hp <= this->AffectsBelowPercent;
+	bool hpAbovePercent = hp > this->AffectsAbovePercent;
+
+	return hpBelowPercent && hpAbovePercent;
 }
 
 // Checks if Warhead can affect target that might or might be currently invulnerable.
@@ -269,6 +282,12 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->CombatAlert_Suppress.Read(exINI, pSection, "CombatAlert.Suppress");
 
 	this->CanKill.Read(exINI, pSection, "CanKill");
+
+	this->AffectsAbovePercent.Read(exINI, pSection, "AffectsAbovePercent");
+	this->AffectsBelowPercent.Read(exINI, pSection, "AffectsBelowPercent");
+
+	if (this->AffectsAbovePercent > this->AffectsBelowPercent)
+		Debug::Log("[Developer warning][%s] AffectsAbovePercent is bigger than AffectsBelowPercent, the warhead will never activate!\n", pSection);
 
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
@@ -486,6 +505,9 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->SuppressRevengeWeapons_Types)
 		.Process(this->SuppressReflectDamage)
 		.Process(this->SuppressReflectDamage_Types)
+
+		.Process(this->AffectsAbovePercent)
+		.Process(this->AffectsBelowPercent)
 
 		.Process(this->InflictLocomotor)
 		.Process(this->RemoveInflictedLocomotor)

@@ -28,6 +28,9 @@ bool RadSiteExt::ExtData::ApplyRadiationDamage(TechnoClass* pTarget, int& damage
 		return false;
 	}
 
+	if (!pWHExt->IsHealthInThreshold(pTarget))
+		return false;
+
 	if (!this->Type->GetWarheadDetonate())
 	{
 		if (pTarget->ReceiveDamage(&damage, distance, pWarhead, this->RadInvoker, false, true, this->RadHouse) == DamageState::NowDead)
