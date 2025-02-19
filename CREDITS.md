@@ -139,6 +139,7 @@ This page lists all the individual contributions to the project by their author.
   - `RandomTarget` for random projectile retargeting
   - Warhead activation target health thresholds enhancements
   - Universal deploy from any techno into any techno
+  - Reveal area on impact
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
