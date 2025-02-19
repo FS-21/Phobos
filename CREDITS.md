@@ -151,6 +151,7 @@ This page lists all the individual contributions to the project by their author.
   - Map Action 600 for overwriting DropCrate behaviour in attached Technos
   - `DropCrate` for setting what crate drop when Techno is destroyed
   - Script actions for modifying AI anger against other houses
+  - Map event `There are no technos of the specified houses list`
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
