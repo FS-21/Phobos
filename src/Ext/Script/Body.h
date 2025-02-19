@@ -60,6 +60,7 @@ enum class PhobosScripts : unsigned int
 	GatherAroundLeader = 10102,
 	LoadIntoTransports = 10103,
 	ChronoshiftToEnemyBase = 10104,
+	RepairDestroyedBridge = 10105,
 
 	// Range 12000-12999 are suplementary/setup pre-actions
 	WaitIfNoTarget = 12000,
@@ -257,6 +258,8 @@ public:
 	static void ManageAITriggers(TeamClass* pTeam, int enabled);
 	static void ManageTriggersWithObjects(TeamClass* pTeam, int idxAITargetType, bool isEnabled);
 	static void Log(const char* pFormat, ...);
+	static void RepairDestroyedBridge(TeamClass* pTeam, int mode);
+
 	// Mission.Attack.cpp
 	static void Mission_Attack(TeamClass* pTeam, bool repeatAction, int calcThreatMode, int attackAITargetType, int IdxAITargetTypeItem);
 	static TechnoClass* GreatestThreat(TechnoClass* pTechno, int method, int calcThreatMode, HouseClass* onlyTargetThisHouseEnemy, int attackAITargetType, int idxAITargetTypeItem, bool agentMode);

@@ -28,6 +28,7 @@ void TeamExt::ExtData::Serialize(T& Stm)
 		.Process(this->OnlyTargetHouseEnemyMode)
 		.Process(this->TriggersSideIdx)
 		.Process(this->TriggersHouseIdx)
+		.Process(this->BridgeRepairHuts)
 		;
 }
 

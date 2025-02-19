@@ -10,6 +10,7 @@
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
 #include <Ext/TechnoType/Body.h>
+#include <Ext/Techno/Body.h>
 #include <Phobos.h>
 
 class TeamExt
@@ -43,6 +44,7 @@ public:
 		int OnlyTargetHouseEnemyMode;
 		int TriggersSideIdx;
 		int TriggersHouseIdx;
+		std::vector<TechnoClass*> BridgeRepairHuts;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -64,6 +66,7 @@ public:
 			, OnlyTargetHouseEnemyMode { -1 }
 			, TriggersSideIdx { -1 }
 			, TriggersHouseIdx { -1 }
+			, BridgeRepairHuts { }
 		{ }
 
 		virtual ~ExtData() = default;

@@ -278,6 +278,10 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 	case PhobosScripts::DisableTriggersWithObjects:
 		ScriptExt::ManageTriggersWithObjects(pTeam, -1, false);
 		break;
+	case PhobosScripts::RepairDestroyedBridge:
+		// Start Timed Jump that jumps to the same line when the countdown finish (in frames)
+		ScriptExt::RepairDestroyedBridge(pTeam, -1);
+		break;
 	default:
 		// Do nothing because or it is a wrong Action number or it is an Ares/YR action...
 		if (action > 70 && !IsExtVariableAction(action))

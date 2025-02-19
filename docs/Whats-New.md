@@ -249,6 +249,7 @@ HideLightFlashEffects=false      ; boolean
   16011=Enable AI Triggers If Contains Any Objects From the List,29,0,1,[LONG DESC]
   16012=Set Side Index For Managing AI Triggers,20,0,1,[LONG DESC]
 
+  10105=Repair Destroyed Bridge,20,0,1,[LONG DESC]
   18000=Local variable set,22,0,1,[LONG DESC]
   18001=Local variable add,22,0,1,[LONG DESC]
   18002=Local variable minus,22,0,1,[LONG DESC]
@@ -462,6 +463,7 @@ New:
 - Allow toggling `Infantry/UnitsGainSelfHeal` for `MultiplayPassive=true` houses (by Starkku)
 - Customizable straight trajectory detonation & snap distance and pass-through option (by Starkku)
 - Airstrike & spy plane fixed spawn distance & height (by Starkku)
+- Script action for repairing destroyed bridges (by FS-21)
 - Allow enabling application of `Verses` and `PercentAtMax` for negative damage (by Starkku)
 - `RandomTarget` for assigning a new target in each projectile (by FS-21)
 - In addition to `PlacementGrid.Translucency`, allow to set the transparency of the grid when PlacementPreview is enabled, using the `PlacementGrid.TranslucencyWithPreview` tag (by Belonit).
