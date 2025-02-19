@@ -159,6 +159,7 @@ This page lists all the individual contributions to the project by their author.
   - Script actions for manipulating script flows with conditional jumps
   - Grant new superweapons in superweapons
   - Penetration damage on garrisonable structures
+  - Map action 507 for printing a message with the remaining map objects
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

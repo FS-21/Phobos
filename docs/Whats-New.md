@@ -562,6 +562,7 @@ New:
 - Modify Ammo on impact (by FS-21)
 - ScriptType actions `10018` & `12003` for aircrafts attacks (by FS-21)
 - Penetration damage on garrisonable structures (by FS-21)
+- Map action 507 for printing a message with the remaining map objects (by FS-21)
 
 Vanilla fixes:
 - Allow AI to repair structures built from base nodes/trigger action 125/SW delivery in single player missions (by Trsdy)
