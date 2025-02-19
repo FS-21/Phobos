@@ -728,3 +728,16 @@ bool __fastcall BuildingTypeClass_CanUseWaypoint(BuildingTypeClass* pThis)
 DEFINE_JUMP(VTABLE, 0x7E4610, GET_OFFSET(BuildingTypeClass_CanUseWaypoint))
 
 #pragma endregion
+
+DEFINE_HOOK(0x445F80, BuildingClass_GrandOpening_UpdateSecretLabAI, 0x5)
+{
+	GET(BuildingClass*, pThis, ECX);
+
+	if (pThis->Type->SecretLab && !pThis->Owner->IsControlledByHuman())
+	{
+		auto pExt = BuildingExt::ExtMap.Find(pThis);
+		pExt->UpdateSecretLabAI();
+	}
+
+	return 0;
+}
