@@ -548,6 +548,26 @@ DEFINE_HOOK(0x70EFE0, TechnoClass_GetMaxSpeed, 0x6)
 	return SkipGameCode;
 }
 
+DEFINE_HOOK(0x51E440, InfantryClass_AI_WhatAction2_CanOnlyTargetTheseTechnos, 0x8)
+{
+	enum { Skip = 0x51E458 };
+
+	GET(InfantryClass*, pThis, EDI);
+	GET_STACK(TechnoClass*, pTarget, STACK_OFFSET(0x38, 0x4));
+
+	if (TechnoExt::IsValidTechno(pTarget))
+	{
+		int weaponIndex_ = pThis->SelectWeapon(pTarget);
+		auto const pWeaponType = pThis->GetWeapon(weaponIndex_)->WeaponType;
+		auto const pWeaponTypeEx = WeaponTypeExt::ExtMap.Find(pWeaponType);
+
+		if (pWeaponTypeEx->OnlyTargetTechnos.size() > 0 && pWeaponTypeEx->CanOnlyTargetTheseTechnos(pTarget->GetTechnoType()))
+		{
+			R->EAX(Action::Attack);
+			return Skip;
+		}
+	}
+}
 
 #pragma region KeepTargetOnMove
 
