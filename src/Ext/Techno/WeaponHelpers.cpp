@@ -37,7 +37,8 @@ int TechnoExt::PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, A
 		if ((pTargetCell && !EnumFunctions::IsCellEligible(pTargetCell, pSecondExt->CanTarget, true, true)) ||
 			(pTargetTechno && (!EnumFunctions::IsTechnoEligible(pTargetTechno, pSecondExt->CanTarget) ||
 				!EnumFunctions::CanTargetHouse(pSecondExt->CanTargetHouses, pThis->Owner, pTargetTechno->Owner) ||
-				!pSecondExt->HasRequiredAttachedEffects(pTargetTechno, pThis))))
+				!pSecondExt->HasRequiredAttachedEffects(pTargetTechno, pThis) ||
+				!pSecondExt->CanOnlyTargetTheseTechnos(pTargetTechno->GetTechnoType()))))
 		{
 			return weaponIndexOne;
 		}
@@ -51,7 +52,8 @@ int TechnoExt::PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, A
 
 			if ((pTargetCell && !EnumFunctions::IsCellEligible(pTargetCell, pFirstExt->CanTarget, true, true)) ||
 				(pTargetTechno && (!EnumFunctions::IsTechnoEligible(pTargetTechno, pFirstExt->CanTarget) ||
-					!EnumFunctions::CanTargetHouse(pFirstExt->CanTargetHouses, pThis->Owner, pTargetTechno->Owner) || !firstAllowedAE)))
+					!EnumFunctions::CanTargetHouse(pFirstExt->CanTargetHouses, pThis->Owner, pTargetTechno->Owner) || !firstAllowedAE ||
+					!pFirstExt->CanOnlyTargetTheseTechnos(pTargetTechno->GetTechnoType()))))
 			{
 				return weaponIndexTwo;
 			}

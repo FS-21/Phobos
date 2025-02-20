@@ -402,6 +402,9 @@ static bool IsAllowedSplitsTarget(TechnoClass* pSource, HouseClass* pOwner, Weap
 			return false;
 		}
 
+		if (!pWeaponExt->CanOnlyTargetTheseTechnos(pType))
+			return false;
+
 		if (!pWeaponExt->HasRequiredAttachedEffects(pTarget, pSource))
 			return false;
 	}
