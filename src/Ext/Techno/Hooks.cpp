@@ -559,6 +559,10 @@ DEFINE_HOOK(0x51E440, InfantryClass_AI_WhatAction2_CanOnlyTargetTheseTechnos, 0x
 	{
 		int weaponIndex_ = pThis->SelectWeapon(pTarget);
 		auto const pWeaponType = pThis->GetWeapon(weaponIndex_)->WeaponType;
+
+		if (!pWeaponType)
+			return 0;
+
 		auto const pWeaponTypeEx = WeaponTypeExt::ExtMap.Find(pWeaponType);
 
 		if (pWeaponTypeEx->OnlyTargetTechnos.size() > 0 && pWeaponTypeEx->CanOnlyTargetTheseTechnos(pTarget->GetTechnoType()))
