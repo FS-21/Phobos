@@ -364,6 +364,7 @@ New:
 - Bunkerable checks dehardcode (by TaranDahl)
 - No turret unit turn to the target (by CrimRecya & TaranDahl)
 - Damage multiplier for different houses (by CrimRecya)
+- Customizable duration for electric bolts (by Starkku)
 - Warhead that can not kill (by FS-21)
 - Reveal area on impact (by FS-21)
 

@@ -35,7 +35,6 @@ public:
 		std::vector<std::vector<ScriptTypeClass*>> AIScriptsLists;
 		std::vector<std::vector<HouseTypeClass*>> AIHousesLists;
 		std::vector<std::vector<AITriggerTypeClass*>> AITriggersLists;
-		ValueableVector<TechnoTypeClass*> HarvesterTypes;
 
 		Valueable<int> Storage_TiberiumIndex;
 		Nullable<int> InfantryGainSelfHealCap;
