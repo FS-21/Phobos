@@ -4,6 +4,7 @@
 #include <AnimClass.h>
 #include <BuildingClass.h>
 
+#include <Ext/TEvent/Body.h>
 #include <Ext/Anim/Body.h>
 #include <Ext/Techno/Body.h>
 #include <Ext/WeaponType/Body.h>
@@ -163,6 +164,9 @@ void AttachEffectClass::AI()
 		this->CreateAnim();
 
 	this->AnimCheck();
+
+	if (auto pTag = this->Techno->AttachedTag)
+		pTag->RaiseEvent((TriggerEvent)PhobosTriggerEvent::AttachedIsUnderAttachedEffect, this->Techno, CellStruct::Empty);
 }
 
 void AttachEffectClass::AI_Temporal()
