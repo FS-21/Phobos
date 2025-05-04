@@ -163,6 +163,7 @@ public:
 		void UpdateRandomTargets();
 		void UpdateWeaponizedEngineerGuard();
 		void WebbyUpdate();
+		void AmmoAutoConvertActions();
 
 		virtual ~ExtData() override;
 

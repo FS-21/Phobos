@@ -4,6 +4,9 @@
 
 void TypeConvertGroup::Convert(FootClass* pTargetFoot, const std::vector<TypeConvertGroup>& convertPairs, HouseClass* pOwner, AnimTypeClass* pAnimType)
 {
+	if (!pTargetFoot)
+		return;
+
 	for (const auto& [fromTypes, toType, affectedHouses] : convertPairs)
 	{
 		if (!toType.Get())

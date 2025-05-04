@@ -50,6 +50,9 @@ void TechnoExt::ExtData::OnEarlyUpdate()
 
 	if (this->WebbyAnim)
 		this->WebbyUpdate();
+
+
+	this->AmmoAutoConvertActions();
 }
 
 void TechnoExt::ExtData::ApplyInterceptor()
@@ -163,6 +166,53 @@ void TechnoExt::ExtData::DepletedAmmoActions()
 
 	if ((skipMinimum || moreThanMinimum) && (skipMaximum || lessThanMaximum))
 		pThis->QueueMission(Mission::Unload, true);
+}
+
+void TechnoExt::ExtData::AmmoAutoConvertActions()
+{
+	auto const pThis = abstract_cast<TechnoClass*>(this->OwnerObject());
+	if (!pThis || pThis->GetTechnoType()->Ammo <= 0)
+		return;
+
+	//auto pType = pThis->GetTechnoType();
+	//auto pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+	auto const pTypeExt = this->TypeExtData;
+	const bool skipMinimum = pTypeExt->Ammo_AutoConvertMinimumAmount < 0;
+	const bool skipMaximum = pTypeExt->Ammo_AutoConvertMaximumAmount < 0;
+
+	if (skipMinimum && skipMaximum)
+		return;
+
+	const bool moreThanMinimum = pThis->Ammo >= pTypeExt->Ammo_AutoConvertMinimumAmount;
+	const bool lessThanMaximum = pThis->Ammo <= pTypeExt->Ammo_AutoConvertMaximumAmount;
+
+	std::vector<TypeConvertGroup> convertPair;
+	ValueableVector<TechnoTypeClass*> convertFrom;
+	Nullable<TechnoTypeClass*> convertTo;
+	Nullable<AffectedHouse> convertAffectedHouses;
+
+	convertFrom.emplace_back(pThis->GetTechnoType());
+	convertTo = pTypeExt->Ammo_AutoConvertType;
+	//Nullable<AffectedHouse> convertAffectedHouses;
+	convertAffectedHouses = AffectedHouse::Owner;
+	convertPair.emplace_back(convertFrom, convertTo, convertAffectedHouses);
+	//convertPair[0] = { convertFrom, convertTo, convertAffectedHouses };// .emplace_back(convertFrom, pTypeExt->Ammo_AutoConvertType);
+
+	if ((skipMinimum || moreThanMinimum) && (skipMaximum || lessThanMaximum))
+	{
+		auto pFoot = abstract_cast<FootClass*>(pThis);
+		auto pTargetBuilding = abstract_cast<BuildingClass*>(pThis);
+		//bool bUniversalDeploy = this->Convert_UseUniversalDeploy.Get();
+		bool bUniversalDeploy = false;
+
+		if ((bUniversalDeploy && !pFoot && !pTargetBuilding) || (!bUniversalDeploy && !pFoot))
+			return;
+
+		if (bUniversalDeploy)
+			TypeConvertGroup::UniversalConvert(pThis, convertPair, pThis->Owner, nullptr);
+		else
+			TypeConvertGroup::Convert(pFoot, convertPair, pThis->Owner, nullptr);
+	}
 }
 
 // TODO : Merge into new AttachEffects

@@ -305,6 +305,10 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Ammo_DeployUnlockMinimumAmount.Read(exINI, pSection, "Ammo.DeployUnlockMinimumAmount");
 	this->Ammo_DeployUnlockMaximumAmount.Read(exINI, pSection, "Ammo.DeployUnlockMaximumAmount");
 
+	this->Ammo_AutoConvertMinimumAmount.Read(exINI, pSection, "Ammo.AutoConvertMinimumAmount");
+	this->Ammo_AutoConvertMaximumAmount.Read(exINI, pSection, "Ammo.AutoConvertMaximumAmount");
+	this->Ammo_AutoConvertType.Read(exINI, pSection, "Ammo.AutoConvertType");
+
 	this->AutoDeath_Behavior.Read(exINI, pSection, "AutoDeath.Behavior");
 	this->AutoDeath_VanishAnimation.Read(exINI, pSection, "AutoDeath.VanishAnimation");
 	this->AutoDeath_OnAmmoDepletion.Read(exINI, pSection, "AutoDeath.OnAmmoDepletion");
@@ -853,6 +857,10 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Ammo_AutoDeployMaximumAmount)
 		.Process(this->Ammo_DeployUnlockMinimumAmount)
 		.Process(this->Ammo_DeployUnlockMaximumAmount)
+
+		.Process(this->Ammo_AutoConvertMinimumAmount)
+		.Process(this->Ammo_AutoConvertMaximumAmount)
+		.Process(this->Ammo_AutoConvertType)
 
 		.Process(this->AutoDeath_Behavior)
 		.Process(this->AutoDeath_VanishAnimation)

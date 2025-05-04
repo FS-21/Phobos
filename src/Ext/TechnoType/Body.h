@@ -66,6 +66,10 @@ public:
 		Valueable<int> Ammo_DeployUnlockMinimumAmount;
 		Valueable<int> Ammo_DeployUnlockMaximumAmount;
 
+		Valueable<int> Ammo_AutoConvertMinimumAmount;
+		Valueable<int> Ammo_AutoConvertMaximumAmount;
+		Nullable<TechnoTypeClass*> Ammo_AutoConvertType;
+
 		Nullable<AutoDeathBehavior> AutoDeath_Behavior;
 		Valueable<AnimTypeClass*> AutoDeath_VanishAnimation;
 		Valueable<bool> AutoDeath_OnAmmoDepletion;
@@ -399,6 +403,10 @@ public:
 			, Ammo_AutoDeployMaximumAmount { -1 }
 			, Ammo_DeployUnlockMinimumAmount { -1 }
 			, Ammo_DeployUnlockMaximumAmount { -1 }
+
+			, Ammo_AutoConvertMinimumAmount { -1 }
+			, Ammo_AutoConvertMaximumAmount { -1 }
+			, Ammo_AutoConvertType { nullptr }
 
 			, AutoDeath_Behavior { }
 			, AutoDeath_VanishAnimation {}
