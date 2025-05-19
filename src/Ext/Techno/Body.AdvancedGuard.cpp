@@ -19,7 +19,7 @@ void TechnoExt::HandleEngineerGuardStopTarNav(EventExt* event)
 {
 	int technoUniqueID = event->SyncEngineerGuardStopTarNav.TechnoUniqueID;
 
-	for (auto pTechno : *TechnoClass::Array)
+	for (auto pTechno : TechnoClass::Array)
 	{
 		// Find the object, update/sync
 		if (pTechno && pTechno->UniqueID == technoUniqueID)
@@ -67,7 +67,7 @@ void TechnoExt::HandleEngineerGuardDestination(EventExt* event)
 	//if (!guardDestination)
 		//return;
 
-	/*for (auto pTechno : *TechnoClass::Array)
+	/*for (auto pTechno : TechnoClass::Array)
 	{
 		if (pTechno && pTechno->UniqueID == technoUniqueID)
 		{
@@ -82,7 +82,7 @@ void TechnoExt::HandleEngineerGuardDestination(EventExt* event)
 		}
 	}*/
 
-	for (auto pTechno : *TechnoClass::Array)
+	for (auto pTechno : TechnoClass::Array)
 	{
 		if (pTechno && pTechno->UniqueID == guardDestinationID)
 		{
@@ -116,7 +116,7 @@ void TechnoExt::HandleWeaponizedEngineerGuard(EventExt* event)
 {
 	int technoUniqueID = event->SyncWeaponizedEngineerGuard.TechnoUniqueID;
 
-	for (auto pTechno : *TechnoClass::Array)
+	for (auto pTechno : TechnoClass::Array)
 	{
 		if (pTechno && pTechno->UniqueID == technoUniqueID)
 		{
@@ -193,8 +193,8 @@ void TechnoExt::ProcessWeaponizedEngineerGuard(TechnoClass* pThis)
 				auto pCell = pThis->GetCell();
 				bool allowBridges = GroundType::Array[static_cast<int>(LandType::Clear)].Cost[static_cast<int>(pType->SpeedType)] > 0.0;
 				bool isBridge = allowBridges && pCell->ContainsBridge();
-				auto nCell = MapClass::Instance->NearByLocation(CellClass::Coord2Cell(pTarget->Location), pType->SpeedType, -1, pType->MovementZone, isBridge, 1, 1, true, false, false, isBridge, CellStruct::Empty, false, false);
-				pCell = MapClass::Instance->TryGetCellAt(nCell);
+				auto nCell = MapClass::Instance.NearByLocation(CellClass::Coord2Cell(pTarget->Location), pType->SpeedType, -1, pType->MovementZone, isBridge, 1, 1, true, false, false, isBridge, CellStruct::Empty, false, false);
+				pCell = MapClass::Instance.TryGetCellAt(nCell);
 				pThis->SetDestination(pCell, false);
 				pThis->Target = nullptr;
 			}
@@ -212,7 +212,7 @@ void TechnoExt::ProcessWeaponizedEngineerGuard(TechnoClass* pThis)
 	int range = -1;
 
 	// Looks for the closest valid target
-	for (auto const pTechno : *TechnoClass::Array)
+	for (auto const pTechno : TechnoClass::Array)
 	{
 		int value = pThis->DistanceFrom(pTechno); // Note: distance is in leptons (*256)
 		int weaponIndex = pThis->SelectWeapon(pTechno);
@@ -264,8 +264,8 @@ void TechnoExt::ProcessWeaponizedEngineerGuard(TechnoClass* pThis)
 		auto pCell = pThis->GetCell();
 		bool allowBridges = GroundType::Array[static_cast<int>(LandType::Clear)].Cost[static_cast<int>(pType->SpeedType)] > 0.0;
 		bool isBridge = allowBridges && pCell->ContainsBridge();
-		auto nCell = MapClass::Instance->NearByLocation(CellClass::Coord2Cell(seletedTarget->Location), pType->SpeedType, -1, pType->MovementZone, isBridge, 1, 1, true, false, false, isBridge, CellStruct::Empty, false, false);
-		pCell = MapClass::Instance->TryGetCellAt(nCell);
+		auto nCell = MapClass::Instance.NearByLocation(CellClass::Coord2Cell(seletedTarget->Location), pType->SpeedType, -1, pType->MovementZone, isBridge, 1, 1, true, false, false, isBridge, CellStruct::Empty, false, false);
+		pCell = MapClass::Instance.TryGetCellAt(nCell);
 		pThis->SetDestination(pCell, false);
 	}
 }
