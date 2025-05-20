@@ -69,9 +69,9 @@ DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 	// Save original AI Trigger values for comparations in the save process
 	if (RulesExt::Global()->AILearning_Weight_Increment.isset() || RulesExt::Global()->AILearning_Weight_Decrement.isset())
 	{
-		for (int i = 0; i < AITriggerTypeClass::Array->Count; i++)
+		for (int i = 0; i < AITriggerTypeClass::Array.Count; i++)
 		{
-			ScenarioExt::Global()->AITriggerWeigths.push_back(AITriggerTypeClass::Array->GetItem(i)->Weight_Current);
+			ScenarioExt::Global()->AITriggerWeigths.push_back(AITriggerTypeClass::Array.GetItem(i)->Weight_Current);
 		}
 	}
 
@@ -101,7 +101,7 @@ DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 			// Modify the default game value with the loaded one
 			int index = AITriggerTypeClass::FindIndex(triggerID);
 			if (index >= 0)
-				AITriggerTypeClass::Array->GetItem(index)->Weight_Current = current_weight;
+				AITriggerTypeClass::Array.GetItem(index)->Weight_Current = current_weight;
 		}
 
 		file.close();
@@ -147,9 +147,9 @@ DEFINE_HOOK(0x685DE7, AILearning_Save, 0x5) // void Do_Lose(void)
 		double decrement = RulesExt::Global()->AILearning_Weight_Decrement.isset() ? RulesExt::Global()->AILearning_Weight_Decrement.Get() : 0;
 		decrement = decrement < 0 ? 0 : decrement;
 
-		for (int i = 0; i < AITriggerTypeClass::Array->Count; i++)
+		for (int i = 0; i < AITriggerTypeClass::Array.Count; i++)
 		{
-			auto pTrigger = AITriggerTypeClass::Array->GetItem(i);
+			auto pTrigger = AITriggerTypeClass::Array.GetItem(i);
 
 			// Only limit weight if the selected AI trigger ran at least 1 time
 			if (pTrigger->TimesExecuted > 0 || pTrigger->TimesCompleted > 0)
