@@ -18,7 +18,7 @@ void TechnoExt::HandleStopPassengersTar(EventExt* event)
 {
 	int technoUniqueID = event->SyncPassengersTar.TechnoUniqueID;
 
-	for (auto pTechno : *TechnoClass::Array)
+	for (auto pTechno : TechnoClass::Array)
 	{
 		if (pTechno && pTechno->UniqueID == technoUniqueID)
 		{
