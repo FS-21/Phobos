@@ -39,6 +39,9 @@ public:
 
 		std::vector<double> AITriggerWeigths;
 		
+		bool SWSidebar_Enable;
+		std::vector<int> SWSidebar_Indices;
+
 		ExtData(ScenarioClass* OwnerObject) : Extension<ScenarioClass>(OwnerObject)
 			, ShowBriefing { false }
 			, BriefingTheme { -1 }
@@ -47,6 +50,8 @@ public:
 			, AutoDeathObjects {}
 			, TransportReloaders {}
 			, AITriggerWeigths { }
+			, SWSidebar_Enable { true }
+			, SWSidebar_Indices {}
 		{ }
 
 		void SetVariableToByID(bool bIsGlobal, int nIndex, char bState);
