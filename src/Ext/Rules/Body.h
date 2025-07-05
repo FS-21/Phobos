@@ -167,7 +167,8 @@ public:
 		Valueable<bool> ShowDesignatorRange;
 		Valueable<bool> IsVoiceCreatedGlobal;
 		Valueable<int> SelectionFlashDuration;
-		AnimTypeClass* DropPodTrailer;
+		Nullable<AnimTypeClass*> DropPodTrailer;
+		AnimTypeClass* DropPodDefaultTrailer;
 		SHPStruct* PodImage;
 		Valueable<bool> DrawInsignia_OnlyOnSelected;
 		Valueable<Point2D> DrawInsignia_AdjustPos_Infantry;
@@ -233,6 +234,16 @@ public:
 		Valueable<bool> HarvesterScanAfterUnload;
 
 		Valueable<bool> AnimCraterDestroyTiberium;
+
+		Valueable<AffectedHouse> BerzerkTargeting;
+
+		Valueable<bool> AttackMove_IgnoreWeaponCheck;
+		Nullable<bool> AttackMove_StopWhenTargetAcquired;
+		
+		// cache tint color
+		int TintColorIronCurtain;
+		int TintColorForceShield;
+		int TintColorBerserk;
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
@@ -366,6 +377,7 @@ public:
 			, AILearning_ScenarioName { }
 			, AILearning_OnlySupportedMaps { true }
 			, DropPodTrailer { }
+			, DropPodDefaultTrailer { }
 			, PodImage { }
 			, DamageOwnerMultiplier { 1.0 }
 			, DamageAlliesMultiplier { 1.0 }
@@ -413,6 +425,15 @@ public:
 			, HarvesterScanAfterUnload { false }
 
 			, AnimCraterDestroyTiberium { true }
+
+			, BerzerkTargeting { AffectedHouse::All }
+
+			, TintColorIronCurtain { 0 }
+			, TintColorForceShield { 0 }
+			, TintColorBerserk { 0 }
+
+			, AttackMove_IgnoreWeaponCheck { false }
+			, AttackMove_StopWhenTargetAcquired { }
 		{ }
 
 		virtual ~ExtData() = default;
@@ -422,6 +443,7 @@ public:
 		virtual void LoadAfterTypeData(RulesClass* pThis, CCINIClass* pINI);
 		virtual void InitializeConstants() override;
 		void InitializeAfterTypeData(RulesClass* pThis);
+		void InitializeAfterAllLoaded();
 
 		virtual void InvalidatePointer(void* ptr, bool bRemoved) override { }
 
