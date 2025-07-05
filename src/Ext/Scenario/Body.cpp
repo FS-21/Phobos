@@ -164,6 +164,7 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(this->ScenarioFileName)
 		.Process(this->SWSidebar_Enable)
 		.Process(this->SWSidebar_Indices)
+//		.Process(this->NewMessageList); // Should not S/L
 		;
 }
 
