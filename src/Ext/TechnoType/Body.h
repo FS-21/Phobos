@@ -403,6 +403,8 @@ public:
 		Valueable<double> FallingDownDamage;
 		Nullable<double> FallingDownDamage_Water;
 
+		Valueable<bool> FixEnteringCyborgLegs;
+
 		Valueable<bool> FiringForceScatter;
 
 		Valueable<int> FireUp;
@@ -764,6 +766,7 @@ public:
 
 			, FallingDownDamage { 1.0 }
 			, FallingDownDamage_Water {}
+			, FixEnteringCyborgLegs { false }
 
 			, Convert_UniversalDeploy {}
 			, Convert_DeployToLand { false }
