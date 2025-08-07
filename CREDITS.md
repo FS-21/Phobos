@@ -160,6 +160,7 @@ This page lists all the individual contributions to the project by their author.
   - Script action for repairing destroyed bridges
   - Unit & infantry auto-conversion on ammo change
   - Web logic against infantry
+  - ScriptType actions `10018` & `12003` for aircrafts attacks
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
