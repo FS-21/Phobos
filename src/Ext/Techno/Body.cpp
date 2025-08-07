@@ -1002,6 +1002,11 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->TintIntensityAllies)
 		.Process(this->TintIntensityEnemies)
 		.Process(this->AttackMoveFollowerTempCount)
+		.Process(this->WebbyDurationCountDown)
+		.Process(this->WebbyDurationTimer)
+		.Process(this->WebbyAnim)
+		.Process(this->WebbyLastTarget)
+		.Process(this->WebbyLastMission)
 		;
 }
 
@@ -1012,6 +1017,7 @@ void TechnoExt::ExtData::InvalidatePointer(void* ptr, bool bRemoved)
 	AnnounceInvalidPointer(Convert_UniversalDeploy_TemporalTechno, ptr);
 	AnnounceInvalidPointer(Convert_UniversalDeploy_DeployAnim, ptr);
 	AnnounceInvalidPointer(Convert_UniversalDeploy_RememberTarget, ptr);
+	AnnounceInvalidPointer(WebbyLastTarget, ptr);
 }
 
 void TechnoExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

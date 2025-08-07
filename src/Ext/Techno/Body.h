@@ -96,6 +96,12 @@ public:
 
 		int AttackMoveFollowerTempCount;
 
+		int	WebbyDurationCountDown;
+		CDTimerClass WebbyDurationTimer;
+		AnimClass* WebbyAnim;
+		AbstractClass* WebbyLastTarget;
+		Mission WebbyLastMission;
+
 		ExtData(TechnoClass* OwnerObject) : Extension<TechnoClass>(OwnerObject)
 			, TypeExtData { nullptr }
 			, Shield {}
@@ -159,6 +165,11 @@ public:
 			, TintIntensityAllies { 0 }
 			, TintIntensityEnemies { 0 }
 			, AttackMoveFollowerTempCount { 0 }
+			, WebbyDurationCountDown { -1 }
+			, WebbyDurationTimer {}
+			, WebbyAnim { nullptr }
+			, WebbyLastTarget { nullptr }
+			, WebbyLastMission { Mission::Sleep }
 		{ }
 
 		void OnEarlyUpdate();
@@ -196,10 +207,12 @@ public:
 		int ApplyForceWeaponInRange(AbstractClass* pTarget);
 		void ResetDelayedFireTimer();
 		void UpdateTintValues();
+		void WebbyUpdate();
 
 		void AmmoAutoConvertActions();
 
 		virtual ~ExtData() override;
+
 		virtual void InvalidatePointer(void* ptr, bool bRemoved) override;
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;

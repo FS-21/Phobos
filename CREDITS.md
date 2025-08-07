@@ -159,6 +159,7 @@ This page lists all the individual contributions to the project by their author.
   - Universal deploy from any techno into any techno
   - Script action for repairing destroyed bridges
   - Unit & infantry auto-conversion on ammo change
+  - Web logic against infantry
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
