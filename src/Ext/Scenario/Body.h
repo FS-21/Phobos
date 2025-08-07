@@ -38,6 +38,8 @@ public:
 		std::vector<TechnoExt::ExtData*> AutoDeathObjects;
 		std::vector<TechnoExt::ExtData*> TransportReloaders; // Objects that can reload ammo in limbo
 
+		char ScenarioFileName[260];
+
 		std::vector<double> AITriggerWeigths;
 		
 		bool SWSidebar_Enable;
@@ -52,6 +54,7 @@ public:
 			, Variables { }
 			, AutoDeathObjects {}
 			, TransportReloaders {}
+			, ScenarioFileName { "" }
 			, AITriggerWeigths { }
 			, SWSidebar_Enable { true }
 			, SWSidebar_Indices {}

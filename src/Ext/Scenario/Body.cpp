@@ -162,6 +162,7 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(this->BriefingTheme)
 		.Process(this->AutoDeathObjects)
 		.Process(this->TransportReloaders)
+		.Process(this->ScenarioFileName)
 		.Process(this->SWSidebar_Enable)
 		.Process(this->SWSidebar_Indices)
 //		.Process(this->NewMessageList); // Should not S/L
