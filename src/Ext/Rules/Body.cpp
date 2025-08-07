@@ -79,6 +79,10 @@ void RulesExt::ExtData::LoadFromINIFile(CCINIClass* pINI)
 
 void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 {
+	const char* sectionAITargetTypes = "AITargetTypes";
+	const char* sectionAIScriptsList = "AIScriptsList";
+	const char* sectionAIHousesList = "AIHousesList";
+
 	INI_EX exINI(pINI);
 
 	this->Storage_TiberiumIndex.Read(exINI, GameStrings::General, "Storage.TiberiumIndex");
