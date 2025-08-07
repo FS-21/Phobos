@@ -150,6 +150,7 @@ This page lists all the individual contributions to the project by their author.
   - Warhead activation target health thresholds enhancements
   - Event 606: AttachEffect is attaching to a Techno
   - Linked superweapons
+  - Script actions for modifying AI anger against other houses
   - Allow cyborg legs to be repaired when they enter into transports or structures
   - Map event `There are no technos of the specified houses list`
   - Script actions for manipulating script flows with conditional jumps
