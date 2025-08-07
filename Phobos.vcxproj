@@ -68,6 +68,7 @@
     <ClCompile Include="src\Ext\OverlayType\Hooks.cpp" />
     <ClCompile Include="src\Ext\ParticleType\Body.cpp" />
     <ClCompile Include="src\Ext\ParticleType\Hooks.cpp" />
+    <ClCompile Include="src\Ext\Scenario\Hooks.AILearning.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.Variables.cpp" />
     <ClCompile Include="src\Ext\Script\Body.AngerNodes.cpp" />

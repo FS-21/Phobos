@@ -287,6 +287,22 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	this->HarvesterScanAfterUnload.Read(exINI, GameStrings::General, "HarvesterScanAfterUnload");
 
+	this->AILearning.Read(exINI, "AI", "AILearning");
+	this->AILearning_OnlySupportedMaps.Read(exINI, "AI", "AILearning.OnlySupportedMaps");
+	this->AILearning_Weight_Max.Read(exINI, "AI", "AILearning.Weight.Max");
+	this->AILearning_Weight_Min.Read(exINI, "AI", "AILearning.Weight.Min");
+	this->AILearning_Weight_Increment.Read(exINI, "AI", "AILearning.Weight.Increment");
+	this->AILearning_Weight_Decrement.Read(exINI, "AI", "AILearning.Weight.Decrement");
+
+	// [AI] -> AILearning.ScenarioName
+	const char* key = "AILearning.ScenarioName";
+	pINI->ReadString("AI", key, "", Phobos::readBuffer);
+
+	if (std::string(Phobos::readBuffer).length() > 0)
+		this->AILearning_ScenarioName = std::string(Phobos::readBuffer);
+
+	key = nullptr;
+
 	this->AnimCraterDestroyTiberium.Read(exINI, GameStrings::General, "AnimCraterDestroyTiberium");
 
 	this->BerzerkTargeting.Read(exINI, GameStrings::CombatDamage, "BerzerkTargeting");
@@ -512,6 +528,13 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->VisualScatter_Min)
 		.Process(this->VisualScatter_Max)
 		.Process(this->ShowDesignatorRange)
+		.Process(this->AILearning)
+		.Process(this->AILearning_Weight_Max)
+		.Process(this->AILearning_Weight_Min)
+		.Process(this->AILearning_Weight_Increment)
+		.Process(this->AILearning_Weight_Decrement)
+		.Process(this->AILearning_ScenarioName)
+		.Process(this->AILearning_OnlySupportedMaps)
 		.Process(this->DropPodTrailer)
 		.Process(this->DropPodDefaultTrailer)
 		.Process(this->PodImage)
