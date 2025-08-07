@@ -405,6 +405,10 @@ public:
 
 		Valueable<bool> FixEnteringCyborgLegs;
 
+		Valueable<int> Ammo_AutoConvertMinimumAmount;
+		Valueable<int> Ammo_AutoConvertMaximumAmount;
+		Nullable<TechnoTypeClass*> Ammo_AutoConvertType;
+
 		Valueable<bool> FiringForceScatter;
 
 		Valueable<int> FireUp;
@@ -781,6 +785,10 @@ public:
 			, Convert_TransferPassengers_IgnoreInvalidOccupiers { false }
 			, Convert_ForceVeterancyTransfer { false }
 			, Convert_RefillWithPassengers {}
+
+			, Ammo_AutoConvertMinimumAmount { -1 }
+			, Ammo_AutoConvertMaximumAmount { -1 }
+			, Ammo_AutoConvertType { nullptr }
 
 			, FiringForceScatter { true }
 

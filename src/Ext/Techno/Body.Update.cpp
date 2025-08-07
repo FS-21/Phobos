@@ -18,6 +18,7 @@
 #include <Ext/Scenario/Body.h>
 #include <Utilities/EnumFunctions.h>
 #include <Utilities/AresFunctions.h>
+#include <New/Type/Affiliated/TypeConvertGroup.h>
 
 
 // TechnoClass_AI_0x6F9E50
@@ -43,6 +44,7 @@ void TechnoExt::ExtData::OnEarlyUpdate()
 	this->ApplyMindControlRangeLimit();
 	this->UpdateRecountBurst();
 	this->UpdateRearmInEMPState();
+	this->AmmoAutoConvertActions();
 
 	if (this->AttackMoveFollowerTempCount)
 		this->AttackMoveFollowerTempCount--;
@@ -196,6 +198,33 @@ void TechnoExt::ExtData::DepletedAmmoActions()
 
 	if ((skipMinimum || moreThanMinimum) && (skipMaximum || lessThanMaximum))
 		pThis->QueueMission(Mission::Unload, true);
+}
+
+void TechnoExt::ExtData::AmmoAutoConvertActions()
+{
+	const auto pThis = this->OwnerObject();
+	const auto pTypeExt = this->TypeExtData;
+
+	if (!pTypeExt || pThis->GetTechnoType()->Ammo <= 0)
+		return;
+
+	const bool skipMinimum = pTypeExt->Ammo_AutoConvertMinimumAmount < 0;
+	const bool skipMaximum = pTypeExt->Ammo_AutoConvertMaximumAmount < 0;
+
+	if (skipMinimum && skipMaximum)
+		return;
+
+	if ((skipMinimum || pThis->Ammo >= pTypeExt->Ammo_AutoConvertMinimumAmount) // More than minimum
+	&& (skipMaximum || pThis->Ammo <= pTypeExt->Ammo_AutoConvertMaximumAmount)) // Less than maximum
+	{
+		const auto pFoot = abstract_cast<FootClass*, true>(pThis);
+
+		if (!pFoot)
+			return;
+
+		if (pTypeExt->Ammo_AutoConvertType.isset())
+			TechnoExt::ConvertToType(pFoot, pTypeExt->Ammo_AutoConvertType);
+	}
 }
 
 // TODO : Merge into new AttachEffects
