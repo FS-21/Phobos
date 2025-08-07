@@ -1186,6 +1186,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		Debug::Log("[Developer warning] [%s] has Palette=%s set but no palette file was loaded (missing file or wrong filename). Missing palettes cause issues with lighting recalculations.\n", pArtSection, pThis->PaletteFile);
 
 	this->LoadFromINIByWhatAmI(exArtINI, pArtSection);
+
+	this->NoManualUnload.Read(exINI, pSection, "NoManualUnload");
 }
 
 void TechnoTypeExt::ExtData::LoadFromINIByWhatAmI(INI_EX& exArtINI, const char* pArtSection)
@@ -1577,6 +1579,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Ammo_AutoConvertMinimumAmount)
 		.Process(this->Ammo_AutoConvertMaximumAmount)
 		.Process(this->Ammo_AutoConvertType)
+
+		.Process(this->NoManualUnload)
 
 		.Process(this->FiringForceScatter)
 

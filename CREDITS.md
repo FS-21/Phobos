@@ -161,6 +161,7 @@ This page lists all the individual contributions to the project by their author.
   - Unit & infantry auto-conversion on ammo change
   - Web logic against infantry
   - ScriptType actions `10018` & `12003` for aircrafts attacks
+  - Kick out ejectable passengers in warheads
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

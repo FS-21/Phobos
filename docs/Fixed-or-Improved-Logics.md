@@ -2112,6 +2112,16 @@ In `rulesmd.ini`:
 ShakeIsLocal=false  ; boolean
 ```
 
+### Kick out ejectable passengers
+
+- Affected transport will eject all the passengers.
+
+In `rulesmd.ini`
+```ini
+[SOMEWARHEAD]                    ; WarheadType
+KickOutKickablePassengers=false  ; boolean
+```
+
 ## Weapons
 
 ### AmbientDamage customizations

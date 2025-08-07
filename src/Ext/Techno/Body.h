@@ -295,6 +295,7 @@ public:
 	static void CreateDelayedFireAnim(TechnoClass* pThis, AnimTypeClass* pAnimType, int weaponIndex, bool attach, bool center, bool removeOnNoDelay, bool onTurret, CoordStruct firingCoords);
 	static bool HandleDelayedFireWithPauseSequence(TechnoClass* pThis, int weaponIndex, int firingFrame);
 	static bool IsHealthInThreshold(TechnoClass* pObject, double min, double max);
+	static void PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo = nullptr, bool forceFullTransfer = true, bool dontCheckInvalidOccupiers = true);
 	static UnitTypeClass* GetUnitTypeExtra(UnitClass* pUnit);
 	static AircraftTypeClass* GetAircraftTypeExtra(AircraftClass* pAircraft);
 	static bool IsValidTechno(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed = true);
