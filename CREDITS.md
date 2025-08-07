@@ -150,6 +150,7 @@ This page lists all the individual contributions to the project by their author.
   - Warhead activation target health thresholds enhancements
   - Event 606: AttachEffect is attaching to a Techno
   - Linked superweapons
+  - Modify Ammo on impact
   - Map action 507 for printing a message with the remaining map objects
   - Script actions for modifying AI anger against other houses
   - Allow cyborg legs to be repaired when they enter into transports or structures

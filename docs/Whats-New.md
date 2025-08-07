@@ -640,6 +640,7 @@ New:
 - Draw visual effects for airburst weapons (by CrimRecya)
 - Unit `Speed` setting now accepts floating point values (by Starkku)
 - `Strafing` is now disabled by default when using `Trajectory` (by CrimRecya)
+- Modify Ammo on impact (by FS-21)
 - Map action 507 for printing a message with the remaining map objects (by FS-21)
 - Skip target scanning function calling for unarmed technos (by TaranDahl & solar-III)
 

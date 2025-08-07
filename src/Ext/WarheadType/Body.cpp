@@ -358,6 +358,7 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->AttachEffects.RemoveGroups.size() > 0
 		|| this->BuildingSell
 		|| this->BuildingUndeploy
+		|| this->Ammo
 	);
 
 	char tempBuffer[32];
@@ -397,6 +398,8 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		else
 			this->SpawnsCrate_Weights.push_back(weight);
 	}
+
+	this->Ammo.Read(exINI, pSection, "Ammo");
 }
 
 template <typename T>
@@ -582,6 +585,8 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->CanKill)
 
 		.Process(this->Convert_UseUniversalDeploy)
+
+		.Process(this->Ammo)
 		;
 }
 
