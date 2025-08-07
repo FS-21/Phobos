@@ -150,6 +150,7 @@ This page lists all the individual contributions to the project by their author.
   - Warhead activation target health thresholds enhancements
   - Event 606: AttachEffect is attaching to a Techno
   - Linked superweapons
+  - Map event `There are no technos of the specified houses list`
   - Script actions for manipulating script flows with conditional jumps
   - Universal deploy from any techno into any techno
 - **Starkku**:
