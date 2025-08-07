@@ -153,6 +153,7 @@ This page lists all the individual contributions to the project by their author.
   - Map event `There are no technos of the specified houses list`
   - Script actions for manipulating script flows with conditional jumps
   - Universal deploy from any techno into any techno
+  - Script action for repairing destroyed bridges
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

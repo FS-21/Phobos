@@ -30,6 +30,7 @@ void TeamExt::ExtData::Serialize(T& Stm)
 		.Process(this->AbortActionAfterKilling)
 		.Process(this->ConditionalJump_Index)
 		.Process(this->ConditionalJump_ResetVariablesIfJump)
+		.Process(this->BridgeRepairHuts)
 		;
 }
 

@@ -5,6 +5,7 @@
 #include <Helpers/Macro.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
+#include <Ext/Techno/Body.h>
 #include <Phobos.h>
 
 class TeamExt
@@ -40,6 +41,7 @@ public:
 		bool AbortActionAfterKilling;
 		bool ConditionalJump_EnabledKillsCount;
 		bool ConditionalJump_ResetVariablesIfJump;
+		std::vector<TechnoClass*> BridgeRepairHuts;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -63,6 +65,7 @@ public:
 			, ConditionalJump_Index { -1000000 }
 			, ConditionalJump_EnabledKillsCount { false }
 			, ConditionalJump_ResetVariablesIfJump { false }
+			, BridgeRepairHuts { }
 		{ }
 
 		virtual ~ExtData() = default;
