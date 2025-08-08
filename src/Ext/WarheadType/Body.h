@@ -219,8 +219,6 @@ public:
 		bool HealthCheck;
 		TechnoClass* DamageAreaTarget;
 
-		Valueable<bool> CanKill;
-
 		Valueable<bool> Convert_UseUniversalDeploy;
 
 		Valueable<int> Ammo;
