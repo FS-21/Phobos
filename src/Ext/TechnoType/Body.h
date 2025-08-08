@@ -355,6 +355,8 @@ public:
 
 		Nullable<AffectedHouse> RadarInvisibleToHouse;
 
+		ValueableVector<double> DetectDisguise_Percent;
+
 		struct LaserTrailDataEntry
 		{
 			ValueableIdx<LaserTrailTypeClass> idxType;
@@ -686,6 +688,7 @@ public:
 
 			, SpawnDistanceFromTarget {}
 			, SpawnHeight {}
+			, DetectDisguise_Percent {}
 
 			, Webby_Anims {}
 			, ImmuneToWeb { false }

@@ -914,6 +914,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->FiringForceScatter.Read(exINI, pSection, "FiringForceScatter");
 
+	this->DetectDisguise_Percent.Read(exINI, pSection, "DetectDisguise.Percent");
+
 	this->EngineerRepairAmount.Read(exINI, pSection, "EngineerRepairAmount");
 
 	this->DebrisTypes_Limit.Read(exINI, pSection, "DebrisTypes.Limit");
@@ -1589,6 +1591,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 
 		.Process(this->SpawnDistanceFromTarget)
 		.Process(this->SpawnHeight)
+
+		.Process(this->DetectDisguise_Percent)
 		.Process(this->Webby_Anims)
 		.Process(this->ImmuneToWeb)
 		.Process(this->Webby_Duration)
