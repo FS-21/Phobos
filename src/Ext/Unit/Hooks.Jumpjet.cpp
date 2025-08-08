@@ -1,8 +1,10 @@
 #include <JumpjetLocomotionClass.h>
 #include <UnitClass.h>
 #include <Utilities/Macro.h>
+#include <Ext/Techno/Body.h>
 #include <Ext/TechnoType/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <Ext/Techno/Body.h>
 
 // Misc jumpjet facing, turning, drawing fix -- Author: Trsdy
 // Jumpjets stuck at FireError::FACING because Jumpjet has its own facing just for JumpjetTurnRate
@@ -13,10 +15,10 @@ DEFINE_HOOK(0x736F78, UnitClass_UpdateFiring_FireErrorIsFACING, 0x6)
 {
 	GET(UnitClass* const, pThis, ESI);
 
-	auto pType = pThis->Type;
+	const auto pType = pThis->Type;
 	CoordStruct& source = pThis->Location;
-	CoordStruct target = pThis->Target->GetCoords(); // Target checked so it's not null here
-	DirStruct tgtDir { Math::atan2(source.Y - target.Y, target.X - source.X) };
+	const CoordStruct target = pThis->Target->GetCoords(); // Target checked so it's not null here
+	const DirStruct tgtDir { Math::atan2(source.Y - target.Y, target.X - source.X) };
 
 	if (pType->Turret && !pType->HasTurret) // 0x736F92
 	{
@@ -24,7 +26,7 @@ DEFINE_HOOK(0x736F78, UnitClass_UpdateFiring_FireErrorIsFACING, 0x6)
 	}
 	else // 0x736FB6
 	{
-		if (auto jjLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor))
+		if (const auto jjLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor))
 		{
 			//wrong destination check and wrong Is_Moving usage for jumpjets, should have used Is_Moving_Now
 			if (jjLoco->State != JumpjetLocomotionClass::State::Cruising)
@@ -46,27 +48,40 @@ DEFINE_HOOK(0x736F78, UnitClass_UpdateFiring_FireErrorIsFACING, 0x6)
 }
 
 // For compatibility with previous builds
-DEFINE_HOOK(0x736EE9, UnitClass_UpdateFiring_FireErrorIsOK, 0x6)
+DEFINE_HOOK(0x736E6E, UnitClass_UpdateFiring_OmniFireTurnToTarget, 0x9)
 {
+	GET(FireError, err, EBP);
+
+	if (err != FireError::OK && err != FireError::REARM)
+		return 0;
+
 	GET(UnitClass* const, pThis, ESI);
-	GET(int const, wpIdx, EDI);
-	auto pType = pThis->Type;
+
+	if (pThis->IsWarpingIn())
+		return 0;
+
+	auto const pType = pThis->Type;
 
 	if ((pType->Turret && !pType->HasTurret) || pType->TurretSpins)
 		return 0;
 
+	GET(int const, wpIdx, EDI);
+
 	if ((pType->DeployFire || pType->DeployFireWeapon == wpIdx) && pThis->CurrentMission == Mission::Unload)
 		return 0;
 
+	if (err == FireError::REARM && !TechnoTypeExt::ExtMap.Find(pType)->NoTurret_TrackTarget.Get(RulesExt::Global()->NoTurret_TrackTarget))
+		return 0;
+
 	auto const pWpn = pThis->GetWeapon(wpIdx)->WeaponType;
+
 	if (pWpn->OmniFire)
 	{
-		const auto pTypeExt = WeaponTypeExt::ExtMap.Find(pWpn);
-		if (pTypeExt->OmniFire_TurnToTarget.Get() && !pThis->Locomotor->Is_Moving_Now())
+		if (WeaponTypeExt::ExtMap.Find(pWpn)->OmniFire_TurnToTarget.Get() && !pThis->Locomotor->Is_Moving_Now())
 		{
 			CoordStruct& source = pThis->Location;
-			CoordStruct target = pThis->Target->GetCoords();
-			DirStruct tgtDir { Math::atan2(source.Y - target.Y, target.X - source.X) };
+			const CoordStruct target = pThis->Target->GetCoords();
+			const DirStruct tgtDir { Math::atan2(source.Y - target.Y, target.X - source.X) };
 
 			if (pThis->GetRealFacing() != tgtDir)
 			{
@@ -86,11 +101,11 @@ void __stdcall JumpjetLocomotionClass_DoTurn(ILocomotion* iloco, DirStruct dir)
 	__assume(iloco != nullptr);
 	// This seems to be used only when unloading shit on the ground
 	// Rewrite just in case
-	auto pThis = static_cast<JumpjetLocomotionClass*>(iloco);
+	const auto pThis = static_cast<JumpjetLocomotionClass*>(iloco);
 	pThis->LocomotionFacing.SetDesired(dir);
 	pThis->LinkedTo->PrimaryFacing.SetDesired(dir);
 }
-DEFINE_JUMP(VTABLE, 0x7ECDB4, GET_OFFSET(JumpjetLocomotionClass_DoTurn))
+DEFINE_FUNCTION_JUMP(VTABLE, 0x7ECDB4, JumpjetLocomotionClass_DoTurn)
 
 DEFINE_HOOK(0x54D326, JumpjetLocomotionClass_MovementAI_CrashSpeedFix, 0x6)
 {
@@ -136,32 +151,10 @@ DEFINE_HOOK(0x736BA3, UnitClass_UpdateRotation_TurretFacing_Jumpjet, 0x6)
 	return 0;
 }
 
-// Bugfix: Jumpjet detect cloaked objects beneath
-DEFINE_HOOK(0x54C036, JumpjetLocomotionClass_State3_UpdateSensors, 0x7)
-{
-	GET(FootClass* const, pLinkedTo, ECX);
-	GET(CellStruct const, currentCell, EAX);
-
-	// Copied from FootClass::UpdatePosition
-	if (pLinkedTo->GetTechnoType()->SensorsSight)
-	{
-		CellStruct const lastCell = pLinkedTo->LastFlightMapCoords;
-
-		if (lastCell != currentCell)
-		{
-			pLinkedTo->RemoveSensorsAt(lastCell);
-			pLinkedTo->AddSensorsAt(currentCell);
-		}
-	}
-	// Something more may be missing
-
-	return 0;
-}
-
 DEFINE_HOOK(0x54CB0E, JumpjetLocomotionClass_State5_CrashSpin, 0x7)
 {
 	GET(JumpjetLocomotionClass*, pThis, EDI);
-	auto pTypeExt = TechnoTypeExt::ExtMap.Find(pThis->LinkedTo->GetTechnoType());
+	auto const pTypeExt = TechnoExt::ExtMap.Find(pThis->LinkedTo)->TypeExtData;
 	return pTypeExt->JumpjetRotateOnCrash ? 0 : 0x54CB3E;
 }
 
@@ -185,7 +178,24 @@ FireError __stdcall JumpjetLocomotionClass_Can_Fire(ILocomotion* pThis)
 	return FireError::OK;
 }
 
-DEFINE_JUMP(VTABLE, 0x7ECDF4, GET_OFFSET(JumpjetLocomotionClass_Can_Fire));
+DEFINE_FUNCTION_JUMP(VTABLE, 0x7ECDF4, JumpjetLocomotionClass_Can_Fire);
+
+DEFINE_HOOK(0x54DAC4, JumpjetLocomotionClass_EndPiggyback_Blyat, 0x6)
+{
+	GET(FootClass*, pLinkedTo, EAX);
+	auto const* pType = pLinkedTo->GetTechnoType();
+
+	pLinkedTo->PrimaryFacing.SetROT(pType->ROT);
+
+	if (pType->SensorsSight)
+	{
+		const auto pExt = TechnoExt::ExtMap.Find(pLinkedTo);
+		pLinkedTo->RemoveSensorsAt(pExt->LastSensorsMapCoords);
+		pLinkedTo->AddSensorsAt(CellStruct::Empty);
+	}
+
+	return 0;
+}
 
 // Fix initial facing when jumpjet locomotor is being attached
 DEFINE_HOOK(0x54AE44, JumpjetLocomotionClass_LinkToObject_FixFacing, 0x7)
@@ -211,21 +221,4 @@ void __stdcall JumpjetLocomotionClass_Unlimbo(ILocomotion* pThis)
 	pThisLoco->LocomotionFacing.SetDesired(pThisLoco->LinkedTo->PrimaryFacing.Desired());
 }
 
-DEFINE_JUMP(VTABLE, 0x7ECDB8, GET_OFFSET(JumpjetLocomotionClass_Unlimbo))
-
-DEFINE_HOOK(0x54DAC4, JumpjetLocomotionClass_EndPiggyback_Blyat, 0x6)
-{
-	GET(FootClass*, pLinked, EAX);
-	auto const* pType = pLinked->GetTechnoType();
-
-	pLinked->PrimaryFacing.SetROT(pType->ROT);
-
-	if (pType->SensorsSight)
-	{
-		pLinked->RemoveSensorsAt(pLinked->LastFlightMapCoords);
-		pLinked->RemoveSensorsAt(pLinked->GetMapCoords());
-		pLinked->AddSensorsAt(pLinked->GetMapCoords());
-	}
-
-	return 0;
-}
+DEFINE_FUNCTION_JUMP(VTABLE, 0x7ECDB8, JumpjetLocomotionClass_Unlimbo)
