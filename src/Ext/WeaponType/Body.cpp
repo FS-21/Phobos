@@ -179,6 +179,8 @@ void WeaponTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	{
 		this->SkipWeaponPicking = false;
 	}
+
+	this->Ammo.Read(exINI, pSection, "Ammo");
 }
 
 template <typename T>
@@ -255,6 +257,7 @@ void WeaponTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DelayedFire_OnlyOnInitialBurst)
 		.Process(this->DelayedFire_AnimOffset)
 		.Process(this->DelayedFire_AnimOnTurret)
+		.Process(this->Ammo)
 		;
 };
 

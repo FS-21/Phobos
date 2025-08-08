@@ -94,6 +94,7 @@ public:
 		Valueable<bool> DelayedFire_OnlyOnInitialBurst;
 		Nullable<CoordStruct> DelayedFire_AnimOffset;
 		Valueable<bool> DelayedFire_AnimOnTurret;
+		Nullable<int> Ammo;
 
 		bool SkipWeaponPicking;
 
@@ -169,6 +170,7 @@ public:
 			, RandomTarget { 0.0 }
 			//, RandomTarget_DistributeBurst { true }
 			, RandomTarget_Spawners_MultipleTargets { false }
+			, Ammo { }
 		{ }
 
 		int GetBurstDelay(int burstIndex) const;

@@ -172,6 +172,7 @@ This page lists all the individual contributions to the project by their author.
   - New EVA voice after deploying a building
   - Penetration damage on garrisonable structures
   - Engineer logics on Warheads
+  - `EMPulseCannon.InaccurateRadius` for projectiles in `EMPulseCannon=yes` superweapons and `Ammo` support
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
