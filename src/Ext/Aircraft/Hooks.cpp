@@ -26,6 +26,9 @@ DEFINE_HOOK(0x417FF1, AircraftClass_Mission_Attack_StrafeShots, 0x6)
 
 	AirAttackStatus const state = (AirAttackStatus)pThis->MissionStatus;
 	auto const pWeapon = pThis->GetWeapon(weaponIndex)->WeaponType;
+	if (!pWeapon)
+		return 0;
+
 	auto const pWeaponExt = WeaponTypeExt::ExtMap.Find(pWeapon);
 
 	if (state < AirAttackStatus::FireAtTarget2_Strafe
