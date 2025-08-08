@@ -258,6 +258,10 @@ public:
 		int TintColorForceShield;
 		int TintColorBerserk;
 
+		Nullable<bool> BattlePoints;
+		Nullable<int> BattlePoints_DefaultValue;
+		Nullable<int> BattlePoints_DefaultFriendlyValue;
+
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
 			, HarvesterDumpAmount { 0.0f }
@@ -458,6 +462,10 @@ public:
 
 			, AttackMove_IgnoreWeaponCheck { false }
 			, AttackMove_StopWhenTargetAcquired { }
+
+			, BattlePoints {}
+			, BattlePoints_DefaultValue {}
+			, BattlePoints_DefaultFriendlyValue {}
 		{ }
 
 		virtual ~ExtData() = default;

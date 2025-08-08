@@ -319,6 +319,10 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->DistributeTargetingFrame.Read(exINI, GameStrings::General, "DistributeTargetingFrame");
 	this->DistributeTargetingFrame_AIOnly.Read(exINI, GameStrings::General, "DistributeTargetingFrame.AIOnly");
 
+	this->BattlePoints.Read(exINI, GameStrings::General, "BattlePoints");
+	this->BattlePoints_DefaultValue.Read(exINI, GameStrings::General, "BattlePoints.DefaultValue");
+	this->BattlePoints_DefaultFriendlyValue.Read(exINI, GameStrings::General, "BattlePoints.DefaultFriendlyValue");
+
 	// Section AITargetTypes
 	int itemsCount = pINI->GetKeyCount("AITargetTypes");
 	for (int i = 0; i < itemsCount; ++i)
@@ -596,6 +600,9 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->TintColorBerserk)
 		.Process(this->AttackMove_IgnoreWeaponCheck)
 		.Process(this->AttackMove_StopWhenTargetAcquired)
+		.Process(this->BattlePoints)
+		.Process(this->BattlePoints_DefaultValue)
+		.Process(this->BattlePoints_DefaultFriendlyValue)
 		;
 }
 

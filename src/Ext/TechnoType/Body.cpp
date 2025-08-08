@@ -928,6 +928,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Ammo_AutoConvertMaximumAmount.Read(exINI, pSection, "Ammo.AutoConvertMaximumAmount");
 	this->Ammo_AutoConvertType.Read(exINI, pSection, "Ammo.AutoConvertType");
 
+	this->BattlePoints.Read(exINI, pSection, "BattlePoints");
+
 	// Ares 0.2
 	this->RadarJamRadius.Read(exINI, pSection, "RadarJamRadius");
 
@@ -1603,6 +1605,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->MultiWeapon_IsSecondary)
 		.Process(this->MultiWeapon_SelectCount)
 		.Process(this->ReadMultiWeapon)
+
+		.Process(this->BattlePoints)
 		;
 }
 void TechnoTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

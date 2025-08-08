@@ -448,6 +448,7 @@ New:
 - [Additional attached animation position customizations](Fixed-or-Improved-Logics.md#attached-animation-position-customization) (by Starkku)
 - Use `SkipCrushSlowdown=true` to avoid the bug related to `Accelerates=true` and `MovementZone=CrushAll` (by TaranDahl)
 - Unit & infantry auto-conversion on ammo change (by FS-21)
+- Battle Points economy for super weapons (by FS-21)
 
 Vanilla fixes:
 - Fixed sidebar not updating queued unit numbers when adding or removing units when the production is on hold (by CrimRecya)
