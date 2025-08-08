@@ -452,6 +452,7 @@ New:
 - Unit & infantry auto-conversion on ammo change (by FS-21)
 - Battle Points economy for super weapons (by FS-21)
 - New EVA voice after deploying a building (by FS-21)
+- Engineer logics on Warheads (by FS-21)
 
 Vanilla fixes:
 - Fixed sidebar not updating queued unit numbers when adding or removing units when the production is on hold (by CrimRecya)

@@ -171,6 +171,7 @@ This page lists all the individual contributions to the project by their author.
   - Battle Points economy for super weapons
   - New EVA voice after deploying a building
   - Penetration damage on garrisonable structures
+  - Engineer logics on Warheads
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

@@ -317,6 +317,7 @@ public:
 	static void PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo = nullptr, bool forceFullTransfer = true, bool dontCheckInvalidOccupiers = true);
 	static UnitTypeClass* GetUnitTypeExtra(UnitClass* pUnit);
 	static AircraftTypeClass* GetAircraftTypeExtra(AircraftClass* pAircraft);
+	static bool CanBeAffectedByFakeEngineer(TechnoClass* pThis, TechnoClass* pBuilding, bool checkBridge = false, bool checkCapturableBuilding = false, bool checkAttachedBombs = false);
 	static bool IsValidTechno(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed = true);
 	static bool IsValidTechno(AbstractClass* pObject, bool checkIfInTransportOrAbsorbed = true);
 
