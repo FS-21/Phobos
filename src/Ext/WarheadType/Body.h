@@ -193,6 +193,13 @@ public:
 		Valueable<double> AffectsAbovePercent;
 		Valueable<bool> AffectsNeutral;
 
+		Valueable<bool> CanKill;
+
+		Valueable<bool> PenetratesGarrison;
+		Valueable<bool> PenetratesGarrison_RandomTarget;
+		Valueable<PartialVector2D<double>> PenetratesGarrison_DamageMultiplier;
+		NullableIdx<VocClass> PenetratesGarrison_CleanSound;
+
 		// Ares tags
 		// http://ares-developers.github.io/Ares-docs/new/warheads/general.html
 		Valueable<bool> AffectsEnemies;
@@ -422,6 +429,11 @@ public:
 			, Webby_Cap { -1 }
 
 			, KickOutKickablePassengers { false }
+
+			, PenetratesGarrison { false }
+			, PenetratesGarrison_RandomTarget { true }
+			, PenetratesGarrison_DamageMultiplier { { 1.0, 1.0 } }
+			, PenetratesGarrison_CleanSound { }
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);
@@ -450,7 +462,7 @@ public:
 		void InterceptBullets(TechnoClass* pOwner, BulletClass* pInterceptor, const CoordStruct& coords);
 		DamageAreaResult DamageAreaWithTarget(const CoordStruct& coords, int damage, TechnoClass* pSource, WarheadTypeClass* pWH, bool affectsTiberium, HouseClass* pSourceHouse, TechnoClass* pTarget);
 	private:
-		void DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* pOwner = nullptr, bool bulletWasIntercepted = false);
+		void DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget, const CoordStruct& coords, int damage, TechnoClass* pOwner = nullptr, bool bulletWasIntercepted = false);
 		void ApplyRemoveDisguise(HouseClass* pHouse, TechnoClass* pTarget);
 		void ApplyRemoveMindControl(TechnoClass* pTarget);
 		void ApplyCrit(HouseClass* pHouse, TechnoClass* pTarget, TechnoClass* Owner);
@@ -459,6 +471,7 @@ public:
 		void ApplyBuildingUndeploy(TechnoClass* pTarget);
 		double GetCritChance(TechnoClass* pFirer) const;
 		void ApplyAmmoModifier(TechnoClass* pTarget);
+		void ApplyPenetratesGarrison(HouseClass* pInvokerHouse, TechnoClass* pTarget, TechnoClass* pInvoker, int damage, const CoordStruct& coords);
 	};
 
 	class ExtContainer final : public Container<WarheadTypeExt>

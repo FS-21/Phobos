@@ -933,6 +933,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->BattlePoints.Read(exINI, pSection, "BattlePoints");
 
+	this->PenetratesGarrison_Allowed.Read(exINI, pSection, "PenetratesGarrison.Allowed");
+
 	// Ares 0.2
 	this->RadarJamRadius.Read(exINI, pSection, "RadarJamRadius");
 
@@ -1736,6 +1738,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Ammo_AutoConvertType)
 
 		.Process(this->NoManualUnload)
+
+		.Process(this->PenetratesGarrison_Allowed)
 
 		.Process(this->FiringForceScatter)
 

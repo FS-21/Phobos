@@ -308,6 +308,11 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	if (this->AffectsAbovePercent > this->AffectsBelowPercent)
 		Debug::Log("[Developer warning][%s] AffectsAbovePercent is bigger than AffectsBelowPercent, the warhead will never activate!\n", pSection);
 
+	this->PenetratesGarrison.Read(exINI, pSection, "PenetratesGarrison");
+	this->PenetratesGarrison_RandomTarget.Read(exINI, pSection, "PenetratesGarrison.RandomTarget");
+	this->PenetratesGarrison_DamageMultiplier.Read(exINI, pSection, "PenetratesGarrison.DamageMultiplier");
+	this->PenetratesGarrison_CleanSound.Read(exINI, pSection, "PenetratesGarrison.CleanSound");
+
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
 	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
@@ -368,6 +373,7 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->BuildingUndeploy
 		|| this->Ammo
 		|| this->KickOutKickablePassengers
+		|| this->PenetratesGarrison
 	);
 
 	char tempBuffer[32];
@@ -584,6 +590,13 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Webby_Duration)
 		.Process(this->Webby_DurationVariation)
 		.Process(this->Webby_Cap)
+
+		.Process(this->CanKill)
+
+		.Process(this->PenetratesGarrison)
+		.Process(this->PenetratesGarrison_RandomTarget)
+		.Process(this->PenetratesGarrison_DamageMultiplier)
+		.Process(this->PenetratesGarrison_CleanSound)
 
 		// Ares tags
 		.Process(this->AffectsEnemies)

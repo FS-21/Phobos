@@ -170,6 +170,7 @@ This page lists all the individual contributions to the project by their author.
   - AI learning
   - Battle Points economy for super weapons
   - New EVA voice after deploying a building
+  - Penetration damage on garrisonable structures
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
