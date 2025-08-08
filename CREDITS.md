@@ -174,6 +174,7 @@ This page lists all the individual contributions to the project by their author.
   - Penetration damage on garrisonable structures
   - Engineer logics on Warheads
   - `EMPulseCannon.InaccurateRadius` for projectiles in `EMPulseCannon=yes` superweapons and `Ammo` support
+  - Additional conversion animation
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
