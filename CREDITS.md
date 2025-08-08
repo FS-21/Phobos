@@ -153,6 +153,7 @@ This page lists all the individual contributions to the project by their author.
   - Warhead activation target health thresholds enhancements
   - Event 606: AttachEffect is attaching to a Techno
   - Linked superweapons
+  - Reveal area on impact
   - Customizable disguised target evaluation behaviour in new ScriptType attack actions
   - New AI teams selector
   - `RandomTarget` for random projectile retargeting
