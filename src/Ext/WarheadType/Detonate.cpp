@@ -96,7 +96,7 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 			int radius = this->RevealAreaRadius.Get();
 			auto pFirer = pBulletExt->FirerHouse;
 
-			for (auto pOtherHouse : *HouseClass::Array)
+			for (auto pOtherHouse : HouseClass::Array)
 			{
 				auto pHouse = pFirer ? pFirer : pOtherHouse;
 
@@ -106,8 +106,8 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 					pHouse->IsAlliedWith(pOtherHouse))    // Not Allied
 				{
 					// Ares used this function like this:
-					MapClass::Instance->RevealArea2(&coords, radius, pOtherHouse, 0, 0, 0, 0, 0);
-					MapClass::Instance->RevealArea2(&coords, radius, pOtherHouse, 0, 0, 0, 0, 1);
+					MapClass::Instance.RevealArea2(&coords, radius, pOtherHouse, 0, 0, 0, 0, 0);
+					MapClass::Instance.RevealArea2(&coords, radius, pOtherHouse, 0, 0, 0, 0, 1);
 				}
 			}
 		}
