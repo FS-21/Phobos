@@ -68,12 +68,14 @@
     <ClCompile Include="src\Ext\Bullet\Trajectories\ParabolaTrajectory.cpp" />
     <ClCompile Include="src\Ext\CaptureManager\Hooks.cpp" />
     <ClCompile Include="src\Ext\CaptureManager\Body.cpp" />
+    <ClCompile Include="src\Ext\House\Body.Prerequisites.cpp" />
     <ClCompile Include="src\Ext\OverlayType\Body.cpp" />
     <ClCompile Include="src\Ext\OverlayType\Hooks.cpp" />
     <ClCompile Include="src\Ext\ParticleType\Body.cpp" />
     <ClCompile Include="src\Ext\ParticleType\Hooks.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.AILearning.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.cpp" />
+    <ClCompile Include="src\Ext\Scenario\Hooks.NewTeamsSelector.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.Variables.cpp" />
     <ClCompile Include="src\Ext\Script\Body.AngerNodes.cpp" />
     <ClCompile Include="src\Ext\Script\ConditionalJump.cpp" />
@@ -88,6 +90,7 @@
     <ClCompile Include="src\Ext\TAction\Body.cpp" />
     <ClCompile Include="src\Ext\TAction\Hooks.cpp" />
     <ClCompile Include="src\Ext\Team\Body.cpp" />
+    <ClCompile Include="src\Ext\Team\Body.NewTeamsSelector.cpp" />
     <ClCompile Include="src\Ext\Team\Hooks.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.UniversalDeploy.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.Pips.cpp" />

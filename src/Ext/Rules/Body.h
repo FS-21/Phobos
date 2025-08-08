@@ -248,6 +248,18 @@ public:
 
 		Valueable<bool> AnimCraterDestroyTiberium;
 
+		DynamicVectorClass<DynamicVectorClass<int>> GenericPrerequisites;
+		DynamicVectorClass<const char*> GenericPrerequisitesNames;
+
+		Valueable<bool> NewTeamsSelector;
+		Valueable<bool> NewTeamsSelector_SplitTriggersByCategory;
+		Valueable<bool> NewTeamsSelector_EnableFallback;
+		Valueable<int> NewTeamsSelector_MergeUnclassifiedCategoryWith;
+		Valueable<double> NewTeamsSelector_UnclassifiedCategoryPercentage;
+		Valueable<double> NewTeamsSelector_GroundCategoryPercentage;
+		Valueable<double> NewTeamsSelector_NavalCategoryPercentage;
+		Valueable<double> NewTeamsSelector_AirCategoryPercentage;
+
 		Valueable<AffectedHouse> BerzerkTargeting;
 
 		Valueable<bool> AttackMove_IgnoreWeaponCheck;
@@ -394,6 +406,16 @@ public:
 			, AILearning_Weight_Decrement { }
 			, AILearning_ScenarioName { }
 			, AILearning_OnlySupportedMaps { true }
+			, GenericPrerequisites { }
+			, GenericPrerequisitesNames { }
+			, NewTeamsSelector { false }
+			, NewTeamsSelector_SplitTriggersByCategory { true }
+			, NewTeamsSelector_EnableFallback { false }
+			, NewTeamsSelector_MergeUnclassifiedCategoryWith { -1 }
+			, NewTeamsSelector_UnclassifiedCategoryPercentage { 0.25 }
+			, NewTeamsSelector_GroundCategoryPercentage { 0.25 }
+			, NewTeamsSelector_NavalCategoryPercentage { 0.25 }
+			, NewTeamsSelector_AirCategoryPercentage { 0.25 }
 			, DropPodTrailer { }
 			, DropPodDefaultTrailer { }
 			, PodImage { }
@@ -516,4 +538,6 @@ public:
 	{
 		Global()->InvalidatePointer(ptr, removed);
 	}
+
+	static void FillDefaultPrerequisites();
 };

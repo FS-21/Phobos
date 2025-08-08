@@ -687,6 +687,7 @@ void HouseExt::ExtData::Serialize(T& Stm)
 		.Process(this->ForceOnlyTargetHouseEnemy)
 		.Process(this->ForceOnlyTargetHouseEnemyMode)
 		.Process(this->BattlePoints)
+		.Process(this->AITriggers_ValidList)
 		;
 }
 

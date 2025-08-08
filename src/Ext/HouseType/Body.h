@@ -14,10 +14,21 @@ public:
 	class ExtData final : public Extension<HouseTypeClass>
 	{
 	public:
+		Nullable<int> NewTeamsSelector_MergeUnclassifiedCategoryWith;
+		Nullable<double> NewTeamsSelector_UnclassifiedCategoryPercentage;
+		Nullable<double> NewTeamsSelector_GroundCategoryPercentage;
+		Nullable<double> NewTeamsSelector_NavalCategoryPercentage;
+		Nullable<double> NewTeamsSelector_AirCategoryPercentage;
+
 		Valueable<bool> BattlePoints;
 		Valueable<bool> BattlePoints_CanUseStandardPoints;
 
 		ExtData(HouseTypeClass* OwnerObject) : Extension<HouseTypeClass>(OwnerObject)
+			, NewTeamsSelector_MergeUnclassifiedCategoryWith { }
+			, NewTeamsSelector_UnclassifiedCategoryPercentage { }
+			, NewTeamsSelector_GroundCategoryPercentage { }
+			, NewTeamsSelector_NavalCategoryPercentage { }
+			, NewTeamsSelector_AirCategoryPercentage { }
 			, BattlePoints { false }
 			, BattlePoints_CanUseStandardPoints { false }
 		{ }
