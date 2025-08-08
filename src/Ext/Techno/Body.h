@@ -6,9 +6,11 @@
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
 #include <Utilities/Macro.h>
+#include <Utilities/EnumFunctions.h>
 #include <New/Entity/ShieldClass.h>
 #include <New/Entity/LaserTrailClass.h>
 #include <New/Entity/AttachEffectClass.h>
+#include <Ext/Event/Body.h>
 
 class BulletClass;
 
@@ -59,6 +61,10 @@ public:
 		DWORD LastTargetID;
 		int AccumulatedGattlingValue;
 		bool ShouldUpdateGattlingValue;
+		int OriginalTargetWeaponIndex;
+		AbstractClass* OriginalTarget;
+		bool ResetRandomTarget;
+		TechnoClass* CurrentRandomTarget;
 		int AttachedEffectInvokerCount;
 
 		// Used for Passengers.SyncOwner.RevertOnExit instead of TechnoClass::InitialOwner / OriginallyOwnedByHouse,
@@ -149,6 +155,10 @@ public:
 			, LastSensorsMapCoords { CellStruct::Empty }
 			, TiberiumEater_Timer {}
 			, AirstrikeTargetingMe { nullptr }
+			, OriginalTarget { nullptr }
+			, ResetRandomTarget { false }
+			, CurrentRandomTarget { nullptr }
+			, OriginalTargetWeaponIndex { -1 }
 			, Convert_UniversalDeploy_DeployAnim { nullptr }
 			, Convert_UniversalDeploy_InProgress { false }
 			, Convert_UniversalDeploy_MakeInvisible { false }
@@ -210,6 +220,7 @@ public:
 		void InitializeDisplayInfo();
 		void ApplyMindControlRangeLimit();
 		int ApplyForceWeaponInRange(AbstractClass* pTarget);
+		void UpdateRandomTargets();
 		void ResetDelayedFireTimer();
 		void UpdateTintValues();
 		void WebbyUpdate();
@@ -295,6 +306,8 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, BuildingSelectBracketPosition bracketPosition);
 	static void DrawSelectBox(TechnoClass* pThis, const Point2D* pLocation, const RectangleStruct* pBounds, bool drawBefore = false);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
+	static void NewRandomTarget(TechnoClass* pThis = nullptr);
+	static TechnoClass* FindRandomTarget(TechnoClass* pThis = nullptr);
 	static int GetDropCrateIndex(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue, int infoIndex);
 	static void GetDigitalDisplayFakeHealth(TechnoClass* pThis, int& value, int& maxValue);
@@ -328,4 +341,7 @@ public:
 	//static void UpdateUniversalDeploy(TechnoClass* pThis);
 
 	static bool MultiWeaponCanFire(TechnoClass* const pThis, AbstractClass* const pTarget, WeaponTypeClass* const pWeaponType);
+
+	static void SendStopRandomTargetTarNav(TechnoClass* pThis);
+	static void HandleStopRandomTargetTarNav(EventExt* event);
 };

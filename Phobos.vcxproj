@@ -41,6 +41,8 @@
     <ClCompile Include="src\Ext\Unit\Hooks.Harvester.cpp" />
     <ClCompile Include="src\Ext\Unit\Hooks.Sinking.cpp" />
     <ClCompile Include="src\Misc\Hooks.AlphaImage.cpp" />
+    <ClCompile Include="src\Ext\Techno\Body.RandomTarget.cpp" />
+    <ClCompile Include="src\Ext\Techno\Hooks.RandomTarget.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.SkipMapSelect.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.ConvertRefillPassengers.cpp" />
     <ClCompile Include="src\New\Entity\AttachEffectClass.cpp" />
@@ -130,6 +132,7 @@
     <ClCompile Include="src\Ext\Bullet\Body.cpp" />
     <ClCompile Include="src\Ext\Bullet\Hooks.cpp" />
     <ClCompile Include="src\Ext\Bullet\Hooks.Obstacles.cpp" />
+    <ClCompile Include="src\Ext\Event\Body.cpp" />
     <ClCompile Include="src\Ext\House\Body.cpp" />
     <ClCompile Include="src\Ext\House\Hooks.cpp" />
     <ClCompile Include="src\Ext\House\Hooks.AINavalProduction.cpp" />
@@ -248,6 +251,7 @@
     <ClInclude Include="src\Ext\Bullet\Trajectories\PhobosTrajectory.h" />
     <ClInclude Include="src\Ext\Bullet\Trajectories\StraightTrajectory.h" />
     <ClInclude Include="src\Ext\Bullet\Trajectories\ParabolaTrajectory.h" />
+    <ClInclude Include="src\Ext\Event\Body.h" />
     <ClInclude Include="src\Ext\OverlayType\Body.h" />
     <ClInclude Include="src\Ext\ParticleType\Body.h" />
     <ClInclude Include="src\Ext\Sidebar\Body.h" />

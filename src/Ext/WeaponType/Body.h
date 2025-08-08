@@ -41,6 +41,7 @@ public:
 		Valueable<AffectedHouse> CanTargetHouses;
 		Valueable<double> CanTarget_MaxHealth;
 		Valueable<double> CanTarget_MinHealth;
+		ValueableVector<TechnoTypeClass*> OnlyTargetTechnos;
 		ValueableVector<int> Burst_Delays;
 		Valueable<bool> Burst_FireWithinSequence;
 		Valueable<bool> Burst_NoDelay;
@@ -73,6 +74,10 @@ public:
 		Valueable<bool> KeepRange_AllowPlayer;
 		Valueable<int> KeepRange_EarlyStopFrame;
 		Valueable<bool> KickOutPassengers;
+		Valueable<double> RandomTarget;
+		//Valueable<bool> RandomTarget_DistributeBurst;
+		Valueable<bool> RandomTarget_Spawners_MultipleTargets;
+
 		Nullable<ColorStruct> Beam_Color;
 		Valueable<int> Beam_Duration;
 		Valueable<double> Beam_Amplitude;
@@ -111,6 +116,7 @@ public:
 			, CanTargetHouses { AffectedHouse::All }
 			, CanTarget_MaxHealth { 1.0 }
 			, CanTarget_MinHealth { 0.0 }
+			, OnlyTargetTechnos {}
 			, Burst_Delays {}
 			, Burst_FireWithinSequence { false }
 			, Burst_NoDelay { false }
@@ -160,11 +166,15 @@ public:
 			, DelayedFire_OnlyOnInitialBurst { false }
 			, DelayedFire_AnimOffset {}
 			, DelayedFire_AnimOnTurret { true }
+			, RandomTarget { 0.0 }
+			//, RandomTarget_DistributeBurst { true }
+			, RandomTarget_Spawners_MultipleTargets { false }
 		{ }
 
 		int GetBurstDelay(int burstIndex) const;
 		bool HasRequiredAttachedEffects(TechnoClass* pTechno, TechnoClass* pFirer) const;
 		bool IsHealthInThreshold(TechnoClass* pTarget) const;
+		bool CanOnlyTargetTheseTechnos(TechnoTypeClass* pType) const;
 
 		virtual ~ExtData() = default;
 

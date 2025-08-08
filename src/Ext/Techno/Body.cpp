@@ -1060,6 +1060,10 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->LastSensorsMapCoords)
 		.Process(this->TiberiumEater_Timer)
 		.Process(this->AirstrikeTargetingMe)
+		.Process(this->OriginalTargetWeaponIndex)
+		.Process(this->OriginalTarget)
+		.Process(this->ResetRandomTarget)
+		.Process(this->CurrentRandomTarget)
 		.Process(this->Convert_UniversalDeploy_DeployAnim)
 		.Process(this->Convert_UniversalDeploy_InProgress)
 		.Process(this->Convert_UniversalDeploy_MakeInvisible)
@@ -1092,6 +1096,8 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 void TechnoExt::ExtData::InvalidatePointer(void* ptr, bool bRemoved)
 {
 	AnnounceInvalidPointer(this->AirstrikeTargetingMe, ptr);
+	AnnounceInvalidPointer(CurrentRandomTarget, ptr);
+	AnnounceInvalidPointer(OriginalTarget, ptr);
 	AnnounceInvalidPointer(OriginalPassengerOwner, ptr);
 	AnnounceInvalidPointer(Convert_UniversalDeploy_TemporalTechno, ptr);
 	AnnounceInvalidPointer(Convert_UniversalDeploy_DeployAnim, ptr);
