@@ -35,6 +35,8 @@ void TeamExt::ExtData::Serialize(T& Stm)
 		.Process(this->ConditionalJump_ResetVariablesIfJump)
 		.Process(this->BridgeRepairHuts)
 		.Process(this->MinAmmoThreshold)
+		.Process(this->TriggersSideIdx)
+		.Process(this->TriggersHouseIdx)
 		;
 }
 

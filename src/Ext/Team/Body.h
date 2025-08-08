@@ -51,6 +51,8 @@ public:
 		bool ConditionalJump_ResetVariablesIfJump;
 		std::vector<TechnoClass*> BridgeRepairHuts;
 		int MinAmmoThreshold;
+		int TriggersSideIdx;
+		int TriggersHouseIdx;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -79,6 +81,8 @@ public:
 			, ConditionalJump_ResetVariablesIfJump { false }
 			, BridgeRepairHuts { }
 			, MinAmmoThreshold { 0 }
+			, TriggersSideIdx { -1 }
+			, TriggersHouseIdx { -1 }
 		{ }
 
 		virtual ~ExtData() = default;
