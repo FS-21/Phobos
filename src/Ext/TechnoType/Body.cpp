@@ -1190,6 +1190,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->LoadFromINIByWhatAmI(exArtINI, pArtSection);
 
 	this->NoManualUnload.Read(exINI, pSection, "NoManualUnload");
+
+	DropCrate.Read(exINI, pSection, "DropCrate");
 }
 
 void TechnoTypeExt::ExtData::LoadFromINIByWhatAmI(INI_EX& exArtINI, const char* pArtSection)
@@ -1589,6 +1591,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->FireUp)
 		.Process(this->FireUp_ResetInRetarget)
 		//.Process(this->SecondaryFire)
+
+		.Process(this->DropCrate)
 
 		.Process(this->DebrisTypes_Limit)
 		.Process(this->DebrisMinimums)

@@ -423,6 +423,8 @@ public:
 		Valueable<bool> FireUp_ResetInRetarget;
 		//Nullable<int> SecondaryFire;
 
+		Nullable<Powerup> DropCrate;
+
 		Nullable<bool> DebrisTypes_Limit;
 		ValueableVector<int> DebrisMinimums;
 
@@ -813,6 +815,8 @@ public:
 			, FireUp { -1 }
 			, FireUp_ResetInRetarget { true }
 			//, SecondaryFire {}
+
+			, DropCrate { }
 
 			, DebrisTypes_Limit {}
 			, DebrisMinimums {}
