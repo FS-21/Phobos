@@ -169,6 +169,7 @@ This page lists all the individual contributions to the project by their author.
   - Kick out ejectable passengers in warheads
   - AI learning
   - Battle Points economy for super weapons
+  - New EVA voice after deploying a building
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

@@ -270,6 +270,8 @@ public:
 		int TintColorForceShield;
 		int TintColorBerserk;
 
+		std::vector<std::string> EVAIndexList;
+
 		Nullable<bool> BattlePoints;
 		Nullable<int> BattlePoints_DefaultValue;
 		Nullable<int> BattlePoints_DefaultFriendlyValue;
@@ -485,6 +487,8 @@ public:
 			, AttackMove_IgnoreWeaponCheck { false }
 			, AttackMove_StopWhenTargetAcquired { }
 
+			, EVAIndexList {}
+
 			, BattlePoints {}
 			, BattlePoints_DefaultValue {}
 			, BattlePoints_DefaultFriendlyValue {}
@@ -505,6 +509,7 @@ public:
 		virtual void SaveToStream(PhobosStreamWriter& Stm) override;
 
 		void ReplaceVoxelLightSources();
+		void LoadEvaVoices();
 
 	private:
 		template <typename T>

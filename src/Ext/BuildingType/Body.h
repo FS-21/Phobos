@@ -102,6 +102,11 @@ public:
 
 		ValueableVector<bool> HasPowerUpAnim;
 
+		Nullable<int> NewEvaVoice_Index;
+		Valueable<int> NewEvaVoice_Priority;
+		Valueable<bool> NewEvaVoice_RecheckOnDeath;
+		NullableIdx<VoxClass> NewEvaVoice_InitialMessage;
+
 		Nullable<bool> BattlePointsCollector;
 
 		ExtData(BuildingTypeClass* OwnerObject) : Extension<BuildingTypeClass>(OwnerObject)
@@ -168,6 +173,10 @@ public:
 			, BuildingRepairedSound {}
 			, Refinery_UseNormalActiveAnim { false }
 			, HasPowerUpAnim {}
+			, NewEvaVoice_Index {}
+			, NewEvaVoice_Priority { 0 }
+			, NewEvaVoice_RecheckOnDeath { false }
+			, NewEvaVoice_InitialMessage { }
 			, BattlePointsCollector {}
 		{ }
 

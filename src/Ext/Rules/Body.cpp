@@ -323,6 +323,9 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->BattlePoints_DefaultValue.Read(exINI, GameStrings::General, "BattlePoints.DefaultValue");
 	this->BattlePoints_DefaultFriendlyValue.Read(exINI, GameStrings::General, "BattlePoints.DefaultFriendlyValue");
 
+	// Reading Ares section [EVATypes] at evamd.ini
+	LoadEvaVoices();
+
 	// Section AITargetTypes
 	int itemsCount = pINI->GetKeyCount("AITargetTypes");
 	for (int i = 0; i < itemsCount; ++i)
@@ -702,6 +705,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->BattlePoints)
 		.Process(this->BattlePoints_DefaultValue)
 		.Process(this->BattlePoints_DefaultFriendlyValue)
+		.Process(this->EVAIndexList)
 		;
 }
 
@@ -742,6 +746,49 @@ void RulesExt::ExtData::ReplaceVoxelLightSources()
 
 	if (needCacheFlush)
 		Game::DestroyVoxelCaches();
+}
+
+void RulesExt::ExtData::LoadEvaVoices()
+{
+	CCFileClass pEvamdFile("evamd.ini");
+
+	if (pEvamdFile.Exists() && pEvamdFile.Open(FileAccessMode::Read))
+	{
+		CCINIClass iniEva;
+		iniEva.ReadCCFile(&pEvamdFile, true);
+		iniEva.CurrentSection = nullptr;
+		iniEva.CurrentSectionName = nullptr;
+		const auto pEvaSection = "EVATypes";
+
+		if (iniEva.GetSection(pEvaSection))
+		{
+			this->EVAIndexList.clear();
+
+			// Default EVA voices
+			this->EVAIndexList.emplace_back(GameStrings::Allied);
+			this->EVAIndexList.emplace_back(GameStrings::Russian);
+			this->EVAIndexList.emplace_back(GameStrings::Yuri);
+
+			// New EVA voices due to a new Ares section in evamd.ini
+			const auto count = (std::size_t)iniEva.GetKeyCount(pEvaSection);
+
+			for (std::size_t i = 0; i < count; i++)
+			{
+				const auto pEvaKey = iniEva.GetKeyName(pEvaSection, i);
+
+				if (iniEva.ReadString(pEvaSection, pEvaKey, "", Phobos::readBuffer) > 0)
+				{
+					std::string buffer = Phobos::readBuffer;
+					bool found = std::find(this->EVAIndexList.begin(), this->EVAIndexList.end(), buffer) != this->EVAIndexList.end();
+
+					if (!found)
+						this->EVAIndexList.emplace_back(buffer);
+				}
+			}
+		}
+	}
+
+	pEvamdFile.Close();
 }
 
 // =============================
