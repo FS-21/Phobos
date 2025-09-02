@@ -443,8 +443,14 @@ void ScriptExt::WaitUntilFullAmmoAction(TeamClass* pTeam)
 						// Fix YR bug (when returns from the last attack the aircraft switch in loop between Mission::Enter & Mission::Guard, making it impossible to land in the dock)
 						if (pUnit->IsInAir() && pUnit->CurrentMission != Mission::Enter)
 						{
-							pUnit->QueueMission(Mission::Enter, true);
-							pUnit->MissionStatus = (int)AirAttackStatus::ReturnToBase;
+							//pUnit->QueueMission(Mission::Enter, true);
+							pAircraft->IsLocked = false;
+							pAircraft->MissionStatus = (int)AirAttackStatus::ReturnToBase;
+
+							if (pAircraft->MegaMissionIsAttackMove())
+								pAircraft->ClearMegaMissionData();
+
+							pAircraft->EnterIdleMode(false, true);
 						}
 
 						return;
