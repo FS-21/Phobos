@@ -40,6 +40,8 @@ public:
 
 		std::vector<double> AITriggerWeigths;
 		
+		char ScenarioFileName[260];
+
 		bool SWSidebar_Enable;
 		std::vector<int> SWSidebar_Indices;
 
@@ -92,6 +94,7 @@ public:
 			, AutoDeathObjects {}
 			, TransportReloaders {}
 			, AITriggerWeigths { }
+			, ScenarioFileName { "" }
 			, SWSidebar_Enable { true }
 			, SWSidebar_Indices {}
 			, NewMessageList {}
