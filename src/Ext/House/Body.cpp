@@ -689,6 +689,7 @@ void HouseExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_Carriers)
 		.Process(this->DropshipLoadout_Cargo)
 		.Process(this->BattlePoints)
+		.Process(this->AITriggers_ValidList)
 		;
 }
 

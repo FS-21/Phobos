@@ -168,6 +168,7 @@ This page lists all the individual contributions to the project by their author.
   - AI learning
   - Battle Points economy for super weapons
   - `RandomTarget` for random projectile retargeting
+  - New AI teams selector
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

@@ -45,6 +45,12 @@ public:
 		Valueable<bool> BattlePoints;
 		Valueable<bool> BattlePoints_CanUseStandardPoints;
 
+		Nullable<int> NewTeamsSelector_MergeUnclassifiedCategoryWith;
+		Nullable<double> NewTeamsSelector_UnclassifiedCategoryPercentage;
+		Nullable<double> NewTeamsSelector_GroundCategoryPercentage;
+		Nullable<double> NewTeamsSelector_NavalCategoryPercentage;
+		Nullable<double> NewTeamsSelector_AirCategoryPercentage;
+
 		ExtData(HouseTypeClass* OwnerObject) : Extension<HouseTypeClass>(OwnerObject)
 			, DropshipLoadout_StartingDropships {}
 			, DropshipLoadout_AllowableUnits {}
@@ -73,6 +79,11 @@ public:
 			, DropshipLoadout_BuyClickSound {}
 			, DropshipLoadout_SellClickSound {}
 			, DropshipLoadout_ArrowsClickSound {}
+			, NewTeamsSelector_MergeUnclassifiedCategoryWith { }
+			, NewTeamsSelector_UnclassifiedCategoryPercentage { }
+			, NewTeamsSelector_GroundCategoryPercentage { }
+			, NewTeamsSelector_NavalCategoryPercentage { }
+			, NewTeamsSelector_AirCategoryPercentage { }
 		{ }
 
 		virtual ~ExtData() = default;
