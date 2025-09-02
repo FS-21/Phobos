@@ -167,6 +167,7 @@ This page lists all the individual contributions to the project by their author.
   - Kick out ejectable passengers in warheads
   - AI learning
   - Battle Points economy for super weapons
+  - `RandomTarget` for random projectile retargeting
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

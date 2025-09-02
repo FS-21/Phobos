@@ -1097,6 +1097,10 @@ void TechnoExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_UniversalDeploy_TemporalTechno)
 		.Process(this->Convert_UniversalDeploy_IsOriginalDeployer)
 		.Process(this->Convert_UniversalDeploy_RememberTarget)
+		.Process(this->OriginalTargetWeaponIndex)
+		.Process(this->OriginalTarget)
+		.Process(this->ResetRandomTarget)
+		.Process(this->CurrentRandomTarget)
 		.Process(this->FiringAnimationTimer)
 		.Process(this->SimpleDeployerAnimationTimer)
 		.Process(this->DelayedFireSequencePaused)
@@ -1129,6 +1133,8 @@ void TechnoExt::ExtData::InvalidatePointer(void* ptr, bool bRemoved)
 	AnnounceInvalidPointer(Convert_UniversalDeploy_DeployAnim, ptr);
 	AnnounceInvalidPointer(Convert_UniversalDeploy_RememberTarget, ptr);
 	AnnounceInvalidPointer(WebbyLastTarget, ptr);
+	AnnounceInvalidPointer(CurrentRandomTarget, ptr);
+	AnnounceInvalidPointer(OriginalTarget, ptr);
 }
 
 void TechnoExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

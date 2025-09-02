@@ -12,9 +12,10 @@ enum class EventTypeExt : uint8_t
 	// Ares used Events 0x60 and 0x61
 
 	SyncPassengersTar = 0x4B,
+	SyncStopRandomTargetTarNav = 0x49,
 
 	FIRST = SyncPassengersTar,
-	LAST = SyncPassengersTar
+	LAST = SyncStopRandomTargetTarNav
 };
 
 #pragma pack(push, 1)
@@ -33,6 +34,12 @@ public:
 		{
 			int TechnoUniqueID;
 		} SyncPassengersTar;
+
+
+		struct SyncStopRandomTargetTarNav
+		{
+			int TechnoUniqueID;
+		} SyncStopRandomTargetTarNav;
 	};
 
 	bool AddEvent();
