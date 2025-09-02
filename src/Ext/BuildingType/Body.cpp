@@ -212,6 +212,11 @@ void BuildingTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	key = nullptr;
 
+	this->NewEvaVoice_Index.Read(exINI, pSection, "NewEVAVoice.Index");
+	this->NewEvaVoice_Priority.Read(exINI, pSection, "NewEVAVoice.Priority");
+	this->NewEvaVoice_RecheckOnDeath.Read(exINI, pSection, "NewEVAVoice.RecheckOnDeath");
+	this->NewEvaVoice_InitialMessage.Read(exINI, pSection, "NewEVAVoice.InitialMessage");
+
 	if (pThis->NumberOfDocks > 0)
 	{
 		this->AircraftDockingDirs.clear();
@@ -356,6 +361,10 @@ void BuildingTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Refinery_UseNormalActiveAnim)
 		.Process(this->HasPowerUpAnim)
 		.Process(this->BattlePointsCollector)
+		.Process(this->NewEvaVoice_Index)
+		.Process(this->NewEvaVoice_Priority)
+		.Process(this->NewEvaVoice_RecheckOnDeath)
+		.Process(this->NewEvaVoice_InitialMessage)
 		;
 }
 

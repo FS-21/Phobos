@@ -170,6 +170,7 @@ This page lists all the individual contributions to the project by their author.
   - `RandomTarget` for random projectile retargeting
   - New AI teams selector
   - Customizable disguised target evaluation behaviour in new ScriptType attack actions
+  - New EVA voice after deploying a building
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

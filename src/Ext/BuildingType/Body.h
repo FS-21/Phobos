@@ -104,6 +104,11 @@ public:
 
 		Nullable<bool> BattlePointsCollector;
 
+		Nullable<int> NewEvaVoice_Index;
+		Valueable<int> NewEvaVoice_Priority;
+		Valueable<bool> NewEvaVoice_RecheckOnDeath;
+		NullableIdx<VoxClass> NewEvaVoice_InitialMessage;
+
 		ExtData(BuildingTypeClass* OwnerObject) : Extension<BuildingTypeClass>(OwnerObject)
 			, PowersUp_Owner { AffectedHouse::Owner }
 			, PowersUp_Buildings {}
@@ -169,6 +174,10 @@ public:
 			, Refinery_UseNormalActiveAnim { false }
 			, HasPowerUpAnim {}
 			, BattlePointsCollector {}
+			, NewEvaVoice_Index {}
+			, NewEvaVoice_Priority { 0 }
+			, NewEvaVoice_RecheckOnDeath { false }
+			, NewEvaVoice_InitialMessage { }
 		{ }
 
 		// Ares 0.A functions
