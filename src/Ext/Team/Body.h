@@ -51,6 +51,8 @@ public:
 		bool OnlyTargetHouseEnemy;
 		int OnlyTargetHouseEnemyMode;
 		int MinAmmoThreshold;
+		int TriggersSideIdx;
+		int TriggersHouseIdx;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -79,6 +81,8 @@ public:
 			, OnlyTargetHouseEnemy { false }
 			, OnlyTargetHouseEnemyMode { -1 }
 			, MinAmmoThreshold { 0 }
+			, TriggersSideIdx { -1 }
+			, TriggersHouseIdx { -1 }
 		{ }
 
 		virtual ~ExtData() = default;
