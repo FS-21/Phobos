@@ -4,6 +4,7 @@
 #include <FPSCounter.h>
 #include <GameOptionsClass.h>
 #include <HouseTypeClass.h>
+#include <GameStrings.h>
 
 #include <Ext/BulletType/Body.h>
 #include <Ext/TechnoType/Body.h>

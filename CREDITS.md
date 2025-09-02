@@ -157,6 +157,7 @@ This page lists all the individual contributions to the project by their author.
   - Universal deploy from any techno into any techno
   - Script action for repairing destroyed bridges
   - Allow cyborg legs to be repaired when they enter into transports or structures
+  - Script actions for modifying AI anger against other houses
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

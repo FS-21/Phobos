@@ -42,6 +42,9 @@ public:
 		bool ConditionalJump_EnabledKillsCount;
 		bool ConditionalJump_ResetVariablesIfJump;
 		std::vector<TechnoClass*> BridgeRepairHuts;
+		int AngerNodeModifier;
+		bool OnlyTargetHouseEnemy;
+		int OnlyTargetHouseEnemyMode;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -66,6 +69,9 @@ public:
 			, ConditionalJump_EnabledKillsCount { false }
 			, ConditionalJump_ResetVariablesIfJump { false }
 			, BridgeRepairHuts { }
+			, AngerNodeModifier { 5000 }
+			, OnlyTargetHouseEnemy { false }
+			, OnlyTargetHouseEnemyMode { -1 }
 		{ }
 
 		virtual ~ExtData() = default;
