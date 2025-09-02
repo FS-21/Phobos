@@ -484,8 +484,10 @@ TechnoClass* ScriptExt::GreatestThreat(TechnoClass* pTechno, int method, int cal
 			continue;
 
 		const auto pTargetType = pTarget->GetTechnoType();
+		const auto pBuilding = abstract_cast<BuildingClass*>(pTarget);
+		bool isBuildingCapturable = pTargetType->Immune && pBuilding && pBuilding->Type->Capturable && agentMode;
 
-		if (!pTargetType->LegalTarget || pTargetType->Immune)
+		if (!pTargetType->LegalTarget || (pTargetType->Immune && !isBuildingCapturable))
 			continue;
 
 		// Discard invisible structures
