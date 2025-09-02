@@ -2544,6 +2544,17 @@ In `rulesmd.ini`:
 RemoveDisguise=false  ; boolean
 ```
 
+### Reveal area on impact
+
+- Warheads can now reveal a specific number of cells on impact.
+- Reveal only applies to the owner of the warhead.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]       ; Warhead
+RevealAreaRadius=0  ; int
+```
+
 ### Reveal map for owner on impact
 
 - Warheads can now reveal an area or the entire map on impact.
