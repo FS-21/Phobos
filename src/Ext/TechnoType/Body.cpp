@@ -984,6 +984,8 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Ammo_AutoConvertMaximumAmount.Read(exINI, pSection, "Ammo.AutoConvertMaximumAmount");
 	this->Ammo_AutoConvertType.Read(exINI, pSection, "Ammo.AutoConvertType");
 
+	this->PenetratesGarrison_Allowed.Read(exINI, pSection, "PenetratesGarrison.Allowed");
+
 	this->InfantryAutoDeploy.Read(exINI, pSection, "InfantryAutoDeploy");
 	
 	this->BattlePoints.Read(exINI, pSection, "BattlePoints");
@@ -1804,6 +1806,8 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Ammo_AutoConvertType)
 
 		.Process(this->NoManualUnload)
+
+		.Process(this->PenetratesGarrison_Allowed)
 
 		.Process(this->FiringForceScatter)
 

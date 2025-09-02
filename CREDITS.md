@@ -171,6 +171,7 @@ This page lists all the individual contributions to the project by their author.
   - New AI teams selector
   - Customizable disguised target evaluation behaviour in new ScriptType attack actions
   - New EVA voice after deploying a building
+  - Penetration damage on garrisonable structures
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

@@ -425,6 +425,8 @@ public:
 
 		Nullable<bool> NoManualUnload;
 
+		Valueable<bool> PenetratesGarrison_Allowed;
+
 		Valueable<bool> FiringForceScatter;
 
 		Valueable<int> FireUp;
@@ -856,6 +858,8 @@ public:
 			, Ammo_AutoConvertType { nullptr }
 
 			, NoManualUnload { }
+
+			, PenetratesGarrison_Allowed { true }
 
 			, FiringForceScatter { true }
 

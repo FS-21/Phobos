@@ -294,6 +294,11 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	if (this->AffectsAbovePercent > this->AffectsBelowPercent)
 		Debug::Log("[Developer warning][%s] AffectsAbovePercent is bigger than AffectsBelowPercent, the warhead will never activate!\n", pSection);
 
+	this->PenetratesGarrison.Read(exINI, pSection, "PenetratesGarrison");
+	this->PenetratesGarrison_RandomTarget.Read(exINI, pSection, "PenetratesGarrison.RandomTarget");
+	this->PenetratesGarrison_DamageMultiplier.Read(exINI, pSection, "PenetratesGarrison.DamageMultiplier");
+	this->PenetratesGarrison_CleanSound.Read(exINI, pSection, "PenetratesGarrison.CleanSound");
+
 	this->ReverseEngineer.Read(exINI, pSection, "ReverseEngineer");
 
 	// Convert.From & Convert.To
@@ -354,6 +359,7 @@ void WarheadTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->AttachEffects.RemoveGroups.size() > 0
 		|| this->BuildingSell
 		|| this->BuildingUndeploy
+		|| this->PenetratesGarrison
 		|| this->ReverseEngineer
 		|| this->Ammo
 		|| this->KickOutKickablePassengers
@@ -574,6 +580,12 @@ void WarheadTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Webby_Duration)
 		.Process(this->Webby_DurationVariation)
 		.Process(this->Webby_Cap)
+		.Process(this->PenetratesGarrison)
+		.Process(this->PenetratesGarrison_RandomTarget)
+		.Process(this->PenetratesGarrison_DamageMultiplier)
+		.Process(this->PenetratesGarrison_CleanSound)
+
+		.Process(this->CanKill)
 
 		.Process(this->ReverseEngineer)
 
