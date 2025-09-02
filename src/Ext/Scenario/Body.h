@@ -6,6 +6,7 @@
 #include <Helpers/Macro.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
+#include <AITriggerTypeClass.h>
 
 #include <Ext/Techno/Body.h>
 
@@ -37,6 +38,8 @@ public:
 		std::vector<TechnoExt::ExtData*> AutoDeathObjects;
 		std::vector<TechnoExt::ExtData*> TransportReloaders; // Objects that can reload ammo in limbo
 
+		std::vector<double> AITriggerWeigths;
+		
 		bool SWSidebar_Enable;
 		std::vector<int> SWSidebar_Indices;
 
@@ -88,6 +91,7 @@ public:
 			, Variables { }
 			, AutoDeathObjects {}
 			, TransportReloaders {}
+			, AITriggerWeigths { }
 			, SWSidebar_Enable { true }
 			, SWSidebar_Indices {}
 			, NewMessageList {}
