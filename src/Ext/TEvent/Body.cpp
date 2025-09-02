@@ -157,6 +157,8 @@ std::optional<bool> TEventExt::Execute(TEventClass* pThis, int iEvent, HouseClas
 		return TEventExt::CellHasAnyTechnoTypeFromListTEvent(pThis, pObject, pHouse);
 	case PhobosTriggerEvent::AttachedIsUnderAttachedEffect:
 		return TEventExt::AttachedIsUnderAttachedEffectTEvent(pThis, pObject);
+	case PhobosTriggerEvent::AttachedIsUnderWebby:
+		return TEventExt::AttachedIsUnderWebbyTEvent(pObject);
 
 
 	// If it requires an additional object as like mapping events 7 or 48, please fill it in here.
@@ -367,6 +369,19 @@ bool TEventExt::HousesAreDestroyedTEvent(TEventClass* pThis)
 	}
 
 	return true;
+}
+
+bool TEventExt::AttachedIsUnderWebbyTEvent(ObjectClass* pObject)
+{
+	if (!pObject)
+		return false;
+
+	const auto pExt = TechnoExt::ExtMap.Find(abstract_cast<TechnoClass*, true>(pObject));
+
+	if (pExt->WebbyDurationCountDown > 0)
+		return true;
+
+	return false;
 }
 
 // =============================

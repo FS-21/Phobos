@@ -160,6 +160,7 @@ This page lists all the individual contributions to the project by their author.
   - Script actions for modifying AI anger against other houses
   - Modify Ammo on impact
   - Unit & infantry auto-conversion on ammo change
+  - Web logic against infantry
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
