@@ -45,6 +45,7 @@ public:
 		int AngerNodeModifier;
 		bool OnlyTargetHouseEnemy;
 		int OnlyTargetHouseEnemyMode;
+		int MinAmmoThreshold;
 
 		ExtData(TeamClass* OwnerObject) : Extension<TeamClass>(OwnerObject)
 			, WaitNoTargetAttempts { 0 }
@@ -72,6 +73,7 @@ public:
 			, AngerNodeModifier { 5000 }
 			, OnlyTargetHouseEnemy { false }
 			, OnlyTargetHouseEnemyMode { -1 }
+			, MinAmmoThreshold { 0 }
 		{ }
 
 		virtual ~ExtData() = default;

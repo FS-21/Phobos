@@ -241,6 +241,7 @@ HideLightFlashEffects=false      ; boolean
   BuiltInType=5
   
   [ScriptsRA2]
+  10018=Attack waypoint,2,0,1,Designed for aircrafts, when remaining ammo reaches a specified ammount this action ends. This threshold can be set with script action 12003.
   10100=Timed Area Guard,20,0,1,[LONG DESC]
   10101=Wait until ammo is full,0,0,1,[LONG DESC]
   10102=Regroup Temporarily Around the Team Leader,20,0,1,[LONG DESC]
@@ -257,6 +258,7 @@ HideLightFlashEffects=false      ; boolean
   14012=Set The Most Hated House Randomly,0,0,1,[LONG DESC]
   14013=Reset Hate Against Other Houses,0,0,1,[LONG DESC]
   14014=Set A House As The Most Hated House Of The Map,20,0,1,[LONG DESC]
+  12003=Set Minimum Ammo Threshold,20,0,1,Sets the ammo threshold for script action 10018.
   18000=Local variable set,22,0,1,[LONG DESC]
   18001=Local variable add,22,0,1,[LONG DESC]
   18002=Local variable minus,22,0,1,[LONG DESC]
@@ -670,6 +672,7 @@ New:
 - Unit `Speed` setting now accepts floating point values (by Starkku)
 - `Strafing` is now disabled by default when using `Trajectory` (by CrimRecya)
 - Modify Ammo on impact (by FS-21)
+- ScriptType actions `10018` & `12003` for aircrafts attacks (by FS-21)
 - Skip target scanning function calling for unarmed technos (by TaranDahl & solar-III)
 
 Vanilla fixes:
