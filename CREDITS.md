@@ -176,6 +176,7 @@ This page lists all the individual contributions to the project by their author.
   - `EMPulseCannon.InaccurateRadius` for projectiles in `EMPulseCannon=yes` superweapons and `Ammo` support
   - Map action 507 for printing a message with the remaining map objects
   - Reveal area on impact
+  - Engineer logics on Warheads
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

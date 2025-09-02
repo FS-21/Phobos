@@ -229,6 +229,11 @@ public:
 
 		Valueable<int> Ammo;
 
+		Valueable<bool> FakeEngineer_CanRepairBridges;
+		Valueable<bool> FakeEngineer_CanDestroyBridges;
+		Valueable<bool> FakeEngineer_CanCaptureBuildings;
+		Valueable<bool> FakeEngineer_BombDisarm;
+
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
 		Valueable<double> Shield_SelfHealing_Rate_InMinutes;
@@ -437,6 +442,11 @@ public:
 			, PenetratesGarrison_DamageMultiplier { { 1.0, 1.0 } }
 			, PenetratesGarrison_CleanSound { }
 
+			, FakeEngineer_CanRepairBridges { false }
+			, FakeEngineer_CanDestroyBridges { false }
+			, FakeEngineer_CanCaptureBuildings { false }
+			, FakeEngineer_BombDisarm { false }
+
 			, ReverseEngineer { false }
 
 			, Ammo { 0 }
@@ -494,4 +504,5 @@ public:
 
 	static void DetonateAt(WarheadTypeClass* pThis, AbstractClass* pTarget, TechnoClass* pOwner, int damage, HouseClass* pFiringHouse = nullptr);
 	static void DetonateAt(WarheadTypeClass* pThis, const CoordStruct& coords, TechnoClass* pOwner, int damage, HouseClass* pFiringHouse = nullptr, AbstractClass* pTarget = nullptr);
+	static void DetonateAtBridgeRepairHut(AbstractClass* pTarget, TechnoClass* pOwner = nullptr, HouseClass* pFiringHouse = nullptr, bool destroyBridge = false);
 };
