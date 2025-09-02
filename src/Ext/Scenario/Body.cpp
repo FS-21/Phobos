@@ -164,6 +164,10 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(this->ScenarioFileName)
 		.Process(this->SWSidebar_Enable)
 		.Process(this->SWSidebar_Indices)
+		.Process(this->DefaultLS640BkgdName)
+		.Process(this->DefaultLS800BkgdName)
+		.Process(this->DefaultLS800BkgdPal)
+		.Process(this->MasterDetonationBullet)
 //		.Process(this->NewMessageList); // Should not S/L
 		;
 }
