@@ -4,6 +4,9 @@
 
 #include <Utilities/EnumFunctions.h>
 #include <Ext/Script/Body.h>
+#include <Ext/HouseType/Body.h>
+#include <Ext/House/Body.h>
+#include <Ext/BuildingType/Body.h>
 
 // Unsorted methods
 
@@ -19,79 +22,39 @@ void TechnoExt::ExtData::InitializeLaserTrails()
 		this->LaserTrails.emplace_back(std::make_unique<LaserTrailClass>(entry.GetType(), this->OwnerObject()->Owner, entry.FLH, entry.IsOnTurret));
 }
 
-void TechnoExt::ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller)
+void TechnoExt::ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller, HouseClass* pHouseKiller)
 {
-	if (!pVictim || !pKiller)
-		return;
+	TechnoClass* pObjectKiller = nullptr;
 
-	auto const pKillerType = pKiller->GetTechnoType();
-	auto const pObjectKiller = ((pKillerType->Spawned || pKillerType->MissileSpawn) && pKiller->SpawnOwner)
-		? pKiller->SpawnOwner : pKiller;
+	if (pKiller)
+	{
+		pObjectKiller = ((pKiller->GetTechnoType()->Spawned || pKiller->GetTechnoType()->MissileSpawn) && pKiller->SpawnOwner) ?
+			pKiller->SpawnOwner : pKiller;
 
-	if (!pObjectKiller->BelongsToATeam())
-		return;
+		if (!pObjectKiller)
+			return;
+	}
 
-	auto pKillerExt = TechnoExt::ExtMap.Find(pObjectKiller);
-	if (!pKillerExt)
-		return;
-
-	const auto pFootKiller = static_cast<FootClass*>(pObjectKiller);
-	TechnoClass* pFocus = nullptr;
-
-	if (pFootKiller->Team->Focus
-		&& (pFootKiller->Team->Focus->WhatAmI() == AbstractType::Unit
-			|| pFootKiller->Team->Focus->WhatAmI() == AbstractType::Aircraft
-			|| pFootKiller->Team->Focus->WhatAmI() == AbstractType::Infantry
-			|| pFootKiller->Team->Focus->WhatAmI() == AbstractType::Building)
-		)
+	if (pObjectKiller && pObjectKiller->BelongsToATeam())
 	{
 		if (auto const pFootKiller = generic_cast<FootClass*, true>(pObjectKiller))
 		{
-			auto const pKillerTechnoData = TechnoExt::ExtMap.Find(pObjectKiller);
+			auto pKillerTechnoData = TechnoExt::ExtMap.Find(pObjectKiller);
 			pKillerTechnoData->LastKillWasTeamTarget = pFootKiller->Team->Focus == pVictim;
 		}
 	}
 
-	/*Debug::Log("ObjectKilledBy() -> [%s] [%s](UID: %d) registered a kill of the type [%s](UID: %d)\n",
-		pFootKiller->Team->Type->ID, pObjectKiller->GetTechnoType()->ID, pObjectKiller->UniqueID, pVictim->GetTechnoType()->ID, pVictim->UniqueID);*/
+	HouseClass* pHouse = pKiller ? pKiller->Owner : pHouseKiller;
 
-	pKillerExt->LastKillWasTeamTarget = false;
-
-	if (pFocus && (pFocus->GetTechnoType() == pVictim->GetTechnoType()))
-		pKillerExt->LastKillWasTeamTarget = true;
-	
-	// Conditional Jump Script Action stuff
-	auto pKillerTeamExt = TeamExt::ExtMap.Find(pFootKiller->Team);
-	if (!pKillerTeamExt)
-		return;
-
-	if (pKillerTeamExt->ConditionalJump_EnabledKillsCount)
+	if (pHouse != pVictim->Owner)
 	{
-		bool isValidKill = pKillerTeamExt->ConditionalJump_Index < 0 ? false : ScriptExt::EvaluateObjectWithMask(pVictim, pKillerTeamExt->ConditionalJump_Index, -1, -1, pKiller);
+		auto pHouseExt = HouseExt::ExtMap.Find(pHouse);
 
-		if (isValidKill || pKillerExt->LastKillWasTeamTarget)
-			pKillerTeamExt->ConditionalJump_Counter++;
-	}
-	
-	// Special case for interrupting current action
-	if (pKillerTeamExt->AbortActionAfterKilling
-		&& pKillerExt->LastKillWasTeamTarget)
-	{
-		pKillerTeamExt->AbortActionAfterKilling = false;
-		auto pTeam = pFootKiller->Team;
-
-		Debug::Log("[%s] [%s] %d = %d,%d - Force next script action (AbortActionAfterKilling=true): %d = %d,%d\n"
-			, pTeam->Type->ID
-			, pTeam->CurrentScript->Type->ID
-			, pTeam->CurrentScript->CurrentMission
-			, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Action
-			, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument
-			, pTeam->CurrentScript->CurrentMission + 1
-			, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission + 1].Action
-			, pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission + 1].Argument);
-
-		// Jumping to the next line of the script list
-		pTeam->StepCompleted = true;
+		if (pHouseExt->AreBattlePointsEnabled())
+		{
+			int points = pHouseExt->CalculateBattlePoints(pVictim);
+			pHouseExt->UpdateBattlePoints(points);
+		}
 	}
 }
 

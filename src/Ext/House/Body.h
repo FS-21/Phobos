@@ -71,6 +71,8 @@ public:
 		std::vector<TechnoTypeClass*> DropshipLoadout_Carriers;
 		std::vector<std::vector<TechnoTypeClass*>> DropshipLoadout_Cargo;
 
+		int BattlePoints;
+
 		ExtData(HouseClass* OwnerObject) : Extension<HouseClass>(OwnerObject)
 			, PowerPlantEnhancers {}
 			, OwnedLimboDeliveredBuildings {}
@@ -103,6 +105,7 @@ public:
 			, ForceOnlyTargetHouseEnemyMode { -1 }
 			, DropshipLoadout_Carriers {}
 			, DropshipLoadout_Cargo {}
+			, BattlePoints(0)
 		{ }
 
 		bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding);
@@ -123,6 +126,10 @@ public:
 		virtual void InvalidatePointer(void* ptr, bool bRemoved) override;
 
 		void UpdateVehicleProduction();
+
+		void UpdateBattlePoints(int modifier);
+		bool AreBattlePointsEnabled();
+		int CalculateBattlePoints(TechnoClass* pTechno);
 
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 		virtual void SaveToStream(PhobosStreamWriter& Stm) override;

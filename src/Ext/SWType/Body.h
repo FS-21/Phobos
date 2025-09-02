@@ -115,6 +115,8 @@ public:
 		Valueable<CSFText> Message_LinkedSWAcquired;
 		NullableIdx<VoxClass> EVA_LinkedSWAcquired;
 
+		Valueable<int> BattlePoints_Amount;
+
 		ExtData(SuperWeaponTypeClass* OwnerObject) : Extension<SuperWeaponTypeClass>(OwnerObject)
 			, TypeID { "" }
 			, Money_Amount { 0 }
@@ -192,6 +194,7 @@ public:
 			, SW_Link_RandomWeightsData {}
 			, Message_LinkedSWAcquired {}
 			, EVA_LinkedSWAcquired {}
+			, BattlePoints_Amount { 0 }
 		{ }
 
 		// Ares 0.A functions
@@ -217,6 +220,8 @@ public:
 		std::pair<double, double> GetEMPulseCannonRange(BuildingClass* pBuilding) const;
 
 		void ApplyLinkedSW(SuperClass* pSW);
+
+		void ApplyBattlePoints(SuperClass* pSW);
 
 		virtual void LoadFromINIFile(CCINIClass* pINI) override;
 		virtual void Initialize() override;

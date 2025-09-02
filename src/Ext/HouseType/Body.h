@@ -42,6 +42,8 @@ public:
 		NullableIdx<VocClass> DropshipLoadout_BuyClickSound;
 		NullableIdx<VocClass> DropshipLoadout_SellClickSound;
 		NullableIdx<VocClass> DropshipLoadout_ArrowsClickSound;
+		Valueable<bool> BattlePoints;
+		Valueable<bool> BattlePoints_CanUseStandardPoints;
 
 		ExtData(HouseTypeClass* OwnerObject) : Extension<HouseTypeClass>(OwnerObject)
 			, DropshipLoadout_StartingDropships {}

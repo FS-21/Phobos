@@ -455,6 +455,8 @@ public:
 
 		Nullable<bool> TurretResponse;
 
+		Nullable<int> BattlePoints;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, HealthBar_HidePips { false }
@@ -858,6 +860,8 @@ public:
 			, InfantryAutoDeploy {}
 
 			, TurretResponse {}
+
+			, BattlePoints {}
 		{ }
 
 		virtual ~ExtData() = default;

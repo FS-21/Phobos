@@ -97,6 +97,7 @@ void SWTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->SW_Link_RollChances)
 		.Process(this->Message_LinkedSWAcquired)
 		.Process(this->EVA_LinkedSWAcquired)
+		.Process(this->BattlePoints_Amount)
 		;
 }
 
@@ -281,6 +282,8 @@ void SWTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		pNewSWType->Initialize(const_cast<SWTypeExt::ExtData*>(this), OwnerObject());
 		pNewSWType->LoadFromINI(const_cast<SWTypeExt::ExtData*>(this), OwnerObject(), pINI);
 	}
+
+	this->BattlePoints_Amount.Read(exINI, pSection, "BattlePoints.Amount");
 }
 
 void SWTypeExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

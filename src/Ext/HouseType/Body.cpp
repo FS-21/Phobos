@@ -133,6 +133,9 @@ void HouseTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->DropshipLoadout_BuyClickSound.Read(exINI, pSection, "DropshipLoadout.BuyClickSound");
 	this->DropshipLoadout_SellClickSound.Read(exINI, pSection, "DropshipLoadout.SellClickSound");
 	this->DropshipLoadout_ArrowsClickSound.Read(exINI, pSection, "DropshipLoadout.ArrowsClickSound");
+
+	this->BattlePoints.Read(exINI, pSection, "BattlePoints");
+	this->BattlePoints_CanUseStandardPoints.Read(exINI, pSection, "BattlePoints.CanUseStandardPoints");
 }
 
 void HouseTypeExt::ExtData::CompleteInitialization()
@@ -172,6 +175,8 @@ void HouseTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_BuyClickSound)
 		.Process(this->DropshipLoadout_SellClickSound)
 		.Process(this->DropshipLoadout_ArrowsClickSound)
+		.Process(this->BattlePoints)
+		.Process(this->BattlePoints_CanUseStandardPoints)
 		;
 }
 

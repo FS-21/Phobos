@@ -272,6 +272,10 @@ public:
 
 		Valueable<bool> InfantryAutoDeploy;
 
+		Nullable<bool> BattlePoints;
+		Nullable<int> BattlePoints_DefaultValue;
+		Nullable<int> BattlePoints_DefaultFriendlyValue;
+
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
 			, HarvesterDumpAmount { 0.0f }
@@ -483,6 +487,10 @@ public:
 
 			, Parasite_GrappleAnim {}
 			, InfantryAutoDeploy { false }
+
+			, BattlePoints {}
+			, BattlePoints_DefaultValue {}
+			, BattlePoints_DefaultFriendlyValue {}
 		{ }
 
 		virtual ~ExtData() = default;
