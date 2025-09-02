@@ -213,6 +213,8 @@ public:
 
 		Valueable<bool> Convert_UseUniversalDeploy;
 
+		Valueable<int> Ammo;
+
 	private:
 		Valueable<double> Shield_Respawn_Rate_InMinutes;
 		Valueable<double> Shield_SelfHealing_Rate_InMinutes;
@@ -408,6 +410,8 @@ public:
 			, Convert_UseUniversalDeploy { false }
 
 			, ReverseEngineer { false }
+
+			, Ammo { 0 }
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);
@@ -445,6 +449,7 @@ public:
 		void ApplyBuildingUndeploy(TechnoClass* pTarget);
 		void ApplyReverseEngineer(HouseClass* pHouse, TechnoClass* pTarget);
 		double GetCritChance(TechnoClass* pFirer) const;
+		void ApplyAmmoModifier(TechnoClass* pTarget);
 	};
 
 	class ExtContainer final : public Container<WarheadTypeExt>

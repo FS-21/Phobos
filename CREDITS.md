@@ -158,6 +158,7 @@ This page lists all the individual contributions to the project by their author.
   - Script action for repairing destroyed bridges
   - Allow cyborg legs to be repaired when they enter into transports or structures
   - Script actions for modifying AI anger against other houses
+  - Modify Ammo on impact
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
