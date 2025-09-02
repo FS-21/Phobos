@@ -361,6 +361,8 @@ public:
 
 		Nullable<AffectedHouse> RadarInvisibleToHouse;
 
+		ValueableVector<double> DetectDisguise_Percent;
+
 		struct LaserTrailDataEntry
 		{
 			ValueableIdx<LaserTrailTypeClass> idxType;
@@ -713,6 +715,7 @@ public:
 			, ImmuneToWeb { false }
 			, Webby_Duration { 0 }
 			, Webby_DurationVariation { 0 }
+			, DetectDisguise_Percent {}
 			, LandingDir {}
 			, DroppodType {}
 			, TiberiumEaterType {}
