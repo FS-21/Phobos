@@ -423,6 +423,8 @@ public:
 
 		Nullable<bool> InfantryAutoDeploy;
 
+		PhobosPCXFile CameoPCX;
+
 		Nullable<bool> TurretResponse;
 
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
@@ -458,6 +460,7 @@ public:
 			, ImmuneToCrit { false }
 			, MultiMindControl_ReleaseVictim { false }
 			, CameoPriority { 0 }
+			, CameoPCX {}
 			, NoManualMove { false }
 			, InitialStrength {}
 			, ReloadInTransport { false }
