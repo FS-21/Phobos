@@ -421,6 +421,8 @@ public:
 		Valueable<int> Ammo_AutoConvertMaximumAmount;
 		Nullable<TechnoTypeClass*> Ammo_AutoConvertType;
 
+		Nullable<bool> NoManualUnload;
+
 		Valueable<bool> FiringForceScatter;
 
 		Valueable<int> FireUp;
@@ -824,6 +826,8 @@ public:
 			, Ammo_AutoConvertMinimumAmount { -1 }
 			, Ammo_AutoConvertMaximumAmount { -1 }
 			, Ammo_AutoConvertType { nullptr }
+
+			, NoManualUnload { }
 
 			, FiringForceScatter { true }
 

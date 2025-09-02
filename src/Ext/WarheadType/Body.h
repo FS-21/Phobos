@@ -217,6 +217,8 @@ public:
 		bool HealthCheck;
 		TechnoClass* DamageAreaTarget;
 
+		Valueable<bool> KickOutKickablePassengers;
+
 		Valueable<bool> Convert_UseUniversalDeploy;
 
 		Valueable<int> Ammo;
@@ -412,6 +414,8 @@ public:
 			, KillWeapon_OnFirer_AffectsHouses { AffectedHouse::All }
 			, KillWeapon_Affects { AffectedTarget::All }
 			, KillWeapon_OnFirer_Affects { AffectedTarget::All }
+
+			, KickOutKickablePassengers { false }
 
 			, Convert_UseUniversalDeploy { false }
 

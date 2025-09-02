@@ -216,6 +216,14 @@ void WarheadTypeExt::ExtData::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass*
 	if (this->AttachEffects.AttachTypes.size() > 0 || this->AttachEffects.RemoveTypes.size() > 0 || this->AttachEffects.RemoveGroups.size() > 0)
 		this->ApplyAttachEffects(pTarget, pHouse, pOwner);
 
+	if (this->KickOutKickablePassengers)
+	{
+		const auto pTargetTypeExt = TechnoTypeExt::ExtMap.Find(pTarget->GetTechnoType());
+
+		if (pTarget->Passengers.NumPassengers > 0 && !pTargetTypeExt->NoManualUnload.Get(false))
+			TechnoExt::PassengersTransfer(pTarget, nullptr, true, true);
+	}
+
 	if (this->BuildingSell || this->BuildingUndeploy)
 		this->ApplyBuildingUndeploy(pTarget);
 
