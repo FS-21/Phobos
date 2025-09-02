@@ -963,6 +963,10 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->AttackMove_StopWhenTargetAcquired.Read(exINI, pSection, "AttackMove.StopWhenTargetAcquired");
 	this->AttackMove_PursuitTarget.Read(exINI, pSection, "AttackMove.PursuitTarget");
 
+	this->Ammo_AutoConvertMinimumAmount.Read(exINI, pSection, "Ammo.AutoConvertMinimumAmount");
+	this->Ammo_AutoConvertMaximumAmount.Read(exINI, pSection, "Ammo.AutoConvertMaximumAmount");
+	this->Ammo_AutoConvertType.Read(exINI, pSection, "Ammo.AutoConvertType");
+
 	this->InfantryAutoDeploy.Read(exINI, pSection, "InfantryAutoDeploy");
 	
 	// Ares 0.2
@@ -1619,6 +1623,10 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_TransferPassengers)
 		.Process(this->Convert_TransferPassengers_IgnoreInvalidOccupiers)
 		.Process(this->Convert_ForceVeterancyTransfer)
+
+		.Process(this->Ammo_AutoConvertMinimumAmount)
+		.Process(this->Ammo_AutoConvertMaximumAmount)
+		.Process(this->Ammo_AutoConvertType)
 
 		.Process(this->FiringForceScatter)
 

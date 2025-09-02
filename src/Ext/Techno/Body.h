@@ -205,6 +205,8 @@ public:
 		void ResetDelayedFireTimer();
 		void UpdateTintValues();
 
+		void AmmoAutoConvertActions();
+
 		virtual ~ExtData() override;
 		virtual void InvalidatePointer(void* ptr, bool bRemoved) override;
 
