@@ -307,17 +307,6 @@ DEFINE_HOOK(0x6F6AC4, TechnoClass_Limbo, 0x5)
 	return 0;
 }
 
-DEFINE_HOOK(0x702D6D, TechnoClass_RegisterDestruction_SaveKillerInfo, 0x6)
-{
-	GET(TechnoClass*, pKiller, EDI);
-	GET(TechnoClass*, pVictim, ESI);
-
-	if (pKiller && pVictim)
-		TechnoExt::ObjectKilledBy(pVictim, pKiller);
-
-	return 0;
-}
-
 bool __fastcall TechnoClass_Limbo_Wrapper(TechnoClass* pThis)
 {
 	// Do not remove attached effects from undeploying buildings.
@@ -562,7 +551,10 @@ DEFINE_HOOK(0x702E4E, TechnoClass_RegisterDestruction_SaveKillerInfo, 0x6)
 // AFAIK, only used by the teleport of the Chronoshift SW
 DEFINE_HOOK(0x70337D, HouseClass_RegisterDestruction_SaveKillerInfo, 0x6)
 {
+	GET(HouseClass*, pHouse, EDI);
 	GET(TechnoClass*, pVictim, ESI);
+
+	TechnoExt::ObjectKilledBy(pVictim, nullptr, pHouse);
 
 	// Drop crate if is dead
 	int nSelectedPowerup = TechnoExt::GetDropCrateIndex(pVictim);
@@ -572,17 +564,6 @@ DEFINE_HOOK(0x70337D, HouseClass_RegisterDestruction_SaveKillerInfo, 0x6)
 		Powerup selectedPowerup = static_cast<Powerup>(nSelectedPowerup);
 		TechnoExt::TryToCreateCrate(pVictim->Location, selectedPowerup);
 	}
-
-	return 0;
-}
-
-// AFAIK, only used by the teleport of the Chronoshift SW
-DEFINE_HOOK(0x70337D, HouseClass_RegisterDestruction_SaveKillerInfo, 0x6)
-{
-	GET(HouseClass*, pHouse, EDI);
-	GET(TechnoClass*, pVictim, ESI);
-
-	TechnoExt::ObjectKilledBy(pVictim, nullptr, pHouse);
 
 	return 0;
 }
