@@ -172,6 +172,7 @@ This page lists all the individual contributions to the project by their author.
   - Customizable disguised target evaluation behaviour in new ScriptType attack actions
   - New EVA voice after deploying a building
   - Penetration damage on garrisonable structures
+  - `EMPulseCannon.InaccurateRadius` for projectiles in `EMPulseCannon=yes` superweapons and `Ammo` support
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
