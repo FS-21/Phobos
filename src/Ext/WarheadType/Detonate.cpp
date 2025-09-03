@@ -185,7 +185,7 @@ void WarheadTypeExt::ExtData::Detonate(TechnoClass* pOwner, HouseClass* pHouse, 
 
 		const bool bulletWasIntercepted = pBulletExt && (pBulletExt->InterceptedStatus & InterceptedStatus::Intercepted);
 		const float cellSpread = this->OwnerObject()->CellSpread;
-		const int damage = pBullet->Health;
+		const int damage = pBullet ? pBullet->Health : 0;
 
 		if (cellSpread)
 		{
