@@ -177,6 +177,7 @@ This page lists all the individual contributions to the project by their author.
   - Map action 507 for printing a message with the remaining map objects
   - Reveal area on impact
   - Engineer logics on Warheads
+  - Additional conversion animation
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
