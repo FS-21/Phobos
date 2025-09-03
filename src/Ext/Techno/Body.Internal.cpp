@@ -24,33 +24,61 @@ void TechnoExt::ExtData::InitializeLaserTrails()
 
 void TechnoExt::ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller, HouseClass* pHouseKiller)
 {
+	// A victim must always be provided
+	if (!pVictim)
+		return;
+
+	// Determine the responsible house, either from the killer unit or a superweapon
+	HouseClass* const pHouse = pKiller ? pKiller->Owner : pHouseKiller;
+
+	// A responsible house is required to attribute the kill
+	if (!pHouse)
+		return;
+
+	// Find the original killer, which handles spawned units/missiles
 	TechnoClass* pObjectKiller = nullptr;
 
 	if (pKiller)
 	{
-		pObjectKiller = ((pKiller->GetTechnoType()->Spawned || pKiller->GetTechnoType()->MissileSpawn) && pKiller->SpawnOwner) ?
-			pKiller->SpawnOwner : pKiller;
-
-		if (!pObjectKiller)
-			return;
+		auto const pKillerType = pKiller->GetTechnoType();
+		pObjectKiller = ((pKillerType->Spawned || pKillerType->MissileSpawn) && pKiller->SpawnOwner)
+			? pKiller->SpawnOwner : pKiller;
 	}
 
+	// Process team-based logic if a specific unit got the kill
 	if (pObjectKiller && pObjectKiller->BelongsToATeam())
 	{
 		if (auto const pFootKiller = generic_cast<FootClass*, true>(pObjectKiller))
 		{
-			auto pKillerTechnoData = TechnoExt::ExtMap.Find(pObjectKiller);
-			pKillerTechnoData->LastKillWasTeamTarget = pFootKiller->Team->Focus == pVictim;
+			auto pKillerExt = TechnoExt::ExtMap.Find(pObjectKiller);
+			auto pKillerTeamExt = TeamExt::ExtMap.Find(pFootKiller->Team);
+
+			// Check if the victim was the team's designated focus
+			pKillerExt->LastKillWasTeamTarget = (pFootKiller->Team->Focus == pVictim);
+
+			// 'Conditional Jump' script action: increment counter if the kill meets criteria
+			if (pKillerTeamExt->ConditionalJump_EnabledKillsCount)
+			{
+				bool isValidKill = pKillerTeamExt->ConditionalJump_Index >= 0 && ScriptExt::EvaluateObjectWithMask(pVictim, pKillerTeamExt->ConditionalJump_Index, -1, -1, pKiller);
+
+				if (isValidKill || pKillerExt->LastKillWasTeamTarget)
+					pKillerTeamExt->ConditionalJump_Counter++;
+			}
+
+			// 'Abort Action': force the team script to advance if it killed its target
+			if (pKillerTeamExt->AbortActionAfterKilling && pKillerExt->LastKillWasTeamTarget)
+			{
+				pKillerTeamExt->AbortActionAfterKilling = false;
+				pFootKiller->Team->StepCompleted = true; // Jump to the next script action
+			}
 		}
 	}
 
-	HouseClass* pHouse = pKiller ? pKiller->Owner : pHouseKiller;
-
+	// Process "Battle Points" logic for both object killer and superweapon kills
 	if (pHouse != pVictim->Owner)
 	{
 		auto pHouseExt = HouseExt::ExtMap.Find(pHouse);
-
-		if (pHouseExt->AreBattlePointsEnabled())
+		if (pHouseExt && pHouseExt->AreBattlePointsEnabled())
 		{
 			int points = pHouseExt->CalculateBattlePoints(pVictim);
 			pHouseExt->UpdateBattlePoints(points);
