@@ -747,10 +747,10 @@ bool TActionExt::CreateDropshipLoadoutTransport(TActionClass* pThis, HouseClass*
 	pTeam->IsForcedActive = true;
 	
 
-	//++Unsorted::ScenarioInit;
+	++Unsorted::ScenarioInit;
 	bool success = pTransporter->Unlimbo(startLocation, DirType::North);
 	//pTransporter->Locomotor->
-	//--Unsorted::ScenarioInit;
+	--Unsorted::ScenarioInit;
 
 	if (success)
 	{
