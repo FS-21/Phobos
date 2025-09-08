@@ -7,12 +7,32 @@
 
 #pragma region FakeEngineer
 
-// Skipping the next 2 small checks permits the AI to target structures, if used correctly (for example with the compation of AttackFriendlies)
-DEFINE_HOOK(0x6F85C8, TechnoClass_EvaluateObject_RemovingWhatMakesGuardModeAutotargetSelectionUnableToTargetStructures, 0x7)
+namespace FakeEngineerTemp
 {
-	enum { skipCode = 0x74049F };
+	bool guardModeAutoTargetStructures = false;
+}
 
-	return 0x6F866D;
+// Necessary if the repairer must repair friendly buildings automatically
+DEFINE_HOOK(0x6F85AB, TechnoClass_EvaluateObject_RemovingWhatMakesGuardModeAutotargetSelectionUnableToTargetStructures, 0x6)
+{
+	enum { SkipRemainingChecks = 0x6F866D, ContinueCheckingCases = 0x6F85C8, ContinueInside = 0x6F8604 };
+
+	GET(TechnoClass* const, pThis, EDI);
+	GET(TechnoClass* const, pTarget, ESI);
+
+	// Hijacking these "if" checks and then inject the new code
+	if (pThis->Owner->IsControlledByHuman() || !pTarget->IsStrange())
+	{
+		if (const auto pBuilding = abstract_cast<BuildingClass*>(pTarget))
+		{
+			if (pBuilding->Owner->IsAlliedWith(pThis))
+				return SkipRemainingChecks; // Skip the remaining cases
+		}
+
+		return ContinueCheckingCases; // Continue with the next checks
+	}
+
+	return ContinueInside; // Go to inside the "if" case
 }
 
 // Skipping the Immune check
