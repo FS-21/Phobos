@@ -367,14 +367,14 @@ DEFINE_HOOK(0x4B6C30, Dropship_Loadout_Remake, 0x0) //0x5)
 	// --- 5. CALCULATE UI ELEMENT POSITIONS ---
 	// Pre-calculate the screen positions for dynamic UI elements like cameos.
 
-	Point2D customUpArrowLocation = { 0, 0 };
+	Point2D customUpArrowLocation = Point2D::Empty;
 
 	if (pHouseTypeExt->DropshipLoadout_UpArrowLocation.isset())
 		customUpArrowLocation = pHouseTypeExt->DropshipLoadout_UpArrowLocation;
 	else if (ScenarioExt::Global()->DropshipLoadout_UpArrowLocation != Point2D::Empty)
 		customUpArrowLocation = ScenarioExt::Global()->DropshipLoadout_UpArrowLocation;
 
-	Point2D customDownArrowLocation = { 0, 0 };
+	Point2D customDownArrowLocation = Point2D::Empty;
 
 	if (pHouseTypeExt->DropshipLoadout_DownArrowLocation.isset())
 		customDownArrowLocation = pHouseTypeExt->DropshipLoadout_DownArrowLocation;
@@ -790,8 +790,8 @@ DEFINE_HOOK(0x4B6C30, Dropship_Loadout_Remake, 0x0) //0x5)
 
 	btn_ScrollUp->SetPosition(upArrowLocation.X, upArrowLocation.Y);
 	btn_ScrollUp->SetDimension(upArrowLocation.Width, upArrowLocation.Height);
-	btn_ScrollUp->DrawPosition.X = upArrowLocation.X;
-	btn_ScrollUp->DrawPosition.Y = upArrowLocation.Y;
+	btn_ScrollUp->DrawPosition.X = dropshipLoadout_UpArrowX;
+	btn_ScrollUp->DrawPosition.Y = dropshipLoadout_UpArrowY;
 
 	buttonsList.push_back(btn_ScrollUp);
 
@@ -810,8 +810,8 @@ DEFINE_HOOK(0x4B6C30, Dropship_Loadout_Remake, 0x0) //0x5)
 
 	btn_ScrollDown->SetPosition(downArrowLocation.X, downArrowLocation.Y);
 	btn_ScrollDown->SetDimension(downArrowLocation.Width, downArrowLocation.Height);
-	btn_ScrollDown->DrawPosition.X = downArrowLocation.X;
-	btn_ScrollDown->DrawPosition.Y = downArrowLocation.Y;
+	btn_ScrollDown->DrawPosition.X = dropshipLoadout_DownArrowX;
+	btn_ScrollDown->DrawPosition.Y = dropshipLoadout_DownArrowY;
 	buttonsList.push_back(btn_ScrollDown);
 	commandManager->Add(*btn_ScrollDown);
 
