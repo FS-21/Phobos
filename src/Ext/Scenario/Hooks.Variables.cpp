@@ -118,7 +118,8 @@ DEFINE_HOOK(0x685EB1, PhobosSaveVariables, 0x5)//Lose
 	return 0;
 }
 
-DEFINE_HOOK(0x685A38, ScenarioClass_sub_685670_SetNextScenario, 0x6)
+// FS-21: Someone's else code that interferes with my code... disable it!
+/*DEFINE_HOOK(0x685A38, ScenarioClass_sub_685670_SetNextScenario, 0x6)
 {
 	enum { AltNextScenario = 0x685A4C, NextScenario = 0x685A59, Continue = 0x685A63 };
 
@@ -160,4 +161,4 @@ DEFINE_HOOK(0x685A38, ScenarioClass_sub_685670_SetNextScenario, 0x6)
 	}
 
 	return Continue;
-}
+}*/
