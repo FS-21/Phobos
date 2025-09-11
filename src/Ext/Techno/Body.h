@@ -288,7 +288,7 @@ public:
 	static CoordStruct GetSimpleFLH(InfantryClass* pThis, int weaponIndex, bool& FLHFound);
 
 	static void ChangeOwnerMissionFix(FootClass* pThis);
-	static void KillSelf(TechnoClass* pThis, AutoDeathBehavior deathOption, AnimTypeClass* pVanishAnimation, bool isInLimbo = false);
+	static void KillSelf(TechnoClass* pThis, AutoDeathBehavior deathOption, const std::vector<AnimTypeClass*>& pVanishAnimation, bool isInLimbo = false);
 	static void ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller = nullptr, HouseClass* pHouseKiller = nullptr);
 	static void UpdateSharedAmmo(TechnoClass* pThis);
 	static double GetCurrentSpeedMultiplier(FootClass* pThis);
@@ -326,6 +326,9 @@ public:
 	static AircraftTypeClass* GetAircraftTypeExtra(AircraftClass* pAircraft);
 	static bool CanBeAffectedByFakeEngineer(TechnoClass* pThis, TechnoClass* pBuilding, bool checkBridge = false, bool checkCapturableBuilding = false, bool checkAttachedBombs = false);
 	static bool CannotMove(UnitClass* pThis);
+	static bool HasAmmoToDeploy(TechnoClass* pThis);
+	static void HandleOnDeployAmmoChange(TechnoClass* pThis, int maxAmmoOverride = -1);
+	static bool SimpleDeployerAllowedToDeploy(UnitClass* pThis, bool defaultValue, bool alwaysCheckLandTypes);
 	static bool IsValidTechno(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed = true);
 	static bool IsValidTechno(AbstractClass* pObject, bool checkIfInTransportOrAbsorbed = true);
 

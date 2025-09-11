@@ -38,6 +38,7 @@ public:
 		int AccumulatedIncome;
 		std::optional<int> CurrentLaserWeaponIndex;
 		int PoweredUpToLevel; // Distinct from UpgradeLevel, and set to highest PowersUpToLevel out of applied upgrades regardless of how many are currently applied to this building.
+		SuperClass* CurrentEMPulseSW;
 		SuperClass* EMPulseSW;
 		CellStruct RandomEMPTarget;
 
@@ -54,6 +55,7 @@ public:
 			, AccumulatedIncome { 0 }
 			, CurrentLaserWeaponIndex {}
 			, PoweredUpToLevel { 0 }
+			, CurrentEMPulseSW {}
 			, EMPulseSW {}
 			, RandomEMPTarget { CellStruct::Empty }
 		{ }
