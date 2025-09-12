@@ -305,6 +305,7 @@ This page lists all the individual contributions to the project by their author.
   - Delayed fire weapons
   - Cyborg legs being restored when the soldier enters into transports or structures
   - Changes / fixes to `Vertical` projectile logic and customizing projectile initial facing behavior
+  - Bugfixes to map trigger action `125 Create Building At`
 - **Morton (MortonPL)**:
   - `XDrawOffset` for animations
   - Shield passthrough & absorption
@@ -571,6 +572,7 @@ This page lists all the individual contributions to the project by their author.
   - Jumpjet Climbing Logic Enhancement
   - Fix for pathfinding crashes on big maps due to too small pathfinding node buffer
   - Fix an issue that units' `LaserTrails` will always lags behind by one frame
+  - Fix an issue that the currently hovered planning node not update up-to-date, such as using hotkeys to select technos
 - **Ollerus**:
   - Build limit group enhancement
   - Customizable rocker amplitude
@@ -658,7 +660,7 @@ This page lists all the individual contributions to the project by their author.
 - **E1 Elite** - TileSet 255 and above bridge repair fix
 - **AutoGavy** - interceptor logic, Warhead critical hit logic
 - **Chasheen (Chasheenburg)** - CN docs help for Build#24
-- **Noble Fish** - some minor fixes, established Community Chinese docs, took over and completely rewrite the Official Chinese docs during Build#46
+- **Noble Fish** - some minor improvements and fixes, established Community Chinese docs, took over and completely rewrite the Official Chinese docs during Build#46
 - **tomsons26** - all-around help, assistance and guidance in reverse-engineering, YR binary mappings
 - **CCHyper** - all-around help, current project logo, assistance and guidance in reverse-engineering, YR binary mappings, custom locomotors example implementation
 - **AlexB** - Original FlyingStrings implementation
