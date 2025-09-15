@@ -208,6 +208,11 @@ public:
 		Valueable<PartialVector2D<double>> PenetratesGarrison_DamageMultiplier;
 		NullableIdx<VocClass> PenetratesGarrison_CleanSound;
 
+		Valueable<bool> UnlimboDetonate;
+		Valueable<bool> UnlimboDetonate_ForceLocation;
+		Valueable<bool> UnlimboDetonate_KeepTarget;
+		Valueable<bool> UnlimboDetonate_KeepSelected;
+
 		// Ares tags
 		// http://ares-developers.github.io/Ares-docs/new/warheads/general.html
 		Valueable<bool> AffectsEnemies;
@@ -458,6 +463,11 @@ public:
 			, ReverseEngineer { false }
 
 			, Ammo { 0 }
+
+			, UnlimboDetonate { false }
+			, UnlimboDetonate_ForceLocation { false }
+			, UnlimboDetonate_KeepTarget { true }
+			, UnlimboDetonate_KeepSelected { true }
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);

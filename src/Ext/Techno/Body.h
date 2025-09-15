@@ -93,6 +93,8 @@ public:
 
 		CDTimerClass FiringAnimationTimer;
 
+		bool IsSelected;
+
 		int DropCrate; // Drop crate on death, modified by map action
 		Powerup DropCrateType;
 
@@ -180,6 +182,7 @@ public:
 			, DropCrate { -1 }
 			, DropCrateType { Powerup::Money }
 			, AttachedEffectInvokerCount { 0 }
+			, IsSelected { false }
 			, TintColorOwner { 0 }
 			, TintColorAllies { 0 }
 			, TintColorEnemies { 0 }

@@ -104,6 +104,7 @@ public:
 		double AirShadowBaseScale_log;
 
 		Valueable<bool> ExtendedAircraftMissions;
+		Valueable<int> ExtendedAircraftMissions_UnlandDamage;
 		Valueable<bool> AmphibiousEnter;
 		Valueable<bool> AmphibiousUnload;
 		Valueable<bool> NoQueueUpToEnter;
@@ -290,6 +291,8 @@ public:
 
 		Valueable<bool> InfantryAutoDeploy;
 
+		Valueable<int> AdjacentWallDamage;
+		
 		Nullable<bool> BattlePoints;
 		Nullable<int> BattlePoints_DefaultValue;
 		Nullable<int> BattlePoints_DefaultFriendlyValue;
@@ -358,6 +361,7 @@ public:
 			, AirShadowBaseScale_log { 0.693376137 }
 
 			, ExtendedAircraftMissions { false }
+			, ExtendedAircraftMissions_UnlandDamage { -1 }
 			, AmphibiousEnter { false }
 			, AmphibiousUnload { false }
 			, NoQueueUpToEnter { false }
@@ -517,6 +521,7 @@ public:
 
 			, Parasite_GrappleAnim {}
 			, InfantryAutoDeploy { false }
+			, AdjacentWallDamage { 200 }
 
 			, BattlePoints {}
 			, BattlePoints_DefaultValue {}
