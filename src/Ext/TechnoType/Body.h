@@ -483,6 +483,8 @@ public:
 
 		Nullable<int> BattlePoints;
 
+		ValueableVector<TechnoTypeClass*> FriendlyAttack_Technos;
+
 		ExtData(TechnoTypeClass* OwnerObject) : Extension<TechnoTypeClass>(OwnerObject)
 			, HealthBar_Hide { false }
 			, HealthBar_HidePips { false }
@@ -909,6 +911,8 @@ public:
 			, TurretResponse {}
 
 			, BattlePoints {}
+
+			, FriendlyAttack_Technos {}
 		{ }
 
 		virtual ~ExtData() = default;

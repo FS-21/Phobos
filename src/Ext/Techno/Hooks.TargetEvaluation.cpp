@@ -597,7 +597,17 @@ DEFINE_FUNCTION_JUMP(VTABLE, 0x7EB418, InfantryClass__GetFireError_Wrapper)
 Action __fastcall UnitClass__WhatAction_Wrapper(UnitClass* pThis, void* _, ObjectClass* pObj, bool ignoreForce)
 {
 	AresScheme::Prefix(pThis, pObj, -1, false);
-	auto const result = pThis->UnitClass::MouseOverObject(pObj, ignoreForce);
+	auto result = pThis->UnitClass::MouseOverObject(pObj, ignoreForce);
+
+	if (auto const pObjTechno = abstract_cast<TechnoClass*>(pObj))
+	{
+		const auto pObjType = pObjTechno->GetTechnoType();
+		const auto pTypeExt = TechnoExt::ExtMap.Find(pThis)->TypeExtData;
+
+		if (pThis->Owner->IsAlliedWith(pObjTechno) && pTypeExt->FriendlyAttack_Technos.Contains(pObjType))
+			result = Action::Attack;
+	}
+
 	AresScheme::Suffix();
 	return result;
 }
@@ -606,7 +616,17 @@ DEFINE_FUNCTION_JUMP(VTABLE, 0x7F5CE4, UnitClass__WhatAction_Wrapper)
 Action __fastcall InfantryClass__WhatAction_Wrapper(InfantryClass* pThis, void* _, ObjectClass* pObj, bool ignoreForce)
 {
 	AresScheme::Prefix(pThis, pObj, -1, pThis->Type->Engineer);
-	auto const result = pThis->InfantryClass::MouseOverObject(pObj, ignoreForce);
+	auto result = pThis->InfantryClass::MouseOverObject(pObj, ignoreForce);
+
+	if (auto const pObjTechno = abstract_cast<TechnoClass*>(pObj))
+	{
+		const auto pObjType = pObjTechno->GetTechnoType();
+		const auto pTypeExt = TechnoExt::ExtMap.Find(pThis)->TypeExtData;
+
+		if (pThis->Owner->IsAlliedWith(pObjTechno) && pTypeExt->FriendlyAttack_Technos.Contains(pObjType))
+			result = Action::Attack;
+	}
+
 	AresScheme::Suffix();
 	return result;
 }
