@@ -64,22 +64,21 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 	GET(HouseClass*, pHouse, ESI);
 
-	bool houseIsHuman = pHouse->IsHumanPlayer;
+	if (!RulesExt::Global()->NewTeamsSelector)
+		return UseOriginalSelector;
 
+	bool houseIsHuman = pHouse->IsHumanPlayer;
 	bool isCampaign = SessionClass::IsCampaign();
 
 	if (isCampaign)
 		houseIsHuman = pHouse->IsHumanPlayer || pHouse->IsInPlayerControl;
 
-	if (houseIsHuman || pHouse->Type->MultiplayPassive)
+	if (houseIsHuman || pHouse->Type->MultiplayPassive || !pHouse->AITriggersActive)
 		return SkipCode;
 
 	auto pHouseTypeExt = HouseTypeExt::ExtMap.Find(pHouse->Type);
 	if (!pHouseTypeExt)
 		return SkipCode;
-
-	if (!RulesExt::Global()->NewTeamsSelector)
-		return UseOriginalSelector;
 
 	// Reset Team selection countdown
 	int countdown = RulesClass::Instance->TeamDelays[(int)pHouse->AIDifficulty];
