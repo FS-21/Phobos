@@ -191,9 +191,10 @@ enum class PhobosScripts : unsigned int
 	GlobalVariableReverseByGlobal = 18068,
 	GlobalVariableXorByGlobal = 18069,
 	GlobalVariableOrByGlobal = 18070,
-	GlobalVariableAndByGlobal = 18071
+	GlobalVariableAndByGlobal = 18071,
 
 	// Range 19000-19999 are miscellanous/uncategorized actions
+	PlaySpeech = 19000
 };
 
 class ScriptExt
@@ -277,6 +278,7 @@ public:
 	static void ManageTriggersWithObjects(TeamClass* pTeam, int idxAITargetType, bool isEnabled);
 	static void Log(const char* pFormat, ...);
 	static void RepairDestroyedBridge(TeamClass* pTeam, int mode);
+	static void PlaySpeech(TeamClass* pTeam);
 
 	// ConditionalJump.cpp
 	static void ConditionalJumpIfTrue(TeamClass* pTeam, int newScriptLine);

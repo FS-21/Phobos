@@ -327,6 +327,9 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 	case PhobosScripts::SetMinimumAmmoThreshold:
 		ScriptExt::SetMinimumAmmoThreshold(pTeam, -2);
 		break;
+	case PhobosScripts::PlaySpeech:
+		ScriptExt::PlaySpeech(pTeam);
+		break;
 	default:
 		// Do nothing because or it is a wrong Action number or it is an Ares/YR action...
 		if (action > 70 && !ScriptExt::IsExtVariableAction(action))
@@ -1499,4 +1502,17 @@ void ScriptExt::SetMinimumAmmoThreshold(TeamClass* pTeam, int newValue = -2)
 
 	// This action finished
 	pTeam->StepCompleted = true;
+}
+
+// Like the old Tiberian Sun ScriptType Action "24"
+void ScriptExt::PlaySpeech(TeamClass* pTeam)
+{
+	int index = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
+	VoxClass::PlayIndex(index);
+	pTeam->StepCompleted = true;
+
+	/*for (auto pVoice : VoxClass::Array)
+	{
+		Debug::Log("%d=%s\n", pVoice->FindIndex(pVoice->Name), pVoice->Name);
+	}*/
 }
