@@ -194,7 +194,19 @@ enum class PhobosScripts : unsigned int
 	GlobalVariableAndByGlobal = 18071,
 
 	// Range 19000-19999 are miscellanous/uncategorized actions
-	PlaySpeech = 19000
+	PlaySpeech = 19000,
+	ChangeToScriptByID = 19017,
+	ChangeToTeamTypeByID = 19018,
+	ChangeToHouseByID = 19020,
+	PlaySpeechByID = 19024,
+	PlaySoundByID = 19025,
+	PlayMovieByID = 19026, // Reserved! Now does nothing
+	PlayThemeByID = 19027,
+	AttackEnemyStructureByID = 19046,
+	MoveToEnemyStructureByID = 19047,
+	PlayAnimationByID = 19051,
+	ChronoshiftTaskForceToStructureByID = 19056,
+	MoveToFriendlyStructureByID = 19058
 };
 
 class ScriptExt
