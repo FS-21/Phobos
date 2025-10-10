@@ -1504,7 +1504,7 @@ void ScriptExt::SetMinimumAmmoThreshold(TeamClass* pTeam, int newValue = -2)
 	pTeam->StepCompleted = true;
 }
 
-// Like the old Tiberian Sun ScriptType Action "24"
+// Works like the old Tiberian Sun ScriptType Action "24"
 void ScriptExt::PlaySpeech(TeamClass* pTeam)
 {
 	int index = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
