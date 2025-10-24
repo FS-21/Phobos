@@ -75,6 +75,16 @@ void ObjectInfoCommandClass::Execute(WWKey eInput) const
 
 	auto printFoots = [&append, &display, &getTargetInfo](FootClass* pFoot)
 	{
+			Debug::Log("HouseClass::Array\n");
+			for (auto pH : HouseClass::Array)
+			{
+				Debug::Log("Index: %d, Plain Name: %s, Country: %s (idx: %d)\n", pH->ArrayIndex, pH->PlainName, pH->Type->Name, pH->Type->GetArrayIndex());
+			}
+			Debug::Log("---\nHouseTypeClass::Array\n");
+			for (auto pC : HouseTypeClass::Array)
+			{
+				Debug::Log("Index: %d, Name: %s - %s\n", pC->ArrayIndex, pC->Name, pC->UINameLabel);
+			}
 		append("[Phobos] Dump ObjectInfo runs.\n");
 		auto const pType = pFoot->GetTechnoType();
 		append("ID = %s, ", pType->ID);
