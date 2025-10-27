@@ -179,6 +179,7 @@ This page lists all the individual contributions to the project by their author.
   - Reveal area on impact
   - Engineer logics on Warheads
   - Additional conversion animation
+  - New map actions in the 19000 range that are copies of the original actions but using ID entries instead of indexes
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
