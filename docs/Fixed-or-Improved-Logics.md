@@ -8,6 +8,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed the bug that light tint created by buildings can never be removed (light tint persists even if the building is destroyed/sold) after loading a game
 - Fixed the bug when reading a map which puts `Preview(Pack)` after `Map` lead to the game fail to draw the preview
 - Fixed the bug when retinting map lighting with a map action corrupted light sources.
+  - Due to performance considerations, this fix may be disabled by setting `[AudioVisual] -> UseRetintFix=no` in `rulesmd.ini`.
 - Fixed the bug when deploying mindcontrolled vehicle into a building permanently transferred the control to the house which mindcontrolled it.
 - Fixed the bug when capturing a mind-controlled building with an engineer fail to break the mind-control link.
 - Removed the `EVA_BuildingCaptured` event when capturing a building considered as a vehicle.
@@ -263,6 +264,12 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - `DeployingAnim` using unit drawer now also tint accordingly with the unit.
 - Fixed an issue that jumpjets in air can not correctly spawn missiles.
 - Fixed an issue that the currently hovered planning node not update up-to-date, such as using hotkeys to select technos.
+- Fixed an issue that infantry walking through a cell containing a tree would cause it to be impassable to other houses.
+- Fixed the bug that techno unit will draw with ironcurtain and airstrike color and intensity who disguised as terrain or overlay.
+- Fixed an issue that the AI would enter a combat state when its building receiving damage from friendly units or damage not greater than 0.
+- Fixed an issue that the techno with weapon with `AA=yes` and `AG=no` would not auto targeting units that are falling, such as paratroopers.
+- Iron Curtain/Custom Tint Support for SHP Turreted Vehicles.
+- Reactivate unused trigger events 2, 53, and 54.
 
 ## Fixes / interactions with other extensions
 
@@ -292,6 +299,10 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed an issue that Ares' Type Conversion not resetting barrel's direction by `FireAngle`.
 - Fixed an issue that jumpjet vehicles can not stop correctly when assigned a target in range.
 - Fixed an issue that jumpjet infantries stop incorrectly when assigned a target out of range.
+- Fixed an issue that jumpjet infantries' shadow is always drawn even if they are cloaked.
+- Fixed an issue that technos head to building's dock even they are not going to dock.
+- Fixed an issue that the jumpjet vehicles cannot stop correctly after going berserk.
+- Fixed the issue where Ares' `Flash.Duration` cannot override the weapon's repair flash effect.
 
 ```{note}
 The described behavior is a replica of and is compliant with XNA CnCNet Client's multiplayer save game support.
@@ -964,12 +975,14 @@ AirstrikeTargets=buildings  ; List of Affected Target Enumeration (none|infantry
 
 ### Alternate FLH customizations
 
-- `AlternateFLH.OnTurret` can be used to customize whether or not `AlternateFLHN` used for `OpenTopped` transport firing coordinates, multiple mind control link offsets etc. is calculated relative to the unit's turret if available or body.
+- `AlternateFLH.OnTurret` can be used to customize whether or not `AlternateFLH` used for `OpenTopped` transport firing coordinates, multiple mind control link offsets etc. is calculated relative to the unit's turret if available or body.
+- `AlternateFLH.ApplyVehicle` can be used to customize whether or not a transport applies its `AlternateFLH` to passengers of the VehicleType, who by default use their own FLH, as opposed to passengers of the InfantryType who adhere to `AlternateFLH`.
 
 In `artmd.ini`:
 ```ini
-[SOMETECHNO]                ; TechnoType
-AlternateFLH.OnTurret=true  ; boolean
+[SOMETECHNO]                     ; TechnoType
+AlternateFLH.OnTurret=true       ; boolean
+AlternateFLH.ApplyVehicle=false  ; boolean
 ```
 
 ### Building-provided self-healing customization
@@ -1808,7 +1821,7 @@ Ammo.AddOnDeploy=0  ; integer
 
 - It is possible to enable checking if the deployed unit (if type conversion is in use, the conversion result will be used for these checks) is allowed to deploy on the cell which will also affect deploy cursor availability by setting `IsSimpleDeployer.ConsiderPathfinding` to true.
   - You can explicitly disable deploying on cells of specified land types using `IsSimpleDeployer.DisallowedLandTypes`. Defaults to `water,beach` for units with Jumpjet or Hover locomotor with `DeployToLand=true`, `none` for others.
-- In vanilla game only units with `DeployingAnim` were constrained to a specific deploy facing and it was not customizable per unit. `DeployDir` can be set to override this per unit (defaults to `[AudioVisual] -> DeployDir`), including using value of -1 to disable the facing restriction.
+- In vanilla game only units with `DeployingAnim` were constrained to a specific deploy facing and it was not customizable per unit. `DeployDir` can be set to override this per unit (defaults to `[AudioVisual] -> DeployDir` for units with `DeployingAnim`, -1 otherwise), including using value of -1 to disable the facing restriction.
 - Multiple new options for deploy animations:
   - `DeployingAnims` can be used instead of `DeployingAnim` (if both are set, `DeployingAnims` takes precedence) to define a list of direction-specific deploy animations to play. Largest power of 2 the number of listed animations falls to is used as number of directions/animations. Less than 8 animations listed results in only first listed one being used.
   - `DeployingAnim.KeepUnitVisible` determines if the unit is **not** hidden while the animation is playing.
@@ -2209,6 +2222,20 @@ Parasite.GrappleAnim=             ; animation
 [SOMEWARHEAD]                     ; WarheadType
 Parasite.CullingTarget=infantry   ; List of Affected Target Enumeration (none|aircraft|infantry|units|all)
 Parasite.GrappleAnim=             ; animation
+```
+
+### Dehardcode the `ZAdjust` of warhead anim
+
+- In vanilla, the animations generated by `AnimList` have a hard-coded `ZAdjust=-15`. Now you can customize it in the following ways.
+  - If these flags are set to 0, the `ZAdjust` defined by the anim will be used.
+
+In `rulesmd.ini`:
+```ini
+[AudioVisual]
+WarheadAnimZAdjust=-15           ; Integer
+
+[SOMEWARHEAD]                    ; WarheadType
+AnimZAdjust=                     ; Integer, default to [AudioVisual] -> WarheadAnimZAdjust
 ```
 
 ### Delay automatic attack on the controlled unit

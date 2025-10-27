@@ -91,9 +91,8 @@ public:
 		bool Convert_UniversalDeploy_IsOriginalDeployer;
 		AbstractClass* Convert_UniversalDeploy_RememberTarget;
 
-		CDTimerClass FiringAnimationTimer;
-
 		bool IsSelected;
+		bool ResetLocomotor;
 
 		int DropCrate; // Drop crate on death, modified by map action
 		Powerup DropCrateType;
@@ -111,6 +110,12 @@ public:
 		int TintIntensityEnemies;
 
 		int AttackMoveFollowerTempCount;
+
+		bool UndergroundTracked;
+		bool SpecialTracked;
+		bool FallingDownTracked;
+
+		bool JumpjetStraightAscend; // Is set to true jumpjet units will ascend straight and do not adjust rotation or position during it.
 
 		int	WebbyDurationCountDown;
 		CDTimerClass WebbyDurationTimer;
@@ -173,7 +178,6 @@ public:
 			, ResetRandomTarget { false }
 			, CurrentRandomTarget { nullptr }
 			, OriginalTargetWeaponIndex { -1 }
-			, FiringAnimationTimer {}
 			, SimpleDeployerAnimationTimer {}
 			, DelayedFireSequencePaused { false }
 			, DelayedFireWeaponIndex { -1 }
@@ -183,6 +187,7 @@ public:
 			, DropCrateType { Powerup::Money }
 			, AttachedEffectInvokerCount { 0 }
 			, IsSelected { false }
+			, ResetLocomotor { false }
 			, TintColorOwner { 0 }
 			, TintColorAllies { 0 }
 			, TintColorEnemies { 0 }
@@ -190,6 +195,10 @@ public:
 			, TintIntensityAllies { 0 }
 			, TintIntensityEnemies { 0 }
 			, AttackMoveFollowerTempCount { 0 }
+			, UndergroundTracked { false }
+			, SpecialTracked { false }
+			, FallingDownTracked { false }
+			, JumpjetStraightAscend { false }
 			, WebbyDurationCountDown { -1 }
 			, WebbyDurationTimer {}
 			, WebbyAnim { nullptr }
@@ -322,7 +331,7 @@ public:
 	static void GetValuesForDisplay(TechnoClass* pThis, DisplayInfoType infoType, int& value, int& maxValue, int infoIndex);
 	static void GetDigitalDisplayFakeHealth(TechnoClass* pThis, int& value, int& maxValue);
 	static void CreateDelayedFireAnim(TechnoClass* pThis, AnimTypeClass* pAnimType, int weaponIndex, bool attach, bool center, bool removeOnNoDelay, bool onTurret, CoordStruct firingCoords);
-	static bool HandleDelayedFireWithPauseSequence(TechnoClass* pThis, int weaponIndex, int firingFrame);
+	static bool HandleDelayedFireWithPauseSequence(TechnoClass* pThis, WeaponTypeClass* pWeapon, int weaponIndex, int frame, int firingFrame);
 	static bool IsHealthInThreshold(TechnoClass* pObject, double min, double max);
 	static void PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo = nullptr, bool forceFullTransfer = true, bool dontCheckInvalidOccupiers = true);
 	static UnitTypeClass* GetUnitTypeExtra(UnitClass* pUnit);

@@ -162,6 +162,9 @@ public:
 		Nullable<double> DamageOwnerMultiplier;
 		Nullable<double> DamageAlliesMultiplier;
 		Nullable<double> DamageEnemiesMultiplier;
+		Nullable<double> DamageOwnerMultiplier_Berzerk;
+		Nullable<double> DamageAlliesMultiplier_Berzerk;
+		Nullable<double> DamageEnemiesMultiplier_Berzerk;
 		Valueable<double> DamageSourceHealthMultiplier;
 		Valueable<double> DamageTargetHealthMultiplier;
 
@@ -213,12 +216,19 @@ public:
 		Valueable<bool> UnlimboDetonate_KeepTarget;
 		Valueable<bool> UnlimboDetonate_KeepSelected;
 
+		Valueable<bool> AffectsUnderground;
+		Valueable<bool> PlayAnimUnderground;
+		Valueable<bool> PlayAnimAboveSurface;
+
+		Nullable<bool> AnimZAdjust;
+
 		// Ares tags
 		// http://ares-developers.github.io/Ares-docs/new/warheads/general.html
 		Valueable<bool> AffectsEnemies;
 		Nullable<bool> AffectsOwner;
 		Valueable<bool> EffectsRequireVerses;
 		Valueable<bool> Malicious;
+		Nullable<int> Flash_Duration;
 
 		double Crit_RandomBuffer;
 		double Crit_CurrentChance;
@@ -390,6 +400,9 @@ public:
 			, DamageOwnerMultiplier {}
 			, DamageAlliesMultiplier {}
 			, DamageEnemiesMultiplier {}
+			, DamageOwnerMultiplier_Berzerk {}
+			, DamageAlliesMultiplier_Berzerk {}
+			, DamageEnemiesMultiplier_Berzerk {}
 			, DamageSourceHealthMultiplier { 0.0 }
 			, DamageTargetHealthMultiplier { 0.0 }
 
@@ -418,6 +431,7 @@ public:
 			, AffectsOwner {}
 			, EffectsRequireVerses { true }
 			, Malicious { true }
+			, Flash_Duration {}
 
 			, Crit_RandomBuffer { 0.0 }
 			, Crit_CurrentChance { 0.0 }
@@ -468,6 +482,12 @@ public:
 			, UnlimboDetonate_ForceLocation { false }
 			, UnlimboDetonate_KeepTarget { true }
 			, UnlimboDetonate_KeepSelected { true }
+
+			, AffectsUnderground { false }
+			, PlayAnimUnderground { true }
+			, PlayAnimAboveSurface { false }
+
+			, AnimZAdjust {}
 		{ }
 
 		void ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget);

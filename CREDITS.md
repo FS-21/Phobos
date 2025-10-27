@@ -51,6 +51,7 @@ This page lists all the individual contributions to the project by their author.
   - Warhead activation target health thresholds
   - MP saves support for quicksave command and savegame trigger action
   - Ported XNA CnCNet Client MP save handling
+  - Retint fix toggle
 - **Uranusian (Thrifinesma)**:
   - Mind Control enhancement
   - Custom warhead splash list
@@ -420,6 +421,9 @@ This page lists all the individual contributions to the project by their author.
   - When the vehicle loses its target, you can customize whether to align the turret direction with the vehicle body
   - Health bar permanently displayed
   - Unlimbo Detonate warhead
+  - Fast access structure
+  - Iron Curtain/Custom Tint Support for SHP Turreted Vehicles
+  - Reactivate unused trigger events 2, 53, and 54
 - **NetsuNegi**:
   - Forbidding parallel AI queues by type
   - Jumpjet crash speed fix when crashing onto building
@@ -474,6 +478,9 @@ This page lists all the individual contributions to the project by their author.
   - Fix the bug that hover vehicle will sink if destroyed on bridge
   - Customize squid grapple animation
   - Fix the bug that armor multiplier of new attacheffect will have extra take effect once if restricted warheads
+  - Fix the bug that techno unit will draw with ironcurtain and airstrike color and intensity who disguised as terrain or overlay
+  - Iron Curtain/Custom Tint Support for SHP Turreted Vehicles
+  - Allow setting whether `AlternateFLH` applies to vehicle passengers in the transport unit
 - **Apollo** - Translucent SHP drawing patches
 - **ststl**:
   - Customizable `ShowTimer` priority of superweapons
@@ -597,6 +604,7 @@ This page lists all the individual contributions to the project by their author.
   - Randomized anims for several behaviors
   - Fix customized `WarpAway` anim's wrong definition
   - Shield respawn animation and weapon
+  - Toggle off laser trail and shake effects
 - **NaotoYuuki** - Vertical & meteor trajectory projectile prototypes
 - **handama** - AI script action to `16005 Jump Back To Previous Script`
 - **TaranDahl (航味麻酱)**:
@@ -644,6 +652,14 @@ This page lists all the individual contributions to the project by their author.
   - Customize the chained damage of the wall
   - Fix an issue that jumpjet vehicles can not stop correctly when assigned a target in range
   - Fix an issue that jumpjet infantries stop incorrectly when assigned a target out of range
+  - Fix an issue that jumpjet infantries' shadow is always drawn even if they are cloaked
+  - Fix an issue that technos head to building's dock even they are not going to dock
+  - Fix an issue that the jumpjet vehicles cannot stop correctly after going berserk
+  - Attack and damage technos underground
+  - Fix an issue that infantry walking through a cell containing a tree would cause it to be impassable to other houses
+  - Fix an issue that the AI would enter a combat state when its building receiving damage from friendly units or damage not greater than 0
+  - Fix an issue that the techno with weapon with `AA=yes` and `AG=no` would not auto targeting units that are falling, such as paratroopers
+  - Dehardcode the `ZAdjust` of warhead anim
 - **solar-III (凤九歌)**
   - Target scanning delay customization (documentation)
   - Skip target scanning function calling for unarmed technos (documentation)

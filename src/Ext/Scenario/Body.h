@@ -54,6 +54,10 @@ public:
 		BulletClass* MasterDetonationBullet; // Used to do warhead/weapon detonations on spot without having to create new BulletClass instance every time.
 		std::vector<TechnoExt::ExtData*> LimboLaunchers;
 
+		DynamicVectorClass<TechnoClass*> UndergroundTracker; // Technos that are underground.
+		DynamicVectorClass<TechnoClass*> SpecialTracker; // For special purposes, like tracking technos that are forced moving. Currently unused.
+		DynamicVectorClass<TechnoClass*> FallingDownTracker; // Technos that are falling down, parachutes and land technos falling from bridge.
+
 		int DropshipLoadout_Theme;
 		long DropshipLoadout_Money;
 		NullableIdx<VoxClass> DropshipLoadout_StartEVA;
@@ -104,6 +108,9 @@ public:
 			, DefaultLS800BkgdPal {}
 			, MasterDetonationBullet {}
 			, LimboLaunchers {}
+			, UndergroundTracker {}
+			, SpecialTracker {}
+			, FallingDownTracker {}
 			, DropshipLoadout_Theme { -1 }
 			, DropshipLoadout_Money { -1 }
 			, DropshipLoadout_StartEVA {}

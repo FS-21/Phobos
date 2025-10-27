@@ -140,6 +140,7 @@ public:
 		std::vector<std::vector<CoordStruct>> EliteWeaponBurstFLHs;
 		std::vector<CoordStruct> AlternateFLHs;
 		Valueable<bool> AlternateFLH_OnTurret;
+		Valueable<bool> AlternateFLH_ApplyVehicle;
 
 		Valueable<bool> DestroyAnim_Random;
 		Valueable<bool> NotHuman_RandomDeathSequence;
@@ -457,6 +458,8 @@ public:
 		ValueableVector<bool> MultiWeapon_IsSecondary;
 		Valueable<int> MultiWeapon_SelectCount;
 		bool ReadMultiWeapon;
+		Vector2D<ThreatType> ThreatTypes;
+		Vector2D<int> CombatDamages;
 
 		Nullable<bool> ConsideredNaval;
 		Nullable<bool> ConsideredVehicle;
@@ -554,6 +557,7 @@ public:
 			, OreGathering_FramesPerDir {}
 			, LaserTrailData {}
 			, AlternateFLH_OnTurret { true }
+			, AlternateFLH_ApplyVehicle { false }
 			, DestroyAnim_Random { true }
 			, NotHuman_RandomDeathSequence { false }
 
@@ -901,6 +905,8 @@ public:
 			, MultiWeapon_IsSecondary {}
 			, MultiWeapon_SelectCount { 2 }
 			, ReadMultiWeapon { false }
+			, ThreatTypes { ThreatType::Normal,ThreatType::Normal }
+			, CombatDamages { 0,0 }
 
 			, VoiceIFVRepair { -1 }
 			, VoiceWeaponAttacks {}
@@ -932,6 +938,8 @@ public:
 
 		int SelectForceWeapon(TechnoClass* pThis, AbstractClass* pTarget);
 		int SelectMultiWeapon(TechnoClass* const pThis, AbstractClass* const pTarget);
+
+		void UpdateAdditionalAttributes();
 
 		// Ares 0.A
 		const char* GetSelectionGroupID() const;
