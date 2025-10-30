@@ -504,6 +504,7 @@ New:
 - Fast access structure (by FlyStar)
 - Toggle off laser trail and shake effects (by Ollerus)
 - [Dehardcode the `ZAdjust` of warhead anim](Fixed-or-Improved-Logics.md#dehardcode-the-zadjust-of-warhead-anim) (by TaranDahl)
+- Distribution click action mode (by CrimRecya)
 - New map actions in the 19000 range that are copies of the original actions but using ID entries instead of indexes (by FS-21)
 
 Vanilla fixes:
