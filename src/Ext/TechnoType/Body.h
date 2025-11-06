@@ -680,7 +680,7 @@ public:
 			, Explodes_DuringBuildup { true }
 			, Prerequisite { }
 			, Prerequisite_Negative { }
-			, Prerequisite_Lists { 0 }
+			, Prerequisite_Lists { -1 }
 			, ConsideredNaval { }
 			, ConsideredVehicle { }
 			, ConsideredSecretLabTech { false }
