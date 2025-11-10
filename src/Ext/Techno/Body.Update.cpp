@@ -57,13 +57,13 @@ void TechnoExt::ExtData::OnEarlyUpdate()
 
 void TechnoExt::ExtData::ApplyInterceptor()
 {
-	const auto pThis = this->OwnerObject();
 	const auto pTypeExt = this->TypeExtData;
 	const auto pInterceptorType = pTypeExt->InterceptorType.get();
 
 	if (!pInterceptorType)
 		return;
 
+	const auto pThis = this->OwnerObject();
 	const auto pTarget = pThis->Target;
 
 	if (pTarget)
@@ -225,13 +225,13 @@ void TechnoExt::ExtData::WebbyUpdate()
 
 void TechnoExt::ExtData::DepletedAmmoActions()
 {
-	auto const pThis = this->OwnerObject();
 	auto const pTypeExt = this->TypeExtData;
 	auto const pType = pTypeExt->OwnerObject();
 
 	if (pType->Ammo <= 0)
 		return;
 
+	auto const pThis = this->OwnerObject();
 	auto const rtti = pThis->WhatAmI();
 	UnitClass* pUnit = nullptr;
 
@@ -254,8 +254,8 @@ void TechnoExt::ExtData::DepletedAmmoActions()
 		return;
 
 	int const ammo = pThis->Ammo;
-	bool canDeploy = TechnoExt::HasAmmoToDeploy(pThis) && (min < 0 || ammo >= min) && (max < 0 || ammo <= max);
-	bool isDeploying = pThis->CurrentMission == Mission::Unload || pThis->QueuedMission == Mission::Unload;
+	const bool canDeploy = TechnoExt::HasAmmoToDeploy(pThis) && (min < 0 || ammo >= min) && (max < 0 || ammo <= max);
+	const bool isDeploying = pThis->CurrentMission == Mission::Unload || pThis->QueuedMission == Mission::Unload;
 
 	if (canDeploy && !isDeploying)
 	{
@@ -300,6 +300,63 @@ void TechnoExt::ExtData::AmmoAutoConvertActions()
 	}
 }
 
+// Subterranean harvester factory exit state machine.
+void TechnoExt::ExtData::UpdateSubterraneanHarvester()
+{
+	auto const pThis = static_cast<UnitClass*>(this->OwnerObject());
+
+	// Unnecessary for AI players.
+	if (!pThis->Owner->IsControlledByHuman())
+		return;
+
+	switch (this->SubterraneanHarvStatus)
+	{
+	case 0: // No state to handle.
+		break;
+	case 1: // Unit has been created.
+		// If we're still in the factory do not advance.
+		if (pThis->HasAnyLink())
+			break;
+
+		pThis->ClearNavigationList();
+
+		// If we have rally point available, move to it and advance to next state, otherwise end here.
+		if (this->SubterraneanHarvRallyPoint)
+		{
+			pThis->SetDestination(this->SubterraneanHarvRallyPoint, false);
+			pThis->QueueMission(Mission::Move, true);
+			this->SubterraneanHarvRallyPoint = nullptr;
+			this->SubterraneanHarvStatus = 2;
+			break;
+		}
+		else
+		{
+			this->SubterraneanHarvStatus = 0;
+		}
+
+		break;
+	case 2: // Out of factory and on move.
+		// If we're still moving don't start harvesting.
+		if (pThis->Destination || pThis->CurrentMission == Mission::Move)
+			break;
+
+		// If harvester stops moving and becomes anything except idle, reset the state machine.
+		if (pThis->CurrentMission != Mission::Guard)
+		{
+			this->SubterraneanHarvStatus = 0;
+			break;
+		}
+
+		// Go harvest ore.
+		pThis->ClearNavigationList();
+		pThis->QueueMission(Mission::Harvest, true);
+		this->SubterraneanHarvStatus = 0;
+		break;
+	default:
+		break;
+	}
+}
+
 // TODO : Merge into new AttachEffects
 bool TechnoExt::ExtData::CheckDeathConditions(bool isInLimbo)
 {
@@ -309,13 +366,12 @@ bool TechnoExt::ExtData::CheckDeathConditions(bool isInLimbo)
 		return false;
 
 	auto const pThis = this->OwnerObject();
-	auto const pType = pThis->GetTechnoType();
 
 	// Self-destruction must be enabled
 	const auto howToDie = pTypeExt->AutoDeath_Behavior.Get();
 
 	// Death if no ammo
-	if (pType->Ammo > 0 && pThis->Ammo <= 0 && pTypeExt->AutoDeath_OnAmmoDepletion)
+	if (pTypeExt->OwnerObject()->Ammo > 0 && pThis->Ammo <= 0 && pTypeExt->AutoDeath_OnAmmoDepletion)
 	{
 		TechnoExt::KillSelf(pThis, howToDie, pTypeExt->AutoDeath_VanishAnimation, isInLimbo);
 		return true;
@@ -386,10 +442,14 @@ bool TechnoExt::ExtData::CheckDeathConditions(bool isInLimbo)
 
 void TechnoExt::ExtData::EatPassengers()
 {
-	auto const pThis = this->OwnerObject();
 	auto const pTypeExt = this->TypeExtData;
 
-	if (!pTypeExt->PassengerDeletionType || !TechnoExt::IsActiveIgnoreEMP(pThis))
+	if (!pTypeExt->PassengerDeletionType)
+		return;
+
+	auto const pThis = this->OwnerObject();
+
+	if (!TechnoExt::IsActiveIgnoreEMP(pThis))
 		return;
 
 	auto const pDelType = pTypeExt->PassengerDeletionType.get();
@@ -489,7 +549,7 @@ void TechnoExt::ExtData::EatPassengers()
 				}
 
 				// Handle gunner change.
-				auto const pTransportType = pThis->GetTechnoType();
+				auto const pTransportType = pTypeExt->OwnerObject();
 
 				if (pTransportType->Gunner)
 				{
@@ -713,6 +773,13 @@ void TechnoExt::ExtData::UpdateTypeData(TechnoTypeClass* pCurrentType)
 	this->TypeExtData = pNewTypeExt;
 
 	this->UpdateSelfOwnedAttachEffects();
+
+	if (auto const pShield = this->Shield.get())
+		pShield->ConvertCheck(pCurrentType);
+
+	// Recalculate and redraw
+	this->UpdateTintValues();
+	pThis->MarkForRedraw();
 
 	// Recreate Laser Trails
 	if (const size_t trailCount = this->LaserTrails.size())
@@ -1392,6 +1459,7 @@ void TechnoExt::ExtData::UpdateLaserTrails()
 void TechnoExt::ExtData::UpdateMindControlAnim()
 {
 	auto const pThis = this->OwnerObject();
+
 	if (pThis->IsMindControlled())
 	{
 		if (pThis->MindControlRingAnim && !this->MindControlRingAnimType)
@@ -1465,9 +1533,7 @@ void TechnoExt::ExtData::UpdateGattlingRateDownReset()
 			this->ShouldUpdateGattlingValue = false;
 
 			if (oldStage != 0)
-			{
 				pThis->GattlingRateDown(0);
-			}
 		}
 	}
 }
@@ -1940,7 +2006,6 @@ void TechnoExt::ExtData::UpdateSelfOwnedAttachEffects()
 	auto const pTypeExt = this->TypeExtData;
 	std::vector<std::unique_ptr<AttachEffectClass>>::iterator it;
 	std::vector<std::pair<WeaponTypeClass*, TechnoClass*>> expireWeapons;
-	bool markForRedraw = false;
 	bool altered = false;
 
 	// Delete ones on old type and not on current.
@@ -1969,7 +2034,6 @@ void TechnoExt::ExtData::UpdateSelfOwnedAttachEffects()
 				}
 			}
 
-			markForRedraw |= pType->HasTint();
 			it = this->AttachedEffects.erase(it);
 			altered = true;
 		}
@@ -1992,9 +2056,6 @@ void TechnoExt::ExtData::UpdateSelfOwnedAttachEffects()
 
 	if (altered && !count)
 		this->RecalculateStatMultipliers();
-
-	if (markForRedraw)
-		pThis->MarkForRedraw();
 }
 
 // Updates CumulativeAnimations AE's on techno.

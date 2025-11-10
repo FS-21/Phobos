@@ -109,6 +109,8 @@ public:
 		Valueable<bool> NewEvaVoice_RecheckOnDeath;
 		NullableIdx<VoxClass> NewEvaVoice_InitialMessage;
 
+		Valueable<bool> UndeploysInto_Sellable;
+
 		// Ares 0.A
 		Valueable<BuildingTypeClass*> RubbleIntact;
 		Valueable<bool> RubbleIntactRemove;
@@ -182,6 +184,7 @@ public:
 			, NewEvaVoice_Priority { 0 }
 			, NewEvaVoice_RecheckOnDeath { false }
 			, NewEvaVoice_InitialMessage { }
+			, UndeploysInto_Sellable { false }
 
 			// Ares 0.A
 			, RubbleIntact { nullptr }

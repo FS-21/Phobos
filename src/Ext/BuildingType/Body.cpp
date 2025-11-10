@@ -269,6 +269,7 @@ void BuildingTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	}
 
 	this->Refinery_UseStorage.Read(exINI, pSection, "Refinery.UseStorage");
+	this->UndeploysInto_Sellable.Read(exINI, pSection, "UndeploysInto.Sellable");
 
 	// PlacementPreview
 	{
@@ -369,6 +370,7 @@ void BuildingTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->NewEvaVoice_Priority)
 		.Process(this->NewEvaVoice_RecheckOnDeath)
 		.Process(this->NewEvaVoice_InitialMessage)
+		.Process(this->UndeploysInto_Sellable)
 
 		// Ares 0.A
 		.Process(this->RubbleIntact)
