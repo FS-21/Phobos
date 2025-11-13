@@ -358,6 +358,8 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	this->IvanBombAttachToCenter.Read(exINI, GameStrings::CombatDamage, "IvanBombAttachToCenter");
 
+	this->FallingDownTargetingFix.Read(exINI, GameStrings::General, "FallingDownTargetingFix");
+
 	// Section AITargetTypes
 	int itemsCount = pINI->GetKeyCount("AITargetTypes");
 	for (int i = 0; i < itemsCount; ++i)
@@ -777,6 +779,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->BattlePoints_DefaultValue)
 		.Process(this->BattlePoints_DefaultFriendlyValue)
 		.Process(this->IvanBombAttachToCenter)
+		.Process(this->FallingDownTargetingFix)
 		;
 }
 

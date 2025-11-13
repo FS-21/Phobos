@@ -303,6 +303,8 @@ public:
 		Valueable<int> WarheadAnimZAdjust;
 
 		Valueable<bool> IvanBombAttachToCenter;
+
+		Valueable<bool> FallingDownTargetingFix;
 		
 		Nullable<bool> BattlePoints;
 		Nullable<int> BattlePoints_DefaultValue;
@@ -547,6 +549,8 @@ public:
 			, BattlePoints_DefaultFriendlyValue {}
 
 			, IvanBombAttachToCenter { false }
+
+			, FallingDownTargetingFix { false }
 		{ }
 
 		virtual ~ExtData() = default;

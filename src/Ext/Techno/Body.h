@@ -348,6 +348,7 @@ public:
 	static bool SimpleDeployerAllowedToDeploy(UnitClass* pThis, bool defaultValue, bool alwaysCheckLandTypes);
 	static bool IsValidTechno(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed = true);
 	static bool IsValidTechno(AbstractClass* pObject, bool checkIfInTransportOrAbsorbed = true);
+	static void ShowPromoteAnim(TechnoClass* pThis);
 
 
 	// WeaponHelpers.cpp
