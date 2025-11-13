@@ -28,7 +28,7 @@ DEFINE_HOOK(0x687C9B, ReadScenarioINI_AITeamSelector_PreloadValidTriggers, 0x7)
 		{
 			auto pTrigger = AITriggerTypeClass::Array.GetItem(i);
 
-			if (!pTrigger || (ignoreGlobalAITriggers && pTrigger->IsGlobal) || !pTrigger->Team1)
+			if (!pTrigger || (ignoreGlobalAITriggers && pTrigger->IsGlobal && !pTrigger->IsEnabled) || !pTrigger->Team1)
 				continue;
 
 			int triggerHouse = pTrigger->HouseIndex;

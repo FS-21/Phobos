@@ -960,8 +960,8 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 	{
 	case teamCategory::None:
 		weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeight) * 1.0;
-		Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
-
+		//Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
+		Debug::Log("AITeamsSelector - Picking 1 team from the %d available...\n", validTriggerCandidates.Count);
 		// Debug
 		/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
 		for (TriggerElementWeight element : validTriggerCandidates)
@@ -983,7 +983,8 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 	case teamCategory::Ground:
 		weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeightGroundOnly) * 1.0;
-		Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
+		//Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
+		Debug::Log("AITeamsSelector - Picking 1 team (of the category 'GROUND') from the %d available...\n", validTriggerCandidatesGroundOnly.Count);
 
 		// Debug
 		/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
@@ -1006,7 +1007,8 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 	case teamCategory::Unclassified:
 		weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeightUnclassifiedOnly) * 1.0;
-		Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
+		//Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
+		Debug::Log("AITeamsSelector - Picking 1 team (of the category 'UNCLASSIFIED') from the %d available...\n", validTriggerCandidatesUnclassifiedOnly.Count);
 
 		// Debug
 		/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
@@ -1029,7 +1031,8 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 	case teamCategory::Naval:
 		weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeightNavalOnly) * 1.0;
-		Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
+		//Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
+		Debug::Log("AITeamsSelector - Picking 1 team (of the category 'NAVAL') from the %d available...\n", validTriggerCandidatesNavalOnly.Count);
 
 		// Debug
 		/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
@@ -1052,7 +1055,8 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 	case teamCategory::Air:
 		weightDice = ScenarioClass::Instance->Random.RandomRanged(0, (int)totalWeightAirOnly) * 1.0;
-		Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
+		//Debug::Log("AITeamsSelector - Weight Dice: %f\n", weightDice);
+		Debug::Log("AITeamsSelector - Picking 1 team (of the category 'AIR') from the %d available...\n", validTriggerCandidatesAirOnly.Count);
 
 		// Debug
 		/*Debug::Log("DEBUG: Candidate AI triggers list:\n");
@@ -1079,7 +1083,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 
 	if (!selectedTrigger)
 	{
-		Debug::Log("AITeamsSelector - House %d [%s](%s) failed to select Trigger. A new attempt Will be done later...\n", pHouse->ArrayIndex, pHouse->PlainName, pHouse->Type->ID);
+		Debug::Log("AITeamsSelector - Failed picking a new trigger for the House %d [%s](%s). A new attempt Will be done later...\n", pHouse->ArrayIndex, pHouse->PlainName, pHouse->Type->ID);
 		return SkipCode;
 	}
 
