@@ -28,7 +28,8 @@ DEFINE_HOOK(0x687C9B, ReadScenarioINI_AITeamSelector_PreloadValidTriggers, 0x7)
 		{
 			auto pTrigger = AITriggerTypeClass::Array.GetItem(i);
 
-			if (!pTrigger || (ignoreGlobalAITriggers && pTrigger->IsGlobal && !pTrigger->IsEnabled) || !pTrigger->Team1)
+			// Note: In 0x41F2E0 "AITriggerTypeClass::Read_Scenario_INI(CCINIClass *a2)" the section [AITriggerTypesEnable] is readed and overwrites the trigger's IsEnabled value. Unless I read that section here or I assume I should add all of this house and in the Teams selector check if is enabled...
+			if (!pTrigger || !pTrigger->Team1)// || !pTrigger->IsEnabled)// || (ignoreGlobalAITriggers && pTrigger->IsGlobal))
 				continue;
 
 			int triggerHouse = pTrigger->HouseIndex;

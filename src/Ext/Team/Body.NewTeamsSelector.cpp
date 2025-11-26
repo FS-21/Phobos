@@ -409,7 +409,7 @@ DEFINE_HOOK(0x4F8A27, TeamTypeClass_SuggestedNewTeam_NewTeamsSelector, 0x5)
 	{
 		const auto pTrigger = AITriggerTypeClass::Array.GetItem(triggerIdx);
 
-		if (!pTrigger || !pTrigger->IsEnabled || (ignoreGlobalAITriggers && pTrigger->IsGlobal) || !pTrigger->Team1)
+		if (!pTrigger || !pTrigger->Team1 || !pTrigger->IsEnabled)
 			continue;
 
 		// Ignore offensive teams if the next trigger must be defensive
