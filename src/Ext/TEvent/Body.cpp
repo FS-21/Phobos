@@ -222,9 +222,6 @@ bool TEventExt::HouseOwnsTechnoTypeTEvent(TEventClass* pThis)
 
 	if (pType->WhatAmI() == AbstractType::BuildingType)
 	{
-		auto const pHouseExt = HouseExt::ExtMap.Find(pHouse);
-		auto& vec = pHouseExt->OwnedLimboDeliveredBuildings;
-
 		for (auto pBuilding : pHouse->Buildings)
 		{
 			if (pBuilding->Type != pType)
