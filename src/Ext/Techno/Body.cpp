@@ -1206,6 +1206,73 @@ bool TechnoExt::SimpleDeployerAllowedToDeploy(UnitClass* pThis, bool defaultValu
 	return true;
 }
 
+void TechnoExt::TransferMindControlOnDeploy(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo)
+{
+	const auto pAnimType = pTechnoFrom->MindControlRingAnim
+		? pTechnoFrom->MindControlRingAnim->Type
+		: TechnoExt::ExtMap.Find(pTechnoFrom)->MindControlRingAnimType;
+
+	if (const auto Controller = pTechnoFrom->MindControlledBy)
+	{
+		if (const auto Manager = Controller->CaptureManager)
+		{
+			CaptureManagerExt::FreeUnit(Manager, pTechnoFrom, true);
+
+			if (CaptureManagerExt::CaptureUnit(Manager, pTechnoTo, false, pAnimType, true))
+			{
+				if (const auto pBld = abstract_cast<BuildingClass*, true>(pTechnoTo))
+				{
+					// Capturing the building after unlimbo before buildup has finished or even started appears to throw certain things off,
+					// Hopefully this is enough to fix most of it like anims playing prematurely etc.
+					pBld->ActuallyPlacedOnMap = false;
+					pBld->DestroyNthAnim(BuildingAnimSlot::All);
+
+					pBld->BeginMode(BStateType::Construction);
+					pBld->QueueMission(Mission::Construction, false);
+				}
+			}
+			else
+			{
+				int nSound = pTechnoTo->GetTechnoType()->MindClearedSound;
+				if (nSound == -1)
+					nSound = RulesClass::Instance->MindClearedSound;
+
+				if (nSound != -1)
+					VocClass::PlayIndexAtPos(nSound, pTechnoTo->Location);
+			}
+		}
+	}
+	else if (const auto MCHouse = pTechnoFrom->MindControlledByHouse)
+	{
+		pTechnoTo->MindControlledByHouse = MCHouse;
+		pTechnoFrom->MindControlledByHouse = nullptr;
+	}
+	else if (pTechnoFrom->MindControlledByAUnit) // Perma MC
+	{
+		pTechnoTo->MindControlledByAUnit = true;
+
+		const auto pBuilding = abstract_cast<BuildingClass*, true>(pTechnoTo);
+		CoordStruct location = pTechnoTo->GetCoords();
+
+		location.Z += pBuilding
+			? pBuilding->Type->Height * Unsorted::LevelHeight
+			: pTechnoTo->GetTechnoType()->MindControlRingOffset;
+
+		const auto pAnim = pAnimType
+			? GameCreate<AnimClass>(pAnimType, location, 0, 1)
+			: nullptr;
+
+		if (pAnim)
+		{
+			if (pBuilding)
+				pAnim->ZAdjust = -1024;
+
+			pTechnoTo->MindControlRingAnim = pAnim;
+			pAnim->SetOwnerObject(pTechnoTo);
+		}
+	}
+}
+
 // =============================
 // load / save
 
