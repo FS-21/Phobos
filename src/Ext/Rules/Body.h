@@ -127,6 +127,10 @@ public:
 		Valueable<bool> DisplayIncome_AllowAI;
 		Valueable<AffectedHouse> DisplayIncome_Houses;
 
+		Valueable<bool> AllowDeployControlledMCV;
+
+		Valueable<bool> TypeSelectUseIFVMode;
+
 		Valueable<bool> IronCurtain_KeptOnDeploy;
 		Valueable<IronCurtainEffect> IronCurtain_EffectOnOrganics;
 		Nullable<WarheadTypeClass*> IronCurtain_KillOrganicsWarhead;
@@ -305,6 +309,9 @@ public:
 		Valueable<bool> IvanBombAttachToCenter;
 
 		Valueable<bool> FallingDownTargetingFix;
+		Valueable<bool> AIAirTargetingFix;
+
+		Valueable<bool> SortCameoByName;
 		
 		Nullable<bool> BattlePoints;
 		Nullable<int> BattlePoints_DefaultValue;
@@ -392,6 +399,10 @@ public:
 			, ForbidParallelAIQueues_Vehicle { false }
 
 			, EnablePowerSurplus { false }
+
+			, AllowDeployControlledMCV { false }
+
+			, TypeSelectUseIFVMode { false }
 
 			, IronCurtain_KeptOnDeploy { true }
 			, IronCurtain_EffectOnOrganics { IronCurtainEffect::Kill }
@@ -551,6 +562,9 @@ public:
 			, IvanBombAttachToCenter { false }
 
 			, FallingDownTargetingFix { false }
+			, AIAirTargetingFix { false }
+
+			, SortCameoByName { false }
 		{ }
 
 		virtual ~ExtData() = default;

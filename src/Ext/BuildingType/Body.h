@@ -32,6 +32,7 @@ public:
 		Valueable<bool> CanC4_AllowZeroDamage;
 		Valueable<bool> Refinery_UseStorage;
 		Valueable<PartialVector2D<double>> InitialStrength_Cloning;
+		Valueable<bool> Cloning_Powered { true };
 		Valueable<bool> ExcludeFromMultipleFactoryBonus;
 
 		ValueableIdx<VocClass> Grinding_Sound;
@@ -111,6 +112,9 @@ public:
 
 		Valueable<bool> UndeploysInto_Sellable;
 
+		// Ares 0.2
+		Valueable<bool> CloningFacility;
+
 		// Ares 0.A
 		Valueable<BuildingTypeClass*> RubbleIntact;
 		Valueable<bool> RubbleIntactRemove;
@@ -185,6 +189,9 @@ public:
 			, NewEvaVoice_RecheckOnDeath { false }
 			, NewEvaVoice_InitialMessage { }
 			, UndeploysInto_Sellable { false }
+
+			// Ares 0.2
+			, CloningFacility { false }
 
 			// Ares 0.A
 			, RubbleIntact { nullptr }

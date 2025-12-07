@@ -272,8 +272,12 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Reactivate unused trigger events 2, 53, and 54.
 - Fixed the bug that vehicle fall on infantry will make all cell content has been removed.
 - Fixed buildings that have their owner changed during buildup skipping buildup and sometimes not correctly clearing the state.
+- Fixed preplaced aircraft outside visible map being incorrectly flagged as crashing under certain conditions.
 - Fixed `MovementZone=Subterannean` harvesters being unable to find docks if in area enclosed by water, cliffs etc.
 - Fixed an issue where some effects pointing to a unit were not properly cleared when the unit changed its owner.
+- Allow Reveal Crate to take effect when picking up by another player controlled house in campaign.
+- Fixed an issue where the vanilla script ignores jumpjets. Enable it through `[General] -> AIAirTargetingFix=true`.
+- Fixed the bug that naval ship will sink even they destroyed in air.
 
 ## Fixes / interactions with other extensions
 
@@ -307,6 +311,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed an issue that technos head to building's dock even they are not going to dock.
 - Fixed an issue that the jumpjet vehicles cannot stop correctly after going berserk.
 - Fixed the issue where Ares' `Flash.Duration` cannot override the weapon's repair flash effect.
+- Fixed the bug that building with `CloningFacility=true` and `WeaponsFactory=true` may cloning multiple vehicles and then they get stuck.
 
 ```{note}
 The described behavior is a replica of and is compliant with XNA CnCNet Client's multiplayer save game support.
@@ -772,6 +777,16 @@ In `rulesmd.ini`:
 ```ini
 [General]
 BuildingWaypoints=false  ; boolean
+```
+
+### Customize if cloning need power
+
+- In vanilla, cloning vats can work fine even low power. Starting from Ares 2.0, they need power to work. Now you can specific it.
+
+In `rulesmd.ini`:
+```ini
+[SOMEBUILDING]        ; BuildingType
+Cloning.Powered=true  ; boolean
 ```
 
 ## Infantry
@@ -1887,13 +1902,16 @@ ForceShield.KeptOnDeploy=       ; boolean, default to [CombatDamage] -> ForceShi
 - It is now possible for vehicles to retain their target when issued movement command by setting `KeepTargetOnMove` to true.
   - Note that no check is done whether or not the vehicle or the weapon can actually fire while moving, this is on modder's discretion.
   - The target is automatically reset if the vehicle moves beyond the weapon's range from the target.
+- `KeepTargetOnMove.Weapon` determines the weapon to be used for range check. If set to -1, the game will select the weapon against the target by default logic.
+  - It's recommended to set it to a specific weapon for better performance, unless there's a need to use multiple weapons for different targets.
 - `KeepTargetOnMove.NoMorePursuit` controls whether the unit will restart chasing the target for attack when it stops again, otherwise it will clear the target when it moves away.
-- `KeepTargetOnMove.ExtraDistance` can be used to modify the distance considered 'out of range' from target (it is added to weapon range), negative values work to reduce the distance.
+- `KeepTargetOnMove.ExtraDistance` can be used to modify the distance considered 'out of range' from the target (it is added to weapon range), negative values work to reduce the distance.
 
 In `rulesmd.ini`:
 ```ini
 [SOMEVEHICLE]                        ; VehicleType
 KeepTargetOnMove=false               ; boolean
+KeepTargetOnMove.Weapon=-1           ; integer, weapon slot index
 KeepTargetOnMove.NoMorePursuit=true  ; boolean
 KeepTargetOnMove.ExtraDistance=0     ; floating point value, distance in cells
 ```
@@ -2403,6 +2421,33 @@ In `rulesmd.ini`:
 ```ini
 [SOMEWEAPON]         ; WeaponType
 IsSingleColor=false  ; boolean
+```
+
+## Allow deploy controlled MCV
+
+In vanilla, you cannot deploy a controlled vehicle to `ConstructionYard=true` building. Now you can customize it.
+
+In `rulesmd.ini`:
+```ini
+[General]
+AllowDeployControlledMCV=false   ; boolean
+```
+
+## Customize type selection for IFV
+
+In vanilla game, when using type selection command on IFVs, all of them will be selected regardless of their current modes, which is allowed to customize now.
+- `WeaponGroupAsN` determines which group the IFV is in when enabling `WeaponN`, where N stands for 1-based weapon mode index. IFVs in the same group will be selected together during type a selection, while not included those in different groups.
+- `TypeSelectUseIFVMode` determines whether all IFV modes will be considered as its own group by default during a type selection.
+  - If it's set to true, `WeaponGroupAsN` will be default to N for each `WeaponN`, which makes each of them become a standalone type during a type selection.
+  - If it's set to false, `WeaponGroupAsN` will be default to 0 for all weapons, which makes type selection on IFVs work the same as before.
+
+In `rulesmd.ini`:
+```ini
+[General]
+TypeSelectUseIFVMode=false   ; boolean
+
+[SOMEVEHICLE]                ; VehicleType
+WeaponGroupAsN=              ; string, default to N if [General] -> TypeSelectUseIFVMode=true, and 0 if false
 ```
 
 ## RadialIndicator visibility

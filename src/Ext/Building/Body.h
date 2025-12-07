@@ -121,4 +121,5 @@ public:
 	static void HideBuildingAnimations(BuildingClass* pThis = nullptr);
 	static void UnhideBuildingAnimations(BuildingClass* pThis = nullptr);
 	static WeaponStruct* GetLaserWeapon(BuildingClass* pThis);
+	static void __fastcall KickOutClone(std::pair<TechnoTypeClass*, HouseClass*>& info, void*, BuildingClass* pFactory);
 };
