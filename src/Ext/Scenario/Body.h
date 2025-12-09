@@ -141,10 +141,10 @@ public:
 			, DropshipLoadout_SellClickSound {}
 			, DropshipLoadout_ArrowsClickSound {}
 		{ }
-		
-		void SetVariableToByID(bool bIsGlobal, int nIndex, char bState);
-		void GetVariableStateByID(bool bIsGlobal, int nIndex, char* pOut);
-		void ReadVariables(bool bIsGlobal, CCINIClass* pINI);
+
+		static void SetVariableToByID(bool bIsGlobal, int nIndex, char bState);
+		static void GetVariableStateByID(bool bIsGlobal, int nIndex, char* pOut);
+		static void ReadVariables(bool bIsGlobal, CCINIClass* pINI);
 		static void SaveVariablesToFile(bool isGlobal);
 
 		virtual ~ExtData() = default;
