@@ -156,6 +156,7 @@ This page lists all the individual contributions to the project by their author.
   - Warhead activation target health thresholds enhancements
   - Event 606: AttachEffect is attaching to a Techno
   - Linked superweapons
+  - Unit & infantry auto-conversion on ammo change
   - Map event `There are no technos of the specified houses list`
   - Script actions for manipulating script flows with conditional jumps
   - Universal deploy from any techno into any techno
@@ -163,7 +164,6 @@ This page lists all the individual contributions to the project by their author.
   - Allow cyborg legs to be repaired when they enter into transports or structures
   - Script actions for modifying AI anger against other houses
   - Modify Ammo on impact
-  - Unit & infantry auto-conversion on ammo change
   - Web logic against infantry
   - ScriptType actions `10018` & `12003` for aircrafts attacks
   - Kick out ejectable passengers in warheads
@@ -492,6 +492,7 @@ This page lists all the individual contributions to the project by their author.
   - Customize Ares's radar jam logic
   - Customize if cloning need power
   - Customize type selection for IFV
+  - Fix the issue that units will goto farest location if target is closer than `MinimumRange`
 - **Apollo** - Translucent SHP drawing patches
 - **ststl**:
   - Customizable `ShowTimer` priority of superweapons
@@ -673,6 +674,8 @@ This page lists all the individual contributions to the project by their author.
   - Dehardcode the `ZAdjust` of warhead anim
   - Fix an issue where some effects pointing to a unit were not properly cleared when the unit changed its owner
   - Fix an issue where the vanilla script ignores jumpjets
+  - CellSpread in cylinder shape
+  - CellSpread damage check if victim is in air or on floor
 - **solar-III (凤九歌)**
   - Target scanning delay customization (documentation)
   - Skip target scanning function calling for unarmed technos (documentation)
@@ -714,3 +717,4 @@ This page lists all the individual contributions to the project by their author.
 - **Damfoos** - extensive and thorough testing
 - **Dmitry Volkov** - extensive and thorough testing
 - **Rise of the East community** - extensive playtesting of in-dev features
+- **11EJDE11** - Prevent mpdebug number from being drawn when visibility toggled off

@@ -1062,6 +1062,9 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Ammo_AutoConvertMaximumAmount.Read(exINI, pSection, "Ammo.AutoConvertMaximumAmount");
 	this->Ammo_AutoConvertType.Read(exINI, pSection, "Ammo.AutoConvertType");
 
+	if (this->Ammo_AutoConvertMinimumAmount > this->Ammo_AutoConvertMaximumAmount)
+		Debug::Log("[Developer warning][%s] Ammo.AutoConvertMinimumAmount is greater than Ammo.AutoConvertMaximumAmount, resulting in no conversion.\n", pSection);
+
 	this->PenetratesGarrison_Allowed.Read(exINI, pSection, "PenetratesGarrison.Allowed");
 
 	this->InfantryAutoDeploy.Read(exINI, pSection, "InfantryAutoDeploy");
@@ -1880,6 +1883,10 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->FallingDownDamage_Water)
 		.Process(this->FixEnteringCyborgLegs)
 
+		.Process(this->Ammo_AutoConvertMinimumAmount)
+		.Process(this->Ammo_AutoConvertMaximumAmount)
+		.Process(this->Ammo_AutoConvertType)
+
 		.Process(this->Convert_UniversalDeploy)
 		.Process(this->Convert_DeployToLand)
 		.Process(this->Convert_PreDeploy_AnimFX)
@@ -1892,10 +1899,6 @@ void TechnoTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->Convert_TransferPassengers)
 		.Process(this->Convert_TransferPassengers_IgnoreInvalidOccupiers)
 		.Process(this->Convert_ForceVeterancyTransfer)
-
-		.Process(this->Ammo_AutoConvertMinimumAmount)
-		.Process(this->Ammo_AutoConvertMaximumAmount)
-		.Process(this->Ammo_AutoConvertType)
 
 		.Process(this->NoManualUnload)
 

@@ -178,34 +178,27 @@ void TechnoExt::ExtData::WebbyUpdate()
 void TechnoExt::ExtData::DepletedAmmoActions()
 {
 	auto const pTypeExt = this->TypeExtData;
+	const int min = pTypeExt->Ammo_AutoDeployMinimumAmount;
+	const int max = pTypeExt->Ammo_AutoDeployMaximumAmount;
+
+	if (min < 0 && max < 0)
+		return;
+
 	auto const pType = pTypeExt->OwnerObject();
 
 	if (pType->Ammo <= 0)
 		return;
 
-	auto const pThis = this->OwnerObject();
-	auto const rtti = pThis->WhatAmI();
-	UnitClass* pUnit = nullptr;
+	auto const pThis = static_cast<UnitClass*>(this->OwnerObject());
+	auto const pUnitType = pThis->Type;
 
-	if (rtti == AbstractType::Unit)
+	if (!pUnitType->IsSimpleDeployer && !pUnitType->DeploysInto && !pUnitType->DeployFire
+		&& pUnitType->Passengers < 1 && pThis->Passengers.NumPassengers < 1)
 	{
-		pUnit = static_cast<UnitClass*>(pThis);
-		auto const pUnitType = pUnit->Type;
-
-		if (!pUnitType->IsSimpleDeployer && !pUnitType->DeploysInto && !pUnitType->DeployFire
-			&& pUnitType->Passengers < 1 && pUnit->Passengers.NumPassengers < 1)
-		{
-			return;
-		}
+		return;
 	}
 
-	int const min = pTypeExt->Ammo_AutoDeployMinimumAmount;
-	int const max = pTypeExt->Ammo_AutoDeployMaximumAmount;
-
-	if (min < 0 && max < 0)
-		return;
-
-	int const ammo = pThis->Ammo;
+	const int ammo = pThis->Ammo;
 	const bool canDeploy = TechnoExt::HasAmmoToDeploy(pThis) && (min < 0 || ammo >= min) && (max < 0 || ammo <= max);
 	const bool isDeploying = pThis->CurrentMission == Mission::Unload || pThis->QueuedMission == Mission::Unload;
 
@@ -217,9 +210,9 @@ void TechnoExt::ExtData::DepletedAmmoActions()
 	{
 		pThis->QueueMission(Mission::Guard, true);
 
-		if (pUnit && pUnit->Type->IsSimpleDeployer && pThis->InAir)
+		if (pUnitType->IsSimpleDeployer && pThis->InAir)
 		{
-			if (auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pUnit->Locomotor))
+			if (auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor))
 				pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
 		}
 	}
@@ -227,28 +220,27 @@ void TechnoExt::ExtData::DepletedAmmoActions()
 
 void TechnoExt::ExtData::AmmoAutoConvertActions()
 {
-	const auto pThis = this->OwnerObject();
 	const auto pTypeExt = this->TypeExtData;
 
-	if (!pTypeExt || pThis->GetTechnoType()->Ammo <= 0)
+	if (!pTypeExt->Ammo_AutoConvertType.isset())
 		return;
 
-	const bool skipMinimum = pTypeExt->Ammo_AutoConvertMinimumAmount < 0;
-	const bool skipMaximum = pTypeExt->Ammo_AutoConvertMaximumAmount < 0;
+	const int min = pTypeExt->Ammo_AutoConvertMinimumAmount;
+	const int max = pTypeExt->Ammo_AutoConvertMaximumAmount;
 
-	if (skipMinimum && skipMaximum)
+	if (min < 0 && max < 0)
 		return;
 
-	if ((skipMinimum || pThis->Ammo >= pTypeExt->Ammo_AutoConvertMinimumAmount) // More than minimum
-	&& (skipMaximum || pThis->Ammo <= pTypeExt->Ammo_AutoConvertMaximumAmount)) // Less than maximum
+	if (pTypeExt->OwnerObject()->Ammo <= 0)
+		return;
+
+	const auto pThis = this->OwnerObject();
+	const int ammo = pThis->Ammo;
+
+	if ((min < 0 || ammo >= min) && (max < 0 || ammo <= max))
 	{
 		const auto pFoot = abstract_cast<FootClass*, true>(pThis);
-
-		if (!pFoot)
-			return;
-
-		if (pTypeExt->Ammo_AutoConvertType.isset())
-			TechnoExt::ConvertToType(pFoot, pTypeExt->Ammo_AutoConvertType);
+		TechnoExt::ConvertToType(pFoot, pTypeExt->Ammo_AutoConvertType);
 	}
 }
 
