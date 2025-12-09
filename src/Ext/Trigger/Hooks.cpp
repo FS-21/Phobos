@@ -129,7 +129,6 @@ DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
 				&& !pExt->SequentialTimers[i].Completed())
 				{
 					pExt->SequentialTimers[i].Resume();
-
 				}
 
 				eventTimer = pExt->SequentialTimers[i];
@@ -155,15 +154,6 @@ DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
 					R->AL(false);
 					return SkipGameCode; // Short-circuit
 				}
-			}
-
-			if (pExt->SequentialTimers.contains(i)
-				&& eventTimer.HasTimeLeft()
-				&& !eventTimer.InProgress()
-				&& !eventTimer.Completed())
-			{
-				pExt->SequentialTimers[i].Resume();
-				eventTimer = pExt->SequentialTimers[i];
 			}
 
 			if (!alreadyOccured)
