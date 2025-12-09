@@ -30,7 +30,7 @@ void TechnoTypeExt::ExtData::ApplyTurretOffset(Matrix3D* mtx, double factor)
 	mtx->Translate(x, y, z);
 }
 
-int TechnoTypeExt::ExtData::SelectForceWeapon(TechnoClass* pThis, AbstractClass* pTarget)
+int TechnoTypeExt::ExtData::SelectForceWeapon(TechnoClass* pThis, AbstractClass* pTarget) const
 {
 	if (TechnoTypeExt::SelectWeaponMutex || !this->ForceWeapon_Check || !pTarget) // In theory, pTarget must exist
 		return -1;
@@ -138,7 +138,7 @@ int TechnoTypeExt::ExtData::SelectForceWeapon(TechnoClass* pThis, AbstractClass*
 	return forceWeaponIndex;
 }
 
-bool TechnoTypeExt::ExtData::IsSecondary(int nWeaponIndex)
+bool TechnoTypeExt::ExtData::IsSecondary(int nWeaponIndex) const
 {
 	const auto pThis = this->OwnerObject();
 
@@ -154,7 +154,7 @@ bool TechnoTypeExt::ExtData::IsSecondary(int nWeaponIndex)
 	return nWeaponIndex != 0;
 }
 
-int TechnoTypeExt::ExtData::SelectMultiWeapon(TechnoClass* const pThis, AbstractClass* const pTarget)
+int TechnoTypeExt::ExtData::SelectMultiWeapon(TechnoClass* const pThis, AbstractClass* const pTarget) const
 {
 	if (!pTarget || !this->MultiWeapon)
 		return -1;
