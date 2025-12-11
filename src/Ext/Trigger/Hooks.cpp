@@ -85,8 +85,9 @@ DEFINE_HOOK(0x72612C, TriggerClass_CTOR_ForceSequentialEvents, 0x7)
 	return 0;
 }
 
+// TO-DO: Enable this and find the right addresses that doesn't produce random crashes
 // TriggerClass::RegisterEvent(...) rewrite
-DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
+/*DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
 {
 	enum { SkipGameCode = 0x7265B1 };
 
@@ -240,4 +241,4 @@ DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
 	R->AL(allEventsSuccessful);
 
 	return SkipGameCode;
-}
+}*/
