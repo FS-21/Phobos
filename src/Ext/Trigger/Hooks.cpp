@@ -31,7 +31,7 @@ DEFINE_HOOK(0x727024, TriggerTypeClass_HasGlobalSetOrClearedEvent, 0x5)
 		: 0x727029;
 }
 
-DEFINE_HOOK(0x72612C, TriggerClass_CTOR_ForceSequentialEvents, 0x7)
+/*DEFINE_HOOK(0x72612C, TriggerClass_CTOR_ForceSequentialEvents, 0x7)
 {
 	GET(TriggerClass*, pThis, ESI);
 
@@ -83,7 +83,7 @@ DEFINE_HOOK(0x72612C, TriggerClass_CTOR_ForceSequentialEvents, 0x7)
 	}
 
 	return 0;
-}
+}*/
 
 // TO-DO: Enable this and find the right addresses that doesn't produce random crashes
 // TriggerClass::RegisterEvent(...) rewrite
