@@ -248,6 +248,9 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 		// Chronoshift to enemy base, argument is additional distance modifier
 		ScriptExt::ChronoshiftToEnemyBase(pTeam, argument);
 		break;
+	case PhobosScripts::ForceGlobalOnlyTargetHouseEnemy:
+		ScriptExt::ForceGlobalOnlyTargetHouseEnemy(pTeam, -1);
+		break;
 	case PhobosScripts::SetSideIdxForManagingTriggers:
 		ScriptExt::SetSideIdxForManagingTriggers(pTeam, -1);
 		break;
@@ -272,9 +275,6 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 	case PhobosScripts::RepairDestroyedBridge:
 		// Start Timed Jump that jumps to the same line when the countdown finish (in frames)
 		ScriptExt::RepairDestroyedBridge(pTeam, -1);
-		break;
-	case PhobosScripts::ForceGlobalOnlyTargetHouseEnemy:
-		ScriptExt::ForceGlobalOnlyTargetHouseEnemy(pTeam, -1);
 		break;
 	case PhobosScripts::AbortActionAfterSuccessKill:
 		ScriptExt::SetAbortActionAfterSuccessKill(pTeam, -1);
@@ -1146,7 +1146,7 @@ void ScriptExt::VariablesHandler(TeamClass* pTeam, PhobosScripts eAction, int nA
 template<bool IsGlobal, class _Pr>
 void ScriptExt::VariableOperationHandler(TeamClass* pTeam, int nVariable, int Number)
 {
-	auto itr = ScenarioExt::Global()->Variables[IsGlobal].find(nVariable);
+	const auto itr = ScenarioExt::Global()->Variables[IsGlobal].find(nVariable);
 
 	if (itr != ScenarioExt::Global()->Variables[IsGlobal].end())
 	{
@@ -1163,7 +1163,7 @@ void ScriptExt::VariableOperationHandler(TeamClass* pTeam, int nVariable, int Nu
 template<bool IsSrcGlobal, bool IsGlobal, class _Pr>
 void ScriptExt::VariableBinaryOperationHandler(TeamClass* pTeam, int nVariable, int nVarToOperate)
 {
-	auto itr = ScenarioExt::Global()->Variables[IsSrcGlobal].find(nVarToOperate);
+	const auto itr = ScenarioExt::Global()->Variables[IsSrcGlobal].find(nVarToOperate);
 
 	if (itr != ScenarioExt::Global()->Variables[IsSrcGlobal].end())
 		ScriptExt::VariableOperationHandler<IsGlobal, _Pr>(pTeam, nVariable, itr->second.Value);
@@ -1197,7 +1197,7 @@ FootClass* ScriptExt::FindTheTeamLeader(TeamClass* pTeam)
 
 bool ScriptExt::IsExtVariableAction(int action)
 {
-	auto eAction = static_cast<PhobosScripts>(action);
+	auto const eAction = static_cast<PhobosScripts>(action);
 	return eAction >= PhobosScripts::LocalVariableAdd && eAction <= PhobosScripts::GlobalVariableAndByGlobal;
 }
 
@@ -1260,7 +1260,7 @@ void ScriptExt::JumpBackToPreviousScript(TeamClass* pTeam)
 
 void ScriptExt::ChronoshiftToEnemyBase(TeamClass* pTeam, int extraDistance)
 {
-	auto pScript = pTeam->CurrentScript;
+	auto const pScript = pTeam->CurrentScript;
 	auto const pLeader = ScriptExt::FindTheTeamLeader(pTeam);
 
 	char logText[1024];
@@ -1273,7 +1273,7 @@ void ScriptExt::ChronoshiftToEnemyBase(TeamClass* pTeam, int extraDistance)
 		return;
 	}
 
-	int houseIndex = pLeader->Owner->EnemyHouseIndex;
+	const int houseIndex = pLeader->Owner->EnemyHouseIndex;
 	HouseClass* pEnemy = houseIndex != -1 ? HouseClass::Array.GetItem(houseIndex) : nullptr;
 
 	if (!pEnemy)
@@ -1297,8 +1297,8 @@ void ScriptExt::ChronoshiftToEnemyBase(TeamClass* pTeam, int extraDistance)
 
 void ScriptExt::ChronoshiftTeamToTarget(TeamClass* pTeam, TechnoClass* pTeamLeader, AbstractClass* pTarget)
 {
-	auto pScript = pTeam->CurrentScript;
-	HouseClass* pOwner = pTeamLeader->Owner;
+	auto const pScript = pTeam->CurrentScript;
+	auto const pOwner = pTeamLeader->Owner;
 	SuperClass* pSuperCSphere = nullptr;
 	SuperClass* pSuperCWarp = nullptr;
 
@@ -1334,7 +1334,7 @@ void ScriptExt::ChronoshiftTeamToTarget(TeamClass* pTeam, TechnoClass* pTeamLead
 		}
 	}
 
-	auto pTargetCell = MapClass::Instance.TryGetCellAt(pTarget->GetCoords());
+	auto const pTargetCell = MapClass::Instance.TryGetCellAt(pTarget->GetCoords());
 
 	if (pTargetCell)
 	{
@@ -1350,6 +1350,17 @@ void ScriptExt::ChronoshiftTeamToTarget(TeamClass* pTeam, TechnoClass* pTeamLead
 
 	pTeam->StepCompleted = true;
 	return;
+}
+
+void ScriptExt::ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode)
+{
+	if (mode < 0 || mode > 2)
+		mode = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
+
+	HouseExt::ForceOnlyTargetHouseEnemy(pTeam->Owner, mode);
+
+	// This action finished
+	pTeam->StepCompleted = true;
 }
 
 bool ScriptExt::IsUnitAvailable(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed)
@@ -1371,31 +1382,6 @@ void ScriptExt::Log(const char* pFormat, ...)
 	va_start(args, pFormat);
 	Debug::LogWithVArgs(pFormat, args);
 	va_end(args);
-}
-
-void ScriptExt::ForceGlobalOnlyTargetHouseEnemy(TeamClass* pTeam, int mode)
-{
-	if (!pTeam)
-		return;
-
-	auto pHouseExt = HouseExt::ExtMap.Find(pTeam->Owner);
-	if (!pHouseExt)
-	{
-		// This action finished
-		pTeam->StepCompleted = true;
-		return;
-	}
-
-	if (mode < 0 || mode > 2)
-		mode = pTeam->CurrentScript->Type->ScriptActions[pTeam->CurrentScript->CurrentMission].Argument;
-
-	if (mode < -1 || mode > 2)
-		mode = -1;
-
-	HouseExt::ForceOnlyTargetHouseEnemy(pTeam->Owner, mode);
-
-	// This action finished
-	pTeam->StepCompleted = true;
 }
 
 void ScriptExt::AttackWaypoint(TeamClass* pTeam, int nWaypoint = -2147483647)

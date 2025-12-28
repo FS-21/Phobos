@@ -112,6 +112,8 @@ public:
 
 		Valueable<bool> UndeploysInto_Sellable;
 
+		Nullable<bool> BuildingRadioLink_SyncOwner;
+
 		// Ares 0.2
 		Valueable<bool> CloningFacility;
 
@@ -189,6 +191,8 @@ public:
 			, NewEvaVoice_RecheckOnDeath { false }
 			, NewEvaVoice_InitialMessage { }
 			, UndeploysInto_Sellable { false }
+
+			, BuildingRadioLink_SyncOwner {}
 
 			// Ares 0.2
 			, CloningFacility { false }

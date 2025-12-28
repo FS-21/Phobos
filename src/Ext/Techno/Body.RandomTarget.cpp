@@ -8,7 +8,7 @@ void TechnoExt::NewRandomTarget(TechnoClass* pThis)
 	if (!pThis)
 		return;
 
-	bool hasWeapons = ScriptExt::IsUnitArmed(pThis);
+	bool hasWeapons = ScriptExt::IsUnitArmed(pThis, pThis->GetTechnoType());
 	if (!hasWeapons)
 		return;
 

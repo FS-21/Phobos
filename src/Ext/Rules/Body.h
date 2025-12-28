@@ -195,6 +195,8 @@ public:
 		Valueable<bool> JumpjetClimbPredictHeight;
 		Valueable<bool> JumpjetClimbWithoutCutOut;
 
+		Valueable<bool> MergeBuildingDamage;
+
 		Valueable<double> DamageOwnerMultiplier;
 		Valueable<double> DamageAlliesMultiplier;
 		Valueable<double> DamageEnemiesMultiplier;
@@ -312,6 +314,8 @@ public:
 		Valueable<bool> AIAirTargetingFix;
 
 		Valueable<bool> SortCameoByName;
+
+		Valueable<bool> BuildingRadioLink_SyncOwner;
 		
 		Nullable<bool> BattlePoints;
 		Nullable<int> BattlePoints_DefaultValue;
@@ -565,6 +569,10 @@ public:
 			, AIAirTargetingFix { false }
 
 			, SortCameoByName { false }
+			
+			, MergeBuildingDamage { false }
+
+			, BuildingRadioLink_SyncOwner { true }
 		{ }
 
 		virtual ~ExtData() = default;
