@@ -10,6 +10,7 @@
 #include <AITriggerTypeClass.h>
 #include <Helpers/Enumerators.h>
 #include <CRT.h>
+#include <TriggerTypeClass.h>
 
 #include <Ext/TechnoType/Body.h>
 #include <Ext/Techno/Body.h>
@@ -268,4 +269,15 @@ void ObjectInfoCommandClass::Execute(WWKey eInput) const
 			dumpInfo(ObjectClass::CurrentObjects.GetItem(ObjectClass::CurrentObjects.Count - 1));
 		}
 	}
+
+	/*if (TriggerClass::Array.Count > 0)
+	{
+		Debug::Log("List of map triggers alive & waiting to be executed:\n");
+
+		for (auto const pTrigger : TriggerClass::Array)
+		{
+			if (pTrigger->Enabled)
+				Debug::Log(" %s - %s\n", pTrigger->Type->ID, pTrigger->Type->Name);
+		}
+	}*/
 }

@@ -242,3 +242,42 @@ DEFINE_HOOK(0x727024, TriggerTypeClass_HasGlobalSetOrClearedEvent, 0x5)
 
 	return SkipGameCode;
 }*/
+
+/*namespace triggerEvaluationTemp
+{
+	bool Evaluated = false;
+}
+
+DEFINE_HOOK(0x6E5484, TagClass_Spring_TriggerEvaluated, 0x5)
+{
+	GET(TriggerClass*, pThis, ESI);
+	GET(bool, triggerEvaluation, EAX);
+
+	if (pThis->Enabled)
+	{
+		if (triggerEvaluationTemp::Evaluated)
+		{
+			triggerEvaluationTemp::Evaluated = false;
+			return 0;
+		}
+
+		triggerEvaluationTemp::Evaluated = true;
+
+		if (triggerEvaluation)
+			Debug::Log("Trigger launched successfully: %s (%s)\n", pThis->Type->ID, pThis->Type->Name);
+		else
+			triggerEvaluationTemp::Evaluated = false;
+			//Debug::Log("Trigger NOT launched, yet: %s (%s)\n", pThis->Type->ID, pThis->Type->Name);
+	}
+
+	return 0;
+}*/
+
+DEFINE_HOOK(0x6E5420, TagClass_Spring_TriggerLaunched, 0x6)
+{
+	GET(TriggerClass*, pThis, ESI);
+
+		Debug::Log("Trigger launched: %s (%s)\n", pThis->Type->ID, pThis->Type->Name);
+
+	return 0;
+}
