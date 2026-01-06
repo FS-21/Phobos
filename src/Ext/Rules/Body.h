@@ -321,6 +321,8 @@ public:
 		Nullable<int> BattlePoints_DefaultValue;
 		Nullable<int> BattlePoints_DefaultFriendlyValue;
 
+		Valueable<bool> ApplyPerTargetEffectsOnDetonate;
+		
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
 			, HarvesterDumpAmount { 0.0f }
@@ -573,6 +575,8 @@ public:
 			, MergeBuildingDamage { false }
 
 			, BuildingRadioLink_SyncOwner { true }
+			
+			, ApplyPerTargetEffectsOnDetonate { true }
 		{ }
 
 		virtual ~ExtData() = default;

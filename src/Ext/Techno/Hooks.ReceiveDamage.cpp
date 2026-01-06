@@ -35,6 +35,10 @@ DEFINE_HOOK(0x701900, TechnoClass_ReceiveDamage_Shield, 0x6)
 	const auto pSourceHouse = args->SourceHouse;
 	const auto pTargetHouse = pThis->Owner;
 
+	// Apply warhead effects
+	if (damage && !pWHExt->ApplyPerTargetEffectsOnDetonate.Get(RulesExt::Global()->ApplyPerTargetEffectsOnDetonate))
+		pWHExt->DetonateOnOneUnit(args->SourceHouse, args->Attacker, pThis->Location, damage);
+
 	// Calculate Damage Multiplier
 	if (!args->IgnoreDefenses && damage)
 	{

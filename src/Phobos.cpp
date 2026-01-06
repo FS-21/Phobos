@@ -11,7 +11,7 @@
 #include "Utilities/Parser.h"
 
 #ifndef IS_RELEASE_VER
-bool HideWarning = false;
+bool HideWarning = true;
 #endif
 
 HANDLE Phobos::hInstance = 0;
