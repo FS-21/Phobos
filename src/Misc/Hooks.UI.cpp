@@ -18,6 +18,8 @@
 #include <New/Type/BannerTypeClass.h>
 
 #include <Utilities/Debug.h>
+#include <BitFont.h>
+#include <CCINIClass.h>
 
 DEFINE_HOOK(0x777C41, UI_ApplyAppIcon, 0x9)
 {
@@ -533,4 +535,28 @@ DEFINE_HOOK(0x552F79, LoadProgressManager_Draw_MissingLoadingScreenDefaults, 0x6
 DEFINE_HOOK(0x55F1F8, MPDebugPrint_CheckDrawFlag, 0x8)
 {
     return Game::DrawMPDebugStats ? 0 : 0x55F280;
+}
+
+DEFINE_HOOK(0x433884, BitFont_CTOR_CustomGameFont, 0x9)
+{
+	REF_STACK(char*, fileName, STACK_OFFSET(0x10, 0x4));
+
+	CCFileClass pRulesFile(GameStrings::RULESMD_INI);
+
+	if (!pRulesFile.Exists() || !pRulesFile.Open(FileAccessMode::Read))
+		return 0;
+
+	CCINIClass iniRules;
+	iniRules.ReadCCFile(&pRulesFile, true);
+	iniRules.CurrentSection = nullptr;
+	iniRules.CurrentSectionName = nullptr;
+
+	iniRules.ReadString(GameStrings::AudioVisual, "GameFont", "", Phobos::readBuffer);
+
+	if (_strcmpi(fileName, "GAME.FNT") != 0 || strlen(Phobos::readBuffer) == 0)
+		return 0;
+
+	fileName = _strdup(Phobos::readBuffer);
+
+	return 0;
 }
