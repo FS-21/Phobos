@@ -760,14 +760,21 @@ TechnoClass* TechnoExt::UniversalDeployConversion(TechnoClass* pOld, TechnoTypeC
 		pNew->Select();
 
 	pOldExt->Convert_UniversalDeploy_RememberTarget = nullptr;
-	pOwner->RemoveTracking(pOld);
-	pOwner->RegisterLoss(pOld, false);
-	pOwner->AddTracking(pNew);
-	pOwner->RegisterGain(pNew, false);
-	pNew->MarkForRedraw();
 	pNew->Owner->RecheckTechTree = true;
 	pNew->Owner->RecheckPower = true;
 	pNew->Owner->RecheckRadar = true;
+
+	//if (!pOld->InLimbo)
+		//pOwner->RegisterLoss(pOld, false);
+
+	//pOwner->RemoveTracking(pOld);
+
+	//pNew->Owner->AddTracking(pNew);
+
+	//if (!pNew->InLimbo)
+		//pNew->Owner->RegisterGain(pNew, false);
+
+	pNew->MarkForRedraw();
 
 	pOld->UnInit();
 
