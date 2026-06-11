@@ -647,15 +647,15 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 
 	int dropshipLoadout_UpArrowWidth = dropshipLoadout_UpArrowPCX ? dropshipLoadout_UpArrowPCX->Width : (dropshipLoadout_UpArrow ? dropshipLoadout_UpArrow->Width : 30);
 	int dropshipLoadout_UpArrowHeight = dropshipLoadout_UpArrowPCX ? dropshipLoadout_UpArrowPCX->Height : (dropshipLoadout_UpArrow ? dropshipLoadout_UpArrow->Height : 30);
-	upArrowX = customUpArrowLocation != Point2D::Empty ? customUpArrowLocation.X : (centerOfCameoColumns - dropshipLoadout_UpArrowWidth);
-	upArrowY = customUpArrowLocation != Point2D::Empty ? customUpArrowLocation.Y : arrowsY;
-	upArrowLocation = { backgroundX + upArrowX, backgroundY + upArrowY, dropshipLoadout_UpArrowWidth, dropshipLoadout_UpArrowHeight };
+	upArrowX = customUpArrowLocation != Point2D::Empty ? (backgroundX + customUpArrowLocation.X) : (centerOfCameoColumns - dropshipLoadout_UpArrowWidth);
+	upArrowY = customUpArrowLocation != Point2D::Empty ? (backgroundY + customUpArrowLocation.Y) : arrowsY;
+	upArrowLocation = { upArrowX, upArrowY, dropshipLoadout_UpArrowWidth, dropshipLoadout_UpArrowHeight };
 
 	int dropshipLoadout_DownArrowWidth = dropshipLoadout_DownArrowPCX ? dropshipLoadout_DownArrowPCX->Width : (dropshipLoadout_DownArrow ? dropshipLoadout_DownArrow->Width : 30);
 	int dropshipLoadout_DownArrowHeight = dropshipLoadout_DownArrowPCX ? dropshipLoadout_DownArrowPCX->Height : (dropshipLoadout_DownArrow ? dropshipLoadout_DownArrow->Height : 30);
-	downArrowX = customDownArrowLocation != Point2D::Empty ? customDownArrowLocation.X : centerOfCameoColumns;
-	downArrowY = customDownArrowLocation != Point2D::Empty ? customDownArrowLocation.Y : arrowsY;
-	downArrowLocation = { backgroundX + downArrowX, backgroundY + downArrowY, dropshipLoadout_DownArrowWidth, dropshipLoadout_DownArrowHeight };
+	downArrowX = customDownArrowLocation != Point2D::Empty ? (backgroundX + customDownArrowLocation.X) : centerOfCameoColumns;
+	downArrowY = customDownArrowLocation != Point2D::Empty ? (backgroundY + customDownArrowLocation.Y) : arrowsY;
+	downArrowLocation = { downArrowX, downArrowY, dropshipLoadout_DownArrowWidth, dropshipLoadout_DownArrowHeight };
 
 	dGreenLocation.clear();
 
