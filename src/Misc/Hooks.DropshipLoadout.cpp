@@ -7,7 +7,6 @@
 #include <BitFont.h>
 
 #include <Utilities/Macro.h>
-#include <Utilities/Debug.h>
 #include <Utilities/TemplateDef.h>
 
 #include <Ext/Scenario/Body.h>
@@ -20,16 +19,11 @@
 
 static ShapeButtonClass* CreateShapeButton(unsigned int nID, int nX, int nY, int nWidth, int nHeight, bool bIsAlpha)
 {
-	Debug::Log("[DropshipLoadout] CreateShapeButton - Creating button: ID=%u, X=%d, Y=%d, W=%d, H=%d, Alpha=%d\n", nID, nX, nY, nWidth, nHeight, bIsAlpha ? 1 : 0);
-
-	Debug::Log("[DropshipLoadout] CreateShapeButton - Allocating memory (size=%d)...\n", (int)sizeof(ShapeButtonClass));
 	auto const pButton = GameAllocator<ShapeButtonClass>().allocate(1);
 	if (!pButton)
 	{
-		Debug::Log("[DropshipLoadout] CreateShapeButton - Error: Allocation failed!\n");
 		return nullptr;
 	}
-	Debug::Log("[DropshipLoadout] CreateShapeButton - Memory allocated at %p\n", pButton);
 
 	using ShapeButtonConstructor_t = ShapeButtonClass* (__thiscall *)(
 		ShapeButtonClass* pThis,
@@ -42,14 +36,8 @@ static ShapeButtonClass* CreateShapeButton(unsigned int nID, int nX, int nY, int
 		bool bIsAlpha
 	);
 	auto const pConstructor = reinterpret_cast<ShapeButtonConstructor_t>(0x69DD30);
-	Debug::Log("[DropshipLoadout] CreateShapeButton - Invoking constructor at 0x69DD30...\n");
-	auto const pResult = pConstructor(pButton, nID, nX, nY, nWidth, nHeight, nullptr, bIsAlpha);
-	Debug::Log("[DropshipLoadout] CreateShapeButton - Constructor completed, result=%p\n", pResult);
-	return pResult;
+	return pConstructor(pButton, nID, nX, nY, nWidth, nHeight, nullptr, bIsAlpha);
 }
-
-
-
 
 class DropshipLoadoutClass
 {
@@ -155,52 +143,42 @@ private:
 
 DropshipLoadoutClass::DropshipLoadoutClass()
 {
-	Debug::Log("[DropshipLoadout] Constructor\n");
 }
 
 DropshipLoadoutClass::~DropshipLoadoutClass()
 {
-	Debug::Log("[DropshipLoadout] Destructor - Start\n");
 	for (size_t i = 0; i < buttonsList.size(); ++i)
 	{
 		auto button = buttonsList[i];
-		Debug::Log("[DropshipLoadout] Destructor - Deleting button %d/%d at %p (ID: %d)\n", (int)i, (int)buttonsList.size(), button, button ? button->ID : -1);
 		if (button)
 		{
 			GameDelete(button);
 		}
 	}
 	buttonsList.clear();
-	Debug::Log("[DropshipLoadout] Destructor - Buttons cleared\n");
 
 	for (size_t i = 0; i < dropshipLoadout_DGreenList.size(); ++i)
 	{
 		auto dGreen = dropshipLoadout_DGreenList[i];
-		Debug::Log("[DropshipLoadout] Destructor - Checking dGreen %d/%d at %p\n", (int)i, (int)dropshipLoadout_DGreenList.size(), dGreen);
 		if (dGreen)
 		{
 			bool isGlobal = false;
 			if (ScenarioExt::Global() && i < ScenarioExt::Global()->DropshipLoadout_DGreenList.size())
 				isGlobal = (dGreen == ScenarioExt::Global()->DropshipLoadout_DGreenList[i]);
 
-			Debug::Log("[DropshipLoadout] Destructor - dGreen %d isGlobal: %d\n", (int)i, isGlobal ? 1 : 0);
 			if (!isGlobal)
 			{
-				Debug::Log("[DropshipLoadout] Destructor - Deleting dGreen %d at %p\n", (int)i, dGreen);
 				GameDelete(dGreen);
 			}
 		}
 	}
 	dropshipLoadout_DGreenList.clear();
-	Debug::Log("[DropshipLoadout] Destructor - dGreen list cleared\n");
 
 	if (dropshipLoadout_Palette)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_Palette == ScenarioExt::Global()->DropshipLoadout_Palette);
-		Debug::Log("[DropshipLoadout] Destructor - Palette palette at %p, isGlobal: %d\n", dropshipLoadout_Palette, isGlobal ? 1 : 0);
 		if (!isGlobal)
 		{
-			Debug::Log("[DropshipLoadout] Destructor - Deleting palette\n");
 			GameDelete(dropshipLoadout_Palette);
 		}
 	}
@@ -208,10 +186,8 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 	if (dropshipLoadout_Background)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_Background == ScenarioExt::Global()->DropshipLoadout_Background);
-		Debug::Log("[DropshipLoadout] Destructor - Background at %p, isGlobal: %d\n", dropshipLoadout_Background, isGlobal ? 1 : 0);
 		if (!isGlobal)
 		{
-			Debug::Log("[DropshipLoadout] Destructor - Deleting background\n");
 			GameDelete(dropshipLoadout_Background);
 		}
 	}
@@ -219,10 +195,8 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 	if (dropshipLoadout_UpArrow)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_UpArrow == ScenarioExt::Global()->DropshipLoadout_UpArrow);
-		Debug::Log("[DropshipLoadout] Destructor - UpArrow at %p, isGlobal: %d\n", dropshipLoadout_UpArrow, isGlobal ? 1 : 0);
 		if (!isGlobal)
 		{
-			Debug::Log("[DropshipLoadout] Destructor - Deleting UpArrow\n");
 			GameDelete(dropshipLoadout_UpArrow);
 		}
 	}
@@ -230,10 +204,8 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 	if (dropshipLoadout_DownArrow)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_DownArrow == ScenarioExt::Global()->DropshipLoadout_DownArrow);
-		Debug::Log("[DropshipLoadout] Destructor - DownArrow at %p, isGlobal: %d\n", dropshipLoadout_DownArrow, isGlobal ? 1 : 0);
 		if (!isGlobal)
 		{
-			Debug::Log("[DropshipLoadout] Destructor - Deleting DownArrow\n");
 			GameDelete(dropshipLoadout_DownArrow);
 		}
 	}
@@ -241,10 +213,8 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 	if (dropshipLoadout_Loadout)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_Loadout == ScenarioExt::Global()->DropshipLoadout_Loadout);
-		Debug::Log("[DropshipLoadout] Destructor - Loadout at %p, isGlobal: %d\n", dropshipLoadout_Loadout, isGlobal ? 1 : 0);
 		if (!isGlobal)
 		{
-			Debug::Log("[DropshipLoadout] Destructor - Deleting loadout\n");
 			GameDelete(dropshipLoadout_Loadout);
 		}
 	}
@@ -252,104 +222,76 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 	if (dropshipLoadout_PilotLit)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_PilotLit == ScenarioExt::Global()->DropshipLoadout_PilotLit);
-		Debug::Log("[DropshipLoadout] Destructor - PilotLit at %p, isGlobal: %d\n", dropshipLoadout_PilotLit, isGlobal ? 1 : 0);
 		if (!isGlobal)
 		{
-			Debug::Log("[DropshipLoadout] Destructor - Deleting pilotlit\n");
 			GameDelete(dropshipLoadout_PilotLit);
 		}
 	}
-	Debug::Log("[DropshipLoadout] Destructor - End\n");
 }
 
 bool DropshipLoadoutClass::Initialize()
 {
-	Debug::Log("[DropshipLoadout] Initialize - Start\n");
 	if (!HouseClass::CurrentPlayer)
 	{
-		Debug::Log("[DropshipLoadout] Initialize - Error: HouseClass::CurrentPlayer is null!\n");
 		return false;
 	}
-	Debug::Log("[DropshipLoadout] Initialize - HouseClass::CurrentPlayer: %p, Country: %s\n", HouseClass::CurrentPlayer, HouseClass::CurrentPlayer->Type ? HouseClass::CurrentPlayer->Type->ID : "UNKNOWN");
 
 	pHouseTypeExt = HouseTypeExt::ExtMap.Find(HouseClass::CurrentPlayer->Type);
-	Debug::Log("[DropshipLoadout] Initialize - pHouseTypeExt: %p\n", pHouseTypeExt);
 	if (!pHouseTypeExt)
 	{
-		Debug::Log("[DropshipLoadout] Initialize - Error: pHouseTypeExt is null\n");
 		return false;
 	}
 
 	if (!ScenarioClass::Instance)
 	{
-		Debug::Log("[DropshipLoadout] Initialize - Error: ScenarioClass::Instance is null!\n");
 		return false;
 	}
 
 	nStartingDropships = pHouseTypeExt->DropshipLoadout_StartingDropships.isset() ? pHouseTypeExt->DropshipLoadout_StartingDropships : ScenarioClass::Instance->StartingDropships;
-	Debug::Log("[DropshipLoadout] Initialize - nStartingDropships = %d\n", nStartingDropships);
 	if (nStartingDropships <= 0)
 	{
-		Debug::Log("[DropshipLoadout] Initialize - nStartingDropships <= 0, returning false\n");
 		return false;
 	}
 
-	Debug::Log("[DropshipLoadout] Initialize - Calling LoadAssets()\n");
 	LoadAssets();
-	Debug::Log("[DropshipLoadout] Initialize - End (success)\n");
 	return true;
 }
 
 void DropshipLoadoutClass::LoadAssets()
 {
-	Debug::Log("[DropshipLoadout] LoadAssets - Start\n");
 	auto const pGlobal = ScenarioExt::Global();
-	Debug::Log("[DropshipLoadout] LoadAssets - ScenarioExt::Global() address: %p\n", pGlobal);
 
 	if (pGlobal && pGlobal->DropshipLoadout_Palette)
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Loading global palette: %p\n", pGlobal->DropshipLoadout_Palette);
 		dropshipLoadout_Palette = pGlobal->DropshipLoadout_Palette;
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Loading DROPSHIP.PAL file...\n");
 		dropshipLoadout_Palette = FileSystem::LoadPALFile("DROPSHIP.PAL", DSurface::Hidden);
-		Debug::Log("[DropshipLoadout] LoadAssets - DROPSHIP.PAL loaded: %p\n", dropshipLoadout_Palette);
 	}
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading Background PCX...\n");
 	if (pHouseTypeExt->DropshipLoadout_BackgroundPCX.isset() && pHouseTypeExt->DropshipLoadout_BackgroundPCX.Get().Exists())
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Background PCX from HouseType\n");
 		dropshipLoadout_BackgroundPCX = pHouseTypeExt->DropshipLoadout_BackgroundPCX.Get().GetSurface();
 	}
 	else if (pGlobal && pGlobal->DropshipLoadout_BackgroundPCX.Exists())
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Background PCX from Global\n");
 		dropshipLoadout_BackgroundPCX = pGlobal->DropshipLoadout_BackgroundPCX.GetSurface();
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - Background PCX surface: %p\n", dropshipLoadout_BackgroundPCX);
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading Background SHP...\n");
 	if (pGlobal && pGlobal->DropshipLoadout_Background)
 	{
 		dropshipLoadout_Background = pGlobal->DropshipLoadout_Background;
-		Debug::Log("[DropshipLoadout] LoadAssets - Background SHP from Global: %p\n", dropshipLoadout_Background);
 	}
 	else
 	{
 		char tempFilenameBuffer[32];
 		_snprintf_s(tempFilenameBuffer, sizeof(tempFilenameBuffer), "DROP%04d.SHP", nStartingDropships);
-		Debug::Log("[DropshipLoadout] LoadAssets - Loading file: %s\n", tempFilenameBuffer);
 		dropshipLoadout_Background = FileSystem::LoadSHPFile(_strdup(tempFilenameBuffer));
-		Debug::Log("[DropshipLoadout] LoadAssets - Background SHP loaded: %p\n", dropshipLoadout_Background);
 	}
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading Loadout PCX...\n");
 	if (pHouseTypeExt->DropshipLoadout_LoadoutPCX.size() > 0)
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Loading Loadout PCX from HouseType, size: %d\n", (int)pHouseTypeExt->DropshipLoadout_LoadoutPCX.size());
 		for (auto& pFilePCX : pHouseTypeExt->DropshipLoadout_LoadoutPCX)
 		{
 			dropshipLoadout_LoadoutPCX.push_back(pFilePCX.GetSurface());
@@ -357,30 +299,23 @@ void DropshipLoadoutClass::LoadAssets()
 	}
 	else if (pGlobal && pGlobal->DropshipLoadout_LoadoutPCX.size() > 0)
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Loading Loadout PCX from Global, size: %d\n", (int)pGlobal->DropshipLoadout_LoadoutPCX.size());
 		for (auto &pFilePCX : pGlobal->DropshipLoadout_LoadoutPCX)
 		{
 			dropshipLoadout_LoadoutPCX.push_back(pFilePCX.GetSurface());
 		}
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - Loadout PCX list loaded size: %d\n", (int)dropshipLoadout_LoadoutPCX.size());
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading Loadout SHP...\n");
 	if (pGlobal && pGlobal->DropshipLoadout_Loadout)
 	{
 		dropshipLoadout_Loadout = pGlobal->DropshipLoadout_Loadout;
-		Debug::Log("[DropshipLoadout] LoadAssets - Loadout SHP from Global: %p\n", dropshipLoadout_Loadout);
 	}
 	else
 	{
 		dropshipLoadout_Loadout = FileSystem::LoadSHPFile("LOADOUT.SHP");
-		Debug::Log("[DropshipLoadout] LoadAssets - Loadout SHP loaded: %p\n", dropshipLoadout_Loadout);
 	}
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading PilotLit PCX...\n");
 	if (!pHouseTypeExt->DropshipLoadout_PilotLitPCX.empty())
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Loading PilotLit PCX from HouseType, size: %d\n", (int)pHouseTypeExt->DropshipLoadout_PilotLitPCX.size());
 		for (const PhobosPCXFile& frame : pHouseTypeExt->DropshipLoadout_PilotLitPCX)
 		{
 			dropshipLoadout_PilotLitPCX.push_back(frame.GetSurface());
@@ -388,27 +323,21 @@ void DropshipLoadoutClass::LoadAssets()
 	}
 	else if (pGlobal && !pGlobal->DropshipLoadout_PilotLitPCX.empty())
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Loading PilotLit PCX from Global, size: %d\n", (int)pGlobal->DropshipLoadout_PilotLitPCX.size());
 		for (auto &pFilePCX : pGlobal->DropshipLoadout_PilotLitPCX)
 		{
 			dropshipLoadout_PilotLitPCX.push_back(pFilePCX.GetSurface());
 		}
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - PilotLit PCX list loaded size: %d\n", (int)dropshipLoadout_PilotLitPCX.size());
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading PilotLit SHP...\n");
 	if (pGlobal && pGlobal->DropshipLoadout_PilotLit)
 	{
 		dropshipLoadout_PilotLit = pGlobal->DropshipLoadout_PilotLit;
-		Debug::Log("[DropshipLoadout] LoadAssets - PilotLit SHP from Global: %p\n", dropshipLoadout_PilotLit);
 	}
 	else
 	{
 		dropshipLoadout_PilotLit = FileSystem::LoadSHPFile("PILOTLIT.SHP");
-		Debug::Log("[DropshipLoadout] LoadAssets - PilotLit SHP loaded: %p\n", dropshipLoadout_PilotLit);
 	}
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading UpArrow PCX...\n");
 	if (pHouseTypeExt->DropshipLoadout_UpArrowPCX.isset() && pHouseTypeExt->DropshipLoadout_UpArrowPCX.Get().Exists())
 	{
 		dropshipLoadout_UpArrowPCX = pHouseTypeExt->DropshipLoadout_UpArrowPCX.Get().GetSurface();
@@ -417,9 +346,7 @@ void DropshipLoadoutClass::LoadAssets()
 	{
 		dropshipLoadout_UpArrowPCX = pGlobal->DropshipLoadout_UpArrowPCX.GetSurface();
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - UpArrow PCX: %p\n", dropshipLoadout_UpArrowPCX);
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading UpArrow SHP...\n");
 	if (pGlobal && pGlobal->DropshipLoadout_UpArrow)
 	{
 		dropshipLoadout_UpArrow = pGlobal->DropshipLoadout_UpArrow;
@@ -428,9 +355,7 @@ void DropshipLoadoutClass::LoadAssets()
 	{
 		dropshipLoadout_UpArrow = FileSystem::LoadSHPFile("DROPUP.SHP");
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - UpArrow SHP: %p\n", dropshipLoadout_UpArrow);
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading DownArrow PCX...\n");
 	if (pHouseTypeExt->DropshipLoadout_DownArrowPCX.isset() && pHouseTypeExt->DropshipLoadout_DownArrowPCX.Get().Exists())
 	{
 		dropshipLoadout_DownArrowPCX = pHouseTypeExt->DropshipLoadout_DownArrowPCX.Get().GetSurface();
@@ -439,9 +364,7 @@ void DropshipLoadoutClass::LoadAssets()
 	{
 		dropshipLoadout_DownArrowPCX = pGlobal->DropshipLoadout_DownArrowPCX.GetSurface();
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - DownArrow PCX: %p\n", dropshipLoadout_DownArrowPCX);
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading DownArrow SHP...\n");
 	if (pGlobal && pGlobal->DropshipLoadout_DownArrow)
 	{
 		dropshipLoadout_DownArrow = pGlobal->DropshipLoadout_DownArrow;
@@ -450,12 +373,9 @@ void DropshipLoadoutClass::LoadAssets()
 	{
 		dropshipLoadout_DownArrow = FileSystem::LoadSHPFile("DROPDOWN.SHP");
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - DownArrow SHP: %p\n", dropshipLoadout_DownArrow);
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading DGreen list PCX...\n");
 	if (pHouseTypeExt->DropshipLoadout_DGreenListPCX.size() > 0)
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Loading DGreen PCX from HouseType, size: %d\n", (int)pHouseTypeExt->DropshipLoadout_DGreenListPCX.size());
 		for (const auto& pAnimationVector : pHouseTypeExt->DropshipLoadout_DGreenListPCX)
 		{
 			std::vector<BSurface*> rowAnimFrames;
@@ -471,7 +391,6 @@ void DropshipLoadoutClass::LoadAssets()
 	}
 	else if (pGlobal && pGlobal->DropshipLoadout_DGreenListPCX.size() > 0)
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Loading DGreen PCX from Global, size: %d\n", (int)pGlobal->DropshipLoadout_DGreenListPCX.size());
 		for (auto& pFileGroupPCX : pGlobal->DropshipLoadout_DGreenListPCX)
 		{
 			std::vector<BSurface*> rowAnimFrames;
@@ -491,14 +410,11 @@ void DropshipLoadoutClass::LoadAssets()
 			dropshipLoadout_DGreenListPCX.push_back(emptyAnimFrames);
 		}
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - DGreen PCX loaded size: %d\n", (int)dropshipLoadout_DGreenListPCX.size());
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Loading DGreen SHP list...\n");
 	for (int i = 0; i < 4; i++)
 	{
 		if (pGlobal && (pGlobal->DropshipLoadout_DGreenList.size() < 4 || pGlobal->DropshipLoadout_DGreenList[i] == nullptr))
 		{
-			Debug::Log("[DropshipLoadout] LoadAssets - Loading DGREEN%d.SHP file\n", i+1);
 			if (i == 0)
 				dropshipLoadout_DGreenList.push_back(FileSystem::LoadSHPFile("DGREEN1.SHP"));
 			else if (i == 1)
@@ -512,7 +428,6 @@ void DropshipLoadoutClass::LoadAssets()
 		}
 		else if (pGlobal)
 		{
-			Debug::Log("[DropshipLoadout] LoadAssets - DGreen SHP %d from Global\n", i);
 			dropshipLoadout_DGreenList.push_back(pGlobal->DropshipLoadout_DGreenList[i]);
 		}
 		else
@@ -528,7 +443,6 @@ void DropshipLoadoutClass::LoadAssets()
 			dropshipLoadout_DGreenList.push_back(pGlobal->DropshipLoadout_DGreenList[i]);
 		}
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - DGreen SHP list size: %d\n", (int)dropshipLoadout_DGreenList.size());
 
 	buyClickSoundIdx = RulesClass::Instance->GenericClick;
 	sellClickSoundIdx = RulesClass::Instance->SellSound;
@@ -549,20 +463,17 @@ void DropshipLoadoutClass::LoadAssets()
 	else if (pGlobal && pGlobal->DropshipLoadout_ArrowsClickSound.isset())
 		arrowsClickSoundIdx = pGlobal->DropshipLoadout_ArrowsClickSound;
 
-	Debug::Log("[DropshipLoadout] LoadAssets - Sounds loaded: buy=%d, sell=%d, arrows=%d\n", buyClickSoundIdx, sellClickSoundIdx, arrowsClickSoundIdx);
 
 	long dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money.isset() ? pHouseTypeExt->DropshipLoadout_Money : (pGlobal ? pGlobal->DropshipLoadout_Money : -1);
 	dropshipLoadout_InitialMoney = dropshipLoadout_InitialMoney >= 0 ? dropshipLoadout_InitialMoney : HouseClass::CurrentPlayer->Available_Money();
 
 	initialMoney = dropshipLoadout_InitialMoney;
 	currentMoney = dropshipLoadout_InitialMoney;
-	Debug::Log("[DropshipLoadout] LoadAssets - Money: initial=%ld, current=%ld\n", initialMoney, currentMoney);
 
 	std::vector<TechnoTypeClass*> allowableUnits;
 
 	if (pHouseTypeExt->DropshipLoadout_AllowableUnits.size() > 0)
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Reading allowable units from HouseType: size=%d\n", (int)pHouseTypeExt->DropshipLoadout_AllowableUnits.size());
 		for (auto pUnit : pHouseTypeExt->DropshipLoadout_AllowableUnits)
 		{
 			allowableUnits.push_back(pUnit);
@@ -570,7 +481,6 @@ void DropshipLoadoutClass::LoadAssets()
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Reading allowable units from ScenarioClass: size=%d\n", (int)ScenarioClass::Instance->AllowableUnits.Count);
 		for (auto pUnit : ScenarioClass::Instance->AllowableUnits)
 		{
 			allowableUnits.push_back(pUnit);
@@ -581,7 +491,6 @@ void DropshipLoadoutClass::LoadAssets()
 
 	if (pHouseTypeExt->DropshipLoadout_AllowableUnitMaximums.size() > 0)
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Reading unit maximums from HouseType: size=%d\n", (int)pHouseTypeExt->DropshipLoadout_AllowableUnitMaximums.size());
 		for (int pUnitCount : pHouseTypeExt->DropshipLoadout_AllowableUnitMaximums)
 		{
 			allowableUnitMaximums.push_back(pUnitCount);
@@ -589,7 +498,6 @@ void DropshipLoadoutClass::LoadAssets()
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - Reading unit maximums from ScenarioClass: size=%d\n", (int)ScenarioClass::Instance->AllowableUnitMaximums.Count);
 		for (int pUnitCount : ScenarioClass::Instance->AllowableUnitMaximums)
 		{
 			allowableUnitMaximums.push_back(pUnitCount);
@@ -600,7 +508,6 @@ void DropshipLoadoutClass::LoadAssets()
 	{
 		if (allowableUnitMaximums.size() > 0 && allowableUnits.size() != allowableUnitMaximums.size())
 		{
-			Debug::Log("[DropshipLoadout] LoadAssets - WARNING: AllowableUnits (%d) and AllowableUnitMaximums (%d) count mismatch! Disabling units limit.\n", (int)allowableUnits.size(), (int)allowableUnitMaximums.size());
 		}
 		else
 		{
@@ -621,22 +528,18 @@ void DropshipLoadoutClass::LoadAssets()
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] LoadAssets - No allowable units specified, scanning all infantry/units...\n");
 		for (const auto pType : TechnoTypeClass::Array)
 		{
 			if (pType && (pType->WhatAmI() == AbstractType::InfantryType || pType->WhatAmI() == AbstractType::UnitType))
 				availableUnits.push_back(pType);
 		}
 	}
-	Debug::Log("[DropshipLoadout] LoadAssets - availableUnits size: %d. End\n", (int)availableUnits.size());
 }
 
 void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 {
-	Debug::Log("[DropshipLoadout] CalculateLayout - Start\n");
 	if (!pSurface)
 	{
-		Debug::Log("[DropshipLoadout] CalculateLayout - Error: pSurface is null!\n");
 		return;
 	}
 
@@ -648,17 +551,14 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	{
 		backgroundWidth = dropshipLoadout_BackgroundPCX->Width;
 		backgroundHeight = dropshipLoadout_BackgroundPCX->Height;
-		Debug::Log("[DropshipLoadout] CalculateLayout - Background from PCX: W=%d, H=%d\n", backgroundWidth, backgroundHeight);
 	}
 	else if (dropshipLoadout_Background)
 	{
 		backgroundWidth = dropshipLoadout_Background->Width;
 		backgroundHeight = dropshipLoadout_Background->Height;
-		Debug::Log("[DropshipLoadout] CalculateLayout - Background from SHP: W=%d, H=%d\n", backgroundWidth, backgroundHeight);
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] CalculateLayout - Error: No background asset loaded!\n");
 		backgroundWidth = 640; // Fallback
 		backgroundHeight = 480;
 	}
@@ -666,7 +566,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	int backgroundX = (pSurface->GetWidth() - backgroundWidth) / 2;
 	int backgroundY = (pSurface->GetHeight() - backgroundHeight) / 2;
 	windowRectangle = { backgroundX, backgroundY, backgroundWidth, backgroundHeight };
-	Debug::Log("[DropshipLoadout] CalculateLayout - windowRectangle: X=%d, Y=%d, W=%d, H=%d\n", windowRectangle.X, windowRectangle.Y, windowRectangle.Width, windowRectangle.Height);
 
 	auto const pGlobal = ScenarioExt::Global();
 
@@ -688,7 +587,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	if (pHouseTypeExt->DropshipLoadout_SidebarCameosCount.isset() && pHouseTypeExt->DropshipLoadout_SidebarCameosCount > 0)
 	{
 		nSidebarCameos = pHouseTypeExt->DropshipLoadout_SidebarCameosCount;
-		Debug::Log("[DropshipLoadout] CalculateLayout - SidebarCameos from HouseType: count=%d\n", nSidebarCameos);
 		for (int i = 0; i < nSidebarCameos; ++i)
 		{
 			int cameoX = backgroundX + pHouseTypeExt->DropshipLoadout_SidebarCameoLocations[i].X;
@@ -699,7 +597,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	else if (pGlobal && pGlobal->DropshipLoadout_SidebarCameosCount > 0)
 	{
 		nSidebarCameos = pGlobal->DropshipLoadout_SidebarCameosCount;
-		Debug::Log("[DropshipLoadout] CalculateLayout - SidebarCameos from Global: count=%d\n", nSidebarCameos);
 		for (int i = 0; i < nSidebarCameos; ++i)
 		{
 			int cameoX = backgroundX + pGlobal->DropshipLoadout_SidebarCameoLocations[i].X;
@@ -709,7 +606,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] CalculateLayout - SidebarCameos default layout: count=%d\n", nSidebarCameos);
 		for (int i = 0; i < nSidebarCameos; ++i)
 		{
 			int cameoX = backgroundX + 493 + 68 * (i % 2);
@@ -717,7 +613,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 			sidebarCameLocations.push_back({ cameoX, cameoY, cameoWidth, cameoHeight });
 		}
 	}
-	Debug::Log("[DropshipLoadout] CalculateLayout - sidebarCameLocations populated size: %d\n", (int)sidebarCameLocations.size());
 
 	int centerOfCameoColumns = 0;
 	int arrowsY = 0;
@@ -737,20 +632,17 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	upArrowX = customUpArrowLocation != Point2D::Empty ? customUpArrowLocation.X : (centerOfCameoColumns - dropshipLoadout_UpArrowWidth);
 	upArrowY = customUpArrowLocation != Point2D::Empty ? customUpArrowLocation.Y : arrowsY;
 	upArrowLocation = { backgroundX + upArrowX, backgroundY + upArrowY, dropshipLoadout_UpArrowWidth, dropshipLoadout_UpArrowHeight };
-	Debug::Log("[DropshipLoadout] CalculateLayout - upArrowLocation: X=%d, Y=%d, W=%d, H=%d\n", upArrowLocation.X, upArrowLocation.Y, upArrowLocation.Width, upArrowLocation.Height);
 
 	int dropshipLoadout_DownArrowWidth = dropshipLoadout_DownArrowPCX ? dropshipLoadout_DownArrowPCX->Width : (dropshipLoadout_DownArrow ? dropshipLoadout_DownArrow->Width : 30);
 	int dropshipLoadout_DownArrowHeight = dropshipLoadout_DownArrowPCX ? dropshipLoadout_DownArrowPCX->Height : (dropshipLoadout_DownArrow ? dropshipLoadout_DownArrow->Height : 30);
 	downArrowX = customDownArrowLocation != Point2D::Empty ? customDownArrowLocation.X : centerOfCameoColumns;
 	downArrowY = customDownArrowLocation != Point2D::Empty ? customDownArrowLocation.Y : arrowsY;
 	downArrowLocation = { backgroundX + downArrowX, backgroundY + downArrowY, dropshipLoadout_DownArrowWidth, dropshipLoadout_DownArrowHeight };
-	Debug::Log("[DropshipLoadout] CalculateLayout - downArrowLocation: X=%d, Y=%d, W=%d, H=%d\n", downArrowLocation.X, downArrowLocation.Y, downArrowLocation.Width, downArrowLocation.Height);
 
 	dGreenLocation.clear();
 
 	if (pHouseTypeExt->DropshipLoadout_DGreenAnimationsCount.isset())
 	{
-		Debug::Log("[DropshipLoadout] CalculateLayout - DGreen animations from HouseType: count=%d\n", (int)pHouseTypeExt->DropshipLoadout_DGreenAnimationsCount);
 		for (int i = 0; i < pHouseTypeExt->DropshipLoadout_DGreenAnimationsCount; i++)
 		{
 			Point2D location = pHouseTypeExt->DropshipLoadout_DGreenLocations[i];
@@ -759,7 +651,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	}
 	else if (pGlobal && pGlobal->DropshipLoadout_DGreenAnimationsCount)
 	{
-		Debug::Log("[DropshipLoadout] CalculateLayout - DGreen animations from Global: count=%d\n", (int)pGlobal->DropshipLoadout_DGreenAnimationsCount);
 		for (int i = 0; i < pGlobal->DropshipLoadout_DGreenAnimationsCount; i++)
 		{
 			Point2D location = pGlobal->DropshipLoadout_DGreenLocations[i];
@@ -768,7 +659,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] CalculateLayout - DGreen default locations\n");
 		int dGreenX = 371;
 		int dGreenY = 10;
 
@@ -795,7 +685,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 			}
 		}
 	}
-	Debug::Log("[DropshipLoadout] CalculateLayout - dGreenLocation populated size: %d\n", (int)dGreenLocation.size());
 
 	if (dropshipLoadout_DGreenListPCX.size() > 0)
 	{
@@ -837,7 +726,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	}
 
 	loadoutLocation = { backgroundX + dropshipLoadout_LoadoutX, backgroundY + dropshipLoadout_LoadoutY, dropshipLoadout_LoadoutWidth, dropshipLoadout_LoadoutHeight };
-	Debug::Log("[DropshipLoadout] CalculateLayout - loadoutLocation: X=%d, Y=%d, W=%d, H=%d\n", loadoutLocation.X, loadoutLocation.Y, loadoutLocation.Width, loadoutLocation.Height);
 
 	int dropshipLoadout_PilotLitWidth = dropshipLoadout_PilotLitPCX.size() > 0 ? dropshipLoadout_PilotLitPCX[0]->Width : (dropshipLoadout_PilotLit ? dropshipLoadout_PilotLit->Width : 100);
 	int dropshipLoadout_PilotLitHeight = dropshipLoadout_PilotLitPCX.size() > 0 ? dropshipLoadout_PilotLitPCX[0]->Height : (dropshipLoadout_PilotLit ? dropshipLoadout_PilotLit->Height : 100);
@@ -856,7 +744,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	}
 
 	pilotLitLocation = { backgroundX + dropshipLoadout_PilotLitX, backgroundY + dropshipLoadout_PilotLitY, dropshipLoadout_PilotLitWidth, dropshipLoadout_PilotLitHeight };
-	Debug::Log("[DropshipLoadout] CalculateLayout - pilotLitLocation: X=%d, Y=%d, W=%d, H=%d\n", pilotLitLocation.X, pilotLitLocation.Y, pilotLitLocation.Width, pilotLitLocation.Height);
 
 	nDropshipBayCameos = 5;
 	dropshipBayCameLocations.clear();
@@ -864,7 +751,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	if (pHouseTypeExt->DropshipLoadout_DropshipCameosCount.Get(0) > 0)
 	{
 		nDropshipBayCameos = pHouseTypeExt->DropshipLoadout_DropshipCameosCount;
-		Debug::Log("[DropshipLoadout] CalculateLayout - Dropship cameos from HouseType: count=%d\n", nDropshipBayCameos);
 		for (int i = 0; i < nStartingDropships; i++)
 		{
 			std::vector<RectangleStruct> list;
@@ -880,7 +766,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	else if (pGlobal && pGlobal->DropshipLoadout_DropshipCameosCount > 0)
 	{
 		nDropshipBayCameos = pGlobal->DropshipLoadout_DropshipCameosCount;
-		Debug::Log("[DropshipLoadout] CalculateLayout - Dropship cameos from Global: count=%d\n", nDropshipBayCameos);
 		for (int i = 0; i < nStartingDropships; i++)
 		{
 			std::vector<RectangleStruct> list;
@@ -895,7 +780,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] CalculateLayout - Dropship cameos default layout: nStartingDropships=%d\n", nStartingDropships);
 		if (nStartingDropships == 1 || nStartingDropships == 2)
 		{
 			int cameoX = backgroundX + 55;
@@ -953,7 +837,6 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 		// What if starting dropships is greater than 3? Or 0?
 		if (dropshipBayCameLocations.size() < (size_t)nStartingDropships)
 		{
-			Debug::Log("[DropshipLoadout] CalculateLayout - WARNING: dropshipBayCameLocations size (%d) is less than nStartingDropships (%d). Generating generic entries for dropships 4+...\n", (int)dropshipBayCameLocations.size(), nStartingDropships);
 			// Generate generic placements so it doesn't crash
 			for (int i = (int)dropshipBayCameLocations.size(); i < nStartingDropships; i++)
 			{
@@ -969,27 +852,22 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 			}
 		}
 	}
-	Debug::Log("[DropshipLoadout] CalculateLayout - dropshipBayCameLocations size: %d\n", (int)dropshipBayCameLocations.size());
 
 	nDropshipBayTotalSlots = nStartingDropships * nDropshipBayCameos;
-	Debug::Log("[DropshipLoadout] CalculateLayout - nDropshipBayTotalSlots: %d. End\n", nDropshipBayTotalSlots);
 }
 
 void DropshipLoadoutClass::CreateControls()
 {
-	Debug::Log("[DropshipLoadout] CreateControls - Start\n");
 	const int cameoWidth = 60, cameoHeight = 48;
 	buttonsList.clear();
 
 	int btn_ScrollUp_ID = 100;
-	Debug::Log("[DropshipLoadout] CreateControls - Creating ScrollUp Button...\n");
 	ShapeButtonClass* btn_ScrollUp = CreateShapeButton(
 		btn_ScrollUp_ID,
 		0, 0,
 		upArrowLocation.Width, upArrowLocation.Height,
 		true
 	);
-	Debug::Log("[DropshipLoadout] CreateControls - ScrollUp Button created: %p\n", btn_ScrollUp);
 	if (btn_ScrollUp)
 	{
 		btn_ScrollUp->SetPosition(upArrowLocation.X, upArrowLocation.Y);
@@ -1001,18 +879,15 @@ void DropshipLoadoutClass::CreateControls()
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] CreateControls - CRITICAL: btn_ScrollUp is null!\n");
 	}
 
 	int btn_ScrollDown_ID = 101;
-	Debug::Log("[DropshipLoadout] CreateControls - Creating ScrollDown Button...\n");
 	ShapeButtonClass* btn_ScrollDown = CreateShapeButton(
 		btn_ScrollDown_ID,
 		0, 0,
 		downArrowLocation.Width, downArrowLocation.Height,
 		true
 	);
-	Debug::Log("[DropshipLoadout] CreateControls - ScrollDown Button created: %p\n", btn_ScrollDown);
 	if (btn_ScrollDown)
 	{
 		btn_ScrollDown->SetPosition(downArrowLocation.X, downArrowLocation.Y);
@@ -1025,20 +900,17 @@ void DropshipLoadoutClass::CreateControls()
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] CreateControls - CRITICAL: btn_ScrollDown is null!\n");
 	}
 
 	int btn_BasicDropshipCameo_ID = 200;
 	int newID = btn_BasicDropshipCameo_ID;
 	dropshipBayChosenUnitsLists.clear();
 
-	Debug::Log("[DropshipLoadout] CreateControls - Creating Dropship Cameo Buttons...\n");
 	for (int i = 0; i < nStartingDropships; i++)
 	{
 		dropshipBayChosenUnitsLists.push_back(std::vector<TechnoTypeClass*>());
 		if (i >= (int)dropshipBayCameLocations.size())
 		{
-			Debug::Log("[DropshipLoadout] CreateControls - WARNING: dropship index %d >= dropshipBayCameLocations size %d! Skipping button creation for this dropship.\n", i, (int)dropshipBayCameLocations.size());
 			continue;
 		}
 
@@ -1046,7 +918,6 @@ void DropshipLoadoutClass::CreateControls()
 		{
 			if (j >= (int)dropshipBayCameLocations[i].size())
 			{
-				Debug::Log("[DropshipLoadout] CreateControls - WARNING: cameo index %d >= dropshipBayCameLocations[%d] size %d! Skipping.\n", j, i, (int)dropshipBayCameLocations[i].size());
 				continue;
 			}
 
@@ -1068,21 +939,17 @@ void DropshipLoadoutClass::CreateControls()
 			}
 			else
 			{
-				Debug::Log("[DropshipLoadout] CreateControls - WARNING: Failed to create button for dropship %d, cameo %d (ID %d)\n", i, j, newID);
 			}
 			dropshipBayChosenUnitsLists[i].push_back(nullptr);
 			newID++;
 		}
 	}
-	Debug::Log("[DropshipLoadout] CreateControls - Created dropship bay buttons. nStartingDropships=%d\n", nStartingDropships);
 
 	int btn_BasicSidebarCameo_ID = 300;
-	Debug::Log("[DropshipLoadout] CreateControls - Creating Sidebar Cameo Buttons...\n");
 	for (int i = 0; i < nSidebarCameos; i++)
 	{
 		if (i >= (int)sidebarCameLocations.size())
 		{
-			Debug::Log("[DropshipLoadout] CreateControls - WARNING: sidebar index %d >= sidebarCameLocations size %d! Skipping.\n", i, (int)sidebarCameLocations.size());
 			continue;
 		}
 
@@ -1105,53 +972,39 @@ void DropshipLoadoutClass::CreateControls()
 		}
 		else
 		{
-			Debug::Log("[DropshipLoadout] CreateControls - WARNING: Failed to create button for sidebar %d (ID %d)\n", i, sID);
 		}
 	}
-	Debug::Log("[DropshipLoadout] CreateControls - created %d buttons. End\n", (int)buttonsList.size());
 }
 
 void DropshipLoadoutClass::Run()
 {
-	Debug::Log("[DropshipLoadout] Run - Start\n");
 	DSurface* pSurface = DSurface::Hidden;
-	Debug::Log("[DropshipLoadout] Run - pSurface (DSurface::Hidden) is %p\n", pSurface);
 	if (!pSurface)
 	{
-		Debug::Log("[DropshipLoadout] Run - ERROR: pSurface is null! Cannot run loadout screen.\n");
 		return;
 	}
 
-	Debug::Log("[DropshipLoadout] Run - Clearing surface...\n");
 	pSurface->Fill(0);
 
-	Debug::Log("[DropshipLoadout] Run - Calculating layout...\n");
 	CalculateLayout(pSurface);
-	Debug::Log("[DropshipLoadout] Run - Creating controls...\n");
 	CreateControls();
 
 	const int voiceEva = pHouseTypeExt->DropshipLoadout_StartEVA.isset() ? pHouseTypeExt->DropshipLoadout_StartEVA.Get(-1) : (ScenarioExt::Global() ? ScenarioExt::Global()->DropshipLoadout_StartEVA.Get(-1) : -1);
-	Debug::Log("[DropshipLoadout] Run - voiceEva: %d\n", voiceEva);
 	if (voiceEva >= 0)
 	{
-		Debug::Log("[DropshipLoadout] Run - Playing EVA sound index %d\n", voiceEva);
 		VoxClass::PlayIndex(voiceEva);
 	}
 
 	const int themeIdx = pHouseTypeExt->DropshipLoadout_Theme.isset() ? pHouseTypeExt->DropshipLoadout_Theme : (ScenarioExt::Global() ? ScenarioExt::Global()->DropshipLoadout_Theme : -1);
-	Debug::Log("[DropshipLoadout] Run - themeIdx: %d\n", themeIdx);
 	if (themeIdx == -1)
 	{
-		Debug::Log("[DropshipLoadout] Run - Stopping music theme\n");
 		ThemeClass::Instance.Stop(true);
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] Run - Playing music theme index %d\n", themeIdx);
 		ThemeClass::Instance.Play(themeIdx);
 	}
 
-	Debug::Log("[DropshipLoadout] Run - Configuring mouse...\n");
 	if (WWMouseClass::Instance)
 	{
 		WWMouseClass::Instance->HideCursor();
@@ -1161,23 +1014,18 @@ void DropshipLoadoutClass::Run()
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] Run - WARNING: WWMouseClass::Instance is null!\n");
 	}
 
 	if (commandManager)
 	{
-		Debug::Log("[DropshipLoadout] Run - Turning on commandManager at %p\n", commandManager);
 		commandManager->TurnOn();
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] Run - ERROR: commandManager is null!\n");
 	}
 
-	Debug::Log("[DropshipLoadout] Run - Calculating total animation frames...\n");
 	loadoutTotalFrames = dropshipLoadout_LoadoutPCX.size() > 0 ? (int)dropshipLoadout_LoadoutPCX.size() - 1 : (dropshipLoadout_Loadout ? dropshipLoadout_Loadout->Frames : 0);
 	pilotLitTotalFrames = dropshipLoadout_PilotLitPCX.size() > 0 ? (int)dropshipLoadout_PilotLitPCX.size() - 1 : (dropshipLoadout_PilotLit ? dropshipLoadout_PilotLit->Frames : 0);
-	Debug::Log("[DropshipLoadout] Run - Animation frames: loadout=%d, pilotLit=%d\n", loadoutTotalFrames, pilotLitTotalFrames);
 
 	animTimer_DelayedStartValue_Loadout = ScenarioClass::Instance->Random(0, 0);
 	animTimer_DelayedStartValue_PilotLit = ScenarioClass::Instance->Random(100, 300);
@@ -1203,7 +1051,6 @@ void DropshipLoadoutClass::Run()
 	pressedSpaceKey = false;
 	repaintAll = true;
 
-	Debug::Log("[DropshipLoadout] Run - Entering main loop\n");
 	while (!pressedSpaceKey)
 	{
 		Game::CallBack();
@@ -1244,9 +1091,7 @@ void DropshipLoadoutClass::Run()
 		GScreenClass::Instance.DoBlit(true, pSurface, nullptr);
 	}
 
-	Debug::Log("[DropshipLoadout] Run - Exited main loop. Saving Cargo...\n");
 	SaveCargo();
-	Debug::Log("[DropshipLoadout] Run - End\n");
 }
 
 void DropshipLoadoutClass::HandleInput(int command, int buttonID)
@@ -1283,7 +1128,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 
 	if (command != 0 || buttonID != -1)
 	{
-		Debug::Log("[DropshipLoadout] HandleInput - command=%d, buttonID=%d, leftClick=%d, rightClick=%d\n", command, buttonID, pressedLeftClick ? 1 : 0, pressedRightClick ? 1 : 0);
 	}
 
 	bool validSidebarCameoPurchase = false;
@@ -1294,7 +1138,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	{
 		if (i >= (int)dropshipBayChosenUnitsLists.size())
 		{
-			Debug::Log("[DropshipLoadout] HandleInput - Error: i (%d) >= dropshipBayChosenUnitsLists.size() (%d) during free slot check\n", i, (int)dropshipBayChosenUnitsLists.size());
 			continue;
 		}
 
@@ -1302,7 +1145,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 		{
 			if (j >= (int)dropshipBayChosenUnitsLists[i].size())
 			{
-				Debug::Log("[DropshipLoadout] HandleInput - Error: j (%d) >= dropshipBayChosenUnitsLists[%d].size() (%d) during free slot check\n", j, i, (int)dropshipBayChosenUnitsLists[i].size());
 				continue;
 			}
 
@@ -1356,7 +1198,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 
 	if (pressedUpArrow)
 	{
-		Debug::Log("[DropshipLoadout] HandleInput - Pressed Up Arrow. firstBrowsableCameo = %d\n", firstBrowsableCameo);
 		if (firstBrowsableCameo >= 2)
 		{
 			firstBrowsableCameo -= 2;
@@ -1366,7 +1207,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	}
 	else if (pressedDownArrow)
 	{
-		Debug::Log("[DropshipLoadout] HandleInput - Pressed Down Arrow. firstBrowsableCameo = %d, availableUnits = %d\n", firstBrowsableCameo, (int)availableUnits.size());
 		if (availableUnits.size() > (size_t)(firstBrowsableCameo + nSidebarCameos))
 		{
 			firstBrowsableCameo += 2;
@@ -1377,7 +1217,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	else if (pressedAnySidebarCameoWithRigthClick)
 	{
 		int newIndex = firstBrowsableCameo + (command - btn_BasicSidebarCameo_ID);
-		Debug::Log("[DropshipLoadout] HandleInput - Right Clicked Sidebar Cameo. Index = %d\n", newIndex);
 		if (newIndex >= 0 && newIndex < (int)availableUnits.size())
 		{
 			auto const pType = availableUnits[newIndex];
@@ -1391,7 +1230,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 					{
 						if (dropshipBay[j] == pType)
 						{
-							Debug::Log("[DropshipLoadout] HandleInput - Selling unit %s from dropship %d, slot %d\n", pType->ID, i, j);
 							currentMoney += pType->Cost;
 							dropshipBay.erase(dropshipBay.begin() + j);
 							dropshipBay.push_back(nullptr);
@@ -1414,7 +1252,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	else if (pressedAnySidebarCameo)
 	{
 		int newIndex = firstBrowsableCameo + (command - btn_BasicSidebarCameo_ID);
-		Debug::Log("[DropshipLoadout] HandleInput - Pressed Sidebar Cameo. Index = %d\n", newIndex);
 		if (newIndex >= 0 && newIndex < (int)availableUnits.size())
 		{
 			if (validSidebarCameoPurchase)
@@ -1428,7 +1265,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 					{
 						if (i >= (int)dropshipBayChosenUnitsLists.size())
 						{
-							Debug::Log("[DropshipLoadout] HandleInput - Error: i (%d) >= dropshipBayChosenUnitsLists.size() (%d) during purchase\n", i, (int)dropshipBayChosenUnitsLists.size());
 							continue;
 						}
 
@@ -1436,7 +1272,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 						{
 							if (j >= (int)dropshipBayChosenUnitsLists[i].size())
 							{
-								Debug::Log("[DropshipLoadout] HandleInput - Error: j (%d) >= dropshipBayChosenUnitsLists[%d].size() (%d) during purchase\n", j, i, (int)dropshipBayChosenUnitsLists[i].size());
 								continue;
 							}
 
@@ -1444,7 +1279,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 							if (pDropshipSlotType)
 								continue;
 
-							Debug::Log("[DropshipLoadout] HandleInput - Purchasing unit %s in dropship %d, slot %d\n", pType->ID, i, j);
 							dropshipBayChosenUnitsLists[i][j] = pType;
 							currentMoney -= pType->Cost;
 							foundFreeSlot = true;
@@ -1462,7 +1296,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 					if (sidebarRowAnimationIndex < 0)
 					{
 						sidebarRowAnimationIndex = ((command - btn_BasicSidebarCameo_ID) / 2);
-						Debug::Log("[DropshipLoadout] HandleInput - Starting sidebar animation row index: %d\n", sidebarRowAnimationIndex);
 						if (dropshipLoadout_DGreenListPCX.size() > 0)
 						{
 							if (sidebarRowAnimationIndex < (int)dropshipLoadout_DGreenListPCX.size())
@@ -1486,7 +1319,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 			}
 			else
 			{
-				Debug::Log("[DropshipLoadout] HandleInput - Purchase not allowed (money limit, count limit, or slots full)\n");
 			}
 		}
 	}
@@ -1496,7 +1328,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 		{
 			int nDropship = (command - btn_BasicDropshipCameo_ID) / nDropshipBayCameos;
 			int index = command - btn_BasicDropshipCameo_ID - (nDropship * nDropshipBayCameos);
-			Debug::Log("[DropshipLoadout] HandleInput - Pressed Dropship Cameo. Dropship: %d, Index: %d\n", nDropship, index);
 
 			if (nDropship >= 0 && nDropship < (int)dropshipBayChosenUnitsLists.size())
 			{
@@ -1505,7 +1336,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 					auto pType = dropshipBayChosenUnitsLists[nDropship][index];
 					if (pType)
 					{
-						Debug::Log("[DropshipLoadout] HandleInput - Selling unit %s from dropship %d, slot %d via click\n", pType->ID, nDropship, index);
 						currentMoney += pType->Cost;
 						auto& affectedDropship = dropshipBayChosenUnitsLists[nDropship];
 						affectedDropship.erase(affectedDropship.begin() + index);
@@ -1536,13 +1366,11 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 
 	if (command == VK_SPACE)
 	{
-		Debug::Log("[DropshipLoadout] HandleInput - Pressed SPACE. Exiting loadout...\n");
 		pressedSpaceKey = true;
 	}
 
 	if (command == VK_ESCAPE)
 	{
-		Debug::Log("[DropshipLoadout] HandleInput - Pressed ESCAPE. Resetting choices...\n");
 		bool soldAny = false;
 		lastSelected = nullptr;
 		dropshipBayChosenUnitsCount.clear();
@@ -1632,7 +1460,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 {
 	if (!pSurface)
 	{
-		Debug::Log("[DropshipLoadout] Render - Error: pSurface is null!\n");
 		return;
 	}
 	GeneralUtils::DrawImage(
@@ -1651,7 +1478,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 
 		if (i >= (int)sidebarCameLocations.size())
 		{
-			Debug::Log("[DropshipLoadout] Render - WARNING: i (%d) >= sidebarCameLocations size (%d)\n", i, (int)sidebarCameLocations.size());
 			continue;
 		}
 
@@ -1711,7 +1537,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
 		if (!pTypeExt)
 		{
-			Debug::Log("[DropshipLoadout] Render - WARNING: No TechnoTypeExt for %s!\n", pType->ID);
 			continue;
 		}
 
@@ -1755,7 +1580,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 	{
 		if (i >= dropshipBayChosenUnitsLists.size())
 		{
-			Debug::Log("[DropshipLoadout] Render - WARNING: dropship index %d >= dropshipBayChosenUnitsLists.size() (%d)\n", (int)i, (int)dropshipBayChosenUnitsLists.size());
 			continue;
 		}
 
@@ -1763,7 +1587,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		{
 			if (j >= dropshipBayChosenUnitsLists[i].size())
 			{
-				Debug::Log("[DropshipLoadout] Render - WARNING: slot index %d >= dropshipBayChosenUnitsLists[%d].size() (%d)\n", (int)j, (int)i, (int)dropshipBayChosenUnitsLists[i].size());
 				continue;
 			}
 
@@ -1793,7 +1616,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
 			if (!pTypeExt)
 			{
-				Debug::Log("[DropshipLoadout] Render - WARNING: No TechnoTypeExt for %s inside dropship slot!\n", pType->ID);
 				continue;
 			}
 
@@ -1824,7 +1646,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			}
 			else
 			{
-				Debug::Log("[DropshipLoadout] Render - Error: currentLoadoutFrame (%d) >= loadoutPCX size (%d)\n", currentLoadoutFrame, (int)dropshipLoadout_LoadoutPCX.size());
 			}
 		}
 
@@ -1850,7 +1671,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			}
 			else
 			{
-				Debug::Log("[DropshipLoadout] Render - Error: currentPilotLitFrame (%d) >= pilotLitPCX size (%d)\n", currentPilotLitFrame, (int)dropshipLoadout_PilotLitPCX.size());
 			}
 		}
 
@@ -1880,7 +1700,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 					}
 					else
 					{
-						Debug::Log("[DropshipLoadout] Render - Error: currentSidebarRowAnimationFrame (%d) >= DGreenListPCX[%d] size (%d)\n", currentSidebarRowAnimationFrame, sidebarRowAnimationIndex, (int)dropshipLoadout_DGreenListPCX[sidebarRowAnimationIndex].size());
 					}
 				}
 			}
@@ -1892,7 +1711,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			}
 			else
 			{
-				Debug::Log("[DropshipLoadout] Render - Error: sidebarRowAnimationIndex (%d) >= DGreenList size (%d)\n", sidebarRowAnimationIndex, (int)dropshipLoadout_DGreenList.size());
 			}
 
 			GeneralUtils::DrawImage(
@@ -1907,7 +1725,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		}
 		else
 		{
-			Debug::Log("[DropshipLoadout] Render - Error: sidebarRowAnimationIndex (%d) >= dGreenLocation size (%d)\n", sidebarRowAnimationIndex, (int)dGreenLocation.size());
 		}
 	}
 
@@ -1933,17 +1750,14 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 
 void DropshipLoadoutClass::SaveCargo()
 {
-	Debug::Log("[DropshipLoadout] SaveCargo - Start\n");
 	if (!HouseClass::CurrentPlayer)
 	{
-		Debug::Log("[DropshipLoadout] SaveCargo - Error: CurrentPlayer is null!\n");
 		return;
 	}
 
 	auto pHouseExt = HouseExt::ExtMap.Find(HouseClass::CurrentPlayer);
 	if (!pHouseExt)
 	{
-		Debug::Log("[DropshipLoadout] SaveCargo - Error: pHouseExt is null!\n");
 		return;
 	}
 
@@ -1954,7 +1768,6 @@ void DropshipLoadoutClass::SaveCargo()
 
 	if (pHouseTypeExt->DropshipLoadout_Carriers.size() > 0)
 	{
-		Debug::Log("[DropshipLoadout] SaveCargo - Carriers from HouseType, size: %d\n", (int)pHouseTypeExt->DropshipLoadout_Carriers.size());
 		for (auto carrier : pHouseTypeExt->DropshipLoadout_Carriers)
 		{
 			carriers.push_back(carrier);
@@ -1962,7 +1775,6 @@ void DropshipLoadoutClass::SaveCargo()
 	}
 	else if (ScenarioExt::Global())
 	{
-		Debug::Log("[DropshipLoadout] SaveCargo - Carriers from Global, size: %d\n", (int)ScenarioExt::Global()->DropshipLoadout_Carriers.size());
 		for (auto carrier : ScenarioExt::Global()->DropshipLoadout_Carriers)
 		{
 			carriers.push_back(carrier);
@@ -1970,7 +1782,6 @@ void DropshipLoadoutClass::SaveCargo()
 	}
 
 	int nCarriers = (int)carriers.size();
-	Debug::Log("[DropshipLoadout] SaveCargo - Saving cargo for %d starting dropships, nCarriers=%d\n", nStartingDropships, nCarriers);
 
 	for (int i = 0; i < nStartingDropships && i < nCarriers; i++)
 	{
@@ -1979,7 +1790,6 @@ void DropshipLoadoutClass::SaveCargo()
 
 		if (i >= (int)dropshipBayChosenUnitsLists.size())
 		{
-			Debug::Log("[DropshipLoadout] SaveCargo - Error: i (%d) >= dropshipBayChosenUnitsLists size (%d)!\n", i, (int)dropshipBayChosenUnitsLists.size());
 			continue;
 		}
 
@@ -1987,7 +1797,6 @@ void DropshipLoadoutClass::SaveCargo()
 		{
 			if (pTechno)
 			{
-				Debug::Log("[DropshipLoadout] SaveCargo - Adding cargo unit %s to dropship %d\n", pTechno->ID, i);
 				unitsList.push_back(pTechno);
 			}
 		}
@@ -1997,75 +1806,59 @@ void DropshipLoadoutClass::SaveCargo()
 	}
 
 	bool addUnusedMoneyToPlayer = pHouseTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer.isset() ? pHouseTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer : (ScenarioExt::Global() ? ScenarioExt::Global()->DropshipLoadout_AddUnusedMoneyToPlayer : false);
-	Debug::Log("[DropshipLoadout] SaveCargo - addUnusedMoneyToPlayer=%d\n", addUnusedMoneyToPlayer ? 1 : 0);
 
 	if (addUnusedMoneyToPlayer)
 	{
-		Debug::Log("[DropshipLoadout] SaveCargo - Transacting currentMoney: %d\n", currentMoney);
 		HouseClass::CurrentPlayer->TransactMoney(currentMoney);
 	}
 	else
 	{
 		long dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money.isset() ? pHouseTypeExt->DropshipLoadout_Money : (ScenarioExt::Global() ? ScenarioExt::Global()->DropshipLoadout_Money : -1);
-		Debug::Log("[DropshipLoadout] SaveCargo - Non-additive: initialMoney setting=%ld\n", dropshipLoadout_InitialMoney);
 
 		if (dropshipLoadout_InitialMoney < 0)
 		{
 			long spent = HouseClass::CurrentPlayer->Available_Money() - currentMoney;
-			Debug::Log("[DropshipLoadout] SaveCargo - Subtracting spent money: %ld\n", spent);
 			HouseClass::CurrentPlayer->TransactMoney(-spent);
 		}
 	}
-	Debug::Log("[DropshipLoadout] SaveCargo - End\n");
 }
 
 DEFINE_HOOK(0x4B6C30, Dropship_Loadout_Remake, 0x0)
 {
 	enum { EndFunction = 0x4B9690 };
-	Debug::Log("[DropshipLoadout] HOOK Dropship_Loadout_Remake triggered\n");
 
 	if (!HouseClass::CurrentPlayer)
 	{
-		Debug::Log("[DropshipLoadout] HOOK - Error: CurrentPlayer is null!\n");
 		return EndFunction;
 	}
 
 	auto const pHouseTypeExt = HouseTypeExt::ExtMap.Find(HouseClass::CurrentPlayer->Type);
 	if (!pHouseTypeExt)
 	{
-		Debug::Log("[DropshipLoadout] HOOK - Error: pHouseTypeExt is null!\n");
 		return EndFunction;
 	}
 
 	if (!ScenarioClass::Instance)
 	{
-		Debug::Log("[DropshipLoadout] HOOK - Error: ScenarioClass::Instance is null!\n");
 		return EndFunction;
 	}
 
 	int nStartingDropships = pHouseTypeExt->DropshipLoadout_StartingDropships.isset() ? pHouseTypeExt->DropshipLoadout_StartingDropships : ScenarioClass::Instance->StartingDropships;
-	Debug::Log("[DropshipLoadout] HOOK - nStartingDropships: %d\n", nStartingDropships);
 
 	if (nStartingDropships <= 0)
 	{
-		Debug::Log("[DropshipLoadout] HOOK - Starting dropships <= 0, returning\n");
 		return EndFunction;
 	}
 
 	DropshipLoadoutClass loadout;
-	Debug::Log("[DropshipLoadout] HOOK - Initializing DropshipLoadoutClass...\n");
 	if (loadout.Initialize())
 	{
-		Debug::Log("[DropshipLoadout] HOOK - Initialization complete. Running loadout screen...\n");
 		loadout.Run();
-		Debug::Log("[DropshipLoadout] HOOK - Run complete.\n");
 	}
 	else
 	{
-		Debug::Log("[DropshipLoadout] HOOK - Initialization failed.\n");
 	}
 
-	Debug::Log("[DropshipLoadout] HOOK Dropship_Loadout_Remake finished\n");
 	return EndFunction;
 }
 
