@@ -17,6 +17,24 @@
 
 #include <Utilities/GeneralUtils.h>
 
+static bool bDropshipLoadoutActive = false;
+static int pendingScrolls = 0;
+
+bool IsDropshipLoadoutActive()
+{
+	return bDropshipLoadoutActive;
+}
+
+void DropshipLoadout_OnMouseWheelUp()
+{
+	pendingScrolls--;
+}
+
+void DropshipLoadout_OnMouseWheelDown()
+{
+	pendingScrolls++;
+}
+
 static ShapeButtonClass* CreateShapeButton(unsigned int nID, int nX, int nY, int nWidth, int nHeight, bool bIsAlpha)
 {
 	auto const pButton = GameAllocator<ShapeButtonClass>().allocate(1);
@@ -1050,6 +1068,8 @@ void DropshipLoadoutClass::Run()
 
 	pressedSpaceKey = false;
 	repaintAll = true;
+	bDropshipLoadoutActive = true;
+	pendingScrolls = 0;
 
 	while (!pressedSpaceKey)
 	{
@@ -1091,6 +1111,7 @@ void DropshipLoadoutClass::Run()
 		GScreenClass::Instance.DoBlit(true, pSurface, nullptr);
 	}
 
+	bDropshipLoadoutActive = false;
 	SaveCargo();
 }
 
@@ -1118,6 +1139,17 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	bool isDownArrow = buttonID == btn_ScrollDown_ID;
 	bool pressedUpArrow = command == VK_UP || ((pressedLeftClick || command == (32768 + btn_ScrollUp_ID)) && isUpArrow);
 	bool pressedDownArrow = command == VK_DOWN || (pressedLeftClick && isDownArrow);
+
+	if (pendingScrolls < 0)
+	{
+		pressedUpArrow = true;
+		pendingScrolls++;
+	}
+	else if (pendingScrolls > 0)
+	{
+		pressedDownArrow = true;
+		pendingScrolls--;
+	}
 
 	if (pressedUpArrow)
 		command = btn_ScrollUp_ID;
