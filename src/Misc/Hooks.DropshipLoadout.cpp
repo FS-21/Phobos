@@ -39,33 +39,6 @@ void DropshipLoadout_OnMouseWheelDown()
 	pendingScrolls++;
 }
 
-static std::wstring GetDropshipLoadoutTooltipText(TechnoTypeClass* pType, int currentCount, int maxLimit)
-{
-	if (!pType)
-		return L"";
-
-	std::wostringstream oss;
-	oss << pType->UIName;
-
-	oss << L"\n";
-	if (maxLimit > 0)
-	{
-		int availableCount = maxLimit - currentCount;
-		oss << availableCount << L"/" << maxLimit << L" ";
-	}
-
-	int cost = pType->GetActualCost(HouseClass::CurrentPlayer);
-	oss << Phobos::UI::CostLabel << std::abs(cost);
-
-	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
-	if (pTypeExt && Phobos::Config::ToolTipDescriptions && !pTypeExt->UIDescription.Get().empty())
-	{
-		oss << L"\n" << pTypeExt->UIDescription.Get().Text;
-	}
-
-	return oss.str();
-}
-
 static ShapeButtonClass* CreateShapeButton(unsigned int nID, int nX, int nY, int nWidth, int nHeight, bool bIsAlpha)
 {
 	auto const pButton = GameAllocator<ShapeButtonClass>().allocate(1);
@@ -104,6 +77,7 @@ private:
 	void HandleInput(int command, int buttonID);
 	void UpdateAnimations();
 	void Render(DSurface* pSurface);
+	void DrawTooltip(DSurface* pSurface);
 	void SaveCargo();
 
 	// Extensions
@@ -1839,100 +1813,264 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 	};
 	pSurface->DrawTextA(buffer, &windowRectangle, &pressSpaceLabel, foreColor, 0, style);
 
-	// Render Hover Tooltip
-	if (pHoveredUnitType)
+	this->DrawTooltip(pSurface);
+}
+
+void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
+{
+	if (!pHoveredUnitType)
+		return;
+
+	if (!BitFont::Instance || !BitText::Instance)
+		return;
+
+	int maxToolTipWidth = Phobos::UI::MaxToolTipWidth > 0 ? Phobos::UI::MaxToolTipWidth : 200;
+
+	// Calculate maxLimit
+	int maxLimit = -1;
+	for (size_t idx = 0; idx < availableUnits.size(); ++idx)
 	{
-		int currentCount = 0;
-		if (dropshipBayChosenUnitsCount.count(pHoveredUnitType) > 0)
+		if (availableUnits[idx] == pHoveredUnitType)
 		{
-			currentCount = dropshipBayChosenUnitsCount[pHoveredUnitType];
-		}
-
-		int maxLimit = -1;
-		for (size_t idx = 0; idx < availableUnits.size(); ++idx)
-		{
-			if (availableUnits[idx] == pHoveredUnitType)
-			{
-				maxLimit = availableUnitsMaximums[idx];
-				break;
-			}
-		}
-
-		std::wstring textStr = GetDropshipLoadoutTooltipText(pHoveredUnitType, currentCount, maxLimit);
-		const wchar_t* pText = textStr.c_str();
-
-		if (pText && pText[0] != L'\0' && BitFont::Instance && BitText::Instance)
-		{
-			int maxToolTipWidth = Phobos::UI::MaxToolTipWidth > 0 ? Phobos::UI::MaxToolTipWidth : 200;
-
-			int textWidth = 0;
-			int textHeight = 0;
-			BitFont::Instance->GetTextDimension(pText, &textWidth, &textHeight, maxToolTipWidth);
-
-			int boxPadding = 5;
-			int boxWidth = textWidth + boxPadding * 2;
-			int boxHeight = textHeight + boxPadding * 2;
-
-			Point2D mousePos = { 0, 0 };
-			if (WWMouseClass::Instance)
-			{
-				mousePos.X = WWMouseClass::Instance->GetX();
-				mousePos.Y = WWMouseClass::Instance->GetY();
-			}
-
-			int minX = windowRectangle.X;
-			int maxX = windowRectangle.X + windowRectangle.Width;
-			int minY = windowRectangle.Y;
-			int maxY = windowRectangle.Y + windowRectangle.Height;
-
-			int boxX = mousePos.X + 15;
-			int boxY = mousePos.Y + 15;
-
-			if (boxX + boxWidth > maxX)
-				boxX = mousePos.X - boxWidth - 5;
-			if (boxY + boxHeight > maxY)
-				boxY = maxY - boxHeight - 5;
-
-			if (boxX < minX) boxX = minX;
-			if (boxY < minY) boxY = minY;
-
-			RectangleStruct boxRect = { boxX, boxY, boxWidth, boxHeight };
-
-			// Translucent black background
-			ColorStruct bgColor(0, 0, 0);
-			pSurface->FillRectTrans(&boxRect, &bgColor, 180);
-
-			// Border outline
-			pSurface->DrawRect(&boxRect, Drawing::RGB_To_Int(120, 120, 120));
-
-			// Save BitFont state to prevent side effects on other parts of UI
-			LTRBStruct oldBounds = BitFont::Instance->Bounds;
-			WORD oldColor = BitFont::Instance->Color;
-			bool oldField41 = BitFont::Instance->field_41;
-
-			// Draw tooltip text
-			LTRBStruct ltrbBounds = { boxRect.X, boxRect.Y, boxRect.X + boxRect.Width, boxRect.Y + boxRect.Height };
-			BitFont::Instance->field_41 = 1;
-			BitFont::Instance->SetBounds(&ltrbBounds);
-			BitFont::Instance->Color = static_cast<WORD>(Drawing::RGB_To_Int(255, 255, 255));
-
-			BitText::Instance->DrawText(
-				BitFont::Instance,
-				pSurface,
-				pText,
-				boxRect.X + boxPadding,
-				boxRect.Y + boxPadding,
-				textWidth,
-				textHeight,
-				0, 0, 0
-			);
-
-			// Restore BitFont state
-			BitFont::Instance->Bounds = oldBounds;
-			BitFont::Instance->Color = oldColor;
-			BitFont::Instance->field_41 = oldField41;
+			maxLimit = availableUnitsMaximums[idx];
+			break;
 		}
 	}
+
+	// Calculate currentCount
+	int currentCount = 0;
+	if (dropshipBayChosenUnitsCount.count(pHoveredUnitType) > 0)
+	{
+		currentCount = dropshipBayChosenUnitsCount[pHoveredUnitType];
+	}
+
+	// Determine dimensions of each line to compute the total box size
+	int textWidth = 0;
+	int textHeight = 0;
+
+	// 1. Name line
+	int nameWidth = 0, nameHeight = 0;
+	std::wstring nameStr = pHoveredUnitType->UIName;
+	BitFont::Instance->GetTextDimension(nameStr.c_str(), &nameWidth, &nameHeight, maxToolTipWidth);
+	textWidth = std::max(textWidth, nameWidth);
+	textHeight += nameHeight;
+
+	// 2. Availability line (if limit exists)
+	int availWidth = 0, availHeight = 0;
+	std::wstring availLabel = L"Available: ";
+	std::wstring availValueStr;
+	int availLabelWidth = 0, availLabelHeight = 0;
+	int availValueWidth = 0, availValueHeight = 0;
+	if (maxLimit > 0)
+	{
+		BitFont::Instance->GetTextDimension(availLabel.c_str(), &availLabelWidth, &availLabelHeight, maxToolTipWidth);
+
+		std::wostringstream availValueOss;
+		availValueOss << (maxLimit - currentCount) << L"/" << maxLimit;
+		availValueStr = availValueOss.str();
+		BitFont::Instance->GetTextDimension(availValueStr.c_str(), &availValueWidth, &availValueHeight, maxToolTipWidth);
+
+		availWidth = availLabelWidth + availValueWidth;
+		availHeight = std::max(availLabelHeight, availValueHeight);
+		textWidth = std::max(textWidth, availWidth);
+		textHeight += availHeight + 2; // +2 line spacing
+	}
+
+	// 3. Cost line
+	std::wstring costLabelStr = L"Cost: ";
+	int costLabelWidth = 0, costLabelHeight = 0;
+	BitFont::Instance->GetTextDimension(costLabelStr.c_str(), &costLabelWidth, &costLabelHeight, maxToolTipWidth);
+
+	int cost = pHoveredUnitType->GetActualCost(HouseClass::CurrentPlayer);
+	std::wostringstream costValOss;
+	costValOss << Phobos::UI::CostLabel << std::abs(cost);
+	std::wstring costValStr = costValOss.str();
+	int costValWidth = 0, costValHeight = 0;
+	BitFont::Instance->GetTextDimension(costValStr.c_str(), &costValWidth, &costValHeight, maxToolTipWidth);
+
+	int fullCostWidth = costLabelWidth + costValWidth;
+	int fullCostHeight = std::max(costLabelHeight, costValHeight);
+	textWidth = std::max(textWidth, fullCostWidth);
+	textHeight += fullCostHeight + 2; // +2 line spacing
+
+	// 4. Description
+	std::wstring descStr;
+	int descWidth = 0, descHeight = 0;
+	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pHoveredUnitType);
+	if (pTypeExt && Phobos::Config::ToolTipDescriptions && !pTypeExt->UIDescription.Get().empty())
+	{
+		descStr = pTypeExt->UIDescription.Get().Text;
+		BitFont::Instance->GetTextDimension(descStr.c_str(), &descWidth, &descHeight, maxToolTipWidth);
+		textWidth = std::max(textWidth, descWidth);
+		textHeight += descHeight + 4; // +4 for extra paragraph gap
+	}
+
+	// Calculate final box bounds
+	int boxPadding = 5;
+	int boxWidth = textWidth + boxPadding * 2;
+	int boxHeight = textHeight + boxPadding * 2;
+
+	Point2D mousePos = { 0, 0 };
+	if (WWMouseClass::Instance)
+	{
+		mousePos.X = WWMouseClass::Instance->GetX();
+		mousePos.Y = WWMouseClass::Instance->GetY();
+	}
+
+	int minX = windowRectangle.X;
+	int maxX = windowRectangle.X + windowRectangle.Width;
+	int minY = windowRectangle.Y;
+	int maxY = windowRectangle.Y + windowRectangle.Height;
+
+	int boxX = mousePos.X + 15;
+	int boxY = mousePos.Y + 15;
+
+	if (boxX + boxWidth > maxX)
+		boxX = mousePos.X - boxWidth - 5;
+	if (boxY + boxHeight > maxY)
+		boxY = maxY - boxHeight - 5;
+
+	if (boxX < minX) boxX = minX;
+	if (boxY < minY) boxY = minY;
+
+	RectangleStruct boxRect = { boxX, boxY, boxWidth, boxHeight };
+
+	// Draw translucent black background
+	ColorStruct bgColor(0, 0, 0);
+	pSurface->FillRectTrans(&boxRect, &bgColor, 180);
+
+	// Draw border outline
+	pSurface->DrawRect(&boxRect, Drawing::RGB_To_Int(120, 120, 120));
+
+	// Save BitFont state to prevent side effects on other parts of UI
+	LTRBStruct oldBounds = BitFont::Instance->Bounds;
+	WORD oldColor = BitFont::Instance->Color;
+	bool oldField41 = BitFont::Instance->field_41;
+
+	// Set shared BitFont properties
+	LTRBStruct ltrbBounds = { boxRect.X, boxRect.Y, boxRect.X + boxRect.Width, boxRect.Y + boxRect.Height };
+	BitFont::Instance->field_41 = 1;
+	BitFont::Instance->SetBounds(&ltrbBounds);
+
+	int currentY = boxRect.Y + boxPadding;
+
+	// 1. Draw Name (Yellow/Gold)
+	BitFont::Instance->Color = static_cast<WORD>(Drawing::RGB_To_Int(255, 239, 99));
+	BitText::Instance->DrawText(
+		BitFont::Instance,
+		pSurface,
+		nameStr.c_str(),
+		boxRect.X + boxPadding,
+		currentY,
+		nameWidth,
+		nameHeight,
+		0, 0, 0
+	);
+	currentY += nameHeight + 2;
+
+	// 2. Draw Availability (if limit exists)
+	if (maxLimit > 0)
+	{
+		// Draw label "Available: " (White)
+		BitFont::Instance->Color = static_cast<WORD>(Drawing::RGB_To_Int(255, 255, 255));
+		BitText::Instance->DrawText(
+			BitFont::Instance,
+			pSurface,
+			availLabel.c_str(),
+			boxRect.X + boxPadding,
+			currentY,
+			availLabelWidth,
+			availLabelHeight,
+			0, 0, 0
+		);
+
+		// Draw value (Red / Yellow / White)
+		int availableCount = maxLimit - currentCount;
+		COLORREF availColor = Drawing::RGB_To_Int(255, 255, 255); // White
+		if (availableCount == 0)
+		{
+			availColor = Drawing::RGB_To_Int(255, 0, 0); // Red
+		}
+		else if (availableCount * 2 <= maxLimit)
+		{
+			availColor = Drawing::RGB_To_Int(255, 255, 0); // Yellow
+		}
+
+		BitFont::Instance->Color = static_cast<WORD>(availColor);
+		BitText::Instance->DrawText(
+			BitFont::Instance,
+			pSurface,
+			availValueStr.c_str(),
+			boxRect.X + boxPadding + availLabelWidth,
+			currentY,
+			availValueWidth,
+			availValueHeight,
+			0, 0, 0
+		);
+
+		currentY += availHeight + 2;
+	}
+
+	// 3. Draw Cost
+	// Draw label "Cost: " (White)
+	BitFont::Instance->Color = static_cast<WORD>(Drawing::RGB_To_Int(255, 255, 255));
+	BitText::Instance->DrawText(
+		BitFont::Instance,
+		pSurface,
+		costLabelStr.c_str(),
+		boxRect.X + boxPadding,
+		currentY,
+		costLabelWidth,
+		costLabelHeight,
+		0, 0, 0
+	);
+
+	// Draw value (Red / Yellow / White)
+	COLORREF costColor = Drawing::RGB_To_Int(255, 255, 255); // White
+	if (currentMoney < cost)
+	{
+		costColor = Drawing::RGB_To_Int(255, 0, 0); // Red
+	}
+	else if (currentMoney < cost * 2)
+	{
+		costColor = Drawing::RGB_To_Int(255, 255, 0); // Yellow
+	}
+
+	BitFont::Instance->Color = static_cast<WORD>(costColor);
+	BitText::Instance->DrawText(
+		BitFont::Instance,
+		pSurface,
+		costValStr.c_str(),
+		boxRect.X + boxPadding + costLabelWidth,
+		currentY,
+		costValWidth,
+		costValHeight,
+		0, 0, 0
+	);
+
+	currentY += fullCostHeight + 2;
+
+	// 4. Draw Description (if exists)
+	if (!descStr.empty())
+	{
+		currentY += 2; // Small gap before description paragraph
+		BitFont::Instance->Color = static_cast<WORD>(Drawing::RGB_To_Int(200, 200, 200)); // Light Gray
+		BitText::Instance->DrawText(
+			BitFont::Instance,
+			pSurface,
+			descStr.c_str(),
+			boxRect.X + boxPadding,
+			currentY,
+			descWidth,
+			descHeight,
+			0, 0, 0
+		);
+	}
+
+	// Restore BitFont state
+	BitFont::Instance->Bounds = oldBounds;
+	BitFont::Instance->Color = oldColor;
+	BitFont::Instance->field_41 = oldField41;
 }
 
 void DropshipLoadoutClass::SaveCargo()
