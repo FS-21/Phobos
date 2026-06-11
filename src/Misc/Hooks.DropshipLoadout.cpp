@@ -5,6 +5,10 @@
 #include <WWMouseClass.h>
 #include <Drawing.h>
 #include <BitFont.h>
+#include <BitText.h>
+#include <Ext/TechnoType/Body.h>
+#include <sstream>
+#include <iomanip>
 
 #include <Utilities/Macro.h>
 #include <Utilities/TemplateDef.h>
@@ -33,6 +37,33 @@ void DropshipLoadout_OnMouseWheelUp()
 void DropshipLoadout_OnMouseWheelDown()
 {
 	pendingScrolls++;
+}
+
+static std::wstring GetDropshipLoadoutTooltipText(TechnoTypeClass* pType, int currentCount, int maxLimit)
+{
+	if (!pType)
+		return L"";
+
+	std::wostringstream oss;
+	oss << pType->UIName;
+
+	oss << L"\n";
+	if (maxLimit > 0)
+	{
+		int availableCount = maxLimit - currentCount;
+		oss << availableCount << L"/" << maxLimit << L" ";
+	}
+
+	int cost = pType->GetActualCost(HouseClass::CurrentPlayer);
+	oss << Phobos::UI::CostLabel << std::abs(cost);
+
+	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
+	if (pTypeExt && Phobos::Config::ToolTipDescriptions && !pTypeExt->UIDescription.Get().empty())
+	{
+		oss << L"\n" << pTypeExt->UIDescription.Get().Text;
+	}
+
+	return oss.str();
 }
 
 static ShapeButtonClass* CreateShapeButton(unsigned int nID, int nX, int nY, int nWidth, int nHeight, bool bIsAlpha)
@@ -113,6 +144,7 @@ private:
 	std::vector<std::vector<TechnoTypeClass*>> dropshipBayChosenUnitsLists;
 	std::map<TechnoTypeClass*, int> dropshipBayChosenUnitsCount;
 	TechnoTypeClass* lastSelected { nullptr };
+	TechnoTypeClass* pHoveredUnitType { nullptr };
 
 	// Layout/Locations
 	RectangleStruct windowRectangle;
@@ -1070,6 +1102,7 @@ void DropshipLoadoutClass::Run()
 	repaintAll = true;
 	bDropshipLoadoutActive = true;
 	pendingScrolls = 0;
+	pHoveredUnitType = nullptr;
 
 	while (!pressedSpaceKey)
 	{
@@ -1121,6 +1154,32 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	int btn_ScrollDown_ID = 101;
 	int btn_BasicDropshipCameo_ID = 200;
 	int btn_BasicSidebarCameo_ID = 300;
+
+	TechnoTypeClass* pPrevHovered = pHoveredUnitType;
+	pHoveredUnitType = nullptr;
+
+	if (buttonID >= btn_BasicSidebarCameo_ID && buttonID < (btn_BasicSidebarCameo_ID + nSidebarCameos))
+	{
+		int sidebarIndex = firstBrowsableCameo + (buttonID - btn_BasicSidebarCameo_ID);
+		if (sidebarIndex < (int)availableUnits.size())
+		{
+			pHoveredUnitType = availableUnits[sidebarIndex];
+		}
+	}
+	else if (buttonID >= btn_BasicDropshipCameo_ID && buttonID < (btn_BasicDropshipCameo_ID + nDropshipBayTotalSlots))
+	{
+		int dropshipIndex = (buttonID - btn_BasicDropshipCameo_ID) / nDropshipBayCameos;
+		int slotIndex = (buttonID - btn_BasicDropshipCameo_ID) - (dropshipIndex * nDropshipBayCameos);
+		if (dropshipIndex < (int)dropshipBayChosenUnitsLists.size() && slotIndex < (int)dropshipBayChosenUnitsLists[dropshipIndex].size())
+		{
+			pHoveredUnitType = dropshipBayChosenUnitsLists[dropshipIndex][slotIndex];
+		}
+	}
+
+	if (pHoveredUnitType != pPrevHovered)
+	{
+		repaintAll = true;
+	}
 
 	bool pressedLeftClick = command == 1;
 	bool pressedRightClick = command == 2;
@@ -1494,6 +1553,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 	{
 		return;
 	}
+	pSurface->Fill(0);
 	GeneralUtils::DrawImage(
 		pSurface,
 		windowRectangle,
@@ -1778,6 +1838,101 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		windowRectangle.Height - 15
 	};
 	pSurface->DrawTextA(buffer, &windowRectangle, &pressSpaceLabel, foreColor, 0, style);
+
+	// Render Hover Tooltip
+	if (pHoveredUnitType)
+	{
+		int currentCount = 0;
+		if (dropshipBayChosenUnitsCount.count(pHoveredUnitType) > 0)
+		{
+			currentCount = dropshipBayChosenUnitsCount[pHoveredUnitType];
+		}
+
+		int maxLimit = -1;
+		for (size_t idx = 0; idx < availableUnits.size(); ++idx)
+		{
+			if (availableUnits[idx] == pHoveredUnitType)
+			{
+				maxLimit = availableUnitsMaximums[idx];
+				break;
+			}
+		}
+
+		std::wstring textStr = GetDropshipLoadoutTooltipText(pHoveredUnitType, currentCount, maxLimit);
+		const wchar_t* pText = textStr.c_str();
+
+		if (pText && pText[0] != L'\0' && BitFont::Instance && BitText::Instance)
+		{
+			int maxToolTipWidth = Phobos::UI::MaxToolTipWidth > 0 ? Phobos::UI::MaxToolTipWidth : 200;
+
+			int textWidth = 0;
+			int textHeight = 0;
+			BitFont::Instance->GetTextDimension(pText, &textWidth, &textHeight, maxToolTipWidth);
+
+			int boxPadding = 5;
+			int boxWidth = textWidth + boxPadding * 2;
+			int boxHeight = textHeight + boxPadding * 2;
+
+			Point2D mousePos = { 0, 0 };
+			if (WWMouseClass::Instance)
+			{
+				mousePos.X = WWMouseClass::Instance->GetX();
+				mousePos.Y = WWMouseClass::Instance->GetY();
+			}
+
+			int minX = windowRectangle.X;
+			int maxX = windowRectangle.X + windowRectangle.Width;
+			int minY = windowRectangle.Y;
+			int maxY = windowRectangle.Y + windowRectangle.Height;
+
+			int boxX = mousePos.X + 15;
+			int boxY = mousePos.Y + 15;
+
+			if (boxX + boxWidth > maxX)
+				boxX = mousePos.X - boxWidth - 5;
+			if (boxY + boxHeight > maxY)
+				boxY = maxY - boxHeight - 5;
+
+			if (boxX < minX) boxX = minX;
+			if (boxY < minY) boxY = minY;
+
+			RectangleStruct boxRect = { boxX, boxY, boxWidth, boxHeight };
+
+			// Translucent black background
+			ColorStruct bgColor(0, 0, 0);
+			pSurface->FillRectTrans(&boxRect, &bgColor, 180);
+
+			// Border outline
+			pSurface->DrawRect(&boxRect, Drawing::RGB_To_Int(120, 120, 120));
+
+			// Save BitFont state to prevent side effects on other parts of UI
+			LTRBStruct oldBounds = BitFont::Instance->Bounds;
+			WORD oldColor = BitFont::Instance->Color;
+			bool oldField41 = BitFont::Instance->field_41;
+
+			// Draw tooltip text
+			LTRBStruct ltrbBounds = { boxRect.X, boxRect.Y, boxRect.X + boxRect.Width, boxRect.Y + boxRect.Height };
+			BitFont::Instance->field_41 = 1;
+			BitFont::Instance->SetBounds(&ltrbBounds);
+			BitFont::Instance->Color = static_cast<WORD>(Drawing::RGB_To_Int(255, 255, 255));
+
+			BitText::Instance->DrawText(
+				BitFont::Instance,
+				pSurface,
+				pText,
+				boxRect.X + boxPadding,
+				boxRect.Y + boxPadding,
+				textWidth,
+				textHeight,
+				0, 0, 0
+			);
+
+			// Restore BitFont state
+			BitFont::Instance->Bounds = oldBounds;
+			BitFont::Instance->Color = oldColor;
+			BitFont::Instance->field_41 = oldField41;
+		}
+	}
 }
 
 void DropshipLoadoutClass::SaveCargo()
