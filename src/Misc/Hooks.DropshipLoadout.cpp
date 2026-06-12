@@ -163,6 +163,14 @@ private:
 	int buyClickSoundIdx { -1 };
 	int sellClickSoundIdx { -1 };
 	int arrowsClickSoundIdx { -1 };
+
+	// Drag & Drop state
+	bool bIsDragging { false };
+	bool bDragPending { false };
+	TechnoTypeClass* pDraggedUnitType { nullptr };
+	int nSourceDropshipIdx { -1 };
+	int nSourceSlotIdx { -1 };
+	Point2D dragStartMousePos { 0, 0 };
 };
 
 DropshipLoadoutClass::DropshipLoadoutClass()
@@ -1106,8 +1114,322 @@ void DropshipLoadoutClass::Run()
 			}
 		}
 
+		if (bDragPending || bIsDragging)
+		{
+			Point2D mousePos = { 0, 0 };
+			if (WWMouseClass::Instance)
+			{
+				mousePos.X = WWMouseClass::Instance->GetX();
+				mousePos.Y = WWMouseClass::Instance->GetY();
+			}
+
+			// 1. Check transition from pending to active drag
+			if (bDragPending)
+			{
+				int dist = std::abs(mousePos.X - dragStartMousePos.X) + std::abs(mousePos.Y - dragStartMousePos.Y);
+				if (dist >= 15)
+				{
+					// Transition to active drag!
+					bIsDragging = true;
+					bDragPending = false;
+
+					// If dragging from a dropship slot, now temporarily remove it and refund it!
+					if (nSourceDropshipIdx != -1)
+					{
+						dropshipBayChosenUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = nullptr;
+						currentMoney += pDraggedUnitType->Cost;
+						if (dropshipBayChosenUnitsCount.count(pDraggedUnitType) > 0)
+						{
+							--dropshipBayChosenUnitsCount[pDraggedUnitType];
+						}
+						VocClass::PlayGlobal(sellClickSoundIdx, 0x2000, 1.0);
+					}
+					repaintAll = true;
+				}
+			}
+
+			// 2. Check if mouse is released
+			if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000))
+			{
+				// Drag finished or clicked!
+				if (bDragPending)
+				{
+					// Quick Click (button released before moving 15 pixels)
+					bDragPending = false;
+
+					if (nSourceDropshipIdx == -1) // Clicked on sidebar
+					{
+						// Normal purchase to first free slot
+						int maxInstances = INT_MAX;
+						for (size_t idx = 0; idx < availableUnits.size(); ++idx)
+						{
+							if (availableUnits[idx] == pDraggedUnitType)
+							{
+								maxInstances = availableUnitsMaximums[idx] < 0 ? INT_MAX : availableUnitsMaximums[idx];
+								break;
+							}
+						}
+						int nInstances = dropshipBayChosenUnitsCount.count(pDraggedUnitType) > 0 ? dropshipBayChosenUnitsCount[pDraggedUnitType] : 0;
+
+						int totalDropshipChosenUnits = 0;
+						for (const auto& pair : dropshipBayChosenUnitsCount)
+						{
+							totalDropshipChosenUnits += pair.second;
+						}
+						bool dropshipsWithFreeSlots = totalDropshipChosenUnits < nDropshipBayTotalSlots;
+
+						if (nInstances < maxInstances
+							&& pDraggedUnitType->Cost <= currentMoney
+							&& dropshipsWithFreeSlots)
+						{
+							bool foundFreeSlot = false;
+							for (int i = 0; i < (int)dropshipBayCameLocations.size() && !foundFreeSlot; i++)
+							{
+								for (int j = 0; j < (int)dropshipBayCameLocations[i].size() && !foundFreeSlot; j++)
+								{
+									if (!dropshipBayChosenUnitsLists[i][j])
+									{
+										dropshipBayChosenUnitsLists[i][j] = pDraggedUnitType;
+										currentMoney -= pDraggedUnitType->Cost;
+										foundFreeSlot = true;
+										lastSelected = pDraggedUnitType;
+										++dropshipBayChosenUnitsCount[pDraggedUnitType];
+										VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+									}
+								}
+							}
+						}
+					}
+					else // Clicked on dropship slot
+					{
+						// Do not sell on quick left-click; just select it.
+						lastSelected = pDraggedUnitType;
+					}
+
+					pDraggedUnitType = nullptr;
+					repaintAll = true;
+				}
+				else if (bIsDragging)
+				{
+					// Drag & Drop drop logic
+					int btn_BasicDropshipCameo_ID = 200;
+					int btn_BasicSidebarCameo_ID = 300;
+					bool droppedOnSlot = (buttonID >= btn_BasicDropshipCameo_ID && buttonID < (btn_BasicDropshipCameo_ID + nDropshipBayTotalSlots));
+					bool droppedOnSidebar = (buttonID >= btn_BasicSidebarCameo_ID && buttonID < (btn_BasicSidebarCameo_ID + nSidebarCameos));
+					bool droppedOnSidebarArea = false;
+					if (nSourceDropshipIdx != -1 && !sidebarCameLocations.empty())
+					{
+						int minX = sidebarCameLocations[0].X;
+						int minY = sidebarCameLocations[0].Y;
+						int maxX = sidebarCameLocations[0].X + sidebarCameLocations[0].Width;
+						int maxY = sidebarCameLocations[0].Y + sidebarCameLocations[0].Height;
+						for (const auto& rect : sidebarCameLocations)
+						{
+							if (rect.X < minX) minX = rect.X;
+							if (rect.Y < minY) minY = rect.Y;
+							if (rect.X + rect.Width > maxX) maxX = rect.X + rect.Width;
+							if (rect.Y + rect.Height > maxY) maxY = rect.Y + rect.Height;
+						}
+						if (upArrowLocation.Y < minY) minY = upArrowLocation.Y;
+						if (downArrowLocation.Y < minY) minY = downArrowLocation.Y;
+						if (upArrowLocation.Y + upArrowLocation.Height > maxY) maxY = upArrowLocation.Y + upArrowLocation.Height;
+						if (downArrowLocation.Y + downArrowLocation.Height > maxY) maxY = downArrowLocation.Y + downArrowLocation.Height;
+
+						int sidebarLeft = minX - 10;
+						int sidebarTop = minY - 10;
+						int sidebarRight = windowRectangle.X + windowRectangle.Width;
+						int sidebarBottom = maxY + 10;
+
+						if (mousePos.X >= sidebarLeft && mousePos.X <= sidebarRight
+							&& mousePos.Y >= sidebarTop && mousePos.Y <= sidebarBottom)
+						{
+							droppedOnSidebarArea = true;
+						}
+					}
+
+					auto ReturnToSource = [&]() {
+						if (nSourceDropshipIdx != -1)
+						{
+							dropshipBayChosenUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = pDraggedUnitType;
+							currentMoney -= pDraggedUnitType->Cost;
+							++dropshipBayChosenUnitsCount[pDraggedUnitType];
+							VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+						}
+					};
+
+					if (droppedOnSlot)
+					{
+						int dropshipIndex = (buttonID - btn_BasicDropshipCameo_ID) / nDropshipBayCameos;
+						int slotIndex = (buttonID - btn_BasicDropshipCameo_ID) - (dropshipIndex * nDropshipBayCameos);
+
+						if (dropshipIndex < (int)dropshipBayChosenUnitsLists.size() && slotIndex < (int)dropshipBayChosenUnitsLists[dropshipIndex].size())
+						{
+							auto pTargetUnit = dropshipBayChosenUnitsLists[dropshipIndex][slotIndex];
+
+							int maxInstances = INT_MAX;
+							for (size_t idx = 0; idx < availableUnits.size(); ++idx)
+							{
+								if (availableUnits[idx] == pDraggedUnitType)
+								{
+									maxInstances = availableUnitsMaximums[idx] < 0 ? INT_MAX : availableUnitsMaximums[idx];
+									break;
+								}
+							}
+							int nInstances = dropshipBayChosenUnitsCount.count(pDraggedUnitType) > 0 ? dropshipBayChosenUnitsCount[pDraggedUnitType] : 0;
+
+							if (pTargetUnit == nullptr)
+							{
+								if (nInstances < maxInstances && pDraggedUnitType->Cost <= currentMoney)
+								{
+									dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
+									currentMoney -= pDraggedUnitType->Cost;
+									++dropshipBayChosenUnitsCount[pDraggedUnitType];
+									lastSelected = pDraggedUnitType;
+									VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+								}
+								else
+								{
+									ReturnToSource();
+								}
+							}
+							else
+							{
+								if (nSourceDropshipIdx != -1)
+								{
+									// Dragged from a dropship slot -> SWAP them!
+									dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
+									dropshipBayChosenUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = pTargetUnit;
+									currentMoney -= pDraggedUnitType->Cost;
+									++dropshipBayChosenUnitsCount[pDraggedUnitType];
+									lastSelected = pDraggedUnitType;
+									VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+								}
+								else
+								{
+									bool hasFreeSlot = false;
+									for (auto const pType : dropshipBayChosenUnitsLists[dropshipIndex])
+									{
+										if (!pType)
+										{
+											hasFreeSlot = true;
+											break;
+										}
+									}
+
+									if (hasFreeSlot)
+									{
+										if (nInstances < maxInstances && pDraggedUnitType->Cost <= currentMoney)
+										{
+											int nullIdx = -1;
+											if (nSourceDropshipIdx == dropshipIndex)
+											{
+												nullIdx = nSourceSlotIdx;
+											}
+											else
+											{
+												for (size_t k = 0; k < dropshipBayChosenUnitsLists[dropshipIndex].size(); ++k)
+												{
+													if (dropshipBayChosenUnitsLists[dropshipIndex][k] == nullptr)
+													{
+														nullIdx = static_cast<int>(k);
+														break;
+													}
+												}
+											}
+											if (nullIdx != -1)
+											{
+												dropshipBayChosenUnitsLists[dropshipIndex].erase(dropshipBayChosenUnitsLists[dropshipIndex].begin() + nullIdx);
+												dropshipBayChosenUnitsLists[dropshipIndex].insert(dropshipBayChosenUnitsLists[dropshipIndex].begin() + slotIndex, pDraggedUnitType);
+											}
+
+											currentMoney -= pDraggedUnitType->Cost;
+											++dropshipBayChosenUnitsCount[pDraggedUnitType];
+											lastSelected = pDraggedUnitType;
+											VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+										}
+										else
+										{
+											// Can't afford shift, try replacement!
+											long netCost = pDraggedUnitType->Cost - pTargetUnit->Cost;
+											bool limitOk = (pDraggedUnitType == pTargetUnit) || (nInstances < maxInstances);
+
+											if (limitOk && netCost <= currentMoney)
+											{
+												currentMoney += pTargetUnit->Cost;
+												if (dropshipBayChosenUnitsCount.count(pTargetUnit) > 0)
+												{
+													--dropshipBayChosenUnitsCount[pTargetUnit];
+												}
+
+												dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
+												currentMoney -= pDraggedUnitType->Cost;
+												++dropshipBayChosenUnitsCount[pDraggedUnitType];
+												lastSelected = pDraggedUnitType;
+												VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+											}
+											else
+											{
+												ReturnToSource();
+											}
+										}
+									}
+									else
+									{
+										long netCost = pDraggedUnitType->Cost - pTargetUnit->Cost;
+										bool limitOk = (pDraggedUnitType == pTargetUnit) || (nInstances < maxInstances);
+
+										if (limitOk && netCost <= currentMoney)
+										{
+											currentMoney += pTargetUnit->Cost;
+											if (dropshipBayChosenUnitsCount.count(pTargetUnit) > 0)
+											{
+												--dropshipBayChosenUnitsCount[pTargetUnit];
+											}
+
+											dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
+											currentMoney -= pDraggedUnitType->Cost;
+											++dropshipBayChosenUnitsCount[pDraggedUnitType];
+											lastSelected = pDraggedUnitType;
+											VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+										}
+										else
+										{
+											ReturnToSource();
+										}
+									}
+								}
+							}
+						}
+						else
+						{
+							ReturnToSource();
+						}
+					}
+					else if ((droppedOnSidebar || droppedOnSidebarArea) && nSourceDropshipIdx != -1)
+					{
+						// Dropped on sidebar -> permanently sold/removed.
+						// We already refunded the money and decremented the count when active drag started.
+						// So we just let it be.
+					}
+					else
+					{
+						ReturnToSource();
+					}
+
+					bIsDragging = false;
+					pDraggedUnitType = nullptr;
+					repaintAll = true;
+				}
+			}
+		}
+
 		HandleInput(command, buttonID);
 		UpdateAnimations();
+
+		if (bIsDragging)
+		{
+			repaintAll = true;
+		}
 
 		if (repaintAll)
 		{
@@ -1128,6 +1450,63 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	int btn_ScrollDown_ID = 101;
 	int btn_BasicDropshipCameo_ID = 200;
 	int btn_BasicSidebarCameo_ID = 300;
+
+	if (bIsDragging || bDragPending)
+	{
+		return;
+	}
+
+	bool pressedLeftClick = command == 1;
+	if (pressedLeftClick)
+	{
+		Point2D mousePos = { 0, 0 };
+		if (WWMouseClass::Instance)
+		{
+			mousePos.X = WWMouseClass::Instance->GetX();
+			mousePos.Y = WWMouseClass::Instance->GetY();
+		}
+
+		if (buttonID >= btn_BasicSidebarCameo_ID && buttonID < (btn_BasicSidebarCameo_ID + nSidebarCameos))
+		{
+			int sidebarIndex = firstBrowsableCameo + (buttonID - btn_BasicSidebarCameo_ID);
+			if (sidebarIndex < (int)availableUnits.size())
+			{
+				auto const pType = availableUnits[sidebarIndex];
+				if (pType)
+				{
+					int maxInstances = availableUnitsMaximums[sidebarIndex] < 0 ? INT_MAX : availableUnitsMaximums[sidebarIndex];
+					int nInstances = dropshipBayChosenUnitsCount.count(pType) > 0 ? dropshipBayChosenUnitsCount[pType] : 0;
+					if (nInstances < maxInstances)
+					{
+						bDragPending = true;
+						pDraggedUnitType = pType;
+						nSourceDropshipIdx = -1;
+						nSourceSlotIdx = -1;
+						dragStartMousePos = mousePos;
+						return;
+					}
+				}
+			}
+		}
+		else if (buttonID >= btn_BasicDropshipCameo_ID && buttonID < (btn_BasicDropshipCameo_ID + nDropshipBayTotalSlots))
+		{
+			int dropshipIndex = (buttonID - btn_BasicDropshipCameo_ID) / nDropshipBayCameos;
+			int slotIndex = (buttonID - btn_BasicDropshipCameo_ID) - (dropshipIndex * nDropshipBayCameos);
+			if (dropshipIndex < (int)dropshipBayChosenUnitsLists.size() && slotIndex < (int)dropshipBayChosenUnitsLists[dropshipIndex].size())
+			{
+				auto pType = dropshipBayChosenUnitsLists[dropshipIndex][slotIndex];
+				if (pType)
+				{
+					bDragPending = true;
+					pDraggedUnitType = pType;
+					nSourceDropshipIdx = dropshipIndex;
+					nSourceSlotIdx = slotIndex;
+					dragStartMousePos = mousePos;
+					return;
+				}
+			}
+		}
+	}
 
 	TechnoTypeClass* pPrevHovered = pHoveredUnitType;
 	pHoveredUnitType = nullptr;
@@ -1155,7 +1534,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 		repaintAll = true;
 	}
 
-	bool pressedLeftClick = command == 1;
+	pressedLeftClick = command == 1;
 	bool pressedRightClick = command == 2;
 
 	bool isAnySidebarCameo = buttonID >= btn_BasicSidebarCameo_ID && buttonID < (btn_BasicSidebarCameo_ID + nSidebarCameos);
@@ -1165,7 +1544,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 
 	bool isAnyDropshipCameo = buttonID >= btn_BasicDropshipCameo_ID && buttonID < (btn_BasicDropshipCameo_ID + nDropshipBayTotalSlots);
 	bool isHoveringOverDropshipCameos = command == 0 && isAnyDropshipCameo;
-	bool pressedAnyDropshipCameo = pressedLeftClick && isAnyDropshipCameo;
+	bool pressedAnyDropshipCameo = pressedRightClick && isAnyDropshipCameo;
 	int mouseOverDropshipCameoID = isHoveringOverDropshipCameos ? buttonID : -1;
 
 	bool isUpArrow = buttonID == btn_ScrollUp_ID;
@@ -1536,6 +1915,53 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		dropshipLoadout_Palette
 	);
 
+	bool isHoveringSidebar = false;
+	if (WWMouseClass::Instance)
+	{
+		RectangleStruct mouseRect = WWMouseClass::Instance->Rect2;
+		for (const auto& rect : sidebarCameLocations)
+		{
+			if (mouseRect.X >= rect.X && mouseRect.X <= (rect.X + rect.Width)
+				&& mouseRect.Y >= rect.Y && mouseRect.Y <= (rect.Y + rect.Height))
+			{
+				isHoveringSidebar = true;
+				break;
+			}
+		}
+	}
+
+	bool isMouseOverSidebarArea = false;
+	if (WWMouseClass::Instance && !sidebarCameLocations.empty())
+	{
+		int minX = sidebarCameLocations[0].X;
+		int minY = sidebarCameLocations[0].Y;
+		int maxX = sidebarCameLocations[0].X + sidebarCameLocations[0].Width;
+		int maxY = sidebarCameLocations[0].Y + sidebarCameLocations[0].Height;
+		for (const auto& rect : sidebarCameLocations)
+		{
+			if (rect.X < minX) minX = rect.X;
+			if (rect.Y < minY) minY = rect.Y;
+			if (rect.X + rect.Width > maxX) maxX = rect.X + rect.Width;
+			if (rect.Y + rect.Height > maxY) maxY = rect.Y + rect.Height;
+		}
+		if (upArrowLocation.Y < minY) minY = upArrowLocation.Y;
+		if (downArrowLocation.Y < minY) minY = downArrowLocation.Y;
+		if (upArrowLocation.Y + upArrowLocation.Height > maxY) maxY = upArrowLocation.Y + upArrowLocation.Height;
+		if (downArrowLocation.Y + downArrowLocation.Height > maxY) maxY = downArrowLocation.Y + downArrowLocation.Height;
+
+		int sidebarLeft = minX - 10;
+		int sidebarTop = minY - 10;
+		int sidebarRight = windowRectangle.X + windowRectangle.Width;
+		int sidebarBottom = maxY + 10;
+
+		RectangleStruct mouseRect = WWMouseClass::Instance->Rect2;
+		if (mouseRect.X >= sidebarLeft && mouseRect.X <= sidebarRight
+			&& mouseRect.Y >= sidebarTop && mouseRect.Y <= sidebarBottom)
+		{
+			isMouseOverSidebarArea = true;
+		}
+	}
+
 	for (int i = 0; i < nSidebarCameos; i++)
 	{
 		int newIndex = firstBrowsableCameo + i;
@@ -1567,7 +1993,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			bf = BlitterFlags::bf_400 | BlitterFlags::Darken;
 
 		bool isHovering = false;
-		if (WWMouseClass::Instance)
+		if (!bIsDragging && !bDragPending && !pDraggedUnitType && WWMouseClass::Instance)
 		{
 			RectangleStruct mouseRect = WWMouseClass::Instance->Rect2;
 			isHovering = mouseRect.X >= sidebarCameLocations[i].X
@@ -1576,27 +2002,59 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 				&& mouseRect.Y <= (sidebarCameLocations[i].Y + sidebarCameLocations[i].Height);
 		}
 
-		bool validSidebarCameoPurchase = false;
-		if (isHovering && freeDropshipSlots)
-		{
-			if (nInstances < maxInstances && pType->Cost <= currentMoney)
-				validSidebarCameoPurchase = true;
-		}
+		ColorStruct foreColor;
+		bool showHighlight = false;
 
-		if (isHovering && validSidebarCameoPurchase)
+		if (isHovering)
 		{
-			auto foreColor = ColorStruct { 0, 255, 0 };
-			RectangleStruct newRectangle = sidebarCameLocations[i];
-			newRectangle.X -= 2;
-			newRectangle.Width += 4;
-			pSurface->FillRectTrans(&newRectangle, &foreColor, 255);
+			showHighlight = true;
+			bool limitReached = (nInstances >= maxInstances);
+			bool canBuyDirectly = (!limitReached && pType->Cost <= currentMoney && freeDropshipSlots);
+			bool canReplaceAny = false;
+			if (!limitReached)
+			{
+				for (auto const& dropship : dropshipBayChosenUnitsLists)
+				{
+					for (auto const pTarget : dropship)
+					{
+						if (pTarget && pType != pTarget)
+						{
+							long netCost = pType->Cost - pTarget->Cost;
+							if (netCost <= currentMoney)
+							{
+								canReplaceAny = true;
+								break;
+							}
+						}
+					}
+					if (canReplaceAny) break;
+				}
+			}
+
+			if (canBuyDirectly)
+			{
+				foreColor = ColorStruct { 0, 255, 0 }; // Green
+			}
+			else if (canReplaceAny)
+			{
+				foreColor = ColorStruct { 0, 0, 255 }; // Blue
+			}
+			else
+			{
+				foreColor = ColorStruct { 255, 0, 0 }; // Red
+			}
 		}
 		else if (pType == lastSelected)
 		{
+			showHighlight = true;
+			foreColor = ColorStruct { 255, 239, 99 }; // Yellow
+		}
+
+		if (showHighlight)
+		{
 			RectangleStruct newRectangle = sidebarCameLocations[i];
 			newRectangle.X -= 2;
 			newRectangle.Width += 4;
-			auto foreColor = ColorStruct { 255, 239, 99 };
 			pSurface->FillRectTrans(&newRectangle, &foreColor, 255);
 		}
 
@@ -1657,8 +2115,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			}
 
 			auto const pType = dropshipBayChosenUnitsLists[i][j];
-			if (!pType)
-				continue;
 
 			bool isHovering = false;
 			if (WWMouseClass::Instance)
@@ -1670,14 +2126,115 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 					&& mouseRect.Y <= (dropshipBayCameLocations[i][j].Y + dropshipBayCameLocations[i][j].Height);
 			}
 
+			ColorStruct foreColor;
+			bool showHighlight = false;
+
 			if (isHovering)
+			{
+				showHighlight = true;
+				foreColor = ColorStruct { 255, 0, 0 };
+				if (bIsDragging)
+				{
+					if (!pType)
+					{
+						if (pDraggedUnitType->Cost <= currentMoney)
+							foreColor = ColorStruct { 0, 0, 255 }; // Blue (empty slot valid drop)
+						else
+							showHighlight = false; // Cannot afford: no highlight
+					}
+					else
+					{
+						if (nSourceDropshipIdx != -1)
+						{
+							foreColor = ColorStruct { 0, 0, 255 }; // Blue (swap)
+						}
+						else
+						{
+							bool targetDropshipHasFreeSlot = false;
+							for (auto const pUnit : dropshipBayChosenUnitsLists[i])
+							{
+								if (!pUnit)
+								{
+									targetDropshipHasFreeSlot = true;
+									break;
+								}
+							}
+
+							// Can we afford a shift?
+							bool canAffordShift = pDraggedUnitType->Cost <= currentMoney;
+
+							// Can we afford a replacement?
+							long netCost = pDraggedUnitType->Cost - pType->Cost;
+							bool canAffordReplacement = netCost <= currentMoney;
+
+							if (targetDropshipHasFreeSlot && canAffordShift)
+								foreColor = ColorStruct { 0, 0, 255 }; // Blue (shift)
+							else if (canAffordReplacement && pDraggedUnitType != pType)
+								foreColor = ColorStruct { 255, 0, 0 }; // Red (overwrite/replace)
+							else
+								showHighlight = false; // Cannot afford either or redundant: no highlight
+						}
+					}
+				}
+				else
+				{
+					if (pType)
+						foreColor = ColorStruct { 255, 0, 0 }; // Red (sellable hover)
+					else
+						showHighlight = false; // Don't highlight empty slot if not dragging
+				}
+			}
+			else if (!bIsDragging && pType && isHoveringSidebar && pHoveredUnitType)
+			{
+				// If hovering a sidebar cameo, see if this slot can be replaced by it
+				int maxInstances = INT_MAX;
+				for (size_t idx = 0; idx < availableUnits.size(); ++idx)
+				{
+					if (availableUnits[idx] == pHoveredUnitType)
+					{
+						maxInstances = availableUnitsMaximums[idx] < 0 ? INT_MAX : availableUnitsMaximums[idx];
+						break;
+					}
+				}
+				int nInstances = dropshipBayChosenUnitsCount.count(pHoveredUnitType) > 0 ? dropshipBayChosenUnitsCount[pHoveredUnitType] : 0;
+				bool limitReached = (nInstances >= maxInstances);
+				bool canBuyDirectly = (!limitReached && pHoveredUnitType->Cost <= currentMoney && freeDropshipSlots);
+
+				if (pHoveredUnitType == pType)
+				{
+					// Hovering the same unit type: highlight in Red if limit is reached (to show where they are)
+					if (limitReached)
+					{
+						showHighlight = true;
+						foreColor = ColorStruct { 255, 0, 0 }; // Red
+					}
+				}
+				else
+				{
+					// Only show replacement highlights on dropship cargo slots if the hovered unit CANNOT be bought normally
+					if (!canBuyDirectly)
+					{
+						bool limitOk = !limitReached;
+						long netCost = pHoveredUnitType->Cost - pType->Cost;
+						if (limitOk && netCost <= currentMoney)
+						{
+							showHighlight = true;
+							foreColor = ColorStruct { 0, 0, 255 }; // Blue (can be replaced)
+						}
+					}
+				}
+			}
+
+			if (showHighlight)
 			{
 				RectangleStruct newRectangle = dropshipBayCameLocations[i][j];
 				newRectangle.X -= 2;
 				newRectangle.Width += 4;
-				auto foreColor = ColorStruct { 255, 0, 0 };
 				pSurface->FillRectTrans(&newRectangle, &foreColor, 255);
 			}
+
+			if (!pType)
+				continue;
 
 			auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
 			if (!pTypeExt)
@@ -1813,11 +2370,60 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 	};
 	pSurface->DrawTextA(buffer, &windowRectangle, &pressSpaceLabel, foreColor, 0, style);
 
+	// Draw Dragged Cameo
+	if (bIsDragging && pDraggedUnitType)
+	{
+		auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pDraggedUnitType);
+		if (pTypeExt)
+		{
+			auto const pPCXSurface = pTypeExt->CameoPCX.GetSurface();
+			auto pFileSHP = pDraggedUnitType->Cameo;
+			auto pPalette = FileSystem::CAMEO_PAL;
+
+			Point2D mousePos = { 0, 0 };
+			if (WWMouseClass::Instance)
+			{
+				mousePos.X = WWMouseClass::Instance->GetX();
+				mousePos.Y = WWMouseClass::Instance->GetY();
+			}
+
+			// Center the cameo on the mouse cursor
+			const int cameoWidth = 60, cameoHeight = 48;
+			RectangleStruct dragLoc = { mousePos.X - cameoWidth / 2, mousePos.Y - cameoHeight / 2, cameoWidth, cameoHeight };
+
+			// Draw Highlight Border first (Blue by default, Red if dragged from dropship and hovering sidebar)
+			RectangleStruct newRectangle = dragLoc;
+			newRectangle.X -= 2;
+			newRectangle.Width += 4;
+			ColorStruct dragBorderColor = ColorStruct { 0, 0, 255 }; // Blue
+			if (nSourceDropshipIdx != -1 && isMouseOverSidebarArea)
+			{
+				dragBorderColor = ColorStruct { 255, 0, 0 }; // Red (sell indicator)
+			}
+			pSurface->FillRectTrans(&newRectangle, &dragBorderColor, 255);
+
+			// Draw the cameo with half transparency to make it look like a drag shadow
+			GeneralUtils::DrawImage(
+				pSurface,
+				dragLoc,
+				pPCXSurface,
+				pFileSHP,
+				pPalette,
+				0,
+				-2,
+				BlitterFlags::bf_400 | BlitterFlags::Darken
+			);
+		}
+	}
+
 	this->DrawTooltip(pSurface);
 }
 
 void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 {
+	if (bIsDragging)
+		return;
+
 	if (!pHoveredUnitType)
 		return;
 
