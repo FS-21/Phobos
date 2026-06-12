@@ -24,6 +24,57 @@
 static bool bDropshipLoadoutActive = false;
 static int pendingScrolls = 0;
 
+static void FillRectTranslucent(DSurface* pSurface, const RectangleStruct& rect, const ColorStruct& color, int opacity)
+{
+	if (!pSurface || opacity <= 0)
+		return;
+
+	if (opacity >= 255)
+	{
+		pSurface->FillRectTrans(const_cast<RectangleStruct*>(&rect), const_cast<ColorStruct*>(&color), opacity);
+		return;
+	}
+
+	if (pSurface->GetBytesPerPixel() < 2)
+	{
+		pSurface->FillRectTrans(const_cast<RectangleStruct*>(&rect), const_cast<ColorStruct*>(&color), opacity);
+		return;
+	}
+
+	RectangleStruct bound = Drawing::Intersect(rect, pSurface->GetRect());
+	if (bound.Width <= 0 || bound.Height <= 0)
+		return;
+
+	const auto line_length = pSurface->GetPitch() / sizeof(WORD);
+	auto ptr = (WORD*)pSurface->Lock(bound.X, bound.Y);
+	if (!ptr)
+		return;
+
+	int alpha = opacity;
+	int invAlpha = 255 - alpha;
+
+	auto p = ptr;
+	for (int y = 0; y < bound.Height; ++y)
+	{
+		auto q = p;
+		for (int x = 0; x < bound.Width; ++x)
+		{
+			BYTE r, g, b;
+			Drawing::Int_To_RGB(*q, r, g, b);
+
+			int newR = (color.R * alpha + r * invAlpha) / 255;
+			int newG = (color.G * alpha + g * invAlpha) / 255;
+			int newB = (color.B * alpha + b * invAlpha) / 255;
+
+			*q = (WORD)Drawing::RGB_To_Int(newR, newG, newB);
+			++q;
+		}
+		p += line_length;
+	}
+
+	pSurface->Unlock();
+}
+
 bool IsDropshipLoadoutActive()
 {
 	return bDropshipLoadoutActive;
@@ -79,6 +130,8 @@ private:
 	void Render(DSurface* pSurface);
 	void DrawTooltip(DSurface* pSurface);
 	void SaveCargo();
+	int GetCarrierSizeLimit(int carrierIdx);
+	bool CanCarrierHoldUnit(int carrierIdx, TechnoTypeClass* pUnitType);
 
 	// Extensions
 	HouseTypeExt::ExtData* pHouseTypeExt { nullptr };
@@ -163,6 +216,8 @@ private:
 	int buyClickSoundIdx { -1 };
 	int sellClickSoundIdx { -1 };
 	int arrowsClickSoundIdx { -1 };
+	int startingDragDropSoundIdx { -1 };
+	int endingDragDropSoundIdx { -1 };
 
 	// Drag & Drop state
 	bool bIsDragging { false };
@@ -494,6 +549,18 @@ void DropshipLoadoutClass::LoadAssets()
 		arrowsClickSoundIdx = pHouseTypeExt->DropshipLoadout_ArrowsClickSound;
 	else if (pGlobal && pGlobal->DropshipLoadout_ArrowsClickSound.isset())
 		arrowsClickSoundIdx = pGlobal->DropshipLoadout_ArrowsClickSound;
+
+	startingDragDropSoundIdx = -1;
+	if (pHouseTypeExt->DropshipLoadout_StartingDragDropSound.isset())
+		startingDragDropSoundIdx = pHouseTypeExt->DropshipLoadout_StartingDragDropSound;
+	else if (pGlobal && pGlobal->DropshipLoadout_StartingDragDropSound.isset())
+		startingDragDropSoundIdx = pGlobal->DropshipLoadout_StartingDragDropSound;
+
+	endingDragDropSoundIdx = -1;
+	if (pHouseTypeExt->DropshipLoadout_EndingDragDropSound.isset())
+		endingDragDropSoundIdx = pHouseTypeExt->DropshipLoadout_EndingDragDropSound;
+	else if (pGlobal && pGlobal->DropshipLoadout_EndingDragDropSound.isset())
+		endingDragDropSoundIdx = pGlobal->DropshipLoadout_EndingDragDropSound;
 
 
 	long dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money.isset() ? pHouseTypeExt->DropshipLoadout_Money : (pGlobal ? pGlobal->DropshipLoadout_Money : -1);
@@ -1142,7 +1209,10 @@ void DropshipLoadoutClass::Run()
 						{
 							--dropshipBayChosenUnitsCount[pDraggedUnitType];
 						}
-						VocClass::PlayGlobal(sellClickSoundIdx, 0x2000, 1.0);
+					}
+					if (startingDragDropSoundIdx >= 0)
+					{
+						VocClass::PlayGlobal(startingDragDropSoundIdx, 0x2000, 1.0);
 					}
 					repaintAll = true;
 				}
@@ -1171,20 +1241,32 @@ void DropshipLoadoutClass::Run()
 						}
 						int nInstances = dropshipBayChosenUnitsCount.count(pDraggedUnitType) > 0 ? dropshipBayChosenUnitsCount[pDraggedUnitType] : 0;
 
-						int totalDropshipChosenUnits = 0;
-						for (const auto& pair : dropshipBayChosenUnitsCount)
+						bool hasCompatibleFreeSlot = false;
+						for (int i_c = 0; i_c < (int)dropshipBayChosenUnitsLists.size() && !hasCompatibleFreeSlot; i_c++)
 						{
-							totalDropshipChosenUnits += pair.second;
+							if (CanCarrierHoldUnit(i_c, pDraggedUnitType))
+							{
+								for (int j_c = 0; j_c < (int)dropshipBayChosenUnitsLists[i_c].size(); j_c++)
+								{
+									if (!dropshipBayChosenUnitsLists[i_c][j_c])
+									{
+										hasCompatibleFreeSlot = true;
+										break;
+									}
+								}
+							}
 						}
-						bool dropshipsWithFreeSlots = totalDropshipChosenUnits < nDropshipBayTotalSlots;
 
 						if (nInstances < maxInstances
 							&& pDraggedUnitType->Cost <= currentMoney
-							&& dropshipsWithFreeSlots)
+							&& hasCompatibleFreeSlot)
 						{
 							bool foundFreeSlot = false;
 							for (int i = 0; i < (int)dropshipBayCameLocations.size() && !foundFreeSlot; i++)
 							{
+								if (!CanCarrierHoldUnit(i, pDraggedUnitType))
+									continue;
+
 								for (int j = 0; j < (int)dropshipBayCameLocations[i].size() && !foundFreeSlot; j++)
 								{
 									if (!dropshipBayChosenUnitsLists[i][j])
@@ -1264,7 +1346,13 @@ void DropshipLoadoutClass::Run()
 
 						if (dropshipIndex < (int)dropshipBayChosenUnitsLists.size() && slotIndex < (int)dropshipBayChosenUnitsLists[dropshipIndex].size())
 						{
-							auto pTargetUnit = dropshipBayChosenUnitsLists[dropshipIndex][slotIndex];
+							if (!CanCarrierHoldUnit(dropshipIndex, pDraggedUnitType))
+							{
+								ReturnToSource();
+							}
+							else
+							{
+								auto pTargetUnit = dropshipBayChosenUnitsLists[dropshipIndex][slotIndex];
 
 							int maxInstances = INT_MAX;
 							for (size_t idx = 0; idx < availableUnits.size(); ++idx)
@@ -1285,7 +1373,8 @@ void DropshipLoadoutClass::Run()
 									currentMoney -= pDraggedUnitType->Cost;
 									++dropshipBayChosenUnitsCount[pDraggedUnitType];
 									lastSelected = pDraggedUnitType;
-									VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+									if (endingDragDropSoundIdx >= 0)
+										VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
 								}
 								else
 								{
@@ -1296,13 +1385,21 @@ void DropshipLoadoutClass::Run()
 							{
 								if (nSourceDropshipIdx != -1)
 								{
-									// Dragged from a dropship slot -> SWAP them!
-									dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
-									dropshipBayChosenUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = pTargetUnit;
-									currentMoney -= pDraggedUnitType->Cost;
-									++dropshipBayChosenUnitsCount[pDraggedUnitType];
-									lastSelected = pDraggedUnitType;
-									VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+									if (pDraggedUnitType == pTargetUnit)
+									{
+										ReturnToSource();
+									}
+									else
+									{
+										// Dragged from a dropship slot -> SWAP them!
+										dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
+										dropshipBayChosenUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = pTargetUnit;
+										currentMoney -= pDraggedUnitType->Cost;
+										++dropshipBayChosenUnitsCount[pDraggedUnitType];
+										lastSelected = pDraggedUnitType;
+										if (endingDragDropSoundIdx >= 0)
+											VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
+									}
 								}
 								else
 								{
@@ -1345,7 +1442,8 @@ void DropshipLoadoutClass::Run()
 											currentMoney -= pDraggedUnitType->Cost;
 											++dropshipBayChosenUnitsCount[pDraggedUnitType];
 											lastSelected = pDraggedUnitType;
-											VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+											if (endingDragDropSoundIdx >= 0)
+												VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
 										}
 										else
 										{
@@ -1365,7 +1463,8 @@ void DropshipLoadoutClass::Run()
 												currentMoney -= pDraggedUnitType->Cost;
 												++dropshipBayChosenUnitsCount[pDraggedUnitType];
 												lastSelected = pDraggedUnitType;
-												VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+												if (endingDragDropSoundIdx >= 0)
+													VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
 											}
 											else
 											{
@@ -1390,7 +1489,8 @@ void DropshipLoadoutClass::Run()
 											currentMoney -= pDraggedUnitType->Cost;
 											++dropshipBayChosenUnitsCount[pDraggedUnitType];
 											lastSelected = pDraggedUnitType;
-											VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+											if (endingDragDropSoundIdx >= 0)
+												VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
 										}
 										else
 										{
@@ -1398,6 +1498,7 @@ void DropshipLoadoutClass::Run()
 										}
 									}
 								}
+							}
 							}
 						}
 						else
@@ -1410,6 +1511,7 @@ void DropshipLoadoutClass::Run()
 						// Dropped on sidebar -> permanently sold/removed.
 						// We already refunded the money and decremented the count when active drag started.
 						// So we just let it be.
+						VocClass::PlayGlobal(sellClickSoundIdx, 0x2000, 1.0);
 					}
 					else
 					{
@@ -1610,9 +1712,25 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 				int maxInstances = availableUnitsMaximums[sidebarIndex] < 0 ? INT_MAX : availableUnitsMaximums[sidebarIndex];
 				int nInstances = dropshipBayChosenUnitsCount.count(pType) > 0 ? dropshipBayChosenUnitsCount[pType] : 0;
 
+				bool hasCompatibleFreeSlot = false;
+				for (int i_c = 0; i_c < (int)dropshipBayChosenUnitsLists.size() && !hasCompatibleFreeSlot; i_c++)
+				{
+					if (CanCarrierHoldUnit(i_c, pType))
+					{
+						for (int j_c = 0; j_c < (int)dropshipBayChosenUnitsLists[i_c].size(); j_c++)
+						{
+							if (!dropshipBayChosenUnitsLists[i_c][j_c])
+							{
+								hasCompatibleFreeSlot = true;
+								break;
+							}
+						}
+					}
+				}
+
 				if (nInstances < maxInstances
 					&& pType->Cost <= currentMoney
-					&& freeDropshipSlots)
+					&& hasCompatibleFreeSlot)
 				{
 					validSidebarCameoPurchase = true;
 				}
@@ -1720,7 +1838,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 							}
 
 							auto const pDropshipSlotType = dropshipBayChosenUnitsLists[i][j];
-							if (pDropshipSlotType)
+							if (pDropshipSlotType || !CanCarrierHoldUnit(i, pType))
 								continue;
 
 							dropshipBayChosenUnitsLists[i][j] = pType;
@@ -1980,16 +2098,24 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		int maxInstances = availableUnitsMaximums[newIndex] < 0 ? INT_MAX : availableUnitsMaximums[newIndex];
 		int nInstances = dropshipBayChosenUnitsCount.count(pType) > 0 ? dropshipBayChosenUnitsCount[pType] : 0;
 
-		int totalDropshipChosenUnits = 0;
-		for (const auto& pair : dropshipBayChosenUnitsCount)
+		bool hasCompatibleFreeSlot = false;
+		for (int i_c = 0; i_c < (int)dropshipBayChosenUnitsLists.size() && !hasCompatibleFreeSlot; i_c++)
 		{
-			totalDropshipChosenUnits += pair.second;
+			if (CanCarrierHoldUnit(i_c, pType))
+			{
+				for (int j_c = 0; j_c < (int)dropshipBayChosenUnitsLists[i_c].size(); j_c++)
+				{
+					if (!dropshipBayChosenUnitsLists[i_c][j_c])
+					{
+						hasCompatibleFreeSlot = true;
+						break;
+					}
+				}
+			}
 		}
 
-		bool dropshipsWithFreeSlots = totalDropshipChosenUnits < nDropshipBayTotalSlots;
-
 		BlitterFlags bf = BlitterFlags::None;
-		if (nInstances >= maxInstances || !dropshipsWithFreeSlots)
+		if (nInstances >= maxInstances || !hasCompatibleFreeSlot)
 			bf = BlitterFlags::bf_400 | BlitterFlags::Darken;
 
 		bool isHovering = false;
@@ -2009,7 +2135,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		{
 			showHighlight = true;
 			bool limitReached = (nInstances >= maxInstances);
-			bool canBuyDirectly = (!limitReached && pType->Cost <= currentMoney && freeDropshipSlots);
+			bool canBuyDirectly = (!limitReached && pType->Cost <= currentMoney && hasCompatibleFreeSlot);
 			bool canReplaceAny = false;
 			if (!limitReached)
 			{
@@ -2135,7 +2261,11 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 				foreColor = ColorStruct { 255, 0, 0 };
 				if (bIsDragging)
 				{
-					if (!pType)
+					if (!CanCarrierHoldUnit(i, pDraggedUnitType))
+					{
+						foreColor = ColorStruct { 170, 0, 255 }; // Violet (Too heavy)
+					}
+					else if (!pType)
 					{
 						if (pDraggedUnitType->Cost <= currentMoney)
 							foreColor = ColorStruct { 0, 0, 255 }; // Blue (empty slot valid drop)
@@ -2146,7 +2276,14 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 					{
 						if (nSourceDropshipIdx != -1)
 						{
-							foreColor = ColorStruct { 0, 0, 255 }; // Blue (swap)
+							if (pDraggedUnitType == pType)
+							{
+								showHighlight = false;
+							}
+							else
+							{
+								foreColor = ColorStruct { 0, 0, 255 }; // Blue (swap)
+							}
 						}
 						else
 						{
@@ -2184,6 +2321,11 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 						showHighlight = false; // Don't highlight empty slot if not dragging
 				}
 			}
+			else if (!bIsDragging && isHoveringSidebar && pHoveredUnitType && !CanCarrierHoldUnit(i, pHoveredUnitType))
+			{
+				showHighlight = true;
+				foreColor = ColorStruct { 170, 0, 255 }; // Violet (Too heavy)
+			}
 			else if (!bIsDragging && pType && isHoveringSidebar && pHoveredUnitType)
 			{
 				// If hovering a sidebar cameo, see if this slot can be replaced by it
@@ -2198,7 +2340,22 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 				}
 				int nInstances = dropshipBayChosenUnitsCount.count(pHoveredUnitType) > 0 ? dropshipBayChosenUnitsCount[pHoveredUnitType] : 0;
 				bool limitReached = (nInstances >= maxInstances);
-				bool canBuyDirectly = (!limitReached && pHoveredUnitType->Cost <= currentMoney && freeDropshipSlots);
+				bool hasCompatibleFreeSlot = false;
+				for (int i_c = 0; i_c < (int)dropshipBayChosenUnitsLists.size() && !hasCompatibleFreeSlot; i_c++)
+				{
+					if (CanCarrierHoldUnit(i_c, pHoveredUnitType))
+					{
+						for (int j_c = 0; j_c < (int)dropshipBayChosenUnitsLists[i_c].size(); j_c++)
+						{
+							if (!dropshipBayChosenUnitsLists[i_c][j_c])
+							{
+								hasCompatibleFreeSlot = true;
+								break;
+							}
+						}
+					}
+				}
+				bool canBuyDirectly = (!limitReached && pHoveredUnitType->Cost <= currentMoney && hasCompatibleFreeSlot);
 
 				if (pHoveredUnitType == pType)
 				{
@@ -2230,7 +2387,8 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 				RectangleStruct newRectangle = dropshipBayCameLocations[i][j];
 				newRectangle.X -= 2;
 				newRectangle.Width += 4;
-				pSurface->FillRectTrans(&newRectangle, &foreColor, 255);
+				int opacity = pType ? 255 : 76;
+				FillRectTranslucent(pSurface, newRectangle, foreColor, opacity);
 			}
 
 			if (!pType)
@@ -2677,6 +2835,78 @@ void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 	BitFont::Instance->Bounds = oldBounds;
 	BitFont::Instance->Color = oldColor;
 	BitFont::Instance->field_41 = oldField41;
+}
+
+int DropshipLoadoutClass::GetCarrierSizeLimit(int carrierIdx)
+{
+	if (carrierIdx < 0 || carrierIdx >= nStartingDropships)
+	{
+		return -1;
+	}
+
+	std::vector<int> sizeLimits;
+	if (pHouseTypeExt && pHouseTypeExt->DropshipLoadout_Carriers_SizeLimit.size() > 0)
+	{
+		for (int limit : pHouseTypeExt->DropshipLoadout_Carriers_SizeLimit)
+		{
+			sizeLimits.push_back(limit);
+		}
+	}
+	else if (ScenarioExt::Global())
+	{
+		for (int limit : ScenarioExt::Global()->DropshipLoadout_Carriers_SizeLimit)
+		{
+			sizeLimits.push_back(limit);
+		}
+	}
+
+	int configuredLimit = -1;
+	if (carrierIdx < (int)sizeLimits.size())
+	{
+		configuredLimit = sizeLimits[carrierIdx];
+	}
+
+	if (configuredLimit == 0)
+	{
+		std::vector<TechnoTypeClass*> carriers;
+		if (pHouseTypeExt && pHouseTypeExt->DropshipLoadout_Carriers.size() > 0)
+		{
+			for (auto carrier : pHouseTypeExt->DropshipLoadout_Carriers)
+			{
+				carriers.push_back(carrier);
+			}
+		}
+		else if (ScenarioExt::Global())
+		{
+			for (auto carrier : ScenarioExt::Global()->DropshipLoadout_Carriers)
+			{
+				carriers.push_back(carrier);
+			}
+		}
+
+		if (carrierIdx < (int)carriers.size() && carriers[carrierIdx])
+		{
+			return static_cast<int>(carriers[carrierIdx]->SizeLimit);
+		}
+	}
+
+	return configuredLimit;
+}
+
+bool DropshipLoadoutClass::CanCarrierHoldUnit(int carrierIdx, TechnoTypeClass* pUnitType)
+{
+	if (!pUnitType)
+	{
+		return true;
+	}
+
+	int limit = GetCarrierSizeLimit(carrierIdx);
+	if (limit == -1)
+	{
+		return true;
+	}
+
+	return static_cast<int>(pUnitType->Size) <= limit;
 }
 
 void DropshipLoadoutClass::SaveCargo()

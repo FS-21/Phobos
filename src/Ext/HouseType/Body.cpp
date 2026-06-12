@@ -34,6 +34,7 @@ void HouseTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->DropshipLoadout_Money.Read(exINI, pSection, "DropshipLoadout.Money");
 	this->DropshipLoadout_StartEVA.Read(exINI, pSection, "DropshipLoadout.StartEVA");
 	this->DropshipLoadout_Carriers.Read(exINI, pSection, "DropshipLoadout.Carriers");
+	this->DropshipLoadout_Carriers_SizeLimit.Read(exINI, pSection, "DropshipLoadout.Carriers.SizeLimit");
 
 	int nStartingDropships = this->DropshipLoadout_StartingDropships.isset() ? this->DropshipLoadout_StartingDropships : ScenarioClass::Instance->StartingDropships;
 
@@ -133,6 +134,8 @@ void HouseTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->DropshipLoadout_BuyClickSound.Read(exINI, pSection, "DropshipLoadout.BuyClickSound");
 	this->DropshipLoadout_SellClickSound.Read(exINI, pSection, "DropshipLoadout.SellClickSound");
 	this->DropshipLoadout_ArrowsClickSound.Read(exINI, pSection, "DropshipLoadout.ArrowsClickSound");
+	this->DropshipLoadout_StartingDragDropSound.Read(exINI, pSection, "DropshipLoadout.StartingDragDropSound");
+	this->DropshipLoadout_EndingDragDropSound.Read(exINI, pSection, "DropshipLoadout.EndingDragDropSound");
 
 	this->BattlePoints.Read(exINI, pSection, "BattlePoints");
 	this->BattlePoints_CanUseStandardPoints.Read(exINI, pSection, "BattlePoints.CanUseStandardPoints");
@@ -161,6 +164,7 @@ void HouseTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_Money)
 		.Process(this->DropshipLoadout_StartEVA)
 		.Process(this->DropshipLoadout_Carriers)
+		.Process(this->DropshipLoadout_Carriers_SizeLimit)
 		.Process(this->DropshipLoadout_AddUnusedMoneyToPlayer)
 		.Process(this->DropshipLoadout_BackgroundPCX)
 		.Process(this->DropshipLoadout_UpArrowPCX)
@@ -181,6 +185,8 @@ void HouseTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_BuyClickSound)
 		.Process(this->DropshipLoadout_SellClickSound)
 		.Process(this->DropshipLoadout_ArrowsClickSound)
+		.Process(this->DropshipLoadout_StartingDragDropSound)
+		.Process(this->DropshipLoadout_EndingDragDropSound)
 		.Process(this->BattlePoints)
 		.Process(this->BattlePoints_CanUseStandardPoints)
 		.Process(this->NewTeamsSelector_MergeUnclassifiedCategoryWith)

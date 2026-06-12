@@ -249,6 +249,18 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 			Debug::Log("[Developer warning] DropshipLoadout.Carriers (Elements: %d): Error parsing [%s] -> Skipped\n", this->DropshipLoadout_Carriers.size(), cur);
 	}
 
+	pINI->ReadString(GameStrings::Basic, "DropshipLoadout.Carriers.SizeLimit", "", Phobos::readBuffer);
+
+	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+	{
+		int limit;
+
+		if (Parser<int>::TryParse(cur, &limit))
+			this->DropshipLoadout_Carriers_SizeLimit.emplace_back(limit);
+		else
+			Debug::Log("[Developer warning] DropshipLoadout.Carriers.SizeLimit (Elements: %d): Error parsing [%s] -> Skipped\n", this->DropshipLoadout_Carriers_SizeLimit.size(), cur);
+	}
+
 	// Custom Dropship Loadout coordinates
 	Point2D defaultEmptyLocation = { Point2D::Empty };
 	pINI->ReadPoint2D(DropshipLoadout_LoadoutLocation, GameStrings::Basic, "DropshipLoadout.LoadoutLocation", defaultEmptyLocation);
@@ -301,6 +313,12 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 		if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.ArrowsClickSound", "", Phobos::readBuffer) != 0)
 			this->DropshipLoadout_ArrowsClickSound = VocClass::FindIndex(Phobos::readBuffer);
+
+		if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.StartingDragDropSound", "", Phobos::readBuffer) != 0)
+			this->DropshipLoadout_StartingDragDropSound = VocClass::FindIndex(Phobos::readBuffer);
+
+		if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.EndingDragDropSound", "", Phobos::readBuffer) != 0)
+			this->DropshipLoadout_EndingDragDropSound = VocClass::FindIndex(Phobos::readBuffer);
 	}
 }
 
@@ -331,6 +349,7 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_Money)
 		.Process(this->DropshipLoadout_StartEVA)
 		.Process(this->DropshipLoadout_Carriers)
+		.Process(this->DropshipLoadout_Carriers_SizeLimit)
 		.Process(this->DropshipLoadout_AddUnusedMoneyToPlayer)
 		.Process(this->DropshipLoadout_Palette)
 		.Process(this->DropshipLoadout_Background)
@@ -358,6 +377,8 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_BuyClickSound)
 		.Process(this->DropshipLoadout_SellClickSound)
 		.Process(this->DropshipLoadout_ArrowsClickSound)
+		.Process(this->DropshipLoadout_StartingDragDropSound)
+		.Process(this->DropshipLoadout_EndingDragDropSound)
 		;
 }
 

@@ -21,6 +21,7 @@ public:
 		Nullable<int> DropshipLoadout_Money;
 		NullableIdx<VoxClass> DropshipLoadout_StartEVA;
 		ValueableVector<TechnoTypeClass*> DropshipLoadout_Carriers;
+		ValueableVector<int> DropshipLoadout_Carriers_SizeLimit;
 		Nullable<bool> DropshipLoadout_AddUnusedMoneyToPlayer;
 
 		Nullable<PhobosPCXFile> DropshipLoadout_BackgroundPCX;
@@ -42,6 +43,8 @@ public:
 		NullableIdx<VocClass> DropshipLoadout_BuyClickSound;
 		NullableIdx<VocClass> DropshipLoadout_SellClickSound;
 		NullableIdx<VocClass> DropshipLoadout_ArrowsClickSound;
+		NullableIdx<VocClass> DropshipLoadout_StartingDragDropSound;
+		NullableIdx<VocClass> DropshipLoadout_EndingDragDropSound;
 		Valueable<bool> BattlePoints;
 		Valueable<bool> BattlePoints_CanUseStandardPoints;
 
@@ -59,6 +62,7 @@ public:
 			, DropshipLoadout_Money {}
 			, DropshipLoadout_StartEVA {}
 			, DropshipLoadout_Carriers {}
+			, DropshipLoadout_Carriers_SizeLimit {}
 			, DropshipLoadout_AddUnusedMoneyToPlayer {}
 			, DropshipLoadout_BackgroundPCX {}
 			, DropshipLoadout_UpArrowPCX {}
@@ -79,6 +83,8 @@ public:
 			, DropshipLoadout_BuyClickSound {}
 			, DropshipLoadout_SellClickSound {}
 			, DropshipLoadout_ArrowsClickSound {}
+			, DropshipLoadout_StartingDragDropSound {}
+			, DropshipLoadout_EndingDragDropSound {}
 			, NewTeamsSelector_MergeUnclassifiedCategoryWith { }
 			, NewTeamsSelector_UnclassifiedCategoryPercentage { }
 			, NewTeamsSelector_GroundCategoryPercentage { }

@@ -61,6 +61,7 @@ public:
 		long DropshipLoadout_Money;
 		NullableIdx<VoxClass> DropshipLoadout_StartEVA;
 		std::vector<TechnoTypeClass*> DropshipLoadout_Carriers;
+		std::vector<int> DropshipLoadout_Carriers_SizeLimit;
 		bool DropshipLoadout_AddUnusedMoneyToPlayer;
 		ConvertClass* DropshipLoadout_Palette;
 		SHPStruct* DropshipLoadout_Background;
@@ -89,6 +90,8 @@ public:
 		NullableIdx<VocClass> DropshipLoadout_BuyClickSound;
 		NullableIdx<VocClass> DropshipLoadout_SellClickSound;
 		NullableIdx<VocClass> DropshipLoadout_ArrowsClickSound;
+		NullableIdx<VocClass> DropshipLoadout_StartingDragDropSound;
+		NullableIdx<VocClass> DropshipLoadout_EndingDragDropSound;
 
 		ExtData(ScenarioClass* OwnerObject) : Extension<ScenarioClass>(OwnerObject)
 			, ShowBriefing { false }
@@ -113,6 +116,7 @@ public:
 			, DropshipLoadout_Money { -1 }
 			, DropshipLoadout_StartEVA {}
 			, DropshipLoadout_Carriers {}
+			, DropshipLoadout_Carriers_SizeLimit {}
 			, DropshipLoadout_AddUnusedMoneyToPlayer { false }
 			, DropshipLoadout_Palette { nullptr }
 			, DropshipLoadout_Background { nullptr }
@@ -140,6 +144,8 @@ public:
 			, DropshipLoadout_BuyClickSound {}
 			, DropshipLoadout_SellClickSound {}
 			, DropshipLoadout_ArrowsClickSound {}
+			, DropshipLoadout_StartingDragDropSound {}
+			, DropshipLoadout_EndingDragDropSound {}
 		{ }
 
 		static void SetVariableToByID(bool bIsGlobal, int nIndex, char bState);
