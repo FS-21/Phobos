@@ -108,6 +108,7 @@ static ShapeButtonClass* CreateShapeButton(unsigned int nID, int nX, int nY, int
 		ConvertClass* pDrawer,
 		bool bIsAlpha
 	);
+
 	auto const pConstructor = reinterpret_cast<ShapeButtonConstructor_t>(0x69DD30);
 	return pConstructor(pButton, nID, nX, nY, nWidth, nHeight, nullptr, bIsAlpha);
 }
@@ -169,6 +170,7 @@ private:
 	std::vector<TechnoTypeClass*> availableUnits;
 	std::vector<int> availableUnitsMaximums;
 	std::vector<std::vector<TechnoTypeClass*>> dropshipBayChosenUnitsLists;
+	std::vector<std::vector<bool>> dropshipBayFixedUnitsLists;
 	std::map<TechnoTypeClass*, int> dropshipBayChosenUnitsCount;
 	TechnoTypeClass* lastSelected { nullptr };
 	TechnoTypeClass* pHoveredUnitType { nullptr };
@@ -225,6 +227,7 @@ private:
 	TechnoTypeClass* pDraggedUnitType { nullptr };
 	int nSourceDropshipIdx { -1 };
 	int nSourceSlotIdx { -1 };
+	bool bDraggedIsFixed { false };
 	Point2D dragStartMousePos { 0, 0 };
 };
 
@@ -238,9 +241,7 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 	{
 		auto button = buttonsList[i];
 		if (button)
-		{
 			GameDelete(button);
-		}
 	}
 	buttonsList.clear();
 
@@ -254,9 +255,7 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 				isGlobal = (dGreen == ScenarioExt::Global()->DropshipLoadout_DGreenList[i]);
 
 			if (!isGlobal)
-			{
 				GameDelete(dGreen);
-			}
 		}
 	}
 	dropshipLoadout_DGreenList.clear();
@@ -264,83 +263,71 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 	if (dropshipLoadout_Palette)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_Palette == ScenarioExt::Global()->DropshipLoadout_Palette);
+
 		if (!isGlobal)
-		{
 			GameDelete(dropshipLoadout_Palette);
-		}
 	}
 
 	if (dropshipLoadout_Background)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_Background == ScenarioExt::Global()->DropshipLoadout_Background);
+
 		if (!isGlobal)
-		{
 			GameDelete(dropshipLoadout_Background);
-		}
 	}
 
 	if (dropshipLoadout_UpArrow)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_UpArrow == ScenarioExt::Global()->DropshipLoadout_UpArrow);
+
 		if (!isGlobal)
-		{
 			GameDelete(dropshipLoadout_UpArrow);
-		}
 	}
 
 	if (dropshipLoadout_DownArrow)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_DownArrow == ScenarioExt::Global()->DropshipLoadout_DownArrow);
+
 		if (!isGlobal)
-		{
 			GameDelete(dropshipLoadout_DownArrow);
-		}
 	}
 
 	if (dropshipLoadout_Loadout)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_Loadout == ScenarioExt::Global()->DropshipLoadout_Loadout);
+
 		if (!isGlobal)
-		{
 			GameDelete(dropshipLoadout_Loadout);
-		}
 	}
 
 	if (dropshipLoadout_PilotLit)
 	{
 		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_PilotLit == ScenarioExt::Global()->DropshipLoadout_PilotLit);
+
 		if (!isGlobal)
-		{
 			GameDelete(dropshipLoadout_PilotLit);
-		}
 	}
 }
 
 bool DropshipLoadoutClass::Initialize()
 {
 	if (!HouseClass::CurrentPlayer)
-	{
 		return false;
-	}
 
 	pHouseTypeExt = HouseTypeExt::ExtMap.Find(HouseClass::CurrentPlayer->Type);
 	if (!pHouseTypeExt)
-	{
 		return false;
-	}
 
 	if (!ScenarioClass::Instance)
-	{
 		return false;
-	}
 
 	nStartingDropships = pHouseTypeExt->DropshipLoadout_StartingDropships.isset() ? pHouseTypeExt->DropshipLoadout_StartingDropships : ScenarioClass::Instance->StartingDropships;
+
 	if (nStartingDropships <= 0)
-	{
 		return false;
-	}
 
 	LoadAssets();
+
 	return true;
 }
 
@@ -349,22 +336,14 @@ void DropshipLoadoutClass::LoadAssets()
 	auto const pGlobal = ScenarioExt::Global();
 
 	if (pGlobal && pGlobal->DropshipLoadout_Palette)
-	{
 		dropshipLoadout_Palette = pGlobal->DropshipLoadout_Palette;
-	}
 	else
-	{
 		dropshipLoadout_Palette = FileSystem::LoadPALFile("DROPSHIP.PAL", DSurface::Hidden);
-	}
 
 	if (pHouseTypeExt->DropshipLoadout_BackgroundPCX.isset() && pHouseTypeExt->DropshipLoadout_BackgroundPCX.Get().Exists())
-	{
 		dropshipLoadout_BackgroundPCX = pHouseTypeExt->DropshipLoadout_BackgroundPCX.Get().GetSurface();
-	}
 	else if (pGlobal && pGlobal->DropshipLoadout_BackgroundPCX.Exists())
-	{
 		dropshipLoadout_BackgroundPCX = pGlobal->DropshipLoadout_BackgroundPCX.GetSurface();
-	}
 
 	if (pGlobal && pGlobal->DropshipLoadout_Background)
 	{
@@ -393,13 +372,9 @@ void DropshipLoadoutClass::LoadAssets()
 	}
 
 	if (pGlobal && pGlobal->DropshipLoadout_Loadout)
-	{
 		dropshipLoadout_Loadout = pGlobal->DropshipLoadout_Loadout;
-	}
 	else
-	{
 		dropshipLoadout_Loadout = FileSystem::LoadSHPFile("LOADOUT.SHP");
-	}
 
 	if (!pHouseTypeExt->DropshipLoadout_PilotLitPCX.empty())
 	{
@@ -417,55 +392,36 @@ void DropshipLoadoutClass::LoadAssets()
 	}
 
 	if (pGlobal && pGlobal->DropshipLoadout_PilotLit)
-	{
 		dropshipLoadout_PilotLit = pGlobal->DropshipLoadout_PilotLit;
-	}
 	else
-	{
 		dropshipLoadout_PilotLit = FileSystem::LoadSHPFile("PILOTLIT.SHP");
-	}
 
 	if (pHouseTypeExt->DropshipLoadout_UpArrowPCX.isset() && pHouseTypeExt->DropshipLoadout_UpArrowPCX.Get().Exists())
-	{
 		dropshipLoadout_UpArrowPCX = pHouseTypeExt->DropshipLoadout_UpArrowPCX.Get().GetSurface();
-	}
 	else if (pGlobal && pGlobal->DropshipLoadout_UpArrowPCX.Exists())
-	{
 		dropshipLoadout_UpArrowPCX = pGlobal->DropshipLoadout_UpArrowPCX.GetSurface();
-	}
 
 	if (pGlobal && pGlobal->DropshipLoadout_UpArrow)
-	{
 		dropshipLoadout_UpArrow = pGlobal->DropshipLoadout_UpArrow;
-	}
 	else
-	{
 		dropshipLoadout_UpArrow = FileSystem::LoadSHPFile("DROPUP.SHP");
-	}
 
 	if (pHouseTypeExt->DropshipLoadout_DownArrowPCX.isset() && pHouseTypeExt->DropshipLoadout_DownArrowPCX.Get().Exists())
-	{
 		dropshipLoadout_DownArrowPCX = pHouseTypeExt->DropshipLoadout_DownArrowPCX.Get().GetSurface();
-	}
 	else if (pGlobal && pGlobal->DropshipLoadout_DownArrowPCX.Exists())
-	{
 		dropshipLoadout_DownArrowPCX = pGlobal->DropshipLoadout_DownArrowPCX.GetSurface();
-	}
 
 	if (pGlobal && pGlobal->DropshipLoadout_DownArrow)
-	{
 		dropshipLoadout_DownArrow = pGlobal->DropshipLoadout_DownArrow;
-	}
 	else
-	{
 		dropshipLoadout_DownArrow = FileSystem::LoadSHPFile("DROPDOWN.SHP");
-	}
 
 	if (pHouseTypeExt->DropshipLoadout_DGreenListPCX.size() > 0)
 	{
 		for (const auto& pAnimationVector : pHouseTypeExt->DropshipLoadout_DGreenListPCX)
 		{
 			std::vector<BSurface*> rowAnimFrames;
+
 			if (pAnimationVector)
 			{
 				for (const auto& frame : *pAnimationVector)
@@ -473,6 +429,7 @@ void DropshipLoadoutClass::LoadAssets()
 					rowAnimFrames.push_back(frame.GetSurface());
 				}
 			}
+
 			dropshipLoadout_DGreenListPCX.push_back(rowAnimFrames);
 		}
 	}
@@ -481,6 +438,7 @@ void DropshipLoadoutClass::LoadAssets()
 		for (auto& pFileGroupPCX : pGlobal->DropshipLoadout_DGreenListPCX)
 		{
 			std::vector<BSurface*> rowAnimFrames;
+
 			if (pFileGroupPCX)
 			{
 				for (auto& pFilePCX : *pFileGroupPCX)
@@ -488,6 +446,7 @@ void DropshipLoadoutClass::LoadAssets()
 					rowAnimFrames.push_back(pFilePCX.GetSurface());
 				}
 			}
+
 			dropshipLoadout_DGreenListPCX.push_back(rowAnimFrames);
 		}
 
@@ -562,8 +521,12 @@ void DropshipLoadoutClass::LoadAssets()
 	else if (pGlobal && pGlobal->DropshipLoadout_EndingDragDropSound.isset())
 		endingDragDropSoundIdx = pGlobal->DropshipLoadout_EndingDragDropSound;
 
+	long dropshipLoadout_InitialMoney = -1;
+	if (pHouseTypeExt->DropshipLoadout_Money.isset())
+		dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money;
+	else if (pGlobal)
+		dropshipLoadout_InitialMoney = pGlobal->DropshipLoadout_Money;
 
-	long dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money.isset() ? pHouseTypeExt->DropshipLoadout_Money : (pGlobal ? pGlobal->DropshipLoadout_Money : -1);
 	dropshipLoadout_InitialMoney = dropshipLoadout_InitialMoney >= 0 ? dropshipLoadout_InitialMoney : HouseClass::CurrentPlayer->Available_Money();
 
 	initialMoney = dropshipLoadout_InitialMoney;
@@ -605,20 +568,22 @@ void DropshipLoadoutClass::LoadAssets()
 
 	if (allowableUnits.size() > 0)
 	{
-		if (allowableUnitMaximums.size() > 0 && allowableUnits.size() != allowableUnitMaximums.size())
-		{
-		}
-		else
+		bool maximumsValid = allowableUnitMaximums.size() == 0 || allowableUnits.size() == allowableUnitMaximums.size();
+
+		if (maximumsValid)
 		{
 			for (size_t i = 0; i < allowableUnits.size(); ++i)
 			{
 				int maximumCount = -1;
+
 				if (allowableUnitMaximums.size() > 0)
 				{
 					maximumCount = allowableUnitMaximums[i];
+
 					if (maximumCount == 0)
 						continue;
 				}
+
 				availableUnitsMaximums.push_back(maximumCount);
 				TechnoTypeClass* pType = allowableUnits[i];
 				availableUnits.push_back(pType);
@@ -638,9 +603,7 @@ void DropshipLoadoutClass::LoadAssets()
 void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 {
 	if (!pSurface)
-	{
 		return;
-	}
 
 	const int cameoWidth = 60, cameoHeight = 48;
 	int backgroundWidth = 0;
@@ -726,14 +689,34 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 		arrowsY = backgroundY + 400;
 	}
 
-	int dropshipLoadout_UpArrowWidth = dropshipLoadout_UpArrowPCX ? dropshipLoadout_UpArrowPCX->Width : (dropshipLoadout_UpArrow ? dropshipLoadout_UpArrow->Width : 30);
-	int dropshipLoadout_UpArrowHeight = dropshipLoadout_UpArrowPCX ? dropshipLoadout_UpArrowPCX->Height : (dropshipLoadout_UpArrow ? dropshipLoadout_UpArrow->Height : 30);
+	int dropshipLoadout_UpArrowWidth = 30;
+	if (dropshipLoadout_UpArrowPCX)
+		dropshipLoadout_UpArrowWidth = dropshipLoadout_UpArrowPCX->Width;
+	else if (dropshipLoadout_UpArrow)
+		dropshipLoadout_UpArrowWidth = dropshipLoadout_UpArrow->Width;
+
+	int dropshipLoadout_UpArrowHeight = 30;
+	if (dropshipLoadout_UpArrowPCX)
+		dropshipLoadout_UpArrowHeight = dropshipLoadout_UpArrowPCX->Height;
+	else if (dropshipLoadout_UpArrow)
+		dropshipLoadout_UpArrowHeight = dropshipLoadout_UpArrow->Height;
+
 	upArrowX = customUpArrowLocation != Point2D::Empty ? (backgroundX + customUpArrowLocation.X) : (centerOfCameoColumns - dropshipLoadout_UpArrowWidth);
 	upArrowY = customUpArrowLocation != Point2D::Empty ? (backgroundY + customUpArrowLocation.Y) : arrowsY;
 	upArrowLocation = { upArrowX, upArrowY, dropshipLoadout_UpArrowWidth, dropshipLoadout_UpArrowHeight };
 
-	int dropshipLoadout_DownArrowWidth = dropshipLoadout_DownArrowPCX ? dropshipLoadout_DownArrowPCX->Width : (dropshipLoadout_DownArrow ? dropshipLoadout_DownArrow->Width : 30);
-	int dropshipLoadout_DownArrowHeight = dropshipLoadout_DownArrowPCX ? dropshipLoadout_DownArrowPCX->Height : (dropshipLoadout_DownArrow ? dropshipLoadout_DownArrow->Height : 30);
+	int dropshipLoadout_DownArrowWidth = 30;
+	if (dropshipLoadout_DownArrowPCX)
+		dropshipLoadout_DownArrowWidth = dropshipLoadout_DownArrowPCX->Width;
+	else if (dropshipLoadout_DownArrow)
+		dropshipLoadout_DownArrowWidth = dropshipLoadout_DownArrow->Width;
+
+	int dropshipLoadout_DownArrowHeight = 30;
+	if (dropshipLoadout_DownArrowPCX)
+		dropshipLoadout_DownArrowHeight = dropshipLoadout_DownArrowPCX->Height;
+	else if (dropshipLoadout_DownArrow)
+		dropshipLoadout_DownArrowHeight = dropshipLoadout_DownArrow->Height;
+
 	downArrowX = customDownArrowLocation != Point2D::Empty ? (backgroundX + customDownArrowLocation.X) : centerOfCameoColumns;
 	downArrowY = customDownArrowLocation != Point2D::Empty ? (backgroundY + customDownArrowLocation.Y) : arrowsY;
 	downArrowLocation = { downArrowX, downArrowY, dropshipLoadout_DownArrowWidth, dropshipLoadout_DownArrowHeight };
@@ -808,8 +791,18 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 		}
 	}
 
-	int dropshipLoadout_LoadoutWidth = dropshipLoadout_LoadoutPCX.size() > 0 ? dropshipLoadout_LoadoutPCX[0]->Width : (dropshipLoadout_Loadout ? dropshipLoadout_Loadout->Width : 100);
-	int dropshipLoadout_LoadoutHeight = dropshipLoadout_LoadoutPCX.size() > 0 ? dropshipLoadout_LoadoutPCX[0]->Height : (dropshipLoadout_Loadout ? dropshipLoadout_Loadout->Height : 100);
+	int dropshipLoadout_LoadoutWidth = 100;
+	if (dropshipLoadout_LoadoutPCX.size() > 0)
+		dropshipLoadout_LoadoutWidth = dropshipLoadout_LoadoutPCX[0]->Width;
+	else if (dropshipLoadout_Loadout)
+		dropshipLoadout_LoadoutWidth = dropshipLoadout_Loadout->Width;
+
+	int dropshipLoadout_LoadoutHeight = 100;
+	if (dropshipLoadout_LoadoutPCX.size() > 0)
+		dropshipLoadout_LoadoutHeight = dropshipLoadout_LoadoutPCX[0]->Height;
+	else if (dropshipLoadout_Loadout)
+		dropshipLoadout_LoadoutHeight = dropshipLoadout_Loadout->Height;
+
 	int dropshipLoadout_LoadoutX = 45;
 	int dropshipLoadout_LoadoutY = 2;
 
@@ -826,8 +819,18 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 
 	loadoutLocation = { backgroundX + dropshipLoadout_LoadoutX, backgroundY + dropshipLoadout_LoadoutY, dropshipLoadout_LoadoutWidth, dropshipLoadout_LoadoutHeight };
 
-	int dropshipLoadout_PilotLitWidth = dropshipLoadout_PilotLitPCX.size() > 0 ? dropshipLoadout_PilotLitPCX[0]->Width : (dropshipLoadout_PilotLit ? dropshipLoadout_PilotLit->Width : 100);
-	int dropshipLoadout_PilotLitHeight = dropshipLoadout_PilotLitPCX.size() > 0 ? dropshipLoadout_PilotLitPCX[0]->Height : (dropshipLoadout_PilotLit ? dropshipLoadout_PilotLit->Height : 100);
+	int dropshipLoadout_PilotLitWidth = 100;
+	if (dropshipLoadout_PilotLitPCX.size() > 0)
+		dropshipLoadout_PilotLitWidth = dropshipLoadout_PilotLitPCX[0]->Width;
+	else if (dropshipLoadout_PilotLit)
+		dropshipLoadout_PilotLitWidth = dropshipLoadout_PilotLit->Width;
+
+	int dropshipLoadout_PilotLitHeight = 100;
+	if (dropshipLoadout_PilotLitPCX.size() > 0)
+		dropshipLoadout_PilotLitHeight = dropshipLoadout_PilotLitPCX[0]->Height;
+	else if (dropshipLoadout_PilotLit)
+		dropshipLoadout_PilotLitHeight = dropshipLoadout_PilotLit->Height;
+
 	int dropshipLoadout_PilotLitX = 284;
 	int dropshipLoadout_PilotLitY = 151;
 
@@ -850,6 +853,7 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 	if (pHouseTypeExt->DropshipLoadout_DropshipCameosCount.Get(0) > 0)
 	{
 		nDropshipBayCameos = pHouseTypeExt->DropshipLoadout_DropshipCameosCount;
+
 		for (int i = 0; i < nStartingDropships; i++)
 		{
 			std::vector<RectangleStruct> list;
@@ -859,12 +863,14 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 				int cameoY = backgroundY + pHouseTypeExt->DropshipLoadout_DropshipCameoLocations[i][j].Y;
 				list.push_back({ cameoX, cameoY, cameoWidth, cameoHeight });
 			}
+
 			dropshipBayCameLocations.push_back(list);
 		}
 	}
 	else if (pGlobal && pGlobal->DropshipLoadout_DropshipCameosCount > 0)
 	{
 		nDropshipBayCameos = pGlobal->DropshipLoadout_DropshipCameosCount;
+
 		for (int i = 0; i < nStartingDropships; i++)
 		{
 			std::vector<RectangleStruct> list;
@@ -874,6 +880,7 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 				int cameoY = backgroundY + pGlobal->DropshipLoadout_DropshipCameoLocations[i][j].Y;
 				list.push_back({ cameoX, cameoY, cameoWidth, cameoHeight });
 			}
+
 			dropshipBayCameLocations.push_back(list);
 		}
 	}
@@ -967,6 +974,7 @@ void DropshipLoadoutClass::CreateControls()
 		upArrowLocation.Width, upArrowLocation.Height,
 		true
 	);
+
 	if (btn_ScrollUp)
 	{
 		btn_ScrollUp->SetPosition(upArrowLocation.X, upArrowLocation.Y);
@@ -976,9 +984,6 @@ void DropshipLoadoutClass::CreateControls()
 		buttonsList.push_back(btn_ScrollUp);
 		commandManager = btn_ScrollUp;
 	}
-	else
-	{
-	}
 
 	int btn_ScrollDown_ID = 101;
 	ShapeButtonClass* btn_ScrollDown = CreateShapeButton(
@@ -987,6 +992,7 @@ void DropshipLoadoutClass::CreateControls()
 		downArrowLocation.Width, downArrowLocation.Height,
 		true
 	);
+
 	if (btn_ScrollDown)
 	{
 		btn_ScrollDown->SetPosition(downArrowLocation.X, downArrowLocation.Y);
@@ -994,31 +1000,38 @@ void DropshipLoadoutClass::CreateControls()
 		btn_ScrollDown->DrawPosition.X = downArrowX;
 		btn_ScrollDown->DrawPosition.Y = downArrowY;
 		buttonsList.push_back(btn_ScrollDown);
+
 		if (commandManager)
 			commandManager->Add(*btn_ScrollDown);
-	}
-	else
-	{
 	}
 
 	int btn_BasicDropshipCameo_ID = 200;
 	int newID = btn_BasicDropshipCameo_ID;
 	dropshipBayChosenUnitsLists.clear();
+	dropshipBayFixedUnitsLists.clear();
+
+	const std::vector<std::vector<TechnoTypeClass*>>* pFixedUnitsSrc = nullptr;
+	if (pHouseTypeExt && !pHouseTypeExt->DropshipLoadout_FixedUnits.empty())
+		pFixedUnitsSrc = &pHouseTypeExt->DropshipLoadout_FixedUnits;
+	else if (ScenarioExt::Global() && !ScenarioExt::Global()->DropshipLoadout_FixedUnits.empty())
+		pFixedUnitsSrc = &ScenarioExt::Global()->DropshipLoadout_FixedUnits;
 
 	for (int i = 0; i < nStartingDropships; i++)
 	{
 		dropshipBayChosenUnitsLists.push_back(std::vector<TechnoTypeClass*>());
+		dropshipBayFixedUnitsLists.push_back(std::vector<bool>());
+
 		if (i >= (int)dropshipBayCameLocations.size())
-		{
 			continue;
-		}
+
+		const std::vector<TechnoTypeClass*>* pFixedList = nullptr;
+		if (pFixedUnitsSrc && i < (int)pFixedUnitsSrc->size())
+			pFixedList = &((*pFixedUnitsSrc)[i]);
 
 		for (int j = 0; j < nDropshipBayCameos; j++)
 		{
 			if (j >= (int)dropshipBayCameLocations[i].size())
-			{
 				continue;
-			}
 
 			ShapeButtonClass* newButton = CreateShapeButton(
 				newID,
@@ -1026,6 +1039,7 @@ void DropshipLoadoutClass::CreateControls()
 				cameoWidth, cameoHeight,
 				true
 			);
+
 			if (newButton)
 			{
 				newButton->SetPosition(dropshipBayCameLocations[i][j].X, dropshipBayCameLocations[i][j].Y);
@@ -1033,13 +1047,22 @@ void DropshipLoadoutClass::CreateControls()
 				newButton->DrawPosition.X = dropshipBayCameLocations[i][j].X;
 				newButton->DrawPosition.Y = dropshipBayCameLocations[i][j].Y;
 				buttonsList.push_back(newButton);
+
 				if (commandManager)
 					commandManager->Add(*newButton);
 			}
-			else
+
+			TechnoTypeClass* pFixedUnit = nullptr;
+			bool isFixed = false;
+			if (pFixedList && j < (int)pFixedList->size())
 			{
+				pFixedUnit = (*pFixedList)[j];
+				if (pFixedUnit)
+					isFixed = true;
 			}
-			dropshipBayChosenUnitsLists[i].push_back(nullptr);
+
+			dropshipBayChosenUnitsLists[i].push_back(pFixedUnit);
+			dropshipBayFixedUnitsLists[i].push_back(isFixed);
 			newID++;
 		}
 	}
@@ -1048,9 +1071,7 @@ void DropshipLoadoutClass::CreateControls()
 	for (int i = 0; i < nSidebarCameos; i++)
 	{
 		if (i >= (int)sidebarCameLocations.size())
-		{
 			continue;
-		}
 
 		int sID = btn_BasicSidebarCameo_ID + i;
 		ShapeButtonClass* newButton = CreateShapeButton(
@@ -1059,6 +1080,7 @@ void DropshipLoadoutClass::CreateControls()
 			cameoWidth, cameoHeight,
 			true
 		);
+
 		if (newButton)
 		{
 			newButton->SetPosition(sidebarCameLocations[i].X, sidebarCameLocations[i].Y);
@@ -1066,11 +1088,9 @@ void DropshipLoadoutClass::CreateControls()
 			newButton->DrawPosition.X = sidebarCameLocations[i].X;
 			newButton->DrawPosition.Y = sidebarCameLocations[i].Y;
 			buttonsList.push_back(newButton);
+
 			if (commandManager)
 				commandManager->Add(*newButton);
-		}
-		else
-		{
 		}
 	}
 }
@@ -1079,30 +1099,32 @@ void DropshipLoadoutClass::Run()
 {
 	DSurface* pSurface = DSurface::Hidden;
 	if (!pSurface)
-	{
 		return;
-	}
 
 	pSurface->Fill(0);
 
 	CalculateLayout(pSurface);
 	CreateControls();
 
-	const int voiceEva = pHouseTypeExt->DropshipLoadout_StartEVA.isset() ? pHouseTypeExt->DropshipLoadout_StartEVA.Get(-1) : (ScenarioExt::Global() ? ScenarioExt::Global()->DropshipLoadout_StartEVA.Get(-1) : -1);
-	if (voiceEva >= 0)
-	{
-		VoxClass::PlayIndex(voiceEva);
-	}
+	int voiceEva = -1;
+	if (pHouseTypeExt->DropshipLoadout_StartEVA.isset())
+		voiceEva = pHouseTypeExt->DropshipLoadout_StartEVA.Get(-1);
+	else if (ScenarioExt::Global())
+		voiceEva = ScenarioExt::Global()->DropshipLoadout_StartEVA.Get(-1);
 
-	const int themeIdx = pHouseTypeExt->DropshipLoadout_Theme.isset() ? pHouseTypeExt->DropshipLoadout_Theme : (ScenarioExt::Global() ? ScenarioExt::Global()->DropshipLoadout_Theme : -1);
+	if (voiceEva >= 0)
+		VoxClass::PlayIndex(voiceEva);
+
+	int themeIdx = -1;
+	if (pHouseTypeExt->DropshipLoadout_Theme.isset())
+		themeIdx = pHouseTypeExt->DropshipLoadout_Theme;
+	else if (ScenarioExt::Global())
+		themeIdx = ScenarioExt::Global()->DropshipLoadout_Theme;
+
 	if (themeIdx == -1)
-	{
 		ThemeClass::Instance.Stop(true);
-	}
 	else
-	{
 		ThemeClass::Instance.Play(themeIdx);
-	}
 
 	if (WWMouseClass::Instance)
 	{
@@ -1111,20 +1133,23 @@ void DropshipLoadoutClass::Run()
 		WWMouseClass::Instance->CaptureMouse();
 		WWMouseClass::Instance->RefCount = 0;
 	}
-	else
-	{
-	}
 
 	if (commandManager)
-	{
 		commandManager->TurnOn();
-	}
-	else
-	{
-	}
 
-	loadoutTotalFrames = dropshipLoadout_LoadoutPCX.size() > 0 ? (int)dropshipLoadout_LoadoutPCX.size() - 1 : (dropshipLoadout_Loadout ? dropshipLoadout_Loadout->Frames : 0);
-	pilotLitTotalFrames = dropshipLoadout_PilotLitPCX.size() > 0 ? (int)dropshipLoadout_PilotLitPCX.size() - 1 : (dropshipLoadout_PilotLit ? dropshipLoadout_PilotLit->Frames : 0);
+	if (dropshipLoadout_LoadoutPCX.size() > 0)
+		loadoutTotalFrames = (int)dropshipLoadout_LoadoutPCX.size() - 1;
+	else if (dropshipLoadout_Loadout)
+		loadoutTotalFrames = dropshipLoadout_Loadout->Frames;
+	else
+		loadoutTotalFrames = 0;
+
+	if (dropshipLoadout_PilotLitPCX.size() > 0)
+		pilotLitTotalFrames = (int)dropshipLoadout_PilotLitPCX.size() - 1;
+	else if (dropshipLoadout_PilotLit)
+		pilotLitTotalFrames = dropshipLoadout_PilotLit->Frames;
+	else
+		pilotLitTotalFrames = 0;
 
 	animTimer_DelayedStartValue_Loadout = ScenarioClass::Instance->Random(0, 0);
 	animTimer_DelayedStartValue_PilotLit = ScenarioClass::Instance->Random(100, 300);
@@ -1159,9 +1184,7 @@ void DropshipLoadoutClass::Run()
 
 		int command = 0;
 		if (commandManager)
-		{
 			command = commandManager->Input();
-		}
 
 		int buttonID = -1;
 		if (WWMouseClass::Instance)
@@ -1203,17 +1226,25 @@ void DropshipLoadoutClass::Run()
 					// If dragging from a dropship slot, now temporarily remove it and refund it!
 					if (nSourceDropshipIdx != -1)
 					{
+						bDraggedIsFixed = dropshipBayFixedUnitsLists[nSourceDropshipIdx][nSourceSlotIdx];
 						dropshipBayChosenUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = nullptr;
-						currentMoney += pDraggedUnitType->Cost;
-						if (dropshipBayChosenUnitsCount.count(pDraggedUnitType) > 0)
+						dropshipBayFixedUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = false;
+
+						if (!bDraggedIsFixed)
 						{
-							--dropshipBayChosenUnitsCount[pDraggedUnitType];
+							currentMoney += pDraggedUnitType->Cost;
+							if (dropshipBayChosenUnitsCount.count(pDraggedUnitType) > 0)
+								--dropshipBayChosenUnitsCount[pDraggedUnitType];
 						}
 					}
-					if (startingDragDropSoundIdx >= 0)
+					else
 					{
-						VocClass::PlayGlobal(startingDragDropSoundIdx, 0x2000, 1.0);
+						bDraggedIsFixed = false;
 					}
+
+					if (startingDragDropSoundIdx >= 0)
+						VocClass::PlayGlobal(startingDragDropSoundIdx, 0x2000, 1.0);
+
 					repaintAll = true;
 				}
 			}
@@ -1272,6 +1303,7 @@ void DropshipLoadoutClass::Run()
 									if (!dropshipBayChosenUnitsLists[i][j])
 									{
 										dropshipBayChosenUnitsLists[i][j] = pDraggedUnitType;
+										dropshipBayFixedUnitsLists[i][j] = false;
 										currentMoney -= pDraggedUnitType->Cost;
 										foundFreeSlot = true;
 										lastSelected = pDraggedUnitType;
@@ -1298,6 +1330,7 @@ void DropshipLoadoutClass::Run()
 					int btn_BasicSidebarCameo_ID = 300;
 					bool droppedOnSlot = (buttonID >= btn_BasicDropshipCameo_ID && buttonID < (btn_BasicDropshipCameo_ID + nDropshipBayTotalSlots));
 					bool droppedOnSidebar = (buttonID >= btn_BasicSidebarCameo_ID && buttonID < (btn_BasicSidebarCameo_ID + nSidebarCameos));
+
 					bool droppedOnSidebarArea = false;
 					if (nSourceDropshipIdx != -1 && !sidebarCameLocations.empty())
 					{
@@ -1305,6 +1338,7 @@ void DropshipLoadoutClass::Run()
 						int minY = sidebarCameLocations[0].Y;
 						int maxX = sidebarCameLocations[0].X + sidebarCameLocations[0].Width;
 						int maxY = sidebarCameLocations[0].Y + sidebarCameLocations[0].Height;
+
 						for (const auto& rect : sidebarCameLocations)
 						{
 							if (rect.X < minX) minX = rect.X;
@@ -1312,6 +1346,7 @@ void DropshipLoadoutClass::Run()
 							if (rect.X + rect.Width > maxX) maxX = rect.X + rect.Width;
 							if (rect.Y + rect.Height > maxY) maxY = rect.Y + rect.Height;
 						}
+
 						if (upArrowLocation.Y < minY) minY = upArrowLocation.Y;
 						if (downArrowLocation.Y < minY) minY = downArrowLocation.Y;
 						if (upArrowLocation.Y + upArrowLocation.Height > maxY) maxY = upArrowLocation.Y + upArrowLocation.Height;
@@ -1329,13 +1364,20 @@ void DropshipLoadoutClass::Run()
 						}
 					}
 
-					auto ReturnToSource = [&]() {
+					auto ReturnToSource = [&](bool playSound = true) {
 						if (nSourceDropshipIdx != -1)
 						{
 							dropshipBayChosenUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = pDraggedUnitType;
-							currentMoney -= pDraggedUnitType->Cost;
-							++dropshipBayChosenUnitsCount[pDraggedUnitType];
-							VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
+							dropshipBayFixedUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = bDraggedIsFixed;
+
+							if (!bDraggedIsFixed)
+							{
+								currentMoney -= pDraggedUnitType->Cost;
+								++dropshipBayChosenUnitsCount[pDraggedUnitType];
+							}
+
+							if (playSound)
+								VocClass::PlayGlobal(buyClickSoundIdx, 0x2000, 1.0);
 						}
 					};
 
@@ -1346,149 +1388,52 @@ void DropshipLoadoutClass::Run()
 
 						if (dropshipIndex < (int)dropshipBayChosenUnitsLists.size() && slotIndex < (int)dropshipBayChosenUnitsLists[dropshipIndex].size())
 						{
-							if (!CanCarrierHoldUnit(dropshipIndex, pDraggedUnitType))
+							if (bDraggedIsFixed && dropshipIndex != nSourceDropshipIdx)
+							{
+								ReturnToSource();
+							}
+							else if (!CanCarrierHoldUnit(dropshipIndex, pDraggedUnitType))
 							{
 								ReturnToSource();
 							}
 							else
 							{
 								auto pTargetUnit = dropshipBayChosenUnitsLists[dropshipIndex][slotIndex];
+								bool bTargetIsFixed = dropshipBayFixedUnitsLists[dropshipIndex][slotIndex];
 
-							int maxInstances = INT_MAX;
-							for (size_t idx = 0; idx < availableUnits.size(); ++idx)
-							{
-								if (availableUnits[idx] == pDraggedUnitType)
+								int maxInstances = INT_MAX;
+								for (size_t idx = 0; idx < availableUnits.size(); ++idx)
 								{
-									maxInstances = availableUnitsMaximums[idx] < 0 ? INT_MAX : availableUnitsMaximums[idx];
-									break;
-								}
-							}
-							int nInstances = dropshipBayChosenUnitsCount.count(pDraggedUnitType) > 0 ? dropshipBayChosenUnitsCount[pDraggedUnitType] : 0;
-
-							if (pTargetUnit == nullptr)
-							{
-								if (nInstances < maxInstances && pDraggedUnitType->Cost <= currentMoney)
-								{
-									dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
-									currentMoney -= pDraggedUnitType->Cost;
-									++dropshipBayChosenUnitsCount[pDraggedUnitType];
-									lastSelected = pDraggedUnitType;
-									if (endingDragDropSoundIdx >= 0)
-										VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
-								}
-								else
-								{
-									ReturnToSource();
-								}
-							}
-							else
-							{
-								if (nSourceDropshipIdx != -1)
-								{
-									if (pDraggedUnitType == pTargetUnit)
+									if (availableUnits[idx] == pDraggedUnitType)
 									{
-										ReturnToSource();
+										maxInstances = availableUnitsMaximums[idx] < 0 ? INT_MAX : availableUnitsMaximums[idx];
+										break;
 									}
-									else
+								}
+
+								int nInstances = dropshipBayChosenUnitsCount.count(pDraggedUnitType) > 0 ? dropshipBayChosenUnitsCount[pDraggedUnitType] : 0;
+
+								if (pTargetUnit == nullptr)
+								{
+									if (bDraggedIsFixed)
 									{
-										// Dragged from a dropship slot -> SWAP them!
 										dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
-										dropshipBayChosenUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = pTargetUnit;
-										currentMoney -= pDraggedUnitType->Cost;
-										++dropshipBayChosenUnitsCount[pDraggedUnitType];
+										dropshipBayFixedUnitsLists[dropshipIndex][slotIndex] = true;
 										lastSelected = pDraggedUnitType;
+
 										if (endingDragDropSoundIdx >= 0)
 											VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
 									}
-								}
-								else
-								{
-									bool hasFreeSlot = false;
-									for (auto const pType : dropshipBayChosenUnitsLists[dropshipIndex])
-									{
-										if (!pType)
-										{
-											hasFreeSlot = true;
-											break;
-										}
-									}
-
-									if (hasFreeSlot)
+									else
 									{
 										if (nInstances < maxInstances && pDraggedUnitType->Cost <= currentMoney)
 										{
-											int nullIdx = -1;
-											if (nSourceDropshipIdx == dropshipIndex)
-											{
-												nullIdx = nSourceSlotIdx;
-											}
-											else
-											{
-												for (size_t k = 0; k < dropshipBayChosenUnitsLists[dropshipIndex].size(); ++k)
-												{
-													if (dropshipBayChosenUnitsLists[dropshipIndex][k] == nullptr)
-													{
-														nullIdx = static_cast<int>(k);
-														break;
-													}
-												}
-											}
-											if (nullIdx != -1)
-											{
-												dropshipBayChosenUnitsLists[dropshipIndex].erase(dropshipBayChosenUnitsLists[dropshipIndex].begin() + nullIdx);
-												dropshipBayChosenUnitsLists[dropshipIndex].insert(dropshipBayChosenUnitsLists[dropshipIndex].begin() + slotIndex, pDraggedUnitType);
-											}
-
-											currentMoney -= pDraggedUnitType->Cost;
-											++dropshipBayChosenUnitsCount[pDraggedUnitType];
-											lastSelected = pDraggedUnitType;
-											if (endingDragDropSoundIdx >= 0)
-												VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
-										}
-										else
-										{
-											// Can't afford shift, try replacement!
-											long netCost = pDraggedUnitType->Cost - pTargetUnit->Cost;
-											bool limitOk = (pDraggedUnitType == pTargetUnit) || (nInstances < maxInstances);
-
-											if (limitOk && netCost <= currentMoney)
-											{
-												currentMoney += pTargetUnit->Cost;
-												if (dropshipBayChosenUnitsCount.count(pTargetUnit) > 0)
-												{
-													--dropshipBayChosenUnitsCount[pTargetUnit];
-												}
-
-												dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
-												currentMoney -= pDraggedUnitType->Cost;
-												++dropshipBayChosenUnitsCount[pDraggedUnitType];
-												lastSelected = pDraggedUnitType;
-												if (endingDragDropSoundIdx >= 0)
-													VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
-											}
-											else
-											{
-												ReturnToSource();
-											}
-										}
-									}
-									else
-									{
-										long netCost = pDraggedUnitType->Cost - pTargetUnit->Cost;
-										bool limitOk = (pDraggedUnitType == pTargetUnit) || (nInstances < maxInstances);
-
-										if (limitOk && netCost <= currentMoney)
-										{
-											currentMoney += pTargetUnit->Cost;
-											if (dropshipBayChosenUnitsCount.count(pTargetUnit) > 0)
-											{
-												--dropshipBayChosenUnitsCount[pTargetUnit];
-											}
-
 											dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
+											dropshipBayFixedUnitsLists[dropshipIndex][slotIndex] = false;
 											currentMoney -= pDraggedUnitType->Cost;
 											++dropshipBayChosenUnitsCount[pDraggedUnitType];
 											lastSelected = pDraggedUnitType;
+
 											if (endingDragDropSoundIdx >= 0)
 												VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
 										}
@@ -1498,7 +1443,152 @@ void DropshipLoadoutClass::Run()
 										}
 									}
 								}
-							}
+								else
+								{
+									if (nSourceDropshipIdx != -1)
+									{
+										if (pDraggedUnitType == pTargetUnit)
+										{
+											ReturnToSource(false);
+										}
+										else
+										{
+											// Dragged from a dropship slot -> SWAP them!
+											if ((bDraggedIsFixed || bTargetIsFixed) && dropshipIndex != nSourceDropshipIdx)
+											{
+												ReturnToSource();
+											}
+											else
+											{
+												dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
+												dropshipBayFixedUnitsLists[dropshipIndex][slotIndex] = bDraggedIsFixed;
+												dropshipBayChosenUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = pTargetUnit;
+												dropshipBayFixedUnitsLists[nSourceDropshipIdx][nSourceSlotIdx] = bTargetIsFixed;
+
+												if (!bDraggedIsFixed)
+												{
+													currentMoney -= pDraggedUnitType->Cost;
+													++dropshipBayChosenUnitsCount[pDraggedUnitType];
+												}
+
+												lastSelected = pDraggedUnitType;
+
+												if (endingDragDropSoundIdx >= 0)
+													VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
+											}
+										}
+									}
+									else
+									{
+										if (bTargetIsFixed)
+										{
+											ReturnToSource();
+										}
+										else
+										{
+											bool hasFreeSlot = false;
+
+											for (auto const pType : dropshipBayChosenUnitsLists[dropshipIndex])
+											{
+												if (!pType)
+												{
+													hasFreeSlot = true;
+													break;
+												}
+											}
+
+											if (hasFreeSlot)
+											{
+												if (nInstances < maxInstances && pDraggedUnitType->Cost <= currentMoney)
+												{
+													int nullIdx = -1;
+													if (nSourceDropshipIdx == dropshipIndex)
+													{
+														nullIdx = nSourceSlotIdx;
+													}
+													else
+													{
+														for (size_t k = 0; k < dropshipBayChosenUnitsLists[dropshipIndex].size(); ++k)
+														{
+															if (dropshipBayChosenUnitsLists[dropshipIndex][k] == nullptr)
+															{
+																nullIdx = static_cast<int>(k);
+																break;
+															}
+														}
+													}
+													if (nullIdx != -1)
+													{
+														dropshipBayChosenUnitsLists[dropshipIndex].erase(dropshipBayChosenUnitsLists[dropshipIndex].begin() + nullIdx);
+														dropshipBayChosenUnitsLists[dropshipIndex].insert(dropshipBayChosenUnitsLists[dropshipIndex].begin() + slotIndex, pDraggedUnitType);
+														dropshipBayFixedUnitsLists[dropshipIndex].erase(dropshipBayFixedUnitsLists[dropshipIndex].begin() + nullIdx);
+														dropshipBayFixedUnitsLists[dropshipIndex].insert(dropshipBayFixedUnitsLists[dropshipIndex].begin() + slotIndex, false);
+													}
+
+													currentMoney -= pDraggedUnitType->Cost;
+													++dropshipBayChosenUnitsCount[pDraggedUnitType];
+													lastSelected = pDraggedUnitType;
+
+													if (endingDragDropSoundIdx >= 0)
+														VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
+												}
+												else
+												{
+													// Can't afford shift, try replacement!
+													long netCost = pDraggedUnitType->Cost - pTargetUnit->Cost;
+													bool limitOk = (pDraggedUnitType == pTargetUnit) || (nInstances < maxInstances);
+
+													if (limitOk && netCost <= currentMoney)
+													{
+														currentMoney += pTargetUnit->Cost;
+
+														if (dropshipBayChosenUnitsCount.count(pTargetUnit) > 0)
+															--dropshipBayChosenUnitsCount[pTargetUnit];
+
+														dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
+														dropshipBayFixedUnitsLists[dropshipIndex][slotIndex] = false;
+														currentMoney -= pDraggedUnitType->Cost;
+														++dropshipBayChosenUnitsCount[pDraggedUnitType];
+														lastSelected = pDraggedUnitType;
+
+														if (endingDragDropSoundIdx >= 0)
+															VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
+													}
+													else
+													{
+														ReturnToSource();
+													}
+												}
+											}
+											else
+											{
+												long netCost = pDraggedUnitType->Cost - pTargetUnit->Cost;
+												bool limitOk = (pDraggedUnitType == pTargetUnit) || (nInstances < maxInstances);
+
+												if (limitOk && netCost <= currentMoney)
+												{
+													currentMoney += pTargetUnit->Cost;
+
+													if (dropshipBayChosenUnitsCount.count(pTargetUnit) > 0)
+														--dropshipBayChosenUnitsCount[pTargetUnit];
+
+													dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
+													dropshipBayFixedUnitsLists[dropshipIndex][slotIndex] = false;
+													currentMoney -= pDraggedUnitType->Cost;
+													++dropshipBayChosenUnitsCount[pDraggedUnitType];
+													lastSelected = pDraggedUnitType;
+
+													if (endingDragDropSoundIdx >= 0)
+														VocClass::PlayGlobal(endingDragDropSoundIdx, 0x2000, 1.0);
+												}
+												else
+												{
+													ReturnToSource();
+												}
+											}
+										}
+									}
+								}
 							}
 						}
 						else
@@ -1508,10 +1598,10 @@ void DropshipLoadoutClass::Run()
 					}
 					else if ((droppedOnSidebar || droppedOnSidebarArea) && nSourceDropshipIdx != -1)
 					{
-						// Dropped on sidebar -> permanently sold/removed.
-						// We already refunded the money and decremented the count when active drag started.
-						// So we just let it be.
-						VocClass::PlayGlobal(sellClickSoundIdx, 0x2000, 1.0);
+						if (bDraggedIsFixed) // Dropped on sidebar -> permanently sold/removed.
+							ReturnToSource();
+						else // We already refunded the money and decremented the count when active drag started. So we just let it be.
+							VocClass::PlayGlobal(sellClickSoundIdx, 0x2000, 1.0);
 					}
 					else
 					{
@@ -1529,15 +1619,11 @@ void DropshipLoadoutClass::Run()
 		UpdateAnimations();
 
 		if (bIsDragging)
-		{
 			repaintAll = true;
-		}
 
 		if (repaintAll)
-		{
 			Render(pSurface);
 			repaintAll = false;
-		}
 
 		GScreenClass::Instance.DoBlit(true, pSurface, nullptr);
 	}
@@ -1554,9 +1640,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	int btn_BasicSidebarCameo_ID = 300;
 
 	if (bIsDragging || bDragPending)
-	{
 		return;
-	}
 
 	bool pressedLeftClick = command == 1;
 	if (pressedLeftClick)
@@ -1571,6 +1655,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 		if (buttonID >= btn_BasicSidebarCameo_ID && buttonID < (btn_BasicSidebarCameo_ID + nSidebarCameos))
 		{
 			int sidebarIndex = firstBrowsableCameo + (buttonID - btn_BasicSidebarCameo_ID);
+
 			if (sidebarIndex < (int)availableUnits.size())
 			{
 				auto const pType = availableUnits[sidebarIndex];
@@ -1578,6 +1663,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 				{
 					int maxInstances = availableUnitsMaximums[sidebarIndex] < 0 ? INT_MAX : availableUnitsMaximums[sidebarIndex];
 					int nInstances = dropshipBayChosenUnitsCount.count(pType) > 0 ? dropshipBayChosenUnitsCount[pType] : 0;
+
 					if (nInstances < maxInstances)
 					{
 						bDragPending = true;
@@ -1585,6 +1671,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 						nSourceDropshipIdx = -1;
 						nSourceSlotIdx = -1;
 						dragStartMousePos = mousePos;
+
 						return;
 					}
 				}
@@ -1594,6 +1681,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 		{
 			int dropshipIndex = (buttonID - btn_BasicDropshipCameo_ID) / nDropshipBayCameos;
 			int slotIndex = (buttonID - btn_BasicDropshipCameo_ID) - (dropshipIndex * nDropshipBayCameos);
+
 			if (dropshipIndex < (int)dropshipBayChosenUnitsLists.size() && slotIndex < (int)dropshipBayChosenUnitsLists[dropshipIndex].size())
 			{
 				auto pType = dropshipBayChosenUnitsLists[dropshipIndex][slotIndex];
@@ -1604,6 +1692,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 					nSourceDropshipIdx = dropshipIndex;
 					nSourceSlotIdx = slotIndex;
 					dragStartMousePos = mousePos;
+
 					return;
 				}
 			}
@@ -1616,25 +1705,21 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	if (buttonID >= btn_BasicSidebarCameo_ID && buttonID < (btn_BasicSidebarCameo_ID + nSidebarCameos))
 	{
 		int sidebarIndex = firstBrowsableCameo + (buttonID - btn_BasicSidebarCameo_ID);
+
 		if (sidebarIndex < (int)availableUnits.size())
-		{
 			pHoveredUnitType = availableUnits[sidebarIndex];
-		}
 	}
 	else if (buttonID >= btn_BasicDropshipCameo_ID && buttonID < (btn_BasicDropshipCameo_ID + nDropshipBayTotalSlots))
 	{
 		int dropshipIndex = (buttonID - btn_BasicDropshipCameo_ID) / nDropshipBayCameos;
 		int slotIndex = (buttonID - btn_BasicDropshipCameo_ID) - (dropshipIndex * nDropshipBayCameos);
+
 		if (dropshipIndex < (int)dropshipBayChosenUnitsLists.size() && slotIndex < (int)dropshipBayChosenUnitsLists[dropshipIndex].size())
-		{
 			pHoveredUnitType = dropshipBayChosenUnitsLists[dropshipIndex][slotIndex];
-		}
 	}
 
 	if (pHoveredUnitType != pPrevHovered)
-	{
 		repaintAll = true;
-	}
 
 	pressedLeftClick = command == 1;
 	bool pressedRightClick = command == 2;
@@ -1654,6 +1739,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	bool pressedUpArrow = command == VK_UP || ((pressedLeftClick || command == (32768 + btn_ScrollUp_ID)) && isUpArrow);
 	bool pressedDownArrow = command == VK_DOWN || (pressedLeftClick && isDownArrow);
 
+	bool isScrollFromWheel = (pendingScrolls != 0);
 	if (pendingScrolls < 0)
 	{
 		pressedUpArrow = true;
@@ -1665,16 +1751,14 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 		pendingScrolls--;
 	}
 
+	bool playScrollSound = !isScrollFromWheel;
+
 	if (pressedUpArrow)
 		command = btn_ScrollUp_ID;
 	else if (pressedDownArrow)
 		command = btn_ScrollDown_ID;
 	else if (pressedAnySidebarCameo || pressedAnyDropshipCameo || pressedAnySidebarCameoWithRigthClick)
 		command = buttonID;
-
-	if (command != 0 || buttonID != -1)
-	{
-	}
 
 	bool validSidebarCameoPurchase = false;
 	freeDropshipSlots = false;
@@ -1683,19 +1767,16 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	for (int i = 0; i < (int)dropshipBayCameLocations.size() && !freeDropshipSlots; i++)
 	{
 		if (i >= (int)dropshipBayChosenUnitsLists.size())
-		{
 			continue;
-		}
 
 		for (int j = 0; j < (int)dropshipBayCameLocations[i].size() && !freeDropshipSlots; j++)
 		{
 			if (j >= (int)dropshipBayChosenUnitsLists[i].size())
-			{
 				continue;
-			}
 
 			if (dropshipBayChosenUnitsLists[i][j])
 				continue;
+
 			freeDropshipSlots = true;
 			break;
 		}
@@ -1704,6 +1785,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	if (isHoveringOverSidebarCameos || pressedAnySidebarCameo)
 	{
 		int sidebarIndex = firstBrowsableCameo + (buttonID - btn_BasicSidebarCameo_ID);
+
 		if (sidebarIndex < (int)availableUnits.size())
 		{
 			auto const pType = availableUnits[sidebarIndex];
@@ -1764,7 +1846,9 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 		{
 			firstBrowsableCameo -= 2;
 			repaintAll = true;
-			VocClass::PlayGlobal(arrowsClickSoundIdx, 0x2000, 1.0);
+
+			if (playScrollSound)
+				VocClass::PlayGlobal(arrowsClickSoundIdx, 0x2000, 1.0);
 		}
 	}
 	else if (pressedDownArrow)
@@ -1773,12 +1857,15 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 		{
 			firstBrowsableCameo += 2;
 			repaintAll = true;
-			VocClass::PlayGlobal(arrowsClickSoundIdx, 0x2000, 1.0);
+
+			if (playScrollSound)
+				VocClass::PlayGlobal(arrowsClickSoundIdx, 0x2000, 1.0);
 		}
 	}
 	else if (pressedAnySidebarCameoWithRigthClick)
 	{
 		int newIndex = firstBrowsableCameo + (command - btn_BasicSidebarCameo_ID);
+
 		if (newIndex >= 0 && newIndex < (int)availableUnits.size())
 		{
 			auto const pType = availableUnits[newIndex];
@@ -1790,11 +1877,13 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 					auto& dropshipBay = dropshipBayChosenUnitsLists[i];
 					for (int j = (int)dropshipBay.size() - 1; j >= 0 && !found; --j)
 					{
-						if (dropshipBay[j] == pType)
+						if (dropshipBay[j] == pType && !dropshipBayFixedUnitsLists[i][j])
 						{
 							currentMoney += pType->Cost;
 							dropshipBay.erase(dropshipBay.begin() + j);
 							dropshipBay.push_back(nullptr);
+							dropshipBayFixedUnitsLists[i].erase(dropshipBayFixedUnitsLists[i].begin() + j);
+							dropshipBayFixedUnitsLists[i].push_back(false);
 							found = true;
 							repaintAll = true;
 
@@ -1814,6 +1903,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	else if (pressedAnySidebarCameo)
 	{
 		int newIndex = firstBrowsableCameo + (command - btn_BasicSidebarCameo_ID);
+
 		if (newIndex >= 0 && newIndex < (int)availableUnits.size())
 		{
 			if (validSidebarCameoPurchase)
@@ -1826,16 +1916,12 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 					for (int i = 0; i < (int)dropshipBayCameLocations.size() && !foundFreeSlot; i++)
 					{
 						if (i >= (int)dropshipBayChosenUnitsLists.size())
-						{
 							continue;
-						}
 
 						for (int j = 0; j < (int)dropshipBayCameLocations[i].size() && !foundFreeSlot; j++)
 						{
 							if (j >= (int)dropshipBayChosenUnitsLists[i].size())
-							{
 								continue;
-							}
 
 							auto const pDropshipSlotType = dropshipBayChosenUnitsLists[i][j];
 							if (pDropshipSlotType || !CanCarrierHoldUnit(i, pType))
@@ -1858,6 +1944,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 					if (sidebarRowAnimationIndex < 0)
 					{
 						sidebarRowAnimationIndex = ((command - btn_BasicSidebarCameo_ID) / 2);
+
 						if (dropshipLoadout_DGreenListPCX.size() > 0)
 						{
 							if (sidebarRowAnimationIndex < (int)dropshipLoadout_DGreenListPCX.size())
@@ -1879,9 +1966,6 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 					}
 				}
 			}
-			else
-			{
-			}
 		}
 	}
 	else if (pressedAnyDropshipCameo)
@@ -1896,12 +1980,14 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 				if (index >= 0 && index < (int)dropshipBayChosenUnitsLists[nDropship].size())
 				{
 					auto pType = dropshipBayChosenUnitsLists[nDropship][index];
-					if (pType)
+					if (pType && !dropshipBayFixedUnitsLists[nDropship][index])
 					{
 						currentMoney += pType->Cost;
 						auto& affectedDropship = dropshipBayChosenUnitsLists[nDropship];
 						affectedDropship.erase(affectedDropship.begin() + index);
 						affectedDropship.push_back(nullptr);
+						dropshipBayFixedUnitsLists[nDropship].erase(dropshipBayFixedUnitsLists[nDropship].begin() + index);
+						dropshipBayFixedUnitsLists[nDropship].push_back(false);
 						repaintAll = true;
 
 						if (dropshipBayChosenUnitsCount.count(pType) > 0)
@@ -1927,9 +2013,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 	}
 
 	if (command == VK_SPACE)
-	{
 		pressedSpaceKey = true;
-	}
 
 	if (command == VK_ESCAPE)
 	{
@@ -1937,14 +2021,32 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 		lastSelected = nullptr;
 		dropshipBayChosenUnitsCount.clear();
 
-		for (auto& dropshipBay : dropshipBayChosenUnitsLists)
+		for (size_t i = 0; i < dropshipBayChosenUnitsLists.size(); ++i)
 		{
-			for (auto& slot : dropshipBay)
+			std::vector<TechnoTypeClass*> newUnits;
+			std::vector<bool> newFixed;
+
+			for (size_t j = 0; j < dropshipBayChosenUnitsLists[i].size(); ++j)
 			{
-				if (slot != nullptr)
+				if (dropshipBayFixedUnitsLists[i][j])
+				{
+					newUnits.push_back(dropshipBayChosenUnitsLists[i][j]);
+					newFixed.push_back(true);
+				}
+				else if (dropshipBayChosenUnitsLists[i][j] != nullptr)
+				{
 					soldAny = true;
-				slot = nullptr;
+				}
 			}
+
+			while (newUnits.size() < dropshipBayChosenUnitsLists[i].size())
+			{
+				newUnits.push_back(nullptr);
+				newFixed.push_back(false);
+			}
+
+			dropshipBayChosenUnitsLists[i] = newUnits;
+			dropshipBayFixedUnitsLists[i] = newFixed;
 		}
 
 		currentMoney = initialMoney;
@@ -2021,9 +2123,8 @@ void DropshipLoadoutClass::UpdateAnimations()
 void DropshipLoadoutClass::Render(DSurface* pSurface)
 {
 	if (!pSurface)
-	{
 		return;
-	}
+
 	pSurface->Fill(0);
 	GeneralUtils::DrawImage(
 		pSurface,
@@ -2034,6 +2135,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 	);
 
 	bool isHoveringSidebar = false;
+
 	if (WWMouseClass::Instance)
 	{
 		RectangleStruct mouseRect = WWMouseClass::Instance->Rect2;
@@ -2049,12 +2151,14 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 	}
 
 	bool isMouseOverSidebarArea = false;
+
 	if (WWMouseClass::Instance && !sidebarCameLocations.empty())
 	{
 		int minX = sidebarCameLocations[0].X;
 		int minY = sidebarCameLocations[0].Y;
 		int maxX = sidebarCameLocations[0].X + sidebarCameLocations[0].Width;
 		int maxY = sidebarCameLocations[0].Y + sidebarCameLocations[0].Height;
+
 		for (const auto& rect : sidebarCameLocations)
 		{
 			if (rect.X < minX) minX = rect.X;
@@ -2062,6 +2166,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			if (rect.X + rect.Width > maxX) maxX = rect.X + rect.Width;
 			if (rect.Y + rect.Height > maxY) maxY = rect.Y + rect.Height;
 		}
+
 		if (upArrowLocation.Y < minY) minY = upArrowLocation.Y;
 		if (downArrowLocation.Y < minY) minY = downArrowLocation.Y;
 		if (upArrowLocation.Y + upArrowLocation.Height > maxY) maxY = upArrowLocation.Y + upArrowLocation.Height;
@@ -2087,9 +2192,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			continue;
 
 		if (i >= (int)sidebarCameLocations.size())
-		{
 			continue;
-		}
 
 		auto const pType = availableUnits[newIndex];
 		if (!pType)
@@ -2137,6 +2240,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			bool limitReached = (nInstances >= maxInstances);
 			bool canBuyDirectly = (!limitReached && pType->Cost <= currentMoney && hasCompatibleFreeSlot);
 			bool canReplaceAny = false;
+
 			if (!limitReached)
 			{
 				for (auto const& dropship : dropshipBayChosenUnitsLists)
@@ -2153,22 +2257,17 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 							}
 						}
 					}
+
 					if (canReplaceAny) break;
 				}
 			}
 
 			if (canBuyDirectly)
-			{
 				foreColor = ColorStruct { 0, 255, 0 }; // Green
-			}
 			else if (canReplaceAny)
-			{
 				foreColor = ColorStruct { 0, 0, 255 }; // Blue
-			}
 			else
-			{
 				foreColor = ColorStruct { 255, 0, 0 }; // Red
-			}
 		}
 		else if (pType == lastSelected)
 		{
@@ -2186,9 +2285,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 
 		auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
 		if (!pTypeExt)
-		{
 			continue;
-		}
 
 		auto const pPCXSurface = pTypeExt->CameoPCX.GetSurface();
 		auto pFileSHP = pType->Cameo;
@@ -2229,16 +2326,12 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 	for (size_t i = 0; i < dropshipBayCameLocations.size(); i++)
 	{
 		if (i >= dropshipBayChosenUnitsLists.size())
-		{
 			continue;
-		}
 
 		for (size_t j = 0; j < dropshipBayCameLocations[i].size(); j++)
 		{
 			if (j >= dropshipBayChosenUnitsLists[i].size())
-			{
 				continue;
-			}
 
 			auto const pType = dropshipBayChosenUnitsLists[i][j];
 
@@ -2261,13 +2354,18 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 				foreColor = ColorStruct { 255, 0, 0 };
 				if (bIsDragging)
 				{
-					if (!CanCarrierHoldUnit(i, pDraggedUnitType))
+					bool bTargetIsFixed = dropshipBayFixedUnitsLists[i][j];
+					if (bDraggedIsFixed && static_cast<int>(i) != nSourceDropshipIdx)
+					{
+						showHighlight = false; // Fixed unit cannot go to other dropships
+					}
+					else if (!CanCarrierHoldUnit(i, pDraggedUnitType))
 					{
 						foreColor = ColorStruct { 170, 0, 255 }; // Violet (Too heavy)
 					}
 					else if (!pType)
 					{
-						if (pDraggedUnitType->Cost <= currentMoney)
+						if (bDraggedIsFixed || pDraggedUnitType->Cost <= currentMoney)
 							foreColor = ColorStruct { 0, 0, 255 }; // Blue (empty slot valid drop)
 						else
 							showHighlight = false; // Cannot afford: no highlight
@@ -2277,48 +2375,54 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 						if (nSourceDropshipIdx != -1)
 						{
 							if (pDraggedUnitType == pType)
-							{
 								showHighlight = false;
-							}
+							else if ((bDraggedIsFixed || bTargetIsFixed) && static_cast<int>(i) != nSourceDropshipIdx)
+								showHighlight = false; // Cannot swap fixed units between dropships
 							else
-							{
 								foreColor = ColorStruct { 0, 0, 255 }; // Blue (swap)
-							}
 						}
 						else
 						{
-							bool targetDropshipHasFreeSlot = false;
-							for (auto const pUnit : dropshipBayChosenUnitsLists[i])
+							// Dragged from sidebar
+							if (bTargetIsFixed)
 							{
-								if (!pUnit)
-								{
-									targetDropshipHasFreeSlot = true;
-									break;
-								}
+								showHighlight = false; // Cannot replace fixed units from sidebar
 							}
-
-							// Can we afford a shift?
-							bool canAffordShift = pDraggedUnitType->Cost <= currentMoney;
-
-							// Can we afford a replacement?
-							long netCost = pDraggedUnitType->Cost - pType->Cost;
-							bool canAffordReplacement = netCost <= currentMoney;
-
-							if (targetDropshipHasFreeSlot && canAffordShift)
-								foreColor = ColorStruct { 0, 0, 255 }; // Blue (shift)
-							else if (canAffordReplacement && pDraggedUnitType != pType)
-								foreColor = ColorStruct { 255, 0, 0 }; // Red (overwrite/replace)
 							else
-								showHighlight = false; // Cannot afford either or redundant: no highlight
+							{
+								bool targetDropshipHasFreeSlot = false;
+								for (auto const pUnit : dropshipBayChosenUnitsLists[i])
+								{
+									if (!pUnit)
+									{
+										targetDropshipHasFreeSlot = true;
+										break;
+									}
+								}
+
+								// Can we afford a shift?
+								bool canAffordShift = pDraggedUnitType->Cost <= currentMoney;
+
+								// Can we afford a replacement?
+								long netCost = pDraggedUnitType->Cost - pType->Cost;
+								bool canAffordReplacement = netCost <= currentMoney;
+
+								if (targetDropshipHasFreeSlot && canAffordShift)
+									foreColor = ColorStruct { 0, 0, 255 }; // Blue (shift)
+								else if (canAffordReplacement && pDraggedUnitType != pType)
+									foreColor = ColorStruct { 255, 0, 0 }; // Red (overwrite/replace)
+								else
+									showHighlight = false; // Cannot afford either or redundant: no highlight
+							}
 						}
 					}
 				}
 				else
 				{
-					if (pType)
+					if (pType && !dropshipBayFixedUnitsLists[i][j])
 						foreColor = ColorStruct { 255, 0, 0 }; // Red (sellable hover)
 					else
-						showHighlight = false; // Don't highlight empty slot if not dragging
+						showHighlight = false; // Don't highlight empty or fixed slot if not dragging
 				}
 			}
 			else if (!bIsDragging && isHoveringSidebar && pHoveredUnitType && !CanCarrierHoldUnit(i, pHoveredUnitType))
@@ -2338,9 +2442,11 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 						break;
 					}
 				}
+
 				int nInstances = dropshipBayChosenUnitsCount.count(pHoveredUnitType) > 0 ? dropshipBayChosenUnitsCount[pHoveredUnitType] : 0;
 				bool limitReached = (nInstances >= maxInstances);
 				bool hasCompatibleFreeSlot = false;
+
 				for (int i_c = 0; i_c < (int)dropshipBayChosenUnitsLists.size() && !hasCompatibleFreeSlot; i_c++)
 				{
 					if (CanCarrierHoldUnit(i_c, pHoveredUnitType))
@@ -2355,9 +2461,10 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 						}
 					}
 				}
+
 				bool canBuyDirectly = (!limitReached && pHoveredUnitType->Cost <= currentMoney && hasCompatibleFreeSlot);
 
-				if (pHoveredUnitType == pType)
+				if (pHoveredUnitType == pType && !dropshipBayFixedUnitsLists[i][j])
 				{
 					// Hovering the same unit type: highlight in Red if limit is reached (to show where they are)
 					if (limitReached)
@@ -2369,10 +2476,11 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 				else
 				{
 					// Only show replacement highlights on dropship cargo slots if the hovered unit CANNOT be bought normally
-					if (!canBuyDirectly)
+					if (!canBuyDirectly && !dropshipBayFixedUnitsLists[i][j])
 					{
 						bool limitOk = !limitReached;
 						long netCost = pHoveredUnitType->Cost - pType->Cost;
+
 						if (limitOk && netCost <= currentMoney)
 						{
 							showHighlight = true;
@@ -2396,13 +2504,16 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 
 			auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
 			if (!pTypeExt)
-			{
 				continue;
-			}
 
 			auto const pPCXSurface = pTypeExt->CameoPCX.GetSurface();
 			auto pFileSHP = pType->Cameo;
 			auto pPalette = FileSystem::CAMEO_PAL;
+
+			BlitterFlags bf = BlitterFlags::None;
+
+			if (dropshipBayFixedUnitsLists[i][j])
+				bf = BlitterFlags::bf_400 | BlitterFlags::Darken;
 
 			GeneralUtils::DrawImage(
 				pSurface,
@@ -2411,7 +2522,8 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 				pFileSHP,
 				pPalette,
 				0,
-				-2
+				-2,
+				bf
 			);
 		}
 	}
@@ -2419,15 +2531,11 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 	if (currentLoadoutFrame >= 0)
 	{
 		BSurface* framePCX = nullptr;
+
 		if (dropshipLoadout_LoadoutPCX.size() > 0)
 		{
 			if (currentLoadoutFrame < (int)dropshipLoadout_LoadoutPCX.size())
-			{
 				framePCX = dropshipLoadout_LoadoutPCX[currentLoadoutFrame];
-			}
-			else
-			{
-			}
 		}
 
 		GeneralUtils::DrawImage(
@@ -2444,15 +2552,11 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 	if (currentPilotLitFrame >= 0)
 	{
 		BSurface* framePCX = nullptr;
+
 		if (dropshipLoadout_PilotLitPCX.size() > 0)
 		{
 			if (currentPilotLitFrame < (int)dropshipLoadout_PilotLitPCX.size())
-			{
 				framePCX = dropshipLoadout_PilotLitPCX[currentPilotLitFrame];
-			}
-			else
-			{
-			}
 		}
 
 		GeneralUtils::DrawImage(
@@ -2471,28 +2575,20 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		if (sidebarRowAnimationIndex < (int)dGreenLocation.size())
 		{
 			BSurface* framePCX = nullptr;
+
 			if (dropshipLoadout_DGreenListPCX.size() > 0)
 			{
 				if (sidebarRowAnimationIndex < (int)dropshipLoadout_DGreenListPCX.size())
 				{
 					if (currentSidebarRowAnimationFrame < (int)dropshipLoadout_DGreenListPCX[sidebarRowAnimationIndex].size())
-					{
 						framePCX = dropshipLoadout_DGreenListPCX[sidebarRowAnimationIndex][currentSidebarRowAnimationFrame];
-					}
-					else
-					{
-					}
 				}
 			}
 
 			SHPStruct* fileSHP = nullptr;
+
 			if (sidebarRowAnimationIndex < (int)dropshipLoadout_DGreenList.size())
-			{
 				fileSHP = dropshipLoadout_DGreenList[sidebarRowAnimationIndex];
-			}
-			else
-			{
-			}
 
 			GeneralUtils::DrawImage(
 				pSurface,
@@ -2504,9 +2600,6 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 				-2
 			);
 		}
-		else
-		{
-		}
 	}
 
 	wchar_t buffer[64];
@@ -2517,6 +2610,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		windowRectangle.Width - 140,
 		windowRectangle.Height - 15
 	};
+
 	pSurface->DrawTextA(buffer, &windowRectangle, &creditsLabel, foreColor, 0, style);
 
 	swprintf_s(buffer, L"Press SPACE to start the mission");
@@ -2526,6 +2620,7 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 		(windowRectangle.Width - 175) / 2,
 		windowRectangle.Height - 15
 	};
+
 	pSurface->DrawTextA(buffer, &windowRectangle, &pressSpaceLabel, foreColor, 0, style);
 
 	// Draw Dragged Cameo
@@ -2554,10 +2649,10 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 			newRectangle.X -= 2;
 			newRectangle.Width += 4;
 			ColorStruct dragBorderColor = ColorStruct { 0, 0, 255 }; // Blue
+
 			if (nSourceDropshipIdx != -1 && isMouseOverSidebarArea)
-			{
 				dragBorderColor = ColorStruct { 255, 0, 0 }; // Red (sell indicator)
-			}
+
 			pSurface->FillRectTrans(&newRectangle, &dragBorderColor, 255);
 
 			// Draw the cameo with half transparency to make it look like a drag shadow
@@ -2592,6 +2687,7 @@ void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 
 	// Calculate maxLimit
 	int maxLimit = -1;
+
 	for (size_t idx = 0; idx < availableUnits.size(); ++idx)
 	{
 		if (availableUnits[idx] == pHoveredUnitType)
@@ -2603,10 +2699,9 @@ void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 
 	// Calculate currentCount
 	int currentCount = 0;
+
 	if (dropshipBayChosenUnitsCount.count(pHoveredUnitType) > 0)
-	{
 		currentCount = dropshipBayChosenUnitsCount[pHoveredUnitType];
-	}
 
 	// Determine dimensions of each line to compute the total box size
 	int textWidth = 0;
@@ -2625,6 +2720,7 @@ void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 	std::wstring availValueStr;
 	int availLabelWidth = 0, availLabelHeight = 0;
 	int availValueWidth = 0, availValueHeight = 0;
+
 	if (maxLimit > 0)
 	{
 		BitFont::Instance->GetTextDimension(availLabel.c_str(), &availLabelWidth, &availLabelHeight, maxToolTipWidth);
@@ -2661,6 +2757,7 @@ void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 	std::wstring descStr;
 	int descWidth = 0, descHeight = 0;
 	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pHoveredUnitType);
+
 	if (pTypeExt && Phobos::Config::ToolTipDescriptions && !pTypeExt->UIDescription.Get().empty())
 	{
 		descStr = pTypeExt->UIDescription.Get().Text;
@@ -2689,10 +2786,8 @@ void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 	int boxX = mousePos.X + 15;
 	int boxY = mousePos.Y + 15;
 
-	if (boxX + boxWidth > maxX)
-		boxX = mousePos.X - boxWidth - 5;
-	if (boxY + boxHeight > maxY)
-		boxY = maxY - boxHeight - 5;
+	if (boxX + boxWidth > maxX) boxX = mousePos.X - boxWidth - 5;
+	if (boxY + boxHeight > maxY) boxY = maxY - boxHeight - 5;
 
 	if (boxX < minX) boxX = minX;
 	if (boxY < minY) boxY = minY;
@@ -2751,14 +2846,11 @@ void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 		// Draw value (Red / Yellow / White)
 		int availableCount = maxLimit - currentCount;
 		COLORREF availColor = Drawing::RGB_To_Int(255, 255, 255); // White
+
 		if (availableCount == 0)
-		{
 			availColor = Drawing::RGB_To_Int(255, 0, 0); // Red
-		}
 		else if (availableCount * 2 <= maxLimit)
-		{
 			availColor = Drawing::RGB_To_Int(255, 255, 0); // Yellow
-		}
 
 		BitFont::Instance->Color = static_cast<WORD>(availColor);
 		BitText::Instance->DrawText(
@@ -2792,13 +2884,9 @@ void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 	// Draw value (Red / Yellow / White)
 	COLORREF costColor = Drawing::RGB_To_Int(255, 255, 255); // White
 	if (currentMoney < cost)
-	{
 		costColor = Drawing::RGB_To_Int(255, 0, 0); // Red
-	}
 	else if (currentMoney < cost * 2)
-	{
 		costColor = Drawing::RGB_To_Int(255, 255, 0); // Yellow
-	}
 
 	BitFont::Instance->Color = static_cast<WORD>(costColor);
 	BitText::Instance->DrawText(
@@ -2840,11 +2928,10 @@ void DropshipLoadoutClass::DrawTooltip(DSurface* pSurface)
 int DropshipLoadoutClass::GetCarrierSizeLimit(int carrierIdx)
 {
 	if (carrierIdx < 0 || carrierIdx >= nStartingDropships)
-	{
 		return -1;
-	}
 
 	std::vector<int> sizeLimits;
+
 	if (pHouseTypeExt && pHouseTypeExt->DropshipLoadout_Carriers_SizeLimit.size() > 0)
 	{
 		for (int limit : pHouseTypeExt->DropshipLoadout_Carriers_SizeLimit)
@@ -2861,14 +2948,14 @@ int DropshipLoadoutClass::GetCarrierSizeLimit(int carrierIdx)
 	}
 
 	int configuredLimit = -1;
+
 	if (carrierIdx < (int)sizeLimits.size())
-	{
 		configuredLimit = sizeLimits[carrierIdx];
-	}
 
 	if (configuredLimit == 0)
 	{
 		std::vector<TechnoTypeClass*> carriers;
+
 		if (pHouseTypeExt && pHouseTypeExt->DropshipLoadout_Carriers.size() > 0)
 		{
 			for (auto carrier : pHouseTypeExt->DropshipLoadout_Carriers)
@@ -2885,9 +2972,7 @@ int DropshipLoadoutClass::GetCarrierSizeLimit(int carrierIdx)
 		}
 
 		if (carrierIdx < (int)carriers.size() && carriers[carrierIdx])
-		{
 			return static_cast<int>(carriers[carrierIdx]->SizeLimit);
-		}
 	}
 
 	return configuredLimit;
@@ -2896,15 +2981,11 @@ int DropshipLoadoutClass::GetCarrierSizeLimit(int carrierIdx)
 bool DropshipLoadoutClass::CanCarrierHoldUnit(int carrierIdx, TechnoTypeClass* pUnitType)
 {
 	if (!pUnitType)
-	{
 		return true;
-	}
 
 	int limit = GetCarrierSizeLimit(carrierIdx);
 	if (limit == -1)
-	{
 		return true;
-	}
 
 	return static_cast<int>(pUnitType->Size) <= limit;
 }
@@ -2912,15 +2993,11 @@ bool DropshipLoadoutClass::CanCarrierHoldUnit(int carrierIdx, TechnoTypeClass* p
 void DropshipLoadoutClass::SaveCargo()
 {
 	if (!HouseClass::CurrentPlayer)
-	{
 		return;
-	}
 
 	auto pHouseExt = HouseExt::ExtMap.Find(HouseClass::CurrentPlayer);
 	if (!pHouseExt)
-	{
 		return;
-	}
 
 	pHouseExt->DropshipLoadout_Cargo.clear();
 	pHouseExt->DropshipLoadout_Carriers.clear();
@@ -2950,23 +3027,23 @@ void DropshipLoadoutClass::SaveCargo()
 		std::vector<TechnoTypeClass*> unitsList;
 
 		if (i >= (int)dropshipBayChosenUnitsLists.size())
-		{
 			continue;
-		}
 
 		for (auto const pTechno : dropshipBayChosenUnitsLists[i])
 		{
 			if (pTechno)
-			{
 				unitsList.push_back(pTechno);
-			}
 		}
 
 		pHouseExt->DropshipLoadout_Cargo.push_back(unitsList);
 		unitsList.clear();
 	}
 
-	bool addUnusedMoneyToPlayer = pHouseTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer.isset() ? pHouseTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer : (ScenarioExt::Global() ? ScenarioExt::Global()->DropshipLoadout_AddUnusedMoneyToPlayer : false);
+	bool addUnusedMoneyToPlayer = false;
+	if (pHouseTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer.isset())
+		addUnusedMoneyToPlayer = pHouseTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer;
+	else if (ScenarioExt::Global())
+		addUnusedMoneyToPlayer = ScenarioExt::Global()->DropshipLoadout_AddUnusedMoneyToPlayer;
 
 	if (addUnusedMoneyToPlayer)
 	{
@@ -2974,7 +3051,11 @@ void DropshipLoadoutClass::SaveCargo()
 	}
 	else
 	{
-		long dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money.isset() ? pHouseTypeExt->DropshipLoadout_Money : (ScenarioExt::Global() ? ScenarioExt::Global()->DropshipLoadout_Money : -1);
+		long dropshipLoadout_InitialMoney = -1;
+		if (pHouseTypeExt->DropshipLoadout_Money.isset())
+			dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money;
+		else if (ScenarioExt::Global())
+			dropshipLoadout_InitialMoney = ScenarioExt::Global()->DropshipLoadout_Money;
 
 		if (dropshipLoadout_InitialMoney < 0)
 		{
@@ -2988,37 +3069,21 @@ DEFINE_HOOK(0x4B6C30, Dropship_Loadout_Remake, 0x0)
 {
 	enum { EndFunction = 0x4B9690 };
 
-	if (!HouseClass::CurrentPlayer)
-	{
+	if (!HouseClass::CurrentPlayer || !ScenarioClass::Instance)
 		return EndFunction;
-	}
 
 	auto const pHouseTypeExt = HouseTypeExt::ExtMap.Find(HouseClass::CurrentPlayer->Type);
 	if (!pHouseTypeExt)
-	{
 		return EndFunction;
-	}
-
-	if (!ScenarioClass::Instance)
-	{
-		return EndFunction;
-	}
 
 	int nStartingDropships = pHouseTypeExt->DropshipLoadout_StartingDropships.isset() ? pHouseTypeExt->DropshipLoadout_StartingDropships : ScenarioClass::Instance->StartingDropships;
 
 	if (nStartingDropships <= 0)
-	{
 		return EndFunction;
-	}
 
 	DropshipLoadoutClass loadout;
 	if (loadout.Initialize())
-	{
 		loadout.Run();
-	}
-	else
-	{
-	}
 
 	return EndFunction;
 }

@@ -23,13 +23,12 @@ void HouseTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	INI_EX exINI(pINI);
 
-	// Custom Dropship loadout images, in PCX format
 	this->DropshipLoadout_StartingDropships.Read(exINI, pSection, "DropshipLoadout.StartingDropships");
 	this->DropshipLoadout_AllowableUnits.Read(exINI, pSection, "DropshipLoadout.AllowableUnits");
 	this->DropshipLoadout_AllowableUnitMaximums.Read(exINI, pSection, "DropshipLoadout.AllowableUnitMaximums");
-	//this->DropshipLoadout_Theme.Read(exINI, pSection, "DropshipLoadout.Theme");
-	if (pINI->ReadTheme(pSection, "DropshipLoadout.Theme", this->DropshipLoadout_Theme))
-		this->DropshipLoadout_Theme = pINI->ReadTheme(pSection, "DropshipLoadout.Theme", this->DropshipLoadout_Theme);
+
+	if (pINI->ReadString(pSection, "DropshipLoadout.Theme", "", Phobos::readBuffer) > 0)
+		this->DropshipLoadout_Theme = pINI->ReadTheme(pSection, "DropshipLoadout.Theme", -1);
 
 	this->DropshipLoadout_Money.Read(exINI, pSection, "DropshipLoadout.Money");
 	this->DropshipLoadout_StartEVA.Read(exINI, pSection, "DropshipLoadout.StartEVA");
@@ -131,6 +130,39 @@ void HouseTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		this->DropshipLoadout_DropshipCameoLocations.push_back(locations);
 	}
 
+	this->DropshipLoadout_FixedUnits.clear();
+	std::vector<TechnoTypeClass*> parsedFixedUnits[64];
+	int maxIdx = -1;
+	
+	for (int i = 0; i < 64; ++i)
+	{
+		char tempBuffer[256];
+		_snprintf_s(tempBuffer, sizeof(tempBuffer), "DropshipLoadout.FixedUnits.Dropship%d", i);
+
+		if (pINI->ReadString(pSection, tempBuffer, "", Phobos::readBuffer) > 0)
+		{
+			char* ctx = nullptr;
+
+			for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+			{
+				if (auto pType = TechnoTypeClass::Find(cur))
+					parsedFixedUnits[i].push_back(pType);
+			}
+
+			maxIdx = i;
+		}
+	}
+
+	if (maxIdx != -1)
+	{
+		this->DropshipLoadout_FixedUnits.resize(maxIdx + 1);
+
+		for (int i = 0; i <= maxIdx; ++i)
+		{
+			this->DropshipLoadout_FixedUnits[i] = std::move(parsedFixedUnits[i]);
+		}
+	}
+
 	this->DropshipLoadout_BuyClickSound.Read(exINI, pSection, "DropshipLoadout.BuyClickSound");
 	this->DropshipLoadout_SellClickSound.Read(exINI, pSection, "DropshipLoadout.SellClickSound");
 	this->DropshipLoadout_ArrowsClickSound.Read(exINI, pSection, "DropshipLoadout.ArrowsClickSound");
@@ -187,6 +219,20 @@ void HouseTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_ArrowsClickSound)
 		.Process(this->DropshipLoadout_StartingDragDropSound)
 		.Process(this->DropshipLoadout_EndingDragDropSound)
+		;
+
+	int numDropships = (int)this->DropshipLoadout_FixedUnits.size();
+	Stm.Process(numDropships);
+
+	if constexpr (std::is_same_v<T, PhobosStreamReader>)
+		this->DropshipLoadout_FixedUnits.resize(numDropships);
+
+	for (int i = 0; i < numDropships; ++i)
+	{
+		Stm.Process(this->DropshipLoadout_FixedUnits[i]);
+	}
+
+	Stm
 		.Process(this->BattlePoints)
 		.Process(this->BattlePoints_CanUseStandardPoints)
 		.Process(this->NewTeamsSelector_MergeUnclassifiedCategoryWith)

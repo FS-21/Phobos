@@ -297,28 +297,55 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 		}
 
 		this->DropshipLoadout_DropshipCameoLocations.push_back(locations);
+	}
 
-		pINI->ReadString(GameStrings::Basic, "DropshipLoadout.Carriers", "", Phobos::readBuffer);
+	if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.BuyClickSound", "", Phobos::readBuffer) != 0)
+		this->DropshipLoadout_BuyClickSound = VocClass::FindIndex(Phobos::readBuffer);
 
-		if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.BuyClickSound", "", Phobos::readBuffer) != 0)
-			this->DropshipLoadout_BuyClickSound = VocClass::FindIndex(Phobos::readBuffer);
-		//else
-			//this->DropshipLoadout_SellClickSound = RulesClass::Instance->GUITabSound;
+	if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.SellClickSound", "", Phobos::readBuffer) != 0)
+		this->DropshipLoadout_SellClickSound = VocClass::FindIndex(Phobos::readBuffer);
 
-		//this->DropshipLoadout_SellClickSound.
-		if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.SellClickSound", "", Phobos::readBuffer) != 0)
-			this->DropshipLoadout_SellClickSound = VocClass::FindIndex(Phobos::readBuffer);
-		//else
-			//this->DropshipLoadout_SellClickSound = RulesClass::Instance->GUITabSound;
+	if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.ArrowsClickSound", "", Phobos::readBuffer) != 0)
+		this->DropshipLoadout_ArrowsClickSound = VocClass::FindIndex(Phobos::readBuffer);
 
-		if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.ArrowsClickSound", "", Phobos::readBuffer) != 0)
-			this->DropshipLoadout_ArrowsClickSound = VocClass::FindIndex(Phobos::readBuffer);
+	if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.StartingDragDropSound", "", Phobos::readBuffer) != 0)
+		this->DropshipLoadout_StartingDragDropSound = VocClass::FindIndex(Phobos::readBuffer);
 
-		if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.StartingDragDropSound", "", Phobos::readBuffer) != 0)
-			this->DropshipLoadout_StartingDragDropSound = VocClass::FindIndex(Phobos::readBuffer);
+	if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.EndingDragDropSound", "", Phobos::readBuffer) != 0)
+		this->DropshipLoadout_EndingDragDropSound = VocClass::FindIndex(Phobos::readBuffer);
 
-		if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.EndingDragDropSound", "", Phobos::readBuffer) != 0)
-			this->DropshipLoadout_EndingDragDropSound = VocClass::FindIndex(Phobos::readBuffer);
+	// Parse FixedUnits per dropship (supports non-contiguous indices e.g. Dropship0 and Dropship2 without Dropship1)
+	this->DropshipLoadout_FixedUnits.clear();
+	{
+		std::vector<TechnoTypeClass*> parsedFixedUnits[64];
+		int maxIdx = -1;
+
+		for (int k = 0; k < 64; ++k)
+		{
+			char tempBuffer[256];
+			_snprintf_s(tempBuffer, sizeof(tempBuffer), "DropshipLoadout.FixedUnits.Dropship%d", k);
+
+			if (pINI->ReadString(GameStrings::Basic, tempBuffer, "", Phobos::readBuffer) > 0)
+			{
+				char* ctx = nullptr;
+
+				for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+				{
+					if (auto pType = TechnoTypeClass::Find(cur))
+						parsedFixedUnits[k].push_back(pType);
+				}
+
+				maxIdx = k;
+			}
+		}
+
+		if (maxIdx != -1)
+		{
+			this->DropshipLoadout_FixedUnits.resize(maxIdx + 1);
+
+			for (int k = 0; k <= maxIdx; ++k)
+				this->DropshipLoadout_FixedUnits[k] = std::move(parsedFixedUnits[k]);
+		}
 	}
 }
 
@@ -380,6 +407,17 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_StartingDragDropSound)
 		.Process(this->DropshipLoadout_EndingDragDropSound)
 		;
+
+	int numDropships = (int)this->DropshipLoadout_FixedUnits.size();
+	Stm.Process(numDropships);
+
+	if constexpr (std::is_same_v<T, PhobosStreamReader>)
+		this->DropshipLoadout_FixedUnits.resize(numDropships);
+
+	for (int i = 0; i < numDropships; ++i)
+	{
+		Stm.Process(this->DropshipLoadout_FixedUnits[i]);
+	}
 }
 
 void ScenarioExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)
