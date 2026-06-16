@@ -17,6 +17,8 @@ public:
 		Nullable<int> DropshipLoadout_StartingDropships;
 		ValueableVector<TechnoTypeClass*> DropshipLoadout_AllowableUnits;
 		ValueableVector<int> DropshipLoadout_AllowableUnitMaximums;
+		std::map<int, std::vector<TechnoTypeClass*>> DropshipLoadout_AllowableUnitsLists;
+		std::map<int, std::vector<int>> DropshipLoadout_AllowableUnitMaximumsLists;
 		Nullable<int> DropshipLoadout_Theme;
 		Nullable<int> DropshipLoadout_Money;
 		NullableIdx<VoxClass> DropshipLoadout_StartEVA;
@@ -25,6 +27,7 @@ public:
 		Nullable<bool> DropshipLoadout_AddUnusedMoneyToPlayer;
 
 		Nullable<PhobosPCXFile> DropshipLoadout_BackgroundPCX;
+		std::string DropshipLoadout_BackgroundPCXPattern; // raw format string, e.g. "DROP%04d.PCX"
 		Nullable<PhobosPCXFile> DropshipLoadout_UpArrowPCX;
 		Nullable<PhobosPCXFile> DropshipLoadout_DownArrowPCX;
 		ValueableVector<PhobosPCXFile> DropshipLoadout_LoadoutPCX;
@@ -59,6 +62,8 @@ public:
 			, DropshipLoadout_StartingDropships {}
 			, DropshipLoadout_AllowableUnits {}
 			, DropshipLoadout_AllowableUnitMaximums {}
+			, DropshipLoadout_AllowableUnitsLists {}
+			, DropshipLoadout_AllowableUnitMaximumsLists {}
 			, DropshipLoadout_Theme {}
 			, DropshipLoadout_Money {}
 			, DropshipLoadout_StartEVA {}

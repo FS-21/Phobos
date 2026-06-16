@@ -633,7 +633,8 @@ bool TActionExt::OpenDropshipLoadoutWindow(TActionClass* pThis, HouseClass* pTri
 	bool bIgnoreFixedUnits = (pThis->Param3 == 1);
 	bool bPreloadCargo = (pThis->Param4 != 1);
 	bool bRefundOnClean = (pThis->Param4 == 1);
-	DropshipLoadoutClass::OpenInGameWindow(bIgnoreFixedUnits, bPreloadCargo, bRefundOnClean);
+	int allowableUnitsIndex = pThis->Value;
+	DropshipLoadoutClass::OpenInGameWindow(bIgnoreFixedUnits, bPreloadCargo, bRefundOnClean, allowableUnitsIndex);
 	
 	return true;
 }

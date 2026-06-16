@@ -138,13 +138,14 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 	dropshipLoadout_DGreenList.clear();
 }
 
-bool DropshipLoadoutClass::Initialize(bool bIgnoreFixedUnits, bool bPreloadCargo, bool bRefundOnClean)
+bool DropshipLoadoutClass::Initialize(bool bIgnoreFixedUnits, bool bPreloadCargo, bool bRefundOnClean, int allowableUnitsIndex)
 {
 	if (!HouseClass::CurrentPlayer)
 		return false;
 
 	this->bIgnoreFixedUnits = bIgnoreFixedUnits;
 	this->bPreloadCargo = bPreloadCargo;
+	this->allowableUnitsIndex = allowableUnitsIndex;
 
 	pHouseTypeExt = HouseTypeExt::ExtMap.Find(HouseClass::CurrentPlayer->Type);
 	if (!pHouseTypeExt)
@@ -157,6 +158,34 @@ bool DropshipLoadoutClass::Initialize(bool bIgnoreFixedUnits, bool bPreloadCargo
 
 	if (nStartingDropships <= 0)
 		return false;
+
+	// Check if the requested allowableUnits list exists (for non-zero indices)
+	if (allowableUnitsIndex != 0)
+	{
+		bool listFound = false;
+		if (pHouseTypeExt)
+		{
+			auto it = pHouseTypeExt->DropshipLoadout_AllowableUnitsLists.find(allowableUnitsIndex);
+			if (it != pHouseTypeExt->DropshipLoadout_AllowableUnitsLists.end())
+				listFound = true;
+			else
+				listFound = false;
+		}
+		if (!listFound)
+		{
+			if (auto const pGlobal = ScenarioExt::Global())
+			{
+				auto it = pGlobal->DropshipLoadout_AllowableUnitsLists.find(allowableUnitsIndex);
+				if (it != pGlobal->DropshipLoadout_AllowableUnitsLists.end())
+					listFound = true;
+				else
+					listFound = false;
+			}
+		}
+
+		if (!listFound)
+			return false;
+	}
 
 	auto pHouseExt = HouseExt::ExtMap.Find(HouseClass::CurrentPlayer);
 	auto const pGlobal = ScenarioExt::Global();
@@ -230,7 +259,20 @@ void DropshipLoadoutClass::LoadAssets()
 		dropshipLoadout_Palette = FileSystem::LoadPALFile("DROPSHIP.PAL", DSurface::Hidden);
 
 	if (pHouseTypeExt->DropshipLoadout_BackgroundPCX.isset() && pHouseTypeExt->DropshipLoadout_BackgroundPCX.Get().Exists())
+	{
 		dropshipLoadout_BackgroundPCX = pHouseTypeExt->DropshipLoadout_BackgroundPCX.Get().GetSurface();
+	}
+	else if (!pHouseTypeExt->DropshipLoadout_BackgroundPCXPattern.empty())
+	{
+		// Re-format with the correct runtime nStartingDropships (parse-time value may have been 0)
+		char filename[260];
+		_snprintf_s(filename, sizeof(filename), pHouseTypeExt->DropshipLoadout_BackgroundPCXPattern.c_str(), nStartingDropships);
+		PhobosPCXFile runtimePCX(filename);
+		if (runtimePCX.Exists())
+			dropshipLoadout_BackgroundPCX = runtimePCX.GetSurface();
+		else if (pGlobal && pGlobal->DropshipLoadout_BackgroundPCX.Exists())
+			dropshipLoadout_BackgroundPCX = pGlobal->DropshipLoadout_BackgroundPCX.GetSurface();
+	}
 	else if (pGlobal && pGlobal->DropshipLoadout_BackgroundPCX.Exists())
 		dropshipLoadout_BackgroundPCX = pGlobal->DropshipLoadout_BackgroundPCX.GetSurface();
 
@@ -488,61 +530,78 @@ void DropshipLoadoutClass::LoadAssets()
 	}
 
 	std::vector<TechnoTypeClass*> allowableUnits;
-
-	if (pHouseTypeExt->DropshipLoadout_AllowableUnits.size() > 0)
-	{
-		for (auto pUnit : pHouseTypeExt->DropshipLoadout_AllowableUnits)
-		{
-			allowableUnits.push_back(pUnit);
-		}
-	}
-	else
-	{
-		for (auto pUnit : ScenarioClass::Instance->AllowableUnits)
-		{
-			allowableUnits.push_back(pUnit);
-		}
-	}
-
 	std::vector<int> allowableUnitMaximums;
 
-	if (pHouseTypeExt->DropshipLoadout_AllowableUnitMaximums.size() > 0)
+	bool listFound = false;
+
+	// 1. Try pHouseTypeExt custom lists
+	if (pHouseTypeExt)
 	{
-		for (int pUnitCount : pHouseTypeExt->DropshipLoadout_AllowableUnitMaximums)
+		auto it = pHouseTypeExt->DropshipLoadout_AllowableUnitsLists.find(this->allowableUnitsIndex);
+		if (it != pHouseTypeExt->DropshipLoadout_AllowableUnitsLists.end())
 		{
-			allowableUnitMaximums.push_back(pUnitCount);
+			allowableUnits = it->second;
+			listFound = true;
+
+			auto itMax = pHouseTypeExt->DropshipLoadout_AllowableUnitMaximumsLists.find(this->allowableUnitsIndex);
+			if (itMax != pHouseTypeExt->DropshipLoadout_AllowableUnitMaximumsLists.end())
+				allowableUnitMaximums = itMax->second;
 		}
 	}
-	else
+
+	// 2. Try Scenario custom lists
+	if (!listFound && pGlobal)
 	{
-		for (int pUnitCount : ScenarioClass::Instance->AllowableUnitMaximums)
+		auto it = pGlobal->DropshipLoadout_AllowableUnitsLists.find(this->allowableUnitsIndex);
+		if (it != pGlobal->DropshipLoadout_AllowableUnitsLists.end())
 		{
-			allowableUnitMaximums.push_back(pUnitCount);
+			allowableUnits = it->second;
+			listFound = true;
+
+			auto itMax = pGlobal->DropshipLoadout_AllowableUnitMaximumsLists.find(this->allowableUnitsIndex);
+			if (itMax != pGlobal->DropshipLoadout_AllowableUnitMaximumsLists.end())
+				allowableUnitMaximums = itMax->second;
+		}
+	}
+
+	// 3. Default native fallback (only if requested index is 0)
+	if (!listFound && this->allowableUnitsIndex == 0)
+	{
+		if (pHouseTypeExt && pHouseTypeExt->DropshipLoadout_AllowableUnits.size() > 0)
+		{
+			for (auto pUnit : pHouseTypeExt->DropshipLoadout_AllowableUnits)
+				allowableUnits.push_back(pUnit);
+			
+			for (int pUnitCount : pHouseTypeExt->DropshipLoadout_AllowableUnitMaximums)
+				allowableUnitMaximums.push_back(pUnitCount);
+		}
+		else
+		{
+			for (auto pUnit : ScenarioClass::Instance->AllowableUnits)
+				allowableUnits.push_back(pUnit);
+
+			for (int pUnitCount : ScenarioClass::Instance->AllowableUnitMaximums)
+				allowableUnitMaximums.push_back(pUnitCount);
 		}
 	}
 
 	if (allowableUnits.size() > 0)
 	{
-		bool maximumsValid = allowableUnitMaximums.size() == 0 || allowableUnits.size() == allowableUnitMaximums.size();
-
-		if (maximumsValid)
+		for (size_t i = 0; i < allowableUnits.size(); ++i)
 		{
-			for (size_t i = 0; i < allowableUnits.size(); ++i)
+			int maximumCount = -1;
+
+			if (i < allowableUnitMaximums.size())
 			{
-				int maximumCount = -1;
+				maximumCount = allowableUnitMaximums[i];
 
-				if (allowableUnitMaximums.size() > 0)
-				{
-					maximumCount = allowableUnitMaximums[i];
-
-					if (maximumCount == 0)
-						continue;
-				}
-
-				availableUnitsMaximums.push_back(maximumCount);
-				TechnoTypeClass* pType = allowableUnits[i];
-				availableUnits.push_back(pType);
+				if (maximumCount == 0)
+					continue;
 			}
+
+			availableUnitsMaximums.push_back(maximumCount);
+			TechnoTypeClass* pType = allowableUnits[i];
+			availableUnits.push_back(pType);
 		}
 	}
 	else
@@ -550,7 +609,10 @@ void DropshipLoadoutClass::LoadAssets()
 		for (const auto pType : TechnoTypeClass::Array)
 		{
 			if (pType && (pType->WhatAmI() == AbstractType::InfantryType || pType->WhatAmI() == AbstractType::UnitType))
+			{
 				availableUnits.push_back(pType);
+				availableUnitsMaximums.push_back(-1);
+			}
 		}
 	}
 }
@@ -814,8 +876,19 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 			std::vector<RectangleStruct> list;
 			for (int j = 0; j < nDropshipBayCameos; j++)
 			{
-				int cameoX = backgroundX + pHouseTypeExt->DropshipLoadout_DropshipCameoLocations[i][j].X;
-				int cameoY = backgroundY + pHouseTypeExt->DropshipLoadout_DropshipCameoLocations[i][j].Y;
+				int offsetX = 0;
+				int offsetY = 0;
+				if (i < (int)pHouseTypeExt->DropshipLoadout_DropshipCameoLocations.size())
+				{
+					auto& row = pHouseTypeExt->DropshipLoadout_DropshipCameoLocations[i];
+					if (j < (int)row.size())
+					{
+						offsetX = row[j].X;
+						offsetY = row[j].Y;
+					}
+				}
+				int cameoX = backgroundX + offsetX;
+				int cameoY = backgroundY + offsetY;
 				list.push_back({ cameoX, cameoY, cameoWidth, cameoHeight });
 			}
 
@@ -831,8 +904,19 @@ void DropshipLoadoutClass::CalculateLayout(DSurface* pSurface)
 			std::vector<RectangleStruct> list;
 			for (int j = 0; j < nDropshipBayCameos; j++)
 			{
-				int cameoX = backgroundX + pGlobal->DropshipLoadout_DropshipCameoLocations[i][j].X;
-				int cameoY = backgroundY + pGlobal->DropshipLoadout_DropshipCameoLocations[i][j].Y;
+				int offsetX = 0;
+				int offsetY = 0;
+				if (i < (int)pGlobal->DropshipLoadout_DropshipCameoLocations.size())
+				{
+					auto& row = pGlobal->DropshipLoadout_DropshipCameoLocations[i];
+					if (j < (int)row.size())
+					{
+						offsetX = row[j].X;
+						offsetY = row[j].Y;
+					}
+				}
+				int cameoX = backgroundX + offsetX;
+				int cameoY = backgroundY + offsetY;
 				list.push_back({ cameoX, cameoY, cameoWidth, cameoHeight });
 			}
 
@@ -1175,10 +1259,10 @@ void DropshipLoadoutClass::Run()
 	pendingScrolls = 0;
 	pHoveredUnitType = nullptr;
 
-	bool wasLButtonDown = false;
-	bool wasRButtonDown = false;
-	bool wasSpaceDown = false;
-	bool wasEscDown = false;
+	bool wasLButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+	bool wasRButtonDown = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+	bool wasSpaceDown = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+	bool wasEscDown = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
 
 	while (!pressedSpaceKey)
 	{
@@ -1482,6 +1566,10 @@ void DropshipLoadoutClass::Run()
 											{
 												ReturnToSource();
 											}
+											else if (!CanCarrierHoldUnit(nSourceDropshipIdx, pTargetUnit))
+											{
+												ReturnToSource();
+											}
 											else
 											{
 												dropshipBayChosenUnitsLists[dropshipIndex][slotIndex] = pDraggedUnitType;
@@ -1760,7 +1848,7 @@ void DropshipLoadoutClass::HandleInput(int command, int buttonID)
 
 	bool isUpArrow = buttonID == btn_ScrollUp_ID;
 	bool isDownArrow = buttonID == btn_ScrollDown_ID;
-	bool pressedUpArrow = command == VK_UP || ((pressedLeftClick || command == (32768 + btn_ScrollUp_ID)) && isUpArrow);
+	bool pressedUpArrow = command == VK_UP || (pressedLeftClick && isUpArrow);
 	bool pressedDownArrow = command == VK_DOWN || (pressedLeftClick && isDownArrow);
 
 	bool isScrollFromWheel = (pendingScrolls != 0);
@@ -2402,6 +2490,8 @@ void DropshipLoadoutClass::Render(DSurface* pSurface)
 								showHighlight = false;
 							else if ((bDraggedIsFixed || bTargetIsFixed) && static_cast<int>(i) != nSourceDropshipIdx)
 								showHighlight = false; // Cannot swap fixed units between dropships
+							else if (!CanCarrierHoldUnit(nSourceDropshipIdx, pType))
+								foreColor = ColorStruct { 170, 0, 255 }; // Violet (Too heavy for source dropship)
 							else
 								foreColor = ColorStruct { 0, 0, 255 }; // Blue (swap)
 						}
@@ -3112,7 +3202,7 @@ DEFINE_HOOK(0x4B6C30, Dropship_Loadout_Remake, 0x0)
 	return EndFunction;
 }
 
-void DropshipLoadoutClass::OpenInGameWindow(bool bIgnoreFixedUnits, bool bPreloadCargo, bool bRefundOnClean)
+void DropshipLoadoutClass::OpenInGameWindow(bool bIgnoreFixedUnits, bool bPreloadCargo, bool bRefundOnClean, int allowableUnitsIndex)
 {
 	if (!ScenarioClass::Instance)
 		return;
@@ -3126,7 +3216,7 @@ void DropshipLoadoutClass::OpenInGameWindow(bool bIgnoreFixedUnits, bool bPreloa
 	ScenarioClass::Instance->IsGamePaused = false;
 
 	DropshipLoadoutClass loadout;
-	if (loadout.Initialize(bIgnoreFixedUnits, bPreloadCargo, bRefundOnClean))
+	if (loadout.Initialize(bIgnoreFixedUnits, bPreloadCargo, bRefundOnClean, allowableUnitsIndex))
 	{
 		loadout.Run();
 	}

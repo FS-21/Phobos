@@ -87,6 +87,8 @@ public:
 		int DropshipLoadout_DropshipCameosCount;
 		std::vector<std::vector<Point2D>> DropshipLoadout_DropshipCameoLocations;
 		std::vector<std::vector<TechnoTypeClass*>> DropshipLoadout_FixedUnits;
+		std::map<int, std::vector<TechnoTypeClass*>> DropshipLoadout_AllowableUnitsLists;
+		std::map<int, std::vector<int>> DropshipLoadout_AllowableUnitMaximumsLists;
 		//VocClass DropshipLoadout_SellClickSound;
 		NullableIdx<VocClass> DropshipLoadout_BuyClickSound;
 		NullableIdx<VocClass> DropshipLoadout_SellClickSound;
@@ -143,6 +145,8 @@ public:
 			, DropshipLoadout_DropshipCameosCount { 0 }
 			, DropshipLoadout_DropshipCameoLocations {}
 			, DropshipLoadout_FixedUnits {}
+			, DropshipLoadout_AllowableUnitsLists {}
+			, DropshipLoadout_AllowableUnitMaximumsLists {}
 			, DropshipLoadout_BuyClickSound {}
 			, DropshipLoadout_SellClickSound {}
 			, DropshipLoadout_ArrowsClickSound {}

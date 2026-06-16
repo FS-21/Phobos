@@ -150,6 +150,7 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	}
 
 	// Dropship loadout stuff
+	const int keyCount = pINI->GetKeyCount(GameStrings::Basic);
 	this->DropshipLoadout_Theme = pINI->ReadTheme(GameStrings::Basic, "DropshipLoadout.Theme", this->DropshipLoadout_Theme);
 	this->DropshipLoadout_Money = pINI->ReadInteger(GameStrings::Basic, "DropshipLoadout.Money", this->DropshipLoadout_Money);
 	this->DropshipLoadout_StartEVA = pINI->ReadVoxName(GameStrings::Basic, "DropshipLoadout.StartEVA", this->DropshipLoadout_StartEVA);
@@ -183,6 +184,7 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	// Sidebar click animations list (the animation that appears in the sidebar when a cameo is clicked)
 	pINI->ReadString(GameStrings::Basic, "DropshipLoadout.DGreenList", "", Phobos::readBuffer);
 	
+	this->DropshipLoadout_DGreenList.clear();
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
 		this->DropshipLoadout_DGreenList.push_back(FileSystem::LoadSHPFile(cur));
@@ -219,6 +221,7 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	// Sidebar click animations list (the animation that appears in the sidebar when a cameo is clicked)
 	pINI->ReadString(GameStrings::Basic, "DropshipLoadout.DGreenListPCX", "", Phobos::readBuffer);
 
+	this->DropshipLoadout_DGreenListPCX.clear();
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
 		this->DropshipLoadout_DGreenListPCX.emplace_back(GeneralUtils::GetAnimationPCX(cur));
@@ -226,6 +229,7 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->DropshipLoadout_DGreenAnimationsCount = pINI->ReadInteger(GameStrings::Basic, "DropshipLoadout.DGreenAnimationsCount", 0);
 
+	this->DropshipLoadout_DGreenLocations.clear();
 	for (int i = 0; i < this->DropshipLoadout_DGreenAnimationsCount; i++)
 	{
 		char tempBuffer[256];
@@ -239,6 +243,7 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	// List of Dropship transports used in the map action
 	pINI->ReadString(GameStrings::Basic, "DropshipLoadout.Carriers", "", Phobos::readBuffer);
 
+	this->DropshipLoadout_Carriers.clear();
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
 		TechnoTypeClass* buffer;
@@ -251,6 +256,7 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	pINI->ReadString(GameStrings::Basic, "DropshipLoadout.Carriers.SizeLimit", "", Phobos::readBuffer);
 
+	this->DropshipLoadout_Carriers_SizeLimit.clear();
 	for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 	{
 		int limit;
@@ -270,6 +276,7 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->DropshipLoadout_SidebarCameosCount = pINI->ReadInteger(GameStrings::Basic, "DropshipLoadout.SidebarCameosCount", 0);
 
+	this->DropshipLoadout_SidebarCameoLocations.clear();
 	for (int i = 0; i < this->DropshipLoadout_SidebarCameosCount; i++)
 	{
 		char tempBuffer[256];
@@ -282,21 +289,41 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->DropshipLoadout_DropshipCameosCount = pINI->ReadInteger(GameStrings::Basic, "DropshipLoadout.DropshipCameosCount", 0);
 
-	for (int i = 0; i < ScenarioClass::Instance->StartingDropships; i++)
+	this->DropshipLoadout_DropshipCameoLocations.clear();
 	{
-		std::vector<Point2D> locations;
-
-		for (int j = 0; j < this->DropshipLoadout_DropshipCameosCount; j++)
+		int maxDropshipIdx = -1;
+		for (int k = 0; k < keyCount; ++k)
 		{
-			char tempBuffer[256];
-			Point2D location = Point2D::Empty;
-
-			_snprintf_s(tempBuffer, sizeof(tempBuffer), "DropshipLoadout.Dropship%d.CameoLocation%d", i, j);
-			pINI->ReadPoint2D(location, GameStrings::Basic, tempBuffer, location);
-			locations.push_back(location);
+			const char* pKeyName = pINI->GetKeyName(GameStrings::Basic, k);
+			int dropshipIdx = -1;
+			int cameoIdx = -1;
+			if (sscanf_s(pKeyName, "DropshipLoadout.Dropship%d.CameoLocation%d", &dropshipIdx, &cameoIdx) == 2)
+			{
+				if (dropshipIdx > maxDropshipIdx)
+					maxDropshipIdx = dropshipIdx;
+			}
 		}
 
-		this->DropshipLoadout_DropshipCameoLocations.push_back(locations);
+		if (maxDropshipIdx != -1)
+		{
+			int limit = maxDropshipIdx + 1;
+			for (int i = 0; i < limit; i++)
+			{
+				std::vector<Point2D> locations;
+
+				for (int j = 0; j < this->DropshipLoadout_DropshipCameosCount; j++)
+				{
+					char tempBuffer[256];
+					Point2D location = Point2D::Empty;
+
+					_snprintf_s(tempBuffer, sizeof(tempBuffer), "DropshipLoadout.Dropship%d.CameoLocation%d", i, j);
+					pINI->ReadPoint2D(location, GameStrings::Basic, tempBuffer, location);
+					locations.push_back(location);
+				}
+
+				this->DropshipLoadout_DropshipCameoLocations.push_back(locations);
+			}
+		}
 	}
 
 	if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.BuyClickSound", "", Phobos::readBuffer) != 0)
@@ -314,37 +341,202 @@ void ScenarioExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.EndingDragDropSound", "", Phobos::readBuffer) != 0)
 		this->DropshipLoadout_EndingDragDropSound = VocClass::FindIndex(Phobos::readBuffer);
 
-	// Parse FixedUnits per dropship (supports non-contiguous indices e.g. Dropship0 and Dropship2 without Dropship1)
-	this->DropshipLoadout_FixedUnits.clear();
+	// Parse multiple AllowableUnits lists
+	this->DropshipLoadout_AllowableUnitsLists.clear();
+	this->DropshipLoadout_AllowableUnitMaximumsLists.clear();
+
+	std::vector<int> parsedIndices;
+	parsedIndices.push_back(0);
+
+	for (int k = 0; k < keyCount; ++k)
 	{
-		std::vector<TechnoTypeClass*> parsedFixedUnits[64];
-		int maxIdx = -1;
-
-		for (int k = 0; k < 64; ++k)
+		const char* pKeyName = pINI->GetKeyName(GameStrings::Basic, k);
+		int idx = -1;
+		if (sscanf_s(pKeyName, "DropshipLoadout.AllowableUnits%d", &idx) == 1)
 		{
-			char tempBuffer[256];
-			_snprintf_s(tempBuffer, sizeof(tempBuffer), "DropshipLoadout.FixedUnits.Dropship%d", k);
+			if (std::find(parsedIndices.begin(), parsedIndices.end(), idx) == parsedIndices.end())
+				parsedIndices.push_back(idx);
+		}
+		else if (sscanf_s(pKeyName, "DropshipLoadout.AllowableUnitMaximums%d", &idx) == 1)
+		{
+			if (std::find(parsedIndices.begin(), parsedIndices.end(), idx) == parsedIndices.end())
+				parsedIndices.push_back(idx);
+		}
+	}
 
-			if (pINI->ReadString(GameStrings::Basic, tempBuffer, "", Phobos::readBuffer) > 0)
+	for (int i : parsedIndices)
+	{
+		std::vector<TechnoTypeClass*> unitsList;
+		std::vector<int> maxList;
+		bool unitsSet = false;
+		bool maxSet = false;
+
+		if (i == 0)
+		{
+			// Load default/native first
+			for (auto pType : ScenarioClass::Instance->AllowableUnits)
 			{
-				char* ctx = nullptr;
+				if (pType)
+					unitsList.push_back(pType);
+			}
+			if (unitsList.size() > 0)
+				unitsSet = true;
 
+			for (auto count : ScenarioClass::Instance->AllowableUnitMaximums)
+			{
+				maxList.push_back(count);
+			}
+			if (maxList.size() > 0)
+				maxSet = true;
+
+			// Overrides
+			if (pINI->ReadString(GameStrings::Basic, "AllowableUnits", "", Phobos::readBuffer) > 0)
+			{
+				unitsList.clear();
+				char* ctx = nullptr;
 				for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
 				{
 					if (auto pType = TechnoTypeClass::Find(cur))
-						parsedFixedUnits[k].push_back(pType);
+						unitsList.push_back(pType);
 				}
+				unitsSet = true;
+			}
 
-				maxIdx = k;
+			if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.AllowableUnits", "", Phobos::readBuffer) > 0)
+			{
+				unitsList.clear();
+				char* ctx = nullptr;
+				for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+				{
+					if (auto pType = TechnoTypeClass::Find(cur))
+						unitsList.push_back(pType);
+				}
+				unitsSet = true;
+			}
+
+			if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.AllowableUnits0", "", Phobos::readBuffer) > 0)
+			{
+				unitsList.clear();
+				char* ctx = nullptr;
+				for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+				{
+					if (auto pType = TechnoTypeClass::Find(cur))
+						unitsList.push_back(pType);
+				}
+				unitsSet = true;
+			}
+
+			// Maximums overrides
+			if (pINI->ReadString(GameStrings::Basic, "AllowableUnitMaximums", "", Phobos::readBuffer) > 0)
+			{
+				maxList.clear();
+				char* ctx = nullptr;
+				for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+				{
+					int maxCount;
+					if (Parser<int>::TryParse(cur, &maxCount))
+						maxList.push_back(maxCount);
+				}
+				maxSet = true;
+			}
+
+			if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.AllowableUnitMaximums", "", Phobos::readBuffer) > 0)
+			{
+				maxList.clear();
+				char* ctx = nullptr;
+				for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+				{
+					int maxCount;
+					if (Parser<int>::TryParse(cur, &maxCount))
+						maxList.push_back(maxCount);
+				}
+				maxSet = true;
+			}
+
+			if (pINI->ReadString(GameStrings::Basic, "DropshipLoadout.AllowableUnitMaximums0", "", Phobos::readBuffer) > 0)
+			{
+				maxList.clear();
+				char* ctx = nullptr;
+				for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+				{
+					int maxCount;
+					if (Parser<int>::TryParse(cur, &maxCount))
+						maxList.push_back(maxCount);
+				}
+				maxSet = true;
+			}
+		}
+		else
+		{
+			char keyUnitsOverride[256];
+			_snprintf_s(keyUnitsOverride, sizeof(keyUnitsOverride), "DropshipLoadout.AllowableUnits%d", i);
+			if (pINI->ReadString(GameStrings::Basic, keyUnitsOverride, "", Phobos::readBuffer) > 0)
+			{
+				char* ctx = nullptr;
+				for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+				{
+					if (auto pType = TechnoTypeClass::Find(cur))
+						unitsList.push_back(pType);
+				}
+				unitsSet = true;
+			}
+
+			char keyMaximumsOverride[256];
+			_snprintf_s(keyMaximumsOverride, sizeof(keyMaximumsOverride), "DropshipLoadout.AllowableUnitMaximums%d", i);
+			if (pINI->ReadString(GameStrings::Basic, keyMaximumsOverride, "", Phobos::readBuffer) > 0)
+			{
+				char* ctx = nullptr;
+				for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+				{
+					int maxCount;
+					if (Parser<int>::TryParse(cur, &maxCount))
+						maxList.push_back(maxCount);
+				}
+				maxSet = true;
+			}
+		}
+
+		if (unitsSet)
+			this->DropshipLoadout_AllowableUnitsLists[i] = std::move(unitsList);
+		if (maxSet)
+			this->DropshipLoadout_AllowableUnitMaximumsLists[i] = std::move(maxList);
+	}
+
+	// Parse FixedUnits per dropship (supports non-contiguous indices e.g. Dropship0 and Dropship2 without Dropship1)
+	this->DropshipLoadout_FixedUnits.clear();
+	{
+		std::map<int, std::vector<TechnoTypeClass*>> parsedFixedUnits;
+		int maxIdx = -1;
+
+		for (int k = 0; k < keyCount; ++k)
+		{
+			const char* pKeyName = pINI->GetKeyName(GameStrings::Basic, k);
+			int dropshipIdx = -1;
+			if (sscanf_s(pKeyName, "DropshipLoadout.FixedUnits.Dropship%d", &dropshipIdx) == 1)
+			{
+				if (pINI->ReadString(GameStrings::Basic, pKeyName, "", Phobos::readBuffer) > 0)
+				{
+					char* ctx = nullptr;
+					std::vector<TechnoTypeClass*> list;
+					for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &ctx); cur; cur = strtok_s(nullptr, Phobos::readDelims, &ctx))
+					{
+						if (auto pType = TechnoTypeClass::Find(cur))
+							list.push_back(pType);
+					}
+					parsedFixedUnits[dropshipIdx] = std::move(list);
+					if (dropshipIdx > maxIdx)
+						maxIdx = dropshipIdx;
+				}
 			}
 		}
 
 		if (maxIdx != -1)
 		{
 			this->DropshipLoadout_FixedUnits.resize(maxIdx + 1);
-
-			for (int k = 0; k <= maxIdx; ++k)
-				this->DropshipLoadout_FixedUnits[k] = std::move(parsedFixedUnits[k]);
+			for (auto& [idx, list] : parsedFixedUnits)
+			{
+				this->DropshipLoadout_FixedUnits[idx] = std::move(list);
+			}
 		}
 	}
 }
@@ -406,6 +598,8 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_ArrowsClickSound)
 		.Process(this->DropshipLoadout_StartingDragDropSound)
 		.Process(this->DropshipLoadout_EndingDragDropSound)
+		.Process(this->DropshipLoadout_AllowableUnitsLists)
+		.Process(this->DropshipLoadout_AllowableUnitMaximumsLists)
 		;
 
 	int numDropships = (int)this->DropshipLoadout_FixedUnits.size();
