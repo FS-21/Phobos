@@ -30,6 +30,7 @@ enum class PhobosTriggerAction : unsigned int
 	DeleteBanner = 802,
 
 	CreateDropshipLoadoutTransport = 900,
+	OpenDropshipLoadoutWindow = 901,
 
 	WinByID = 19001,
 	LoseByID = 19002,
@@ -115,6 +116,7 @@ public:
 	ACTION_FUNC(DeleteBanner);
 
 	ACTION_FUNC(CreateDropshipLoadoutTransport);
+	ACTION_FUNC(OpenDropshipLoadoutWindow);
 
 	static bool RunSuperWeaponAt(TActionClass* pThis, int X, int Y);
 

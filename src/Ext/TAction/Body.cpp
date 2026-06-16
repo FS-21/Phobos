@@ -17,6 +17,7 @@
 #include <TriggerClass.h>
 #include <Ext/House/Body.h>
 #include <Ext/Script/Body.h>
+#include <Misc/Hooks.DropshipLoadout.h>
 
 //Static init
 TActionExt::ExtContainer TActionExt::ExtMap;
@@ -95,6 +96,8 @@ bool TActionExt::Execute(TActionClass* pThis, HouseClass* pHouse, ObjectClass* p
 		return TActionExt::DeleteBanner(pThis, pHouse, pObject, pTrigger, location);
 	case PhobosTriggerAction::CreateDropshipLoadoutTransport:
 		return TActionExt::CreateDropshipLoadoutTransport(pThis, pHouse, pObject, pTrigger, location);
+	case PhobosTriggerAction::OpenDropshipLoadoutWindow:
+		return TActionExt::OpenDropshipLoadoutWindow(pThis, pHouse, pObject, pTrigger, location);
 
 	default:
 		bHandled = false;
@@ -622,6 +625,19 @@ bool TActionExt::DeleteBanner(TActionClass* pThis, HouseClass* pHouse, ObjectCla
 	return true;
 }
 
+bool TActionExt::OpenDropshipLoadoutWindow(TActionClass* pThis, HouseClass* pTriggerHouse, ObjectClass* pObject, TriggerClass* pTrigger, CellStruct const& location)
+{
+	if (!SessionClass::IsCampaign() && !SessionClass::IsSkirmish())
+		return true;
+
+	bool bIgnoreFixedUnits = (pThis->Param3 == 1);
+	bool bPreloadCargo = (pThis->Param4 != 1);
+	bool bRefundOnClean = (pThis->Param4 == 1);
+	DropshipLoadoutClass::OpenInGameWindow(bIgnoreFixedUnits, bPreloadCargo, bRefundOnClean);
+	
+	return true;
+}
+
 bool TActionExt::CreateDropshipLoadoutTransport(TActionClass* pThis, HouseClass* pTriggerHouse, ObjectClass* pObject, TriggerClass* pTrigger, CellStruct const& location)
 {
 	if (!pThis || !pThis->TeamType || !pTriggerHouse || (!SessionClass::IsCampaign() && !SessionClass::IsSkirmish()))
@@ -630,6 +646,7 @@ bool TActionExt::CreateDropshipLoadoutTransport(TActionClass* pThis, HouseClass*
 	const int dropshipIdx = pThis->Param3;
 	if (dropshipIdx < 0)
 		return true;
+
 
 	auto& waypoints = ScenarioExt::Global()->Waypoints;
 	const int nSpawnWaypoint = pThis->TeamType->Waypoint;

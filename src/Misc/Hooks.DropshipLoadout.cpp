@@ -20,6 +20,7 @@
 #include <Ext/HouseType/Body.h>
 
 #include <Utilities/GeneralUtils.h>
+#include <Misc/Hooks.DropshipLoadout.h>
 
 static bool bDropshipLoadoutActive = false;
 static int pendingScrolls = 0;
@@ -113,123 +114,7 @@ static ShapeButtonClass* CreateShapeButton(unsigned int nID, int nX, int nY, int
 	return pConstructor(pButton, nID, nX, nY, nWidth, nHeight, nullptr, bIsAlpha);
 }
 
-class DropshipLoadoutClass
-{
-public:
-	DropshipLoadoutClass();
-	~DropshipLoadoutClass();
 
-	bool Initialize();
-	void Run();
-
-private:
-	void LoadAssets();
-	void CalculateLayout(DSurface* pSurface);
-	void CreateControls();
-	void HandleInput(int command, int buttonID);
-	void UpdateAnimations();
-	void Render(DSurface* pSurface);
-	void DrawTooltip(DSurface* pSurface);
-	void SaveCargo();
-	int GetCarrierSizeLimit(int carrierIdx);
-	bool CanCarrierHoldUnit(int carrierIdx, TechnoTypeClass* pUnitType);
-
-	// Extensions
-	HouseTypeExt::ExtData* pHouseTypeExt { nullptr };
-
-	// Config & state
-	int nStartingDropships { 0 };
-	long initialMoney { 0 };
-	long currentMoney { 0 };
-	int nSidebarCameos { 8 };
-	int nDropshipBayCameos { 5 };
-	int nDropshipBayTotalSlots { 0 };
-	int firstBrowsableCameo { 0 };
-	bool pressedSpaceKey { false };
-	bool repaintAll { true };
-	bool lastTimeWasOverCameos { false };
-	bool freeDropshipSlots { false };
-
-	// Assets (Palette, surfaces, SHPs)
-	ConvertClass* dropshipLoadout_Palette { nullptr };
-	SHPStruct* dropshipLoadout_Background { nullptr };
-	SHPStruct* dropshipLoadout_UpArrow { nullptr };
-	SHPStruct* dropshipLoadout_DownArrow { nullptr };
-	SHPStruct* dropshipLoadout_Loadout { nullptr };
-	SHPStruct* dropshipLoadout_PilotLit { nullptr };
-	std::vector<SHPStruct*> dropshipLoadout_DGreenList;
-
-	BSurface* dropshipLoadout_BackgroundPCX { nullptr };
-	BSurface* dropshipLoadout_UpArrowPCX { nullptr };
-	BSurface* dropshipLoadout_DownArrowPCX { nullptr };
-	std::vector<BSurface*> dropshipLoadout_LoadoutPCX;
-	std::vector<BSurface*> dropshipLoadout_PilotLitPCX;
-	std::vector<std::vector<BSurface*>> dropshipLoadout_DGreenListPCX;
-
-	// Unit lists
-	std::vector<TechnoTypeClass*> availableUnits;
-	std::vector<int> availableUnitsMaximums;
-	std::vector<std::vector<TechnoTypeClass*>> dropshipBayChosenUnitsLists;
-	std::vector<std::vector<bool>> dropshipBayFixedUnitsLists;
-	std::map<TechnoTypeClass*, int> dropshipBayChosenUnitsCount;
-	TechnoTypeClass* lastSelected { nullptr };
-	TechnoTypeClass* pHoveredUnitType { nullptr };
-
-	// Layout/Locations
-	RectangleStruct windowRectangle;
-	int upArrowX { 0 }, upArrowY { 0 };
-	int downArrowX { 0 }, downArrowY { 0 };
-	RectangleStruct upArrowLocation;
-	RectangleStruct downArrowLocation;
-	std::vector<RectangleStruct> sidebarCameLocations;
-	std::vector<std::vector<RectangleStruct>> dropshipBayCameLocations;
-	RectangleStruct loadoutLocation;
-	RectangleStruct pilotLitLocation;
-	std::vector<RectangleStruct> dGreenLocation;
-
-	// Interactive Buttons
-	std::vector<ShapeButtonClass*> buttonsList;
-	ToggleClass* commandManager { nullptr };
-
-	// Animations & Timers
-	int currentLoadoutFrame { -1 };
-	int currentPilotLitFrame { -1 };
-	int loadoutFrameDelay { 11 };
-	int pilotLitFrameDelay { 15 };
-	int loadoutTotalFrames { 0 };
-	int pilotLitTotalFrames { 0 };
-	int animTimer_StartValue { 15 };
-	int animTimer_DelayedStartValue_Loadout { 0 };
-	int animTimer_DelayedStartValue_PilotLit { 0 };
-
-	SysTimerClass animTimer_UpdateFrameTimer;
-	SysTimerClass animTimer_DelayedStartTimer_Loadout;
-	SysTimerClass animTimer_UpdateFrameTimer_Loadout;
-	SysTimerClass animTimer_DelayedStartTimer_PilotLit;
-	SysTimerClass animTimer_UpdateFrameTimer_PilotLit;
-
-	int sidebarRowAnimationIndex { -1 };
-	int currentSidebarRowAnimationFrame { 0 };
-	int sidebarRowAnimationFrameDelay { 5 };
-	int sidebarRowAnimationTotalFrames { 0 };
-	SysTimerClass animTimer_UpdateFrameTimer_SidebarRowAnimation;
-
-	// Sounds
-	int buyClickSoundIdx { -1 };
-	int sellClickSoundIdx { -1 };
-	int arrowsClickSoundIdx { -1 };
-	int startingDragDropSoundIdx { -1 };
-	int endingDragDropSoundIdx { -1 };
-
-	// Drag & Drop state
-	bool bIsDragging { false };
-	bool bDragPending { false };
-	TechnoTypeClass* pDraggedUnitType { nullptr };
-	int nSourceDropshipIdx { -1 };
-	int nSourceSlotIdx { -1 };
-	bool bDraggedIsFixed { false };
-	Point2D dragStartMousePos { 0, 0 };
-};
 
 DropshipLoadoutClass::DropshipLoadoutClass()
 {
@@ -237,6 +122,12 @@ DropshipLoadoutClass::DropshipLoadoutClass()
 
 DropshipLoadoutClass::~DropshipLoadoutClass()
 {
+	if (commandManager)
+	{
+		commandManager->TurnOff();
+		commandManager = nullptr;
+	}
+
 	for (size_t i = 0; i < buttonsList.size(); ++i)
 	{
 		auto button = buttonsList[i];
@@ -244,75 +135,16 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 			GameDelete(button);
 	}
 	buttonsList.clear();
-
-	for (size_t i = 0; i < dropshipLoadout_DGreenList.size(); ++i)
-	{
-		auto dGreen = dropshipLoadout_DGreenList[i];
-		if (dGreen)
-		{
-			bool isGlobal = false;
-			if (ScenarioExt::Global() && i < ScenarioExt::Global()->DropshipLoadout_DGreenList.size())
-				isGlobal = (dGreen == ScenarioExt::Global()->DropshipLoadout_DGreenList[i]);
-
-			if (!isGlobal)
-				GameDelete(dGreen);
-		}
-	}
 	dropshipLoadout_DGreenList.clear();
-
-	if (dropshipLoadout_Palette)
-	{
-		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_Palette == ScenarioExt::Global()->DropshipLoadout_Palette);
-
-		if (!isGlobal)
-			GameDelete(dropshipLoadout_Palette);
-	}
-
-	if (dropshipLoadout_Background)
-	{
-		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_Background == ScenarioExt::Global()->DropshipLoadout_Background);
-
-		if (!isGlobal)
-			GameDelete(dropshipLoadout_Background);
-	}
-
-	if (dropshipLoadout_UpArrow)
-	{
-		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_UpArrow == ScenarioExt::Global()->DropshipLoadout_UpArrow);
-
-		if (!isGlobal)
-			GameDelete(dropshipLoadout_UpArrow);
-	}
-
-	if (dropshipLoadout_DownArrow)
-	{
-		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_DownArrow == ScenarioExt::Global()->DropshipLoadout_DownArrow);
-
-		if (!isGlobal)
-			GameDelete(dropshipLoadout_DownArrow);
-	}
-
-	if (dropshipLoadout_Loadout)
-	{
-		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_Loadout == ScenarioExt::Global()->DropshipLoadout_Loadout);
-
-		if (!isGlobal)
-			GameDelete(dropshipLoadout_Loadout);
-	}
-
-	if (dropshipLoadout_PilotLit)
-	{
-		bool isGlobal = ScenarioExt::Global() && (dropshipLoadout_PilotLit == ScenarioExt::Global()->DropshipLoadout_PilotLit);
-
-		if (!isGlobal)
-			GameDelete(dropshipLoadout_PilotLit);
-	}
 }
 
-bool DropshipLoadoutClass::Initialize()
+bool DropshipLoadoutClass::Initialize(bool bIgnoreFixedUnits, bool bPreloadCargo, bool bRefundOnClean)
 {
 	if (!HouseClass::CurrentPlayer)
 		return false;
+
+	this->bIgnoreFixedUnits = bIgnoreFixedUnits;
+	this->bPreloadCargo = bPreloadCargo;
 
 	pHouseTypeExt = HouseTypeExt::ExtMap.Find(HouseClass::CurrentPlayer->Type);
 	if (!pHouseTypeExt)
@@ -325,6 +157,63 @@ bool DropshipLoadoutClass::Initialize()
 
 	if (nStartingDropships <= 0)
 		return false;
+
+	auto pHouseExt = HouseExt::ExtMap.Find(HouseClass::CurrentPlayer);
+	auto const pGlobal = ScenarioExt::Global();
+
+	if (bRefundOnClean && pHouseExt && pHouseExt->DropshipLoadout_Cargo.size() > 0)
+	{
+		// Find fixed units source
+		const std::vector<std::vector<TechnoTypeClass*>>* pFixedUnitsSrc = nullptr;
+		if (!this->bIgnoreFixedUnits)
+		{
+			if (pHouseTypeExt && !pHouseTypeExt->DropshipLoadout_FixedUnits.empty())
+				pFixedUnitsSrc = &pHouseTypeExt->DropshipLoadout_FixedUnits;
+			else if (pGlobal && !pGlobal->DropshipLoadout_FixedUnits.empty())
+				pFixedUnitsSrc = &pGlobal->DropshipLoadout_FixedUnits;
+		}
+
+		long totalCargoCost = 0;
+
+		// Calculate total cost of custom units in saved cargo
+		for (size_t i = 0; i < pHouseExt->DropshipLoadout_Cargo.size(); i++)
+		{
+			const std::vector<TechnoTypeClass*>* pFixedList = nullptr;
+			if (pFixedUnitsSrc && i < pFixedUnitsSrc->size())
+				pFixedList = &((*pFixedUnitsSrc)[i]);
+
+			std::vector<TechnoTypeClass*> fixedRemaining;
+			if (pFixedList)
+			{
+				for (auto pUnit : *pFixedList)
+					if (pUnit)
+						fixedRemaining.push_back(pUnit);
+			}
+
+			for (auto pUnit : pHouseExt->DropshipLoadout_Cargo[i])
+			{
+				if (!pUnit)
+					continue;
+
+				auto it = std::find(fixedRemaining.begin(), fixedRemaining.end(), pUnit);
+				if (it != fixedRemaining.end())
+				{
+					fixedRemaining.erase(it);
+				}
+				else
+				{
+					totalCargoCost += pUnit->Cost;
+				}
+			}
+		}
+
+		if (totalCargoCost > 0)
+		{
+			HouseClass::CurrentPlayer->TransactMoney(totalCargoCost);
+		}
+
+		pHouseExt->DropshipLoadout_Cargo.clear();
+	}
 
 	LoadAssets();
 
@@ -531,6 +420,72 @@ void DropshipLoadoutClass::LoadAssets()
 
 	initialMoney = dropshipLoadout_InitialMoney;
 	currentMoney = dropshipLoadout_InitialMoney;
+
+	long totalPreloadedCost = 0;
+	bool canPreload = false;
+
+	if (this->bPreloadCargo)
+	{
+		auto pHouseExt = HouseExt::ExtMap.Find(HouseClass::CurrentPlayer);
+		if (pHouseExt && pHouseExt->DropshipLoadout_Cargo.size() > 0)
+		{
+			// Find fixed units source
+			const std::vector<std::vector<TechnoTypeClass*>>* pFixedUnitsSrc = nullptr;
+			if (!this->bIgnoreFixedUnits)
+			{
+				if (pHouseTypeExt && !pHouseTypeExt->DropshipLoadout_FixedUnits.empty())
+					pFixedUnitsSrc = &pHouseTypeExt->DropshipLoadout_FixedUnits;
+				else if (pGlobal && !pGlobal->DropshipLoadout_FixedUnits.empty())
+					pFixedUnitsSrc = &pGlobal->DropshipLoadout_FixedUnits;
+			}
+
+			// Calculate total cost of custom units in saved cargo
+			for (size_t i = 0; i < pHouseExt->DropshipLoadout_Cargo.size(); i++)
+			{
+				const std::vector<TechnoTypeClass*>* pFixedList = nullptr;
+				if (pFixedUnitsSrc && i < pFixedUnitsSrc->size())
+					pFixedList = &((*pFixedUnitsSrc)[i]);
+
+				std::vector<TechnoTypeClass*> fixedRemaining;
+				if (pFixedList)
+				{
+					for (auto pUnit : *pFixedList)
+						if (pUnit)
+							fixedRemaining.push_back(pUnit);
+				}
+
+				for (auto pUnit : pHouseExt->DropshipLoadout_Cargo[i])
+				{
+					if (!pUnit)
+						continue;
+
+					auto it = std::find(fixedRemaining.begin(), fixedRemaining.end(), pUnit);
+					if (it != fixedRemaining.end())
+					{
+						fixedRemaining.erase(it);
+					}
+					else
+					{
+						totalPreloadedCost += pUnit->Cost;
+					}
+				}
+			}
+
+			if (currentMoney >= totalPreloadedCost)
+			{
+				canPreload = true;
+			}
+		}
+	}
+
+	if (canPreload)
+	{
+		currentMoney -= totalPreloadedCost;
+	}
+	else
+	{
+		this->bPreloadCargo = false;
+	}
 
 	std::vector<TechnoTypeClass*> allowableUnits;
 
@@ -1009,12 +964,19 @@ void DropshipLoadoutClass::CreateControls()
 	int newID = btn_BasicDropshipCameo_ID;
 	dropshipBayChosenUnitsLists.clear();
 	dropshipBayFixedUnitsLists.clear();
+	dropshipBayChosenUnitsCount.clear();
 
 	const std::vector<std::vector<TechnoTypeClass*>>* pFixedUnitsSrc = nullptr;
-	if (pHouseTypeExt && !pHouseTypeExt->DropshipLoadout_FixedUnits.empty())
-		pFixedUnitsSrc = &pHouseTypeExt->DropshipLoadout_FixedUnits;
-	else if (ScenarioExt::Global() && !ScenarioExt::Global()->DropshipLoadout_FixedUnits.empty())
-		pFixedUnitsSrc = &ScenarioExt::Global()->DropshipLoadout_FixedUnits;
+	if (!bIgnoreFixedUnits)
+	{
+		if (pHouseTypeExt && !pHouseTypeExt->DropshipLoadout_FixedUnits.empty())
+			pFixedUnitsSrc = &pHouseTypeExt->DropshipLoadout_FixedUnits;
+		else if (ScenarioExt::Global() && !ScenarioExt::Global()->DropshipLoadout_FixedUnits.empty())
+			pFixedUnitsSrc = &ScenarioExt::Global()->DropshipLoadout_FixedUnits;
+	}
+
+	auto pHouseExt = HouseExt::ExtMap.Find(HouseClass::CurrentPlayer);
+	bool hasSavedCargo = (pHouseExt && pHouseExt->DropshipLoadout_Cargo.size() > 0);
 
 	for (int i = 0; i < nStartingDropships; i++)
 	{
@@ -1027,6 +989,16 @@ void DropshipLoadoutClass::CreateControls()
 		const std::vector<TechnoTypeClass*>* pFixedList = nullptr;
 		if (pFixedUnitsSrc && i < (int)pFixedUnitsSrc->size())
 			pFixedList = &((*pFixedUnitsSrc)[i]);
+
+		std::vector<TechnoTypeClass*> fixedRemaining;
+		if (pFixedList)
+		{
+			for (auto pUnit : *pFixedList)
+				if (pUnit)
+					fixedRemaining.push_back(pUnit);
+		}
+
+		bool usePreload = bPreloadCargo && hasSavedCargo && i < (int)pHouseExt->DropshipLoadout_Cargo.size();
 
 		for (int j = 0; j < nDropshipBayCameos; j++)
 		{
@@ -1052,16 +1024,41 @@ void DropshipLoadoutClass::CreateControls()
 					commandManager->Add(*newButton);
 			}
 
-			TechnoTypeClass* pFixedUnit = nullptr;
+			TechnoTypeClass* pUnit = nullptr;
 			bool isFixed = false;
-			if (pFixedList && j < (int)pFixedList->size())
+
+			if (usePreload)
 			{
-				pFixedUnit = (*pFixedList)[j];
-				if (pFixedUnit)
-					isFixed = true;
+				if (j < (int)pHouseExt->DropshipLoadout_Cargo[i].size())
+				{
+					pUnit = pHouseExt->DropshipLoadout_Cargo[i][j];
+					if (pUnit)
+					{
+						auto it = std::find(fixedRemaining.begin(), fixedRemaining.end(), pUnit);
+						if (it != fixedRemaining.end())
+						{
+							isFixed = true;
+							fixedRemaining.erase(it);
+						}
+						else
+						{
+							isFixed = false;
+							dropshipBayChosenUnitsCount[pUnit]++;
+						}
+					}
+				}
+			}
+			else
+			{
+				if (pFixedList && j < (int)pFixedList->size())
+				{
+					pUnit = (*pFixedList)[j];
+					if (pUnit)
+						isFixed = true;
+				}
 			}
 
-			dropshipBayChosenUnitsLists[i].push_back(pFixedUnit);
+			dropshipBayChosenUnitsLists[i].push_back(pUnit);
 			dropshipBayFixedUnitsLists[i].push_back(isFixed);
 			newID++;
 		}
@@ -1178,6 +1175,11 @@ void DropshipLoadoutClass::Run()
 	pendingScrolls = 0;
 	pHoveredUnitType = nullptr;
 
+	bool wasLButtonDown = false;
+	bool wasRButtonDown = false;
+	bool wasSpaceDown = false;
+	bool wasEscDown = false;
+
 	while (!pressedSpaceKey)
 	{
 		Game::CallBack();
@@ -1185,6 +1187,28 @@ void DropshipLoadoutClass::Run()
 		int command = 0;
 		if (commandManager)
 			command = commandManager->Input();
+
+		bool isLButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+		bool isRButtonDown = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+		bool isSpaceDown = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+		bool isEscDown = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+
+		if (command == 0)
+		{
+			if (isLButtonDown && !wasLButtonDown)
+				command = 1;
+			else if (isRButtonDown && !wasRButtonDown)
+				command = 2;
+			else if (isSpaceDown && !wasSpaceDown)
+				command = VK_SPACE;
+			else if (isEscDown && !wasEscDown)
+				command = VK_ESCAPE;
+		}
+
+		wasLButtonDown = isLButtonDown;
+		wasRButtonDown = isRButtonDown;
+		wasSpaceDown = isSpaceDown;
+		wasEscDown = isEscDown;
 
 		int buttonID = -1;
 		if (WWMouseClass::Instance)
@@ -3088,3 +3112,27 @@ DEFINE_HOOK(0x4B6C30, Dropship_Loadout_Remake, 0x0)
 	return EndFunction;
 }
 
+void DropshipLoadoutClass::OpenInGameWindow(bool bIgnoreFixedUnits, bool bPreloadCargo, bool bRefundOnClean)
+{
+	if (!ScenarioClass::Instance)
+		return;
+
+	ScenarioClass::Instance->PauseGame();
+
+	const bool oldLocked = ScenarioClass::Instance->UserInputLocked;
+	const bool oldPaused = ScenarioClass::Instance->IsGamePaused;
+
+	ScenarioClass::Instance->UserInputLocked = false;
+	ScenarioClass::Instance->IsGamePaused = false;
+
+	DropshipLoadoutClass loadout;
+	if (loadout.Initialize(bIgnoreFixedUnits, bPreloadCargo, bRefundOnClean))
+	{
+		loadout.Run();
+	}
+
+	ScenarioClass::Instance->IsGamePaused = oldPaused;
+	ScenarioClass::Instance->UserInputLocked = oldLocked;
+
+	ScenarioClass::Instance->ResumeGame();
+}
