@@ -3,6 +3,7 @@
 #include <MessageListClass.h>
 
 #include <Ext/Scenario/Body.h>
+#include <Ext/HouseType/Body.h>
 #include <ScriptClass.h>
 #include <ScriptTypeClass.h>
 #include <Ext/SWType/Body.h>
@@ -634,6 +635,27 @@ bool TActionExt::OpenDropshipLoadoutWindow(TActionClass* pThis, HouseClass* pTri
 	bool bPreloadCargo = (pThis->Param4 != 1);
 	bool bRefundOnClean = (pThis->Param4 == 1);
 	int allowableUnitsIndex = pThis->Value;
+
+	if (allowableUnitsIndex != 0)
+	{
+		bool listFound = false;
+		auto const pHouseTypeExt = HouseTypeExt::ExtMap.Find(HouseClass::CurrentPlayer->Type);
+
+		auto it = pHouseTypeExt->DropshipLoadout_AllowableUnitsLists.find(allowableUnitsIndex);
+		if (it != pHouseTypeExt->DropshipLoadout_AllowableUnitsLists.end())
+			listFound = true;
+
+		if (!listFound)
+		{
+			auto it = ScenarioExt::Global()->DropshipLoadout_AllowableUnitsLists.find(allowableUnitsIndex);
+			if (it != ScenarioExt::Global()->DropshipLoadout_AllowableUnitsLists.end())
+				listFound = true;
+		}
+
+		if (!listFound)
+			return true;
+	}
+
 	DropshipLoadoutClass::OpenInGameWindow(bIgnoreFixedUnits, bPreloadCargo, bRefundOnClean, allowableUnitsIndex);
 	
 	return true;

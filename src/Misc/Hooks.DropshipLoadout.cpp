@@ -159,34 +159,6 @@ bool DropshipLoadoutClass::Initialize(bool bIgnoreFixedUnits, bool bPreloadCargo
 	if (nStartingDropships <= 0)
 		return false;
 
-	// Check if the requested allowableUnits list exists (for non-zero indices)
-	if (allowableUnitsIndex != 0)
-	{
-		bool listFound = false;
-		if (pHouseTypeExt)
-		{
-			auto it = pHouseTypeExt->DropshipLoadout_AllowableUnitsLists.find(allowableUnitsIndex);
-			if (it != pHouseTypeExt->DropshipLoadout_AllowableUnitsLists.end())
-				listFound = true;
-			else
-				listFound = false;
-		}
-		if (!listFound)
-		{
-			if (auto const pGlobal = ScenarioExt::Global())
-			{
-				auto it = pGlobal->DropshipLoadout_AllowableUnitsLists.find(allowableUnitsIndex);
-				if (it != pGlobal->DropshipLoadout_AllowableUnitsLists.end())
-					listFound = true;
-				else
-					listFound = false;
-			}
-		}
-
-		if (!listFound)
-			return false;
-	}
-
 	auto pHouseExt = HouseExt::ExtMap.Find(HouseClass::CurrentPlayer);
 	auto const pGlobal = ScenarioExt::Global();
 
