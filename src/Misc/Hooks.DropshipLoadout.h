@@ -20,10 +20,10 @@ public:
 	DropshipLoadoutClass();
 	~DropshipLoadoutClass();
 
-	bool Initialize(bool bIgnoreFixedUnits = false, bool bPreloadCargo = false, bool bRefundOnClean = false, int allowableUnitsIndex = 0);
+	bool Initialize(bool bIgnoreFixedUnits = false, bool bPreloadCargo = false, int allowableUnitsIndex = 0, int startingMoney = 0, Nullable<bool> bAddUnusedMoneyToPlayer = {});
 	void Run();
 
-	static void OpenInGameWindow(bool bIgnoreFixedUnits = false, bool bPreloadCargo = false, bool bRefundOnClean = false, int allowableUnitsIndex = 0);
+	static void OpenInGameWindow(bool bIgnoreFixedUnits = false, bool bPreloadCargo = false, int allowableUnitsIndex = 0, int startingMoney = 0, Nullable<bool> bAddUnusedMoneyToPlayer = {});
 
 private:
 	void LoadAssets();
@@ -54,7 +54,9 @@ private:
 	bool freeDropshipSlots { false };
 	bool bIgnoreFixedUnits { false };
 	bool bPreloadCargo { false };
+	Nullable<bool> bAddUnusedMoneyToPlayer {};
 	int allowableUnitsIndex { 0 };
+	int startingMoney { 0 };
 
 	// Assets (Palette, surfaces, SHPs)
 	ConvertClass* dropshipLoadout_Palette { nullptr };

@@ -13,6 +13,7 @@
 #include "Ext/WarheadType/Body.h"
 #include "Ext/WeaponType/Body.h"
 #include <Ext/Scenario/Body.h>
+#include <Misc/Hooks.DropshipLoadout.h>
 
 // ============= New SuperWeapon Effects================
 
@@ -45,6 +46,17 @@ void SWTypeExt::FireSuperWeaponExt(SuperClass* pSW, const CellStruct& cell)
 
 	if (pTypeExt->BattlePoints_Amount != 0)
 		pTypeExt->ApplyBattlePoints(pSW);
+
+	if (pTypeExt->OpenDropshipLoadout.Get(false) && pHouse->IsCurrentPlayer())
+	{
+		DropshipLoadoutClass::OpenInGameWindow(
+			pTypeExt->OpenDropshipLoadout_IgnoreFixedUnits,
+			pTypeExt->OpenDropshipLoadout_PreloadCargo,
+			pTypeExt->OpenDropshipLoadout_AllowableUnitsIndex,
+			pTypeExt->OpenDropshipLoadout_InitialMoney.isset() ? pTypeExt->OpenDropshipLoadout_InitialMoney.Get() : -1,
+			pTypeExt->OpenDropshipLoadout_AddUnusedMoneyToPlayer
+		);
+	}
 
 	auto& sw_ext = HouseExt::ExtMap.Find(pHouse)->SuperExts[pType->ArrayIndex];
 	sw_ext.ShotCount++;

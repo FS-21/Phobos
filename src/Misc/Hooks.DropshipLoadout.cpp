@@ -3,6 +3,9 @@
 
 #include <ThemeClass.h>
 #include <WWMouseClass.h>
+#include <MouseClass.h>
+#include <DisplayClass.h>
+#include <Unsorted.h>
 #include <Drawing.h>
 #include <BitFont.h>
 #include <BitText.h>
@@ -138,14 +141,16 @@ DropshipLoadoutClass::~DropshipLoadoutClass()
 	dropshipLoadout_DGreenList.clear();
 }
 
-bool DropshipLoadoutClass::Initialize(bool bIgnoreFixedUnits, bool bPreloadCargo, bool bRefundOnClean, int allowableUnitsIndex)
+bool DropshipLoadoutClass::Initialize(bool bIgnoreFixedUnits, bool bPreloadCargo, int allowableUnitsIndex, int startingMoney, Nullable<bool> bAddUnusedMoneyToPlayer)
 {
 	if (!HouseClass::CurrentPlayer)
 		return false;
 
 	this->bIgnoreFixedUnits = bIgnoreFixedUnits;
 	this->bPreloadCargo = bPreloadCargo;
+	this->bAddUnusedMoneyToPlayer = bAddUnusedMoneyToPlayer;
 	this->allowableUnitsIndex = allowableUnitsIndex;
+	this->startingMoney = startingMoney;
 
 	pHouseTypeExt = HouseTypeExt::ExtMap.Find(HouseClass::CurrentPlayer->Type);
 	if (!pHouseTypeExt)
@@ -158,63 +163,6 @@ bool DropshipLoadoutClass::Initialize(bool bIgnoreFixedUnits, bool bPreloadCargo
 
 	if (nStartingDropships <= 0)
 		return false;
-
-	auto pHouseExt = HouseExt::ExtMap.Find(HouseClass::CurrentPlayer);
-	auto const pGlobal = ScenarioExt::Global();
-
-	if (bRefundOnClean && pHouseExt && pHouseExt->DropshipLoadout_Cargo.size() > 0)
-	{
-		// Find fixed units source
-		const std::vector<std::vector<TechnoTypeClass*>>* pFixedUnitsSrc = nullptr;
-		if (!this->bIgnoreFixedUnits)
-		{
-			if (pHouseTypeExt && !pHouseTypeExt->DropshipLoadout_FixedUnits.empty())
-				pFixedUnitsSrc = &pHouseTypeExt->DropshipLoadout_FixedUnits;
-			else if (pGlobal && !pGlobal->DropshipLoadout_FixedUnits.empty())
-				pFixedUnitsSrc = &pGlobal->DropshipLoadout_FixedUnits;
-		}
-
-		long totalCargoCost = 0;
-
-		// Calculate total cost of custom units in saved cargo
-		for (size_t i = 0; i < pHouseExt->DropshipLoadout_Cargo.size(); i++)
-		{
-			const std::vector<TechnoTypeClass*>* pFixedList = nullptr;
-			if (pFixedUnitsSrc && i < pFixedUnitsSrc->size())
-				pFixedList = &((*pFixedUnitsSrc)[i]);
-
-			std::vector<TechnoTypeClass*> fixedRemaining;
-			if (pFixedList)
-			{
-				for (auto pUnit : *pFixedList)
-					if (pUnit)
-						fixedRemaining.push_back(pUnit);
-			}
-
-			for (auto pUnit : pHouseExt->DropshipLoadout_Cargo[i])
-			{
-				if (!pUnit)
-					continue;
-
-				auto it = std::find(fixedRemaining.begin(), fixedRemaining.end(), pUnit);
-				if (it != fixedRemaining.end())
-				{
-					fixedRemaining.erase(it);
-				}
-				else
-				{
-					totalCargoCost += pUnit->Cost;
-				}
-			}
-		}
-
-		if (totalCargoCost > 0)
-		{
-			HouseClass::CurrentPlayer->TransactMoney(totalCargoCost);
-		}
-
-		pHouseExt->DropshipLoadout_Cargo.clear();
-	}
 
 	LoadAssets();
 
@@ -425,15 +373,22 @@ void DropshipLoadoutClass::LoadAssets()
 		endingDragDropSoundIdx = pGlobal->DropshipLoadout_EndingDragDropSound;
 
 	long dropshipLoadout_InitialMoney = -1;
-	if (pHouseTypeExt->DropshipLoadout_Money.isset())
-		dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money;
-	else if (pGlobal)
-		dropshipLoadout_InitialMoney = pGlobal->DropshipLoadout_Money;
+	if (this->startingMoney > 0)
+	{
+		dropshipLoadout_InitialMoney = this->startingMoney;
+	}
+	else if (this->startingMoney == 0)
+	{
+		if (pHouseTypeExt->DropshipLoadout_Money.isset())
+			dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money;
+		else if (pGlobal)
+			dropshipLoadout_InitialMoney = pGlobal->DropshipLoadout_Money;
+	}
 
 	dropshipLoadout_InitialMoney = dropshipLoadout_InitialMoney >= 0 ? dropshipLoadout_InitialMoney : HouseClass::CurrentPlayer->Available_Money();
 
-	initialMoney = dropshipLoadout_InitialMoney;
-	currentMoney = dropshipLoadout_InitialMoney;
+	this->initialMoney = dropshipLoadout_InitialMoney;
+	this->currentMoney = dropshipLoadout_InitialMoney;
 
 	long totalPreloadedCost = 0;
 	bool canPreload = false;
@@ -1179,6 +1134,16 @@ void DropshipLoadoutClass::Run()
 	else
 		ThemeClass::Instance.Play(themeIdx);
 
+	if (DisplayClass::Instance.CurrentSWTypeIndex != -1)
+	{
+		DisplayClass::Instance.CurrentSWTypeIndex = -1;
+	}
+
+	if (Unsorted::CurrentSWType != -1)
+	{
+		Unsorted::CurrentSWType = -1;
+	}
+
 	if (WWMouseClass::Instance)
 	{
 		WWMouseClass::Instance->HideCursor();
@@ -1186,6 +1151,8 @@ void DropshipLoadoutClass::Run()
 		WWMouseClass::Instance->CaptureMouse();
 		WWMouseClass::Instance->RefCount = 0;
 	}
+
+	MouseClass::Instance.UpdateCursor(MouseCursorType::Default, false);
 
 	if (commandManager)
 		commandManager->TurnOn();
@@ -1239,6 +1206,7 @@ void DropshipLoadoutClass::Run()
 	while (!pressedSpaceKey)
 	{
 		Game::CallBack();
+		MouseClass::Instance.UpdateCursor(MouseCursorType::Default, false);
 
 		int command = 0;
 		if (commandManager)
@@ -1709,6 +1677,7 @@ void DropshipLoadoutClass::Run()
 			Render(pSurface);
 			repaintAll = false;
 
+		MouseClass::Instance.UpdateCursor(MouseCursorType::Default, false);
 		GScreenClass::Instance.DoBlit(true, pSurface, nullptr);
 	}
 
@@ -3126,27 +3095,40 @@ void DropshipLoadoutClass::SaveCargo()
 	}
 
 	bool addUnusedMoneyToPlayer = false;
-	if (pHouseTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer.isset())
+	if (this->bAddUnusedMoneyToPlayer.isset())
+		addUnusedMoneyToPlayer = this->bAddUnusedMoneyToPlayer;
+	else if (pHouseTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer.isset())
 		addUnusedMoneyToPlayer = pHouseTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer;
 	else if (ScenarioExt::Global())
 		addUnusedMoneyToPlayer = ScenarioExt::Global()->DropshipLoadout_AddUnusedMoneyToPlayer;
 
-	if (addUnusedMoneyToPlayer)
+	if (this->startingMoney == -1)
 	{
-		HouseClass::CurrentPlayer->TransactMoney(currentMoney);
+		// Using player's own money: just deduct what was spent
+		long spent = HouseClass::CurrentPlayer->Available_Money() - currentMoney;
+		HouseClass::CurrentPlayer->TransactMoney(-spent);
 	}
 	else
 	{
-		long dropshipLoadout_InitialMoney = -1;
-		if (pHouseTypeExt->DropshipLoadout_Money.isset())
-			dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money;
-		else if (ScenarioExt::Global())
-			dropshipLoadout_InitialMoney = ScenarioExt::Global()->DropshipLoadout_Money;
-
-		if (dropshipLoadout_InitialMoney < 0)
+		// Using a separate budget (either from rules, global, or a custom amount > 0)
+		if (addUnusedMoneyToPlayer)
 		{
-			long spent = HouseClass::CurrentPlayer->Available_Money() - currentMoney;
-			HouseClass::CurrentPlayer->TransactMoney(-spent);
+			HouseClass::CurrentPlayer->TransactMoney(currentMoney);
+		}
+		else
+		{
+			long dropshipLoadout_InitialMoney = -1;
+			if (pHouseTypeExt->DropshipLoadout_Money.isset())
+				dropshipLoadout_InitialMoney = pHouseTypeExt->DropshipLoadout_Money;
+			else if (ScenarioExt::Global())
+				dropshipLoadout_InitialMoney = ScenarioExt::Global()->DropshipLoadout_Money;
+
+			if (this->startingMoney == 0 && dropshipLoadout_InitialMoney < 0)
+			{
+				// Fallback to player's own money in default rules
+				long spent = HouseClass::CurrentPlayer->Available_Money() - currentMoney;
+				HouseClass::CurrentPlayer->TransactMoney(-spent);
+			}
 		}
 	}
 }
@@ -3174,7 +3156,7 @@ DEFINE_HOOK(0x4B6C30, Dropship_Loadout_Remake, 0x0)
 	return EndFunction;
 }
 
-void DropshipLoadoutClass::OpenInGameWindow(bool bIgnoreFixedUnits, bool bPreloadCargo, bool bRefundOnClean, int allowableUnitsIndex)
+void DropshipLoadoutClass::OpenInGameWindow(bool bIgnoreFixedUnits, bool bPreloadCargo, int allowableUnitsIndex, int startingMoney, Nullable<bool> bAddUnusedMoneyToPlayer)
 {
 	if (!ScenarioClass::Instance)
 		return;
@@ -3188,7 +3170,7 @@ void DropshipLoadoutClass::OpenInGameWindow(bool bIgnoreFixedUnits, bool bPreloa
 	ScenarioClass::Instance->IsGamePaused = false;
 
 	DropshipLoadoutClass loadout;
-	if (loadout.Initialize(bIgnoreFixedUnits, bPreloadCargo, bRefundOnClean, allowableUnitsIndex))
+	if (loadout.Initialize(bIgnoreFixedUnits, bPreloadCargo, allowableUnitsIndex, startingMoney, bAddUnusedMoneyToPlayer))
 	{
 		loadout.Run();
 	}

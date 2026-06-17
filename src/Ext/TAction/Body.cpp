@@ -632,9 +632,10 @@ bool TActionExt::OpenDropshipLoadoutWindow(TActionClass* pThis, HouseClass* pTri
 		return true;
 
 	bool bIgnoreFixedUnits = (pThis->Param3 == 1);
-	bool bPreloadCargo = (pThis->Param4 != 1);
-	bool bRefundOnClean = (pThis->Param4 == 1);
+	bool bPreloadCargo = (pThis->Param4 == 1);
+	bool bAddUnusedMoneyToPlayer = (pThis->Param5 == 1);
 	int allowableUnitsIndex = pThis->Value;
+	int startingMoney = pThis->Param6;
 
 	if (allowableUnitsIndex != 0)
 	{
@@ -656,7 +657,7 @@ bool TActionExt::OpenDropshipLoadoutWindow(TActionClass* pThis, HouseClass* pTri
 			return true;
 	}
 
-	DropshipLoadoutClass::OpenInGameWindow(bIgnoreFixedUnits, bPreloadCargo, bRefundOnClean, allowableUnitsIndex);
+	DropshipLoadoutClass::OpenInGameWindow(bIgnoreFixedUnits, bPreloadCargo, allowableUnitsIndex, startingMoney, Nullable<bool>(bAddUnusedMoneyToPlayer));
 	
 	return true;
 }

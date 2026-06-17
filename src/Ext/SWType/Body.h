@@ -81,6 +81,12 @@ public:
 		Valueable<int> TabIndex;
 
 		Nullable<bool> SuperWeaponSidebar_Allow;
+		Nullable<bool> OpenDropshipLoadout;
+		Valueable<bool> OpenDropshipLoadout_IgnoreFixedUnits;
+		Valueable<bool> OpenDropshipLoadout_PreloadCargo;
+		Nullable<bool> OpenDropshipLoadout_AddUnusedMoneyToPlayer;
+		Valueable<int> OpenDropshipLoadout_AllowableUnitsIndex;
+		Nullable<int> OpenDropshipLoadout_InitialMoney;
 		DWORD SuperWeaponSidebar_PriorityHouses;
 		DWORD SuperWeaponSidebar_RequiredHouses;
 		Valueable<int> SuperWeaponSidebar_Significance;
@@ -173,6 +179,12 @@ public:
 			, TabIndex { 1 }
 			, Convert_UseUniversalDeploy { false }
 			, SuperWeaponSidebar_Allow {}
+			, OpenDropshipLoadout {}
+			, OpenDropshipLoadout_IgnoreFixedUnits { false }
+			, OpenDropshipLoadout_PreloadCargo { false }
+			, OpenDropshipLoadout_AddUnusedMoneyToPlayer {}
+			, OpenDropshipLoadout_AllowableUnitsIndex { 0 }
+			, OpenDropshipLoadout_InitialMoney {}
 			, SuperWeaponSidebar_PriorityHouses { 0u }
 			, SuperWeaponSidebar_RequiredHouses { 0xFFFFFFFFu }
 			, SuperWeaponSidebar_Significance { 0 }

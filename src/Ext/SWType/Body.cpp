@@ -76,6 +76,12 @@ void SWTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->TabIndex)
 		.Process(this->Convert_UseUniversalDeploy)
 		.Process(this->SuperWeaponSidebar_Allow)
+		.Process(this->OpenDropshipLoadout)
+		.Process(this->OpenDropshipLoadout_IgnoreFixedUnits)
+		.Process(this->OpenDropshipLoadout_PreloadCargo)
+		.Process(this->OpenDropshipLoadout_AddUnusedMoneyToPlayer)
+		.Process(this->OpenDropshipLoadout_AllowableUnitsIndex)
+		.Process(this->OpenDropshipLoadout_InitialMoney)
 		.Process(this->SuperWeaponSidebar_PriorityHouses)
 		.Process(this->SuperWeaponSidebar_RequiredHouses)
 		.Process(this->SuperWeaponSidebar_Significance)
@@ -264,6 +270,12 @@ void SWTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
 
 	this->SuperWeaponSidebar_Allow.Read(exINI, pSection, "SuperWeaponSidebar.Allow");
+	this->OpenDropshipLoadout.Read(exINI, pSection, "OpenDropshipLoadout");
+	this->OpenDropshipLoadout_IgnoreFixedUnits.Read(exINI, pSection, "OpenDropshipLoadout.IgnoreFixedUnits");
+	this->OpenDropshipLoadout_PreloadCargo.Read(exINI, pSection, "OpenDropshipLoadout.PreloadCargo");
+	this->OpenDropshipLoadout_AddUnusedMoneyToPlayer.Read(exINI, pSection, "OpenDropshipLoadout.AddUnusedMoneyToPlayer");
+	this->OpenDropshipLoadout_AllowableUnitsIndex.Read(exINI, pSection, "OpenDropshipLoadout.AllowableUnitsIndex");
+	this->OpenDropshipLoadout_InitialMoney.Read(exINI, pSection, "OpenDropshipLoadout.InitialMoney");
 	this->SuperWeaponSidebar_PriorityHouses = pINI->ReadHouseTypesList(pSection, "SuperWeaponSidebar.PriorityHouses", this->SuperWeaponSidebar_PriorityHouses);
 	this->SuperWeaponSidebar_RequiredHouses = pINI->ReadHouseTypesList(pSection, "SuperWeaponSidebar.RequiredHouses", this->SuperWeaponSidebar_RequiredHouses);
 	this->SuperWeaponSidebar_Significance.Read(exINI, pSection, "SuperWeaponSidebar.Significance");
