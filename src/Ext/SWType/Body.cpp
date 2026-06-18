@@ -82,6 +82,9 @@ void SWTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->OpenDropshipLoadout_AddUnusedMoneyToPlayer)
 		.Process(this->OpenDropshipLoadout_AllowableUnitsIndex)
 		.Process(this->OpenDropshipLoadout_InitialMoney)
+		.Process(this->DropshipLoadout_Launch)
+		.Process(this->DropshipLoadout_ReusableCargo)
+		.Process(this->DropshipLoadout_OverwriteTransport)
 		.Process(this->SuperWeaponSidebar_PriorityHouses)
 		.Process(this->SuperWeaponSidebar_RequiredHouses)
 		.Process(this->SuperWeaponSidebar_Significance)
@@ -276,6 +279,9 @@ void SWTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->OpenDropshipLoadout_AddUnusedMoneyToPlayer.Read(exINI, pSection, "OpenDropshipLoadout.AddUnusedMoneyToPlayer");
 	this->OpenDropshipLoadout_AllowableUnitsIndex.Read(exINI, pSection, "OpenDropshipLoadout.AllowableUnitsIndex");
 	this->OpenDropshipLoadout_InitialMoney.Read(exINI, pSection, "OpenDropshipLoadout.InitialMoney");
+	this->DropshipLoadout_Launch.Read(exINI, pSection, "DropshipLoadout.Launch");
+	this->DropshipLoadout_ReusableCargo.Read(exINI, pSection, "DropshipLoadout.ReusableCargo");
+	this->DropshipLoadout_OverwriteTransport.Read(exINI, pSection, "DropshipLoadout.OverwriteTransport");
 	this->SuperWeaponSidebar_PriorityHouses = pINI->ReadHouseTypesList(pSection, "SuperWeaponSidebar.PriorityHouses", this->SuperWeaponSidebar_PriorityHouses);
 	this->SuperWeaponSidebar_RequiredHouses = pINI->ReadHouseTypesList(pSection, "SuperWeaponSidebar.RequiredHouses", this->SuperWeaponSidebar_RequiredHouses);
 	this->SuperWeaponSidebar_Significance.Read(exINI, pSection, "SuperWeaponSidebar.Significance");

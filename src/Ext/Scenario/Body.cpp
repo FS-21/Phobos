@@ -3,6 +3,8 @@
 #include <SessionClass.h>
 #include <VeinholeMonsterClass.h>
 
+extern void ConfigureTemporarySWClass(int index, TechnoTypeClass* pTransporterType, const CellStruct& cell, const CellStruct& spawnCell);
+
 std::unique_ptr<ScenarioExt::ExtData> ScenarioExt::Data = nullptr;
 
 bool ScenarioExt::CellParsed = false;
@@ -600,6 +602,7 @@ void ScenarioExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropshipLoadout_EndingDragDropSound)
 		.Process(this->DropshipLoadout_AllowableUnitsLists)
 		.Process(this->DropshipLoadout_AllowableUnitMaximumsLists)
+		.Process(this->DropshipLoadout_ActiveTeamSuffixes)
 		;
 
 	int numDropships = (int)this->DropshipLoadout_FixedUnits.size();
@@ -618,6 +621,11 @@ void ScenarioExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)
 {
 	Extension<ScenarioClass>::LoadFromStream(Stm);
 	this->Serialize(Stm);
+
+	for (int suffix : this->DropshipLoadout_ActiveTeamSuffixes)
+	{
+		ConfigureTemporarySWClass(suffix, nullptr, CellStruct::Empty, CellStruct::Empty);
+	}
 }
 
 void ScenarioExt::ExtData::SaveToStream(PhobosStreamWriter& Stm)

@@ -87,6 +87,9 @@ public:
 		Nullable<bool> OpenDropshipLoadout_AddUnusedMoneyToPlayer;
 		Valueable<int> OpenDropshipLoadout_AllowableUnitsIndex;
 		Nullable<int> OpenDropshipLoadout_InitialMoney;
+		Valueable<int> DropshipLoadout_Launch;
+		Valueable<bool> DropshipLoadout_ReusableCargo;
+		Nullable<TechnoTypeClass*> DropshipLoadout_OverwriteTransport;
 		DWORD SuperWeaponSidebar_PriorityHouses;
 		DWORD SuperWeaponSidebar_RequiredHouses;
 		Valueable<int> SuperWeaponSidebar_Significance;
@@ -185,6 +188,9 @@ public:
 			, OpenDropshipLoadout_AddUnusedMoneyToPlayer {}
 			, OpenDropshipLoadout_AllowableUnitsIndex { 0 }
 			, OpenDropshipLoadout_InitialMoney {}
+			, DropshipLoadout_Launch { -1 }
+			, DropshipLoadout_ReusableCargo { false }
+			, DropshipLoadout_OverwriteTransport {}
 			, SuperWeaponSidebar_PriorityHouses { 0u }
 			, SuperWeaponSidebar_RequiredHouses { 0xFFFFFFFFu }
 			, SuperWeaponSidebar_Significance { 0 }
@@ -232,8 +238,8 @@ public:
 		std::pair<double, double> GetEMPulseCannonRange(BuildingClass* pBuilding) const;
 
 		void ApplyLinkedSW(SuperClass* pSW);
-
 		void ApplyBattlePoints(SuperClass* pSW);
+		void ApplyDropshipLoadoutLaunch(HouseClass* pHouse, const CellStruct& cell);
 
 		virtual void LoadFromINIFile(CCINIClass* pINI) override;
 		virtual void Initialize() override;

@@ -14,6 +14,14 @@
 #include "Ext/WeaponType/Body.h"
 #include <Ext/Scenario/Body.h>
 #include <Misc/Hooks.DropshipLoadout.h>
+#include <Ext/Techno/Body.h>
+#include <TeamClass.h>
+#include <TeamTypeClass.h>
+#include <TaskForceClass.h>
+#include <ScriptTypeClass.h>
+#include <ScriptClass.h>
+#include <MapClass.h>
+#include <algorithm>
 
 // ============= New SuperWeapon Effects================
 
@@ -57,6 +65,9 @@ void SWTypeExt::FireSuperWeaponExt(SuperClass* pSW, const CellStruct& cell)
 			pTypeExt->OpenDropshipLoadout_AddUnusedMoneyToPlayer
 		);
 	}
+
+	if (pTypeExt->DropshipLoadout_Launch >= 0)
+		pTypeExt->ApplyDropshipLoadoutLaunch(pHouse, cell);
 
 	auto& sw_ext = HouseExt::ExtMap.Find(pHouse)->SuperExts[pType->ArrayIndex];
 	sw_ext.ShotCount++;
@@ -495,4 +506,284 @@ void SWTypeExt::ExtData::ApplyBattlePoints(SuperClass* pSW)
 {
 	auto pOwnerExt = HouseExt::ExtMap.Find(pSW->Owner);
 	pOwnerExt->UpdateBattlePoints(this->BattlePoints_Amount);
+}
+
+void ConfigureTemporarySWClass(int index, TechnoTypeClass* pTransporterType, const CellStruct& cell, const CellStruct& spawnCell)
+{
+	char scriptName[64];
+	char tfName[64];
+	char ttName[64];
+	sprintf_s(scriptName, "PH_SW_TempScript_%d", index);
+	sprintf_s(tfName, "PH_SW_TempTaskForce_%d", index);
+	sprintf_s(ttName, "PH_SW_TempTeamType_%d", index);
+
+	auto pScript = ScriptTypeClass::Find(scriptName);
+	if (!pScript)
+	{
+		pScript = GameCreate<ScriptTypeClass>(scriptName);
+	}
+	pScript->ActionsCount = 5;
+	pScript->ScriptActions[0].Action = 4; // Move to cell
+	const int nDivisor = ScenarioClass::NewINIFormat < 4 ? 128 : 1000;
+	pScript->ScriptActions[0].Argument = cell.Y * nDivisor + cell.X;
+
+	pScript->ScriptActions[1].Action = 5; // Deploy
+	pScript->ScriptActions[1].Argument = 6;
+
+	pScript->ScriptActions[2].Action = 8; // Deliver payload
+	pScript->ScriptActions[2].Argument = 1;
+
+	pScript->ScriptActions[3].Action = 4; // Move to cell
+	pScript->ScriptActions[3].Argument = spawnCell.Y * nDivisor + spawnCell.X;
+
+	pScript->ScriptActions[4].Action = 37; // Delete team
+	pScript->ScriptActions[4].Argument = 0;
+
+	auto pTaskForce = TaskForceClass::Find(tfName);
+	if (!pTaskForce)
+	{
+		pTaskForce = GameCreate<TaskForceClass>(tfName);
+	}
+	pTaskForce->CountEntries = 1;
+	pTaskForce->Entries[0].Amount = 1;
+	if (pTransporterType)
+	{
+		pTaskForce->Entries[0].Type = pTransporterType;
+	}
+
+	auto pTeamType = TeamTypeClass::Find(ttName);
+	if (!pTeamType)
+	{
+		pTeamType = GameCreate<TeamTypeClass>(ttName);
+	}
+
+	pTeamType->ScriptType = pScript;
+	pTeamType->TaskForce = pTaskForce;
+
+	pTeamType->Max = 1;
+	pTeamType->Full = true;
+	pTeamType->OnTransOnly = true;
+	pTeamType->Annoyance = false;
+	pTeamType->GuardSlower = false;
+	pTeamType->Recruiter = false;
+	pTeamType->Autocreate = false;
+	pTeamType->Prebuild = false;
+	pTeamType->Reinforce = false;
+	pTeamType->Whiner = false;
+	pTeamType->Aggressive = false;
+	pTeamType->LooseRecruit = false;
+	pTeamType->Suicide = false;
+	pTeamType->Droppod = false;
+	pTeamType->UseTransportOrigin = false;
+	pTeamType->Priority = 0;
+	pTeamType->Owner = nullptr;
+	pTeamType->idxHouse = 0;
+	pTeamType->TechLevel = 0;
+	pTeamType->AvoidThreats = false;
+	pTeamType->IonImmune = false;
+	pTeamType->TransportsReturnOnUnload = false;
+	pTeamType->AreTeamMembersRecruitable = false;
+	pTeamType->IsBaseDefense = false;
+	pTeamType->OnlyTargetHouseEnemy = false;
+}
+
+void SWTypeExt::ExtData::ApplyDropshipLoadoutLaunch(HouseClass* pHouse, const CellStruct& cell)
+{
+	auto const pHouseExt = HouseExt::ExtMap.Find(pHouse);
+	if (!pHouseExt)
+		return;
+
+	int dropshipIdx = this->DropshipLoadout_Launch;
+	if (dropshipIdx < 0
+		|| dropshipIdx >= (int)pHouseExt->DropshipLoadout_Carriers.size()
+		|| dropshipIdx >= (int)pHouseExt->DropshipLoadout_Cargo.size()
+		|| pHouseExt->DropshipLoadout_Cargo[dropshipIdx].size() == 0)
+	{
+		return;
+	}
+
+	TechnoTypeClass* pTransporterType = pHouseExt->DropshipLoadout_Carriers[dropshipIdx];
+	if (this->DropshipLoadout_OverwriteTransport.isset())
+		pTransporterType = this->DropshipLoadout_OverwriteTransport;
+
+	if (!pTransporterType || pTransporterType->Passengers == 0)
+		return;
+
+	auto pCargo = pHouseExt->DropshipLoadout_Cargo[dropshipIdx];
+
+	Edge spawnEdge = pHouse->StartingEdge;
+	if (spawnEdge == Edge::None || spawnEdge == Edge::Air)
+		spawnEdge = Edge::North;
+
+	CellStruct spawnCell = MapClass::Instance.PickCellOnEdge(
+		spawnEdge,
+		cell,
+		cell,
+		pTransporterType->SpeedType,
+		false,
+		pTransporterType->MovementZone
+	);
+
+	// Offset the spawn cell outwards into the black margins (outside playable area)
+	if (spawnEdge == Edge::North)
+	{
+		// North edge of visible area is at MapRect.Y. Move Y outside visible area (towards 0).
+		for (int y = spawnCell.Y - 1; y >= 0; --y)
+		{
+			CellStruct nextCell = { spawnCell.X, y };
+			if (MapClass::Instance.CoordinatesLegal(nextCell))
+				spawnCell = nextCell;
+			else
+				break;
+		}
+	}
+	else if (spawnEdge == Edge::South)
+	{
+		// South edge of visible area is at MapRect.Y + MapRect.Height - 1. Move Y outside (towards MaxHeight).
+		int maxHeight = MapClass::Instance.MaxHeight;
+		for (int y = spawnCell.Y + 1; y < maxHeight; ++y)
+		{
+			CellStruct nextCell = { spawnCell.X, y };
+			if (MapClass::Instance.CoordinatesLegal(nextCell))
+				spawnCell = nextCell;
+			else
+				break;
+		}
+	}
+	else if (spawnEdge == Edge::West)
+	{
+		// West edge of visible area is at MapRect.X. Move X outside visible area (towards 0).
+		for (int x = spawnCell.X - 1; x >= 0; --x)
+		{
+			CellStruct nextCell = { x, spawnCell.Y };
+			if (MapClass::Instance.CoordinatesLegal(nextCell))
+				spawnCell = nextCell;
+			else
+				break;
+		}
+	}
+	else if (spawnEdge == Edge::East)
+	{
+		// East edge of visible area is at MapRect.X + MapRect.Width - 1. Move X outside (towards MaxWidth).
+		int maxWidth = MapClass::Instance.MaxWidth;
+		for (int x = spawnCell.X + 1; x < maxWidth; ++x)
+		{
+			CellStruct nextCell = { x, spawnCell.Y };
+			if (MapClass::Instance.CoordinatesLegal(nextCell))
+				spawnCell = nextCell;
+			else
+				break;
+		}
+	}
+
+	CoordStruct startLocation = CellClass::Cell2Coord(spawnCell);
+
+	auto pGlobal = ScenarioExt::Global();
+	auto& activeSuffixes = pGlobal->DropshipLoadout_ActiveTeamSuffixes;
+
+	// Clean up inactive suffixes from the active list
+	activeSuffixes.erase(
+		std::remove_if(activeSuffixes.begin(), activeSuffixes.end(), [](int s) {
+			char ttName[64];
+			sprintf_s(ttName, "PH_SW_TempTeamType_%d", s);
+			auto pTeamType = TeamTypeClass::Find(ttName);
+			if (pTeamType)
+			{
+				return pTeamType->cntInstances == 0 && pTeamType->FindFirstInstance() == nullptr;
+			}
+			return true;
+		}),
+		activeSuffixes.end()
+	);
+
+	// Find the first unused suffix
+	int suffix = 0;
+	while (true)
+	{
+		bool isInUse = std::find(activeSuffixes.begin(), activeSuffixes.end(), suffix) != activeSuffixes.end();
+		if (!isInUse)
+			break;
+		suffix++;
+	}
+
+	activeSuffixes.push_back(suffix);
+
+	ConfigureTemporarySWClass(suffix, pTransporterType, cell, spawnCell);
+
+	char ttName[64];
+	sprintf_s(ttName, "PH_SW_TempTeamType_%d", suffix);
+	auto pTeamType = TeamTypeClass::Find(ttName);
+
+	if (!pTeamType)
+		return;
+
+	auto pTeam = GameCreate<TeamClass>(pTeamType, pHouse, 0);
+	if (!pTeam)
+		return;
+
+	pTeam->NeedsToDisappear = false;
+	pTeam->IsTransient = false;
+	pTeam->IsForcedActive = true;
+
+	auto const pTransporter = static_cast<FootClass*>(pTransporterType->CreateObject(pHouse));
+	if (!pTransporter)
+	{
+		GameDelete(pTeam);
+		return;
+	}
+
+	FootClass* pGunner = nullptr;
+
+	for (auto pObjectType : pCargo)
+	{
+		auto const pObject = static_cast<FootClass*>(pObjectType->CreateObject(pHouse));
+		if (!pObject)
+			continue;
+
+		auto const pPayload = static_cast<FootClass*>(pObject);
+		pPayload->SetLocation(startLocation);
+		pPayload->Limbo();
+
+		if (pTransporterType->OpenTopped)
+			pTransporter->EnteredOpenTopped(pPayload);
+
+		pPayload->Transporter = pTransporter;
+		pGunner = pPayload;
+		pTransporter->AddPassenger(pPayload);
+	}
+
+	if (pTransporterType->Gunner && pGunner)
+		pTransporter->ReceiveGunner(pGunner);
+
+	if (!this->DropshipLoadout_ReusableCargo)
+		pHouseExt->DropshipLoadout_Cargo[dropshipIdx].clear();
+
+	int zCoord = 0;
+	if (pTransporterType->ConsideredAircraft)
+	{
+		zCoord = RulesClass::Instance->FlightLevel;
+	}
+	else if (pTransporterType->IsSubterranean)
+	{
+		auto const pTypeExt = TechnoExt::ExtMap.Find(pTransporter)->TypeExtData;
+		zCoord += pTypeExt->SubterraneanHeight.Get(RulesExt::Global()->SubterraneanHeight);
+		zCoord -= pTransporter->Location.Z;
+	}
+
+	startLocation.Z = zCoord;
+	pTransporter->SetLocation(startLocation);
+
+	++Unsorted::ScenarioInit;
+	bool success = pTransporter->Unlimbo(startLocation, DirType::North);
+	--Unsorted::ScenarioInit;
+
+	if (!success)
+	{
+		GameDelete(pTeam);
+		GameDelete(pTransporter);
+		return;
+	}
+
+	pTeam->AddMember(pTransporter, true);
+	pTransporter->SetDestination(pTransporter, true);
 }

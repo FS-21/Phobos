@@ -95,6 +95,7 @@ public:
 		NullableIdx<VocClass> DropshipLoadout_ArrowsClickSound;
 		NullableIdx<VocClass> DropshipLoadout_StartingDragDropSound;
 		NullableIdx<VocClass> DropshipLoadout_EndingDragDropSound;
+		std::vector<int> DropshipLoadout_ActiveTeamSuffixes;
 
 		ExtData(ScenarioClass* OwnerObject) : Extension<ScenarioClass>(OwnerObject)
 			, ShowBriefing { false }
@@ -152,6 +153,7 @@ public:
 			, DropshipLoadout_ArrowsClickSound {}
 			, DropshipLoadout_StartingDragDropSound {}
 			, DropshipLoadout_EndingDragDropSound {}
+			, DropshipLoadout_ActiveTeamSuffixes {}
 		{ }
 
 		static void SetVariableToByID(bool bIsGlobal, int nIndex, char bState);
