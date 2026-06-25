@@ -20,10 +20,10 @@ public:
 	DropshipLoadoutClass();
 	~DropshipLoadoutClass();
 
-	bool Initialize(bool bIgnoreFixedUnits = false, bool bPreloadCargo = false, int allowableUnitsIndex = 0, int startingMoney = 0, Nullable<bool> bAddUnusedMoneyToPlayer = {});
+	bool Initialize(bool bIgnoreFixedUnits = false, bool bPreloadCargo = false, int allowableUnitsIndex = 0, int startingMoney = 0, Nullable<bool> bAddUnusedMoneyToPlayer = {}, Nullable<bool> bRememberPurchasedCargo = {}, SuperWeaponTypeClass* pSWType = nullptr);
 	void Run();
 
-	static void OpenInGameWindow(bool bIgnoreFixedUnits = false, bool bPreloadCargo = false, int allowableUnitsIndex = 0, int startingMoney = 0, Nullable<bool> bAddUnusedMoneyToPlayer = {});
+	static void OpenInGameWindow(bool bIgnoreFixedUnits = false, bool bPreloadCargo = false, int allowableUnitsIndex = 0, int startingMoney = 0, Nullable<bool> bAddUnusedMoneyToPlayer = {}, Nullable<bool> bRememberPurchasedCargo = {}, SuperWeaponTypeClass* pSWType = nullptr);
 
 private:
 	void LoadAssets();
@@ -39,6 +39,8 @@ private:
 
 	// Extensions
 	HouseTypeExt::ExtData* pHouseTypeExt { nullptr };
+	SuperWeaponTypeClass* pSWType { nullptr };
+	class SWTypeExt::ExtData* pSWTypeExt { nullptr };
 
 	// Config & state
 	int nStartingDropships { 0 };
@@ -55,6 +57,7 @@ private:
 	bool bIgnoreFixedUnits { false };
 	bool bPreloadCargo { false };
 	Nullable<bool> bAddUnusedMoneyToPlayer {};
+	Nullable<bool> bRememberPurchasedCargo {};
 	int allowableUnitsIndex { 0 };
 	int startingMoney { 0 };
 
@@ -82,6 +85,8 @@ private:
 	std::map<TechnoTypeClass*, int> dropshipBayChosenUnitsCount;
 	TechnoTypeClass* lastSelected { nullptr };
 	TechnoTypeClass* pHoveredUnitType { nullptr };
+	int hoveredDropshipIdx { -1 };
+	int hoveredSlotIdx { -1 };
 
 	// Layout/Locations
 	RectangleStruct windowRectangle;

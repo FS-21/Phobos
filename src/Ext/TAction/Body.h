@@ -29,8 +29,8 @@ enum class PhobosTriggerAction : unsigned int
 	CreateBannerGlobal = 801, // any banner w/ global variable
 	DeleteBanner = 802,
 
-	CreateDropshipLoadoutTransport = 900,
-	OpenDropshipLoadoutWindow = 901,
+	OpenDropshipLoadoutWindow = 900,
+	CreateDropshipLoadoutTransport = 901,
 
 	WinByID = 19001,
 	LoseByID = 19002,

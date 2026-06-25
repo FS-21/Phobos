@@ -25,6 +25,8 @@ public:
 		ValueableVector<TechnoTypeClass*> DropshipLoadout_Carriers;
 		ValueableVector<int> DropshipLoadout_Carriers_SizeLimit;
 		Nullable<bool> DropshipLoadout_AddUnusedMoneyToPlayer;
+		Nullable<bool> DropshipLoadout_RememberPurchasedCargo;
+		ConvertClass* DropshipLoadout_Palette;
 
 		Nullable<PhobosPCXFile> DropshipLoadout_BackgroundPCX;
 		std::string DropshipLoadout_BackgroundPCXPattern; // raw format string, e.g. "DROP%04d.PCX"
@@ -44,6 +46,7 @@ public:
 		Nullable<int> DropshipLoadout_DropshipCameosCount;
 		ValueableVector<std::vector<Point2D>> DropshipLoadout_DropshipCameoLocations;
 		std::vector<std::vector<TechnoTypeClass*>> DropshipLoadout_FixedUnits;
+		std::vector<std::vector<TechnoTypeClass*>> DropshipLoadout_InitialUnits;
 		NullableIdx<VocClass> DropshipLoadout_BuyClickSound;
 		NullableIdx<VocClass> DropshipLoadout_SellClickSound;
 		NullableIdx<VocClass> DropshipLoadout_ArrowsClickSound;
@@ -70,6 +73,8 @@ public:
 			, DropshipLoadout_Carriers {}
 			, DropshipLoadout_Carriers_SizeLimit {}
 			, DropshipLoadout_AddUnusedMoneyToPlayer {}
+			, DropshipLoadout_RememberPurchasedCargo {}
+			, DropshipLoadout_Palette { nullptr }
 			, DropshipLoadout_BackgroundPCX {}
 			, DropshipLoadout_UpArrowPCX {}
 			, DropshipLoadout_DownArrowPCX {}
@@ -87,6 +92,7 @@ public:
 			, DropshipLoadout_DropshipCameosCount {}
 			, DropshipLoadout_DropshipCameoLocations {}
 			, DropshipLoadout_FixedUnits {}
+			, DropshipLoadout_InitialUnits {}
 			, DropshipLoadout_BuyClickSound {}
 			, DropshipLoadout_SellClickSound {}
 			, DropshipLoadout_ArrowsClickSound {}

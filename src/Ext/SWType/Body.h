@@ -81,15 +81,51 @@ public:
 		Valueable<int> TabIndex;
 
 		Nullable<bool> SuperWeaponSidebar_Allow;
-		Nullable<bool> OpenDropshipLoadout;
-		Valueable<bool> OpenDropshipLoadout_IgnoreFixedUnits;
-		Valueable<bool> OpenDropshipLoadout_PreloadCargo;
-		Nullable<bool> OpenDropshipLoadout_AddUnusedMoneyToPlayer;
-		Valueable<int> OpenDropshipLoadout_AllowableUnitsIndex;
-		Nullable<int> OpenDropshipLoadout_InitialMoney;
-		Valueable<int> DropshipLoadout_Launch;
-		Valueable<bool> DropshipLoadout_ReusableCargo;
-		Nullable<TechnoTypeClass*> DropshipLoadout_OverwriteTransport;
+		Nullable<bool> DropshipLoadout_OpenWindow;
+		Valueable<bool> DropshipLoadout_Launch;
+		Valueable<bool> DropshipLoadout_PersistentCargo;
+		Nullable<bool> DropshipLoadout_PreloadCargo;
+		Nullable<bool> DropshipLoadout_AddUnusedMoneyToPlayer;
+		Valueable<bool> DropshipLoadout_RememberPurchasedCargo;
+		ConvertClass* DropshipLoadout_Palette;
+		Nullable<TechnoTypeClass*> DropshipLoadout_Carrier;
+		ValueableVector<TechnoTypeClass*> DropshipLoadout_AllowableUnits;
+		ValueableVector<int> DropshipLoadout_AllowableUnitMaximums;
+		Nullable<int> DropshipLoadout_Money;
+		Nullable<int> DropshipLoadout_Theme;
+		NullableIdx<VoxClass> DropshipLoadout_StartEVA;
+		Nullable<int> DropshipLoadout_SizeLimit;
+		Nullable<PhobosPCXFile> DropshipLoadout_BackgroundPCX;
+		std::string DropshipLoadout_BackgroundPCXPattern;
+		Nullable<PhobosPCXFile> DropshipLoadout_UpArrowPCX;
+		Nullable<PhobosPCXFile> DropshipLoadout_DownArrowPCX;
+		Nullable<Point2D> DropshipLoadout_UpArrowLocation;
+		Nullable<Point2D> DropshipLoadout_DownArrowLocation;
+		Nullable<int> DropshipLoadout_SidebarCameosCount;
+		ValueableVector<Point2D> DropshipLoadout_SidebarCameosLocations;
+		Nullable<PhobosPCXFile> DropshipLoadout_PilotLitPCX;
+		Nullable<Point2D> DropshipLoadout_PilotLitLocation;
+		Nullable<PhobosPCXFile> DropshipLoadout_LoadoutPCX;
+		Nullable<Point2D> DropshipLoadout_LoadoutLocation;
+		ValueableVector<PhobosPCXFile> DropshipLoadout_DGreenListPCX;
+		Nullable<SHPStruct*> DropshipLoadout_Background;
+		Nullable<SHPStruct*> DropshipLoadout_UpArrow;
+		Nullable<SHPStruct*> DropshipLoadout_DownArrow;
+		Nullable<SHPStruct*> DropshipLoadout_Loadout;
+		Nullable<SHPStruct*> DropshipLoadout_PilotLit;
+		std::vector<SHPStruct*> DropshipLoadout_DGreenList;
+		Nullable<int> DropshipLoadout_DGreenAnimationsCount;
+		ValueableVector<Point2D> DropshipLoadout_DGreenLocations;
+		Nullable<int> DropshipLoadout_DropshipCameosCount;
+		ValueableVector<Point2D> DropshipLoadout_DropshipCameosLocations;
+		ValueableVector<TechnoTypeClass*> DropshipLoadout_FixedUnits;
+		ValueableVector<TechnoTypeClass*> DropshipLoadout_InitialUnits;
+		NullableIdx<VoxClass> DropshipLoadout_BuyClickSound;
+		NullableIdx<VoxClass> DropshipLoadout_SellClickSound;
+		NullableIdx<VoxClass> DropshipLoadout_ArrowsClickSound;
+		NullableIdx<VoxClass> DropshipLoadout_StartingDragDropSound;
+		NullableIdx<VoxClass> DropshipLoadout_EndingDragDropSound;
+		Nullable<int> DropshipLoadout_VeteranLevel;
 		DWORD SuperWeaponSidebar_PriorityHouses;
 		DWORD SuperWeaponSidebar_RequiredHouses;
 		Valueable<int> SuperWeaponSidebar_Significance;
@@ -123,7 +159,6 @@ public:
 		ValueableVector<float> SW_Link_RollChances;
 		Valueable<CSFText> Message_LinkedSWAcquired;
 		NullableIdx<VoxClass> EVA_LinkedSWAcquired;
-
 		Valueable<int> BattlePoints_Amount;
 
 		ExtData(SuperWeaponTypeClass* OwnerObject) : Extension<SuperWeaponTypeClass>(OwnerObject)
@@ -182,15 +217,51 @@ public:
 			, TabIndex { 1 }
 			, Convert_UseUniversalDeploy { false }
 			, SuperWeaponSidebar_Allow {}
-			, OpenDropshipLoadout {}
-			, OpenDropshipLoadout_IgnoreFixedUnits { false }
-			, OpenDropshipLoadout_PreloadCargo { false }
-			, OpenDropshipLoadout_AddUnusedMoneyToPlayer {}
-			, OpenDropshipLoadout_AllowableUnitsIndex { 0 }
-			, OpenDropshipLoadout_InitialMoney {}
-			, DropshipLoadout_Launch { -1 }
-			, DropshipLoadout_ReusableCargo { false }
-			, DropshipLoadout_OverwriteTransport {}
+			, DropshipLoadout_OpenWindow {}
+			, DropshipLoadout_Launch { false }
+			, DropshipLoadout_PersistentCargo { false }
+			, DropshipLoadout_PreloadCargo {}
+			, DropshipLoadout_AddUnusedMoneyToPlayer {}
+			, DropshipLoadout_RememberPurchasedCargo { false }
+			, DropshipLoadout_Palette { nullptr }
+			, DropshipLoadout_Carrier {}
+			, DropshipLoadout_AllowableUnits {}
+			, DropshipLoadout_AllowableUnitMaximums {}
+			, DropshipLoadout_Money {}
+			, DropshipLoadout_Theme {}
+			, DropshipLoadout_StartEVA {}
+			, DropshipLoadout_SizeLimit {}
+			, DropshipLoadout_BackgroundPCX {}
+			, DropshipLoadout_BackgroundPCXPattern { "" }
+			, DropshipLoadout_UpArrowPCX {}
+			, DropshipLoadout_DownArrowPCX {}
+			, DropshipLoadout_UpArrowLocation {}
+			, DropshipLoadout_DownArrowLocation {}
+			, DropshipLoadout_SidebarCameosCount {}
+			, DropshipLoadout_SidebarCameosLocations {}
+			, DropshipLoadout_PilotLitPCX {}
+			, DropshipLoadout_PilotLitLocation {}
+			, DropshipLoadout_LoadoutPCX {}
+			, DropshipLoadout_LoadoutLocation {}
+			, DropshipLoadout_DGreenListPCX {}
+			, DropshipLoadout_Background {}
+			, DropshipLoadout_UpArrow {}
+			, DropshipLoadout_DownArrow {}
+			, DropshipLoadout_Loadout {}
+			, DropshipLoadout_PilotLit {}
+			, DropshipLoadout_DGreenList {}
+			, DropshipLoadout_DGreenAnimationsCount {}
+			, DropshipLoadout_DGreenLocations {}
+			, DropshipLoadout_DropshipCameosCount {}
+			, DropshipLoadout_DropshipCameosLocations {}
+			, DropshipLoadout_FixedUnits {}
+			, DropshipLoadout_InitialUnits {}
+			, DropshipLoadout_BuyClickSound {}
+			, DropshipLoadout_SellClickSound {}
+			, DropshipLoadout_ArrowsClickSound {}
+			, DropshipLoadout_StartingDragDropSound {}
+			, DropshipLoadout_EndingDragDropSound {}
+			, DropshipLoadout_VeteranLevel {}
 			, SuperWeaponSidebar_PriorityHouses { 0u }
 			, SuperWeaponSidebar_RequiredHouses { 0xFFFFFFFFu }
 			, SuperWeaponSidebar_Significance { 0 }

@@ -55,18 +55,20 @@ void SWTypeExt::FireSuperWeaponExt(SuperClass* pSW, const CellStruct& cell)
 	if (pTypeExt->BattlePoints_Amount != 0)
 		pTypeExt->ApplyBattlePoints(pSW);
 
-	if (pTypeExt->OpenDropshipLoadout.Get(false) && pHouse->IsCurrentPlayer())
+	if (pTypeExt->DropshipLoadout_OpenWindow.Get(false) && pHouse->IsCurrentPlayer())
 	{
 		DropshipLoadoutClass::OpenInGameWindow(
-			pTypeExt->OpenDropshipLoadout_IgnoreFixedUnits,
-			pTypeExt->OpenDropshipLoadout_PreloadCargo,
-			pTypeExt->OpenDropshipLoadout_AllowableUnitsIndex,
-			pTypeExt->OpenDropshipLoadout_InitialMoney.isset() ? pTypeExt->OpenDropshipLoadout_InitialMoney.Get() : -1,
-			pTypeExt->OpenDropshipLoadout_AddUnusedMoneyToPlayer
+			false, // bIgnoreFixedUnits
+			pTypeExt->DropshipLoadout_PreloadCargo.Get(false), // bPreloadCargo
+			0,     // allowableUnitsIndex
+			pTypeExt->DropshipLoadout_Money.Get(-1), // startingMoney
+			pTypeExt->DropshipLoadout_AddUnusedMoneyToPlayer,
+			Nullable<bool>(pTypeExt->DropshipLoadout_RememberPurchasedCargo.Get()),
+			pType
 		);
 	}
 
-	if (pTypeExt->DropshipLoadout_Launch >= 0)
+	if (pTypeExt->DropshipLoadout_Launch.Get())
 		pTypeExt->ApplyDropshipLoadoutLaunch(pHouse, cell);
 
 	auto& sw_ext = HouseExt::ExtMap.Find(pHouse)->SuperExts[pType->ArrayIndex];
@@ -593,23 +595,31 @@ void SWTypeExt::ExtData::ApplyDropshipLoadoutLaunch(HouseClass* pHouse, const Ce
 	if (!pHouseExt)
 		return;
 
-	int dropshipIdx = this->DropshipLoadout_Launch;
-	if (dropshipIdx < 0
-		|| dropshipIdx >= (int)pHouseExt->DropshipLoadout_Carriers.size()
-		|| dropshipIdx >= (int)pHouseExt->DropshipLoadout_Cargo.size()
-		|| pHouseExt->DropshipLoadout_Cargo[dropshipIdx].size() == 0)
+	TechnoTypeClass* pTransporterType = nullptr;
+	std::vector<TechnoTypeClass*> pCargo;
+
+	if (pHouseExt->DropshipLoadout_SWCargo.empty())
 	{
 		return;
 	}
 
-	TechnoTypeClass* pTransporterType = pHouseExt->DropshipLoadout_Carriers[dropshipIdx];
-	if (this->DropshipLoadout_OverwriteTransport.isset())
-		pTransporterType = this->DropshipLoadout_OverwriteTransport;
+	if (this->DropshipLoadout_Carrier.isset())
+	{
+		pTransporterType = this->DropshipLoadout_Carrier;
+	}
+	else if (pHouseExt->DropshipLoadout_SWCarrier)
+	{
+		pTransporterType = pHouseExt->DropshipLoadout_SWCarrier;
+	}
+	else if (!pHouseExt->DropshipLoadout_Carriers.empty())
+	{
+		pTransporterType = pHouseExt->DropshipLoadout_Carriers[0];
+	}
 
-	if (!pTransporterType || pTransporterType->Passengers == 0)
+	if (!pTransporterType)
 		return;
 
-	auto pCargo = pHouseExt->DropshipLoadout_Cargo[dropshipIdx];
+	pCargo = pHouseExt->DropshipLoadout_SWCargo;
 
 	Edge spawnEdge = pHouse->StartingEdge;
 	if (spawnEdge == Edge::None || spawnEdge == Edge::Air)
@@ -744,6 +754,20 @@ void SWTypeExt::ExtData::ApplyDropshipLoadoutLaunch(HouseClass* pHouse, const Ce
 		pPayload->SetLocation(startLocation);
 		pPayload->Limbo();
 
+		if (pPayload->GetTechnoType()->Trainable && this->DropshipLoadout_VeteranLevel.isset())
+		{
+			int targetVetLevel = this->DropshipLoadout_VeteranLevel.Get();
+			float targetVeterancy = 0.0f;
+
+			if (targetVetLevel == 2)
+				targetVeterancy = 1.0f;
+			else if (targetVetLevel == 3)
+				targetVeterancy = 2.0f;
+
+			if (targetVeterancy > pPayload->Veterancy.Veterancy)
+				pPayload->Veterancy.Add(targetVeterancy - pPayload->Veterancy.Veterancy);
+		}
+
 		if (pTransporterType->OpenTopped)
 			pTransporter->EnteredOpenTopped(pPayload);
 
@@ -755,8 +779,24 @@ void SWTypeExt::ExtData::ApplyDropshipLoadoutLaunch(HouseClass* pHouse, const Ce
 	if (pTransporterType->Gunner && pGunner)
 		pTransporter->ReceiveGunner(pGunner);
 
-	if (!this->DropshipLoadout_ReusableCargo)
-		pHouseExt->DropshipLoadout_Cargo[dropshipIdx].clear();
+	if (!this->DropshipLoadout_PersistentCargo)
+	{
+		pHouseExt->DropshipLoadout_SWCargo.clear();
+	}
+
+	// Remove only the spawned units from SW InitialUnits pool in HouseExt
+	for (auto pObjectType : pCargo)
+	{
+		if (pObjectType)
+		{
+			auto& swInitialUnits = pHouseExt->DropshipLoadout_SWInitialUnits;
+			auto it = std::find(swInitialUnits.begin(), swInitialUnits.end(), pObjectType);
+			if (it != swInitialUnits.end())
+			{
+				swInitialUnits.erase(it);
+			}
+		}
+	}
 
 	int zCoord = 0;
 	if (pTransporterType->ConsideredAircraft)
