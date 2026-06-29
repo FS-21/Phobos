@@ -1,17 +1,5 @@
 #pragma once
-#include <BuildingClass.h>
-#include <HouseClass.h>
-#include <TiberiumClass.h>
-#include <FactoryClass.h>
-
-#include <Helpers/Macro.h>
-#include <Utilities/Container.h>
-#include <Utilities/TemplateDef.h>
-
-#include <Misc/FlyingStrings.h>
 #include <Ext/Techno/Body.h>
-#include <Ext/TechnoType/Body.h>
-#include <Ext/Building/Body.h>
 #include <Ext/BuildingType/Body.h>
 
 class BuildingExt
@@ -21,6 +9,7 @@ public:
 
 	static constexpr DWORD Canary = 0x87654321;
 	static constexpr size_t ExtPointerOffset = 0x6FC;
+	static constexpr bool ShouldConsiderInvalidatePointer = true;
 
 	class ExtData final : public Extension<BuildingClass>
 	{
@@ -34,7 +23,13 @@ public:
 		int GrindingWeapon_AccumulatedCredits;
 		BuildingClass* CurrentAirFactory;
 		int AccumulatedIncome;
-		OptionalStruct<int, true> CurrentLaserWeaponIndex;
+		std::optional<int> CurrentLaserWeaponIndex;
+		int PoweredUpToLevel; // Distinct from UpgradeLevel, and set to highest PowersUpToLevel out of applied upgrades regardless of how many are currently applied to this building.
+		SuperClass* CurrentEMPulseSW;
+		bool IsFiringNow;
+		int TurretAnimIdleFrame;
+		int TurretAnimFiringFrame;
+		int TurretAnimRateTick;
 
 		/**
 		*  If this building was built by the AI for it to reach an expansion
@@ -53,13 +48,19 @@ public:
 			, CurrentAirFactory { nullptr }
 			, AccumulatedIncome { 0 }
 			, CurrentLaserWeaponIndex {}
+			, PoweredUpToLevel { 0 }
+			, CurrentEMPulseSW {}
+			, IsFiringNow { false }
+			, TurretAnimIdleFrame { 0 }
+			, TurretAnimFiringFrame { -1 }
+			, TurretAnimRateTick { 0 }
 			, AssignedExpansionPoint {}
 		{ }
 
 		void DisplayIncomeString();
 		void ApplyPoweredKillSpawns();
-		bool HasSuperWeapon(int index, bool withUpgrades) const;
-
+		bool HasSuperWeapon(int index) const;
+		bool HandleInfiltrate(HouseClass* pInfiltratorHouse, int moneybefore);
 		void UpdatePrimaryFactoryAI();
 
 		static BuildingClass* OurBuildings[1000];
@@ -114,8 +115,12 @@ public:
 	static bool HasFreeDocks(BuildingClass* pBuilding);
 	static bool CanGrindTechno(BuildingClass* pBuilding, TechnoClass* pTechno);
 	static bool DoGrindingExtras(BuildingClass* pBuilding, TechnoClass* pTechno, int refund);
-	static bool HandleInfiltrate(BuildingClass* pBuilding, HouseClass* pInfiltratorHouse);
 	static bool CanUndeployOnSell(BuildingClass* pThis);
+	static void KickOutStuckUnits(BuildingClass* pThis);
+	static const std::vector<CellStruct> GetFoundationCells(BuildingClass* pThis, CellStruct baseCoords, bool includeOccupyHeight = false);
+	static WeaponStruct* GetLaserWeapon(BuildingClass* pThis);
+	static void __fastcall KickOutClone(std::pair<TechnoTypeClass*, HouseClass*>& info, void*, BuildingClass* pFactory);
+	static int GetTurretFrame(BuildingClass* pThis);
 
 	static HouseClass* Find_Closest_Opponent(const HouseClass* pHouse);
 	static int Get_Distance_To_Primary_Enemy(CellStruct cell, HouseClass* pHouse);

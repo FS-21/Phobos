@@ -1,84 +1,245 @@
-#include <InfantryClass.h>
+#include <JumpjetLocomotionClass.h>
 
 #include "Body.h"
 
 #include <Ext/Anim/Body.h>
 
-#pragma region ICColorBugFix
+#pragma region Intensity_Helper_Functions
 
-DEFINE_HOOK(0x43D442, BuildingClass_Draw_ICFSColor, 0x7)
+static bool IsOnBridge(FootClass* pUnit)
 {
-	enum { SkipGameCode = 0x43D45B };
+	auto const pCell = MapClass::Instance.GetCellAt(pUnit->GetCoords());
+	auto const pCellAdj = pCell->GetNeighbourCell(FacingType::North);
+	const bool containsBridge = pCell->ContainsBridge();
+	const bool containsBridgeDir = static_cast<bool>(pCell->Flags & CellFlags::BridgeDir);
 
-	GET(BuildingClass*, pThis, ESI);
-
-	RulesClass* rules = RulesClass::Instance;
-
-	R->ECX(rules);
-	R->EAX(pThis->ForceShielded ? rules->ForceShieldColor : rules->IronCurtainColor);
-
-	return SkipGameCode;
+	return (containsBridge || containsBridgeDir || pCellAdj->ContainsBridge())
+		&& (!containsBridge || pCell->GetNeighbourCell(FacingType::West)->ContainsBridge());
 }
 
-DEFINE_HOOK(0x43DCE1, BuildingClass_Draw2_ICFSColor, 0x7)
+static void GetLevelIntensity(TechnoClass* pThis, int level, int& levelIntensity, int& cellIntensity, double levelMult, bool applyBridgeBonus)
 {
-	enum { SkipGameCode = 0x43DCFA };
-
-	GET(BuildingClass*, pThis, EBP);
-
-	RulesClass* rules = RulesClass::Instance;
-
-	R->ECX(rules);
-	R->EAX(pThis->ForceShielded ? rules->ForceShieldColor : rules->IronCurtainColor);
-
-	return SkipGameCode;
+	const int bridgeHeight = applyBridgeBonus ? 4 : 0;
+	const int bridgeBonus = bridgeHeight * level;
+	const double currentLevel = (pThis->GetHeight() / static_cast<double>(Unsorted::LevelHeight)) - bridgeHeight;
+	levelIntensity = static_cast<int>(level * currentLevel * levelMult);
+	cellIntensity = MapClass::Instance.GetCellAt(pThis->GetMapCoords())->Intensity_Normal + bridgeBonus;
 }
 
-DEFINE_HOOK(0x73BFBF, UnitClass_DrawAsVoxel_ICFSColor, 0x6)
+static int GetJumpjetIntensity(FootClass* pThis)
 {
-	enum { SkipGameCode = 0x73BFC5 };
+	int level = ScenarioClass::Instance->NormalLighting.Level;
 
-	GET(UnitClass*, pThis, EBP);
+	if (LightningStorm::Active)
+		level = ScenarioClass::Instance->IonLighting.Level;
+	else if (PsyDom::Active())
+		level = ScenarioClass::Instance->DominatorLighting.Level;
+	else if (NukeFlash::IsFadingIn())
+		level = ScenarioClass::Instance->NukeLighting.Level;
 
-	RulesClass* rules = RulesClass::Instance;
+	int levelIntensity = 0;
+	int cellIntensity = 1000;
+	GetLevelIntensity(pThis, level, levelIntensity, cellIntensity, RulesExt::Global()->JumpjetLevelLightMultiplier, IsOnBridge(pThis));
 
-	R->EAX(pThis->ForceShielded ? rules->ForceShieldColor : rules->IronCurtainColor);
-
-	return SkipGameCode;
+	return levelIntensity + cellIntensity;
 }
 
-DEFINE_HOOK(0x42350C, AnimClass_Draw_ICFSColor, 0x7)
+static int GetDeployingAnimIntensity(FootClass* pThis)
 {
-	enum { SkipGameCode = 0x423525 };
+	int intensity = 0;
 
-	GET(BuildingClass*, pBuilding, ECX);
+	if (locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor))
+		intensity = GetJumpjetIntensity(pThis);
+	else
+		intensity = pThis->GetCell()->Intensity_Normal;
 
-	RulesClass* rules = RulesClass::Instance;
+	intensity = pThis->GetFlashingIntensity(intensity);
 
-	R->ECX(rules);
-	R->EAX(pBuilding->ForceShielded ? rules->ForceShieldColor : rules->IronCurtainColor);
+	if (pThis->IsIronCurtained())
+		intensity = pThis->GetInvulnerabilityTintIntensity(intensity);
 
-	return SkipGameCode;
+	if (TechnoExt::ExtMap.Find(pThis)->AirstrikeTargetingMe)
+		intensity = pThis->GetAirstrikeTintIntensity(intensity);
+
+	return intensity;
 }
 
 #pragma endregion
 
+DEFINE_HOOK(0x43D386, BuildingClass_Draw_TintColor, 0x6)
+{
+	enum { SkipGameCode = 0x43D4EB };
+
+	GET(BuildingClass*, pThis, ESI);
+
+	int color = TechnoExt::GetTintColor(pThis, true, true, false);
+	color |= TechnoExt::GetCustomTintColor(pThis);
+	R->EDI(color);
+
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x43DC1C, BuildingClass_Draw2_TintColor, 0x6)
+{
+	enum { SkipGameCode = 0x43DD8E };
+
+	GET(BuildingClass*, pThis, EBP);
+	REF_STACK(int, color, STACK_OFFSET(0x12C, -0x110));
+
+	color = TechnoExt::GetTintColor(pThis, true, true, false);
+	color |= TechnoExt::GetCustomTintColor(pThis);
+
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x73BF95, UnitClass_DrawAsVoxel_Tint, 0x7)
+{
+	enum { SkipGameCode = 0x73C141 };
+
+	GET(UnitClass*, pThis, EBP);
+	GET(const int, flashIntensity, ESI);
+	REF_STACK(int, intensity, STACK_OFFSET(0x1D0, 0x10));
+
+	intensity = flashIntensity;
+
+	if (pThis->IsIronCurtained())
+		intensity = pThis->GetInvulnerabilityTintIntensity(intensity);
+
+	if (TechnoExt::ExtMap.Find(pThis)->AirstrikeTargetingMe)
+		intensity = pThis->GetAirstrikeTintIntensity(intensity);
+
+	int color = TechnoExt::GetTintColor(pThis, true, true, true);
+	TechnoExt::ApplyCustomTintValues(pThis, color, intensity);
+
+	R->ESI(color);
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x518FC8, InfantryClass_Draw_TintColor, 0x6)
+{
+	enum { SkipGameCode = 0x519082 };
+
+	GET(InfantryClass*, pThis, EBP);
+	REF_STACK(int, color, STACK_OFFSET(0x54, -0x40));
+
+	color = 0;
+	color |= TechnoExt::GetTintColor(pThis, true, true, true);
+	color |= TechnoExt::GetCustomTintColor(pThis);
+
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x51946D, InfantryClass_Draw_TintIntensity, 0x6)
+{
+	GET(InfantryClass*, pThis, EBP);
+	GET(int, intensity, ESI);
+
+	if (pThis->IsIronCurtained())
+		intensity = pThis->GetInvulnerabilityTintIntensity(intensity);
+
+	if (TechnoExt::ExtMap.Find(pThis)->AirstrikeTargetingMe)
+		intensity = pThis->GetAirstrikeTintIntensity(intensity);
+
+	intensity += TechnoExt::GetCustomTintIntensity(pThis);
+	R->ESI(intensity);
+
+	return 0;
+}
+
+DEFINE_HOOK(0x423420, AnimClass_Draw_TintColor, 0x6)
+{
+	enum { SkipGameCode = 0x4235D3 };
+
+	GET(AnimClass*, pThis, ESI);
+	GET(BuildingClass*, pBuilding, EAX);
+	REF_STACK(int, color, STACK_OFFSET(0x110, -0xF4));
+	REF_STACK(int, intensity, STACK_OFFSET(0x110, -0xD8));
+
+	TechnoClass* pTechno = pBuilding;
+	auto const pUnit = abstract_cast<UnitClass*>(pThis->OwnerObject);
+	bool allowBerserkTint = false;
+
+	if (pUnit && pUnit->DeployAnim == pThis)
+	{
+		pTechno = pUnit;
+		allowBerserkTint = true;
+
+		if (!pThis->Type->UseNormalLight)
+			intensity = GetDeployingAnimIntensity(pUnit);
+	}
+	else if (!pTechno)
+	{
+		pTechno = AnimExt::ExtMap.Find(pThis)->ParentBuilding;
+	}
+
+	if (pTechno)
+	{
+		int discard = 0;
+		color |= TechnoExt::GetTintColor(pTechno, true, true, allowBerserkTint);
+		TechnoExt::ApplyCustomTintValues(pTechno, color, pThis->Type->UseNormalLight ? discard : intensity);
+	}
+
+	R->EBP(color);
+	return SkipGameCode;
+}
+
+namespace TechnoClass_DrawShapeTemp
+{
+	bool DisableTint = false;
+}
+
+DEFINE_HOOK(0x7060D6, TechnoClass_DrawShape_DisguiseTint_SetContext, 0x5)
+{
+	TechnoClass_DrawShapeTemp::DisableTint = true;
+	return 0;
+}
+
+DEFINE_HOOK(0x70632E, TechnoClass_DrawShape_GetTintIntensity, 0x6)
+{
+	enum { SkipGameCode = 0x706389 };
+
+	GET(TechnoClass*, pThis, ESI);
+	GET(int, intensity, EAX);
+
+	if (!TechnoClass_DrawShapeTemp::DisableTint)
+	{
+		if (pThis->IsIronCurtained())
+			intensity = pThis->GetInvulnerabilityTintIntensity(intensity);
+
+		const auto pExt = TechnoExt::ExtMap.Find(pThis);
+
+		if (pExt->AirstrikeTargetingMe)
+			intensity = pThis->GetAirstrikeTintIntensity(intensity);
+	}
+
+	R->EBP(intensity);
+	return SkipGameCode;
+}
+
 DEFINE_HOOK(0x706389, TechnoClass_DrawObject_TintColor, 0x6)
 {
+	enum { ClearColor = 0x7063E0 };
+
+	if (TechnoClass_DrawShapeTemp::DisableTint)
+	{
+		TechnoClass_DrawShapeTemp::DisableTint = false;
+		return ClearColor;
+	}
+
 	GET(TechnoClass*, pThis, ESI);
 	GET(int, intensity, EBP);
 	REF_STACK(int, color, STACK_OFFSET(0x54, 0x2C));
 
-	bool isVehicle = pThis->WhatAmI() == AbstractType::Unit;
-	bool isAircraft = pThis->WhatAmI() == AbstractType::Aircraft;
+	auto const rtti = pThis->WhatAmI();
+	const bool isAircraft = rtti == AbstractType::Aircraft;
 
 	// SHP vehicles and aircraft
-	if (isVehicle || isAircraft)
+	if (rtti == AbstractType::Unit || isAircraft)
 	{
-		color |= TechnoExt::GetTintColor(pThis, true, false, !isAircraft);
+		color |= TechnoExt::GetTintColor(pThis, true, true, !isAircraft);
 		TechnoExt::ApplyCustomTintValues(pThis, color, intensity);
 	}
-	else if (pThis->WhatAmI() != AbstractType::Infantry)
+	else if (rtti != AbstractType::Infantry)
 	{
 		intensity += TechnoExt::GetCustomTintIntensity(pThis);
 	}
@@ -88,38 +249,38 @@ DEFINE_HOOK(0x706389, TechnoClass_DrawObject_TintColor, 0x6)
 	return 0;
 }
 
-DEFINE_HOOK(0x7067E4, TechnoClass_DrawVoxel_TintColor, 0x8)
+DEFINE_HOOK(0x706786, TechnoClass_DrawVoxel_TintColor, 0x5)
 {
+	enum { SkipTint = 0x7067E4 };
+
 	GET(TechnoClass*, pThis, EBP);
-	GET(int, intensity, EDI);
+
+	auto const rtti = pThis->WhatAmI();
+
+	// Vehicles already have had tint intensity as well as custom tints applied, no need to do it twice.
+	if (rtti == AbstractType::Unit)
+		return SkipTint;
+
+	GET(int, intensity, EAX);
 	REF_STACK(int, color, STACK_OFFSET(0x50, 0x24));
 
-	color |= TechnoExt::GetTintColor(pThis, true, false, true);
-	TechnoExt::ApplyCustomTintValues(pThis, color, intensity);
+	if (rtti == AbstractType::Aircraft)
+		color = TechnoExt::GetTintColor(pThis, true, true, false);
+
+	// Non-aircraft voxels do not need custom tint color applied again, discard that component for them.
+	int discardColor = 0;
+	TechnoExt::ApplyCustomTintValues(pThis, rtti == AbstractType::Aircraft ? color : discardColor, intensity);
+
+	if (pThis->IsIronCurtained())
+		intensity = pThis->GetInvulnerabilityTintIntensity(intensity);
+
+	const auto pExt = TechnoExt::ExtMap.Find(pThis);
+
+	if (pExt->AirstrikeTargetingMe)
+		intensity = pThis->GetAirstrikeTintIntensity(intensity);
+
 	R->EDI(intensity);
-
-	return 0;
-}
-
-DEFINE_HOOK(0x43D4EB, BuildingClass_Draw_TintColor, 0x6)
-{
-	GET(BuildingClass*, pThis, ESI);
-	GET(int, color, EDI);
-
-	color |= TechnoExt::GetCustomTintColor(pThis);
-	R->EDI(color);
-
-	return 0;
-}
-
-DEFINE_HOOK(0x43DD8E, BuildingClass_Draw2_TintColor, 0xA)
-{
-	GET(BuildingClass*, pThis, EBP);
-	REF_STACK(int, color, STACK_OFFSET(0x12C, -0x110));
-
-	color |= TechnoExt::GetCustomTintColor(pThis);
-
-	return 0;
+	return SkipTint;
 }
 
 DEFINE_HOOK(0x43FA19, BuildingClass_Mark_TintIntensity, 0x7)
@@ -133,67 +294,94 @@ DEFINE_HOOK(0x43FA19, BuildingClass_Mark_TintIntensity, 0x7)
 	return 0;
 }
 
-DEFINE_HOOK(0x519082, InfantryClass_Draw_TintColor, 0x7)
+namespace ICTintTemp
 {
+	bool IsForceShield = false;
+}
+
+DEFINE_HOOK(0x70E380, TechnoClass_InvulnerabilityIntensity_SetContext, 0x6)
+{
+	GET(TechnoClass*, pThis, ECX);
+
+	ICTintTemp::IsForceShield = pThis->ForceShielded;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x70E475, TechnoClass_InvulnerabilityIntensity_Adjust, 0x5)
+{
+	enum { SkipGameCode = 0x70E488 };
+
+	GET(int, intensity, EAX);
+
+	if (intensity > 2000)
+		intensity = 2000;
+
+	const int max = static_cast<int>((ICTintTemp::IsForceShield
+		? RulesExt::Global()->ForceShield_ExtraTintIntensity
+		: RulesExt::Global()->IronCurtain_ExtraTintIntensity) * 1000);
+
+	R->EAX(intensity + max);
+	return SkipGameCode;
+}
+
+#pragma region LevelLighting
+
+DEFINE_HOOK(0x4148F4, AircraftClass_DrawIt_LevelIntensity, 0x5)
+{
+	enum { SkipGameCode = 0x414925 };
+
+	GET(AircraftClass*, pThis, EBP);
+	GET(int, level, EDI);
+
+	if (PsyDom::Active())
+		level = ScenarioClass::Instance->DominatorLighting.Level;
+	else if (NukeFlash::IsFadingIn())
+		level = ScenarioClass::Instance->NukeLighting.Level;
+
+	int levelIntensity = 0;
+	int cellIntensity = 1000;
+	GetLevelIntensity(pThis, level, levelIntensity, cellIntensity, RulesExt::Global()->AircraftLevelLightMultiplier, false);
+
+	R->ESI(levelIntensity);
+	R->EBX(cellIntensity);
+
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x51933B, InfantryClass_DrawIt_LevelIntensity, 0x6)
+{
+	enum { SkipGameCode = 0x51944D };
+
 	GET(InfantryClass*, pThis, EBP);
-	REF_STACK(int, color, STACK_OFFSET(0x54, -0x40));
+	GET(const int, level, EBX);
 
-	color |= TechnoExt::GetTintColor(pThis, true, false, false);
-	color |= TechnoExt::GetCustomTintColor(pThis);
+	if (locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor))
+	{
+		int levelIntensity = 0;
+		int cellIntensity = 1000;
+		GetLevelIntensity(pThis, level, levelIntensity, cellIntensity, RulesExt::Global()->JumpjetLevelLightMultiplier, IsOnBridge(pThis));
+
+		R->ESI(levelIntensity + cellIntensity);
+		return SkipGameCode;
+	}
 
 	return 0;
 }
 
-DEFINE_HOOK(0x51946D, InfantryClass_Draw_TintIntensity, 0x6)
+DEFINE_HOOK(0x73CFA7, UnitClass_DrawIt_LevelIntensity, 0x6)
 {
-	GET(InfantryClass*, pThis, EBP);
-	GET(int, intensity, ESI);
+	enum { SkipGameCode = 0x73D0C3 };
 
-	intensity = pThis->GetEffectTintIntensity(intensity);
-	intensity += TechnoExt::GetCustomTintIntensity(pThis);
-	R->ESI(intensity);
+	GET(UnitClass*, pThis, ESI);
 
-	return 0;
-}
-
-DEFINE_HOOK(0x73C083, UnitClass_DrawAsVoxel_TintColor, 0x6)
-{
-	GET(UnitClass*, pThis, EBP);
-	GET(int, color, ESI);
-	REF_STACK(int, intensity, STACK_OFFSET(0x1D0, 0x10));
-
-	TechnoExt::ApplyCustomTintValues(pThis, color, intensity);
-
-	R->ESI(color);
+	if (locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor))
+	{
+		R->EBP(GetJumpjetIntensity(pThis));
+		return SkipGameCode;
+	}
 
 	return 0;
 }
 
-DEFINE_HOOK(0x423420, AnimClass_Draw_ParentBuildingCheck, 0x6)
-{
-	GET(AnimClass*, pThis, ESI);
-	GET(BuildingClass*, pBuilding, EAX);
-
-	if (!pBuilding)
-		R->EAX(AnimExt::ExtMap.Find(pThis)->ParentBuilding);
-
-	return 0;
-}
-
-DEFINE_HOOK(0x4235D3, AnimClass_Draw_TintColor, 0x6)
-{
-	GET(AnimClass*, pThis, ESI);
-	GET(int, color, EBP);
-	REF_STACK(int, intensity, STACK_OFFSET(0x110, -0xD8));
-
-	auto const pBuilding = AnimExt::ExtMap.Find(pThis)->ParentBuilding;
-
-	if (!pBuilding)
-		return 0;
-
-	int dummy = 0;
-	TechnoExt::ApplyCustomTintValues(pBuilding, color, !pThis->Type->UseNormalLight ? intensity : dummy);
-	R->EBP(color);
-
-	return 0;
-}
+#pragma endregion

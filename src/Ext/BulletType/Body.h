@@ -1,7 +1,6 @@
 #pragma once
 #include <BulletTypeClass.h>
 
-#include <Helpers/Macro.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
 
@@ -27,13 +26,16 @@ public:
 		Valueable<WeaponTypeClass*> Interceptable_WeaponOverride;
 		ValueableIdxVector<LaserTrailTypeClass> LaserTrail_Types;
 		Nullable<double> Gravity;
+		Valueable<bool> Vertical_AircraftFix;
+		Nullable<bool> VerticalInitialFacing;
 
-		PhobosTrajectoryType* TrajectoryType;// TODO: why not unique_ptr
-		Valueable<double> Trajectory_Speed;
+		TrajectoryTypePointer TrajectoryType;
 
 		Valueable<bool> Shrapnel_AffectsGround;
 		Valueable<bool> Shrapnel_AffectsBuildings;
 		Valueable<bool> Shrapnel_UseWeaponTargeting;
+		Nullable<bool> Shrapnel_IgnoreHitBuildings;
+		Nullable<bool> Shrapnel_ObeyWarheadTriggerConditions;
 		Nullable<bool> SubjectToLand;
 		Valueable<bool> SubjectToLand_Detonate;
 		Nullable<bool> SubjectToWater;
@@ -45,6 +47,38 @@ public:
 		Valueable<bool> AAOnly;
 		Valueable<bool> Arcing_AllowElevationInaccuracy;
 		Valueable<WeaponTypeClass*> ReturnWeapon;
+		Valueable<bool> ReturnWeapon_ApplyFirepowerMult;
+
+		Valueable<bool> SubjectToGround;
+
+		Valueable<bool> Splits;
+		Valueable<double> AirburstSpread;
+		Valueable<double> RetargetAccuracy;
+		Valueable<bool> RetargetSelf;
+		Valueable<double> RetargetSelf_Probability;
+		Nullable<bool> AroundTarget;
+		Valueable<bool> Airburst_UseCluster;
+		Valueable<bool> Airburst_RandomClusters;
+		Valueable<bool> Airburst_TargetAsSource;
+		Valueable<bool> Airburst_TargetAsSource_SkipHeight;
+		Valueable<Leptons> Splits_TargetingDistance;
+		Valueable<bool> Splits_TargetingDistance_Cylindrical;
+		Valueable<bool> Splits_AllowRepeatTargets;
+		Valueable<int> Splits_TargetCellRange;
+		Valueable<bool> Splits_UseWeaponTargeting;
+		Valueable<bool> AirburstWeapon_ApplyFirepowerMult;
+		Valueable<Leptons> AirburstWeapon_SourceScatterMin;
+		Valueable<Leptons> AirburstWeapon_SourceScatterMax;
+		Valueable<bool> AirburstWeapon_UseFiringEffects;
+		Valueable<bool> AirburstWeapon_HeadToTarget;
+		Valueable<int> AirburstWeapon_RadialFireSegments;
+
+		Valueable<bool> Parachuted;
+		Valueable<int> Parachuted_FallRate;
+		Nullable<int> Parachuted_MaxFallRate;
+		Nullable<AnimTypeClass*> BombParachute;
+
+		Valueable<bool> AU;
 
 		// Ares 0.7
 		Nullable<Leptons> BallisticScatter_Min;
@@ -57,11 +91,14 @@ public:
 			, Interceptable_WeaponOverride {}
 			, LaserTrail_Types {}
 			, Gravity {}
-			, TrajectoryType { nullptr }
-			, Trajectory_Speed { 100.0 }
+			, Vertical_AircraftFix { true }
+			, VerticalInitialFacing {}
+			, TrajectoryType { }
 			, Shrapnel_AffectsGround { false }
 			, Shrapnel_AffectsBuildings { false }
 			, Shrapnel_UseWeaponTargeting { false }
+			, Shrapnel_IgnoreHitBuildings {}
+			, Shrapnel_ObeyWarheadTriggerConditions {}
 			, ClusterScatter_Min { Leptons(256) }
 			, ClusterScatter_Max { Leptons(512) }
 			, BallisticScatter_Min {}
@@ -73,6 +110,34 @@ public:
 			, AAOnly { false }
 			, Arcing_AllowElevationInaccuracy { true }
 			, ReturnWeapon {}
+			, ReturnWeapon_ApplyFirepowerMult { false }
+			, SubjectToGround { false }
+			, Splits { false }
+			, AirburstSpread { 1.5 }
+			, RetargetAccuracy { 0.0 }
+			, RetargetSelf { true }
+			, RetargetSelf_Probability { 0.5 }
+			, AroundTarget {}
+			, Airburst_UseCluster { false }
+			, Airburst_RandomClusters { false }
+			, Airburst_TargetAsSource { false }
+			, Airburst_TargetAsSource_SkipHeight { false }
+			, Splits_TargetingDistance{ Leptons(1280) }
+			, Splits_TargetingDistance_Cylindrical { false }
+			, Splits_AllowRepeatTargets { false }
+			, Splits_TargetCellRange { 3 }
+			, Splits_UseWeaponTargeting { false }
+			, AirburstWeapon_ApplyFirepowerMult { false }
+			, AirburstWeapon_SourceScatterMin { Leptons(0) }
+			, AirburstWeapon_SourceScatterMax { Leptons(0) }
+			, AirburstWeapon_UseFiringEffects { false }
+			, AirburstWeapon_HeadToTarget { false }
+			, AirburstWeapon_RadialFireSegments { 0 }
+			, Parachuted { false }
+			, Parachuted_FallRate { 1 }
+			, Parachuted_MaxFallRate {}
+			, BombParachute {}
+			, AU { false }
 		{ }
 
 		virtual ~ExtData() = default;
@@ -92,7 +157,8 @@ public:
 		void TrajectoryValidation() const;
 	};
 
-	class ExtContainer final : public Container<BulletTypeExt> {
+	class ExtContainer final : public Container<BulletTypeExt>
+	{
 	public:
 		ExtContainer();
 		~ExtContainer();

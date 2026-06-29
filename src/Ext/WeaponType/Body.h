@@ -1,8 +1,4 @@
 #pragma once
-#include <BulletClass.h>
-#include <WeaponTypeClass.h>
-#include <DiskLaserClass.h>
-#include <Helpers/Macro.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
 
@@ -22,25 +18,48 @@ public:
 	public:
 
 		Valueable<double> DiskLaser_Radius;
+		Valueable<Leptons> ProjectileRange;
 		Valueable<RadTypeClass*> RadType;
-		Valueable<bool> Bolt_Disable1;
-		Valueable<bool> Bolt_Disable2;
-		Valueable<bool> Bolt_Disable3;
+		Nullable<ColorStruct> Bolt_Color[3];
+		Valueable<bool> Bolt_Disable[3];
+		Nullable<ParticleSystemTypeClass*> Bolt_ParticleSystem;
 		Valueable<int> Bolt_Arcs;
-		Valueable<int> Strafing_Shots;
+		Valueable<int> Bolt_Duration;
+		Nullable<bool> Bolt_FollowFLH;
+		Nullable<bool> Strafing;
+		Nullable<int> Strafing_Shots;
 		Valueable<bool> Strafing_SimulateBurst;
+		Valueable<bool> Strafing_UseAmmoPerShot;
+		Valueable<bool> Strafing_TargetCell;
+		Nullable<int> Strafing_EndDelay;
 		Valueable<AffectedTarget> CanTarget;
 		Valueable<AffectedHouse> CanTargetHouses;
+		Valueable<double> CanTarget_MaxHealth;
+		Valueable<double> CanTarget_MinHealth;
+		Valueable<AffectedVeterancy> CanTargetVeterancy;
+		Nullable<bool> CanTarget_IronCurtained;
+		Nullable<bool> AutoTarget_IronCurtained;
 		ValueableVector<int> Burst_Delays;
 		Valueable<bool> Burst_FireWithinSequence;
+		Valueable<bool> Burst_NoDelay;
 		Valueable<AreaFireTarget> AreaFire_Target;
 		Valueable<WeaponTypeClass*> FeedbackWeapon;
 		Valueable<bool> Laser_IsSingleColor;
+		Nullable<int> LaserZAdjust;
+		Nullable<int> EBoltZAdjust;
+		Nullable<bool> EBoltZAdjust_ClampInitialDepthForBuilding;
+		Valueable<bool> VisualScatter;
 		Nullable<PartialVector2D<int>> ROF_RandomDelay;
+		ValueableVector<int> ChargeTurret_Delays;
 		Valueable<bool> OmniFire_TurnToTarget;
+		Valueable<bool> FireOnce_ResetSequence;
+		Valueable<bool> TurretRecoil_Suppress;
 		ValueableVector<WarheadTypeClass*> ExtraWarheads;
 		ValueableVector<int> ExtraWarheads_DamageOverrides;
 		ValueableVector<double> ExtraWarheads_DetonationChances;
+		ValueableVector<float> ExtraWarheads_RollChances;
+		std::vector<ValueableVector<int>> ExtraWarheads_WeightsData;
+		ValueableVector<bool> ExtraWarheads_FullDetonation;
 		Nullable<WarheadTypeClass*> AmbientDamage_Warhead;
 		Valueable<bool> AmbientDamage_IgnoreTarget;
 		ValueableVector<AttachEffectTypeClass*> AttachEffect_RequiredTypes;
@@ -51,29 +70,87 @@ public:
 		ValueableVector<int> AttachEffect_RequiredMaxCounts;
 		ValueableVector<int> AttachEffect_DisallowedMinCounts;
 		ValueableVector<int> AttachEffect_DisallowedMaxCounts;
+		Valueable<bool> AttachEffect_CheckOnFirer;
 		Valueable<bool> AttachEffect_IgnoreFromSameSource;
+		Valueable<Leptons> KeepRange;
+		Valueable<bool> KeepRange_AllowAI;
+		Valueable<bool> KeepRange_AllowPlayer;
+		Valueable<int> KeepRange_EarlyStopFrame;
+		Valueable<bool> KickOutPassengers;
+		Nullable<ColorStruct> Beam_Color;
+		Valueable<int> Beam_Duration;
+		Valueable<double> Beam_Amplitude;
+		Valueable<bool> Beam_IsHouseColor;
+		Valueable<int> LaserThickness;
+		Nullable<PartialVector2D<int>> DelayedFire_Duration;
+		Valueable<bool> DelayedFire_SkipInTransport;
+		Valueable<AnimTypeClass*> DelayedFire_Animation;
+		Nullable<AnimTypeClass*> DelayedFire_OpenToppedAnimation;
+		Valueable<bool> DelayedFire_AnimIsAttached;
+		Valueable<bool> DelayedFire_CenterAnimOnFirer;
+		Valueable<bool> DelayedFire_RemoveAnimOnNoDelay;
+		Valueable<bool> DelayedFire_PauseFiringSequence;
+		Valueable<bool> DelayedFire_OnlyOnInitialBurst;
+		Nullable<CoordStruct> DelayedFire_AnimOffset;
+		Valueable<bool> DelayedFire_AnimOnTurret;
+		Nullable<Leptons> ExtraRange_TargetMoving;
+		Nullable<Leptons> ExtraRange_FirerMoving;
+		Nullable<Leptons> ExtraRange_Prefiring;
+		Nullable<bool> ExtraRange_Prefiring_IncludeBurst;
+		Nullable<bool> AttackFriendlies;
+		Nullable<bool> AttackCursorOnFriendlies;
+		Nullable<bool> AttackNoThreatBuildings;
 
+		Nullable<bool> Anim_Update;
+
+		bool SkipWeaponPicking;
+
+		Nullable<bool> CylinderRangefinding;
+		
 		ExtData(WeaponTypeClass* OwnerObject) : Extension<WeaponTypeClass>(OwnerObject)
 			, DiskLaser_Radius { DiskLaserClass::Radius }
+			, ProjectileRange { Leptons(100000) }
 			, RadType {}
-			, Bolt_Disable1 { false }
-			, Bolt_Disable2 { false }
-			, Bolt_Disable3 { false }
+			, Bolt_Color {}
+			, Bolt_Disable { Valueable<bool>(false) }
+			, Bolt_ParticleSystem {}
 			, Bolt_Arcs { 8 }
-			, Strafing_Shots { 5 }
+			, Bolt_Duration { 17 }
+			, Bolt_FollowFLH {}
+			, Strafing { }
+			, Strafing_Shots {}
 			, Strafing_SimulateBurst { false }
+			, Strafing_UseAmmoPerShot { false }
+			, Strafing_TargetCell { false }
+			, Strafing_EndDelay {}
 			, CanTarget { AffectedTarget::All }
 			, CanTargetHouses { AffectedHouse::All }
+			, CanTarget_MaxHealth { 1.0 }
+			, CanTarget_MinHealth { 0.0 }
+			, CanTargetVeterancy { AffectedVeterancy::All }
+			, CanTarget_IronCurtained {}
+			, AutoTarget_IronCurtained {}
 			, Burst_Delays {}
 			, Burst_FireWithinSequence { false }
+			, Burst_NoDelay { false }
 			, AreaFire_Target { AreaFireTarget::Base }
 			, FeedbackWeapon {}
 			, Laser_IsSingleColor { false }
+			, LaserZAdjust {}
+			, EBoltZAdjust {}
+			, EBoltZAdjust_ClampInitialDepthForBuilding {}
+			, VisualScatter { false }
 			, ROF_RandomDelay {}
+			, ChargeTurret_Delays {}
 			, OmniFire_TurnToTarget { false }
+			, FireOnce_ResetSequence { true }
+			, TurretRecoil_Suppress { false }
 			, ExtraWarheads {}
 			, ExtraWarheads_DamageOverrides {}
 			, ExtraWarheads_DetonationChances {}
+			, ExtraWarheads_RollChances {}
+			, ExtraWarheads_WeightsData {}
+			, ExtraWarheads_FullDetonation {}
 			, AmbientDamage_Warhead {}
 			, AmbientDamage_IgnoreTarget { false }
 			, AttachEffect_RequiredTypes {}
@@ -84,22 +161,52 @@ public:
 			, AttachEffect_RequiredMaxCounts {}
 			, AttachEffect_DisallowedMinCounts {}
 			, AttachEffect_DisallowedMaxCounts {}
+			, AttachEffect_CheckOnFirer { false }
 			, AttachEffect_IgnoreFromSameSource { false }
+			, KeepRange { Leptons(0) }
+			, KeepRange_AllowAI { false }
+			, KeepRange_AllowPlayer { false }
+			, KeepRange_EarlyStopFrame { 0 }
+			, KickOutPassengers { true }
+			, Beam_Color {}
+			, Beam_Duration { 15 }
+			, Beam_Amplitude { 40.0 }
+			, Beam_IsHouseColor { false }
+			, LaserThickness { 3 }
+			, SkipWeaponPicking { true }
+			, DelayedFire_Duration {}
+			, DelayedFire_SkipInTransport { false }
+			, DelayedFire_Animation {}
+			, DelayedFire_OpenToppedAnimation {}
+			, DelayedFire_AnimIsAttached { true }
+			, DelayedFire_CenterAnimOnFirer { false }
+			, DelayedFire_RemoveAnimOnNoDelay { false }
+			, DelayedFire_PauseFiringSequence { false }
+			, DelayedFire_OnlyOnInitialBurst { false }
+			, DelayedFire_AnimOffset {}
+			, DelayedFire_AnimOnTurret { true }
+			, ExtraRange_TargetMoving {}
+			, ExtraRange_FirerMoving {}
+			, ExtraRange_Prefiring {}
+			, ExtraRange_Prefiring_IncludeBurst {}
+			, AttackFriendlies {}
+			, AttackCursorOnFriendlies {}
+			, AttackNoThreatBuildings {}
+			, CylinderRangefinding {}
+			, Anim_Update {}
 		{ }
 
-		int GetBurstDelay(int burstIndex);
-
-		bool HasRequiredAttachedEffects(TechnoClass* pTechno, TechnoClass* pFirer);
+		int GetBurstDelay(int burstIndex) const;
+		bool HasRequiredAttachedEffects(TechnoClass* pTechno, TechnoClass* pFirer) const;
+		bool IsHealthInThreshold(TechnoClass* pTarget) const;
+		bool IsVeterancyInThreshold(TechnoClass* pTarget) const;
 
 		virtual ~ExtData() = default;
 
 		virtual void LoadFromINIFile(CCINIClass* pINI) override;
 		virtual void Initialize() override;
-
 		virtual void InvalidatePointer(void* ptr, bool bRemoved) override { }
-
 		virtual void LoadFromStream(PhobosStreamReader& Stm) override;
-
 		virtual void SaveToStream(PhobosStreamWriter& Stm) override;
 
 	private:
@@ -123,7 +230,9 @@ public:
 
 	static void DetonateAt(WeaponTypeClass* pThis, AbstractClass* pTarget, TechnoClass* pOwner, HouseClass* pFiringHouse = nullptr);
 	static void DetonateAt(WeaponTypeClass* pThis, AbstractClass* pTarget, TechnoClass* pOwner, int damage, HouseClass* pFiringHouse = nullptr);
-	static void DetonateAt(WeaponTypeClass* pThis, const CoordStruct& coords, TechnoClass* pOwner, HouseClass* pFiringHouse = nullptr);
-	static void DetonateAt(WeaponTypeClass* pThis, const CoordStruct& coords, TechnoClass* pOwner, int damage, HouseClass* pFiringHouse = nullptr);
+	static void DetonateAt(WeaponTypeClass* pThis, const CoordStruct& coords, TechnoClass* pOwner, HouseClass* pFiringHouse = nullptr, AbstractClass* pTarget = nullptr);
+	static void DetonateAt(WeaponTypeClass* pThis, const CoordStruct& coords, TechnoClass* pOwner, int damage, HouseClass* pFiringHouse = nullptr, AbstractClass* pTarget = nullptr);
 	static int GetRangeWithModifiers(WeaponTypeClass* pThis, TechnoClass* pFirer);
+	static int GetRangeWithModifiers(WeaponTypeClass* pThis, TechnoClass* pFirer, int range);
+	static int GetTechnoKeepRange(WeaponTypeClass* pThis, TechnoClass* pFirer, bool isMinimum);
 };

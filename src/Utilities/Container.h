@@ -283,20 +283,22 @@ private:
 	using extension_type_ptr = extension_type*;
 	using map_type = ContainerMap<base_type, extension_type>;
 
-	map_type Items;
+	map_type MappedItems;
+	std::vector<extension_type_ptr> Items;
 
 	base_type* SavingObject;
+	extension_type_ptr SavingExtPointer;
 	IStream* SavingStream;
 	const char* Name;
 
 public:
 	explicit Container(const char* pName) :
+		MappedItems(),
 		Items(),
 		SavingObject(nullptr),
 		SavingStream(nullptr),
 		Name(pName)
-	{
-	}
+	{ }
 
 	virtual ~Container() = default;
 
@@ -319,7 +321,7 @@ protected:
 	void InvalidateExtDataPointer(void* const ptr, bool bRemoved) const
 	{
 		for (const auto& i : this->Items)
-			i.second->InvalidatePointer(ptr, bRemoved);
+			i->InvalidatePointer(ptr, bRemoved);
 	}
 
 private:
@@ -344,27 +346,22 @@ public:
 		if constexpr (HasOffset<T>)
 			ResetExtensionPointer(key);
 
-		if (auto const val = new extension_type(key))
-		{
-			val->EnsureConstanted();
+		auto const val = new extension_type(key);
 
-			if constexpr (HasOffset<T>)
-				SetExtensionPointer(key, val);
+		val->EnsureConstanted();
 
-			this->Items.insert(key, val);
+		if constexpr (HasOffset<T>)
+			SetExtensionPointer(key, val);
+		else
+			this->MappedItems.insert(key, val);
 
-			return val;
-		}
+		Items.emplace_back(val);
 
-		return nullptr;
+		return val;
 	}
 
 	extension_type_ptr TryAllocate(base_type_ptr key, bool bCond, const std::string_view& nMessage)
 	{
-		// Do not allow allocation when loading save games.
-		if (Phobos::IsLoadingSaveGame)
-			return nullptr;
-
 		if (!key || (!bCond && !nMessage.empty()))
 		{
 			Debug::Log("%s \n", nMessage.data());
@@ -376,10 +373,6 @@ public:
 
 	extension_type_ptr TryAllocate(base_type_ptr key)
 	{
-		// Do not allow allocation when loading save games.
-		if (Phobos::IsLoadingSaveGame)
-			return nullptr;
-
 		if (!key)
 		{
 			Debug::Log("Attempted to allocate %s from nullptr!\n", typeid(extension_type).name());
@@ -389,7 +382,7 @@ public:
 		return Allocate(key);
 	}
 
-	extension_type_ptr Find(const_base_type_ptr key) const
+	extension_type_ptr TryFind(const_base_type_ptr key) const
 	{
 		if (!key)
 			return nullptr;
@@ -397,18 +390,52 @@ public:
 		if constexpr (HasOffset<T>)
 			return GetExtensionPointer(key);
 		else
-			return this->Items.find(key);
+			return this->MappedItems.find(key);
+	}
+
+	extension_type_ptr Find(const_base_type_ptr key) const
+	{
+		if constexpr (HasOffset<T>)
+			return GetExtensionPointer(key);
+		else
+			return this->MappedItems.find(key);
+	}
+
+	// Only used on loading, does not check if key is nullptr.
+	extension_type_ptr FindOrAllocate(base_type_ptr key)
+	{
+		extension_type_ptr value = nullptr;
+
+		if constexpr (HasOffset<T>)
+			value = GetExtensionPointer(key);
+		else
+			value = this->MappedItems.find(key);
+
+		if (!value)
+			value = Allocate(key);
+
+		return value;
 	}
 
 	void Remove(base_type_ptr key)
 	{
 		if (auto Item = Find(key))
 		{
-			this->Items.remove(key);
-			delete Item;
-
 			if constexpr (HasOffset<T>)
 				ResetExtensionPointer(key);
+			else
+				this->MappedItems.remove(key);
+
+			auto& vec = this->Items;
+			auto it = std::find(vec.begin(), vec.end(), Item);
+
+			if (it != vec.end())
+			{
+				*it = vec.back();
+				vec.pop_back();
+			}
+
+			delete Item;
 		}
 	}
 
@@ -422,8 +449,12 @@ public:
 			{
 				for (const auto& item : this->Items)
 				{
-					ResetExtensionPointer(item.first);
+					ResetExtensionPointer(item->OwnerObject());
 				}
+			}
+			else
+			{
+				this->MappedItems.clear();
 			}
 
 			this->Items.clear();
@@ -442,6 +473,10 @@ public:
 
 		this->SavingObject = key;
 		this->SavingStream = pStm;
+
+		// Loading the base type data might override the ext pointer stored on it so it needs to be saved.
+		if constexpr (HasOffset<T>)
+			this->SavingExtPointer = GetExtensionPointer(key);
 	}
 
 	void SaveStatic()
@@ -466,6 +501,10 @@ public:
 	{
 		if (this->SavingObject && this->SavingStream)
 		{
+			// Restore stored ext pointer data.
+			if constexpr (HasOffset<T>)
+				SetExtensionPointer(this->SavingObject, this->SavingExtPointer);
+
 			//Debug::Log("[LoadStatic] Loading object %p as '%s'\n", this->SavingObject, this->Name);
 			if (!this->Load(this->SavingObject, this->SavingStream))
 				Debug::FatalErrorAndExit("LoadStatic - Loading object %p as '%s' failed!\n", this->SavingObject, this->Name);
@@ -550,8 +589,8 @@ protected:
 			return nullptr;
 		}
 
-		extension_type_ptr buffer = this->Allocate(key);
-
+		// get or allocate the value data
+		extension_type_ptr buffer = this->FindOrAllocate(key);
 		if (!buffer)
 		{
 			Debug::Log("LoadKey - Could not find or allocate value.\n");
