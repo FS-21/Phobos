@@ -69,6 +69,59 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 		return false;
 	}
 
+	// If we already have a solid economy (>= 3 refineries/miners),
+	// attempt to pivot directly to combat crawling / beachhead towards the enemy base if they are within crawling range.
+	const int slaveMinerCount = RulesClass::Instance->PrerequisiteProcAlternate != nullptr ?
+		pHouse->ActiveUnitTypes.GetItemCount(RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex) : 0;
+	size_t refineryCount = TechTreeTypeClass::CountTotalOwnedBuildings(pHouse, TechTreeTypeClass::BuildType::BuildRefinery);
+	refineryCount += slaveMinerCount;
+
+	double maxDist = 80.0 + (refineryCount > 3 ? (refineryCount - 3) * 10.0 : 0.0) + (Unsorted::CurrentFrame / 9000.0) * 10.0;
+	double maxDistSq = maxDist * maxDist;
+
+	if (refineryCount >= 3)
+	{
+		const HouseClass* pEnemy = nullptr;
+		if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
+		{
+			pEnemy = HouseClass::Array[pHouse->EnemyHouseIndex];
+		}
+
+		if (pEnemy != nullptr)
+		{
+			double nearestEnemyDistSq = std::numeric_limits<double>::max();
+			CellStruct enemyTarget = CellStruct(0, 0);
+
+			for (const auto pBld : pEnemy->Buildings)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo)
+				{
+					for (const auto pOurBld : pHouse->Buildings)
+					{
+						if (pOurBld && pOurBld->IsAlive && !pOurBld->InLimbo)
+						{
+							double distSq = pOurBld->GetMapCoords().DistanceFromSquared(pBld->GetMapCoords());
+							if (distSq < nearestEnemyDistSq && pOurBld->IsInSameZoneAs(pBld))
+							{
+								nearestEnemyDistSq = distSq;
+								enemyTarget = pBld->GetMapCoords();
+							}
+						}
+					}
+				}
+			}
+
+			// If the enemy base is within crawling range
+			if (nearestEnemyDistSq <= maxDistSq && enemyTarget.X > 0 && enemyTarget.Y > 0)
+			{
+				ext->NextExpansionPointLocation = enemyTarget;
+				Debug::Log("AdvAI ExpansionSearch: House %d: Pivot to combat crawling (3+ refineries). Crawling towards enemy House %d (%s) base at (%d,%d) at dist %.1f cells (Limit: %.1f).\n",
+					pHouse->ArrayIndex, pEnemy->ArrayIndex, pEnemy->Type->ID, enemyTarget.X, enemyTarget.Y, std::sqrt(nearestEnemyDistSq), maxDist);
+				return true;
+			}
+		}
+	}
+
 	// Scan through terrain objects that spawn Tiberium (Tiberium Trees) AND map cells containing
 	// Tiberium/Ore overlays. Pick the one that is closest to any of our own structures and does not
 	// have a refinery near it yet. This allows the AI to expand on any map, whether it uses Tiberium trees or not.
@@ -231,12 +284,12 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 				}
 			}
 
-			// If the enemy base is within crawling range (e.g. 80 cells, squared is 6400)
-			if (nearestEnemyDistSq <= 6400.0 && enemyTarget.X > 0 && enemyTarget.Y > 0)
+			// If the enemy base is within crawling range
+			if (nearestEnemyDistSq <= maxDistSq && enemyTarget.X > 0 && enemyTarget.Y > 0)
 			{
 				ext->NextExpansionPointLocation = enemyTarget;
-				Debug::Log("AdvAI ExpansionSearch: House %d: All Tiberium fields taken. Crawling towards enemy base at (%d,%d) at dist %.1f cells.\n",
-					pHouse->ArrayIndex, enemyTarget.X, enemyTarget.Y, std::sqrt(nearestEnemyDistSq));
+				Debug::Log("AdvAI ExpansionSearch: House %d: All Tiberium fields taken. Crawling towards enemy House %d (%s) base at (%d,%d) at dist %.1f cells (Limit: %.1f).\n",
+					pHouse->ArrayIndex, pEnemy->ArrayIndex, pEnemy->Type->ID, enemyTarget.X, enemyTarget.Y, std::sqrt(nearestEnemyDistSq), maxDist);
 				return true;
 			}
 		}
@@ -2337,7 +2390,7 @@ void HouseExt::AdvAI_HouseClass_Expert_AI(HouseClass* pHouse)
 		AdvAI_Awaken_Sleeping_Harvesters(pHouse);
 	}
 
-	if (Unsorted::CurrentFrame > houseExt->LastPrimaryFactoryCheckFrame + 800)
+	if (Unsorted::CurrentFrame > houseExt->LastPrimaryFactoryCheckFrame + 400)
 	{
 		houseExt->LastPrimaryFactoryCheckFrame = Unsorted::CurrentFrame;
 		AdvAI_Update_Primary_Factories(pHouse);
@@ -2395,24 +2448,50 @@ void HouseExt::AdvAI_Update_Primary_Factories(HouseClass* pHouse)
 	if (!pHouse || pHouse->IsControlledByHuman())
 		return;
 
-	const HouseClass* pEnemy = nullptr;
-	if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
+	const auto houseExt = ExtMap.Find(pHouse);
+	CellStruct targetCoords = CellStruct(0, 0);
+	bool hasTarget = false;
+
+	if (houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
 	{
-		pEnemy = HouseClass::Array[pHouse->EnemyHouseIndex];
+		targetCoords = houseExt->NextExpansionPointLocation;
+		hasTarget = true;
+	}
+	else
+	{
+		const HouseClass* pEnemy = nullptr;
+		if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
+		{
+			pEnemy = HouseClass::Array[pHouse->EnemyHouseIndex];
+		}
+
+		if (pEnemy != nullptr && pEnemy->Buildings.Count > 0)
+		{
+			targetCoords = pEnemy->Base_Center();
+			hasTarget = true;
+		}
 	}
 
-	if (!pEnemy || pEnemy->Buildings.Count == 0)
+	if (!hasTarget)
 		return;
 
-	CellStruct targetCoords = pEnemy->Base_Center();
+	auto updatePrimary = [pHouse, targetCoords](AbstractType type, bool isNaval) {
+		BuildingClass* pOldPrimary = nullptr;
+		for (const auto pBuilding : pHouse->Buildings)
+		{
+			if (pBuilding && pBuilding->IsAlive && pBuilding->Type->Factory == type && pBuilding->Type->Naval == isNaval && pBuilding->IsPrimaryFactory)
+			{
+				pOldPrimary = pBuilding;
+				break;
+			}
+		}
 
-	auto updatePrimary = [pHouse, targetCoords](AbstractType type) {
 		BuildingClass* pBestFactory = nullptr;
 		double bestDistanceSq = std::numeric_limits<double>::max();
 
 		for (const auto pBuilding : pHouse->Buildings)
 		{
-			if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Type->Factory == type)
+			if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Type->Factory == type && pBuilding->Type->Naval == isNaval)
 			{
 				double distSq = pBuilding->GetMapCoords().DistanceFromSquared(targetCoords);
 				if (distSq < bestDistanceSq)
@@ -2425,21 +2504,57 @@ void HouseExt::AdvAI_Update_Primary_Factories(HouseClass* pHouse)
 
 		if (pBestFactory != nullptr)
 		{
-			for (const auto pBuilding : pHouse->Buildings)
+			// Find the active FactoryClass for this house/type/naval
+			FactoryClass* pActiveFactory = pHouse->GetPrimaryFactory(type, isNaval, BuildCat::DontCare);
+
+			// Fallback: if GetPrimaryFactory returned null, try to find any building currently holding the FactoryClass pointer
+			if (pActiveFactory == nullptr)
 			{
-				if (pBuilding && pBuilding->Type->Factory == type)
+				for (const auto pBuilding : pHouse->Buildings)
 				{
-					pBuilding->IsPrimaryFactory = (pBuilding == pBestFactory);
+					if (pBuilding && pBuilding->IsAlive && pBuilding->Type->Factory == type && pBuilding->Type->Naval == isNaval && pBuilding->Factory != nullptr)
+					{
+						pActiveFactory = pBuilding->Factory;
+						break;
+					}
 				}
 			}
 
-			if (pBestFactory->Factory != nullptr)
+			if (pActiveFactory != nullptr)
 			{
-				pHouse->SetPrimaryFactory(pBestFactory->Factory, type, pBestFactory->Type->Naval, BuildCat::DontCare);
+				if (pBestFactory != pOldPrimary)
+				{
+					Debug::Log("AdvAI PrimaryFactory: House %d (%s) changing primary %s %s factory from %s (%d,%d) to %s (%d,%d).\n",
+						pHouse->ArrayIndex, pHouse->Type->ID,
+						(isNaval ? "Naval" : "Land"),
+						(type == AbstractType::InfantryType ? "Infantry" : "Unit/Vehicle"),
+						pOldPrimary ? pOldPrimary->Type->ID : "None",
+						pOldPrimary ? pOldPrimary->GetMapCoords().X : 0,
+						pOldPrimary ? pOldPrimary->GetMapCoords().Y : 0,
+						pBestFactory->Type->ID,
+						pBestFactory->GetMapCoords().X,
+						pBestFactory->GetMapCoords().Y);
+				}
+
+				// Assign the active factory to the best building, and detach it from all others of this category
+				for (const auto pBuilding : pHouse->Buildings)
+				{
+					if (pBuilding && pBuilding->Type->Factory == type && pBuilding->Type->Naval == isNaval)
+					{
+						pBuilding->IsPrimaryFactory = (pBuilding == pBestFactory);
+						if (pBuilding == pBestFactory)
+							pBuilding->Factory = pActiveFactory;
+						else if (pBuilding->Factory == pActiveFactory)
+							pBuilding->Factory = nullptr;
+					}
+				}
+
+				pHouse->SetPrimaryFactory(pActiveFactory, type, isNaval, BuildCat::DontCare);
 			}
 		}
 	};
 
-	updatePrimary(AbstractType::InfantryType);
-	updatePrimary(AbstractType::UnitType);
+	updatePrimary(AbstractType::InfantryType, false);
+	updatePrimary(AbstractType::UnitType, false);
+	updatePrimary(AbstractType::UnitType, true);
 }

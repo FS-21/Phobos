@@ -576,6 +576,35 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 				}
 			}
 
+			// Enforce spacing between factories to prevent unit exit traffic jams.
+			if (pBuilding->Type->Factory != AbstractType::None)
+			{
+				bool tooCloseToFactory = false;
+				const int x1 = cell.X - 1;
+				const int y1 = cell.Y - 1;
+				const int w1 = pBuilding->Type->GetFoundationWidth() + 2;
+				const int h1 = pBuilding->Type->GetFoundationHeight(false) + 2;
+
+				for (const auto pOtherBuilding : BuildingClass::Array)
+				{
+					if (pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding->Type->Factory != AbstractType::None && pOtherBuilding != pBuilding)
+					{
+						const int x2 = pOtherBuilding->GetMapCoords().X;
+						const int y2 = pOtherBuilding->GetMapCoords().Y;
+						const int w2 = pOtherBuilding->Type->GetFoundationWidth();
+						const int h2 = pOtherBuilding->Type->GetFoundationHeight(false);
+
+						if ((x1 < x2 + w2) && (x1 + w1 > x2) && (y1 < y2 + h2) && (y1 + h1 > y2))
+						{
+							tooCloseToFactory = true;
+							break;
+						}
+					}
+				}
+				if (tooCloseToFactory)
+					value += 5000; // Add a moderate rating penalty so spacing is preferred if terrain/space allows
+			}
+
 			// Support for AIInnerBase and dispersion of special structures
 			if (IsAIInnerBase(pBuilding->Type))
 			{
@@ -1173,8 +1202,29 @@ int BuildingExt::Barracks_Placement_Cell_Value(CellStruct cell, BuildingClass* p
 int BuildingExt::NavalYard_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding)
 {
 	const HouseClass* pOwner = pBuilding->Owner;
-	const CellStruct center = pOwner->Base_Center();
-	return Modify_Rating_By_Allied_Building_Proximity(cell, pBuilding, static_cast<int>(cell.DistanceFrom(center)));
+	CellStruct conyardCell;
+	if (pOwner->ConYards.Count > 0 && pOwner->ConYards[0] != nullptr)
+		conyardCell = GeneralUtils::CellFromCoordinates(pOwner->ConYards[0]->GetCenterCoords());
+	else
+		conyardCell = pOwner->Base_Center();
+
+	const CellStruct centerCell = cell + CellStruct(pBuilding->Type->GetFoundationWidth() / 2, pBuilding->Type->GetFoundationHeight(false) / 2);
+	double closestDistSq = std::numeric_limits<double>::max();
+
+	for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
+	{
+		const BuildingClass* otherBuilding = ExtData::OurBuildings[i];
+		CellStruct otherCenter = GeneralUtils::CellFromCoordinates(otherBuilding->GetCenterCoords());
+		double dSq = centerCell.DistanceFromSquared(otherCenter);
+		if (dSq < closestDistSq)
+			closestDistSq = dSq;
+	}
+
+	double closestDist = std::sqrt(closestDistSq);
+	double conyardDist = cell.DistanceFrom(conyardCell);
+
+	// Favor cells that are close to our shoreline buildings (closestDist) and reasonably close to our ConYard (conyardDist)
+	return static_cast<int>(conyardDist * 10.0) + static_cast<int>(closestDist * 100.0);
 }
 
 int BuildingExt::WarFactory_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding)
