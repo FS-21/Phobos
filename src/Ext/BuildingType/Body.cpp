@@ -200,6 +200,10 @@ void BuildingTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->SellBuildupLength.Read(exINI, pSection, "SellBuildupLength");
 	this->IsDestroyableObstacle.Read(exINI, pSection, "IsDestroyableObstacle");
 
+	exINI.ReadInteger(pSection, "AntiInfantryValue", &this->OwnerObject()->AntiInfantryValue);
+	exINI.ReadInteger(pSection, "AntiArmorValue", &this->OwnerObject()->AntiArmorValue);
+	exINI.ReadInteger(pSection, "AntiAirValue", &this->OwnerObject()->AntiAirValue);
+
 	this->FactoryPlant_AllowTypes.Read(exINI, pSection, "FactoryPlant.AllowTypes");
 	this->FactoryPlant_DisallowTypes.Read(exINI, pSection, "FactoryPlant.DisallowTypes");
 	this->FactoryPlant_MaxCount.Read(exINI, pSection, "FactoryPlant.MaxCount");
@@ -228,8 +232,15 @@ void BuildingTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->BuildingBunkerROFMult.Read(exINI, pSection, "BunkerROFMultMultiplier");
 	this->BunkerWallsUpSound.Read(exINI, pSection, "BunkerWallsUpSound");
 	this->BunkerWallsDownSound.Read(exINI, pSection, "BunkerWallsDownSound");
-	this->BunkerStateUpdateDelay.Read(exINI, pSection, "BunkerStateUpdateDelay");
 	this->BuildingRepairedSound.Read(exINI, pSection, "BuildingRepairedSound");
+
+	this->AIBuildCounts.Read(exINI, pSection, "AIBuildCounts");
+	this->AIExtraCounts.Read(exINI, pSection, "AIExtraCounts");
+
+	this->AIBaseNormal.Read(exINI, pSection, "AIBaseNormal");
+	exINI.ReadBool(pSection, "BaseNormal", &this->BaseNormal);
+	this->AIInnerBase.Read(exINI, pSection, "AIInnerBase");
+
 	this->Refinery_UseStorage.Read(exINI, pSection, "Refinery.UseStorage");
 	this->UndeploysInto_Sellable.Read(exINI, pSection, "UndeploysInto.Sellable");
 	this->BuildingRadioLink_SyncOwner.Read(exINI, pSection, "BuildingRadioLink.SyncOwner");
@@ -366,14 +377,14 @@ void BuildingTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 bool BuildingTypeExt::HasDisableableSuperWeapons(BuildingTypeClass* pBuildingType)
 {
-	if (pBuildingType->SuperWeapon != static_cast<int>(SpecialWeaponType::None) &&
-		(*SuperWeaponTypeClass::Array)[pBuildingType->SuperWeapon]->DisableableFromShell)
+	if (pBuildingType->SuperWeapon != -1 &&
+		SuperWeaponTypeClass::Array[pBuildingType->SuperWeapon]->DisableableFromShell)
 	{
 		return true;
 	}
 
-	if (pBuildingType->SuperWeapon2 != static_cast<int>(SpecialWeaponType::None) &&
-		(*SuperWeaponTypeClass::Array)[pBuildingType->SuperWeapon2]->DisableableFromShell)
+	if (pBuildingType->SuperWeapon2 != -1 &&
+		SuperWeaponTypeClass::Array[pBuildingType->SuperWeapon2]->DisableableFromShell)
 	{
 		return true;
 	}
@@ -381,7 +392,7 @@ bool BuildingTypeExt::HasDisableableSuperWeapons(BuildingTypeClass* pBuildingTyp
 	const auto pExt = ExtMap.Find(pBuildingType);
 	for (const auto pSuperWeapon : pExt->SuperWeapons)
 	{
-		if ((*SuperWeaponTypeClass::Array)[pSuperWeapon]->DisableableFromShell)
+		if (SuperWeaponTypeClass::Array[pSuperWeapon]->DisableableFromShell)
 		{
 			return true;
 		}
@@ -468,6 +479,11 @@ void BuildingTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->BunkerWallsDownSound)
 		.Process(this->BunkerStateUpdateDelay)
 		.Process(this->BuildingRepairedSound)
+		.Process(this->AIBuildCounts)
+		.Process(this->AIExtraCounts)
+		.Process(this->AIBaseNormal)
+		.Process(this->BaseNormal)
+		.Process(this->AIInnerBase)
 		.Process(this->Refinery_UseNormalActiveAnim)
 		.Process(this->HasPowerUpAnim)
 		.Process(this->UndeploysInto_Sellable)

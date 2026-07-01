@@ -65,6 +65,8 @@ public:
 
 		static BuildingClass* OurBuildings[1000];
 		static size_t OurBuildingCount;
+		static BuildingClass* AdjacencyAnchors[1000];
+		static size_t AdjacencyAnchorCount;
 		static CellStruct AttackCell;
 
 		virtual ~ExtData() = default;
@@ -125,9 +127,11 @@ public:
 	static HouseClass* Find_Closest_Opponent(const HouseClass* pHouse);
 	static int Get_Distance_To_Primary_Enemy(CellStruct cell, HouseClass* pHouse);
 	static void Mark_Expansion_As_Done(HouseClass* pHouse);
+	static void PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass* pBuildingType);
 	static int Try_Place(BuildingClass* pBuilding, CellStruct cell);
 	static RectangleStruct Get_Base_Rect(HouseClass* pHouse, int adjacency, int width, int height);
 	static bool Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingClass* pBuilding, int adjacencyBonus);
+	static bool Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingTypeClass* pBuildingType, HouseClass* pOwner, int adjacencyBonus);
 	static int inline Modify_Rating_By_Terrain_Passability(CellStruct cell, BuildingClass* pBuilding, int originalValue);
 	static CellStruct Find_Best_Building_Placement_Cell(RectangleStruct baseArea, BuildingClass* pBuilding, int (*valueGenerator)(CellStruct, BuildingClass*), int adjacencyBonus = 0);
 	static int inline Modify_Rating_By_Allied_Building_Proximity(CellStruct cell, BuildingClass* pBuilding, int originalValue);

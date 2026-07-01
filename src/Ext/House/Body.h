@@ -95,6 +95,7 @@ public:
 		 *  If yes, the AI should build a refinery.
 		 */
 		bool ShouldBuildRefinery;
+		int ExpansionPlacementFailures;
 
 		/**
 		 *  Set when the AI has built its first barracks during the game.
@@ -112,6 +113,7 @@ public:
 		 *  Records when the AI last checked for sleeping harvesters.
 		 */
 		int LastSleepingHarvesterCheckFrame;
+		int LastPrimaryFactoryCheckFrame { 0 };
 
 		/**
 		 *  Defines whether the AI has already performed a final "desperate vehicle charge".
@@ -124,6 +126,26 @@ public:
 		 *  was made under threat of getting rushed early in the game.
 		 */
 		bool IsUnderStartRushThreat;
+
+		/**
+		 *  Records cooldown frames for building types that failed to be placed.
+		 *  AI will not attempt to build these building types until the frame has passed.
+		 */
+		std::map<BuildingTypeClass*, int> PlacementFailedCooldowns;
+
+		/**
+		 *  Records the dynamic build counts calculated for each building type
+		 *  including base AIBuildCounts and probabilistic AIExtraCounts.
+		 */
+		std::map<BuildingTypeClass*, int> AICachedBuildCounts;
+		CellStruct LastAttackedBuildingCoords;
+
+		struct UnsafePlacementZone
+		{
+			CellStruct Coords;
+			int ExpiryFrame;
+		};
+		std::vector<UnsafePlacementZone> UnsafePlacementZones;
 
 		ExtData(HouseClass* OwnerObject) : Extension<HouseClass>(OwnerObject)
 			, PowerPlantEnhancers {}
@@ -159,6 +181,10 @@ public:
 			, FreeRadar(false)
 			, ForceRadar(false)
 			, PlayerAutoRepair(true)
+			, PrimaryTechTreeType(nullptr)
+			, SecondaryTechTreeType(nullptr)
+			, LastAttackedBuildingCoords { 0, 0 }
+			, ExpansionPlacementFailures { 0 }
 		{ }
 
 		bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;
@@ -227,7 +253,7 @@ public:
 	static void SetSkirmishHouseName(HouseClass* pHouse);
 
 	static bool AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse);
-	static bool AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* pBuildingType, bool checkPrereqs);
+	static bool AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* pBuildingType, bool checkPrereqs, bool isTechTree = false);
 	static bool AdvAI_Is_Recently_Attacked(HouseClass* pHouse);
 	static bool AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse, int enemyAircraftValue);
 	static int AdvAI_Calculate_Enemy_Aircraft_Value(HouseClass* pHouse);
@@ -240,6 +266,11 @@ public:
 	static void AdvAI_Sell_Extra_ConYards(HouseClass* pHouse);
 	static void Vinifera_HouseClass_AI_Building(HouseClass* pHouse);
 	static void AdvAI_HouseClass_Expert_AI(HouseClass* pHouse);
+	static void AdvAI_Update_Primary_Factories(HouseClass* pHouse);
+
+	static int FindGenericPrerequisite(const char* id);
+	static bool HasGenericPrerequisite(int idx, HouseClass* pHouse);
+	static bool PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool skipSecretLabChecks = false);
 
 	static bool IsDisabledFromShell(
 	HouseClass const* pHouse, BuildingTypeClass const* pItem);

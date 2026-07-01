@@ -106,9 +106,24 @@ size_t TechTreeTypeClass::CountTotalOwnedBuildings(HouseClass* pHouse, BuildType
 	}
 
 	size_t count = 0;
-	for (const auto pBuilding : *typeList)
+	if (buildType == BuildType::BuildRefinery)
 	{
-		count += pHouse->ActiveBuildingTypes.GetItemCount(pBuilding->ArrayIndex);
+		for (const auto pBld : BuildingClass::Array)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner == pHouse)
+			{
+				if (typeList->contains(pBld->Type) || pBld->Type->Refinery)
+					count++;
+			}
+		}
+
+		if (RulesClass::Instance->PrerequisiteProcAlternate != nullptr)
+			count += pHouse->ActiveUnitTypes.GetItemCount(RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex);
+	}
+	else
+	{
+		for (const auto pBuilding : *typeList)
+			count += pHouse->ActiveBuildingTypes.GetItemCount(pBuilding->ArrayIndex);
 	}
 
 	return count;
@@ -155,9 +170,24 @@ size_t TechTreeTypeClass::CountSideOwnedBuildings(HouseClass* pHouse, BuildType 
 	}
 
 	size_t count = 0;
-	for (const auto pBuilding : *typeList)
+	if (buildType == BuildType::BuildRefinery)
 	{
-		count += pHouse->ActiveBuildingTypes.GetItemCount(pBuilding->ArrayIndex);
+		for (const auto pBld : BuildingClass::Array)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner == pHouse)
+			{
+				if (typeList->Contains(pBld->Type) || pBld->Type->Refinery)
+					count++;
+			}
+		}
+
+		if (RulesClass::Instance->PrerequisiteProcAlternate != nullptr)
+			count += pHouse->ActiveUnitTypes.GetItemCount(RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex);
+	}
+	else
+	{
+		for (const auto pBuilding : *typeList)
+			count += pHouse->ActiveBuildingTypes.GetItemCount(pBuilding->ArrayIndex);
 	}
 
 	return count;
@@ -278,8 +308,7 @@ void TechTreeTypeClass::LoadFromINI(CCINIClass* pINI)
 		}
 		else
 		{
-			Debug::Log("TechTreeTypeClass::LoadFromINI: BuildOtherCounts is missing count for %s, setting to 0.", BuildOther[i]->Name);
-			BuildOtherCountMap[BuildOther[i]] = 0;
+			BuildOtherCountMap[BuildOther[i]] = 1;
 		}
 	}
 }
@@ -301,13 +330,25 @@ void TechTreeTypeClass::Serialize(T& Stm)
 		.Process(BuildDefense)
 		.Process(BuildOther)
 		.Process(BuildOtherCounts)
-		.Process(BuildOtherCountMap)
 		;
 }
 
 void TechTreeTypeClass::LoadFromStream(PhobosStreamReader& Stm)
 {
 	this->Serialize(Stm);
+
+	BuildOtherCountMap.clear();
+	for (size_t i = 0; i < BuildOther.size(); i++)
+	{
+		if (i < BuildOtherCounts.size())
+		{
+			BuildOtherCountMap[BuildOther[i]] = BuildOtherCounts[i];
+		}
+		else
+		{
+			BuildOtherCountMap[BuildOther[i]] = 1;
+		}
+	}
 }
 
 void TechTreeTypeClass::SaveToStream(PhobosStreamWriter& Stm)

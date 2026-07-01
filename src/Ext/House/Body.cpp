@@ -711,7 +711,37 @@ void HouseExt::ExtData::Serialize(T& Stm)
 		.Process(this->FreeRadar)
 		.Process(this->ForceRadar)
 		.Process(this->PlayerAutoRepair)
+		.Process(this->ExpansionPlacementFailures)
+		.Process(this->LastAttackedBuildingCoords)
 		;
+
+	int countMapSize = static_cast<int>(this->AICachedBuildCounts.size());
+	Stm.Process(countMapSize);
+	if constexpr (std::is_same_v<T, PhobosStreamWriter>)
+	{
+		for (auto& pair : this->AICachedBuildCounts)
+		{
+			BuildingTypeClass* pType = pair.first;
+			int val = pair.second;
+			Stm.Process(pType);
+			Stm.Process(val);
+		}
+	}
+	else
+	{
+		this->AICachedBuildCounts.clear();
+		for (int i = 0; i < countMapSize; ++i)
+		{
+			BuildingTypeClass* pType = nullptr;
+			int val = 0;
+			Stm.Process(pType);
+			Stm.Process(val);
+			if (pType != nullptr)
+			{
+				this->AICachedBuildCounts[pType] = val;
+			}
+		}
+	}
 }
 
 void HouseExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)
@@ -1165,3 +1195,164 @@ bool HouseExt::ReachedBuildLimit(const HouseClass* pHouse, const TechnoTypeClass
 	return false;
 }
 #pragma endregion
+
+int HouseExt::FindGenericPrerequisite(const char* id)
+{
+	if (BuildingTypeClass::FindIndex(id) >= 0)
+		return INT32_MAX;
+
+	if (RulesExt::Global()->GenericPrerequisitesNames.Count == 0)
+		RulesExt::FillDefaultPrerequisites();
+
+	int i = 0;
+	for (auto str : RulesExt::Global()->GenericPrerequisitesNames)
+	{
+		if (_strcmpi(id, str) == 0)
+			return i;
+
+		--i;
+	}
+
+	return INT32_MAX;
+}
+
+bool HouseExt::HasGenericPrerequisite(int idx, HouseClass* pHouse)
+{
+	if (idx >= 0 || !pHouse)
+		return false;
+
+	int absoluteIndex = std::abs(idx);
+	if (absoluteIndex >= RulesExt::Global()->GenericPrerequisites.Count)
+		return false;
+
+	DynamicVectorClass<int> selectedPrerequisite = RulesExt::Global()->GenericPrerequisites.GetItem(absoluteIndex);
+	if (selectedPrerequisite.Count == 0)
+		return false;
+
+	for (auto idxItem : selectedPrerequisite)
+	{
+		if (pHouse->ActiveBuildingTypes.GetItemCount(idxItem) > 0)
+			return true;
+	}
+
+	return false;
+}
+
+bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool skipSecretLabChecks)
+{
+	if (!pHouse || !pItem)
+		return false;
+
+	auto pItemExt = TechnoTypeExt::ExtMap.Find(pItem);
+	if (!pItemExt)
+		return false;
+
+	// Secret lab tech: item must have been explicitly unlocked if ConsideredSecretLabTech
+	if (!skipSecretLabChecks && pItemExt->ConsideredSecretLabTech.Get() && !pHouse->HasFromSecretLab(pItem))
+		return false;
+
+	// Prerequisite.Negative: if the house owns any building in these lists, the item is blocked
+	if (!pItemExt->Prerequisite_Negative.empty())
+	{
+		for (int idx : pItemExt->Prerequisite_Negative)
+		{
+			bool negFound = false;
+			if (idx < 0)
+			{
+				negFound = HasGenericPrerequisite(idx, pHouse);
+			}
+			else
+			{
+				negFound = pHouse->ActiveBuildingTypes.GetItemCount(idx) > 0;
+			}
+
+			if (negFound)
+				return false;
+		}
+	}
+
+	if (skipSecretLabChecks)
+		return true;
+
+	// PrerequisiteOverride: if ANY entry is owned, prerequisites are considered met
+	for (int idx : pItem->PrerequisiteOverride)
+	{
+		if (idx < 0)
+		{
+			if (HasGenericPrerequisite(idx, pHouse))
+				return true;
+		}
+		else
+		{
+			if (pHouse->ActiveBuildingTypes.GetItemCount(idx) > 0)
+				return true;
+		}
+	}
+
+	// Main Prerequisite list (AND logic: ALL entries must be satisfied)
+	bool prerequisiteMet = true;
+	if (!pItemExt->Prerequisite.empty())
+	{
+		for (int idx : pItemExt->Prerequisite)
+		{
+			bool found = false;
+			if (idx < 0)
+			{
+				// Also check slave miner as alternative for PROC (-6)
+				if (idx == -6 &&
+					RulesClass::Instance->PrerequisiteProcAlternate != nullptr &&
+					pHouse->ActiveUnitTypes.GetItemCount(RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex) > 0)
+				{
+					found = true;
+				}
+				else
+				{
+					found = HasGenericPrerequisite(idx, pHouse);
+				}
+			}
+			else
+			{
+				found = pHouse->ActiveBuildingTypes.GetItemCount(idx) > 0;
+			}
+
+			if (!found)
+			{
+				prerequisiteMet = false;
+				break;
+			}
+		}
+	}
+
+	// Prerequisite.ListX (OR logic between lists, AND logic within each list)
+	bool prerequisiteListsMet = false;
+	if (pItemExt->Prerequisite_Lists.Get() > 0 && !pItemExt->Prerequisite_ListVector.empty())
+	{
+		for (const auto& list : pItemExt->Prerequisite_ListVector)
+		{
+			bool listSatisfied = true;
+			for (int idx : list)
+			{
+				bool found = false;
+				if (idx < 0)
+					found = HasGenericPrerequisite(idx, pHouse);
+				else
+					found = pHouse->ActiveBuildingTypes.GetItemCount(idx) > 0;
+
+				if (!found)
+				{
+					listSatisfied = false;
+					break;
+				}
+			}
+
+			if (listSatisfied)
+			{
+				prerequisiteListsMet = true;
+				break;
+			}
+		}
+	}
+
+	return prerequisiteMet || prerequisiteListsMet;
+}
+

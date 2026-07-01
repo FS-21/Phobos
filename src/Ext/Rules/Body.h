@@ -268,6 +268,9 @@ public:
 		Valueable<bool> CanTarget_IronCurtained;
 		Valueable<bool> AutoTarget_IronCurtained;
 
+		DynamicVectorClass<DynamicVectorClass<int>> GenericPrerequisites;
+		DynamicVectorClass<const char*> GenericPrerequisitesNames;
+
 		Valueable<bool> BuildingWaypoints;
 		Valueable<bool> BuildingTypeSelectable;
 
@@ -763,4 +766,6 @@ public:
 	{
 		Global()->InvalidatePointer(ptr, removed);
 	}
+
+	static void FillDefaultPrerequisites();
 };

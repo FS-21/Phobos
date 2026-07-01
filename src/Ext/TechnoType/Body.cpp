@@ -7,6 +7,7 @@
 #include <Ext/BulletType/Body.h>
 #include <Ext/Techno/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <Ext/House/Body.h>
 #include <New/Type/InsigniaTypeClass.h>
 
 #include <Utilities/AresHelper.h>
@@ -1304,6 +1305,120 @@ void TechnoTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 
 	// Airstrike tint color
 	this->TintColorAirstrike = GeneralUtils::GetColorFromColorAdd(this->LaserTargetColor.Get(RulesClass::Instance->LaserTargetColor));
+
+	this->ConsideredSecretLabTech.Read(exINI, pSection, "ConsideredSecretLabTech");
+
+	// Secret.RequiredHouses contains a list of HouseTypeClass indexes
+	if (pINI->ReadString(pSection, "SecretLab.RequiredHouses", "", Phobos::readBuffer) > 0)
+	{
+		char* context = nullptr;
+		this->Secret_RequiredHouses.clear();
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			std::string item(cur);
+			this->Secret_RequiredHouses.push_back(item);
+		}
+	}
+
+	// Secret.ForbiddenHouses contains a list of HouseTypeClass indexes
+	if (pINI->ReadString(pSection, "SecretLab.ForbiddenHouses", "", Phobos::readBuffer) > 0)
+	{
+		char* context = nullptr;
+		this->Secret_ForbiddenHouses.clear();
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			std::string item(cur);
+			this->Secret_ForbiddenHouses.push_back(item);
+		}
+	}
+
+	// Prerequisite with Generic Prerequisites support
+	if (pINI->ReadString(pSection, "Prerequisite", "", Phobos::readBuffer) > 0)
+	{
+		char* context = nullptr;
+		this->Prerequisite.clear();
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			int idx = TechnoTypeClass::FindIndex(cur);
+
+			if (idx >= 0)
+			{
+				this->Prerequisite.push_back(idx);
+			}
+			else
+			{
+				int index = HouseExt::FindGenericPrerequisite(cur);
+
+				if (index < 0)
+					this->Prerequisite.push_back(index);
+			}
+		}
+	}
+
+	// Prerequisite.Negative with Generic Prerequisites support
+	if (pINI->ReadString(pSection, "Prerequisite.Negative", "", Phobos::readBuffer) > 0)
+	{
+		char* context = nullptr;
+		this->Prerequisite_Negative.clear();
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			int idx = TechnoTypeClass::FindIndex(cur);
+
+			if (idx >= 0)
+			{
+				this->Prerequisite_Negative.push_back(idx);
+			}
+			else
+			{
+				int index = HouseExt::FindGenericPrerequisite(cur);
+
+				if (index < 0)
+					this->Prerequisite_Negative.push_back(index);
+			}
+		}
+	}
+
+	// Prerequisite.ListX with Generic Prerequisites support
+	this->Prerequisite_Lists.Read(exINI, pSection, "Prerequisite.Lists");
+
+	if (this->Prerequisite_Lists.Get() >= 0)
+	{
+		this->Prerequisite_ListVector.clear();
+
+		for (int i = 1; i <= Prerequisite_Lists.Get(); i++)
+		{
+			char keySection[32];
+			_snprintf_s(keySection, sizeof(keySection), "Prerequisite.List%d", i);
+
+			DynamicVectorClass<int> objectsList;
+			char* context = nullptr;
+			pINI->ReadString(pSection, keySection, "", Phobos::readBuffer);
+
+			for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+			{
+				int idx = TechnoTypeClass::FindIndex(cur);
+
+				if (idx >= 0)
+				{
+					objectsList.AddItem(idx);
+				}
+				else
+				{
+					int index = HouseExt::FindGenericPrerequisite(cur);
+
+					if (index < 0)
+						objectsList.AddItem(index);
+				}
+			}
+
+			this->Prerequisite_ListVector.push_back(objectsList);
+			objectsList.Clear();
+		}
+	}
 
 	// Art tags
 	const auto pArtINI = &CCINIClass::INI_Art;

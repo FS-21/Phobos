@@ -363,6 +363,9 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->CanTarget_IronCurtained.Read(exINI, GameStrings::CombatDamage, "CanTarget.IronCurtained");
 	this->AutoTarget_IronCurtained.Read(exINI, GameStrings::CombatDamage, "AutoTarget.IronCurtained");
 
+	// Section Generic Prerequisites
+	FillDefaultPrerequisites();
+
 	this->InfantryAutoDeploy.Read(exINI, GameStrings::General, "InfantryAutoDeploy");
 
 	this->AdjacentWallDamage.Read(exINI, GameStrings::CombatDamage, "AdjacentWallDamage");
@@ -520,6 +523,63 @@ void RulesExt::ExtData::InitializeAfterAllLoaded()
 	this->TintColorIronCurtain = GeneralUtils::GetColorFromColorAdd(pRules->IronCurtainColor);
 	this->TintColorForceShield = GeneralUtils::GetColorFromColorAdd(pRules->ForceShieldColor);
 	this->TintColorBerserk = GeneralUtils::GetColorFromColorAdd(pRules->BerserkColor);
+}
+
+void RulesExt::FillDefaultPrerequisites()
+{
+	if (RulesExt::Global()->GenericPrerequisitesNames.Count != 0)
+		return;
+
+	DynamicVectorClass<int> empty;
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("-"); // Official index: 0
+	RulesExt::Global()->GenericPrerequisites.AddItem(empty);
+
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("POWER"); // Official index: -1
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisitePower);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("FACTORY"); // -2
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteFactory);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("BARRACKS"); // -3
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteBarracks);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("RADAR"); // -4
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteRadar);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("TECH"); // -5
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteTech);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("PROC"); // -6
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteProc);
+
+	// If [GenericPrerequisites] is present will be added after these.
+	// Also the originals can be replaced by new ones
+	int genericPreqsCount = CCINIClass::INI_Rules->GetKeyCount("GenericPrerequisites");
+
+	for (int i = 0; i < genericPreqsCount; ++i)
+	{
+		DynamicVectorClass<int> objectsList;
+		char* context = nullptr;
+		CCINIClass::INI_Rules->ReadString("GenericPrerequisites", CCINIClass::INI_Rules->GetKeyName("GenericPrerequisites", i), "", Phobos::readBuffer);
+		char* name = (char*)CCINIClass::INI_Rules->GetKeyName("GenericPrerequisites", i);
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			int idx = BuildingTypeClass::FindIndex(cur);
+			if (idx >= 0)
+				objectsList.AddItem(idx);
+		}
+
+		int index = RulesExt::Global()->GenericPrerequisitesNames.FindItemIndex(name);
+		if (index < 7 && index > 0)
+		{
+			// Overwrites a vanilla generic prerequisite
+			RulesExt::Global()->GenericPrerequisites[index] = objectsList;
+		}
+		else
+		{
+			// New generic prerequisite
+			RulesExt::Global()->GenericPrerequisitesNames.AddItem(name);
+			RulesExt::Global()->GenericPrerequisites.AddItem(objectsList);
+		}
+
+		objectsList.Clear();
+	}
 }
 
 // =============================

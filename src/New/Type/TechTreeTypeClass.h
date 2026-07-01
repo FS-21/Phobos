@@ -42,9 +42,9 @@ public:
 
 	TechTreeTypeClass(const char* pTitle = NONE_STR) : Enumerable(pTitle) { }
 
-	virtual void LoadFromINI(CCINIClass* pINI) override;
-	virtual void LoadFromStream(PhobosStreamReader& Stm) override;
-	virtual void SaveToStream(PhobosStreamWriter& Stm) override;
+	virtual void LoadFromINI(CCINIClass* pINI);
+	virtual void LoadFromStream(PhobosStreamReader& Stm);
+	virtual void SaveToStream(PhobosStreamWriter& Stm);
 
 	static TechTreeTypeClass* GetForSide(int sideIndex);
 	static TechTreeTypeClass* GetAnySuitable(HouseClass* pHouse);

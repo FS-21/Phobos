@@ -589,7 +589,24 @@ DEFINE_HOOK(0x702E4E, TechnoClass_RegisterDestruction_SaveKillerInfo, 0x6)
 	GET(TechnoClass*, pVictim, ECX);
 
 	if (pKiller && pVictim)
+	{
 		TechnoExt::ObjectKilledBy(pVictim, pKiller);
+
+		if (pVictim->WhatAmI() == AbstractType::Building)
+		{
+			if (auto const pOwner = pVictim->Owner)
+			{
+				if (pKiller->Owner != pOwner && !pOwner->IsAlliedWith(pKiller->Owner))
+				{
+					if (auto const pExt = HouseExt::ExtMap.TryFind(pOwner))
+					{
+						// Cooldown: 3600 frames (4 minutes at 15 FPS)
+						pExt->UnsafePlacementZones.push_back({ pVictim->GetMapCoords(), Unsorted::CurrentFrame + 3600 });
+					}
+				}
+			}
+		}
+	}
 
 	return 0;
 }

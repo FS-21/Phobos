@@ -98,6 +98,13 @@ public:
 
 		NullableIdx<VocClass> BuildingRepairedSound;
 
+		NullableVector<int> AIBuildCounts;
+		NullableVector<int> AIExtraCounts;
+
+		Nullable<bool> AIBaseNormal;
+		bool BaseNormal;
+		Nullable<bool> AIInnerBase;
+
 		Valueable<bool> Refinery_UseNormalActiveAnim;
 
 		ValueableVector<bool> HasPowerUpAnim;
@@ -227,6 +234,7 @@ public:
 			, PrerequisiteLists {}
 			, PrerequisiteNegatives {}
 			, PrerequisiteTheaters { 0xFFFFFFFF }
+			, BaseNormal { true }
 		{ }
 
 		// Ares 0.A functions

@@ -307,6 +307,15 @@ public:
 
 		Nullable<bool> RecountBurst;
 
+		std::vector<int> Prerequisite_RequiredTheaters;
+		std::vector<int> Prerequisite;
+		std::vector<int> Prerequisite_Negative;
+		Valueable<int> Prerequisite_Lists;
+		std::vector<DynamicVectorClass<int>> Prerequisite_ListVector;
+		Valueable<bool> ConsideredSecretLabTech;
+		std::vector<std::string> Secret_RequiredHouses;
+		std::vector<std::string> Secret_ForbiddenHouses;
+
 		ValueableVector<TechnoTypeClass*> BuildLimitGroup_Types;
 		ValueableVector<int> BuildLimitGroup_Nums;
 		Valueable<int> BuildLimitGroup_Factor;
