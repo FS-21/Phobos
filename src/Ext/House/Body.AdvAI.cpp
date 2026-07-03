@@ -7,6 +7,7 @@
 #include <GameOptionsClass.h>
 #include <OverlayClass.h>
 #include <TerrainClass.h>
+#include <CellClass.h>
 
 #define TICKS_PER_SECOND    15
 #define TICKS_PER_MINUTE    (TICKS_PER_SECOND * 60)
@@ -14,6 +15,8 @@
 
 std::vector<BuildingTypeClass*> HouseExt::BaseDefenses;
 bool HouseExt::BaseDefensesInitialized;
+
+static int GetRealPowerDrain(const HouseClass* pHouse);
 
 void HouseExt::InitializeBaseDefenses()
 {
@@ -186,13 +189,12 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			}
 		}
 
+		size_t nearbyRefineries = 0;
 		bool found = false;
 		for (const auto pBuilding : BuildingClass::Array)
 		{
 			if (!pBuilding->IsAlive || pBuilding->InLimbo || !pBuilding->Type->ResourceDestination)
-			{
 				continue;
-			}
 
 			// Check if any existing AI refinery has been assigned for this expansion point yet.
 			// If yes, consider it occupied, but only if it is ours.
@@ -212,20 +214,53 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 				found = true;
 				break;
 			}
+
+			if (pBuilding->Owner == pHouse && dist < 28.0)
+				nearbyRefineries++;
 		}
 
-		if (found)
+		// Count tiberium trees within 20 cells of candidateCell
+		int tiberiumTreeCount = 0;
+		for (int dy = -20; dy <= 20; ++dy)
 		{
+			for (int dx = -20; dx <= 20; ++dx)
+			{
+				CellStruct scanCell(candidateCell.X + dx, candidateCell.Y + dy);
+				if (!MapClass::Instance.CoordinatesLegal(scanCell))
+					continue;
+
+				if (candidateCell.DistanceFrom(scanCell) > 20.0)
+					continue;
+
+				const CellClass* cell = MapClass::Instance.GetCellAt(scanCell);
+				if (cell)
+				{
+					const TerrainClass* pTerrain = cell->GetTerrain(false);
+					if (pTerrain != nullptr && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
+						tiberiumTreeCount++;
+				}
+			}
+		}
+
+		int allowedRefineries = 1;
+		if (tiberiumTreeCount > 0)
+			allowedRefineries = std::min(tiberiumTreeCount, 3);
+
+		if (found || nearbyRefineries >= allowedRefineries)
+		{
+			Debug::Log("AdvAI Search node (%d,%d): skipped (occupied: found=%d, nearby=%d, allowed=%d, trees=%d)\n",
+				candidateCell.X, candidateCell.Y, found, static_cast<int>(nearbyRefineries), allowedRefineries, tiberiumTreeCount);
 			occupiedNodes++;
 			continue; // Someone is already occupying this Tiberium cell/field
 		}
 
 		// Find the distance from our nearest owned structure to this candidate cell.
 		double distanceFromNearestOwnedStructure = std::numeric_limits<double>::max();
-		const BuildingClass* pNearestBuilding = nullptr;
+		BuildingClass* pNearestBuilding = nullptr;
+
 		for (const auto pBuilding : BuildingClass::Array)
 		{
-			if (!pBuilding->IsAlive || pBuilding->InLimbo || pBuilding->Owner != pHouse)
+			if (!pBuilding->IsAlive || pBuilding->InLimbo || pBuilding->Owner != pHouse || pBuilding->Type->Naval)
 				continue;
 
 			const double dist = pBuilding->GetMapCoords().DistanceFrom(candidateCell);
@@ -235,6 +270,15 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 				pNearestBuilding = pBuilding;
 			}
 		}
+
+		if (pNearestBuilding == nullptr)
+		{
+			Debug::Log("AdvAI Search node (%d,%d): skipped (no nearest land building found)\n", candidateCell.X, candidateCell.Y);
+			continue;
+		}
+
+		Debug::Log("AdvAI Search node (%d,%d): reachable. Nearest structure: %s at dist %.1f cells\n",
+			candidateCell.X, candidateCell.Y, pNearestBuilding->Type->ID, distanceFromNearestOwnedStructure);
 
 		if (distanceFromNearestOwnedStructure < nearestDistance)
 		{
@@ -736,6 +780,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 	/// Primary tech tree
 	///	Handles the main expansion
 	{
+		const bool limitFactories = pPrimaryTechTree == nullptr || pPrimaryTechTree->LimitedFactories;
 		const bool hasTechCenter = TechTreeTypeClass::CountTotalOwnedBuildings(pHouse, TechTreeTypeClass::BuildType::BuildTech) >= 1;
 
 		// If we have no power plants yet, then build one
@@ -823,7 +868,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			}
 		}*/
 
-		if (!isUnderThreat && Unsorted::CurrentFrame > 5000 && (pHouse->PowerOutput - pHouse->PowerDrain < 100 || hasUnpoweredBuildings))
+		if (!isUnderThreat && Unsorted::CurrentFrame > 5000 && (pHouse->PowerOutput - GetRealPowerDrain(pHouse) < 100 || hasUnpoweredBuildings))
 		{
 			const BuildingTypeClass* pOurAdvancedPowerPlant = pPrimaryTechTree->GetRandomBuildable(TechTreeTypeClass::BuildType::BuildAdvancedPower, canBuildFunction);
 			if (pOurAdvancedPowerPlant != nullptr)
@@ -894,8 +939,10 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 		else if (pHouse->AIDifficulty == AIDifficulty::Hard)
 			maxBarracksLimit = 12;
 
-		if (optimalBarracksCount > maxBarracksLimit)
+		if (limitFactories && optimalBarracksCount > maxBarracksLimit)
 			optimalBarracksCount = maxBarracksLimit;
+
+		AdvAI_Recycle_Furthest_Factory(pHouse, AbstractType::InfantryType, false, optimalBarracksCount, houseExt->NextExpansionPointLocation);
 
 		const BuildingTypeClass* pBarracksToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildBarracks, 1, optimalBarracksCount);
 
@@ -936,11 +983,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 		if (LogVerboseAdvAI)
 			Debug::Log("AdvAI Eval: House %d (%s), TechTree: %s, BuildableDefenses count: %u\n", pHouse->ArrayIndex, pHouse->Type->ID, pPrimaryTechTree->Name.data(), buildableDefenses.size());
 
-		int paranoiaDuration = TICKS_PER_MINUTE;
-		if (pHouse->AIDifficulty == AIDifficulty::Normal)
-			paranoiaDuration = 2 * TICKS_PER_MINUTE;
-		else if (pHouse->AIDifficulty == AIDifficulty::Hard)
-			paranoiaDuration = 3 * TICKS_PER_MINUTE;
+		int paranoiaDuration = TICKS_PER_MINUTE + (30 * TICKS_PER_SECOND);
 
 		bool hasEnemiesClose = false;
 		{
@@ -1066,7 +1109,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			// apply a severe penalty to its score, unless we have no other choice.
 			if (pDefense->PowerDrain > 0)
 			{
-				int powerSurplus = pHouse->PowerOutput - pHouse->PowerDrain;
+				int powerSurplus = pHouse->PowerOutput - GetRealPowerDrain(pHouse);
 				if (powerSurplus < pDefense->PowerDrain)
 				{
 					// Applying a 99% penalty to the score if it would overload our power grid.
@@ -1313,8 +1356,10 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			else if (pHouse->AIDifficulty == AIDifficulty::Hard)
 				maxWFLimit = 12;
 
-			if (optimalWeaponsCount > maxWFLimit)
+			if (limitFactories && optimalWeaponsCount > maxWFLimit)
 				optimalWeaponsCount = maxWFLimit;
+
+			AdvAI_Recycle_Furthest_Factory(pHouse, AbstractType::UnitType, false, optimalWeaponsCount, houseExt->NextExpansionPointLocation);
 
 			const BuildingTypeClass* pWeaponsFactoryToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildWeapons, 1, optimalWeaponsCount);
 
@@ -1373,8 +1418,10 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			else if (pHouse->AIDifficulty == AIDifficulty::Hard)
 				maxNavalYardLimit = 8;
 
-			if (optimalNavalYardCount > maxNavalYardLimit)
+			if (limitFactories && optimalNavalYardCount > maxNavalYardLimit)
 				optimalNavalYardCount = maxNavalYardLimit;
+
+			AdvAI_Recycle_Furthest_Factory(pHouse, AbstractType::UnitType, true, optimalNavalYardCount, houseExt->NextExpansionPointLocation);
 
 			const BuildingTypeClass* pNavalYardToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildNavalYard, 1, optimalNavalYardCount);
 			if (pNavalYardToBuild != nullptr)
@@ -1396,6 +1443,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			if (pRefineryToBuild != nullptr)
 			{
 				houseExt->NextExpansionPointLocation = CellStruct(0, 0);
+				houseExt->ShouldBuildRefinery = false;
 				Debug::Log("AdvAI: Making AI build %s because it only has too few refineries\n", pRefineryToBuild->Name);
 				return pRefineryToBuild;
 			}
@@ -1581,6 +1629,51 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				}
 			}
 		}
+
+		// Build Service Depot if we have War Factories but not enough Service Depots (on demand: 1 depot per War Factory)
+		int ourWFCount = 0;
+		int ourDepotCount = 0;
+		for (const auto pBuilding : BuildingClass::Array)
+		{
+			if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pHouse)
+			{
+				if (pBuilding->Type->Factory == AbstractType::UnitType && !pBuilding->Type->Naval)
+					ourWFCount++;
+				else
+				{
+					bool isDepot = false;
+					for (const auto pType : pPrimaryTechTree->BuildServiceDepot)
+					{
+						if (pBuilding->Type == pType)
+						{
+							isDepot = true;
+							break;
+						}
+					}
+					if (isDepot)
+						ourDepotCount++;
+				}
+			}
+		}
+
+		bool shouldBuildDepot = false;
+		if (ourDepotCount < 1)
+			shouldBuildDepot = true;
+		else if (ourDepotCount < ourWFCount && ScenarioClass::Instance->Random.RandomRanged(0, 99) < 10)
+			shouldBuildDepot = true;
+
+		if (shouldBuildDepot)
+		{
+			const BuildingTypeClass* pDepotToBuild = pPrimaryTechTree->GetRandomBuildable(TechTreeTypeClass::BuildType::BuildServiceDepot, canBuildFunction);
+			if (pDepotToBuild != nullptr)
+			{
+				Debug::Log("AdvAI: Making AI build %s (Service Depot count: %d, War Factory count: %d).\n",
+					pDepotToBuild->Name, ourDepotCount, ourWFCount);
+				return pDepotToBuild;
+			}
+		}
+
+
 	}
 
 	/// Secondary tech tree
@@ -1732,7 +1825,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Get_Building_To_Build(HouseClass* pHous
 
 	if (buildChoice->PowerDrain > 0 && !buildChoice->ResourceDestination && !buildChoice->ConstructionYard)
 	{
-		const int expectedSurplus = (pHouse->PowerOutput - pHouse->PowerDrain) - buildChoice->PowerDrain;
+		const int expectedSurplus = (pHouse->PowerOutput - GetRealPowerDrain(pHouse)) - buildChoice->PowerDrain;
 		const int requiredSurplus = pHouse->PowerSurplus > 0 ? pHouse->PowerSurplus : RulesClass::Instance->PowerSurplus;
 
 		if (expectedSurplus < requiredSurplus)
@@ -1764,6 +1857,39 @@ const BuildingTypeClass* HouseExt::AdvAI_Get_Building_To_Build(HouseClass* pHous
 	return buildChoice;
 }
 
+
+static int GetRealPowerDrain(const HouseClass* pHouse)
+{
+	int realPowerDrain = pHouse->PowerDrain;
+	for (const auto pBld : BuildingClass::Array)
+	{
+		if (pBld && pBld->Owner == pHouse && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->TogglePower && (!pBld->HasPower || !pBld->StuffEnabled))
+			realPowerDrain += pBld->Type->PowerDrain;
+	}
+	return realPowerDrain;
+}
+
+static bool IsLocatedInAlliedBase(BuildingClass* pBuilding, HouseClass* pHouse)
+{
+	if (pBuilding == nullptr || pHouse == nullptr)
+		return false;
+
+	for (const auto pOtherHouse : HouseClass::Array)
+	{
+		if (pOtherHouse != pHouse && pHouse->IsAlliedWith(pOtherHouse))
+		{
+			for (const auto pOtherBld : pOtherHouse->Buildings)
+			{
+				if (pOtherBld && pOtherBld->IsAlive && !pOtherBld->InLimbo)
+				{
+					if (pBuilding->GetMapCoords().DistanceFrom(pOtherBld->GetMapCoords()) < 25.0)
+						return true;
+				}
+			}
+		}
+	}
+	return false;
+}
 
 /**
  *  Checks if AdvAI should raise money.
@@ -1803,6 +1929,10 @@ void HouseExt::AdvAI_Raise_Money(HouseClass* pHouse)
 		{
 			continue;
 		}
+
+		// Safety check: do not sell any buildings built in allied bases (backup/life insurance)
+		if (IsLocatedInAlliedBase(pBuilding, pHouse))
+			continue;
 
 		if (pBuilding->CurrentMission == Mission::Construction || pBuilding->QueuedMission == Mission::Construction)
 		{
@@ -1918,11 +2048,7 @@ void HouseExt::AdvAI_Economy_Upkeep(HouseClass* pHouse)
 			}
 		}
 
-		int paranoiaDuration = TICKS_PER_MINUTE;
-		if (pHouse->AIDifficulty == AIDifficulty::Normal)
-			paranoiaDuration = 2 * TICKS_PER_MINUTE;
-		else if (pHouse->AIDifficulty == AIDifficulty::Hard)
-			paranoiaDuration = 3 * TICKS_PER_MINUTE;
+		int paranoiaDuration = TICKS_PER_MINUTE + (30 * TICKS_PER_SECOND);
 
 		const bool wasRecentlyAttacked = pHouse->LATime + paranoiaDuration > Unsorted::CurrentFrame;
 		const bool isParanoid = (isUnderThreat && hasEnemiesClose) || wasRecentlyAttacked;
@@ -2110,6 +2236,30 @@ void HouseExt::AdvAI_Economy_Upkeep(HouseClass* pHouse)
 											}
 										}
 									}
+								}
+							}
+
+							// 3. Keep the defense if it is close to any allied building (within 10 cells)
+							if (safeToSell)
+							{
+								for (const auto pOtherHouse : HouseClass::Array)
+								{
+									if (pOtherHouse != pHouse && pHouse->IsAlliedWith(pOtherHouse))
+									{
+										for (const auto pTarget : pOtherHouse->Buildings)
+										{
+											if (pTarget && pTarget->IsAlive && !pTarget->InLimbo)
+											{
+												if (pBld->GetMapCoords().DistanceFromSquared(pTarget->GetMapCoords()) < 100.0)
+												{
+													safeToSell = false;
+													break;
+												}
+											}
+										}
+									}
+									if (!safeToSell)
+										break;
 								}
 							}
 
@@ -2328,7 +2478,19 @@ void HouseExt::Vinifera_HouseClass_AI_Building(HouseClass* pHouse)
 	// If we have nowhere to expand towards, check for a new location to expand to.
 	if (houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0)
 	{
-		AdvAI_House_Search_For_Next_Expansion_Point(pHouse);
+		if (Unsorted::CurrentFrame >= houseExt->NextExpansionSearchFrame)
+		{
+			AdvAI_House_Search_For_Next_Expansion_Point(pHouse);
+			houseExt->NextExpansionSearchFrame = Unsorted::CurrentFrame + 300; // Cooldown of 20 seconds at 15 FPS
+		}
+	}
+
+	// Check if we should clear the blocked expansion list after the 10 minute cooldown has elapsed
+	if (houseExt->NextBlacklistClearFrame > 0 && Unsorted::CurrentFrame >= houseExt->NextBlacklistClearFrame)
+	{
+		for (size_t i = 0; i < std::size(houseExt->PermanentlyBlockedExpansionPointLocations); i++)
+			houseExt->PermanentlyBlockedExpansionPointLocations[i] = CellStruct(0, 0);
+		houseExt->NextBlacklistClearFrame = 0;
 	}
 
 	const BuildingTypeClass* toBuild = AdvAI_Get_Building_To_Build(pHouse);
@@ -2557,4 +2719,86 @@ void HouseExt::AdvAI_Update_Primary_Factories(HouseClass* pHouse)
 	updatePrimary(AbstractType::InfantryType, false);
 	updatePrimary(AbstractType::UnitType, false);
 	updatePrimary(AbstractType::UnitType, true);
+}
+
+void HouseExt::AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval, size_t optimalCount, CellStruct targetCell)
+{
+	if (targetCell.X <= 0 || targetCell.Y <= 0)
+		return;
+
+	const auto houseExt = HouseExt::ExtMap.Find(pHouse);
+	if (Unsorted::CurrentFrame < houseExt->LastFactoryRecycleFrame + 2700)
+		return;
+
+	// Check if we have a foothold near the target (any building of ours within 22.0 cells of targetCell)
+	bool hasFoothold = false;
+	for (const auto pBuilding : pHouse->Buildings)
+	{
+		if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo)
+		{
+			if (pBuilding->GetMapCoords().DistanceFrom(targetCell) <= 22.0)
+			{
+				hasFoothold = true;
+				break;
+			}
+		}
+	}
+
+	if (!hasFoothold)
+		return; // Cannot build close to the target anyway, wait for crawler to advance
+
+	// Count our active factories of this type
+	std::vector<BuildingClass*> ourFactories;
+	for (const auto pBuilding : pHouse->Buildings)
+	{
+		if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo)
+		{
+			if (pBuilding->Type->Factory == factoryType && pBuilding->Type->Naval == isNaval)
+				ourFactories.push_back(pBuilding);
+		}
+	}
+
+	if (ourFactories.size() < optimalCount || ourFactories.size() < 3)
+		return;
+
+	// Find the nearest and furthest distances to the targetCell
+	double nearestDist = std::numeric_limits<double>::max();
+	double furthestDist = 0.0;
+	BuildingClass* pFurthestFactory = nullptr;
+
+	const BuildingClass* pOurConYard = pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
+	const CellStruct conyardCell = pOurConYard != nullptr ? pOurConYard->GetMapCoords() : pHouse->Base_Center();
+
+	for (const auto pFactory : ourFactories)
+	{
+		if (pFactory->CurrentMission == Mission::Selling || pFactory->QueuedMission == Mission::Selling)
+			return;
+
+		const double dist = pFactory->GetMapCoords().DistanceFrom(targetCell);
+		if (dist < nearestDist)
+			nearestDist = dist;
+
+		const double conyardDist = pFactory->GetMapCoords().DistanceFrom(conyardCell);
+		if (conyardDist > 20.0)
+		{
+			if (dist > furthestDist)
+			{
+				furthestDist = dist;
+				pFurthestFactory = pFactory;
+			}
+		}
+	}
+
+	if (nearestDist > 22.0 && pFurthestFactory != nullptr && furthestDist > 35.0)
+	{
+		Debug::Log("AdvAI Recycling: House %d selling furthest %s %s factory %s at (%d,%d) (dist %.1f from target) to rebuild closer (nearest is %.1f).\n",
+			pHouse->ArrayIndex,
+			(isNaval ? "Naval" : "Land"),
+			(factoryType == AbstractType::InfantryType ? "Infantry" : "Unit/Vehicle"),
+			pFurthestFactory->Type->ID,
+			pFurthestFactory->GetMapCoords().X, pFurthestFactory->GetMapCoords().Y,
+			furthestDist, nearestDist);
+		pFurthestFactory->Sell(1);
+		houseExt->LastFactoryRecycleFrame = Unsorted::CurrentFrame;
+	}
 }

@@ -238,7 +238,6 @@ void BuildingTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	this->AIExtraCounts.Read(exINI, pSection, "AIExtraCounts");
 
 	this->AIBaseNormal.Read(exINI, pSection, "AIBaseNormal");
-	exINI.ReadBool(pSection, "BaseNormal", &this->BaseNormal);
 	this->AIInnerBase.Read(exINI, pSection, "AIInnerBase");
 
 	this->Refinery_UseStorage.Read(exINI, pSection, "Refinery.UseStorage");
@@ -482,7 +481,6 @@ void BuildingTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->AIBuildCounts)
 		.Process(this->AIExtraCounts)
 		.Process(this->AIBaseNormal)
-		.Process(this->BaseNormal)
 		.Process(this->AIInnerBase)
 		.Process(this->Refinery_UseNormalActiveAnim)
 		.Process(this->HasPowerUpAnim)
@@ -595,4 +593,26 @@ DEFINE_HOOK(0x464A49, BuildingTypeClass_LoadFromINI, 0xA)
 
 	BuildingTypeExt::ExtMap.LoadFromINI(pItem, pINI);
 	return 0;
+}
+
+bool BuildingTypeExt::IsAIBaseNormal(const BuildingTypeClass* pType)
+{
+	if (pType == nullptr)
+		return false;
+
+	const auto pExt = ExtMap.Find(pType);
+	return pExt->AIBaseNormal.Get(pType->BaseNormal);
+}
+
+bool BuildingTypeExt::IsAIInnerBase(const BuildingTypeClass* pType)
+{
+	if (pType == nullptr)
+		return false;
+
+	const auto pExt = ExtMap.Find(pType);
+	if (pExt->AIInnerBase.isset())
+	{
+		return pExt->AIInnerBase.Get();
+	}
+	return pType->CloakGenerator;
 }

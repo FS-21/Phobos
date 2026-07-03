@@ -48,6 +48,7 @@ void TechTreeTypeClass::CalculateTotals()
 	TotalBuildTech.clear();
 	TotalBuildDefense.clear();
 	TotalBuildOther.clear();
+	TotalBuildServiceDepot.clear();
 
 	for (const auto& pTree : Array)
 	{
@@ -62,12 +63,13 @@ void TechTreeTypeClass::CalculateTotals()
 		TotalBuildTech.insert(pTree->BuildTech.begin(), pTree->BuildTech.end());
 		TotalBuildDefense.insert(pTree->BuildDefense.begin(), pTree->BuildDefense.end());
 		TotalBuildOther.insert(pTree->BuildOther.begin(), pTree->BuildOther.end());
+		TotalBuildServiceDepot.insert(pTree->BuildServiceDepot.begin(), pTree->BuildServiceDepot.end());
 	}
 }
 
 size_t TechTreeTypeClass::CountTotalOwnedBuildings(HouseClass* pHouse, BuildType buildType)
 {
-	std::set<BuildingTypeClass*>* typeList;
+	std::set<BuildingTypeClass*>* typeList = nullptr;
 	switch (buildType)
 	{
 	case BuildType::BuildPower:
@@ -103,6 +105,9 @@ size_t TechTreeTypeClass::CountTotalOwnedBuildings(HouseClass* pHouse, BuildType
 	case BuildType::BuildOther:
 		typeList = &TotalBuildOther;
 		break;
+	case BuildType::BuildServiceDepot:
+		typeList = &TotalBuildServiceDepot;
+		break;
 	}
 
 	size_t count = 0;
@@ -131,7 +136,7 @@ size_t TechTreeTypeClass::CountTotalOwnedBuildings(HouseClass* pHouse, BuildType
 
 size_t TechTreeTypeClass::CountSideOwnedBuildings(HouseClass* pHouse, BuildType buildType) const
 {
-	const ValueableVector<BuildingTypeClass*>* typeList;
+	const ValueableVector<BuildingTypeClass*>* typeList = nullptr;
 	switch (buildType)
 	{
 	case BuildType::BuildPower:
@@ -166,6 +171,9 @@ size_t TechTreeTypeClass::CountSideOwnedBuildings(HouseClass* pHouse, BuildType 
 		break;
 	case BuildType::BuildOther:
 		typeList = &this->BuildOther;
+		break;
+	case BuildType::BuildServiceDepot:
+		typeList = &this->BuildServiceDepot;
 		break;
 	}
 
@@ -219,7 +227,7 @@ bool TechTreeTypeClass::IsCompleted(HouseClass* pHouse, std::function<bool(Build
 
 std::vector<BuildingTypeClass*> TechTreeTypeClass::GetBuildable(BuildType buildType, std::function<bool(BuildingTypeClass*)> const& filter) const
 {
-	const ValueableVector<BuildingTypeClass*>* typeList;
+	const ValueableVector<BuildingTypeClass*>* typeList = nullptr;
 	switch (buildType)
 	{
 	case BuildType::BuildPower:
@@ -254,6 +262,9 @@ std::vector<BuildingTypeClass*> TechTreeTypeClass::GetBuildable(BuildType buildT
 		break;
 	case BuildType::BuildOther:
 		typeList = &this->BuildOther;
+		break;
+	case BuildType::BuildServiceDepot:
+		typeList = &this->BuildServiceDepot;
 		break;
 	}
 
@@ -298,7 +309,9 @@ void TechTreeTypeClass::LoadFromINI(CCINIClass* pINI)
 	this->BuildAdvancedPower.Read(exINI, section, "BuildAdvancedPower");
 	this->BuildDefense.Read(exINI, section, "BuildDefense");
 	this->BuildOther.Read(exINI, section, "BuildOther");
+	this->BuildServiceDepot.Read(exINI, section, "BuildServiceDepot");
 	this->BuildOtherCounts.Read(exINI, section, "BuildOtherCounts");
+	this->LimitedFactories.Read(exINI, section, "LimitedFactories");
 
 	for (size_t i = 0; i < BuildOther.size(); i++)
 	{
@@ -322,6 +335,7 @@ void TechTreeTypeClass::Serialize(T& Stm)
 		.Process(BuildPower)
 		.Process(BuildRefinery)
 		.Process(BuildBarracks)
+		.Process(BuildWeapons)
 		.Process(BuildRadar)
 		.Process(BuildHelipad)
 		.Process(BuildNavalYard)
@@ -329,7 +343,9 @@ void TechTreeTypeClass::Serialize(T& Stm)
 		.Process(BuildAdvancedPower)
 		.Process(BuildDefense)
 		.Process(BuildOther)
+		.Process(BuildServiceDepot)
 		.Process(BuildOtherCounts)
+		.Process(LimitedFactories)
 		;
 }
 

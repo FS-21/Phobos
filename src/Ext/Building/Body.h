@@ -129,7 +129,7 @@ public:
 	static void Mark_Expansion_As_Done(HouseClass* pHouse);
 	static void PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass* pBuildingType);
 	static int Try_Place(BuildingClass* pBuilding, CellStruct cell);
-	static RectangleStruct Get_Base_Rect(HouseClass* pHouse, int adjacency, int width, int height);
+	static RectangleStruct Get_Base_Rect(HouseClass* pHouse, int adjacency, int width, int height, BuildingTypeClass* pBuildingType = nullptr);
 	static bool Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingClass* pBuilding, int adjacencyBonus);
 	static bool Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingTypeClass* pBuildingType, HouseClass* pOwner, int adjacencyBonus);
 	static int inline Modify_Rating_By_Terrain_Passability(CellStruct cell, BuildingClass* pBuilding, int originalValue);
@@ -154,6 +154,8 @@ public:
 	static int Near_AttackCell_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static CellStruct Get_Best_Defense_Placement_Position(BuildingClass* pBuilding);
 	static CellStruct Get_Best_Sensor_Placement_Position(BuildingClass* pBuilding);
+	static int Near_WarFactory_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding);
+	static CellStruct Get_Best_ServiceDepot_Placement_Position(BuildingClass* pBuilding);
 	static CellStruct Get_Best_Placement_Position(BuildingClass* pBuilding);
 	static int Exit_Object_Custom_Position(BuildingClass* pBuilding);
 };

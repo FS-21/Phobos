@@ -21,7 +21,8 @@ public:
 		BuildTech,
 		BuildAdvancedPower,
 		BuildDefense,
-		BuildOther
+		BuildOther,
+		BuildServiceDepot
 	};
 
 	Valueable<int> SideIndex;
@@ -37,10 +38,12 @@ public:
 	ValueableVector<BuildingTypeClass*> BuildAdvancedPower;
 	ValueableVector<BuildingTypeClass*> BuildDefense;
 	ValueableVector<BuildingTypeClass*> BuildOther;
+	ValueableVector<BuildingTypeClass*> BuildServiceDepot;
 	ValueableVector<int> BuildOtherCounts;
 	std::map<BuildingTypeClass*, int> BuildOtherCountMap;
+	Valueable<bool> LimitedFactories;
 
-	TechTreeTypeClass(const char* pTitle = NONE_STR) : Enumerable(pTitle) { }
+	TechTreeTypeClass(const char* pTitle = NONE_STR) : Enumerable(pTitle), LimitedFactories(true) { }
 
 	virtual void LoadFromINI(CCINIClass* pINI);
 	virtual void LoadFromStream(PhobosStreamReader& Stm);
@@ -68,6 +71,7 @@ public:
 	static inline std::set<BuildingTypeClass*> TotalBuildAdvancedPower;
 	static inline std::set<BuildingTypeClass*> TotalBuildDefense;
 	static inline std::set<BuildingTypeClass*> TotalBuildOther;
+	static inline std::set<BuildingTypeClass*> TotalBuildServiceDepot;
 
 	static void CalculateTotals();
 

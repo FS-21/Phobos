@@ -82,44 +82,47 @@ public:
 		 *  If we are currently expanding our base towards a resourceful location,
 		 *  this records the cell that we are expanding towards.
 		 */
-		CellStruct NextExpansionPointLocation;
+		CellStruct NextExpansionPointLocation { 0, 0 };
 
 		/**
 		 *  Locations that we should never expand towards.
 		 *  Basically, locations that are unreachable.
 		 */
-		CellStruct PermanentlyBlockedExpansionPointLocations[20];
+		CellStruct PermanentlyBlockedExpansionPointLocations[20] {};
 
 		/**
 		 *  Records whether the AI has reached its expansion point.
 		 *  If yes, the AI should build a refinery.
 		 */
-		bool ShouldBuildRefinery;
+		bool ShouldBuildRefinery { false };
 		int ExpansionPlacementFailures;
+		int LastFactoryRecycleFrame;
+		int NextExpansionSearchFrame;
+		int NextBlacklistClearFrame;
 
 		/**
 		 *  Set when the AI has built its first barracks during the game.
 		 *  Used to figure out whether the AI should reset its TeamDelay
 		 *  timer when it has built a barracks.
 		 */
-		bool HasBuiltFirstBarracks;
+		bool HasBuiltFirstBarracks { false };
 
 		/**
 		 *  Records when the AI last checked for excess refineries.
 		 */
-		int LastExcessRefineryCheckFrame;
+		int LastExcessRefineryCheckFrame { 0 };
 
 		/**
 		 *  Records when the AI last checked for sleeping harvesters.
 		 */
-		int LastSleepingHarvesterCheckFrame;
+		int LastSleepingHarvesterCheckFrame { 0 };
 		int LastPrimaryFactoryCheckFrame { 0 };
 
 		/**
 		 *  Defines whether the AI has already performed a final "desperate vehicle charge".
 		 *  If it has been done, then there is no need to do it again.
 		 */
-		bool HasPerformedVehicleCharge;
+		bool HasPerformedVehicleCharge { false };
 
 		/**
 		 *  Records a value whether the current structure build choice
@@ -185,6 +188,9 @@ public:
 			, SecondaryTechTreeType(nullptr)
 			, LastAttackedBuildingCoords { 0, 0 }
 			, ExpansionPlacementFailures { 0 }
+			, LastFactoryRecycleFrame { 0 }
+			, NextExpansionSearchFrame { 0 }
+			, NextBlacklistClearFrame { 0 }
 		{ }
 
 		bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;
@@ -267,6 +273,7 @@ public:
 	static void Vinifera_HouseClass_AI_Building(HouseClass* pHouse);
 	static void AdvAI_HouseClass_Expert_AI(HouseClass* pHouse);
 	static void AdvAI_Update_Primary_Factories(HouseClass* pHouse);
+	static void AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval, size_t optimalCount, CellStruct targetCell);
 
 	static int FindGenericPrerequisite(const char* id);
 	static bool HasGenericPrerequisite(int idx, HouseClass* pHouse);

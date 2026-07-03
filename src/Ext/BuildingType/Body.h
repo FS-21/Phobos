@@ -102,7 +102,6 @@ public:
 		NullableVector<int> AIExtraCounts;
 
 		Nullable<bool> AIBaseNormal;
-		bool BaseNormal;
 		Nullable<bool> AIInnerBase;
 
 		Valueable<bool> Refinery_UseNormalActiveAnim;
@@ -234,7 +233,6 @@ public:
 			, PrerequisiteLists {}
 			, PrerequisiteNegatives {}
 			, PrerequisiteTheaters { 0xFFFFFFFF }
-			, BaseNormal { true }
 		{ }
 
 		// Ares 0.A functions
@@ -278,4 +276,6 @@ public:
 	static int CountOwnedNowWithDeployOrUpgrade(BuildingTypeClass* pBuilding, HouseClass* pHouse);
 	static int GetUpgradesAmount(BuildingTypeClass* pBuilding, HouseClass* pHouse);
 	static bool HasDisableableSuperWeapons(BuildingTypeClass* pBuildingType);
+	static bool IsAIBaseNormal(const BuildingTypeClass* pType);
+	static bool IsAIInnerBase(const BuildingTypeClass* pType);
 };
