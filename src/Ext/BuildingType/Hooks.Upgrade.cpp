@@ -10,15 +10,6 @@ bool BuildingTypeExt::CanUpgrade(BuildingClass* pBuilding, BuildingTypeClass* pU
 	{
 		auto const pType = pBuilding->Type;
 
-		// June 7, 2026 - Starkku: PowersUpBuilding is now put in PowersUp_Buildings
-		/*
-		auto const idx = pType->ID;
-
-		// PowersUpBuilding
-		if (_stricmp(idx, pUpgradeType->PowersUpBuilding) == 0)
-			return true;
-		*/
-
 		// PowersUp.Buildings
 		for (auto const pPowerUpBuilding : pUpgradeExt->PowersUp_Buildings)
 		{

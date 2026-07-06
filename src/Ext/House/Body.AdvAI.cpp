@@ -177,6 +177,26 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 	{
 		totalNodesChecked++;
 
+		// Check if this candidate is close to a recently failed expansion point
+		bool isBlacklisted = false;
+		for (size_t i = 0; i < std::size(ext->PermanentlyBlockedExpansionPointLocations); i++)
+		{
+			const CellStruct blocked = ext->PermanentlyBlockedExpansionPointLocations[i];
+			if (blocked.X > 0 && blocked.Y > 0)
+			{
+				if (candidateCell.DistanceFromSquared(blocked) < 225.0) // 15-cell radius
+				{
+					isBlacklisted = true;
+					break;
+				}
+			}
+		}
+		if (isBlacklisted)
+		{
+			occupiedNodes++;
+			continue;
+		}
+
 		// Fetch the cell. If the cell has a non-Tiberium/Ore overlay on it,
 		// we should not expand towards it.
 		const CellClass* cell = MapClass::Instance.GetCellAt(candidateCell);
@@ -209,7 +229,7 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			// base refineries and human players' refineries do not.
 			// For these refineries, we rely on a distance check.
 			const double dist = pBuilding->GetMapCoords().DistanceFrom(candidateCell);
-			if (dist < 15)
+			if (pBuilding->Owner == pHouse && dist < 15)
 			{
 				found = true;
 				break;
@@ -294,6 +314,78 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 
 	Debug::Log("AdvAI ExpansionSearch: House %d: Checked %d Tiberium nodes, %d occupied/blocked. Target: (%d,%d).\n",
 		pHouse->ArrayIndex, totalNodesChecked, occupiedNodes, target.X, target.Y);
+
+	if (target.X == 0 || target.Y == 0)
+	{
+		Debug::Log("AdvAI ExpansionSearch Safeguard: House %d: Scanning Tiberium trees on the map...\n", pHouse->ArrayIndex);
+		nearestDistance = std::numeric_limits<double>::max();
+
+		for (const auto pTerrain : TerrainClass::Array)
+		{
+			if (pTerrain && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
+			{
+				const CellStruct treeCoords = pTerrain->GetMapCoords();
+				double nearestRefineryDist = std::numeric_limits<double>::max();
+				const BuildingClass* pNearestRefinery = nullptr;
+
+				for (const auto pBuilding : pHouse->Buildings)
+				{
+					if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Type->ResourceDestination)
+					{
+						const double dist = treeCoords.DistanceFrom(pBuilding->GetMapCoords());
+						if (dist < nearestRefineryDist)
+						{
+							nearestRefineryDist = dist;
+							pNearestRefinery = pBuilding;
+						}
+					}
+				}
+
+				const bool occupied = (nearestRefineryDist < 15.0);
+				Debug::Log("AdvAI ExpansionSearch Safeguard: House %d: Tree %s at (%d,%d) -> Occupied: %s (Nearest friendly refinery: %s at (%d,%d), dist %.1f cells)\n",
+					pHouse->ArrayIndex,
+					pTerrain->Type->ID, treeCoords.X, treeCoords.Y,
+					(occupied ? "YES" : "NO"),
+					(pNearestRefinery ? pNearestRefinery->Type->ID : "None"),
+					(pNearestRefinery ? pNearestRefinery->GetMapCoords().X : 0),
+					(pNearestRefinery ? pNearestRefinery->GetMapCoords().Y : 0),
+					nearestRefineryDist);
+
+				if (!occupied)
+				{
+					// Find the nearest structure of ours to crawl from
+					double minStructureDist = std::numeric_limits<double>::max();
+					const BuildingClass* pNearestStructure = nullptr;
+
+					for (const auto pBld : pHouse->Buildings)
+					{
+						if (pBld && pBld->IsAlive && !pBld->InLimbo)
+						{
+							const double dist = treeCoords.DistanceFrom(pBld->GetMapCoords());
+							if (dist < minStructureDist)
+							{
+								minStructureDist = dist;
+								pNearestStructure = pBld;
+							}
+						}
+					}
+
+					if (minStructureDist < nearestDistance)
+					{
+						nearestDistance = minStructureDist;
+						target = treeCoords;
+						pBestNearestBuilding = pNearestStructure;
+					}
+				}
+			}
+		}
+
+		if (target.X > 0 && target.Y > 0)
+		{
+			Debug::Log("AdvAI ExpansionSearch Safeguard: House %d: Recovered target (%d,%d) because it has no refinery within its radius.\n",
+				pHouse->ArrayIndex, target.X, target.Y);
+		}
+	}
 
 	if (target.X == 0 || target.Y == 0)
 	{
@@ -438,6 +530,56 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* p
 	// If this is an upgrade, do we have a building we could upgrade with it?
 	if (!pExt->PowersUp_Buildings.empty())
 	{
+		// Enforce AI powerplant upgrade restrictions:
+		// Check if the upgrade type's target base buildings are powerplants
+		bool isPowerUpgrade = false;
+		for (auto const pPowerUpBld : pExt->PowersUp_Buildings)
+		{
+			if (pPowerUpBld != nullptr && (TechTreeTypeClass::TotalBuildPower.count(pPowerUpBld) > 0 || TechTreeTypeClass::TotalBuildAdvancedPower.count(pPowerUpBld) > 0))
+			{
+				isPowerUpgrade = true;
+				break;
+			}
+		}
+
+		if (isPowerUpgrade)
+		{
+			const int surplusPower = pHouse->PowerOutput - pHouse->PowerDrain;
+			const int requiredSurplus = pHouse->PowerSurplus > 0 ? pHouse->PowerSurplus : RulesClass::Instance->PowerSurplus;
+			if (surplusPower >= requiredSurplus)
+			{
+				// Check if there is at least one upgradeable powerplant in the main base
+				const BuildingClass* pOurConYard = pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
+				const CellStruct conyardCell = pOurConYard != nullptr ? pOurConYard->GetMapCoords() : pHouse->Base_Center();
+
+				bool hasUpgradeableInBase = false;
+				for (const auto pBld : BuildingClass::Array)
+				{
+					if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner == pHouse)
+					{
+						if (pExt->PowersUp_Buildings.Contains(pBld->Type))
+						{
+							if (pBld->UpgradeLevel < pBld->Type->Upgrades)
+							{
+								const double bldDist = pBld->GetMapCoords().DistanceFrom(conyardCell);
+								if (bldDist < 20.0)
+								{
+									hasUpgradeableInBase = true;
+									break;
+								}
+							}
+						}
+					}
+				}
+
+				// Only block building upgrades if there are NO upgradeable powerplants in the main base
+				if (!hasUpgradeableInBase)
+				{
+					return false; // Block!
+				}
+			}
+		}
+
 		bool anyBaseExists = false;
 		for (const auto base : pExt->PowersUp_Buildings)
 		{
@@ -517,7 +659,15 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* p
 		BuildingExt::PopulateAdjacencyAnchors(pHouse, pBuildingType);
 
 		const int adjacency = pBuildingType->Adjacent;
-		const RectangleStruct baseArea = BuildingExt::Get_Base_Rect(pHouse, adjacency, pBuildingType->GetFoundationWidth(), pBuildingType->GetFoundationHeight(false));
+		RectangleStruct baseArea;
+		if (pBuildingType->Refinery || pBuildingType->ResourceDestination)
+		{
+			baseArea = BuildingExt::GetRefinerySearchRect(pHouse, pBuildingType);
+		}
+		else
+		{
+			baseArea = BuildingExt::Get_Base_Rect(pHouse, adjacency, pBuildingType->GetFoundationWidth(), pBuildingType->GetFoundationHeight(false));
+		}
 
 		bool canPlaceAnywhere = false;
 		const int resCells = 2000;
@@ -822,7 +972,34 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				}
 				else
 				{
-					Debug::Log("AdvAI: House %d reached expansion point, but refinery is physically unbuildable here. Reverting ShouldBuildRefinery to crawl further.\n", pHouse->ArrayIndex);
+					const CellStruct targetCell = houseExt->NextExpansionPointLocation;
+
+					// Check if we are combat crawling (target is an enemy building)
+					bool isCombatCrawling = false;
+					if (const auto pTargetCell = MapClass::Instance.TryGetCellAt(targetCell))
+					{
+						if (const auto pTargetBld = pTargetCell->GetBuilding())
+						{
+							if (pTargetBld->Owner != pHouse && !pHouse->IsAlliedWith(pTargetBld->Owner))
+							{
+								isCombatCrawling = true;
+							}
+						}
+					}
+
+					if (!isCombatCrawling)
+					{
+						Debug::Log("AdvAI: House %d reached expansion point (%d,%d), but refinery is physically unbuildable here. Blacklisting target and marking expansion as done.\n",
+							pHouse->ArrayIndex, targetCell.X, targetCell.Y);
+						AdvAI_Add_Failed_Expansion_Point(pHouse, targetCell);
+						BuildingExt::Mark_Expansion_As_Done(pHouse);
+					}
+					else
+					{
+						Debug::Log("AdvAI: House %d reached expansion point (%d,%d), but refinery is physically unbuildable here. Combat crawling in progress: reverting ShouldBuildRefinery to crawl further.\n",
+							pHouse->ArrayIndex, targetCell.X, targetCell.Y);
+					}
+
 					houseExt->ShouldBuildRefinery = false;
 				}
 			}
@@ -1542,8 +1719,21 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 		if (pHelipadType != nullptr)
 		{
 			const int docksPerHelipad = pHelipadType->NumberOfDocks > 0 ? pHelipadType->NumberOfDocks : 1;
-			const int ourHelipadCount = pHouse->ActiveBuildingTypes.GetItemCount(pHelipadType->ArrayIndex);
-			const int currentDocks = ourHelipadCount * docksPerHelipad;
+
+			int totalCurrentDocks = 0;
+			int totalHelipadsOwned = 0;
+			for (const auto pBld : pHouse->Buildings)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo)
+				{
+					if (pBld->Type->Helipad)
+					{
+						const int docks = pBld->Type->NumberOfDocks > 0 ? pBld->Type->NumberOfDocks : 1;
+						totalCurrentDocks += docks;
+						totalHelipadsOwned++;
+					}
+				}
+			}
 
 			size_t optimalHelipadCount = 1;
 
@@ -1561,25 +1751,28 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			}
 
 			// If we already have helipads, we only build more if all current docks are occupied
-			if (ourHelipadCount > 0)
-				optimalHelipadCount = (ownedAirportBoundAircraft >= currentDocks) ? ourHelipadCount + 1 : ourHelipadCount;
+			if (totalHelipadsOwned > 0)
+				optimalHelipadCount = (ownedAirportBoundAircraft >= totalCurrentDocks) ? totalHelipadsOwned + 1 : totalHelipadsOwned;
 
-			// Enforce difficulty-based safety cap of docks (Easy: 8 docks, Normal: 12 docks, Hard: 16 docks)
-			int maxDocks = 16;
-			if (pHouse->AIDifficulty == AIDifficulty::Easy)
-				maxDocks = 8;
-			else if (pHouse->AIDifficulty == AIDifficulty::Normal)
-				maxDocks = 12;
+			if (limitFactories)
+			{
+				// Enforce difficulty-based safety cap of docks (Easy: 8 docks, Normal: 12 docks, Hard: 16 docks)
+				int maxDocks = 16;
+				if (pHouse->AIDifficulty == AIDifficulty::Easy)
+					maxDocks = 8;
+				else if (pHouse->AIDifficulty == AIDifficulty::Normal)
+					maxDocks = 12;
 
-			const size_t maxHelipadCount = (maxDocks + docksPerHelipad - 1) / docksPerHelipad;
-			if (optimalHelipadCount > maxHelipadCount)
-				optimalHelipadCount = maxHelipadCount;
+				const size_t maxHelipadCount = (maxDocks + docksPerHelipad - 1) / docksPerHelipad;
+				if (optimalHelipadCount > maxHelipadCount)
+					optimalHelipadCount = maxHelipadCount;
+			}
 
 			const BuildingTypeClass* pHelipadToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildHelipad, 1, optimalHelipadCount);
 			if (pHelipadToBuild != nullptr)
 			{
 				Debug::Log("AdvAI: Making AI build %s because it has no free aircraft docks (Docks: %d, Aircraft: %d, Wanted helipads: %d)\n",
-					pHelipadToBuild->Name, currentDocks, ownedAirportBoundAircraft, optimalHelipadCount);
+					pHelipadToBuild->Name, totalCurrentDocks, ownedAirportBoundAircraft, optimalHelipadCount);
 
 				return pHelipadToBuild;
 			}
@@ -1630,45 +1823,17 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			}
 		}
 
-		// Build Service Depot if we have War Factories but not enough Service Depots (on demand: 1 depot per War Factory)
-		int ourWFCount = 0;
-		int ourDepotCount = 0;
-		for (const auto pBuilding : BuildingClass::Array)
-		{
-			if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pHouse)
-			{
-				if (pBuilding->Type->Factory == AbstractType::UnitType && !pBuilding->Type->Naval)
-					ourWFCount++;
-				else
-				{
-					bool isDepot = false;
-					for (const auto pType : pPrimaryTechTree->BuildServiceDepot)
-					{
-						if (pBuilding->Type == pType)
-						{
-							isDepot = true;
-							break;
-						}
-					}
-					if (isDepot)
-						ourDepotCount++;
-				}
-			}
-		}
+		// Build Service Depot if we have War Factories but not enough Service Depots (1 initial + 1 per 4 refineries)
+		const size_t ourRefineryCount = pPrimaryTechTree->CountSideOwnedBuildings(pHouse, TechTreeTypeClass::BuildType::BuildRefinery);
+		const size_t optimalDepotCount = 1 + (ourRefineryCount / 4);
 
-		bool shouldBuildDepot = false;
-		if (ourDepotCount < 1)
-			shouldBuildDepot = true;
-		else if (ourDepotCount < ourWFCount && ScenarioClass::Instance->Random.RandomRanged(0, 99) < 10)
-			shouldBuildDepot = true;
-
-		if (shouldBuildDepot)
+		if (Unsorted::CurrentFrame > houseExt->LastServiceDepotPlacementFailedFrame + 3000)
 		{
-			const BuildingTypeClass* pDepotToBuild = pPrimaryTechTree->GetRandomBuildable(TechTreeTypeClass::BuildType::BuildServiceDepot, canBuildFunction);
+			const BuildingTypeClass* pDepotToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildServiceDepot, 1, optimalDepotCount);
 			if (pDepotToBuild != nullptr)
 			{
-				Debug::Log("AdvAI: Making AI build %s (Service Depot count: %d, War Factory count: %d).\n",
-					pDepotToBuild->Name, ourDepotCount, ourWFCount);
+				Debug::Log("AdvAI: Making AI build %s (Refinery count: %d, Max depots: %d).\n",
+					pDepotToBuild->Name, static_cast<int>(ourRefineryCount), static_cast<int>(optimalDepotCount));
 				return pDepotToBuild;
 			}
 		}
@@ -1868,6 +2033,8 @@ static int GetRealPowerDrain(const HouseClass* pHouse)
 	}
 	return realPowerDrain;
 }
+
+
 
 static bool IsLocatedInAlliedBase(BuildingClass* pBuilding, HouseClass* pHouse)
 {
@@ -2546,6 +2713,12 @@ void HouseExt::AdvAI_HouseClass_Expert_AI(HouseClass* pHouse)
 		AdvAI_Economy_Upkeep(pHouse);
 	}
 
+	if (Unsorted::CurrentFrame > houseExt->LastObsoleteRefineryCheckFrame + 4500)
+	{
+		houseExt->LastObsoleteRefineryCheckFrame = Unsorted::CurrentFrame;
+		AdvAI_Recycle_Obsolete_Refineries(pHouse);
+	}
+
 	if (Unsorted::CurrentFrame > houseExt->LastSleepingHarvesterCheckFrame + 1000)
 	{
 		houseExt->LastSleepingHarvesterCheckFrame = Unsorted::CurrentFrame;
@@ -2723,10 +2896,16 @@ void HouseExt::AdvAI_Update_Primary_Factories(HouseClass* pHouse)
 
 void HouseExt::AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval, size_t optimalCount, CellStruct targetCell)
 {
+	const auto houseExt = HouseExt::ExtMap.Find(pHouse);
+	const auto pPrimaryTechTree = houseExt->PrimaryTechTreeType;
+	const bool limitFactories = pPrimaryTechTree == nullptr || pPrimaryTechTree->LimitedFactories;
+
+	if (!limitFactories)
+		return;
+
 	if (targetCell.X <= 0 || targetCell.Y <= 0)
 		return;
 
-	const auto houseExt = HouseExt::ExtMap.Find(pHouse);
 	if (Unsorted::CurrentFrame < houseExt->LastFactoryRecycleFrame + 2700)
 		return;
 
@@ -2800,5 +2979,102 @@ void HouseExt::AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType f
 			furthestDist, nearestDist);
 		pFurthestFactory->Sell(1);
 		houseExt->LastFactoryRecycleFrame = Unsorted::CurrentFrame;
+	}
+}
+
+void HouseExt::AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse)
+{
+	const BuildingClass* pOurConYard = pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
+	const CellStruct baseCenter = pOurConYard != nullptr ? pOurConYard->GetMapCoords() : pHouse->Base_Center();
+
+	for (const auto pBld : pHouse->Buildings)
+	{
+		if (!pBld || !pBld->IsAlive || pBld->InLimbo)
+		{
+			continue;
+		}
+
+		if (!pBld->Type->Refinery && !pBld->Type->ResourceDestination)
+		{
+			continue;
+		}
+
+		if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
+		{
+			continue;
+		}
+
+		// Skip refineries that are close to the core base (ConYard) to avoid leaving the base defenseless or base-less.
+		const double distToConYard = pBld->GetMapCoords().DistanceFrom(baseCenter);
+		if (distToConYard < 20.0)
+		{
+			continue;
+		}
+
+		// Scan a radius of 14 cells around the refinery to check for tiberium trees or tiberium overlays.
+		const CellStruct refCoords = pBld->GetMapCoords();
+		bool hasResources = false;
+
+		for (int dy = -14; dy <= 14; ++dy)
+		{
+			for (int dx = -14; dx <= 14; ++dx)
+			{
+				CellStruct scanCell(refCoords.X + dx, refCoords.Y + dy);
+				if (!MapClass::Instance.CoordinatesLegal(scanCell))
+				{
+					continue;
+				}
+
+				if (refCoords.DistanceFrom(scanCell) > 14.0)
+				{
+					continue;
+				}
+
+				const CellClass* cell = MapClass::Instance.GetCellAt(scanCell);
+				if (cell)
+				{
+					// Check for tiberium overlay
+					if (cell->OverlayTypeIndex != -1 && OverlayClass::GetTiberiumType(cell->OverlayTypeIndex) >= 0)
+					{
+						hasResources = true;
+						break;
+					}
+
+					// Check for tiberium tree
+					const TerrainClass* pTerrain = cell->GetTerrain(false);
+					if (pTerrain != nullptr && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
+					{
+						hasResources = true;
+						break;
+					}
+				}
+			}
+			if (hasResources)
+			{
+				break;
+			}
+		}
+
+		if (!hasResources)
+		{
+			Debug::Log("AdvAI: Refinery %s at (%d,%d) is obsolete (no resources/spawners within 14 cells). Selling it.\n",
+				pBld->Type->ID, refCoords.X, refCoords.Y);
+			pBld->Sell(1);
+		}
+	}
+}
+
+void HouseExt::AdvAI_Add_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords)
+{
+	const auto houseExt = ExtMap.Find(pHouse);
+	for (size_t i = 0; i < std::size(houseExt->PermanentlyBlockedExpansionPointLocations); i++)
+	{
+		if (houseExt->PermanentlyBlockedExpansionPointLocations[i].X == 0 && houseExt->PermanentlyBlockedExpansionPointLocations[i].Y == 0)
+		{
+			houseExt->PermanentlyBlockedExpansionPointLocations[i] = coords;
+			houseExt->NextBlacklistClearFrame = Unsorted::CurrentFrame + 9000; // 10 minute cooldown at 15 FPS
+			Debug::Log("AdvAI: House %d blacklisted failed expansion point (%d,%d) for 10 minutes.\n", pHouse->ArrayIndex, coords.X, coords.Y);
+			break;
+		}
 	}
 }

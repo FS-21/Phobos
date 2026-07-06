@@ -111,6 +111,8 @@ public:
 		 *  Records when the AI last checked for excess refineries.
 		 */
 		int LastExcessRefineryCheckFrame { 0 };
+		int LastObsoleteRefineryCheckFrame { 0 };
+		int LastServiceDepotPlacementFailedFrame { 0 };
 
 		/**
 		 *  Records when the AI last checked for sleeping harvesters.
@@ -191,6 +193,8 @@ public:
 			, LastFactoryRecycleFrame { 0 }
 			, NextExpansionSearchFrame { 0 }
 			, NextBlacklistClearFrame { 0 }
+			, LastObsoleteRefineryCheckFrame { 0 }
+			, LastServiceDepotPlacementFailedFrame { 0 }
 		{ }
 
 		bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;
@@ -259,6 +263,7 @@ public:
 	static void SetSkirmishHouseName(HouseClass* pHouse);
 
 	static bool AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse);
+	static void AdvAI_Add_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* pBuildingType, bool checkPrereqs, bool isTechTree = false);
 	static bool AdvAI_Is_Recently_Attacked(HouseClass* pHouse);
 	static bool AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse, int enemyAircraftValue);
@@ -274,6 +279,7 @@ public:
 	static void AdvAI_HouseClass_Expert_AI(HouseClass* pHouse);
 	static void AdvAI_Update_Primary_Factories(HouseClass* pHouse);
 	static void AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval, size_t optimalCount, CellStruct targetCell);
+	static void AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse);
 
 	static int FindGenericPrerequisite(const char* id);
 	static bool HasGenericPrerequisite(int idx, HouseClass* pHouse);

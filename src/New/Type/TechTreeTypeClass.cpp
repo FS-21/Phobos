@@ -46,6 +46,7 @@ void TechTreeTypeClass::CalculateTotals()
 	TotalBuildHelipad.clear();
 	TotalBuildNavalYard.clear();
 	TotalBuildTech.clear();
+	TotalBuildAdvancedPower.clear();
 	TotalBuildDefense.clear();
 	TotalBuildOther.clear();
 	TotalBuildServiceDepot.clear();
@@ -61,6 +62,7 @@ void TechTreeTypeClass::CalculateTotals()
 		TotalBuildHelipad.insert(pTree->BuildHelipad.begin(), pTree->BuildHelipad.end());
 		TotalBuildNavalYard.insert(pTree->BuildNavalYard.begin(), pTree->BuildNavalYard.end());
 		TotalBuildTech.insert(pTree->BuildTech.begin(), pTree->BuildTech.end());
+		TotalBuildAdvancedPower.insert(pTree->BuildAdvancedPower.begin(), pTree->BuildAdvancedPower.end());
 		TotalBuildDefense.insert(pTree->BuildDefense.begin(), pTree->BuildDefense.end());
 		TotalBuildOther.insert(pTree->BuildOther.begin(), pTree->BuildOther.end());
 		TotalBuildServiceDepot.insert(pTree->BuildServiceDepot.begin(), pTree->BuildServiceDepot.end());

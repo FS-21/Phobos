@@ -132,11 +132,13 @@ public:
 	static RectangleStruct Get_Base_Rect(HouseClass* pHouse, int adjacency, int width, int height, BuildingTypeClass* pBuildingType = nullptr);
 	static bool Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingClass* pBuilding, int adjacencyBonus);
 	static bool Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingTypeClass* pBuildingType, HouseClass* pOwner, int adjacencyBonus);
+	static bool OverlapsTiberiumTreeZone(CellStruct cell, BuildingTypeClass* pType);
 	static int inline Modify_Rating_By_Terrain_Passability(CellStruct cell, BuildingClass* pBuilding, int originalValue);
 	static CellStruct Find_Best_Building_Placement_Cell(RectangleStruct baseArea, BuildingClass* pBuilding, int (*valueGenerator)(CellStruct, BuildingClass*), int adjacencyBonus = 0);
 	static int inline Modify_Rating_By_Allied_Building_Proximity(CellStruct cell, BuildingClass* pBuilding, int originalValue);
 	static int Refinery_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static CellStruct Get_Best_Refinery_Placement_Position(BuildingClass* pBuilding);
+	static RectangleStruct GetRefinerySearchRect(HouseClass* pHouse, BuildingTypeClass* pRefineryType);
 	static int Near_Base_Center_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding);
 	static int Near_Base_Center_Defense_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding);
 	static int Near_Enemy_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding);
@@ -155,6 +157,7 @@ public:
 	static CellStruct Get_Best_Defense_Placement_Position(BuildingClass* pBuilding);
 	static CellStruct Get_Best_Sensor_Placement_Position(BuildingClass* pBuilding);
 	static int Near_WarFactory_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding);
+	static int ServiceDepot_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static CellStruct Get_Best_ServiceDepot_Placement_Position(BuildingClass* pBuilding);
 	static CellStruct Get_Best_Placement_Position(BuildingClass* pBuilding);
 	static int Exit_Object_Custom_Position(BuildingClass* pBuilding);
