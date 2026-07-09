@@ -325,6 +325,23 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 
 			if (completedExpansion)
 			{
+				const CellStruct targetCell = houseExt->NextExpansionPointLocation;
+				for (size_t i = 0; i < std::size(houseExt->PermanentlyBlockedExpansionPointLocations); i++)
+				{
+					auto& blocked = houseExt->PermanentlyBlockedExpansionPointLocations[i];
+					if (blocked.Coords.X > 0 && blocked.Coords.Y > 0)
+					{
+						if (targetCell.DistanceFromSquared(blocked.Coords) < 225.0) // 15-cell radius
+						{
+							blocked.Coords = CellStruct(0, 0);
+							blocked.ExpiryFrame = 0;
+							blocked.FailureCount = 0;
+							Debug::Log("AdvAI: House %d successfully placed refinery at (%d,%d). Cleared failed expansion history for this area.\n",
+								owner->ArrayIndex, targetCell.X, targetCell.Y);
+						}
+					}
+				}
+
 				Mark_Expansion_As_Done(owner);
 				houseExt->ShouldBuildRefinery = false;
 			}
@@ -1781,15 +1798,14 @@ int BuildingExt::Towards_Expansion_Placement_Cell_Value(CellStruct cell, Buildin
 	return distanceValue + enemyDistance;
 }
 
-CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBuilding)
+CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass* pOwner, BuildingTypeClass* pBuildingType, BuildingClass* pBuilding)
 {
-	HouseClass* pOwner = pBuilding->Owner;
 	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
 
-	const int buildingW = pBuilding->Type->GetFoundationWidth();
-	const int buildingH = pBuilding->Type->GetFoundationHeight(false);
+	const int buildingW = pBuildingType->GetFoundationWidth();
+	const int buildingH = pBuildingType->GetFoundationHeight(false);
 	// +1 allows one cell of adjacency leniency to hop over small gaps.
-	const int adjRange = pBuilding->Type->Adjacent + 1;
+	const int adjRange = pBuildingType->Adjacent + 1;
 
 	const CellStruct& expansionTarget = houseExt->NextExpansionPointLocation;
 	const bool hasExpansionTarget = expansionTarget.X > 0 && expansionTarget.Y > 0;
@@ -1832,10 +1848,10 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBu
 					// CanPlaceHere is the engine's authoritative check:
 					// it validates terrain suitability, adjacency to existing structures,
 					// occupied cells, and all other placement rules.
-					if (!pBuilding->Type->CanPlaceHere(&cell, pOwner))
+					if (!pBuildingType->CanPlaceHere(&cell, pOwner))
 						continue;
 
-					if (OverlapsTiberiumTreeZone(cell, pBuilding->Type))
+					if (OverlapsTiberiumTreeZone(cell, pBuildingType))
 						continue;
 
 					// Prevent placing the expansion building if it would cause congestion (touching same type or 2+ buildings)
@@ -1843,8 +1859,8 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBu
 					int touchingCount = 0;
 					const int b1X = cell.X;
 					const int b1Y = cell.Y;
-					const int b1W = pBuilding->Type->GetFoundationWidth();
-					const int b1H = pBuilding->Type->GetFoundationHeight(false);
+					const int b1W = pBuildingType->GetFoundationWidth();
+					const int b1H = pBuildingType->GetFoundationHeight(false);
 
 					for (const auto pOtherBuilding : BuildingClass::Array)
 					{
@@ -1861,7 +1877,13 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBu
 								if ((b1X - 1 <= b2X + b2W - 1) && (b1X + b1W >= b2X) &&
 									(b1Y - 1 <= b2Y + b2H - 1) && (b1Y + b1H >= b2Y))
 								{
-									if (pOtherBuilding->Type == pBuilding->Type)
+									if (pBuildingType->IsBaseDefense && pOtherBuilding->Type->IsBaseDefense)
+									{
+										cellIsCongested = true;
+										break;
+									}
+
+									if (pOtherBuilding->Type == pBuildingType)
 									{
 										cellIsCongested = true;
 										break;
@@ -1906,8 +1928,8 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBu
 							continue;
 					}
 
-					// Enforce a minimum separation of 12 cells between refineries during expansion placement
-					if (pBuilding->Type->ResourceDestination)
+					// Enforce a minimum separation of 10 cells between refineries during expansion placement
+					if (pBuildingType->ResourceDestination)
 					{
 						bool tooCloseToRefinery = false;
 						for (const auto pOtherBuilding : BuildingClass::Array)
@@ -1917,7 +1939,7 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBu
 								if (pOtherBuilding->Owner == pOwner)
 								{
 									double distToOtherRefinery = cell.DistanceFrom(pOtherBuilding->GetMapCoords());
-									if (distToOtherRefinery < 12.0)
+									if (distToOtherRefinery < 10.0)
 									{
 										tooCloseToRefinery = true;
 										break;
@@ -1960,42 +1982,53 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBu
 					houseExt->ShouldBuildRefinery = true;
 			}
 
-			houseExt->ExpansionPlacementFailures = 0;
+			if (pBuilding)
+			{
+				houseExt->ExpansionPlacementFailures = 0;
 
-			Debug::Log("AdvAI ExpansionPlacement: House %d placing %s at (%d,%d), dist to target (%d,%d) = %.1f cells%s\n",
-				pOwner->ArrayIndex, pBuilding->Type->ID,
-				bestCell.X, bestCell.Y,
-				expansionTarget.X, expansionTarget.Y,
-				bestDist,
-				houseExt->ShouldBuildRefinery ? " [REFINERY NEXT]" : "");
+				Debug::Log("AdvAI ExpansionPlacement: House %d placing %s at (%d,%d), dist to target (%d,%d) = %.1f cells%s\n",
+					pOwner->ArrayIndex, pBuildingType->ID,
+					bestCell.X, bestCell.Y,
+					expansionTarget.X, expansionTarget.Y,
+					bestDist,
+					houseExt->ShouldBuildRefinery ? " [REFINERY NEXT]" : "");
+			}
 
 			return bestCell;
 		}
 
-		houseExt->ExpansionPlacementFailures++;
-		if (houseExt->ExpansionPlacementFailures >= 3)
+		if (pBuilding)
 		{
-			Debug::Log("AdvAI ExpansionPlacement: House %d: failed to crawl towards target (%d,%d) 3 times. Abandoning expansion target.\n",
-				pOwner->ArrayIndex, expansionTarget.X, expansionTarget.Y);
+			houseExt->ExpansionPlacementFailures++;
+			if (houseExt->ExpansionPlacementFailures >= 3)
+			{
+				Debug::Log("AdvAI ExpansionPlacement: House %d: failed to crawl towards target (%d,%d) 3 times. Abandoning expansion target.\n",
+					pOwner->ArrayIndex, expansionTarget.X, expansionTarget.Y);
 
-			// Blacklist this target to prevent endless loop crawls if we cannot place any buildings towards it
-			HouseExt::AdvAI_Add_Failed_Expansion_Point(pOwner, expansionTarget);
+				// Blacklist this target to prevent endless loop crawls if we cannot place any buildings towards it
+				HouseExt::AdvAI_Add_Failed_Expansion_Point(pOwner, expansionTarget);
 
-			Mark_Expansion_As_Done(pOwner);
-			houseExt->ExpansionPlacementFailures = 0;
-			houseExt->ShouldBuildRefinery = false;
+				Mark_Expansion_As_Done(pOwner);
+				houseExt->ExpansionPlacementFailures = 0;
+				houseExt->ShouldBuildRefinery = false;
+			}
+			else
+			{
+				Debug::Log("AdvAI ExpansionPlacement: House %d: no valid adjacent cell found for %s toward target (%d,%d). Failure count: %d. Falling back.\n",
+					pOwner->ArrayIndex, pBuildingType->ID, expansionTarget.X, expansionTarget.Y, houseExt->ExpansionPlacementFailures);
+			}
 		}
-		else
-		{
-			Debug::Log("AdvAI ExpansionPlacement: House %d: no valid adjacent cell found for %s toward target (%d,%d). Failure count: %d. Falling back.\n",
-				pOwner->ArrayIndex, pBuilding->Type->ID, expansionTarget.X, expansionTarget.Y, houseExt->ExpansionPlacementFailures);
-		}
+
+		return CellStruct::Empty; // Abort and do not fall back to base if we were actively expanding!
 	}
+
+	if (pBuilding == nullptr)
+		return CellStruct::Empty;
 
 	// Fallback: no expansion target set, or couldn't find any adjacent valid cell.
 	// Use the old bounding-box scan to find a reasonable placement.
 	const int adjacency = adjRange + 1;
-	const RectangleStruct baseArea = Get_Base_Rect(pOwner, adjacency, buildingW, buildingH, pBuilding->Type);
+	const RectangleStruct baseArea = Get_Base_Rect(pOwner, adjacency, buildingW, buildingH, pBuildingType);
 
 	CellStruct bestCell = Find_Best_Building_Placement_Cell(baseArea, pBuilding, Towards_Expansion_Placement_Cell_Value, 0);
 
@@ -2005,6 +2038,11 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBu
 		bestCell = altBestCell;
 
 	return bestCell;
+}
+
+CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBuilding)
+{
+	return Get_Best_Expansion_Placement_Position_Helper(pBuilding->Owner, pBuilding->Type, pBuilding);
 }
 
 
@@ -2105,14 +2143,14 @@ int BuildingExt::Helipad_Placement_Cell_Value(CellStruct cell, BuildingClass* pB
 	const HouseClass* pOwner = pBuilding->Owner;
 	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
 
-	// If we are expanding (Tiberium or aggressive enemy crawl), place the helipad near the front target
-	if (houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+	// If the building is NOT marked as an inner-base structure, and we are expanding, place it near the front target
+	if (!IsAIInnerBase(pBuilding->Type) && houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
 	{
 		double value = cell.DistanceFrom(houseExt->NextExpansionPointLocation);
 		return Modify_Rating_By_Allied_Building_Proximity(cell, pBuilding, static_cast<int>(value));
 	}
 
-	return Far_From_Enemy_Placement_Position_Value(cell, pBuilding);
+	return Near_Base_Center_Placement_Position_Value(cell, pBuilding);
 }
 
 /**
@@ -2383,6 +2421,11 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 
 	if (pBuilding->Type->ResourceDestination)
 	{
+		const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
+		if (houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+		{
+			return Get_Best_Expansion_Placement_Position(pBuilding);
+		}
 		return Get_Best_Refinery_Placement_Position(pBuilding);
 	}
 

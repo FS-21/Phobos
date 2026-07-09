@@ -148,6 +148,7 @@ public:
 	static int Far_From_Enemy_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding);
 	static CellStruct Get_Best_SuperWeapon_Building_Placement_Position(BuildingClass* pBuilding);
 	static int Towards_Expansion_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
+	static CellStruct Get_Best_Expansion_Placement_Position_Helper(HouseClass* pOwner, BuildingTypeClass* pBuildingType, BuildingClass* pBuilding);
 	static CellStruct Get_Best_Expansion_Placement_Position(BuildingClass* pBuilding);
 	static int Barracks_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static int NavalYard_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
