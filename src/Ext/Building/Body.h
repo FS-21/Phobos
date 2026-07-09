@@ -68,6 +68,7 @@ public:
 		static BuildingClass* AdjacencyAnchors[1000];
 		static size_t AdjacencyAnchorCount;
 		static CellStruct AttackCell;
+		static CellStruct AttackSourceCell;
 
 		virtual ~ExtData() = default;
 
@@ -154,6 +155,7 @@ public:
 	static int Helipad_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static CellStruct Get_Best_Factory_Placement_Position(BuildingClass* pBuilding);
 	static int Near_AttackCell_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
+	static int Directional_Defense_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static CellStruct Get_Best_Defense_Placement_Position(BuildingClass* pBuilding);
 	static CellStruct Get_Best_Sensor_Placement_Position(BuildingClass* pBuilding);
 	static int Near_WarFactory_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding);

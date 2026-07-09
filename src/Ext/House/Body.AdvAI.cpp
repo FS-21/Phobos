@@ -115,12 +115,50 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			}
 
 			// If the enemy base is within crawling range
-			if (nearestEnemyDistSq <= maxDistSq && enemyTarget.X > 0 && enemyTarget.Y > 0)
+			int factoryCount = TechTreeTypeClass::CountTotalOwnedBuildings(pHouse, TechTreeTypeClass::BuildType::BuildBarracks);
+			int warFactoryCount = TechTreeTypeClass::CountTotalOwnedBuildings(pHouse, TechTreeTypeClass::BuildType::BuildWeapons);
+			if (nearestEnemyDistSq <= maxDistSq && factoryCount > 0 && warFactoryCount > 0)
 			{
-				ext->NextExpansionPointLocation = enemyTarget;
-				Debug::Log("AdvAI ExpansionSearch: House %d: Pivot to combat crawling (3+ refineries). Crawling towards enemy House %d (%s) base at (%d,%d) at dist %.1f cells (Limit: %.1f).\n",
-					pHouse->ArrayIndex, pEnemy->ArrayIndex, pEnemy->Type->ID, enemyTarget.X, enemyTarget.Y, std::sqrt(nearestEnemyDistSq), maxDist);
-				return true;
+				const BuildingClass* pOurConYard = pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
+				const CellStruct baseCenter = pOurConYard != nullptr ? pOurConYard->GetMapCoords() : pHouse->Base_Center();
+
+				CellStruct bestEnemyTarget(0, 0);
+				double closestEnemyDist = 999999.0;
+
+				for (const auto pBld : pEnemy->Buildings)
+				{
+					if (pBld && pBld->IsAlive && !pBld->InLimbo)
+					{
+						CellStruct bldCell = pBld->GetMapCoords();
+						if (AdvAI_Is_Failed_Expansion_Point(pHouse, bldCell))
+							continue;
+
+						double dist = baseCenter.DistanceFrom(bldCell);
+						if (dist < closestEnemyDist)
+						{
+							closestEnemyDist = dist;
+							bestEnemyTarget = bldCell;
+						}
+					}
+				}
+
+				// Fallback to base center if no individual building is found/valid (and center not blacklisted)
+				if (bestEnemyTarget.X == 0 && bestEnemyTarget.Y == 0)
+				{
+					CellStruct center = pEnemy->Base_Center();
+					if (!AdvAI_Is_Failed_Expansion_Point(pHouse, center))
+					{
+						bestEnemyTarget = center;
+					}
+				}
+
+				if (bestEnemyTarget.X > 0 && bestEnemyTarget.Y > 0)
+				{
+					ext->NextExpansionPointLocation = bestEnemyTarget;
+					Debug::Log("AdvAI SearchExpansion: House %d starting COMBAT crawling towards enemy %d (%s) at (%d,%d).\n",
+						pHouse->ArrayIndex, pEnemy->ArrayIndex, pEnemy->Type->ID, bestEnemyTarget.X, bestEnemyTarget.Y);
+					return true;
+				}
 			}
 		}
 	}
@@ -181,10 +219,10 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 		bool isBlacklisted = false;
 		for (size_t i = 0; i < std::size(ext->PermanentlyBlockedExpansionPointLocations); i++)
 		{
-			const CellStruct blocked = ext->PermanentlyBlockedExpansionPointLocations[i];
-			if (blocked.X > 0 && blocked.Y > 0)
+			const auto& blocked = ext->PermanentlyBlockedExpansionPointLocations[i];
+			if (blocked.Coords.X > 0 && blocked.Coords.Y > 0 && Unsorted::CurrentFrame < blocked.ExpiryFrame)
 			{
-				if (candidateCell.DistanceFromSquared(blocked) < 225.0) // 15-cell radius
+				if (candidateCell.DistanceFromSquared(blocked.Coords) < 225.0) // 15-cell radius
 				{
 					isBlacklisted = true;
 					break;
@@ -229,7 +267,7 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			// base refineries and human players' refineries do not.
 			// For these refineries, we rely on a distance check.
 			const double dist = pBuilding->GetMapCoords().DistanceFrom(candidateCell);
-			if (pBuilding->Owner == pHouse && dist < 15)
+			if (pBuilding->Owner == pHouse && dist < 12)
 			{
 				found = true;
 				break;
@@ -1628,7 +1666,11 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 
 		// Probabilistic roll: 70% chance to build defense when paranoid (threat/attack), 50% chance in normal state.
 		const int rollChance = isParanoid ? 70 : 50;
-		const bool shouldBuildDefenseThisCycle = (ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance);
+		bool shouldBuildDefenseThisCycle = (ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance);
+		if (houseExt->FrontlineThreatCoords.X > 0 && houseExt->FrontlineThreatActiveFrames > Unsorted::CurrentFrame && houseExt->FrontlineThreatNeedsDefenses > 0)
+		{
+			shouldBuildDefenseThisCycle = true;
+		}
 
 		if (shouldBuildDefenseThisCycle)
 		{
@@ -1684,6 +1726,27 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				Debug::Log("AdvAI: Making AI build %s because only anti-vehicle is deficient. VehDef: %d\n",
 					ourAntiVehicleDefense->Name, antiVehicleDeficiency);
 				return ourAntiVehicleDefense;
+			}
+
+			// Fallback: If forced by frontline threat but all global deficiencies are 0
+			if (houseExt->FrontlineThreatNeedsDefenses > 0)
+			{
+				if (ourAntiVehicleDefense != nullptr)
+				{
+					Debug::Log("AdvAI: Forced local defense build fallback: Choosing %s (Anti-Vehicle).\n", ourAntiVehicleDefense->Name);
+					return ourAntiVehicleDefense;
+				}
+				else if (ourAntiInfantryDefense != nullptr)
+				{
+					Debug::Log("AdvAI: Forced local defense build fallback: Choosing %s (Anti-Infantry).\n", ourAntiInfantryDefense->Name);
+					return ourAntiInfantryDefense;
+				}
+				else if (!buildableDefenses.empty())
+				{
+					const BuildingTypeClass* pRandomDefense = buildableDefenses[ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(buildableDefenses.size()) - 1)];
+					Debug::Log("AdvAI: Forced local defense build fallback: Choosing random buildable defense %s.\n", pRandomDefense->Name);
+					return pRandomDefense;
+				}
 			}
 		}
 		else if (antiInfDeficiency > 0 || antiVehicleDeficiency > 0 || antiAirDeficiency > 0)
@@ -2652,12 +2715,20 @@ void HouseExt::Vinifera_HouseClass_AI_Building(HouseClass* pHouse)
 		}
 	}
 
-	// Check if we should clear the blocked expansion list after the 10 minute cooldown has elapsed
-	if (houseExt->NextBlacklistClearFrame > 0 && Unsorted::CurrentFrame >= houseExt->NextBlacklistClearFrame)
+	// Periodically clean up fully expired blacklist entries (expired for more than 5 minutes)
+	// to clear their historical failure counts and keep the slots clean.
+	for (size_t i = 0; i < std::size(houseExt->PermanentlyBlockedExpansionPointLocations); i++)
 	{
-		for (size_t i = 0; i < std::size(houseExt->PermanentlyBlockedExpansionPointLocations); i++)
-			houseExt->PermanentlyBlockedExpansionPointLocations[i] = CellStruct(0, 0);
-		houseExt->NextBlacklistClearFrame = 0;
+		auto& blocked = houseExt->PermanentlyBlockedExpansionPointLocations[i];
+		if (blocked.Coords.X > 0 && blocked.Coords.Y > 0)
+		{
+			if (Unsorted::CurrentFrame >= blocked.ExpiryFrame + 4500)
+			{
+				blocked.Coords = CellStruct(0, 0);
+				blocked.ExpiryFrame = 0;
+				blocked.FailureCount = 0;
+			}
+		}
 	}
 
 	const BuildingTypeClass* toBuild = AdvAI_Get_Building_To_Build(pHouse);
@@ -2704,6 +2775,14 @@ void HouseExt::AdvAI_HouseClass_Expert_AI(HouseClass* pHouse)
 	}
 
 	const auto houseExt = ExtMap.Find(pHouse);
+
+	// Clear attacker and building coords if paranoia has expired
+	int paranoiaDuration = TICKS_PER_MINUTE + (30 * TICKS_PER_SECOND);
+	if (pHouse->LATime == 0 || pHouse->LATime + paranoiaDuration + 1800 <= Unsorted::CurrentFrame)
+	{
+		houseExt->LastAttackerCoords = CellStruct(0, 0);
+		houseExt->LastAttackedBuildingCoords = CellStruct(0, 0);
+	}
 
 	// Do some economy upkeep to keep the AI running.
 
@@ -3067,14 +3146,78 @@ void HouseExt::AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse)
 void HouseExt::AdvAI_Add_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords)
 {
 	const auto houseExt = ExtMap.Find(pHouse);
+
+	// 1. Check if this coordinate (or close to it, within 5.0 cells) is already blacklisted
+	bool found = false;
 	for (size_t i = 0; i < std::size(houseExt->PermanentlyBlockedExpansionPointLocations); i++)
 	{
-		if (houseExt->PermanentlyBlockedExpansionPointLocations[i].X == 0 && houseExt->PermanentlyBlockedExpansionPointLocations[i].Y == 0)
+		auto& blocked = houseExt->PermanentlyBlockedExpansionPointLocations[i];
+		if (blocked.Coords.X > 0 && blocked.Coords.Y > 0)
 		{
-			houseExt->PermanentlyBlockedExpansionPointLocations[i] = coords;
-			houseExt->NextBlacklistClearFrame = Unsorted::CurrentFrame + 9000; // 10 minute cooldown at 15 FPS
-			Debug::Log("AdvAI: House %d blacklisted failed expansion point (%d,%d) for 10 minutes.\n", pHouse->ArrayIndex, coords.X, coords.Y);
-			break;
+			if (coords.DistanceFromSquared(blocked.Coords) < 25.0) // 5-cell radius
+			{
+				blocked.FailureCount++;
+				int multiplier = std::min(blocked.FailureCount, 6); // Cap multiplier at 6x (60 minutes)
+				blocked.ExpiryFrame = Unsorted::CurrentFrame + (9000 * multiplier);
+				blocked.Coords = coords; // Update exact coordinates
+				Debug::Log("AdvAI: House %d updated failed expansion point (%d,%d). Failure count: %d, cooldown: %d mins.\n",
+					pHouse->ArrayIndex, coords.X, coords.Y, blocked.FailureCount, 10 * multiplier);
+				found = true;
+				break;
+			}
 		}
 	}
+
+	// 2. If not found, add to an empty slot or recycle the oldest expired slot
+	if (!found)
+	{
+		int bestIndex = -1;
+		int oldestExpiry = std::numeric_limits<int>::max();
+
+		for (size_t i = 0; i < std::size(houseExt->PermanentlyBlockedExpansionPointLocations); i++)
+		{
+			const auto& b = houseExt->PermanentlyBlockedExpansionPointLocations[i];
+			if (b.Coords.X == 0 && b.Coords.Y == 0)
+			{
+				bestIndex = i;
+				break;
+			}
+			if (Unsorted::CurrentFrame >= b.ExpiryFrame && b.ExpiryFrame < oldestExpiry)
+			{
+				oldestExpiry = b.ExpiryFrame;
+				bestIndex = i;
+			}
+		}
+
+		if (bestIndex != -1)
+		{
+			auto& blocked = houseExt->PermanentlyBlockedExpansionPointLocations[bestIndex];
+			blocked.Coords = coords;
+			blocked.FailureCount = 1;
+			blocked.ExpiryFrame = Unsorted::CurrentFrame + 9000; // 10 minute cooldown at 15 FPS
+			Debug::Log("AdvAI: House %d blacklisted failed expansion point (%d,%d) for 10 minutes.\n",
+				pHouse->ArrayIndex, coords.X, coords.Y);
+		}
+	}
+}
+
+bool HouseExt::AdvAI_Is_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords)
+{
+	const auto houseExt = ExtMap.Find(pHouse);
+	for (size_t i = 0; i < std::size(houseExt->PermanentlyBlockedExpansionPointLocations); i++)
+	{
+		const auto& blocked = houseExt->PermanentlyBlockedExpansionPointLocations[i];
+		if (blocked.Coords.X > 0 && blocked.Coords.Y > 0)
+		{
+			// Entry is only active if the frame hasn't reached its individual expiry frame
+			if (Unsorted::CurrentFrame < blocked.ExpiryFrame)
+			{
+				if (coords.DistanceFromSquared(blocked.Coords) < 225.0) // 15-cell radius
+				{
+					return true;
+				}
+			}
+		}
+	}
+	return false;
 }

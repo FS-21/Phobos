@@ -84,11 +84,18 @@ public:
 		 */
 		CellStruct NextExpansionPointLocation { 0, 0 };
 
+		struct BlockedExpansionPoint
+		{
+			CellStruct Coords { 0, 0 };
+			int ExpiryFrame { 0 };
+			int FailureCount { 0 };
+		};
+
 		/**
 		 *  Locations that we should never expand towards.
 		 *  Basically, locations that are unreachable.
 		 */
-		CellStruct PermanentlyBlockedExpansionPointLocations[20] {};
+		BlockedExpansionPoint PermanentlyBlockedExpansionPointLocations[20] {};
 
 		/**
 		 *  Records whether the AI has reached its expansion point.
@@ -144,6 +151,11 @@ public:
 		 */
 		std::map<BuildingTypeClass*, int> AICachedBuildCounts;
 		CellStruct LastAttackedBuildingCoords;
+		CellStruct LastAttackerCoords;
+		CellStruct FrontlineThreatCoords;
+		int FrontlineThreatActiveFrames;
+		int FrontlineThreatNeedsDefenses;
+		CellStruct FrontlineThreatBuildingCoords;
 
 		struct UnsafePlacementZone
 		{
@@ -189,6 +201,11 @@ public:
 			, PrimaryTechTreeType(nullptr)
 			, SecondaryTechTreeType(nullptr)
 			, LastAttackedBuildingCoords { 0, 0 }
+			, LastAttackerCoords { 0, 0 }
+			, FrontlineThreatCoords { 0, 0 }
+			, FrontlineThreatBuildingCoords { 0, 0 }
+			, FrontlineThreatActiveFrames { 0 }
+			, FrontlineThreatNeedsDefenses { 0 }
 			, ExpansionPlacementFailures { 0 }
 			, LastFactoryRecycleFrame { 0 }
 			, NextExpansionSearchFrame { 0 }
@@ -264,6 +281,7 @@ public:
 
 	static bool AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse);
 	static void AdvAI_Add_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
+	static bool AdvAI_Is_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* pBuildingType, bool checkPrereqs, bool isTechTree = false);
 	static bool AdvAI_Is_Recently_Attacked(HouseClass* pHouse);
 	static bool AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse, int enemyAircraftValue);

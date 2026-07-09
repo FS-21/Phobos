@@ -2810,7 +2810,14 @@ DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_SetLATime, 0x8)
 		houseExt->LastAttackedBuildingCoords = pThis->GetMapCoords();
 
 		if (pAttacker)
+		{
+			houseExt->LastAttackerCoords = pAttacker->GetMapCoords();
 			pThis->BaseIsAttacked(pAttacker);
+		}
+		else
+		{
+			houseExt->LastAttackerCoords = CellStruct(0, 0);
+		}
 	}
 
 	return 0;
