@@ -3,16 +3,29 @@
 #include <algorithm>
 #include "Ext/TechnoType/Body.h"
 #include "Ext/TerrainType/Body.h"
+#include "Ext/SWType/Body.h"
 #include <CellClass.h>
 #include <MapClass.h>
 #include <OverlayClass.h>
 #include <TerrainClass.h>
+
+enum class SupportRadiusType { None, Cloak, Gap, Inhibitor, RadarJam, EMPulseCannon };
+
+static bool IsAIBaseNormal(const BuildingTypeClass* pType);
+static bool HasWeapons(TechnoClass* pTechno);
+static bool IsAIInnerBase(const BuildingTypeClass* pType);
+static SupportRadiusType GetSupportRadiusType(const BuildingTypeClass* pType);
+static bool IsSameSupportNetwork(const BuildingTypeClass* pTypeA, const BuildingTypeClass* pTypeB);
+static int GetSupportRadius(const BuildingTypeClass* pType);
+static const char* GetGroupAsID(BuildingTypeClass* pType);
 
 static bool IsAIBaseNormal(const BuildingTypeClass* pType)
 {
 	const auto pExt = BuildingTypeExt::ExtMap.Find(pType);
 	return pExt->AIBaseNormal.Get(pType->BaseNormal);
 }
+
+static bool HasWeapons(TechnoClass* pTechno);
 
 static bool IsAIInnerBase(const BuildingTypeClass* pType)
 {
@@ -21,11 +34,102 @@ static bool IsAIInnerBase(const BuildingTypeClass* pType)
 	{
 		return pExt->AIInnerBase.Get();
 	}
-	return pType->CloakGenerator;
+	return pType->CloakGenerator || pExt->GapGenerator;
+}
+
+static bool IsSameSupportNetwork(const BuildingTypeClass* pTypeA, const BuildingTypeClass* pTypeB)
+{
+	const SupportRadiusType typeA = GetSupportRadiusType(pTypeA);
+	const SupportRadiusType typeB = GetSupportRadiusType(pTypeB);
+
+	if (typeA == SupportRadiusType::None || typeB == SupportRadiusType::None)
+		return false;
+
+	if (typeA != typeB)
+		return false;
+
+	const char* groupA = TechnoTypeExt::GetSelectionGroupID(const_cast<BuildingTypeClass*>(pTypeA));
+	const char* groupB = TechnoTypeExt::GetSelectionGroupID(const_cast<BuildingTypeClass*>(pTypeB));
+
+	return _stricmp(groupA, groupB) == 0;
+}
+
+static int GetSupportRadius(const BuildingTypeClass* pType)
+{
+	int minRadius = 999;
+
+	if (pType->CloakGenerator && pType->CloakRadiusInCells > 0 && pType->CloakRadiusInCells < minRadius)
+		minRadius = pType->CloakRadiusInCells;
+
+	const auto pBldExt = BuildingTypeExt::ExtMap.Find(pType);
+	if (pBldExt->GapGenerator)
+	{
+		if (pBldExt->GapRadiusInCells > 0 && pBldExt->GapRadiusInCells < minRadius)
+			minRadius = pBldExt->GapRadiusInCells;
+
+		if (pBldExt->SuperGapRadiusInCells > 0 && pBldExt->SuperGapRadiusInCells < minRadius)
+			minRadius = pBldExt->SuperGapRadiusInCells;
+	}
+
+	const auto pExt = TechnoTypeExt::ExtMap.Find(pType);
+	if (pExt->InhibitorRange.isset() && pExt->InhibitorRange.Get() > 0 && pExt->InhibitorRange.Get() < minRadius)
+		minRadius = pExt->InhibitorRange.Get();
+
+	if (pExt->RadarJamRadius.Get() > 0 && pExt->RadarJamRadius.Get() < minRadius)
+		minRadius = pExt->RadarJamRadius.Get();
+
+	if (pType->EMPulseCannon)
+	{
+		std::vector<int> swIndices;
+		if (pType->SuperWeapon != -1)
+			swIndices.push_back(pType->SuperWeapon);
+		if (pType->SuperWeapon2 != -1)
+			swIndices.push_back(pType->SuperWeapon2);
+
+		const auto pBldTypeExt = BuildingTypeExt::ExtMap.Find(pType);
+		for (const auto swIdx : pBldTypeExt->SuperWeapons)
+		{
+			swIndices.push_back(swIdx);
+		}
+
+		for (const auto swIdx : swIndices)
+		{
+			if (swIdx >= 0 && swIdx < SuperWeaponTypeClass::Array.Count)
+			{
+				const auto pSW = SuperWeaponTypeClass::Array[swIdx];
+				const auto pSWExt = SWTypeExt::ExtMap.Find(pSW);
+
+				double swRadius = -1.0;
+				if (pSWExt->SW_RangeMaximum.Get() > 0.0)
+				{
+					swRadius = pSWExt->SW_RangeMaximum.Get();
+				}
+				else if (pSWExt->SW_RangeMinimum.Get() > 0.0)
+				{
+					swRadius = pSWExt->SW_RangeMinimum.Get();
+				}
+				else if (const auto pWeapon = pType->GetWeapon(0u, false).WeaponType)
+				{
+					swRadius = pWeapon->Range / (double)Unsorted::LeptonsPerCell;
+				}
+
+				if (swRadius > 0.0 && swRadius < minRadius)
+				{
+					minRadius = static_cast<int>(swRadius);
+				}
+			}
+		}
+	}
+
+	return minRadius == 999 ? 0 : minRadius;
 }
 
 bool BuildingExt::OverlapsTiberiumTreeZone(CellStruct cell, BuildingTypeClass* pType)
 {
+	if (pType->ResourceDestination)
+	{
+		return false;
+	}
 	const int foundationW = pType->GetFoundationWidth();
 	const int foundationH = pType->GetFoundationHeight(false);
 
@@ -90,27 +194,26 @@ bool BuildingExt::OverlapsTiberiumTreeZone(CellStruct cell, BuildingTypeClass* p
 	return false;
 }
 
-// Categorizes a building by which kind of area-support radius it provides.
-// Buildings that share the same category should be spatially dispersed.
-enum class SupportRadiusType { None, Cloak, Gap, Inhibitor, RadarJam };
+
 
 static SupportRadiusType GetSupportRadiusType(const BuildingTypeClass* pType)
 {
-	// CloakRadiusInCells is a BYTE in BuildingTypeClass
-	if (pType->CloakRadiusInCells > 0)
+	if (pType->CloakGenerator && pType->CloakRadiusInCells > 0)
 		return SupportRadiusType::Cloak;
 
-	// GapRadiusInCells / SuperGapRadiusInCells are chars in TechnoTypeClass (inherited)
-	if (pType->GapRadiusInCells != 0 || pType->SuperGapRadiusInCells != 0)
+	const auto pBldExt = BuildingTypeExt::ExtMap.Find(pType);
+	if (pBldExt->GapGenerator && (pBldExt->GapRadiusInCells != 0 || pBldExt->SuperGapRadiusInCells != 0))
 		return SupportRadiusType::Gap;
 
-	// InhibitorRange and RadarJamRadius live in TechnoTypeExt
 	const auto pTechnoTypeExt = TechnoTypeExt::ExtMap.Find(pType);
 	if (pTechnoTypeExt->InhibitorRange.isset() && pTechnoTypeExt->InhibitorRange.Get() > 0)
 		return SupportRadiusType::Inhibitor;
 
 	if (pTechnoTypeExt->RadarJamRadius.Get() > 0)
 		return SupportRadiusType::RadarJam;
+
+	if (pType->EMPulseCannon)
+		return SupportRadiusType::EMPulseCannon;
 
 	return SupportRadiusType::None;
 }
@@ -231,7 +334,7 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 		pBuilding->QueueMission(Mission::Construction, true);
 		pBuilding->NextMission();
 
-		int closeEnough = 12;
+		int closeEnough = 8;
 
 		// If we just placed down our first barracks, then set our team timer to 0
 		// so we can immediately start producing infantry.
@@ -250,17 +353,30 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 		bool threatFound = false;
 		CellStruct threatCoords(0, 0);
 		double nearestThreatDistSq = 64.0; // 8.0 cells squared
+		const char* threatID = nullptr;
+		const char* threatHouseID = nullptr;
 
 		// Check enemy buildings
 		for (const auto pBld : BuildingClass::Array)
 		{
 			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner != owner && !owner->IsAlliedWith(pBld->Owner))
 			{
+				// Ignore neutral buildings unless they have weapons (e.g. civilian defenses)
+				if (pBld->Owner->IsNeutral())
+				{
+					const auto& primary = pBld->Type->GetWeapon(0, false);
+					const auto& secondary = pBld->Type->GetWeapon(1, false);
+					if (primary.WeaponType == nullptr && secondary.WeaponType == nullptr)
+						continue;
+				}
+
 				double distSq = cell.DistanceFromSquared(pBld->GetMapCoords());
 				if (distSq < nearestThreatDistSq)
 				{
 					nearestThreatDistSq = distSq;
 					threatCoords = pBld->GetMapCoords();
+					threatID = pBld->Type->ID;
+					threatHouseID = pBld->Owner->Type->ID;
 					threatFound = true;
 				}
 			}
@@ -271,11 +387,16 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 		{
 			if (pFoot && pFoot->IsAlive && !pFoot->InLimbo && pFoot->Owner != owner && !owner->IsAlliedWith(pFoot->Owner))
 			{
+				// Ignore neutral units unless they have weapons (e.g. avoid triggering on cows/ambient animals)
+				if (pFoot->Owner->IsNeutral() && !HasWeapons(pFoot))
+					continue;
+
 				double distSq = cell.DistanceFromSquared(pFoot->GetMapCoords());
 				if (distSq < nearestThreatDistSq)
 				{
 					nearestThreatDistSq = distSq;
-					threatCoords = pFoot->GetMapCoords();
+					threatCoords = pFoot->GetMapCoords();				threatID = pFoot->GetTechnoType()->ID;
+					threatHouseID = pFoot->Owner->Type->ID;
 					threatFound = true;
 				}
 			}
@@ -287,8 +408,9 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 			houseExt->FrontlineThreatBuildingCoords = cell;
 			houseExt->FrontlineThreatActiveFrames = Unsorted::CurrentFrame + 1800; // 2 minutes active
 			houseExt->FrontlineThreatNeedsDefenses = 2; // Request 2 local defenses
-			Debug::Log("AdvAI Crawler: Placed building %s at (%d,%d) near enemy at (%d,%d). Local threat detected! Requesting 2 defenses.\n",
-				pBuilding->Type->ID, cell.X, cell.Y, threatCoords.X, threatCoords.Y);
+			Debug::Log("AdvAI Crawler: Placed building %s at (%d,%d) near enemy at (%d,%d). Local threat detected! Threat: %s (House: %s). Requesting 2 defenses.\n",
+				pBuilding->Type->ID, cell.X, cell.Y, threatCoords.X, threatCoords.Y,
+				threatID ? threatID : "???", threatHouseID ? threatHouseID : "???");
 		}
 
 		// If we placed a base defense and a threat is active, decrement the threat defense requirement
@@ -315,7 +437,7 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 			if (houseExt->NextExpansionPointLocation.X != 0 && houseExt->NextExpansionPointLocation.Y != 0)
 			{
 				const double distToTarget = cell.DistanceFrom(houseExt->NextExpansionPointLocation);
-				if (houseExt->ShouldBuildRefinery || distToTarget < 13.0)
+				if (houseExt->ShouldBuildRefinery || distToTarget < 22.0)
 				{
 					const auto buildingExt = ExtMap.Find(pBuilding);
 					buildingExt->AssignedExpansionPoint = houseExt->NextExpansionPointLocation;
@@ -381,7 +503,7 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 			}
 			else
 			{
-				if (distToTarget < 20.0)
+				if (distToTarget < 12.0)
 				{
 					const CellStruct buildingCell = GeneralUtils::CellFromCoordinates(pBuilding->GetCenterCoords());
 					bool foundTiberium = false;
@@ -1181,33 +1303,37 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 					// Fallback: no ConYard nor factories yet — reward proximity to the base center
 					const CellStruct center = pBuilding->Owner->Base_Center();
 					value += static_cast<int>(cell.DistanceFrom(center) * 80);
-				}
-
-				// --- Dispersion penalty: avoid clustering with other buildings of the same radius type ---
+				}				// --- Dispersion penalty: avoid clustering with other buildings of the same radius type ---
 				bool tooCloseToSameType = false;
 				double closestSameTypeDist = 999.0;
 				for (const auto pOtherBuilding : BuildingClass::Array)
 				{
 					if (pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding->Owner == pBuilding->Owner && pOtherBuilding != pBuilding)
 					{
-						if (GetSupportRadiusType(pOtherBuilding->Type) == supportRadiusType)
+						if (GetSupportRadiusType(pOtherBuilding->Type) == supportRadiusType || _stricmp(GetGroupAsID(pOtherBuilding->Type), GetGroupAsID(pBuilding->Type)) == 0)
 						{
 							double dist = cell.DistanceFrom(pOtherBuilding->GetMapCoords());
 							if (dist < closestSameTypeDist)
 								closestSameTypeDist = dist;
-							if (dist < 3.0)
+
+							const int otherRadius = GetSupportRadius(pOtherBuilding->Type);
+							const int otherSeparation = otherRadius > 1 ? static_cast<int>(otherRadius * 1.8) : 3;
+							if (dist < otherSeparation)
 								tooCloseToSameType = true;
 						}
 					}
 				}
 
+				const int buildingRadius = GetSupportRadius(pBuilding->Type);
+				const int targetSeparation = buildingRadius > 1 ? static_cast<int>(buildingRadius * 1.8) : 8;
+
 				if (tooCloseToSameType)
 				{
-					value += 20000;
+					value += 500000;
 				}
-				else if (closestSameTypeDist < 8.0)
+				else if (closestSameTypeDist < targetSeparation)
 				{
-					value += static_cast<int>((8.0 - closestSameTypeDist) * 1500);
+					value += static_cast<int>((targetSeparation - closestSameTypeDist) * 1500);
 				}
 			}
 
@@ -1274,9 +1400,59 @@ int inline BuildingExt::Modify_Rating_By_Allied_Building_Proximity(CellStruct ce
 
 	const double closest_distance = std::sqrt(closest_distance_sq);
 
+	int penalty = 0;
+	const HouseClass* pOwner = pBuilding->Owner;
+	if (pOwner != nullptr)
+	{
+		const auto houseExt = HouseExt::ExtMap.Find(pOwner);
+		if (houseExt != nullptr && houseExt->PrimaryTechTreeType != nullptr && houseExt->PrimaryTechTreeType->IsNavalMode)
+		{
+			if (pBuilding->Type->Naval)
+			{
+				for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
+				{
+					const BuildingClass* otherBuilding = ExtData::OurBuildings[i];
+					if (otherBuilding->Type->Naval)
+					{
+						CellStruct other_center_cell = GeneralUtils::CellFromCoordinates(otherBuilding->GetCenterCoords());
+						const double dist = centerCell.DistanceFrom(other_center_cell);
+						if (dist < 5.0)
+						{
+							penalty = 500000;
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (pBuilding->Type->IsBaseDefense)
+	{
+		for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
+		{
+			const BuildingClass* otherBuilding = ExtData::OurBuildings[i];
+			if (otherBuilding->Type->IsBaseDefense)
+			{
+				CellStruct other_center_cell = GeneralUtils::CellFromCoordinates(otherBuilding->GetCenterCoords());
+				const double dist = centerCell.DistanceFrom(other_center_cell);
+
+				double size1 = (static_cast<double>(pBuilding->Type->GetFoundationWidth()) + static_cast<double>(pBuilding->Type->GetFoundationHeight(false))) / 2.0;
+				double size2 = (static_cast<double>(otherBuilding->Type->GetFoundationWidth()) + static_cast<double>(otherBuilding->Type->GetFoundationHeight(false))) / 2.0;
+				double minAllowedDist = (size1 + size2) / 2.0 + 0.5;
+
+				if (dist < minAllowedDist)
+				{
+					penalty = 500000;
+					break;
+				}
+			}
+		}
+	}
+
 	// The closer the building is to an existing building, the worse the placement position is.
 	// In other words, being closer INCREASES the value (as lower is better).
-	return value + (1000 - static_cast<int>(closest_distance));
+	return value + penalty + (1000 - static_cast<int>(closest_distance));
 }
 
 int BuildingExt::Refinery_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding)
@@ -1773,7 +1949,7 @@ int BuildingExt::Towards_Expansion_Placement_Cell_Value(CellStruct cell, Buildin
 		const double baseCenterDist = cell.DistanceFrom(pOwner->Base_Center());
 		const double conyardDist = cell.DistanceFrom(conyardCell);
 		const double balancedDist = (baseCenterDist + conyardDist) / 2.0;
-		return SHRT_MAX - static_cast<int>(balancedDist);
+		return static_cast<int>(balancedDist);
 	}
 
 	HouseClass* pEnemy = nullptr;
@@ -1801,6 +1977,10 @@ int BuildingExt::Towards_Expansion_Placement_Cell_Value(CellStruct cell, Buildin
 CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass* pOwner, BuildingTypeClass* pBuildingType, BuildingClass* pBuilding)
 {
 	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
+	Debug::Log("AdvAI ExpansionPlacement: House %d: Evaluating placement for %s. Target: (%d,%d). ShouldBuildRefinery: %s\n",
+		pOwner->ArrayIndex, pBuildingType->ID,
+		houseExt->NextExpansionPointLocation.X, houseExt->NextExpansionPointLocation.Y,
+		houseExt->ShouldBuildRefinery ? "YES" : "NO");
 
 	const int buildingW = pBuildingType->GetFoundationWidth();
 	const int buildingH = pBuildingType->GetFoundationHeight(false);
@@ -1962,6 +2142,12 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 			}
 		}
 
+		if (bestCell.X <= 0 && bestCell.Y <= 0)
+		{
+			Debug::Log("AdvAI ExpansionPlacement: House %d: No valid buildable cell found for %s near any anchor building towards (%d,%d)\n",
+				pOwner->ArrayIndex, pBuildingType->ID, expansionTarget.X, expansionTarget.Y);
+		}
+
 		if (bestCell.X > 0 || bestCell.Y > 0)
 		{
 			// Check if this new cell gets us closer to the expansion point than
@@ -1972,14 +2158,34 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 				double nearestExistingDistSq = std::numeric_limits<double>::max();
 				for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
 				{
-					const double dSq = expansionTarget.DistanceFromSquared(ExtData::OurBuildings[i]->GetMapCoords());
-					if (dSq < nearestExistingDistSq)
-						nearestExistingDistSq = dSq;
+					const auto pBld = ExtData::OurBuildings[i];
+					if (pBld && IsAIBaseNormal(pBld->Type))
+					{
+						const double dSq = expansionTarget.DistanceFromSquared(pBld->GetMapCoords());
+						if (dSq < nearestExistingDistSq)
+							nearestExistingDistSq = dSq;
+					}
 				}
 
 				const double bestDistSq = bestDist * bestDist;
-				if (bestDistSq >= nearestExistingDistSq || nearestExistingDistSq < 144.0)
-					houseExt->ShouldBuildRefinery = true;
+				if (bestDist < 22.0)
+				{
+					if (bestDistSq >= nearestExistingDistSq || nearestExistingDistSq < 64.0)
+					{
+						houseExt->ShouldBuildRefinery = true;
+						Debug::Log("AdvAI: House %d: Switched ShouldBuildRefinery = YES. BestDist: %.1f, NearestExistingDist: %.1f\n",
+							pOwner->ArrayIndex, bestDist, sqrt(nearestExistingDistSq));
+					}
+				}
+				else
+				{
+					if (bestDistSq >= nearestExistingDistSq)
+					{
+						Debug::Log("AdvAI: House %d crawler cannot get closer than existing buildings (Best: %.1f, Existing: %.1f). Blocked halfway! Aborting placement.\n",
+							pOwner->ArrayIndex, bestDist, sqrt(nearestExistingDistSq));
+						return CellStruct::Empty;
+					}
+				}
 			}
 
 			if (pBuilding)
@@ -2249,6 +2455,11 @@ CellStruct BuildingExt::Get_Best_Defense_Placement_Position(BuildingClass* pBuil
 	const int adjacency = pBuilding->Type->Adjacent;
 	const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(false), pBuilding->Type);
 
+	if (houseExt->ShouldPlaceDefenseAtBlockedEdge)
+	{
+		return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Towards_Expansion_Placement_Cell_Value);
+	}
+
 	int paranoiaDuration = TICKS_PER_MINUTE + (30 * TICKS_PER_SECOND);
 
 	CellStruct targetBuilding(0, 0);
@@ -2429,6 +2640,11 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 		return Get_Best_Refinery_Placement_Position(pBuilding);
 	}
 
+	if (GetSupportRadiusType(pBuilding->Type) != SupportRadiusType::None || TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
+	{
+		return Get_Best_Support_Placement_Position(pBuilding);
+	}
+
 	if (BuildingTypeExt::HasDisableableSuperWeapons(pBuilding->Type))
 	{
 		return Get_Best_SuperWeapon_Building_Placement_Position(pBuilding);
@@ -2577,6 +2793,54 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 
 	const CellStruct placementCell = Get_Best_Placement_Position(pBuilding);
 
+	const auto houseExtLog = HouseExt::ExtMap.Find(pBuilding->Owner);
+	if (houseExtLog != nullptr)
+	{
+		const CellStruct expansionPoint = houseExtLog->NextExpansionPointLocation;
+		if (expansionPoint.X <= 0 || expansionPoint.Y <= 0)
+		{
+			Debug::Log("[Phobos] AdvAI Placement: House %d is PASSIVE (no active expansion, placing %s at (%d,%d) near main base).\n",
+				pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, placementCell.X, placementCell.Y);
+		}
+		else
+		{
+			bool isCombat = false;
+			if (pBuilding->Owner->EnemyHouseIndex >= 0 && pBuilding->Owner->EnemyHouseIndex < HouseClass::Array.Count)
+			{
+				const HouseClass* pEnemy = HouseClass::Array[pBuilding->Owner->EnemyHouseIndex];
+				if (pEnemy != nullptr)
+				{
+					if (expansionPoint.DistanceFromSquared(pEnemy->Base_Center()) < 100.0)
+					{
+						isCombat = true;
+					}
+					else
+					{
+						for (const auto pBld : pEnemy->Buildings)
+						{
+							if (pBld && pBld->IsAlive && !pBld->InLimbo && expansionPoint.DistanceFromSquared(pBld->GetMapCoords()) < 100.0)
+							{
+								isCombat = true;
+								break;
+							}
+						}
+					}
+				}
+			}
+
+			if (isCombat)
+			{
+				Debug::Log("[Phobos] AdvAI Placement: House %d is in COMBAT CRAWLING mode towards target (%d,%d) (placing %s at (%d,%d)).\n",
+					pBuilding->Owner->ArrayIndex, expansionPoint.X, expansionPoint.Y, pBuilding->Type->ID, placementCell.X, placementCell.Y);
+			}
+			else
+			{
+				Debug::Log("[Phobos] AdvAI Placement: House %d is in RESOURCE EXPANSION mode towards Tiberium at (%d,%d) (placing %s at (%d,%d)).\n",
+					pBuilding->Owner->ArrayIndex, expansionPoint.X, expansionPoint.Y, pBuilding->Type->ID, placementCell.X, placementCell.Y);
+			}
+		}
+	}
+
 	// If we couldn't find any place for the building, refund it.
 	if (placementCell.X <= 0 || placementCell.Y <= 0)
 	{
@@ -2600,4 +2864,274 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 	}
 
 	return result;
+}
+
+static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeClass* pBuildingType, BuildingClass* pBuilding)
+{
+	if (pHouse == nullptr || pBuildingType == nullptr)
+		return CellStruct::Empty;
+
+	std::vector<BuildingClass*> existingSupports;
+	std::vector<BuildingClass*> baseBuildings;
+
+	for (const auto pOtherBuilding : pHouse->Buildings)
+	{
+		if (pOtherBuilding && pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo)
+		{
+			if (IsSameSupportNetwork(pOtherBuilding->Type, pBuildingType))
+			{
+				existingSupports.push_back(pOtherBuilding);
+			}
+
+			const bool isBaseBuilding = pOtherBuilding->Type->ConstructionYard ||
+				pOtherBuilding->Type->Factory != AbstractType::None ||
+				pOtherBuilding->Type->Refinery ||
+				pOtherBuilding->Type->Radar ||
+				pOtherBuilding->Type->Helipad ||
+				(pOtherBuilding->Type->TechLevel > 0 && !pOtherBuilding->Type->IsBaseDefense && GetSupportRadiusType(pOtherBuilding->Type) == SupportRadiusType::None);
+
+			if (isBaseBuilding)
+			{
+				baseBuildings.push_back(pOtherBuilding);
+			}
+		}
+	}
+
+	const SupportRadiusType supportType = GetSupportRadiusType(pBuildingType);
+	const int radius = GetSupportRadius(pBuildingType);
+	int coverageDistance = radius > 1 ? radius - 1 : 3;
+	int targetSeparation = 8;
+	if (supportType == SupportRadiusType::EMPulseCannon)
+	{
+		coverageDistance = radius > 1 ? radius - 1 : 29;
+		targetSeparation = radius > 1 ? radius : 30;
+	}
+	else if (radius > 1)
+	{
+		targetSeparation = static_cast<int>(radius * 1.8);
+	}
+
+	std::vector<BuildingClass*> pivots;
+
+	if (supportType == SupportRadiusType::None)
+	{
+		// Non-radius support buildings: pivots are all base buildings,
+		// sorted with ConYard and Factories prioritized.
+		pivots = baseBuildings;
+		std::stable_sort(pivots.begin(), pivots.end(), [](const BuildingClass* a, const BuildingClass* b) {
+			if (a->Type->ConstructionYard != b->Type->ConstructionYard)
+				return a->Type->ConstructionYard;
+			if ((a->Type->Factory != AbstractType::None) != (b->Type->Factory != AbstractType::None))
+				return a->Type->Factory != AbstractType::None;
+			return false;
+		});
+	}
+	else
+	{
+		// Radius-based support buildings: identify uncovered base buildings.
+		std::vector<BuildingClass*> uncoveredBuildings;
+		for (const auto pBaseBld : baseBuildings)
+		{
+			bool covered = false;
+			for (const auto pExist : existingSupports)
+			{
+				if (pExist != pBuilding && pBaseBld->GetMapCoords().DistanceFrom(pExist->GetMapCoords()) <= coverageDistance)
+				{
+					covered = true;
+					break;
+				}
+			}
+
+			if (!covered)
+			{
+				uncoveredBuildings.push_back(pBaseBld);
+			}
+		}
+
+		if (uncoveredBuildings.empty())
+		{
+			// All base structures are covered!
+			return CellStruct::Empty;
+		}
+
+		// Sort uncovered buildings by distance to ConYard or base center
+		CellStruct coreCell;
+		if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
+			coreCell = GeneralUtils::CellFromCoordinates(pHouse->ConYards[0]->GetCenterCoords());
+		else
+			coreCell = pHouse->Base_Center();
+
+		pivots = uncoveredBuildings;
+		std::sort(pivots.begin(), pivots.end(), [coreCell](const BuildingClass* a, const BuildingClass* b) {
+			return a->GetMapCoords().DistanceFromSquared(coreCell) < b->GetMapCoords().DistanceFromSquared(coreCell);
+		});
+	}
+
+	const int buildingW = pBuildingType->GetFoundationWidth();
+	const int buildingH = pBuildingType->GetFoundationHeight(false);
+	const int adjRange = pBuildingType->Adjacent + 1;
+
+	// Loop through pivots to find a valid adjacent placement cell
+	for (const auto pPivot : pivots)
+	{
+		const CellStruct pivotCell = pPivot->GetMapCoords();
+		const int pivotW = pPivot->Type->GetFoundationWidth();
+		const int pivotH = pPivot->Type->GetFoundationHeight(false);
+
+		const int xMin = pivotCell.X - adjRange - buildingW + 1;
+		const int xMax = pivotCell.X + pivotW + adjRange - 1;
+		const int yMin = pivotCell.Y - adjRange - buildingH + 1;
+		const int yMax = pivotCell.Y + pivotH + adjRange - 1;
+
+		CellStruct bestCellForPivot = CellStruct::Empty;
+		int bestRatingForPivot = std::numeric_limits<int>::max();
+
+		for (int y = yMin; y <= yMax; y++)
+		{
+			for (int x = xMin; x <= xMax; x++)
+			{
+				CellStruct cell(static_cast<short>(x), static_cast<short>(y));
+
+				if (!MapClass::Instance.CoordinatesLegal(cell))
+					continue;
+
+				if (!pBuildingType->CanPlaceHere(&cell, pHouse))
+					continue;
+
+				if (BuildingExt::OverlapsTiberiumTreeZone(cell, pBuildingType))
+					continue;
+
+				// Congestion check with other base structures
+				bool cellIsCongested = false;
+				int touchingCount = 0;
+				const int b1X = cell.X;
+				const int b1Y = cell.Y;
+				const int b1W = buildingW;
+				const int b1H = buildingH;
+
+				for (const auto pOtherBuilding : pHouse->Buildings)
+				{
+					if (pOtherBuilding && pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding != pBuilding)
+					{
+						if (pOtherBuilding->Type->InvisibleInGame)
+							continue;
+
+						const int b2X = pOtherBuilding->GetMapCoords().X;
+						const int b2Y = pOtherBuilding->GetMapCoords().Y;
+						const int b2W = pOtherBuilding->Type->GetFoundationWidth();
+						const int b2H = pOtherBuilding->Type->GetFoundationHeight(false);
+
+						// Fast distance check to skip far-away buildings
+						const double dx = static_cast<double>(b1X - b2X);
+						const double dy = static_cast<double>(b1Y - b2Y);
+						if ((dx * dx + dy * dy) > 64.0)
+							continue;
+
+						if ((b1X - 1 <= b2X + b2W - 1) && (b1X + b1W >= b2X) &&
+							(b1Y - 1 <= b2Y + b2H - 1) && (b1Y + b1H >= b2Y))
+						{
+							if (pBuildingType->IsBaseDefense && pOtherBuilding->Type->IsBaseDefense)
+							{
+								cellIsCongested = true;
+								break;
+							}
+
+							if (pOtherBuilding->Type == pBuildingType)
+							{
+								cellIsCongested = true;
+								break;
+							}
+							touchingCount++;
+							if (touchingCount >= 2)
+							{
+								cellIsCongested = true;
+								break;
+							}
+						}
+					}
+				}
+
+				if (cellIsCongested)
+					continue;
+
+				// Unsafe placement zone check
+				const auto houseExt = HouseExt::ExtMap.Find(pHouse);
+				bool isUnsafe = false;
+				for (auto it = houseExt->UnsafePlacementZones.begin(); it != houseExt->UnsafePlacementZones.end(); )
+				{
+					if (Unsorted::CurrentFrame > it->ExpiryFrame)
+						it = houseExt->UnsafePlacementZones.erase(it);
+					else
+					{
+						if (cell.DistanceFromSquared(it->Coords) < 100.0)
+						{
+							isUnsafe = true;
+							break;
+						}
+						++it;
+					}
+				}
+				if (isUnsafe)
+					continue;
+
+				// Separation rule check (radius-based support buildings only)
+				if (supportType != SupportRadiusType::None)
+				{
+					bool tooCloseToSameType = false;
+					for (const auto pExist : existingSupports)
+					{
+						if (pExist != pBuilding && cell.DistanceFrom(pExist->GetMapCoords()) < targetSeparation)
+						{
+							tooCloseToSameType = true;
+							break;
+						}
+					}
+					if (tooCloseToSameType)
+						continue;
+				}
+
+				// Rating: closer to the pivot building
+				int rating = static_cast<int>(cell.DistanceFrom(pivotCell) * 10);
+
+				if (rating < bestRatingForPivot)
+				{
+					bestRatingForPivot = rating;
+					bestCellForPivot = cell;
+				}
+			}
+		}
+
+		if (bestCellForPivot.X > 0 && bestCellForPivot.Y > 0)
+		{
+			return bestCellForPivot;
+		}
+	}
+
+	return CellStruct::Empty;
+}
+
+bool BuildingExt::AdvAI_Is_Support_Placement_Feasible(HouseClass* pHouse, BuildingTypeClass* pBuildingType)
+{
+	CellStruct cell = Find_Best_Support_Placement(pHouse, pBuildingType, nullptr);
+	return cell.X > 0 && cell.Y > 0;
+}
+
+CellStruct BuildingExt::Get_Best_Support_Placement_Position(BuildingClass* pBuilding)
+{
+	if (pBuilding == nullptr || pBuilding->Owner == nullptr)
+		return CellStruct::Empty;
+	return Find_Best_Support_Placement(pBuilding->Owner, pBuilding->Type, pBuilding);
+}
+
+
+static const char* GetGroupAsID(BuildingTypeClass* pType)
+{
+	if (const auto pExt = TechnoTypeExt::ExtMap.Find(pType))
+	{
+		if (pExt->GroupAs.data() && pExt->GroupAs.data()[0] != '\0' && _stricmp(pExt->GroupAs.data(), "none") != 0)
+		{
+			return pExt->GroupAs.data();
+		}
+	}
+	return pType->ID;
 }

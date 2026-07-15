@@ -1,6 +1,9 @@
 #include "Body.h"
+#include <Utilities/GeneralUtils.h>
 #include <Ext/BuildingType/Body.h>
 #include <Ext/Building/Body.h>
+#include <Ext/SWType/Body.h>
+#include <Ext/TechnoType/Body.h>
 
 #include <AircraftClass.h>
 #include <FactoryClass.h>
@@ -9,6 +12,7 @@
 #include <OverlayClass.h>
 #include <TerrainClass.h>
 #include <CellClass.h>
+#include <AStarClass.h>
 
 #define TICKS_PER_SECOND    15
 #define TICKS_PER_MINUTE    (TICKS_PER_SECOND * 60)
@@ -19,6 +23,178 @@ bool HouseExt::BaseDefensesInitialized;
 
 static int GetRealPowerDrain(const HouseClass* pHouse);
 static bool IsBuildingTypeQueued(HouseClass* pHouse, TechTreeTypeClass::BuildType buildType);
+
+enum class SupportRadiusType { None, Cloak, Gap, Inhibitor, RadarJam, EMPulseCannon };
+
+static SupportRadiusType GetSupportRadiusType(const BuildingTypeClass* pType)
+{
+	if (pType->CloakGenerator && pType->CloakRadiusInCells > 0)
+		return SupportRadiusType::Cloak;
+
+	const auto pBldExt = BuildingTypeExt::ExtMap.Find(pType);
+	if (pBldExt->GapGenerator && (pBldExt->GapRadiusInCells != 0 || pBldExt->SuperGapRadiusInCells != 0))
+		return SupportRadiusType::Gap;
+
+	const auto pTechnoTypeExt = TechnoTypeExt::ExtMap.Find(pType);
+	if (pTechnoTypeExt->InhibitorRange.isset() && pTechnoTypeExt->InhibitorRange.Get() > 0)
+		return SupportRadiusType::Inhibitor;
+
+	if (pTechnoTypeExt->RadarJamRadius.Get() > 0)
+		return SupportRadiusType::RadarJam;
+
+	if (pType->EMPulseCannon)
+		return SupportRadiusType::EMPulseCannon;
+
+	return SupportRadiusType::None;
+}
+
+static bool IsSameSupportNetwork(const BuildingTypeClass* pTypeA, const BuildingTypeClass* pTypeB)
+{
+	const SupportRadiusType typeA = GetSupportRadiusType(pTypeA);
+	const SupportRadiusType typeB = GetSupportRadiusType(pTypeB);
+
+	if (typeA == SupportRadiusType::None || typeB == SupportRadiusType::None)
+		return false;
+
+	if (typeA != typeB)
+		return false;
+
+	const char* groupA = TechnoTypeExt::GetSelectionGroupID(const_cast<BuildingTypeClass*>(pTypeA));
+	const char* groupB = TechnoTypeExt::GetSelectionGroupID(const_cast<BuildingTypeClass*>(pTypeB));
+
+	return _stricmp(groupA, groupB) == 0;
+}
+
+static int GetSupportRadius(const BuildingTypeClass* pType)
+{
+	int minRadius = 999;
+
+	if (pType->CloakGenerator && pType->CloakRadiusInCells > 0 && pType->CloakRadiusInCells < minRadius)
+		minRadius = pType->CloakRadiusInCells;
+
+	const auto pBldExt = BuildingTypeExt::ExtMap.Find(pType);
+	if (pBldExt->GapGenerator)
+	{
+		if (pBldExt->GapRadiusInCells > 0 && pBldExt->GapRadiusInCells < minRadius)
+			minRadius = pBldExt->GapRadiusInCells;
+
+		if (pBldExt->SuperGapRadiusInCells > 0 && pBldExt->SuperGapRadiusInCells < minRadius)
+			minRadius = pBldExt->SuperGapRadiusInCells;
+	}
+
+	const auto pExt = TechnoTypeExt::ExtMap.Find(pType);
+	if (pExt->InhibitorRange.isset() && pExt->InhibitorRange.Get() > 0 && pExt->InhibitorRange.Get() < minRadius)
+		minRadius = pExt->InhibitorRange.Get();
+
+	if (pExt->RadarJamRadius.Get() > 0 && pExt->RadarJamRadius.Get() < minRadius)
+		minRadius = pExt->RadarJamRadius.Get();
+
+	if (pType->EMPulseCannon)
+	{
+		std::vector<int> swIndices;
+		if (pType->SuperWeapon != -1)
+			swIndices.push_back(pType->SuperWeapon);
+		if (pType->SuperWeapon2 != -1)
+			swIndices.push_back(pType->SuperWeapon2);
+
+		const auto pBldTypeExt = BuildingTypeExt::ExtMap.Find(pType);
+		for (const auto swIdx : pBldTypeExt->SuperWeapons)
+		{
+			swIndices.push_back(swIdx);
+		}
+
+		for (const auto swIdx : swIndices)
+		{
+			if (swIdx >= 0 && swIdx < SuperWeaponTypeClass::Array.Count)
+			{
+				const auto pSW = SuperWeaponTypeClass::Array[swIdx];
+				const auto pSWExt = SWTypeExt::ExtMap.Find(pSW);
+
+				double swRadius = -1.0;
+				if (pSWExt->SW_RangeMaximum.Get() > 0.0)
+				{
+					swRadius = pSWExt->SW_RangeMaximum.Get();
+				}
+				else if (pSWExt->SW_RangeMinimum.Get() > 0.0)
+				{
+					swRadius = pSWExt->SW_RangeMinimum.Get();
+				}
+				else if (const auto pWeapon = pType->GetWeapon(0u, false).WeaponType)
+				{
+					swRadius = pWeapon->Range / (double)Unsorted::LeptonsPerCell;
+				}
+
+				if (swRadius > 0.0 && swRadius < minRadius)
+				{
+					minRadius = static_cast<int>(swRadius);
+				}
+			}
+		}
+	}
+
+	return minRadius == 999 ? 0 : minRadius;
+}
+
+static const char* GetGroupAsID(BuildingTypeClass* pType)
+{
+	if (const auto pExt = TechnoTypeExt::ExtMap.Find(pType))
+	{
+		if (pExt->GroupAs.data() && pExt->GroupAs.data()[0] != '\0' && _stricmp(pExt->GroupAs.data(), "none") != 0)
+		{
+			return pExt->GroupAs.data();
+		}
+	}
+	return pType->ID;
+}
+
+static int CountBuildingOfGroup(HouseClass* pHouse, BuildingTypeClass* pType)
+{
+	const char* groupID = GetGroupAsID(pType);
+	int count = 0;
+	for (const auto pBuilding : pHouse->Buildings)
+	{
+		if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo)
+		{
+			if (_stricmp(GetGroupAsID(pBuilding->Type), groupID) == 0)
+			{
+				count++;
+			}
+		}
+	}
+	return count;
+}
+
+static const BuildingTypeClass* GetBasicDefense(HouseClass* pHouse, TechTreeTypeClass* pTechTree)
+{
+	if (pTechTree == nullptr || pHouse == nullptr)
+		return nullptr;
+
+	auto canBuildFunction = [pHouse](BuildingTypeClass* pType)
+	{
+		return HouseExt::AdvAI_Can_Build_Building(pHouse, pType, true, true);
+	};
+
+	for (const auto pType : pTechTree->BuildDefense)
+	{
+		if (canBuildFunction(pType))
+		{
+			if (pType->Cost <= 1000)
+			{
+				return pType;
+			}
+		}
+	}
+
+	for (const auto pType : pTechTree->BuildDefense)
+	{
+		if (canBuildFunction(pType))
+		{
+			return pType;
+		}
+	}
+
+	return nullptr;
+}
 
 static bool IsBuildingTypeQueued(HouseClass* pHouse, TechTreeTypeClass::BuildType buildType)
 {
@@ -91,6 +267,28 @@ void HouseExt::InitializeBaseDefenses()
 ///	Credits to Rampastring
 ///
 
+static int GetCellLandZone(const CellStruct& cell)
+{
+	int zone = MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, false);
+	if (zone > 0)
+		return zone;
+
+	// If the cell itself is impassable (e.g. because it contains the tree itself, or is blocked by an obstacle), check adjacent cells
+	static const int dx[] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+	static const int dy[] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+	for (int i = 0; i < 8; ++i)
+	{
+		CellStruct neighbor(static_cast<short>(cell.X + dx[i]), static_cast<short>(cell.Y + dy[i]));
+		if (MapClass::Instance.CoordinatesLegal(neighbor))
+		{
+			int nZone = MapClass::Instance.GetMovementZoneType(neighbor, MovementZone::Normal, false);
+			if (nZone > 0)
+				return nZone;
+		}
+	}
+	return 0;
+}
+
 bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 {
 	const auto ext = ExtMap.Find(pHouse);
@@ -159,7 +357,9 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 						if (pOurBld && pOurBld->IsAlive && !pOurBld->InLimbo)
 						{
 							double distSq = pOurBld->GetMapCoords().DistanceFromSquared(pBld->GetMapCoords());
-							if (distSq < nearestEnemyDistSq && pOurBld->IsInSameZoneAs(pBld))
+
+
+							if (distSq < nearestEnemyDistSq && GeneralUtils::AreZonesConnected(pOurBld->GetMapCoords(), pBld->GetMapCoords()))
 							{
 								nearestEnemyDistSq = distSq;
 								enemyTarget = pBld->GetMapCoords();
@@ -206,6 +406,13 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 						bestEnemyTarget = center;
 					}
 				}
+
+				Debug::Log("AdvAI Combat Crawl Evaluation: House %d: refineryCount=%d, enemyIndex=%d, nearestEnemyDist=%.1f (Limit=%.1f), hasFactories=%s, hasTarget=%s\n",
+					pHouse->ArrayIndex, refineryCount, pEnemy->ArrayIndex,
+					(nearestEnemyDistSq != std::numeric_limits<double>::max() ? sqrt(nearestEnemyDistSq) : -1.0),
+					maxDist,
+					(factoryCount > 0 && warFactoryCount > 0 ? "YES" : "NO"),
+					(bestEnemyTarget.X > 0 ? "YES" : "NO"));
 
 				if (bestEnemyTarget.X > 0 && bestEnemyTarget.Y > 0)
 				{
@@ -378,14 +585,17 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 		// Find the distance from our nearest owned structure to this candidate cell.
 		double distanceFromNearestOwnedStructure = std::numeric_limits<double>::max();
 		BuildingClass* pNearestBuilding = nullptr;
+		int failedZonesCount = 0;
+		int lastZoneBld = -1;
+		int lastZoneCand = -1;
 
 		for (const auto pBuilding : BuildingClass::Array)
 		{
 			if (!pBuilding->IsAlive || pBuilding->InLimbo || pBuilding->Owner != pHouse || pBuilding->Type->Naval)
 				continue;
 
-			// Ensure candidate is in the same land zone to prevent crawling across water/cliffs
-			if (!pBuilding->IsInSameZoneAsCoords(CellClass::Cell2Coord(candidateCell)))
+			// Avoid targeting resource nodes on other islands
+			if (!GeneralUtils::AreZonesConnected(pBuilding->GetMapCoords(), candidateCell))
 				continue;
 
 			const double dist = pBuilding->GetMapCoords().DistanceFrom(candidateCell);
@@ -472,13 +682,16 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 					// Find the nearest structure of ours to crawl from
 					double minStructureDist = std::numeric_limits<double>::max();
 					const BuildingClass* pNearestStructure = nullptr;
+					int failedZonesCount = 0;
+					int lastZoneBld = -1;
+					int lastZoneTree = -1;
 
 					for (const auto pBld : pHouse->Buildings)
 					{
 						if (pBld && pBld->IsAlive && !pBld->InLimbo)
 						{
-							// Ensure candidate is in the same land zone to prevent crawling across water/cliffs
-							if (!pBld->IsInSameZoneAsCoords(CellClass::Cell2Coord(treeCoords)))
+							// Avoid targeting resource nodes on other islands
+							if (!GeneralUtils::AreZonesConnected(pBld->GetMapCoords(), treeCoords))
 								continue;
 
 							const double dist = treeCoords.DistanceFrom(pBld->GetMapCoords());
@@ -488,6 +701,18 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 								pNearestStructure = pBld;
 							}
 						}
+					}
+
+					if (pNearestStructure == nullptr)
+					{
+						Debug::Log("AdvAI ExpansionSearch Safeguard: House %d: Tree %s at (%d,%d) -> Unreachable (no buildings found)\n",
+							pHouse->ArrayIndex, pTerrain->Type->ID, treeCoords.X, treeCoords.Y);
+					}
+					else
+					{
+						Debug::Log("AdvAI ExpansionSearch Safeguard: House %d: Tree %s at (%d,%d) -> Reachable. Nearest structure: %s at dist %.1f cells\n",
+							pHouse->ArrayIndex, pTerrain->Type->ID, treeCoords.X, treeCoords.Y,
+							pNearestStructure->Type->ID, minStructureDist);
 					}
 
 					if (minStructureDist < nearestDistance)
@@ -530,7 +755,9 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 						if (pOurBld && pOurBld->IsAlive && !pOurBld->InLimbo)
 						{
 							double distSq = pOurBld->GetMapCoords().DistanceFromSquared(pBld->GetMapCoords());
-							if (distSq < nearestEnemyDistSq && pOurBld->IsInSameZoneAs(pBld))
+
+
+							if (distSq < nearestEnemyDistSq && GeneralUtils::AreZonesConnected(pOurBld->GetMapCoords(), pBld->GetMapCoords()))
 							{
 								nearestEnemyDistSq = distSq;
 								enemyTarget = pBld->GetMapCoords();
@@ -539,6 +766,12 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 					}
 				}
 			}
+
+			Debug::Log("AdvAI: House %d: All Tiberium fields taken. Checking combat crawling. nearestEnemyDist=%.1f (Limit=%.1f), hasTarget=%s\n",
+				pHouse->ArrayIndex,
+				(nearestEnemyDistSq != std::numeric_limits<double>::max() ? sqrt(nearestEnemyDistSq) : -1.0),
+				maxDist,
+				(enemyTarget.X > 0 ? "YES" : "NO"));
 
 			// If the enemy base is within crawling range
 			if (nearestEnemyDistSq <= maxDistSq && enemyTarget.X > 0 && enemyTarget.Y > 0)
@@ -942,6 +1175,71 @@ int HouseExt::AdvAI_Calculate_Enemy_Aircraft_Value(HouseClass* pHouse)
  *
  *  Author: Rampastring
  */
+
+enum class ThreatCategory { None, Infantry, Vehicle, Air };
+
+static ThreatCategory GetActiveThreatCategory(HouseClass* pHouse, CellStruct threatCenter)
+{
+	if (threatCenter.X == 0 && threatCenter.Y == 0)
+		return ThreatCategory::None;
+
+	int enemyInfantryCount = 0;
+	int enemyVehicleCount = 0;
+	int enemyAirCount = 0;
+
+	auto CheckThreat = [&](TechnoClass* pObj) {
+		if (pObj && pObj->IsAlive && !pObj->InLimbo && pObj->Owner != pHouse && !pHouse->IsAlliedWith(pObj->Owner))
+		{
+			if (pObj->GetMapCoords().DistanceFrom(threatCenter) <= 15.0)
+			{
+				const auto pType = pObj->GetTechnoType();
+				if (pType && (pType->JumpJet || pObj->WhatAmI() == AbstractType::Aircraft))
+				{
+					enemyAirCount++;
+				}
+				else if (pObj->WhatAmI() == AbstractType::Unit)
+				{
+					enemyVehicleCount++;
+				}
+				else if (pObj->WhatAmI() == AbstractType::Infantry)
+				{
+					enemyInfantryCount++;
+				}
+			}
+		}
+	};
+
+	for (const auto pInf : InfantryClass::Array)
+		CheckThreat(pInf);
+
+	for (const auto pUnit : UnitClass::Array)
+		CheckThreat(pUnit);
+
+	for (const auto pAir : AircraftClass::Array)
+		CheckThreat(pAir);
+
+	// Treat enemy structures (defenses, conyards) as armored ground threats (Vehicles)
+	for (const auto pBld : BuildingClass::Array)
+	{
+		if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner != pHouse && !pHouse->IsAlliedWith(pBld->Owner))
+		{
+			if (pBld->GetMapCoords().DistanceFrom(threatCenter) <= 15.0)
+			{
+				enemyVehicleCount++;
+			}
+		}
+	}
+
+	if (enemyAirCount > 0 && enemyAirCount >= enemyVehicleCount && enemyAirCount >= enemyInfantryCount)
+		return ThreatCategory::Air;
+	if (enemyVehicleCount > 0 && enemyVehicleCount >= enemyInfantryCount)
+		return ThreatCategory::Vehicle;
+	if (enemyInfantryCount > 0)
+		return ThreatCategory::Infantry;
+
+	return ThreatCategory::None;
+}
+
 const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 {
 	constexpr bool LogVerboseAdvAI = false;
@@ -1119,7 +1417,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 
 					if (!isCombatCrawling)
 					{
-						Debug::Log("AdvAI: House %d reached expansion point (%d,%d), but refinery is physically unbuildable here. Blacklisting target and marking expansion as done.\n",
+						Debug::Log("AdvAI: House %d reached expansion point (%d,%d), but no valid refinery placement could be found near it. Blacklisting target and marking expansion as done.\n",
 							pHouse->ArrayIndex, targetCell.X, targetCell.Y);
 						AdvAI_Add_Failed_Expansion_Point(pHouse, targetCell);
 						BuildingExt::Mark_Expansion_As_Done(pHouse);
@@ -1549,22 +1847,50 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				int maxDeficiency = 0;
 				const BuildingTypeClass* pBestDefense = nullptr;
 
-				if (antiInfDeficiency > maxDeficiency && ourAntiInfantryDefense != nullptr)
+				// Analyze the local active threat type to choose the correct counter defense
+				CellStruct threatCenter = CellStruct::Empty;
+				if (houseExt->LastAttackerCoords.X > 0 && houseExt->LastAttackerCoords.Y > 0)
 				{
-					maxDeficiency = antiInfDeficiency;
-					pBestDefense = ourAntiInfantryDefense;
+					threatCenter = houseExt->LastAttackerCoords;
+				}
+				else if (houseExt->FrontlineThreatCoords.X > 0 && houseExt->FrontlineThreatCoords.Y > 0)
+				{
+					threatCenter = houseExt->FrontlineThreatCoords;
 				}
 
-				if (antiVehicleDeficiency > maxDeficiency && ourAntiVehicleDefense != nullptr)
+				ThreatCategory threat = GetActiveThreatCategory(pHouse, threatCenter);
+				if (threat == ThreatCategory::Air && ourAntiAirDefense != nullptr)
 				{
-					maxDeficiency = antiVehicleDeficiency;
+					pBestDefense = ourAntiAirDefense;
+				}
+				else if (threat == ThreatCategory::Vehicle && ourAntiVehicleDefense != nullptr)
+				{
 					pBestDefense = ourAntiVehicleDefense;
 				}
-
-				if (antiAirDeficiency > maxDeficiency && ourAntiAirDefense != nullptr)
+				else if (threat == ThreatCategory::Infantry && ourAntiInfantryDefense != nullptr)
 				{
-					maxDeficiency = antiAirDeficiency;
-					pBestDefense = ourAntiAirDefense;
+					pBestDefense = ourAntiInfantryDefense;
+				}
+				else
+				{
+					// Fallback to deficiency calculations
+					if (antiInfDeficiency > maxDeficiency && ourAntiInfantryDefense != nullptr)
+					{
+						maxDeficiency = antiInfDeficiency;
+						pBestDefense = ourAntiInfantryDefense;
+					}
+
+					if (antiVehicleDeficiency > maxDeficiency && ourAntiVehicleDefense != nullptr)
+					{
+						maxDeficiency = antiVehicleDeficiency;
+						pBestDefense = ourAntiVehicleDefense;
+					}
+
+					if (antiAirDeficiency > maxDeficiency && ourAntiAirDefense != nullptr)
+					{
+						maxDeficiency = antiAirDeficiency;
+						pBestDefense = ourAntiAirDefense;
+					}
 				}
 
 				if (pBestDefense != nullptr)
@@ -1718,7 +2044,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			// If we have too few refineries, build enough to match the minimum.
 			// Because this is not for expanding but an emergency situation,
 			// cancel any potential expanding.
-			int minRefineryCount = RulesExt::Global()->AdvancedAIMinimumRefineryCount;
+			int minRefineryCount = RulesExt::Global()->AdvancedAI_MinimumRefineryCount;
 			if (!hasTechCenter)
 				minRefineryCount = std::min(minRefineryCount, 2);
 
@@ -1859,7 +2185,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			}
 
 			size_t optimalHelipadCount = 1;
-			if (totalCurrentDocks < 8)
+			if (totalCurrentDocks < 4)
 			{
 				optimalHelipadCount = totalHelipadsOwned + 1;
 			}
@@ -1894,6 +2220,129 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 					pHelipadToBuild->Name, totalCurrentDocks, ownedAirportBoundAircraft, optimalHelipadCount);
 
 				return pHelipadToBuild;
+			}
+		}
+
+		// BuildSupport network evaluation.
+		// 90% chance to skip (10% entry chance) to avoid starving other tech decisions.
+		const bool skipSupport = ScenarioClass::Instance->Random.RandomRanged(0, 99) < 90;
+
+		if (!skipSupport)
+		{
+			const auto canBuildSupportFunction = [pHouse](BuildingTypeClass* pType)
+			{
+				return AdvAI_Can_Build_Building(pHouse, pType, true, true);
+			};
+
+			const auto buildableSupportTypes = pPrimaryTechTree->GetBuildable(TechTreeTypeClass::BuildType::BuildSupport, canBuildSupportFunction);
+
+			if (!buildableSupportTypes.empty())
+			{
+				std::vector<BuildingTypeClass*> neededSupportCandidates;
+
+				for (const auto pSupportType : buildableSupportTypes)
+				{
+					const SupportRadiusType supportType = GetSupportRadiusType(pSupportType);
+					const int radius = GetSupportRadius(pSupportType);
+					
+					int coverageDistance = radius > 1 ? radius - 1 : 3;
+					int targetSeparation = 8;
+					if (supportType == SupportRadiusType::EMPulseCannon)
+					{
+						coverageDistance = radius > 1 ? radius - 1 : 29;
+						targetSeparation = radius > 1 ? radius : 30;
+					}
+					else if (radius > 1)
+					{
+						targetSeparation = static_cast<int>(radius * 1.8);
+					}
+
+					const int targetBuildCount = GetTargetBuildCount(const_cast<BuildingTypeClass*>(pSupportType), -1, pPrimaryTechTree);
+					const int ownedThisSpecificType = CountBuildingOfGroup(pHouse, const_cast<BuildingTypeClass*>(pSupportType));
+
+					bool respectLimit = false;
+					int limit = 0;
+					if (targetBuildCount >= 0)
+					{
+						respectLimit = true;
+						limit = targetBuildCount;
+					}
+					else if (pSupportType->BuildLimit > 0)
+					{
+						respectLimit = true;
+						limit = pSupportType->BuildLimit;
+					}
+
+					if (respectLimit && ownedThisSpecificType >= limit)
+						continue;
+
+					// Check if we are already building this specific support structure type (or an equivalent one under GroupAs)
+					if (pHouse->ProducingBuildingTypeIndex != -1)
+					{
+						BuildingTypeClass* pProducingType = BuildingTypeClass::Array[pHouse->ProducingBuildingTypeIndex];
+						if (_stricmp(GetGroupAsID(pProducingType), GetGroupAsID(pSupportType)) == 0)
+							continue;
+					}
+
+					// Check coverage: does any functional base structure lack this support coverage?
+					bool needMoreSupport = false;
+
+					if (ownedThisSpecificType == 0)
+					{
+						needMoreSupport = true;
+					}
+					else
+					{
+						for (const auto pBld : pHouse->Buildings)
+						{
+							if (pBld && pBld->IsAlive && !pBld->InLimbo)
+							{
+								const bool isBaseBuilding = pBld->Type->ConstructionYard ||
+									pBld->Type->Factory != AbstractType::None ||
+									pBld->Type->Refinery ||
+									pBld->Type->Radar ||
+									pBld->Type->Helipad ||
+									(pBld->Type->TechLevel > 0 && !pBld->Type->IsBaseDefense && GetSupportRadiusType(pBld->Type) == SupportRadiusType::None);
+
+								if (!isBaseBuilding)
+									continue;
+
+								bool covered = false;
+								for (const auto pOtherBld : pHouse->Buildings)
+								{
+									if (pOtherBld && pOtherBld->IsAlive && !pOtherBld->InLimbo &&
+										pOtherBld != pBld &&
+										IsSameSupportNetwork(pOtherBld->Type, pSupportType) &&
+										pBld->GetMapCoords().DistanceFrom(pOtherBld->GetMapCoords()) <= coverageDistance)
+									{
+										covered = true;
+										break;
+									}
+								}
+
+								if (!covered)
+								{
+									needMoreSupport = true;
+									break;
+								}
+							}
+						}
+					}
+
+					if (needMoreSupport)
+						neededSupportCandidates.push_back(pSupportType);
+				}
+
+				if (!neededSupportCandidates.empty())
+				{
+					BuildingTypeClass* pChosenSupport = neededSupportCandidates[
+						ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(neededSupportCandidates.size()) - 1)];
+
+					Debug::Log("AdvAI: Making AI build %s for support coverage (uncovered base buildings detected).\n",
+						pChosenSupport->Name);
+
+					return pChosenSupport;
+				}
 			}
 		}
 
@@ -2080,12 +2529,26 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			else
 			{
 				const CellStruct targetCell = houseExt->NextExpansionPointLocation;
+				if (!houseExt->ShouldPlaceDefenseAtBlockedEdge)
+				{
+					const BuildingTypeClass* pDefense = GetBasicDefense(pHouse, pPrimaryTechTree);
+					if (pDefense != nullptr)
+					{
+						Debug::Log("AdvAI: House %d crawler blocked towards target (%d,%d). Building sentinel defense %s at the edge first.\n",
+							pHouse->ArrayIndex, targetCell.X, targetCell.Y, pDefense->ID);
+						
+						houseExt->ShouldPlaceDefenseAtBlockedEdge = true;
+						return pDefense;
+					}
+				}
+
 				Debug::Log("AdvAI: House %d cannot find any valid adjacent cells to place %s towards target (%d,%d). Blacklisting target and aborting expansion.\n",
 					pHouse->ArrayIndex, pOurPowerPlant->Name, targetCell.X, targetCell.Y);
 
 				AdvAI_Add_Failed_Expansion_Point(pHouse, targetCell);
 				BuildingExt::Mark_Expansion_As_Done(pHouse);
 				houseExt->ShouldBuildRefinery = false;
+				houseExt->ShouldPlaceDefenseAtBlockedEdge = false;
 			}
 		}
 	}
@@ -2866,14 +3329,14 @@ void HouseExt::AdvAI_HouseClass_Expert_AI(HouseClass* pHouse)
 	}
 
 	// Only enable our custom logic when using Advanced AI.
-	if (!RulesExt::Global()->IsUseAdvancedAI)
+	if (!RulesExt::Global()->AdvancedAI)
 	{
 		return;
 	}
 
 	// If we have more than 1 ConYard without Rules allowing it, sell some of them off
 	// to avoid the "Extreme AI" syndrome.
-	if (pHouse->ConYards.Count > 1 && !RulesExt::Global()->IsAdvancedAIMultiConYard)
+	if (pHouse->ConYards.Count > 1 && !RulesExt::Global()->AdvancedAI_MultiConYard)
 	{
 		AdvAI_Sell_Extra_ConYards(pHouse);
 	}
@@ -3017,11 +3480,33 @@ void HouseExt::AdvAI_Update_Primary_Factories(HouseClass* pHouse)
 		{
 			if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Type->Factory == type && pBuilding->Type->Naval == isNaval)
 			{
+				// For land factories, verify they can actually reach the threat/crawling target by land
+				if (!isNaval && !GeneralUtils::AreZonesConnected(pBuilding->GetMapCoords(), targetCoords))
+					continue;
+
 				double distSq = pBuilding->GetMapCoords().DistanceFromSquared(targetCoords);
 				if (distSq < bestDistanceSq)
 				{
 					bestDistanceSq = distSq;
 					pBestFactory = pBuilding;
+				}
+			}
+		}
+
+		// Fallback: If no land factory can reach the target (e.g. they are all on the main island and the target is on another island),
+		// fall back to distance check to make sure at least some factory remains primary.
+		if (pBestFactory == nullptr)
+		{
+			for (const auto pBuilding : pHouse->Buildings)
+			{
+				if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Type->Factory == type && pBuilding->Type->Naval == isNaval)
+				{
+					double distSq = pBuilding->GetMapCoords().DistanceFromSquared(targetCoords);
+					if (distSq < bestDistanceSq)
+					{
+						bestDistanceSq = distSq;
+						pBestFactory = pBuilding;
+					}
 				}
 			}
 		}

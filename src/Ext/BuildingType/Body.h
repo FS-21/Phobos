@@ -124,6 +124,11 @@ public:
 		// Ares 0.2
 		Valueable<bool> CloningFacility;
 
+		// Standard Valueable fields to bypass YRpp offset shifts
+		Valueable<bool> GapGenerator;
+		Valueable<int> GapRadiusInCells;
+		Valueable<int> SuperGapRadiusInCells;
+
 		// Ares 0.A
 		Valueable<BuildingTypeClass*> RubbleIntact;
 		Valueable<bool> RubbleIntactRemove;
@@ -222,6 +227,9 @@ public:
 
 			// Ares 0.2
 			, CloningFacility { false }
+			, GapGenerator { false }
+			, GapRadiusInCells { 0 }
+			, SuperGapRadiusInCells { 0 }
 
 			// Ares 0.A
 			, RubbleIntact { nullptr }

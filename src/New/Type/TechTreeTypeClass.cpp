@@ -48,8 +48,10 @@ void TechTreeTypeClass::CalculateTotals()
 	TotalBuildTech.clear();
 	TotalBuildAdvancedPower.clear();
 	TotalBuildDefense.clear();
-	TotalBuildOther.clear();
-	TotalBuildServiceDepot.clear();
+	TotalBuildOther.clear();	TotalBuildServiceDepot.clear();
+	TotalBuildSupport.clear();
+	TotalBuildSupport.clear();
+	TotalPostBuildOtherRandom.clear();
 
 	for (const auto& pTree : Array)
 	{
@@ -65,9 +67,11 @@ void TechTreeTypeClass::CalculateTotals()
 		TotalBuildAdvancedPower.insert(pTree->BuildAdvancedPower.begin(), pTree->BuildAdvancedPower.end());
 		TotalBuildDefense.insert(pTree->BuildDefense.begin(), pTree->BuildDefense.end());
 		TotalBuildOther.insert(pTree->BuildOther.begin(), pTree->BuildOther.end());
-		TotalBuildServiceDepot.insert(pTree->BuildServiceDepot.begin(), pTree->BuildServiceDepot.end());
+		TotalPreBuildOtherRandom.insert(pTree->PreBuildOtherRandom.begin(), pTree->PreBuildOtherRandom.end());
+		TotalPostBuildOtherRandom.insert(pTree->PostBuildOtherRandom.begin(), pTree->PostBuildOtherRandom.end());				TotalBuildServiceDepot.insert(pTree->BuildServiceDepot.begin(), pTree->BuildServiceDepot.end());
+		TotalBuildSupport.insert(pTree->BuildSupport.begin(), pTree->BuildSupport.end());
 	}
-}
+	}
 
 size_t TechTreeTypeClass::CountTotalOwnedBuildings(HouseClass* pHouse, BuildType buildType)
 {
@@ -107,8 +111,17 @@ size_t TechTreeTypeClass::CountTotalOwnedBuildings(HouseClass* pHouse, BuildType
 	case BuildType::BuildOther:
 		typeList = &TotalBuildOther;
 		break;
+	case BuildType::PreBuildOtherRandom:
+		typeList = &TotalPreBuildOtherRandom;
+		break;
+	case BuildType::PostBuildOtherRandom:
+		typeList = &TotalPostBuildOtherRandom;
+		break;
 	case BuildType::BuildServiceDepot:
 		typeList = &TotalBuildServiceDepot;
+		break;
+	case BuildType::BuildSupport:
+		typeList = &TotalBuildSupport;
 		break;
 	}
 
@@ -174,8 +187,17 @@ size_t TechTreeTypeClass::CountSideOwnedBuildings(HouseClass* pHouse, BuildType 
 	case BuildType::BuildOther:
 		typeList = &this->BuildOther;
 		break;
+	case BuildType::PreBuildOtherRandom:
+		typeList = &this->PreBuildOtherRandom;
+		break;
+	case BuildType::PostBuildOtherRandom:
+		typeList = &this->PostBuildOtherRandom;
+		break;
 	case BuildType::BuildServiceDepot:
 		typeList = &this->BuildServiceDepot;
+		break;
+	case BuildType::BuildSupport:
+		typeList = &this->BuildSupport;
 		break;
 	}
 
@@ -220,7 +242,19 @@ bool TechTreeTypeClass::IsCompleted(HouseClass* pHouse, std::function<bool(Build
 
 	for (const auto& buildOtherPair : BuildOtherCountMap)
 	{
-		if (filter(buildOtherPair.first) && CountSideOwnedBuildings(pHouse, BuildType::BuildOther) < buildOtherPair.second)
+		if (filter(buildOtherPair.first) && CountSideOwnedBuildings(pHouse, BuildType::BuildOther) < static_cast<size_t>(buildOtherPair.second))
+			return false;
+	}
+
+	for (const auto& buildOtherRandomPair : PreBuildOtherRandomCountMap)
+	{
+		if (filter(buildOtherRandomPair.first) && CountSideOwnedBuildings(pHouse, BuildType::PreBuildOtherRandom) < static_cast<size_t>(buildOtherRandomPair.second))
+			return false;
+	}
+
+	for (const auto& buildOtherRandom2Pair : PostBuildOtherRandomCountMap)
+	{
+		if (filter(buildOtherRandom2Pair.first) && CountSideOwnedBuildings(pHouse, BuildType::PostBuildOtherRandom) < static_cast<size_t>(buildOtherRandom2Pair.second))
 			return false;
 	}
 
@@ -265,8 +299,17 @@ std::vector<BuildingTypeClass*> TechTreeTypeClass::GetBuildable(BuildType buildT
 	case BuildType::BuildOther:
 		typeList = &this->BuildOther;
 		break;
+	case BuildType::PreBuildOtherRandom:
+		typeList = &this->PreBuildOtherRandom;
+		break;
+	case BuildType::PostBuildOtherRandom:
+		typeList = &this->PostBuildOtherRandom;
+		break;
 	case BuildType::BuildServiceDepot:
 		typeList = &this->BuildServiceDepot;
+		break;
+	case BuildType::BuildSupport:
+		typeList = &this->BuildSupport;
 		break;
 	}
 
@@ -311,9 +354,14 @@ void TechTreeTypeClass::LoadFromINI(CCINIClass* pINI)
 	this->BuildAdvancedPower.Read(exINI, section, "BuildAdvancedPower");
 	this->BuildDefense.Read(exINI, section, "BuildDefense");
 	this->BuildOther.Read(exINI, section, "BuildOther");
-	this->BuildServiceDepot.Read(exINI, section, "BuildServiceDepot");
+	this->PreBuildOtherRandom.Read(exINI, section, "PreBuildOtherRandom");
+	this->PostBuildOtherRandom.Read(exINI, section, "PostBuildOtherRandom");		this->BuildServiceDepot.Read(exINI, section, "BuildServiceDepot");
+	this->BuildSupport.Read(exINI, section, "BuildSupport");
 	this->BuildOtherCounts.Read(exINI, section, "BuildOtherCounts");
+	this->PreBuildOtherRandomCounts.Read(exINI, section, "PreBuildOtherRandomCounts");
+	this->PostBuildOtherRandomCounts.Read(exINI, section, "PostBuildOtherRandomCounts");
 	this->LimitedFactories.Read(exINI, section, "LimitedFactories");
+	this->IsNavalMode.Read(exINI, section, "IsNavalMode");
 
 	for (size_t i = 0; i < BuildOther.size(); i++)
 	{
@@ -324,6 +372,30 @@ void TechTreeTypeClass::LoadFromINI(CCINIClass* pINI)
 		else
 		{
 			BuildOtherCountMap[BuildOther[i]] = 1;
+		}
+	}
+
+	for (size_t i = 0; i < PreBuildOtherRandom.size(); i++)
+	{
+		if (i < PreBuildOtherRandomCounts.size())
+		{
+			PreBuildOtherRandomCountMap[PreBuildOtherRandom[i]] = PreBuildOtherRandomCounts[i];
+		}
+		else
+		{
+			PreBuildOtherRandomCountMap[PreBuildOtherRandom[i]] = 1;
+		}
+	}
+
+	for (size_t i = 0; i < PostBuildOtherRandom.size(); i++)
+	{
+		if (i < PostBuildOtherRandomCounts.size())
+		{
+			PostBuildOtherRandomCountMap[PostBuildOtherRandom[i]] = PostBuildOtherRandomCounts[i];
+		}
+		else
+		{
+			PostBuildOtherRandomCountMap[PostBuildOtherRandom[i]] = 1;
 		}
 	}
 }
@@ -345,9 +417,14 @@ void TechTreeTypeClass::Serialize(T& Stm)
 		.Process(BuildAdvancedPower)
 		.Process(BuildDefense)
 		.Process(BuildOther)
-		.Process(BuildServiceDepot)
+		.Process(PreBuildOtherRandom)
+		.Process(PostBuildOtherRandom)				.Process(BuildServiceDepot)
+		.Process(BuildSupport)
 		.Process(BuildOtherCounts)
+		.Process(PreBuildOtherRandomCounts)
+		.Process(PostBuildOtherRandomCounts)
 		.Process(LimitedFactories)
+		.Process(IsNavalMode)
 		;
 }
 
@@ -365,6 +442,32 @@ void TechTreeTypeClass::LoadFromStream(PhobosStreamReader& Stm)
 		else
 		{
 			BuildOtherCountMap[BuildOther[i]] = 1;
+		}
+	}
+
+	PreBuildOtherRandomCountMap.clear();
+	for (size_t i = 0; i < PreBuildOtherRandom.size(); i++)
+	{
+		if (i < PreBuildOtherRandomCounts.size())
+		{
+			PreBuildOtherRandomCountMap[PreBuildOtherRandom[i]] = PreBuildOtherRandomCounts[i];
+		}
+		else
+		{
+			PreBuildOtherRandomCountMap[PreBuildOtherRandom[i]] = 1;
+		}
+	}
+
+	PostBuildOtherRandomCountMap.clear();
+	for (size_t i = 0; i < PostBuildOtherRandom.size(); i++)
+	{
+		if (i < PostBuildOtherRandomCounts.size())
+		{
+			PostBuildOtherRandomCountMap[PostBuildOtherRandom[i]] = PostBuildOtherRandomCounts[i];
+		}
+		else
+		{
+			PostBuildOtherRandomCountMap[PostBuildOtherRandom[i]] = 1;
 		}
 	}
 }

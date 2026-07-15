@@ -160,7 +160,9 @@ void BuildingTypeExt::ExtData::LoadFromINIFile(CCINIClass* const pINI)
 	const char* pArtSection = pThis->ImageFile;
 	auto pArtINI = &CCINIClass::INI_Art;
 	INI_EX exINI(pINI);
-	INI_EX exArtINI(pArtINI);
+	INI_EX exArtINI(pArtINI);	this->GapGenerator.Read(exINI, pSection, "GapGenerator");
+	this->GapRadiusInCells.Read(exINI, pSection, "GapRadiusInCells");
+	this->SuperGapRadiusInCells.Read(exINI, pSection, "SuperGapRadiusInCells");
 
 	this->PowersUp_Owner.Read(exINI, pSection, "PowersUp.Owner");
 	this->PowersUp_Buildings.Read(exINI, pSection, "PowersUp.Buildings");
@@ -421,9 +423,11 @@ void BuildingTypeExt::ExtData::Serialize(T& Stm)
 		.Process(this->SuperWeapons)
 		.Process(this->OccupierMuzzleFlashes)
 		.Process(this->Powered_KillSpawns)
-		.Process(this->CanC4_AllowZeroDamage)
-		.Process(this->InitialStrength_Cloning)
+		.Process(this->CanC4_AllowZeroDamage)		.Process(this->InitialStrength_Cloning)
 		.Process(this->Cloning_Powered)
+		.Process(this->GapGenerator)
+		.Process(this->GapRadiusInCells)
+		.Process(this->SuperGapRadiusInCells)
 		.Process(this->ExcludeFromMultipleFactoryBonus)
 		.Process(this->Refinery_UseStorage)
 		.Process(this->Grinding_AllowAllies)
@@ -613,6 +617,5 @@ bool BuildingTypeExt::IsAIInnerBase(const BuildingTypeClass* pType)
 	if (pExt->AIInnerBase.isset())
 	{
 		return pExt->AIInnerBase.Get();
-	}
-	return pType->CloakGenerator;
+	}	return pType->CloakGenerator || pExt->GapGenerator;
 }

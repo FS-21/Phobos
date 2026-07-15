@@ -1323,9 +1323,7 @@ void NAKED BuildingClass_Exit_Object_Seek_Building_Position_Epilogue()
 
 DEFINE_HOOK(0x444F39, BuildingClass_Exit_Object_Seek_Building_Position, 0x6)
 {
-	GET(BuildingClass*, base, EDI);
-
-	if (!RulesExt::Global()->IsUseAdvancedAI || base->Type->PowersUpBuilding[0] != '\0')
+	GET(BuildingClass*, base, EDI);	if (!RulesExt::Global()->AdvancedAI || base->Type->PowersUpBuilding[0] != '\0')
 		return 0;
 
 	const int result = BuildingExt::Exit_Object_Custom_Position(base);

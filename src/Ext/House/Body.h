@@ -102,6 +102,7 @@ public:
 		 *  If yes, the AI should build a refinery.
 		 */
 		bool ShouldBuildRefinery { false };
+		bool ShouldPlaceDefenseAtBlockedEdge { false };
 		int ExpansionPlacementFailures;
 		int LastFactoryRecycleFrame;
 		int NextExpansionSearchFrame;
@@ -144,6 +145,7 @@ public:
 		 *  AI will not attempt to build these building types until the frame has passed.
 		 */
 		std::map<BuildingTypeClass*, int> PlacementFailedCooldowns;
+		std::map<BuildingTypeClass*, int> FeasibilityFailedCooldowns;
 
 		/**
 		 *  Records the dynamic build counts calculated for each building type

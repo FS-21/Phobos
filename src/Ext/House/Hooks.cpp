@@ -693,8 +693,7 @@ DEFINE_HOOK(0x4FE3E9, HouseClass_AI_Building_Intercept, 0x7)
 
 	/**
 	 *  If our custom AI logic is enabled, transfer control to it and return.
-	 */
-	if (RulesExt::Global()->IsUseAdvancedAI)
+	 */	if (RulesExt::Global()->AdvancedAI)
 	{
 		HouseExt::Vinifera_HouseClass_AI_Building(pHouse);
 		return 0x4FE3F0;

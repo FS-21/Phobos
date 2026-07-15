@@ -158,6 +158,9 @@ public:
 	static int Near_AttackCell_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static int Directional_Defense_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static CellStruct Get_Best_Defense_Placement_Position(BuildingClass* pBuilding);
+
+	static bool AdvAI_Is_Support_Placement_Feasible(HouseClass* pHouse, BuildingTypeClass* pBuildingType);
+	static CellStruct Get_Best_Support_Placement_Position(BuildingClass* pBuilding);
 	static CellStruct Get_Best_Sensor_Placement_Position(BuildingClass* pBuilding);
 	static int Near_WarFactory_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding);
 	static int ServiceDepot_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);

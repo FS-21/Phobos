@@ -250,10 +250,25 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->VisualScatter_Min.Read(exINI, GameStrings::AudioVisual, "VisualScatter.Min");
 	this->VisualScatter_Max.Read(exINI, GameStrings::AudioVisual, "VisualScatter.Max");
 
-	this->IsUseAdvancedAI.Read(exINI, GameStrings::General, "IsUseAdvancedAI");
-	this->IsAdvancedAIMultiConYard.Read(exINI, GameStrings::General, "IsAdvancedAIMultiConYard");
-	this->AdvancedAIMaxExpansionDistance.Read(exINI, GameStrings::General, "AdvancedAIMaxExpansionDistance");
-	this->AdvancedAIMinimumRefineryCount.Read(exINI, GameStrings::General, "AdvancedAIMinimumRefineryCount");
+	this->AdvancedAI.Read(exINI, GameStrings::AI, "AdvancedAI");
+	if (exINI.ReadString(GameStrings::AI, "AdvancedAI") == 0)
+	{
+		this->AdvancedAI.Read(exINI, GameStrings::General, "IsUseAdvancedAI");
+	}
+
+	this->AdvancedAI_NavalMode.Read(exINI, GameStrings::AI, "AdvancedAI.NavalMode");
+
+	this->AdvancedAI_MultiConYard.Read(exINI, GameStrings::AI, "AdvancedAI.MultiConYard");
+	if (exINI.ReadString(GameStrings::AI, "AdvancedAI.MultiConYard") == 0)
+	{
+		this->AdvancedAI_MultiConYard.Read(exINI, GameStrings::General, "IsAdvancedAIMultiConYard");
+	}
+
+	this->AdvancedAI_MinimumRefineryCount.Read(exINI, GameStrings::AI, "AdvancedAI.MinimumRefineryCount");
+	if (exINI.ReadString(GameStrings::AI, "AdvancedAI.MinimumRefineryCount") == 0)
+	{
+		this->AdvancedAI_MinimumRefineryCount.Read(exINI, GameStrings::General, "AdvancedAIMinimumRefineryCount");
+	}
 
 	this->Buildings_DefaultDigitalDisplayTypes.Read(exINI, GameStrings::AudioVisual, "Buildings.DefaultDigitalDisplayTypes");
 	this->Infantry_DefaultDigitalDisplayTypes.Read(exINI, GameStrings::AudioVisual, "Infantry.DefaultDigitalDisplayTypes");

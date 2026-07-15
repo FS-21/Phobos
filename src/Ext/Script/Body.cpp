@@ -216,8 +216,7 @@ void ScriptExt::ProcessAction(TeamClass* pTeam)
 	case PhobosScripts::ForceGlobalOnlyTargetHouseEnemy:
 		ScriptExt::ForceGlobalOnlyTargetHouseEnemy(pTeam, -1);
 		break;
-	default:
-		// Do nothing because or it is a wrong Action number or it is an Ares/YR action...
+	default:		// Do nothing because or it is a wrong Action number or it is an Ares/YR action...
 		if (action > 70 && !ScriptExt::IsExtVariableAction(action))
 		{
 			// Unknown new action. This action finished

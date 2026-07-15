@@ -379,25 +379,10 @@ public:
 
 		Valueable<int> BunkerStateUpdateDelay;
 
-		/**
-		*  Is DTA's custom advanced AI logic enabled?
-		*/
-		Valueable<bool> IsUseAdvancedAI;
-
-		/**
-		 *  Is the advanced AI allowed to own multiple Construction Yards at a time?
-		 */
-		Valueable<bool> IsAdvancedAIMultiConYard;
-
-		/**
-		 *  Specifies the maximum distance that the advanced AI is allowed to expand at.
-		 */
-		Valueable<int> AdvancedAIMaxExpansionDistance;
-
-		/**
-		 *  Specifies the minimum number of refineries that the Advanced AI thinks it should build.
-		 */
-		Valueable<int> AdvancedAIMinimumRefineryCount;
+		Valueable<bool> AdvancedAI;
+		Valueable<bool> AdvancedAI_NavalMode;
+		Valueable<bool> AdvancedAI_MultiConYard;
+		Valueable<int> AdvancedAI_MinimumRefineryCount;
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
@@ -712,10 +697,10 @@ public:
 			, BerzerkMission { Mission::Hunt }
 
 			, BunkerStateUpdateDelay { 15 }
-			, IsUseAdvancedAI { false }
-			, IsAdvancedAIMultiConYard { false }
-			, AdvancedAIMaxExpansionDistance { 150 }
-			, AdvancedAIMinimumRefineryCount { 2 }
+			, AdvancedAI { false }
+			, AdvancedAI_NavalMode { false }
+			, AdvancedAI_MultiConYard { false }
+			, AdvancedAI_MinimumRefineryCount { 2 }
 		{ }
 
 		virtual ~ExtData() = default;

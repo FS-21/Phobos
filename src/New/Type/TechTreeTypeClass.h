@@ -22,7 +22,10 @@ public:
 		BuildAdvancedPower,
 		BuildDefense,
 		BuildOther,
-		BuildServiceDepot
+		PreBuildOtherRandom,
+		PostBuildOtherRandom,
+		BuildServiceDepot,
+		BuildSupport
 	};
 
 	Valueable<int> SideIndex;
@@ -38,12 +41,20 @@ public:
 	ValueableVector<BuildingTypeClass*> BuildAdvancedPower;
 	ValueableVector<BuildingTypeClass*> BuildDefense;
 	ValueableVector<BuildingTypeClass*> BuildOther;
+	ValueableVector<BuildingTypeClass*> PreBuildOtherRandom;
+	ValueableVector<BuildingTypeClass*> PostBuildOtherRandom;
 	ValueableVector<BuildingTypeClass*> BuildServiceDepot;
+	ValueableVector<BuildingTypeClass*> BuildSupport;
 	ValueableVector<int> BuildOtherCounts;
+	ValueableVector<int> PreBuildOtherRandomCounts;
+	ValueableVector<int> PostBuildOtherRandomCounts;
 	std::map<BuildingTypeClass*, int> BuildOtherCountMap;
+	std::map<BuildingTypeClass*, int> PreBuildOtherRandomCountMap;
+	std::map<BuildingTypeClass*, int> PostBuildOtherRandomCountMap;
 	Valueable<bool> LimitedFactories;
+	Valueable<bool> IsNavalMode;
 
-	TechTreeTypeClass(const char* pTitle = NONE_STR) : Enumerable(pTitle), LimitedFactories(true) { }
+	TechTreeTypeClass(const char* pTitle = NONE_STR) : Enumerable(pTitle), LimitedFactories(true), IsNavalMode(false) { }
 
 	virtual void LoadFromINI(CCINIClass* pINI);
 	virtual void LoadFromStream(PhobosStreamReader& Stm);
@@ -52,6 +63,7 @@ public:
 	static TechTreeTypeClass* GetForSide(int sideIndex);
 	static TechTreeTypeClass* GetAnySuitable(HouseClass* pHouse);
 	static size_t CountTotalOwnedBuildings(HouseClass* pHouse, BuildType buildType);
+	static void CalculateTotals();
 
 	bool IsSuitable(HouseClass* pHouse) const;
 	bool IsCompleted(HouseClass* pHouse, std::function<bool(BuildingTypeClass*)> const& filter) const;
@@ -71,9 +83,10 @@ public:
 	static inline std::set<BuildingTypeClass*> TotalBuildAdvancedPower;
 	static inline std::set<BuildingTypeClass*> TotalBuildDefense;
 	static inline std::set<BuildingTypeClass*> TotalBuildOther;
+	static inline std::set<BuildingTypeClass*> TotalPreBuildOtherRandom;
+	static inline std::set<BuildingTypeClass*> TotalPostBuildOtherRandom;
 	static inline std::set<BuildingTypeClass*> TotalBuildServiceDepot;
-
-	static void CalculateTotals();
+	static inline std::set<BuildingTypeClass*> TotalBuildSupport;
 
 private:
 	template <typename T>

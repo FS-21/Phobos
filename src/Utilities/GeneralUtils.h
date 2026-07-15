@@ -42,6 +42,9 @@ public:
 	static int SafeMultiply(int value, int mult);
 	static int SafeMultiply(int value, double mult);
 	static DynamicVectorClass<ColorScheme*>* BuildPalette(const char* paletteFileName);
+	static int GetAStarPathLength(CellStruct fromCell, CellStruct toCell, MovementZone movementZone = MovementZone::Normal);
+	static bool AreZonesConnected(CellStruct fromCell, CellStruct toCell, MovementZone movementZone = MovementZone::Normal);
+	static std::vector<CellStruct> GetAStarPath(CellStruct fromCell, CellStruct toCell, MovementZone movementZone = MovementZone::Normal);
 
 	static CoordStruct CoordinatesFromCell(const CellStruct& cell, bool snap = false, int zValue = 0)
 	{
