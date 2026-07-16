@@ -433,6 +433,16 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 		// If not, but we're close to an expansion field, then flag us to build a refinery as our next building.
 		if (pBuilding->Type->ResourceDestination)
 		{
+			if (houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0)
+			{
+				CellStruct targetZone = houseExt->NextRefineryPlacementLocation;
+				auto& zones = houseExt->UnclaimedTiberiumZones;
+				zones.erase(std::remove(zones.begin(), zones.end(), targetZone), zones.end());
+				houseExt->NextRefineryPlacementLocation = CellStruct(0, 0);
+				Debug::Log("AdvAI: Successfully placed refinery %s at (%d,%d) to claim tiberium zone at (%d,%d). Remaining unclaimed zones in list: %d.\n",
+					pBuilding->Type->ID, cell.X, cell.Y, targetZone.X, targetZone.Y, static_cast<int>(zones.size()));
+			}
+
 			bool completedExpansion = false;
 			if (houseExt->NextExpansionPointLocation.X != 0 && houseExt->NextExpansionPointLocation.Y != 0)
 			{
@@ -2248,6 +2258,17 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 
 CellStruct BuildingExt::Get_Best_Expansion_Placement_Position(BuildingClass* pBuilding)
 {
+	const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
+	if (pBuilding->Type->ResourceDestination && houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0)
+	{
+		const CellStruct savedTarget = houseExt->NextExpansionPointLocation;
+		houseExt->NextExpansionPointLocation = houseExt->NextRefineryPlacementLocation;
+		
+		CellStruct result = Get_Best_Expansion_Placement_Position_Helper(pBuilding->Owner, pBuilding->Type, pBuilding);
+		
+		houseExt->NextExpansionPointLocation = savedTarget;
+		return result;
+	}
 	return Get_Best_Expansion_Placement_Position_Helper(pBuilding->Owner, pBuilding->Type, pBuilding);
 }
 
@@ -2633,7 +2654,8 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 	if (pBuilding->Type->ResourceDestination)
 	{
 		const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
-		if (houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+		if ((houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0) ||
+			(houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0))
 		{
 			return Get_Best_Expansion_Placement_Position(pBuilding);
 		}
@@ -2828,15 +2850,16 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 				}
 			}
 
+			double dist = placementCell.DistanceFrom(expansionPoint);
 			if (isCombat)
 			{
-				Debug::Log("[Phobos] AdvAI Placement: House %d is in COMBAT CRAWLING mode towards target (%d,%d) (placing %s at (%d,%d)).\n",
-					pBuilding->Owner->ArrayIndex, expansionPoint.X, expansionPoint.Y, pBuilding->Type->ID, placementCell.X, placementCell.Y);
+				Debug::Log("[Phobos] AdvAI Placement: House %d is in COMBAT CRAWLING mode towards target (%d,%d) (placing %s at (%d,%d), distance to target: %.1f cells).\n",
+					pBuilding->Owner->ArrayIndex, expansionPoint.X, expansionPoint.Y, pBuilding->Type->ID, placementCell.X, placementCell.Y, dist);
 			}
 			else
 			{
-				Debug::Log("[Phobos] AdvAI Placement: House %d is in RESOURCE EXPANSION mode towards Tiberium at (%d,%d) (placing %s at (%d,%d)).\n",
-					pBuilding->Owner->ArrayIndex, expansionPoint.X, expansionPoint.Y, pBuilding->Type->ID, placementCell.X, placementCell.Y);
+				Debug::Log("[Phobos] AdvAI Placement: House %d is in RESOURCE EXPANSION mode towards Tiberium at (%d,%d) (placing %s at (%d,%d), distance to target: %.1f cells).\n",
+					pBuilding->Owner->ArrayIndex, expansionPoint.X, expansionPoint.Y, pBuilding->Type->ID, placementCell.X, placementCell.Y, dist);
 			}
 		}
 	}
@@ -2847,10 +2870,27 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
 		houseExt->PlacementFailedCooldowns[pBuilding->Type] = Unsorted::CurrentFrame + 450; // 30 second cooldown at 15 FPS
 		Debug::Log("AdvAI: AI %d failed to place building %s. Putting on placement cooldown for 30s.\n", pBuilding->Owner->ArrayIndex, pBuilding->Type->ID);
+		if (pBuilding->Type->ResourceDestination)
+		{
+			if (houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0)
+			{
+				HouseExt::AdvAI_Add_Failed_Expansion_Point(pBuilding->Owner, houseExt->NextRefineryPlacementLocation);
+				houseExt->NextRefineryPlacementLocation = CellStruct(0, 0);
+			}
+		}
 		return 0;
 	}
 
 	const int result = Try_Place(pBuilding, placementCell);
+
+	if (pBuilding->Type->ResourceDestination)
+	{
+		if (result != 2)
+		{
+			const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
+			houseExt->NextRefineryPlacementLocation = CellStruct(0, 0);
+		}
+	}
 
 	if (result == 2)
 	{

@@ -166,6 +166,10 @@ public:
 		};
 		std::vector<UnsafePlacementZone> UnsafePlacementZones;
 
+		std::vector<CellStruct> UnclaimedTiberiumZones;
+		CellStruct NextRefineryPlacementLocation { 0, 0 };
+		int LastUnclaimedTiberiumCheckFrame { 0 };
+
 		ExtData(HouseClass* OwnerObject) : Extension<HouseClass>(OwnerObject)
 			, PowerPlantEnhancers {}
 			, OwnedLimboDeliveredBuildings {}
@@ -214,6 +218,8 @@ public:
 			, NextBlacklistClearFrame { 0 }
 			, LastObsoleteRefineryCheckFrame { 0 }
 			, LastServiceDepotPlacementFailedFrame { 0 }
+			, NextRefineryPlacementLocation { 0, 0 }
+			, LastUnclaimedTiberiumCheckFrame { 0 }
 		{ }
 
 		bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;
@@ -284,6 +290,7 @@ public:
 	static bool AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse);
 	static void AdvAI_Add_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Is_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
+	static bool AdvAI_Has_Failed_Placement_Three_Times(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* pBuildingType, bool checkPrereqs, bool isTechTree = false);
 	static bool AdvAI_Is_Recently_Attacked(HouseClass* pHouse);
 	static bool AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse, int enemyAircraftValue);
@@ -300,6 +307,7 @@ public:
 	static void AdvAI_Update_Primary_Factories(HouseClass* pHouse);
 	static void AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval, size_t optimalCount, CellStruct targetCell);
 	static void AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse);
+	static void AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse);
 
 	static int FindGenericPrerequisite(const char* id);
 	static bool HasGenericPrerequisite(int idx, HouseClass* pHouse);

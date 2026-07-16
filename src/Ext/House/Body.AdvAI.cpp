@@ -289,6 +289,177 @@ static int GetCellLandZone(const CellStruct& cell)
 	return 0;
 }
 
+
+
+struct ResourceSector
+{
+	CellStruct BoundsMin;
+	CellStruct BoundsMax;
+	CellStruct CachedCoords;
+	bool HasResources;
+};
+
+static std::vector<ResourceSector> GlobalResourceSectors;
+static std::vector<CellStruct> GlobalTiberiumTrees;
+static bool SectorsInitialized = false;
+static int NumSectorsX = 0;
+static size_t NextActiveSectorToScan = 0;
+static size_t NextFringeSectorToScan = 0;
+static size_t NextPassiveSectorToScan = 0;
+static int GetTiberiumSectorIndex(CellStruct coords);
+
+static bool ScanSectorForResources(ResourceSector& sector)
+{
+	bool found = false;
+	for (int y = sector.BoundsMin.Y; y < sector.BoundsMax.Y; ++y)
+	{
+		for (int x = sector.BoundsMin.X; x < sector.BoundsMax.X; ++x)
+		{
+			CellStruct cellCoords(static_cast<short>(x), static_cast<short>(y));
+			if (MapClass::Instance.CoordinatesLegal(cellCoords))
+			{
+				const CellClass* cell = MapClass::Instance.GetCellAt(cellCoords);
+				if (cell && cell->OverlayTypeIndex != -1)
+				{
+					if (const auto pOverlayType = OverlayTypeClass::Array.GetItem(cell->OverlayTypeIndex))
+					{
+						if (pOverlayType->Tiberium)
+						{
+							sector.CachedCoords = cellCoords;
+							found = true;
+							break;
+						}
+					}
+				}
+			}
+		}
+		if (found)
+			break;
+	}
+	return found;
+}
+
+static bool IsFringeSector(size_t idx)
+{
+	if (NumSectorsX <= 0) return false;
+
+	int gx = static_cast<int>(idx % NumSectorsX);
+	int gy = static_cast<int>(idx / NumSectorsX);
+
+	for (int dy = -1; dy <= 1; ++dy)
+	{
+		for (int dx = -1; dx <= 1; ++dx)
+		{
+			if (dx == 0 && dy == 0) continue;
+			int ngx = gx + dx;
+			int ngy = gy + dy;
+			if (ngx >= 0 && ngx < NumSectorsX)
+			{
+				size_t nIdx = static_cast<size_t>(ngy * NumSectorsX + ngx);
+				if (nIdx < GlobalResourceSectors.size())
+				{
+					if (GlobalResourceSectors[nIdx].HasResources)
+					{
+						return true;
+					}
+				}
+			}
+		}
+	}
+	return false;
+}
+
+static void InitializeGlobalSectors()
+{
+	int xMin = 512, xMax = 0, yMin = 512, yMax = 0;
+
+	// Scan the 512x512 grid to find the real bounding box of playable cell coordinates
+	for (short y = 0; y < 512; ++y)
+	{
+		for (short x = 0; x < 512; ++x)
+		{
+			CellStruct cell{ x, y };
+			if (MapClass::Instance.IsWithinUsableArea(cell, false))
+			{
+				if (x < xMin) xMin = x;
+				if (x > xMax) xMax = x;
+				if (y < yMin) yMin = y;
+				if (y > yMax) yMax = y;
+			}
+		}
+	}
+
+	// Fallback to full engine dimensions if no usable cells are found
+	if (xMin >= xMax || yMin >= yMax)
+	{
+		xMin = 0;
+		xMax = MapClass::Instance.MaxWidth;
+		yMin = 0;
+		yMax = MapClass::Instance.MaxHeight;
+	}
+
+	if (xMax <= 0 || yMax <= 0)
+	{
+		// Map bounds are not yet loaded/initialized
+		return;
+	}
+
+	GlobalResourceSectors.clear();
+	GlobalTiberiumTrees.clear();
+	NextActiveSectorToScan = 0;
+	NextFringeSectorToScan = 0;
+	NextPassiveSectorToScan = 0;
+	const int SECTOR_SIZE = 18;
+
+	NumSectorsX = 0;
+	for (int sx = xMin; sx < xMax; sx += SECTOR_SIZE)
+	{
+		NumSectorsX++;
+	}
+
+	for (int sy = yMin; sy < yMax; sy += SECTOR_SIZE)
+	{
+		for (int sx = xMin; sx < xMax; sx += SECTOR_SIZE)
+		{
+			ResourceSector sector;
+			sector.BoundsMin = CellStruct(static_cast<short>(sx), static_cast<short>(sy));
+			sector.BoundsMax = CellStruct(static_cast<short>(sx + SECTOR_SIZE), static_cast<short>(sy + SECTOR_SIZE));
+			sector.CachedCoords = CellStruct(0, 0);
+			sector.HasResources = false;
+
+			// Perform a one-time initial scan of this sector at startup
+			sector.HasResources = ScanSectorForResources(sector);
+			
+			GlobalResourceSectors.push_back(sector);
+		}
+	}
+
+	for (const auto pTerrain : TerrainClass::Array)
+	{
+		if (pTerrain && pTerrain->IsAlive && !pTerrain->InLimbo && pTerrain->Type->SpawnsTiberium)
+		{
+			GlobalTiberiumTrees.push_back(pTerrain->GetMapCoords());
+		}
+	}
+
+	SectorsInitialized = true;
+	Debug::Log("AdvAI: Initialized & pre-scanned %d global resource sectors (18x18). Map visible area: (%d,%d) to (%d,%d)\n",
+		static_cast<int>(GlobalResourceSectors.size()), xMin, yMin, xMax, yMax);
+
+	int activeSectorsCount = 0;
+	for (size_t idx = 0; idx < GlobalResourceSectors.size(); ++idx)
+	{
+		const auto& sector = GlobalResourceSectors[idx];
+		if (sector.HasResources)
+		{
+			activeSectorsCount++;
+			Debug::Log("AdvAI: Startup active resource sector #%d bounds: (%d,%d) to (%d,%d), cached resource cell: (%d,%d)\n",
+				static_cast<int>(idx), sector.BoundsMin.X, sector.BoundsMin.Y, sector.BoundsMax.X - 1, sector.BoundsMax.Y - 1, sector.CachedCoords.X, sector.CachedCoords.Y);
+		}
+	}
+	Debug::Log("AdvAI: Total active tiberium sectors found on startup: %d\n", activeSectorsCount);
+}
+
 bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 {
 	const auto ext = ExtMap.Find(pHouse);
@@ -428,41 +599,204 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 	// Scan through terrain objects that spawn Tiberium (Tiberium Trees) AND map cells containing
 	// Tiberium/Ore overlays. Pick the one that is closest to any of our own structures and does not
 	// have a refinery near it yet. This allows the AI to expand on any map, whether it uses Tiberium trees or not.
-	std::vector<CellStruct> candidates;
-
-	// 1. Scan TerrainClass for Tiberium trees
-	for (const auto pTerrain : TerrainClass::Array)
+	struct CandidateInfo
 	{
-		if (pTerrain->IsAlive && !pTerrain->InLimbo && pTerrain->Type->SpawnsTiberium)
+		CellStruct Coords;
+		bool IsTree;
+	};
+	std::vector<CandidateInfo> candidates;
+
+	// Reset cache on new game or map change
+	static int NextActiveScanFrame = -1;
+	static int NextFringeScanFrame = -1;
+	static int NextPassiveScanFrame = -1;
+
+	if (Unsorted::CurrentFrame < 10)
+	{
+		SectorsInitialized = false;
+		GlobalResourceSectors.clear();
+		GlobalTiberiumTrees.clear();
+		NextActiveSectorToScan = 0;
+		NextFringeSectorToScan = 0;
+		NextPassiveSectorToScan = 0;
+		NextActiveScanFrame = 450;  // 30 seconds
+		NextFringeScanFrame = 675;  // 45 seconds
+		NextPassiveScanFrame = 1350; // 90 seconds
+	}
+
+	// 1. Scan Cached Tiberium Tree Nodes (Nodos de Árbol)
+	for (const auto& treeCoords : GlobalTiberiumTrees)
+	{
+		candidates.push_back({ treeCoords, true });
+	}
+
+	// 2. Scan Map for cells containing Tiberium or Ore overlays using 20x20 sectors (Ground Tiberium Zones / Zonas de Suelo) and cyclical round-robin updates
+	if (!SectorsInitialized)
+	{
+		InitializeGlobalSectors();
+	}
+
+	if (SectorsInitialized && !GlobalResourceSectors.empty())
+	{
+		// 1. Active Scan (1 sector every 30 seconds / 450 frames)
+		if (Unsorted::CurrentFrame >= NextActiveScanFrame)
 		{
-			candidates.push_back(pTerrain->GetMapCoords());
+			NextActiveScanFrame = Unsorted::CurrentFrame + 450;
+
+			size_t startedAt = NextActiveSectorToScan;
+			bool foundAny = false;
+			do
+			{
+				if (NextActiveSectorToScan >= GlobalResourceSectors.size())
+				{
+					NextActiveSectorToScan = 0;
+				}
+
+				if (GlobalResourceSectors[NextActiveSectorToScan].HasResources)
+				{
+					foundAny = true;
+					break;
+				}
+				NextActiveSectorToScan++;
+			} while (NextActiveSectorToScan != startedAt);
+
+			if (foundAny)
+			{
+				auto& sector = GlobalResourceSectors[NextActiveSectorToScan];
+				bool oldHasResources = sector.HasResources;
+
+				sector.HasResources = ScanSectorForResources(sector);
+
+				if (sector.HasResources != oldHasResources)
+				{
+					Debug::Log("AdvAI: Active Sector #%d at (%d,%d) to (%d,%d) state changed. HasResources: %s\n",
+						static_cast<int>(NextActiveSectorToScan), sector.BoundsMin.X, sector.BoundsMin.Y, sector.BoundsMax.X, sector.BoundsMax.Y,
+						sector.HasResources ? "YES" : "NO");
+				}
+				NextActiveSectorToScan++;
+			}
+		}
+
+		// 2. Fringe Scan (2 sectors every 45 seconds / 675 frames)
+		if (Unsorted::CurrentFrame >= NextFringeScanFrame)
+		{
+			NextFringeScanFrame = Unsorted::CurrentFrame + 675;
+
+			int scannedCount = 0;
+			size_t startedAt = NextFringeSectorToScan;
+			do
+			{
+				if (NextFringeSectorToScan >= GlobalResourceSectors.size())
+				{
+					NextFringeSectorToScan = 0;
+				}
+
+				auto& sector = GlobalResourceSectors[NextFringeSectorToScan];
+				if (!sector.HasResources && IsFringeSector(NextFringeSectorToScan))
+				{
+					bool oldHasResources = sector.HasResources;
+
+					sector.HasResources = ScanSectorForResources(sector);
+
+					if (sector.HasResources != oldHasResources)
+					{
+						Debug::Log("AdvAI: Fringe Sector #%d at (%d,%d) to (%d,%d) state changed. HasResources: %s\n",
+							static_cast<int>(NextFringeSectorToScan), sector.BoundsMin.X, sector.BoundsMin.Y, sector.BoundsMax.X, sector.BoundsMax.Y,
+							sector.HasResources ? "YES" : "NO");
+					}
+
+					scannedCount++;
+					if (scannedCount >= 2)
+					{
+						NextFringeSectorToScan++;
+						break;
+					}
+				}
+				NextFringeSectorToScan++;
+			} while (NextFringeSectorToScan != startedAt);
+		}
+
+		// 3. Passive/Deep Scan (4 sectors every 90 seconds / 1350 frames)
+		if (Unsorted::CurrentFrame >= NextPassiveScanFrame)
+		{
+			NextPassiveScanFrame = Unsorted::CurrentFrame + 1350;
+
+			int scannedCount = 0;
+			size_t startedAt = NextPassiveSectorToScan;
+			do
+			{
+				if (NextPassiveSectorToScan >= GlobalResourceSectors.size())
+				{
+					NextPassiveSectorToScan = 0;
+				}
+
+				auto& sector = GlobalResourceSectors[NextPassiveSectorToScan];
+				if (!sector.HasResources && !IsFringeSector(NextPassiveSectorToScan))
+				{
+					bool oldHasResources = sector.HasResources;
+
+					sector.HasResources = ScanSectorForResources(sector);
+
+					if (sector.HasResources != oldHasResources)
+					{
+						Debug::Log("AdvAI: Deep Sector #%d at (%d,%d) to (%d,%d) state changed. HasResources: %s\n",
+							static_cast<int>(NextPassiveSectorToScan), sector.BoundsMin.X, sector.BoundsMin.Y, sector.BoundsMax.X, sector.BoundsMax.Y,
+							sector.HasResources ? "YES" : "NO");
+					}
+
+					scannedCount++;
+					if (scannedCount >= 4)
+					{
+						NextPassiveSectorToScan++;
+						break;
+					}
+				}
+				NextPassiveSectorToScan++;
+			} while (NextPassiveSectorToScan != startedAt);
 		}
 	}
 
-	// 2. Scan Map for cells containing Tiberium or Ore overlays
-	const auto& visibleRect = MapClass::Instance.VisibleRect;
-	// Safety check: ensure map rect is initialized and valid to prevent out of bounds or infinite loops
-	if (visibleRect.Width > 0 && visibleRect.Height > 0 && visibleRect.Width <= 512 && visibleRect.Height <= 512)
+	// Add cached tiberium ground sector representatives to candidates, refined to the closest tiberium cell to our base
+	const CellStruct baseCenter = pHouse->Base_Center();
+	for (const auto& sector : GlobalResourceSectors)
 	{
-		const int scanStep = 4; // Scan every 4th cell to be fast and cover the map fields safely
-		for (int y = visibleRect.Y; y < visibleRect.Y + visibleRect.Height; y += scanStep)
+		if (sector.HasResources)
 		{
-			for (int x = visibleRect.X; x < visibleRect.X + visibleRect.Width; x += scanStep)
-			{
-				CellStruct cellCoords = CellStruct(static_cast<short>(x), static_cast<short>(y));
-				if (!MapClass::Instance.CoordinatesLegal(cellCoords))
-					continue;
+			const int SECTOR_SIZE = 18;
+			int sx = sector.BoundsMin.X;
+			int sy = sector.BoundsMin.Y;
 
-				const CellClass* cell = MapClass::Instance.GetCellAt(cellCoords);
-				if (cell && cell->OverlayTypeIndex != -1)
+			CellStruct closestResourceCell = sector.CachedCoords;
+			double minDistanceSq = std::numeric_limits<double>::max();
+
+			for (int dy = 0; dy < SECTOR_SIZE; ++dy)
+			{
+				for (int dx = 0; dx < SECTOR_SIZE; ++dx)
 				{
-					int tibType = OverlayClass::GetTiberiumType(cell->OverlayTypeIndex);
-					if (tibType >= 0)
+					CellStruct cellCoords(static_cast<short>(sx + dx), static_cast<short>(sy + dy));
+					if (MapClass::Instance.CoordinatesLegal(cellCoords))
 					{
-						candidates.push_back(cellCoords);
+						const CellClass* cell = MapClass::Instance.GetCellAt(cellCoords);
+						if (cell && cell->OverlayTypeIndex != -1)
+						{
+							if (const auto pOverlayType = OverlayTypeClass::Array.GetItem(cell->OverlayTypeIndex))
+							{
+								if (pOverlayType->Tiberium)
+								{
+									double distSq = cellCoords.DistanceFromSquared(baseCenter);
+									if (distSq < minDistanceSq)
+									{
+										minDistanceSq = distSq;
+										closestResourceCell = cellCoords;
+									}
+								}
+							}
+						}
 					}
 				}
 			}
+
+			candidates.push_back({ closestResourceCell, false });
 		}
 	}
 
@@ -471,6 +805,7 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 		CellStruct Coords;
 		double Distance;
 		BuildingClass* NearestBuilding;
+		bool IsTree;
 	};
 	std::vector<ValidCandidate> validList;
 
@@ -481,8 +816,10 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 	int totalNodesChecked = 0;
 	int occupiedNodes = 0;
 
-	for (const auto& candidateCell : candidates)
+	for (const auto& candidateInfo : candidates)
 	{
+		const auto& candidateCell = candidateInfo.Coords;
+		bool isTree = candidateInfo.IsTree;
 		totalNodesChecked++;
 
 		// Check if this candidate is close to a recently failed expansion point
@@ -537,7 +874,8 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			// base refineries and human players' refineries do not.
 			// For these refineries, we rely on a distance check.
 			const double dist = pBuilding->GetMapCoords().DistanceFrom(candidateCell);
-			if (pBuilding->Owner == pHouse && dist < 10)
+			const double refineryRange = 22.0;
+			if (pBuilding->Owner == pHouse && dist < refineryRange)
 			{
 				found = true;
 				break;
@@ -547,8 +885,9 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 				nearbyRefineries++;
 		}
 
-		// Count tiberium trees within 20 cells of candidateCell
+		// Count tiberium trees and ore cells within 20 cells of candidateCell
 		int tiberiumTreeCount = 0;
+		int tiberiumOreCellCount = 0;
 		for (int dy = -20; dy <= 20; ++dy)
 		{
 			for (int dx = -20; dx <= 20; ++dx)
@@ -566,6 +905,15 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 					const TerrainClass* pTerrain = cell->GetTerrain(false);
 					if (pTerrain != nullptr && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
 						tiberiumTreeCount++;
+
+					if (cell->OverlayTypeIndex != -1)
+					{
+						if (const auto pOverlayType = OverlayTypeClass::Array.GetItem(cell->OverlayTypeIndex))
+						{
+							if (pOverlayType->Tiberium)
+								tiberiumOreCellCount++;
+						}
+					}
 				}
 			}
 		}
@@ -573,11 +921,24 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 		int allowedRefineries = 1;
 		if (tiberiumTreeCount > 0)
 			allowedRefineries = std::min(tiberiumTreeCount, 3);
+		else if (tiberiumOreCellCount > 0)
+			allowedRefineries = std::min(1 + (tiberiumOreCellCount / 40), 3); // 1 refinery per 40 ore cells, up to 3
 
 		if (found || nearbyRefineries >= allowedRefineries)
 		{
-			Debug::Log("AdvAI Search node (%d,%d): skipped (occupied: found=%d, nearby=%d, allowed=%d, trees=%d)\n",
-				candidateCell.X, candidateCell.Y, found, static_cast<int>(nearbyRefineries), allowedRefineries, tiberiumTreeCount);
+			/*
+			const int sIdx = isTree ? -1 : GetTiberiumSectorIndex(candidateCell);
+			if (sIdx >= 0)
+			{
+				Debug::Log("AdvAI Search Ground Tiberium Zone Sector #%d at (%d,%d): skipped (occupied: found=%d, nearby=%d, allowed=%d, trees=%d)\n",
+					sIdx, candidateCell.X, candidateCell.Y, found, static_cast<int>(nearbyRefineries), allowedRefineries, tiberiumTreeCount);
+			}
+			else
+			{
+				Debug::Log("AdvAI Search Tiberium Tree Node at (%d,%d): skipped (occupied: found=%d, nearby=%d, allowed=%d, trees=%d)\n",
+					candidateCell.X, candidateCell.Y, found, static_cast<int>(nearbyRefineries), allowedRefineries, tiberiumTreeCount);
+			}
+			*/
 			occupiedNodes++;
 			continue; // Someone is already occupying this Tiberium cell/field
 		}
@@ -589,53 +950,133 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 		int lastZoneBld = -1;
 		int lastZoneCand = -1;
 
+		struct BuildingDistance
+		{
+			BuildingClass* pBld;
+			double Distance;
+		};
+		std::vector<BuildingDistance> buildingsByDist;
+
 		for (const auto pBuilding : BuildingClass::Array)
 		{
 			if (!pBuilding->IsAlive || pBuilding->InLimbo || pBuilding->Owner != pHouse || pBuilding->Type->Naval)
 				continue;
 
-			// Avoid targeting resource nodes on other islands
-			if (!GeneralUtils::AreZonesConnected(pBuilding->GetMapCoords(), candidateCell))
-				continue;
+			double dist = pBuilding->GetMapCoords().DistanceFrom(candidateCell);
+			buildingsByDist.push_back({ pBuilding, dist });
+		}
 
-			const double dist = pBuilding->GetMapCoords().DistanceFrom(candidateCell);
-			if (dist < distanceFromNearestOwnedStructure)
+		// Sort by distance ascending
+		std::sort(buildingsByDist.begin(), buildingsByDist.end(), [](const BuildingDistance& a, const BuildingDistance& b) {
+			return a.Distance < b.Distance;
+		});
+
+		// Find the closest reachable one (limit check to top 3 closest buildings to avoid A* spam)
+		int checkedCount = 0;
+		for (const auto& bldDist : buildingsByDist)
+		{
+			if (checkedCount >= 3)
+				break;
+			checkedCount++;
+
+			if (GeneralUtils::AreZonesConnected(bldDist.pBld->GetMapCoords(), candidateCell))
 			{
-				distanceFromNearestOwnedStructure = dist;
-				pNearestBuilding = pBuilding;
+				distanceFromNearestOwnedStructure = bldDist.Distance;
+				pNearestBuilding = bldDist.pBld;
+				break;
 			}
 		}
 
 		if (pNearestBuilding == nullptr)
 		{
-			Debug::Log("AdvAI Search node (%d,%d): skipped (no nearest land building found)\n", candidateCell.X, candidateCell.Y);
+			// Debug::Log("AdvAI Search node (%d,%d): skipped (no nearest land building found)\n", candidateCell.X, candidateCell.Y);
 			continue;
 		}
 
-		Debug::Log("AdvAI Search node (%d,%d): reachable. Nearest structure: %s at dist %.1f cells\n",
-			candidateCell.X, candidateCell.Y, pNearestBuilding->Type->ID, distanceFromNearestOwnedStructure);
+		/*
+		const int sIdx = isTree ? -1 : GetTiberiumSectorIndex(candidateCell);
+		if (sIdx >= 0)
+		{
+			Debug::Log("AdvAI Search Ground Tiberium Zone Sector #%d at (%d,%d): reachable. Nearest structure: %s at dist %.1f cells\n",
+				sIdx, candidateCell.X, candidateCell.Y, pNearestBuilding->Type->ID, distanceFromNearestOwnedStructure);
+		}
+		else
+		{
+			Debug::Log("AdvAI Search Tiberium Tree Node at (%d,%d): reachable. Nearest structure: %s at dist %.1f cells\n",
+				candidateCell.X, candidateCell.Y, pNearestBuilding->Type->ID, distanceFromNearestOwnedStructure);
+		}
+		*/
 
-		validList.push_back({ candidateCell, distanceFromNearestOwnedStructure, pNearestBuilding });
+		validList.push_back({ candidateCell, distanceFromNearestOwnedStructure, pNearestBuilding, isTree });
 	}
 
 	if (!validList.empty())
 	{
-		std::sort(validList.begin(), validList.end(), [](const ValidCandidate& a, const ValidCandidate& b) {
+		// Separate into trees and ground candidates
+		std::vector<ValidCandidate> treeList;
+		std::vector<ValidCandidate> groundList;
+		for (const auto& cand : validList)
+		{
+			if (cand.IsTree)
+				treeList.push_back(cand);
+			else
+				groundList.push_back(cand);
+		}
+
+		// Sort both lists by distance
+		std::sort(treeList.begin(), treeList.end(), [](const ValidCandidate& a, const ValidCandidate& b) {
+			return a.Distance < b.Distance;
+		});
+		std::sort(groundList.begin(), groundList.end(), [](const ValidCandidate& a, const ValidCandidate& b) {
 			return a.Distance < b.Distance;
 		});
 
-		size_t selectionSize = std::min(validList.size(), size_t(3));
-		int randomIndex = ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(selectionSize) - 1);
-		const auto& chosen = validList[randomIndex];
+		bool chooseTree = false;
+		if (!treeList.empty())
+		{
+			if (groundList.empty())
+			{
+				chooseTree = true;
+			}
+			else
+			{
+				// 75% probability to prioritize trees
+				int dice = ScenarioClass::Instance->Random.RandomRanged(0, 99);
+				chooseTree = (dice < 75);
+			}
+		}
+
+		const auto& chosenList = chooseTree ? treeList : groundList;
+		size_t selectionSize = chooseTree ? std::min(chosenList.size(), size_t(3)) : 1;
+		int randomIndex = chooseTree ? ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(selectionSize) - 1) : 0;
+		const auto& chosen = chosenList[randomIndex];
 
 		target = chosen.Coords;
 		pBestNearestBuilding = chosen.NearestBuilding;
 		nearestDistance = chosen.Distance;
 
-		Debug::Log("AdvAI ExpansionSearch: House %d: Tiberium cell at (%d,%d) is chosen from top %d candidates. Nearest friendly structure: %s at dist %.1f cells.\n",
-			pHouse->ArrayIndex, target.X, target.Y, static_cast<int>(selectionSize),
-			pBestNearestBuilding ? pBestNearestBuilding->Type->ID : "None",
-			nearestDistance);
+		const int targetSectorIdx = chosen.IsTree ? -1 : GetTiberiumSectorIndex(target);
+		if (targetSectorIdx >= 0)
+		{
+			Debug::Log("AdvAI ExpansionSearch: House %d: Ground Tiberium Zone Sector #%d at (%d,%d) chosen (75%% tree prioritization: %s). Selection size: %d. Nearest friendly structure: %s at dist %.1f cells.\n",
+				pHouse->ArrayIndex,
+				targetSectorIdx,
+				target.X, target.Y,
+				chooseTree ? "YES" : "NO",
+				static_cast<int>(selectionSize),
+				pBestNearestBuilding ? pBestNearestBuilding->Type->ID : "None",
+				nearestDistance);
+		}
+		else
+		{
+			Debug::Log("AdvAI ExpansionSearch: House %d: Tiberium Tree Node at (%d,%d) chosen (75%% tree prioritization: %s). Selection size: %d. Nearest friendly structure: %s at dist %.1f cells.\n",
+				pHouse->ArrayIndex,
+				target.X, target.Y,
+				chooseTree ? "YES" : "NO",
+				static_cast<int>(selectionSize),
+				pBestNearestBuilding ? pBestNearestBuilding->Type->ID : "None",
+				nearestDistance);
+		}
 	}
 
 	Debug::Log("AdvAI ExpansionSearch: House %d: Checked %d Tiberium nodes, %d occupied/blocked. Target: (%d,%d).\n",
@@ -1662,6 +2103,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			}
 		}
 
+		bool hasUndefendedExpansionStructure = false;
 		if (!hasSomethingToProtect)
 		{
 			const BuildingClass* pOurConYard = pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
@@ -1669,7 +2111,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			{
 				for (const auto pBld : pHouse->Buildings)
 				{
-					if (pBld && pBld->Type && pBld->Type->Refinery)
+					if (pBld && pBld->Type && (pBld->Type->Refinery || pBld->Type->ResourceDestination || pBld->Type->PowerBonus > 0))
 					{
 						if (pBld->GetMapCoords().DistanceFromSquared(pOurConYard->GetMapCoords()) >= 400.0)
 						{
@@ -1692,6 +2134,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 							if (!isProtected)
 							{
 								hasSomethingToProtect = true;
+								hasUndefendedExpansionStructure = true;
 								break;
 							}
 						}
@@ -1868,6 +2311,10 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 					pBestDefense = ourAntiVehicleDefense;
 				}
 				else if (threat == ThreatCategory::Infantry && ourAntiInfantryDefense != nullptr)
+				{
+					pBestDefense = ourAntiInfantryDefense;
+				}
+				else if (hasUndefendedExpansionStructure && ourAntiInfantryDefense != nullptr)
 				{
 					pBestDefense = ourAntiInfantryDefense;
 				}
@@ -2171,16 +2618,13 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				}
 			}
 
-			// Count all airport-bound aircraft currently owned by this house
-			int ownedAirportBoundAircraft = 0;
-			for (const auto pAircraft : AircraftClass::Array)
+			// Count how many docks are currently occupied on our owned helipads
+			int totalOccupiedDocks = 0;
+			for (const auto pBld : pHouse->Buildings)
 			{
-				if (pAircraft->Owner == pHouse && pAircraft->IsAlive && !pAircraft->InLimbo)
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type->Helipad)
 				{
-					if (pAircraft->Type->AirportBound)
-					{
-						ownedAirportBoundAircraft++;
-					}
+					totalOccupiedDocks += BuildingExt::CountOccupiedDocks(pBld);
 				}
 			}
 
@@ -2191,7 +2635,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			}
 			else
 			{
-				optimalHelipadCount = (ownedAirportBoundAircraft >= totalCurrentDocks) ? totalHelipadsOwned + 1 : totalHelipadsOwned;
+				optimalHelipadCount = (totalOccupiedDocks >= totalCurrentDocks) ? totalHelipadsOwned + 1 : totalHelipadsOwned;
 			}
 
 			if (limitFactories)
@@ -2216,8 +2660,8 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 
 			if (pHelipadToBuild != nullptr)
 			{
-				Debug::Log("AdvAI: Making AI build %s because it has no free aircraft docks (Docks: %d, Aircraft: %d, Wanted helipads: %d)\n",
-					pHelipadToBuild->Name, totalCurrentDocks, ownedAirportBoundAircraft, optimalHelipadCount);
+				Debug::Log("AdvAI: Making AI build %s because it has no free aircraft docks (Total Docks: %d, Occupied Docks: %d, Wanted helipads: %d)\n",
+					pHelipadToBuild->Name, totalCurrentDocks, totalOccupiedDocks, optimalHelipadCount);
 
 				return pHelipadToBuild;
 			}
@@ -2577,6 +3021,59 @@ const BuildingTypeClass* HouseExt::AdvAI_BuildAtLeastNOfSideAndMInTotal(HouseCla
 
 const BuildingTypeClass* HouseExt::AdvAI_Get_Building_To_Build(HouseClass* pHouse)
 {
+	const auto houseExt = ExtMap.Find(pHouse);
+	if (houseExt != nullptr && !houseExt->UnclaimedTiberiumZones.empty())
+	{
+		const auto pTechTree = TechTreeTypeClass::GetAnySuitable(pHouse);
+		if (pTechTree != nullptr && !pTechTree->BuildRefinery.empty())
+		{
+			BuildingTypeClass* pRefinery = pTechTree->BuildRefinery[0];
+			if (pRefinery != nullptr && AdvAI_Can_Build_Building(pHouse, pRefinery, true, true))
+			{
+				for (auto it = houseExt->UnclaimedTiberiumZones.begin(); it != houseExt->UnclaimedTiberiumZones.end(); ++it)
+				{
+					CellStruct target = *it;
+					if (AdvAI_Is_Failed_Expansion_Point(pHouse, target))
+					{
+						continue; // Skip targets currently under cooldown (failed placements)
+					}
+					
+					bool isTree = false;
+					for (const auto pTerrain : TerrainClass::Array)
+					{
+						if (pTerrain->IsAlive && !pTerrain->InLimbo && pTerrain->Type->SpawnsTiberium && pTerrain->GetMapCoords() == target)
+						{
+							isTree = true;
+							break;
+						}
+					}
+					const double refineryRange = isTree ? 22.0 : 27.0;
+
+					bool hasRefinery = false;
+					for (const auto pBld : BuildingClass::Array)
+					{
+						if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner == pHouse && pBld->Type->ResourceDestination)
+						{
+							if (target.DistanceFrom(pBld->GetMapCoords()) < refineryRange)
+							{
+								hasRefinery = true;
+								break;
+							}
+						}
+					}
+
+					if (!hasRefinery)
+					{
+						houseExt->NextRefineryPlacementLocation = target;
+						Debug::Log("AdvAI: Intercepting build loop to construct refinery %s for unclaimed tiberium zone at (%d,%d).\n",
+							pRefinery->Name, target.X, target.Y);
+						return pRefinery;
+					}
+				}
+			}
+		}
+	}
+
 	const BuildingTypeClass* buildChoice = AdvAI_Evaluate_Get_Best_Building(pHouse);
 
 	if (buildChoice == nullptr)
@@ -3377,6 +3874,12 @@ void HouseExt::AdvAI_HouseClass_Expert_AI(HouseClass* pHouse)
 		AdvAI_Awaken_Sleeping_Harvesters(pHouse);
 	}
 
+	if (Unsorted::CurrentFrame > houseExt->LastUnclaimedTiberiumCheckFrame + 450)
+	{
+		houseExt->LastUnclaimedTiberiumCheckFrame = Unsorted::CurrentFrame;
+		AdvAI_Update_Unclaimed_Tiberium_Zones(pHouse);
+	}
+
 	if (Unsorted::CurrentFrame > houseExt->LastPrimaryFactoryCheckFrame + 400)
 	{
 		houseExt->LastPrimaryFactoryCheckFrame = Unsorted::CurrentFrame;
@@ -3688,12 +4191,12 @@ void HouseExt::AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse)
 		}
 
 		// Scan a radius of 14 cells around the refinery to check for tiberium trees or tiberium overlays.
-		const CellStruct refCoords = pBld->GetMapCoords();
+		const CellStruct refCoords = GeneralUtils::CellFromCoordinates(pBld->GetCenterCoords());
 		bool hasResources = false;
 
-		for (int dy = -14; dy <= 14; ++dy)
+		for (int dy = -27; dy <= 27; ++dy)
 		{
-			for (int dx = -14; dx <= 14; ++dx)
+			for (int dx = -27; dx <= 27; ++dx)
 			{
 				CellStruct scanCell(refCoords.X + dx, refCoords.Y + dy);
 				if (!MapClass::Instance.CoordinatesLegal(scanCell))
@@ -3701,7 +4204,8 @@ void HouseExt::AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse)
 					continue;
 				}
 
-				if (refCoords.DistanceFrom(scanCell) > 14.0)
+				double distSq = refCoords.DistanceFromSquared(scanCell);
+				if (distSq > 729.0) // 35.0 * 35.0 = 1225.0
 				{
 					continue;
 				}
@@ -3709,19 +4213,24 @@ void HouseExt::AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse)
 				const CellClass* cell = MapClass::Instance.GetCellAt(scanCell);
 				if (cell)
 				{
-					// Check for tiberium overlay
+					const bool within22 = (distSq <= 484.0); // 22.0 * 22.0 = 484.0
+
+					// Ground Tiberium / Ore is accepted up to 35 cells
 					if (cell->OverlayTypeIndex != -1 && OverlayClass::GetTiberiumType(cell->OverlayTypeIndex) >= 0)
 					{
 						hasResources = true;
 						break;
 					}
 
-					// Check for tiberium tree
-					const TerrainClass* pTerrain = cell->GetTerrain(false);
-					if (pTerrain != nullptr && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
+					// Tiberium Trees are ONLY accepted if within 14 cells
+					if (within22)
 					{
-						hasResources = true;
-						break;
+						const TerrainClass* pTerrain = cell->GetTerrain(false);
+						if (pTerrain != nullptr && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
+						{
+							hasResources = true;
+							break;
+						}
 					}
 				}
 			}
@@ -3733,7 +4242,7 @@ void HouseExt::AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse)
 
 		if (!hasResources)
 		{
-			Debug::Log("AdvAI: Refinery %s at (%d,%d) is obsolete (no resources/spawners within 14 cells). Selling it.\n",
+			Debug::Log("AdvAI: Refinery %s at (%d,%d) is obsolete (no resources within 27 cells, no trees within 22 cells). Selling it.\n",
 				pBld->Type->ID, refCoords.X, refCoords.Y);
 			pBld->Sell(1);
 		}
@@ -3822,4 +4331,263 @@ bool HouseExt::AdvAI_Is_Failed_Expansion_Point(HouseClass* pHouse, CellStruct co
 		}
 	}
 	return false;
+}
+
+bool HouseExt::AdvAI_Has_Failed_Placement_Three_Times(HouseClass* pHouse, CellStruct coords)
+{
+	const auto houseExt = ExtMap.Find(pHouse);
+	for (size_t i = 0; i < std::size(houseExt->PermanentlyBlockedExpansionPointLocations); i++)
+	{
+		const auto& blocked = houseExt->PermanentlyBlockedExpansionPointLocations[i];
+		if (blocked.Coords.X > 0 && blocked.Coords.Y > 0)
+		{
+			if (coords.DistanceFromSquared(blocked.Coords) < 225.0) // 15-cell radius
+			{
+				if (blocked.FailureCount >= 3)
+				{
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+
+static int GetTiberiumSectorIndex(CellStruct coords)
+{
+	for (size_t i = 0; i < GlobalResourceSectors.size(); ++i)
+	{
+		const auto& sector = GlobalResourceSectors[i];
+		if (coords.X >= sector.BoundsMin.X && coords.X < sector.BoundsMax.X &&
+			coords.Y >= sector.BoundsMin.Y && coords.Y < sector.BoundsMax.Y)
+		{
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
+}
+
+void HouseExt::AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse)
+{
+	const auto houseExt = ExtMap.Find(pHouse);
+	if (houseExt == nullptr)
+		return;
+
+	// 1. Clean up existing registered coordinates in UnclaimedTiberiumZones
+	auto& zones = houseExt->UnclaimedTiberiumZones;
+	
+	Debug::Log("AdvAI: Update_Unclaimed_Tiberium_Zones for House %d. Current tracked zones count: %d\n", pHouse->ArrayIndex, static_cast<int>(zones.size()));
+
+	zones.erase(std::remove_if(zones.begin(), zones.end(), [pHouse](const CellStruct& coords) {
+		const int failedIdx = GetTiberiumSectorIndex(coords);
+		if (AdvAI_Has_Failed_Placement_Three_Times(pHouse, coords))
+		{
+			if (failedIdx >= 0)
+				Debug::Log("AdvAI: Sector #%d at (%d,%d) has failed refinery placement 3 times. Removing permanently from tracking.\n", failedIdx, coords.X, coords.Y);
+			else
+				Debug::Log("AdvAI: Tree Node at (%d,%d) has failed refinery placement 3 times. Removing permanently from tracking.\n", coords.X, coords.Y);
+			return true; // remove
+		}
+
+		bool stillHasTiberium = false;
+		for (int dy = -4; dy <= 4; ++dy)
+		{
+			for (int dx = -4; dx <= 4; ++dx)
+			{
+				CellStruct cellCoords(static_cast<short>(coords.X + dx), static_cast<short>(coords.Y + dy));
+				if (!MapClass::Instance.CoordinatesLegal(cellCoords))
+					continue;
+
+				const CellClass* cell = MapClass::Instance.GetCellAt(cellCoords);
+				if (cell)
+				{
+					if (cell->OverlayTypeIndex != -1 && OverlayClass::GetTiberiumType(cell->OverlayTypeIndex) >= 0)
+					{
+						stillHasTiberium = true;
+						break;
+					}
+
+					TerrainClass* pTerrain = cell->GetTerrain(false);
+					if (pTerrain != nullptr && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
+					{
+						stillHasTiberium = true;
+						break;
+					}
+				}
+			}
+			if (stillHasTiberium)
+				break;
+		}
+
+		const int sIdx = GetTiberiumSectorIndex(coords);
+
+		if (!stillHasTiberium)
+		{
+			if (sIdx >= 0)
+				Debug::Log("AdvAI: Unclaimed tiberium zone Sector #%d at (%d,%d) has been mined out or cleared. Removing from tracking.\n", sIdx, coords.X, coords.Y);
+			else
+				Debug::Log("AdvAI: Unclaimed tiberium Tree Node at (%d,%d) has been mined out or cleared. Removing from tracking.\n", coords.X, coords.Y);
+			return true; // remove
+		}
+
+		// Check if a refinery has been placed near it
+		bool isTree = false;
+		for (const auto pTerrain : TerrainClass::Array)
+		{
+			if (pTerrain->IsAlive && !pTerrain->InLimbo && pTerrain->Type->SpawnsTiberium && pTerrain->GetMapCoords() == coords)
+			{
+				isTree = true;
+				break;
+			}
+		}
+		const double refineryRange = 22.0;
+
+		bool hasRefinery = false;
+		for (const auto pBld : BuildingClass::Array)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner == pHouse && pBld->Type->ResourceDestination)
+			{
+				if (coords.DistanceFrom(pBld->GetMapCoords()) < refineryRange)
+				{
+					hasRefinery = true;
+					break;
+				}
+			}
+		}
+
+		if (hasRefinery)
+		{
+			if (sIdx >= 0)
+				Debug::Log("AdvAI: Refinery now exists near Sector #%d at (%d,%d). Removing from tracking.\n", sIdx, coords.X, coords.Y);
+			else
+				Debug::Log("AdvAI: Refinery now exists near Tree Node at (%d,%d). Removing from tracking.\n", coords.X, coords.Y);
+			return true; // remove
+		}
+
+		return false; // keep
+	}), zones.end());
+
+	// 2. Discover new unclaimed tiberium zones near our base normal structures
+	struct CandidateZone
+	{
+		CellStruct Coords;
+		int SectorIndex; // -1 if tree node
+	};
+	std::vector<CandidateZone> candidates;
+
+	// Ground resource sectors
+	for (size_t idx = 0; idx < GlobalResourceSectors.size(); ++idx)
+	{
+		const auto& sector = GlobalResourceSectors[idx];
+		if (sector.HasResources)
+		{
+			candidates.push_back({ sector.CachedCoords, static_cast<int>(idx) });
+		}
+	}
+
+	// Tiberium tree structures near our base (from cached list)
+	for (const auto& treeCoords : GlobalTiberiumTrees)
+	{
+		candidates.push_back({ treeCoords, -1 });
+	}
+
+	Debug::Log("AdvAI: House %d: Scanned %d candidates (ground sectors + trees).\n", pHouse->ArrayIndex, static_cast<int>(candidates.size()));
+
+	// Filter candidates close to our base buildings and without refineries
+	for (const auto& candidate : candidates)
+	{
+		const CellStruct targetCoords = candidate.Coords;
+		const int sIdx = candidate.SectorIndex;
+		const bool isTree = (sIdx == -1);
+		const double maxBaseDistance = isTree ? 22.0 : 27.0;
+
+		bool isNearBase = false;
+		double minBldDist = 9999.0;
+		BuildingClass* pClosestBld = nullptr;
+		for (const auto pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo)
+			{
+				const auto pBldExt = BuildingTypeExt::ExtMap.Find(pBld->Type);
+				if (pBldExt->AIBaseNormal.Get(pBld->Type->BaseNormal))
+				{
+					double d = targetCoords.DistanceFrom(pBld->GetMapCoords());
+					if (d < minBldDist)
+					{
+						minBldDist = d;
+						pClosestBld = pBld;
+					}
+					if (d < maxBaseDistance)
+					{
+						isNearBase = true;
+					}
+				}
+			}
+		}
+
+		if (!isNearBase)
+		{
+			continue;
+		}
+
+		if (AdvAI_Has_Failed_Placement_Three_Times(pHouse, targetCoords))
+		{
+			continue; // Skip permanently blocked/failed locations
+		}
+
+		// Check if already in UnclaimedTiberiumZones
+		bool alreadyRegistered = std::find(zones.begin(), zones.end(), targetCoords) != zones.end();
+		if (alreadyRegistered)
+		{
+			/*
+			if (sIdx >= 0)
+				Debug::Log("AdvAI: Candidate Sector #%d at (%d,%d) already registered in vector. Vector size: %d.\n", sIdx, targetCoords.X, targetCoords.Y, static_cast<int>(zones.size()));
+			else
+				Debug::Log("AdvAI: Candidate Tree Node at (%d,%d) already registered in vector. Vector size: %d.\n", targetCoords.X, targetCoords.Y, static_cast<int>(zones.size()));
+			*/
+			continue;
+		}
+
+		// Check if a refinery already exists near this coordinate
+		const double refineryRange = 22.0;
+		bool hasRefinery = false;
+		BuildingClass* pClashingRefinery = nullptr;
+		for (const auto pBld : BuildingClass::Array)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner == pHouse && pBld->Type->ResourceDestination)
+			{
+				double d = targetCoords.DistanceFrom(pBld->GetMapCoords());
+				if (d < refineryRange)
+				{
+					hasRefinery = true;
+					pClashingRefinery = pBld;
+					break;
+				}
+			}
+		}
+
+		if (hasRefinery)
+		{
+			/*
+			if (sIdx >= 0)
+				Debug::Log("AdvAI: Candidate Sector #%d at (%d,%d) is already covered by refinery %s at (%d,%d) (distance: %.1f < %.1f).\n",
+					sIdx, targetCoords.X, targetCoords.Y, pClashingRefinery->Type->ID, pClashingRefinery->GetMapCoords().X, pClashingRefinery->GetMapCoords().Y,
+					targetCoords.DistanceFrom(pClashingRefinery->GetMapCoords()), refineryRange);
+			else
+				Debug::Log("AdvAI: Candidate Tree Node at (%d,%d) is already covered by refinery %s at (%d,%d) (distance: %.1f < %.1f).\n",
+					targetCoords.X, targetCoords.Y, pClashingRefinery->Type->ID, pClashingRefinery->GetMapCoords().X, pClashingRefinery->GetMapCoords().Y,
+					targetCoords.DistanceFrom(pClashingRefinery->GetMapCoords()), refineryRange);
+			*/
+			continue;
+		}
+
+		zones.push_back(targetCoords);
+		if (sIdx >= 0)
+			Debug::Log("AdvAI: Registered new unclaimed Sector #%d at (%d,%d) near building %s (distance: %.1f < %.1f). Vector size: %d.\n",
+				sIdx, targetCoords.X, targetCoords.Y, pClosestBld ? pClosestBld->Type->ID : "???", minBldDist, maxBaseDistance, static_cast<int>(zones.size()));
+		else
+			Debug::Log("AdvAI: Registered new unclaimed Tree Node at (%d,%d) near building %s (distance: %.1f < %.1f). Vector size: %d.\n",
+				targetCoords.X, targetCoords.Y, pClosestBld ? pClosestBld->Type->ID : "???", minBldDist, maxBaseDistance, static_cast<int>(zones.size()));
+	}
 }

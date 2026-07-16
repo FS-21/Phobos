@@ -409,12 +409,14 @@ int GeneralUtils::GetAStarPathLength(CellStruct fromCell, CellStruct toCell, Mov
 	int res = AStarClass::Instance.AttemptPath(&start, &end, pFoot, false, false, movementZone);
 	
 	// Only log path failures
+	/*
 	if (res <= 0 || res > 100000)
 	{
 		Debug::Log("Phobos Pathfinder: (%d,%d) [adj (%d,%d)] -> (%d,%d) [adj (%d,%d)] (zone %d, foot %s) -> Result: %d\n",
 			fromCell.X, fromCell.Y, start.X, start.Y, toCell.X, toCell.Y, end.X, end.Y, static_cast<int>(movementZone),
 			pFoot ? pFoot->GetTechnoType()->ID : "nullptr", res);
 	}
+	*/
 	
 	return res;
 }

@@ -713,6 +713,9 @@ void HouseExt::ExtData::Serialize(T& Stm)
 		.Process(this->PlayerAutoRepair)
 		.Process(this->ExpansionPlacementFailures)
 		.Process(this->LastAttackedBuildingCoords)
+		.Process(this->NextRefineryPlacementLocation)
+		.Process(this->UnclaimedTiberiumZones)
+		.Process(this->LastUnclaimedTiberiumCheckFrame)
 		;
 
 	int countMapSize = static_cast<int>(this->AICachedBuildCounts.size());
