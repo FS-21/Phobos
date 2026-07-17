@@ -170,6 +170,11 @@ public:
 		CellStruct NextRefineryPlacementLocation { 0, 0 };
 		int LastUnclaimedTiberiumCheckFrame { 0 };
 
+		std::vector<CellStruct> CachedExpansionPath;
+		CellStruct CachedExpansionPathTarget { 0, 0 };
+		CellStruct CachedExpansionPathStart { 0, 0 };
+		CellStruct GetCrawlingWaypoint(CellStruct targetCell);
+
 		ExtData(HouseClass* OwnerObject) : Extension<HouseClass>(OwnerObject)
 			, PowerPlantEnhancers {}
 			, OwnedLimboDeliveredBuildings {}
@@ -220,6 +225,9 @@ public:
 			, LastServiceDepotPlacementFailedFrame { 0 }
 			, NextRefineryPlacementLocation { 0, 0 }
 			, LastUnclaimedTiberiumCheckFrame { 0 }
+			, CachedExpansionPath {}
+			, CachedExpansionPathTarget { 0, 0 }
+			, CachedExpansionPathStart { 0, 0 }
 		{ }
 
 		bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;

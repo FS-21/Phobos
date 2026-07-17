@@ -1102,9 +1102,11 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 	
 	// Check the resolution of the scan. If our base area is huge, we can't check as precisely
 	// or we'll cause into performance issues.
+	// Cap resolution to pBuilding->Type->Adjacent so we never skip valid adjacent placement slots.
 	const int resCells = 2000;
 	const int areaSize = baseArea.Width * baseArea.Height;
-	const int resolution = 1 + (areaSize / resCells);
+	const int maxResolution = std::max(1, pBuilding->Type->Adjacent);
+	const int resolution = std::min(maxResolution, 1 + (areaSize / resCells));
 
 	for (int y = baseArea.Y; y < baseArea.Y + baseArea.Height; y += resolution)
 	{
@@ -1976,9 +1978,10 @@ int BuildingExt::Towards_Expansion_Placement_Cell_Value(CellStruct cell, Buildin
 	}
 
 	// Otherwise, we can basically make the value equal to the distance
-	// that the building has to our next expansion point.
+	// that the building has to our next expansion point waypoint.
 	// Also, secondarily take distance into enemy into account.
-	const double dist = cell.DistanceFrom(houseExt->NextExpansionPointLocation);
+	const CellStruct currentWaypoint = houseExt->GetCrawlingWaypoint(houseExt->NextExpansionPointLocation);
+	const double dist = cell.DistanceFrom(currentWaypoint);
 	int distanceValue = static_cast<int>(dist * 100);
 
 	return distanceValue + enemyDistance;
@@ -2008,6 +2011,9 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 		// with resolution sampling, which could skip the best cells entirely.
 		CellStruct bestCell = CellStruct(0, 0);
 		double bestDist = std::numeric_limits<double>::max();
+
+		// Use A* waypoint dynamic crawling
+		const CellStruct currentWaypoint = houseExt->GetCrawlingWaypoint(expansionTarget);
 
 		for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
 		{
@@ -2141,7 +2147,7 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 							continue;
 					}
 
-					const double dist = cell.DistanceFrom(expansionTarget);
+					const double dist = cell.DistanceFrom(currentWaypoint);
 
 					if (dist < bestDist)
 					{
@@ -2154,15 +2160,14 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 
 		if (bestCell.X <= 0 && bestCell.Y <= 0)
 		{
-			Debug::Log("AdvAI ExpansionPlacement: House %d: No valid buildable cell found for %s near any anchor building towards (%d,%d)\n",
-				pOwner->ArrayIndex, pBuildingType->ID, expansionTarget.X, expansionTarget.Y);
+			Debug::Log("AdvAI ExpansionPlacement: House %d: No valid buildable cell found for %s near any anchor building towards waypoint (%d,%d)\n",
+				pOwner->ArrayIndex, pBuildingType->ID, currentWaypoint.X, currentWaypoint.Y);
 		}
 
 		if (bestCell.X > 0 || bestCell.Y > 0)
 		{
-			// Check if this new cell gets us closer to the expansion point than
-			// any of our existing buildings. If not, we are as close as we can
-			// get and should build the refinery next.
+			// Check if this new cell gets us closer to the waypoint than
+			// any of our existing buildings. If not, we are as close as we can get.
 			if (!houseExt->ShouldBuildRefinery)
 			{
 				double nearestExistingDistSq = std::numeric_limits<double>::max();
@@ -2171,14 +2176,15 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 					const auto pBld = ExtData::OurBuildings[i];
 					if (pBld && IsAIBaseNormal(pBld->Type))
 					{
-						const double dSq = expansionTarget.DistanceFromSquared(pBld->GetMapCoords());
+						const double dSq = currentWaypoint.DistanceFromSquared(pBld->GetMapCoords());
 						if (dSq < nearestExistingDistSq)
 							nearestExistingDistSq = dSq;
 					}
 				}
 
 				const double bestDistSq = bestDist * bestDist;
-				if (bestDist < 22.0)
+				const bool isFinalTarget = (currentWaypoint == expansionTarget);
+				if (bestDist < 22.0 && isFinalTarget)
 				{
 					if (bestDistSq >= nearestExistingDistSq || nearestExistingDistSq < 64.0)
 					{
@@ -2202,11 +2208,12 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 			{
 				houseExt->ExpansionPlacementFailures = 0;
 
-				Debug::Log("AdvAI ExpansionPlacement: House %d placing %s at (%d,%d), dist to target (%d,%d) = %.1f cells%s\n",
+				Debug::Log("AdvAI ExpansionPlacement: House %d placing %s at (%d,%d), dist to target (%d,%d) = %.1f cells (waypoint: (%d,%d))%s\n",
 					pOwner->ArrayIndex, pBuildingType->ID,
 					bestCell.X, bestCell.Y,
 					expansionTarget.X, expansionTarget.Y,
-					bestDist,
+					bestCell.DistanceFrom(expansionTarget),
+					currentWaypoint.X, currentWaypoint.Y,
 					houseExt->ShouldBuildRefinery ? " [REFINERY NEXT]" : "");
 			}
 

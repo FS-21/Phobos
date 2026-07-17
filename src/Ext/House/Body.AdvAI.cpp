@@ -2818,6 +2818,12 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				continue;
 			}
 
+			// Exclude helipads here, as they are handled dynamically based on occupied docks
+			if (pBuilding->Helipad)
+			{
+				continue;
+			}
+
 			if (pBuilding->AIBasePlanningSide == pPrimaryTechTree->SideIndex && AdvAI_Can_Build_Building(pHouse, pBuilding, true))
 			{
 				if (pHouse->ActiveBuildingTypes.GetItemCount(pBuilding->ArrayIndex) < 1)
@@ -2935,6 +2941,12 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 	{
 		// Exclude defenses here, no need to build defenses just to have them
 		if (TechTreeTypeClass::TotalBuildDefense.contains(pBuilding))
+		{
+			continue;
+		}
+
+		// Exclude helipads here, as they are handled dynamically based on occupied docks
+		if (pBuilding->Helipad)
 		{
 			continue;
 		}
@@ -4590,4 +4602,101 @@ void HouseExt::AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse)
 			Debug::Log("AdvAI: Registered new unclaimed Tree Node at (%d,%d) near building %s (distance: %.1f < %.1f). Vector size: %d.\n",
 				targetCoords.X, targetCoords.Y, pClosestBld ? pClosestBld->Type->ID : "???", minBldDist, maxBaseDistance, static_cast<int>(zones.size()));
 	}
+}
+
+CellStruct HouseExt::ExtData::GetCrawlingWaypoint(CellStruct targetCell)
+{
+	if (targetCell.X <= 0 || targetCell.Y <= 0)
+	{
+		return targetCell;
+	}
+
+	const auto pHouse = this->OwnerObject();
+
+	// Find closest building to the target to start the path
+	BuildingClass* pStartBld = nullptr;
+	double minDist = 99999.0;
+	for (const auto pBld : pHouse->Buildings)
+	{
+		if (pBld && pBld->IsAlive && !pBld->InLimbo)
+		{
+			double dist = pBld->GetMapCoords().DistanceFrom(targetCell);
+			if (dist < minDist)
+			{
+				minDist = dist;
+				pStartBld = pBld;
+			}
+		}
+	}
+
+	CellStruct currentStartCoords = pStartBld ? pStartBld->GetMapCoords() : CellStruct(0, 0);
+
+	// 1. Manage Cached A* Path (Recalculate if target changes OR if our bridgehead building changes)
+	if (this->CachedExpansionPathTarget != targetCell || this->CachedExpansionPathStart != currentStartCoords || this->CachedExpansionPath.empty())
+	{
+		if (pStartBld != nullptr)
+		{
+			this->CachedExpansionPath = GeneralUtils::GetAStarPath(currentStartCoords, targetCell, MovementZone::Normal);
+			this->CachedExpansionPathTarget = targetCell;
+			this->CachedExpansionPathStart = currentStartCoords;
+
+			if (!this->CachedExpansionPath.empty())
+			{
+				Debug::Log("AdvAI: Recalculated A* crawl path from (%d,%d) to (%d,%d). Path size: %d cells.\n",
+					currentStartCoords.X, currentStartCoords.Y, targetCell.X, targetCell.Y, static_cast<int>(this->CachedExpansionPath.size()));
+			}
+		}
+		else
+		{
+			this->CachedExpansionPath.clear();
+			this->CachedExpansionPathTarget = CellStruct(0, 0);
+			this->CachedExpansionPathStart = CellStruct(0, 0);
+		}
+	}
+
+	if (this->CachedExpansionPath.empty())
+	{
+		return targetCell;
+	}
+
+	// 2. Find the furthest cell on the path that is within building adjacency range
+	size_t furthestIdx = 0;
+	bool foundAny = false;
+
+	for (size_t i = 0; i < this->CachedExpansionPath.size(); ++i)
+	{
+		bool closeToExisting = false;
+		for (const auto pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo)
+			{
+				// Typically build range is up to 15.0 cells
+				if (pBld->GetMapCoords().DistanceFrom(this->CachedExpansionPath[i]) <= 15.0)
+				{
+					closeToExisting = true;
+					break;
+				}
+			}
+		}
+
+		if (closeToExisting)
+		{
+			furthestIdx = i;
+			foundAny = true;
+		}
+	}
+
+	if (!foundAny)
+	{
+		return targetCell;
+	}
+
+	// 3. Set waypoint to be 10 cells further along the path
+	size_t waypointIdx = furthestIdx + 10;
+	if (waypointIdx >= this->CachedExpansionPath.size())
+	{
+		return targetCell;
+	}
+
+	return this->CachedExpansionPath[waypointIdx];
 }
