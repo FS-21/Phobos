@@ -1007,8 +1007,8 @@ Phobos introduces a port of the custom Advanced AI building, expansion, and supp
   - `AdvancedAI` Enables the custom Advanced AI logics. Replaces the vanilla AI's rigid layout system with a dynamic, human-like base expansion planner. The AI actively expands towards resource fields via base-crawling (placing structures sequentially to extend build radius) and establishes outposts and secondary bases near resource fields.
   - `AdvancedAI.NavalMode` Enables Advanced AI naval construction mode. When enabled, the AI adapts its base planning algorithms for water-centric maps:
     - **Build Order / Priority Swap**: Prioritizes building Naval Yards over War Factories.
-    - **Structural Cap Reductions**: Limits land-based unit production capacity on water maps by capping Barracks (Easy: 3, Normal: 4, Hard: 6) and War Factories (Easy: 2, Normal: 3, Hard: 4).
-    - **Naval Yard Expansion**: Increases the target Naval Yard limit (up to 4) and raises the dynamic cap (Easy: 4, Normal: 8, Hard: 12).
+    - **Structural Cap Reductions**: Limits land-based unit production capacity on water maps by capping Barracks and War Factories to a lower maximum (Easy: 2, Normal: 3, Hard: 4).
+    - **Naval Yard Expansion**: Increases the target Naval Yard limit (up to 4) and raises the dynamic cap (Easy: 4, Normal: 6, Hard: 9).
     - **Competitive Helipad Scaling**: On non-Easy difficulties, helipad count scales dynamically to match the opponent's helipad counts.
     - **Naval Spacing Rule**: Enforces a minimum spacing of `5.0` cells between naval structures in naval mode, and `2.0` cells when not in naval mode, to avoid unit exit traffic jams.
   - `AdvancedAI.MultiConYard` Enables the AI to build and own multiple Construction Yards.
