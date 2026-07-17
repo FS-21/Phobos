@@ -1000,7 +1000,7 @@ ID=EventCount,...,606,2,0,[AttachEffectType],...
 
 ## Rampastring's DTA Advanced AI
 
-Phobos introduces a port of the custom Advanced AI building, expansion, and support logics from Rampastring's DTA (Dawn of the Tiberium Age).
+Phobos introduces a heavily modified and expanded version of ZivDero's initial port of Rampastring's DTA (Dawn of the Tiberium Age) Advanced AI building, expansion, and support logics.
 
 ### Advanced AI Configurations
 - Enables custom AI construction and base expansion algorithms.
@@ -1008,9 +1008,9 @@ Phobos introduces a port of the custom Advanced AI building, expansion, and supp
   - `AdvancedAI.NavalMode` Enables Advanced AI naval construction mode. When enabled, the AI adapts its base planning algorithms for water-centric maps:
     - **Build Order / Priority Swap**: Prioritizes building Naval Yards over War Factories.
     - **Structural Cap Reductions**: Limits land-based unit production capacity on water maps by capping Barracks and War Factories to a lower maximum (Easy: 2, Normal: 3, Hard: 4).
-    - **Naval Yard Expansion**: Increases the target Naval Yard limit (up to 4) and raises the dynamic cap (Easy: 4, Normal: 6, Hard: 9).
-    - **Competitive Helipad Scaling**: On non-Easy difficulties, helipad count scales dynamically to match the opponent's helipad counts.
-    - **Naval Spacing Rule**: Enforces a minimum spacing of `5.0` cells between naval structures in naval mode to avoid unit exit traffic jams.
+    - **Naval Yard Expansion & Scaling**: Raises the dynamic shipyard cap (Easy: 4, Normal: 6, Hard: 9) and scales the target Naval Yard count dynamically to match the opponent's shipyard counts. On Hard difficulty, the safety cap scales dynamically up to `opponent shipyards - 1` if it exceeds the base limit of 9.
+    - **Competitive Helipad Scaling**: On non-Easy difficulties, the target helipad count scales dynamically to match the opponent's total aircraft docks, converting them into the equivalent number of helipad structures needed.
+    - **Naval Spacing Rule**: Enforces a minimum spacing of `5.0` cells between naval structures to avoid unit exit traffic jams.
   - `AdvancedAI.MultiConYard` Enables the AI to build and own multiple Construction Yards.
   - `AdvancedAI.MinimumRefineryCount` Specifies the minimum number of refineries the AI will attempt to maintain.
 
@@ -1025,25 +1025,69 @@ AdvancedAI.MinimumRefineryCount=2     ; integer
 
 ### TechTree Building Categories
 - All lists are evaluated and built by selecting a buildable candidate randomly, with the sole exception of `BuildOther`, which is evaluated sequentially in the exact order specified.
-- `Side` The 0-based side index (e.g., `0` for Allies, `1` for Soviets, `2` for Yuri) that this TechTree profile belongs to.
+- `SideIndex` The 0-based side index (e.g., `0` for Allies, `1` for Soviets, `2` for Yuri) that this TechTree profile belongs to.
+- `BuildConst` The Construction Yard type class for this TechTree. The AI uses this to identify which TechTree profile is suitable for the Construction Yard they currently own.
 - `BuildPower` List of basic power plants. Evaluated when the AI house's power surplus is below `[General] -> PowerSurplus` (or rulesmd.ini default).
-- `BuildAdvancedPower` List of advanced power plants. Constructed instead of basic power plants when surplus power is low and tech requirements are met.
+- `BuildAdvancedPower` List of advanced power plants. The AI prioritizes constructing these over basic power plants once their tech requirements are met (saving space and maximizing power output). However, the AI **specifically excludes advanced power plants from combat crawling**; it exclusively uses basic power plants (`BuildPower`) as cheap, expendable pivot structures to extend its base radius towards expansions.
+- `BuildRefinery` List of ore refineries or resource gathering structures.
+- `BuildBarracks` List of infantry training structures.
+- `BuildWeapons` List of unit production factories.
+- `BuildNavalYard` List of shipyards or naval ports.
 - `BuildDefense` List of defensive structures built to protect base boundaries. Evaluated probabilistically per cycle (50% evaluation probability normally, 70% under threat, 100% if active frontline threat requires defenses).
-- `BuildOther` List of other key structures (such as refineries, barracks, radars, tech centers) constructed **sequentially**. The AI builds each item up to its specified count before proceeding to evaluate the next item in the list.
-- `BuildOtherCounts` List of integers specifying the desired quantity for each corresponding building in `BuildOther`. Defaults to 1 if unspecified.
-- `BuildServiceDepot` List of service depots or repair bays.
-- `BuildSupport` List of support buildings (Stealth/Gap Generators, EMP Cannons, etc.) built to defend/shield the base. These are only constructed when key buildings are not covered by their support network's radius. Checked with a **75% skip chance per cycle** to avoid starving other tech choices.
+- `BuildRadar` List of radar or spy structures.
+- `BuildTech` List of technology center structures.
+- `BuildHelipad` List of airfields or helipads.
+- `BuildSupport` List of support buildings built to defend/shield the base. These are only constructed when key base structures (such as Construction Yards, factories, refineries, radar, helipads, and high-tech buildings) lack coverage from their corresponding support network. Checked with a **75% skip chance per cycle** to avoid starving other tech choices.
+  - **Support Categories**:
+    - **Cloak Generators** (`CloakGenerator=yes`): Radius determined by `CloakRadiusInCells`.
+    - **Gap Generators** (`GapGenerator=yes`): Radius determined by `GapRadiusInCells` or `SuperGapRadiusInCells`.
+    - **Inhibitors**: Radius determined by `InhibitorRange`.
+    - **Radar Jammers**: Radius determined by `RadarJamRadius`.
+    - **EMP Cannons** (`EMPulseCannon=yes`): Radius determined by the associated SuperWeapon's range tags (`SW.RangeMaximum` or `SW.RangeMinimum` under `[SuperWeaponType]`), falling back to the building's primary weapon range (divided by `256` leptons per cell) if no SuperWeapon range is set.
+  - **Spacing Rules**:
+    - **Target Separation**: Enforces a minimum spacing between individual support structures of the same network to avoid redundant clumping. Spacing is `8` cells by default, scaling to `radius * 1.8` cells when `radius > 1` (or `30` cells for EMP Cannons).
+  - **GroupAs Integration**: Buildings sharing the same `GroupAs` tag (or Selection Group ID) are treated as the same support network type, preventing the AI from building duplicate structures if a functional equivalent is already covering the area.
 - `PreBuildOtherRandom` List of buildings constructed **randomly** (with a **50% skip chance per cycle** to make the build order unpredictable). Evaluated before starting the `BuildOther` sequence.
 - `PreBuildOtherRandomCounts` List of integers specifying the desired quantity for each corresponding building in `PreBuildOtherRandom`. Defaults to 1 if unspecified.
+- `BuildOther` List of other key structures (such as refineries, barracks, radars, tech centers) constructed **sequentially**. The AI builds each item up to its specified count before proceeding to evaluate the next item in the list.
+- `BuildOtherCounts` List of integers specifying the desired quantity for each corresponding building in `BuildOther`. Defaults to 1 if unspecified.
 - `PostBuildOtherRandom` List of buildings constructed **randomly** (always evaluated without skip chances). Evaluated after the `BuildOther` sequence completes.
 - `PostBuildOtherRandomCounts` List of integers specifying the desired quantity for each corresponding building in `PostBuildOtherRandom`. Defaults to 1 if unspecified.
+- `BuildServiceDepot` List of service depots or repair bays. The AI scales the target quantity dynamically based on its economy, aiming for `1 + (refineries / 4)` depots. The AI prefers to place them near unit production factories (War Factories) or Refineries (ideally between `3.0` and `8.0` cells away), while maintaining a minimum separation of `25.0` cells between individual depots.
 - `LimitedFactories` (boolean) If set to `true` (default), the AI enforces difficulty-based maximum safety limits (caps) on factory construction (such as capping barracks and War Factories to 12 on Hard, 8 on Normal, 6 on Easy). Even if the AI's dynamic formulas—which scale the optimal factory counts based on refinery counts (e.g., `1 + (refineries / 3)`)—recommend more structures, the AI will stop building them once the cap is reached. If set to `false`, these safety caps are bypassed, allowing the factory limits to scale indefinitely based on the refinery formulas.
+
+#### List Evaluation Order
+- During each AI decision cycle, the TechTree categories are evaluated in the following sequence:
+1. **BuildPower**: Evaluated first to maintain baseline power generation.
+2. **BuildRefinery** (Emergency): Builds the first refinery if the AI owns none.
+3. **BuildBarracks** (Emergency): Builds the first barracks if the AI owns none.
+4. Factories:
+   - **Normal Mode** (`AdvancedAI.NavalMode=false`): Evaluates `BuildWeapons` (War Factory) first, then `BuildNavalYard` (Shipyard).
+   - **Naval Mode** (`AdvancedAI.NavalMode=true`): Prioritizes naval construction, evaluating `BuildNavalYard` (Shipyard) first, then `BuildWeapons` (War Factory).
+5. **BuildDefense**: Evaluated probabilistically or due to active frontline threats.
+6. **BuildRefinery** (General): Builds refineries up to `AdvancedAI.MinimumRefineryCount`.
+7. **BuildRadar**: Evaluated to establish radar coverage once factories are built.
+8. **BuildTech**: Evaluated to unlock high-tech options.
+9. **BuildHelipad**: Evaluated to deploy aircraft.
+10. **BuildSupport**: Evaluated to shield or cover key base structures.
+11. **PreBuildOtherRandom**: Evaluated before `BuildOther` (50% skip chance per cycle, choosing a candidate randomly).
+12. **BuildOther**: Evaluated sequentially in the exact specified order.
+13. **PostBuildOtherRandom**: Evaluated after `BuildOther` is completed (no skip chance, choosing a candidate randomly).
+14. **BuildServiceDepot**: Evaluated to allow repairs. Scales dynamically based on refineries (`1 + (refineries / 4)`), preferring placement near War Factories or Refineries (between `3.0` and `8.0` cells away) and enforcing a `25.0` cell minimum spacing from other depots.
 
 In `rulesmd.ini`:
 ```ini
 [SideTechTree]                        ; TechTree
-Side=                                 ; integer
+SideIndex=                            ; integer
+BuildConst=                           ; BuildingType
 BuildPower=                           ; list of BuildingType
+BuildRefinery=                        ; list of BuildingType
+BuildBarracks=                        ; list of BuildingType
+BuildWeapons=                         ; list of BuildingType
+BuildRadar=                           ; list of BuildingType
+BuildHelipad=                         ; list of BuildingType
+BuildNavalYard=                       ; list of BuildingType
+BuildTech=                            ; list of BuildingType
 BuildAdvancedPower=                   ; list of BuildingType
 BuildDefense=                         ; list of BuildingType
 BuildOther=                           ; list of BuildingType
@@ -1064,7 +1108,6 @@ LimitedFactories=true                 ; boolean
   - `AIInnerBase` (boolean) If set to `true`, the building is treated as an inner-base structure. The AI will place it near the base center (rewarded for proximity to the Construction Yard), enforce dispersion spacing from other inner-base buildings, and prevent placing it at frontline expansions or outposts. If set to `false`, the structure can be constructed at expansions. Defaults to `true` if the building has `CloakGenerator=yes` or `GapGenerator=yes` configured, and `false` otherwise.
 - **Affected Lists**:
   - `AIBuildCounts` and `AIExtraCounts` are only supported and evaluated for buildings placed in the `BuildOther` (takes priority over `BuildOtherCounts` if explicitly defined on the building type), `PreBuildOtherRandom` (takes priority over `PreBuildOtherRandomCounts` if explicitly defined on the building type), `PostBuildOtherRandom` (takes priority over `PostBuildOtherRandomCounts` if explicitly defined on the building type), and `BuildSupport` (acts as the maximum limit; falls back to `BuildLimit`) categories. Other lists (like power plants, barracks, factories, refineries, radars, helipads, and tech centers) determine their build limits dynamically and do not support these tags.
-  - `AIInnerBase` is evaluated generically for all buildings during base placement scans, but it specifically determines whether general structures and helipads are permitted to be placed at distant expansion outposts.
 
 In `rulesmd.ini`:
 ```ini
@@ -1075,8 +1118,8 @@ AIInnerBase=false                     ; boolean
 ```
 
 #### Unlisted Buildings & Secret Lab Tech
-- **Unlisted `AICanBuildThis=yes` Buildings**: If a building is not listed in any `[SideTechTree]` category but has `AICanBuildThis=yes` (or `AIBuildThis=yes`) defined, the AI will actively evaluate it. If the building's `AIBasePlanningSide` matches the AI's current side, and its prerequisites are met, the AI will queue and construct **exactly 1** instance of it.
-- **Secret Lab Unlocks**: If a building is flagged with `ConsideredSecretLabTech=yes`, the AI is blocked from constructing it by default. However, once the AI captures a Secret Lab and successfully unlocks that building type, the AI will detect that the prerequisites are now met. If the building has `AICanBuildThis=yes` set and belongs to the AI's planning side, the AI will automatically build **exactly 1** instance of it. Note that special structures—such as defenses or support buildings—must be explicitly placed in their corresponding TechTree lists (e.g. `BuildDefense` or `BuildSupport`) for the AI to actively evaluate, construct, and place them according to their specific logic once unlocked, as they are excluded from the unlisted fallback checks.
+- **Unlisted `AIBuildThis=yes` Buildings**: If a building is not listed in any `[SideTechTree]` category but has `AIBuildThis=yes` defined, the AI will actively evaluate it. If the building's `AIBasePlanningSide` matches the AI's current side, and its prerequisites are met, the AI will queue and construct **exactly 1** instance of it.
+- **Secret Lab Unlocks**: If a building is flagged with `ConsideredSecretLabTech=yes`, the AI is blocked from constructing it by default. However, once the AI captures a Secret Lab and successfully unlocks that building type, the AI will detect that the prerequisites are now met. If the building has `AIBuildThis=yes` set and belongs to the AI's planning side, the AI will automatically build **exactly 1** instance of it. Note that special structures—such as defenses or support buildings—must be explicitly placed in their corresponding TechTree lists (e.g. `BuildDefense` or `BuildSupport`) for the AI to actively evaluate, construct, and place them according to their specific logic once unlocked, as they are excluded from the unlisted fallback checks.
 
 ### Support Buildings Spacing Rules
 - The Advanced AI uses automatic localized spacing and coverage rules to deploy support buildings efficiently across the base based on their configured radius tags:
@@ -1088,4 +1131,4 @@ AIInnerBase=false                     ; boolean
 ### Building Upgrades Logic
 - The Advanced AI evaluates building upgrades (structures with `PowersUp.Buildings` defined) using these safety rules to prevent queue locking:
   - **Prerequisite Validation**: The upgrade will only be queued if the AI owns at least one target base structure that has not yet reached its maximum upgrade level (`pBuilding->UpgradeLevel < pBuilding->Type->Upgrades`).
-  - **Power Upgrades**: If the upgrade targets a powerplant type (listed under `BuildPower` or `BuildAdvancedPower`), the AI will only build it if the base currently has low power surplus (surplus power is below the threshold). Additionally, the AI checks if there is at least one upgradeable powerplant situated within `20` cells of the Construction Yard (or the base center) to avoid placing upgrades at isolated or distant outposts.
+  - **Power Upgrades**: If the upgrade targets a powerplant type (listed under `BuildPower` or `BuildAdvancedPower`), the AI regulates its construction based on power needs: if the base has a power deficit, the upgrade is allowed unconditionally to recover power quickly. If the base already has a sufficient power surplus, the upgrade is blocked unless there is at least one upgradeable powerplant situated within `20` cells of the Construction Yard (or base center), protecting expensive upgrades from being placed at vulnerable frontline outposts.

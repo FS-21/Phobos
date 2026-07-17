@@ -52,9 +52,8 @@ public:
 	std::map<BuildingTypeClass*, int> PreBuildOtherRandomCountMap;
 	std::map<BuildingTypeClass*, int> PostBuildOtherRandomCountMap;
 	Valueable<bool> LimitedFactories;
-	Valueable<bool> IsNavalMode;
 
-	TechTreeTypeClass(const char* pTitle = NONE_STR) : Enumerable(pTitle), LimitedFactories(true), IsNavalMode(false) { }
+	TechTreeTypeClass(const char* pTitle = NONE_STR) : Enumerable(pTitle), LimitedFactories(true) { }
 
 	virtual void LoadFromINI(CCINIClass* pINI);
 	virtual void LoadFromStream(PhobosStreamReader& Stm);

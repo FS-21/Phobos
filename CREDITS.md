@@ -156,6 +156,7 @@ This page lists all the individual contributions to the project by their author.
   - Event 606: AttachEffect is attaching to a Techno
   - Linked superweapons
   - Unit & infantry auto-conversion on ammo change
+  - Heavily modified and expanded version of ZivDero's initial port of Rampastring's DTA Advanced AI logics
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
@@ -867,3 +868,5 @@ This page lists all the individual contributions to the project by their author.
 - **Chang_zhi**:
   - Interop export interface for accessing scenario local/global variables
   - Add `ClampToScreen` tag for `BannerType` to control whether banner position is clamped to the visible area
+- **ZivDero**:
+  - Initial port of Rampastring's DTA Advanced AI logics

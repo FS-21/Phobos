@@ -361,7 +361,6 @@ void TechTreeTypeClass::LoadFromINI(CCINIClass* pINI)
 	this->PreBuildOtherRandomCounts.Read(exINI, section, "PreBuildOtherRandomCounts");
 	this->PostBuildOtherRandomCounts.Read(exINI, section, "PostBuildOtherRandomCounts");
 	this->LimitedFactories.Read(exINI, section, "LimitedFactories");
-	this->IsNavalMode.Read(exINI, section, "IsNavalMode");
 
 	for (size_t i = 0; i < BuildOther.size(); i++)
 	{
@@ -424,7 +423,6 @@ void TechTreeTypeClass::Serialize(T& Stm)
 		.Process(PreBuildOtherRandomCounts)
 		.Process(PostBuildOtherRandomCounts)
 		.Process(LimitedFactories)
-		.Process(IsNavalMode)
 		;
 }
 

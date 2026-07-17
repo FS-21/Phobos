@@ -2744,8 +2744,8 @@ bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 
 			bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 
-			// Find the number of helipads owned by the current enemy
-			int enemyHelipadCount = 0;
+			// Find the number of helipad docks owned by the current enemy
+			int enemyHelipadDocks = 0;
 			HouseClass* pEnemyHelipad = nullptr;
 			if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
 			{
@@ -2764,7 +2764,7 @@ bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 					{
 						if (pBuilding->Type->Helipad)
 						{
-							enemyHelipadCount++;
+							enemyHelipadDocks += pBuilding->Type->NumberOfDocks > 0 ? pBuilding->Type->NumberOfDocks : 1;
 						}
 					}
 				}
@@ -2798,9 +2798,10 @@ bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 			// Competitive scaling for helipads under naval mode (non-Easy difficulties)
 			if (isNavalMode && pHouse->AIDifficulty != AIDifficulty::Easy)
 			{
-				if (static_cast<size_t>(enemyHelipadCount) > optimalHelipadCount)
+				const size_t targetHelipadsToMatchEnemyDocks = (static_cast<size_t>(enemyHelipadDocks) + docksPerHelipad - 1) / docksPerHelipad;
+				if (targetHelipadsToMatchEnemyDocks > optimalHelipadCount)
 				{
-					optimalHelipadCount = static_cast<size_t>(enemyHelipadCount);
+					optimalHelipadCount = targetHelipadsToMatchEnemyDocks;
 				}
 			}
 
@@ -2969,6 +2970,37 @@ bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 
 
 
+		// PreBuildOtherRandom evaluation
+		const auto buildablePreRandomTypes = pPrimaryTechTree->GetBuildable(TechTreeTypeClass::BuildType::PreBuildOtherRandom, canBuildFunction);
+		if (!buildablePreRandomTypes.empty())
+		{
+			// 50% skip chance per cycle
+			const bool skipPreRandom = ScenarioClass::Instance->Random.RandomRanged(0, 99) < 50;
+			if (!skipPreRandom)
+			{
+				std::vector<BuildingTypeClass*> preRandomCandidates;
+				for (const auto pBldType : buildablePreRandomTypes)
+				{
+					const int targetCount = GetTargetBuildCount(pBldType, -1, pPrimaryTechTree);
+					if (pHouse->ActiveBuildingTypes.GetItemCount(pBldType->ArrayIndex) < targetCount)
+					{
+						preRandomCandidates.push_back(pBldType);
+					}
+				}
+
+				if (!preRandomCandidates.empty())
+				{
+					BuildingTypeClass* pChosen = preRandomCandidates[
+						ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(preRandomCandidates.size()) - 1)];
+
+					Debug::Log("AdvAI: Making AI build %s from PreBuildOtherRandom.\n",
+						pChosen->Name);
+
+					return pChosen;
+				}
+			}
+		}
+
 		for (const auto buildOtherPair : pPrimaryTechTree->BuildOtherCountMap)
 		{
 			if (!AdvAI_Can_Build_Building(pHouse, buildOtherPair.first, true))
@@ -3015,6 +3047,32 @@ bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 						pBuilding->Name);
 					return pBuilding;
 				}
+			}
+		}
+
+		// PostBuildOtherRandom evaluation
+		const auto buildablePostRandomTypes = pPrimaryTechTree->GetBuildable(TechTreeTypeClass::BuildType::PostBuildOtherRandom, canBuildFunction);
+		if (!buildablePostRandomTypes.empty())
+		{
+			std::vector<BuildingTypeClass*> postRandomCandidates;
+			for (const auto pBldType : buildablePostRandomTypes)
+			{
+				const int targetCount = GetTargetBuildCount(pBldType, -1, pPrimaryTechTree);
+				if (pHouse->ActiveBuildingTypes.GetItemCount(pBldType->ArrayIndex) < targetCount)
+				{
+					postRandomCandidates.push_back(pBldType);
+				}
+			}
+
+			if (!postRandomCandidates.empty())
+			{
+				BuildingTypeClass* pChosen = postRandomCandidates[
+					ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(postRandomCandidates.size()) - 1)];
+
+				Debug::Log("AdvAI: Making AI build %s from PostBuildOtherRandom.\n",
+					pChosen->Name);
+
+				return pChosen;
 			}
 		}
 
