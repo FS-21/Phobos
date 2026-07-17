@@ -307,6 +307,16 @@ void BuildingExt::Mark_Expansion_As_Done(HouseClass* pHouse)
 	if (ext->NextExpansionPointLocation.X == 0 || ext->NextExpansionPointLocation.Y == 0)
 		return;
 
+	if (ext->NextExpansionPointLocation == ext->CombatCrawlingTarget)
+	{
+		ext->CombatCrawlingTarget = CellStruct(0, 0);
+	}
+	else if (ext->NextExpansionPointLocation == ext->ResourceCrawlingTarget)
+	{
+		ext->ResourceCrawlingTarget = CellStruct(0, 0);
+		ext->ResourceShouldBuildRefinery = false;
+	}
+
 	ext->NextExpansionPointLocation = CellStruct(0, 0);
 	ext->ShouldBuildRefinery = false;
 
@@ -2000,7 +2010,7 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 	// +1 allows one cell of adjacency leniency to hop over small gaps.
 	const int adjRange = pBuildingType->Adjacent + 1;
 
-	const CellStruct& expansionTarget = houseExt->NextExpansionPointLocation;
+	const CellStruct& expansionTarget = pBuildingType->ResourceDestination ? (houseExt->NextRefineryPlacementLocation.X > 0 ? houseExt->NextRefineryPlacementLocation : houseExt->ResourceCrawlingTarget) : houseExt->NextExpansionPointLocation;
 	const bool hasExpansionTarget = expansionTarget.X > 0 && expansionTarget.Y > 0;
 
 	if (hasExpansionTarget)
@@ -2917,11 +2927,24 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 
 	if (result == 2)
 	{
+		const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
+
 		if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
 		{
-			const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
 			const char* groupID = GetGroupAsID(pBuilding->Type);
 			houseExt->GroupConsecutiveFailures[groupID] = 0;
+		}
+
+		if (houseExt->CombatCrawlingTarget.X > 0 && houseExt->ResourceCrawlingTarget.X > 0)
+		{
+			if (pBuilding->Type->ResourceDestination)
+			{
+				houseExt->ConsecutiveCombatBuilds = 0;
+			}
+			else if (pBuilding->Type->IsBaseDefense)
+			{
+				houseExt->ConsecutiveCombatBuilds++;
+			}
 		}
 
 		if (HasEnemyThreatsNear(placementCell, pBuilding->Owner, 8.0))

@@ -464,10 +464,15 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 {
 	const auto ext = ExtMap.Find(pHouse);
 
-	if (ext->NextExpansionPointLocation.X != 0 && ext->NextExpansionPointLocation.Y != 0)
+	const bool needCombatTarget = (ext->CombatCrawlingTarget.X == 0 || ext->CombatCrawlingTarget.Y == 0);
+	const bool needResourceTarget = (ext->ResourceCrawlingTarget.X == 0 || ext->ResourceCrawlingTarget.Y == 0);
+
+	if (!needCombatTarget && !needResourceTarget)
 	{
 		return false;
 	}
+
+	bool foundAny = false;
 
 	// Delay active expansion until we have completed our Tech Center,
 	// ensuring all early building cycles and funds go directly to teching up.
@@ -506,7 +511,7 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 	double maxDist = 80.0 + (refineryCount > 3 ? (refineryCount - 3) * 10.0 : 0.0) + (Unsorted::CurrentFrame / 9000.0) * 10.0;
 	double maxDistSq = maxDist * maxDist;
 
-	if (refineryCount >= 3)
+	if (needCombatTarget && refineryCount >= 3)
 	{
 		const HouseClass* pEnemy = nullptr;
 		if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
@@ -587,10 +592,12 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 
 				if (bestEnemyTarget.X > 0 && bestEnemyTarget.Y > 0)
 				{
-					ext->NextExpansionPointLocation = bestEnemyTarget;
+					ext->CombatCrawlingTarget = bestEnemyTarget;
 					Debug::Log("AdvAI SearchExpansion: House %d starting COMBAT crawling towards enemy %d (%s) at (%d,%d).\n",
 						pHouse->ArrayIndex, pEnemy->ArrayIndex, pEnemy->Type->ID, bestEnemyTarget.X, bestEnemyTarget.Y);
-					return true;
+					foundAny = true;
+					if (!needResourceTarget)
+						return true;
 				}
 			}
 		}
@@ -1217,19 +1224,23 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			// If the enemy base is within crawling range
 			if (nearestEnemyDistSq <= maxDistSq && enemyTarget.X > 0 && enemyTarget.Y > 0)
 			{
-				ext->NextExpansionPointLocation = enemyTarget;
+				ext->CombatCrawlingTarget = enemyTarget;
 				Debug::Log("AdvAI ExpansionSearch: House %d: All Tiberium fields taken. Crawling towards enemy House %d (%s) base at (%d,%d) at dist %.1f cells (Limit: %.1f).\n",
 					pHouse->ArrayIndex, pEnemy->ArrayIndex, pEnemy->Type->ID, enemyTarget.X, enemyTarget.Y, std::sqrt(nearestEnemyDistSq), maxDist);
-				return true;
+				foundAny = true;
 			}
 		}
 
-		return false;
+		return foundAny;
 	}
 
-	ext->NextExpansionPointLocation = target;
+	if (needResourceTarget && target.X > 0 && target.Y > 0)
+	{
+		ext->ResourceCrawlingTarget = target;
+		foundAny = true;
+	}
 
-	return true;
+	return foundAny;
 }
 
 
@@ -3812,8 +3823,9 @@ void HouseExt::Vinifera_HouseClass_AI_Building(HouseClass* pHouse)
 
 	const auto houseExt = ExtMap.Find(pHouse);
 
-	// If we have nowhere to expand towards, check for a new location to expand to.
-	if (houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0)
+	// If either target is missing, check for a new location to expand to.
+	if (houseExt->CombatCrawlingTarget.X <= 0 || houseExt->CombatCrawlingTarget.Y <= 0 ||
+		houseExt->ResourceCrawlingTarget.X <= 0 || houseExt->ResourceCrawlingTarget.Y <= 0)
 	{
 		if (Unsorted::CurrentFrame >= houseExt->NextExpansionSearchFrame)
 		{
@@ -3822,6 +3834,45 @@ void HouseExt::Vinifera_HouseClass_AI_Building(HouseClass* pHouse)
 		}
 	}
 
+	// Sync the previous ShouldBuildRefinery state back to ResourceShouldBuildRefinery if we were targeting resources
+	if (houseExt->NextExpansionPointLocation == houseExt->ResourceCrawlingTarget)
+	{
+		houseExt->ResourceShouldBuildRefinery = houseExt->ShouldBuildRefinery;
+	}
+
+	// Dynamic alternating target logic
+	const bool isParanoid = (pHouse->LATime + 900 > Unsorted::CurrentFrame);
+	const int combatLimit = isParanoid ? 5 : 3;
+
+	if (houseExt->CombatCrawlingTarget.X > 0 && houseExt->CombatCrawlingTarget.Y > 0 &&
+		houseExt->ResourceCrawlingTarget.X > 0 && houseExt->ResourceCrawlingTarget.Y > 0)
+	{
+		if (houseExt->ConsecutiveCombatBuilds < combatLimit)
+		{
+			houseExt->NextExpansionPointLocation = houseExt->CombatCrawlingTarget;
+			houseExt->ShouldBuildRefinery = false;
+		}
+		else
+		{
+			houseExt->NextExpansionPointLocation = houseExt->ResourceCrawlingTarget;
+			houseExt->ShouldBuildRefinery = houseExt->ResourceShouldBuildRefinery;
+		}
+	}
+	else if (houseExt->CombatCrawlingTarget.X > 0 && houseExt->CombatCrawlingTarget.Y > 0)
+	{
+		houseExt->NextExpansionPointLocation = houseExt->CombatCrawlingTarget;
+		houseExt->ShouldBuildRefinery = false;
+	}
+	else if (houseExt->ResourceCrawlingTarget.X > 0 && houseExt->ResourceCrawlingTarget.Y > 0)
+	{
+		houseExt->NextExpansionPointLocation = houseExt->ResourceCrawlingTarget;
+		houseExt->ShouldBuildRefinery = houseExt->ResourceShouldBuildRefinery;
+	}
+	else
+	{
+		houseExt->NextExpansionPointLocation = CellStruct(0, 0);
+		houseExt->ShouldBuildRefinery = false;
+	}
 
 	const BuildingTypeClass* toBuild = AdvAI_Get_Building_To_Build(pHouse);
 

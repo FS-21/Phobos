@@ -84,6 +84,10 @@ public:
 		 *  this records the cell that we are expanding towards.
 		 */
 		CellStruct NextExpansionPointLocation { 0, 0 };
+		CellStruct CombatCrawlingTarget { 0, 0 };
+		CellStruct ResourceCrawlingTarget { 0, 0 };
+		int ConsecutiveCombatBuilds { 0 };
+		bool ResourceShouldBuildRefinery { false };
 
 		struct BlockedExpansionPoint
 		{
@@ -223,6 +227,10 @@ public:
 			, ExpansionPlacementFailures { 0 }
 			, LastFactoryRecycleFrame { 0 }
 			, NextExpansionSearchFrame { 0 }
+			, CombatCrawlingTarget { 0, 0 }
+			, ResourceCrawlingTarget { 0, 0 }
+			, ConsecutiveCombatBuilds { 0 }
+			, ResourceShouldBuildRefinery { false }
 			, NextBlacklistClearFrame { 0 }
 			, LastObsoleteRefineryCheckFrame { 0 }
 			, LastServiceDepotPlacementFailedFrame { 0 }
