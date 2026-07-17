@@ -2472,9 +2472,9 @@ bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode
 				// Find the number of Naval Yards owned by the current enemy
 				int enemyNavalYardsCount = 0;
 				HouseClass* pEnemy = nullptr;
-				if (pHouse->EnemyHouseIndex != -1)
+				if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
 				{
-					pEnemy = HouseClass::FindByCountryIndex(pHouse->EnemyHouseIndex);
+					pEnemy = HouseClass::Array[pHouse->EnemyHouseIndex];
 				}
 				if (pEnemy == nullptr)
 				{
@@ -2747,9 +2747,9 @@ bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode
 			// Find the number of helipads owned by the current enemy
 			int enemyHelipadCount = 0;
 			HouseClass* pEnemyHelipad = nullptr;
-			if (pHouse->EnemyHouseIndex != -1)
+			if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
 			{
-				pEnemyHelipad = HouseClass::FindByCountryIndex(pHouse->EnemyHouseIndex);
+				pEnemyHelipad = HouseClass::Array[pHouse->EnemyHouseIndex];
 			}
 			if (pEnemyHelipad == nullptr)
 			{
@@ -3827,9 +3827,9 @@ void HouseExt::AdvAI_Economy_Upkeep(HouseClass* pHouse)
 	// It probably won't go horribly wrong anyway.
 
 	const HouseClass* pEnemy = nullptr;
-	if (pHouse->EnemyHouseIndex != -1)
+	if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
 	{
-		pEnemy = HouseClass::FindByCountryIndex(pHouse->EnemyHouseIndex);
+		pEnemy = HouseClass::Array[pHouse->EnemyHouseIndex];
 	}
 
 	CellStruct centerPoint;
