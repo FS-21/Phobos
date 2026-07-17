@@ -2743,6 +2743,31 @@ bool isNavalMode = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
 
 			bool isNavalMode = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
 
+			// Find the maximum number of helipads owned by any other house
+			int maxHelipadsOwnedByOther = 0;
+			for (const auto pOtherHouse : HouseClass::Array)
+			{
+				if (pOtherHouse == pHouse || pHouse->IsAlliedWith(pOtherHouse))
+					continue;
+
+				int otherHelipadCount = 0;
+				for (const auto pBuilding : BuildingClass::Array)
+				{
+					if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pOtherHouse)
+					{
+						if (pBuilding->Type->Helipad)
+						{
+							otherHelipadCount++;
+						}
+					}
+				}
+
+				if (otherHelipadCount > maxHelipadsOwnedByOther)
+				{
+					maxHelipadsOwnedByOther = otherHelipadCount;
+				}
+			}
+
 			int minInitialDocks = 8;
 			if (pHouse->AIDifficulty == AIDifficulty::Easy)
 				minInitialDocks = 2;
@@ -2766,6 +2791,15 @@ bool isNavalMode = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
 			else
 			{
 				optimalHelipadCount = (totalAircraft >= totalCurrentDocks) ? totalHelipadsOwned + 1 : totalHelipadsOwned;
+			}
+
+			// Competitive scaling for helipads under naval mode (non-Easy difficulties)
+			if (isNavalMode && pHouse->AIDifficulty != AIDifficulty::Easy)
+			{
+				if (static_cast<size_t>(maxHelipadsOwnedByOther) > optimalHelipadCount)
+				{
+					optimalHelipadCount = static_cast<size_t>(maxHelipadsOwnedByOther);
+				}
 			}
 
 			bool limitHelipadFactories = limitFactories && !isNavalMode;
