@@ -2686,6 +2686,16 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 
 				for (const auto pSupportType : buildableSupportTypes)
 				{
+					const char* groupID = GetGroupAsID(const_cast<BuildingTypeClass*>(pSupportType));
+					auto it = houseExt->GroupPlacementCooldowns.find(groupID);
+					if (it != houseExt->GroupPlacementCooldowns.end())
+					{
+						if (Unsorted::CurrentFrame < it->second)
+						{
+							continue; // Excluded from candidates due to active progressive cooldown
+						}
+					}
+
 					const SupportRadiusType supportType = GetSupportRadiusType(pSupportType);
 					const int radius = GetSupportRadius(pSupportType);
 					

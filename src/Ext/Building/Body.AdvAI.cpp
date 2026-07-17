@@ -2875,8 +2875,24 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 	if (placementCell.X <= 0 || placementCell.Y <= 0)
 	{
 		const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
-		houseExt->PlacementFailedCooldowns[pBuilding->Type] = Unsorted::CurrentFrame + 450; // 30 second cooldown at 15 FPS
-		Debug::Log("AdvAI: AI %d failed to place building %s. Putting on placement cooldown for 30s.\n", pBuilding->Owner->ArrayIndex, pBuilding->Type->ID);
+		if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
+		{
+			const char* groupID = GetGroupAsID(pBuilding->Type);
+			int failures = ++houseExt->GroupConsecutiveFailures[groupID];
+			// 30 seconds increments: 450 frames * failures
+			int cooldownFrames = 450 * failures;
+			// Capped at 10 minutes (9000 frames)
+			cooldownFrames = std::min(9000, cooldownFrames);
+
+			houseExt->GroupPlacementCooldowns[groupID] = Unsorted::CurrentFrame + cooldownFrames;
+			Debug::Log("AdvAI: BuildSupport %s (Group: %s) failed to place (Failures: %d). Group cooldown set for %ds.\n",
+				pBuilding->Type->ID, groupID, failures, cooldownFrames / 15);
+		}
+		else
+		{
+			houseExt->PlacementFailedCooldowns[pBuilding->Type] = Unsorted::CurrentFrame + 450; // 30 second cooldown at 15 FPS
+			Debug::Log("AdvAI: AI %d failed to place building %s. Putting on placement cooldown for 30s.\n", pBuilding->Owner->ArrayIndex, pBuilding->Type->ID);
+		}
 		if (pBuilding->Type->ResourceDestination)
 		{
 			if (houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0)
@@ -2901,6 +2917,13 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 
 	if (result == 2)
 	{
+		if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
+		{
+			const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
+			const char* groupID = GetGroupAsID(pBuilding->Type);
+			houseExt->GroupConsecutiveFailures[groupID] = 0;
+		}
+
 		if (HasEnemyThreatsNear(placementCell, pBuilding->Owner, 8.0))
 		{
 			pBuilding->Owner->LATime = Unsorted::CurrentFrame;

@@ -7,6 +7,7 @@
 #include <Ext/Building/Body.h>
 
 #include <map>
+#include <string>
 
 #include "New/Type/TechTreeTypeClass.h"
 
@@ -145,6 +146,8 @@ public:
 		 *  AI will not attempt to build these building types until the frame has passed.
 		 */
 		std::map<BuildingTypeClass*, int> PlacementFailedCooldowns;
+		std::map<std::string, int> GroupConsecutiveFailures;
+		std::map<std::string, int> GroupPlacementCooldowns;
 		std::map<BuildingTypeClass*, int> FeasibilityFailedCooldowns;
 
 		/**
