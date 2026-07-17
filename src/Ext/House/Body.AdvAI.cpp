@@ -1990,11 +1990,24 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 		}
 
 		// Enforce difficulty-based safety cap for barracks (Easy: 6, Normal: 8, Hard: 12)
+		// Reduced in naval mode (Easy: 3, Normal: 4, Hard: 6) to save space on islands
+		bool isNavalMode = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
 		size_t maxBarracksLimit = 8;
-		if (pHouse->AIDifficulty == AIDifficulty::Easy)
-			maxBarracksLimit = 6;
-		else if (pHouse->AIDifficulty == AIDifficulty::Hard)
-			maxBarracksLimit = 12;
+		if (isNavalMode)
+		{
+			maxBarracksLimit = 4;
+			if (pHouse->AIDifficulty == AIDifficulty::Easy)
+				maxBarracksLimit = 3;
+			else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+				maxBarracksLimit = 6;
+		}
+		else
+		{
+			if (pHouse->AIDifficulty == AIDifficulty::Easy)
+				maxBarracksLimit = 6;
+			else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+				maxBarracksLimit = 12;
+		}
 
 		if (limitFactories && optimalBarracksCount > maxBarracksLimit)
 			optimalBarracksCount = maxBarracksLimit;
@@ -2417,11 +2430,24 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			}
 
 			// Enforce difficulty-based safety cap for War Factories (Easy: 6, Normal: 8, Hard: 12)
+			// Reduced in naval mode (Easy: 2, Normal: 3, Hard: 4) to save space on islands
+			bool isNavalMode = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
 			size_t maxWFLimit = 8;
-			if (pHouse->AIDifficulty == AIDifficulty::Easy)
-				maxWFLimit = 6;
-			else if (pHouse->AIDifficulty == AIDifficulty::Hard)
-				maxWFLimit = 12;
+			if (isNavalMode)
+			{
+				maxWFLimit = 3;
+				if (pHouse->AIDifficulty == AIDifficulty::Easy)
+					maxWFLimit = 2;
+				else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+					maxWFLimit = 4;
+			}
+			else
+			{
+				if (pHouse->AIDifficulty == AIDifficulty::Easy)
+					maxWFLimit = 6;
+				else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+					maxWFLimit = 12;
+			}
 
 			if (limitFactories && optimalWeaponsCount > maxWFLimit)
 				optimalWeaponsCount = maxWFLimit;
@@ -2479,11 +2505,30 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			}
 
 			// Apply difficulty-based safety cap for Naval Yards (Easy: 3, Normal: 5, Hard: 8)
+			// Under naval mode, the cap increases to (Easy: 4, Normal: 8, Hard: 12)
+			// And can dynamically scale up to the enemy's shipyard count - 1
+			bool isNavalMode_SY = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
 			size_t maxNavalYardLimit = 5;
-			if (pHouse->AIDifficulty == AIDifficulty::Easy)
-				maxNavalYardLimit = 3;
-			else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+			if (isNavalMode_SY)
+			{
 				maxNavalYardLimit = 8;
+				if (pHouse->AIDifficulty == AIDifficulty::Easy)
+					maxNavalYardLimit = 4;
+				else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+					maxNavalYardLimit = 12;
+
+				if (maxNavalYardsOwnedByOther > 0 && pHouse->AIDifficulty == AIDifficulty::Hard)
+				{
+					maxNavalYardLimit = std::max(maxNavalYardLimit, static_cast<size_t>(maxNavalYardsOwnedByOther - 1));
+				}
+			}
+			else
+			{
+				if (pHouse->AIDifficulty == AIDifficulty::Easy)
+					maxNavalYardLimit = 3;
+				else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+					maxNavalYardLimit = 8;
+			}
 
 			if (limitFactories && optimalNavalYardCount > maxNavalYardLimit)
 				optimalNavalYardCount = maxNavalYardLimit;
@@ -2629,7 +2674,20 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				}
 			}
 
-			// Count how many docks are currently occupied on our owned helipads
+			// Count all airport-bound aircraft currently owned by this house (including those flying or attacking)
+			int totalAircraft = 0;
+			for (const auto pAircraft : AircraftClass::Array)
+			{
+				if (pAircraft && pAircraft->IsAlive && !pAircraft->InLimbo && pAircraft->Owner == pHouse)
+				{
+					if (pAircraft->Type->AirportBound)
+					{
+						totalAircraft++;
+					}
+				}
+			}
+
+			// Also count actual occupied docks just in case some custom planes are docked but not marked AirportBound
 			int totalOccupiedDocks = 0;
 			for (const auto pBld : pHouse->Buildings)
 			{
@@ -2639,17 +2697,40 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				}
 			}
 
+			if (totalOccupiedDocks > totalAircraft)
+			{
+				totalAircraft = totalOccupiedDocks;
+			}
+
+			bool isNavalMode = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
+
+			int minInitialDocks = 8;
+			if (pHouse->AIDifficulty == AIDifficulty::Easy)
+				minInitialDocks = 2;
+			else if (pHouse->AIDifficulty == AIDifficulty::Normal)
+				minInitialDocks = 6;
+
+			if (isNavalMode)
+			{
+				minInitialDocks = 10;
+				if (pHouse->AIDifficulty == AIDifficulty::Easy)
+					minInitialDocks = 6;
+				else if (pHouse->AIDifficulty == AIDifficulty::Normal)
+					minInitialDocks = 8;
+			}
+
 			size_t optimalHelipadCount = 1;
-			if (totalCurrentDocks < 4)
+			if (totalCurrentDocks < minInitialDocks)
 			{
 				optimalHelipadCount = totalHelipadsOwned + 1;
 			}
 			else
 			{
-				optimalHelipadCount = (totalOccupiedDocks >= totalCurrentDocks) ? totalHelipadsOwned + 1 : totalHelipadsOwned;
+				optimalHelipadCount = (totalAircraft >= totalCurrentDocks) ? totalHelipadsOwned + 1 : totalHelipadsOwned;
 			}
 
-			if (limitFactories)
+			bool limitHelipadFactories = limitFactories && !isNavalMode;
+			if (limitHelipadFactories)
 			{
 				// Enforce difficulty-based safety cap of docks (Easy: 8 docks, Normal: 12 docks, Hard: 16 docks)
 				int maxDocks = 16;
@@ -2671,8 +2752,8 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 
 			if (pHelipadToBuild != nullptr)
 			{
-				Debug::Log("AdvAI: Making AI build %s because it has no free aircraft docks (Total Docks: %d, Occupied Docks: %d, Wanted helipads: %d)\n",
-					pHelipadToBuild->Name, totalCurrentDocks, totalOccupiedDocks, optimalHelipadCount);
+				Debug::Log("AdvAI: Making AI build %s because it has no free aircraft docks (Total Docks: %d, Total Aircraft: %d, Wanted helipads: %d)\n",
+					pHelipadToBuild->Name, totalCurrentDocks, totalAircraft, optimalHelipadCount);
 
 				return pHelipadToBuild;
 			}
