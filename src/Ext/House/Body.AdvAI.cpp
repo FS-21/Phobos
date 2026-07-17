@@ -2469,28 +2469,29 @@ bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode
 			};
 
 			auto evaluateNavalYards = [&]() -> const BuildingTypeClass* {
-				// Find the maximum number of Naval Yards owned by any other house
-				int maxNavalYardsOwnedByOther = 0;
-				for (const auto pOtherHouse : HouseClass::Array)
+				// Find the number of Naval Yards owned by the current enemy
+				int enemyNavalYardsCount = 0;
+				HouseClass* pEnemy = nullptr;
+				if (pHouse->EnemyHouseIndex != -1)
 				{
-					if (pOtherHouse == pHouse || pHouse->IsAlliedWith(pOtherHouse))
-						continue;
+					pEnemy = HouseClass::FindByCountryIndex(pHouse->EnemyHouseIndex);
+				}
+				if (pEnemy == nullptr)
+				{
+					pEnemy = BuildingExt::Find_Closest_Opponent(pHouse);
+				}
 
-					int otherNavalYardCount = 0;
+				if (pEnemy != nullptr)
+				{
 					for (const auto pBuilding : BuildingClass::Array)
 					{
-						if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pOtherHouse)
+						if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pEnemy)
 						{
 							if (pBuilding->Type->Factory == AbstractType::UnitType && pBuilding->Type->Naval)
 							{
-								otherNavalYardCount++;
+								enemyNavalYardsCount++;
 							}
 						}
-					}
-
-					if (otherNavalYardCount > maxNavalYardsOwnedByOther)
-					{
-						maxNavalYardsOwnedByOther = otherNavalYardCount;
 					}
 				}
 
@@ -2516,9 +2517,9 @@ bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode
 					optimalNavalYardCount = 1;
 
 				// Scale up to match competitors if they build more
-				if (static_cast<size_t>(maxNavalYardsOwnedByOther) > optimalNavalYardCount)
+				if (static_cast<size_t>(enemyNavalYardsCount) > optimalNavalYardCount)
 				{
-					optimalNavalYardCount = static_cast<size_t>(maxNavalYardsOwnedByOther);
+					optimalNavalYardCount = static_cast<size_t>(enemyNavalYardsCount);
 				}
 
 				// Apply difficulty-based safety cap for Naval Yards (Easy: 3, Normal: 5, Hard: 8)
@@ -2533,9 +2534,9 @@ bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode
 					else if (pHouse->AIDifficulty == AIDifficulty::Hard)
 						maxNavalYardLimit = 9;
 
-					if (maxNavalYardsOwnedByOther > 0 && pHouse->AIDifficulty == AIDifficulty::Hard)
+					if (enemyNavalYardsCount > 0 && pHouse->AIDifficulty == AIDifficulty::Hard)
 					{
-						maxNavalYardLimit = std::max(maxNavalYardLimit, static_cast<size_t>(maxNavalYardsOwnedByOther - 1));
+						maxNavalYardLimit = std::max(maxNavalYardLimit, static_cast<size_t>(enemyNavalYardsCount - 1));
 					}
 				}
 				else
@@ -2554,8 +2555,8 @@ bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode
 				const BuildingTypeClass* pNavalYardToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildNavalYard, 1, optimalNavalYardCount);
 				if (pNavalYardToBuild != nullptr)
 				{
-					Debug::Log("AdvAI: Making AI build %s because it does not have enough Naval Yards. Wanted: %d (Competitor max: %d)\n",
-						pNavalYardToBuild->Name, optimalNavalYardCount, maxNavalYardsOwnedByOther);
+					Debug::Log("AdvAI: Making AI build %s because it does not have enough Naval Yards. Wanted: %d (Enemy max: %d)\n",
+						pNavalYardToBuild->Name, optimalNavalYardCount, enemyNavalYardsCount);
 
 					return pNavalYardToBuild;
 				}
@@ -2743,28 +2744,29 @@ bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode
 
 			bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode) || RulesExt::Global()->AdvancedAI_NavalMode;
 
-			// Find the maximum number of helipads owned by any other house
-			int maxHelipadsOwnedByOther = 0;
-			for (const auto pOtherHouse : HouseClass::Array)
+			// Find the number of helipads owned by the current enemy
+			int enemyHelipadCount = 0;
+			HouseClass* pEnemyHelipad = nullptr;
+			if (pHouse->EnemyHouseIndex != -1)
 			{
-				if (pOtherHouse == pHouse || pHouse->IsAlliedWith(pOtherHouse))
-					continue;
+				pEnemyHelipad = HouseClass::FindByCountryIndex(pHouse->EnemyHouseIndex);
+			}
+			if (pEnemyHelipad == nullptr)
+			{
+				pEnemyHelipad = BuildingExt::Find_Closest_Opponent(pHouse);
+			}
 
-				int otherHelipadCount = 0;
+			if (pEnemyHelipad != nullptr)
+			{
 				for (const auto pBuilding : BuildingClass::Array)
 				{
-					if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pOtherHouse)
+					if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pEnemyHelipad)
 					{
 						if (pBuilding->Type->Helipad)
 						{
-							otherHelipadCount++;
+							enemyHelipadCount++;
 						}
 					}
-				}
-
-				if (otherHelipadCount > maxHelipadsOwnedByOther)
-				{
-					maxHelipadsOwnedByOther = otherHelipadCount;
 				}
 			}
 
@@ -2796,9 +2798,9 @@ bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode
 			// Competitive scaling for helipads under naval mode (non-Easy difficulties)
 			if (isNavalMode && pHouse->AIDifficulty != AIDifficulty::Easy)
 			{
-				if (static_cast<size_t>(maxHelipadsOwnedByOther) > optimalHelipadCount)
+				if (static_cast<size_t>(enemyHelipadCount) > optimalHelipadCount)
 				{
-					optimalHelipadCount = static_cast<size_t>(maxHelipadsOwnedByOther);
+					optimalHelipadCount = static_cast<size_t>(enemyHelipadCount);
 				}
 			}
 
