@@ -1010,7 +1010,7 @@ Phobos introduces a port of the custom Advanced AI building, expansion, and supp
     - **Structural Cap Reductions**: Limits land-based unit production capacity on water maps by capping Barracks and War Factories to a lower maximum (Easy: 2, Normal: 3, Hard: 4).
     - **Naval Yard Expansion**: Increases the target Naval Yard limit (up to 4) and raises the dynamic cap (Easy: 4, Normal: 6, Hard: 9).
     - **Competitive Helipad Scaling**: On non-Easy difficulties, helipad count scales dynamically to match the opponent's helipad counts.
-    - **Naval Spacing Rule**: Enforces a minimum spacing of `5.0` cells between naval structures in naval mode, and `2.0` cells when not in naval mode, to avoid unit exit traffic jams.
+    - **Naval Spacing Rule**: Enforces a minimum spacing of `5.0` cells between naval structures in naval mode to avoid unit exit traffic jams.
   - `AdvancedAI.MultiConYard` Enables the AI to build and own multiple Construction Yards.
   - `AdvancedAI.MinimumRefineryCount` Specifies the minimum number of refineries the AI will attempt to maintain.
 
