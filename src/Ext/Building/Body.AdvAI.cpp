@@ -1431,7 +1431,7 @@ int inline BuildingExt::Modify_Rating_By_Allied_Building_Proximity(CellStruct ce
 		{
 			if (pBuilding->Type->Naval)
 			{
-				const bool isNavalMode = (houseExt->PrimaryTechTreeType != nullptr && houseExt->PrimaryTechTreeType->IsNavalMode) || RulesExt::Global()->AdvancedAI_NavalMode;
+				const bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 				const double minNavalDist = isNavalMode ? 5.0 : 2.0;
 
 				for (size_t i = 0; i < ExtData::OurBuildingCount; i++)

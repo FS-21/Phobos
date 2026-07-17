@@ -1991,7 +1991,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 
 		// Enforce difficulty-based safety cap for barracks (Easy: 6, Normal: 8, Hard: 12)
 		// Reduced in naval mode (Easy: 2, Normal: 3, Hard: 4) to save space on islands
-		bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode) || RulesExt::Global()->AdvancedAI_NavalMode;
+		bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 		size_t maxBarracksLimit = 8;
 		if (isNavalMode)
 		{
@@ -2377,7 +2377,7 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 		// Instead build defenses or tech up so we can get AA ASAP.
 		if (!isUnderThreat || (antiInfDeficiency <= 0 && antiAirDeficiency <= 0))
 		{
-bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode) || RulesExt::Global()->AdvancedAI_NavalMode;
+bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 
 			auto evaluateWeaponsFactory = [&]() -> const BuildingTypeClass* {
 				// If we don't have enough weapons factories, then build one.
@@ -2742,7 +2742,7 @@ bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode
 				totalAircraft = totalOccupiedDocks;
 			}
 
-			bool isNavalMode = (pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode) || RulesExt::Global()->AdvancedAI_NavalMode;
+			bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 
 			// Find the number of helipads owned by the current enemy
 			int enemyHelipadCount = 0;
