@@ -4266,12 +4266,26 @@ void HouseExt::AdvAI_Update_Primary_Factories(HouseClass* pHouse)
 		BuildingClass* pBestFactory = nullptr;
 		double bestDistanceSq = std::numeric_limits<double>::max();
 
+		// Find the primary enemy's base center for connectivity verification
+		CellStruct enemyBaseCenter = CellStruct(0, 0);
+		bool hasEnemy = false;
+		const HouseClass* pEnemy = nullptr;
+		if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
+		{
+			pEnemy = HouseClass::Array[pHouse->EnemyHouseIndex];
+		}
+		if (pEnemy != nullptr && pEnemy->Buildings.Count > 0)
+		{
+			enemyBaseCenter = pEnemy->Base_Center();
+			hasEnemy = true;
+		}
+
 		for (const auto pBuilding : pHouse->Buildings)
 		{
 			if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Type->Factory == type && pBuilding->Type->Naval == isNaval)
 			{
-				// For land factories, verify they can actually reach the threat/crawling target by land
-				if (!isNaval && !GeneralUtils::AreZonesConnected(pBuilding->GetMapCoords(), targetCoords))
+				// For land factories, verify they can actually reach the enemy base by land
+				if (!isNaval && hasEnemy && !GeneralUtils::AreZonesConnected(pBuilding->GetMapCoords(), enemyBaseCenter))
 					continue;
 
 				double distSq = pBuilding->GetMapCoords().DistanceFromSquared(targetCoords);
