@@ -1990,16 +1990,16 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 		}
 
 		// Enforce difficulty-based safety cap for barracks (Easy: 6, Normal: 8, Hard: 12)
-		// Reduced in naval mode (Easy: 3, Normal: 4, Hard: 6) to save space on islands
+		// Reduced in naval mode (Easy: 2, Normal: 3, Hard: 4) to save space on islands
 		bool isNavalMode = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
 		size_t maxBarracksLimit = 8;
 		if (isNavalMode)
 		{
-			maxBarracksLimit = 4;
+			maxBarracksLimit = 3;
 			if (pHouse->AIDifficulty == AIDifficulty::Easy)
-				maxBarracksLimit = 3;
+				maxBarracksLimit = 2;
 			else if (pHouse->AIDifficulty == AIDifficulty::Hard)
-				maxBarracksLimit = 6;
+				maxBarracksLimit = 4;
 		}
 		else
 		{
@@ -2377,171 +2377,210 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 		// Instead build defenses or tech up so we can get AA ASAP.
 		if (!isUnderThreat || (antiInfDeficiency <= 0 && antiAirDeficiency <= 0))
 		{
-			// If we don't have enough weapons factories, then build one.
-			int ourWFCount = 0;
-			for (const auto pBuilding : BuildingClass::Array)
-			{
-				if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pHouse)
-				{
-					if (pBuilding->Type->Factory == AbstractType::UnitType && !pBuilding->Type->Naval)
-					{
-						ourWFCount++;
-					}
-				}
-			}
+bool isNavalMode = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
 
-			int maxWFOwnedByOther = 0;
-			for (const auto pOtherHouse : HouseClass::Array)
-			{
-				if (pOtherHouse == pHouse || pHouse->IsAlliedWith(pOtherHouse))
-					continue;
-
-				int otherWFCount = 0;
+			auto evaluateWeaponsFactory = [&]() -> const BuildingTypeClass* {
+				// If we don't have enough weapons factories, then build one.
+				int ourWFCount = 0;
 				for (const auto pBuilding : BuildingClass::Array)
 				{
-					if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pOtherHouse)
+					if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pHouse)
 					{
 						if (pBuilding->Type->Factory == AbstractType::UnitType && !pBuilding->Type->Naval)
 						{
-							otherWFCount++;
+							ourWFCount++;
 						}
 					}
 				}
 
-				if (otherWFCount > maxWFOwnedByOther)
+				int maxWFOwnedByOther = 0;
+				for (const auto pOtherHouse : HouseClass::Array)
 				{
-					maxWFOwnedByOther = otherWFCount;
+					if (pOtherHouse == pHouse || pHouse->IsAlliedWith(pOtherHouse))
+						continue;
+
+					int otherWFCount = 0;
+					for (const auto pBuilding : BuildingClass::Array)
+					{
+						if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pOtherHouse)
+						{
+							if (pBuilding->Type->Factory == AbstractType::UnitType && !pBuilding->Type->Naval)
+							{
+								otherWFCount++;
+							}
+						}
+					}
+
+					if (otherWFCount > maxWFOwnedByOther)
+					{
+						maxWFOwnedByOther = otherWFCount;
+					}
 				}
-			}
 
-			size_t optimalWeaponsCount = 1 + (refineryCount / 3);
-			if (pHouse->AIDifficulty == AIDifficulty::Easy)
-				optimalWeaponsCount = 1 + (refineryCount / 4);
-			else if (refineryCount >= 6)
-				optimalWeaponsCount = refineryCount / 2;
+				size_t optimalWeaponsCount = 1 + (refineryCount / 3);
+				if (pHouse->AIDifficulty == AIDifficulty::Easy)
+					optimalWeaponsCount = 1 + (refineryCount / 4);
+				else if (refineryCount >= 6)
+					optimalWeaponsCount = refineryCount / 2;
 
-			if (!hasTechCenter)
-				optimalWeaponsCount = 1;
+				if (!hasTechCenter)
+					optimalWeaponsCount = 1;
 
-			// Competitive scaling: if a competitor has at least double our War Factory count, increase our limit
-			if (maxWFOwnedByOther >= ourWFCount * 2 && ourWFCount > 0)
-			{
-				optimalWeaponsCount = std::max(optimalWeaponsCount, static_cast<size_t>(ourWFCount + 1));
-			}
+				// Competitive scaling: if a competitor has at least double our War Factory count, increase our limit
+				if (maxWFOwnedByOther >= ourWFCount * 2 && ourWFCount > 0)
+				{
+					optimalWeaponsCount = std::max(optimalWeaponsCount, static_cast<size_t>(ourWFCount + 1));
+				}
 
-			// Enforce difficulty-based safety cap for War Factories (Easy: 6, Normal: 8, Hard: 12)
-			// Reduced in naval mode (Easy: 2, Normal: 3, Hard: 4) to save space on islands
-			bool isNavalMode = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
-			size_t maxWFLimit = 8;
+				// Enforce difficulty-based safety cap for War Factories (Easy: 6, Normal: 8, Hard: 12)
+				// Reduced in naval mode (Easy: 2, Normal: 3, Hard: 4) to save space on islands
+				size_t maxWFLimit = 8;
+				if (isNavalMode)
+				{
+					maxWFLimit = 3;
+					if (pHouse->AIDifficulty == AIDifficulty::Easy)
+						maxWFLimit = 2;
+					else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+						maxWFLimit = 4;
+				}
+				else
+				{
+					if (pHouse->AIDifficulty == AIDifficulty::Easy)
+						maxWFLimit = 6;
+					else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+						maxWFLimit = 12;
+				}
+
+				if (limitFactories && optimalWeaponsCount > maxWFLimit)
+					optimalWeaponsCount = maxWFLimit;
+
+				AdvAI_Recycle_Furthest_Factory(pHouse, AbstractType::UnitType, false, optimalWeaponsCount, houseExt->NextExpansionPointLocation);
+
+				const BuildingTypeClass* pWeaponsFactoryToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildWeapons, 1, optimalWeaponsCount);
+
+				if (pWeaponsFactoryToBuild != nullptr)
+				{
+					Debug::Log("AdvAI: Making AI build %s because it does not have enough Weapons Factories. Wanted: %d (Competitor max: %d)\n",
+						pWeaponsFactoryToBuild->Name, optimalWeaponsCount, maxWFOwnedByOther);
+
+					return pWeaponsFactoryToBuild;
+				}
+				return nullptr;
+			};
+
+			auto evaluateNavalYards = [&]() -> const BuildingTypeClass* {
+				// Find the maximum number of Naval Yards owned by any other house
+				int maxNavalYardsOwnedByOther = 0;
+				for (const auto pOtherHouse : HouseClass::Array)
+				{
+					if (pOtherHouse == pHouse || pHouse->IsAlliedWith(pOtherHouse))
+						continue;
+
+					int otherNavalYardCount = 0;
+					for (const auto pBuilding : BuildingClass::Array)
+					{
+						if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pOtherHouse)
+						{
+							if (pBuilding->Type->Factory == AbstractType::UnitType && pBuilding->Type->Naval)
+							{
+								otherNavalYardCount++;
+							}
+						}
+					}
+
+					if (otherNavalYardCount > maxNavalYardsOwnedByOther)
+					{
+						maxNavalYardsOwnedByOther = otherNavalYardCount;
+					}
+				}
+
+				size_t optimalNavalYardCount = 1;
+				if (isNavalMode)
+				{
+					if (refineryCount >= 6)
+						optimalNavalYardCount = 4;
+					else if (refineryCount >= 3)
+						optimalNavalYardCount = 3;
+					else
+						optimalNavalYardCount = 2;
+				}
+				else
+				{
+					if (refineryCount >= 6)
+						optimalNavalYardCount = 3;
+					else if (refineryCount >= 3)
+						optimalNavalYardCount = 2;
+				}
+
+				if (!hasTechCenter)
+					optimalNavalYardCount = 1;
+
+				// Scale up to match competitors if they build more
+				if (static_cast<size_t>(maxNavalYardsOwnedByOther) > optimalNavalYardCount)
+				{
+					optimalNavalYardCount = static_cast<size_t>(maxNavalYardsOwnedByOther);
+				}
+
+				// Apply difficulty-based safety cap for Naval Yards (Easy: 3, Normal: 5, Hard: 8)
+				// Under naval mode, the cap increases to (Easy: 4, Normal: 6, Hard: 9)
+				// And can dynamically scale up to the enemy's shipyard count - 1
+				size_t maxNavalYardLimit = 5;
+				if (isNavalMode)
+				{
+					maxNavalYardLimit = 6;
+					if (pHouse->AIDifficulty == AIDifficulty::Easy)
+						maxNavalYardLimit = 4;
+					else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+						maxNavalYardLimit = 9;
+
+					if (maxNavalYardsOwnedByOther > 0 && pHouse->AIDifficulty == AIDifficulty::Hard)
+					{
+						maxNavalYardLimit = std::max(maxNavalYardLimit, static_cast<size_t>(maxNavalYardsOwnedByOther - 1));
+					}
+				}
+				else
+				{
+					if (pHouse->AIDifficulty == AIDifficulty::Easy)
+						maxNavalYardLimit = 3;
+					else if (pHouse->AIDifficulty == AIDifficulty::Hard)
+						maxNavalYardLimit = 8;
+				}
+
+				if (limitFactories && optimalNavalYardCount > maxNavalYardLimit)
+					optimalNavalYardCount = maxNavalYardLimit;
+
+				AdvAI_Recycle_Furthest_Factory(pHouse, AbstractType::UnitType, true, optimalNavalYardCount, houseExt->NextExpansionPointLocation);
+
+				const BuildingTypeClass* pNavalYardToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildNavalYard, 1, optimalNavalYardCount);
+				if (pNavalYardToBuild != nullptr)
+				{
+					Debug::Log("AdvAI: Making AI build %s because it does not have enough Naval Yards. Wanted: %d (Competitor max: %d)\n",
+						pNavalYardToBuild->Name, optimalNavalYardCount, maxNavalYardsOwnedByOther);
+
+					return pNavalYardToBuild;
+				}
+				return nullptr;
+			};
+
 			if (isNavalMode)
 			{
-				maxWFLimit = 3;
-				if (pHouse->AIDifficulty == AIDifficulty::Easy)
-					maxWFLimit = 2;
-				else if (pHouse->AIDifficulty == AIDifficulty::Hard)
-					maxWFLimit = 4;
+				const BuildingTypeClass* pBld = evaluateNavalYards();
+				if (pBld != nullptr)
+					return pBld;
+
+				pBld = evaluateWeaponsFactory();
+				if (pBld != nullptr)
+					return pBld;
 			}
 			else
 			{
-				if (pHouse->AIDifficulty == AIDifficulty::Easy)
-					maxWFLimit = 6;
-				else if (pHouse->AIDifficulty == AIDifficulty::Hard)
-					maxWFLimit = 12;
-			}
+				const BuildingTypeClass* pBld = evaluateWeaponsFactory();
+				if (pBld != nullptr)
+					return pBld;
 
-			if (limitFactories && optimalWeaponsCount > maxWFLimit)
-				optimalWeaponsCount = maxWFLimit;
-
-			AdvAI_Recycle_Furthest_Factory(pHouse, AbstractType::UnitType, false, optimalWeaponsCount, houseExt->NextExpansionPointLocation);
-
-			const BuildingTypeClass* pWeaponsFactoryToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildWeapons, 1, optimalWeaponsCount);
-
-			if (pWeaponsFactoryToBuild != nullptr)
-			{
-				Debug::Log("AdvAI: Making AI build %s because it does not have enough Weapons Factories. Wanted: %d (Competitor max: %d)\n",
-					pWeaponsFactoryToBuild->Name, optimalWeaponsCount, maxWFOwnedByOther);
-
-				return pWeaponsFactoryToBuild;
-			}
-
-			// Find the maximum number of Naval Yards owned by any other house
-			int maxNavalYardsOwnedByOther = 0;
-			for (const auto pOtherHouse : HouseClass::Array)
-			{
-				if (pOtherHouse == pHouse || pHouse->IsAlliedWith(pOtherHouse))
-					continue;
-
-				int otherNavalYardCount = 0;
-				for (const auto pBuilding : BuildingClass::Array)
-				{
-					if (pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pOtherHouse)
-					{
-						if (pBuilding->Type->Factory == AbstractType::UnitType && pBuilding->Type->Naval)
-						{
-							otherNavalYardCount++;
-						}
-					}
-				}
-
-				if (otherNavalYardCount > maxNavalYardsOwnedByOther)
-				{
-					maxNavalYardsOwnedByOther = otherNavalYardCount;
-				}
-			}
-
-			size_t optimalNavalYardCount = 1;
-			if (refineryCount >= 6)
-				optimalNavalYardCount = 3;
-			else if (refineryCount >= 3)
-				optimalNavalYardCount = 2;
-
-			if (!hasTechCenter)
-				optimalNavalYardCount = 1;
-
-			// Scale up to match competitors if they build more
-			if (static_cast<size_t>(maxNavalYardsOwnedByOther) > optimalNavalYardCount)
-			{
-				optimalNavalYardCount = static_cast<size_t>(maxNavalYardsOwnedByOther);
-			}
-
-			// Apply difficulty-based safety cap for Naval Yards (Easy: 3, Normal: 5, Hard: 8)
-			// Under naval mode, the cap increases to (Easy: 4, Normal: 8, Hard: 12)
-			// And can dynamically scale up to the enemy's shipyard count - 1
-			bool isNavalMode_SY = pPrimaryTechTree != nullptr && pPrimaryTechTree->IsNavalMode;
-			size_t maxNavalYardLimit = 5;
-			if (isNavalMode_SY)
-			{
-				maxNavalYardLimit = 8;
-				if (pHouse->AIDifficulty == AIDifficulty::Easy)
-					maxNavalYardLimit = 4;
-				else if (pHouse->AIDifficulty == AIDifficulty::Hard)
-					maxNavalYardLimit = 12;
-
-				if (maxNavalYardsOwnedByOther > 0 && pHouse->AIDifficulty == AIDifficulty::Hard)
-				{
-					maxNavalYardLimit = std::max(maxNavalYardLimit, static_cast<size_t>(maxNavalYardsOwnedByOther - 1));
-				}
-			}
-			else
-			{
-				if (pHouse->AIDifficulty == AIDifficulty::Easy)
-					maxNavalYardLimit = 3;
-				else if (pHouse->AIDifficulty == AIDifficulty::Hard)
-					maxNavalYardLimit = 8;
-			}
-
-			if (limitFactories && optimalNavalYardCount > maxNavalYardLimit)
-				optimalNavalYardCount = maxNavalYardLimit;
-
-			AdvAI_Recycle_Furthest_Factory(pHouse, AbstractType::UnitType, true, optimalNavalYardCount, houseExt->NextExpansionPointLocation);
-
-			const BuildingTypeClass* pNavalYardToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildNavalYard, 1, optimalNavalYardCount);
-			if (pNavalYardToBuild != nullptr)
-			{
-				Debug::Log("AdvAI: Making AI build %s because it does not have enough Naval Yards. Wanted: %d (Competitor max: %d)\n",
-					pNavalYardToBuild->Name, optimalNavalYardCount, maxNavalYardsOwnedByOther);
-
-				return pNavalYardToBuild;
+				pBld = evaluateNavalYards();
+				if (pBld != nullptr)
+					return pBld;
 			}
 
 			// If we have too few refineries, build enough to match the minimum.

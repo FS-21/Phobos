@@ -1427,10 +1427,13 @@ int inline BuildingExt::Modify_Rating_By_Allied_Building_Proximity(CellStruct ce
 	if (pOwner != nullptr)
 	{
 		const auto houseExt = HouseExt::ExtMap.Find(pOwner);
-		if (houseExt != nullptr && houseExt->PrimaryTechTreeType != nullptr && houseExt->PrimaryTechTreeType->IsNavalMode)
+		if (houseExt != nullptr && houseExt->PrimaryTechTreeType != nullptr)
 		{
 			if (pBuilding->Type->Naval)
 			{
+				const bool isNavalMode = houseExt->PrimaryTechTreeType->IsNavalMode;
+				const double minNavalDist = isNavalMode ? 5.0 : 2.0;
+
 				for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
 				{
 					const BuildingClass* otherBuilding = ExtData::OurBuildings[i];
@@ -1438,7 +1441,7 @@ int inline BuildingExt::Modify_Rating_By_Allied_Building_Proximity(CellStruct ce
 					{
 						CellStruct other_center_cell = GeneralUtils::CellFromCoordinates(otherBuilding->GetCenterCoords());
 						const double dist = centerCell.DistanceFrom(other_center_cell);
-						if (dist < 5.0)
+						if (dist < minNavalDist)
 						{
 							penalty = 500000;
 							break;
