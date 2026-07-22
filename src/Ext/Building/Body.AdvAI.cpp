@@ -8,8 +8,12 @@
 #include <MapClass.h>
 #include <OverlayClass.h>
 #include <TerrainClass.h>
+#include <Utilities/GeneralUtils.h>
 
 enum class SupportRadiusType { None, Cloak, Gap, Inhibitor, RadarJam, EMPulseCannon };
+
+static CellStruct g_DefenseTargetCell = CellStruct::Empty;
+static CellStruct g_BasePlacementBiasCell = CellStruct::Empty;
 
 static bool IsAIBaseNormal(const BuildingTypeClass* pType);
 static bool HasWeapons(TechnoClass* pTechno);
@@ -229,6 +233,65 @@ static SupportRadiusType GetSupportRadiusType(const BuildingTypeClass* pType)
 /// Advanced AI
 ///	Credits to Rampastring
 ///
+
+bool BuildingExt::OverlapsAnyBuilding(CellStruct cell, BuildingTypeClass* pBuildingType, BuildingClass* pIgnore)
+{
+	if (pBuildingType == nullptr)
+		return false;
+
+	const int b1X = cell.X;
+	const int b1Y = cell.Y;
+	const int b1W = pBuildingType->GetFoundationWidth();
+	const int b1H = pBuildingType->GetFoundationHeight(false);
+
+	for (const auto pOtherBuilding : BuildingClass::Array)
+	{
+		if (pOtherBuilding && pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding != pIgnore)
+		{
+			if (pOtherBuilding->Type->InvisibleInGame)
+				continue;
+
+			const int b2X = pOtherBuilding->GetMapCoords().X;
+			const int b2Y = pOtherBuilding->GetMapCoords().Y;
+			const int b2W = pOtherBuilding->Type->GetFoundationWidth();
+			const int b2H = pOtherBuilding->Type->GetFoundationHeight(false);
+
+			if ((b1X < b2X + b2W) && (b1X + b1W > b2X) &&
+				(b1Y < b2Y + b2H) && (b1Y + b1H > b2Y))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool BuildingExt::OverlapsBridge(CellStruct cell, BuildingTypeClass* pBuildingType)
+{
+	if (pBuildingType == nullptr)
+		return false;
+
+	const int foundationW = pBuildingType->GetFoundationWidth();
+	const int foundationH = pBuildingType->GetFoundationHeight(false);
+
+	for (int dy = 0; dy < foundationH; ++dy)
+	{
+		for (int dx = 0; dx < foundationW; ++dx)
+		{
+			CellStruct checkCell(cell.X + dx, cell.Y + dy);
+			if (!MapClass::Instance.CoordinatesLegal(checkCell))
+				continue;
+
+			const CellClass* pCell = MapClass::Instance.GetCellAt(checkCell);
+			if (pCell && pCell->ContainsBridge())
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
 
 HouseClass* BuildingExt::Find_Closest_Opponent(const HouseClass* pHouse)
 {
@@ -1133,6 +1196,14 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 			if (!pBuilding->Type->CanPlaceHere(&cell, pBuilding->Owner))
 				continue;
 
+			// Strictly prevent placing overlapping any existing structures
+			if (OverlapsAnyBuilding(cell, pBuilding->Type, pBuilding))
+				continue;
+
+			// Strictly prevent placing on bridge cells to avoid overlaps with high bridges
+			if (OverlapsBridge(cell, pBuilding->Type))
+				continue;
+
 			// Check whether this cell is fine by proximity rules.
 			if (!Should_Evaluate_Cell_For_Placement(cell, pBuilding, adjacencyBonus))
 				continue;
@@ -1471,13 +1542,16 @@ int inline BuildingExt::Modify_Rating_By_Allied_Building_Proximity(CellStruct ce
 					penalty = 500000;
 					break;
 				}
+
+				if (dist < 8.0)
+				{
+					penalty += static_cast<int>((8.0 - dist) * 20000);
+				}
 			}
 		}
 	}
 
-	// The closer the building is to an existing building, the worse the placement position is.
-	// In other words, being closer INCREASES the value (as lower is better).
-	return value + penalty + (1000 - static_cast<int>(closest_distance));
+	return originalValue + penalty;
 }
 
 int BuildingExt::Refinery_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding)
@@ -1826,7 +1900,13 @@ int BuildingExt::Near_Base_Center_Placement_Position_Value(CellStruct cell, Buil
 	const double conyardDist = cell.DistanceFrom(conyardCell);
 	const double balancedDist = (baseCenterDist + conyardDist) / 2.0;
 
-	return Modify_Rating_By_Allied_Building_Proximity(cell, pBuilding, static_cast<int>(balancedDist));
+	int biasValue = 0;
+	if (g_BasePlacementBiasCell.X > 0 && g_BasePlacementBiasCell.Y > 0)
+	{
+		biasValue = static_cast<int>(cell.DistanceFrom(g_BasePlacementBiasCell) * 15.0);
+	}
+
+	return Modify_Rating_By_Allied_Building_Proximity(cell, pBuilding, static_cast<int>(balancedDist * 100.0) + biasValue);
 }
 
 int BuildingExt::Near_Base_Center_Defense_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding)
@@ -1847,6 +1927,11 @@ int BuildingExt::Near_Base_Center_Defense_Placement_Position_Value(CellStruct ce
 
 int BuildingExt::Near_Enemy_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding)
 {
+	if (g_DefenseTargetCell.X > 0 && g_DefenseTargetCell.Y > 0)
+	{
+		return Modify_Rating_By_Allied_Building_Proximity(cell, pBuilding, static_cast<int>(cell.DistanceFrom(g_DefenseTargetCell)));
+	}
+
 	const HouseClass* pOwner = pBuilding->Owner;
 	const HouseClass* enemy = nullptr;
 
@@ -1984,6 +2069,37 @@ int BuildingExt::Towards_Expansion_Placement_Cell_Value(CellStruct cell, Buildin
 		pEnemy = HouseClass::Array[pOwner->EnemyHouseIndex];
 	}
 
+	// Constraint: During resource expansion (not combat crawling against enemy),
+	// defenses must NOT be placed closer to the target than the current crawler pivot structure.
+	// This prevents defenses from blocking or reducing the forward expansion area.
+	bool isResourceExpansion = true;
+	if (pEnemy != nullptr && pEnemy->ConYards.Count > 0)
+	{
+		if (houseExt->NextExpansionPointLocation.DistanceFromSquared(pEnemy->ConYards[0]->GetMapCoords()) < 100.0)
+			isResourceExpansion = false;
+	}
+
+	if (isResourceExpansion && pBuilding->Type->IsBaseDefense)
+	{
+		double pivotDistToTarget = std::numeric_limits<double>::max();
+		for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
+		{
+			const BuildingClass* pOurBld = ExtData::OurBuildings[i];
+			if (pOurBld && IsAIBaseNormal(pOurBld->Type))
+			{
+				double d = houseExt->NextExpansionPointLocation.DistanceFrom(pOurBld->GetMapCoords());
+				if (d < pivotDistToTarget)
+					pivotDistToTarget = d;
+			}
+		}
+
+		double candidateDistToTarget = cell.DistanceFrom(houseExt->NextExpansionPointLocation);
+		if (candidateDistToTarget < pivotDistToTarget)
+		{
+			return 5000000;
+		}
+	}
+
 	int enemyDistance = 0;
 	if (pEnemy != nullptr && pEnemy->ConYards.Count > 0)
 	{
@@ -2058,6 +2174,10 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 					// it validates terrain suitability, adjacency to existing structures,
 					// occupied cells, and all other placement rules.
 					if (!pBuildingType->CanPlaceHere(&cell, pOwner))
+						continue;
+
+					// Verify ground path connectivity to the expansion target (prevents placing in cliff/water enclosed pockets)
+					if (!GeneralUtils::AreZonesConnected(cell, expansionTarget, MovementZone::Normal))
 						continue;
 
 					if (OverlapsTiberiumTreeZone(cell, pBuildingType))
@@ -2197,13 +2317,16 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 
 				const double bestDistSq = bestDist * bestDist;
 				const bool isFinalTarget = (currentWaypoint == expansionTarget);
-				if (bestDist < 22.0 && isFinalTarget)
+				const bool isFailedOrBlocked = HouseExt::AdvAI_Has_Failed_Placement_Three_Times(pOwner, expansionTarget);
+				const double maxAllowedDist = isFailedOrBlocked ? 22.0 : 11.0;
+
+				if (bestDist <= maxAllowedDist && isFinalTarget)
 				{
 					if (bestDistSq >= nearestExistingDistSq || nearestExistingDistSq < 64.0)
 					{
 						houseExt->ShouldBuildRefinery = true;
-						Debug::Log("AdvAI: House %d: Switched ShouldBuildRefinery = YES. BestDist: %.1f, NearestExistingDist: %.1f\n",
-							pOwner->ArrayIndex, bestDist, sqrt(nearestExistingDistSq));
+						Debug::Log("AdvAI: House %d: Switched ShouldBuildRefinery = YES. BestDist: %.1f, NearestExistingDist: %.1f (FallbackAllowed: %s)\n",
+							pOwner->ArrayIndex, bestDist, sqrt(nearestExistingDistSq), isFailedOrBlocked ? "YES" : "NO");
 					}
 				}
 				else
@@ -2638,6 +2761,38 @@ CellStruct BuildingExt::Get_Best_Defense_Placement_Position(BuildingClass* pBuil
 	if (pEnemy == nullptr)
 		pEnemy = Find_Closest_Opponent(pOwner);
 
+	// Feature 6: ONLY in PASSIVE mode (no active expansion target), use perimeter and directional target angle spread:
+	if (houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0)
+	{
+		const int roll = ScenarioClass::Instance->Random.RandomRanged(0, 99);
+		if (roll < 40 && pEnemy != nullptr) // 40% chance: Towards enemy with +-45 deg spread
+		{
+			const CellStruct baseCenter = pOwner->Base_Center();
+			const CellStruct enemyCenter = pEnemy->Base_Center();
+			double dx = enemyCenter.X - baseCenter.X;
+			double dy = enemyCenter.Y - baseCenter.Y;
+			double baseAngle = atan2(dy, dx);
+
+			double spread = (ScenarioClass::Instance->Random.RandomRanged(0, 90) - 45) * 3.14159265 / 180.0;
+			double angle = baseAngle + spread;
+
+			g_DefenseTargetCell.X = static_cast<short>(baseCenter.X + cos(angle) * 25.0);
+			g_DefenseTargetCell.Y = static_cast<short>(baseCenter.Y + sin(angle) * 25.0);
+
+			return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Enemy_Placement_Position_Value);
+		}
+		else if (roll < 75) // 35% chance: Random base perimeter angle
+		{
+			const CellStruct baseCenter = pOwner->Base_Center();
+			double angle = ScenarioClass::Instance->Random.RandomRanged(0, 359) * 3.14159265 / 180.0;
+
+			g_DefenseTargetCell.X = static_cast<short>(baseCenter.X + cos(angle) * 25.0);
+			g_DefenseTargetCell.Y = static_cast<short>(baseCenter.Y + sin(angle) * 25.0);
+
+			return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Enemy_Placement_Position_Value);
+		}
+	}
+
 	// Place some defenses around the center of our base to defend against cheese and flank attacks.
 	const bool percentChance30 = ScenarioClass::Instance->Random.RandomRanged(0, 99) < 20;
 	if (pEnemy == nullptr || percentChance30)
@@ -2668,6 +2823,20 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 					break;
 				}
 			}
+		}
+
+		// Feature 6: Randomize base placement bias cell ONLY when in PASSIVE mode
+		const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
+		if (houseExt != nullptr && (houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0))
+		{
+			const CellStruct baseCenter = pBuilding->Owner->Base_Center();
+			double angle = ScenarioClass::Instance->Random.RandomRanged(0, 359) * 3.14159265 / 180.0;
+			g_BasePlacementBiasCell.X = static_cast<short>(baseCenter.X + std::cos(angle) * 20.0);
+			g_BasePlacementBiasCell.Y = static_cast<short>(baseCenter.Y + std::sin(angle) * 20.0);
+		}
+		else
+		{
+			g_BasePlacementBiasCell = CellStruct::Empty;
 		}
 	}
 
@@ -3011,16 +3180,47 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 
 	if (supportType == SupportRadiusType::None)
 	{
-		// Non-radius support buildings: pivots are all base buildings,
-		// sorted with ConYard and Factories prioritized.
 		pivots = baseBuildings;
-		std::stable_sort(pivots.begin(), pivots.end(), [](const BuildingClass* a, const BuildingClass* b) {
-			if (a->Type->ConstructionYard != b->Type->ConstructionYard)
-				return a->Type->ConstructionYard;
-			if ((a->Type->Factory != AbstractType::None) != (b->Type->Factory != AbstractType::None))
-				return a->Type->Factory != AbstractType::None;
-			return false;
-		});
+
+		CellStruct mainBaseCenter;
+		if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
+			mainBaseCenter = GeneralUtils::CellFromCoordinates(pHouse->ConYards[0]->GetCenterCoords());
+		else
+			mainBaseCenter = pHouse->Base_Center();
+
+		const bool isPowerPlant = TechTreeTypeClass::TotalBuildPower.contains(pBuildingType) || TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBuildingType);
+		if (isPowerPlant)
+		{
+			// For power plants, strictly restrict pivots to buildings within 25 cells of the main base/ConYard
+			std::vector<BuildingClass*> mainBasePivots;
+			for (const auto pBld : pivots)
+			{
+				if (pBld->GetMapCoords().DistanceFrom(mainBaseCenter) <= 25.0)
+				{
+					mainBasePivots.push_back(pBld);
+				}
+			}
+			if (!mainBasePivots.empty())
+			{
+				pivots = mainBasePivots;
+			}
+
+			std::stable_sort(pivots.begin(), pivots.end(), [mainBaseCenter](const BuildingClass* a, const BuildingClass* b) {
+				if (a->Type->ConstructionYard != b->Type->ConstructionYard)
+					return a->Type->ConstructionYard;
+				return a->GetMapCoords().DistanceFromSquared(mainBaseCenter) < b->GetMapCoords().DistanceFromSquared(mainBaseCenter);
+			});
+		}
+		else
+		{
+			std::stable_sort(pivots.begin(), pivots.end(), [](const BuildingClass* a, const BuildingClass* b) {
+				if (a->Type->ConstructionYard != b->Type->ConstructionYard)
+					return a->Type->ConstructionYard;
+				if ((a->Type->Factory != AbstractType::None) != (b->Type->Factory != AbstractType::None))
+					return a->Type->Factory != AbstractType::None;
+				return false;
+			});
+		}
 	}
 	else
 	{

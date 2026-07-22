@@ -150,6 +150,7 @@ public:
 		 *  AI will not attempt to build these building types until the frame has passed.
 		 */
 		std::map<BuildingTypeClass*, int> PlacementFailedCooldowns;
+		std::map<BuildingTypeClass*, int> PlacementConsecutiveFailures;
 		std::map<std::string, int> GroupConsecutiveFailures;
 		std::map<std::string, int> GroupPlacementCooldowns;
 		std::map<BuildingTypeClass*, int> FeasibilityFailedCooldowns;
@@ -307,6 +308,10 @@ public:
 	static void SetSkirmishHouseName(HouseClass* pHouse);
 
 	static bool AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse);
+	static std::vector<CellStruct> AdvAI_Get_Reachable_Resource_Fields(HouseClass* pHouse);
+	static int AdvAI_GetMobileRefineryTargetCount(HouseClass* pHouse);
+	static bool AdvAI_IsMobileRefineryHouse(HouseClass* pHouse);
+	static bool AdvAI_CanBuildAnyStaticRefinery(HouseClass* pHouse);
 	static void AdvAI_Add_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Is_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Has_Failed_Placement_Three_Times(HouseClass* pHouse, CellStruct coords);

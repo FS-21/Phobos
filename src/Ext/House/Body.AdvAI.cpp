@@ -12,6 +12,8 @@
 #include <OverlayClass.h>
 #include <TerrainClass.h>
 #include <CellClass.h>
+#include <AnimClass.h>
+#include <AnimTypeClass.h>
 #include <AStarClass.h>
 
 #define TICKS_PER_SECOND    15
@@ -319,17 +321,11 @@ static bool ScanSectorForResources(ResourceSector& sector)
 			if (MapClass::Instance.CoordinatesLegal(cellCoords))
 			{
 				const CellClass* cell = MapClass::Instance.GetCellAt(cellCoords);
-				if (cell && cell->OverlayTypeIndex != -1)
+				if (cell && cell->OverlayTypeIndex != -1 && OverlayClass::GetTiberiumType(cell->OverlayTypeIndex) >= 0)
 				{
-					if (const auto pOverlayType = OverlayTypeClass::Array.GetItem(cell->OverlayTypeIndex))
-					{
-						if (pOverlayType->Tiberium)
-						{
-							sector.CachedCoords = cellCoords;
-							found = true;
-							break;
-						}
-					}
+					sector.CachedCoords = cellCoords;
+					found = true;
+					break;
 				}
 			}
 		}
@@ -337,6 +333,51 @@ static bool ScanSectorForResources(ResourceSector& sector)
 			break;
 	}
 	return found;
+}
+
+static bool VerifyAndRefreshSector(ResourceSector& sector)
+{
+	if (!sector.HasResources)
+		return false;
+
+	if (MapClass::Instance.CoordinatesLegal(sector.CachedCoords))
+	{
+		const CellClass* cell = MapClass::Instance.GetCellAt(sector.CachedCoords);
+		if (cell && cell->OverlayTypeIndex != -1 && OverlayClass::GetTiberiumType(cell->OverlayTypeIndex) >= 0)
+		{
+			return true;
+		}
+	}
+
+	sector.HasResources = ScanSectorForResources(sector);
+	return sector.HasResources;
+}
+
+static int GetNonConflictingScanFrame(int currentFrame, int baseInterval, std::initializer_list<int> otherFrames)
+{
+	int candidateFrame = currentFrame + baseInterval + ScenarioClass::Instance->Random.RandomRanged(-10, 10);
+
+	for (int retry = 0; retry < 10; ++retry)
+	{
+		bool conflict = false;
+		for (int otherFrame : otherFrames)
+		{
+			if (std::abs(candidateFrame - otherFrame) <= 3)
+			{
+				conflict = true;
+				break;
+			}
+		}
+
+		if (!conflict)
+		{
+			return candidateFrame;
+		}
+
+		candidateFrame += ScenarioClass::Instance->Random.RandomRanged(8, 15);
+	}
+
+	return candidateFrame;
 }
 
 static bool IsFringeSector(size_t idx)
@@ -458,6 +499,147 @@ static void InitializeGlobalSectors()
 		}
 	}
 	Debug::Log("AdvAI: Total active tiberium sectors found on startup: %d\n", activeSectorsCount);
+}
+
+bool HouseExt::AdvAI_IsMobileRefineryHouse(HouseClass* pHouse)
+{
+	if (!pHouse)
+		return false;
+
+	const auto pTechTree = TechTreeTypeClass::GetAnySuitable(pHouse);
+	if (pTechTree == nullptr)
+		return false;
+
+	bool hasStaticRefinery = false;
+	for (const auto pRef : pTechTree->BuildRefinery)
+	{
+		if (pRef && !pRef->ResourceGatherer)
+		{
+			hasStaticRefinery = true;
+			break;
+		}
+	}
+
+	return !hasStaticRefinery;
+}
+
+bool HouseExt::AdvAI_CanBuildAnyStaticRefinery(HouseClass* pHouse)
+{
+	if (!pHouse)
+		return false;
+
+	const auto pTechTree = TechTreeTypeClass::GetAnySuitable(pHouse);
+	if (pTechTree == nullptr)
+		return false;
+
+	for (const auto pRef : pTechTree->BuildRefinery)
+	{
+		if (pRef && !pRef->ResourceGatherer && AdvAI_Can_Build_Building(pHouse, pRef, true, true))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+std::vector<CellStruct> HouseExt::AdvAI_Get_Reachable_Resource_Fields(HouseClass* pHouse)
+{
+	std::vector<CellStruct> result;
+	if (!pHouse)
+		return result;
+
+	CellStruct baseCell = pHouse->Base_Center();
+	if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
+		baseCell = pHouse->ConYards[0]->GetMapCoords();
+
+	const auto houseExt = ExtMap.Find(pHouse);
+	if (houseExt != nullptr)
+	{
+		for (const auto& zone : houseExt->UnclaimedTiberiumZones)
+		{
+			if (GeneralUtils::AreZonesConnected(baseCell, zone))
+				result.push_back(zone);
+		}
+	}
+
+	return result;
+}
+
+int HouseExt::AdvAI_GetMobileRefineryTargetCount(HouseClass* pHouse)
+{
+	if (!pHouse)
+		return 3;
+
+	int reachableResources = static_cast<int>(HouseExt::AdvAI_Get_Reachable_Resource_Fields(pHouse).size());
+	int targetCount = std::min(15, reachableResources);
+
+	HouseClass* pEnemy = nullptr;
+	if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count)
+	{
+		pEnemy = HouseClass::Array[pHouse->EnemyHouseIndex];
+	}
+	if (pEnemy == nullptr)
+	{
+		pEnemy = BuildingExt::Find_Closest_Opponent(pHouse);
+	}
+
+	if (pEnemy != nullptr)
+	{
+		int enemyRefineries = 0;
+		for (const auto pBuilding : BuildingClass::Array)
+		{
+			if (pBuilding && pBuilding->IsAlive && !pBuilding->InLimbo && pBuilding->Owner == pEnemy)
+			{
+				if (pBuilding->Type->Refinery || pBuilding->Type->ResourceGatherer)
+				{
+					enemyRefineries++;
+				}
+			}
+		}
+		for (const auto pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pEnemy)
+			{
+				if (pUnit->Type->ResourceGatherer)
+				{
+					enemyRefineries++;
+				}
+			}
+		}
+
+		int competitiveLimit = enemyRefineries / 2;
+		if (competitiveLimit > targetCount)
+		{
+			targetCount = competitiveLimit;
+		}
+	}
+
+	if (reachableResources > 0 && targetCount == 0)
+	{
+		targetCount = 1;
+	}
+
+	bool hasTechCenter = false;
+	const auto pTechTree = TechTreeTypeClass::GetAnySuitable(pHouse);
+	if (pTechTree != nullptr && !pTechTree->BuildTech.empty())
+	{
+		for (const auto pTech : pTechTree->BuildTech)
+		{
+			if (pTech && pHouse->ActiveBuildingTypes.GetItemCount(pTech->ArrayIndex) > 0)
+			{
+				hasTechCenter = true;
+				break;
+			}
+		}
+	}
+
+	if (!hasTechCenter)
+	{
+		targetCount = std::min(targetCount, 2);
+	}
+
+	return targetCount;
 }
 
 bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
@@ -637,6 +819,7 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 		candidates.push_back({ treeCoords, true });
 	}
 
+
 	// 2. Scan Map for cells containing Tiberium or Ore overlays using 20x20 sectors (Ground Tiberium Zones / Zonas de Suelo) and cyclical round-robin updates
 	if (!SectorsInitialized)
 	{
@@ -645,10 +828,10 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 
 	if (SectorsInitialized && !GlobalResourceSectors.empty())
 	{
-		// 1. Active Scan (1 sector every 30 seconds / 450 frames)
+		// 1. Active Scan (1 sector every ~30 seconds / 450 frames +/- 10)
 		if (Unsorted::CurrentFrame >= NextActiveScanFrame)
 		{
-			NextActiveScanFrame = Unsorted::CurrentFrame + 450;
+			NextActiveScanFrame = GetNonConflictingScanFrame(Unsorted::CurrentFrame, 450, { NextFringeScanFrame, NextPassiveScanFrame });
 
 			size_t startedAt = NextActiveSectorToScan;
 			bool foundAny = false;
@@ -684,10 +867,10 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			}
 		}
 
-		// 2. Fringe Scan (2 sectors every 45 seconds / 675 frames)
+		// 2. Fringe Scan (2 sectors every ~45 seconds / 675 frames +/- 10)
 		if (Unsorted::CurrentFrame >= NextFringeScanFrame)
 		{
-			NextFringeScanFrame = Unsorted::CurrentFrame + 675;
+			NextFringeScanFrame = GetNonConflictingScanFrame(Unsorted::CurrentFrame, 675, { NextActiveScanFrame, NextPassiveScanFrame });
 
 			int scannedCount = 0;
 			size_t startedAt = NextFringeSectorToScan;
@@ -723,10 +906,10 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			} while (NextFringeSectorToScan != startedAt);
 		}
 
-		// 3. Passive/Deep Scan (4 sectors every 90 seconds / 1350 frames)
+		// 3. Passive/Deep Scan (4 sectors every ~90 seconds / 1350 frames +/- 10)
 		if (Unsorted::CurrentFrame >= NextPassiveScanFrame)
 		{
-			NextPassiveScanFrame = Unsorted::CurrentFrame + 1350;
+			NextPassiveScanFrame = GetNonConflictingScanFrame(Unsorted::CurrentFrame, 1350, { NextActiveScanFrame, NextFringeScanFrame });
 
 			int scannedCount = 0;
 			size_t startedAt = NextPassiveSectorToScan;
@@ -806,6 +989,9 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			candidates.push_back({ closestResourceCell, false });
 		}
 	}
+
+	Debug::Log("AdvAI ReachableFieldsScan: House %d: Scanning %d total candidates (trees + ground sectors).\n",
+		pHouse->ArrayIndex, static_cast<int>(candidates.size()));
 
 	struct ValidCandidate
 	{
@@ -1250,6 +1436,34 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* p
 		pBuildingType->What_Am_I() != AbstractType::BuildingType)
 	{
 		Debug::FatalErrorAndExit("Invalid BuildingTypeClass pointer in AdvAI_Can_Build_Building!!!");
+	}
+
+	// If it is a mobile refinery, enforce the limits (dynamic limit for mobile-only houses, cap at 5 for hybrid houses)
+	static bool inRecurse = false;
+	if (pBuildingType->ResourceGatherer && !inRecurse)
+	{
+		inRecurse = true;
+		bool isMobileOnly = AdvAI_IsMobileRefineryHouse(pHouse);
+		inRecurse = false;
+
+		int mobileCount = 0;
+		for (const auto pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type->ResourceGatherer)
+			{
+				mobileCount++;
+			}
+		}
+		const int slaveMinerCount = RulesClass::Instance->PrerequisiteProcAlternate != nullptr ?
+			pHouse->ActiveUnitTypes.GetItemCount(RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex) : 0;
+		mobileCount += slaveMinerCount;
+
+		int maxAllowed = isMobileOnly ? AdvAI_GetMobileRefineryTargetCount(pHouse) : 5;
+
+		if (mobileCount >= maxAllowed)
+		{
+			return false;
+		}
 	}
 
 	// Check if this building type is currently on placement failure cooldown.
@@ -2029,6 +2243,15 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 		BuildingTypeClass* ourAntiVehicleDefense = nullptr;
 		BuildingTypeClass* ourAntiAirDefense = nullptr;
 
+		std::vector<const BuildingTypeClass*> antiInfantryCandidates;
+		std::vector<int> antiInfantryWeights;
+
+		std::vector<const BuildingTypeClass*> antiVehicleCandidates;
+		std::vector<int> antiVehicleWeights;
+
+		std::vector<const BuildingTypeClass*> antiAirCandidates;
+		std::vector<int> antiAirWeights;
+
 		double bestAntiInfantryScore = -1.0;
 		double bestAntiVehicleScore = -1.0;
 		double bestAntiAirScore = -1.0;
@@ -2167,6 +2390,22 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			}
 		}
 
+		// Find minimum positive PowerDrain among buildable defenses
+		int minPositivePowerDrain = std::numeric_limits<int>::max();
+		for (const auto pDef : buildableDefenses)
+		{
+			if (pDef->PowerDrain > 0 && pDef->PowerDrain < minPositivePowerDrain)
+			{
+				minPositivePowerDrain = pDef->PowerDrain;
+			}
+		}
+
+		int fallbackPowerDrain = 1;
+		if (minPositivePowerDrain != std::numeric_limits<int>::max())
+		{
+			fallbackPowerDrain = std::max(1, minPositivePowerDrain / 2);
+		}
+
 		for (const auto pDefense : buildableDefenses)
 		{
 			if (!isParanoid && !hasSomethingToProtect && houseExt->NextExpansionPointLocation.X <= 0)
@@ -2179,16 +2418,14 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 			// 1. Power constraint check:
 			// If building this defense will cause a low power state (net power < 0),
 			// apply a severe penalty to its score, unless we have no other choice.
-			if (pDefense->PowerDrain > 0)
+			int effectivePowerDrain = (pDefense->PowerDrain > 0) ? pDefense->PowerDrain : fallbackPowerDrain;
+			int powerSurplus = pHouse->PowerOutput - GetRealPowerDrain(pHouse);
+			if (powerSurplus < effectivePowerDrain)
 			{
-				int powerSurplus = pHouse->PowerOutput - GetRealPowerDrain(pHouse);
-				if (powerSurplus < pDefense->PowerDrain)
-				{
-					// Applying a 99% penalty to the score if it would overload our power grid.
-					antiInfantryScore *= 0.01;
-					antiVehicleScore *= 0.01;
-					antiAirScore *= 0.01;
-				}
+				// Applying a 99% penalty to the score if it would overload our power grid.
+				antiInfantryScore *= 0.01;
+				antiVehicleScore *= 0.01;
+				antiAirScore *= 0.01;
 			}
 
 			// 2. Budget constraint check:
@@ -2212,30 +2449,89 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				antiAirScore *= costFactor;
 			}
 
+			// Apply a 25% score reduction for defenses without weapons
+			const auto pPrimaryW = pDefense->Weapon[0].WeaponType;
+			const auto pSecondaryW = pDefense->Weapon[1].WeaponType;
+			if (pPrimaryW == nullptr && pSecondaryW == nullptr)
+			{
+				antiInfantryScore *= 0.75;
+				antiVehicleScore *= 0.75;
+				antiAirScore *= 0.75;
+			}
+
 			if (LogVerboseAdvAI)
 			{
 				Debug::Log("AdvAI Eval: House %d Defense Option %s -> Cost: %d, PowerDrain: %d, InfVal: %d (Score: %.4f), ArmVal: %d (Score: %.4f), AirVal: %d (Score: %.4f)\n",
 					pHouse->ArrayIndex, pDefense->ID, pDefense->Cost, pDefense->PowerDrain, pDefense->AntiInfantryValue, antiInfantryScore, pDefense->AntiArmorValue, antiVehicleScore, pDefense->AntiAirValue, antiAirScore);
 			}
 
+			if (pDefense->AntiInfantryValue > 0 && antiInfantryScore > 0.0)
+			{
+				antiInfantryCandidates.push_back(pDefense);
+				antiInfantryWeights.push_back(static_cast<int>(antiInfantryScore * 100.0));
+			}
 			if (antiInfantryScore > bestAntiInfantryScore)
 			{
 				bestAntiInfantryScore = antiInfantryScore;
-				ourAntiInfantryDefense = pDefense;
+				ourAntiInfantryDefense = const_cast<BuildingTypeClass*>(pDefense);
 			}
 
+			if (pDefense->AntiArmorValue > 0 && antiVehicleScore > 0.0)
+			{
+				antiVehicleCandidates.push_back(pDefense);
+				antiVehicleWeights.push_back(static_cast<int>(antiVehicleScore * 100.0));
+			}
 			if (antiVehicleScore > bestAntiVehicleScore)
 			{
 				bestAntiVehicleScore = antiVehicleScore;
-				ourAntiVehicleDefense = pDefense;
+				ourAntiVehicleDefense = const_cast<BuildingTypeClass*>(pDefense);
 			}
 
+			if (pDefense->AntiAirValue > 0 && antiAirScore > 0.0)
+			{
+				antiAirCandidates.push_back(pDefense);
+				antiAirWeights.push_back(static_cast<int>(antiAirScore * 100.0));
+			}
 			if (antiAirScore > bestAntiAirScore)
 			{
 				bestAntiAirScore = antiAirScore;
-				ourAntiAirDefense = pDefense;
+				ourAntiAirDefense = const_cast<BuildingTypeClass*>(pDefense);
 			}
 		}
+
+		if (!antiInfantryWeights.empty())
+		{
+			const double dice = ScenarioClass::Instance->Random.RandomDouble();
+			int chosenIndex = GeneralUtils::ChooseOneWeighted(dice, &antiInfantryWeights);
+			if (chosenIndex >= 0)
+			{
+				ourAntiInfantryDefense = const_cast<BuildingTypeClass*>(antiInfantryCandidates[chosenIndex]);
+			}
+		}
+
+		if (!antiVehicleWeights.empty())
+		{
+			const double dice = ScenarioClass::Instance->Random.RandomDouble();
+			int chosenIndex = GeneralUtils::ChooseOneWeighted(dice, &antiVehicleWeights);
+			if (chosenIndex >= 0)
+			{
+				ourAntiVehicleDefense = const_cast<BuildingTypeClass*>(antiVehicleCandidates[chosenIndex]);
+			}
+		}
+
+		if (!antiAirWeights.empty())
+		{
+			const double dice = ScenarioClass::Instance->Random.RandomDouble();
+			int chosenIndex = GeneralUtils::ChooseOneWeighted(dice, &antiAirWeights);
+			if (chosenIndex >= 0)
+			{
+				ourAntiAirDefense = const_cast<BuildingTypeClass*>(antiAirCandidates[chosenIndex]);
+			}
+		}
+
+		if (ourAntiInfantryDefense != nullptr) bestAntiInfantryScore *= 1.15;
+		if (ourAntiVehicleDefense != nullptr) bestAntiVehicleScore *= 1.15;
+		if (ourAntiAirDefense != nullptr) bestAntiAirScore *= 1.15;
 
 		int antiInfantryDefenseValue = 0;
 		int antiVehicleDefenseValue = 0;
@@ -2588,16 +2884,33 @@ bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 			// Because this is not for expanding but an emergency situation,
 			// cancel any potential expanding.
 			int minRefineryCount = RulesExt::Global()->AdvancedAI_MinimumRefineryCount;
-			if (!hasTechCenter)
-				minRefineryCount = std::min(minRefineryCount, 2);
+			bool isMobileOnly = AdvAI_IsMobileRefineryHouse(pHouse);
 
-			pRefineryToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildRefinery, 1, minRefineryCount, slaveMinerCount);
-			if (pRefineryToBuild != nullptr)
+			if (isMobileOnly)
 			{
-				houseExt->NextExpansionPointLocation = CellStruct(0, 0);
-				houseExt->ShouldBuildRefinery = false;
-				Debug::Log("AdvAI: Making AI build %s because it only has too few refineries\n", pRefineryToBuild->Name);
-				return pRefineryToBuild;
+				minRefineryCount = AdvAI_GetMobileRefineryTargetCount(pHouse);
+			}
+			else if (!hasTechCenter)
+			{
+				minRefineryCount = std::min(minRefineryCount, 2);
+			}
+
+			bool shouldBuildRefinery = true;
+			if (isMobileOnly && (ScenarioClass::Instance->Random.RandomRanged(0, 99) >= 10))
+			{
+				shouldBuildRefinery = false;
+			}
+
+			if (shouldBuildRefinery)
+			{
+				pRefineryToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildRefinery, 1, minRefineryCount, slaveMinerCount);
+				if (pRefineryToBuild != nullptr)
+				{
+					houseExt->NextExpansionPointLocation = CellStruct(0, 0);
+					houseExt->ShouldBuildRefinery = false;
+					Debug::Log("AdvAI: Making AI build %s because it only has too few refineries (Mobile Target: %d)\n", pRefineryToBuild->Name, minRefineryCount);
+					return pRefineryToBuild;
+				}
 			}
 		}
 
@@ -3180,6 +3493,12 @@ bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 			continue;
 		}
 
+		// Exclude power plants here, as power plants are built dynamically on-demand when power surplus is low
+		if (TechTreeTypeClass::TotalBuildPower.contains(pBuilding) || TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBuilding))
+		{
+			continue;
+		}
+
 		// Exclude helipads here, as they are handled dynamically based on occupied docks
 		if (pBuilding->Helipad)
 		{
@@ -3269,7 +3588,7 @@ const BuildingTypeClass* HouseExt::AdvAI_BuildAtLeastNOfSideAndMInTotal(HouseCla
 const BuildingTypeClass* HouseExt::AdvAI_Get_Building_To_Build(HouseClass* pHouse)
 {
 	const auto houseExt = ExtMap.Find(pHouse);
-	if (houseExt != nullptr && !houseExt->UnclaimedTiberiumZones.empty())
+	if (houseExt != nullptr && !houseExt->UnclaimedTiberiumZones.empty() && !AdvAI_IsMobileRefineryHouse(pHouse))
 	{
 		const auto pTechTree = TechTreeTypeClass::GetAnySuitable(pHouse);
 		if (pTechTree != nullptr && !pTechTree->BuildRefinery.empty())
@@ -3285,23 +3604,17 @@ const BuildingTypeClass* HouseExt::AdvAI_Get_Building_To_Build(HouseClass* pHous
 						continue; // Skip targets currently under cooldown (failed placements)
 					}
 					
-					bool isTree = false;
-					for (const auto pTerrain : TerrainClass::Array)
-					{
-						if (pTerrain->IsAlive && !pTerrain->InLimbo && pTerrain->Type->SpawnsTiberium && pTerrain->GetMapCoords() == target)
-						{
-							isTree = true;
-							break;
-						}
-					}
-					const double refineryRange = isTree ? 22.0 : 27.0;
+					const double idealMaxDist = 11.0;
+					const double coverageRange = 22.0;
+
+					bool isFailedOrBlocked = AdvAI_Has_Failed_Placement_Three_Times(pHouse, target);
 
 					bool hasRefinery = false;
 					for (const auto pBld : BuildingClass::Array)
 					{
 						if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner == pHouse && pBld->Type->ResourceDestination)
 						{
-							if (target.DistanceFrom(pBld->GetMapCoords()) < refineryRange)
+							if (target.DistanceFrom(pBld->GetMapCoords()) < coverageRange)
 							{
 								hasRefinery = true;
 								break;
@@ -3309,12 +3622,33 @@ const BuildingTypeClass* HouseExt::AdvAI_Get_Building_To_Build(HouseClass* pHous
 						}
 					}
 
-					if (!hasRefinery)
+					if (hasRefinery)
 					{
-						houseExt->NextRefineryPlacementLocation = target;
-						Debug::Log("AdvAI: Intercepting build loop to construct refinery %s for unclaimed tiberium zone at (%d,%d).\n",
-							pRefinery->Name, target.X, target.Y);
+						continue;
+					}
+
+					// Test if we can place a refinery within idealMaxDist right now
+					houseExt->NextRefineryPlacementLocation = target;
+					CellStruct bestCell = BuildingExt::Get_Best_Expansion_Placement_Position_Helper(pHouse, pRefinery, nullptr);
+					double bestDistToTarget = (bestCell.X > 0 && bestCell.Y > 0) ? bestCell.DistanceFrom(target) : 9999.0;
+
+					if (bestDistToTarget <= idealMaxDist || isFailedOrBlocked)
+					{
+						// Excellent: placement is within ideal distance (or crawling failed so we accept fallback placement)!
+						Debug::Log("AdvAI: Intercepting build loop to construct refinery %s for unclaimed tiberium zone at (%d,%d) (Placement dist: %.1f cells <= %.1f).\n",
+							pRefinery->Name, target.X, target.Y, bestDistToTarget, coverageRange);
 						return pRefinery;
+					}
+					else
+					{
+						// Placement is farther than 11.0 cells (e.g. 16+ cells away). Crawl closer first!
+						houseExt->NextRefineryPlacementLocation = CellStruct(0, 0);
+						if (houseExt->NextExpansionPointLocation.X == 0 || houseExt->NextExpansionPointLocation.Y == 0)
+						{
+							houseExt->NextExpansionPointLocation = target;
+							Debug::Log("AdvAI: Unclaimed tiberium zone at (%d,%d) is too far for direct refinery (best dist: %.1f > %.1f). Crawling closer first.\n",
+								target.X, target.Y, bestDistToTarget, idealMaxDist);
+						}
 					}
 				}
 			}
@@ -4669,6 +5003,18 @@ static int GetTiberiumSectorIndex(CellStruct coords)
 	return -1;
 }
 
+static CoordStruct GetCellGroundCoords(CellStruct cellCoords)
+{
+	if (MapClass::Instance.CoordinatesLegal(cellCoords))
+	{
+		if (CellClass* pCell = MapClass::Instance.GetCellAt(cellCoords))
+		{
+			return pCell->GetCoordsWithBridge();
+		}
+	}
+	return CellClass::Cell2Coord(cellCoords);
+}
+
 void HouseExt::AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse)
 {
 	const auto houseExt = ExtMap.Find(pHouse);
@@ -4678,7 +5024,10 @@ void HouseExt::AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse)
 	// 1. Clean up existing registered coordinates in UnclaimedTiberiumZones
 	auto& zones = houseExt->UnclaimedTiberiumZones;
 	
-	Debug::Log("AdvAI: Update_Unclaimed_Tiberium_Zones for House %d. Current tracked zones count: %d\n", pHouse->ArrayIndex, static_cast<int>(zones.size()));
+	if (!zones.empty())
+	{
+		Debug::Log("AdvAI: Update_Unclaimed_Tiberium_Zones for House %d. Current tracked zones count: %d\n", pHouse->ArrayIndex, static_cast<int>(zones.size()));
+	}
 
 	zones.erase(std::remove_if(zones.begin(), zones.end(), [pHouse](const CellStruct& coords) {
 		const int failedIdx = GetTiberiumSectorIndex(coords);
@@ -4780,8 +5129,8 @@ void HouseExt::AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse)
 	// Ground resource sectors
 	for (size_t idx = 0; idx < GlobalResourceSectors.size(); ++idx)
 	{
-		const auto& sector = GlobalResourceSectors[idx];
-		if (sector.HasResources)
+		auto& sector = GlobalResourceSectors[idx];
+		if (VerifyAndRefreshSector(sector))
 		{
 			candidates.push_back({ sector.CachedCoords, static_cast<int>(idx) });
 		}
@@ -4793,7 +5142,20 @@ void HouseExt::AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse)
 		candidates.push_back({ treeCoords, -1 });
 	}
 
-	Debug::Log("AdvAI: House %d: Scanned %d candidates (ground sectors + trees).\n", pHouse->ArrayIndex, static_cast<int>(candidates.size()));
+	if (!candidates.empty())
+	{
+		Debug::Log("AdvAI UnclaimedZonesScan: House %d: Scanned %d candidates (ground sectors + trees).\n", pHouse->ArrayIndex, static_cast<int>(candidates.size()));
+
+		// VISUAL DEBUG 1: Candidate nodes scanned (SW_TS_BEACON_DEBUG)
+		const auto pVisualDebug1 = AnimTypeClass::Find("SW_TS_BEACON_DEBUG");
+		if (pVisualDebug1 != nullptr)
+		{
+			for (const auto& candidate : candidates)
+			{
+				GameCreate<AnimClass>(pVisualDebug1, GetCellGroundCoords(candidate.Coords));
+			}
+		}
+	}
 
 	// Filter candidates close to our base buildings and without refineries
 	for (const auto& candidate : candidates)
@@ -4832,21 +5194,28 @@ void HouseExt::AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse)
 			continue;
 		}
 
+		if (pClosestBld != nullptr && !GeneralUtils::AreZonesConnected(pClosestBld->GetMapCoords(), targetCoords, MovementZone::Normal))
+		{
+			continue; // Skip Tiberium zones separated from base by cliffs, water, or impassable barriers
+		}
+
 		if (AdvAI_Has_Failed_Placement_Three_Times(pHouse, targetCoords))
 		{
 			continue; // Skip permanently blocked/failed locations
 		}
 
-		// Check if already in UnclaimedTiberiumZones
-		bool alreadyRegistered = std::find(zones.begin(), zones.end(), targetCoords) != zones.end();
+		// Check if already in UnclaimedTiberiumZones or within 15 cells of an existing registered zone
+		bool alreadyRegistered = false;
+		for (const auto& zoneCoords : zones)
+		{
+			if (targetCoords.DistanceFrom(zoneCoords) < 15.0)
+			{
+				alreadyRegistered = true;
+				break;
+			}
+		}
 		if (alreadyRegistered)
 		{
-			/*
-			if (sIdx >= 0)
-				Debug::Log("AdvAI: Candidate Sector #%d at (%d,%d) already registered in vector. Vector size: %d.\n", sIdx, targetCoords.X, targetCoords.Y, static_cast<int>(zones.size()));
-			else
-				Debug::Log("AdvAI: Candidate Tree Node at (%d,%d) already registered in vector. Vector size: %d.\n", targetCoords.X, targetCoords.Y, static_cast<int>(zones.size()));
-			*/
 			continue;
 		}
 
@@ -4870,16 +5239,6 @@ void HouseExt::AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse)
 
 		if (hasRefinery)
 		{
-			/*
-			if (sIdx >= 0)
-				Debug::Log("AdvAI: Candidate Sector #%d at (%d,%d) is already covered by refinery %s at (%d,%d) (distance: %.1f < %.1f).\n",
-					sIdx, targetCoords.X, targetCoords.Y, pClashingRefinery->Type->ID, pClashingRefinery->GetMapCoords().X, pClashingRefinery->GetMapCoords().Y,
-					targetCoords.DistanceFrom(pClashingRefinery->GetMapCoords()), refineryRange);
-			else
-				Debug::Log("AdvAI: Candidate Tree Node at (%d,%d) is already covered by refinery %s at (%d,%d) (distance: %.1f < %.1f).\n",
-					targetCoords.X, targetCoords.Y, pClashingRefinery->Type->ID, pClashingRefinery->GetMapCoords().X, pClashingRefinery->GetMapCoords().Y,
-					targetCoords.DistanceFrom(pClashingRefinery->GetMapCoords()), refineryRange);
-			*/
 			continue;
 		}
 
@@ -4890,6 +5249,19 @@ void HouseExt::AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse)
 		else
 			Debug::Log("AdvAI: Registered new unclaimed Tree Node at (%d,%d) near building %s (distance: %.1f < %.1f). Vector size: %d.\n",
 				targetCoords.X, targetCoords.Y, pClosestBld ? pClosestBld->Type->ID : "???", minBldDist, maxBaseDistance, static_cast<int>(zones.size()));
+	}
+
+	// VISUAL DEBUG 2: Confirmed unclaimed tiberium zones (REDLASERFLASH10)
+	if (!zones.empty())
+	{
+		const auto pVisualDebug2 = AnimTypeClass::Find("REDLASERFLASH10");
+		if (pVisualDebug2 != nullptr)
+		{
+			for (const auto& zoneCoords : zones)
+			{
+				GameCreate<AnimClass>(pVisualDebug2, GetCellGroundCoords(zoneCoords));
+			}
+		}
 	}
 }
 

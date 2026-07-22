@@ -112,6 +112,9 @@ public:
 	static bool LoadGlobals(PhobosStreamReader& Stm);
 	static bool SaveGlobals(PhobosStreamWriter& Stm);
 
+	static bool OverlapsAnyBuilding(CellStruct cell, BuildingTypeClass* pBuildingType, BuildingClass* pIgnore = nullptr);
+	static bool OverlapsBridge(CellStruct cell, BuildingTypeClass* pBuildingType);
+
 	static void StoreTiberium(BuildingClass* pThis, float amount, int idxTiberiumType, int idxStorageTiberiumType);
 
 	static int CountOccupiedDocks(BuildingClass* pBuilding);
