@@ -549,18 +549,26 @@ std::vector<CellStruct> HouseExt::AdvAI_Get_Reachable_Resource_Fields(HouseClass
 	if (!pHouse)
 		return result;
 
-	CellStruct baseCell = pHouse->Base_Center();
-	if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
-		baseCell = pHouse->ConYards[0]->GetMapCoords();
-
 	const auto houseExt = ExtMap.Find(pHouse);
 	if (houseExt != nullptr)
 	{
+		if (Unsorted::CurrentFrame < houseExt->NextReachableResourceScanFrame && !houseExt->CachedReachableResourceFields.empty())
+		{
+			return houseExt->CachedReachableResourceFields;
+		}
+
+		CellStruct baseCell = pHouse->Base_Center();
+		if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
+			baseCell = pHouse->ConYards[0]->GetMapCoords();
+
 		for (const auto& zone : houseExt->UnclaimedTiberiumZones)
 		{
 			if (GeneralUtils::AreZonesConnected(baseCell, zone))
 				result.push_back(zone);
 		}
+
+		houseExt->CachedReachableResourceFields = result;
+		houseExt->NextReachableResourceScanFrame = Unsorted::CurrentFrame + 300; // 20-second cache (300 frames at 15 FPS)
 	}
 
 	return result;
@@ -5315,21 +5323,26 @@ CellStruct HouseExt::ExtData::GetCrawlingWaypoint(CellStruct targetCell)
 			}
 		}
 	}
-
 	CellStruct currentStartCoords = pStartBld ? pStartBld->GetMapCoords() : CellStruct(0, 0);
 
+	// Select corresponding target cache for resource vs combat crawling
+	const bool isCombatTarget = (targetCell == this->CombatCrawlingTarget);
+	auto& cachedPath = isCombatTarget ? this->CachedCombatPath : this->CachedResourcePath;
+	auto& cachedPathTarget = isCombatTarget ? this->CachedCombatPathTarget : this->CachedResourcePathTarget;
+	auto& cachedPathStart = isCombatTarget ? this->CachedCombatPathStart : this->CachedResourcePathStart;
+
 	// 1. Manage Cached A* Path (Reuse & Trim existing path if advancing along it, recalculate only if target changes or off-path)
-	if (this->CachedExpansionPathTarget != targetCell || this->CachedExpansionPathStart != currentStartCoords || this->CachedExpansionPath.empty())
+	if (cachedPathTarget != targetCell || cachedPathStart != currentStartCoords || cachedPath.empty())
 	{
 		bool reusedExistingPath = false;
-		if (this->CachedExpansionPathTarget == targetCell && !this->CachedExpansionPath.empty() && pStartBld != nullptr)
+		if (cachedPathTarget == targetCell && !cachedPath.empty() && pStartBld != nullptr)
 		{
 			// Check if currentStartCoords is close to any node on the existing cached path
 			size_t matchIdx = std::numeric_limits<size_t>::max();
 			double minNodeDistSq = 64.0; // within 8 cells of a path node
-			for (size_t k = 0; k < this->CachedExpansionPath.size(); ++k)
+			for (size_t k = 0; k < cachedPath.size(); ++k)
 			{
-				const double dSq = currentStartCoords.DistanceFromSquared(this->CachedExpansionPath[k]);
+				const double dSq = currentStartCoords.DistanceFromSquared(cachedPath[k]);
 				if (dSq < minNodeDistSq)
 				{
 					minNodeDistSq = dSq;
@@ -5340,11 +5353,11 @@ CellStruct HouseExt::ExtData::GetCrawlingWaypoint(CellStruct targetCell)
 			if (matchIdx != std::numeric_limits<size_t>::max())
 			{
 				// Truncate path to start from matchIdx onwards! Instant 0ms reuse!
-				if (matchIdx > 0 && matchIdx < this->CachedExpansionPath.size())
+				if (matchIdx > 0 && matchIdx < cachedPath.size())
 				{
-					this->CachedExpansionPath.erase(this->CachedExpansionPath.begin(), this->CachedExpansionPath.begin() + matchIdx);
+					cachedPath.erase(cachedPath.begin(), cachedPath.begin() + matchIdx);
 				}
-				this->CachedExpansionPathStart = currentStartCoords;
+				cachedPathStart = currentStartCoords;
 				reusedExistingPath = true;
 			}
 		}
@@ -5353,26 +5366,26 @@ CellStruct HouseExt::ExtData::GetCrawlingWaypoint(CellStruct targetCell)
 		{
 			if (pStartBld != nullptr)
 			{
-				this->CachedExpansionPath = GeneralUtils::GetAStarPath(currentStartCoords, targetCell, MovementZone::Normal);
-				this->CachedExpansionPathTarget = targetCell;
-				this->CachedExpansionPathStart = currentStartCoords;
+				cachedPath = GeneralUtils::GetAStarPath(currentStartCoords, targetCell, MovementZone::Normal);
+				cachedPathTarget = targetCell;
+				cachedPathStart = currentStartCoords;
 
-				if (!this->CachedExpansionPath.empty())
+				if (!cachedPath.empty())
 				{
-					Debug::Log("AdvAI: Recalculated A* crawl path from (%d,%d) to (%d,%d). Path size: %d cells.\n",
-						currentStartCoords.X, currentStartCoords.Y, targetCell.X, targetCell.Y, static_cast<int>(this->CachedExpansionPath.size()));
+					Debug::Log("AdvAI: Recalculated A* crawl path (%s) from (%d,%d) to (%d,%d). Path size: %d cells.\n",
+						isCombatTarget ? "Combat" : "Resource", currentStartCoords.X, currentStartCoords.Y, targetCell.X, targetCell.Y, static_cast<int>(cachedPath.size()));
 				}
 			}
 			else
 			{
-				this->CachedExpansionPath.clear();
-				this->CachedExpansionPathTarget = CellStruct(0, 0);
-				this->CachedExpansionPathStart = CellStruct(0, 0);
+				cachedPath.clear();
+				cachedPathTarget = CellStruct(0, 0);
+				cachedPathStart = CellStruct(0, 0);
 			}
 		}
 	}
 
-	if (this->CachedExpansionPath.empty())
+	if (cachedPath.empty())
 	{
 		return targetCell;
 	}
@@ -5381,7 +5394,7 @@ CellStruct HouseExt::ExtData::GetCrawlingWaypoint(CellStruct targetCell)
 	size_t furthestIdx = 0;
 	bool foundAny = false;
 
-	for (size_t i = 0; i < this->CachedExpansionPath.size(); ++i)
+	for (size_t i = 0; i < cachedPath.size(); ++i)
 	{
 		bool closeToExisting = false;
 		for (const auto pBld : pHouse->Buildings)
@@ -5389,7 +5402,7 @@ CellStruct HouseExt::ExtData::GetCrawlingWaypoint(CellStruct targetCell)
 			if (pBld && pBld->IsAlive && !pBld->InLimbo)
 			{
 				// Typically build range is up to 15.0 cells
-				if (pBld->GetMapCoords().DistanceFrom(this->CachedExpansionPath[i]) <= 15.0)
+				if (pBld->GetMapCoords().DistanceFromSquared(cachedPath[i]) <= 225.0)
 				{
 					closeToExisting = true;
 					break;
@@ -5404,9 +5417,9 @@ CellStruct HouseExt::ExtData::GetCrawlingWaypoint(CellStruct targetCell)
 		}
 	}
 
-	if (!foundAny)
+	if (foundAny && furthestIdx < cachedPath.size())
 	{
-		return targetCell;
+		return cachedPath[furthestIdx];
 	}
 
 	// 3. Set waypoint to be 10 cells further along the path

@@ -178,6 +178,17 @@ public:
 		CellStruct NextRefineryPlacementLocation { 0, 0 };
 		int LastUnclaimedTiberiumCheckFrame { 0 };
 
+		std::vector<CellStruct> CachedReachableResourceFields;
+		int NextReachableResourceScanFrame { 0 };
+
+		std::vector<CellStruct> CachedResourcePath;
+		CellStruct CachedResourcePathTarget { 0, 0 };
+		CellStruct CachedResourcePathStart { 0, 0 };
+
+		std::vector<CellStruct> CachedCombatPath;
+		CellStruct CachedCombatPathTarget { 0, 0 };
+		CellStruct CachedCombatPathStart { 0, 0 };
+
 		std::vector<CellStruct> CachedExpansionPath;
 		CellStruct CachedExpansionPathTarget { 0, 0 };
 		CellStruct CachedExpansionPathStart { 0, 0 };

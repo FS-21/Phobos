@@ -2144,7 +2144,13 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 		// Use A* waypoint dynamic crawling
 		const CellStruct currentWaypoint = houseExt->GetCrawlingWaypoint(expansionTarget);
 
-		// Find the leading tip anchor (closest to currentWaypoint) among our base normal buildings
+		// Sort candidate anchor buildings by 2D distance to currentWaypoint (closest first)
+		struct SortedAnchor
+		{
+			const BuildingClass* pBld;
+			double DistSq;
+		};
+		std::vector<SortedAnchor> sortedAnchors;
 		const BuildingClass* pLeadingTipAnchor = nullptr;
 		double minTipDistSq = std::numeric_limits<double>::max();
 		size_t baseNormalCount = 0;
@@ -2156,6 +2162,7 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 			{
 				baseNormalCount++;
 				const double dSq = currentWaypoint.DistanceFromSquared(pBld->GetMapCoords());
+				sortedAnchors.push_back({ pBld, dSq });
 				if (dSq < minTipDistSq)
 				{
 					minTipDistSq = dSq;
@@ -2164,11 +2171,19 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 			}
 		}
 
-		for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
+		std::sort(sortedAnchors.begin(), sortedAnchors.end(), [](const SortedAnchor& a, const SortedAnchor& b) {
+			return a.DistSq < b.DistSq;
+		});
+
+		size_t evaluatedCount = 0;
+		for (const auto& anchorInfo : sortedAnchors)
 		{
-			const BuildingClass* pAnchor = ExtData::OurBuildings[i];
-			if (!IsAIBaseNormal(pAnchor->Type))
-				continue;
+			// Limit evaluation cap to top 10 closest pivot buildings to eliminate CPU spikes
+			if (evaluatedCount >= 10)
+				break;
+
+			const BuildingClass* pAnchor = anchorInfo.pBld;
+			evaluatedCount++;
 
 			// Defenses must be placed at PREVIOUS pivot buildings (behind the advancing tip)
 			// to avoid becoming an obstacle for future expansion power plants!
@@ -2188,6 +2203,7 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 			const int yMin = anchorCell.Y - adjRange - buildingH + 1;
 			const int yMax = anchorCell.Y + anchorH + adjRange - 1;
 
+			bool foundValidCellForAnchor = false;
 			for (int y = yMin; y <= yMax; y++)
 			{
 				for (int x = xMin; x <= xMax; x++)
@@ -2313,8 +2329,15 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 					{
 						bestDist = dist;
 						bestCell = cell;
+						foundValidCellForAnchor = true;
 					}
 				}
+			}
+
+			// Early exit: if we found a valid placement cell for this anchor that advances towards the target, stop scanning further anchors!
+			if (foundValidCellForAnchor && bestCell.X > 0 && bestCell.Y > 0)
+			{
+				break;
 			}
 		}
 
