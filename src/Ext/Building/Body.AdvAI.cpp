@@ -2331,10 +2331,12 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 				}
 				else
 				{
-					if (bestDistSq >= nearestExistingDistSq)
+					const double nearestDist = sqrt(nearestExistingDistSq);
+					// Allow a 4.0 cell bending tolerance so the crawler can step around small obstacles (trees, sandbags, water edges)
+					if (bestDist > nearestDist + 4.0)
 					{
-						Debug::Log("AdvAI: House %d crawler cannot get closer than existing buildings (Best: %.1f, Existing: %.1f). Blocked halfway! Aborting placement.\n",
-							pOwner->ArrayIndex, bestDist, sqrt(nearestExistingDistSq));
+						Debug::Log("AdvAI: House %d crawler cannot get closer than existing buildings (Best: %.1f > Existing: %.1f + 4.0 margin). Blocked halfway! Aborting placement.\n",
+							pOwner->ArrayIndex, bestDist, nearestDist);
 						return CellStruct::Empty;
 					}
 				}
