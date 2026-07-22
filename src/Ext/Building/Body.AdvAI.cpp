@@ -22,6 +22,7 @@ static SupportRadiusType GetSupportRadiusType(const BuildingTypeClass* pType);
 static bool IsSameSupportNetwork(const BuildingTypeClass* pTypeA, const BuildingTypeClass* pTypeB);
 static int GetSupportRadius(const BuildingTypeClass* pType);
 static const char* GetGroupAsID(BuildingTypeClass* pType);
+static bool HasEnemyThreatsNear(CellStruct cell, HouseClass* pOwner, double radius);
 
 static bool IsAIBaseNormal(const BuildingTypeClass* pType)
 {
@@ -1223,21 +1224,40 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 			// Enforce spacing between base defenses (prevent placing them touching).
 			if (pBuilding->Type->IsBaseDefense)
 			{
+				const bool isEffectivelyNearEnemy = HasEnemyThreatsNear(cell, pBuilding->Owner, 20.0);
+				const bool isParanoid = (pBuilding->Owner->LATime + 900 > Unsorted::CurrentFrame);
+
+				const BuildingClass* pOurConYard = pBuilding->Owner->ConYards.Count > 0 ? pBuilding->Owner->ConYards[0] : nullptr;
+				const CellStruct baseCenter = pOurConYard ? pOurConYard->GetMapCoords() : pBuilding->Owner->Base_Center();
+				const bool isInMainBase = (cell.DistanceFrom(baseCenter) < 20.0);
+
+				// Spacing rule: 10.0 cells ONLY on expansion/crawling routes (away from main base, paranoia, and enemy)
+				// In main base, during paranoia, or near enemy -> Standard 4.0 cell margin (original branch behavior)
+				const double requiredDefenseSpacing = (isInMainBase || isParanoid || isEffectivelyNearEnemy) ? 4.0 : 10.0;
+
 				bool tooCloseToDefense = false;
 				for (const auto pOtherBuilding : BuildingClass::Array)
 				{
 					if (pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding->Type->IsBaseDefense && pOtherBuilding != pBuilding)
 					{
-						double dist = cell.DistanceFrom(pOtherBuilding->GetMapCoords());
-						if (dist < 4.0) // Require at least 4 cells spacing between base defenses to avoid clustering
+						if (pOtherBuilding->Owner == pBuilding->Owner)
 						{
-							tooCloseToDefense = true;
-							break;
+							double dist = cell.DistanceFrom(pOtherBuilding->GetMapCoords());
+							if (dist < requiredDefenseSpacing)
+							{
+								tooCloseToDefense = true;
+								break;
+							}
 						}
 					}
 				}
 				if (tooCloseToDefense)
 				{
+					// Strict rejection on expansion routes!
+					if (requiredDefenseSpacing >= 10.0)
+					{
+						continue;
+					}
 					value += 500000; // Add a strong rating penalty (lowest is best) to prevent clustering
 				}
 			}
@@ -2190,6 +2210,16 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 			if (pBuildingType->IsBaseDefense && baseNormalCount > 1 && pAnchor == pLeadingTipAnchor)
 			{
 				continue;
+			}
+
+			// For crawling power plants (non-defense, non-refinery), restrict anchors to the leading tip building
+			// (or buildings within 4.0 cells of the tip) so we build a single line instead of parallel rows.
+			if (!pBuildingType->IsBaseDefense && !pBuildingType->Refinery && pLeadingTipAnchor != nullptr)
+			{
+				if (anchorInfo.DistSq > sortedAnchors[0].DistSq + 16.0)
+				{
+					continue;
+				}
 			}
 
 			const CellStruct anchorCell = pAnchor->GetMapCoords();
@@ -3177,6 +3207,67 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 			const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
 			houseExt->LastAttackedBuildingCoords = placementCell;
 			Debug::Log("AdvAI: Placed %s at (%d,%d) near enemy threats! Triggering instant paranoia alert.\n", pBuilding->Type->ID, placementCell.X, placementCell.Y);
+		}
+
+		// Opportunistic Tiberium detection upon building placement (11.0 cell radius)
+		if (!pBuilding->Type->ResourceDestination)
+		{
+			bool hasTiberiumNear = false;
+			const double scanRadiusSq = 11.0 * 11.0;
+
+			for (int dy = -11; dy <= 11; ++dy)
+			{
+				for (int dx = -11; dx <= 11; ++dx)
+				{
+					CellStruct scanCell(static_cast<short>(placementCell.X + dx), static_cast<short>(placementCell.Y + dy));
+					if (!MapClass::Instance.CoordinatesLegal(scanCell))
+						continue;
+
+					if (placementCell.DistanceFromSquared(scanCell) > scanRadiusSq)
+						continue;
+
+					const CellClass* cell = MapClass::Instance.GetCellAt(scanCell);
+					if (cell)
+					{
+						if (cell->OverlayTypeIndex != -1 && OverlayClass::GetTiberiumType(cell->OverlayTypeIndex) >= 0)
+						{
+							hasTiberiumNear = true;
+							break;
+						}
+						const TerrainClass* pTerrain = cell->GetTerrain(false);
+						if (pTerrain != nullptr && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
+						{
+							hasTiberiumNear = true;
+							break;
+						}
+					}
+				}
+				if (hasTiberiumNear)
+					break;
+			}
+
+			if (hasTiberiumNear)
+			{
+				bool tooCloseToRefinery = false;
+				for (const auto pBld : pBuilding->Owner->Buildings)
+				{
+					if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type->ResourceDestination)
+					{
+						if (placementCell.DistanceFrom(pBld->GetMapCoords()) < 14.0)
+						{
+							tooCloseToRefinery = true;
+							break;
+						}
+					}
+				}
+
+				if (!tooCloseToRefinery)
+				{
+					houseExt->ShouldBuildRefinery = true;
+					Debug::Log("AdvAI: Placed %s at (%d,%d) near unclaimed Tiberium (within 11.0 cells)! Triggering opportunistic refinery construction.\n",
+						pBuilding->Type->ID, placementCell.X, placementCell.Y);
+				}
+			}
 		}
 	}
 
