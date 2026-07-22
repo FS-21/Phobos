@@ -2144,11 +2144,38 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 		// Use A* waypoint dynamic crawling
 		const CellStruct currentWaypoint = houseExt->GetCrawlingWaypoint(expansionTarget);
 
+		// Find the leading tip anchor (closest to currentWaypoint) among our base normal buildings
+		const BuildingClass* pLeadingTipAnchor = nullptr;
+		double minTipDistSq = std::numeric_limits<double>::max();
+		size_t baseNormalCount = 0;
+
+		for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
+		{
+			const BuildingClass* pBld = ExtData::OurBuildings[i];
+			if (pBld && IsAIBaseNormal(pBld->Type))
+			{
+				baseNormalCount++;
+				const double dSq = currentWaypoint.DistanceFromSquared(pBld->GetMapCoords());
+				if (dSq < minTipDistSq)
+				{
+					minTipDistSq = dSq;
+					pLeadingTipAnchor = pBld;
+				}
+			}
+		}
+
 		for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
 		{
 			const BuildingClass* pAnchor = ExtData::OurBuildings[i];
 			if (!IsAIBaseNormal(pAnchor->Type))
 				continue;
+
+			// Defenses must be placed at PREVIOUS pivot buildings (behind the advancing tip)
+			// to avoid becoming an obstacle for future expansion power plants!
+			if (pBuildingType->IsBaseDefense && baseNormalCount > 1 && pAnchor == pLeadingTipAnchor)
+			{
+				continue;
+			}
 
 			const CellStruct anchorCell = pAnchor->GetMapCoords();
 			const int anchorW = pAnchor->Type->GetFoundationWidth();

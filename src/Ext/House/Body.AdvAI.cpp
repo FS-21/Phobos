@@ -1078,28 +1078,23 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 				nearbyRefineries++;
 		}
 
-		// Count tiberium trees and ore cells within 20 cells of candidateCell
-		int tiberiumTreeCount = 0;
+		// Calculate resource density to determine the maximum allowed refineries for this zone
+		int tiberiumTreeCount = isTree ? 1 : 0;
 		int tiberiumOreCellCount = 0;
-		for (int dy = -20; dy <= 20; ++dy)
+
+		if (!isTree)
 		{
-			for (int dx = -20; dx <= 20; ++dx)
+			// Sample local 11x11 area around candidate cell for ore density
+			for (int dy = -5; dy <= 5; ++dy)
 			{
-				CellStruct scanCell(candidateCell.X + dx, candidateCell.Y + dy);
-				if (!MapClass::Instance.CoordinatesLegal(scanCell))
-					continue;
-
-				if (candidateCell.DistanceFrom(scanCell) > 20.0)
-					continue;
-
-				const CellClass* cell = MapClass::Instance.GetCellAt(scanCell);
-				if (cell)
+				for (int dx = -5; dx <= 5; ++dx)
 				{
-					const TerrainClass* pTerrain = cell->GetTerrain(false);
-					if (pTerrain != nullptr && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
-						tiberiumTreeCount++;
+					CellStruct scanCell(candidateCell.X + dx, candidateCell.Y + dy);
+					if (!MapClass::Instance.CoordinatesLegal(scanCell))
+						continue;
 
-					if (cell->OverlayTypeIndex != -1)
+					const CellClass* cell = MapClass::Instance.GetCellAt(scanCell);
+					if (cell && cell->OverlayTypeIndex != -1)
 					{
 						if (const auto pOverlayType = OverlayTypeClass::Array.GetItem(cell->OverlayTypeIndex))
 						{
@@ -1115,7 +1110,7 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 		if (tiberiumTreeCount > 0)
 			allowedRefineries = std::min(tiberiumTreeCount, 3);
 		else if (tiberiumOreCellCount > 0)
-			allowedRefineries = std::min(1 + (tiberiumOreCellCount / 40), 3); // 1 refinery per 40 ore cells, up to 3
+			allowedRefineries = std::min(1 + (tiberiumOreCellCount / 10), 3);
 
 		if (found || nearbyRefineries >= allowedRefineries)
 		{
@@ -2449,14 +2444,14 @@ const BuildingTypeClass* HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* 
 				antiAirScore *= costFactor;
 			}
 
-			// Apply a 25% score reduction for defenses without weapons
+			// Apply an 85% score reduction for defenses without built-in weapons (e.g. empty Battle Bunkers)
 			const auto pPrimaryW = pDefense->Weapon[0].WeaponType;
 			const auto pSecondaryW = pDefense->Weapon[1].WeaponType;
 			if (pPrimaryW == nullptr && pSecondaryW == nullptr)
 			{
-				antiInfantryScore *= 0.75;
-				antiVehicleScore *= 0.75;
-				antiAirScore *= 0.75;
+				antiInfantryScore *= 0.15;
+				antiVehicleScore *= 0.15;
+				antiAirScore *= 0.15;
 			}
 
 			if (LogVerboseAdvAI)
@@ -3526,7 +3521,38 @@ bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 	// Build power by default, but only if we have somewhere to expand towards.
 	if (houseExt->NextExpansionPointLocation.X != 0 && houseExt->NextExpansionPointLocation.Y != 0)
 	{
-		const BuildingTypeClass* pOurPowerPlant = pPrimaryTechTree->GetRandomBuildable(TechTreeTypeClass::BuildType::BuildPower, canBuildFunction);
+		const BuildingTypeClass* pOurPowerPlant = nullptr;
+		int lowestCost = std::numeric_limits<int>::max();
+		int maxAdjacent = -1;
+		std::vector<const BuildingTypeClass*> bestPowerCandidates;
+
+		for (const auto pType : TechTreeTypeClass::TotalBuildPower)
+		{
+			if (pType && canBuildFunction(pType))
+			{
+				if (pType->Cost < lowestCost || (pType->Cost == lowestCost && pType->Adjacent > maxAdjacent))
+				{
+					lowestCost = pType->Cost;
+					maxAdjacent = pType->Adjacent;
+					bestPowerCandidates.clear();
+					bestPowerCandidates.push_back(pType);
+				}
+				else if (pType->Cost == lowestCost && pType->Adjacent == maxAdjacent)
+				{
+					bestPowerCandidates.push_back(pType);
+				}
+			}
+		}
+
+		if (!bestPowerCandidates.empty())
+		{
+			const int idx = ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(bestPowerCandidates.size()) - 1);
+			pOurPowerPlant = bestPowerCandidates[idx];
+		}
+		else
+		{
+			pOurPowerPlant = pPrimaryTechTree->GetRandomBuildable(TechTreeTypeClass::BuildType::BuildPower, canBuildFunction);
+		}
 		if (pOurPowerPlant != nullptr)
 		{
 			CellStruct placementCell = BuildingExt::Get_Best_Expansion_Placement_Position_Helper(pHouse, const_cast<BuildingTypeClass*>(pOurPowerPlant), nullptr);
@@ -5292,26 +5318,57 @@ CellStruct HouseExt::ExtData::GetCrawlingWaypoint(CellStruct targetCell)
 
 	CellStruct currentStartCoords = pStartBld ? pStartBld->GetMapCoords() : CellStruct(0, 0);
 
-	// 1. Manage Cached A* Path (Recalculate if target changes OR if our bridgehead building changes)
+	// 1. Manage Cached A* Path (Reuse & Trim existing path if advancing along it, recalculate only if target changes or off-path)
 	if (this->CachedExpansionPathTarget != targetCell || this->CachedExpansionPathStart != currentStartCoords || this->CachedExpansionPath.empty())
 	{
-		if (pStartBld != nullptr)
+		bool reusedExistingPath = false;
+		if (this->CachedExpansionPathTarget == targetCell && !this->CachedExpansionPath.empty() && pStartBld != nullptr)
 		{
-			this->CachedExpansionPath = GeneralUtils::GetAStarPath(currentStartCoords, targetCell, MovementZone::Normal);
-			this->CachedExpansionPathTarget = targetCell;
-			this->CachedExpansionPathStart = currentStartCoords;
-
-			if (!this->CachedExpansionPath.empty())
+			// Check if currentStartCoords is close to any node on the existing cached path
+			size_t matchIdx = std::numeric_limits<size_t>::max();
+			double minNodeDistSq = 64.0; // within 8 cells of a path node
+			for (size_t k = 0; k < this->CachedExpansionPath.size(); ++k)
 			{
-				Debug::Log("AdvAI: Recalculated A* crawl path from (%d,%d) to (%d,%d). Path size: %d cells.\n",
-					currentStartCoords.X, currentStartCoords.Y, targetCell.X, targetCell.Y, static_cast<int>(this->CachedExpansionPath.size()));
+				const double dSq = currentStartCoords.DistanceFromSquared(this->CachedExpansionPath[k]);
+				if (dSq < minNodeDistSq)
+				{
+					minNodeDistSq = dSq;
+					matchIdx = k;
+				}
+			}
+
+			if (matchIdx != std::numeric_limits<size_t>::max())
+			{
+				// Truncate path to start from matchIdx onwards! Instant 0ms reuse!
+				if (matchIdx > 0 && matchIdx < this->CachedExpansionPath.size())
+				{
+					this->CachedExpansionPath.erase(this->CachedExpansionPath.begin(), this->CachedExpansionPath.begin() + matchIdx);
+				}
+				this->CachedExpansionPathStart = currentStartCoords;
+				reusedExistingPath = true;
 			}
 		}
-		else
+
+		if (!reusedExistingPath)
 		{
-			this->CachedExpansionPath.clear();
-			this->CachedExpansionPathTarget = CellStruct(0, 0);
-			this->CachedExpansionPathStart = CellStruct(0, 0);
+			if (pStartBld != nullptr)
+			{
+				this->CachedExpansionPath = GeneralUtils::GetAStarPath(currentStartCoords, targetCell, MovementZone::Normal);
+				this->CachedExpansionPathTarget = targetCell;
+				this->CachedExpansionPathStart = currentStartCoords;
+
+				if (!this->CachedExpansionPath.empty())
+				{
+					Debug::Log("AdvAI: Recalculated A* crawl path from (%d,%d) to (%d,%d). Path size: %d cells.\n",
+						currentStartCoords.X, currentStartCoords.Y, targetCell.X, targetCell.Y, static_cast<int>(this->CachedExpansionPath.size()));
+				}
+			}
+			else
+			{
+				this->CachedExpansionPath.clear();
+				this->CachedExpansionPathTarget = CellStruct(0, 0);
+				this->CachedExpansionPathStart = CellStruct(0, 0);
+			}
 		}
 	}
 
