@@ -64,14 +64,22 @@ DEFINE_HOOK(0x533066, CommandClassCallback_Register, 0x6)
 	return 0;
 }
 
+#include <Ext/Observer/ObserverUI.h>
+
 static void MouseWheelDownCommand()
 {
+	if (ObserverUIClass::IsActive() && ObserverUIClass::Instance.HandleMouseWheel(false))
+		return;
+
 	if (MessageColumnClass::Instance.IsHovering())
 		MessageColumnClass::Instance.ScrollDown();
 }
 
 static void MouseWheelUpCommand()
 {
+	if (ObserverUIClass::IsActive() && ObserverUIClass::Instance.HandleMouseWheel(true))
+		return;
+
 	if (MessageColumnClass::Instance.IsHovering())
 		MessageColumnClass::Instance.ScrollUp();
 }
@@ -90,6 +98,9 @@ DEFINE_HOOK(0x777998, Game_WndProc_ScrollMouseWheel, 0x6)
 
 static inline bool CheckSkipScrollSidebar()
 {
+	if (ObserverUIClass::IsActive() && ObserverUIClass::Instance.IsMouseHoveringUI())
+		return true;
+
 	return MessageColumnClass::Instance.IsHovering();
 }
 
