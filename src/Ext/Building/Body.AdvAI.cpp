@@ -1215,6 +1215,35 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 				continue;
 			}
 
+			// Enforce ground connectivity for factories (Barracks, War Factory) so produced units aren't trapped on cliffs/isolated ledges
+			if (pBuilding->Type->Factory == AbstractType::InfantryType ||
+				(pBuilding->Type->Factory == AbstractType::UnitType && !pBuilding->Type->Naval))
+			{
+				const BuildingClass* pOurConYard = pBuilding->Owner->ConYards.Count > 0 ? pBuilding->Owner->ConYards[0] : nullptr;
+				const CellStruct baseCenter = pOurConYard ? pOurConYard->GetMapCoords() : pBuilding->Owner->Base_Center();
+
+				if (!GeneralUtils::AreZonesConnected(cell, baseCenter, MovementZone::Normal))
+				{
+					bool connectedToAnyOwned = false;
+					for (size_t i = 0; i < ExtData::OurBuildingCount; i++)
+					{
+						const BuildingClass* pOther = ExtData::OurBuildings[i];
+						if (pOther && pOther->IsAlive && !pOther->InLimbo && !pOther->Type->Naval)
+						{
+							if (GeneralUtils::AreZonesConnected(cell, pOther->GetMapCoords(), MovementZone::Normal))
+							{
+								connectedToAnyOwned = true;
+								break;
+							}
+						}
+					}
+					if (!connectedToAnyOwned)
+					{
+						continue;
+					}
+				}
+			}
+
 			// Get value for the cell.
 			int value = valueGenerator(cell, pBuilding);
 
@@ -2933,6 +2962,14 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 		return Get_Best_Refinery_Placement_Position(pBuilding);
 	}
 
+	// Advanced Power Plants (Reactors) MUST ALWAYS be placed in the main base near ConYard!
+	if (TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBuilding->Type) || pBuilding->Type->PowerBonus > 200)
+	{
+		const int adjacency = pBuilding->Type->Adjacent;
+		const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(false), pBuilding->Type);
+		return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Base_Center_Placement_Position_Value);
+	}
+
 	if (GetSupportRadiusType(pBuilding->Type) != SupportRadiusType::None || TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
 	{
 		return Get_Best_Support_Placement_Position(pBuilding);
@@ -2970,7 +3007,17 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 		return Get_Best_Sensor_Placement_Position(pBuilding);
 	}
 
-	return Get_Best_Expansion_Placement_Position(pBuilding);
+	// For basic power plants: place along expansion route ONLY IF AI is actively expanding towards Tiberium,
+	// otherwise place in main base near ConYard.
+	const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
+	if (houseExt != nullptr && houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+	{
+		return Get_Best_Expansion_Placement_Position(pBuilding);
+	}
+
+	const int adjacency = pBuilding->Type->Adjacent;
+	const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(false), pBuilding->Type);
+	return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Base_Center_Placement_Position_Value);
 }
 
 void BuildingExt::PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass* pBuildingType)
