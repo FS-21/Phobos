@@ -2,6 +2,7 @@
 #include "SWSidebar/SWSidebarClass.h"
 
 #include <Ext/Side/Body.h>
+#include <Ext/Observer/ObserverUI.h>
 #include <Misc/MessageColumn.h>
 
 DEFINE_HOOK(0x6A593E, SidebarClass_InitForHouse_AdditionalFiles, 0x5)
@@ -105,7 +106,8 @@ DEFINE_HOOK(0x692419, DisplayClass_ProcessClickCoords_SkipOnNewButtons, 0x7)
 
 	return (SWSidebarClass::IsEnabled() && SWSidebarClass::Instance.CurrentColumn
 		|| SWSidebarClass::Instance.ToggleButton && SWSidebarClass::Instance.ToggleButton->IsHovering
-		|| MessageColumnClass::Instance.IsBlocked())
+		|| MessageColumnClass::Instance.IsBlocked()
+		|| (ObserverUIClass::IsActive() && ObserverUIClass::Instance.IsMouseHoveringUI()))
 		? DoNothing : 0;
 }
 

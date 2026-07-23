@@ -6,6 +6,7 @@
 #include <TechnoTypeClass.h>
 #include <FactoryClass.h>
 #include <TacticalClass.h>
+#include <ScenarioClass.h>
 #include <Surface.h>
 #include <GeneralStructures.h>
 
@@ -20,15 +21,38 @@ struct PlayerEconomySample
 	int Money { 0 };
 };
 
-// Structure representing an individual cameo item (structure or production item)
+enum class ObserverFilterCategory : int
+{
+	Defenses = 0,
+	Structures,
+	AllStructures,
+	Infantry,
+	Vehicles,
+	Naval,
+	Aircraft,
+	AllUnits,
+	Everything,
+	Count
+};
+
+struct ObserverTabButton
+{
+	ObserverFilterCategory Category;
+	std::wstring Label;
+	RectangleStruct Rect { 0, 0, 0, 0 };
+	bool IsHovered { false };
+};
+
+// Structure representing an individual cameo item (structure, unit or production item)
 struct ObserverCameoItem
 {
 	TechnoTypeClass* pType { nullptr };
-	int Count { 0 };               // >1 for structures (if 1, not drawn)
+	int Count { 0 };               // Quantity count
 	int ProgressPercent { -1 };    // 0..100 for items currently in production
 	bool IsProduction { false };
 	HouseClass* pOwner { nullptr };
 	std::vector<BuildingClass*> Buildings {}; // List of building instances for camera cycling
+	std::vector<TechnoClass*> Technos {};     // List of techno instances for camera cycling
 	RectangleStruct DisplayRect { 0, 0, 0, 0 }; // Screen area occupied by this cameo
 };
 
@@ -36,6 +60,7 @@ struct ObserverCameoItem
 struct ObserverPlayerRow
 {
 	HouseClass* pHouse { nullptr };
+	int PlayerNumber { 0 }; // 1 for P1, 2 for P2, 3 for P3...
 	ColorStruct PlayerColor { 0, 0, 0 };
 	std::wstring PlayerName {};
 	std::wstring CountryName {};
@@ -72,6 +97,8 @@ public:
 	bool HandleMouseClick(Point2D mousePos, bool isRightClick);
 	bool HandleMouseWheel(bool isUp);
 	bool IsMouseHoveringUI() const;
+	bool IsSearchFocused() const { return this->IsSearchInputFocused; }
+	void ClearData();
 
 	static bool IsActive();
 
@@ -81,6 +108,19 @@ private:
 	void DrawTooltip(DSurface* pSurface, const ObserverCameoItem& item, Point2D mousePos);
 	void DrawPlayerTooltip(DSurface* pSurface, HouseClass* pHouse, Point2D mousePos);
 	void CenterOnNextBuilding(ObserverCameoItem& item);
+
+	ObserverFilterCategory ActiveFilterTab { ObserverFilterCategory::AllStructures };
+	std::vector<ObserverTabButton> TabButtons {};
+
+	// Search filter box state
+	std::wstring SearchFilterText {};
+	bool IsSearchInputFocused { false };
+	RectangleStruct SearchBoxRect { 0, 0, 0, 0 };
+	RectangleStruct ClearBtnRect { 0, 0, 0, 0 };
+	bool IsHoveringClearBtn { false };
+
+	std::vector<std::wstring> ParseSearchTerms(const std::wstring& query) const;
+	bool MatchesSearchFilter(TechnoTypeClass* pType) const;
 
 	std::vector<ObserverPlayerRow> PlayerRows {};
 	std::map<HouseClass*, std::deque<PlayerEconomySample>> EconomyHistory {};
@@ -95,5 +135,5 @@ private:
 	Point2D HoveredMousePos { 0, 0 };
 
 	// Tracks camera cycling index per (House, BuildingTypeArrayIndex) pair
-	std::map<std::pair<HouseClass*, int>, size_t> CycleIndices {};
+	std::map<std::pair<HouseClass*, uintptr_t>, size_t> CycleIndices {};
 };
