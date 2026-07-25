@@ -1,6 +1,9 @@
 #include "Commands.h"
 
 #include "ObjectInfo.h"
+#include "ShowObjectCard.h"
+#include "ToggleObserverUI.h"
+#include "ClearObserverUICards.h"
 #include "NextIdleHarvester.h"
 #include "QuickSave.h"
 #include "DamageDisplay.h"
@@ -30,6 +33,9 @@ DEFINE_HOOK(0x533066, CommandClassCallback_Register, 0x6)
 	MakeCommand<ToggleDesignatorRangeCommandClass>();
 	MakeCommand<ToggleMessageListCommandClass>();
 	MakeCommand<ToggleSWSidebar>();
+	MakeCommand<ToggleObserverUICommandClass>();
+	MakeCommand<ShowObjectCardCommandClass>();
+	MakeCommand<ClearObserverUICardsCommandClass>();
 	MakeCommand<DeselectObjectCommandClass>();
 	MakeCommand<DeselectObject5CommandClass>();
 

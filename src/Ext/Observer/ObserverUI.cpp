@@ -2,6 +2,8 @@
 
 #include <Ext/TechnoType/Body.h>
 #include <Ext/Techno/Body.h>
+#include <Ext/SWType/Body.h>
+#include <Ext/BuildingType/Body.h>
 #include <InfantryClass.h>
 #include <UnitClass.h>
 #include <AircraftClass.h>
@@ -15,6 +17,8 @@
 #include <MouseClass.h>
 #include <Drawing.h>
 #include <StringTable.h>
+#include <RulesClass.h>
+#include <New/Entity/ShieldClass.h>
 #include <PCX.h>
 
 #include <algorithm>
@@ -38,6 +42,26 @@ static bool IntersectRect(const RectangleStruct& r1, const RectangleStruct& r2, 
 	return false;
 }
 
+static int GetFactoryProgressPercent(FactoryClass* pFact)
+{
+	if (!pFact || !pFact->Object)
+		return 0;
+
+	int rate = pFact->Production.Rate;
+	if (rate > 0)
+	{
+		int step = pFact->Production.Value; // 0 to 54
+		int timeLeftInStep = pFact->Production.Timer.GetTimeLeft();
+		int elapsedInStep = (timeLeftInStep >= 0 && timeLeftInStep <= rate) ? (rate - timeLeftInStep) : 0;
+		int totalElapsedFrames = (step * rate) + elapsedInStep;
+		int totalFrames = 54 * rate;
+		return std::clamp((totalElapsedFrames * 100) / totalFrames, 0, 100);
+	}
+
+	int curProgress = pFact->GetProgress(); // 0..54
+	return std::clamp((curProgress * 100) / 54, 0, 100);
+}
+
 bool ObserverUIClass::IsActive()
 {
 	if (!ScenarioClass::Instance || HouseClass::Array.Count == 0 || !HouseClass::CurrentPlayer)
@@ -49,7 +73,13 @@ bool ObserverUIClass::IsActive()
 
 void ObserverUIClass::ClearData()
 {
+	this->DisplayMode = ObserverUIDisplayMode::Hidden;
 	this->PlayerRows.clear();
+	if (!Phobos::Config::DevelopmentCommands)
+	{
+		this->FloatingWindows.clear();
+		this->FloatingUnitWindows.clear();
+	}
 	this->EconomyHistory.clear();
 	this->CycleIndices.clear();
 	this->TabButtons.clear();
@@ -59,6 +89,9 @@ void ObserverUIClass::ClearData()
 	this->HasHoveredItem = false;
 	this->pHoveredPlayer = nullptr;
 	this->HasHoveredPlayer = false;
+	this->WasEnterPressed = false;
+	this->VerticalScrollOffset = 0;
+	this->MaxVerticalScrollOffset = 0;
 }
 
 std::vector<std::wstring> ObserverUIClass::ParseSearchTerms(const std::wstring& query) const
@@ -117,10 +150,23 @@ std::vector<std::wstring> ObserverUIClass::ParseSearchTerms(const std::wstring& 
 	return terms;
 }
 
-bool ObserverUIClass::MatchesSearchFilter(TechnoTypeClass* pType) const
+bool ObserverUIClass::MatchesSearchFilter(AbstractTypeClass* pType) const
 {
 	if (!pType)
 		return false;
+
+	if (pType->WhatAmI() == AbstractType::BuildingType)
+	{
+		auto pBType = static_cast<BuildingTypeClass*>(pType);
+		if (pBType->InvisibleInGame || pBType->Invisible)
+			return false;
+	}
+	else if (pType->WhatAmI() == AbstractType::UnitType || pType->WhatAmI() == AbstractType::InfantryType || pType->WhatAmI() == AbstractType::AircraftType)
+	{
+		auto pTechType = static_cast<TechnoTypeClass*>(pType);
+		if (pTechType->Invisible)
+			return false;
+	}
 
 	if (this->SearchFilterText.empty())
 		return true;
@@ -292,7 +338,15 @@ void ObserverUIClass::CollectPlayerData()
 			plainNameStr = pHouse->get_ID();
 
 		std::wstring wPlainName(plainNameStr.begin(), plainNameStr.end());
-		row.PlayerName = L"P" + std::to_wstring(row.PlayerNumber) + L": " + wPlainName;
+		bool isMultiplayer = SessionClass::Instance.GameMode == GameMode::Skirmish || SessionClass::Instance.GameMode == GameMode::LAN || SessionClass::Instance.GameMode == GameMode::Internet;
+		if (isMultiplayer)
+		{
+			row.PlayerName = L"P" + std::to_wstring(row.PlayerNumber) + L": " + wPlainName;
+		}
+		else
+		{
+			row.PlayerName = wPlainName;
+		}
 		row.CountryName = pHouse->Type->UIName;
 
 		// Calculate economy rate per minute (+- $X/min) based on rolling sample history
@@ -337,21 +391,30 @@ void ObserverUIClass::CollectPlayerData()
 		// Assign actual player house ColorScheme BaseColor
 		row.PlayerColor = GetHouseColor(pHouse, row.PlayerNumber - 1);
 
-		// Collect active factory production for this player grouped by TechnoType
+		// Collect active factory production for this player from FactoryClass::Array grouped by TechnoType
 		std::map<TechnoTypeClass*, std::vector<BuildingClass*>> prodGroupMap;
 		std::map<TechnoTypeClass*, int> prodProgressMap;
 
-		for (auto const pBld : pHouse->Buildings)
+		for (auto const pFact : FactoryClass::Array)
 		{
-			if (!pBld || !pBld->Factory || !pBld->Factory->Object)
+			if (!pFact || pFact->Owner != pHouse || !pFact->Object)
 				continue;
 
-			auto const pProducingType = pBld->Factory->Object->GetTechnoType();
-			if (!pProducingType)
+			auto const pProducingType = pFact->Object->GetTechnoType();
+			if (!pProducingType || !this->MatchesSearchFilter(pProducingType))
 				continue;
 
-			int progressPercent = (pBld->Factory->GetProgress() * 100) / 54;
-			progressPercent = std::clamp(progressPercent, 0, 100);
+			int progressPercent = GetFactoryProgressPercent(pFact);
+
+			BuildingClass* pBld = nullptr;
+			for (auto const b : pHouse->Buildings)
+			{
+				if (b && b->Factory == pFact)
+				{
+					pBld = b;
+					break;
+				}
+			}
 
 			prodGroupMap[pProducingType].push_back(pBld);
 			prodProgressMap[pProducingType] = std::max(prodProgressMap[pProducingType], progressPercent);
@@ -511,6 +574,76 @@ void ObserverUIClass::CollectPlayerData()
 			}
 		}
 
+		// Collect Superweapons if Superweapons tab is selected
+		if (this->ActiveFilterTab == ObserverFilterCategory::Superweapons)
+		{
+			for (int s = 0; s < pHouse->Supers.Count; ++s)
+			{
+				auto pSuper = pHouse->Supers.GetItem(s);
+				if (!pSuper || !pSuper->Type || !this->MatchesSearchFilter(pSuper->Type))
+					continue;
+
+				// Check Phobos SWTypeExt visibility settings
+				const auto pSWExt = SWTypeExt::ExtMap.Find(pSuper->Type);
+				if (pSWExt && !pSWExt->SW_ShowCameo && pSWExt->SW_AutoFire)
+					continue;
+
+				ObserverCameoItem item;
+				item.pSuperType = pSuper->Type;
+				item.pSuper = pSuper;
+				item.IsSuperweapon = true;
+				item.pOwner = pHouse;
+				item.Count = 1;
+
+				for (int b = 0; b < BuildingClass::Array.Count; ++b)
+				{
+					auto pBldObj = BuildingClass::Array.GetItem(b);
+					if (pBldObj && pBldObj->Owner == pHouse && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Type)
+					{
+						bool grantsSW = false;
+						if (pBldObj->Type->SuperWeapon == pSuper->Type->ArrayIndex || pBldObj->Type->SuperWeapon2 == pSuper->Type->ArrayIndex)
+						{
+							grantsSW = true;
+						}
+
+						auto pBldExt = BuildingTypeExt::ExtMap.Find(pBldObj->Type);
+						if (pBldExt)
+						{
+							for (int swIdx : pBldExt->SuperWeapons)
+							{
+								if (swIdx == pSuper->Type->ArrayIndex)
+								{
+									grantsSW = true;
+									break;
+								}
+							}
+						}
+
+						if (grantsSW)
+						{
+							item.Buildings.push_back(pBldObj);
+						}
+					}
+				}
+
+				if (!pSuper->IsPresent && !pSuper->IsReady && !pSuper->IsOneTime && item.Buildings.empty())
+					continue;
+
+				int totalFrames = pSuper->GetRechargeTime();
+				int framesLeft = pSuper->RechargeTimer.GetTimeLeft();
+				if (totalFrames > 0 && framesLeft > 0)
+				{
+					item.ProgressPercent = std::clamp(((totalFrames - framesLeft) * 100) / totalFrames, 0, 100);
+				}
+				else
+				{
+					item.ProgressPercent = 100;
+				}
+
+				row.StructureItems.emplace_back(item);
+			}
+		}
+
 		for (auto const& [pType, technoList] : filterGroupMap)
 		{
 			ObserverCameoItem item;
@@ -599,7 +732,8 @@ void ObserverUIClass::CollectPlayerData()
 
 void ObserverUIClass::Update()
 {
-	if (!IsActive())
+	bool isActive = IsActive() || (Phobos::Config::DevelopmentCommands && (this->DisplayMode != ObserverUIDisplayMode::Hidden || this->HasFloatingWindows()));
+	if (!isActive)
 	{
 		if (!this->PlayerRows.empty() || !this->EconomyHistory.empty())
 		{
@@ -608,9 +742,98 @@ void ObserverUIClass::Update()
 		return;
 	}
 
+	// Check ENTER key press: If no hotkey is assigned to ObjectInfo in the key options menu, ENTER acts as default key for observers
+	bool isEnterPressed = (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
+	if (isEnterPressed && !this->WasEnterPressed)
+	{
+		if (this->IsSearchInputFocused)
+		{
+			// Defocus search box ONLY, do NOT toggle card window!
+			this->IsSearchInputFocused = false;
+		}
+		else
+		{
+			// If Show Object Card hotkey is unassigned, ENTER opens card for hovered/selected object
+			bool cardOpened = false;
+			if (!IsShowObjectCardHotkeyBound())
+			{
+				cardOpened = this->OpenFloatingWindowForSelectedObject();
+			}
+
+			// If no card was opened and Toggle Observer UI hotkey is unassigned, ENTER toggles Observer UI display mode
+			if (!cardOpened && !IsToggleObserverUIHotkeyBound())
+			{
+				this->ToggleDisplayMode();
+			}
+		}
+	}
+	this->WasEnterPressed = isEnterPressed;
+
+	if (this->DisplayMode == ObserverUIDisplayMode::Hidden && !this->HasFloatingWindows())
+		return;
+
 	if (this->IsMouseHoveringUI() || this->IsSearchFocused())
 	{
 		MouseClass::Instance.UpdateCursor(MouseCursorType::Default, false);
+	}
+
+	// Update dragging position of floating card windows
+	Point2D mousePos = { 0, 0 };
+	if (WWMouseClass::Instance)
+	{
+		mousePos = Point2D { WWMouseClass::Instance->GetX(), WWMouseClass::Instance->GetY() };
+	}
+
+	bool isLeftPressed = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+	bool anyDragging = false;
+
+	for (auto& win : this->FloatingWindows)
+	{
+		if (win.IsDragging)
+		{
+			if (isLeftPressed)
+			{
+				win.Position.X = mousePos.X - win.DragOffset.X;
+				win.Position.Y = mousePos.Y - win.DragOffset.Y;
+
+				int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
+				int screenH = DSurface::Composite ? DSurface::Composite->Height : 768;
+				win.Position.X = std::max(0, std::min(win.Position.X, std::max(0, screenW - win.WindowRect.Width)));
+				win.Position.Y = std::max(0, std::min(win.Position.Y, std::max(0, screenH - win.WindowRect.Height)));
+				anyDragging = true;
+			}
+			else
+			{
+				win.IsDragging = false;
+			}
+		}
+	}
+
+	for (auto& win : this->FloatingUnitWindows)
+	{
+		if (win.IsDragging)
+		{
+			if (isLeftPressed)
+			{
+				win.Position.X = mousePos.X - win.DragOffset.X;
+				win.Position.Y = mousePos.Y - win.DragOffset.Y;
+
+				int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
+				int screenH = DSurface::Composite ? DSurface::Composite->Height : 768;
+				win.Position.X = std::max(0, std::min(win.Position.X, std::max(0, screenW - win.WindowRect.Width)));
+				win.Position.Y = std::max(0, std::min(win.Position.Y, std::max(0, screenH - win.WindowRect.Height)));
+				anyDragging = true;
+			}
+			else
+			{
+				win.IsDragging = false;
+			}
+		}
+	}
+
+	if (anyDragging)
+	{
+		DisplayClass::Instance.ClearDragBand();
 	}
 
 	// Handle keyboard input & real-time typematic auto-repeat if search input box is focused
@@ -627,35 +850,47 @@ void ObserverUIClass::Update()
 		int currentPressedVK = -1;
 		wchar_t charNormal = L'\0';
 		wchar_t charShift = L'\0';
-		bool isShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+		bool isShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 
-		if ((GetKeyState(VK_BACK) & 0x8000) != 0)
+		if ((GetAsyncKeyState(VK_BACK) & 0x8000) != 0)
 		{
 			currentPressedVK = VK_BACK;
 		}
-		else if ((GetKeyState(VK_SPACE) & 0x8000) != 0)
+		else if ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0)
 		{
 			currentPressedVK = VK_SPACE;
 			charNormal = L' ';
 			charShift = L' ';
 		}
-		else if ((GetKeyState(0xDE) & 0x8000) != 0) // Quotes / apostrophe
+		else if ((GetAsyncKeyState(0xDE) & 0x8000) != 0) // Quotes / apostrophe
 		{
 			currentPressedVK = 0xDE;
 			charNormal = L'\'';
 			charShift = L'"';
 		}
-		else if ((GetKeyState(0xBD) & 0x8000) != 0) // Hyphen / minus
+		else if ((GetAsyncKeyState(0xBD) & 0x8000) != 0) // Hyphen / minus
 		{
 			currentPressedVK = 0xBD;
 			charNormal = L'-';
 			charShift = L'_';
 		}
+		else if ((GetAsyncKeyState(0xBE) & 0x8000) != 0) // Period / dot
+		{
+			currentPressedVK = 0xBE;
+			charNormal = L'.';
+			charShift = L'>';
+		}
+		else if ((GetAsyncKeyState(0xBC) & 0x8000) != 0) // Comma
+		{
+			currentPressedVK = 0xBC;
+			charNormal = L',';
+			charShift = L'<';
+		}
 		else
 		{
 			for (int vk = 'A'; vk <= 'Z'; ++vk)
 			{
-				if ((GetKeyState(vk) & 0x8000) != 0)
+				if ((GetAsyncKeyState(vk) & 0x8000) != 0)
 				{
 					currentPressedVK = vk;
 					charNormal = static_cast<wchar_t>('a' + (vk - 'A'));
@@ -668,7 +903,7 @@ void ObserverUIClass::Update()
 			{
 				for (int vk = '0'; vk <= '9'; ++vk)
 				{
-					if ((GetKeyState(vk) & 0x8000) != 0)
+					if ((GetAsyncKeyState(vk) & 0x8000) != 0)
 					{
 						currentPressedVK = vk;
 						charNormal = static_cast<wchar_t>(vk);
@@ -680,7 +915,7 @@ void ObserverUIClass::Update()
 		}
 
 		// Escape or Enter -> Unfocus search box
-		if ((GetKeyState(VK_ESCAPE) & 0x8000) != 0 || (GetKeyState(VK_RETURN) & 0x8000) != 0)
+		if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0 || (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0)
 		{
 			this->IsSearchInputFocused = false;
 			heldVK = -1;
@@ -784,15 +1019,111 @@ void ObserverUIClass::Update()
 		}
 	}
 
-	this->CollectPlayerData();
+	// Skip player data collection ONLY if in Minimal mode with no open floating windows (saves CPU)
+	bool isMinimalEmpty = (this->DisplayMode == ObserverUIDisplayMode::Minimal && this->FloatingWindows.empty() && this->FloatingUnitWindows.empty());
+	if (!isMinimalEmpty)
+	{
+		this->CollectPlayerData();
+	}
 }
 
 void ObserverUIClass::Render(DSurface* pSurface)
 {
-	if (!IsActive() || !pSurface)
+	bool isActive = IsActive() || (Phobos::Config::DevelopmentCommands && (this->DisplayMode != ObserverUIDisplayMode::Hidden || this->HasFloatingWindows()));
+	if (!isActive || !pSurface)
 		return;
 
 	this->Update();
+
+	if (this->DisplayMode == ObserverUIDisplayMode::Hidden)
+		return;
+
+	if (this->DisplayMode == ObserverUIDisplayMode::Minimal)
+	{
+		Point2D mousePos { 0, 0 };
+		if (WWMouseClass::Instance)
+		{
+			mousePos.X = WWMouseClass::Instance->GetX();
+			mousePos.Y = WWMouseClass::Instance->GetY();
+		}
+
+		this->HasHoveredItem = false;
+		this->HasHoveredPlayer = false;
+
+		// 1. Render Floating Player Windows & Floating Unit Windows
+		this->RenderFloatingWindows(pSurface);
+		this->RenderFloatingUnitWindows(pSurface);
+
+		// 2. Render Inspect Button at bottom-left in Minimal mode (54x40, with 18px bottom padding to avoid covering bottom info text)
+		int screenH = DSurface::ViewBounds.Height;
+		this->InspectBtnRect = RectangleStruct { 16, screenH - 58, 54, 40 };
+		this->IsHoveringInspectBtn = (mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+			&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height));
+
+		ColorStruct btnBgColor = this->IsHoveringInspectBtn ? ColorStruct { 100, 220, 255 } : ColorStruct { 0, 0, 0 };
+		pSurface->FillRectTrans(&this->InspectBtnRect, &btnBgColor, this->IsHoveringInspectBtn ? 180 : 120);
+		pSurface->DrawRect(&this->InspectBtnRect, this->IsHoveringInspectBtn ? Drawing::RGB_To_Int(255, 255, 255) : Drawing::RGB_To_Int(140, 140, 140));
+
+		if (BitFont::Instance && BitText::Instance)
+		{
+			int btnW = 0, btnH = 0;
+			BitFont::Instance->GetTextDimension(L"-> [] <-", &btnW, &btnH, this->InspectBtnRect.Width);
+			Point2D btnPt = { this->InspectBtnRect.X + (this->InspectBtnRect.Width - btnW) / 2, this->InspectBtnRect.Y + (this->InspectBtnRect.Height - btnH) / 2 };
+
+			LTRBStruct oldBounds = BitFont::Instance->Bounds;
+			WORD oldColor = BitFont::Instance->Color;
+			bool oldField41 = BitFont::Instance->field_41;
+
+			LTRBStruct ltrbBounds = { this->InspectBtnRect.X, this->InspectBtnRect.Y, this->InspectBtnRect.X + this->InspectBtnRect.Width, this->InspectBtnRect.Y + this->InspectBtnRect.Height };
+			BitFont::Instance->field_41 = 1;
+			BitFont::Instance->SetBounds(&ltrbBounds);
+			BitFont::Instance->Color = static_cast<WORD>(this->IsHoveringInspectBtn ? Drawing::RGB_To_Int(255, 255, 255) : Drawing::RGB_To_Int(200, 200, 200));
+
+			BitText::Instance->DrawText(
+				BitFont::Instance,
+				pSurface,
+				L"-> [] <-",
+				btnPt.X,
+				btnPt.Y,
+				btnW,
+				btnH,
+				0, 0, 0
+			);
+
+			BitFont::Instance->Bounds = oldBounds;
+			BitFont::Instance->Color = oldColor;
+			BitFont::Instance->field_41 = oldField41;
+		}
+
+		// 3. Render Tooltip for Inspect Button or Floating windows in Minimal mode
+		if (this->IsHoveringInspectBtn && BitFont::Instance)
+		{
+			std::wstring tooltipText = L"Inspect Selected Object (Create Card)";
+			int textW = 0, textH = 0;
+			BitFont::Instance->GetTextDimension(tooltipText.c_str(), &textW, &textH, 300);
+
+			int tipX = std::min(mousePos.X + 12, pSurface->Width - textW - 16);
+			int tipY = std::max(10, mousePos.Y - textH - 12);
+
+			RectangleStruct tipBgRect = { tipX - 4, tipY - 4, textW + 8, textH + 8 };
+			ColorStruct tipBgColor { 0, 0, 0 };
+			pSurface->FillRectTrans(&tipBgRect, &tipBgColor, 200);
+			pSurface->DrawRect(&tipBgRect, Drawing::RGB_To_Int(140, 140, 140));
+
+			Point2D tipPt { tipX, tipY };
+			pSurface->DrawTextA(tooltipText.c_str(), &DSurface::ViewBounds, &tipPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::Point8);
+		}
+		else if (this->HasHoveredPlayer && this->pHoveredPlayer)
+		{
+			this->DrawPlayerTooltip(pSurface, this->pHoveredPlayer, mousePos);
+		}
+		else if (this->HasHoveredItem && this->HoveredItem.pType)
+		{
+			this->DrawTooltip(pSurface, this->HoveredItem, mousePos);
+		}
+
+		return;
+	}
 
 	if (this->PlayerRows.empty())
 		return;
@@ -846,25 +1177,6 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	int availableStructWidth = maxStructEndX - structStartX - 30; // Reserve room for scroll buttons
 	if (availableStructWidth < 0) availableStructWidth = 0;
 
-	// Calculate team Y extents ONLY for teams with 2 or more players!
-	std::map<int, std::pair<int, int>> teamYExtents;
-	int calcY = startY;
-	for (auto const& row : this->PlayerRows)
-	{
-		if (row.TeamID >= 0 && row.TeamMemberCount >= 2)
-		{
-			if (teamYExtents.count(row.TeamID) == 0)
-			{
-				teamYExtents[row.TeamID] = { calcY, calcY + rowHeight };
-			}
-			else
-			{
-				teamYExtents[row.TeamID].second = calcY + rowHeight;
-			}
-		}
-		calcY += rowHeight;
-	}
-
 	// Build Tab Buttons positioned top-center directly attached above Section 2 (middle objects panel)
 	static const std::vector<std::pair<ObserverFilterCategory, std::wstring>> tabDefs = {
 		{ ObserverFilterCategory::Defenses, L"Defenses" },
@@ -875,6 +1187,7 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		{ ObserverFilterCategory::Naval, L"Naval" },
 		{ ObserverFilterCategory::Aircraft, L"Aircraft" },
 		{ ObserverFilterCategory::AllUnits, L"All Units" },
+		{ ObserverFilterCategory::Superweapons, L"Superweapons" },
 		{ ObserverFilterCategory::Everything, L"Everything" }
 	};
 
@@ -932,12 +1245,145 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	}
 
 	int tabRowGap = 3;
-	int tabsBaseY = startY - 4; // Bottom-most tab row sits right above Section 2
+	int totalRows = static_cast<int>(this->PlayerRows.size());
+	int totalRowsH = totalRows * rowHeight;
+	int calcStartY = screenHeight - totalRowsH - 18;
 
+	int tabRowsCount = static_cast<int>(tabRows.size());
+	int searchH = 24;
+	int inspectBtnW = 54;
+	int clearW = 24;
+	int availableSectionW = maxStructEndX - structStartX;
+	int searchW = availableSectionW - inspectBtnW - clearW - 6;
+	if (searchW < 80) searchW = 80;
+
+	int inspectX = structStartX;
+	int searchX = inspectX + inspectBtnW + 3;
+
+	int totalHeaderH = (tabRowsCount * tabHeight) + ((tabRowsCount - 1) * tabRowGap) + searchH + 12;
+	int topHeaderMinY = 20;
+	int bottomMargin = 45;
+	int availablePlayerAreaH = screenHeight - totalHeaderH - bottomMargin;
+
+	int maxAllowedRows = 8;
+	int maxVisibleRows = totalRows;
+	bool needsScroll = (totalRows > maxAllowedRows) || (calcStartY - totalHeaderH < topHeaderMinY) || (totalRowsH > availablePlayerAreaH);
+
+	int searchY = 0;
+	int tabsBaseY = 0;
+	int highestTabY = 0;
+
+	if (needsScroll)
+	{
+		int vertBtnH = 20;
+		int playerRowsH = availablePlayerAreaH - vertBtnH - 6;
+		maxVisibleRows = std::min(maxAllowedRows, std::max(1, playerRowsH / rowHeight));
+
+		this->MaxVerticalScrollOffset = std::max(0, totalRows - maxVisibleRows);
+		this->VerticalScrollOffset = std::clamp(this->VerticalScrollOffset, 0, this->MaxVerticalScrollOffset);
+
+		searchY = topHeaderMinY;
+		highestTabY = searchY + searchH + 4;
+		tabsBaseY = highestTabY + (tabRowsCount * tabHeight) + ((tabRowsCount - 1) * tabRowGap);
+
+		int scrollBtnW = 40;
+		int centerBtnX = structStartX + (availableStructWidth / 2) - scrollBtnW;
+		int scrollBtnY = tabsBaseY + 2;
+
+		this->VertScrollUpBtnRect = RectangleStruct { centerBtnX, scrollBtnY, scrollBtnW, vertBtnH };
+		this->VertScrollDownBtnRect = RectangleStruct { centerBtnX + scrollBtnW, scrollBtnY, scrollBtnW, vertBtnH };
+
+		this->IsHoveringVertScrollUp = mousePos.X >= this->VertScrollUpBtnRect.X && mousePos.X <= (this->VertScrollUpBtnRect.X + this->VertScrollUpBtnRect.Width)
+			&& mousePos.Y >= this->VertScrollUpBtnRect.Y && mousePos.Y <= (this->VertScrollUpBtnRect.Y + this->VertScrollUpBtnRect.Height);
+		this->IsHoveringVertScrollDown = mousePos.X >= this->VertScrollDownBtnRect.X && mousePos.X <= (this->VertScrollDownBtnRect.X + this->VertScrollDownBtnRect.Width)
+			&& mousePos.Y >= this->VertScrollDownBtnRect.Y && mousePos.Y <= (this->VertScrollDownBtnRect.Y + this->VertScrollDownBtnRect.Height);
+
+		// Render Joined Centered Scroll Buttons [ ▲ ][ ▼ ]
+		ColorStruct upBg = this->IsHoveringVertScrollUp ? ColorStruct { 0, 140, 180 } : ColorStruct { 30, 30, 30 };
+		pSurface->FillRectTrans(&this->VertScrollUpBtnRect, &upBg, 80);
+		COLORREF upBorder = this->IsHoveringVertScrollUp ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(80, 80, 80);
+		pSurface->DrawRect(&this->VertScrollUpBtnRect, upBorder);
+
+		ColorStruct downBg = this->IsHoveringVertScrollDown ? ColorStruct { 0, 140, 180 } : ColorStruct { 30, 30, 30 };
+		pSurface->FillRectTrans(&this->VertScrollDownBtnRect, &downBg, 80);
+		COLORREF downBorder = this->IsHoveringVertScrollDown ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(80, 80, 80);
+		pSurface->DrawRect(&this->VertScrollDownBtnRect, downBorder);
+
+		if (BitFont::Instance && BitText::Instance)
+		{
+			LTRBStruct oldBounds = BitFont::Instance->Bounds;
+
+			LTRBStruct upBounds = { this->VertScrollUpBtnRect.X, this->VertScrollUpBtnRect.Y, this->VertScrollUpBtnRect.X + this->VertScrollUpBtnRect.Width, this->VertScrollUpBtnRect.Y + this->VertScrollUpBtnRect.Height };
+			BitFont::Instance->SetBounds(&upBounds);
+			Point2D upPt = { this->VertScrollUpBtnRect.X + 16, this->VertScrollUpBtnRect.Y + 2 };
+			COLORREF upTextColor = (this->VerticalScrollOffset > 0) ? Drawing::RGB_To_Int(255, 255, 255) : Drawing::RGB_To_Int(90, 90, 90);
+			pSurface->DrawTextA(L"^", &DSurface::ViewBounds, &upPt, upTextColor, 0, TextPrintType::FullShadow | TextPrintType::Point8);
+
+			LTRBStruct downBounds = { this->VertScrollDownBtnRect.X, this->VertScrollDownBtnRect.Y, this->VertScrollDownBtnRect.X + this->VertScrollDownBtnRect.Width, this->VertScrollDownBtnRect.Y + this->VertScrollDownBtnRect.Height };
+			BitFont::Instance->SetBounds(&downBounds);
+			Point2D downPt = { this->VertScrollDownBtnRect.X + 16, this->VertScrollDownBtnRect.Y + 2 };
+			COLORREF downTextColor = (this->VerticalScrollOffset < this->MaxVerticalScrollOffset) ? Drawing::RGB_To_Int(255, 255, 255) : Drawing::RGB_To_Int(90, 90, 90);
+			pSurface->DrawTextA(L"v", &DSurface::ViewBounds, &downPt, downTextColor, 0, TextPrintType::FullShadow | TextPrintType::Point8);
+
+			BitFont::Instance->Bounds = oldBounds;
+		}
+
+		startY = scrollBtnY + vertBtnH + 4;
+	}
+	else
+	{
+		this->VerticalScrollOffset = 0;
+		this->MaxVerticalScrollOffset = 0;
+		this->VertScrollUpBtnRect = RectangleStruct { 0, 0, 0, 0 };
+		this->VertScrollDownBtnRect = RectangleStruct { 0, 0, 0, 0 };
+
+		// Dynamic bottom anchor when fewer players: UI moves down to screen bottom!
+		startY = calcStartY;
+		tabsBaseY = startY - 4;
+		highestTabY = tabsBaseY - (tabRowsCount * tabHeight) - ((tabRowsCount - 1) * tabRowGap);
+		searchY = highestTabY - searchH - 4;
+	}
+
+	// Calculate team Y extents ONLY for teams with 2 or more players!
+	std::map<int, std::pair<int, int>> teamYExtents;
+	int calcY = startY;
+	for (auto const& row : this->PlayerRows)
+	{
+		if (row.TeamID >= 0 && row.TeamMemberCount >= 2)
+		{
+			if (teamYExtents.count(row.TeamID) == 0)
+			{
+				teamYExtents[row.TeamID] = { calcY, calcY + rowHeight };
+			}
+			else
+			{
+				teamYExtents[row.TeamID].second = calcY + rowHeight;
+			}
+		}
+		calcY += rowHeight;
+	}
+
+	this->InspectBtnRect = RectangleStruct { inspectX, searchY, inspectBtnW, searchH };
+	this->SearchBoxRect = RectangleStruct { searchX, searchY, searchW, searchH };
+	this->ClearBtnRect = RectangleStruct { searchX + searchW + 3, searchY, clearW, searchH };
+
+	this->IsHoveringInspectBtn = mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+		&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height);
+	this->IsHoveringClearBtn = mousePos.X >= this->ClearBtnRect.X && mousePos.X <= (this->ClearBtnRect.X + this->ClearBtnRect.Width)
+		&& mousePos.Y >= this->ClearBtnRect.Y && mousePos.Y <= (this->ClearBtnRect.Y + this->ClearBtnRect.Height);
+
+	// Build Tab Buttons
 	for (size_t r = 0; r < tabRows.size(); ++r)
 	{
-		// Render rows bottom-to-top: Row 0 attached above Section 2, Row 1 above Row 0
-		int rowY = tabsBaseY - (static_cast<int>(r + 1) * tabHeight) - (static_cast<int>(r) * tabRowGap);
+		int rowY = 0;
+		if (needsScroll)
+		{
+			rowY = highestTabY + (static_cast<int>(r) * (tabHeight + tabRowGap));
+		}
+		else
+		{
+			rowY = tabsBaseY - (static_cast<int>(r + 1) * tabHeight) - (static_cast<int>(r) * tabRowGap);
+		}
 
 		const auto& lineIndices = tabRows[r];
 		int lineTotalW = 0;
@@ -977,14 +1423,14 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	// Render Category Filter Tab Buttons
 	for (const auto& btn : this->TabButtons)
 	{
-		bool isActive = (btn.Category == this->ActiveFilterTab);
+		bool isTabActive = (btn.Category == this->ActiveFilterTab);
 
 		ColorStruct tabBgColor { 0, 0, 0 };
-		pSurface->FillRectTrans(const_cast<RectangleStruct*>(&btn.Rect), &tabBgColor, isActive ? 95 : 60);
+		pSurface->FillRectTrans(const_cast<RectangleStruct*>(&btn.Rect), &tabBgColor, isTabActive ? 95 : 60);
 
 		// Border color: Neon Cyan for active tab, Soft White for hovered, Dark Gray for inactive
 		COLORREF borderColor = Drawing::RGB_To_Int(60, 60, 60);
-		if (isActive)
+		if (isTabActive)
 		{
 			borderColor = Drawing::RGB_To_Int(0, 255, 255); // Cyan active outline
 		}
@@ -996,7 +1442,7 @@ void ObserverUIClass::Render(DSurface* pSurface)
 
 		// Text color: Bright White for active, Soft White for hovered, Silver for inactive
 		COLORREF textColor = Drawing::RGB_To_Int(160, 160, 160);
-		if (isActive)
+		if (isTabActive)
 		{
 			textColor = Drawing::RGB_To_Int(255, 255, 255);
 		}
@@ -1038,22 +1484,23 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		}
 	}
 
-	// Position and render Search Box and Clear Button [X] dynamically matching Section 2 width (structStartX to maxStructEndX)
-	int clearW = 24;
-	int searchH = 24;
-	int availableSectionW = maxStructEndX - structStartX;
-	int searchW = availableSectionW - clearW - 3;
-	if (searchW < 80) searchW = 80;
+	// Render Inspect Selected Button [-> [] <-]
+	ColorStruct inspectBgColor = this->IsHoveringInspectBtn ? ColorStruct { 0, 140, 180 } : ColorStruct { 30, 30, 30 };
+	pSurface->FillRectTrans(&this->InspectBtnRect, &inspectBgColor, 80);
+	COLORREF inspectBorderColor = this->IsHoveringInspectBtn ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(80, 80, 80);
+	pSurface->DrawRect(&this->InspectBtnRect, inspectBorderColor);
 
-	int searchX = structStartX;
-	int highestTabY = tabsBaseY - (static_cast<int>(tabRows.size()) * tabHeight) - (static_cast<int>(tabRows.size() - 1) * tabRowGap);
-	int searchY = highestTabY - searchH - 4;
+	{
+		LTRBStruct oldBounds = BitFont::Instance->Bounds;
+		LTRBStruct btnBounds = { this->InspectBtnRect.X, this->InspectBtnRect.Y, this->InspectBtnRect.X + this->InspectBtnRect.Width, this->InspectBtnRect.Y + this->InspectBtnRect.Height };
+		BitFont::Instance->SetBounds(&btnBounds);
 
-	this->SearchBoxRect = RectangleStruct { searchX, searchY, searchW, searchH };
-	this->ClearBtnRect = RectangleStruct { searchX + searchW + 3, searchY, clearW, searchH };
-
-	this->IsHoveringClearBtn = mousePos.X >= this->ClearBtnRect.X && mousePos.X <= (this->ClearBtnRect.X + this->ClearBtnRect.Width)
-		&& mousePos.Y >= this->ClearBtnRect.Y && mousePos.Y <= (this->ClearBtnRect.Y + this->ClearBtnRect.Height);
+		int textW = 0, textH = 0;
+		BitFont::Instance->GetTextDimension(L"-> [] <-", &textW, &textH, inspectBtnW);
+		Point2D iconPt = { this->InspectBtnRect.X + (inspectBtnW - textW) / 2, this->InspectBtnRect.Y + 3 };
+		pSurface->DrawTextA(L"-> [] <-", &DSurface::ViewBounds, &iconPt, this->IsHoveringInspectBtn ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(220, 220, 220), 0, TextPrintType::FullShadow | TextPrintType::Point8);
+		BitFont::Instance->Bounds = oldBounds;
+	}
 
 	// Render Search Input Box Background
 	ColorStruct searchBgColor { 15, 15, 15 };
@@ -1111,6 +1558,9 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		BitFont::Instance->Bounds = oldBounds;
 	}
 
+	int visibleStart = std::clamp(this->VerticalScrollOffset, 0, std::max(0, totalRows - 1));
+	int visibleEnd = std::min(totalRows, visibleStart + maxVisibleRows);
+
 	// Render team alliance vertical bars attached directly to the left edge of Section 1 ONLY for 2+ player alliances
 	for (auto const& [teamID, yPair] : teamYExtents)
 	{
@@ -1126,10 +1576,10 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		}
 	}
 
-	int currentY = startY;
-
-	for (auto& row : this->PlayerRows)
+	for (int rIdx = visibleStart; rIdx < visibleEnd; ++rIdx)
 	{
+		auto& row = this->PlayerRows[rIdx];
+		int currentY = startY + (rIdx - visibleStart) * rowHeight;
 		ColorStruct bgPanelColor { 0, 0, 0 };
 
 		// Section 1: Player Info Box + Player Color Bar
@@ -1283,14 +1733,1485 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		this->HandleMouseClick(mousePos, false);
 	}
 
-	// Render tooltip for cameo or player name
-	if (this->HasHoveredPlayer && this->pHoveredPlayer)
+	// Render tooltip for inspect button, player info or cameo item
+	if (this->IsHoveringInspectBtn && BitFont::Instance)
+	{
+		std::wstring tooltipText = L"Inspect Selected Object (Create Card)";
+		int textW = 0, textH = 0;
+		BitFont::Instance->GetTextDimension(tooltipText.c_str(), &textW, &textH, 300);
+
+		int tipX = std::min(mousePos.X + 12, pSurface->Width - textW - 16);
+		int tipY = std::max(10, mousePos.Y - textH - 12);
+
+		RectangleStruct tipBgRect = { tipX - 4, tipY - 4, textW + 8, textH + 8 };
+		ColorStruct tipBgColor { 0, 0, 0 };
+		pSurface->FillRectTrans(&tipBgRect, &tipBgColor, 200);
+		pSurface->DrawRect(&tipBgRect, Drawing::RGB_To_Int(140, 140, 140));
+
+		Point2D tipPt { tipX, tipY };
+		pSurface->DrawTextA(tooltipText.c_str(), &DSurface::ViewBounds, &tipPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::Point8);
+	}
+	else if (this->HasHoveredPlayer && this->pHoveredPlayer)
 	{
 		this->DrawPlayerTooltip(pSurface, this->pHoveredPlayer, this->HoveredMousePos);
 	}
 	else if (this->HasHoveredItem)
 	{
 		this->DrawTooltip(pSurface, this->HoveredItem, this->HoveredMousePos);
+	}
+
+	// Render Floating Windows on top of UI
+	this->RenderFloatingWindows(pSurface);
+	this->RenderFloatingUnitWindows(pSurface);
+}
+
+static const wchar_t* GetMissionNameString(Mission mission)
+{
+	switch (mission)
+	{
+	case Mission::Sleep: return L"Sleep";
+	case Mission::Attack: return L"Attack";
+	case Mission::Move: return L"Move";
+	case Mission::Retreat: return L"Retreat";
+	case Mission::Guard: return L"Guard";
+	case Mission::Enter: return L"Enter";
+	case Mission::Capture: return L"Capture";
+	case Mission::Harvest: return L"Harvest";
+	case Mission::Area_Guard: return L"Area Guard";
+	case Mission::Hunt: return L"Hunt";
+	case Mission::Unload: return L"Unload";
+	case Mission::Sabotage: return L"Sabotage";
+	case Mission::Construction: return L"Construction";
+	case Mission::Selling: return L"Selling";
+	case Mission::Repair: return L"Repair";
+	case Mission::Patrol: return L"Patrol";
+	case Mission::AttackMove: return L"Attack Move";
+	default: return L"Idle";
+	}
+}
+
+static bool IsTechnoValidAndAlive(TechnoClass* pTech)
+{
+	if (!pTech)
+		return false;
+
+	if (TechnoClass::Array.FindItemIndex(pTech) < 0)
+		return false;
+
+	return pTech->IsAlive && !pTech->InLimbo;
+}
+
+static bool IsBuildingValidAndAlive(BuildingClass* pBld)
+{
+	if (!pBld)
+		return false;
+
+	if (BuildingClass::Array.FindItemIndex(pBld) < 0)
+		return false;
+
+	return pBld->IsAlive && !pBld->InLimbo;
+}
+
+static int GetTechnoBuildTimeFrames(TechnoTypeClass* pType, HouseClass* pOwner)
+{
+	if (!pType || !pOwner)
+		return 0;
+
+	static char pTrick[0x6C8];
+	memset(pTrick, 0, sizeof(pTrick));
+
+	switch (pType->WhatAmI())
+	{
+	case AbstractType::BuildingType:
+		VTable::Set(pTrick, BuildingClass::AbsVTable);
+		reinterpret_cast<BuildingClass*>(pTrick)->Type = static_cast<BuildingTypeClass*>(pType);
+		break;
+	case AbstractType::AircraftType:
+		VTable::Set(pTrick, AircraftClass::AbsVTable);
+		reinterpret_cast<AircraftClass*>(pTrick)->Type = static_cast<AircraftTypeClass*>(pType);
+		break;
+	case AbstractType::InfantryType:
+		VTable::Set(pTrick, InfantryClass::AbsVTable);
+		reinterpret_cast<InfantryClass*>(pTrick)->Type = static_cast<InfantryTypeClass*>(pType);
+		break;
+	case AbstractType::UnitType:
+		VTable::Set(pTrick, UnitClass::AbsVTable);
+		reinterpret_cast<UnitClass*>(pTrick)->Type = static_cast<UnitTypeClass*>(pType);
+		break;
+	default:
+		return 0;
+	}
+
+	reinterpret_cast<TechnoClass*>(pTrick)->Owner = pOwner;
+	int nTimeToBuild = reinterpret_cast<TechnoClass*>(pTrick)->TimeToBuild();
+	return std::max(54, nTimeToBuild);
+}
+
+static std::wstring FormatObjectNameWithDebug(int playerNum, const char* pID, const wchar_t* pUIName, bool isDebugEnabled)
+{
+	bool isMultiplayer = SessionClass::Instance.GameMode == GameMode::Skirmish || SessionClass::Instance.GameMode == GameMode::LAN || SessionClass::Instance.GameMode == GameMode::Internet;
+	int effectivePlayerNum = isMultiplayer ? playerNum : 0;
+
+	std::string idStr = pID ? pID : "";
+	std::wstring wID(idStr.begin(), idStr.end());
+	std::wstring wName = (pUIName && pUIName[0] != L'\0') ? pUIName : wID;
+
+	std::wostringstream oss;
+	if (isDebugEnabled)
+	{
+		if (effectivePlayerNum > 0)
+		{
+			oss << L"P" << effectivePlayerNum << L" [" << wID << L"]";
+		}
+		else
+		{
+			oss << L"[" << wID << L"]";
+		}
+
+		if (!wName.empty() && wName != wID)
+		{
+			oss << L" (" << wName << L")";
+		}
+	}
+	else
+	{
+		if (effectivePlayerNum > 0)
+		{
+			oss << L"[P" << effectivePlayerNum << L"] " << wName;
+		}
+		else
+		{
+			oss << wName;
+		}
+	}
+	return oss.str();
+}
+
+void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
+{
+	bool isActive = IsActive() || Phobos::Config::DevelopmentCommands;
+	if (!isActive || !pSurface || !BitFont::Instance || !BitText::Instance)
+		return;
+
+	bool isDebugKeysEnabled = Phobos::Config::DevelopmentCommands;
+
+	Point2D mousePos { 0, 0 };
+	if (WWMouseClass::Instance)
+	{
+		mousePos = Point2D { WWMouseClass::Instance->GetX(), WWMouseClass::Instance->GetY() };
+	}
+
+	int maxCardWidth = 360;
+
+	for (auto& win : this->FloatingUnitWindows)
+	{
+		auto pType = win.pType;
+		auto pOwner = win.pOwner;
+		if (!pOwner || (!pType && !win.IsSuperweapon && !win.pSuperType))
+			continue;
+
+		auto itRow = std::find_if(this->PlayerRows.begin(), this->PlayerRows.end(), [pOwner](const ObserverPlayerRow& r) {
+			return r.pHouse == pOwner;
+		});
+
+		ColorStruct playerColor { 180, 180, 180 };
+		if (itRow != this->PlayerRows.end())
+		{
+			playerColor = itRow->PlayerColor;
+		}
+
+		struct TooltipSegment { std::wstring Text; int Color; };
+		struct TooltipLine { std::vector<TooltipSegment> Segments; int Width; int Height; };
+
+		std::vector<TooltipLine> lines;
+		int textWidth = 0;
+		int textHeight = 0;
+
+		auto addLineSegments = [&](const std::vector<TooltipSegment>& segs) {
+			if (segs.empty()) return;
+			int lineW = 0;
+			int maxH = 0;
+			for (const auto& seg : segs)
+			{
+				int w = 0, h = 0;
+				BitFont::Instance->GetTextDimension(seg.Text.c_str(), &w, &h, maxCardWidth);
+				lineW += w;
+				maxH = std::max(maxH, h);
+			}
+			lines.push_back({ segs, lineW, maxH });
+			textWidth = std::max(textWidth, lineW);
+			textHeight += maxH + 2;
+		};
+
+		auto addLine = [&](const std::wstring& textStr, int color) {
+			addLineSegments({ { textStr, color } });
+		};
+
+		BuildingClass* pBld = IsBuildingValidAndAlive(win.pTargetBuilding) ? win.pTargetBuilding : nullptr;
+		TechnoClass* pTech = IsTechnoValidAndAlive(win.pTargetTechno) ? win.pTargetTechno : nullptr;
+		TechnoTypeClass* pTargetType = win.pType;
+		TechnoTypeClass* pBaseType = nullptr;
+		if (pBld)
+		{
+			pBaseType = pBld->Type;
+		}
+		else if (pTech)
+		{
+			pBaseType = pTech->GetTechnoType();
+		}
+		else
+		{
+			pBaseType = pTargetType;
+		}
+
+		FactoryClass* pFact = (pBld && pBld->Factory) ? pBld->Factory : nullptr;
+		if (!pFact && win.IsProductionItem && pTargetType)
+		{
+			pFact = FactoryClass::FindByOwnerAndProduct(pOwner, pTargetType);
+		}
+
+		if (!pBld && pFact)
+		{
+			for (auto pBldObj : BuildingClass::Array)
+			{
+				if (pBldObj && pBldObj->Owner == pOwner && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Factory == pFact)
+				{
+					pBld = pBldObj;
+					break;
+				}
+			}
+		}
+
+		TechnoTypeClass* pCurProdType = (pFact && pFact->Object) ? pFact->Object->GetTechnoType() : nullptr;
+
+		if (win.IsProductionItem && pFact)
+		{
+			if (pCurProdType)
+			{
+				win.pType = pCurProdType;
+				pTargetType = pCurProdType;
+			}
+		}
+
+		bool isProductionView = win.IsProductionItem;
+		
+		TechnoTypeClass* pCameoType = nullptr;
+		if (isProductionView)
+		{
+			pCameoType = pTargetType ? pTargetType : pCurProdType;
+		}
+		else
+		{
+			pCameoType = pBaseType;
+		}
+
+		TechnoTypeClass* pTitleType = nullptr;
+		if (isProductionView)
+		{
+			pTitleType = pTargetType ? pTargetType : pCurProdType;
+		}
+		else if (pBld)
+		{
+			pTitleType = pBld->Type;
+		}
+		else
+		{
+			pTitleType = pBaseType;
+		}
+		if (!pTitleType) pTitleType = pBaseType;
+
+		if (win.IsSuperweapon || win.pSuperType)
+		{
+			SuperWeaponTypeClass* pSWType = win.pSuperType;
+			SuperClass* pSuper = win.pSuper;
+
+			// Title Line: Superweapon Name
+			int pNum = (itRow != this->PlayerRows.end() && itRow->PlayerNumber > 0) ? itRow->PlayerNumber : 0;
+			std::string swId = pSWType ? pSWType->get_ID() : "";
+			std::wstring titleStr = FormatObjectNameWithDebug(pNum, swId.c_str(), pSWType ? pSWType->UIName : nullptr, isDebugKeysEnabled);
+			addLine(titleStr, Drawing::RGB_To_Int(255, 255, 255));
+
+			// Owner Line in Singleplayer / Campaign
+			bool isMultiplayer = SessionClass::Instance.GameMode == GameMode::Skirmish || SessionClass::Instance.GameMode == GameMode::LAN || SessionClass::Instance.GameMode == GameMode::Internet;
+			if (!isMultiplayer && pOwner)
+			{
+				std::string ownerPlain = pOwner->PlainName;
+				if (ownerPlain.empty()) ownerPlain = pOwner->get_ID();
+				std::wstring wOwnerPlain(ownerPlain.begin(), ownerPlain.end());
+				std::wstring ownerLine = L"Owner: " + wOwnerPlain + L" (" + pOwner->Type->UIName + L")";
+				addLine(ownerLine, Drawing::RGB_To_Int(200, 200, 200));
+			}
+
+			// Cooldown Line: Cooldown: 01:45 / 05:00
+			int totalFrames = 0;
+			if (pSuper)
+			{
+				totalFrames = pSuper->GetRechargeTime();
+			}
+			else if (pSWType)
+			{
+				totalFrames = pSWType->RechargeTime;
+			}
+			int framesLeft = pSuper ? pSuper->RechargeTimer.GetTimeLeft() : 0;
+
+			int secsLeft = (framesLeft + 14) / 15;
+			int minsLeft = secsLeft / 60;
+			secsLeft %= 60;
+
+			int secsTotal = (totalFrames + 14) / 15;
+			int minsTotal = secsTotal / 60;
+			secsTotal %= 60;
+
+			wchar_t cdBuf[64];
+			swprintf_s(cdBuf, L"%02d:%02d / %02d:%02d", minsLeft, secsLeft, minsTotal, secsTotal);
+
+			std::wostringstream cdOss;
+			cdOss << L"Cooldown: " << cdBuf;
+			int cdColor = (framesLeft == 0) ? Drawing::RGB_To_Int(0, 255, 0) : Drawing::RGB_To_Int(100, 220, 255);
+			addLine(cdOss.str(), cdColor);
+
+			// Power Line (ONLY shown when superweapon requires power AND owner is in low power state)
+			if (pSWType && pSWType->IsPowered && pOwner && pOwner->PowerOutput < pOwner->PowerDrain)
+			{
+				addLine(L"Power: Low Power", Drawing::RGB_To_Int(255, 50, 50));
+			}
+
+			// Coords Line
+			BuildingClass* pSWBld = IsBuildingValidAndAlive(win.pTargetBuilding) ? win.pTargetBuilding : nullptr;
+			if (!pSWBld && pOwner && pSWType)
+			{
+				for (int b = 0; b < BuildingClass::Array.Count; ++b)
+				{
+					auto pBldObj = BuildingClass::Array.GetItem(b);
+					if (pBldObj && pBldObj->Owner == pOwner && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Type)
+					{
+						if (pBldObj->Type->SuperWeapon == pSWType->ArrayIndex || pBldObj->Type->SuperWeapon2 == pSWType->ArrayIndex)
+						{
+							pSWBld = pBldObj;
+							break;
+						}
+					}
+				}
+			}
+
+			if (pSWBld)
+			{
+				CellStruct curCell = CellClass::Coord2Cell(pSWBld->GetCenterCoords());
+				std::wostringstream locOss;
+				locOss << L"Coords: (" << curCell.X << L", " << curCell.Y << L")";
+				addLine(locOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+			}
+		}
+		else if (pBaseType)
+		{
+			// Standard unit/building lines
+			int prodProgressPercent = -1;
+			if (pFact && pFact->Object)
+			{
+				prodProgressPercent = GetFactoryProgressPercent(pFact);
+			}
+
+			// Live snapshot tracking while object is alive
+			if (pTech)
+			{
+				win.IsDestroyed = false;
+				win.LastHP = pTech->Health;
+				win.LastMaxHP = pBaseType ? pBaseType->Strength : pTech->Health;
+				win.LastCoords = CellClass::Coord2Cell(pTech->GetCenterCoords());
+				win.LastMission = GetMissionNameString(pTech->GetCurrentMission());
+				win.LastVeterancy = pTech->Veterancy.Veterancy;
+			}
+			else if (pBld)
+			{
+				win.IsDestroyed = false;
+				win.LastHP = pBld->Health;
+				win.LastMaxHP = pBld->Type ? pBld->Type->Strength : (pBaseType ? pBaseType->Strength : pBld->Health);
+				win.LastCoords = CellClass::Coord2Cell(pBld->GetCenterCoords());
+				win.LastMission = L"";
+				win.LastVeterancy = pBld->Veterancy.Veterancy;
+			}
+			else if (win.pTargetTechno || win.pTargetBuilding)
+			{
+				win.IsDestroyed = true;
+			}
+
+			// 1. Factory Building Line Determination
+			BuildingTypeClass* pFactoryBldType = nullptr;
+			if (pBld && pBld->Type)
+			{
+				pFactoryBldType = pBld->Type;
+			}
+			else if (pFact && pFact->Object && pFact->Object->GetTechnoType())
+			{
+				pFactoryBldType = abstract_cast<BuildingTypeClass*>(pFact->Object->GetTechnoType());
+			}
+			else if (pFact && pOwner)
+			{
+				for (auto pBldObj : pOwner->Buildings)
+				{
+					if (pBldObj && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Factory == pFact && pBldObj->Type)
+					{
+						pFactoryBldType = pBldObj->Type;
+						break;
+					}
+				}
+			}
+
+			// Title Line (First Line of Card)
+			int pNum = (itRow != this->PlayerRows.end() && itRow->PlayerNumber > 0) ? itRow->PlayerNumber : 0;
+			std::wstring titleStr;
+
+			if (isProductionView)
+			{
+				// First Line of Production Card = Factory Name!
+				std::string fId = pFactoryBldType ? pFactoryBldType->get_ID() : (pTitleType ? pTitleType->get_ID() : "");
+				titleStr = FormatObjectNameWithDebug(pNum, fId.c_str(), pFactoryBldType ? pFactoryBldType->UIName : (pTitleType ? pTitleType->UIName : nullptr), isDebugKeysEnabled);
+			}
+			else
+			{
+				std::string tId = pTitleType ? pTitleType->get_ID() : "";
+				titleStr = FormatObjectNameWithDebug(pNum, tId.c_str(), pTitleType ? pTitleType->UIName : nullptr, isDebugKeysEnabled);
+
+				if (win.InstanceNumber > 1 && !pFact)
+				{
+					titleStr += L" #" + std::to_wstring(win.InstanceNumber);
+				}
+			}
+
+			addLine(titleStr, Drawing::RGB_To_Int(255, 255, 255));
+
+			// Owner Line in Singleplayer / Campaign
+			bool isMultiplayer = SessionClass::Instance.GameMode == GameMode::Skirmish || SessionClass::Instance.GameMode == GameMode::LAN || SessionClass::Instance.GameMode == GameMode::Internet;
+			if (!isMultiplayer && pOwner)
+			{
+				std::string ownerPlain = pOwner->PlainName;
+				if (ownerPlain.empty()) ownerPlain = pOwner->get_ID();
+				std::wstring wOwnerPlain(ownerPlain.begin(), ownerPlain.end());
+				std::wstring ownerLine = L"Owner: " + wOwnerPlain + L" (" + pOwner->Type->UIName + L")";
+				addLine(ownerLine, Drawing::RGB_To_Int(200, 200, 200));
+			}
+
+			// 2. Production Lines
+			bool isProducing = (pCurProdType && pFact && pFact->Object);
+
+			if (isProductionView)
+			{
+				// For production card view: show product name with percentage ONLY if producing!
+				if (isProducing)
+				{
+					int progressPercent = GetFactoryProgressPercent(pFact);
+
+					std::string pId = pCurProdType->get_ID();
+					std::wstring prodName = FormatObjectNameWithDebug(0, pId.c_str(), pCurProdType->UIName, isDebugKeysEnabled);
+
+					std::wostringstream prodOss;
+					prodOss << prodName << L" (" << progressPercent << L"%)";
+					addLine(prodOss.str(), Drawing::RGB_To_Int(100, 220, 255));
+				}
+			}
+			else if (isProducing)
+			{
+				// For building card on map: show Production: [HTNK] (Rhino Tank) (74%)
+				int progressPercent = GetFactoryProgressPercent(pFact);
+
+				std::string pId = pCurProdType->get_ID();
+				std::wstring prodName = FormatObjectNameWithDebug(0, pId.c_str(), pCurProdType->UIName, isDebugKeysEnabled);
+
+				std::wostringstream prodOss;
+				prodOss << L"Production: " << prodName << L" (" << progressPercent << L"%)";
+				addLine(prodOss.str(), Drawing::RGB_To_Int(100, 220, 255));
+			}
+			else if (pFact || (pBld && pBld->Type && pBld->Type->Factory != AbstractType::None))
+			{
+				addLine(L"Production: None", Drawing::RGB_To_Int(160, 160, 160));
+			}
+
+			// 3. Health & Shield Line
+			if (win.IsDestroyed)
+			{
+				std::wostringstream hpOss;
+				hpOss << L"0 / " << (win.LastMaxHP > 0 ? win.LastMaxHP : (pBaseType ? pBaseType->Strength : 1)) << L" (Destroyed)";
+				addLineSegments({
+					{ L"HP: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ hpOss.str(), Drawing::RGB_To_Int(255, 50, 50) }
+				});
+			}
+			else if (!isProductionView && (pTech || pBld))
+			{
+				int currentHP = pTech ? pTech->Health : pBld->Health;
+				int maxHP = currentHP;
+				if (pTech)
+				{
+					if (pBaseType)
+					{
+						maxHP = pBaseType->Strength;
+					}
+				}
+				else if (pBld)
+				{
+					if (pBld->Type)
+					{
+						maxHP = pBld->Type->Strength;
+					}
+					else if (pBaseType)
+					{
+						maxHP = pBaseType->Strength;
+					}
+				}
+				std::wostringstream hpOss;
+				hpOss << currentHP << L" / " << maxHP;
+
+				int hpColor = Drawing::RGB_To_Int(0, 255, 0);
+				if (currentHP < maxHP / 2) hpColor = Drawing::RGB_To_Int(255, 255, 0);
+				if (currentHP < maxHP / 4) hpColor = Drawing::RGB_To_Int(255, 50, 50);
+
+				addLineSegments({
+					{ L"HP: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ hpOss.str(), hpColor }
+				});
+			}
+
+			// Shield Check (ONLY for real map objects)
+			int currentShield = 0;
+			int maxShield = 0;
+
+			if (!isProductionView)
+			{
+				auto pTechExt = pTech ? TechnoExt::ExtMap.Find(pTech) : nullptr;
+				if (pTechExt && pTechExt->Shield && pTechExt->Shield->GetType())
+				{
+					currentShield = pTechExt->Shield->GetHP();
+					maxShield = pTechExt->Shield->GetType()->Strength.Get();
+				}
+				else
+				{
+					auto pExt = pBaseType ? TechnoTypeExt::ExtMap.Find(pBaseType) : nullptr;
+					if (pExt && pExt->ShieldType)
+					{
+						maxShield = pExt->ShieldType->Strength.Get();
+						currentShield = maxShield;
+					}
+				}
+			}
+			else
+			{
+				auto pTechExt = pTech ? TechnoExt::ExtMap.Find(pTech) : nullptr;
+				if (pTechExt && pTechExt->Shield && pTechExt->Shield->GetType())
+				{
+					currentShield = pTechExt->Shield->GetHP();
+					maxShield = pTechExt->Shield->GetType()->Strength.Get();
+				}
+				else
+				{
+					auto pTypeExt = pBaseType ? TechnoTypeExt::ExtMap.Find(pBaseType) : nullptr;
+					if (pTypeExt && pTypeExt->ShieldType)
+					{
+						maxShield = pTypeExt->ShieldType->Strength.Get();
+						currentShield = maxShield;
+					}
+				}
+			}
+
+			if (maxShield > 0)
+			{
+				std::wostringstream shieldOss;
+				shieldOss << currentShield << L" / " << maxShield;
+				int shieldColor = Drawing::RGB_To_Int(100, 200, 255);
+				if (currentShield <= 0) shieldColor = Drawing::RGB_To_Int(160, 160, 160);
+
+				addLineSegments({
+					{ L"Shield: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ shieldOss.str(), shieldColor }
+				});
+			}
+
+			// 4. Location, Mission, Target & Destination Details
+			if (win.IsDestroyed)
+			{
+				std::wostringstream locOss;
+				locOss << L"Coords: (" << win.LastCoords.X << L", " << win.LastCoords.Y << L")";
+				if (!win.LastMission.empty()) locOss << L"   Mission: " << win.LastMission;
+				addLine(locOss.str(), Drawing::RGB_To_Int(180, 180, 180));
+			}
+			else if (!isProductionView && (pTech || pBld))
+			{
+				CellStruct curCell = pTech ? CellClass::Coord2Cell(pTech->GetCenterCoords()) : CellClass::Coord2Cell(pBld->GetCenterCoords());
+
+				std::wostringstream locOss;
+				locOss << L"Coords: (" << curCell.X << L", " << curCell.Y << L")";
+				
+				bool showMission = false;
+				if (pTech && pTech->WhatAmI() != AbstractType::Building)
+				{
+					showMission = true;
+				}
+				else if (pBld && pBld->Type && (pBld->Type->Weapon[0].WeaponType || pBld->Type->Weapon[1].WeaponType))
+				{
+					showMission = true;
+				}
+
+				if (showMission)
+				{
+					Mission curMission = pTech ? pTech->GetCurrentMission() : pBld->GetCurrentMission();
+					locOss << L"   Mission: " << GetMissionNameString(curMission);
+				}
+				addLine(locOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+
+				AbstractClass* pRawTarget = nullptr;
+				if (pTech)
+				{
+					pRawTarget = pTech->Target;
+				}
+				else if (pBld)
+				{
+					pRawTarget = pBld->Target;
+				}
+				TechnoClass* pTargetTech = abstract_cast<TechnoClass*>(pRawTarget);
+				FootClass* pFoot = pTech ? abstract_cast<FootClass*>(pTech) : nullptr;
+
+				if (!pTargetTech && pFoot) pTargetTech = abstract_cast<TechnoClass*>(pFoot->Destination);
+
+				if (pTargetTech && IsTechnoValidAndAlive(pTargetTech))
+				{
+					HouseClass* pTargetOwner = pTargetTech->Owner;
+					int targetPlayerNum = 0;
+					auto itTargetRow = std::find_if(this->PlayerRows.begin(), this->PlayerRows.end(), [pTargetOwner](const ObserverPlayerRow& r) {
+						return r.pHouse == pTargetOwner;
+					});
+					if (itTargetRow != this->PlayerRows.end())
+						targetPlayerNum = itTargetRow->PlayerNumber;
+
+					TechnoTypeClass* pTType = pTargetTech->GetTechnoType();
+					std::wstring targetUName = (pTType && pTType->UIName) ? pTType->UIName : L"";
+					if (targetUName.empty() && pTType)
+					{
+						std::string targetIdStr = pTType->get_ID();
+						targetUName = std::wstring(targetIdStr.begin(), targetIdStr.end());
+					}
+
+					std::wostringstream targetOss;
+					if (targetPlayerNum > 0)
+						targetOss << L"Target: [P" << targetPlayerNum << L"] " << targetUName;
+					else
+						targetOss << L"Target: " << targetUName;
+
+					addLine(targetOss.str(), Drawing::RGB_To_Int(255, 120, 120));
+
+					CellStruct destCell = CellClass::Coord2Cell(pTargetTech->GetCenterCoords());
+					if (destCell != CellStruct::Empty && (destCell.X != curCell.X || destCell.Y != curCell.Y))
+					{
+						int dx = static_cast<int>(curCell.X) - static_cast<int>(destCell.X);
+						int dy = static_cast<int>(curCell.Y) - static_cast<int>(destCell.Y);
+						double distCells = std::sqrt(dx * dx + dy * dy);
+
+						wchar_t distBuf[32];
+						swprintf_s(distBuf, L"%.1f", distCells);
+
+						std::wostringstream destOss;
+						destOss << L"Dest: (" << destCell.X << L", " << destCell.Y << L")   Dist: " << distBuf << L" cells";
+						addLine(destOss.str(), Drawing::RGB_To_Int(255, 120, 120));
+					}
+				}
+				else if (pRawTarget)
+				{
+					CellClass* pCellTarget = abstract_cast<CellClass*>(pRawTarget);
+					if (pCellTarget)
+					{
+						CellStruct destCell = pCellTarget->MapCoords;
+						int dx = static_cast<int>(curCell.X) - static_cast<int>(destCell.X);
+						int dy = static_cast<int>(curCell.Y) - static_cast<int>(destCell.Y);
+						double distCells = std::sqrt(dx * dx + dy * dy);
+
+						wchar_t distBuf[32];
+						swprintf_s(distBuf, L"%.1f", distCells);
+
+						std::wostringstream destOss;
+						destOss << L"Target: Ground (" << destCell.X << L", " << destCell.Y << L")   Dist: " << distBuf << L" cells";
+						addLine(destOss.str(), Drawing::RGB_To_Int(255, 120, 120));
+					}
+				}
+				else if (pFoot && pFoot->WaypointCell != CellStruct::Empty && pFoot->WaypointCell.X > 0)
+				{
+					CellStruct destCell = pFoot->WaypointCell;
+					if (destCell.X != curCell.X || destCell.Y != curCell.Y)
+					{
+						int dx = static_cast<int>(curCell.X) - static_cast<int>(destCell.X);
+						int dy = static_cast<int>(curCell.Y) - static_cast<int>(destCell.Y);
+						double distCells = std::sqrt(dx * dx + dy * dy);
+
+						wchar_t distBuf[32];
+						swprintf_s(distBuf, L"%.1f", distCells);
+
+						std::wostringstream destOss;
+						destOss << L"Dest: (" << destCell.X << L", " << destCell.Y << L")   Dist: " << distBuf << L" cells";
+						addLine(destOss.str(), Drawing::RGB_To_Int(180, 220, 255));
+					}
+				}
+			}
+
+			// 5. Ammo Check (ONLY for objects with Ammo > 0, placed right after Target/Dest!)
+			if (!isProductionView && pBaseType && pBaseType->Ammo > 0)
+			{
+				int maxAmmo = pBaseType->Ammo;
+				int curAmmo = maxAmmo;
+				if (pTech)
+				{
+					curAmmo = pTech->Ammo;
+				}
+				else if (pBld)
+				{
+					curAmmo = pBld->Ammo;
+				}
+				curAmmo = std::clamp(curAmmo, 0, maxAmmo);
+
+				std::wostringstream ammoOss;
+				ammoOss << curAmmo << L" / " << maxAmmo;
+
+				int ammoColor = Drawing::RGB_To_Int(100, 220, 255);
+				if (curAmmo == 0) ammoColor = Drawing::RGB_To_Int(255, 50, 50);
+				else if (curAmmo < maxAmmo) ammoColor = Drawing::RGB_To_Int(255, 255, 0);
+
+				addLineSegments({
+					{ L"Ammo: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ ammoOss.str(), ammoColor }
+				});
+			}
+
+			// 6. Veterancy (if trainable unit, placed right below Ammo!)
+			if (!win.IsProductionItem && pBaseType && pBaseType->Trainable)
+			{
+				float vetVal = 0.0f;
+				if (win.IsDestroyed)
+				{
+					vetVal = win.LastVeterancy;
+				}
+				else if (pTech)
+				{
+					vetVal = pTech->Veterancy.Veterancy;
+				}
+				else if (pBld)
+				{
+					vetVal = pBld->Veterancy.Veterancy;
+				}
+
+				std::wostringstream vetOss;
+				int vetColor = Drawing::RGB_To_Int(200, 200, 200);
+
+				std::wstring rankStr = L"Rookie";
+				if (vetVal >= 2.0f) { rankStr = L"Elite"; vetColor = Drawing::RGB_To_Int(255, 215, 0); }
+				else if (vetVal >= 1.0f) { rankStr = L"Veteran"; vetColor = Drawing::RGB_To_Int(100, 220, 255); }
+
+				wchar_t scoreBuf[32];
+				swprintf_s(scoreBuf, L"%.2f", vetVal);
+
+				vetOss << L"Veterancy: " << rankStr << L" (" << scoreBuf << L")";
+				addLine(vetOss.str(), vetColor);
+			}
+
+			// 5. Total Build Time Line (MM:SS format) & 6. Cost Line (ONLY for production cards IF producing!)
+			if (isProductionView && isProducing)
+			{
+				int totalBuildFrames = 0;
+				if (pFact)
+				{
+					totalBuildFrames = pFact->GetBuildTimeFrames();
+				}
+				else if (pCurProdType)
+				{
+					totalBuildFrames = GetTechnoBuildTimeFrames(pCurProdType, pOwner);
+				}
+
+				if (totalBuildFrames > 0)
+				{
+					int buildTimeSecs = (totalBuildFrames + 14) / 15;
+					int mins = buildTimeSecs / 60;
+					int secs = buildTimeSecs % 60;
+
+					wchar_t timeBuf[32];
+					swprintf_s(timeBuf, L"%02d:%02d", mins, secs);
+
+					std::wostringstream btOss;
+					btOss << L"Build Time: " << timeBuf;
+					addLine(btOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+				}
+
+				if (pCurProdType)
+				{
+					std::wostringstream costOss;
+					costOss << L"Cost: $" << pCurProdType->Cost;
+					addLine(costOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+				}
+			}
+
+			// 8. Debug AI Team Info (ONLY rendered if DebugKeysEnabled=yes, and ALWAYS placed at the very end of the card!)
+			FootClass* pFoot = pTech ? abstract_cast<FootClass*>(pTech) : nullptr;
+			if (isDebugKeysEnabled && pFoot && pFoot->BelongsToATeam() && pFoot->Team)
+			{
+				auto const pTeam = pFoot->Team;
+				auto const pTeamType = pTeam->Type;
+
+				auto formatIdName = [](AbstractTypeClass* pTypeObj) -> std::wstring {
+					if (!pTypeObj) return L"";
+
+					std::string idStr = pTypeObj->get_ID();
+					std::wstring wID(idStr.begin(), idStr.end());
+
+					std::wstring wName = (pTypeObj->UIName && pTypeObj->UIName[0] != L'\0') ? pTypeObj->UIName : L"";
+					if (wName.empty() && pTypeObj->Name[0] != '\0')
+					{
+						std::string nStr = pTypeObj->Name;
+						wName = std::wstring(nStr.begin(), nStr.end());
+					}
+
+					if (!wName.empty() && wName != wID)
+					{
+						return wID + L" (" + wName + L")";
+					}
+					return wID;
+				};
+
+				if (pTeamType)
+				{
+					std::wstring teamInfo = formatIdName(pTeamType);
+					if (!teamInfo.empty())
+					{
+						addLine(L"Team: " + teamInfo, Drawing::RGB_To_Int(200, 200, 200));
+					}
+				}
+
+				if (pTeam->CurrentScript && pTeam->CurrentScript->Type)
+				{
+					std::wstring scriptInfo = formatIdName(pTeam->CurrentScript->Type);
+					if (!scriptInfo.empty())
+					{
+						addLine(L"Script: " + scriptInfo, Drawing::RGB_To_Int(200, 200, 200));
+					}
+				}
+
+				if (pTeamType && pTeamType->TaskForce)
+				{
+					std::wstring tfInfo = formatIdName(pTeamType->TaskForce);
+					if (!tfInfo.empty())
+					{
+						addLine(L"Taskforce: " + tfInfo, Drawing::RGB_To_Int(200, 200, 200));
+					}
+				}
+
+				if (pTeam->CurrentScript && pTeam->CurrentScript->Type)
+				{
+					int lineNum = pTeam->CurrentScript->CurrentMission;
+					if (lineNum >= 0 && lineNum < pTeam->CurrentScript->Type->ActionsCount)
+					{
+						int action = pTeam->CurrentScript->Type->ScriptActions[lineNum].Action;
+						int arg = pTeam->CurrentScript->Type->ScriptActions[lineNum].Argument;
+
+						std::wostringstream lineOss;
+						lineOss << L"Script Line " << lineNum << L": " << action << L", " << arg;
+						addLine(lineOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+					}
+					else if (lineNum >= 0)
+					{
+						std::wostringstream lineOss;
+						lineOss << L"Script Line " << lineNum;
+						addLine(lineOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+					}
+				}
+			}
+		}
+
+		int cameoBoxW = 60;
+		int cameoBoxH = 48;
+		int boxPadding = 8;
+
+		// Calculate total layout width & height
+		int contentLeftMargin = cameoBoxW + 16;
+		int boxWidth = std::max(260, textWidth + contentLeftMargin + boxPadding + 20); // 20px for close btn
+		int boxHeight = std::max(cameoBoxH + boxPadding * 2 + 4, textHeight + boxPadding * 2 + 4);
+
+		// Update WindowRect, CloseBtnRect, CameoClickRect
+		win.WindowRect = RectangleStruct { win.Position.X, win.Position.Y, boxWidth, boxHeight };
+		win.CloseBtnRect = RectangleStruct { win.Position.X + boxWidth - 20, win.Position.Y + 4, 16, 16 };
+		win.CameoClickRect = RectangleStruct { win.Position.X + boxPadding, win.Position.Y + boxPadding, cameoBoxW, cameoBoxH };
+
+		ColorStruct bgColor { 0, 0, 0 };
+		// Translucent panel background
+		pSurface->FillRectTrans(&win.WindowRect, &bgColor, 75);
+
+		// Outer border in player's color
+		pSurface->DrawRect(&win.WindowRect, Drawing::RGB_To_Int(playerColor.R, playerColor.G, playerColor.B));
+
+		// Top-Left Cameo rendering using DrawCameoItem
+		bool isCameoHovered = mousePos.X >= win.CameoClickRect.X && mousePos.X <= (win.CameoClickRect.X + win.CameoClickRect.Width)
+			&& mousePos.Y >= win.CameoClickRect.Y && mousePos.Y <= (win.CameoClickRect.Y + win.CameoClickRect.Height);
+
+		ObserverCameoItem cameoItem;
+		if (win.IsSuperweapon || win.pSuperType)
+		{
+			cameoItem.pSuperType = win.pSuperType;
+			cameoItem.pSuper = win.pSuper;
+			cameoItem.IsSuperweapon = true;
+		}
+		else
+		{
+			bool isProducing = (isProductionView && pFact && pFact->Object && pCurProdType);
+			if (isProductionView)
+			{
+				if (isProducing)
+				{
+					cameoItem.pType = pCurProdType;
+					cameoItem.IsProduction = true;
+					cameoItem.ProgressPercent = GetFactoryProgressPercent(pFact);
+				}
+				else
+				{
+					cameoItem.pType = nullptr; // no Cameo when not producing!
+					cameoItem.IsProduction = false;
+					cameoItem.ProgressPercent = -1;
+				}
+			}
+			else
+			{
+				cameoItem.pType = pCameoType;
+			}
+		}
+		cameoItem.pOwner = pOwner;
+		cameoItem.Count = 1;
+		cameoItem.DisplayRect = win.CameoClickRect;
+
+		this->DrawCameoItem(pSurface, cameoItem, isCameoHovered, win.CameoClickRect, playerColor);
+
+		// Close Button [X] rendering
+		bool isCloseHovered = mousePos.X >= win.CloseBtnRect.X && mousePos.X <= (win.CloseBtnRect.X + win.CloseBtnRect.Width)
+			&& mousePos.Y >= win.CloseBtnRect.Y && mousePos.Y <= (win.CloseBtnRect.Y + win.CloseBtnRect.Height);
+
+		int closeBgColor = isCloseHovered ? Drawing::RGB_To_Int(220, 40, 40) : Drawing::RGB_To_Int(60, 60, 60);
+		pSurface->FillRect(&win.CloseBtnRect, closeBgColor);
+		pSurface->DrawRect(&win.CloseBtnRect, Drawing::RGB_To_Int(140, 140, 140));
+
+		int xW = 0, xH = 0;
+		BitFont::Instance->GetTextDimension(L"X", &xW, &xH, win.CloseBtnRect.Width);
+		Point2D closeTxtPt { win.CloseBtnRect.X + (win.CloseBtnRect.Width - xW) / 2, win.CloseBtnRect.Y + (win.CloseBtnRect.Height - xH) / 2 };
+		pSurface->DrawTextA(L"X", &DSurface::ViewBounds, &closeTxtPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::Point8);
+
+		// Render text lines inside window (offset by cameo box width)
+		LTRBStruct oldBounds = BitFont::Instance->Bounds;
+		WORD oldColor = BitFont::Instance->Color;
+		bool oldField41 = BitFont::Instance->field_41;
+
+		LTRBStruct ltrbBounds = { win.WindowRect.X, win.WindowRect.Y, win.WindowRect.X + win.WindowRect.Width, win.WindowRect.Y + win.WindowRect.Height };
+		BitFont::Instance->field_41 = 1;
+		BitFont::Instance->SetBounds(&ltrbBounds);
+
+		int currentY = win.WindowRect.Y + boxPadding;
+		for (const auto& line : lines)
+		{
+			int currentX = win.WindowRect.X + contentLeftMargin;
+			for (const auto& seg : line.Segments)
+			{
+				int w = 0, h = 0;
+				BitFont::Instance->GetTextDimension(seg.Text.c_str(), &w, &h, maxCardWidth);
+				BitFont::Instance->Color = static_cast<WORD>(seg.Color);
+				BitText::Instance->DrawText(
+					BitFont::Instance,
+					pSurface,
+					seg.Text.c_str(),
+					currentX,
+					currentY,
+					w,
+					line.Height,
+					0, 0, 0
+				);
+				currentX += w;
+			}
+			currentY += line.Height + 2;
+		}
+
+		BitFont::Instance->field_41 = oldField41 ? 1 : 0;
+		BitFont::Instance->Color = oldColor;
+		BitFont::Instance->SetBounds(&oldBounds);
+	}
+}
+
+void ObserverUIClass::RenderFloatingWindows(DSurface* pSurface)
+{
+	bool isActive = IsActive() || Phobos::Config::DevelopmentCommands;
+	if (!isActive || !pSurface || !BitFont::Instance || !BitText::Instance)
+		return;
+
+	Point2D mousePos { 0, 0 };
+	if (WWMouseClass::Instance)
+	{
+		mousePos = Point2D { WWMouseClass::Instance->GetX(), WWMouseClass::Instance->GetY() };
+	}
+
+	int maxCardWidth = 350;
+
+	for (auto& win : this->FloatingWindows)
+	{
+		auto pHouse = win.pHouse;
+		if (!pHouse || !pHouse->Type)
+			continue;
+
+		auto itRow = std::find_if(this->PlayerRows.begin(), this->PlayerRows.end(), [pHouse](const ObserverPlayerRow& r) {
+			return r.pHouse == pHouse;
+		});
+
+		ColorStruct playerColor { 180, 180, 180 };
+		if (itRow != this->PlayerRows.end())
+		{
+			playerColor = itRow->PlayerColor;
+		}
+
+		struct TooltipSegment { std::wstring Text; int Color; };
+		struct TooltipLine { std::vector<TooltipSegment> Segments; int Width; int Height; };
+
+		std::vector<TooltipLine> lines;
+		int textWidth = 0;
+		int textHeight = 0;
+
+		auto addLineSegments = [&](const std::vector<TooltipSegment>& segs) {
+			if (segs.empty()) return;
+			int lineW = 0;
+			int maxH = 0;
+			for (const auto& seg : segs)
+			{
+				int w = 0, h = 0;
+				BitFont::Instance->GetTextDimension(seg.Text.c_str(), &w, &h, maxCardWidth);
+				lineW += w;
+				maxH = std::max(maxH, h);
+			}
+			lines.push_back({ segs, lineW, maxH });
+			textWidth = std::max(textWidth, lineW);
+			textHeight += maxH + 2;
+		};
+
+		auto addLine = [&](const std::wstring& textStr, int color) {
+			addLineSegments({ { textStr, color } });
+		};
+
+		// Title Line: Player Number, Player Name & Country Name
+		std::string plainNameStr = pHouse->PlainName;
+		if (plainNameStr.empty())
+			plainNameStr = pHouse->get_ID();
+		std::wstring wPlainName(plainNameStr.begin(), plainNameStr.end());
+
+		std::wstring controlStr = L"";
+		if (!pHouse->IsControlledByHuman())
+		{
+			switch (pHouse->AIDifficulty)
+			{
+			case AIDifficulty::Easy: controlStr = L" [AI Easy]"; break;
+			case AIDifficulty::Normal: controlStr = L" [AI Normal]"; break;
+			case AIDifficulty::Hard: controlStr = L" [AI Hard]"; break;
+			default: controlStr = L" [AI]"; break;
+			}
+		}
+
+		bool isMultiplayer = SessionClass::Instance.GameMode == GameMode::Skirmish || SessionClass::Instance.GameMode == GameMode::LAN || SessionClass::Instance.GameMode == GameMode::Internet;
+		bool isDebugEnabled = Phobos::Config::DevelopmentCommands;
+		std::wostringstream nameOss;
+
+		std::string houseIdStr = pHouse->get_ID();
+		std::wstring wHouseID(houseIdStr.begin(), houseIdStr.end());
+
+		if (isMultiplayer && itRow != this->PlayerRows.end() && itRow->PlayerNumber > 0)
+		{
+			if (isDebugEnabled)
+			{
+				nameOss << L"P" << itRow->PlayerNumber << L" [" << wHouseID << L"] " << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
+			}
+			else
+			{
+				nameOss << L"[P" << itRow->PlayerNumber << L"] " << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
+			}
+		}
+		else
+		{
+			if (isDebugEnabled)
+			{
+				nameOss << L"[" << wHouseID << L"] " << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
+			}
+			else
+			{
+				nameOss << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
+			}
+		}
+		addLine(nameOss.str(), Drawing::RGB_To_Int(255, 255, 255));
+
+		// Money Line
+		std::wostringstream moneyOss;
+		moneyOss << L"Credits: $" << pHouse->Available_Money();
+		addLine(moneyOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+
+		// Income Rate Line
+		if (itRow != this->PlayerRows.end())
+		{
+			std::wostringstream rateValOss;
+			int valColor = Drawing::RGB_To_Int(180, 180, 180);
+			if (itRow->IncomeRatePerMin > 0)
+			{
+				rateValOss << L"+$" << itRow->IncomeRatePerMin;
+				valColor = Drawing::RGB_To_Int(0, 255, 0);
+			}
+			else if (itRow->IncomeRatePerMin < 0)
+			{
+				rateValOss << L"-$" << std::abs(itRow->IncomeRatePerMin);
+				valColor = Drawing::RGB_To_Int(255, 90, 90);
+			}
+			else
+			{
+				rateValOss << L"+$0";
+			}
+			addLineSegments({
+				{ L"Economy/min: ", Drawing::RGB_To_Int(200, 200, 200) },
+				{ rateValOss.str(), valColor }
+			});
+		}
+
+		// Power Line
+		int powerOutput = pHouse->PowerOutput;
+		int powerDrain = pHouse->PowerDrain;
+		int balance = powerOutput - powerDrain;
+
+		std::wostringstream powerMainOss;
+		powerMainOss << powerDrain << L" / " << powerOutput << L" (";
+
+		std::wostringstream balanceOss;
+		int balanceColor = Drawing::RGB_To_Int(180, 180, 180);
+		if (balance > 0)
+		{
+			balanceOss << L"+" << balance;
+			balanceColor = Drawing::RGB_To_Int(0, 255, 0);
+		}
+		else if (balance < 0)
+		{
+			balanceOss << balance;
+			balanceColor = Drawing::RGB_To_Int(255, 50, 50);
+		}
+		else
+		{
+			balanceOss << L"+0";
+		}
+
+		addLineSegments({
+			{ L"Power: ", Drawing::RGB_To_Int(200, 200, 200) },
+			{ powerMainOss.str(), Drawing::RGB_To_Int(200, 200, 200) },
+			{ balanceOss.str(), balanceColor },
+			{ L")", Drawing::RGB_To_Int(200, 200, 200) }
+		});
+
+		// Debug-only AI / Tech lines (ONLY if DebugKeysEnabled=yes in rulesmd.ini)
+		bool isDebugKeysEnabled = Phobos::Config::DevelopmentCommands;
+		if (isDebugKeysEnabled)
+		{
+			// 1. IQLevel (only if AI)
+			if (!pHouse->IsControlledByHuman())
+			{
+				addLine(L"AI's IQ Level: " + std::to_wstring(pHouse->IQLevel2), Drawing::RGB_To_Int(200, 200, 200));
+			}
+
+			// 2. TechLevel (always when debug)
+			addLine(L"Tech Level: " + std::to_wstring(pHouse->TechLevel), Drawing::RGB_To_Int(200, 200, 200));
+
+			// 3. Production (only if AI and false)
+			if (!pHouse->IsControlledByHuman() && !pHouse->Production)
+			{
+				addLineSegments({
+					{ L"AI Production: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ L"Disabled", Drawing::RGB_To_Int(255, 90, 90) }
+				});
+			}
+
+			// 4. AITriggersActive (only if AI and false)
+			if (!pHouse->IsControlledByHuman() && !pHouse->AITriggersActive)
+			{
+				addLineSegments({
+					{ L"AI Triggers: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ L"Disabled", Drawing::RGB_To_Int(255, 90, 90) }
+				});
+			}
+
+			// 5. AutoBaseBuilding (only if AI and false)
+			if (!pHouse->IsControlledByHuman() && !pHouse->AutoBaseBuilding)
+			{
+				addLineSegments({
+					{ L"Auto Base Building: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ L"Disabled", Drawing::RGB_To_Int(255, 90, 90) }
+				});
+			}
+
+			// 5b. Active AI Teams (only if AI and > 0)
+			if (!pHouse->IsControlledByHuman())
+			{
+				int activeAITeams = 0;
+				for (int k = 0; k < TeamClass::Array.Count; ++k)
+				{
+					auto pTeam = TeamClass::Array.GetItem(k);
+					if (pTeam && pTeam->Owner == pHouse)
+					{
+						activeAITeams++;
+					}
+				}
+				if (activeAITeams > 0)
+				{
+					addLine(L"Active AI Teams: " + std::to_wstring(activeAITeams), Drawing::RGB_To_Int(200, 200, 200));
+				}
+			}
+		}
+
+		// 6. Defeated (only on floating card if defeated)
+		if (pHouse->Defeated)
+		{
+			addLineSegments({
+				{ L"Status: ", Drawing::RGB_To_Int(200, 200, 200) },
+				{ L"Defeated", Drawing::RGB_To_Int(255, 50, 50) }
+			});
+		}
+
+		// 7. Refineries (formerly Resource Destinations) (only if > 0)
+		if (pHouse->CountResourceDestinations > 0)
+		{
+			addLine(L"Refineries: " + std::to_wstring(pHouse->CountResourceDestinations), Drawing::RGB_To_Int(200, 200, 200));
+		}
+
+		// 8. War Factories (only if > 0)
+		if (pHouse->CountWarfactories > 0)
+		{
+			addLine(L"War Factories: " + std::to_wstring(pHouse->CountWarfactories), Drawing::RGB_To_Int(200, 200, 200));
+		}
+
+		// 9. Barracks & Helipads & Airport Docks
+		int barracksCount = 0;
+		int helipadsCount = 0;
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type)
+			{
+				if (pBld->Type->Factory == AbstractType::InfantryType || pBld->Type->GDIBarracks || pBld->Type->NODBarracks || pBld->Type->YuriBarracks)
+				{
+					barracksCount++;
+				}
+				if (pBld->Type->Helipad || pBld->Type->Factory == AbstractType::AircraftType || pBld->Type->UnitReload)
+				{
+					helipadsCount++;
+				}
+			}
+		}
+		if (barracksCount > 0)
+		{
+			addLine(L"Barracks: " + std::to_wstring(barracksCount), Drawing::RGB_To_Int(200, 200, 200));
+		}
+		if (helipadsCount > 0 || pHouse->AirportDocks > 0)
+		{
+			std::wstring helipadsLine = L"Helipads: " + std::to_wstring(helipadsCount);
+			if (pHouse->AirportDocks > 0)
+			{
+				helipadsLine += L" (Docks: " + std::to_wstring(pHouse->AirportDocks) + L")";
+			}
+			addLine(helipadsLine, Drawing::RGB_To_Int(200, 200, 200));
+		}
+
+		// 10. Total Objects Counts (only if > 0)
+		if (pHouse->OwnedBuildings > 0)
+		{
+			addLine(L"Total Buildings: " + std::to_wstring(pHouse->OwnedBuildings), Drawing::RGB_To_Int(200, 200, 200));
+		}
+		if (pHouse->OwnedInfantry > 0)
+		{
+			addLine(L"Total Infantry: " + std::to_wstring(pHouse->OwnedInfantry), Drawing::RGB_To_Int(200, 200, 200));
+		}
+		if (pHouse->OwnedUnits > 0)
+		{
+			addLine(L"Total Units: " + std::to_wstring(pHouse->OwnedUnits), Drawing::RGB_To_Int(200, 200, 200));
+		}
+		if (pHouse->OwnedAircraft > 0)
+		{
+			addLine(L"Total Aircraft: " + std::to_wstring(pHouse->OwnedAircraft), Drawing::RGB_To_Int(200, 200, 200));
+		}
+		if (pHouse->OwnedNavy > 0)
+		{
+			addLine(L"Total Navy: " + std::to_wstring(pHouse->OwnedNavy), Drawing::RGB_To_Int(200, 200, 200));
+		}
+
+		// 12. Killed Objects Counts (only if > 0)
+		int killedUnits = pHouse->KilledUnitTypes.GetUnitCount() + pHouse->KilledInfantryTypes.GetUnitCount() + pHouse->KilledAircraftTypes.GetUnitCount();
+		if (killedUnits > 0)
+		{
+			addLine(L"Killed Units: " + std::to_wstring(killedUnits), Drawing::RGB_To_Int(200, 200, 200));
+		}
+		int killedBuildings = pHouse->KilledBuildingTypes.GetUnitCount();
+		if (killedBuildings > 0)
+		{
+			addLine(L"Killed Buildings: " + std::to_wstring(killedBuildings), Drawing::RGB_To_Int(200, 200, 200));
+		}
+
+		// Allies Line (ONLY if allies exist)
+		std::wstring alliesStr = L"";
+		for (const auto& r : this->PlayerRows)
+		{
+			if (r.pHouse && r.pHouse != pHouse && pHouse->IsAlliedWith(r.pHouse))
+			{
+				if (!alliesStr.empty()) alliesStr += L", ";
+
+				std::string allyIdStr = r.pHouse->get_ID();
+				std::wstring wAllyID(allyIdStr.begin(), allyIdStr.end());
+
+				std::string allyPlainStr = r.pHouse->PlainName;
+				if (allyPlainStr.empty()) allyPlainStr = allyIdStr;
+				std::wstring wAllyPlain(allyPlainStr.begin(), allyPlainStr.end());
+
+				if (isMultiplayer && r.PlayerNumber > 0)
+				{
+					if (isDebugEnabled)
+					{
+						alliesStr += L"P" + std::to_wstring(r.PlayerNumber) + L" [" + wAllyID + L"]";
+					}
+					else
+					{
+						alliesStr += L"P" + std::to_wstring(r.PlayerNumber);
+					}
+				}
+				else
+				{
+					// Singleplayer / Campaign mode: use House Name (and [ID] in front if debug mode)
+					if (isDebugEnabled)
+					{
+						alliesStr += L"[" + wAllyID + L"] " + wAllyPlain;
+					}
+					else
+					{
+						alliesStr += wAllyPlain;
+					}
+				}
+			}
+		}
+		if (!alliesStr.empty())
+		{
+			addLineSegments({
+				{ L"Allies: ", Drawing::RGB_To_Int(200, 200, 200) },
+				{ alliesStr, Drawing::RGB_To_Int(100, 220, 255) }
+			});
+		}
+
+		if (!pHouse->IsControlledByHuman())
+		{
+			auto pEnemyHouse = GetTargetEnemy(pHouse);
+			if (pEnemyHouse && pEnemyHouse->Type)
+			{
+				ColorStruct enemyColor = GetHouseColor(pEnemyHouse);
+				std::string enemyPlainName = pEnemyHouse->PlainName;
+				if (enemyPlainName.empty())
+					enemyPlainName = pEnemyHouse->get_ID();
+				std::wstring wEnemyPlain(enemyPlainName.begin(), enemyPlainName.end());
+
+				std::string enemyIdStr = pEnemyHouse->get_ID();
+				std::wstring wEnemyID(enemyIdStr.begin(), enemyIdStr.end());
+
+				std::wostringstream enemyValOss;
+				auto itEnemyRow = std::find_if(this->PlayerRows.begin(), this->PlayerRows.end(), [pEnemyHouse](const ObserverPlayerRow& r) {
+					return r.pHouse == pEnemyHouse;
+				});
+				if (isMultiplayer && itEnemyRow != this->PlayerRows.end() && itEnemyRow->PlayerNumber > 0)
+				{
+					if (isDebugEnabled)
+					{
+						enemyValOss << L"P" << itEnemyRow->PlayerNumber << L" [" << wEnemyID << L"] " << wEnemyPlain << L" (" << pEnemyHouse->Type->UIName << L")";
+					}
+					else
+					{
+						enemyValOss << L"[P" << itEnemyRow->PlayerNumber << L"] " << wEnemyPlain << L" (" << pEnemyHouse->Type->UIName << L")";
+					}
+				}
+				else
+				{
+					if (isDebugEnabled)
+					{
+						enemyValOss << L"[" << wEnemyID << L"] " << wEnemyPlain << L" (" << pEnemyHouse->Type->UIName << L")";
+					}
+					else
+					{
+						enemyValOss << wEnemyPlain << L" (" << pEnemyHouse->Type->UIName << L")";
+					}
+				}
+
+				addLineSegments({
+					{ L"Target Enemy: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ enemyValOss.str(), Drawing::RGB_To_Int(enemyColor.R, enemyColor.G, enemyColor.B) }
+				});
+			}
+			else
+			{
+				addLineSegments({
+					{ L"Target Enemy: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ L"None", Drawing::RGB_To_Int(180, 180, 180) }
+				});
+			}
+		}
+
+		int boxPadding = 8;
+		int boxWidth = textWidth + boxPadding * 2 + 20; // 20px extra space for top-right [X] close button
+		int boxHeight = textHeight + boxPadding * 2 + 4;
+
+		// Update WindowRect & CloseBtnRect
+		win.WindowRect = RectangleStruct { win.Position.X, win.Position.Y, boxWidth, boxHeight };
+		win.CloseBtnRect = RectangleStruct { win.Position.X + boxWidth - 20, win.Position.Y + 4, 16, 16 };
+
+		ColorStruct bgColor { 0, 0, 0 };
+		// Translucent panel background
+		pSurface->FillRectTrans(&win.WindowRect, &bgColor, 75);
+		
+		// Outer border in player's color
+		pSurface->DrawRect(&win.WindowRect, Drawing::RGB_To_Int(playerColor.R, playerColor.G, playerColor.B));
+
+		// Close Button [X] rendering
+		bool isCloseHovered = mousePos.X >= win.CloseBtnRect.X && mousePos.X <= (win.CloseBtnRect.X + win.CloseBtnRect.Width)
+			&& mousePos.Y >= win.CloseBtnRect.Y && mousePos.Y <= (win.CloseBtnRect.Y + win.CloseBtnRect.Height);
+
+		int closeBgColor = isCloseHovered ? Drawing::RGB_To_Int(220, 40, 40) : Drawing::RGB_To_Int(60, 60, 60);
+		pSurface->FillRect(&win.CloseBtnRect, closeBgColor);
+		pSurface->DrawRect(&win.CloseBtnRect, Drawing::RGB_To_Int(140, 140, 140));
+
+		int xW = 0, xH = 0;
+		BitFont::Instance->GetTextDimension(L"X", &xW, &xH, win.CloseBtnRect.Width);
+		Point2D closeTxtPt { win.CloseBtnRect.X + (win.CloseBtnRect.Width - xW) / 2, win.CloseBtnRect.Y + (win.CloseBtnRect.Height - xH) / 2 };
+		pSurface->DrawTextA(L"X", &DSurface::ViewBounds, &closeTxtPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::Point8);
+
+		// Render text lines inside window
+		LTRBStruct oldBounds = BitFont::Instance->Bounds;
+		WORD oldColor = BitFont::Instance->Color;
+		bool oldField41 = BitFont::Instance->field_41;
+
+		LTRBStruct ltrbBounds = { win.WindowRect.X, win.WindowRect.Y, win.WindowRect.X + win.WindowRect.Width, win.WindowRect.Y + win.WindowRect.Height };
+		BitFont::Instance->field_41 = 1;
+		BitFont::Instance->SetBounds(&ltrbBounds);
+
+		int currentY = win.WindowRect.Y + boxPadding;
+		for (const auto& line : lines)
+		{
+			int currentX = win.WindowRect.X + boxPadding;
+			for (const auto& seg : line.Segments)
+			{
+				int w = 0, h = 0;
+				BitFont::Instance->GetTextDimension(seg.Text.c_str(), &w, &h, maxCardWidth);
+				BitFont::Instance->Color = static_cast<WORD>(seg.Color);
+				BitText::Instance->DrawText(
+					BitFont::Instance,
+					pSurface,
+					seg.Text.c_str(),
+					currentX,
+					currentY,
+					w,
+					line.Height,
+					0, 0, 0
+				);
+				currentX += w;
+			}
+			currentY += line.Height + 2;
+		}
+
+		BitFont::Instance->field_41 = oldField41 ? 1 : 0;
+		BitFont::Instance->Color = oldColor;
+		BitFont::Instance->SetBounds(&oldBounds);
 	}
 }
 
@@ -1318,21 +3239,11 @@ static bool DrawImage(
 	// Otherwise, if an SHP is provided, draw it
 	else if (fileSHP)
 	{
-		if (!pPalette)
-			return false;
+		ConvertClass* pPal = pPalette ? pPalette : FileSystem::CAMEO_PAL;
+		if (!pPal) pPal = FileSystem::UNITx_PAL;
 
-		Point2D noLocation = { 0, 0 };
-
-		::CC_Draw_Shape(
-			pSurface,
-			pPalette,
-			fileSHP,
-			frameIndex,
-			&noLocation,
-			&destinationRect,
-			BlitterFlags::None,
-			0, zAdjust, ZGradient::Ground, 1000, 0, nullptr, 0, 0, 0
-		);
+		Point2D location = { destinationRect.X, destinationRect.Y };
+		pSurface->DrawSHP(pPal, fileSHP, frameIndex, &location, &DSurface::ViewBounds, BlitterFlags::bf_400, 0, zAdjust, ZGradient::Ground, 1000, 0, nullptr, 0, 0, 0);
 		painted = true;
 	}
 
@@ -1341,7 +3252,7 @@ static bool DrawImage(
 
 void ObserverUIClass::DrawCameoItem(DSurface* pSurface, const ObserverCameoItem& item, bool isHovered, const RectangleStruct& clipRect, ColorStruct playerColor)
 {
-	if (!item.pType || !pSurface)
+	if (!pSurface)
 		return;
 
 	// Calculate intersection clip rect between item display area and section panel clip rect
@@ -1349,32 +3260,144 @@ void ObserverUIClass::DrawCameoItem(DSurface* pSurface, const ObserverCameoItem&
 	if (!IntersectRect(item.DisplayRect, clipRect, drawRect))
 		return;
 
-	// 1. Try PCX cameo from TechnoTypeExt (CameoPCX or AltCameoPCX) or CameoFile or ID
+	// 1. Try PCX cameo from TechnoTypeExt / SWTypeExt or CameoFile or ID
 	BSurface* pPCXSurface = nullptr;
-	auto pTypeExt = TechnoTypeExt::ExtMap.Find(item.pType);
-	if (pTypeExt)
-	{
-		if (pTypeExt->CameoPCX.Exists())
-			pPCXSurface = pTypeExt->CameoPCX.GetSurface();
-		else if (pTypeExt->AltCameoPCX.Exists())
-			pPCXSurface = pTypeExt->AltCameoPCX.GetSurface();
-	}
+	SHPStruct* pFileSHP = nullptr;
 
-	if (!pPCXSurface && item.pType->CameoFile[0] != '\0')
+	if (item.IsSuperweapon && item.pSuperType)
 	{
-		PhobosPCXFile pcxFile(item.pType->CameoFile);
-		if (pcxFile.Exists())
-			pPCXSurface = pcxFile.GetSurface();
-	}
+		auto pSWExt = SWTypeExt::ExtMap.Find(item.pSuperType);
+		if (pSWExt && pSWExt->SidebarPCX.Exists())
+		{
+			pPCXSurface = pSWExt->SidebarPCX.GetSurface();
+		}
 
-	if (!pPCXSurface && item.pType->ID)
+		const char* imgFile = item.pSuperType->SidebarImageFile;
+		if (!pPCXSurface && imgFile[0] != '\0')
+		{
+			PhobosPCXFile pcxFile(imgFile);
+			if (pcxFile.Exists())
+				pPCXSurface = pcxFile.GetSurface();
+
+			if (!pPCXSurface)
+			{
+				char pcxName[64];
+				sprintf_s(pcxName, "%s.pcx", imgFile);
+				_strlwr_s(pcxName);
+				PhobosPCXFile pcxFile2(pcxName);
+				if (pcxFile2.Exists())
+					pPCXSurface = pcxFile2.GetSurface();
+			}
+
+			if (!pPCXSurface)
+			{
+				pFileSHP = FileSystem::LoadSHPFile(imgFile);
+				if (!pFileSHP)
+				{
+					char shpName[64];
+					sprintf_s(shpName, "%s.shp", imgFile);
+					_strlwr_s(shpName);
+					pFileSHP = FileSystem::LoadSHPFile(shpName);
+				}
+			}
+		}
+
+		if (!pPCXSurface && !pFileSHP)
+		{
+			pFileSHP = item.pSuperType->SidebarImage;
+		}
+	}
+	else if (item.pType)
 	{
-		char pcxName[64];
-		sprintf_s(pcxName, "%sicon.pcx", item.pType->ID);
-		_strlwr_s(pcxName);
-		PhobosPCXFile pcxFile(pcxName);
-		if (pcxFile.Exists())
-			pPCXSurface = pcxFile.GetSurface();
+		// 1. Check TechnoTypeExt PCX cameos
+		auto pTypeExt = TechnoTypeExt::ExtMap.Find(item.pType);
+		if (pTypeExt)
+		{
+			if (pTypeExt->CameoPCX.Exists())
+				pPCXSurface = pTypeExt->CameoPCX.GetSurface();
+			else if (pTypeExt->AltCameoPCX.Exists())
+				pPCXSurface = pTypeExt->AltCameoPCX.GetSurface();
+		}
+
+		// 2. Check CameoFile PCX
+		if (!pPCXSurface && item.pType->CameoFile[0] != '\0')
+		{
+			PhobosPCXFile pcxFile(item.pType->CameoFile);
+			if (pcxFile.Exists())
+			{
+				pPCXSurface = pcxFile.GetSurface();
+			}
+			else
+			{
+				char pcxName[64];
+				sprintf_s(pcxName, "%s.pcx", item.pType->CameoFile);
+				_strlwr_s(pcxName);
+				PhobosPCXFile pcxFile2(pcxName);
+				if (pcxFile2.Exists())
+					pPCXSurface = pcxFile2.GetSurface();
+			}
+		}
+
+		// 3. Check ID PCX variants (e.g. TSGACNSTicon.pcx, TSGACNST.pcx, GDIPOWRicon.pcx)
+		if (!pPCXSurface && item.pType->ID)
+		{
+			const char* idStr = item.pType->ID;
+			char pcxBuf[64];
+			sprintf_s(pcxBuf, "%sicon.pcx", idStr);
+			_strlwr_s(pcxBuf);
+			PhobosPCXFile pcx1(pcxBuf);
+			if (pcx1.Exists())
+			{
+				pPCXSurface = pcx1.GetSurface();
+			}
+			else
+			{
+				sprintf_s(pcxBuf, "%s.pcx", idStr);
+				_strlwr_s(pcxBuf);
+				PhobosPCXFile pcx2(pcxBuf);
+				if (pcx2.Exists())
+					pPCXSurface = pcx2.GetSurface();
+			}
+		}
+
+		// 4. Fallback to SHP cameos, ONLY if SHP is not XXICON.SHP placeholder
+		if (!pPCXSurface)
+		{
+			SHPStruct* pCandidateSHP = item.pType->GetCameo();
+			if (!pCandidateSHP) pCandidateSHP = item.pType->Cameo;
+			if (!pCandidateSHP) pCandidateSHP = item.pType->AltCameo;
+
+			if (pCandidateSHP)
+			{
+				bool isXXIcon = false;
+				SHPReference* pRef = pCandidateSHP->AsReference();
+				if (pRef && pRef->Filename)
+				{
+					const char* fn = pRef->Filename;
+					if (_stricmp(fn, "XXICON.SHP") == 0 || _stricmp(fn, "xxicon.shp") == 0 || _stricmp(fn, "XXICON") == 0)
+					{
+						isXXIcon = true;
+					}
+				}
+
+				if (!isXXIcon)
+				{
+					pFileSHP = pCandidateSHP;
+				}
+			}
+
+			if (!pFileSHP && item.pType->CameoFile[0] != '\0')
+			{
+				pFileSHP = FileSystem::LoadSHPFile(item.pType->CameoFile);
+				if (!pFileSHP)
+				{
+					char shpBuf[64];
+					sprintf_s(shpBuf, "%s.shp", item.pType->CameoFile);
+					_strlwr_s(shpBuf);
+					pFileSHP = FileSystem::LoadSHPFile(shpBuf);
+				}
+			}
+		}
 	}
 
 	if (pPCXSurface && (pPCXSurface->GetWidth() <= 0 || pPCXSurface->GetHeight() <= 0))
@@ -1382,19 +3405,13 @@ void ObserverUIClass::DrawCameoItem(DSurface* pSurface, const ObserverCameoItem&
 		pPCXSurface = nullptr;
 	}
 
-	// 2. Try SHP cameo from TechnoTypeClass or XXICON.SHP fallback
-	SHPStruct* pFileSHP = item.pType->GetCameo();
-	if (!pFileSHP)
-		pFileSHP = item.pType->Cameo;
-	if (!pFileSHP)
-		pFileSHP = item.pType->AltCameo;
-	if (!pFileSHP)
+	if (!pFileSHP && !pPCXSurface)
 		pFileSHP = FileSystem::LoadSHPFile("XXICON.SHP");
-	if (!pFileSHP)
+	if (!pFileSHP && !pPCXSurface)
 		pFileSHP = FileSystem::LoadSHPFile("xxicon.shp");
-	if (!pFileSHP)
+	if (!pFileSHP && !pPCXSurface)
 		pFileSHP = FileSystem::LoadSHPFile("XXICON");
-	if (!pFileSHP)
+	if (!pFileSHP && !pPCXSurface)
 		pFileSHP = FileSystem::LoadSHPFile("xxicon");
 
 	// Draw image using DrawImage helper (exact DropshipLoadout approach)
@@ -1431,11 +3448,64 @@ void ObserverUIClass::DrawCameoItem(DSurface* pSurface, const ObserverCameoItem&
 
 	ColorStruct textBgColor { 0, 0, 0 };
 
-	// Draw production percentage overlay with " %" suffix and 30% translucent dark background
-	if (item.IsProduction && item.ProgressPercent >= 0)
+	// Draw superweapon percentage overlay centered on cameo (0% -> 100%)
+	if (item.IsSuperweapon && item.pSuper)
+	{
+		int totalFrames = item.pSuper->GetRechargeTime();
+		int framesLeft = item.pSuper->RechargeTimer.GetTimeLeft();
+		int pctReady = 100;
+		if (totalFrames > 0 && framesLeft > 0)
+		{
+			pctReady = std::clamp(((totalFrames - framesLeft) * 100) / totalFrames, 0, 100);
+		}
+
+		std::wostringstream oss;
+		oss << pctReady << L"%";
+		std::wstring pctStr = oss.str();
+
+		if (BitFont::Instance && BitText::Instance)
+		{
+			int textW = 0, textH = 0;
+			BitFont::Instance->GetTextDimension(pctStr.c_str(), &textW, &textH, item.DisplayRect.Width);
+			Point2D textPt = { item.DisplayRect.X + (item.DisplayRect.Width - textW) / 2, item.DisplayRect.Y + (item.DisplayRect.Height - textH) / 2 };
+
+			RectangleStruct textBgRect = { textPt.X - 3, textPt.Y - 1, textW + 6, textH + 2 };
+			RectangleStruct clippedBgRect;
+			if (IntersectRect(textBgRect, clipRect, clippedBgRect))
+			{
+				pSurface->FillRectTrans(&clippedBgRect, &textBgColor, 75);
+			}
+
+			LTRBStruct oldBounds = BitFont::Instance->Bounds;
+			WORD oldColor = BitFont::Instance->Color;
+			bool oldField41 = BitFont::Instance->field_41;
+
+			LTRBStruct ltrbBounds = { clipRect.X, clipRect.Y, clipRect.X + clipRect.Width, clipRect.Y + clipRect.Height };
+			BitFont::Instance->field_41 = 1;
+			BitFont::Instance->SetBounds(&ltrbBounds);
+			BitFont::Instance->Color = static_cast<WORD>((pctReady == 100) ? Drawing::RGB_To_Int(0, 255, 0) : Drawing::RGB_To_Int(255, 255, 255));
+
+			BitText::Instance->DrawText(
+				BitFont::Instance,
+				pSurface,
+				pctStr.c_str(),
+				textPt.X,
+				textPt.Y,
+				textW,
+				textH,
+				0, 0, 0
+			);
+
+			BitFont::Instance->Bounds = oldBounds;
+			BitFont::Instance->Color = oldColor;
+			BitFont::Instance->field_41 = oldField41;
+		}
+	}
+	// Draw production percentage overlay with "%" suffix and 30% translucent dark background
+	else if (item.IsProduction && item.ProgressPercent >= 0)
 	{
 		std::wostringstream oss;
-		oss << item.ProgressPercent << L" %";
+		oss << item.ProgressPercent << L"%";
 		std::wstring pctStr = oss.str();
 
 		if (BitFont::Instance && BitText::Instance)
@@ -1581,18 +3651,30 @@ void ObserverUIClass::DrawPlayerTooltip(DSurface* pSurface, HouseClass* pHouse, 
 		plainNameStr = pHouse->get_ID();
 	std::wstring wPlainName(plainNameStr.begin(), plainNameStr.end());
 
+	std::wstring controlStr = L"";
+	if (!pHouse->IsControlledByHuman())
+	{
+		switch (pHouse->AIDifficulty)
+		{
+		case AIDifficulty::Easy: controlStr = L" [AI Easy]"; break;
+		case AIDifficulty::Normal: controlStr = L" [AI Normal]"; break;
+		case AIDifficulty::Hard: controlStr = L" [AI Hard]"; break;
+		default: controlStr = L" [AI]"; break;
+		}
+	}
+
 	std::wostringstream nameOss;
 	if (itRow != this->PlayerRows.end() && itRow->PlayerNumber > 0)
 	{
-		nameOss << L"[P" << itRow->PlayerNumber << L"] " << wPlainName << L" (" << pHouse->Type->UIName << L") [" << (pHouse->IsControlledByHuman() ? L"Human" : L"AI") << L"]";
+		nameOss << L"[P" << itRow->PlayerNumber << L"] " << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
 	}
 	else
 	{
-		nameOss << wPlainName << L" (" << pHouse->Type->UIName << L") [" << (pHouse->IsControlledByHuman() ? L"Human" : L"AI") << L"]";
+		nameOss << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
 	}
 	addLine(nameOss.str(), Drawing::RGB_To_Int(255, 255, 255));
 
-	// Line 2: Money / Credits
+	// Money Line
 	std::wostringstream moneyOss;
 	moneyOss << L"Credits: $" << pHouse->Available_Money();
 	addLine(moneyOss.str(), Drawing::RGB_To_Int(200, 200, 200));
@@ -1624,7 +3706,7 @@ void ObserverUIClass::DrawPlayerTooltip(DSurface* pSurface, HouseClass* pHouse, 
 		});
 	}
 
-	// Line 4: Power Line: Drain / Output (+-Balance)
+	// Power Line
 	int powerOutput = pHouse->PowerOutput;
 	int powerDrain = pHouse->PowerDrain;
 	int balance = powerOutput - powerDrain;
@@ -1637,12 +3719,12 @@ void ObserverUIClass::DrawPlayerTooltip(DSurface* pSurface, HouseClass* pHouse, 
 	if (balance > 0)
 	{
 		balanceOss << L"+" << balance;
-		balanceColor = Drawing::RGB_To_Int(0, 255, 0); // Green surplus
+		balanceColor = Drawing::RGB_To_Int(0, 255, 0);
 	}
 	else if (balance < 0)
 	{
-		balanceOss << balance; // e.g. -200
-		balanceColor = Drawing::RGB_To_Int(255, 50, 50); // Vivid Red for negative deficit
+		balanceOss << balance;
+		balanceColor = Drawing::RGB_To_Int(255, 50, 50);
 	}
 	else
 	{
@@ -1657,7 +3739,154 @@ void ObserverUIClass::DrawPlayerTooltip(DSurface* pSurface, HouseClass* pHouse, 
 		{ L")", Drawing::RGB_To_Int(200, 200, 200) }
 	});
 
-	// Line 5: Target Enemy House (ONLY for AI players)
+	// Debug-only AI / Tech lines (ONLY if DebugKeysEnabled=yes in rulesmd.ini)
+	bool isDebugKeysEnabled = Phobos::Config::DevelopmentCommands;
+	if (isDebugKeysEnabled)
+	{
+		// 1. IQLevel (only if AI)
+		if (!pHouse->IsControlledByHuman())
+		{
+			addLine(L"AI's IQ Level: " + std::to_wstring(pHouse->IQLevel2), Drawing::RGB_To_Int(200, 200, 200));
+		}
+
+		// 2. TechLevel (always when debug)
+		addLine(L"Tech Level: " + std::to_wstring(pHouse->TechLevel), Drawing::RGB_To_Int(200, 200, 200));
+
+		// 3. Production (only if AI and false)
+		if (!pHouse->IsControlledByHuman() && !pHouse->Production)
+		{
+			addLineSegments({
+				{ L"AI Production: ", Drawing::RGB_To_Int(200, 200, 200) },
+				{ L"Disabled", Drawing::RGB_To_Int(255, 90, 90) }
+			});
+		}
+
+		// 4. AITriggersActive (only if AI and false)
+		if (!pHouse->IsControlledByHuman() && !pHouse->AITriggersActive)
+		{
+			addLineSegments({
+				{ L"AI Triggers: ", Drawing::RGB_To_Int(200, 200, 200) },
+				{ L"Disabled", Drawing::RGB_To_Int(255, 90, 90) }
+			});
+		}
+
+		// 5. AutoBaseBuilding (only if AI and false)
+		if (!pHouse->IsControlledByHuman() && !pHouse->AutoBaseBuilding)
+		{
+			addLineSegments({
+				{ L"Auto Base Building: ", Drawing::RGB_To_Int(200, 200, 200) },
+				{ L"Disabled", Drawing::RGB_To_Int(255, 90, 90) }
+			});
+		}
+
+		// 5b. Active AI Teams (only if AI and > 0)
+		if (!pHouse->IsControlledByHuman())
+		{
+			int activeAITeams = 0;
+			for (int k = 0; k < TeamClass::Array.Count; ++k)
+			{
+				auto pTeam = TeamClass::Array.GetItem(k);
+				if (pTeam && pTeam->Owner == pHouse)
+				{
+					activeAITeams++;
+				}
+			}
+			if (activeAITeams > 0)
+			{
+				addLine(L"Active AI Teams: " + std::to_wstring(activeAITeams), Drawing::RGB_To_Int(200, 200, 200));
+			}
+		}
+	}
+
+	// 7. Refineries (formerly Resource Destinations)
+	addLine(L"Refineries: " + std::to_wstring(pHouse->CountResourceDestinations), Drawing::RGB_To_Int(200, 200, 200));
+
+	// 8. War Factories
+	addLine(L"War Factories: " + std::to_wstring(pHouse->CountWarfactories), Drawing::RGB_To_Int(200, 200, 200));
+
+	// 9. Barracks & Helipads & Airport Docks
+	int barracksCount = 0;
+	int helipadsCount = 0;
+	for (auto const pBld : pHouse->Buildings)
+	{
+		if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type)
+		{
+			if (pBld->Type->Factory == AbstractType::InfantryType || pBld->Type->GDIBarracks || pBld->Type->NODBarracks || pBld->Type->YuriBarracks)
+			{
+				barracksCount++;
+			}
+			if (pBld->Type->Helipad || pBld->Type->Factory == AbstractType::AircraftType || pBld->Type->UnitReload)
+			{
+				helipadsCount++;
+			}
+		}
+	}
+	if (barracksCount > 0)
+	{
+		addLine(L"Barracks: " + std::to_wstring(barracksCount), Drawing::RGB_To_Int(200, 200, 200));
+	}
+	if (helipadsCount > 0 || pHouse->AirportDocks > 0)
+	{
+		std::wstring helipadsLine = L"Helipads: " + std::to_wstring(helipadsCount);
+		if (pHouse->AirportDocks > 0)
+		{
+			helipadsLine += L" (Docks: " + std::to_wstring(pHouse->AirportDocks) + L")";
+		}
+		addLine(helipadsLine, Drawing::RGB_To_Int(200, 200, 200));
+	}
+
+	// 10. Total Objects Counts (only if > 0)
+	if (pHouse->OwnedBuildings > 0)
+	{
+		addLine(L"Total Buildings: " + std::to_wstring(pHouse->OwnedBuildings), Drawing::RGB_To_Int(200, 200, 200));
+	}
+	if (pHouse->OwnedInfantry > 0)
+	{
+		addLine(L"Total Infantry: " + std::to_wstring(pHouse->OwnedInfantry), Drawing::RGB_To_Int(200, 200, 200));
+	}
+	if (pHouse->OwnedUnits > 0)
+	{
+		addLine(L"Total Units: " + std::to_wstring(pHouse->OwnedUnits), Drawing::RGB_To_Int(200, 200, 200));
+	}
+	if (pHouse->OwnedAircraft > 0)
+	{
+		addLine(L"Total Aircraft: " + std::to_wstring(pHouse->OwnedAircraft), Drawing::RGB_To_Int(200, 200, 200));
+	}
+	if (pHouse->OwnedNavy > 0)
+	{
+		addLine(L"Total Navy: " + std::to_wstring(pHouse->OwnedNavy), Drawing::RGB_To_Int(200, 200, 200));
+	}
+
+	// 11. Killed Objects Counts (only if > 0)
+	int killedUnits = pHouse->KilledUnitTypes.GetUnitCount() + pHouse->KilledInfantryTypes.GetUnitCount() + pHouse->KilledAircraftTypes.GetUnitCount();
+	if (killedUnits > 0)
+	{
+		addLine(L"Killed Units: " + std::to_wstring(killedUnits), Drawing::RGB_To_Int(200, 200, 200));
+	}
+	int killedBuildings = pHouse->KilledBuildingTypes.GetUnitCount();
+	if (killedBuildings > 0)
+	{
+		addLine(L"Killed Buildings: " + std::to_wstring(killedBuildings), Drawing::RGB_To_Int(200, 200, 200));
+	}
+
+	// Target Enemy House & Allies
+	std::wstring alliesStr = L"";
+	for (const auto& r : this->PlayerRows)
+	{
+		if (r.pHouse && r.pHouse != pHouse && pHouse->IsAlliedWith(r.pHouse))
+		{
+			if (!alliesStr.empty()) alliesStr += L", ";
+			alliesStr += L"P" + std::to_wstring(r.PlayerNumber);
+		}
+	}
+	if (!alliesStr.empty())
+	{
+		addLineSegments({
+			{ L"Allies: ", Drawing::RGB_To_Int(200, 200, 200) },
+			{ alliesStr, Drawing::RGB_To_Int(100, 220, 255) }
+		});
+	}
+
 	if (!pHouse->IsControlledByHuman())
 	{
 		auto pEnemyHouse = GetTargetEnemy(pHouse);
@@ -1768,7 +3997,7 @@ void ObserverUIClass::DrawPlayerTooltip(DSurface* pSurface, HouseClass* pHouse, 
 
 void ObserverUIClass::DrawTooltip(DSurface* pSurface, const ObserverCameoItem& item, Point2D mousePos)
 {
-	if (!item.pType || !BitFont::Instance || !BitText::Instance)
+	if ((!item.pType && !item.pSuperType) || !BitFont::Instance || !BitText::Instance)
 		return;
 
 	int maxToolTipWidth = 220;
@@ -1794,67 +4023,102 @@ void ObserverUIClass::DrawTooltip(DSurface* pSurface, const ObserverCameoItem& i
 		textHeight += h + 2;
 	};
 
-	// Top line: Structure / Techno Name
-	addLine(item.pType->UIName, Drawing::RGB_To_Int(255, 255, 255));
+	bool isDebugKeysEnabled = Phobos::Config::DevelopmentCommands;
 
-	if (item.IsProduction)
+	if (item.IsSuperweapon && item.pSuperType)
 	{
-		// Production Cost Line
-		int cost = item.pType->GetActualCost(item.pOwner ? item.pOwner : HouseClass::CurrentPlayer);
-		std::wostringstream costOss;
-		costOss << L"Cost: $" << cost;
-		addLine(costOss.str(), Drawing::RGB_To_Int(200, 200, 200));
-	}
-	else if (!item.Buildings.empty())
-	{
-		// Only display individual stats (HP, Shield, Veterancy) when there is EXACTLY 1 building instance
-		if (item.Buildings.size() == 1 && item.Buildings[0])
+		std::string swId = item.pSuperType->get_ID();
+		std::wstring swName = FormatObjectNameWithDebug(0, swId.c_str(), item.pSuperType->UIName, isDebugKeysEnabled);
+		addLine(swName, Drawing::RGB_To_Int(255, 255, 255));
+
+		int totalFrames = item.pSuper ? item.pSuper->GetRechargeTime() : item.pSuperType->RechargeTime;
+		int framesLeft = item.pSuper ? item.pSuper->RechargeTimer.GetTimeLeft() : 0;
+
+		int secsLeft = (framesLeft + 14) / 15;
+		int minsLeft = secsLeft / 60;
+		secsLeft %= 60;
+
+		int secsTotal = (totalFrames + 14) / 15;
+		int minsTotal = secsTotal / 60;
+		secsTotal %= 60;
+
+		wchar_t cdBuf[64];
+		swprintf_s(cdBuf, L"%02d:%02d / %02d:%02d", minsLeft, secsLeft, minsTotal, secsTotal);
+		std::wostringstream cdOss;
+		cdOss << L"Cooldown: " << cdBuf;
+		addLine(cdOss.str(), (framesLeft == 0) ? Drawing::RGB_To_Int(0, 255, 0) : Drawing::RGB_To_Int(100, 220, 255));
+
+		if (item.pSuperType->IsPowered && item.pOwner && item.pOwner->PowerOutput < item.pOwner->PowerDrain)
 		{
-			auto const pBld = item.Buildings[0];
-			std::wostringstream hpOss;
-			hpOss << L"HP: " << pBld->Health << L"/" << item.pType->Strength;
+			addLine(L"Power: Low Power", Drawing::RGB_To_Int(255, 50, 50));
+		}
+	}
+	else if (item.pType)
+	{
+		// Top line: Structure / Techno Name
+		std::string tId = item.pType->get_ID();
+		std::wstring tName = FormatObjectNameWithDebug(0, tId.c_str(), item.pType->UIName, isDebugKeysEnabled);
+		addLine(tName, Drawing::RGB_To_Int(255, 255, 255));
 
-			COLORREF hpColor = Drawing::RGB_To_Int(200, 200, 200);
-			if (pBld->Health < item.pType->Strength / 4)
-				hpColor = Drawing::RGB_To_Int(255, 90, 90);
-
-			addLine(hpOss.str(), hpColor);
-
-			// Shield Status Line
-			auto const pExt = TechnoExt::ExtMap.Find(pBld);
-			if (pExt && pExt->Shield && pExt->Shield->IsAvailable())
+		if (item.IsProduction)
+		{
+			// Production Cost Line
+			int cost = item.pType->GetActualCost(item.pOwner ? item.pOwner : HouseClass::CurrentPlayer);
+			std::wostringstream costOss;
+			costOss << L"Cost: $" << cost;
+			addLine(costOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+		}
+		else if (!item.Buildings.empty())
+		{
+			// Only display individual stats (HP, Shield, Veterancy) when there is EXACTLY 1 building instance
+			if (item.Buildings.size() == 1 && item.Buildings[0])
 			{
-				std::wostringstream shieldOss;
-				shieldOss << L"Shield: " << pExt->Shield->GetHP() << L"/" << pExt->Shield->GetType()->Strength.Get();
-				addLine(shieldOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+				auto const pBld = item.Buildings[0];
+				std::wostringstream hpOss;
+				hpOss << L"HP: " << pBld->Health << L"/" << item.pType->Strength;
+
+				COLORREF hpColor = Drawing::RGB_To_Int(200, 200, 200);
+				if (pBld->Health < item.pType->Strength / 4)
+					hpColor = Drawing::RGB_To_Int(255, 90, 90);
+
+				addLine(hpOss.str(), hpColor);
+
+				// Shield Status Line
+				auto const pExt = TechnoExt::ExtMap.Find(pBld);
+				if (pExt && pExt->Shield && pExt->Shield->IsAvailable())
+				{
+					std::wostringstream shieldOss;
+					shieldOss << L"Shield: " << pExt->Shield->GetHP() << L"/" << pExt->Shield->GetType()->Strength.Get();
+					addLine(shieldOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+				}
+
+				// Experience / Veterancy Line
+				if (item.pType->Trainable)
+				{
+					std::wostringstream expOss;
+					int vetPercent = static_cast<int>((pBld->Veterancy.Veterancy / 2.0f) * 100.0f);
+					expOss << L"Veterancy: " << std::clamp(vetPercent, 0, 100) << L"%";
+					addLine(expOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+				}
 			}
 
-			// Experience / Veterancy Line
-			if (item.pType->Trainable)
+			// Low Power warning line (applies regardless of building count)
+			if (item.pType->WhatAmI() == AbstractType::BuildingType)
 			{
-				std::wostringstream expOss;
-				int vetPercent = static_cast<int>((pBld->Veterancy.Veterancy / 2.0f) * 100.0f);
-				expOss << L"Veterancy: " << std::clamp(vetPercent, 0, 100) << L"%";
-				addLine(expOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+				auto pBldType = static_cast<BuildingTypeClass*>(item.pType);
+				if (pBldType->Powered && item.pOwner && item.pOwner->HasLowPower())
+				{
+					addLine(L"Low Power", Drawing::RGB_To_Int(255, 90, 90));
+				}
 			}
 		}
 
-		// Low Power warning line (applies regardless of building count)
-		if (item.pType->WhatAmI() == AbstractType::BuildingType)
+		// Description line (wrapped at maxToolTipWidth)
+		auto const pTypeExt = item.pType ? TechnoTypeExt::ExtMap.Find(item.pType) : nullptr;
+		if (Phobos::Config::ToolTipDescriptions && pTypeExt && !pTypeExt->UIDescription.Get().empty())
 		{
-			auto pBldType = static_cast<BuildingTypeClass*>(item.pType);
-			if (pBldType->Powered && item.pOwner && item.pOwner->HasLowPower())
-			{
-				addLine(L"Low Power", Drawing::RGB_To_Int(255, 90, 90));
-			}
+			addLine(pTypeExt->UIDescription.Get().Text, Drawing::RGB_To_Int(180, 180, 180));
 		}
-	}
-
-	// Description line (wrapped at maxToolTipWidth)
-	auto const pTypeExt = TechnoTypeExt::ExtMap.Find(item.pType);
-	if (Phobos::Config::ToolTipDescriptions && pTypeExt && !pTypeExt->UIDescription.Get().empty())
-	{
-		addLine(pTypeExt->UIDescription.Get().Text, Drawing::RGB_To_Int(180, 180, 180));
 	}
 
 	int boxPadding = 6;
@@ -1960,14 +4224,185 @@ static CoordStruct GetPlayerStartCoords(HouseClass* pHouse)
 
 bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 {
-	if (!IsActive())
+	bool isActive = IsActive() || (Phobos::Config::DevelopmentCommands && (this->DisplayMode != ObserverUIDisplayMode::Hidden || this->HasFloatingWindows()));
+	if (!isActive)
 		return false;
 
-	if (isRightClick)
+	if (this->DisplayMode == ObserverUIDisplayMode::Hidden && !this->HasFloatingWindows())
 		return false;
 
-	// Handle Clear Button [X] click
-	if (this->ClearBtnRect.Width > 0 && mousePos.X >= this->ClearBtnRect.X && mousePos.X <= (this->ClearBtnRect.X + this->ClearBtnRect.Width)
+	// 1. Handle clicks on Floating Unit Status Windows (in reverse order, top-most first)
+	for (int i = static_cast<int>(this->FloatingUnitWindows.size()) - 1; i >= 0; --i)
+	{
+		auto& win = this->FloatingUnitWindows[i];
+
+		// Check Close Button [X]
+		if (win.CloseBtnRect.Width > 0 && mousePos.X >= win.CloseBtnRect.X && mousePos.X <= (win.CloseBtnRect.X + win.CloseBtnRect.Width)
+			&& mousePos.Y >= win.CloseBtnRect.Y && mousePos.Y <= (win.CloseBtnRect.Y + win.CloseBtnRect.Height))
+		{
+			this->FloatingUnitWindows.erase(this->FloatingUnitWindows.begin() + i);
+			return true;
+		}
+
+		// Check Cameo Click Rect
+		if (win.CameoClickRect.Width > 0 && mousePos.X >= win.CameoClickRect.X && mousePos.X <= (win.CameoClickRect.X + win.CameoClickRect.Width)
+			&& mousePos.Y >= win.CameoClickRect.Y && mousePos.Y <= (win.CameoClickRect.Y + win.CameoClickRect.Height))
+		{
+			if (!isRightClick)
+			{
+				while (ObjectClass::CurrentObjects.Count > 0)
+				{
+					ObjectClass::CurrentObjects.GetItem(0)->Deselect();
+				}
+
+				if (win.pTargetTechno && IsTechnoValidAndAlive(win.pTargetTechno) && TacticalClass::Instance)
+				{
+					CoordStruct coords = win.pTargetTechno->GetCenterCoords();
+					TacticalClass::Instance->SetTacticalPosition(&coords);
+					win.pTargetTechno->Select();
+					MapClass::Instance.Redraws = TRUE;
+				}
+				else if (win.pTargetBuilding && IsBuildingValidAndAlive(win.pTargetBuilding) && TacticalClass::Instance)
+				{
+					CoordStruct coords = win.pTargetBuilding->GetCenterCoords();
+					TacticalClass::Instance->SetTacticalPosition(&coords);
+					win.pTargetBuilding->Select();
+					MapClass::Instance.Redraws = TRUE;
+				}
+				else if (win.pType && win.pOwner && TacticalClass::Instance)
+				{
+					TechnoClass* pFoundTech = nullptr;
+					BuildingClass* pFoundBld = nullptr;
+
+					for (int k = 0; k < TechnoClass::Array.Count; ++k)
+					{
+						auto pObj = TechnoClass::Array.GetItem(k);
+						if (pObj && pObj->IsAlive && !pObj->InLimbo && pObj->Owner == win.pOwner && pObj->GetTechnoType() == win.pType)
+						{
+							pFoundTech = pObj;
+							break;
+						}
+					}
+
+					if (!pFoundTech)
+					{
+						for (int k = 0; k < BuildingClass::Array.Count; ++k)
+						{
+							auto pBldObj = BuildingClass::Array.GetItem(k);
+							if (pBldObj && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Owner == win.pOwner && pBldObj->Type == win.pType)
+							{
+								pFoundBld = pBldObj;
+								break;
+							}
+						}
+					}
+
+					if (pFoundTech)
+					{
+						CoordStruct coords = pFoundTech->GetCenterCoords();
+						TacticalClass::Instance->SetTacticalPosition(&coords);
+						pFoundTech->Select();
+						MapClass::Instance.Redraws = TRUE;
+					}
+					else if (pFoundBld)
+					{
+						CoordStruct coords = pFoundBld->GetCenterCoords();
+						TacticalClass::Instance->SetTacticalPosition(&coords);
+						pFoundBld->Select();
+						MapClass::Instance.Redraws = TRUE;
+					}
+				}
+				return true;
+			}
+		}
+
+		// Check Window Rect
+		if (win.WindowRect.Width > 0 && mousePos.X >= win.WindowRect.X && mousePos.X <= (win.WindowRect.X + win.WindowRect.Width)
+			&& mousePos.Y >= win.WindowRect.Y && mousePos.Y <= (win.WindowRect.Y + win.WindowRect.Height))
+		{
+			if (!isRightClick)
+			{
+				win.IsDragging = true;
+				win.DragOffset = Point2D { mousePos.X - win.Position.X, mousePos.Y - win.Position.Y };
+
+				if (i != static_cast<int>(this->FloatingUnitWindows.size()) - 1)
+				{
+					ObserverFloatingUnitWindow targetWin = win;
+					this->FloatingUnitWindows.erase(this->FloatingUnitWindows.begin() + i);
+					this->FloatingUnitWindows.push_back(targetWin);
+				}
+			}
+			return true;
+		}
+	}
+
+	// 2. Handle clicks on Floating Player Status Windows (in reverse order, top-most first)
+	for (int i = static_cast<int>(this->FloatingWindows.size()) - 1; i >= 0; --i)
+	{
+		auto& win = this->FloatingWindows[i];
+
+		// Check Close Button [X]
+		if (win.CloseBtnRect.Width > 0 && mousePos.X >= win.CloseBtnRect.X && mousePos.X <= (win.CloseBtnRect.X + win.CloseBtnRect.Width)
+			&& mousePos.Y >= win.CloseBtnRect.Y && mousePos.Y <= (win.CloseBtnRect.Y + win.CloseBtnRect.Height))
+		{
+			this->FloatingWindows.erase(this->FloatingWindows.begin() + i);
+			return true;
+		}
+
+		// Check Window Rect
+		if (win.WindowRect.Width > 0 && mousePos.X >= win.WindowRect.X && mousePos.X <= (win.WindowRect.X + win.WindowRect.Width)
+			&& mousePos.Y >= win.WindowRect.Y && mousePos.Y <= (win.WindowRect.Y + win.WindowRect.Height))
+		{
+			if (!isRightClick)
+			{
+				// Left click starts dragging & brings window to front
+				win.IsDragging = true;
+				win.DragOffset = Point2D { mousePos.X - win.Position.X, mousePos.Y - win.Position.Y };
+
+				if (i != static_cast<int>(this->FloatingWindows.size()) - 1)
+				{
+					ObserverFloatingWindow targetWin = win;
+					this->FloatingWindows.erase(this->FloatingWindows.begin() + i);
+					this->FloatingWindows.push_back(targetWin);
+				}
+			}
+			return true;
+		}
+	}
+
+	// 3. Handle Inspect Selected Button [-> [] <-] click
+	if (!isRightClick && this->InspectBtnRect.Width > 0 && mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+		&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height))
+	{
+		this->OpenFloatingWindowForSelectedObject();
+		return true;
+	}
+
+	// 3b. Handle Vertical Player Rows Scroll Buttons [ ▲ ][ ▼ ] click
+	if (!isRightClick && this->MaxVerticalScrollOffset > 0)
+	{
+		if (this->VertScrollUpBtnRect.Width > 0 && mousePos.X >= this->VertScrollUpBtnRect.X && mousePos.X <= (this->VertScrollUpBtnRect.X + this->VertScrollUpBtnRect.Width)
+			&& mousePos.Y >= this->VertScrollUpBtnRect.Y && mousePos.Y <= (this->VertScrollUpBtnRect.Y + this->VertScrollUpBtnRect.Height))
+		{
+			this->VerticalScrollOffset = std::max(0, this->VerticalScrollOffset - 1);
+			return true;
+		}
+
+		if (this->VertScrollDownBtnRect.Width > 0 && mousePos.X >= this->VertScrollDownBtnRect.X && mousePos.X <= (this->VertScrollDownBtnRect.X + this->VertScrollDownBtnRect.Width)
+			&& mousePos.Y >= this->VertScrollDownBtnRect.Y && mousePos.Y <= (this->VertScrollDownBtnRect.Y + this->VertScrollDownBtnRect.Height))
+		{
+			this->VerticalScrollOffset = std::min(this->MaxVerticalScrollOffset, this->VerticalScrollOffset + 1);
+			return true;
+		}
+	}
+
+	if (this->DisplayMode == ObserverUIDisplayMode::Minimal)
+	{
+		return false;
+	}
+
+	// 4. Handle Clear Button [X] click
+	if (!isRightClick && this->ClearBtnRect.Width > 0 && mousePos.X >= this->ClearBtnRect.X && mousePos.X <= (this->ClearBtnRect.X + this->ClearBtnRect.Width)
 		&& mousePos.Y >= this->ClearBtnRect.Y && mousePos.Y <= (this->ClearBtnRect.Y + this->ClearBtnRect.Height))
 	{
 		this->SearchFilterText.clear();
@@ -1976,8 +4411,8 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 		return true;
 	}
 
-	// Handle Search Input Box click
-	if (this->SearchBoxRect.Width > 0 && mousePos.X >= this->SearchBoxRect.X && mousePos.X <= (this->SearchBoxRect.X + this->SearchBoxRect.Width)
+	// 5. Handle Search Input Box click
+	if (!isRightClick && this->SearchBoxRect.Width > 0 && mousePos.X >= this->SearchBoxRect.X && mousePos.X <= (this->SearchBoxRect.X + this->SearchBoxRect.Width)
 		&& mousePos.Y >= this->SearchBoxRect.Y && mousePos.Y <= (this->SearchBoxRect.Y + this->SearchBoxRect.Height))
 	{
 		this->IsSearchInputFocused = true;
@@ -1985,40 +4420,184 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 	}
 
 	// Clicking anywhere else unfocuses search input
-	this->IsSearchInputFocused = false;
-
-	// Handle clicking on Category Filter Tab Buttons
-	for (const auto& btn : this->TabButtons)
+	if (!isRightClick)
 	{
-		if (mousePos.X >= btn.Rect.X && mousePos.X <= (btn.Rect.X + btn.Rect.Width)
-			&& mousePos.Y >= btn.Rect.Y && mousePos.Y <= (btn.Rect.Y + btn.Rect.Height))
+		this->IsSearchInputFocused = false;
+	}
+
+	// 6. Handle clicking on Category Filter Tab Buttons
+	if (!isRightClick)
+	{
+		for (const auto& btn : this->TabButtons)
 		{
-			this->ActiveFilterTab = btn.Category;
-			this->CollectPlayerData();
-			return true;
+			if (mousePos.X >= btn.Rect.X && mousePos.X <= (btn.Rect.X + btn.Rect.Width)
+				&& mousePos.Y >= btn.Rect.Y && mousePos.Y <= (btn.Rect.Y + btn.Rect.Height))
+			{
+				this->ActiveFilterTab = btn.Category;
+				this->CollectPlayerData();
+				return true;
+			}
 		}
 	}
 
 	int playerColorBarWidth = 5;
 	int teamColorBarWidth = 10;
 
-	for (auto& row : this->PlayerRows)
-	{
-		// Handle clicking on Player Info Box (Section 1) to jump to player's start point / base
-		if (mousePos.X >= (row.InfoRect.X - teamColorBarWidth) && mousePos.X <= (row.InfoRect.X + row.InfoRect.Width + playerColorBarWidth)
-			&& mousePos.Y >= row.InfoRect.Y && mousePos.Y <= (row.InfoRect.Y + row.InfoRect.Height))
+	auto openFloatingWindowForCameo = [&](const ObserverCameoItem& item, bool isFromProductionPanel) {
+		if (item.IsSuperweapon && item.pSuperType)
 		{
-			CoordStruct coords = GetPlayerStartCoords(row.pHouse);
-			if (coords != CoordStruct::Empty && TacticalClass::Instance)
+			auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [&item](const ObserverFloatingUnitWindow& w) {
+				return w.IsSuperweapon && w.pSuperType == item.pSuperType && w.pOwner == item.pOwner;
+			});
+
+			if (itWin != this->FloatingUnitWindows.end())
 			{
-				TacticalClass::Instance->SetTacticalPosition(&coords);
-				MapClass::Instance.Redraws = TRUE;
+				ObserverFloatingUnitWindow targetWin = *itWin;
+				this->FloatingUnitWindows.erase(itWin);
+				this->FloatingUnitWindows.push_back(targetWin);
+			}
+			else
+			{
+				ObserverFloatingUnitWindow newWin;
+				newWin.IsSuperweapon = true;
+				newWin.pSuperType = item.pSuperType;
+				newWin.pSuper = item.pSuper;
+				newWin.pOwner = item.pOwner;
+				if (!item.Buildings.empty()) newWin.pTargetBuilding = item.Buildings[0];
+
+				int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
+				int cardW = 320;
+				int topY = 40;
+				int cascadeOffset = static_cast<int>((this->FloatingUnitWindows.size() + this->FloatingWindows.size()) * 24) % 140;
+
+				newWin.Position = Point2D { (screenW - cardW) / 2 + cascadeOffset, topY + cascadeOffset };
+				this->FloatingUnitWindows.push_back(newWin);
 			}
 			return true;
 		}
 
+		TechnoClass* pTargetTech = nullptr;
+		BuildingClass* pTargetBld = nullptr;
+		int instanceNum = 1;
+
+		if (isFromProductionPanel)
+		{
+			if (!item.Buildings.empty())
+			{
+				pTargetBld = item.Buildings[0];
+			}
+		}
+		else
+		{
+			uintptr_t typeKey = reinterpret_cast<uintptr_t>(item.pType);
+			auto key = std::make_pair(item.pOwner, typeKey);
+
+			if (!item.Buildings.empty())
+			{
+				size_t cycleIdx = this->CycleIndices[key];
+				size_t idx = (cycleIdx > 0 ? cycleIdx - 1 : 0) % item.Buildings.size();
+				pTargetBld = item.Buildings[idx];
+				instanceNum = static_cast<int>(idx + 1);
+			}
+			else if (!item.Technos.empty())
+			{
+				size_t cycleIdx = this->CycleIndices[key];
+				size_t idx = (cycleIdx > 0 ? cycleIdx - 1 : 0) % item.Technos.size();
+				pTargetTech = item.Technos[idx];
+				instanceNum = static_cast<int>(idx + 1);
+			}
+		}
+
+		if (!pTargetTech && !pTargetBld && !isFromProductionPanel)
+			return true;
+
+		// Check if floating window ALREADY exists for this exact specific instance or factory!
+		auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [&item, pTargetTech, pTargetBld, isFromProductionPanel](const ObserverFloatingUnitWindow& w) {
+			if (pTargetBld && w.pTargetBuilding == pTargetBld) return true;
+			if (pTargetTech && w.pTargetTechno == pTargetTech) return true;
+			if (isFromProductionPanel && w.IsProductionItem && w.pType == item.pType && w.pOwner == item.pOwner) return true;
+			return false;
+		});
+
+		if (itWin != this->FloatingUnitWindows.end())
+		{
+			// Bring existing window for this instance/factory to front
+			ObserverFloatingUnitWindow targetWin = *itWin;
+			this->FloatingUnitWindows.erase(itWin);
+			this->FloatingUnitWindows.push_back(targetWin);
+		}
+		else
+		{
+			// Spawn new window for this specific instance or factory!
+			ObserverFloatingUnitWindow newWin;
+			newWin.pType = isFromProductionPanel ? item.pType : (pTargetTech ? pTargetTech->GetTechnoType() : (pTargetBld ? pTargetBld->Type : item.pType));
+			newWin.pOwner = item.pOwner;
+			newWin.pTargetTechno = pTargetTech;
+			newWin.pTargetBuilding = pTargetBld;
+			newWin.IsProductionItem = isFromProductionPanel;
+			newWin.InstanceNumber = instanceNum;
+			int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
+			int cardW = 320;
+			int topY = 40;
+			int cascadeOffset = static_cast<int>((this->FloatingUnitWindows.size() + this->FloatingWindows.size()) * 24) % 140;
+
+			newWin.Position = Point2D { (screenW - cardW) / 2 + cascadeOffset, topY + cascadeOffset };
+			this->FloatingUnitWindows.push_back(newWin);
+		}
+		return true;
+	};
+
+	for (auto& row : this->PlayerRows)
+	{
+		// Handle clicking on Player Info Box (Section 1)
+		if (mousePos.X >= (row.InfoRect.X - teamColorBarWidth) && mousePos.X <= (row.InfoRect.X + row.InfoRect.Width + playerColorBarWidth)
+			&& mousePos.Y >= row.InfoRect.Y && mousePos.Y <= (row.InfoRect.Y + row.InfoRect.Height))
+		{
+			if (isRightClick)
+			{
+				// Right click on Section 1 opens/toggles a floating window for this player!
+				auto itWin = std::find_if(this->FloatingWindows.begin(), this->FloatingWindows.end(), [&row](const ObserverFloatingWindow& w) {
+					return w.pHouse == row.pHouse;
+				});
+
+				if (itWin != this->FloatingWindows.end())
+				{
+					// If already open, bring to front
+					ObserverFloatingWindow targetWin = *itWin;
+					this->FloatingWindows.erase(itWin);
+					this->FloatingWindows.push_back(targetWin);
+				}
+				else
+				{
+					// Open new floating card window!
+					ObserverFloatingWindow newWin;
+					newWin.pHouse = row.pHouse;
+
+					int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
+					int cardW = 340;
+					int topY = 40;
+					int cascadeOffset = static_cast<int>((this->FloatingUnitWindows.size() + this->FloatingWindows.size()) * 24) % 140;
+
+					newWin.Position = Point2D { (screenW - cardW) / 2 + cascadeOffset, topY + cascadeOffset };
+					this->FloatingWindows.push_back(newWin);
+				}
+				return true;
+			}
+			else
+			{
+				// Left click jumps camera to player's start point / base
+				CoordStruct coords = GetPlayerStartCoords(row.pHouse);
+				if (coords != CoordStruct::Empty && TacticalClass::Instance)
+				{
+					TacticalClass::Instance->SetTacticalPosition(&coords);
+					MapClass::Instance.Redraws = TRUE;
+				}
+				return true;
+			}
+		}
+
 		// Handle per-player row scroll button clicks (64px = 1 cameo width step)
-		if (row.MaxScrollOffset > 0)
+		if (!isRightClick && row.MaxScrollOffset > 0)
 		{
 			int scrollStep = 64; // 1 cameo width (60 + 4 padding)
 			if (mousePos.X >= row.ScrollLeftBtnRect.X && mousePos.X <= row.ScrollLeftBtnRect.X + row.ScrollLeftBtnRect.Width
@@ -2036,27 +4615,55 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 			}
 		}
 
-		// Handle clicking on production cameos to center view and rotate focus on producing factories
+		// Handle clicking on production cameos
 		for (auto& item : row.ProductionItems)
 		{
 			if (mousePos.X >= item.DisplayRect.X && mousePos.X <= item.DisplayRect.X + item.DisplayRect.Width
 				&& mousePos.Y >= item.DisplayRect.Y && mousePos.Y <= item.DisplayRect.Y + item.DisplayRect.Height
 				&& mousePos.X >= row.ProdPanelRect.X && mousePos.X <= row.ProdPanelRect.X + row.ProdPanelRect.Width)
 			{
-				this->CenterOnNextBuilding(item);
-				return true;
+				if (isRightClick)
+				{
+					return openFloatingWindowForCameo(item, true);
+				}
+				else
+				{
+					this->CenterOnNextBuilding(item);
+					return true;
+				}
 			}
 		}
 
-		// Handle clicking on structure cameos to center view and rotate focus
+		// Handle clicking on structure cameos
 		for (auto& item : row.StructureItems)
 		{
 			if (mousePos.X >= item.DisplayRect.X && mousePos.X <= item.DisplayRect.X + item.DisplayRect.Width
 				&& mousePos.Y >= item.DisplayRect.Y && mousePos.Y <= item.DisplayRect.Y + item.DisplayRect.Height
 				&& mousePos.X >= row.StructPanelRect.X && mousePos.X <= row.StructPanelRect.X + row.StructPanelRect.Width)
 			{
-				this->CenterOnNextBuilding(item);
-				return true;
+				if (item.IsSuperweapon)
+				{
+					if (isRightClick)
+					{
+						return openFloatingWindowForCameo(item, false);
+					}
+					else
+					{
+						openFloatingWindowForCameo(item, false);
+						this->CenterOnNextBuilding(item);
+						return true;
+					}
+				}
+
+				if (isRightClick)
+				{
+					return openFloatingWindowForCameo(item, false);
+				}
+				else
+				{
+					this->CenterOnNextBuilding(item);
+					return true;
+				}
 			}
 		}
 	}
@@ -2064,22 +4671,120 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 	return false;
 }
 
+bool ObserverUIClass::HandleKeyPress(int keyVal)
+{
+	if (!this->IsSearchInputFocused)
+		return false;
+
+	// Ignore key release events (WWKey::Release = 0x800)
+	if ((keyVal & 0x800) != 0)
+		return true; // Swallow key release event so game doesn't process it
+
+	int vk = keyVal & 0xFF;
+	bool isShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 || (keyVal & 0x100) != 0;
+
+	// Check Enter or Escape -> Unfocus search box
+	if (vk == VK_RETURN || vk == VK_ESCAPE || vk == 0x0D || vk == 0x1B)
+	{
+		this->IsSearchInputFocused = false;
+		return true;
+	}
+
+	// Backspace
+	if (vk == VK_BACK || vk == 0x08)
+	{
+		if (!this->SearchFilterText.empty())
+		{
+			this->SearchFilterText.pop_back();
+			this->CollectPlayerData();
+		}
+		return true;
+	}
+
+	// Space
+	if (vk == VK_SPACE || vk == 0x20)
+	{
+		this->SearchFilterText += L' ';
+		this->CollectPlayerData();
+		return true;
+	}
+
+	// Letters A-Z / a-z
+	if ((vk >= 'A' && vk <= 'Z') || (vk >= 'a' && vk <= 'z'))
+	{
+		wchar_t baseChar = static_cast<wchar_t>(std::tolower(vk));
+		wchar_t ch = isShift ? static_cast<wchar_t>(std::toupper(vk)) : baseChar;
+		this->SearchFilterText += ch;
+		this->CollectPlayerData();
+		return true;
+	}
+
+	// Numbers 0-9
+	if (vk >= '0' && vk <= '9')
+	{
+		this->SearchFilterText += static_cast<wchar_t>(vk);
+		this->CollectPlayerData();
+		return true;
+	}
+
+	// Minus / Hyphen
+	if (vk == VK_OEM_MINUS || vk == 0xBD || vk == '-')
+	{
+		this->SearchFilterText += isShift ? L'_' : L'-';
+		this->CollectPlayerData();
+		return true;
+	}
+
+	// Period / Dot
+	if (vk == VK_OEM_PERIOD || vk == 0xBE || vk == '.')
+	{
+		this->SearchFilterText += isShift ? L'>' : L'.';
+		this->CollectPlayerData();
+		return true;
+	}
+
+	// Comma
+	if (vk == VK_OEM_COMMA || vk == 0xBC || vk == ',')
+	{
+		this->SearchFilterText += isShift ? L'<' : L',';
+		this->CollectPlayerData();
+		return true;
+	}
+
+	// Any printable ASCII character (32..126)
+	if (vk >= 32 && vk <= 126)
+	{
+		this->SearchFilterText += static_cast<wchar_t>(vk);
+		this->CollectPlayerData();
+		return true;
+	}
+
+	return true; // Swallow all other keys while search input box is focused
+}
+
 void ObserverUIClass::CenterOnNextBuilding(ObserverCameoItem& item)
 {
 	if (!TacticalClass::Instance)
 		return;
 
+	// Deselect current in-game selection
+	while (ObjectClass::CurrentObjects.Count > 0)
+	{
+		ObjectClass::CurrentObjects.GetItem(0)->Deselect();
+	}
+
 	if (!item.Buildings.empty())
 	{
-		uintptr_t typeKey = reinterpret_cast<uintptr_t>(item.pType);
+		uintptr_t typeKey = item.IsSuperweapon ? reinterpret_cast<uintptr_t>(item.pSuperType) : reinterpret_cast<uintptr_t>(item.pType);
 		auto key = std::make_pair(item.pOwner, typeKey);
 		size_t currentIdx = this->CycleIndices[key] % item.Buildings.size();
 
 		auto pTargetBld = item.Buildings[currentIdx];
-		if (pTargetBld && pTargetBld->IsAlive && !pTargetBld->InLimbo)
+		if (pTargetBld && IsBuildingValidAndAlive(pTargetBld))
 		{
 			CoordStruct coords = pTargetBld->GetCenterCoords();
 			TacticalClass::Instance->SetTacticalPosition(&coords);
+			pTargetBld->Select();
 			MapClass::Instance.Redraws = TRUE;
 		}
 
@@ -2092,10 +4797,11 @@ void ObserverUIClass::CenterOnNextBuilding(ObserverCameoItem& item)
 		size_t currentIdx = this->CycleIndices[key] % item.Technos.size();
 
 		auto pTargetTech = item.Technos[currentIdx];
-		if (pTargetTech && pTargetTech->IsAlive && !pTargetTech->InLimbo)
+		if (pTargetTech && IsTechnoValidAndAlive(pTargetTech))
 		{
 			CoordStruct coords = pTargetTech->GetCenterCoords();
 			TacticalClass::Instance->SetTacticalPosition(&coords);
+			pTargetTech->Select();
 			MapClass::Instance.Redraws = TRUE;
 		}
 
@@ -2105,7 +4811,24 @@ void ObserverUIClass::CenterOnNextBuilding(ObserverCameoItem& item)
 
 bool ObserverUIClass::HandleMouseWheel(bool isUp)
 {
-	if (!IsActive() || !WWMouseClass::Instance)
+	bool isActive = IsActive() || (Phobos::Config::DevelopmentCommands && this->DisplayMode != ObserverUIDisplayMode::Hidden);
+	if (!isActive || !WWMouseClass::Instance)
+		return false;
+
+	if (this->MaxVerticalScrollOffset > 0)
+	{
+		if (isUp)
+		{
+			this->VerticalScrollOffset = std::max(0, this->VerticalScrollOffset - 1);
+		}
+		else
+		{
+			this->VerticalScrollOffset = std::min(this->MaxVerticalScrollOffset, this->VerticalScrollOffset + 1);
+		}
+		return true;
+	}
+
+	if (this->DisplayMode != ObserverUIDisplayMode::Full)
 		return false;
 
 	Point2D mousePos = { WWMouseClass::Instance->GetX(), WWMouseClass::Instance->GetY() };
@@ -2139,12 +4862,63 @@ bool ObserverUIClass::HandleMouseWheel(bool isUp)
 
 bool ObserverUIClass::IsMouseHoveringUI() const
 {
-	if (!IsActive() || !WWMouseClass::Instance)
+	if (!WWMouseClass::Instance)
+		return false;
+
+	bool isUIOpen = IsActive() || (Phobos::Config::DevelopmentCommands && this->DisplayMode != ObserverUIDisplayMode::Hidden);
+
+	if (!isUIOpen && !Phobos::Config::DevelopmentCommands)
+		return false;
+
+	if (this->DisplayMode == ObserverUIDisplayMode::Hidden && !HasFloatingWindows())
 		return false;
 
 	Point2D mousePos = { WWMouseClass::Instance->GetX(), WWMouseClass::Instance->GetY() };
 
-	// 1. Check Search Box & Clear Button
+	// 0. If any window is currently being dragged, mouse is hovering UI!
+	for (const auto& win : this->FloatingUnitWindows)
+	{
+		if (win.IsDragging) return true;
+	}
+	for (const auto& win : this->FloatingWindows)
+	{
+		if (win.IsDragging) return true;
+	}
+
+	// 1. Check Floating Windows (Player & Unit cards)
+	for (const auto& win : this->FloatingUnitWindows)
+	{
+		if (win.WindowRect.Width > 0 && mousePos.X >= win.WindowRect.X && mousePos.X <= (win.WindowRect.X + win.WindowRect.Width)
+			&& mousePos.Y >= win.WindowRect.Y && mousePos.Y <= (win.WindowRect.Y + win.WindowRect.Height))
+		{
+			return true;
+		}
+	}
+
+	for (const auto& win : this->FloatingWindows)
+	{
+		if (win.WindowRect.Width > 0 && mousePos.X >= win.WindowRect.X && mousePos.X <= (win.WindowRect.X + win.WindowRect.Width)
+			&& mousePos.Y >= win.WindowRect.Y && mousePos.Y <= (win.WindowRect.Y + win.WindowRect.Height))
+		{
+			return true;
+		}
+	}
+
+	if (!isUIOpen)
+		return false;
+
+	// 2. Check Inspect Button
+	if (this->InspectBtnRect.Width > 0 && mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+		&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height))
+	{
+		return true;
+	}
+
+	if (this->DisplayMode == ObserverUIDisplayMode::Minimal)
+	{
+		return false;
+	}
+
 	if (this->SearchBoxRect.Width > 0 && mousePos.X >= this->SearchBoxRect.X && mousePos.X <= (this->SearchBoxRect.X + this->SearchBoxRect.Width)
 		&& mousePos.Y >= this->SearchBoxRect.Y && mousePos.Y <= (this->SearchBoxRect.Y + this->SearchBoxRect.Height))
 	{
@@ -2157,7 +4931,19 @@ bool ObserverUIClass::IsMouseHoveringUI() const
 		return true;
 	}
 
-	// 2. Check Category Filter Tab Buttons
+	if (this->VertScrollUpBtnRect.Width > 0 && mousePos.X >= this->VertScrollUpBtnRect.X && mousePos.X <= (this->VertScrollUpBtnRect.X + this->VertScrollUpBtnRect.Width)
+		&& mousePos.Y >= this->VertScrollUpBtnRect.Y && mousePos.Y <= (this->VertScrollUpBtnRect.Y + this->VertScrollUpBtnRect.Height))
+	{
+		return true;
+	}
+
+	if (this->VertScrollDownBtnRect.Width > 0 && mousePos.X >= this->VertScrollDownBtnRect.X && mousePos.X <= (this->VertScrollDownBtnRect.X + this->VertScrollDownBtnRect.Width)
+		&& mousePos.Y >= this->VertScrollDownBtnRect.Y && mousePos.Y <= (this->VertScrollDownBtnRect.Y + this->VertScrollDownBtnRect.Height))
+	{
+		return true;
+	}
+
+	// 3. Check Category Filter Tab Buttons
 	for (const auto& btn : this->TabButtons)
 	{
 		if (mousePos.X >= btn.Rect.X && mousePos.X <= (btn.Rect.X + btn.Rect.Width)
@@ -2167,7 +4953,7 @@ bool ObserverUIClass::IsMouseHoveringUI() const
 		}
 	}
 
-	// 2. Check Player Row specific UI panels
+	// 4. Check Player Row specific UI panels
 	for (auto const& row : this->PlayerRows)
 	{
 		// Section 1: Player Info Box (+ Team Bar on left, Player Color Bar on right)
@@ -2207,4 +4993,127 @@ bool ObserverUIClass::IsMouseHoveringUI() const
 	}
 
 	return false;
+}
+
+void ObserverUIClass::ClearFloatingWindows()
+{
+	this->FloatingWindows.clear();
+	this->FloatingUnitWindows.clear();
+}
+
+void ObserverUIClass::ToggleDisplayMode()
+{
+	this->DisplayMode = static_cast<ObserverUIDisplayMode>((static_cast<int>(this->DisplayMode) + 1) % static_cast<int>(ObserverUIDisplayMode::Count));
+}
+
+bool ObserverUIClass::IsToggleObserverUIHotkeyBound()
+{
+	for (int idx = 0; idx < CommandClass::Hotkeys.IndexCount; idx++)
+	{
+		auto const& entry = CommandClass::Hotkeys.IndexTable[idx];
+		if (entry.Data && entry.Data->GetName() && _stricmp(entry.Data->GetName(), "ToggleObserverUI") == 0)
+		{
+			if (entry.ID != 0 && entry.ID != 0xFFFF)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool ObserverUIClass::IsShowObjectCardHotkeyBound()
+{
+	for (int idx = 0; idx < CommandClass::Hotkeys.IndexCount; idx++)
+	{
+		auto const& entry = CommandClass::Hotkeys.IndexTable[idx];
+		if (entry.Data && entry.Data->GetName() && _stricmp(entry.Data->GetName(), "ShowObjectCard") == 0)
+		{
+			if (entry.ID != 0 && entry.ID != 0xFFFF)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool ObserverUIClass::OpenFloatingWindowForSelectedObject()
+{
+	std::vector<ObjectClass*> targets;
+
+	// 1. First priority: Check hovered object under mouse cursor
+	for (auto const pTechno : TechnoClass::Array)
+	{
+		if (pTechno && pTechno->IsMouseHovering)
+		{
+			targets.push_back(pTechno);
+			break;
+		}
+	}
+
+	// 2. Second priority: Check selected objects if no object is hovered
+	if (targets.empty() && ObjectClass::CurrentObjects.Count > 0)
+	{
+		for (int k = 0; k < ObjectClass::CurrentObjects.Count; ++k)
+		{
+			if (ObjectClass::CurrentObjects.GetItem(k))
+			{
+				targets.push_back(ObjectClass::CurrentObjects.GetItem(k));
+			}
+		}
+	}
+
+	if (targets.empty())
+		return false;
+
+	bool openedAny = false;
+	for (auto pObj : targets)
+	{
+		if (!pObj) continue;
+
+		BuildingClass* pBld = abstract_cast<BuildingClass*>(pObj);
+		TechnoClass* pTech = pBld ? nullptr : abstract_cast<TechnoClass*>(pObj);
+
+		BuildingClass* pValidBld = IsBuildingValidAndAlive(pBld) ? pBld : nullptr;
+		TechnoClass* pValidTech = pValidBld ? nullptr : (IsTechnoValidAndAlive(pTech) ? pTech : nullptr);
+
+		if (!pValidTech && !pValidBld) continue;
+
+		// Check if floating window ALREADY exists for this exact instance
+		auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [pValidTech, pValidBld](const ObserverFloatingUnitWindow& w) {
+			if (pValidBld && w.pTargetBuilding == pValidBld) return true;
+			if (pValidTech && w.pTargetTechno == pValidTech) return true;
+			return false;
+		});
+
+		if (itWin != this->FloatingUnitWindows.end())
+		{
+			// Bring existing window for this instance to front
+			ObserverFloatingUnitWindow targetWin = *itWin;
+			this->FloatingUnitWindows.erase(itWin);
+			this->FloatingUnitWindows.push_back(targetWin);
+		}
+		else
+		{
+			// Spawn new window for this specific instance!
+			ObserverFloatingUnitWindow newWin;
+			newWin.pType = pValidTech ? pValidTech->GetTechnoType() : (pValidBld ? pValidBld->Type : nullptr);
+			newWin.pOwner = pValidTech ? pValidTech->Owner : (pValidBld ? pValidBld->Owner : nullptr);
+			newWin.pTargetTechno = pValidTech;
+			newWin.pTargetBuilding = pValidBld;
+			newWin.IsProductionItem = false;
+			newWin.InstanceNumber = 1;
+
+			int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
+			int cardW = 320;
+			int topY = 40;
+			int cascadeOffset = static_cast<int>((this->FloatingUnitWindows.size() + this->FloatingWindows.size()) * 24) % 140;
+
+			newWin.Position = Point2D { (screenW - cardW) / 2 + cascadeOffset, topY + cascadeOffset };
+			this->FloatingUnitWindows.push_back(newWin);
+		}
+		openedAny = true;
+	}
+	return openedAny;
 }

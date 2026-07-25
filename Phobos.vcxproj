@@ -41,6 +41,9 @@
     <ClCompile Include="src\Commands\FrameStep.cpp" />
     <ClCompile Include="src\Commands\NextIdleHarvester.cpp" />
     <ClCompile Include="src\Commands\ObjectInfo.cpp" />
+    <ClCompile Include="src\Commands\ShowObjectCard.cpp" />
+    <ClCompile Include="src\Commands\ToggleObserverUI.cpp" />
+    <ClCompile Include="src\Commands\ClearObserverUICards.cpp" />
     <ClCompile Include="src\Commands\QuickSave.cpp" />
     <ClCompile Include="src\Commands\SaveVariablesToFile.cpp" />
     <ClCompile Include="src\Commands\ToggleDesignatorRange.cpp" />

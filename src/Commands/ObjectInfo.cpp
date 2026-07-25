@@ -5,6 +5,7 @@
 #include <CRT.h>
 
 #include <Ext/Techno/Body.h>
+#include <Ext/Observer/ObserverUI.h>
 
 const char* ObjectInfoCommandClass::GetName() const
 {
@@ -28,6 +29,9 @@ const wchar_t* ObjectInfoCommandClass::GetUIDescription() const
 
 void ObjectInfoCommandClass::Execute(WWKey eInput) const
 {
+	if (!Phobos::Config::DevelopmentCommands && !ObserverUIClass::IsActive())
+		return;
+
 	char buffer[0x800] = { 0 };
 
 	auto append = [&buffer](const char* pFormat, ...)
@@ -207,6 +211,46 @@ void ObjectInfoCommandClass::Execute(WWKey eInput) const
 
 		if (pTechnoExt->CurrentShieldType && pShieldData)
 			append("Current Shield HP = (%d / %d)\n", pShieldData->GetHP(), pTechnoExt->CurrentShieldType->Strength);
+
+		if (pBuilding->Owner)
+		{
+			append("Superweapons (%d total):\n", pBuilding->Owner->Supers.Count);
+			Debug::Log("[Phobos ObjectInfo] Superweapons dump for House %s (%s):\n", pBuilding->Owner->get_ID(), pBuilding->Owner->PlainName);
+
+			for (int s = 0; s < pBuilding->Owner->Supers.Count; ++s)
+			{
+				auto pSuper = pBuilding->Owner->Supers.GetItem(s);
+				if (pSuper && pSuper->Type)
+				{
+					const char* swID = pSuper->Type->get_ID();
+					int timeLeft = pSuper->RechargeTimer.GetTimeLeft();
+					int totalTime = pSuper->GetRechargeTime();
+
+					Debug::Log("SW [%02d] ID = %-22s | IsPresent = %d | IsReady = %d | IsOneTime = %d | IsSuspended = %d | CanHold = %d | Recharge = %d/%d\n",
+						s,
+						swID,
+						pSuper->IsPresent ? 1 : 0,
+						pSuper->IsReady ? 1 : 0,
+						pSuper->IsOneTime ? 1 : 0,
+						pSuper->IsSuspended ? 1 : 0,
+						pSuper->CanHold ? 1 : 0,
+						timeLeft,
+						totalTime
+					);
+
+					append("SW [%02d] %s | Pres=%d Ready=%d 1Time=%d Susp=%d | Rec=%d/%d\n",
+						s,
+						swID,
+						pSuper->IsPresent ? 1 : 0,
+						pSuper->IsReady ? 1 : 0,
+						pSuper->IsOneTime ? 1 : 0,
+						pSuper->IsSuspended ? 1 : 0,
+						timeLeft,
+						totalTime
+					);
+				}
+			}
+		}
 
 		display();
 	};
