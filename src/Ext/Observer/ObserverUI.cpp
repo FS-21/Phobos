@@ -313,20 +313,101 @@ void ObserverUIClass::CollectPlayerData()
 	for (int i = 0; i < HouseClass::Array.Count; ++i)
 	{
 		auto pHouse = HouseClass::Array.GetItem(i);
-		if (!pHouse || pHouse->Defeated || !pHouse->Type)
+		if (!pHouse || pHouse->IsObserver() || pHouse->Defeated || !pHouse->Type)
 			continue;
 
-		// Exclude houses with MultiplayerPassive=true
-		if (pHouse->Type->MultiplayPassive)
-			continue;
+		bool isMultiplayer = SessionClass::Instance.GameMode == GameMode::Skirmish || SessionClass::Instance.GameMode == GameMode::LAN || SessionClass::Instance.GameMode == GameMode::Internet;
+		bool isDevMode = Phobos::Config::DevelopmentCommands;
 
-		// Exclude neutral, civilian, defeated or observer houses
-		if (pHouse->IsObserver() || pHouse->Defeated)
-			continue;
+		if (isMultiplayer && !isDevMode)
+		{
+			// In standard multiplayer (when DevelopmentCommands is false):
+			// show only real skirmish/MP players (exclude MultiplayPassive, Neutral, Special, Civilian)
+			if (pHouse->Type->MultiplayPassive)
+				continue;
 
-		// Exclude Special & Neutral houses
-		if (pHouse == HouseClass::FindNeutral() || pHouse == HouseClass::FindSpecial() || pHouse == HouseClass::FindCivilianSide())
-			continue;
+			if (pHouse == HouseClass::FindNeutral() || pHouse == HouseClass::FindSpecial() || pHouse == HouseClass::FindCivilianSide())
+				continue;
+		}
+		else
+		{
+			// In singleplayer / campaign OR when DevelopmentCommands=true:
+			// Include ANY house that has objects/units/structures/superweapons or production to display for debugging!
+			bool hasContent = false;
+
+			for (auto const pBld : BuildingClass::Array)
+			{
+				if (pBld && pBld->Owner == pHouse && pBld->IsAlive && !pBld->InLimbo)
+				{
+					hasContent = true;
+					break;
+				}
+			}
+
+			if (!hasContent)
+			{
+				for (auto const pInf : InfantryClass::Array)
+				{
+					if (pInf && pInf->Owner == pHouse && pInf->IsAlive && !pInf->InLimbo)
+					{
+						hasContent = true;
+						break;
+					}
+				}
+			}
+
+			if (!hasContent)
+			{
+				for (auto const pUnit : UnitClass::Array)
+				{
+					if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo)
+					{
+						hasContent = true;
+						break;
+					}
+				}
+			}
+
+			if (!hasContent)
+			{
+				for (auto const pAir : AircraftClass::Array)
+				{
+					if (pAir && pAir->Owner == pHouse && pAir->IsAlive && !pAir->InLimbo)
+					{
+						hasContent = true;
+						break;
+					}
+				}
+			}
+
+			if (!hasContent && pHouse->Supers.Count > 0)
+			{
+				for (int s = 0; s < pHouse->Supers.Count; ++s)
+				{
+					auto pSuper = pHouse->Supers.GetItem(s);
+					if (pSuper && pSuper->Type && pSuper->IsPresent)
+					{
+						hasContent = true;
+						break;
+					}
+				}
+			}
+
+			if (!hasContent)
+			{
+				for (auto const pFact : FactoryClass::Array)
+				{
+					if (pFact && pFact->Owner == pHouse && pFact->Object)
+					{
+						hasContent = true;
+						break;
+					}
+				}
+			}
+
+			if (!hasContent)
+				continue;
+		}
 
 		ObserverPlayerRow row;
 		row.pHouse = pHouse;
@@ -338,7 +419,6 @@ void ObserverUIClass::CollectPlayerData()
 			plainNameStr = pHouse->get_ID();
 
 		std::wstring wPlainName(plainNameStr.begin(), plainNameStr.end());
-		bool isMultiplayer = SessionClass::Instance.GameMode == GameMode::Skirmish || SessionClass::Instance.GameMode == GameMode::LAN || SessionClass::Instance.GameMode == GameMode::Internet;
 		if (isMultiplayer)
 		{
 			row.PlayerName = L"P" + std::to_wstring(row.PlayerNumber) + L": " + wPlainName;
@@ -444,13 +524,23 @@ void ObserverUIClass::CollectPlayerData()
 				return;
 
 			bool include = false;
-
 			AbstractType absType = pTechno->WhatAmI();
+
+			bool isConsideredVehicle = false;
+			if (absType == AbstractType::Building)
+			{
+				auto pBldType = static_cast<BuildingTypeClass*>(pType);
+				auto pBldExt = BuildingTypeExt::ExtMap.Find(pBldType);
+				if (pBldExt && pBldExt->ConsideredVehicle.Get(false))
+				{
+					isConsideredVehicle = true;
+				}
+			}
 
 			switch (this->ActiveFilterTab)
 			{
 			case ObserverFilterCategory::Defenses:
-				if (absType == AbstractType::Building)
+				if (absType == AbstractType::Building && !isConsideredVehicle)
 				{
 					auto pBldType = static_cast<BuildingTypeClass*>(pType);
 					if (pBldType->IsBaseDefense)
@@ -459,7 +549,7 @@ void ObserverUIClass::CollectPlayerData()
 				break;
 
 			case ObserverFilterCategory::Structures:
-				if (absType == AbstractType::Building)
+				if (absType == AbstractType::Building && !isConsideredVehicle)
 				{
 					auto pBldType = static_cast<BuildingTypeClass*>(pType);
 					if (!pBldType->IsBaseDefense)
@@ -468,7 +558,7 @@ void ObserverUIClass::CollectPlayerData()
 				break;
 
 			case ObserverFilterCategory::AllStructures:
-				if (absType == AbstractType::Building)
+				if (absType == AbstractType::Building && !isConsideredVehicle)
 					include = true;
 				break;
 
@@ -478,7 +568,7 @@ void ObserverUIClass::CollectPlayerData()
 				break;
 
 			case ObserverFilterCategory::Vehicles:
-				if (absType == AbstractType::Unit)
+				if (isConsideredVehicle || absType == AbstractType::Unit)
 				{
 					bool isNaval = pType->Naval;
 					bool isAircraft = pType->ConsideredAircraft;
@@ -498,7 +588,7 @@ void ObserverUIClass::CollectPlayerData()
 				break;
 
 			case ObserverFilterCategory::AllUnits:
-				if (absType != AbstractType::Building)
+				if (isConsideredVehicle || absType != AbstractType::Building)
 					include = true;
 				break;
 
@@ -517,7 +607,9 @@ void ObserverUIClass::CollectPlayerData()
 		if (this->ActiveFilterTab == ObserverFilterCategory::Defenses
 			|| this->ActiveFilterTab == ObserverFilterCategory::Structures
 			|| this->ActiveFilterTab == ObserverFilterCategory::AllStructures
+			|| this->ActiveFilterTab == ObserverFilterCategory::Vehicles
 			|| this->ActiveFilterTab == ObserverFilterCategory::Naval
+			|| this->ActiveFilterTab == ObserverFilterCategory::AllUnits
 			|| this->ActiveFilterTab == ObserverFilterCategory::Everything)
 		{
 			for (auto const pBld : BuildingClass::Array)
@@ -580,7 +672,7 @@ void ObserverUIClass::CollectPlayerData()
 			for (int s = 0; s < pHouse->Supers.Count; ++s)
 			{
 				auto pSuper = pHouse->Supers.GetItem(s);
-				if (!pSuper || !pSuper->Type || !this->MatchesSearchFilter(pSuper->Type))
+				if (!pSuper || !pSuper->Type || !pSuper->IsPresent || !this->MatchesSearchFilter(pSuper->Type))
 					continue;
 
 				// Check Phobos SWTypeExt visibility settings
@@ -625,9 +717,6 @@ void ObserverUIClass::CollectPlayerData()
 						}
 					}
 				}
-
-				if (!pSuper->IsPresent && !pSuper->IsReady && !pSuper->IsOneTime && item.Buildings.empty())
-					continue;
 
 				int totalFrames = pSuper->GetRechargeTime();
 				int framesLeft = pSuper->RechargeTimer.GetTimeLeft();
@@ -1003,9 +1092,18 @@ void ObserverUIClass::Update()
 			if (!pHouse || pHouse->Defeated || !pHouse->Type)
 				continue;
 
-			// Exclude neutral, civilian, defeated or observer houses
-			if (pHouse->IsObserver() || pHouse == HouseClass::FindNeutral() || pHouse == HouseClass::FindSpecial() || pHouse == HouseClass::FindCivilianSide())
+			bool isMultiplayer = SessionClass::Instance.GameMode == GameMode::Skirmish || SessionClass::Instance.GameMode == GameMode::LAN || SessionClass::Instance.GameMode == GameMode::Internet;
+			bool isDevMode = Phobos::Config::DevelopmentCommands;
+
+			// Exclude observer houses
+			if (pHouse->IsObserver())
 				continue;
+
+			if (isMultiplayer && !isDevMode)
+			{
+				if (pHouse->Type->MultiplayPassive || pHouse == HouseClass::FindNeutral() || pHouse == HouseClass::FindSpecial() || pHouse == HouseClass::FindCivilianSide())
+					continue;
+			}
 
 			auto& history = this->EconomyHistory[pHouse];
 			int currentMoney = pHouse->Available_Money();
@@ -1246,9 +1344,6 @@ void ObserverUIClass::Render(DSurface* pSurface)
 
 	int tabRowGap = 3;
 	int totalRows = static_cast<int>(this->PlayerRows.size());
-	int totalRowsH = totalRows * rowHeight;
-	int calcStartY = screenHeight - totalRowsH - 18;
-
 	int tabRowsCount = static_cast<int>(tabRows.size());
 	int searchH = 24;
 	int inspectBtnW = 54;
@@ -1260,53 +1355,58 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	int inspectX = structStartX;
 	int searchX = inspectX + inspectBtnW + 3;
 
-	int totalHeaderH = (tabRowsCount * tabHeight) + ((tabRowsCount - 1) * tabRowGap) + searchH + 12;
-	int topHeaderMinY = 20;
-	int bottomMargin = 45;
-	int availablePlayerAreaH = screenHeight - totalHeaderH - bottomMargin;
-
 	int maxAllowedRows = 8;
-	int maxVisibleRows = totalRows;
-	bool needsScroll = (totalRows > maxAllowedRows) || (calcStartY - totalHeaderH < topHeaderMinY) || (totalRowsH > availablePlayerAreaH);
-
-	int searchY = 0;
-	int tabsBaseY = 0;
-	int highestTabY = 0;
+	int maxVisibleRows = std::min(maxAllowedRows, totalRows);
+	bool needsScroll = (totalRows > maxAllowedRows);
 
 	if (needsScroll)
 	{
-		int vertBtnH = 20;
-		int playerRowsH = availablePlayerAreaH - vertBtnH - 6;
-		maxVisibleRows = std::min(maxAllowedRows, std::max(1, playerRowsH / rowHeight));
-
 		this->MaxVerticalScrollOffset = std::max(0, totalRows - maxVisibleRows);
 		this->VerticalScrollOffset = std::clamp(this->VerticalScrollOffset, 0, this->MaxVerticalScrollOffset);
+	}
+	else
+	{
+		this->VerticalScrollOffset = 0;
+		this->MaxVerticalScrollOffset = 0;
+	}
 
-		searchY = topHeaderMinY;
-		highestTabY = searchY + searchH + 4;
-		tabsBaseY = highestTabY + (tabRowsCount * tabHeight) + ((tabRowsCount - 1) * tabRowGap);
+	// Panel startY is ALWAYS bottom-anchored based on visible rows (FIXED position, max 8 rows!)
+	int visibleRowsH = maxVisibleRows * rowHeight;
+	startY = screenHeight - visibleRowsH - 18;
 
-		int scrollBtnW = 40;
-		int centerBtnX = structStartX + (availableStructWidth / 2) - scrollBtnW;
-		int scrollBtnY = tabsBaseY + 2;
+	// Scroll buttons centered directly above the first player/house info box
+	int scrollBtnW = 40;
+	int scrollBtnH = 20;
+	int scrollBtnGap = 4;
+	int totalScrollBtnsW = (scrollBtnW * 2) + scrollBtnGap;
+	int centerBtnX = startX + ((infoBoxWidth + playerColorBarWidth) - totalScrollBtnsW) / 2;
+	if (centerBtnX < startX) centerBtnX = startX;
 
-		this->VertScrollUpBtnRect = RectangleStruct { centerBtnX, scrollBtnY, scrollBtnW, vertBtnH };
-		this->VertScrollDownBtnRect = RectangleStruct { centerBtnX + scrollBtnW, scrollBtnY, scrollBtnW, vertBtnH };
+	int scrollBtnY = needsScroll ? (startY - scrollBtnH - 3) : startY;
+
+	int tabsBaseY = (needsScroll ? scrollBtnY : startY) - 4;
+	int highestTabY = tabsBaseY - (tabRowsCount * tabHeight) - ((tabRowsCount - 1) * tabRowGap);
+	int searchY = highestTabY - searchH - 4;
+
+	if (needsScroll)
+	{
+		this->VertScrollUpBtnRect = RectangleStruct { centerBtnX, scrollBtnY, scrollBtnW, scrollBtnH };
+		this->VertScrollDownBtnRect = RectangleStruct { centerBtnX + scrollBtnW + scrollBtnGap, scrollBtnY, scrollBtnW, scrollBtnH };
 
 		this->IsHoveringVertScrollUp = mousePos.X >= this->VertScrollUpBtnRect.X && mousePos.X <= (this->VertScrollUpBtnRect.X + this->VertScrollUpBtnRect.Width)
 			&& mousePos.Y >= this->VertScrollUpBtnRect.Y && mousePos.Y <= (this->VertScrollUpBtnRect.Y + this->VertScrollUpBtnRect.Height);
 		this->IsHoveringVertScrollDown = mousePos.X >= this->VertScrollDownBtnRect.X && mousePos.X <= (this->VertScrollDownBtnRect.X + this->VertScrollDownBtnRect.Width)
 			&& mousePos.Y >= this->VertScrollDownBtnRect.Y && mousePos.Y <= (this->VertScrollDownBtnRect.Y + this->VertScrollDownBtnRect.Height);
 
-		// Render Joined Centered Scroll Buttons [ ▲ ][ ▼ ]
+		// Render Scroll Up / Down Buttons (Centered above first player/house)
 		ColorStruct upBg = this->IsHoveringVertScrollUp ? ColorStruct { 0, 140, 180 } : ColorStruct { 30, 30, 30 };
-		pSurface->FillRectTrans(&this->VertScrollUpBtnRect, &upBg, 80);
-		COLORREF upBorder = this->IsHoveringVertScrollUp ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(80, 80, 80);
+		pSurface->FillRectTrans(&this->VertScrollUpBtnRect, &upBg, 95);
+		COLORREF upBorder = this->IsHoveringVertScrollUp ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(100, 100, 100);
 		pSurface->DrawRect(&this->VertScrollUpBtnRect, upBorder);
 
 		ColorStruct downBg = this->IsHoveringVertScrollDown ? ColorStruct { 0, 140, 180 } : ColorStruct { 30, 30, 30 };
-		pSurface->FillRectTrans(&this->VertScrollDownBtnRect, &downBg, 80);
-		COLORREF downBorder = this->IsHoveringVertScrollDown ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(80, 80, 80);
+		pSurface->FillRectTrans(&this->VertScrollDownBtnRect, &downBg, 95);
+		COLORREF downBorder = this->IsHoveringVertScrollDown ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(100, 100, 100);
 		pSurface->DrawRect(&this->VertScrollDownBtnRect, downBorder);
 
 		if (BitFont::Instance && BitText::Instance)
@@ -1327,28 +1427,22 @@ void ObserverUIClass::Render(DSurface* pSurface)
 
 			BitFont::Instance->Bounds = oldBounds;
 		}
-
-		startY = scrollBtnY + vertBtnH + 4;
 	}
 	else
 	{
-		this->VerticalScrollOffset = 0;
-		this->MaxVerticalScrollOffset = 0;
 		this->VertScrollUpBtnRect = RectangleStruct { 0, 0, 0, 0 };
 		this->VertScrollDownBtnRect = RectangleStruct { 0, 0, 0, 0 };
-
-		// Dynamic bottom anchor when fewer players: UI moves down to screen bottom!
-		startY = calcStartY;
-		tabsBaseY = startY - 4;
-		highestTabY = tabsBaseY - (tabRowsCount * tabHeight) - ((tabRowsCount - 1) * tabRowGap);
-		searchY = highestTabY - searchH - 4;
 	}
 
-	// Calculate team Y extents ONLY for teams with 2 or more players!
+	// Calculate team Y extents ONLY for visible player rows!
 	std::map<int, std::pair<int, int>> teamYExtents;
-	int calcY = startY;
-	for (auto const& row : this->PlayerRows)
+	int visibleStart = std::clamp(this->VerticalScrollOffset, 0, std::max(0, totalRows - 1));
+	int visibleEnd = std::min(totalRows, visibleStart + maxVisibleRows);
+
+	for (int rIdx = visibleStart; rIdx < visibleEnd; ++rIdx)
 	{
+		auto const& row = this->PlayerRows[rIdx];
+		int calcY = startY + (rIdx - visibleStart) * rowHeight;
 		if (row.TeamID >= 0 && row.TeamMemberCount >= 2)
 		{
 			if (teamYExtents.count(row.TeamID) == 0)
@@ -1360,7 +1454,6 @@ void ObserverUIClass::Render(DSurface* pSurface)
 				teamYExtents[row.TeamID].second = calcY + rowHeight;
 			}
 		}
-		calcY += rowHeight;
 	}
 
 	this->InspectBtnRect = RectangleStruct { inspectX, searchY, inspectBtnW, searchH };
@@ -1558,8 +1651,8 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		BitFont::Instance->Bounds = oldBounds;
 	}
 
-	int visibleStart = std::clamp(this->VerticalScrollOffset, 0, std::max(0, totalRows - 1));
-	int visibleEnd = std::min(totalRows, visibleStart + maxVisibleRows);
+	visibleStart = std::clamp(this->VerticalScrollOffset, 0, std::max(0, totalRows - 1));
+	visibleEnd = std::min(totalRows, visibleStart + maxVisibleRows);
 
 	// Render team alliance vertical bars attached directly to the left edge of Section 1 ONLY for 2+ player alliances
 	for (auto const& [teamID, yPair] : teamYExtents)
@@ -4378,20 +4471,31 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 		return true;
 	}
 
-	// 3b. Handle Vertical Player Rows Scroll Buttons [ ▲ ][ ▼ ] click
+	// 3b. Handle Vertical Player Rows Scroll Buttons [ ▲ ][ ▼ ] click (scroll 1 by 1 with click debounce)
 	if (!isRightClick && this->MaxVerticalScrollOffset > 0)
 	{
+		static DWORD lastVertScrollTime = 0;
+		DWORD now = GetTickCount();
+
 		if (this->VertScrollUpBtnRect.Width > 0 && mousePos.X >= this->VertScrollUpBtnRect.X && mousePos.X <= (this->VertScrollUpBtnRect.X + this->VertScrollUpBtnRect.Width)
 			&& mousePos.Y >= this->VertScrollUpBtnRect.Y && mousePos.Y <= (this->VertScrollUpBtnRect.Y + this->VertScrollUpBtnRect.Height))
 		{
-			this->VerticalScrollOffset = std::max(0, this->VerticalScrollOffset - 1);
+			if (now - lastVertScrollTime >= 150)
+			{
+				this->VerticalScrollOffset = std::max(0, this->VerticalScrollOffset - 1);
+				lastVertScrollTime = now;
+			}
 			return true;
 		}
 
 		if (this->VertScrollDownBtnRect.Width > 0 && mousePos.X >= this->VertScrollDownBtnRect.X && mousePos.X <= (this->VertScrollDownBtnRect.X + this->VertScrollDownBtnRect.Width)
 			&& mousePos.Y >= this->VertScrollDownBtnRect.Y && mousePos.Y <= (this->VertScrollDownBtnRect.Y + this->VertScrollDownBtnRect.Height))
 		{
-			this->VerticalScrollOffset = std::min(this->MaxVerticalScrollOffset, this->VerticalScrollOffset + 1);
+			if (now - lastVertScrollTime >= 150)
+			{
+				this->VerticalScrollOffset = std::min(this->MaxVerticalScrollOffset, this->VerticalScrollOffset + 1);
+				lastVertScrollTime = now;
+			}
 			return true;
 		}
 	}
