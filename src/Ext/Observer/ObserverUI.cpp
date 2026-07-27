@@ -20,6 +20,7 @@
 #include <RulesClass.h>
 #include <New/Entity/ShieldClass.h>
 #include <PCX.h>
+#include <MissionClass.h>
 
 #include <algorithm>
 #include <sstream>
@@ -2447,6 +2448,11 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				{
 					Mission curMission = pTech ? pTech->GetCurrentMission() : pBld->GetCurrentMission();
 					locOss << L"   Mission: " << GetMissionNameString(curMission);
+					if (isDebugKeysEnabled)
+					{
+						int missionStatus = pTech ? pTech->MissionStatus : pBld->MissionStatus;
+						locOss << L" (Status: " << missionStatus << L")";
+					}
 				}
 				addLine(locOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 
@@ -2601,6 +2607,108 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				addLine(vetOss.str(), vetColor);
 			}
 
+
+			// Passengers / Garrisoned Occupants Line
+			if (!isProductionView)
+			{
+				FootClass* pFootPass = pTech ? abstract_cast<FootClass*>(pTech) : nullptr;
+				if (pFootPass)
+				{
+					int passCount = pFootPass->Passengers.NumPassengers;
+					if (passCount > 0)
+					{
+						if (isDebugKeysEnabled)
+						{
+							std::vector<TechnoTypeClass*> order;
+							std::map<TechnoTypeClass*, int> counts;
+
+							for (FootClass* pPass = pFootPass->Passengers.GetFirstPassenger(); pPass; pPass = abstract_cast<FootClass*>(pPass->NextObject))
+							{
+								if (auto pPassType = pPass->GetTechnoType())
+								{
+									if (counts[pPassType] == 0)
+									{
+										order.push_back(pPassType);
+									}
+									counts[pPassType]++;
+								}
+							}
+
+							std::wostringstream passOss;
+							passOss << L"Passengers (" << passCount << L"): ";
+							bool first = true;
+							for (auto pPassType : order)
+							{
+								if (!first) passOss << L", ";
+								first = false;
+
+								int qty = counts[pPassType];
+								std::string passId = pPassType->get_ID();
+								std::wstring wPassID(passId.begin(), passId.end());
+
+								std::wstring wPassName = (pPassType->UIName && pPassType->UIName[0] != L'\0') ? pPassType->UIName : L"";
+								if (wPassName.empty()) wPassName = wPassID;
+
+								passOss << qty << L"x [" << wPassID << L"] " << wPassName;
+							}
+							addLine(passOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+						}
+						else
+						{
+							addLine(L"Passengers: " + std::to_wstring(passCount), Drawing::RGB_To_Int(200, 200, 200));
+						}
+					}
+				}
+				else if (pBld)
+				{
+					int occCount = pBld->Occupants.Count;
+					if (occCount > 0)
+					{
+						if (isDebugKeysEnabled)
+						{
+							std::vector<TechnoTypeClass*> order;
+							std::map<TechnoTypeClass*, int> counts;
+
+							for (int i = 0; i < occCount; ++i)
+							{
+								InfantryClass* pInf = pBld->Occupants.GetItem(i);
+								if (pInf && pInf->Type)
+								{
+									if (counts[pInf->Type] == 0)
+									{
+										order.push_back(pInf->Type);
+									}
+									counts[pInf->Type]++;
+								}
+							}
+
+							std::wostringstream occOss;
+							occOss << L"Garrisoned (" << occCount << L"): ";
+							bool first = true;
+							for (auto pInfType : order)
+							{
+								if (!first) occOss << L", ";
+								first = false;
+
+								int qty = counts[pInfType];
+								std::string infId = pInfType->get_ID();
+								std::wstring wInfID(infId.begin(), infId.end());
+
+								std::wstring wInfName = (pInfType->UIName && pInfType->UIName[0] != L'\0') ? pInfType->UIName : L"";
+								if (wInfName.empty()) wInfName = wInfID;
+
+								occOss << qty << L"x [" << wInfID << L"] " << wInfName;
+							}
+							addLine(occOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+						}
+						else
+						{
+							addLine(L"Garrisoned: " + std::to_wstring(occCount), Drawing::RGB_To_Int(200, 200, 200));
+						}
+					}
+				}
+			}
+
 			// 5. Total Build Time Line (MM:SS format) & 6. Cost Line (ONLY for production cards IF producing!)
 			if (isProductionView && isProducing)
 			{
@@ -2672,15 +2780,6 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					}
 				}
 
-				if (pTeam->CurrentScript && pTeam->CurrentScript->Type)
-				{
-					std::wstring scriptInfo = formatIdName(pTeam->CurrentScript->Type);
-					if (!scriptInfo.empty())
-					{
-						addLine(L"Script: " + scriptInfo, Drawing::RGB_To_Int(200, 200, 200));
-					}
-				}
-
 				if (pTeamType && pTeamType->TaskForce)
 				{
 					std::wstring tfInfo = formatIdName(pTeamType->TaskForce);
@@ -2692,6 +2791,12 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 				if (pTeam->CurrentScript && pTeam->CurrentScript->Type)
 				{
+					std::wstring scriptInfo = formatIdName(pTeam->CurrentScript->Type);
+					if (!scriptInfo.empty())
+					{
+						addLine(L"Script: " + scriptInfo, Drawing::RGB_To_Int(200, 200, 200));
+					}
+
 					int lineNum = pTeam->CurrentScript->CurrentMission;
 					if (lineNum >= 0 && lineNum < pTeam->CurrentScript->Type->ActionsCount)
 					{
@@ -2699,13 +2804,13 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						int arg = pTeam->CurrentScript->Type->ScriptActions[lineNum].Argument;
 
 						std::wostringstream lineOss;
-						lineOss << L"Script Line " << lineNum << L": " << action << L", " << arg;
+						lineOss << L"Script Data: Line " << lineNum << L" (" << action << L", " << arg << L")";
 						addLine(lineOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 					}
 					else if (lineNum >= 0)
 					{
 						std::wostringstream lineOss;
-						lineOss << L"Script Line " << lineNum;
+						lineOss << L"Script Data: Line " << lineNum;
 						addLine(lineOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 					}
 				}
@@ -4919,6 +5024,36 @@ bool ObserverUIClass::HandleMouseWheel(bool isUp)
 	if (!isActive || !WWMouseClass::Instance)
 		return false;
 
+	Point2D mousePos = { WWMouseClass::Instance->GetX(), WWMouseClass::Instance->GetY() };
+
+	// 1. Check horizontal cameo scrolling if mouse is hovering over a specific player's cameos bar
+	if (this->DisplayMode == ObserverUIDisplayMode::Full)
+	{
+		int scrollStep = 64; // 1 cameo width (60 + 4 padding)
+		for (auto& row : this->PlayerRows)
+		{
+			if (row.MaxScrollOffset <= 0)
+				continue;
+
+			bool isHoveringCameos = (mousePos.Y >= row.StructPanelRect.Y && mousePos.Y <= (row.StructPanelRect.Y + row.StructPanelRect.Height))
+				&& (mousePos.X >= row.StructPanelRect.X && mousePos.X <= (row.StructPanelRect.X + row.StructPanelRect.Width));
+
+			if (isHoveringCameos)
+			{
+				if (isUp)
+				{
+					row.ScrollOffset = std::max(0, row.ScrollOffset - scrollStep);
+				}
+				else
+				{
+					row.ScrollOffset = std::min(row.MaxScrollOffset, row.ScrollOffset + scrollStep);
+				}
+				return true;
+			}
+		}
+	}
+
+	// 2. Vertical Player Rows Scroll (scrolls 1 player row per wheel notch)
 	if (this->MaxVerticalScrollOffset > 0)
 	{
 		if (isUp)
@@ -4930,35 +5065,6 @@ bool ObserverUIClass::HandleMouseWheel(bool isUp)
 			this->VerticalScrollOffset = std::min(this->MaxVerticalScrollOffset, this->VerticalScrollOffset + 1);
 		}
 		return true;
-	}
-
-	if (this->DisplayMode != ObserverUIDisplayMode::Full)
-		return false;
-
-	Point2D mousePos = { WWMouseClass::Instance->GetX(), WWMouseClass::Instance->GetY() };
-	int scrollStep = 64; // 1 cameo width (60 + 4 padding)
-
-	for (auto& row : this->PlayerRows)
-	{
-		if (row.MaxScrollOffset <= 0)
-			continue;
-
-		// Check if mouse is hovering over this player row's structure panel or row area
-		bool isHoveringRow = (mousePos.Y >= row.StructPanelRect.Y && mousePos.Y <= (row.StructPanelRect.Y + row.StructPanelRect.Height))
-			&& (mousePos.X >= row.InfoRect.X && mousePos.X <= (row.StructPanelRect.X + row.StructPanelRect.Width + 30));
-
-		if (isHoveringRow)
-		{
-			if (isUp)
-			{
-				row.ScrollOffset = std::max(0, row.ScrollOffset - scrollStep);
-			}
-			else
-			{
-				row.ScrollOffset = std::min(row.MaxScrollOffset, row.ScrollOffset + scrollStep);
-			}
-			return true;
-		}
 	}
 
 	return false;
