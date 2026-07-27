@@ -2507,7 +2507,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						swprintf_s(distBuf, L"%.1f", distCells);
 
 						std::wostringstream destOss;
-						destOss << L"Dest: (" << destCell.X << L", " << destCell.Y << L")   Dist: " << distBuf << L" cells";
+						destOss << L"Destination: (" << destCell.X << L", " << destCell.Y << L")   Distance: " << distBuf << L" cells";
 						addLine(destOss.str(), Drawing::RGB_To_Int(255, 120, 120));
 					}
 				}
@@ -2525,7 +2525,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						swprintf_s(distBuf, L"%.1f", distCells);
 
 						std::wostringstream destOss;
-						destOss << L"Target: Ground (" << destCell.X << L", " << destCell.Y << L")   Dist: " << distBuf << L" cells";
+						destOss << L"Target: Ground (" << destCell.X << L", " << destCell.Y << L")   Distance: " << distBuf << L" cells";
 						addLine(destOss.str(), Drawing::RGB_To_Int(255, 120, 120));
 					}
 				}
@@ -2542,7 +2542,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						swprintf_s(distBuf, L"%.1f", distCells);
 
 						std::wostringstream destOss;
-						destOss << L"Dest: (" << destCell.X << L", " << destCell.Y << L")   Dist: " << distBuf << L" cells";
+						destOss << L"Destination: (" << destCell.X << L", " << destCell.Y << L")   Distance: " << distBuf << L" cells";
 						addLine(destOss.str(), Drawing::RGB_To_Int(180, 220, 255));
 					}
 				}
