@@ -21,6 +21,7 @@
 #include <New/Entity/ShieldClass.h>
 #include <PCX.h>
 #include <MissionClass.h>
+#include <Utilities/GeneralUtils.h>
 
 #include <algorithm>
 #include <sstream>
@@ -1277,17 +1278,17 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	if (availableStructWidth < 0) availableStructWidth = 0;
 
 	// Build Tab Buttons positioned top-center directly attached above Section 2 (middle objects panel)
-	static const std::vector<std::pair<ObserverFilterCategory, std::wstring>> tabDefs = {
-		{ ObserverFilterCategory::Defenses, L"Defenses" },
-		{ ObserverFilterCategory::Structures, L"Structures" },
-		{ ObserverFilterCategory::AllStructures, L"All Structures" },
-		{ ObserverFilterCategory::Infantry, L"Infantry" },
-		{ ObserverFilterCategory::Vehicles, L"Vehicles" },
-		{ ObserverFilterCategory::Naval, L"Naval" },
-		{ ObserverFilterCategory::Aircraft, L"Aircraft" },
-		{ ObserverFilterCategory::AllUnits, L"All Units" },
-		{ ObserverFilterCategory::Superweapons, L"Superweapons" },
-		{ ObserverFilterCategory::Everything, L"Everything" }
+	std::vector<std::pair<ObserverFilterCategory, std::wstring>> tabDefs = {
+		{ ObserverFilterCategory::Defenses, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_DEFENSES", L"Defenses") },
+		{ ObserverFilterCategory::Structures, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_STRUCTURES", L"Structures") },
+		{ ObserverFilterCategory::AllStructures, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_ALL_STRUCTURES", L"All Structures") },
+		{ ObserverFilterCategory::Infantry, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_INFANTRY", L"Infantry") },
+		{ ObserverFilterCategory::Vehicles, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_VEHICLES", L"Vehicles") },
+		{ ObserverFilterCategory::Naval, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_NAVAL", L"Naval") },
+		{ ObserverFilterCategory::Aircraft, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_AIRCRAFT", L"Aircraft") },
+		{ ObserverFilterCategory::AllUnits, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_ALL_UNITS", L"All Units") },
+		{ ObserverFilterCategory::Superweapons, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_SUPERWEAPONS", L"Superweapons") },
+		{ ObserverFilterCategory::Everything, GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TAB_EVERYTHING", L"Everything") }
 	};
 
 	this->TabButtons.clear();
@@ -1612,7 +1613,7 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		Point2D textPt = { this->SearchBoxRect.X + 8, this->SearchBoxRect.Y + 4 };
 		if (this->SearchFilterText.empty() && !this->IsSearchInputFocused)
 		{
-			pSurface->DrawTextA(L"Filter...", &DSurface::ViewBounds, &textPt, Drawing::RGB_To_Int(120, 120, 120), 0, TextPrintType::FullShadow | TextPrintType::Point8);
+			pSurface->DrawTextA(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_FILTER_PLACEHOLDER", L"Filter..."), &DSurface::ViewBounds, &textPt, Drawing::RGB_To_Int(120, 120, 120), 0, TextPrintType::FullShadow | TextPrintType::Point8);
 		}
 		else
 		{
@@ -1830,7 +1831,7 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	// Render tooltip for inspect button, player info or cameo item
 	if (this->IsHoveringInspectBtn && BitFont::Instance)
 	{
-		std::wstring tooltipText = L"Inspect Selected Object (Create Card)";
+		std::wstring tooltipText = GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TOOLTIP_INSPECT", L"Inspect Selected Object (Create Card)");
 		int textW = 0, textH = 0;
 		BitFont::Instance->GetTextDimension(tooltipText.c_str(), &textW, &textH, 300);
 
@@ -1859,29 +1860,15 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	this->RenderFloatingUnitWindows(pSurface);
 }
 
-static const wchar_t* GetMissionNameString(Mission mission)
+static std::wstring GetMissionNameString(Mission mission)
 {
-	switch (mission)
+	const char* pName = MissionControlClass::FindName(mission);
+	if (pName && pName[0] != '\0')
 	{
-	case Mission::Sleep: return L"Sleep";
-	case Mission::Attack: return L"Attack";
-	case Mission::Move: return L"Move";
-	case Mission::Retreat: return L"Retreat";
-	case Mission::Guard: return L"Guard";
-	case Mission::Enter: return L"Enter";
-	case Mission::Capture: return L"Capture";
-	case Mission::Harvest: return L"Harvest";
-	case Mission::Area_Guard: return L"Area Guard";
-	case Mission::Hunt: return L"Hunt";
-	case Mission::Unload: return L"Unload";
-	case Mission::Sabotage: return L"Sabotage";
-	case Mission::Construction: return L"Construction";
-	case Mission::Selling: return L"Selling";
-	case Mission::Repair: return L"Repair";
-	case Mission::Patrol: return L"Patrol";
-	case Mission::AttackMove: return L"Attack Move";
-	default: return L"Idle";
+		std::string str(pName);
+		return std::wstring(str.begin(), str.end());
 	}
+	return L"Idle";
 }
 
 static bool IsTechnoValidAndAlive(TechnoClass* pTech)
@@ -1955,7 +1942,7 @@ static std::wstring FormatObjectNameWithDebug(int playerNum, const char* pID, co
 	{
 		if (effectivePlayerNum > 0)
 		{
-			oss << L"P" << effectivePlayerNum << L" [" << wID << L"]";
+			oss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_PLAYER_PREFIX", L"P") << effectivePlayerNum << L" [" << wID << L"]";
 		}
 		else
 		{
@@ -1971,7 +1958,7 @@ static std::wstring FormatObjectNameWithDebug(int playerNum, const char* pID, co
 	{
 		if (effectivePlayerNum > 0)
 		{
-			oss << L"[P" << effectivePlayerNum << L"] " << wName;
+			oss << L"[" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_PLAYER_PREFIX", L"P") << effectivePlayerNum << L"] " << wName;
 		}
 		else
 		{
@@ -2360,7 +2347,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				if (currentHP < maxHP / 4) hpColor = Drawing::RGB_To_Int(255, 50, 50);
 
 				addLineSegments({
-					{ L"HP: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_HP", L"HP: "), Drawing::RGB_To_Int(200, 200, 200) },
 					{ hpOss.str(), hpColor }
 				});
 			}
@@ -2414,7 +2401,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				if (currentShield <= 0) shieldColor = Drawing::RGB_To_Int(160, 160, 160);
 
 				addLineSegments({
-					{ L"Shield: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SHIELD", L"Shield: "), Drawing::RGB_To_Int(200, 200, 200) },
 					{ shieldOss.str(), shieldColor }
 				});
 			}
@@ -2423,8 +2410,8 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			if (win.IsDestroyed)
 			{
 				std::wostringstream locOss;
-				locOss << L"Coords: (" << win.LastCoords.X << L", " << win.LastCoords.Y << L")";
-				if (!win.LastMission.empty()) locOss << L"   Mission: " << win.LastMission;
+				locOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_COORDS", L"Coords: ") << L"(" << win.LastCoords.X << L", " << win.LastCoords.Y << L")";
+				if (!win.LastMission.empty()) locOss << L"   " << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_MISSION", L"Mission: ") << win.LastMission;
 				addLine(locOss.str(), Drawing::RGB_To_Int(180, 180, 180));
 			}
 			else if (!isProductionView && (pTech || pBld))
@@ -2432,7 +2419,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				CellStruct curCell = pTech ? CellClass::Coord2Cell(pTech->GetCenterCoords()) : CellClass::Coord2Cell(pBld->GetCenterCoords());
 
 				std::wostringstream locOss;
-				locOss << L"Coords: (" << curCell.X << L", " << curCell.Y << L")";
+				locOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_COORDS", L"Coords: ") << L"(" << curCell.X << L", " << curCell.Y << L")";
 				
 				bool showMission = false;
 				if (pTech && pTech->WhatAmI() != AbstractType::Building)
@@ -2447,7 +2434,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				if (showMission)
 				{
 					Mission curMission = pTech ? pTech->GetCurrentMission() : pBld->GetCurrentMission();
-					locOss << L"   Mission: " << GetMissionNameString(curMission);
+					locOss << L"   " << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_MISSION", L"Mission: ") << GetMissionNameString(curMission);
 					if (isDebugKeysEnabled)
 					{
 						int missionStatus = pTech ? pTech->MissionStatus : pBld->MissionStatus;
@@ -2490,9 +2477,9 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 					std::wostringstream targetOss;
 					if (targetPlayerNum > 0)
-						targetOss << L"Target: [P" << targetPlayerNum << L"] " << targetUName;
+						targetOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_TARGET", L"Target: ") << L"[" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_PLAYER_PREFIX", L"P") << targetPlayerNum << L"] " << targetUName;
 					else
-						targetOss << L"Target: " << targetUName;
+						targetOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_TARGET", L"Target: ") << targetUName;
 
 					addLine(targetOss.str(), Drawing::RGB_To_Int(255, 120, 120));
 
@@ -2507,7 +2494,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						swprintf_s(distBuf, L"%.1f", distCells);
 
 						std::wostringstream destOss;
-						destOss << L"Destination: (" << destCell.X << L", " << destCell.Y << L")   Distance: " << distBuf << L" cells";
+						destOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_DESTINATION", L"Destination: ") << L"(" << destCell.X << L", " << destCell.Y << L")   " << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_DISTANCE", L"Distance: ") << distBuf << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_CELLS", L" cells");
 						addLine(destOss.str(), Drawing::RGB_To_Int(255, 120, 120));
 					}
 				}
@@ -2525,7 +2512,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						swprintf_s(distBuf, L"%.1f", distCells);
 
 						std::wostringstream destOss;
-						destOss << L"Target: Ground (" << destCell.X << L", " << destCell.Y << L")   Distance: " << distBuf << L" cells";
+						destOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_TARGET", L"Target: ") << L"(" << destCell.X << L", " << destCell.Y << L")   " << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_DISTANCE", L"Distance: ") << distBuf << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_CELLS", L" cells");
 						addLine(destOss.str(), Drawing::RGB_To_Int(255, 120, 120));
 					}
 				}
@@ -2542,7 +2529,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						swprintf_s(distBuf, L"%.1f", distCells);
 
 						std::wostringstream destOss;
-						destOss << L"Destination: (" << destCell.X << L", " << destCell.Y << L")   Distance: " << distBuf << L" cells";
+						destOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_DESTINATION", L"Destination: ") << L"(" << destCell.X << L", " << destCell.Y << L")   " << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_DISTANCE", L"Distance: ") << distBuf << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_CELLS", L" cells");
 						addLine(destOss.str(), Drawing::RGB_To_Int(180, 220, 255));
 					}
 				}
@@ -2571,7 +2558,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				else if (curAmmo < maxAmmo) ammoColor = Drawing::RGB_To_Int(255, 255, 0);
 
 				addLineSegments({
-					{ L"Ammo: ", Drawing::RGB_To_Int(200, 200, 200) },
+					{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_AMMO", L"Ammo: "), Drawing::RGB_To_Int(200, 200, 200) },
 					{ ammoOss.str(), ammoColor }
 				});
 			}
@@ -2593,20 +2580,17 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					vetVal = pBld->Veterancy.Veterancy;
 				}
 
-				std::wostringstream vetOss;
 				int vetColor = Drawing::RGB_To_Int(200, 200, 200);
-
-				std::wstring rankStr = L"Rookie";
-				if (vetVal >= 2.0f) { rankStr = L"Elite"; vetColor = Drawing::RGB_To_Int(255, 215, 0); }
-				else if (vetVal >= 1.0f) { rankStr = L"Veteran"; vetColor = Drawing::RGB_To_Int(100, 220, 255); }
+				if (vetVal >= 2.0f) { vetColor = Drawing::RGB_To_Int(255, 215, 0); }
+				else if (vetVal >= 1.0f) { vetColor = Drawing::RGB_To_Int(100, 220, 255); }
 
 				wchar_t scoreBuf[32];
 				swprintf_s(scoreBuf, L"%.2f", vetVal);
 
-				vetOss << L"Veterancy: " << rankStr << L" (" << scoreBuf << L")";
+				std::wostringstream vetOss;
+				vetOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_VETERANCY", L"Veterancy: ") << scoreBuf;
 				addLine(vetOss.str(), vetColor);
 			}
-
 
 			// Passengers / Garrisoned Occupants Line
 			if (!isProductionView)
@@ -2635,7 +2619,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 							}
 
 							std::wostringstream passOss;
-							passOss << L"Passengers (" << passCount << L"): ";
+							passOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_PASSENGERS", L"Passengers") << L" (" << passCount << L"): ";
 							bool first = true;
 							for (auto pPassType : order)
 							{
@@ -2655,7 +2639,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						}
 						else
 						{
-							addLine(L"Passengers: " + std::to_wstring(passCount), Drawing::RGB_To_Int(200, 200, 200));
+							addLine(std::wstring(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_PASSENGERS", L"Passengers")) + L": " + std::to_wstring(passCount), Drawing::RGB_To_Int(200, 200, 200));
 						}
 					}
 				}
@@ -2683,7 +2667,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 							}
 
 							std::wostringstream occOss;
-							occOss << L"Garrisoned (" << occCount << L"): ";
+							occOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_GARRISONED", L"Garrisoned") << L" (" << occCount << L"): ";
 							bool first = true;
 							for (auto pInfType : order)
 							{
@@ -2703,7 +2687,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						}
 						else
 						{
-							addLine(L"Garrisoned: " + std::to_wstring(occCount), Drawing::RGB_To_Int(200, 200, 200));
+							addLine(std::wstring(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_GARRISONED", L"Garrisoned")) + L": " + std::to_wstring(occCount), Drawing::RGB_To_Int(200, 200, 200));
 						}
 					}
 				}
@@ -2732,14 +2716,14 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					swprintf_s(timeBuf, L"%02d:%02d", mins, secs);
 
 					std::wostringstream btOss;
-					btOss << L"Build Time: " << timeBuf;
+					btOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_BUILD_TIME", L"Build Time: ") << timeBuf;
 					addLine(btOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 				}
 
 				if (pCurProdType)
 				{
 					std::wostringstream costOss;
-					costOss << L"Cost: $" << pCurProdType->Cost;
+					costOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_COST", L"Cost: $") << pCurProdType->Cost;
 					addLine(costOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 				}
 			}
@@ -2776,7 +2760,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					std::wstring teamInfo = formatIdName(pTeamType);
 					if (!teamInfo.empty())
 					{
-						addLine(L"Team: " + teamInfo, Drawing::RGB_To_Int(200, 200, 200));
+						addLine(std::wstring(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_TEAM", L"Team: ")) + teamInfo, Drawing::RGB_To_Int(200, 200, 200));
 					}
 				}
 
@@ -2785,7 +2769,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					std::wstring tfInfo = formatIdName(pTeamType->TaskForce);
 					if (!tfInfo.empty())
 					{
-						addLine(L"Taskforce: " + tfInfo, Drawing::RGB_To_Int(200, 200, 200));
+						addLine(std::wstring(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_TASKFORCE", L"Taskforce: ")) + tfInfo, Drawing::RGB_To_Int(200, 200, 200));
 					}
 				}
 
@@ -2794,7 +2778,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					std::wstring scriptInfo = formatIdName(pTeam->CurrentScript->Type);
 					if (!scriptInfo.empty())
 					{
-						addLine(L"Script: " + scriptInfo, Drawing::RGB_To_Int(200, 200, 200));
+						addLine(std::wstring(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT", L"Script: ")) + scriptInfo, Drawing::RGB_To_Int(200, 200, 200));
 					}
 
 					int lineNum = pTeam->CurrentScript->CurrentMission;
@@ -2804,13 +2788,13 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						int arg = pTeam->CurrentScript->Type->ScriptActions[lineNum].Argument;
 
 						std::wostringstream lineOss;
-						lineOss << L"Script Data: Line " << lineNum << L" (" << action << L", " << arg << L")";
+						lineOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT_DATA", L"Script Data: Line ") << lineNum << L" (" << action << L", " << arg << L")";
 						addLine(lineOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 					}
 					else if (lineNum >= 0)
 					{
 						std::wostringstream lineOss;
-						lineOss << L"Script Data: Line " << lineNum;
+						lineOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT_DATA", L"Script Data: Line ") << lineNum;
 						addLine(lineOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 					}
 				}
@@ -3016,11 +3000,11 @@ void ObserverUIClass::RenderFloatingWindows(DSurface* pSurface)
 		{
 			if (isDebugEnabled)
 			{
-				nameOss << L"P" << itRow->PlayerNumber << L" [" << wHouseID << L"] " << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
+				nameOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_PLAYER_PREFIX", L"P") << itRow->PlayerNumber << L" [" << wHouseID << L"] " << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
 			}
 			else
 			{
-				nameOss << L"[P" << itRow->PlayerNumber << L"] " << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
+				nameOss << L"[" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_PLAYER_PREFIX", L"P") << itRow->PlayerNumber << L"] " << wPlainName << L" (" << pHouse->Type->UIName << L")" << controlStr;
 			}
 		}
 		else

@@ -223,6 +223,54 @@ In `RA2MD.INI`:
 PrioritySelectionFiltering=true  ; boolean
 ```
 
+### Observer UI
+
+- An in-game Observer / Spectator UI that renders real-time game state information.
+- Displays useful player information and game statistics in campaign and multiplayer.
+- When `DebugKeysEnabled=yes` under `[GlobalControls]` in `rulesmd.ini`, all houses with active objects on the map are listed across all game modes for developer inspection.
+- Supports floating inspection cards to display detailed object and AI debug information.
+- All interface texts can be localized via `.csf` string table keys:
+
+  | CSF String Key | Default Text |
+  |---|---|
+  | `TXT_TOGGLE_OBSERVER_UI` | `Observer UI` |
+  | `TXT_TOGGLE_OBSERVER_UI_DESC` | `Toggle Observer UI overlay display mode.` |
+  | `TXT_SHOW_OBJECT_CARD` | `Observer UI - Add Card` |
+  | `TXT_SHOW_OBJECT_CARD_DESC` | `Add floating info card window for hovered or selected object.` |
+  | `TXT_CLEAR_OBSERVER_UI_CARDS` | `Observer UI - Clear Cards` |
+  | `TXT_CLEAR_OBSERVER_UI_CARDS_DESC` | `Clear all open floating info card windows.` |
+  | `TXT_OBSERVER_FILTER_PLACEHOLDER` | `Filter...` |
+  | `TXT_OBSERVER_TOOLTIP_INSPECT` | `Inspect Selected Object (Create Card)` |
+  | `TXT_OBSERVER_PLAYER_PREFIX` | `P` |
+  | `TXT_OBSERVER_TAB_DEFENSES` | `Defenses` |
+  | `TXT_OBSERVER_TAB_STRUCTURES` | `Structures` |
+  | `TXT_OBSERVER_TAB_ALL_STRUCTURES` | `All Structures` |
+  | `TXT_OBSERVER_TAB_INFANTRY` | `Infantry` |
+  | `TXT_OBSERVER_TAB_VEHICLES` | `Vehicles` |
+  | `TXT_OBSERVER_TAB_NAVAL` | `Naval` |
+  | `TXT_OBSERVER_TAB_AIRCRAFT` | `Aircraft` |
+  | `TXT_OBSERVER_TAB_ALL_UNITS` | `All Units` |
+  | `TXT_OBSERVER_TAB_SUPERWEAPONS` | `Superweapons` |
+  | `TXT_OBSERVER_TAB_EVERYTHING` | `Everything` |
+  | `TXT_OBSERVER_CARD_HP` | `HP: ` |
+  | `TXT_OBSERVER_CARD_SHIELD` | `Shield: ` |
+  | `TXT_OBSERVER_CARD_COORDS` | `Coords: ` |
+  | `TXT_OBSERVER_CARD_MISSION` | `Mission: ` |
+  | `TXT_OBSERVER_CARD_TARGET` | `Target: ` |
+  | `TXT_OBSERVER_CARD_DESTINATION` | `Destination: ` |
+  | `TXT_OBSERVER_CARD_DISTANCE` | `Distance: ` |
+  | `TXT_OBSERVER_CARD_CELLS` | ` cells` |
+  | `TXT_OBSERVER_CARD_AMMO` | `Ammo: ` |
+  | `TXT_OBSERVER_CARD_VETERANCY` | `Veterancy: ` |
+  | `TXT_OBSERVER_CARD_PASSENGERS` | `Passengers` |
+  | `TXT_OBSERVER_CARD_GARRISONED` | `Garrisoned` |
+  | `TXT_OBSERVER_CARD_BUILD_TIME` | `Build Time: ` |
+  | `TXT_OBSERVER_CARD_COST` | `Cost: ` |
+  | `TXT_OBSERVER_CARD_TEAM` | `Team: ` |
+  | `TXT_OBSERVER_CARD_TASKFORCE` | `Taskforce: ` |
+  | `TXT_OBSERVER_CARD_SCRIPT` | `Script: ` |
+  | `TXT_OBSERVER_CARD_SCRIPT_DATA` | `Script Data: Line ` |
+
 ### Placement preview
 
 ![placepreview](_static/images/placepreview.png)
@@ -541,10 +589,20 @@ For this command to work in multiplayer - you need to use a version of [YRpp spa
 - Switches on/off [Task subtitles' label in the middle of the screen](#task-subtitles-display-in-the-middle-of-the-screen).
 - For localization add `TXT_TOGGLE_MESSAGE` and `TXT_TOGGLE_MESSAGE_DESC` into your `.csf` file.
 
-### `[ ]` Deselect Object(s)
+### `[ ]` Observer UI - Clear Cards
 
-- Deselect 1 or 5 object(s) from current selected objects.
-- For localization add `TXT_DESELECT`, `TXT_DESELECT_DESC`, `TXT_DESELECT5` and `TXT_DESELECT5_DESC` into your `.csf` file.
+- Clears all active floating object inspection cards from the Observer UI.
+- For localization add `TXT_CLEAR_OBSERVER_UI_CARDS` and `TXT_CLEAR_OBSERVER_UI_CARDS_DESC` into your `.csf` file.
+
+### `[ ]` Observer UI - Show Object Card
+
+- Adds a floating info inspection card window for the currently selected or hovered object within the Observer UI.
+- For localization add `TXT_SHOW_OBJECT_CARD` and `TXT_SHOW_OBJECT_CARD_DESC` into your `.csf` file.
+
+### `[ ]` Observer UI - Toggle Display
+
+- Cycles/toggles the Observer UI display mode (Full, Compact, Hidden).
+- For localization add `TXT_TOGGLE_OBSERVER_UI` and `TXT_TOGGLE_OBSERVER_UI_DESC` into your `.csf` file.
 
 ## Loading screen
 
