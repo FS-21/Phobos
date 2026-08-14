@@ -998,7 +998,7 @@ ID=EventCount,...,606,2,0,[AttachEffectType],...
 ...
 ```
 
-## Rampastring's DTA Advanced AI
+## Advanced AI v1 (modified version)
 
 Phobos introduces a heavily modified and expanded version of ZivDero's initial port of Rampastring's DTA (Dawn of the Tiberium Age) Advanced AI building, expansion, and support logics.
 

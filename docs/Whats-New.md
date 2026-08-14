@@ -597,6 +597,7 @@ HideShakeEffects=false           ; boolean
 - Add `ClampToScreen` tag for `BannerType` (defaults to `true`) to control whether banner position is clamped to the visible area (by Chang_zhi)
 - [Customizable Berzerk mission](New-or-Enhanced-Logics.md#enhanced-berzerk-behavior) (by TaranDahl)
 - [Tank Bunker foundation and state update delay improvements](Fixed-or-Improved-Logics.md#tank-bunker-improvements) (by Starkku)
+- [Advanced AI v1 (modified version)](AI-Scripting-and-Mapping.md#advanced-ai-v1-modified-version) (by FS-21, ZivDero, Rampastring)
 
 #### Vanilla fixes:
 - Fixed sidebar not updating queued unit numbers when adding or removing units when the production is on hold (by CrimRecya)
