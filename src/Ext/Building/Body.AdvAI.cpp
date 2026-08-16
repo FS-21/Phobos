@@ -542,6 +542,8 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 							blocked.Coords = CellStruct(0, 0);
 							blocked.ExpiryFrame = 0;
 							blocked.FailureCount = 0;
+							houseExt->CachedResourceCandidates.clear();
+							houseExt->ExpansionNodeFailureCounts.erase(targetCell);
 							Debug::Log("AdvAI: House %d successfully placed refinery at (%d,%d). Cleared failed expansion history for this area.\n",
 								owner->ArrayIndex, targetCell.X, targetCell.Y);
 						}
