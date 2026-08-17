@@ -361,7 +361,7 @@ int BuildingExt::Get_Distance_To_Primary_Enemy(CellStruct cell, HouseClass* pHou
 */
 BuildingClass* BuildingExt::ExtData::OurBuildings[1000];
 size_t BuildingExt::ExtData::OurBuildingCount;
-BuildingClass* BuildingExt::ExtData::AdjacencyAnchors[1000];
+BuildingExt::ExtData::CachedAdjacencyAnchor BuildingExt::ExtData::AdjacencyAnchors[1000];
 size_t BuildingExt::ExtData::AdjacencyAnchorCount;
 
 void BuildingExt::Mark_Expansion_As_Done(HouseClass* pHouse)
@@ -886,200 +886,114 @@ RectangleStruct BuildingExt::Get_Base_Rect(HouseClass* pHouse, int adjacency, in
  */
 bool BuildingExt::Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingClass* pBuilding, int adjacencyBonus)
 {
-	if (pBuilding == nullptr || pBuilding->Owner == nullptr)
+	if (pBuilding == nullptr || pBuilding->Owner == nullptr || pBuilding->Type == nullptr)
 		return false;
 
-	const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
-	bool isCellUnsafe = false;
-	for (auto it = houseExt->UnsafePlacementZones.begin(); it != houseExt->UnsafePlacementZones.end(); )
-	{
-		if (Unsorted::CurrentFrame > it->ExpiryFrame)
-			it = houseExt->UnsafePlacementZones.erase(it);
-		else
-		{
-			if (cell.DistanceFromSquared(it->Coords) < 100.0) // 10-cell radius
-			{
-				isCellUnsafe = true;
-				break;
-			}
-			++it;
-		}
-	}
-
-	if (isCellUnsafe)
-	{
-		if (houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
-			return false; // Strictly enforce unsafe/congested zones during expansion crawling
-
-		const BuildingClass* pOurConYard = pBuilding->Owner->ConYards.Count > 0 ? pBuilding->Owner->ConYards[0] : nullptr;
-		if (pOurConYard == nullptr || cell.DistanceFromSquared(pOurConYard->GetMapCoords()) >= 400.0)
-			return false;
-	}
-
-	bool result = false;
-	const bool isNaval = pBuilding->Type->Naval;
-
-	for (size_t i = 0; i < ExtData::AdjacencyAnchorCount; i++)
-	{
-		const BuildingClass* pOtherBuilding = ExtData::AdjacencyAnchors[i];
-		int adjacency = pBuilding->Type->Adjacent + adjacencyBonus;
-
-		if (isNaval && pOtherBuilding->Type->ConstructionYard)
-			adjacency = RulesClass::Instance->AINavalYardAdjacency + adjacencyBonus;
-
-		const int otherW = pOtherBuilding->Type->GetFoundationWidth();
-		const int otherH = pOtherBuilding->Type->GetFoundationHeight(false);
-		const CellStruct origin = pOtherBuilding->GetMapCoords();
-
-		const int newW = pBuilding->Type->GetFoundationWidth();
-		const int newH = pBuilding->Type->GetFoundationHeight(false);
-
-		// Fast Bounding Box check:
-		const int dx = (cell.X > origin.X + otherW - 1) ? (cell.X - (origin.X + otherW - 1)) 
-		             : ((cell.X + newW - 1 < origin.X) ? (origin.X - (cell.X + newW - 1)) : 0);
-		if (dx > adjacency)
-			continue;
-
-		const int dy = (cell.Y > origin.Y + otherH - 1) ? (cell.Y - (origin.Y + otherH - 1)) 
-		             : ((cell.Y + newH - 1 < origin.Y) ? (origin.Y - (cell.Y + newH - 1)) : 0);
-		if (dy > adjacency)
-			continue;
-
-		if (!result)
-		{
-			bool pass = false;
-			CellStruct const* occupy = pOtherBuilding->GetFoundationData(true);
-			while (occupy->X != REFRESH_EOL && occupy->Y != REFRESH_EOL)
-			{
-				const CellStruct sum = origin + *occupy;
-				CellStruct const* newOccupy = pBuilding->GetFoundationData(true);
-				while (newOccupy->X != REFRESH_EOL && newOccupy->Y != REFRESH_EOL)
-				{
-					const CellStruct newSum = cell + *newOccupy;
-
-					int xDiff = std::abs(newSum.X - sum.X);
-					int yDiff = std::abs(newSum.Y - sum.Y);
-
-					if (xDiff <= adjacency && yDiff <= adjacency)
-					{
-						pass = true;
-						break;
-					}
-
-					newOccupy++;
-				}
-
-				if (pass)
-					break;
-
-				occupy++;
-			}
-
-			if (pass)
-				result = true;
-		}
-	}
-
-	return result;
+	return Should_Evaluate_Cell_For_Placement(cell, pBuilding->Type, pBuilding->Owner, adjacencyBonus);
 }
 
 bool BuildingExt::Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingTypeClass* pBuildingType, HouseClass* pOwner, int adjacencyBonus)
 {
-	if (pOwner == nullptr)
+	if (pOwner == nullptr || pBuildingType == nullptr)
 		return false;
 
-	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
-	bool isCellUnsafe = false;
-	for (auto it = houseExt->UnsafePlacementZones.begin(); it != houseExt->UnsafePlacementZones.end(); )
+	const auto houseExt = HouseExt::Fetch(pOwner);
+	if (houseExt != nullptr && !houseExt->UnsafePlacementZones.empty())
 	{
-		if (Unsorted::CurrentFrame > it->ExpiryFrame)
-			it = houseExt->UnsafePlacementZones.erase(it);
-		else
+		bool isCellUnsafe = false;
+		for (const auto& zone : houseExt->UnsafePlacementZones)
 		{
-			if (cell.DistanceFromSquared(it->Coords) < 100.0) // 10-cell radius
+			if (Unsorted::CurrentFrame <= zone.ExpiryFrame)
 			{
-				isCellUnsafe = true;
-				break;
+				if (cell.DistanceFromSquared(zone.Coords) < 100.0) // 10-cell radius
+				{
+					isCellUnsafe = true;
+					break;
+				}
 			}
-			++it;
+		}
+
+		if (isCellUnsafe)
+		{
+			if (houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+				return false; // Strictly enforce unsafe/congested zones during expansion crawling
+
+			const BuildingClass* pOurConYard = pOwner->ConYards.Count > 0 ? pOwner->ConYards[0] : nullptr;
+			if (pOurConYard == nullptr || cell.DistanceFromSquared(pOurConYard->GetMapCoords()) >= 400.0)
+				return false;
 		}
 	}
 
-	if (isCellUnsafe)
-	{
-		if (houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
-			return false; // Strictly enforce unsafe/congested zones during expansion crawling
-
-		const BuildingClass* pOurConYard = pOwner->ConYards.Count > 0 ? pOwner->ConYards[0] : nullptr;
-		if (pOurConYard == nullptr || cell.DistanceFromSquared(pOurConYard->GetMapCoords()) >= 400.0)
-			return false;
-	}
-
-	bool result = false;
 	const bool isNaval = pBuildingType->Naval;
+	const int newW = pBuildingType->GetFoundationWidth();
+	const int newH = pBuildingType->GetFoundationHeight(false);
+	const int baseAdjacency = pBuildingType->Adjacent + adjacencyBonus;
+	const int navalYardAdjacency = RulesClass::Instance->AINavalYardAdjacency + adjacencyBonus;
+
+	// Check if new building is a simple solid rectangular box
+	bool newIsSimpleBox = true;
+	int count = 0;
+	CellStruct const* newOccupy = pBuildingType->GetFoundationData(true);
+	while (newOccupy != nullptr && newOccupy->X != REFRESH_EOL && newOccupy->Y != REFRESH_EOL)
+	{
+		if (newOccupy->X < 0 || newOccupy->X >= newW || newOccupy->Y < 0 || newOccupy->Y >= newH)
+		{
+			newIsSimpleBox = false;
+		}
+		count++;
+		newOccupy++;
+	}
+	if (count != newW * newH)
+	{
+		newIsSimpleBox = false;
+	}
 
 	for (size_t i = 0; i < ExtData::AdjacencyAnchorCount; i++)
 	{
-		const BuildingClass* pOtherBuilding = ExtData::AdjacencyAnchors[i];
-		int adjacency = pBuildingType->Adjacent + adjacencyBonus;
-
-		if (isNaval && pOtherBuilding->Type->ConstructionYard)
-			adjacency = RulesClass::Instance->AINavalYardAdjacency + adjacencyBonus;
-
-		const int otherW = pOtherBuilding->Type->GetFoundationWidth();
-		const int otherH = pOtherBuilding->Type->GetFoundationHeight(false);
-		const CellStruct origin = pOtherBuilding->GetMapCoords();
-
-		const int newW = pBuildingType->GetFoundationWidth();
-		const int newH = pBuildingType->GetFoundationHeight(false);
+		const auto& anchor = ExtData::AdjacencyAnchors[i];
+		const int adjacency = (isNaval && anchor.IsConYard) ? navalYardAdjacency : baseAdjacency;
 
 		// Fast Bounding Box check:
-		const int dx = (cell.X > origin.X + otherW - 1) ? (cell.X - (origin.X + otherW - 1)) 
-		             : ((cell.X + newW - 1 < origin.X) ? (origin.X - (cell.X + newW - 1)) : 0);
+		const int dx = (cell.X > anchor.Origin.X + anchor.Width - 1) ? (cell.X - (anchor.Origin.X + anchor.Width - 1)) 
+		             : ((cell.X + newW - 1 < anchor.Origin.X) ? (anchor.Origin.X - (cell.X + newW - 1)) : 0);
 		if (dx > adjacency)
 			continue;
 
-		const int dy = (cell.Y > origin.Y + otherH - 1) ? (cell.Y - (origin.Y + otherH - 1)) 
-		             : ((cell.Y + newH - 1 < origin.Y) ? (origin.Y - (cell.Y + newH - 1)) : 0);
+		const int dy = (cell.Y > anchor.Origin.Y + anchor.Height - 1) ? (cell.Y - (anchor.Origin.Y + anchor.Height - 1)) 
+		             : ((cell.Y + newH - 1 < anchor.Origin.Y) ? (anchor.Origin.Y - (cell.Y + newH - 1)) : 0);
 		if (dy > adjacency)
 			continue;
 
-		if (!result)
+		// If both are simple solid rectangles, the Bounding Box is 100% exact!
+		if (newIsSimpleBox && anchor.IsSimpleBox)
 		{
-			bool pass = false;
-			CellStruct const* occupy = pOtherBuilding->GetFoundationData(true);
-			while (occupy->X != REFRESH_EOL && occupy->Y != REFRESH_EOL)
+			return true;
+		}
+
+		// Fallback for irregular foundations
+		CellStruct const* occupy = anchor.pBuilding->GetFoundationData(true);
+		while (occupy != nullptr && occupy->X != REFRESH_EOL && occupy->Y != REFRESH_EOL)
+		{
+			const CellStruct sum = anchor.Origin + *occupy;
+			CellStruct const* curNewOccupy = pBuildingType->GetFoundationData(true);
+			while (curNewOccupy != nullptr && curNewOccupy->X != REFRESH_EOL && curNewOccupy->Y != REFRESH_EOL)
 			{
-				const CellStruct sum = origin + *occupy;
-				CellStruct const* newOccupy = pBuildingType->GetFoundationData(true);
-				while (newOccupy->X != REFRESH_EOL && newOccupy->Y != REFRESH_EOL)
+				const CellStruct newSum = cell + *curNewOccupy;
+				const int xDiff = std::abs(newSum.X - sum.X);
+				const int yDiff = std::abs(newSum.Y - sum.Y);
+
+				if (xDiff <= adjacency && yDiff <= adjacency)
 				{
-					const CellStruct newSum = cell + *newOccupy;
-
-					int xDiff = std::abs(newSum.X - sum.X);
-					int yDiff = std::abs(newSum.Y - sum.Y);
-
-					if (xDiff <= adjacency && yDiff <= adjacency)
-					{
-						pass = true;
-						break;
-					}
-
-					newOccupy++;
+					return true;
 				}
 
-				if (pass)
-					break;
-
-				occupy++;
+				curNewOccupy++;
 			}
-
-			if (pass)
-				result = true;
+			occupy++;
 		}
 	}
 
-	return result;
+	return false;
 }
 
 /**
@@ -3064,7 +2978,37 @@ void BuildingExt::PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass
 
 			if (include && ExtData::AdjacencyAnchorCount < std::size(ExtData::AdjacencyAnchors))
 			{
-				ExtData::AdjacencyAnchors[ExtData::AdjacencyAnchorCount] = pOtherBuilding;
+				const int otherW = pOtherBuilding->Type->GetFoundationWidth();
+				const int otherH = pOtherBuilding->Type->GetFoundationHeight(false);
+				const CellStruct origin = pOtherBuilding->GetMapCoords();
+				const bool isConYard = pOtherBuilding->Type->ConstructionYard;
+
+				// Check if simple solid rectangle
+				bool isSimpleBox = true;
+				int count = 0;
+				CellStruct const* occupy = pOtherBuilding->GetFoundationData(true);
+				while (occupy != nullptr && occupy->X != REFRESH_EOL && occupy->Y != REFRESH_EOL)
+				{
+					if (occupy->X < 0 || occupy->X >= otherW || occupy->Y < 0 || occupy->Y >= otherH)
+					{
+						isSimpleBox = false;
+					}
+					count++;
+					occupy++;
+				}
+				if (count != otherW * otherH)
+				{
+					isSimpleBox = false;
+				}
+
+				ExtData::AdjacencyAnchors[ExtData::AdjacencyAnchorCount] = {
+					pOtherBuilding,
+					origin,
+					otherW,
+					otherH,
+					isConYard,
+					isSimpleBox
+				};
 				ExtData::AdjacencyAnchorCount++;
 			}
 		}

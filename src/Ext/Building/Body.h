@@ -74,7 +74,17 @@ public:
 
 	static BuildingClass* OurBuildings[1000];
 	static size_t OurBuildingCount;
-	static BuildingClass* AdjacencyAnchors[1000];
+
+	struct CachedAdjacencyAnchor
+	{
+		const BuildingClass* pBuilding;
+		CellStruct Origin;
+		int Width;
+		int Height;
+		bool IsConYard;
+		bool IsSimpleBox;
+	};
+	static CachedAdjacencyAnchor AdjacencyAnchors[1000];
 	static size_t AdjacencyAnchorCount;
 	static CellStruct AttackCell;
 	static CellStruct AttackSourceCell;
