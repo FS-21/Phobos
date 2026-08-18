@@ -1273,6 +1273,14 @@ bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool
 	if (!pItemExt)
 		return false;
 
+	// RequiredHouses and ForbiddenHouses
+	if (pHouse->Type)
+	{
+		const auto ownerBits = 1u << pHouse->Type->ArrayIndex;
+		if (!(pItemExt->RequiredHouses & ownerBits) || (pItemExt->ForbiddenHouses & ownerBits))
+			return false;
+	}
+
 	// Secret lab tech: item must have been explicitly unlocked if ConsideredSecretLabTech
 	if (!skipSecretLabChecks && pItemExt->ConsideredSecretLabTech.Get() && !pHouse->HasFromSecretLab(pItem))
 		return false;

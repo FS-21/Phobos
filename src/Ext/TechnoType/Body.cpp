@@ -1317,6 +1317,9 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 		}
 	}
 
+	this->RequiredHouses = pINI->ReadHouseTypesList(pSection, "RequiredHouses", this->RequiredHouses);
+	this->ForbiddenHouses = pINI->ReadHouseTypesList(pSection, "ForbiddenHouses", this->ForbiddenHouses);
+
 	// Prerequisite with Generic Prerequisites support
 	if (pINI->ReadString(pSection, "Prerequisite", "", Phobos::readBuffer) > 0)
 	{
@@ -1780,6 +1783,8 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->ConsideredSecretLabTech)
 		.Process(this->Secret_RequiredHouses)
 		.Process(this->Secret_ForbiddenHouses)
+		.Process(this->RequiredHouses)
+		.Process(this->ForbiddenHouses)
 
 		.Process(this->BuildLimitGroup_Types)
 		.Process(this->BuildLimitGroup_Nums)

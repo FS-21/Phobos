@@ -165,6 +165,29 @@ static int CountBuildingOfGroup(HouseClass *pHouse, BuildingTypeClass *pType) {
   return count;
 }
 
+static int CountOwnedBuildingInstances(HouseClass *pHouse, BuildingTypeClass *pType) {
+  if (pHouse == nullptr || pType == nullptr)
+    return 0;
+
+  int count = pHouse->ActiveBuildingTypes.GetItemCount(pType->ArrayIndex);
+  const auto pExt = BuildingTypeExt::ExtMap.Find(pType);
+  const bool isUpgrade = (pType->PowersUpBuilding[0] != '\0') || (pExt && !pExt->PowersUp_Buildings.empty());
+  if (isUpgrade) {
+    int upgradeCount = 0;
+    for (const auto pBld : pHouse->Buildings) {
+      if (pBld && pBld->IsAlive && !pBld->InLimbo) {
+        for (int i = 0; i < 3; i++) {
+          if (pBld->Upgrades[i] == pType) {
+            upgradeCount++;
+          }
+        }
+      }
+    }
+    count += upgradeCount;
+  }
+  return count;
+}
+
 static const BuildingTypeClass *GetBasicDefense(HouseClass *pHouse,
                                                 TechTreeTypeClass *pTechTree) {
   if (pTechTree == nullptr || pHouse == nullptr)
@@ -1327,12 +1350,41 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass *pHouse,
     return false;
   }
 
-  if (!pHouse->CanExpectToBuild(pBuildingType))
-    return false;
+  // Check RequiredHouses and ForbiddenHouses (Ares compatibility)
+  const auto pTechExt = TechnoTypeExt::Fetch(pBuildingType);
+  if (pTechExt && pHouse->Type) {
+    const auto ownerBits = 1u << pHouse->Type->ArrayIndex;
+    if (!(pTechExt->RequiredHouses & ownerBits) ||
+        (pTechExt->ForbiddenHouses & ownerBits)) {
+      return false;
+    }
+  }
 
-  if (pBuildingType->TechLevel > pHouse->TechLevel ||
-      (pBuildingType->TechLevel < 0 && pBuildingType->TechLevel != -1))
+  // Check if this house is in the Owner list
+  if (!pHouse->InOwners(pBuildingType)) {
     return false;
+  }
+
+  // Check TechLevel
+  if (pBuildingType->TechLevel != -1) {
+    if (pBuildingType->TechLevel > pHouse->TechLevel ||
+        pBuildingType->TechLevel < 0)
+      return false;
+  }
+
+  // Ensure the house owns at least one construction yard or building factory
+  bool hasBuildingFactory = false;
+  for (const auto pBld : pHouse->Buildings) {
+    if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type &&
+        (pBld->Type->ConstructionYard ||
+         pBld->Type->Factory == AbstractType::BuildingType)) {
+      hasBuildingFactory = true;
+      break;
+    }
+  }
+  if (!hasBuildingFactory) {
+    return false;
+  }
 
   // Per-session build limit
   if (pBuildingType->BuildLimit < 0 &&
@@ -1343,9 +1395,43 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass *pHouse,
 
   // Normal build limit: BuildLimit=0 means no limit in RA2 convention.
   if (pBuildingType->BuildLimit > 0 &&
-      pHouse->ActiveBuildingTypes.GetItemCount(pBuildingType->ArrayIndex) >=
+      CountOwnedBuildingInstances(pHouse, pBuildingType) >=
           pBuildingType->BuildLimit) {
     return false;
+  }
+
+  // If this is a building upgrade, ensure we have an eligible parent building with a free slot
+  const bool isUpgrade = (pBuildingType->PowersUpBuilding[0] != '\0') || (pExt && !pExt->PowersUp_Buildings.empty());
+  if (isUpgrade) {
+    bool hasFreeSlot = false;
+    for (const auto pBld : pHouse->Buildings) {
+      if (pBld && pBld->IsAlive && !pBld->InLimbo) {
+        bool isEligibleParent = false;
+        if (pBuildingType->PowersUpBuilding[0] != '\0' && _stricmp(pBld->Type->ID, pBuildingType->PowersUpBuilding) == 0) {
+          isEligibleParent = true;
+        }
+        if (!isEligibleParent && pExt != nullptr) {
+          for (const auto pTargetType : pExt->PowersUp_Buildings) {
+            if (pTargetType == pBld->Type) {
+              isEligibleParent = true;
+              break;
+            }
+          }
+        }
+
+        if (isEligibleParent) {
+          const int maxSlots = pBld->Type->Upgrades > 0 ? pBld->Type->Upgrades : pBld->Type->PowersUpToLevel;
+          if (pBld->UpgradeLevel < maxSlots) {
+            hasFreeSlot = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!hasFreeSlot) {
+      return false;
+    }
   }
 
   if (!GameModeOptionsClass::Instance.SWAllowed) {
@@ -1534,6 +1620,154 @@ prereqsChecked:
   return true;
 }
 
+BuildingTypeClass* HouseExt::AdvAI_Find_Next_Buildable_Prerequisite(
+    HouseClass* pHouse,
+    BuildingTypeClass* pTargetType,
+    BuildingTypeClass* pRootGoalType,
+    std::set<BuildingTypeClass*>& visited,
+    bool& outIsSubPrereq)
+{
+  if (pHouse == nullptr || pTargetType == nullptr)
+    return nullptr;
+
+  if (visited.count(pTargetType) > 0)
+    return nullptr; // Cycle / recursion loop protection
+
+  visited.insert(pTargetType);
+
+  const auto pExt = TechnoTypeExt::Fetch(pTargetType);
+  if (pExt == nullptr)
+    return nullptr;
+
+  // Helper lambda to collect all candidate buildings from a prerequisite integer token
+  auto getBuildingsForPrereqToken = [&](int token) -> std::vector<BuildingTypeClass*> {
+    std::vector<BuildingTypeClass*> candidates;
+    if (token >= 0 && token < BuildingTypeClass::Array.Count) {
+      BuildingTypeClass* pBld = BuildingTypeClass::Array[token];
+      if (pBld != nullptr)
+        candidates.push_back(pBld);
+    } else if (token < 0) {
+      // Generic prerequisite token
+      int absIdx = std::abs(token);
+      if (absIdx < RulesExt::Global()->GenericPrerequisites.Count) {
+        const auto& genList = RulesExt::Global()->GenericPrerequisites.GetItem(absIdx);
+        for (int bldIdx : genList) {
+          if (bldIdx >= 0 && bldIdx < BuildingTypeClass::Array.Count) {
+            BuildingTypeClass* pBld = BuildingTypeClass::Array[bldIdx];
+            if (pBld != nullptr)
+              candidates.push_back(pBld);
+          }
+        }
+      }
+    }
+    return candidates;
+  };
+
+  struct ListEvalResult {
+    bool isSatisfied;
+    std::vector<BuildingTypeClass*> directlyBuildable;
+    std::vector<BuildingTypeClass*> subBuildable;
+  };
+
+  auto evaluatePrereqList = [&](const auto& tokenList) -> ListEvalResult {
+    ListEvalResult res;
+    res.isSatisfied = true;
+
+    for (int token : tokenList) {
+      auto possibleBuildings = getBuildingsForPrereqToken(token);
+      if (possibleBuildings.empty())
+        continue;
+
+      // Check if house already owns any building fulfilling this token
+      bool owned = false;
+      for (auto pBld : possibleBuildings) {
+        if (pHouse->ActiveBuildingTypes.GetItemCount(pBld->ArrayIndex) > 0) {
+          owned = true;
+          break;
+        }
+      }
+
+      if (owned)
+        continue;
+
+      res.isSatisfied = false;
+
+      std::vector<BuildingTypeClass*> directlyBuildableForToken;
+      std::vector<BuildingTypeClass*> subBuildableForToken;
+
+      for (auto pBld : possibleBuildings) {
+        if (AdvAI_Can_Build_Building(pHouse, pBld, true)) {
+          directlyBuildableForToken.push_back(pBld);
+        } else {
+          bool isSub = false;
+          BuildingTypeClass* pSub = AdvAI_Find_Next_Buildable_Prerequisite(
+              pHouse, pBld, pRootGoalType, visited, isSub);
+          if (pSub != nullptr) {
+            subBuildableForToken.push_back(pSub);
+          }
+        }
+      }
+
+      if (!directlyBuildableForToken.empty()) {
+        int r = ScenarioClass::Instance->Random.RandomRanged(
+            0, static_cast<int>(directlyBuildableForToken.size()) - 1);
+        res.directlyBuildable.push_back(directlyBuildableForToken[r]);
+      } else if (!subBuildableForToken.empty()) {
+        int r = ScenarioClass::Instance->Random.RandomRanged(
+            0, static_cast<int>(subBuildableForToken.size()) - 1);
+        res.subBuildable.push_back(subBuildableForToken[r]);
+      }
+    }
+
+    return res;
+  };
+
+  std::vector<BuildingTypeClass*> allDirectlyBuildable;
+  std::vector<BuildingTypeClass*> allSubBuildable;
+
+  if (!pExt->Prerequisite_ListVector.empty()) {
+    for (const auto& altList : pExt->Prerequisite_ListVector) {
+      auto listRes = evaluatePrereqList(altList);
+      if (!listRes.isSatisfied) {
+        allDirectlyBuildable.insert(allDirectlyBuildable.end(),
+                                    listRes.directlyBuildable.begin(),
+                                    listRes.directlyBuildable.end());
+        allSubBuildable.insert(allSubBuildable.end(),
+                               listRes.subBuildable.begin(),
+                               listRes.subBuildable.end());
+      }
+    }
+  } else if (!pExt->Prerequisite.empty()) {
+    auto listRes = evaluatePrereqList(pExt->Prerequisite);
+    if (!listRes.isSatisfied) {
+      allDirectlyBuildable.insert(allDirectlyBuildable.end(),
+                                  listRes.directlyBuildable.begin(),
+                                  listRes.directlyBuildable.end());
+      allSubBuildable.insert(allSubBuildable.end(),
+                             listRes.subBuildable.begin(),
+                             listRes.subBuildable.end());
+    }
+  }
+
+  // 1. If we have directly buildable candidates, pick one at random
+  if (!allDirectlyBuildable.empty()) {
+    outIsSubPrereq = (pTargetType != pRootGoalType);
+    int r = ScenarioClass::Instance->Random.RandomRanged(
+        0, static_cast<int>(allDirectlyBuildable.size()) - 1);
+    return allDirectlyBuildable[r];
+  }
+
+  // 2. If we have sub-buildable candidates, pick one at random
+  if (!allSubBuildable.empty()) {
+    outIsSubPrereq = true;
+    int r = ScenarioClass::Instance->Random.RandomRanged(
+        0, static_cast<int>(allSubBuildable.size()) - 1);
+    return allSubBuildable[r];
+  }
+
+  return nullptr;
+}
+
 bool HouseExt::AdvAI_Is_Recently_Attacked(HouseClass *pHouse) {
   return pHouse->LATime + TICKS_PER_MINUTE > Unsorted::CurrentFrame;
 }
@@ -1709,6 +1943,17 @@ static ThreatCategory GetActiveThreatCategory(HouseClass *pHouse,
     return ThreatCategory::Infantry;
 
   return ThreatCategory::None;
+}
+
+static int GetRealPowerDrain(const HouseClass *pHouse) {
+  int realPowerDrain = pHouse->PowerDrain;
+  for (const auto pBld : BuildingClass::Array) {
+    if (pBld && pBld->Owner == pHouse && pBld->IsAlive && !pBld->InLimbo &&
+        pBld->Type && pBld->Type->TogglePower && !pBld->StuffEnabled) {
+      realPowerDrain += pBld->Type->PowerDrain;
+    }
+  }
+  return realPowerDrain;
 }
 
 const BuildingTypeClass *
@@ -1951,34 +2196,34 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
     if (!pHouse->PowerBlackoutTimer.HasTimeLeft()) {
       for (const auto pBuilding : BuildingClass::Array) {
         if (pBuilding->Owner == pHouse && pBuilding->IsAlive &&
-            !pBuilding->InLimbo && !pBuilding->IsUnderEMP() &&
-            !pBuilding->HasPower) {
-          hasUnpoweredBuildings = true;
-          break;
+            !pBuilding->InLimbo && !pBuilding->IsUnderEMP()) {
+          if (!pBuilding->HasPower ||
+              (pBuilding->Type->TogglePower && !pBuilding->StuffEnabled)) {
+            hasUnpoweredBuildings = true;
+            break;
+          }
         }
       }
     }
 
-    /*for (const auto pBuilding : BuildingClass::Array)
-    {
-            if (pBuilding->Owner == pHouse && !pBuilding->IsPowerOnline())
-            {
-                    hasUnpoweredBuildings = true;
-                    break;
-            }
-    }*/
+    const int realDrain = GetRealPowerDrain(pHouse);
+    const int reqSurplus = pHouse->PowerSurplus > 0
+                               ? pHouse->PowerSurplus
+                               : RulesClass::Instance->PowerSurplus;
+    const bool isLowOnPower =
+        (pHouse->PowerOutput - realDrain < reqSurplus) || hasUnpoweredBuildings;
 
-    if (!isUnderThreat && Unsorted::CurrentFrame > 5000 &&
-        (pHouse->PowerOutput - GetRealPowerDrain(pHouse) < 100 ||
-         hasUnpoweredBuildings)) {
+    if (isLowOnPower) {
       const BuildingTypeClass *pOurAdvancedPowerPlant =
           pPrimaryTechTree->GetRandomBuildable(
               TechTreeTypeClass::BuildType::BuildAdvancedPower,
               canBuildFunction);
       if (pOurAdvancedPowerPlant != nullptr) {
-        Debug::Log("AdvAI: Making AI build %s because it is out of power and "
-                   "can build an adv. power plant\n",
-                   pOurAdvancedPowerPlant->Name);
+        Debug::Log("AdvAI: House %d making AI build %s because real power surplus is low "
+                   "(Output: %d, Real Drain: %d, Req Surplus: %d, HasUnpowered: %s)\n",
+                   pHouse->ArrayIndex, pOurAdvancedPowerPlant->Name,
+                   pHouse->PowerOutput, realDrain, reqSurplus,
+                   hasUnpoweredBuildings ? "YES" : "NO");
         return pOurAdvancedPowerPlant;
       }
 
@@ -1986,9 +2231,11 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
           pPrimaryTechTree->GetRandomBuildable(
               TechTreeTypeClass::BuildType::BuildPower, canBuildFunction);
       if (pOurPowerPlant != nullptr) {
-        Debug::Log("AdvAI: Making AI build %s because it is out of power and "
-                   "can only build a basic power plant\n",
-                   pOurPowerPlant->Name);
+        Debug::Log("AdvAI: House %d making AI build %s because real power surplus is low "
+                   "(Output: %d, Real Drain: %d, Req Surplus: %d, HasUnpowered: %s)\n",
+                   pHouse->ArrayIndex, pOurPowerPlant->Name,
+                   pHouse->PowerOutput, realDrain, reqSurplus,
+                   hasUnpoweredBuildings ? "YES" : "NO");
         return pOurPowerPlant;
       }
     }
@@ -2167,14 +2414,31 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
       }
     }
 
+    bool allyRecentlyAttacked = false;
+    for (const auto pOtherOwner : HouseClass::Array) {
+      if (pOtherOwner != pHouse && pHouse->IsAlliedWith(pOtherOwner)) {
+        if (pOtherOwner->LATime > 0 &&
+            pOtherOwner->LATime + paranoiaDuration + 1800 >
+                Unsorted::CurrentFrame) {
+          const auto otherHouseExt = ExtMap.Find(pOtherOwner);
+          if (otherHouseExt &&
+              otherHouseExt->LastAttackedBuildingCoords.X > 0) {
+            allyRecentlyAttacked = true;
+            break;
+          }
+        }
+      }
+    }
+
     const bool wasRecentlyAttacked =
-        pHouse->LATime + paranoiaDuration > Unsorted::CurrentFrame;
+        pHouse->LATime + paranoiaDuration > Unsorted::CurrentFrame ||
+        allyRecentlyAttacked;
     const bool isParanoid =
         (isUnderThreat && hasEnemiesClose) || wasRecentlyAttacked;
 
     bool hasSomethingToProtect = false;
     for (const auto pBld : pHouse->Buildings) {
-      if (pBld && pBld->Type && pBld->Type->ToProtect) {
+      if (pBld && pBld->Type && (pBld->Type->ToProtect || TechTreeTypeClass::TotalBuildSuperWeapon.contains(pBld->Type))) {
         bool isProtected = false;
         for (const auto pOther : pHouse->Buildings) {
           if (pOther && pOther->IsAlive && !pOther->InLimbo && pOther != pBld) {
@@ -2392,26 +2656,79 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
           pDefense->AntiAirValue;
     }
 
-    int optimalDefenseValue = refineryCount + powerPlantCount / 4;
-    if (houseExt->NextExpansionPointLocation.X > 0 &&
-        houseExt->NextExpansionPointLocation.Y > 0)
-      optimalDefenseValue += 5;
-
-    // Special check for early infantry rushes.
-    // If we are getting infantry-rushed, build more anti-infantry defenses.
-    if (isUnderThreat && enemyAircraftValue == 0) {
-      if (hasEnemiesClose)
-        optimalDefenseValue *= 3;
-      else
-        optimalDefenseValue = (optimalDefenseValue * 3) / 2;
+    // Base optimal defense calculation:
+    // Difficulty base: Easy = 40, Normal = 80, Hard = 120.
+    int diffBase = 80;
+    int baseAA = 30;
+    if (pHouse->AIDifficulty == AIDifficulty::Easy) {
+      diffBase = 40;
+      baseAA = 15;
+    } else if (pHouse->AIDifficulty == AIDifficulty::Hard) {
+      diffBase = 120;
+      baseAA = 50;
     }
 
-    // If we are under attack, prioritize defense.
-    if (wasRecentlyAttacked)
-      optimalDefenseValue += 2;
+    // Scale with economy and base footprint
+    int baseOptimalDefenseValue =
+        diffBase + (refineryCount * 25) + (powerPlantCount * 10);
+    if (houseExt->NextExpansionPointLocation.X > 0 &&
+        houseExt->NextExpansionPointLocation.Y > 0)
+      baseOptimalDefenseValue += 60;
 
-    // Scale this to match the values used in vanilla in Rules.
-    optimalDefenseValue *= 15;
+    bool isInfantryAttacker = false;
+    bool isVehicleAttacker = false;
+    bool isAirAttacker = false;
+
+    if (houseExt->LastAttackerType != nullptr && wasRecentlyAttacked) {
+      auto const pAttackerType = houseExt->LastAttackerType;
+      if (pAttackerType->WhatAmI() == AbstractType::AircraftType) {
+        isAirAttacker = true;
+      } else if (pAttackerType->WhatAmI() == AbstractType::InfantryType) {
+        auto const pInfType = specific_cast<InfantryTypeClass *>(pAttackerType);
+        if (pInfType && (pInfType->ConsideredAircraft || pInfType->JumpJet ||
+                         pInfType->MovementZone == MovementZone::Fly)) {
+          isAirAttacker = true;
+        } else {
+          isInfantryAttacker = true;
+        }
+      } else if (pAttackerType->WhatAmI() == AbstractType::UnitType) {
+        auto const pUnitType = specific_cast<UnitTypeClass *>(pAttackerType);
+        if (pUnitType && (pUnitType->ConsideredAircraft || pUnitType->JumpJet ||
+                          pUnitType->MovementZone == MovementZone::Fly ||
+                          pUnitType->Spawns != nullptr)) {
+          isAirAttacker = true;
+        } else {
+          isVehicleAttacker = true;
+        }
+      } else {
+        isVehicleAttacker = true;
+      }
+    }
+
+    int antiInfOptimal = baseOptimalDefenseValue;
+    int antiVehOptimal = baseOptimalDefenseValue;
+    int antiAirOptimal = baseAA + (refineryCount * 15);
+
+    if (isNavalMode) {
+      antiAirOptimal *= 3; // Triple optimal AA requirements in naval mode
+    }
+
+    if (isInfantryAttacker) {
+      antiInfOptimal *= 3;
+    } else if (hasEnemiesClose && isUnderThreat) {
+      antiInfOptimal = (antiInfOptimal * 3) / 2;
+    }
+
+    if (isVehicleAttacker) {
+      antiVehOptimal *= 3;
+    } else if (hasEnemiesClose && isUnderThreat) {
+      antiVehOptimal = (antiVehOptimal * 3) / 2;
+    }
+
+    if (wasRecentlyAttacked) {
+      antiInfOptimal += 30;
+      antiVehOptimal += 30;
+    }
 
     // Check which type of defense is most desperately needed.
     int antiInfDeficiency = 0;
@@ -2419,25 +2736,59 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
     int antiAirDeficiency = 0;
 
     if (ourAntiInfantryDefense != nullptr) {
-      antiInfDeficiency = optimalDefenseValue - antiInfantryDefenseValue;
+      antiInfDeficiency = antiInfOptimal - antiInfantryDefenseValue;
     }
 
     if (ourAntiVehicleDefense != nullptr) {
-      antiVehicleDeficiency = optimalDefenseValue - antiVehicleDefenseValue;
+      antiVehicleDeficiency = antiVehOptimal - antiVehicleDefenseValue;
     }
 
     if (ourAntiAirDefense != nullptr) {
-      // Dynamically scale AA deficiency against enemy aircraft/jumpjets without an artificial cap
-      antiAirDeficiency = enemyAircraftValue - antiAirDefenseValue;
+      // Dynamically scale AA deficiency with baseline requirements + enemy aircraft/jumpjets
+      const int targetAAValue = antiAirOptimal + (isNavalMode ? enemyAircraftValue * 3 : enemyAircraftValue);
+      antiAirDeficiency = targetAAValue - antiAirDefenseValue;
+      if (isAirAttacker) {
+        antiAirDeficiency += isNavalMode ? 180 : 60; // Immediate AA priority boost on recent aerial attack!
+      }
+      if (isNavalMode && antiAirDeficiency > 0) {
+        antiAirDeficiency *= 3; // Triple AA deficiency in naval mode
+      }
+    }
+
+    // Also honor AIBuildCounts explicitly configured on individual defense structures
+    for (const auto pDef : pPrimaryTechTree->BuildDefense) {
+      if (pDef) {
+        const int targetCount = GetTargetBuildCount(pDef, -1, pPrimaryTechTree);
+        if (targetCount > 0) {
+          const int owned =
+              pHouse->ActiveBuildingTypes.GetItemCount(pDef->ArrayIndex);
+          if (owned < targetCount) {
+            const int missing = targetCount - owned;
+            if (pDef->AntiInfantryValue > 0)
+              antiInfDeficiency = std::max(
+                  antiInfDeficiency, missing * pDef->AntiInfantryValue);
+            if (pDef->AntiArmorValue > 0)
+              antiVehicleDeficiency = std::max(
+                  antiVehicleDeficiency, missing * pDef->AntiArmorValue);
+            if (pDef->AntiAirValue > 0) {
+              int missingAA = missing * pDef->AntiAirValue;
+              if (isNavalMode)
+                missingAA *= 3;
+              antiAirDeficiency =
+                  std::max(antiAirDeficiency, missingAA);
+            }
+          }
+        }
+      }
     }
 
     if (LogVerboseAdvAI) {
       Debug::Log(
-          "AdvAI Eval: House %d Totals -> OptVal: %d, InfVal: %d (Defic: %d), "
+          "AdvAI Eval: House %d Totals -> BaseOptVal: %d, InfVal: %d (Defic: %d), "
           "ArmVal: %d (Defic: %d), AirVal: %d (Defic: %d). BestCandidates -> "
           "Inf: %s (Own: %d, Limit: %d), Arm: %s (Own: %d, Limit: %d), Air: %s "
           "(Own: %d, Limit: %d)\n",
-          pHouse->ArrayIndex, optimalDefenseValue, antiInfantryDefenseValue,
+          pHouse->ArrayIndex, baseOptimalDefenseValue, antiInfantryDefenseValue,
           antiInfDeficiency, antiVehicleDefenseValue, antiVehicleDeficiency,
           antiAirDefenseValue, antiAirDeficiency,
           ourAntiInfantryDefense ? ourAntiInfantryDefense->ID : "None",
@@ -2457,10 +2808,52 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
           ourAntiAirDefense ? ourAntiAirDefense->BuildLimit : 0);
     }
 
+    // Detect if any active enemy has built a superweapon (Arms Race Trigger)
+    bool enemyHasSuperWeapon = false;
+    for (const auto pEnemyHouse : HouseClass::Array) {
+      if (pEnemyHouse && pEnemyHouse != pHouse &&
+          !pHouse->IsAlliedWith(pEnemyHouse) && !pEnemyHouse->Defeated) {
+        for (const auto pBld : pEnemyHouse->Buildings) {
+          if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type) {
+            if (TechTreeTypeClass::TotalBuildSuperWeapon.contains(
+                    pBld->Type) ||
+                pBld->Type->SuperWeapon != -1) {
+              enemyHasSuperWeapon = true;
+              break;
+            }
+          }
+        }
+        if (enemyHasSuperWeapon)
+          break;
+      }
+    }
+
+    // Check if we still have uncompleted tech center or primary superweapons
+    bool missingCoreTechOrSW = false;
+    if (GameModeOptionsClass::Instance.SWAllowed) {
+      if (!hasTechCenter) {
+        missingCoreTechOrSW = true;
+      } else if (!pPrimaryTechTree->BuildSuperWeapon.empty()) {
+        for (const auto pSW : pPrimaryTechTree->BuildSuperWeapon) {
+          if (pSW && !pSW->Unbuildable &&
+              CountOwnedBuildingInstances(pHouse, pSW) <
+                  GetTargetBuildCount(pSW, 1, pPrimaryTechTree)) {
+            missingCoreTechOrSW = true;
+            break;
+          }
+        }
+      }
+    }
+
     // Prioritize defense construction if paranoid or if we have undefended
     // nodes to protect!
     if (isParanoid || hasSomethingToProtect) {
-      const int rollChance = isParanoid ? 85 : 70;
+      // In Arms Race or when tech/superweapons are needed, 50% probability allows advancing the tech tree
+      int rollChance = isParanoid ? 85 : 70;
+      if (enemyHasSuperWeapon || missingCoreTechOrSW) {
+        rollChance = isParanoid ? 50 : 35;
+      }
+
       if (ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance) {
         int maxDeficiency = 0;
         const BuildingTypeClass *pBestDefense = nullptr;
@@ -2523,6 +2916,35 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
     if (!isUnderThreat || (antiInfDeficiency <= 0 && antiAirDeficiency <= 0)) {
       bool isNavalMode = RulesExt::Global()->AdvancedAI_NavalMode;
 
+      const bool hasSuperWeaponGoal =
+          GameModeOptionsClass::Instance.SWAllowed &&
+          (!pPrimaryTechTree->BuildSuperWeapon.empty() ||
+           !pPrimaryTechTree->BuildSuperWeaponRandom.empty());
+
+      bool hasCompletedSuperWeapons = true;
+      if (hasSuperWeaponGoal) {
+        for (const auto pSW : pPrimaryTechTree->BuildSuperWeapon) {
+          if (pSW != nullptr && !pSW->Unbuildable) {
+            const int target = GetTargetBuildCount(pSW, 1, pPrimaryTechTree);
+            if (CountOwnedBuildingInstances(pHouse, pSW) < target) {
+              hasCompletedSuperWeapons = false;
+              break;
+            }
+          }
+        }
+        if (hasCompletedSuperWeapons) {
+          for (const auto pSW : pPrimaryTechTree->BuildSuperWeaponRandom) {
+            if (pSW != nullptr && !pSW->Unbuildable) {
+              const int target = GetTargetBuildCount(pSW, 1, pPrimaryTechTree);
+              if (CountOwnedBuildingInstances(pHouse, pSW) < target) {
+                hasCompletedSuperWeapons = false;
+                break;
+              }
+            }
+          }
+        }
+      }
+
       auto evaluateWeaponsFactory = [&]() -> const BuildingTypeClass * {
         // If we don't have enough weapons factories, then build one.
         int ourWFCount = 0;
@@ -2563,12 +2985,12 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
         else if (refineryCount >= 6)
           optimalWeaponsCount = refineryCount / 2;
 
-        if (!hasTechCenter)
+        if (!hasTechCenter || !hasCompletedSuperWeapons)
           optimalWeaponsCount = 1;
 
         // Competitive scaling: if a competitor has at least double our War
         // Factory count, increase our limit
-        if (maxWFOwnedByOther >= ourWFCount * 2 && ourWFCount > 0) {
+        if (hasCompletedSuperWeapons && maxWFOwnedByOther >= ourWFCount * 2 && ourWFCount > 0) {
           optimalWeaponsCount = std::max(optimalWeaponsCount,
                                          static_cast<size_t>(ourWFCount + 1));
         }
@@ -2654,11 +3076,11 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
             optimalNavalYardCount = 2;
         }
 
-        if (!hasTechCenter)
+        if (!hasTechCenter || !hasCompletedSuperWeapons)
           optimalNavalYardCount = 1;
 
         // Scale up to match competitors if they build more
-        if (static_cast<size_t>(enemyNavalYardsCount) > optimalNavalYardCount) {
+        if (hasCompletedSuperWeapons && static_cast<size_t>(enemyNavalYardsCount) > optimalNavalYardCount) {
           optimalNavalYardCount = static_cast<size_t>(enemyNavalYardsCount);
         }
 
@@ -2674,7 +3096,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
           else if (pHouse->AIDifficulty == AIDifficulty::Hard)
             maxNavalYardLimit = 9;
 
-          if (enemyNavalYardsCount > 0 &&
+          if (hasCompletedSuperWeapons && enemyNavalYardsCount > 0 &&
               pHouse->AIDifficulty == AIDifficulty::Hard) {
             maxNavalYardLimit =
                 std::max(maxNavalYardLimit,
@@ -2737,7 +3159,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
 
       if (isMobileOnly) {
         minRefineryCount = AdvAI_GetMobileRefineryTargetCount(pHouse);
-      } else if (!hasTechCenter) {
+      } else if (!hasTechCenter || !hasCompletedSuperWeapons) {
         minRefineryCount = std::min(minRefineryCount, 2);
       }
 
@@ -2760,6 +3182,129 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
                      pRefineryToBuild->Name, minRefineryCount);
           return pRefineryToBuild;
         }
+      }
+    }
+
+    // If we have no radar, then build one
+    for (const auto pRadarType : pPrimaryTechTree->BuildRadar) {
+      if (pRadarType == nullptr || pRadarType->Unbuildable)
+        continue;
+      const int targetCount =
+          GetTargetBuildCount(pRadarType, 1, pPrimaryTechTree);
+      const int ownedCount =
+          CountOwnedBuildingInstances(pHouse, pRadarType);
+      if (ownedCount < targetCount &&
+          AdvAI_Can_Build_Building(pHouse, pRadarType, true, true)) {
+        Debug::Log("AdvAI: Making AI build %s because it does not have enough "
+                   "radars (Owned: %d, Wanted: %d).\n",
+                   pRadarType->Name, ownedCount, targetCount);
+        return pRadarType;
+      }
+    }
+
+    // If we have no tech center, then build one
+    for (const auto pTechType : pPrimaryTechTree->BuildTech) {
+      if (pTechType == nullptr || pTechType->Unbuildable)
+        continue;
+      const int targetCount =
+          GetTargetBuildCount(pTechType, 1, pPrimaryTechTree);
+      const int ownedCount =
+          CountOwnedBuildingInstances(pHouse, pTechType);
+      if (ownedCount < targetCount &&
+          AdvAI_Can_Build_Building(pHouse, pTechType, true, true)) {
+        Debug::Log("AdvAI: Making AI build %s because it does not have enough "
+                   "tech centers (Owned: %d, Wanted: %d).\n",
+                   pTechType->Name, ownedCount, targetCount);
+        return pTechType;
+      }
+    }
+
+    // BuildSuperWeapon evaluation
+    // If superweapons are allowed in the game mode, evaluate the sequential list of BuildSuperWeapon
+    if (GameModeOptionsClass::Instance.SWAllowed &&
+        !pPrimaryTechTree->BuildSuperWeapon.empty()) {
+      for (const auto pSWType : pPrimaryTechTree->BuildSuperWeapon) {
+        if (pSWType == nullptr || pSWType->Unbuildable)
+          continue;
+
+        if (BuildingTypeExt::HasDisableableSuperWeapons(pSWType) &&
+            !GameModeOptionsClass::Instance.SWAllowed)
+          continue;
+
+        const int targetCount =
+            GetTargetBuildCount(pSWType, 1, pPrimaryTechTree);
+        const int ownedCount =
+            CountOwnedBuildingInstances(pHouse, pSWType);
+
+        if (ownedCount >= targetCount)
+          continue; // Already built to target count, move to next in list
+
+        // Check if the superweapon can be built directly right now
+        if (AdvAI_Can_Build_Building(pHouse, pSWType, true)) {
+          Debug::Log("AdvAI: House %d targeting SuperWeapon %s -> All "
+                     "prerequisites met. Making AI build %s!\n",
+                     pHouse->ArrayIndex, pSWType->Name, pSWType->Name);
+          return pSWType;
+        } else {
+          // Prerequisites missing: recursively resolve next buildable
+          // prerequisite in dependency tree
+          std::set<BuildingTypeClass *> visited;
+          bool isSubPrereq = false;
+          BuildingTypeClass *pPrereqToBuild =
+              AdvAI_Find_Next_Buildable_Prerequisite(
+                  pHouse, pSWType, pSWType, visited, isSubPrereq);
+
+          if (pPrereqToBuild != nullptr) {
+            if (isSubPrereq) {
+              Debug::Log("AdvAI: House %d targeting SuperWeapon %s -> Needs "
+                         "sub-prerequisite %s. Making AI build %s.\n",
+                         pHouse->ArrayIndex, pSWType->Name,
+                         pPrereqToBuild->Name, pPrereqToBuild->Name);
+            } else {
+              Debug::Log("AdvAI: House %d targeting SuperWeapon %s -> Needs "
+                         "prerequisite %s. Making AI build %s.\n",
+                         pHouse->ArrayIndex, pSWType->Name,
+                         pPrereqToBuild->Name, pPrereqToBuild->Name);
+            }
+            return pPrereqToBuild;
+          }
+        }
+      }
+    }
+
+    // BuildSuperWeaponRandom evaluation
+    // If superweapons are allowed, evaluate the pool of random superweapons
+    if (GameModeOptionsClass::Instance.SWAllowed &&
+        !pPrimaryTechTree->BuildSuperWeaponRandom.empty()) {
+      std::vector<BuildingTypeClass *> swRandomCandidates;
+      for (const auto pSWType : pPrimaryTechTree->BuildSuperWeaponRandom) {
+        if (pSWType == nullptr || pSWType->Unbuildable)
+          continue;
+
+        if (BuildingTypeExt::HasDisableableSuperWeapons(pSWType) &&
+            !GameModeOptionsClass::Instance.SWAllowed)
+          continue;
+
+        const int targetCount =
+            GetTargetBuildCount(pSWType, 1, pPrimaryTechTree);
+        const int ownedCount =
+            CountOwnedBuildingInstances(pHouse, pSWType);
+
+        if (ownedCount < targetCount &&
+            AdvAI_Can_Build_Building(pHouse, pSWType, true)) {
+          swRandomCandidates.push_back(pSWType);
+        }
+      }
+
+      if (!swRandomCandidates.empty()) {
+        BuildingTypeClass *pChosenSW =
+            swRandomCandidates[ScenarioClass::Instance->Random.RandomRanged(
+                0, static_cast<int>(swRandomCandidates.size()) - 1)];
+
+        Debug::Log("AdvAI: Making AI build %s from BuildSuperWeaponRandom.\n",
+                   pChosenSW->Name);
+
+        return pChosenSW;
       }
     }
 
@@ -2839,31 +3384,6 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
             "probability roll (%d%%), continuing base expansion.\n",
             pHouse->ArrayIndex, 100 - rollChance);
       }
-    }
-    // If we have no radar, then build one
-    const BuildingTypeClass *pRadarToBuild =
-        AdvAI_BuildAtLeastNOfSideAndMInTotal(
-            pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildRadar,
-            1, 1);
-    if (pRadarToBuild != nullptr) {
-      Debug::Log(
-          "AdvAI: Making AI build %s because it does not have a radar.\n",
-          pRadarToBuild->Name);
-
-      return pRadarToBuild;
-    }
-
-    // If we have no tech center, then build one
-    const BuildingTypeClass *pTechCenterToBuild =
-        AdvAI_BuildAtLeastNOfSideAndMInTotal(
-            pHouse, pPrimaryTechTree, TechTreeTypeClass::BuildType::BuildTech,
-            1, 1);
-    if (pTechCenterToBuild != nullptr) {
-      Debug::Log(
-          "AdvAI: Making AI build %s because it does not have a tech center.\n",
-          pTechCenterToBuild->Name);
-
-      return pTechCenterToBuild;
     }
 
     // If we don't have enough helipads/airfields (based on total aircraft docks
@@ -2953,13 +3473,27 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
           minInitialDocks = 8;
       }
 
-      size_t optimalHelipadCount = 1;
-      if (totalCurrentDocks < minInitialDocks) {
-        optimalHelipadCount = totalHelipadsOwned + 1;
-      } else {
-        optimalHelipadCount = (totalAircraft >= totalCurrentDocks)
-                                  ? totalHelipadsOwned + 1
-                                  : totalHelipadsOwned;
+      // If the modder explicitly configured AIBuildCounts / AIExtraCounts on the helipad type,
+      // use that to define the initial minimum target docks/helipads
+      const int explicitHelipadTarget =
+          GetTargetBuildCount(const_cast<BuildingTypeClass *>(pHelipadType), -1,
+                              pPrimaryTechTree);
+      if (explicitHelipadTarget > 0) {
+        minInitialDocks = explicitHelipadTarget * docksPerHelipad;
+      }
+
+      const size_t targetInitialHelipads =
+          (static_cast<size_t>(minInitialDocks) + docksPerHelipad - 1) / docksPerHelipad;
+
+      size_t optimalHelipadCount = targetInitialHelipads;
+
+      // If the AI has met its initial helipad target, only scale up if aircraft capacity is full
+      if (totalHelipadsOwned >= targetInitialHelipads) {
+        if (totalCurrentDocks > 0 && totalAircraft >= totalCurrentDocks) {
+          optimalHelipadCount = totalHelipadsOwned + 1;
+        } else {
+          optimalHelipadCount = totalHelipadsOwned;
+        }
       }
 
       // Competitive scaling for helipads under naval mode (non-Easy
@@ -2989,6 +3523,12 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
           optimalHelipadCount = maxHelipadCount;
       }
 
+      // If explicit BuildLimit is defined, respect it as an absolute cap
+      if (pHelipadType->BuildLimit > 0 &&
+          optimalHelipadCount > static_cast<size_t>(pHelipadType->BuildLimit)) {
+        optimalHelipadCount = static_cast<size_t>(pHelipadType->BuildLimit);
+      }
+
       const BuildingTypeClass *pHelipadToBuild =
           AdvAI_BuildAtLeastNOfSideAndMInTotal(
               pHouse, pPrimaryTechTree,
@@ -3011,11 +3551,215 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
       }
     }
 
-    // BuildSupport network evaluation.
-    // 90% chance to skip (10% entry chance) to avoid starving other tech
-    // decisions.
+    // PreBuildOtherRandom evaluation
+    if (!pPrimaryTechTree->PreBuildOtherRandom.empty()) {
+      std::vector<BuildingTypeClass *> preRandomCandidates;
+      for (const auto pBldType : pPrimaryTechTree->PreBuildOtherRandom) {
+        if (!pBldType || pBldType->Unbuildable)
+          continue;
+
+        const bool canBuild = canBuildFunction(pBldType);
+        const int targetCount =
+            GetTargetBuildCount(pBldType, 1, pPrimaryTechTree);
+        const int ownedCount =
+            CountOwnedBuildingInstances(pHouse, pBldType);
+
+        if (canBuild && ownedCount < targetCount) {
+          preRandomCandidates.push_back(pBldType);
+        }
+      }
+
+      if (!preRandomCandidates.empty()) {
+        BuildingTypeClass *pChosen =
+            preRandomCandidates[ScenarioClass::Instance->Random.RandomRanged(
+                0, static_cast<int>(preRandomCandidates.size()) - 1)];
+
+        Debug::Log("AdvAI: Making AI build %s from PreBuildOtherRandom.\n",
+                   pChosen->Name);
+
+        return pChosen;
+      }
+    }
+
+    for (const auto buildOtherPair : pPrimaryTechTree->BuildOtherCountMap) {
+      if (!AdvAI_Can_Build_Building(pHouse, buildOtherPair.first, true)) {
+        continue;
+      }
+
+      const int targetCount = GetTargetBuildCount(
+          buildOtherPair.first, buildOtherPair.second, pPrimaryTechTree);
+      if (CountOwnedBuildingInstances(
+              pHouse, buildOtherPair.first) < targetCount) {
+        Debug::Log("AdvAI: Making AI build %s because it does not have enough "
+                   "of it. Wanted: %d\n",
+                   buildOtherPair.first->Name, targetCount);
+
+        return buildOtherPair.first;
+      }
+    }
+
+    // PostBuildOtherRandom evaluation (evaluated BEFORE generic AIBuildThis array loop)
+    if (!pPrimaryTechTree->PostBuildOtherRandom.empty()) {
+      std::vector<BuildingTypeClass *> postRandomCandidates;
+      for (const auto pBldType : pPrimaryTechTree->PostBuildOtherRandom) {
+        if (!pBldType || pBldType->Unbuildable)
+          continue;
+
+        const bool canBuild = canBuildFunction(pBldType);
+        const int targetCount =
+            GetTargetBuildCount(pBldType, 1, pPrimaryTechTree);
+        const int ownedCount =
+            CountOwnedBuildingInstances(pHouse, pBldType);
+
+        if (canBuild && ownedCount < targetCount) {
+          postRandomCandidates.push_back(pBldType);
+        }
+      }
+
+      if (!postRandomCandidates.empty()) {
+        BuildingTypeClass *pChosen =
+            postRandomCandidates[ScenarioClass::Instance->Random.RandomRanged(
+                0, static_cast<int>(postRandomCandidates.size()) - 1)];
+
+        Debug::Log("AdvAI: Making AI build %s from PostBuildOtherRandom.\n",
+                   pChosen->Name);
+
+        return pChosen;
+      }
+    }
+
+    // BuildAlliedFallback evaluation
+    // If BuildOffAlly is enabled and BuildAlliedFallback has structures defined,
+    // establish or maintain a fallback outpost in one designated ally's base.
+    const bool buildOffAlly = SessionClass::IsCampaign() ? RulesClass::Instance->BuildOffAlly : GameModeOptionsClass::Instance.BuildOffAlly;
+    if (buildOffAlly && !pPrimaryTechTree->BuildAlliedFallback.empty() && pHouse->Balance > 2000) {
+      struct AllyCandidate {
+        HouseClass* pHouse;
+        bool HasEnemyLandConnection;
+        int DefenseScore;
+        double DistanceToUs;
+      };
+      std::vector<AllyCandidate> validAllies;
+
+      HouseClass* pPrimaryEnemy = nullptr;
+      if (pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < HouseClass::Array.Count) {
+        pPrimaryEnemy = HouseClass::Array[pHouse->EnemyHouseIndex];
+      }
+      if (pPrimaryEnemy == nullptr) {
+        pPrimaryEnemy = BuildingExt::Find_Closest_Opponent(pHouse);
+      }
+
+      for (const auto pOtherHouse : HouseClass::Array) {
+        if (pOtherHouse == pHouse || !pHouse->IsAlliedWith(pOtherHouse) || pOtherHouse->Defeated)
+          continue;
+
+        int allyBldCount = 0;
+        int allyDefCount = 0;
+        for (const auto pBld : pOtherHouse->Buildings) {
+          if (pBld && pBld->IsAlive && !pBld->InLimbo) {
+            allyBldCount++;
+            if (TechTreeTypeClass::TotalBuildDefense.count(pBld->Type) > 0)
+              allyDefCount++;
+          }
+        }
+        if (allyBldCount < 2)
+          continue; // Base too weak or eliminated
+
+        bool hasEnemyLandConn = false;
+        if (pPrimaryEnemy != nullptr) {
+          hasEnemyLandConn = GeneralUtils::AreZonesConnected(pOtherHouse->Base_Center(), pPrimaryEnemy->Base_Center(), MovementZone::Normal);
+        }
+
+        double distToUs = pHouse->Base_Center().DistanceFrom(pOtherHouse->Base_Center());
+        validAllies.push_back({ pOtherHouse, hasEnemyLandConn, allyDefCount, distToUs });
+      }
+
+      // Sort allies: prefer enemy land connection first, then defense score, then closest
+      std::sort(validAllies.begin(), validAllies.end(), [](const AllyCandidate& a, const AllyCandidate& b) {
+        if (a.HasEnemyLandConnection != b.HasEnemyLandConnection)
+          return a.HasEnemyLandConnection > b.HasEnemyLandConnection;
+        if (a.DefenseScore != b.DefenseScore)
+          return a.DefenseScore > b.DefenseScore;
+        return a.DistanceToUs < b.DistanceToUs;
+      });
+
+      if (!validAllies.empty()) {
+        HouseClass* pChosenAlly = validAllies[0].pHouse;
+        const bool limitByGroupAs = pPrimaryTechTree->BuildAlliedFallback_LimitByGroupAs;
+
+        std::vector<BuildingTypeClass*> neededCandidates;
+        std::set<std::string> satisfiedGroups;
+
+        for (const auto pFallbackType : pPrimaryTechTree->BuildAlliedFallback) {
+          if (pFallbackType == nullptr || pFallbackType->Unbuildable)
+            continue;
+
+          const char* targetGroupID = GetGroupAsID(pFallbackType);
+          if (limitByGroupAs && satisfiedGroups.count(targetGroupID) > 0)
+            continue;
+
+          int countNearAlly = 0;
+          for (const auto pBld : pHouse->Buildings) {
+            if (pBld && pBld->IsAlive && !pBld->InLimbo) {
+              bool match = false;
+              if (limitByGroupAs) {
+                match = (_stricmp(GetGroupAsID(pBld->Type), targetGroupID) == 0);
+              } else {
+                match = (pBld->Type == pFallbackType);
+              }
+
+              if (match) {
+                for (const auto pAllyBld : pChosenAlly->Buildings) {
+                  if (pAllyBld && pAllyBld->IsAlive && !pAllyBld->InLimbo) {
+                    if (pBld->GetMapCoords().DistanceFrom(pAllyBld->GetMapCoords()) <= 25.0) {
+                      countNearAlly++;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          const int targetCount = 1;
+
+          if (countNearAlly >= targetCount) {
+            if (limitByGroupAs) {
+              satisfiedGroups.insert(targetGroupID);
+            }
+          } else {
+            neededCandidates.push_back(pFallbackType);
+          }
+        }
+
+        if (!neededCandidates.empty()) {
+          // Choose randomly among the missing fallback candidates
+          const int chosenIdx = ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(neededCandidates.size()) - 1);
+          BuildingTypeClass* pChosenFallbackType = neededCandidates[chosenIdx];
+
+          if (AdvAI_Can_Build_Building(pHouse, pChosenFallbackType, true)) {
+            houseExt->TargetAlliedFallbackHouse = pChosenAlly;
+            Debug::Log("AdvAI: House %d establishing/restoring Allied Fallback Outpost at House %d base -> Making AI build %s (chosen randomly from %d candidates, LimitByGroupAs: %s).\n",
+              pHouse->ArrayIndex, pChosenAlly->ArrayIndex, pChosenFallbackType->Name, static_cast<int>(neededCandidates.size()), limitByGroupAs ? "true" : "false");
+            return pChosenFallbackType;
+          } else {
+            std::set<BuildingTypeClass*> visited;
+            bool isSubPrereq = false;
+            BuildingTypeClass* pPrereq = AdvAI_Find_Next_Buildable_Prerequisite(pHouse, pChosenFallbackType, pChosenFallbackType, visited, isSubPrereq);
+            if (pPrereq != nullptr) {
+              houseExt->TargetAlliedFallbackHouse = pChosenAlly;
+              Debug::Log("AdvAI: House %d targeting Allied Fallback %s -> Needs prerequisite %s. Making AI build %s.\n",
+                pHouse->ArrayIndex, pChosenFallbackType->Name, pPrereq->Name, pPrereq->Name);
+              return pPrereq;
+            }
+          }
+        }
+      }
+    }
+
+    // BuildSupport network evaluation (evaluated towards the end, to protect established base)
     const bool skipSupport =
-        ScenarioClass::Instance->Random.RandomRanged(0, 99) < 90;
+        ScenarioClass::Instance->Random.RandomRanged(0, 99) < 80;
 
     if (!skipSupport) {
       const auto canBuildSupportFunction = [pHouse](BuildingTypeClass *pType) {
@@ -3034,8 +3778,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
           auto it = houseExt->GroupPlacementCooldowns.find(groupID);
           if (it != houseExt->GroupPlacementCooldowns.end()) {
             if (Unsorted::CurrentFrame < it->second) {
-              continue; // Excluded from candidates due to active progressive
-                        // cooldown
+              continue; // Excluded from candidates due to active progressive cooldown
             }
           }
 
@@ -3095,7 +3838,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
                     pBld->Type->Factory != AbstractType::None ||
                     pBld->Type->Refinery || pBld->Type->Radar ||
                     pBld->Type->Helipad ||
-                    (pBld->Type->TechLevel > 0 && !pBld->Type->IsBaseDefense &&
+                    ((pBld->Type->TechLevel > 0 || pBld->Type->TechLevel == -1) && !pBld->Type->IsBaseDefense &&
                      GetSupportRadiusType(pBld->Type) ==
                          SupportRadiusType::None);
 
@@ -3140,111 +3883,41 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
       }
     }
 
-    // PreBuildOtherRandom evaluation
-    const auto buildablePreRandomTypes = pPrimaryTechTree->GetBuildable(
-        TechTreeTypeClass::BuildType::PreBuildOtherRandom, canBuildFunction);
-    if (!buildablePreRandomTypes.empty()) {
-      // 50% skip chance per cycle
-      const bool skipPreRandom =
-          ScenarioClass::Instance->Random.RandomRanged(0, 99) < 50;
-      if (!skipPreRandom) {
-        std::vector<BuildingTypeClass *> preRandomCandidates;
-        for (const auto pBldType : buildablePreRandomTypes) {
+    // Are there other AIBuildThis=yes buildings that we haven't built yet?
+    if (pPrimaryTechTree->AllowNonListedBuildings) {
+      for (const auto pBuilding : BuildingTypeClass::Array) {
+        // Exclude defenses here, no need to build defenses just to have them
+        if (TechTreeTypeClass::TotalBuildDefense.contains(pBuilding)) {
+          continue;
+        }
+
+        // Exclude helipads here, as they are handled dynamically based on
+        // occupied docks
+        if (pBuilding->Helipad) {
+          continue;
+        }
+
+        if (AdvAI_Can_Build_Building(pHouse, pBuilding, true)) {
           const int targetCount =
-              GetTargetBuildCount(pBldType, -1, pPrimaryTechTree);
-          if (pHouse->ActiveBuildingTypes.GetItemCount(pBldType->ArrayIndex) <
-              targetCount) {
-            preRandomCandidates.push_back(pBldType);
+              GetTargetBuildCount(pBuilding, 1, pPrimaryTechTree);
+          if (CountOwnedBuildingInstances(pHouse, pBuilding) < targetCount) {
+            // Special case for the slave miner to count its undeployed form
+            if (RulesClass::Instance->PrerequisiteProcAlternate != nullptr &&
+                pBuilding->UndeploysInto ==
+                    RulesClass::Instance->PrerequisiteProcAlternate &&
+                pHouse->ActiveUnitTypes.GetItemCount(
+                    RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex) >
+                    0)
+              continue;
+
+            Debug::Log("AdvAI: Making AI build %s because it has AIBuildThis=yes "
+                       "(Owned: %d, Wanted: %d).\n",
+                       pBuilding->Name,
+                       CountOwnedBuildingInstances(pHouse, pBuilding),
+                       targetCount);
+            return pBuilding;
           }
         }
-
-        if (!preRandomCandidates.empty()) {
-          BuildingTypeClass *pChosen =
-              preRandomCandidates[ScenarioClass::Instance->Random.RandomRanged(
-                  0, static_cast<int>(preRandomCandidates.size()) - 1)];
-
-          Debug::Log("AdvAI: Making AI build %s from PreBuildOtherRandom.\n",
-                     pChosen->Name);
-
-          return pChosen;
-        }
-      }
-    }
-
-    for (const auto buildOtherPair : pPrimaryTechTree->BuildOtherCountMap) {
-      if (!AdvAI_Can_Build_Building(pHouse, buildOtherPair.first, true)) {
-        continue;
-      }
-
-      const int targetCount = GetTargetBuildCount(
-          buildOtherPair.first, buildOtherPair.second, pPrimaryTechTree);
-      if (pHouse->ActiveBuildingTypes.GetItemCount(
-              buildOtherPair.first->ArrayIndex) < targetCount) {
-        Debug::Log("AdvAI: Making AI build %s because it does not have enough "
-                   "of it. Wanted: %d\n",
-                   buildOtherPair.first->Name, targetCount);
-
-        return buildOtherPair.first;
-      }
-    }
-
-    // Are there other AIBuildThis=yes buildings that we haven't built yet?
-    for (const auto pBuilding : BuildingTypeClass::Array) {
-      // Exclude defenses here, no need to build defenses just to have them
-      if (TechTreeTypeClass::TotalBuildDefense.contains(pBuilding)) {
-        continue;
-      }
-
-      // Exclude helipads here, as they are handled dynamically based on
-      // occupied docks
-      if (pBuilding->Helipad) {
-        continue;
-      }
-
-      if (pBuilding->AIBasePlanningSide == pPrimaryTechTree->SideIndex &&
-          AdvAI_Can_Build_Building(pHouse, pBuilding, true)) {
-        if (pHouse->ActiveBuildingTypes.GetItemCount(pBuilding->ArrayIndex) <
-            1) {
-          // Special case for the slave miner to count its undeployed form
-          if (RulesClass::Instance->PrerequisiteProcAlternate != nullptr &&
-              pBuilding->UndeploysInto ==
-                  RulesClass::Instance->PrerequisiteProcAlternate &&
-              pHouse->ActiveUnitTypes.GetItemCount(
-                  RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex) >
-                  0)
-            continue;
-
-          Debug::Log("AdvAI: Making AI build %s because it has AIBuildThis=yes "
-                     "and the AI has none.\n",
-                     pBuilding->Name);
-          return pBuilding;
-        }
-      }
-    }
-
-    // PostBuildOtherRandom evaluation
-    const auto buildablePostRandomTypes = pPrimaryTechTree->GetBuildable(
-        TechTreeTypeClass::BuildType::PostBuildOtherRandom, canBuildFunction);
-    if (!buildablePostRandomTypes.empty()) {
-      std::vector<BuildingTypeClass *> postRandomCandidates;
-      for (const auto pBldType : buildablePostRandomTypes) {
-        const int targetCount =
-            GetTargetBuildCount(pBldType, -1, pPrimaryTechTree);
-        if (pHouse->ActiveBuildingTypes.GetItemCount(pBldType->ArrayIndex) <
-            targetCount) {
-          postRandomCandidates.push_back(pBldType);
-        }
-      }
-
-      if (!postRandomCandidates.empty()) {
-        BuildingTypeClass *pChosen =
-            postRandomCandidates[ScenarioClass::Instance->Random.RandomRanged(
-                0, static_cast<int>(postRandomCandidates.size()) - 1)];
-
-        Debug::Log("AdvAI: Making AI build %s from PostBuildOtherRandom.\n",
-                   pChosen->Name);
-
-        return pChosen;
       }
     }
 
@@ -3371,8 +4044,8 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
 
       const int targetCount = GetTargetBuildCount(
           buildOtherPair.first, buildOtherPair.second, pSecondaryTechTree);
-      if (pHouse->ActiveBuildingTypes.GetItemCount(
-              buildOtherPair.first->ArrayIndex) < targetCount) {
+      if (CountOwnedBuildingInstances(
+              pHouse, buildOtherPair.first) < targetCount) {
         Debug::Log("AdvAI: Making AI build %s because it does not have enough "
                    "of it. Wanted: %d\n",
                    buildOtherPair.first->Name, targetCount);
@@ -3383,42 +4056,44 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
   }
 
   // Are there other AIBuildThis=yes buildings that we haven't built yet?
-  for (const auto pBuilding : BuildingTypeClass::Array) {
-    // Exclude defenses here, no need to build defenses just to have them
-    if (TechTreeTypeClass::TotalBuildDefense.contains(pBuilding)) {
-      continue;
-    }
+  if (!pPrimaryTechTree || pPrimaryTechTree->AllowNonListedBuildings) {
+    for (const auto pBuilding : BuildingTypeClass::Array) {
+      // Exclude defenses here, no need to build defenses just to have them
+      if (TechTreeTypeClass::TotalBuildDefense.contains(pBuilding)) {
+        continue;
+      }
 
-    // Exclude power plants here, as power plants are built dynamically
-    // on-demand when power surplus is low
-    if (TechTreeTypeClass::TotalBuildPower.contains(pBuilding) ||
-        TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBuilding)) {
-      continue;
-    }
+      // Exclude power plants here, as power plants are built dynamically
+      // on-demand when power surplus is low
+      if (TechTreeTypeClass::TotalBuildPower.contains(pBuilding) ||
+          TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBuilding)) {
+        continue;
+      }
 
-    // Exclude helipads here, as they are handled dynamically based on occupied
-    // docks
-    if (pBuilding->Helipad) {
-      continue;
-    }
+      // Exclude helipads here, as they are handled dynamically based on occupied
+      // docks
+      if (pBuilding->Helipad) {
+        continue;
+      }
 
-    if (AdvAI_Can_Build_Building(pHouse, pBuilding, true)) {
-      const int targetCount = GetTargetBuildCount(pBuilding, 1, nullptr);
-      if (pHouse->ActiveBuildingTypes.GetItemCount(pBuilding->ArrayIndex) <
-          targetCount) {
-        // Special case for the slave miner to count its undeployed form
-        if (RulesClass::Instance->PrerequisiteProcAlternate != nullptr &&
-            pBuilding->UndeploysInto ==
-                RulesClass::Instance->PrerequisiteProcAlternate &&
-            pHouse->ActiveUnitTypes.GetItemCount(
-                RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex) >
-                0)
-          continue;
+      if (AdvAI_Can_Build_Building(pHouse, pBuilding, true)) {
+        const int targetCount = GetTargetBuildCount(pBuilding, 1, pPrimaryTechTree);
+        if (CountOwnedBuildingInstances(pHouse, pBuilding) <
+            targetCount) {
+          // Special case for the slave miner to count its undeployed form
+          if (RulesClass::Instance->PrerequisiteProcAlternate != nullptr &&
+              pBuilding->UndeploysInto ==
+                  RulesClass::Instance->PrerequisiteProcAlternate &&
+              pHouse->ActiveUnitTypes.GetItemCount(
+                  RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex) >
+                  0)
+            continue;
 
-        Debug::Log("AdvAI: Making AI build %s because it has AIBuildThis=yes "
-                   "and the AI does not have enough of it. Wanted: %d\n",
-                   pBuilding->Name, targetCount);
-        return pBuilding;
+          Debug::Log("AdvAI: Making AI build %s because it has AIBuildThis=yes "
+                     "and the AI does not have enough of it. Wanted: %d\n",
+                     pBuilding->Name, targetCount);
+          return pBuilding;
+        }
       }
     }
   }
@@ -3585,6 +4260,36 @@ HouseExt::AdvAI_Get_Building_To_Build(HouseClass *pHouse) {
       AdvAI_Evaluate_Get_Best_Building(pHouse);
 
   if (buildChoice == nullptr) {
+    // Check if we still need power plants because real power surplus is low or buildings are unpowered
+    const int realDrain = GetRealPowerDrain(pHouse);
+    const int requiredSurplus = pHouse->PowerSurplus > 0
+                                    ? pHouse->PowerSurplus
+                                    : RulesClass::Instance->PowerSurplus;
+    if (pHouse->PowerOutput - realDrain < requiredSurplus) {
+      const auto pTechTree = TechTreeTypeClass::GetAnySuitable(pHouse);
+      if (pTechTree != nullptr) {
+        auto canBuildFunction = [pHouse](BuildingTypeClass *pType) {
+          return AdvAI_Can_Build_Building(pHouse, pType, true, true);
+        };
+
+        const BuildingTypeClass *pAdvPower = pTechTree->GetRandomBuildable(
+            TechTreeTypeClass::BuildType::BuildAdvancedPower, canBuildFunction);
+        if (pAdvPower != nullptr) {
+          Debug::Log("AdvAI: House %d building %s to restore full power surplus for deactivated structures.\n",
+                     pHouse->ArrayIndex, pAdvPower->Name);
+          return pAdvPower;
+        }
+
+        const BuildingTypeClass *pPower = pTechTree->GetRandomBuildable(
+            TechTreeTypeClass::BuildType::BuildPower, canBuildFunction);
+        if (pPower != nullptr) {
+          Debug::Log("AdvAI: House %d building %s to restore full power surplus for deactivated structures.\n",
+                     pHouse->ArrayIndex, pPower->Name);
+          return pPower;
+        }
+      }
+    }
+
     return nullptr;
   }
 
@@ -3626,17 +4331,6 @@ HouseExt::AdvAI_Get_Building_To_Build(HouseClass *pHouse) {
   }
 
   return buildChoice;
-}
-
-static int GetRealPowerDrain(const HouseClass *pHouse) {
-  int realPowerDrain = pHouse->PowerDrain;
-  for (const auto pBld : BuildingClass::Array) {
-    if (pBld && pBld->Owner == pHouse && pBld->IsAlive && !pBld->InLimbo &&
-        pBld->Type && pBld->Type->TogglePower &&
-        (!pBld->HasPower || !pBld->StuffEnabled))
-      realPowerDrain += pBld->Type->PowerDrain;
-  }
-  return realPowerDrain;
 }
 
 static bool IsLocatedInAlliedBase(BuildingClass *pBuilding,
@@ -3816,7 +4510,7 @@ void HouseExt::AdvAI_Economy_Upkeep(HouseClass *pHouse) {
     // hasSomethingToProtect scan
     bool hasSomethingToProtect = false;
     for (const auto pBld : pHouse->Buildings) {
-      if (pBld && pBld->Type && pBld->Type->ToProtect) {
+      if (pBld && pBld->Type && (pBld->Type->ToProtect || TechTreeTypeClass::TotalBuildSuperWeapon.contains(pBld->Type))) {
         bool isProtected = false;
         for (const auto pOther : pHouse->Buildings) {
           if (pOther && pOther->IsAlive && !pOther->InLimbo && pOther != pBld) {
@@ -3965,7 +4659,7 @@ void HouseExt::AdvAI_Economy_Upkeep(HouseClass *pHouse) {
                 for (const auto pTarget : pHouse->Buildings) {
                   if (pTarget && pTarget->IsAlive && !pTarget->InLimbo &&
                       pTarget->Type) {
-                    if (pTarget->Type->ToProtect) {
+                    if (pTarget->Type->ToProtect || TechTreeTypeClass::TotalBuildSuperWeapon.contains(pTarget->Type)) {
                       if (pBld->GetMapCoords().DistanceFromSquared(
                               pTarget->GetMapCoords()) < 49.0) {
                         int defenders = 0;

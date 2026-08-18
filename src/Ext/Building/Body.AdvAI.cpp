@@ -770,7 +770,7 @@ static bool CanAIBuildOffThisAllyBuilding(HouseClass* pOwner, BuildingTypeClass*
 	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
 	const auto pOtherOwner = pAlliedBuilding->Owner;
 
-	// 1. Defenses (joint defense): Allowed if the ally was recently attacked (and has valid target coords)
+	// 1. Defenses (joint defense): Allowed if the ally was recently attacked
 	const bool isDefense = pBuildingType->IsBaseDefense || pBuildingType->GetWeapon(0u, false).WeaponType != nullptr || pBuildingType->GetWeapon(1u, false).WeaponType != nullptr;
 	if (isDefense && pOtherOwner != nullptr && pOtherOwner->LATime > 0)
 	{
@@ -778,43 +778,31 @@ static bool CanAIBuildOffThisAllyBuilding(HouseClass* pOwner, BuildingTypeClass*
 
 		if (pOtherOwner->LATime + otherParanoia + 1800 > Unsorted::CurrentFrame)
 		{
-			const auto otherHouseExt = HouseExt::ExtMap.Find(pOtherOwner);
-			if (otherHouseExt->LastAttackedBuildingCoords.X > 0)
-				return true;
+			return true;
 		}
 	}
 
-	// 2. Backup factories & Service Depots: Allowed in late game for security
-	if (Unsorted::CurrentFrame > 9900)
+	// 2. Allied Fallback Outpost: Allowed for structures in BuildAlliedFallback
+	if (TechTreeTypeClass::TotalBuildAlliedFallback.count(pBuildingType) > 0)
 	{
-		const auto pTechTree = TechTreeTypeClass::GetAnySuitable(pOwner);
-		if (pTechTree != nullptr)
+		if (pOtherOwner != nullptr && houseExt != nullptr && houseExt->TargetAlliedFallbackHouse == pOtherOwner)
 		{
-			const bool isWF = pBuildingType->Factory == AbstractType::UnitType && !pBuildingType->Naval;
-			const bool isBarracks = pBuildingType->Factory == AbstractType::InfantryType;
+			return true;
+		}
 
-			bool isDepot = false;
-			for (const auto pType : pTechTree->BuildServiceDepot)
+		if (pOtherOwner != nullptr)
+		{
+			for (const auto pOtherBld : pOtherOwner->Buildings)
 			{
-				if (pBuildingType == pType)
+				if (pOtherBld && pOtherBld->IsAlive && !pOtherBld->InLimbo)
 				{
-					isDepot = true;
-					break;
+					if (TechTreeTypeClass::TotalBuildDefense.count(pOtherBld->Type) > 0)
+					{
+						if (pAlliedBuilding->GetMapCoords().DistanceFrom(pOtherBld->GetMapCoords()) <= 15.0)
+							return true;
+					}
 				}
 			}
-
-			bool isTech = false;
-			for (const auto pType : pTechTree->BuildTech)
-			{
-				if (pBuildingType == pType)
-				{
-					isTech = true;
-					break;
-				}
-			}
-
-			if (isWF || isBarracks || isDepot || isTech)
-				return true;
 		}
 	}
 
@@ -831,15 +819,37 @@ static bool CanAIBuildOffThisAllyBuilding(HouseClass* pOwner, BuildingTypeClass*
 			return true;
 	}
 
+	// 4. SuperWeapons: Allowed in allied base if the ally has defenses covering the area
+	if (TechTreeTypeClass::TotalBuildSuperWeapon.count(pBuildingType) > 0)
+	{
+		if (pOtherOwner != nullptr)
+		{
+			for (const auto pOtherBld : pOtherOwner->Buildings)
+			{
+				if (pOtherBld && pOtherBld->IsAlive && !pOtherBld->InLimbo)
+				{
+					if (TechTreeTypeClass::TotalBuildDefense.count(pOtherBld->Type) > 0)
+					{
+						if (pAlliedBuilding->GetMapCoords().DistanceFrom(pOtherBld->GetMapCoords()) <= 12.0)
+							return true;
+					}
+				}
+			}
+		}
+	}
+
 	return false;
 }
 
-RectangleStruct BuildingExt::Get_Base_Rect(HouseClass* pHouse, int adjacency, int width, int height, BuildingTypeClass* pBuildingType)
+RectangleStruct BuildingExt::Get_Base_Rect(HouseClass* pHouse, int adjacency, int width, int height, BuildingTypeClass* pBuildingType, bool includeAllies)
 {
 	int x = INT_MAX;
 	int y = INT_MAX;
 	int right = INT_MIN;
 	int bottom = INT_MIN;
+
+	const auto houseExt = HouseExt::ExtMap.Find(pHouse);
+	const HouseClass* pTargetAlly = (houseExt != nullptr) ? houseExt->TargetAlliedFallbackHouse : nullptr;
 
 	for (const auto building : BuildingClass::Array)
 	{
@@ -848,11 +858,22 @@ RectangleStruct BuildingExt::Get_Base_Rect(HouseClass* pHouse, int adjacency, in
 			continue;
 		}
 
-		const bool isOwner = building->Owner == pHouse;
-		const bool isEligibleAlly = building->Owner != nullptr && pHouse->IsAlliedWith(building->Owner) && building->Type->EligibileForAllyBuilding &&
-			CanAIBuildOffThisAllyBuilding(pHouse, pBuildingType, building);
+		bool shouldInclude = false;
+		if (pTargetAlly != nullptr)
+		{
+			if (building->Owner == pTargetAlly || building->Owner == pHouse)
+				shouldInclude = true;
+		}
+		else
+		{
+			const bool isOwner = building->Owner == pHouse;
+			const bool isEligibleAlly = includeAllies && building->Owner != nullptr && pHouse->IsAlliedWith(building->Owner) && building->Type->EligibileForAllyBuilding &&
+				CanAIBuildOffThisAllyBuilding(pHouse, pBuildingType, building);
 
-		if (isOwner || isEligibleAlly)
+			shouldInclude = isOwner || isEligibleAlly;
+		}
+
+		if (shouldInclude)
 		{
 			const CellStruct buildingCell = building->GetMapCoords();
 			if (buildingCell.X < x)
@@ -869,6 +890,16 @@ RectangleStruct BuildingExt::Get_Base_Rect(HouseClass* pHouse, int adjacency, in
 			if (buildingBottom > bottom)
 				bottom = buildingBottom;
 		}
+	}
+
+	if (x == INT_MAX || y == INT_MAX)
+	{
+		// Fallback to Base_Center if no buildings were found
+		const CellStruct center = pHouse->Base_Center();
+		x = center.X - 10;
+		y = center.Y - 10;
+		right = center.X + 10;
+		bottom = center.Y + 10;
 	}
 
 	x -= adjacency;
@@ -2656,37 +2687,49 @@ CellStruct BuildingExt::Get_Best_Defense_Placement_Position(BuildingClass* pBuil
 	CellStruct targetBuilding(0, 0);
 	CellStruct targetAttacker(0, 0);
 
+	unsigned long selfAttackTime = (pOwner->LATime > 0 && pOwner->LATime + paranoiaDuration + 1800 > Unsorted::CurrentFrame) ? pOwner->LATime : 0;
+	unsigned long latestAllyAttackTime = 0;
+	HouseClass* pMostRecentAttackedAlly = nullptr;
+
+	for (const auto pOtherOwner : HouseClass::Array)
+	{
+		if (pOtherOwner != pOwner && pOwner->IsAlliedWith(pOtherOwner))
+		{
+			int otherParanoia = TICKS_PER_MINUTE + (30 * TICKS_PER_SECOND);
+			if (pOtherOwner->LATime > 0 && pOtherOwner->LATime + otherParanoia + 1800 > Unsorted::CurrentFrame)
+			{
+				if (pOtherOwner->LATime > latestAllyAttackTime)
+				{
+					latestAllyAttackTime = pOtherOwner->LATime;
+					pMostRecentAttackedAlly = pOtherOwner;
+				}
+			}
+		}
+	}
+
 	// 1. Check Frontline Threat (from crawler placement)
 	if (houseExt->FrontlineThreatCoords.X > 0 && houseExt->FrontlineThreatActiveFrames > Unsorted::CurrentFrame && houseExt->FrontlineThreatNeedsDefenses > 0)
 	{
 		targetAttacker = houseExt->FrontlineThreatCoords;
 		targetBuilding = houseExt->FrontlineThreatBuildingCoords;
 	}
-	// 2. Check Self Attacked
-	else if (pOwner->LATime > 0 && pOwner->LATime + paranoiaDuration + 1800 > Unsorted::CurrentFrame)
+	// 2. Check whoever was attacked most recently (Self vs Ally)
+	else if (selfAttackTime >= latestAllyAttackTime && selfAttackTime > 0)
 	{
 		if (houseExt->LastAttackerCoords.X > 0)
 			targetAttacker = houseExt->LastAttackerCoords;
 		if (houseExt->LastAttackedBuildingCoords.X > 0)
 			targetBuilding = houseExt->LastAttackedBuildingCoords;
 	}
-	// 3. Check Ally Attacked
-	else
+	else if (latestAllyAttackTime > 0 && pMostRecentAttackedAlly != nullptr)
 	{
-		for (const auto pOtherOwner : HouseClass::Array)
+		const auto otherHouseExt = HouseExt::ExtMap.Find(pMostRecentAttackedAlly);
+		if (otherHouseExt != nullptr)
 		{
-			if (pOtherOwner != pOwner && pOwner->IsAlliedWith(pOtherOwner))
-			{
-				int otherParanoia = TICKS_PER_MINUTE + (30 * TICKS_PER_SECOND);
-
-				if (pOtherOwner->LATime > 0 && pOtherOwner->LATime + otherParanoia + 1800 > Unsorted::CurrentFrame)
-				{
-					const auto otherHouseExt = HouseExt::ExtMap.Find(pOtherOwner);
-					if (otherHouseExt->LastAttackerCoords.X > 0)
-						targetAttacker = otherHouseExt->LastAttackerCoords;
-					break;
-				}
-			}
+			if (otherHouseExt->LastAttackerCoords.X > 0)
+				targetAttacker = otherHouseExt->LastAttackerCoords;
+			if (otherHouseExt->LastAttackedBuildingCoords.X > 0)
+				targetBuilding = otherHouseExt->LastAttackedBuildingCoords;
 		}
 	}
 
@@ -2936,12 +2979,15 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 	return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Base_Center_Placement_Position_Value);
 }
 
-void BuildingExt::PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass* pBuildingType)
+void BuildingExt::PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass* pBuildingType, bool includeAllies)
 {
 	const bool isNaval = pBuildingType->Naval;
 
 	ExtData::OurBuildingCount = 0;
 	ExtData::AdjacencyAnchorCount = 0;
+
+	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
+	const HouseClass* pTargetAlly = (houseExt != nullptr) ? houseExt->TargetAlliedFallbackHouse : nullptr;
 
 	for (const auto pOtherBuilding : BuildingClass::Array)
 	{
@@ -2960,12 +3006,21 @@ void BuildingExt::PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass
 		}
 
 		bool isValidAnchor = false;
-		if (pOtherBuilding->Owner == pOwner)
-			isValidAnchor = true;
-		else if (pOtherBuilding->Owner != nullptr && pOwner->IsAlliedWith(pOtherBuilding->Owner) && pOtherBuilding->Type->EligibileForAllyBuilding)
+		if (pTargetAlly != nullptr)
 		{
-			if (CanAIBuildOffThisAllyBuilding(pOwner, pBuildingType, pOtherBuilding))
+			// Specifically building an Allied Fallback Outpost near the designated ally
+			if (pOtherBuilding->Owner == pTargetAlly || pOtherBuilding->Owner == pOwner)
 				isValidAnchor = true;
+		}
+		else
+		{
+			if (pOtherBuilding->Owner == pOwner)
+				isValidAnchor = true;
+			else if (includeAllies && pOtherBuilding->Owner != nullptr && pOwner->IsAlliedWith(pOtherBuilding->Owner) && pOtherBuilding->Type->EligibileForAllyBuilding)
+			{
+				if (CanAIBuildOffThisAllyBuilding(pOwner, pBuildingType, pOtherBuilding))
+					isValidAnchor = true;
+			}
 		}
 
 		if (isValidAnchor)
@@ -3075,11 +3130,76 @@ static bool HasEnemyThreatsNear(CellStruct cell, HouseClass* pOwner, double radi
 
 int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 {
-	PopulateAdjacencyAnchors(pBuilding->Owner, pBuilding->Type);
+	const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
 
-	const CellStruct placementCell = Get_Best_Placement_Position(pBuilding);
+	CellStruct placementCell = CellStruct(0, 0);
 
-	const auto houseExtLog = HouseExt::ExtMap.Find(pBuilding->Owner);
+	// Case 1: Specific Allied Fallback Outpost structure targeting an ally
+	if (houseExt != nullptr && houseExt->TargetAlliedFallbackHouse != nullptr &&
+		TechTreeTypeClass::TotalBuildAlliedFallback.count(pBuilding->Type) > 0)
+	{
+		PopulateAdjacencyAnchors(pBuilding->Owner, pBuilding->Type, true);
+		placementCell = Get_Best_Placement_Position(pBuilding);
+		if (placementCell.X > 0 && placementCell.Y > 0)
+		{
+			Debug::Log("[Phobos] AdvAI Placement: House %d successfully placed Allied Fallback %s at (%d,%d) in Ally %d base.\n",
+				pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, placementCell.X, placementCell.Y, houseExt->TargetAlliedFallbackHouse->ArrayIndex);
+			houseExt->TargetAlliedFallbackHouse = nullptr;
+		}
+	}
+
+	// Case 2: Defense placement -> Always evaluate eligible anchors (own base + attacked allies)
+	const bool isDefense = pBuilding->Type->IsBaseDefense ||
+		pBuilding->Type->GetWeapon(0u, false).WeaponType != nullptr ||
+		pBuilding->Type->GetWeapon(1u, false).WeaponType != nullptr;
+
+	if (isDefense && (placementCell.X <= 0 || placementCell.Y <= 0))
+	{
+		PopulateAdjacencyAnchors(pBuilding->Owner, pBuilding->Type, true); // Include eligible ally anchors!
+		placementCell = Get_Best_Placement_Position(pBuilding);
+		if (placementCell.X > 0 && placementCell.Y > 0)
+		{
+			for (const auto pOtherOwner : HouseClass::Array)
+			{
+				if (pOtherOwner != pBuilding->Owner && pBuilding->Owner->IsAlliedWith(pOtherOwner))
+				{
+					for (const auto pBld : pOtherOwner->Buildings)
+					{
+						if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->GetMapCoords().DistanceFrom(placementCell) <= 6.0)
+						{
+							Debug::Log("[Phobos] AdvAI Placement: House %d successfully placed joint defense %s at (%d,%d) in Ally %d base to assist against attack.\n",
+								pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, placementCell.X, placementCell.Y, pOtherOwner->ArrayIndex);
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Case 3: Standard 2-Phase placement for non-defense buildings (Phase 1: Own base & expansions first)
+	if (placementCell.X <= 0 || placementCell.Y <= 0)
+	{
+		PopulateAdjacencyAnchors(pBuilding->Owner, pBuilding->Type, false); // own anchors only!
+		placementCell = Get_Best_Placement_Position(pBuilding);
+
+		// Phase 2: If own base/expansions are full, search allied bases as fallback
+		if (placementCell.X <= 0 || placementCell.Y <= 0)
+		{
+			PopulateAdjacencyAnchors(pBuilding->Owner, pBuilding->Type, true); // include eligible ally anchors!
+			placementCell = Get_Best_Placement_Position(pBuilding);
+			if (placementCell.X > 0 && placementCell.Y > 0)
+			{
+				Debug::Log("[Phobos] AdvAI Placement: House %d own base is full/congested! Fallback placement of %s at (%d,%d) in allied territory.\n",
+					pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, placementCell.X, placementCell.Y);
+			}
+		}
+	}
+
+	if (houseExt != nullptr)
+		houseExt->TargetAlliedFallbackHouse = nullptr;
+
+	const auto houseExtLog = houseExt;
 	if (houseExtLog != nullptr)
 	{
 		const CellStruct expansionPoint = houseExtLog->NextExpansionPointLocation;
@@ -3289,7 +3409,7 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 				pOtherBuilding->Type->Refinery ||
 				pOtherBuilding->Type->Radar ||
 				pOtherBuilding->Type->Helipad ||
-				(pOtherBuilding->Type->TechLevel > 0 && !pOtherBuilding->Type->IsBaseDefense && GetSupportRadiusType(pOtherBuilding->Type) == SupportRadiusType::None);
+				((pOtherBuilding->Type->TechLevel > 0 || pOtherBuilding->Type->TechLevel == -1) && !pOtherBuilding->Type->IsBaseDefense && GetSupportRadiusType(pOtherBuilding->Type) == SupportRadiusType::None);
 
 			if (isBaseBuilding)
 			{

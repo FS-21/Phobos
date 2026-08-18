@@ -150,9 +150,9 @@ public:
 	static HouseClass* Find_Closest_Opponent(const HouseClass* pHouse);
 	static int Get_Distance_To_Primary_Enemy(CellStruct cell, HouseClass* pHouse);
 	static void Mark_Expansion_As_Done(HouseClass* pHouse);
-	static void PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass* pBuildingType);
+	static void PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass* pBuildingType, bool includeAllies = true);
 	static int Try_Place(BuildingClass* pBuilding, CellStruct cell);
-	static RectangleStruct Get_Base_Rect(HouseClass* pHouse, int adjacency, int width, int height, BuildingTypeClass* pBuildingType = nullptr);
+	static RectangleStruct Get_Base_Rect(HouseClass* pHouse, int adjacency, int width, int height, BuildingTypeClass* pBuildingType = nullptr, bool includeAllies = true);
 	static bool Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingClass* pBuilding, int adjacencyBonus);
 	static bool Should_Evaluate_Cell_For_Placement(CellStruct cell, BuildingTypeClass* pBuildingType, HouseClass* pOwner, int adjacencyBonus);
 	static bool OverlapsTiberiumTreeZone(CellStruct cell, BuildingTypeClass* pType);

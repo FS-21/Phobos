@@ -25,7 +25,10 @@ public:
 		PreBuildOtherRandom,
 		PostBuildOtherRandom,
 		BuildServiceDepot,
-		BuildSupport
+		BuildSupport,
+		BuildSuperWeapon,
+		BuildSuperWeaponRandom,
+		BuildAlliedFallback
 	};
 
 	Valueable<int> SideIndex;
@@ -45,6 +48,9 @@ public:
 	ValueableVector<BuildingTypeClass*> PostBuildOtherRandom;
 	ValueableVector<BuildingTypeClass*> BuildServiceDepot;
 	ValueableVector<BuildingTypeClass*> BuildSupport;
+	ValueableVector<BuildingTypeClass*> BuildSuperWeapon;
+	ValueableVector<BuildingTypeClass*> BuildSuperWeaponRandom;
+	ValueableVector<BuildingTypeClass*> BuildAlliedFallback;
 	ValueableVector<int> BuildOtherCounts;
 	ValueableVector<int> PreBuildOtherRandomCounts;
 	ValueableVector<int> PostBuildOtherRandomCounts;
@@ -52,8 +58,10 @@ public:
 	std::map<BuildingTypeClass*, int> PreBuildOtherRandomCountMap;
 	std::map<BuildingTypeClass*, int> PostBuildOtherRandomCountMap;
 	Valueable<bool> LimitedFactories;
+	Valueable<bool> BuildAlliedFallback_LimitByGroupAs;
+	Valueable<bool> AllowNonListedBuildings;
 
-	TechTreeTypeClass(const char* pTitle = NONE_STR) : Enumerable(pTitle), LimitedFactories(true) { }
+	TechTreeTypeClass(const char* pTitle = NONE_STR) : Enumerable(pTitle), LimitedFactories(true), BuildAlliedFallback_LimitByGroupAs(false), AllowNonListedBuildings(true) { }
 
 	virtual void LoadFromINI(CCINIClass* pINI);
 	virtual void LoadFromStream(PhobosStreamReader& Stm);
@@ -86,6 +94,8 @@ public:
 	static inline std::set<BuildingTypeClass*> TotalPostBuildOtherRandom;
 	static inline std::set<BuildingTypeClass*> TotalBuildServiceDepot;
 	static inline std::set<BuildingTypeClass*> TotalBuildSupport;
+	static inline std::set<BuildingTypeClass*> TotalBuildSuperWeapon;
+	static inline std::set<BuildingTypeClass*> TotalBuildAlliedFallback;
 
 private:
 	template <typename T>

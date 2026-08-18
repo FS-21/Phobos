@@ -2832,15 +2832,18 @@ DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_SetLATime, 0x8)
 
 		auto const houseExt = HouseExt::ExtMap.Find(pOwner);
 		houseExt->LastAttackedBuildingCoords = pThis->GetMapCoords();
+		houseExt->LastAttackedFrame = Unsorted::CurrentFrame;
 
 		if (pAttacker)
 		{
 			houseExt->LastAttackerCoords = pAttacker->GetMapCoords();
+			houseExt->LastAttackerType = pAttacker->GetTechnoType();
 			pThis->BaseIsAttacked(pAttacker);
 		}
 		else
 		{
 			houseExt->LastAttackerCoords = CellStruct(0, 0);
+			houseExt->LastAttackerType = nullptr;
 		}
 	}
 

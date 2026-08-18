@@ -170,6 +170,8 @@ public:
 	 *  including base AIBuildCounts and probabilistic AIExtraCounts.
 	 */
 	std::map<BuildingTypeClass*, int> AICachedBuildCounts;
+	TechnoTypeClass* LastAttackerType;
+	int LastAttackedFrame;
 	CellStruct LastAttackedBuildingCoords;
 	CellStruct LastAttackerCoords;
 	CellStruct FrontlineThreatCoords;
@@ -218,7 +220,10 @@ public:
 	CellStruct CachedExpansionPathStart;
 	CellStruct GetCrawlingWaypoint(CellStruct targetCell);
 
+	HouseClass* TargetAlliedFallbackHouse;
+
 	HouseExt(HouseClass* OwnerObject) : AbstractExt(OwnerObject)
+		, TargetAlliedFallbackHouse { nullptr }
 		, PowerPlantEnhancers {}
 		, OwnedLimboDeliveredBuildings {}
 		, OwnedCountedHarvesters {}
@@ -281,6 +286,8 @@ public:
 		, GroupPlacementCooldowns {}
 		, FeasibilityFailedCooldowns {}
 		, AICachedBuildCounts {}
+		, LastAttackerType { nullptr }
+		, LastAttackedFrame { 0 }
 		, LastAttackedBuildingCoords { 0, 0 }
 		, LastAttackerCoords { 0, 0 }
 		, FrontlineThreatCoords { 0, 0 }
@@ -378,6 +385,7 @@ public:
 	static bool AdvAI_Is_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Has_Failed_Placement_Three_Times(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* pBuildingType, bool checkPrereqs, bool isTechTree = false);
+	static BuildingTypeClass* AdvAI_Find_Next_Buildable_Prerequisite(HouseClass* pHouse, BuildingTypeClass* pTargetType, BuildingTypeClass* pRootGoalType, std::set<BuildingTypeClass*>& visited, bool& outIsSubPrereq);
 	static bool AdvAI_Is_Recently_Attacked(HouseClass* pHouse);
 	static bool AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse, int enemyAircraftValue);
 	static int AdvAI_Calculate_Enemy_Aircraft_Value(HouseClass* pHouse);

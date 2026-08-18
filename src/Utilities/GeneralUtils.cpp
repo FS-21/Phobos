@@ -375,30 +375,50 @@ static CellStruct GetPassableNeighbor(CellStruct center)
 
 static FootClass* GetRepresentativeFootForCell(CellStruct cellCoords)
 {
-	if (const CellClass* cell = MapClass::Instance.GetCellAt(cellCoords))
+	if (MapClass::Instance.CoordinatesLegal(cellCoords))
 	{
-		if (const BuildingClass* pBld = cell->GetBuilding())
+		if (const CellClass* cell = MapClass::Instance.GetCellAt(cellCoords))
 		{
-			HouseClass* pHouse = pBld->Owner;
-			if (pHouse)
+			if (const BuildingClass* pBld = cell->GetBuilding())
 			{
-				for (const auto pUnit : UnitClass::Array)
+				HouseClass* pHouse = pBld->Owner;
+				if (pHouse)
 				{
-					if (pUnit && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pHouse && !pUnit->Type->Naval)
+					for (const auto pUnit : UnitClass::Array)
 					{
-						return static_cast<FootClass*>(pUnit);
+						if (pUnit && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pHouse && !pUnit->Type->Naval)
+						{
+							return static_cast<FootClass*>(pUnit);
+						}
 					}
-				}
-				for (const auto pInf : InfantryClass::Array)
-				{
-					if (pInf && pInf->IsAlive && !pInf->InLimbo && pInf->Owner == pHouse)
+					for (const auto pInf : InfantryClass::Array)
 					{
-						return static_cast<FootClass*>(pInf);
+						if (pInf && pInf->IsAlive && !pInf->InLimbo && pInf->Owner == pHouse)
+						{
+							return static_cast<FootClass*>(pInf);
+						}
 					}
 				}
 			}
 		}
 	}
+
+	// Global fallback: check any alive ground unit on the map
+	for (const auto pUnit : UnitClass::Array)
+	{
+		if (pUnit && pUnit->IsAlive && !pUnit->InLimbo && !pUnit->Type->Naval)
+		{
+			return static_cast<FootClass*>(pUnit);
+		}
+	}
+	for (const auto pInf : InfantryClass::Array)
+	{
+		if (pInf && pInf->IsAlive && !pInf->InLimbo)
+		{
+			return static_cast<FootClass*>(pInf);
+		}
+	}
+
 	return nullptr;
 }
 
@@ -416,32 +436,10 @@ int GeneralUtils::GetAStarPathLength(CellStruct fromCell, CellStruct toCell, Mov
 
 	int res = AStarClass::Instance.AttemptPath(&start, &end, pFoot, false, false, movementZone);
 	
-	// Only log path failures
-	/*
-	if (res <= 0 || res > 100000)
-	{
-		Debug::Log("Phobos Pathfinder: (%d,%d) [adj (%d,%d)] -> (%d,%d) [adj (%d,%d)] (zone %d, foot %s) -> Result: %d\n",
-			fromCell.X, fromCell.Y, start.X, start.Y, toCell.X, toCell.Y, end.X, end.Y, static_cast<int>(movementZone),
-			pFoot ? pFoot->GetTechnoType()->ID : "nullptr", res);
-	}
-	*/
-	
 	return res;
 }
 
 // Checks if two map cells are connected by land (passable by ground units).
-//
-// WHY NOT USE NATIVE ENGINE CHECKS?
-// 1. Structure-to-structure 'IsInSameZoneAs' is double-bugged:
-//    - Returns YES across water/islands (because structures have null/0 movement zones, causing a 0==0 match).
-//    - Returns NO on land maps when bases are walled (because structures do not bypass walls/fences).
-// 2. Unit-to-coordinate 'IsInSameZoneAsCoords' is stateful and inconsistent:
-//    - It depends on the unit's current physical position. If a friendly unit is dropped
-//      or spawned at toCell, it would incorrectly report a connection between fromCell and toCell.
-//
-// WHY USE ASTAR DIRECTLY?
-// - Calling AStarClass::Instance.AttemptPath with a nullptr unit context and MovementZone::Normal
-//   runs the pathfinder abstractly on the map grid. It is stateless and 100% mathematically correct.
 bool GeneralUtils::AreZonesConnected(CellStruct fromCell, CellStruct toCell, MovementZone movementZone)
 {
 	const int returnValue = GetAStarPathLength(fromCell, toCell, movementZone);
@@ -449,12 +447,21 @@ bool GeneralUtils::AreZonesConnected(CellStruct fromCell, CellStruct toCell, Mov
 }
 
 // Computes and returns the list of cells representing the path from fromCell to toCell.
-// Returns an empty vector if no path exists.
+// Returns an empty vector if no path exists or if no foot unit is available.
 std::vector<CellStruct> GeneralUtils::GetAStarPath(CellStruct fromCell, CellStruct toCell, MovementZone movementZone)
 {
 	std::vector<CellStruct> path;
 
+	if (!MapClass::Instance.CoordinatesLegal(fromCell) || !MapClass::Instance.CoordinatesLegal(toCell))
+		return path;
+
 	FootClass* pFoot = GetRepresentativeFootForCell(fromCell);
+	if (pFoot == nullptr)
+	{
+		// Westwood engine's AStarClass::FindPath unconditionally dereferences [pFoot + 0x8C].
+		// If no FootClass instance exists on the map, we cannot call FindPath.
+		return path;
+	}
 
 	CellStruct start = fromCell;
 	if (IsCellBlocked(fromCell))

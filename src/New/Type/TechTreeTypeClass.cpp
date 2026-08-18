@@ -48,10 +48,13 @@ void TechTreeTypeClass::CalculateTotals()
 	TotalBuildTech.clear();
 	TotalBuildAdvancedPower.clear();
 	TotalBuildDefense.clear();
-	TotalBuildOther.clear();	TotalBuildServiceDepot.clear();
+	TotalBuildOther.clear();
+	TotalBuildServiceDepot.clear();
 	TotalBuildSupport.clear();
-	TotalBuildSupport.clear();
+	TotalPreBuildOtherRandom.clear();
 	TotalPostBuildOtherRandom.clear();
+	TotalBuildSuperWeapon.clear();
+	TotalBuildAlliedFallback.clear();
 
 	for (const auto& pTree : Array)
 	{
@@ -68,10 +71,14 @@ void TechTreeTypeClass::CalculateTotals()
 		TotalBuildDefense.insert(pTree->BuildDefense.begin(), pTree->BuildDefense.end());
 		TotalBuildOther.insert(pTree->BuildOther.begin(), pTree->BuildOther.end());
 		TotalPreBuildOtherRandom.insert(pTree->PreBuildOtherRandom.begin(), pTree->PreBuildOtherRandom.end());
-		TotalPostBuildOtherRandom.insert(pTree->PostBuildOtherRandom.begin(), pTree->PostBuildOtherRandom.end());				TotalBuildServiceDepot.insert(pTree->BuildServiceDepot.begin(), pTree->BuildServiceDepot.end());
+		TotalPostBuildOtherRandom.insert(pTree->PostBuildOtherRandom.begin(), pTree->PostBuildOtherRandom.end());
+		TotalBuildServiceDepot.insert(pTree->BuildServiceDepot.begin(), pTree->BuildServiceDepot.end());
 		TotalBuildSupport.insert(pTree->BuildSupport.begin(), pTree->BuildSupport.end());
+		TotalBuildSuperWeapon.insert(pTree->BuildSuperWeapon.begin(), pTree->BuildSuperWeapon.end());
+		TotalBuildSuperWeapon.insert(pTree->BuildSuperWeaponRandom.begin(), pTree->BuildSuperWeaponRandom.end());
+		TotalBuildAlliedFallback.insert(pTree->BuildAlliedFallback.begin(), pTree->BuildAlliedFallback.end());
 	}
-	}
+}
 
 size_t TechTreeTypeClass::CountTotalOwnedBuildings(HouseClass* pHouse, BuildType buildType)
 {
@@ -122,6 +129,13 @@ size_t TechTreeTypeClass::CountTotalOwnedBuildings(HouseClass* pHouse, BuildType
 		break;
 	case BuildType::BuildSupport:
 		typeList = &TotalBuildSupport;
+		break;
+	case BuildType::BuildSuperWeapon:
+	case BuildType::BuildSuperWeaponRandom:
+		typeList = &TotalBuildSuperWeapon;
+		break;
+	case BuildType::BuildAlliedFallback:
+		typeList = &TotalBuildAlliedFallback;
 		break;
 	}
 
@@ -199,6 +213,15 @@ size_t TechTreeTypeClass::CountSideOwnedBuildings(HouseClass* pHouse, BuildType 
 	case BuildType::BuildSupport:
 		typeList = &this->BuildSupport;
 		break;
+	case BuildType::BuildSuperWeapon:
+		typeList = &this->BuildSuperWeapon;
+		break;
+	case BuildType::BuildSuperWeaponRandom:
+		typeList = &this->BuildSuperWeaponRandom;
+		break;
+	case BuildType::BuildAlliedFallback:
+		typeList = &this->BuildAlliedFallback;
+		break;
 	}
 
 	size_t count = 0;
@@ -258,6 +281,18 @@ bool TechTreeTypeClass::IsCompleted(HouseClass* pHouse, std::function<bool(Build
 			return false;
 	}
 
+	for (const auto pSuperWeaponType : BuildSuperWeapon)
+	{
+		if (filter(pSuperWeaponType) && CountSideOwnedBuildings(pHouse, BuildType::BuildSuperWeapon) < 1)
+			return false;
+	}
+
+	for (const auto pSuperWeaponRandomType : BuildSuperWeaponRandom)
+	{
+		if (filter(pSuperWeaponRandomType) && CountSideOwnedBuildings(pHouse, BuildType::BuildSuperWeaponRandom) < 1)
+			return false;
+	}
+
 	return true;
 }
 
@@ -311,6 +346,15 @@ std::vector<BuildingTypeClass*> TechTreeTypeClass::GetBuildable(BuildType buildT
 	case BuildType::BuildSupport:
 		typeList = &this->BuildSupport;
 		break;
+	case BuildType::BuildSuperWeapon:
+		typeList = &this->BuildSuperWeapon;
+		break;
+	case BuildType::BuildSuperWeaponRandom:
+		typeList = &this->BuildSuperWeaponRandom;
+		break;
+	case BuildType::BuildAlliedFallback:
+		typeList = &this->BuildAlliedFallback;
+		break;
 	}
 
 	std::vector<BuildingTypeClass*> filtered;
@@ -355,12 +399,18 @@ void TechTreeTypeClass::LoadFromINI(CCINIClass* pINI)
 	this->BuildDefense.Read(exINI, section, "BuildDefense");
 	this->BuildOther.Read(exINI, section, "BuildOther");
 	this->PreBuildOtherRandom.Read(exINI, section, "PreBuildOtherRandom");
-	this->PostBuildOtherRandom.Read(exINI, section, "PostBuildOtherRandom");		this->BuildServiceDepot.Read(exINI, section, "BuildServiceDepot");
+	this->PostBuildOtherRandom.Read(exINI, section, "PostBuildOtherRandom");
+	this->BuildServiceDepot.Read(exINI, section, "BuildServiceDepot");
 	this->BuildSupport.Read(exINI, section, "BuildSupport");
+	this->BuildSuperWeapon.Read(exINI, section, "BuildSuperWeapon");
+	this->BuildSuperWeaponRandom.Read(exINI, section, "BuildSuperWeaponRandom");
+	this->BuildAlliedFallback.Read(exINI, section, "BuildAlliedFallback");
 	this->BuildOtherCounts.Read(exINI, section, "BuildOtherCounts");
 	this->PreBuildOtherRandomCounts.Read(exINI, section, "PreBuildOtherRandomCounts");
 	this->PostBuildOtherRandomCounts.Read(exINI, section, "PostBuildOtherRandomCounts");
 	this->LimitedFactories.Read(exINI, section, "LimitedFactories");
+	this->BuildAlliedFallback_LimitByGroupAs.Read(exINI, section, "BuildAlliedFallback.LimitByGroupAs");
+	this->AllowNonListedBuildings.Read(exINI, section, "AllowNonListedBuildings");
 
 	for (size_t i = 0; i < BuildOther.size(); i++)
 	{
@@ -417,12 +467,18 @@ void TechTreeTypeClass::Serialize(T& Stm)
 		.Process(BuildDefense)
 		.Process(BuildOther)
 		.Process(PreBuildOtherRandom)
-		.Process(PostBuildOtherRandom)				.Process(BuildServiceDepot)
+		.Process(PostBuildOtherRandom)
+		.Process(BuildServiceDepot)
 		.Process(BuildSupport)
+		.Process(BuildSuperWeapon)
+		.Process(BuildSuperWeaponRandom)
+		.Process(BuildAlliedFallback)
 		.Process(BuildOtherCounts)
 		.Process(PreBuildOtherRandomCounts)
 		.Process(PostBuildOtherRandomCounts)
 		.Process(LimitedFactories)
+		.Process(BuildAlliedFallback_LimitByGroupAs)
+		.Process(AllowNonListedBuildings)
 		;
 }
 
