@@ -642,6 +642,8 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	this->Warhead_PreventScatter.Read(exINI, GameStrings::CombatDamage, "Warhead.PreventScatter");
 
+	this->ProjectileRange_ApplyModifiers.Read(exINI, GameStrings::CombatDamage, "ProjectileRange.ApplyModifiers");
+
 	// Section AITargetTypes
 	int itemsCount = pINI->GetKeyCount("AITargetTypes");
 	for (int i = 0; i < itemsCount; ++i)
@@ -1175,6 +1177,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->NoAlphaImageOnBuildup)
 		.Process(this->ReadyToNextMission_MovingCheck)
 		.Process(this->Warhead_PreventScatter)
+		.Process(this->ProjectileRange_ApplyModifiers)
     ;
 }
 

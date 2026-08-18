@@ -543,6 +543,8 @@ public:
 
 		Valueable<bool> Warhead_PreventScatter;
 
+		Valueable<bool> ProjectileRange_ApplyModifiers;
+
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
 			, HarvesterDumpAmount { 0.0f }
@@ -1013,8 +1015,12 @@ public:
 			, ApproachTarget_StopWhenInRange { false }
 
 			, NoAlphaImageOnBuildup { false }
+
 			, ReadyToNextMission_MovingCheck { false }
+
 			, Warhead_PreventScatter { false }
+
+			, ProjectileRange_ApplyModifiers { true }
 		{ }
 
 		virtual ~ExtData() = default;
