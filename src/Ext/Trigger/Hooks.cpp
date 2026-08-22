@@ -1,8 +1,7 @@
 #include <TriggerClass.h>
 #include <TriggerTypeClass.h>
 #include <HouseClass.h>
-
-#include <Helpers/Macro.h>
+#include <ScenarioClass.h>
 
 #include <Ext/TEvent/Body.h>
 #include <Ext/Trigger/Body.h>
@@ -38,7 +37,7 @@ DEFINE_HOOK(0x72612C, TriggerClass_CTOR_ForceSequentialEvents, 0x7)
 	if (!pThis->Type)
 		return 0;
 
-	auto pExt = TriggerExt::ExtMap.Find(pThis);
+	auto pExt = TriggerExt::Fetch(pThis);
 	auto pCurrentEvent = pThis->Type->FirstEvent;
 
 	while (pCurrentEvent)
@@ -95,7 +94,6 @@ DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
 	GET_STACK(TechnoClass*, pTechno, 0x8);
 	GET_STACK(bool, skipStuff, 0xC);
 	GET_STACK(bool, isPersistant, 0x10);
-	GET_STACK(ObjectClass*, pPayback, 0x14); // <-- Warning! YRpp call HasOccured(...) doesn't have the last argument...
 
 	if (!pThis->Enabled || pThis->Destroyed)
 	{
@@ -103,7 +101,7 @@ DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
 		return SkipGameCode;
 	}
 
-	auto pExt = TriggerExt::ExtMap.Find(pThis);
+	auto pExt = TriggerExt::Fetch(pThis);
 	bool isSequentialMode = false; // Flag: Controls if short-circuit is active for subsequent events
 	bool allEventsSuccessful = true;
 	int nPredecessorEventsCompleted = 0;
@@ -159,7 +157,6 @@ DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
 			if (!alreadyOccured)
 			{
 				HouseClass* pEventOwner = HouseClass::FindByCountryName(pThis->Type->House->ID);
-				TechnoClass* pPaybackTechno = static_cast<TechnoClass*>(pPayback);
 
 				triggeredNow = pCurrentEvent->HasOccured(
 									static_cast<int>(nEvent),
@@ -167,10 +164,6 @@ DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
 									pTechno,
 									&eventTimer,
 									&isPersistant);
-				// Note: I think HasOccured in YRpp is wrong, where is the last parameter for "pPaybackTechno"? I mean this "payback1":
-				// TEventClass::operator()(v8, tevent, v9, &techno->r.m.o, &this->Event.Timer, &is_persistant, payback1)) )
-				// In pseudocode:
-				// bool __thiscall TEventClass::operator()(TEventClass *this, int event, HouseClass *house, ObjectClass *obj, CDTimerClass *td, bool *bool1, TechnoClass *source)
 			}
 
 			if (alreadyOccured || triggeredNow)
