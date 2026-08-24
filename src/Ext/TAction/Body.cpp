@@ -855,9 +855,9 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 		const int listIdx = pThis->Param4;
 
 		if (listIdx < 0
-		|| RulesExt::Global()->AIHousesLists.size() == 0
-		|| RulesExt::Global()->AIHousesLists.size() <= listIdx
-		|| RulesExt::Global()->AIHousesLists[listIdx].size() == 0)
+		|| RulesExt::Global()->AIHousesLists.empty()
+		|| static_cast<size_t>(listIdx) >= RulesExt::Global()->AIHousesLists.size()
+		|| RulesExt::Global()->AIHousesLists[listIdx].empty())
 		{
 			Debug::Log("Map action %d: List [AIHousesList](%d) is empty or invalid. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
 			return true;
@@ -907,9 +907,9 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 	int listIdx = std::abs(pThis->Param5);
 	bool isGlobalCount = pThis->Param5 < 0;
 
-	if (RulesExt::Global()->AITargetTypesLists.size() == 0
-		|| RulesExt::Global()->AITargetTypesLists[listIdx].size() == 0
-		|| RulesExt::Global()->AITargetTypesLists.size() <= listIdx)
+	if (RulesExt::Global()->AITargetTypesLists.empty()
+		|| static_cast<size_t>(listIdx) >= RulesExt::Global()->AITargetTypesLists.size()
+		|| RulesExt::Global()->AITargetTypesLists[listIdx].empty())
 	{
 		Debug::Log("Map action %d: List [AITargetTypes](%d) is empty. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
 		return true;
