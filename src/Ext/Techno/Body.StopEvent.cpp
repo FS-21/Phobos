@@ -4,32 +4,35 @@
 
 void TechnoExt::SendStopPassengersTar(TechnoClass* pThis)
 {
-	auto pFoot = abstract_cast<FootClass*>(pThis);
+	if (!pThis)
+		return;
 
-	EventExt event;
+	EventExt event {};
 	event.Type = EventTypeExt::SyncPassengersTar;
 	event.HouseIndex = (char)HouseClass::CurrentPlayer->ArrayIndex;
 	event.Frame = Unsorted::CurrentFrame;
+	event.SyncPassengersTar.TechnoUniqueID = pThis->UniqueID;
 
 	event.AddEvent();
 }
 
 void TechnoExt::HandleStopPassengersTar(EventExt* event)
 {
-	int technoUniqueID = event->SyncPassengersTar.TechnoUniqueID;
+	DWORD technoUniqueID = event->SyncPassengersTar.TechnoUniqueID;
 
 	for (auto pTechno : TechnoClass::Array)
 	{
 		if (pTechno && pTechno->UniqueID == technoUniqueID)
 		{
-			auto pExtType = TechnoTypeExt::ExtMap.Find(pTechno->GetTechnoType());
+			auto pExtType = TechnoTypeExt::Fetch(pTechno->GetTechnoType());
 
 			if (pExtType->OpenTopped_TransferPassengerStopCommand)
 			{
 				for (FootClass* pNext = pTechno->Passengers.FirstPassenger; pNext; pNext = abstract_cast<FootClass*>(pNext->NextObject))
 				{
 					pNext->SetTarget(nullptr);
-					pNext->SpawnManager->ResetTarget();
+					if (pNext->SpawnManager)
+						pNext->SpawnManager->ResetTarget();
 				}
 			}
 

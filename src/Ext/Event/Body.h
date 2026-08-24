@@ -1,5 +1,9 @@
 #pragma once
 
+#include <EventClass.h>
+#include <TargetClass.h>
+#include <HouseClass.h>
+
 #include <cstddef>
 #include <stdint.h>
 #include <TechnoClass.h>
@@ -11,9 +15,11 @@ enum class EventTypeExt : uint8_t
 	// CnCNet reserved Events from 0x30 to 0x3F
 	// Ares used Events 0x60 and 0x61
 
+	ApproachObject = 0x40,
+	TogglePlayerAutoRepair = 0x41,
 	SyncPassengersTar = 0x4B,
 
-	FIRST = SyncPassengersTar,
+	FIRST = ApproachObject,
 	LAST = SyncPassengersTar
 };
 
@@ -31,12 +37,23 @@ public:
 
 		struct SyncPassengersTar
 		{
-			int TechnoUniqueID;
+			DWORD TechnoUniqueID;
 		} SyncPassengersTar;
+		struct APPROACHOBJECT
+		{
+			TargetClass Whom;
+			TargetClass Target;
+		} ApproachObject;
+		struct TogglePlayerAutoRepair
+		{ } TogglePlayerAutoRepair;
 	};
 
 	bool AddEvent();
 	void RespondEvent();
+
+	void RespondApproachObject();
+	static void RaiseTogglePlayerAutoRepair();
+	void RespondToTogglePlayerAutoRepair();
 
 	static size_t GetDataSize(EventTypeExt type);
 	static bool IsValidType(EventTypeExt type);
@@ -45,3 +62,4 @@ public:
 static_assert(sizeof(EventExt) == 111);
 static_assert(offsetof(EventExt, DataBuffer) == 7);
 #pragma pack(pop)
+
