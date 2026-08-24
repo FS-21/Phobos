@@ -924,7 +924,7 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 
 	if (pOldExt->Convert_UniversalDeploy_RememberTarget)
 		pNew->SetTarget(pOldExt->Convert_UniversalDeploy_RememberTarget);
-	else if (isOldBuilding && isNewBuilding && !ScriptExt::IsUnitArmed(pNew))
+	else if (isOldBuilding && isNewBuilding && !ScriptExt::IsUnitArmed(pNew, pNewType))
 	{
 		pNew->SetTarget(nullptr);
 		pNew->QueueMission(Mission::Guard, false);
