@@ -6,34 +6,34 @@ This page describes all the engine features that are either new and introduced b
 
 ### AI Learning
 
-- Save all the AI triggers `current weight` value at the end of the battle and loads the same values at the beginning of the next battle on the same map.
-- Each map save/load its own data in the folder `AI`.
-- This feature is designed having the offline gaming in mind, so only skirmish and campaign battles.
-- By default `AILearning.OnlySupportedMaps` is set to true. This makes game always read `AILearning.ScenarioName` inside maps and if isn't present' won't save the AI data'. This is done this way because XNA CnCNet client doesn't save the multiplayer scenario name in `spawn.ini`.
-- If `AILearning.OnlySupportedMaps` is set to false and the map doesn't have `AILearning.ScenarioName` a common generic file name will be used for saving/loading the current AI values.
+- Saves AI trigger weights at the end of the battle and loads the accumulated knowledge at the start of future battles on the same map.
+- Knowledge is stored in INI format in the `./AI/` folder, structured into sections by starting spot, country, and difficulty (e.g. `[Spot0_Russians_Hard]`).
+- Includes an automatic fallback system to general country knowledge (`[Russians_Hard]`) when playing in a new position on that map.
+- Uses Exponential Moving Average via `AILearning.LearningRate` to smoothly blend new match outcomes with historical data.
+- Applies a soft decay via `AILearning.DecayRate` towards the base weights to keep tactics dynamic and prevent permanent strategy lock.
+- This feature is designed for singleplayer skirmish and campaign games and is dormant in multiplayer games.
 
 In `rulesmd.ini`:
 ```ini
 [AI]
 AILearning=false                   ; boolean
-AILearning.Weight.Max=             ; integer, value <= 5000
-AILearning.Weight.Min=             ; integer, value >= 0
-AILearning.Weight.Increment=       ; integer, value > 0
-AILearning.Weight.Decrement=       ; integer, value > 0
+AILearning.LearningRate=0.2        ; floating point, 0.0 - 1.0 (portion of current match weight applied to history)
+AILearning.DecayRate=0.05          ; floating point, 0.0 - 1.0 (soft decay rate towards base weight per match)
 AILearning.OnlySupportedMaps=true  ; boolean
 ```
 
 In the map:
 ```ini
 [AI]
-AILearning.ScenarioName=  ; filename string, valid characters by the Windows filesystem, recommended ANSI characters
+AILearning.ScenarioName=  ; filename string, valid characters for Windows filesystem
 ```
 
 ```{warning}
-AI adjusts the current weight of the affected AI trigger value by using:
-- Script action 49,0 (at the end of the team execution it increases the current weight by adding `AITriggerSuccessWeightDelta` value).
-- Script action 14003,0 (at the end of the team execution it decreases the current weight by substracting `AITriggerFailureWeightDelta` value).
-- Script actions: 14000, 14001, 14002.
+In the game engine, the current weight of an AI trigger is dynamically adjusted during battle:
+- When an AI team successfully completes its mission and executes script action `49,0`, the trigger's current weight increases by `AITriggerSuccessWeightDelta`.
+- If an AI team is destroyed or fails without executing script action `49,0`, it is counted as a failure, decreasing the trigger's current weight by `AITriggerFailureWeightDelta`.
+- Script action `14003,0` explicitly decreases current weight by `AITriggerFailureWeightDelta`.
+- Script actions `14000`, `14001`, and `14002` can also be used to manipulate trigger weights directly.
 ```
 
 ## New types / ingame entities

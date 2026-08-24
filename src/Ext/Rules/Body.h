@@ -209,10 +209,8 @@ public:
 		ValueableIdx<ColorScheme> AnimRemapDefaultColorScheme;
 		ValueableIdx<ColorScheme> TimerBlinkColorScheme;
 		Valueable<bool> AILearning;
-		Nullable<int> AILearning_Weight_Max;
-		Nullable<int> AILearning_Weight_Min;
-		Nullable<int> AILearning_Weight_Increment;
-		Nullable<int> AILearning_Weight_Decrement;
+		Valueable<double> AILearning_LearningRate;
+		Valueable<double> AILearning_DecayRate;
 		std::string AILearning_ScenarioName;
 		Valueable<bool> AILearning_OnlySupportedMaps;
 
@@ -749,10 +747,8 @@ public:
 			, ShowPowerPlantEnhancerRange { true }
 			, ShowGameTime { true }
 			, AILearning { false }
-			, AILearning_Weight_Max { }
-			, AILearning_Weight_Min { }
-			, AILearning_Weight_Increment { }
-			, AILearning_Weight_Decrement { }
+			, AILearning_LearningRate { 0.2 }
+			, AILearning_DecayRate { 0.05 }
 			, AILearning_ScenarioName { }
 			, AILearning_OnlySupportedMaps { true }
 			, DropPodTrailer { }

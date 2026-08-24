@@ -387,10 +387,8 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	this->AILearning.Read(exINI, "AI", "AILearning");
 	this->AILearning_OnlySupportedMaps.Read(exINI, "AI", "AILearning.OnlySupportedMaps");
-	this->AILearning_Weight_Max.Read(exINI, "AI", "AILearning.Weight.Max");
-	this->AILearning_Weight_Min.Read(exINI, "AI", "AILearning.Weight.Min");
-	this->AILearning_Weight_Increment.Read(exINI, "AI", "AILearning.Weight.Increment");
-	this->AILearning_Weight_Decrement.Read(exINI, "AI", "AILearning.Weight.Decrement");
+	this->AILearning_LearningRate.Read(exINI, "AI", "AILearning.LearningRate");
+	this->AILearning_DecayRate.Read(exINI, "AI", "AILearning.DecayRate");
 
 	// [AI] -> AILearning.ScenarioName
 	const char* key = "AILearning.ScenarioName";
@@ -894,10 +892,8 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->ShowPowerPlantEnhancerRange)
 		.Process(this->ShowGameTime)
 		.Process(this->AILearning)
-		.Process(this->AILearning_Weight_Max)
-		.Process(this->AILearning_Weight_Min)
-		.Process(this->AILearning_Weight_Increment)
-		.Process(this->AILearning_Weight_Decrement)
+		.Process(this->AILearning_LearningRate)
+		.Process(this->AILearning_DecayRate)
 		.Process(this->AILearning_ScenarioName)
 		.Process(this->AILearning_OnlySupportedMaps)
 		.Process(this->DropPodTrailer)
