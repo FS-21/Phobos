@@ -220,7 +220,7 @@ DEFINE_HOOK(0x685DE7, AILearning_Save, 0x5) // void Do_Lose(void)
 	}
 	else
 	{
-		Debug::Log("AI Learning - The AI state can not be saved in the the file %s\n", fileName);
+		Debug::Log("AI Learning - The AI state can not be saved in the the file %s\n", fileName.c_str());
 	}
 
 	return 0;
