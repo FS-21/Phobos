@@ -11,12 +11,13 @@ This page describes all the engine features that are either new and introduced b
 - Includes an automatic fallback system to general country knowledge (`[Russians_Hard]`) when playing in a new position on that map.
 - Uses Exponential Moving Average via `AILearning.LearningRate` to smoothly blend new match outcomes with historical data.
 - Applies a soft decay via `AILearning.DecayRate` towards the base weights to keep tactics dynamic and prevent permanent strategy lock.
-- This feature is designed for singleplayer skirmish and campaign games and is dormant in multiplayer games.
+- This feature is designed for singleplayer skirmish and campaign games, and can optionally be enabled in multiplayer via `AILearning.Multiplayer`. When enabled in multiplayer, all clients seamlessly adopt the Host's learned AI data for that match, and only the Host updates the database on match completion.
 
 In `rulesmd.ini`:
 ```ini
 [AI]
 AILearning=false                   ; boolean
+AILearning.Multiplayer=false       ; boolean
 AILearning.LearningRate=0.2        ; floating point, 0.0 - 1.0 (portion of current match weight applied to history)
 AILearning.DecayRate=0.05          ; floating point, 0.0 - 1.0 (soft decay rate towards base weight per match)
 AILearning.OnlySupportedMaps=true  ; boolean

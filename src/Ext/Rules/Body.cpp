@@ -386,6 +386,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->HarvesterScanAfterUnload.Read(exINI, GameStrings::General, "HarvesterScanAfterUnload");
 
 	this->AILearning.Read(exINI, "AI", "AILearning");
+	this->AILearning_Multiplayer.Read(exINI, "AI", "AILearning.Multiplayer");
 	this->AILearning_OnlySupportedMaps.Read(exINI, "AI", "AILearning.OnlySupportedMaps");
 	this->AILearning_LearningRate.Read(exINI, "AI", "AILearning.LearningRate");
 	this->AILearning_DecayRate.Read(exINI, "AI", "AILearning.DecayRate");
@@ -892,6 +893,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->ShowPowerPlantEnhancerRange)
 		.Process(this->ShowGameTime)
 		.Process(this->AILearning)
+		.Process(this->AILearning_Multiplayer)
 		.Process(this->AILearning_LearningRate)
 		.Process(this->AILearning_DecayRate)
 		.Process(this->AILearning_ScenarioName)

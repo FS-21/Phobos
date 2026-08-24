@@ -6,13 +6,16 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 #include <algorithm>
 
 #include <Ext/Rules/Body.h>
+#include <Ext/Event/Body.h>
 #include <AITriggerTypeClass.h>
 #include <HouseClass.h>
 #include <HouseTypeClass.h>
 #include <ScenarioClass.h>
+#include <SessionClass.h>
 
 namespace
 {
@@ -156,7 +159,16 @@ namespace
 
 DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 {
-	if (!RulesExt::Global()->AILearning || !SessionClass::IsSingleplayer())
+	if (!RulesExt::Global()->AILearning)
+		return 0;
+
+	bool isSingle = SessionClass::IsSingleplayer();
+	bool allowMulti = RulesExt::Global()->AILearning_Multiplayer.Get();
+
+	if (!isSingle && !allowMulti)
+		return 0;
+
+	if (!isSingle && !SessionClass::Instance.Am_I_Master())
 		return 0;
 
 	if (RulesExt::Global()->AILearning_OnlySupportedMaps.Get()
@@ -185,6 +197,8 @@ DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 
 	double decayRate = RulesExt::Global()->AILearning_DecayRate.Get();
 	decayRate = std::clamp(decayRate, 0.0, 1.0);
+
+	std::vector<std::pair<uint16_t, float>> modifiedTriggers;
 
 	for (int h = 0; h < HouseClass::Array.Count; ++h)
 	{
@@ -234,9 +248,19 @@ DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 					double adjustedWeight = (learnedWeight * (1.0 - decayRate)) + (baseWeight * decayRate);
 					adjustedWeight = std::clamp(adjustedWeight, pTrigger->Weight_Minimum, pTrigger->Weight_Maximum);
 					pTrigger->Weight_Current = adjustedWeight;
+
+					if (!isSingle)
+					{
+						modifiedTriggers.push_back({ static_cast<uint16_t>(triggerIdx), static_cast<float>(adjustedWeight) });
+					}
 				}
 			}
 		}
+	}
+
+	if (!isSingle && !modifiedTriggers.empty())
+	{
+		EventExt::RaiseAILearningSync(modifiedTriggers);
 	}
 
 	return 0;
@@ -245,7 +269,16 @@ DEFINE_HOOK(0x6879ED, AILearning_Load, 0x5)
 DEFINE_HOOK_AGAIN(0x6856A5, AILearning_Save, 0x7) // void Do_Win(void)
 DEFINE_HOOK(0x685DE7, AILearning_Save, 0x5) // void Do_Lose(void)
 {
-	if (!RulesExt::Global()->AILearning || !SessionClass::IsSingleplayer())
+	if (!RulesExt::Global()->AILearning)
+		return 0;
+
+	bool isSingle = SessionClass::IsSingleplayer();
+	bool allowMulti = RulesExt::Global()->AILearning_Multiplayer.Get();
+
+	if (!isSingle && !allowMulti)
+		return 0;
+
+	if (!isSingle && !SessionClass::Instance.Am_I_Master())
 		return 0;
 
 	if (RulesExt::Global()->AILearning_OnlySupportedMaps.Get()

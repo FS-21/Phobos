@@ -3,6 +3,7 @@
 
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
+#include <AITriggerTypeClass.h>
 
 #include <Helpers/Macro.h>
 #include <ShapeButtonClass.h>
@@ -22,6 +23,9 @@ void EventExt::RespondEvent()
 	case EventTypeExt::TogglePlayerAutoRepair:
 		this->RespondToTogglePlayerAutoRepair();
 		break;
+	case EventTypeExt::AILearningSync:
+		this->RespondToAILearningSync();
+		break;
 	default:
 		break;
 	}
@@ -37,6 +41,54 @@ void EventExt::RaiseTogglePlayerAutoRepair()
 	Debug::LogGame("Adding event TOGGLE_PLAYER_AUTOREPAIR\n");
 }
 
+void EventExt::RaiseAILearningSync(const std::vector<std::pair<uint16_t, float>>& triggers)
+{
+	if (triggers.empty())
+		return;
+
+	const size_t maxPerPacket = 16;
+	for (size_t i = 0; i < triggers.size(); i += maxPerPacket)
+	{
+		EventExt eventExt {};
+		eventExt.Type = EventTypeExt::AILearningSync;
+		eventExt.HouseIndex = HouseClass::CurrentPlayer ? static_cast<char>(HouseClass::CurrentPlayer->ArrayIndex) : 0;
+		eventExt.Frame = Unsorted::CurrentFrame;
+
+		uint8_t count = 0;
+		for (size_t j = i; j < triggers.size() && j < i + maxPerPacket; ++j)
+		{
+			eventExt.AILearningSync.Entries[count].TriggerIndex = triggers[j].first;
+			eventExt.AILearningSync.Entries[count].Weight = triggers[j].second;
+			count++;
+		}
+		eventExt.AILearningSync.Count = count;
+		eventExt.AddEvent();
+		Debug::LogGame("Adding event AI_LEARNING_SYNC (%u triggers)\n", count);
+	}
+}
+
+void EventExt::RespondToAILearningSync()
+{
+	if (!RulesExt::Global()->AILearning || !RulesExt::Global()->AILearning_Multiplayer.Get())
+		return;
+
+	for (uint8_t i = 0; i < this->AILearningSync.Count && i < 16; ++i)
+	{
+		uint16_t idx = this->AILearningSync.Entries[i].TriggerIndex;
+		float weight = this->AILearningSync.Entries[i].Weight;
+
+		if (idx < AITriggerTypeClass::Array.Count)
+		{
+			auto pTrigger = AITriggerTypeClass::Array.GetItem(idx);
+			if (pTrigger)
+			{
+				pTrigger->Weight_Current = static_cast<double>(weight);
+				Debug::LogGame("AI Learning Sync - Trigger [%s] set to weight %.2f\n", pTrigger->ID, pTrigger->Weight_Current);
+			}
+		}
+	}
+}
+
 size_t EventExt::GetDataSize(EventTypeExt type)
 {
 	switch (type)
@@ -45,6 +97,8 @@ size_t EventExt::GetDataSize(EventTypeExt type)
 		return sizeof(EventExt::ApproachObject);
 	case EventTypeExt::TogglePlayerAutoRepair:
 		return sizeof(EventExt::TogglePlayerAutoRepair);
+	case EventTypeExt::AILearningSync:
+		return sizeof(EventExt::AILearningSync);
 	default:
 		break;
 	}

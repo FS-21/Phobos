@@ -209,6 +209,7 @@ public:
 		ValueableIdx<ColorScheme> AnimRemapDefaultColorScheme;
 		ValueableIdx<ColorScheme> TimerBlinkColorScheme;
 		Valueable<bool> AILearning;
+		Valueable<bool> AILearning_Multiplayer;
 		Valueable<double> AILearning_LearningRate;
 		Valueable<double> AILearning_DecayRate;
 		std::string AILearning_ScenarioName;
@@ -747,6 +748,7 @@ public:
 			, ShowPowerPlantEnhancerRange { true }
 			, ShowGameTime { true }
 			, AILearning { false }
+			, AILearning_Multiplayer { false }
 			, AILearning_LearningRate { 0.2 }
 			, AILearning_DecayRate { 0.05 }
 			, AILearning_ScenarioName { }
