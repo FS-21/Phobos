@@ -1320,6 +1320,23 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->RequiredHouses = pINI->ReadHouseTypesList(pSection, "RequiredHouses", this->RequiredHouses);
 	this->ForbiddenHouses = pINI->ReadHouseTypesList(pSection, "ForbiddenHouses", this->ForbiddenHouses);
 
+	// Prerequisite.RequiredTheaters contains a list of theater names
+	if (pINI->ReadString(pSection, "Prerequisite.RequiredTheaters", "", Phobos::readBuffer) > 0)
+	{
+		char* context = nullptr;
+		this->PrerequisiteTheaters = 0;
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			int index = Theater::FindIndex(cur);
+
+			if (index != -1)
+				this->PrerequisiteTheaters |= (1u << index);
+			else
+				Debug::INIParseFailed(pSection, "Prerequisite.RequiredTheaters", cur);
+		}
+	}
+
 	// Prerequisite with Generic Prerequisites support
 	if (pINI->ReadString(pSection, "Prerequisite", "", Phobos::readBuffer) > 0)
 	{
@@ -1775,7 +1792,7 @@ void TechnoTypeExt::Serialize(T& Stm)
 
 		.Process(this->RecountBurst)
 
-		.Process(this->Prerequisite_RequiredTheaters)
+		.Process(this->PrerequisiteTheaters)
 		.Process(this->Prerequisite)
 		.Process(this->Prerequisite_Negative)
 		.Process(this->Prerequisite_Lists)

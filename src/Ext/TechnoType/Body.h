@@ -267,7 +267,7 @@ public:
 
 	Nullable<bool> RecountBurst;
 
-	std::vector<int> Prerequisite_RequiredTheaters;
+	DWORD PrerequisiteTheaters;
 	std::vector<int> Prerequisite;
 	std::vector<int> Prerequisite_Negative;
 	Valueable<int> Prerequisite_Lists;
@@ -679,7 +679,7 @@ public:
 
 		, RecountBurst {}
 
-		, Prerequisite_RequiredTheaters {}
+		, PrerequisiteTheaters { 0xFFFFFFFF }
 		, Prerequisite {}
 		, Prerequisite_Negative {}
 		, Prerequisite_Lists { 0 }

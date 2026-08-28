@@ -1316,6 +1316,37 @@ bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool
 	if (!skipSecretLabChecks && pItemExt->ConsideredSecretLabTech.Get() && !pHouse->HasFromSecretLab(pItem))
 		return false;
 
+	// Prerequisite.RequiredTheaters check
+	if (!(pItemExt->PrerequisiteTheaters & (1u << static_cast<int>(ScenarioClass::Instance->Theater))))
+		return false;
+
+	// TechLevel check
+	if (pHouse->TechLevel < pItem->TechLevel)
+		return false;
+
+	// BuildLimit checks
+	if (pItem->BuildLimit > 0)
+	{
+		int nInstances = 0;
+		for (const auto pTechno : TechnoClass::Array)
+		{
+			if (pTechno->Owner == pHouse
+				&& pTechno->GetTechnoType() == pItem
+				&& pTechno->IsAlive
+				&& pTechno->Health > 0)
+			{
+				nInstances++;
+
+				if (nInstances >= pItem->BuildLimit)
+					return false;
+			}
+		}
+	}
+	else if (pItem->BuildLimit == 0)
+	{
+		return false;
+	}
+
 	// Prerequisite.Negative: if the house owns any building in these lists, the item is blocked
 	if (!pItemExt->Prerequisite_Negative.empty())
 	{
@@ -1399,9 +1430,22 @@ bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool
 			{
 				bool found = false;
 				if (idx < 0)
-					found = HasGenericPrerequisite(idx, pHouse);
+				{
+					if (idx == -6 &&
+						RulesClass::Instance->PrerequisiteProcAlternate != nullptr &&
+						pHouse->ActiveUnitTypes.GetItemCount(RulesClass::Instance->PrerequisiteProcAlternate->ArrayIndex) > 0)
+					{
+						found = true;
+					}
+					else
+					{
+						found = HasGenericPrerequisite(idx, pHouse);
+					}
+				}
 				else
+				{
 					found = pHouse->ActiveBuildingTypes.GetItemCount(idx) > 0;
+				}
 
 				if (!found)
 				{
