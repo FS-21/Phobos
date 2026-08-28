@@ -1264,6 +1264,41 @@ bool HouseExt::HasGenericPrerequisite(int idx, HouseClass* pHouse)
 	return false;
 }
 
+bool HouseExt::IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* const pItem)
+{
+	if (!pHouse || !pItem)
+		return false;
+
+	const auto pType = pHouse->Type;
+	if (!pType)
+		return false;
+
+	DWORD const bitHouse = 1u << pType->ArrayIndex2;
+
+	bool inOwners = pItem->InOwners(bitHouse);
+	bool inRequired = pItem->InRequiredHouses(bitHouse);
+	bool inForbidden = pItem->InForbiddenHouses(bitHouse);
+
+	if (!inOwners || !inRequired || inForbidden)
+	{
+		if (auto const pParent = pType->FindParentCountry())
+		{
+			DWORD const bitParent = 1u << pParent->ArrayIndex2;
+
+			if (!inOwners && pItem->InOwners(bitParent))
+				inOwners = true;
+
+			if (!inRequired && pItem->InRequiredHouses(bitParent))
+				inRequired = true;
+
+			if (!inForbidden && pItem->InForbiddenHouses(bitParent))
+				inForbidden = true;
+		}
+	}
+
+	return inOwners && inRequired && !inForbidden;
+}
+
 bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool skipSecretLabChecks)
 {
 	if (!pHouse || !pItem)
@@ -1273,13 +1308,9 @@ bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool
 	if (!pItemExt)
 		return false;
 
-	// RequiredHouses and ForbiddenHouses
-	if (pHouse->Type)
-	{
-		const auto ownerBits = 1u << pHouse->Type->ArrayIndex;
-		if (!(pItemExt->RequiredHouses & ownerBits) || (pItemExt->ForbiddenHouses & ownerBits))
-			return false;
-	}
+	// Check if it appears in Owner=, RequiredHouses= and ForbiddenHouses= (including ParentCountry support)
+	if (!HouseExt::IsAvailableToHouse(pHouse, pItem))
+		return false;
 
 	// Secret lab tech: item must have been explicitly unlocked if ConsideredSecretLabTech
 	if (!skipSecretLabChecks && pItemExt->ConsideredSecretLabTech.Get() && !pHouse->HasFromSecretLab(pItem))

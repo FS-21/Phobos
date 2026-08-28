@@ -405,6 +405,7 @@ public:
 
 	static int FindGenericPrerequisite(const char* id);
 	static bool HasGenericPrerequisite(int idx, HouseClass* pHouse);
+	static bool IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* const pItem);
 	static bool PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool skipSecretLabChecks = false);
 
 	static bool IsDisabledFromShell(
