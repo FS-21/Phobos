@@ -1316,6 +1316,14 @@ bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool
 	if (!skipSecretLabChecks && pItemExt->ConsideredSecretLabTech.Get() && !pHouse->HasFromSecretLab(pItem))
 		return false;
 
+	// Stolen Tech checks (Chrono Commando, Psi Commando, etc.)
+	if ((pItem->RequiresStolenAlliedTech && !pHouse->Side0TechInfiltrated) ||
+		(pItem->RequiresStolenSovietTech && !pHouse->Side1TechInfiltrated) ||
+		(pItem->RequiresStolenThirdTech && !pHouse->Side2TechInfiltrated))
+	{
+		return false;
+	}
+
 	// Prerequisite.RequiredTheaters check
 	if (!(pItemExt->PrerequisiteTheaters & (1u << static_cast<int>(ScenarioClass::Instance->Theater))))
 		return false;
@@ -1461,6 +1469,18 @@ bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool
 			}
 		}
 	}
+
+	bool hasPrereq = !pItemExt->Prerequisite.empty();
+	bool hasLists = pItemExt->Prerequisite_Lists.Get() > 0 && !pItemExt->Prerequisite_ListVector.empty();
+
+	if (!hasPrereq && !hasLists)
+		return true;
+
+	if (hasPrereq && !hasLists)
+		return prerequisiteMet;
+
+	if (!hasPrereq && hasLists)
+		return prerequisiteListsMet;
 
 	return prerequisiteMet || prerequisiteListsMet;
 }
