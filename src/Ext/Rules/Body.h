@@ -322,6 +322,7 @@ public:
 
 		DynamicVectorClass<DynamicVectorClass<int>> GenericPrerequisites;
 		DynamicVectorClass<const char*> GenericPrerequisitesNames;
+		DynamicVectorClass<DynamicVectorClass<TechnoTypeClass*>> GenericPrerequisitesAlternates;
 
 		Valueable<bool> BuildingWaypoints;
 		Valueable<bool> BuildingTypeSelectable;
@@ -740,6 +741,9 @@ public:
 			, VisualScatter_Max { Leptons(32) }
 			, ShowDesignatorRange { true }
 			, ShowPowerPlantEnhancerRange { true }
+			, GenericPrerequisites { }
+			, GenericPrerequisitesNames { }
+			, GenericPrerequisitesAlternates { }
 			, DropPodTrailer { }
 			, DropPodDefaultTrailer { }
 			, PodImage { }
