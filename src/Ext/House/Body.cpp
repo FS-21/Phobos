@@ -1350,10 +1350,19 @@ bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool
 			}
 		}
 	}
+	else if (pItem->BuildLimit < 0)
+	{
+		if (pHouse->CountOwnedEver(pItem) >= -pItem->BuildLimit)
+			return false;
+	}
 	else if (pItem->BuildLimit == 0)
 	{
 		return false;
 	}
+
+	// Phobos BuildLimitGroup check
+	if (HouseExt::ReachedBuildLimit(pHouse, pItem, true))
+		return false;
 
 	// Prerequisite.Negative: if the house owns any building in these lists, the item is blocked
 	if (!pItemExt->Prerequisite_Negative.empty())
