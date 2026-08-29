@@ -404,7 +404,9 @@ public:
 	static void AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse);
 
 	static int FindGenericPrerequisite(const char* id);
+	static bool HasBuildingPrerequisite(HouseClass* const pHouse, int idxBuildingType);
 	static bool HasGenericPrerequisite(int idx, HouseClass* pHouse);
+	static bool HasPrerequisite(HouseClass* const pHouse, int idx);
 	static bool IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* const pItem);
 	static bool PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool skipSecretLabChecks = false);
 

@@ -704,9 +704,20 @@ void RulesExt::ExtData::LoadAfterTypeData(RulesClass* pThis, CCINIClass* pINI)
 				formattedName[k] = static_cast<char>(formattedName[k] - 'A' + 'a');
 		}
 
+		bool found = false;
 		_snprintf_s(keyName, _TRUNCATE, "Prerequisite%sAlternate", formattedName);
-
 		if (pINI->ReadString("General", keyName, "", Phobos::readBuffer) > 0)
+		{
+			found = true;
+		}
+		else
+		{
+			_snprintf_s(keyName, _TRUNCATE, "Prerequisite%sAlternate", name);
+			if (pINI->ReadString("General", keyName, "", Phobos::readBuffer) > 0)
+				found = true;
+		}
+
+		if (found)
 		{
 			char* context = nullptr;
 			for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
@@ -788,26 +799,47 @@ void RulesExt::FillDefaultPrerequisites()
 	{
 		DynamicVectorClass<int> objectsList;
 		char* context = nullptr;
-		CCINIClass::INI_Rules->ReadString("GenericPrerequisites", CCINIClass::INI_Rules->GetKeyName("GenericPrerequisites", i), "", Phobos::readBuffer);
-		char* name = (char*)CCINIClass::INI_Rules->GetKeyName("GenericPrerequisites", i);
+		const char* keyName = CCINIClass::INI_Rules->GetKeyName("GenericPrerequisites", i);
+		if (!keyName || keyName[0] == '\0')
+			continue;
+
+		CCINIClass::INI_Rules->ReadString("GenericPrerequisites", keyName, "", Phobos::readBuffer);
 
 		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
 		{
 			int idx = BuildingTypeClass::FindIndex(cur);
 			if (idx >= 0)
+			{
 				objectsList.AddItem(idx);
+			}
+			else
+			{
+				int genIdx = HouseExt::FindGenericPrerequisite(cur);
+				if (genIdx < 0)
+					objectsList.AddItem(genIdx);
+			}
 		}
 
-		int index = RulesExt::Global()->GenericPrerequisitesNames.FindItemIndex(name);
-		if (index < 7 && index > 0)
+		// Find existing name using case-insensitive comparison
+		int existingIndex = -1;
+		for (int k = 0; k < RulesExt::Global()->GenericPrerequisitesNames.Count; ++k)
 		{
-			// Overwrites a vanilla generic prerequisite
-			RulesExt::Global()->GenericPrerequisites[index] = objectsList;
+			if (_strcmpi(RulesExt::Global()->GenericPrerequisitesNames[k], keyName) == 0)
+			{
+				existingIndex = k;
+				break;
+			}
+		}
+
+		if (existingIndex > 0)
+		{
+			// Overwrites an existing generic prerequisite (vanilla or custom)
+			RulesExt::Global()->GenericPrerequisites[existingIndex] = objectsList;
 		}
 		else
 		{
 			// New generic prerequisite
-			RulesExt::Global()->GenericPrerequisitesNames.AddItem(name);
+			RulesExt::Global()->GenericPrerequisitesNames.AddItem(keyName);
 			RulesExt::Global()->GenericPrerequisites.AddItem(objectsList);
 		}
 
