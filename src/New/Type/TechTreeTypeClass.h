@@ -13,6 +13,7 @@ public:
 	{
 		BuildPower,
 		BuildRefinery,
+		BuildSilo,
 		BuildBarracks,
 		BuildWeapons,
 		BuildRadar,
@@ -35,6 +36,7 @@ public:
 	Valueable<BuildingTypeClass*> BuildConst;
 	ValueableVector<BuildingTypeClass*> BuildPower;
 	ValueableVector<BuildingTypeClass*> BuildRefinery;
+	ValueableVector<BuildingTypeClass*> BuildSilo;
 	ValueableVector<BuildingTypeClass*> BuildBarracks;
 	ValueableVector<BuildingTypeClass*> BuildWeapons;
 	ValueableVector<BuildingTypeClass*> BuildRadar;
@@ -81,6 +83,7 @@ public:
 	static inline std::set<BuildingTypeClass*> TotalBuildConst;
 	static inline std::set<BuildingTypeClass*> TotalBuildPower;
 	static inline std::set<BuildingTypeClass*> TotalBuildRefinery;
+	static inline std::set<BuildingTypeClass*> TotalBuildSilo;
 	static inline std::set<BuildingTypeClass*> TotalBuildBarracks;
 	static inline std::set<BuildingTypeClass*> TotalBuildWeapons;
 	static inline std::set<BuildingTypeClass*> TotalBuildRadar;

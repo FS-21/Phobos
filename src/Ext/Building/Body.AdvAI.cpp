@@ -1884,6 +1884,13 @@ CellStruct BuildingExt::Get_Best_ServiceDepot_Placement_Position(BuildingClass* 
 	return placementCell;
 }
 
+CellStruct BuildingExt::Get_Best_Silo_Placement_Position(BuildingClass* pBuilding)
+{
+	const int adjacency = pBuilding->Type->Adjacent;
+	const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(false), pBuilding->Type);
+	return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_ConYard_Placement_Position_Value);
+}
+
 int BuildingExt::Near_Base_Center_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding)
 {
 	const HouseClass* pOwner = pBuilding->Owner;
@@ -2947,6 +2954,11 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 	if (pBuilding->Type->GetWeapon(0u, false).WeaponType != nullptr)
 	{
 		return Get_Best_Defense_Placement_Position(pBuilding);
+	}
+
+	if (TechTreeTypeClass::TotalBuildSilo.contains(pBuilding->Type))
+	{
+		return Get_Best_Silo_Placement_Position(pBuilding);
 	}
 
 	const auto pTechTree = TechTreeTypeClass::GetAnySuitable(pBuilding->Owner);

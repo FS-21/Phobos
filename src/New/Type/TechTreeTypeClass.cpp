@@ -40,6 +40,7 @@ void TechTreeTypeClass::CalculateTotals()
 	TotalBuildConst.clear();
 	TotalBuildPower.clear();
 	TotalBuildRefinery.clear();
+	TotalBuildSilo.clear();
 	TotalBuildBarracks.clear();
 	TotalBuildWeapons.clear();
 	TotalBuildRadar.clear();
@@ -61,6 +62,7 @@ void TechTreeTypeClass::CalculateTotals()
 		TotalBuildConst.insert(pTree->BuildConst);
 		TotalBuildPower.insert(pTree->BuildPower.begin(), pTree->BuildPower.end());
 		TotalBuildRefinery.insert(pTree->BuildRefinery.begin(), pTree->BuildRefinery.end());
+		TotalBuildSilo.insert(pTree->BuildSilo.begin(), pTree->BuildSilo.end());
 		TotalBuildBarracks.insert(pTree->BuildBarracks.begin(), pTree->BuildBarracks.end());
 		TotalBuildWeapons.insert(pTree->BuildWeapons.begin(), pTree->BuildWeapons.end());
 		TotalBuildRadar.insert(pTree->BuildRadar.begin(), pTree->BuildRadar.end());
@@ -90,6 +92,9 @@ size_t TechTreeTypeClass::CountTotalOwnedBuildings(HouseClass* pHouse, BuildType
 		break;
 	case BuildType::BuildRefinery:
 		typeList = &TotalBuildRefinery;
+		break;
+	case BuildType::BuildSilo:
+		typeList = &TotalBuildSilo;
 		break;
 	case BuildType::BuildBarracks:
 		typeList = &TotalBuildBarracks;
@@ -173,6 +178,9 @@ size_t TechTreeTypeClass::CountSideOwnedBuildings(HouseClass* pHouse, BuildType 
 		break;
 	case BuildType::BuildRefinery:
 		typeList = &this->BuildRefinery;
+		break;
+	case BuildType::BuildSilo:
+		typeList = &this->BuildSilo;
 		break;
 	case BuildType::BuildBarracks:
 		typeList = &this->BuildBarracks;
@@ -307,6 +315,9 @@ std::vector<BuildingTypeClass*> TechTreeTypeClass::GetBuildable(BuildType buildT
 	case BuildType::BuildRefinery:
 		typeList = &this->BuildRefinery;
 		break;
+	case BuildType::BuildSilo:
+		typeList = &this->BuildSilo;
+		break;
 	case BuildType::BuildBarracks:
 		typeList = &this->BuildBarracks;
 		break;
@@ -389,6 +400,7 @@ void TechTreeTypeClass::LoadFromINI(CCINIClass* pINI)
 	this->BuildConst.Read(exINI, section, "BuildConst");
 	this->BuildPower.Read(exINI, section, "BuildPower");
 	this->BuildRefinery.Read(exINI, section, "BuildRefinery");
+	this->BuildSilo.Read(exINI, section, "BuildSilo");
 	this->BuildBarracks.Read(exINI, section, "BuildBarracks");
 	this->BuildWeapons.Read(exINI, section, "BuildWeapons");
 	this->BuildRadar.Read(exINI, section, "BuildRadar");
@@ -457,6 +469,7 @@ void TechTreeTypeClass::Serialize(T& Stm)
 		.Process(BuildConst)
 		.Process(BuildPower)
 		.Process(BuildRefinery)
+		.Process(BuildSilo)
 		.Process(BuildBarracks)
 		.Process(BuildWeapons)
 		.Process(BuildRadar)

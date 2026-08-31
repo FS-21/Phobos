@@ -224,6 +224,9 @@ static bool IsBuildingTypeQueued(HouseClass *pHouse,
   case TechTreeTypeClass::BuildType::BuildRefinery:
     typeList = &TechTreeTypeClass::TotalBuildRefinery;
     break;
+  case TechTreeTypeClass::BuildType::BuildSilo:
+    typeList = &TechTreeTypeClass::TotalBuildSilo;
+    break;
   case TechTreeTypeClass::BuildType::BuildBarracks:
     typeList = &TechTreeTypeClass::TotalBuildBarracks;
     break;
@@ -3181,6 +3184,24 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
                      "refineries (Mobile Target: %d)\n",
                      pRefineryToBuild->Name, minRefineryCount);
           return pRefineryToBuild;
+        }
+      }
+    }
+
+    // If AI is using resource storage and capacity is nearly full, build a Silo
+    if (RulesExt::Global()->Storage_AI && !pPrimaryTechTree->BuildSilo.empty()) {
+      if (pHouse->TotalStorage > 0 && pHouse->GetStoragePercentage() >= 0.75) {
+        if (!IsBuildingTypeQueued(pHouse, TechTreeTypeClass::BuildType::BuildSilo)) {
+          for (const auto pSiloType : pPrimaryTechTree->BuildSilo) {
+            if (pSiloType == nullptr || pSiloType->Unbuildable)
+              continue;
+
+            if (AdvAI_Can_Build_Building(pHouse, pSiloType, true, true)) {
+              Debug::Log("AdvAI: House %d is building Silo %s because storage is at %.1f%% (TotalStorage: %d)\n",
+                         pHouse->ArrayIndex, pSiloType->Name, pHouse->GetStoragePercentage() * 100.0, pHouse->TotalStorage);
+              return pSiloType;
+            }
+          }
         }
       }
     }

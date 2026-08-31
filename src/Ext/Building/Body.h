@@ -187,6 +187,7 @@ public:
 	static int Near_WarFactory_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding);
 	static int ServiceDepot_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static CellStruct Get_Best_ServiceDepot_Placement_Position(BuildingClass* pBuilding);
+	static CellStruct Get_Best_Silo_Placement_Position(BuildingClass* pBuilding);
 	static CellStruct Get_Best_Placement_Position(BuildingClass* pBuilding);
 	static int Exit_Object_Custom_Position(BuildingClass* pBuilding);
 };

@@ -510,12 +510,18 @@ In vanilla, `[CLNT]` does not have its own image. Originally, in `artmd.ini`, it
 ### Customize resource storage
 
 - Now Ares `Storage` feature can set which Tiberium type from `[Tiberiums]` list should be used for storing resources in structures with `Refinery.UseStorage=yes` and `Storage` > 0.
+- By default, AI players in skirmish/multiplayer bypass silo storage to maintain compatibility with legacy Ares mods. You can enable physical silo storage for AI players via `[General] -> Storage.AI=true`.
+- When `Storage.AI=true` is enabled, the Advanced AI will monitor its storage capacity and construct silos from the `BuildSilo` list in `[TechTree]` when storage is nearly full (>75%).
 - This tag can not be used without Ares.
 
 In `rulesmd.ini`:
 ```ini
 [General]
 Storage.TiberiumIndex=-1  ; integer, [Tiberiums] list index
+Storage.AI=false          ; boolean, enable physical resource storage for AI
+
+[SOMETECHTREE]            ; TechTreeType
+BuildSilo=GASILO          ; List of BuildingTypes used as resource silos by AI
 ```
 
 ### Customize the chained damage of the wall
