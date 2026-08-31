@@ -513,6 +513,7 @@ In vanilla, `[CLNT]` does not have its own image. Originally, in `artmd.ini`, it
 - By default, AI players in skirmish/multiplayer bypass silo storage to maintain compatibility with legacy Ares mods. You can enable physical silo storage for AI players via `[General] -> Storage.AI=true`.
 - When `Storage.AI=true` is enabled, the Advanced AI will monitor its storage capacity and construct silos from the `BuildSilo` list in `[TechTree]` when storage is nearly full (controlled by `Storage.AI.Threshold`, 85% by default).
 - To prevent base overcrowding with silos, each existing silo increases the skip probability of building additional silos by `Storage.AI.PenaltyMultiplier` (10% per silo by default), up to a maximum cap set by `Storage.AI.MaxPenalty` (90% by default). Setting `Storage.AI.PenaltyMultiplier=0.0` or `Storage.AI.MaxPenalty=0.0` disables this penalty.
+- Modders can also hard-cap the number of silos the AI will construct by configuring `AIBuildCounts=` and `AIExtraCounts=` on the silo's `[BuildingType]`.
 - This tag can not be used without Ares.
 
 In `rulesmd.ini`:

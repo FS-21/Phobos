@@ -3210,9 +3210,14 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
               if (pSiloType == nullptr || pSiloType->Unbuildable)
                 continue;
 
+              const int targetCount = GetTargetBuildCount(pSiloType, 9999, pPrimaryTechTree);
+              const int ownedCount = CountOwnedBuildingInstances(pHouse, pSiloType);
+              if (ownedCount >= targetCount)
+                continue;
+
               if (AdvAI_Can_Build_Building(pHouse, pSiloType, true, true)) {
-                Debug::Log("AdvAI: House %d is building Silo %s because storage is at %.1f%% >= %.1f%% (TotalStorage: %d, OwnedSilos: %u, SkipChance: %d%%)\n",
-                           pHouse->ArrayIndex, pSiloType->Name, pHouse->GetStoragePercentage() * 100.0, threshold * 100.0, pHouse->TotalStorage, siloCount, skipChance);
+                Debug::Log("AdvAI: House %d is building Silo %s because storage is at %.1f%% >= %.1f%% (TotalStorage: %d, OwnedSilos: %u, SkipChance: %d%%, OwnedType: %d, TargetType: %d)\n",
+                           pHouse->ArrayIndex, pSiloType->Name, pHouse->GetStoragePercentage() * 100.0, threshold * 100.0, pHouse->TotalStorage, siloCount, skipChance, ownedCount, targetCount);
                 return pSiloType;
               }
             }
