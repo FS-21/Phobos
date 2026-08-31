@@ -63,6 +63,7 @@ DEFINE_HOOK(0x73E474, UnitClass_Unload_Storage, 0x6)
 	GET(BuildingClass* const, pBuilding, EDI);
 	GET(int const, idxTiberium, EBP);
 	REF_STACK(float, amount, 0x1C);
+	REF_STACK(float, purifierBonus, 0x34);
 
 	auto const pTypeExt = BuildingTypeExt::Fetch(pBuilding->Type);
 
@@ -72,6 +73,23 @@ DEFINE_HOOK(0x73E474, UnitClass_Unload_Storage, 0x6)
 	{
 		BuildingExt::StoreTiberium(pBuilding, amount, idxTiberium, storageTiberiumIndex);
 		amount = 0.0f;
+
+		if (purifierBonus > 0.0f)
+		{
+			if (const auto pHouse = pBuilding->Owner)
+			{
+				if (const auto pTiberium = TiberiumClass::Array.GetItem(idxTiberium))
+				{
+					const int bonusCredits = static_cast<int>(purifierBonus * pTiberium->Value * pHouse->Type->IncomeMult);
+					if (bonusCredits > 0)
+					{
+						pHouse->GiveMoney(bonusCredits);
+					}
+				}
+			}
+
+			purifierBonus = 0.0f;
+		}
 	}
 
 	return 0;

@@ -92,6 +92,9 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	this->Storage_TiberiumIndex.Read(exINI, GameStrings::General, "Storage.TiberiumIndex");
 	this->Storage_AI.Read(exINI, GameStrings::General, "Storage.AI");
+	this->Storage_AI_Threshold.Read(exINI, GameStrings::General, "Storage.AI.Threshold");
+	this->Storage_AI_PenaltyMultiplier.Read(exINI, GameStrings::General, "Storage.AI.PenaltyMultiplier");
+	this->Storage_AI_MaxPenalty.Read(exINI, GameStrings::General, "Storage.AI.MaxPenalty");
 	this->HarvesterDumpAmount.Read(exINI, GameStrings::General, "HarvesterDumpAmount");
 	this->InfantryGainSelfHealCap.Read(exINI, GameStrings::General, "InfantryGainSelfHealCap");
 	this->UnitsGainSelfHealCap.Read(exINI, GameStrings::General, "UnitsGainSelfHealCap");
@@ -859,6 +862,9 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->AIScriptsLists)
 		.Process(this->Storage_TiberiumIndex)
 		.Process(this->Storage_AI)
+		.Process(this->Storage_AI_Threshold)
+		.Process(this->Storage_AI_PenaltyMultiplier)
+		.Process(this->Storage_AI_MaxPenalty)
 		.Process(this->HarvesterDumpAmount)
 		.Process(this->InfantryGainSelfHealCap)
 		.Process(this->UnitsGainSelfHealCap)

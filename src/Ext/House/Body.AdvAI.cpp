@@ -1403,6 +1403,11 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass *pHouse,
     return false;
   }
 
+  // Group build limit (Phobos BuildLimitGroup)
+  if (HouseExt::ReachedBuildLimit(pHouse, pBuildingType, true)) {
+    return false;
+  }
+
   // If this is a building upgrade, ensure we have an eligible parent building with a free slot
   const bool isUpgrade = (pBuildingType->PowersUpBuilding[0] != '\0') || (pExt && !pExt->PowersUp_Buildings.empty());
   if (isUpgrade) {
@@ -3190,17 +3195,30 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass *pHouse) {
 
     // If AI is using resource storage and capacity is nearly full, build a Silo
     if (RulesExt::Global()->Storage_AI && !pPrimaryTechTree->BuildSilo.empty()) {
-      if (pHouse->TotalStorage > 0 && pHouse->GetStoragePercentage() >= 0.75) {
+      const double threshold = RulesExt::Global()->Storage_AI_Threshold;
+      if (pHouse->TotalStorage > 0 && pHouse->GetStoragePercentage() >= threshold) {
         if (!IsBuildingTypeQueued(pHouse, TechTreeTypeClass::BuildType::BuildSilo)) {
-          for (const auto pSiloType : pPrimaryTechTree->BuildSilo) {
-            if (pSiloType == nullptr || pSiloType->Unbuildable)
-              continue;
+          // Calculate skip chance based on current silo count and penalty multiplier (capped at Storage_AI_MaxPenalty)
+          const size_t siloCount = TechTreeTypeClass::CountTotalOwnedBuildings(pHouse, TechTreeTypeClass::BuildType::BuildSilo);
+          const double penaltyMult = RulesExt::Global()->Storage_AI_PenaltyMultiplier;
+          const double maxPenalty = RulesExt::Global()->Storage_AI_MaxPenalty;
+          const int maxSkipChance = std::clamp(static_cast<int>(maxPenalty * 100.0), 0, 100);
+          const int skipChance = std::min(static_cast<int>(siloCount * penaltyMult * 100.0), maxSkipChance);
 
-            if (AdvAI_Can_Build_Building(pHouse, pSiloType, true, true)) {
-              Debug::Log("AdvAI: House %d is building Silo %s because storage is at %.1f%% (TotalStorage: %d)\n",
-                         pHouse->ArrayIndex, pSiloType->Name, pHouse->GetStoragePercentage() * 100.0, pHouse->TotalStorage);
-              return pSiloType;
+          if (skipChance <= 0 || ScenarioClass::Instance->Random.RandomRanged(0, 99) >= skipChance) {
+            for (const auto pSiloType : pPrimaryTechTree->BuildSilo) {
+              if (pSiloType == nullptr || pSiloType->Unbuildable)
+                continue;
+
+              if (AdvAI_Can_Build_Building(pHouse, pSiloType, true, true)) {
+                Debug::Log("AdvAI: House %d is building Silo %s because storage is at %.1f%% >= %.1f%% (TotalStorage: %d, OwnedSilos: %u, SkipChance: %d%%)\n",
+                           pHouse->ArrayIndex, pSiloType->Name, pHouse->GetStoragePercentage() * 100.0, threshold * 100.0, pHouse->TotalStorage, siloCount, skipChance);
+                return pSiloType;
+              }
             }
+          } else {
+            Debug::Log("AdvAI: House %d skipped Silo build evaluation due to diminishing returns (OwnedSilos: %u, SkipChance: %d%%)\n",
+                       pHouse->ArrayIndex, siloCount, skipChance);
           }
         }
       }

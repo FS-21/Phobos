@@ -27,6 +27,9 @@ public:
 
 		Valueable<int> Storage_TiberiumIndex;
 		Valueable<bool> Storage_AI;
+		Valueable<double> Storage_AI_Threshold;
+		Valueable<double> Storage_AI_PenaltyMultiplier;
+		Valueable<double> Storage_AI_MaxPenalty;
 		Valueable<float> HarvesterDumpAmount;
 		Nullable<int> InfantryGainSelfHealCap;
 		Nullable<int> UnitsGainSelfHealCap;
@@ -550,6 +553,9 @@ public:
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
 			, Storage_AI { false }
+			, Storage_AI_Threshold { 0.85 }
+			, Storage_AI_PenaltyMultiplier { 0.10 }
+			, Storage_AI_MaxPenalty { 0.90 }
 			, HarvesterDumpAmount { 0.0f }
 			, InfantryGainSelfHealCap {}
 			, UnitsGainSelfHealCap {}
