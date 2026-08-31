@@ -141,6 +141,18 @@ public:
 
 	Nullable<int> DeployFireDelay;
 
+	Valueable<AnimTypeClass*> RoofProductionAnim;
+	Valueable<AnimTypeClass*> RoofProductionAnimDamaged;
+	Valueable<AnimTypeClass*> RoofProductionAnimGarrisoned;
+	Nullable<int> RoofProductionAnimX;
+	Nullable<int> RoofProductionAnimY;
+	Nullable<int> RoofProductionAnimZAdjust;
+	Nullable<int> RoofProductionAnimYSort;
+	Nullable<bool> RoofProductionAnimPowered;
+	Nullable<bool> RoofProductionAnimPoweredLight;
+	Nullable<bool> RoofProductionAnimPoweredEffect;
+	Nullable<bool> RoofProductionAnimPoweredSpecial;
+
 	// Ares 0.2
 	Valueable<bool> CloningFacility;
 
@@ -152,6 +164,9 @@ public:
 	// Ares 0.A
 	Valueable<BuildingTypeClass*> RubbleIntact;
 	Valueable<bool> RubbleIntactRemove;
+
+	// Ares 0.E
+	Valueable<bool> Tunnel; // temporarily bool: Ares stores TunnelType name (string -> index), not mapped here
 
 	// Ares 3.0
 	Nullable<bool> UnitSell;
@@ -250,12 +265,31 @@ public:
 		, SetTabBySelecting { -1 }
 		, RevealToAll_Radius {}
 		, DeployFireDelay {}
+
+		, RoofProductionAnim { nullptr }
+		, RoofProductionAnimDamaged { nullptr }
+		, RoofProductionAnimGarrisoned { nullptr }
+		, RoofProductionAnimX {}
+		, RoofProductionAnimY {}
+		, RoofProductionAnimZAdjust {}
+		, RoofProductionAnimYSort {}
+		, RoofProductionAnimPowered { }
+		, RoofProductionAnimPoweredLight { }
+		, RoofProductionAnimPoweredEffect { }
+		, RoofProductionAnimPoweredSpecial { }
+
+		// Ares 0.2
 		, CloningFacility { false }
 		, GapGenerator { false }
 		, GapRadiusInCells { 0 }
 		, SuperGapRadiusInCells { 0 }
 		, RubbleIntact { nullptr }
 		, RubbleIntactRemove { false }
+
+		// Ares 0.E
+		, Tunnel { false }
+
+		// Ares 3.0
 		, UnitSell {}
 	{ }
 
