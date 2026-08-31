@@ -1886,6 +1886,16 @@ CellStruct BuildingExt::Get_Best_ServiceDepot_Placement_Position(BuildingClass* 
 
 CellStruct BuildingExt::Get_Best_Silo_Placement_Position(BuildingClass* pBuilding)
 {
+	const auto pExt = BuildingTypeExt::Fetch(pBuilding->Type);
+	const bool isInnerBase = pExt ? pExt->AIInnerBase.Get(true) : true;
+
+	const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
+	if (!isInnerBase && houseExt != nullptr &&
+		houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+	{
+		return Get_Best_Expansion_Placement_Position(pBuilding);
+	}
+
 	const int adjacency = pBuilding->Type->Adjacent;
 	const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(false), pBuilding->Type);
 	return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_ConYard_Placement_Position_Value);
