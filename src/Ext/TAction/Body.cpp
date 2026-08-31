@@ -593,38 +593,36 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 	{
 		// Pick a group of countries from [AIHousesList].
 		// Any house of the same type of the listed at [AIHousesList] will be included here
-
 		const int listIdx = pThis->Param4;
+		const auto& housesLists = RulesExt::Global()->AIHousesLists;
 
-		if (listIdx < 0
-		|| RulesExt::Global()->AIHousesLists.size() == 0
-		|| RulesExt::Global()->AIHousesLists.size() <= listIdx
-		|| RulesExt::Global()->AIHousesLists[listIdx].size() == 0)
+		if (listIdx < 0 || (size_t)listIdx >= housesLists.size() || housesLists[listIdx].empty())
 		{
 			Debug::Log("Map action %d: List [AIHousesList](%d) is empty or invalid. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
 			return true;
 		}
 
-		std::vector<HouseTypeClass*> housesTypeList;
-		housesTypeList = RulesExt::Global()->AIHousesLists.at(listIdx);
+		const auto& housesTypeList = housesLists[listIdx];
 
 		for (const auto pHouseType : housesTypeList)
 		{
 			for (auto pItem : HouseClass::Array)
 			{
 				if (pItem->Type == pHouseType && !pItem->Defeated && !pItem->IsObserver())
-					housesList.push_back(pItem);
+				{
+					if (std::find(housesList.begin(), housesList.end(), pItem) == housesList.end())
+						housesList.push_back(pItem);
+				}
 			}
 		}
 
 		// Nothing to check
-		if (housesList.size() == 0)
+		if (housesList.empty())
 			return true;
 	}
 	else
 	{
 		// Check index of a single house.
-
 		if (param3 >= HouseClass::PlayerAtA && param3 <= HouseClass::PlayerAtH)
 		{
 			// Is a multiplayer house index (Player@A - Player@H) ?
@@ -646,43 +644,49 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 	}
 
 	// Read the ID list of technos
-	int listIdx = std::abs(pThis->Param5);
-	bool isGlobalCount = pThis->Param5 < 0;
+	const int listIdx = std::abs(pThis->Param5);
+	const bool isGlobalCount = pThis->Param5 < 0;
+	const auto& targetTypesLists = RulesExt::Global()->AITargetTypesLists;
 
-	if (RulesExt::Global()->AITargetTypesLists.size() == 0
-		|| RulesExt::Global()->AITargetTypesLists[listIdx].size() == 0
-		|| RulesExt::Global()->AITargetTypesLists.size() <= listIdx)
+	if ((size_t)listIdx >= targetTypesLists.size() || targetTypesLists[listIdx].empty())
 	{
-		Debug::Log("Map action %d: List [AITargetTypes](%d) is empty. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
+		Debug::Log("Map action %d: List [AITargetTypes](%d) is empty or invalid. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
 		return true;
 	}
 
-	std::vector<TechnoTypeClass*> technosList = RulesExt::Global()->AITargetTypesLists[listIdx];
-	std::vector<int> technosRemaining;
+	const auto& technosList = targetTypesLists[listIdx];
+	std::vector<int> technosRemaining(technosList.size(), 0);
 	int globalRemaining = 0;
 
-	// Count all valid instances
-	for (auto const pType : technosList)
+	// Count all valid instances in a single pass over TechnoClass::Array
+	for (const auto pTechno : TechnoClass::Array)
 	{
-		int nRemaining = 0;
+		if (!ScriptExt::IsUnitAvailable(pTechno, false))
+			continue;
 
-		for (const auto pTechno : TechnoClass::Array)
+		bool ownerMatches = false;
+		for (const auto pItem : housesList)
 		{
-			if (!ScriptExt::IsUnitAvailable(pTechno, false) || pTechno->GetTechnoType() != pType)
-				continue;
-
-			for (const auto pItem : housesList)
+			if (pTechno->Owner == pItem)
 			{
-				if (pTechno->Owner == pItem)
-				{
-					globalRemaining++;
-					nRemaining++;
-					break;
-				}
+				ownerMatches = true;
+				break;
 			}
 		}
 
-		technosRemaining.push_back(nRemaining);
+		if (!ownerMatches)
+			continue;
+
+		const auto pTechnoType = pTechno->GetTechnoType();
+		for (size_t i = 0; i < technosList.size(); ++i)
+		{
+			if (technosList[i] == pTechnoType)
+			{
+				technosRemaining[i]++;
+				globalRemaining++;
+				break;
+			}
+		}
 	}
 
 	bool textToShow = false;
@@ -704,13 +708,26 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 	{
 		wcscat_s(message, L"\n");
 
-		for (std::size_t i = 0; i < technosRemaining.size(); i++)
+		for (size_t i = 0; i < technosRemaining.size(); i++)
 		{
 			if (technosRemaining[i] == 0)
 				continue;
 
 			textToShow = true;
-			wcscat_s(message, technosList[i]->UIName);
+			const auto pType = technosList[i];
+			const wchar_t* pTypeName = (pType->UIName && pType->UIName[0] != L'\0') ? pType->UIName : StringTable::TryFetchString(pType->ID, nullptr);
+
+			if (pTypeName)
+			{
+				wcscat_s(message, pTypeName);
+			}
+			else
+			{
+				wchar_t idBuffer[0x40] = { 0 };
+				mbstowcs_s(nullptr, idBuffer, pType->ID, _TRUNCATE);
+				wcscat_s(message, idBuffer);
+			}
+
 			wcscat_s(message, L": ");
 			wchar_t strInteger[24] = { 0 };
 			swprintf_s(strInteger, L"%d", technosRemaining[i]);
