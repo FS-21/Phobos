@@ -117,8 +117,9 @@ DEFINE_HOOK(0x6F683C, TechnoClass_DrawHealthBar_Units, 0x7)
 	{
 		if (pShieldData->IsAvailable() && !pShieldData->IsBrokenAndNonRespawning())
 		{
-			const int length = pThis->WhatAmI() == AbstractType::Infantry ? 8 : 17;
-			pShieldData->DrawShieldBar_Other(length, pBound);
+			const bool isInfantry = pThis->WhatAmI() == AbstractType::Infantry;
+			const int length = isInfantry ? 8 : 17;
+			pShieldData->DrawShieldBar_Other(length, pBound, isInfantry);
 		}
 	}
 
@@ -184,7 +185,7 @@ DEFINE_HOOK(0x709B2E, TechnoClass_DrawPips_Sizes, 0x5)
 	return 0;
 }
 
-DEFINE_HOOK(0x709B8B, TechnoClass_DrawPips_Spawns, 0x5)
+DEFINE_HOOK(0x709B8B, TechnoClass_DrawPips_Spawns, 0x0)
 {
 	enum { SkipGameDrawing = 0x709C27 };
 
