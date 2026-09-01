@@ -54,6 +54,7 @@ enum PhobosTriggerEvent
 	AttachedIsUnderAttachedEffect = 606,
 
 	ForceSequentialEvents = 1000,
+	ForceParallelEvents = 1001,
 
 	_DummyMaximum,
 };

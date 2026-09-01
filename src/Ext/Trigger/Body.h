@@ -9,6 +9,8 @@
 #include <Utilities/Template.h>
 #include <Utilities/TemplateDef.h>
 
+class TEventClass;
+
 class TriggerExt final : public AbstractExt
 {
 public:
@@ -26,23 +28,34 @@ public:
 		return static_cast<TriggerClass*>(this->GetAttachedObject());
 	}
 
-	std::vector<TEventClass*> SortedEventsList;
-	PhobosMap<int, CDTimerClass> SequentialTimers;
-	std::map<int, int> SequentialTimersOriginalValue;
-	PhobosMap<int, CDTimerClass> ParallelTimers;
-	std::map<int, int> ParallelTimersOriginalValue;
-	int SequentialSwitchModeIndex { -1 };
+	struct EventTimer
+	{
+		CDTimerClass Timer {};
+		int Duration { 0 };
+		bool IsRandom { false };
+		bool Started { false };
+
+		template <typename T>
+		void Serialize(T& Stm)
+		{
+			Stm
+				.Process(this->Timer)
+				.Process(this->Duration)
+				.Process(this->IsRandom)
+				.Process(this->Started);
+		}
+	};
+
+	PhobosMap<int, EventTimer> EventTimers {};
 
 	TriggerExt(TriggerClass* const OwnerObject) : AbstractExt(OwnerObject)
-		, SortedEventsList {}
-		, SequentialTimers {}
-		, SequentialTimersOriginalValue {}
-		, ParallelTimers {}
-		, ParallelTimersOriginalValue {}
-		, SequentialSwitchModeIndex { -1 }
+		, EventTimers {}
 	{ }
 
 	virtual ~TriggerExt() = default;
+
+	CDTimerClass* GetTimerForEvent(int eventIndex, TEventClass* pEvent, bool isParallel);
+	void ResetAllTimers();
 
 	virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 	virtual void SaveToStream(PhobosStreamWriter& Stm) override;

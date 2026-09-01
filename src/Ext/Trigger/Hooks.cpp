@@ -30,207 +30,253 @@ DEFINE_HOOK(0x727024, TriggerTypeClass_HasGlobalSetOrClearedEvent, 0x5)
 		: 0x727029;
 }
 
-DEFINE_HOOK(0x72612C, TriggerClass_CTOR_ForceSequentialEvents, 0x7)
+#include <Utilities/Macro.h>
+
+static bool __fastcall TriggerClass_RegisterEvent_Wrapper(
+	TriggerClass* pThis,
+	void* _,
+	TriggerEvent nEvent,
+	ObjectClass* pObject,
+	bool forceFire,
+	bool isPersistent,
+	TechnoClass* pSource)
 {
-	GET(TriggerClass*, pThis, ESI);
+	if (!pThis || !pThis->Enabled || pThis->Destroyed || !pThis->Type)
+		return false;
 
-	if (!pThis->Type)
-		return 0;
-
-	auto pExt = TriggerExt::Fetch(pThis);
-	auto pCurrentEvent = pThis->Type->FirstEvent;
-
-	while (pCurrentEvent)
+	if (forceFire)
 	{
-		pExt->SortedEventsList.emplace_back(pCurrentEvent);
-		pCurrentEvent = pCurrentEvent->NextEvent;
+		if (isPersistent)
+		{
+			pThis->ResetTimers();
+			if (auto pExt = TriggerExt::TryFetch(pThis))
+				pExt->ResetAllTimers();
+		}
+		return true;
 	}
 
-	std::reverse(pExt->SortedEventsList.begin(), pExt->SortedEventsList.end());
+	auto const pFirstEvent = pThis->Type->FirstEvent;
+	if (!pFirstEvent)
+		return false;
 
-	for (std::size_t i = 0; i < pExt->SortedEventsList.size(); i++)
+	// Collect all events in original INI order
+	std::vector<TEventClass*> events;
+	for (auto pEvent = pFirstEvent; pEvent; pEvent = pEvent->NextEvent)
 	{
-		pCurrentEvent = pExt->SortedEventsList[i];
+		events.push_back(pEvent);
+	}
+	std::reverse(events.begin(), events.end());
 
-		if (static_cast<int>(pCurrentEvent->EventKind) == PhobosTriggerEvent::ForceSequentialEvents)
+	enum class EventBlockType
+	{
+		Parallel,
+		Sequential
+	};
+
+	struct EventBlock
+	{
+		EventBlockType Type { EventBlockType::Parallel };
+		int StartIndex { 0 };
+		int EndIndex { 0 };
+		int ControlEventIndex { -1 };
+	};
+
+	// Partition events into alternating blocks (delimited by Event 1000 and Event 1001)
+	std::vector<EventBlock> blocks;
+	EventBlock currentBlock;
+	currentBlock.Type = EventBlockType::Parallel;
+	currentBlock.StartIndex = 0;
+	currentBlock.ControlEventIndex = -1;
+
+	bool hasControlEvents = false;
+
+	for (int i = 0; i < static_cast<int>(events.size()); ++i)
+	{
+		int const kind = static_cast<int>(events[i]->EventKind);
+		if (kind == PhobosTriggerEvent::ForceSequentialEvents)
 		{
-			pExt->SequentialSwitchModeIndex = i;
-			continue;
+			hasControlEvents = true;
+			currentBlock.EndIndex = i - 1;
+			currentBlock.ControlEventIndex = i;
+			blocks.push_back(currentBlock);
+
+			// Start new sequential block
+			currentBlock.Type = EventBlockType::Sequential;
+			currentBlock.StartIndex = i + 1;
+			currentBlock.ControlEventIndex = -1;
 		}
-
-		if (pCurrentEvent->EventKind != TriggerEvent::ElapsedTime && pCurrentEvent->EventKind != TriggerEvent::RandomDelay)
-			continue;
-
-		int countdown = 0;
-
-		if (pCurrentEvent->EventKind == TriggerEvent::ElapsedTime) // Event 13 "Elapsed Time..."
-			countdown = pCurrentEvent->Value;
-		else // Event 51 "Random delay..."
-			countdown = ScenarioClass::Instance->Random.RandomRanged(static_cast<int>(pCurrentEvent->Value * 0.5), static_cast<int>(pCurrentEvent->Value * 1.5));
-
-		if (pExt->SequentialSwitchModeIndex >= 0)
+		else if (kind == PhobosTriggerEvent::ForceParallelEvents)
 		{
-			pExt->SequentialTimersOriginalValue[i] = pCurrentEvent->EventKind == TriggerEvent::ElapsedTime ? pCurrentEvent->Value : pCurrentEvent->Value * -1;
-			pExt->SequentialTimers[i].Start(15 * countdown);
-			pExt->SequentialTimers[i].Pause();
+			hasControlEvents = true;
+			currentBlock.EndIndex = i - 1;
+			currentBlock.ControlEventIndex = i;
+			blocks.push_back(currentBlock);
+
+			// Start new parallel block
+			currentBlock.Type = EventBlockType::Parallel;
+			currentBlock.StartIndex = i + 1;
+			currentBlock.ControlEventIndex = -1;
 		}
-		else
+	}
+	currentBlock.EndIndex = static_cast<int>(events.size()) - 1;
+	blocks.push_back(currentBlock);
+
+	auto const pExt = TriggerExt::Fetch(pThis);
+	HouseClass* pEventOwner = (pThis->Type && pThis->Type->House) ? HouseClass::FindByCountryName(pThis->Type->House->ID) : nullptr;
+
+	bool allEventsOccurred = true;
+
+	if (!hasControlEvents)
+	{
+		// Standard parallel evaluation (vanilla)
+		for (size_t i = 0; i < events.size(); ++i)
 		{
-			pExt->ParallelTimersOriginalValue[i] = pCurrentEvent->EventKind == TriggerEvent::ElapsedTime ? pCurrentEvent->Value : pCurrentEvent->Value * -1;
-			pExt->ParallelTimers[i].Start(15 * countdown);
+			auto const pEvent = events[i];
+			const DWORD eventBit = 1u << i;
+			bool occurred = (pThis->OccuredEvents & eventBit) != 0;
+
+			if (!occurred)
+			{
+				bool repeatingFlag = isPersistent;
+				occurred = pEvent->HasOccured(
+					static_cast<int>(nEvent),
+					pEventOwner,
+					pObject,
+					&pThis->Timer,
+					&repeatingFlag
+				);
+
+				if (!occurred)
+					allEventsOccurred = false;
+			}
+
+			if (occurred)
+			{
+				if (pEvent->House)
+					pThis->House = pEvent->House;
+
+				if (isPersistent && pEvent->GetStateA() && pEvent->GetStateB())
+					pThis->OccuredEvents |= eventBit;
+			}
+		}
+	}
+	else
+	{
+		// Multi-block evaluation (alternating Parallel and Sequential blocks)
+		for (const auto& block : blocks)
+		{
+			if (block.StartIndex <= block.EndIndex)
+			{
+				if (block.Type == EventBlockType::Parallel)
+				{
+					bool blockDone = true;
+					for (int i = block.StartIndex; i <= block.EndIndex; ++i)
+					{
+						auto const pEvent = events[i];
+						const DWORD eventBit = 1u << i;
+						bool occurred = (pThis->OccuredEvents & eventBit) != 0;
+
+						if (!occurred)
+						{
+							CDTimerClass* pTimer = pExt->GetTimerForEvent(i, pEvent, true);
+							bool repeatingFlag = isPersistent;
+							occurred = pEvent->HasOccured(
+								static_cast<int>(nEvent),
+								pEventOwner,
+								pObject,
+								pTimer,
+								&repeatingFlag
+							);
+
+							if (!occurred)
+								blockDone = false;
+						}
+
+						if (occurred)
+						{
+							if (pEvent->House)
+								pThis->House = pEvent->House;
+
+							pThis->OccuredEvents |= eventBit;
+						}
+					}
+
+					if (!blockDone)
+					{
+						// Parallel block incomplete: short-circuit!
+						return false;
+					}
+				}
+				else // Sequential block
+				{
+					bool blockDone = true;
+					for (int i = block.StartIndex; i <= block.EndIndex; ++i)
+					{
+						auto const pEvent = events[i];
+						const DWORD eventBit = 1u << i;
+						bool occurred = (pThis->OccuredEvents & eventBit) != 0;
+
+						if (!occurred)
+						{
+							// Active sequential step in this block
+							CDTimerClass* pTimer = pExt->GetTimerForEvent(i, pEvent, false);
+							bool repeatingFlag = isPersistent;
+							occurred = pEvent->HasOccured(
+								static_cast<int>(nEvent),
+								pEventOwner,
+								pObject,
+								pTimer,
+								&repeatingFlag
+							);
+
+							if (occurred)
+							{
+								if (pEvent->House)
+									pThis->House = pEvent->House;
+
+								pThis->OccuredEvents |= eventBit;
+							}
+							else
+							{
+								// Sequential step failed: stop evaluating this block and subsequent blocks!
+								blockDone = false;
+								break;
+							}
+						}
+						else
+						{
+							if (pEvent->House)
+								pThis->House = pEvent->House;
+						}
+					}
+
+					if (!blockDone)
+					{
+						// Sequential block incomplete: short-circuit!
+						return false;
+					}
+				}
+			}
+
+			// Block fully satisfied! Mark closing control event as passed
+			if (block.ControlEventIndex >= 0)
+			{
+				pThis->OccuredEvents |= (1u << block.ControlEventIndex);
+			}
 		}
 	}
 
-	return 0;
+	if (allEventsOccurred)
+	{
+		if (isPersistent)
+		{
+			pThis->ResetTimers();
+			pExt->ResetAllTimers();
+		}
+		return true;
+	}
+
+	return false;
 }
 
-// TriggerClass::RegisterEvent(...) rewrite
-DEFINE_HOOK(0x7264C0, TriggerClass_RegisterEvent_ForceSequentialEvents, 0x0)
-{
-	enum { SkipGameCode = 0x7265B1 };
-
-	GET(TriggerClass*, pThis, ECX);
-	GET_STACK(TriggerEvent, nEvent, 0x4);
-	GET_STACK(TechnoClass*, pTechno, 0x8);
-	GET_STACK(bool, skipStuff, 0xC);
-	GET_STACK(bool, isPersistant, 0x10);
-
-	if (!pThis->Enabled || pThis->Destroyed)
-	{
-		R->AL(false);
-		return SkipGameCode;
-	}
-
-	auto pExt = TriggerExt::Fetch(pThis);
-	bool isSequentialMode = false; // Flag: Controls if short-circuit is active for subsequent events
-	bool allEventsSuccessful = true;
-	int nPredecessorEventsCompleted = 0;
-
-	if (!skipStuff)
-	{
-		// Check status of the trigger events in sequential logic (INI order)
-		for (std::size_t i = 0; i < pExt->SortedEventsList.size(); i++)
-		{
-			const auto pCurrentEvent = pExt->SortedEventsList[i];
-			bool alreadyOccured = pThis->HasEventOccured(i);
-			bool triggeredNow = false;
-			auto eventTimer = pThis->Timer; // Fallback
-
-			if (pExt->ParallelTimers.contains(i))
-			{
-				eventTimer = pExt->ParallelTimers[i];
-			}
-			else if (pExt->SequentialTimers.contains(i))
-			{
-				if (pExt->SequentialTimers[i].HasTimeLeft()
-				&& !pExt->SequentialTimers[i].InProgress()
-				&& !pExt->SequentialTimers[i].Completed())
-				{
-					pExt->SequentialTimers[i].Resume();
-				}
-
-				eventTimer = pExt->SequentialTimers[i];
-			}
-
-			if (static_cast<int>(pCurrentEvent->EventKind) == PhobosTriggerEvent::ForceSequentialEvents)
-			{
-				bool predecessorsCompleted = false;
-
-				if (nPredecessorEventsCompleted >= pExt->SequentialSwitchModeIndex)
-					predecessorsCompleted = true;
-
-				if (predecessorsCompleted)
-				{
-					pThis->MarkEventAsOccured(i);
-					alreadyOccured = true;
-					triggeredNow = true;
-					isSequentialMode = true; // Activate sequential mode for the rest of the INI events
-				}
-				else
-				{
-					allEventsSuccessful = false;
-					R->AL(false);
-					return SkipGameCode; // Short-circuit
-				}
-			}
-
-			if (!alreadyOccured)
-			{
-				HouseClass* pEventOwner = HouseClass::FindByCountryName(pThis->Type->House->ID);
-
-				triggeredNow = pCurrentEvent->HasOccured(
-									static_cast<int>(nEvent),
-									pEventOwner,
-									pTechno,
-									&eventTimer,
-									&isPersistant);
-			}
-
-			if (alreadyOccured || triggeredNow)
-			{
-				HouseClass* pNewHouse = pCurrentEvent->House;
-
-				if (pNewHouse)
-					pThis->House = pNewHouse;
-
-				if (isPersistant && pCurrentEvent->GetStateA() && pCurrentEvent->GetStateB())
-					pThis->MarkEventAsOccured(i); //pThis->OccuredEvents |= eventBit;
-
-				nPredecessorEventsCompleted++;
-			}
-			else
-			{
-				// Conditional short-circuit on Failure
-				allEventsSuccessful = false;
-
-				if (isSequentialMode)
-				{
-					R->AL(false);
-					return SkipGameCode;
-				}
-			}
-		}
-	}
-
-	if (allEventsSuccessful || skipStuff)
-	{
-		if (isPersistant)
-		{
-			pThis->ResetTimers(); // Is really needed now? Maybe, because YRpp is incomplete and looks that each event have its own timer inside a struct... or something similar. I'll preserve this for now that doesn't hurt having this here...
-
-			for (std::size_t i = 0; i < pExt->ParallelTimersOriginalValue.size(); i++)
-			{
-				int timerValue = pExt->ParallelTimersOriginalValue[i];
-
-				if (timerValue < 0)
-				{
-					// Generate random value for event 51 "Delayed timer"
-					timerValue = ScenarioClass::Instance->Random.RandomRanged(static_cast<int>(std::abs(timerValue) * 0.5), static_cast<int>(std::abs(timerValue) * 1.5));
-				}
-
-				pExt->ParallelTimers[i].Start(15 * timerValue);
-			}
-
-			for (std::size_t i = 0; i < pExt->SequentialTimersOriginalValue.size(); i++)
-			{
-				int timerValue = pExt->SequentialTimersOriginalValue[i];
-
-				if (timerValue < 0)
-				{
-					// Generate random value for event 51 "Delayed timer"
-					timerValue = ScenarioClass::Instance->Random.RandomRanged(static_cast<int>(std::abs(timerValue) * 0.5), static_cast<int>(std::abs(timerValue) * 1.5));
-				}
-
-				pExt->SequentialTimers[i].Start(15 * timerValue);
-				pExt->SequentialTimers[i].Pause();
-			}
-		}
-	}
-
-	if (allEventsSuccessful)
-		Debug::Log("Starting actions of the trigger: [%s] - %s\n", pThis->Type->ID, pThis->Type->Name);
-
-	R->AL(allEventsSuccessful);
-
-	return SkipGameCode;
-}
+DEFINE_FUNCTION_JUMP(LJMP, 0x7264C0, TriggerClass_RegisterEvent_Wrapper);

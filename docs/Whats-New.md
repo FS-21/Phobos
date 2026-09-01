@@ -579,7 +579,7 @@ HideShakeEffects=false           ; boolean
 - [Customize if cloning need power](Fixed-or-Improved-Logics.md#customize-if-cloning-need-power) (by NetsuNegi)
 - [Added Target Filtering Options to AttachEffect System](New-or-Enhanced-Logics.md#attached-effects) (by Flactine)
 - [Customize type selection for IFV](Fixed-or-Improved-Logics.md#customize-type-selection-for-ifv) (by NetsuNegi)
-- [Force the check of events in sequential order](AI-Scripting-and-Mapping.md#1000-force-the-check-of-events-in-sequential-order) (by FS-21)
+- [Switch event evaluation mode (Sequential / Parallel)](AI-Scripting-and-Mapping.md#1000--1001-switch-event-evaluation-mode-sequential--parallel) (by FS-21)
 - [CellSpread in cylinder shape](New-or-Enhanced-Logics.md#cellspread-enhancement) (by TaranDahl)
 - [CellSpread damage check if victim is in air or on floor](New-or-Enhanced-Logics.md#cellspread-enhancement) (by TaranDahl)
 - [OpenTopped range bonus and damage multiplier customization for passengers](Fixed-or-Improved-Logics.md#opentopped-range-bonus-and-damage-multiplier-customization-for-passengers) (by Ollerus)
