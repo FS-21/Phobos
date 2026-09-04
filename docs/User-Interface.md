@@ -72,6 +72,17 @@ HealthBar.Permanent=false            ; boolean
 HealthBar.Permanent.PipScale=false   ; boolean
 ```
 
+### Custom in-game font
+
+- You can now customize the in-game font file (`GAME.FNT`) by specifying a custom font name.
+  - `GameFont` specifies the filename of the `.fnt` font file to load instead of `GAME.FNT`.
+
+In `uimd.ini`:
+```ini
+[UISettings]
+GameFont=              ; string, filename of a custom .fnt font file (e.g. MYFONT.FNT), default to GAME.FNT
+```
+
 ### Customize the step limit of the credits indicator
 
 - In vanilla, the Credits Indicator in the sidebar increases by at most 143 points per frame, and now you can customize this limit.

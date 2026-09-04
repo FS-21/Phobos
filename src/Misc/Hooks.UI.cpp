@@ -12,6 +12,9 @@
 #include <New/Entity/BannerClass.h>
 
 #include <Utilities/Debug.h>
+#include <Phobos.h>
+#include <BitFont.h>
+#include <CCINIClass.h>
 
 DEFINE_HOOK(0x777C41, UI_ApplyAppIcon, 0x9)
 {
@@ -726,4 +729,49 @@ DEFINE_HOOK(0x6DBEA3, TacticalClass_DrawRadialIndicator_Building_Extras, 0x7)
 
 	R->EAX(pCurrentBuilding->GetRadialIndicatorRange());
 	return ContinueAfter;
+}
+
+DEFINE_HOOK(0x433884, BitFont_CTOR_CustomGameFont, 0x9)
+{
+	REF_STACK(char*, fileName, STACK_OFFSET(0x10, 0x4));
+
+	if (!fileName || _strcmpi(fileName, GameStrings::GAME_FNT) != 0)
+		return 0;
+
+	static bool hasRead = false;
+	static char customFontName[MAX_PATH] = { 0 };
+
+	if (!hasRead)
+	{
+		hasRead = true;
+
+		CCFileClass fileUI(GameStrings::UIMD_INI);
+		if (fileUI.Exists() && fileUI.Open(FileAccessMode::Read))
+		{
+			CCINIClass iniUI;
+			iniUI.ReadCCFile(&fileUI, false);
+			iniUI.CurrentSection = nullptr;
+			iniUI.CurrentSectionName = nullptr;
+
+			iniUI.ReadString(UISETTINGS_SECTION, "GameFont", "", customFontName);
+		}
+
+		if (customFontName[0] != '\0')
+		{
+			CCFileClass customFontFile(customFontName);
+			if (!customFontFile.Exists())
+			{
+				customFontName[0] = '\0';
+			}
+			else
+			{
+				Debug::Log("GameFont: Loaded custom font '%s'\n", customFontName);
+			}
+		}
+	}
+
+	if (customFontName[0] != '\0')
+		fileName = customFontName;
+
+	return 0;
 }
