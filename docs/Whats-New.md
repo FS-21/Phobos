@@ -439,6 +439,8 @@ HideShakeEffects=false           ; boolean
 - `<Player @ X>` can now be used as owner for triggers on skirmish and multiplayer maps (by Starkku)
 - More veteran and elite abilities (by Ollerus)
 - [Custom in-game font](User-Interface.md#custom-in-game-font) (by FS-21)
+- [Attached animation draw offset customizations](Fixed-or-Improved-Logics.md#draw-offset-customization) (by Starkku)
+- [Draw offset rules for AttachEffect animations](New-or-Enhanced-Logics.md#attached-effects) by (Starkku)
 
 #### Vanilla fixes:
 - Fixed the bug where a building with `Factory=BuildingType` owned by the AI did not play `ProductionAnim` when placing a produced building (by Noble_Fish)
