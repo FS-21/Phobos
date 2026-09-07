@@ -874,103 +874,98 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 	if (!pThis)
 		return true;
 
-	std::vector<HouseClass*> targetHouses;
-	const int houseParam = pThis->Param3;
+	std::vector<HouseClass*> housesList;
+	int param3 = pThis->Param3;
 
-	if (houseParam < 0)
+	if (param3 < 0)
 	{
 		const int listIdx = pThis->Param4;
 		const auto& houseLists = RulesExt::Global()->AIHousesLists;
 
 		if (listIdx < 0 || static_cast<size_t>(listIdx) >= houseLists.size() || houseLists[listIdx].empty())
 		{
-			Debug::Log("Map action %d: List [AIHousesList](%d) is empty or invalid. Action skipped.\n", static_cast<int>(pThis->ActionKind), listIdx);
+			Debug::Log("Map action %d: List [AIHousesList](%d) is empty or invalid. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
 			return true;
 		}
 
-		const auto& houseTypes = houseLists[listIdx];
+		const auto& housesTypeList = houseLists[listIdx];
 
-		// Collect active and valid houses matching any type in the list
-		for (auto const pActiveHouse : HouseClass::Array)
+		for (const auto pHouseType : housesTypeList)
 		{
-			if (pActiveHouse && !pActiveHouse->Defeated && !pActiveHouse->IsObserver())
+			for (auto pItem : HouseClass::Array)
 			{
-				if (std::find(houseTypes.begin(), houseTypes.end(), pActiveHouse->Type) != houseTypes.end())
-				{
-					targetHouses.push_back(pActiveHouse);
-				}
+				if (pItem->Type == pHouseType && !pItem->Defeated && !pItem->IsObserver())
+					housesList.push_back(pItem);
 			}
 		}
 
-		if (targetHouses.empty())
+		if (housesList.empty())
 			return true;
 	}
 	else
 	{
-		HouseClass* pTargetHouse = nullptr;
-
-		if (houseParam >= HouseClass::PlayerAtA && houseParam <= HouseClass::PlayerAtH)
+		if (param3 >= HouseClass::PlayerAtA && param3 <= HouseClass::PlayerAtH)
 		{
-			const int mpIndex = houseParam - HouseClass::PlayerAtA;
-			if (mpIndex >= 0 && mpIndex < HouseClass::Array.Count)
-				pTargetHouse = HouseClass::Array.GetItem(mpIndex);
+			param3 = pThis->Param3 - HouseClass::PlayerAtA;
 		}
-		else if (houseParam == 8997)
+		else if (param3 == 8997)
 		{
-			pTargetHouse = (pThis->TeamType && pThis->TeamType->Owner) ? pThis->TeamType->Owner : pHouse;
+			param3 = (pThis->TeamType && pThis->TeamType->Owner) ? pThis->TeamType->Owner->ArrayIndex : (pHouse ? pHouse->ArrayIndex : -1);
 		}
-		else if (houseParam >= 0 && houseParam < HouseClass::Array.Count)
+		else if (param3 > 8997 || HouseClass::Array.Count <= param3)
 		{
-			pTargetHouse = HouseClass::Array.GetItem(houseParam);
-		}
-
-		if (!pTargetHouse)
-		{
-			Debug::Log("Map action %d: House index '%d' could not be resolved. Action skipped.\n", static_cast<int>(pThis->ActionKind), houseParam);
+			Debug::Log("Map action %d: Invalid house index '%d'. This action will be skipped.\n", (int)pThis->ActionKind, pThis->Param3);
 			return true;
 		}
 
-		targetHouses.push_back(pTargetHouse);
+		if (param3 < 0 || param3 >= HouseClass::Array.Count)
+		{
+			Debug::Log("Map action %d: Invalid house index '%d'. This action will be skipped.\n", (int)pThis->ActionKind, pThis->Param3);
+			return true;
+		}
+
+		housesList.push_back(HouseClass::Array.GetItem(param3));
 	}
 
-	const int targetListIdx = std::abs(pThis->Param5);
+	const int listIdx = std::abs(pThis->Param5);
 	const bool isGlobalCount = pThis->Param5 < 0;
 	const auto& targetLists = RulesExt::Global()->AITargetTypesLists;
 
-	if (static_cast<size_t>(targetListIdx) >= targetLists.size() || targetLists[targetListIdx].empty())
+	if (static_cast<size_t>(listIdx) >= targetLists.size() || targetLists[listIdx].empty())
 	{
-		Debug::Log("Map action %d: List [AITargetTypes](%d) is empty or invalid. Action skipped.\n", static_cast<int>(pThis->ActionKind), targetListIdx);
+		Debug::Log("Map action %d: List [AITargetTypes](%d) is empty or invalid. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
 		return true;
 	}
 
-	const auto& technosList = targetLists[targetListIdx];
-	std::vector<int> technosRemaining(technosList.size(), 0);
+	const auto& technosList = targetLists[listIdx];
+	std::vector<int> technosRemaining;
 	int globalRemaining = 0;
 
-	// Single pass over map technos for optimal cache locality and performance
-	for (auto const pTechno : TechnoClass::Array)
+	for (auto const pType : technosList)
 	{
-		if (!pTechno || !pTechno->Owner)
-			continue;
+		int nRemaining = 0;
 
-		// Early exit before evaluating expensive script status
-		if (std::find(targetHouses.begin(), targetHouses.end(), pTechno->Owner) == targetHouses.end())
-			continue;
-
-		if (!ScriptExt::IsUnitAvailable(pTechno, false))
-			continue;
-
-		const auto pTechnoType = pTechno->GetTechnoType();
-		const auto it = std::find(technosList.begin(), technosList.end(), pTechnoType);
-		if (it != technosList.end())
+		for (const auto pTechno : TechnoClass::Array)
 		{
-			const size_t typeIndex = std::distance(technosList.begin(), it);
-			technosRemaining[typeIndex]++;
-			globalRemaining++;
+			if (!ScriptExt::IsUnitAvailable(pTechno, false) || pTechno->GetTechnoType() != pType)
+				continue;
+
+			for (const auto pItem : housesList)
+			{
+				if (pTechno->Owner == pItem)
+				{
+					globalRemaining++;
+					nRemaining++;
+					break;
+				}
+			}
 		}
+
+		technosRemaining.push_back(nRemaining);
 	}
 
-	bool shouldDisplay = false;
+	bool textToShow = false;
+	const double messageDelay = pThis->Param6 <= 0 ? RulesClass::Instance->MessageDelay : pThis->Param6 / 60.0;
 	std::wstring message = StringTable::TryFetchString(pThis->Text, L"Remaining: ");
 
 	if (isGlobalCount)
@@ -978,32 +973,28 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 		if (globalRemaining > 0)
 		{
 			message += std::to_wstring(globalRemaining);
-			shouldDisplay = true;
+			textToShow = true;
 		}
 	}
 	else
 	{
-		message += L'\n';
+		message += L"\n";
 
 		for (size_t i = 0; i < technosRemaining.size(); ++i)
 		{
 			if (technosRemaining[i] == 0)
 				continue;
 
-			shouldDisplay = true;
+			textToShow = true;
 			message += technosList[i]->UIName;
 			message += L": ";
 			message += std::to_wstring(technosRemaining[i]);
-			message += L'\n';
+			message += L"\n";
 		}
 	}
 
-	if (shouldDisplay)
-	{
-		const double messageDelay = pThis->Param6 <= 0 ? RulesClass::Instance->MessageDelay : pThis->Param6 / 60.0;
-		const int colorScheme = HouseClass::CurrentPlayer ? HouseClass::CurrentPlayer->ColorSchemeIndex : 0;
-		MessageListClass::Instance.PrintMessage(message.c_str(), messageDelay, colorScheme, true);
-	}
+	if (textToShow)
+		MessageListClass::Instance.PrintMessage(message.c_str(), messageDelay, HouseClass::CurrentPlayer->ColorSchemeIndex, true);
 
 	return true;
 }
