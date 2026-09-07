@@ -5,6 +5,7 @@
 #include <Ext/TerrainType/Body.h>
 #include <Ext/CaptureManager/Body.h>
 #include <Ext/Building/Body.h>
+#include <TeamClass.h>
 
 #pragma region AllowDeployControlledMCV
 
@@ -108,9 +109,32 @@ DEFINE_HOOK(0x44A03C, BuildingClass_Mi_Selling_Transfer, 0x6)
 	TechnoExt::SyncInvulnerability(pStructure, pUnit);
 	AttachEffectClass::TransferAttachedEffects(pStructure, pUnit);
 
-	// This line will break the bahavior of UnDeploysInto buildings. However, it might serve a purpose that no one knows yet
-	// Comment out the line instead of removing it for now, so we can turn to it if something related goes wrong in the future
-	// pUnit->QueueMission(Mission::Hunt, true);
+	const auto pStructureExt = BuildingExt::Fetch(pStructure);
+	if (pStructureExt->SmartAutoDeploy_SavedTeam)
+	{
+		if (TeamClass::Array.FindItemIndex(pStructureExt->SmartAutoDeploy_SavedTeam) != -1)
+			pStructureExt->SmartAutoDeploy_SavedTeam->AddMember(pUnit, true);
+
+		pStructureExt->SmartAutoDeploy_SavedTeam = nullptr;
+	}
+
+	if (auto const pTarget = pStructureExt->SmartAutoDeploy_SavedTarget)
+	{
+		bool isValid = false;
+		if (auto const pObj = abstract_cast<ObjectClass*>(pTarget))
+			isValid = pObj->IsAlive && !pObj->InLimbo;
+		else if (abstract_cast<CellClass*>(pTarget))
+			isValid = true;
+
+		if (isValid)
+		{
+			pUnit->SetTarget(pTarget);
+			pUnit->QueueMission(Mission::Attack, false);
+		}
+
+		pStructureExt->SmartAutoDeploy_SavedTarget = nullptr;
+	}
+
 	return 0;
 }
 
@@ -284,6 +308,12 @@ DEFINE_HOOK(0x7396D2, UnitClass_TryToDeploy_Transfer, 0x5)
 
 	const auto pStructureExt = BuildingExt::Fetch(pStructure);
 	pStructureExt->DeployedTechno = true;
+
+	if (pUnit->Team)
+		pStructureExt->SmartAutoDeploy_SavedTeam = pUnit->Team;
+
+	if (pUnit->Target)
+		pStructureExt->SmartAutoDeploy_SavedTarget = pUnit->Target;
 
 	return 0;
 }

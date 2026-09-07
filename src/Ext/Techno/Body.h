@@ -12,6 +12,13 @@
 class AirstrikeClass;
 class BulletClass;
 
+enum class SmartAutoDeployAction : unsigned char
+{
+	None = 0,
+	Deploy = 1,
+	Undeploy = 2
+};
+
 class TechnoExt : public RadioExt, public Detach::Listener<AirstrikeClass>
 {
 public:
@@ -88,6 +95,15 @@ public:
 
 	bool PreventCrewEscape;
 
+	// SmartAutoDeploy
+	CDTimerClass SmartAutoDeploy_IdleTimer;
+	AbstractClass* SmartAutoDeploy_SavedTarget;
+	TeamClass* SmartAutoDeploy_SavedTeam;
+	SmartAutoDeployAction SmartAutoDeploy_TargetAction;
+	Mission SmartAutoDeploy_SavedMission;
+	bool SmartAutoDeploy_IsRepositioning;
+	CoordStruct SmartAutoDeploy_RepositionDestination;
+
 	TechnoExt(TechnoClass* OwnerObject) : RadioExt(OwnerObject)
 		, TypeExtData { nullptr }
 		, Shield {}
@@ -137,6 +153,13 @@ public:
 		, DropCrate { -1 }
 		, DropCrateType { Powerup::Money }
 		, PreventCrewEscape { false }
+		, SmartAutoDeploy_IdleTimer {}
+		, SmartAutoDeploy_SavedTarget { nullptr }
+		, SmartAutoDeploy_SavedTeam { nullptr }
+		, SmartAutoDeploy_TargetAction { SmartAutoDeployAction::None }
+		, SmartAutoDeploy_SavedMission { Mission::None }
+		, SmartAutoDeploy_IsRepositioning { false }
+		, SmartAutoDeploy_RepositionDestination { CoordStruct::Empty }
 	{ }
 
 	void OnEarlyUpdate();

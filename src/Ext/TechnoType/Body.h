@@ -463,6 +463,29 @@ public:
 	Nullable<bool> Unsellable;
 	Nullable<bool> KeepAlive;
 
+	// SmartAutoDeploy
+	Valueable<bool> SmartAutoDeploy_AI;
+	Valueable<bool> SmartAutoDeploy_Player;
+	Valueable<bool> SmartAutoDeploy_TargetChase;
+	Valueable<bool> SmartAutoDeploy_Idle;
+	Valueable<int> SmartAutoDeploy_IdleDelay;
+	Valueable<bool> SmartAutoDeploy_AA;
+	Valueable<bool> SmartAutoDeploy_AG;
+	Valueable<bool> SmartAutoDeploy_AN;
+	Valueable<bool> SmartAutoDeploy_AS;
+	Valueable<bool> SmartAutoDeploy_Travel;
+	Valueable<int> SmartAutoDeploy_TravelMinDistance;
+	Valueable<bool> SmartAutoDeploy_ByWeaponDamage;
+	Valueable<bool> SmartAutoDeploy_Guard;
+	Valueable<bool> SmartAutoDeploy_AreaGuard;
+	Valueable<double> SmartAutoDeploy_Chance;
+	Nullable<double> SmartAutoDeploy_HP_Threshold;
+	Valueable<double> SmartAutoDeploy_HP_Threshold_Chance;
+	Valueable<bool> SmartAutoDeploy_HP_Threshold_Inverted;
+	Nullable<double> SmartAutoDeploy_SHP_Threshold;
+	Valueable<double> SmartAutoDeploy_SHP_Threshold_Chance;
+	Valueable<bool> SmartAutoDeploy_SHP_Threshold_Inverted;
+
 	TechnoTypeExt(TechnoTypeClass* OwnerObject) : ObjectTypeExt(OwnerObject)
 		, HealthBar_Hide { false }
 		, HealthBar_HidePips { false }
@@ -876,6 +899,29 @@ public:
 		// Ares 3.0
 		, Unsellable {}
 		, KeepAlive {}
+
+		// SmartAutoDeploy
+		, SmartAutoDeploy_AI { false }
+		, SmartAutoDeploy_Player { false }
+		, SmartAutoDeploy_TargetChase { true }
+		, SmartAutoDeploy_Idle { false }
+		, SmartAutoDeploy_IdleDelay { 60 }
+		, SmartAutoDeploy_AA { true }
+		, SmartAutoDeploy_AG { true }
+		, SmartAutoDeploy_AN { true }
+		, SmartAutoDeploy_AS { true }
+		, SmartAutoDeploy_Travel { true }
+		, SmartAutoDeploy_TravelMinDistance { 10 }
+		, SmartAutoDeploy_ByWeaponDamage { false }
+		, SmartAutoDeploy_Guard { false }
+		, SmartAutoDeploy_AreaGuard { false }
+		, SmartAutoDeploy_Chance { 1.0 }
+		, SmartAutoDeploy_HP_Threshold { }
+		, SmartAutoDeploy_HP_Threshold_Chance { 1.0 }
+		, SmartAutoDeploy_HP_Threshold_Inverted { false }
+		, SmartAutoDeploy_SHP_Threshold { }
+		, SmartAutoDeploy_SHP_Threshold_Chance { 1.0 }
+		, SmartAutoDeploy_SHP_Threshold_Inverted { false }
 	{ }
 
 	virtual ~TechnoTypeExt() = default;

@@ -1226,6 +1226,29 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->Unsellable.Read(exINI, pSection, "Unsellable");
 	this->KeepAlive.Read(exINI, pSection, "KeepAlive");
 
+	// SmartAutoDeploy
+	this->SmartAutoDeploy_AI.Read(exINI, pSection, "SmartAutoDeploy.AI");
+	this->SmartAutoDeploy_Player.Read(exINI, pSection, "SmartAutoDeploy");
+	this->SmartAutoDeploy_TargetChase.Read(exINI, pSection, "SmartAutoDeploy.TargetChase");
+	this->SmartAutoDeploy_Idle.Read(exINI, pSection, "SmartAutoDeploy.Idle");
+	this->SmartAutoDeploy_IdleDelay.Read(exINI, pSection, "SmartAutoDeploy.IdleDelay");
+	this->SmartAutoDeploy_AA.Read(exINI, pSection, "SmartAutoDeploy.AA");
+	this->SmartAutoDeploy_AG.Read(exINI, pSection, "SmartAutoDeploy.AG");
+	this->SmartAutoDeploy_AN.Read(exINI, pSection, "SmartAutoDeploy.AN");
+	this->SmartAutoDeploy_AS.Read(exINI, pSection, "SmartAutoDeploy.AS");
+	this->SmartAutoDeploy_Travel.Read(exINI, pSection, "SmartAutoDeploy.Travel");
+	this->SmartAutoDeploy_TravelMinDistance.Read(exINI, pSection, "SmartAutoDeploy.TravelMinDistance");
+	this->SmartAutoDeploy_ByWeaponDamage.Read(exINI, pSection, "SmartAutoDeploy.ByWeaponDamage");
+	this->SmartAutoDeploy_Guard.Read(exINI, pSection, "SmartAutoDeploy.Guard");
+	this->SmartAutoDeploy_AreaGuard.Read(exINI, pSection, "SmartAutoDeploy.AreaGuard");
+	this->SmartAutoDeploy_Chance.Read(exINI, pSection, "SmartAutoDeploy.Chance");
+	this->SmartAutoDeploy_HP_Threshold.Read(exINI, pSection, "SmartAutoDeploy.HP.Threshold");
+	this->SmartAutoDeploy_HP_Threshold_Chance.Read(exINI, pSection, "SmartAutoDeploy.HP.Threshold.Chance");
+	this->SmartAutoDeploy_HP_Threshold_Inverted.Read(exINI, pSection, "SmartAutoDeploy.HP.Threshold.Inverted");
+	this->SmartAutoDeploy_SHP_Threshold.Read(exINI, pSection, "SmartAutoDeploy.SHP.Threshold");
+	this->SmartAutoDeploy_SHP_Threshold_Chance.Read(exINI, pSection, "SmartAutoDeploy.SHP.Threshold.Chance");
+	this->SmartAutoDeploy_SHP_Threshold_Inverted.Read(exINI, pSection, "SmartAutoDeploy.SHP.Threshold.Inverted");
+
 	if (pThis->Gunner)
 	{
 		size_t weaponCount = pThis->WeaponCount;
@@ -1859,6 +1882,29 @@ void TechnoTypeExt::Serialize(T& Stm)
 		// Ares 3.0
 		.Process(this->Unsellable)
 		.Process(this->KeepAlive)
+
+		// SmartAutoDeploy
+		.Process(this->SmartAutoDeploy_AI)
+		.Process(this->SmartAutoDeploy_Player)
+		.Process(this->SmartAutoDeploy_TargetChase)
+		.Process(this->SmartAutoDeploy_Idle)
+		.Process(this->SmartAutoDeploy_IdleDelay)
+		.Process(this->SmartAutoDeploy_AA)
+		.Process(this->SmartAutoDeploy_AG)
+		.Process(this->SmartAutoDeploy_AN)
+		.Process(this->SmartAutoDeploy_AS)
+		.Process(this->SmartAutoDeploy_Travel)
+		.Process(this->SmartAutoDeploy_TravelMinDistance)
+		.Process(this->SmartAutoDeploy_ByWeaponDamage)
+		.Process(this->SmartAutoDeploy_Guard)
+		.Process(this->SmartAutoDeploy_AreaGuard)
+		.Process(this->SmartAutoDeploy_Chance)
+		.Process(this->SmartAutoDeploy_HP_Threshold)
+		.Process(this->SmartAutoDeploy_HP_Threshold_Chance)
+		.Process(this->SmartAutoDeploy_HP_Threshold_Inverted)
+		.Process(this->SmartAutoDeploy_SHP_Threshold)
+		.Process(this->SmartAutoDeploy_SHP_Threshold_Chance)
+		.Process(this->SmartAutoDeploy_SHP_Threshold_Inverted)
 		;
 }
 void TechnoTypeExt::LoadFromStream(PhobosStreamReader& Stm)

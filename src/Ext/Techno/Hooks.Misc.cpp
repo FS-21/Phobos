@@ -1066,6 +1066,15 @@ DEFINE_HOOK(0x4C7462, EventClass_Execute_MegaMission_MoveCommand, 0x5)
 				return SkipGameCode;
 			}
 		}
+
+		auto const pTechnoExt = TechnoExt::Fetch(pTechno);
+		pTechnoExt->SmartAutoDeploy_IsRepositioning = false;
+		pTechnoExt->SmartAutoDeploy_RepositionDestination = CoordStruct::Empty;
+		pTechnoExt->SmartAutoDeploy_SavedTarget = nullptr;
+		pTechnoExt->SmartAutoDeploy_SavedMission = Mission::None;
+		pTechnoExt->SmartAutoDeploy_TargetAction = SmartAutoDeployAction::None;
+		pTechno->SetTarget(nullptr);
+		pTechno->LastTarget = nullptr;
 	}
 
 	pExt->KeepTargetOnMove = false;

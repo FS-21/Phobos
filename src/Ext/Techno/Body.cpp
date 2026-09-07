@@ -1201,6 +1201,13 @@ void TechnoExt::Serialize(T& Stm)
 		.Process(this->LastTargetCrdClearTimer)
 		.Process(this->ShouldBeDead)
 		.Process(this->PreventCrewEscape)
+		.Process(this->SmartAutoDeploy_IdleTimer)
+		.Process(this->SmartAutoDeploy_SavedTarget)
+		.Process(this->SmartAutoDeploy_SavedTeam)
+		.Process(this->SmartAutoDeploy_TargetAction)
+		.Process(this->SmartAutoDeploy_SavedMission)
+		.Process(this->SmartAutoDeploy_IsRepositioning)
+		.Process(this->SmartAutoDeploy_RepositionDestination)
 		;
 }
 

@@ -180,6 +180,7 @@
     <ClCompile Include="src\Ext\Techno\Hooks.Transport.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.WeaponEffects.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.WeaponRange.cpp" />
+    <ClCompile Include="src\Ext\Techno\SmartAutoDeploy.cpp" />
     <ClCompile Include="src\Ext\Techno\WeaponHelpers.cpp" />
     <ClCompile Include="src\Ext\TechnoType\Body.cpp" />
     <ClCompile Include="src\Ext\TechnoType\Hooks.cpp" />
@@ -374,6 +375,7 @@
     <ClInclude Include="src\Ext\Team\Body.h" />
     <ClInclude Include="src\Ext\TeamType\Body.h" />
     <ClInclude Include="src\Ext\Techno\Body.h" />
+    <ClInclude Include="src\Ext\Techno\SmartAutoDeploy.h" />
     <ClInclude Include="src\Ext\TechnoType\Body.h" />
     <ClInclude Include="src\Ext\TerrainType\Body.h" />
     <ClInclude Include="src\Ext\TEvent\Body.h" />

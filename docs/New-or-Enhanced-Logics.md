@@ -2591,6 +2591,57 @@ Ammo.Shared=no        ; boolean
 Ammo.Shared.Group=-1  ; integer
 ```
 
+### Smart Auto Deploy and state adaptation
+
+- Allows deployable technos (`IsSimpleDeployer=true`, `DeploysInto`/`UndeploysInto`, and `Convert.Deploy`/`Convert.Undeploy`) to autonomously switch between mobile and deployed states based on combat context, target eligibility, tactical immunity, weapon range, travel speed, and idle state.
+- `SmartAutoDeploy.AI` enables autonomous state transitions for AI-controlled units.
+- `SmartAutoDeploy` enables autonomous state transitions for player-controlled units.
+- `SmartAutoDeploy.TargetChase` controls whether deployed units undeploy to pursue targets moving out of weapon range or inside minimum range.
+- `SmartAutoDeploy.AA` controls whether state transitions are considered against air targets.
+- `SmartAutoDeploy.AG` controls whether state transitions are considered against ground targets.
+- `SmartAutoDeploy.AN` controls whether state transitions are considered against surface naval targets.
+- `SmartAutoDeploy.AS` controls whether state transitions are considered against submerged targets.
+- `SmartAutoDeploy.Idle` specifies whether this form is preferred when out of combat.
+- `SmartAutoDeploy.IdleDelay` sets the delay in frames before switching to the preferred idle form.
+- `SmartAutoDeploy.Travel` specifies whether this form is preferred for long-distance movement.
+- `SmartAutoDeploy.TravelMinDistance` sets the minimum distance in cells to destination required to trigger travel form switching.
+- `SmartAutoDeploy.ByWeaponDamage` controls whether the unit evaluates combat effectiveness against the target's armor type before deploying, comparing sustained damage per second (taking warhead verses, ambient damage, burst, and rate of fire into account). If damage output is roughly tied, weapon range determines deployment.
+- `SmartAutoDeploy.Guard` controls whether units autonomously deploy when acquiring targets while on Guard mission (`Mission::Guard`). Defaults to false.
+- `SmartAutoDeploy.AreaGuard` controls whether units autonomously deploy when acquiring targets while on Area Guard mission (`Mission::Area_Guard`). Defaults to false.
+- `SmartAutoDeploy.Chance` sets the probability (from 0.0 to 1.0) of deploying into combat form when an attack condition is met. Defaults to 1.0.
+- `SmartAutoDeploy.HP.Threshold` sets the health percentage threshold (from 0.0 to 1.0) for defensive deployment. When current health ratio drops below this threshold, the unit will attempt to bunker down (deploy). If `SmartAutoDeploy.HP.Threshold.Inverted` is enabled, the unit will instead deploy only while health is above or equal to this threshold, and will undeploy to retreat/flee when health drops below it. Defaults to empty (disabled).
+- `SmartAutoDeploy.HP.Threshold.Chance` sets the probability (from 0.0 to 1.0) of triggering the HP threshold deployment or undeployment. Defaults to 1.0.
+- `SmartAutoDeploy.HP.Threshold.Inverted` inverts the HP threshold logic. Defaults to false.
+- `SmartAutoDeploy.SHP.Threshold` sets the shield percentage threshold (from 0.0 to 1.0, requires Phobos shield system) for defensive deployment. When current shield ratio drops below this threshold, the unit will attempt to bunker down (deploy). If `SmartAutoDeploy.SHP.Threshold.Inverted` is enabled, the unit will undeploy to retreat/flee when shield drops below this threshold. Defaults to empty (disabled).
+- `SmartAutoDeploy.SHP.Threshold.Chance` sets the probability (from 0.0 to 1.0) of triggering the shield threshold deployment or undeployment. Defaults to 1.0.
+- `SmartAutoDeploy.SHP.Threshold.Inverted` inverts the shield threshold logic. Defaults to false.
+
+In `rulesmd.ini`:
+```ini
+[SOME_TECHNO]                        ; TechnoType
+SmartAutoDeploy.AI=false             ; boolean
+SmartAutoDeploy=false                ; boolean
+SmartAutoDeploy.TargetChase=true     ; boolean
+SmartAutoDeploy.ByWeaponDamage=false ; boolean
+SmartAutoDeploy.Guard=false          ; boolean
+SmartAutoDeploy.AreaGuard=false      ; boolean
+SmartAutoDeploy.AA=true              ; boolean
+SmartAutoDeploy.AG=true              ; boolean
+SmartAutoDeploy.AN=true              ; boolean
+SmartAutoDeploy.AS=true              ; boolean
+SmartAutoDeploy.Idle=false           ; boolean
+SmartAutoDeploy.IdleDelay=60         ; integer - frames
+SmartAutoDeploy.Travel=true          ; boolean
+SmartAutoDeploy.TravelMinDistance=10 ; integer - cells
+SmartAutoDeploy.Chance=1.0           ; floating point - 0.0 to 1.0
+SmartAutoDeploy.HP.Threshold=        ; floating point - 0.0 to 1.0
+SmartAutoDeploy.HP.Threshold.Chance=1.0 ; floating point - 0.0 to 1.0
+SmartAutoDeploy.HP.Threshold.Inverted=false ; boolean
+SmartAutoDeploy.SHP.Threshold=       ; floating point - 0.0 to 1.0
+SmartAutoDeploy.SHP.Threshold.Chance=1.0 ; floating point - 0.0 to 1.0
+SmartAutoDeploy.SHP.Threshold.Inverted=false ; boolean
+```
+
 ### Sound entry on unit's creation
 
 - When a unit is created, sound specified in `VoiceCreated` will be played for the unit owner.

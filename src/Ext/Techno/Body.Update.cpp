@@ -8,6 +8,7 @@
 #include <Misc/FlyingStrings.h>
 #include <Utilities/AresFunctions.h>
 #include <New/Type/Affiliated/TypeConvertGroup.h>
+#include "SmartAutoDeploy.h"
 
 
 // TechnoClass_AI_0x6F9E50
@@ -27,6 +28,7 @@ void TechnoExt::OnEarlyUpdate()
 		return;
 
 	this->ApplyInterceptor();
+	SmartAutoDeploy::Update(this->OwnerObject());
 }
 
 void TechnoExt::ApplyInterceptor()
