@@ -840,145 +840,137 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 {
 	if (!pThis)
 		return true;
-	// Example:
-	// ID=ActionCount,[Action1],507,4,[CSFKey],[HouseIndex],[AIHousesLists Index],[AITargetTypes Index],[MesageDelay],A,[ActionX]
-	std::vector<HouseClass*> housesList;
 
-	// Obtain houses
-	int param3 = pThis->Param3;
+	std::vector<HouseClass*> targetHouses;
+	const int houseParam = pThis->Param3;
 
-	if (param3 < 0)
+	if (houseParam < 0)
 	{
-		// Pick a group of countries from [AIHousesList].
-		// Any house of the same type of the listed at [AIHousesList] will be included here
-
 		const int listIdx = pThis->Param4;
+		const auto& houseLists = RulesExt::Global()->AIHousesLists;
 
-		if (listIdx < 0
-		|| RulesExt::Global()->AIHousesLists.empty()
-		|| static_cast<size_t>(listIdx) >= RulesExt::Global()->AIHousesLists.size()
-		|| RulesExt::Global()->AIHousesLists[listIdx].empty())
+		if (listIdx < 0 || static_cast<size_t>(listIdx) >= houseLists.size() || houseLists[listIdx].empty())
 		{
-			Debug::Log("Map action %d: List [AIHousesList](%d) is empty or invalid. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
+			Debug::Log("Map action %d: List [AIHousesList](%d) is empty or invalid. Action skipped.\n", static_cast<int>(pThis->ActionKind), listIdx);
 			return true;
 		}
 
-		std::vector<HouseTypeClass*> housesTypeList;
-		housesTypeList = RulesExt::Global()->AIHousesLists.at(listIdx);
+		const auto& houseTypes = houseLists[listIdx];
 
-		for (const auto pHouseType : housesTypeList)
+		// Collect active and valid houses matching any type in the list
+		for (auto const pActiveHouse : HouseClass::Array)
 		{
-			for (auto pItem : HouseClass::Array)
+			if (pActiveHouse && !pActiveHouse->Defeated && !pActiveHouse->IsObserver())
 			{
-				if (pItem->Type == pHouseType && !pItem->Defeated && !pItem->IsObserver())
-					housesList.push_back(pItem);
-			}
-		}
-
-		// Nothing to check
-		if (housesList.size() == 0)
-			return true;
-	}
-	else
-	{
-		// Check index of a single house.
-
-		if (param3 >= HouseClass::PlayerAtA && param3 <= HouseClass::PlayerAtH)
-		{
-			// Is a multiplayer house index (Player@A - Player@H) ?
-			param3 = pThis->Param3 - HouseClass::PlayerAtA;
-		}
-		else if (param3 == 8997)
-		{
-			// Is the owner of the trigger ?
-			param3 = pThis->TeamType ? pThis->TeamType->Owner->ArrayIndex : pHouse->ArrayIndex;
-		}
-		else if (param3 > 8997 || HouseClass::Array.Count <= param3)
-		{
-			// Is a invalid index value ?
-			Debug::Log("Map action %d: Invalid house index '%d'. This action will be skipped.\n", (int)pThis->ActionKind, pThis->Param3);
-			return true;
-		}
-
-		housesList.push_back(HouseClass::Array.GetItem(param3));
-	}
-
-	// Read the ID list of technos
-	int listIdx = std::abs(pThis->Param5);
-	bool isGlobalCount = pThis->Param5 < 0;
-
-	if (RulesExt::Global()->AITargetTypesLists.empty()
-		|| static_cast<size_t>(listIdx) >= RulesExt::Global()->AITargetTypesLists.size()
-		|| RulesExt::Global()->AITargetTypesLists[listIdx].empty())
-	{
-		Debug::Log("Map action %d: List [AITargetTypes](%d) is empty. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
-		return true;
-	}
-
-	std::vector<TechnoTypeClass*> technosList = RulesExt::Global()->AITargetTypesLists[listIdx];
-	std::vector<int> technosRemaining;
-	int globalRemaining = 0;
-
-	// Count all valid instances
-	for (auto const pType : technosList)
-	{
-		int nRemaining = 0;
-
-		for (const auto pTechno : TechnoClass::Array)
-		{
-			if (!ScriptExt::IsUnitAvailable(pTechno, false) || pTechno->GetTechnoType() != pType)
-				continue;
-
-			for (const auto pItem : housesList)
-			{
-				if (pTechno->Owner == pItem)
+				if (std::find(houseTypes.begin(), houseTypes.end(), pActiveHouse->Type) != houseTypes.end())
 				{
-					globalRemaining++;
-					nRemaining++;
-					break;
+					targetHouses.push_back(pActiveHouse);
 				}
 			}
 		}
 
-		technosRemaining.push_back(nRemaining);
+		if (targetHouses.empty())
+			return true;
+	}
+	else
+	{
+		HouseClass* pTargetHouse = nullptr;
+
+		if (houseParam >= HouseClass::PlayerAtA && houseParam <= HouseClass::PlayerAtH)
+		{
+			const int mpIndex = houseParam - HouseClass::PlayerAtA;
+			if (mpIndex >= 0 && mpIndex < HouseClass::Array.Count)
+				pTargetHouse = HouseClass::Array.GetItem(mpIndex);
+		}
+		else if (houseParam == 8997)
+		{
+			pTargetHouse = (pThis->TeamType && pThis->TeamType->Owner) ? pThis->TeamType->Owner : pHouse;
+		}
+		else if (houseParam >= 0 && houseParam < HouseClass::Array.Count)
+		{
+			pTargetHouse = HouseClass::Array.GetItem(houseParam);
+		}
+
+		if (!pTargetHouse)
+		{
+			Debug::Log("Map action %d: House index '%d' could not be resolved. Action skipped.\n", static_cast<int>(pThis->ActionKind), houseParam);
+			return true;
+		}
+
+		targetHouses.push_back(pTargetHouse);
 	}
 
-	bool textToShow = false;
-	double messageDelay = pThis->Param6 <= 0 ? RulesClass::Instance->MessageDelay : pThis->Param6 / 60.0; // seconds / 60 = message delay in minutes
-	wchar_t message[2048] = { 0 };
-	wcscpy_s(message, StringTable::TryFetchString(pThis->Text, L"Remaining: "));
+	const int targetListIdx = std::abs(pThis->Param5);
+	const bool isGlobalCount = pThis->Param5 < 0;
+	const auto& targetLists = RulesExt::Global()->AITargetTypesLists;
+
+	if (static_cast<size_t>(targetListIdx) >= targetLists.size() || targetLists[targetListIdx].empty())
+	{
+		Debug::Log("Map action %d: List [AITargetTypes](%d) is empty or invalid. Action skipped.\n", static_cast<int>(pThis->ActionKind), targetListIdx);
+		return true;
+	}
+
+	const auto& technosList = targetLists[targetListIdx];
+	std::vector<int> technosRemaining(technosList.size(), 0);
+	int globalRemaining = 0;
+
+	// Single pass over map technos for optimal cache locality and performance
+	for (auto const pTechno : TechnoClass::Array)
+	{
+		if (!pTechno || !pTechno->Owner)
+			continue;
+
+		// Early exit before evaluating expensive script status
+		if (std::find(targetHouses.begin(), targetHouses.end(), pTechno->Owner) == targetHouses.end())
+			continue;
+
+		if (!ScriptExt::IsUnitAvailable(pTechno, false))
+			continue;
+
+		const auto pTechnoType = pTechno->GetTechnoType();
+		const auto it = std::find(technosList.begin(), technosList.end(), pTechnoType);
+		if (it != technosList.end())
+		{
+			const size_t typeIndex = std::distance(technosList.begin(), it);
+			technosRemaining[typeIndex]++;
+			globalRemaining++;
+		}
+	}
+
+	bool shouldDisplay = false;
+	std::wstring message = StringTable::TryFetchString(pThis->Text, L"Remaining: ");
 
 	if (isGlobalCount)
 	{
 		if (globalRemaining > 0)
 		{
-			wchar_t strInteger[24] = { 0 };
-			swprintf_s(strInteger, L"%d", globalRemaining);
-			wcscat_s(message, strInteger);
-			textToShow = true;
+			message += std::to_wstring(globalRemaining);
+			shouldDisplay = true;
 		}
 	}
 	else
 	{
-		wcscat_s(message, L"\n");
+		message += L'\n';
 
-		for (std::size_t i = 0; i < technosRemaining.size(); i++)
+		for (size_t i = 0; i < technosRemaining.size(); ++i)
 		{
 			if (technosRemaining[i] == 0)
 				continue;
 
-			textToShow = true;
-			wcscat_s(message, technosList[i]->UIName);
-			wcscat_s(message, L": ");
-			wchar_t strInteger[24] = { 0 };
-			swprintf_s(strInteger, L"%d", technosRemaining[i]);
-			wcscat_s(message, strInteger);
-			wcscat_s(message, L"\n");
+			shouldDisplay = true;
+			message += technosList[i]->UIName;
+			message += L": ";
+			message += std::to_wstring(technosRemaining[i]);
+			message += L'\n';
 		}
 	}
 
-	if (textToShow)
-		MessageListClass::Instance.PrintMessage(message, messageDelay, HouseClass::CurrentPlayer->ColorSchemeIndex, true);
+	if (shouldDisplay)
+	{
+		const double messageDelay = pThis->Param6 <= 0 ? RulesClass::Instance->MessageDelay : pThis->Param6 / 60.0;
+		const int colorScheme = HouseClass::CurrentPlayer ? HouseClass::CurrentPlayer->ColorSchemeIndex : 0;
+		MessageListClass::Instance.PrintMessage(message.c_str(), messageDelay, colorScheme, true);
+	}
 
 	return true;
 }
