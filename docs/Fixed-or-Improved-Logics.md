@@ -52,7 +52,6 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 
 - Vehicle to building deployers now keep their target when deploying with `DeployToFire`.
 - Effects like lasers are no longer drawn from wrong firing offset on weapons that use Burst.
-- Animations can now be offset on the X axis with `XDrawOffset`.
 - `IsSimpleDeployer` units now only play `DeploySound` and `UndeploySound` once, when done with (un)deploying instead of repeating it over duration of turning and/or `DeployingAnim`.
 - AITrigger can now recognize Building Upgrades as legal condition.
 - Fixed interaction of `UnitAbsorb` & `InfantryAbsorb` with `Grinding` buildings. The keys will now make the building only accept appropriate types of objects.
@@ -158,7 +157,6 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed damaged aircraft not repairing on `UnitReload=true` docks unless they land on the dock first.
 - Certain global tileset indices (`ShorePieces`, `WaterSet`, `CliffSet`, `WaterCliffs`, `WaterBridge`, `BridgeSet` and `WoodBridgeSet`) can now be toggled to be parsed for lunar theater by setting `[General] -> ApplyLunarFixes` to true in `lunarmd.ini`. Do note that enabling this without fixing f.ex `WoodBridgeTileSet` pointing to a tileset with `TilesInSet=0` will cause issues in-game.
 - Fixed objects with ally target and `AttackFriendlies=true` having their target reset every frame, particularly AI-owned buildings.
-- `<Player @ X>` can now be used as owner for pre-placed objects on skirmish and multiplayer maps.
 - Follower vehicle index for preplaced vehicles in maps is now explicitly constrained to `[Units]` list in map files and is no longer thrown off by vehicles that could not be created or created vehicles having other vehicles as initial passengers.
 - Drive/Jumpjet/Ship/Teleport locomotor did not power on when it is un-piggybacked bugfix
 - Stop command (`[S]` by default) behavior is now more correct:
@@ -330,6 +328,9 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - `(Pre)ProductionAnim` building animations can now use `Powered` & `PoweredLight/Effect/Special` keys.
 - Fixed the bug where a building with `Factory=BuildingType` owned by the AI did not play `ProductionAnim` when placing a produced building.
 - Fixed the bug that buildings with passengers cannot unload via the Deploy hotkey or command bar button.
+- Fixed the issue where vehicles always finish turret resetting first before turn to a new attack target, now it should turn to new target immediately.
+- Fixed the bug that computer player record cannot be log normally in non English mode.
+- Fixed the bug that setting `WalkRate=0` on a TechnoType crashed the game (integer divide-by-zero) the moment an object of that type started moving; `WalkRate=0` is now treated like `IdleRate=0`: the walk animation/footstep tick never fires, so a moving unit behaves as if standing still.
 
 ## Fixes / interactions with other extensions
 
@@ -423,6 +424,16 @@ In `rulesmd.ini`:
 ```ini
 [General]
 AllowBeaconHotKeyInSinglePlayer=false  ; boolean
+```
+
+### Allow customize that whether `Temporal=yes` warhead will cause target building animation poweroff
+
+- In vanilla, `Temporal=yes` warhead will cause target building animation poweroff. Now you can customize it.
+
+In `rulesmd.ini`:
+```ini
+[General]
+Temporal.KillPoweredAnim=true   ; boolean
 ```
 
 ### Allow deploy controlled MCV
@@ -566,6 +577,16 @@ LeptonMindControlOffset=70    ; integer, in leptons
 MindControlRingOffset=140     ; integer, in leptons
 ```
 
+### Customize whether mind-controlled `Insignificant` technos can be auto-targeted
+
+- In vanilla Red Alert 2, non-building technos with `Insignificant=yes` can never be acquired as auto targets, even when mind-controlled. In vanilla Yuri's Revenge, such technos become targetable once they are mind-controlled. Now you can customize it.
+
+In `rulesmd.ini`:
+```ini
+[CombatDamage]
+AutoTarget.InsignificantWhenMindControlled=true  ; boolean
+```
+
 ### Customizing effect of level lighting on air units
 
 - It is now possible to customize how air units are affected by level lighting, separately for AircraftTypes and infantry/vehicles with Jumpjet `Locomotor`.
@@ -633,7 +654,7 @@ Due to technical constraints this cannot be customized per WeaponType.
 In `rulesmd.ini`:
 ```ini
 [AudioVisual]
-RadialIndicatorVisibility=allies  ; List of Affected House Enumeration (owner/self | allies/ally | enemies/enemy | all)
+RadialIndicatorVisibility=allies  ; List of Affected House Enumeration (owner/self | allies/ally | enemies/enemy | neutral | all)
 ```
 
 ### Re-enable obsolete `[JumpjetControls]`
@@ -1066,6 +1087,28 @@ In `artmd.ini`:
 ```ini
 [SOMEANIM]                      ; AnimationType
 Crater.DestroyTiberium=         ; boolean, default to [General] -> AnimCraterDestroyTiberium
+```
+
+### Draw offset customization
+
+- `XDrawOffset` can be used to adjust horizontal/X axis position of the animation.
+- `X/YDrawOffset.ApplyBracketHeight` makes X/Y axis position follow it's owner object's selection bracket width/height (for buildings, this is based on `Height` and `Foundation`, for others it is influenced by `PixelSelectionBracketDelta` for Y axis and hardcoded bracket width for X axis) if it is attached to one.
+  - By default Y axis shift will only apply if the bracket position is negative e.g it is moved upwards from the object center. If `YDrawOffset.InvertBracketShift` is set to true, the opposite is true and negative shift is ignored.
+  - For X axis the shift direction can also be switched by setting `XDrawOffset.InvertBracketShift=true`. The default is positive shift, towards right-hand side of the screen.
+  - The bracket-based shift can be further adjusted with offset from `X/YDrawOffset.BracketAdjust`, overridden by `X/YDrawOffset.BracketAdjust.Buildings` for buildings only.
+ 
+In `artmd.ini`:
+```ini
+[SOMEANIM]                            ; AnimationType
+XDrawOffset=0                         ; integer, pixels relative to default
+XDrawOffset.ApplyBracketHeight=false  ; boolean
+XDrawOffset.InvertBracketShift=false  ; boolean
+XDrawOffset.BracketAdjust=0           ; integer, pixels relative to default
+XDrawOffset.BracketAdjust.Buildings=  ; integer, pixels relative to default
+YDrawOffset.ApplyBracketHeight=false  ; boolean
+YDrawOffset.InvertBracketShift=false  ; boolean
+YDrawOffset.BracketAdjust=0           ; integer, pixels relative to default
+YDrawOffset.BracketAdjust.Buildings=  ; integer, pixels relative to default
 ```
 
 ### Fire animations spawned by Scorch & Flamer
@@ -2078,6 +2121,26 @@ FlyNoWobbles=  ; boolean
 FlyNoWobbles=  ; boolean, defaults to [AudioVisual] -> FlyNoWobbles
 ```
 
+### Customize whether the unit can be detected by psychic detector
+
+- Now you can use the following flag to define whether the unit can be detected by buildings that have `PsychicDetectionRadius`.
+
+In `rulesmd.ini`:
+```ini
+[SOMETECHNO]            ; TechnoType
+PsychicDetectable=true  ; boolean
+```
+
+### Customize whether the unit exits from the roof
+
+- In vanilla, units with `BalloonHover=true` or `JumpJet=true` exit from the roof. Now you can customize it.
+
+In `rulesmd.ini`:
+```ini
+[SOMETECHNO]             ; TechnoType
+ExitThroughRoof=         ; boolean, defaults to true if BalloonHover=true or JumpJet=true, otherwise false
+```
+
 ### Damaged speed customization
 
 - In vanilla, units using drive/ship loco will has hardcoded speed multiplier when damaged. Now you can customize it.
@@ -2369,7 +2432,7 @@ Power=0               ; integer, positive means output, negative means drain
 In `rulesmd.ini`:
 ```ini
 [SOMETECHNO]                         ; TechnoType
-RadarInvisibleToHouse=               ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all), default to enemy if RadarInvisible=true, none otherwise
+RadarInvisibleToHouse=               ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all), default to enemy if RadarInvisible=true, none otherwise
 ```
 
 ### Stop immediately if the target enters the range during ApproachTarget
@@ -3268,10 +3331,10 @@ ROF.RandomDelay=     ; integer - single or comma-sep. range (game frames), defau
 In `rulesmd.ini`:
 ```ini
 [AudioVisual]
-IvanIconVisibility=owner    ; List of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all)
+IvanIconVisibility=owner    ; List of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all)
 
 [SOMEWEAPON]                ; WeaponType
-IvanBomb.Visibility=        ; List of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all)
+IvanBomb.Visibility=        ; List of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all)
 ```
 
 ### Customizing whether passengers are kicked out when an aircraft fires

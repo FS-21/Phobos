@@ -292,6 +292,8 @@ public:
 		Valueable<bool> NoReload_Temporal;
 		Valueable<double> VeteranReload;
 		Nullable<double> VeteranEmptyReload;
+		Valueable<double> VeteranRange;
+		Valueable<double> VeteranCritChance;
 		Valueable<bool> NoTurret_TrackTarget;
 
 		Valueable<bool> GatherWhenMCVDeploy;
@@ -492,6 +494,7 @@ public:
 
 		Valueable<bool> Temporal_ApplyVersus;
 		Valueable<bool> Temporal_ApplyMultiplier;
+		Valueable<bool> Temporal_KillPoweredAnim;
 
 		Valueable<bool> DiscardOn_Sequences_Immediate;
 		Valueable<bool> DiscardOn_MoveBasedOnDestination;
@@ -545,6 +548,17 @@ public:
 		Valueable<bool> KeepAlive_Aircraft;
 		Valueable<bool> KeepAlive_Buildings;
 		Valueable<bool> KeepAlive_Defenses;
+		Valueable<bool> AutoTarget_InsignificantWhenMindControlled;
+
+		ValueableVector<AnimTypeClass*> CloakAnims;
+		ValueableVector<AnimTypeClass*> DecloakAnims;
+		Valueable<bool> Cloak_KickOutParasite;
+
+		// Global default per-sequence animation rates for infantry
+		std::vector<int> CustomSequenceRates;
+
+		// Global default per-sequence game-speed normalization flags for infantry
+		std::vector<int> CustomSequenceNormalized;
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
@@ -789,6 +803,8 @@ public:
 			, NoReload_Temporal { false }
 			, VeteranReload { 1.0 }
 			, VeteranEmptyReload {}
+			, VeteranRange { 1.0 }
+			, VeteranCritChance { 1.0 }
 			, NoTurret_TrackTarget { false }
 			, GatherWhenMCVDeploy { true }
 			, AIFireSale { true }
@@ -970,6 +986,7 @@ public:
 			, Vertical_AircraftFix { true }
 			, Temporal_ApplyVersus { false }
 			, Temporal_ApplyMultiplier { false }
+			, Temporal_KillPoweredAnim { true }
 			, DiscardOn_Sequences_Immediate { true }
 			, DiscardOn_MoveBasedOnDestination { false }
 			, DiscardOn_ConsiderHarvestingAsStationary { true }
@@ -1026,6 +1043,15 @@ public:
 			, KeepAlive_Aircraft { false }
 			, KeepAlive_Buildings { true }
 			, KeepAlive_Defenses { true }
+
+			, AutoTarget_InsignificantWhenMindControlled { true }
+
+			, CloakAnims {}
+			, DecloakAnims {}
+			, Cloak_KickOutParasite { false }
+
+			, CustomSequenceRates(42, -1)
+			, CustomSequenceNormalized(42, -1)
 		{ }
 
 		virtual ~ExtData() = default;
