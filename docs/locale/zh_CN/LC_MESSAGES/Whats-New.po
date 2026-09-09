@@ -978,6 +978,13 @@ msgstr "修复了单位设置 `WalkRate=0` 时一开始移动游戏就会崩溃�
 msgid "Phobos fixes:"
 msgstr "Phobos 过往版本问题修复："
 
+msgid ""
+"Fixed an issue where `IsSimpleDeployer=yes` and `BalloonHover=yes` jumpjet "
+"units were still forced to land upon reaching destination or when hovering "
+"unless actively deploying (by FS-21)"
+msgstr ""
+"修复了拥有 `IsSimpleDeployer=yes` 和 `BalloonHover=yes` 的跳跃机甲单位在到达目的地或悬停时仍会被强制着陆的问题，除非正在主动部署（by FS-21）"
+
 msgid "Fixed a game crash when parsing string list with null entry (by Ollerus)"
 msgstr "修复了解析含有空条目的字符串列表时发生的游戏崩溃（by Ollerus）"
 

@@ -261,12 +261,31 @@ DEFINE_HOOK(0x54C58E, JumpjetLocomotionClass_Descending_PathfindingChecks, 0x7)
 	return 0;
 }
 
-// Skip DeployToLand check for IsSimpleDeployer jumpjet units, the desired behaviour here
-// should be same for both (hover in place if not deploying)
-DEFINE_JUMP(LJMP, 0x54BDDE, 0x54BDF2);
+// Allow IsSimpleDeployer jumpjet units with BalloonHover=yes to remain hovering in place upon arrival unless actively deploying.
+DEFINE_HOOK(0x54BDDE, JumpjetLocomotionClass_Hovering_SimpleDeployer, 0x14)
+{
+	GET(UnitClass*, pUnit, EDI);
 
-// Same as above but at a different state.
-DEFINE_JUMP(LJMP, 0x54C212, 0x54C22A);
+	auto const pType = pUnit->GetTechnoType();
+
+	if (pType->BalloonHover && (pUnit->CurrentMission != Mission::Unload && !pUnit->Deploying))
+		return 0x54BE62;
+
+	return 0x54BDF2;
+}
+
+// Same as above during cruising state.
+DEFINE_HOOK(0x54C212, JumpjetLocomotionClass_Cruising_SimpleDeployer, 0x18)
+{
+	GET(UnitClass*, pUnit, EDI);
+
+	auto const pType = pUnit->GetTechnoType();
+
+	if (pType->BalloonHover && (pUnit->CurrentMission != Mission::Unload && !pUnit->Deploying))
+		return 0x54C34D;
+
+	return 0x54C22A;
+}
 
 // Disable Ares hover locomotor bobbing processing DeployToLand hook.
 DEFINE_PATCH(0x513EAA, 0xA1, 0xE0, 0x71, 0x88, 0x00);

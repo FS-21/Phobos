@@ -453,6 +453,7 @@ HideShakeEffects=false           ; boolean
 - Observer can see IvanBomb that's attached by any house (by NetsuNegi)
 
 #### Phobos fixes:
+- Fixed an issue where `IsSimpleDeployer=yes` and `BalloonHover=yes` jumpjet units were still forced to land upon reaching destination or when hovering unless actively deploying (by FS-21)
 - Fixed a game crash when parsing string list with null entry (by Ollerus)
 - Fixed the bug where `Ranged=true` causes projectiles using the new Trajectory to ignore settings such as `BounceTimes` (by Noble_Fish)
 - Fixed `DiscardOn=entry` AttachEffects not triggering `ExpireWeapon` with on-discard trigger on entry (by Starkku)

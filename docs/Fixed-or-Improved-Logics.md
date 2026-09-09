@@ -243,7 +243,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - When `Speed=0` or the TechnoTypes cell cannot move due to `MovementRestrictedTo`, vehicles cannot attack targets beyond the weapon's range. `Area Guard` and `Hunt` missions will also become ineffective.
 - Fixed an issue that barrel anim data will be incorrectly overwritten by turret anim data if the techno's section exists in the map file.
 - Fixed pathfinding crashes (EIP 0x42A525, 0x42C507, 0x42C554) that happened on bigger maps due to too small pathfinding node buffer.
-- `IsSimpleDeployer` `BalloonHover=true` units with `DeployToLand=false` are no longer forced to land when hovering.
+- `IsSimpleDeployer` `BalloonHover=true` units are no longer forced to land upon reaching destination or when hovering unless actively deploying.
 - If `DeployingAnim` with `Shadow=true` is played for unit currently in air its shadow will now be drawn on ground.
 - `DeployingAnim` now supports both `Normalized=true` and `Reverse=true`. Keep in mind `Reverse` uses `LoopEnd` for frame amount instead of `End` even without `LoopCount` > 1.
 - `DeployingAnim` using unit drawer now also tint accordingly with the unit.
