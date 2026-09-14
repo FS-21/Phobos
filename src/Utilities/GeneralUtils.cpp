@@ -3,6 +3,7 @@
 #include "Debug.h"
 #include <Theater.h>
 #include <BitFont.h>
+#include <New/Type/TheaterTypeClass.h>
 
 #include <Ext/Rules/Body.h>
 #include <Ext/Techno/Body.h>
@@ -154,7 +155,7 @@ bool GeneralUtils::ApplyTheaterSuffixToString(char* str)
 	if (auto pSuffix = strstr(str, "~~~"))
 	{
 		const auto theater = ScenarioClass::Instance->Theater;
-		const auto pExtension = Theater::GetTheater(theater).Extension;
+		const auto pExtension = TheaterTypeClass::Suffix_From(theater);
 		pSuffix[0] = pExtension[0];
 		pSuffix[1] = pExtension[1];
 		pSuffix[2] = pExtension[2];

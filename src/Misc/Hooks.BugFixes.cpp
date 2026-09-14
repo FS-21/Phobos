@@ -11,6 +11,7 @@
 #include <Ext/SWType/Body.h>
 #include <Ext/WarheadType/Body.h>
 #include <Ext/Cell/Body.h>
+#include <New/Type/TheaterTypeClass.h>
 
 /*
 	Allow usage of TileSet of 255 and above without making NE-SW broken bridges unrepairable
@@ -1557,6 +1558,8 @@ DEFINE_HOOK(0x4D8606, FootClass_UpdatePosition_Sensors, 0x6)
 	{
 		pThis->RemoveSensorsAt(pExt->LastSensorsMapCoords);
 		pThis->AddSensorsAt(currentCell);
+
+		TheaterTypeClass::ProcessIceMovement(pThis, currentCell);
 	}
 
 	return SkipGameCode;

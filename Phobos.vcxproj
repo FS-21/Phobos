@@ -275,6 +275,8 @@
     <ClCompile Include="src\New\Type\RadTypeClass.cpp" />
     <ClCompile Include="src\New\Type\SelectBoxTypeClass.cpp" />
     <ClCompile Include="src\New\Type\ShieldTypeClass.cpp" />
+    <ClCompile Include="src\New\Type\TheaterTypeClass.cpp" />
+    <ClCompile Include="src\New\Type\TheaterTypeHooks.cpp" />
     <!-- src\New\Type\Affiliated -->
     <ClCompile Include="src\New\Type\Affiliated\CreateUnitTypeClass.cpp" />
     <ClCompile Include="src\New\Type\Affiliated\DroppodTypeClass.cpp" />
@@ -416,6 +418,7 @@
     <ClInclude Include="src\New\Type\RadTypeClass.h" />
     <ClInclude Include="src\New\Type\SelectBoxTypeClass.h" />
     <ClInclude Include="src\New\Type\ShieldTypeClass.h" />
+    <ClInclude Include="src\New\Type\TheaterTypeClass.h" />
     <!-- src\New\Type\Affiliated -->
     <ClInclude Include="src\New\Type\Affiliated\CreateUnitTypeClass.h" />
     <ClInclude Include="src\New\Type\Affiliated\DroppodTypeClass.h" />

@@ -580,6 +580,66 @@ When using `Convert` or `(Un)DeploysInto` to change TechnoType, shield interacti
 - Whenever a shield is passed between TechnoTypes, its current strength will be adjusted to the same percentage through before and after, and most of the properties will be transferred. Notice that the timers for warhead modifiers and combat delay will not be reset to the same percentage; they keep their remaining time as‑is, for simplicity.
 ```
 
+### Theater Types
+
+- Custom theater types can be defined in `theatersmd.ini` (or fallback `theaters.ini`).
+  - Theater types are declared in the `[TheaterTypes]` list section.
+  - Omitted naming properties are automatically inferred from the theater name.
+  - `UIName` specifies the CSF string label used for display in the Map Generator options.
+  - `Root` specifies the base filename root used for control and mix files (defaults to up to 8 uppercase characters of the theater name).
+  - `IsoRoot` specifies the isometric tileset root name (defaults to `ISO` + up to 5 uppercase characters of the theater name).
+  - `Suffix` specifies the 3-letter file extension for tiles, art filenames, and unit palettes (defaults to the first 3 uppercase characters of the theater name).
+  - `MMSuffix` specifies the 3-letter marble madness tile extension (defaults to `MM` + first letter of the suffix).
+  - `ImageLetter` specifies the 1-letter theater code used for theater-specific object types (defaults to the first character of the theater name).
+  - `IsArctic` controls whether arctic visual properties (such as snow roof textures, cell overlays, and RMG ambient lighting) apply to this theater.
+  - `IsIceGrowthEnabled` restores Tiberian Sun ice cracking, vehicle breaking/sinking, and periodic ice refreezing mechanics according to `rulesmd.ini` settings (`IceCrackingWeight`, `IceBreakingWeight`, `IceCrackSounds`, and `IceGrowthRate`).
+  - `IsVeinGrowthEnabled` controls whether Tiberian Sun Tiberium vein and veinhole monster growth is allowed in this theater.
+  - `IsAllowedInMapGenerator` determines whether this theater is selectable in the Map Generator options (see note below).
+  - `IsGenerateVeinholesInMapGenerator` controls whether the Map Generator may place veinhole monsters for this theater (see note below).
+  - `LowRadarBrightness` specifies the low height radar cell brightness multiplier for this theater.
+  - `HighRadarBrightness` specifies the high height radar cell brightness multiplier for this theater.
+  - `TerrainControl` allows overriding the terrain control INI filename (defaults to `<Root>MD.INI`).
+  - `PaletteISO` allows overriding the isometric tileset palette filename (defaults to `ISO<Suffix>.PAL`).
+  - `PaletteOverlay` allows overriding the overlay palette filename (defaults to `<Root>.PAL`).
+  - `PaletteUnit` allows overriding the unit remap palette filename (defaults to `UNIT<Suffix>.PAL`).
+  - `Mixes` specifies a comma-separated list of custom MIX archive files to load for this theater. When omitted, standard base mixes are loaded automatically.
+
+```ini
+; theatersmd.ini
+[TheaterTypes]
+0=TEMPERATE
+1=SNOW
+2=URBAN
+3=DESERT
+4=NEWURBAN
+5=LUNAR
+6=CUSTOMTHEATER
+
+[CUSTOMTHEATER]                                ; TheaterType
+UIName=Name:CUSTOMTHEATER                      ; CSF label
+Root=CUSTOMTH                                  ; string (up to 8 characters)
+IsoRoot=ISOCUS                                 ; string (up to 8 characters)
+Suffix=CUS                                     ; string (3 characters)
+MMSuffix=MMC                                   ; string (3 characters)
+ImageLetter=C                                  ; character
+IsArctic=no                                    ; boolean
+IsIceGrowthEnabled=no                          ; boolean
+IsVeinGrowthEnabled=no                         ; boolean
+IsAllowedInMapGenerator=no                     ; boolean
+IsGenerateVeinholesInMapGenerator=no           ; boolean
+LowRadarBrightness=1.0                         ; float
+HighRadarBrightness=1.0                        ; float
+TerrainControl=CUSTOMTHMD.INI                  ; filename
+PaletteISO=ISOCUS.PAL                          ; filename
+PaletteOverlay=CUSTOMTH.PAL                    ; filename
+PaletteUnit=UNITCUS.PAL                        ; filename
+Mixes=                                         ; list of filenames
+```
+
+```{note}
+The Map Generator is not currently active in retail Yuri's Revenge. However, map generator tags (`IsAllowedInMapGenerator`, `IsGenerateVeinholesInMapGenerator`, and `UIName`) and their corresponding engine hooks are fully implemented and ready in case map generation functionality is re-enabled in the future.
+```
+
 ## Aircraft
 
 ### Custom cruise missiles

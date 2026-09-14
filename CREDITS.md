@@ -162,6 +162,7 @@ This page lists all the individual contributions to the project by their author.
   - Restore the ScriptType action#24 `Play speech` from Tiberian Sun
   - Modify ammo on impact
   - Tiberium ramp expansion support, spread and growth crash fixes due to data corruption.
+  - Custom theater types support and Tiberian Sun ice cracking, breaking, and regeneration mechanics restoration (design inspired by CCHyper's work in Vinifera).
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

@@ -12,6 +12,7 @@
 #include "Utilities/Parser.h"
 
 #include <Ext/Rules/Body.h>
+#include <New/Type/TheaterTypeClass.h>
 #include <TiberiumClass.h>
 #include <algorithm>
 
@@ -210,6 +211,7 @@ void Phobos::ExeRun()
 	ActivateCommonControls6();
 
 	Patch::ApplyStatic();
+	TheaterTypeClass::Init();
 
 #ifdef DEBUG
 
@@ -246,6 +248,7 @@ void Phobos::ExeRun()
 
 void Phobos::ExeTerminate()
 {
+	TheaterTypeClass::UnloadCurrentMixes();
 	Console::Release();
 }
 

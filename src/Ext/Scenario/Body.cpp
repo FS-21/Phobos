@@ -1,6 +1,7 @@
 #include "Body.h"
 
 #include <VeinholeMonsterClass.h>
+#include <New/Type/TheaterTypeClass.h>
 
 #include <Ext/House/Body.h>
 
@@ -227,12 +228,16 @@ DEFINE_HOOK(0x683549, ScenarioClass_CTOR, 0x9)
 	ScenarioExt::Global()->Variables[1].clear();
 	ScenarioExt::Global()->TriggerTypePlayerAtXOwners.clear();
 
+	TheaterTypeClass::ClearIceState();
+
 	return 0;
 }
 
 DEFINE_HOOK(0x6BEB7D, ScenarioClass_DTOR, 0x6)
 {
 	GET(ScenarioClass*, pItem, ESI);
+
+	TheaterTypeClass::ClearIceState();
 
 	ScenarioExt::Remove(pItem);
 	return 0;
@@ -292,7 +297,10 @@ DEFINE_HOOK(0x68AD2F, ScenarioClass_LoadFromINI, 0x5)
 
 DEFINE_HOOK(0x55B4E1, LogicClass_Update_BeforeAll, 0x5)
 {
-	VeinholeMonsterClass::UpdateAllVeinholes();
+	if (ScenarioClass::Instance && TheaterTypeClass::Vein_Growth_Allowed(ScenarioClass::Instance->Theater))
+		VeinholeMonsterClass::UpdateAllVeinholes();
+
+	TheaterTypeClass::UpdateIceRegeneration();
 
 	ScenarioExt::Global()->UpdateAutoDeathObjectsInLimbo();
 	ScenarioExt::Global()->UpdateTransportReloaders();
