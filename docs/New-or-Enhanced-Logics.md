@@ -2615,12 +2615,14 @@ Ammo.Shared.Group=-1  ; integer
 - `SmartAutoDeploy.SHP.Threshold` sets the shield percentage threshold (from 0.0 to 1.0, requires Phobos shield system) for defensive deployment. When current shield ratio drops below this threshold, the unit will attempt to bunker down (deploy). If `SmartAutoDeploy.SHP.Threshold.Inverted` is enabled, the unit will undeploy to retreat/flee when shield drops below this threshold. Defaults to empty (disabled).
 - `SmartAutoDeploy.SHP.Threshold.Chance` sets the probability (from 0.0 to 1.0) of triggering the shield threshold deployment or undeployment. Defaults to 1.0.
 - `SmartAutoDeploy.SHP.Threshold.Inverted` inverts the shield threshold logic. Defaults to false.
+- `SmartAutoDeploy.CheckMinimumRange` controls whether human-controlled units perform the tactical standoff repositioning maneuver when an enemy enters within the deployed weapon's `MinimumRange` (retreating to weapon range minus 1 cell, landing, and redeploying to resume artillery bombardment). AI-controlled units always perform this repositioning maneuver automatically. Defaults to false for human players. (Alias: `SmartAutoDeploy.MinimumRange`).
 
 In `rulesmd.ini`:
 ```ini
 [SOME_TECHNO]                        ; TechnoType
 SmartAutoDeploy.AI=false             ; boolean
 SmartAutoDeploy=false                ; boolean
+SmartAutoDeploy.CheckMinimumRange=false ; boolean
 SmartAutoDeploy.TargetChase=true     ; boolean
 SmartAutoDeploy.ByWeaponDamage=false ; boolean
 SmartAutoDeploy.Guard=false          ; boolean

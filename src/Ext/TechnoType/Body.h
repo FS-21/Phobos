@@ -485,6 +485,7 @@ public:
 	Nullable<double> SmartAutoDeploy_SHP_Threshold;
 	Valueable<double> SmartAutoDeploy_SHP_Threshold_Chance;
 	Valueable<bool> SmartAutoDeploy_SHP_Threshold_Inverted;
+	Valueable<bool> SmartAutoDeploy_CheckMinimumRange;
 
 	TechnoTypeExt(TechnoTypeClass* OwnerObject) : ObjectTypeExt(OwnerObject)
 		, HealthBar_Hide { false }
@@ -922,6 +923,7 @@ public:
 		, SmartAutoDeploy_SHP_Threshold { }
 		, SmartAutoDeploy_SHP_Threshold_Chance { 1.0 }
 		, SmartAutoDeploy_SHP_Threshold_Inverted { false }
+		, SmartAutoDeploy_CheckMinimumRange { false }
 	{ }
 
 	virtual ~TechnoTypeExt() = default;

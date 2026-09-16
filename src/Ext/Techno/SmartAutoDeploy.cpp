@@ -1,5 +1,4 @@
 #include "SmartAutoDeploy.h"
-#include <Utilities/Debug.h>
 
 #include <TechnoClass.h>
 #include <UnitClass.h>
@@ -441,13 +440,24 @@ namespace
 		return false;
 	}
 
+	bool ShouldCheckMinimumRange(TechnoClass* pThis, TechnoTypeExt* pTypeExt, TechnoTypeExt* pAltTypeExt)
+	{
+		const bool isAI = !pThis->Owner || !pThis->Owner->IsControlledByHuman();
+		return isAI || pTypeExt->SmartAutoDeploy_CheckMinimumRange.Get() || pAltTypeExt->SmartAutoDeploy_CheckMinimumRange.Get();
+	}
+
 	CellClass* CalculateStandoffCell(TechnoClass* pThis, AbstractClass* pTarget, WeaponTypeClass* pWeapon)
 	{
 		if (!pThis || !pTarget || !pWeapon)
 			return nullptr;
 
+		// Standoff at (Range - 1 cell), bounded above MinimumRange to maximize firing distance and safety.
 		const double maxRange = static_cast<double>(pWeapon->Range);
-		const double desiredDist = maxRange * 0.85;
+		const double margin = 256.0; // 1 cell (256 leptons)
+		const double minAllowed = (pWeapon->MinimumRange > 0)
+			? (static_cast<double>(pWeapon->MinimumRange) + margin)
+			: margin;
+		const double desiredDist = std::max(minAllowed, maxRange - margin);
 
 		const CoordStruct myCoords = pThis->GetCoords();
 		const CoordStruct targetCoords = pTarget->GetCoords();
@@ -870,7 +880,10 @@ namespace SmartAutoDeploy
 
 		// ── MinimumRange reposition ──────────────────────────────────────
 		if (pCurrentWeapon && pCurrentWeapon->MinimumRange > 0 && currentDist < pCurrentWeapon->MinimumRange)
-			return SaveAndTransform(pThis, pTarget, SmartAutoDeployAction::Undeploy, false, Mission::Attack, true);
+		{
+			if (ShouldCheckMinimumRange(pThis, pTypeExt, pAltTypeExt))
+				return SaveAndTransform(pThis, pTarget, SmartAutoDeployAction::Undeploy, false, Mission::Attack, true);
+		}
 
 		// ── Inverted HP threshold: flee when health is low ───────────────
 		if (pTypeExt->SmartAutoDeploy_HP_Threshold.isset() && pTypeExt->SmartAutoDeploy_HP_Threshold_Inverted)
@@ -898,13 +911,10 @@ namespace SmartAutoDeploy
 				const int currentWeaponIdx = GetFormWeaponIndex(pThis, pType, true, pTarget);
 				const bool canAttackCurrent = pThis->IsCloseEnough(pTarget, currentWeaponIdx);
 
-				// No dead zone: if the unit can't attack, chase immediately.
-				// The deployMargin on the deploy side already provides hysteresis
-				// to prevent deploy/undeploy oscillation.
-				if (!canAttackCurrent)
+				// Pursue target when it moves outside maximum weapon range.
+				// (Targets inside MinimumRange are handled exclusively by MinimumRange reposition above).
+				if (!canAttackCurrent && currentDist >= pCurrentWeapon->Range)
 				{
-					Debug::Log("[SmartAutoDeploy::TargetChase] %s: canAttack=false, dist=%d, wpnRange=%d, wpnMinRange=%d, mission=%d -> CHASE\n",
-						pThis->get_ID(), currentDist, pCurrentWeapon->Range, pCurrentWeapon->MinimumRange, (int)pThis->CurrentMission);
 					shouldUndeploy = true;
 				}
 				else if (byWeaponDamage && pAltWeapon)
@@ -917,7 +927,6 @@ namespace SmartAutoDeploy
 			}
 			else
 			{
-				Debug::Log("[SmartAutoDeploy::TargetChase] %s: no current weapon -> CHASE\n", pThis->get_ID());
 				shouldUndeploy = true;
 			}
 
@@ -1053,20 +1062,23 @@ namespace SmartAutoDeploy
 		// ── MinimumRange repositioning ───────────────────────────────────
 		if (pAltWeapon->MinimumRange > 0 && currentDist < pAltWeapon->MinimumRange)
 		{
-			if (auto const pStandoffCell = CalculateStandoffCell(pThis, pTarget, pAltWeapon))
+			if (ShouldCheckMinimumRange(pThis, pTypeExt, pAltTypeExt))
 			{
-				if (auto const pFoot = abstract_cast<FootClass*>(pThis))
+				if (auto const pStandoffCell = CalculateStandoffCell(pThis, pTarget, pAltWeapon))
 				{
-					auto const pExt = TechnoExt::Fetch(pThis);
-					pThis->SetTarget(nullptr);
-					pFoot->SetDestination(pStandoffCell, true);
-					pFoot->QueueMission(Mission::Move, true);
-					pExt->SmartAutoDeploy_SavedTarget = pTarget;
-					pExt->SmartAutoDeploy_SavedMission = pThis->CurrentMission;
-					pExt->SmartAutoDeploy_IsRepositioning = true;
-					pExt->SmartAutoDeploy_RepositionDestination = pStandoffCell->GetCenterCoords();
-					pExt->SmartAutoDeploy_TargetAction = SmartAutoDeployAction::None;
-					return true;
+					if (auto const pFoot = abstract_cast<FootClass*>(pThis))
+					{
+						auto const pExt = TechnoExt::Fetch(pThis);
+						pThis->SetTarget(nullptr);
+						pFoot->SetDestination(pStandoffCell, true);
+						pFoot->QueueMission(Mission::Move, true);
+						pExt->SmartAutoDeploy_SavedTarget = pTarget;
+						pExt->SmartAutoDeploy_SavedMission = pThis->CurrentMission;
+						pExt->SmartAutoDeploy_IsRepositioning = true;
+						pExt->SmartAutoDeploy_RepositionDestination = pStandoffCell->GetCenterCoords();
+						pExt->SmartAutoDeploy_TargetAction = SmartAutoDeployAction::None;
+						return true;
+					}
 				}
 			}
 			return false;

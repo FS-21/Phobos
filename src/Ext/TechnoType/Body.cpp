@@ -1248,6 +1248,8 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->SmartAutoDeploy_SHP_Threshold.Read(exINI, pSection, "SmartAutoDeploy.SHP.Threshold");
 	this->SmartAutoDeploy_SHP_Threshold_Chance.Read(exINI, pSection, "SmartAutoDeploy.SHP.Threshold.Chance");
 	this->SmartAutoDeploy_SHP_Threshold_Inverted.Read(exINI, pSection, "SmartAutoDeploy.SHP.Threshold.Inverted");
+	this->SmartAutoDeploy_CheckMinimumRange.Read(exINI, pSection, "SmartAutoDeploy.CheckMinimumRange");
+	this->SmartAutoDeploy_CheckMinimumRange.Read(exINI, pSection, "SmartAutoDeploy.MinimumRange");
 
 	if (pThis->Gunner)
 	{
@@ -1905,6 +1907,7 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->SmartAutoDeploy_SHP_Threshold)
 		.Process(this->SmartAutoDeploy_SHP_Threshold_Chance)
 		.Process(this->SmartAutoDeploy_SHP_Threshold_Inverted)
+		.Process(this->SmartAutoDeploy_CheckMinimumRange)
 		;
 }
 void TechnoTypeExt::LoadFromStream(PhobosStreamReader& Stm)
