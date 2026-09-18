@@ -451,6 +451,17 @@ CustomSidebarButtonClass::CustomSidebarButtonClass(const SidebarButtonConfig& cf
 	: GadgetClass(x, y, width, height, (GadgetFlag::LeftPress | GadgetFlag::RightPress), false)
 	, Config(cfg)
 {
+	if (auto const pShape = this->GetShape())
+	{
+		if (!cfg.Size.isset() || this->Width <= 0 || this->Height <= 0)
+		{
+			this->Width = pShape->Width;
+			this->Height = pShape->Height;
+		}
+	}
+
+	if (this->Width <= 0) this->Width = 24;
+	if (this->Height <= 0) this->Height = 24;
 }
 
 CustomSidebarButtonClass::~CustomSidebarButtonClass()
@@ -744,7 +755,7 @@ void SidebarExt::InitIO()
 			pos.Y = static_cast<int>(sellY);
 		}
 
-		ActiveTogglePowerButton = GameCreate<CustomSidebarButtonClass>(tpCfg, pos.X, pos.Y, 24, 24);
+		ActiveTogglePowerButton = GameCreate<CustomSidebarButtonClass>(tpCfg, pos.X, pos.Y, 0, 0);
 		GScreenClass::Instance.AddButton(ActiveTogglePowerButton);
 	}
 
@@ -755,7 +766,7 @@ void SidebarExt::InitIO()
 		if (btnCfg.Show.Get(true))
 		{
 			Point2D pos = btnCfg.Position.Get(Point2D { 0, 0 });
-			Point2D sz = btnCfg.Size.Get(Point2D { 24, 24 });
+			Point2D sz = btnCfg.Size.Get(Point2D { 0, 0 });
 			auto pBtn = GameCreate<CustomSidebarButtonClass>(btnCfg, pos.X, pos.Y, sz.X, sz.Y);
 			ActiveCustomButtons.push_back(pBtn);
 			GScreenClass::Instance.AddButton(pBtn);
