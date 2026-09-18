@@ -8,6 +8,13 @@
 
 DEFINE_HOOK(0x6ABC60, SidebarClass_GetObjectTabIdx, 0x5)
 {
+	const auto config = SidebarExt::ActiveConfig();
+	if (config.Tabs.Count.Get(4) == 1)
+	{
+		R->EAX(0);
+		return 0x6ABC9A;
+	}
+
 	GET(AbstractType, abs, ECX);
 	GET(int, idxType, EDX);
 
@@ -18,7 +25,6 @@ DEFINE_HOOK(0x6ABC60, SidebarClass_GetObjectTabIdx, 0x5)
 		{
 			if (pExt->TabIndex.isset())
 			{
-				const auto config = SidebarExt::ActiveConfig();
 				int maxCount = config.Tabs.Count.Get(4);
 				int tabIdx = pExt->TabIndex.Get();
 
@@ -39,10 +45,28 @@ DEFINE_HOOK(0x6ABC60, SidebarClass_GetObjectTabIdx, 0x5)
 	return 0;
 }
 
+DEFINE_HOOK(0x6ABCD0, SidebarClass_GetObjectTabIdx2, 0x5)
+{
+	const auto config = SidebarExt::ActiveConfig();
+	if (config.Tabs.Count.Get(4) == 1)
+	{
+		R->EAX(0);
+		return 0x6ABCF4;
+	}
+
+	return 0;
+}
+
 DEFINE_HOOK(0x6A7590, SidebarClass_SetTab, 0x5)
 {
-	GET_STACK(int, tabIndex, 0x4);
 	const auto config = SidebarExt::ActiveConfig();
+	if (config.Tabs.Count.Get(4) == 1)
+	{
+		R->Stack(0x4, 0);
+		return 0;
+	}
+
+	GET_STACK(int, tabIndex, 0x4);
 	if (!config.Tabs.Order.empty() && tabIndex >= 0 && static_cast<size_t>(tabIndex) < config.Tabs.Order.size())
 	{
 		R->Stack(0x4, config.Tabs.Order[tabIndex]);

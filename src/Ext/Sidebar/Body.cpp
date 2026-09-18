@@ -736,6 +736,37 @@ void SidebarExt::InitIO()
 
 	const auto config = ActiveConfig();
 
+	int tabCount = config.Tabs.Count.Get(4);
+	if (tabCount < 4)
+	{
+		for (int i = tabCount; i < 4; ++i)
+		{
+			SidebarClass::TabButtons[i].SetPosition(-10000, -10000);
+			SidebarClass::TabButtons[i].Disable();
+		}
+	}
+
+	if (config.RepairButton.Position.isset())
+	{
+		SidebarClass::ToggleRepairButton.SetPosition(config.RepairButton.Position.Get().X, config.RepairButton.Position.Get().Y);
+	}
+	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
+	{
+		SidebarClass::ToggleRepairButton.SetPosition(-10000, -10000);
+		SidebarClass::ToggleRepairButton.Disable();
+	}
+
+	auto pSellButton = reinterpret_cast<ToggleClass*>(0xB07DF8);
+	if (config.SellButton.Position.isset())
+	{
+		pSellButton->SetPosition(config.SellButton.Position.Get().X, config.SellButton.Position.Get().Y);
+	}
+	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
+	{
+		pSellButton->SetPosition(-10000, -10000);
+		pSellButton->Disable();
+	}
+
 	// Create TogglePowerButton if enabled
 	if (config.TogglePowerButton.Enabled.Get())
 	{
