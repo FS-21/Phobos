@@ -761,6 +761,27 @@ void SidebarExt::InitIO()
 	{
 		pSellButton->SetPosition(config.SellButton.Position.Get().X, config.SellButton.Position.Get().Y);
 	}
+	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
+	{
+		bool isNOD = false;
+		if (HouseClass::CurrentPlayer)
+		{
+			if (const auto pSide = SideClass::Array.GetItemOrDefault(HouseClass::CurrentPlayer->SideIndex))
+			{
+				if (const auto pSideExt = SideExt::TryFetch(pSide))
+				{
+					isNOD = !pSideExt->Sidebar_GDIPositions;
+				}
+				else
+				{
+					isNOD = HouseClass::CurrentPlayer->SideIndex != 0;
+				}
+			}
+		}
+		int sellX = config.RepairButton.Position.Get().X + (isNOD ? 0x34 : 0x40);
+		int sellY = config.RepairButton.Position.Get().Y;
+		pSellButton->SetPosition(sellX, sellY);
+	}
 	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
 	{
 		pSellButton->SetPosition(-10000, -10000);
@@ -780,10 +801,44 @@ void SidebarExt::InitIO()
 		Point2D pos = config.TogglePowerButton.Position.Get(Point2D { 0, 0 });
 		if (!config.TogglePowerButton.Position.isset())
 		{
-			DWORD sellX = *reinterpret_cast<DWORD*>(0xB07E04);
-			DWORD sellY = *reinterpret_cast<DWORD*>(0xB07E08);
-			pos.X = static_cast<int>(sellX) + 24;
-			pos.Y = static_cast<int>(sellY);
+			int sellX = *reinterpret_cast<int*>(0xB07E04);
+			int sellY = *reinterpret_cast<int*>(0xB07E08);
+
+			if (sellX <= -5000 || sellY <= -5000)
+			{
+				DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
+				DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
+
+				bool isNOD = false;
+				if (HouseClass::CurrentPlayer)
+				{
+					if (const auto pSide = SideClass::Array.GetItemOrDefault(HouseClass::CurrentPlayer->SideIndex))
+					{
+						if (const auto pSideExt = SideExt::TryFetch(pSide))
+						{
+							isNOD = !pSideExt->Sidebar_GDIPositions;
+						}
+						else
+						{
+							isNOD = HouseClass::CurrentPlayer->SideIndex != 0;
+						}
+					}
+				}
+
+				int baseSellX = sidebarX + (isNOD ? (0x21 + 0x34) : (0x14 + 0x40));
+				int baseSellY = topMargin + (isNOD ? 7 : 8);
+
+				if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
+				{
+					baseSellX = config.RepairButton.Position.Get().X + (isNOD ? 0x34 : 0x40);
+					baseSellY = config.RepairButton.Position.Get().Y;
+				}
+				sellX = baseSellX;
+				sellY = baseSellY;
+			}
+
+			pos.X = sellX + 24;
+			pos.Y = sellY;
 		}
 
 		ActiveTogglePowerButton = GameCreate<CustomSidebarButtonClass>(tpCfg, pos.X, pos.Y, 0, 0);

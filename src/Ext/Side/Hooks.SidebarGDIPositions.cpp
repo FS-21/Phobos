@@ -1,7 +1,12 @@
 #include "Body.h"
 #include <Ext/Sidebar/Body.h>
 
-bool isNODSidebar = false;
+namespace SidebarGDIPositionsTemp
+{
+	bool isNODSidebar = false;
+}
+
+using namespace SidebarGDIPositionsTemp;
 
 DEFINE_HOOK(0x534FA7, Prep_For_Side, 0x5)
 {
@@ -16,8 +21,15 @@ DEFINE_HOOK(0x534FA7, Prep_For_Side, 0x5)
 DEFINE_HOOK(0x652EAB, RadarClass_InitForHouse, 0x6)
 {
 	R->EAX(isNODSidebar);
+	return 0x652EB7;
+}
+
+DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_Buttons, 0x6)
+{
+	R->EDX(*reinterpret_cast<DWORD*>(R->ESI() + 0x11F0));
 
 	const auto config = SidebarExt::ActiveConfig();
+
 	if (config.DiplomacyButton.Position.isset())
 	{
 		*reinterpret_cast<DWORD*>(0x00B04A00) = config.DiplomacyButton.Position.Get().X;
@@ -40,24 +52,24 @@ DEFINE_HOOK(0x652EAB, RadarClass_InitForHouse, 0x6)
 		*reinterpret_cast<DWORD*>(0x00B048CC) = static_cast<DWORD>(-10000);
 	}
 
-	return 0x652EB7;
+	return 0;
 }
 
 DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 {
 	DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
 
+	DWORD repairY = topMargin + (isNODSidebar ? 7 : 8);
+	DWORD tabsY = repairY + (isNODSidebar ? 0x20 : 0x1F);
+	DWORD cameosY = tabsY + 0x1E;
+
 	if (!isNODSidebar)
 	{
 		*reinterpret_cast<DWORD*>(0x00B0B4E4) = 0x40; // Repair Width (64)
 		*reinterpret_cast<DWORD*>(0x00B0B4F0) = 0x1D; // Tab Width (29)
 		*reinterpret_cast<DWORD*>(0x00B0B4FC) = 0x3F; // Cameo Width (63)
-
-		DWORD repairY = topMargin + 8;
 		*reinterpret_cast<DWORD*>(0x00B0B4E0) = repairY;
-		DWORD tabsY = repairY + 0x1F;
 		*reinterpret_cast<DWORD*>(0x00B0B4EC) = tabsY;
-		DWORD cameosY = tabsY + 0x1E;
 		*reinterpret_cast<DWORD*>(0x00B0B4F8) = cameosY;
 	}
 	else
@@ -65,12 +77,8 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 		*reinterpret_cast<DWORD*>(0x00B0B4E4) = 0x34; // Repair Width (52)
 		*reinterpret_cast<DWORD*>(0x00B0B4F0) = 0x20; // Tab Width (32)
 		*reinterpret_cast<DWORD*>(0x00B0B4FC) = 0x40; // Cameo Width (64)
-
-		DWORD repairY = topMargin + 7;
 		*reinterpret_cast<DWORD*>(0x00B0B4E0) = repairY;
-		DWORD tabsY = repairY + 0x20;
 		*reinterpret_cast<DWORD*>(0x00B0B4EC) = tabsY;
-		DWORD cameosY = tabsY + 0x1E;
 		*reinterpret_cast<DWORD*>(0x00B0B4F8) = cameosY;
 	}
 
@@ -103,16 +111,31 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 		*reinterpret_cast<DWORD*>(0x00B0B4E0) = static_cast<DWORD>(-10000);
 	}
 
+	// Baseline SellButton coordinates (independent of RepairButton state)
+	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
+	int baseSellX = sidebarX + (isNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
+	int baseSellY = repairY;
+
+	int sellX = baseSellX;
+	int sellY = baseSellY;
 	if (config.SellButton.Position.isset())
 	{
-		*reinterpret_cast<DWORD*>(0x00B07E04) = config.SellButton.Position.Get().X;
-		*reinterpret_cast<DWORD*>(0x00B07E08) = config.SellButton.Position.Get().Y;
+		sellX = config.SellButton.Position.Get().X;
+		sellY = config.SellButton.Position.Get().Y;
 	}
+	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
+	{
+		sellX = config.RepairButton.Position.Get().X + (isNODSidebar ? 0x34 : 0x40);
+		sellY = config.RepairButton.Position.Get().Y;
+	}
+
 	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
 	{
-		*reinterpret_cast<DWORD*>(0x00B07E04) = static_cast<DWORD>(-10000);
-		*reinterpret_cast<DWORD*>(0x00B07E08) = static_cast<DWORD>(-10000);
+		sellX = -10000;
+		sellY = -10000;
 	}
+	*reinterpret_cast<DWORD*>(0x00B07E04) = sellX;
+	*reinterpret_cast<DWORD*>(0x00B07E08) = sellY;
 
 	return 0x6A50DB;
 }
@@ -155,14 +178,26 @@ DEFINE_HOOK(0x6A532B, SidebarClass_InitGUI_AfterInitPositions, 0x5)
 DEFINE_HOOK(0x6A53BF, SidebarClass_InitGUI_SellButtonPos, 0x6)
 {
 	const auto config = SidebarExt::ActiveConfig();
-	int posX = R->ECX();
-	int posY = R->EDX();
+
+	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
+	DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
+	int baseSellX = sidebarX + (isNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
+	int baseSellY = topMargin + (isNODSidebar ? 7 : 8);
+
+	int posX = baseSellX;
+	int posY = baseSellY;
 
 	if (config.SellButton.Position.isset())
 	{
 		posX = config.SellButton.Position.Get().X;
 		posY = config.SellButton.Position.Get().Y;
 	}
+	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
+	{
+		posX = config.RepairButton.Position.Get().X + (isNODSidebar ? 0x34 : 0x40);
+		posY = config.RepairButton.Position.Get().Y;
+	}
+
 	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
 	{
 		posX = -10000;
@@ -172,6 +207,7 @@ DEFINE_HOOK(0x6A53BF, SidebarClass_InitGUI_SellButtonPos, 0x6)
 	R->ECX(posX);
 	R->EDX(posY);
 	*reinterpret_cast<DWORD*>(0x00B07E04) = posX;
+	*reinterpret_cast<DWORD*>(0x00B07E08) = posY;
 	return 0x6A53C5;
 }
 
@@ -202,14 +238,26 @@ DEFINE_HOOK(0x6ABE03, SidebarClass_RepositionButtons, 0x5)
 DEFINE_HOOK(0x6ABE45, SidebarClass_RepositionSellButton, 0x7)
 {
 	const auto config = SidebarExt::ActiveConfig();
-	int posX = R->EDX();
-	int posY = R->EAX();
+
+	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
+	DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
+	int baseSellX = sidebarX + (isNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
+	int baseSellY = topMargin + (isNODSidebar ? 7 : 8);
+
+	int posX = baseSellX;
+	int posY = baseSellY;
 
 	if (config.SellButton.Position.isset())
 	{
 		posX = config.SellButton.Position.Get().X;
 		posY = config.SellButton.Position.Get().Y;
 	}
+	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
+	{
+		posX = config.RepairButton.Position.Get().X + (isNODSidebar ? 0x34 : 0x40);
+		posY = config.RepairButton.Position.Get().Y;
+	}
+
 	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
 	{
 		posX = -10000;
@@ -218,6 +266,8 @@ DEFINE_HOOK(0x6ABE45, SidebarClass_RepositionSellButton, 0x7)
 
 	R->EDX(posX);
 	R->EAX(posY);
+	*reinterpret_cast<DWORD*>(0x00B07E04) = posX;
+	*reinterpret_cast<DWORD*>(0x00B07E08) = posY;
 	return 0;
 }
 
