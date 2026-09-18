@@ -3,6 +3,8 @@
 #include <VeinholeMonsterClass.h>
 
 #include <Ext/House/Body.h>
+#include <Ext/Side/Body.h>
+#include <Ext/Sidebar/Body.h>
 
 std::unique_ptr<ScenarioExt::ExtData> ScenarioExt::Data = nullptr;
 
@@ -96,6 +98,20 @@ void ScenarioExt::LoadFromINIFile(ScenarioClass* pThis, CCINIClass* pINI)
 	{
 		HouseExt::Fetch(pHouse)->FreeRadar = ScenarioClass::Instance->FreeRadar;
 	}
+
+	SidebarExt::ResetToBaseline();
+	for (auto const pSide : SideClass::Array)
+	{
+		if (auto const pSideExt = SideExt::Fetch(pSide))
+		{
+			pSideExt->ResetToBaseline();
+			if (pINI->GetSection(pSide->ID))
+			{
+				pSideExt->LoadFromINI(pINI);
+			}
+		}
+	}
+	SidebarExt::LoadFromScenario(pINI);
 }
 
 void ScenarioExt::ExtData::UpdateAutoDeathObjectsInLimbo()

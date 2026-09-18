@@ -28,6 +28,7 @@ void SideExt::LoadFromINIFile(CCINIClass* pINI)
 
 	INI_EX exINI(pINI);
 	this->Sidebar_GDIPositions.Read(exINI, pSection, "Sidebar.GDIPositions");
+	this->SidebarSettings.Read(pINI, pSection);
 	this->IngameScore_WinTheme = pINI->ReadTheme(pSection, "IngameScore.WinTheme", this->IngameScore_WinTheme);
 	this->IngameScore_LoseTheme = pINI->ReadTheme(pSection, "IngameScore.LoseTheme", this->IngameScore_LoseTheme);
 	this->Sidebar_HarvesterCounter_Offset.Read(exINI, pSection, "Sidebar.HarvesterCounter.Offset");
@@ -66,6 +67,7 @@ void SideExt::Serialize(T& Stm)
 	Stm
 		.Process(this->ArrayIndex)
 		.Process(this->Sidebar_GDIPositions)
+		.Process(this->SidebarSettings)
 		.Process(this->Sidebar_HarvesterCounter_Offset)
 		.Process(this->Sidebar_HarvesterCounter_HideMaxValue)
 		.Process(this->Sidebar_HarvesterCounter_OnlyMaxValue)

@@ -760,6 +760,7 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->HealthBar_Hide.Read(exINI, pSection, "HealthBar.Hide");
 	this->HealthBar_HidePips.Read(exINI, pSection, "HealthBar.HidePips");
+	this->TabIndex.Read(exINI, pSection, "TabIndex");
 	this->HealthBar_Permanent.Read(exINI, pSection, "HealthBar.Permanent");
 	this->HealthBar_Permanent_PipScale.Read(exINI, pSection, "HealthBar.Permanent.PipScale");
 	this->UIDescription.Read(exINI, pSection, "UIDescription");
@@ -1873,6 +1874,7 @@ void TechnoTypeExt::Serialize(T& Stm)
 		// Ares 3.0
 		.Process(this->Unsellable)
 		.Process(this->KeepAlive)
+		.Process(this->TabIndex)
 		;
 }
 void TechnoTypeExt::LoadFromStream(PhobosStreamReader& Stm)

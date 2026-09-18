@@ -469,8 +469,10 @@ public:
 	// Ares 3.0
 	Nullable<bool> Unsellable;
 	Nullable<bool> KeepAlive;
+	Nullable<int> TabIndex;
 
 	TechnoTypeExt(TechnoTypeClass* OwnerObject) : ObjectTypeExt(OwnerObject)
+		, TabIndex {}
 		, HealthBar_Hide { false }
 		, HealthBar_HidePips { false }
 		, HealthBar_Permanent { false }

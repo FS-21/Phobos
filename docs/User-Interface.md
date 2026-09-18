@@ -846,6 +846,91 @@ In `rulesmd.ini`:
 Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 ```
 
+### Sidebar Customizations
+
+- Now you can customize the layout, coordinates, visibility, and behavior of sidebar controls, restore the Tiberian Sun power toggle button, create custom buttons, and configure sidebar tabs.
+	- `RepairButton.Show` determines whether the repair button is displayed and clickable.
+	- `RepairButton.Position` sets the X and Y screen coordinates of the repair button.
+	- `SellButton.Show` determines whether the sell button is displayed and clickable.
+	- `SellButton.Position` sets the X and Y screen coordinates of the sell button.
+	- `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`).
+	- `DiplomacyButton.Position` sets the X and Y screen coordinates of the diplomacy button (also aliased as `RadarButton.Position`).
+	- `MenuButton.Show` determines whether the options/menu button is displayed and clickable.
+	- `MenuButton.Position` sets the X and Y screen coordinates of the options/menu button.
+	- `TogglePowerButton.Enabled` restores and enables the Tiberian Sun power toggle button.
+	- `TogglePowerButton.Position` sets the X and Y screen coordinates of the toggle power button.
+	- `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button.
+	- `TogglePowerButton.RequiresBuildings` controls whether the toggle power button is disabled when the player has no buildings.
+	- `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip.
+	- `CustomButtons` lists the section names of custom sidebar buttons to create.
+	- `Credits.Position` sets the X and Y screen coordinates of the credits counter text.
+	- `Credits.Align` sets the text alignment for the credits counter (`left`, `center`, or `right`).
+	- `Credits.Color` sets the text color of the credits counter as an RGB value.
+	- `PowerBar.Show` controls whether the power bar is displayed.
+	- `PowerBar.Position` sets the X and Y screen coordinates of the power bar.
+	- `PowerBar.Height` sets a fixed pixel height for the power bar (`-1` for dynamic vanilla scaling).
+	- `PowerBar.Shape` specifies a custom SHP file for the power bar pips.
+	- `Tabs.Count` specifies the total number of sidebar tabs. When set to `1`, tab buttons are automatically hidden and the cameo strip is shifted up.
+	- `Tabs.Order` specifies the display order of the tabs as a comma-separated list of zero-based tab indices.
+	- `Cameos.Y` overrides the vertical start coordinate of the cameo strip.
+	- `TabIndex` assigns an object type or superweapon to a specific sidebar tab index.
+
+In `uimd.ini`:
+```ini
+[Sidebar]
+RepairButton.Show=true               ; boolean
+RepairButton.Position=               ; integer, X,Y coordinates
+SellButton.Show=true                 ; boolean
+SellButton.Position=                 ; integer, X,Y coordinates
+DiplomacyButton.Show=true            ; boolean
+DiplomacyButton.Position=            ; integer, X,Y coordinates
+MenuButton.Show=true                 ; boolean
+MenuButton.Position=                 ; integer, X,Y coordinates
+TogglePowerButton.Enabled=false      ; boolean
+TogglePowerButton.Position=          ; integer, X,Y coordinates
+TogglePowerButton.Shape=power.shp    ; filename - including the .shp extension
+TogglePowerButton.RequiresBuildings=true ; boolean
+TogglePowerButton.Tooltip=GUI:TogglePower ; CSF entry key
+CustomButtons=                       ; list of section names
+Credits.Position=                    ; integer, X,Y coordinates
+Credits.Align=center                 ; left | center | right
+Credits.Color=                       ; integer - Red,Green,Blue
+PowerBar.Show=true                   ; boolean
+PowerBar.Position=                   ; integer, X,Y coordinates
+PowerBar.Height=-1                   ; integer, -1 for dynamic or height in pixels
+PowerBar.Shape=                      ; filename - including the .shp extension
+Tabs.Count=4                         ; integer (1..16)
+Tabs.Order=                          ; list of integer tab indices
+Cameos.Y=                            ; integer
+
+[SOMECUSTOMBUTTON]                   ; Section listed in CustomButtons
+Show=true                            ; boolean
+Action=None                          ; None | Repair | Sell | TogglePower | SuperWeapon | Command | Custom
+Position=                            ; integer, X,Y coordinates
+Size=                                ; integer, Width,Height
+Shape=                               ; filename - including the .shp extension
+RequiresBuildings=false              ; boolean
+SuperWeapon=                         ; SuperWeaponType
+SuperWeaponIndex=                    ; integer, 0-based index
+Command=                             ; Command name
+Tooltip=                             ; CSF entry key
+```
+
+In `rulesmd.ini`:
+```ini
+[Sidebar]
+; Any [Sidebar] tag from uimd.ini can also be overridden globally here
+
+[SOMESIDE]                           ; Side
+; Any [Sidebar] tag can also be overridden per-side here
+
+[SOMETECHNO]                         ; TechnoType
+TabIndex=                            ; integer, 0-based tab index
+
+[SOMESW]                             ; SuperWeaponType
+TabIndex=                            ; integer, 0-based tab index
+```
+
 ### Specify Sidebar style
 
 - It's now possible to switch hardcoded sidebar button coords to use GDI sidebar coords by setting `Sidebar.GDIPosition`. Defaults to true for first side, false for all others.

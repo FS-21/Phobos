@@ -6,6 +6,7 @@
 #include <Utilities/GeneralUtils.h>
 #include <Utilities/Patch.h>
 #include <Utilities/Macro.h>
+#include <Ext/Sidebar/Body.h>
 
 #include "Misc/BlittersFix.h"
 
@@ -239,6 +240,8 @@ DEFINE_HOOK(0x5FACDF, OptionsClass_LoadSettings_LoadPhobosSettings, 0x5)
 
 		Phobos::UI::CreditsIndicator_Smooth =
 			ini_uimd.ReadBool(SIDEBAR_SECTION, "CreditsIndicator.Smooth", Phobos::UI::CreditsIndicator_Smooth);
+
+		SidebarExt::LoadFromUIMD(ini_uimd);
 	}
 
 	// UISettings
