@@ -1201,6 +1201,9 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->ExitThroughRoof.Read(exINI, pSection, "ExitThroughRoof");
 	this->PsychicDetectable.Read(exINI, pSection, "PsychicDetectable");
 
+	if (!this->PsychicDetectable)
+		Phobos::Optimizations::DisablePsychicDetectable = false;
+
 	this->CloakAnims.Read(exINI, pSection, "CloakAnims");
 	this->DecloakAnims.Read(exINI, pSection, "DecloakAnims");
 	this->Cloak_KickOutParasite.Read(exINI, pSection, "Cloak.KickOutParasite");
@@ -1881,6 +1884,9 @@ void TechnoTypeExt::LoadFromStream(PhobosStreamReader& Stm)
 {
 	ObjectTypeExt::LoadFromStream(Stm);
 	this->Serialize(Stm);
+
+	if (!this->PsychicDetectable)
+		Phobos::Optimizations::DisablePsychicDetectable = false;
 }
 
 void TechnoTypeExt::SaveToStream(PhobosStreamWriter& Stm)
