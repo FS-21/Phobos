@@ -859,7 +859,7 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 	- `MenuButton.Position` sets the X and Y screen coordinates of the options/menu button.
 	- `TogglePowerButton.Enabled` restores and enables the Tiberian Sun power toggle button.
 	- `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. If X < 168, it is automatically treated as relative to the sidebar (resolution-independent); otherwise, it is treated as absolute screen coordinates. Defaults to its standard position adjacent to the Sell button.
-	- `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button.
+	- `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button (defaults to `power.shp`). **Note:** `power.shp` is an asset from Tiberian Sun and does **not** exist in vanilla Yuri's Revenge MIX archives. You must provide `power.shp` in your mod files (or set this tag to an existing SHP) for the button to appear. The SHP supports 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled (when `RequiresBuildings=true` and player has no buildings).
 	- `TogglePowerButton.RequiresBuildings` controls whether the toggle power button is disabled when the player has no buildings.
 	- `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip.
 	- `CustomButtons` lists the section names of custom sidebar buttons to create.
@@ -869,7 +869,7 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 	- `PowerBar.Show` controls whether the power bar is displayed.
 	- `PowerBar.Position` sets the X and Y screen coordinates of the power bar.
 	- `PowerBar.Height` sets a fixed pixel height for the power bar (`-1` for dynamic vanilla scaling).
-	- `PowerBar.Shape` specifies a custom SHP file for the power bar pips.
+	- `PowerBar.Shape` specifies a custom SHP file for the power bar pips (defaults to vanilla `powerp.shp`).
 	- `Tabs.Count` specifies the total number of sidebar tabs. When set to `1`, tab buttons are automatically hidden and the cameo strip is shifted up.
 	- `Tabs.Order` specifies the display order of the tabs as a comma-separated list of zero-based tab indices.
 	- `Cameos.Y` overrides the vertical start coordinate of the cameo strip.
@@ -915,6 +915,18 @@ SuperWeaponIndex=                    ; integer, 0-based index
 Command=                             ; Command name
 Tooltip=                             ; CSF entry key
 ```
+
+#### Default Sidebar SHP Files
+
+| UI Element | Default SHP File | How to Customize |
+|---|---|---|
+| Toggle Power Button | `power.shp` *(from TS, not present in vanilla YR)* | Set `TogglePowerButton.Shape=filename.shp` or add `power.shp` to the mod |
+| Power Bar Pips | `powerp.shp` | Set `PowerBar.Shape=filename.shp` or replace `powerp.shp` in the mod |
+| Repair Button | `repair.shp` | Replace `repair.shp` in the mod, or hide it and use a `CustomButtons` entry with `Action=Repair` |
+| Sell Button | `sell.shp` | Replace `sell.shp` in the mod, or hide it and use a `CustomButtons` entry with `Action=Sell` |
+| Diplomacy Button | `diplobtn.shp` | Replace `diplobtn.shp` in the mod |
+| Options / Menu Button | `optbtn.shp` | Replace `optbtn.shp` in the mod |
+| Tabs (Categories) | `tab00.shp` – `tab03.shp` | Replace `tab00.shp` through `tab03.shp` in the mod |
 
 In `rulesmd.ini`:
 ```ini
