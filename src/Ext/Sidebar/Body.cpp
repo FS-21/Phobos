@@ -515,6 +515,7 @@ bool CustomSidebarButtonClass::Draw(bool forced)
 
 	const auto sidebarRect = *reinterpret_cast<RectangleStruct*>(0x886F90);
 	DSurface* pSurface = nullptr;
+	ConvertClass* pPalette = nullptr;
 	Point2D drawPos;
 	RectangleStruct bounds;
 
@@ -523,17 +524,19 @@ bool CustomSidebarButtonClass::Draw(bool forced)
 		drawPos = { this->X - sidebarRect.X, this->Y };
 		bounds = DSurface::Sidebar->GetRect();
 		pSurface = DSurface::Sidebar;
+		pPalette = FileSystem::SIDEBAR_PAL;
 	}
 	else if (DSurface::Composite)
 	{
 		drawPos = { this->X, this->Y };
 		bounds = DSurface::Composite->GetRect();
 		pSurface = DSurface::Composite;
+		pPalette = FileSystem::PALETTE_PAL;
 	}
 
-	if (pSurface)
+	if (pSurface && pPalette)
 	{
-		pSurface->DrawSHP(FileSystem::SIDEBAR_PAL, pShape, frame, &drawPos, &bounds,
+		pSurface->DrawSHP(pPalette, pShape, frame, &drawPos, &bounds,
 			BlitterFlags::bf_400, 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
 	}
 
@@ -763,9 +766,18 @@ void SidebarExt::InitIO()
 		SidebarClass::TabButtons[i].Disable();
 	}
 
+	const DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
+	const DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
+
 	if (config.RepairButton.Position.isset())
 	{
-		SidebarClass::ToggleRepairButton.SetPosition(config.RepairButton.Position.Get().X, config.RepairButton.Position.Get().Y);
+		Point2D rPos = config.RepairButton.Position.Get();
+		if (rPos.X < 168 && rPos.X >= 0)
+		{
+			rPos.X += sidebarX;
+			rPos.Y += topMargin;
+		}
+		SidebarClass::ToggleRepairButton.SetPosition(rPos.X, rPos.Y);
 	}
 	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
 	{
@@ -776,7 +788,13 @@ void SidebarExt::InitIO()
 	auto pSellButton = reinterpret_cast<ToggleClass*>(0xB07DF8);
 	if (config.SellButton.Position.isset())
 	{
-		pSellButton->SetPosition(config.SellButton.Position.Get().X, config.SellButton.Position.Get().Y);
+		Point2D sPos = config.SellButton.Position.Get();
+		if (sPos.X < 168 && sPos.X >= 0)
+		{
+			sPos.X += sidebarX;
+			sPos.Y += topMargin;
+		}
+		pSellButton->SetPosition(sPos.X, sPos.Y);
 	}
 	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
 	{
@@ -795,8 +813,8 @@ void SidebarExt::InitIO()
 				}
 			}
 		}
-		int sellX = config.RepairButton.Position.Get().X + (isNOD ? 0x34 : 0x40);
-		int sellY = config.RepairButton.Position.Get().Y;
+		int sellX = SidebarClass::ToggleRepairButton.X + (isNOD ? 0x34 : 0x40);
+		int sellY = SidebarClass::ToggleRepairButton.Y;
 		pSellButton->SetPosition(sellX, sellY);
 	}
 	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
@@ -816,46 +834,67 @@ void SidebarExt::InitIO()
 		tpCfg.Tooltip = config.TogglePowerButton.Tooltip;
 
 		Point2D pos = config.TogglePowerButton.Position.Get(Point2D { 0, 0 });
-		if (!config.TogglePowerButton.Position.isset())
+		if (config.TogglePowerButton.Position.isset())
 		{
-			int sellX = *reinterpret_cast<int*>(0xB07E04);
-			int sellY = *reinterpret_cast<int*>(0xB07E08);
-
-			if (sellX <= -5000 || sellY <= -5000)
+			if (pos.X < 168 && pos.X >= 0)
 			{
-				DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
-				DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
-
-				bool isNOD = false;
-				if (HouseClass::CurrentPlayer)
+				pos.X += sidebarX;
+				pos.Y += topMargin;
+			}
+		}
+		else
+		{
+			bool isNOD = false;
+			if (HouseClass::CurrentPlayer)
+			{
+				if (const auto pSide = SideClass::Array.GetItemOrDefault(HouseClass::CurrentPlayer->SideIndex))
 				{
-					if (const auto pSide = SideClass::Array.GetItemOrDefault(HouseClass::CurrentPlayer->SideIndex))
+					if (const auto pSideExt = SideExt::TryFetch(pSide))
 					{
-						if (const auto pSideExt = SideExt::TryFetch(pSide))
-						{
-							isNOD = !pSideExt->Sidebar_GDIPositions;
-						}
-						else
-						{
-							isNOD = HouseClass::CurrentPlayer->SideIndex != 0;
-						}
+						isNOD = !pSideExt->Sidebar_GDIPositions;
+					}
+					else
+					{
+						isNOD = HouseClass::CurrentPlayer->SideIndex != 0;
 					}
 				}
-
-				int baseSellX = sidebarX + (isNOD ? (0x21 + 0x34) : (0x14 + 0x40));
-				int baseSellY = topMargin + (isNOD ? 7 : 8);
-
-				if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
-				{
-					baseSellX = config.RepairButton.Position.Get().X + (isNOD ? 0x34 : 0x40);
-					baseSellY = config.RepairButton.Position.Get().Y;
-				}
-				sellX = baseSellX;
-				sellY = baseSellY;
 			}
 
-			pos.X = sellX + 24;
-			pos.Y = sellY;
+			int baseRepairX = sidebarX + (isNOD ? 0x21 : 0x14);
+			int baseRepairY = topMargin + (isNOD ? 7 : 8);
+			if (config.RepairButton.Position.isset())
+			{
+				baseRepairX = SidebarClass::ToggleRepairButton.X;
+				baseRepairY = SidebarClass::ToggleRepairButton.Y;
+			}
+			int baseSellX = baseRepairX + (isNOD ? 0x34 : 0x40);
+			int baseSellY = baseRepairY;
+
+			bool repairShown = !config.RepairButton.Show.isset() || config.RepairButton.Show.Get();
+			bool sellShown = !config.SellButton.Show.isset() || config.SellButton.Show.Get();
+
+			if (!repairShown && !sellShown)
+			{
+				pos.X = baseRepairX;
+				pos.Y = baseRepairY;
+			}
+			else if (repairShown && !sellShown)
+			{
+				pos.X = baseSellX;
+				pos.Y = baseSellY;
+			}
+			else
+			{
+				int sellX = pSellButton->X;
+				int sellY = pSellButton->Y;
+				if (sellX <= -5000 || sellY <= -5000)
+				{
+					sellX = baseSellX;
+					sellY = baseSellY;
+				}
+				pos.X = sellX + 24;
+				pos.Y = sellY;
+			}
 		}
 
 		ActiveTogglePowerButton = GameCreate<CustomSidebarButtonClass>(tpCfg, pos.X, pos.Y, 0, 0);
@@ -870,6 +909,11 @@ void SidebarExt::InitIO()
 		{
 			Point2D pos = btnCfg.Position.Get(Point2D { 0, 0 });
 			Point2D sz = btnCfg.Size.Get(Point2D { 0, 0 });
+			if (btnCfg.Position.isset() && pos.X < 168 && pos.X >= 0)
+			{
+				pos.X += sidebarX;
+				pos.Y += topMargin;
+			}
 			auto pBtn = GameCreate<CustomSidebarButtonClass>(btnCfg, pos.X, pos.Y, sz.X, sz.Y);
 			ActiveCustomButtons.push_back(pBtn);
 			GScreenClass::Instance.AddButton(pBtn);
