@@ -601,9 +601,19 @@ bool CustomSidebarButtonClass::Draw(bool forced)
 	if (!pShape)
 		return false;
 
-	if (this->Config.Action.Get(CustomButtonType::None) == CustomButtonType::TogglePower)
+	const auto actionType = this->Config.Action.Get(CustomButtonType::None);
+
+	if (actionType == CustomButtonType::TogglePower)
 	{
 		this->IsToggled = DisplayClass::Instance.PowerToggleMode;
+	}
+	else if (actionType == CustomButtonType::Repair)
+	{
+		this->IsToggled = DisplayClass::Instance.RepairMode;
+	}
+	else if (actionType == CustomButtonType::Sell)
+	{
+		this->IsToggled = DisplayClass::Instance.SellMode;
 	}
 
 	const bool disabled = this->IsDisabled();
@@ -659,11 +669,31 @@ bool CustomSidebarButtonClass::Action(GadgetFlag flags, DWORD* pKey, KeyModifier
 
 	if (flags & GadgetFlag::RightPress)
 	{
-		if (this->Config.Action.Get(CustomButtonType::None) == CustomButtonType::TogglePower)
+		const auto actionType = this->Config.Action.Get(CustomButtonType::None);
+
+		if (actionType == CustomButtonType::TogglePower)
 		{
 			if (DisplayClass::Instance.PowerToggleMode)
 			{
 				DisplayClass::Instance.SetTogglePowerMode(0);
+				this->IsToggled = false;
+				SidebarClass::Instance.SidebarNeedsRedraw = true;
+			}
+		}
+		else if (actionType == CustomButtonType::Repair)
+		{
+			if (DisplayClass::Instance.RepairMode)
+			{
+				DisplayClass::Instance.SetRepairMode(0);
+				this->IsToggled = false;
+				SidebarClass::Instance.SidebarNeedsRedraw = true;
+			}
+		}
+		else if (actionType == CustomButtonType::Sell)
+		{
+			if (DisplayClass::Instance.SellMode)
+			{
+				DisplayClass::Instance.SetSellMode(0);
 				this->IsToggled = false;
 				SidebarClass::Instance.SidebarNeedsRedraw = true;
 			}
@@ -707,11 +737,13 @@ void CustomSidebarButtonClass::ExecuteAction()
 
 	case CustomButtonType::Repair:
 		DisplayClass::Instance.SetRepairMode(-1);
+		this->IsToggled = DisplayClass::Instance.RepairMode;
 		SidebarClass::Instance.SidebarNeedsRedraw = true;
 		break;
 
 	case CustomButtonType::Sell:
 		DisplayClass::Instance.SetSellMode(-1);
+		this->IsToggled = DisplayClass::Instance.SellMode;
 		SidebarClass::Instance.SidebarNeedsRedraw = true;
 		break;
 
@@ -1087,6 +1119,83 @@ void SidebarExt::DrawCustomButtons()
 			pBtn->Draw(false);
 		}
 	}
+}
+
+bool SidebarExt::IsTogglePowerRequiresBuildings()
+{
+	if (ActiveTogglePowerButton)
+	{
+		if (!ActiveTogglePowerButton->Config.RequiresBuildings.Get(true))
+		{
+			return false;
+		}
+	}
+
+	const auto config = SidebarExt::ActiveConfig();
+
+	if (config.TogglePowerButton.RequiresBuildings.isset() && !config.TogglePowerButton.RequiresBuildings.Get())
+	{
+		return false;
+	}
+
+	for (const auto* pBtn : SidebarExt::ActiveCustomButtons)
+	{
+		if (pBtn && pBtn->Config.Action.Get(CustomButtonType::None) == CustomButtonType::TogglePower)
+		{
+			if (pBtn->Config.RequiresBuildings.isset() && !pBtn->Config.RequiresBuildings.Get())
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+bool SidebarExt::IsRepairRequiresBuildings()
+{
+	const auto config = SidebarExt::ActiveConfig();
+
+	if (config.RepairButton.RequiresBuildings.isset() && !config.RepairButton.RequiresBuildings.Get())
+	{
+		return false;
+	}
+
+	for (const auto* pBtn : SidebarExt::ActiveCustomButtons)
+	{
+		if (pBtn && pBtn->Config.Action.Get(CustomButtonType::None) == CustomButtonType::Repair)
+		{
+			if (pBtn->Config.RequiresBuildings.isset() && !pBtn->Config.RequiresBuildings.Get())
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+bool SidebarExt::IsSellRequiresBuildings()
+{
+	const auto config = SidebarExt::ActiveConfig();
+
+	if (config.SellButton.RequiresBuildings.isset() && !config.SellButton.RequiresBuildings.Get())
+	{
+		return false;
+	}
+
+	for (const auto* pBtn : SidebarExt::ActiveCustomButtons)
+	{
+		if (pBtn && pBtn->Config.Action.Get(CustomButtonType::None) == CustomButtonType::Sell)
+		{
+			if (pBtn->Config.RequiresBuildings.isset() && !pBtn->Config.RequiresBuildings.Get())
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
 }
 
 // Reversed from Ares source code (In fact, it's the same as Vanilla).

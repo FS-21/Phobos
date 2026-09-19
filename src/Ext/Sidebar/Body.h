@@ -250,4 +250,8 @@ public:
 	}
 
 	static bool __stdcall AresTabCameo_RemoveCameo(BuildType* pItem);
+
+	static bool IsTogglePowerRequiresBuildings();
+	static bool IsRepairRequiresBuildings();
+	static bool IsSellRequiresBuildings();
 };

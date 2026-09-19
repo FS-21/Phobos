@@ -506,4 +506,39 @@ DEFINE_HOOK(0x4E1A84, GadgetClass_DTOR_ClearCurrentOverGadget, 0x6)
 	return 0;
 }
 
+// -----------------------------------------------------------------------------
+// Action Mode Hooks (RequiresBuildings bypass)
+// -----------------------------------------------------------------------------
+
+DEFINE_HOOK(0x4AC884, MapClass_SetTogglePowerMode_RequiresBuildings, 0x6)
+{
+	if (!SidebarExt::IsTogglePowerRequiresBuildings())
+	{
+		return 0x4AC894;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(0x4AC924, MapClass_SetRepairMode_RequiresBuildings, 0x6)
+{
+	if (!SidebarExt::IsRepairRequiresBuildings())
+	{
+		return 0x4AC934;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(0x4AC6C4, MapClass_SetSellMode_RequiresBuildings, 0x6)
+{
+	if (!SidebarExt::IsSellRequiresBuildings())
+	{
+		return 0x4AC6D4;
+	}
+
+	return 0;
+}
+
 #pragma endregion
+
