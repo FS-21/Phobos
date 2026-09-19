@@ -115,6 +115,8 @@ class CameosConfig
 {
 public:
 	Nullable<int> Y;
+	Nullable<int> Height;
+	Nullable<int> MarginBottom;
 
 	CameosConfig() = default;
 
@@ -139,6 +141,8 @@ public:
 	PowerBarConfig PowerBar;
 	TabsConfig Tabs;
 	CameosConfig Cameos;
+	SidebarButtonConfig ScrollUpButton;
+	SidebarButtonConfig ScrollDownButton;
 
 	SidebarConfig() = default;
 
@@ -233,6 +237,15 @@ public:
 
 	static void SaveBaseline();
 	static void ResetToBaseline();
+
+	static Point2D ResolveCoord(Point2D pos, DWORD sidebarX)
+	{
+		if (pos.X < 168 && pos.X >= 0)
+		{
+			pos.X += static_cast<int>(sidebarX);
+		}
+		return pos;
+	}
 
 	static bool __stdcall AresTabCameo_RemoveCameo(BuildType* pItem);
 };

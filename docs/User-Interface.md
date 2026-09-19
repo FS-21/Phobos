@@ -848,88 +848,105 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 
 ### Sidebar Customizations
 
-- Now you can customize the layout, coordinates, visibility, and behavior of sidebar controls, restore the Tiberian Sun power toggle button, create custom buttons, and configure sidebar tabs.
+- Now you can customize the layout, coordinates, visibility, and behavior of sidebar controls, restore the Tiberian Sun power toggle button, create custom buttons, configure sidebar tabs, control cameo list height, and reposition scroll buttons.
 
 #### Sidebar Layout Architecture & Coordinate Systems
 
-The rightmost 168-pixel sidebar column is divided into two distinct sections in the game engine:
+The 168-pixel sidebar column docked to the right edge of the screen uses a unified panel coordinate system where **`(X = 0, Y = 0)` corresponds to the top-left corner of the sidebar panel** (screen coordinates `ScreenWidth - 168, 0`):
 
 1. **Upper Section — Radar Area (`Y = 0` to `Y = 158` from top of panel):**
    - Contains the circular radar minimap (`RadarClass`).
-   - Radar control buttons (`MenuButton` and `DiplomacyButton` / `RadarButton`) are anchored within this section (or in vanilla RA2's top-left bar) using screen coordinates.
+   - Radar control buttons (`MenuButton` and `DiplomacyButton` / `RadarButton`) are anchored in the upper frame of the panel.
 
-2. **Lower Section — Sidebar Controls & Cameos (`DSurface::Sidebar`, starting at `Y = 158`):**
-   - Begins immediately below the radar frame (`topMargin = 158` pixels from top of panel).
-   - Contains the command buttons (`RepairButton`, `SellButton`, `TogglePowerButton`, `CustomButtons`), tabs (`Tabs`), cameo build strip (`Cameos`), and the power bar (`PowerBar`).
+2. **Lower Section — Controls & Cameos (`DSurface::Sidebar`, from `Y = 158` downwards):**
+   - Begins directly below the radar frame.
+   - Contains the command buttons (`RepairButton`, `SellButton`, `TogglePowerButton`, `CustomButtons`), category tabs (`Tabs`), the cameo build strip (`Cameos`), the scroll buttons (`ScrollUpButton`, `ScrollDownButton`), and the vertical power gauge (`PowerBar`).
 
 #### How Coordinates Work
 
-When configuring coordinates (`*.Position=X,Y`) for sidebar controls (`RepairButton`, `SellButton`, `TogglePowerButton`, and custom buttons in `CustomButtons`):
+When configuring coordinates (`*.Position=X,Y`) for sidebar controls:
 
 - **Relative Mode (`X < 168` — Recommended):**
-  - **`X`** is measured from the left edge of the 168-pixel sidebar panel (`0` = left edge of panel, `168` = right edge of screen). The engine automatically shifts `X` to the right edge of the screen (`ScreenWidth - 168 + X`), making the layout resolution-independent across 1024x768, 1280x720, 1920x1080, etc.
-  - **`Y`** is measured from the **bottom edge of the radar** (`Y = 0` relative = 158 pixels from the top of the panel):
-    - `Y = 8` (or `7` in Nod): Baseline row for `RepairButton`, `SellButton`, and `TogglePowerButton` (166 px from top of panel).
-    - `Y = 39`: Baseline for the tab buttons (`Tabs`, 197 px from top of panel).
-    - `Y = 69`: Baseline start of the cameo strip (`Cameos`, 227 px from top of panel).
+  - **`X`** is measured from the left edge of the 168-pixel sidebar panel (`0` = left edge of panel, `168` = right edge of screen). The engine automatically shifts `X` to the right edge of the screen (`ScreenWidth - 168 + X`), making your layout resolution-independent across 1024x768, 1280x720, 1920x1080, etc.
+  - **`Y`** is measured directly from the **top edge of the sidebar panel (`Y = 0`)**. These numbers match 1:1 with the pixel coordinates of your `sidebar.shp` image in graphic editors (e.g. Photoshop or Paint.NET):
+    - `Y = 5`: Default row for `MenuButton` and `DiplomacyButton`.
+    - `Y = 166` (or `165` in Soviet): Default row for `RepairButton`, `SellButton`, and `TogglePowerButton`.
+    - `Y = 197`: Default start of the category tabs (`Tabs`).
+    - `Y = 227`: Default start of the cameo build strip (`Cameos`).
 - **Absolute Mode (`X >= 168`):**
-  - Coordinates are treated as exact pixel positions from the top-left corner of the screen (`0,0`), bypassing automatic sidebar offsets.
+  - Coordinates are treated as exact pixel positions from the top-left corner of the monitor (`0,0`), bypassing automatic sidebar offsets.
 
 #### Configuration Tags
 
-	- `RepairButton.Show` determines whether the repair button is displayed and clickable.
-	- `RepairButton.Position` sets the X and Y coordinates of the repair button. If X < 168, it is automatically treated as relative to the sidebar (resolution-independent); otherwise, it is treated as absolute screen coordinates.
-	- `SellButton.Show` determines whether the sell button is displayed and clickable.
-	- `SellButton.Position` sets the X and Y coordinates of the sell button. If X < 168, it is automatically treated as relative to the sidebar; otherwise, it is treated as absolute screen coordinates.
-	- `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`).
-	- `DiplomacyButton.Position` sets the X and Y screen coordinates of the diplomacy button (also aliased as `RadarButton.Position`).
-	- `MenuButton.Show` determines whether the options/menu button is displayed and clickable.
-	- `MenuButton.Position` sets the X and Y screen coordinates of the options/menu button.
-	- `TogglePowerButton.Enabled` restores and enables the Tiberian Sun power toggle button.
-	- `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. If X < 168, it is automatically treated as relative to the sidebar (resolution-independent); otherwise, it is treated as absolute screen coordinates. Defaults to its standard position adjacent to the Sell button.
-	- `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button (defaults to `power.shp`). **Note:** `power.shp` is an asset from Tiberian Sun and does **not** exist in vanilla Yuri's Revenge MIX archives. You must provide `power.shp` in your mod files (or set this tag to an existing SHP) for the button to appear. The SHP supports 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled (when `RequiresBuildings=true` and player has no buildings).
-	- `TogglePowerButton.RequiresBuildings` controls whether the toggle power button is disabled when the player has no buildings.
-	- `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip.
-	- `CustomButtons` lists the section names of custom sidebar buttons to create.
-	- `Credits.Position` sets the X and Y screen coordinates of the credits counter text.
-	- `Credits.Align` sets the text alignment for the credits counter (`left`, `center`, or `right`).
-	- `Credits.Color` sets the text color of the credits counter as an RGB value.
-	- `PowerBar.Show` controls whether the power bar is displayed.
-	- `PowerBar.Position` sets the X and Y screen coordinates of the power bar.
-	- `PowerBar.Height` sets a fixed pixel height for the power bar (`-1` for dynamic vanilla scaling).
-	- `PowerBar.Shape` specifies a custom SHP file for the power bar pips (defaults to vanilla `powerp.shp`).
-	- `Tabs.Count` specifies the total number of sidebar tabs. When set to `1`, tab buttons are automatically hidden and the cameo strip is shifted up.
-	- `Tabs.Order` specifies the display order of the tabs as a comma-separated list of zero-based tab indices.
-	- `Cameos.Y` overrides the vertical start coordinate of the cameo strip.
+	- `RepairButton.Show` [Default: `true`] determines whether the repair button is displayed and clickable.
+	- `RepairButton.Position` [Default: Allied `20,166`, Soviet `33,165`] sets the X and Y coordinates of the repair button relative to the panel. If X < 168, it is automatically treated as relative to the sidebar (resolution-independent); otherwise, it is treated as absolute screen coordinates.
+	- `SellButton.Show` [Default: `true`] determines whether the sell button is displayed and clickable.
+	- `SellButton.Position` [Default: Allied `84,166`, Soviet `85,165`] sets the X and Y coordinates of the sell button relative to the panel.
+	- `DiplomacyButton.Show` [Default: `true`] determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`).
+	- `DiplomacyButton.Position` [Default: `86,5`] sets the X and Y coordinates of the diplomacy button relative to the panel.
+	- `MenuButton.Show` [Default: `true`] determines whether the options/menu button is displayed and clickable.
+	- `MenuButton.Position` [Default: `14,5`] sets the X and Y coordinates of the options/menu button relative to the panel.
+	- `TogglePowerButton.Enabled` [Default: `false`] restores and enables the Tiberian Sun power toggle button.
+	- `TogglePowerButton.Position` [Default: Allied `108,166`, Soviet `109,165`] sets the X and Y coordinates of the toggle power button relative to the panel.
+	- `TogglePowerButton.Shape` [Default: `power.shp`] specifies the SHP image file for the toggle power button. **Note:** `power.shp` is an asset from Tiberian Sun and does **not** exist in vanilla Yuri's Revenge MIX archives. You must provide `power.shp` in your mod files (or set this tag to an existing SHP) for the button to appear. The SHP supports 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled (when `RequiresBuildings=true` and player has no buildings).
+	- `TogglePowerButton.RequiresBuildings` [Default: `true`] controls whether the toggle power button is disabled when the player has no buildings.
+	- `TogglePowerButton.Tooltip` [Default: `GUI:TogglePower`] specifies the CSF label for the button tooltip.
+	- `CustomButtons` [Default: none] lists the section names of custom sidebar buttons to create.
+	- `Credits.Position` [Default: `84,2`] sets the X and Y coordinates of the credits counter text relative to the panel.
+	- `Credits.Align` [Default: `center`] sets the text alignment for the credits counter (`left`, `center`, or `right`).
+	- `Credits.Color` [Default: yellow/gold] sets the text color of the credits counter as an RGB value (`R,G,B`).
+	- `PowerBar.Show` [Default: `true`] controls whether the power bar is displayed.
+	- `PowerBar.Position` [Default: Allied `5,227`, Soviet `0,227`] sets the X and Y coordinates of the power bar relative to the panel.
+	- `PowerBar.Height` [Default: `-1`] sets a fixed pixel height for the power bar (`-1` for dynamic scaling to the bottom of the screen).
+	- `PowerBar.Shape` [Default: `powerp.shp`] specifies a custom SHP file for the power bar pips.
+	- `Tabs.Count` [Default: `4`] specifies the total number of sidebar tabs (1..16). When set to `1`, tab buttons are automatically hidden and the cameo strip is shifted up.
+	- `Tabs.Order` [Default: `0,1,2,3`] specifies the display order of the tabs as a comma-separated list of zero-based tab indices.
+	- `Cameos.Y` [Default: `227`] overrides the vertical start coordinate of the cameo strip relative to the panel.
+	- `Cameos.Height` [Default: `-1`] sets a fixed pixel height for the cameo list (`-1` for dynamic scaling).
+	- `Cameos.MarginBottom` [Default: `32`] sets the pixel margin reserved at the bottom of the screen when calculating dynamic cameo rows.
+	- `ScrollUpButton.Show` [Default: `true`] controls whether the scroll up button is displayed and clickable.
+	- `ScrollUpButton.Position` [Default: dynamic bottom] sets custom X and Y coordinates for the scroll up button relative to the panel. If unspecified, it automatically anchors to the bottom of the screen (`ScreenHeight - Cameos.MarginBottom`).
+	- `ScrollUpButton.Shape` [Default: `r-up.shp`] specifies a custom SHP file for the scroll up button.
+	- `ScrollDownButton.Show` [Default: `true`] controls whether the scroll down button is displayed and clickable.
+	- `ScrollDownButton.Position` [Default: dynamic bottom] sets custom X and Y coordinates for the scroll down button relative to the panel. If unspecified, it automatically anchors to the bottom of the screen (`ScreenHeight - Cameos.MarginBottom`).
+	- `ScrollDownButton.Shape` [Default: `r-dn.shp`] specifies a custom SHP file for the scroll down button.
 	- `TabIndex` assigns an object type or superweapon to a specific sidebar tab index.
 
 In `uimd.ini`:
 ```ini
 [Sidebar]
 RepairButton.Show=true               ; boolean
-RepairButton.Position=               ; integer, X,Y coordinates
+RepairButton.Position=20,166         ; integer, X,Y coordinates (Allied: 20,166, Soviet: 33,165)
 SellButton.Show=true                 ; boolean
-SellButton.Position=                 ; integer, X,Y coordinates
+SellButton.Position=84,166           ; integer, X,Y coordinates (Allied: 84,166, Soviet: 85,165)
 DiplomacyButton.Show=true            ; boolean
-DiplomacyButton.Position=            ; integer, X,Y coordinates
+DiplomacyButton.Position=86,5        ; integer, X,Y coordinates
 MenuButton.Show=true                 ; boolean
-MenuButton.Position=                 ; integer, X,Y coordinates
+MenuButton.Position=14,5             ; integer, X,Y coordinates
 TogglePowerButton.Enabled=false      ; boolean
-TogglePowerButton.Position=          ; integer, X,Y coordinates
+TogglePowerButton.Position=108,166   ; integer, X,Y coordinates (Allied: 108,166, Soviet: 109,165)
 TogglePowerButton.Shape=power.shp    ; filename - including the .shp extension
 TogglePowerButton.RequiresBuildings=true ; boolean
 TogglePowerButton.Tooltip=GUI:TogglePower ; CSF entry key
 CustomButtons=                       ; list of section names
-Credits.Position=                    ; integer, X,Y coordinates
+Credits.Position=84,2                ; integer, X,Y coordinates
 Credits.Align=center                 ; left | center | right
 Credits.Color=                       ; integer - Red,Green,Blue
 PowerBar.Show=true                   ; boolean
-PowerBar.Position=                   ; integer, X,Y coordinates
+PowerBar.Position=5,227              ; integer, X,Y coordinates (Allied: 5,227, Soviet: 0,227)
 PowerBar.Height=-1                   ; integer, -1 for dynamic or height in pixels
-PowerBar.Shape=                      ; filename - including the .shp extension
+PowerBar.Shape=powerp.shp            ; filename - including the .shp extension
 Tabs.Count=4                         ; integer (1..16)
-Tabs.Order=                          ; list of integer tab indices
-Cameos.Y=                            ; integer
+Tabs.Order=0,1,2,3                   ; list of integer tab indices
+Cameos.Y=227                         ; integer
+Cameos.Height=-1                     ; integer, -1 for dynamic or height in pixels
+Cameos.MarginBottom=32               ; integer, margin from screen bottom in pixels
+ScrollUpButton.Show=true             ; boolean
+ScrollUpButton.Position=             ; integer, X,Y coordinates (leave empty for automatic bottom anchor)
+ScrollUpButton.Shape=r-up.shp        ; filename - including the .shp extension
+ScrollDownButton.Show=true           ; boolean
+ScrollDownButton.Position=           ; integer, X,Y coordinates (leave empty for automatic bottom anchor)
+ScrollDownButton.Shape=r-dn.shp      ; filename - including the .shp extension
 
 [SOMECUSTOMBUTTON]                   ; Section listed in CustomButtons
 Show=true                            ; boolean
@@ -950,6 +967,8 @@ Tooltip=                             ; CSF entry key
 |---|---|---|
 | Toggle Power Button | `power.shp` *(from TS, not present in vanilla YR)* | Set `TogglePowerButton.Shape=filename.shp` or add `power.shp` to the mod |
 | Power Bar Pips | `powerp.shp` | Set `PowerBar.Shape=filename.shp` or replace `powerp.shp` in the mod |
+| Scroll Up Button | `r-up.shp` | Set `ScrollUpButton.Shape=filename.shp` or replace `r-up.shp` in the mod |
+| Scroll Down Button | `r-dn.shp` | Set `ScrollDownButton.Shape=filename.shp` or replace `r-dn.shp` in the mod |
 | Repair Button | `repair.shp` | Replace `repair.shp` in the mod, or hide it and use a `CustomButtons` entry with `Action=Repair` |
 | Sell Button | `sell.shp` | Replace `sell.shp` in the mod, or hide it and use a `CustomButtons` entry with `Action=Sell` |
 | Diplomacy Button | `diplobtn.shp` | Replace `diplobtn.shp` in the mod |
@@ -973,7 +992,7 @@ TabIndex=                            ; integer, 0-based tab index
 
 ### Specify Sidebar style
 
-- It's now possible to switch hardcoded sidebar button coords to use GDI sidebar coords by setting `Sidebar.GDIPosition`. Defaults to true for first side, false for all others.
+- It is possible to switch hardcoded sidebar button coordinates to use Allied sidebar coordinates by setting `Sidebar.GDIPositions`. Defaults to `true` for the first side (Allied), and `false` for other sides (Soviet, Yuri). (The tag name `Sidebar.GDIPositions` reflects the underlying engine's internal legacy naming).
 
 In `rulesmd.ini`:
 ```ini

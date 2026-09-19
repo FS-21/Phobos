@@ -338,17 +338,25 @@ void CameosConfig::Read(CCINIClass* pINI, const char* pSection)
 	if (!pINI) return;
 	INI_EX exINI(pINI);
 	this->Y.Read(exINI, pSection, "Cameos.Y");
+	this->Height.Read(exINI, pSection, "Cameos.Height");
+	this->MarginBottom.Read(exINI, pSection, "Cameos.MarginBottom");
 }
 
 void CameosConfig::Merge(const CameosConfig& other)
 {
 	if (other.Y.isset()) this->Y = other.Y;
+	if (other.Height.isset()) this->Height = other.Height;
+	if (other.MarginBottom.isset()) this->MarginBottom = other.MarginBottom;
 }
 
 template <typename T>
 void CameosConfig::Serialize(T& Stm)
 {
-	Stm.Process(this->Y);
+	Stm
+		.Process(this->Y)
+		.Process(this->Height)
+		.Process(this->MarginBottom)
+		;
 }
 
 // -----------------------------------------------------------------------------
@@ -371,6 +379,8 @@ void SidebarConfig::Read(CCINIClass* pINI, const char* pSection)
 	this->PowerBar.Read(pINI, pSection);
 	this->Tabs.Read(pINI, pSection);
 	this->Cameos.Read(pINI, pSection);
+	this->ScrollUpButton.Read(pINI, pSection, "ScrollUpButton.");
+	this->ScrollDownButton.Read(pINI, pSection, "ScrollDownButton.");
 
 	char customBtnBuf[0x100] = { 0 };
 	if (pINI->ReadString(pSection, "CustomButtons", "", customBtnBuf, sizeof(customBtnBuf)) && customBtnBuf[0] != '\0')
@@ -407,6 +417,8 @@ void SidebarConfig::Merge(const SidebarConfig& other)
 	this->PowerBar.Merge(other.PowerBar);
 	this->Tabs.Merge(other.Tabs);
 	this->Cameos.Merge(other.Cameos);
+	this->ScrollUpButton.Merge(other.ScrollUpButton);
+	this->ScrollDownButton.Merge(other.ScrollDownButton);
 
 	for (const auto& btn : other.CustomButtons)
 	{
@@ -440,6 +452,8 @@ void SidebarConfig::Serialize(T& Stm)
 		.Process(this->PowerBar)
 		.Process(this->Tabs)
 		.Process(this->Cameos)
+		.Process(this->ScrollUpButton)
+		.Process(this->ScrollDownButton)
 		;
 }
 
@@ -767,16 +781,10 @@ void SidebarExt::InitIO()
 	}
 
 	const DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
-	const DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
 
 	if (config.RepairButton.Position.isset())
 	{
-		Point2D rPos = config.RepairButton.Position.Get();
-		if (rPos.X < 168 && rPos.X >= 0)
-		{
-			rPos.X += sidebarX;
-			rPos.Y += topMargin;
-		}
+		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
 		SidebarClass::ToggleRepairButton.SetPosition(rPos.X, rPos.Y);
 	}
 	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
@@ -788,12 +796,7 @@ void SidebarExt::InitIO()
 	auto pSellButton = reinterpret_cast<ToggleClass*>(0xB07DF8);
 	if (config.SellButton.Position.isset())
 	{
-		Point2D sPos = config.SellButton.Position.Get();
-		if (sPos.X < 168 && sPos.X >= 0)
-		{
-			sPos.X += sidebarX;
-			sPos.Y += topMargin;
-		}
+		Point2D sPos = ResolveCoord(config.SellButton.Position.Get(), sidebarX);
 		pSellButton->SetPosition(sPos.X, sPos.Y);
 	}
 	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
@@ -833,14 +836,10 @@ void SidebarExt::InitIO()
 		tpCfg.RequiresBuildings = config.TogglePowerButton.RequiresBuildings;
 		tpCfg.Tooltip = config.TogglePowerButton.Tooltip;
 
-		Point2D pos = config.TogglePowerButton.Position.Get(Point2D { 0, 0 });
+		Point2D pos { 0, 0 };
 		if (config.TogglePowerButton.Position.isset())
 		{
-			if (pos.X < 168 && pos.X >= 0)
-			{
-				pos.X += sidebarX;
-				pos.Y += topMargin;
-			}
+			pos = ResolveCoord(config.TogglePowerButton.Position.Get(), sidebarX);
 		}
 		else
 		{
@@ -861,7 +860,7 @@ void SidebarExt::InitIO()
 			}
 
 			int baseRepairX = sidebarX + (isNOD ? 0x21 : 0x14);
-			int baseRepairY = topMargin + (isNOD ? 7 : 8);
+			int baseRepairY = isNOD ? 165 : 166;
 			int baseSellX = baseRepairX + (isNOD ? 0x34 : 0x40);
 			int baseSellY = baseRepairY;
 
@@ -887,16 +886,51 @@ void SidebarExt::InitIO()
 		const auto& btnCfg = pair.second;
 		if (btnCfg.Show.Get(true))
 		{
-			Point2D pos = btnCfg.Position.Get(Point2D { 0, 0 });
+			Point2D pos = btnCfg.Position.isset()
+				? ResolveCoord(btnCfg.Position.Get(), sidebarX)
+				: Point2D { 0, 0 };
 			Point2D sz = btnCfg.Size.Get(Point2D { 0, 0 });
-			if (btnCfg.Position.isset() && pos.X < 168 && pos.X >= 0)
-			{
-				pos.X += sidebarX;
-				pos.Y += topMargin;
-			}
 			auto pBtn = GameCreate<CustomSidebarButtonClass>(btnCfg, pos.X, pos.Y, sz.X, sz.Y);
 			ActiveCustomButtons.push_back(pBtn);
 			GScreenClass::Instance.AddButton(pBtn);
+		}
+	}
+
+	// Configure Scroll Up Button
+	if (config.ScrollUpButton.Position.isset())
+	{
+		Point2D uPos = ResolveCoord(config.ScrollUpButton.Position.Get(), sidebarX);
+		SidebarClass::ScrollUpButton.SetPosition(uPos.X, uPos.Y);
+	}
+	if (config.ScrollUpButton.Show.isset() && !config.ScrollUpButton.Show.Get())
+	{
+		SidebarClass::ScrollUpButton.SetPosition(-10000, -10000);
+		SidebarClass::ScrollUpButton.Disable();
+	}
+	if (config.ScrollUpButton.Shape[0] != '\0')
+	{
+		if (auto pSHP = FileSystem::LoadSHPFile(config.ScrollUpButton.Shape.data()))
+		{
+			SidebarClass::ScrollUpButton.SetShape(pSHP, pSHP->Width, pSHP->Height);
+		}
+	}
+
+	// Configure Scroll Down Button
+	if (config.ScrollDownButton.Position.isset())
+	{
+		Point2D dPos = ResolveCoord(config.ScrollDownButton.Position.Get(), sidebarX);
+		SidebarClass::ScrollDownButton.SetPosition(dPos.X, dPos.Y);
+	}
+	if (config.ScrollDownButton.Show.isset() && !config.ScrollDownButton.Show.Get())
+	{
+		SidebarClass::ScrollDownButton.SetPosition(-10000, -10000);
+		SidebarClass::ScrollDownButton.Disable();
+	}
+	if (config.ScrollDownButton.Shape[0] != '\0')
+	{
+		if (auto pSHP = FileSystem::LoadSHPFile(config.ScrollDownButton.Shape.data()))
+		{
+			SidebarClass::ScrollDownButton.SetShape(pSHP, pSHP->Width, pSHP->Height);
 		}
 	}
 }

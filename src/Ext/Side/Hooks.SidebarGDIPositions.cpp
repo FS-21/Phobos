@@ -4,6 +4,11 @@
 namespace SidebarGDIPositionsTemp
 {
 	bool isNODSidebar = false;
+
+	inline Point2D ResolveCoord(Point2D pos, DWORD sidebarX)
+	{
+		return SidebarExt::ResolveCoord(pos, sidebarX);
+	}
 }
 
 using namespace SidebarGDIPositionsTemp;
@@ -29,11 +34,13 @@ DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_Buttons, 0x6)
 	R->EDX(*reinterpret_cast<DWORD*>(R->ESI() + 0x11F0));
 
 	const auto config = SidebarExt::ActiveConfig();
+	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
 
 	if (config.DiplomacyButton.Position.isset())
 	{
-		*reinterpret_cast<DWORD*>(0x00B04A00) = config.DiplomacyButton.Position.Get().X;
-		*reinterpret_cast<DWORD*>(0x00B04A04) = config.DiplomacyButton.Position.Get().Y;
+		Point2D dPos = ResolveCoord(config.DiplomacyButton.Position.Get(), sidebarX);
+		*reinterpret_cast<DWORD*>(0x00B04A00) = dPos.X;
+		*reinterpret_cast<DWORD*>(0x00B04A04) = dPos.Y;
 	}
 	if (config.DiplomacyButton.Show.isset() && !config.DiplomacyButton.Show.Get())
 	{
@@ -43,8 +50,9 @@ DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_Buttons, 0x6)
 
 	if (config.MenuButton.Position.isset())
 	{
-		*reinterpret_cast<DWORD*>(0x00B048C8) = config.MenuButton.Position.Get().X;
-		*reinterpret_cast<DWORD*>(0x00B048CC) = config.MenuButton.Position.Get().Y;
+		Point2D mPos = ResolveCoord(config.MenuButton.Position.Get(), sidebarX);
+		*reinterpret_cast<DWORD*>(0x00B048C8) = mPos.X;
+		*reinterpret_cast<DWORD*>(0x00B048CC) = mPos.Y;
 	}
 	if (config.MenuButton.Show.isset() && !config.MenuButton.Show.Get())
 	{
@@ -57,11 +65,9 @@ DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_Buttons, 0x6)
 
 DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 {
-	DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
-
-	DWORD repairY = topMargin + (isNODSidebar ? 7 : 8);
-	DWORD tabsY = repairY + (isNODSidebar ? 0x20 : 0x1F);
-	DWORD cameosY = tabsY + 0x1E;
+	DWORD repairY = isNODSidebar ? 165 : 166;
+	DWORD tabsY = 197;
+	DWORD cameosY = 227;
 
 	if (!isNODSidebar)
 	{
@@ -83,6 +89,7 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 	}
 
 	const auto config = SidebarExt::ActiveConfig();
+	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
 
 	if (config.Cameos.Y.isset())
 	{
@@ -102,8 +109,9 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 
 	if (config.RepairButton.Position.isset())
 	{
-		*reinterpret_cast<DWORD*>(0x00B0B4DC) = config.RepairButton.Position.Get().X;
-		*reinterpret_cast<DWORD*>(0x00B0B4E0) = config.RepairButton.Position.Get().Y;
+		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
+		*reinterpret_cast<DWORD*>(0x00B0B4DC) = rPos.X;
+		*reinterpret_cast<DWORD*>(0x00B0B4E0) = rPos.Y;
 	}
 	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
 	{
@@ -112,7 +120,6 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 	}
 
 	// Baseline SellButton coordinates (independent of RepairButton state)
-	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
 	int baseSellX = sidebarX + (isNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
 	int baseSellY = repairY;
 
@@ -120,13 +127,15 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 	int sellY = baseSellY;
 	if (config.SellButton.Position.isset())
 	{
-		sellX = config.SellButton.Position.Get().X;
-		sellY = config.SellButton.Position.Get().Y;
+		Point2D sPos = ResolveCoord(config.SellButton.Position.Get(), sidebarX);
+		sellX = sPos.X;
+		sellY = sPos.Y;
 	}
 	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
 	{
-		sellX = config.RepairButton.Position.Get().X + (isNODSidebar ? 0x34 : 0x40);
-		sellY = config.RepairButton.Position.Get().Y;
+		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
+		sellX = rPos.X + (isNODSidebar ? 0x34 : 0x40);
+		sellY = rPos.Y;
 	}
 
 	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
@@ -145,6 +154,19 @@ DEFINE_HOOK(0x6A51E9, SidebarClass_InitGUI, 0x6)
 	DWORD& SidebarClass__OBJECT_HEIGHT = *reinterpret_cast<DWORD*>(0xB0B500);
 	SidebarClass__OBJECT_HEIGHT = 0x32;
 
+	const auto config = SidebarExt::ActiveConfig();
+	if (config.Cameos.Height.isset() && config.Cameos.Height.Get() > 0)
+	{
+		DWORD cameosY = *reinterpret_cast<DWORD*>(0x00B0B4F8);
+		DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
+		*reinterpret_cast<DWORD*>(0x00886F9C) = (cameosY - topMargin) + config.Cameos.Height.Get();
+	}
+	else if (config.Cameos.MarginBottom.isset())
+	{
+		int extraMargin = config.Cameos.MarginBottom.Get() - 32;
+		*reinterpret_cast<DWORD*>(0x00886F9C) -= extraMargin;
+	}
+
 	R->ESI(isNODSidebar);
 	R->EDX(isNODSidebar);
 
@@ -154,6 +176,7 @@ DEFINE_HOOK(0x6A51E9, SidebarClass_InitGUI, 0x6)
 DEFINE_HOOK(0x6A532B, SidebarClass_InitGUI_AfterInitPositions, 0x5)
 {
 	const auto config = SidebarExt::ActiveConfig();
+	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
 
 	if (config.Tabs.Count.isset() && config.Tabs.Count.Get() == 1)
 	{
@@ -163,8 +186,9 @@ DEFINE_HOOK(0x6A532B, SidebarClass_InitGUI_AfterInitPositions, 0x5)
 
 	if (config.RepairButton.Position.isset())
 	{
-		*reinterpret_cast<DWORD*>(0x00B0B4DC) = config.RepairButton.Position.Get().X;
-		*reinterpret_cast<DWORD*>(0x00B0B4E0) = config.RepairButton.Position.Get().Y;
+		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
+		*reinterpret_cast<DWORD*>(0x00B0B4DC) = rPos.X;
+		*reinterpret_cast<DWORD*>(0x00B0B4E0) = rPos.Y;
 	}
 	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
 	{
@@ -180,22 +204,23 @@ DEFINE_HOOK(0x6A53BF, SidebarClass_InitGUI_SellButtonPos, 0x6)
 	const auto config = SidebarExt::ActiveConfig();
 
 	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
-	DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
 	int baseSellX = sidebarX + (isNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
-	int baseSellY = topMargin + (isNODSidebar ? 7 : 8);
+	int baseSellY = isNODSidebar ? 165 : 166;
 
 	int posX = baseSellX;
 	int posY = baseSellY;
 
 	if (config.SellButton.Position.isset())
 	{
-		posX = config.SellButton.Position.Get().X;
-		posY = config.SellButton.Position.Get().Y;
+		Point2D sPos = ResolveCoord(config.SellButton.Position.Get(), sidebarX);
+		posX = sPos.X;
+		posY = sPos.Y;
 	}
 	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
 	{
-		posX = config.RepairButton.Position.Get().X + (isNODSidebar ? 0x34 : 0x40);
-		posY = config.RepairButton.Position.Get().Y;
+		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
+		posX = rPos.X + (isNODSidebar ? 0x34 : 0x40);
+		posY = rPos.Y;
 	}
 
 	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
@@ -214,6 +239,7 @@ DEFINE_HOOK(0x6A53BF, SidebarClass_InitGUI_SellButtonPos, 0x6)
 DEFINE_HOOK(0x6ABE03, SidebarClass_RepositionButtons, 0x5)
 {
 	const auto config = SidebarExt::ActiveConfig();
+	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
 
 	if (config.Tabs.Count.isset() && config.Tabs.Count.Get() == 1)
 	{
@@ -223,8 +249,9 @@ DEFINE_HOOK(0x6ABE03, SidebarClass_RepositionButtons, 0x5)
 
 	if (config.RepairButton.Position.isset())
 	{
-		*reinterpret_cast<DWORD*>(0x00B0B4DC) = config.RepairButton.Position.Get().X;
-		*reinterpret_cast<DWORD*>(0x00B0B4E0) = config.RepairButton.Position.Get().Y;
+		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
+		*reinterpret_cast<DWORD*>(0x00B0B4DC) = rPos.X;
+		*reinterpret_cast<DWORD*>(0x00B0B4E0) = rPos.Y;
 	}
 	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
 	{
@@ -240,22 +267,23 @@ DEFINE_HOOK(0x6ABE45, SidebarClass_RepositionSellButton, 0x7)
 	const auto config = SidebarExt::ActiveConfig();
 
 	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
-	DWORD topMargin = *reinterpret_cast<DWORD*>(0x886F94);
 	int baseSellX = sidebarX + (isNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
-	int baseSellY = topMargin + (isNODSidebar ? 7 : 8);
+	int baseSellY = isNODSidebar ? 165 : 166;
 
 	int posX = baseSellX;
 	int posY = baseSellY;
 
 	if (config.SellButton.Position.isset())
 	{
-		posX = config.SellButton.Position.Get().X;
-		posY = config.SellButton.Position.Get().Y;
+		Point2D sPos = ResolveCoord(config.SellButton.Position.Get(), sidebarX);
+		posX = sPos.X;
+		posY = sPos.Y;
 	}
 	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
 	{
-		posX = config.RepairButton.Position.Get().X + (isNODSidebar ? 0x34 : 0x40);
-		posY = config.RepairButton.Position.Get().Y;
+		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
+		posX = rPos.X + (isNODSidebar ? 0x34 : 0x40);
+		posY = rPos.Y;
 	}
 
 	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
@@ -268,6 +296,44 @@ DEFINE_HOOK(0x6ABE45, SidebarClass_RepositionSellButton, 0x7)
 	R->EAX(posY);
 	*reinterpret_cast<DWORD*>(0x00B07E04) = posX;
 	*reinterpret_cast<DWORD*>(0x00B07E08) = posY;
+	return 0;
+}
+
+DEFINE_HOOK(0x6ABEAC, SidebarClass_RepositionButtons_ScrollButtons, 0x6)
+{
+	const auto config = SidebarExt::ActiveConfig();
+	bool customUp = config.ScrollUpButton.Position.isset() || (config.ScrollUpButton.Show.isset() && !config.ScrollUpButton.Show.Get());
+	bool customDown = config.ScrollDownButton.Position.isset() || (config.ScrollDownButton.Show.isset() && !config.ScrollDownButton.Show.Get());
+
+	if (customUp || customDown)
+	{
+		DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
+
+		if (config.ScrollUpButton.Show.isset() && !config.ScrollUpButton.Show.Get())
+		{
+			SidebarClass::ScrollUpButton.SetPosition(-10000, -10000);
+			SidebarClass::ScrollUpButton.Disable();
+		}
+		else if (config.ScrollUpButton.Position.isset())
+		{
+			Point2D uPos = ResolveCoord(config.ScrollUpButton.Position.Get(), sidebarX);
+			SidebarClass::ScrollUpButton.SetPosition(uPos.X, uPos.Y);
+		}
+
+		if (config.ScrollDownButton.Show.isset() && !config.ScrollDownButton.Show.Get())
+		{
+			SidebarClass::ScrollDownButton.SetPosition(-10000, -10000);
+			SidebarClass::ScrollDownButton.Disable();
+		}
+		else if (config.ScrollDownButton.Position.isset())
+		{
+			Point2D dPos = ResolveCoord(config.ScrollDownButton.Position.Get(), sidebarX);
+			SidebarClass::ScrollDownButton.SetPosition(dPos.X, dPos.Y);
+		}
+
+		return 0x6ABF03;
+	}
+
 	return 0;
 }
 
