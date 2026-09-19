@@ -851,9 +851,9 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 - Now you can customize the layout, coordinates, visibility, and behavior of sidebar controls, restore the Tiberian Sun power toggle button, create custom buttons, configure sidebar tabs, control cameo list height, and reposition scroll buttons.
   - All button and control positions are coordinates relative to the top-left corner of the sidebar panel (`0,0`).
   - `RepairButton.Show` determines whether the repair button is displayed and clickable. Default to `true`.
-  - `RepairButton.Position` sets the X and Y coordinates of the repair button. If left empty, uses the original side default (`20,166` for Allied, `33,165` for Soviet).
+  - `RepairButton.Position` sets the X and Y coordinates of the repair button. This tag is nullable; if not declared, it uses the original side-specific coordinate (`20,166` for Allied, `33,165` for Soviet/Yuri). When undeclared, this position is also subject to `Sidebar.GDIPositions`: if enabled, Soviet/Yuri uses the Allied position (`20,166`). If declared under `[Sidebar]`, it applies globally to all sides.
   - `SellButton.Show` determines whether the sell button is displayed and clickable. Default to `true`.
-  - `SellButton.Position` sets the X and Y coordinates of the sell button. If left empty, uses the original side default (`84,166` for Allied, `85,165` for Soviet).
+  - `SellButton.Position` sets the X and Y coordinates of the sell button. This tag is nullable; if not declared, it uses the original side-specific coordinate (`84,166` for Allied, `85,165` for Soviet/Yuri). If `RepairButton.Position` was customized but `SellButton.Position` is left undeclared, the sell button automatically shifts to the right of the repair button using the button width determined by `Sidebar.GDIPositions` (+64 pixels for Allied, +52 pixels for Soviet). If declared under `[Sidebar]`, it applies globally to all sides.
   - `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`). Default to `true`.
   - `DiplomacyButton.Position` sets the X and Y coordinates of the diplomacy button. Default to `86,5`.
   - `MenuButton.Show` determines whether the options/menu button is displayed and clickable. Default to `true`.

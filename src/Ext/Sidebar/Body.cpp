@@ -692,7 +692,37 @@ void CustomSidebarButtonClass::ExecuteAction()
 
 SidebarConfig SidebarExt::ActiveConfig()
 {
-	SidebarConfig result = GlobalConfig;
+	SidebarConfig result;
+
+	// Default values for standard sidebar controls
+	result.DiplomacyButton.Show = true;
+	result.DiplomacyButton.Position = Point2D { 86, 5 };
+	result.RadarButton.Show = true;
+	result.RadarButton.Position = Point2D { 86, 5 };
+	result.MenuButton.Show = true;
+	result.MenuButton.Position = Point2D { 14, 5 };
+	result.Credits.Position = Point2D { 84, 2 };
+	result.Credits.Align = TextAlign::Center;
+	result.Cameos.Y = 227;
+	result.Cameos.Height = -1;
+	result.Cameos.MarginBottom = 32;
+	result.Tabs.Count = 4;
+	result.Tabs.Order = { 0, 1, 2, 3 };
+	result.PowerBar.Show = true;
+	result.PowerBar.Height = -1;
+	result.PowerBar.Shape = "powerp.shp";
+	result.ScrollUpButton.Show = true;
+	result.ScrollUpButton.Shape = "r-up.shp";
+	result.ScrollDownButton.Show = true;
+	result.ScrollDownButton.Shape = "r-dn.shp";
+	result.RepairButton.Show = true;
+	result.SellButton.Show = true;
+
+	// RepairButton.Position and SellButton.Position are left intentionally Nullable (unset)
+	// so that if not specified in INI, they preserve original side-specific coordinates
+	// (Allied: 20,166 / 84,166 vs Soviet: 33,165 / 85,165) and the Sidebar.GDIPositions hack.
+
+	result.Merge(GlobalConfig);
 	result.Merge(RulesConfig);
 
 	if (HouseClass::CurrentPlayer)
