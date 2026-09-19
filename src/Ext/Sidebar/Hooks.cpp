@@ -79,14 +79,14 @@ DEFINE_HOOK(0x6A7590, SidebarClass_SetTab, 0x5)
 // Tab Button Visibility and Position Hooks
 // -----------------------------------------------------------------------------
 
-DEFINE_HOOK(0x69DEB0, ShapeButtonClass_Draw, 0x7)
+DEFINE_HOOK(0x69DEC0, ShapeButtonClass_Draw_CheckEnabled, 0x8)
 {
-	GET(ShapeButtonClass*, pThis, ECX);
+	GET(ShapeButtonClass*, pThis, ESI);
+	GET(DWORD, eaxVal, EAX);
 
-	if (pThis->X <= -5000 || pThis->Y <= -5000)
+	if (eaxVal == 0 || pThis->X <= -5000 || pThis->Y <= -5000)
 	{
-		R->EAX(0);
-		return 0x69DFB3;
+		return 0x69DFAD;
 	}
 
 	const auto config = SidebarExt::ActiveConfig();
@@ -97,14 +97,11 @@ DEFINE_HOOK(0x69DEB0, ShapeButtonClass_Draw, 0x7)
 	{
 		if (pThis == &SidebarClass::TabButtons[i])
 		{
-			R->EAX(0);
-			return 0x69DFB3;
+			return 0x69DFAD;
 		}
 	}
 
-	R->EAX(R->Stack<DWORD>(0x4));
-	R->ESP(R->ESP() - 0x20);
-	return 0x69DEB7;
+	return 0x69DEC8;
 }
 
 DEFINE_HOOK(0x6A5443, SidebarClass_InitGUI_TabButtonPos, 0x6)

@@ -513,11 +513,29 @@ bool CustomSidebarButtonClass::Draw(bool forced)
 	else
 		frame = 0;
 
-	Point2D drawPos = { this->X, this->Y };
-	RectangleStruct bounds = DSurface::Sidebar->GetRect();
+	const auto sidebarRect = *reinterpret_cast<RectangleStruct*>(0x886F90);
+	DSurface* pSurface = nullptr;
+	Point2D drawPos;
+	RectangleStruct bounds;
 
-	DSurface::Sidebar->DrawSHP(FileSystem::SIDEBAR_PAL, pShape, frame, &drawPos, &bounds,
-		BlitterFlags::bf_400, 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
+	if (this->X >= sidebarRect.X && DSurface::Sidebar)
+	{
+		drawPos = { this->X - sidebarRect.X, this->Y };
+		bounds = DSurface::Sidebar->GetRect();
+		pSurface = DSurface::Sidebar;
+	}
+	else if (DSurface::Composite)
+	{
+		drawPos = { this->X, this->Y };
+		bounds = DSurface::Composite->GetRect();
+		pSurface = DSurface::Composite;
+	}
+
+	if (pSurface)
+	{
+		pSurface->DrawSHP(FileSystem::SIDEBAR_PAL, pShape, frame, &drawPos, &bounds,
+			BlitterFlags::bf_400, 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
+	}
 
 	return true;
 }
@@ -546,7 +564,7 @@ bool CustomSidebarButtonClass::Action(GadgetFlag flags, DWORD* pKey, KeyModifier
 		{
 			if (DisplayClass::Instance.PowerToggleMode)
 			{
-				reinterpret_cast<void(__thiscall*)(DisplayClass*, int)>(0x4AC820)(&DisplayClass::Instance, 0);
+				DisplayClass::Instance.SetTogglePowerMode(0);
 				this->IsToggled = false;
 				SidebarClass::Instance.SidebarNeedsRedraw = true;
 			}
@@ -579,18 +597,18 @@ void CustomSidebarButtonClass::ExecuteAction()
 	switch (actionType)
 	{
 	case CustomButtonType::TogglePower:
-		reinterpret_cast<void(__thiscall*)(DisplayClass*, int)>(0x4AC820)(&DisplayClass::Instance, -1);
+		DisplayClass::Instance.SetTogglePowerMode(-1);
 		this->IsToggled = DisplayClass::Instance.PowerToggleMode;
 		SidebarClass::Instance.SidebarNeedsRedraw = true;
 		break;
 
 	case CustomButtonType::Repair:
-		reinterpret_cast<void(__thiscall*)(DisplayClass*, int)>(0x4AC8E0)(&DisplayClass::Instance, -1);
+		DisplayClass::Instance.SetRepairMode(-1);
 		SidebarClass::Instance.SidebarNeedsRedraw = true;
 		break;
 
 	case CustomButtonType::Sell:
-		reinterpret_cast<void(__thiscall*)(DisplayClass*, int)>(0x4AC9A0)(&DisplayClass::Instance, -1);
+		DisplayClass::Instance.SetSellMode(-1);
 		SidebarClass::Instance.SidebarNeedsRedraw = true;
 		break;
 
