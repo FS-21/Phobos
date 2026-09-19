@@ -737,13 +737,12 @@ void SidebarExt::InitIO()
 	const auto config = ActiveConfig();
 
 	int tabCount = config.Tabs.Count.Get(4);
-	if (tabCount < 4)
+	int visibleTabs = (tabCount == 1) ? 0 : tabCount;
+	for (int i = visibleTabs; i < 4; ++i)
 	{
-		for (int i = tabCount; i < 4; ++i)
-		{
-			SidebarClass::TabButtons[i].SetPosition(-10000, -10000);
-			SidebarClass::TabButtons[i].Disable();
-		}
+		GScreenClass::Instance.RemoveButton(&SidebarClass::TabButtons[i]);
+		SidebarClass::TabButtons[i].SetPosition(-10000, -10000);
+		SidebarClass::TabButtons[i].Disable();
 	}
 
 	if (config.RepairButton.Position.isset())

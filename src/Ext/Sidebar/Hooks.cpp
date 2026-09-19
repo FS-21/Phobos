@@ -5,6 +5,7 @@
 #include <Ext/TechnoType/Body.h>
 #include <Misc/MessageColumn.h>
 #include <Drawing.h>
+#include <GScreenClass.h>
 
 DEFINE_HOOK(0x6ABC60, SidebarClass_GetObjectTabIdx, 0x5)
 {
@@ -72,6 +73,165 @@ DEFINE_HOOK(0x6A7590, SidebarClass_SetTab, 0x5)
 		R->Stack(0x4, config.Tabs.Order[tabIndex]);
 	}
 	return 0;
+}
+
+// -----------------------------------------------------------------------------
+// Tab Button Visibility and Position Hooks
+// -----------------------------------------------------------------------------
+
+DEFINE_HOOK(0x69DEB0, ShapeButtonClass_Draw, 0x7)
+{
+	GET(ShapeButtonClass*, pThis, ECX);
+
+	if (pThis->X <= -5000 || pThis->Y <= -5000)
+	{
+		R->EAX(0);
+		return 0x69DFB3;
+	}
+
+	const auto config = SidebarExt::ActiveConfig();
+	int tabCount = config.Tabs.Count.Get(4);
+	int visibleTabs = (tabCount == 1) ? 0 : tabCount;
+
+	for (int i = visibleTabs; i < 4; ++i)
+	{
+		if (pThis == &SidebarClass::TabButtons[i])
+		{
+			R->EAX(0);
+			return 0x69DFB3;
+		}
+	}
+
+	R->EAX(R->Stack<DWORD>(0x4));
+	R->ESP(R->ESP() - 0x20);
+	return 0x69DEB7;
+}
+
+DEFINE_HOOK(0x6A5443, SidebarClass_InitGUI_TabButtonPos, 0x6)
+{
+	const auto config = SidebarExt::ActiveConfig();
+	int tabCount = config.Tabs.Count.Get(4);
+	int visibleTabs = (tabCount == 1) ? 0 : tabCount;
+
+	GET(int, tabIdx, EBP);
+	GET(DWORD, esiVal, ESI);
+
+	int posX = R->EDX();
+	int posY = R->EAX();
+
+	if (tabIdx >= visibleTabs)
+	{
+		posX = -10000;
+		posY = -10000;
+	}
+	else if (static_cast<size_t>(tabIdx) < config.Tabs.Positions.size())
+	{
+		posX = config.Tabs.Positions[tabIdx].X;
+		posY = config.Tabs.Positions[tabIdx].Y;
+	}
+
+	*reinterpret_cast<int*>(esiVal - 0x18) = posX;
+	*reinterpret_cast<int*>(esiVal - 0x14) = posY;
+
+	return 0x6A5449;
+}
+
+DEFINE_HOOK(0x6A7E36, SidebarClass_Activate_AddTabButton, 0x8)
+{
+	const auto config = SidebarExt::ActiveConfig();
+	int tabCount = config.Tabs.Count.Get(4);
+	int visibleTabs = (tabCount == 1) ? 0 : tabCount;
+
+	GET(ShapeButtonClass*, pButton, EDI);
+	int tabIdx = (reinterpret_cast<DWORD>(pButton) - 0x00B07C48) / sizeof(ShapeButtonClass);
+
+	if (tabIdx < visibleTabs)
+	{
+		GET(GScreenClass*, pGScreen, ESI);
+		pGScreen->AddButton(pButton);
+	}
+	else
+	{
+		pButton->SetPosition(-10000, -10000);
+		pButton->Disable();
+	}
+
+	return 0x6A7E3E;
+}
+
+DEFINE_HOOK(0x6ABE6E, SidebarClass_RepositionTabButtons, 0x6)
+{
+	const auto config = SidebarExt::ActiveConfig();
+	int tabCount = config.Tabs.Count.Get(4);
+	int visibleTabs = (tabCount == 1) ? 0 : tabCount;
+
+	GET(int, edi, EDI);
+	GET(ShapeButtonClass*, pButton, ESI);
+
+	if (edi >= visibleTabs)
+	{
+		pButton->SetPosition(-10000, -10000);
+		pButton->Disable();
+		GScreenClass::Instance.RemoveButton(pButton);
+
+		return 0x6ABE94;
+	}
+
+	if (static_cast<size_t>(edi) < config.Tabs.Positions.size())
+	{
+		int posX = config.Tabs.Positions[edi].X;
+		int posY = config.Tabs.Positions[edi].Y;
+		pButton->SetPosition(posX, posY);
+		pButton->MarkRedraw();
+		return 0x6ABE94;
+	}
+
+	R->EDX(*reinterpret_cast<DWORD*>(0x00B0B4F0));
+	return 0x6ABE74;
+}
+
+DEFINE_HOOK(0x6A6483, SidebarClass_Recalc_EnableTabButton, 0x7)
+{
+	const auto config = SidebarExt::ActiveConfig();
+	int tabCount = config.Tabs.Count.Get(4);
+	int visibleTabs = (tabCount == 1) ? 0 : tabCount;
+
+	GET_STACK(int, tabIdx, 0x18);
+	GET(ShapeButtonClass*, pButton, ESI);
+
+	if (tabIdx < visibleTabs)
+	{
+		pButton->Enable();
+	}
+	else
+	{
+		pButton->Disable();
+		pButton->SetPosition(-10000, -10000);
+	}
+
+	return 0x6A648A;
+}
+
+DEFINE_HOOK(0x6A67FD, SidebarClass_Recalc2_EnableTabButton, 0x7)
+{
+	const auto config = SidebarExt::ActiveConfig();
+	int tabCount = config.Tabs.Count.Get(4);
+	int visibleTabs = (tabCount == 1) ? 0 : tabCount;
+
+	GET(int, tabIdx, ESI);
+	GET(ShapeButtonClass*, pButton, EBX);
+
+	if (tabIdx < visibleTabs)
+	{
+		pButton->Enable();
+	}
+	else
+	{
+		pButton->Disable();
+		pButton->SetPosition(-10000, -10000);
+	}
+
+	return 0x6A6804;
 }
 
 DEFINE_HOOK(0x6A593E, SidebarClass_InitForHouse_AdditionalFiles, 0x5)
