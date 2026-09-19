@@ -27,6 +27,7 @@ public:
 	Nullable<Point2D> Size;
 	PhobosFixedString<0x20> Shape;
 	Nullable<bool> RequiresBuildings;
+	Nullable<bool> Toggle;
 	Nullable<int> SuperWeaponIndex;
 	PhobosFixedString<0x20> SuperWeapon;
 	PhobosFixedString<0x40> Tooltip;

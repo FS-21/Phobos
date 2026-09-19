@@ -84,6 +84,7 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 
 	this->Shape.Read(pINI, pSection, makeKey("Shape"));
 	this->RequiresBuildings.Read(exINI, pSection, makeKey("RequiresBuildings"));
+	this->Toggle.Read(exINI, pSection, makeKey("Toggle"));
 
 	char actionBuf[0x40] = { 0 };
 	if (pINI->ReadString(pSection, makeKey("Action"), "", actionBuf, sizeof(actionBuf)) ||
@@ -134,6 +135,9 @@ void SidebarButtonConfig::Merge(const SidebarButtonConfig& other)
 	if (other.RequiresBuildings.isset())
 		this->RequiresBuildings = other.RequiresBuildings;
 
+	if (other.Toggle.isset())
+		this->Toggle = other.Toggle;
+
 	if (other.SuperWeaponIndex.isset())
 		this->SuperWeaponIndex = other.SuperWeaponIndex;
 
@@ -157,6 +161,7 @@ void SidebarButtonConfig::Serialize(T& Stm)
 		.Process(this->Size)
 		.Process(this->Shape)
 		.Process(this->RequiresBuildings)
+		.Process(this->Toggle)
 		.Process(this->SuperWeaponIndex)
 		.Process(this->SuperWeapon)
 		.Process(this->Tooltip)
@@ -698,6 +703,14 @@ bool CustomSidebarButtonClass::Action(GadgetFlag flags, DWORD* pKey, KeyModifier
 				SidebarClass::Instance.SidebarNeedsRedraw = true;
 			}
 		}
+		else if (this->Config.Toggle.Get(false))
+		{
+			if (this->IsToggled)
+			{
+				this->IsToggled = false;
+				SidebarClass::Instance.SidebarNeedsRedraw = true;
+			}
+		}
 	}
 
 	if (flags & GadgetFlag::LeftPress)
@@ -796,10 +809,23 @@ void CustomSidebarButtonClass::ExecuteAction()
 				}
 			}
 		}
+
+		if (this->Config.Toggle.Get(false))
+		{
+			this->IsToggled = !this->IsToggled;
+			SidebarClass::Instance.SidebarNeedsRedraw = true;
+		}
 		break;
 	}
 
+	case CustomButtonType::Custom:
+	case CustomButtonType::None:
 	default:
+		if (this->Config.Toggle.Get(false))
+		{
+			this->IsToggled = !this->IsToggled;
+			SidebarClass::Instance.SidebarNeedsRedraw = true;
+		}
 		break;
 	}
 }
@@ -1142,7 +1168,7 @@ bool SidebarExt::IsTogglePowerRequiresBuildings()
 	{
 		if (pBtn && pBtn->Config.Action.Get(CustomButtonType::None) == CustomButtonType::TogglePower)
 		{
-			if (pBtn->Config.RequiresBuildings.isset() && !pBtn->Config.RequiresBuildings.Get())
+			if (!pBtn->Config.RequiresBuildings.Get(false))
 			{
 				return false;
 			}
@@ -1165,7 +1191,7 @@ bool SidebarExt::IsRepairRequiresBuildings()
 	{
 		if (pBtn && pBtn->Config.Action.Get(CustomButtonType::None) == CustomButtonType::Repair)
 		{
-			if (pBtn->Config.RequiresBuildings.isset() && !pBtn->Config.RequiresBuildings.Get())
+			if (!pBtn->Config.RequiresBuildings.Get(false))
 			{
 				return false;
 			}
@@ -1188,7 +1214,7 @@ bool SidebarExt::IsSellRequiresBuildings()
 	{
 		if (pBtn && pBtn->Config.Action.Get(CustomButtonType::None) == CustomButtonType::Sell)
 		{
-			if (pBtn->Config.RequiresBuildings.isset() && !pBtn->Config.RequiresBuildings.Get())
+			if (!pBtn->Config.RequiresBuildings.Get(false))
 			{
 				return false;
 			}

@@ -927,6 +927,7 @@ Position=                                ; integer, X,Y coordinates
 Size=                                    ; integer, Width,Height (optional, auto-detected from SHP)
 Shape=                                   ; filename - including the .shp extension
 RequiresBuildings=false                  ; boolean
+Toggle=false                             ; boolean, enables toggle state (stays pressed until clicked again or right-clicked)
 SuperWeapon=                             ; SuperWeaponType
 SuperWeaponIndex=                        ; integer, 0-based index
 Command=                                 ; Command name
