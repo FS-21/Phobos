@@ -851,15 +851,15 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 - Now you can customize the layout, coordinates, visibility, and behavior of sidebar controls, restore the Tiberian Sun power toggle button, create custom buttons, configure sidebar tabs, control cameo list height, and reposition scroll buttons.
   - All button and control positions are coordinates relative to the top-left corner of the sidebar panel (`0,0`).
   - `RepairButton.Show` determines whether the repair button is displayed and clickable. Default to `true`.
-  - `RepairButton.Position` sets the X and Y coordinates of the repair button. Default to `20,166` (Allied) or `33,165` (Soviet).
+  - `RepairButton.Position` sets the X and Y coordinates of the repair button. If left empty, uses the original side default (`20,166` for Allied, `33,165` for Soviet).
   - `SellButton.Show` determines whether the sell button is displayed and clickable. Default to `true`.
-  - `SellButton.Position` sets the X and Y coordinates of the sell button. Default to `84,166` (Allied) or `85,165` (Soviet).
+  - `SellButton.Position` sets the X and Y coordinates of the sell button. If left empty, uses the original side default (`84,166` for Allied, `85,165` for Soviet).
   - `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`). Default to `true`.
   - `DiplomacyButton.Position` sets the X and Y coordinates of the diplomacy button. Default to `86,5`.
   - `MenuButton.Show` determines whether the options/menu button is displayed and clickable. Default to `true`.
   - `MenuButton.Position` sets the X and Y coordinates of the options/menu button. Default to `14,5`.
   - `TogglePowerButton.Enabled` restores and enables the Tiberian Sun power toggle button. Default to `false`.
-  - `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. Default to `108,166` (Allied) or `109,165` (Soviet).
+  - `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. If left empty, defaults to `108,166` (Allied) or `109,165` (Soviet).
   - `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button. Default to `power.shp`. **Note:** `power.shp` is an asset from Tiberian Sun and does **not** exist in vanilla Yuri's Revenge MIX archives. You must provide `power.shp` in your mod files (or set this tag to an existing SHP) for the button to appear. The SHP supports 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled (when `RequiresBuildings=true` and player has no buildings).
   - `TogglePowerButton.RequiresBuildings` controls whether the toggle power button is disabled when the player has no buildings. Default to `true`.
   - `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip. Default to `GUI:TogglePower`.
@@ -868,7 +868,7 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
   - `Credits.Align` sets the text alignment for the credits counter (`left`, `center`, or `right`). Default to `center`.
   - `Credits.Color` sets the text color of the credits counter as an RGB value (`R,G,B`). Default to yellow/gold (`255,255,0`).
   - `PowerBar.Show` controls whether the power bar is displayed. Default to `true`.
-  - `PowerBar.Position` sets the X and Y coordinates of the power bar. Default to `5,227` (Allied) or `0,227` (Soviet).
+  - `PowerBar.Position` sets the X and Y coordinates of the power bar. If left empty, defaults to `5,227` (Allied) or `0,227` (Soviet).
   - `PowerBar.Height` sets a fixed pixel height for the power bar (`-1` for dynamic scaling to the bottom of the screen). Default to `-1`.
   - `PowerBar.Shape` specifies a custom SHP file for the power bar pips. Default to `powerp.shp`.
   - `Tabs.Count` specifies the total number of sidebar tabs (1..16). When set to `1`, tab buttons are automatically hidden and the cameo strip is shifted up. Default to `4`.
@@ -888,15 +888,15 @@ In `uimd.ini`:
 ```ini
 [Sidebar]
 RepairButton.Show=true               ; boolean
-RepairButton.Position=20,166         ; integer, X,Y coordinates (Allied: 20,166, Soviet: 33,165)
+RepairButton.Position=               ; integer, X,Y coordinates
 SellButton.Show=true                 ; boolean
-SellButton.Position=84,166           ; integer, X,Y coordinates (Allied: 84,166, Soviet: 85,165)
+SellButton.Position=                 ; integer, X,Y coordinates
 DiplomacyButton.Show=true            ; boolean
 DiplomacyButton.Position=86,5        ; integer, X,Y coordinates
 MenuButton.Show=true                 ; boolean
 MenuButton.Position=14,5             ; integer, X,Y coordinates
 TogglePowerButton.Enabled=false      ; boolean
-TogglePowerButton.Position=108,166   ; integer, X,Y coordinates (Allied: 108,166, Soviet: 109,165)
+TogglePowerButton.Position=          ; integer, X,Y coordinates
 TogglePowerButton.Shape=power.shp    ; filename - including the .shp extension
 TogglePowerButton.RequiresBuildings=true ; boolean
 TogglePowerButton.Tooltip=GUI:TogglePower ; CSF entry key
@@ -905,7 +905,7 @@ Credits.Position=84,2                ; integer, X,Y coordinates
 Credits.Align=center                 ; left | center | right
 Credits.Color=                       ; integer - Red,Green,Blue
 PowerBar.Show=true                   ; boolean
-PowerBar.Position=5,227              ; integer, X,Y coordinates (Allied: 5,227, Soviet: 0,227)
+PowerBar.Position=                   ; integer, X,Y coordinates
 PowerBar.Height=-1                   ; integer, -1 for dynamic or height in pixels
 PowerBar.Shape=powerp.shp            ; filename - including the .shp extension
 Tabs.Count=4                         ; integer (1..16)
