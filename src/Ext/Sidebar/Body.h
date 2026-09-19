@@ -234,6 +234,7 @@ public:
 
 	static void InitClear();
 	static void InitIO();
+	static void DrawCustomButtons();
 
 	static void SaveBaseline();
 	static void ResetToBaseline();

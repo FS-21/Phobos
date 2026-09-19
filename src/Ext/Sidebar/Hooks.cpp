@@ -320,6 +320,12 @@ DEFINE_HOOK(0x6A6EB1, SidebarClass_DrawIt_ProducingProgress, 0x6)
 	return 0;
 }
 
+DEFINE_HOOK(0x6A6EC7, SidebarClass_DrawIt_CustomButtons, 0x6)
+{
+	SidebarExt::DrawCustomButtons();
+	return 0;
+}
+
 DEFINE_HOOK(0x72FCB5, InitSideRectangles_CenterBackground, 0x5)
 {
 	if (Phobos::UI::CenterPauseMenuBackground)

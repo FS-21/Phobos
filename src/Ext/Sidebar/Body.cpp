@@ -530,13 +530,20 @@ bool CustomSidebarButtonClass::Draw(bool forced)
 	else
 		frame = 0;
 
-	DSurface* pSurface = DSurface::Composite;
+	DSurface* pSurface = DSurface::Sidebar;
 	if (!pSurface)
 		return false;
 
-	ConvertClass* pPalette = FileSystem::SIDEBAR_PAL ? FileSystem::SIDEBAR_PAL : FileSystem::PALETTE_PAL;
-	Point2D drawPos = { this->X, this->Y };
+	const DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
+	int relX = this->X;
+	if (relX >= static_cast<int>(sidebarX))
+	{
+		relX -= static_cast<int>(sidebarX);
+	}
+	Point2D drawPos = { relX, this->Y };
 	RectangleStruct bounds = pSurface->GetRect();
+
+	ConvertClass* pPalette = FileSystem::SIDEBAR_PAL ? FileSystem::SIDEBAR_PAL : FileSystem::PALETTE_PAL;
 
 	pSurface->DrawSHP(pPalette, pShape, frame, &drawPos, &bounds,
 		BlitterFlags::bf_400, 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
@@ -548,6 +555,7 @@ void CustomSidebarButtonClass::OnMouseEnter()
 {
 	this->IsHovering = true;
 	MouseClass::Instance.UpdateCursor(MouseCursorType::Default, false);
+	SidebarClass::Instance.SidebarNeedsRedraw = true;
 }
 
 void CustomSidebarButtonClass::OnMouseLeave()
@@ -555,6 +563,7 @@ void CustomSidebarButtonClass::OnMouseLeave()
 	this->IsHovering = false;
 	this->IsPressed = false;
 	MouseClass::Instance.UpdateCursor(MouseCursorType::Default, false);
+	SidebarClass::Instance.SidebarNeedsRedraw = true;
 }
 
 bool CustomSidebarButtonClass::Action(GadgetFlag flags, DWORD* pKey, KeyModifier modifier)
@@ -578,12 +587,16 @@ bool CustomSidebarButtonClass::Action(GadgetFlag flags, DWORD* pKey, KeyModifier
 	if (flags & GadgetFlag::LeftPress)
 	{
 		if (!this->IsDisabled())
+		{
 			this->IsPressed = true;
+			SidebarClass::Instance.SidebarNeedsRedraw = true;
+		}
 	}
 
 	if ((flags & GadgetFlag::LeftRelease) && this->IsPressed)
 	{
 		this->IsPressed = false;
+		SidebarClass::Instance.SidebarNeedsRedraw = true;
 		if (!this->IsDisabled())
 		{
 			this->ExecuteAction();
@@ -955,6 +968,24 @@ void SidebarExt::InitIO()
 		if (auto pSHP = FileSystem::LoadSHPFile(config.ScrollDownButton.Shape.data()))
 		{
 			SetShapeButtonSHP(&SidebarClass::ScrollDownButton, pSHP);
+		}
+	}
+
+	SidebarClass::Instance.SidebarNeedsRedraw = true;
+}
+
+void SidebarExt::DrawCustomButtons()
+{
+	if (ActiveTogglePowerButton)
+	{
+		ActiveTogglePowerButton->Draw(false);
+	}
+
+	for (auto pBtn : ActiveCustomButtons)
+	{
+		if (pBtn)
+		{
+			pBtn->Draw(false);
 		}
 	}
 }
