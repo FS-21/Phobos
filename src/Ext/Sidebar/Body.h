@@ -44,11 +44,11 @@ public:
 class TogglePowerButtonConfig
 {
 public:
-	Valueable<bool> Enabled { false };
+	Nullable<bool> Enabled;
 	Nullable<Point2D> Position;
-	PhobosFixedString<0x20> Shape { "power.shp" };
-	Nullable<bool> RequiresBuildings { true };
-	PhobosFixedString<0x40> Tooltip { "GUI:TogglePower" };
+	PhobosFixedString<0x20> Shape;
+	Nullable<bool> RequiresBuildings;
+	PhobosFixedString<0x40> Tooltip;
 
 	TogglePowerButtonConfig() = default;
 

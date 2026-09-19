@@ -171,7 +171,7 @@ void TogglePowerButtonConfig::Read(CCINIClass* pINI, const char* pSection)
 
 void TogglePowerButtonConfig::Merge(const TogglePowerButtonConfig& other)
 {
-	this->Enabled = other.Enabled;
+	if (other.Enabled.isset()) this->Enabled = other.Enabled;
 	if (other.Position.isset()) this->Position = other.Position;
 	if (other.Shape[0] != '\0') this->Shape = other.Shape;
 	if (other.RequiresBuildings.isset()) this->RequiresBuildings = other.RequiresBuildings;
@@ -462,7 +462,7 @@ void SidebarConfig::Serialize(T& Stm)
 // -----------------------------------------------------------------------------
 
 CustomSidebarButtonClass::CustomSidebarButtonClass(const SidebarButtonConfig& cfg, int x, int y, int width, int height)
-	: GadgetClass(x, y, width, height, (GadgetFlag::LeftPress | GadgetFlag::RightPress), false)
+	: GadgetClass(x, y, width, height, (GadgetFlag::LeftPress | GadgetFlag::LeftRelease | GadgetFlag::RightPress), false)
 	, Config(cfg)
 {
 	if (auto const pShape = this->GetShape())
@@ -488,6 +488,10 @@ SHPStruct* CustomSidebarButtonClass::GetShape()
 	if (!this->ShapeData && this->Config.Shape[0] != '\0')
 	{
 		this->ShapeData = FileSystem::LoadSHPFile(this->Config.Shape.data());
+		if (!this->ShapeData)
+		{
+			Debug::Log("[Sidebar] Warning: Could not load button shape '%s'\n", this->Config.Shape.data());
+		}
 	}
 	return this->ShapeData;
 }
@@ -691,6 +695,11 @@ SidebarConfig SidebarExt::ActiveConfig()
 	result.RepairButton.Show = true;
 	result.SellButton.Show = true;
 
+	result.TogglePowerButton.Enabled = false;
+	result.TogglePowerButton.Shape = "power.shp";
+	result.TogglePowerButton.RequiresBuildings = true;
+	result.TogglePowerButton.Tooltip = "GUI:TogglePower";
+
 	// Positions (RepairButton, SellButton, DiplomacyButton, MenuButton, RadarButton,
 	// ScrollUpButton, ScrollDownButton, Credits, PowerBar, Cameos.Y, Cameos.Height)
 	// and custom shapes (PowerBar, ScrollUpButton, ScrollDownButton) are left Nullable/unset
@@ -831,7 +840,7 @@ void SidebarExt::InitIO()
 	}
 
 	// Create TogglePowerButton if enabled
-	if (config.TogglePowerButton.Enabled.Get())
+	if (config.TogglePowerButton.Enabled.Get(false))
 	{
 		SidebarButtonConfig tpCfg;
 		tpCfg.Show = true;
@@ -881,6 +890,7 @@ void SidebarExt::InitIO()
 		}
 
 		ActiveTogglePowerButton = GameCreate<CustomSidebarButtonClass>(tpCfg, pos.X, pos.Y, 0, 0);
+		ActiveTogglePowerButton->Zap();
 		GScreenClass::Instance.AddButton(ActiveTogglePowerButton);
 	}
 
@@ -895,6 +905,7 @@ void SidebarExt::InitIO()
 				: Point2D { 0, 0 };
 			Point2D sz = btnCfg.Size.Get(Point2D { 0, 0 });
 			auto pBtn = GameCreate<CustomSidebarButtonClass>(btnCfg, pos.X, pos.Y, sz.X, sz.Y);
+			pBtn->Zap();
 			ActiveCustomButtons.push_back(pBtn);
 			GScreenClass::Instance.AddButton(pBtn);
 		}
