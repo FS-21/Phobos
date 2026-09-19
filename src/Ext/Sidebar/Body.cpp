@@ -862,39 +862,19 @@ void SidebarExt::InitIO()
 
 			int baseRepairX = sidebarX + (isNOD ? 0x21 : 0x14);
 			int baseRepairY = topMargin + (isNOD ? 7 : 8);
-			if (config.RepairButton.Position.isset())
-			{
-				baseRepairX = SidebarClass::ToggleRepairButton.X;
-				baseRepairY = SidebarClass::ToggleRepairButton.Y;
-			}
 			int baseSellX = baseRepairX + (isNOD ? 0x34 : 0x40);
 			int baseSellY = baseRepairY;
 
-			bool repairShown = !config.RepairButton.Show.isset() || config.RepairButton.Show.Get();
-			bool sellShown = !config.SellButton.Show.isset() || config.SellButton.Show.Get();
+			int sellX = pSellButton->X;
+			int sellY = pSellButton->Y;
+			if (sellX <= -5000 || sellY <= -5000)
+			{
+				sellX = baseSellX;
+				sellY = baseSellY;
+			}
 
-			if (!repairShown && !sellShown)
-			{
-				pos.X = baseRepairX;
-				pos.Y = baseRepairY;
-			}
-			else if (repairShown && !sellShown)
-			{
-				pos.X = baseSellX;
-				pos.Y = baseSellY;
-			}
-			else
-			{
-				int sellX = pSellButton->X;
-				int sellY = pSellButton->Y;
-				if (sellX <= -5000 || sellY <= -5000)
-				{
-					sellX = baseSellX;
-					sellY = baseSellY;
-				}
-				pos.X = sellX + 24;
-				pos.Y = sellY;
-			}
+			pos.X = sellX + 24;
+			pos.Y = sellY;
 		}
 
 		ActiveTogglePowerButton = GameCreate<CustomSidebarButtonClass>(tpCfg, pos.X, pos.Y, 0, 0);

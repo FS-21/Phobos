@@ -858,7 +858,7 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 	- `MenuButton.Show` determines whether the options/menu button is displayed and clickable.
 	- `MenuButton.Position` sets the X and Y screen coordinates of the options/menu button.
 	- `TogglePowerButton.Enabled` restores and enables the Tiberian Sun power toggle button.
-	- `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. If X < 168, it is automatically treated as relative to the sidebar (resolution-independent); otherwise, it is treated as absolute screen coordinates. If omitted, it automatically places itself into the first available top button slot (e.g. replacing Repair or Sell when hidden, or adjacent to Sell).
+	- `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. If X < 168, it is automatically treated as relative to the sidebar (resolution-independent); otherwise, it is treated as absolute screen coordinates. Defaults to its standard position adjacent to the Sell button.
 	- `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button.
 	- `TogglePowerButton.RequiresBuildings` controls whether the toggle power button is disabled when the player has no buildings.
 	- `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip.
