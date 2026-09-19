@@ -849,6 +849,34 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 ### Sidebar Customizations
 
 - Now you can customize the layout, coordinates, visibility, and behavior of sidebar controls, restore the Tiberian Sun power toggle button, create custom buttons, and configure sidebar tabs.
+
+#### Sidebar Layout Architecture & Coordinate Systems
+
+The rightmost 168-pixel sidebar column is divided into two distinct sections in the game engine:
+
+1. **Upper Section — Radar Area (`Y = 0` to `Y = 158` from top of panel):**
+   - Contains the circular radar minimap (`RadarClass`).
+   - Radar control buttons (`MenuButton` and `DiplomacyButton` / `RadarButton`) are anchored within this section (or in vanilla RA2's top-left bar) using screen coordinates.
+
+2. **Lower Section — Sidebar Controls & Cameos (`DSurface::Sidebar`, starting at `Y = 158`):**
+   - Begins immediately below the radar frame (`topMargin = 158` pixels from top of panel).
+   - Contains the command buttons (`RepairButton`, `SellButton`, `TogglePowerButton`, `CustomButtons`), tabs (`Tabs`), cameo build strip (`Cameos`), and the power bar (`PowerBar`).
+
+#### How Coordinates Work
+
+When configuring coordinates (`*.Position=X,Y`) for sidebar controls (`RepairButton`, `SellButton`, `TogglePowerButton`, and custom buttons in `CustomButtons`):
+
+- **Relative Mode (`X < 168` — Recommended):**
+  - **`X`** is measured from the left edge of the 168-pixel sidebar panel (`0` = left edge of panel, `168` = right edge of screen). The engine automatically shifts `X` to the right edge of the screen (`ScreenWidth - 168 + X`), making the layout resolution-independent across 1024x768, 1280x720, 1920x1080, etc.
+  - **`Y`** is measured from the **bottom edge of the radar** (`Y = 0` relative = 158 pixels from the top of the panel):
+    - `Y = 8` (or `7` in Nod): Baseline row for `RepairButton`, `SellButton`, and `TogglePowerButton` (166 px from top of panel).
+    - `Y = 39`: Baseline for the tab buttons (`Tabs`, 197 px from top of panel).
+    - `Y = 69`: Baseline start of the cameo strip (`Cameos`, 227 px from top of panel).
+- **Absolute Mode (`X >= 168`):**
+  - Coordinates are treated as exact pixel positions from the top-left corner of the screen (`0,0`), bypassing automatic sidebar offsets.
+
+#### Configuration Tags
+
 	- `RepairButton.Show` determines whether the repair button is displayed and clickable.
 	- `RepairButton.Position` sets the X and Y coordinates of the repair button. If X < 168, it is automatically treated as relative to the sidebar (resolution-independent); otherwise, it is treated as absolute screen coordinates.
 	- `SellButton.Show` determines whether the sell button is displayed and clickable.
