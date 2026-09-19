@@ -169,6 +169,7 @@ DEFINE_HOOK(0x6A51E9, SidebarClass_InitGUI, 0x6)
 
 	R->ESI(isNODSidebar);
 	R->EDX(isNODSidebar);
+	R->EAX(*reinterpret_cast<DWORD*>(0x00886F9C));
 
 	return 0x6A5205;
 }
@@ -259,6 +260,26 @@ DEFINE_HOOK(0x6ABE03, SidebarClass_RepositionButtons, 0x5)
 		*reinterpret_cast<DWORD*>(0x00B0B4E0) = static_cast<DWORD>(-10000);
 	}
 
+	if (SidebarExt::ActiveTogglePowerButton)
+	{
+		if (config.TogglePowerButton.Position.isset())
+		{
+			Point2D tpPos = ResolveCoord(config.TogglePowerButton.Position.Get(), sidebarX);
+			SidebarExt::ActiveTogglePowerButton->SetPosition(tpPos.X, tpPos.Y);
+			SidebarExt::ActiveTogglePowerButton->MarkRedraw();
+		}
+	}
+
+	for (auto pBtn : SidebarExt::ActiveCustomButtons)
+	{
+		if (pBtn && pBtn->Config.Position.isset())
+		{
+			Point2D cPos = ResolveCoord(pBtn->Config.Position.Get(), sidebarX);
+			pBtn->SetPosition(cPos.X, cPos.Y);
+			pBtn->MarkRedraw();
+		}
+	}
+
 	return 0;
 }
 
@@ -318,6 +339,7 @@ DEFINE_HOOK(0x6ABEAA, SidebarClass_RepositionButtons_ScrollButtons, 0x6)
 		{
 			Point2D uPos = ResolveCoord(config.ScrollUpButton.Position.Get(), sidebarX);
 			SidebarClass::ScrollUpButton.SetPosition(uPos.X, uPos.Y);
+			SidebarClass::ScrollUpButton.MarkRedraw();
 		}
 
 		if (config.ScrollDownButton.Show.isset() && !config.ScrollDownButton.Show.Get())
@@ -329,9 +351,16 @@ DEFINE_HOOK(0x6ABEAA, SidebarClass_RepositionButtons_ScrollButtons, 0x6)
 		{
 			Point2D dPos = ResolveCoord(config.ScrollDownButton.Position.Get(), sidebarX);
 			SidebarClass::ScrollDownButton.SetPosition(dPos.X, dPos.Y);
+			SidebarClass::ScrollDownButton.MarkRedraw();
+		}
+		else if (customUp && (!config.ScrollDownButton.Show.isset() || config.ScrollDownButton.Show.Get()))
+		{
+			// If ScrollUp was customized but ScrollDown was not, follow ScrollUp button by +36px
+			SidebarClass::ScrollDownButton.SetPosition(SidebarClass::ScrollUpButton.X + 36, SidebarClass::ScrollUpButton.Y);
+			SidebarClass::ScrollDownButton.MarkRedraw();
 		}
 
-		return 0x6ABF03;
+		return 0x6ABF01;
 	}
 
 	return 0;

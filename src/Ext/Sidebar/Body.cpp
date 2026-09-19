@@ -467,11 +467,10 @@ CustomSidebarButtonClass::CustomSidebarButtonClass(const SidebarButtonConfig& cf
 {
 	if (auto const pShape = this->GetShape())
 	{
-		if (!cfg.Size.isset() || this->Width <= 0 || this->Height <= 0)
-		{
+		if (this->Width <= 0)
 			this->Width = pShape->Width;
+		if (this->Height <= 0)
 			this->Height = pShape->Height;
-		}
 	}
 
 	if (this->Width <= 0) this->Width = 24;
@@ -527,32 +526,16 @@ bool CustomSidebarButtonClass::Draw(bool forced)
 	else
 		frame = 0;
 
-	const auto sidebarRect = *reinterpret_cast<RectangleStruct*>(0x886F90);
-	DSurface* pSurface = nullptr;
-	ConvertClass* pPalette = nullptr;
-	Point2D drawPos;
-	RectangleStruct bounds;
+	DSurface* pSurface = DSurface::Composite;
+	if (!pSurface)
+		return false;
 
-	if (this->X >= sidebarRect.X && DSurface::Sidebar)
-	{
-		drawPos = { this->X - sidebarRect.X, this->Y };
-		bounds = DSurface::Sidebar->GetRect();
-		pSurface = DSurface::Sidebar;
-		pPalette = FileSystem::SIDEBAR_PAL;
-	}
-	else if (DSurface::Composite)
-	{
-		drawPos = { this->X, this->Y };
-		bounds = DSurface::Composite->GetRect();
-		pSurface = DSurface::Composite;
-		pPalette = FileSystem::PALETTE_PAL;
-	}
+	ConvertClass* pPalette = FileSystem::SIDEBAR_PAL ? FileSystem::SIDEBAR_PAL : FileSystem::PALETTE_PAL;
+	Point2D drawPos = { this->X, this->Y };
+	RectangleStruct bounds = pSurface->GetRect();
 
-	if (pSurface && pPalette)
-	{
-		pSurface->DrawSHP(pPalette, pShape, frame, &drawPos, &bounds,
-			BlitterFlags::bf_400, 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
-	}
+	pSurface->DrawSHP(pPalette, pShape, frame, &drawPos, &bounds,
+		BlitterFlags::bf_400, 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
 
 	return true;
 }
@@ -696,31 +679,22 @@ SidebarConfig SidebarExt::ActiveConfig()
 
 	// Default values for standard sidebar controls
 	result.DiplomacyButton.Show = true;
-	result.DiplomacyButton.Position = Point2D { 86, 5 };
 	result.RadarButton.Show = true;
-	result.RadarButton.Position = Point2D { 86, 5 };
 	result.MenuButton.Show = true;
-	result.MenuButton.Position = Point2D { 14, 5 };
-	result.Credits.Position = Point2D { 84, 2 };
 	result.Credits.Align = TextAlign::Center;
-	result.Cameos.Y = 227;
-	result.Cameos.Height = -1;
 	result.Cameos.MarginBottom = 32;
 	result.Tabs.Count = 4;
 	result.Tabs.Order = { 0, 1, 2, 3 };
 	result.PowerBar.Show = true;
-	result.PowerBar.Height = -1;
-	result.PowerBar.Shape = "powerp.shp";
 	result.ScrollUpButton.Show = true;
-	result.ScrollUpButton.Shape = "r-up.shp";
 	result.ScrollDownButton.Show = true;
-	result.ScrollDownButton.Shape = "r-dn.shp";
 	result.RepairButton.Show = true;
 	result.SellButton.Show = true;
 
-	// RepairButton.Position and SellButton.Position are left intentionally Nullable (unset)
-	// so that if not specified in INI, they preserve original side-specific coordinates
-	// (Allied: 20,166 / 84,166 vs Soviet: 33,165 / 85,165) and the Sidebar.GDIPositions hack.
+	// Positions (RepairButton, SellButton, DiplomacyButton, MenuButton, RadarButton,
+	// ScrollUpButton, ScrollDownButton, Credits, PowerBar, Cameos.Y, Cameos.Height)
+	// and custom shapes (PowerBar, ScrollUpButton, ScrollDownButton) are left Nullable/unset
+	// by default so that if not specified in INI, original game logic calculates them naturally.
 
 	result.Merge(GlobalConfig);
 	result.Merge(RulesConfig);
@@ -937,11 +911,20 @@ void SidebarExt::InitIO()
 		SidebarClass::ScrollUpButton.SetPosition(-10000, -10000);
 		SidebarClass::ScrollUpButton.Disable();
 	}
+	auto SetShapeButtonSHP = [](ShapeButtonClass* pButton, SHPStruct* pSHP)
+	{
+		if (!pButton || !pSHP) return;
+		reinterpret_cast<void (__thiscall*)(ShapeButtonClass*, SHPStruct*)>(0x69DE00)(pButton, pSHP);
+		reinterpret_cast<void (__thiscall*)(ShapeButtonClass*)>(0x69DEA0)(pButton);
+		pButton->Width = pSHP->Width;
+		pButton->Height = pSHP->Height;
+	};
+
 	if (config.ScrollUpButton.Shape[0] != '\0')
 	{
 		if (auto pSHP = FileSystem::LoadSHPFile(config.ScrollUpButton.Shape.data()))
 		{
-			SidebarClass::ScrollUpButton.SetShape(pSHP, pSHP->Width, pSHP->Height);
+			SetShapeButtonSHP(&SidebarClass::ScrollUpButton, pSHP);
 		}
 	}
 
@@ -960,7 +943,7 @@ void SidebarExt::InitIO()
 	{
 		if (auto pSHP = FileSystem::LoadSHPFile(config.ScrollDownButton.Shape.data()))
 		{
-			SidebarClass::ScrollDownButton.SetShape(pSHP, pSHP->Width, pSHP->Height);
+			SetShapeButtonSHP(&SidebarClass::ScrollDownButton, pSHP);
 		}
 	}
 }

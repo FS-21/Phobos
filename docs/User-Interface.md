@@ -855,9 +855,9 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
   - `SellButton.Show` determines whether the sell button is displayed and clickable. Default to `true`.
   - `SellButton.Position` sets the X and Y coordinates of the sell button. This tag is nullable; if not declared, it uses the original side-specific coordinate (`84,166` for Allied, `85,165` for Soviet/Yuri). If `RepairButton.Position` was customized but `SellButton.Position` is left undeclared, the sell button automatically shifts to the right of the repair button using the button width determined by `Sidebar.GDIPositions` (+64 pixels for Allied, +52 pixels for Soviet). If declared under `[Sidebar]`, it applies globally to all sides.
   - `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`). Default to `true`.
-  - `DiplomacyButton.Position` sets the X and Y coordinates of the diplomacy button. Default to `86,5`.
+  - `DiplomacyButton.Position` sets the X and Y coordinates of the diplomacy button. This tag is nullable; if not declared, it uses the original coordinate (`14,5`).
   - `MenuButton.Show` determines whether the options/menu button is displayed and clickable. Default to `true`.
-  - `MenuButton.Position` sets the X and Y coordinates of the options/menu button. Default to `14,5`.
+  - `MenuButton.Position` sets the X and Y coordinates of the options/menu button. This tag is nullable; if not declared, it uses the original coordinate (`86,5`).
   - `TogglePowerButton.Enabled` restores and enables the Tiberian Sun power toggle button. Default to `false`.
   - `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. If left empty, defaults to `108,166` (Allied) or `109,165` (Soviet).
   - `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button. Default to `power.shp`. **Note:** `power.shp` is an asset from Tiberian Sun and does **not** exist in vanilla Yuri's Revenge MIX archives. You must provide `power.shp` in your mod files (or set this tag to an existing SHP) for the button to appear. The SHP supports 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled (when `RequiresBuildings=true` and player has no buildings).
@@ -870,7 +870,7 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
   - `PowerBar.Show` controls whether the power bar is displayed. Default to `true`.
   - `PowerBar.Position` sets the X and Y coordinates of the power bar. If left empty, defaults to `5,227` (Allied) or `0,227` (Soviet).
   - `PowerBar.Height` sets a fixed pixel height for the power bar (`-1` for dynamic scaling to the bottom of the screen). Default to `-1`.
-  - `PowerBar.Shape` specifies a custom SHP file for the power bar pips. Default to `powerp.shp`.
+  - `PowerBar.Shape` specifies a custom SHP file for the power bar pips. If omitted, uses the vanilla game shape.
   - `Tabs.Count` specifies the total number of sidebar tabs (1..16). When set to `1`, tab buttons are automatically hidden and the cameo strip is shifted up. Default to `4`.
   - `Tabs.Order` specifies the display order of the tabs as a comma-separated list of zero-based tab indices. Default to `0,1,2,3`.
   - `Cameos.Y` overrides the vertical start coordinate of the cameo strip. Default to `227`.
@@ -878,10 +878,10 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
   - `Cameos.MarginBottom` sets the pixel margin reserved at the bottom of the screen when calculating dynamic cameo rows. Default to `32`.
   - `ScrollUpButton.Show` controls whether the scroll up button is displayed and clickable. Default to `true`.
   - `ScrollUpButton.Position` sets custom X and Y coordinates for the scroll up button. If unspecified, it automatically anchors to the bottom of the screen (`ScreenHeight - Cameos.MarginBottom`).
-  - `ScrollUpButton.Shape` specifies a custom SHP file for the scroll up button. Default to `r-up.shp`.
+  - `ScrollUpButton.Shape` specifies a custom SHP file for the scroll up button. If omitted, uses vanilla `r-up.shp`.
   - `ScrollDownButton.Show` controls whether the scroll down button is displayed and clickable. Default to `true`.
   - `ScrollDownButton.Position` sets custom X and Y coordinates for the scroll down button. If unspecified, it automatically anchors to the bottom of the screen (`ScreenHeight - Cameos.MarginBottom`).
-  - `ScrollDownButton.Shape` specifies a custom SHP file for the scroll down button. Default to `r-dn.shp`.
+  - `ScrollDownButton.Shape` specifies a custom SHP file for the scroll down button. If omitted, uses vanilla `r-dn.shp`.
   - `TabIndex` assigns an object type or superweapon to a specific sidebar tab index.
 
 In `uimd.ini`:
@@ -892,9 +892,9 @@ RepairButton.Position=               ; integer, X,Y coordinates
 SellButton.Show=true                 ; boolean
 SellButton.Position=                 ; integer, X,Y coordinates
 DiplomacyButton.Show=true            ; boolean
-DiplomacyButton.Position=86,5        ; integer, X,Y coordinates
+DiplomacyButton.Position=            ; integer, X,Y coordinates (default: 14,5)
 MenuButton.Show=true                 ; boolean
-MenuButton.Position=14,5             ; integer, X,Y coordinates
+MenuButton.Position=                 ; integer, X,Y coordinates (default: 86,5)
 TogglePowerButton.Enabled=false      ; boolean
 TogglePowerButton.Position=          ; integer, X,Y coordinates
 TogglePowerButton.Shape=power.shp    ; filename - including the .shp extension

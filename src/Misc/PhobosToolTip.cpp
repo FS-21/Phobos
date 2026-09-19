@@ -7,6 +7,7 @@
 #include <Ext/Side/Body.h>
 #include <Ext/Surface/Body.h>
 #include <Ext/House/Body.h>
+#include <Ext/Sidebar/Body.h>
 #include <Ext/Sidebar/SWSidebar/SWSidebarClass.h>
 
 #include <sstream>
@@ -250,6 +251,39 @@ DEFINE_HOOK(0x4AE51E, DisplayClass_GetToolTip_HelpText, 0x6)
 		}
 		else if (swSidebar.CurrentColumn || (swSidebar.ToggleButton && swSidebar.ToggleButton->IsHovering))
 		{
+			R->EAX(0);
+			return ApplyToolTip;
+		}
+	}
+
+	if (SidebarExt::ActiveTogglePowerButton && SidebarExt::ActiveTogglePowerButton->IsHovering)
+	{
+		if (SidebarExt::ActiveTogglePowerButton->Config.Tooltip[0] != '\0')
+		{
+			const wchar_t* pText = StringTable::LoadString(SidebarExt::ActiveTogglePowerButton->Config.Tooltip.data());
+			if (pText && pText[0] != L'\0')
+			{
+				R->EAX(pText);
+				return ApplyToolTip;
+			}
+		}
+		R->EAX(0);
+		return ApplyToolTip;
+	}
+
+	for (auto pBtn : SidebarExt::ActiveCustomButtons)
+	{
+		if (pBtn && pBtn->IsHovering)
+		{
+			if (pBtn->Config.Tooltip[0] != '\0')
+			{
+				const wchar_t* pText = StringTable::LoadString(pBtn->Config.Tooltip.data());
+				if (pText && pText[0] != L'\0')
+				{
+					R->EAX(pText);
+					return ApplyToolTip;
+				}
+			}
 			R->EAX(0);
 			return ApplyToolTip;
 		}
