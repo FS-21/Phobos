@@ -278,7 +278,9 @@ DEFINE_HOOK(0x63FB5D, PowerClass_DrawIt, 0x6)
 	if ((config.PowerBar.Show.isset() && !config.PowerBar.Show.Get()) ||
 		(config.PowerBar.Height.isset() && config.PowerBar.Height.Get() == 0))
 	{
-		return 0x63FC8A;
+		R->EBX(*reinterpret_cast<DWORD*>(R->ESP()));
+		R->ESP(R->ESP() + 4);
+		return 0x63FDA5;
 	}
 
 	R->EAX(isNODSidebar);
