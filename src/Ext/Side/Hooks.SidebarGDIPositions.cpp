@@ -299,7 +299,7 @@ DEFINE_HOOK(0x6ABE45, SidebarClass_RepositionSellButton, 0x7)
 	return 0;
 }
 
-DEFINE_HOOK(0x6ABEAC, SidebarClass_RepositionButtons_ScrollButtons, 0x6)
+DEFINE_HOOK(0x6ABEAA, SidebarClass_RepositionButtons_ScrollButtons, 0x6)
 {
 	const auto config = SidebarExt::ActiveConfig();
 	bool customUp = config.ScrollUpButton.Position.isset() || (config.ScrollUpButton.Show.isset() && !config.ScrollUpButton.Show.Get());
