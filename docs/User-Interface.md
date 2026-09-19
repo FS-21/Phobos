@@ -850,15 +850,15 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 
 - Now you can customize the layout, coordinates, visibility, and behavior of sidebar controls, restore the Tiberian Sun power toggle button, create custom buttons, and configure sidebar tabs.
 	- `RepairButton.Show` determines whether the repair button is displayed and clickable.
-	- `RepairButton.Position` sets the X and Y screen coordinates of the repair button.
+	- `RepairButton.Position` sets the X and Y coordinates of the repair button. If X < 168, it is automatically treated as relative to the sidebar (resolution-independent); otherwise, it is treated as absolute screen coordinates.
 	- `SellButton.Show` determines whether the sell button is displayed and clickable.
-	- `SellButton.Position` sets the X and Y screen coordinates of the sell button.
+	- `SellButton.Position` sets the X and Y coordinates of the sell button. If X < 168, it is automatically treated as relative to the sidebar; otherwise, it is treated as absolute screen coordinates.
 	- `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`).
 	- `DiplomacyButton.Position` sets the X and Y screen coordinates of the diplomacy button (also aliased as `RadarButton.Position`).
 	- `MenuButton.Show` determines whether the options/menu button is displayed and clickable.
 	- `MenuButton.Position` sets the X and Y screen coordinates of the options/menu button.
 	- `TogglePowerButton.Enabled` restores and enables the Tiberian Sun power toggle button.
-	- `TogglePowerButton.Position` sets the X and Y screen coordinates of the toggle power button.
+	- `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. If X < 168, it is automatically treated as relative to the sidebar (resolution-independent); otherwise, it is treated as absolute screen coordinates. If omitted, it automatically places itself into the first available top button slot (e.g. replacing Repair or Sell when hidden, or adjacent to Sell).
 	- `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button.
 	- `TogglePowerButton.RequiresBuildings` controls whether the toggle power button is disabled when the player has no buildings.
 	- `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip.
