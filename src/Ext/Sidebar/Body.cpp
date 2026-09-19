@@ -37,15 +37,20 @@ void SidebarExt::Remove(SidebarClass* pThis)
 
 void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const char* pPrefix)
 {
-	if (!pINI) return;
+	if (!pINI)
+		return;
+
 	INI_EX exINI(pINI);
 
 	char keyBuf[0x80];
-	auto makeKey = [&](const char* baseKey) -> const char* {
-		if (pPrefix && *pPrefix) {
+	auto makeKey = [&](const char* baseKey) -> const char*
+	{
+		if (pPrefix && *pPrefix)
+		{
 			sprintf_s(keyBuf, "%s%s", pPrefix, baseKey);
 			return keyBuf;
 		}
+
 		return baseKey;
 	};
 
@@ -111,16 +116,35 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 
 void SidebarButtonConfig::Merge(const SidebarButtonConfig& other)
 {
-	if (other.Show.isset()) this->Show = other.Show;
-	if (other.Action.isset()) this->Action = other.Action;
-	if (other.Position.isset()) this->Position = other.Position;
-	if (other.Size.isset()) this->Size = other.Size;
-	if (other.Shape[0] != '\0') this->Shape = other.Shape;
-	if (other.RequiresBuildings.isset()) this->RequiresBuildings = other.RequiresBuildings;
-	if (other.SuperWeaponIndex.isset()) this->SuperWeaponIndex = other.SuperWeaponIndex;
-	if (other.SuperWeapon[0] != '\0') this->SuperWeapon = other.SuperWeapon;
-	if (other.Tooltip[0] != '\0') this->Tooltip = other.Tooltip;
-	if (other.Command[0] != '\0') this->Command = other.Command;
+	if (other.Show.isset())
+		this->Show = other.Show;
+
+	if (other.Action.isset())
+		this->Action = other.Action;
+
+	if (other.Position.isset())
+		this->Position = other.Position;
+
+	if (other.Size.isset())
+		this->Size = other.Size;
+
+	if (other.Shape[0] != '\0')
+		this->Shape = other.Shape;
+
+	if (other.RequiresBuildings.isset())
+		this->RequiresBuildings = other.RequiresBuildings;
+
+	if (other.SuperWeaponIndex.isset())
+		this->SuperWeaponIndex = other.SuperWeaponIndex;
+
+	if (other.SuperWeapon[0] != '\0')
+		this->SuperWeapon = other.SuperWeapon;
+
+	if (other.Tooltip[0] != '\0')
+		this->Tooltip = other.Tooltip;
+
+	if (other.Command[0] != '\0')
+		this->Command = other.Command;
 }
 
 template <typename T>
@@ -146,7 +170,9 @@ void SidebarButtonConfig::Serialize(T& Stm)
 
 void TogglePowerButtonConfig::Read(CCINIClass* pINI, const char* pSection)
 {
-	if (!pINI) return;
+	if (!pINI)
+		return;
+
 	INI_EX exINI(pINI);
 
 	this->Enabled.Read(exINI, pSection, "TogglePowerButton.Enabled");
@@ -171,11 +197,20 @@ void TogglePowerButtonConfig::Read(CCINIClass* pINI, const char* pSection)
 
 void TogglePowerButtonConfig::Merge(const TogglePowerButtonConfig& other)
 {
-	if (other.Enabled.isset()) this->Enabled = other.Enabled;
-	if (other.Position.isset()) this->Position = other.Position;
-	if (other.Shape[0] != '\0') this->Shape = other.Shape;
-	if (other.RequiresBuildings.isset()) this->RequiresBuildings = other.RequiresBuildings;
-	if (other.Tooltip[0] != '\0') this->Tooltip = other.Tooltip;
+	if (other.Enabled.isset())
+		this->Enabled = other.Enabled;
+
+	if (other.Position.isset())
+		this->Position = other.Position;
+
+	if (other.Shape[0] != '\0')
+		this->Shape = other.Shape;
+
+	if (other.RequiresBuildings.isset())
+		this->RequiresBuildings = other.RequiresBuildings;
+
+	if (other.Tooltip[0] != '\0')
+		this->Tooltip = other.Tooltip;
 }
 
 template <typename T>
@@ -196,7 +231,9 @@ void TogglePowerButtonConfig::Serialize(T& Stm)
 
 void CreditsConfig::Read(CCINIClass* pINI, const char* pSection)
 {
-	if (!pINI) return;
+	if (!pINI)
+		return;
+
 	INI_EX exINI(pINI);
 
 	this->Position.Read(exINI, pSection, "Credits.Position");
@@ -218,9 +255,14 @@ void CreditsConfig::Read(CCINIClass* pINI, const char* pSection)
 
 void CreditsConfig::Merge(const CreditsConfig& other)
 {
-	if (other.Position.isset()) this->Position = other.Position;
-	if (other.Align.isset()) this->Align = other.Align;
-	if (other.Color.isset()) this->Color = other.Color;
+	if (other.Position.isset())
+		this->Position = other.Position;
+
+	if (other.Align.isset())
+		this->Align = other.Align;
+
+	if (other.Color.isset())
+		this->Color = other.Color;
 }
 
 template <typename T>
@@ -239,7 +281,9 @@ void CreditsConfig::Serialize(T& Stm)
 
 void PowerBarConfig::Read(CCINIClass* pINI, const char* pSection)
 {
-	if (!pINI) return;
+	if (!pINI)
+		return;
+
 	INI_EX exINI(pINI);
 
 	this->Show.Read(exINI, pSection, "PowerBar.Show");
@@ -262,10 +306,17 @@ void PowerBarConfig::Read(CCINIClass* pINI, const char* pSection)
 
 void PowerBarConfig::Merge(const PowerBarConfig& other)
 {
-	if (other.Show.isset()) this->Show = other.Show;
-	if (other.Position.isset()) this->Position = other.Position;
-	if (other.Height.isset()) this->Height = other.Height;
-	if (other.Shape[0] != '\0') this->Shape = other.Shape;
+	if (other.Show.isset())
+		this->Show = other.Show;
+
+	if (other.Position.isset())
+		this->Position = other.Position;
+
+	if (other.Height.isset())
+		this->Height = other.Height;
+
+	if (other.Shape[0] != '\0')
+		this->Shape = other.Shape;
 }
 
 template <typename T>
@@ -285,7 +336,9 @@ void PowerBarConfig::Serialize(T& Stm)
 
 void TabsConfig::Read(CCINIClass* pINI, const char* pSection)
 {
-	if (!pINI) return;
+	if (!pINI)
+		return;
+
 	INI_EX exINI(pINI);
 
 	this->Count.Read(exINI, pSection, "Tabs.Count");
@@ -308,12 +361,23 @@ void TabsConfig::Read(CCINIClass* pINI, const char* pSection)
 
 void TabsConfig::Merge(const TabsConfig& other)
 {
-	if (other.Count.isset()) this->Count = other.Count;
-	if (other.Rows.isset()) this->Rows = other.Rows;
-	if (other.Columns.isset()) this->Columns = other.Columns;
-	if (!other.Order.empty()) this->Order = other.Order;
-	if (!other.Positions.empty()) this->Positions = other.Positions;
-	if (!other.Shapes.empty()) this->Shapes = other.Shapes;
+	if (other.Count.isset())
+		this->Count = other.Count;
+
+	if (other.Rows.isset())
+		this->Rows = other.Rows;
+
+	if (other.Columns.isset())
+		this->Columns = other.Columns;
+
+	if (!other.Order.empty())
+		this->Order = other.Order;
+
+	if (!other.Positions.empty())
+		this->Positions = other.Positions;
+
+	if (!other.Shapes.empty())
+		this->Shapes = other.Shapes;
 }
 
 template <typename T>
@@ -335,7 +399,9 @@ void TabsConfig::Serialize(T& Stm)
 
 void CameosConfig::Read(CCINIClass* pINI, const char* pSection)
 {
-	if (!pINI) return;
+	if (!pINI)
+		return;
+
 	INI_EX exINI(pINI);
 	this->Y.Read(exINI, pSection, "Cameos.Y");
 	this->Height.Read(exINI, pSection, "Cameos.Height");
@@ -344,9 +410,14 @@ void CameosConfig::Read(CCINIClass* pINI, const char* pSection)
 
 void CameosConfig::Merge(const CameosConfig& other)
 {
-	if (other.Y.isset()) this->Y = other.Y;
-	if (other.Height.isset()) this->Height = other.Height;
-	if (other.MarginBottom.isset()) this->MarginBottom = other.MarginBottom;
+	if (other.Y.isset())
+		this->Y = other.Y;
+
+	if (other.Height.isset())
+		this->Height = other.Height;
+
+	if (other.MarginBottom.isset())
+		this->MarginBottom = other.MarginBottom;
 }
 
 template <typename T>
@@ -365,7 +436,9 @@ void CameosConfig::Serialize(T& Stm)
 
 void SidebarConfig::Read(CCINIClass* pINI, const char* pSection)
 {
-	if (!pINI) return;
+	if (!pINI)
+		return;
+
 	INI_EX exINI(pINI);
 
 	this->RepairButton.Read(pINI, pSection, "RepairButton.");
@@ -389,9 +462,13 @@ void SidebarConfig::Read(CCINIClass* pINI, const char* pSection)
 		char* token = strtok_s(customBtnBuf, ",", &context);
 		while (token)
 		{
-			while (*token == ' ' || *token == '\t') token++;
+			while (*token == ' ' || *token == '\t')
+				token++;
+
 			char* end = token + strlen(token) - 1;
-			while (end > token && (*end == ' ' || *end == '\t')) *end-- = '\0';
+
+			while (end > token && (*end == ' ' || *end == '\t'))
+				*end-- = '\0';
 
 			if (*token)
 			{
@@ -399,6 +476,7 @@ void SidebarConfig::Read(CCINIClass* pINI, const char* pSection)
 				btnCfg.Read(pINI, token, nullptr);
 				this->CustomButtons.emplace_back(FixedString<0x20>(token), btnCfg);
 			}
+
 			token = strtok_s(nullptr, ",", &context);
 		}
 	}
@@ -423,7 +501,8 @@ void SidebarConfig::Merge(const SidebarConfig& other)
 	for (const auto& btn : other.CustomButtons)
 	{
 		auto it = std::find_if(this->CustomButtons.begin(), this->CustomButtons.end(),
-			[&](const std::pair<FixedString<0x20>, SidebarButtonConfig>& item) {
+			[&](const std::pair<FixedString<0x20>, SidebarButtonConfig>& item)
+			{
 				return !_stricmp(item.first.data(), btn.first.data());
 			});
 		if (it != this->CustomButtons.end())
@@ -469,12 +548,16 @@ CustomSidebarButtonClass::CustomSidebarButtonClass(const SidebarButtonConfig& cf
 	{
 		if (this->Width <= 0)
 			this->Width = pShape->Width;
+
 		if (this->Height <= 0)
 			this->Height = pShape->Height;
 	}
 
-	if (this->Width <= 0) this->Width = 24;
-	if (this->Height <= 0) this->Height = 24;
+	if (this->Width <= 0)
+		this->Width = 24;
+
+	if (this->Height <= 0)
+		this->Height = 24;
 }
 
 CustomSidebarButtonClass::~CustomSidebarButtonClass()
@@ -493,6 +576,7 @@ SHPStruct* CustomSidebarButtonClass::GetShape()
 			Debug::Log("[Sidebar] Warning: Could not load button shape '%s'\n", this->Config.Shape.data());
 		}
 	}
+
 	return this->ShapeData;
 }
 
@@ -504,6 +588,7 @@ bool CustomSidebarButtonClass::IsDisabled() const
 		if (!pPlayer || pPlayer->Buildings.Count <= 0)
 			return true;
 	}
+
 	return false;
 }
 
@@ -540,6 +625,7 @@ bool CustomSidebarButtonClass::Draw(bool forced)
 	{
 		relX -= static_cast<int>(sidebarX);
 	}
+
 	Point2D drawPos = { relX, this->Y };
 	RectangleStruct bounds = pSurface->GetRect();
 
@@ -734,17 +820,19 @@ SidebarConfig SidebarExt::ActiveConfig()
 	return result;
 }
 
-void SidebarExt::LoadFromUIMD(CCINIClass& ini_uimd)
+void SidebarExt::LoadFromUIMD(CCINIClass& iniUIMD)
 {
-	if (ini_uimd.GetSection(SIDEBAR_SECTION))
+	if (iniUIMD.GetSection(SIDEBAR_SECTION))
 	{
-		GlobalConfig.Read(&ini_uimd, SIDEBAR_SECTION);
+		GlobalConfig.Read(&iniUIMD, SIDEBAR_SECTION);
 	}
 }
 
 void SidebarExt::LoadFromRules(CCINIClass* pINI)
 {
-	if (!pINI) return;
+	if (!pINI)
+		return;
+
 	if (pINI->GetSection("Sidebar"))
 	{
 		RulesConfig.Read(pINI, "Sidebar");
@@ -753,7 +841,9 @@ void SidebarExt::LoadFromRules(CCINIClass* pINI)
 
 void SidebarExt::LoadFromScenario(CCINIClass* pINI)
 {
-	if (!pINI) return;
+	if (!pINI)
+		return;
+
 	if (pINI->GetSection("Sidebar"))
 	{
 		ScenarioConfig.Read(pINI, "Sidebar");
@@ -813,6 +903,7 @@ void SidebarExt::InitIO()
 		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
 		SidebarClass::ToggleRepairButton.SetPosition(rPos.X, rPos.Y);
 	}
+
 	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
 	{
 		SidebarClass::ToggleRepairButton.SetPosition(-10000, -10000);
@@ -842,10 +933,12 @@ void SidebarExt::InitIO()
 				}
 			}
 		}
+
 		int sellX = SidebarClass::ToggleRepairButton.X + (isNOD ? 0x34 : 0x40);
 		int sellY = SidebarClass::ToggleRepairButton.Y;
 		pSellButton->SetPosition(sellX, sellY);
 	}
+
 	if (config.SellButton.Show.isset() && !config.SellButton.Show.Get())
 	{
 		pSellButton->SetPosition(-10000, -10000);
@@ -930,14 +1023,18 @@ void SidebarExt::InitIO()
 		Point2D uPos = ResolveCoord(config.ScrollUpButton.Position.Get(), sidebarX);
 		SidebarClass::ScrollUpButton.SetPosition(uPos.X, uPos.Y);
 	}
+
 	if (config.ScrollUpButton.Show.isset() && !config.ScrollUpButton.Show.Get())
 	{
 		SidebarClass::ScrollUpButton.SetPosition(-10000, -10000);
 		SidebarClass::ScrollUpButton.Disable();
 	}
+
 	auto SetShapeButtonSHP = [](ShapeButtonClass* pButton, SHPStruct* pSHP)
 	{
-		if (!pButton || !pSHP) return;
+		if (!pButton || !pSHP)
+			return;
+
 		reinterpret_cast<void (__thiscall*)(ShapeButtonClass*, SHPStruct*)>(0x69DE00)(pButton, pSHP);
 		reinterpret_cast<void (__thiscall*)(ShapeButtonClass*)>(0x69DEA0)(pButton);
 		pButton->Width = pSHP->Width;
@@ -958,11 +1055,13 @@ void SidebarExt::InitIO()
 		Point2D dPos = ResolveCoord(config.ScrollDownButton.Position.Get(), sidebarX);
 		SidebarClass::ScrollDownButton.SetPosition(dPos.X, dPos.Y);
 	}
+
 	if (config.ScrollDownButton.Show.isset() && !config.ScrollDownButton.Show.Get())
 	{
 		SidebarClass::ScrollDownButton.SetPosition(-10000, -10000);
 		SidebarClass::ScrollDownButton.Disable();
 	}
+
 	if (config.ScrollDownButton.Shape[0] != '\0')
 	{
 		if (auto pSHP = FileSystem::LoadSHPFile(config.ScrollDownButton.Shape.data()))
@@ -1085,6 +1184,7 @@ DEFINE_HOOK(0x6AC82F, SidebarClass_DTOR, 0x5)
 	GET(SidebarClass*, pItem, EBX);
 
 	SidebarExt::Remove(pItem);
+
 	return 0;
 }
 

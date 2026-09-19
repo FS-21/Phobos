@@ -72,6 +72,7 @@ DEFINE_HOOK(0x6A7590, SidebarClass_SetTab, 0x5)
 	{
 		R->Stack(0x4, config.Tabs.Order[tabIndex]);
 	}
+
 	return 0;
 }
 
@@ -352,13 +353,16 @@ DEFINE_HOOK(0x4A23C2, CreditClass_GraphicLogic_Coords1, 0xC)
 	const auto config = SidebarExt::ActiveConfig();
 	int posX = R->EDI();
 	int posY = 2;
+
 	if (config.Credits.Position.isset())
 	{
 		posX = config.Credits.Position.Get().X;
 		posY = config.Credits.Position.Get().Y;
 	}
+
 	R->Stack<int>(0x0C, posX);
 	R->Stack<int>(0x10, posY);
+
 	return 0x4A23CE;
 }
 
@@ -367,13 +371,16 @@ DEFINE_HOOK(0x4A254E, CreditClass_GraphicLogic_Coords2, 0x8)
 	const auto config = SidebarExt::ActiveConfig();
 	int posX = R->EDI();
 	int posY = R->ESI();
+
 	if (config.Credits.Position.isset())
 	{
 		posX = config.Credits.Position.Get().X;
 		posY = config.Credits.Position.Get().Y;
 	}
+
 	R->Stack<int>(0x0C, posX);
 	R->Stack<int>(0x10, posY);
+
 	return 0x4A2556;
 }
 
@@ -382,12 +389,19 @@ DEFINE_HOOK(0x4A25B8, CreditClass_GraphicLogic_Format, 0x6)
 	const auto config = SidebarExt::ActiveConfig();
 	DWORD printFlags = 0x4100;
 	TextAlign align = config.Credits.Align.Get(TextAlign::Center);
+
 	if (align == TextAlign::Left)
+	{
 		printFlags |= 0;
+	}
 	else if (align == TextAlign::Right)
+	{
 		printFlags |= 1;
+	}
 	else
+	{
 		printFlags |= 8;
+	}
 
 	R->Stack<DWORD>(0x4, printFlags);
 
@@ -402,6 +416,7 @@ DEFINE_HOOK(0x4A25B8, CreditClass_GraphicLogic_Format, 0x6)
 	}
 
 	R->EDX(R->ESP() + 0x18);
+
 	return 0x4A25BE;
 }
 
@@ -412,17 +427,19 @@ DEFINE_HOOK(0x4A25B8, CreditClass_GraphicLogic_Format, 0x6)
 DEFINE_HOOK(0x63FB72, PowerClass_DrawIt_Offsets, 0x11)
 {
 	const auto config = SidebarExt::ActiveConfig();
+
 	if (config.PowerBar.Position.isset())
 	{
 		R->EBX(config.PowerBar.Position.Get().X);
 	}
+
 	if (config.PowerBar.Height.isset() && config.PowerBar.Height.Get() > 0)
 	{
 		*reinterpret_cast<DWORD*>(0x00B0B504) = config.PowerBar.Height.Get();
 	}
 
-	auto pECX = *reinterpret_cast<DWORD*>(0x886F94);
-	R->ECX(pECX);
+	DWORD baseOffset = *reinterpret_cast<DWORD*>(0x886F94);
+	R->ECX(baseOffset);
 	R->Stack<DWORD>(0x10, R->EAX());
 	R->EAX(R->ESP() + 0x10);
 
@@ -432,7 +449,7 @@ DEFINE_HOOK(0x63FB72, PowerClass_DrawIt_Offsets, 0x11)
 	}
 	else
 	{
-		R->ESI(pECX + 0x45);
+		R->ESI(baseOffset + 0x45);
 	}
 
 	return 0x63FB83;
@@ -449,6 +466,7 @@ DEFINE_HOOK(0x63FBE2, PowerClass_DrawIt_Shape, 0x6)
 			return 0x63FBE8;
 		}
 	}
+
 	return 0;
 }
 

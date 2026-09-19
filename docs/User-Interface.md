@@ -850,36 +850,36 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 
 - Now you can customize the layout, coordinates, visibility, and behavior of sidebar controls, restore the Tiberian Sun power toggle button, create custom buttons, configure sidebar tabs, control cameo list height, and reposition scroll buttons.
   - All button and control positions are coordinates relative to the top-left corner of the sidebar panel (`0,0`).
-  - `RepairButton.Show` determines whether the repair button is displayed and clickable. Default to `true`.
+  - `RepairButton.Show` determines whether the repair button is displayed and clickable. Defaults to `true`.
   - `RepairButton.Position` sets the X and Y coordinates of the repair button. This tag is nullable; if not declared, it uses the original side-specific coordinate (`20,166` for Allied, `33,165` for Soviet/Yuri). When undeclared, this position is also subject to `Sidebar.GDIPositions`: if enabled, Soviet/Yuri uses the Allied position (`20,166`). If declared under `[Sidebar]`, it applies globally to all sides.
-  - `SellButton.Show` determines whether the sell button is displayed and clickable. Default to `true`.
+  - `SellButton.Show` determines whether the sell button is displayed and clickable. Defaults to `true`.
   - `SellButton.Position` sets the X and Y coordinates of the sell button. This tag is nullable; if not declared, it uses the original side-specific coordinate (`84,166` for Allied, `85,165` for Soviet/Yuri). If `RepairButton.Position` was customized but `SellButton.Position` is left undeclared, the sell button automatically shifts to the right of the repair button using the button width determined by `Sidebar.GDIPositions` (+64 pixels for Allied, +52 pixels for Soviet). If declared under `[Sidebar]`, it applies globally to all sides.
-  - `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`). Default to `true`.
+  - `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`). Defaults to `true`.
   - `DiplomacyButton.Position` sets the X and Y coordinates of the diplomacy button. This tag is nullable; if not declared, it uses the original coordinate (`14,5`).
-  - `MenuButton.Show` determines whether the options/menu button is displayed and clickable. Default to `true`.
+  - `MenuButton.Show` determines whether the options/menu button is displayed and clickable. Defaults to `true`.
   - `MenuButton.Position` sets the X and Y coordinates of the options/menu button. This tag is nullable; if not declared, it uses the original coordinate (`86,5`).
-  - `TogglePowerButton.Enabled` restores and enables the Tiberian Sun power toggle button. Default to `false`.
+  - `TogglePowerButton.Enabled` restores and enables the Tiberian Sun power toggle button. Defaults to `false`.
   - `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. If left empty, defaults to `108,166` (Allied) or `109,165` (Soviet).
-  - `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button. Default to `power.shp`. **Note:** `power.shp` is an asset from Tiberian Sun and does **not** exist in vanilla Yuri's Revenge MIX archives. You must provide `power.shp` in your mod files (or set this tag to an existing SHP) for the button to appear. The SHP supports 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled (when `RequiresBuildings=true` and player has no buildings).
-  - `TogglePowerButton.RequiresBuildings` controls whether the toggle power button is disabled when the player has no buildings. Default to `true`.
-  - `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip. Default to `GUI:TogglePower`.
+  - `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button. Defaults to `power.shp`. **Note:** `power.shp` is an asset from Tiberian Sun and does **not** exist in vanilla Yuri's Revenge MIX archives. You must provide `power.shp` in your mod files (or set this tag to an existing SHP) for the button to appear. The SHP supports 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled (when `RequiresBuildings=true` and player has no buildings).
+  - `TogglePowerButton.RequiresBuildings` controls whether the toggle power button is disabled when the player has no buildings. Defaults to `true`.
+  - `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip. Defaults to `GUI:TogglePower`.
   - `CustomButtons` lists the section names of custom sidebar buttons to create.
-  - `Credits.Position` sets the X and Y coordinates of the credits counter text. Default to `84,2`.
-  - `Credits.Align` sets the text alignment for the credits counter (`left`, `center`, or `right`). Default to `center`.
-  - `Credits.Color` sets the text color of the credits counter as an RGB value (`R,G,B`). Default to yellow/gold (`255,255,0`).
-  - `PowerBar.Show` controls whether the power bar is displayed. Default to `true`.
+  - `Credits.Position` sets the X and Y coordinates of the credits counter text. Defaults to `84,2`.
+  - `Credits.Align` sets the text alignment for the credits counter (`left`, `center`, or `right`). Defaults to `center`.
+  - `Credits.Color` sets the text color of the credits counter as an RGB value (`R,G,B`). Defaults to yellow/gold (`255,255,0`).
+  - `PowerBar.Show` controls whether the power bar is displayed. Defaults to `true`.
   - `PowerBar.Position` sets the X and Y coordinates of the power bar. If left empty, defaults to `5,227` (Allied) or `0,227` (Soviet).
-  - `PowerBar.Height` sets a fixed pixel height for the power bar (`-1` for dynamic scaling to the bottom of the screen). Default to `-1`.
+  - `PowerBar.Height` sets a fixed pixel height for the power bar (`-1` for dynamic scaling to the bottom of the screen). Defaults to `-1`.
   - `PowerBar.Shape` specifies a custom SHP file for the power bar pips. If omitted, uses the vanilla game shape.
-  - `Tabs.Count` specifies the total number of sidebar tabs (1..16). When set to `1`, tab buttons are automatically hidden and the cameo strip is shifted up. Default to `4`.
-  - `Tabs.Order` specifies the display order of the tabs as a comma-separated list of zero-based tab indices. Default to `0,1,2,3`.
-  - `Cameos.Y` overrides the vertical start coordinate of the cameo strip. Default to `227`.
-  - `Cameos.Height` sets a fixed pixel height for the cameo list (`-1` for dynamic scaling). Default to `-1`.
-  - `Cameos.MarginBottom` sets the pixel margin reserved at the bottom of the screen when calculating dynamic cameo rows. Default to `32`.
-  - `ScrollUpButton.Show` controls whether the scroll up button is displayed and clickable. Default to `true`.
+  - `Tabs.Count` specifies the total number of sidebar tabs (1..16). When set to `1`, tab buttons are automatically hidden and the cameo strip is shifted up. Defaults to `4`.
+  - `Tabs.Order` specifies the display order of the tabs as a comma-separated list of zero-based tab indices. Defaults to `0,1,2,3`.
+  - `Cameos.Y` overrides the vertical start coordinate of the cameo strip. Defaults to `227`.
+  - `Cameos.Height` sets a fixed pixel height for the cameo list (`-1` for dynamic scaling). Defaults to `-1`.
+  - `Cameos.MarginBottom` sets the pixel margin reserved at the bottom of the screen when calculating dynamic cameo rows. Defaults to `32`.
+  - `ScrollUpButton.Show` controls whether the scroll up button is displayed and clickable. Defaults to `true`.
   - `ScrollUpButton.Position` sets custom X and Y coordinates for the scroll up button. If unspecified, it automatically anchors to the bottom of the screen (`ScreenHeight - Cameos.MarginBottom`).
   - `ScrollUpButton.Shape` specifies a custom SHP file for the scroll up button. If omitted, uses vanilla `r-up.shp`.
-  - `ScrollDownButton.Show` controls whether the scroll down button is displayed and clickable. Default to `true`.
+  - `ScrollDownButton.Show` controls whether the scroll down button is displayed and clickable. Defaults to `true`.
   - `ScrollDownButton.Position` sets custom X and Y coordinates for the scroll down button. If unspecified, it automatically anchors to the bottom of the screen (`ScreenHeight - Cameos.MarginBottom`).
   - `ScrollDownButton.Shape` specifies a custom SHP file for the scroll down button. If omitted, uses vanilla `r-dn.shp`.
   - `TabIndex` assigns an object type or superweapon to a specific sidebar tab index.
@@ -887,53 +887,53 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 In `uimd.ini`:
 ```ini
 [Sidebar]
-RepairButton.Show=true               ; boolean
-RepairButton.Position=               ; integer, X,Y coordinates
-SellButton.Show=true                 ; boolean
-SellButton.Position=                 ; integer, X,Y coordinates
-DiplomacyButton.Show=true            ; boolean
-DiplomacyButton.Position=            ; integer, X,Y coordinates (default: 14,5)
-MenuButton.Show=true                 ; boolean
-MenuButton.Position=                 ; integer, X,Y coordinates (default: 86,5)
-TogglePowerButton.Enabled=false      ; boolean
-TogglePowerButton.Position=          ; integer, X,Y coordinates
-TogglePowerButton.Shape=power.shp    ; filename - including the .shp extension
+RepairButton.Show=true                   ; boolean
+RepairButton.Position=                   ; integer, X,Y coordinates
+SellButton.Show=true                     ; boolean
+SellButton.Position=                     ; integer, X,Y coordinates
+DiplomacyButton.Show=true                ; boolean
+DiplomacyButton.Position=                ; integer, X,Y coordinates (default: 14,5)
+MenuButton.Show=true                     ; boolean
+MenuButton.Position=                     ; integer, X,Y coordinates (default: 86,5)
+TogglePowerButton.Enabled=false          ; boolean
+TogglePowerButton.Position=              ; integer, X,Y coordinates
+TogglePowerButton.Shape=power.shp        ; filename - including the .shp extension
 TogglePowerButton.RequiresBuildings=true ; boolean
 TogglePowerButton.Tooltip=GUI:TogglePower ; CSF entry key
-CustomButtons=                       ; list of section names
-Credits.Position=84,2                ; integer, X,Y coordinates
-Credits.Align=center                 ; left | center | right
-Credits.Color=                       ; integer - Red,Green,Blue
-PowerBar.Show=true                   ; boolean
-PowerBar.Position=                   ; integer, X,Y coordinates
-PowerBar.Height=-1                   ; integer, -1 for dynamic or height in pixels
-PowerBar.Shape=powerp.shp            ; filename - including the .shp extension
-Tabs.Count=4                         ; integer (1..16)
-Tabs.Order=0,1,2,3                   ; list of integer tab indices
-Cameos.Y=227                         ; integer
-Cameos.Height=-1                     ; integer, -1 for dynamic or height in pixels
-Cameos.MarginBottom=32               ; integer, margin from screen bottom in pixels
-ScrollUpButton.Show=true             ; boolean
-ScrollUpButton.Position=             ; integer, X,Y coordinates (leave empty for automatic bottom anchor)
-ScrollUpButton.Shape=r-up.shp        ; filename - including the .shp extension
-ScrollDownButton.Show=true           ; boolean
-ScrollDownButton.Position=           ; integer, X,Y coordinates (leave empty for automatic bottom anchor)
-ScrollDownButton.Shape=r-dn.shp      ; filename - including the .shp extension
+CustomButtons=                           ; list of section names
+Credits.Position=84,2                    ; integer, X,Y coordinates
+Credits.Align=center                     ; left | center | right
+Credits.Color=                           ; integer - Red,Green,Blue
+PowerBar.Show=true                       ; boolean
+PowerBar.Position=                       ; integer, X,Y coordinates
+PowerBar.Height=-1                       ; integer, -1 for dynamic or height in pixels
+PowerBar.Shape=powerp.shp                ; filename - including the .shp extension
+Tabs.Count=4                             ; integer (1..16)
+Tabs.Order=0,1,2,3                       ; list of integer tab indices
+Cameos.Y=227                             ; integer
+Cameos.Height=-1                         ; integer, -1 for dynamic or height in pixels
+Cameos.MarginBottom=32                   ; integer, margin from screen bottom in pixels
+ScrollUpButton.Show=true                 ; boolean
+ScrollUpButton.Position=                 ; integer, X,Y coordinates (leave empty for automatic bottom anchor)
+ScrollUpButton.Shape=r-up.shp            ; filename - including the .shp extension
+ScrollDownButton.Show=true               ; boolean
+ScrollDownButton.Position=               ; integer, X,Y coordinates (leave empty for automatic bottom anchor)
+ScrollDownButton.Shape=r-dn.shp          ; filename - including the .shp extension
 
-[SOMECUSTOMBUTTON]                   ; Section listed in CustomButtons
-Show=true                            ; boolean
-Action=None                          ; None | Repair | Sell | TogglePower | SuperWeapon | Command | Custom
-Position=                            ; integer, X,Y coordinates
-Size=                                ; integer, Width,Height (optional, auto-detected from SHP)
-Shape=                               ; filename - including the .shp extension
-RequiresBuildings=false              ; boolean
-SuperWeapon=                         ; SuperWeaponType
-SuperWeaponIndex=                    ; integer, 0-based index
-Command=                             ; Command name
-Tooltip=                             ; CSF entry key
+[SOMECUSTOMBUTTON]                       ; Section listed in CustomButtons
+Show=true                                ; boolean
+Action=None                              ; None | Repair | Sell | TogglePower | SuperWeapon | Command | Custom
+Position=                                ; integer, X,Y coordinates
+Size=                                    ; integer, Width,Height (optional, auto-detected from SHP)
+Shape=                                   ; filename - including the .shp extension
+RequiresBuildings=false                  ; boolean
+SuperWeapon=                             ; SuperWeaponType
+SuperWeaponIndex=                        ; integer, 0-based index
+Command=                                 ; Command name
+Tooltip=                                 ; CSF entry key
 ```
 
-#### Default Sidebar SHP Files
+The table below lists the default SHP files used by sidebar elements:
 
 | UI Element | Default SHP File | How to Customize |
 |---|---|---|

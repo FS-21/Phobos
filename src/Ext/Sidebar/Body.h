@@ -228,7 +228,7 @@ public:
 
 	static SidebarConfig ActiveConfig();
 
-	static void LoadFromUIMD(CCINIClass& ini_uimd);
+	static void LoadFromUIMD(CCINIClass& iniUIMD);
 	static void LoadFromRules(CCINIClass* pINI);
 	static void LoadFromScenario(CCINIClass* pINI);
 
@@ -245,6 +245,7 @@ public:
 		{
 			pos.X += static_cast<int>(sidebarX);
 		}
+
 		return pos;
 	}
 

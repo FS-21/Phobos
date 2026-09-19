@@ -1,9 +1,9 @@
 #include "Body.h"
 #include <Ext/Sidebar/Body.h>
 
-namespace SidebarGDIPositionsTemp
+namespace
 {
-	bool isNODSidebar = false;
+	bool IsNODSidebar = false;
 
 	inline Point2D ResolveCoord(Point2D pos, DWORD sidebarX)
 	{
@@ -11,21 +11,19 @@ namespace SidebarGDIPositionsTemp
 	}
 }
 
-using namespace SidebarGDIPositionsTemp;
-
 DEFINE_HOOK(0x534FA7, Prep_For_Side, 0x5)
 {
 	GET(const int, sideIndex, ECX);
 	const auto pSide = SideClass::Array.GetItemOrDefault(sideIndex);
 	const auto pSideExt = SideExt::TryFetch(pSide);
-	isNODSidebar = pSideExt ? !pSideExt->Sidebar_GDIPositions : sideIndex;
+	IsNODSidebar = pSideExt ? !pSideExt->Sidebar_GDIPositions : sideIndex;
 
 	return 0;
 }
 
 DEFINE_HOOK(0x652EAB, RadarClass_InitForHouse, 0x6)
 {
-	R->EAX(isNODSidebar);
+	R->EAX(IsNODSidebar);
 	return 0x652EB7;
 }
 
@@ -42,6 +40,7 @@ DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_Buttons, 0x6)
 		*reinterpret_cast<DWORD*>(0x00B04A00) = dPos.X;
 		*reinterpret_cast<DWORD*>(0x00B04A04) = dPos.Y;
 	}
+
 	if (config.DiplomacyButton.Show.isset() && !config.DiplomacyButton.Show.Get())
 	{
 		*reinterpret_cast<DWORD*>(0x00B04A00) = static_cast<DWORD>(-10000);
@@ -54,6 +53,7 @@ DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_Buttons, 0x6)
 		*reinterpret_cast<DWORD*>(0x00B048C8) = mPos.X;
 		*reinterpret_cast<DWORD*>(0x00B048CC) = mPos.Y;
 	}
+
 	if (config.MenuButton.Show.isset() && !config.MenuButton.Show.Get())
 	{
 		*reinterpret_cast<DWORD*>(0x00B048C8) = static_cast<DWORD>(-10000);
@@ -65,11 +65,11 @@ DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_Buttons, 0x6)
 
 DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 {
-	DWORD repairY = isNODSidebar ? 165 : 166;
+	DWORD repairY = IsNODSidebar ? 165 : 166;
 	DWORD tabsY = 197;
 	DWORD cameosY = 227;
 
-	if (!isNODSidebar)
+	if (!IsNODSidebar)
 	{
 		*reinterpret_cast<DWORD*>(0x00B0B4E4) = 0x40; // Repair Width (64)
 		*reinterpret_cast<DWORD*>(0x00B0B4F0) = 0x1D; // Tab Width (29)
@@ -113,6 +113,7 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 		*reinterpret_cast<DWORD*>(0x00B0B4DC) = rPos.X;
 		*reinterpret_cast<DWORD*>(0x00B0B4E0) = rPos.Y;
 	}
+
 	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
 	{
 		*reinterpret_cast<DWORD*>(0x00B0B4DC) = static_cast<DWORD>(-10000);
@@ -120,7 +121,7 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 	}
 
 	// Baseline SellButton coordinates (independent of RepairButton state)
-	int baseSellX = sidebarX + (isNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
+	int baseSellX = sidebarX + (IsNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
 	int baseSellY = repairY;
 
 	int sellX = baseSellX;
@@ -134,7 +135,7 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
 	{
 		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
-		sellX = rPos.X + (isNODSidebar ? 0x34 : 0x40);
+		sellX = rPos.X + (IsNODSidebar ? 0x34 : 0x40);
 		sellY = rPos.Y;
 	}
 
@@ -143,6 +144,7 @@ DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
 		sellX = -10000;
 		sellY = -10000;
 	}
+
 	*reinterpret_cast<DWORD*>(0x00B07E04) = sellX;
 	*reinterpret_cast<DWORD*>(0x00B07E08) = sellY;
 
@@ -167,8 +169,8 @@ DEFINE_HOOK(0x6A51E9, SidebarClass_InitGUI, 0x6)
 		*reinterpret_cast<DWORD*>(0x00886F9C) -= extraMargin;
 	}
 
-	R->ESI(isNODSidebar);
-	R->EDX(isNODSidebar);
+	R->ESI(IsNODSidebar);
+	R->EDX(IsNODSidebar);
 	R->EAX(*reinterpret_cast<DWORD*>(0x00886F9C));
 
 	return 0x6A5205;
@@ -191,6 +193,7 @@ DEFINE_HOOK(0x6A532B, SidebarClass_InitGUI_AfterInitPositions, 0x5)
 		*reinterpret_cast<DWORD*>(0x00B0B4DC) = rPos.X;
 		*reinterpret_cast<DWORD*>(0x00B0B4E0) = rPos.Y;
 	}
+
 	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
 	{
 		*reinterpret_cast<DWORD*>(0x00B0B4DC) = static_cast<DWORD>(-10000);
@@ -205,8 +208,8 @@ DEFINE_HOOK(0x6A53BF, SidebarClass_InitGUI_SellButtonPos, 0x6)
 	const auto config = SidebarExt::ActiveConfig();
 
 	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
-	int baseSellX = sidebarX + (isNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
-	int baseSellY = isNODSidebar ? 165 : 166;
+	int baseSellX = sidebarX + (IsNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
+	int baseSellY = IsNODSidebar ? 165 : 166;
 
 	int posX = baseSellX;
 	int posY = baseSellY;
@@ -220,7 +223,7 @@ DEFINE_HOOK(0x6A53BF, SidebarClass_InitGUI_SellButtonPos, 0x6)
 	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
 	{
 		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
-		posX = rPos.X + (isNODSidebar ? 0x34 : 0x40);
+		posX = rPos.X + (IsNODSidebar ? 0x34 : 0x40);
 		posY = rPos.Y;
 	}
 
@@ -234,6 +237,7 @@ DEFINE_HOOK(0x6A53BF, SidebarClass_InitGUI_SellButtonPos, 0x6)
 	R->EDX(posY);
 	*reinterpret_cast<DWORD*>(0x00B07E04) = posX;
 	*reinterpret_cast<DWORD*>(0x00B07E08) = posY;
+
 	return 0x6A53C5;
 }
 
@@ -254,6 +258,7 @@ DEFINE_HOOK(0x6ABE03, SidebarClass_RepositionButtons, 0x5)
 		*reinterpret_cast<DWORD*>(0x00B0B4DC) = rPos.X;
 		*reinterpret_cast<DWORD*>(0x00B0B4E0) = rPos.Y;
 	}
+
 	if (config.RepairButton.Show.isset() && !config.RepairButton.Show.Get())
 	{
 		*reinterpret_cast<DWORD*>(0x00B0B4DC) = static_cast<DWORD>(-10000);
@@ -288,8 +293,8 @@ DEFINE_HOOK(0x6ABE45, SidebarClass_RepositionSellButton, 0x7)
 	const auto config = SidebarExt::ActiveConfig();
 
 	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
-	int baseSellX = sidebarX + (isNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
-	int baseSellY = isNODSidebar ? 165 : 166;
+	int baseSellX = sidebarX + (IsNODSidebar ? (0x21 + 0x34) : (0x14 + 0x40));
+	int baseSellY = IsNODSidebar ? 165 : 166;
 
 	int posX = baseSellX;
 	int posY = baseSellY;
@@ -303,7 +308,7 @@ DEFINE_HOOK(0x6ABE45, SidebarClass_RepositionSellButton, 0x7)
 	else if (config.RepairButton.Position.isset() && (!config.RepairButton.Show.isset() || config.RepairButton.Show.Get()))
 	{
 		Point2D rPos = ResolveCoord(config.RepairButton.Position.Get(), sidebarX);
-		posX = rPos.X + (isNODSidebar ? 0x34 : 0x40);
+		posX = rPos.X + (IsNODSidebar ? 0x34 : 0x40);
 		posY = rPos.Y;
 	}
 
@@ -317,6 +322,7 @@ DEFINE_HOOK(0x6ABE45, SidebarClass_RepositionSellButton, 0x7)
 	R->EAX(posY);
 	*reinterpret_cast<DWORD*>(0x00B07E04) = posX;
 	*reinterpret_cast<DWORD*>(0x00B07E08) = posY;
+
 	return 0;
 }
 
@@ -378,13 +384,13 @@ DEFINE_HOOK(0x63FB5D, PowerClass_DrawIt, 0x6)
 		return 0x63FDA5;
 	}
 
-	R->EAX(isNODSidebar);
+	R->EAX(IsNODSidebar);
 	return 0x63FB63;
 }
 
 // PowerBar Tooltip Positions
 DEFINE_HOOK(0x6403DF, PowerClass_InitGUI, 0x6)
 {
-	R->ESI(isNODSidebar);
+	R->ESI(IsNODSidebar);
 	return 0x6403E5;
 }
