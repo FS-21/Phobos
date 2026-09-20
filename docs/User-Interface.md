@@ -865,7 +865,25 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
   - `TogglePowerButton.AuxBuildings` specifies a list of building types (`BuildingTypeClass`). If specified, the toggle power button is disabled unless the player owns and has at least one of these structures alive on the map.
   - `TogglePowerButton.NegBuildings` specifies a list of building types (`BuildingTypeClass`). If specified, the toggle power button is disabled if the player owns any of these structures on the map.
   - `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip. Defaults to `GUI:TogglePower`.
-  - `CustomButtons` lists the section names of custom sidebar buttons to create. For buttons with `Action=SuperWeapon`, the button is automatically disabled (Frame 2) when the superweapon is not ready or not present. While targeting/aiming a superweapon on the map, the button automatically stays toggled down (Frame 1) and untoggles upon firing or cancelling (via right-click or clicking the button again). Superweapons that fire automatically/instantly (such as those with `Action=None` or `SW.UseAITargeting=yes`) fire immediately on click and never remain toggled. The `Toggle` tag allows manual toggle behavior for `Command` and `Custom` buttons, whereas built-in actions (`Repair`, `Sell`, `TogglePower`, `SuperWeapon`) automatically synchronize their toggle state with the active game mode. Buttons also support `AuxBuildings` and `NegBuildings` to condition their availability to specific structures.
+  - `CustomButtons` lists the section names of custom sidebar buttons to create. Each button section supports the following tags:
+    - `Action` specifies the behavior executed when the button is clicked. Accepted values:
+      - `None` *(default)*: Does not execute any built-in game action. Can be paired with `Toggle=true` as a generic toggle switch.
+      - `Repair`: Toggles building repair mode (`RepairMode`), identical to the vanilla wrench button.
+      - `Sell`: Toggles building sell mode (`SellMode`), identical to the vanilla dollar button.
+      - `TogglePower` *(or `Power`)*: Toggles building power management mode (`PowerToggleMode`).
+      - `SuperWeapon` *(or `Special`)*: Triggers the superweapon defined in `SuperWeapon=`. If it requires map targeting, the button enclaves/toggles while aiming and untoggles upon firing or cancelling. Automatically disabled (Frame 2) if not ready or not owned. If it fires automatically/instantly (`Action=None` or `SW.UseAITargeting=yes`), it fires immediately on click and never remains toggled.
+      - `Command`: Executes an internal interface command specified in `Command=` (from `CommandClass::Array`, e.g. `Options`, `ToggleSidebar`, etc.).
+      - `Custom`: Alias of `None` (generic placeholder without built-in logic).
+    - `Shape` specifies the SHP image file for the button. Supports up to 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled.
+    - `Size` optionally overrides the clickable width and height (`Width,Height`). If omitted (recommended), the button size is automatically detected from the dimensions of the SHP file specified in `Shape`, exactly like the existing sidebar controls.
+    - `Position` sets the X and Y coordinates relative to the sidebar (`0,0`).
+    - `RequiresBuildings` controls whether the button is disabled when the player has no buildings. Defaults to `false`.
+    - `AuxBuildings` (or `AuxBuilding`) specifies a list of building types. The button is disabled unless the player owns at least one of these structures on the map.
+    - `NegBuildings` (or `NegBuilding`) specifies a list of building types. The button is disabled if the player owns any of these structures on the map.
+    - `Toggle` enables manual toggle state for `Command`, `None`, and `Custom` buttons. For built-in actions (`Repair`, `Sell`, `TogglePower`, `SuperWeapon`), toggle state is automatically synchronized with the active game mode.
+    - `SuperWeapon` specifies the ID of the `SuperWeaponType` to activate when `Action=SuperWeapon`.
+    - `Command` specifies the command name to execute when `Action=Command`.
+    - `Tooltip` specifies the CSF label for the button tooltip.
   - `Credits.Position` sets the X and Y coordinates of the credits counter text. Defaults to `84,2`.
   - `Credits.Align` sets the text alignment for the credits counter (`left`, `center`, or `right`). Defaults to `center`.
   - `Credits.Color` sets the text color of the credits counter as an RGB value (`R,G,B`). Defaults to yellow/gold (`255,255,0`).
@@ -928,7 +946,7 @@ ScrollDownButton.Shape=r-dn.shp          ; filename - including the .shp extensi
 Show=true                                ; boolean
 Action=None                              ; None | Repair | Sell | TogglePower | SuperWeapon | Command | Custom
 Position=                                ; integer, X,Y coordinates
-Size=                                    ; integer, Width,Height (optional, auto-detected from SHP)
+Size=                                    ; integer, Width,Height (optional override; if omitted, uses SHP dimensions)
 Shape=                                   ; filename - including the .shp extension
 RequiresBuildings=false                  ; boolean
 AuxBuildings=                            ; list of BuildingTypes (enables button only if at least one is owned)
