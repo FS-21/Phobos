@@ -30,7 +30,6 @@ public:
 	PhobosFixedString<0x20> Shape;
 	Nullable<bool> RequiresBuildings;
 	Nullable<bool> Toggle;
-	Nullable<int> SuperWeaponIndex;
 	PhobosFixedString<0x20> SuperWeapon;
 	PhobosFixedString<0x40> Tooltip;
 	PhobosFixedString<0x40> Command;

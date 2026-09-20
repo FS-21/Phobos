@@ -116,7 +116,6 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 	}
 
 	this->SuperWeapon.Read(pINI, pSection, makeKey("SuperWeapon"));
-	this->SuperWeaponIndex.Read(exINI, pSection, makeKey("SuperWeaponIndex"));
 	this->Tooltip.Read(pINI, pSection, makeKey("Tooltip"));
 	this->Command.Read(pINI, pSection, makeKey("Command"));
 
@@ -152,9 +151,6 @@ void SidebarButtonConfig::Merge(const SidebarButtonConfig& other)
 	if (other.Toggle.isset())
 		this->Toggle = other.Toggle;
 
-	if (other.SuperWeaponIndex.isset())
-		this->SuperWeaponIndex = other.SuperWeaponIndex;
-
 	if (other.SuperWeapon[0] != '\0')
 		this->SuperWeapon = other.SuperWeapon;
 
@@ -182,7 +178,6 @@ void SidebarButtonConfig::Serialize(T& Stm)
 		.Process(this->Shape)
 		.Process(this->RequiresBuildings)
 		.Process(this->Toggle)
-		.Process(this->SuperWeaponIndex)
 		.Process(this->SuperWeapon)
 		.Process(this->Tooltip)
 		.Process(this->Command)
@@ -628,10 +623,10 @@ SuperClass* CustomSidebarButtonClass::GetSuperWeapon() const
 	if (this->Config.Action.Get(CustomButtonType::None) != CustomButtonType::SuperWeapon)
 		return nullptr;
 
-	int swIdx = this->Config.SuperWeaponIndex.Get(-1);
-	if (swIdx < 0 && this->Config.SuperWeapon[0] != '\0')
-		swIdx = SuperWeaponTypeClass::FindIndex(this->Config.SuperWeapon.data());
+	if (this->Config.SuperWeapon[0] == '\0')
+		return nullptr;
 
+	const int swIdx = SuperWeaponTypeClass::FindIndex(this->Config.SuperWeapon.data());
 	const auto pCurrent = HouseClass::CurrentPlayer;
 	if (swIdx >= 0 && pCurrent && pCurrent->Supers.ValidIndex(swIdx))
 		return pCurrent->Supers[swIdx];

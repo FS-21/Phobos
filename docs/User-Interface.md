@@ -935,7 +935,6 @@ AuxBuildings=                            ; list of BuildingTypes (enables button
 NegBuildings=                            ; list of BuildingTypes (disables button if any is owned)
 Toggle=false                             ; boolean, enables toggle state for Custom/Command (for SuperWeapon, toggle state is automatically bound to targeting mode)
 SuperWeapon=                             ; SuperWeaponType
-SuperWeaponIndex=                        ; integer, 0-based index
 Command=                                 ; Command name
 Tooltip=                                 ; CSF entry key
 ```
