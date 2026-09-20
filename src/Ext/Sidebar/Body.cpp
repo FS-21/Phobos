@@ -95,8 +95,6 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 				this->Action = CustomButtonType::SuperWeapon;
 			else if (!_stricmp(actionBuf, "Command"))
 				this->Action = CustomButtonType::Command;
-			else if (!_stricmp(actionBuf, "Custom"))
-				this->Action = CustomButtonType::Custom;
 			else if (!_stricmp(actionBuf, "None"))
 				this->Action = CustomButtonType::None;
 		}
@@ -962,7 +960,6 @@ void CustomSidebarButtonClass::ExecuteAction()
 		break;
 	}
 
-	case CustomButtonType::Custom:
 	case CustomButtonType::None:
 	default:
 		if (this->Config.Toggle.Get(false))

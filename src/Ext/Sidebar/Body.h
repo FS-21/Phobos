@@ -16,8 +16,7 @@ enum class CustomButtonType : int
 	Sell = 2,
 	TogglePower = 3,
 	SuperWeapon = 4,
-	Command = 5,
-	Custom = 6
+	Command = 5
 };
 
 class SidebarButtonConfig

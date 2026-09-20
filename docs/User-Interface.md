@@ -873,13 +873,12 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
       - `TogglePower` *(or `Power`)*: Toggles building power management mode (`PowerToggleMode`).
       - `SuperWeapon` *(or `Special`)*: Triggers the superweapon defined in `SuperWeapon=`. If it requires map targeting, the button enclaves/toggles while aiming and untoggles upon firing or cancelling. Automatically disabled (Frame 2) if not ready or not owned. If it fires automatically/instantly (`Action=None` or `SW.UseAITargeting=yes`), it fires immediately on click and never remains toggled.
       - `Command`: Executes an internal interface command specified in `Command=` (from `CommandClass::Array`, e.g. `Options`, `ToggleSidebar`, etc.).
-      - `Custom`: Alias of `None` (generic placeholder without built-in logic).
     - `Shape` specifies the SHP image file for the button. Supports up to 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled.
     - `Position` sets the X and Y coordinates relative to the sidebar (`0,0`).
     - `RequiresBuildings` controls whether the button is disabled when the player has no buildings. Defaults to `false`.
     - `AuxBuildings` (or `AuxBuilding`) specifies a list of building types. The button is disabled unless the player owns at least one of these structures on the map.
     - `NegBuildings` (or `NegBuilding`) specifies a list of building types. The button is disabled if the player owns any of these structures on the map.
-    - `Toggle` enables manual toggle state for `Command`, `None`, and `Custom` buttons. For built-in actions (`Repair`, `Sell`, `TogglePower`, `SuperWeapon`), toggle state is automatically synchronized with the active game mode.
+    - `Toggle` enables manual toggle state for `Command` and `None` buttons. For built-in actions (`Repair`, `Sell`, `TogglePower`, `SuperWeapon`), toggle state is automatically synchronized with the active game mode.
     - `SuperWeapon` specifies the ID of the `SuperWeaponType` to activate when `Action=SuperWeapon`.
     - `Command` specifies the command name to execute when `Action=Command`.
     - `Tooltip` specifies the CSF label for the button tooltip.
@@ -943,13 +942,13 @@ ScrollDownButton.Shape=r-dn.shp          ; filename - including the .shp extensi
 
 [SOMECUSTOMBUTTON]                       ; Section listed in CustomButtons
 Show=true                                ; boolean
-Action=None                              ; None | Repair | Sell | TogglePower | SuperWeapon | Command | Custom
+Action=None                              ; None | Repair | Sell | TogglePower | SuperWeapon | Command
 Position=                                ; integer, X,Y coordinates
 Shape=                                   ; filename - including the .shp extension
 RequiresBuildings=false                  ; boolean
 AuxBuildings=                            ; list of BuildingTypes (enables button only if at least one is owned)
 NegBuildings=                            ; list of BuildingTypes (disables button if any is owned)
-Toggle=false                             ; boolean, enables toggle state for Custom/Command (for SuperWeapon, toggle state is automatically bound to targeting mode)
+Toggle=false                             ; boolean, enables toggle state for None/Command (for SuperWeapon, toggle state is automatically bound to targeting mode)
 SuperWeapon=                             ; SuperWeaponType
 Command=                                 ; Command name
 Tooltip=                                 ; CSF entry key
