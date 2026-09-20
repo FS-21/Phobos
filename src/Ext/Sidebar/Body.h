@@ -26,7 +26,6 @@ public:
 	Nullable<bool> Show;
 	Nullable<CustomButtonType> Action;
 	Nullable<Point2D> Position;
-	Nullable<Point2D> Size;
 	PhobosFixedString<0x20> Shape;
 	Nullable<bool> RequiresBuildings;
 	Nullable<bool> Toggle;

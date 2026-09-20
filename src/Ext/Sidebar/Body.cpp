@@ -75,19 +75,6 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 		}
 	}
 
-	this->Size.Read(exINI, pSection, makeKey("Size"));
-	if (!this->Size.isset())
-	{
-		Nullable<int> w;
-		Nullable<int> h;
-		w.Read(exINI, pSection, makeKey("Width"));
-		h.Read(exINI, pSection, makeKey("Height"));
-		if (w.isset() || h.isset())
-		{
-			this->Size = Point2D { w.Get(0), h.Get(0) };
-		}
-	}
-
 	this->Shape.Read(pINI, pSection, makeKey("Shape"));
 	this->RequiresBuildings.Read(exINI, pSection, makeKey("RequiresBuildings"));
 	this->Toggle.Read(exINI, pSection, makeKey("Toggle"));
@@ -139,9 +126,6 @@ void SidebarButtonConfig::Merge(const SidebarButtonConfig& other)
 	if (other.Position.isset())
 		this->Position = other.Position;
 
-	if (other.Size.isset())
-		this->Size = other.Size;
-
 	if (other.Shape[0] != '\0')
 		this->Shape = other.Shape;
 
@@ -174,7 +158,6 @@ void SidebarButtonConfig::Serialize(T& Stm)
 		.Process(this->Show)
 		.Process(this->Action)
 		.Process(this->Position)
-		.Process(this->Size)
 		.Process(this->Shape)
 		.Process(this->RequiresBuildings)
 		.Process(this->Toggle)
@@ -1230,8 +1213,7 @@ void SidebarExt::InitIO()
 			Point2D pos = btnCfg.Position.isset()
 				? ResolveCoord(btnCfg.Position.Get(), sidebarX)
 				: Point2D { 0, 0 };
-			Point2D sz = btnCfg.Size.Get(Point2D { 0, 0 });
-			auto pBtn = GameCreate<CustomSidebarButtonClass>(btnCfg, pos.X, pos.Y, sz.X, sz.Y);
+			auto pBtn = GameCreate<CustomSidebarButtonClass>(btnCfg, pos.X, pos.Y, 0, 0);
 			pBtn->Zap();
 			ActiveCustomButtons.push_back(pBtn);
 			GScreenClass::Instance.AddButton(pBtn);

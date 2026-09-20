@@ -875,7 +875,6 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
       - `Command`: Executes an internal interface command specified in `Command=` (from `CommandClass::Array`, e.g. `Options`, `ToggleSidebar`, etc.).
       - `Custom`: Alias of `None` (generic placeholder without built-in logic).
     - `Shape` specifies the SHP image file for the button. Supports up to 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled.
-    - `Size` optionally overrides the clickable width and height (`Width,Height`). If omitted (recommended), the button size is automatically detected from the dimensions of the SHP file specified in `Shape`, exactly like the existing sidebar controls.
     - `Position` sets the X and Y coordinates relative to the sidebar (`0,0`).
     - `RequiresBuildings` controls whether the button is disabled when the player has no buildings. Defaults to `false`.
     - `AuxBuildings` (or `AuxBuilding`) specifies a list of building types. The button is disabled unless the player owns at least one of these structures on the map.
@@ -946,7 +945,6 @@ ScrollDownButton.Shape=r-dn.shp          ; filename - including the .shp extensi
 Show=true                                ; boolean
 Action=None                              ; None | Repair | Sell | TogglePower | SuperWeapon | Command | Custom
 Position=                                ; integer, X,Y coordinates
-Size=                                    ; integer, Width,Height (optional override; if omitted, uses SHP dimensions)
 Shape=                                   ; filename - including the .shp extension
 RequiresBuildings=false                  ; boolean
 AuxBuildings=                            ; list of BuildingTypes (enables button only if at least one is owned)
