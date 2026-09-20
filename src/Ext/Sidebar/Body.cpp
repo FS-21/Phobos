@@ -4,11 +4,17 @@
 #include <EventClass.h>
 #include <Drawing.h>
 #include <GeneralStructures.h>
+#include <SuperClass.h>
 #include <SuperWeaponTypeClass.h>
+#include <VoxClass.h>
 #include <CommandClass.h>
 #include <Ext/Side/Body.h>
 #include <Ext/SWType/Body.h>
+#include <Ext/BuildingType/Body.h>
+#include <Ext/House/Body.h>
 #include <Utilities/GeneralUtils.h>
+#include <Utilities/AresFunctions.h>
+#include <algorithm>
 
 std::unique_ptr<SidebarExt::ExtData> SidebarExt::Data = nullptr;
 SHPStruct* SidebarExt::TabProducingProgress[16];
@@ -113,6 +119,14 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 	this->SuperWeaponIndex.Read(exINI, pSection, makeKey("SuperWeaponIndex"));
 	this->Tooltip.Read(pINI, pSection, makeKey("Tooltip"));
 	this->Command.Read(pINI, pSection, makeKey("Command"));
+
+	this->AuxBuildings.Read(exINI, pSection, makeKey("AuxBuildings"));
+	if (this->AuxBuildings.empty())
+		this->AuxBuildings.Read(exINI, pSection, makeKey("AuxBuilding"));
+
+	this->NegBuildings.Read(exINI, pSection, makeKey("NegBuildings"));
+	if (this->NegBuildings.empty())
+		this->NegBuildings.Read(exINI, pSection, makeKey("NegBuilding"));
 }
 
 void SidebarButtonConfig::Merge(const SidebarButtonConfig& other)
@@ -149,6 +163,12 @@ void SidebarButtonConfig::Merge(const SidebarButtonConfig& other)
 
 	if (other.Command[0] != '\0')
 		this->Command = other.Command;
+
+	if (!other.AuxBuildings.empty())
+		this->AuxBuildings = other.AuxBuildings;
+
+	if (!other.NegBuildings.empty())
+		this->NegBuildings = other.NegBuildings;
 }
 
 template <typename T>
@@ -166,6 +186,8 @@ void SidebarButtonConfig::Serialize(T& Stm)
 		.Process(this->SuperWeapon)
 		.Process(this->Tooltip)
 		.Process(this->Command)
+		.Process(this->AuxBuildings)
+		.Process(this->NegBuildings)
 		;
 }
 
@@ -198,6 +220,14 @@ void TogglePowerButtonConfig::Read(CCINIClass* pINI, const char* pSection)
 	this->Shape.Read(pINI, pSection, "TogglePowerButton.Shape", this->Shape.data());
 	this->RequiresBuildings.Read(exINI, pSection, "TogglePowerButton.RequiresBuildings");
 	this->Tooltip.Read(pINI, pSection, "TogglePowerButton.Tooltip", this->Tooltip.data());
+
+	this->AuxBuildings.Read(exINI, pSection, "TogglePowerButton.AuxBuildings");
+	if (this->AuxBuildings.empty())
+		this->AuxBuildings.Read(exINI, pSection, "TogglePowerButton.AuxBuilding");
+
+	this->NegBuildings.Read(exINI, pSection, "TogglePowerButton.NegBuildings");
+	if (this->NegBuildings.empty())
+		this->NegBuildings.Read(exINI, pSection, "TogglePowerButton.NegBuilding");
 }
 
 void TogglePowerButtonConfig::Merge(const TogglePowerButtonConfig& other)
@@ -216,6 +246,12 @@ void TogglePowerButtonConfig::Merge(const TogglePowerButtonConfig& other)
 
 	if (other.Tooltip[0] != '\0')
 		this->Tooltip = other.Tooltip;
+
+	if (!other.AuxBuildings.empty())
+		this->AuxBuildings = other.AuxBuildings;
+
+	if (!other.NegBuildings.empty())
+		this->NegBuildings = other.NegBuildings;
 }
 
 template <typename T>
@@ -227,6 +263,8 @@ void TogglePowerButtonConfig::Serialize(T& Stm)
 		.Process(this->Shape)
 		.Process(this->RequiresBuildings)
 		.Process(this->Tooltip)
+		.Process(this->AuxBuildings)
+		.Process(this->NegBuildings)
 		;
 }
 
@@ -585,12 +623,57 @@ SHPStruct* CustomSidebarButtonClass::GetShape()
 	return this->ShapeData;
 }
 
+SuperClass* CustomSidebarButtonClass::GetSuperWeapon() const
+{
+	if (this->Config.Action.Get(CustomButtonType::None) != CustomButtonType::SuperWeapon)
+		return nullptr;
+
+	int swIdx = this->Config.SuperWeaponIndex.Get(-1);
+	if (swIdx < 0 && this->Config.SuperWeapon[0] != '\0')
+		swIdx = SuperWeaponTypeClass::FindIndex(this->Config.SuperWeapon.data());
+
+	const auto pCurrent = HouseClass::CurrentPlayer;
+	if (swIdx >= 0 && pCurrent && pCurrent->Supers.ValidIndex(swIdx))
+		return pCurrent->Supers[swIdx];
+
+	return nullptr;
+}
+
 bool CustomSidebarButtonClass::IsDisabled() const
 {
-	if (this->Config.RequiresBuildings.Get(false))
+	const auto pPlayer = HouseClass::CurrentPlayer;
+	if (!pPlayer)
+		return true;
+
+	if (this->Config.RequiresBuildings.Get(false) && pPlayer->Buildings.Count <= 0)
+		return true;
+
+	auto isBuildingPresent = [pPlayer](BuildingTypeClass* pType) -> bool
 	{
-		const auto pPlayer = HouseClass::CurrentPlayer;
-		if (!pPlayer || pPlayer->Buildings.Count <= 0)
+		if (!pType)
+			return false;
+
+		const auto pBuildingExt = BuildingTypeExt::Fetch(pType);
+		if (pBuildingExt && !pBuildingExt->PowersUp_Buildings.empty())
+			return BuildingTypeExt::GetUpgradesAmount(pType, pPlayer) > 0;
+
+		return HouseExt::Fetch(pPlayer)->CountOwnedPresentAndLimboed(pType) > 0;
+	};
+
+	if (!this->Config.AuxBuildings.empty() && std::ranges::none_of(this->Config.AuxBuildings, isBuildingPresent))
+		return true;
+
+	if (!this->Config.NegBuildings.empty() && std::ranges::any_of(this->Config.NegBuildings, isBuildingPresent))
+		return true;
+
+	if (this->Config.Action.Get(CustomButtonType::None) == CustomButtonType::SuperWeapon)
+	{
+		const auto pSuper = this->GetSuperWeapon();
+		if (!pSuper || !pSuper->IsPresent || !pSuper->CanFire())
+			return true;
+
+		const auto pSWExt = SWTypeExt::Fetch(pSuper->Type);
+		if (pSWExt && !pSWExt->SW_ManualFire)
 			return true;
 	}
 
@@ -620,8 +703,48 @@ bool CustomSidebarButtonClass::Draw(bool forced)
 	{
 		this->IsToggled = DisplayClass::Instance.SellMode;
 	}
+	else if (actionType == CustomButtonType::SuperWeapon)
+	{
+		const auto pSuper = this->GetSuperWeapon();
+		if (pSuper && pSuper->Type && pSuper->Type->Action != Action::None)
+		{
+			const auto pSWExt = SWTypeExt::Fetch(pSuper->Type);
+			if (pSWExt && pSWExt->SW_UseAITargeting)
+				this->IsToggled = false;
+			else
+				this->IsToggled = (DisplayClass::Instance.CurrentSWTypeIndex == pSuper->Type->ArrayIndex);
+		}
+		else
+		{
+			this->IsToggled = false;
+		}
+	}
 
 	const bool disabled = this->IsDisabled();
+	if (disabled)
+	{
+		if (actionType == CustomButtonType::TogglePower && DisplayClass::Instance.PowerToggleMode)
+			DisplayClass::Instance.SetTogglePowerMode(0);
+
+		if (actionType == CustomButtonType::Repair && DisplayClass::Instance.RepairMode)
+			DisplayClass::Instance.SetRepairMode(0);
+
+		if (actionType == CustomButtonType::Sell && DisplayClass::Instance.SellMode)
+			DisplayClass::Instance.SetSellMode(0);
+
+		if (actionType == CustomButtonType::SuperWeapon)
+		{
+			const auto pSuper = this->GetSuperWeapon();
+			if (pSuper && pSuper->Type && DisplayClass::Instance.CurrentSWTypeIndex == pSuper->Type->ArrayIndex)
+			{
+				DisplayClass::Instance.CurrentSWTypeIndex = -1;
+				MouseClass::Instance.UpdateCursor(MouseCursorType::Default, false);
+			}
+		}
+
+		this->IsToggled = false;
+	}
+
 	int frame = 0;
 	if (disabled)
 		frame = (pShape->Frames > 2) ? 2 : 0;
@@ -703,6 +826,17 @@ bool CustomSidebarButtonClass::Action(GadgetFlag flags, DWORD* pKey, KeyModifier
 				SidebarClass::Instance.SidebarNeedsRedraw = true;
 			}
 		}
+		else if (actionType == CustomButtonType::SuperWeapon)
+		{
+			const auto pSuper = this->GetSuperWeapon();
+			if (pSuper && pSuper->Type && DisplayClass::Instance.CurrentSWTypeIndex == pSuper->Type->ArrayIndex)
+			{
+				DisplayClass::Instance.CurrentSWTypeIndex = -1;
+				MouseClass::Instance.UpdateCursor(MouseCursorType::Default, false);
+				this->IsToggled = false;
+				SidebarClass::Instance.SidebarNeedsRedraw = true;
+			}
+		}
 		else if (this->Config.Toggle.Get(false))
 		{
 			if (this->IsToggled)
@@ -762,35 +896,67 @@ void CustomSidebarButtonClass::ExecuteAction()
 
 	case CustomButtonType::SuperWeapon:
 	{
-		int swIdx = this->Config.SuperWeaponIndex.Get(-1);
-		if (swIdx < 0 && this->Config.SuperWeapon[0] != '\0')
+		const auto pCurrent = HouseClass::CurrentPlayer;
+		const auto pSuper = this->GetSuperWeapon();
+		if (pCurrent && pSuper && pSuper->IsPresent && pSuper->CanFire())
 		{
-			swIdx = SuperWeaponTypeClass::FindIndex(this->Config.SuperWeapon.data());
-		}
+			const auto pType = pSuper->Type;
+			const auto pSWExt = SWTypeExt::Fetch(pType);
+			const auto swIdx = pType->ArrayIndex;
 
-		if (swIdx >= 0 && HouseClass::CurrentPlayer && HouseClass::CurrentPlayer->Supers.ValidIndex(swIdx))
-		{
-			auto pSuper = HouseClass::CurrentPlayer->Supers[swIdx];
-			if (pSuper && pSuper->IsPresent && pSuper->IsReady)
+			if (pSWExt && !pSWExt->SW_ManualFire)
+				break;
+
+			if (pSWExt && !pCurrent->CanTransactMoney(pSWExt->Money_Amount))
 			{
-				auto pType = pSuper->Type;
-				if (pType->Action == Action::None)
+				VoxClass::PlayIndex(pSWExt->EVA_InsufficientFunds);
+				pSWExt->PrintMessage(pSWExt->Message_InsufficientFunds, pCurrent);
+				break;
+			}
+
+			if (pSWExt && pSWExt->SW_UseAITargeting && AresFunctions::IsTargetConstraintsEligible && !AresFunctions::IsTargetConstraintsEligible(AresFunctions::SWTypeExtMap_Find(pType), pCurrent, true))
+			{
+				pSWExt->PrintMessage(pSWExt->Message_CannotFire, pCurrent);
+				break;
+			}
+
+			if (pType->Action != Action::None && (!pSWExt || !pSWExt->SW_UseAITargeting))
+			{
+				if (DisplayClass::Instance.CurrentSWTypeIndex == swIdx)
 				{
-					EventClass::OutList.Add(EventClass(HouseClass::CurrentPlayer->ArrayIndex, EventType::SpecialPlace, swIdx, CellStruct { 0, 0 }));
+					DisplayClass::Instance.CurrentSWTypeIndex = -1;
+					MouseClass::Instance.UpdateCursor(MouseCursorType::Default, false);
+					this->IsToggled = false;
+					SidebarClass::Instance.SidebarNeedsRedraw = true;
+					break;
 				}
-				else
-				{
-					DisplayClass::Instance.SetActiveFoundation(nullptr);
-					DisplayClass::Instance.CurrentBuilding = nullptr;
-					DisplayClass::Instance.CurrentBuildingType = nullptr;
-					DisplayClass::Instance.CurrentBuildingOwnerArrayIndex = -1;
-					MapClass::Instance.SetRepairMode(0);
-					MapClass::Instance.SetSellMode(0);
-					DisplayClass::Instance.PowerToggleMode = false;
-					DisplayClass::Instance.PlanningMode = false;
-					DisplayClass::Instance.PlaceBeaconMode = false;
-					DisplayClass::Instance.CurrentSWTypeIndex = swIdx;
-				}
+			}
+
+			if (pType->Action == Action::None || (pSWExt && pSWExt->SW_UseAITargeting))
+			{
+				EventClass::OutList.Add(EventClass(pCurrent->ArrayIndex, EventType::SpecialPlace, swIdx, CellStruct::Empty));
+				this->IsToggled = false;
+				SidebarClass::Instance.SidebarNeedsRedraw = true;
+			}
+			else
+			{
+				DisplayClass::Instance.SetActiveFoundation(nullptr);
+				DisplayClass::Instance.CurrentBuilding = nullptr;
+				DisplayClass::Instance.CurrentBuildingType = nullptr;
+				DisplayClass::Instance.CurrentBuildingOwnerArrayIndex = -1;
+				MapClass::Instance.SetRepairMode(0);
+				MapClass::Instance.SetSellMode(0);
+				DisplayClass::Instance.PowerToggleMode = false;
+				DisplayClass::Instance.PlanningMode = false;
+				DisplayClass::Instance.PlaceBeaconMode = false;
+				DisplayClass::Instance.CurrentSWTypeIndex = swIdx;
+				MapClass::Instance.UnselectAll();
+
+				if (pSWExt)
+					VoxClass::PlayIndex(pSWExt->EVA_SelectTarget);
+
+				this->IsToggled = true;
+				SidebarClass::Instance.SidebarNeedsRedraw = true;
 			}
 		}
 		break;
@@ -1012,6 +1178,8 @@ void SidebarExt::InitIO()
 		tpCfg.Shape = config.TogglePowerButton.Shape;
 		tpCfg.RequiresBuildings = config.TogglePowerButton.RequiresBuildings;
 		tpCfg.Tooltip = config.TogglePowerButton.Tooltip;
+		tpCfg.AuxBuildings = config.TogglePowerButton.AuxBuildings;
+		tpCfg.NegBuildings = config.TogglePowerButton.NegBuildings;
 
 		Point2D pos { 0, 0 };
 		if (config.TogglePowerButton.Position.isset())

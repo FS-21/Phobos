@@ -862,8 +862,10 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
   - `TogglePowerButton.Position` sets the X and Y coordinates of the toggle power button. If left empty, defaults to `108,166` (Allied) or `109,165` (Soviet).
   - `TogglePowerButton.Shape` specifies the SHP image file for the toggle power button. Defaults to `power.shp`. **Note:** `power.shp` is an asset from Tiberian Sun and does **not** exist in vanilla Yuri's Revenge MIX archives. You must provide `power.shp` in your mod files (or set this tag to an existing SHP) for the button to appear. The SHP supports 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled (when `RequiresBuildings=true` and player has no buildings).
   - `TogglePowerButton.RequiresBuildings` controls whether the toggle power button is disabled when the player has no buildings. Defaults to `true`.
+  - `TogglePowerButton.AuxBuildings` specifies a list of building types (`BuildingTypeClass`). If specified, the toggle power button is disabled unless the player owns and has at least one of these structures alive on the map.
+  - `TogglePowerButton.NegBuildings` specifies a list of building types (`BuildingTypeClass`). If specified, the toggle power button is disabled if the player owns any of these structures on the map.
   - `TogglePowerButton.Tooltip` specifies the CSF label for the button tooltip. Defaults to `GUI:TogglePower`.
-  - `CustomButtons` lists the section names of custom sidebar buttons to create.
+  - `CustomButtons` lists the section names of custom sidebar buttons to create. For buttons with `Action=SuperWeapon`, the button is automatically disabled (Frame 2) when the superweapon is not ready or not present. While targeting/aiming a superweapon on the map, the button automatically stays toggled down (Frame 1) and untoggles upon firing or cancelling (via right-click or clicking the button again). Superweapons that fire automatically/instantly (such as those with `Action=None` or `SW.UseAITargeting=yes`) fire immediately on click and never remain toggled. The `Toggle` tag allows manual toggle behavior for `Command` and `Custom` buttons, whereas built-in actions (`Repair`, `Sell`, `TogglePower`, `SuperWeapon`) automatically synchronize their toggle state with the active game mode. Buttons also support `AuxBuildings` and `NegBuildings` to condition their availability to specific structures.
   - `Credits.Position` sets the X and Y coordinates of the credits counter text. Defaults to `84,2`.
   - `Credits.Align` sets the text alignment for the credits counter (`left`, `center`, or `right`). Defaults to `center`.
   - `Credits.Color` sets the text color of the credits counter as an RGB value (`R,G,B`). Defaults to yellow/gold (`255,255,0`).
@@ -899,6 +901,8 @@ TogglePowerButton.Enabled=false          ; boolean
 TogglePowerButton.Position=              ; integer, X,Y coordinates
 TogglePowerButton.Shape=power.shp        ; filename - including the .shp extension
 TogglePowerButton.RequiresBuildings=true ; boolean
+TogglePowerButton.AuxBuildings=          ; list of BuildingTypes (enables button only if at least one is owned)
+TogglePowerButton.NegBuildings=          ; list of BuildingTypes (disables button if any is owned)
 TogglePowerButton.Tooltip=GUI:TogglePower ; CSF entry key
 CustomButtons=                           ; list of section names
 Credits.Position=84,2                    ; integer, X,Y coordinates
@@ -927,7 +931,9 @@ Position=                                ; integer, X,Y coordinates
 Size=                                    ; integer, Width,Height (optional, auto-detected from SHP)
 Shape=                                   ; filename - including the .shp extension
 RequiresBuildings=false                  ; boolean
-Toggle=false                             ; boolean, enables toggle state (stays pressed until clicked again or right-clicked)
+AuxBuildings=                            ; list of BuildingTypes (enables button only if at least one is owned)
+NegBuildings=                            ; list of BuildingTypes (disables button if any is owned)
+Toggle=false                             ; boolean, enables toggle state for Custom/Command (for SuperWeapon, toggle state is automatically bound to targeting mode)
 SuperWeapon=                             ; SuperWeaponType
 SuperWeaponIndex=                        ; integer, 0-based index
 Command=                                 ; Command name

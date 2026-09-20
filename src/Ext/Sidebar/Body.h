@@ -7,6 +7,8 @@
 #include <Utilities/TemplateDef.h>
 #include <Utilities/Constructs.h>
 
+class BuildingTypeClass;
+
 enum class CustomButtonType : int
 {
 	None = 0,
@@ -32,6 +34,8 @@ public:
 	PhobosFixedString<0x20> SuperWeapon;
 	PhobosFixedString<0x40> Tooltip;
 	PhobosFixedString<0x40> Command;
+	ValueableVector<BuildingTypeClass*> AuxBuildings;
+	ValueableVector<BuildingTypeClass*> NegBuildings;
 
 	SidebarButtonConfig() = default;
 
@@ -50,6 +54,8 @@ public:
 	PhobosFixedString<0x20> Shape;
 	Nullable<bool> RequiresBuildings;
 	PhobosFixedString<0x40> Tooltip;
+	ValueableVector<BuildingTypeClass*> AuxBuildings;
+	ValueableVector<BuildingTypeClass*> NegBuildings;
 
 	TogglePowerButtonConfig() = default;
 
@@ -174,6 +180,7 @@ public:
 	bool IsDisabled() const;
 	void ExecuteAction();
 	SHPStruct* GetShape();
+	SuperClass* GetSuperWeapon() const;
 };
 
 class SidebarExt
