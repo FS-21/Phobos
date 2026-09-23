@@ -30,11 +30,14 @@ This page describes all the engine features that are either new and introduced b
     - `mission`: Discard when the current mission of the object the effect is attached to matches any one in the `DiscardOn.Missions` list (or `DiscardOn.AIMissions` for AI-controlled objects, if set).
     - `landtype`: Discard when the land type of the cell where the object the effect is attached to is currently located matches any land type in the `DiscardOn.LandTypes` list.
     - `sequence`: Discard when the infantry to which the effect is attached is playing a sequence that matches any one in the `DiscardOn.Sequences` list.
+    - `ownerchange`: Discard when an owner change of the object the effect is attached to happens. `DiscardOn.OwnerChange.IgnoreRevertOnExit` defines whether to ignore the case where `Passengers.SyncOwner.RevertOnExit=true` causes ownership change. `DiscardOn.OwnerChange.HumanToComputer/ComputerToHuman` defines whether the discard will happen if the object's ownership has been changed from human to computer or from computer to human.
   - `DiscardOn.Sequences.Immediate` defines whether the `sequence` discard condition triggers immediately while the infantry is playing a matching sequence, or only when the infantry starts playing its next sequence after finishing that sequence.
   - `DiscardOn.MoveBasedOnDestination` defines whether to determine the movement state according to the presence or absence of a destination. It treats Jumpjet units hovering in the air as movement, and units that have no destination but are turning as stationary.
     - If used for an AE that has `DiscardOn=harvesting`, in order for it to judge correctly, this should be set to `true`.
   - `DiscardOn.ConsiderHarvestingAsStationary` defines whether to treat `harvesting` as `stationary`. When this flag is set to `false`, `DiscardOn=harvesting` can be used and it will not be considered `stationary` while `harvesting`.
     - In other words, the original `DiscardOn=stationary` is equivalent to `DiscardOn=harvesting,stationary` when this flag is set to `false`.
+  - `AllowTransfer` controls whether or not the effect can be transferred if the TechnoType changes (such as `(Un)DeploysInto` or Ares type conversion). If not set, defaults to false if the effect was attached by the TechnoType itself, otherwise true.
+    - `AllowTransfer.Convert` can be used to set this separately for type conversion, defaults to value of `AllowTransfer`.
   - If `PenetratesIronCurtain` is not set to true, the effect is not applied on currently invulnerable objects.
     - `PenetratesForceShield` can be used to set this separately for Force Shielded objects, defaults to value of `PenetratesIronCurtain`.
   - `AffectTypes`, if set to a non-empty list, restricts the effect to only be applicable on the specific unit types listed. If this is not set or empty, no whitelist filtering occurs. This check has the highest priority.
@@ -88,11 +91,17 @@ This page describes all the engine features that are either new and introduced b
   - `AttachEffect.RecreationDelays` is used to determine if the effect can be recreated if it is removed completely (e.g `AttachEffect.RemoveTypes`), and if yes, how long this takes. Defaults to -1, meaning no recreation. Delay matching the position in `AttachTypes` is used for that type, or the last listed delay if not available.
     - Note that neither `InitialDelays` or `RecreationDelays` count down if the effect cannot currently be active due to `DiscardOn` condition.
 
-- AttachEffectTypes can be attached to objects via Warheads using `AttachEffect.AttachTypes`.
+- AttachEffectTypes can be attached to TechnoTypes of a specific Country when they're created using `AttachEffect.AttachTypes`.
+  - `AffectTypes`, `IgnoreTypes` and `AffectsTarget` of the attached effect can be used to define which TechnoType can these effects attached to.
+  - `AttachEffect.DurationOverrides`, `AttachEffect.Delays`, `AttachEffect.InitialDelays` and `AttachEffect.RecreationDelays` have the same functionalities like those tags on TechnoTypes.
+  - `AttachEffect.AttachOnOwnerChange` can be used to make the Country's AttachEffectTypes also attach to a TechnoType once it's changed to this house.
+
+- AttachEffectTypes can be attached to objects via Warheads or Weapons using `AttachEffect.AttachTypes`. When it is used on a Warhead, it will only be used when the warhead hits the target within the cellspread range. When it is used on a Weapon, it will directly act on the target at the instant after firing.
   - `AttachEffect.DurationOverrides` can be used to override the default durations. Duration matching the position in `AttachTypes` is used for that type, or the last listed duration if not available.
   - `AttachEffect.CumulativeSourceMaxCount` can be used to determine the maximum count of `Cumulative=true` effect from this source, or with no limit if `AttachEffect.CumulativeSourceMaxCount` is a negative number. Work independently from `Cumulative.MaxCount` of the effect. If the target already has `AttachEffect.CumulativeSourceMaxCount` number of the same effect from the same source applied on it, trying to attach another will refresh duration of the attached instance with shortest remaining duration.
   - `AttachEffect.CumulativeRefreshAll` if set to true makes it so that trying to attach `Cumulative=true` effect to a target that already has `Cumulative.MaxCount` amount of effects will refresh duration of all attached effects of the same type instead of only the one with shortest remaining duration. If `AttachEffect.CumulativeRefreshAll.OnAttach` is also set to true, this refresh applies even if the target does not have maximum allowed amount of effects of same type.
   - `AttachEffect.CumulativeRefreshSameSourceOnly` controls whether or not trying to apply `Cumulative=true` effect on target requires any existing effects of same type to come from same Warhead by same firer for them to be eligible for duration refresh.
+  - `AttachEffect.ReplaceLongerDuration` controls whether or not to refresh duration if there's already an attached instance (or the attached instance with shortest remaining duration if `Cumulative=true` and already reaches `Cumulative.MaxCount`) with longer remaining duration. Doesn't work when `AttachEffect.CumulativeRefreshAll=true`.
   - Attached Effects can be removed from objects by Warheads using `AttachEffect.RemoveTypes` or `AttachEffect.RemoveGroups`.
     - `AttachEffect.CumulativeRemoveMinCounts` sets minimum number of active instaces per `RemoveTypes`/`RemoveGroups` required for `Cumulative=true` types to be removed.
     - `AttachEffect.CumulativeRemoveMaxCounts` sets maximum number of active instaces per `RemoveTypes`/`RemoveGroups` for `Cumulative=true` that are removed at once by this Warhead.
@@ -113,6 +122,8 @@ DiscardOn.MoveBasedOnDestination=false             ; boolean
 DiscardOn.ConsiderHarvestingAsStationary=true      ; boolean
 OpenTopped.UseTransportRangeModifiers=false        ; boolean
 OpenTopped.CheckTransportDisableWeapons=false      ; boolean
+AttachEffect.ReplaceLongerDuration=false           ; boolean
+AttachEffect.AttachOnOwnerChange=false             ; boolean
 
 [AttachEffectTypes]
 0=SOMEATTACHEFFECT
@@ -124,7 +135,7 @@ Duration.ApplyArmorMultOnTarget=false              ; boolean
 Cumulative=false                                   ; boolean
 Cumulative.MaxCount=-1                             ; integer
 Powered=false                                      ; boolean
-DiscardOn=none                                     ; List of discard condition enumeration (none|entry|move|stationary|drain|inrange|outofrange|firing|receiveddamage|selling|undeploying|harvesting|invokerdie|ammo|health|mission|landtype|sequence)
+DiscardOn=none                                     ; List of discard condition enumeration (none|entry|move|stationary|drain|inrange|outofrange|firing|receiveddamage|selling|undeploying|harvesting|invokerdie|ammo|health|mission|landtype|sequence|ownerchange)
 DiscardOn.Ammo.MinimumAmount=-1                    ; integer
 DiscardOn.Ammo.MaximumAmount=-1                    ; integer
 DiscardOn.Health.BelowPercent=-1                   ; floating point value
@@ -140,6 +151,11 @@ DiscardOn.Sequences.Immediate=                     ; boolean, default to [Genera
 DiscardOn.RangeOverride=                           ; floating point value, distance in cells
 DiscardOn.MoveBasedOnDestination=                  ; boolean, default to [General] -> DiscardOn.MoveBasedOnDestination
 DiscardOn.ConsiderHarvestingAsStationary=          ; boolean, default to [General] -> DiscardOn.ConsiderHarvestingAsStationary
+DiscardOn.OwnerChange.HumanToComputer=true         ; boolean
+DiscardOn.OwnerChange.ComputerToHuman=true         ; boolean
+DiscardOn.OwnerChange.IgnoreRevertOnExit=false     ; boolean
+AllowTransfer=                                     ; boolean
+AllowTransfer.Convert=                             ; boolean
 PenetratesIronCurtain=false                        ; boolean
 PenetratesForceShield=                             ; boolean
 AffectTypes=                                       ; List of TechnoTypes
@@ -207,7 +223,24 @@ AttachEffect.RecreationDelays=                     ; integer - recreation delays
 OpenTopped.UseTransportRangeModifiers=             ; boolean, default to [General] -> OpenTopped.UseTransportRangeModifiers
 OpenTopped.CheckTransportDisableWeapons=           ; boolean, default to [General] -> OpenTopped.CheckTransportDisableWeapons
 
+[SOMECOUNTRY]                                      ; Country
+AttachEffect.AttachTypes=                          ; List of AttachEffectTypes
+AttachEffect.DurationOverrides=                    ; integer - duration overrides (comma-separated) for AttachTypes in order from first to last.
+AttachEffect.Delays=                               ; integer - delays (comma-separated) for AttachTypes in order from first to last.
+AttachEffect.InitialDelays=                        ; integer - initial delays (comma-separated) for AttachTypes in order from first to last.
+AttachEffect.RecreationDelays=                     ; integer - recreation delays (comma-separated) for AttachTypes in order from first to last.
+AttachEffect.AttachOnOwnerChange=                  ; boolean, default to [General] -> AttachEffect.AttachOnOwnerChange
+
 [SOMEWEAPON]                                       ; WeaponType
+AttachEffect.AttachTypes=                          ; List of AttachEffectTypes
+AttachEffect.CumulativeRefreshAll=false            ; boolean
+AttachEffect.CumulativeRefreshAll.OnAttach=false   ; boolean
+AttachEffect.CumulativeRefreshSameSourceOnly=true  ; boolean
+AttachEffect.RemoveTypes=                          ; List of AttachEffectTypes
+AttachEffect.RemoveGroups=                         ; comma-separated list of strings (group IDs)
+AttachEffect.CumulativeRemoveMinCounts=            ; integer - minimum required instance count (comma-separated) for cumulative types in order from first to last.
+AttachEffect.CumulativeRemoveMaxCounts=            ; integer - maximum removed instance count (comma-separated) for cumulative types in order from first to last.
+AttachEffect.DurationOverrides=                    ; integer - duration overrides (comma-separated) for AttachTypes in order from first to last.
 AttachEffect.RequiredTypes=                        ; List of AttachEffectTypes
 AttachEffect.DisallowedTypes=                      ; List of AttachEffectTypes
 AttachEffect.RequiredGroups=                       ; comma-separated list of strings (group IDs)
@@ -230,6 +263,7 @@ AttachEffect.RemoveGroups=                         ; comma-separated list of str
 AttachEffect.CumulativeRemoveMinCounts=            ; integer - minimum required instance count (comma-separated) for cumulative types in order from first to last.
 AttachEffect.CumulativeRemoveMaxCounts=            ; integer - maximum removed instance count (comma-separated) for cumulative types in order from first to last.
 AttachEffect.DurationOverrides=                    ; integer - duration overrides (comma-separated) for AttachTypes in order from first to last.
+AttachEffect.ReplaceLongerDuration=                ; boolean, default to [General] -> AttachEffect.ReplaceLongerDuration
 SuppressReflectDamage=false                        ; boolean
 SuppressReflectDamage.Types=                       ; List of AttachEffectTypes
 SuppressReflectDamage.Groups=                      ; comma-separated list of strings (group IDs)
@@ -419,6 +453,7 @@ PassPercent=0.0                             ; floating point value
 ReceivedDamage.Minimum=-2147483648          ; integer
 ReceivedDamage.Maximum=2147483647           ; integer
 AllowTransfer=                              ; boolean
+AllowTransfer.Convert=                      ; boolean
 ImmuneToBerserk=no                          ; boolean
 ImmuneToCrit=no                             ; boolean
 Tint.Color=                                 ; integer - Red,Green,Blue
@@ -508,6 +543,7 @@ Shield.InheritStateOnReplace=false          ; boolean
 - `PassPercent` controls the percentage of damage that will *not* be absorbed by the shield, and will be dealt to the unit directly even if the shield is active. Defaults to 0.0 - no penetration.
 - `ReceivedDamage.Minimum` & `ReceivedDamage.Maximum` control the minimum and maximum amount of damage that can be dealt to shield in a single hit. This is applied after armor type and `AbsorbPercent` adjustments. If `AbsorbOverDamage=false`, the residual damage dealt to the TechnoType is still based on the original damage before the clamping to the range.
 - `AllowTransfer` controls whether or not the shield can be transferred if the TechnoType changes (such as `(Un)DeploysInto` or Ares type conversion). If not set, defaults to true if shield was attached via `Shield.AttachTypes`, otherwise false.
+  - `AllowTransfer.Convert` can be used to set this separately for type conversion, defaults to value of `AllowTransfer`.
 - `ImmuneToBerserk` gives the immunity against `Psychedelic=yes` warhead. Otherwise the berserk effect penetrates shields by default. Note that this shouldn't prevent the unit from targeting at the shielded object. `Versus.shieldArmor=0%` is still required in this case.
 - A tint effect similar to that used by Iron Curtain / Force Shield or `Psychedelic=true` Warheads can be applied to TechnoTypes with shields by setting `Tint.Color` and/or `Tint Intensity`.
   - `Tint.Intensity` is additive lighting increase/decrease - 1.0 is the default object lighting.
@@ -531,9 +567,13 @@ Shield.InheritStateOnReplace=false          ; boolean
   - `Shield.PassPercent` overrides the `PassPercent` value set in the ShieldType that is being damaged.
   - `Shield.ReceivedDamage.Minimum` & `Shield.ReceivedDamage.Maximum` override the values set in in the ShieldType that is being damaged.
     - `Shield.ReceivedDamage.MinMultiplier` and `Shield.ReceivedDamage.MinMultiplier` are multipliers to the effective `Shield.ReceivedDamage.Minimum` and `Shield.ReceivedDamage.Maximum` respectively that are applied when the Warhead deals damage to a shield.
-  - `Shield.Respawn.Rate`, `Shield.Respawn.Amount`, `Shield.Respawn.Anim` and `Shield.Respawn.Weapon` override ShieldType `Respawn.Rate`, `Respawn.Amount`, `Respawn.Anim` and `Respawn.Weapon` for duration of `Shield.Respawn.Duration` amount of frames. Negative rate & zero or lower amount default to ShieldType values. If `Shield.Respawn.RestartTimer` is set, currently running shield respawn timer is reset, otherwise the timer's duration is adjusted in proportion to the new `Shield.Respawn.Rate` (e.g timer will be same percentage through before and after) without restarting the timer. If the effect expires while respawn timer is running, remaining time is adjusted to proportionally match ShieldType `Respawn.Rate`. Re-applying the effect resets the duration to `Shield.Respawn.Duration`
+  - `Shield.Respawn.Rate`, `Shield.Respawn.Amount`, `Shield.Respawn.Anim` and `Shield.Respawn.Weapon` override ShieldType `Respawn.Rate`, `Respawn.Amount`, `Respawn.Anim` and `Respawn.Weapon` for duration of `Shield.Respawn.Duration` amount of frames. Negative rate & zero or lower amount & empty values default to ShieldType values.
+    - If `Shield.Respawn.RestartTimer` is set, currently running shield respawn timer is reset, otherwise the timer's duration is adjusted in proportion to the new `Shield.Respawn.Rate` (e.g timer will be same percentage through before and after) without restarting the timer. If the effect expires while respawn timer is running, remaining time is adjusted to proportionally match ShieldType `Respawn.Rate`.
+    - Re-applying the effect resets the duration to `Shield.Respawn.Duration`. If another warhead with `Shield.Respawn.Duration` is applied on top of an existed one, all Respawn properties will be reset to this new warhead's values, or to the ShieldType's default values if it's negative rate & zero or lower amount & empty values.
     - Additionally `Shield.Respawn.RestartInCombat` & `Shield.Respawn.RestartInCombatDelay` can be used to override ShieldType settings.
-  - `Shield.SelfHealing.Rate` & `Shield.SelfHealing.Amount` override ShieldType `SelfHealing.Rate` and `SelfHealing.Amount` for duration of `Shield.SelfHealing.Duration` amount of frames. Negative rate & zero or lower amount default to ShieldType values. If `Shield.SelfHealing.RestartTimer` is set, currently running self-healing timer is restarted, otherwise timer's duration is adjusted in proportion to the new `Shield.SelfHealing.Rate` (e.g timer will be same percentage through before and after) without restarting the timer. If the effect expires while self-healing timer is running, remaining time is adjusted to proportionally match ShieldType `SelfHealing.Rate`. Re-applying the effect resets the duration to `Shield.SelfHealing.Duration`.
+  - `Shield.SelfHealing.Rate` & `Shield.SelfHealing.Amount` override ShieldType `SelfHealing.Rate` and `SelfHealing.Amount` for duration of `Shield.SelfHealing.Duration` amount of frames. Negative rate & zero or lower amount default to ShieldType values.
+    - If `Shield.SelfHealing.RestartTimer` is set, currently running self-healing timer is restarted, otherwise timer's duration is adjusted in proportion to the new `Shield.SelfHealing.Rate` (e.g timer will be same percentage through before and after) without restarting the timer. If the effect expires while self-healing timer is running, remaining time is adjusted to proportionally match ShieldType `SelfHealing.Rate`.
+    - Re-applying the effect resets the duration to `Shield.SelfHealing.Duration`. If another warhead with `Shield.SelfHealing.Duration` is applied on top of an existed one, all SelfHealing properties will be reset to this new warhead's values, or to the ShieldType's default values if it's negative rate & zero or lower amount.
     - Additionally `Shield.SelfHealing.RestartInCombat` & `Shield.SelfHealing.RestartInCombatDelay` can be used to override ShieldType settings.
   - `Shield.AffectTypes` allows listing which ShieldTypes can be affected by any of the effects listed above. If none are listed, all ShieldTypes are affected.
     - `Shield.AffectTypes` can be overriden for specific shield interactions by using keys `Shield.Penetrate.Types`, `Shield.Break.Types`, `Shield.Respawn.Types` and `Shield.SelfHealing.Types` respectively.
@@ -543,6 +583,17 @@ Shield.InheritStateOnReplace=false          ; boolean
     - If `Shield.RemoveAll` is set, all shield types are removed from the affected targets, even those that are not listed in `Shield.RemoveTypes`. If `Shield.ReplaceOnly` is set, first type listed in `Shield.AttachTypes` is used to replace any removed types not listed in `Shield.RemoveTypes`. Notice that the techno's own `ShieldType` will be permanantly removed by this.
     - `Shield.MinimumReplaceDelay` can be used to control how long after the shield has been broken (in game frames) can it be replaced. If not enough frames have passed, it won't be replaced.
     - If `Shield.InheritStateOnReplace` is set, shields replaced via `Shield.ReplaceOnly` inherit the current strength (relative to ShieldType `Strength`) of the previous shield and whether or not the shield was currently broken. Self-healing and respawn timers are always reset.
+
+```{note}
+When using `Convert` or `(Un)DeploysInto` to change TechnoType, shield interaction will be like the following:
+- If the previous TechnoType doesn't have a shield, while the new TechnoType has `ShieldType` defined, the new TechnoType's shield will be applied immediately.
+- If the previous TechnoType has a shield with `AllowTransfer=true`, it will be transferred to the new TechnoType whether it's broken or not, and whether the new TechnoType has `ShieldType` defined or not. If `AllowTransfer` for old shield type is set to false, it will be removed immediately, and changed to the new TechnoType's `ShieldType` if defined.
+- If the previous TechnoType has a shield that is broken and `AllowTransfer=false`, while the new TechnoType has `ShieldType` defined, the new shield will be created but still in broken status, which can be respawned if the new shield type has `Respawn` set or being affected by a warhead with Respawn modifiers.
+  - If the old shield type also has Respawn, the new shield's Respawn timer will be adjusted to the same percentage through before and after. Otherwise the timer will be reset to the new shield's `Respawn.Rate`. If the Respawn timer is applied via warhead, then it will continue to tick without value change.
+  - If the old shield type is during the delay of `Respawn.RestartInCombatDelay` when the change of TechnoType is happening, it will prevent the Respawn from happening until it's over.
+  - The shield's `SelfHealing` properties also follow an identical transfer rule of `Respawn` when the change of TechnoType is happening.
+- Whenever a shield is passed between TechnoTypes, its current strength will be adjusted to the same percentage through before and after, and most of the properties will be transferred. Notice that the timers for warhead modifiers and combat delay will not be reset to the same percentage; they keep their remaining time as‑is, for simplicity.
+```
 
 ## Aircraft
 
@@ -1838,41 +1889,45 @@ DrainMoneyDisplay.OnTarget.UseDisplayIncome=        ; boolean
 - You can now override global `OpenTopped` transport properties per TechnoType.
 - `OpenTopped.IgnoreRangefinding` can be used to disable `OpenTopped` transport rangefinding behaviour where smallest weapon range between transport and all passengers is used when approaching targets that are out of range and when scanning for potential targets.
 - `OpenTopped.AllowFiringIfDeactivated` can be used to customize whether or not passengers can fire out when the transport is deactivated (EMP, powered unit etc).
+- `OpenTopped.AllowFiringIfAttackedByLocomotor` can be used to customize whether or not passengers can fire out when the transport is being attacked by a weapon whose warhead has `IsLocomotor=true`.
 - `OpenTopped.ShareTransportTarget` controls whether or not the current target of the transport itself is passed to the passengers as well.
 - You can also customize range bonus and damage multiplier for passenger inside the transport with `OpenTransport.RangeBonus/DamageMultiplier`, which works independently from transport's `OpenTopped.RangeBonus/DamageMultiplier`.
 - `OpenTopped.DecloakToFire` can customize if a transport has to uncloak to have passengers fireout if transport is also OpenTopped.
 - `OpenTopped/OpenTransport.FireWhileMoving` can be used to customize whether or not passengers can fire out when the transport is moving, for transport and passenger respectively. Both of them and the weapon's `FireWhileMoving` toggle need to be set to true to allow firing out when moving.
+  - `OpenTopped.FireWhileMoving.BasedOnDestination` defines whether to determine the movement state according to the presence or absence of a destination. This is more similar to how vanilla `FireWhileMoving` work.
 
 In `rulesmd.ini`:
 ```ini
 [General]
-OpenTopped.IgnoreRangefinding=false               ; boolean
-OpenTopped.AllowFiringIfDeactivated=true          ; boolean
-OpenTopped.AllowFiringIfAttackedByLocomotor=true  ; boolean
-OpenTopped.ShareTransportTarget=true              ; boolean
-OpenTopped.DecloakToFire=true                     ; boolean
-OpenTopped.FireWhileMoving=true                   ; boolean
-OpenTransport.FireWhileMoving=true                ; boolean
+OpenTopped.IgnoreRangefinding=false                 ; boolean
+OpenTopped.AllowFiringIfDeactivated=true            ; boolean
+OpenTopped.AllowFiringIfAttackedByLocomotor=true    ; boolean
+OpenTopped.ShareTransportTarget=true                ; boolean
+OpenTopped.DecloakToFire=true                       ; boolean
+OpenTopped.FireWhileMoving=true                     ; boolean
+OpenTopped.FireWhileMoving.BasedOnDestination=false ; boolean
+OpenTransport.FireWhileMoving=true                  ; boolean
 
 [CombatDamage]
-OpenTransport.RangeBonus=0                        ; integer
-OpenTransport.DamageMultiplier=1.0                ; floating point value
+OpenTransport.RangeBonus=0                          ; integer
+OpenTransport.DamageMultiplier=1.0                  ; floating point value
 
-[SOMETECHNO]                                      ; TechnoType, transport with OpenTopped=yes
-OpenTopped.RangeBonus=                            ; integer, default to [CombatDamage] -> OpenToppedRangeBonus
-OpenTopped.DamageMultiplier=                      ; floating point value, default to [CombatDamage] -> OpenToppedDamageMultiplier
-OpenTopped.WarpDistance=                          ; integer, default to [CombatDamage] -> OpenToppedWarpDistance
-OpenTopped.IgnoreRangefinding=                    ; boolean, default to [General] -> OpenTopped.IgnoreRangefinding
-OpenTopped.AllowFiringIfDeactivated=              ; boolean, default to [General] -> OpenTopped.AllowFiringIfDeactivated
-OpenTopped.AllowFiringIfAttackedByLocomotor=      ; boolean, default to [General] -> OpenTopped.AllowFiringIfAttackedByLocomotor
-OpenTopped.ShareTransportTarget=                  ; boolean, default to [General] -> OpenTopped.ShareTransportTarget
-OpenTopped.DecloakToFire=                         ; boolean, default to [General] -> OpenTopped.DecloakToFire
-OpenTopped.FireWhileMoving=                       ; boolean, default to [General] -> OpenTopped.FireWhileMoving
+[SOMETECHNO]                                        ; TechnoType, transport with OpenTopped=yes
+OpenTopped.RangeBonus=                              ; integer, default to [CombatDamage] -> OpenToppedRangeBonus
+OpenTopped.DamageMultiplier=                        ; floating point value, default to [CombatDamage] -> OpenToppedDamageMultiplier
+OpenTopped.WarpDistance=                            ; integer, default to [CombatDamage] -> OpenToppedWarpDistance
+OpenTopped.IgnoreRangefinding=                      ; boolean, default to [General] -> OpenTopped.IgnoreRangefinding
+OpenTopped.AllowFiringIfDeactivated=                ; boolean, default to [General] -> OpenTopped.AllowFiringIfDeactivated
+OpenTopped.AllowFiringIfAttackedByLocomotor=        ; boolean, default to [General] -> OpenTopped.AllowFiringIfAttackedByLocomotor
+OpenTopped.ShareTransportTarget=                    ; boolean, default to [General] -> OpenTopped.ShareTransportTarget
+OpenTopped.DecloakToFire=                           ; boolean, default to [General] -> OpenTopped.DecloakToFire
+OpenTopped.FireWhileMoving=                         ; boolean, default to [General] -> OpenTopped.FireWhileMoving
+OpenTopped.FireWhileMoving.BasedOnDestination=      ; boolean, default to [General] -> OpenTopped.FireWhileMoving.BasedOnDestination
 
-[SOMETECHNO]                                      ; TechnoType, passenger
-OpenTransport.RangeBonus=                         ; integer, default to [CombatDamage] -> OpenTransport.RangeBonus
-OpenTransport.DamageMultiplier=                   ; floating point value, default to [CombatDamage] -> OpenTransport.DamageMultiplier
-OpenTransport.FireWhileMoving=                    ; boolean, default to [General] -> OpenTransport.FireWhileMoving
+[SOMETECHNO]                                        ; TechnoType, passenger
+OpenTransport.RangeBonus=                           ; integer, default to [CombatDamage] -> OpenTransport.RangeBonus
+OpenTransport.DamageMultiplier=                     ; floating point value, default to [CombatDamage] -> OpenTransport.DamageMultiplier
+OpenTransport.FireWhileMoving=                      ; boolean, default to [General] -> OpenTransport.FireWhileMoving
 ```
 
 ```{note}
@@ -1880,7 +1935,7 @@ Range of passive acquiring of passengers in an OpenTopped transport won't be aff
 ```
 
 ```{note}
-Due to technical issues, the behaviors of `OpenTopped/OpenTransport.FireWhileMoving` and `FireWhileMoving` for opentopped transport are somewhat different from `FireWhileMoving` for regular techno. This might be changed in the future.
+Due to technical issues, the behaviors of `OpenTopped/OpenTransport.FireWhileMoving` and `FireWhileMoving` for opentopped transport are somewhat different from `FireWhileMoving` for regular techno even if `OpenTopped.FireWhileMoving.BasedOnDestination` is set to true. This might be changed in the future.
 ```
 
 ### Customizable spawns queue
@@ -2477,25 +2532,6 @@ CombatAlert.EVA=EVA_UnitsInCombat      ; EVA entry
 CombatAlert.Suppress=                  ; boolean
 ```
 
-### Weapon range adjustment on promotion
-
-- Now you can add `RANGE` to `VeteranAbilities` and `EliteAbilities` to adjust the weapon range of this TechnoType.
-  - `ProjectileRange` of the weapon's projectile will also be affected if `Projectile.ApplyModifiers` set to true.
-
-```{hint}
-- Abilities from `VeteranAbilities` keep working at elite level, and `EliteAbilities` are added on top, matching how vanilla abilities accumulate.
-- `VeteranRange` will be applied to the range calculation. Values greater than `1.0` lengthen the range, values smaller than `1.0` shorten it, and `1.0` (the default) leaves it unchanged.
-```
-
-In `rulesmd.ini`:
-```ini
-[General]
-VeteranRange=1.0        ; floating point value, multiplier
-
-[SOMETECHNO]            ; TechnoType, with VeteranAbilities and/or EliteAbilities containing RANGE.
-VeteranRange=           ; floating point value, multiplier, default to [General] -> VeteranRange
-```
-
 ### Recount burst index
 
 - You can now make technos recount their current burst index when they have changed the firing weapon or have maintained for a period of time without any targets (take the larger value of last firing weapon's `ROF` and 30 frames).
@@ -2645,6 +2681,25 @@ TiberiumEater.Anims.Tiberium2=    ; List of AnimationTypes
 TiberiumEater.Anims.Tiberium3=    ; List of AnimationTypes
 TiberiumEater.AnimMove=true       ; boolean
 TiberiumEater.UnderEMP=false      ; boolean
+```
+
+### Weapon range adjustment on promotion
+
+- Now you can add `RANGE` to `VeteranAbilities` and `EliteAbilities` to adjust the weapon range of this TechnoType.
+  - `ProjectileRange` of the weapon's projectile will also be affected if `Projectile.ApplyModifiers` set to true.
+
+```{hint}
+- Abilities from `VeteranAbilities` keep working at elite level, and `EliteAbilities` are added on top, matching how vanilla abilities accumulate.
+- `VeteranRange` will be applied to the range calculation. Values greater than `1.0` lengthen the range, values smaller than `1.0` shorten it, and `1.0` (the default) leaves it unchanged.
+```
+
+In `rulesmd.ini`:
+```ini
+[General]
+VeteranRange=1.0        ; floating point value, multiplier
+
+[SOMETECHNO]            ; TechnoType, with VeteranAbilities and/or EliteAbilities containing RANGE.
+VeteranRange=           ; floating point value, multiplier, default to [General] -> VeteranRange
 ```
 
 ### Weapons fired on warping in / out
@@ -2950,7 +3005,7 @@ AffectsGround=true         ; boolean
 
 ```{hint}
 - Abilities from `VeteranAbilities` keep working at elite level, and `EliteAbilities` are added on top, matching how vanilla abilities accumulate.
-- `VeteranCritChance` will be applied to the range calculation. Values greater than `1.0` increase the chance, values smaller than `1.0` decrease it, and `1.0` (the default) leaves it unchanged.
+- `VeteranCritChance` will be applied to the chance calculation. Values greater than `1.0` increase the chance, values smaller than `1.0` decrease it, and `1.0` (the default) leaves it unchanged.
 ```
 
 In `rulesmd.ini`:
@@ -3118,6 +3173,33 @@ In `rulesmd.ini`:
 AffectsUnderground=false              ; boolean
 PlayAnimUnderground=true              ; boolean
 PlayAnimAboveSurface=false            ; boolean
+```
+
+### Detonate ivan bomb on impact
+
+![image](_static/images/IvanBombDetonate.gif)
+*Ivan detonated the bomb via deploy*
+
+- Now you can detonate planted Ivan bombs using custom werhead.
+  - `IvanBomb.Detonate.SameInvokerOnly` can be used to configure whether the warhead can detonate ivan bombs only if they come from the same invoker.
+  - `IvanBomb.Detonate.PenetratesTransport` can be used to configure whether the warhead can detonate ivan bombs on a unit that is inside a transport. The bomb will explode after the unit is unloaded.
+  - `IvanBomb.Detonate.PenetratesGarrison` can be used to configure whether the warhead can detonate ivan bombs on a unit that is inside a building. The bomb will explode after the unit leaves the building.
+  - `IvanBomb.Detonate.AffectsParasite` can be used to configure whether the warhead can detonate IvanBombs on a parasite. the bomb will explode after the parasite leave the victim.
+  - `IvanBomb.Detonate.AffectTypes` can be used to configure Ivan bombs from which TechnoType can be detonated by warhead, use empty for all types.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]                                ; WarheadType
+IvanBomb.Detonate=false                      ; boolean
+IvanBomb.Detonate.SameInvokerOnly=true       ; boolean
+IvanBomb.Detonate.PenetratesTransport=false  ; boolean
+IvanBomb.Detonate.PenetratesGarrison=false   ; boolean
+IvanBomb.Detonate.AffectsParasite=false      ; boolean
+IvanBomb.Detonate.AffectTypes=               ; List of TechnoTypes
+```
+
+```{note}
+`IvanBomb.Detonate.AffectTypes` doesn't work if the owner of the Ivan bomb is dead. This may change in future.
 ```
 
 ### Detonate Warhead on all objects on map
