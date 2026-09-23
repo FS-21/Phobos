@@ -633,7 +633,7 @@ bool CustomSidebarButtonClass::IsDisabled() const
 		if (pBuildingExt && !pBuildingExt->PowersUp_Buildings.empty())
 			return BuildingTypeExt::GetUpgradesAmount(pType, pPlayer) > 0;
 
-		return HouseExt::Fetch(pPlayer)->CountOwnedPresentAndLimboed(pType) > 0;
+		return HouseExt::Fetch(pPlayer)->HasOwnedPresentAndLimboed(pType);
 	};
 
 	if (!this->Config.AuxBuildings.empty() && std::ranges::none_of(this->Config.AuxBuildings, isBuildingPresent))
