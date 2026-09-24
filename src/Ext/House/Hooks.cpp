@@ -867,9 +867,9 @@ DEFINE_HOOK(0x4FE3E9, HouseClass_AI_Building_Intercept, 0x7)
 	/**
 	 *  If our custom AI logic is enabled, transfer control to it and return.
 	 */
-	if (RulesExt::Global()->AdvancedAI)
+	if (HouseExt::IsAdvancedAIActive(pHouse))
 	{
-		HouseExt::Vinifera_HouseClass_AI_Building(pHouse);
+		HouseExt::AdvAI_Building(pHouse);
 		return 0x4FE3F0;
 	}
 
@@ -879,7 +879,19 @@ DEFINE_HOOK(0x4FE3E9, HouseClass_AI_Building_Intercept, 0x7)
 DEFINE_HOOK(0x4FD50D, HouseClass_Expert_AI_Advanced_AI_Intercept, 0x8)
 {
 	GET(HouseClass*, pHouse, EBX);
-	HouseExt::AdvAI_HouseClass_Expert_AI(pHouse);
+
+	if (HouseExt::IsAdvancedAIActive(pHouse))
+		HouseExt::AdvAI_ExpertAI(pHouse);
 
 	return 0;
 }
+
+DEFINE_HOOK(0x50C210, HouseClass_GenerateBase_AdvancedAI, 0x5)
+{
+	if (RulesExt::Global()->AdvancedAI)
+		return 0x50C332;
+
+	return 0;
+}
+
+

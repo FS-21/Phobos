@@ -329,6 +329,7 @@ DEFINE_HOOK(0x440B4F, BuildingClass_Unlimbo_SetShouldRebuild, 0x5)
 		if (!HouseExt::Fetch(pThis->Owner)->RepairBaseNodes[GameOptionsClass::Instance.Difficulty].Get(RulesExt::Global()->RepairBaseNodes))
 			return SkipSetShouldRebuild;
 	}
+
 	// Vanilla instruction: always repairable in other game modes
 	return ContinueCheck;
 }
@@ -880,6 +881,7 @@ static bool __fastcall BuildingTypeClass_CanUseWaypoint(BuildingTypeClass* pThis
 {
 	return RulesExt::Global()->BuildingWaypoints;
 }
+
 DEFINE_FUNCTION_JUMP(VTABLE, 0x7E4610, BuildingTypeClass_CanUseWaypoint)
 
 DEFINE_HOOK(0x4AE95E, DisplayClass_sub_4AE750_DisallowBuildingNonAttackPlanning, 0x5)
@@ -1508,7 +1510,7 @@ void NAKED BuildingClass_Exit_Object_Seek_Building_Position_Epilogue()
 DEFINE_HOOK(0x444F39, BuildingClass_Exit_Object_Seek_Building_Position, 0x6)
 {
 	GET(BuildingClass*, base, EDI);
-	if (!RulesExt::Global()->AdvancedAI || base->Type->PowersUpBuilding[0] != '\0')
+	if (!HouseExt::IsAdvancedAIActive(base->Owner) || base->Type->PowersUpBuilding[0] != '\0')
 		return 0;
 
 	const int result = BuildingExt::Exit_Object_Custom_Position(base);

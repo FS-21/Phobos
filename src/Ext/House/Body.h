@@ -385,8 +385,9 @@ public:
 	static void AdvAI_Economy_Upkeep(HouseClass* pHouse);
 	static void AdvAI_Awaken_Sleeping_Harvesters(HouseClass* pHouse);
 	static void AdvAI_Sell_Extra_ConYards(HouseClass* pHouse);
-	static void Vinifera_HouseClass_AI_Building(HouseClass* pHouse);
-	static void AdvAI_HouseClass_Expert_AI(HouseClass* pHouse);
+	static bool IsAdvancedAIActive(HouseClass* pHouse);
+	static void AdvAI_Building(HouseClass* pHouse);
+	static void AdvAI_ExpertAI(HouseClass* pHouse);
 	static void AdvAI_Update_Primary_Factories(HouseClass* pHouse);
 	static void AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval, size_t optimalCount, CellStruct targetCell);
 	static void AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse);

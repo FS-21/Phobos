@@ -307,6 +307,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 		Debug::Log("[Developer warning] [AudioVisual] DisplayIncome.Delay is set 0 which would cause a crash, set to 1 instead.\n");
 		this->DisplayIncome_Delay = 1;
 	}
+
 	this->DisplayIncome_Houses.Read(exINI, GameStrings::AudioVisual, "DisplayIncome.Houses");
 	this->DisplayIncome_AllowAI.Read(exINI, GameStrings::AudioVisual, "DisplayIncome.AllowAI");
 
@@ -338,24 +339,9 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->VisualScatter_Max.Read(exINI, GameStrings::AudioVisual, "VisualScatter.Max");
 
 	this->AdvancedAI.Read(exINI, GameStrings::AI, "AdvancedAI");
-	if (exINI.ReadString(GameStrings::AI, "AdvancedAI") == 0)
-	{
-		this->AdvancedAI.Read(exINI, GameStrings::General, "IsUseAdvancedAI");
-	}
-
 	this->AdvancedAI_NavalMode.Read(exINI, GameStrings::AI, "AdvancedAI.NavalMode");
-
 	this->AdvancedAI_MultiConYard.Read(exINI, GameStrings::AI, "AdvancedAI.MultiConYard");
-	if (exINI.ReadString(GameStrings::AI, "AdvancedAI.MultiConYard") == 0)
-	{
-		this->AdvancedAI_MultiConYard.Read(exINI, GameStrings::General, "IsAdvancedAIMultiConYard");
-	}
-
 	this->AdvancedAI_MinimumRefineryCount.Read(exINI, GameStrings::AI, "AdvancedAI.MinimumRefineryCount");
-	if (exINI.ReadString(GameStrings::AI, "AdvancedAI.MinimumRefineryCount") == 0)
-	{
-		this->AdvancedAI_MinimumRefineryCount.Read(exINI, GameStrings::General, "AdvancedAIMinimumRefineryCount");
-	}
 
 	this->Buildings_DefaultDigitalDisplayTypes.Read(exINI, GameStrings::AudioVisual, "Buildings.DefaultDigitalDisplayTypes");
 	this->Infantry_DefaultDigitalDisplayTypes.Read(exINI, GameStrings::AudioVisual, "Infantry.DefaultDigitalDisplayTypes");
@@ -675,6 +661,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	{
 		Debug::Log("[Developer warning][%s] AttackMove.StopWhenTargetAcquired is deprecated and has been replaced by ApproachTarget.StopWhenInRange! If both are set, the latter will be used.\n", GameStrings::General);
 	}
+
 	this->ApproachTarget_StopWhenInRange.Read(exINI, GameStrings::General, "AttackMove.StopWhenTargetAcquired");
 	this->ApproachTarget_StopWhenInRange.Read(exINI, GameStrings::General, "ApproachTarget.StopWhenInRange");
 
@@ -1320,6 +1307,10 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->TeamDelays_Count)
 		.Process(this->BerzerkMission)
 		.Process(this->BunkerStateUpdateDelay)
+		.Process(this->AdvancedAI)
+		.Process(this->AdvancedAI_NavalMode)
+		.Process(this->AdvancedAI_MultiConYard)
+		.Process(this->AdvancedAI_MinimumRefineryCount)
 		.Process(this->AllowChatBoxInSinglePlayer)
 		.Process(this->NotHuman_RandomDeathSequence)
 		.Process(this->OnlyUseLandSequences)
@@ -1390,6 +1381,7 @@ void RulesExt::ExtData::ReplaceVoxelLightSources()
 		auto source = this->VoxelShadowLightSource.Get().Normalized();
 		Game::VoxelShadowLightSource = Matrix3D::VoxelDefaultMatrix * source;
 	}
+
 	*/
 
 	if (needCacheFlush)
