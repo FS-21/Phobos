@@ -92,6 +92,7 @@ public:
 	CellStruct CombatCrawlingTarget;
 	CellStruct ResourceCrawlingTarget;
 	int ConsecutiveCombatBuilds;
+	int ConsecutiveResourceBuilds;
 	bool ResourceShouldBuildRefinery;
 
 	struct BlockedExpansionPoint
@@ -173,6 +174,8 @@ public:
 	int FrontlineThreatActiveFrames;
 	int FrontlineThreatNeedsDefenses;
 	CellStruct FrontlineThreatBuildingCoords;
+	int LastParanoiaFrame;
+	std::vector<CellStruct> DefensivePlaceholders;
 
 	struct UnsafePlacementZone
 	{
@@ -255,6 +258,7 @@ public:
 		, CombatCrawlingTarget { 0, 0 }
 		, ResourceCrawlingTarget { 0, 0 }
 		, ConsecutiveCombatBuilds { 0 }
+		, ConsecutiveResourceBuilds { 0 }
 		, ResourceShouldBuildRefinery { false }
 		, PermanentlyBlockedExpansionPointLocations {}
 		, ShouldBuildRefinery { false }
@@ -285,6 +289,8 @@ public:
 		, FrontlineThreatActiveFrames { 0 }
 		, FrontlineThreatNeedsDefenses { 0 }
 		, FrontlineThreatBuildingCoords { 0, 0 }
+		, LastParanoiaFrame { 0 }
+		, DefensivePlaceholders {}
 		, UnsafePlacementZones {}
 		, UnclaimedTiberiumZones {}
 		, NextRefineryPlacementLocation { 0, 0 }
@@ -392,6 +398,7 @@ public:
 	static void AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval, size_t optimalCount, CellStruct targetCell);
 	static void AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse);
 	static void AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse);
+	static void AdvAI_Update_Defensive_Placeholders(HouseClass* pHouse);
 
 	static int FindGenericPrerequisite(const char* id);
 	static bool HasBuildingPrerequisite(HouseClass* const pHouse, int idxBuildingType);

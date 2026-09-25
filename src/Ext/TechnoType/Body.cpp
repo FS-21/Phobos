@@ -839,7 +839,9 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	if ((this->AutoDeath_PlayerMoney_Max != -1)
 		&& (this->AutoDeath_PlayerMoney_Min != -1)
 		&& (this->AutoDeath_PlayerMoney_Max < this->AutoDeath_PlayerMoney_Min))
+	{
 		Debug::Log("[Developer warning][%s] AutoDeath.PlayerMoney.Min is bigger than AutoDeath.PlayerMoney.Max, AutoDeath will never activate!\n", pSection);
+	}
 
 	this->SellSound.Read(exINI, pSection, "SellSound");
 	this->EVA_Sold.Read(exINI, pSection, "EVA.Sold");
@@ -1419,13 +1421,12 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	}
 
 	// Prerequisite.ListX with Generic Prerequisites support
-	this->Prerequisite_Lists.Read(exINI, pSection, "Prerequisite.Lists");
-
-	if (this->Prerequisite_Lists.Get() >= 0)
+	if (pINI->ReadString(pSection, "Prerequisite.Lists", "", Phobos::readBuffer) > 0)
 	{
+		this->Prerequisite_Lists.Read(exINI, pSection, "Prerequisite.Lists");
 		this->Prerequisite_ListVector.clear();
 
-		for (int i = 1; i <= Prerequisite_Lists.Get(); i++)
+		for (int i = 1; i <= this->Prerequisite_Lists.Get(); i++)
 		{
 			char keySection[32];
 			_snprintf_s(keySection, sizeof(keySection), "Prerequisite.List%d", i);
@@ -1451,7 +1452,9 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 				}
 			}
 
-			this->Prerequisite_ListVector.push_back(objectsList);
+			if (objectsList.Count > 0)
+				this->Prerequisite_ListVector.push_back(objectsList);
+
 			objectsList.Clear();
 		}
 	}

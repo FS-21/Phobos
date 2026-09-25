@@ -657,6 +657,10 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->LastUnclaimedTiberiumCheckFrame)
 		.Process(this->CachedResourceCandidates)
 		.Process(this->CachedResourceCandidatesExpiryFrame)
+		.Process(this->LastParanoiaFrame)
+		.Process(this->DefensivePlaceholders)
+		.Process(this->ConsecutiveCombatBuilds)
+		.Process(this->ConsecutiveResourceBuilds)
 		//.Process(this->BeaconsPlacedOrder) beacon is not saved, so this follows it.
 		;
 
@@ -1403,6 +1407,9 @@ bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool
 	{
 		for (const auto& list : pItemExt->Prerequisite_ListVector)
 		{
+			if (list.Count == 0)
+				continue;
+
 			bool listSatisfied = true;
 			for (int idx : list)
 			{

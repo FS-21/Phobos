@@ -245,7 +245,9 @@ bool BuildingExt::OverlapsAnyBuilding(CellStruct cell, BuildingTypeClass* pBuild
 
 			if ((b1X < b2X + b2W) && (b1X + b1W > b2X) &&
 				(b1Y < b2Y + b2H) && (b1Y + b1H > b2Y))
+			{
 				return true;
+			}
 		}
 	}
 
@@ -743,8 +745,13 @@ static bool CanAIBuildOffThisAllyBuilding(HouseClass* pOwner, BuildingTypeClass*
 
 	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
 	const auto pOtherOwner = pAlliedBuilding->Owner;
+	if (pOtherOwner == nullptr || pOtherOwner == pOwner || !pOwner->IsAlliedWith(pOtherOwner) ||
+		pOtherOwner->IsNeutral() || pOtherOwner->Type->MultiplayPassive)
+	{
+		return false;
+	}
 
-	// 1. Defenses (joint defense): Allowed if the ally was recently attacked
+	// Joint defense: Allowed adjacent to ally if the ally was recently attacked
 	const bool isDefense = pBuildingType->IsBaseDefense || pBuildingType->GetWeapon(0u, false).WeaponType != nullptr || pBuildingType->GetWeapon(1u, false).WeaponType != nullptr;
 	if (isDefense && pOtherOwner != nullptr && pOtherOwner->LATime > 0)
 	{
@@ -754,7 +761,7 @@ static bool CanAIBuildOffThisAllyBuilding(HouseClass* pOwner, BuildingTypeClass*
 			return true;
 	}
 
-	// 2. Allied Fallback Outpost: Allowed for structures in BuildAlliedFallback
+	// Allied fallback outposts: Allowed for structures in BuildAlliedFallback
 	if (TechTreeTypeClass::TotalBuildAlliedFallback.count(pBuildingType) > 0)
 	{
 		if (pOtherOwner != nullptr && houseExt != nullptr && houseExt->TargetAlliedFallbackHouse == pOtherOwner)
@@ -764,19 +771,19 @@ static bool CanAIBuildOffThisAllyBuilding(HouseClass* pOwner, BuildingTypeClass*
 		{
 			for (const auto pOtherBld : pOtherOwner->Buildings)
 			{
-				if (pOtherBld && pOtherBld->IsAlive && !pOtherBld->InLimbo)
+				if (!pOtherBld || !pOtherBld->IsAlive || pOtherBld->InLimbo)
+					continue;
+
+				if (TechTreeTypeClass::TotalBuildDefense.count(pOtherBld->Type) > 0 &&
+					pAlliedBuilding->GetMapCoords().DistanceFrom(pOtherBld->GetMapCoords()) <= 15.0)
 				{
-					if (TechTreeTypeClass::TotalBuildDefense.count(pOtherBld->Type) > 0)
-					{
-						if (pAlliedBuilding->GetMapCoords().DistanceFrom(pOtherBld->GetMapCoords()) <= 15.0)
-							return true;
-					}
+					return true;
 				}
 			}
 		}
 	}
 
-	// 3. Crawler/Expansion: Allowed if we are actively expanding, the allied building is on the way, AND it is a Power Plant (crawling structure)
+	// Base crawling and expansion: Allowed if actively expanding towards target through allied perimeter
 	const bool isPowerPlant = TechTreeTypeClass::TotalBuildPower.count(pBuildingType) > 0 || TechTreeTypeClass::TotalBuildAdvancedPower.count(pBuildingType) > 0;
 	if (isPowerPlant && houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
 	{
@@ -789,20 +796,20 @@ static bool CanAIBuildOffThisAllyBuilding(HouseClass* pOwner, BuildingTypeClass*
 			return true;
 	}
 
-	// 4. SuperWeapons: Allowed in allied base if the ally has defenses covering the area
+	// Superweapons: Allowed in allied base if the ally has defenses covering the area
 	if (TechTreeTypeClass::TotalBuildSuperWeapon.count(pBuildingType) > 0)
 	{
 		if (pOtherOwner != nullptr)
 		{
 			for (const auto pOtherBld : pOtherOwner->Buildings)
 			{
-				if (pOtherBld && pOtherBld->IsAlive && !pOtherBld->InLimbo)
+				if (!pOtherBld || !pOtherBld->IsAlive || pOtherBld->InLimbo)
+					continue;
+
+				if (TechTreeTypeClass::TotalBuildDefense.count(pOtherBld->Type) > 0 &&
+					pAlliedBuilding->GetMapCoords().DistanceFrom(pOtherBld->GetMapCoords()) <= 12.0)
 				{
-					if (TechTreeTypeClass::TotalBuildDefense.count(pOtherBld->Type) > 0)
-					{
-						if (pAlliedBuilding->GetMapCoords().DistanceFrom(pOtherBld->GetMapCoords()) <= 12.0)
-							return true;
-					}
+					return true;
 				}
 			}
 		}
@@ -1593,7 +1600,7 @@ CellStruct BuildingExt::Get_Best_Refinery_Placement_Position(BuildingClass* pBui
 	{
 		const CellStruct expansionTarget = houseExt->NextExpansionPointLocation;
 
-		// 1. Find the closest base normal building to the expansion target (the main pivot)
+		// Locate the primary pivot building closest to the expansion target
 		const BuildingClass* pClosestPivot = nullptr;
 		double closestDist = std::numeric_limits<double>::max();
 
@@ -1614,7 +1621,7 @@ CellStruct BuildingExt::Get_Best_Refinery_Placement_Position(BuildingClass* pBui
 		{
 			const CellStruct pivotCoords = pClosestPivot->GetMapCoords();
 
-			// 2. Gather all other pivots within 9.0 cells of the main pivot
+			// Aggregate nearby base structures to form a cohesive pivot cluster
 			std::vector<const BuildingClass*> pivotGroup;
 			for (const auto pBld : pOwner->Buildings)
 			{
@@ -1626,11 +1633,11 @@ CellStruct BuildingExt::Get_Best_Refinery_Placement_Position(BuildingClass* pBui
 				}
 			}
 
-			// 3. Sort pivotGroup by their distance to the expansion target (closest first)
+			// Sort candidate pivots by proximity to the expansion goal
 			std::sort(pivotGroup.begin(), pivotGroup.end(), [&expansionTarget](const BuildingClass* a, const BuildingClass* b)
 					  { return a->GetMapCoords().DistanceFrom(expansionTarget) < b->GetMapCoords().DistanceFrom(expansionTarget); });
 
-			// 4. Try to place the refinery around each pivot sequentially
+			// Attempt refinery placement around each candidate pivot in order of proximity
 			for (const auto pPivot : pivotGroup)
 			{
 				const CellStruct pc = pPivot->GetMapCoords();
@@ -1806,7 +1813,9 @@ CellStruct BuildingExt::Get_Best_Silo_Placement_Position(BuildingClass* pBuildin
 	const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
 	if (!isInnerBase && houseExt != nullptr &&
 		houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+	{
 		return Get_Best_Expansion_Placement_Position(pBuilding);
+	}
 
 	const int adjacency = pBuilding->Type->Adjacent;
 	const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(false), pBuilding->Type);
@@ -2573,7 +2582,8 @@ CellStruct BuildingExt::Get_Best_Defense_Placement_Position(BuildingClass* pBuil
 
 	for (const auto pOtherOwner : HouseClass::Array)
 	{
-		if (pOtherOwner != pOwner && pOwner->IsAlliedWith(pOtherOwner))
+		if (pOtherOwner != pOwner && pOwner->IsAlliedWith(pOtherOwner) &&
+			!pOtherOwner->IsNeutral() && !pOtherOwner->Type->MultiplayPassive)
 		{
 			int otherParanoia = TICKS_PER_MINUTE + (30 * TICKS_PER_SECOND);
 			if (pOtherOwner->LATime > 0 && pOtherOwner->LATime + otherParanoia + 1800 > Unsorted::CurrentFrame)
@@ -2587,14 +2597,14 @@ CellStruct BuildingExt::Get_Best_Defense_Placement_Position(BuildingClass* pBuil
 		}
 	}
 
-	// 1. Check Frontline Threat (from crawler placement)
+	// Prioritize immediate frontline threats detected during base crawling
 	if (houseExt->FrontlineThreatCoords.X > 0 && houseExt->FrontlineThreatActiveFrames > Unsorted::CurrentFrame && houseExt->FrontlineThreatNeedsDefenses > 0)
 	{
 		targetAttacker = houseExt->FrontlineThreatCoords;
 		targetBuilding = houseExt->FrontlineThreatBuildingCoords;
 	}
 
-	// 2. Check whoever was attacked most recently (Self vs Ally)
+	// Prioritize the location of the most recent attack, checking self and allies
 	else if (selfAttackTime >= latestAllyAttackTime && selfAttackTime > 0)
 	{
 		if (houseExt->LastAttackerCoords.X > 0)
@@ -2614,7 +2624,7 @@ CellStruct BuildingExt::Get_Best_Defense_Placement_Position(BuildingClass* pBuil
 		}
 	}
 
-	// 4. Setup AttackCells and select appropriate valuation function
+	// Establish attack vector and target coordinates for directional placement
 	bool hasDirectionalTargets = false;
 	if (targetAttacker.X > 0 && targetBuilding.X > 0)
 	{
@@ -2631,40 +2641,42 @@ CellStruct BuildingExt::Get_Best_Defense_Placement_Position(BuildingClass* pBuil
 		ExtData::AttackCell = targetBuilding;
 	}
 
-	// If we didn't find any threat/attacker above, check for undefended expansion refinery
+	// If we didn't find any threat/attacker above, check for pending defensive placeholders
 	if (ExtData::AttackCell.X <= 0 || ExtData::AttackCell.Y <= 0)
 	{
-		const BuildingClass* pOurConYard = pOwner->ConYards.Count > 0 ? pOwner->ConYards[0] : nullptr;
-		if (pOurConYard != nullptr)
+		if (houseExt != nullptr && !houseExt->DefensivePlaceholders.empty())
 		{
+			ExtData::AttackCell = houseExt->DefensivePlaceholders.front();
+		}
+		else if (pOwner->ConYards.Count > 0)
+		{
+			const BuildingClass* pOurConYard = pOwner->ConYards[0];
 			for (const auto pBld : pOwner->Buildings)
 			{
-				if (pBld && pBld->Type && pBld->Type->Refinery)
-				{
-					if (pBld->GetMapCoords().DistanceFromSquared(pOurConYard->GetMapCoords()) >= 400.0)
-					{
-						bool isProtected = false;
-						for (const auto pOther : pOwner->Buildings)
-						{
-							if (pOther && pOther->IsAlive && !pOther->InLimbo && pOther != pBld)
-							{
-								if (TechTreeTypeClass::TotalBuildDefense.contains(pOther->Type))
-								{
-									if (pBld->GetMapCoords().DistanceFromSquared(pOther->GetMapCoords()) < 225.0)
-									{
-										isProtected = true;
-										break;
-									}
-								}
-							}
-						}
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->Refinery)
+					continue;
 
-						if (!isProtected)
-						{
-							ExtData::AttackCell = pBld->GetMapCoords();
-							break;
-						}
+				if (pBld->GetMapCoords().DistanceFromSquared(pOurConYard->GetMapCoords()) < 400.0)
+					continue;
+
+				bool isProtected = false;
+				for (const auto pOther : pOwner->Buildings)
+				{
+					if (!pOther || !pOther->IsAlive || pOther->InLimbo || pOther == pBld)
+						continue;
+
+					if (TechTreeTypeClass::TotalBuildDefense.contains(pOther->Type) &&
+						pBld->GetMapCoords().DistanceFromSquared(pOther->GetMapCoords()) < 225.0)
+					{
+						isProtected = true;
+						break;
 					}
+				}
+
+				if (!isProtected)
+				{
+					ExtData::AttackCell = pBld->GetMapCoords();
+					break;
 				}
 			}
 		}
@@ -2790,7 +2802,9 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 		const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
 		if ((houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0) ||
 			(houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0))
+		{
 			return Get_Best_Expansion_Placement_Position(pBuilding);
+		}
 		return Get_Best_Refinery_Placement_Position(pBuilding);
 	}
 
@@ -2873,7 +2887,9 @@ void BuildingExt::PopulateAdjacencyAnchors(HouseClass* pOwner, BuildingTypeClass
 		if (!pOtherBuilding->IsAlive ||
 			pOtherBuilding->InLimbo ||
 			pOtherBuilding->Type->InvisibleInGame)
+		{
 			continue;
+		}
 
 		if (pOtherBuilding->Owner == pOwner)
 		{
@@ -3031,7 +3047,8 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		{
 			for (const auto pOtherOwner : HouseClass::Array)
 			{
-				if (pOtherOwner != pBuilding->Owner && pBuilding->Owner->IsAlliedWith(pOtherOwner))
+				if (pOtherOwner != pBuilding->Owner && pBuilding->Owner->IsAlliedWith(pOtherOwner) &&
+					!pOtherOwner->IsNeutral() && !pOtherOwner->Type->MultiplayPassive)
 				{
 					for (const auto pBld : pOtherOwner->Buildings)
 					{
@@ -3171,9 +3188,19 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		if (houseExt->CombatCrawlingTarget.X > 0 && houseExt->ResourceCrawlingTarget.X > 0)
 		{
 			if (pBuilding->Type->ResourceDestination)
-				houseExt->ConsecutiveCombatBuilds = 0;
-			else if (pBuilding->Type->IsBaseDefense)
+			{
+				houseExt->ConsecutiveResourceBuilds++;
+				if (houseExt->ConsecutiveResourceBuilds >= 2)
+				{
+					houseExt->ConsecutiveCombatBuilds = 0;
+					houseExt->ConsecutiveResourceBuilds = 0;
+				}
+			}
+			else if (pBuilding->Type->IsBaseDefense &&
+				houseExt->NextExpansionPointLocation == houseExt->CombatCrawlingTarget)
+			{
 				houseExt->ConsecutiveCombatBuilds++;
+			}
 		}
 
 		if (HasEnemyThreatsNear(placementCell, pBuilding->Owner, 8.0))
