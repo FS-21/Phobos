@@ -1953,10 +1953,13 @@ bool HouseExt::AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse,
 	if (enemyAircraftValue > 0 || AdvAI_Is_Recently_Attacked(pHouse))
 		return true;
 
+	if (!pHouse || pHouse->ArrayIndex < 0 ||
+		pHouse->ArrayIndex >= HouseClass::Array.Count)
+		return false;
+
 	// Counter infantry rushing. If a human enemy has more infantry than we do, we
 	// are at risk.
-
-	static int houseInfantryStrength[10] = {};
+	std::vector<int> houseInfantryStrength(HouseClass::Array.Count, 0);
 
 	// Go through all infantry on the map and gather infantry strength of all
 	// enemy human houses.
@@ -1981,7 +1984,9 @@ bool HouseExt::AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse,
 		if (pInfantry->Owner->IsAlliedWith(pHouse))
 			continue;
 
-		if (pInfantry->Owner->ArrayIndex >= std::size(houseInfantryStrength))
+		if (pInfantry->Owner->ArrayIndex < 0 ||
+			pInfantry->Owner->ArrayIndex >=
+				static_cast<int>(houseInfantryStrength.size()))
 			continue;
 
 		// Humans can typically micromanage better than the AI, so increase points
@@ -1992,8 +1997,10 @@ bool HouseExt::AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse,
 
 	const int ourInfantryStrength = houseInfantryStrength[pHouse->ArrayIndex];
 	for (const int i : houseInfantryStrength)
+	{
 		if (i > ourInfantryStrength)
 			return true;
+	}
 
 	return false;
 }
@@ -2009,7 +2016,8 @@ int HouseExt::AdvAI_Calculate_Enemy_Aircraft_Value(HouseClass* pHouse)
 
 	for (const auto pOtherHouse : HouseClass::Array)
 	{
-		if (pOtherHouse->IsAlliedWith(pHouse) ||
+		if (pOtherHouse == pHouse || pOtherHouse->Defeated ||
+			pOtherHouse->IsAlliedWith(pHouse) ||
 			pOtherHouse->Type->MultiplayPassive)
 			continue;
 
@@ -3536,41 +3544,29 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		}
 
 		// If we have no radar, then build one
-		for (const auto pRadarType : pPrimaryTechTree->BuildRadar)
+		const BuildingTypeClass* pRadarToBuild =
+			AdvAI_BuildAtLeastNOfSideAndMInTotal(
+				pHouse, pPrimaryTechTree,
+				TechTreeTypeClass::BuildType::BuildRadar, 1, 1);
+		if (pRadarToBuild != nullptr)
 		{
-			if (pRadarType == nullptr || pRadarType->Unbuildable)
-				continue;
-			const int targetCount =
-				GetTargetBuildCount(pRadarType, 1, pPrimaryTechTree);
-			const int ownedCount =
-				CountOwnedBuildingInstances(pHouse, pRadarType);
-			if (ownedCount < targetCount &&
-				AdvAI_Can_Build_Building(pHouse, pRadarType, true, true))
-			{
-				Debug::Log("AdvAI: Making AI build %s because it does not have enough "
-						   "radars (Owned: %d, Wanted: %d).\n",
-						   pRadarType->Name, ownedCount, targetCount);
-				return pRadarType;
-			}
+			Debug::Log("AdvAI: Making AI build %s because it does not have a radar.\n",
+					   pRadarToBuild->Name);
+
+			return pRadarToBuild;
 		}
 
 		// If we have no tech center, then build one
-		for (const auto pTechType : pPrimaryTechTree->BuildTech)
+		const BuildingTypeClass* pTechCenterToBuild =
+			AdvAI_BuildAtLeastNOfSideAndMInTotal(
+				pHouse, pPrimaryTechTree,
+				TechTreeTypeClass::BuildType::BuildTech, 1, 1);
+		if (pTechCenterToBuild != nullptr)
 		{
-			if (pTechType == nullptr || pTechType->Unbuildable)
-				continue;
-			const int targetCount =
-				GetTargetBuildCount(pTechType, 1, pPrimaryTechTree);
-			const int ownedCount =
-				CountOwnedBuildingInstances(pHouse, pTechType);
-			if (ownedCount < targetCount &&
-				AdvAI_Can_Build_Building(pHouse, pTechType, true, true))
-			{
-				Debug::Log("AdvAI: Making AI build %s because it does not have enough "
-						   "tech centers (Owned: %d, Wanted: %d).\n",
-						   pTechType->Name, ownedCount, targetCount);
-				return pTechType;
-			}
+			Debug::Log("AdvAI: Making AI build %s because it does not have a tech center.\n",
+					   pTechCenterToBuild->Name);
+
+			return pTechCenterToBuild;
 		}
 
 		// BuildSuperWeapon evaluation
@@ -3850,30 +3846,35 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 					minInitialDocks = 8;
 			}
 
-			// If the modder explicitly configured AIBuildCounts / AIExtraCounts on the helipad type,
-			// use that to define the initial minimum target docks/helipads
-			const int explicitHelipadTarget =
-				GetTargetBuildCount(const_cast<BuildingTypeClass*>(pHelipadType), -1,
-									pPrimaryTechTree);
-			if (explicitHelipadTarget > 0)
-				minInitialDocks = explicitHelipadTarget * docksPerHelipad;
-
 			const size_t targetInitialHelipads =
 				(static_cast<size_t>(minInitialDocks) + docksPerHelipad - 1) / docksPerHelipad;
 
 			size_t optimalHelipadCount = targetInitialHelipads;
 
+			// Enforce difficulty-based safety cap of docks to prevent runaway spam:
+			// Easy: 4 docks (1 GAAIRC / 4 TS helipads)
+			// Normal: 8 docks (2 GAAIRC / 8 TS helipads)
+			// Hard: 12 docks (3 GAAIRC / 12 TS helipads)
+			int maxDocks = 12;
+			if (pHouse->AIDifficulty == AIDifficulty::Easy)
+				maxDocks = 4;
+			else if (pHouse->AIDifficulty == AIDifficulty::Normal)
+				maxDocks = 8;
+
+			if (isNavalMode)
+				maxDocks += 4;
+
 			// If the AI has met its initial helipad target, only scale up if aircraft capacity is full
-			if (totalHelipadsOwned >= targetInitialHelipads)
+			// AND we haven't reached the difficulty safety cap of docks
+			if (static_cast<size_t>(totalHelipadsOwned) >= targetInitialHelipads)
 			{
-				if (totalCurrentDocks > 0 && totalAircraft >= totalCurrentDocks)
+				if (totalCurrentDocks > 0 && totalAircraft >= totalCurrentDocks && totalCurrentDocks < maxDocks)
 					optimalHelipadCount = totalHelipadsOwned + 1;
 				else
 					optimalHelipadCount = totalHelipadsOwned;
 			}
 
-			// Competitive scaling for helipads under naval mode (non-Easy
-			// difficulties)
+			// Competitive scaling for helipads under naval mode (non-Easy difficulties)
 			if (isNavalMode && pHouse->AIDifficulty != AIDifficulty::Easy)
 			{
 				const size_t targetHelipadsToMatchEnemyDocks =
@@ -3883,33 +3884,25 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 					optimalHelipadCount = targetHelipadsToMatchEnemyDocks;
 			}
 
-			bool limitHelipadFactories = limitFactories && !isNavalMode;
-			if (limitHelipadFactories)
-			{
-				// Enforce difficulty-based safety cap of docks (Easy: 8 docks, Normal:
-				// 12 docks, Hard: 16 docks)
-				int maxDocks = 16;
-				if (pHouse->AIDifficulty == AIDifficulty::Easy)
-					maxDocks = 8;
-				else if (pHouse->AIDifficulty == AIDifficulty::Normal)
-					maxDocks = 12;
-
-				const size_t maxHelipadCount =
-					(maxDocks + docksPerHelipad - 1) / docksPerHelipad;
-				if (optimalHelipadCount > maxHelipadCount)
-					optimalHelipadCount = maxHelipadCount;
-			}
+			const size_t maxHelipadCount =
+				std::max(size_t(1), (static_cast<size_t>(maxDocks) + docksPerHelipad - 1) / docksPerHelipad);
+			if (optimalHelipadCount > maxHelipadCount)
+				optimalHelipadCount = maxHelipadCount;
 
 			// If explicit BuildLimit is defined, respect it as an absolute cap
 			if (pHelipadType->BuildLimit > 0 &&
 				optimalHelipadCount > static_cast<size_t>(pHelipadType->BuildLimit))
 				optimalHelipadCount = static_cast<size_t>(pHelipadType->BuildLimit);
 
-			const BuildingTypeClass* pHelipadToBuild =
-				AdvAI_BuildAtLeastNOfSideAndMInTotal(
+			const BuildingTypeClass* pHelipadToBuild = nullptr;
+			if (static_cast<size_t>(totalHelipadsOwned) < optimalHelipadCount)
+			{
+				pHelipadToBuild = AdvAI_BuildAtLeastNOfSideAndMInTotal(
 					pHouse, pPrimaryTechTree,
 					TechTreeTypeClass::BuildType::BuildHelipad, 1,
 					optimalHelipadCount);
+			}
+
 			if (pHelipadToBuild != nullptr &&
 				IsBuildingTypeQueued(pHouse,
 									 TechTreeTypeClass::BuildType::BuildHelipad))
@@ -3918,10 +3911,10 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			if (pHelipadToBuild != nullptr)
 			{
 				Debug::Log(
-					"AdvAI: Making AI build %s because it has no free aircraft docks "
-					"(Total Docks: %d, Total Aircraft: %d, Wanted helipads: %d)\n",
-					pHelipadToBuild->Name, totalCurrentDocks, totalAircraft,
-					optimalHelipadCount);
+					"AdvAI: Making AI build %s (Helipads owned: %d, Wanted: %u, Total Docks: %d, Total Aircraft: %d)\n",
+					pHelipadToBuild->Name, totalHelipadsOwned,
+					static_cast<unsigned int>(optimalHelipadCount), totalCurrentDocks,
+					totalAircraft);
 
 				return pHelipadToBuild;
 			}
@@ -4929,7 +4922,8 @@ void HouseExt::AdvAI_Economy_Upkeep(HouseClass* pHouse)
 		int enemyAircraftValue = 0;
 		for (const auto pOtherHouse : HouseClass::Array)
 		{
-			if (pOtherHouse == pHouse || pHouse->IsAlliedWith(pOtherHouse))
+			if (pOtherHouse == pHouse || pOtherHouse->Defeated ||
+				pHouse->IsAlliedWith(pOtherHouse))
 				continue;
 			for (const auto pAircraft : AircraftClass::Array)
 			{
@@ -5513,13 +5507,14 @@ bool HouseExt::IsAdvancedAIActive(HouseClass* pHouse)
 	if (!pHouse || pHouse->IsControlledByHuman())
 		return false;
 
-	if (SessionClass::IsCampaign())
+	if (!RulesExt::Global()->AdvancedAI)
 		return false;
 
-	if (pHouse->Base.BaseNodes.Count > 0)
+	// In campaign missions, respect scripted base layouts: houses with pre-placed nodes use vanilla AI
+	if (SessionClass::IsCampaign() && pHouse->Base.BaseNodes.Count > 0)
 		return false;
 
-	return RulesExt::Global()->AdvancedAI;
+	return true;
 }
 
 /**
@@ -5719,8 +5714,8 @@ void HouseExt::AdvAI_ExpertAI(HouseClass* pHouse)
 				const BuildingClass* pBuilding =
 					reinterpret_cast<BuildingClass*>(buildingFactory->Object);
 
-				if (pBuilding->Type->PowerBonus <= 0 ||
-					pBuilding->Type->GetWeapon(0, false).WeaponType == nullptr ||
+				if (pBuilding->Type->PowerBonus <= 0 &&
+					pBuilding->Type->GetWeapon(0, false).WeaponType == nullptr &&
 					pBuilding->Type->Factory != AbstractType::InfantryType)
 					buildingFactory->AbandonProduction();
 			}

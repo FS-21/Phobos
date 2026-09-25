@@ -862,6 +862,8 @@ DEFINE_HOOK(0x4AC9B2, MouseClass_ToggleBeaconMode_AllUsed, 0x6)
  */
 DEFINE_HOOK(0x4FE3E9, HouseClass_AI_Building_Intercept, 0x7)
 {
+	enum { ReturnEpilogue = 0x4FEA48, ReturnDefault = 0 };
+
 	GET(HouseClass*, pHouse, EBP);
 
 	/**
@@ -870,10 +872,10 @@ DEFINE_HOOK(0x4FE3E9, HouseClass_AI_Building_Intercept, 0x7)
 	if (HouseExt::IsAdvancedAIActive(pHouse))
 	{
 		HouseExt::AdvAI_Building(pHouse);
-		return 0x4FE3F0;
+		return ReturnEpilogue;
 	}
 
-	return 0;
+	return ReturnDefault;
 }
 
 DEFINE_HOOK(0x4FD50D, HouseClass_Expert_AI_Advanced_AI_Intercept, 0x8)
@@ -885,13 +887,4 @@ DEFINE_HOOK(0x4FD50D, HouseClass_Expert_AI_Advanced_AI_Intercept, 0x8)
 
 	return 0;
 }
-
-DEFINE_HOOK(0x50C210, HouseClass_GenerateBase_AdvancedAI, 0x5)
-{
-	if (RulesExt::Global()->AdvancedAI)
-		return 0x50C332;
-
-	return 0;
-}
-
 

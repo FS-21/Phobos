@@ -2467,16 +2467,7 @@ int BuildingExt::WarFactory_Placement_Cell_Value(CellStruct cell, BuildingClass*
 
 int BuildingExt::Helipad_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding)
 {
-	const HouseClass* pOwner = pBuilding->Owner;
-	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
-
-	// If the building is NOT marked as an inner-base structure, and we are expanding, place it near the front target
-	if (!IsAIInnerBase(pBuilding->Type) && houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
-	{
-		double value = cell.DistanceFrom(houseExt->NextExpansionPointLocation);
-		return Modify_Rating_By_Allied_Building_Proximity(cell, pBuilding, static_cast<int>(value));
-	}
-
+	// Helipads/Airfields are high-value tech structures with vulnerable aircraft and must always be safely placed in the inner base
 	return Near_Base_Center_Placement_Position_Value(cell, pBuilding);
 }
 
@@ -2502,7 +2493,7 @@ CellStruct BuildingExt::Get_Best_Factory_Placement_Position(BuildingClass* pBuil
 		return Find_Best_Building_Placement_Cell(baseArea, pBuilding, WarFactory_Placement_Cell_Value);
 	}
 
-	if (pBuilding->Type->Factory == AbstractType::AircraftType)
+	if (pBuilding->Type->Helipad || pBuilding->Type->Factory == AbstractType::AircraftType || TechTreeTypeClass::TotalBuildHelipad.contains(pBuilding->Type))
 		return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Helipad_Placement_Cell_Value);
 
 	return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Base_Center_Placement_Position_Value);
@@ -2811,6 +2802,22 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 		return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Base_Center_Placement_Position_Value);
 	}
 
+	// Helipads / Airfields MUST ALWAYS be placed safely in the inner base near base center / ConYard!
+	if (pBuilding->Type->Helipad || TechTreeTypeClass::TotalBuildHelipad.contains(pBuilding->Type) || pBuilding->Type->Factory == AbstractType::AircraftType)
+	{
+		const int adjacency = pBuilding->Type->Adjacent;
+		const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(false), pBuilding->Type);
+		return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Helipad_Placement_Cell_Value);
+	}
+
+	// Radar and Tech Centers must also always be placed safely in the inner base!
+	if (pBuilding->Type->Radar || TechTreeTypeClass::TotalBuildRadar.contains(pBuilding->Type) || TechTreeTypeClass::TotalBuildTech.contains(pBuilding->Type))
+	{
+		const int adjacency = pBuilding->Type->Adjacent;
+		const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(false), pBuilding->Type);
+		return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Base_Center_Placement_Position_Value);
+	}
+
 	if (GetSupportRadiusType(pBuilding->Type) != SupportRadiusType::None || TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
 		return Get_Best_Support_Placement_Position(pBuilding);
 
@@ -2840,8 +2847,11 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 	// For basic power plants: place along expansion route ONLY IF AI is actively expanding towards Tiberium,
 	// otherwise place in main base near ConYard.
 	const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
-	if (houseExt != nullptr && houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+	if ((TechTreeTypeClass::TotalBuildPower.contains(pBuilding->Type) || pBuilding->Type->PowerBonus > 0) &&
+		houseExt != nullptr && houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+	{
 		return Get_Best_Expansion_Placement_Position(pBuilding);
+	}
 
 	const int adjacency = pBuilding->Type->Adjacent;
 	const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(false), pBuilding->Type);
