@@ -17,6 +17,9 @@ namespace
 	constexpr std::pair<const char*, AdditionalAbility> AbilityTokens[] = {
 		{ "RELOAD",       AdditionalAbility::Reload },
 		{ "EMPTY_RELOAD", AdditionalAbility::EmptyReload },
+		{ "RANGE",		  AdditionalAbility::Range },
+		{ "CRITIMMUNE",	  AdditionalAbility::CritImmune },
+		{ "CRITCHANCE",	  AdditionalAbility::CritChance }
 	};
 
 	void ReadAdditionalAbilities(
@@ -762,6 +765,9 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->UIDescription.Read(exINI, pSection, "UIDescription");
 	this->LowSelectionPriority.Read(exINI, pSection, "LowSelectionPriority");
 	this->LowDeployPriority.Read(exINI, pSection, "LowDeployPriority");
+	this->TypeCyclePriority.Read(exINI, pSection, "TypeCyclePriority");
+	this->HighDeployPriority.Read(exINI, pSection, "HighDeployPriority");
+	this->DeployForbidTypes.Read(exINI, pSection, "DeployForbidTypes");
 
 	if (pThis->Gunner)
 	{
@@ -828,6 +834,14 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->AutoDeath_TechnosExist_Any.Read(exINI, pSection, "AutoDeath.TechnosExist.Any");
 	this->AutoDeath_TechnosExist_AllowLimboed.Read(exINI, pSection, "AutoDeath.TechnosExist.AllowLimboed");
 	this->AutoDeath_TechnosExist_Houses.Read(exINI, pSection, "AutoDeath.TechnosExist.Houses");
+	this->AutoDeath_PlayerPowerState.Read(exINI, pSection, "AutoDeath.PlayerPowerState");
+	this->AutoDeath_PlayerMoney_Max.Read(exINI, pSection, "AutoDeath.PlayerMoney.Max");
+	this->AutoDeath_PlayerMoney_Min.Read(exINI, pSection, "AutoDeath.PlayerMoney.Min");
+
+	if ((this->AutoDeath_PlayerMoney_Max != -1)
+		&& (this->AutoDeath_PlayerMoney_Min != -1)
+		&& (this->AutoDeath_PlayerMoney_Max < this->AutoDeath_PlayerMoney_Min))
+		Debug::Log("[Developer warning][%s] AutoDeath.PlayerMoney.Min is bigger than AutoDeath.PlayerMoney.Max, AutoDeath will never activate!\n", pSection);
 
 	this->SellSound.Read(exINI, pSection, "SellSound");
 	this->EVA_Sold.Read(exINI, pSection, "EVA.Sold");
@@ -877,6 +891,7 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->OpenTopped_TransferPassengerStopCommand.Read(exINI, pSection, "OpenTopped.TransferPassengerStopCommand");
 	this->OpenTopped_DecloakToFire.Read(exINI, pSection, "OpenTopped.DecloakToFire");
 	this->OpenTopped_FireWhileMoving.Read(exINI, pSection, "OpenTopped.FireWhileMoving");
+	this->OpenTopped_FireWhileMoving_BasedOnDestination.Read(exINI, pSection, "OpenTopped.FireWhileMoving.BasedOnDestination");
 	this->OpenTransport_RangeBonus.Read(exINI, pSection, "OpenTransport.RangeBonus");
 	this->OpenTransport_DamageMultiplier.Read(exINI, pSection, "OpenTransport.DamageMultiplier");
 	this->OpenTransport_FireWhileMoving.Read(exINI, pSection, "OpenTransport.FireWhileMoving");
@@ -1051,6 +1066,8 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->VeteranReload.Read(exINI, pSection, "VeteranReload");
 	this->VeteranEmptyReload.Read(exINI, pSection, "VeteranEmptyReload");
+	this->VeteranRange.Read(exINI, pSection, "VeteranRange");
+	this->VeteranCritChance.Read(exINI, pSection, "VeteranCritChance");
 
 	this->Wake.Read(exINI, pSection, "Wake");
 	this->Wake_Grapple.Read(exINI, pSection, "Wake.Grapple");
@@ -1184,6 +1201,26 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 
 	if (this->Convert_Health_AbovePercent > this->Convert_Health_BelowPercent)
 		Debug::Log("[Developer warning][%s] Convert.Health.AbovePercent is greater than Convert.Health.BelowPercent, resulting in no conversion.\n", pSection);
+
+	this->ExitThroughRoof.Read(exINI, pSection, "ExitThroughRoof");
+	this->PsychicDetectable.Read(exINI, pSection, "PsychicDetectable");
+
+	if (!this->PsychicDetectable)
+		Phobos::Optimizations::DisablePsychicDetectable = false;
+
+	this->CloakAnims.Read(exINI, pSection, "CloakAnims");
+	this->DecloakAnims.Read(exINI, pSection, "DecloakAnims");
+	this->Cloak_KickOutParasite.Read(exINI, pSection, "Cloak.KickOutParasite");
+
+	this->RevealHouses.Read<false, true>(exINI, pSection, "RevealHouses");
+
+	exINI.ReadSpeed(pSection, "SubterraneanSpeed", &this->SubterraneanSpeed);
+	this->SubterraneanHeight.Read(exINI, pSection, "SubterraneanHeight");
+	
+	this->VoiceEnterGrinder.Read(exINI, pSection, "VoiceEnterGrinder");
+
+	this->DefaultToGuardArea_Modes.Read(exINI, pSection, "DefaultToGuardArea.Modes");
+	this->DefaultToGuardArea_AIModes.Read(exINI, pSection, "DefaultToGuardArea.AIModes");
 
 	// Ares 0.2
 	this->RadarJamRadius.Read(exINI, pSection, "RadarJamRadius");
@@ -1428,6 +1465,8 @@ template <typename T>
 void TechnoTypeExt::Serialize(T& Stm)
 {
 	Stm
+		.Process(this->Array)
+
 		.Process(this->HealthBar_Hide)
 		.Process(this->HealthBar_HidePips)
 		.Process(this->HealthBar_Permanent)
@@ -1435,6 +1474,9 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->UIDescription)
 		.Process(this->LowSelectionPriority)
 		.Process(this->LowDeployPriority)
+		.Process(this->TypeCyclePriority)
+		.Process(this->HighDeployPriority)
+		.Process(this->DeployForbidTypes)
 		.Process(this->MindControlRangeLimit)
 		.Process(this->MindControl_IgnoreSize)
 		.Process(this->MindControlSize)
@@ -1493,6 +1535,9 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->AutoDeath_TechnosExist_Any)
 		.Process(this->AutoDeath_TechnosExist_AllowLimboed)
 		.Process(this->AutoDeath_TechnosExist_Houses)
+		.Process(this->AutoDeath_PlayerPowerState)
+		.Process(this->AutoDeath_PlayerMoney_Max)
+		.Process(this->AutoDeath_PlayerMoney_Min)
 
 		.Process(this->SellSound)
 		.Process(this->EVA_Sold)
@@ -1544,6 +1589,7 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->OpenTopped_TransferPassengerStopCommand)
 		.Process(this->OpenTopped_DecloakToFire)
 		.Process(this->OpenTopped_FireWhileMoving)
+		.Process(this->OpenTopped_FireWhileMoving_BasedOnDestination)
 		.Process(this->OpenTransport_RangeBonus)
 		.Process(this->OpenTransport_DamageMultiplier)
 		.Process(this->OpenTransport_FireWhileMoving)
@@ -1680,6 +1726,8 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->AdditionalEliteAbilities)
 		.Process(this->VeteranReload)
 		.Process(this->VeteranEmptyReload)
+		.Process(this->VeteranRange)
+		.Process(this->VeteranCritChance)
 
 		.Process(this->Wake)
 		.Process(this->Wake_Grapple)
@@ -1808,6 +1856,23 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->Convert_Health_BelowPercent)
 		.Process(this->Convert_Health)
 
+		.Process(this->ExitThroughRoof)
+		.Process(this->PsychicDetectable)
+
+		.Process(this->CloakAnims)
+		.Process(this->DecloakAnims)
+		.Process(this->Cloak_KickOutParasite)
+			
+		.Process(this->RevealHouses)
+
+		.Process(this->SubterraneanSpeed)
+		.Process(this->SubterraneanHeight)
+
+		.Process(this->VoiceEnterGrinder)
+
+		.Process(this->DefaultToGuardArea_Modes)
+		.Process(this->DefaultToGuardArea_AIModes)
+
 		// Ares 0.2
 		.Process(this->RadarJamRadius)
 
@@ -1835,6 +1900,9 @@ void TechnoTypeExt::LoadFromStream(PhobosStreamReader& Stm)
 {
 	ObjectTypeExt::LoadFromStream(Stm);
 	this->Serialize(Stm);
+
+	if (!this->PsychicDetectable)
+		Phobos::Optimizations::DisablePsychicDetectable = false;
 }
 
 void TechnoTypeExt::SaveToStream(PhobosStreamWriter& Stm)
