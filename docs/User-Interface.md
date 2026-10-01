@@ -23,12 +23,22 @@ You can use the improved vanilla font which can be found on [Phobos supplementar
 
 In `rulesmd.ini`:
 ```ini
-[SOMESIDE]             ; Side
-IngameScore.WinTheme=  ; Soundtrack theme ID
-IngameScore.LoseTheme= ; Soundtrack theme ID
+[SOMESIDE]              ; Side
+IngameScore.WinTheme=   ; Soundtrack theme ID
+IngameScore.LoseTheme=  ; Soundtrack theme ID
 ```
 
 ## Battle screen UI/UX
+
+### Allow chat box in singleplayer
+
+- In vanilla, the in-game chat box is disabled in singleplayer scenarios. You can now enable it by setting `[General] -> AllowChatBoxInSinglePlayer` to true.
+
+In `rulesmd.ini`:
+```ini
+[General]
+AllowChatBoxInSinglePlayer=false  ; boolean
+```
 
 ### Allow draw SuperWeapon timer as percentage
 
@@ -60,6 +70,21 @@ HealthBar.Hide=false                 ; boolean
 HealthBar.HidePips=false             ; boolean
 HealthBar.Permanent=false            ; boolean
 HealthBar.Permanent.PipScale=false   ; boolean
+```
+
+### Customize the step limit of the credits indicator
+
+- In vanilla, the Credits Indicator in the sidebar increases by at most 143 points per frame, and now you can customize this limit.
+  - If set to a value less than or equal to 0, the upper limit will be removed.
+
+In `uimd.ini`:
+```ini
+[Sidebar]
+CreditsIndicator.MaxStep=143  ; integer
+```
+
+```{note}
+The game first takes the absolute value of the difference between the actual credits and the current value, then divides it by 8, and then clamps this value to the limit set here. If you wish to disable this smoothing effect, set [`CreditsIndicator.Smooth=false`](User-Interface.md#disable-the-credits-indicator-smooth-transition).
 ```
 
 ### Digital display
@@ -124,6 +149,7 @@ Buildings.DefaultDigitalDisplayTypes=          ; List of DigitalDisplayTypes
 Infantry.DefaultDigitalDisplayTypes=           ; List of DigitalDisplayTypes
 Vehicles.DefaultDigitalDisplayTypes=           ; List of DigitalDisplayTypes
 Aircraft.DefaultDigitalDisplayTypes=           ; List of DigitalDisplayTypes
+DigitalDisplay.Health.FakeAtDisguise=true      ; boolean
 
 [SOMEDIGITALDISPLAYTYPE]                       ; DigitalDisplayType
 ; Generic
@@ -137,7 +163,7 @@ Anchor.Vertical=top                            ; Vertical position enumeration (
 Anchor.Building=top                            ; Hexagon vertex enumeration (top|lefttop|leftbottom|bottom|rightbottom|righttop)
 Percentage=false                               ; boolean
 HideMaxValue=false                             ; boolean
-VisibleToHouses=owner                          ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all)
+VisibleToHouses=owner                          ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all)
 VisibleToHouses.Observer=true                  ; boolean
 VisibleInSpecialState=true                     ; boolean
 ValueScaleDivisor=                             ; integer
@@ -157,7 +183,7 @@ Shape.PercentageFrame=false                    ; boolean
 [SOMETECHNO]                                   ; TechnoType
 DigitalDisplay.Disable=false                   ; boolean
 DigitalDisplayTypes=                           ; List of DigitalDisplayTypes
-DigitalDisplay.Health.FakeAtDisguise=true      ; boolean
+DigitalDisplay.Health.FakeAtDisguise=          ; boolean, default to [AudioVisual] -> DigitalDisplay.Health.FakeAtDisguise
 ```
 
 In `RA2MD.INI`:
@@ -184,6 +210,20 @@ The arrangement of static images on the plane is entirely up to you to draw free
 
 Of course, this is just the implementation method. To balance freedom with efficiency - that is, how to efficiently draw the patterns you need - you still need to independently explore a workflow that suits you.
 ````
+
+### Disable the credits indicator smooth transition
+
+- In vanilla, the Credits Indicator has a smooth transition effect when the displayed credit value approaches the actual credit value. Now you can disable this effect, allowing the change step to always follow the value of [`CreditsIndicator.MaxStep`](User-Interface.md#customize-the-step-limit-of-the-credits-indicator).
+
+In `uimd.ini`:
+```ini
+[Sidebar]
+CreditsIndicator.Smooth=true  ; boolean
+```
+
+```{hint}
+For example, if you want to make the credits update immediately without a transition process by setting `CreditsIndicator.MaxStep=0`, then you should also set `CreditsIndicator.Smooth=false`; otherwise, the displayed credit value will still change in the form of an exponential approximation function.
+```
 
 ### Flashing Technos on selecting
 
@@ -356,7 +396,7 @@ Palette=palette.pal                     ; filename with .pal extension
 Frames=                                 ; List of integer, default 1,1,1 for infantry, 0,0,0 for vehicle and aircraft
 Offset=0,0                              ; integers - horizontal, vertical
 Translucency=0                          ; translucency level (0/25/50/75)
-VisibleToHouses=all                     ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all)
+VisibleToHouses=all                     ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all)
 VisibleToHouses.Observer=true           ; boolean
 DrawAboveTechno=true                    ; boolean
 GroundShape=                            ; filename with .shp extension
@@ -406,6 +446,27 @@ In `RA2MD.INI`:
 ```ini
 [Phobos]
 ShowDesignatorRange=false             ; boolean
+```
+
+### Show game time
+
+- A timer can be displayed to show how many time has passed since game starts.
+  - Both `[Phobos] -> ShowGameTime` and `[General] -> ShowGameTime` need to be set to true to enable the timer.
+  - The timer will be shown in the format of `TXT_GAMETIME hh:mm:ss`. For localization add `TXT_GAMETIME` into your `.csf` file.
+  - `ShowGameTime.BoardOpacity` can be used to set the opacitiy of background for game time display.
+  - Observer can't see this timer since they've already gotten one on the top of sidebar.
+
+In `rulesmd.ini`:
+```ini
+[General]
+ShowGameTime=true              ; boolean
+```
+
+In `RA2MD.INI`:
+```ini
+[Phobos]
+ShowGameTime=false             ; boolean
+ShowGameTime.BoardOpacity=40   ; integer
 ```
 
 ### SuperWeapon ShowTimer sorting
@@ -507,16 +568,16 @@ HideShakeEffects=false       ; boolean
 In `rulesmd.ini`:
 ```ini
 [AudioVisual]
-DisplayIncome=false       ; boolean
-DisplayIncome.Delay=15    ; integer
-DisplayIncome.Houses=all  ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|all)
-DisplayIncome.AllowAI=yes ; boolean
+DisplayIncome=false        ; boolean
+DisplayIncome.Delay=15     ; integer
+DisplayIncome.Houses=all   ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all)
+DisplayIncome.AllowAI=yes  ; boolean
 
-[SOMEBUILDING]            ; BuildingType
-DisplayIncome=            ; boolean, defaults to [AudioVisual] -> DisplayIncome
-DisplayIncome.Delay=15    ; integer, defaults to [AudioVisual] -> DisplayIncome.Delay
-DisplayIncome.Houses=     ; Affected House Enumeration, defaults to [AudioVisual] -> DisplayIncome.Houses
-DisplayIncome.Offset=0,0  ; X,Y, pixels relative to default
+[SOMEBUILDING]             ; BuildingType
+DisplayIncome=             ; boolean, defaults to [AudioVisual] -> DisplayIncome
+DisplayIncome.Delay=15     ; integer, defaults to [AudioVisual] -> DisplayIncome.Delay
+DisplayIncome.Houses=      ; Affected House Enumeration, defaults to [AudioVisual] -> DisplayIncome.Houses
+DisplayIncome.Offset=0,0   ; X,Y, pixels relative to default
 ```
 
 ### Show power plant enhancer range
@@ -535,7 +596,162 @@ In `RA2MD.INI`:
 ShowPowerPlantEnhancerRange=false  ; boolean
 ```
 
+### Set sidebar tab by selecting factory
+
+- You can choose the corresponding type of factory to switch the sidebar tab by setting `SetTabBySelectingFactory=true`.
+  - `SetTabBySelecting` can be used to define which tab to switch to when this building (which need not be a factory) is selected.
+    - Normal values: 0 (buildings tab), 1 (arsenal tab), 2 (infantry tab), 3 (vehicle tab).
+    - Negative values: automatically match according to the selected building's `Factory`. For `Factory=BuildingType`, if the current tab is 0, switch to 1; otherwise switch to 0.
+    - Other values (values greater than or equal to 4): do nothing, i.e., disable this effect.
+
+In `rulesmd.ini`:
+```ini
+[General]
+SetTabBySelectingFactory=false  ; boolean
+
+[SOMEBUILDING]                  ; BuildingType
+SetTabBySelecting=-1            ; integer, index of tab
+```
+
 ## Hotkey Commands
+
+### `[ ]` Cycle Selection
+
+- Cycles through the objects that were selected when the cycle was started, selecting one of them at a time and wrapping around at the end of the list.
+- The cycle is restarted from the beginning whenever the current selection changes, e.g. when another object is selected or the selection is cleared.
+- If nothing is selected, `MSG:NothingSelected` is logged.
+- Enable the hotkey by setting `CycleSelectionKeyEnabled` to true.
+- For localization add `TXT_CYCLE_SELECTION` and `TXT_CYCLE_SELECTION_DESC` into your `.csf` file.
+
+In `rulesmd.ini`:
+```ini
+[GlobalControls]
+CycleSelectionKeyEnabled=true    ; boolean
+```
+
+### `[ ]` Cycle Type Selection
+
+- Cycles through the types present in the selection the cycle was started with, selecting every object of one type at a time and wrapping around at the end of the type list.
+- Type identity follows the game's own type selection: vanilla's Type ID, as extended by Ares `GroupAs` and Phobos selection group IDs.
+- The cycle is restarted from the beginning whenever the current selection changes, e.g. when another object is selected or the selection is cleared.
+- If nothing is selected, `MSG:NothingSelected` is logged.
+- If `CycleTypeSelectionPrintSummary` is set to true, every step prints the same kind of selection summary the game's own type selection prints: the type's name, followed by the number of selected objects of that type and their total cost, formatted into the vanilla `MSG:UnitsWorth` string. The total cost is what the game itself adds up for that summary.
+- Enable the hotkey by setting `CycleTypeSelectionKeyEnabled` to true.
+- For localization add `TXT_CYCLE_TYPE_SELECTION` and `TXT_CYCLE_TYPE_SELECTION_DESC` into your `.csf` file.
+
+The order in which the types are cycled to is customizable, and is decided by the following rules, in order:
+
+1. Higher `TypeCyclePriority` wins.
+2. Ties are broken by the type's `Cost`, from the highest to the lowest. The raw cost registered in the INI is used - never the cost the type currently has for the selecting player - so cost multipliers of the owning house do not affect the order.
+3. Remaining ties are broken by the reversed INI load order: the type written further down in the INI is cycled to first.
+
+In `rulesmd.ini`:
+```ini
+[GlobalControls]
+CycleTypeSelectionKeyEnabled=true    ; boolean
+CycleTypeSelectionPrintSummary=true  ; boolean
+
+[SOMETECHNO]                         ; TechnoType
+TypeCyclePriority=0                  ; integer
+```
+
+### `[ ]` Deselect Object(s)
+
+- Deselect 1 or 5 object(s) from current selected objects.
+- Enable these hotkeys by setting `DeselectObjectKeysEnabled` to true.
+- For localization add `TXT_DESELECT`, `TXT_DESELECT_DESC`, `TXT_DESELECT5` and `TXT_DESELECT5_DESC` into your `.csf` file.
+
+In `rulesmd.ini`:
+```ini
+[GlobalControls]
+DeselectObjectKeysEnabled=true    ; boolean
+```
+
+### `[ ]` Next Idle Harvester
+
+- Selects and centers the camera on the next TechnoType that is counted via the [harvester counter](#harvester-counter) and is currently idle.
+- Enable the hotkey by setting `NextIdleHarvesterKeyEnabled` to true.
+- For localization add `TXT_NEXT_IDLE_HARVESTER` and `TXT_NEXT_IDLE_HARVESTER_DESC` into your `.csf` file.
+
+In `rulesmd.ini`:
+```ini
+[GlobalControls]
+NextIdleHarvesterKeyEnabled=true    ; boolean
+```
+
+### `[ ]` Quicksave
+
+- Saves the current game.
+
+```{note}
+For this command to work in multiplayer - you need to use a version of [YRpp spawner](https://github.com/CnCNet/yrpp-spawner) with multiplayer saves support.
+```
+
+- Enable the hotkey by setting `QuickSaveKeyEnabled` to true.
+- For localization, add `TXT_QUICKSAVE`, `TXT_QUICKSAVE_DESC`, `TXT_QUICKSAVE_SUFFIX` and `MSG:NotAvailableInMultiplayer` into your `.csf` file.
+  - These vanilla CSF entries will be used: `TXT_SAVING_GAME`, `TXT_GAME_WAS_SAVED` and `TXT_ERROR_SAVING_GAME`.
+  - The save should be looks like `Allied Mission 25: Esther's Money - QuickSaved`.
+
+In `rulesmd.ini`:
+```ini
+[GlobalControls]
+QuickSaveKeyEnabled=true    ; boolean
+```
+
+### `[ ]` Toggle Designator Range
+
+- Switches on/off super weapon designator range indicator. See [this](#show-designator--inhibitor-range) for details.
+- Enable the hotkey by setting `ToggleDesignatorRangeKeyEnabled` to true.
+- For localization add `TXT_DESIGNATOR_RANGE` and `TXT_DESIGNATOR_RANGE_DESC` into your `.csf` file.
+
+In `rulesmd.ini`:
+```ini
+[GlobalControls]
+ToggleDesignatorRangeKeyEnabled=true    ; boolean
+```
+
+### `[ ]` Toggle Digital Display
+
+- Switches on/off [digital display types](#digital-display).
+- Enable the hotkey by setting `ToggleDigitalDisplayKeyEnabled` to true.
+- For localization add `TXT_DIGITAL_DISPLAY` and `TXT_DIGITAL_DISPLAY_DESC` into your `.csf` file.
+
+In `rulesmd.ini`:
+```ini
+[GlobalControls]
+ToggleDigitalDisplayKeyEnabled=true    ; boolean
+```
+
+### `[ ]` Toggle Message Label
+
+- Switches on/off [Task subtitles' label in the middle of the screen](#task-subtitles-display-in-the-middle-of-the-screen).
+- Enable the hotkey by setting `ToggleMessageListKeyEnabled` to true.
+- For localization add `TXT_TOGGLE_MESSAGE` and `TXT_TOGGLE_MESSAGE_DESC` into your `.csf` file.
+
+In `rulesmd.ini`:
+```ini
+[GlobalControls]
+ToggleMessageListKeyEnabled=true    ; boolean
+```
+
+### `[ ]` Select Captured Units
+
+- Select the units within the current screen that are captured by non-permanent mind-controller.
+- Enable the hotkey by setting `SelectCapturedKeyEnabled` to true.
+- If selected any unit, `MSG:SelectCaptured` is logged on the left-top of the screen, otherwise `MSG:NothingSelected` is logged.
+- For localization add `MSG:SelectCaptured`, `TXT_SELECT_CAPTURED` and `TXT_SELECT_CAPTURED_DESC` into your `.csf` file.
+
+In `rulesmd.ini`:
+```ini
+[GlobalControls]
+SelectCapturedKeyEnabled=false    ; boolean
+```
+
+```{important}
+**Development Hotkey Commands**
+
+- The following hotkeys are for debug purpose and require setting [`DebugKeysEnabled`](https://ares-developers.github.io/Ares-docs/ui-features/keyboardcommandshotkeys.html#disabling-keyboard-commands) to true to enable.
+```
 
 ### `[ ]` Display Damage Numbers
 
@@ -556,38 +772,6 @@ ShowPowerPlantEnhancerRange=false  ; boolean
 
 - Save local & global variables to an INI file. See [this](Miscellanous.md#save-variables-to-file) for details.
 - For localization add `TXT_SAVE_VARIABLES` and `TXT_SAVE_VARIABLES_DESC` into your `.csf` file.
-
-### `[ ]` Toggle Designator Range
-
-- Switches on/off super weapon designator range indicator. See [this](#show-designator--inhibitor-range) for details.
-- For localization add `TXT_DESIGNATOR_RANGE` and `TXT_DESIGNATOR_RANGE_DESC` into your `.csf` file.
-
-### `[ ]` Toggle Digital Display
-
-- Switches on/off [digital display types](#digital-display).
-- For localization add `TXT_DIGITAL_DISPLAY` and `TXT_DIGITAL_DISPLAY_DESC` into your `.csf` file.
-
-### `[ ]` Next Idle Harvester
-
-- Selects and centers the camera on the next TechnoType that is counted via the [harvester counter](#harvester-counter) and is currently idle.
-- For localization add `TXT_NEXT_IDLE_HARVESTER` and `TXT_NEXT_IDLE_HARVESTER_DESC` into your `.csf` file.
-
-### `[ ]` Quicksave
-
-- Saves the current game.
-
-```{note}
-For this command to work in multiplayer - you need to use a version of [YRpp spawner](https://github.com/CnCNet/yrpp-spawner) with multiplayer saves support.
-```
-
-- For localization, add `TXT_QUICKSAVE`, `TXT_QUICKSAVE_DESC`, `TXT_QUICKSAVE_SUFFIX` and `MSG:NotAvailableInMultiplayer` into your `.csf` file.
-  - These vanilla CSF entries will be used: `TXT_SAVING_GAME`, `TXT_GAME_WAS_SAVED` and `TXT_ERROR_SAVING_GAME`.
-  - The save should be looks like `Allied Mission 25: Esther's Money - QuickSaved`.
-
-### `[ ]` Toggle Message Label
-
-- Switches on/off [Task subtitles' label in the middle of the screen](#task-subtitles-display-in-the-middle-of-the-screen).
-- For localization add `TXT_TOGGLE_MESSAGE` and `TXT_TOGGLE_MESSAGE_DESC` into your `.csf` file.
 
 ### `[ ]` Observer UI - Clear Cards
 
@@ -625,16 +809,15 @@ DisableEmptySpawnPositions=false  ; boolean
 
 ### Skip saving game on starting a new campaign
 
-When starting a new campaign, the game automatically saves the game. Now you can decide whether you want that to happen or not.
+- When starting a new campaign, the game automatically saves the game. Now you can decide whether you want that to happen or not.
 
 In `RA2MD.INI`:
 ```ini
 [Phobos]
-SaveGameOnScenarioStart=true ; boolean
+SaveGameOnScenarioStart=true  ; boolean
 ```
 
 ## Sidebar / Battle UI
-
 
 ### Allow replacing vanilla repairing with togglable auto repairing
 
@@ -844,6 +1027,7 @@ While a mod maker can "ban" certain superweapons from appearing on a sidebar com
 ```
 
   - There is a hotkey to toggle the sidebar on/off, which can be bound to a key in the hotkey settings.
+    - Enable the hotkey by setting `ToggleSuperWeaponSidebarKeyEnabled` to true.
     - `TXT_TOGGLE_SW_SIDEBAR` and `TXT_TOGGLE_SW_SIDEBAR_DESC` are used for localization of the hotkey.
   - `SuperWeaponSidebarKeysEnabled` enables users to use hotkeys for superweapons displayed on the sidebar.
     - The hotkeys are positional and are only provided for the first 10 superweapons.
@@ -869,6 +1053,7 @@ SuperWeaponSidebar.MaxColumns=              ; integer
 In `rulesmd.ini`:
 ```ini
 [GlobalControls]
+ToggleSuperWeaponSidebarKeyEnabled=true     ; boolean
 SuperWeaponSidebarKeysEnabled=false         ; boolean
 
 [AudioVisual]

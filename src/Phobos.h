@@ -62,6 +62,8 @@ public:
 		static int SuperWeaponSidebar_CameoHeight;
 		static int SuperWeaponSidebar_Max;
 		static int SuperWeaponSidebar_MaxColumns;
+		static int CreditsIndicator_MaxStep;
+		static bool CreditsIndicator_Smooth;
 		static bool WeedsCounter_Show;
 		static bool AnchoredToolTips;
 
@@ -83,8 +85,6 @@ public:
 		static bool PrioritySelectionFiltering;
 		static bool PriorityDeployFiltering;
 		static bool TypeSelectUseIFVMode;
-		static bool DevelopmentCommands;
-		static bool SuperWeaponSidebarCommands;
 		static bool ArtImageSwap;
 		static bool ShowPlacementPreview;
 		static bool EnableBuildingPlacementPreview;
@@ -114,6 +114,22 @@ public:
 		static bool ShowFlashOnSelecting;
 		static bool UnitPowerDrain;
 		static int SuperWeaponSidebar_RequiredSignificance;
+		static bool ShowGameTime;
+		static int ShowGameTime_BoardOpacity;
+		static bool CycleTypeSelectionPrintSummary;
+		// Hotkeys
+		static bool NextIdleHarvesterCommand;
+		static bool QuickSaveCommand;
+		static bool ToggleDigitalDisplayCommand;
+		static bool ToggleDesignatorRangeCommand;
+		static bool ToggleMessageListCommand;
+		static bool ToggleSuperWeaponSidebarCommand;
+		static bool DeselectObjectCommand;
+		static bool CycleSelectionCommand;
+		static bool CycleTypeSelectionCommand;
+		static bool SelectCapturedCommand;
+		static bool SuperWeaponSidebarCommands;
+		static bool DevelopmentCommands;
 	};
 
 	class Misc
@@ -132,5 +148,7 @@ public:
 		static bool DisableBalloonHoverPathingFix;
 		static bool DisableRadDamageOnBuildings;
 		static bool DisableSyncLogging;
+		static bool DisableLaserTracking;
+		static bool DisablePsychicDetectable;
 	};
 };

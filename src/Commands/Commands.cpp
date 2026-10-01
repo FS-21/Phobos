@@ -12,11 +12,14 @@
 #include "ToggleDigitalDisplay.h"
 #include "ToggleDesignatorRange.h"
 #include "SaveVariablesToFile.h"
+#include "SelectCaptured.h"
 #include "ToggleSWSidebar.h"
 #include "FireTacticalSW.h"
 #include "ToggleMessageList.h"
 #include "DeselectObject.h"
 #include "DeselectObject5.h"
+#include "CycleSelection.h"
+#include "CycleTypeSelection.h"
 
 #include <CCINIClass.h>
 
@@ -27,17 +30,42 @@ DEFINE_HOOK(0x533066, CommandClassCallback_Register, 0x6)
 {
 	// Load it after Ares'
 
-	MakeCommand<NextIdleHarvesterCommandClass>();
-	MakeCommand<QuickSaveCommandClass>();
-	MakeCommand<ToggleDigitalDisplayCommandClass>();
-	MakeCommand<ToggleDesignatorRangeCommandClass>();
-	MakeCommand<ToggleMessageListCommandClass>();
-	MakeCommand<ToggleSWSidebar>();
+	if (Phobos::Config::NextIdleHarvesterCommand)
+		MakeCommand<NextIdleHarvesterCommandClass>();
+
+	if (Phobos::Config::QuickSaveCommand)
+		MakeCommand<QuickSaveCommandClass>();
+
+	if (Phobos::Config::ToggleDigitalDisplayCommand)
+		MakeCommand<ToggleDigitalDisplayCommandClass>();
+
+	if (Phobos::Config::ToggleDesignatorRangeCommand)
+		MakeCommand<ToggleDesignatorRangeCommandClass>();
+
+	if (Phobos::Config::MessageDisplayInCenter && Phobos::Config::ToggleMessageListCommand)
+		MakeCommand<ToggleMessageListCommandClass>();
+
+	if (Phobos::UI::SuperWeaponSidebar && Phobos::Config::ToggleSuperWeaponSidebarCommand)
+		MakeCommand<ToggleSWSidebar>();
+
+	if (Phobos::Config::DeselectObjectCommand)
+	{
+		MakeCommand<DeselectObjectCommandClass>();
+		MakeCommand<DeselectObject5CommandClass>();
+	}
+
+	if (Phobos::Config::CycleSelectionCommand)
+		MakeCommand<CycleSelectionCommandClass>();
+
+	if (Phobos::Config::CycleTypeSelectionCommand)
+		MakeCommand<CycleTypeSelectionCommandClass>();
+
+	if (Phobos::Config::SelectCapturedCommand)
+		MakeCommand<SelectCapturedCommandClass>();
+
 	MakeCommand<ToggleObserverUICommandClass>();
 	MakeCommand<ShowObjectCardCommandClass>();
 	MakeCommand<ClearObserverUICardsCommandClass>();
-	MakeCommand<DeselectObjectCommandClass>();
-	MakeCommand<DeselectObject5CommandClass>();
 
 	if (Phobos::Config::SuperWeaponSidebarCommands)
 	{
