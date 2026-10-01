@@ -135,6 +135,8 @@ void AttachEffectTypeClass::LoadFromINI(CCINIClass* pINI)
 	this->DiscardOn_OwnerChange_HumanToComputer.Read(exINI, pSection, "DiscardOn.OwnerChange.HumanToComputer");
 	this->DiscardOn_OwnerChange_ComputerToHuman.Read(exINI, pSection, "DiscardOn.OwnerChange.ComputerToHuman");
 	this->DiscardOn_OwnerChange_IgnoreRevertOnExit.Read(exINI, pSection, "DiscardOn.OwnerChange.IgnoreRevertOnExit");
+	this->AllowTransfer.Read(exINI, pSection, "AllowTransfer");
+	this->AllowTransfer_Convert.Read(exINI, pSection, "AllowTransfer.Convert");
 	this->PenetratesIronCurtain.Read(exINI, pSection, "PenetratesIronCurtain");
 	this->PenetratesForceShield.Read(exINI, pSection, "PenetratesForceShield");
 	this->AffectTypes.Read(exINI, pSection, "AffectTypes");
@@ -169,6 +171,7 @@ void AttachEffectTypeClass::LoadFromINI(CCINIClass* pINI)
 	this->ArmorMultiplier_AllowWarheads.Read(exINI, pSection, "ArmorMultiplier.AllowWarheads");
 	this->ArmorMultiplier_DisallowWarheads.Read(exINI, pSection, "ArmorMultiplier.DisallowWarheads");
 	this->ArmorMultiplier_Chance.Read(exINI, pSection, "ArmorMultiplier.Chance");
+	this->ArmorMultiplier_Delay.Read(exINI, pSection, "ArmorMultiplier.Delay");
 	this->ArmorMultiplier_AffectsHouse.Read(exINI, pSection, "ArmorMultiplier.AffectsHouse");
 	this->ArmorMultiplier_HitAnim.Read(exINI, pSection, "ArmorMultiplier.HitAnim");
 	this->SpeedMultiplier.Read(exINI, pSection, "SpeedMultiplier");
@@ -208,6 +211,7 @@ void AttachEffectTypeClass::LoadFromINI(CCINIClass* pINI)
 	this->ReflectDamage_AffectsHouse.Read(exINI, pSection, "ReflectDamage.AffectsHouses"); // Temporary solution for the INI tags renaming issue, see #2093
 	this->ReflectDamage_AffectsHouse.Read(exINI, pSection, "ReflectDamage.AffectsHouse");
 	this->ReflectDamage_Chance.Read(exINI, pSection, "ReflectDamage.Chance");
+	this->ReflectDamage_Delay.Read(exINI, pSection, "ReflectDamage.Delay");
 	this->ReflectDamage_Override.Read(exINI, pSection, "ReflectDamage.Override");
 	this->ReflectDamage_UseInvokerAsOwner.Read(exINI, pSection, "ReflectDamage.UseInvokerAsOwner");
 
@@ -245,11 +249,23 @@ void AttachEffectTypeClass::LoadFromINI(CCINIClass* pINI)
 		this->RequiresRecalculation = false;
 	}
 
-	// RestrictedArmorMultiplier
-	if (this->ArmorMultiplier_HitAnim.size() > 0 || (this->ArmorMultiplier != 1.0 && (this->ArmorMultiplier_AllowWarheads.size() > 0 || this->ArmorMultiplier_DisallowWarheads.size() > 0 || this->ArmorMultiplier_Chance < 1.0 || this->ArmorMultiplier_AffectsHouse != AffectedHouse::All)))
-		this->RestrictedArmorMultiplier = true;
+	// RequiresAnimUpdate
+	if (this->Animation_HideIfAttachedWith.size() > 0 || this->Animation_DrawOffsets.size() > 0)
+		this->RequiresAnimUpdate = true;
 	else
+		this->RequiresAnimUpdate = false;
+
+	// RestrictedArmorMultiplier
+	if (this->ArmorMultiplier_HitAnim.size() > 0 || (this->ArmorMultiplier != 1.0 && (this->ArmorMultiplier_AllowWarheads.size() > 0
+		|| this->ArmorMultiplier_DisallowWarheads.size() > 0 || this->ArmorMultiplier_Chance < 1.0
+		|| this->ArmorMultiplier_Delay > 0 || this->ArmorMultiplier_AffectsHouse != AffectedHouse::All)))
+	{
+		this->RestrictedArmorMultiplier = true;
+	}
+	else
+	{
 		this->RestrictedArmorMultiplier = false;
+	}
 }
 
 template <typename T>
@@ -281,6 +297,8 @@ void AttachEffectTypeClass::Serialize(T& Stm)
 		.Process(this->DiscardOn_OwnerChange_HumanToComputer)
 		.Process(this->DiscardOn_OwnerChange_ComputerToHuman)
 		.Process(this->DiscardOn_OwnerChange_IgnoreRevertOnExit)
+		.Process(this->AllowTransfer)
+		.Process(this->AllowTransfer_Convert)
 		.Process(this->PenetratesIronCurtain)
 		.Process(this->PenetratesForceShield)
 		.Process(this->AffectTypes)
@@ -306,6 +324,7 @@ void AttachEffectTypeClass::Serialize(T& Stm)
 		.Process(this->ArmorMultiplier_AllowWarheads)
 		.Process(this->ArmorMultiplier_DisallowWarheads)
 		.Process(this->ArmorMultiplier_Chance)
+		.Process(this->ArmorMultiplier_Delay)
 		.Process(this->ArmorMultiplier_AffectsHouse)
 		.Process(this->ArmorMultiplier_HitAnim)
 		.Process(this->SpeedMultiplier)
@@ -330,6 +349,7 @@ void AttachEffectTypeClass::Serialize(T& Stm)
 		.Process(this->ReflectDamage_Multiplier)
 		.Process(this->ReflectDamage_AffectsHouse)
 		.Process(this->ReflectDamage_Chance)
+		.Process(this->ReflectDamage_Delay)
 		.Process(this->ReflectDamage_Override)
 		.Process(this->ReflectDamage_UseInvokerAsOwner)
 		.Process(this->DisableWeapons)
@@ -338,6 +358,7 @@ void AttachEffectTypeClass::Serialize(T& Stm)
 		.Process(this->Groups)
 		.Process(this->Animation_DrawOffsets)
 		.Process(this->RequiresRecalculation)
+		.Process(this->RequiresAnimUpdate)
 		;
 }
 

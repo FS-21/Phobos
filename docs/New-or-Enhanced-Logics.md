@@ -36,6 +36,8 @@ This page describes all the engine features that are either new and introduced b
     - If used for an AE that has `DiscardOn=harvesting`, in order for it to judge correctly, this should be set to `true`.
   - `DiscardOn.ConsiderHarvestingAsStationary` defines whether to treat `harvesting` as `stationary`. When this flag is set to `false`, `DiscardOn=harvesting` can be used and it will not be considered `stationary` while `harvesting`.
     - In other words, the original `DiscardOn=stationary` is equivalent to `DiscardOn=harvesting,stationary` when this flag is set to `false`.
+  - `AllowTransfer` controls whether or not the effect can be transferred if the TechnoType changes (such as `(Un)DeploysInto` or Ares type conversion). If not set, defaults to false if the effect was attached by the TechnoType itself, otherwise true.
+    - `AllowTransfer.Convert` can be used to set this separately for type conversion, defaults to value of `AllowTransfer`.
   - If `PenetratesIronCurtain` is not set to true, the effect is not applied on currently invulnerable objects.
     - `PenetratesForceShield` can be used to set this separately for Force Shielded objects, defaults to value of `PenetratesIronCurtain`.
   - `AffectTypes`, if set to a non-empty list, restricts the effect to only be applicable on the specific unit types listed. If this is not set or empty, no whitelist filtering occurs. This check has the highest priority.
@@ -60,6 +62,7 @@ This page describes all the engine features that are either new and introduced b
   - `FirepowerMultiplier`, `ArmorMultiplier`, `SpeedMultiplier` and `ROFMultiplier` can be used to modify the object's firepower, armor strength, movement speed and weapon reload rate, respectively.
     - `ArmorMultiplier.AllowWarheads` and `ArmorMultiplier.DisallowWarheads` can be used to restrict which Warheads the armor multiplier is applied to when dealing damage.
     - `ArmorMultiplier.Chance` can be used to set the chance of whether the armor multiplier will take effect or not when taking damage.
+    - `ArmorMultiplier.Delay` can be used to set the delay of armor multiplier taking effect when taking damage since the last time.
     - `ArmorMultiplier.AffectsHouse` can be used to set which houses the armor multiplier will take effect.
     - `ArmorMultiplier.HitAnim` can be used to set the animation that'll be played when taking damage. Won't be displayed if the armor multiplier doesn't take effect due to `ArmorMultiplier.Allow/DisallowWarheads`, `ArmorMultiplier.Chance` or `ArmorMultiplier.AffectsHouse` settings. If more than one animation is listed, a random one is selected.
     - If `ROFMultiplier.ApplyOnCurrentTimer` is set to true, `ROFMultiplier` is applied on currently running reload timer (if any) when the effect is first applied.
@@ -73,7 +76,7 @@ This page describes all the engine features that are either new and introduced b
   - `RevengeWeapon` can be used to temporarily grant the specified weapon as a [revenge weapon](#revenge-weapon) for the attached object.
     - `RevengeWeapon.AffectsHouse` customizes which houses can trigger the revenge weapon.
     - `RevengeWeapon.UseInvokerAsOwner` can be used to set the house and TechnoType that created the effect (e.g firer of the weapon that applied it) as the weapon's owner & invoker instead of the object the effect is attached to.
-  - `ReflectDamage` can be set to true to have any positive damage dealt to the object the effect is attached to be reflected back to the attacker. `ReflectDamage.Warhead` determines which Warhead is used to deal the damage, defaults to `[CombatDamage] -> C4Warhead`. If `ReflectDamage.Warhead.Detonate` is set to true, the Warhead is fully detonated instead of used to simply deal damage. `ReflectDamage.Chance` determines the chance of reflection. `ReflectDamage.Multiplier` is a multiplier to the damage received and then reflected back, while `ReflectDamage.Override` directly overrides the damage. Already reflected damage cannot be further reflected back.
+  - `ReflectDamage` can be set to true to have any positive damage dealt to the object the effect is attached to be reflected back to the attacker. `ReflectDamage.Warhead` determines which Warhead is used to deal the damage, defaults to `[CombatDamage] -> C4Warhead`. If `ReflectDamage.Warhead.Detonate` is set to true, the Warhead is fully detonated instead of used to simply deal damage. `ReflectDamage.Chance` determines the chance of reflection. `ReflectDamage.Delay` can be used to set the delay of reflect damage taking effect when taking damage since the last time. `ReflectDamage.Multiplier` is a multiplier to the damage received and then reflected back, while `ReflectDamage.Override` directly overrides the damage. Already reflected damage cannot be further reflected back.
     - Warheads can prevent reflect damage from occuring by setting `SuppressReflectDamage` to true. `SuppressReflectDamage.Types` can control which AttachEffectTypes' reflect damage is suppressed, if none are listed then all of them are suppressed. `SuppressReflectDamage.Groups` does the same thing but for all AttachEffectTypes in the listed groups.
     - `ReflectDamage.UseInvokerAsOwner` can be used to set the house and TechnoType that created the effect (e.g firer of the weapon that applied it) as the reflected damage's owner & invoker instead of the object the effect is attached to.
   - `DisableWeapons` can be used to disable ability to fire any and all weapons.
@@ -94,7 +97,7 @@ This page describes all the engine features that are either new and introduced b
   - `AttachEffect.DurationOverrides`, `AttachEffect.Delays`, `AttachEffect.InitialDelays` and `AttachEffect.RecreationDelays` have the same functionalities like those tags on TechnoTypes.
   - `AttachEffect.AttachOnOwnerChange` can be used to make the Country's AttachEffectTypes also attach to a TechnoType once it's changed to this house.
 
-- AttachEffectTypes can be attached to objects via Warheads using `AttachEffect.AttachTypes`.
+- AttachEffectTypes can be attached to objects via Warheads or Weapons using `AttachEffect.AttachTypes`. When it is used on a Warhead, it will only be used when the warhead hits the target within the cellspread range. When it is used on a Weapon, it will directly act on the target at the instant after firing.
   - `AttachEffect.DurationOverrides` can be used to override the default durations. Duration matching the position in `AttachTypes` is used for that type, or the last listed duration if not available.
   - `AttachEffect.CumulativeSourceMaxCount` can be used to determine the maximum count of `Cumulative=true` effect from this source, or with no limit if `AttachEffect.CumulativeSourceMaxCount` is a negative number. Work independently from `Cumulative.MaxCount` of the effect. If the target already has `AttachEffect.CumulativeSourceMaxCount` number of the same effect from the same source applied on it, trying to attach another will refresh duration of the attached instance with shortest remaining duration.
   - `AttachEffect.CumulativeRefreshAll` if set to true makes it so that trying to attach `Cumulative=true` effect to a target that already has `Cumulative.MaxCount` amount of effects will refresh duration of all attached effects of the same type instead of only the one with shortest remaining duration. If `AttachEffect.CumulativeRefreshAll.OnAttach` is also set to true, this refresh applies even if the target does not have maximum allowed amount of effects of same type.
@@ -105,11 +108,12 @@ This page describes all the engine features that are either new and introduced b
     - `AttachEffect.CumulativeRemoveMaxCounts` sets maximum number of active instaces per `RemoveTypes`/`RemoveGroups` for `Cumulative=true` that are removed at once by this Warhead.
 
 - Weapons can require attached effects on target to fire, or be prevented by firing if specific attached effects are applied.
-  - `AttachEffect.RequiredTypes` can be used to list attached effects required to be on target to fire, all listed effect types must be present to allow firing.
-  - `AttachEffect.DisallowedTypes` can be used to list attached effects that when present prevent the weapon from firing, any of the listed effect types will prevent firing if present.
+  - `AttachEffect.RequiredTypes` can be used to list attached effects required to be on target to fire. If `AttachEffect.Required.Any` is set to true, any of the listed effect types will allow firing if present. Otherwise, all listed effect types must be present to allow firing.
+  - `AttachEffect.DisallowedTypes` can be used to list attached effects that when present prevent the weapon from firing. If `AttachEffect.Disallowed.Any` is set to true, any of the listed effect types will prevent firing if present. Otherwise, all listed effect types must be present to prevent firing.
   - `AttachEffect.Required/DisallowedGroups` have the same effect except applied with/to all types that have one of the listed groups in their `Groups` listing.
+  - `AttachEffect.Required/Disallowed.Houses` can be used to set effects from which houses can allow/prevent firing.
   - `AttachEffect.(Required|Disallowed)MinCounts & (Required|Disallowed)MaxCounts` can be used to set the minimum and maximum number of instances required / disallowed to be on the Techno for `Cumulative=true` types (ignored for other types) respectively.
-  - `AttachEffect.IgnoreFromSameSource` can be set to true to ignore effects that have been attached by the firer of the weapon and its Warhead.
+  - `AttachEffect.IgnoreFromSameSource` can be set to true to ignore effects that have been attached by the firer of the weapon and its Warhead. `AttachEffect.SameSourceOnly` does the opposite thing that'll ignore effects that come from other sources.
   - `AttachEffect.CheckOnFirer` is set to true makes it so that the required / disallowed attached effects are checked from the firer of the weapon instead of the target.
 
 In `rulesmd.ini`:
@@ -152,6 +156,8 @@ DiscardOn.ConsiderHarvestingAsStationary=          ; boolean, default to [Genera
 DiscardOn.OwnerChange.HumanToComputer=true         ; boolean
 DiscardOn.OwnerChange.ComputerToHuman=true         ; boolean
 DiscardOn.OwnerChange.IgnoreRevertOnExit=false     ; boolean
+AllowTransfer=                                     ; boolean
+AllowTransfer.Convert=                             ; boolean
 PenetratesIronCurtain=false                        ; boolean
 PenetratesForceShield=                             ; boolean
 AffectTypes=                                       ; List of TechnoTypes
@@ -179,6 +185,7 @@ ArmorMultiplier=1.0                                ; floating point value
 ArmorMultiplier.AllowWarheads=                     ; List of WarheadTypes
 ArmorMultiplier.DisallowWarheads=                  ; List of WarheadTypes
 ArmorMultiplier.Chance=1.0                         ; floating point value
+ArmorMultiplier.Delay=0                            ; integer
 ArmorMultiplier.AffectsHouse=all                   ; List of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all)
 ArmorMultiplier.HitAnim=                           ; List of AnimationTypes
 SpeedMultiplier=1.0                                ; floating point value
@@ -203,6 +210,7 @@ ReflectDamage.Warhead.Detonate=false               ; WarheadType
 ReflectDamage.Multiplier=1.0                       ; floating point value, percents or absolute
 ReflectDamage.AffectsHouse=all                     ; List of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all)
 ReflectDamage.Chance=1.0                           ; floating point value
+ReflectDamage.Delay=0                              ; integer
 ReflectDamage.Override=                            ; integer
 ReflectDamage.UseInvokerAsOwner=false              ; boolean
 DisableWeapons=false                               ; boolean
@@ -228,15 +236,29 @@ AttachEffect.RecreationDelays=                     ; integer - recreation delays
 AttachEffect.AttachOnOwnerChange=                  ; boolean, default to [General] -> AttachEffect.AttachOnOwnerChange
 
 [SOMEWEAPON]                                       ; WeaponType
+AttachEffect.AttachTypes=                          ; List of AttachEffectTypes
+AttachEffect.CumulativeRefreshAll=false            ; boolean
+AttachEffect.CumulativeRefreshAll.OnAttach=false   ; boolean
+AttachEffect.CumulativeRefreshSameSourceOnly=true  ; boolean
+AttachEffect.RemoveTypes=                          ; List of AttachEffectTypes
+AttachEffect.RemoveGroups=                         ; comma-separated list of strings (group IDs)
+AttachEffect.CumulativeRemoveMinCounts=            ; integer - minimum required instance count (comma-separated) for cumulative types in order from first to last.
+AttachEffect.CumulativeRemoveMaxCounts=            ; integer - maximum removed instance count (comma-separated) for cumulative types in order from first to last.
+AttachEffect.DurationOverrides=                    ; integer - duration overrides (comma-separated) for AttachTypes in order from first to last.
 AttachEffect.RequiredTypes=                        ; List of AttachEffectTypes
 AttachEffect.DisallowedTypes=                      ; List of AttachEffectTypes
 AttachEffect.RequiredGroups=                       ; comma-separated list of strings (group IDs)
 AttachEffect.DisallowedGroups=                     ; comma-separated list of strings (group IDs)
 AttachEffect.RequiredMinCounts=                    ; integer - minimum required instance count (comma-separated) for cumulative types in order from first to last.
 AttachEffect.RequiredMaxCounts=                    ; integer - maximum required instance count (comma-separated) for cumulative types in order from first to last.
+AttachEffect.Required.Any=false                    ; boolean
+AttachEffect.Required.Houses=all                   ; List of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all)
 AttachEffect.DisallowedMinCounts=                  ; integer - minimum disallowed instance count (comma-separated) for cumulative types in order from first to last.
 AttachEffect.DisallowedMaxCounts=                  ; integer - maximum disallowed instance count (comma-separated) for cumulative types in order from first to last.
+AttachEffect.Disallowed.Any=true                   ; boolean
+AttachEffect.Disallowed.Houses=all                 ; List of Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|all)
 AttachEffect.IgnoreFromSameSource=false            ; boolean
+AttachEffect.SameSourceOnly=false                  ; boolean
 AttachEffect.CheckOnFirer=false                    ; boolean
 
 [SOMEWARHEAD]                                      ; WarheadType
@@ -440,6 +462,7 @@ PassPercent=0.0                             ; floating point value
 ReceivedDamage.Minimum=-2147483648          ; integer
 ReceivedDamage.Maximum=2147483647           ; integer
 AllowTransfer=                              ; boolean
+AllowTransfer.Convert=                      ; boolean
 ImmuneToBerserk=no                          ; boolean
 ImmuneToCrit=no                             ; boolean
 Tint.Color=                                 ; integer - Red,Green,Blue
@@ -529,6 +552,7 @@ Shield.InheritStateOnReplace=false          ; boolean
 - `PassPercent` controls the percentage of damage that will *not* be absorbed by the shield, and will be dealt to the unit directly even if the shield is active. Defaults to 0.0 - no penetration.
 - `ReceivedDamage.Minimum` & `ReceivedDamage.Maximum` control the minimum and maximum amount of damage that can be dealt to shield in a single hit. This is applied after armor type and `AbsorbPercent` adjustments. If `AbsorbOverDamage=false`, the residual damage dealt to the TechnoType is still based on the original damage before the clamping to the range.
 - `AllowTransfer` controls whether or not the shield can be transferred if the TechnoType changes (such as `(Un)DeploysInto` or Ares type conversion). If not set, defaults to true if shield was attached via `Shield.AttachTypes`, otherwise false.
+  - `AllowTransfer.Convert` can be used to set this separately for type conversion, defaults to value of `AllowTransfer`.
 - `ImmuneToBerserk` gives the immunity against `Psychedelic=yes` warhead. Otherwise the berserk effect penetrates shields by default. Note that this shouldn't prevent the unit from targeting at the shielded object. `Versus.shieldArmor=0%` is still required in this case.
 - A tint effect similar to that used by Iron Curtain / Force Shield or `Psychedelic=true` Warheads can be applied to TechnoTypes with shields by setting `Tint.Color` and/or `Tint Intensity`.
   - `Tint.Intensity` is additive lighting increase/decrease - 1.0 is the default object lighting.
@@ -1879,37 +1903,40 @@ DrainMoneyDisplay.OnTarget.UseDisplayIncome=        ; boolean
 - You can also customize range bonus and damage multiplier for passenger inside the transport with `OpenTransport.RangeBonus/DamageMultiplier`, which works independently from transport's `OpenTopped.RangeBonus/DamageMultiplier`.
 - `OpenTopped.DecloakToFire` can customize if a transport has to uncloak to have passengers fireout if transport is also OpenTopped.
 - `OpenTopped/OpenTransport.FireWhileMoving` can be used to customize whether or not passengers can fire out when the transport is moving, for transport and passenger respectively. Both of them and the weapon's `FireWhileMoving` toggle need to be set to true to allow firing out when moving.
+  - `OpenTopped.FireWhileMoving.BasedOnDestination` defines whether to determine the movement state according to the presence or absence of a destination. This is more similar to how vanilla `FireWhileMoving` work.
 
 In `rulesmd.ini`:
 ```ini
 [General]
-OpenTopped.IgnoreRangefinding=false               ; boolean
-OpenTopped.AllowFiringIfDeactivated=true          ; boolean
-OpenTopped.AllowFiringIfAttackedByLocomotor=true  ; boolean
-OpenTopped.ShareTransportTarget=true              ; boolean
-OpenTopped.DecloakToFire=true                     ; boolean
-OpenTopped.FireWhileMoving=true                   ; boolean
-OpenTransport.FireWhileMoving=true                ; boolean
+OpenTopped.IgnoreRangefinding=false                 ; boolean
+OpenTopped.AllowFiringIfDeactivated=true            ; boolean
+OpenTopped.AllowFiringIfAttackedByLocomotor=true    ; boolean
+OpenTopped.ShareTransportTarget=true                ; boolean
+OpenTopped.DecloakToFire=true                       ; boolean
+OpenTopped.FireWhileMoving=true                     ; boolean
+OpenTopped.FireWhileMoving.BasedOnDestination=false ; boolean
+OpenTransport.FireWhileMoving=true                  ; boolean
 
 [CombatDamage]
-OpenTransport.RangeBonus=0                        ; integer
-OpenTransport.DamageMultiplier=1.0                ; floating point value
+OpenTransport.RangeBonus=0                          ; integer
+OpenTransport.DamageMultiplier=1.0                  ; floating point value
 
-[SOMETECHNO]                                      ; TechnoType, transport with OpenTopped=yes
-OpenTopped.RangeBonus=                            ; integer, default to [CombatDamage] -> OpenToppedRangeBonus
-OpenTopped.DamageMultiplier=                      ; floating point value, default to [CombatDamage] -> OpenToppedDamageMultiplier
-OpenTopped.WarpDistance=                          ; integer, default to [CombatDamage] -> OpenToppedWarpDistance
-OpenTopped.IgnoreRangefinding=                    ; boolean, default to [General] -> OpenTopped.IgnoreRangefinding
-OpenTopped.AllowFiringIfDeactivated=              ; boolean, default to [General] -> OpenTopped.AllowFiringIfDeactivated
-OpenTopped.AllowFiringIfAttackedByLocomotor=      ; boolean, default to [General] -> OpenTopped.AllowFiringIfAttackedByLocomotor
-OpenTopped.ShareTransportTarget=                  ; boolean, default to [General] -> OpenTopped.ShareTransportTarget
-OpenTopped.DecloakToFire=                         ; boolean, default to [General] -> OpenTopped.DecloakToFire
-OpenTopped.FireWhileMoving=                       ; boolean, default to [General] -> OpenTopped.FireWhileMoving
+[SOMETECHNO]                                        ; TechnoType, transport with OpenTopped=yes
+OpenTopped.RangeBonus=                              ; integer, default to [CombatDamage] -> OpenToppedRangeBonus
+OpenTopped.DamageMultiplier=                        ; floating point value, default to [CombatDamage] -> OpenToppedDamageMultiplier
+OpenTopped.WarpDistance=                            ; integer, default to [CombatDamage] -> OpenToppedWarpDistance
+OpenTopped.IgnoreRangefinding=                      ; boolean, default to [General] -> OpenTopped.IgnoreRangefinding
+OpenTopped.AllowFiringIfDeactivated=                ; boolean, default to [General] -> OpenTopped.AllowFiringIfDeactivated
+OpenTopped.AllowFiringIfAttackedByLocomotor=        ; boolean, default to [General] -> OpenTopped.AllowFiringIfAttackedByLocomotor
+OpenTopped.ShareTransportTarget=                    ; boolean, default to [General] -> OpenTopped.ShareTransportTarget
+OpenTopped.DecloakToFire=                           ; boolean, default to [General] -> OpenTopped.DecloakToFire
+OpenTopped.FireWhileMoving=                         ; boolean, default to [General] -> OpenTopped.FireWhileMoving
+OpenTopped.FireWhileMoving.BasedOnDestination=      ; boolean, default to [General] -> OpenTopped.FireWhileMoving.BasedOnDestination
 
-[SOMETECHNO]                                      ; TechnoType, passenger
-OpenTransport.RangeBonus=                         ; integer, default to [CombatDamage] -> OpenTransport.RangeBonus
-OpenTransport.DamageMultiplier=                   ; floating point value, default to [CombatDamage] -> OpenTransport.DamageMultiplier
-OpenTransport.FireWhileMoving=                    ; boolean, default to [General] -> OpenTransport.FireWhileMoving
+[SOMETECHNO]                                        ; TechnoType, passenger
+OpenTransport.RangeBonus=                           ; integer, default to [CombatDamage] -> OpenTransport.RangeBonus
+OpenTransport.DamageMultiplier=                     ; floating point value, default to [CombatDamage] -> OpenTransport.DamageMultiplier
+OpenTransport.FireWhileMoving=                      ; boolean, default to [General] -> OpenTransport.FireWhileMoving
 ```
 
 ```{note}
@@ -1917,7 +1944,7 @@ Range of passive acquiring of passengers in an OpenTopped transport won't be aff
 ```
 
 ```{note}
-Due to technical issues, the behaviors of `OpenTopped/OpenTransport.FireWhileMoving` and `FireWhileMoving` for opentopped transport are somewhat different from `FireWhileMoving` for regular techno. This might be changed in the future.
+Due to technical issues, the behaviors of `OpenTopped/OpenTransport.FireWhileMoving` and `FireWhileMoving` for opentopped transport are somewhat different from `FireWhileMoving` for regular techno even if `OpenTopped.FireWhileMoving.BasedOnDestination` is set to true. This might be changed in the future.
 ```
 
 ### Customizable spawns queue
@@ -2303,17 +2330,22 @@ AutoDeath.PlayerMoneyMoreThan=-1                  ; integer
 Please notice that if the object is a unit which carries passengers, they will not be released even with the `kill` option **if you are not using Ares 3.0+**.
 ```
 
-### Low priority for deploy
+### Customize whether the unit can deploy
 
-- You can now set lower priority for TechnoType deploying which means it will be excluded from deploy command if selected together with other units. This will not affect the cursor action which requires no other objects to be selected in the first place.
+- You can now set lower/high priority for TechnoType deploying. This will not affect the cursor action which requires no other objects to be selected in the first place.
+  - `LowDeployPriority` will be excluded from deploy command if selected together with other units.
+  - `HighDeployPriority` will exclude other units without it from deploy command if selected together.
+- You can also set `DeployForbidTypes` to exclude TechnoType from deploy command if selected together with units listed in it.
 
 In `rulesmd.ini`:
 ```ini
 [SOMETECHNO]             ; TechnoType
 LowDeployPriority=false  ; boolean
+HighDeployPriority=false ; boolean
+DeployForbidTypes=       ; List of TechnoTypes
 ```
 
-- This behavior is designed to be toggleable by users. For now you can only do that externally via client or manually.
+- Low/high deploy priority is designed to be toggleable by users. For now you can only do that externally via client or manually.
 
 In `RA2MD.INI`:
 ```ini
@@ -3155,6 +3187,33 @@ In `rulesmd.ini`:
 AffectsUnderground=false              ; boolean
 PlayAnimUnderground=true              ; boolean
 PlayAnimAboveSurface=false            ; boolean
+```
+
+### Detonate ivan bomb on impact
+
+![image](_static/images/IvanBombDetonate.gif)
+*Ivan detonated the bomb via deploy*
+
+- Now you can detonate planted Ivan bombs using custom werhead.
+  - `IvanBomb.Detonate.SameInvokerOnly` can be used to configure whether the warhead can detonate ivan bombs only if they come from the same invoker.
+  - `IvanBomb.Detonate.PenetratesTransport` can be used to configure whether the warhead can detonate ivan bombs on a unit that is inside a transport. The bomb will explode after the unit is unloaded.
+  - `IvanBomb.Detonate.PenetratesGarrison` can be used to configure whether the warhead can detonate ivan bombs on a unit that is inside a building. The bomb will explode after the unit leaves the building.
+  - `IvanBomb.Detonate.AffectsParasite` can be used to configure whether the warhead can detonate IvanBombs on a parasite. the bomb will explode after the parasite leave the victim.
+  - `IvanBomb.Detonate.AffectTypes` can be used to configure Ivan bombs from which TechnoType can be detonated by warhead, use empty for all types.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]                                ; WarheadType
+IvanBomb.Detonate=false                      ; boolean
+IvanBomb.Detonate.SameInvokerOnly=true       ; boolean
+IvanBomb.Detonate.PenetratesTransport=false  ; boolean
+IvanBomb.Detonate.PenetratesGarrison=false   ; boolean
+IvanBomb.Detonate.AffectsParasite=false      ; boolean
+IvanBomb.Detonate.AffectTypes=               ; List of TechnoTypes
+```
+
+```{note}
+`IvanBomb.Detonate.AffectTypes` doesn't work if the owner of the Ivan bomb is dead. This may change in future.
 ```
 
 ### Detonate Warhead on all objects on map

@@ -77,6 +77,9 @@ AttachEffectClass::AttachEffectClass(AttachEffectTypeClass* pType, TechnoClass* 
 			&& (!pInvokerHouse || EnumFunctions::CanTargetHouse(pType->ArmorMultiplier_AffectsHouse, pTechno->Owner, pInvokerHouse))))
 		{
 			armorMultiplier *= pType->ArmorMultiplier;
+
+			if (pType->ArmorMultiplier_Delay > 0)
+				this->ArmorMultiplierTimer.Start(pType->ArmorMultiplier_Delay);
 		}
 
 		duration = Math::max(static_cast<int>(duration / armorMultiplier), 0);
@@ -345,7 +348,7 @@ void AttachEffectClass::UpdateConditionalAnimDrawingLogic()
 	{
 		auto const pTechnoExt = TechnoExt::Fetch(this->Techno);
 
-		if (pTechnoExt->HasAttachedEffects(this->Type->Animation_HideIfAttachedWith, false, false, nullptr, nullptr, nullptr, nullptr))
+		if (pTechnoExt->HasAttachedEffects(this->Type->Animation_HideIfAttachedWith, false, false, false, nullptr, nullptr, nullptr, nullptr))
 		{
 			// Inlined because calling KillAnim() would cause recursive calls to this function.
 			if (this->Animation)
@@ -369,7 +372,7 @@ void AttachEffectClass::UpdateConditionalAnimDrawingLogic()
 
 		for (auto const& drawOffset : this->Type->Animation_DrawOffsets)
 		{
-			if (drawOffset.RequiredTypes.size() < 1 || pTechnoExt->HasAttachedEffects(drawOffset.RequiredTypes, false, false, nullptr, nullptr, nullptr, nullptr, true))
+			if (drawOffset.RequiredTypes.size() < 1 || pTechnoExt->HasAttachedEffects(drawOffset.RequiredTypes, false, false, false, nullptr, nullptr, nullptr, nullptr, true))
 				pAnimExt->AEDrawOffset += drawOffset.Offset;
 		}
 	}
@@ -487,7 +490,9 @@ void AttachEffectClass::CreateAnim()
 
 		pAnim->RemainingIterations = 0xFFu;
 		this->Animation = pAnim;
-		this->ShouldUpdateAnim = true;
+
+		if (pType->RequiresAnimUpdate)
+			this->ShouldUpdateAnim = true;
 	}
 }
 
@@ -501,7 +506,14 @@ bool AttachEffectClass::UpdateCumulativeAnim(int count)
 	if (count < 1)
 	{
 		this->KillAnim();
-		return true;
+
+		if (this->ShouldUpdateAnim)
+		{
+			this->ShouldUpdateAnim = false;
+			return true;
+		}
+
+		return false;
 	}
 
 	const auto pType = this->Type;
@@ -1061,6 +1073,7 @@ int AttachEffectClass::DetachTypes(TechnoClass* pTarget, AEAttachInfoTypeClass c
 	int detachedCount = 0;
 	bool markForRedraw = false;
 	bool requiresRecalc = false;
+	bool requiresAnimUpdate = false;
 	auto const& minCounts = attachEffectInfo.CumulativeRemoveMinCounts;
 	auto const& maxCounts = attachEffectInfo.CumulativeRemoveMaxCounts;
 	size_t index = 0;
@@ -1079,6 +1092,9 @@ int AttachEffectClass::DetachTypes(TechnoClass* pTarget, AEAttachInfoTypeClass c
 			if (pType->RequiresRecalculation)
 				requiresRecalc = true;
 
+			if (pType->RequiresAnimUpdate)
+				requiresAnimUpdate = true;
+
 			if (pType->HasTint())
 				markForRedraw = true;
 		}
@@ -1090,10 +1106,12 @@ int AttachEffectClass::DetachTypes(TechnoClass* pTarget, AEAttachInfoTypeClass c
 	if (detachedCount > 0)
 	{
 		const auto pExt = TechnoExt::Fetch(pTarget);
-		pExt->UpdateAEAnimDrawingLogic();
 
 		if (requiresRecalc)
 			pExt->RecalculateStatMultipliers();
+
+		if (requiresAnimUpdate)
+			pExt->UpdateAEAnimDrawingLogic();
 
 		if (markForRedraw)
 		{
@@ -1208,24 +1226,26 @@ void AttachEffectClass::TransferAttachedEffects(TechnoClass* pSource, TechnoClas
 	for (it = pSourceExt->AttachedEffects.begin(); it != pSourceExt->AttachedEffects.end(); )
 	{
 		auto const attachEffect = it->get();
+		auto const type = attachEffect->GetType();
 
-		if (attachEffect->IsSelfOwned())
+		if (!type->AllowTransfer.Get(!attachEffect->IsSelfOwned()))
 		{
 			++it;
 			continue;
 		}
 
-		auto const type = attachEffect->GetType();
 		const bool isValid = EnumFunctions::IsTechnoEligible(pTarget, type->AffectsTarget, true)
 			&& (type->AffectTypes.empty() || type->AffectTypes.Contains(pTargetType)) && !type->IgnoreTypes.Contains(pTargetType);
 
 		if (!isValid)
 		{
 			it = pSourceExt->AttachedEffects.erase(it);
-			requiresUpdateAnim = true;
 
 			if (type->RequiresRecalculation)
 				requiresRecalc = true;
+
+			if (type->RequiresAnimUpdate)
+				requiresUpdateAnim = true;
 
 			if (type->HasTint())
 				markForRedraw = true;
@@ -1296,6 +1316,13 @@ void AttachEffectClass::TransferAttachedEffects(TechnoClass* pSource, TechnoClas
 				// discard count
 				pAE->FiringCount = attachEffect->FiringCount;
 				pAE->ReceivedDamageCount = attachEffect->ReceivedDamageCount;
+
+				// delay
+				if (type->ArmorMultiplier_Delay > 0 && attachEffect->ArmorMultiplierTimer.HasTimeLeft())
+					pAE->ArmorMultiplierTimer.Start(attachEffect->ArmorMultiplierTimer.GetTimeLeft());
+
+				if (type->ReflectDamage_Delay > 0 && attachEffect->ReflectDamageTimer.HasTimeLeft())
+					pAE->ReflectDamageTimer.Start(attachEffect->ReflectDamageTimer.GetTimeLeft());
 			}
 		}
 
@@ -1388,6 +1415,8 @@ bool AttachEffectClass::Serialize(T& Stm)
 		.Process(this->LastSequenceCheck)
 		.Process(this->FiringCount)
 		.Process(this->ReceivedDamageCount)
+		.Process(this->ArmorMultiplierTimer)
+		.Process(this->ReflectDamageTimer)
 		.Success();
 }
 
