@@ -356,10 +356,6 @@ public:
 
 		Valueable<bool> AnimCraterDestroyTiberium;
 
-		DynamicVectorClass<DynamicVectorClass<int>> GenericPrerequisites;
-		DynamicVectorClass<const char*> GenericPrerequisitesNames;
-		DynamicVectorClass<DynamicVectorClass<TechnoTypeClass*>> GenericPrerequisitesAlternates;
-
 		Valueable<bool> NewTeamsSelector;
 		Valueable<bool> NewTeamsSelector_SplitTriggersByCategory;
 		Valueable<bool> NewTeamsSelector_EnableFallback;

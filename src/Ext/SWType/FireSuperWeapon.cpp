@@ -963,41 +963,6 @@ void SWTypeExt::ApplyDropshipLoadoutLaunch(HouseClass* pHouse, const CellStruct&
 
 	pTeam->AddMember(pTransporter, true);
 	pTransporter->SetDestination(pTransporter, true);
-=======
-	if (const auto pOwnerExt = HouseExt::TryFetch(pSW->Owner))
-	{
-		for (size_t i = 0; i < this->SW_ResourceAmounts.size(); ++i)
-		{
-			const int amount = this->SW_ResourceAmounts[i];
-			if (amount != 0)
-			{
-				pOwnerExt->UpdateResourceAmount(static_cast<int>(i), amount);
-			}
-		}
-	}
-}
-
-bool SWTypeExt::AreResourcesSufficient(HouseClass* pHouse) const
-{
-	if (!pHouse)
-		return false;
-
-	const auto pOwnerExt = HouseExt::TryFetch(pHouse);
-	if (!pOwnerExt)
-		return false;
-
-	for (size_t i = 0; i < this->SW_ResourceAmounts.size(); ++i)
-	{
-		const int amount = this->SW_ResourceAmounts[i];
-		if (amount < 0) // Negative amount = required cost
-		{
-			if (pOwnerExt->GetResourceAmount(static_cast<int>(i)) < std::abs(amount))
-				return false;
-		}
-	}
-
-	return true;
->>>>>>> feature/multi-resource-system
 }
 
 void SWTypeExt::ApplyActivatedMessage(SuperClass* pSW) const

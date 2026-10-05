@@ -73,6 +73,11 @@ public:
 		return this->Type;
 	}
 
+	bool IsAvailable() const
+	{
+		return this->Type != nullptr;
+	}
+
 	ArmorType GetArmorType(TechnoTypeClass* pTechnoType = nullptr) const;
 	int GetFramesSinceLastBroken() const { return Unsorted::CurrentFrame - this->LastBreakFrame; }
 	void UpdateTint();

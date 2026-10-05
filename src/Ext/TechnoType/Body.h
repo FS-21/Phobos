@@ -579,14 +579,6 @@ public:
 
 	Nullable<bool> ConsideredNaval;
 	Nullable<bool> ConsideredVehicle;
-	Valueable<bool> ConsideredSecretLabTech;
-	std::vector<std::string> Secret_RequiredHouses;
-	std::vector<std::string> Secret_ForbiddenHouses;
-	DWORD PrerequisiteTheaters;
-	ValueableVector<int> Prerequisite;
-	ValueableVector<int> Prerequisite_Negative;
-	Valueable<int> Prerequisite_Lists;
-	std::vector<DynamicVectorClass<int>> Prerequisite_ListVector;
 
 	std::vector<int> ResourceCosts;
 	std::vector<int> ResourceBounties;
@@ -1097,14 +1089,6 @@ public:
 		, FlyingProduction_RallyPointFromSpawnBuilding { false }
 		, ConsideredNaval {}
 		, ConsideredVehicle {}
-		, ConsideredSecretLabTech { false }
-		, Secret_RequiredHouses {}
-		, Secret_ForbiddenHouses {}
-		, PrerequisiteTheaters { 0xFFFFFFFF }
-		, Prerequisite {}
-		, Prerequisite_Negative {}
-		, Prerequisite_Lists { -1 }
-		, Prerequisite_ListVector {}
 		, ResourceCosts {}
 		, ResourceBounties {}
 		, ResourceFriendlyBounties {}

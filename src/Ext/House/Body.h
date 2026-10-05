@@ -399,6 +399,10 @@ public:
 	void AddToLimboTracking(TechnoTypeClass* pTechnoType);
 	void RemoveFromLimboTracking(TechnoTypeClass* pTechnoType);
 	int CountOwnedPresentAndLimboed(TechnoTypeClass* pTechnoType) const;
+	bool HasOwnedPresentAndLimboed(TechnoTypeClass* pTechnoType) const
+	{
+		return this->CountOwnedPresentAndLimboed(pTechnoType) > 0;
+	}
 	void UpdateNonMFBFactoryCounts(AbstractType rtti, bool remove, bool isNaval);
 	int GetFactoryCountWithoutNonMFB(AbstractType rtti, bool isNaval) const;
 	float GetRestrictedFactoryPlantMult(TechnoTypeClass* pTechnoType) const;
@@ -494,13 +498,6 @@ public:
 	static void AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse);
 	static void AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse);
 	static void AdvAI_Update_Defensive_Placeholders(HouseClass* pHouse);
-
-	static int FindGenericPrerequisite(const char* id);
-	static bool HasBuildingPrerequisite(HouseClass* const pHouse, int idxBuildingType);
-	static bool HasGenericPrerequisite(int idx, HouseClass* pHouse);
-	static bool HasPrerequisite(HouseClass* const pHouse, int idx);
-	static bool IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* const pItem);
-	static bool PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool skipSecretLabChecks = false);
 
 	static bool IsDisabledFromShell(
 	HouseClass const* pHouse, BuildingTypeClass const* pItem);

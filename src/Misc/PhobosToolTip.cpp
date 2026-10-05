@@ -330,7 +330,7 @@ void PhobosToolTip::HelpText_Super(int swidx)
 			}
 		}
 
-		showSth = true;
+		lineStarted = true;
 	}
 
 	auto const& sw_ext = HouseExt::Fetch(HouseClass::CurrentPlayer)->SuperExts[swidx];
