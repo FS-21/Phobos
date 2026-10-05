@@ -1278,6 +1278,16 @@ ID=EventCount,...,606,2,0,[AttachEffectType],...
 ...
 ```
 
+### `607` A webby weapon hit the tagged infantry
+
+In `mycampaign.map`:
+```ini
+[Events]
+...
+ID=EventCount,...,607,0,0,...
+...
+```
+
 ### `1000` & `1001` Switch event evaluation mode (Sequential / Parallel)
 
 - By default, the game evaluates all trigger events in parallel (simultaneously).
