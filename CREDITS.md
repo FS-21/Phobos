@@ -173,6 +173,7 @@ This page lists all the individual contributions to the project by their author.
   - Custom theater types support and Tiberian Sun ice cracking, breaking, and regeneration mechanics restoration (design inspired by CCHyper's work in Vinifera).
   - Flying production
   - Rally point customization
+  - Recursive spawn conversion on spawner type conversion
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
