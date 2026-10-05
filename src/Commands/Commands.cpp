@@ -105,7 +105,7 @@ static void MouseWheelDownCommand()
 	if (ObserverUIClass::IsActive() && ObserverUIClass::Instance.HandleMouseWheel(false))
 		return;
 
-	if (MessageColumnClass::Instance.IsHovering())
+	if (MessageColumnClass::Instance.IsHovering() && !ScenarioClass::Instance->UserInputLocked)
 		MessageColumnClass::Instance.ScrollDown();
 }
 
@@ -114,7 +114,7 @@ static void MouseWheelUpCommand()
 	if (ObserverUIClass::IsActive() && ObserverUIClass::Instance.HandleMouseWheel(true))
 		return;
 
-	if (MessageColumnClass::Instance.IsHovering())
+	if (MessageColumnClass::Instance.IsHovering() && !ScenarioClass::Instance->UserInputLocked)
 		MessageColumnClass::Instance.ScrollUp();
 }
 
