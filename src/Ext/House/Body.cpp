@@ -738,6 +738,7 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->DefensivePlaceholders)
 		.Process(this->ConsecutiveCombatBuilds)
 		.Process(this->ConsecutiveResourceBuilds)
+		.Process(this->ActiveEvaVoiceBuildingType)
 		//.Process(this->BeaconsPlacedOrder) beacon is not saved, so this follows it.
 		.Process(this->TiberiumStorage)
 		.Process(this->WeedStorage)
@@ -805,6 +806,7 @@ void HouseExt::OnDetach(BuildingClass* pTarget, bool removed)
 		AnnounceInvalidPointer(this->Factory_VehicleType, pTarget);
 		AnnounceInvalidPointer(this->Factory_NavyType, pTarget);
 		AnnounceInvalidPointer(this->Factory_AircraftType, pTarget);
+		AnnounceInvalidPointer(this->ActiveEvaVoiceBuildingType, pTarget);
 
 		if (!this->PowerPlantEnhancers.empty())
 		{
