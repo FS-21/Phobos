@@ -2,6 +2,13 @@
 
 #include <Ext/House/Body.h>
 #include <Ext/Scenario/Body.h>
+#include <Ext/Techno/Body.h>
+#include <Ext/Script/Body.h>
+#include <BuildingClass.h>
+#include <InfantryClass.h>
+#include <UnitClass.h>
+#include <AircraftClass.h>
+#include <HouseClass.h>
 #include <New/Entity/ShieldClass.h>
 #include <New/Type/ResourceTypeClass.h>
 
@@ -143,6 +150,8 @@ std::optional<bool> TEventExt::Execute(TEventClass* pThis, int iEvent, HouseClas
 		return TEventExt::HouseOwnsTechnoTypeTEvent(pThis);
 	case PhobosTriggerEvent::HouseDoesntOwnTechnoType:
 		return TEventExt::HouseDoesntOwnTechnoTypeTEvent(pThis);
+	case PhobosTriggerEvent::HousesDestroyed:
+		return TEventExt::HousesAreDestroyedTEvent(pThis);
 	case PhobosTriggerEvent::CellHasTechnoType:
 		return TEventExt::CellHasTechnoTypeTEvent(pThis, pObject, pHouse);
 	case PhobosTriggerEvent::CellHasAnyTechnoTypeFromList:
@@ -382,6 +391,42 @@ bool TEventExt::HouseHasCustomResource(TEventClass* pThis, HouseClass* pEventHou
 	const int targetAmount = pThis->Value;
 
 	return isGreaterThan ? (currentAmount > targetAmount) : (currentAmount < targetAmount);
+}
+
+bool TEventExt::HousesAreDestroyedTEvent(TEventClass* pThis)
+{
+	const int nIdxVariable = pThis->Value;
+
+	if (nIdxVariable < 0)
+		return false;
+	
+	if (RulesExt::Global()->AIHousesLists.size() == 0)
+	{
+		Debug::Log("Map event %d: [AIHousesList] is empty. This event can't continue.\n", (int)pThis->EventKind);
+		return false;
+	}
+
+	std::vector<HouseTypeClass*> housesList = RulesExt::Global()->AIHousesLists.at(nIdxVariable);
+	
+	if (housesList.size() == 0)
+	{
+		Debug::Log("Map event %d: List [AIHousesList](%d) is empty. This event can't continue.\n", (int)pThis->EventKind, nIdxVariable);
+		return false;
+	}
+
+	for (const auto pTechno : TechnoClass::Array)
+	{
+		if (!ScriptExt::IsUnitAvailable(pTechno, false))
+			continue;
+
+		for (const auto pHouse : housesList)
+		{
+			if (pTechno->Owner->Type == pHouse)
+				return false;
+		}
+	}
+
+	return true;
 }
 
 // =============================
