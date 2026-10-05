@@ -205,6 +205,7 @@ This page lists all the individual contributions to the project by their author.
   - Custom in-game font
   - Superweapon cooldown groups
   - Randomize AI superweapon priority
+  - Fix unit type conversion corrupting factory queue and freezing production when units are being produced
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
