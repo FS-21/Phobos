@@ -1429,6 +1429,7 @@ void TechnoExt::Serialize(T& Stm)
 		.Process(this->WebbyAnim)
 		.Process(this->WebbyLastTarget)
 		.Process(this->WebbyLastMission)
+		.Process(this->SpawnRandomTarget)
 		;
 }
 

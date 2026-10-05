@@ -164,6 +164,7 @@ This page lists all the individual contributions to the project by their author.
   - Engineer logics on Warheads
   - Penetration damage on garrisonable structures
   - Customizable disguised target evaluation behaviour in new ScriptType attack actions
+  - `RandomTarget` for weapon random retargeting
   - Unit & infantry auto-conversion on ammo change
   - Dropship Loadout
   - Events 1000 & 1001: Switch event evaluation mode (Sequential / Parallel)

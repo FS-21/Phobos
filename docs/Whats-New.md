@@ -2030,6 +2030,7 @@ HideShakeEffects=false           ; boolean
 - [Customize whether mind-controlled `Insignificant` technos can be auto-targeted](Fixed-or-Improved-Logics.md#customize-whether-mind-controlled-insignificant-technos-can-be-auto-targeted) (by Noble_Fish)
 - [Mission selection screen](User-Interface.md#mission-selection-screen) (by FS-21)
 - [Customizable disguised target evaluation behaviour in new ScriptType attack actions](Fixed-or-Improved-Logics.md#customizable-disguised-target-evaluation-behaviour-in-new-scripttype-attack-actions) (by FS-21)
+- [Weapon random target](New-or-Enhanced-Logics.md#weapon-random-target) (by FS-21)
 - [AutoDeath based on player power status and player credits](New-or-Enhanced-Logics.md#kill-object-automatically) (by Flactine)
 - [Roof production anim](New-or-Enhanced-Logics.md#roof-production-anim) (by Noble_Fish)
 - [Customize whether the unit exits from the roof](Fixed-or-Improved-Logics.md#customize-whether-the-unit-exits-from-the-roof) (by Noble_Fish)

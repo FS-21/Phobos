@@ -9,6 +9,7 @@
 #include <New/Entity/LaserTrailClass.h>
 #include <New/Entity/AttachEffectClass.h>
 #include <TiberiumClass.h>
+#include <Ext/Event/Body.h>
 
 class AirstrikeClass;
 class BulletClass;
@@ -101,6 +102,7 @@ public:
 	Powerup DropCrateType;
 
 	bool PreventCrewEscape;
+	AbstractClass* SpawnRandomTarget;
 
 	std::vector<float> TiberiumStorage;
 
@@ -181,6 +183,7 @@ public:
 		, SmartAutoDeploy_SavedMission { Mission::None }
 		, SmartAutoDeploy_IsRepositioning { false }
 		, SmartAutoDeploy_RepositionDestination { CoordStruct::Empty }
+		, SpawnRandomTarget { nullptr }
 	{ }
 
 	void OnEarlyUpdate();
@@ -303,6 +306,7 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, TechnoTypeClass* pType, BuildingSelectBracketPosition bracketPosition);
 	static void DrawSelectBox(TechnoClass* pThis, const Point2D* pLocation, const RectangleStruct* pBounds, bool drawBefore = false);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
+	static AbstractClass* FindRandomTarget(TechnoClass* pFirer, AbstractClass* pOriginalTarget, WeaponTypeClass* pWeapon);
 	static int GetDropCrateIndex(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, TechnoTypeClass* pType, DisplayInfoType infoType, int& value, int& maxValue, int infoIndex);
 	static bool IsValidTechno(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed = true);
