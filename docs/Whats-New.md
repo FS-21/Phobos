@@ -2023,6 +2023,7 @@ HideShakeEffects=false           ; boolean
 - [Modify ammo on impact](New-or-Enhanced-Logics.md#modify-ammo-on-impact) (by FS-21)
 - [Smart auto deploy and state adaptation](New-or-Enhanced-Logics.md#smart-auto-deploy-and-state-adaptation) (by FS-21)
 - [`EMPulseCannon.InaccurateRadius` and `EMPulse.Burst` for `Type=EMPulse` superweapons](New-or-Enhanced-Logics.md#empulse-settings) (by FS-21)
+- [Penetration damage on garrisonable structures](New-or-Enhanced-Logics.md#penetration-damage-on-garrisonable-structures) (by FS-21)
 - [Customize ivan bomb visibility](Fixed-or-Improved-Logics.md#customize-ivan-bomb-visibility) (by NetsuNegi)
 - [Customize whether mind-controlled `Insignificant` technos can be auto-targeted](Fixed-or-Improved-Logics.md#customize-whether-mind-controlled-insignificant-technos-can-be-auto-targeted) (by Noble_Fish)
 - [Mission selection screen](User-Interface.md#mission-selection-screen) (by FS-21)

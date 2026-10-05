@@ -162,6 +162,7 @@ This page lists all the individual contributions to the project by their author.
   - Map action 507 for printing a message with the remaining map objects
   - New EVA voice after deploying a building
   - Engineer logics on Warheads
+  - Penetration damage on garrisonable structures
   - Unit & infantry auto-conversion on ammo change
   - Dropship Loadout
   - Events 1000 & 1001: Switch event evaluation mode (Sequential / Parallel)
