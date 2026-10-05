@@ -166,6 +166,7 @@ This page lists all the individual contributions to the project by their author.
   - Dropship Loadout
   - Events 1000 & 1001: Switch event evaluation mode (Sequential / Parallel)
   - Heavily modified and expanded version of ZivDero's initial port of Rampastring's DTA Advanced AI logics
+  - Script action for repairing destroyed bridges
   - Restore the ScriptType action#24 `Play speech` from Tiberian Sun
   - Modify ammo on impact
   - New AI teams selector
