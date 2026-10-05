@@ -485,6 +485,21 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	this->HarvesterScanAfterUnload.Read(exINI, GameStrings::General, "HarvesterScanAfterUnload");
 
+	this->AILearning.Read(exINI, "AI", "AILearning");
+	this->AILearning_Multiplayer.Read(exINI, "AI", "AILearning.Multiplayer");
+	this->AILearning_OnlySupportedMaps.Read(exINI, "AI", "AILearning.OnlySupportedMaps");
+	this->AILearning_LearningRate.Read(exINI, "AI", "AILearning.LearningRate");
+	this->AILearning_DecayRate.Read(exINI, "AI", "AILearning.DecayRate");
+
+	// [AI] -> AILearning.ScenarioName
+	const char* key = "AILearning.ScenarioName";
+	pINI->ReadString("AI", key, "", Phobos::readBuffer);
+
+	if (std::string(Phobos::readBuffer).length() > 0)
+		this->AILearning_ScenarioName = std::string(Phobos::readBuffer);
+
+	key = nullptr;
+
 	this->AnimCraterDestroyTiberium.Read(exINI, GameStrings::General, "AnimCraterDestroyTiberium");
 
 	this->BerzerkTargeting.Read(exINI, GameStrings::CombatDamage, "BerzerkTargeting");
@@ -1188,6 +1203,12 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->NewTeamsSelector_NavalCategoryPercentage)
 		.Process(this->NewTeamsSelector_InfantryCategoryPercentage)
 		.Process(this->NewTeamsSelector_VIPWeight)
+		.Process(this->AILearning)
+		.Process(this->AILearning_Multiplayer)
+		.Process(this->AILearning_LearningRate)
+		.Process(this->AILearning_DecayRate)
+		.Process(this->AILearning_ScenarioName)
+		.Process(this->AILearning_OnlySupportedMaps)
 		.Process(this->DropPodTrailer)
 		.Process(this->DropPodDefaultTrailer)
 		.Process(this->PodImage)

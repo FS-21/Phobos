@@ -213,6 +213,12 @@ public:
 		Valueable<bool> DrawTurretShadow;
 		ValueableIdx<ColorScheme> AnimRemapDefaultColorScheme;
 		ValueableIdx<ColorScheme> TimerBlinkColorScheme;
+		Valueable<bool> AILearning;
+		Valueable<bool> AILearning_Multiplayer;
+		Valueable<double> AILearning_LearningRate;
+		Valueable<double> AILearning_DecayRate;
+		std::string AILearning_ScenarioName;
+		Valueable<bool> AILearning_OnlySupportedMaps;
 
 		ValueableVector<DigitalDisplayTypeClass*> Buildings_DefaultDigitalDisplayTypes;
 		ValueableVector<DigitalDisplayTypeClass*> Infantry_DefaultDigitalDisplayTypes;
@@ -811,6 +817,12 @@ public:
 			, NewTeamsSelector_AirCategoryPercentage { 0.20 }
 			, NewTeamsSelector_InfantryCategoryPercentage { 0.20 }
 			, NewTeamsSelector_VIPWeight { 5000.0 }
+			, AILearning { false }
+			, AILearning_Multiplayer { false }
+			, AILearning_LearningRate { 0.2 }
+			, AILearning_DecayRate { 0.05 }
+			, AILearning_ScenarioName { }
+			, AILearning_OnlySupportedMaps { true }
 			, DropPodTrailer { }
 			, DropPodDefaultTrailer { }
 			, PodImage { }

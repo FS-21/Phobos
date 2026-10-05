@@ -2,6 +2,41 @@
 
 This page describes all the engine features that are either new and introduced by Phobos or significantly extended or expanded.
 
+## AI
+
+### AI Learning
+
+- Saves AI trigger weights at the end of the battle and loads the accumulated knowledge at the start of future battles on the same map.
+- Knowledge is stored in INI format in the `./AI/` folder, structured into sections by starting spot, country, and difficulty (e.g. `[Spot0_Russians_Hard]`).
+- Includes an automatic fallback system to general country knowledge (`[Russians_Hard]`) when playing in a new position on that map.
+- Uses Exponential Moving Average via `AILearning.LearningRate` to smoothly blend new match outcomes with historical data.
+- Applies a soft decay via `AILearning.DecayRate` towards the base weights to keep tactics dynamic and prevent permanent strategy lock.
+- This feature is designed for singleplayer skirmish and campaign games, and can optionally be enabled in multiplayer via `AILearning.Multiplayer`. When enabled in multiplayer, all clients seamlessly adopt the Host's learned AI data for that match, and only the Host updates the database on match completion.
+
+In `rulesmd.ini`:
+```ini
+[AI]
+AILearning=false                   ; boolean
+AILearning.Multiplayer=false       ; boolean
+AILearning.LearningRate=0.2        ; floating point, 0.0 - 1.0 (portion of current match weight applied to history)
+AILearning.DecayRate=0.05          ; floating point, 0.0 - 1.0 (soft decay rate towards base weight per match)
+AILearning.OnlySupportedMaps=true  ; boolean
+```
+
+In the map:
+```ini
+[AI]
+AILearning.ScenarioName=  ; filename string, valid characters for Windows filesystem
+```
+
+```{warning}
+In the game engine, the current weight of an AI trigger is dynamically adjusted during battle:
+- When an AI team successfully completes its mission and executes script action `49,0`, the trigger's current weight increases by `AITriggerSuccessWeightDelta`.
+- If an AI team is destroyed or fails without executing script action `49,0`, it is counted as a failure, decreasing the trigger's current weight by `AITriggerFailureWeightDelta`.
+- Script action `14003,0` explicitly decreases current weight by `AITriggerFailureWeightDelta`.
+- Script actions `14000`, `14001`, and `14002` can also be used to manipulate trigger weights directly.
+```
+
 ## New types / ingame entities
 
 ### Attached Effects

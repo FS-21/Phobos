@@ -133,6 +133,7 @@
     <ClCompile Include="src\Ext\Rules\Hooks.Image.cpp" />
     <!-- src\Ext\Scenario -->
     <ClCompile Include="src\Ext\Scenario\Body.cpp" />
+    <ClCompile Include="src\Ext\Scenario\Hooks.AILearning.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.NewTeamsSelector.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.Variables.cpp" />

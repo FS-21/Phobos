@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <stdint.h>
+#include <vector>
 
 enum class EventTypeExt : uint8_t
 {
@@ -15,9 +16,10 @@ enum class EventTypeExt : uint8_t
 
 	ApproachObject = 0x40,
 	TogglePlayerAutoRepair = 0x41,
+	AILearningSync = 0x42,
 
 	FIRST = ApproachObject,
-	LAST = TogglePlayerAutoRepair
+	LAST = AILearningSync
 };
 
 #pragma pack(push, 1)
@@ -39,6 +41,15 @@ public:
 		} ApproachObject;
 		struct TogglePlayerAutoRepair
 		{ } TogglePlayerAutoRepair;
+		struct AILearningSync
+		{
+			uint8_t Count;
+			struct Entry
+			{
+				uint16_t TriggerIndex;
+				float Weight;
+			} Entries[16];
+		} AILearningSync;
 	};
 
 	bool AddEvent();
@@ -47,6 +58,9 @@ public:
 	void RespondApproachObject();
 	static void RaiseTogglePlayerAutoRepair();
 	void RespondToTogglePlayerAutoRepair();
+
+	static void RaiseAILearningSync(const std::vector<std::pair<uint16_t, float>>& triggers);
+	void RespondToAILearningSync();
 
 	static size_t GetDataSize(EventTypeExt type);
 	static bool IsValidType(EventTypeExt type);

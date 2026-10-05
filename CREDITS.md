@@ -167,6 +167,7 @@ This page lists all the individual contributions to the project by their author.
   - `RandomTarget` for weapon random retargeting
   - New ScriptTypeActions `19017, 19018, 19020, 19024, 19025, 19026, 19027, 19046, 19047, 19051, 19056, 19058` that require ID as argument
   - Custom Resource Types system
+  - AI learning
   - Unit & infantry auto-conversion on ammo change
   - Dropship Loadout
   - Events 1000 & 1001: Switch event evaluation mode (Sequential / Parallel)
