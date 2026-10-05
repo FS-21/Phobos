@@ -171,6 +171,8 @@ This page lists all the individual contributions to the project by their author.
   - Sidebar customizations: configurable controls, custom buttons, restored TogglePower, and decoupled tabs
   - Smart auto deploy and state adaptation logic
   - Custom theater types support and Tiberian Sun ice cracking, breaking, and regeneration mechanics restoration (design inspired by CCHyper's work in Vinifera).
+  - Flying production
+  - Rally point customization
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
