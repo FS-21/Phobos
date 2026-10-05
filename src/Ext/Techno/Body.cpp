@@ -11,6 +11,7 @@
 #include <Ext/Event/Body.h>
 #include <New/Type/ResourceTypeClass.h>
 #include <Misc/FlyingStrings.h>
+#include <Ext/Team/Body.h>
 
 #include <Utilities/AresFunctions.h>
 #include <Ext/WarheadType/Body.h>

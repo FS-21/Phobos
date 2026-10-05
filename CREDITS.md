@@ -173,6 +173,7 @@ This page lists all the individual contributions to the project by their author.
   - Kick out ejectable passengers in warheads
   - Universal deploy from any techno into any techno
   - Map event `There are no technos of the specified houses list`
+  - Script actions for manipulating script flows with conditional jumps
   - Unit & infantry auto-conversion on ammo change
   - Dropship Loadout
   - Events 1000 & 1001: Switch event evaluation mode (Sequential / Parallel)
