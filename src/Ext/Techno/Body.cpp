@@ -7,6 +7,7 @@
 #include <Ext/Scenario/Body.h>
 #include <Ext/WeaponType/Body.h>
 #include <Ext/Script/Body.h>
+#include <Ext/CaptureManager/Body.h>
 #include <Ext/Event/Body.h>
 #include <New/Type/ResourceTypeClass.h>
 #include <Misc/FlyingStrings.h>
@@ -478,6 +479,46 @@ bool TechnoExt::ConvertToType(FootClass* pThis, TechnoTypeClass* pToType)
 	return true;
 }
 
+// Checks if vehicle can deploy into a building at its current location. If unit has no DeploysInto set returns noDeploysIntoDefaultValue (def = false) instead.
+bool TechnoExt::CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue)
+{
+	return UnitExt::CanDeployIntoBuilding(pThis, noDeploysIntoDefaultValue);
+}
+
+// Checks if a structure can deploy into another at its current location. If the building has problems forplacing the new one returns noDeploysIntoDefaultValue (def = false) instead.
+// If a building is specified then it will be used by default.
+bool TechnoExt::CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue, BuildingTypeClass* pBuildingType)
+{
+	if (!pThis)
+		return false;
+
+	auto pDeployType = pBuildingType;
+
+	if (!pDeployType)
+	{
+		auto pBldTypeExt = TechnoTypeExt::ExtMap.Find(pThis->GetTechnoType());
+		if (!pBldTypeExt || !pBldTypeExt->Convert_UniversalDeploy.isset())
+			return noDeploysIntoDefaultValue;
+
+		pDeployType = static_cast<BuildingTypeClass*>(pBldTypeExt->Convert_UniversalDeploy.Get());
+	}
+
+	if (!pDeployType)
+		return noDeploysIntoDefaultValue;
+
+	bool canDeploy = true;
+	auto mapCoords = CellClass::Coord2Cell(pThis->GetCoords());
+
+	pThis->Mark(MarkType::Up);
+
+	if (!pDeployType->CanCreateHere(mapCoords, pThis->Owner))
+		canDeploy = false;
+
+	pThis->Mark(MarkType::Down);
+
+	return canDeploy;
+}
+
 bool TechnoExt::IsTypeImmune(TechnoClass* pThis, TechnoTypeClass* pType, TechnoClass* pSource)
 {
 	if (!pSource || !pType->TypeImmune)
@@ -659,6 +700,7 @@ void TechnoExt::PassengersTransfer(TechnoClass* pFrom, TechnoClass* pTo, bool fo
 	if (passengersList.Count == 0) // Nothing to transfer
 		return;
 
+	const auto pFromType = pFrom->GetTechnoType();
 	const auto pToType = pTo ? pTo->GetTechnoType() : nullptr;
 
 	double nToPassengersSizeLimit = pToType ? pToType->SizeLimit : 0;
@@ -1541,6 +1583,12 @@ void TechnoExt::Serialize(T& Stm)
 		.Process(this->AccumulatedGattlingValue)
 		.Process(this->ShouldUpdateGattlingValue)
 		.Process(this->AirstrikeTargetingMe)
+		.Process(this->Convert_UniversalDeploy_DeployAnim)
+		.Process(this->Convert_UniversalDeploy_InProgress)
+		.Process(this->Convert_UniversalDeploy_MakeInvisible)
+		.Process(this->Convert_UniversalDeploy_TemporalTechno)
+		.Process(this->Convert_UniversalDeploy_IsOriginalDeployer)
+		.Process(this->Convert_UniversalDeploy_RememberTarget)
 		.Process(this->DelayedFireSequencePaused)
 		.Process(this->DelayedFireTimer)
 		.Process(this->DelayedFireWeaponIndex)

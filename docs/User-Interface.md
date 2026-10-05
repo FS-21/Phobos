@@ -663,6 +663,7 @@ In `RA2MD.INI`:
 TacticalZoom=true          ; boolean
 TacticalZoom.Smooth=true   ; boolean
 ```
+
 ## Hotkey Commands
 
 ### `[ ]` Tactical Zoom Commands

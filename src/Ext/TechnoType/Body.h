@@ -393,6 +393,20 @@ public:
 	std::vector<LaserTrailDataEntry> LaserTrailData;
 
 	Nullable<bool> NoManualUnload;
+	Nullable<TechnoTypeClass*> Convert_UniversalDeploy;
+	Valueable<bool> Convert_DeployToLand;
+	Nullable<AnimTypeClass*> Convert_PreDeploy_AnimFX;
+	Valueable<bool> Convert_PreDeploy_AnimFX_FollowDeployer;
+	Nullable<AnimTypeClass*> Convert_PostDeploy_AnimFX;
+	Valueable<bool> Convert_PostDeploy_AnimFX_FollowDeployer;
+	Nullable<AnimTypeClass*> Convert_DeployingAnim;
+	NullableIdx<VocClass> Convert_PostDeploySound;
+	Valueable<int> Convert_DeployDir;
+	Valueable<bool> Convert_TransferPassengers;
+	Valueable<bool> Convert_TransferPassengers_IgnoreInvalidOccupiers;
+	Valueable<bool> Convert_ForceVeterancyTransfer;
+	ValueableVector<TechnoTypeClass*> Convert_RefillWithPassengers;
+	Valueable<bool> FiringForceScatter;
 
 	Valueable<bool> SuppressKillWeapons;
 	ValueableVector<WeaponTypeClass*> SuppressKillWeapons_Types;
@@ -964,6 +978,20 @@ public:
 		, ExtraThreatCoefficient_DistanceToLastTarget {}
 
 		, NoManualUnload { }
+		, Convert_UniversalDeploy {}
+		, Convert_DeployToLand { false }
+		, Convert_PreDeploy_AnimFX {}
+		, Convert_PreDeploy_AnimFX_FollowDeployer { false }
+		, Convert_PostDeploy_AnimFX {}
+		, Convert_PostDeploy_AnimFX_FollowDeployer { false }
+		, Convert_DeployingAnim {}
+		, Convert_PostDeploySound {}
+		, Convert_DeployDir { -1 }
+		, Convert_TransferPassengers { true }
+		, Convert_TransferPassengers_IgnoreInvalidOccupiers { false }
+		, Convert_ForceVeterancyTransfer { false }
+		, Convert_RefillWithPassengers {}
+		, FiringForceScatter { true }
 		, DropCrate {}
 
 		, Convert_Health_AbovePercent { -1.0 }

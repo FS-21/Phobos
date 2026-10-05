@@ -77,8 +77,10 @@ void SWTypeExt::Serialize(T& Stm)
 		.Process(this->ShowTimer_Priority)
 		.Process(this->ShowTimer_Percentage)
 		.Process(this->Convert_Pairs)
+		.Process(this->Convert_Anim)
 		.Process(this->ShowDesignatorRange)
 		.Process(this->TabIndex)
+		.Process(this->Convert_UseUniversalDeploy)
 		.Process(this->SuperWeaponSidebar_Allow)
 		.Process(this->SuperWeaponSidebar_PriorityHouses)
 		.Process(this->SuperWeaponSidebar_RequiredHouses)
@@ -332,11 +334,14 @@ void SWTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::Owner);
+	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
 
 	this->ShowDesignatorRange.Read(exINI, pSection, "ShowDesignatorRange");
 
 	this->TabIndex.Read(exINI, pSection, "TabIndex");
 	GeneralUtils::IntValidCheck(&this->TabIndex, pSection, "TabIndex", 1, 0, 15);
+
+	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
 
 	this->SuperWeaponSidebar_Allow.Read(exINI, pSection, "SuperWeaponSidebar.Allow");
 	this->SuperWeaponSidebar_PriorityHouses = pINI->ReadHouseTypesList(pSection, "SuperWeaponSidebar.PriorityHouses", this->SuperWeaponSidebar_PriorityHouses);

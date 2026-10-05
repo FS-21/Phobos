@@ -419,6 +419,7 @@ void WarheadTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->Webby_Duration.Read(exINI, pSection, "Webby.Duration");
 	this->Webby_DurationVariation.Read(exINI, pSection, "Webby.DurationVariation");
 	this->Webby_Cap.Read(exINI, pSection, "Webby.Cap");
+	this->Convert_UseUniversalDeploy.Read(exINI, pSection, "Convert.UseUniversalDeploy");
 
 	this->AffectsBelowPercent.Read(exINI, pSection, "AffectsBelowPercent");
 	this->AffectsAbovePercent.Read(exINI, pSection, "AffectsAbovePercent");
@@ -486,6 +487,7 @@ void WarheadTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 
 	// Convert.From & Convert.To
 	TypeConvertGroup::Parse(this->Convert_Pairs, exINI, pSection, AffectedHouse::All);
+	Convert_Anim.Read(exINI, pSection, "Convert.Anim");
 
 	// AttachEffect
 	this->AttachEffects.LoadFromINI(pINI, pSection);
@@ -738,6 +740,7 @@ void WarheadTypeExt::Serialize(T& Stm)
 		.Process(this->DetonateOnAllMapObjects_IgnoreTypes)
 
 		.Process(this->Convert_Pairs)
+		.Process(this->Convert_Anim)
 		.Process(this->AttachEffects)
 
 		.Process(this->SuppressRevengeWeapons)
@@ -881,6 +884,7 @@ void WarheadTypeExt::Serialize(T& Stm)
 		.Process(this->FakeEngineer_CanCaptureBuildings)
 		.Process(this->FakeEngineer_BombDisarm)
 		.Process(this->KickOutKickablePassengers)
+		.Process(this->Convert_UseUniversalDeploy)
 		.Process(this->Ammo)
 
 		.Process(this->IvanBomb_Detonate)

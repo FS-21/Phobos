@@ -1116,6 +1116,17 @@ SpyEffect.VictimSuperWeapon=       ; SuperWeaponType
 SpyEffect.InfiltratorSuperWeapon=  ; SuperWeaponType
 ```
 
+### Skip anim delay for burst fire
+
+- In Red Alert 1, the tesla coil will attack multiple times after charging animation. This is not possible in Red Alert 2, where the building must play the charge animation every time it fires.
+- Now you can implement the above logic using the following flag.
+
+In `artmd.ini`:
+```ini
+[SOMEBUILDING]                     ; BuildingType
+IsAnimDelayedBurst=true            ; boolean
+```
+
 ## Infantry
 
 ### Allow infantry to perform type conversion when deploying and undeploying
@@ -1835,6 +1846,20 @@ EMPulseCannon.InaccurateRadius=0 ; integer (distance in cells)
 
 ```{note}
 `Type=EMPulse` superweapon and any associated keys are [Ares features](https://ares-developers.github.io/Ares-docs/new/superweapons/types/empulse.html).
+```
+
+### Universal deploy from any techno into any techno
+- Extension of the above logic. Replaces the internal logic (Ares code) by a new implementation capable to convert any techno into any techno. Only valid in warheads and superweapons.
+- `Convert.Anim` plays an animation on the converted techno using `Convert.UseUniversalDeploy`.
+
+```
+[SOMEWARHEAD]                     ; Warhead
+Convert.UseUniversalDeploy=false  ; Boolean
+Convert.Anim=                     ; Animation
+
+[SOMESW]                          ; Superweapon
+Convert.UseUniversalDeploy=false  ; Boolean
+Convert.Anim=                     ; Animation
 ```
 
 ### LimboDelivery

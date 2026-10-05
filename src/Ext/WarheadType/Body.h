@@ -159,6 +159,7 @@ public:
 	ValueableVector<TechnoTypeClass*> DetonateOnAllMapObjects_IgnoreTypes;
 
 	std::vector<TypeConvertGroup> Convert_Pairs;
+	Nullable<AnimTypeClass*> Convert_Anim;
 	AEAttachInfoTypeClass AttachEffects;
 #ifdef LOCO_TEST_WARHEADS // Enable warheads parsing
 	Valueable<bool> InflictLocomotor;
@@ -248,6 +249,7 @@ public:
 	Valueable<bool> FakeEngineer_BombDisarm;
 
 	Valueable<bool> KickOutKickablePassengers;
+	Valueable<bool> Convert_UseUniversalDeploy;
 	Valueable<bool> CanKill;
 
 	Valueable<bool> UnlimboDetonate;
@@ -463,6 +465,7 @@ public:
 		, DetonateOnAllMapObjects_IgnoreTypes {}
 
 		, Convert_Pairs {}
+		, Convert_Anim {}
 		, AttachEffects {}
 #ifdef LOCO_TEST_WARHEADS // Enable warheads parsing
 		, InflictLocomotor { false }
@@ -611,6 +614,7 @@ public:
 		, PreventPassengerEscape { false }
 		, PreventOccupantEscape { false }
 		, KickOutKickablePassengers { false }
+		, Convert_UseUniversalDeploy { false }
 		, Ammo { 0 }
 
 		, IvanBomb_Detonate { false }

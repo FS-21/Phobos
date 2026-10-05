@@ -71,6 +71,13 @@ public:
 	CDTimerClass DelayedFireTimer;
 	AnimClass* CurrentDelayedFireAnim;
 
+	AnimClass* Convert_UniversalDeploy_DeployAnim;
+	bool Convert_UniversalDeploy_InProgress;
+	bool Convert_UniversalDeploy_MakeInvisible;
+	TechnoClass* Convert_UniversalDeploy_TemporalTechno;
+	bool Convert_UniversalDeploy_IsOriginalDeployer;
+	AbstractClass* Convert_UniversalDeploy_RememberTarget;
+
 	AirstrikeClass* AirstrikeTargetingMe;
 
 	bool IsSelected;
@@ -158,6 +165,12 @@ public:
 		, DelayedFireWeaponIndex { -1 }
 		, DelayedFireTimer {}
 		, CurrentDelayedFireAnim { nullptr }
+		, Convert_UniversalDeploy_DeployAnim { nullptr }
+		, Convert_UniversalDeploy_InProgress { false }
+		, Convert_UniversalDeploy_MakeInvisible { false }
+		, Convert_UniversalDeploy_TemporalTechno { nullptr }
+		, Convert_UniversalDeploy_IsOriginalDeployer { true }
+		, Convert_UniversalDeploy_RememberTarget { nullptr }
 		, AttachedEffectInvokerCount { 0 }
 		, IsSelected { false }
 		, TintColorOwner { 0 }
@@ -278,6 +291,8 @@ public:
 	static bool LoadGlobals(PhobosStreamReader& Stm);
 	static bool SaveGlobals(PhobosStreamWriter& Stm);
 
+	static void TransferMindControlOnDeploy(TechnoClass* pTechnoFrom, TechnoClass* pTechnoTo);
+
 	static bool IsActive(TechnoClass* pThis);
 
 	static bool IsHarvesting(TechnoClass* pThis);
@@ -309,6 +324,8 @@ public:
 	static bool AllowedTargetByZone(TechnoClass* pThis, TechnoClass* pTarget, TargetZoneScanType zoneScanType, WeaponTypeClass* pWeapon = nullptr, bool useZone = false, int zone = -1);
 	static void UpdateAttachedAnimLayers(TechnoClass* pThis);
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
+	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
+	static bool CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue = false, BuildingTypeClass* pBuildingType = nullptr);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoTypeClass* pType, TechnoClass* pSource);
 	static int GetTintColor(TechnoClass* pThis, bool invulnerability, bool airstrike, bool berserk);
 	static int GetCustomTintColor(TechnoClass* pThis);
@@ -354,6 +371,12 @@ public:
 	static int GetWeaponIndexAgainstWall(TechnoClass* pThis, OverlayTypeClass* pWallOverlayType);
 	static void ApplyKillWeapon(TechnoClass* pThis, TechnoClass* pSource, WarheadTypeClass* pWH, HouseClass* pSourceHouse);
 	static void ApplyRevengeWeapon(TechnoClass* pThis, TechnoClass* pSource, WarheadTypeClass* pWH);
+
+	static void ConvertRefillWithPassengers(TechnoClass* pThis);
+	static TechnoClass* UniversalDeployConversion(TechnoClass* pThis, TechnoTypeClass* pNewType = nullptr);
+	//static void CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType = nullptr);
+	static bool Techno2TechnoPropertiesTransfer(TechnoClass* pNew = nullptr, TechnoClass* pOld = nullptr);
+	//static void UpdateUniversalDeploy(TechnoClass* pThis);
 	static bool TryToCreateCrate(CoordStruct location, Powerup selectedPowerup = Powerup::Money, int maxCellRange = 10);
 	static bool MultiWeaponCanFire(TechnoClass* const pThis, AbstractClass* const pTarget, WeaponTypeClass* const pWeaponType);
 	static void SendStopPassengersTar(TechnoClass* pThis);

@@ -171,6 +171,7 @@ This page lists all the individual contributions to the project by their author.
   - ScriptType actions `10018` & `12003` for aircrafts attacks
   - Script actions for modifying AI anger against other houses
   - Kick out ejectable passengers in warheads
+  - Universal deploy from any techno into any techno
   - Unit & infantry auto-conversion on ammo change
   - Dropship Loadout
   - Events 1000 & 1001: Switch event evaluation mode (Sequential / Parallel)

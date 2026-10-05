@@ -231,6 +231,7 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->FactoryPlant_DisallowTypes.Read(exINI, pSection, "FactoryPlant.DisallowTypes");
 	this->FactoryPlant_MaxCount.Read(exINI, pSection, "FactoryPlant.MaxCount");
 
+	this->IsAnimDelayedBurst.Read(exArtINI, pSection, "IsAnimDelayedBurst");
 	this->Units_RepairRate.Read(exINI, pSection, "Units.RepairRate");
 	this->Units_RepairStep.Read(exINI, pSection, "Units.RepairStep");
 	this->Units_RepairPercent.Read(exINI, pSection, "Units.RepairPercent");

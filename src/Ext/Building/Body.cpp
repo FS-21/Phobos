@@ -786,6 +786,38 @@ void BuildingExt::UpdateSecretLabAI()
 	}
 }
 
+void BuildingExt::HideBuildingAnimations(BuildingClass* pThis)
+{
+	if (!pThis)
+		return;
+
+	// Hide building animations
+	for (auto pAnim : pThis->Anims)
+	{
+		if (!pAnim)
+			continue;
+
+		pAnim->Invisible = true;
+		pAnim->NeedsRedraw = true;
+	}
+}
+
+void BuildingExt::UnhideBuildingAnimations(BuildingClass* pThis)
+{
+	if (!pThis)
+		return;
+
+	// Show building animations
+	for (auto pAnim : pThis->Anims)
+	{
+		if (!pAnim)
+			continue;
+
+		pAnim->Invisible = false;
+		pAnim->NeedsRedraw = true;
+	}
+}
+
 WeaponStruct* BuildingExt::GetLaserWeapon(BuildingClass* pThis)
 {
 	auto const pExt = BuildingExt::Fetch(pThis);

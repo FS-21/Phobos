@@ -392,7 +392,17 @@ void SWTypeExt::ApplySWNext(SuperClass* pSW, const CellStruct& cell)
 
 void SWTypeExt::ApplyTypeConversion(SuperClass* pSW)
 {
-	TypeConvertGroup::ConvertSW(this->Convert_Pairs, pSW->Owner);
+	AnimTypeClass* pAnimType = this->Convert_Anim.isset() ? this->Convert_Anim.Get() : nullptr;
+
+	if (this->Convert_UseUniversalDeploy.Get())
+	{
+		for (const auto pTarget : TechnoClass::Array)
+			TypeConvertGroup::UniversalConvert(pTarget, this->Convert_Pairs, pSW->Owner, pAnimType);
+
+		return;
+	}
+
+	TypeConvertGroup::ConvertSW(this->Convert_Pairs, pSW->Owner, pAnimType);
 }
 
 void SWTypeExt::HandleEMPulseLaunch(SuperClass* pSW, const CellStruct& cell) const
