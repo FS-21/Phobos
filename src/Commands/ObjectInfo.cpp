@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <string>
+#include <Ext/Script/Body.h>
 
 const char* ObjectInfoCommandClass::GetName() const
 {

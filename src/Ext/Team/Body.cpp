@@ -26,6 +26,9 @@ void TeamExt::Serialize(T& Stm)
 		.Process(this->TriggersSideIdx)
 		.Process(this->TriggersHouseIdx)
 		.Process(this->MinAmmoThreshold)
+		.Process(this->AngerNodeModifier)
+		.Process(this->OnlyTargetHouseEnemy)
+		.Process(this->OnlyTargetHouseEnemyMode)
 		;
 }
 

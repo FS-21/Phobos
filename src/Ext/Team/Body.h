@@ -47,6 +47,9 @@ public:
 	int TriggersSideIdx;
 	int TriggersHouseIdx;
 	int MinAmmoThreshold;
+	int AngerNodeModifier;
+	bool OnlyTargetHouseEnemy;
+	int OnlyTargetHouseEnemyMode;
 
 	TeamExt(TeamClass* OwnerObject) : AbstractExt(OwnerObject)
 		, WaitNoTargetAttempts { 0 }
@@ -66,6 +69,9 @@ public:
 		, TriggersSideIdx { -1 }
 		, TriggersHouseIdx { -1 }
 		, MinAmmoThreshold { 0 }
+		, AngerNodeModifier { 5000 }
+		, OnlyTargetHouseEnemy { false }
+		, OnlyTargetHouseEnemyMode { -1 }
 	{ }
 
 	virtual ~TeamExt() = default;

@@ -169,6 +169,7 @@ This page lists all the individual contributions to the project by their author.
   - AI learning
   - Reveal area on impact
   - ScriptType actions `10018` & `12003` for aircrafts attacks
+  - Script actions for modifying AI anger against other houses
   - Unit & infantry auto-conversion on ammo change
   - Dropship Loadout
   - Events 1000 & 1001: Switch event evaluation mode (Sequential / Parallel)
