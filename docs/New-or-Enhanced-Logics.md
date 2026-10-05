@@ -4005,6 +4005,17 @@ In `rulesmd.ini`:
 RemoveDisguise=false  ; boolean
 ```
 
+### Reveal area on impact
+
+- Warheads can now reveal a specific number of cells on impact.
+- Reveal only applies to the owner of the warhead.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]       ; Warhead
+RevealAreaRadius=0  ; int
+```
+
 ### Return warhead
 
 - For each techno affected by this warhead, a warhead owned by the target techno will be detonated at the owner of the original warhead.

@@ -103,6 +103,26 @@ void WarheadTypeExt::Detonate(TechnoClass* pOwner, HouseClass* pHouse, BulletExt
 			MapClass::Instance.Reveal(pHouse);
 		}
 
+		if (this->RevealAreaRadius > 0)
+		{
+			int radius = this->RevealAreaRadius.Get();
+			auto pFirer = pBulletExt ? pBulletExt->FirerHouse : pHouse;
+
+			for (auto pOtherHouse : HouseClass::Array)
+			{
+				auto pEffectiveHouse = pFirer ? pFirer : pOtherHouse;
+
+				if (pOtherHouse->IsControlledByHuman() &&
+					!pOtherHouse->IsObserver() &&
+					!pOtherHouse->Defeated &&
+					pEffectiveHouse->IsAlliedWith(pOtherHouse))
+				{
+					MapClass::Instance.RevealArea2(const_cast<CoordStruct*>(&coords), radius, pOtherHouse, 0, 0, 0, 0, 0);
+					MapClass::Instance.RevealArea2(const_cast<CoordStruct*>(&coords), radius, pOtherHouse, 0, 0, 0, 0, 1);
+				}
+			}
+		}
+
 		if (this->TransactMoney)
 		{
 			pHouse->TransactMoney(this->TransactMoney);

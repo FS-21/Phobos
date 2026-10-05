@@ -170,6 +170,7 @@ void WarheadTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	// Miscs
 	this->Reveal.Read(exINI, pSection, "Reveal");
 	this->CreateGap.Read(exINI, pSection, "CreateGap");
+	this->RevealAreaRadius.Read(exINI, pSection, "RevealAreaRadius");
 	this->TransactMoney.Read(exINI, pSection, "TransactMoney");
 	this->TransactMoney_Display.Read(exINI, pSection, "TransactMoney.Display");
 	this->TransactMoney_Display_Houses.Read(exINI, pSection, "TransactMoney.Display.Houses");
@@ -604,6 +605,7 @@ void WarheadTypeExt::Serialize(T& Stm)
 	Stm
 		.Process(this->Reveal)
 		.Process(this->CreateGap)
+		.Process(this->RevealAreaRadius)
 		.Process(this->TransactMoney)
 		.Process(this->TransactMoney_Display)
 		.Process(this->TransactMoney_Display_Houses)

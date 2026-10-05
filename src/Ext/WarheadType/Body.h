@@ -24,9 +24,9 @@ public:
 		return static_cast<WarheadTypeClass*>(this->GetAttachedObject());
 	}
 
-
 	Valueable<int> Reveal;
 	Valueable<int> CreateGap;
+	Valueable<int> RevealAreaRadius;
 	Valueable<int> TransactMoney;
 	Valueable<bool> TransactMoney_Display;
 	Valueable<AffectedHouse> TransactMoney_Display_Houses;
@@ -329,6 +329,7 @@ public:
 	WarheadTypeExt(WarheadTypeClass* OwnerObject) : AbstractTypeExt(OwnerObject)
 		, Reveal { 0 }
 		, CreateGap { 0 }
+		, RevealAreaRadius { 0 }
 		, TransactMoney { 0 }
 		, TransactMoney_Display { false }
 		, TransactMoney_Display_Houses { AffectedHouse::All }
