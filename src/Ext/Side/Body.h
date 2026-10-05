@@ -5,6 +5,8 @@
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
 
+#include <Ext/Sidebar/Body.h>
+
 class SideExt final : public AbstractTypeExt
 {
 public:
@@ -24,6 +26,8 @@ public:
 
 	Valueable<int> ArrayIndex;
 	Valueable<bool> Sidebar_GDIPositions;
+	SidebarConfig SidebarSettings;
+	SidebarConfig BaselineSidebarSettings;
 	Valueable<int> IngameScore_WinTheme;
 	Valueable<int> IngameScore_LoseTheme;
 	Valueable<Point2D> Sidebar_HarvesterCounter_Offset;
@@ -55,6 +59,8 @@ public:
 	SideExt(SideClass* OwnerObject) : AbstractTypeExt(OwnerObject)
 		, ArrayIndex { -1 }
 		, Sidebar_GDIPositions { false }
+		, SidebarSettings {}
+		, BaselineSidebarSettings {}
 		, IngameScore_WinTheme { -2 }
 		, IngameScore_LoseTheme { -2 }
 		, Sidebar_HarvesterCounter_Offset { { 0, 0 } }
@@ -90,6 +96,9 @@ public:
 	virtual void Initialize() override;
 	virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 	virtual void SaveToStream(PhobosStreamWriter& Stm) override;
+
+	void SaveBaseline() { this->BaselineSidebarSettings = this->SidebarSettings; }
+	void ResetToBaseline() { this->SidebarSettings = this->BaselineSidebarSettings; }
 
 private:
 	template <typename T>

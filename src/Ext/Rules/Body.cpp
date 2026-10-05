@@ -18,6 +18,8 @@
 #include <New/Type/SelectBoxTypeClass.h>
 #include <TiberiumClass.h>
 #include <Ext/Tiberium/Body.h>
+#include <Ext/Side/Body.h>
+#include <Ext/Sidebar/Body.h>
 
 std::unique_ptr<RulesExt::ExtData> RulesExt::Data = nullptr;
 
@@ -51,6 +53,23 @@ void RulesExt::LoadFromINIFile(RulesClass* pThis, CCINIClass* pINI)
 		if (const auto pTibExt = TiberiumExt::TryFetch(pTib))
 			pTibExt->LoadFromINIFile(pINI);
 	}
+
+	if (pINI != CCINIClass::INI_Rules)
+	{
+		SidebarExt::ResetToBaseline();
+		for (auto const pSide : SideClass::Array)
+		{
+			if (auto const pSideExt = SideExt::Fetch(pSide))
+			{
+				pSideExt->ResetToBaseline();
+				if (pINI->GetSection(pSide->ID))
+				{
+					pSideExt->LoadFromINI(pINI);
+				}
+			}
+		}
+		SidebarExt::LoadFromScenario(pINI);
+	}
 }
 
 void RulesExt::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
@@ -82,7 +101,18 @@ void RulesExt::LoadAfterTypeData(RulesClass* pThis, CCINIClass* pINI)
 	}
 
 	if (pINI == CCINIClass::INI_Rules)
+	{
 		Data->InitializeAfterTypeData(pThis);
+		SidebarExt::LoadFromRules(pINI);
+		SidebarExt::SaveBaseline();
+		for (auto const pSide : SideClass::Array)
+		{
+			if (auto const pSideExt = SideExt::Fetch(pSide))
+			{
+				pSideExt->SaveBaseline();
+			}
+		}
+	}
 
 	Data->LoadAfterTypeData(pThis, pINI);
 }
