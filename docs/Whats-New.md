@@ -2050,6 +2050,7 @@ HideShakeEffects=false           ; boolean
 
 #### New:
 - [Sidebar Customizations](User-Interface.md#sidebar-customizations) (by FS-21)
+- New map actions in the 19000 range that are copies of the original actions but using ID entries instead of indexes (by FS-21)
 - [Customized transport plane for teams](AI-Scripting-and-Mapping.md#customized-transport-plane-for-teams) (by FlyStar)
 - [Modify ammo on impact](New-or-Enhanced-Logics.md#modify-ammo-on-impact) (by FS-21)
 - [Smart auto deploy and state adaptation](New-or-Enhanced-Logics.md#smart-auto-deploy-and-state-adaptation) (by FS-21)
@@ -2268,6 +2269,7 @@ HideShakeEffects=false           ; boolean
 - Fast access structure (by FlyStar)
 - Toggle off laser trail and shake effects (by Ollerus)
 - [Dehardcode the `ZAdjust` of warhead anim](Fixed-or-Improved-Logics.md#dehardcode-the-zadjust-of-warhead-anim) (by TaranDahl)
+- New map actions in the 19000 range that are copies of the original actions but using ID entries instead of indexes (by FS-21)
 - [Interceptor target scan delay customization & cylindrical rangefinding](New-or-Enhanced-Logics.md#projectile-interception-logic) (by Starkku)
 - [Allow deploy controlled MCV](Fixed-or-Improved-Logics.md#allow-deploy-controlled-mcv) (by NetsuNegi)
 - [Customize if cloning need power](Fixed-or-Improved-Logics.md#customize-if-cloning-need-power) (by NetsuNegi)
