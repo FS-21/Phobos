@@ -46,11 +46,15 @@ public:
 	std::vector<RadSiteClass*> RadSites {};
 	std::vector<RadLevel> RadLevels { };
 	int InfantryCount{ 0 };
+	UnitClass* IncomingUnit {};
+	UnitClass* IncomingUnitAlt {};
 
 	CellExt(CellClass* OwnerObject) : AbstractExt(OwnerObject)
 	{ }
 
 	virtual ~CellExt() = default;
+
+	void InvalidatePointer(void* ptr, bool bRemoved);
 
 	virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 	virtual void SaveToStream(PhobosStreamWriter& Stm) override;

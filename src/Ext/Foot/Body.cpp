@@ -184,6 +184,9 @@ void FootExt::UpdateTypeData(TechnoTypeClass* pCurrentType)
 	pOldTypeExt->Array.Remove(pThis);
 	pNewTypeExt->Array.AddItem(pThis);
 
+	// Handle attachment slot matching and conversion
+	TechnoExt::HandleAttachmentConversion(pThis, pOldType, pCurrentType);
+
 	this->UpdateSelfOwnedAttachEffects();
 
 	if (auto const pShield = this->Shield.get())

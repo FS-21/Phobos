@@ -14,6 +14,9 @@ DEFINE_HOOK(0x736F78, UnitClass_UpdateFiring_FireErrorIsFACING, 0x6)
 {
 	GET(UnitClass* const, pThis, ESI);
 
+	if (TechnoExt::HasAttachmentLoco(pThis))
+		return 0;
+
 	const auto pType = pThis->Type;
 	CoordStruct& source = pThis->Location;
 	const CoordStruct target = pThis->Target->GetCoords(); // Target checked so it's not null here
@@ -129,6 +132,9 @@ DEFINE_HOOK(0x736990, UnitClass_UpdateRotation_TurretFacing_EMP, 0x6)
 	enum { SkipAll = 0x736C0E };
 
 	if (pThis->IsUnderEMP())
+		return SkipAll;
+
+	if (!pThis->Target && (TechnoExt::IsAttached(pThis) || TechnoExt::HasAttachmentLoco(pThis)))
 		return SkipAll;
 
 	return 0;

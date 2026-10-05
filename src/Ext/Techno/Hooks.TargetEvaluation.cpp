@@ -303,6 +303,46 @@ DEFINE_HOOK(0x6F9C67, TechnoClass_GreatestThreat_MapZoneSetContext, 0x5)
 	return 0;
 }
 
+static bool IsCloakedAndUndetected(TechnoClass* pTarget, HouseClass* pAttackerHouse)
+{
+	if (!pTarget || !pAttackerHouse)
+		return false;
+
+	if (pTarget->Owner == pAttackerHouse || pTarget->Owner->IsAlliedWith(pAttackerHouse))
+		return false;
+
+	bool isCloaked = pTarget->CloakState == CloakState::Cloaked || pTarget->CloakState == CloakState::Cloaking;
+
+	if (auto const pAttachment = TechnoExt::ExtMap.Find(pTarget)->ParentAttachment)
+	{
+		if (pAttachment->GetType()->InheritStateEffects && pAttachment->Parent)
+		{
+			auto const pParent = pAttachment->Parent;
+			if (pParent->CloakState == CloakState::Cloaked || pParent->CloakState == CloakState::Cloaking)
+				isCloaked = true;
+		}
+	}
+
+	if (!isCloaked)
+		return false;
+
+	auto const pCell = pTarget->GetCell();
+	if (pCell && pCell->Sensors_InclHouse(pAttackerHouse->ArrayIndex))
+		return false;
+
+	if (auto const pAttachment = TechnoExt::ExtMap.Find(pTarget)->ParentAttachment)
+	{
+		if (pAttachment->Parent)
+		{
+			auto const pParentCell = pAttachment->Parent->GetCell();
+			if (pParentCell && pParentCell->Sensors_InclHouse(pAttackerHouse->ArrayIndex))
+				return false;
+		}
+	}
+
+	return true;
+}
+
 DEFINE_HOOK(0x6F7E47, TechnoClass_EvaluateObject_MapZone, 0x7)
 {
 	enum { AllowedObject = 0x6F7EA2, DisallowedObject = 0x6F894F };
@@ -313,6 +353,18 @@ DEFINE_HOOK(0x6F7E47, TechnoClass_EvaluateObject_MapZone, 0x7)
 
 	if (auto const pTechno = abstract_cast<TechnoClass*>(pObject))
 	{
+		if (pThis == pTechno || TechnoExt::AreRelatives(pThis, pTechno))
+			return DisallowedObject;
+
+		if (auto const pAttachment = TechnoExt::ExtMap.Find(pTechno)->ParentAttachment)
+		{
+			if (!pAttachment->GetType()->Targetable || !pAttachment->GetType()->Damageable)
+				return DisallowedObject;
+		}
+
+		if (IsCloakedAndUndetected(pTechno, pThis->Owner))
+			return DisallowedObject;
+
 		if (!TechnoExt::AllowedTargetByZone(pThis, pTechno, MapZoneTemp::zoneScanType, nullptr, true, zone))
 			return DisallowedObject;
 	}
@@ -590,8 +642,14 @@ private:
 	}
 };
 
-static FireError __fastcall UnitClass__GetFireError_Wrapper(UnitClass* pThis, void* _, ObjectClass* pObj, int nWeaponIndex, bool ignoreRange)
+FireError __fastcall UnitClass__GetFireError_Wrapper(UnitClass* pThis, void* _, ObjectClass* pObj, int nWeaponIndex, bool ignoreRange)
 {
+	if (auto const pTechno = abstract_cast<TechnoClass*>(pObj))
+	{
+		if (IsCloakedAndUndetected(pTechno, pThis->Owner))
+			return FireError::ILLEGAL;
+	}
+
 	AresScheme::Prefix(pThis, pObj, nWeaponIndex, false);
 	auto const result = pThis->UnitClass::GetFireError(pObj, nWeaponIndex, ignoreRange);
 	AresScheme::Suffix();
@@ -601,6 +659,12 @@ DEFINE_FUNCTION_JUMP(VTABLE, 0x7F6030, UnitClass__GetFireError_Wrapper)
 
 static FireError __fastcall InfantryClass__GetFireError_Wrapper(InfantryClass* pThis, void* _, ObjectClass* pObj, int nWeaponIndex, bool ignoreRange)
 {
+	if (auto const pTechno = abstract_cast<TechnoClass*>(pObj))
+	{
+		if (IsCloakedAndUndetected(pTechno, pThis->Owner))
+			return FireError::ILLEGAL;
+	}
+
 	AresScheme::Prefix(pThis, pObj, nWeaponIndex, false);
 	auto const result = pThis->InfantryClass::GetFireError(pObj, nWeaponIndex, ignoreRange);
 	AresScheme::Suffix();
@@ -625,8 +689,67 @@ static Action __fastcall UnitClass__WhatAction_Wrapper(UnitClass* pThis, void* _
 	}
 
 	AresScheme::Prefix(pThis, pObj, -1, false);
-	auto const result = pThis->UnitClass::MouseOverObject(pObj, ignoreForce);
+	auto result = pThis->UnitClass::MouseOverObject(pObj, ignoreForce);
 	AresScheme::Suffix();
+
+	if (auto const pTechnoObj = abstract_cast<TechnoClass*>(pObj))
+	{
+		if (pThis != pTechnoObj && TechnoExt::AreRelatives(pThis, pTechnoObj))
+		{
+			if (result == Action::Attack || result == Action::AreaAttack)
+				result = Action::None;
+			else if (result == Action::Enter)
+				result = pTechnoObj->Passengers.NumPassengers > 0 ? Action::Self_Deploy : Action::NoEnter;
+		}
+		else if (result == Action::Attack || result == Action::AreaAttack)
+		{
+			if (!ignoreForce && IsCloakedAndUndetected(pTechnoObj, pThis->Owner))
+			{
+				result = Action::None;
+			}
+			else if (auto const pAttachment = TechnoExt::ExtMap.Find(pTechnoObj)->ParentAttachment)
+			{
+				if ((!pAttachment->GetType()->Targetable || !pAttachment->GetType()->Damageable) && pAttachment->Parent)
+				{
+					auto const pTargetParent = TechnoExt::GetFirstDamageableParent(pTechnoObj);
+					auto const pRedirect = pTargetParent ? pTargetParent : pAttachment->Parent;
+
+					AresScheme::Prefix(pThis, pRedirect, -1, false);
+					result = pThis->UnitClass::MouseOverObject(pRedirect, ignoreForce);
+					AresScheme::Suffix();
+				}
+			}
+		}
+	}
+
+	auto const& pExt = TechnoExt::ExtMap.Find(pThis);
+	if (!pExt->ParentAttachment)
+		return result;
+
+	switch (result)
+	{
+	case Action::Repair:
+		result = Action::NoRepair;
+		break;
+
+	case Action::Self_Deploy:
+		if (pThis->Type->DeploysInto)
+			result = Action::NoDeploy;
+		break;
+
+	case Action::Sabotage:
+	case Action::Capture:
+	case Action::Enter:
+		result = Action::NoEnter;
+		break;
+
+	case Action::GuardArea:
+	case Action::AttackMoveNav:
+	case Action::Move:
+		result = Action::NoMove;
+		break;
+	}
+
 	return result;
 }
 DEFINE_FUNCTION_JUMP(VTABLE, 0x7F5CE4, UnitClass__WhatAction_Wrapper)
@@ -648,8 +771,39 @@ static Action __fastcall InfantryClass__WhatAction_Wrapper(InfantryClass* pThis,
 	}
 
 	AresScheme::Prefix(pThis, pObj, -1, pThis->Type->Engineer);
-	auto const result = pThis->InfantryClass::MouseOverObject(pObj, ignoreForce);
+	auto result = pThis->InfantryClass::MouseOverObject(pObj, ignoreForce);
 	AresScheme::Suffix();
+
+	if (auto const pTechnoObj = abstract_cast<TechnoClass*>(pObj))
+	{
+		if (pThis != pTechnoObj && TechnoExt::AreRelatives(pThis, pTechnoObj))
+		{
+			if (result == Action::Attack || result == Action::AreaAttack)
+				result = Action::None;
+			else if (result == Action::Enter)
+				result = pTechnoObj->Passengers.NumPassengers > 0 ? Action::Self_Deploy : Action::NoEnter;
+		}
+		else if (result == Action::Attack || result == Action::AreaAttack)
+		{
+			if (!ignoreForce && IsCloakedAndUndetected(pTechnoObj, pThis->Owner))
+			{
+				result = Action::None;
+			}
+			else if (auto const pAttachment = TechnoExt::ExtMap.Find(pTechnoObj)->ParentAttachment)
+			{
+				if ((!pAttachment->GetType()->Targetable || !pAttachment->GetType()->Damageable) && pAttachment->Parent)
+				{
+					auto const pTargetParent = TechnoExt::GetFirstDamageableParent(pTechnoObj);
+					auto const pRedirect = pTargetParent ? pTargetParent : pAttachment->Parent;
+
+					AresScheme::Prefix(pThis, pRedirect, -1, pThis->Type->Engineer);
+					result = pThis->InfantryClass::MouseOverObject(pRedirect, ignoreForce);
+					AresScheme::Suffix();
+				}
+			}
+		}
+	}
+
 	return result;
 }
 DEFINE_FUNCTION_JUMP(VTABLE, 0x7EB0CC, InfantryClass__WhatAction_Wrapper)

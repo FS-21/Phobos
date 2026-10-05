@@ -95,6 +95,7 @@ DEFINE_HOOK(0x739956, UnitClass_Deploy_Transfer, 0x6)
 	ShieldClass::SyncShieldToAnother(pUnit, pStructure);
 	TechnoExt::SyncInvulnerability(pUnit, pStructure);
 	AttachEffectClass::TransferAttachedEffects(pUnit, pStructure);
+	TechnoExt::HandleAttachmentDeployTransfer(pUnit, pStructure);
 
 	return 0;
 }
@@ -108,6 +109,7 @@ DEFINE_HOOK(0x44A03C, BuildingClass_Mi_Selling_Transfer, 0x6)
 	ShieldClass::SyncShieldToAnother(pStructure, pUnit);
 	TechnoExt::SyncInvulnerability(pStructure, pUnit);
 	AttachEffectClass::TransferAttachedEffects(pStructure, pUnit);
+	TechnoExt::HandleAttachmentDeployTransfer(pStructure, pUnit);
 
 	const auto pStructureExt = BuildingExt::Fetch(pStructure);
 	if (pStructureExt->SmartAutoDeploy_SavedTeam)
@@ -143,6 +145,8 @@ DEFINE_HOOK(0x449E2E, BuildingClass_Mi_Selling_CreateUnit, 0x6)
 	GET(BuildingClass*, pStructure, EBP);
 	R->ECX<HouseClass*>(pStructure->GetOriginalOwner());
 
+	TechnoExt::DeployTransferSource = pStructure;
+
 	// Remember MC ring animation.
 	if (pStructure->IsMindControlled())
 	{
@@ -157,6 +161,8 @@ DEFINE_HOOK(0x7396AD, UnitClass_Deploy_CreateBuilding, 0x6)
 {
 	GET(UnitClass*, pUnit, EBP);
 	R->EDX<HouseClass*>(pUnit->GetOriginalOwner());
+
+	TechnoExt::DeployTransferSource = pUnit;
 
 	return 0x7396B3;
 }
@@ -234,7 +240,12 @@ DEFINE_HOOK(0x47C640, CellClass_CanThisExistHere_IgnoreSomething, 0x6)
 			}
 			else if (pObject->AbstractFlags & AbstractFlags::Techno)
 			{
-				if (pObject == UnitExt::Deployer)
+				auto const pTechno = abstract_cast<TechnoClass*>(pObject);
+				auto const pParent = pTechno ? TechnoExt::GetTopLevelParent(pTechno) : nullptr;
+				if (pObject == UnitExt::Deployer
+					|| (pTechno && UnitExt::Deployer && TechnoExt::IsChildOf(pTechno, UnitExt::Deployer))
+					|| (pTechno && TechnoExt::DoesntOccupyCellAsChild(pTechno))
+					|| (pParent && pParent->GetTechnoType()->DeploysInto == pBuildingType))
 				{
 					skipFlag = true;
 				}
@@ -276,7 +287,12 @@ DEFINE_HOOK(0x47C640, CellClass_CanThisExistHere_IgnoreSomething, 0x6)
 		{
 			if (pObject->AbstractFlags & AbstractFlags::Techno)
 			{
-				if (pObject == UnitExt::Deployer)
+				auto const pTechno = abstract_cast<TechnoClass*>(pObject);
+				auto const pParent = pTechno ? TechnoExt::GetTopLevelParent(pTechno) : nullptr;
+				if (pObject == UnitExt::Deployer
+					|| (pTechno && UnitExt::Deployer && TechnoExt::IsChildOf(pTechno, UnitExt::Deployer))
+					|| (pTechno && TechnoExt::DoesntOccupyCellAsChild(pTechno))
+					|| (pParent && pParent->GetTechnoType()->DeploysInto == pBuildingType))
 					skipFlag = true;
 				else
 					return CanNotExistHere;
@@ -297,6 +313,24 @@ DEFINE_HOOK(0x47C640, CellClass_CanThisExistHere_IgnoreSomething, 0x6)
 	return CanExistHere; // Continue check the overlays .etc
 }
 
+DEFINE_HOOK(0x7394BE, UnitClass_TryToDeploy_CanCreateHere_Before, 0x6)
+{
+	GET(UnitClass*, pThis, EBP);
+	TechnoExt::Deployer = pThis;
+	return 0;
+}
+
+DEFINE_HOOK(0x7394E0, UnitClass_TryToDeploy_CanCreateHere_Success, 0x6)
+{
+	TechnoExt::Deployer = nullptr;
+	return 0;
+}
+
+DEFINE_HOOK(0x73958A, UnitClass_TryToDeploy_CanCreateHere_Failure, 0x6)
+{
+	TechnoExt::Deployer = nullptr;
+	return 0;
+}
 
 DEFINE_HOOK(0x7396D2, UnitClass_TryToDeploy_Transfer, 0x5)
 {

@@ -934,6 +934,67 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->AutoTargetOwnPosition_Self.Read(exINI, pSection, "AutoFire.TargetSelf"); // Temporary solution for the INI tags renaming issue, see #2093
 	this->AutoTargetOwnPosition_Self.Read(exINI, pSection, "AutoTargetOwnPosition.Self");
 
+	this->AttachmentTopLayerMinHeight.Read(exINI, pSection, "AttachmentTopLayerMinHeight");
+	this->AttachmentUndergroundLayerMaxHeight.Read(exINI, pSection, "AttachmentUndergroundLayerMaxHeight");
+
+	// The following loop iterates over size + 1 INI entries so that the
+	// vector contents can be properly overriden via scenario rules - Kerbiter
+	for (size_t i = 0; i <= this->AttachmentData.size(); ++i)
+	{
+		NullableIdx<AttachmentTypeClass> type;
+		_snprintf_s(tempBuffer, sizeof(tempBuffer), "Attachment%d.Type", i);
+		type.Read(exINI, pSection, tempBuffer);
+
+		if (!type.isset())
+			continue;
+
+		NullableIdx<TechnoTypeClass> technoType;
+		_snprintf_s(tempBuffer, sizeof(tempBuffer), "Attachment%d.TechnoType", i);
+		technoType.Read(exINI, pSection, tempBuffer);
+
+		Valueable<CoordStruct> flh;
+		_snprintf_s(tempBuffer, sizeof(tempBuffer), "Attachment%d.FLH", i);
+		flh.Read(exINI, pSection, tempBuffer);
+
+		Valueable<bool> isOnTurret;
+		_snprintf_s(tempBuffer, sizeof(tempBuffer), "Attachment%d.IsOnTurret", i);
+		isOnTurret.Read(exINI, pSection, tempBuffer);
+
+		Valueable<bool> isOnBarrel;
+		_snprintf_s(tempBuffer, sizeof(tempBuffer), "Attachment%d.IsOnBarrel", i);
+		isOnBarrel.Read(exINI, pSection, tempBuffer);
+
+		Valueable<DirType> rotationAdjust;
+		_snprintf_s(tempBuffer, sizeof(tempBuffer), "Attachment%d.RotationAdjust", i);
+		rotationAdjust.Read(exINI, pSection, tempBuffer);
+
+		PhobosFixedString<32> id;
+		_snprintf_s(tempBuffer, sizeof(tempBuffer), "Attachment%d.ID", i);
+		id.Read(pINI, pSection, tempBuffer);
+
+		AttachmentDataEntry const entry { ValueableIdx<AttachmentTypeClass>(type), technoType, flh, isOnTurret, isOnBarrel, rotationAdjust, id };
+		if (i == AttachmentData.size())
+			this->AttachmentData.push_back(entry);
+		else
+			this->AttachmentData[i] = entry;
+	}
+
+	// Validate attachment ID uniqueness
+	std::set<PhobosFixedString<32>> usedIds;
+	for (size_t i = 0; i < this->AttachmentData.size(); ++i)
+	{
+		const auto& id = this->AttachmentData[i].ID;
+
+		if (!id)
+			continue;
+
+		if (!usedIds.insert(id).second)
+		{
+			Debug::FatalErrorAndExit("[%s] Duplicate Attachment ID '%s'\n",
+				pSection, id);
+		}
+	}
+
 	this->NoSecondaryWeaponFallback.Read(exINI, pSection, "NoSecondaryWeaponFallback");
 	this->NoSecondaryWeaponFallback_AllowAA.Read(exINI, pSection, "NoSecondaryWeaponFallback.AllowAA");
 	this->AllowWeaponSelectAgainstWalls.Read(exINI, pSection, "AllowWeaponSelectAgainstWalls");
@@ -2592,6 +2653,10 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->Prerequisite_Negative)
 		.Process(this->Prerequisite_Lists)
 		.Process(this->Prerequisite_ListVector)
+
+		.Process(this->AttachmentTopLayerMinHeight)
+		.Process(this->AttachmentUndergroundLayerMaxHeight)
+		.Process(this->AttachmentData)
 		;
 }
 void TechnoTypeExt::LoadFromStream(PhobosStreamReader& Stm)
@@ -2608,6 +2673,34 @@ void TechnoTypeExt::SaveToStream(PhobosStreamWriter& Stm)
 	ObjectTypeExt::SaveToStream(Stm);
 	this->Serialize(Stm);
 }
+
+#pragma region Data entry save/load
+
+bool TechnoTypeExt::AttachmentDataEntry::Load(PhobosStreamReader& stm, bool registerForChange)
+{
+	return this->Serialize(stm);
+}
+
+bool TechnoTypeExt::AttachmentDataEntry::Save(PhobosStreamWriter& stm) const
+{
+	return const_cast<AttachmentDataEntry*>(this)->Serialize(stm);
+}
+
+template <typename T>
+bool TechnoTypeExt::AttachmentDataEntry::Serialize(T& stm)
+{
+	return stm
+		.Process(this->Type)
+		.Process(this->TechnoType)
+		.Process(this->FLH)
+		.Process(this->IsOnTurret)
+		.Process(this->IsOnBarrel)
+		.Process(this->RotationAdjust)
+		.Process(this->ID)
+		.Success();
+}
+
+#pragma endregion
 
 // =============================
 // container hooks

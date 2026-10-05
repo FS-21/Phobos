@@ -606,6 +606,9 @@ public:
 
 		Valueable<bool> MissileKeepTargetCoord;
 
+		Valueable<int> AttachmentTopLayerMinHeight;
+		Valueable<int> AttachmentUndergroundLayerMaxHeight;
+
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
 			, Storage_AI { false }
@@ -1135,6 +1138,9 @@ public:
 			, RevealHouses { AffectedHouse::Team }
 
 			, MissileKeepTargetCoord { false }
+
+			, AttachmentTopLayerMinHeight { 500 }
+			, AttachmentUndergroundLayerMaxHeight { -256 }
 		{ }
 
 		virtual ~ExtData() = default;

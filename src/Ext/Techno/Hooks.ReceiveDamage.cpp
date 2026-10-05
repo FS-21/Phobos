@@ -9,7 +9,10 @@
 #include <Ext/TEvent/Body.h>
 #include <Ext/WarheadType/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <New/Entity/AttachmentClass.h>
+#include <New/Type/AttachmentTypeClass.h>
 #include <Utilities/AresHelper.h>
+#include <Utilities/GeneralUtils.h>
 
 namespace ReceiveDamageTemp
 {
@@ -40,6 +43,28 @@ DEFINE_HOOK(0x701900, TechnoClass_ReceiveDamage_Shield, 0x6)
 	const auto pExt = TechnoExt::Fetch(pThis);
 	const auto pSourceHouse = pAttacker ? pAttacker->Owner : args->SourceHouse;
 	const auto pTargetHouse = pThis->Owner;
+
+	const double versus = args->WH
+		? GeneralUtils::GetWarheadVersusArmor(args->WH, pThis, pThis->GetTechnoType())
+		: 1.0;
+	const bool isHealing = (damage * versus) < 0.0;
+
+	if (args->Attacker && !isHealing && damage > 0)
+		pExt->LastAttacker = abstract_cast<TechnoClass*>(args->Attacker);
+
+	if (!args->IgnoreDefenses && pExt->ParentAttachment && !pExt->ParentAttachment->GetType()->Damageable && !isHealing)
+	{
+		if (args->WH && (args->WH->CellSpread <= 0.0f || args->DistanceToEpicenter == 0))
+		{
+			if (auto const pTargetParent = TechnoExt::GetFirstDamageableParent(pThis))
+				pTargetParent->ReceiveDamage(args->Damage, args->DistanceToEpicenter, args->WH, args->Attacker, args->IgnoreDefenses, args->PreventsPassengerEscape, args->SourceHouse);
+		}
+
+		damage = 0;
+		ReceiveDamageTemp::SkipLowDamageCheck = true;
+
+		return 0;
+	}
 
 	// Apply warhead effects
 	if (damage && !pWHExt->ApplyPerTargetEffectsOnDetonate.Get(RulesExt::Global()->ApplyPerTargetEffectsOnDetonate))

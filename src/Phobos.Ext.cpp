@@ -332,7 +332,9 @@ using PhobosTypeRegistry = TypeRegistry <
 	AttachEffectClass,
 	NewSWType,
 	SelectBoxTypeClass,
-	ResourceTypeClass
+	ResourceTypeClass,
+	AttachmentClass,
+	AttachmentTypeClass
 	// other classes
 > ;
 

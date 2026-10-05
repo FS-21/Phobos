@@ -192,6 +192,9 @@ void UnitExt::DepletedAmmoActions()
 
 bool UnitExt::CannotMove(UnitClass* pThis)
 {
+	if (TechnoExt::IsAttached(pThis) || TechnoExt::HasAttachmentLoco(pThis))
+		return true;
+
 	if (pThis->LocomotorSource)
 		return false;
 

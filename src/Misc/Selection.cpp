@@ -63,7 +63,11 @@ public:
 			{
 				if ((selected.Object->AbstractFlags & AbstractFlags::Techno) != AbstractFlags::None)
 				{
-					if (!TechnoExt::Fetch(static_cast<TechnoClass*>(selected.Object))->TypeExtData->LowSelectionPriority)
+					auto const pExt = TechnoExt::Fetch(static_cast<TechnoClass*>(selected.Object));
+					auto const pTypeExt = pExt->TypeExtData;
+
+					bool isLowPriorityByAttachment = pExt->ParentAttachment && pExt->ParentAttachment->GetType()->LowSelectionPriority;
+					if (!pTypeExt->LowSelectionPriority && !isLowPriorityByAttachment)
 						return true;
 				}
 			}
@@ -89,8 +93,17 @@ public:
 
 				if (auto const pTypeExt = TechnoTypeExt::TryFetch(pTechnoType)) // If pTechnoType is nullptr so will be pTypeExt
 				{
-					if (bPriorityFiltering && pTypeExt->LowSelectionPriority)
+					auto const& pExt = TechnoExt::ExtMap.Find(static_cast<TechnoClass*>(pObject));
+					bool isLowPriorityByAttachment = pExt && pExt->ParentAttachment && pExt->ParentAttachment->GetType()->LowSelectionPriority;
+					if (isLowPriorityByAttachment)
 						continue;
+
+					if (bPriorityFiltering)
+					{
+						bool isLowPriorityByTechno = Phobos::Config::PrioritySelectionFiltering && pTypeExt->LowSelectionPriority;
+						if (isLowPriorityByTechno)
+							continue;
+					}
 
 					if (Game::IsTypeSelecting())
 					{
@@ -166,7 +179,7 @@ public:
 
 			LTRBStruct rect { nLeft , nTop, nRight - nLeft + 1, nBottom - nTop + 1 };
 
-			const bool bPriorityFiltering = Phobos::Config::PrioritySelectionFiltering && Tactical_IsHighPriorityInRect(pThis, &rect);
+			bool bPriorityFiltering = Tactical_IsHighPriorityInRect(pThis, &rect);
 			Tactical_SelectFiltered(pThis, &rect, check_callback, bPriorityFiltering);
 
 			pThis->Band.Left = 0;

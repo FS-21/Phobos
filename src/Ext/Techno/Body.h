@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include <Ext/TechnoType/Body.h>
 #include <Ext/Radio/Body.h>
 #include <Utilities/Container.h>
@@ -10,6 +12,7 @@
 #include <New/Entity/AttachEffectClass.h>
 #include <TiberiumClass.h>
 #include <Ext/Event/Body.h>
+#include <New/Entity/AttachmentClass.h>
 
 class AirstrikeClass;
 class BulletClass;
@@ -21,7 +24,7 @@ enum class SmartAutoDeployAction : unsigned char
 	Undeploy = 2
 };
 
-class TechnoExt : public RadioExt, public Detach::Listener<AirstrikeClass>
+class TechnoExt : public RadioExt, public Detach::Listener<AirstrikeClass>, public Detach::Listener<AbstractClass>
 {
 public:
 	using base_type = TechnoClass;
@@ -104,6 +107,18 @@ public:
 	AnimClass* WebbyAnim;
 	AbstractClass* WebbyLastTarget;
 	Mission WebbyLastMission;
+
+	AttachmentClass* ParentAttachment;
+	ValueableVector<std::unique_ptr<AttachmentClass>> ChildAttachments;
+	std::map<int, ValueableVector<std::unique_ptr<AttachmentClass>>> DormantAttachments;
+	TechnoClass* LastAttacker;
+
+	AbstractClass* FallingInheritedTarget;
+	AbstractClass* FallingInheritedDestination;
+	Mission FallingInheritedMission;
+
+	// Ares
+	std::optional<bool> AltOccupation; // if the unit marks cell occupation flags, this is set to whether it uses the "high" occupation members
 
 	int DropCrate; // Drop crate on death, modified by map action
 	Powerup DropCrateType;
@@ -206,6 +221,14 @@ public:
 		, ResourceStartupGranted { false }
 		, ResourceInitialized { false }
 		, CollectorRegistered { false }
+		, ParentAttachment { nullptr }
+		, ChildAttachments {}
+		, DormantAttachments {}
+		, LastAttacker { nullptr }
+		, FallingInheritedTarget { nullptr }
+		, FallingInheritedDestination { nullptr }
+		, FallingInheritedMission { Mission::None }
+		, AltOccupation {}
 	{ }
 
 	void OnEarlyUpdate();
@@ -264,6 +287,7 @@ public:
 
 	virtual ~TechnoExt() override;
 	virtual void OnDetach(AirstrikeClass* pTarget, bool removed) override;
+	virtual void OnDetach(AbstractClass* pTarget, bool removed) override;
 	virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 	virtual void SaveToStream(PhobosStreamWriter& Stm) override;
 
@@ -288,6 +312,9 @@ public:
 	// deprecated stand-in for the pre-rework container of all TechnoClass extensions
 	static inline CompatExtMap<TechnoExt, TechnoClass> ExtMap {};
 
+	static UnitClass* Deployer;
+	static TechnoClass* DeployTransferSource;  // Set before deploy-target construction to skip InitializeAttachments and possibly other things
+
 	static bool LoadGlobals(PhobosStreamReader& Stm);
 	static bool SaveGlobals(PhobosStreamWriter& Stm);
 
@@ -299,16 +326,47 @@ public:
 	static bool HasAvailableDock(TechnoClass* pThis);
 	static bool HasRadioLinkWithDock(TechnoClass* pThis);
 
-
 	static Matrix3D GetTransform(TechnoClass* pThis, VoxelIndexKey* pKey = nullptr, bool isShadow = false);
-	static Matrix3D GetFLHMatrix(TechnoClass* pThis, const CoordStruct& flh, bool isOnTurret, double factor = 1.0, bool isShadow = false, int turIdx = -1);
-	static Matrix3D TransformFLHForTurret(TechnoClass* pThis, Matrix3D mtx, bool isOnTurret, double factor = 1.0, int turIdx = -1);
-	static CoordStruct GetFLHAbsoluteCoords(TechnoClass* pThis, const CoordStruct& flh, bool isOnTurret = false, int turIdx = -1);
+	static Matrix3D GetFLHMatrix(TechnoClass* pThis, const CoordStruct& flh, bool isOnTurret, double factor = 1.0, bool isShadow = false, int turIdx = -1, bool isOnBarrel = false);
+	static Matrix3D TransformFLHForTurret(TechnoClass* pThis, Matrix3D mtx, bool isOnTurret, double factor = 1.0, int turIdx = -1, bool isOnBarrel = false);
+	static CoordStruct GetFLHAbsoluteCoords(TechnoClass* pThis, const CoordStruct& flh, bool isOnTurret = false, int turIdx = -1, bool isOnBarrel = false);
+	static CoordStruct GetFLHAbsoluteCoords(TechnoClass* pThis, const CoordStruct& flh, bool isOnTurret, bool isOnBarrel)
+	{
+		return GetFLHAbsoluteCoords(pThis, flh, isOnTurret, -1, isOnBarrel);
+	}
 
 	static CoordStruct GetBurstFLH(TechnoClass* pThis, int weaponIndex, bool& FLHFound);
 
-	static void ChangeOwnerMissionFix(FootClass* pThis, TechnoTypeClass* pType);
+	static bool AttachTo(TechnoClass* pThis, TechnoClass* pParent);
+	static bool DetachFromParent(TechnoClass* pThis);
+
+	static void InitializeAttachments(TechnoClass* pThis);
+	static void DestroyAttachments(TechnoClass* pThis, TechnoClass* pSource);
+	static void HandleDestructionAsChild(TechnoClass* pThis);
+	static void UnlimboAttachments(TechnoClass* pThis);
+	static void LimboAttachments(TechnoClass* pThis);
+	static void TransferAttachments(TechnoClass* pThis, TechnoClass* pThat);
+	static void HandleAttachmentConversion(TechnoClass* pThis, TechnoTypeClass* pOldType, TechnoTypeClass* pNewType);
+	static void HandleAttachmentDeployTransfer(TechnoClass* pFrom, TechnoClass* pTo);
+
+	static bool IsAttached(TechnoClass* pThis);
+	static bool HasAttachmentLoco(FootClass* pThis); // FIXME shouldn't be here
+	static bool DoesntOccupyCellAsChild(TechnoClass* pThis);
+	static bool IsChildOf(TechnoClass* pThis, TechnoClass* pParent, bool deep = true);
+	static bool AreRelatives(TechnoClass* pThis, TechnoClass* pThat);
+	static TechnoClass* GetTopLevelParent(TechnoClass* pThis);
+	static TechnoClass* GetFirstDamageableParent(TechnoClass* pThis);
+	static AbstractClass* RedirectUntargetableAttachment(AbstractClass* pObj);
+	template <typename T>
+	static T* RedirectUntargetableAttachment(T* pObj)
+	{
+		return static_cast<T*>(RedirectUntargetableAttachment(static_cast<AbstractClass*>(pObj)));
+	}
+
+	static void ChangeOwnerMissionFix(FootClass* pThis, TechnoTypeClass* pType = nullptr);
 	static void KillSelf(TechnoClass* pThis, AutoDeathBehavior deathOption, const std::vector<AnimTypeClass*>& pVanishAnimation, bool isInLimbo = false);
+	static void Kill(TechnoClass* pThis, ObjectClass* pAttacker, HouseClass* pAttackingHouse);
+	static void Kill(TechnoClass* pThis, TechnoClass* pAttacker);
 	static void ObjectKilledBy(TechnoClass* pVictim, TechnoClass* pKiller = nullptr, HouseClass* pHouseKiller = nullptr);
 	static void UpdateSharedAmmo(TechnoClass* pThis);
 	static bool HasAdditionalAbility(TechnoClass* pThis, AdditionalAbility ability);

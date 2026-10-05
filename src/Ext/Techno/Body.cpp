@@ -19,6 +19,9 @@
 #include <Utilities/AresHelper.h>
 #include <Interop/TechnoExt.h>
 
+UnitClass* TechnoExt::Deployer = nullptr;
+TechnoClass* TechnoExt::DeployTransferSource = nullptr;
+
 TechnoExt::~TechnoExt()
 {
 	this->ApplyCollectorRegistration(false);
@@ -1157,6 +1160,7 @@ bool TechnoExt::IsHealthInThreshold(TechnoClass* pObject, double min, double max
 	return (hp > 0 ? hp > min : hp >= min) && hp <= max;
 }
 
+
 void TechnoExt::ClickedApproachObject(FootClass* pThis, ObjectClass* pObject)
 {
 	if (Unsorted::MoveFeedback)
@@ -1629,6 +1633,11 @@ void TechnoExt::Serialize(T& Stm)
 		.Process(this->ResourceStartupGranted)
 		.Process(this->ResourceInitialized)
 		.Process(this->CollectorRegistered)
+		.Process(this->AltOccupation)
+		.Process(this->LastAttacker)
+		.Process(this->FallingInheritedTarget)
+		.Process(this->FallingInheritedDestination)
+		.Process(this->FallingInheritedMission)
 		;
 }
 
@@ -1847,6 +1856,24 @@ void TechnoExt::OnDetach(AirstrikeClass* pTarget, bool removed)
 {
 	if (removed)
 		AnnounceInvalidPointer(this->AirstrikeTargetingMe, pTarget);
+}
+
+void TechnoExt::OnDetach(AbstractClass* pTarget, bool removed)
+{
+	if (removed)
+	{
+		AnnounceInvalidPointer(this->AirstrikeTargetingMe, pTarget);
+		AnnounceInvalidPointer(this->LastAttacker, pTarget);
+		AnnounceInvalidPointer(this->FallingInheritedTarget, pTarget);
+		AnnounceInvalidPointer(this->FallingInheritedDestination, pTarget);
+
+		for (auto const& pAttachment : this->ChildAttachments)
+			pAttachment->InvalidatePointer(pTarget);
+
+		for (auto& [key, vec] : this->DormantAttachments)
+			for (auto const& pAttachment : vec)
+				pAttachment->InvalidatePointer(pTarget);
+	}
 }
 
 void TechnoExt::LoadFromStream(PhobosStreamReader& Stm)

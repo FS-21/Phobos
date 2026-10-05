@@ -274,6 +274,13 @@ enum class StackingMode
 	Divide = 7
 };
 
+enum class AttachmentYSortPosition
+{
+	Default = 0,
+	UnderParent = 1,
+	OverParent = 2
+};
+
 enum class ChronoSparkleDisplayPosition : unsigned char
 {
 	None = 0x0,

@@ -14,6 +14,7 @@
 #include <New/Type/Affiliated/DroppodTypeClass.h>
 #include <New/Type/Affiliated/TiberiumEaterTypeClass.h>
 #include <New/Type/Affiliated/CreateUnitTypeClass.h>
+#include <New/Type/AttachmentTypeClass.h>
 
 class Matrix3D;
 class ParticleSystemTypeClass;
@@ -424,6 +425,28 @@ public:
 	Nullable<double> FallingDownDamage;
 	Nullable<double> FallingDownDamage_Water;
 	Nullable<bool> FallingDownDamage_AllowEMP;
+	Valueable<int> AttachmentTopLayerMinHeight;
+	Valueable<int> AttachmentUndergroundLayerMaxHeight;
+
+	struct AttachmentDataEntry
+	{
+		ValueableIdx<AttachmentTypeClass> Type;
+		NullableIdx<TechnoTypeClass> TechnoType;
+		Valueable<CoordStruct> FLH;
+		Valueable<bool> IsOnTurret;
+		Valueable<bool> IsOnBarrel;
+		Valueable<DirType> RotationAdjust;
+		PhobosFixedString<32> ID;
+
+		bool Load(PhobosStreamReader& stm, bool registerForChange);
+		bool Save(PhobosStreamWriter& stm) const;
+
+	private:
+		template <typename T>
+		bool Serialize(T& stm);
+	};
+
+	ValueableVector<AttachmentDataEntry> AttachmentData;
 
 	Valueable<int> Ammo_AutoConvertMinimumAmount;
 	Valueable<int> Ammo_AutoConvertMaximumAmount;
@@ -1017,6 +1040,9 @@ public:
 
 		, DefaultToGuardArea_Modes {}
 		, DefaultToGuardArea_AIModes {}
+		, AttachmentTopLayerMinHeight { RulesExt::Global()->AttachmentTopLayerMinHeight }
+		, AttachmentUndergroundLayerMaxHeight { RulesExt::Global()->AttachmentUndergroundLayerMaxHeight }
+		, AttachmentData {}
 
 		// Ares 0.2
 		, RadarJamRadius { 0 }

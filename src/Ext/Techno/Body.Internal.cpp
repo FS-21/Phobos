@@ -137,13 +137,13 @@ Matrix3D TechnoExt::GetTransform(TechnoClass* pThis, VoxelIndexKey* pKey, bool i
 	return mtx;
 }
 
-Matrix3D TechnoExt::TransformFLHForTurret(TechnoClass* pThis, Matrix3D mtx, bool isOnTurret, double factor, int turIdx)
+Matrix3D TechnoExt::TransformFLHForTurret(TechnoClass* pThis, Matrix3D mtx, bool isOnTurret, double factor, int turIdx, bool isOnBarrel)
 {
 	auto const pType = pThis->GetTechnoType();
 	const bool isFoot = (pThis->AbstractFlags & AbstractFlags::Foot) != AbstractFlags::None;
 
-	// turret offset and rotation
-	if (isOnTurret && (pType->Turret || !isFoot)) // If building has no turret, it's TurretFacing is TargetDirection
+	// Steps 2-3: turret offset and rotation
+	if ((isOnTurret || isOnBarrel) && (pType->Turret || !isFoot)) // If building has no turret, it's TurretFacing is TargetDirection
 	{
 		TechnoTypeExt::ApplyTurretOffset(pType, &mtx, factor, turIdx);
 
@@ -152,15 +152,24 @@ Matrix3D TechnoExt::TransformFLHForTurret(TechnoClass* pThis, Matrix3D mtx, bool
 		const float angle = isFoot ? (float)(turretRad - pThis->PrimaryFacing.Current().GetRadian<32>()) : (float)(turretRad);
 
 		mtx.RotateZ(angle);
+
+		// Step 3.5: barrel elevation and recoil if on barrel
+		if (isOnBarrel)
+		{
+			mtx.RotateY(static_cast<float>(-pThis->BarrelFacing.Current().GetRadian<32>()));
+
+			if (pThis->BarrelRecoil.State != RecoilData::RecoilState::Inactive)
+				mtx.TranslateX(-pThis->BarrelRecoil.TravelSoFar);
+		}
 	}
 
 	return mtx;
 }
 
-Matrix3D TechnoExt::GetFLHMatrix(TechnoClass* pThis, const CoordStruct& flh, bool isOnTurret, double factor, bool isShadow, int turIdx)
+Matrix3D TechnoExt::GetFLHMatrix(TechnoClass* pThis, const CoordStruct& flh, bool isOnTurret, double factor, bool isShadow, int turIdx, bool isOnBarrel)
 {
 	Matrix3D transform = TechnoExt::GetTransform(pThis, nullptr, isShadow);
-	Matrix3D mtx = TechnoExt::TransformFLHForTurret(pThis, transform, isOnTurret, factor, turIdx);
+	Matrix3D mtx = TechnoExt::TransformFLHForTurret(pThis, transform, isOnTurret, factor, turIdx, isOnBarrel);
 
 	// apply FLH offset
 	mtx.Translate((float)(flh.X * factor), (float)(flh.Y * factor), (float)(flh.Z * factor));
@@ -169,9 +178,9 @@ Matrix3D TechnoExt::GetFLHMatrix(TechnoClass* pThis, const CoordStruct& flh, boo
 }
 
 // reversed from 6F3D60
-CoordStruct TechnoExt::GetFLHAbsoluteCoords(TechnoClass* pThis, const CoordStruct& flh, bool isOnTurret, int turIdx)
+CoordStruct TechnoExt::GetFLHAbsoluteCoords(TechnoClass* pThis, const CoordStruct& flh, bool isOnTurret, int turIdx, bool isOnBarrel)
 {
-	auto result = TechnoExt::GetFLHMatrix(pThis, flh, isOnTurret, 1.0, false, turIdx).GetTranslation();
+	auto result = TechnoExt::GetFLHMatrix(pThis, flh, isOnTurret, 1.0, false, turIdx, isOnBarrel).GetTranslation();
 
 	// apply as an offset to global object coords
 	// Resulting coords are mirrored along X axis, so we mirror it back

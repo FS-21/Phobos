@@ -27,6 +27,7 @@
 #include <New/Type/TheaterTypeClass.h>
 #include "New/Type/TechTreeTypeClass.h"
 #include <New/Type/ResourceTypeClass.h>
+#include <New/Type/AttachmentTypeClass.h>
 #include <Ext/Side/Body.h>
 #include <TiberiumClass.h>
 #include <Ext/Tiberium/Body.h>
@@ -109,6 +110,7 @@ void RulesExt::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	InsigniaTypeClass::LoadFromINIList(pINI);
 	TechTreeTypeClass::LoadFromINIList(pINI);
 	TechTreeTypeClass::CalculateTotals();
+	AttachmentTypeClass::LoadFromINIList(pINI);
 
 	Data->LoadBeforeTypeData(pThis, pINI);
 }
@@ -746,6 +748,9 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->KeepAlive_Defenses.Read(exINI, GameStrings::General, "KeepAlive.Defenses");
 
 	this->AutoTarget_InsignificantWhenMindControlled.Read(exINI, GameStrings::CombatDamage, "AutoTarget.InsignificantWhenMindControlled");
+
+	this->AttachmentTopLayerMinHeight.Read(exINI, GameStrings::General, "AttachmentTopLayerMinHeight");
+	this->AttachmentUndergroundLayerMaxHeight.Read(exINI, GameStrings::General, "AttachmentUndergroundLayerMaxHeight");
 
 	// Section AITargetTypes
 	int itemsCount = pINI->GetKeyCount("AITargetTypes");
@@ -1477,7 +1482,9 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->CustomSequenceNormalized)
 		.Process(this->RevealHouses)
 		.Process(this->MissileKeepTargetCoord)
-	;
+		.Process(this->AttachmentTopLayerMinHeight)
+		.Process(this->AttachmentUndergroundLayerMaxHeight)
+		;
 }
 
 void RulesExt::ExtData::LoadFromStream(PhobosStreamReader& Stm)

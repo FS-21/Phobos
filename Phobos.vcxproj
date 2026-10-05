@@ -190,6 +190,8 @@
     <ClCompile Include="src\Ext\Techno\Body.UniversalDeploy.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.Update.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.Visuals.cpp" />
+    <ClCompile Include="src\Ext\Techno\Body.TechnoAttachment.cpp" />
+    <ClCompile Include="src\Ext\Techno\Hooks.TechnoAttachment.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.Airstrike.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.Cloak.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.cpp" />
@@ -261,6 +263,7 @@
     <ClCompile Include="src\Interop\Version.cpp" />
     <!-- src\Locomotion -->
     <ClCompile Include="src\Locomotion\TestLocomotionClass.cpp" />
+    <ClCompile Include="src\Locomotion\AttachmentLocomotionClass.cpp" />
     <!-- src\Misc -->
     <ClCompile Include="src\Misc\BlittersFix.cpp" />
     <ClCompile Include="src\Misc\ExceptionHandler.cpp" />
@@ -269,6 +272,7 @@
     <ClCompile Include="src\Misc\FlyingStrings.cpp" />
     <ClCompile Include="src\Misc\Hooks.AlphaImage.cpp" />
     <ClCompile Include="src\Misc\Hooks.Ares.cpp" />
+    <ClCompile Include="src\Misc\Hooks.AI.cpp" />
     <ClCompile Include="src\Misc\Hooks.BugFixes.cpp" />
     <ClCompile Include="src\Misc\Hooks.Crates.cpp" />
     <ClCompile Include="src\Misc\Hooks.DropshipLoadout.cpp" />
@@ -298,6 +302,7 @@
     <ClCompile Include="src\New\Entity\BannerClass.cpp" />
     <ClCompile Include="src\New\Entity\LaserTrailClass.cpp" />
     <ClCompile Include="src\New\Entity\ShieldClass.cpp" />
+    <ClCompile Include="src\New\Entity\AttachmentClass.cpp" />
     <!-- src\New\Type -->
     <ClCompile Include="src\New\Type\AttachEffectTypeClass.cpp" />
     <ClCompile Include="src\New\Type\BannerTypeClass.cpp" />
@@ -309,6 +314,7 @@
     <ClCompile Include="src\New\Type\ResourceTypeClass.cpp" />
     <ClCompile Include="src\New\Type\SelectBoxTypeClass.cpp" />
     <ClCompile Include="src\New\Type\ShieldTypeClass.cpp" />
+    <ClCompile Include="src\New\Type\AttachmentTypeClass.cpp" />
     <ClCompile Include="src\New\Type\TheaterTypeClass.cpp" />
     <ClCompile Include="src\New\Type\TheaterTypeHooks.cpp" />
     <!-- src\New\Type\Affiliated -->
@@ -435,6 +441,7 @@
     <ClInclude Include="src\Interop\Version.h" />
     <!-- src\Locomotion -->
     <ClInclude Include="src\Locomotion\TestLocomotionClass.h" />
+    <ClInclude Include="src\Locomotion\AttachmentLocomotionClass.h" />
     <!-- src\Misc -->
     <ClInclude Include="src\Misc\BlittersFix.h" />
     <ClInclude Include="src\Misc\ExceptionHandler.h" />
@@ -453,6 +460,7 @@
     <ClInclude Include="src\New\Entity\BannerClass.h" />
     <ClInclude Include="src\New\Entity\LaserTrailClass.h" />
     <ClInclude Include="src\New\Entity\ShieldClass.h" />
+    <ClInclude Include="src\New\Entity\AttachmentClass.h" />
     <!-- src\New\Type -->
     <ClInclude Include="src\New\Type\AttachEffectTypeClass.h" />
     <ClInclude Include="src\New\Type\BannerTypeClass.h" />
@@ -464,6 +472,7 @@
     <ClInclude Include="src\New\Type\ResourceTypeClass.h" />
     <ClInclude Include="src\New\Type\SelectBoxTypeClass.h" />
     <ClInclude Include="src\New\Type\ShieldTypeClass.h" />
+    <ClInclude Include="src\New\Type\AttachmentTypeClass.h" />
     <ClInclude Include="src\New\Type\TheaterTypeClass.h" />
     <!-- src\New\Type\Affiliated -->
     <ClInclude Include="src\New\Type\Affiliated\CreateUnitTypeClass.h" />
