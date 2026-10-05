@@ -2,6 +2,8 @@
 
 #include <Utilities/TemplateDef.h>
 
+class AnimTypeClass;
+
 class TypeConvertGroup
 {
 public:

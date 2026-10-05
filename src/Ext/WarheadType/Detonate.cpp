@@ -722,7 +722,7 @@ void WarheadTypeExt::ApplyConvert(HouseClass* pHouse, TechnoClass* pTarget)
 	}
 	else
 	{
-		TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pHouse);
+		TypeConvertGroup::Convert(pTargetFoot, this->Convert_Pairs, pHouse, this->Convert_Anim);
 	}
 }
 

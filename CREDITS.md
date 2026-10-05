@@ -188,6 +188,7 @@ This page lists all the individual contributions to the project by their author.
   - New map actions in the 19000 range that are copies of the original actions but with ID entries instead of indexes
   - Modify ammo on impact
   - New AI teams selector
+  - Additional conversion animation
   - Tiberium ramp expansion support
   - Fix crashes and freezes caused by Tiberium growth and spread
   - Fix Tiberium types not supporting overrides in map and game mode INIs
