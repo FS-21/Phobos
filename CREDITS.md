@@ -181,6 +181,7 @@ This page lists all the individual contributions to the project by their author.
   - Script action for repairing destroyed bridges
   - `EMPulseCannon.InaccurateRadius` and `EMPulse.Burst` for `Type=EMPulse` superweapons
   - Web logic against infantry
+  - Allow cyborg legs to be repaired when they enter into transports or structures
   - Restore the ScriptType action#24 `Play speech` from Tiberian Sun
   - Modify ammo on impact
   - New AI teams selector
@@ -327,6 +328,7 @@ This page lists all the individual contributions to the project by their author.
   - Airstrike flare visual customizations & fixes
   - Restored parabombs
   - Delayed fire weapons
+  - Cyborg legs being restored when the soldier enters into transports or structures
   - Changes / fixes to `Vertical` projectile logic and customizing projectile initial facing behavior
   - Bugfixes to map trigger action `125 Build At...`
   - Owner change during buildup bugfix
