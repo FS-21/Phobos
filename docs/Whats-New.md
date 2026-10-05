@@ -2032,6 +2032,7 @@ HideShakeEffects=false           ; boolean
 - [Customizable infantry sequence rates](New-or-Enhanced-Logics.md#customizable-infantry-sequence-rates) (by Noble_Fish)
 - `<Player @ X>` can now be used as owner for triggers on skirmish and multiplayer maps (by Starkku)
 - `RANGE`, `CRITIMMUNE` and `CRITCHANCE` promotion abilities (by Ollerus)
+- [Custom in-game font](User-Interface.md#custom-in-game-font) (by FS-21)
 - [Attached animation draw offset customizations](Fixed-or-Improved-Logics.md#draw-offset-customization) (by Starkku)
 - [Draw offset rules for AttachEffect animations](New-or-Enhanced-Logics.md#attached-effects) (by Starkku)
 - [Allowed customize that whether `Temporal=yes` warhead will cause target building animation poweroff](Fixed-or-Improved-Logics.md#allow-customize-that-whether-temporal-yes-warhead-will-cause-target-building-animation-poweroff) (by NetsuNegi)

@@ -175,6 +175,7 @@ This page lists all the individual contributions to the project by their author.
   - Flying production
   - Rally point customization
   - Recursive spawn conversion on spawner type conversion
+  - Custom in-game font
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
