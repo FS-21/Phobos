@@ -166,6 +166,8 @@ This page lists all the individual contributions to the project by their author.
   - Fix Tiberium types not supporting overrides in map and game mode INIs
   - Tiberium veins overlay palette fix
   - Allow the creation of new Tiberium types
+  - `514` Set tactical zoom trigger action
+  - Tactical zoom
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
