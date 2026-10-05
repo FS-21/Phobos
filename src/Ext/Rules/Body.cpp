@@ -16,6 +16,7 @@
 #include <New/Type/BannerTypeClass.h>
 #include <New/Type/InsigniaTypeClass.h>
 #include <New/Type/SelectBoxTypeClass.h>
+#include <New/Type/TheaterTypeClass.h>
 #include <TiberiumClass.h>
 #include <Ext/Tiberium/Body.h>
 #include <Ext/Side/Body.h>
@@ -74,6 +75,7 @@ void RulesExt::LoadFromINIFile(RulesClass* pThis, CCINIClass* pINI)
 
 void RulesExt::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 {
+	TheaterTypeClass::LoadTheatersINI();
 	DigitalDisplayTypeClass::LoadFromINIList(pINI);
 	SelectBoxTypeClass::LoadFromINIList(pINI);
 	RadTypeClass::LoadFromINIList(pINI);
