@@ -1927,6 +1927,13 @@ HideShakeEffects=false           ; boolean
   10104=Chronoshift to Enemy Base,20,0,1,[LONG DESC]
   10105=Repair Destroyed Bridge,20,0,1,[LONG DESC]
   14004=Force Global OnlyTargetHouseEnemy value in Teams,20,0,1,[LONG DESC]
+  16006=Set House Index For Managing AI Triggers,20,0,1,[LONG DESC]
+  16007=Enable Or Disable All AI Triggers,21,0,1,[LONG DESC]
+  16008=Enable AI Triggers From List,28,0,1,[LONG DESC]
+  16009=Disable AI Triggers From List,28,0,1,[LONG DESC]
+  16010=Disable AI Triggers If Contains Any Objects From the List,29,0,1,[LONG DESC]
+  16011=Enable AI Triggers If Contains Any Objects From the List,29,0,1,[LONG DESC]
+  16012=Set Side Index For Managing AI Triggers,20,0,1,[LONG DESC]
   18000=Local variable set,22,0,1,[LONG DESC]
   18001=Local variable add,22,0,1,[LONG DESC]
   18002=Local variable minus,22,0,1,[LONG DESC]
@@ -2007,6 +2014,12 @@ HideShakeEffects=false           ; boolean
   25=Local variables,-4
   26=Global variables,-5
   27=Global variables,-6
+  28=AI Scripts List, -7
+  29=AI Target Type,-8
+
+  [ScriptParamTypes]
+  7=AIScriptsList,1,1,0
+  8=AITargetTypes,1,1,0
   ```
 ````
 
@@ -2034,6 +2047,7 @@ HideShakeEffects=false           ; boolean
 - [Customizable disguised target evaluation behaviour in new ScriptType attack actions](Fixed-or-Improved-Logics.md#customizable-disguised-target-evaluation-behaviour-in-new-scripttype-attack-actions) (by FS-21)
 - [Weapon random target](New-or-Enhanced-Logics.md#weapon-random-target) (by FS-21)
 - [New ScriptTypeActions `19017, 19018, 19020, 19024, 19025, 19026, 19027, 19046, 19047, 19051, 19056, 19058` that require ID as argument](AI-Scripting-and-Mapping.md#new-scripttypeactions-that-require-id-as-argument) (by FS-21)
+- [Script actions for managing AI Triggers](AI-Scripting-and-Mapping.md#script-actions-for-managing-ai-triggers) (by FS-21)
 - [AutoDeath based on player power status and player credits](New-or-Enhanced-Logics.md#kill-object-automatically) (by Flactine)
 - [Roof production anim](New-or-Enhanced-Logics.md#roof-production-anim) (by Noble_Fish)
 - [Customize whether the unit exits from the roof](Fixed-or-Improved-Logics.md#customize-whether-the-unit-exits-from-the-roof) (by Noble_Fish)
@@ -2618,6 +2632,7 @@ HideShakeEffects=false           ; boolean
 - Building airstrike target eligibility customization (by Starkku)
 - IvanBomb detonation & image display optionally centered on buildings (by Starkku)
 - Forcing specific weapon against cloaked or disguised targets (by Starkku)
+- Script action for enabling & disabling AI Triggers (by FS-21)
 - Customizable ROF random delay (by Starkku)
 - Animation with `Tiled=yes` now supports `CustomPalette` (by ststl)
 - Toggleable `DieSound` when grinding (by Trsdy)

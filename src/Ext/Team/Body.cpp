@@ -23,6 +23,8 @@ void TeamExt::Serialize(T& Stm)
 		.Process(this->TeamLeader)
 		.Process(this->PreviousScriptList)
 		.Process(this->BridgeRepairHuts)
+		.Process(this->TriggersSideIdx)
+		.Process(this->TriggersHouseIdx)
 		;
 }
 

@@ -814,6 +814,23 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->NewTeamsSelector_InfantryCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.InfantryCategoryPercentage");
 	this->NewTeamsSelector_VIPWeight.Read(exINI, "AI", "NewTeamsSelector.VIPWeight");
 
+	// Section AITriggersList
+	int triggerItemsCount = pINI->GetKeyCount("AITriggersList");
+	for (int i = 0; i < triggerItemsCount; ++i)
+	{
+		std::vector<AITriggerTypeClass*> objectsList;
+
+		char* context = nullptr;
+		pINI->ReadString("AITriggersList", pINI->GetKeyName("AITriggersList", i), "", Phobos::readBuffer);
+
+		for (char *cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			AITriggerTypeClass* pNewTrigger = GameCreate<AITriggerTypeClass>(cur); // Note: Don't use ::FindOrAllocate(cur) here...
+			objectsList.emplace_back(pNewTrigger);
+		}
+
+		this->AITriggersLists.emplace_back(std::move(objectsList));
+	}
 	// Global default per-sequence animation rates for infantry.
 	for (size_t i = 0; i < SequenceRates::Entries.size(); ++i)
 	{
@@ -1004,6 +1021,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->AITargetTypesLists)
 		.Process(this->AIScriptsLists)
 		.Process(this->AIHousesLists)
+		.Process(this->AITriggersLists)
 		.Process(this->Storage_TiberiumIndex)
 		.Process(this->Storage_AI)
 		.Process(this->Storage_AI_Threshold)

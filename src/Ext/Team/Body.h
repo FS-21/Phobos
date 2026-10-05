@@ -44,6 +44,8 @@ public:
 	FootClass* TeamLeader;
 	std::vector<ScriptClass*> PreviousScriptList;
 	std::vector<TechnoClass*> BridgeRepairHuts;
+	int TriggersSideIdx;
+	int TriggersHouseIdx;
 
 	TeamExt(TeamClass* OwnerObject) : AbstractExt(OwnerObject)
 		, WaitNoTargetAttempts { 0 }
@@ -60,6 +62,8 @@ public:
 		, TeamLeader { nullptr }
 		, PreviousScriptList { }
 		, BridgeRepairHuts { }
+		, TriggersSideIdx { -1 }
+		, TriggersHouseIdx { -1 }
 	{ }
 
 	virtual ~TeamExt() = default;

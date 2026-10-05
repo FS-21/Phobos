@@ -135,10 +135,9 @@ This page lists all the individual contributions to the project by their author.
 - **FS-21**:
   - Interactive mission selection screen
   - Dump Object Info enhancements
-  - `Powered.KillSpawns`
-  - `Spawner.LimitRange`
   - Majority of ScriptType actions
   - ScriptType Action 14004: Force Global `OnlyTargetHouseEnemy` value in Teams
+  - Script actions for managing AI Triggers
   - MC deployer fixes
   - Help with docs
   - Automatic Passenger Deletion logic
