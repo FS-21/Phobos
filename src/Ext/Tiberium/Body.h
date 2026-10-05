@@ -26,6 +26,7 @@ public:
 	Nullable<ColorStruct> MinimapColor;
 	Valueable<bool> AllowRamps;
 	std::array<OverlayTypeClass*, 8> RampOverlays {};
+	Nullable<int> PipFrame;
 
 	bool HasRampOverlays();
 	OverlayTypeClass* GetRampOverlay(int slopeOffset);
@@ -35,6 +36,7 @@ public:
 		, MinimapColor {}
 		, AllowRamps { false }
 		, RampOverlays {}
+		, PipFrame {}
 	{ }
 
 	virtual ~TiberiumExt() = default;
