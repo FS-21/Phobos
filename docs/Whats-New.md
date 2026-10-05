@@ -2031,6 +2031,7 @@ HideShakeEffects=false           ; boolean
 - [Mission selection screen](User-Interface.md#mission-selection-screen) (by FS-21)
 - [Customizable disguised target evaluation behaviour in new ScriptType attack actions](Fixed-or-Improved-Logics.md#customizable-disguised-target-evaluation-behaviour-in-new-scripttype-attack-actions) (by FS-21)
 - [Weapon random target](New-or-Enhanced-Logics.md#weapon-random-target) (by FS-21)
+- [New ScriptTypeActions `19017, 19018, 19020, 19024, 19025, 19026, 19027, 19046, 19047, 19051, 19056, 19058` that require ID as argument](AI-Scripting-and-Mapping.md#new-scripttypeactions-that-require-id-as-argument) (by FS-21)
 - [AutoDeath based on player power status and player credits](New-or-Enhanced-Logics.md#kill-object-automatically) (by Flactine)
 - [Roof production anim](New-or-Enhanced-Logics.md#roof-production-anim) (by Noble_Fish)
 - [Customize whether the unit exits from the roof](Fixed-or-Improved-Logics.md#customize-whether-the-unit-exits-from-the-roof) (by Noble_Fish)
