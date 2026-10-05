@@ -2056,6 +2056,8 @@ HideShakeEffects=false           ; boolean
 - [Flying production](New-or-Enhanced-Logics.md#flying-production) (by FS-21)
 - [Rally point customization](New-or-Enhanced-Logics.md#rally-point-customization) (by FS-21)
 - [Recursive conversion of spawned units](New-or-Enhanced-Logics.md#recursive-conversion-of-spawned-units) (by FS-21)
+- [Superweapon cooldown groups](New-or-Enhanced-Logics.md#cooldown-groups) (by FS-21)
+- [Randomize AI superweapon priority](New-or-Enhanced-Logics.md#randomize-ai-superweapon-priority) (by FS-21)
 - [AttachEffect `CumulativeAnimations` count increment customization](New-or-Enhanced-Logics.md#attached-effects) (by Starkku)
 
 #### Vanilla fixes:

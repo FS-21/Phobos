@@ -176,6 +176,8 @@ This page lists all the individual contributions to the project by their author.
   - Rally point customization
   - Recursive spawn conversion on spawner type conversion
   - Custom in-game font
+  - Superweapon cooldown groups
+  - Randomize AI superweapon priority
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
