@@ -49,6 +49,8 @@ public:
 	BuildingClass* Factory_NavyType;
 	BuildingClass* Factory_AircraftType;
 
+	std::vector<int> AITriggers_ValidList;
+
 	CDTimerClass CombatAlertTimer;
 	CDTimerClass AISuperWeaponDelayTimer;
 	CDTimerClass AIFireSaleDelayTimer;
@@ -409,6 +411,13 @@ public:
 	static CellClass* GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass* pCurrentHouse, CoordStruct defaultCurrentCoords, SpeedType speedTypeZone, int extraDistance = 0);
 	static void GetAIChronoshiftSupers(HouseClass* pThis, SuperClass*& pSuperCSphere, SuperClass*& pSuperCWarp);
 	static void AI_TryFireSW_CooldownGroupAware(HouseClass* pThis);
+
+	static bool IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* const pItem);
+	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, bool skipSecretLabChecks = false);
+	static bool HasBuildingPrerequisite(HouseClass* const pHouse, int idxBuildingType);
+	static bool HasGenericPrerequisite(int idx, HouseClass* const pHouse);
+	static bool HasPrerequisite(HouseClass* const pHouse, int idx);
+	static int FindGenericPrerequisite(const char* id);
 
 	static void SetForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode = -1);
 	static void SetSkirmishHouseName(HouseClass* pHouse);

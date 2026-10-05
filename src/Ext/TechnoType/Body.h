@@ -525,6 +525,17 @@ public:
 	Valueable<bool> SmartAutoDeploy_SHP_Threshold_Inverted;
 	Valueable<bool> SmartAutoDeploy_CheckMinimumRange;
 
+	Nullable<bool> ConsideredNaval;
+	Nullable<bool> ConsideredVehicle;
+	Valueable<bool> ConsideredSecretLabTech;
+	std::vector<std::string> Secret_RequiredHouses;
+	std::vector<std::string> Secret_ForbiddenHouses;
+	DWORD PrerequisiteTheaters;
+	ValueableVector<int> Prerequisite;
+	ValueableVector<int> Prerequisite_Negative;
+	Valueable<int> Prerequisite_Lists;
+	std::vector<DynamicVectorClass<int>> Prerequisite_ListVector;
+
 	TechnoTypeExt(TechnoTypeClass* OwnerObject) : ObjectTypeExt(OwnerObject)
 		, Array {}
 		, TabIndex {}
@@ -998,6 +1009,16 @@ public:
 		, FlyingProduction_SpawnAnim_AttachedToObject { false }
 		, FlyingProduction_SpawnAt {}
 		, FlyingProduction_RallyPointFromSpawnBuilding { false }
+		, ConsideredNaval {}
+		, ConsideredVehicle {}
+		, ConsideredSecretLabTech { false }
+		, Secret_RequiredHouses {}
+		, Secret_ForbiddenHouses {}
+		, PrerequisiteTheaters { 0xFFFFFFFF }
+		, Prerequisite {}
+		, Prerequisite_Negative {}
+		, Prerequisite_Lists { -1 }
+		, Prerequisite_ListVector {}
 	{ }
 
 	virtual ~TechnoTypeExt() = default;

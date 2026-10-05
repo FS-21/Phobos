@@ -14,6 +14,8 @@
 #include <Utilities/SequenceRates.h>
 
 #include <Ext/TechnoType/Body.h>
+#include <Ext/Scenario/Body.h>
+#include <Ext/House/Body.h>
 #include <New/Type/RadTypeClass.h>
 #include <New/Type/ShieldTypeClass.h>
 #include <New/Type/LaserTrailTypeClass.h>
@@ -771,6 +773,17 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 		this->AIHousesLists.emplace_back(std::move(objectsList));
 	}
 
+	this->NewTeamsSelector.Read(exINI, "AI", "NewTeamsSelector");
+	this->NewTeamsSelector_SplitTriggersByCategory.Read(exINI, "AI", "NewTeamsSelector.SplitTriggersByCategory");
+	this->NewTeamsSelector_EnableFallback.Read(exINI, "AI", "NewTeamsSelector.EnableFallback");
+	this->NewTeamsSelector_MergeUnclassifiedCategoryWith.Read(exINI, "AI", "NewTeamsSelector.MergeUnclassifiedCategoryWith");
+	this->NewTeamsSelector_UnclassifiedCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.UnclassifiedCategoryPercentage");
+	this->NewTeamsSelector_GroundCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.GroundCategoryPercentage");
+	this->NewTeamsSelector_AirCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.AirCategoryPercentage");
+	this->NewTeamsSelector_NavalCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.NavalCategoryPercentage");
+	this->NewTeamsSelector_InfantryCategoryPercentage.Read(exINI, "AI", "NewTeamsSelector.InfantryCategoryPercentage");
+	this->NewTeamsSelector_VIPWeight.Read(exINI, "AI", "NewTeamsSelector.VIPWeight");
+
 	// Global default per-sequence animation rates for infantry.
 	for (size_t i = 0; i < SequenceRates::Entries.size(); ++i)
 	{
@@ -1150,6 +1163,16 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->GenericPrerequisites)
 		.Process(this->GenericPrerequisitesNames)
 		.Process(this->GenericPrerequisitesAlternates)
+		.Process(this->NewTeamsSelector)
+		.Process(this->NewTeamsSelector_SplitTriggersByCategory)
+		.Process(this->NewTeamsSelector_EnableFallback)
+		.Process(this->NewTeamsSelector_MergeUnclassifiedCategoryWith)
+		.Process(this->NewTeamsSelector_UnclassifiedCategoryPercentage)
+		.Process(this->NewTeamsSelector_GroundCategoryPercentage)
+		.Process(this->NewTeamsSelector_AirCategoryPercentage)
+		.Process(this->NewTeamsSelector_NavalCategoryPercentage)
+		.Process(this->NewTeamsSelector_InfantryCategoryPercentage)
+		.Process(this->NewTeamsSelector_VIPWeight)
 		.Process(this->DropPodTrailer)
 		.Process(this->DropPodDefaultTrailer)
 		.Process(this->PodImage)
