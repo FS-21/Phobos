@@ -247,6 +247,7 @@ public:
 	Valueable<bool> FakeEngineer_CanCaptureBuildings;
 	Valueable<bool> FakeEngineer_BombDisarm;
 
+	Valueable<bool> KickOutKickablePassengers;
 	Valueable<bool> CanKill;
 
 	Valueable<bool> UnlimboDetonate;
@@ -609,7 +610,7 @@ public:
 		, PreventCrewEscape { false }
 		, PreventPassengerEscape { false }
 		, PreventOccupantEscape { false }
-
+		, KickOutKickablePassengers { false }
 		, Ammo { 0 }
 
 		, IvanBomb_Detonate { false }

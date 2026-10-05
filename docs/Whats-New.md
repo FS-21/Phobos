@@ -2055,6 +2055,7 @@ HideShakeEffects=false           ; boolean
 - [Custom Resource Types](New-or-Enhanced-Logics.md#custom-resource-types) (by FS-21)
 - [AI Learning](New-or-Enhanced-Logics.md#ai-learning) (by FS-21)
 - [ScriptType actions for aircraft attacks](AI-Scripting-and-Mapping.md#10018-attack-at-specified-waypoint) (by FS-21)
+- [Kick out ejectable passengers](Fixed-or-Improved-Logics.md#kick-out-ejectable-passengers) (by FS-21)
 - [Customize ivan bomb visibility](Fixed-or-Improved-Logics.md#customize-ivan-bomb-visibility) (by NetsuNegi)
 - [Customize whether mind-controlled `Insignificant` technos can be auto-targeted](Fixed-or-Improved-Logics.md#customize-whether-mind-controlled-insignificant-technos-can-be-auto-targeted) (by Noble_Fish)
 - [Mission selection screen](User-Interface.md#mission-selection-screen) (by FS-21)

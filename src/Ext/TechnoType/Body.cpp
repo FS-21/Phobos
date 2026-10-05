@@ -1968,6 +1968,8 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 		}
 	}
 
+	this->NoManualUnload.Read(exINI, pSection, "NoManualUnload");
+
 	// VoiceIFVRepair from Ares 0.2
 	this->VoiceIFVRepair.Read(exINI, pSection, "VoiceIFVRepair");
 	this->ParseVoiceWeaponAttacks(exINI, pSection, this->VoiceWeaponAttacks, this->VoiceEliteWeaponAttacks);
@@ -2397,7 +2399,7 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->FallingDownDamage_AllowEMP)
 
 		.Process(this->PenetratesGarrison_Allowed)
-
+		.Process(this->NoManualUnload)
 		.Process(this->Ammo_AutoConvertMinimumAmount)
 		.Process(this->Ammo_AutoConvertMaximumAmount)
 		.Process(this->Ammo_AutoConvertType)

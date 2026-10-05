@@ -392,6 +392,8 @@ public:
 
 	std::vector<LaserTrailDataEntry> LaserTrailData;
 
+	Nullable<bool> NoManualUnload;
+
 	Valueable<bool> SuppressKillWeapons;
 	ValueableVector<WeaponTypeClass*> SuppressKillWeapons_Types;
 
@@ -961,6 +963,7 @@ public:
 		, ExtraThreatCoefficient_Facing {}
 		, ExtraThreatCoefficient_DistanceToLastTarget {}
 
+		, NoManualUnload { }
 		, DropCrate {}
 
 		, Convert_Health_AbovePercent { -1.0 }

@@ -490,6 +490,8 @@ void WarheadTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	// AttachEffect
 	this->AttachEffects.LoadFromINI(pINI, pSection);
 
+	this->KickOutKickablePassengers.Read(exINI, pSection, "KickOutKickablePassengers");
+
 #ifdef LOCO_TEST_WARHEADS // Enable warheads parsing
 	this->InflictLocomotor.Read(exINI, pSection, "InflictLocomotor");
 	this->RemoveInflictedLocomotor.Read(exINI, pSection, "RemoveInflictedLocomotor");
@@ -552,6 +554,7 @@ void WarheadTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 		|| this->BuildingUndeploy
 		|| this->PenetratesGarrison
 		|| this->ReverseEngineer
+		|| this->KickOutKickablePassengers
 		|| this->ReturnWarhead
 		|| this->PenetratesTransport_Level > 0
 		|| this->Taunt
@@ -877,6 +880,7 @@ void WarheadTypeExt::Serialize(T& Stm)
 		.Process(this->FakeEngineer_CanDestroyBridges)
 		.Process(this->FakeEngineer_CanCaptureBuildings)
 		.Process(this->FakeEngineer_BombDisarm)
+		.Process(this->KickOutKickablePassengers)
 		.Process(this->Ammo)
 
 		.Process(this->IvanBomb_Detonate)

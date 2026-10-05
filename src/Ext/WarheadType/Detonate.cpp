@@ -238,6 +238,13 @@ void WarheadTypeExt::DetonateOnOneUnit(HouseClass* pHouse, TechnoClass* pTarget,
 	if (this->Convert_Pairs.size() > 0)
 		this->ApplyConvert(pHouse, pTarget);
 
+	if (this->KickOutKickablePassengers)
+	{
+		const auto pTargetTypeExt = TechnoTypeExt::Fetch(pTarget->GetTechnoType());
+
+		if (pTarget->Passengers.NumPassengers > 0 && !pTargetTypeExt->NoManualUnload.Get(false))
+			TechnoExt::PassengersTransfer(pTarget, nullptr, true, true);
+	}
 	if (this->BuildingSell || this->BuildingUndeploy)
 		this->ApplyBuildingUndeploy(pTarget);
 
