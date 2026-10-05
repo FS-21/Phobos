@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <string>
+#include <New/Type/ResourceTypeClass.h>
 
 TiberiumExt::ExtContainer TiberiumExt::ExtMap;
 
@@ -14,6 +15,8 @@ void TiberiumExt::Serialize(T& Stm)
 {
 	Stm
 		.Process(this->MinimapColor)
+		.Process(this->ResourceType)
+		.Process(this->ResourceValue)
 		.Process(this->AllowRamps)
 		.Process(this->PipFrame)
 		;
@@ -123,6 +126,8 @@ void TiberiumExt::LoadFromINIFile(CCINIClass* const pINI)
 	INI_EX exINI(pINI);
 
 	this->MinimapColor.Read(exINI, pSection, "MinimapColor");
+	this->ResourceType.Read(exINI, pSection, "ResourceType");
+	this->ResourceValue.Read(exINI, pSection, "ResourceValue");
 	this->AllowRamps.Read(exINI, pSection, "AllowRamps");
 	this->PipFrame.Read(exINI, pSection, "PipFrame");
 

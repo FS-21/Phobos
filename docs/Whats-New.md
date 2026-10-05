@@ -2026,6 +2026,7 @@ HideShakeEffects=false           ; boolean
 - [Penetration damage on garrisonable structures](New-or-Enhanced-Logics.md#penetration-damage-on-garrisonable-structures) (by FS-21)
 - [Web logic against infantry](New-or-Enhanced-Logics.md#web-logic-against-infantry) (by FS-21)
 - [Event 607: A webby weapon hit the tagged infantry](AI-Scripting-and-Mapping.md#607-a-webby-weapon-hit-the-tagged-infantry) (by FS-21)
+- [Custom Resource Types](New-or-Enhanced-Logics.md#custom-resource-types) (by FS-21)
 - [Customize ivan bomb visibility](Fixed-or-Improved-Logics.md#customize-ivan-bomb-visibility) (by NetsuNegi)
 - [Customize whether mind-controlled `Insignificant` technos can be auto-targeted](Fixed-or-Improved-Logics.md#customize-whether-mind-controlled-insignificant-technos-can-be-auto-targeted) (by Noble_Fish)
 - [Mission selection screen](User-Interface.md#mission-selection-screen) (by FS-21)

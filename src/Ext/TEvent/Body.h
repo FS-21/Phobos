@@ -53,6 +53,8 @@ enum PhobosTriggerEvent
 	CellHasAnyTechnoTypeFromList = 605,
 	AttachedIsUnderAttachedEffect = 606,
 	AttachedIsUnderWebby = 607,
+	HouseHasCustomResourceGreaterThan = 610,
+	HouseHasCustomResourceLessThan = 611,
 
 	ForceSequentialEvents = 1000,
 	ForceParallelEvents = 1001,
@@ -109,6 +111,7 @@ public:
 	static bool AttachedIsUnderWebbyTEvent(ObjectClass* pObject);
 
 	static bool AttachedIsUnderAttachedEffectTEvent(TEventClass* pThis, ObjectClass* pObject);
+	static bool HouseHasCustomResource(TEventClass* pThis, HouseClass* pHouse, bool isGreaterThan);
 
 
 public:

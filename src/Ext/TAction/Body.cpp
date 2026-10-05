@@ -13,6 +13,7 @@
 #include <Ext/SWType/Body.h>
 
 #include <New/Entity/BannerClass.h>
+#include <New/Type/ResourceTypeClass.h>
 #include <Utilities/SpawnerHelper.h>
 #include <Misc/ZoomManager.h>
 #include <Utilities/Debug.h>
@@ -114,6 +115,11 @@ bool TActionExt::Execute(TActionClass* pThis, HouseClass* pHouse, ObjectClass* p
 	case PhobosTriggerAction::OpenDropshipLoadoutWindow:
 		return TActionExt::OpenDropshipLoadoutWindow(pThis, pHouse, pObject, pTrigger, location);
 
+
+	case PhobosTriggerAction::SetCustomResource:
+	case PhobosTriggerAction::AddCustomResource:
+	case PhobosTriggerAction::SubtractCustomResource:
+		return TActionExt::ModifyCustomResource(pThis, pHouse, pObject, pTrigger, location);
 
 	default:
 		bHandled = false;
@@ -1067,6 +1073,55 @@ bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* p
 
 	if (textToShow)
 		MessageListClass::Instance.PrintMessage(message, messageDelay, HouseClass::CurrentPlayer->ColorSchemeIndex, true);
+
+	return true;
+}
+
+bool TActionExt::ModifyCustomResource(TActionClass* pThis, HouseClass* pHouse, ObjectClass* pObject, TriggerClass* pTrigger, CellStruct const& location)
+{
+	if (!pThis)
+		return true;
+
+	const int resIdx = ResourceTypeClass::FindIndex(pThis->Text);
+	if (resIdx < 0)
+		return true;
+
+	const auto pResource = ResourceTypeClass::Array[resIdx].get();
+	if (pResource && pResource->IsPowerResource())
+		return true;
+
+	HouseClass* pTargetHouse = pHouse;
+	if (pThis->Value2 >= 0)
+	{
+		pTargetHouse = HouseClass::Index_IsMP(pThis->Value2)
+			? HouseClass::FindByIndex(pThis->Value2)
+			: HouseClass::FindByCountryIndex(pThis->Value2);
+	}
+	if (!pTargetHouse)
+		pTargetHouse = HouseClass::CurrentPlayer;
+
+	if (!pTargetHouse)
+		return true;
+
+	const auto pHouseExt = HouseExt::TryFetch(pTargetHouse);
+	if (!pHouseExt)
+		return true;
+
+	const auto action = static_cast<PhobosTriggerAction>(pThis->ActionKind);
+	const int value = pThis->Value;
+
+	if (action == PhobosTriggerAction::SetCustomResource)
+	{
+		pHouseExt->SetResourceAmount(resIdx, value);
+	}
+	else if (action == PhobosTriggerAction::AddCustomResource)
+	{
+		pHouseExt->UpdateResourceAmount(resIdx, value);
+	}
+	else if (action == PhobosTriggerAction::SubtractCustomResource)
+	{
+		pHouseExt->UpdateResourceAmount(resIdx, -value);
+	}
 
 	return true;
 }

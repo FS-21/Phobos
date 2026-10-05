@@ -6,6 +6,9 @@
 #include "Ext/Techno/Body.h"
 #include "Ext/Building/Body.h"
 #include <Ext/Event/Body.h>
+#include <Ext/Tiberium/Body.h>
+#include <New/Type/ResourceTypeClass.h>
+#include <Misc/FlyingStrings.h>
 
 #include <BeaconManagerClass.h>
 #include <Utilities/AresHelper.h>
@@ -134,7 +137,52 @@ DEFINE_HOOK(0x73E474, UnitClass_Unload_Storage, 0x6)
 	auto const pTypeExt = BuildingTypeExt::Fetch(pBuilding->Type);
 	auto const storageTiberiumIndex = RulesExt::Global()->Storage_TiberiumIndex;
 
-	if (pTypeExt->Refinery_UseStorage)
+	if (idxTiberium >= 0 && idxTiberium < TiberiumClass::Array.Count)
+	{
+		const auto pTiberium = TiberiumClass::Array.GetItem(idxTiberium);
+		if (const auto pTibExt = TiberiumExt::TryFetch(pTiberium))
+		{
+			if (pTibExt->ResourceType.isset() && pTibExt->ResourceType >= 0)
+			{
+				const int resIdx = pTibExt->ResourceType.Get();
+				const bool hasCustomResourceValue = pTibExt->ResourceValue.isset();
+				const int unitVal = hasCustomResourceValue ? pTibExt->ResourceValue.Get() : pTiberium->Value;
+				const float incomingPoints = amount * static_cast<float>(unitVal);
+
+				if (incomingPoints > 0.0f && pBuilding && pBuilding->Owner)
+				{
+					if (const auto pHouseExt = HouseExt::TryFetch(pBuilding->Owner))
+					{
+						if (pHouseExt->IsResourceEnabled(resIdx))
+						{
+							if (const auto pBldExt = BuildingExt::TryFetch(pBuilding))
+							{
+								if (resIdx >= static_cast<int>(pBldExt->AccumulatedResources.size()))
+									pBldExt->AccumulatedResources.resize(resIdx + 1, 0.0f);
+
+								const int prevWhole = static_cast<int>(pBldExt->AccumulatedResources[resIdx]);
+								pBldExt->AccumulatedResources[resIdx] += incomingPoints;
+								const int newWhole = static_cast<int>(pBldExt->AccumulatedResources[resIdx]);
+								const int pointsToGrant = newWhole - prevWhole;
+
+								if (pointsToGrant > 0)
+								{
+									pHouseExt->UpdateResourceAmount(resIdx, pointsToGrant);
+								}
+							}
+						}
+					}
+				}
+
+				if (!hasCustomResourceValue)
+				{
+					amount = 0.0f; // Value was used for the custom resource, suppress money
+				}
+			}
+		}
+	}
+
+	if (pTypeExt->Refinery_UseStorage && amount > 0.0f)
 	{
 		if (storageTiberiumIndex >= 0)
 		{

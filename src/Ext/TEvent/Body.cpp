@@ -1,7 +1,9 @@
 #include "Body.h"
 
+#include <Ext/House/Body.h>
 #include <Ext/Scenario/Body.h>
 #include <New/Entity/ShieldClass.h>
+#include <New/Type/ResourceTypeClass.h>
 
 //Static init
 TEventExt::ExtContainer TEventExt::ExtMap;
@@ -149,6 +151,10 @@ std::optional<bool> TEventExt::Execute(TEventClass* pThis, int iEvent, HouseClas
 		return TEventExt::AttachedIsUnderAttachedEffectTEvent(pThis, pObject);
 	case PhobosTriggerEvent::AttachedIsUnderWebby:
 		return TEventExt::AttachedIsUnderWebbyTEvent(pObject);
+	case PhobosTriggerEvent::HouseHasCustomResourceGreaterThan:
+		return TEventExt::HouseHasCustomResource(pThis, pHouse, true);
+	case PhobosTriggerEvent::HouseHasCustomResourceLessThan:
+		return TEventExt::HouseHasCustomResource(pThis, pHouse, false);
 
 
 	// If it requires an additional object as like mapping events 7 or 48, please fill it in here.
@@ -353,6 +359,29 @@ bool TEventExt::AttachedIsUnderWebbyTEvent(ObjectClass* pObject)
 	}
 
 	return false;
+}
+
+bool TEventExt::HouseHasCustomResource(TEventClass* pThis, HouseClass* pEventHouse, bool isGreaterThan)
+{
+	if (!pThis)
+		return false;
+
+	const int resIdx = ResourceTypeClass::FindIndex(pThis->String);
+	if (resIdx < 0)
+		return false;
+
+	HouseClass* pHouse = pEventHouse ? pEventHouse : HouseClass::CurrentPlayer;
+	if (!pHouse)
+		return false;
+
+	const auto pHouseExt = HouseExt::TryFetch(pHouse);
+	if (!pHouseExt)
+		return false;
+
+	const int currentAmount = pHouseExt->GetResourceAmount(resIdx);
+	const int targetAmount = pThis->Value;
+
+	return isGreaterThan ? (currentAmount > targetAmount) : (currentAmount < targetAmount);
 }
 
 // =============================

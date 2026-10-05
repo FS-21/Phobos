@@ -158,6 +158,7 @@ public:
 	NullableIdx<VoxClass> DropshipLoadout_EndingDragDropSound;
 	Nullable<int> DropshipLoadout_VeteranLevel;
 
+	std::vector<int> SW_ResourceAmounts;
 	ValueableIdxVector<SuperWeaponTypeClass> SW_Link;
 	Valueable<bool> SW_Link_Grant;
 	Valueable<bool> SW_Link_Ready;
@@ -311,6 +312,7 @@ public:
 		, DropshipLoadout_StartingDragDropSound {}
 		, DropshipLoadout_EndingDragDropSound {}
 		, DropshipLoadout_VeteranLevel {}
+		, SW_ResourceAmounts {}
 	{ }
 
 	// Ares 0.A functions
@@ -336,6 +338,8 @@ public:
 	std::pair<double, double> GetEMPulseCannonRange(BuildingClass* pBuilding) const;
 
 	void ApplyDropshipLoadoutLaunch(HouseClass* pHouse, const CellStruct& cell);
+	void ApplyResourceAmounts(SuperClass* pSW);
+	bool AreResourcesSufficient(HouseClass* pHouse) const;
 	void ApplyLinkedSW(SuperClass* pSW);
 
 	void ApplyCooldownGroupReset(SuperClass* pSW);

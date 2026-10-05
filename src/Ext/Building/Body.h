@@ -22,6 +22,7 @@ public:
 	BuildingClass* CurrentAirFactory;
 	bool SecretLab_Placed;
 	int AccumulatedIncome;
+	std::vector<float> AccumulatedResources;
 	std::optional<int> CurrentLaserWeaponIndex;
 	int PoweredUpToLevel; // Distinct from UpgradeLevel, and set to highest PowersUpToLevel out of applied upgrades regardless of how many are currently applied to this building.
 	SuperClass* CurrentEMPulseSW;
@@ -50,6 +51,7 @@ public:
 		, CurrentAirFactory { nullptr }
 		, SecretLab_Placed { false }
 		, AccumulatedIncome { 0 }
+		, AccumulatedResources {}
 		, CurrentLaserWeaponIndex {}
 		, PoweredUpToLevel { 0 }
 		, CurrentEMPulseSW {}

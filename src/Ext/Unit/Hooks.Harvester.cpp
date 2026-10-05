@@ -200,6 +200,7 @@ DEFINE_HOOK(0x73E411, UnitClass_Mission_Unload_DumpAmount, 0x7)
 
 	GET(UnitClass*, pThis, ESI);
 	GET(const int, tiberiumIdx, EBP);
+	REF_STACK(float, stackAmount, 0x18);
 	const auto pTypeExt = UnitTypeExt::Fetch(pThis->Type);
 	const auto pExt = TechnoExt::Fetch(pThis);
 	const float totalAmount = pExt ? pExt->GetTiberium(tiberiumIdx) : pThis->Tiberium.GetAmount(tiberiumIdx);
@@ -208,6 +209,7 @@ DEFINE_HOOK(0x73E411, UnitClass_Mission_Unload_DumpAmount, 0x7)
 	if (dumpAmount <= 0.0f || totalAmount < dumpAmount)
 		dumpAmount = totalAmount;
 
+	stackAmount = dumpAmount;
 	__asm fld dumpAmount;
 
 	return SkipGameCode;

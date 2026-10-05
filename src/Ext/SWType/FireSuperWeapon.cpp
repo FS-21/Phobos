@@ -17,6 +17,8 @@
 #include <ScriptClass.h>
 #include <MapClass.h>
 #include <algorithm>
+#include <Misc/FlyingStrings.h>
+#include <New/Type/ResourceTypeClass.h>
 
 #include <unordered_set>
 
@@ -67,6 +69,8 @@ void SWTypeExt::FireSuperWeaponExt(SuperClass* pSW, const CellStruct& cell)
 
 	if (pTypeExt->DropshipLoadout_Launch.Get())
 		pTypeExt->ApplyDropshipLoadoutLaunch(pHouse, cell);
+
+	pTypeExt->ApplyResourceAmounts(pSW);
 
 	pTypeExt->ApplyActivatedMessage(pSW);
 
@@ -598,6 +602,46 @@ void SWTypeExt::ApplyCooldownGroupReset(SuperClass* pSW)
 		MouseClass::Instance.RepaintSidebar(1);
 }
 
+void SWTypeExt::ApplyResourceAmounts(SuperClass* pSW)
+{
+	if (!pSW || !pSW->Owner)
+		return;
+
+	if (const auto pOwnerExt = HouseExt::TryFetch(pSW->Owner))
+	{
+		for (size_t i = 0; i < this->SW_ResourceAmounts.size(); ++i)
+		{
+			const int amount = this->SW_ResourceAmounts[i];
+			if (amount != 0)
+			{
+				pOwnerExt->UpdateResourceAmount(static_cast<int>(i), amount);
+			}
+		}
+	}
+}
+
+bool SWTypeExt::AreResourcesSufficient(HouseClass* pHouse) const
+{
+	if (!pHouse)
+		return false;
+
+	const auto pOwnerExt = HouseExt::TryFetch(pHouse);
+	if (!pOwnerExt)
+		return false;
+
+	for (size_t i = 0; i < this->SW_ResourceAmounts.size(); ++i)
+	{
+		const int amount = this->SW_ResourceAmounts[i];
+		if (amount < 0) // Negative amount = required cost
+		{
+			if (pOwnerExt->GetResourceAmount(static_cast<int>(i)) < std::abs(amount))
+				return false;
+		}
+	}
+
+	return true;
+}
+
 void ConfigureTemporarySWClass(int index, TechnoTypeClass* pTransporterType, const CellStruct& cell, const CellStruct& spawnCell)
 {
 	char scriptName[64];
@@ -911,6 +955,41 @@ void SWTypeExt::ApplyDropshipLoadoutLaunch(HouseClass* pHouse, const CellStruct&
 
 	pTeam->AddMember(pTransporter, true);
 	pTransporter->SetDestination(pTransporter, true);
+=======
+	if (const auto pOwnerExt = HouseExt::TryFetch(pSW->Owner))
+	{
+		for (size_t i = 0; i < this->SW_ResourceAmounts.size(); ++i)
+		{
+			const int amount = this->SW_ResourceAmounts[i];
+			if (amount != 0)
+			{
+				pOwnerExt->UpdateResourceAmount(static_cast<int>(i), amount);
+			}
+		}
+	}
+}
+
+bool SWTypeExt::AreResourcesSufficient(HouseClass* pHouse) const
+{
+	if (!pHouse)
+		return false;
+
+	const auto pOwnerExt = HouseExt::TryFetch(pHouse);
+	if (!pOwnerExt)
+		return false;
+
+	for (size_t i = 0; i < this->SW_ResourceAmounts.size(); ++i)
+	{
+		const int amount = this->SW_ResourceAmounts[i];
+		if (amount < 0) // Negative amount = required cost
+		{
+			if (pOwnerExt->GetResourceAmount(static_cast<int>(i)) < std::abs(amount))
+				return false;
+		}
+	}
+
+	return true;
+>>>>>>> feature/multi-resource-system
 }
 
 void SWTypeExt::ApplyActivatedMessage(SuperClass* pSW) const

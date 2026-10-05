@@ -4,6 +4,7 @@
 #include <Ext/AbstractType/Body.h>
 #include <Utilities/Container.h>
 #include <Utilities/TemplateDef.h>
+#include <New/Type/ResourceTypeClass.h>
 
 #include <Ext/Sidebar/Body.h>
 #include <New/Type/EVATypeClass.h>
@@ -46,6 +47,10 @@ public:
 	Valueable<ColorStruct> Sidebar_PowerDelta_ColorRed;
 	Valueable<ColorStruct> Sidebar_PowerDelta_ColorGrey;
 	Valueable<TextAlign> Sidebar_PowerDelta_Align;
+	Valueable<Point2D> Sidebar_ResourceTypes_Offset;
+	Nullable<ColorStruct> Sidebar_ResourceTypes_Color;
+	Valueable<TextAlign> Sidebar_ResourceTypes_Align;
+	ValueableIdxVector<ResourceTypeClass> Sidebar_ResourceTypes_Types;
 	Nullable<ColorStruct> ToolTip_Background_Color;
 	Nullable<int> ToolTip_Background_Opacity;
 	Nullable<float> ToolTip_Background_BlurSize;
@@ -57,6 +62,16 @@ public:
 	PhobosPCXFile SuperWeaponSidebar_CenterPCX;
 	PhobosPCXFile SuperWeaponSidebar_BottomPCX;
 	EVAType EVATag;
+	Valueable<ResourceDisplayOrientation> Display_ResourceTypes_Orientation;
+	Valueable<ResourceDisplayAnchor> Display_ResourceTypes_Anchor;
+	Valueable<Point2D> Display_ResourceTypes_BaseOffset;
+	Valueable<int> Display_ResourceTypes_Spacing;
+	Nullable<TextAlign> Display_ResourceTypes_Align;
+	PhobosPCXFile Display_ResourceTypes_Background_PCX;
+	Valueable<SHPStruct*> Display_ResourceTypes_Background_SHP;
+	CustomPalette Display_ResourceTypes_Background_Palette;
+	Valueable<Point2D> Display_ResourceTypes_Background_Offset;
+	Valueable<bool> Display_ResourceTypes_Background_Horizontal_ResourcesInside;
 
 	SideExt(SideClass* OwnerObject) : AbstractTypeExt(OwnerObject)
 		, ArrayIndex { -1 }
@@ -80,6 +95,10 @@ public:
 		, Sidebar_PowerDelta_ColorRed { { 255, 0, 0 } }
 		, Sidebar_PowerDelta_ColorGrey { { 0x80,0x80,0x80 } }
 		, Sidebar_PowerDelta_Align { TextAlign::Left }
+		, Sidebar_ResourceTypes_Offset { { 0, 0 } }
+		, Sidebar_ResourceTypes_Color {}
+		, Sidebar_ResourceTypes_Align { TextAlign::Left }
+		, Sidebar_ResourceTypes_Types {}
 		, ToolTip_Background_Color { }
 		, ToolTip_Background_Opacity { }
 		, ToolTip_Background_BlurSize { }
@@ -91,6 +110,16 @@ public:
 		, SuperWeaponSidebar_CenterPCX {}
 		, SuperWeaponSidebar_BottomPCX {}
 		, EVATag { -2 }
+		, Display_ResourceTypes_Orientation { ResourceDisplayOrientation::Vertical }
+		, Display_ResourceTypes_Anchor { ResourceDisplayAnchor::TopRight }
+		, Display_ResourceTypes_BaseOffset { { 0, 0 } }
+		, Display_ResourceTypes_Spacing { 14 }
+		, Display_ResourceTypes_Align {}
+		, Display_ResourceTypes_Background_PCX {}
+		, Display_ResourceTypes_Background_SHP { nullptr }
+		, Display_ResourceTypes_Background_Palette {}
+		, Display_ResourceTypes_Background_Offset { { 0, 0 } }
+		, Display_ResourceTypes_Background_Horizontal_ResourcesInside { false }
 	{ }
 
 	virtual ~SideExt() = default;

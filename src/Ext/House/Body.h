@@ -15,6 +15,28 @@
 
 #include "New/Type/TechTreeTypeClass.h"
 
+class FactoryClass;
+class TechnoTypeClass;
+
+struct FactoryResourceState
+{
+	FactoryClass* pFactory { nullptr };
+	TechnoTypeClass* pType { nullptr };
+	int LastStep { 0 };
+	std::vector<int> Spent {};
+
+	template <typename T>
+	void Serialize(T& Stm)
+	{
+		Stm
+			.Process(this->pFactory)
+			.Process(this->pType)
+			.Process(this->LastStep)
+			.Process(this->Spent)
+			;
+	}
+};
+
 class HouseExt final : public AbstractExt, public Detach::Listener<BuildingClass>
 {
 public:
@@ -73,6 +95,11 @@ public:
 
 	std::map<int, std::vector<int>> SuspendedEMPulseSWs;
 
+	std::vector<int> CustomResources;
+	std::vector<int> ResourceCollectorCounts;
+
+	// standalone? no need and not a good idea
+
 	struct SWExt
 	{
 		int ShotCount;
@@ -97,6 +124,7 @@ public:
 	bool DropshipLoadout_SWInitialUnitsSet;
 
 	std::array<int, 3> BeaconsPlacedOrder;
+	std::vector<FactoryResourceState> FactoryResourceStates;
 
 	std::vector<float> TiberiumStorage;
 	std::vector<float> WeedStorage;
@@ -273,6 +301,8 @@ public:
 		, NumShipyards_NonMFB { 0 }
 		, AIFireSaleDelayTimer {}
 		, SuspendedEMPulseSWs {}
+		, CustomResources {}
+		, ResourceCollectorCounts {}
 		, SuperExts(SuperWeaponTypeClass::Array.Count)
 		, ForceEnemyIndex(-1)
 		, ForceOnlyTargetHouseEnemy { false }
@@ -350,7 +380,19 @@ public:
 		, CachedExpansionPathTarget { 0, 0 }
 		, CachedExpansionPathStart { 0, 0 }
 		, ActiveEvaVoiceBuildingType { nullptr }
+		, FactoryResourceStates {}
 	{ }
+
+	int GetResourceAmount(int resourceIdx) const;
+	void SetResourceAmount(int resourceIdx, int amount);
+	void UpdateResourceAmount(int resourceIdx, int delta);
+	bool CanAffordResource(int resourceIdx, int amount) const;
+	bool IsResourceEnabled(int resourceIdx) const;
+	int CalculateResourceBounty(int resourceIdx, TechnoClass* pTechno) const;
+	void InitializeCustomResources();
+	int GetFactoryResourceSpent(FactoryClass* pFactory, size_t resIdx) const;
+	void AddFactoryResourceSpent(FactoryClass* pFactory, size_t resIdx, int amount);
+	void ClearFactoryResourceState(FactoryClass* pFactory);
 
 	bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;
 	void AddToLimboTracking(TechnoTypeClass* pTechnoType);

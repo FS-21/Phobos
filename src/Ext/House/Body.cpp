@@ -4,6 +4,10 @@
 #include <Ext/Techno/Body.h>
 #include <Ext/BuildingType/Body.h>
 #include <BuildingClass.h>
+#include <Ext/HouseType/Body.h>
+#include <Ext/TechnoType/Body.h>
+#include <FactoryClass.h>
+#include <New/Type/ResourceTypeClass.h>
 
 //Static init
 
@@ -714,6 +718,8 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->SuperExts)
 		.Process(this->ForceEnemyIndex)
 		.Process(this->AITriggers_ValidList)
+		.Process(this->CustomResources)
+		.Process(this->ResourceCollectorCounts)
 		.Process(this->ForceOnlyTargetHouseEnemy)
 		.Process(this->ForceOnlyTargetHouseEnemyMode)
 		.Process(this->TeamDelay)
@@ -740,6 +746,7 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->ConsecutiveCombatBuilds)
 		.Process(this->ConsecutiveResourceBuilds)
 		.Process(this->ActiveEvaVoiceBuildingType)
+		.Process(this->FactoryResourceStates)
 		//.Process(this->BeaconsPlacedOrder) beacon is not saved, so this follows it.
 		.Process(this->TiberiumStorage)
 		.Process(this->WeedStorage)
@@ -1247,282 +1254,215 @@ bool HouseExt::ReachedBuildLimit(const HouseClass* pHouse, const TechnoTypeClass
 }
 #pragma endregion
 
-int HouseExt::FindGenericPrerequisite(const char* id)
+int HouseExt::GetResourceAmount(int resourceIdx) const
 {
-	if (BuildingTypeClass::FindIndex(id) >= 0)
-		return INT32_MAX;
-
-	if (RulesExt::Global()->GenericPrerequisitesNames.Count == 0)
-		RulesExt::FillDefaultPrerequisites();
-
-	int i = 0;
-	for (auto str : RulesExt::Global()->GenericPrerequisitesNames)
+	if (resourceIdx >= 0 && resourceIdx < static_cast<int>(ResourceTypeClass::Array.size()))
 	{
-		if (_strcmpi(id, str) == 0)
-			return i;
-
-		--i;
-	}
-
-	return INT32_MAX;
-}
-
-bool HouseExt::HasBuildingPrerequisite(HouseClass* const pHouse, int const idxBuildingType)
-{
-	if (!pHouse || idxBuildingType < 0 || idxBuildingType >= BuildingTypeClass::Array.Count)
-		return false;
-
-	if (pHouse->ActiveBuildingTypes.GetItemCount(idxBuildingType) > 0)
-		return true;
-
-	// Check if this building type is an upgrade attached to an active building
-	auto const pType = BuildingTypeClass::Array.GetItem(idxBuildingType);
-	if (!pType)
-		return false;
-
-	auto const pTypeExt = BuildingTypeExt::ExtMap.Find(pType);
-	bool const isUpgrade = (pType->PowersUpBuilding[0] != '\0') || (pTypeExt && !pTypeExt->PowersUp_Buildings.empty());
-
-	if (isUpgrade)
-	{
-		for (auto const pBld : pHouse->Buildings)
+		const auto pResource = ResourceTypeClass::Array[resourceIdx].get();
+		if (pResource && pResource->IsMoneyResource())
 		{
-			if (!pBld || !pBld->IsAlive || pBld->Health <= 0)
-				continue;
-
-			for (auto const pUpgrade : pBld->Upgrades)
-			{
-				if (pUpgrade == pType)
-					return true;
-			}
+			auto pHouse = this->OwnerObject();
+			return pHouse ? pHouse->Available_Money() : 0;
+		}
+		if (pResource && pResource->IsPowerResource())
+		{
+			auto pHouse = this->OwnerObject();
+			return pHouse ? (pHouse->PowerOutput - pHouse->PowerDrain) : 0;
 		}
 	}
+
+	if (resourceIdx >= 0 && resourceIdx < static_cast<int>(this->CustomResources.size()))
+		return this->CustomResources[resourceIdx];
+	return 0;
+}
+
+void HouseExt::SetResourceAmount(int resourceIdx, int amount)
+{
+	if (resourceIdx < 0)
+		return;
+
+	if (resourceIdx < static_cast<int>(ResourceTypeClass::Array.size()))
+	{
+		const auto pResource = ResourceTypeClass::Array[resourceIdx].get();
+		if (pResource && pResource->IsMoneyResource())
+		{
+			auto pHouse = this->OwnerObject();
+			if (pHouse)
+				pHouse->TransactMoney(amount - pHouse->Available_Money());
+			return;
+		}
+	}
+
+	if (resourceIdx >= static_cast<int>(this->CustomResources.size()))
+		const_cast<HouseExt*>(this)->CustomResources.resize(resourceIdx + 1, 0);
+
+	this->CustomResources[resourceIdx] = std::max(0, amount);
+}
+
+void HouseExt::UpdateResourceAmount(int resourceIdx, int delta)
+{
+	if (resourceIdx < 0)
+		return;
+
+	if (resourceIdx < static_cast<int>(ResourceTypeClass::Array.size()))
+	{
+		const auto pResource = ResourceTypeClass::Array[resourceIdx].get();
+		if (pResource && pResource->IsMoneyResource())
+		{
+			auto pHouse = this->OwnerObject();
+			if (pHouse)
+				pHouse->TransactMoney(delta);
+			return;
+		}
+	}
+
+	if (resourceIdx >= static_cast<int>(this->CustomResources.size()))
+		const_cast<HouseExt*>(this)->CustomResources.resize(resourceIdx + 1, 0);
+
+	this->CustomResources[resourceIdx] = std::max(0, this->CustomResources[resourceIdx] + delta);
+}
+
+bool HouseExt::CanAffordResource(int resourceIdx, int amount) const
+{
+	if (!this->IsResourceEnabled(resourceIdx))
+		return false;
+	return this->GetResourceAmount(resourceIdx) >= amount;
+}
+
+bool HouseExt::IsResourceEnabled(int resourceIdx) const
+{
+	if (resourceIdx < 0 || resourceIdx >= static_cast<int>(ResourceTypeClass::Array.size()))
+		return false;
+
+	const auto pResource = ResourceTypeClass::Array[resourceIdx].get();
+	if (!pResource)
+		return false;
+
+	if (!pResource->RequiresCollector.Get())
+		return true;
+
+	if (resourceIdx < static_cast<int>(this->ResourceCollectorCounts.size()))
+		return this->ResourceCollectorCounts[resourceIdx] > 0;
 
 	return false;
 }
 
-bool HouseExt::HasGenericPrerequisite(int idx, HouseClass* pHouse)
+int HouseExt::CalculateResourceBounty(int resourceIdx, TechnoClass* pVictim) const
 {
-	if (idx >= 0 || !pHouse)
-		return false;
+	if (!pVictim || resourceIdx < 0 || resourceIdx >= static_cast<int>(ResourceTypeClass::Array.size()))
+		return 0;
 
-	int absoluteIndex = std::abs(idx);
-	auto const pRulesExt = RulesExt::Global();
-	if (absoluteIndex >= pRulesExt->GenericPrerequisites.Count)
-		return false;
+	const auto pResource = ResourceTypeClass::Array[resourceIdx].get();
+	if (!pResource || !this->IsResourceEnabled(resourceIdx))
+		return 0;
 
-	// Check buildings and nested generic prerequisites matching this generic prerequisite
-	DynamicVectorClass<int> selectedPrerequisite = pRulesExt->GenericPrerequisites.GetItem(absoluteIndex);
-	for (auto idxItem : selectedPrerequisite)
+	const auto pThis = this->OwnerObject();
+	const auto pVictimType = pVictim->GetTechnoType();
+	const auto pVictimTypeExt = TechnoTypeExt::TryFetch(pVictimType);
+
+	const bool isAllied = pThis->IsAlliedWith(pVictim);
+
+	if (isAllied)
 	{
-		if (idxItem < 0)
+		// Friendly fire always applies a friendly penalty (never enemy bounties).
+		// Clamped to negative/zero so positive accidental inputs cannot reward teamkilling.
+		if (pVictimTypeExt && resourceIdx < static_cast<int>(pVictimTypeExt->ResourceFriendlyBounties.size()))
 		{
-			if (HouseExt::HasGenericPrerequisite(idxItem, pHouse))
-				return true;
+			int customFriendlyVal = pVictimTypeExt->ResourceFriendlyBounties[resourceIdx];
+			if (customFriendlyVal != 0)
+				return -std::abs(customFriendlyVal);
 		}
-		else
+
+		return -std::abs(pResource->Bounty_DefaultFriendlyValue.Get());
+	}
+
+	int bounty = 0;
+
+	// 1. Explicit per-techno bounty
+	if (pVictimTypeExt && resourceIdx < static_cast<int>(pVictimTypeExt->ResourceBounties.size()))
+	{
+		int customVal = pVictimTypeExt->ResourceBounties[resourceIdx];
+		if (customVal != 0)
+			bounty = customVal;
+	}
+
+	// 2. Generic fallback / MoneyConversion / Points / DefaultValue
+	if (bounty == 0)
+	{
+		const int moneyConversion = pResource->Bounty_MoneyConversion.Get();
+		if (moneyConversion > 0)
 		{
-			if (HouseExt::HasBuildingPrerequisite(pHouse, idxItem))
-				return true;
+			bounty = (pVictimType->Cost + (moneyConversion / 2)) / moneyConversion;
+		}
+
+		if (bounty <= 0)
+		{
+			if (pResource->Bounty_CanUseStandardPoints.Get() && pVictimType->Points > 0)
+			{
+				bounty = pVictimType->Points;
+			}
+			else if (pResource->Bounty_DefaultValue.Get() > 0)
+			{
+				bounty = pResource->Bounty_DefaultValue.Get();
+			}
 		}
 	}
 
-	// Check alternate technos (vehicles, infantry, aircraft, etc.)
-	if (absoluteIndex < pRulesExt->GenericPrerequisitesAlternates.Count)
-	{
-		DynamicVectorClass<TechnoTypeClass*> selectedAlternates = pRulesExt->GenericPrerequisitesAlternates.GetItem(absoluteIndex);
-		for (auto pTechnoType : selectedAlternates)
-		{
-			if (pHouse->CountOwnedNow(pTechnoType) > 0)
-				return true;
-		}
-	}
-
-	return false;
+	return bounty;
 }
 
-bool HouseExt::HasPrerequisite(HouseClass* const pHouse, int const idx)
+void HouseExt::InitializeCustomResources()
 {
-	if (idx < 0)
-		return HouseExt::HasGenericPrerequisite(idx, pHouse);
+	const size_t count = ResourceTypeClass::Array.size();
+	this->CustomResources.resize(count, 0);
+	this->ResourceCollectorCounts.resize(count, 0);
 
-	return HouseExt::HasBuildingPrerequisite(pHouse, idx);
+	for (size_t i = 0; i < count; ++i)
+	{
+		this->CustomResources[i] = ResourceTypeClass::Array[i]->InitialValue.Get();
+	}
 }
 
-bool HouseExt::IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* const pItem)
+int HouseExt::GetFactoryResourceSpent(FactoryClass* pFactory, size_t resIdx) const
 {
-	if (!pHouse || !pItem)
-		return false;
-
-	const auto pType = pHouse->Type;
-	if (!pType)
-		return false;
-
-	DWORD const bitHouse = 1u << pType->ArrayIndex2;
-
-	bool inOwners = pItem->InOwners(bitHouse);
-	bool inRequired = pItem->InRequiredHouses(bitHouse);
-	bool inForbidden = pItem->InForbiddenHouses(bitHouse);
-
-	if (!inOwners || !inRequired || inForbidden)
+	for (const auto& s : this->FactoryResourceStates)
 	{
-		if (auto const pParent = pType->FindParentCountry())
-		{
-			DWORD const bitParent = 1u << pParent->ArrayIndex2;
-
-			if (!inOwners && pItem->InOwners(bitParent))
-				inOwners = true;
-
-			if (!inRequired && pItem->InRequiredHouses(bitParent))
-				inRequired = true;
-
-			if (!inForbidden && pItem->InForbiddenHouses(bitParent))
-				inForbidden = true;
-		}
+		if (s.pFactory == pFactory && resIdx < s.Spent.size())
+			return s.Spent[resIdx];
 	}
-
-	return inOwners && inRequired && !inForbidden;
+	return 0;
 }
 
-bool HouseExt::PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool skipSecretLabChecks)
+void HouseExt::AddFactoryResourceSpent(FactoryClass* pFactory, size_t resIdx, int amount)
 {
-	if (!pHouse || !pItem)
-		return false;
-
-	auto pItemExt = TechnoTypeExt::Fetch(pItem);
-	if (!pItemExt)
-		return false;
-
-	// Check if it appears in Owner=, RequiredHouses= and ForbiddenHouses= (including ParentCountry support)
-	if (!HouseExt::IsAvailableToHouse(pHouse, pItem))
-		return false;
-
-	// Secret lab tech: item must have been explicitly unlocked if ConsideredSecretLabTech
-	if (!skipSecretLabChecks && pItemExt->ConsideredSecretLabTech.Get() && !pHouse->HasFromSecretLab(pItem))
-		return false;
-
-	// Stolen Tech checks (Chrono Commando, Psi Commando, etc.)
-	if ((pItem->RequiresStolenAlliedTech && !pHouse->Side0TechInfiltrated) ||
-		(pItem->RequiresStolenSovietTech && !pHouse->Side1TechInfiltrated) ||
-		(pItem->RequiresStolenThirdTech && !pHouse->Side2TechInfiltrated))
+	for (auto& s : this->FactoryResourceStates)
 	{
-		return false;
-	}
-
-	// Prerequisite.RequiredTheaters check
-	if (!(pItemExt->PrerequisiteTheaters & (1u << static_cast<int>(ScenarioClass::Instance->Theater))))
-		return false;
-
-	// TechLevel check
-	if (pHouse->TechLevel < pItem->TechLevel)
-		return false;
-
-	// BuildLimit checks
-	if (pItem->BuildLimit > 0)
-	{
-		int nInstances = 0;
-		for (const auto pTechno : TechnoClass::Array)
+		if (s.pFactory == pFactory)
 		{
-			if (pTechno->Owner == pHouse
-				&& pTechno->GetTechnoType() == pItem
-				&& pTechno->IsAlive
-				&& pTechno->Health > 0)
-			{
-				nInstances++;
-
-				if (nInstances >= pItem->BuildLimit)
-					return false;
-			}
-		}
-	}
-	else if (pItem->BuildLimit < 0)
-	{
-		if (pHouse->CountOwnedEver(pItem) >= -pItem->BuildLimit)
-			return false;
-	}
-	else if (pItem->BuildLimit == 0)
-	{
-		return false;
-	}
-
-	// Phobos BuildLimitGroup check
-	if (HouseExt::ReachedBuildLimit(pHouse, pItem, true))
-		return false;
-
-	// Prerequisite.Negative: if the house owns any building in these lists, the item is blocked
-	if (!pItemExt->Prerequisite_Negative.empty())
-	{
-		for (int idx : pItemExt->Prerequisite_Negative)
-		{
-			if (HouseExt::HasPrerequisite(pHouse, idx))
-				return false;
+			if (s.Spent.size() <= resIdx)
+				s.Spent.resize(resIdx + 1, 0);
+			s.Spent[resIdx] += amount;
+			return;
 		}
 	}
 
-	if (skipSecretLabChecks)
-		return true;
+	FactoryResourceState newState;
+	newState.pFactory = pFactory;
+	newState.Spent.resize(resIdx + 1, 0);
+	newState.Spent[resIdx] = amount;
+	const_cast<HouseExt*>(this)->FactoryResourceStates.push_back(newState);
+}
 
-	// PrerequisiteOverride: if ANY entry is owned, prerequisites are considered met
-	for (int idx : pItem->PrerequisiteOverride)
+void HouseExt::ClearFactoryResourceState(FactoryClass* pFactory)
+{
+	for (auto it = this->FactoryResourceStates.begin(); it != this->FactoryResourceStates.end(); ++it)
 	{
-		if (HouseExt::HasPrerequisite(pHouse, idx))
-			return true;
-	}
-
-	// Main Prerequisite list (AND logic: ALL entries must be satisfied)
-	bool prerequisiteMet = true;
-	if (!pItemExt->Prerequisite.empty())
-	{
-		for (int idx : pItemExt->Prerequisite)
+		if (it->pFactory == pFactory)
 		{
-			if (!HouseExt::HasPrerequisite(pHouse, idx))
-			{
-				prerequisiteMet = false;
-				break;
-			}
+			this->FactoryResourceStates.erase(it);
+			return;
 		}
 	}
-
-	// Prerequisite.ListX (OR logic between lists, AND logic within each list)
-	bool prerequisiteListsMet = false;
-	if (pItemExt->Prerequisite_Lists.Get() > 0 && !pItemExt->Prerequisite_ListVector.empty())
-	{
-		for (const auto& list : pItemExt->Prerequisite_ListVector)
-		{
-			if (list.Count == 0)
-				continue;
-
-			bool listSatisfied = true;
-			for (int idx : list)
-			{
-				if (!HouseExt::HasPrerequisite(pHouse, idx))
-				{
-					listSatisfied = false;
-					break;
-				}
-			}
-
-			if (listSatisfied)
-			{
-				prerequisiteListsMet = true;
-				break;
-			}
-		}
-	}
-
-	bool hasPrereq = !pItemExt->Prerequisite.empty();
-	bool hasLists = pItemExt->Prerequisite_Lists.Get() > 0 && !pItemExt->Prerequisite_ListVector.empty();
-
-	if (!hasPrereq && !hasLists)
-		return true;
-
-	if (hasPrereq && !hasLists)
-		return prerequisiteMet;
-
-	if (!hasPrereq && hasLists)
-		return prerequisiteListsMet;
-
-	return prerequisiteMet || prerequisiteListsMet;
 }
 
 // =============================
@@ -1540,7 +1480,10 @@ DEFINE_HOOK(0x4F6532, HouseClass_CTOR, 0x5)
 {
 	GET(HouseClass*, pItem, EAX);
 
-	HouseExt::ExtMap.TryAllocate(pItem);
+	if (const auto pExt = HouseExt::ExtMap.TryAllocate(pItem))
+	{
+		pExt->InitializeCustomResources();
+	}
 	HouseExt::CalculatePowerSurplus(pItem);
 
 	return 0;
