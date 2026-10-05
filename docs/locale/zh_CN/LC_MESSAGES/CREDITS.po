@@ -501,6 +501,9 @@ msgstr "建筑集结点自定义"
 msgid "Recursive spawn conversion on spawner type conversion"
 msgstr "母机变形时子机的递归转换"
 
+msgid "Building disguise detector logic fix"
+msgstr "建筑伪装探测逻辑修复"
+
 msgid "**Starkku**:"
 msgstr "**Starkku**："
 

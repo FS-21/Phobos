@@ -34,6 +34,7 @@ public:
 	int TurretAnimRateTick;
 	int ConstructionStartFacing;
 	bool IsPlayingRoofProductionAnim;
+	int DetectDisguiseActiveCounter;
 
 	/**
 	*  If this building was built by the AI for it to reach an expansion
@@ -64,6 +65,7 @@ public:
 		, ConstructionStartFacing { -1 }
 		, AssignedExpansionPoint {}
 		, IsPlayingRoofProductionAnim { false }
+		, DetectDisguiseActiveCounter { 0 }
 	{ }
 
 	// typed owner accessor (shadows the TechnoClass one from the base)
@@ -84,6 +86,7 @@ public:
 	bool HandleInfiltrate(HouseClass* pInfiltratorHouse, int moneybefore);
 	void UpdateSecretLabAI();
 	void UpdatePrimaryFactoryAI();
+	void UpdateDetectDisguise();
 
 	static BuildingClass* OurBuildings[1000];
 	static size_t OurBuildingCount;

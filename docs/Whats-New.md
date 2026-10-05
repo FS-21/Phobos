@@ -16,6 +16,9 @@ You can use the migration utility (can be found on [Phobos supplementaries repo]
 
 ### 0.6
 
+#### Changes to vanilla behavior
+
+- `DetectDisguise` and `DetectDisguiseRange` now work for buildings. In the vanilla game, these settings had no effect on buildings. To preserve the vanilla behavior, remove `DetectDisguise` and `DetectDisguiseRange` from affected BuildingTypes.
 - `Cumulative=true` AttachEffect tint effects now stack. This behaviour can be disabled by setting `Tint.Cumulative=false` on the AttachEffect type.
 
 ### 0.5
@@ -2121,6 +2124,7 @@ HideShakeEffects=false           ; boolean
 - Observer can see IvanBomb that's attached by any house (by NetsuNegi)
 - Fixed crashes and freezes caused by Tiberium growth and spread (by FS-21)
 - Fixed Tiberium types not supporting overrides in map and game mode INIs (by FS-21)
+- Fixed building disguise detector logic (by FS-21)
 
 #### Phobos fixes:
 - Fixed an issue where `IsSimpleDeployer=yes` and `BalloonHover=yes` jumpjet units were still forced to land upon reaching destination or when hovering unless actively deploying (by FS-21)

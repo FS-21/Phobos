@@ -957,6 +957,25 @@ bool BuildingExt::BuildingOnline(BuildingClass* pThis)
 	return true;
 }
 
+void BuildingExt::UpdateDetectDisguise()
+{
+	auto const pBld = this->OwnerObject();
+
+	if (pBld->Type->DetectDisguise)
+	{
+		const bool isActive = pBld->IsPowerOnline() && !pBld->Deactivated;
+		const bool wasActive = (this->DetectDisguiseActiveCounter > 0);
+
+		if (isActive != wasActive)
+		{
+			if (isActive)
+				pBld->DisguiseDetectorActivate();
+			else
+				pBld->DisguiseDetectorDeactivate();
+		}
+	}
+}
+
 // =============================
 // load / save
 
@@ -986,6 +1005,7 @@ void BuildingExt::Serialize(T& Stm)
 		.Process(this->ConstructionStartFacing)
 		.Process(this->AssignedExpansionPoint)
 		//.Process(this->IsPlayingRoofProductionAnim) It is set and reset within a same function.
+		.Process(this->DetectDisguiseActiveCounter)
 		;
 }
 
