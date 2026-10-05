@@ -123,8 +123,21 @@ DEFINE_HOOK(0x739AC0, UnitClass_SimpleDeployer_Deploy, 0x6)
 
 	if (!pThis->Deployed)
 	{
-		if (!pThis->InAir && pType->DeployToLand && pThis->GetHeight() > 0)
-			pThis->InAir = true;
+		bool inAir = pThis->InAir;
+
+		if (pType->DeployToLand)
+		{
+			if (pThis->GetHeight() > 0)
+				inAir = true;
+
+			if (auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor))
+			{
+				if (pJJLoco->State != JumpjetLocomotionClass::State::Grounded)
+					inAir = true;
+			}
+
+			pThis->InAir = inAir;
+		}
 
 		if (pThis->Deploying && pThis->DeployAnim)
 		{
@@ -138,7 +151,7 @@ DEFINE_HOOK(0x739AC0, UnitClass_SimpleDeployer_Deploy, 0x6)
 				pThis->Deploying = false;
 			}
 		}
-		else if (!pThis->InAir)
+		else if (!inAir)
 		{
 			if (CheckRestrictions(pThis, true))
 				return ReturnFromFunction;
@@ -384,9 +397,19 @@ DEFINE_HOOK(0x73CF46, UnitClass_Draw_It_KeepUnitVisible, 0x6)
 
 	if (pThis->Deploying || pThis->Undeploying)
 	{
+		if (!pThis->DeployAnim)
+		{
+			if (pThis->CurrentMission != Mission::Unload)
+			{
+				pThis->Deploying = false;
+				pThis->Undeploying = false;
+			}
+			return Continue;
+		}
+
 		const auto pTypeExt = UnitTypeExt::Fetch(pThis->Type);
 
-		if (pTypeExt->DeployingAnim_KeepUnitVisible || (pThis->Deploying && !pThis->DeployAnim))
+		if (pTypeExt->DeployingAnim_KeepUnitVisible)
 			return Continue;
 
 		return DoNotDraw;

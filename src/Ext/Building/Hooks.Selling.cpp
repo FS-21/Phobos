@@ -28,7 +28,7 @@ DEFINE_HOOK(0x4D9F7B, FootClass_Sell, 0x6)
 
 // Rewrite 0x449BC0
 // true: undeploy into vehicle; false: sell
-bool __forceinline BuildingExt::CanUndeployOnSell(BuildingClass* pThis)
+bool BuildingExt::CanUndeployOnSell(BuildingClass* pThis)
 {
 	const auto pType = pThis->Type;
 

@@ -169,6 +169,7 @@ This page lists all the individual contributions to the project by their author.
   - `514` Set tactical zoom trigger action
   - Tactical zoom
   - Sidebar customizations: configurable controls, custom buttons, restored TogglePower, and decoupled tabs
+  - Smart auto deploy and state adaptation logic
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
