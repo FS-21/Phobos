@@ -161,6 +161,7 @@ This page lists all the individual contributions to the project by their author.
   - Linked superweapons
   - Map action 507 for printing a message with the remaining map objects
   - Unit & infantry auto-conversion on ammo change
+  - Dropship Loadout
   - Restore the ScriptType action#24 `Play speech` from Tiberian Sun
   - Modify ammo on impact
   - Tiberium ramp expansion support
