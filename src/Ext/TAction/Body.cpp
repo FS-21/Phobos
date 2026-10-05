@@ -3,6 +3,7 @@
 #include <ScenarioClass.h>
 #include <TriggerTypeClass.h>
 #include <Ext/House/Body.h>
+#include <Ext/Script/Body.h>
 #include <Ext/Scenario/Body.h>
 #include <New/Entity/BannerClass.h>
 #include <Utilities/SpawnerHelper.h>
@@ -63,7 +64,8 @@ bool TActionExt::Execute(TActionClass* pThis, HouseClass* pHouse, ObjectClass* p
 		return TActionExt::RunSuperWeaponAtLocation(pThis, pHouse, pObject, pTrigger, location);
 	case PhobosTriggerAction::RunSuperWeaponAtWaypoint:
 		return TActionExt::RunSuperWeaponAtWaypoint(pThis, pHouse, pObject, pTrigger, location);
-
+	case PhobosTriggerAction::PrintMessageRemainingTechnos:
+		return TActionExt::PrintMessageRemainingTechnos(pThis, pHouse, pObject, pTrigger, location);
 	case PhobosTriggerAction::ToggleMCVRedeploy:
 		return TActionExt::ToggleMCVRedeploy(pThis, pHouse, pObject, pTrigger, location);
 	case PhobosTriggerAction::UndeployToWaypoint:
@@ -884,6 +886,175 @@ bool TActionExt::DeleteBanner(TActionClass* pThis, HouseClass* pHouse, ObjectCla
 	return true;
 }
 
+bool TActionExt::PrintMessageRemainingTechnos(TActionClass* pThis, HouseClass* pHouse, ObjectClass* pObject, TriggerClass* pTrigger, CellStruct const& location)
+{
+	if (!pThis)
+		return true;
+	// Example:
+	// ID=ActionCount,[Action1],507,4,[CSFKey],[HouseIndex],[AIHousesLists Index],[AITargetTypes Index],[MesageDelay],A,[ActionX]
+	std::vector<HouseClass*> housesList;
+
+	// Obtain houses
+	int param3 = pThis->Param3;
+
+	if (param3 < 0)
+	{
+		// Pick a group of countries from [AIHousesList].
+		// Any house of the same type of the listed at [AIHousesList] will be included here
+		const int listIdx = pThis->Param4;
+		const auto& housesLists = RulesExt::Global()->AIHousesLists;
+
+		if (listIdx < 0 || (size_t)listIdx >= housesLists.size() || housesLists[listIdx].empty())
+		{
+			Debug::Log("Map action %d: List [AIHousesList](%d) is empty or invalid. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
+			return true;
+		}
+
+		const auto& housesTypeList = housesLists[listIdx];
+
+		for (const auto pHouseType : housesTypeList)
+		{
+			for (auto pItem : HouseClass::Array)
+			{
+				if (pItem->Type == pHouseType && !pItem->Defeated && !pItem->IsObserver())
+				{
+					if (std::find(housesList.begin(), housesList.end(), pItem) == housesList.end())
+						housesList.push_back(pItem);
+				}
+			}
+		}
+
+		// Nothing to check
+		if (housesList.empty())
+			return true;
+	}
+	else
+	{
+		// Check index of a single house.
+		if (param3 >= HouseClass::PlayerAtA && param3 <= HouseClass::PlayerAtH)
+		{
+			// Is a multiplayer house index (Player@A - Player@H) ?
+			param3 = pThis->Param3 - HouseClass::PlayerAtA;
+		}
+		else if (param3 == 8997)
+		{
+			// Is the owner of the trigger ?
+			param3 = (pThis->TeamType && pThis->TeamType->Owner) ? pThis->TeamType->Owner->ArrayIndex : (pHouse ? pHouse->ArrayIndex : -1);
+		}
+		else if (param3 > 8997 || HouseClass::Array.Count <= param3)
+		{
+			// Is a invalid index value ?
+			Debug::Log("Map action %d: Invalid house index '%d'. This action will be skipped.\n", (int)pThis->ActionKind, pThis->Param3);
+			return true;
+		}
+
+		if (param3 < 0 || param3 >= HouseClass::Array.Count)
+		{
+			Debug::Log("Map action %d: Invalid house index '%d'. This action will be skipped.\n", (int)pThis->ActionKind, pThis->Param3);
+			return true;
+		}
+
+		housesList.push_back(HouseClass::Array.GetItem(param3));
+	}
+
+	// Read the ID list of technos
+	const int listIdx = std::abs(pThis->Param5);
+	const bool isGlobalCount = pThis->Param5 < 0;
+	const auto& targetTypesLists = RulesExt::Global()->AITargetTypesLists;
+
+	if ((size_t)listIdx >= targetTypesLists.size() || targetTypesLists[listIdx].empty())
+	{
+		Debug::Log("Map action %d: List [AITargetTypes](%d) is empty or invalid. This action will be skipped.\n", (int)pThis->ActionKind, listIdx);
+		return true;
+	}
+
+	const auto& technosList = targetTypesLists[listIdx];
+	std::vector<int> technosRemaining(technosList.size(), 0);
+	int globalRemaining = 0;
+
+	// Count all valid instances in a single pass over TechnoClass::Array
+	for (const auto pTechno : TechnoClass::Array)
+	{
+		if (!ScriptExt::IsUnitAvailable(pTechno, false))
+			continue;
+
+		bool ownerMatches = false;
+		for (const auto pItem : housesList)
+		{
+			if (pTechno->Owner == pItem)
+			{
+				ownerMatches = true;
+				break;
+			}
+		}
+
+		if (!ownerMatches)
+			continue;
+
+		const auto pTechnoType = pTechno->GetTechnoType();
+		for (size_t i = 0; i < technosList.size(); ++i)
+		{
+			if (technosList[i] == pTechnoType)
+			{
+				technosRemaining[i]++;
+				globalRemaining++;
+				break;
+			}
+		}
+	}
+
+	bool textToShow = false;
+	double messageDelay = pThis->Param6 <= 0 ? RulesClass::Instance->MessageDelay : pThis->Param6 / 60.0; // seconds / 60 = message delay in minutes
+	wchar_t message[2048] = { 0 };
+	wcscpy_s(message, StringTable::TryFetchString(pThis->Text, L"Remaining: "));
+
+	if (isGlobalCount)
+	{
+		if (globalRemaining > 0)
+		{
+			wchar_t strInteger[24] = { 0 };
+			swprintf_s(strInteger, L"%d", globalRemaining);
+			wcscat_s(message, strInteger);
+			textToShow = true;
+		}
+	}
+	else
+	{
+		wcscat_s(message, L"\n");
+
+		for (size_t i = 0; i < technosRemaining.size(); i++)
+		{
+			if (technosRemaining[i] == 0)
+				continue;
+
+			textToShow = true;
+			const auto pType = technosList[i];
+			const wchar_t* pTypeName = (pType->UIName && pType->UIName[0] != L'\0') ? pType->UIName : StringTable::TryFetchString(pType->ID, nullptr);
+
+			if (pTypeName)
+			{
+				wcscat_s(message, pTypeName);
+			}
+			else
+			{
+				wchar_t idBuffer[0x40] = { 0 };
+				mbstowcs_s(nullptr, idBuffer, pType->ID, _TRUNCATE);
+				wcscat_s(message, idBuffer);
+			}
+
+			wcscat_s(message, L": ");
+			wchar_t strInteger[24] = { 0 };
+			swprintf_s(strInteger, L"%d", technosRemaining[i]);
+			wcscat_s(message, strInteger);
+			wcscat_s(message, L"\n");
+		}
+	}
+
+	if (textToShow)
+		MessageListClass::Instance.PrintMessage(message, messageDelay, HouseClass::CurrentPlayer->ColorSchemeIndex, true);
+
+	return true;
+}
 
 // =============================
 // container
