@@ -681,7 +681,24 @@ DEFINE_HOOK(0x702E4E, TechnoClass_RegisterDestruction_SaveKillerInfo, 0x6)
 
 	// Note: Some SW never had a "killer" or a "house" (hello "NukeSpecial"), probably never scored to the killer?
 	if (pKiller && pVictim)
+	{
 		TechnoExt::ObjectKilledBy(pVictim, pKiller);
+
+		if (pVictim->WhatAmI() == AbstractType::Building)
+		{
+			if (auto const pOwner = pVictim->Owner)
+			{
+				if (pKiller->Owner != pOwner && !pOwner->IsAlliedWith(pKiller->Owner))
+				{
+					if (auto const pExt = HouseExt::Fetch(pOwner))
+					{
+						// Cooldown: 3600 frames (4 minutes at 15 FPS)
+						pExt->UnsafePlacementZones.push_back({ pVictim->GetMapCoords(), Unsorted::CurrentFrame + 3600 });
+					}
+				}
+			}
+		}
+	}
 
 	// Drop crate if is dead
 	const int nSelectedPowerup = TechnoExt::GetDropCrateIndex(pVictim);

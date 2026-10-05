@@ -126,6 +126,7 @@ DEFINE_HOOK(0x73E474, UnitClass_Unload_Storage, 0x6)
 	GET(BuildingClass* const, pBuilding, EDI);
 	GET(int const, idxTiberium, EBP);
 	REF_STACK(float, amount, 0x1C);
+	REF_STACK(float, purifierBonus, 0x34);
 
 	if (!pBuilding || !pBuilding->Type || !pBuilding->Owner)
 		return 0;
@@ -157,6 +158,23 @@ DEFINE_HOOK(0x73E474, UnitClass_Unload_Storage, 0x6)
 			}
 
 			amount = 0.0f;
+		}
+
+		if (purifierBonus > 0.0f)
+		{
+			if (const auto pHouse = pBuilding->Owner)
+			{
+				if (const auto pTiberium = TiberiumClass::Array.GetItem(idxTiberium))
+				{
+					const int bonusCredits = static_cast<int>(purifierBonus * pTiberium->Value * pHouse->Type->IncomeMult);
+					if (bonusCredits > 0)
+					{
+						pHouse->GiveMoney(bonusCredits);
+					}
+				}
+			}
+
+			purifierBonus = 0.0f;
 		}
 	}
 
@@ -1252,8 +1270,6 @@ DEFINE_HOOK(0x45063F, BuildingClass_UpdateRepairSell_PlayerAutoRepair, 0x6)
 	}
 }
 
-#pragma endregion
-
 #pragma region BeaconOrder
 
 DEFINE_HOOK(0x43131B, BeaconManagerClass_DeleteBeacon_RecordOrder, 0x5)
@@ -1337,4 +1353,36 @@ DEFINE_HOOK(0x4AC9B2, MouseClass_ToggleBeaconMode_AllUsed, 0x6)
 
 #pragma endregion
 
+/**
+ *  Entry point for DTA's custom AI building selection logic.
+ *
+ *  Author: Rampastring
+ */
+DEFINE_HOOK(0x4FE3E9, HouseClass_AI_Building_Intercept, 0x7)
+{
+	enum { ReturnEpilogue = 0x4FEA48, ReturnDefault = 0 };
+
+	GET(HouseClass*, pHouse, EBP);
+
+	/**
+	 *  If our custom AI logic is enabled, transfer control to it and return.
+	 */
+	if (HouseExt::IsAdvancedAIActive(pHouse))
+	{
+		HouseExt::AdvAI_Building(pHouse);
+		return ReturnEpilogue;
+	}
+
+	return ReturnDefault;
+}
+
+DEFINE_HOOK(0x4FD50D, HouseClass_Expert_AI_Advanced_AI_Intercept, 0x8)
+{
+	GET(HouseClass*, pHouse, EBX);
+
+	if (HouseExt::IsAdvancedAIActive(pHouse))
+		HouseExt::AdvAI_ExpertAI(pHouse);
+
+	return 0;
+}
 

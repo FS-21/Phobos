@@ -180,7 +180,9 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	const char* pArtSection = pThis->ImageFile;
 	auto pArtINI = &CCINIClass::INI_Art;
 	INI_EX exINI(pINI);
-	INI_EX exArtINI(pArtINI);
+	INI_EX exArtINI(pArtINI);	this->GapGenerator.Read(exINI, pSection, "GapGenerator");
+	this->GapRadiusInCells.Read(exINI, pSection, "GapRadiusInCells");
+	this->SuperGapRadiusInCells.Read(exINI, pSection, "SuperGapRadiusInCells");
 
 	this->PowersUp_Owner.Read(exINI, pSection, "PowersUp.Owner");
 	this->PowersUp_Buildings.Read(exINI, pSection, "PowersUp.Buildings");
@@ -221,6 +223,10 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->IsDestroyableObstacle.Read(exINI, pSection, "IsDestroyableObstacle");
 	this->Explodes_DuringBuildup.Read(exINI, pSection, "Explodes.DuringBuildup");
 
+	exINI.ReadInteger(pSection, "AntiInfantryValue", &this->OwnerObject()->AntiInfantryValue);
+	exINI.ReadInteger(pSection, "AntiArmorValue", &this->OwnerObject()->AntiArmorValue);
+	exINI.ReadInteger(pSection, "AntiAirValue", &this->OwnerObject()->AntiAirValue);
+
 	this->FactoryPlant_AllowTypes.Read(exINI, pSection, "FactoryPlant.AllowTypes");
 	this->FactoryPlant_DisallowTypes.Read(exINI, pSection, "FactoryPlant.DisallowTypes");
 	this->FactoryPlant_MaxCount.Read(exINI, pSection, "FactoryPlant.MaxCount");
@@ -250,8 +256,14 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->BuildingBunkerROFMult.Read(exINI, pSection, "BunkerROFMultMultiplier");
 	this->BunkerWallsUpSound.Read(exINI, pSection, "BunkerWallsUpSound");
 	this->BunkerWallsDownSound.Read(exINI, pSection, "BunkerWallsDownSound");
-	this->BunkerStateUpdateDelay.Read(exINI, pSection, "BunkerStateUpdateDelay");
 	this->BuildingRepairedSound.Read(exINI, pSection, "BuildingRepairedSound");
+
+	this->AIBuildCounts.Read(exINI, pSection, "AIBuildCounts");
+	this->AIExtraCounts.Read(exINI, pSection, "AIExtraCounts");
+
+	this->AIBaseNormal.Read(exINI, pSection, "AIBaseNormal");
+	this->AIInnerBase.Read(exINI, pSection, "AIInnerBase");
+
 	this->Refinery_UseStorage.Read(exINI, pSection, "Refinery.UseStorage");
 	this->UndeploysInto_Sellable.Read(exINI, pSection, "UndeploysInto.Sellable");
 	this->BuildingRadioLink_SyncOwner.Read(exINI, pSection, "BuildingRadioLink.SyncOwner");
@@ -279,6 +291,7 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 			this->PowersUp_Buildings.emplace_back(pPowerUpType);
 	}
 
+	this->IsAdvancedAIIgnoresPrerequisites.Read(exINI, pSection, "IsAdvancedAIIgnoresPrerequisites");
 	this->SetTabBySelecting.Read(exINI, pSection, "SetTabBySelecting");
 
 	this->RevealToAll_Radius.Read(exINI, pSection, "RevealToAll.Radius");
@@ -307,6 +320,39 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->AircraftDockingDir_DefaultToPoseDir.Read(exArtINI, pArtSection, "AircraftDockingDir.DefaultToPoseDir");
 
 	this->Refinery_UseNormalActiveAnim.Read(exArtINI, pArtSection, "Refinery.UseNormalActiveAnim");
+
+	this->PrerequisiteNegatives.Read(exINI, pSection, "Prerequisite.Negative");
+
+	static constexpr size_t bufferSize = 256;
+	static char buffer[bufferSize];
+
+	if (pINI->ReadString(pSection, "Prerequisite.RequiredTheaters", "", buffer, bufferSize))
+	{
+		this->PrerequisiteTheaters = 0;
+
+		char* context = nullptr;
+		for (const char* theaterToken = strtok_s(buffer, ",", &context); theaterToken; theaterToken = strtok_s(nullptr, ",", &context))
+		{
+			const int idx = Theater::FindIndex(theaterToken);
+			if (idx != -1)
+			{
+				this->PrerequisiteTheaters |= (1 << idx);
+			}
+			else
+			{
+				Debug::INIParseFailed(pSection, "Prerequisite.RequiredTheaters", theaterToken);
+			}
+		}
+	}
+
+	const int prerequisiteLists = pINI->ReadInteger(pSection, "Prerequisite.Lists", 0);
+	this->PrerequisiteLists.resize(prerequisiteLists);
+
+	for (size_t i = 0; i < this->PrerequisiteLists.size(); ++i)
+	{
+		_snprintf_s(buffer, bufferSize, "Prerequisite.List%u", i);
+		this->PrerequisiteLists[i].Read(exINI, pSection, buffer);
+	}
 
 	this->DeployFireDelay.Read(exINI, pSection, "DeployFireDelay");
 
@@ -393,6 +439,32 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->HasRallyPoint.Read(exINI, pSection, "HasRallyPoint");
 }
 
+bool BuildingTypeExt::HasDisableableSuperWeapons(BuildingTypeClass* pBuildingType)
+{
+	if (pBuildingType->SuperWeapon != -1 &&
+		SuperWeaponTypeClass::Array[pBuildingType->SuperWeapon]->DisableableFromShell)
+	{
+		return true;
+	}
+
+	if (pBuildingType->SuperWeapon2 != -1 &&
+		SuperWeaponTypeClass::Array[pBuildingType->SuperWeapon2]->DisableableFromShell)
+	{
+		return true;
+	}
+
+	const auto pExt = BuildingTypeExt::Fetch(pBuildingType);
+	for (const auto pSuperWeapon : pExt->SuperWeapons)
+	{
+		if (SuperWeaponTypeClass::Array[pSuperWeapon]->DisableableFromShell)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void BuildingTypeExt::CompleteInitialization()
 {
 	auto const pThis = this->OwnerObject();
@@ -414,9 +486,11 @@ void BuildingTypeExt::Serialize(T& Stm)
 		.Process(this->SuperWeapons)
 		.Process(this->OccupierMuzzleFlashes)
 		.Process(this->Powered_KillSpawns)
-		.Process(this->CanC4_AllowZeroDamage)
-		.Process(this->InitialStrength_Cloning)
+		.Process(this->CanC4_AllowZeroDamage)		.Process(this->InitialStrength_Cloning)
 		.Process(this->Cloning_Powered)
+		.Process(this->GapGenerator)
+		.Process(this->GapRadiusInCells)
+		.Process(this->SuperGapRadiusInCells)
 		.Process(this->ExcludeFromMultipleFactoryBonus)
 		.Process(this->Refinery_UseStorage)
 		.Process(this->Grinding_AllowAllies)
@@ -474,6 +548,14 @@ void BuildingTypeExt::Serialize(T& Stm)
 		.Process(this->BunkerWallsDownSound)
 		.Process(this->BunkerStateUpdateDelay)
 		.Process(this->BuildingRepairedSound)
+		.Process(this->AIBuildCounts)
+		.Process(this->AIExtraCounts)
+		.Process(this->AIBaseNormal)
+		.Process(this->AIInnerBase)
+		.Process(this->IsAdvancedAIIgnoresPrerequisites)
+		.Process(this->PrerequisiteLists)
+		.Process(this->PrerequisiteNegatives)
+		.Process(this->PrerequisiteTheaters)
 		.Process(this->Refinery_UseNormalActiveAnim)
 		.Process(this->HasPowerUpAnim)
 		.Process(this->UndeploysInto_Sellable)
@@ -584,4 +666,26 @@ DEFINE_HOOK(0x45E732, BuildingTypeClass_DTOR, 0xE)
 	BuildingTypeExt::ExtMap.Remove(pItem);
 
 	return 0;
+}
+
+bool BuildingTypeExt::IsAIBaseNormal(const BuildingTypeClass* pType)
+{
+	if (pType == nullptr)
+		return false;
+
+	const auto pExt = BuildingTypeExt::Fetch(pType);
+	return pExt->AIBaseNormal.Get(pType->BaseNormal);
+}
+
+bool BuildingTypeExt::IsAIInnerBase(const BuildingTypeClass* pType)
+{
+	if (pType == nullptr)
+		return false;
+
+	const auto pExt = BuildingTypeExt::Fetch(pType);
+	if (pExt->AIInnerBase.isset())
+	{
+		return pExt->AIInnerBase.Get();
+	}
+	return pType->CloakGenerator || pExt->GapGenerator;
 }

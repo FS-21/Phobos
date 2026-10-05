@@ -64,6 +64,7 @@
     <ClCompile Include="src\Ext\Beacon\Hooks.cpp" />
     <!-- src\Ext\Building -->
     <ClCompile Include="src\Ext\Building\Body.cpp" />
+    <ClCompile Include="src\Ext\Building\Body.AdvAI.cpp" />
     <ClCompile Include="src\Ext\Foot\Body.cpp" />
     <ClCompile Include="src\Ext\Unit\Body.cpp" />
     <ClCompile Include="src\Ext\Infantry\Body.cpp" />
@@ -105,6 +106,7 @@
     <ClCompile Include="src\Ext\Event\Body.cpp" />
     <!-- src\Ext\House -->
     <ClCompile Include="src\Ext\House\Body.cpp" />
+	<ClCompile Include="src\Ext\House\Body.AdvAI.cpp" />
     <ClCompile Include="src\Ext\House\Hooks.AINavalProduction.cpp" />
     <ClCompile Include="src\Ext\House\Hooks.cpp" />
     <ClCompile Include="src\Ext\House\Hooks.ForceEnemy.cpp" />
@@ -281,6 +283,7 @@
     <ClCompile Include="src\New\Type\DigitalDisplayTypeClass.cpp" />
     <ClCompile Include="src\New\Type\InsigniaTypeClass.cpp" />
     <ClCompile Include="src\New\Type\LaserTrailTypeClass.cpp" />
+	<ClCompile Include="src\New\Type\TechTreeTypeClass.cpp" />
     <ClCompile Include="src\New\Type\RadTypeClass.cpp" />
     <ClCompile Include="src\New\Type\SelectBoxTypeClass.cpp" />
     <ClCompile Include="src\New\Type\ShieldTypeClass.cpp" />

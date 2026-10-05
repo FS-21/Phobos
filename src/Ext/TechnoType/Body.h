@@ -270,6 +270,17 @@ public:
 
 	Nullable<bool> RecountBurst;
 
+	DWORD PrerequisiteTheaters;
+	std::vector<int> Prerequisite;
+	std::vector<int> Prerequisite_Negative;
+	Valueable<int> Prerequisite_Lists;
+	std::vector<DynamicVectorClass<int>> Prerequisite_ListVector;
+	Valueable<bool> ConsideredSecretLabTech;
+	std::vector<std::string> Secret_RequiredHouses;
+	std::vector<std::string> Secret_ForbiddenHouses;
+	DWORD RequiredHouses;
+	DWORD ForbiddenHouses;
+
 	ValueableVector<TechnoTypeClass*> BuildLimitGroup_Types;
 	ValueableVector<int> BuildLimitGroup_Nums;
 	Valueable<int> BuildLimitGroup_Factor;
@@ -745,6 +756,17 @@ public:
 		, AttachEffects {}
 
 		, RecountBurst {}
+
+		, PrerequisiteTheaters { 0xFFFFFFFF }
+		, Prerequisite {}
+		, Prerequisite_Negative {}
+		, Prerequisite_Lists { 0 }
+		, Prerequisite_ListVector {}
+		, ConsideredSecretLabTech { false }
+		, Secret_RequiredHouses {}
+		, Secret_ForbiddenHouses {}
+		, RequiredHouses { 0xFFFFFFFFu }
+		, ForbiddenHouses { 0u }
 
 		, BuildLimitGroup_Types {}
 		, BuildLimitGroup_Nums {}

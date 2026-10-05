@@ -1,6 +1,8 @@
 #include "Body.h"
 
 #include <BitFont.h>
+#include <SessionClass.h>
+#include <Ext/Rules/Body.h>
 #include <Misc/FlyingStrings.h>
 #include <Utilities/AresHelper.h>
 #include <Ext/Techno/Body.h>
@@ -90,13 +92,67 @@ void BuildingExt::StoreTiberium(BuildingClass* pThis, float amount, int idxTiber
 		{
 			// Store Tiberium in structures
 			depositableTiberiumAmount = (amount * pTiberium->Value) / pDepositableTiberium->Value;
-			if (idxStorageTiberiumType < 4)
+			if (idxStorageTiberiumType >= 4)
 			{
-				pThis->Owner->GiveTiberium(depositableTiberiumAmount, idxStorageTiberiumType);
+				BuildingExt::StoreTiberium(pThis, depositableTiberiumAmount, idxStorageTiberiumType);
 			}
 			else
 			{
-				BuildingExt::StoreTiberium(pThis, depositableTiberiumAmount, idxStorageTiberiumType);
+				const auto pHouse = pThis->Owner;
+				if (!pHouse)
+					return;
+
+				if (pHouse->IsControlledByHuman() || SessionClass::Instance.GameMode == GameMode::Campaign || RulesExt::Global()->Storage_AI)
+				{
+					const auto lastStorage = static_cast<int>(pHouse->OwnedTiberium.GetTotalAmount());
+					const auto lastTotalStorage = pHouse->TotalStorage;
+
+					float remainingAmount = depositableTiberiumAmount;
+					if (remainingAmount > lastTotalStorage - lastStorage)
+						remainingAmount = static_cast<float>(lastTotalStorage - lastStorage);
+
+					float actuallyStored = 0.0f;
+
+					for (const auto pBuilding : pHouse->Buildings)
+					{
+						if (remainingAmount <= 0.0f)
+							break;
+
+						if (!pBuilding || !pBuilding->Type || !pBuilding->IsOnMap)
+							continue;
+
+						const auto storage = pBuilding->Type->Storage;
+						if (storage > 0)
+						{
+							auto freeSpace = storage - pBuilding->Tiberium.GetTotalAmount();
+							if (freeSpace > 0.0f)
+							{
+								if (freeSpace > remainingAmount)
+									freeSpace = remainingAmount;
+
+								pBuilding->Tiberium.AddAmount(freeSpace, idxStorageTiberiumType);
+								pHouse->OwnedTiberium.AddAmount(freeSpace, idxStorageTiberiumType);
+								remainingAmount -= freeSpace;
+								actuallyStored += freeSpace;
+							}
+						}
+					}
+
+					pHouse->UpdateAllSilos(lastStorage, lastTotalStorage);
+
+					if (actuallyStored > 0.0f)
+					{
+						const int creditValue = static_cast<int>(actuallyStored * pDepositableTiberium->Value * pHouse->Type->IncomeMult);
+						if (creditValue > 0)
+						{
+							pHouse->GiveMoney(creditValue);
+						}
+					}
+				}
+				else
+				{
+					pHouse->GiveTiberium(depositableTiberiumAmount, idxStorageTiberiumType);
+				}
 			}
 		}
 	}
@@ -671,6 +727,7 @@ void BuildingExt::Serialize(T& Stm)
 		.Process(this->TurretAnimFiringFrame)
 		.Process(this->TurretAnimRateTick)
 		.Process(this->ConstructionStartFacing)
+		.Process(this->AssignedExpansionPoint)
 		//.Process(this->IsPlayingRoofProductionAnim) It is set and reset within a same function.
 		;
 }

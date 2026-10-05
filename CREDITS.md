@@ -163,6 +163,7 @@ This page lists all the individual contributions to the project by their author.
   - Unit & infantry auto-conversion on ammo change
   - Dropship Loadout
   - Events 1000 & 1001: Switch event evaluation mode (Sequential / Parallel)
+  - Heavily modified and expanded version of ZivDero's initial port of Rampastring's DTA Advanced AI logics
   - Restore the ScriptType action#24 `Play speech` from Tiberian Sun
   - Modify ammo on impact
   - Tiberium ramp expansion support
@@ -996,6 +997,8 @@ This page lists all the individual contributions to the project by their author.
 - **Chang_zhi**:
   - Interop export interface for accessing scenario local/global variables
   - Add `ClampToScreen` tag for `BannerType` to control whether banner position is clamped to the visible area
+- **ZivDero**:
+  - Initial port of Rampastring's DTA Advanced AI logics
 - **obsidianus** - Automatic conversion based on health
 - **Nuke** - Reload speed adjustment on promotion
 - **frg2089 (舰队的偶像-岛风酱!)** - Fix `Slaved.OwnerWhenMasterKilled` not being respected when the master is sold or self-destructed

@@ -6,8 +6,14 @@
 #include <Utilities/Container.h>
 #include <Utilities/Detach.h>
 #include <Utilities/TemplateDef.h>
+#include <Ext/Building/Body.h>
 
+#include <map>
+#include <string>
 #include <array>
+#include <vector>
+
+#include "New/Type/TechTreeTypeClass.h"
 
 class HouseExt final : public AbstractExt, public Detach::Listener<BuildingClass>
 {
@@ -65,7 +71,6 @@ public:
 
 	std::map<int, std::vector<int>> SuspendedEMPulseSWs;
 
-	// standalone? no need and not a good idea
 	struct SWExt
 	{
 		int ShotCount;
@@ -99,7 +104,147 @@ public:
 	float RemoveTiberiumStorage(float amount, int index);
 	float GetTotalTiberiumStorage() const;
 
+	TechTreeTypeClass* PrimaryTechTreeType;
+	TechTreeTypeClass* SecondaryTechTreeType;
+
+	/**
+	 *  If we are currently expanding our base towards a resourceful location,
+	 *  this records the cell that we are expanding towards.
+	 */
+	CellStruct NextExpansionPointLocation;
+	CellStruct CombatCrawlingTarget;
+	CellStruct ResourceCrawlingTarget;
+	int ConsecutiveCombatBuilds;
+	int ConsecutiveResourceBuilds;
+	bool ResourceShouldBuildRefinery;
+
+	struct BlockedExpansionPoint
+	{
+		CellStruct Coords { 0, 0 };
+		int ExpiryFrame { 0 };
+		int FailureCount { 0 };
+	};
+
+	/**
+	 *  Locations that we should never expand towards.
+	 *  Basically, locations that are unreachable.
+	 */
+	BlockedExpansionPoint PermanentlyBlockedExpansionPointLocations[20] {};
+
+	/**
+	 *  Records whether the AI has reached its expansion point.
+	 *  If yes, the AI should build a refinery.
+	 */
+	bool ShouldBuildRefinery;
+	bool ShouldPlaceDefenseAtBlockedEdge;
+	int ExpansionPlacementFailures;
+	int LastFactoryRecycleFrame;
+	int NextExpansionSearchFrame;
+	int NextBlacklistClearFrame;
+
+	/**
+	 *  Set when the AI has built its first barracks during the game.
+	 *  Used to figure out whether the AI should reset its TeamDelay
+	 *  timer when it has built a barracks.
+	 */
+	bool HasBuiltFirstBarracks;
+
+	/**
+	 *  Records when the AI last checked for excess refineries.
+	 */
+	int LastExcessRefineryCheckFrame;
+	int LastObsoleteRefineryCheckFrame;
+	int LastServiceDepotPlacementFailedFrame;
+
+	/**
+	 *  Records when the AI last checked for sleeping harvesters.
+	 */
+	int LastSleepingHarvesterCheckFrame;
+	int LastPrimaryFactoryCheckFrame;
+
+	/**
+	 *  Defines whether the AI has already performed a final "desperate vehicle charge".
+	 *  If it has been done, then there is no need to do it again.
+	 */
+	bool HasPerformedVehicleCharge;
+
+	/**
+	 *  Records a value whether the current structure build choice
+	 *  was made under threat of getting rushed early in the game.
+	 */
+	bool IsUnderStartRushThreat;
+
+	/**
+	 *  Records cooldown frames for building types that failed to be placed.
+	 *  AI will not attempt to build these building types until the frame has passed.
+	 */
+	std::map<BuildingTypeClass*, int> PlacementFailedCooldowns;
+	std::map<BuildingTypeClass*, int> PlacementConsecutiveFailures;
+	std::map<std::string, int> GroupConsecutiveFailures;
+	std::map<std::string, int> GroupPlacementCooldowns;
+	std::map<BuildingTypeClass*, int> FeasibilityFailedCooldowns;
+
+	/**
+	 *  Records the dynamic build counts calculated for each building type
+	 *  including base AIBuildCounts and probabilistic AIExtraCounts.
+	 */
+	std::map<BuildingTypeClass*, int> AICachedBuildCounts;
+	TechnoTypeClass* LastAttackerType;
+	int LastAttackedFrame;
+	CellStruct LastAttackedBuildingCoords;
+	CellStruct LastAttackerCoords;
+	CellStruct FrontlineThreatCoords;
+	int FrontlineThreatActiveFrames;
+	int FrontlineThreatNeedsDefenses;
+	CellStruct FrontlineThreatBuildingCoords;
+	int LastParanoiaFrame;
+	std::vector<CellStruct> DefensivePlaceholders;
+
+	struct UnsafePlacementZone
+	{
+		CellStruct Coords;
+		int ExpiryFrame;
+	};
+	std::vector<UnsafePlacementZone> UnsafePlacementZones;
+
+	std::vector<CellStruct> UnclaimedTiberiumZones;
+	CellStruct NextRefineryPlacementLocation;
+	int LastUnclaimedTiberiumCheckFrame;
+
+	std::vector<CellStruct> CachedReachableResourceFields;
+	int NextReachableResourceScanFrame;
+
+	std::vector<CellStruct> CachedResourceCandidates;
+	int CachedResourceCandidatesExpiryFrame;
+
+	struct CellStructComparator
+	{
+		bool operator()(const CellStruct& a, const CellStruct& b) const
+		{
+			if (a.X != b.X)
+				return a.X < b.X;
+			return a.Y < b.Y;
+		}
+	};
+	std::map<CellStruct, int, CellStructComparator> ExpansionNodeFailureCounts;
+
+	std::vector<CellStruct> CachedResourcePath;
+	CellStruct CachedResourcePathTarget;
+	CellStruct CachedResourcePathStart;
+
+	std::vector<CellStruct> CachedCombatPath;
+	CellStruct CachedCombatPathTarget;
+	CellStruct CachedCombatPathStart;
+
+	std::vector<CellStruct> CachedExpansionPath;
+	CellStruct CachedExpansionPathTarget;
+	CellStruct CachedExpansionPathStart;
+	CellStruct GetCrawlingWaypoint(CellStruct targetCell);
+
+	HouseClass* TargetAlliedFallbackHouse;
+
 	HouseExt(HouseClass* OwnerObject) : AbstractExt(OwnerObject)
+		, TargetAlliedFallbackHouse { nullptr }
 		, PowerPlantEnhancers {}
 		, OwnedLimboDeliveredBuildings {}
 		, OwnedCountedHarvesters {}
@@ -144,6 +289,63 @@ public:
 		, BeaconsPlacedOrder { 0, 0, 0 }
 		, TiberiumStorage {}
 		, WeedStorage {}
+		, PrimaryTechTreeType { nullptr }
+		, SecondaryTechTreeType { nullptr }
+		, NextExpansionPointLocation { 0, 0 }
+		, CombatCrawlingTarget { 0, 0 }
+		, ResourceCrawlingTarget { 0, 0 }
+		, ConsecutiveCombatBuilds { 0 }
+		, ConsecutiveResourceBuilds { 0 }
+		, ResourceShouldBuildRefinery { false }
+		, PermanentlyBlockedExpansionPointLocations {}
+		, ShouldBuildRefinery { false }
+		, ShouldPlaceDefenseAtBlockedEdge { false }
+		, ExpansionPlacementFailures { 0 }
+		, LastFactoryRecycleFrame { 0 }
+		, NextExpansionSearchFrame { 0 }
+		, NextBlacklistClearFrame { 0 }
+		, HasBuiltFirstBarracks { false }
+		, LastExcessRefineryCheckFrame { 0 }
+		, LastObsoleteRefineryCheckFrame { 0 }
+		, LastServiceDepotPlacementFailedFrame { 0 }
+		, LastSleepingHarvesterCheckFrame { 0 }
+		, LastPrimaryFactoryCheckFrame { 0 }
+		, HasPerformedVehicleCharge { false }
+		, IsUnderStartRushThreat { false }
+		, PlacementFailedCooldowns {}
+		, PlacementConsecutiveFailures {}
+		, GroupConsecutiveFailures {}
+		, GroupPlacementCooldowns {}
+		, FeasibilityFailedCooldowns {}
+		, AICachedBuildCounts {}
+		, LastAttackerType { nullptr }
+		, LastAttackedFrame { 0 }
+		, LastAttackedBuildingCoords { 0, 0 }
+		, LastAttackerCoords { 0, 0 }
+		, FrontlineThreatCoords { 0, 0 }
+		, FrontlineThreatActiveFrames { 0 }
+		, FrontlineThreatNeedsDefenses { 0 }
+		, FrontlineThreatBuildingCoords { 0, 0 }
+		, LastParanoiaFrame { 0 }
+		, DefensivePlaceholders {}
+		, UnsafePlacementZones {}
+		, UnclaimedTiberiumZones {}
+		, NextRefineryPlacementLocation { 0, 0 }
+		, LastUnclaimedTiberiumCheckFrame { 0 }
+		, CachedReachableResourceFields {}
+		, NextReachableResourceScanFrame { 0 }
+		, CachedResourceCandidates {}
+		, CachedResourceCandidatesExpiryFrame { 0 }
+		, ExpansionNodeFailureCounts {}
+		, CachedResourcePath {}
+		, CachedResourcePathTarget { 0, 0 }
+		, CachedResourcePathStart { 0, 0 }
+		, CachedCombatPath {}
+		, CachedCombatPathTarget { 0, 0 }
+		, CachedCombatPathStart { 0, 0 }
+		, CachedExpansionPath {}
+		, CachedExpansionPathTarget { 0, 0 }
+		, CachedExpansionPathStart { 0, 0 }
 	{ }
 
 	bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;
@@ -196,6 +398,9 @@ public:
 	static bool LoadGlobals(PhobosStreamReader& Stm);
 	static bool SaveGlobals(PhobosStreamWriter& Stm);
 
+	static void InitializeBaseDefenses();
+	static bool BaseDefensesInitialized;
+
 	static int ActiveHarvesterCount(HouseClass* pThis);
 	static int TotalHarvesterCount(HouseClass* pThis);
 	static HouseClass* GetHouseKind(OwnerHouseKind kind, bool allowRandom, HouseClass* pDefault, HouseClass* pInvoker = nullptr, HouseClass* pVictim = nullptr);
@@ -205,6 +410,42 @@ public:
 
 	static void SetForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode = -1);
 	static void SetSkirmishHouseName(HouseClass* pHouse);
+
+	static bool AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse);
+	static std::vector<CellStruct> AdvAI_Get_Reachable_Resource_Fields(HouseClass* pHouse);
+	static int AdvAI_GetMobileRefineryTargetCount(HouseClass* pHouse);
+	static bool AdvAI_IsMobileRefineryHouse(HouseClass* pHouse);
+	static bool AdvAI_CanBuildAnyStaticRefinery(HouseClass* pHouse);
+	static void AdvAI_Add_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
+	static bool AdvAI_Is_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
+	static bool AdvAI_Has_Failed_Placement_Three_Times(HouseClass* pHouse, CellStruct coords);
+	static bool AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* pBuildingType, bool checkPrereqs, bool isTechTree = false);
+	static BuildingTypeClass* AdvAI_Find_Next_Buildable_Prerequisite(HouseClass* pHouse, BuildingTypeClass* pTargetType, BuildingTypeClass* pRootGoalType, std::set<BuildingTypeClass*>& visited, bool& outIsSubPrereq);
+	static bool AdvAI_Is_Recently_Attacked(HouseClass* pHouse);
+	static bool AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse, int enemyAircraftValue);
+	static int AdvAI_Calculate_Enemy_Aircraft_Value(HouseClass* pHouse);
+	static const BuildingTypeClass* AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse);
+	static const BuildingTypeClass* AdvAI_BuildAtLeastNOfSideAndMInTotal(HouseClass* pHouse, TechTreeTypeClass* techTree, TechTreeTypeClass::BuildType buildType, int sideBuildingsWanted, int totalBuildingsWanted, int extraCount = 0);
+	static const BuildingTypeClass* AdvAI_Get_Building_To_Build(HouseClass* pHouse);
+	static void AdvAI_Raise_Money(HouseClass* pHouse);
+	static void AdvAI_Economy_Upkeep(HouseClass* pHouse);
+	static void AdvAI_Awaken_Sleeping_Harvesters(HouseClass* pHouse);
+	static void AdvAI_Sell_Extra_ConYards(HouseClass* pHouse);
+	static bool IsAdvancedAIActive(HouseClass* pHouse);
+	static void AdvAI_Building(HouseClass* pHouse);
+	static void AdvAI_ExpertAI(HouseClass* pHouse);
+	static void AdvAI_Update_Primary_Factories(HouseClass* pHouse);
+	static void AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval, size_t optimalCount, CellStruct targetCell);
+	static void AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse);
+	static void AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse);
+	static void AdvAI_Update_Defensive_Placeholders(HouseClass* pHouse);
+
+	static int FindGenericPrerequisite(const char* id);
+	static bool HasBuildingPrerequisite(HouseClass* const pHouse, int idxBuildingType);
+	static bool HasGenericPrerequisite(int idx, HouseClass* pHouse);
+	static bool HasPrerequisite(HouseClass* const pHouse, int idx);
+	static bool IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* const pItem);
+	static bool PrerequisitesMet(HouseClass* pHouse, TechnoTypeClass* pItem, bool skipSecretLabChecks = false);
 
 	static bool IsDisabledFromShell(
 	HouseClass const* pHouse, BuildingTypeClass const* pItem);
@@ -244,5 +485,6 @@ public:
 	static bool ReachedBuildLimit(const HouseClass* pHouse, const TechnoTypeClass* pType, bool ignoreQueued);
 
 	static void CalculatePowerSurplus(HouseClass* pThis);
-};
 
+	static std::vector<BuildingTypeClass*> BaseDefenses;
+};

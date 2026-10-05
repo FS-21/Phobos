@@ -1,5 +1,6 @@
 #include "Constructs.h"
 #include "GeneralUtils.h"
+#include <AStarClass.h>
 #include "Debug.h"
 #include <Theater.h>
 #include <BitFont.h>
@@ -391,7 +392,6 @@ bool GeneralUtils::DrawImage(
 	return true;
 }
 
->>>>>>> feature/dropship-loadout
 std::unique_ptr<std::vector<PhobosPCXFile>> GeneralUtils::GetAnimationPCX(const std::string& baseFilename)
 {
 	auto animationFrames = std::make_unique<std::vector<PhobosPCXFile>>();
@@ -464,3 +464,180 @@ std::unique_ptr<std::vector<PhobosPCXFile>> GeneralUtils::GetAnimationPCX(const 
 	return animationFrames;
 }
 
+static bool IsCellBlocked(CellStruct coords)
+{
+	if (const CellClass* cell = MapClass::Instance.GetCellAt(coords))
+	{
+		if (cell->GetBuilding() != nullptr)
+			return true;
+		if (cell->GetTerrain(false) != nullptr)
+			return true;
+		if (cell->Tile_Is_Cliff() || cell->Tile_Is_Water())
+			return true;
+	}
+	return false;
+}
+
+static CellStruct GetPassableNeighbor(CellStruct center)
+{
+	for (int r = 1; r <= 3; r++)
+	{
+		for (int dy = -r; dy <= r; dy++)
+		{
+			for (int dx = -r; dx <= r; dx++)
+			{
+				CellStruct testCell(center.X + dx, center.Y + dy);
+				if (MapClass::Instance.CoordinatesLegal(testCell))
+				{
+					const CellClass* cell = MapClass::Instance.GetCellAt(testCell);
+					if (cell)
+					{
+						if (cell->GetBuilding() == nullptr && cell->GetTerrain(false) == nullptr && !cell->Tile_Is_Cliff() && !cell->Tile_Is_Water())
+						{
+							return testCell;
+						}
+					}
+				}
+			}
+		}
+	}
+	return center;
+}
+
+static FootClass* GetRepresentativeFootForCell(CellStruct cellCoords)
+{
+	if (MapClass::Instance.CoordinatesLegal(cellCoords))
+	{
+		if (const CellClass* cell = MapClass::Instance.GetCellAt(cellCoords))
+		{
+			if (const BuildingClass* pBld = cell->GetBuilding())
+			{
+				HouseClass* pHouse = pBld->Owner;
+				if (pHouse)
+				{
+					for (const auto pUnit : UnitClass::Array)
+					{
+						if (pUnit && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pHouse && !pUnit->Type->Naval)
+						{
+							return static_cast<FootClass*>(pUnit);
+						}
+					}
+					for (const auto pInf : InfantryClass::Array)
+					{
+						if (pInf && pInf->IsAlive && !pInf->InLimbo && pInf->Owner == pHouse)
+						{
+							return static_cast<FootClass*>(pInf);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Global fallback: check any alive ground unit on the map
+	for (const auto pUnit : UnitClass::Array)
+	{
+		if (pUnit && pUnit->IsAlive && !pUnit->InLimbo && !pUnit->Type->Naval)
+		{
+			return static_cast<FootClass*>(pUnit);
+		}
+	}
+	for (const auto pInf : InfantryClass::Array)
+	{
+		if (pInf && pInf->IsAlive && !pInf->InLimbo)
+		{
+			return static_cast<FootClass*>(pInf);
+		}
+	}
+
+	return nullptr;
+}
+
+int GeneralUtils::GetAStarPathLength(CellStruct fromCell, CellStruct toCell, MovementZone movementZone)
+{
+	FootClass* pFoot = GetRepresentativeFootForCell(fromCell);
+
+	CellStruct start = fromCell;
+	if (IsCellBlocked(fromCell))
+		start = GetPassableNeighbor(fromCell);
+
+	CellStruct end = toCell;
+	if (IsCellBlocked(toCell))
+		end = GetPassableNeighbor(toCell);
+
+	int res = AStarClass::Instance.AttemptPath(&start, &end, pFoot, false, false, movementZone);
+
+	return res;
+}
+
+// Checks if two map cells are connected by land (passable by ground units).
+bool GeneralUtils::AreZonesConnected(CellStruct fromCell, CellStruct toCell, MovementZone movementZone)
+{
+	const int returnValue = GetAStarPathLength(fromCell, toCell, movementZone);
+	return returnValue > 0 && returnValue < 2147483647;
+}
+
+// Computes and returns the list of cells representing the path from fromCell to toCell.
+// Returns an empty vector if no path exists or if no foot unit is available.
+std::vector<CellStruct> GeneralUtils::GetAStarPath(CellStruct fromCell, CellStruct toCell, MovementZone movementZone)
+{
+	std::vector<CellStruct> path;
+
+	if (!MapClass::Instance.CoordinatesLegal(fromCell) || !MapClass::Instance.CoordinatesLegal(toCell))
+		return path;
+
+	FootClass* pFoot = GetRepresentativeFootForCell(fromCell);
+	if (pFoot == nullptr)
+	{
+		// Westwood engine's AStarClass::FindPath unconditionally dereferences [pFoot + 0x8C].
+		// If no FootClass instance exists on the map, we cannot call FindPath.
+		return path;
+	}
+
+	CellStruct start = fromCell;
+	if (IsCellBlocked(fromCell))
+		start = GetPassableNeighbor(fromCell);
+
+	CellStruct end = toCell;
+	if (IsCellBlocked(toCell))
+		end = GetPassableNeighbor(toCell);
+
+	const int maxSteps = 500;
+	int directions[maxSteps] = { 0 };
+
+	PathFinderData* pPathData = AStarClass::Instance.FindPath(
+		&start, &end, pFoot, directions, maxSteps, movementZone, 0
+	);
+
+	if (pPathData != nullptr && pPathData->PathLength > 0)
+	{
+		CellStruct currentCell = fromCell;
+		path.push_back(currentCell);
+
+		// Direction offsets mapping for 8 directions in engine:
+		// 0 = Northeast (1, -1)
+		// 1 = East (1, 0)
+		// 2 = Southeast (1, 1)
+		// 3 = South (0, 1)
+		// 4 = Southwest (-1, 1)
+		// 5 = West (-1, 0)
+		// 6 = Northwest (-1, -1)
+		// 7 = North (0, -1)
+		const int dx[8] = { 1, 1, 1, 0, -1, -1, -1, 0 };
+		const int dy[8] = { -1, 0, 1, 1, 1, 0, -1, -1 };
+
+		// Reconstruct the path cell-by-cell using direction steps
+		for (int i = 0; i < pPathData->PathLength; i++)
+		{
+			int dir = directions[i];
+			if (dir >= 0 && dir < 8)
+			{
+				currentCell.X += dx[dir];
+				currentCell.Y += dy[dir];
+				path.push_back(currentCell);
+			}
+		}
+	}
+
+	return path;
+}

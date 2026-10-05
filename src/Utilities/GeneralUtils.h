@@ -48,6 +48,32 @@ public:
 	static bool DrawImage(DSurface* pSurface, RectangleStruct destinationRect, BSurface* pPCXSurface, SHPStruct* fileSHP, ConvertClass* pPalette, int frameIndex = 0, int zAdjust = 0, BlitterFlags blitterFlags = BlitterFlags::None);
 	static std::unique_ptr<std::vector<class PhobosPCXFile>> GetAnimationPCX(const std::string& baseFilename);
 
+	static int GetAStarPathLength(CellStruct fromCell, CellStruct toCell, MovementZone movementZone = MovementZone::Normal);
+	static bool AreZonesConnected(CellStruct fromCell, CellStruct toCell, MovementZone movementZone = MovementZone::Normal);
+	static std::vector<CellStruct> GetAStarPath(CellStruct fromCell, CellStruct toCell, MovementZone movementZone = MovementZone::Normal);
+
+	static CoordStruct CoordinatesFromCell(const CellStruct& cell, bool snap = false, int zValue = 0)
+	{
+		CoordStruct tmp;
+		tmp.X = cell.X * 256;
+		tmp.Y = cell.Y * 256;
+		tmp.Z = zValue;
+		if (snap)
+		{
+			tmp.X += 256 / 2;
+			tmp.Y += 256 / 2;
+		}
+		return tmp;
+	}
+
+	static CellStruct CellFromCoordinates(const CoordStruct& coord)
+	{
+		CellStruct tmp;
+		tmp.X = coord.X / 256;
+		tmp.Y = coord.Y / 256;
+		return tmp;
+	}
+
 	template<typename T>
 	static constexpr T FastPow(T x, size_t n)
 	{

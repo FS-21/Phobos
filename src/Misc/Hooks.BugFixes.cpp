@@ -6,6 +6,8 @@
 #include <FileFormats/HVA.h>
 
 #include <Ext/BuildingType/Body.h>
+#include <Ext/House/Body.h>
+#include <Ext/Techno/Body.h>
 #include <Ext/Unit/Body.h>
 #include <Ext/Anim/Body.h>
 #include <Ext/SWType/Body.h>
@@ -2857,8 +2859,21 @@ DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_SetLATime, 0x8)
 		pOwner->LATime = Unsorted::CurrentFrame;
 		pOwner->LAEnemy = pFromHouse->ArrayIndex;
 
+		auto const houseExt = HouseExt::ExtMap.Find(pOwner);
+		houseExt->LastAttackedBuildingCoords = pThis->GetMapCoords();
+		houseExt->LastAttackedFrame = Unsorted::CurrentFrame;
+
 		if (pAttacker)
+		{
+			houseExt->LastAttackerCoords = pAttacker->GetMapCoords();
+			houseExt->LastAttackerType = pAttacker->GetTechnoType();
 			pThis->BaseIsAttacked(pAttacker);
+		}
+		else
+		{
+			houseExt->LastAttackerCoords = CellStruct(0, 0);
+			houseExt->LastAttackerType = nullptr;
+		}
 	}
 
 	return 0;

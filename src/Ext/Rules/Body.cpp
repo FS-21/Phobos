@@ -1,6 +1,10 @@
 #include "Body.h"
 #include <HouseTypeClass.h>
-
+#include "Ext/House/Body.h"
+#include <Ext/Side/Body.h>
+#include <Utilities/TemplateDef.h>
+#include <FPSCounter.h>
+#include <GameOptionsClass.h>
 
 #include <cmath>
 #include <algorithm>
@@ -19,9 +23,9 @@
 #include <New/Type/InsigniaTypeClass.h>
 #include <New/Type/SelectBoxTypeClass.h>
 #include <New/Type/TheaterTypeClass.h>
+#include "New/Type/TechTreeTypeClass.h"
 #include <TiberiumClass.h>
 #include <Ext/Tiberium/Body.h>
-#include <Ext/Side/Body.h>
 #include <Ext/Sidebar/Body.h>
 
 std::unique_ptr<RulesExt::ExtData> RulesExt::Data = nullptr;
@@ -86,6 +90,8 @@ void RulesExt::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	AttachEffectTypeClass::LoadFromINIList(pINI);
 	BannerTypeClass::LoadFromINIList(pINI);
 	InsigniaTypeClass::LoadFromINIList(pINI);
+	TechTreeTypeClass::LoadFromINIList(pINI);
+	TechTreeTypeClass::CalculateTotals();
 
 	Data->LoadBeforeTypeData(pThis, pINI);
 }
@@ -141,6 +147,10 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	INI_EX exINI(pINI);
 
 	this->Storage_TiberiumIndex.Read(exINI, GameStrings::General, "Storage.TiberiumIndex");
+	this->Storage_AI.Read(exINI, GameStrings::General, "Storage.AI");
+	this->Storage_AI_Threshold.Read(exINI, GameStrings::General, "Storage.AI.Threshold");
+	this->Storage_AI_PenaltyMultiplier.Read(exINI, GameStrings::General, "Storage.AI.PenaltyMultiplier");
+	this->Storage_AI_MaxPenalty.Read(exINI, GameStrings::General, "Storage.AI.MaxPenalty");
 	this->HarvesterDumpAmount.Read(exINI, GameStrings::General, "HarvesterDumpAmount");
 	this->InfantryGainSelfHealCap.Read(exINI, GameStrings::General, "InfantryGainSelfHealCap");
 	this->UnitsGainSelfHealCap.Read(exINI, GameStrings::General, "UnitsGainSelfHealCap");
@@ -329,6 +339,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 		Debug::Log("[Developer warning] [AudioVisual] DisplayIncome.Delay is set 0 which would cause a crash, set to 1 instead.\n");
 		this->DisplayIncome_Delay = 1;
 	}
+
 	this->DisplayIncome_Houses.Read(exINI, GameStrings::AudioVisual, "DisplayIncome.Houses");
 	this->DisplayIncome_AllowAI.Read(exINI, GameStrings::AudioVisual, "DisplayIncome.AllowAI");
 
@@ -358,6 +369,11 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	this->VisualScatter_Min.Read(exINI, GameStrings::AudioVisual, "VisualScatter.Min");
 	this->VisualScatter_Max.Read(exINI, GameStrings::AudioVisual, "VisualScatter.Max");
+
+	this->AdvancedAI.Read(exINI, GameStrings::AI, "AdvancedAI");
+	this->AdvancedAI_NavalMode.Read(exINI, GameStrings::AI, "AdvancedAI.NavalMode");
+	this->AdvancedAI_MultiConYard.Read(exINI, GameStrings::AI, "AdvancedAI.MultiConYard");
+	this->AdvancedAI_MinimumRefineryCount.Read(exINI, GameStrings::AI, "AdvancedAI.MinimumRefineryCount");
 
 	this->Buildings_DefaultDigitalDisplayTypes.Read(exINI, GameStrings::AudioVisual, "Buildings.DefaultDigitalDisplayTypes");
 	this->Infantry_DefaultDigitalDisplayTypes.Read(exINI, GameStrings::AudioVisual, "Infantry.DefaultDigitalDisplayTypes");
@@ -474,6 +490,9 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->CanTargetAI_IronCurtained.Read(exINI, GameStrings::CombatDamage, "CanTargetAI.IronCurtained");
 	this->CanTarget_IronCurtained.Read(exINI, GameStrings::CombatDamage, "CanTarget.IronCurtained");
 	this->AutoTarget_IronCurtained.Read(exINI, GameStrings::CombatDamage, "AutoTarget.IronCurtained");
+
+	// Section Generic Prerequisites
+	FillDefaultPrerequisites();
 
 	this->InfantryAutoDeploy.Read(exINI, GameStrings::General, "InfantryAutoDeploy");
 
@@ -677,6 +696,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	{
 		Debug::Log("[Developer warning][%s] AttackMove.StopWhenTargetAcquired is deprecated and has been replaced by ApproachTarget.StopWhenInRange! If both are set, the latter will be used.\n", GameStrings::General);
 	}
+
 	this->ApproachTarget_StopWhenInRange.Read(exINI, GameStrings::General, "AttackMove.StopWhenTargetAcquired");
 	this->ApproachTarget_StopWhenInRange.Read(exINI, GameStrings::General, "ApproachTarget.StopWhenInRange");
 
@@ -767,13 +787,74 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->MissileKeepTargetCoord.Read(exINI, GameStrings::General, "MissileKeepTargetCoord");
 }
 
-// this should load everything that TypeData is not dependant on
-// i.e. InfantryElectrocuted= can go here since nothing refers to it
-// but [GenericPrerequisites] have to go earlier because they're used in parsing TypeData
 void RulesExt::ExtData::LoadAfterTypeData(RulesClass* pThis, CCINIClass* pINI)
 {
 	INI_EX exINI(pINI);
 
+	this->GenericPrerequisitesAlternates.Clear();
+
+	auto loadAlternates = [&](const char* name) -> DynamicVectorClass<TechnoTypeClass*>
+	{
+		DynamicVectorClass<TechnoTypeClass*> alternates;
+		char keyName[0x80];
+		char formattedName[0x80];
+		strcpy_s(formattedName, name);
+
+		if (formattedName[0] >= 'a' && formattedName[0] <= 'z')
+			formattedName[0] = static_cast<char>(formattedName[0] - 'a' + 'A');
+		for (size_t k = 1; formattedName[k] != '\0'; ++k)
+		{
+			if (formattedName[k] >= 'A' && formattedName[k] <= 'Z')
+				formattedName[k] = static_cast<char>(formattedName[k] - 'A' + 'a');
+		}
+
+		bool found = false;
+		_snprintf_s(keyName, _TRUNCATE, "Prerequisite%sAlternate", formattedName);
+		if (pINI->ReadString("General", keyName, "", Phobos::readBuffer) > 0)
+		{
+			found = true;
+		}
+		else
+		{
+			_snprintf_s(keyName, _TRUNCATE, "Prerequisite%sAlternate", name);
+			if (pINI->ReadString("General", keyName, "", Phobos::readBuffer) > 0)
+				found = true;
+		}
+
+		if (found)
+		{
+			char* context = nullptr;
+			for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+			{
+				if (auto const pType = TechnoTypeClass::Find(cur))
+				{
+					alternates.AddItem(pType);
+				}
+			}
+		}
+
+		return alternates;
+	};
+
+	// Index 0: "-" dummy
+	DynamicVectorClass<TechnoTypeClass*> emptyList;
+	this->GenericPrerequisitesAlternates.AddItem(emptyList);
+
+	for (int i = 1; i < this->GenericPrerequisitesNames.Count; ++i)
+	{
+		const char* name = this->GenericPrerequisitesNames[i];
+		auto alternates = loadAlternates(name);
+
+		if (_stricmp(name, "PROC") == 0)
+		{
+			if (alternates.Count == 0 && pThis->PrerequisiteProcAlternate)
+			{
+				alternates.AddItem(pThis->PrerequisiteProcAlternate);
+			}
+		}
+
+		this->GenericPrerequisitesAlternates.AddItem(alternates);
+	}
 }
 
 // this runs between the before and after type data loading methods for rules ini
@@ -792,6 +873,84 @@ void RulesExt::ExtData::InitializeAfterAllLoaded()
 	this->TintColorBerserk = GeneralUtils::GetColorFromColorAdd(pRules->BerserkColor);
 }
 
+void RulesExt::FillDefaultPrerequisites()
+{
+	if (RulesExt::Global()->GenericPrerequisitesNames.Count != 0)
+		return;
+
+	DynamicVectorClass<int> empty;
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("-"); // Official index: 0
+	RulesExt::Global()->GenericPrerequisites.AddItem(empty);
+
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("POWER"); // Official index: -1
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisitePower);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("FACTORY"); // -2
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteFactory);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("BARRACKS"); // -3
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteBarracks);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("RADAR"); // -4
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteRadar);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("TECH"); // -5
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteTech);
+	RulesExt::Global()->GenericPrerequisitesNames.AddItem("PROC"); // -6
+	RulesExt::Global()->GenericPrerequisites.AddItem(RulesClass::Instance->PrerequisiteProc);
+
+	// If [GenericPrerequisites] is present will be added after these.
+	// Also the originals can be replaced by new ones
+	int genericPreqsCount = CCINIClass::INI_Rules->GetKeyCount("GenericPrerequisites");
+
+	for (int i = 0; i < genericPreqsCount; ++i)
+	{
+		DynamicVectorClass<int> objectsList;
+		char* context = nullptr;
+		const char* keyName = CCINIClass::INI_Rules->GetKeyName("GenericPrerequisites", i);
+		if (!keyName || keyName[0] == '\0')
+			continue;
+
+		CCINIClass::INI_Rules->ReadString("GenericPrerequisites", keyName, "", Phobos::readBuffer);
+
+		for (char* cur = strtok_s(Phobos::readBuffer, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			int idx = BuildingTypeClass::FindIndex(cur);
+			if (idx >= 0)
+			{
+				objectsList.AddItem(idx);
+			}
+			else
+			{
+				int genIdx = HouseExt::FindGenericPrerequisite(cur);
+				if (genIdx < 0)
+					objectsList.AddItem(genIdx);
+			}
+		}
+
+		// Find existing name using case-insensitive comparison
+		int existingIndex = -1;
+		for (int k = 0; k < RulesExt::Global()->GenericPrerequisitesNames.Count; ++k)
+		{
+			if (_strcmpi(RulesExt::Global()->GenericPrerequisitesNames[k], keyName) == 0)
+			{
+				existingIndex = k;
+				break;
+			}
+		}
+
+		if (existingIndex > 0)
+		{
+			// Overwrites an existing generic prerequisite (vanilla or custom)
+			RulesExt::Global()->GenericPrerequisites[existingIndex] = objectsList;
+		}
+		else
+		{
+			// New generic prerequisite
+			RulesExt::Global()->GenericPrerequisitesNames.AddItem(keyName);
+			RulesExt::Global()->GenericPrerequisites.AddItem(objectsList);
+		}
+
+		objectsList.Clear();
+	}
+}
+
 // =============================
 // load / save
 
@@ -803,6 +962,10 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->AIScriptsLists)
 		.Process(this->AIHousesLists)
 		.Process(this->Storage_TiberiumIndex)
+		.Process(this->Storage_AI)
+		.Process(this->Storage_AI_Threshold)
+		.Process(this->Storage_AI_PenaltyMultiplier)
+		.Process(this->Storage_AI_MaxPenalty)
 		.Process(this->HarvesterDumpAmount)
 		.Process(this->InfantryGainSelfHealCap)
 		.Process(this->UnitsGainSelfHealCap)
@@ -984,6 +1147,9 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->ShowDesignatorRange)
 		.Process(this->ShowPowerPlantEnhancerRange)
 		.Process(this->ShowGameTime)
+		.Process(this->GenericPrerequisites)
+		.Process(this->GenericPrerequisitesNames)
+		.Process(this->GenericPrerequisitesAlternates)
 		.Process(this->DropPodTrailer)
 		.Process(this->DropPodDefaultTrailer)
 		.Process(this->PodImage)
@@ -1197,6 +1363,10 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->TeamDelays_Count)
 		.Process(this->BerzerkMission)
 		.Process(this->BunkerStateUpdateDelay)
+		.Process(this->AdvancedAI)
+		.Process(this->AdvancedAI_NavalMode)
+		.Process(this->AdvancedAI_MultiConYard)
+		.Process(this->AdvancedAI_MinimumRefineryCount)
 		.Process(this->AllowChatBoxInSinglePlayer)
 		.Process(this->NotHuman_RandomDeathSequence)
 		.Process(this->OnlyUseLandSequences)
@@ -1267,6 +1437,7 @@ void RulesExt::ExtData::ReplaceVoxelLightSources()
 		auto source = this->VoxelShadowLightSource.Get().Normalized();
 		Game::VoxelShadowLightSource = Matrix3D::VoxelDefaultMatrix * source;
 	}
+
 	*/
 
 	if (needCacheFlush)

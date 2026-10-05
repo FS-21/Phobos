@@ -69,7 +69,7 @@ public:
 	Valueable<bool> IsAnimDelayedBurst;
 
 	std::vector<std::optional<DirType>> AircraftDockingDirs;
-		Nullable<bool> AircraftDockingDir_DefaultToPoseDir;
+	Nullable<bool> AircraftDockingDir_DefaultToPoseDir;
 
 	ValueableVector<TechnoTypeClass*> FactoryPlant_AllowTypes;
 	ValueableVector<TechnoTypeClass*> FactoryPlant_DisallowTypes;
@@ -102,6 +102,18 @@ public:
 	Nullable<int> BunkerStateUpdateDelay;
 
 	NullableIdx<VocClass> BuildingRepairedSound;
+
+	NullableVector<int> AIBuildCounts;
+	NullableVector<int> AIExtraCounts;
+
+	Nullable<bool> AIBaseNormal;
+	Nullable<bool> AIInnerBase;
+
+	Valueable<bool> IsAdvancedAIIgnoresPrerequisites;
+
+	std::vector<ValueableVector<BuildingTypeClass*>> PrerequisiteLists;
+	ValueableVector<BuildingTypeClass*> PrerequisiteNegatives;
+	DWORD PrerequisiteTheaters;
 
 	Valueable<bool> Refinery_UseNormalActiveAnim;
 
@@ -143,6 +155,11 @@ public:
 
 	// Ares 0.2
 	Valueable<bool> CloningFacility;
+
+	// Standard Valueable fields to bypass YRpp offset shifts
+	Valueable<bool> GapGenerator;
+	Valueable<int> GapRadiusInCells;
+	Valueable<int> SuperGapRadiusInCells;
 
 	// Ares 0.A
 	Valueable<BuildingTypeClass*> RubbleIntact;
@@ -229,6 +246,14 @@ public:
 		, BunkerWallsDownSound {}
 		, BunkerStateUpdateDelay {}
 		, BuildingRepairedSound {}
+		, AIBuildCounts {}
+		, AIExtraCounts {}
+		, AIBaseNormal {}
+		, AIInnerBase {}
+		, IsAdvancedAIIgnoresPrerequisites { false }
+		, PrerequisiteLists {}
+		, PrerequisiteNegatives {}
+		, PrerequisiteTheaters { 0xFFFFFFFF }
 		, Refinery_UseNormalActiveAnim { false }
 		, HasPowerUpAnim {}
 		, UndeploysInto_Sellable { false }
@@ -240,8 +265,8 @@ public:
 		, TurretAnim_LowPowerFiringFrames { 0 }
 		, TurretAnim_IdleRate { 1 }
 		, TurretAnim_FiringRate { 1 }
-		, StartFacing{}
-		, StartFacing_Random{}
+		, StartFacing {}
+		, StartFacing_Random {}
 		, SetTabBySelecting { -1 }
 		, RevealToAll_Radius {}
 		, DeployFireDelay {}
@@ -260,8 +285,9 @@ public:
 
 		// Ares 0.2
 		, CloningFacility { false }
-
-		// Ares 0.A
+		, GapGenerator { false }
+		, GapRadiusInCells { 0 }
+		, SuperGapRadiusInCells { 0 }
 		, RubbleIntact { nullptr }
 		, RubbleIntactRemove { false }
 
@@ -331,5 +357,7 @@ public:
 	static bool CanUpgrade(BuildingClass* pBuilding, BuildingTypeClass* pUpgradeType, HouseClass* pUpgradeOwner);
 	static int CountOwnedNowWithDeployOrUpgrade(BuildingTypeClass* pBuilding, HouseClass* pHouse);
 	static int GetUpgradesAmount(BuildingTypeClass* pBuilding, HouseClass* pHouse);
+	static bool HasDisableableSuperWeapons(BuildingTypeClass* pBuildingType);
+	static bool IsAIBaseNormal(const BuildingTypeClass* pType);
+	static bool IsAIInnerBase(const BuildingTypeClass* pType);
 };
-

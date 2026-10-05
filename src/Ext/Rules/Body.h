@@ -27,6 +27,10 @@ public:
 		std::vector<std::vector<HouseTypeClass*>> AIHousesLists;
 
 		Valueable<int> Storage_TiberiumIndex;
+		Valueable<bool> Storage_AI;
+		Valueable<double> Storage_AI_Threshold;
+		Valueable<double> Storage_AI_PenaltyMultiplier;
+		Valueable<double> Storage_AI_MaxPenalty;
 		Valueable<float> HarvesterDumpAmount;
 		Nullable<int> InfantryGainSelfHealCap;
 		Nullable<int> UnitsGainSelfHealCap;
@@ -328,6 +332,10 @@ public:
 		Valueable<bool> CanTarget_IronCurtained;
 		Valueable<bool> AutoTarget_IronCurtained;
 
+		DynamicVectorClass<DynamicVectorClass<int>> GenericPrerequisites;
+		DynamicVectorClass<const char*> GenericPrerequisitesNames;
+		DynamicVectorClass<DynamicVectorClass<TechnoTypeClass*>> GenericPrerequisitesAlternates;
+
 		Valueable<bool> BuildingWaypoints;
 		Valueable<bool> BuildingTypeSelectable;
 
@@ -520,6 +528,11 @@ public:
 
 		Valueable<int> BunkerStateUpdateDelay;
 
+		Valueable<bool> AdvancedAI;
+		Valueable<bool> AdvancedAI_NavalMode;
+		Valueable<bool> AdvancedAI_MultiConYard;
+		Valueable<int> AdvancedAI_MinimumRefineryCount;
+
 		Valueable<bool> AllowChatBoxInSinglePlayer;
 
 		Valueable<bool> NotHuman_RandomDeathSequence;
@@ -574,6 +587,10 @@ public:
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
+			, Storage_AI { false }
+			, Storage_AI_Threshold { 0.85 }
+			, Storage_AI_PenaltyMultiplier { 0.10 }
+			, Storage_AI_MaxPenalty { 0.90 }
 			, HarvesterDumpAmount { 0.0f }
 			, InfantryGainSelfHealCap {}
 			, UnitsGainSelfHealCap {}
@@ -768,6 +785,9 @@ public:
 			, ShowDesignatorRange { true }
 			, ShowPowerPlantEnhancerRange { true }
 			, ShowGameTime { true }
+			, GenericPrerequisites { }
+			, GenericPrerequisitesNames { }
+			, GenericPrerequisitesAlternates { }
 			, DropPodTrailer { }
 			, DropPodDefaultTrailer { }
 			, PodImage { }
@@ -1022,6 +1042,10 @@ public:
 			, BerzerkMission { Mission::Hunt }
 
 			, BunkerStateUpdateDelay { 15 }
+			, AdvancedAI { false }
+			, AdvancedAI_NavalMode { false }
+			, AdvancedAI_MultiConYard { false }
+			, AdvancedAI_MinimumRefineryCount { 2 }
 
 			, AllowChatBoxInSinglePlayer { false }
 
@@ -1118,4 +1142,6 @@ public:
 	{
 		Allocate(RulesClass::Instance);
 	}
+
+	static void FillDefaultPrerequisites();
 };
