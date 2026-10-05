@@ -3,6 +3,7 @@
 
 #include <Ext/Side/Body.h>
 #include <Ext/TechnoType/Body.h>
+#include <Ext/Observer/ObserverUI.h>
 #include <Misc/MessageColumn.h>
 #include <Drawing.h>
 #include <GScreenClass.h>
@@ -478,7 +479,8 @@ DEFINE_HOOK(0x692419, DisplayClass_ProcessClickCoords_SkipOnNewButtons, 0x7)
 
 	return (SWSidebarClass::IsEnabled() && SWSidebarClass::Instance.CurrentColumn
 		|| SWSidebarClass::Instance.ToggleButton && SWSidebarClass::Instance.ToggleButton->IsHovering
-		|| MessageColumnClass::Instance.IsBlocked())
+		|| MessageColumnClass::Instance.IsBlocked()
+		|| (ObserverUIClass::IsActive() && ObserverUIClass::Instance.IsMouseHoveringUI()))
 		? DoNothing : 0;
 }
 

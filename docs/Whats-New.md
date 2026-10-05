@@ -2366,6 +2366,7 @@ HideShakeEffects=false           ; boolean
 - [Customizable Berzerk mission](Fixed-or-Improved-Logics.md#enhanced-berzerk-behavior) (by TaranDahl)
 - [Tank Bunker foundation and state update delay improvements](Fixed-or-Improved-Logics.md#tank-bunker-improvements) (by Starkku)
 - [Advanced AI v1 (modified version)](AI-Scripting-and-Mapping.md#advanced-ai-v1-modified-version) (by FS-21, ZivDero, Rampastring)
+- [Observer UI](User-Interface.md#observer-ui) (by FS-21)
 - [Custom cruise missiles](New-or-Enhanced-Logics.md#custom-cruise-missiles) (by Noble_Fish)
 - [Allow chat box in singleplayer](User-Interface.md#allow-chat-box-in-singleplayer) (by TaranDahl)
 - [Recipient-specific message and EVA on superweapon activation](New-or-Enhanced-Logics.md#recipient-specific-message-and-eva-on-superweapon-activation) (by Flactine)

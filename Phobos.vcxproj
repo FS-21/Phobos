@@ -42,6 +42,9 @@
     <ClCompile Include="src\Commands\FrameStep.cpp" />
     <ClCompile Include="src\Commands\NextIdleHarvester.cpp" />
     <ClCompile Include="src\Commands\ObjectInfo.cpp" />
+    <ClCompile Include="src\Commands\ShowObjectCard.cpp" />
+    <ClCompile Include="src\Commands\ToggleObserverUI.cpp" />
+    <ClCompile Include="src\Commands\ClearObserverUICards.cpp" />
     <ClCompile Include="src\Commands\QuickSave.cpp" />
     <ClCompile Include="src\Commands\SaveVariablesToFile.cpp" />
     <ClCompile Include="src\Commands\SelectCaptured.cpp" />
@@ -117,6 +120,9 @@
     <!-- src\Ext\Infantry -->
     <ClCompile Include="src\Ext\Infantry\Hooks.cpp" />
     <ClCompile Include="src\Ext\Infantry\Hooks.Firing.cpp" />
+    <!-- src\Ext\Observer -->
+    <ClCompile Include="src\Ext\Observer\ObserverUI.cpp" />
+    <ClCompile Include="src\Ext\Observer\ObserverUI.Hooks.cpp" />
     <!-- src\Ext\OverlayType -->
     <ClCompile Include="src\Ext\OverlayType\Body.cpp" />
     <ClCompile Include="src\Ext\OverlayType\Hooks.cpp" />
@@ -387,6 +393,8 @@
     <ClInclude Include="src\Ext\Event\Body.h" />
     <ClInclude Include="src\Ext\House\Body.h" />
     <ClInclude Include="src\Ext\HouseType\Body.h" />
+    <!-- src\Ext\Observer -->
+    <ClInclude Include="src\Ext\Observer\ObserverUI.h" />
     <ClInclude Include="src\Ext\OverlayType\Body.h" />
     <ClInclude Include="src\Ext\ParticleSystemType\Body.h" />
     <ClInclude Include="src\Ext\ParticleType\Body.h" />

@@ -6,10 +6,11 @@
 
 #include <Ext/Techno/Body.h>
 #include <Ext/BuildingType/Body.h>
+#include <Ext/Script/Body.h>
+#include <Ext/Observer/ObserverUI.h>
 
 #include <cmath>
 #include <string>
-#include <Ext/Script/Body.h>
 
 const char* ObjectInfoCommandClass::GetName() const
 {
@@ -33,6 +34,9 @@ const wchar_t* ObjectInfoCommandClass::GetUIDescription() const
 
 void ObjectInfoCommandClass::Execute(WWKey eInput) const
 {
+	if (!Phobos::Config::DevelopmentCommands && !ObserverUIClass::IsActive())
+		return;
+
 	char buffer[0x800] = { 0 };
 
 	auto append = [&buffer](const char* pFormat, ...)

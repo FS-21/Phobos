@@ -20,3 +20,4 @@ T* MakeCommand()
 #define CATEGORY_DEBUG L"Debug"
 #define CATEGORY_GUIDEBUG StringTable::LoadString(GameStrings::GUI_DEBUG)
 #define CATEGORY_DEVELOPMENT StringTable::LoadString("TXT_DEVELOPMENT")
+#define CATEGORY_INFORMATION GeneralUtils::LoadStringUnlessMissing("TXT_CATEGORY_INFORMATION", L"Information")

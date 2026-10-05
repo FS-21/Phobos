@@ -1,6 +1,9 @@
 #include "Commands.h"
 
 #include "ObjectInfo.h"
+#include "ShowObjectCard.h"
+#include "ToggleObserverUI.h"
+#include "ClearObserverUICards.h"
 #include "NextIdleHarvester.h"
 #include "QuickSave.h"
 #include "DamageDisplay.h"
@@ -69,6 +72,10 @@ DEFINE_HOOK(0x533066, CommandClassCallback_Register, 0x6)
 	if (Phobos::Config::SelectCapturedCommand)
 		MakeCommand<SelectCapturedCommandClass>();
 
+	MakeCommand<ToggleObserverUICommandClass>();
+	MakeCommand<ShowObjectCardCommandClass>();
+	MakeCommand<ClearObserverUICardsCommandClass>();
+
 	if (Phobos::Config::SuperWeaponSidebarCommands)
 	{
 		SWSidebarClass::Commands[0] = MakeCommand<FireTacticalSWCommandClass<0>>();
@@ -100,12 +107,17 @@ DEFINE_HOOK(0x533066, CommandClassCallback_Register, 0x6)
 	return 0;
 }
 
+#include <Ext/Observer/ObserverUI.h>
+
 extern bool IsDropshipLoadoutActive();
 extern void DropshipLoadout_OnMouseWheelUp();
 extern void DropshipLoadout_OnMouseWheelDown();
 
 static void MouseWheelDownCommand()
 {
+	if (ObserverUIClass::IsActive() && ObserverUIClass::Instance.HandleMouseWheel(false))
+		return;
+
 	if (IsDropshipLoadoutActive())
 		DropshipLoadout_OnMouseWheelDown();
 	else if (MessageColumnClass::Instance.IsHovering() && !ScenarioClass::Instance->UserInputLocked)
@@ -114,6 +126,9 @@ static void MouseWheelDownCommand()
 
 static void MouseWheelUpCommand()
 {
+	if (ObserverUIClass::IsActive() && ObserverUIClass::Instance.HandleMouseWheel(true))
+		return;
+
 	if (IsDropshipLoadoutActive())
 		DropshipLoadout_OnMouseWheelUp();
 	else if (MessageColumnClass::Instance.IsHovering() && !ScenarioClass::Instance->UserInputLocked)
@@ -145,6 +160,9 @@ DEFINE_HOOK(0x777998, Game_WndProc_ScrollMouseWheel, 0x6)
 static inline bool CheckSkipScrollSidebar()
 {
 	if (ZoomManager::CanPlayerZoom() && ZoomManager::ScrollEnabled && (GetAsyncKeyState(VK_CONTROL) & 0x8000))
+		return true;
+
+	if (ObserverUIClass::IsActive() && ObserverUIClass::Instance.IsMouseHoveringUI())
 		return true;
 
 	return MessageColumnClass::Instance.IsHovering();
