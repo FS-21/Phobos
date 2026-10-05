@@ -1920,12 +1920,14 @@ HideShakeEffects=false           ; boolean
   BuiltInType=5
 
   [ScriptsRA2]
+  10018=Attack waypoint,2,0,1,Designed for aircrafts, when remaining ammo reaches a specified ammount this action ends. This threshold can be set with script action 12003.
   10100=Timed Area Guard,20,0,1,[LONG DESC]
   10101=Wait until ammo is full,0,0,1,[LONG DESC]
   10102=Regroup Temporarily Around the Team Leader,20,0,1,[LONG DESC]
   10103=Load Onto Transports,0,0,1,[LONG DESC]
   10104=Chronoshift to Enemy Base,20,0,1,[LONG DESC]
   10105=Repair Destroyed Bridge,20,0,1,[LONG DESC]
+  12003=Set Minimum Ammo Threshold,20,0,1,Sets the ammo threshold for script action 10018.
   14004=Force Global OnlyTargetHouseEnemy value in Teams,20,0,1,[LONG DESC]
   16006=Set House Index For Managing AI Triggers,20,0,1,[LONG DESC]
   16007=Enable Or Disable All AI Triggers,21,0,1,[LONG DESC]
@@ -2041,6 +2043,7 @@ HideShakeEffects=false           ; boolean
 - [Event 607: A webby weapon hit the tagged infantry](AI-Scripting-and-Mapping.md#607-a-webby-weapon-hit-the-tagged-infantry) (by FS-21)
 - [Custom Resource Types](New-or-Enhanced-Logics.md#custom-resource-types) (by FS-21)
 - [AI Learning](New-or-Enhanced-Logics.md#ai-learning) (by FS-21)
+- [ScriptType actions for aircraft attacks](AI-Scripting-and-Mapping.md#10018-attack-at-specified-waypoint) (by FS-21)
 - [Customize ivan bomb visibility](Fixed-or-Improved-Logics.md#customize-ivan-bomb-visibility) (by NetsuNegi)
 - [Customize whether mind-controlled `Insignificant` technos can be auto-targeted](Fixed-or-Improved-Logics.md#customize-whether-mind-controlled-insignificant-technos-can-be-auto-targeted) (by Noble_Fish)
 - [Mission selection screen](User-Interface.md#mission-selection-screen) (by FS-21)
@@ -2795,6 +2798,7 @@ HideShakeEffects=false           ; boolean
 - Unit `Speed` setting now accepts floating point values (by Starkku)
 - `Strafing` is now disabled by default when using `Trajectory` (by CrimRecya)
 - Map action 507 for printing a message with the remaining map objects (by FS-21)
+- ScriptType actions `10018` & `12003` for aircrafts attacks (by FS-21)
 - Skip target scanning function calling for unarmed technos (by TaranDahl & solar-III)
 - Allow retint fix to be disabled with `[AudioVisual] -> UseRetintFix=no` in `rulesmd.ini` due to performance considerations (by Kerbiter)
 - Elite technos no longer scatter by default, behaviour is controlled by `SCATTER` veterancy ability now (by NetsuNegi & Starkku)

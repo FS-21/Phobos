@@ -46,6 +46,7 @@ public:
 	std::vector<TechnoClass*> BridgeRepairHuts;
 	int TriggersSideIdx;
 	int TriggersHouseIdx;
+	int MinAmmoThreshold;
 
 	TeamExt(TeamClass* OwnerObject) : AbstractExt(OwnerObject)
 		, WaitNoTargetAttempts { 0 }
@@ -64,6 +65,7 @@ public:
 		, BridgeRepairHuts { }
 		, TriggersSideIdx { -1 }
 		, TriggersHouseIdx { -1 }
+		, MinAmmoThreshold { 0 }
 	{ }
 
 	virtual ~TeamExt() = default;

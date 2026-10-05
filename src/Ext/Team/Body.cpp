@@ -25,6 +25,7 @@ void TeamExt::Serialize(T& Stm)
 		.Process(this->BridgeRepairHuts)
 		.Process(this->TriggersSideIdx)
 		.Process(this->TriggersHouseIdx)
+		.Process(this->MinAmmoThreshold)
 		;
 }
 
