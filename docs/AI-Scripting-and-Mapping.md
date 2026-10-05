@@ -550,6 +550,37 @@ x=i,n             ; where 18048 <= i <= 18071, n is made up of two parts, the lo
 
 This category is empty for now.
 
+## Teams
+
+### Adjust recruitable status on team member liberate
+
+- In vanilla, when a unit is added to a team, its `RecruitableB` flag is overwritten by the team's `AreTeamMembersRecruitable` setting. When the unit is liberated from the team, the flag is not restored. The following settings allow a team to reset this flag when liberating its members.
+  - If set to a value **greater than 0**, the liberated unit is forcibly marked as recruitable.
+  - If set to **0**, the liberated unit is forcibly marked as not recruitable.
+  - If set to a value **less than 0** (default: `-1`), the original game behavior is preserved.
+
+In `rulesmd.ini`:
+```ini
+[General]
+SetRecruitableOnLiberate=-1  ; integer
+```
+
+In `aimd.ini`:
+```ini
+[SOMETEAMTYPE]               ; TeamType
+SetRecruitableOnLiberate=    ; integer, default to [General] -> SetRecruitableOnLiberate
+```
+
+### Customized transport plane for teams
+
+- You can now use `ParaDropAircraft` to specify a new transport aircraft type for teams with `Droppod=yes`, which will override the global settings for `Ares` and `Vanilla`.
+
+In `aimd.ini`:
+```ini
+[SOMETEAMTYPE]      ; TeamType, with Droppod=yes
+ParaDropAircraft=   ; AircraftType
+```
+
 ## Trigger Actions
 
 ### `500` Save Game
@@ -1223,33 +1254,3 @@ AIInnerBase=false                     ; boolean
   - **Prerequisite Validation**: The upgrade will only be queued if the AI owns at least one target base structure that has not yet reached its maximum upgrade level (`pBuilding->UpgradeLevel < pBuilding->Type->Upgrades`).
   - **Power Upgrades**: If the upgrade targets a powerplant type (listed under `BuildPower` or `BuildAdvancedPower`), the AI regulates its construction based on power needs: if the base has a power deficit, the upgrade is allowed unconditionally to recover power quickly. If the base already has a sufficient power surplus, the upgrade is blocked unless there is at least one upgradeable powerplant situated within `20` cells of the Construction Yard (or base center), protecting expensive upgrades from being placed at vulnerable frontline outposts.
 
-## Teams
-
-### Adjust recruitable status on team member liberate
-
-- In vanilla, when a unit is added to a team, its `RecruitableB` flag is overwritten by the team's `AreTeamMembersRecruitable` setting. When the unit is liberated from the team, the flag is not restored. The following settings allow a team to reset this flag when liberating its members.
-  - If set to a value **greater than 0**, the liberated unit is forcibly marked as recruitable.
-  - If set to **0**, the liberated unit is forcibly marked as not recruitable.
-  - If set to a value **less than 0** (default: `-1`), the original game behavior is preserved.
-
-In `rulesmd.ini`:
-```ini
-[General]
-SetRecruitableOnLiberate=-1  ; integer
-```
-
-In `aimd.ini`:
-```ini
-[SOMETEAMTYPE]               ; TeamType
-SetRecruitableOnLiberate=    ; integer, default to [General] -> SetRecruitableOnLiberate
-```
-
-### Customized transport plane for teams
-
-- You can now use `ParaDropAircraft` to specify a new transport aircraft type for teams with `Droppod=yes`, which will override the global settings for `Ares` and `Vanilla`.
-
-In `aimd.ini`:
-```ini
-[SOMETEAMTYPE]      ; TeamType, with Droppod=yes
-ParaDropAircraft=   ; AircraftType
-```
