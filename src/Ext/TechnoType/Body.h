@@ -163,6 +163,7 @@ public:
 	Nullable<bool> OpenTopped_ShareTransportTarget;
 	Nullable<bool> OpenTopped_UseTransportRangeModifiers;
 	Nullable<bool> OpenTopped_CheckTransportDisableWeapons;
+	Nullable<bool> OpenTopped_TransferPassengerStopCommand;
 	Nullable<bool> OpenTopped_DecloakToFire;
 	Nullable<bool> OpenTopped_FireWhileMoving;
 	Nullable<bool> OpenTopped_FireWhileMoving_BasedOnDestination;
@@ -643,6 +644,7 @@ public:
 		, OpenTopped_ShareTransportTarget {}
 		, OpenTopped_UseTransportRangeModifiers {}
 		, OpenTopped_CheckTransportDisableWeapons {}
+		, OpenTopped_TransferPassengerStopCommand {}
 		, OpenTopped_DecloakToFire {}
 		, OpenTopped_FireWhileMoving {}
 		, OpenTopped_FireWhileMoving_BasedOnDestination {}

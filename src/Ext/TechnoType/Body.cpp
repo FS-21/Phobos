@@ -913,6 +913,7 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->OpenTopped_ShareTransportTarget.Read(exINI, pSection, "OpenTopped.ShareTransportTarget");
 	this->OpenTopped_UseTransportRangeModifiers.Read(exINI, pSection, "OpenTopped.UseTransportRangeModifiers");
 	this->OpenTopped_CheckTransportDisableWeapons.Read(exINI, pSection, "OpenTopped.CheckTransportDisableWeapons");
+	this->OpenTopped_TransferPassengerStopCommand.Read(exINI, pSection, "OpenTopped.TransferPassengerStopCommand");
 	this->OpenTopped_DecloakToFire.Read(exINI, pSection, "OpenTopped.DecloakToFire");
 	this->OpenTopped_FireWhileMoving.Read(exINI, pSection, "OpenTopped.FireWhileMoving");
 	this->OpenTopped_FireWhileMoving_BasedOnDestination.Read(exINI, pSection, "OpenTopped.FireWhileMoving.BasedOnDestination");
@@ -2169,6 +2170,7 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->OpenTopped_ShareTransportTarget)
 		.Process(this->OpenTopped_UseTransportRangeModifiers)
 		.Process(this->OpenTopped_CheckTransportDisableWeapons)
+		.Process(this->OpenTopped_TransferPassengerStopCommand)
 		.Process(this->OpenTopped_DecloakToFire)
 		.Process(this->OpenTopped_FireWhileMoving)
 		.Process(this->OpenTopped_FireWhileMoving_BasedOnDestination)

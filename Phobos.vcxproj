@@ -176,6 +176,7 @@
     <!-- src\Ext\Techno -->
     <ClCompile Include="src\Ext\Techno\Body.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.Internal.cpp" />
+    <ClCompile Include="src\Ext\Techno\Body.StopEvent.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.Update.cpp" />
     <ClCompile Include="src\Ext\Techno\Body.Visuals.cpp" />
     <ClCompile Include="src\Ext\Techno\Hooks.Airstrike.cpp" />

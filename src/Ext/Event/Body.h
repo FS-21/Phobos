@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <stdint.h>
 #include <vector>
+#include <TechnoClass.h>
+#include <FootClass.h>
 
 enum class EventTypeExt : uint8_t
 {
@@ -17,9 +19,10 @@ enum class EventTypeExt : uint8_t
 	ApproachObject = 0x40,
 	TogglePlayerAutoRepair = 0x41,
 	AILearningSync = 0x42,
+	SyncPassengersTar = 0x4B,
 
 	FIRST = ApproachObject,
-	LAST = AILearningSync
+	LAST = SyncPassengersTar
 };
 
 #pragma pack(push, 1)
@@ -34,6 +37,10 @@ public:
 	{
 		char DataBuffer[104];
 
+		struct SyncPassengersTar
+		{
+			DWORD TechnoUniqueID;
+		} SyncPassengersTar;
 		struct APPROACHOBJECT
 		{
 			TargetClass Whom;

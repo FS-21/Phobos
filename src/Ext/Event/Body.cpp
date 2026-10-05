@@ -1,5 +1,6 @@
 #include "Body.h"
 
+#include <Ext/Techno/Body.h>
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
 #include <AITriggerTypeClass.h>
@@ -24,6 +25,9 @@ void EventExt::RespondEvent()
 		break;
 	case EventTypeExt::AILearningSync:
 		this->RespondToAILearningSync();
+		break;
+	case EventTypeExt::SyncPassengersTar:
+		TechnoExt::HandleStopPassengersTar(this);
 		break;
 	default:
 		break;
@@ -98,6 +102,8 @@ size_t EventExt::GetDataSize(EventTypeExt type)
 		return sizeof(EventExt::TogglePlayerAutoRepair);
 	case EventTypeExt::AILearningSync:
 		return sizeof(EventExt::AILearningSync);
+	case EventTypeExt::SyncPassengersTar:
+		return sizeof(EventExt::SyncPassengersTar);
 	default:
 		break;
 	}
