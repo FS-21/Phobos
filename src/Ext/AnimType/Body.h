@@ -49,6 +49,7 @@ public:
 	Valueable<WeaponTypeClass*> Weapon;
 	Valueable<int> Damage_Delay;
 	Nullable<bool> Damage_DealtByInvoker;
+	Valueable<bool> Damage_DealtByAnimOwner;
 	Valueable<bool> Damage_ApplyOncePerLoop;
 	Nullable<bool> Damage_ApplyFirepowerMult;
 	Valueable<bool> ExplodeOnWater;
@@ -101,6 +102,7 @@ public:
 		, Weapon {}
 		, Damage_Delay { 0 }
 		, Damage_DealtByInvoker {}
+		, Damage_DealtByAnimOwner { false }
 		, Damage_ApplyOncePerLoop { false }
 		, Damage_ApplyFirepowerMult {}
 		, ExplodeOnWater { false }
