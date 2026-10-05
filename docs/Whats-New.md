@@ -2063,6 +2063,7 @@ HideShakeEffects=false           ; boolean
 - [Kick out ejectable passengers](Fixed-or-Improved-Logics.md#kick-out-ejectable-passengers) (by FS-21)
 - [Universal deploy from any techno into any techno](New-or-Enhanced-Logics.md#universal-deploy-from-any-techno-into-any-techno) (by FS-21)
 - [There are no technos of the specified houses list](AI-Scripting-and-Mapping.md#603-there-are-no-technos-of-the-specified-houses-list) (by FS-21)
+- New Map Events in the 19000 range that are copies of the original actions but with ID entries instead of indexes (by FS-21)
 - [Customize ivan bomb visibility](Fixed-or-Improved-Logics.md#customize-ivan-bomb-visibility) (by NetsuNegi)
 - [Customize whether mind-controlled `Insignificant` technos can be auto-targeted](Fixed-or-Improved-Logics.md#customize-whether-mind-controlled-insignificant-technos-can-be-auto-targeted) (by Noble_Fish)
 - [Mission selection screen](User-Interface.md#mission-selection-screen) (by FS-21)

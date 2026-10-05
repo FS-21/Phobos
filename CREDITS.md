@@ -182,6 +182,7 @@ This page lists all the individual contributions to the project by their author.
   - `EMPulseCannon.InaccurateRadius` and `EMPulse.Burst` for `Type=EMPulse` superweapons
   - Web logic against infantry
   - Allow cyborg legs to be repaired when they enter into transports or structures
+  - New Map Events in the 19000 range that are copies of the original events but with ID entries instead of indexes
   - Restore the ScriptType action#24 `Play speech` from Tiberian Sun
   - Modify ammo on impact
   - New AI teams selector
