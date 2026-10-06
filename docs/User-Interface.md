@@ -347,7 +347,7 @@ PrioritySelectionFiltering=true  ; boolean
   | `TXT_OBSERVER_CARD_TEAM` | `Team: ` |
   | `TXT_OBSERVER_CARD_TASKFORCE` | `Taskforce: ` |
   | `TXT_OBSERVER_CARD_SCRIPT` | `Script: ` |
-  | `TXT_OBSERVER_CARD_SCRIPT_DATA` | `Script Data: Line ` |
+  | `TXT_OBSERVER_CARD_SCRIPT_LINE` | `Script Line: ` (falls back to `TXT_OBSERVER_CARD_SCRIPT_DATA`) |
 
 ### Placement preview
 
