@@ -3490,6 +3490,153 @@ static bool DrawImage(
 	return painted;
 }
 
+static bool DrawScaledShapePreview(
+	DSurface* pDstSurface,
+	const RectangleStruct& destRect,
+	SHPStruct* pImage,
+	int nImageFrame,
+	ConvertClass* pPalette,
+	BlitterFlags blitFlags)
+{
+	if (!pDstSurface || !pImage || nImageFrame < 0 || nImageFrame >= static_cast<int>(pImage->Frames))
+		return false;
+
+	const int imgW = static_cast<int>(pImage->Width);
+	const int imgH = static_cast<int>(pImage->Height);
+	if (imgW <= 0 || imgH <= 0)
+		return false;
+
+	// Maintain a persistent offscreen BSurface for rendering building previews
+	const int surfW = std::clamp(std::max(256, imgW * 2), 256, 512);
+	const int surfH = std::clamp(std::max(256, imgH * 2), 256, 512);
+
+	static std::unique_ptr<BSurface> s_pTempSurface;
+	if (!s_pTempSurface || s_pTempSurface->Width < surfW || s_pTempSurface->Height < surfH)
+	{
+		s_pTempSurface = std::make_unique<BSurface>(surfW, surfH);
+	}
+
+	// Fast clear of surface buffer
+	std::memset(s_pTempSurface->Buffer.Buffer, 0, s_pTempSurface->Width * s_pTempSurface->Height * sizeof(WORD));
+
+	Point2D centerPt = { s_pTempSurface->Width / 2, s_pTempSurface->Height / 2 };
+	RectangleStruct tempBounds = { 0, 0, s_pTempSurface->Width, s_pTempSurface->Height };
+
+	CC_Draw_Shape(
+		s_pTempSurface.get(),
+		pPalette,
+		pImage,
+		nImageFrame,
+		&centerPt,
+		&tempBounds,
+		blitFlags,
+		0,
+		0,
+		ZGradient::Ground,
+		1000,
+		0,
+		nullptr,
+		0,
+		0,
+		0
+	);
+
+	// Find non-zero bounding box around drawn center
+	const WORD* pSrcBuf = reinterpret_cast<const WORD*>(s_pTempSurface->Buffer.Buffer);
+	const int tWidth = s_pTempSurface->Width;
+	const int tHeight = s_pTempSurface->Height;
+
+	const int searchMinX = std::max(0, centerPt.X - imgW);
+	const int searchMaxX = std::min(tWidth - 1, centerPt.X + imgW);
+	const int searchMinY = std::max(0, centerPt.Y - imgH);
+	const int searchMaxY = std::min(tHeight - 1, centerPt.Y + imgH);
+
+	int minX = tWidth, maxX = -1;
+	int minY = tHeight, maxY = -1;
+
+	for (int y = searchMinY; y <= searchMaxY; ++y)
+	{
+		const WORD* pRow = pSrcBuf + y * tWidth;
+		for (int x = searchMinX; x <= searchMaxX; ++x)
+		{
+			if (pRow[x] != 0)
+			{
+				if (x < minX) minX = x;
+				if (x > maxX) maxX = x;
+				if (y < minY) minY = y;
+				if (y > maxY) maxY = y;
+			}
+		}
+	}
+
+	if (minX > maxX || minY > maxY)
+		return false;
+
+	const int spriteW = maxX - minX + 1;
+	const int spriteH = maxY - minY + 1;
+	const int maxW = std::max(4, destRect.Width - 4);
+	const int maxH = std::max(4, destRect.Height - 4);
+
+	const float scaleX = static_cast<float>(maxW) / static_cast<float>(spriteW);
+	const float scaleY = static_cast<float>(maxH) / static_cast<float>(spriteH);
+	float scale = std::min(scaleX, scaleY);
+	if (scale > 1.0f)
+		scale = 1.0f;
+
+	const int dstW = std::clamp(static_cast<int>(spriteW * scale), 1, maxW);
+	const int dstH = std::clamp(static_cast<int>(spriteH * scale), 1, maxH);
+
+	const int dstX = destRect.X + (destRect.Width - dstW) / 2;
+	const int dstY = destRect.Y + (destRect.Height - dstH) / 2;
+
+	// Draw subtle dark translucent background inside the cameo slot so the preview stands out
+	ColorStruct slotBgColor { 15, 18, 24 };
+	pDstSurface->FillRectTrans(const_cast<RectangleStruct*>(&destRect), &slotBgColor, 55);
+
+	WORD* pDstBase = static_cast<WORD*>(pDstSurface->Lock(0, 0));
+	if (pDstBase)
+	{
+		const int dstPitch = pDstSurface->GetPitch();
+		BYTE* pDstBytes = reinterpret_cast<BYTE*>(pDstBase);
+
+		for (int dy = 0; dy < dstH; ++dy)
+		{
+			const int curY = dstY + dy;
+			if (curY < destRect.Y || curY >= destRect.Y + destRect.Height)
+				continue;
+
+			const int sy = minY + (dy * spriteH) / dstH;
+			if (sy < 0 || sy >= tHeight)
+				continue;
+
+			WORD* pDstRow = reinterpret_cast<WORD*>(pDstBytes + curY * dstPitch) + dstX;
+			const WORD* pSrcRow = pSrcBuf + sy * tWidth;
+
+			for (int dx = 0; dx < dstW; ++dx)
+			{
+				const int curX = dstX + dx;
+				if (curX < destRect.X || curX >= destRect.X + destRect.Width)
+					continue;
+
+				const int sx = minX + (dx * spriteW) / dstW;
+				if (sx < 0 || sx >= tWidth)
+					continue;
+
+				const WORD px = pSrcRow[sx];
+				if (px != 0)
+				{
+					pDstRow[dx] = px;
+				}
+			}
+		}
+
+		pDstSurface->Unlock();
+	}
+
+	pDstSurface->DrawRect(const_cast<RectangleStruct*>(&destRect), Drawing::RGB_To_Int(70, 75, 85));
+	return true;
+}
+
 void ObserverUIClass::DrawCameoItem(DSurface* pSurface, const ObserverCameoItem& item, bool isHovered, const RectangleStruct& clipRect, ColorStruct playerColor)
 {
 	if (!pSurface)
@@ -3719,33 +3866,14 @@ void ObserverUIClass::DrawCameoItem(DSurface* pSurface, const ObserverCameoItem&
 			// PlacementPreview blit flags: Centered | Nonzero | MultiPass
 			const BlitterFlags blitFlags = BlitterFlags::Centered | BlitterFlags::Nonzero | BlitterFlags::MultiPass;
 
-			Point2D point = { drawRect.X + drawRect.Width / 2, drawRect.Y + drawRect.Height / 2 };
-			RectangleStruct surfaceRect = pSurface->GetRect();
-
-			CC_Draw_Shape(
+			painted = DrawScaledShapePreview(
 				pSurface,
-				pPalette,
+				drawRect,
 				pImage,
 				nImageFrame,
-				&point,
-				&surfaceRect,
-				blitFlags,
-				0,
-				0,
-				ZGradient::Ground,
-				1000,
-				0,
-				nullptr,
-				0,
-				0,
-				0
+				pPalette,
+				blitFlags
 			);
-
-			// Draw subtle outline around cameo slot so the slot boundary is clear even with transparent background
-			if (!isHovered)
-				pSurface->DrawRect(const_cast<RectangleStruct*>(&drawRect), Drawing::RGB_To_Int(70, 70, 80));
-
-			painted = true;
 		}
 	}
 
