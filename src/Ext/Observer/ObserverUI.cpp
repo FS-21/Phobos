@@ -21,6 +21,9 @@
 #include <New/Entity/ShieldClass.h>
 #include <PCX.h>
 #include <MissionClass.h>
+#include <ScriptTypeClass.h>
+#include <TeamTypeClass.h>
+#include <HouseTypeClass.h>
 #include <Utilities/GeneralUtils.h>
 
 #include <algorithm>
@@ -2782,19 +2785,80 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					}
 
 					int lineNum = pTeam->CurrentScript->CurrentMission;
-					if (lineNum >= 0 && lineNum < pTeam->CurrentScript->Type->ActionsCount)
+					std::wstring scriptLineLabel = GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT_LINE", L"");
+					if (scriptLineLabel.empty())
+					{
+						scriptLineLabel = GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT_DATA", L"Script Line: ");
+						if (scriptLineLabel.rfind(L"Script Data: Line", 0) == 0)
+							scriptLineLabel = L"Script Line: ";
+					}
+					if (!scriptLineLabel.empty() && scriptLineLabel.back() != L' ')
+						scriptLineLabel += L' ';
+
+					if (lineNum >= 0 && lineNum < pTeam->CurrentScript->Type->ActionsCount && lineNum < 50)
 					{
 						int action = pTeam->CurrentScript->Type->ScriptActions[lineNum].Action;
 						int arg = pTeam->CurrentScript->Type->ScriptActions[lineNum].Argument;
 
 						std::wostringstream lineOss;
-						lineOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT_DATA", L"Script Data: Line ") << lineNum << L" (" << action << L", " << arg << L")";
+						lineOss << scriptLineLabel << lineNum << L" (" << action << L", " << arg;
+
+						// Support decoded target and secondary argument (scan mode) for structure actions
+						if (action == 46 || action == 47 || action == 56 || action == 58
+							|| action == 19046 || action == 19047 || action == 19056 || action == 19058)
+						{
+							int bldIdx = arg & 0xFFFF;
+							int modeOffset = arg & ~0xFFFF;
+							if (bldIdx >= 0 && bldIdx < BuildingTypeClass::Array.Count)
+							{
+								if (auto const pTargetBld = BuildingTypeClass::Array[bldIdx])
+								{
+									const wchar_t* modeStr = L"";
+									if (modeOffset == 0x00000)
+										modeStr = L", low";
+									else if (modeOffset == 0x10000)
+										modeStr = L", high";
+									else if (modeOffset == 0x20000)
+										modeStr = L", near";
+									else if (modeOffset == 0x30000)
+										modeStr = L", far";
+
+									lineOss << L" [" << formatIdName(pTargetBld) << modeStr << L"]";
+								}
+							}
+						}
+						else if (action == 17 || action == 19017)
+						{
+							if (arg >= 0 && arg < ScriptTypeClass::Array.Count)
+							{
+								if (auto const pNextScript = ScriptTypeClass::Array[arg])
+									lineOss << L" [" << formatIdName(pNextScript) << L"]";
+							}
+						}
+						else if (action == 18 || action == 19018)
+						{
+							if (arg >= 0 && arg < TeamTypeClass::Array.Count)
+							{
+								if (auto const pNextTeam = TeamTypeClass::Array[arg])
+									lineOss << L" [" << formatIdName(pNextTeam) << L"]";
+							}
+						}
+						else if (action == 20 || action == 19020)
+						{
+							if (arg >= 0 && arg < HouseTypeClass::Array.Count)
+							{
+								if (auto const pHouseType = HouseTypeClass::Array[arg])
+									lineOss << L" [" << formatIdName(pHouseType) << L"]";
+							}
+						}
+
+						lineOss << L")";
 						addLine(lineOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 					}
 					else if (lineNum >= 0)
 					{
 						std::wostringstream lineOss;
-						lineOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT_DATA", L"Script Data: Line ") << lineNum;
+						lineOss << scriptLineLabel << lineNum;
 						addLine(lineOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 					}
 				}
