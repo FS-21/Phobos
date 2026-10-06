@@ -3651,26 +3651,146 @@ void ObserverUIClass::DrawCameoItem(DSurface* pSurface, const ObserverCameoItem&
 		pPCXSurface = nullptr;
 	}
 
-	if (!pFileSHP && !pPCXSurface)
-		pFileSHP = FileSystem::LoadSHPFile("XXICON.SHP");
-	if (!pFileSHP && !pPCXSurface)
-		pFileSHP = FileSystem::LoadSHPFile("xxicon.shp");
-	if (!pFileSHP && !pPCXSurface)
-		pFileSHP = FileSystem::LoadSHPFile("XXICON");
-	if (!pFileSHP && !pPCXSurface)
-		pFileSHP = FileSystem::LoadSHPFile("xxicon");
+	bool painted = false;
 
-	// Draw image using DrawImage helper (exact DropshipLoadout approach)
-	bool painted = DrawImage(
-		pSurface,
-		drawRect,
-		pPCXSurface,
-		pFileSHP,
-		FileSystem::CAMEO_PAL,
-		0,
-		-2,
-		BlitterFlags::None
-	);
+	if (pPCXSurface || pFileSHP)
+	{
+		painted = DrawImage(
+			pSurface,
+			drawRect,
+			pPCXSurface,
+			pFileSHP,
+			FileSystem::CAMEO_PAL,
+			0,
+			-2,
+			BlitterFlags::None
+		);
+	}
+	else if (item.pType)
+	{
+		// Fallback: Generate sprite preview for structures (or technos) lacking a cameo
+		SHPStruct* pPreviewSHP = nullptr;
+		int previewFrame = 0;
+
+		if (auto const pBldType = specific_cast<BuildingTypeClass*>(item.pType))
+		{
+			auto const pTypeExt = BuildingTypeExt::TryFetch(pBldType);
+			pPreviewSHP = pTypeExt ? pTypeExt->PlacementPreview_Shape.GetSHP() : nullptr;
+
+			if (!pPreviewSHP)
+			{
+				pPreviewSHP = pBldType->LoadBuildup();
+				if (pPreviewSHP && pPreviewSHP->Frames > 0)
+				{
+					previewFrame = (pPreviewSHP->Frames / 2) - 1;
+					if (previewFrame < 0)
+						previewFrame = 0;
+				}
+				else
+				{
+					pPreviewSHP = pBldType->GetImage();
+					previewFrame = 0;
+				}
+			}
+			else
+			{
+				previewFrame = std::clamp(pTypeExt->PlacementPreview_ShapeFrame.Get(0), 0, static_cast<int>(pPreviewSHP->Frames) - 1);
+			}
+		}
+		else
+		{
+			pPreviewSHP = item.pType->GetImage();
+			previewFrame = 0;
+		}
+
+		if (pPreviewSHP && pPreviewSHP->Frames > 0)
+		{
+			previewFrame = std::clamp(previewFrame, 0, static_cast<int>(pPreviewSHP->Frames) - 1);
+
+			// Resolve appropriate palette with player color remap
+			ConvertClass* pPreviewPalette = nullptr;
+			if (item.pOwner && item.pOwner->ColorSchemeIndex >= 0 && item.pOwner->ColorSchemeIndex < ColorScheme::Array.Count)
+			{
+				if (auto const pScheme = ColorScheme::Array[item.pOwner->ColorSchemeIndex])
+					pPreviewPalette = pScheme->LightConvert;
+			}
+
+			if (!pPreviewPalette && !item.Buildings.empty() && item.Buildings.front())
+				pPreviewPalette = item.Buildings.front()->GetDrawer();
+
+			if (!pPreviewPalette && !item.Technos.empty() && item.Technos.front())
+				pPreviewPalette = item.Technos.front()->GetDrawer();
+
+			if (!pPreviewPalette)
+				pPreviewPalette = FileSystem::UNITx_PAL ? FileSystem::UNITx_PAL : FileSystem::PALETTE_PAL;
+
+			// Center the frame inside the cameo slot (60x48)
+			RectangleStruct frameBounds = pPreviewSHP->GetFrameBounds(previewFrame);
+			int frameCenterX = (frameBounds.Width > 0 && frameBounds.Height > 0)
+				? (frameBounds.X + frameBounds.Width / 2)
+				: (pPreviewSHP->Width / 2);
+			int frameCenterY = (frameBounds.Width > 0 && frameBounds.Height > 0)
+				? (frameBounds.Y + frameBounds.Height / 2)
+				: (pPreviewSHP->Height / 2);
+
+			int slotCenterX = item.DisplayRect.X + item.DisplayRect.Width / 2;
+			int slotCenterY = item.DisplayRect.Y + item.DisplayRect.Height / 2;
+
+			Point2D location = { slotCenterX - frameCenterX, slotCenterY - frameCenterY };
+
+			// Transparent background: the translucent window/panel background acts as the backdrop
+			pSurface->DrawSHP(
+				pPreviewPalette,
+				pPreviewSHP,
+				previewFrame,
+				&location,
+				&drawRect,
+				BlitterFlags::Nonzero,
+				0,
+				-2,
+				ZGradient::Ground,
+				1000,
+				0,
+				nullptr,
+				0,
+				0,
+				0
+			);
+
+			// Draw subtle outline around cameo slot so the slot boundary is clear even with transparent background
+			if (!isHovered)
+				pSurface->DrawRect(const_cast<RectangleStruct*>(&drawRect), Drawing::RGB_To_Int(70, 70, 80));
+
+			painted = true;
+		}
+	}
+
+	if (!painted)
+	{
+		// Last resort: try XXICON.SHP placeholder
+		if (!pFileSHP)
+			pFileSHP = FileSystem::LoadSHPFile("XXICON.SHP");
+		if (!pFileSHP)
+			pFileSHP = FileSystem::LoadSHPFile("xxicon.shp");
+		if (!pFileSHP)
+			pFileSHP = FileSystem::LoadSHPFile("XXICON");
+		if (!pFileSHP)
+			pFileSHP = FileSystem::LoadSHPFile("xxicon");
+
+		if (pFileSHP)
+		{
+			painted = DrawImage(
+				pSurface,
+				drawRect,
+				nullptr,
+				pFileSHP,
+				FileSystem::CAMEO_PAL,
+				0,
+				-2,
+				BlitterFlags::None
+			);
+		}
+	}
 
 	if (!painted)
 	{

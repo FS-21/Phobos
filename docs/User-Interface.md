@@ -307,6 +307,7 @@ PrioritySelectionFiltering=true  ; boolean
 - Displays useful player information and game statistics in campaign and multiplayer.
 - When `DebugKeysEnabled=yes` under `[GlobalControls]` in `rulesmd.ini`, all houses with active objects on the map are listed across all game modes for developer inspection.
 - Supports floating inspection cards to display detailed object and AI debug information.
+- Structures lacking a cameo icon automatically display a centered sprite preview with player faction remap and a transparent background.
 - All interface texts can be localized via `.csf` string table keys:
 
   | CSF String Key | Default Text |
