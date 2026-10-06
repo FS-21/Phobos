@@ -3506,24 +3506,27 @@ static bool DrawScaledShapePreview(
 	if (imgW <= 0 || imgH <= 0)
 		return false;
 
-	// Maintain a persistent offscreen BSurface for rendering building previews
-	const int surfW = std::clamp(std::max(256, imgW * 2), 256, 512);
-	const int surfH = std::clamp(std::max(256, imgH * 2), 256, 512);
+	if (imgW > 512 || imgH > 512)
+		return false;
 
-	static std::unique_ptr<BSurface> s_pTempSurface;
-	if (!s_pTempSurface || s_pTempSurface->Width < surfW || s_pTempSurface->Height < surfH)
+	// Maintain a single persistent offscreen BSurface (512x512) allocated via GameCreate to match game heap
+	static BSurface* s_pTempSurface = nullptr;
+	if (!s_pTempSurface)
 	{
-		s_pTempSurface = std::make_unique<BSurface>(surfW, surfH);
+		s_pTempSurface = GameCreate<BSurface>(512, 512);
 	}
 
-	// Fast clear of surface buffer
-	std::memset(s_pTempSurface->Buffer.Buffer, 0, s_pTempSurface->Width * s_pTempSurface->Height * sizeof(WORD));
+	if (!s_pTempSurface || !s_pTempSurface->Buffer.Buffer)
+		return false;
 
-	Point2D centerPt = { s_pTempSurface->Width / 2, s_pTempSurface->Height / 2 };
-	RectangleStruct tempBounds = { 0, 0, s_pTempSurface->Width, s_pTempSurface->Height };
+	// Fast clear of surface buffer
+	std::memset(s_pTempSurface->Buffer.Buffer, 0, 512 * 512 * sizeof(WORD));
+
+	Point2D centerPt = { 256, 256 };
+	RectangleStruct tempBounds = { 0, 0, 512, 512 };
 
 	CC_Draw_Shape(
-		s_pTempSurface.get(),
+		s_pTempSurface,
 		pPalette,
 		pImage,
 		nImageFrame,
@@ -3543,8 +3546,8 @@ static bool DrawScaledShapePreview(
 
 	// Find non-zero bounding box around drawn center
 	const WORD* pSrcBuf = reinterpret_cast<const WORD*>(s_pTempSurface->Buffer.Buffer);
-	const int tWidth = s_pTempSurface->Width;
-	const int tHeight = s_pTempSurface->Height;
+	const int tWidth = 512;
+	const int tHeight = 512;
 
 	const int searchMinX = std::max(0, centerPt.X - imgW);
 	const int searchMaxX = std::min(tWidth - 1, centerPt.X + imgW);
@@ -3598,11 +3601,13 @@ static bool DrawScaledShapePreview(
 	{
 		const int dstPitch = pDstSurface->GetPitch();
 		BYTE* pDstBytes = reinterpret_cast<BYTE*>(pDstBase);
+		const int surfWidth = pDstSurface->GetWidth();
+		const int surfHeight = pDstSurface->GetHeight();
 
 		for (int dy = 0; dy < dstH; ++dy)
 		{
 			const int curY = dstY + dy;
-			if (curY < destRect.Y || curY >= destRect.Y + destRect.Height)
+			if (curY < 0 || curY >= surfHeight || curY < destRect.Y || curY >= destRect.Y + destRect.Height)
 				continue;
 
 			const int sy = minY + (dy * spriteH) / dstH;
@@ -3615,7 +3620,7 @@ static bool DrawScaledShapePreview(
 			for (int dx = 0; dx < dstW; ++dx)
 			{
 				const int curX = dstX + dx;
-				if (curX < destRect.X || curX >= destRect.X + destRect.Width)
+				if (curX < 0 || curX >= surfWidth || curX < destRect.X || curX >= destRect.X + destRect.Width)
 					continue;
 
 				const int sx = minX + (dx * spriteW) / dstW;
