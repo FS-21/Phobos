@@ -452,33 +452,25 @@ void ScriptExt::WaitUntilFullAmmoAction(TeamClass* pTeam)
 
 			if (pUnitType->Ammo > 0 && pUnit->Ammo < pUnitType->Ammo)
 			{
-				// If an aircraft object have AirportBound it must be evaluated
+				// For AirportBound aircraft, waiting for ammo only applies once they have landed at their dock
 				if (auto const pAircraft = abstract_cast<AircraftClass*, true>(pUnit))
 				{
 					if (pAircraft->Type->AirportBound)
 					{
-						// Reset last target, at long term battles this prevented the aircraft to pick a new target (rare vanilla YR bug)
-						pUnit->SetTarget(nullptr);
-						pUnit->LastTarget = nullptr;
-
-						// Fix YR bug (when returns from the last attack the aircraft switch in loop between Mission::Enter & Mission::Guard, making it impossible to land in the dock)
-						if (pUnit->IsInAir() && pUnit->CurrentMission != Mission::Enter)
+						if (!pAircraft->IsInAir())
 						{
-							//pUnit->QueueMission(Mission::Enter, true);
-							pAircraft->IsLocked = false;
-							pAircraft->MissionStatus = (int)AirAttackStatus::ReturnToBase;
-
-							if (pAircraft->MegaMissionIsAttackMove())
-								pAircraft->ClearMegaMissionData();
-
-							pAircraft->EnterIdleMode(false, true);
+							pUnit->SetTarget(nullptr);
+							pUnit->LastTarget = nullptr;
+							return;
 						}
 
-						return;
+						continue;
 					}
 				}
 				else if (pUnitType->Reload != 0) // Don't skip units that can reload themselves
+				{
 					return;
+				}
 			}
 		}
 	}
