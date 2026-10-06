@@ -2785,13 +2785,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					}
 
 					int lineNum = pTeam->CurrentScript->CurrentMission;
-					std::wstring scriptLineLabel = GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT_LINE", L"");
-					if (scriptLineLabel.empty())
-					{
-						scriptLineLabel = GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT_DATA", L"Script Line: ");
-						if (scriptLineLabel.rfind(L"Script Data: Line", 0) == 0)
-							scriptLineLabel = L"Script Line: ";
-					}
+					std::wstring scriptLineLabel = GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_SCRIPT_DATA", L"Script Line: ");
 					if (!scriptLineLabel.empty() && scriptLineLabel.back() != L' ')
 						scriptLineLabel += L' ';
 
@@ -3668,86 +3662,76 @@ void ObserverUIClass::DrawCameoItem(DSurface* pSurface, const ObserverCameoItem&
 	}
 	else if (item.pType)
 	{
-		// Fallback: Generate sprite preview for structures (or technos) lacking a cameo
-		SHPStruct* pPreviewSHP = nullptr;
-		int previewFrame = 0;
+		// Fallback: Generate sprite preview using exact PlacementPreview logic
+		SHPStruct* pImage = nullptr;
+		int nImageFrame = 0;
+		auto const pBldType = specific_cast<BuildingTypeClass*>(item.pType);
+		auto const pTypeExt = BuildingTypeExt::TryFetch(pBldType);
 
-		if (auto const pBldType = specific_cast<BuildingTypeClass*>(item.pType))
+		if (pBldType)
 		{
-			auto const pTypeExt = BuildingTypeExt::TryFetch(pBldType);
-			pPreviewSHP = pTypeExt ? pTypeExt->PlacementPreview_Shape.GetSHP() : nullptr;
-
-			if (!pPreviewSHP)
+			pImage = pTypeExt ? pTypeExt->PlacementPreview_Shape.GetSHP() : nullptr;
+			if (!pImage)
 			{
-				pPreviewSHP = pBldType->LoadBuildup();
-				if (pPreviewSHP && pPreviewSHP->Frames > 0)
-				{
-					previewFrame = (pPreviewSHP->Frames / 2) - 1;
-					if (previewFrame < 0)
-						previewFrame = 0;
-				}
+				pImage = pBldType->LoadBuildup();
+				if (pImage && pImage->Frames > 0)
+					nImageFrame = (pImage->Frames / 2) - 1;
 				else
-				{
-					pPreviewSHP = pBldType->GetImage();
-					previewFrame = 0;
-				}
+					pImage = pBldType->GetImage();
 			}
-			else
+
+			if (pImage && pImage->Frames > 0)
 			{
-				previewFrame = std::clamp(pTypeExt->PlacementPreview_ShapeFrame.Get(0), 0, static_cast<int>(pPreviewSHP->Frames) - 1);
+				if (pTypeExt)
+					nImageFrame = std::clamp(pTypeExt->PlacementPreview_ShapeFrame.Get(nImageFrame), 0, static_cast<int>(pImage->Frames) - 1);
+				else
+					nImageFrame = std::clamp(nImageFrame, 0, static_cast<int>(pImage->Frames) - 1);
 			}
 		}
 		else
 		{
-			pPreviewSHP = item.pType->GetImage();
-			previewFrame = 0;
+			pImage = item.pType->GetImage();
+			nImageFrame = 0;
 		}
 
-		if (pPreviewSHP && pPreviewSHP->Frames > 0)
+		if (pImage && pImage->Frames > 0)
 		{
-			previewFrame = std::clamp(previewFrame, 0, static_cast<int>(pPreviewSHP->Frames) - 1);
+			// Resolve palette using exact PlacementPreview remap logic
+			BuildingClass* pBuilding = !item.Buildings.empty() ? item.Buildings.front() : nullptr;
+			ConvertClass* pPalette = nullptr;
 
-			// Resolve appropriate palette with player color remap
-			ConvertClass* pPreviewPalette = nullptr;
-			if (item.pOwner && item.pOwner->ColorSchemeIndex >= 0 && item.pOwner->ColorSchemeIndex < ColorScheme::Array.Count)
+			if (pTypeExt && pTypeExt->PlacementPreview_Remap.Get())
 			{
-				if (auto const pScheme = ColorScheme::Array[item.pOwner->ColorSchemeIndex])
-					pPreviewPalette = pScheme->LightConvert;
+				if (pBuilding)
+					pPalette = pBuilding->GetDrawer();
+				else if (item.pOwner && item.pOwner->ColorSchemeIndex >= 0 && item.pOwner->ColorSchemeIndex < ColorScheme::Array.Count)
+				{
+					if (auto const pScheme = ColorScheme::Array[item.pOwner->ColorSchemeIndex])
+						pPalette = pScheme->LightConvert;
+				}
 			}
 
-			if (!pPreviewPalette && !item.Buildings.empty() && item.Buildings.front())
-				pPreviewPalette = item.Buildings.front()->GetDrawer();
+			if (!pPalette)
+				pPalette = pTypeExt ? pTypeExt->PlacementPreview_Palette.GetOrDefaultConvert(FileSystem::UNITx_PAL) : FileSystem::UNITx_PAL;
+			if (!pPalette)
+				pPalette = FileSystem::PALETTE_PAL;
 
-			if (!pPreviewPalette && !item.Technos.empty() && item.Technos.front())
-				pPreviewPalette = item.Technos.front()->GetDrawer();
+			// PlacementPreview blit flags: Centered | Nonzero | MultiPass
+			const BlitterFlags blitFlags = BlitterFlags::Centered | BlitterFlags::Nonzero | BlitterFlags::MultiPass;
 
-			if (!pPreviewPalette)
-				pPreviewPalette = FileSystem::UNITx_PAL ? FileSystem::UNITx_PAL : FileSystem::PALETTE_PAL;
+			Point2D point = { drawRect.X + drawRect.Width / 2, drawRect.Y + drawRect.Height / 2 };
+			RectangleStruct surfaceRect = pSurface->GetRect();
 
-			// Center the frame inside the cameo slot (60x48)
-			RectangleStruct frameBounds = pPreviewSHP->GetFrameBounds(previewFrame);
-			int frameCenterX = (frameBounds.Width > 0 && frameBounds.Height > 0)
-				? (frameBounds.X + frameBounds.Width / 2)
-				: (pPreviewSHP->Width / 2);
-			int frameCenterY = (frameBounds.Width > 0 && frameBounds.Height > 0)
-				? (frameBounds.Y + frameBounds.Height / 2)
-				: (pPreviewSHP->Height / 2);
-
-			int slotCenterX = item.DisplayRect.X + item.DisplayRect.Width / 2;
-			int slotCenterY = item.DisplayRect.Y + item.DisplayRect.Height / 2;
-
-			Point2D location = { slotCenterX - frameCenterX, slotCenterY - frameCenterY };
-
-			// Transparent background: the translucent window/panel background acts as the backdrop
-			pSurface->DrawSHP(
-				pPreviewPalette,
-				pPreviewSHP,
-				previewFrame,
-				&location,
-				&drawRect,
-				BlitterFlags::Nonzero,
+			CC_Draw_Shape(
+				pSurface,
+				pPalette,
+				pImage,
+				nImageFrame,
+				&point,
+				&surfaceRect,
+				blitFlags,
 				0,
-				-2,
+				0,
 				ZGradient::Ground,
 				1000,
 				0,
