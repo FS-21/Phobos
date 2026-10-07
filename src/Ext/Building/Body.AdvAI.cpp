@@ -2341,6 +2341,83 @@ bool BuildingExt::CanClearObstructingDefensesForPlacement(
 	return true;
 }
 
+CellStruct BuildingExt::Find_Best_Defense_Clearance_Placement_Cell(
+	BuildingClass* pBuilding,
+	std::vector<BuildingClass*>& outDefenses)
+{
+	outDefenses.clear();
+	if (pBuilding == nullptr || pBuilding->Owner == nullptr || pBuilding->Type == nullptr)
+		return CellStruct::Empty;
+
+	if (pBuilding->Type->IsBaseDefense || TechTreeTypeClass::TotalBuildDefense.contains(pBuilding->Type))
+		return CellStruct::Empty;
+
+	const int adjacency = pBuilding->Type->Adjacent;
+	PopulateAdjacencyAnchors(pBuilding->Owner, pBuilding->Type, false); // own anchors only
+
+	const RectangleStruct baseArea = Get_Base_Rect(
+		pBuilding->Owner,
+		adjacency,
+		pBuilding->Type->GetFoundationWidth(),
+		pBuilding->Type->GetFoundationHeight(true),
+		pBuilding->Type);
+
+	CellStruct bestCell = CellStruct::Empty;
+	std::vector<BuildingClass*> bestDefenses;
+	int bestScore = INT_MAX; // lower is better
+
+	const CellStruct baseCenter = pBuilding->Owner->Base_Center();
+
+	const int resCells = 2000;
+	const int areaSize = baseArea.Width * baseArea.Height;
+	const int maxResolution = std::max(1, pBuilding->Type->Adjacent);
+	const int resolution = std::min(maxResolution, 1 + (areaSize / resCells));
+
+	for (int y = baseArea.Y; y < baseArea.Y + baseArea.Height; y += resolution)
+	{
+		for (int x = baseArea.X; x < baseArea.X + baseArea.Width; x += resolution)
+		{
+			CellStruct cell = CellStruct(static_cast<short>(x), static_cast<short>(y));
+
+			if (!MapClass::Instance.CoordinatesLegal(cell))
+				continue;
+
+			if (!Should_Evaluate_Cell_For_Placement(cell, pBuilding, 0))
+				continue;
+
+			std::vector<BuildingClass*> candidateDefenses;
+			if (CanClearObstructingDefensesForPlacement(cell, pBuilding->Type, pBuilding->Owner, candidateDefenses))
+			{
+				if (pBuilding->Type->Factory == AbstractType::InfantryType ||
+					(pBuilding->Type->Factory == AbstractType::UnitType && !pBuilding->Type->Naval))
+				{
+					if (!GeneralUtils::AreZonesConnected(cell, baseCenter, MovementZone::Normal))
+						continue;
+				}
+
+				// Rating: heavily penalize the number of defenses destroyed (1 defense sold is much better than 2+)
+				// Secondary: proximity to base center
+				int score = static_cast<int>(candidateDefenses.size() * 1000) + static_cast<int>(cell.DistanceFrom(baseCenter));
+
+				if (score < bestScore)
+				{
+					bestScore = score;
+					bestCell = cell;
+					bestDefenses = std::move(candidateDefenses);
+				}
+			}
+		}
+	}
+
+	if (bestCell.X > 0 && bestCell.Y > 0 && !bestDefenses.empty())
+	{
+		outDefenses = std::move(bestDefenses);
+		return bestCell;
+	}
+
+	return CellStruct::Empty;
+}
+
 CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass* pOwner, BuildingTypeClass* pBuildingType, BuildingClass* pBuilding)
 {
 	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
@@ -3376,6 +3453,113 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 {
 	const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
 
+	// Step 0: Check existing clearance reservation
+	if (houseExt != nullptr && houseExt->PendingClearanceType != nullptr)
+	{
+		if (houseExt->PendingClearanceCell.X <= 0 || houseExt->PendingClearanceCell.Y <= 0 ||
+			!MapClass::Instance.CoordinatesLegal(houseExt->PendingClearanceCell))
+		{
+			houseExt->ClearClearanceReservation();
+		}
+		else
+		{
+			bool foundationMatches = false;
+
+			if (pBuilding->Type == houseExt->PendingClearanceType)
+			{
+				foundationMatches = true;
+			}
+			else if (pBuilding->Type->GetFoundationWidth() == houseExt->PendingClearanceFoundationWidth &&
+					 pBuilding->Type->GetFoundationHeight(true) == houseExt->PendingClearanceFoundationHeight &&
+					 pBuilding->Type->Foundation == houseExt->PendingClearanceFoundation)
+			{
+				// Compatible mutation (ConvertTo / factory upgrade): adapt reservation to new type
+				Debug::Log("AdvAI Placement: House %d clearance reservation type updated from %s to %s (matching foundation %dx%d).\n",
+					pBuilding->Owner->ArrayIndex, houseExt->PendingClearanceType->ID, pBuilding->Type->ID,
+					houseExt->PendingClearanceFoundationWidth, houseExt->PendingClearanceFoundationHeight);
+				houseExt->PendingClearanceType = pBuilding->Type;
+				foundationMatches = true;
+			}
+
+			if (!foundationMatches)
+			{
+				// Mismatch in dimensions/foundation: reset reservation and start fresh search
+				Debug::Log("AdvAI Placement: House %d clearance reservation invalidated for %s (foundation mismatch with %s). Resetting reservation.\n",
+					pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, houseExt->PendingClearanceType->ID);
+				houseExt->ClearClearanceReservation();
+			}
+			else
+			{
+				// Check if we are still waiting for the 5-second interval
+				if (Unsorted::CurrentFrame < houseExt->NextClearanceCheckFrame)
+				{
+					return 1; // Keep waiting in factory, do not cancel
+				}
+
+				// Check if the footprint at PendingClearanceCell is now clear of obstructing defenses
+				bool stillObstructed = false;
+				const int width = pBuilding->Type->GetFoundationWidth();
+				const int height = pBuilding->Type->GetFoundationHeight(true);
+
+				for (int dx = 0; dx < width && !stillObstructed; ++dx)
+				{
+					for (int dy = 0; dy < height && !stillObstructed; ++dy)
+					{
+						CellStruct checkCell = houseExt->PendingClearanceCell + CellStruct(static_cast<short>(dx), static_cast<short>(dy));
+						CellClass* pCell = MapClass::Instance.TryGetCellAt(checkCell);
+						if (pCell != nullptr)
+						{
+							BuildingClass* pOccBld = pCell->GetBuilding();
+							if (pOccBld != nullptr && pOccBld->Owner == pBuilding->Owner &&
+								(pOccBld->Type->IsBaseDefense ||
+								 TechTreeTypeClass::TotalBuildDefense.contains(pOccBld->Type) ||
+								 pOccBld->Type->GetWeapon(0u, false).WeaponType != nullptr ||
+								 pOccBld->Type->GetWeapon(1u, false).WeaponType != nullptr))
+							{
+								stillObstructed = true;
+							}
+						}
+					}
+				}
+
+				if (!stillObstructed)
+				{
+					const int placeResult = Try_Place(pBuilding, houseExt->PendingClearanceCell);
+					if (placeResult == 2)
+					{
+						Debug::Log("AdvAI Placement: House %d successfully placed %s at reserved clearance cell (%d,%d).\n",
+							pBuilding->Owner->ArrayIndex, pBuilding->Type->ID,
+							houseExt->PendingClearanceCell.X, houseExt->PendingClearanceCell.Y);
+						houseExt->ClearClearanceReservation();
+						houseExt->PlacementConsecutiveFailures[pBuilding->Type] = 0;
+						houseExt->PlacementFailedCooldowns.erase(pBuilding->Type);
+						return 2;
+					}
+				}
+
+				// Still obstructed or Try_Place failed this attempt: increment attempts
+				houseExt->ClearanceAttempts++;
+				if (houseExt->ClearanceAttempts < 3)
+				{
+					houseExt->NextClearanceCheckFrame = Unsorted::CurrentFrame + 75; // wait another 5 seconds (75 frames at 15 FPS)
+					Debug::Log("AdvAI Placement: House %d clearance attempt %d/3 for %s at (%d,%d) pending. Re-checking in 5s.\n",
+						pBuilding->Owner->ArrayIndex, houseExt->ClearanceAttempts, pBuilding->Type->ID,
+						houseExt->PendingClearanceCell.X, houseExt->PendingClearanceCell.Y);
+					return 1; // Keep waiting in factory
+				}
+				else
+				{
+					Debug::Log("AdvAI Placement: House %d clearance attempts exhausted for %s at (%d,%d). Resetting reservation.\n",
+						pBuilding->Owner->ArrayIndex, pBuilding->Type->ID,
+						houseExt->PendingClearanceCell.X, houseExt->PendingClearanceCell.Y);
+					houseExt->ClearClearanceReservation();
+					houseExt->LastClearanceFailedFrame = Unsorted::CurrentFrame;
+					// Fall through to normal search
+				}
+			}
+		}
+	}
+
 	CellStruct placementCell = CellStruct(0, 0);
 
 	// Case 1: Specific Allied Fallback Outpost structure targeting an ally
@@ -3490,6 +3674,43 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 	// If we couldn't find any place for the building, refund it and put on cooldown
 	if (placementCell.X <= 0 || placementCell.Y <= 0)
 	{
+		// Phase 3: Defense clearance check (only if base is completely congested and normal placement failed)
+		if (houseExt != nullptr && !isDefense && !TechTreeTypeClass::TotalBuildDefense.contains(pBuilding->Type))
+		{
+			if (Unsorted::CurrentFrame >= houseExt->LastClearanceFailedFrame + 300)
+			{
+				std::vector<BuildingClass*> defensesToSell;
+				CellStruct clearanceCell = Find_Best_Defense_Clearance_Placement_Cell(pBuilding, defensesToSell);
+				if (clearanceCell.X > 0 && clearanceCell.Y > 0 && !defensesToSell.empty())
+				{
+					for (auto const pDef : defensesToSell)
+					{
+						if (pDef != nullptr && pDef->IsAlive && !pDef->InLimbo)
+						{
+							Debug::Log("AdvAI Placement: House %d selling defense %s at (%d,%d) to clear space for %s at (%d,%d).\n",
+								pBuilding->Owner->ArrayIndex, pDef->Type->ID,
+								pDef->GetMapCoords().X, pDef->GetMapCoords().Y,
+								pBuilding->Type->ID, clearanceCell.X, clearanceCell.Y);
+							pDef->Sell(1);
+						}
+					}
+
+					// Reserve clearance tuple
+					houseExt->PendingClearanceCell = clearanceCell;
+					houseExt->PendingClearanceType = pBuilding->Type;
+					houseExt->PendingClearanceFoundationWidth = pBuilding->Type->GetFoundationWidth();
+					houseExt->PendingClearanceFoundationHeight = pBuilding->Type->GetFoundationHeight(true);
+					houseExt->PendingClearanceFoundation = pBuilding->Type->Foundation;
+					houseExt->ClearanceAttempts = 0;
+					houseExt->NextClearanceCheckFrame = Unsorted::CurrentFrame + 75; // 5 seconds wait (75 frames at 15 FPS)
+
+					Debug::Log("AdvAI Placement: House %d registered clearance reservation for %s at (%d,%d). Waiting 5s in factory.\n",
+						pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, clearanceCell.X, clearanceCell.Y);
+
+					return 1; // Keep building waiting in factory!
+				}
+			}
+		}
 
 		if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
 		{
@@ -3556,6 +3777,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		{
 			houseExt->PlacementConsecutiveFailures[pBuilding->Type] = 0;
 			houseExt->PlacementFailedCooldowns.erase(pBuilding->Type);
+			houseExt->ClearClearanceReservation();
 		}
 
 		if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
