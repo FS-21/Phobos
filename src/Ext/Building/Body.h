@@ -164,6 +164,7 @@ public:
 	static bool OverlapsTiberiumTreeZone(CellStruct cell, BuildingTypeClass* pType);
 	static int inline Modify_Rating_By_Terrain_Passability(CellStruct cell, BuildingClass* pBuilding, int originalValue);
 	static CellStruct Find_Best_Building_Placement_Cell(RectangleStruct baseArea, BuildingClass* pBuilding, int (*valueGenerator)(CellStruct, BuildingClass*), int adjacencyBonus = 0);
+	static CellStruct Find_Best_Inner_Base_Placement_Cell(BuildingClass* pBuilding, int (*valueGenerator)(CellStruct, BuildingClass*), int initialRadius = 25, int stepRadius = 5, int maxRadius = 0);
 	static int inline Modify_Rating_By_Allied_Building_Proximity(CellStruct cell, BuildingClass* pBuilding, int originalValue);
 	static int Refinery_Placement_Cell_Value(CellStruct cell, BuildingClass* pBuilding);
 	static CellStruct Get_Best_Refinery_Placement_Position(BuildingClass* pBuilding);
