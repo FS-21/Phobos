@@ -3961,14 +3961,12 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		}
 
 		// Probabilistic roll: 50% chance when paranoid (threat/attack) or 0% in calm state while teching up.
-		int rollChance = isParanoid ? 80 : 50;
-		if (needsTechOrRadar)
-		{
-			rollChance = isParanoid ? 50 : 0;
-		}
+		const int rollChance = needsTechOrRadar
+			? (isParanoid ? 50 : 0)
+			: (isParanoid ? 80 : 50);
 
-		bool shouldBuildDefenseThisCycle =
-			(ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance);
+		bool shouldBuildDefenseThisCycle = ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance;
+
 		if (houseExt->FrontlineThreatCoords.X > 0 &&
 			houseExt->FrontlineThreatActiveFrames > Unsorted::CurrentFrame &&
 			houseExt->FrontlineThreatNeedsDefenses > 0)
@@ -5982,10 +5980,7 @@ void HouseExt::AdvAI_Update_Primary_Factories(HouseClass* pHouse)
 			}
 
 			if (pBestFactory->Factory != nullptr)
-			{
-				pHouse->SetPrimaryFactory(pBestFactory->Factory, type, isNaval,
-										  BuildCat::DontCare);
-			}
+				pHouse->SetPrimaryFactory(pBestFactory->Factory, type, isNaval, BuildCat::DontCare);
 		}
 	};
 

@@ -2211,7 +2211,7 @@ bool BuildingExt::CanClearObstructingDefensesForPlacement(
 	std::vector<BuildingClass*>& outDefenses)
 {
 	outDefenses.clear();
-	if (!pBuildingType || !pOwner || pBuildingType->IsBaseDefense || TechTreeTypeClass::TotalBuildDefense.contains(pBuildingType))
+	if (!pBuildingType || !pOwner || pBuildingType->IsBaseDefense)
 		return false;
 
 	const bool isCustom = (static_cast<int>(pBuildingType->Foundation) == 0x7F);
@@ -2316,8 +2316,8 @@ bool BuildingExt::CanClearObstructingDefensesForPlacement(
 				if (pOtherBuilding->Owner != pOwner)
 					return false;
 
-				// Must strictly be an owned base defense
-				if (!pOtherBuilding->Type->IsBaseDefense && !TechTreeTypeClass::TotalBuildDefense.contains(pOtherBuilding->Type))
+				// Must strictly be an owned base defense (IsBaseDefense=yes)
+				if (!pOtherBuilding->Type->IsBaseDefense)
 					return false;
 
 				// Strict immunity: ToProtect=yes
@@ -2349,7 +2349,7 @@ CellStruct BuildingExt::Find_Best_Defense_Clearance_Placement_Cell(
 	if (pBuilding == nullptr || pBuilding->Owner == nullptr || pBuilding->Type == nullptr)
 		return CellStruct::Empty;
 
-	if (pBuilding->Type->IsBaseDefense || TechTreeTypeClass::TotalBuildDefense.contains(pBuilding->Type))
+	if (pBuilding->Type->IsBaseDefense)
 		return CellStruct::Empty;
 
 	const int adjacency = pBuilding->Type->Adjacent;
@@ -3510,11 +3510,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 						if (pCell != nullptr)
 						{
 							BuildingClass* pOccBld = pCell->GetBuilding();
-							if (pOccBld != nullptr && pOccBld->Owner == pBuilding->Owner &&
-								(pOccBld->Type->IsBaseDefense ||
-								 TechTreeTypeClass::TotalBuildDefense.contains(pOccBld->Type) ||
-								 pOccBld->Type->GetWeapon(0u, false).WeaponType != nullptr ||
-								 pOccBld->Type->GetWeapon(1u, false).WeaponType != nullptr))
+							if (pOccBld != nullptr && pOccBld->Owner == pBuilding->Owner && pOccBld->Type->IsBaseDefense)
 							{
 								stillObstructed = true;
 							}
@@ -3675,7 +3671,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 	if (placementCell.X <= 0 || placementCell.Y <= 0)
 	{
 		// Phase 3: Defense clearance check (only if base is completely congested and normal placement failed)
-		if (houseExt != nullptr && !isDefense && !TechTreeTypeClass::TotalBuildDefense.contains(pBuilding->Type))
+		if (houseExt != nullptr && !pBuilding->Type->IsBaseDefense)
 		{
 			if (Unsorted::CurrentFrame >= houseExt->LastClearanceFailedFrame + 300)
 			{
