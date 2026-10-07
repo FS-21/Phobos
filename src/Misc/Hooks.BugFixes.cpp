@@ -2846,21 +2846,65 @@ DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_SetLATime, 0x8)
 		pOwner->LATime = Unsorted::CurrentFrame;
 		pOwner->LAEnemy = pFromHouse->ArrayIndex;
 
-		auto const houseExt = HouseExt::ExtMap.Find(pOwner);
-		houseExt->LastAttackedBuildingCoords = pThis->GetMapCoords();
-		houseExt->LastAttackedFrame = Unsorted::CurrentFrame;
+		auto const houseExt = HouseExt::Fetch(pOwner);
+		if (houseExt)
+		{
+			houseExt->LastAttackedBuildingCoords = pThis->GetMapCoords();
+			houseExt->LastAttackedFrame = Unsorted::CurrentFrame;
 
-		if (pAttacker)
-		{
-			houseExt->LastAttackerCoords = pAttacker->GetMapCoords();
-			houseExt->LastAttackerType = pAttacker->GetTechnoType();
-			pThis->BaseIsAttacked(pAttacker);
+			ThreatCategory threat = ThreatCategory::None;
+			if (pAttacker)
+			{
+				houseExt->LastAttackerCoords = pAttacker->GetMapCoords();
+				houseExt->LastAttackerType = pAttacker->GetTechnoType();
+				pThis->BaseIsAttacked(pAttacker);
+
+				if (pAttacker->IsInAir() || pAttacker->WhatAmI() == AbstractType::Aircraft)
+					threat = ThreatCategory::Air;
+				else if (pAttacker->WhatAmI() == AbstractType::Infantry)
+					threat = ThreatCategory::Infantry;
+				else
+					threat = ThreatCategory::Vehicle;
+			}
+			else
+			{
+				houseExt->LastAttackerCoords = CellStruct(0, 0);
+				houseExt->LastAttackerType = nullptr;
+			}
+
+			// Register or update in LIFO queue
+			const CellStruct bldCoords = pThis->GetMapCoords();
+			auto it = std::find_if(houseExt->AttackedBuildingsLIFO.begin(), houseExt->AttackedBuildingsLIFO.end(),
+				[&](const AttackedBuildingRecord& r) { return r.BuildingCoords == bldCoords; });
+
+			if (it != houseExt->AttackedBuildingsLIFO.end())
+			{
+				AttackedBuildingRecord rec = *it;
+				rec.AttackerCoords = houseExt->LastAttackerCoords;
+				rec.AttackerType = houseExt->LastAttackerType;
+				if (threat != ThreatCategory::None)
+					rec.Threat = threat;
+				rec.AttackFrame = Unsorted::CurrentFrame;
+				houseExt->AttackedBuildingsLIFO.erase(it);
+				houseExt->AttackedBuildingsLIFO.push_back(rec);
+			}
+			else
+			{
+				AttackedBuildingRecord rec;
+				rec.BuildingCoords = bldCoords;
+				rec.AttackerCoords = houseExt->LastAttackerCoords;
+				rec.AttackerType = houseExt->LastAttackerType;
+				rec.Threat = threat;
+				rec.AttackFrame = Unsorted::CurrentFrame;
+				houseExt->AttackedBuildingsLIFO.push_back(rec);
+			}
+
+			if (houseExt->AttackedBuildingsLIFO.size() > 20)
+				houseExt->AttackedBuildingsLIFO.erase(houseExt->AttackedBuildingsLIFO.begin());
 		}
-		else
-		{
-			houseExt->LastAttackerCoords = CellStruct(0, 0);
-			houseExt->LastAttackerType = nullptr;
-		}
+
+		if (auto const pBldExt = BuildingExt::TryFetch(pThis))
+			pBldExt->LastCombatFrame = Unsorted::CurrentFrame;
 	}
 
 	return 0;

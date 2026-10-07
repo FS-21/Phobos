@@ -15,6 +15,30 @@
 
 #include "New/Type/TechTreeTypeClass.h"
 
+class TechnoTypeClass;
+
+enum class ThreatCategory : int
+{
+	None = 0,
+	Infantry = 1,
+	Vehicle = 2,
+	Air = 3
+};
+
+struct AttackedBuildingRecord
+{
+	CellStruct BuildingCoords { 0, 0 };
+	CellStruct AttackerCoords { 0, 0 };
+	TechnoTypeClass* AttackerType { nullptr };
+	ThreatCategory Threat { ThreatCategory::None };
+	int AttackFrame { 0 };
+
+	bool operator==(const AttackedBuildingRecord& other) const
+	{
+		return BuildingCoords == other.BuildingCoords;
+	}
+};
+
 class HouseExt final : public AbstractExt, public Detach::Listener<BuildingClass>
 {
 public:
@@ -181,6 +205,7 @@ public:
 	CellStruct FrontlineThreatBuildingCoords;
 	int LastParanoiaFrame;
 	std::vector<CellStruct> DefensivePlaceholders;
+	std::vector<AttackedBuildingRecord> AttackedBuildingsLIFO;
 
 	struct UnsafePlacementZone
 	{
@@ -300,6 +325,7 @@ public:
 		, FrontlineThreatBuildingCoords { 0, 0 }
 		, LastParanoiaFrame { 0 }
 		, DefensivePlaceholders {}
+		, AttackedBuildingsLIFO {}
 		, UnsafePlacementZones {}
 		, UnclaimedTiberiumZones {}
 		, NextRefineryPlacementLocation { 0, 0 }
@@ -410,6 +436,7 @@ public:
 	static void AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse);
 	static void AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse);
 	static void AdvAI_Update_Defensive_Placeholders(HouseClass* pHouse);
+	static void AdvAI_Prune_Attacked_Buildings_LIFO(HouseClass* pHouse);
 
 	static int FindGenericPrerequisite(const char* id);
 	static bool HasBuildingPrerequisite(HouseClass* const pHouse, int idxBuildingType);

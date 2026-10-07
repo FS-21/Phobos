@@ -710,9 +710,10 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 {
 	const auto ext = ExtMap.Find(pHouse);
 
+	const bool isMobileRefinery = AdvAI_IsMobileRefineryHouse(pHouse);
 	const bool needCombatTarget =
 		(ext->CombatCrawlingTarget.X == 0 || ext->CombatCrawlingTarget.Y == 0);
-	const bool needResourceTarget = (ext->ResourceCrawlingTarget.X == 0 ||
+	const bool needResourceTarget = !isMobileRefinery && (ext->ResourceCrawlingTarget.X == 0 ||
 									 ext->ResourceCrawlingTarget.Y == 0);
 
 	if (!needCombatTarget && !needResourceTarget)
@@ -1792,11 +1793,22 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass* pHouse,
 				CellStruct cell = CellStruct(x, y);
 				if (MapClass::Instance.CoordinatesLegal(cell) &&
 					BuildingExt::Should_Evaluate_Cell_For_Placement(cell, pBuildingType,
-																	pHouse, 0) &&
-					pBuildingType->CanPlaceHere(&cell, pHouse))
+																	pHouse, 0))
 				{
-					canPlaceAnywhere = true;
-					break;
+					if (pBuildingType->CanPlaceHere(&cell, pHouse))
+					{
+						canPlaceAnywhere = true;
+						break;
+					}
+					else if (!pBuildingType->IsBaseDefense && !TechTreeTypeClass::TotalBuildDefense.contains(pBuildingType))
+					{
+						std::vector<BuildingClass*> obstructingDefenses;
+						if (BuildingExt::CanClearObstructingDefensesForPlacement(cell, pBuildingType, pHouse, obstructingDefenses))
+						{
+							canPlaceAnywhere = true;
+							break;
+						}
+					}
 				}
 			}
 
@@ -2122,14 +2134,6 @@ int HouseExt::AdvAI_Calculate_Enemy_Aircraft_Value(HouseClass* pHouse)
  *  Author: Rampastring
  */
 
-enum class ThreatCategory
-{
-	None,
-	Infantry,
-	Vehicle,
-	Air
-};
-
 static ThreatCategory GetActiveThreatCategory(HouseClass* pHouse,
 											  CellStruct threatCenter)
 {
@@ -2311,6 +2315,62 @@ void HouseExt::AdvAI_Update_Defensive_Placeholders(HouseClass* pHouse)
 
 		if (hasDefense)
 			it = houseExt->DefensivePlaceholders.erase(it);
+		else
+			++it;
+	}
+}
+
+void HouseExt::AdvAI_Prune_Attacked_Buildings_LIFO(HouseClass* pHouse)
+{
+	if (!pHouse)
+		return;
+
+	const auto houseExt = ExtMap.Find(pHouse);
+	if (!houseExt)
+		return;
+
+	for (auto it = houseExt->AttackedBuildingsLIFO.begin(); it != houseExt->AttackedBuildingsLIFO.end(); )
+	{
+		const CellStruct cell = it->BuildingCoords;
+		bool foundLiving = false;
+		for (const auto pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Owner == pHouse &&
+				pBld->GetMapCoords().X == cell.X && pBld->GetMapCoords().Y == cell.Y)
+			{
+				foundLiving = true;
+				break;
+			}
+		}
+
+		if (!foundLiving)
+		{
+			it = houseExt->AttackedBuildingsLIFO.erase(it);
+			continue;
+		}
+
+		// Check if the building already has defense coverage against this threat
+		bool isDefended = false;
+		for (const auto pOther : pHouse->Buildings)
+		{
+			if (pOther && pOther->IsAlive && !pOther->InLimbo && pOther->Owner == pHouse &&
+				TechTreeTypeClass::TotalBuildDefense.contains(pOther->Type))
+			{
+				if (pOther->GetMapCoords().DistanceFrom(cell) <= 8.0)
+				{
+					if ((it->Threat == ThreatCategory::Air && pOther->Type->AntiAirValue > 0) ||
+						(it->Threat == ThreatCategory::Vehicle && pOther->Type->AntiArmorValue > 0) ||
+						(it->Threat == ThreatCategory::Infantry && pOther->Type->AntiInfantryValue > 0))
+					{
+						isDefended = true;
+						break;
+					}
+				}
+			}
+		}
+
+		if (isDefended)
+			it = houseExt->AttackedBuildingsLIFO.erase(it);
 		else
 			++it;
 	}
@@ -2537,62 +2597,79 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 					TechTreeTypeClass::BuildType::BuildRefinery, canBuildFunction);
 			if (houseExt->ShouldBuildRefinery)
 			{
-				bool hasPlacement = false;
-				if (pOurRefinery != nullptr)
+				if (AdvAI_IsMobileRefineryHouse(pHouse))
 				{
-					CellStruct placementCell =
-						BuildingExt::Get_Best_Expansion_Placement_Position_Helper(
-							pHouse, const_cast<BuildingTypeClass*>(pOurRefinery),
-							nullptr);
-					if (placementCell.X > 0 && placementCell.Y > 0)
-						hasPlacement = true;
-				}
-
-				if (hasPlacement && pOurRefinery != nullptr)
-				{
-					Debug::Log("AdvAI: Making AI build %s because it has reached an "
-							   "expansion point\n",
-							   pOurRefinery->Name);
-					return pOurRefinery;
+					houseExt->ShouldBuildRefinery = false;
 				}
 				else
 				{
-					const CellStruct targetCell = houseExt->NextExpansionPointLocation;
-
-					// Check if we are combat crawling (target is an enemy building)
-					bool isCombatCrawling = false;
-					if (const auto pTargetCell =
-							MapClass::Instance.TryGetCellAt(targetCell))
+					bool hasPlacement = false;
+					if (pOurRefinery != nullptr)
 					{
-						if (const auto pTargetBld = pTargetCell->GetBuilding())
-						{
-							if (pTargetBld->Owner != pHouse &&
-								!pHouse->IsAlliedWith(pTargetBld->Owner))
-							{
-								isCombatCrawling = true;
-							}
-						}
+						CellStruct placementCell =
+							BuildingExt::Get_Best_Expansion_Placement_Position_Helper(
+								pHouse, const_cast<BuildingTypeClass*>(pOurRefinery),
+								nullptr);
+						if (placementCell.X > 0 && placementCell.Y > 0)
+							hasPlacement = true;
 					}
 
-					if (!isCombatCrawling)
+					if (hasPlacement && pOurRefinery != nullptr)
 					{
-						Debug::Log("AdvAI: House %d reached expansion point (%d,%d), but "
-								   "no valid refinery placement could be found near it. "
-								   "Blacklisting target and marking expansion as done.\n",
-								   pHouse->ArrayIndex, targetCell.X, targetCell.Y);
-						AdvAI_Add_Failed_Expansion_Point(pHouse, targetCell);
-						BuildingExt::Mark_Expansion_As_Done(pHouse);
+						Debug::Log("AdvAI: Making AI build %s because it has reached an "
+								   "expansion point\n",
+								   pOurRefinery->Name);
+						return pOurRefinery;
 					}
 					else
 					{
-						Debug::Log(
-							"AdvAI: House %d reached expansion point (%d,%d), but refinery "
-							"is physically unbuildable here. Combat crawling in progress: "
-							"reverting ShouldBuildRefinery to crawl further.\n",
-							pHouse->ArrayIndex, targetCell.X, targetCell.Y);
-					}
+						const CellStruct targetCell = houseExt->NextExpansionPointLocation;
 
-					houseExt->ShouldBuildRefinery = false;
+						// Check if we are combat crawling (target is an enemy building)
+						bool isCombatCrawling = false;
+						if (const auto pTargetCell =
+								MapClass::Instance.TryGetCellAt(targetCell))
+						{
+							if (const auto pTargetBld = pTargetCell->GetBuilding())
+							{
+								if (pTargetBld->Owner != pHouse &&
+									!pHouse->IsAlliedWith(pTargetBld->Owner))
+								{
+									isCombatCrawling = true;
+								}
+							}
+						}
+
+						double nearestDist = 9999.0;
+						for (const auto pBld : pHouse->Buildings)
+						{
+							if (pBld && pBld->IsAlive && !pBld->InLimbo && BuildingTypeExt::IsAIBaseNormal(pBld->Type))
+							{
+								double d = targetCell.DistanceFrom(pBld->GetMapCoords());
+								if (d < nearestDist)
+									nearestDist = d;
+							}
+						}
+
+						if (!isCombatCrawling && nearestDist <= 14.0)
+						{
+							Debug::Log("AdvAI: House %d reached expansion point (%d,%d), but "
+									   "no valid refinery placement could be found near it. "
+									   "Blacklisting target and marking expansion as done.\n",
+									   pHouse->ArrayIndex, targetCell.X, targetCell.Y);
+							AdvAI_Add_Failed_Expansion_Point(pHouse, targetCell);
+							BuildingExt::Mark_Expansion_As_Done(pHouse);
+						}
+						else
+						{
+							Debug::Log(
+								"AdvAI: House %d cannot place refinery yet for expansion point (%d,%d) (Dist: %.1f). "
+								"Reverting ShouldBuildRefinery to crawl further.\n",
+								pHouse->ArrayIndex, targetCell.X, targetCell.Y, nearestDist);
+						}
+
+						houseExt->ShouldBuildRefinery = false;
+					}
 				}
 			}
 		}
@@ -2901,7 +2978,34 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			(isUnderThreat && hasEnemiesClose) || wasRecentlyAttacked;
 
 		if (isParanoid)
+		{
 			houseExt->LastParanoiaFrame = Unsorted::CurrentFrame;
+			AdvAI_Prune_Attacked_Buildings_LIFO(pHouse);
+		}
+		else
+		{
+			// Check if any defense is currently queued, under construction, or waiting to be placed
+			bool isBuildingDefense = false;
+			for (const auto pDef : TechTreeTypeClass::TotalBuildDefense)
+			{
+				if (FactoryClass::FindByOwnerAndProduct(pHouse, pDef) != nullptr)
+				{
+					isBuildingDefense = true;
+					break;
+				}
+			}
+
+			if (isBuildingDefense)
+			{
+				// Keep LIFO queue active and pruned so the defense currently being built can use it upon placement!
+				AdvAI_Prune_Attacked_Buildings_LIFO(pHouse);
+			}
+			else if (!houseExt->AttackedBuildingsLIFO.empty())
+			{
+				houseExt->AttackedBuildingsLIFO.clear();
+				Debug::Log("AdvAI: House %d paranoia ended and no defense in production. Cleared attacked buildings LIFO queue.\n", pHouse->ArrayIndex);
+			}
+		}
 
 		AdvAI_Update_Defensive_Placeholders(pHouse);
 
@@ -2929,12 +3033,6 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 
 		for (const auto pDefense : buildableDefenses)
 		{
-			if (!isParanoid && !hasSomethingToProtect &&
-				houseExt->NextExpansionPointLocation.X <= 0)
-			{
-				continue;
-			}
-
 			double antiInfantryScore = pDefense->AntiInfantryValue;
 			double antiVehicleScore = pDefense->AntiArmorValue;
 			double antiAirScore = pDefense->AntiAirValue;
@@ -3321,36 +3419,64 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 				int maxDeficiency = 0;
 				const BuildingTypeClass* pBestDefense = nullptr;
 
-				// Analyze the local active threat type to choose the correct counter
-				// defense
+				// Analyze the local active threat type to choose the correct counter defense
 				CellStruct threatCenter = CellStruct::Empty;
-				if (houseExt->LastAttackerCoords.X > 0 &&
-					houseExt->LastAttackerCoords.Y > 0)
+
+				// 1. First, check the LIFO queue of attacked buildings from newest to oldest
+				if (!houseExt->AttackedBuildingsLIFO.empty())
 				{
-					threatCenter = houseExt->LastAttackerCoords;
-				}
-				else if (houseExt->FrontlineThreatCoords.X > 0 &&
-						 houseExt->FrontlineThreatCoords.Y > 0)
-				{
-					threatCenter = houseExt->FrontlineThreatCoords;
+					for (auto it = houseExt->AttackedBuildingsLIFO.rbegin(); it != houseExt->AttackedBuildingsLIFO.rend(); ++it)
+					{
+						if (it->Threat == ThreatCategory::Air && ourAntiAirDefense != nullptr)
+						{
+							pBestDefense = ourAntiAirDefense;
+							break;
+						}
+						else if (it->Threat == ThreatCategory::Vehicle && ourAntiVehicleDefense != nullptr)
+						{
+							pBestDefense = ourAntiVehicleDefense;
+							break;
+						}
+						else if (it->Threat == ThreatCategory::Infantry && ourAntiInfantryDefense != nullptr)
+						{
+							pBestDefense = ourAntiInfantryDefense;
+							break;
+						}
+					}
 				}
 
-				ThreatCategory threat = GetActiveThreatCategory(pHouse, threatCenter);
-				if (threat == ThreatCategory::Air && ourAntiAirDefense != nullptr)
+				// 2. If no defense chosen from the queue yet, use the active threats near attacker or frontline
+				if (pBestDefense == nullptr)
 				{
-					pBestDefense = ourAntiAirDefense;
+					if (houseExt->LastAttackerCoords.X > 0 &&
+						houseExt->LastAttackerCoords.Y > 0)
+					{
+						threatCenter = houseExt->LastAttackerCoords;
+					}
+					else if (houseExt->FrontlineThreatCoords.X > 0 &&
+							 houseExt->FrontlineThreatCoords.Y > 0)
+					{
+						threatCenter = houseExt->FrontlineThreatCoords;
+					}
+
+					ThreatCategory threat = GetActiveThreatCategory(pHouse, threatCenter);
+					if (threat == ThreatCategory::Air && ourAntiAirDefense != nullptr)
+					{
+						pBestDefense = ourAntiAirDefense;
+					}
+					else if (threat == ThreatCategory::Vehicle &&
+							 ourAntiVehicleDefense != nullptr)
+					{
+						pBestDefense = ourAntiVehicleDefense;
+					}
+					else if (threat == ThreatCategory::Infantry &&
+							 ourAntiInfantryDefense != nullptr)
+					{
+						pBestDefense = ourAntiInfantryDefense;
+					}
 				}
-				else if (threat == ThreatCategory::Vehicle &&
-						 ourAntiVehicleDefense != nullptr)
-				{
-					pBestDefense = ourAntiVehicleDefense;
-				}
-				else if (threat == ThreatCategory::Infantry &&
-						 ourAntiInfantryDefense != nullptr)
-				{
-					pBestDefense = ourAntiInfantryDefense;
-				}
-				else if (!houseExt->DefensivePlaceholders.empty() || hasSomethingToProtect)
+
+				if (pBestDefense == nullptr && (!houseExt->DefensivePlaceholders.empty() || hasSomethingToProtect))
 				{
 					// Active threat is resolved or no local threat at threatCenter; protect pending placeholders
 					if (antiInfDeficiency > maxDeficiency &&
@@ -3711,6 +3837,106 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			}
 		}
 
+		// Ensure baseline defense coverage (at least 2 anti-infantry defenses) once basic production is established
+		int ownedAntiInfDefenses = 0;
+		for (const auto pDefense : TechTreeTypeClass::TotalBuildDefense)
+		{
+			if (pDefense && pDefense->AntiInfantryValue > 0)
+				ownedAntiInfDefenses += pHouse->ActiveBuildingTypes.GetItemCount(pDefense->ArrayIndex);
+		}
+
+		if (ourAntiInfantryDefense != nullptr && ownedAntiInfDefenses < 2)
+		{
+			Debug::Log("AdvAI: Making AI build %s because it needs baseline anti-infantry defense near ConYard (Owned: %d < 2).\n",
+				ourAntiInfantryDefense->Name, ownedAntiInfDefenses);
+			return ourAntiInfantryDefense;
+		}
+
+		// Probabilistic roll: 80% chance to build defense when paranoid (threat/attack), 50% chance in normal state.
+		const int rollChance = isParanoid ? 80 : 50;
+		bool shouldBuildDefenseThisCycle =
+			(ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance);
+		if (houseExt->FrontlineThreatCoords.X > 0 &&
+			houseExt->FrontlineThreatActiveFrames > Unsorted::CurrentFrame &&
+			houseExt->FrontlineThreatNeedsDefenses > 0)
+		{
+			shouldBuildDefenseThisCycle = true;
+		}
+
+		if (isPacifistAndGreedy && canStillExpand)
+			shouldBuildDefenseThisCycle = false;
+
+		if (shouldBuildDefenseThisCycle)
+		{
+			int maxDeficiency = 0;
+			const BuildingTypeClass* pBestDefense = nullptr;
+
+			if (antiInfDeficiency > maxDeficiency && ourAntiInfantryDefense != nullptr)
+			{
+				maxDeficiency = antiInfDeficiency;
+				pBestDefense = ourAntiInfantryDefense;
+			}
+
+			if (antiVehicleDeficiency > maxDeficiency && ourAntiVehicleDefense != nullptr)
+			{
+				maxDeficiency = antiVehicleDeficiency;
+				pBestDefense = ourAntiVehicleDefense;
+			}
+
+			if (antiAirDeficiency > maxDeficiency && ourAntiAirDefense != nullptr)
+			{
+				maxDeficiency = antiAirDeficiency;
+				pBestDefense = ourAntiAirDefense;
+			}
+
+			if (pBestDefense != nullptr)
+			{
+				Debug::Log("AdvAI: Making AI build %s (highest deficiency). InfDef: %d, VehDef: %d, AirDef: %d\n",
+					pBestDefense->Name, antiInfDeficiency, antiVehicleDeficiency, antiAirDeficiency);
+				return pBestDefense;
+			}
+
+			// Fallback: If forced by frontline threat but all global deficiencies are 0
+			if (houseExt->FrontlineThreatNeedsDefenses > 0)
+			{
+				if (enemyAircraftValue > 0 && ourAntiAirDefense != nullptr)
+				{
+					Debug::Log("AdvAI: Forced local defense build fallback: Choosing %s (Anti-Air) due to enemy airborne threat.\n",
+						ourAntiAirDefense->Name);
+					return ourAntiAirDefense;
+				}
+				else if (ourAntiVehicleDefense != nullptr)
+				{
+					Debug::Log("AdvAI: Forced local defense build fallback: Choosing %s (Anti-Vehicle).\n",
+						ourAntiVehicleDefense->Name);
+					return ourAntiVehicleDefense;
+				}
+				else if (ourAntiInfantryDefense != nullptr)
+				{
+					Debug::Log("AdvAI: Forced local defense build fallback: Choosing %s (Anti-Infantry).\n",
+						ourAntiInfantryDefense->Name);
+					return ourAntiInfantryDefense;
+				}
+				else if (!buildableDefenses.empty())
+				{
+					const BuildingTypeClass* pRandomDefense =
+						buildableDefenses[ScenarioClass::Instance->Random.RandomRanged(
+							0, static_cast<int>(buildableDefenses.size()) - 1)];
+					Debug::Log("AdvAI: Forced local defense build fallback: Choosing random buildable defense %s.\n",
+						pRandomDefense->Name);
+					return pRandomDefense;
+				}
+			}
+		}
+		else if (antiInfDeficiency > 0 || antiVehicleDeficiency > 0 || antiAirDeficiency > 0)
+		{
+			if (LogVerboseAdvAI)
+			{
+				Debug::Log("AdvAI: House %d deferred defense construction this cycle due to probability roll (%d%%), continuing base expansion.\n",
+					pHouse->ArrayIndex, 100 - rollChance);
+			}
+		}
+
 		// If AI is using resource storage and capacity is nearly full, build a Silo
 		if (RulesExt::Global()->Storage_AI && !pPrimaryTechTree->BuildSilo.empty())
 		{
@@ -3883,101 +4109,6 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			}
 		}
 
-		// Probabilistic roll: 70% chance to build defense when paranoid
-		// (threat/attack), 50% chance in normal state.
-		const int rollChance = isParanoid ? 70 : 50;
-		bool shouldBuildDefenseThisCycle =
-			(ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance);
-		if (houseExt->FrontlineThreatCoords.X > 0 &&
-			houseExt->FrontlineThreatActiveFrames > Unsorted::CurrentFrame &&
-			houseExt->FrontlineThreatNeedsDefenses > 0)
-		{
-			shouldBuildDefenseThisCycle = true;
-		}
-
-		if (isPacifistAndGreedy && canStillExpand)
-			shouldBuildDefenseThisCycle = false;
-
-		if (shouldBuildDefenseThisCycle)
-		{
-			int maxDeficiency = 0;
-			const BuildingTypeClass* pBestDefense = nullptr;
-
-			if (antiInfDeficiency > maxDeficiency &&
-				ourAntiInfantryDefense != nullptr)
-			{
-				maxDeficiency = antiInfDeficiency;
-				pBestDefense = ourAntiInfantryDefense;
-			}
-
-			if (antiVehicleDeficiency > maxDeficiency &&
-				ourAntiVehicleDefense != nullptr)
-			{
-				maxDeficiency = antiVehicleDeficiency;
-				pBestDefense = ourAntiVehicleDefense;
-			}
-
-			if (antiAirDeficiency > maxDeficiency && ourAntiAirDefense != nullptr)
-			{
-				maxDeficiency = antiAirDeficiency;
-				pBestDefense = ourAntiAirDefense;
-			}
-
-			if (pBestDefense != nullptr)
-			{
-				Debug::Log("AdvAI: Making AI build %s (highest deficiency). InfDef: "
-						   "%d, VehDef: %d, AirDef: %d\n",
-						   pBestDefense->Name, antiInfDeficiency, antiVehicleDeficiency,
-						   antiAirDeficiency);
-				return pBestDefense;
-			}
-
-			// Fallback: If forced by frontline threat but all global deficiencies are
-			// 0
-			if (houseExt->FrontlineThreatNeedsDefenses > 0)
-			{
-				if (enemyAircraftValue > 0 && ourAntiAirDefense != nullptr)
-				{
-					Debug::Log("AdvAI: Forced local defense build fallback: Choosing %s "
-							   "(Anti-Air) due to enemy airborne threat.\n",
-							   ourAntiAirDefense->Name);
-					return ourAntiAirDefense;
-				}
-				else if (ourAntiVehicleDefense != nullptr)
-				{
-					Debug::Log("AdvAI: Forced local defense build fallback: Choosing %s "
-							   "(Anti-Vehicle).\n",
-							   ourAntiVehicleDefense->Name);
-					return ourAntiVehicleDefense;
-				}
-				else if (ourAntiInfantryDefense != nullptr)
-				{
-					Debug::Log("AdvAI: Forced local defense build fallback: Choosing %s "
-							   "(Anti-Infantry).\n",
-							   ourAntiInfantryDefense->Name);
-					return ourAntiInfantryDefense;
-				}
-				else if (!buildableDefenses.empty())
-				{
-					const BuildingTypeClass* pRandomDefense =
-						buildableDefenses[ScenarioClass::Instance->Random.RandomRanged(
-							0, static_cast<int>(buildableDefenses.size()) - 1)];
-					Debug::Log("AdvAI: Forced local defense build fallback: Choosing "
-							   "random buildable defense %s.\n",
-							   pRandomDefense->Name);
-					return pRandomDefense;
-				}
-			}
-		}
-		else if (antiInfDeficiency > 0 || antiVehicleDeficiency > 0 ||
-				 antiAirDeficiency > 0)
-		{
-			if (LogVerboseAdvAI)
-				Debug::Log(
-					"AdvAI: House %d deferred defense construction this cycle due to "
-					"probability roll (%d%%), continuing base expansion.\n",
-					pHouse->ArrayIndex, 100 - rollChance);
-		}
 
 		// If we don't have enough helipads/airfields (based on total aircraft docks
 		// needed), then build one
@@ -4076,10 +4207,10 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 
 			size_t optimalHelipadCount = targetInitialHelipads;
 
-			// Enforce difficulty-based safety cap of docks to prevent runaway spam:
-			// Easy: 4 docks (1 GAAIRC / 4 TS helipads)
-			// Normal: 8 docks (2 GAAIRC / 8 TS helipads)
-			// Hard: 12 docks (3 GAAIRC / 12 TS helipads)
+			// Enforce difficulty-based safety cap on total aircraft docks to prevent runaway building:
+			// Easy: 4 docks
+			// Normal: 8 docks
+			// Hard: 12 docks
 			int maxDocks = 12;
 			if (pHouse->AIDifficulty == AIDifficulty::Easy)
 				maxDocks = 4;
@@ -4770,7 +4901,9 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 	if (houseExt->NextExpansionPointLocation.X != 0 &&
 		houseExt->NextExpansionPointLocation.Y != 0)
 	{
-		const BuildingTypeClass* pOurPowerPlant = nullptr;
+		const BuildingTypeClass* pOurExpansionBuilding = nullptr;
+
+		// 1. Try finding a suitable Power Plant for expansion
 		int lowestCost = std::numeric_limits<int>::max();
 		int maxAdjacent = -1;
 		std::vector<const BuildingTypeClass*> bestPowerCandidates;
@@ -4799,38 +4932,54 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		{
 			const int idx = ScenarioClass::Instance->Random.RandomRanged(
 				0, static_cast<int>(bestPowerCandidates.size()) - 1);
-			pOurPowerPlant = bestPowerCandidates[idx];
+			pOurExpansionBuilding = bestPowerCandidates[idx];
 		}
 		else
 		{
-			pOurPowerPlant = pPrimaryTechTree->GetRandomBuildable(
+			pOurExpansionBuilding = pPrimaryTechTree->GetRandomBuildable(
 				TechTreeTypeClass::BuildType::BuildPower, canBuildFunction);
 		}
 
-		if (pOurPowerPlant != nullptr)
+		// Verify if the chosen power plant actually has a valid placement towards the expansion target
+		if (pOurExpansionBuilding != nullptr)
 		{
 			CellStruct placementCell =
 				BuildingExt::Get_Best_Expansion_Placement_Position_Helper(
-					pHouse, const_cast<BuildingTypeClass*>(pOurPowerPlant), nullptr);
-			if (placementCell.X > 0 && placementCell.Y > 0)
+					pHouse, const_cast<BuildingTypeClass*>(pOurExpansionBuilding), nullptr);
+			if (placementCell.X <= 0 || placementCell.Y <= 0)
 			{
-				Debug::Log("AdvAI: Making AI build %s because the AI is expanding.\n",
-						   pOurPowerPlant->Name);
-				return pOurPowerPlant;
+				// Power plant cannot be placed right now along the expansion path
+				pOurExpansionBuilding = nullptr;
 			}
-			else
+		}
+
+		if (pOurExpansionBuilding != nullptr)
+		{
+			Debug::Log("AdvAI: Making AI build %s because the AI is expanding towards (%d,%d).\n",
+					   pOurExpansionBuilding->Name, houseExt->NextExpansionPointLocation.X, houseExt->NextExpansionPointLocation.Y);
+			houseExt->ExpansionPlacementFailures = 0;
+			return pOurExpansionBuilding;
+		}
+		else
+		{
+			const CellStruct targetCell = houseExt->NextExpansionPointLocation;
+			houseExt->ExpansionPlacementFailures++;
+
+			if (houseExt->ExpansionPlacementFailures >= 3)
 			{
-				const CellStruct targetCell = houseExt->NextExpansionPointLocation;
-				Debug::Log("AdvAI: House %d cannot find any valid adjacent cells to "
-						   "place %s towards target (%d,%d). Blacklisting target and "
-						   "aborting expansion.\n",
-						   pHouse->ArrayIndex, pOurPowerPlant->Name, targetCell.X,
-						   targetCell.Y);
+				Debug::Log("AdvAI: House %d cannot find any valid adjacent cells for any expansion structures towards target (%d,%d) after 3 attempts. Blacklisting target and aborting expansion.\n",
+						   pHouse->ArrayIndex, targetCell.X, targetCell.Y);
 
 				AdvAI_Add_Failed_Expansion_Point(pHouse, targetCell);
 				BuildingExt::Mark_Expansion_As_Done(pHouse);
 				houseExt->ShouldBuildRefinery = false;
 				houseExt->ShouldPlaceDefenseAtBlockedEdge = false;
+				houseExt->ExpansionPlacementFailures = 0;
+			}
+			else
+			{
+				Debug::Log("AdvAI: House %d could not place expansion structure towards target (%d,%d) (Attempt %d/3). Will retry in 10s.\n",
+						   pHouse->ArrayIndex, targetCell.X, targetCell.Y, houseExt->ExpansionPlacementFailures);
 			}
 		}
 	}
@@ -5158,336 +5307,13 @@ void HouseExt::AdvAI_Economy_Upkeep(HouseClass* pHouse)
 {
 	AdvAI_Raise_Money(pHouse);
 
-	const auto houseExt = ExtMap.Find(pHouse);
-	auto pPrimaryTechTree = houseExt->PrimaryTechTreeType;
-	if (pPrimaryTechTree == nullptr)
+	auto const pHouseExt = ExtMap.Find(pHouse);
+	auto pPrimaryTechTree = pHouseExt->PrimaryTechTreeType;
+	if (!pPrimaryTechTree)
 		pPrimaryTechTree = TechTreeTypeClass::GetForSide(pHouse->Type->SideIndex);
 
-	if (pPrimaryTechTree != nullptr)
-	{
-		// Check threat levels
-		int enemyAircraftValue = 0;
-		for (const auto pOtherHouse : HouseClass::Array)
-		{
-			if (pOtherHouse == pHouse || pOtherHouse->Defeated ||
-				pHouse->IsAlliedWith(pOtherHouse))
-			{
-				continue;
-			}
-			for (const auto pAircraft : AircraftClass::Array)
-			{
-				if (pAircraft->Owner == pOtherHouse && pAircraft->IsAlive &&
-					!pAircraft->InLimbo)
-				{
-					if (pAircraft->Type->AirportBound || pAircraft->Type->JumpJet)
-						enemyAircraftValue += 15;
-				}
-			}
-		}
-
-		const bool isUnderThreat =
-			AdvAI_Is_Under_Start_Rush_Threat(pHouse, enemyAircraftValue);
-
-		// hasEnemiesClose scan
-		bool hasEnemiesClose = false;
-		{
-			const BuildingClass* pOurConYard =
-				pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
-			CellStruct baseCenter = pOurConYard != nullptr
-										? pOurConYard->GetMapCoords()
-										: pHouse->Base_Center();
-			const double checkDistSq = 30.0 * 30.0;
-			for (const auto pFoot : FootClass::Array)
-			{
-				if (pFoot && pFoot->IsAlive && !pFoot->InLimbo &&
-					pFoot->Owner != pHouse && !pFoot->Owner->IsNeutral() &&
-					!pHouse->IsAlliedWith(pFoot->Owner))
-				{
-					if (baseCenter.DistanceFromSquared(pFoot->GetMapCoords()) <=
-						checkDistSq)
-					{
-						hasEnemiesClose = true;
-						break;
-					}
-				}
-			}
-
-			if (!hasEnemiesClose)
-			{
-				for (const auto pBld : BuildingClass::Array)
-				{
-					if (pBld && pBld->IsAlive && !pBld->InLimbo &&
-						pBld->Owner != pHouse && !pBld->Owner->IsNeutral() &&
-						!pHouse->IsAlliedWith(pBld->Owner))
-					{
-						const auto& primary = pBld->Type->GetWeapon(0, false);
-						const auto& secondary = pBld->Type->GetWeapon(1, false);
-
-						if (primary.WeaponType != nullptr ||
-							secondary.WeaponType != nullptr)
-						{
-							if (baseCenter.DistanceFromSquared(pBld->GetMapCoords()) <=
-								checkDistSq)
-							{
-								hasEnemiesClose = true;
-								break;
-							}
-						}
-					}
-				}
-			}
-		}
-
-		int paranoiaDuration = TICKS_PER_MINUTE;
-
-		const bool wasRecentlyAttacked =
-			pHouse->LATime + paranoiaDuration > Unsorted::CurrentFrame;
-		const bool isParanoid =
-			(isUnderThreat && hasEnemiesClose) || wasRecentlyAttacked;
-
+	if (pPrimaryTechTree)
 		AdvAI_Update_Defensive_Placeholders(pHouse);
-		const bool hasSomethingToProtect = !houseExt->DefensivePlaceholders.empty();
-
-		// Only sell redundant defenses when completely safe (not paranoid, nothing
-		// needs protection, no threat, and no pending placeholders)
-		if (!isParanoid && !hasSomethingToProtect && !isUnderThreat && houseExt->DefensivePlaceholders.empty())
-		{
-			bool alreadySelling = false;
-			for (const auto pBld : pHouse->Buildings)
-			{
-				if (pBld && pBld->IsAlive && !pBld->InLimbo &&
-					TechTreeTypeClass::TotalBuildDefense.contains(pBld->Type))
-				{
-					if (pBld->CurrentMission == Mission::Selling ||
-						pBld->QueuedMission == Mission::Selling)
-					{
-						alreadySelling = true;
-						break;
-					}
-				}
-			}
-
-			if (!alreadySelling)
-			{
-				const int slaveMinerCount =
-					RulesClass::Instance->PrerequisiteProcAlternate != nullptr
-						? pHouse->ActiveUnitTypes.GetItemCount(
-							  RulesClass::Instance->PrerequisiteProcAlternate
-								  ->ArrayIndex)
-						: 0;
-				size_t refineryCount = pPrimaryTechTree->CountSideOwnedBuildings(
-					pHouse, TechTreeTypeClass::BuildType::BuildRefinery);
-				refineryCount += slaveMinerCount;
-
-				const size_t powerPlantCount =
-					TechTreeTypeClass::CountTotalOwnedBuildings(
-						pHouse, TechTreeTypeClass::BuildType::BuildPower) +
-					TechTreeTypeClass::CountTotalOwnedBuildings(
-						pHouse, TechTreeTypeClass::BuildType::BuildAdvancedPower) *
-						4;
-
-				int optimalDefenseValue = refineryCount + powerPlantCount / 4;
-				if (houseExt->NextExpansionPointLocation.X > 0 &&
-					houseExt->NextExpansionPointLocation.Y > 0)
-				{
-					optimalDefenseValue += 5;
-				}
-
-				optimalDefenseValue *= 15;
-
-				int antiInfantryDefenseValue = 0;
-				int antiVehicleDefenseValue = 0;
-				for (const auto pDefense : TechTreeTypeClass::TotalBuildDefense)
-				{
-					antiInfantryDefenseValue +=
-						pHouse->ActiveBuildingTypes.GetItemCount(pDefense->ArrayIndex) *
-						pDefense->AntiInfantryValue;
-					antiVehicleDefenseValue +=
-						pHouse->ActiveBuildingTypes.GetItemCount(pDefense->ArrayIndex) *
-						pDefense->AntiArmorValue;
-				}
-
-				if (antiInfantryDefenseValue > optimalDefenseValue + 35 ||
-					antiVehicleDefenseValue > optimalDefenseValue + 35)
-				{
-					BuildingClass* pDefToSell = nullptr;
-					const BuildingClass* pOurConYard =
-						pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
-					CellStruct center = pOurConYard != nullptr
-											? pOurConYard->GetMapCoords()
-											: pHouse->Base_Center();
-
-					for (const auto pBld : pHouse->Buildings)
-					{
-						if (!pBld || !pBld->IsAlive || pBld->InLimbo ||
-							!TechTreeTypeClass::TotalBuildDefense.contains(pBld->Type))
-						{
-							continue;
-						}
-
-						// Maintain baseline defense count in base and preserve remote outpost defenses
-						if (pOurConYard != nullptr)
-						{
-							const double distToConYardSq =
-								pBld->GetMapCoords().DistanceFromSquared(pOurConYard->GetMapCoords());
-							if (distToConYardSq >= 400.0)
-								continue;
-
-							int defensesInBase = 0;
-							for (const auto pOther : pHouse->Buildings)
-							{
-								if (!pOther || !pOther->IsAlive || pOther->InLimbo ||
-									!TechTreeTypeClass::TotalBuildDefense.contains(pOther->Type))
-								{
-									continue;
-								}
-
-								if (pOther->GetMapCoords().DistanceFromSquared(pOurConYard->GetMapCoords()) < 400.0)
-									defensesInBase++;
-							}
-
-							if (defensesInBase <= 2)
-								continue;
-						}
-
-						// Preserve defenses acting as the sole protection for high-value or expansion structures
-						bool isSoleProtector = false;
-						for (const auto pTarget : pHouse->Buildings)
-						{
-							if (!pTarget || !pTarget->IsAlive || pTarget->InLimbo || !pTarget->Type)
-								continue;
-
-							if (pTarget->Type->ToProtect || TechTreeTypeClass::TotalBuildSuperWeapon.contains(pTarget->Type))
-							{
-								if (pBld->GetMapCoords().DistanceFromSquared(pTarget->GetMapCoords()) < 49.0)
-								{
-									int defenders = 0;
-									for (const auto pOther : pHouse->Buildings)
-									{
-										if (pOther && pOther->IsAlive && !pOther->InLimbo &&
-											TechTreeTypeClass::TotalBuildDefense.contains(pOther->Type) &&
-											pOther->GetMapCoords().DistanceFromSquared(pTarget->GetMapCoords()) < 49.0)
-										{
-											defenders++;
-										}
-									}
-
-									if (defenders <= 1)
-									{
-										isSoleProtector = true;
-										break;
-									}
-								}
-							}
-							else if (pTarget->Type->Refinery && pOurConYard != nullptr)
-							{
-								if (pTarget->GetMapCoords().DistanceFromSquared(pOurConYard->GetMapCoords()) >= 400.0 &&
-									pBld->GetMapCoords().DistanceFromSquared(pTarget->GetMapCoords()) < 225.0)
-								{
-									isSoleProtector = true;
-									break;
-								}
-							}
-						}
-
-						if (isSoleProtector)
-							continue;
-
-						// Preserve defenses stationed close to allied structures
-						bool nearAlly = false;
-						for (const auto pOtherHouse : HouseClass::Array)
-						{
-							if (pOtherHouse == pHouse || !pHouse->IsAlliedWith(pOtherHouse) ||
-								pOtherHouse->IsNeutral() || pOtherHouse->Type->MultiplayPassive)
-							{
-								continue;
-							}
-
-							for (const auto pTarget : pOtherHouse->Buildings)
-							{
-								if (pTarget && pTarget->IsAlive && !pTarget->InLimbo &&
-									pBld->GetMapCoords().DistanceFromSquared(pTarget->GetMapCoords()) < 100.0)
-								{
-									nearAlly = true;
-									break;
-								}
-							}
-
-							if (nearAlly)
-								break;
-						}
-
-						if (nearAlly)
-							continue;
-
-						// Only consider selling defenses if clustered immediately adjacent to another defense
-						bool isClustered = false;
-						const int b1X = pBld->GetMapCoords().X;
-						const int b1Y = pBld->GetMapCoords().Y;
-						const int b1W = pBld->Type->GetFoundationWidth();
-						const int b1H = pBld->Type->GetFoundationHeight(false);
-
-						for (const auto pOther : pHouse->Buildings)
-						{
-							if (!pOther || !pOther->IsAlive || pOther->InLimbo || pOther == pBld ||
-								!TechTreeTypeClass::TotalBuildDefense.contains(pOther->Type))
-							{
-								continue;
-							}
-
-							const int b2X = pOther->GetMapCoords().X;
-							const int b2Y = pOther->GetMapCoords().Y;
-							const int b2W = pOther->Type->GetFoundationWidth();
-							const int b2H = pOther->Type->GetFoundationHeight(false);
-
-							// Check if touching (0 empty cells margin)
-							if ((b1X - 1 <= b2X + b2W - 1) && (b1X + b1W >= b2X) &&
-								(b1Y - 1 <= b2Y + b2H - 1) && (b1Y + b1H >= b2Y))
-							{
-								isClustered = true;
-								break;
-							}
-						}
-
-						if (!isClustered)
-							continue;
-
-						bool chooseThis = false;
-						if (pDefToSell == nullptr)
-						{
-							chooseThis = true;
-						}
-						else if (pBld->Type->Cost < pDefToSell->Type->Cost)
-						{
-							chooseThis = true;
-						}
-						else if (pBld->Type->Cost == pDefToSell->Type->Cost)
-						{
-							// If costs are equal, sell the one closer to the base center
-							const double distSq1 = pBld->GetMapCoords().DistanceFromSquared(center);
-							const double distSq2 = pDefToSell->GetMapCoords().DistanceFromSquared(center);
-							if (distSq1 < distSq2)
-								chooseThis = true;
-						}
-
-						if (chooseThis)
-							pDefToSell = pBld;
-					}
-
-					if (pDefToSell != nullptr)
-					{
-						Debug::Log(
-							"AdvAI: Selling redundant base defense %s at (%d,%d) because "
-							"rush threat is over. Owned value: %d, Calm optimal: %d\n",
-							pDefToSell->Type->ID, pDefToSell->GetMapCoords().X,
-							pDefToSell->GetMapCoords().Y, antiInfantryDefenseValue,
-							optimalDefenseValue);
-						pDefToSell->Sell(1);
-					}
-				}
-			}
-		}
-	}
 
 	// Don't sell refineries on Easy mode.
 	if (pHouse->AIDifficulty == AIDifficulty::Hard)
@@ -5688,12 +5514,13 @@ void HouseExt::AdvAI_Building(HouseClass* pHouse)
 	const auto houseExt = ExtMap.Find(pHouse);
 
 	// If either target is missing, check for a new location to expand to.
-	if (houseExt->CombatCrawlingTarget.X <= 0 ||
-		houseExt->CombatCrawlingTarget.Y <= 0 ||
-		houseExt->ResourceCrawlingTarget.X <= 0 ||
-		houseExt->ResourceCrawlingTarget.Y <= 0)
+	const bool isMobile = AdvAI_IsMobileRefineryHouse(pHouse);
+	const bool needsTarget = (houseExt->CombatCrawlingTarget.X <= 0 || houseExt->CombatCrawlingTarget.Y <= 0) ||
+		(!isMobile && (houseExt->ResourceCrawlingTarget.X <= 0 || houseExt->ResourceCrawlingTarget.Y <= 0));
+
+	if (needsTarget)
 	{
-		const bool hasCachedCandidates = (!houseExt->CachedResourceCandidates.empty() &&
+		const bool hasCachedCandidates = (!isMobile && !houseExt->CachedResourceCandidates.empty() &&
 										  Unsorted::CurrentFrame < houseExt->CachedResourceCandidatesExpiryFrame);
 		if (hasCachedCandidates || Unsorted::CurrentFrame >= houseExt->NextExpansionSearchFrame)
 		{
