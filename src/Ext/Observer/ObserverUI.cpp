@@ -49,7 +49,7 @@ static bool IntersectRect(const RectangleStruct& r1, const RectangleStruct& r2, 
 
 static int GetFactoryProgressPercent(FactoryClass* pFact)
 {
-	if (!pFact || !pFact->Object)
+	if (!pFact || !pFact->Object || !pFact->Object->IsAlive || !pFact->Object->InLimbo || pFact->Object->Health <= 0)
 		return 0;
 
 	int rate = pFact->Production.Rate;
@@ -402,7 +402,7 @@ void ObserverUIClass::CollectPlayerData()
 			{
 				for (auto const pFact : FactoryClass::Array)
 				{
-					if (pFact && pFact->Owner == pHouse && pFact->Object)
+					if (pFact && pFact->Owner == pHouse && pFact->Object && pFact->Object->IsAlive && pFact->Object->InLimbo && pFact->Object->Health > 0)
 					{
 						hasContent = true;
 						break;
@@ -483,6 +483,9 @@ void ObserverUIClass::CollectPlayerData()
 		for (auto const pFact : FactoryClass::Array)
 		{
 			if (!pFact || pFact->Owner != pHouse || !pFact->Object)
+				continue;
+
+			if (!pFact->Object->IsAlive || !pFact->Object->InLimbo || pFact->Object->Health <= 0)
 				continue;
 
 			auto const pProducingType = pFact->Object->GetTechnoType();
@@ -2049,9 +2052,23 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		}
 
 		FactoryClass* pFact = (pBld && pBld->Factory) ? pBld->Factory : nullptr;
+		if (pFact && (!pFact->Object || !pFact->Object->IsAlive || !pFact->Object->InLimbo || pFact->Object->Health <= 0))
+		{
+			pFact = nullptr;
+		}
+
 		if (!pFact && win.IsProductionItem && pTargetType)
 		{
-			pFact = FactoryClass::FindByOwnerAndProduct(pOwner, pTargetType);
+			for (auto const pCandidate : FactoryClass::Array)
+			{
+				if (pCandidate && pCandidate->Owner == pOwner && pCandidate->Object
+					&& pCandidate->Object->IsAlive && pCandidate->Object->InLimbo && pCandidate->Object->Health > 0
+					&& pCandidate->Object->GetTechnoType() == pTargetType)
+				{
+					pFact = pCandidate;
+					break;
+				}
+			}
 		}
 
 		if (!pBld && pFact)
@@ -2066,7 +2083,9 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			}
 		}
 
-		TechnoTypeClass* pCurProdType = (pFact && pFact->Object) ? pFact->Object->GetTechnoType() : nullptr;
+		TechnoTypeClass* pCurProdType = (pFact && pFact->Object && pFact->Object->IsAlive && pFact->Object->InLimbo && pFact->Object->Health > 0)
+			? pFact->Object->GetTechnoType()
+			: nullptr;
 
 		if (win.IsProductionItem && pFact)
 		{
