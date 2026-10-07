@@ -1835,15 +1835,6 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass* pHouse,
 						canPlaceAnywhere = true;
 						break;
 					}
-					else if (!pBuildingType->IsBaseDefense && !TechTreeTypeClass::TotalBuildDefense.contains(pBuildingType))
-					{
-						std::vector<BuildingClass*> obstructingDefenses;
-						if (BuildingExt::CanClearObstructingDefensesForPlacement(cell, pBuildingType, pHouse, obstructingDefenses))
-						{
-							canPlaceAnywhere = true;
-							break;
-						}
-					}
 				}
 			}
 
@@ -5356,8 +5347,22 @@ void HouseExt::AdvAI_Raise_Money(HouseClass* pHouse)
 
 	int refineryCount = 0;
 	for (const auto pRefinery : RulesClass::Instance->BuildRefinery)
-		refineryCount +=
-			pHouse->ActiveBuildingTypes.GetItemCount(pRefinery->ArrayIndex);
+	{
+		if (pRefinery != nullptr)
+			refineryCount += pHouse->ActiveBuildingTypes.GetItemCount(pRefinery->ArrayIndex);
+	}
+
+	for (const auto pBld : pHouse->Buildings)
+	{
+		if (pBld != nullptr && pBld->IsAlive && !pBld->InLimbo)
+		{
+			if (pBld->Type->Refinery || pBld->Type->ResourceDestination ||
+				TechTreeTypeClass::TotalBuildRefinery.contains(pBld->Type))
+			{
+				refineryCount++;
+			}
+		}
+	}
 
 	if (refineryCount > 0)
 		return;
@@ -5371,7 +5376,8 @@ void HouseExt::AdvAI_Raise_Money(HouseClass* pHouse)
 	for (const auto pBuilding : BuildingClass::Array)
 	{
 		if (!pBuilding->IsAlive || pBuilding->InLimbo ||
-			pBuilding->Owner != pHouse || pBuilding->Type->ConstructionYard)
+			pBuilding->Owner != pHouse || pBuilding->Type->ConstructionYard ||
+			pBuilding->Type->IsBaseDefense || TechTreeTypeClass::TotalBuildDefense.contains(pBuilding->Type))
 		{
 			continue;
 		}

@@ -3218,7 +3218,11 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 		houseExt != nullptr && houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
 	{
 		if (!BuildingTypeExt::IsAIInnerBase(pBuilding->Type))
-			return Get_Best_Expansion_Placement_Position(pBuilding);
+		{
+			CellStruct expCell = Get_Best_Expansion_Placement_Position(pBuilding);
+			if (expCell.X > 0 && expCell.Y > 0)
+				return expCell;
+		}
 	}
 
 	const int adjacency = pBuilding->Type->Adjacent;
@@ -3483,77 +3487,9 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		}
 	}
 
-	// If we couldn't find any place for the building, check if clearing owned obstructing defenses can make room
+	// If we couldn't find any place for the building, refund it and put on cooldown
 	if (placementCell.X <= 0 || placementCell.Y <= 0)
 	{
-		// Phase 3: Space Clearance - When the AI has run out of space to place the building,
-		// check if clearing owned obstructing defenses frees up space to place it.
-		if (!pBuilding->Type->IsBaseDefense && !TechTreeTypeClass::TotalBuildDefense.contains(pBuilding->Type))
-		{
-			const int adjacency = pBuilding->Type->Adjacent + 1;
-			const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(true), pBuilding->Type);
-
-			CellStruct bestClearDefenseCell = CellStruct(0, 0);
-			double bestClearDistance = 999999.0;
-			std::vector<BuildingClass*> bestClearDefenses;
-
-			const CellStruct expansionTarget = houseExt ? houseExt->NextExpansionPointLocation : CellStruct(0, 0);
-			const bool hasExpansionTarget = (expansionTarget.X > 0 && expansionTarget.Y > 0);
-
-			const bool isPowerPlant = TechTreeTypeClass::TotalBuildPower.contains(pBuilding->Type) ||
-									  TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBuilding->Type);
-
-			const BuildingClass* pConYard = pBuilding->Owner->ConYards.Count > 0 ? pBuilding->Owner->ConYards[0] : nullptr;
-			const CellStruct referenceCenter = (hasExpansionTarget && (isPowerPlant || pBuilding->Type->Refinery || pBuilding->Type->ResourceDestination))
-				? expansionTarget
-				: (pConYard != nullptr ? pConYard->GetMapCoords() : pBuilding->Owner->Base_Center());
-
-			for (int y = baseArea.Y; y < baseArea.Y + baseArea.Height; ++y)
-			{
-				for (int x = baseArea.X; x < baseArea.X + baseArea.Width; ++x)
-				{
-					CellStruct cell = CellStruct(static_cast<short>(x), static_cast<short>(y));
-					if (!MapClass::Instance.CoordinatesLegal(cell))
-						continue;
-
-					if (!Should_Evaluate_Cell_For_Placement(cell, pBuilding, 0))
-						continue;
-
-					std::vector<BuildingClass*> obstructingDefenses;
-					if (!CanClearObstructingDefensesForPlacement(cell, pBuilding->Type, pBuilding->Owner, obstructingDefenses))
-						continue;
-
-					double dist = cell.DistanceFrom(referenceCenter);
-					if (dist < bestClearDistance)
-					{
-						bestClearDistance = dist;
-						bestClearDefenseCell = cell;
-						bestClearDefenses = obstructingDefenses;
-					}
-				}
-			}
-
-			if (bestClearDefenseCell.X > 0 && bestClearDefenseCell.Y > 0)
-			{
-				for (auto const pDef : bestClearDefenses)
-				{
-					if (pDef && pDef->IsAlive && !pDef->InLimbo && pDef->CurrentMission != Mission::Selling && pDef->QueuedMission != Mission::Selling)
-					{
-						Debug::Log("AdvAI Space Clearance: AI %d has no open space for %s! Selling defense %s at (%d,%d) to clear space.\n",
-							pBuilding->Owner->ArrayIndex, pBuilding->Type->ID,
-							pDef->Type->ID, pDef->GetMapCoords().X, pDef->GetMapCoords().Y);
-						pDef->Sell(1);
-					}
-				}
-
-				// Put on a 10s cooldown (150 frames) for retry so the defense finishes selling
-				int failures = ++houseExt->PlacementConsecutiveFailures[pBuilding->Type];
-				houseExt->PlacementFailedCooldowns[pBuilding->Type] = Unsorted::CurrentFrame + 150;
-				Debug::Log("AdvAI Space Clearance: AI %d waiting 10s for defenses to clear before retrying placement of %s (Attempt %d/3).\n",
-					pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, failures);
-				return 0;
-			}
-		}
 
 		if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
 		{
