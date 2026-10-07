@@ -3383,24 +3383,20 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		}
 
 		// Check if we still have uncompleted tech center or primary superweapons
-		bool missingCoreTechOrSW = false;
-		if (GameModeOptionsClass::Instance.SWAllowed)
+		const bool hasTechCenterSupport = (pPrimaryTechTree != nullptr && !pPrimaryTechTree->BuildTech.empty());
+		const bool needsTechCenter = hasTechCenterSupport && !hasTechCenter;
+
+		bool missingCoreTechOrSW = needsTechCenter;
+		if (GameModeOptionsClass::Instance.SWAllowed && !pPrimaryTechTree->BuildSuperWeapon.empty())
 		{
-			if (!hasTechCenter)
+			for (const auto pSW : pPrimaryTechTree->BuildSuperWeapon)
 			{
-				missingCoreTechOrSW = true;
-			}
-			else if (!pPrimaryTechTree->BuildSuperWeapon.empty())
-			{
-				for (const auto pSW : pPrimaryTechTree->BuildSuperWeapon)
+				if (pSW && !pSW->Unbuildable &&
+					CountOwnedBuildingInstances(pHouse, pSW) <
+						GetTargetBuildCount(pSW, 1, pPrimaryTechTree))
 				{
-					if (pSW && !pSW->Unbuildable &&
-						CountOwnedBuildingInstances(pHouse, pSW) <
-							GetTargetBuildCount(pSW, 1, pPrimaryTechTree))
-					{
-						missingCoreTechOrSW = true;
-						break;
-					}
+					missingCoreTechOrSW = true;
+					break;
 				}
 			}
 		}
@@ -3409,9 +3405,11 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		// nodes to protect!
 		if (isParanoid || hasSomethingToProtect)
 		{
-			// In Arms Race or when tech/superweapons are needed, 50% probability allows advancing the tech tree
+			// When tech center or superweapons are needed, lower defense probability allows advancing the tech tree
 			int rollChance = isParanoid ? 85 : 70;
-			if (enemyHasSuperWeapon || missingCoreTechOrSW)
+			if (needsTechCenter)
+				rollChance = isParanoid ? 50 : 25;
+			else if (enemyHasSuperWeapon || missingCoreTechOrSW)
 				rollChance = isParanoid ? 50 : 35;
 
 			if (ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance)
@@ -3852,8 +3850,60 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			return ourAntiInfantryDefense;
 		}
 
-		// Probabilistic roll: 80% chance to build defense when paranoid (threat/attack), 50% chance in normal state.
-		const int rollChance = isParanoid ? 80 : 50;
+		// Prioritize BuildTech (and recursively resolve its prerequisites like Radar)
+		// once baseline production and anti-engineer defenses are established,
+		// ensuring the AI techs up swiftly to unlock tier-3 units and expansion.
+		if (needsTechCenter)
+		{
+			for (const auto pTechType : pPrimaryTechTree->BuildTech)
+			{
+				if (pTechType == nullptr || pTechType->Unbuildable)
+					continue;
+
+				const int targetCount = GetTargetBuildCount(pTechType, 1, pPrimaryTechTree);
+				const int ownedCount = CountOwnedBuildingInstances(pHouse, pTechType);
+				if (ownedCount >= targetCount)
+					continue;
+
+				if (AdvAI_Can_Build_Building(pHouse, pTechType, true, true))
+				{
+					Debug::Log("AdvAI: House %d prioritizing BuildTech %s -> All prerequisites met. Making AI build %s!\n",
+						pHouse->ArrayIndex, pTechType->Name, pTechType->Name);
+					return pTechType;
+				}
+				else
+				{
+					std::set<BuildingTypeClass*> visited;
+					bool isSubPrereq = false;
+					BuildingTypeClass* pPrereqToBuild =
+						AdvAI_Find_Next_Buildable_Prerequisite(
+							pHouse, pTechType, pTechType, visited, isSubPrereq);
+
+					if (pPrereqToBuild != nullptr)
+					{
+						if (isSubPrereq)
+						{
+							Debug::Log("AdvAI: House %d prioritizing BuildTech %s -> Needs sub-prerequisite %s. Making AI build %s.\n",
+								pHouse->ArrayIndex, pTechType->Name, pPrereqToBuild->Name, pPrereqToBuild->Name);
+						}
+						else
+						{
+							Debug::Log("AdvAI: House %d prioritizing BuildTech %s -> Needs prerequisite %s. Making AI build %s.\n",
+								pHouse->ArrayIndex, pTechType->Name, pPrereqToBuild->Name, pPrereqToBuild->Name);
+						}
+						return pPrereqToBuild;
+					}
+				}
+			}
+		}
+
+		// Probabilistic roll: 50% chance when paranoid (threat/attack) or 15% in normal state while teching up.
+		int rollChance = isParanoid ? 80 : 50;
+		if (needsTechCenter)
+		{
+			rollChance = isParanoid ? 50 : 15;
+		}
+
 		bool shouldBuildDefenseThisCycle =
 			(ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance);
 		if (houseExt->FrontlineThreatCoords.X > 0 &&
