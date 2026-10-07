@@ -732,42 +732,7 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			TechTreeTypeClass::CountTotalOwnedBuildings(
 				pHouse, TechTreeTypeClass::BuildType::BuildTech) >= 1;
 		if (!hasTechCenter)
-		{
-			// Anti-deadlock safety check: if we still need Radar or Tech Center,
-			// verify if at least one required structure can fit in the current base layout.
-			// If neither can fit (e.g. cramped space, island, cliff-bound), allow expansion
-			// so the AI can crawl outward to obtain building space instead of stalling in calm!
-			bool canFitNextTech = false;
-			const bool hasRadar = (TechTreeTypeClass::CountTotalOwnedBuildings(
-				pHouse, TechTreeTypeClass::BuildType::BuildRadar) >= 1) ||
-				pTechTree->BuildRadar.empty();
-
-			if (!hasRadar)
-			{
-				for (const auto pR : pTechTree->BuildRadar)
-				{
-					if (pR && AdvAI_Can_Build_Building(pHouse, pR, false, true))
-					{
-						canFitNextTech = true;
-						break;
-					}
-				}
-			}
-			else
-			{
-				for (const auto pT : pTechTree->BuildTech)
-				{
-					if (pT && AdvAI_Can_Build_Building(pHouse, pT, false, true))
-					{
-						canFitNextTech = true;
-						break;
-					}
-				}
-			}
-
-			if (canFitNextTech)
-				return false;
-		}
+			return false;
 	}
 
 	// Check that we have at least one ConYard (needed to place buildings at the
@@ -5639,12 +5604,19 @@ void HouseExt::AdvAI_Building(HouseClass* pHouse)
 
 	const auto houseExt = ExtMap.Find(pHouse);
 
-	// If either target is missing, check for a new location to expand to.
+	const auto pTechTree = TechTreeTypeClass::GetAnySuitable(pHouse);
+	const bool hasTechCenterSupport =
+		pTechTree != nullptr && !pTechTree->BuildTech.empty();
+	const bool hasTechCenter = !hasTechCenterSupport ||
+		TechTreeTypeClass::CountTotalOwnedBuildings(
+			pHouse, TechTreeTypeClass::BuildType::BuildTech) >= 1;
+
+	// If either target is missing, check for a new location to expand to (only once tech center is completed).
 	const bool isMobile = AdvAI_IsMobileRefineryHouse(pHouse);
 	const bool needsTarget = (houseExt->CombatCrawlingTarget.X <= 0 || houseExt->CombatCrawlingTarget.Y <= 0) ||
 		(!isMobile && (houseExt->ResourceCrawlingTarget.X <= 0 || houseExt->ResourceCrawlingTarget.Y <= 0));
 
-	if (needsTarget)
+	if (hasTechCenter && needsTarget)
 	{
 		const bool hasCachedCandidates = (!isMobile && !houseExt->CachedResourceCandidates.empty() &&
 										  Unsorted::CurrentFrame < houseExt->CachedResourceCandidatesExpiryFrame);
@@ -5668,7 +5640,14 @@ void HouseExt::AdvAI_Building(HouseClass* pHouse)
 	const bool isParanoid = (pHouse->LATime + 900 > Unsorted::CurrentFrame);
 	const int combatLimit = isParanoid ? 5 : 3;
 
-	if (houseExt->CombatCrawlingTarget.X > 0 &&
+	if (!hasTechCenter)
+	{
+		houseExt->NextExpansionPointLocation = CellStruct(0, 0);
+		houseExt->ShouldBuildRefinery = false;
+		houseExt->ConsecutiveCombatBuilds = 0;
+		houseExt->ConsecutiveResourceBuilds = 0;
+	}
+	else if (houseExt->CombatCrawlingTarget.X > 0 &&
 		houseExt->CombatCrawlingTarget.Y > 0 &&
 		houseExt->ResourceCrawlingTarget.X > 0 &&
 		houseExt->ResourceCrawlingTarget.Y > 0)
