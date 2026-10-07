@@ -238,6 +238,29 @@ public:
 	std::map<BuildingTypeClass*, int> FeasibilityFailedCooldowns;
 
 	/**
+	 *  Tuple to reserve and coordinate defense clearance when base space is full.
+	 */
+	CellStruct PendingClearanceCell;
+	BuildingTypeClass* PendingClearanceType;
+	int PendingClearanceFoundationWidth;
+	int PendingClearanceFoundationHeight;
+	Foundation PendingClearanceFoundation;
+	int ClearanceAttempts;
+	int NextClearanceCheckFrame;
+	int LastClearanceFailedFrame;
+
+	void ClearClearanceReservation()
+	{
+		this->PendingClearanceCell = CellStruct::Empty;
+		this->PendingClearanceType = nullptr;
+		this->PendingClearanceFoundationWidth = 0;
+		this->PendingClearanceFoundationHeight = 0;
+		this->PendingClearanceFoundation = static_cast<Foundation>(0);
+		this->ClearanceAttempts = 0;
+		this->NextClearanceCheckFrame = 0;
+	}
+
+	/**
 	 *  Records the dynamic build counts calculated for each building type
 	 *  including base AIBuildCounts and probabilistic AIExtraCounts.
 	 */
@@ -374,6 +397,14 @@ public:
 		, GroupConsecutiveFailures {}
 		, GroupPlacementCooldowns {}
 		, FeasibilityFailedCooldowns {}
+		, PendingClearanceCell { 0, 0 }
+		, PendingClearanceType { nullptr }
+		, PendingClearanceFoundationWidth { 0 }
+		, PendingClearanceFoundationHeight { 0 }
+		, PendingClearanceFoundation { static_cast<Foundation>(0) }
+		, ClearanceAttempts { 0 }
+		, NextClearanceCheckFrame { 0 }
+		, LastClearanceFailedFrame { 0 }
 		, AICachedBuildCounts {}
 		, LastAttackerType { nullptr }
 		, LastAttackedFrame { 0 }

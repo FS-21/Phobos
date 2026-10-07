@@ -215,4 +215,5 @@ public:
 	static int Exit_Object_Custom_Position(BuildingClass* pBuilding);
 	static bool HasEnemyThreatsNear(CellStruct cell, HouseClass* pOwner, double radius);
 	static bool CanClearObstructingDefensesForPlacement(CellStruct cell, BuildingTypeClass* pBuildingType, HouseClass* pOwner, std::vector<BuildingClass*>& outDefenses);
+	static CellStruct Find_Best_Defense_Clearance_Placement_Cell(BuildingClass* pBuilding, std::vector<BuildingClass*>& outDefenses);
 };
