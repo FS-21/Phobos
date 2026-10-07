@@ -3574,6 +3574,25 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			}
 		}
 
+		// Ensure baseline defense coverage (at least 2 anti-infantry defenses) near ConYard
+		// to securely prevent early engineer rushes before investing in the War Factory
+		int ownedAntiInfDefenses = 0;
+		for (const auto pDefense : TechTreeTypeClass::TotalBuildDefense)
+		{
+			if (pDefense && pDefense->AntiInfantryValue > 0)
+				ownedAntiInfDefenses += pHouse->ActiveBuildingTypes.GetItemCount(pDefense->ArrayIndex);
+		}
+
+		if (ourAntiInfantryDefense != nullptr && ownedAntiInfDefenses < 2)
+		{
+			if (AdvAI_Can_Build_Building(pHouse, ourAntiInfantryDefense, true, true))
+			{
+				Debug::Log("AdvAI: Making AI build %s because it needs baseline anti-infantry defense near ConYard (Owned: %d < 2).\n",
+					ourAntiInfantryDefense->Name, ownedAntiInfDefenses);
+				return ourAntiInfantryDefense;
+			}
+		}
+
 		// If we are under threat of an immediate early-game rush, then skip the WF
 		// and refinery minimums. Instead build defenses or tech up so we can get AA
 		// ASAP.
@@ -3886,21 +3905,6 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 					return pRefineryToBuild;
 				}
 			}
-		}
-
-		// Ensure baseline defense coverage (at least 2 anti-infantry defenses) once basic production is established
-		int ownedAntiInfDefenses = 0;
-		for (const auto pDefense : TechTreeTypeClass::TotalBuildDefense)
-		{
-			if (pDefense && pDefense->AntiInfantryValue > 0)
-				ownedAntiInfDefenses += pHouse->ActiveBuildingTypes.GetItemCount(pDefense->ArrayIndex);
-		}
-
-		if (ourAntiInfantryDefense != nullptr && ownedAntiInfDefenses < 2)
-		{
-			Debug::Log("AdvAI: Making AI build %s because it needs baseline anti-infantry defense near ConYard (Owned: %d < 2).\n",
-				ourAntiInfantryDefense->Name, ownedAntiInfDefenses);
-			return ourAntiInfantryDefense;
 		}
 
 		// Prioritize BuildRadar once basic production and baseline anti-engineer defenses are established
