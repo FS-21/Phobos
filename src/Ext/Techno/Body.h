@@ -252,6 +252,7 @@ public:
 	void InitializeResourceProductions();
 	void ApplyCollectorRegistration(bool registering, HouseClass* pHouse = nullptr);
 	static int GetResourceRefund(TechnoClass* pTechno, int resourceIdx, bool isGrinder = false);
+	static int GetResourceRefund(TechnoTypeClass* pType, int resourceIdx);
 	void ApplyInterceptor();
 	bool CheckDeathConditions(bool isInLimbo = false);
 	void EatPassengers();
