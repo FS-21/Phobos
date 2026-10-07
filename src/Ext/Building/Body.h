@@ -35,6 +35,7 @@ public:
 	int ConstructionStartFacing;
 	bool IsPlayingRoofProductionAnim;
 	int DetectDisguiseActiveCounter;
+	int LastCombatFrame;
 
 	/**
 	*  If this building was built by the AI for it to reach an expansion
@@ -66,6 +67,7 @@ public:
 		, AssignedExpansionPoint {}
 		, IsPlayingRoofProductionAnim { false }
 		, DetectDisguiseActiveCounter { 0 }
+		, LastCombatFrame { 0 }
 	{ }
 
 	// typed owner accessor (shadows the TechnoClass one from the base)
@@ -210,4 +212,6 @@ public:
 	static CellStruct Get_Best_Silo_Placement_Position(BuildingClass* pBuilding);
 	static CellStruct Get_Best_Placement_Position(BuildingClass* pBuilding);
 	static int Exit_Object_Custom_Position(BuildingClass* pBuilding);
+	static bool HasEnemyThreatsNear(CellStruct cell, HouseClass* pOwner, double radius);
+	static bool CanClearObstructingDefensesForPlacement(CellStruct cell, BuildingTypeClass* pBuildingType, HouseClass* pOwner, std::vector<BuildingClass*>& outDefenses);
 };

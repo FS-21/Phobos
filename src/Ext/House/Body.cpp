@@ -846,6 +846,35 @@ void HouseExt::Serialize(T& Stm)
 			}
 		}
 	}
+
+	int lifoSize = static_cast<int>(this->AttackedBuildingsLIFO.size());
+	Stm.Process(lifoSize);
+	if constexpr (std::is_same_v<T, PhobosStreamWriter>)
+	{
+		for (auto& rec : this->AttackedBuildingsLIFO)
+		{
+			Stm.Process(rec.BuildingCoords);
+			Stm.Process(rec.AttackerCoords);
+			Stm.Process(rec.AttackerType);
+			int threatVal = static_cast<int>(rec.Threat);
+			Stm.Process(threatVal);
+			Stm.Process(rec.AttackFrame);
+		}
+	}
+	else
+	{
+		this->AttackedBuildingsLIFO.resize(lifoSize);
+		for (int i = 0; i < lifoSize; ++i)
+		{
+			Stm.Process(this->AttackedBuildingsLIFO[i].BuildingCoords);
+			Stm.Process(this->AttackedBuildingsLIFO[i].AttackerCoords);
+			Stm.Process(this->AttackedBuildingsLIFO[i].AttackerType);
+			int threatVal = 0;
+			Stm.Process(threatVal);
+			this->AttackedBuildingsLIFO[i].Threat = static_cast<ThreatCategory>(threatVal);
+			Stm.Process(this->AttackedBuildingsLIFO[i].AttackFrame);
+		}
+	}
 }
 
 void HouseExt::LoadFromStream(PhobosStreamReader& Stm)

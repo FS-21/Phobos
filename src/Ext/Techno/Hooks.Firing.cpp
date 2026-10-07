@@ -928,6 +928,12 @@ DEFINE_HOOK(0x6FF660, TechnoClass_FireAt_LateLogic, 0x6)
 	auto const pExt = TechnoExt::Fetch(pThis);
 	const auto pTypeExt = pExt->TypeExtData;
 
+	if (auto const pBld = abstract_cast<BuildingClass*>(pThis))
+	{
+		if (auto const pBldExt = BuildingExt::TryFetch(pBld))
+			pBldExt->LastCombatFrame = Unsorted::CurrentFrame;
+	}
+
 	// Interceptor.
 	if (const auto pInterceptorType = pTypeExt->InterceptorType.get())
 	{

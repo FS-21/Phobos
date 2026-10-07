@@ -1010,6 +1010,7 @@ void BuildingExt::Serialize(T& Stm)
 		.Process(this->AssignedExpansionPoint)
 		//.Process(this->IsPlayingRoofProductionAnim) It is set and reset within a same function.
 		.Process(this->DetectDisguiseActiveCounter)
+		.Process(this->LastCombatFrame)
 		;
 }
 
