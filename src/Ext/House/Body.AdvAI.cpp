@@ -732,7 +732,42 @@ bool HouseExt::AdvAI_House_Search_For_Next_Expansion_Point(HouseClass* pHouse)
 			TechTreeTypeClass::CountTotalOwnedBuildings(
 				pHouse, TechTreeTypeClass::BuildType::BuildTech) >= 1;
 		if (!hasTechCenter)
-			return false;
+		{
+			// Anti-deadlock safety check: if we still need Radar or Tech Center,
+			// verify if at least one required structure can fit in the current base layout.
+			// If neither can fit (e.g. cramped space, island, cliff-bound), allow expansion
+			// so the AI can crawl outward to obtain building space instead of stalling in calm!
+			bool canFitNextTech = false;
+			const bool hasRadar = (TechTreeTypeClass::CountTotalOwnedBuildings(
+				pHouse, TechTreeTypeClass::BuildType::BuildRadar) >= 1) ||
+				pTechTree->BuildRadar.empty();
+
+			if (!hasRadar)
+			{
+				for (const auto pR : pTechTree->BuildRadar)
+				{
+					if (pR && AdvAI_Can_Build_Building(pHouse, pR, false, true))
+					{
+						canFitNextTech = true;
+						break;
+					}
+				}
+			}
+			else
+			{
+				for (const auto pT : pTechTree->BuildTech)
+				{
+					if (pT && AdvAI_Can_Build_Building(pHouse, pT, false, true))
+					{
+						canFitNextTech = true;
+						break;
+					}
+				}
+			}
+
+			if (canFitNextTech)
+				return false;
+		}
 	}
 
 	// Check that we have at least one ConYard (needed to place buildings at the
@@ -1889,22 +1924,36 @@ BuildingTypeClass* HouseExt::AdvAI_Find_Next_Buildable_Prerequisite(
 
 		for (int token : tokenList)
 		{
-			auto possibleBuildings = getBuildingsForPrereqToken(token);
-			if (possibleBuildings.empty())
-				continue;
-
-			// Check if house already owns any building fulfilling this token
+			// Check if house already satisfies this token (generic or building)
 			bool owned = false;
-			for (auto pBld : possibleBuildings)
+			if (token < 0)
 			{
-				if (pHouse->ActiveBuildingTypes.GetItemCount(pBld->ArrayIndex) > 0)
-				{
+				if (HouseExt::HasGenericPrerequisite(token, pHouse))
 					owned = true;
-					break;
+			}
+			else
+			{
+				if (HouseExt::HasBuildingPrerequisite(pHouse, token))
+					owned = true;
+			}
+
+			auto possibleBuildings = getBuildingsForPrereqToken(token);
+			if (!owned && !possibleBuildings.empty())
+			{
+				for (auto pBld : possibleBuildings)
+				{
+					if (pHouse->ActiveBuildingTypes.GetItemCount(pBld->ArrayIndex) > 0)
+					{
+						owned = true;
+						break;
+					}
 				}
 			}
 
 			if (owned)
+				continue;
+
+			if (possibleBuildings.empty())
 				continue;
 
 			res.isSatisfied = false;
@@ -1914,7 +1963,7 @@ BuildingTypeClass* HouseExt::AdvAI_Find_Next_Buildable_Prerequisite(
 
 			for (auto pBld : possibleBuildings)
 			{
-				if (AdvAI_Can_Build_Building(pHouse, pBld, true))
+				if (AdvAI_Can_Build_Building(pHouse, pBld, true, true))
 				{
 					directlyBuildableForToken.push_back(pBld);
 				}
@@ -3383,10 +3432,14 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		}
 
 		// Check if we still have uncompleted tech center or primary superweapons
+		const bool hasRadar = (TechTreeTypeClass::CountTotalOwnedBuildings(
+			pHouse, TechTreeTypeClass::BuildType::BuildRadar) >= 1) ||
+			(pPrimaryTechTree == nullptr || pPrimaryTechTree->BuildRadar.empty());
 		const bool hasTechCenterSupport = (pPrimaryTechTree != nullptr && !pPrimaryTechTree->BuildTech.empty());
 		const bool needsTechCenter = hasTechCenterSupport && !hasTechCenter;
+		const bool needsTechOrRadar = (!hasRadar) || needsTechCenter;
 
-		bool missingCoreTechOrSW = needsTechCenter;
+		bool missingCoreTechOrSW = needsTechOrRadar;
 		if (GameModeOptionsClass::Instance.SWAllowed && !pPrimaryTechTree->BuildSuperWeapon.empty())
 		{
 			for (const auto pSW : pPrimaryTechTree->BuildSuperWeapon)
@@ -3403,12 +3456,12 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 
 		// Prioritize defense construction if paranoid or if we have undefended
 		// nodes to protect!
-		if (isParanoid || hasSomethingToProtect)
+		if (isParanoid || (!needsTechOrRadar && hasSomethingToProtect))
 		{
-			// When tech center or superweapons are needed, lower defense probability allows advancing the tech tree
+			// When tech center, radar, or superweapons are needed, lower defense probability allows advancing the tech tree
 			int rollChance = isParanoid ? 85 : 70;
-			if (needsTechCenter)
-				rollChance = isParanoid ? 50 : 25;
+			if (needsTechOrRadar)
+				rollChance = 50; // Throttled to 50% under paranoia, skipped entirely when calm
 			else if (enemyHasSuperWeapon || missingCoreTechOrSW)
 				rollChance = isParanoid ? 50 : 35;
 
@@ -3850,6 +3903,21 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			return ourAntiInfantryDefense;
 		}
 
+		// Prioritize BuildRadar once basic production and baseline anti-engineer defenses are established
+		if (!hasRadar)
+		{
+			const BuildingTypeClass* pRadarToBuild =
+				AdvAI_BuildAtLeastNOfSideAndMInTotal(
+					pHouse, pPrimaryTechTree,
+					TechTreeTypeClass::BuildType::BuildRadar, 1, 1);
+			if (pRadarToBuild != nullptr)
+			{
+				Debug::Log("AdvAI: House %d prioritizing BuildRadar %s.\n",
+					pHouse->ArrayIndex, pRadarToBuild->Name);
+				return pRadarToBuild;
+			}
+		}
+
 		// Prioritize BuildTech (and recursively resolve its prerequisites like Radar)
 		// once baseline production and anti-engineer defenses are established,
 		// ensuring the AI techs up swiftly to unlock tier-3 units and expansion.
@@ -3897,11 +3965,11 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			}
 		}
 
-		// Probabilistic roll: 50% chance when paranoid (threat/attack) or 15% in normal state while teching up.
+		// Probabilistic roll: 50% chance when paranoid (threat/attack) or 0% in calm state while teching up.
 		int rollChance = isParanoid ? 80 : 50;
-		if (needsTechCenter)
+		if (needsTechOrRadar)
 		{
-			rollChance = isParanoid ? 50 : 15;
+			rollChance = isParanoid ? 50 : 0;
 		}
 
 		bool shouldBuildDefenseThisCycle =
