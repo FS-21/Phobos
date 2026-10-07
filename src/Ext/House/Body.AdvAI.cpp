@@ -5829,58 +5829,33 @@ void HouseExt::AdvAI_Update_Primary_Factories(HouseClass* pHouse)
 
 		if (pBestFactory != nullptr)
 		{
-			// Find the active FactoryClass for this house/type/naval
-			FactoryClass* pActiveFactory =
-				pHouse->GetPrimaryFactory(type, isNaval, BuildCat::DontCare);
-
-			// Fallback: if GetPrimaryFactory returned null, try to find any building
-			// currently holding the FactoryClass pointer
-			if (pActiveFactory == nullptr)
+			if (pBestFactory != pOldPrimary)
 			{
-				for (const auto pBuilding : pHouse->Buildings)
+				Debug::Log("AdvAI PrimaryFactory: House %d (%s) changing primary %s "
+						   "%s factory from %s (%d,%d) to %s (%d,%d).\n",
+						   pHouse->ArrayIndex, pHouse->Type->ID,
+						   (isNaval ? "Naval" : "Land"),
+						   (type == AbstractType::InfantryType ? "Infantry"
+															   : "Unit/Vehicle"),
+						   pOldPrimary ? pOldPrimary->Type->ID : "None",
+						   pOldPrimary ? pOldPrimary->GetMapCoords().X : 0,
+						   pOldPrimary ? pOldPrimary->GetMapCoords().Y : 0,
+						   pBestFactory->Type->ID, pBestFactory->GetMapCoords().X,
+						   pBestFactory->GetMapCoords().Y);
+			}
+
+			for (const auto pBuilding : pHouse->Buildings)
+			{
+				if (pBuilding && pBuilding->Type->Factory == type &&
+					pBuilding->Type->Naval == isNaval)
 				{
-					if (pBuilding && pBuilding->IsAlive &&
-						pBuilding->Type->Factory == type &&
-						pBuilding->Type->Naval == isNaval &&
-						pBuilding->Factory != nullptr)
-					{
-						pActiveFactory = pBuilding->Factory;
-						break;
-					}
+					pBuilding->IsPrimaryFactory = (pBuilding == pBestFactory);
 				}
 			}
 
-			if (pActiveFactory != nullptr)
+			if (pBestFactory->Factory != nullptr)
 			{
-				if (pBestFactory != pOldPrimary)
-					Debug::Log("AdvAI PrimaryFactory: House %d (%s) changing primary %s "
-							   "%s factory from %s (%d,%d) to %s (%d,%d).\n",
-							   pHouse->ArrayIndex, pHouse->Type->ID,
-							   (isNaval ? "Naval" : "Land"),
-							   (type == AbstractType::InfantryType ? "Infantry"
-																   : "Unit/Vehicle"),
-							   pOldPrimary ? pOldPrimary->Type->ID : "None",
-							   pOldPrimary ? pOldPrimary->GetMapCoords().X : 0,
-							   pOldPrimary ? pOldPrimary->GetMapCoords().Y : 0,
-							   pBestFactory->Type->ID, pBestFactory->GetMapCoords().X,
-							   pBestFactory->GetMapCoords().Y);
-
-				// Assign the active factory to the best building, and detach it from
-				// all others of this category
-				for (const auto pBuilding : pHouse->Buildings)
-				{
-					if (pBuilding && pBuilding->Type->Factory == type &&
-						pBuilding->Type->Naval == isNaval)
-					{
-						pBuilding->IsPrimaryFactory = (pBuilding == pBestFactory);
-						if (pBuilding == pBestFactory)
-							pBuilding->Factory = pActiveFactory;
-						else if (pBuilding->Factory == pActiveFactory)
-							pBuilding->Factory = nullptr;
-					}
-				}
-
-				pHouse->SetPrimaryFactory(pActiveFactory, type, isNaval,
+				pHouse->SetPrimaryFactory(pBestFactory->Factory, type, isNaval,
 										  BuildCat::DontCare);
 			}
 		}
