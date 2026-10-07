@@ -1508,6 +1508,55 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 	return bestCell;
 }
 
+CellStruct BuildingExt::Find_Best_Inner_Base_Placement_Cell(
+	BuildingClass* pBuilding,
+	int (*valueGenerator)(CellStruct, BuildingClass*),
+	int initialRadius,
+	int stepRadius,
+	int maxRadius)
+{
+	if (!pBuilding || !pBuilding->Owner || !pBuilding->Type)
+		return CellStruct::Empty;
+
+	const HouseClass* pOwner = pBuilding->Owner;
+	CellStruct centerCell;
+	if (pOwner->ConYards.Count > 0 && pOwner->ConYards[0] != nullptr)
+		centerCell = GeneralUtils::CellFromCoordinates(pOwner->ConYards[0]->GetCenterCoords());
+	else
+		centerCell = pOwner->Base_Center();
+
+	const int mapWidth = static_cast<int>(MapClass::Instance.MapRect.Width);
+	const int mapHeight = static_cast<int>(MapClass::Instance.MapRect.Height);
+	const int mapMaxDimension = std::max(mapWidth, mapHeight);
+	const int effectiveMaxRadius = (maxRadius > 0) ? maxRadius : mapMaxDimension;
+
+	// Concentric search expanding outward from ConYard / Base Center:
+	// Start with initialRadius (e.g. 25 cells), then expand by stepRadius (5 cells)
+	// until a valid placement is found or the entire map area is scanned.
+	for (int radius = initialRadius; radius <= effectiveMaxRadius; radius += stepRadius)
+	{
+		const int left = std::max(0, centerCell.X - radius);
+		const int top = std::max(0, centerCell.Y - radius);
+		const int right = std::min(mapWidth, centerCell.X + radius + 1);
+		const int bottom = std::min(mapHeight, centerCell.Y + radius + 1);
+		const RectangleStruct ringArea{ left, top, right - left, bottom - top };
+
+		CellStruct cell = Find_Best_Building_Placement_Cell(ringArea, pBuilding, valueGenerator);
+		if (cell.X > 0 && cell.Y > 0)
+		{
+			Debug::Log("AdvAI: Found inner base placement for %s within radius %d cells of ConYard (%d,%d).\n",
+				pBuilding->Type->Name, radius, cell.X, cell.Y);
+			return cell;
+		}
+
+		// If this search area already encompasses the entire map, further radius expansion is redundant
+		if (left == 0 && top == 0 && right >= mapWidth && bottom >= mapHeight)
+			break;
+	}
+
+	return CellStruct::Empty;
+}
+
 int inline BuildingExt::Modify_Rating_By_Allied_Building_Proximity(CellStruct cell, BuildingClass* pBuilding, int originalValue)
 {
 	const int value = originalValue * 1000;
@@ -1935,7 +1984,14 @@ int BuildingExt::Near_Base_Center_Placement_Position_Value(CellStruct cell, Buil
 	if (g_BasePlacementBiasCell.X > 0 && g_BasePlacementBiasCell.Y > 0)
 		biasValue = static_cast<int>(cell.DistanceFrom(g_BasePlacementBiasCell) * 15.0);
 
-	return Modify_Rating_By_Allied_Building_Proximity(cell, pBuilding, static_cast<int>(balancedDist * 100.0) + biasValue);
+	// Penalize placement towards the primary enemy so critical inner-base structures (Reactors, Superweapons)
+	// prefer the safe backline of the base rather than facing enemy attack routes.
+	int enemyProximityPenalty = 0;
+	const int enemyDist = Get_Distance_To_Primary_Enemy(cell, const_cast<HouseClass*>(pOwner));
+	if (enemyDist < 80)
+		enemyProximityPenalty = (80 - enemyDist) * 35;
+
+	return Modify_Rating_By_Allied_Building_Proximity(cell, pBuilding, static_cast<int>(balancedDist * 100.0) + biasValue + enemyProximityPenalty);
 }
 
 int BuildingExt::Near_Base_Center_Defense_Placement_Position_Value(CellStruct cell, BuildingClass* pBuilding)
@@ -2075,7 +2131,7 @@ CellStruct BuildingExt::Get_Best_SuperWeapon_Building_Placement_Position(Buildin
 
 	if (isInnerBase)
 	{
-		return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Base_Center_Placement_Position_Value);
+		return Find_Best_Inner_Base_Placement_Cell(pBuilding, Near_Base_Center_Placement_Position_Value);
 	}
 
 	return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Far_From_Enemy_Placement_Position_Value);
@@ -3119,42 +3175,6 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 			return Get_Best_Expansion_Placement_Position(pBuilding);
 		}
 		return Get_Best_Refinery_Placement_Position(pBuilding);
-	}
-
-	// Advanced Power Plants (Reactors) MUST ALWAYS be placed in the main base near ConYard!
-	if (TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBuilding->Type) || pBuilding->Type->PowerBonus > 200)
-	{
-		const auto pExt = BuildingTypeExt::Fetch(pBuilding->Type);
-		if (pExt->AIInnerBase.Get(true))
-		{
-			const int adjacency = pBuilding->Type->Adjacent;
-			const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(true), pBuilding->Type);
-			return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Base_Center_Placement_Position_Value);
-		}
-	}
-
-	// Helipads / Airfields MUST ALWAYS be placed safely in the inner base near base center / ConYard!
-	if (pBuilding->Type->Helipad || TechTreeTypeClass::TotalBuildHelipad.contains(pBuilding->Type) || pBuilding->Type->Factory == AbstractType::AircraftType)
-	{
-		const auto pExt = BuildingTypeExt::Fetch(pBuilding->Type);
-		if (pExt->AIInnerBase.Get(true))
-		{
-			const int adjacency = pBuilding->Type->Adjacent;
-			const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(true), pBuilding->Type);
-			return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Helipad_Placement_Cell_Value);
-		}
-	}
-
-	// Radar and Tech Centers must also always be placed safely in the inner base!
-	if (pBuilding->Type->Radar || TechTreeTypeClass::TotalBuildRadar.contains(pBuilding->Type) || TechTreeTypeClass::TotalBuildTech.contains(pBuilding->Type))
-	{
-		const auto pExt = BuildingTypeExt::Fetch(pBuilding->Type);
-		if (pExt->AIInnerBase.Get(true))
-		{
-			const int adjacency = pBuilding->Type->Adjacent;
-			const RectangleStruct baseArea = Get_Base_Rect(pBuilding->Owner, adjacency, pBuilding->Type->GetFoundationWidth(), pBuilding->Type->GetFoundationHeight(true), pBuilding->Type);
-			return Find_Best_Building_Placement_Cell(baseArea, pBuilding, Near_Base_Center_Placement_Position_Value);
-		}
 	}
 
 	if (GetSupportRadiusType(pBuilding->Type) != SupportRadiusType::None || TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
