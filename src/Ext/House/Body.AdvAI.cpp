@@ -4407,10 +4407,10 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 				maxDocks += 4;
 
 			// If the AI has met its initial helipad target, only scale up if aircraft capacity is full
-			// AND we haven't reached the difficulty safety cap of docks
+			// AND we haven't reached the difficulty safety cap of docks (unless LimitedFactories=false)
 			if (static_cast<size_t>(totalHelipadsOwned) >= targetInitialHelipads)
 			{
-				if (totalCurrentDocks > 0 && totalAircraft >= totalCurrentDocks && totalCurrentDocks < maxDocks)
+				if (totalCurrentDocks > 0 && totalAircraft >= totalCurrentDocks && (!limitFactories || totalCurrentDocks < maxDocks))
 					optimalHelipadCount = totalHelipadsOwned + 1;
 				else
 					optimalHelipadCount = totalHelipadsOwned;
@@ -4428,8 +4428,13 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 
 			const size_t maxHelipadCount =
 				std::max(size_t(1), (static_cast<size_t>(maxDocks) + docksPerHelipad - 1) / docksPerHelipad);
-			if (optimalHelipadCount > maxHelipadCount)
+			if (limitFactories && optimalHelipadCount > maxHelipadCount)
 				optimalHelipadCount = maxHelipadCount;
+
+			// Also honor AIBuildCounts explicitly configured on individual helipad structures
+			const int targetFromCounts = GetTargetBuildCount(const_cast<BuildingTypeClass*>(pHelipadType), -1, pPrimaryTechTree);
+			if (targetFromCounts > 0 && optimalHelipadCount < static_cast<size_t>(targetFromCounts))
+				optimalHelipadCount = static_cast<size_t>(targetFromCounts);
 
 			// If explicit BuildLimit is defined, respect it as an absolute cap
 			if (pHelipadType->BuildLimit > 0 &&
