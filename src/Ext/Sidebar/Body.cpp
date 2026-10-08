@@ -367,13 +367,17 @@ void TabsConfig::Read(CCINIClass* pINI, const char* pSection)
 	char orderBuf[0x80] = { 0 };
 	if (pINI->ReadString(pSection, "Tabs.Order", "", orderBuf, sizeof(orderBuf)) && orderBuf[0] != '\0')
 	{
+		char* comment = strchr(orderBuf, ';');
+		if (comment)
+			*comment = '\0';
+
 		this->Order.clear();
 		char* context = nullptr;
-		char* token = strtok_s(orderBuf, ",", &context);
+		char* token = strtok_s(orderBuf, ", \t", &context);
 		while (token)
 		{
 			this->Order.push_back(atoi(token));
-			token = strtok_s(nullptr, ",", &context);
+			token = strtok_s(nullptr, ", \t", &context);
 		}
 	}
 }
@@ -1080,6 +1084,104 @@ void SidebarExt::InitClear()
 	}
 }
 
+int SidebarExt::GetTabSlot(int tabIdx, const SidebarConfig& config)
+{
+	if (!config.Tabs.Order.empty())
+	{
+		for (size_t s = 0; s < config.Tabs.Order.size(); ++s)
+		{
+			if (config.Tabs.Order[s] == tabIdx)
+				return static_cast<int>(s);
+		}
+		return -1;
+	}
+	return tabIdx;
+}
+
+bool SidebarExt::IsTabVisible(int tabIdx, const SidebarConfig& config)
+{
+	int tabCount = config.Tabs.Count.Get(4);
+	if (tabCount <= 1)
+	{
+		int defaultTab = config.Tabs.Order.empty() ? 0 : config.Tabs.Order[0];
+		return tabIdx == defaultTab;
+	}
+
+	int slot = GetTabSlot(tabIdx, config);
+	return slot >= 0 && slot < tabCount;
+}
+
+int SidebarExt::ResolveVisibleTab(int desiredTab, AbstractType abs, const SidebarConfig& config)
+{
+	if (IsTabVisible(desiredTab, config))
+		return desiredTab;
+
+	std::vector<int> candidates;
+	if (desiredTab == 2)
+	{
+		candidates = { 2, 3, 1, 0 };
+	}
+	else if (desiredTab == 3)
+	{
+		candidates = { 3, 2, 1, 0 };
+	}
+	else if (desiredTab == 1)
+	{
+		candidates = { 1, 0, 3, 2 };
+	}
+	else if (desiredTab == 0)
+	{
+		candidates = { 0, 1, 3, 2 };
+	}
+	else
+	{
+		switch (abs)
+		{
+		case AbstractType::Infantry:
+		case AbstractType::InfantryType:
+			candidates = { 2, 3, 1, 0 };
+			break;
+		case AbstractType::Unit:
+		case AbstractType::UnitType:
+		case AbstractType::Aircraft:
+		case AbstractType::AircraftType:
+			candidates = { 3, 2, 1, 0 };
+			break;
+		case AbstractType::Building:
+		case AbstractType::BuildingType:
+		case AbstractType::Super:
+		case AbstractType::SuperWeaponType:
+		default:
+			candidates = { 0, 1, 3, 2 };
+			break;
+		}
+	}
+
+	for (int cand : candidates)
+	{
+		if (cand != desiredTab && IsTabVisible(cand, config))
+			return cand;
+	}
+
+	if (!config.Tabs.Order.empty())
+	{
+		int tabCount = config.Tabs.Count.Get(4);
+		for (size_t s = 0; s < config.Tabs.Order.size() && s < static_cast<size_t>(tabCount); ++s)
+		{
+			if (IsTabVisible(config.Tabs.Order[s], config))
+				return config.Tabs.Order[s];
+		}
+	}
+
+	for (int t = 0; t < 16; ++t)
+	{
+		if (IsTabVisible(t, config))
+			return t;
+	}
+
+	return 0;
+}
+
 void SidebarExt::InitIO()
 {
 	InitClear();
@@ -1088,11 +1190,48 @@ void SidebarExt::InitIO()
 
 	int tabCount = config.Tabs.Count.Get(4);
 	int visibleTabs = (tabCount == 1) ? 0 : tabCount;
-	for (int i = visibleTabs; i < 4; ++i)
+	for (int i = 0; i < 4; ++i)
 	{
-		GScreenClass::Instance.RemoveButton(&SidebarClass::TabButtons[i]);
-		SidebarClass::TabButtons[i].SetPosition(-10000, -10000);
-		SidebarClass::TabButtons[i].Disable();
+		int slot = GetTabSlot(i, config);
+
+		if (slot < 0 || slot >= visibleTabs)
+		{
+			GScreenClass::Instance.RemoveButton(&SidebarClass::TabButtons[i]);
+			SidebarClass::TabButtons[i].SetPosition(-10000, -10000);
+			SidebarClass::TabButtons[i].Disable();
+		}
+		else
+		{
+			if (static_cast<size_t>(slot) < config.Tabs.Positions.size())
+			{
+				SidebarClass::TabButtons[i].SetPosition(config.Tabs.Positions[slot].X, config.Tabs.Positions[slot].Y);
+			}
+			else if (!config.Tabs.Order.empty())
+			{
+				int baseX = *reinterpret_cast<int*>(0x00B0B4E8);
+				int tabWidth = *reinterpret_cast<int*>(0x00B0B4F0);
+				int posY = *reinterpret_cast<int*>(0x00B0B4EC);
+				SidebarClass::TabButtons[i].SetPosition(baseX + slot * tabWidth, posY);
+			}
+		}
+	}
+
+	int initialTab = 0;
+	if (!config.Tabs.Order.empty() && IsTabVisible(config.Tabs.Order[0], config))
+		initialTab = config.Tabs.Order[0];
+	else
+		initialTab = ResolveVisibleTab(0, AbstractType::None, config);
+
+	if (initialTab >= 0 && initialTab < 4)
+	{
+		SidebarClass::Instance.ActiveTabIndex = initialTab;
+		for (int i = 0; i < 4; ++i)
+		{
+			if (i == initialTab)
+				SidebarClass::TabButtons[i].TurnOn();
+			else
+				SidebarClass::TabButtons[i].TurnOff();
+		}
 	}
 
 	const DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);

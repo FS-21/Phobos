@@ -256,6 +256,10 @@ public:
 
 	static bool __stdcall AresTabCameo_RemoveCameo(BuildType* pItem);
 
+	static int GetTabSlot(int tabIdx, const SidebarConfig& config);
+	static bool IsTabVisible(int tabIdx, const SidebarConfig& config);
+	static int ResolveVisibleTab(int desiredTab, AbstractType abs, const SidebarConfig& config);
+
 	static bool IsTogglePowerRequiresBuildings();
 	static bool IsRepairRequiresBuildings();
 	static bool IsSellRequiresBuildings();
