@@ -30,6 +30,8 @@ public:
 	int TurretAnimRateTick;
 	int ConstructionStartFacing;
 	bool IsPlayingRoofProductionAnim;
+	TechnoClass* LastProducedTechno;
+	TechnoTypeClass* LastProducedType;
 
 	BuildingExt(BuildingClass* OwnerObject) : TechnoExt(OwnerObject)
 		, DeployedTechno { false }
@@ -49,6 +51,8 @@ public:
 		, TurretAnimRateTick { 0 }
 		, ConstructionStartFacing { -1 }
 		, IsPlayingRoofProductionAnim { false }
+		, LastProducedTechno { nullptr }
+		, LastProducedType { nullptr }
 	{ }
 
 	// typed owner accessor (shadows the TechnoClass one from the base)
@@ -76,7 +80,10 @@ public:
 	virtual void OnDetach(BuildingClass* pTarget, bool removed) override
 	{
 		if (removed)
+		{
 			AnnounceInvalidPointer(this->CurrentAirFactory, pTarget);
+			AnnounceInvalidPointer(this->LastProducedTechno, pTarget);
+		}
 	}
 
 	virtual void LoadFromStream(PhobosStreamReader& Stm) override;

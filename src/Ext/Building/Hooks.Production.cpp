@@ -244,3 +244,19 @@ DEFINE_HOOK(0x4449FB, BuildingClass_KickOutUnit_CloningVats, 0x8)
 
 	return SkipGameCode;
 }
+
+DEFINE_HOOK(0x443C60, BuildingClass_ExitObject_TrackLastProduced, 0x6)
+{
+	GET(BuildingClass*, pFactory, ECX);
+	GET_STACK(TechnoClass*, pProduction, 0x4);
+
+	if (pFactory && pProduction)
+	{
+		auto const pBldExt = BuildingExt::Fetch(pFactory);
+
+		pBldExt->LastProducedTechno = pProduction;
+		pBldExt->LastProducedType = pProduction->GetTechnoType();
+	}
+
+	return 0;
+}

@@ -126,6 +126,10 @@ struct ObserverFloatingUnitWindow
 	RectangleStruct WindowRect { 0, 0, 0, 0 };
 	RectangleStruct CloseBtnRect { 0, 0, 0, 0 };
 	RectangleStruct CameoClickRect { 0, 0, 0, 0 };
+	RectangleStruct LastProducedClickRect { 0, 0, 0, 0 };
+	RectangleStruct LastProducedCameoRect { 0, 0, 0, 0 };
+	TechnoClass* pLastProducedTechno { nullptr };
+	TechnoTypeClass* pLastProducedType { nullptr };
 	bool IsDragging { false };
 	Point2D DragOffset { 0, 0 };
 

@@ -43,6 +43,18 @@ public:
 	BuildingClass* Factory_NavyType;
 	BuildingClass* Factory_AircraftType;
 
+	TechnoClass* LastProducedBuilding { nullptr };
+	TechnoTypeClass* LastProducedBuildingType { nullptr };
+	TechnoClass* LastProducedDefense { nullptr };
+	TechnoTypeClass* LastProducedDefenseType { nullptr };
+	TechnoClass* LastProducedInfantry { nullptr };
+	TechnoTypeClass* LastProducedInfantryType { nullptr };
+	TechnoClass* LastProducedUnit { nullptr };
+	TechnoTypeClass* LastProducedUnitType { nullptr };
+	TechnoClass* LastProducedAircraft { nullptr };
+	TechnoTypeClass* LastProducedAircraftType { nullptr };
+	TechnoClass* LastProducedNavy { nullptr };
+	TechnoTypeClass* LastProducedNavyType { nullptr };
 	CDTimerClass CombatAlertTimer;
 	CDTimerClass AISuperWeaponDelayTimer;
 	CDTimerClass AIFireSaleDelayTimer;

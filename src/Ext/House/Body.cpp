@@ -719,6 +719,18 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->ForceRadar)
 		.Process(this->PlayerAutoRepair)
 		//.Process(this->BeaconsPlacedOrder) beacon is not saved, so this follows it.
+		.Process(this->LastProducedBuilding)
+		.Process(this->LastProducedBuildingType)
+		.Process(this->LastProducedDefense)
+		.Process(this->LastProducedDefenseType)
+		.Process(this->LastProducedInfantry)
+		.Process(this->LastProducedInfantryType)
+		.Process(this->LastProducedUnit)
+		.Process(this->LastProducedUnitType)
+		.Process(this->LastProducedAircraft)
+		.Process(this->LastProducedAircraftType)
+		.Process(this->LastProducedNavy)
+		.Process(this->LastProducedNavyType)
 		;
 }
 
@@ -755,6 +767,8 @@ void HouseExt::OnDetach(BuildingClass* pTarget, bool removed)
 		AnnounceInvalidPointer(this->Factory_VehicleType, pTarget);
 		AnnounceInvalidPointer(this->Factory_NavyType, pTarget);
 		AnnounceInvalidPointer(this->Factory_AircraftType, pTarget);
+		AnnounceInvalidPointer(this->LastProducedBuilding, pTarget);
+		AnnounceInvalidPointer(this->LastProducedDefense, pTarget);
 
 		if (!this->PowerPlantEnhancers.empty())
 		{
