@@ -2,7 +2,6 @@
 
 #include <Ext/House/Body.h>
 #include <Ext/SWType/Body.h>
-#include <New/Type/TechTreeTypeClass.h>
 
 BuildingTypeExt::ExtContainer BuildingTypeExt::ExtMap;
 
@@ -675,15 +674,9 @@ bool BuildingTypeExt::IsAIInnerBase(const BuildingTypeClass* pType)
 
 	const auto pExt = BuildingTypeExt::Fetch(pType);
 	if (pExt->AIInnerBase.isset())
-	{
 		return pExt->AIInnerBase.Get();
-	}
 
-	const bool isSuperWeapon = (pType->HasSuperWeapon()
-		|| BuildingTypeExt::HasDisableableSuperWeapons(const_cast<BuildingTypeClass*>(pType))
-		|| TechTreeTypeClass::TotalBuildSuperWeapon.contains(const_cast<BuildingTypeClass*>(pType)))
-		&& !pType->IsBaseDefense;
-
-	return pType->CloakGenerator || pExt->GapGenerator || isSuperWeapon;
+	return pType->CloakGenerator || pExt->GapGenerator;
 }
+
 
