@@ -3,6 +3,7 @@
 
 #include <Ext/Side/Body.h>
 #include <Ext/TechnoType/Body.h>
+
 #include <Misc/MessageColumn.h>
 #include <Drawing.h>
 #include <GScreenClass.h>
@@ -10,14 +11,10 @@
 DEFINE_HOOK(0x6ABC60, SidebarClass_GetObjectTabIdx, 0x5)
 {
 	const auto config = SidebarExt::ActiveConfig();
-	if (config.Tabs.Count.Get(4) == 1)
-	{
-		R->EAX(0);
-		return 0x6ABC9A;
-	}
-
 	GET(AbstractType, abs, ECX);
 	GET(int, idxType, EDX);
+
+	int desiredTab = 0;
 
 	const auto pTechnoType = TechnoTypeClass::GetByTypeAndIndex(abs, idxType);
 	if (pTechnoType)
@@ -26,52 +23,82 @@ DEFINE_HOOK(0x6ABC60, SidebarClass_GetObjectTabIdx, 0x5)
 		{
 			if (pExt->TabIndex.isset())
 			{
-				int maxCount = config.Tabs.Count.Get(4);
-				int tabIdx = pExt->TabIndex.Get();
+				desiredTab = pExt->TabIndex.Get();
+				R->EAX(SidebarExt::ResolveVisibleTab(desiredTab, abs, config));
+				return 0x6ABC9A;
+			}
+		}
 
-				if (tabIdx >= 0 && tabIdx < maxCount)
-				{
-					R->EAX(tabIdx);
-					return 0x6ABC9A;
-				}
-				else
-				{
-					Debug::Log("[Sidebar] Warning: TechnoType [%s] has TabIndex=%d out of bounds (Tabs.Count=%d). Falling back to vanilla.\n",
-						pTechnoType->ID, tabIdx, maxCount);
-				}
+		if (abs == AbstractType::Infantry || abs == AbstractType::InfantryType)
+		{
+			desiredTab = 2;
+		}
+		else if (abs == AbstractType::Unit || abs == AbstractType::UnitType ||
+			abs == AbstractType::Aircraft || abs == AbstractType::AircraftType)
+		{
+			desiredTab = 3;
+		}
+		else if (abs == AbstractType::Building || abs == AbstractType::BuildingType)
+		{
+			auto pBType = static_cast<BuildingTypeClass*>(pTechnoType);
+			desiredTab = (pBType->BuildCat == BuildCat::Combat) ? 1 : 0;
+		}
+	}
+	else if (abs == AbstractType::Super || abs == AbstractType::SuperWeaponType)
+	{
+		desiredTab = 1;
+		if (idxType >= 0 && idxType < SuperWeaponTypeClass::Array.Count)
+		{
+			if (const auto pSWType = SuperWeaponTypeClass::Array[idxType])
+			{
+				if (const auto pSWTypExt = SWTypeExt::Fetch(pSWType))
+					desiredTab = pSWTypExt->TabIndex;
 			}
 		}
 	}
+	else
+	{
+		if (abs == AbstractType::Infantry || abs == AbstractType::InfantryType)
+			desiredTab = 2;
+		else if (abs == AbstractType::Unit || abs == AbstractType::UnitType ||
+			abs == AbstractType::Aircraft || abs == AbstractType::AircraftType)
+			desiredTab = 3;
+		else
+			desiredTab = 0;
+	}
 
-	return 0;
+	R->EAX(SidebarExt::ResolveVisibleTab(desiredTab, abs, config));
+	return 0x6ABC9A;
 }
 
 DEFINE_HOOK(0x6ABCD0, SidebarClass_GetObjectTabIdx2, 0x5)
 {
 	const auto config = SidebarExt::ActiveConfig();
-	if (config.Tabs.Count.Get(4) == 1)
-	{
-		R->EAX(0);
-		return 0x6ABCF4;
-	}
+	GET(AbstractType, abs, ECX);
+	GET(BuildCat, buildCat, EDX);
 
-	return 0;
+	int desiredTab = 0;
+	if (abs == AbstractType::InfantryType || abs == AbstractType::Infantry)
+		desiredTab = 2;
+	else if (abs == AbstractType::AircraftType || abs == AbstractType::Aircraft ||
+		abs == AbstractType::UnitType || abs == AbstractType::Unit)
+		desiredTab = 3;
+	else if (abs == AbstractType::BuildingType || abs == AbstractType::Building)
+		desiredTab = (buildCat == BuildCat::Combat) ? 1 : 0;
+	else if (abs == AbstractType::Super || abs == AbstractType::SuperWeaponType)
+		desiredTab = 1;
+
+	R->EAX(SidebarExt::ResolveVisibleTab(desiredTab, abs, config));
+	return 0x6ABCF4;
 }
 
 DEFINE_HOOK(0x6A7590, SidebarClass_SetTab, 0x5)
 {
 	const auto config = SidebarExt::ActiveConfig();
-	if (config.Tabs.Count.Get(4) == 1)
-	{
-		R->Stack(0x4, 0);
-		return 0;
-	}
-
 	GET_STACK(int, tabIndex, 0x4);
-	if (!config.Tabs.Order.empty() && tabIndex >= 0 && static_cast<size_t>(tabIndex) < config.Tabs.Order.size())
-	{
-		R->Stack(0x4, config.Tabs.Order[tabIndex]);
-	}
+
+	int resolvedTab = SidebarExt::ResolveVisibleTab(tabIndex, AbstractType::None, config);
+	R->Stack(0x4, resolvedTab);
 
 	return 0;
 }
@@ -85,19 +112,20 @@ DEFINE_HOOK(0x69DEC8, ShapeButtonClass_Draw_CheckEnabled, 0x5)
 	GET(ShapeButtonClass*, pThis, ESI);
 
 	if (pThis->X <= -5000 || pThis->Y <= -5000)
-	{
 		return 0x69DFAD;
-	}
 
 	const auto config = SidebarExt::ActiveConfig();
 	int tabCount = config.Tabs.Count.Get(4);
 	int visibleTabs = (tabCount == 1) ? 0 : tabCount;
 
-	for (int i = visibleTabs; i < 4; ++i)
+	for (int i = 0; i < 4; ++i)
 	{
 		if (pThis == &SidebarClass::TabButtons[i])
 		{
-			return 0x69DFAD;
+			int slot = SidebarExt::GetTabSlot(i, config);
+			if (slot < 0 || slot >= visibleTabs)
+				return 0x69DFAD;
+			break;
 		}
 	}
 
@@ -113,18 +141,27 @@ DEFINE_HOOK(0x6A5443, SidebarClass_InitGUI_TabButtonPos, 0x6)
 	GET(int, tabIdx, EBP);
 	GET(DWORD, esiVal, ESI);
 
+	int slot = SidebarExt::GetTabSlot(tabIdx, config);
+
 	int posX = R->EDX();
 	int posY = R->EAX();
 
-	if (tabIdx >= visibleTabs)
+	if (slot < 0 || slot >= visibleTabs)
 	{
 		posX = -10000;
 		posY = -10000;
 	}
-	else if (static_cast<size_t>(tabIdx) < config.Tabs.Positions.size())
+	else if (static_cast<size_t>(slot) < config.Tabs.Positions.size())
 	{
-		posX = config.Tabs.Positions[tabIdx].X;
-		posY = config.Tabs.Positions[tabIdx].Y;
+		posX = config.Tabs.Positions[slot].X;
+		posY = config.Tabs.Positions[slot].Y;
+	}
+	else if (!config.Tabs.Order.empty())
+	{
+		int baseX = *reinterpret_cast<int*>(0x00B0B4E8);
+		int tabWidth = *reinterpret_cast<int*>(0x00B0B4F0);
+		posX = baseX + slot * tabWidth;
+		posY = *reinterpret_cast<int*>(0x00B0B4EC);
 	}
 
 	*reinterpret_cast<int*>(esiVal - 0x18) = posX;
@@ -141,8 +178,9 @@ DEFINE_HOOK(0x6A7E36, SidebarClass_Activate_AddTabButton, 0x8)
 
 	GET(ShapeButtonClass*, pButton, EDI);
 	int tabIdx = (reinterpret_cast<DWORD>(pButton) - 0x00B07C48) / sizeof(ShapeButtonClass);
+	int slot = SidebarExt::GetTabSlot(tabIdx, config);
 
-	if (tabIdx < visibleTabs)
+	if (slot >= 0 && slot < visibleTabs)
 	{
 		GET(GScreenClass*, pGScreen, ESI);
 		pGScreen->AddButton(pButton);
@@ -165,7 +203,9 @@ DEFINE_HOOK(0x6ABE6E, SidebarClass_RepositionTabButtons, 0x6)
 	GET(int, edi, EDI);
 	GET(ShapeButtonClass*, pButton, ESI);
 
-	if (edi >= visibleTabs)
+	int slot = SidebarExt::GetTabSlot(edi, config);
+
+	if (slot < 0 || slot >= visibleTabs)
 	{
 		pButton->SetPosition(-10000, -10000);
 		pButton->Disable();
@@ -174,11 +214,20 @@ DEFINE_HOOK(0x6ABE6E, SidebarClass_RepositionTabButtons, 0x6)
 		return 0x6ABE94;
 	}
 
-	if (static_cast<size_t>(edi) < config.Tabs.Positions.size())
+	if (static_cast<size_t>(slot) < config.Tabs.Positions.size())
 	{
-		int posX = config.Tabs.Positions[edi].X;
-		int posY = config.Tabs.Positions[edi].Y;
+		int posX = config.Tabs.Positions[slot].X;
+		int posY = config.Tabs.Positions[slot].Y;
 		pButton->SetPosition(posX, posY);
+		pButton->MarkRedraw();
+		return 0x6ABE94;
+	}
+	else if (!config.Tabs.Order.empty())
+	{
+		int baseX = *reinterpret_cast<int*>(0x00B0B4E8);
+		int tabWidth = *reinterpret_cast<int*>(0x00B0B4F0);
+		int posY = *reinterpret_cast<int*>(0x00B0B4EC);
+		pButton->SetPosition(baseX + slot * tabWidth, posY);
 		pButton->MarkRedraw();
 		return 0x6ABE94;
 	}
@@ -196,10 +245,10 @@ DEFINE_HOOK(0x6A6483, SidebarClass_Recalc_EnableTabButton, 0x7)
 	GET_STACK(int, tabIdx, 0x18);
 	GET(ShapeButtonClass*, pButton, ESI);
 
-	if (tabIdx < visibleTabs)
-	{
+	int slot = SidebarExt::GetTabSlot(tabIdx, config);
+
+	if (slot >= 0 && slot < visibleTabs)
 		pButton->Enable();
-	}
 	else
 	{
 		pButton->Disable();
@@ -218,10 +267,10 @@ DEFINE_HOOK(0x6A67FD, SidebarClass_Recalc2_EnableTabButton, 0x7)
 	GET(int, tabIdx, ESI);
 	GET(ShapeButtonClass*, pButton, EBX);
 
-	if (tabIdx < visibleTabs)
-	{
+	int slot = SidebarExt::GetTabSlot(tabIdx, config);
+
+	if (slot >= 0 && slot < visibleTabs)
 		pButton->Enable();
-	}
 	else
 	{
 		pButton->Disable();
@@ -271,9 +320,7 @@ DEFINE_HOOK(0x6A6EB1, SidebarClass_DrawIt_ProducingProgress, 0x6)
 	{
 		const auto config = SidebarExt::ActiveConfig();
 		if (config.Tabs.Count.isset() && config.Tabs.Count.Get() == 1)
-		{
 			return 0;
-		}
 
 		const auto pPlayer = HouseClass::CurrentPlayer;
 		const auto pSideExt = SideExt::Fetch(SideClass::Array.GetItem(HouseClass::CurrentPlayer->SideIndex));
@@ -281,39 +328,56 @@ DEFINE_HOOK(0x6A6EB1, SidebarClass_DrawIt_ProducingProgress, 0x6)
 		const int XBase = (pSideExt->Sidebar_GDIPositions ? 26 : 20) + pSideExt->Sidebar_ProducingProgress_Offset.Get().X;
 		const int YBase = 197 + pSideExt->Sidebar_ProducingProgress_Offset.Get().Y;
 
-		const int maxTabs = config.Tabs.Count.Get(4);
-		for (int i = 0; i < maxTabs && i < 16; i++)
+		for (int t = 0; t < 16; ++t)
 		{
-			if (const auto pSHP = SidebarExt::TabProducingProgress[i])
+			if (!SidebarExt::IsTabVisible(t, config))
+				continue;
+
+			auto pSHP = SidebarExt::TabProducingProgress[t];
+			if (!pSHP && t < 4)
+				pSHP = SidebarExt::TabProducingProgress[0];
+
+			if (!pSHP)
+				continue;
+
+			FactoryClass* pActiveFactory = nullptr;
+			auto checkFactory = [&](FactoryClass* pF)
 			{
-				const auto rtti = i == 0 || i == 1 ? AbstractType::BuildingType : AbstractType::InfantryType;
-				FactoryClass* pFactory = nullptr;
-
-				if (i != 3)
+				if (pF && pF->Object)
 				{
-					pFactory = pPlayer->GetPrimaryFactory(rtti, false, i == 1 ? BuildCat::Combat : BuildCat::DontCare);
+					if (!pActiveFactory || pF->GetProgress() > pActiveFactory->GetProgress())
+						pActiveFactory = pF;
 				}
-				else
-				{
-					pFactory = pPlayer->GetPrimaryFactory(AbstractType::UnitType, false, BuildCat::DontCare);
-					if (!pFactory || !pFactory->Object)
-						pFactory = pPlayer->GetPrimaryFactory(AbstractType::UnitType, true, BuildCat::DontCare);
-					if (!pFactory || !pFactory->Object)
-						pFactory = pPlayer->GetPrimaryFactory(AbstractType::AircraftType, false, BuildCat::DontCare);
-				}
+			};
 
-				const int idxFrame = pFactory
-					? (int)(((double)pFactory->GetProgress() / 54) * (pSHP->Frames - 1))
-					: -1;
+			if (SidebarExt::ResolveVisibleTab(0, AbstractType::BuildingType, config) == t)
+				checkFactory(pPlayer->GetPrimaryFactory(AbstractType::BuildingType, false, BuildCat::DontCare));
 
-				Point2D vPos = { XBase + i * XOffset, YBase };
-				RectangleStruct sidebarRect = DSurface::Sidebar->GetRect();
+			if (SidebarExt::ResolveVisibleTab(1, AbstractType::BuildingType, config) == t)
+				checkFactory(pPlayer->GetPrimaryFactory(AbstractType::BuildingType, false, BuildCat::Combat));
 
-				if (idxFrame != -1)
-				{
-					DSurface::Sidebar->DrawSHP(FileSystem::SIDEBAR_PAL, pSHP, idxFrame, &vPos,
-						&sidebarRect, BlitterFlags::bf_400, 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
-				}
+			if (SidebarExt::ResolveVisibleTab(2, AbstractType::InfantryType, config) == t)
+				checkFactory(pPlayer->GetPrimaryFactory(AbstractType::InfantryType, false, BuildCat::DontCare));
+
+			if (SidebarExt::ResolveVisibleTab(3, AbstractType::UnitType, config) == t)
+			{
+				checkFactory(pPlayer->GetPrimaryFactory(AbstractType::UnitType, false, BuildCat::DontCare));
+				checkFactory(pPlayer->GetPrimaryFactory(AbstractType::UnitType, true, BuildCat::DontCare));
+				checkFactory(pPlayer->GetPrimaryFactory(AbstractType::AircraftType, false, BuildCat::DontCare));
+			}
+
+			const int idxFrame = pActiveFactory
+				? static_cast<int>(((double)pActiveFactory->GetProgress() / 54.0) * (pSHP->Frames - 1))
+				: -1;
+
+			int slot = SidebarExt::GetTabSlot(t, config);
+			Point2D vPos = { XBase + slot * XOffset, YBase };
+			RectangleStruct sidebarRect = DSurface::Sidebar->GetRect();
+
+			if (idxFrame != -1)
+			{
+				DSurface::Sidebar->DrawSHP(FileSystem::SIDEBAR_PAL, pSHP, idxFrame, &vPos,
+					&sidebarRect, BlitterFlags::bf_400, 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
 			}
 		}
 	}

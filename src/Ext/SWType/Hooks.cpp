@@ -1,4 +1,6 @@
 #include "Body.h"
+#include <Ext/House/Body.h>
+#include <Ext/Sidebar/Body.h>
 
 //this hook just for phobos NewSWType
 DEFINE_HOOK(0x6CC390, SuperClass_Launch, 0x6)
@@ -261,7 +263,8 @@ DEFINE_HOOK(0x6ABC9D, SidebarClass_GetObjectTabIndex_Super, 0x5)
 	const auto pSWType = SuperWeaponTypeClass::Array[typeIdx];
 	const auto pSWTypExt = SWTypeExt::Fetch(pSWType);
 
-	R->EAX(pSWTypExt->TabIndex);
+	const auto config = SidebarExt::ActiveConfig();
+	R->EAX(SidebarExt::ResolveVisibleTab(pSWTypExt->TabIndex, AbstractType::Super, config));
 	return ApplyTabIndex;
 }
 
