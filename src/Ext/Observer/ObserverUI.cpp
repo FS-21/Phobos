@@ -2724,25 +2724,23 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			if (isProducing)
 			{
 				int totalBuildFrames = 0;
+
 				if (pFact && pFact->Object)
-				{
 					totalBuildFrames = pFact->Object->TimeToBuild();
-				}
 				else if (pCurProdType)
-				{
 					totalBuildFrames = GetTechnoBuildTimeFrames(pCurProdType, pOwner);
-				}
 
 				if (totalBuildFrames > 0)
 				{
 					int buildTimeSecs = (totalBuildFrames + 14) / 15;
 					int mins = buildTimeSecs / 60;
 					int secs = buildTimeSecs % 60;
-
 					wchar_t timeBuf[32];
+
 					swprintf_s(timeBuf, L"%02d:%02d", mins, secs);
 
 					std::wostringstream btOss;
+
 					btOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_BUILD_TIME", L"Build Time: ") << timeBuf;
 					addLine(btOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 				}
@@ -2750,6 +2748,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				if (pCurProdType)
 				{
 					std::wostringstream costOss;
+
 					costOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_COST", L"Cost: $") << pCurProdType->Cost;
 					addLine(costOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 				}
@@ -2761,16 +2760,17 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				if (pBld)
 				{
 					auto const pBldExt = BuildingExt::Fetch(pBld);
+
 					pLastTech = pBldExt->LastProducedTechno;
 					pLastType = pBldExt->LastProducedType;
 				}
 
 				if (!pLastType && pOwner)
 				{
-					auto const pHouseExt = HouseExt::TryFetch(pOwner);
-					if (pHouseExt)
+					if (auto const pHouseExt = HouseExt::TryFetch(pOwner))
 					{
 						AbstractType absType = pTargetType ? pTargetType->WhatAmI() : (pBld && pBld->Type ? pBld->Type->Factory : AbstractType::None);
+
 						if (absType == AbstractType::UnitType || absType == AbstractType::Unit)
 						{
 							pLastTech = pHouseExt->LastProducedUnit;
@@ -2812,18 +2812,20 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					std::wstring lastUIName = FormatObjectNameWithDebug(0, lastId.c_str(), pLastType->UIName, isDebugKeysEnabled);
 
 					std::wostringstream lastOss;
+
 					lastOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_LAST_PRODUCED", L"Last Produced: ") << lastUIName;
+
 					if (!isLastAlive)
-					{
 						lastOss << L" (" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_DESTROYED", L"Destroyed") << L")";
-					}
 
 					int lastColor = isLastAlive ? Drawing::RGB_To_Int(100, 220, 255) : Drawing::RGB_To_Int(160, 160, 160);
+
 					addLine(lastOss.str(), lastColor);
 				}
 				else
 				{
 					std::wstring noneStr = std::wstring(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_LAST_PRODUCED", L"Last Produced: ")) + GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_NONE", L"None");
+
 					addLine(noneStr, Drawing::RGB_To_Int(160, 160, 160));
 				}
 			}
@@ -4706,9 +4708,11 @@ void ObserverUIClass::DrawTooltip(DSurface* pSurface, const ObserverCameoItem& i
 
 				// Shield Status Line
 				auto const pExt = TechnoExt::ExtMap.Find(pBld);
-				if (pExt && pExt->Shield && pExt->Shield->IsAvailable())
+
+				if (pExt && pExt->Shield && pExt->Shield->GetType())
 				{
 					std::wostringstream shieldOss;
+
 					shieldOss << L"Shield: " << pExt->Shield->GetHP() << L"/" << pExt->Shield->GetType()->Strength.Get();
 					addLine(shieldOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 				}
@@ -4718,6 +4722,7 @@ void ObserverUIClass::DrawTooltip(DSurface* pSurface, const ObserverCameoItem& i
 				{
 					std::wostringstream expOss;
 					int vetPercent = static_cast<int>((pBld->Veterancy.Veterancy / 2.0f) * 100.0f);
+
 					expOss << L"Veterancy: " << std::clamp(vetPercent, 0, 100) << L"%";
 					addLine(expOss.str(), Drawing::RGB_To_Int(200, 200, 200));
 				}
@@ -4727,19 +4732,17 @@ void ObserverUIClass::DrawTooltip(DSurface* pSurface, const ObserverCameoItem& i
 			if (item.pType->WhatAmI() == AbstractType::BuildingType)
 			{
 				auto pBldType = static_cast<BuildingTypeClass*>(item.pType);
+
 				if (pBldType->Powered && item.pOwner && item.pOwner->HasLowPower())
-				{
 					addLine(L"Low Power", Drawing::RGB_To_Int(255, 90, 90));
-				}
 			}
 		}
 
 		// Description line (wrapped at maxToolTipWidth)
 		auto const pTypeExt = item.pType ? TechnoTypeExt::ExtMap.Find(item.pType) : nullptr;
+
 		if (Phobos::Config::ToolTipDescriptions && pTypeExt && !pTypeExt->UIDescription.Get().empty())
-		{
 			addLine(pTypeExt->UIDescription.Get().Text, Drawing::RGB_To_Int(180, 180, 180));
-		}
 	}
 
 	int boxPadding = 6;
@@ -4947,15 +4950,15 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 				if (win.pLastProducedTechno && IsTechnoValidAndAlive(win.pLastProducedTechno) && !win.pLastProducedTechno->InLimbo && TacticalClass::Instance)
 				{
 					while (ObjectClass::CurrentObjects.Count > 0)
-					{
 						ObjectClass::CurrentObjects.GetItem(0)->Deselect();
-					}
 
 					CoordStruct coords = win.pLastProducedTechno->GetCenterCoords();
+
 					TacticalClass::Instance->SetTacticalPosition(&coords);
 					win.pLastProducedTechno->Select();
 					MapClass::Instance.Redraws = TRUE;
 				}
+
 				return true;
 			}
 			else
@@ -4965,28 +4968,39 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 					? win.pLastProducedTechno
 					: nullptr;
 				BuildingClass* pTargetBld = pTargetTech ? abstract_cast<BuildingClass*>(pTargetTech) : nullptr;
-				if (pTargetBld) pTargetTech = nullptr;
+
+				if (pTargetBld)
+					pTargetTech = nullptr;
 
 				TechnoTypeClass* pTargetType = win.pLastProducedType ? win.pLastProducedType : (pTargetTech ? pTargetTech->GetTechnoType() : nullptr);
 
 				if (pTargetType || pTargetTech || pTargetBld)
 				{
-					auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [pTargetTech, pTargetBld, pTargetType, &win](const ObserverFloatingUnitWindow& w) {
-						if (pTargetBld && w.pTargetBuilding == pTargetBld) return true;
-						if (pTargetTech && w.pTargetTechno == pTargetTech) return true;
-						if (!pTargetTech && !pTargetBld && w.pType == pTargetType && w.pOwner == win.pOwner) return true;
+					auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [pTargetTech, pTargetBld, pTargetType, &win](const ObserverFloatingUnitWindow& w)
+					{
+						if (pTargetBld && w.pTargetBuilding == pTargetBld)
+							return true;
+
+						if (pTargetTech && w.pTargetTechno == pTargetTech)
+							return true;
+
+						if (!pTargetTech && !pTargetBld && w.pType == pTargetType && w.pOwner == win.pOwner)
+							return true;
+
 						return false;
 					});
 
 					if (itWin != this->FloatingUnitWindows.end())
 					{
 						ObserverFloatingUnitWindow targetWin = *itWin;
+
 						this->FloatingUnitWindows.erase(itWin);
 						this->FloatingUnitWindows.push_back(targetWin);
 					}
 					else
 					{
 						ObserverFloatingUnitWindow newWin;
+
 						newWin.pType = pTargetType;
 						newWin.pOwner = win.pOwner;
 						newWin.pTargetTechno = pTargetTech;
@@ -5003,6 +5017,7 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 						this->FloatingUnitWindows.push_back(newWin);
 					}
 				}
+
 				return true;
 			}
 		}

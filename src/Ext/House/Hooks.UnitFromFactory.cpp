@@ -21,6 +21,7 @@ DEFINE_HOOK(0x4FB64B, HouseClass_UnitFromFactory_VoiceCreated, 0x5)
 	if (pThisTechno && pThisTechno->Owner && pThisFactory)
 	{
 		BuildingClass* pFactoryBld = nullptr;
+
 		for (auto pBld : pThisTechno->Owner->Buildings)
 		{
 			if (pBld && pBld->Factory == pThisFactory)
@@ -29,15 +30,18 @@ DEFINE_HOOK(0x4FB64B, HouseClass_UnitFromFactory_VoiceCreated, 0x5)
 				break;
 			}
 		}
+
 		if (pFactoryBld)
 		{
 			auto const pBldExt = BuildingExt::Fetch(pFactoryBld);
+
 			pBldExt->LastProducedTechno = pThisTechno;
 			pBldExt->LastProducedType = pThisTechno->GetTechnoType();
 		}
 	}
 
 	auto const pThisTechnoType = TechnoExt::Fetch(pThisTechno)->TypeExtData;
+
 	if (pThisTechno->Owner->IsControlledByCurrentPlayer() && pThisTechnoType->VoiceCreated.isset())
 	{
 		if (RulesExt::Global()->IsVoiceCreatedGlobal.Get())
@@ -47,6 +51,7 @@ DEFINE_HOOK(0x4FB64B, HouseClass_UnitFromFactory_VoiceCreated, 0x5)
 	}
 
 	pThisFactory->CompletedProduction();
+
 	return 0x4FB650;
 }
 
@@ -64,6 +69,7 @@ DEFINE_HOOK(0x4FB6B0, HouseClass_JustBuilt_TrackLastProduced, 0x5)
 		if (absType == AbstractType::Building)
 		{
 			auto pBld = static_cast<BuildingClass*>(pTechno);
+
 			if (pBld->Type && pBld->Type->BuildCat == BuildCat::Combat)
 			{
 				pHouseExt->LastProducedDefense = pTechno;
@@ -77,6 +83,7 @@ DEFINE_HOOK(0x4FB6B0, HouseClass_JustBuilt_TrackLastProduced, 0x5)
 
 			// Also associate with the ConYard / Construction Yard
 			BuildingClass* pConYard = nullptr;
+
 			if (pThis->Primary_ForBuildings && pThis->Primary_ForBuildings->Owner == pThis)
 			{
 				for (auto pB : pThis->Buildings)
@@ -88,10 +95,10 @@ DEFINE_HOOK(0x4FB6B0, HouseClass_JustBuilt_TrackLastProduced, 0x5)
 					}
 				}
 			}
+
 			if (!pConYard)
-			{
 				pConYard = pHouseExt->Factory_BuildingType;
-			}
+
 			if (!pConYard)
 			{
 				for (auto pB : pThis->Buildings)
@@ -103,9 +110,11 @@ DEFINE_HOOK(0x4FB6B0, HouseClass_JustBuilt_TrackLastProduced, 0x5)
 					}
 				}
 			}
+
 			if (pConYard)
 			{
 				auto const pConYardExt = BuildingExt::Fetch(pConYard);
+
 				pConYardExt->LastProducedTechno = pBld;
 				pConYardExt->LastProducedType = pBld->Type;
 			}

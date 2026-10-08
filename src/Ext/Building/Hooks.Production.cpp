@@ -689,9 +689,11 @@ KickOutResult BuildingExt::TrySpawnFlyingProduction(BuildingClass* pFactory, Tec
 		}
 
 		BuildingClass* pRecordBld = pSpawnBuilding ? pSpawnBuilding : pFactory;
+
 		if (pRecordBld)
 		{
 			auto const pRecordBldExt = BuildingExt::Fetch(pRecordBld);
+
 			pRecordBldExt->LastProducedTechno = pProduction;
 			pRecordBldExt->LastProducedType = pType;
 		}
@@ -710,6 +712,7 @@ DEFINE_HOOK(0x443C60, BuildingClass_KickOutUnit_FlyingProduction, 0x6)
 	if (pFactory && pProduction)
 	{
 		auto const pBldExt = BuildingExt::Fetch(pFactory);
+
 		pBldExt->LastProducedTechno = pProduction;
 		pBldExt->LastProducedType = pProduction->GetTechnoType();
 	}
