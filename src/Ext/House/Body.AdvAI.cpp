@@ -1484,17 +1484,6 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass* pHouse,
 			return false;
 	}
 
-	// Pre-placement check for support structures:
-	// Verify that at least one feasible placement position exists in the base
-	// before authorizing the AI to begin constructing this support structure.
-	const bool isSupport = TechTreeTypeClass::TotalBuildSupport.contains(pBuildingType) ||
-		GetSupportRadiusType(pBuildingType) != SupportRadiusType::None;
-	if (isSupport && checkPrereqs)
-	{
-		if (!BuildingExt::AdvAI_Is_Support_Placement_Feasible(pHouse, pBuildingType))
-			return false;
-	}
-
 	// Debug::Log("Checking if AI %d can build %s. ", house->ArrayIndex,
 	// int->Name);
 
@@ -4822,6 +4811,9 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 									pBld->Type->Radar ||
 									pBld->Type->Helipad ||
 									pBld->Type->HasSuperWeapon() ||
+									pBld->Type->PowerBonus > 0 ||
+									TechTreeTypeClass::TotalBuildPower.contains(pBld->Type) ||
+									TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBld->Type) ||
 									TechTreeTypeClass::TotalBuildSuperWeapon.contains(pBld->Type) ||
 									TechTreeTypeClass::TotalBuildTech.contains(pBld->Type) ||
 									TechTreeTypeClass::TotalBuildServiceDepot.contains(pBld->Type);

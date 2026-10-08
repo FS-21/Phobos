@@ -3948,6 +3948,9 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 										pOtherBuilding->Type->Radar ||
 										pOtherBuilding->Type->Helipad ||
 										pOtherBuilding->Type->HasSuperWeapon() ||
+										pOtherBuilding->Type->PowerBonus > 0 ||
+										TechTreeTypeClass::TotalBuildPower.contains(pOtherBuilding->Type) ||
+										TechTreeTypeClass::TotalBuildAdvancedPower.contains(pOtherBuilding->Type) ||
 										TechTreeTypeClass::TotalBuildSuperWeapon.contains(pOtherBuilding->Type) ||
 										TechTreeTypeClass::TotalBuildTech.contains(pOtherBuilding->Type) ||
 										TechTreeTypeClass::TotalBuildServiceDepot.contains(pOtherBuilding->Type);
@@ -4033,20 +4036,52 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 
 		if (uncoveredBuildings.empty())
 		{
-			// All base structures are covered!
-			return CellStruct::Empty;
+			int targetBuildCount = -1;
+			if (const auto pTypeExt = BuildingTypeExt::Fetch(pBuildingType))
+			{
+				const unsigned int difficulty = pHouse->GetAIDifficultyIndex();
+				if (pTypeExt->AIBuildCounts.size() > difficulty)
+					targetBuildCount = pTypeExt->AIBuildCounts[difficulty];
+			}
+
+			if (targetBuildCount > 0 && existingSupports.size() < static_cast<size_t>(targetBuildCount))
+			{
+				// Mod or rules explicitly requested additional instances:
+				// Pivot from base buildings that are farthest from existing support structures
+				pivots = baseBuildings;
+				std::sort(pivots.begin(), pivots.end(), [&existingSupports](const BuildingClass* a, const BuildingClass* b)
+				{
+					double distA = 9999.0;
+					double distB = 9999.0;
+					for (const auto pExist : existingSupports)
+					{
+						distA = std::min(distA, a->GetMapCoords().DistanceFrom(pExist->GetMapCoords()));
+						distB = std::min(distB, b->GetMapCoords().DistanceFrom(pExist->GetMapCoords()));
+					}
+					return distA > distB;
+				});
+			}
+			else
+			{
+				// All base structures are covered!
+				return CellStruct::Empty;
+			}
 		}
-
-		// Sort uncovered buildings by distance to ConYard or base center
-		CellStruct coreCell;
-		if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
-			coreCell = GeneralUtils::CellFromCoordinates(pHouse->ConYards[0]->GetCenterCoords());
 		else
-			coreCell = pHouse->Base_Center();
+		{
+			// Sort uncovered buildings by distance to ConYard or base center
+			CellStruct coreCell;
+			if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
+				coreCell = GeneralUtils::CellFromCoordinates(pHouse->ConYards[0]->GetCenterCoords());
+			else
+				coreCell = pHouse->Base_Center();
 
-		pivots = uncoveredBuildings;
-		std::sort(pivots.begin(), pivots.end(), [coreCell](const BuildingClass* a, const BuildingClass* b)
-				  { return a->GetMapCoords().DistanceFromSquared(coreCell) < b->GetMapCoords().DistanceFromSquared(coreCell); });
+			pivots = uncoveredBuildings;
+			std::sort(pivots.begin(), pivots.end(), [coreCell](const BuildingClass* a, const BuildingClass* b)
+			{
+				return a->GetMapCoords().DistanceFromSquared(coreCell) < b->GetMapCoords().DistanceFromSquared(coreCell);
+			});
+		}
 	}
 
 	const int buildingW = pBuildingType->GetFoundationWidth();
