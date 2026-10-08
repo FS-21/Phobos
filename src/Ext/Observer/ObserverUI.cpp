@@ -4,6 +4,8 @@
 #include <Ext/Techno/Body.h>
 #include <Ext/SWType/Body.h>
 #include <Ext/BuildingType/Body.h>
+#include <Ext/Building/Body.h>
+#include <Ext/House/Body.h>
 #include <InfantryClass.h>
 #include <UnitClass.h>
 #include <AircraftClass.h>
@@ -2097,6 +2099,9 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		}
 
 		bool isProductionView = win.IsProductionItem;
+		bool isFactoryCard = isProductionView || pFact != nullptr || (pBld && pBld->Type && pBld->Type->Factory != AbstractType::None);
+		TechnoClass* pLastTech = nullptr;
+		TechnoTypeClass* pLastType = nullptr;
 		
 		TechnoTypeClass* pCameoType = nullptr;
 		if (isProductionView)
@@ -2715,13 +2720,13 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				}
 			}
 
-			// 5. Total Build Time Line (MM:SS format) & 6. Cost Line (ONLY for production cards IF producing!)
-			if (isProductionView && isProducing)
+			// 5. Total Build Time Line (MM:SS format) & 6. Cost Line (for production cards when producing)
+			if (isProducing)
 			{
 				int totalBuildFrames = 0;
-				if (pFact)
+				if (pFact && pFact->Object)
 				{
-					totalBuildFrames = pFact->GetBuildTimeFrames();
+					totalBuildFrames = pFact->Object->TimeToBuild();
 				}
 				else if (pCurProdType)
 				{
@@ -2747,6 +2752,79 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					std::wostringstream costOss;
 					costOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_COST", L"Cost: $") << pCurProdType->Cost;
 					addLine(costOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+				}
+			}
+
+			// 7. Last Produced Line (for factory / production cards)
+			if (isFactoryCard)
+			{
+				if (pBld)
+				{
+					auto const pBldExt = BuildingExt::Fetch(pBld);
+					pLastTech = pBldExt->LastProducedTechno;
+					pLastType = pBldExt->LastProducedType;
+				}
+
+				if (!pLastType && pOwner)
+				{
+					auto const pHouseExt = HouseExt::TryFetch(pOwner);
+					if (pHouseExt)
+					{
+						AbstractType absType = pTargetType ? pTargetType->WhatAmI() : (pBld && pBld->Type ? pBld->Type->Factory : AbstractType::None);
+						if (absType == AbstractType::UnitType || absType == AbstractType::Unit)
+						{
+							pLastTech = pHouseExt->LastProducedUnit;
+							pLastType = pHouseExt->LastProducedUnitType;
+						}
+						else if (absType == AbstractType::InfantryType || absType == AbstractType::Infantry)
+						{
+							pLastTech = pHouseExt->LastProducedInfantry;
+							pLastType = pHouseExt->LastProducedInfantryType;
+						}
+						else if (absType == AbstractType::AircraftType || absType == AbstractType::Aircraft)
+						{
+							pLastTech = pHouseExt->LastProducedAircraft;
+							pLastType = pHouseExt->LastProducedAircraftType;
+						}
+						else if (absType == AbstractType::BuildingType || absType == AbstractType::Building)
+						{
+							if (pTargetType && specific_cast<BuildingTypeClass*>(pTargetType)->BuildCat == BuildCat::Combat)
+							{
+								pLastTech = pHouseExt->LastProducedDefense;
+								pLastType = pHouseExt->LastProducedDefenseType;
+							}
+							else
+							{
+								pLastTech = pHouseExt->LastProducedBuilding;
+								pLastType = pHouseExt->LastProducedBuildingType;
+							}
+						}
+					}
+				}
+
+				win.pLastProducedTechno = pLastTech;
+				win.pLastProducedType = pLastType;
+
+				if (pLastType)
+				{
+					bool isLastAlive = (pLastTech && IsTechnoValidAndAlive(pLastTech) && pLastTech->GetTechnoType() == pLastType && pLastTech->Owner == pOwner);
+					std::string lastId = pLastType->get_ID();
+					std::wstring lastUIName = FormatObjectNameWithDebug(0, lastId.c_str(), pLastType->UIName, isDebugKeysEnabled);
+
+					std::wostringstream lastOss;
+					lastOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_LAST_PRODUCED", L"Last Produced: ") << lastUIName;
+					if (!isLastAlive)
+					{
+						lastOss << L" (" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_DESTROYED", L"Destroyed") << L")";
+					}
+
+					int lastColor = isLastAlive ? Drawing::RGB_To_Int(100, 220, 255) : Drawing::RGB_To_Int(160, 160, 160);
+					addLine(lastOss.str(), lastColor);
+				}
+				else
+				{
+					std::wstring noneStr = std::wstring(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_LAST_PRODUCED", L"Last Produced: ")) + GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_NONE", L"None");
+					addLine(noneStr, Drawing::RGB_To_Int(160, 160, 160));
 				}
 			}
 
@@ -2887,6 +2965,18 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		int boxWidth = std::max(260, textWidth + contentLeftMargin + boxPadding + 20); // 20px for close btn
 		int boxHeight = std::max(cameoBoxH + boxPadding * 2 + 4, textHeight + boxPadding * 2 + 4);
 
+		if (isFactoryCard && pLastType)
+		{
+			boxHeight += cameoBoxH + 8;
+			win.LastProducedCameoRect = RectangleStruct { win.Position.X + contentLeftMargin, win.Position.Y + boxHeight - cameoBoxH - boxPadding - 2, cameoBoxW, cameoBoxH };
+			win.LastProducedClickRect = RectangleStruct { win.Position.X + contentLeftMargin, win.Position.Y + boxHeight - cameoBoxH - boxPadding - 4, boxWidth - contentLeftMargin - boxPadding, cameoBoxH + 4 };
+		}
+		else
+		{
+			win.LastProducedCameoRect = RectangleStruct { 0, 0, 0, 0 };
+			win.LastProducedClickRect = RectangleStruct { 0, 0, 0, 0 };
+		}
+
 		// Update WindowRect, CloseBtnRect, CameoClickRect
 		win.WindowRect = RectangleStruct { win.Position.X, win.Position.Y, boxWidth, boxHeight };
 		win.CloseBtnRect = RectangleStruct { win.Position.X + boxWidth - 20, win.Position.Y + 4, 16, 16 };
@@ -2988,6 +3078,35 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		BitFont::Instance->field_41 = oldField41 ? 1 : 0;
 		BitFont::Instance->Color = oldColor;
 		BitFont::Instance->SetBounds(&oldBounds);
+
+		// Render Last Produced Cameo + interactive hint (if factory card and last produced item exists)
+		if (isFactoryCard && pLastType && win.LastProducedCameoRect.Width > 0)
+		{
+			bool isLastHovered = mousePos.X >= win.LastProducedClickRect.X && mousePos.X <= (win.LastProducedClickRect.X + win.LastProducedClickRect.Width)
+				&& mousePos.Y >= win.LastProducedClickRect.Y && mousePos.Y <= (win.LastProducedClickRect.Y + win.LastProducedClickRect.Height);
+
+			ObserverCameoItem lastCameoItem;
+			lastCameoItem.pType = pLastType;
+			lastCameoItem.pOwner = pOwner;
+			lastCameoItem.Count = 1;
+			lastCameoItem.DisplayRect = win.LastProducedCameoRect;
+			lastCameoItem.IsProduction = false;
+			lastCameoItem.ProgressPercent = -1;
+
+			this->DrawCameoItem(pSurface, lastCameoItem, isLastHovered, win.LastProducedCameoRect, playerColor);
+
+			int lastBorderColor = isLastHovered ? Drawing::RGB_To_Int(255, 255, 0) : Drawing::RGB_To_Int(120, 120, 120);
+			pSurface->DrawRect(&win.LastProducedCameoRect, lastBorderColor);
+
+			// Draw helper hint text next to cameo
+			bool isLastAlive = (pLastTech && IsTechnoValidAndAlive(pLastTech) && pLastTech->GetTechnoType() == pLastType && pLastTech->Owner == pOwner);
+			const wchar_t* pHint = isLastAlive
+				? GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_HINT_ALIVE", L"L: Focus | R: Card")
+				: GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_HINT_DEAD", L"R: Card");
+
+			Point2D hintPt { win.LastProducedCameoRect.X + cameoBoxW + 8, win.LastProducedCameoRect.Y + (cameoBoxH - 12) / 2 };
+			pSurface->DrawTextA(pHint, &DSurface::ViewBounds, &hintPt, isLastHovered ? Drawing::RGB_To_Int(255, 255, 120) : Drawing::RGB_To_Int(160, 160, 160), 0, TextPrintType::Point6);
+		}
 	}
 }
 
@@ -4812,6 +4931,76 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 						TacticalClass::Instance->SetTacticalPosition(&coords);
 						pFoundBld->Select();
 						MapClass::Instance.Redraws = TRUE;
+					}
+				}
+				return true;
+			}
+		}
+
+		// Check Last Produced Click Rect (Cameo or line)
+		if (win.LastProducedClickRect.Width > 0 && mousePos.X >= win.LastProducedClickRect.X && mousePos.X <= (win.LastProducedClickRect.X + win.LastProducedClickRect.Width)
+			&& mousePos.Y >= win.LastProducedClickRect.Y && mousePos.Y <= (win.LastProducedClickRect.Y + win.LastProducedClickRect.Height))
+		{
+			if (!isRightClick)
+			{
+				// Left Click: Send camera to current location if alive and on map!
+				if (win.pLastProducedTechno && IsTechnoValidAndAlive(win.pLastProducedTechno) && !win.pLastProducedTechno->InLimbo && TacticalClass::Instance)
+				{
+					while (ObjectClass::CurrentObjects.Count > 0)
+					{
+						ObjectClass::CurrentObjects.GetItem(0)->Deselect();
+					}
+
+					CoordStruct coords = win.pLastProducedTechno->GetCenterCoords();
+					TacticalClass::Instance->SetTacticalPosition(&coords);
+					win.pLastProducedTechno->Select();
+					MapClass::Instance.Redraws = TRUE;
+				}
+				return true;
+			}
+			else
+			{
+				// Right Click: Open its floating card!
+				TechnoClass* pTargetTech = (win.pLastProducedTechno && IsTechnoValidAndAlive(win.pLastProducedTechno) && !win.pLastProducedTechno->InLimbo)
+					? win.pLastProducedTechno
+					: nullptr;
+				BuildingClass* pTargetBld = pTargetTech ? abstract_cast<BuildingClass*>(pTargetTech) : nullptr;
+				if (pTargetBld) pTargetTech = nullptr;
+
+				TechnoTypeClass* pTargetType = win.pLastProducedType ? win.pLastProducedType : (pTargetTech ? pTargetTech->GetTechnoType() : nullptr);
+
+				if (pTargetType || pTargetTech || pTargetBld)
+				{
+					auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [pTargetTech, pTargetBld, pTargetType, &win](const ObserverFloatingUnitWindow& w) {
+						if (pTargetBld && w.pTargetBuilding == pTargetBld) return true;
+						if (pTargetTech && w.pTargetTechno == pTargetTech) return true;
+						if (!pTargetTech && !pTargetBld && w.pType == pTargetType && w.pOwner == win.pOwner) return true;
+						return false;
+					});
+
+					if (itWin != this->FloatingUnitWindows.end())
+					{
+						ObserverFloatingUnitWindow targetWin = *itWin;
+						this->FloatingUnitWindows.erase(itWin);
+						this->FloatingUnitWindows.push_back(targetWin);
+					}
+					else
+					{
+						ObserverFloatingUnitWindow newWin;
+						newWin.pType = pTargetType;
+						newWin.pOwner = win.pOwner;
+						newWin.pTargetTechno = pTargetTech;
+						newWin.pTargetBuilding = pTargetBld;
+						newWin.IsProductionItem = false;
+						newWin.InstanceNumber = 1;
+
+						int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
+						int cardW = 320;
+						int topY = 40;
+						int cascadeOffset = static_cast<int>((this->FloatingUnitWindows.size() + this->FloatingWindows.size()) * 24) % 140;
+
+						newWin.Position = Point2D { (screenW - cardW) / 2 + cascadeOffset, topY + cascadeOffset };
+						this->FloatingUnitWindows.push_back(newWin);
 					}
 				}
 				return true;

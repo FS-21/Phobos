@@ -36,6 +36,8 @@ public:
 	bool IsPlayingRoofProductionAnim;
 	int DetectDisguiseActiveCounter;
 	int LastCombatFrame;
+	TechnoClass* LastProducedTechno;
+	TechnoTypeClass* LastProducedType;
 
 	/**
 	*  If this building was built by the AI for it to reach an expansion
@@ -68,6 +70,8 @@ public:
 		, IsPlayingRoofProductionAnim { false }
 		, DetectDisguiseActiveCounter { 0 }
 		, LastCombatFrame { 0 }
+		, LastProducedTechno { nullptr }
+		, LastProducedType { nullptr }
 	{ }
 
 	// typed owner accessor (shadows the TechnoClass one from the base)
@@ -114,7 +118,10 @@ public:
 	virtual void OnDetach(BuildingClass* pTarget, bool removed) override
 	{
 		if (removed)
+		{
 			AnnounceInvalidPointer(this->CurrentAirFactory, pTarget);
+			AnnounceInvalidPointer(this->LastProducedTechno, pTarget);
+		}
 	}
 
 	virtual void LoadFromStream(PhobosStreamReader& Stm) override;

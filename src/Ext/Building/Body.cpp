@@ -1011,6 +1011,8 @@ void BuildingExt::Serialize(T& Stm)
 		//.Process(this->IsPlayingRoofProductionAnim) It is set and reset within a same function.
 		.Process(this->DetectDisguiseActiveCounter)
 		.Process(this->LastCombatFrame)
+		.Process(this->LastProducedTechno)
+		.Process(this->LastProducedType)
 		;
 }
 

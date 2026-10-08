@@ -887,6 +887,21 @@ void HouseExt::Serialize(T& Stm)
 			Stm.Process(this->AttackedBuildingsLIFO[i].AttackFrame);
 		}
 	}
+
+	Stm
+		.Process(this->LastProducedBuilding)
+		.Process(this->LastProducedBuildingType)
+		.Process(this->LastProducedDefense)
+		.Process(this->LastProducedDefenseType)
+		.Process(this->LastProducedInfantry)
+		.Process(this->LastProducedInfantryType)
+		.Process(this->LastProducedUnit)
+		.Process(this->LastProducedUnitType)
+		.Process(this->LastProducedAircraft)
+		.Process(this->LastProducedAircraftType)
+		.Process(this->LastProducedNavy)
+		.Process(this->LastProducedNavyType)
+		;
 }
 
 void HouseExt::LoadFromStream(PhobosStreamReader& Stm)
@@ -923,6 +938,8 @@ void HouseExt::OnDetach(BuildingClass* pTarget, bool removed)
 		AnnounceInvalidPointer(this->Factory_NavyType, pTarget);
 		AnnounceInvalidPointer(this->Factory_AircraftType, pTarget);
 		AnnounceInvalidPointer(this->ActiveEvaVoiceBuildingType, pTarget);
+		AnnounceInvalidPointer(this->LastProducedBuilding, pTarget);
+		AnnounceInvalidPointer(this->LastProducedDefense, pTarget);
 
 		if (!this->PowerPlantEnhancers.empty())
 		{
