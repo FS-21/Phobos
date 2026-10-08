@@ -554,6 +554,7 @@ public:
 	static void AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse);
 	static void AdvAI_Update_Defensive_Placeholders(HouseClass* pHouse);
 	static void AdvAI_Prune_Attacked_Buildings_LIFO(HouseClass* pHouse);
+	static bool IsNeutralOrSpecialHouse(const HouseClass* pHouse);
 
 	static bool IsDisabledFromShell(
 	HouseClass const* pHouse, BuildingTypeClass const* pItem);

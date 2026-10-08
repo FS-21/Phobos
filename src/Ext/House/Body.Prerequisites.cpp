@@ -200,10 +200,6 @@ bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const 
 		if (pThis->CountOwnedEver(pItem) >= -pItem->BuildLimit)
 			return false;
 	}
-	else if (pItem->BuildLimit == 0)
-	{
-		return false;
-	}
 
 	// Phobos BuildLimitGroup check
 	if (HouseExt::ReachedBuildLimit(pThis, pItem, true))

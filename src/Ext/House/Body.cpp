@@ -405,6 +405,18 @@ HouseClass* HouseExt::GetHouseKind(OwnerHouseKind const kind, bool const allowRa
 	}
 }
 
+bool HouseExt::IsNeutralOrSpecialHouse(const HouseClass* pHouse)
+{
+	if (!pHouse)
+		return false;
+
+	return pHouse->IsNeutral() ||
+		(pHouse->Type && pHouse->Type->MultiplayPassive) ||
+		pHouse == HouseClass::FindNeutral() ||
+		pHouse == HouseClass::FindSpecial() ||
+		pHouse == HouseClass::FindCivilianSide();
+}
+
 void HouseExt::AddToLimboTracking(TechnoTypeClass* pTechnoType)
 {
 	if (pTechnoType)

@@ -1514,6 +1514,23 @@ bool TechnoExt::CanReceiveEvent(TechnoClass* pThis, HouseClass* pHouse)
 	return true;
 }
 
+bool TechnoExt::HasWeapons(TechnoClass* pThis)
+{
+	if (pThis != nullptr)
+	{
+		for (int i = 0; i < TechnoTypeClass::MaxWeapons; i++)
+		{
+			if (const auto pWeapon = pThis->GetWeapon(i))
+			{
+				if (pWeapon->WeaponType != nullptr)
+					return true;
+			}
+		}
+	}
+
+	return false;
+}
+
 bool TechnoExt::HasWeaponsDisabled(TechnoClass* pThis)
 {
 	if (TechnoExt::Fetch(pThis)->AE.DisableWeapons)
