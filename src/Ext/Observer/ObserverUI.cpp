@@ -506,6 +506,58 @@ void ObserverUIClass::CollectPlayerData()
 				}
 			}
 
+			if (!pBld && pProducingType)
+			{
+				AbstractType abs = pProducingType->WhatAmI();
+
+				if (abs == AbstractType::BuildingType)
+				{
+					for (auto const b : pHouse->Buildings)
+					{
+						if (b && b->IsAlive && !b->InLimbo && b->Type && b->Type->Factory == AbstractType::BuildingType)
+						{
+							if (b->IsPrimaryFactory || !pBld)
+								pBld = b;
+						}
+					}
+				}
+				else if (abs == AbstractType::InfantryType)
+				{
+					for (auto const b : pHouse->Buildings)
+					{
+						if (b && b->IsAlive && !b->InLimbo && b->Type && b->Type->Factory == AbstractType::InfantryType)
+						{
+							if (b->IsPrimaryFactory || !pBld)
+								pBld = b;
+						}
+					}
+				}
+				else if (abs == AbstractType::UnitType)
+				{
+					bool isNaval = specific_cast<UnitTypeClass*>(pProducingType)->Naval;
+
+					for (auto const b : pHouse->Buildings)
+					{
+						if (b && b->IsAlive && !b->InLimbo && b->Type && b->Type->Factory == AbstractType::UnitType && b->Type->Naval == isNaval)
+						{
+							if (b->IsPrimaryFactory || !pBld)
+								pBld = b;
+						}
+					}
+				}
+				else if (abs == AbstractType::AircraftType)
+				{
+					for (auto const b : pHouse->Buildings)
+					{
+						if (b && b->IsAlive && !b->InLimbo && b->Type && (b->Type->Factory == AbstractType::AircraftType || b->Type->Helipad))
+						{
+							if (b->IsPrimaryFactory || !pBld)
+								pBld = b;
+						}
+					}
+				}
+			}
+
 			prodGroupMap[pProducingType].push_back(pBld);
 			prodProgressMap[pProducingType] = std::max(prodProgressMap[pProducingType], progressPercent);
 		}
@@ -2015,6 +2067,8 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		std::vector<TooltipLine> lines;
 		int textWidth = 0;
 		int textHeight = 0;
+		int lastProducedLineIndex = -1;
+		int lastProducedLineWidth = 0;
 
 		auto addLineSegments = [&](const std::vector<TooltipSegment>& segs) {
 			if (segs.empty()) return;
@@ -2081,6 +2135,58 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				{
 					pBld = pBldObj;
 					break;
+				}
+			}
+		}
+
+		if (!pBld && pOwner && pTargetType)
+		{
+			AbstractType abs = pTargetType->WhatAmI();
+
+			if (abs == AbstractType::BuildingType)
+			{
+				for (auto pBldObj : pOwner->Buildings)
+				{
+					if (pBldObj && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Type && pBldObj->Type->Factory == AbstractType::BuildingType)
+					{
+						if (pBldObj->IsPrimaryFactory || !pBld)
+							pBld = pBldObj;
+					}
+				}
+			}
+			else if (abs == AbstractType::InfantryType)
+			{
+				for (auto pBldObj : pOwner->Buildings)
+				{
+					if (pBldObj && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Type && pBldObj->Type->Factory == AbstractType::InfantryType)
+					{
+						if (pBldObj->IsPrimaryFactory || !pBld)
+							pBld = pBldObj;
+					}
+				}
+			}
+			else if (abs == AbstractType::UnitType)
+			{
+				bool isNaval = specific_cast<UnitTypeClass*>(pTargetType)->Naval;
+
+				for (auto pBldObj : pOwner->Buildings)
+				{
+					if (pBldObj && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Type && pBldObj->Type->Factory == AbstractType::UnitType && pBldObj->Type->Naval == isNaval)
+					{
+						if (pBldObj->IsPrimaryFactory || !pBld)
+							pBld = pBldObj;
+					}
+				}
+			}
+			else if (abs == AbstractType::AircraftType)
+			{
+				for (auto pBldObj : pOwner->Buildings)
+				{
+					if (pBldObj && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Type && (pBldObj->Type->Factory == AbstractType::AircraftType || pBldObj->Type->Helipad))
+					{
+						if (pBldObj->IsPrimaryFactory || !pBld)
+							pBld = pBldObj;
+					}
 				}
 			}
 		}
@@ -2765,45 +2871,15 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					pLastType = pBldExt->LastProducedType;
 				}
 
-				if (!pLastType && pOwner)
-				{
-					if (auto const pHouseExt = HouseExt::TryFetch(pOwner))
-					{
-						AbstractType absType = pTargetType ? pTargetType->WhatAmI() : (pBld && pBld->Type ? pBld->Type->Factory : AbstractType::None);
-
-						if (absType == AbstractType::UnitType || absType == AbstractType::Unit)
-						{
-							pLastTech = pHouseExt->LastProducedUnit;
-							pLastType = pHouseExt->LastProducedUnitType;
-						}
-						else if (absType == AbstractType::InfantryType || absType == AbstractType::Infantry)
-						{
-							pLastTech = pHouseExt->LastProducedInfantry;
-							pLastType = pHouseExt->LastProducedInfantryType;
-						}
-						else if (absType == AbstractType::AircraftType || absType == AbstractType::Aircraft)
-						{
-							pLastTech = pHouseExt->LastProducedAircraft;
-							pLastType = pHouseExt->LastProducedAircraftType;
-						}
-						else if (absType == AbstractType::BuildingType || absType == AbstractType::Building)
-						{
-							if (pTargetType && specific_cast<BuildingTypeClass*>(pTargetType)->BuildCat == BuildCat::Combat)
-							{
-								pLastTech = pHouseExt->LastProducedDefense;
-								pLastType = pHouseExt->LastProducedDefenseType;
-							}
-							else
-							{
-								pLastTech = pHouseExt->LastProducedBuilding;
-								pLastType = pHouseExt->LastProducedBuildingType;
-							}
-						}
-					}
-				}
-
 				win.pLastProducedTechno = pLastTech;
 				win.pLastProducedType = pLastType;
+
+				lastProducedLineIndex = static_cast<int>(lines.size());
+
+				addLine(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_LAST_PRODUCED", L"Last Produced:"), Drawing::RGB_To_Int(200, 200, 200));
+
+				if (lastProducedLineIndex < static_cast<int>(lines.size()))
+					lastProducedLineWidth = std::max(lastProducedLineWidth, lines[lastProducedLineIndex].Width);
 
 				if (pLastType)
 				{
@@ -2811,22 +2887,24 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					std::string lastId = pLastType->get_ID();
 					std::wstring lastUIName = FormatObjectNameWithDebug(0, lastId.c_str(), pLastType->UIName, isDebugKeysEnabled);
 
-					std::wostringstream lastOss;
-
-					lastOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_LAST_PRODUCED", L"Last Produced: ") << lastUIName;
-
 					if (!isLastAlive)
-						lastOss << L" (" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_DESTROYED", L"Destroyed") << L")";
+						lastUIName += L" (" + std::wstring(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_DESTROYED", L"Destroyed")) + L")";
 
-					int lastColor = isLastAlive ? Drawing::RGB_To_Int(100, 220, 255) : Drawing::RGB_To_Int(160, 160, 160);
+					int lastColor = isLastAlive ? Drawing::RGB_To_Int(200, 200, 200) : Drawing::RGB_To_Int(160, 160, 160);
 
-					addLine(lastOss.str(), lastColor);
+					addLine(lastUIName, lastColor);
+
+					if (lastProducedLineIndex + 1 < static_cast<int>(lines.size()))
+						lastProducedLineWidth = std::max(lastProducedLineWidth, lines[lastProducedLineIndex + 1].Width);
 				}
 				else
 				{
-					std::wstring noneStr = std::wstring(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_LAST_PRODUCED", L"Last Produced: ")) + GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_NONE", L"None");
+					std::wstring noneStr = GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_NONE", L"None");
 
 					addLine(noneStr, Drawing::RGB_To_Int(160, 160, 160));
+
+					if (lastProducedLineIndex + 1 < static_cast<int>(lines.size()))
+						lastProducedLineWidth = std::max(lastProducedLineWidth, lines[lastProducedLineIndex + 1].Width);
 				}
 			}
 
@@ -2962,6 +3040,13 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		int cameoBoxH = 48;
 		int boxPadding = 8;
 
+		int lastProducedSectionTop = 0;
+		if (lastProducedLineIndex >= 0)
+		{
+			for (int i = 0; i < lastProducedLineIndex && i < static_cast<int>(lines.size()); ++i)
+				lastProducedSectionTop += lines[i].Height + 2;
+		}
+
 		// Calculate total layout width & height
 		int contentLeftMargin = cameoBoxW + 16;
 		int boxWidth = std::max(260, textWidth + contentLeftMargin + boxPadding + 20); // 20px for close btn
@@ -2969,9 +3054,17 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 		if (isFactoryCard && pLastType)
 		{
-			boxHeight += cameoBoxH + 8;
-			win.LastProducedCameoRect = RectangleStruct { win.Position.X + contentLeftMargin, win.Position.Y + boxHeight - cameoBoxH - boxPadding - 2, cameoBoxW, cameoBoxH };
-			win.LastProducedClickRect = RectangleStruct { win.Position.X + contentLeftMargin, win.Position.Y + boxHeight - cameoBoxH - boxPadding - 4, boxWidth - contentLeftMargin - boxPadding, cameoBoxH + 4 };
+			int requiredWidthWithCameo = contentLeftMargin + lastProducedLineWidth + 12 + cameoBoxW + boxPadding;
+			boxWidth = std::max({ boxWidth, 310, requiredWidthWithCameo });
+
+			int requiredHeightWithCameo = lastProducedSectionTop + cameoBoxH + boxPadding * 2;
+			boxHeight = std::max(boxHeight, requiredHeightWithCameo);
+
+			int cameoX = win.Position.X + boxWidth - cameoBoxW - boxPadding;
+			int cameoY = win.Position.Y + boxPadding + lastProducedSectionTop;
+
+			win.LastProducedCameoRect = RectangleStruct { cameoX, cameoY, cameoBoxW, cameoBoxH };
+			win.LastProducedClickRect = win.LastProducedCameoRect;
 		}
 		else
 		{
@@ -3081,7 +3174,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		BitFont::Instance->Color = oldColor;
 		BitFont::Instance->SetBounds(&oldBounds);
 
-		// Render Last Produced Cameo + interactive hint (if factory card and last produced item exists)
+		// Render Last Produced Cameo (if factory card and last produced item exists)
 		if (isFactoryCard && pLastType && win.LastProducedCameoRect.Width > 0)
 		{
 			bool isLastHovered = mousePos.X >= win.LastProducedClickRect.X && mousePos.X <= (win.LastProducedClickRect.X + win.LastProducedClickRect.Width)
@@ -3099,15 +3192,6 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 			int lastBorderColor = isLastHovered ? Drawing::RGB_To_Int(255, 255, 0) : Drawing::RGB_To_Int(120, 120, 120);
 			pSurface->DrawRect(&win.LastProducedCameoRect, lastBorderColor);
-
-			// Draw helper hint text next to cameo
-			bool isLastAlive = (pLastTech && IsTechnoValidAndAlive(pLastTech) && pLastTech->GetTechnoType() == pLastType && pLastTech->Owner == pOwner);
-			const wchar_t* pHint = isLastAlive
-				? GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_HINT_ALIVE", L"L: Focus | R: Card")
-				: GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_HINT_DEAD", L"R: Card");
-
-			Point2D hintPt { win.LastProducedCameoRect.X + cameoBoxW + 8, win.LastProducedCameoRect.Y + (cameoBoxH - 12) / 2 };
-			pSurface->DrawTextA(pHint, &DSurface::ViewBounds, &hintPt, isLastHovered ? Drawing::RGB_To_Int(255, 255, 120) : Drawing::RGB_To_Int(160, 160, 160), 0, TextPrintType::Point6);
 		}
 	}
 }

@@ -31,6 +31,39 @@ DEFINE_HOOK(0x4FB64B, HouseClass_UnitFromFactory_VoiceCreated, 0x5)
 			}
 		}
 
+		if (!pFactoryBld)
+		{
+			AbstractType abs = pThisTechno->WhatAmI();
+			AbstractType factType = AbstractType::None;
+
+			if (abs == AbstractType::Infantry)
+				factType = AbstractType::InfantryType;
+			else if (abs == AbstractType::Unit)
+				factType = AbstractType::UnitType;
+			else if (abs == AbstractType::Aircraft)
+				factType = AbstractType::AircraftType;
+
+			if (factType != AbstractType::None)
+			{
+				bool isNaval = (abs == AbstractType::Unit) && specific_cast<UnitClass*>(pThisTechno)->Type->Naval;
+
+				for (auto pBld : pThisTechno->Owner->Buildings)
+				{
+					if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type)
+					{
+						bool match = (pBld->Type->Factory == factType);
+						if (abs == AbstractType::Unit)
+							match = match && (pBld->Type->Naval == isNaval);
+						else if (abs == AbstractType::Aircraft)
+							match = match || pBld->Type->Helipad;
+
+						if (match && (pBld->IsPrimaryFactory || !pFactoryBld))
+							pFactoryBld = pBld;
+					}
+				}
+			}
+		}
+
 		if (pFactoryBld)
 		{
 			auto const pBldExt = BuildingExt::Fetch(pFactoryBld);
@@ -105,8 +138,8 @@ DEFINE_HOOK(0x4FB6B0, HouseClass_JustBuilt_TrackLastProduced, 0x5)
 				{
 					if (pB && pB->Type && pB->Type->Factory == AbstractType::BuildingType && pB->IsAlive && !pB->InLimbo)
 					{
-						pConYard = pB;
-						break;
+						if (pB->IsPrimaryFactory || !pConYard)
+							pConYard = pB;
 					}
 				}
 			}
