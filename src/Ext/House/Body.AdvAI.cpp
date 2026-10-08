@@ -4706,16 +4706,23 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		}
 
 		// BuildSupport network evaluation (evaluated towards the end, to protect established base)
+		bool hasAnySupport = false;
+		for (const auto pSupport : pPrimaryTechTree->BuildSupport)
+		{
+			if (pSupport && CountBuildingOfGroup(pHouse, pSupport) > 0)
+			{
+				hasAnySupport = true;
+				break;
+			}
+		}
+
 		const bool skipSupport =
-			ScenarioClass::Instance->Random.RandomRanged(0, 99) < 80;
+			hasAnySupport && (ScenarioClass::Instance->Random.RandomRanged(0, 99) < 25);
 
 		if (!skipSupport)
 		{
 			const auto canBuildSupportFunction = [pHouse](BuildingTypeClass* pType)
 			{
-				if (!BuildingExt::AdvAI_Is_Support_Placement_Feasible(pHouse, pType))
-					return false;
-
 				return AdvAI_Can_Build_Building(pHouse, pType, true, true);
 			};
 
@@ -4789,10 +4796,16 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 					}
 
 					// Check coverage: does any functional base structure lack this
-					// support coverage?
+					// support coverage? Or does AIBuildCounts explicitly demand more?
 					bool needMoreSupport = false;
 
-					if (ownedThisSpecificType == 0)
+					if (supportType == SupportRadiusType::None)
+					{
+						const int target = (targetBuildCount >= 0) ? targetBuildCount : 1;
+						if (ownedThisSpecificType < target)
+							needMoreSupport = true;
+					}
+					else if (ownedThisSpecificType == 0 || (targetBuildCount > 0 && ownedThisSpecificType < targetBuildCount))
 					{
 						needMoreSupport = true;
 					}
@@ -4805,11 +4818,13 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 								const bool isBaseBuilding =
 									pBld->Type->ConstructionYard ||
 									pBld->Type->Factory != AbstractType::None ||
-									pBld->Type->Refinery || pBld->Type->Radar ||
+									pBld->Type->Refinery ||
+									pBld->Type->Radar ||
 									pBld->Type->Helipad ||
-									((pBld->Type->TechLevel > 0 || pBld->Type->TechLevel == -1) && !pBld->Type->IsBaseDefense &&
-									 GetSupportRadiusType(pBld->Type) ==
-										 SupportRadiusType::None);
+									pBld->Type->HasSuperWeapon() ||
+									TechTreeTypeClass::TotalBuildSuperWeapon.contains(pBld->Type) ||
+									TechTreeTypeClass::TotalBuildTech.contains(pBld->Type) ||
+									TechTreeTypeClass::TotalBuildServiceDepot.contains(pBld->Type);
 
 								if (!isBaseBuilding)
 									continue;

@@ -3947,7 +3947,10 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 										pOtherBuilding->Type->Refinery ||
 										pOtherBuilding->Type->Radar ||
 										pOtherBuilding->Type->Helipad ||
-										((pOtherBuilding->Type->TechLevel > 0 || pOtherBuilding->Type->TechLevel == -1) && !pOtherBuilding->Type->IsBaseDefense && GetSupportRadiusType(pOtherBuilding->Type) == SupportRadiusType::None);
+										pOtherBuilding->Type->HasSuperWeapon() ||
+										TechTreeTypeClass::TotalBuildSuperWeapon.contains(pOtherBuilding->Type) ||
+										TechTreeTypeClass::TotalBuildTech.contains(pOtherBuilding->Type) ||
+										TechTreeTypeClass::TotalBuildServiceDepot.contains(pOtherBuilding->Type);
 
 			if (isBaseBuilding)
 				baseBuildings.push_back(pOtherBuilding);
@@ -4049,6 +4052,9 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 	const int buildingW = pBuildingType->GetFoundationWidth();
 	const int buildingH = pBuildingType->GetFoundationHeight(true);
 	const int adjRange = pBuildingType->Adjacent + 1;
+	const int searchRange = (supportType != SupportRadiusType::None && coverageDistance > 0)
+		? std::max(adjRange, std::min(coverageDistance, 12))
+		: adjRange;
 
 	// Loop through pivots to find a valid adjacent placement cell
 	for (const auto pPivot : pivots)
@@ -4057,10 +4063,10 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 		const int pivotW = pPivot->Type->GetFoundationWidth();
 		const int pivotH = pPivot->Type->GetFoundationHeight(true);
 
-		const int xMin = pivotCell.X - adjRange - buildingW + 1;
-		const int xMax = pivotCell.X + pivotW + adjRange - 1;
-		const int yMin = pivotCell.Y - adjRange - buildingH + 1;
-		const int yMax = pivotCell.Y + pivotH + adjRange - 1;
+		const int xMin = pivotCell.X - searchRange - buildingW + 1;
+		const int xMax = pivotCell.X + pivotW + searchRange - 1;
+		const int yMin = pivotCell.Y - searchRange - buildingH + 1;
+		const int yMax = pivotCell.Y + pivotH + searchRange - 1;
 
 		CellStruct bestCellForPivot = CellStruct::Empty;
 		int bestRatingForPivot = std::numeric_limits<int>::max();
@@ -4076,6 +4082,12 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 
 				if (!pBuildingType->CanPlaceHere(&cell, pHouse))
 					continue;
+
+				if (supportType != SupportRadiusType::None && coverageDistance > 0 &&
+					cell.DistanceFrom(pivotCell) > coverageDistance)
+				{
+					continue;
+				}
 
 				if (BuildingExt::OverlapsAnyBuilding(cell, pBuildingType, pBuilding))
 					continue;
@@ -4098,7 +4110,7 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 				{
 					if (pOtherBuilding && pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding != pBuilding)
 					{
-						if (pOtherBuilding->Type->InvisibleInGame)
+						if (pOtherBuilding->Type->InvisibleInGame || pOtherBuilding->Type->Wall)
 							continue;
 
 						const int b2X = pOtherBuilding->GetMapCoords().X;
@@ -4128,7 +4140,7 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 							}
 
 							touchingCount++;
-							const int maxTouching = (b1W == 1 && b1H == 1) ? 3 : 2;
+							const int maxTouching = 3;
 							if (touchingCount >= maxTouching)
 							{
 								cellIsCongested = true;
