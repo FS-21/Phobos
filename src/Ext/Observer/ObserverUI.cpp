@@ -2069,6 +2069,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		int textHeight = 0;
 		int lastProducedLineIndex = -1;
 		int lastProducedLineWidth = 0;
+		bool hasProductionDivider = false;
 
 		auto addLineSegments = [&](const std::vector<TooltipSegment>& segs) {
 			if (segs.empty()) return;
@@ -2863,6 +2864,8 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			// 7. Last Produced Line (for factory / production cards)
 			if (isFactoryCard)
 			{
+				hasProductionDivider = isProducing;
+
 				if (pBld)
 				{
 					auto const pBldExt = BuildingExt::Fetch(pBld);
@@ -3039,18 +3042,21 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		int cameoBoxW = 60;
 		int cameoBoxH = 48;
 		int boxPadding = 8;
+		int dividerHeight = hasProductionDivider ? 8 : 0;
 
 		int lastProducedSectionTop = 0;
 		if (lastProducedLineIndex >= 0)
 		{
 			for (int i = 0; i < lastProducedLineIndex && i < static_cast<int>(lines.size()); ++i)
 				lastProducedSectionTop += lines[i].Height + 2;
+
+			lastProducedSectionTop += dividerHeight;
 		}
 
 		// Calculate total layout width & height
 		int contentLeftMargin = cameoBoxW + 16;
 		int boxWidth = std::max(260, textWidth + contentLeftMargin + boxPadding + 20); // 20px for close btn
-		int boxHeight = std::max(cameoBoxH + boxPadding * 2 + 4, textHeight + boxPadding * 2 + 4);
+		int boxHeight = std::max(cameoBoxH + boxPadding * 2 + 4, textHeight + dividerHeight + boxPadding * 2 + 4);
 
 		if (isFactoryCard && pLastType)
 		{
@@ -3147,8 +3153,22 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		BitFont::Instance->SetBounds(&ltrbBounds);
 
 		int currentY = win.WindowRect.Y + boxPadding;
-		for (const auto& line : lines)
+		for (size_t i = 0; i < lines.size(); ++i)
 		{
+			if (static_cast<int>(i) == lastProducedLineIndex && hasProductionDivider)
+			{
+				int lineY = currentY + 3;
+				RectangleStruct divRect {
+					win.WindowRect.X + contentLeftMargin,
+					lineY,
+					win.WindowRect.Width - contentLeftMargin - boxPadding,
+					1
+				};
+				pSurface->FillRect(&divRect, Drawing::RGB_To_Int(85, 85, 85));
+				currentY += dividerHeight;
+			}
+
+			const auto& line = lines[i];
 			int currentX = win.WindowRect.X + contentLeftMargin;
 			for (const auto& seg : line.Segments)
 			{
