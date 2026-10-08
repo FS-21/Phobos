@@ -4710,6 +4710,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			{
 				if (!BuildingExt::AdvAI_Is_Support_Placement_Feasible(pHouse, pType))
 					return false;
+
 				return AdvAI_Can_Build_Building(pHouse, pType, true, true);
 			};
 

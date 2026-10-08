@@ -1524,20 +1524,22 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 			for (int x = baseArea.X; x < baseArea.X + baseArea.Width; ++x)
 			{
 				CellStruct cell = CellStruct(static_cast<short>(x), static_cast<short>(y));
-				if (MapClass::Instance.CoordinatesLegal(cell) &&
-					pBuilding->Type->CanPlaceHere(&cell, pBuilding->Owner) &&
-					!OverlapsAnyBuilding(cell, pBuilding->Type, pBuilding) &&
-					!OverlapsBridge(cell, pBuilding->Type) &&
-					!OverlapsTiberiumTreeZone(cell, pBuilding->Type) &&
-					Should_Evaluate_Cell_For_Placement(cell, pBuilding, adjacencyBonus))
+
+				if (MapClass::Instance.CoordinatesLegal(cell)
+					&& pBuilding->Type->CanPlaceHere(&cell, pBuilding->Owner)
+					&& !OverlapsAnyBuilding(cell, pBuilding->Type, pBuilding)
+					&& !OverlapsBridge(cell, pBuilding->Type)
+					&& !OverlapsTiberiumTreeZone(cell, pBuilding->Type)
+					&& Should_Evaluate_Cell_For_Placement(cell, pBuilding, adjacencyBonus))
 				{
-					const auto houseExt = HouseExt::Fetch(pBuilding->Owner);
-					if (houseExt != nullptr && houseExt->PendingClearanceType != nullptr && houseExt->PendingClearanceType != pBuilding->Type)
+					auto const pHouseExt = HouseExt::Fetch(pBuilding->Owner);
+
+					if (pHouseExt && pHouseExt->PendingClearanceType && pHouseExt->PendingClearanceType != pBuilding->Type)
 					{
-						const int rX = houseExt->PendingClearanceCell.X;
-						const int rY = houseExt->PendingClearanceCell.Y;
-						const int rW = houseExt->PendingClearanceFoundationWidth;
-						const int rH = houseExt->PendingClearanceFoundationHeight;
+						const int rX = pHouseExt->PendingClearanceCell.X;
+						const int rY = pHouseExt->PendingClearanceCell.Y;
+						const int rW = pHouseExt->PendingClearanceFoundationWidth;
+						const int rH = pHouseExt->PendingClearanceFoundationHeight;
 						const int bW = pBuilding->Type->GetFoundationWidth();
 						const int bH = pBuilding->Type->GetFoundationHeight(true);
 
@@ -1549,6 +1551,7 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 					break;
 				}
 			}
+
 			if (bestCell.X > 0 && bestCell.Y > 0)
 				break;
 		}
@@ -2244,9 +2247,7 @@ bool BuildingExt::CanClearObstructingDefensesForPlacement(
 		for (int dy = 0; dy < newH; ++dy)
 		{
 			for (int dx = 0; dx < newW; ++dx)
-			{
 				cellsToCheck.push_back(CellStruct(static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy)));
-			}
 		}
 	}
 
@@ -2256,11 +2257,12 @@ bool BuildingExt::CanClearObstructingDefensesForPlacement(
 			return false;
 
 		CellClass* pCell = MapClass::Instance.TryGetCellAt(pt);
+
 		if (!pCell)
 			return false;
 
 		// If ground units or infantry are physically standing on this cell, it cannot be safely cleared
-		if (pCell->GetUnit(false) != nullptr || pCell->GetInfantry(false) != nullptr)
+		if (pCell->GetUnit(false) || pCell->GetInfantry(false))
 			return false;
 
 		// Terrain land type checks
@@ -3519,9 +3521,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 			{
 				// Check if we are still waiting for the 5-second interval
 				if (Unsorted::CurrentFrame < houseExt->NextClearanceCheckFrame)
-				{
 					return 1; // Keep waiting in factory, do not cancel
-				}
 
 				// Check if the footprint at PendingClearanceCell is now clear of obstructing defenses
 				bool stillObstructed = false;
@@ -3534,14 +3534,16 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 					{
 						CellStruct checkCell = houseExt->PendingClearanceCell + CellStruct(static_cast<short>(dx), static_cast<short>(dy));
 						CellClass* pCell = MapClass::Instance.TryGetCellAt(checkCell);
-						if (pCell != nullptr)
+
+						if (pCell)
 						{
 							BuildingClass* pOccBld = pCell->GetBuilding();
-							if (pOccBld != nullptr && pOccBld->Owner == pBuilding->Owner && pOccBld->Type->IsBaseDefense)
+
+							if (pOccBld && pOccBld->Owner == pBuilding->Owner && pOccBld->Type->IsBaseDefense)
 								stillObstructed = true;
 
 							// If any friendly units/infantry are on the footprint, force them to scatter
-							if (pCell->GetUnit(false) != nullptr || pCell->GetInfantry(false) != nullptr)
+							if (pCell->GetUnit(false) || pCell->GetInfantry(false))
 							{
 								pCell->ScatterContent(GeneralUtils::CoordinatesFromCell(checkCell), true, true, false);
 								stillObstructed = true;
@@ -3734,13 +3736,15 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 					// Immediately scatter friendly units / survivors away from the footprint
 					const int foundationW = pBuilding->Type->GetFoundationWidth();
 					const int foundationH = pBuilding->Type->GetFoundationHeight(true);
+
 					for (int dx = 0; dx < foundationW; ++dx)
 					{
 						for (int dy = 0; dy < foundationH; ++dy)
 						{
 							CellStruct checkCell = clearanceCell + CellStruct(static_cast<short>(dx), static_cast<short>(dy));
 							CellClass* pCell = MapClass::Instance.TryGetCellAt(checkCell);
-							if (pCell != nullptr)
+
+							if (pCell)
 								pCell->ScatterContent(GeneralUtils::CoordinatesFromCell(checkCell), true, true, false);
 						}
 					}
