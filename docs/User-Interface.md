@@ -308,6 +308,8 @@ PrioritySelectionFiltering=true  ; boolean
 - When `DebugKeysEnabled=yes` under `[GlobalControls]` in `rulesmd.ini`, all houses with active objects on the map are listed across all game modes for developer inspection.
 - Supports floating inspection cards to display detailed object and AI debug information.
 - Structures lacking a cameo icon automatically display a centered sprite preview with player faction remap and a transparent background.
+- Structures with cash production (`ProduceCashAmount` and `ProduceCashDelay`) show their production rate per minute (`Income: +$X / min`).
+- Structures and harvester units with storage capacity show their current and maximum storage (`Storage: X / Y`), along with a breakdown of stored resource types and quantities. (For refineries and resource destinations, this is enabled when `Refinery.UseStorage=yes`).
 - All interface texts can be localized via `.csf` string table keys:
 
   | CSF String Key | Default Text |
@@ -343,12 +345,17 @@ PrioritySelectionFiltering=true  ; boolean
   | `TXT_OBSERVER_CARD_VETERANCY` | `Veterancy: ` |
   | `TXT_OBSERVER_CARD_PASSENGERS` | `Passengers` |
   | `TXT_OBSERVER_CARD_GARRISONED` | `Garrisoned` |
+  | `TXT_OBSERVER_CARD_INCOME` | `Income: ` |
+  | `TXT_OBSERVER_CARD_STORAGE` | `Storage: ` |
   | `TXT_OBSERVER_CARD_BUILD_TIME` | `Build Time: ` |
   | `TXT_OBSERVER_CARD_COST` | `Cost: ` |
+  | `TXT_OBSERVER_CARD_LAST_PRODUCED` | `Last Produced:` |
+  | `TXT_OBSERVER_CARD_DESTROYED` | `Destroyed` |
   | `TXT_OBSERVER_CARD_TEAM` | `Team: ` |
   | `TXT_OBSERVER_CARD_TASKFORCE` | `Taskforce: ` |
   | `TXT_OBSERVER_CARD_SCRIPT` | `Script: ` |
   | `TXT_OBSERVER_CARD_SCRIPT_DATA` | `Script Line: ` |
+  | `TXT_OBSERVER_NONE` | `None` |
 
 ### Placement preview
 
