@@ -3951,7 +3951,10 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 										pOtherBuilding->Type->Refinery ||
 										pOtherBuilding->Type->Radar ||
 										pOtherBuilding->Type->Helipad ||
-										((pOtherBuilding->Type->TechLevel > 0 || pOtherBuilding->Type->TechLevel == -1) && !pOtherBuilding->Type->IsBaseDefense && GetSupportRadiusType(pOtherBuilding->Type) == SupportRadiusType::None);
+										pOtherBuilding->Type->HasSuperWeapon() ||
+										TechTreeTypeClass::TotalBuildSuperWeapon.contains(pOtherBuilding->Type) ||
+										TechTreeTypeClass::TotalBuildTech.contains(pOtherBuilding->Type) ||
+										TechTreeTypeClass::TotalBuildServiceDepot.contains(pOtherBuilding->Type);
 
 			if (isBaseBuilding)
 				baseBuildings.push_back(pOtherBuilding);
@@ -4051,20 +4054,25 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 	}
 
 	const int buildingW = pBuildingType->GetFoundationWidth();
-	const int buildingH = pBuildingType->GetFoundationHeight(false);
+	const int buildingH = pBuildingType->GetFoundationHeight(true);
 	const int adjRange = pBuildingType->Adjacent + 1;
+	const int searchRange = (supportType != SupportRadiusType::None && coverageDistance > 0)
+		? std::max(adjRange, std::min(coverageDistance, 12))
+		: adjRange;
+
+	const auto houseExt = HouseExt::ExtMap.Find(pHouse);
 
 	// Loop through pivots to find a valid adjacent placement cell
 	for (const auto pPivot : pivots)
 	{
 		const CellStruct pivotCell = pPivot->GetMapCoords();
 		const int pivotW = pPivot->Type->GetFoundationWidth();
-		const int pivotH = pPivot->Type->GetFoundationHeight(false);
+		const int pivotH = pPivot->Type->GetFoundationHeight(true);
 
-		const int xMin = pivotCell.X - adjRange - buildingW + 1;
-		const int xMax = pivotCell.X + pivotW + adjRange - 1;
-		const int yMin = pivotCell.Y - adjRange - buildingH + 1;
-		const int yMax = pivotCell.Y + pivotH + adjRange - 1;
+		const int xMin = pivotCell.X - searchRange - buildingW + 1;
+		const int xMax = pivotCell.X + pivotW + searchRange - 1;
+		const int yMin = pivotCell.Y - searchRange - buildingH + 1;
+		const int yMax = pivotCell.Y + pivotH + searchRange - 1;
 
 		CellStruct bestCellForPivot = CellStruct::Empty;
 		int bestRatingForPivot = std::numeric_limits<int>::max();
@@ -4079,6 +4087,15 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 					continue;
 
 				if (!pBuildingType->CanPlaceHere(&cell, pHouse))
+					continue;
+
+				if (supportType != SupportRadiusType::None && coverageDistance > 0 &&
+					cell.DistanceFrom(pivotCell) > coverageDistance)
+				{
+					continue;
+				}
+
+				if (BuildingExt::OverlapsAnyBuilding(cell, pBuildingType, pBuilding))
 					continue;
 
 				if (BuildingExt::OverlapsTiberiumTreeZone(cell, pBuildingType))
@@ -4096,13 +4113,13 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 				{
 					if (pOtherBuilding && pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding != pBuilding)
 					{
-						if (pOtherBuilding->Type->InvisibleInGame)
+						if (pOtherBuilding->Type->InvisibleInGame || pOtherBuilding->Type->Wall)
 							continue;
 
 						const int b2X = pOtherBuilding->GetMapCoords().X;
 						const int b2Y = pOtherBuilding->GetMapCoords().Y;
 						const int b2W = pOtherBuilding->Type->GetFoundationWidth();
-						const int b2H = pOtherBuilding->Type->GetFoundationHeight(false);
+						const int b2H = pOtherBuilding->Type->GetFoundationHeight(true);
 
 						// Fast distance check to skip far-away buildings
 						const double dx = static_cast<double>(b1X - b2X);
@@ -4126,7 +4143,8 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 							}
 
 							touchingCount++;
-							if (touchingCount >= 2)
+							const int maxTouching = 3;
+							if (touchingCount >= maxTouching)
 							{
 								cellIsCongested = true;
 								break;
@@ -4139,26 +4157,28 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 					continue;
 
 				// Unsafe placement zone check
-				const auto houseExt = HouseExt::ExtMap.Find(pHouse);
-				bool isUnsafe = false;
-				for (auto it = houseExt->UnsafePlacementZones.begin(); it != houseExt->UnsafePlacementZones.end();)
+				if (houseExt != nullptr)
 				{
-					if (Unsorted::CurrentFrame > it->ExpiryFrame)
-						it = houseExt->UnsafePlacementZones.erase(it);
-					else
+					bool isUnsafe = false;
+					for (auto it = houseExt->UnsafePlacementZones.begin(); it != houseExt->UnsafePlacementZones.end();)
 					{
-						if (cell.DistanceFromSquared(it->Coords) < 100.0)
+						if (Unsorted::CurrentFrame > it->ExpiryFrame)
+							it = houseExt->UnsafePlacementZones.erase(it);
+						else
 						{
-							isUnsafe = true;
-							break;
+							if (cell.DistanceFromSquared(it->Coords) < 100.0)
+							{
+								isUnsafe = true;
+								break;
+							}
+
+							++it;
 						}
-
-						++it;
 					}
-				}
 
-				if (isUnsafe)
-					continue;
+					if (isUnsafe)
+						continue;
+				}
 
 				// Separation rule check (radius-based support buildings only)
 				if (supportType != SupportRadiusType::None)
@@ -4212,7 +4232,7 @@ static const char* GetGroupAsID(BuildingTypeClass* pType)
 {
 	if (const auto pExt = TechnoTypeExt::ExtMap.Find(pType))
 	{
-		if (pExt->GroupAs.data() && pExt->GroupAs.data()[0] != '\0' && _stricmp(pExt->GroupAs.data(), "none") != 0)
+		if (GeneralUtils::IsValidString(pExt->GroupAs.data()))
 			return pExt->GroupAs.data();
 	}
 

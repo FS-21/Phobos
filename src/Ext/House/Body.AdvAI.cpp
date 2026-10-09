@@ -171,11 +171,8 @@ static const char* GetGroupAsID(BuildingTypeClass* pType)
 {
 	if (const auto pExt = TechnoTypeExt::ExtMap.Find(pType))
 	{
-		if (pExt->GroupAs.data() && pExt->GroupAs.data()[0] != '\0' &&
-			_stricmp(pExt->GroupAs.data(), "none") != 0)
-		{
+		if (GeneralUtils::IsValidString(pExt->GroupAs.data()))
 			return pExt->GroupAs.data();
-		}
 	}
 
 	return pType->ID;
@@ -4695,8 +4692,18 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		}
 
 		// BuildSupport network evaluation (evaluated towards the end, to protect established base)
+		bool hasAnySupport = false;
+		for (const auto pSupport : pPrimaryTechTree->BuildSupport)
+		{
+			if (pSupport && CountBuildingOfGroup(pHouse, pSupport) > 0)
+			{
+				hasAnySupport = true;
+				break;
+			}
+		}
+
 		const bool skipSupport =
-			ScenarioClass::Instance->Random.RandomRanged(0, 99) < 80;
+			hasAnySupport && (ScenarioClass::Instance->Random.RandomRanged(0, 99) < 25);
 
 		if (!skipSupport)
 		{
@@ -4797,11 +4804,13 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 								const bool isBaseBuilding =
 									pBld->Type->ConstructionYard ||
 									pBld->Type->Factory != AbstractType::None ||
-									pBld->Type->Refinery || pBld->Type->Radar ||
+									pBld->Type->Refinery ||
+									pBld->Type->Radar ||
 									pBld->Type->Helipad ||
-									((pBld->Type->TechLevel > 0 || pBld->Type->TechLevel == -1) && !pBld->Type->IsBaseDefense &&
-									 GetSupportRadiusType(pBld->Type) ==
-										 SupportRadiusType::None);
+									pBld->Type->HasSuperWeapon() ||
+									TechTreeTypeClass::TotalBuildSuperWeapon.contains(pBld->Type) ||
+									TechTreeTypeClass::TotalBuildTech.contains(pBld->Type) ||
+									TechTreeTypeClass::TotalBuildServiceDepot.contains(pBld->Type);
 
 								if (!isBaseBuilding)
 									continue;
@@ -4861,9 +4870,20 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 				if (TechTreeTypeClass::TotalBuildDefense.contains(pBuilding))
 					continue;
 
+				// Exclude support structures here, handled by their dedicated BuildSupport circuit
+				if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding) ||
+					GetSupportRadiusType(pBuilding) != SupportRadiusType::None)
+				{
+					continue;
+				}
+
 				// Exclude helipads here, as they are handled dynamically based on
 				// occupied docks
 				if (pBuilding->Helipad)
+					continue;
+
+				auto it = houseExt->PlacementFailedCooldowns.find(pBuilding);
+				if (it != houseExt->PlacementFailedCooldowns.end() && Unsorted::CurrentFrame < it->second)
 					continue;
 
 				if (AdvAI_Can_Build_Building(pHouse, pBuilding, true))
@@ -5052,9 +5072,20 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			if (TechTreeTypeClass::TotalBuildDefense.contains(pBuilding))
 				continue;
 
+			// Exclude support structures here, handled by their dedicated BuildSupport circuit
+			if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding) ||
+				GetSupportRadiusType(pBuilding) != SupportRadiusType::None)
+			{
+				continue;
+			}
+
 			// Exclude helipads here, as they are handled dynamically based on occupied
 			// docks
 			if (pBuilding->Helipad)
+				continue;
+
+			auto it = houseExt->PlacementFailedCooldowns.find(pBuilding);
+			if (it != houseExt->PlacementFailedCooldowns.end() && Unsorted::CurrentFrame < it->second)
 				continue;
 
 			if (AdvAI_Can_Build_Building(pHouse, pBuilding, true))
