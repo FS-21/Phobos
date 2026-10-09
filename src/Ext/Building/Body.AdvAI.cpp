@@ -444,7 +444,11 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 	const bool overlaps = OverlapsAnyBuilding(cell, pBuilding->Type, pBuilding);
 
 	if (!canPlace || overlaps)
-		return 1;
+	{
+		Debug::Log("AdvAI: Try_Place failed for %s at (%d,%d) (canPlace: %d, overlaps: %d). Cancelling placement to prevent queue freeze.\n",
+			pBuilding->Type->ID, cell.X, cell.Y, canPlace, overlaps);
+		return 0;
+	}
 
 	const CellStruct finalPlacementCell = cell;
 	CoordStruct coord = GeneralUtils::CoordinatesFromCell(finalPlacementCell);
@@ -3939,7 +3943,7 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 	{
 		if (pOtherBuilding && pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo)
 		{
-			if (pOtherBuilding->Type == pBuildingType || IsSameSupportNetwork(pOtherBuilding->Type, pBuildingType))
+			if (IsSameSupportNetwork(pOtherBuilding->Type, pBuildingType))
 				existingSupports.push_back(pOtherBuilding);
 
 			const bool isBaseBuilding = pOtherBuilding->Type->ConstructionYard ||
@@ -3947,13 +3951,7 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 										pOtherBuilding->Type->Refinery ||
 										pOtherBuilding->Type->Radar ||
 										pOtherBuilding->Type->Helipad ||
-										pOtherBuilding->Type->HasSuperWeapon() ||
-										pOtherBuilding->Type->PowerBonus > 0 ||
-										TechTreeTypeClass::TotalBuildPower.contains(pOtherBuilding->Type) ||
-										TechTreeTypeClass::TotalBuildAdvancedPower.contains(pOtherBuilding->Type) ||
-										TechTreeTypeClass::TotalBuildSuperWeapon.contains(pOtherBuilding->Type) ||
-										TechTreeTypeClass::TotalBuildTech.contains(pOtherBuilding->Type) ||
-										TechTreeTypeClass::TotalBuildServiceDepot.contains(pOtherBuilding->Type);
+										((pOtherBuilding->Type->TechLevel > 0 || pOtherBuilding->Type->TechLevel == -1) && !pOtherBuilding->Type->IsBaseDefense && GetSupportRadiusType(pOtherBuilding->Type) == SupportRadiusType::None);
 
 			if (isBaseBuilding)
 				baseBuildings.push_back(pOtherBuilding);
@@ -3963,20 +3961,61 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 	const SupportRadiusType supportType = GetSupportRadiusType(pBuildingType);
 	const int radius = GetSupportRadius(pBuildingType);
 	int coverageDistance = radius > 1 ? radius - 1 : 3;
-	double hardMinSeparation = 0.0;
+	int targetSeparation = 8;
 	if (supportType == SupportRadiusType::EMPulseCannon)
 	{
 		coverageDistance = radius > 1 ? radius - 1 : 29;
-		hardMinSeparation = radius > 1 ? (radius * 0.8) : 24.0;
+		targetSeparation = radius > 1 ? radius : 30;
 	}
 	else if (radius > 1)
 	{
-		hardMinSeparation = radius * 0.8;
+		targetSeparation = static_cast<int>(radius * 1.8);
 	}
 
-	std::vector<BuildingClass*> uncoveredBuildings;
-	if (supportType != SupportRadiusType::None)
+	std::vector<BuildingClass*> pivots;
+
+	if (supportType == SupportRadiusType::None)
 	{
+		pivots = baseBuildings;
+
+		CellStruct mainBaseCenter;
+		if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
+			mainBaseCenter = GeneralUtils::CellFromCoordinates(pHouse->ConYards[0]->GetCenterCoords());
+		else
+			mainBaseCenter = pHouse->Base_Center();
+
+		const bool isPowerPlant = TechTreeTypeClass::TotalBuildPower.contains(pBuildingType) || TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBuildingType);
+		if (isPowerPlant)
+		{
+			// For power plants, strictly restrict pivots to buildings within 25 cells of the main base/ConYard
+			std::vector<BuildingClass*> mainBasePivots;
+			for (const auto pBld : pivots)
+				if (pBld->GetMapCoords().DistanceFrom(mainBaseCenter) <= 25.0)
+					mainBasePivots.push_back(pBld);
+			if (!mainBasePivots.empty())
+				pivots = mainBasePivots;
+
+			std::stable_sort(pivots.begin(), pivots.end(), [mainBaseCenter](const BuildingClass* a, const BuildingClass* b)
+							 {
+				if (a->Type->ConstructionYard != b->Type->ConstructionYard)
+					return a->Type->ConstructionYard;
+				return a->GetMapCoords().DistanceFromSquared(mainBaseCenter) < b->GetMapCoords().DistanceFromSquared(mainBaseCenter); });
+		}
+		else
+		{
+			std::stable_sort(pivots.begin(), pivots.end(), [](const BuildingClass* a, const BuildingClass* b)
+							 {
+				if (a->Type->ConstructionYard != b->Type->ConstructionYard)
+					return a->Type->ConstructionYard;
+				if ((a->Type->Factory != AbstractType::None) != (b->Type->Factory != AbstractType::None))
+					return a->Type->Factory != AbstractType::None;
+				return false; });
+		}
+	}
+	else
+	{
+		// Radius-based support buildings: identify uncovered base buildings.
+		std::vector<BuildingClass*> uncoveredBuildings;
 		for (const auto pBaseBld : baseBuildings)
 		{
 			bool covered = false;
@@ -3995,239 +4034,171 @@ static CellStruct Find_Best_Support_Placement(HouseClass* pHouse, BuildingTypeCl
 
 		if (uncoveredBuildings.empty())
 		{
-			int targetBuildCount = -1;
-			if (const auto pTypeExt = BuildingTypeExt::Fetch(pBuildingType))
-			{
-				const unsigned int difficulty = pHouse->GetAIDifficultyIndex();
-				if (pTypeExt->AIBuildCounts.size() > difficulty)
-					targetBuildCount = pTypeExt->AIBuildCounts[difficulty];
-			}
-
-			if (targetBuildCount <= 0 || existingSupports.size() >= static_cast<size_t>(targetBuildCount))
-			{
-				// All base structures are covered and no additional instances requested
-				return CellStruct::Empty;
-			}
+			// All base structures are covered!
+			return CellStruct::Empty;
 		}
+
+		// Sort uncovered buildings by distance to ConYard or base center
+		CellStruct coreCell;
+		if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
+			coreCell = GeneralUtils::CellFromCoordinates(pHouse->ConYards[0]->GetCenterCoords());
+		else
+			coreCell = pHouse->Base_Center();
+
+		pivots = uncoveredBuildings;
+		std::sort(pivots.begin(), pivots.end(), [coreCell](const BuildingClass* a, const BuildingClass* b)
+				  { return a->GetMapCoords().DistanceFromSquared(coreCell) < b->GetMapCoords().DistanceFromSquared(coreCell); });
 	}
 
-	CellStruct coreCell;
-	if (pHouse->ConYards.Count > 0 && pHouse->ConYards[0] != nullptr)
-		coreCell = GeneralUtils::CellFromCoordinates(pHouse->ConYards[0]->GetCenterCoords());
-	else
-		coreCell = pHouse->Base_Center();
-
-	BuildingExt::PopulateAdjacencyAnchors(pHouse, pBuildingType, false);
-
 	const int buildingW = pBuildingType->GetFoundationWidth();
-	const int buildingH = pBuildingType->GetFoundationHeight(true);
-	const int adjacency = pBuildingType->Adjacent;
+	const int buildingH = pBuildingType->GetFoundationHeight(false);
+	const int adjRange = pBuildingType->Adjacent + 1;
 
-	const RectangleStruct baseArea = BuildingExt::Get_Base_Rect(
-		pHouse, adjacency, buildingW, buildingH, pBuildingType, false);
-
-	if (baseArea.Width <= 0 || baseArea.Height <= 0)
-		return CellStruct::Empty;
-
-	const auto houseExt = HouseExt::ExtMap.Find(pHouse);
-
-	auto evaluatePlacement = [&](bool requireUncovered, bool checkCongestion) -> CellStruct
+	// Loop through pivots to find a valid adjacent placement cell
+	for (const auto pPivot : pivots)
 	{
-		CellStruct passBestCell = CellStruct::Empty;
-		int passBestScore = std::numeric_limits<int>::min();
+		const CellStruct pivotCell = pPivot->GetMapCoords();
+		const int pivotW = pPivot->Type->GetFoundationWidth();
+		const int pivotH = pPivot->Type->GetFoundationHeight(false);
 
-		for (int y = baseArea.Y; y < baseArea.Y + baseArea.Height; ++y)
+		const int xMin = pivotCell.X - adjRange - buildingW + 1;
+		const int xMax = pivotCell.X + pivotW + adjRange - 1;
+		const int yMin = pivotCell.Y - adjRange - buildingH + 1;
+		const int yMax = pivotCell.Y + pivotH + adjRange - 1;
+
+		CellStruct bestCellForPivot = CellStruct::Empty;
+		int bestRatingForPivot = std::numeric_limits<int>::max();
+
+		for (int y = yMin; y <= yMax; y++)
 		{
-			for (int x = baseArea.X; x < baseArea.X + baseArea.Width; ++x)
+			for (int x = xMin; x <= xMax; x++)
 			{
 				CellStruct cell(static_cast<short>(x), static_cast<short>(y));
 
 				if (!MapClass::Instance.CoordinatesLegal(cell))
 					continue;
 
-				if (!BuildingExt::Should_Evaluate_Cell_For_Placement(cell, pBuildingType, pHouse, 0))
-					continue;
-
 				if (!pBuildingType->CanPlaceHere(&cell, pHouse))
-					continue;
-
-				if (BuildingExt::OverlapsAnyBuilding(cell, pBuildingType, pBuilding))
-					continue;
-
-				if (BuildingExt::OverlapsBridge(cell, pBuildingType))
 					continue;
 
 				if (BuildingExt::OverlapsTiberiumTreeZone(cell, pBuildingType))
 					continue;
 
-				// Pending clearance protection
-				if (houseExt != nullptr && houseExt->PendingClearanceType != nullptr && houseExt->PendingClearanceType != pBuildingType)
+				// Congestion check with other base structures
+				bool cellIsCongested = false;
+				int touchingCount = 0;
+				const int b1X = cell.X;
+				const int b1Y = cell.Y;
+				const int b1W = buildingW;
+				const int b1H = buildingH;
+
+				for (const auto pOtherBuilding : pHouse->Buildings)
 				{
-					const int rX = houseExt->PendingClearanceCell.X;
-					const int rY = houseExt->PendingClearanceCell.Y;
-					const int rW = houseExt->PendingClearanceFoundationWidth;
-					const int rH = houseExt->PendingClearanceFoundationHeight;
-
-					if ((cell.X < rX + rW) && (cell.X + buildingW > rX) &&
-						(cell.Y < rY + rH) && (cell.Y + buildingH > rY))
+					if (pOtherBuilding && pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding != pBuilding)
 					{
-						continue;
-					}
-				}
+						if (pOtherBuilding->Type->InvisibleInGame)
+							continue;
 
-				if (checkCongestion)
-				{
-					bool cellIsCongested = false;
-					int touchingCount = 0;
-					const int b1X = cell.X;
-					const int b1Y = cell.Y;
-					const int b1W = buildingW;
-					const int b1H = buildingH;
+						const int b2X = pOtherBuilding->GetMapCoords().X;
+						const int b2Y = pOtherBuilding->GetMapCoords().Y;
+						const int b2W = pOtherBuilding->Type->GetFoundationWidth();
+						const int b2H = pOtherBuilding->Type->GetFoundationHeight(false);
 
-					for (const auto pOtherBuilding : pHouse->Buildings)
-					{
-						if (pOtherBuilding && pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding != pBuilding)
+						// Fast distance check to skip far-away buildings
+						const double dx = static_cast<double>(b1X - b2X);
+						const double dy = static_cast<double>(b1Y - b2Y);
+						if ((dx * dx + dy * dy) > 64.0)
+							continue;
+
+						if ((b1X - 1 <= b2X + b2W - 1) && (b1X + b1W >= b2X) &&
+							(b1Y - 1 <= b2Y + b2H - 1) && (b1Y + b1H >= b2Y))
 						{
-							if (pOtherBuilding->Type->InvisibleInGame || pOtherBuilding->Type->Wall)
-								continue;
-
-							const int b2X = pOtherBuilding->GetMapCoords().X;
-							const int b2Y = pOtherBuilding->GetMapCoords().Y;
-							const int b2W = pOtherBuilding->Type->GetFoundationWidth();
-							const int b2H = pOtherBuilding->Type->GetFoundationHeight(true);
-
-							const double dx = static_cast<double>(b1X - b2X);
-							const double dy = static_cast<double>(b1Y - b2Y);
-							if ((dx * dx + dy * dy) > 64.0)
-								continue;
-
-							if ((b1X - 1 <= b2X + b2W - 1) && (b1X + b1W >= b2X) &&
-								(b1Y - 1 <= b2Y + b2H - 1) && (b1Y + b1H >= b2Y))
+							if (pBuildingType->IsBaseDefense && pOtherBuilding->Type->IsBaseDefense)
 							{
-								if (pBuildingType->IsBaseDefense && pOtherBuilding->Type->IsBaseDefense)
-								{
-									cellIsCongested = true;
-									break;
-								}
-
-								if (pOtherBuilding->Type == pBuildingType)
-								{
-									cellIsCongested = true;
-									break;
-								}
-
-								touchingCount++;
-								const int maxTouching = (b1W == 1 && b1H == 1) ? 3 : 2;
-								if (touchingCount >= maxTouching)
-								{
-									cellIsCongested = true;
-									break;
-								}
-							}
-						}
-					}
-
-					if (cellIsCongested)
-						continue;
-				}
-
-				// Unsafe placement zone check
-				if (houseExt != nullptr)
-				{
-					bool isUnsafe = false;
-					for (auto it = houseExt->UnsafePlacementZones.begin(); it != houseExt->UnsafePlacementZones.end();)
-					{
-						if (Unsorted::CurrentFrame > it->ExpiryFrame)
-							it = houseExt->UnsafePlacementZones.erase(it);
-						else
-						{
-							if (cell.DistanceFromSquared(it->Coords) < 100.0)
-							{
-								isUnsafe = true;
+								cellIsCongested = true;
 								break;
 							}
-							++it;
+
+							if (pOtherBuilding->Type == pBuildingType)
+							{
+								cellIsCongested = true;
+								break;
+							}
+
+							touchingCount++;
+							if (touchingCount >= 2)
+							{
+								cellIsCongested = true;
+								break;
+							}
+						}
+					}
+				}
+
+				if (cellIsCongested)
+					continue;
+
+				// Unsafe placement zone check
+				const auto houseExt = HouseExt::ExtMap.Find(pHouse);
+				bool isUnsafe = false;
+				for (auto it = houseExt->UnsafePlacementZones.begin(); it != houseExt->UnsafePlacementZones.end();)
+				{
+					if (Unsorted::CurrentFrame > it->ExpiryFrame)
+						it = houseExt->UnsafePlacementZones.erase(it);
+					else
+					{
+						if (cell.DistanceFromSquared(it->Coords) < 100.0)
+						{
+							isUnsafe = true;
+							break;
+						}
+
+						++it;
+					}
+				}
+
+				if (isUnsafe)
+					continue;
+
+				// Separation rule check (radius-based support buildings only)
+				if (supportType != SupportRadiusType::None)
+				{
+					bool tooCloseToSameType = false;
+					for (const auto pExist : existingSupports)
+					{
+						if (pExist != pBuilding && cell.DistanceFrom(pExist->GetMapCoords()) < targetSeparation)
+						{
+							tooCloseToSameType = true;
+							break;
 						}
 					}
 
-					if (isUnsafe)
+					if (tooCloseToSameType)
 						continue;
 				}
 
-				// Hard minimum distance check against existing support buildings of the same network/type
-				bool tooCloseToSameType = false;
-				for (const auto pExist : existingSupports)
+				// Rating: closer to the pivot building
+				int rating = static_cast<int>(cell.DistanceFrom(pivotCell) * 10);
+
+				if (rating < bestRatingForPivot)
 				{
-					if (pExist != pBuilding && hardMinSeparation > 0.0 && cell.DistanceFrom(pExist->GetMapCoords()) < hardMinSeparation)
-					{
-						tooCloseToSameType = true;
-						break;
-					}
-				}
-
-				if (tooCloseToSameType)
-					continue;
-
-				int score = 0;
-				if (supportType != SupportRadiusType::None && coverageDistance > 0)
-				{
-					int uncoveredCoveredCount = 0;
-					for (const auto pUncov : uncoveredBuildings)
-					{
-						if (cell.DistanceFrom(pUncov->GetMapCoords()) <= coverageDistance)
-							uncoveredCoveredCount++;
-					}
-
-					if (requireUncovered && !uncoveredBuildings.empty() && uncoveredCoveredCount == 0)
-						continue;
-
-					int totalCoveredCount = 0;
-					for (const auto pBaseBld : baseBuildings)
-					{
-						if (cell.DistanceFrom(pBaseBld->GetMapCoords()) <= coverageDistance)
-							totalCoveredCount++;
-					}
-
-					// Primary: envelop maximum uncovered buildings (5000 pts each)
-					// Secondary: envelop maximum total base buildings (1000 pts each)
-					// Proximity: slight preference closer to base center / conyard (-5 pts per cell)
-					score = (uncoveredCoveredCount * 5000) + (totalCoveredCount * 1000)
-						- static_cast<int>(cell.DistanceFrom(coreCell) * 5);
-				}
-				else
-				{
-					score = -static_cast<int>(cell.DistanceFrom(coreCell) * 10);
-				}
-
-				if (score > passBestScore)
-				{
-					passBestScore = score;
-					passBestCell = cell;
+					bestRatingForPivot = rating;
+					bestCellForPivot = cell;
 				}
 			}
 		}
 
-		return passBestCell;
-	};
+		if (bestCellForPivot.X > 0 && bestCellForPivot.Y > 0)
+			return bestCellForPivot;
+	}
 
-	CellStruct bestCell = evaluatePlacement(true, true);
-
-	if (bestCell.X <= 0 || bestCell.Y <= 0)
-		bestCell = evaluatePlacement(false, true);
-
-	if (bestCell.X <= 0 || bestCell.Y <= 0)
-		bestCell = evaluatePlacement(false, false);
-
-	return bestCell;
+	return CellStruct::Empty;
 }
 
 bool BuildingExt::AdvAI_Is_Support_Placement_Feasible(HouseClass* pHouse, BuildingTypeClass* pBuildingType)
 {
 	CellStruct cell = Find_Best_Support_Placement(pHouse, pBuildingType, nullptr);
-	if (cell.X > 0 && cell.Y > 0)
-		return true;
-
-	return HouseExt::AdvAI_Can_Build_Building(pHouse, pBuildingType, false, true);
+	return cell.X > 0 && cell.Y > 0;
 }
 
 CellStruct BuildingExt::Get_Best_Support_Placement_Position(BuildingClass* pBuilding)
