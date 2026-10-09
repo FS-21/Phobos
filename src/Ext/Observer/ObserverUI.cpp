@@ -403,12 +403,30 @@ void ObserverUIClass::CollectPlayerData()
 
 			if (!hasContent)
 			{
-				for (auto const pFact : FactoryClass::Array)
+				auto const checkFactContent = [&](FactoryClass* pFact) -> bool
 				{
-					if (pFact && pFact->Owner == pHouse && pFact->Object && pFact->Object->IsAlive && pFact->Object->InLimbo && pFact->Object->Health > 0)
+					return pFact && pFact->Owner == pHouse && pFact->Object
+						&& pFact->Object->IsAlive && pFact->Object->InLimbo && pFact->Object->Health > 0;
+				};
+
+				if (checkFactContent(pHouse->Primary_ForBuildings)
+					|| checkFactContent(pHouse->Primary_ForDefenses)
+					|| checkFactContent(pHouse->Primary_ForInfantry)
+					|| checkFactContent(pHouse->Primary_ForVehicles)
+					|| checkFactContent(pHouse->Primary_ForShips)
+					|| checkFactContent(pHouse->Primary_ForAircraft))
+				{
+					hasContent = true;
+				}
+				else
+				{
+					for (auto const b : pHouse->Buildings)
 					{
-						hasContent = true;
-						break;
+						if (b && b->IsAlive && !b->InLimbo && b->Health > 0 && checkFactContent(b->Factory))
+						{
+							hasContent = true;
+							break;
+						}
 					}
 				}
 			}
@@ -479,85 +497,105 @@ void ObserverUIClass::CollectPlayerData()
 		// Assign actual player house ColorScheme BaseColor
 		row.PlayerColor = GetHouseColor(pHouse, row.PlayerNumber - 1);
 
-		// Collect active factory production for this player from FactoryClass::Array grouped by TechnoType
+		// Collect active factory production for this player grouped by TechnoType.
+		// Only query genuine active primary queues of the house or factories attached to alive in-world buildings.
+		// Detached / orphaned factory instances in FactoryClass::Array must never be queried.
 		std::map<TechnoTypeClass*, std::vector<BuildingClass*>> prodGroupMap;
 		std::map<TechnoTypeClass*, int> prodProgressMap;
 
-		for (auto const pFact : FactoryClass::Array)
+		std::vector<std::pair<FactoryClass*, BuildingClass*>> activeFactories;
+
+		// 1. Check all in-world buildings currently on the map
+		for (auto const b : pHouse->Buildings)
 		{
-			if (!pFact || pFact->Owner != pHouse || !pFact->Object)
-				continue;
+			if (b && b->IsAlive && !b->InLimbo && b->Health > 0 && b->Factory)
+			{
+				auto const pFact = b->Factory;
 
-			if (!pFact->Object->IsAlive || !pFact->Object->InLimbo || pFact->Object->Health <= 0)
-				continue;
+				if (pFact->Owner == pHouse && pFact->Object)
+				{
+					if (pFact->Object->IsAlive && pFact->Object->InLimbo && pFact->Object->Health > 0)
+					{
+						bool alreadyAdded = false;
 
+						for (const auto& [existingFact, existingBld] : activeFactories)
+						{
+							if (existingFact == pFact)
+							{
+								alreadyAdded = true;
+								break;
+							}
+						}
+
+						if (!alreadyAdded)
+							activeFactories.push_back({ pFact, b });
+					}
+				}
+			}
+		}
+
+		// 2. Check the 6 primary factory channels of the house
+		auto checkAddPrimary = [&](FactoryClass* pPrimaryFact, AbstractType absType, bool isNaval)
+		{
+			if (!pPrimaryFact || pPrimaryFact->Owner != pHouse || !pPrimaryFact->Object)
+				return;
+
+			if (!pPrimaryFact->Object->IsAlive || !pPrimaryFact->Object->InLimbo || pPrimaryFact->Object->Health <= 0)
+				return;
+
+			for (const auto& [existingFact, existingBld] : activeFactories)
+			{
+				if (existingFact == pPrimaryFact)
+					return;
+			}
+
+			BuildingClass* pPrimaryBld = nullptr;
+
+			for (auto const b : pHouse->Buildings)
+			{
+				if (b && b->IsAlive && !b->InLimbo && b->Health > 0 && b->Type)
+				{
+					if (absType == AbstractType::BuildingType && b->Type->Factory == AbstractType::BuildingType)
+					{
+						if (b->IsPrimaryFactory || !pPrimaryBld)
+							pPrimaryBld = b;
+					}
+					else if (absType == AbstractType::InfantryType && b->Type->Factory == AbstractType::InfantryType)
+					{
+						if (b->IsPrimaryFactory || !pPrimaryBld)
+							pPrimaryBld = b;
+					}
+					else if (absType == AbstractType::UnitType && b->Type->Factory == AbstractType::UnitType && b->Type->Naval == isNaval)
+					{
+						if (b->IsPrimaryFactory || !pPrimaryBld)
+							pPrimaryBld = b;
+					}
+					else if (absType == AbstractType::AircraftType && (b->Type->Factory == AbstractType::AircraftType || b->Type->Helipad))
+					{
+						if (b->IsPrimaryFactory || !pPrimaryBld)
+							pPrimaryBld = b;
+					}
+				}
+			}
+
+			activeFactories.push_back({ pPrimaryFact, pPrimaryBld });
+		};
+
+		checkAddPrimary(pHouse->Primary_ForBuildings, AbstractType::BuildingType, false);
+		checkAddPrimary(pHouse->Primary_ForDefenses, AbstractType::BuildingType, false);
+		checkAddPrimary(pHouse->Primary_ForInfantry, AbstractType::InfantryType, false);
+		checkAddPrimary(pHouse->Primary_ForVehicles, AbstractType::UnitType, false);
+		checkAddPrimary(pHouse->Primary_ForShips, AbstractType::UnitType, true);
+		checkAddPrimary(pHouse->Primary_ForAircraft, AbstractType::AircraftType, false);
+
+		for (const auto& [pFact, pBld] : activeFactories)
+		{
 			auto const pProducingType = pFact->Object->GetTechnoType();
+
 			if (!pProducingType || !this->MatchesSearchFilter(pProducingType))
 				continue;
 
 			int progressPercent = GetFactoryProgressPercent(pFact);
-
-			BuildingClass* pBld = nullptr;
-			for (auto const b : pHouse->Buildings)
-			{
-				if (b && b->Factory == pFact)
-				{
-					pBld = b;
-					break;
-				}
-			}
-
-			if (!pBld && pProducingType)
-			{
-				AbstractType abs = pProducingType->WhatAmI();
-
-				if (abs == AbstractType::BuildingType)
-				{
-					for (auto const b : pHouse->Buildings)
-					{
-						if (b && b->IsAlive && !b->InLimbo && b->Type && b->Type->Factory == AbstractType::BuildingType)
-						{
-							if (b->IsPrimaryFactory || !pBld)
-								pBld = b;
-						}
-					}
-				}
-				else if (abs == AbstractType::InfantryType)
-				{
-					for (auto const b : pHouse->Buildings)
-					{
-						if (b && b->IsAlive && !b->InLimbo && b->Type && b->Type->Factory == AbstractType::InfantryType)
-						{
-							if (b->IsPrimaryFactory || !pBld)
-								pBld = b;
-						}
-					}
-				}
-				else if (abs == AbstractType::UnitType)
-				{
-					bool isNaval = specific_cast<UnitTypeClass*>(pProducingType)->Naval;
-
-					for (auto const b : pHouse->Buildings)
-					{
-						if (b && b->IsAlive && !b->InLimbo && b->Type && b->Type->Factory == AbstractType::UnitType && b->Type->Naval == isNaval)
-						{
-							if (b->IsPrimaryFactory || !pBld)
-								pBld = b;
-						}
-					}
-				}
-				else if (abs == AbstractType::AircraftType)
-				{
-					for (auto const b : pHouse->Buildings)
-					{
-						if (b && b->IsAlive && !b->InLimbo && b->Type && (b->Type->Factory == AbstractType::AircraftType || b->Type->Helipad))
-						{
-							if (b->IsPrimaryFactory || !pBld)
-								pBld = b;
-						}
-					}
-				}
-			}
 
 			prodGroupMap[pProducingType].push_back(pBld);
 			prodProgressMap[pProducingType] = std::max(prodProgressMap[pProducingType], progressPercent);
@@ -2115,16 +2153,55 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			pFact = nullptr;
 		}
 
-		if (!pFact && win.IsProductionItem && pTargetType)
+		if (!pFact && win.IsProductionItem && pTargetType && pOwner)
 		{
-			for (auto const pCandidate : FactoryClass::Array)
+			AbstractType const abs = pTargetType->WhatAmI();
+			FactoryClass* pCandidateFact = nullptr;
+
+			if (abs == AbstractType::BuildingType)
 			{
-				if (pCandidate && pCandidate->Owner == pOwner && pCandidate->Object
-					&& pCandidate->Object->IsAlive && pCandidate->Object->InLimbo && pCandidate->Object->Health > 0
-					&& pCandidate->Object->GetTechnoType() == pTargetType)
+				pCandidateFact = pOwner->Primary_ForBuildings;
+				if (!pCandidateFact || !pCandidateFact->Object || pCandidateFact->Object->GetTechnoType() != pTargetType)
+					pCandidateFact = pOwner->Primary_ForDefenses;
+			}
+			else if (abs == AbstractType::InfantryType)
+			{
+				pCandidateFact = pOwner->Primary_ForInfantry;
+			}
+			else if (abs == AbstractType::UnitType)
+			{
+				bool const isNaval = specific_cast<UnitTypeClass*>(pTargetType)->Naval;
+				pCandidateFact = isNaval ? pOwner->Primary_ForShips : pOwner->Primary_ForVehicles;
+			}
+			else if (abs == AbstractType::AircraftType)
+			{
+				pCandidateFact = pOwner->Primary_ForAircraft;
+			}
+
+			if (pCandidateFact && pCandidateFact->Owner == pOwner && pCandidateFact->Object
+				&& pCandidateFact->Object->IsAlive && pCandidateFact->Object->InLimbo && pCandidateFact->Object->Health > 0
+				&& pCandidateFact->Object->GetTechnoType() == pTargetType)
+			{
+				pFact = pCandidateFact;
+			}
+
+			if (!pFact)
+			{
+				for (auto const b : pOwner->Buildings)
 				{
-					pFact = pCandidate;
-					break;
+					if (b && b->IsAlive && !b->InLimbo && b->Health > 0 && b->Factory)
+					{
+						if (b->Factory->Owner == pOwner && b->Factory->Object
+							&& b->Factory->Object->IsAlive && b->Factory->Object->InLimbo && b->Factory->Object->Health > 0
+							&& b->Factory->Object->GetTechnoType() == pTargetType)
+						{
+							pFact = b->Factory;
+							if (!pBld)
+								pBld = b;
+
+							break;
+						}
+					}
 				}
 			}
 		}
