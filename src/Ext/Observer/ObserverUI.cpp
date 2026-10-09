@@ -2905,29 +2905,185 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				}
 			}
 
-			// Income Line (for in-world buildings or building cards)
-			BuildingTypeClass* pIncomeBldType = nullptr;
+			// Building Type resolution for building cards (Power, Upgrades, Income)
+			BuildingTypeClass* pBldCardType = nullptr;
 			if (pBld && pBld->Type)
 			{
-				pIncomeBldType = pBld->Type;
+				pBldCardType = pBld->Type;
 			}
 			else if (pTech && pTech->WhatAmI() == AbstractType::Building)
 			{
-				pIncomeBldType = static_cast<BuildingClass*>(pTech)->Type;
+				pBldCardType = static_cast<BuildingClass*>(pTech)->Type;
 			}
 			else if (pBaseType && pBaseType->WhatAmI() == AbstractType::BuildingType)
 			{
-				pIncomeBldType = static_cast<BuildingTypeClass*>(pBaseType);
+				pBldCardType = static_cast<BuildingTypeClass*>(pBaseType);
 			}
 
-			if (!isProductionView && pIncomeBldType && !win.IsDestroyed)
+			// Power Output Line (for in-world buildings or building cards that produce power)
+			if (!isProductionView && pBldCardType && !win.IsDestroyed)
 			{
-				if (pIncomeBldType->ProduceCashAmount > 0 && pIncomeBldType->ProduceCashDelay > 0)
+				int nominalBasePower = pBldCardType->PowerBonus;
+				int upgradeBonusPower = 0;
+
+				if (pBld && pBld->UpgradeLevel)
 				{
-					int const cashPerMinute = (pIncomeBldType->ProduceCashAmount * 900) / pIncomeBldType->ProduceCashDelay;
+					for (auto const pUpg : pBld->Upgrades)
+					{
+						if (pUpg)
+						{
+							upgradeBonusPower += pUpg->PowerBonus;
+						}
+					}
+				}
+
+				HouseClass* pBldOwner = pBld ? pBld->Owner : pOwner;
+				auto [enhPower, enhExtra] = BuildingTypeExt::GetEnhancedPower(pBldCardType, nominalBasePower + upgradeBonusPower, pBldOwner, pBld);
+				int const nominalTotalPower = enhPower + enhExtra;
+
+				int currentPower = 0;
+				if (pBld)
+				{
+					currentPower = pBld->GetPowerOutput();
+				}
+				else
+				{
+					currentPower = nominalTotalPower;
+				}
+
+				if (nominalTotalPower > 0 || currentPower > 0)
+				{
+					std::wostringstream powOss;
+					int powColor = Drawing::RGB_To_Int(100, 255, 120);
+
+					if (pBld)
+					{
+						if (!pBld->HasPower || pBld->IsUnderEMP())
+						{
+							powOss << L"+0 / " << nominalTotalPower << L" ("
+								   << GeneralUtils::LoadStringUnlessMissing(pBld->IsUnderEMP() ? "TXT_OBSERVER_EMP" : "TXT_OBSERVER_OFFLINE", pBld->IsUnderEMP() ? L"EMP" : L"Offline")
+								   << L")";
+							powColor = Drawing::RGB_To_Int(255, 80, 80);
+						}
+						else if (currentPower < nominalTotalPower)
+						{
+							powOss << L"+" << currentPower << L" / " << nominalTotalPower;
+							if (currentPower <= nominalTotalPower / 2)
+								powColor = Drawing::RGB_To_Int(255, 120, 80);
+							else
+								powColor = Drawing::RGB_To_Int(255, 220, 80);
+						}
+						else if (currentPower > nominalTotalPower)
+						{
+							powOss << L"+" << currentPower << L" / " << nominalTotalPower;
+							powColor = Drawing::RGB_To_Int(100, 220, 255);
+						}
+						else
+						{
+							powOss << L"+" << currentPower;
+							powColor = Drawing::RGB_To_Int(100, 255, 120);
+						}
+					}
+					else
+					{
+						powOss << L"+" << nominalTotalPower;
+						powColor = Drawing::RGB_To_Int(100, 255, 120);
+					}
+
+					addLineSegments({
+						{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_POWER", L"Power: "), Drawing::RGB_To_Int(200, 200, 200) },
+						{ powOss.str(), powColor }
+					});
+				}
+			}
+
+			// Upgrades Line (for in-world buildings with upgrades or upgrade slots)
+			if (!isProductionView && pBld && pBld->Type && !win.IsDestroyed)
+			{
+				std::vector<BuildingTypeClass*> activeUpgrades;
+				for (size_t u = 0; u < 3; ++u)
+				{
+					if (auto const pUpg = pBld->Upgrades[u])
+					{
+						activeUpgrades.push_back(pUpg);
+					}
+				}
+
+				if (!activeUpgrades.empty())
+				{
+					std::vector<BuildingTypeClass*> uniqueUpgrades;
+					std::map<BuildingTypeClass*, int> upgCounts;
+					for (auto const pUpg : activeUpgrades)
+					{
+						if (upgCounts[pUpg] == 0)
+							uniqueUpgrades.push_back(pUpg);
+						upgCounts[pUpg]++;
+					}
+
+					std::wostringstream upgPrefixOss;
+					upgPrefixOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_UPGRADES", L"Upgrades");
+					if (pBld->Type->Upgrades > 0)
+					{
+						upgPrefixOss << L" (" << activeUpgrades.size() << L"/" << pBld->Type->Upgrades << L"): ";
+					}
+					else
+					{
+						upgPrefixOss << L" (" << activeUpgrades.size() << L"): ";
+					}
+
+					std::wostringstream upgListOss;
+					bool firstUpg = true;
+					for (auto const pUpg : uniqueUpgrades)
+					{
+						if (!firstUpg)
+							upgListOss << L", ";
+						firstUpg = false;
+
+						int const count = upgCounts[pUpg];
+						std::string const upgId = pUpg->get_ID();
+						std::wstring const upgName = FormatObjectNameWithDebug(0, upgId.c_str(), pUpg->UIName, isDebugKeysEnabled);
+
+						if (count > 1)
+							upgListOss << count << L"x " << upgName;
+						else
+							upgListOss << upgName;
+					}
+
+					addLineSegments({
+						{ upgPrefixOss.str(), Drawing::RGB_To_Int(200, 200, 200) },
+						{ upgListOss.str(), Drawing::RGB_To_Int(255, 215, 100) }
+					});
+				}
+				else if (pBld->Type->Upgrades > 0)
+				{
+					std::wostringstream upgEmptyOss;
+					upgEmptyOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_UPGRADES", L"Upgrades")
+								<< L" (0/" << pBld->Type->Upgrades << L"): ";
+					addLineSegments({
+						{ upgEmptyOss.str(), Drawing::RGB_To_Int(200, 200, 200) },
+						{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_NONE", L"None"), Drawing::RGB_To_Int(140, 140, 140) }
+					});
+				}
+			}
+			else if (!isProductionView && !pBld && pBldCardType && pBldCardType->Upgrades > 0 && !win.IsDestroyed)
+			{
+				std::wostringstream upgSlotsOss;
+				upgSlotsOss << pBldCardType->Upgrades;
+				addLineSegments({
+					{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_UPGRADE_SLOTS", L"Upgrade Slots: "), Drawing::RGB_To_Int(200, 200, 200) },
+					{ upgSlotsOss.str(), Drawing::RGB_To_Int(255, 215, 100) }
+				});
+			}
+
+			// Income Line (for in-world buildings or building cards)
+			if (!isProductionView && pBldCardType && !win.IsDestroyed)
+			{
+				if (pBldCardType->ProduceCashAmount > 0 && pBldCardType->ProduceCashDelay > 0)
+				{
+					int const cashPerMinute = (pBldCardType->ProduceCashAmount * 900) / pBldCardType->ProduceCashDelay;
 
 					bool isPowerOffline = false;
-					if (pIncomeBldType->Powered)
+					if (pBldCardType->Powered)
 					{
 						if (pBld)
 						{
@@ -3122,6 +3278,51 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 					if (auto const pCurBldType = abstract_cast<BuildingTypeClass*>(pCurProdType))
 					{
+						if (pCurBldType->PowerBonus > 0)
+						{
+							std::wostringstream powOss;
+							powOss << L"+" << pCurBldType->PowerBonus;
+							addLineSegments({
+								{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_POWER", L"Power: "), Drawing::RGB_To_Int(200, 200, 200) },
+								{ powOss.str(), Drawing::RGB_To_Int(100, 255, 120) }
+							});
+						}
+
+						if (pCurBldType->Upgrades > 0)
+						{
+							std::wostringstream upgSlotsOss;
+							upgSlotsOss << pCurBldType->Upgrades;
+							addLineSegments({
+								{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_UPGRADE_SLOTS", L"Upgrade Slots: "), Drawing::RGB_To_Int(200, 200, 200) },
+								{ upgSlotsOss.str(), Drawing::RGB_To_Int(255, 215, 100) }
+							});
+						}
+
+						auto const pCurBldExt = BuildingTypeExt::Fetch(pCurBldType);
+						if (pCurBldExt && !pCurBldExt->PowersUp_Buildings.empty())
+						{
+							std::wostringstream powersUpOss;
+							bool firstTgt = true;
+							for (auto pTargetBld : pCurBldExt->PowersUp_Buildings)
+							{
+								if (pTargetBld)
+								{
+									if (!firstTgt) powersUpOss << L", ";
+									firstTgt = false;
+									std::string tgtId = pTargetBld->get_ID();
+									powersUpOss << FormatObjectNameWithDebug(0, tgtId.c_str(), pTargetBld->UIName, isDebugKeysEnabled);
+								}
+							}
+
+							if (!powersUpOss.str().empty())
+							{
+								addLineSegments({
+									{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_UPGRADES_FOR", L"Upgrades: "), Drawing::RGB_To_Int(200, 200, 200) },
+									{ powersUpOss.str(), Drawing::RGB_To_Int(255, 215, 100) }
+								});
+							}
+						}
+
 						if (pCurBldType->ProduceCashAmount > 0 && pCurBldType->ProduceCashDelay > 0)
 						{
 							int const cashPerMinute = (pCurBldType->ProduceCashAmount * 900) / pCurBldType->ProduceCashDelay;
