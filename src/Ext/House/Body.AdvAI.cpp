@@ -2276,23 +2276,7 @@ void HouseExt::AdvAI_Update_Defensive_Placeholders(HouseClass* pHouse)
 	if (!houseExt)
 		return;
 
-	// If there are no active enemies on the map, never create defensive placeholders
-	bool hasAnyEnemyHouse = false;
-	for (const auto pOther : HouseClass::Array)
-	{
-		if (pOther != pHouse && !pOther->Defeated && !pHouse->IsAlliedWith(pOther) &&
-			!HouseExt::IsNeutralOrSpecialHouse(pOther))
-		{
-			hasAnyEnemyHouse = true;
-			break;
-		}
-	}
 
-	if (!hasAnyEnemyHouse)
-	{
-		houseExt->DefensivePlaceholders.clear();
-		return;
-	}
 
 	const BuildingClass* pOurConYard =
 		pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
@@ -2982,19 +2966,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 
 		int paranoiaDuration = TICKS_PER_MINUTE;
 
-		bool hasAnyEnemyHouse = false;
-		for (const auto pOther : HouseClass::Array)
-		{
-			if (pOther != pHouse && !pOther->Defeated && !pHouse->IsAlliedWith(pOther) &&
-				!HouseExt::IsNeutralOrSpecialHouse(pOther))
-			{
-				hasAnyEnemyHouse = true;
-				break;
-			}
-		}
-
 		bool hasEnemiesClose = false;
-		if (hasAnyEnemyHouse)
 		{
 			const BuildingClass* pOurConYard =
 				pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
@@ -3049,34 +3021,31 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		}
 
 		bool allyRecentlyAttacked = false;
-		if (hasAnyEnemyHouse)
+		for (const auto pOtherOwner : HouseClass::Array)
 		{
-			for (const auto pOtherOwner : HouseClass::Array)
+			if (pOtherOwner != pHouse && pHouse->IsAlliedWith(pOtherOwner) &&
+				!HouseExt::IsNeutralOrSpecialHouse(pOtherOwner))
 			{
-				if (pOtherOwner != pHouse && pHouse->IsAlliedWith(pOtherOwner) &&
-					!HouseExt::IsNeutralOrSpecialHouse(pOtherOwner))
+				if (pOtherOwner->LATime > 0 &&
+					pOtherOwner->LATime + paranoiaDuration + 1800 >
+						Unsorted::CurrentFrame)
 				{
-					if (pOtherOwner->LATime > 0 &&
-						pOtherOwner->LATime + paranoiaDuration + 1800 >
-							Unsorted::CurrentFrame)
+					const auto otherHouseExt = ExtMap.Find(pOtherOwner);
+					if (otherHouseExt &&
+						otherHouseExt->LastAttackedBuildingCoords.X > 0)
 					{
-						const auto otherHouseExt = ExtMap.Find(pOtherOwner);
-						if (otherHouseExt &&
-							otherHouseExt->LastAttackedBuildingCoords.X > 0)
-						{
-							allyRecentlyAttacked = true;
-							break;
-						}
+						allyRecentlyAttacked = true;
+						break;
 					}
 				}
 			}
 		}
 
-		const bool wasRecentlyAttacked = hasAnyEnemyHouse &&
-			(pHouse->LATime + paranoiaDuration > Unsorted::CurrentFrame ||
-			allyRecentlyAttacked);
-		const bool isParanoid = hasAnyEnemyHouse &&
-			((isUnderThreat && hasEnemiesClose) || wasRecentlyAttacked);
+		const bool wasRecentlyAttacked =
+			pHouse->LATime + paranoiaDuration > Unsorted::CurrentFrame ||
+			allyRecentlyAttacked;
+		const bool isParanoid =
+			(isUnderThreat && hasEnemiesClose) || wasRecentlyAttacked;
 
 		if (isParanoid)
 		{
@@ -3116,7 +3085,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		const bool canStillExpand = (houseExt->NextExpansionPointLocation.X > 0 &&
 			houseExt->NextExpansionPointLocation.Y > 0);
 
-		bool hasSomethingToProtect = hasAnyEnemyHouse && !houseExt->DefensivePlaceholders.empty();
+		bool hasSomethingToProtect = !houseExt->DefensivePlaceholders.empty();
 
 		// In PacifistAndGreedy mode, postpone defending placeholders as long as the AI can still expand
 		if (isPacifistAndGreedy && canStillExpand)
@@ -3334,23 +3303,19 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			functionalBaseStructureCount++;
 		}
 
-		int baseOptimalDefenseValue = 0;
-		if (hasAnyEnemyHouse)
+		int baseOptimalDefenseValue =
+			diffBase + (refineryCount * 10) + (functionalBaseStructureCount * 5);
+		if (houseExt->NextExpansionPointLocation.X > 0 &&
+			houseExt->NextExpansionPointLocation.Y > 0)
 		{
-			baseOptimalDefenseValue =
-				diffBase + (refineryCount * 10) + (functionalBaseStructureCount * 5);
-			if (houseExt->NextExpansionPointLocation.X > 0 &&
-				houseExt->NextExpansionPointLocation.Y > 0)
-			{
-				baseOptimalDefenseValue += 25;
-			}
+			baseOptimalDefenseValue += 25;
 		}
 
 		bool isInfantryAttacker = false;
 		bool isVehicleAttacker = false;
 		bool isAirAttacker = false;
 
-		if (hasAnyEnemyHouse && houseExt->LastAttackerType != nullptr && wasRecentlyAttacked)
+		if (houseExt->LastAttackerType != nullptr && wasRecentlyAttacked)
 		{
 			auto const pAttackerType = houseExt->LastAttackerType;
 			if (pAttackerType->WhatAmI() == AbstractType::AircraftType)
@@ -3392,92 +3357,80 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 
 		int antiInfOptimal = baseOptimalDefenseValue;
 		int antiVehOptimal = baseOptimalDefenseValue;
-		int antiAirOptimal = hasAnyEnemyHouse ? (baseAA + (refineryCount * 10)) : 0;
+		int antiAirOptimal = baseAA + (refineryCount * 10);
 
-		if (hasAnyEnemyHouse)
+		if (isNavalMode)
+			antiAirOptimal *= 3; // Triple optimal AA requirements in naval mode
+
+		if (isInfantryAttacker)
+			antiInfOptimal = (antiInfOptimal * 3) / 2;
+		else if (hasEnemiesClose && isUnderThreat)
+			antiInfOptimal = (antiInfOptimal * 5) / 4;
+
+		if (isVehicleAttacker)
+			antiVehOptimal = (antiVehOptimal * 3) / 2;
+		else if (hasEnemiesClose && isUnderThreat)
+			antiVehOptimal = (antiVehOptimal * 5) / 4;
+
+		if (wasRecentlyAttacked)
 		{
-			if (isNavalMode)
-				antiAirOptimal *= 3; // Triple optimal AA requirements in naval mode
-
-			if (isInfantryAttacker)
-				antiInfOptimal = (antiInfOptimal * 3) / 2;
-			else if (hasEnemiesClose && isUnderThreat)
-				antiInfOptimal = (antiInfOptimal * 5) / 4;
-
-			if (isVehicleAttacker)
-				antiVehOptimal = (antiVehOptimal * 3) / 2;
-			else if (hasEnemiesClose && isUnderThreat)
-				antiVehOptimal = (antiVehOptimal * 5) / 4;
-
-			if (wasRecentlyAttacked)
-			{
-				antiInfOptimal += 30;
-				antiVehOptimal += 30;
-			}
-
-			// Cap optimal defense values to prevent runaway requirements
-			antiVehOptimal = std::min(maxOptimal, antiVehOptimal);
-			antiInfOptimal = std::min(maxOptimal, antiInfOptimal);
-			antiAirOptimal = std::min(maxOptimal, antiAirOptimal);
+			antiInfOptimal += 30;
+			antiVehOptimal += 30;
 		}
-		else
-		{
-			antiVehOptimal = 0;
-			antiInfOptimal = 0;
-			antiAirOptimal = 0;
-		}
+
+		// Cap optimal defense values to prevent runaway requirements
+		antiVehOptimal = std::min(maxOptimal, antiVehOptimal);
+		antiInfOptimal = std::min(maxOptimal, antiInfOptimal);
+		antiAirOptimal = std::min(maxOptimal, antiAirOptimal);
 
 		// Check which type of defense is most desperately needed.
 		int antiInfDeficiency = 0;
 		int antiVehicleDeficiency = 0;
 		int antiAirDeficiency = 0;
 
-		if (hasAnyEnemyHouse)
+		if (ourAntiInfantryDefense != nullptr)
+			antiInfDeficiency = antiInfOptimal - antiInfantryDefenseValue;
+
+		if (ourAntiVehicleDefense != nullptr)
+			antiVehicleDeficiency = antiVehOptimal - antiVehicleDefenseValue;
+
+		if (ourAntiAirDefense != nullptr)
 		{
-			if (ourAntiInfantryDefense != nullptr)
-				antiInfDeficiency = antiInfOptimal - antiInfantryDefenseValue;
+			// Dynamically scale AA deficiency with baseline requirements + enemy aircraft/jumpjets
+			const int targetAAValue = antiAirOptimal + (isNavalMode ? enemyAircraftValue * 3 : enemyAircraftValue);
+			antiAirDeficiency = targetAAValue - antiAirDefenseValue;
+			if (isAirAttacker)
+				antiAirDeficiency += isNavalMode ? 180 : 60; // Immediate AA priority boost on recent aerial attack!
+			if (isNavalMode && antiAirDeficiency > 0)
+				antiAirDeficiency *= 3; // Triple AA deficiency in naval mode
+		}
 
-			if (ourAntiVehicleDefense != nullptr)
-				antiVehicleDeficiency = antiVehOptimal - antiVehicleDefenseValue;
-
-			if (ourAntiAirDefense != nullptr)
+		// Also honor AIBuildCounts explicitly configured on individual defense structures
+		for (const auto pDef : pPrimaryTechTree->BuildDefense)
+		{
+			if (pDef)
 			{
-				// Dynamically scale AA deficiency with baseline requirements + enemy aircraft/jumpjets
-				const int targetAAValue = antiAirOptimal + (isNavalMode ? enemyAircraftValue * 3 : enemyAircraftValue);
-				antiAirDeficiency = targetAAValue - antiAirDefenseValue;
-				if (isAirAttacker)
-					antiAirDeficiency += isNavalMode ? 180 : 60; // Immediate AA priority boost on recent aerial attack!
-				if (isNavalMode && antiAirDeficiency > 0)
-					antiAirDeficiency *= 3; // Triple AA deficiency in naval mode
-			}
-
-			// Also honor AIBuildCounts explicitly configured on individual defense structures
-			for (const auto pDef : pPrimaryTechTree->BuildDefense)
-			{
-				if (pDef)
+				const int targetCount = GetTargetBuildCount(pDef, -1, pPrimaryTechTree);
+				if (targetCount > 0)
 				{
-					const int targetCount = GetTargetBuildCount(pDef, -1, pPrimaryTechTree);
-					if (targetCount > 0)
+					const int owned =
+						pHouse->ActiveBuildingTypes.GetItemCount(pDef->ArrayIndex);
+					if (owned < targetCount)
 					{
-						const int owned =
-							pHouse->ActiveBuildingTypes.GetItemCount(pDef->ArrayIndex);
-						if (owned < targetCount)
+						const int missing = targetCount - owned;
+						if (pDef->AntiInfantryValue > 0)
+							antiInfDeficiency = std::max(
+								antiInfDeficiency, missing * pDef->AntiInfantryValue);
+						if (pDef->AntiArmorValue > 0)
+							antiVehicleDeficiency = std::max(
+								antiVehicleDeficiency, missing * pDef->AntiArmorValue);
+						if (pDef->AntiAirValue > 0)
 						{
-							const int missing = targetCount - owned;
-							if (pDef->AntiInfantryValue > 0)
-								antiInfDeficiency = std::max(
-									antiInfDeficiency, missing * pDef->AntiInfantryValue);
-							if (pDef->AntiArmorValue > 0)
-								antiVehicleDeficiency = std::max(
-									antiVehicleDeficiency, missing * pDef->AntiArmorValue);
-							if (pDef->AntiAirValue > 0)
-							{
-								int missingAA = missing * pDef->AntiAirValue;
-								if (isNavalMode)
-									missingAA *= 3;
-								antiAirDeficiency =
-									std::max(antiAirDeficiency, missingAA);
-							}
+							int missingAA = missing * pDef->AntiAirValue;
+							if (isNavalMode)
+								missingAA *= 3;
+							antiAirDeficiency =
+								std::max(antiAirDeficiency, missingAA);
 						}
 					}
 				}
@@ -3557,7 +3510,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 
 		// Prioritize defense construction if paranoid or if we have undefended
 		// nodes to protect!
-		if (hasAnyEnemyHouse && (isParanoid || (!needsTechOrRadar && hasSomethingToProtect)))
+		if (isParanoid || (!needsTechOrRadar && hasSomethingToProtect))
 		{
 			// When tech center, radar, or superweapons are needed, lower defense probability allows advancing the tech tree
 			int rollChance = isParanoid ? 85 : 70;
@@ -3677,7 +3630,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		const bool hasWarFactory = TechTreeTypeClass::CountTotalOwnedBuildings(
 			pHouse, TechTreeTypeClass::BuildType::BuildWeapons) >= 1;
 
-		if (hasAnyEnemyHouse && !hasWarFactory && !needsTechOrRadar && houseExt->PendingClearanceType == nullptr &&
+		if (!hasWarFactory && !needsTechOrRadar && houseExt->PendingClearanceType == nullptr &&
 			ourAntiInfantryDefense != nullptr && ownedAntiInfDefenses < 2)
 		{
 			if (AdvAI_Can_Build_Building(pHouse, ourAntiInfantryDefense, true, true))
@@ -4065,15 +4018,14 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		}
 
 		// Probabilistic roll: 50% chance when paranoid (threat/attack) or 0% in calm state while teching up.
-		const int rollChance = !hasAnyEnemyHouse ? 0 : (needsTechOrRadar
+		const int rollChance = needsTechOrRadar
 			? (isParanoid ? 50 : 0)
-			: (isParanoid ? 80 : 50));
+			: (isParanoid ? 80 : 50);
 
-		bool shouldBuildDefenseThisCycle = hasAnyEnemyHouse &&
+		bool shouldBuildDefenseThisCycle =
 			(ScenarioClass::Instance->Random.RandomRanged(0, 99) < rollChance);
 
-		if (hasAnyEnemyHouse &&
-			houseExt->FrontlineThreatCoords.X > 0 &&
+		if (houseExt->FrontlineThreatCoords.X > 0 &&
 			houseExt->FrontlineThreatActiveFrames > Unsorted::CurrentFrame &&
 			houseExt->FrontlineThreatNeedsDefenses > 0)
 		{
@@ -4083,7 +4035,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		if (isPacifistAndGreedy && canStillExpand)
 			shouldBuildDefenseThisCycle = false;
 
-		if (hasAnyEnemyHouse && shouldBuildDefenseThisCycle)
+		if (shouldBuildDefenseThisCycle)
 		{
 			int maxDeficiency = 0;
 			const BuildingTypeClass* pBestDefense = nullptr;
