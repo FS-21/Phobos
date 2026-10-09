@@ -844,7 +844,7 @@ void ObserverUIClass::CollectPlayerData()
 
 			for (auto const pTech : technoList)
 			{
-				if (pTech->WhatAmI() == AbstractType::BuildingType)
+				if (pTech->WhatAmI() == AbstractType::Building)
 				{
 					item.Buildings.push_back(static_cast<BuildingClass*>(pTech));
 				}
@@ -2132,6 +2132,13 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 		BuildingClass* pBld = IsBuildingValidAndAlive(win.pTargetBuilding) ? win.pTargetBuilding : nullptr;
 		TechnoClass* pTech = IsTechnoValidAndAlive(win.pTargetTechno) ? win.pTargetTechno : nullptr;
+
+		if (!pBld && pTech && pTech->WhatAmI() == AbstractType::Building)
+		{
+			pBld = static_cast<BuildingClass*>(pTech);
+			pTech = nullptr;
+		}
+
 		TechnoTypeClass* pTargetType = win.pType;
 		TechnoTypeClass* pBaseType = nullptr;
 		if (pBld)
@@ -2898,20 +2905,58 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				}
 			}
 
-			// Income Line (for in-world buildings)
-			if (!isProductionView && pBld && pBld->Type && !win.IsDestroyed)
+			// Income Line (for in-world buildings or building cards)
+			BuildingTypeClass* pIncomeBldType = nullptr;
+			if (pBld && pBld->Type)
 			{
-				if (pBld->Type->ProduceCashAmount > 0 && pBld->Type->ProduceCashDelay > 0)
+				pIncomeBldType = pBld->Type;
+			}
+			else if (pTech && pTech->WhatAmI() == AbstractType::Building)
+			{
+				pIncomeBldType = static_cast<BuildingClass*>(pTech)->Type;
+			}
+			else if (pBaseType && pBaseType->WhatAmI() == AbstractType::BuildingType)
+			{
+				pIncomeBldType = static_cast<BuildingTypeClass*>(pBaseType);
+			}
+
+			if (!isProductionView && pIncomeBldType && !win.IsDestroyed)
+			{
+				if (pIncomeBldType->ProduceCashAmount > 0 && pIncomeBldType->ProduceCashDelay > 0)
 				{
-					int const cashPerMinute = (pBld->Type->ProduceCashAmount * 900) / pBld->Type->ProduceCashDelay;
+					int const cashPerMinute = (pIncomeBldType->ProduceCashAmount * 900) / pIncomeBldType->ProduceCashDelay;
+
+					bool isPowerOffline = false;
+					if (pIncomeBldType->Powered)
+					{
+						if (pBld)
+						{
+							if (!pBld->HasPower || pBld->IsUnderEMP() || (pBld->Owner && pBld->Owner->PowerOutput < pBld->Owner->PowerDrain))
+								isPowerOffline = true;
+						}
+						else if (pOwner && pOwner->PowerOutput < pOwner->PowerDrain)
+						{
+							isPowerOffline = true;
+						}
+					}
 
 					std::wostringstream incOss;
-					incOss << L"+$" << cashPerMinute << L" / min";
-
-					addLineSegments({
-						{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_INCOME", L"Income: "), Drawing::RGB_To_Int(200, 200, 200) },
-						{ incOss.str(), Drawing::RGB_To_Int(100, 255, 120) }
-					});
+					if (isPowerOffline)
+					{
+						incOss << L"+$0 / min (" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_LOW_POWER", L"Low Power") << L")";
+						addLineSegments({
+							{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_INCOME", L"Income: "), Drawing::RGB_To_Int(200, 200, 200) },
+							{ incOss.str(), Drawing::RGB_To_Int(255, 80, 80) }
+						});
+					}
+					else
+					{
+						incOss << L"+$" << cashPerMinute << L" / min";
+						addLineSegments({
+							{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_INCOME", L"Income: "), Drawing::RGB_To_Int(200, 200, 200) },
+							{ incOss.str(), Drawing::RGB_To_Int(100, 255, 120) }
+						});
+					}
 				}
 			}
 
