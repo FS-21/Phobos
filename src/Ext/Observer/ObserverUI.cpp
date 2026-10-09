@@ -10,6 +10,7 @@
 #include <UnitClass.h>
 #include <AircraftClass.h>
 #include <BuildingClass.h>
+#include <TiberiumClass.h>
 #include <Utilities/Constructs.h>
 #include <Fundamentals.h>
 #include <ColorScheme.h>
@@ -2820,6 +2821,151 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				}
 			}
 
+			// Income Line (for in-world buildings)
+			if (!isProductionView && pBld && pBld->Type && !win.IsDestroyed)
+			{
+				if (pBld->Type->ProduceCashAmount > 0 && pBld->Type->ProduceCashDelay > 0)
+				{
+					int const cashPerMinute = (pBld->Type->ProduceCashAmount * 900) / pBld->Type->ProduceCashDelay;
+
+					std::wostringstream incOss;
+					incOss << L"+$" << cashPerMinute << L" / min";
+
+					addLineSegments({
+						{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_INCOME", L"Income: "), Drawing::RGB_To_Int(200, 200, 200) },
+						{ incOss.str(), Drawing::RGB_To_Int(100, 255, 120) }
+					});
+				}
+			}
+
+			// Storage Line & Stored Resources Breakdown (for in-world buildings & harvester units)
+			if (!isProductionView && !win.IsDestroyed)
+			{
+				TechnoClass* pActiveTechno = pBld ? static_cast<TechnoClass*>(pBld) : pTech;
+				TechnoTypeClass* pActiveType = pBld ? pBld->Type : (pTech ? pTech->GetTechnoType() : nullptr);
+
+				if (pActiveTechno && pActiveType && pActiveType->Storage > 0)
+				{
+					bool shouldShowStorage = false;
+
+					if (pBld)
+					{
+						bool const isRefineryOrDest = pBld->Type->Refinery || pBld->Type->ResourceDestination;
+						if (!isRefineryOrDest)
+						{
+							shouldShowStorage = true;
+						}
+						else
+						{
+							auto const pBldTypeExt = BuildingTypeExt::Fetch(pBld->Type);
+							shouldShowStorage = (pBldTypeExt && pBldTypeExt->Refinery_UseStorage);
+						}
+					}
+					else if (pTech)
+					{
+						auto const pUnitType = abstract_cast<UnitTypeClass*>(pActiveType);
+						if (pUnitType && (pUnitType->Harvester || pUnitType->Weeder || pUnitType->Storage > 0))
+							shouldShowStorage = true;
+					}
+
+					if (shouldShowStorage)
+					{
+						auto const pTechnoExt = TechnoExt::Fetch(pActiveTechno);
+						int const maxStorage = pActiveType->Storage;
+						float const totalStored = pTechnoExt ? pTechnoExt->GetTotalTiberium() : pActiveTechno->Tiberium.GetTotalAmount();
+						int const totalInt = static_cast<int>(std::round(totalStored));
+
+						int storageColor = Drawing::RGB_To_Int(100, 220, 255);
+						if (totalInt >= maxStorage)
+							storageColor = Drawing::RGB_To_Int(255, 60, 60);
+						else if (totalInt >= static_cast<int>(maxStorage * 0.8f))
+							storageColor = Drawing::RGB_To_Int(255, 220, 80);
+
+						std::wostringstream storOss;
+						storOss << totalInt << L" / " << maxStorage;
+
+						addLineSegments({
+							{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_STORAGE", L"Storage: "), Drawing::RGB_To_Int(200, 200, 200) },
+							{ storOss.str(), storageColor }
+						});
+
+						std::vector<std::pair<std::wstring, int>> storedList;
+						size_t const slotCount = std::max({ pTechnoExt ? pTechnoExt->TiberiumStorage.size() : static_cast<size_t>(0), static_cast<size_t>(TiberiumClass::Array.Count), static_cast<size_t>(4) });
+
+						for (size_t i = 0; i < slotCount; ++i)
+						{
+							float const bails = pTechnoExt ? pTechnoExt->GetTiberium(static_cast<int>(i)) : (i < 4 ? pActiveTechno->Tiberium.GetAmount(static_cast<int>(i)) : 0.0f);
+							if (bails >= 0.5f)
+							{
+								auto const pTib = TiberiumClass::Array.GetItemOrDefault(static_cast<int>(i));
+								std::wstring tibName;
+
+								if (pTib)
+								{
+									if (isDebugKeysEnabled && pTib->ID && pTib->ID[0] != '\0')
+									{
+										std::string id = pTib->ID;
+										std::wstring wid(id.begin(), id.end());
+
+										if (pTib->UIName && pTib->UIName[0] != L'\0')
+											tibName = L"[" + wid + L"] " + std::wstring(pTib->UIName);
+										else
+											tibName = L"[" + wid + L"]";
+									}
+									else
+									{
+										if (pTib->UIName && pTib->UIName[0] != L'\0')
+											tibName = pTib->UIName;
+										else if (pTib->Name && pTib->Name[0] != '\0')
+										{
+											std::string n = pTib->Name;
+											tibName = std::wstring(n.begin(), n.end());
+										}
+										else if (pTib->ID && pTib->ID[0] != '\0')
+										{
+											std::string id = pTib->ID;
+											tibName = std::wstring(id.begin(), id.end());
+										}
+									}
+								}
+
+								if (tibName.empty())
+									tibName = L"Resource " + std::to_wstring(i + 1);
+
+								storedList.push_back({ tibName, static_cast<int>(std::round(bails)) });
+							}
+						}
+
+						if (!storedList.empty())
+						{
+							std::wostringstream resOss;
+							size_t countInLine = 0;
+
+							for (const auto& [name, qty] : storedList)
+							{
+								if (countInLine > 0)
+									resOss << L", ";
+
+								resOss << name << L": " << qty;
+								countInLine++;
+
+								if (countInLine >= 2)
+								{
+									addLine(resOss.str(), Drawing::RGB_To_Int(255, 215, 100));
+
+									resOss.str(L"");
+									resOss.clear();
+									countInLine = 0;
+								}
+							}
+
+							if (countInLine > 0)
+								addLine(resOss.str(), Drawing::RGB_To_Int(255, 215, 100));
+						}
+					}
+				}
+			}
+
 			// 5. Total Build Time Line (MM:SS format) & 6. Cost Line (for production cards when producing)
 			if (isProducing)
 			{
@@ -2851,6 +2997,22 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 					costOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_COST", L"Cost: $") << pCurProdType->Cost;
 					addLine(costOss.str(), Drawing::RGB_To_Int(200, 200, 200));
+
+					if (auto const pCurBldType = abstract_cast<BuildingTypeClass*>(pCurProdType))
+					{
+						if (pCurBldType->ProduceCashAmount > 0 && pCurBldType->ProduceCashDelay > 0)
+						{
+							int const cashPerMinute = (pCurBldType->ProduceCashAmount * 900) / pCurBldType->ProduceCashDelay;
+
+							std::wostringstream incOss;
+							incOss << L"+$" << cashPerMinute << L" / min";
+
+							addLineSegments({
+								{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_INCOME", L"Income: "), Drawing::RGB_To_Int(200, 200, 200) },
+								{ incOss.str(), Drawing::RGB_To_Int(100, 255, 120) }
+							});
+						}
+					}
 				}
 			}
 
