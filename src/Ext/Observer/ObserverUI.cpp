@@ -2206,7 +2206,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			}
 		}
 
-		if (!pBld && pFact)
+		if (!pBld && win.IsProductionItem && pFact)
 		{
 			for (auto pBldObj : BuildingClass::Array)
 			{
@@ -2218,7 +2218,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			}
 		}
 
-		if (!pBld && pOwner && pTargetType)
+		if (!pBld && win.IsProductionItem && pOwner && pTargetType)
 		{
 			AbstractType abs = pTargetType->WhatAmI();
 
@@ -2284,7 +2284,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		}
 
 		bool isProductionView = win.IsProductionItem;
-		bool isFactoryCard = isProductionView || pFact != nullptr || (pBld && pBld->Type && pBld->Type->Factory != AbstractType::None);
+		bool isFactoryCard = isProductionView || (!pTech && (pFact != nullptr || (pBld && pBld->Type && pBld->Type->Factory != AbstractType::None)));
 		TechnoClass* pLastTech = nullptr;
 		TechnoTypeClass* pLastType = nullptr;
 		
