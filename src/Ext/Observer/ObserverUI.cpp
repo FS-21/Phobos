@@ -2411,29 +2411,22 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 			if (isProductionView)
 			{
-				// For production card view: show product name with percentage ONLY if producing!
+				// For production card view: show product name without percentage (percentage is already indicated on the cameo)
 				if (isProducing)
 				{
-					int progressPercent = GetFactoryProgressPercent(pFact);
-
 					std::string pId = pCurProdType->get_ID();
 					std::wstring prodName = FormatObjectNameWithDebug(0, pId.c_str(), pCurProdType->UIName, isDebugKeysEnabled);
-
-					std::wostringstream prodOss;
-					prodOss << prodName << L" (" << progressPercent << L"%)";
-					addLine(prodOss.str(), Drawing::RGB_To_Int(100, 220, 255));
+					addLine(prodName, Drawing::RGB_To_Int(100, 220, 255));
 				}
 			}
 			else if (isProducing)
 			{
-				// For building card on map: show Production: [HTNK] (Rhino Tank) (74%)
-				int progressPercent = GetFactoryProgressPercent(pFact);
-
+				// For building card on map: show Production: [HTNK] (Rhino Tank)
 				std::string pId = pCurProdType->get_ID();
 				std::wstring prodName = FormatObjectNameWithDebug(0, pId.c_str(), pCurProdType->UIName, isDebugKeysEnabled);
 
 				std::wostringstream prodOss;
-				prodOss << L"Production: " << prodName << L" (" << progressPercent << L"%)";
+				prodOss << L"Production: " << prodName;
 				addLine(prodOss.str(), Drawing::RGB_To_Int(100, 220, 255));
 			}
 			else if (pFact || (pBld && pBld->Type && pBld->Type->Factory != AbstractType::None))
