@@ -4695,18 +4695,8 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 		}
 
 		// BuildSupport network evaluation (evaluated towards the end, to protect established base)
-		bool hasAnySupport = false;
-		for (const auto pSupport : pPrimaryTechTree->BuildSupport)
-		{
-			if (pSupport && CountBuildingOfGroup(pHouse, pSupport) > 0)
-			{
-				hasAnySupport = true;
-				break;
-			}
-		}
-
 		const bool skipSupport =
-			hasAnySupport && (ScenarioClass::Instance->Random.RandomRanged(0, 99) < 25);
+			ScenarioClass::Instance->Random.RandomRanged(0, 99) < 80;
 
 		if (!skipSupport)
 		{
@@ -4807,16 +4797,11 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 								const bool isBaseBuilding =
 									pBld->Type->ConstructionYard ||
 									pBld->Type->Factory != AbstractType::None ||
-									pBld->Type->Refinery ||
-									pBld->Type->Radar ||
+									pBld->Type->Refinery || pBld->Type->Radar ||
 									pBld->Type->Helipad ||
-									pBld->Type->HasSuperWeapon() ||
-									pBld->Type->PowerBonus > 0 ||
-									TechTreeTypeClass::TotalBuildPower.contains(pBld->Type) ||
-									TechTreeTypeClass::TotalBuildAdvancedPower.contains(pBld->Type) ||
-									TechTreeTypeClass::TotalBuildSuperWeapon.contains(pBld->Type) ||
-									TechTreeTypeClass::TotalBuildTech.contains(pBld->Type) ||
-									TechTreeTypeClass::TotalBuildServiceDepot.contains(pBld->Type);
+									((pBld->Type->TechLevel > 0 || pBld->Type->TechLevel == -1) && !pBld->Type->IsBaseDefense &&
+									 GetSupportRadiusType(pBld->Type) ==
+										 SupportRadiusType::None);
 
 								if (!isBaseBuilding)
 									continue;
@@ -4845,17 +4830,7 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 					}
 
 					if (needMoreSupport)
-					{
-						if (BuildingExt::AdvAI_Is_Support_Placement_Feasible(pHouse, pSupportType))
-						{
-							neededSupportCandidates.push_back(pSupportType);
-						}
-						else
-						{
-							Debug::Log("AdvAI: House %d skipping support structure %s because no feasible placement cell exists in base.\n",
-									   pHouse->ArrayIndex, pSupportType->ID);
-						}
-					}
+						neededSupportCandidates.push_back(pSupportType);
 				}
 
 				if (!neededSupportCandidates.empty())
@@ -4885,13 +4860,6 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 				// Exclude defenses here, no need to build defenses just to have them
 				if (TechTreeTypeClass::TotalBuildDefense.contains(pBuilding))
 					continue;
-
-				// Exclude support structures here, handled by their dedicated BuildSupport circuit
-				if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding) ||
-					GetSupportRadiusType(pBuilding) != SupportRadiusType::None)
-				{
-					continue;
-				}
 
 				// Exclude helipads here, as they are handled dynamically based on
 				// occupied docks
@@ -5083,13 +5051,6 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			// Exclude defenses here, no need to build defenses just to have them
 			if (TechTreeTypeClass::TotalBuildDefense.contains(pBuilding))
 				continue;
-
-			// Exclude support structures here, handled by their dedicated BuildSupport circuit
-			if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding) ||
-				GetSupportRadiusType(pBuilding) != SupportRadiusType::None)
-			{
-				continue;
-			}
 
 			// Exclude helipads here, as they are handled dynamically based on occupied
 			// docks
