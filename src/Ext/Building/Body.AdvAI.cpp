@@ -1262,7 +1262,7 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 			value = Modify_Rating_By_Terrain_Passability(cell, pBuilding, value);
 
 			// Enforce spacing between base defenses (prevent placing them touching).
-			if (pBuilding->Type->IsBaseDefense)
+			if (pBuilding->Type->IsBaseDefense || TechTreeTypeClass::TotalBuildDefense.contains(pBuilding->Type))
 			{
 				const bool isEffectivelyNearEnemy = HasEnemyThreatsNear(cell, pBuilding->Owner, 20.0);
 				const bool isParanoid = (pBuilding->Owner->LATime + 900 > Unsorted::CurrentFrame);
@@ -1275,14 +1275,22 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 				// In main base, during paranoia, or near enemy -> Standard 4.0 cell margin (original branch behavior)
 				const double requiredDefenseSpacing = (isInMainBase || isParanoid || isEffectivelyNearEnemy) ? 4.0 : 10.0;
 
+				bool strictlyTouchingDefense = false;
 				bool tooCloseToDefense = false;
 				for (const auto pOtherBuilding : BuildingClass::Array)
 				{
-					if (pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo && pOtherBuilding->Type->IsBaseDefense && pOtherBuilding != pBuilding)
+					if (pOtherBuilding->IsAlive && !pOtherBuilding->InLimbo &&
+						(pOtherBuilding->Type->IsBaseDefense || TechTreeTypeClass::TotalBuildDefense.contains(pOtherBuilding->Type)) &&
+						pOtherBuilding != pBuilding)
 					{
 						if (pOtherBuilding->Owner == pBuilding->Owner)
 						{
 							double dist = cell.DistanceFrom(pOtherBuilding->GetMapCoords());
+							if (dist < 2.5)
+							{
+								strictlyTouchingDefense = true;
+								break;
+							}
 							if (dist < requiredDefenseSpacing)
 							{
 								tooCloseToDefense = true;
@@ -1291,6 +1299,9 @@ CellStruct BuildingExt::Find_Best_Building_Placement_Cell(RectangleStruct baseAr
 						}
 					}
 				}
+
+				if (strictlyTouchingDefense)
+					continue;
 
 				if (tooCloseToDefense)
 				{
@@ -3150,7 +3161,7 @@ CellStruct BuildingExt::Get_Best_Defense_Placement_Position(BuildingClass* pBuil
 					if (!pOther || !pOther->IsAlive || pOther->InLimbo || pOther == pBld)
 						continue;
 
-					if (TechTreeTypeClass::TotalBuildDefense.contains(pOther->Type) &&
+					if ((pOther->Type->IsBaseDefense || TechTreeTypeClass::TotalBuildDefense.contains(pOther->Type)) &&
 						pBld->GetMapCoords().DistanceFromSquared(pOther->GetMapCoords()) < 225.0)
 					{
 						isProtected = true;
