@@ -1,5 +1,6 @@
 #include <Ext/Building/Body.h>
 #include <Ext/House/Body.h>
+#include <New/Type/TechTreeTypeClass.h>
 
 bool BuildingTypeExt::CanUpgrade(BuildingClass* pBuilding, BuildingTypeClass* pUpgradeType, HouseClass* pUpgradeOwner)
 {
@@ -219,6 +220,145 @@ DEFINE_HOOK(0x451630, BuildingClass_CreateUpgradeAnims_AnimIndex, 0x7)
 	}
 
 	return 0;
+}
+
+#pragma endregion
+
+#pragma region AI_Upgrade_Target_Selection
+
+void NAKED HouseClass_Powerups_FindUpgradeTarget_Epilogue()
+{
+	_asm
+	{
+		retn 8
+	}
+}
+
+DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
+{
+	GET(HouseClass*, pHouse, ECX);
+	GET_STACK(CellStruct*, pOutCell, 0x4);
+	GET_STACK(BuildingTypeClass*, pUpgradeType, 0x8);
+
+	if (!HouseExt::IsAdvancedAIActive(pHouse) || !pUpgradeType || !pOutCell)
+		return 0;
+
+	bool isPowerUpgrade = false;
+	auto const pUpgradeExt = BuildingTypeExt::TryFetch(pUpgradeType);
+	if (pUpgradeExt)
+	{
+		for (auto const pTargetType : pUpgradeExt->PowersUp_Buildings)
+		{
+			if (pTargetType && (TechTreeTypeClass::TotalBuildPower.count(pTargetType) > 0 ||
+								TechTreeTypeClass::TotalBuildAdvancedPower.count(pTargetType) > 0 ||
+								pTargetType->PowerBonus > 0))
+			{
+				isPowerUpgrade = true;
+				break;
+			}
+		}
+	}
+	if (!isPowerUpgrade && pUpgradeType->PowersUpBuilding[0] != '\0')
+	{
+		if (auto const pTargetType = BuildingTypeClass::Find(pUpgradeType->PowersUpBuilding))
+		{
+			if (TechTreeTypeClass::TotalBuildPower.count(pTargetType) > 0 ||
+				TechTreeTypeClass::TotalBuildAdvancedPower.count(pTargetType) > 0 ||
+				pTargetType->PowerBonus > 0)
+			{
+				isPowerUpgrade = true;
+			}
+		}
+	}
+
+	const BuildingClass* pConYard = pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
+	const CellStruct centerCell = pConYard != nullptr ? pConYard->GetMapCoords() : pHouse->Base_Center();
+
+	BuildingClass* pBestBuilding = nullptr;
+	double bestDistance = 999999.0;
+	int lowestUpgradeLevel = 9999;
+
+	for (const auto pBld : BuildingClass::Array)
+	{
+		if (!pBld || !pBld->IsAlive || pBld->InLimbo)
+			continue;
+
+		if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
+			continue;
+
+		bool isEligible = false;
+		if (pUpgradeExt && BuildingTypeExt::CanUpgrade(pBld, pUpgradeType, pHouse))
+			isEligible = true;
+		else if (pUpgradeType->PowersUpBuilding[0] != '\0' && _stricmp(pBld->Type->ID, pUpgradeType->PowersUpBuilding) == 0 && pBld->Owner == pHouse)
+			isEligible = true;
+
+		if (!isEligible)
+			continue;
+
+		const int maxSlots = pBld->Type->Upgrades > 0 ? pBld->Type->Upgrades : pBld->Type->PowersUpToLevel;
+		if (pBld->UpgradeLevel >= maxSlots)
+			continue;
+
+		const double dist = pBld->GetMapCoords().DistanceFrom(centerCell);
+
+		if (isPowerUpgrade)
+		{
+			// Only upgrade powerplants within 25.0 cells of the ConYard / base center
+			if (dist > 25.0)
+				continue;
+
+			// Prefer the closest eligible powerplant to the ConYard
+			if (dist < bestDistance - 0.5)
+			{
+				bestDistance = dist;
+				lowestUpgradeLevel = pBld->UpgradeLevel;
+				pBestBuilding = pBld;
+			}
+			else if (std::abs(dist - bestDistance) <= 0.5)
+			{
+				if (pBld->UpgradeLevel < lowestUpgradeLevel)
+				{
+					bestDistance = dist;
+					lowestUpgradeLevel = pBld->UpgradeLevel;
+					pBestBuilding = pBld;
+				}
+			}
+		}
+		else
+		{
+			// Non-power upgrades (e.g. defenses or plugins): lowest upgrade level first, then closest
+			if (pBld->UpgradeLevel < lowestUpgradeLevel || (pBld->UpgradeLevel == lowestUpgradeLevel && dist < bestDistance))
+			{
+				bestDistance = dist;
+				lowestUpgradeLevel = pBld->UpgradeLevel;
+				pBestBuilding = pBld;
+			}
+		}
+	}
+
+	if (pBestBuilding != nullptr)
+	{
+		*pOutCell = pBestBuilding->GetMapCoords();
+
+		Debug::Log("AdvAI: House %d placing upgrade %s on %s at (%d,%d) (Dist to ConYard: %.1f, Upgrades: %d/%d)\n",
+			pHouse->ArrayIndex, pUpgradeType->ID, pBestBuilding->Type->ID,
+			pOutCell->X, pOutCell->Y, pBestBuilding->GetMapCoords().DistanceFrom(centerCell),
+			pBestBuilding->UpgradeLevel, pBestBuilding->Type->Upgrades);
+
+		R->EAX(pOutCell);
+		return reinterpret_cast<intptr_t>(&HouseClass_Powerups_FindUpgradeTarget_Epilogue);
+	}
+	else
+	{
+		// Signal failure so it does not upgrade faraway expansion powerplants
+		pOutCell->X = 0;
+		pOutCell->Y = 0;
+		Debug::Log("AdvAI: House %d found no eligible building within 25 cells for upgrade %s\n",
+			pHouse->ArrayIndex, pUpgradeType->ID);
+
+		R->EAX(pOutCell);
+		return reinterpret_cast<intptr_t>(&HouseClass_Powerups_FindUpgradeTarget_Epilogue);
+	}
 }
 
 #pragma endregion

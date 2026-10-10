@@ -1662,47 +1662,47 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass* pHouse,
 
 		if (isPowerUpgrade)
 		{
-			const int surplusPower = pHouse->PowerOutput - pHouse->PowerDrain;
-			const int requiredSurplus = pHouse->PowerSurplus > 0
-											? pHouse->PowerSurplus
-											: RulesClass::Instance->PowerSurplus;
-			if (surplusPower >= requiredSurplus)
-			{
-				// Check if there is at least one upgradeable powerplant in the main
-				// base
-				const BuildingClass* pOurConYard =
-					pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
-				const CellStruct conyardCell = pOurConYard != nullptr
-												   ? pOurConYard->GetMapCoords()
-												   : pHouse->Base_Center();
+			// Check if there is at least one upgradeable powerplant in the main base (within 25.0 cells of ConYard)
+			const BuildingClass* pOurConYard =
+				pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
+			const CellStruct conyardCell = pOurConYard != nullptr
+											   ? pOurConYard->GetMapCoords()
+											   : pHouse->Base_Center();
 
-				bool hasUpgradeableInBase = false;
-				for (const auto pBld : BuildingClass::Array)
+			bool hasUpgradeableInBase = false;
+			for (const auto pBld : BuildingClass::Array)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo &&
+					pBld->Owner == pHouse &&
+					pBld->CurrentMission != Mission::Selling &&
+					pBld->QueuedMission != Mission::Selling)
 				{
-					if (pBld && pBld->IsAlive && !pBld->InLimbo &&
-						pBld->Owner == pHouse)
+					bool isEligible = false;
+					if (pExt && pExt->PowersUp_Buildings.Contains(pBld->Type))
+						isEligible = true;
+					else if (pBuildingType->PowersUpBuilding[0] != '\0' && _stricmp(pBld->Type->ID, pBuildingType->PowersUpBuilding) == 0)
+						isEligible = true;
+
+					if (isEligible)
 					{
-						if (pExt->PowersUp_Buildings.Contains(pBld->Type))
+						const int maxSlots = pBld->Type->Upgrades > 0 ? pBld->Type->Upgrades : pBld->Type->PowersUpToLevel;
+						if (pBld->UpgradeLevel < maxSlots)
 						{
-							if (pBld->UpgradeLevel < pBld->Type->Upgrades)
+							const double bldDist =
+								pBld->GetMapCoords().DistanceFrom(conyardCell);
+							if (bldDist <= 25.0)
 							{
-								const double bldDist =
-									pBld->GetMapCoords().DistanceFrom(conyardCell);
-								if (bldDist < 20.0)
-								{
-									hasUpgradeableInBase = true;
-									break;
-								}
+								hasUpgradeableInBase = true;
+								break;
 							}
 						}
 					}
 				}
-
-				// Only block building upgrades if there are NO upgradeable powerplants
-				// in the main base
-				if (!hasUpgradeableInBase)
-					return false; // Block!
 			}
+
+			// Only block building upgrades if there are NO upgradeable powerplants in the main base
+			if (!hasUpgradeableInBase)
+				return false; // Block!
 		}
 
 		bool anyBaseExists = false;
