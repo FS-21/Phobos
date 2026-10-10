@@ -303,11 +303,7 @@ DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
 
 		if (isPowerUpgrade)
 		{
-			// Only upgrade powerplants within 25.0 cells of the ConYard / base center
-			if (dist > 25.0)
-				continue;
-
-			// Prefer the closest eligible powerplant to the ConYard
+			// Prefer the closest eligible powerplant to the ConYard (base powerplants <= 25.0 will be picked first; if all full and AI lacks power, closest outside)
 			if (dist < bestDistance - 0.5)
 			{
 				bestDistance = dist;

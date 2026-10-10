@@ -1700,9 +1700,18 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass* pHouse,
 				}
 			}
 
-			// Only block building upgrades if there are NO upgradeable powerplants in the main base
-			if (!hasUpgradeableInBase)
-				return false; // Block!
+			const int surplusPower = pHouse->PowerOutput - pHouse->PowerDrain;
+			const int requiredSurplus = pHouse->PowerSurplus > 0
+											? pHouse->PowerSurplus
+											: RulesClass::Instance->PowerSurplus;
+
+			// If the house already has enough surplus power, only allow power upgrades if there is an upgradeable powerplant in the main base (<= 25.0 cells).
+			// Beyond 25.0 cells, power upgrades are only allowed if the AI actually lacks power.
+			if (surplusPower >= requiredSurplus)
+			{
+				if (!hasUpgradeableInBase)
+					return false; // Block!
+			}
 		}
 
 		bool anyBaseExists = false;
