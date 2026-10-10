@@ -2291,7 +2291,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 		}
 
 		bool isProductionView = win.IsProductionItem;
-		bool isFactoryCard = isProductionView || (!pTech && (pFact != nullptr || (pBld && pBld->Type && pBld->Type->Factory != AbstractType::None)));
+		bool isFactoryCard = isProductionView;
 		TechnoClass* pLastTech = nullptr;
 		TechnoTypeClass* pLastType = nullptr;
 		
@@ -2472,7 +2472,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				std::string tId = pTitleType ? pTitleType->get_ID() : "";
 				titleStr = FormatObjectNameWithDebug(pNum, tId.c_str(), pTitleType ? pTitleType->UIName : nullptr, isDebugKeysEnabled);
 
-				if (win.InstanceNumber > 1 && !pFact)
+				if (win.InstanceNumber > 1)
 				{
 					titleStr += L" #" + std::to_wstring(win.InstanceNumber);
 				}
@@ -2503,20 +2503,6 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					std::wstring prodName = FormatObjectNameWithDebug(0, pId.c_str(), pCurProdType->UIName, isDebugKeysEnabled);
 					addLine(prodName, Drawing::RGB_To_Int(100, 220, 255));
 				}
-			}
-			else if (isProducing)
-			{
-				// For building card on map: show Production: [HTNK] (Rhino Tank)
-				std::string pId = pCurProdType->get_ID();
-				std::wstring prodName = FormatObjectNameWithDebug(0, pId.c_str(), pCurProdType->UIName, isDebugKeysEnabled);
-
-				std::wostringstream prodOss;
-				prodOss << L"Production: " << prodName;
-				addLine(prodOss.str(), Drawing::RGB_To_Int(100, 220, 255));
-			}
-			else if (pFact || (pBld && pBld->Type && pBld->Type->Factory != AbstractType::None))
-			{
-				addLine(L"Production: None", Drawing::RGB_To_Int(160, 160, 160));
 			}
 
 			// 3. Health & Shield Line
@@ -3245,7 +3231,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			}
 
 			// 5. Total Build Time Line (MM:SS format) & 6. Cost Line (for production cards when producing)
-			if (isProducing)
+			if (isProductionView && isProducing)
 			{
 				int totalBuildFrames = 0;
 
@@ -5560,6 +5546,9 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 				{
 					auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [pTargetTech, pTargetBld, pTargetType, &win](const ObserverFloatingUnitWindow& w)
 					{
+						if (w.IsProductionItem)
+							return false;
+
 						if (pTargetBld && w.pTargetBuilding == pTargetBld)
 							return true;
 
@@ -5812,10 +5801,17 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 
 		// Check if floating window ALREADY exists for this exact specific instance or factory!
 		auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [&item, pTargetTech, pTargetBld, isFromProductionPanel](const ObserverFloatingUnitWindow& w) {
-			if (pTargetBld && w.pTargetBuilding == pTargetBld) return true;
-			if (pTargetTech && w.pTargetTechno == pTargetTech) return true;
-			if (isFromProductionPanel && w.IsProductionItem && w.pType == item.pType && w.pOwner == item.pOwner) return true;
-			return false;
+			if (w.IsProductionItem != isFromProductionPanel) return false;
+			if (isFromProductionPanel)
+			{
+				return w.pType == item.pType && w.pOwner == item.pOwner;
+			}
+			else
+			{
+				if (pTargetBld && w.pTargetBuilding == pTargetBld) return true;
+				if (pTargetTech && w.pTargetTechno == pTargetTech) return true;
+				return false;
+			}
 		});
 
 		if (itWin != this->FloatingUnitWindows.end())
@@ -6382,6 +6378,7 @@ bool ObserverUIClass::OpenFloatingWindowForSelectedObject()
 
 		// Check if floating window ALREADY exists for this exact instance
 		auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [pValidTech, pValidBld](const ObserverFloatingUnitWindow& w) {
+			if (w.IsProductionItem) return false;
 			if (pValidBld && w.pTargetBuilding == pValidBld) return true;
 			if (pValidTech && w.pTargetTechno == pValidTech) return true;
 			return false;
