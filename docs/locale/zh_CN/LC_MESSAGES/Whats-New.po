@@ -6903,4 +6903,7 @@ msgstr "[飞行生产](New-or-Enhanced-Logics.md#flying-production)（by FS-21�
 msgid "[Rally point customization](New-or-Enhanced-Logics.md#rally-point-customization) (by FS-21)"
 msgstr "[建筑集结点自定义](New-or-Enhanced-Logics.md#rally-point-customization)（by FS-21）"
 
+msgid "[Movie subtitles background](User-Interface.md#movie-subtitles-background) (by FS-21)"
+msgstr "[过场动画字幕背景](User-Interface.md#movie-subtitles-background) (by FS-21)"
+
 

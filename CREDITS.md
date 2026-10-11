@@ -208,6 +208,7 @@ This page lists all the individual contributions to the project by their author.
   - Randomize AI superweapon priority
   - Fix unit type conversion corrupting factory queue and freezing production when units are being produced
   - Building disguise detector logic fix
+  - Movie subtitles background
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
