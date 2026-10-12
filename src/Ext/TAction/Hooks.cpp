@@ -139,9 +139,25 @@ DEFINE_HOOK(0x6E2368, TActionClass_PlayAnimAt, 0x7)
 DEFINE_HOOK(0x6DD791, TActionClass_ReadINI_MaskedTActions, 0xB)
 {
 	GET(TActionClass*, pThis, EBP);
+	GET(char*, pToken, EAX);
 
 	switch (static_cast<PhobosTriggerAction>(pThis->ActionKind))
 	{
+	case PhobosTriggerAction::OpenDropshipLoadoutWindow:
+		if (pToken && *pToken)
+		{
+			char* endPtr = nullptr;
+			double const val = strtod(pToken, &endPtr);
+			if (endPtr != pToken && val >= 0.0)
+			{
+				if (auto const pExt = TActionExt::Fetch(pThis))
+				{
+					pExt->DropshipLoadout_CostMultiplier = val;
+				}
+			}
+		}
+		break;
+
 	case PhobosTriggerAction::WinByID:
 		pThis->Value = HouseTypeClass::FindIndexOfName(pThis->Text);
 		pThis->ActionKind = TriggerAction::Win;

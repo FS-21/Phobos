@@ -29,7 +29,9 @@ TActionExt::ExtContainer TActionExt::ExtMap;
 template <typename T>
 void TActionExt::Serialize(T& Stm)
 {
-	//Stm;
+	Stm
+		.Process(this->DropshipLoadout_CostMultiplier)
+		;
 }
 
 void TActionExt::LoadFromStream(PhobosStreamReader& Stm)
@@ -1161,7 +1163,22 @@ bool TActionExt::OpenDropshipLoadoutWindow(TActionClass* pThis, HouseClass* pTri
 		}
 	}
 
-	DropshipLoadoutClass::OpenInGameWindow(bIgnoreFixedUnits, bPreloadCargo, allowableUnitsIndex, startingMoney, Nullable<bool>(bAddUnusedMoneyToPlayer), {});
+	Nullable<double> costMultiplier {};
+	if (auto const pExt = TActionExt::TryFetch(pThis))
+	{
+		costMultiplier = pExt->DropshipLoadout_CostMultiplier;
+	}
+
+	DropshipLoadoutClass::OpenInGameWindow(
+		bIgnoreFixedUnits,
+		bPreloadCargo,
+		allowableUnitsIndex,
+		startingMoney,
+		Nullable<bool>(bAddUnusedMoneyToPlayer),
+		{},
+		nullptr,
+		costMultiplier
+	);
 
 	return true;
 }
