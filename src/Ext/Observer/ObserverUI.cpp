@@ -2981,6 +2981,204 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 						{ powOss.str(), powColor }
 					});
 				}
+				else
+				{
+					// Power Drain / Consumption Line or Powered Status
+					int const nominalDrain = pBldCardType->PowerDrain;
+					int const currentDrain = pBld ? pBld->GetPowerDrain() : nominalDrain;
+					bool const isPowered = pBldCardType->Powered;
+					bool const isOwnerLowPower = (pBldOwner && pBldOwner->HasLowPower());
+
+					if (nominalDrain > 0 || currentDrain > 0 || isPowered)
+					{
+						int const drainVal = currentDrain > 0 ? currentDrain : nominalDrain;
+						std::wostringstream powOss;
+						int powColor = Drawing::RGB_To_Int(255, 175, 120);
+
+						if (pBld)
+						{
+							if (pBld->IsUnderEMP())
+							{
+								if (drainVal > 0)
+								{
+									powOss << L"-" << drainVal << L" ("
+										   << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_EMP", L"EMP")
+										   << L")";
+								}
+								else
+								{
+									powOss << L"(" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_EMP", L"EMP") << L")";
+								}
+								powColor = Drawing::RGB_To_Int(255, 80, 80);
+							}
+							else if (pBld->Deactivated)
+							{
+								if (drainVal > 0)
+								{
+									powOss << L"-" << drainVal << L" ("
+										   << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_OFFLINE", L"Offline")
+										   << L")";
+								}
+								else
+								{
+									powOss << L"(" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_OFFLINE", L"Offline") << L")";
+								}
+								powColor = Drawing::RGB_To_Int(255, 80, 80);
+							}
+							else if (isOwnerLowPower)
+							{
+								if (drainVal > 0)
+								{
+									powOss << L"-" << drainVal << L" ("
+										   << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_LOW_POWER", L"Low Power")
+										   << L")";
+								}
+								else
+								{
+									powOss << L"(" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_LOW_POWER", L"Low Power") << L")";
+								}
+								powColor = Drawing::RGB_To_Int(255, 80, 80);
+							}
+							else if (!pBld->HasPower)
+							{
+								if (drainVal > 0)
+								{
+									powOss << L"-" << drainVal << L" ("
+										   << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_OFFLINE", L"Offline")
+										   << L")";
+								}
+								else
+								{
+									powOss << L"(" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_OFFLINE", L"Offline") << L")";
+								}
+								powColor = Drawing::RGB_To_Int(255, 80, 80);
+							}
+							else
+							{
+								if (drainVal > 0)
+									powOss << L"-" << drainVal;
+							}
+						}
+						else
+						{
+							if (drainVal > 0)
+							{
+								powOss << L"-" << drainVal;
+
+								if (isOwnerLowPower)
+								{
+									powOss << L" (" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_LOW_POWER", L"Low Power") << L")";
+									powColor = Drawing::RGB_To_Int(255, 80, 80);
+								}
+							}
+							else if (isOwnerLowPower)
+							{
+								powOss << L"(" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_LOW_POWER", L"Low Power") << L")";
+								powColor = Drawing::RGB_To_Int(255, 80, 80);
+							}
+						}
+
+						if (!powOss.str().empty())
+						{
+							addLineSegments({
+								{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_POWER", L"Power: "), Drawing::RGB_To_Int(200, 200, 200) },
+								{ powOss.str(), powColor }
+							});
+						}
+					}
+				}
+			}
+
+			// Power / Status Line for Units (TechnoClass/TechnoTypeClass that is not a building)
+			if (!isProductionView && !pBldCardType && pBaseType && !win.IsDestroyed)
+			{
+				auto const pTypeExt = TechnoTypeExt::Fetch(pBaseType);
+				int const unitPower = (pTypeExt && Phobos::Config::UnitPowerDrain) ? pTypeExt->Power.Get() : 0;
+				HouseClass* pTechOwner = pTech ? pTech->Owner : pOwner;
+				bool const isOwnerLowPower = (pTechOwner && pTechOwner->HasLowPower());
+				bool const isDeactivated = pTech ? pTech->Deactivated : false;
+				bool const isEMP = pTech ? pTech->IsUnderEMP() : false;
+
+				if (unitPower != 0)
+				{
+					std::wostringstream powOss;
+					int powColor = Drawing::RGB_To_Int(100, 255, 120);
+
+					if (unitPower > 0)
+					{
+						if (isEMP)
+						{
+							powOss << L"+0 / " << unitPower << L" ("
+								   << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_EMP", L"EMP")
+								   << L")";
+							powColor = Drawing::RGB_To_Int(255, 80, 80);
+						}
+						else if (isDeactivated)
+						{
+							powOss << L"+0 / " << unitPower << L" ("
+								   << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_OFFLINE", L"Offline")
+								   << L")";
+							powColor = Drawing::RGB_To_Int(255, 80, 80);
+						}
+						else
+						{
+							powOss << L"+" << unitPower;
+							powColor = Drawing::RGB_To_Int(100, 255, 120);
+						}
+					}
+					else
+					{
+						int const drainVal = -unitPower;
+						powColor = Drawing::RGB_To_Int(255, 175, 120);
+
+						if (isEMP)
+						{
+							powOss << L"-" << drainVal << L" ("
+								   << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_EMP", L"EMP")
+								   << L")";
+							powColor = Drawing::RGB_To_Int(255, 80, 80);
+						}
+						else if (isDeactivated)
+						{
+							powOss << L"-" << drainVal << L" ("
+								   << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_OFFLINE", L"Offline")
+								   << L")";
+							powColor = Drawing::RGB_To_Int(255, 80, 80);
+						}
+						else if (isOwnerLowPower)
+						{
+							powOss << L"-" << drainVal << L" ("
+								   << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_LOW_POWER", L"Low Power")
+								   << L")";
+							powColor = Drawing::RGB_To_Int(255, 80, 80);
+						}
+						else
+						{
+							powOss << L"-" << drainVal;
+						}
+					}
+
+					addLineSegments({
+						{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_POWER", L"Power: "), Drawing::RGB_To_Int(200, 200, 200) },
+						{ powOss.str(), powColor }
+					});
+				}
+				else if (isDeactivated || isEMP)
+				{
+					std::wostringstream statusOss;
+
+					if (isEMP)
+						statusOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_EMP", L"EMP");
+					else if (isOwnerLowPower)
+						statusOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_LOW_POWER", L"Low Power");
+					else
+						statusOss << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_OFFLINE", L"Offline");
+
+					addLineSegments({
+						{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_POWER", L"Power: "), Drawing::RGB_To_Int(200, 200, 200) },
+						{ statusOss.str(), Drawing::RGB_To_Int(255, 80, 80) }
+					});
+				}
 			}
 
 			// Upgrades Line (for in-world buildings with upgrades or upgrade slots)
@@ -3273,6 +3471,23 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 								{ powOss.str(), Drawing::RGB_To_Int(100, 255, 120) }
 							});
 						}
+						else if (pCurBldType->PowerDrain > 0)
+						{
+							std::wostringstream powOss;
+							powOss << L"-" << pCurBldType->PowerDrain;
+							int powColor = Drawing::RGB_To_Int(255, 175, 120);
+
+							if (pOwner && pOwner->HasLowPower())
+							{
+								powOss << L" (" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_LOW_POWER", L"Low Power") << L")";
+								powColor = Drawing::RGB_To_Int(255, 80, 80);
+							}
+
+							addLineSegments({
+								{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_POWER", L"Power: "), Drawing::RGB_To_Int(200, 200, 200) },
+								{ powOss.str(), powColor }
+							});
+						}
 
 						if (pCurBldType->Upgrades > 0)
 						{
@@ -3293,7 +3508,9 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 							{
 								if (pTargetBld)
 								{
-									if (!firstTgt) powersUpOss << L", ";
+									if (!firstTgt)
+										powersUpOss << L", ";
+
 									firstTgt = false;
 									std::string tgtId = pTargetBld->get_ID();
 									powersUpOss << FormatObjectNameWithDebug(0, tgtId.c_str(), pTargetBld->UIName, isDebugKeysEnabled);
@@ -3319,6 +3536,37 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 							addLineSegments({
 								{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_INCOME", L"Income: "), Drawing::RGB_To_Int(200, 200, 200) },
 								{ incOss.str(), Drawing::RGB_To_Int(100, 255, 120) }
+							});
+						}
+					}
+					else if (Phobos::Config::UnitPowerDrain)
+					{
+						auto const pCurProdExt = TechnoTypeExt::Fetch(pCurProdType);
+
+						if (pCurProdExt && pCurProdExt->Power != 0)
+						{
+							std::wostringstream powOss;
+							int powColor = Drawing::RGB_To_Int(100, 255, 120);
+
+							if (pCurProdExt->Power > 0)
+							{
+								powOss << L"+" << pCurProdExt->Power.Get();
+							}
+							else
+							{
+								powOss << pCurProdExt->Power.Get();
+								powColor = Drawing::RGB_To_Int(255, 175, 120);
+
+								if (pOwner && pOwner->HasLowPower())
+								{
+									powOss << L" (" << GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_LOW_POWER", L"Low Power") << L")";
+									powColor = Drawing::RGB_To_Int(255, 80, 80);
+								}
+							}
+
+							addLineSegments({
+								{ GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_CARD_POWER", L"Power: "), Drawing::RGB_To_Int(200, 200, 200) },
+								{ powOss.str(), powColor }
 							});
 						}
 					}
