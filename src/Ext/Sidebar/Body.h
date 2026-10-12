@@ -137,7 +137,6 @@ public:
 	SidebarButtonConfig RepairButton;
 	SidebarButtonConfig SellButton;
 	SidebarButtonConfig DiplomacyButton;
-	SidebarButtonConfig RadarButton;
 	SidebarButtonConfig MenuButton;
 	TogglePowerButtonConfig TogglePowerButton;
 	std::vector<std::pair<FixedString<0x20>, SidebarButtonConfig>> CustomButtons;

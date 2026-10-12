@@ -62,26 +62,12 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 
 	this->Show.Read(exINI, pSection, makeKey("Show"));
 	this->Position.Read(exINI, pSection, makeKey("Position"));
-
-	if (!this->Position.isset())
-	{
-		Nullable<int> posX;
-		Nullable<int> posY;
-		posX.Read(exINI, pSection, makeKey("X"));
-		posY.Read(exINI, pSection, makeKey("Y"));
-		if (posX.isset() || posY.isset())
-		{
-			this->Position = Point2D { posX.Get(0), posY.Get(0) };
-		}
-	}
-
 	this->Shape.Read(pINI, pSection, makeKey("Shape"));
 	this->RequiresBuildings.Read(exINI, pSection, makeKey("RequiresBuildings"));
 	this->Toggle.Read(exINI, pSection, makeKey("Toggle"));
 
 	char actionBuf[0x40] = { 0 };
-	if (pINI->ReadString(pSection, makeKey("Action"), "", actionBuf, sizeof(actionBuf)) ||
-		pINI->ReadString(pSection, makeKey("Type"), "", actionBuf, sizeof(actionBuf)))
+	if (pINI->ReadString(pSection, makeKey("Action"), "", actionBuf, sizeof(actionBuf)))
 	{
 		if (actionBuf[0] != '\0')
 		{
@@ -89,9 +75,9 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 				this->Action = CustomButtonType::Repair;
 			else if (!_stricmp(actionBuf, "Sell"))
 				this->Action = CustomButtonType::Sell;
-			else if (!_stricmp(actionBuf, "TogglePower") || !_stricmp(actionBuf, "Power"))
+			else if (!_stricmp(actionBuf, "TogglePower"))
 				this->Action = CustomButtonType::TogglePower;
-			else if (!_stricmp(actionBuf, "SuperWeapon") || !_stricmp(actionBuf, "Special"))
+			else if (!_stricmp(actionBuf, "SuperWeapon"))
 				this->Action = CustomButtonType::SuperWeapon;
 			else if (!_stricmp(actionBuf, "Command"))
 				this->Action = CustomButtonType::Command;
@@ -103,14 +89,8 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 	this->SuperWeapon.Read(pINI, pSection, makeKey("SuperWeapon"));
 	this->Tooltip.Read(pINI, pSection, makeKey("Tooltip"));
 	this->Command.Read(pINI, pSection, makeKey("Command"));
-
 	this->AuxBuildings.Read(exINI, pSection, makeKey("AuxBuildings"));
-	if (this->AuxBuildings.empty())
-		this->AuxBuildings.Read(exINI, pSection, makeKey("AuxBuilding"));
-
 	this->NegBuildings.Read(exINI, pSection, makeKey("NegBuildings"));
-	if (this->NegBuildings.empty())
-		this->NegBuildings.Read(exINI, pSection, makeKey("NegBuilding"));
 }
 
 void SidebarButtonConfig::Merge(const SidebarButtonConfig& other)
@@ -180,30 +160,11 @@ void TogglePowerButtonConfig::Read(CCINIClass* pINI, const char* pSection)
 
 	this->Enabled.Read(exINI, pSection, "TogglePowerButton.Enabled");
 	this->Position.Read(exINI, pSection, "TogglePowerButton.Position");
-
-	if (!this->Position.isset())
-	{
-		Nullable<int> posX;
-		Nullable<int> posY;
-		posX.Read(exINI, pSection, "TogglePowerButton.X");
-		posY.Read(exINI, pSection, "TogglePowerButton.Y");
-		if (posX.isset() || posY.isset())
-		{
-			this->Position = Point2D { posX.Get(0), posY.Get(0) };
-		}
-	}
-
 	this->Shape.Read(pINI, pSection, "TogglePowerButton.Shape", this->Shape.data());
 	this->RequiresBuildings.Read(exINI, pSection, "TogglePowerButton.RequiresBuildings");
 	this->Tooltip.Read(pINI, pSection, "TogglePowerButton.Tooltip", this->Tooltip.data());
-
 	this->AuxBuildings.Read(exINI, pSection, "TogglePowerButton.AuxBuildings");
-	if (this->AuxBuildings.empty())
-		this->AuxBuildings.Read(exINI, pSection, "TogglePowerButton.AuxBuilding");
-
 	this->NegBuildings.Read(exINI, pSection, "TogglePowerButton.NegBuildings");
-	if (this->NegBuildings.empty())
-		this->NegBuildings.Read(exINI, pSection, "TogglePowerButton.NegBuilding");
 }
 
 void TogglePowerButtonConfig::Merge(const TogglePowerButtonConfig& other)
@@ -467,8 +428,6 @@ void SidebarConfig::Read(CCINIClass* pINI, const char* pSection)
 	this->RepairButton.Read(pINI, pSection, "RepairButton.");
 	this->SellButton.Read(pINI, pSection, "SellButton.");
 	this->DiplomacyButton.Read(pINI, pSection, "DiplomacyButton.");
-	this->RadarButton.Read(pINI, pSection, "RadarButton.");
-	this->DiplomacyButton.Merge(this->RadarButton);
 	this->MenuButton.Read(pINI, pSection, "MenuButton.");
 	this->TogglePowerButton.Read(pINI, pSection);
 	this->Credits.Read(pINI, pSection);
@@ -510,8 +469,6 @@ void SidebarConfig::Merge(const SidebarConfig& other)
 	this->RepairButton.Merge(other.RepairButton);
 	this->SellButton.Merge(other.SellButton);
 	this->DiplomacyButton.Merge(other.DiplomacyButton);
-	this->RadarButton.Merge(other.RadarButton);
-	this->DiplomacyButton.Merge(other.RadarButton);
 	this->MenuButton.Merge(other.MenuButton);
 	this->TogglePowerButton.Merge(other.TogglePowerButton);
 	this->Credits.Merge(other.Credits);
@@ -546,7 +503,6 @@ void SidebarConfig::Serialize(T& Stm)
 		.Process(this->RepairButton)
 		.Process(this->SellButton)
 		.Process(this->DiplomacyButton)
-		.Process(this->RadarButton)
 		.Process(this->MenuButton)
 		.Process(this->TogglePowerButton)
 		.Process(this->CustomButtons)
@@ -985,7 +941,6 @@ SidebarConfig SidebarExt::ActiveConfig()
 
 	// Default values for standard sidebar controls
 	result.DiplomacyButton.Show = true;
-	result.RadarButton.Show = true;
 	result.MenuButton.Show = true;
 	result.Credits.Align = TextAlign::Center;
 	result.Cameos.MarginBottom = 32;
@@ -1002,7 +957,7 @@ SidebarConfig SidebarExt::ActiveConfig()
 	result.TogglePowerButton.RequiresBuildings = true;
 	result.TogglePowerButton.Tooltip = "GUI:TogglePower";
 
-	// Positions (RepairButton, SellButton, DiplomacyButton, MenuButton, RadarButton,
+	// Positions (RepairButton, SellButton, DiplomacyButton, MenuButton,
 	// ScrollUpButton, ScrollDownButton, Credits, PowerBar, Cameos.Y, Cameos.Height)
 	// and custom shapes (PowerBar, ScrollUpButton, ScrollDownButton) are left Nullable/unset
 	// by default so that if not specified in INI, original game logic calculates them naturally.

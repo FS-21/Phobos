@@ -942,7 +942,7 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
   - `RepairButton.Position` sets the X and Y coordinates of the repair button. This tag is nullable; if not declared, it uses the original side-specific coordinate (`20,166` for Allied, `33,165` for Soviet/Yuri). When undeclared, this position is also subject to `Sidebar.GDIPositions`: if enabled, Soviet/Yuri uses the Allied position (`20,166`). If declared under `[Sidebar]`, it applies globally to all sides.
   - `SellButton.Show` determines whether the sell button is displayed and clickable. Defaults to `true`.
   - `SellButton.Position` sets the X and Y coordinates of the sell button. This tag is nullable; if not declared, it uses the original side-specific coordinate (`84,166` for Allied, `85,165` for Soviet/Yuri). If `RepairButton.Position` was customized but `SellButton.Position` is left undeclared, the sell button automatically shifts to the right of the repair button using the button width determined by `Sidebar.GDIPositions` (+64 pixels for Allied, +52 pixels for Soviet). If declared under `[Sidebar]`, it applies globally to all sides.
-  - `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable (also aliased as `RadarButton.Show`). Defaults to `true`.
+  - `DiplomacyButton.Show` determines whether the diplomacy button is displayed and clickable. Defaults to `true`.
   - `DiplomacyButton.Position` sets the X and Y coordinates of the diplomacy button. This tag is nullable; if not declared, it uses the original coordinate (`14,5`).
   - `MenuButton.Show` determines whether the options/menu button is displayed and clickable. Defaults to `true`.
   - `MenuButton.Position` sets the X and Y coordinates of the options/menu button. This tag is nullable; if not declared, it uses the original coordinate (`86,5`).
@@ -958,14 +958,14 @@ Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
       - `None` *(default)*: Does not execute any built-in game action. Can be paired with `Toggle=true` as a generic toggle switch.
       - `Repair`: Toggles building repair mode (`RepairMode`), identical to the vanilla wrench button.
       - `Sell`: Toggles building sell mode (`SellMode`), identical to the vanilla dollar button.
-      - `TogglePower` *(or `Power`)*: Toggles building power management mode (`PowerToggleMode`).
-      - `SuperWeapon` *(or `Special`)*: Triggers the superweapon defined in `SuperWeapon=`. If it requires map targeting, the button enclaves/toggles while aiming and untoggles upon firing or cancelling. Automatically disabled (Frame 2) if not ready or not owned. If it fires automatically/instantly (`Action=None` or `SW.UseAITargeting=yes`), it fires immediately on click and never remains toggled.
+      - `TogglePower`: Toggles building power management mode (`PowerToggleMode`).
+      - `SuperWeapon`: Triggers the superweapon defined in `SuperWeapon=`. If it requires map targeting, the button enclaves/toggles while aiming and untoggles upon firing or cancelling. Automatically disabled (Frame 2) if not ready or not owned. If it fires automatically/instantly (`Action=None` or `SW.UseAITargeting=yes`), it fires immediately on click and never remains toggled.
       - `Command`: Executes an internal interface command specified in `Command=` (from `CommandClass::Array`, e.g. `Options`, `ToggleSidebar`, etc.).
     - `Shape` specifies the SHP image file for the button. Supports up to 3 frames: Frame 0 = Normal, Frame 1 = Active / Toggled, Frame 2 = Disabled.
     - `Position` sets the X and Y coordinates relative to the sidebar (`0,0`).
     - `RequiresBuildings` controls whether the button is disabled when the player has no buildings. Defaults to `false`.
-    - `AuxBuildings` (or `AuxBuilding`) specifies a list of building types. The button is disabled unless the player owns at least one of these structures on the map.
-    - `NegBuildings` (or `NegBuilding`) specifies a list of building types. The button is disabled if the player owns any of these structures on the map.
+    - `AuxBuildings` specifies a list of building types. The button is disabled unless the player owns at least one of these structures on the map.
+    - `NegBuildings` specifies a list of building types. The button is disabled if the player owns any of these structures on the map.
     - `Toggle` enables manual toggle state for `Command` and `None` buttons. For built-in actions (`Repair`, `Sell`, `TogglePower`, `SuperWeapon`), toggle state is automatically synchronized with the active game mode.
     - `SuperWeapon` specifies the ID of the `SuperWeaponType` to activate when `Action=SuperWeapon`.
     - `Command` specifies the command name to execute when `Action=Command`.
