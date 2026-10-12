@@ -37,6 +37,27 @@ void SidebarExt::Remove(SidebarClass* pThis)
 	Data = nullptr;
 }
 
+static void ReadBuildingList(INI_EX& exINI, const char* pSection, const char* pKey, std::vector<PhobosFixedString<0x20>>& outList)
+{
+	if (exINI.ReadString(pSection, pKey))
+	{
+		outList.clear();
+
+		char* str = exINI.value();
+		char* context = nullptr;
+
+		for (char* cur = strtok_s(str, Phobos::readDelims, &context); cur; cur = strtok_s(nullptr, Phobos::readDelims, &context))
+		{
+			cur = CRT::strtrim(cur);
+
+			if (cur[0] != '\0' && _stricmp(cur, "<none>") != 0 && _stricmp(cur, "none") != 0)
+			{
+				outList.emplace_back(cur);
+			}
+		}
+	}
+}
+
 // -----------------------------------------------------------------------------
 // SidebarButtonConfig
 // -----------------------------------------------------------------------------
@@ -89,8 +110,8 @@ void SidebarButtonConfig::Read(CCINIClass* pINI, const char* pSection, const cha
 	this->SuperWeapon.Read(pINI, pSection, makeKey("SuperWeapon"));
 	this->Tooltip.Read(pINI, pSection, makeKey("Tooltip"));
 	this->Command.Read(pINI, pSection, makeKey("Command"));
-	this->AuxBuildings.Read(exINI, pSection, makeKey("AuxBuildings"));
-	this->NegBuildings.Read(exINI, pSection, makeKey("NegBuildings"));
+	ReadBuildingList(exINI, pSection, makeKey("AuxBuildings"), this->AuxBuildings);
+	ReadBuildingList(exINI, pSection, makeKey("NegBuildings"), this->NegBuildings);
 }
 
 void SidebarButtonConfig::Merge(const SidebarButtonConfig& other)
@@ -163,8 +184,8 @@ void TogglePowerButtonConfig::Read(CCINIClass* pINI, const char* pSection)
 	this->Shape.Read(pINI, pSection, "TogglePowerButton.Shape", this->Shape.data());
 	this->RequiresBuildings.Read(exINI, pSection, "TogglePowerButton.RequiresBuildings");
 	this->Tooltip.Read(pINI, pSection, "TogglePowerButton.Tooltip", this->Tooltip.data());
-	this->AuxBuildings.Read(exINI, pSection, "TogglePowerButton.AuxBuildings");
-	this->NegBuildings.Read(exINI, pSection, "TogglePowerButton.NegBuildings");
+	ReadBuildingList(exINI, pSection, "TogglePowerButton.AuxBuildings", this->AuxBuildings);
+	ReadBuildingList(exINI, pSection, "TogglePowerButton.NegBuildings", this->NegBuildings);
 }
 
 void TogglePowerButtonConfig::Merge(const TogglePowerButtonConfig& other)
@@ -579,38 +600,60 @@ bool CustomSidebarButtonClass::IsDisabled() const
 {
 	const auto pPlayer = HouseClass::CurrentPlayer;
 	if (!pPlayer)
+	{
 		return true;
+	}
 
 	if (this->Config.RequiresBuildings.Get(false) && pPlayer->Buildings.Count <= 0)
-		return true;
-
-	auto isBuildingPresent = [pPlayer](BuildingTypeClass* pType) -> bool
 	{
-		if (!pType)
+		return true;
+	}
+
+	auto isBuildingPresent = [pPlayer](const PhobosFixedString<0x20>& buildingId) -> bool
+	{
+		if (buildingId[0] == '\0')
+		{
 			return false;
+		}
+
+		const auto pType = BuildingTypeClass::Find(buildingId.data());
+		if (!pType)
+		{
+			return false;
+		}
 
 		const auto pBuildingExt = BuildingTypeExt::Fetch(pType);
 		if (pBuildingExt && !pBuildingExt->PowersUp_Buildings.empty())
+		{
 			return BuildingTypeExt::GetUpgradesAmount(pType, pPlayer) > 0;
+		}
 
 		return HouseExt::Fetch(pPlayer)->HasOwnedPresentAndLimboed(pType);
 	};
 
 	if (!this->Config.AuxBuildings.empty() && std::ranges::none_of(this->Config.AuxBuildings, isBuildingPresent))
+	{
 		return true;
+	}
 
 	if (!this->Config.NegBuildings.empty() && std::ranges::any_of(this->Config.NegBuildings, isBuildingPresent))
+	{
 		return true;
+	}
 
 	if (this->Config.Action.Get(CustomButtonType::None) == CustomButtonType::SuperWeapon)
 	{
 		const auto pSuper = this->GetSuperWeapon();
 		if (!pSuper || !pSuper->IsPresent || !pSuper->CanFire())
+		{
 			return true;
+		}
 
 		const auto pSWExt = SWTypeExt::Fetch(pSuper->Type);
 		if (pSWExt && !pSWExt->SW_ManualFire)
+		{
 			return true;
+		}
 	}
 
 	return false;

@@ -31,8 +31,8 @@ public:
 	PhobosFixedString<0x20> SuperWeapon;
 	PhobosFixedString<0x40> Tooltip;
 	PhobosFixedString<0x40> Command;
-	ValueableVector<BuildingTypeClass*> AuxBuildings;
-	ValueableVector<BuildingTypeClass*> NegBuildings;
+	std::vector<PhobosFixedString<0x20>> AuxBuildings;
+	std::vector<PhobosFixedString<0x20>> NegBuildings;
 
 	SidebarButtonConfig() = default;
 
@@ -51,8 +51,8 @@ public:
 	PhobosFixedString<0x20> Shape;
 	Nullable<bool> RequiresBuildings;
 	PhobosFixedString<0x40> Tooltip;
-	ValueableVector<BuildingTypeClass*> AuxBuildings;
-	ValueableVector<BuildingTypeClass*> NegBuildings;
+	std::vector<PhobosFixedString<0x20>> AuxBuildings;
+	std::vector<PhobosFixedString<0x20>> NegBuildings;
 
 	TogglePowerButtonConfig() = default;
 
