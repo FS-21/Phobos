@@ -742,6 +742,7 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->DefensivePlaceholders)
 		.Process(this->ConsecutiveCombatBuilds)
 		.Process(this->ConsecutiveResourceBuilds)
+		.Process(this->Academies)
 		//.Process(this->BeaconsPlacedOrder) beacon is not saved, so this follows it.
 		;
 

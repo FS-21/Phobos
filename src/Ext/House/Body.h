@@ -272,6 +272,7 @@ public:
 	CellStruct GetCrawlingWaypoint(CellStruct targetCell);
 
 	HouseClass* TargetAlliedFallbackHouse;
+	std::vector<BuildingClass*> Academies;
 
 	HouseExt(HouseClass* OwnerObject) : AbstractExt(OwnerObject)
 		, TargetAlliedFallbackHouse { nullptr }
@@ -375,6 +376,7 @@ public:
 		, CachedExpansionPath {}
 		, CachedExpansionPathTarget { 0, 0 }
 		, CachedExpansionPathStart { 0, 0 }
+		, Academies {}
 	{ }
 
 	bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;
