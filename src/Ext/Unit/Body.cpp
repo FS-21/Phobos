@@ -198,6 +198,9 @@ bool UnitExt::CannotMove(UnitClass* pThis)
 	if (pThis->LocomotorSource)
 		return false;
 
+	if (TechnoExt::DriverKilled(pThis))
+		return true;
+
 	const auto pType = pThis->Type;
 
 	if (pType->Speed == 0)

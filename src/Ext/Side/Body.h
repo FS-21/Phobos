@@ -30,6 +30,7 @@ public:
 	Valueable<bool> Sidebar_GDIPositions;
 	SidebarConfig SidebarSettings;
 	SidebarConfig BaselineSidebarSettings;
+	Nullable<int> Sidebar_RadarOffsetFix;
 	Valueable<int> IngameScore_WinTheme;
 	Valueable<int> IngameScore_LoseTheme;
 	Valueable<Point2D> Sidebar_HarvesterCounter_Offset;
@@ -78,6 +79,7 @@ public:
 		, Sidebar_GDIPositions { false }
 		, SidebarSettings {}
 		, BaselineSidebarSettings {}
+		, Sidebar_RadarOffsetFix { }
 		, IngameScore_WinTheme { -2 }
 		, IngameScore_LoseTheme { -2 }
 		, Sidebar_HarvesterCounter_Offset { { 0, 0 } }

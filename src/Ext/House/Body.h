@@ -334,6 +334,8 @@ public:
 	HouseClass* TargetAlliedFallbackHouse;
 	BuildingTypeClass* ActiveEvaVoiceBuildingType;
 
+	std::vector<BuildingClass*> Academies;
+
 	HouseExt(HouseClass* OwnerObject) : AbstractExt(OwnerObject)
 		, TargetAlliedFallbackHouse { nullptr }
 		, PowerPlantEnhancers {}
@@ -450,6 +452,7 @@ public:
 		, CachedExpansionPathStart { 0, 0 }
 		, ActiveEvaVoiceBuildingType { nullptr }
 		, FactoryResourceStates {}
+		, Academies {}
 	{ }
 
 	int GetResourceAmount(int resourceIdx) const;

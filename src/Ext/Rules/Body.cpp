@@ -159,6 +159,7 @@ void RulesExt::ExtData::LoadFromINIFile(CCINIClass* pINI)
 	this->DefaultToGuardArea.Read(exINI, GameStrings::General, "DefaultToGuardArea");
 	this->LeptonMindControlOffset.Read(exINI, GameStrings::AudioVisual, "LeptonMindControlOffset");
 	this->MindControlRingOffset.Read(exINI, GameStrings::AudioVisual, "MindControlRingOffset");
+	this->Anim_ShouldUseCellDrawer.Read(exINI, GameStrings::AudioVisual, "Anim.ShouldUseCellDrawer");
 }
 
 void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
@@ -343,6 +344,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 
 	this->CrateOnlyOnLand.Read(exINI, GameStrings::CrateRules, "CrateOnlyOnLand");
 	this->UnitCrateVehicleCap.Read(exINI, GameStrings::CrateRules, "UnitCrateVehicleCap");
+	this->HealBaseNoScatter.Read(exINI, GameStrings::CrateRules, "HealBaseNoScatter");
 	this->FreeMCV_CreditsThreshold.Read(exINI, GameStrings::CrateRules, "FreeMCV.CreditsThreshold");
 
 	this->ROF_RandomDelay.Read(exINI, GameStrings::CombatDamage, "ROF.RandomDelay");
@@ -479,6 +481,7 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->BuildingTypeSelectable.Read(exINI, GameStrings::General, "BuildingTypeSelectable");
 
 	this->UseRetintFix.Read(exINI, GameStrings::AudioVisual, "UseRetintFix");
+	this->UseSidebarRadarOffsetFix.Read(exINI, GameStrings::AudioVisual, "UseSidebarRadarOffsetFix");
 
 	this->ProneSpeed_Crawls.Read(exINI, GameStrings::General, "ProneSpeed.Crawls");
 	this->ProneSpeed_NoCrawls.Read(exINI, GameStrings::General, "ProneSpeed.NoCrawls");
@@ -1185,6 +1188,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->DrainMoneyDisplay_OnTarget_UseDisplayIncome)
 		.Process(this->CrateOnlyOnLand)
 		.Process(this->UnitCrateVehicleCap)
+		.Process(this->HealBaseNoScatter)
 		.Process(this->FreeMCV_CreditsThreshold)
 		.Process(this->RadialIndicatorVisibility)
 		.Process(this->DrawTurretShadow)
@@ -1385,6 +1389,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->DefaultToGuardArea)
 		.Process(this->LeptonMindControlOffset)
 		.Process(this->MindControlRingOffset)
+		.Process(this->Anim_ShouldUseCellDrawer)
 		.Process(this->CylinderRangefinding)
 		.Process(this->PenetratesTransport_Level)
 		.Process(this->UnitsUnsellable)
@@ -1484,6 +1489,7 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->MissileKeepTargetCoord)
 		.Process(this->AttachmentTopLayerMinHeight)
 		.Process(this->AttachmentUndergroundLayerMaxHeight)
+		.Process(this->UseSidebarRadarOffsetFix)
 		;
 }
 

@@ -1414,7 +1414,6 @@ In `rulesmd.ini`:
 [SOMESIDE]                            ; Side
 Sidebar.ProducingProgress.Offset=0,0  ; X,Y, pixels relative to default
 ```
-
 ### Sidebar Customizations
 
 - Now you can customize the layout, coordinates, visibility, and behavior of sidebar controls, restore the Tiberian Sun power toggle button, create custom buttons, configure sidebar tabs, control cameo list height, and reposition scroll buttons.
@@ -1550,6 +1549,26 @@ TabIndex=                            ; integer, 0-based tab index
 
 [SOMESW]                             ; SuperWeaponType
 TabIndex=                            ; integer, 0-based tab index
+```
+
+### Sidebar radar horizontal offset
+
+- In vanilla the radar image does not line up with the frame drawn around it - it is offset 3 pixels to the right on Allied/GDI sidebars and 2 pixels to the right on Soviet/NOD sidebars. The radar is now lined up with its frame.
+- The correction can be turned off entirely or adjusted: Setting `[AudioVisual] -> UseSidebarRadarOffsetFix` to `false` disables it altogether.
+  - `Sidebar.RadarOffsetFix` overrides the correction for that side. Negative values move the radar to the left, `0` disables the correction for that side.
+  - Which of the two defaults is used depends on `Sidebar.GDIPositions`, see [Specify Sidebar style](#specify-sidebar-style).
+
+In `rulesmd.ini`:
+```ini
+[AudioVisual]
+UseSidebarRadarOffsetFix=true  ; boolean
+
+[SOMESIDE]                     ; Side
+Sidebar.RadarOffsetFix=        ; integer, pixels, defaults to -3 if Sidebar.GDIPositions=true, otherwise -2
+```
+
+```{note}
+Only the sidebar of the local player is affected - the offset applied is always the one configured for the local player's side.
 ```
 
 ### Specify Sidebar style

@@ -454,9 +454,6 @@ void HouseTypeExt::LoadFromINIFile(CCINIClass* pINI)
 
 	this->Crew.Read<true>(exINI, pSection, "Crew");
 
-	this->VeteranBuildings.Read(exINI, pSection, "VeteranBuildings");
-	this->VeteranDefenses.Read(exINI, pSection, "VeteranDefenses");
-
 	this->RevealHouses.Read<false, true>(exINI, pSection, "RevealHouses");
 
 	this->NewTeamsSelector_MergeUnclassifiedCategoryWith.Read(exINI, pSection, "NewTeamsSelector.MergeUnclassifiedCategoryWith");
@@ -466,6 +463,7 @@ void HouseTypeExt::LoadFromINIFile(CCINIClass* pINI)
 	this->NewTeamsSelector_NavalCategoryPercentage.Read(exINI, pSection, "NewTeamsSelector.NavalCategoryPercentage");
 	this->NewTeamsSelector_InfantryCategoryPercentage.Read(exINI, pSection, "NewTeamsSelector.InfantryCategoryPercentage");
 	this->NewTeamsSelector_VIPWeight.Read(exINI, pSection, "NewTeamsSelector.VIPWeight");
+	this->Academy_AllowCountryFilter.Read(exINI, pSection, "Academy.AllowCountryFilter");
 }
 
 template <typename T>
@@ -512,8 +510,6 @@ void HouseTypeExt::Serialize(T& Stm)
 		.Process(this->AttachEffects)
 		.Process(this->AttachEffects_AttachOnOwnerChange)
 		.Process(this->Crew)
-		.Process(this->VeteranBuildings)
-		.Process(this->VeteranDefenses)
 		.Process(this->RevealHouses)
 		.Process(this->NewTeamsSelector_MergeUnclassifiedCategoryWith)
 		.Process(this->NewTeamsSelector_UnclassifiedCategoryPercentage)
@@ -522,6 +518,7 @@ void HouseTypeExt::Serialize(T& Stm)
 		.Process(this->NewTeamsSelector_NavalCategoryPercentage)
 		.Process(this->NewTeamsSelector_InfantryCategoryPercentage)
 		.Process(this->NewTeamsSelector_VIPWeight)
+		.Process(this->Academy_AllowCountryFilter)
 		;
 
 	int numDropships = (int)this->DropshipLoadout_FixedUnits.size();

@@ -826,6 +826,7 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->ConsecutiveResourceBuilds)
 		.Process(this->ActiveEvaVoiceBuildingType)
 		.Process(this->FactoryResourceStates)
+		.Process(this->Academies)
 		//.Process(this->BeaconsPlacedOrder) beacon is not saved, so this follows it.
 		.Process(this->TiberiumStorage)
 		.Process(this->WeedStorage)

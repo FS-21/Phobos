@@ -73,9 +73,6 @@ public:
 	Nullable<bool> AttachEffects_AttachOnOwnerChange;
 	Nullable<InfantryTypeClass*> Crew;
 
-	ValueableVector<BuildingTypeClass*> VeteranBuildings;
-	ValueableVector<BuildingTypeClass*> VeteranDefenses;
-
 	Nullable<AffectedHouse> RevealHouses;
 
 	Nullable<int> NewTeamsSelector_MergeUnclassifiedCategoryWith;
@@ -85,6 +82,7 @@ public:
 	Nullable<double> NewTeamsSelector_AirCategoryPercentage;
 	Nullable<double> NewTeamsSelector_InfantryCategoryPercentage;
 	Nullable<double> NewTeamsSelector_VIPWeight;
+	Valueable<bool> Academy_AllowCountryFilter;
 
 	HouseTypeExt(HouseTypeClass* OwnerObject) : AbstractTypeExt(OwnerObject)
 		, EVATag { -2 }
@@ -129,8 +127,6 @@ public:
 		, AttachEffects {}
 		, AttachEffects_AttachOnOwnerChange {}
 		, Crew {}
-		, VeteranBuildings {}
-		, VeteranDefenses {}
 		, RevealHouses {}
 		, NewTeamsSelector_MergeUnclassifiedCategoryWith { }
 		, NewTeamsSelector_UnclassifiedCategoryPercentage { }
@@ -139,6 +135,7 @@ public:
 		, NewTeamsSelector_AirCategoryPercentage { }
 		, NewTeamsSelector_InfantryCategoryPercentage { }
 		, NewTeamsSelector_VIPWeight { }
+		, Academy_AllowCountryFilter { false }
 	{ }
 
 	virtual ~HouseTypeExt() = default;
