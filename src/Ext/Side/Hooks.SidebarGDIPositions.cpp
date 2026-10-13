@@ -1,6 +1,10 @@
 #include "Body.h"
 #include <Ext/Sidebar/Body.h>
 
+#include <Ext/Rules/Body.h>
+#include <RadarClass.h>
+#include <ScenarioClass.h>
+
 namespace
 {
 	bool IsNODSidebar = false;
@@ -27,9 +31,23 @@ DEFINE_HOOK(0x652EAB, RadarClass_InitForHouse, 0x6)
 	return 0x652EB7;
 }
 
-DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_Buttons, 0x6)
+DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_OffsetAndButtons, 0x6)
 {
-	R->EDX(*reinterpret_cast<DWORD*>(R->ESI() + 0x11F0));
+	GET(RadarClass*, pThis, ESI);
+	if (RulesExt::Global()->UseSidebarRadarOffsetFix)
+	{
+		const auto pSideExt = SideExt::TryFetch(
+			SideClass::Array.GetItemOrDefault(ScenarioClass::Instance->PlayerSideIndex));
+		const bool isGDI = pSideExt
+			? pSideExt->Sidebar_GDIPositions
+			: ScenarioClass::Instance->PlayerSideIndex == 0;
+		const int defaultOffset = isGDI ? -3 : -2;
+		const int radarOffset = pSideExt
+			? pSideExt->Sidebar_RadarOffsetFix.Get(defaultOffset)
+			: defaultOffset;
+		pThis->RadarX += radarOffset;
+	}
+	R->EDX(pThis->RadarX);
 
 	const auto config = SidebarExt::ActiveConfig();
 	DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
@@ -60,7 +78,7 @@ DEFINE_HOOK(0x652F4F, RadarClass_InitForHouse_Buttons, 0x6)
 		*reinterpret_cast<DWORD*>(0x00B048CC) = static_cast<DWORD>(-10000);
 	}
 
-	return 0;
+	return 0x652F55;
 }
 
 DEFINE_HOOK(0x6A5090, SidebarClass_InitPositions, 0x5)
