@@ -1165,9 +1165,7 @@ bool TActionExt::OpenDropshipLoadoutWindow(TActionClass* pThis, HouseClass* pTri
 
 	Nullable<double> costMultiplier {};
 	if (auto const pExt = TActionExt::TryFetch(pThis))
-	{
 		costMultiplier = pExt->DropshipLoadout_CostMultiplier;
-	}
 
 	DropshipLoadoutClass::OpenInGameWindow(
 		bIgnoreFixedUnits,
