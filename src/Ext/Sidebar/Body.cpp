@@ -51,9 +51,7 @@ static void ReadBuildingList(INI_EX& exINI, const char* pSection, const char* pK
 			cur = CRT::strtrim(cur);
 
 			if (cur[0] != '\0' && _stricmp(cur, "<none>") != 0 && _stricmp(cur, "none") != 0)
-			{
 				outList.emplace_back(cur);
-			}
 		}
 	}
 }
@@ -245,9 +243,7 @@ void CreditsConfig::Read(CCINIClass* pINI, const char* pSection)
 		posX.Read(exINI, pSection, "Credits.X");
 		posY.Read(exINI, pSection, "Credits.Y");
 		if (posX.isset() || posY.isset())
-		{
 			this->Position = Point2D { posX.Get(0), posY.Get(0) };
-		}
 	}
 
 	this->Align.Read(exINI, pSection, "Credits.Align");
@@ -296,9 +292,7 @@ void PowerBarConfig::Read(CCINIClass* pINI, const char* pSection)
 		posX.Read(exINI, pSection, "PowerBar.X");
 		posY.Read(exINI, pSection, "PowerBar.Y");
 		if (posX.isset() || posY.isset())
-		{
 			this->Position = Point2D { posX.Get(0), posY.Get(0) };
-		}
 	}
 
 	this->Height.Read(exINI, pSection, "PowerBar.Height");
@@ -507,13 +501,9 @@ void SidebarConfig::Merge(const SidebarConfig& other)
 				return !_stricmp(item.first.data(), btn.first.data());
 			});
 		if (it != this->CustomButtons.end())
-		{
 			it->second.Merge(btn.second);
-		}
 		else
-		{
 			this->CustomButtons.push_back(btn);
-		}
 	}
 }
 
@@ -572,9 +562,7 @@ SHPStruct* CustomSidebarButtonClass::GetShape()
 	{
 		this->ShapeData = FileSystem::LoadSHPFile(this->Config.Shape.data());
 		if (!this->ShapeData)
-		{
 			Debug::Log("[Sidebar] Warning: Could not load button shape '%s'\n", this->Config.Shape.data());
-		}
 	}
 
 	return this->ShapeData;
@@ -600,60 +588,42 @@ bool CustomSidebarButtonClass::IsDisabled() const
 {
 	const auto pPlayer = HouseClass::CurrentPlayer;
 	if (!pPlayer)
-	{
 		return true;
-	}
 
 	if (this->Config.RequiresBuildings.Get(false) && pPlayer->Buildings.Count <= 0)
-	{
 		return true;
-	}
 
 	auto isBuildingPresent = [pPlayer](const PhobosFixedString<0x20>& buildingId) -> bool
 	{
 		if (buildingId[0] == '\0')
-		{
 			return false;
-		}
 
 		const auto pType = BuildingTypeClass::Find(buildingId.data());
 		if (!pType)
-		{
 			return false;
-		}
 
 		const auto pBuildingExt = BuildingTypeExt::Fetch(pType);
 		if (pBuildingExt && !pBuildingExt->PowersUp_Buildings.empty())
-		{
 			return BuildingTypeExt::GetUpgradesAmount(pType, pPlayer) > 0;
-		}
 
 		return HouseExt::Fetch(pPlayer)->CountOwnedPresentAndLimboed(pType) > 0;
 	};
 
 	if (!this->Config.AuxBuildings.empty() && std::ranges::none_of(this->Config.AuxBuildings, isBuildingPresent))
-	{
 		return true;
-	}
 
 	if (!this->Config.NegBuildings.empty() && std::ranges::any_of(this->Config.NegBuildings, isBuildingPresent))
-	{
 		return true;
-	}
 
 	if (this->Config.Action.Get(CustomButtonType::None) == CustomButtonType::SuperWeapon)
 	{
 		const auto pSuper = this->GetSuperWeapon();
 		if (!pSuper || !pSuper->IsPresent || !pSuper->CanFire())
-		{
 			return true;
-		}
 
 		const auto pSWExt = SWTypeExt::Fetch(pSuper->Type);
 		if (pSWExt && !pSWExt->SW_ManualFire)
-		{
 			return true;
-		}
 	}
 
 	return false;
@@ -739,9 +709,7 @@ bool CustomSidebarButtonClass::Draw(bool forced)
 	const DWORD sidebarX = *reinterpret_cast<DWORD*>(0x886F90);
 	int relX = this->X;
 	if (relX >= static_cast<int>(sidebarX))
-	{
 		relX -= static_cast<int>(sidebarX);
-	}
 
 	Point2D drawPos = { relX, this->Y };
 	RectangleStruct bounds = pSurface->GetRect();
@@ -840,9 +808,7 @@ bool CustomSidebarButtonClass::Action(GadgetFlag flags, DWORD* pKey, KeyModifier
 		this->IsPressed = false;
 		SidebarClass::Instance.SidebarNeedsRedraw = true;
 		if (!this->IsDisabled())
-		{
 			this->ExecuteAction();
-		}
 	}
 
 	this->GadgetClass::Action(flags, pKey, KeyModifier::None);
@@ -1012,9 +978,7 @@ SidebarConfig SidebarExt::ActiveConfig()
 	{
 		const auto pSide = SideClass::Array.GetItemOrDefault(HouseClass::CurrentPlayer->SideIndex);
 		if (const auto pSideExt = SideExt::TryFetch(pSide))
-		{
 			result.Merge(pSideExt->SidebarSettings);
-		}
 	}
 
 	result.Merge(ScenarioConfig);
@@ -1024,9 +988,7 @@ SidebarConfig SidebarExt::ActiveConfig()
 void SidebarExt::LoadFromUIMD(CCINIClass& iniUIMD)
 {
 	if (iniUIMD.GetSection(SIDEBAR_SECTION))
-	{
 		GlobalConfig.Read(&iniUIMD, SIDEBAR_SECTION);
-	}
 }
 
 void SidebarExt::LoadFromRules(CCINIClass* pINI)
@@ -1035,9 +997,7 @@ void SidebarExt::LoadFromRules(CCINIClass* pINI)
 		return;
 
 	if (pINI->GetSection("Sidebar"))
-	{
 		RulesConfig.Read(pINI, "Sidebar");
-	}
 }
 
 void SidebarExt::LoadFromScenario(CCINIClass* pINI)
@@ -1046,9 +1006,7 @@ void SidebarExt::LoadFromScenario(CCINIClass* pINI)
 		return;
 
 	if (pINI->GetSection("Sidebar"))
-	{
 		ScenarioConfig.Read(pINI, "Sidebar");
-	}
 }
 
 void SidebarExt::SaveBaseline()
@@ -1260,13 +1218,9 @@ void SidebarExt::InitIO()
 			if (const auto pSide = SideClass::Array.GetItemOrDefault(HouseClass::CurrentPlayer->SideIndex))
 			{
 				if (const auto pSideExt = SideExt::TryFetch(pSide))
-				{
 					isNOD = !pSideExt->Sidebar_GDIPositions;
-				}
 				else
-				{
 					isNOD = HouseClass::CurrentPlayer->SideIndex != 0;
-				}
 			}
 		}
 
@@ -1306,13 +1260,9 @@ void SidebarExt::InitIO()
 				if (const auto pSide = SideClass::Array.GetItemOrDefault(HouseClass::CurrentPlayer->SideIndex))
 				{
 					if (const auto pSideExt = SideExt::TryFetch(pSide))
-					{
 						isNOD = !pSideExt->Sidebar_GDIPositions;
-					}
 					else
-					{
 						isNOD = HouseClass::CurrentPlayer->SideIndex != 0;
-					}
 				}
 			}
 
@@ -1381,9 +1331,7 @@ void SidebarExt::InitIO()
 	if (config.ScrollUpButton.Shape[0] != '\0')
 	{
 		if (auto pSHP = FileSystem::LoadSHPFile(config.ScrollUpButton.Shape.data()))
-		{
 			SetShapeButtonSHP(&SidebarClass::ScrollUpButton, pSHP);
-		}
 	}
 
 	// Configure Scroll Down Button
@@ -1402,9 +1350,7 @@ void SidebarExt::InitIO()
 	if (config.ScrollDownButton.Shape[0] != '\0')
 	{
 		if (auto pSHP = FileSystem::LoadSHPFile(config.ScrollDownButton.Shape.data()))
-		{
 			SetShapeButtonSHP(&SidebarClass::ScrollDownButton, pSHP);
-		}
 	}
 
 	SidebarClass::Instance.SidebarNeedsRedraw = true;
@@ -1413,16 +1359,12 @@ void SidebarExt::InitIO()
 void SidebarExt::DrawCustomButtons()
 {
 	if (ActiveTogglePowerButton)
-	{
 		ActiveTogglePowerButton->Draw(false);
-	}
 
 	for (auto pBtn : ActiveCustomButtons)
 	{
 		if (pBtn)
-		{
 			pBtn->Draw(false);
-		}
 	}
 }
 
@@ -1431,26 +1373,20 @@ bool SidebarExt::IsTogglePowerRequiresBuildings()
 	if (ActiveTogglePowerButton)
 	{
 		if (!ActiveTogglePowerButton->Config.RequiresBuildings.Get(true))
-		{
 			return false;
-		}
 	}
 
 	const auto config = SidebarExt::ActiveConfig();
 
 	if (config.TogglePowerButton.RequiresBuildings.isset() && !config.TogglePowerButton.RequiresBuildings.Get())
-	{
 		return false;
-	}
 
 	for (const auto* pBtn : SidebarExt::ActiveCustomButtons)
 	{
 		if (pBtn && pBtn->Config.Action.Get(CustomButtonType::None) == CustomButtonType::TogglePower)
 		{
 			if (!pBtn->Config.RequiresBuildings.Get(false))
-			{
 				return false;
-			}
 		}
 	}
 
@@ -1462,18 +1398,14 @@ bool SidebarExt::IsRepairRequiresBuildings()
 	const auto config = SidebarExt::ActiveConfig();
 
 	if (config.RepairButton.RequiresBuildings.isset() && !config.RepairButton.RequiresBuildings.Get())
-	{
 		return false;
-	}
 
 	for (const auto* pBtn : SidebarExt::ActiveCustomButtons)
 	{
 		if (pBtn && pBtn->Config.Action.Get(CustomButtonType::None) == CustomButtonType::Repair)
 		{
 			if (!pBtn->Config.RequiresBuildings.Get(false))
-			{
 				return false;
-			}
 		}
 	}
 
@@ -1485,18 +1417,14 @@ bool SidebarExt::IsSellRequiresBuildings()
 	const auto config = SidebarExt::ActiveConfig();
 
 	if (config.SellButton.RequiresBuildings.isset() && !config.SellButton.RequiresBuildings.Get())
-	{
 		return false;
-	}
 
 	for (const auto* pBtn : SidebarExt::ActiveCustomButtons)
 	{
 		if (pBtn && pBtn->Config.Action.Get(CustomButtonType::None) == CustomButtonType::Sell)
 		{
 			if (!pBtn->Config.RequiresBuildings.Get(false))
-			{
 				return false;
-			}
 		}
 	}
 

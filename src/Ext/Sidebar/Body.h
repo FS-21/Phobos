@@ -246,9 +246,7 @@ public:
 	static Point2D ResolveCoord(Point2D pos, DWORD sidebarX)
 	{
 		if (pos.X < 168 && pos.X >= 0)
-		{
 			pos.X += static_cast<int>(sidebarX);
-		}
 
 		return pos;
 	}

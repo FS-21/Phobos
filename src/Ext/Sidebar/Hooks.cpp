@@ -288,13 +288,9 @@ DEFINE_HOOK(0x6A593E, SidebarClass_InitForHouse_AdditionalFiles, 0x5)
 	{
 		sprintf_s(filename, "tab%02dpp.shp", i);
 		if (FileSystem::LoadSHPFile(filename))
-		{
 			SidebarExt::TabProducingProgress[i] = GameCreate<SHPReference>(filename);
-		}
 		else
-		{
 			SidebarExt::TabProducingProgress[i] = nullptr;
-		}
 	}
 
 	return 0;
@@ -455,17 +451,11 @@ DEFINE_HOOK(0x4A25B8, CreditClass_GraphicLogic_Format, 0x6)
 	TextAlign align = config.Credits.Align.Get(TextAlign::Center);
 
 	if (align == TextAlign::Left)
-	{
 		printFlags |= 0;
-	}
 	else if (align == TextAlign::Right)
-	{
 		printFlags |= 1;
-	}
 	else
-	{
 		printFlags |= 8;
-	}
 
 	R->Stack<DWORD>(0x4, printFlags);
 
@@ -493,14 +483,10 @@ DEFINE_HOOK(0x63FB72, PowerClass_DrawIt_Offsets, 0x11)
 	const auto config = SidebarExt::ActiveConfig();
 
 	if (config.PowerBar.Position.isset())
-	{
 		R->EBX(config.PowerBar.Position.Get().X);
-	}
 
 	if (config.PowerBar.Height.isset() && config.PowerBar.Height.Get() > 0)
-	{
 		*reinterpret_cast<DWORD*>(0x00B0B504) = config.PowerBar.Height.Get();
-	}
 
 	DWORD baseOffset = *reinterpret_cast<DWORD*>(0x886F94);
 	R->ECX(baseOffset);
@@ -508,13 +494,9 @@ DEFINE_HOOK(0x63FB72, PowerClass_DrawIt_Offsets, 0x11)
 	R->EAX(R->ESP() + 0x10);
 
 	if (config.PowerBar.Position.isset())
-	{
 		R->ESI(config.PowerBar.Position.Get().Y);
-	}
 	else
-	{
 		R->ESI(baseOffset + 0x45);
-	}
 
 	return 0x63FB83;
 }
@@ -577,9 +559,7 @@ DEFINE_HOOK(0x4E1A84, GadgetClass_DTOR_ClearCurrentOverGadget, 0x6)
 DEFINE_HOOK(0x4AC884, MapClass_SetTogglePowerMode_RequiresBuildings, 0x6)
 {
 	if (!SidebarExt::IsTogglePowerRequiresBuildings())
-	{
 		return 0x4AC894;
-	}
 
 	return 0;
 }
@@ -587,9 +567,7 @@ DEFINE_HOOK(0x4AC884, MapClass_SetTogglePowerMode_RequiresBuildings, 0x6)
 DEFINE_HOOK(0x4AC924, MapClass_SetRepairMode_RequiresBuildings, 0x6)
 {
 	if (!SidebarExt::IsRepairRequiresBuildings())
-	{
 		return 0x4AC934;
-	}
 
 	return 0;
 }
@@ -597,9 +575,7 @@ DEFINE_HOOK(0x4AC924, MapClass_SetRepairMode_RequiresBuildings, 0x6)
 DEFINE_HOOK(0x4AC6C4, MapClass_SetSellMode_RequiresBuildings, 0x6)
 {
 	if (!SidebarExt::IsSellRequiresBuildings())
-	{
 		return 0x4AC6D4;
-	}
 
 	return 0;
 }
