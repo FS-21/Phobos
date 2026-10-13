@@ -66,30 +66,41 @@ void TiberiumExt::AutoDetectRampOverlays()
 
 	if (!imageId.empty())
 	{
-		bool allFound = true;
-		for (int i = 13; i <= 20; ++i)
+		const std::string candidatePrefixes[] = {
+			"TS_" + imageId,
+			"RA2_" + imageId,
+			imageId,
+			"ts_" + imageId,
+			"ra2_" + imageId
+		};
+
+		for (const auto& prefix : candidatePrefixes)
 		{
-			char buf[64];
-			sprintf_s(buf, "%s%d", imageId.c_str(), i);
-			auto pFound = OverlayTypeClass::Find(buf);
-			if (!pFound)
+			bool allFound = true;
+			for (int i = 13; i <= 20; ++i)
 			{
-				allFound = false;
-				break;
+				char buf[64];
+				sprintf_s(buf, "%s%d", prefix.c_str(), i);
+				auto pFound = OverlayTypeClass::Find(buf);
+				if (!pFound)
+				{
+					allFound = false;
+					break;
+				}
+
+				this->RampOverlays[i - 13] = pFound;
 			}
 
-			this->RampOverlays[i - 13] = pFound;
-		}
+			if (allFound)
+			{
+				for (auto pOverlay : this->RampOverlays)
+					pOverlay->Tiberium = true;
 
-		if (allFound)
-		{
-			for (auto pOverlay : this->RampOverlays)
-				pOverlay->Tiberium = true;
+				if (pThis->NumSlopes < 8)
+					pThis->NumSlopes = 8;
 
-			if (pThis->NumSlopes < 8)
-				pThis->NumSlopes = 8;
-
-			return;
+				return;
+			}
 		}
 	}
 
@@ -115,8 +126,14 @@ void TiberiumExt::AutoDetectRampOverlays()
 
 			if (pThis->NumSlopes < 8)
 				pThis->NumSlopes = 8;
+
+			return;
 		}
 	}
+
+	// 3. Ensure NumSlopes is initialized if AllowRamps is enabled
+	if (this->AllowRamps && pThis->NumSlopes < 8)
+		pThis->NumSlopes = 8;
 }
 
 void TiberiumExt::LoadFromINIFile(CCINIClass* const pINI)
@@ -164,7 +181,11 @@ void TiberiumExt::LoadFromINIFile(CCINIClass* const pINI)
 	}
 
 	if (this->AllowRamps)
+	{
 		this->AutoDetectRampOverlays();
+		if (pThis->NumSlopes < 8)
+			pThis->NumSlopes = 8;
+	}
 }
 
 void TiberiumExt::LoadFromStream(PhobosStreamReader& Stm)
