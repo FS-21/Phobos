@@ -233,6 +233,68 @@ DEFINE_HOOK(0x741983, UnitClass_AssignDestination_Carryall, 0x6)
 	return ReturnDefault;
 }
 
+static bool ShouldEmulateBalloonHover(JumpjetLocomotionClass* pJJLoco, TechnoTypeClass* pType)
+{
+	if (pType && pType->BalloonHover)
+		return true;
+
+	if (pJJLoco)
+	{
+		if (auto const pUnit = abstract_cast<UnitClass*, true>(pJJLoco->LinkedTo))
+		{
+			auto const pExt = UnitExt::Fetch(pUnit);
+			if (pExt && (pExt->CarryallCargo || pExt->CarryallState != JumpjetCarryallState::Idle))
+				return true;
+		}
+	}
+
+	return false;
+}
+
+DEFINE_HOOK(0x54B26B, JumpjetLocomotionClass_Move_BalloonHover, 0x6)
+{
+	enum { ReturnNext = 0x54B271 };
+
+	GET(TechnoTypeClass*, pType, ECX);
+	GET(JumpjetLocomotionClass*, pThis, ESI);
+
+	R->AL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
+	return ReturnNext;
+}
+
+DEFINE_HOOK(0x54B3F2, JumpjetLocomotionClass_Process_BalloonHover, 0x6)
+{
+	enum { ReturnNext = 0x54B3F8 };
+
+	GET(TechnoTypeClass*, pType, EAX);
+	GET(JumpjetLocomotionClass*, pThis, ESI);
+
+	R->CL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
+	return ReturnNext;
+}
+
+DEFINE_HOOK(0x54BCEE, JumpjetLocomotionClass_StateAscending_BalloonHover, 0x6)
+{
+	enum { ReturnNext = 0x54BCF4 };
+
+	GET(TechnoTypeClass*, pType, EAX);
+	GET(JumpjetLocomotionClass*, pThis, ESI);
+
+	R->CL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
+	return ReturnNext;
+}
+
+DEFINE_HOOK(0x54BE6D, JumpjetLocomotionClass_StateMove_BalloonHover, 0x6)
+{
+	enum { ReturnNext = 0x54BE73 };
+
+	GET(TechnoTypeClass*, pType, EAX);
+	GET(JumpjetLocomotionClass*, pThis, ESI);
+
+	R->CL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
+	return ReturnNext;
+}
+
 DEFINE_HOOK(0x54C0EB, JumpjetLocomotionClass_StateHovering_BalloonHover, 0x6)
 {
 	enum { ReturnNext = 0x54C0F1 };
@@ -240,19 +302,7 @@ DEFINE_HOOK(0x54C0EB, JumpjetLocomotionClass_StateHovering_BalloonHover, 0x6)
 	GET(TechnoTypeClass*, pType, EAX);
 	GET(JumpjetLocomotionClass*, pThis, ESI);
 
-	bool balloonHover = pType ? pType->BalloonHover : false;
-
-	if (!balloonHover && pThis)
-	{
-		if (auto const pUnit = abstract_cast<UnitClass*, true>(pThis->LinkedTo))
-		{
-			auto const pExt = UnitExt::Fetch(pUnit);
-			if (pExt && (pExt->CarryallCargo || pExt->CarryallState != JumpjetCarryallState::Idle))
-				balloonHover = true;
-		}
-	}
-
-	R->AL(balloonHover ? 1 : 0);
+	R->AL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
 	return ReturnNext;
 }
 
@@ -285,13 +335,13 @@ DEFINE_HOOK(0x73CEEA, UnitClass_DrawIt_Cargo, 0x6)
 	pCargo->Location.Y = pThis->Location.Y;
 	pCargo->Location.Z = cargoZ;
 	pCargo->PrimaryFacing = pThis->PrimaryFacing;
-	pCargo->SecondaryFacing = pThis->SecondaryFacing;
+	pCargo->SecondaryFacing = pThis->PrimaryFacing;
 	pCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
 	pCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
 	pCargo->PitchAngle = pThis->PitchAngle;
 
 	Point2D cargoScreenLoc = *pLocation;
-	cargoScreenLoc.Y += TacticalClass::AdjustForZ(pThis->Location.Z - cargoZ);
+	cargoScreenLoc.Y += TacticalClass::AdjustForZ(pThis->Location.Z - cargoZ) - 10;
 
 	pCargo->DrawIt(&cargoScreenLoc, pBounds);
 

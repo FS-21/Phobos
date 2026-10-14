@@ -592,7 +592,7 @@ void UnitExt::CarryallPickup(UnitClass* pTarget)
 
 	pTarget->Location = pThis->Location;
 	pTarget->PrimaryFacing = pThis->PrimaryFacing;
-	pTarget->SecondaryFacing = pThis->SecondaryFacing;
+	pTarget->SecondaryFacing = pThis->PrimaryFacing;
 	pTarget->AngleRotatedSideways = pThis->AngleRotatedSideways;
 	pTarget->AngleRotatedForwards = pThis->AngleRotatedForwards;
 	pTarget->PitchAngle = pThis->PitchAngle;
@@ -645,6 +645,9 @@ void UnitExt::UpdateCarryall()
 	if (!pJJLoco)
 		return;
 
+	if (pThis->InAir && !pJJLoco->Is_Moving_Now())
+		pThis->WalkedFramesSoFar++;
+
 	const int cruiseHeight = pType->JumpjetHeight > 0 ? pType->JumpjetHeight : 500;
 	const int climbRate = std::max(2, static_cast<int>(pType->JumpjetClimb > 0.0f ? pType->JumpjetClimb : 5.0f));
 	const int descendRate = climbRate;
@@ -681,26 +684,47 @@ void UnitExt::UpdateCarryall()
 		// Move until the carryall is in the exact same cell as the target unit.
 		if (pThis->GetCell() == pTargetCell)
 		{
-			// Arrived in the same cell: halt horizontal movement and hover in the air.
-			pThis->SetDestination(nullptr, false);
-			pJJLoco->Stop_Moving();
-			pJJLoco->CurrentSpeed = 0.0;
-			pJJLoco->IsMoving = false;
-			pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
-
-			// Snap horizontally to center directly above the target unit.
 			const CoordStruct targetPos = pTargetUnit->GetCoords();
-			pThis->Location.X = targetPos.X;
-			pThis->Location.Y = targetPos.Y;
-			pJJLoco->DestinationCoords = pThis->Location;
+			const int dx = targetPos.X - pThis->Location.X;
+			const int dy = targetPos.Y - pThis->Location.Y;
+			const int step = std::max(6, static_cast<int>(pType->Speed));
 
-			// Maintain cruise height in the air.
-			const int targetGroundZ = targetPos.Z;
-			pJJLoco->CurrentHeight = cruiseHeight;
-			pThis->Location.Z = targetGroundZ + cruiseHeight;
+			if (std::abs(dx) <= step && std::abs(dy) <= step)
+			{
+				// Arrived at unit center: halt horizontal movement and hover in the air.
+				pThis->SetDestination(nullptr, false);
+				pJJLoco->Stop_Moving();
+				pJJLoco->CurrentSpeed = 0.0;
+				pJJLoco->IsMoving = false;
+				pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
 
-			this->CarryallAlignTimer = 0;
-			this->CarryallState = JumpjetCarryallState::AligningInAir;
+				pThis->Location.X = targetPos.X;
+				pThis->Location.Y = targetPos.Y;
+				pJJLoco->DestinationCoords = pThis->Location;
+
+				// Maintain cruise height in the air.
+				const int targetGroundZ = targetPos.Z;
+				pJJLoco->CurrentHeight = cruiseHeight;
+				pThis->Location.Z = targetGroundZ + cruiseHeight;
+
+				this->CarryallAlignTimer = 0;
+				this->CarryallState = JumpjetCarryallState::AligningInAir;
+			}
+			else
+			{
+				// Smooth glide within the cell towards targetPos without teleporting.
+				const double dist = std::sqrt(static_cast<double>(dx * dx + dy * dy));
+				if (dist > 0.0)
+				{
+					const double moveDist = std::min(static_cast<double>(step), dist);
+					pThis->Location.X += static_cast<int>(std::round((dx / dist) * moveDist));
+					pThis->Location.Y += static_cast<int>(std::round((dy / dist) * moveDist));
+				}
+
+				pJJLoco->DestinationCoords = targetPos;
+				pJJLoco->CurrentHeight = cruiseHeight;
+				pThis->Location.Z = targetPos.Z + cruiseHeight;
+			}
 		}
 		else
 		{
@@ -866,7 +890,7 @@ void UnitExt::UpdateCarryall()
 		{
 			this->CarryallCargo->Location = pThis->Location;
 			this->CarryallCargo->PrimaryFacing = pThis->PrimaryFacing;
-			this->CarryallCargo->SecondaryFacing = pThis->SecondaryFacing;
+			this->CarryallCargo->SecondaryFacing = pThis->PrimaryFacing;
 			this->CarryallCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
 			this->CarryallCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
 			this->CarryallCargo->PitchAngle = pThis->PitchAngle;
@@ -888,7 +912,7 @@ void UnitExt::UpdateCarryall()
 
 		this->CarryallCargo->Location = pThis->Location;
 		this->CarryallCargo->PrimaryFacing = pThis->PrimaryFacing;
-		this->CarryallCargo->SecondaryFacing = pThis->SecondaryFacing;
+		this->CarryallCargo->SecondaryFacing = pThis->PrimaryFacing;
 		this->CarryallCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
 		this->CarryallCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
 		this->CarryallCargo->PitchAngle = pThis->PitchAngle;
@@ -926,7 +950,7 @@ void UnitExt::UpdateCarryall()
 
 		this->CarryallCargo->Location = pThis->Location;
 		this->CarryallCargo->PrimaryFacing = pThis->PrimaryFacing;
-		this->CarryallCargo->SecondaryFacing = pThis->SecondaryFacing;
+		this->CarryallCargo->SecondaryFacing = pThis->PrimaryFacing;
 		this->CarryallCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
 		this->CarryallCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
 		this->CarryallCargo->PitchAngle = pThis->PitchAngle;
