@@ -31,6 +31,11 @@ void UnitExt::Serialize(T& Stm)
 		.Process(this->SimpleDeployerAnimationTimer)
 		.Process(this->ExtraTurretRecoil)
 		.Process(this->ExtraBarrelRecoil)
+		.Process(this->CarryallState)
+		.Process(this->CarryallCargo)
+		.Process(this->CarryallTarget)
+		.Process(this->CarryallDropOnArrival)
+		.Process(this->CarryallAlignTimer)
 		;
 }
 
@@ -488,6 +493,502 @@ void UnitExt::UpdateRecoilData()
 		data.Update();
 }
 
+bool UnitExt::CanCargoLandOnCell(UnitClass* pCargo, CellClass* pCell)
+{
+	if (!pCargo || !pCell)
+		return false;
+
+	auto const pCargoType = pCargo->Type;
+	if (!pCargoType)
+		return false;
+
+	if (pCell->GetContent() != nullptr)
+		return false;
+
+	const bool isWater = (pCell->LandType == LandType::Water);
+	const bool onBridge = pCell->ContainsBridge();
+	const bool isNavalOrWater = pCargoType->Naval
+		|| pCargoType->MovementZone == MovementZone::Water
+		|| pCargoType->SpeedType == SpeedType::Float;
+
+	if (isNavalOrWater && !isWater && pCell->LandType != LandType::Beach)
+	{
+		if (pCargoType->MovementZone == MovementZone::Water || pCargoType->SpeedType == SpeedType::Float)
+			return false;
+	}
+
+	if (!isNavalOrWater && isWater && !onBridge)
+	{
+		if (pCargoType->SpeedType != SpeedType::Hover && pCargoType->SpeedType != SpeedType::Amphibious)
+			return false;
+	}
+
+	if (pCargoType->SpeedType != SpeedType::None && pCargoType->MovementZone != MovementZone::None)
+	{
+		if (!pCell->IsClearToMove(pCargoType->SpeedType, true, true, -1, pCargoType->MovementZone, -1, onBridge))
+			return false;
+	}
+
+	return true;
+}
+
+bool UnitExt::CarryallCanLift(TechnoClass* pTarget) const
+{
+	if (!pTarget || !pTarget->IsAlive || pTarget->InLimbo)
+		return false;
+
+	auto const pThis = this->OwnerObject();
+	if (!pThis || pThis == pTarget)
+		return false;
+
+	if (this->CarryallCargo != nullptr)
+		return false;
+
+	if (pTarget->WhatAmI() != AbstractType::Unit)
+		return false;
+
+	auto const pTargetUnit = static_cast<UnitClass*>(pTarget);
+
+	if (pTargetUnit->IsInAir() || pTargetUnit->GetHeight() > 0)
+		return false;
+
+	if (pTargetUnit->Transporter || pTargetUnit->IsOnCarryall)
+		return false;
+
+	if (!pThis->Owner->IsAlliedWith(pTargetUnit->Owner))
+		return false;
+
+	auto const pTargetTypeExt = TechnoTypeExt::Fetch(pTargetUnit->Type);
+	if (!pTargetTypeExt->Carryall_Allowed.Get())
+		return false;
+
+	auto const pCarrierTypeExt = this->GetTypeExtData();
+	if (pCarrierTypeExt->Carryall_SizeLimit.isset() && static_cast<int>(pTargetUnit->GetTechnoType()->Size) > pCarrierTypeExt->Carryall_SizeLimit.Get())
+		return false;
+
+	return true;
+}
+
+bool UnitExt::CarryallCanDropAt(CellClass* pCell) const
+{
+	if (!this->CarryallCargo || !pCell)
+		return false;
+
+	return CanCargoLandOnCell(this->CarryallCargo, pCell);
+}
+
+void UnitExt::CarryallPickup(UnitClass* pTarget)
+{
+	auto const pThis = this->OwnerObject();
+	if (!pThis || !pTarget)
+		return;
+
+	if (pTarget->IsSelected)
+		pTarget->Deselect();
+
+	pTarget->Limbo();
+	pTarget->IsOnCarryall = true;
+	this->CarryallCargo = pTarget;
+
+	pTarget->Location = pThis->Location;
+	pTarget->PrimaryFacing = pThis->PrimaryFacing;
+	pTarget->SecondaryFacing = pThis->SecondaryFacing;
+	pTarget->AngleRotatedSideways = pThis->AngleRotatedSideways;
+	pTarget->AngleRotatedForwards = pThis->AngleRotatedForwards;
+	pTarget->PitchAngle = pThis->PitchAngle;
+
+	pTarget->SetDestination(nullptr, true);
+	pTarget->QueueMission(Mission::Guard, true);
+}
+
+void UnitExt::CarryallDeployDrop()
+{
+	auto const pThis = this->OwnerObject();
+	if (!pThis || !this->CarryallCargo)
+		return;
+
+	auto const pCargo = this->CarryallCargo;
+	auto const pCell = pThis->GetCell();
+	const CoordStruct dropCoords = pCell->GetCoordsWithBridge();
+	const DirType facing = pThis->PrimaryFacing.Current().GetDir();
+
+	pCargo->IsOnCarryall = false;
+	this->CarryallCargo = nullptr;
+
+	pCargo->AngleRotatedSideways = 0.0f;
+	pCargo->AngleRotatedForwards = 0.0f;
+	pCargo->PitchAngle = 0.0f;
+
+	pCargo->Unlimbo(dropCoords, facing);
+	pCargo->SetLocation(dropCoords);
+	pCargo->InAir = false;
+
+	if (auto const pLoco = pCargo->Locomotor)
+		pLoco->Mark_All_Occupation_Bits(MarkType::Down);
+
+	pCargo->QueueMission(Mission::Guard, true);
+}
+
+void UnitExt::UpdateCarryall()
+{
+	auto const pThis = this->OwnerObject();
+	if (!pThis || !pThis->IsAlive || pThis->InLimbo)
+		return;
+
+	auto const pType = pThis->Type;
+	auto const pTypeExt = this->GetTypeExtData();
+
+	if (!pTypeExt->Carryall && this->CarryallState == JumpjetCarryallState::Idle && !this->CarryallCargo)
+		return;
+
+	auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor);
+	if (!pJJLoco)
+		return;
+
+	const int cruiseHeight = pType->JumpjetHeight > 0 ? pType->JumpjetHeight : 500;
+	const int climbRate = std::max(2, static_cast<int>(pType->JumpjetClimb > 0.0f ? pType->JumpjetClimb : 5.0f));
+	const int descendRate = climbRate;
+
+	switch (this->CarryallState)
+	{
+	case JumpjetCarryallState::Idle:
+	{
+		if (this->CarryallCargo)
+			this->CarryallState = JumpjetCarryallState::Carrying;
+
+		break;
+	}
+
+	case JumpjetCarryallState::MovingToPickup:
+	{
+		pThis->InAir = true;
+
+		auto const pTargetUnit = abstract_cast<UnitClass*>(this->CarryallTarget);
+		if (!pTargetUnit || !pTargetUnit->IsAlive || pTargetUnit->InLimbo || !this->CarryallCanLift(pTargetUnit))
+		{
+			this->CarryallTarget = nullptr;
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::Idle;
+			pThis->SetDestination(nullptr, false);
+			pThis->QueueMission(Mission::Guard, true);
+			break;
+		}
+
+		auto const pTargetCell = pTargetUnit->GetCell();
+		if (!pTargetCell)
+			break;
+
+		// Move until the carryall is in the exact same cell as the target unit.
+		if (pThis->GetCell() == pTargetCell)
+		{
+			// Arrived in the same cell: halt horizontal movement and hover in the air.
+			pThis->SetDestination(nullptr, false);
+			pJJLoco->Stop_Moving();
+			pJJLoco->CurrentSpeed = 0.0;
+			pJJLoco->IsMoving = false;
+			pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
+
+			// Snap horizontally to center directly above the target unit.
+			const CoordStruct targetPos = pTargetUnit->GetCoords();
+			pThis->Location.X = targetPos.X;
+			pThis->Location.Y = targetPos.Y;
+			pJJLoco->DestinationCoords = pThis->Location;
+
+			// Maintain cruise height in the air.
+			const int targetGroundZ = targetPos.Z;
+			pJJLoco->CurrentHeight = cruiseHeight;
+			pThis->Location.Z = targetGroundZ + cruiseHeight;
+
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::AligningInAir;
+		}
+		else
+		{
+			this->CarryallAlignTimer = 0;
+
+			if (pThis->Destination != pTargetCell)
+				pThis->SetDestination(pTargetCell, false);
+
+			pJJLoco->DestinationCoords = pTargetCell->GetCoords();
+		}
+		break;
+	}
+
+	case JumpjetCarryallState::AligningInAir:
+	{
+		pThis->InAir = true;
+
+		auto const pTargetUnit = abstract_cast<UnitClass*>(this->CarryallTarget);
+		if (!pTargetUnit || !pTargetUnit->IsAlive || pTargetUnit->InLimbo || !this->CarryallCanLift(pTargetUnit))
+		{
+			this->CarryallTarget = nullptr;
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::Idle;
+			pThis->SetDestination(nullptr, false);
+			pThis->QueueMission(Mission::Guard, true);
+			break;
+		}
+
+		if (pThis->GetCurrentMission() == Mission::Attack)
+		{
+			this->CarryallTarget = nullptr;
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::Idle;
+			break;
+		}
+
+		// If the target moved to a different cell while aligning, resume chasing it.
+		if (pThis->GetCell() != pTargetUnit->GetCell())
+		{
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::MovingToPickup;
+			break;
+		}
+
+		// Stay stationary in the air centered directly above the target unit.
+		const CoordStruct targetPos = pTargetUnit->GetCoords();
+		pThis->Location.X = targetPos.X;
+		pThis->Location.Y = targetPos.Y;
+		pJJLoco->DestinationCoords = pThis->Location;
+		pJJLoco->CurrentSpeed = 0.0;
+		pJJLoco->IsMoving = false;
+		pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
+
+		const int targetGroundZ = targetPos.Z;
+		pJJLoco->CurrentHeight = cruiseHeight;
+		pThis->Location.Z = targetGroundZ + cruiseHeight;
+
+		// Smoothly rotate to match the target unit's facing while hovering in place.
+		const DirStruct targetFacing = pTargetUnit->PrimaryFacing.Current();
+		pThis->PrimaryFacing.SetDesired(targetFacing);
+		pJJLoco->LocomotionFacing.SetDesired(targetFacing);
+
+		const bool facingAligned = (pThis->PrimaryFacing.Current() == targetFacing || !pJJLoco->LocomotionFacing.IsRotating());
+		this->CarryallAlignTimer++;
+
+		if (facingAligned || this->CarryallAlignTimer >= 60)
+		{
+			pThis->PrimaryFacing.SetCurrent(targetFacing);
+			pJJLoco->LocomotionFacing.SetCurrent(targetFacing);
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::DescendingToPickup;
+		}
+		break;
+	}
+
+	case JumpjetCarryallState::DescendingToPickup:
+	{
+		pThis->InAir = true;
+
+		auto const pTargetUnit = abstract_cast<UnitClass*>(this->CarryallTarget);
+		if (!pTargetUnit || !pTargetUnit->IsAlive || pTargetUnit->InLimbo || !this->CarryallCanLift(pTargetUnit))
+		{
+			this->CarryallTarget = nullptr;
+			this->CarryallState = JumpjetCarryallState::AscendingAfterDrop;
+			break;
+		}
+
+		if (pThis->GetCurrentMission() == Mission::Attack)
+		{
+			this->CarryallTarget = nullptr;
+			this->CarryallState = JumpjetCarryallState::AscendingAfterDrop;
+			break;
+		}
+
+		// If the target moved to a different cell while descending, chase it again.
+		if (pThis->GetCell() != pTargetUnit->GetCell())
+		{
+			this->CarryallState = JumpjetCarryallState::MovingToPickup;
+			break;
+		}
+
+		// Keep centered and facing the target unit without changing cells.
+		const CoordStruct targetPos = pTargetUnit->GetCoords();
+		pThis->Location.X = targetPos.X;
+		pThis->Location.Y = targetPos.Y;
+		pJJLoco->DestinationCoords = pThis->Location;
+		pJJLoco->CurrentSpeed = 0.0;
+		pJJLoco->IsMoving = false;
+		pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
+
+		const DirStruct targetFacing = pTargetUnit->PrimaryFacing.Current();
+		pThis->PrimaryFacing.SetCurrent(targetFacing);
+		pJJLoco->LocomotionFacing.SetCurrent(targetFacing);
+
+		const int targetGroundZ = targetPos.Z;
+
+		if (pJJLoco->CurrentHeight > 32)
+		{
+			pJJLoco->CurrentHeight = std::max(32, pJJLoco->CurrentHeight - descendRate);
+			pThis->Location.Z = targetGroundZ + pJJLoco->CurrentHeight;
+			pJJLoco->DestinationCoords = pThis->Location;
+		}
+
+		if (pJJLoco->CurrentHeight <= 32)
+		{
+			this->CarryallPickup(pTargetUnit);
+			this->CarryallTarget = nullptr;
+			this->CarryallState = JumpjetCarryallState::AscendingWithCargo;
+			pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
+		}
+		break;
+	}
+
+	case JumpjetCarryallState::AscendingWithCargo:
+	{
+		pThis->InAir = true;
+		pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
+		FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
+
+		pJJLoco->CurrentSpeed = 0.0;
+		pJJLoco->IsMoving = false;
+
+		auto const pCell = pThis->GetCell();
+		const int targetGroundZ = pCell ? pCell->GetCoordsWithBridge().Z : pThis->Location.Z;
+
+		if (pJJLoco->CurrentHeight < cruiseHeight)
+		{
+			pJJLoco->CurrentHeight = std::min(cruiseHeight, pJJLoco->CurrentHeight + climbRate);
+			pThis->Location.Z = targetGroundZ + pJJLoco->CurrentHeight;
+			pJJLoco->DestinationCoords = pThis->Location;
+		}
+		else
+		{
+			pJJLoco->CurrentHeight = cruiseHeight;
+			pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
+			this->CarryallState = JumpjetCarryallState::Carrying;
+			pThis->QueueMission(Mission::Guard, true);
+		}
+
+		if (this->CarryallCargo && this->CarryallCargo->IsAlive)
+		{
+			this->CarryallCargo->Location = pThis->Location;
+			this->CarryallCargo->PrimaryFacing = pThis->PrimaryFacing;
+			this->CarryallCargo->SecondaryFacing = pThis->SecondaryFacing;
+			this->CarryallCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
+			this->CarryallCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
+			this->CarryallCargo->PitchAngle = pThis->PitchAngle;
+		}
+		break;
+	}
+
+	case JumpjetCarryallState::Carrying:
+	{
+		pThis->InAir = true;
+
+		if (!this->CarryallCargo || !this->CarryallCargo->IsAlive)
+		{
+			this->CarryallCargo = nullptr;
+			this->CarryallState = JumpjetCarryallState::Idle;
+			this->CarryallDropOnArrival = false;
+			break;
+		}
+
+		this->CarryallCargo->Location = pThis->Location;
+		this->CarryallCargo->PrimaryFacing = pThis->PrimaryFacing;
+		this->CarryallCargo->SecondaryFacing = pThis->SecondaryFacing;
+		this->CarryallCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
+		this->CarryallCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
+		this->CarryallCargo->PitchAngle = pThis->PitchAngle;
+		break;
+	}
+
+	case JumpjetCarryallState::DescendingToDrop:
+	{
+		pThis->InAir = true;
+
+		if (!this->CarryallCargo || !this->CarryallCargo->IsAlive)
+		{
+			this->CarryallCargo = nullptr;
+			this->CarryallState = JumpjetCarryallState::AscendingAfterDrop;
+			break;
+		}
+
+		if (pThis->GetCurrentMission() == Mission::Attack)
+		{
+			this->CarryallState = JumpjetCarryallState::AscendingWithCargo;
+			break;
+		}
+
+		pThis->SetDestination(nullptr, false);
+		pJJLoco->Stop_Moving();
+		pJJLoco->CurrentSpeed = 0.0;
+		pJJLoco->IsMoving = false;
+		pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
+
+		auto const pCell = pThis->GetCell();
+		const CoordStruct dropCoords = pCell ? pCell->GetCoordsWithBridge() : pThis->Location;
+		pThis->Location.X = dropCoords.X;
+		pThis->Location.Y = dropCoords.Y;
+		pJJLoco->DestinationCoords = pThis->Location;
+
+		this->CarryallCargo->Location = pThis->Location;
+		this->CarryallCargo->PrimaryFacing = pThis->PrimaryFacing;
+		this->CarryallCargo->SecondaryFacing = pThis->SecondaryFacing;
+		this->CarryallCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
+		this->CarryallCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
+		this->CarryallCargo->PitchAngle = pThis->PitchAngle;
+
+		const int targetGroundZ = dropCoords.Z;
+
+		if (pJJLoco->CurrentHeight > 32)
+		{
+			pJJLoco->CurrentHeight = std::max(32, pJJLoco->CurrentHeight - descendRate);
+			pThis->Location.Z = targetGroundZ + pJJLoco->CurrentHeight;
+			pJJLoco->DestinationCoords = pThis->Location;
+		}
+
+		if (pJJLoco->CurrentHeight <= 32)
+		{
+			this->CarryallDeployDrop();
+			this->CarryallState = JumpjetCarryallState::AscendingAfterDrop;
+			pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
+		}
+		break;
+	}
+
+	case JumpjetCarryallState::AscendingAfterDrop:
+	{
+		pThis->InAir = true;
+		pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
+		FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
+
+		pJJLoco->CurrentSpeed = 0.0;
+		pJJLoco->IsMoving = false;
+
+		auto const pCell = pThis->GetCell();
+		const CoordStruct dropCoords = pCell ? pCell->GetCoordsWithBridge() : pThis->Location;
+		pThis->Location.X = dropCoords.X;
+		pThis->Location.Y = dropCoords.Y;
+		pJJLoco->DestinationCoords = pThis->Location;
+
+		const int targetGroundZ = dropCoords.Z;
+
+		if (pJJLoco->CurrentHeight < cruiseHeight)
+		{
+			pJJLoco->CurrentHeight = std::min(cruiseHeight, pJJLoco->CurrentHeight + climbRate);
+			pThis->Location.Z = targetGroundZ + pJJLoco->CurrentHeight;
+			pJJLoco->DestinationCoords = pThis->Location;
+		}
+		else
+		{
+			pJJLoco->CurrentHeight = cruiseHeight;
+			pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
+			this->CarryallState = JumpjetCarryallState::Idle;
+			pThis->QueueMission(Mission::Guard, true);
+
+			if (!pType->BalloonHover)
+				pThis->Scatter(CoordStruct::Empty, true, false);
+		}
+		break;
+	}
+	}
+}
+
 void UnitExt::LoadFromStream(PhobosStreamReader& Stm)
 {
 	FootExt::LoadFromStream(Stm);
@@ -524,6 +1025,18 @@ DEFINE_HOOK_AGAIN(0x7359DA, UnitClass_DTOR, 0x9)
 DEFINE_HOOK(0x735967, UnitClass_DTOR, 0x9)
 {
 	GET(UnitClass*, pItem, ESI);
+
+	if (auto const pExt = UnitExt::Fetch(pItem))
+	{
+		if (pExt->CarryallCargo && pExt->CarryallCargo->IsAlive)
+		{
+			auto const pCargo = pExt->CarryallCargo;
+			pCargo->IsOnCarryall = false;
+			pExt->CarryallCargo = nullptr;
+			int damage = pCargo->Health;
+			pCargo->ReceiveDamage(&damage, 0, RulesClass::Instance->C4Warhead, nullptr, true, false, nullptr);
+		}
+	}
 
 	UnitExt::ExtMap.Remove(pItem);
 

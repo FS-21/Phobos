@@ -4,6 +4,18 @@
 #include <Ext/UnitType/Body.h>
 #include <UnitClass.h>
 
+enum class JumpjetCarryallState : unsigned char
+{
+	Idle = 0,
+	MovingToPickup,
+	AligningInAir,
+	DescendingToPickup,
+	AscendingWithCargo,
+	Carrying,
+	DescendingToDrop,
+	AscendingAfterDrop
+};
+
 // Concrete leaf extension for UnitClass. Empty for now: all techno-level data lives
 // in TechnoExt; this leaf only exists so a unit's extension has its own
 // concrete type (TechnoExt itself is never instantiated).
@@ -24,6 +36,12 @@ public:
 	std::vector<RecoilData> ExtraTurretRecoil;
 	std::vector<RecoilData> ExtraBarrelRecoil;
 
+	JumpjetCarryallState CarryallState;
+	UnitClass* CarryallCargo;
+	AbstractClass* CarryallTarget;
+	bool CarryallDropOnArrival;
+	int CarryallAlignTimer;
+
 	explicit UnitExt(UnitClass* const OwnerObject) : FootExt(OwnerObject)
 		, SubterraneanHarvStatus { 0 }
 		, SubterraneanHarvRallyPoint { nullptr }
@@ -33,6 +51,11 @@ public:
 		, SimpleDeployerAnimationTimer {}
 		, ExtraTurretRecoil {}
 		, ExtraBarrelRecoil {}
+		, CarryallState { JumpjetCarryallState::Idle }
+		, CarryallCargo { nullptr }
+		, CarryallTarget { nullptr }
+		, CarryallDropOnArrival { false }
+		, CarryallAlignTimer { 0 }
 	{ }
 
 	virtual ~UnitExt() override;
@@ -43,6 +66,12 @@ public:
 	void InitializeRecoilData();
 	void UpdateRecoilData();
 	void RecordRecoilData();
+	void UpdateCarryall();
+	bool CarryallCanLift(TechnoClass* pTarget) const;
+	bool CarryallCanDropAt(CellClass* pCell) const;
+	static bool CanCargoLandOnCell(UnitClass* pCargo, CellClass* pCell);
+	void CarryallPickup(UnitClass* pTarget);
+	void CarryallDeployDrop();
 
 	static UnitClass* Deployer;
 
