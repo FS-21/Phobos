@@ -178,7 +178,7 @@ DEFINE_HOOK(0x741983, UnitClass_AssignDestination_Carryall, 0x6)
 	{
 		if (pExt->CarryallCargo)
 		{
-			if (pExt->CarryallCanDropAt(pThis->GetCell()))
+			if (pExt->CarryallState == JumpjetCarryallState::Carrying && pExt->CarryallCanDropAt(pThis->GetCell()))
 			{
 				pExt->CarryallState = JumpjetCarryallState::DescendingToDrop;
 				pThis->QueueMission(Mission::Guard, true);

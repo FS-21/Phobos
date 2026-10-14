@@ -1486,9 +1486,15 @@ DEFINE_HOOK(0x7010C1, TechnoClass_CanShowDeployCursor_UnitsAndAircraft, 0x5)
 			auto const pTypeExt = TechnoTypeExt::Fetch(pUnit->Type);
 			if (pTypeExt && pTypeExt->Carryall)
 			{
-				if (pExt->CarryallState != JumpjetCarryallState::Carrying
-					|| !pExt->CarryallCargo
-					|| !pExt->CarryallCanDropAt(pUnit->GetCell()))
+				if (pExt->CarryallCargo)
+				{
+					if (pExt->CarryallState != JumpjetCarryallState::Carrying
+						|| !pExt->CarryallCanDropAt(pUnit->GetCell()))
+					{
+						return DoNotAllowDeploy;
+					}
+				}
+				else if (pExt->CarryallState != JumpjetCarryallState::Idle)
 				{
 					return DoNotAllowDeploy;
 				}

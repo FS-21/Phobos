@@ -784,6 +784,9 @@ void UnitExt::UpdateCarryall()
 		{
 			pThis->PrimaryFacing.SetCurrent(targetFacing);
 			pJJLoco->LocomotionFacing.SetCurrent(targetFacing);
+			if (!pThis->Type->Turret)
+				pThis->SecondaryFacing.SetCurrent(targetFacing);
+
 			this->CarryallAlignTimer = 0;
 			this->CarryallState = JumpjetCarryallState::DescendingToPickup;
 		}
@@ -797,6 +800,8 @@ void UnitExt::UpdateCarryall()
 			const DirStruct newFacing { curRaw };
 			pThis->PrimaryFacing.SetCurrent(newFacing);
 			pJJLoco->LocomotionFacing.SetCurrent(newFacing);
+			if (!pThis->Type->Turret)
+				pThis->SecondaryFacing.SetCurrent(newFacing);
 		}
 		break;
 	}
@@ -847,6 +852,8 @@ void UnitExt::UpdateCarryall()
 		{
 			pThis->PrimaryFacing.SetCurrent(targetFacing);
 			pJJLoco->LocomotionFacing.SetCurrent(targetFacing);
+			if (!pThis->Type->Turret)
+				pThis->SecondaryFacing.SetCurrent(targetFacing);
 		}
 		else
 		{
@@ -858,6 +865,8 @@ void UnitExt::UpdateCarryall()
 			const DirStruct newFacing { curRaw };
 			pThis->PrimaryFacing.SetCurrent(newFacing);
 			pJJLoco->LocomotionFacing.SetCurrent(newFacing);
+			if (!pThis->Type->Turret)
+				pThis->SecondaryFacing.SetCurrent(newFacing);
 		}
 
 		const int targetGroundZ = targetPos.Z;
