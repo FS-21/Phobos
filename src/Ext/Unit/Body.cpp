@@ -14,6 +14,13 @@ UnitExt::~UnitExt()
 {
 	if (this->UndergroundTracked)
 		ScenarioExt::Global()->UndergroundTracker.Remove(this->OwnerObject());
+
+	if (this->CarryallCargo)
+	{
+		this->CarryallCargo->Transporter = nullptr;
+		this->CarryallCargo->IsOnCarryall = false;
+		this->CarryallCargo = nullptr;
+	}
 }
 
 // =============================
@@ -588,6 +595,7 @@ void UnitExt::CarryallPickup(UnitClass* pTarget)
 
 	pTarget->Limbo();
 	pTarget->IsOnCarryall = true;
+	pTarget->Transporter = pThis;
 	this->CarryallCargo = pTarget;
 
 	pTarget->Location = pThis->Location;
@@ -613,6 +621,7 @@ void UnitExt::CarryallDeployDrop()
 	const DirType facing = pThis->PrimaryFacing.Current().GetDir();
 
 	pCargo->IsOnCarryall = false;
+	pCargo->Transporter = nullptr;
 	this->CarryallCargo = nullptr;
 
 	pCargo->AngleRotatedSideways = 0.0f;
@@ -763,20 +772,31 @@ void UnitExt::UpdateCarryall()
 		const int targetGroundZ = targetPos.Z;
 		pThis->Location.Z = targetGroundZ + pJJLoco->CurrentHeight;
 
-		// Smoothly rotate to match the target unit's facing while hovering in place.
+		// Smoothly rotate to match the target unit's facing using the jumpjet unit's rotation rate.
 		const DirStruct targetFacing = pTargetUnit->PrimaryFacing.Current();
-		pThis->PrimaryFacing.SetDesired(targetFacing);
-		pJJLoco->LocomotionFacing.SetDesired(targetFacing);
+		const int turnRate = pJJLoco->TurnRate > 0 ? pJJLoco->TurnRate : pThis->Type->ROT;
+		const int step = std::max(1, turnRate) * 256;
 
-		const bool facingAligned = (pThis->PrimaryFacing.Current() == targetFacing || !pJJLoco->LocomotionFacing.IsRotating());
-		this->CarryallAlignTimer++;
+		unsigned short curRaw = pThis->PrimaryFacing.Current().Raw;
+		const short diff = static_cast<short>(targetFacing.Raw - curRaw);
 
-		if (facingAligned || this->CarryallAlignTimer >= 60)
+		if (std::abs(diff) <= step)
 		{
 			pThis->PrimaryFacing.SetCurrent(targetFacing);
 			pJJLoco->LocomotionFacing.SetCurrent(targetFacing);
 			this->CarryallAlignTimer = 0;
 			this->CarryallState = JumpjetCarryallState::DescendingToPickup;
+		}
+		else
+		{
+			if (diff > 0)
+				curRaw += static_cast<unsigned short>(step);
+			else
+				curRaw -= static_cast<unsigned short>(step);
+
+			const DirStruct newFacing { curRaw };
+			pThis->PrimaryFacing.SetCurrent(newFacing);
+			pJJLoco->LocomotionFacing.SetCurrent(newFacing);
 		}
 		break;
 	}
@@ -817,8 +837,28 @@ void UnitExt::UpdateCarryall()
 		pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
 
 		const DirStruct targetFacing = pTargetUnit->PrimaryFacing.Current();
-		pThis->PrimaryFacing.SetCurrent(targetFacing);
-		pJJLoco->LocomotionFacing.SetCurrent(targetFacing);
+		const int turnRate = pJJLoco->TurnRate > 0 ? pJJLoco->TurnRate : pThis->Type->ROT;
+		const int step = std::max(1, turnRate) * 256;
+
+		unsigned short curRaw = pThis->PrimaryFacing.Current().Raw;
+		const short diff = static_cast<short>(targetFacing.Raw - curRaw);
+
+		if (std::abs(diff) <= step)
+		{
+			pThis->PrimaryFacing.SetCurrent(targetFacing);
+			pJJLoco->LocomotionFacing.SetCurrent(targetFacing);
+		}
+		else
+		{
+			if (diff > 0)
+				curRaw += static_cast<unsigned short>(step);
+			else
+				curRaw -= static_cast<unsigned short>(step);
+
+			const DirStruct newFacing { curRaw };
+			pThis->PrimaryFacing.SetCurrent(newFacing);
+			pJJLoco->LocomotionFacing.SetCurrent(newFacing);
+		}
 
 		const int targetGroundZ = targetPos.Z;
 

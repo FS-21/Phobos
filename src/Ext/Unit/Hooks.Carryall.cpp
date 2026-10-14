@@ -27,8 +27,7 @@ DEFINE_HOOK(0x73FD67, UnitClass_WhatAction_Carryall, 0x5)
 	{
 		if (pExt->CarryallCargo)
 		{
-			auto const pCell = pThis->GetCell();
-			if (pExt->CarryallCanDropAt(pCell))
+			if (pExt->CarryallState == JumpjetCarryallState::Carrying && pExt->CarryallCanDropAt(pThis->GetCell()))
 			{
 				R->EAX(static_cast<int>(Action::Self_Deploy));
 				return ReturnAction;
@@ -106,7 +105,8 @@ DEFINE_HOOK(0x700D5D, TechnoClass_CanDeploy_Carryall, 0x5)
 
 	if (pExt->CarryallCargo)
 	{
-		const bool canDrop = pExt->CarryallCanDropAt(pUnit->GetCell());
+		const bool canDrop = (pExt->CarryallState == JumpjetCarryallState::Carrying)
+			&& pExt->CarryallCanDropAt(pUnit->GetCell());
 		R->AL(canDrop ? 1 : 0);
 		return ReturnValue;
 	}
@@ -139,7 +139,7 @@ DEFINE_HOOK(0x7393C9, UnitClass_TryToDeploy_Carryall, 0x9)
 
 	if (pExt->CarryallCargo)
 	{
-		if (pExt->CarryallCanDropAt(pThis->GetCell()))
+		if (pExt->CarryallState == JumpjetCarryallState::Carrying && pExt->CarryallCanDropAt(pThis->GetCell()))
 		{
 			pExt->CarryallState = JumpjetCarryallState::DescendingToDrop;
 			pThis->QueueMission(Mission::Guard, true);
@@ -347,6 +347,8 @@ DEFINE_HOOK(0x73CEEA, UnitClass_DrawIt_Cargo, 0x6)
 	pCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
 	pCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
 	pCargo->PitchAngle = pThis->PitchAngle;
+	pCargo->IsOnCarryall = true;
+	pCargo->Transporter = pThis;
 
 	Point2D cargoScreenLoc = *pLocation;
 	cargoScreenLoc.Y += TacticalClass::AdjustForZ(pThis->Location.Z - cargoZ) - 10;

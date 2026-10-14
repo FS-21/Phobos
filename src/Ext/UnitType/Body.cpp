@@ -85,6 +85,7 @@ void UnitTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->Deploy_NoPassenger.Read(exINI, pSection, "Deploy.NoPassenger");
 	this->Deploy_NoTiberium.Read(exINI, pSection, "Deploy.NoTiberium");
 	this->HoverDrownable.Read(exINI, pSection, "HoverDrownable");
+	this->VoicePickup.Read(exINI, pSection, "VoicePickup");
 
 	const auto pArtINI = &CCINIClass::INI_Art;
 	INI_EX exArtINI(pArtINI);
@@ -196,6 +197,7 @@ void UnitTypeExt::Serialize(T& Stm)
 		.Process(this->ExtraTurretCount)
 		.Process(this->ExtraTurretOffsets)
 		.Process(this->BurstPerTurret)
+		.Process(this->VoicePickup)
 		;
 }
 

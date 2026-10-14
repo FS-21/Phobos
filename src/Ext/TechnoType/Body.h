@@ -542,6 +542,11 @@ public:
 	Nullable<bool> Unsellable;
 	Nullable<bool> KeepAlive;
 
+	Valueable<bool> Carryall;
+	Nullable<int> Carryall_SizeLimit;
+	Valueable<bool> Carryall_Allowed;
+	Valueable<double> Carryall_SpeedMultiplier;
+
 	TechnoTypeExt(TechnoTypeClass* OwnerObject) : ObjectTypeExt(OwnerObject)
 		, Array {}
 
@@ -967,6 +972,11 @@ public:
 		// Ares 3.0
 		, Unsellable {}
 		, KeepAlive {}
+
+		, Carryall { false }
+		, Carryall_SizeLimit {}
+		, Carryall_Allowed { true }
+		, Carryall_SpeedMultiplier { 1.0 }
 	{ }
 
 	virtual ~TechnoTypeExt() = default;

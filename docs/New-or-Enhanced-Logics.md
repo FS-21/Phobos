@@ -2941,7 +2941,35 @@ FireUp=                         ; integer
 FireUp.ResetInRetarget=true     ; boolean
 ```
 
+### Carryall for Jumpjets
+
+- Jumpjet vehicles (`UnitClass` using `JumpjetLocomotionClass`) can now function as Carryalls, lifting and transporting friendly vehicles across the battlefield.
+- Carryalls can pick up eligible friendly vehicles on command. Hovering the cursor over an eligible friendly unit displays the `Enter` action.
+- `Carryall` specifies whether the unit can act as a Carryall.
+- `Carryall.SizeLimit` determines the maximum cargo size the unit can lift. If not set, any size vehicle can be carried.
+- `Carryall.Allowed` determines whether a vehicle is eligible to be carried by Carryalls.
+- `Carryall.SpeedMultiplier` specifies a speed multiplier applied to the carrier while slinging cargo. Supported for both Jumpjets and native `AircraftClass` carryalls.
+- `VoicePickup` defines the voice line played when a Carryall is ordered to pick up a unit.
+- For hovering jumpjets (`BalloonHover=yes`, such as Kirovs, Zeppelins, or flying platforms):
+  - Normal movement orders fly to the destination and remain hovering without dropping cargo.
+  - Deploying (pressing 'D' or left-clicking self) drops off the slung vehicle if the terrain underneath is clear and passable for that unit's speed type. If the cell is blocked or impassable, deploying is prevented and hovering the cursor over self shows the `NoDeploy` cursor.
+- For landing jumpjets (`BalloonHover=no`) and native `AircraftClass` carryalls:
+  - When ordered to move or drop cargo, the landing zone search ensures the carrier only lands on clear, passable terrain suitable for the carried vehicle (avoiding water, cliffs, and obstacles).
+
+In `rulesmd.ini`:
+```ini
+[SOMETECHNO]                                         ; TechnoType
+Carryall=false                                       ; boolean
+Carryall.SizeLimit=                                  ; integer
+Carryall.Allowed=true                                ; boolean
+Carryall.SpeedMultiplier=1.0                         ; floating point
+
+[SOMEVEHICLE]                                        ; VehicleType
+VoicePickup=                                         ; Sound
+```
+
 ## Warheads
+
 
 ```{hint}
 All new Warhead effects

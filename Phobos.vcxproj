@@ -53,6 +53,7 @@
     <!-- src\Ext\Aircraft -->
     <ClCompile Include="src\Ext\Aircraft\Body.cpp" />
     <ClCompile Include="src\Ext\Aircraft\Hooks.cpp" />
+    <ClCompile Include="src\Ext\Aircraft\Hooks.Carryall.cpp" />
     <!-- src\Ext\Anim -->
     <ClCompile Include="src\Ext\Anim\Body.cpp" />
     <ClCompile Include="src\Ext\Anim\Hooks.AnimCreateUnit.cpp" />
@@ -202,6 +203,7 @@
     <!-- src\Ext\Trigger -->
     <ClCompile Include="src\Ext\Trigger\Hooks.cpp" />
     <!-- src\Ext\Unit -->
+    <ClCompile Include="src\Ext\Unit\Hooks.Carryall.cpp" />
     <ClCompile Include="src\Ext\Unit\Hooks.Crushing.cpp" />
     <ClCompile Include="src\Ext\Unit\Hooks.DeployFire.cpp" />
     <ClCompile Include="src\Ext\Unit\Hooks.DeploysInto.cpp" />

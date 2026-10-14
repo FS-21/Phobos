@@ -1446,6 +1446,11 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	// VoiceIFVRepair from Ares 0.2
 	this->VoiceIFVRepair.Read(exINI, pSection, "VoiceIFVRepair");
 	this->ParseVoiceWeaponAttacks(exINI, pSection, this->VoiceWeaponAttacks, this->VoiceEliteWeaponAttacks);
+
+	this->Carryall.Read(exINI, pSection, "Carryall");
+	this->Carryall_SizeLimit.Read(exINI, pSection, "Carryall.SizeLimit");
+	this->Carryall_Allowed.Read(exINI, pSection, "Carryall.Allowed");
+	this->Carryall_SpeedMultiplier.Read(exINI, pSection, "Carryall.SpeedMultiplier");
 }
 
 template <typename T>
@@ -1876,6 +1881,11 @@ void TechnoTypeExt::Serialize(T& Stm)
 		// Ares 3.0
 		.Process(this->Unsellable)
 		.Process(this->KeepAlive)
+
+		.Process(this->Carryall)
+		.Process(this->Carryall_SizeLimit)
+		.Process(this->Carryall_Allowed)
+		.Process(this->Carryall_SpeedMultiplier)
 		;
 }
 void TechnoTypeExt::LoadFromStream(PhobosStreamReader& Stm)
