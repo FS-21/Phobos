@@ -702,10 +702,10 @@ void UnitExt::UpdateCarryall()
 				pThis->Location.Y = targetPos.Y;
 				pJJLoco->DestinationCoords = pThis->Location;
 
-				// Maintain cruise height in the air.
+				// Maintain current arrival height in the air above the target ground.
 				const int targetGroundZ = targetPos.Z;
-				pJJLoco->CurrentHeight = cruiseHeight;
-				pThis->Location.Z = targetGroundZ + cruiseHeight;
+				pJJLoco->CurrentHeight = std::max(32, pThis->Location.Z - targetGroundZ);
+				pThis->Location.Z = targetGroundZ + pJJLoco->CurrentHeight;
 
 				this->CarryallAlignTimer = 0;
 				this->CarryallState = JumpjetCarryallState::AligningInAir;
@@ -722,8 +722,6 @@ void UnitExt::UpdateCarryall()
 				}
 
 				pJJLoco->DestinationCoords = targetPos;
-				pJJLoco->CurrentHeight = cruiseHeight;
-				pThis->Location.Z = targetPos.Z + cruiseHeight;
 			}
 		}
 		else
@@ -779,8 +777,7 @@ void UnitExt::UpdateCarryall()
 		pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
 
 		const int targetGroundZ = targetPos.Z;
-		pJJLoco->CurrentHeight = cruiseHeight;
-		pThis->Location.Z = targetGroundZ + cruiseHeight;
+		pThis->Location.Z = targetGroundZ + pJJLoco->CurrentHeight;
 
 		// Smoothly rotate to match the target unit's facing while hovering in place.
 		const DirStruct targetFacing = pTargetUnit->PrimaryFacing.Current();
