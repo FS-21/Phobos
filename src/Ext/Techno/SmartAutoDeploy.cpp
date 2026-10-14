@@ -440,10 +440,9 @@ namespace
 		return false;
 	}
 
-	bool ShouldCheckMinimumRange(TechnoClass* pThis, TechnoTypeExt* pTypeExt, TechnoTypeExt* pAltTypeExt)
+	bool ShouldCheckMinimumRange(TechnoTypeExt* pTypeExt, TechnoTypeExt* pAltTypeExt)
 	{
-		const bool isAI = !pThis->Owner || !pThis->Owner->IsControlledByHuman();
-		return isAI || pTypeExt->SmartAutoDeploy_CheckMinimumRange.Get() || pAltTypeExt->SmartAutoDeploy_CheckMinimumRange.Get();
+		return pTypeExt->SmartAutoDeploy_CheckMinimumRange.Get() || pAltTypeExt->SmartAutoDeploy_CheckMinimumRange.Get();
 	}
 
 	CellClass* CalculateStandoffCell(TechnoClass* pThis, AbstractClass* pTarget, WeaponTypeClass* pWeapon)
@@ -881,7 +880,7 @@ namespace SmartAutoDeploy
 		// ── MinimumRange reposition ──────────────────────────────────────
 		if (pCurrentWeapon && pCurrentWeapon->MinimumRange > 0 && currentDist < pCurrentWeapon->MinimumRange)
 		{
-			if (ShouldCheckMinimumRange(pThis, pTypeExt, pAltTypeExt))
+			if (ShouldCheckMinimumRange(pTypeExt, pAltTypeExt))
 				return SaveAndTransform(pThis, pTarget, SmartAutoDeployAction::Undeploy, false, Mission::Attack, true);
 		}
 
@@ -1062,7 +1061,7 @@ namespace SmartAutoDeploy
 		// ── MinimumRange repositioning ───────────────────────────────────
 		if (pAltWeapon->MinimumRange > 0 && currentDist < pAltWeapon->MinimumRange)
 		{
-			if (ShouldCheckMinimumRange(pThis, pTypeExt, pAltTypeExt))
+			if (ShouldCheckMinimumRange(pTypeExt, pAltTypeExt))
 			{
 				if (auto const pStandoffCell = CalculateStandoffCell(pThis, pTarget, pAltWeapon))
 				{
