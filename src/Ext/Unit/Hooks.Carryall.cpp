@@ -258,17 +258,20 @@ DEFINE_HOOK(0x54C0EB, JumpjetLocomotionClass_StateHovering_BalloonHover, 0x6)
 
 static bool InCarryallCargoDraw = false;
 
-DEFINE_HOOK(0x73D43F, UnitClass_DrawIt_Cargo, 0x7)
+DEFINE_HOOK(0x73CEEA, UnitClass_DrawIt_Cargo, 0x6)
 {
 	GET(UnitClass*, pThis, ESI);
 	GET_STACK(Point2D*, pLocation, 0x54);
 	GET_STACK(RectangleStruct*, pBounds, 0x58);
 
-	if (InCarryallCargoDraw || !pThis || !pLocation)
+	if (InCarryallCargoDraw || !pThis || !pLocation || !pBounds)
+		return 0;
+
+	if (reinterpret_cast<uintptr_t>(pLocation) < 0x10000 || reinterpret_cast<uintptr_t>(pBounds) < 0x10000)
 		return 0;
 
 	auto const pExt = UnitExt::Fetch(pThis);
-	if (!pExt || !pExt->CarryallCargo)
+	if (!pExt || !pExt->CarryallCargo || !pExt->CarryallCargo->IsAlive)
 		return 0;
 
 	auto const pCargo = pExt->CarryallCargo;
