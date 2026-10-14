@@ -681,48 +681,32 @@ void UnitExt::UpdateCarryall()
 		if (!pTargetCell)
 			break;
 
-		// Move until the carryall is in the exact same cell as the target unit.
-		if (pThis->GetCell() == pTargetCell)
+		const CoordStruct targetPos = pTargetUnit->GetCoords();
+		const int dx = targetPos.X - pThis->Location.X;
+		const int dy = targetPos.Y - pThis->Location.Y;
+		const int distSq = dx * dx + dy * dy;
+
+		// Check if the carryall has reached directly above the target unit.
+		if (pThis->GetCell() == pTargetCell && (distSq <= 16 * 16 || pJJLoco->DestinationReached || (!pJJLoco->IsMoving && distSq <= 48 * 48)))
 		{
-			const CoordStruct targetPos = pTargetUnit->GetCoords();
-			const int dx = targetPos.X - pThis->Location.X;
-			const int dy = targetPos.Y - pThis->Location.Y;
-			const int step = std::max(6, static_cast<int>(pType->Speed));
+			// Arrived at unit center: halt horizontal movement and hover in the air.
+			pThis->SetDestination(nullptr, false);
+			pJJLoco->Stop_Moving();
+			pJJLoco->CurrentSpeed = 0.0;
+			pJJLoco->IsMoving = false;
+			pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
 
-			if (std::abs(dx) <= step && std::abs(dy) <= step)
-			{
-				// Arrived at unit center: halt horizontal movement and hover in the air.
-				pThis->SetDestination(nullptr, false);
-				pJJLoco->Stop_Moving();
-				pJJLoco->CurrentSpeed = 0.0;
-				pJJLoco->IsMoving = false;
-				pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
+			pThis->Location.X = targetPos.X;
+			pThis->Location.Y = targetPos.Y;
+			pJJLoco->DestinationCoords = pThis->Location;
 
-				pThis->Location.X = targetPos.X;
-				pThis->Location.Y = targetPos.Y;
-				pJJLoco->DestinationCoords = pThis->Location;
+			// Maintain current arrival height in the air above the target ground.
+			const int targetGroundZ = targetPos.Z;
+			pJJLoco->CurrentHeight = std::max(32, pThis->Location.Z - targetGroundZ);
+			pThis->Location.Z = targetGroundZ + pJJLoco->CurrentHeight;
 
-				// Maintain current arrival height in the air above the target ground.
-				const int targetGroundZ = targetPos.Z;
-				pJJLoco->CurrentHeight = std::max(32, pThis->Location.Z - targetGroundZ);
-				pThis->Location.Z = targetGroundZ + pJJLoco->CurrentHeight;
-
-				this->CarryallAlignTimer = 0;
-				this->CarryallState = JumpjetCarryallState::AligningInAir;
-			}
-			else
-			{
-				// Smooth glide within the cell towards targetPos without teleporting.
-				const double dist = std::sqrt(static_cast<double>(dx * dx + dy * dy));
-				if (dist > 0.0)
-				{
-					const double moveDist = std::min(static_cast<double>(step), dist);
-					pThis->Location.X += static_cast<int>(std::round((dx / dist) * moveDist));
-					pThis->Location.Y += static_cast<int>(std::round((dy / dist) * moveDist));
-				}
-
-				pJJLoco->DestinationCoords = targetPos;
-			}
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::AligningInAir;
 		}
 		else
 		{
@@ -731,7 +715,7 @@ void UnitExt::UpdateCarryall()
 			if (pThis->Destination != pTargetCell)
 				pThis->SetDestination(pTargetCell, false);
 
-			pJJLoco->DestinationCoords = pTargetCell->GetCoords();
+			pJJLoco->DestinationCoords = targetPos;
 		}
 		break;
 	}
