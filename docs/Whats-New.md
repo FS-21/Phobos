@@ -2140,6 +2140,7 @@ MovieSubtitles.BackgroundOpacity=60  ; integer
 - [Sidebar radar horizontal offset](User-Interface.md#sidebar-radar-horizontal-offset) (by TwinkleStar)
 - Fixed `HealBase` crates causing full-health objects to scatter (by Noble_Fish)
 - Fixed the bug that units keep attacking ground after target wall has been destroyed by adjacent damage/crush/wave damage (by NetsuNegi)
+- Fixed an issue where Engineers and Spies might not be able to enter target buildings properly when executing vanilla's attack script (by FlyStar)
 
 #### Phobos fixes:
 - Fixed an issue where `IsSimpleDeployer=yes` and `BalloonHover=yes` jumpjet units were still forced to land upon reaching destination or when hovering unless actively deploying (by FS-21)

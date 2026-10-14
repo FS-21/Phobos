@@ -388,6 +388,11 @@ public:
 	static bool ConvertToType(FootClass* pThis, TechnoTypeClass* toType);
 	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
 	static bool CanDeployIntoBuilding(BuildingClass* pThis, bool noDeploysIntoDefaultValue = false, BuildingTypeClass* pBuildingType = nullptr);
+	static TechnoTypeClass* GetDeployTargetType(TechnoClass* pThis);
+	static bool CanTechnoExistOnCell(TechnoClass* pThis, TechnoTypeClass* pTargetType, CellClass* pCell = nullptr);
+	static bool CanDeployOnCell(TechnoClass* pThis, CellClass* pCell = nullptr);
+	static bool CanUndeployOnCell(TechnoClass* pThis, CellClass* pCell = nullptr);
+	static CellClass* FindNearbyDeployCell(FootClass* pThis, CellClass* pCurrentCell, int maxRange = 6);
 	static bool IsTypeImmune(TechnoClass* pThis, TechnoTypeClass* pType, TechnoClass* pSource);
 	static int GetTintColor(TechnoClass* pThis, bool invulnerability, bool airstrike, bool berserk);
 	static int GetCustomTintColor(TechnoClass* pThis);
