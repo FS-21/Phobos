@@ -233,14 +233,14 @@ DEFINE_HOOK(0x741983, UnitClass_AssignDestination_Carryall, 0x6)
 	return ReturnDefault;
 }
 
-static bool ShouldEmulateBalloonHover(JumpjetLocomotionClass* pJJLoco, TechnoTypeClass* pType)
+static bool ShouldEmulateBalloonHover(FootClass* pFoot, TechnoTypeClass* pType)
 {
 	if (pType && pType->BalloonHover)
 		return true;
 
-	if (pJJLoco)
+	if (reinterpret_cast<uintptr_t>(pFoot) >= 0x10000)
 	{
-		if (auto const pUnit = abstract_cast<UnitClass*, true>(pJJLoco->LinkedTo))
+		if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
 		{
 			auto const pExt = UnitExt::Fetch(pUnit);
 			if (pExt && (pExt->CarryallCargo || pExt->CarryallState != JumpjetCarryallState::Idle))
@@ -256,9 +256,9 @@ DEFINE_HOOK(0x54B26B, JumpjetLocomotionClass_Move_BalloonHover, 0x6)
 	enum { ReturnNext = 0x54B271 };
 
 	GET(TechnoTypeClass*, pType, ECX);
-	GET(JumpjetLocomotionClass*, pThis, ESI);
+	GET(FootClass*, pFoot, EAX);
 
-	R->AL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
+	R->AL(ShouldEmulateBalloonHover(pFoot, pType) ? 1 : 0);
 	return ReturnNext;
 }
 
@@ -267,9 +267,11 @@ DEFINE_HOOK(0x54B3F2, JumpjetLocomotionClass_Process_BalloonHover, 0x6)
 	enum { ReturnNext = 0x54B3F8 };
 
 	GET(TechnoTypeClass*, pType, EAX);
-	GET(JumpjetLocomotionClass*, pThis, ESI);
+	auto const pFoot = reinterpret_cast<uintptr_t>(R->ESI<void*>()) >= 0x10000
+		? *reinterpret_cast<FootClass**>(R->ESI<uintptr_t>() + 8)
+		: nullptr;
 
-	R->CL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
+	R->CL(ShouldEmulateBalloonHover(pFoot, pType) ? 1 : 0);
 	return ReturnNext;
 }
 
@@ -278,9 +280,11 @@ DEFINE_HOOK(0x54BCEE, JumpjetLocomotionClass_StateAscending_BalloonHover, 0x6)
 	enum { ReturnNext = 0x54BCF4 };
 
 	GET(TechnoTypeClass*, pType, EAX);
-	GET(JumpjetLocomotionClass*, pThis, ESI);
+	auto const pFoot = reinterpret_cast<uintptr_t>(R->ESI<void*>()) >= 0x10000
+		? *reinterpret_cast<FootClass**>(R->ESI<uintptr_t>() + 0xC)
+		: nullptr;
 
-	R->CL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
+	R->CL(ShouldEmulateBalloonHover(pFoot, pType) ? 1 : 0);
 	return ReturnNext;
 }
 
@@ -289,9 +293,11 @@ DEFINE_HOOK(0x54BE6D, JumpjetLocomotionClass_StateMove_BalloonHover, 0x6)
 	enum { ReturnNext = 0x54BE73 };
 
 	GET(TechnoTypeClass*, pType, EAX);
-	GET(JumpjetLocomotionClass*, pThis, ESI);
+	auto const pFoot = reinterpret_cast<uintptr_t>(R->ESI<void*>()) >= 0x10000
+		? *reinterpret_cast<FootClass**>(R->ESI<uintptr_t>() + 0xC)
+		: nullptr;
 
-	R->CL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
+	R->CL(ShouldEmulateBalloonHover(pFoot, pType) ? 1 : 0);
 	return ReturnNext;
 }
 
@@ -300,9 +306,11 @@ DEFINE_HOOK(0x54C0EB, JumpjetLocomotionClass_StateHovering_BalloonHover, 0x6)
 	enum { ReturnNext = 0x54C0F1 };
 
 	GET(TechnoTypeClass*, pType, EAX);
-	GET(JumpjetLocomotionClass*, pThis, ESI);
+	auto const pFoot = reinterpret_cast<uintptr_t>(R->ESI<void*>()) >= 0x10000
+		? *reinterpret_cast<FootClass**>(R->ESI<uintptr_t>() + 0xC)
+		: nullptr;
 
-	R->AL(ShouldEmulateBalloonHover(pThis, pType) ? 1 : 0);
+	R->AL(ShouldEmulateBalloonHover(pFoot, pType) ? 1 : 0);
 	return ReturnNext;
 }
 
