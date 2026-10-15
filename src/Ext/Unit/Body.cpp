@@ -581,6 +581,16 @@ bool UnitExt::CarryallCanDropAt(CellClass* pCell) const
 	if (!this->CarryallCargo || !pCell)
 		return false;
 
+	if (auto const pThis = this->OwnerObject())
+	{
+		if (auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor))
+		{
+			const int cruiseHeight = pJJLoco->Height > 0 ? pJJLoco->Height : RulesClass::Instance->CruiseHeight;
+			if (pJJLoco->CurrentHeight < (cruiseHeight * 9 / 10))
+				return false;
+		}
+	}
+
 	return CanCargoLandOnCell(this->CarryallCargo, pCell);
 }
 
@@ -690,6 +700,15 @@ void UnitExt::UpdateCarryall()
 		if (!pTargetCell)
 			break;
 
+		if (pThis->Destination != nullptr && pThis->Destination != pTargetUnit && pThis->Destination != pTargetCell)
+		{
+			this->CarryallTarget = nullptr;
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::Idle;
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
+			break;
+		}
+
 		const CoordStruct targetPos = pTargetUnit->GetCoords();
 		const int dx = targetPos.X - pThis->Location.X;
 		const int dy = targetPos.Y - pThis->Location.Y;
@@ -749,6 +768,15 @@ void UnitExt::UpdateCarryall()
 			this->CarryallTarget = nullptr;
 			this->CarryallAlignTimer = 0;
 			this->CarryallState = JumpjetCarryallState::Idle;
+			break;
+		}
+
+		if (pThis->Destination != nullptr && pThis->Destination != pTargetUnit && pThis->Destination != pTargetUnit->GetCell())
+		{
+			this->CarryallTarget = nullptr;
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::Idle;
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
 			break;
 		}
 
@@ -825,6 +853,15 @@ void UnitExt::UpdateCarryall()
 			break;
 		}
 
+		if (pThis->Destination != nullptr && pThis->Destination != pTargetUnit && pThis->Destination != pTargetUnit->GetCell())
+		{
+			this->CarryallTarget = nullptr;
+			this->CarryallAlignTimer = 0;
+			this->CarryallState = JumpjetCarryallState::Idle;
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
+			break;
+		}
+
 		// If the target moved to a different cell while descending, chase it again.
 		if (pThis->GetCell() != pTargetUnit->GetCell())
 		{
@@ -892,6 +929,14 @@ void UnitExt::UpdateCarryall()
 	case JumpjetCarryallState::AscendingWithCargo:
 	{
 		pThis->InAir = true;
+
+		if (pThis->Destination != nullptr)
+		{
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
+			this->CarryallState = JumpjetCarryallState::Carrying;
+			break;
+		}
+
 		pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
 		FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
 
@@ -913,7 +958,8 @@ void UnitExt::UpdateCarryall()
 			pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
 			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
 			this->CarryallState = JumpjetCarryallState::Carrying;
-			pThis->QueueMission(Mission::Guard, true);
+			if (!pThis->Destination && pThis->GetCurrentMission() != Mission::Move)
+				pThis->QueueMission(Mission::Guard, true);
 		}
 
 		if (this->CarryallCargo && this->CarryallCargo->IsAlive)
@@ -966,6 +1012,13 @@ void UnitExt::UpdateCarryall()
 			break;
 		}
 
+		if (pThis->Destination != nullptr)
+		{
+			this->CarryallState = JumpjetCarryallState::Carrying;
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
+			break;
+		}
+
 		pThis->SetDestination(nullptr, false);
 		pJJLoco->Stop_Moving();
 		pJJLoco->CurrentSpeed = 0.0;
@@ -1007,6 +1060,14 @@ void UnitExt::UpdateCarryall()
 	case JumpjetCarryallState::AscendingAfterDrop:
 	{
 		pThis->InAir = true;
+
+		if (pThis->Destination != nullptr)
+		{
+			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
+			this->CarryallState = JumpjetCarryallState::Idle;
+			break;
+		}
+
 		pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
 		FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
 
@@ -1033,10 +1094,13 @@ void UnitExt::UpdateCarryall()
 			pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
 			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
 			this->CarryallState = JumpjetCarryallState::Idle;
-			pThis->QueueMission(Mission::Guard, true);
+			if (!pThis->Destination && pThis->GetCurrentMission() != Mission::Move)
+			{
+				pThis->QueueMission(Mission::Guard, true);
 
-			if (!pType->BalloonHover)
-				pThis->Scatter(CoordStruct::Empty, true, false);
+				if (!pType->BalloonHover)
+					pThis->Scatter(CoordStruct::Empty, true, false);
+			}
 		}
 		break;
 	}
