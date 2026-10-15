@@ -652,6 +652,83 @@ void UnitExt::CarryallDeployDrop()
 	pCargo->QueueMission(Mission::Guard, true);
 }
 
+static SHPStruct* GetOrCreateScaledSHPShadow()
+{
+	static std::vector<byte> shadowBuffer;
+	static SHPStruct* pCachedSHP = nullptr;
+
+	if (pCachedSHP)
+		return pCachedSHP;
+
+	auto pBaseSHP = *reinterpret_cast<SHPStruct**>(0xA8F244);
+
+	if (!pBaseSHP)
+		pBaseSHP = FileSystem::LoadSHPFile("infshdw.shp");
+
+	int w = 48;
+	int h = 24;
+
+	auto pBaseData = pBaseSHP ? pBaseSHP->GetData() : nullptr;
+	if (pBaseData && pBaseData->Width > 0 && pBaseData->Height > 0)
+	{
+		w = pBaseData->Width * 3;
+		h = pBaseData->Height * 3;
+	}
+
+	if (w <= 0)
+		w = 48;
+
+	if (h <= 0)
+		h = 24;
+
+	const size_t headerSize = 32;
+	const size_t pixelSize = static_cast<size_t>(w) * static_cast<size_t>(h);
+	shadowBuffer.assign(headerSize + pixelSize, 0);
+
+	byte* pData = shadowBuffer.data();
+
+	// SHPStruct Header (8 bytes)
+	*reinterpret_cast<WORD*>(pData + 0) = 0;
+	*reinterpret_cast<short*>(pData + 2) = static_cast<short>(w);
+	*reinterpret_cast<short*>(pData + 4) = static_cast<short>(h);
+	*reinterpret_cast<short*>(pData + 6) = 1;
+
+	// SHPFrame Header (24 bytes)
+	*reinterpret_cast<short*>(pData + 8) = 0;
+	*reinterpret_cast<short*>(pData + 10) = 0;
+	*reinterpret_cast<short*>(pData + 12) = static_cast<short>(w);
+	*reinterpret_cast<short*>(pData + 14) = static_cast<short>(h);
+	*reinterpret_cast<DWORD*>(pData + 16) = 0; // Flags = 0 (uncompressed plain blit)
+	pData[20] = 0;
+	pData[21] = 0;
+	pData[22] = 0;
+	*reinterpret_cast<DWORD*>(pData + 24) = 0;
+	*reinterpret_cast<int*>(pData + 28) = 32; // Offset to pixel buffer
+
+	// Generate 2:1 isometric ellipse in the pixel buffer
+	byte* pPixels = pData + 32;
+	const double rx = (w - 1) / 2.0;
+	const double ry = (h - 1) / 2.0;
+	const double cx = rx;
+	const double cy = ry;
+
+	for (int y = 0; y < h; ++y)
+	{
+		for (int x = 0; x < w; ++x)
+		{
+			const double dx = (x - cx) / rx;
+			const double dy = (y - cy) / ry;
+			if ((dx * dx + dy * dy) <= 1.0)
+			{
+				pPixels[y * w + x] = 1;
+			}
+		}
+	}
+
+	pCachedSHP = reinterpret_cast<SHPStruct*>(pData);
+	return pCachedSHP;
+}
+
 void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClass* pCargo, RectangleStruct* pBounds)
 {
 	if (!pCargo || !pCargo->IsAlive || pCargo->InLimbo)
@@ -668,17 +745,7 @@ void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClas
 	if (pCargo->Location.Z <= groundZ + 16)
 		return;
 
-	static SHPStruct* pShadowSHP = nullptr;
-	static bool shadowLoaded = false;
-	if (!shadowLoaded)
-	{
-		shadowLoaded = true;
-
-		pShadowSHP = *reinterpret_cast<SHPStruct**>(0xA8F244);
-
-		if (!pShadowSHP)
-			pShadowSHP = FileSystem::LoadSHPFile("infshdw.shp");
-	}
+	auto pShadowSHP = GetOrCreateScaledSHPShadow();
 
 	if (!pShadowSHP)
 		return;
@@ -688,7 +755,7 @@ void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClas
 
 	Point2D shadowScreenLoc = TacticalClass::CoordsToScreen(groundCoord) - TacticalClass::Instance->TacticalPos;
 
-	const int frameIdx = pShadowSHP->Frames > 1 ? 1 : 0;
+	const int frameIdx = 0;
 	const auto pBoundsToUse = pBounds ? pBounds : &DSurface::ViewBounds;
 
 	CC_Draw_Shape(
