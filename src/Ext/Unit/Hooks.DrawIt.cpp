@@ -1,5 +1,17 @@
 #include <Ext/UnitType/Body.h>
 
+DEFINE_HOOK(0x73C75A, UnitClass_DrawAsSHP_SkipShadow, 0x7)
+{
+	enum { SkipShadow = 0x73C7AC, DrawShadow = 0 };
+
+	GET(UnitClass*, pThis, EBP);
+
+	if (pThis->IsOnCarryall)
+		return SkipShadow;
+
+	return DrawShadow;
+}
+
 DEFINE_HOOK(0x73C7AC, UnitClass_DrawAsSHP_DrawTurret_TintFix, 0x6)
 {
 	enum { SkipDrawCode = 0x73CE00 };

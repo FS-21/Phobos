@@ -738,11 +738,14 @@ void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClas
 	if (!pCargoType || pCargoType->Voxel)
 		return;
 
-	auto const pCell = pCargo->GetCell();
-	const int groundZ = pCell ? pCell->GetCoordsWithBridge().Z : MapClass::Instance.GetCellFloorHeight(pCargo->Location);
+	auto const pCarrier = pTransporter ? pTransporter : pCargo->Transporter;
+	auto const pCell = pCarrier ? pCarrier->GetCell() : pCargo->GetCell();
+	const CoordStruct carrierLoc = pCarrier ? pCarrier->Location : pCargo->Location;
+	const int groundZ = pCell ? pCell->GetCoordsWithBridge().Z : MapClass::Instance.GetCellFloorHeight(carrierLoc);
 
 	// Only draw generic airborne shadow when held above ground
-	if (pCargo->Location.Z <= groundZ + 16)
+	const int currentZ = pCarrier ? pCarrier->Location.Z : pCargo->Location.Z;
+	if (currentZ <= groundZ + 16)
 		return;
 
 	auto pShadowSHP = GetOrCreateScaledSHPShadow();
@@ -750,7 +753,7 @@ void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClas
 	if (!pShadowSHP)
 		return;
 
-	CoordStruct groundCoord = pCargo->Location;
+	CoordStruct groundCoord = carrierLoc;
 	groundCoord.Z = groundZ;
 
 	Point2D shadowScreenLoc = TacticalClass::CoordsToScreen(groundCoord) - TacticalClass::Instance->TacticalPos;
@@ -768,7 +771,7 @@ void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClas
 		static_cast<BlitterFlags>(0x2601),
 		0,
 		0,
-		ZGradient::Ground,
+		ZGradient(0),
 		1000,
 		0,
 		nullptr,

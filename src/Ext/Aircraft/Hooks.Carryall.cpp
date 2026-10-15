@@ -40,6 +40,15 @@ DEFINE_HOOK(0x4151AA, AircraftClass_AI_CarryallCargoSync, 0x6)
 
 	if (pCargo && pThis)
 	{
+		auto const pCell = pThis->GetCell();
+		const int floorZ = pCell ? pCell->GetCoordsWithBridge().Z : MapClass::Instance.GetCellFloorHeight(pThis->Location);
+		const int cargoZ = std::max(floorZ, pThis->Location.Z - 32);
+
+		pCargo->Location.X = pThis->Location.X;
+		pCargo->Location.Y = pThis->Location.Y;
+		pCargo->Location.Z = cargoZ;
+		pCargo->PrimaryFacing = pThis->PrimaryFacing;
+		pCargo->SecondaryFacing = pThis->PrimaryFacing;
 		pCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
 		pCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
 		pCargo->PitchAngle = pThis->PitchAngle;
