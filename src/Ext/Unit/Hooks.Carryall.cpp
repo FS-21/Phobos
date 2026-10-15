@@ -229,29 +229,6 @@ DEFINE_HOOK(0x741983, UnitClass_AssignDestination_Carryall, 0x6)
 			}
 		}
 	}
-	else if (pTarget == nullptr)
-	{
-		if (pExt->CarryallCargo)
-		{
-			if (pExt->CarryallState == JumpjetCarryallState::DescendingToDrop)
-			{
-				pExt->CarryallState = JumpjetCarryallState::Carrying;
-				FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
-			}
-		}
-		else
-		{
-			if (pExt->CarryallState == JumpjetCarryallState::MovingToPickup ||
-				pExt->CarryallState == JumpjetCarryallState::AligningInAir ||
-				pExt->CarryallState == JumpjetCarryallState::DescendingToPickup)
-			{
-				pExt->CarryallTarget = nullptr;
-				pExt->CarryallAlignTimer = 0;
-				pExt->CarryallState = JumpjetCarryallState::Idle;
-				FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
-			}
-		}
-	}
 
 	return ReturnDefault;
 }

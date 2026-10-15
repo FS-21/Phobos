@@ -700,15 +700,6 @@ void UnitExt::UpdateCarryall()
 		if (!pTargetCell)
 			break;
 
-		if (pThis->Destination != nullptr && pThis->Destination != pTargetUnit && pThis->Destination != pTargetCell)
-		{
-			this->CarryallTarget = nullptr;
-			this->CarryallAlignTimer = 0;
-			this->CarryallState = JumpjetCarryallState::Idle;
-			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
-			break;
-		}
-
 		const CoordStruct targetPos = pTargetUnit->GetCoords();
 		const int dx = targetPos.X - pThis->Location.X;
 		const int dy = targetPos.Y - pThis->Location.Y;
@@ -768,15 +759,6 @@ void UnitExt::UpdateCarryall()
 			this->CarryallTarget = nullptr;
 			this->CarryallAlignTimer = 0;
 			this->CarryallState = JumpjetCarryallState::Idle;
-			break;
-		}
-
-		if (pThis->Destination != nullptr && pThis->Destination != pTargetUnit && pThis->Destination != pTargetUnit->GetCell())
-		{
-			this->CarryallTarget = nullptr;
-			this->CarryallAlignTimer = 0;
-			this->CarryallState = JumpjetCarryallState::Idle;
-			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
 			break;
 		}
 
@@ -853,15 +835,6 @@ void UnitExt::UpdateCarryall()
 			break;
 		}
 
-		if (pThis->Destination != nullptr && pThis->Destination != pTargetUnit && pThis->Destination != pTargetUnit->GetCell())
-		{
-			this->CarryallTarget = nullptr;
-			this->CarryallAlignTimer = 0;
-			this->CarryallState = JumpjetCarryallState::Idle;
-			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
-			break;
-		}
-
 		// If the target moved to a different cell while descending, chase it again.
 		if (pThis->GetCell() != pTargetUnit->GetCell())
 		{
@@ -929,13 +902,6 @@ void UnitExt::UpdateCarryall()
 	case JumpjetCarryallState::AscendingWithCargo:
 	{
 		pThis->InAir = true;
-
-		if (pThis->Destination != nullptr)
-		{
-			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
-			this->CarryallState = JumpjetCarryallState::Carrying;
-			break;
-		}
 
 		pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
 		FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
@@ -1012,13 +978,6 @@ void UnitExt::UpdateCarryall()
 			break;
 		}
 
-		if (pThis->Destination != nullptr)
-		{
-			this->CarryallState = JumpjetCarryallState::Carrying;
-			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
-			break;
-		}
-
 		pThis->SetDestination(nullptr, false);
 		pJJLoco->Stop_Moving();
 		pJJLoco->CurrentSpeed = 0.0;
@@ -1060,13 +1019,6 @@ void UnitExt::UpdateCarryall()
 	case JumpjetCarryallState::AscendingAfterDrop:
 	{
 		pThis->InAir = true;
-
-		if (pThis->Destination != nullptr)
-		{
-			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
-			this->CarryallState = JumpjetCarryallState::Idle;
-			break;
-		}
 
 		pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
 		FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
