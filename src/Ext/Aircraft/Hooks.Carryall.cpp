@@ -35,23 +35,33 @@ DEFINE_HOOK(0x419B1D, AircraftClass_CellSeemsOk_Carryall, 0x8)
 
 DEFINE_HOOK(0x4151AA, AircraftClass_AI_CarryallCargoSync, 0x6)
 {
-	enum { ReturnNext = 0x4151B0 };
-
 	GET(TechnoClass*, pCargo, ECX);
-	GET(AircraftClass*, pThis, ESI);
-	GET_STACK(CoordStruct*, pCoords, 0x0);
+	auto const pThis = reinterpret_cast<AircraftClass*>(R->EBX<char*>() - 0x114);
+
+	if (pCargo && pThis)
+	{
+		pCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
+		pCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
+		pCargo->PitchAngle = pThis->PitchAngle;
+		pCargo->IsOnCarryall = true;
+		pCargo->Transporter = pThis;
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(0x416C66, AircraftClass_DropOffCargo_ResetAngles, 0x7)
+{
+	GET(UnitClass*, pCargo, ESI);
 
 	if (pCargo)
 	{
-		pCargo->SetLocation(*pCoords);
-
-		if (pThis)
-		{
-			pCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
-			pCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
-			pCargo->PitchAngle = pThis->PitchAngle;
-		}
+		pCargo->AngleRotatedSideways = 0.0f;
+		pCargo->AngleRotatedForwards = 0.0f;
+		pCargo->PitchAngle = 0.0f;
+		pCargo->Transporter = nullptr;
 	}
 
-	return ReturnNext;
+	return 0;
 }
+

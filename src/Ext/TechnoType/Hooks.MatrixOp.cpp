@@ -372,19 +372,19 @@ DEFINE_HOOK(0x4CF68D, FlyLocomotionClass_DrawMatrix_OnAirport, 0x5)
 	const auto pThis = static_cast<AircraftClass*>(loco->LinkedTo);
 	if (pThis->GetHeight() <= 0)
 	{
-		REF_STACK(Matrix3D, mat, STACK_OFFSET(0x38, -0x30));
-		const auto slope_idx = MapClass::Instance.GetCellAt(pThis->Location)->SlopeIndex;
-		mat = Matrix3D::VoxelRampMatrix[slope_idx] * mat;
 		const float ars = pThis->AngleRotatedSideways;
 		const float arf = pThis->AngleRotatedForwards;
 		if (std::abs(ars) > 0.005f || std::abs(arf) > 0.005f)
 		{
+			REF_STACK(Matrix3D, mat, STACK_OFFSET(0x38, -0x30));
 			const auto pType = pThis->Type;
 			mat.TranslateZ(float(std::abs(Math::sin(ars)) * pType->VoxelScaleX
 				+ std::abs(Math::sin(arf)) * pType->VoxelScaleY));
 			R->ECX(pThis);
 			return 0x4CF6AD;
 		}
+
+		return 0x4CF809;
 	}
 
 	return 0x4CF6A0;
