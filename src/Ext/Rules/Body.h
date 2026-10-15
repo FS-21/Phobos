@@ -231,6 +231,8 @@ public:
 		Nullable<AnimTypeClass*> DropPodTrailer;
 		AnimTypeClass* DropPodDefaultTrailer;
 		SHPStruct* PodImage;
+		PhobosFixedString<0x20> CarryallGenericSHPShadowName;
+		SHPStruct* CarryallGenericSHPShadow;
 		Valueable<bool> DrawInsignia_OnlyOnSelected;
 		Valueable<Point2D> DrawInsignia_AdjustPos_Infantry;
 		Valueable<Point2D> DrawInsignia_AdjustPos_Buildings;
@@ -770,6 +772,8 @@ public:
 			, DropPodTrailer { }
 			, DropPodDefaultTrailer { }
 			, PodImage { }
+			, CarryallGenericSHPShadowName { }
+			, CarryallGenericSHPShadow { }
 			, JumpjetClimbPredictHeight { false }
 			, JumpjetClimbWithoutCutOut { false }
 			, JumpjetClimbIgnoreBuilding { false }

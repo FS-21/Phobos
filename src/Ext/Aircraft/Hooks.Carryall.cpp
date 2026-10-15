@@ -45,6 +45,8 @@ DEFINE_HOOK(0x4151AA, AircraftClass_AI_CarryallCargoSync, 0x6)
 		pCargo->PitchAngle = pThis->PitchAngle;
 		pCargo->IsOnCarryall = true;
 		pCargo->Transporter = pThis;
+
+		UnitExt::DrawCarryallSHPGenericShadow(pThis, pCargo, nullptr);
 	}
 
 	return 0;
@@ -56,6 +58,7 @@ DEFINE_HOOK(0x416C66, AircraftClass_DropOffCargo_ResetAngles, 0x7)
 
 	if (pCargo)
 	{
+		pCargo->IsOnCarryall = false;
 		pCargo->AngleRotatedSideways = 0.0f;
 		pCargo->AngleRotatedForwards = 0.0f;
 		pCargo->PitchAngle = 0.0f;

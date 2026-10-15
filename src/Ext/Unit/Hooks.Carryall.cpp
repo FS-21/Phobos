@@ -353,6 +353,7 @@ DEFINE_HOOK(0x73CEEA, UnitClass_DrawIt_Cargo, 0x6)
 	Point2D cargoScreenLoc = *pLocation;
 	cargoScreenLoc.Y += TacticalClass::AdjustForZ(pThis->Location.Z - cargoZ) - 10;
 
+	UnitExt::DrawCarryallSHPGenericShadow(pThis, pCargo, pBounds);
 	pCargo->DrawIt(&cargoScreenLoc, pBounds);
 
 	InCarryallCargoDraw = false;

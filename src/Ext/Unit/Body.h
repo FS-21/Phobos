@@ -81,6 +81,7 @@ public:
 	static bool SimpleDeployerAllowedToDeploy(UnitClass* pThis, bool defaultValue, bool alwaysCheckLandTypes);
 	static bool CanDeployIntoBuilding(UnitClass* pThis, bool noDeploysIntoDefaultValue = false);
 	static UnitTypeClass* GetUnitTypeExtra(UnitClass* pUnit, UnitTypeExt* pData);
+	static void DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClass* pCargo, RectangleStruct* pBounds);
 
 	UnitClass* OwnerObject() const
 	{

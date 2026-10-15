@@ -1,7 +1,11 @@
 #include "Body.h"
 
 #include <JumpjetLocomotionClass.h>
+#include <FileSystem.h>
+#include <Surface.h>
+#include <TacticalClass.h>
 
+#include <Ext/Rules/Body.h>
 #include <Ext/Scenario/Body.h>
 #include <Ext/UnitType/Body.h>
 #include <Utilities/AresFunctions.h>
@@ -646,6 +650,61 @@ void UnitExt::CarryallDeployDrop()
 		pLoco->Mark_All_Occupation_Bits(MarkType::Down);
 
 	pCargo->QueueMission(Mission::Guard, true);
+}
+
+void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClass* pCargo, RectangleStruct* pBounds)
+{
+	if (!pCargo || !pCargo->IsAlive || pCargo->InLimbo)
+		return;
+
+	auto const pCargoType = pCargo->GetTechnoType();
+	if (!pCargoType || pCargoType->Voxel)
+		return;
+
+	auto const pCell = pCargo->GetCell();
+	const int groundZ = pCell ? pCell->GetCoordsWithBridge().Z : MapClass::Instance.GetCellFloorHeight(pCargo->Location);
+
+	// Only draw generic airborne shadow when held above ground
+	if (pCargo->Location.Z <= groundZ + 16)
+		return;
+
+	auto const pRulesExt = RulesExt::Global();
+	auto pShadowSHP = pRulesExt ? pRulesExt->CarryallGenericSHPShadow : nullptr;
+	if (!pShadowSHP)
+	{
+		// Fallback to game's loaded INFSHDW.SHP if available
+		pShadowSHP = *reinterpret_cast<SHPStruct**>(0xA8F244);
+	}
+
+	if (!pShadowSHP)
+		return;
+
+	CoordStruct groundCoord = pCargo->Location;
+	groundCoord.Z = groundZ;
+
+	Point2D shadowScreenLoc = TacticalClass::CoordsToScreen(groundCoord) - TacticalClass::Instance->TacticalPos;
+
+	const int frameIdx = pShadowSHP->Frames > 1 ? 1 : 0;
+	const auto pBoundsToUse = pBounds ? pBounds : &DSurface::ViewBounds;
+
+	CC_Draw_Shape(
+		DSurface::Temp,
+		FileSystem::PALETTE_PAL,
+		pShadowSHP,
+		frameIdx,
+		&shadowScreenLoc,
+		pBoundsToUse,
+		static_cast<BlitterFlags>(0x2601),
+		0,
+		0,
+		ZGradient::Ground,
+		1000,
+		0,
+		nullptr,
+		0,
+		0,
+		0
+	);
 }
 
 void UnitExt::UpdateCarryall()
