@@ -668,12 +668,16 @@ void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClas
 	if (pCargo->Location.Z <= groundZ + 16)
 		return;
 
-	auto const pRulesExt = RulesExt::Global();
-	auto pShadowSHP = pRulesExt ? pRulesExt->CarryallGenericSHPShadow : nullptr;
-	if (!pShadowSHP)
+	static SHPStruct* pShadowSHP = nullptr;
+	static bool shadowLoaded = false;
+	if (!shadowLoaded)
 	{
-		// Fallback to game's loaded INFSHDW.SHP if available
+		shadowLoaded = true;
+
 		pShadowSHP = *reinterpret_cast<SHPStruct**>(0xA8F244);
+
+		if (!pShadowSHP)
+			pShadowSHP = FileSystem::LoadSHPFile("infshdw.shp");
 	}
 
 	if (!pShadowSHP)

@@ -322,30 +322,6 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->DropPodDefaultTrailer = AnimTypeClass::Find("SMOKEY");
 	this->PodImage = FileSystem::LoadSHPFile("POD.SHP");
 
-	this->CarryallGenericSHPShadowName.Read(pINI, GameStrings::AudioVisual, "CarryallGenericSHPShadow");
-
-	const char* pCustomShadow = this->CarryallGenericSHPShadowName.data();
-	if (pCustomShadow && *pCustomShadow)
-	{
-		if (_stricmp(pCustomShadow, "none") != 0 && _stricmp(pCustomShadow, "no") != 0)
-			this->CarryallGenericSHPShadow = FileSystem::LoadSHPFile(pCustomShadow);
-		else
-			this->CarryallGenericSHPShadow = nullptr;
-	}
-	else
-	{
-		this->CarryallGenericSHPShadow = FileSystem::LoadSHPFile("c_shadow.shp");
-
-		if (!this->CarryallGenericSHPShadow)
-			this->CarryallGenericSHPShadow = FileSystem::LoadSHPFile("infshdw.shp");
-
-		if (!this->CarryallGenericSHPShadow)
-			this->CarryallGenericSHPShadow = *reinterpret_cast<SHPStruct**>(0xA8F244);
-
-		if (!this->CarryallGenericSHPShadow)
-			this->CarryallGenericSHPShadow = FileSystem::LoadSHPFile("shadow.shp");
-	}
-
 	this->BuildingWaypoints.Read(exINI, GameStrings::General, "BuildingWaypoints");
 
 	this->VisualScatter_Min.Read(exINI, GameStrings::AudioVisual, "VisualScatter.Min");
@@ -960,8 +936,6 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->DropPodTrailer)
 		.Process(this->DropPodDefaultTrailer)
 		.Process(this->PodImage)
-		.Process(this->CarryallGenericSHPShadowName)
-		.Process(this->CarryallGenericSHPShadow)
 		.Process(this->JumpjetClimbPredictHeight)
 		.Process(this->JumpjetClimbWithoutCutOut)
 		.Process(this->JumpjetClimbIgnoreBuilding)
