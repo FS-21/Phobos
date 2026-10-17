@@ -642,47 +642,70 @@ DEFINE_HOOK(0x762D57, WaveClass_AI_TargetUnset, 0x6)
 	return 0;
 }
 
-DEFINE_HOOK_AGAIN(0x7630C4, WaveClass_AI_Step, 0x6)
-DEFINE_HOOK_AGAIN(0x7630A1, WaveClass_AI_Step, 0x6)
-DEFINE_HOOK_AGAIN(0x762F77, WaveClass_AI_Step, 0x6)
-DEFINE_HOOK_AGAIN(0x762E88, WaveClass_AI_Step, 0x6)
-DEFINE_HOOK_AGAIN(0x762E65, WaveClass_AI_Step, 0x6)
-DEFINE_HOOK(0x762D89, WaveClass_AI_Step, 0x6)
+DEFINE_HOOK_AGAIN(0x762F77, WaveClass_AI_StepStart, 0x6)
+DEFINE_HOOK(0x762D89, WaveClass_AI_StepStart, 0x6)
 {
 	GET(WaveClass*, pThis, ESI);
 
 	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
 	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
 
-	const float step = (pWeaponExt && pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
-		? static_cast<float>(pWeaponExt->Wave_Step.Get()) : 0.05f;
+	const double step = (pWeaponExt && pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
+		? pWeaponExt->Wave_Step.Get() : static_cast<double>(0.05f);
 
-	__asm { fld step }
-	return R->Origin() + 0x6;
+	pThis->MatrixScale1 += step;
+	if (pThis->MatrixScale1 > 1.0 - step * 0.4)
+		pThis->MatrixScale1 = 1.0;
+
+	return R->Origin() + 0x33;
+}
+
+DEFINE_HOOK_AGAIN(0x7630A1, WaveClass_AI_StepEnd, 0x6)
+DEFINE_HOOK(0x762E65, WaveClass_AI_StepEnd, 0x6)
+{
+	enum { SkipEndStep = 0x7631DB };
+
+	GET(WaveClass*, pThis, ESI);
+
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	const double step = (pWeaponExt && pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
+		? pWeaponExt->Wave_Step.Get() : static_cast<double>(0.05f);
+
+	if (pThis->MatrixScale2 >= pThis->MatrixScale1 + step * 0.5)
+		return SkipEndStep;
+
+	pThis->MatrixScale2 += step - static_cast<double>(0.05f);
+	return R->Origin() + 0x23;
 }
 
 DEFINE_HOOK(0x761124, WaveClass_UpdateCells_InitialScale, 0x6)
 {
-	GET(WaveClass*, pThis, EBP);
+	enum { SkipGameCode = 0x76112F };
 
-	const float initialScale = std::max(0.05f, static_cast<float>(pThis->MatrixScale2));
-	__asm { fld initialScale }
-	return R->Origin() + 0x6;
+	GET(WaveClass*, pThis, ESI);
+	GET(const int, startX, EAX);
+
+	R->EDX(startX < 0 ? -1 : 0);
+	R->Stack<double>(0x40, std::max(static_cast<double>(0.05f), pThis->MatrixScale2));
+	return SkipGameCode;
 }
 
 DEFINE_HOOK(0x75EE36, WaveClass_PutSonicBeamPixel_SineTableWrap, 0x6)
 {
-	enum { SkipGameCode = 0x75EE43 };
+	enum { SkipGameCode = 0x75EE3C };
 
-	GET(WaveClass*, pThis, EBP);
-	GET(int, index, EAX);
+	GET(const int, baseIndex, EAX);
+	GET(const int, waveEC, EDI);
+	GET_STACK(const int, buffer, 0x28);
 
-	index = (index + pThis->WaveEC) % 500;
+	int index = (baseIndex + waveEC) % 500;
 	if (index < 0)
 		index += 500;
 
-	const double value = reinterpret_cast<const double*>(0xB2CD68u)[index];
-	__asm { fld value }
+	R->EAX(index);
+	R->EDI(buffer);
 	return SkipGameCode;
 }
 
@@ -690,14 +713,13 @@ DEFINE_HOOK(0x7601CF, WaveClass_PutMagBeamPixel_SineTableWrap, 0xA)
 {
 	enum { SkipGameCode = 0x7601D9 };
 
-	GET(WaveClass*, pThis, EBP);
-	GET(int, index, EAX);
+	GET(const int, baseIndex, EAX);
+	GET(const int, waveEC, EBX);
 
-	index = (index + pThis->WaveEC) % 500;
+	int index = (baseIndex + waveEC) % 500;
 	if (index < 0)
 		index += 500;
 
-	const double value = reinterpret_cast<const double*>(0xB2B9B8u)[index];
-	__asm { fadd value }
+	R->EAX(static_cast<int>(reinterpret_cast<const short*>(0xB45E68u)[index]));
 	return SkipGameCode;
 }
