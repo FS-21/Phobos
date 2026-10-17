@@ -660,26 +660,10 @@ static SHPStruct* GetOrCreateScaledSHPShadow()
 	if (pCachedSHP)
 		return pCachedSHP;
 
-	auto pBaseSHP = *reinterpret_cast<SHPStruct**>(0xA8F244);
-
-	if (!pBaseSHP)
-		pBaseSHP = FileSystem::LoadSHPFile("infshdw.shp");
-
-	int w = 48;
-	int h = 24;
-
-	auto pBaseData = pBaseSHP ? pBaseSHP->GetData() : nullptr;
-	if (pBaseData && pBaseData->Width > 0 && pBaseData->Height > 0)
-	{
-		w = pBaseData->Width * 3;
-		h = pBaseData->Height * 3;
-	}
-
-	if (w <= 0)
-		w = 48;
-
-	if (h <= 0)
-		h = 24;
+	// In Yuri's Revenge, an infantry shadow is ~16x8 pixels (2:1 isometric ratio), scaled x1.25.
+	constexpr double scale = 1.25;
+	const int w = static_cast<int>(16 * scale);
+	const int h = static_cast<int>(8 * scale);
 
 	const size_t headerSize = 32;
 	const size_t pixelSize = static_cast<size_t>(w) * static_cast<size_t>(h);
@@ -688,12 +672,14 @@ static SHPStruct* GetOrCreateScaledSHPShadow()
 	byte* pData = shadowBuffer.data();
 
 	// SHPStruct Header (8 bytes)
-	*reinterpret_cast<WORD*>(pData + 0) = 0;
+	*reinterpret_cast<WORD*>(pData + 0) = 0; // Type 0 (TS SHP)
 	*reinterpret_cast<short*>(pData + 2) = static_cast<short>(w);
 	*reinterpret_cast<short*>(pData + 4) = static_cast<short>(h);
-	*reinterpret_cast<short*>(pData + 6) = 1;
+	*reinterpret_cast<short*>(pData + 6) = 1; // 1 frame
 
 	// SHPFrame Header (24 bytes)
+	// Centered around 0: BlitterFlags::Centered (0x200) subtracts Width/2 and Height/2.
+	// Setting Left = 0 and Top = 0 ensures perfect centering at the target screen position.
 	*reinterpret_cast<short*>(pData + 8) = 0;
 	*reinterpret_cast<short*>(pData + 10) = 0;
 	*reinterpret_cast<short*>(pData + 12) = static_cast<short>(w);
@@ -703,10 +689,10 @@ static SHPStruct* GetOrCreateScaledSHPShadow()
 	pData[21] = 0;
 	pData[22] = 0;
 	*reinterpret_cast<DWORD*>(pData + 24) = 0;
-	*reinterpret_cast<int*>(pData + 28) = 32; // Offset to pixel buffer
+	*reinterpret_cast<int*>(pData + 28) = 32; // Offset to pixel buffer (8 + 24 = 32)
 
-	// Generate 2:1 isometric ellipse in the pixel buffer
 	byte* pPixels = pData + 32;
+
 	const double rx = (w - 1) / 2.0;
 	const double ry = (h - 1) / 2.0;
 	const double cx = rx;
@@ -729,9 +715,12 @@ static SHPStruct* GetOrCreateScaledSHPShadow()
 	return pCachedSHP;
 }
 
-void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClass* pCargo, RectangleStruct* pBounds)
+void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClass* pCargo, RectangleStruct* pBounds, Point2D* pScreenLoc)
 {
-	if (!pCargo || !pCargo->IsAlive || pCargo->InLimbo)
+	if (!pCargo || !pCargo->IsAlive)
+		return;
+
+	if (pCargo->InLimbo && !pCargo->IsOnCarryall)
 		return;
 
 	auto const pCargoType = pCargo->GetTechnoType();
@@ -739,39 +728,44 @@ void UnitExt::DrawCarryallSHPGenericShadow(TechnoClass* pTransporter, TechnoClas
 		return;
 
 	auto const pCarrier = pTransporter ? pTransporter : pCargo->Transporter;
-	auto const pCell = pCarrier ? pCarrier->GetCell() : pCargo->GetCell();
-	const CoordStruct carrierLoc = pCarrier ? pCarrier->Location : pCargo->Location;
-	const int groundZ = pCell ? pCell->GetCoordsWithBridge().Z : MapClass::Instance.GetCellFloorHeight(carrierLoc);
-
-	// Only draw generic airborne shadow when held above ground
-	const int currentZ = pCarrier ? pCarrier->Location.Z : pCargo->Location.Z;
-	if (currentZ <= groundZ + 16)
-		return;
+	const int altitude = std::max(0, pCarrier ? pCarrier->GetHeight() : pCargo->GetHeight());
 
 	auto pShadowSHP = GetOrCreateScaledSHPShadow();
-
 	if (!pShadowSHP)
 		return;
 
-	CoordStruct groundCoord = carrierLoc;
-	groundCoord.Z = groundZ;
+	Point2D shadowScreenLoc;
+	if (pScreenLoc)
+	{
+		shadowScreenLoc = *pScreenLoc;
+		shadowScreenLoc.Y += TacticalClass::AdjustForZ(altitude);
+	}
+	else
+	{
+		auto const pCell = pCarrier ? pCarrier->GetCell() : pCargo->GetCell();
+		const CoordStruct carrierLoc = pCarrier ? pCarrier->Location : pCargo->Location;
+		const int groundZ = pCell ? pCell->GetCoordsWithBridge().Z : MapClass::Instance.GetCellFloorHeight(carrierLoc);
+		CoordStruct groundCoord = carrierLoc;
+		groundCoord.Z = groundZ;
+		shadowScreenLoc = TacticalClass::Instance->CoordsToClient(groundCoord).first;
+	}
 
-	Point2D shadowScreenLoc = TacticalClass::CoordsToScreen(groundCoord) - TacticalClass::Instance->TacticalPos;
+	// The shadow is projected onto the ground but the engine still derives its depth from the
+	// airborne position, so a small ZAdjust loses the Z-buffer test against the terrain.
+	// Empirically (altitude 500) the threshold is between -100 and -200; keep a floor of -200 so it
+	// also passes at low altitude, and scale with altitude above that.
+	const int zAdjust = -2 - std::max(altitude, 200);
 
-	const int frameIdx = 0;
-	const auto pBoundsToUse = pBounds ? pBounds : &DSurface::ViewBounds;
-
-	CC_Draw_Shape(
-		DSurface::Temp,
+	DSurface::Temp->DrawSHP(
 		FileSystem::PALETTE_PAL,
 		pShadowSHP,
-		frameIdx,
+		0,
 		&shadowScreenLoc,
-		pBoundsToUse,
+		&DSurface::ViewBounds,
 		static_cast<BlitterFlags>(0x2601),
 		0,
-		0,
-		ZGradient(0),
+		zAdjust,
+		ZGradient::Ground,
 		1000,
 		0,
 		nullptr,
@@ -797,8 +791,17 @@ void UnitExt::UpdateCarryall()
 	if (!pJJLoco)
 		return;
 
-	if (pThis->InAir && !pJJLoco->Is_Moving_Now())
-		pThis->WalkedFramesSoFar++;
+	const bool isAirborne = (pJJLoco->State != JumpjetLocomotionClass::State::Grounded) && (pThis->GetHeight() > 0);
+	if (isAirborne)
+	{
+		pThis->InAir = true;
+		if (!pJJLoco->Is_Moving_Now())
+			pThis->WalkedFramesSoFar++;
+	}
+	else
+	{
+		pThis->InAir = false;
+	}
 
 	const int cruiseHeight = pType->JumpjetHeight > 0 ? pType->JumpjetHeight : 500;
 	const int climbRate = std::max(2, static_cast<int>(pType->JumpjetClimb > 0.0f ? pType->JumpjetClimb : 5.0f));

@@ -1,17 +1,5 @@
 #include <Ext/UnitType/Body.h>
 
-DEFINE_HOOK(0x73C75A, UnitClass_DrawAsSHP_SkipShadow, 0x7)
-{
-	enum { SkipShadow = 0x73C7AC, DrawShadow = 0 };
-
-	GET(UnitClass*, pThis, EBP);
-
-	if (pThis->IsOnCarryall)
-		return SkipShadow;
-
-	return DrawShadow;
-}
-
 DEFINE_HOOK(0x73C7AC, UnitClass_DrawAsSHP_DrawTurret_TintFix, 0x6)
 {
 	enum { SkipDrawCode = 0x73CE00 };
@@ -36,11 +24,7 @@ DEFINE_HOOK(0x73C7AC, UnitClass_DrawAsSHP_DrawTurret_TintFix, 0x6)
 	const int zAdjust = tooBigToFitUnderBridge ? -16 : 0;
 	const ZGradient zGradient = tooBigToFitUnderBridge ? ZGradient::Ground : pThis->GetZGradient();
 
-	const bool suppressBodyShadow = pThis->IsOnCarryall;
-	const bool originalBodyDrawShadow = suppressBodyShadow ? std::exchange(Game::bDrawShadow, false) : Game::bDrawShadow;
 	pThis->Draw_A_SHP(pShape, bodyFrameIdx, &location, &bounds, 0, 256, zAdjust, zGradient, 0, extraLight, 0, 0, 0, 0, 0, 0);
-	if (suppressBodyShadow)
-		Game::bDrawShadow = originalBodyDrawShadow;
 
 	const auto pTurretShape = UnitTypeExt::Fetch(pType)->TurretShape;
 	const int StartFrame = pTurretShape ? 0 : (pType->WalkFrames * pType->Facings);

@@ -353,8 +353,26 @@ DEFINE_HOOK(0x73CEEA, UnitClass_DrawIt_Cargo, 0x6)
 	Point2D cargoScreenLoc = *pLocation;
 	cargoScreenLoc.Y += TacticalClass::AdjustForZ(pThis->Location.Z - cargoZ) - 10;
 
-	UnitExt::DrawCarryallSHPGenericShadow(pThis, pCargo, pBounds);
+	UnitExt::DrawCarryallSHPGenericShadow(pThis, pCargo, pBounds, pLocation);
+
+	auto const pCargoType = pCargo->GetTechnoType();
+	const bool origNoShadow = pCargoType ? pCargoType->NoShadow : false;
+	const bool origUnderwater = pCargoType ? pCargoType->Underwater : false;
+	if (pCargoType)
+	{
+		pCargoType->NoShadow = true;
+		pCargoType->Underwater = true;
+	}
+
+	const bool origDrawShadow = std::exchange(Game::bDrawShadow, false);
 	pCargo->DrawIt(&cargoScreenLoc, pBounds);
+	Game::bDrawShadow = origDrawShadow;
+
+	if (pCargoType)
+	{
+		pCargoType->NoShadow = origNoShadow;
+		pCargoType->Underwater = origUnderwater;
+	}
 
 	InCarryallCargoDraw = false;
 

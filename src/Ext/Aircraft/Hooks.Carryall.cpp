@@ -33,6 +33,69 @@ DEFINE_HOOK(0x419B1D, AircraftClass_CellSeemsOk_Carryall, 0x8)
 	return ReturnDefault;
 }
 
+DEFINE_HOOK(0x41463E, AircraftClass_DrawIt_CarryallCargoSync, 0x7)
+{
+	GET(TechnoClass*, pCargo, EAX);
+	GET(AircraftClass*, pThis, EBP);
+	GET_STACK(RectangleStruct*, pBounds, 0xD8);
+
+	if (pCargo && pThis)
+	{
+		auto const pCell = pThis->GetCell();
+		const int floorZ = pCell ? pCell->GetCoordsWithBridge().Z : MapClass::Instance.GetCellFloorHeight(pThis->Location);
+		const int cargoZ = std::max(floorZ, pThis->Location.Z - 32);
+
+		pCargo->Location.X = pThis->Location.X;
+		pCargo->Location.Y = pThis->Location.Y;
+		pCargo->Location.Z = cargoZ;
+		pCargo->PrimaryFacing = pThis->PrimaryFacing;
+		pCargo->SecondaryFacing = pThis->PrimaryFacing;
+		pCargo->AngleRotatedSideways = pThis->AngleRotatedSideways;
+		pCargo->AngleRotatedForwards = pThis->AngleRotatedForwards;
+		pCargo->PitchAngle = pThis->PitchAngle;
+		pCargo->IsOnCarryall = true;
+		pCargo->Transporter = pThis;
+	}
+
+	R->ECX(pBounds);
+	return 0;
+}
+
+DEFINE_HOOK(0x41464F, AircraftClass_DrawIt_CallDrawAgain_SuppressShadow, 0x6)
+{
+	GET(TechnoClass*, pCargo, ECX);
+	GET(AircraftClass*, pCarrier, EBP);
+	GET_STACK(Point2D*, pLocation, 0x0);
+	GET_STACK(RectangleStruct*, pBounds, 0x4);
+
+	if (pCargo)
+	{
+		UnitExt::DrawCarryallSHPGenericShadow(pCarrier ? pCarrier : pCargo->Transporter, pCargo, pBounds, pLocation);
+
+		auto const pCargoType = pCargo->GetTechnoType();
+		const bool origNoShadow = pCargoType ? pCargoType->NoShadow : false;
+		const bool origUnderwater = pCargoType ? pCargoType->Underwater : false;
+		if (pCargoType)
+		{
+			pCargoType->NoShadow = true;
+			pCargoType->Underwater = true;
+		}
+
+		const bool origDrawShadow = std::exchange(Game::bDrawShadow, false);
+		pCargo->DrawIt(pLocation, pBounds);
+		Game::bDrawShadow = origDrawShadow;
+
+		if (pCargoType)
+		{
+			pCargoType->NoShadow = origNoShadow;
+			pCargoType->Underwater = origUnderwater;
+		}
+	}
+
+	R->ESP(R->ESP() + 8);
+	return 0x414655;
+}
+
 DEFINE_HOOK(0x4151AA, AircraftClass_AI_CarryallCargoSync, 0x6)
 {
 	GET(TechnoClass*, pCargo, ECX);
@@ -54,8 +117,6 @@ DEFINE_HOOK(0x4151AA, AircraftClass_AI_CarryallCargoSync, 0x6)
 		pCargo->PitchAngle = pThis->PitchAngle;
 		pCargo->IsOnCarryall = true;
 		pCargo->Transporter = pThis;
-
-		UnitExt::DrawCarryallSHPGenericShadow(pThis, pCargo, nullptr);
 	}
 
 	return 0;
