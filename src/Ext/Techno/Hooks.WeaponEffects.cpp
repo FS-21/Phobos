@@ -4,17 +4,154 @@
 #include <Ext/WeaponType/Body.h>
 #include <Ext/Bullet/Body.h>
 
+#include <unordered_map>
+
 // Contains hooks that fix weapon graphical effects like lasers, railguns, electric bolts, beams and waves not interacting
 // correctly with obstacles between firer and target, as well as railgun / railgun particles being cut off by elevation.
 
 namespace FireAtTemp
 {
 	BulletClass* FireBullet = nullptr;
+	WeaponTypeClass* FireWeapon = nullptr;
 	CoordStruct OriginalTargetCoords;
 	CellClass* pObstacleCell = nullptr;
 	AbstractClass* pOriginalTarget = nullptr;
 	AbstractClass* pWaveOwnerTarget = nullptr;
 	bool IgnoreTargetForWaveAmbientDamage = false;
+	bool CheckedOtherWaves = false;
+	bool RestoredWaveEC19 = false;
+	std::unordered_map<const WaveClass*, WeaponTypeClass*> WaveWeaponMap;
+
+	WeaponTypeClass* GetWaveWeapon(const WaveClass* pWave)
+	{
+		if (!pWave)
+			return nullptr;
+
+		auto const it = WaveWeaponMap.find(pWave);
+		if (it != WaveWeaponMap.end())
+			return it->second;
+
+		if (FireWeapon)
+			return FireWeapon;
+
+		if (auto const pOwner = pWave->Owner)
+		{
+			for (int i = 0; i < 2; ++i)
+			{
+				if (auto const pWeaponStruct = pOwner->GetWeapon(i))
+				{
+					if (auto const pWeapon = pWeaponStruct->WeaponType)
+					{
+						if ((pWave->Type == WaveType::Sonic && pWeapon->IsSonic)
+							|| (pWave->Type == WaveType::Magnetron && pWeapon->IsMagBeam))
+						{
+							return pWeapon;
+						}
+					}
+				}
+			}
+
+			if (auto const pWeaponStruct = pOwner->GetWeapon(0))
+				return pWeaponStruct->WeaponType;
+		}
+
+		return nullptr;
+	}
+
+	bool ShouldDelayWaveROF(const TechnoClass* pTechno, const WeaponTypeClass* pWeapon)
+	{
+		if (!pTechno || !pTechno->Wave)
+			return false;
+
+		if (auto const pWaveWeapon = GetWaveWeapon(pTechno->Wave))
+		{
+			if (auto const pWaveWeaponExt = WeaponTypeExt::TryFetch(pWaveWeapon))
+			{
+				if (pWaveWeaponExt->Wave_DelayROF.Get(pWaveWeaponExt->IsClassicSonic))
+					return true;
+			}
+		}
+
+		if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon))
+		{
+			if (pWeaponExt->Wave_DelayROF.Get(pWeaponExt->IsClassicSonic))
+				return true;
+		}
+
+		return false;
+	}
+
+	void ApplyWaveGeometry(const WaveClass* pWave, bool isMagnetic)
+	{
+		if (!pWave)
+			return;
+
+		const auto type = pWave->Type;
+		const int typeIndex = static_cast<int>(type);
+
+		if (typeIndex < 0 || typeIndex > 3)
+			return;
+
+		int defaultWidth = 100;
+		int defaultCap = 30;
+
+		switch (type)
+		{
+		case WaveType::Sonic:
+			defaultWidth = 100;
+			defaultCap = 30;
+			break;
+		case WaveType::BigLaser:
+			defaultWidth = 44;
+			defaultCap = 34;
+			break;
+		case WaveType::Laser:
+			defaultWidth = 34;
+			defaultCap = 27;
+			break;
+		case WaveType::Magnetron:
+			defaultWidth = 50;
+			defaultCap = isMagnetic ? 0 : 30;
+			break;
+		default:
+			break;
+		}
+
+		auto const pWeapon = GetWaveWeapon(pWave);
+		auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+		const int baseWidth = (pWeaponExt && pWeaponExt->Wave_Width.isset())
+			? pWeaponExt->Wave_Width.Get() : defaultWidth;
+		int startWidth = (pWeaponExt && pWeaponExt->Wave_StartWidth.isset())
+			? pWeaponExt->Wave_StartWidth.Get() : baseWidth;
+		int endWidth = (pWeaponExt && pWeaponExt->Wave_EndWidth.isset())
+			? pWeaponExt->Wave_EndWidth.Get() : baseWidth;
+		int capLength = (pWeaponExt && pWeaponExt->Wave_CapLength.isset())
+			? pWeaponExt->Wave_CapLength.Get() : defaultCap;
+
+		if (type == WaveType::Sonic || type == WaveType::Magnetron)
+		{
+			startWidth = std::clamp(startWidth, 1, 149);
+			endWidth = std::clamp(endWidth, 1, 149);
+		}
+		else
+		{
+			startWidth = std::max(1, startWidth);
+			endWidth = std::max(1, endWidth);
+		}
+
+		capLength = std::max(0, capLength);
+
+		auto* const pVectors = reinterpret_cast<Vector3D<float>*>((isMagnetic ? 0xB45CA0u : 0xB45DA8u) + typeIndex * 48u);
+		const float cap = static_cast<float>(capLength);
+		const float startW = static_cast<float>(startWidth);
+		const float endW = static_cast<float>(endWidth);
+
+		pVectors[0] = { -cap, -endW, 0.0f };
+		pVectors[1] = { -cap, endW, 0.0f };
+		pVectors[2] = { cap, -startW, 0.0f };
+		pVectors[3] = { cap, startW, 0.0f };
+	}
 }
 
 DEFINE_HOOK(0x6FF08B, TechnoClass_Fire_RecordBullet, 0x6)
@@ -251,10 +388,13 @@ DEFINE_HOOK(0x6FD38D, TechnoClass_DrawSth_DrawToInvisoFlakScatterLocation, 0x7) 
 // Adjust target for bolt / beam / wave drawing.
 DEFINE_HOOK(0x6FF43F, TechnoClass_FireAt_TargetSet, 0x6)
 {
+	GET(WeaponTypeClass*, pWeapon, EBX);
 	LEA_STACK(CoordStruct*, pTargetCoords, STACK_OFFSET(0xB0, -0x28));
 	GET_BASE(AbstractClass*, pOriginalTarget, 0x8);
 
 	// Store original target & coords
+	FireAtTemp::FireWeapon = pWeapon;
+	FireAtTemp::CheckedOtherWaves = false;
 	FireAtTemp::OriginalTargetCoords = *pTargetCoords;
 	FireAtTemp::pOriginalTarget = pOriginalTarget;
 
@@ -262,6 +402,24 @@ DEFINE_HOOK(0x6FF43F, TechnoClass_FireAt_TargetSet, 0x6)
 	{
 		*pTargetCoords = FireAtTemp::pObstacleCell->GetCoordsWithBridge();
 		R->Base(8, FireAtTemp::pObstacleCell); // Replace original target so it gets used by Ares sonic wave stuff etc. as well.
+	}
+
+	return 0;
+}
+
+// Allow IsLaser, IsElectricBolt, IsRadBeam, and IsRadEruption weapons to also spawn Wave.IsLaser, Wave.IsBigLaser, or IsMagBeam waves.
+DEFINE_HOOK(0x6FF65A, TechnoClass_FireAt_CheckOtherWaves, 0x6)
+{
+	enum { CheckOtherWaves = 0x6FF5F5 };
+
+	GET(WeaponTypeClass*, pWeapon, EBX);
+
+	if (!FireAtTemp::CheckedOtherWaves && pWeapon
+		&& (pWeapon->IsLaser || pWeapon->IsElectricBolt || pWeapon->IsRadBeam || pWeapon->IsRadEruption))
+	{
+		FireAtTemp::CheckedOtherWaves = true;
+		R->EDI(R->Base<AbstractClass*>(0x8));
+		return CheckOtherWaves;
 	}
 
 	return 0;
@@ -279,6 +437,8 @@ DEFINE_HOOK(0x6FF660, TechnoClass_FireAt_ObstacleCellUnset, 0x6)
 
 	// Reset temp values
 	FireAtTemp::FireBullet = nullptr;
+	FireAtTemp::FireWeapon = nullptr;
+	FireAtTemp::CheckedOtherWaves = false;
 	FireAtTemp::OriginalTargetCoords = CoordStruct::Empty;
 	FireAtTemp::pObstacleCell = nullptr;
 	FireAtTemp::pOriginalTarget = nullptr;
@@ -286,7 +446,7 @@ DEFINE_HOOK(0x6FF660, TechnoClass_FireAt_ObstacleCellUnset, 0x6)
 	return 0;
 }
 
-// Allow drawing single color lasers with thickness.
+// Allow drawing single color lasers with thickness and antialiased lasers.
 DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 {
 	GET(WeaponTypeClass* const, pWeapon, ECX);
@@ -296,6 +456,8 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 	{
 		if (!pLaser->IsHouseColor && pWeaponExt->Laser_IsSingleColor)
 			pLaser->IsHouseColor = true;
+
+		*reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(pLaser) + 0x53) = pWeaponExt->IsAntialiasedLaser;
 	}
 
 	// Fixes drawing thick lasers for non-PrismSupport building-fired lasers.
@@ -304,9 +466,105 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 	return 0;
 }
 
+DEFINE_HOOK(0x6FC6EE, TechnoClass_CanFire_WaveDelayROF, 0x6)
+{
+	enum { ReturnFireErrorRearm = 0x6FC8A1 };
+
+	GET(TechnoClass*, pThis, ESI);
+	GET(WeaponTypeClass*, pWeapon, EBP);
+
+	if (pThis->Wave && FireAtTemp::ShouldDelayWaveROF(pThis, pWeapon))
+		return ReturnFireErrorRearm;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x75E97B, WaveClass_CTOR_Init, 0x6)
+{
+	GET(WaveClass*, pThis, ESI);
+	GET(WaveType, type, ECX);
+
+	// Fix swapped Wave.IsBigLaser and Wave.IsLaser wave types.
+	if (type == WaveType::BigLaser)
+		type = WaveType::Laser;
+	else if (type == WaveType::Laser)
+		type = WaveType::BigLaser;
+
+	pThis->Type = type;
+	R->ECX(type);
+
+	if (FireAtTemp::FireWeapon)
+		FireAtTemp::WaveWeaponMap[pThis] = FireAtTemp::FireWeapon;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x75E98E, WaveClass_CTOR_SonicDuration, 0xA)
+{
+	enum { SkipGameCode = 0x75E998 };
+
+	GET(WaveClass*, pThis, ESI);
+
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	pThis->WaveEC = (pWeaponExt && pWeaponExt->Wave_Duration.isset())
+		? std::max(1, pWeaponExt->Wave_Duration.Get()) : 100;
+
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x75EB87, WaveClass_CTOR_LaserDuration, 0xA)
+{
+	enum { SkipGameCode = 0x75EB91 };
+
+	GET(WaveClass*, pThis, ESI);
+
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	pThis->LaserEC = (pWeaponExt && pWeaponExt->Wave_Duration.isset())
+		? std::max(33, pWeaponExt->Wave_Duration.Get()) : 160;
+
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x75ED30, WaveClass_DTOR_Cleanup, 0x6)
+{
+	GET(WaveClass*, pThis, ECX);
+	FireAtTemp::WaveWeaponMap.erase(pThis);
+	return 0;
+}
+
+DEFINE_HOOK_AGAIN(0x762492, WaveClass_InitSonicAndMagnetic_EndZAdjustAndGeometry, 0x6)
+DEFINE_HOOK(0x761A62, WaveClass_InitSonicAndMagnetic_EndZAdjustAndGeometry, 0x6)
+{
+	GET(WaveClass*, pThis, EDI);
+	GET(const int, endZ, EAX);
+
+	const bool isMagnetic = R->Origin() == 0x762492;
+	FireAtTemp::ApplyWaveGeometry(pThis, isMagnetic);
+
+	int endZAdjust = (pThis->Type == WaveType::Sonic || pThis->Type == WaveType::Magnetron) ? 50 : 0;
+
+	if (auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis))
+	{
+		if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon))
+		{
+			if (pWeaponExt->Wave_EndZAdjust.isset())
+				endZAdjust = pWeaponExt->Wave_EndZAdjust.Get();
+		}
+	}
+
+	R->Stack(0x3C, endZ + endZAdjust);
+	return R->Origin() + 0x17;
+}
+
 // WaveClass requires the firer's target and wave's target to match so it needs bit of extra handling here for obstacle cell targets.
 DEFINE_HOOK(0x762AFF, WaveClass_AI_TargetSet, 0x6)
 {
+	enum { SkipCutoffAndMagnetronLoop = 0x762B62 };
+
 	GET(WaveClass*, pThis, ESI);
 
 	if (pThis->Target)
@@ -323,12 +581,55 @@ DEFINE_HOOK(0x762AFF, WaveClass_AI_TargetSet, 0x6)
 		}
 	}
 
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	const double step = (pWeaponExt && pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
+		? pWeaponExt->Wave_Step.Get() : 0.05;
+	const int detachThreshold = std::max(1, static_cast<int>(1.0 / step) - 1);
+
+	if (pThis->Type == WaveType::Magnetron)
+	{
+		if (!pWeaponExt || !pWeaponExt->Wave_Duration.isset())
+		{
+			if (pThis->WaveEC == detachThreshold && pThis->WaveCount < 4)
+			{
+				pThis->WaveEC = detachThreshold + 45;
+				++pThis->WaveCount;
+			}
+		}
+	}
+
+	if (pThis->WaveEC <= detachThreshold)
+	{
+		pThis->IsTraveling = false;
+		pThis->ShouldEnd = true;
+	}
+	else if (detachThreshold != 19 && pThis->WaveEC == 19)
+	{
+		FireAtTemp::RestoredWaveEC19 = true;
+		pThis->WaveEC = 20;
+	}
+
+	if ((pWeaponExt && pWeaponExt->IsClassicSonic)
+		|| (pThis->Type == WaveType::Magnetron && ((pWeaponExt && pWeaponExt->Wave_Duration.isset()) || detachThreshold != 19)))
+	{
+		R->ECX(pThis->Owner);
+		return SkipCutoffAndMagnetronLoop;
+	}
+
 	return 0;
 }
 
 DEFINE_HOOK(0x762D57, WaveClass_AI_TargetUnset, 0x6)
 {
 	GET(WaveClass*, pThis, ESI);
+
+	if (FireAtTemp::RestoredWaveEC19)
+	{
+		pThis->WaveEC = 19;
+		FireAtTemp::RestoredWaveEC19 = false;
+	}
 
 	if (FireAtTemp::pWaveOwnerTarget)
 	{
@@ -339,4 +640,64 @@ DEFINE_HOOK(0x762D57, WaveClass_AI_TargetUnset, 0x6)
 	}
 
 	return 0;
+}
+
+DEFINE_HOOK_AGAIN(0x7630C4, WaveClass_AI_Step, 0x6)
+DEFINE_HOOK_AGAIN(0x7630A1, WaveClass_AI_Step, 0x6)
+DEFINE_HOOK_AGAIN(0x762F77, WaveClass_AI_Step, 0x6)
+DEFINE_HOOK_AGAIN(0x762E88, WaveClass_AI_Step, 0x6)
+DEFINE_HOOK_AGAIN(0x762E65, WaveClass_AI_Step, 0x6)
+DEFINE_HOOK(0x762D89, WaveClass_AI_Step, 0x6)
+{
+	GET(WaveClass*, pThis, ESI);
+
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	const float step = (pWeaponExt && pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
+		? static_cast<float>(pWeaponExt->Wave_Step.Get()) : 0.05f;
+
+	__asm { fld step }
+	return R->Origin() + 0x6;
+}
+
+DEFINE_HOOK(0x761124, WaveClass_UpdateCells_InitialScale, 0x6)
+{
+	GET(WaveClass*, pThis, EBP);
+
+	const float initialScale = std::max(0.05f, static_cast<float>(pThis->MatrixScale2));
+	__asm { fld initialScale }
+	return R->Origin() + 0x6;
+}
+
+DEFINE_HOOK(0x75EE36, WaveClass_PutSonicBeamPixel_SineTableWrap, 0x6)
+{
+	enum { SkipGameCode = 0x75EE43 };
+
+	GET(WaveClass*, pThis, EBP);
+	GET(int, index, EAX);
+
+	index = (index + pThis->WaveEC) % 500;
+	if (index < 0)
+		index += 500;
+
+	const double value = reinterpret_cast<const double*>(0xB2CD68u)[index];
+	__asm { fld value }
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x7601CF, WaveClass_PutMagBeamPixel_SineTableWrap, 0xA)
+{
+	enum { SkipGameCode = 0x7601D9 };
+
+	GET(WaveClass*, pThis, EBP);
+	GET(int, index, EAX);
+
+	index = (index + pThis->WaveEC) % 500;
+	if (index < 0)
+		index += 500;
+
+	const double value = reinterpret_cast<const double*>(0xB2B9B8u)[index];
+	__asm { fadd value }
+	return SkipGameCode;
 }

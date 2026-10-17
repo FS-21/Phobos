@@ -129,6 +129,17 @@ public:
 	Valueable<bool> Abductor_ChangeOwner_IgnoreDriverKilled;
 	Valueable<bool> CanTarget_DriverKilled;
 
+	Valueable<bool> IsClassicSonic;
+	Valueable<bool> IsAntialiasedLaser;
+	Nullable<bool> Wave_DelayROF;
+	Nullable<int> Wave_Duration;
+	Nullable<double> Wave_Step;
+	Nullable<int> Wave_Width;
+	Nullable<int> Wave_StartWidth;
+	Nullable<int> Wave_EndWidth;
+	Nullable<int> Wave_CapLength;
+	Nullable<int> Wave_EndZAdjust;
+
 	WeaponTypeExt(WeaponTypeClass* OwnerObject) : AbstractTypeExt(OwnerObject)
 		, DiskLaser_Radius { DiskLaserClass::Radius }
 		, ProjectileRange { Leptons(100000) }
@@ -230,6 +241,16 @@ public:
 		, Abductor_ChangeOwner_ResetDriverKilled { true }
 		, Abductor_ChangeOwner_IgnoreDriverKilled { false }
 		, CanTarget_DriverKilled { true }
+		, IsClassicSonic { false }
+		, IsAntialiasedLaser { false }
+		, Wave_DelayROF {}
+		, Wave_Duration {}
+		, Wave_Step {}
+		, Wave_Width {}
+		, Wave_StartWidth {}
+		, Wave_EndWidth {}
+		, Wave_CapLength {}
+		, Wave_EndZAdjust {}
 	{ }
 
 	int GetBurstDelay(int burstIndex) const;

@@ -221,6 +221,20 @@ void WeaponTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->Abductor_ChangeOwner_IgnoreDriverKilled.Read(exINI, pSection, "Abductor.ChangeOwner.IgnoreDriverKilled");
 	this->CanTarget_DriverKilled.Read(exINI, pSection, "CanTarget.DriverKilled");
 
+	this->IsClassicSonic.Read(exINI, pSection, "IsClassicSonic");
+	if (this->IsClassicSonic)
+		pThis->IsSonic = true;
+
+	this->IsAntialiasedLaser.Read(exINI, pSection, "IsAntialiasedLaser");
+	this->Wave_DelayROF.Read(exINI, pSection, "Wave.DelayROF");
+	this->Wave_Duration.Read(exINI, pSection, "Wave.Duration");
+	this->Wave_Step.Read(exINI, pSection, "Wave.Step");
+	this->Wave_Width.Read(exINI, pSection, "Wave.Width");
+	this->Wave_StartWidth.Read(exINI, pSection, "Wave.StartWidth");
+	this->Wave_EndWidth.Read(exINI, pSection, "Wave.EndWidth");
+	this->Wave_CapLength.Read(exINI, pSection, "Wave.CapLength");
+	this->Wave_EndZAdjust.Read(exINI, pSection, "Wave.EndZAdjust");
+
 	// handle SkipWeaponPicking
 	if (this->CanTarget != AffectedTarget::All || this->CanTargetHouses != AffectedHouse::All
 		|| this->CanTarget_MaxHealth < 1.0 || this->CanTarget_MinHealth > 0.0
@@ -341,6 +355,16 @@ void WeaponTypeExt::Serialize(T& Stm)
 		.Process(this->Abductor_ChangeOwner_ResetDriverKilled)
 		.Process(this->Abductor_ChangeOwner_IgnoreDriverKilled)
 		.Process(this->CanTarget_DriverKilled)
+		.Process(this->IsClassicSonic)
+		.Process(this->IsAntialiasedLaser)
+		.Process(this->Wave_DelayROF)
+		.Process(this->Wave_Duration)
+		.Process(this->Wave_Step)
+		.Process(this->Wave_Width)
+		.Process(this->Wave_StartWidth)
+		.Process(this->Wave_EndWidth)
+		.Process(this->Wave_CapLength)
+		.Process(this->Wave_EndZAdjust)
 		;
 };
 

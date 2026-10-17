@@ -3671,6 +3671,16 @@ LaserPositionUpdate.StopOnFirerConvert=false  ; boolean, default to [AudioVisual
 If the weapon sets this logic to a non-`None` value while also using other logics that change the drawing position, such as `FlakScatter` and `VisualScatter`, then after initially drawing the laser according to those other logics, the drawing position will be forced to change due to the update rules.
 ```
 
+### Antialiased laser drawing
+
+- Standard two-color lasers (`IsLaser=true` with `IsHouseColor=false` and `IsSingleColor=false`) can now be drawn using depth-aware antialiased lines instead of 1-pixel multiplying lines by setting `IsAntialiasedLaser` to `true`, restoring the classic Tiberian Sun laser appearance with a smooth outer glow for both `LaserInnerColor` and `LaserOuterColor`.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWEAPON]               ; WeaponType
+IsAntialiasedLaser=false   ; boolean
+```
+
 ### AreaFire target customization
 
 - You can now specify how AreaFire weapon picks its target. By default it targets the base cell the firer is currently on, but this can now be changed to fire on the firer itself or at a random cell within the radius of the weapon's `Range` by setting `AreaFire.Target` to `self` or `random` respectively.
@@ -3723,6 +3733,32 @@ Burst.NoDelay=false   ; boolean
 ```{note}
 - This is useless for buildings and aircraft.
 - This will ignore `Burst.Delays` setting.
+```
+
+### Classic sonic wave and wave customization
+
+- Wave weapons (`IsSonic=true`, `IsMagBeam=true`, `Wave.IsLaser=true`, and `Wave.IsBigLaser=true`) can now be customized with several new options, and classic Tiberian Sun sustained sonic wave behavior can be restored.
+  - `IsClassicSonic` enables the sustained sonic wave behavior where the wave remains anchored to the firing unit's `FLH` and the target for the entire active phase instead of detaching immediately into a short traveling pulse, detaching its trailing edge only during the final frames of the wave's lifetime or if the firer or target is lost. Setting `IsClassicSonic=true` automatically enables `IsSonic=true` on the weapon.
+  - `Wave.DelayROF` prevents the firing unit from initiating another shot while its current wave is still active. Defaults to `true` when `IsClassicSonic=true`, and `false` otherwise.
+  - `Wave.Duration` customizes the lifetime counter of the wave (`WaveEC` for sonic and magnetic beams, or `LaserEC` for laser waves).
+  - `Wave.Step` customizes the progression step per frame of the wave along the beam trajectory for sonic and magnetic waves.
+  - `Wave.Width` customizes the uniform half-width of the wave at both the source and target ends. For sonic and magnetic waves, widths are clamped below 150.
+  - `Wave.StartWidth` and `Wave.EndWidth` allow overriding the half-width of the wave independently at the firing origin and at the target end respectively, falling back to `Wave.Width` if set, or to the wave type's default width (`100` for `IsSonic`, `50` for `IsMagBeam`, `44` for `Wave.IsBigLaser`, and `34` for `Wave.IsLaser`).
+  - `Wave.CapLength` customizes the longitudinal cap extension at both ends of the wave polygon (`30` for `IsSonic`, `0` for `IsMagBeam`, `34` for `Wave.IsBigLaser`, and `27` for `Wave.IsLaser`).
+  - `Wave.EndZAdjust` customizes the vertical Z offset added to the target endpoint of the wave (`50` for `IsSonic` and `IsMagBeam`, and `0` for `Wave.IsLaser` and `Wave.IsBigLaser`).
+
+In `rulesmd.ini`:
+```ini
+[SOMEWEAPON]           ; WeaponType
+IsClassicSonic=false   ; boolean
+Wave.DelayROF=         ; boolean
+Wave.Duration=         ; integer
+Wave.Step=0.05         ; floating point value
+Wave.Width=            ; integer
+Wave.StartWidth=       ; integer
+Wave.EndWidth=         ; integer
+Wave.CapLength=        ; integer
+Wave.EndZAdjust=       ; integer
 ```
 
 ### Customize whether weapon can target iron-curtained technos
