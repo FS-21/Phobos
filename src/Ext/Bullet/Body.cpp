@@ -218,7 +218,7 @@ inline void BulletExt::SimulatedFiringLaser(BulletClass* pBullet, HouseClass* pH
 			((pWeapon->IsHouseColor && pHouse) ? pHouse->LaserColor : pWeapon->LaserInnerColor), black, black, pWeapon->LaserDuration);
 
 		pLaser->IsHouseColor = true;
-		pLaser->Thickness = pWeaponExt->LaserThickness;
+		pLaser->Thickness = pWeaponExt->LaserThickness > 0 ? pWeaponExt->LaserThickness.Get() : 3;
 		pLaser->IsSupported = (pLaser->Thickness > 3);
 	}
 	else

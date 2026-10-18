@@ -97,11 +97,22 @@ DEFINE_HOOK(0x55074B, LaserDrawClass_Draw_Antialiased, 0x6)
 			startZ, endZ, false, outerHasR, outerHasG, outerHasB, currentIntensity);
 	}
 
-	Point2D innerStart = start;
-	Point2D innerEnd = end;
-	DSurface::Temp->DrawSubtractiveLine(
-		&DSurface::ViewBounds, &innerStart, &innerEnd, &pThis->InnerColor,
-		startZ, endZ, false, hasR, hasG, hasB, currentIntensity);
+	const int thickness = std::max(1, pThis->Thickness);
+	const int dx = std::abs(end.X - start.X);
+	const int dy = std::abs(end.Y - start.Y);
+	const Point2D step = (dx >= dy) ? Point2D { 0, 1 } : Point2D { 1, 0 };
+
+	for (int i = 0; i < thickness; ++i)
+	{
+		const int offsetIdx = (i % 2 != 0) ? ((i + 1) / 2) : -(i / 2);
+		const Point2D offset = { step.X * offsetIdx, step.Y * offsetIdx };
+
+		Point2D innerStart = { start.X + offset.X, start.Y + offset.Y };
+		Point2D innerEnd = { end.X + offset.X, end.Y + offset.Y };
+		DSurface::Temp->DrawSubtractiveLine(
+			&DSurface::ViewBounds, &innerStart, &innerEnd, &pThis->InnerColor,
+			startZ, endZ, false, hasR, hasG, hasB, currentIntensity);
+	}
 
 	return SkipGameCode;
 }

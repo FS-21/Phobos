@@ -410,9 +410,7 @@ DEFINE_PATCH(0x6FF506, 0x0F, 0x84, 0xE9, 0x00, 0x00, 0x00);
 DEFINE_PATCH(0x6FF51E, 0x0F, 0x85, 0xD1, 0x00, 0x00, 0x00);
 DEFINE_PATCH(0x6FF533, 0x0F, 0x8E, 0xBC, 0x00, 0x00, 0x00);
 DEFINE_JUMP(LJMP, 0x6FF544, 0x6FF5F5);
-DEFINE_PATCH(0x6FF55D, 0x0F, 0x84, 0x92, 0x00, 0x00, 0x00);
-DEFINE_PATCH(0x6FF56B, 0x0F, 0x84, 0x84, 0x00, 0x00, 0x00);
-DEFINE_JUMP(LJMP, 0x6FF578, 0x6FF5F5);
+DEFINE_JUMP(LJMP, 0x6FF55D, 0x6FF5F5);
 DEFINE_JUMP(LJMP, 0x6FF58F, 0x6FF5F5);
 DEFINE_JUMP(LJMP, 0x6FF5BC, 0x6FF5F5);
 DEFINE_JUMP(LJMP, 0x6FF5CB, 0x6FF5F5);
@@ -450,10 +448,17 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 		{
 			pLaser->IsHouseColor = false;
 			pLaser->Fades = false;
+			pLaser->Thickness = (pWeaponExt->LaserThickness > 0) ? pWeaponExt->LaserThickness.Get() : 1;
 		}
-		else if (!pLaser->IsHouseColor && pWeaponExt->Laser_IsSingleColor)
+		else
 		{
-			pLaser->IsHouseColor = true;
+			if (pWeaponExt->LaserThickness > 0)
+				pLaser->Thickness = pWeaponExt->LaserThickness.Get();
+			else if (pWeapon->IsBigLaser && pLaser->Thickness <= 1)
+				pLaser->Thickness = 2;
+
+			if (!pLaser->IsHouseColor && pWeaponExt->Laser_IsSingleColor)
+				pLaser->IsHouseColor = true;
 		}
 
 		*reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(pLaser) + 0x53) = pWeaponExt->IsAntialiasedLaser;

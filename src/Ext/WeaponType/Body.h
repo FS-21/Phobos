@@ -216,7 +216,7 @@ public:
 		, Beam_Duration { 15 }
 		, Beam_Amplitude { 40.0 }
 		, Beam_IsHouseColor { false }
-		, LaserThickness { 3 }
+		, LaserThickness { -1 }
 		, SkipWeaponPicking { true }
 		, DelayedFire_Duration {}
 		, DelayedFire_SkipInTransport { false }

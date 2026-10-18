@@ -3673,12 +3673,14 @@ If the weapon sets this logic to a non-`None` value while also using other logic
 
 ### Antialiased laser drawing
 
-- Standard two-color lasers (`IsLaser=true` with `IsHouseColor=false` and `IsSingleColor=false`) can now be drawn using depth-aware antialiased lines instead of 1-pixel multiplying lines by setting `IsAntialiasedLaser` to `true`, restoring the classic Tiberian Sun laser appearance with a smooth outer glow for both `LaserInnerColor` and `LaserOuterColor`.
+- Lasers (`IsLaser=true`) can now be drawn using depth-aware antialiased lines instead of multiplying lines by setting `IsAntialiasedLaser` to `true`, restoring the classic Tiberian Sun laser appearance with a smooth outer glow for both `LaserInnerColor` and `LaserOuterColor`.
+- When `IsAntialiasedLaser=true`, `LaserThickness` is also respected (defaulting to `1` when not specified), drawing additional parallel antialiased passes for values greater than `1`.
 
 In `rulesmd.ini`:
 ```ini
 [SOMEWEAPON]               ; WeaponType
 IsAntialiasedLaser=false   ; boolean
+LaserThickness=1           ; integer
 ```
 
 ### AreaFire target customization
@@ -3743,8 +3745,8 @@ Burst.NoDelay=false   ; boolean
   - `Wave.Duration` customizes the lifetime counter of the wave (`WaveEC` for sonic and magnetic beams, or `LaserEC` for laser waves).
   - `Wave.Step` customizes the progression step per frame of the wave along the beam trajectory for sonic and magnetic waves.
   - `Wave.Width` customizes the uniform half-width of the wave at both the source and target ends. For sonic and magnetic waves, widths are clamped below 150.
-  - `Wave.StartWidth` and `Wave.EndWidth` allow overriding the half-width of the wave independently at the firing origin and at the target end respectively, falling back to `Wave.Width` if set, or to the wave type's default width (`100` for `IsSonic`, `50` for `IsMagBeam`, `44` for `Wave.IsLaser`, and `34` for `Wave.IsBigLaser`).
-  - `Wave.CapLength` customizes the longitudinal cap extension at both ends of the wave polygon (`30` for `IsSonic`, `0` for `IsMagBeam`, `34` for `Wave.IsLaser`, and `27` for `Wave.IsBigLaser`).
+  - `Wave.StartWidth` and `Wave.EndWidth` allow overriding the half-width of the wave independently at the firing origin and at the target end respectively, falling back to `Wave.Width` if set, or to the wave type's default width (`100` for `IsSonic`, `50` for `IsMagBeam`, `34` for `Wave.IsLaser`, and `44` for `Wave.IsBigLaser`).
+  - `Wave.CapLength` customizes the longitudinal cap extension at both ends of the wave polygon (`30` for `IsSonic`, `0` for `IsMagBeam`, `27` for `Wave.IsLaser`, and `34` for `Wave.IsBigLaser`).
   - `Wave.EndZAdjust` customizes the vertical Z offset added to the target endpoint of the wave (`50` for `IsSonic` and `IsMagBeam`, and `0` for `Wave.IsLaser` and `Wave.IsBigLaser`).
 
 In `rulesmd.ini`:
