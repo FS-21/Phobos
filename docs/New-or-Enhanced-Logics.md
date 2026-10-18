@@ -3742,9 +3742,9 @@ Burst.NoDelay=false   ; boolean
 - Wave weapons (`IsSonic=true`, `IsMagBeam=true`, `Wave.IsLaser=true`, and `Wave.IsBigLaser=true`) can now be customized with several new options, and classic Tiberian Sun sustained sonic wave behavior can be restored.
   - `IsClassicSonic` enables the sustained sonic wave behavior where the wave remains anchored to the firing unit's `FLH` and the target for the entire active phase instead of detaching immediately into a short traveling pulse, detaching its trailing edge only during the final frames of the wave's lifetime or if the firer or target is lost. While the wave is active, the firing unit cannot initiate another shot while its `ROF` timer counts down in parallel. Setting `IsClassicSonic=true` automatically enables `IsSonic=true` on the weapon.
   - `Wave.DelayROF` pauses the firing unit's `ROF` rearm timer while its current wave is active so the full `ROF` cooldown only begins counting down after the wave finishes.
-  - `Wave.Duration` customizes the lifetime counter of the wave (`WaveEC` for sonic and magnetic beams, or `LaserEC` for laser waves).
-  - `Wave.Step` customizes the progression step per frame of the wave along the beam trajectory for sonic and magnetic waves.
-  - `Wave.Width` customizes the uniform half-width of the wave at both the source and target ends. For sonic and magnetic waves, widths are clamped below 150.
+  - `Wave.Duration` customizes the initial lifetime/intensity counter of the wave (`WaveEC` for sonic and magnetic beams, defaulting to `100`; or `LaserEC` for laser waves, defaulting to `160`).
+  - `Wave.Step` customizes the progression step per frame along the beam trajectory for sonic and magnetic waves (defaulting to `0.05`), or the intensity decay per frame for laser waves (defaulting to `6`).
+  - `Wave.Width` customizes the uniform half-width of the wave at both the source and target ends (`100` for `IsSonic`, `50` for `IsMagBeam`, `34` for `Wave.IsLaser`, and `44` for `Wave.IsBigLaser`). For sonic and magnetic waves, widths are clamped below 150.
   - `Wave.StartWidth` and `Wave.EndWidth` allow overriding the half-width of the wave independently at the firing origin and at the target end respectively, falling back to `Wave.Width` if set, or to the wave type's default width (`100` for `IsSonic`, `50` for `IsMagBeam`, `34` for `Wave.IsLaser`, and `44` for `Wave.IsBigLaser`).
   - `Wave.CapLength` customizes the longitudinal cap extension at both ends of the wave polygon (`30` for `IsSonic`, `0` for `IsMagBeam`, `27` for `Wave.IsLaser`, and `34` for `Wave.IsBigLaser`).
   - `Wave.EndZAdjust` customizes the vertical Z offset added to the target endpoint of the wave (`50` for `IsSonic` and `IsMagBeam`, and `0` for `Wave.IsLaser` and `Wave.IsBigLaser`).
@@ -3754,13 +3754,13 @@ In `rulesmd.ini`:
 [SOMEWEAPON]           ; WeaponType
 IsClassicSonic=false   ; boolean
 Wave.DelayROF=false    ; boolean
-Wave.Duration=         ; integer
-Wave.Step=0.05         ; floating point value
-Wave.Width=            ; integer
-Wave.StartWidth=       ; integer
-Wave.EndWidth=         ; integer
-Wave.CapLength=        ; integer
-Wave.EndZAdjust=       ; integer
+Wave.Duration=         ; integer, defaults to 100 (Sonic/MagBeam) or 160 (Laser/BigLaser)
+Wave.Step=             ; floating point value, defaults to 0.05 (Sonic/MagBeam) or 6.0 (Laser/BigLaser)
+Wave.Width=            ; integer, defaults to 100 (Sonic), 50 (MagBeam), 34 (Laser) or 44 (BigLaser)
+Wave.StartWidth=       ; integer, defaults to Wave.Width
+Wave.EndWidth=         ; integer, defaults to Wave.Width
+Wave.CapLength=        ; integer, defaults to 30 (Sonic), 0 (MagBeam), 27 (Laser) or 34 (BigLaser)
+Wave.EndZAdjust=       ; integer, defaults to 50 (Sonic/MagBeam) or 0 (Laser/BigLaser)
 ```
 
 ### Customize whether weapon can target iron-curtained technos
