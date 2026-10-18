@@ -446,8 +446,15 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 
 	if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon))
 	{
-		if (!pLaser->IsHouseColor && pWeaponExt->Laser_IsSingleColor)
+		if (pWeaponExt->IsAntialiasedLaser)
+		{
+			pLaser->IsHouseColor = false;
+			pLaser->Fades = false;
+		}
+		else if (!pLaser->IsHouseColor && pWeaponExt->Laser_IsSingleColor)
+		{
 			pLaser->IsHouseColor = true;
+		}
 
 		*reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(pLaser) + 0x53) = pWeaponExt->IsAntialiasedLaser;
 	}
@@ -487,16 +494,6 @@ DEFINE_HOOK(0x6FDE4A, TechnoClass_FireAt_WaveDelayROF, 0x6)
 DEFINE_HOOK(0x75E97B, WaveClass_CTOR_Init, 0x6)
 {
 	GET(WaveClass*, pThis, ESI);
-	GET(WaveType, type, ECX);
-
-	// Fix swapped Wave.IsBigLaser and Wave.IsLaser wave types.
-	if (type == WaveType::BigLaser)
-		type = WaveType::Laser;
-	else if (type == WaveType::Laser)
-		type = WaveType::BigLaser;
-
-	pThis->Type = type;
-	R->ECX(type);
 
 	if (FireAtTemp::FireWeapon)
 		FireAtTemp::WaveWeaponMap[pThis] = FireAtTemp::FireWeapon;
