@@ -18,7 +18,6 @@ namespace FireAtTemp
 	AbstractClass* pOriginalTarget = nullptr;
 	AbstractClass* pWaveOwnerTarget = nullptr;
 	bool IgnoreTargetForWaveAmbientDamage = false;
-	bool CheckedOtherWaves = false;
 	bool RestoredWaveEC19 = false;
 	std::unordered_map<const WaveClass*, WeaponTypeClass*> WaveWeaponMap;
 
@@ -394,7 +393,6 @@ DEFINE_HOOK(0x6FF43F, TechnoClass_FireAt_TargetSet, 0x6)
 
 	// Store original target & coords
 	FireAtTemp::FireWeapon = pWeapon;
-	FireAtTemp::CheckedOtherWaves = false;
 	FireAtTemp::OriginalTargetCoords = *pTargetCoords;
 	FireAtTemp::pOriginalTarget = pOriginalTarget;
 
@@ -408,22 +406,17 @@ DEFINE_HOOK(0x6FF43F, TechnoClass_FireAt_TargetSet, 0x6)
 }
 
 // Allow IsLaser, IsElectricBolt, IsRadBeam, and IsRadEruption weapons to also spawn Wave.IsLaser, Wave.IsBigLaser, or IsMagBeam waves.
-DEFINE_HOOK(0x6FF65A, TechnoClass_FireAt_CheckOtherWaves, 0x6)
-{
-	enum { CheckOtherWaves = 0x6FF5F5 };
-
-	GET(WeaponTypeClass*, pWeapon, EBX);
-
-	if (!FireAtTemp::CheckedOtherWaves && pWeapon
-		&& (pWeapon->IsLaser || pWeapon->IsElectricBolt || pWeapon->IsRadBeam || pWeapon->IsRadEruption))
-	{
-		FireAtTemp::CheckedOtherWaves = true;
-		R->EDI(R->Base<AbstractClass*>(0x8));
-		return CheckOtherWaves;
-	}
-
-	return 0;
-}
+DEFINE_PATCH(0x6FF506, 0x0F, 0x84, 0xE9, 0x00, 0x00, 0x00);
+DEFINE_PATCH(0x6FF51E, 0x0F, 0x85, 0xD1, 0x00, 0x00, 0x00);
+DEFINE_PATCH(0x6FF533, 0x0F, 0x8E, 0xBC, 0x00, 0x00, 0x00);
+DEFINE_JUMP(LJMP, 0x6FF544, 0x6FF5F5);
+DEFINE_PATCH(0x6FF55D, 0x0F, 0x84, 0x92, 0x00, 0x00, 0x00);
+DEFINE_PATCH(0x6FF56B, 0x0F, 0x84, 0x84, 0x00, 0x00, 0x00);
+DEFINE_JUMP(LJMP, 0x6FF578, 0x6FF5F5);
+DEFINE_JUMP(LJMP, 0x6FF58F, 0x6FF5F5);
+DEFINE_JUMP(LJMP, 0x6FF5BC, 0x6FF5F5);
+DEFINE_JUMP(LJMP, 0x6FF5CB, 0x6FF5F5);
+DEFINE_PATCH(0x6FF5F3, 0x90, 0x90);
 
 // Restore original target values and unset obstacle cell.
 DEFINE_HOOK(0x6FF660, TechnoClass_FireAt_ObstacleCellUnset, 0x6)
@@ -438,7 +431,6 @@ DEFINE_HOOK(0x6FF660, TechnoClass_FireAt_ObstacleCellUnset, 0x6)
 	// Reset temp values
 	FireAtTemp::FireBullet = nullptr;
 	FireAtTemp::FireWeapon = nullptr;
-	FireAtTemp::CheckedOtherWaves = false;
 	FireAtTemp::OriginalTargetCoords = CoordStruct::Empty;
 	FireAtTemp::pObstacleCell = nullptr;
 	FireAtTemp::pOriginalTarget = nullptr;
@@ -466,17 +458,30 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 	return 0;
 }
 
-DEFINE_HOOK(0x6FC6EE, TechnoClass_CanFire_WaveDelayROF, 0x6)
+DEFINE_HOOK(0x6FC9EB, TechnoClass_CanFire_WaveDelayROF, 0x6)
 {
-	enum { ReturnFireErrorRearm = 0x6FC8A1 };
+	enum { ReturnFireErrorRearm = 0x6FC9FF, ContinueCheck = 0x6FCA0E };
 
 	GET(TechnoClass*, pThis, ESI);
-	GET(WeaponTypeClass*, pWeapon, EBP);
+	GET(WeaponTypeClass*, pWeapon, EBX);
 
-	if (pThis->Wave && FireAtTemp::ShouldDelayWaveROF(pThis, pWeapon))
+	if (pThis->Wave && (pWeapon->IsSonic || FireAtTemp::ShouldDelayWaveROF(pThis, pWeapon)))
 		return ReturnFireErrorRearm;
 
-	return 0;
+	return ContinueCheck;
+}
+
+DEFINE_HOOK(0x6FDE4A, TechnoClass_FireAt_WaveDelayROF, 0x6)
+{
+	enum { AbortFire = 0x6FDE03, ContinueFire = 0x6FDE5E };
+
+	GET(TechnoClass*, pThis, ESI);
+	GET(WeaponTypeClass*, pWeapon, EBX);
+
+	if (pThis->Wave && (pWeapon->IsSonic || FireAtTemp::ShouldDelayWaveROF(pThis, pWeapon)))
+		return AbortFire;
+
+	return ContinueFire;
 }
 
 DEFINE_HOOK(0x75E97B, WaveClass_CTOR_Init, 0x6)
@@ -529,7 +534,7 @@ DEFINE_HOOK(0x75EB87, WaveClass_CTOR_LaserDuration, 0xA)
 	return SkipGameCode;
 }
 
-DEFINE_HOOK(0x75ED30, WaveClass_DTOR_Cleanup, 0x6)
+DEFINE_HOOK(0x75ED30, WaveClass_DTOR_Cleanup, 0x5)
 {
 	GET(WaveClass*, pThis, ECX);
 	FireAtTemp::WaveWeaponMap.erase(pThis);
