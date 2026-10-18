@@ -449,7 +449,6 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 		if (pWeaponExt->IsAntialiasedLaser)
 		{
 			pLaser->IsHouseColor = false;
-			pLaser->Fades = false;
 		}
 		else if (!pLaser->IsHouseColor && pWeaponExt->Laser_IsSingleColor)
 		{

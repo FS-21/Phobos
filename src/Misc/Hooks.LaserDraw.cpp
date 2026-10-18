@@ -56,16 +56,6 @@ DEFINE_HOOK(0x6FD3FD, TechnoClass_LaserZap_ZAdjust, 0x5)
 	return 0;
 }
 
-// Fix swapped main and neighbor pixel reads in DSurface::DrawSubtractiveLine shallow-slope loops.
-DEFINE_PATCH(0x4BCCE8, 0x20);
-DEFINE_PATCH(0x4BCCEC, 0x01);
-DEFINE_PATCH(0x4BCD32, 0x38);
-DEFINE_PATCH(0x4BCD3E, 0x48);
-DEFINE_PATCH(0x4BD634, 0x10);
-DEFINE_PATCH(0x4BD649, 0x02);
-DEFINE_PATCH(0x4BD68A, 0x30);
-DEFINE_PATCH(0x4BD692, 0x4A);
-
 DEFINE_HOOK(0x55074B, LaserDrawClass_Draw_Antialiased, 0x6)
 {
 	enum { SkipGameCode = 0x5509CA };
@@ -81,31 +71,37 @@ DEFINE_HOOK(0x55074B, LaserDrawClass_Draw_Antialiased, 0x6)
 	GET_STACK(const bool, hasOuterGlow, 0x13);
 	REF_STACK(ColorStruct, outerColor, 0x14);
 	GET_STACK(const float, currentIntensity, 0x1C);
+	GET_STACK(const bool, hasB, 0x28);
+	GET_STACK(const bool, hasG, 0x2C);
+	GET_STACK(const bool, hasR, 0x30);
 	GET_STACK(const Point2D, end, 0x40);
 	GET_STACK(const Point2D, start, 0x48);
 
 	if (hasOuterGlow)
 	{
 		const auto* const pOffsets = reinterpret_cast<const Point2D*>(0xABC738 + (facing & 7u) * 16u);
+		const bool outerHasR = outerColor.R > 0;
+		const bool outerHasG = outerColor.G > 0;
+		const bool outerHasB = outerColor.B > 0;
 
 		Point2D outerStart1 = { start.X + pOffsets[0].X, start.Y + pOffsets[0].Y };
 		Point2D outerEnd1 = { end.X + pOffsets[0].X, end.Y + pOffsets[0].Y };
 		DSurface::Temp->DrawSubtractiveLine(
 			&DSurface::ViewBounds, &outerStart1, &outerEnd1, &outerColor,
-			startZ, endZ, false, true, true, true, 1.0f);
+			startZ, endZ, false, outerHasR, outerHasG, outerHasB, currentIntensity);
 
 		Point2D outerStart2 = { start.X + pOffsets[1].X, start.Y + pOffsets[1].Y };
 		Point2D outerEnd2 = { end.X + pOffsets[1].X, end.Y + pOffsets[1].Y };
 		DSurface::Temp->DrawSubtractiveLine(
 			&DSurface::ViewBounds, &outerStart2, &outerEnd2, &outerColor,
-			startZ, endZ, false, true, true, true, 1.0f);
+			startZ, endZ, false, outerHasR, outerHasG, outerHasB, currentIntensity);
 	}
 
 	Point2D innerStart = start;
 	Point2D innerEnd = end;
 	DSurface::Temp->DrawSubtractiveLine(
 		&DSurface::ViewBounds, &innerStart, &innerEnd, &pThis->InnerColor,
-		startZ, endZ, false, true, true, true, currentIntensity);
+		startZ, endZ, false, hasR, hasG, hasB, currentIntensity);
 
 	return SkipGameCode;
 }
