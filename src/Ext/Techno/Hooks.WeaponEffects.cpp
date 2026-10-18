@@ -458,9 +458,9 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 	return 0;
 }
 
-DEFINE_HOOK(0x6FC9EB, TechnoClass_CanFire_WaveDelayROF, 0x6)
+DEFINE_HOOK(0x6FC9EA, TechnoClass_CanFire_WaveDelayROF, 0x6)
 {
-	enum { ReturnFireErrorRearm = 0x6FC9FF, ContinueCheck = 0x6FCA0E };
+	enum { ReturnFireErrorRearm = 0x6FC9FE, ContinueCheck = 0x6FCA0D };
 
 	GET(TechnoClass*, pThis, ESI);
 	GET(WeaponTypeClass*, pWeapon, EBX);
