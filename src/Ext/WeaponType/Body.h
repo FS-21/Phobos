@@ -131,7 +131,7 @@ public:
 
 	Valueable<bool> IsClassicSonic;
 	Valueable<bool> IsAntialiasedLaser;
-	Nullable<bool> Wave_DelayROF;
+	Valueable<bool> Wave_DelayROF;
 	Nullable<int> Wave_Duration;
 	Nullable<double> Wave_Step;
 	Nullable<int> Wave_Width;
@@ -243,7 +243,7 @@ public:
 		, CanTarget_DriverKilled { true }
 		, IsClassicSonic { false }
 		, IsAntialiasedLaser { false }
-		, Wave_DelayROF {}
+		, Wave_DelayROF { false }
 		, Wave_Duration {}
 		, Wave_Step {}
 		, Wave_Width {}

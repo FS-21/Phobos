@@ -3738,8 +3738,8 @@ Burst.NoDelay=false   ; boolean
 ### Classic sonic wave and wave customization
 
 - Wave weapons (`IsSonic=true`, `IsMagBeam=true`, `Wave.IsLaser=true`, and `Wave.IsBigLaser=true`) can now be customized with several new options, and classic Tiberian Sun sustained sonic wave behavior can be restored.
-  - `IsClassicSonic` enables the sustained sonic wave behavior where the wave remains anchored to the firing unit's `FLH` and the target for the entire active phase instead of detaching immediately into a short traveling pulse, detaching its trailing edge only during the final frames of the wave's lifetime or if the firer or target is lost. Setting `IsClassicSonic=true` automatically enables `IsSonic=true` on the weapon.
-  - `Wave.DelayROF` prevents the firing unit from initiating another shot while its current wave is still active. Defaults to `true` when `IsClassicSonic=true`, and `false` otherwise.
+  - `IsClassicSonic` enables the sustained sonic wave behavior where the wave remains anchored to the firing unit's `FLH` and the target for the entire active phase instead of detaching immediately into a short traveling pulse, detaching its trailing edge only during the final frames of the wave's lifetime or if the firer or target is lost. While the wave is active, the firing unit cannot initiate another shot while its `ROF` timer counts down in parallel. Setting `IsClassicSonic=true` automatically enables `IsSonic=true` on the weapon.
+  - `Wave.DelayROF` pauses the firing unit's `ROF` rearm timer while its current wave is active so the full `ROF` cooldown only begins counting down after the wave finishes.
   - `Wave.Duration` customizes the lifetime counter of the wave (`WaveEC` for sonic and magnetic beams, or `LaserEC` for laser waves).
   - `Wave.Step` customizes the progression step per frame of the wave along the beam trajectory for sonic and magnetic waves.
   - `Wave.Width` customizes the uniform half-width of the wave at both the source and target ends. For sonic and magnetic waves, widths are clamped below 150.
@@ -3751,7 +3751,7 @@ In `rulesmd.ini`:
 ```ini
 [SOMEWEAPON]           ; WeaponType
 IsClassicSonic=false   ; boolean
-Wave.DelayROF=         ; boolean
+Wave.DelayROF=false    ; boolean
 Wave.Duration=         ; integer
 Wave.Step=0.05         ; floating point value
 Wave.Width=            ; integer

@@ -67,14 +67,14 @@ namespace FireAtTemp
 		{
 			if (auto const pWaveWeaponExt = WeaponTypeExt::TryFetch(pWaveWeapon))
 			{
-				if (pWaveWeaponExt->Wave_DelayROF.Get(pWaveWeaponExt->IsClassicSonic))
+				if (pWaveWeaponExt->IsClassicSonic || pWaveWeaponExt->Wave_DelayROF)
 					return true;
 			}
 		}
 
 		if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon))
 		{
-			if (pWeaponExt->Wave_DelayROF.Get(pWeaponExt->IsClassicSonic))
+			if (pWeaponExt->IsClassicSonic || pWeaponExt->Wave_DelayROF)
 				return true;
 		}
 
@@ -583,6 +583,15 @@ DEFINE_HOOK(0x762AFF, WaveClass_AI_TargetSet, 0x6)
 
 	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
 	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	if (!FireAtTemp::FireWeapon && pWeaponExt && pWeaponExt->Wave_DelayROF)
+	{
+		if (auto const pOwner = pThis->Owner)
+		{
+			if (pOwner->Wave == pThis && pOwner->RearmTimer.InProgress())
+				pOwner->RearmTimer.Start(pOwner->RearmTimer.GetTimeLeft() + 1);
+		}
+	}
 
 	const double step = (pWeaponExt && pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
 		? pWeaponExt->Wave_Step.Get() : 0.05;
