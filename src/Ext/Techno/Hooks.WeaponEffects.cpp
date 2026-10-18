@@ -449,6 +449,7 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 		if (pWeaponExt->IsAntialiasedLaser)
 		{
 			pLaser->IsHouseColor = false;
+			pLaser->Fades = false;
 		}
 		else if (!pLaser->IsHouseColor && pWeaponExt->Laser_IsSingleColor)
 		{
@@ -493,6 +494,15 @@ DEFINE_HOOK(0x6FDE4A, TechnoClass_FireAt_WaveDelayROF, 0x6)
 DEFINE_HOOK(0x75E97B, WaveClass_CTOR_Init, 0x6)
 {
 	GET(WaveClass*, pThis, ESI);
+	GET(WaveType, type, ECX);
+
+	if (type == WaveType::BigLaser || type == WaveType::Laser)
+	{
+		if (FireAtTemp::FireWeapon && FireAtTemp::FireWeapon->IsBigLaser)
+			R->ECX(WaveType::BigLaser);
+		else
+			R->ECX(type == WaveType::BigLaser ? WaveType::Laser : WaveType::BigLaser);
+	}
 
 	if (FireAtTemp::FireWeapon)
 		FireAtTemp::WaveWeaponMap[pThis] = FireAtTemp::FireWeapon;

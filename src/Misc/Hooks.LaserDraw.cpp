@@ -442,7 +442,12 @@ DEFINE_HOOK(0x550173, LaserDrawClass_Update_Tracking, 0x6)
 	}
 
 	if (const auto pTarget = data.Target)
-		pLaser->Target = pTarget->GetTargetCoords();
+	{
+		const auto what = pTarget->WhatAmI();
+		pLaser->Target = (what == AbstractType::Building || what == AbstractType::Terrain || what == AbstractType::Overlay)
+			? pTarget->GetCenterCoords()
+			: pTarget->GetTargetCoords();
+	}
 
 	return 0;
 }
