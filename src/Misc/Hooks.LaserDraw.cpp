@@ -56,6 +56,17 @@ DEFINE_HOOK(0x6FD3FD, TechnoClass_LaserZap_ZAdjust, 0x5)
 	return 0;
 }
 
+// Fix swapped main and neighbor pixel reads and duplicate xoff/neighoff increment in DSurface::DrawSubtractiveLine shallow-slope loops.
+DEFINE_PATCH(0x4BCCE8, 0x20);
+DEFINE_PATCH(0x4BCCEC, 0x01);
+DEFINE_PATCH(0x4BCD32, 0x38);
+DEFINE_PATCH(0x4BCD3E, 0x48);
+DEFINE_PATCH(0x4BD096, 0x90, 0x90, 0x90, 0x90);
+DEFINE_PATCH(0x4BD634, 0x10);
+DEFINE_PATCH(0x4BD649, 0x02);
+DEFINE_PATCH(0x4BD68A, 0x30);
+DEFINE_PATCH(0x4BD692, 0x4A);
+
 DEFINE_HOOK(0x55074B, LaserDrawClass_Draw_Antialiased, 0x6)
 {
 	enum { SkipGameCode = 0x5509CA };
