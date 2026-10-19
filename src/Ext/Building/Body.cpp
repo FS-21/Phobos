@@ -169,82 +169,21 @@ bool BuildingExt::HasSuperWeapon(const int index) const
 
 void BuildingExt::StoreTiberium(BuildingClass* pThis, float amount, int idxTiberiumType, int idxStorageTiberiumType)
 {
-	auto const pDepositableTiberium = TiberiumClass::Array.GetItem(idxStorageTiberiumType);
-	float depositableTiberiumAmount = 0.0f; // Number of 'bails' that will be stored.
+	if (amount <= 0.0f || !pThis || !pThis->Owner)
+		return;
+
+	auto const pExt = BuildingTypeExt::Fetch(pThis->Type);
+	if (!pExt->Refinery_UseStorage)
+		return;
+
 	auto const pTiberium = TiberiumClass::Array.GetItem(idxTiberiumType);
+	auto const pDepositableTiberium = TiberiumClass::Array.GetItem(idxStorageTiberiumType);
+	if (!pTiberium || !pDepositableTiberium || pDepositableTiberium->Value <= 0)
+		return;
 
-	if (amount > 0.0f)
-	{
-		auto const pExt = BuildingTypeExt::Fetch(pThis->Type);
-
-		if (pExt->Refinery_UseStorage)
-		{
-			// Store Tiberium in structures
-			depositableTiberiumAmount = (amount * pTiberium->Value) / pDepositableTiberium->Value;
-			if (idxStorageTiberiumType >= 4)
-			{
-				BuildingExt::StoreTiberium(pThis, depositableTiberiumAmount, idxStorageTiberiumType);
-			}
-			else
-			{
-				const auto pHouse = pThis->Owner;
-				if (!pHouse)
-					return;
-
-				if (pHouse->IsControlledByHuman() || SessionClass::Instance.GameMode == GameMode::Campaign || RulesExt::Global()->Storage_AI)
-				{
-					const auto lastStorage = static_cast<int>(pHouse->OwnedTiberium.GetTotalAmount());
-					const auto lastTotalStorage = pHouse->TotalStorage;
-
-					float remainingAmount = depositableTiberiumAmount;
-					if (remainingAmount > lastTotalStorage - lastStorage)
-						remainingAmount = static_cast<float>(lastTotalStorage - lastStorage);
-
-					float actuallyStored = 0.0f;
-
-					for (const auto pBuilding : pHouse->Buildings)
-					{
-						if (remainingAmount <= 0.0f)
-							break;
-
-						if (!pBuilding || !pBuilding->Type || !pBuilding->IsOnMap)
-							continue;
-
-						const auto storage = pBuilding->Type->Storage;
-						if (storage > 0)
-						{
-							auto freeSpace = storage - pBuilding->Tiberium.GetTotalAmount();
-							if (freeSpace > 0.0f)
-							{
-								if (freeSpace > remainingAmount)
-									freeSpace = remainingAmount;
-
-								pBuilding->Tiberium.AddAmount(freeSpace, idxStorageTiberiumType);
-								pHouse->OwnedTiberium.AddAmount(freeSpace, idxStorageTiberiumType);
-								remainingAmount -= freeSpace;
-								actuallyStored += freeSpace;
-							}
-						}
-					}
-
-					pHouse->UpdateAllSilos(lastStorage, lastTotalStorage);
-
-					if (actuallyStored > 0.0f)
-					{
-						const int creditValue = static_cast<int>(actuallyStored * pDepositableTiberium->Value * pHouse->Type->IncomeMult);
-						if (creditValue > 0)
-						{
-							pHouse->GiveMoney(creditValue);
-						}
-					}
-				}
-				else
-				{
-					pHouse->GiveTiberium(depositableTiberiumAmount, idxStorageTiberiumType);
-				}
-			}
-		}
-	}
+	// Store Tiberium in structures
+	float const depositableTiberiumAmount = (amount * pTiberium->Value) / pDepositableTiberium->Value;
+	BuildingExt::StoreTiberium(pThis, depositableTiberiumAmount, idxStorageTiberiumType);
 }
 
 float BuildingExt::StoreTiberium(BuildingClass* pThis, float amount, int idxTiberiumType)
@@ -253,6 +192,21 @@ float BuildingExt::StoreTiberium(BuildingClass* pThis, float amount, int idxTibe
 		return 0.0f;
 
 	auto const pHouse = pThis->Owner;
+
+	if (!pHouse->IsControlledByHuman() && SessionClass::Instance.GameMode != GameMode::Campaign && !RulesExt::Global()->Storage_AI)
+	{
+		if (idxTiberiumType < 4)
+		{
+			pHouse->GiveTiberium(amount, idxTiberiumType);
+		}
+		else if (auto const pTib = TiberiumClass::Array.GetItemOrDefault(idxTiberiumType))
+		{
+			pHouse->HarvestedCredits += static_cast<int>(amount * 5.0);
+			pHouse->Balance += static_cast<int>(amount * pTib->Value * pHouse->Type->IncomeMult);
+		}
+		return amount;
+	}
+
 	auto const pHouseExt = HouseExt::Fetch(pHouse);
 
 	const auto lastStorage = static_cast<int>(pHouseExt ? pHouseExt->GetTotalTiberiumStorage() : pHouse->OwnedTiberium.GetTotalAmount());
@@ -260,13 +214,13 @@ float BuildingExt::StoreTiberium(BuildingClass* pThis, float amount, int idxTibe
 
 	// First, try to store in the unloading building (dock / refinery)
 	std::vector<BuildingClass*> targetBuildings;
-	if (pThis->Type->Storage > 0 && pThis->IsOnMap)
+	if (pThis->Type->Storage > 0 && pThis->IsOnMap && !pThis->InLimbo)
 		targetBuildings.push_back(pThis);
 
 	// Then, other storage structures of the same house
 	for (auto const pBld : pHouse->Buildings)
 	{
-		if (pBld && pBld != pThis && pBld->IsOnMap && pBld->Type->Storage > 0)
+		if (pBld && pBld != pThis && pBld->IsOnMap && !pBld->InLimbo && pBld->Type->Storage > 0)
 			targetBuildings.push_back(pBld);
 	}
 

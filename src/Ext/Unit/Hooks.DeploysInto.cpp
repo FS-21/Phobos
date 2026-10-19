@@ -1,4 +1,5 @@
 #include <IsometricTileTypeClass.h>
+#include <SessionClass.h>
 
 #include "Body.h"
 
@@ -97,6 +98,58 @@ DEFINE_HOOK(0x739956, UnitClass_Deploy_Transfer, 0x6)
 	AttachEffectClass::TransferAttachedEffects(pUnit, pStructure);
 	TechnoExt::HandleAttachmentDeployTransfer(pUnit, pStructure);
 
+	auto const pUnitExt = TechnoExt::Fetch(pUnit);
+	float const totalUnitTiberium = pUnitExt ? pUnitExt->GetTotalTiberium() : pUnit->Tiberium.GetTotalAmount();
+
+	if (totalUnitTiberium > 0.0f)
+	{
+		if (auto const pHouse = pStructure->Owner)
+		{
+			auto const pBldTypeExt = BuildingTypeExt::Fetch(pStructure->Type);
+			int const storageTiberiumIndex = RulesExt::Global()->Storage_TiberiumIndex;
+			size_t const maxSlots = std::max(pUnitExt ? pUnitExt->TiberiumStorage.size() : static_cast<size_t>(0), static_cast<size_t>(4));
+
+			if (pBldTypeExt->Refinery_UseStorage)
+			{
+				for (size_t i = 0; i < maxSlots; ++i)
+				{
+					int const idx = static_cast<int>(i);
+					float const amount = pUnitExt ? pUnitExt->GetTiberium(idx) : (idx < 4 ? pUnit->Tiberium.GetAmount(idx) : 0.0f);
+					if (amount > 0.0f)
+					{
+						if (pUnitExt)
+							pUnitExt->RemoveTiberium(amount, idx);
+						else if (idx < 4)
+							pUnit->Tiberium.RemoveAmount(amount, idx);
+
+						int const idxStorage = storageTiberiumIndex >= 0 ? storageTiberiumIndex : idx;
+						BuildingExt::StoreTiberium(pStructure, amount, idx, idxStorage);
+					}
+				}
+			}
+			else
+			{
+				for (size_t i = 0; i < maxSlots; ++i)
+				{
+					int const idx = static_cast<int>(i);
+					float const amount = pUnitExt ? pUnitExt->GetTiberium(idx) : (idx < 4 ? pUnit->Tiberium.GetAmount(idx) : 0.0f);
+					if (amount > 0.0f)
+					{
+						if (pUnitExt)
+							pUnitExt->RemoveTiberium(amount, idx);
+						else if (idx < 4)
+							pUnit->Tiberium.RemoveAmount(amount, idx);
+
+						if (idx < 4)
+							pHouse->GiveTiberium(amount, idx);
+						else if (auto const pTib = TiberiumClass::Array.GetItemOrDefault(idx))
+							pHouse->Balance += static_cast<int>(amount * pTib->Value * pHouse->Type->IncomeMult);
+					}
+				}
+			}
+		}
+	}
+
 	return 0;
 }
 
@@ -137,6 +190,49 @@ DEFINE_HOOK(0x44A03C, BuildingClass_Mi_Selling_Transfer, 0x6)
 		pStructureExt->SmartAutoDeploy_SavedTarget = nullptr;
 	}
 
+	auto const pStructureTechnoExt = TechnoExt::Fetch(pStructure);
+	auto const pUnitExt = TechnoExt::Fetch(pUnit);
+	float const totalStructureTiberium = pStructureTechnoExt ? pStructureTechnoExt->GetTotalTiberium() : pStructure->Tiberium.GetTotalAmount();
+
+	if (totalStructureTiberium > 0.0f)
+	{
+		int const maxStorage = pUnit->Type->Storage > 0 ? pUnit->Type->Storage : pStructure->Type->Storage;
+		size_t const maxSlots = std::max(pStructureTechnoExt ? pStructureTechnoExt->TiberiumStorage.size() : static_cast<size_t>(0), static_cast<size_t>(4));
+
+		for (size_t i = 0; i < maxSlots; ++i)
+		{
+			int const idx = static_cast<int>(i);
+			float const amount = pStructureTechnoExt ? pStructureTechnoExt->GetTiberium(idx) : (idx < 4 ? pStructure->Tiberium.GetAmount(idx) : 0.0f);
+			if (amount > 0.0f)
+			{
+				if (pStructureTechnoExt)
+					pStructureTechnoExt->RemoveTiberium(amount, idx);
+				else if (idx < 4)
+					pStructure->Tiberium.RemoveAmount(amount, idx);
+
+				if (maxStorage > 0)
+				{
+					float const curUnitStored = pUnitExt ? pUnitExt->GetTotalTiberium() : pUnit->Tiberium.GetTotalAmount();
+					float const freeSpace = static_cast<float>(maxStorage) - curUnitStored;
+					if (freeSpace > 0.0f)
+					{
+						float const toStore = std::min(amount, freeSpace);
+						if (pUnitExt)
+							pUnitExt->AddTiberium(toStore, idx);
+						if (idx < 4)
+							pUnit->Tiberium.AddAmount(toStore, idx);
+					}
+				}
+			}
+		}
+
+		if (auto const pHouse = pStructure->Owner)
+			pHouse->UpdateAllSilos(0, 0);
+	}
+
+	// This line will break the bahavior of UnDeploysInto buildings. However, it might serve a purpose that no one knows yet
+	// Comment out the line instead of removing it for now, so we can turn to it if something related goes wrong in the future
+	// pUnit->QueueMission(Mission::Hunt, true);
 	return 0;
 }
 

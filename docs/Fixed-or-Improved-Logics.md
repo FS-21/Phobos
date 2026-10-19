@@ -343,6 +343,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed an issue where Engineers and Spies might not be able to enter target buildings properly when executing vanilla's attack script.
 - Fixed a rare crash when an `IsSonic=true` wave was drawn near the top edge of the screen.
 - Fixed a crash or memory corruption when a wave (e.g. `IsSonic=true`) was drawn while its firer was at the same horizontal position as its target.
+- Fixed the bug that crashing or sinking unit can be recruit into taskforce team.
 
 ## Fixes / interactions with other extensions
 
@@ -404,6 +405,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed an issue in Ares where vehicles would occasionally continue to fire and move even after the driver had been killed.
 - Fixed `Wave.IsBigLaser` and `Wave.IsLaser` *(Ares features)* having their wave sizes swapped (`Wave.IsBigLaser` now uses the larger laser wave and `Wave.IsLaser` uses the standard laser wave).
 - Allowed weapons with `IsLaser=true`, `IsElectricBolt=true`, `IsRadBeam=true`, or `IsRadEruption=true` to simultaneously spawn `Wave.IsLaser=true`, `Wave.IsBigLaser=true` *(Ares features)*, or `IsMagBeam=true` waves.
+- Fixed Ares' `Refinery.UseStorage=yes` not prioritizing the refinery's own `Storage` capacity and not properly handling `[General] -> Storage.TiberiumIndex` or Tiberium transfer across `DeploysInto` / `UndeploysInto` on Slave Miners and their slaves.
 
 ## Newly added global settings
 
@@ -554,7 +556,7 @@ In vanilla, `[CLNT]` does not have its own image. Originally, in `artmd.ini`, it
 
 ### Customize resource storage
 
-- Now Ares `Storage` feature can set which Tiberium type from `[Tiberiums]` list should be used for storing resources in structures with `Refinery.UseStorage=yes` and `Storage` > 0.
+- Now Ares `Storage` feature can set which Tiberium type from `[Tiberiums]` list should be used for storing resources in structures with `Refinery.UseStorage=yes` and `Storage` > 0 (including Slave Miners and their slaves).
 - By default, AI players in skirmish/multiplayer bypass silo storage to maintain compatibility with legacy Ares mods. You can enable physical silo storage for AI players via `[General] -> Storage.AI=true`.
 - When `Storage.AI=true` is enabled, the Advanced AI will monitor its storage capacity and construct silos from the `BuildSilo` list in `[TechTree]` when storage is nearly full (controlled by `Storage.AI.Threshold`, 85% by default).
 - To prevent base overcrowding with silos, each existing silo increases the skip probability of building additional silos by `Storage.AI.PenaltyMultiplier` (10% per silo by default), up to a maximum cap set by `Storage.AI.MaxPenalty` (90% by default). Setting `Storage.AI.PenaltyMultiplier=0.0` or `Storage.AI.MaxPenalty=0.0` disables this penalty.
