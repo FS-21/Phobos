@@ -19,7 +19,73 @@ namespace FireAtTemp
 	AbstractClass* pWaveOwnerTarget = nullptr;
 	bool IgnoreTargetForWaveAmbientDamage = false;
 	bool RestoredWaveEC19 = false;
+	bool WaveWasActiveBeforeTargetCheck = false;
 	std::unordered_map<const WaveClass*, WeaponTypeClass*> WaveWeaponMap;
+
+	struct SonicBurstState
+	{
+		DWORD OwnerUniqueID { 0 };
+		WeaponTypeClass* Weapon { nullptr };
+		int BurstEndFrame { 0 };
+		int DetachThreshold { 19 };
+		int RearmEndFrame { 0 };
+		int SavedRearmTimeLeft { 0 };
+		bool WaitingForNewTarget { false };
+	};
+
+	std::unordered_map<const TechnoClass*, SonicBurstState> SonicBurstMap;
+
+	void PruneSonicBurstMap()
+	{
+		for (auto it = SonicBurstMap.begin(); it != SonicBurstMap.end(); )
+		{
+			if (!it->second.WaitingForNewTarget && Unsorted::CurrentFrame >= it->second.BurstEndFrame)
+				it = SonicBurstMap.erase(it);
+			else
+				++it;
+		}
+	}
+
+	void RestoreSonicBurstCooldown(TechnoClass* pTechno, const SonicBurstState& state)
+	{
+		auto const pWeaponExt = WeaponTypeExt::TryFetch(state.Weapon);
+		const int remainingROF = (pWeaponExt && pWeaponExt->Wave_DelayROF)
+			? std::max(1, state.SavedRearmTimeLeft)
+			: std::max(1, state.RearmEndFrame - Unsorted::CurrentFrame);
+		pTechno->RearmTimer.Start(remainingROF);
+	}
+
+	bool CheckAndExpireSonicBurst(TechnoClass* pTechno)
+	{
+		if (SonicBurstMap.empty() || !pTechno)
+			return false;
+
+		auto const it = SonicBurstMap.find(pTechno);
+		if (it == SonicBurstMap.end())
+			return false;
+
+		if (it->second.OwnerUniqueID != pTechno->UniqueID)
+		{
+			SonicBurstMap.erase(it);
+			return false;
+		}
+
+		if (it->second.WaitingForNewTarget)
+		{
+			if (!pTechno->Target || Unsorted::CurrentFrame >= it->second.BurstEndFrame - it->second.DetachThreshold)
+			{
+				RestoreSonicBurstCooldown(pTechno, it->second);
+				SonicBurstMap.erase(it);
+				return true;
+			}
+		}
+		else if (!pTechno->Wave && Unsorted::CurrentFrame >= it->second.BurstEndFrame)
+		{
+			SonicBurstMap.erase(it);
+		}
+
+		return false;
+	}
 
 	WeaponTypeClass* GetWaveWeapon(const WaveClass* pWave)
 	{
@@ -470,12 +536,33 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 	return 0;
 }
 
+DEFINE_HOOK(0x6F9E50, TechnoClass_AI_SonicBurstCheck, 0x5)
+{
+	if (!FireAtTemp::SonicBurstMap.empty())
+	{
+		GET(TechnoClass*, pThis, ECX);
+		FireAtTemp::CheckAndExpireSonicBurst(pThis);
+	}
+
+	return 0;
+}
+
 DEFINE_HOOK(0x6FC9EA, TechnoClass_CanFire_WaveDelayROF, 0x6)
 {
 	enum { ReturnFireErrorRearm = 0x6FC9FE, ContinueCheck = 0x6FCA0D };
 
 	GET(TechnoClass*, pThis, ESI);
 	GET(WeaponTypeClass*, pWeapon, EBX);
+
+	if (FireAtTemp::CheckAndExpireSonicBurst(pThis))
+		return ReturnFireErrorRearm;
+
+	if (!FireAtTemp::SonicBurstMap.empty())
+	{
+		auto const it = FireAtTemp::SonicBurstMap.find(pThis);
+		if (it != FireAtTemp::SonicBurstMap.end() && it->second.WaitingForNewTarget && it->second.Weapon != pWeapon)
+			return ReturnFireErrorRearm;
+	}
 
 	if (pThis->Wave && (pWeapon->IsSonic || FireAtTemp::ShouldDelayWaveROF(pThis, pWeapon)))
 		return ReturnFireErrorRearm;
@@ -489,6 +576,9 @@ DEFINE_HOOK(0x6FDE4A, TechnoClass_FireAt_WaveDelayROF, 0x6)
 
 	GET(TechnoClass*, pThis, ESI);
 	GET(WeaponTypeClass*, pWeapon, EBX);
+
+	if (FireAtTemp::CheckAndExpireSonicBurst(pThis))
+		return AbortFire;
 
 	if (pThis->Wave && (pWeapon->IsSonic || FireAtTemp::ShouldDelayWaveROF(pThis, pWeapon)))
 		return AbortFire;
@@ -523,10 +613,46 @@ DEFINE_HOOK(0x75E98E, WaveClass_CTOR_SonicDuration, 0xA)
 
 	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
 	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
-
-	pThis->WaveEC = (pWeaponExt && pWeaponExt->Wave_Duration.isset())
+	const int fullDuration = (pWeaponExt && pWeaponExt->Wave_Duration.isset())
 		? std::max(1, pWeaponExt->Wave_Duration.Get()) : 100;
 
+	if (pWeaponExt && pWeaponExt->IsClassicSonic)
+	{
+		if (auto const pOwner = pThis->Owner)
+		{
+			const double step = (pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
+				? pWeaponExt->Wave_Step.Get() : static_cast<double>(0.05f);
+			const int detachThreshold = std::max(1, static_cast<int>(1.0 / step) - 1);
+
+			auto const it = FireAtTemp::SonicBurstMap.find(pOwner);
+			if (it != FireAtTemp::SonicBurstMap.end()
+				&& it->second.OwnerUniqueID == pOwner->UniqueID
+				&& it->second.Weapon == pWeapon
+				&& it->second.WaitingForNewTarget
+				&& Unsorted::CurrentFrame < it->second.BurstEndFrame - detachThreshold)
+			{
+				pThis->WaveEC = it->second.BurstEndFrame - Unsorted::CurrentFrame;
+				it->second.DetachThreshold = detachThreshold;
+				it->second.WaitingForNewTarget = false;
+				FireAtTemp::RestoreSonicBurstCooldown(pOwner, it->second);
+				return SkipGameCode;
+			}
+
+			FireAtTemp::PruneSonicBurstMap();
+			const int rearmTimeLeft = pOwner->RearmTimer.GetTimeLeft();
+			FireAtTemp::SonicBurstMap[pOwner] = {
+				pOwner->UniqueID,
+				pWeapon,
+				Unsorted::CurrentFrame + fullDuration,
+				detachThreshold,
+				Unsorted::CurrentFrame + rearmTimeLeft,
+				rearmTimeLeft,
+				false
+			};
+		}
+	}
+
+	pThis->WaveEC = fullDuration;
 	return SkipGameCode;
 }
 
@@ -639,6 +765,10 @@ DEFINE_HOOK(0x762AFF, WaveClass_AI_TargetSet, 0x6)
 		pThis->WaveEC = 20;
 	}
 
+	FireAtTemp::WaveWasActiveBeforeTargetCheck = !FireAtTemp::FireWeapon
+		&& pWeaponExt && pWeaponExt->IsClassicSonic
+		&& pThis->IsTraveling && pThis->WaveEC > detachThreshold;
+
 	if ((pWeaponExt && pWeaponExt->IsClassicSonic)
 		|| (pThis->Type == WaveType::Magnetron && ((pWeaponExt && pWeaponExt->Wave_Duration.isset()) || detachThreshold != 19)))
 	{
@@ -665,6 +795,37 @@ DEFINE_HOOK(0x762D57, WaveClass_AI_TargetUnset, 0x6)
 			pThis->Owner->Target = FireAtTemp::pWaveOwnerTarget;
 
 		FireAtTemp::pWaveOwnerTarget = nullptr;
+	}
+
+	if (FireAtTemp::WaveWasActiveBeforeTargetCheck)
+	{
+		FireAtTemp::WaveWasActiveBeforeTargetCheck = false;
+
+		if (!pThis->IsTraveling)
+		{
+			if (auto const pOwner = pThis->Owner)
+			{
+				if (pOwner->Wave == pThis)
+				{
+					auto const it = FireAtTemp::SonicBurstMap.find(pOwner);
+					if (it != FireAtTemp::SonicBurstMap.end() && it->second.OwnerUniqueID == pOwner->UniqueID)
+					{
+						if (pOwner->Target && pOwner->Target != pThis->Target
+							&& Unsorted::CurrentFrame < it->second.BurstEndFrame - it->second.DetachThreshold)
+						{
+							pOwner->Wave = nullptr;
+							it->second.SavedRearmTimeLeft = pOwner->RearmTimer.GetTimeLeft();
+							it->second.WaitingForNewTarget = true;
+							pOwner->RearmTimer.Start(0);
+						}
+						else
+						{
+							FireAtTemp::SonicBurstMap.erase(it);
+						}
+					}
+				}
+			}
+		}
 	}
 
 	return 0;
