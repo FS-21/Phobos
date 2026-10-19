@@ -142,12 +142,10 @@ public:
 	Mission SmartAutoDeploy_SavedMission;
 	bool SmartAutoDeploy_IsRepositioning;
 	CoordStruct SmartAutoDeploy_RepositionDestination;
-
 	std::vector<ResourceProductionTimer> ResourceProductionTimers;
 	bool ResourceStartupGranted;
 	bool ResourceInitialized;
 	bool CollectorRegistered;
-
 	double OriginVeterancy;
 
 	TechnoExt(TechnoClass* OwnerObject) : RadioExt(OwnerObject)
