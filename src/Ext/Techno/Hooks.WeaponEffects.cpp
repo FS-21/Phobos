@@ -552,6 +552,9 @@ DEFINE_HOOK(0x75ED30, WaveClass_DTOR_Cleanup, 0x5)
 	return 0;
 }
 
+// Use 1.0f instead of 1.05f for WaveLengthFactor on BigLaser and Laser waves so they do not extend behind the firing origin or past the target.
+DEFINE_PATCH(0x7F6BB8, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F);
+
 DEFINE_HOOK_AGAIN(0x762492, WaveClass_InitSonicAndMagnetic_EndZAdjustAndGeometry, 0x6)
 DEFINE_HOOK(0x761A62, WaveClass_InitSonicAndMagnetic_EndZAdjustAndGeometry, 0x6)
 {
