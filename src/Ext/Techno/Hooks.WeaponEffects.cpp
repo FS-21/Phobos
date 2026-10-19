@@ -4,17 +4,219 @@
 #include <Ext/WeaponType/Body.h>
 #include <Ext/Bullet/Body.h>
 
+#include <unordered_map>
+
 // Contains hooks that fix weapon graphical effects like lasers, railguns, electric bolts, beams and waves not interacting
 // correctly with obstacles between firer and target, as well as railgun / railgun particles being cut off by elevation.
 
 namespace FireAtTemp
 {
 	BulletClass* FireBullet = nullptr;
+	WeaponTypeClass* FireWeapon = nullptr;
 	CoordStruct OriginalTargetCoords;
 	CellClass* pObstacleCell = nullptr;
 	AbstractClass* pOriginalTarget = nullptr;
 	AbstractClass* pWaveOwnerTarget = nullptr;
 	bool IgnoreTargetForWaveAmbientDamage = false;
+	bool RestoredWaveEC19 = false;
+	bool WaveWasActiveBeforeTargetCheck = false;
+	std::unordered_map<const WaveClass*, WeaponTypeClass*> WaveWeaponMap;
+
+	struct SonicBurstState
+	{
+		DWORD OwnerUniqueID { 0 };
+		WeaponTypeClass* Weapon { nullptr };
+		int BurstEndFrame { 0 };
+		int DetachThreshold { 19 };
+		int RearmEndFrame { 0 };
+		int SavedRearmTimeLeft { 0 };
+		bool WaitingForNewTarget { false };
+	};
+
+	std::unordered_map<const TechnoClass*, SonicBurstState> SonicBurstMap;
+
+	void PruneSonicBurstMap()
+	{
+		for (auto it = SonicBurstMap.begin(); it != SonicBurstMap.end(); )
+		{
+			if (!it->second.WaitingForNewTarget && Unsorted::CurrentFrame >= it->second.BurstEndFrame)
+				it = SonicBurstMap.erase(it);
+			else
+				++it;
+		}
+	}
+
+	void RestoreSonicBurstCooldown(TechnoClass* pTechno, const SonicBurstState& state)
+	{
+		auto const pWeaponExt = WeaponTypeExt::TryFetch(state.Weapon);
+		const int remainingROF = (pWeaponExt && pWeaponExt->Wave_DelayROF)
+			? std::max(1, state.SavedRearmTimeLeft)
+			: std::max(1, state.RearmEndFrame - Unsorted::CurrentFrame);
+		pTechno->RearmTimer.Start(remainingROF);
+	}
+
+	bool CheckAndExpireSonicBurst(TechnoClass* pTechno)
+	{
+		if (SonicBurstMap.empty() || !pTechno)
+			return false;
+
+		auto const it = SonicBurstMap.find(pTechno);
+		if (it == SonicBurstMap.end())
+			return false;
+
+		if (it->second.OwnerUniqueID != pTechno->UniqueID)
+		{
+			SonicBurstMap.erase(it);
+			return false;
+		}
+
+		if (it->second.WaitingForNewTarget)
+		{
+			if (!pTechno->Target || Unsorted::CurrentFrame >= it->second.BurstEndFrame - it->second.DetachThreshold)
+			{
+				RestoreSonicBurstCooldown(pTechno, it->second);
+				SonicBurstMap.erase(it);
+				return true;
+			}
+		}
+		else if (!pTechno->Wave && Unsorted::CurrentFrame >= it->second.BurstEndFrame)
+		{
+			SonicBurstMap.erase(it);
+		}
+
+		return false;
+	}
+
+	WeaponTypeClass* GetWaveWeapon(const WaveClass* pWave)
+	{
+		if (!pWave)
+			return nullptr;
+
+		auto const it = WaveWeaponMap.find(pWave);
+		if (it != WaveWeaponMap.end())
+			return it->second;
+
+		if (FireWeapon)
+			return FireWeapon;
+
+		if (auto const pOwner = pWave->Owner)
+		{
+			for (int i = 0; i < 2; ++i)
+			{
+				if (auto const pWeaponStruct = pOwner->GetWeapon(i))
+				{
+					if (auto const pWeapon = pWeaponStruct->WeaponType)
+					{
+						if ((pWave->Type == WaveType::Sonic && pWeapon->IsSonic)
+							|| (pWave->Type == WaveType::Magnetron && pWeapon->IsMagBeam))
+						{
+							return pWeapon;
+						}
+					}
+				}
+			}
+
+			if (auto const pWeaponStruct = pOwner->GetWeapon(0))
+				return pWeaponStruct->WeaponType;
+		}
+
+		return nullptr;
+	}
+
+	bool ShouldDelayWaveROF(const TechnoClass* pTechno, const WeaponTypeClass* pWeapon)
+	{
+		if (!pTechno || !pTechno->Wave)
+			return false;
+
+		if (auto const pWaveWeapon = GetWaveWeapon(pTechno->Wave))
+		{
+			if (auto const pWaveWeaponExt = WeaponTypeExt::TryFetch(pWaveWeapon))
+			{
+				if (pWaveWeaponExt->IsClassicSonic || pWaveWeaponExt->Wave_DelayROF)
+					return true;
+			}
+		}
+
+		if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon))
+		{
+			if (pWeaponExt->IsClassicSonic || pWeaponExt->Wave_DelayROF)
+				return true;
+		}
+
+		return false;
+	}
+
+	void ApplyWaveGeometry(const WaveClass* pWave, bool isMagnetic)
+	{
+		if (!pWave)
+			return;
+
+		const auto type = pWave->Type;
+		const int typeIndex = static_cast<int>(type);
+
+		if (typeIndex < 0 || typeIndex > 3)
+			return;
+
+		int defaultWidth = 100;
+		int defaultCap = 30;
+
+		switch (type)
+		{
+		case WaveType::Sonic:
+			defaultWidth = 100;
+			defaultCap = 30;
+			break;
+		case WaveType::BigLaser:
+			defaultWidth = 44;
+			defaultCap = 34;
+			break;
+		case WaveType::Laser:
+			defaultWidth = 34;
+			defaultCap = 27;
+			break;
+		case WaveType::Magnetron:
+			defaultWidth = 50;
+			defaultCap = isMagnetic ? 0 : 30;
+			break;
+		default:
+			break;
+		}
+
+		auto const pWeapon = GetWaveWeapon(pWave);
+		auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+		const int baseWidth = (pWeaponExt && pWeaponExt->Wave_Width.isset())
+			? pWeaponExt->Wave_Width.Get() : defaultWidth;
+		int startWidth = (pWeaponExt && pWeaponExt->Wave_StartWidth.isset())
+			? pWeaponExt->Wave_StartWidth.Get() : baseWidth;
+		int endWidth = (pWeaponExt && pWeaponExt->Wave_EndWidth.isset())
+			? pWeaponExt->Wave_EndWidth.Get() : baseWidth;
+		int capLength = (pWeaponExt && pWeaponExt->Wave_CapLength.isset())
+			? pWeaponExt->Wave_CapLength.Get() : defaultCap;
+
+		if (type == WaveType::Sonic || type == WaveType::Magnetron)
+		{
+			startWidth = std::clamp(startWidth, 1, 149);
+			endWidth = std::clamp(endWidth, 1, 149);
+		}
+		else
+		{
+			startWidth = std::max(1, startWidth);
+			endWidth = std::max(1, endWidth);
+		}
+
+		capLength = std::max(0, capLength);
+
+		auto* const pVectors = reinterpret_cast<Vector3D<float>*>((isMagnetic ? 0xB45CA0u : 0xB45DA8u) + typeIndex * 48u);
+		const float cap = static_cast<float>(capLength);
+		const float startW = static_cast<float>(startWidth);
+		const float endW = static_cast<float>(endWidth);
+
+		pVectors[0] = { -cap, -endW, 0.0f };
+		pVectors[1] = { -cap, endW, 0.0f };
+		pVectors[2] = { cap, -startW, 0.0f };
+		pVectors[3] = { cap, startW, 0.0f };
+	}
 }
 
 DEFINE_HOOK(0x6FF08B, TechnoClass_Fire_RecordBullet, 0x6)
@@ -251,10 +453,12 @@ DEFINE_HOOK(0x6FD38D, TechnoClass_DrawSth_DrawToInvisoFlakScatterLocation, 0x7) 
 // Adjust target for bolt / beam / wave drawing.
 DEFINE_HOOK(0x6FF43F, TechnoClass_FireAt_TargetSet, 0x6)
 {
+	GET(WeaponTypeClass*, pWeapon, EBX);
 	LEA_STACK(CoordStruct*, pTargetCoords, STACK_OFFSET(0xB0, -0x28));
 	GET_BASE(AbstractClass*, pOriginalTarget, 0x8);
 
 	// Store original target & coords
+	FireAtTemp::FireWeapon = pWeapon;
 	FireAtTemp::OriginalTargetCoords = *pTargetCoords;
 	FireAtTemp::pOriginalTarget = pOriginalTarget;
 
@@ -266,6 +470,17 @@ DEFINE_HOOK(0x6FF43F, TechnoClass_FireAt_TargetSet, 0x6)
 
 	return 0;
 }
+
+// Allow IsLaser, IsElectricBolt, IsRadBeam, and IsRadEruption weapons to also spawn Wave.IsLaser, Wave.IsBigLaser, or IsMagBeam waves.
+DEFINE_PATCH(0x6FF506, 0x0F, 0x84, 0xE9, 0x00, 0x00, 0x00);
+DEFINE_PATCH(0x6FF51E, 0x0F, 0x85, 0xD1, 0x00, 0x00, 0x00);
+DEFINE_PATCH(0x6FF533, 0x0F, 0x8E, 0xBC, 0x00, 0x00, 0x00);
+DEFINE_JUMP(LJMP, 0x6FF544, 0x6FF5F5);
+DEFINE_JUMP(LJMP, 0x6FF55D, 0x6FF5F5);
+DEFINE_JUMP(LJMP, 0x6FF58F, 0x6FF5F5);
+DEFINE_JUMP(LJMP, 0x6FF5BC, 0x6FF5F5);
+DEFINE_JUMP(LJMP, 0x6FF5CB, 0x6FF5F5);
+DEFINE_PATCH(0x6FF5F3, 0x90, 0x90);
 
 // Restore original target values and unset obstacle cell.
 DEFINE_HOOK(0x6FF660, TechnoClass_FireAt_ObstacleCellUnset, 0x6)
@@ -279,6 +494,7 @@ DEFINE_HOOK(0x6FF660, TechnoClass_FireAt_ObstacleCellUnset, 0x6)
 
 	// Reset temp values
 	FireAtTemp::FireBullet = nullptr;
+	FireAtTemp::FireWeapon = nullptr;
 	FireAtTemp::OriginalTargetCoords = CoordStruct::Empty;
 	FireAtTemp::pObstacleCell = nullptr;
 	FireAtTemp::pOriginalTarget = nullptr;
@@ -286,7 +502,7 @@ DEFINE_HOOK(0x6FF660, TechnoClass_FireAt_ObstacleCellUnset, 0x6)
 	return 0;
 }
 
-// Allow drawing single color lasers with thickness.
+// Allow drawing single color lasers with thickness and antialiased lasers.
 DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 {
 	GET(WeaponTypeClass* const, pWeapon, ECX);
@@ -294,8 +510,24 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 
 	if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon))
 	{
-		if (!pLaser->IsHouseColor && pWeaponExt->Laser_IsSingleColor)
-			pLaser->IsHouseColor = true;
+		if (pWeaponExt->IsAntialiasedLaser)
+		{
+			pLaser->IsHouseColor = false;
+			pLaser->Fades = false;
+			pLaser->Thickness = (pWeaponExt->LaserThickness > 0) ? pWeaponExt->LaserThickness.Get() : 1;
+		}
+		else
+		{
+			if (pWeaponExt->LaserThickness > 0)
+				pLaser->Thickness = pWeaponExt->LaserThickness.Get();
+			else if (pWeapon->IsBigLaser && pLaser->Thickness <= 1)
+				pLaser->Thickness = 2;
+
+			if (!pLaser->IsHouseColor && pWeaponExt->Laser_IsSingleColor)
+				pLaser->IsHouseColor = true;
+		}
+
+		*reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(pLaser) + 0x53) = pWeaponExt->IsAntialiasedLaser;
 	}
 
 	// Fixes drawing thick lasers for non-PrismSupport building-fired lasers.
@@ -304,9 +536,180 @@ DEFINE_HOOK(0x6FD446, TechnoClass_LaserZap_IsSingleColor, 0x7)
 	return 0;
 }
 
+DEFINE_HOOK(0x6F9E50, TechnoClass_AI_SonicBurstCheck, 0x5)
+{
+	if (!FireAtTemp::SonicBurstMap.empty())
+	{
+		GET(TechnoClass*, pThis, ECX);
+		FireAtTemp::CheckAndExpireSonicBurst(pThis);
+	}
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6FC9EA, TechnoClass_CanFire_WaveDelayROF, 0x6)
+{
+	enum { ReturnFireErrorRearm = 0x6FC9FE, ContinueCheck = 0x6FCA0D };
+
+	GET(TechnoClass*, pThis, ESI);
+	GET(WeaponTypeClass*, pWeapon, EBX);
+
+	if (FireAtTemp::CheckAndExpireSonicBurst(pThis))
+		return ReturnFireErrorRearm;
+
+	if (!FireAtTemp::SonicBurstMap.empty())
+	{
+		auto const it = FireAtTemp::SonicBurstMap.find(pThis);
+		if (it != FireAtTemp::SonicBurstMap.end() && it->second.WaitingForNewTarget && it->second.Weapon != pWeapon)
+			return ReturnFireErrorRearm;
+	}
+
+	if (pThis->Wave && (pWeapon->IsSonic || FireAtTemp::ShouldDelayWaveROF(pThis, pWeapon)))
+		return ReturnFireErrorRearm;
+
+	return ContinueCheck;
+}
+
+DEFINE_HOOK(0x6FDE4A, TechnoClass_FireAt_WaveDelayROF, 0x6)
+{
+	enum { AbortFire = 0x6FDE03, ContinueFire = 0x6FDE5E };
+
+	GET(TechnoClass*, pThis, ESI);
+	GET(WeaponTypeClass*, pWeapon, EBX);
+
+	if (FireAtTemp::CheckAndExpireSonicBurst(pThis))
+		return AbortFire;
+
+	if (pThis->Wave && (pWeapon->IsSonic || FireAtTemp::ShouldDelayWaveROF(pThis, pWeapon)))
+		return AbortFire;
+
+	return ContinueFire;
+}
+
+DEFINE_HOOK(0x75E97B, WaveClass_CTOR_Init, 0x6)
+{
+	GET(WaveClass*, pThis, ESI);
+	GET(WaveType, type, ECX);
+
+	if (type == WaveType::BigLaser || type == WaveType::Laser)
+	{
+		if (FireAtTemp::FireWeapon && FireAtTemp::FireWeapon->IsBigLaser)
+			R->ECX(WaveType::BigLaser);
+		else
+			R->ECX(type == WaveType::BigLaser ? WaveType::Laser : WaveType::BigLaser);
+	}
+
+	if (FireAtTemp::FireWeapon)
+		FireAtTemp::WaveWeaponMap[pThis] = FireAtTemp::FireWeapon;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x75E98E, WaveClass_CTOR_SonicDuration, 0xA)
+{
+	enum { SkipGameCode = 0x75E998 };
+
+	GET(WaveClass*, pThis, ESI);
+
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+	const int fullDuration = (pWeaponExt && pWeaponExt->Wave_Duration.isset())
+		? std::max(1, pWeaponExt->Wave_Duration.Get()) : 100;
+
+	if (pWeaponExt && pWeaponExt->IsClassicSonic)
+	{
+		if (auto const pOwner = pThis->Owner)
+		{
+			const double step = (pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
+				? pWeaponExt->Wave_Step.Get() : static_cast<double>(0.05f);
+			const int detachThreshold = std::max(1, static_cast<int>(1.0 / step) - 1);
+
+			auto const it = FireAtTemp::SonicBurstMap.find(pOwner);
+			if (it != FireAtTemp::SonicBurstMap.end()
+				&& it->second.OwnerUniqueID == pOwner->UniqueID
+				&& it->second.Weapon == pWeapon
+				&& it->second.WaitingForNewTarget
+				&& Unsorted::CurrentFrame < it->second.BurstEndFrame - detachThreshold)
+			{
+				pThis->WaveEC = it->second.BurstEndFrame - Unsorted::CurrentFrame;
+				it->second.DetachThreshold = detachThreshold;
+				it->second.WaitingForNewTarget = false;
+				FireAtTemp::RestoreSonicBurstCooldown(pOwner, it->second);
+				return SkipGameCode;
+			}
+
+			FireAtTemp::PruneSonicBurstMap();
+			const int rearmTimeLeft = pOwner->RearmTimer.GetTimeLeft();
+			FireAtTemp::SonicBurstMap[pOwner] = {
+				pOwner->UniqueID,
+				pWeapon,
+				Unsorted::CurrentFrame + fullDuration,
+				detachThreshold,
+				Unsorted::CurrentFrame + rearmTimeLeft,
+				rearmTimeLeft,
+				false
+			};
+		}
+	}
+
+	pThis->WaveEC = fullDuration;
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x75EB87, WaveClass_CTOR_LaserDuration, 0xA)
+{
+	enum { SkipGameCode = 0x75EB91 };
+
+	GET(WaveClass*, pThis, ESI);
+
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	pThis->LaserEC = (pWeaponExt && pWeaponExt->Wave_Duration.isset())
+		? std::max(33, pWeaponExt->Wave_Duration.Get()) : 160;
+
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x75ED30, WaveClass_DTOR_Cleanup, 0x5)
+{
+	GET(WaveClass*, pThis, ECX);
+	FireAtTemp::WaveWeaponMap.erase(pThis);
+	return 0;
+}
+
+// Use 1.0f instead of 1.05f for WaveLengthFactor on BigLaser and Laser waves so they do not extend behind the firing origin or past the target.
+DEFINE_PATCH(0x7F6BB8, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F);
+
+DEFINE_HOOK_AGAIN(0x762492, WaveClass_InitSonicAndMagnetic_EndZAdjustAndGeometry, 0x6)
+DEFINE_HOOK(0x761A62, WaveClass_InitSonicAndMagnetic_EndZAdjustAndGeometry, 0x6)
+{
+	GET(WaveClass*, pThis, EDI);
+	GET(const int, endZ, EAX);
+
+	const bool isMagnetic = R->Origin() == 0x762492;
+	FireAtTemp::ApplyWaveGeometry(pThis, isMagnetic);
+
+	int endZAdjust = (pThis->Type == WaveType::Sonic || pThis->Type == WaveType::Magnetron) ? 50 : 0;
+
+	if (auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis))
+	{
+		if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon))
+		{
+			if (pWeaponExt->Wave_EndZAdjust.isset())
+				endZAdjust = pWeaponExt->Wave_EndZAdjust.Get();
+		}
+	}
+
+	R->Stack(0x3C, endZ + endZAdjust);
+	return R->Origin() + 0x17;
+}
+
 // WaveClass requires the firer's target and wave's target to match so it needs bit of extra handling here for obstacle cell targets.
 DEFINE_HOOK(0x762AFF, WaveClass_AI_TargetSet, 0x6)
 {
+	enum { SkipCutoffAndMagnetronLoop = 0x762B62 };
+
 	GET(WaveClass*, pThis, ESI);
 
 	if (pThis->Target)
@@ -323,12 +726,68 @@ DEFINE_HOOK(0x762AFF, WaveClass_AI_TargetSet, 0x6)
 		}
 	}
 
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	if (!FireAtTemp::FireWeapon && pWeaponExt && pWeaponExt->Wave_DelayROF)
+	{
+		if (auto const pOwner = pThis->Owner)
+		{
+			if (pOwner->Wave == pThis && pOwner->RearmTimer.InProgress())
+				pOwner->RearmTimer.Start(pOwner->RearmTimer.GetTimeLeft() + 1);
+		}
+	}
+
+	const double step = (pWeaponExt && pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
+		? pWeaponExt->Wave_Step.Get() : 0.05;
+	const int detachThreshold = std::max(1, static_cast<int>(1.0 / step) - 1);
+
+	if (pThis->Type == WaveType::Magnetron)
+	{
+		if (!pWeaponExt || !pWeaponExt->Wave_Duration.isset())
+		{
+			if (pThis->WaveEC == detachThreshold && pThis->WaveCount < 4)
+			{
+				pThis->WaveEC = detachThreshold + 45;
+				++pThis->WaveCount;
+			}
+		}
+	}
+
+	if (pThis->WaveEC <= detachThreshold)
+	{
+		pThis->IsTraveling = false;
+		pThis->ShouldEnd = true;
+	}
+	else if (detachThreshold != 19 && pThis->WaveEC == 19)
+	{
+		FireAtTemp::RestoredWaveEC19 = true;
+		pThis->WaveEC = 20;
+	}
+
+	FireAtTemp::WaveWasActiveBeforeTargetCheck = !FireAtTemp::FireWeapon
+		&& pWeaponExt && pWeaponExt->IsClassicSonic
+		&& pThis->IsTraveling && pThis->WaveEC > detachThreshold;
+
+	if ((pWeaponExt && pWeaponExt->IsClassicSonic)
+		|| (pThis->Type == WaveType::Magnetron && ((pWeaponExt && pWeaponExt->Wave_Duration.isset()) || detachThreshold != 19)))
+	{
+		R->ECX(pThis->Owner);
+		return SkipCutoffAndMagnetronLoop;
+	}
+
 	return 0;
 }
 
 DEFINE_HOOK(0x762D57, WaveClass_AI_TargetUnset, 0x6)
 {
 	GET(WaveClass*, pThis, ESI);
+
+	if (FireAtTemp::RestoredWaveEC19)
+	{
+		pThis->WaveEC = 19;
+		FireAtTemp::RestoredWaveEC19 = false;
+	}
 
 	if (FireAtTemp::pWaveOwnerTarget)
 	{
@@ -338,5 +797,118 @@ DEFINE_HOOK(0x762D57, WaveClass_AI_TargetUnset, 0x6)
 		FireAtTemp::pWaveOwnerTarget = nullptr;
 	}
 
+	if (FireAtTemp::WaveWasActiveBeforeTargetCheck)
+	{
+		FireAtTemp::WaveWasActiveBeforeTargetCheck = false;
+
+		if (!pThis->IsTraveling)
+		{
+			if (auto const pOwner = pThis->Owner)
+			{
+				if (pOwner->Wave == pThis)
+				{
+					auto const it = FireAtTemp::SonicBurstMap.find(pOwner);
+					if (it != FireAtTemp::SonicBurstMap.end() && it->second.OwnerUniqueID == pOwner->UniqueID)
+					{
+						if (pOwner->Target && pOwner->Target != pThis->Target
+							&& Unsorted::CurrentFrame < it->second.BurstEndFrame - it->second.DetachThreshold)
+						{
+							pOwner->Wave = nullptr;
+							it->second.SavedRearmTimeLeft = pOwner->RearmTimer.GetTimeLeft();
+							it->second.WaitingForNewTarget = true;
+							pOwner->RearmTimer.Start(0);
+						}
+						else
+						{
+							FireAtTemp::SonicBurstMap.erase(it);
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return 0;
+}
+
+DEFINE_HOOK_AGAIN(0x762F77, WaveClass_AI_StepStart, 0x6)
+DEFINE_HOOK(0x762D89, WaveClass_AI_StepStart, 0x6)
+{
+	GET(WaveClass*, pThis, ESI);
+
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	const double step = (pWeaponExt && pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
+		? pWeaponExt->Wave_Step.Get() : static_cast<double>(0.05f);
+
+	pThis->MatrixScale1 += step;
+	if (pThis->MatrixScale1 > 1.0 - step * 0.4)
+		pThis->MatrixScale1 = 1.0;
+
+	return R->Origin() + 0x33;
+}
+
+DEFINE_HOOK_AGAIN(0x7630A1, WaveClass_AI_StepEnd, 0x6)
+DEFINE_HOOK(0x762E65, WaveClass_AI_StepEnd, 0x6)
+{
+	enum { SkipEndStep = 0x7631DB };
+
+	GET(WaveClass*, pThis, ESI);
+
+	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
+	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+	const double step = (pWeaponExt && pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
+		? pWeaponExt->Wave_Step.Get() : static_cast<double>(0.05f);
+
+	if (pThis->MatrixScale2 >= pThis->MatrixScale1 + step * 0.5)
+		return SkipEndStep;
+
+	pThis->MatrixScale2 += step - static_cast<double>(0.05f);
+	return R->Origin() + 0x23;
+}
+
+DEFINE_HOOK(0x761124, WaveClass_UpdateCells_InitialScale, 0x6)
+{
+	enum { SkipGameCode = 0x76112F };
+
+	GET(WaveClass*, pThis, ESI);
+	GET(const int, startX, EAX);
+
+	R->EDX(startX < 0 ? -1 : 0);
+	R->Stack<double>(0x40, std::max(static_cast<double>(0.05f), pThis->MatrixScale2));
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x75EE36, WaveClass_PutSonicBeamPixel_SineTableWrap, 0x6)
+{
+	enum { SkipGameCode = 0x75EE3C };
+
+	GET(const int, baseIndex, EAX);
+	GET(const int, waveEC, EDI);
+	GET_STACK(const int, buffer, 0x28);
+
+	int index = (baseIndex + waveEC) % 500;
+	if (index < 0)
+		index += 500;
+
+	R->EAX(index);
+	R->EDI(buffer);
+	return SkipGameCode;
+}
+
+DEFINE_HOOK(0x7601CF, WaveClass_PutMagBeamPixel_SineTableWrap, 0xA)
+{
+	enum { SkipGameCode = 0x7601D9 };
+
+	GET(const int, baseIndex, EAX);
+	GET(const int, waveEC, EBX);
+
+	int index = (baseIndex + waveEC) % 500;
+	if (index < 0)
+		index += 500;
+
+	R->EAX(static_cast<int>(reinterpret_cast<const short*>(0xB45E68u)[index]));
+	return SkipGameCode;
 }

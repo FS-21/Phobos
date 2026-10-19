@@ -401,6 +401,8 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Allowed `SW.ShowCameo` and `SW.ManualFire` to work independently of `SW.AutoFire`.
 - Fixed the bug that Ares tunnel-type buildings cannot unload via the Deploy hotkey or command bar button.
 - Fixed an issue in Ares where vehicles would occasionally continue to fire and move even after the driver had been killed.
+- Fixed `Wave.IsBigLaser` and `Wave.IsLaser` *(Ares features)* having their wave sizes swapped (`Wave.IsBigLaser` now uses the larger laser wave and `Wave.IsLaser` uses the standard laser wave).
+- Allowed weapons with `IsLaser=true`, `IsElectricBolt=true`, `IsRadBeam=true`, or `IsRadEruption=true` to simultaneously spawn `Wave.IsLaser=true`, `Wave.IsBigLaser=true` *(Ares features)*, or `IsMagBeam=true` waves.
 
 ## Newly added global settings
 
