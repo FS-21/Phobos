@@ -3,9 +3,11 @@
 
 #include <Ext/Side/Body.h>
 #include <Ext/TechnoType/Body.h>
-
+#include <Ext/SWType/Body.h>
 #include <Misc/MessageColumn.h>
+#include <Utilities/AresFunctions.h>
 #include <Drawing.h>
+#include <FactoryClass.h>
 #include <GScreenClass.h>
 
 DEFINE_HOOK(0x6ABC60, SidebarClass_GetObjectTabIdx, 0x5)
@@ -16,7 +18,7 @@ DEFINE_HOOK(0x6ABC60, SidebarClass_GetObjectTabIdx, 0x5)
 
 	int desiredTab = 0;
 
-	const auto pTechnoType = TechnoTypeClass::GetByTypeAndIndex(abs, idxType);
+	const auto pTechnoType = (idxType >= 0) ? TechnoTypeClass::GetByTypeAndIndex(abs, idxType) : nullptr;
 	if (pTechnoType)
 	{
 		if (const auto pExt = TechnoTypeExt::TryFetch(pTechnoType))
@@ -99,6 +101,80 @@ DEFINE_HOOK(0x6A7590, SidebarClass_SetTab, 0x5)
 
 	int resolvedTab = SidebarExt::ResolveVisibleTab(tabIndex, AbstractType::None, config);
 	R->Stack(0x4, resolvedTab);
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6ABAD0, SidebarClass_AbandonCameosFromFactory, 0x7)
+{
+	GET(SidebarClass*, pThis, ECX);
+	GET_STACK(AbstractType, abs, 0x4);
+	GET_STACK(int, idxType, 0x8);
+	GET_STACK(FactoryClass*, pFactory, 0xC);
+
+	auto const abandonFromStrip = reinterpret_cast<bool(__thiscall*)(StripClass*, FactoryClass*)>(0x6ABB60);
+
+	if (idxType < 0 && pFactory && pFactory->Object)
+	{
+		if (const auto pTechnoType = pFactory->Object->GetTechnoType())
+			idxType = pTechnoType->GetArrayIndex();
+	}
+
+	bool result = false;
+	const int tabIdx = SidebarClass::GetObjectTabIdx(abs, idxType, 0);
+
+	if (tabIdx >= 0 && tabIdx < 4)
+		result = abandonFromStrip(&pThis->Tabs[tabIdx], pFactory);
+
+	if (!result && pFactory)
+	{
+		for (int i = 0; i < 4; ++i)
+		{
+			if (i != tabIdx && abandonFromStrip(&pThis->Tabs[i], pFactory))
+			{
+				result = true;
+				break;
+			}
+		}
+	}
+
+	R->AL(result);
+	return 0x6ABB5A;
+}
+
+DEFINE_HOOK(0x4C9A16, FactoryClass_DTOR_ClearSidebarCameos, 0x6)
+{
+	GET(FactoryClass*, pThis, ESI);
+
+	if (AresFunctions::TabCameos)
+	{
+		for (int tabIdx = 0; tabIdx < 4; ++tabIdx)
+		{
+			auto& cameos = AresFunctions::TabCameos[tabIdx];
+			for (int i = 0; i < cameos.Count; ++i)
+			{
+				if (cameos.Items[i].CurrentFactory == pThis)
+				{
+					cameos.Items[i].CurrentFactory = nullptr;
+					cameos.Items[i].unknown_10 = 0;
+				}
+			}
+		}
+	}
+
+	for (int tabIdx = 0; tabIdx < 4; ++tabIdx)
+	{
+		auto& strip = SidebarClass::Instance.Tabs[tabIdx];
+		const int count = (std::min)(strip.CameoCount, 75);
+		for (int i = 0; i < count; ++i)
+		{
+			if (strip.Cameos[i].CurrentFactory == pThis)
+			{
+				strip.Cameos[i].CurrentFactory = nullptr;
+				strip.Cameos[i].unknown_10 = 0;
+			}
+		}
+	}
 
 	return 0;
 }
