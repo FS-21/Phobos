@@ -255,6 +255,7 @@ DEFINE_HOOK(0x6A5F6E, SidebarClass_6A5F20_TabIndex, 0x8)
 	GET(AbstractType const, absType, ESI);
 	GET(int const, typeIdx, EAX);
 
+	R->EBX(1);
 	R->EAX(SidebarClass::GetObjectTabIdx(absType, typeIdx, 0));
 	return ApplyTabIndex;
 }
