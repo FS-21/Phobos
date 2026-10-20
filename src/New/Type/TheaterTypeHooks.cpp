@@ -30,6 +30,9 @@ DEFINE_HOOK(0x5349C9, Theater_Init, 0x6)
 {
 	GET(TheaterType, theater, ECX);
 
+	if (ScenarioClass::Instance)
+		ScenarioClass::Instance->Theater = theater;
+
 	if (theater == ScenarioClass::LastTheater)
 		return 0x534DCA;
 
@@ -116,13 +119,8 @@ DEFINE_HOOK(0x5349C9, Theater_Init, 0x6)
 // Isometric tileset filename hooks
 DEFINE_HOOK(0x5452F2, IsometricTileTypeClass_SlopeZ, 0x6)
 {
-	auto const pSuffix = TheaterTypeClass::Suffix_From(ScenarioClass::Instance->Theater);
-
-	static char slopeBuffer[32];
-	_snprintf_s(slopeBuffer, sizeof(slopeBuffer), "SLOP01Z.%s", pSuffix);
-	R->ECX(slopeBuffer);
-
-	return 0x545315;
+	R->EAX(TheaterTypeClass::Suffix_From(ScenarioClass::Instance->Theater));
+	return 0x5452F8;
 }
 
 DEFINE_HOOK(0x54547F, IsometricTileTypeClass_PaletteISO, 0x6)
