@@ -294,34 +294,25 @@ DEFINE_HOOK(0x54C57A, JumpjetLocomotionClass_Descending_CheckDeployTerrain, 0x6)
 	return 0;
 }
 
-// Allow IsSimpleDeployer jumpjet units with BalloonHover=yes to remain hovering in place upon arrival unless actively deploying.
+// Skip DeployToLand check for IsSimpleDeployer jumpjet units, the desired behaviour here
+// should be same for both (hover in place if not deploying)
 DEFINE_HOOK(0x54BDDE, JumpjetLocomotionClass_Hovering_SimpleDeployer, 0x14)
 {
 	GET(UnitClass*, pUnit, EDI);
 
-	auto const pType = pUnit->GetTechnoType();
-	auto const pExt = UnitExt::Fetch(pUnit);
-	const bool isCarryallBusy = pExt && (pExt->CarryallCargo || pExt->CarryallState != JumpjetCarryallState::Idle);
-	const bool isHoverAttacking = pType->HoverAttack && (pUnit->Target || pUnit->GetCurrentMission() == Mission::Attack);
-
-	if ((pType->BalloonHover || isCarryallBusy || isHoverAttacking) && (pUnit->CurrentMission != Mission::Unload && !pUnit->Deploying))
-		return 0x54BE62;
+	if (pUnit->InAir && pUnit->CurrentMission != Mission::Unload && pUnit->QueuedMission != Mission::Unload && !pUnit->Deploying)
+		pUnit->InAir = false;
 
 	return 0x54BDF2;
 }
 
-// Same as above during cruising state.
+// Same as above but at a different state.
 DEFINE_HOOK(0x54C212, JumpjetLocomotionClass_Cruising_SimpleDeployer, 0x18)
 {
 	GET(UnitClass*, pUnit, EDI);
 
-	auto const pType = pUnit->GetTechnoType();
-	auto const pExt = UnitExt::Fetch(pUnit);
-	const bool isCarryallBusy = pExt && (pExt->CarryallCargo || pExt->CarryallState != JumpjetCarryallState::Idle);
-	const bool isHoverAttacking = pType->HoverAttack && (pUnit->Target || pUnit->GetCurrentMission() == Mission::Attack);
-
-	if ((pType->BalloonHover || isCarryallBusy || isHoverAttacking) && (pUnit->CurrentMission != Mission::Unload && !pUnit->Deploying))
-		return 0x54C34D;
+	if (pUnit->InAir && pUnit->CurrentMission != Mission::Unload && pUnit->QueuedMission != Mission::Unload && !pUnit->Deploying)
+		pUnit->InAir = false;
 
 	return 0x54C22A;
 }
