@@ -969,3 +969,45 @@ DEFINE_HOOK(0x4FD50D, HouseClass_Expert_AI_Advanced_AI_Intercept, 0x8)
 	return 0;
 }
 
+// Map action 30 (AutoBaseBuilding) turns a campaign AI house into a "skirmish-like" base builder,
+// so it also opts the house into the Advanced AI logics (see HouseExt::IsAdvancedAIActive).
+DEFINE_HOOK(0x6E0F02, TActionClass_AutoBaseBuilding_Enable, 0x7)
+{
+	GET(HouseClass*, pHouse, ESI);
+
+	if (auto const pExt = HouseExt::ExtMap.Find(pHouse))
+		pExt->AdvancedAI_Campaign = true;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6E0F7F, TActionClass_AutoBaseBuilding_Disable, 0x7)
+{
+	GET(HouseClass*, pHouse, EAX);
+
+	if (auto const pExt = HouseExt::ExtMap.Find(pHouse))
+		pExt->AdvancedAI_Campaign = false;
+
+	return 0;
+}
+
+// Same as above, inlined copy inside TActionClass::Execute.
+DEFINE_HOOK(0x6DE21B, TActionClass_Execute_AutoBaseBuilding_Enable, 0x7)
+{
+	GET(HouseClass*, pHouse, ESI);
+
+	if (auto const pExt = HouseExt::ExtMap.Find(pHouse))
+		pExt->AdvancedAI_Campaign = true;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6DE29F, TActionClass_Execute_AutoBaseBuilding_Disable, 0x7)
+{
+	GET(HouseClass*, pHouse, EAX);
+
+	if (auto const pExt = HouseExt::ExtMap.Find(pHouse))
+		pExt->AdvancedAI_Campaign = false;
+
+	return 0;
+}
