@@ -760,27 +760,30 @@ void UnitExt::UpdateCarryall()
 	if (!pThis || !pThis->IsAlive || pThis->InLimbo)
 		return;
 
+	auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor);
+	if (pJJLoco)
+	{
+		const bool isAirborne = (pJJLoco->State != JumpjetLocomotionClass::State::Grounded) && (pThis->GetHeight() > 0);
+		if (isAirborne)
+		{
+			pThis->InAir = true;
+			if (!pJJLoco->Is_Moving_Now())
+				pThis->WalkedFramesSoFar++;
+		}
+		else
+		{
+			pThis->InAir = false;
+		}
+	}
+
 	auto const pType = pThis->Type;
 	auto const pTypeExt = this->GetTypeExtData();
 
 	if (!pTypeExt->Carryall && this->CarryallState == JumpjetCarryallState::Idle && !this->CarryallCargo)
 		return;
 
-	auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor);
 	if (!pJJLoco)
 		return;
-
-	const bool isAirborne = (pJJLoco->State != JumpjetLocomotionClass::State::Grounded) && (pThis->GetHeight() > 0);
-	if (isAirborne)
-	{
-		pThis->InAir = true;
-		if (!pJJLoco->Is_Moving_Now())
-			pThis->WalkedFramesSoFar++;
-	}
-	else
-	{
-		pThis->InAir = false;
-	}
 
 	const int cruiseHeight = pType->JumpjetHeight > 0 ? pType->JumpjetHeight : 500;
 	const int climbRate = std::max(2, static_cast<int>(pType->JumpjetClimb > 0.0f ? pType->JumpjetClimb : 5.0f));
