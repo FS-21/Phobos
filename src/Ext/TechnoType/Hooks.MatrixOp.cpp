@@ -841,7 +841,7 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 	float arf = pThis->AngleRotatedForwards;
 	float ars = pThis->AngleRotatedSideways;
 	const bool hasJumpjetTilt = pDrawTypeExt->JumpjetTilt.Get(RulesExt::Global()->JumpjetTilt)
-		|| (pParentTechnoTypeExt && pParentTechnoTypeExt->JumpjetTilt.Get(RulesExt::Global()->JumpjetTilt));
+		|| (pParentUnitTypeExt && pParentUnitTypeExt->JumpjetTilt.Get(RulesExt::Global()->JumpjetTilt));
 
 	// lazy, don't want to hook inside Shadow_Matrix
 	if (std::abs(ars) >= 0.005f || std::abs(arf) >= 0.005f)
@@ -861,7 +861,7 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 		&& pThis->Health > 0
 		&& !pThis->IsAttackedByLocomotor)
 	{
-		auto const pTiltExt = (pParentTechnoTypeExt && !pDrawTypeExt->JumpjetTilt.isset()) ? pParentTechnoTypeExt : pDrawTypeExt;
+		auto const pTiltExt = (pParentUnitTypeExt && !pDrawTypeExt->JumpjetTilt.isset()) ? pParentUnitTypeExt : pDrawTypeExt;
 		const float forwardSpeedFactor = static_cast<float>(jjloco->CurrentSpeed * pTiltExt->JumpjetTilt_ForwardSpeedFactor.Get(RulesExt::Global()->JumpjetTilt_ForwardSpeedFactor));
 		const float forwardAccelFactor = static_cast<float>(jjloco->Accel * pTiltExt->JumpjetTilt_ForwardAccelFactor.Get(RulesExt::Global()->JumpjetTilt_ForwardAccelFactor));
 
