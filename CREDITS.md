@@ -209,6 +209,8 @@ This page lists all the individual contributions to the project by their author.
   - Fix unit type conversion corrupting factory queue and freezing production when units are being produced
   - Building disguise detector logic fix
   - Movie subtitles background
+  - Fix `Refinery.UseStorage` and `Storage.TiberiumIndex` on Slave Miners
+  - Veinhole monster and veins logic fixes and ramp support
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
