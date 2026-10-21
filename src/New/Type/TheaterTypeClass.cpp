@@ -146,10 +146,10 @@ void TheaterTypeClass::Init()
 	static const VanillaDef vanillaList[] = {
 		{ "TEMPERATE", "Name:Temperate", "TEMPERAT", "ISOTEMP", "TEM", "MMT", 'T', false, false, true,  true,  true,  1.0f, 1.6f, "TEMPERATMD.INI", "ISOTEM.PAL", "TEMPERAT.PAL", "UNITTEM.PAL" },
 		{ "SNOW",      "Name:Snow",      "SNOW",     "ISOSNOW", "SNO", "MMS", 'A', true,  true,  true,  true,  true,  0.8f, 1.1f, "SNOWMD.INI",     "ISOSNO.PAL", "SNOW.PAL",     "UNITSNO.PAL" },
-		{ "URBAN",     "Name:Urban",     "URBAN",    "ISOURB",  "URB", "MMU", 'U', false, false, false, false, false, 1.0f, 1.0f, "URBANMD.INI",    "ISOURB.PAL", "URBAN.PAL",    "UNITURB.PAL" },
-		{ "DESERT",    "Name:Desert",    "DESERT",   "ISODES",  "DES", "MMD", 'D', false, false, false, true,  false, 1.0f, 1.0f, "DESERTMD.INI",   "ISODES.PAL", "DESERT.PAL",   "UNITDES.PAL" },
-		{ "NEWURBAN",  "Name:New Urban", "URBANN",   "ISOUBN",  "UBN", "MMT", 'N', false, false, false, false, false, 1.0f, 1.0f, "URBANNMD.INI",   "ISOUBN.PAL", "URBANN.PAL",   "UNITUBN.PAL" },
-		{ "LUNAR",     "Name:Lunar",     "LUNAR",    "ISOLUN",  "LUN", "MML", 'L', false, false, false, false, false, 1.0f, 1.0f, "LUNARMD.INI",    "ISOLUN.PAL", "LUNAR.PAL",    "UNITLUN.PAL" }
+		{ "URBAN",     "Name:Urban",     "URBAN",    "ISOURB",  "URB", "MMU", 'U', false, false, true,  false, false, 1.0f, 1.0f, "URBANMD.INI",    "ISOURB.PAL", "URBAN.PAL",    "UNITURB.PAL" },
+		{ "DESERT",    "Name:Desert",    "DESERT",   "ISODES",  "DES", "MMD", 'D', false, false, true,  true,  false, 1.0f, 1.0f, "DESERTMD.INI",   "ISODES.PAL", "DESERT.PAL",   "UNITDES.PAL" },
+		{ "NEWURBAN",  "Name:New Urban", "URBANN",   "ISOUBN",  "UBN", "MMT", 'N', false, false, true,  false, false, 1.0f, 1.0f, "URBANNMD.INI",   "ISOUBN.PAL", "URBANN.PAL",   "UNITUBN.PAL" },
+		{ "LUNAR",     "Name:Lunar",     "LUNAR",    "ISOLUN",  "LUN", "MML", 'L', false, false, true,  false, false, 1.0f, 1.0f, "LUNARMD.INI",    "ISOLUN.PAL", "LUNAR.PAL",    "UNITLUN.PAL" }
 	};
 
 	for (const auto& def : vanillaList)
@@ -275,7 +275,7 @@ bool TheaterTypeClass::Vein_Growth_Allowed(TheaterType type)
 	if (const auto pTheater = As_Pointer(type))
 		return pTheater->IsVeinGrowthEnabled.Get();
 
-	return false;
+	return true;
 }
 
 bool TheaterTypeClass::Allowed_In_Map_Generator(TheaterType type)
