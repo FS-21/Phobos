@@ -1140,7 +1140,7 @@ AdvancedAI.MinimumRefineryCount=2     ; integer
 ```
 
 ```{note}
-In campaign missions, the Advanced AI is **disabled by default** for every AI house, so scripted or pre-built bases keep the vanilla AI behavior and do not start constructing extra structures. A map can opt a specific house in, making it behave like a skirmish AI, by setting `AdvancedAI=yes` in that house's own section of the map file, or by running the vanilla map action `30` (Auto Base Building) for it (action parameter `1` enables it, any other value disables it again). Both options also require `[AI] -> AdvancedAI=yes`. In skirmish and multiplayer the global `[AI] -> AdvancedAI` value applies to all AI houses.
+In campaign missions, the Advanced AI is **disabled by default** for every AI house, so scripted or pre-built bases keep the vanilla AI behavior and do not start constructing extra structures. A map can opt a specific house in, making it behave like a skirmish AI, by setting `AdvancedAI=yes` in that house's own section of the map file, or by running the vanilla map action `30` (Auto Base Building) for it (second parameter `1` = yes, `0` = no). Both options also require `[AI] -> AdvancedAI=yes`. In skirmish and multiplayer the global `[AI] -> AdvancedAI` value applies to all AI houses.
 ```
 
 In map file:
