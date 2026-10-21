@@ -760,23 +760,17 @@ void UnitExt::UpdateCarryall()
 	if (!pThis || !pThis->IsAlive || pThis->InLimbo)
 		return;
 
+	auto const pType = pThis->Type;
 	auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor);
 	if (pJJLoco)
 	{
 		const bool isAirborne = (pJJLoco->State != JumpjetLocomotionClass::State::Grounded) && (pThis->GetHeight() > 0);
-		if (isAirborne)
+		if (isAirborne && !pJJLoco->Is_Moving_Now() && !pType->DeployToLand && pType->IdleRate == 0
+			&& !pThis->IsDeactivated() && !pThis->IsUnderEMP() && !pThis->IsAttackedByLocomotor)
 		{
-			pThis->InAir = true;
-			if (!pJJLoco->Is_Moving_Now())
-				pThis->WalkedFramesSoFar++;
-		}
-		else
-		{
-			pThis->InAir = false;
+			pThis->WalkedFramesSoFar++;
 		}
 	}
-
-	auto const pType = pThis->Type;
 	auto const pTypeExt = this->GetTypeExtData();
 
 	if (!pTypeExt->Carryall && this->CarryallState == JumpjetCarryallState::Idle && !this->CarryallCargo)
@@ -801,8 +795,6 @@ void UnitExt::UpdateCarryall()
 
 	case JumpjetCarryallState::MovingToPickup:
 	{
-		pThis->InAir = true;
-
 		auto const pTargetUnit = abstract_cast<UnitClass*>(this->CarryallTarget);
 		if (!pTargetUnit || !pTargetUnit->IsAlive || pTargetUnit->InLimbo || !this->CarryallCanLift(pTargetUnit))
 		{
@@ -859,8 +851,6 @@ void UnitExt::UpdateCarryall()
 
 	case JumpjetCarryallState::AligningInAir:
 	{
-		pThis->InAir = true;
-
 		auto const pTargetUnit = abstract_cast<UnitClass*>(this->CarryallTarget);
 		if (!pTargetUnit || !pTargetUnit->IsAlive || pTargetUnit->InLimbo || !this->CarryallCanLift(pTargetUnit))
 		{
@@ -936,8 +926,6 @@ void UnitExt::UpdateCarryall()
 
 	case JumpjetCarryallState::DescendingToPickup:
 	{
-		pThis->InAir = true;
-
 		auto const pTargetUnit = abstract_cast<UnitClass*>(this->CarryallTarget);
 		if (!pTargetUnit || !pTargetUnit->IsAlive || pTargetUnit->InLimbo || !this->CarryallCanLift(pTargetUnit))
 		{
@@ -1019,8 +1007,6 @@ void UnitExt::UpdateCarryall()
 
 	case JumpjetCarryallState::AscendingWithCargo:
 	{
-		pThis->InAir = true;
-
 		pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
 		FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
 
@@ -1060,8 +1046,6 @@ void UnitExt::UpdateCarryall()
 
 	case JumpjetCarryallState::Carrying:
 	{
-		pThis->InAir = true;
-
 		if (!this->CarryallCargo || !this->CarryallCargo->IsAlive)
 		{
 			this->CarryallCargo = nullptr;
@@ -1081,8 +1065,6 @@ void UnitExt::UpdateCarryall()
 
 	case JumpjetCarryallState::DescendingToDrop:
 	{
-		pThis->InAir = true;
-
 		if (!this->CarryallCargo || !this->CarryallCargo->IsAlive)
 		{
 			this->CarryallCargo = nullptr;
@@ -1136,8 +1118,6 @@ void UnitExt::UpdateCarryall()
 
 	case JumpjetCarryallState::AscendingAfterDrop:
 	{
-		pThis->InAir = true;
-
 		pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
 		FootExt::Fetch(pThis)->JumpjetStraightAscend = true;
 
