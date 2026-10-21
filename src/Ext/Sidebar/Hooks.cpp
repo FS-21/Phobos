@@ -46,7 +46,7 @@ DEFINE_HOOK(0x6ABC60, SidebarClass_GetObjectTabIdx, 0x5)
 			desiredTab = (pBType->BuildCat == BuildCat::Combat) ? 1 : 0;
 		}
 	}
-	else if (abs == AbstractType::Super || abs == AbstractType::SuperWeaponType)
+	else if (abs == AbstractType::Super || abs == AbstractType::SuperWeaponType || abs == AbstractType::Special)
 	{
 		desiredTab = 1;
 		if (idxType >= 0 && idxType < SuperWeaponTypeClass::Array.Count)
@@ -87,7 +87,7 @@ DEFINE_HOOK(0x6ABCD0, SidebarClass_GetObjectTabIdx2, 0x5)
 		desiredTab = 3;
 	else if (abs == AbstractType::BuildingType || abs == AbstractType::Building)
 		desiredTab = (buildCat == BuildCat::Combat) ? 1 : 0;
-	else if (abs == AbstractType::Super || abs == AbstractType::SuperWeaponType)
+	else if (abs == AbstractType::Super || abs == AbstractType::SuperWeaponType || abs == AbstractType::Special)
 		desiredTab = 1;
 
 	R->EAX(SidebarExt::ResolveVisibleTab(desiredTab, abs, config));
