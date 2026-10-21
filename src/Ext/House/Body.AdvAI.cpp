@@ -5727,9 +5727,13 @@ bool HouseExt::IsAdvancedAIActive(HouseClass* pHouse)
 	if (!RulesExt::Global()->AdvancedAI)
 		return false;
 
-	// In campaign missions, respect scripted base layouts: houses with pre-placed nodes use vanilla AI
-	if (SessionClass::IsCampaign() && pHouse->Base.BaseNodes.Count > 0)
-		return false;
+	// In campaign missions, scripted/pre-built houses keep the vanilla AI unless the map explicitly opts in
+	// by setting AdvancedAI=yes in the house's own section of the map file.
+	if (SessionClass::IsCampaign())
+	{
+		const auto pHouseExt = HouseExt::ExtMap.Find(pHouse);
+		return pHouseExt && pHouseExt->AdvancedAI_Campaign;
+	}
 
 	return true;
 }

@@ -89,6 +89,7 @@ public:
 
 	//Read from INI
 	Nullable<bool> RepairBaseNodes[3];
+	Valueable<bool> AdvancedAI_Campaign;
 
 	// FactoryPlants with Allow/DisallowTypes set.
 	std::vector<BuildingClass*> RestrictedFactoryPlants;
@@ -304,6 +305,7 @@ public:
 		, Factory_AircraftType { nullptr }
 		, AISuperWeaponDelayTimer {}
 		, RepairBaseNodes { }
+		, AdvancedAI_Campaign { false }
 		, RestrictedFactoryPlants {}
 		, LastBuiltNavalVehicleType { -1 }
 		, ProducingNavalUnitTypeIndex { -1 }

@@ -1139,6 +1139,16 @@ AdvancedAI.MultiConYard=false         ; boolean
 AdvancedAI.MinimumRefineryCount=2     ; integer
 ```
 
+```{note}
+In campaign missions, the Advanced AI is **disabled by default** for every AI house, so scripted or pre-built bases keep the vanilla AI behavior and do not start constructing extra structures. A map can opt a specific house in, making it behave like a skirmish AI, by setting `AdvancedAI=yes` in that house's own section of the map file (it also requires `[AI] -> AdvancedAI=yes`). In skirmish and multiplayer the global `[AI] -> AdvancedAI` value applies to all AI houses.
+```
+
+In map file:
+```ini
+[SomeHouse]
+AdvancedAI=false                      ; boolean, campaign only
+```
+
 ### TechTree Building Categories
 - All lists are evaluated and built by selecting a buildable candidate randomly, with the sole exception of `BuildOther`, which is evaluated sequentially in the exact order specified.
 - `SideIndex` The 0-based side index (e.g., `0` for Allies, `1` for Soviets, `2` for Yuri) that this TechTree profile belongs to.
