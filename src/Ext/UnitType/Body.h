@@ -81,6 +81,8 @@ public:
 	std::vector<CoordStruct> ExtraTurretOffsets;
 	Valueable<int> BurstPerTurret;
 
+	NullableIdx<VocClass> VoicePickup;
+
 	explicit UnitTypeExt(UnitTypeClass* const OwnerObject) : TechnoTypeExt(OwnerObject)
 		, SinkSpeed {}
 		, Sinkable {}
@@ -139,6 +141,7 @@ public:
 		, ExtraTurretCount { 0 }
 		, ExtraTurretOffsets { }
 		, BurstPerTurret { 0 }
+		, VoicePickup {}
 	{ }
 
 	UnitTypeClass* OwnerObject() const

@@ -300,8 +300,10 @@ DEFINE_HOOK(0x54BDDE, JumpjetLocomotionClass_Hovering_SimpleDeployer, 0x14)
 	GET(UnitClass*, pUnit, EDI);
 
 	auto const pType = pUnit->GetTechnoType();
+	auto const pExt = UnitExt::Fetch(pUnit);
+	const bool isCarryallBusy = pExt && (pExt->CarryallCargo || pExt->CarryallState != JumpjetCarryallState::Idle);
 
-	if (pType->BalloonHover && (pUnit->CurrentMission != Mission::Unload && !pUnit->Deploying))
+	if ((pType->BalloonHover || isCarryallBusy) && (pUnit->CurrentMission != Mission::Unload && !pUnit->Deploying))
 		return 0x54BE62;
 
 	return 0x54BDF2;
@@ -313,8 +315,10 @@ DEFINE_HOOK(0x54C212, JumpjetLocomotionClass_Cruising_SimpleDeployer, 0x18)
 	GET(UnitClass*, pUnit, EDI);
 
 	auto const pType = pUnit->GetTechnoType();
+	auto const pExt = UnitExt::Fetch(pUnit);
+	const bool isCarryallBusy = pExt && (pExt->CarryallCargo || pExt->CarryallState != JumpjetCarryallState::Idle);
 
-	if (pType->BalloonHover && (pUnit->CurrentMission != Mission::Unload && !pUnit->Deploying))
+	if ((pType->BalloonHover || isCarryallBusy) && (pUnit->CurrentMission != Mission::Unload && !pUnit->Deploying))
 		return 0x54C34D;
 
 	return 0x54C22A;

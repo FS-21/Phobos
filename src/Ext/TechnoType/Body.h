@@ -651,6 +651,11 @@ public:
 	std::vector<ResourceProductionData> ResourceProductions;
 	std::vector<int> ResourceCollectors;
 
+	Valueable<bool> Carryall;
+	Nullable<int> Carryall_SizeLimit;
+	Valueable<bool> Carryall_Allowed;
+	Valueable<double> Carryall_SpeedMultiplier;
+
 	TechnoTypeExt(TechnoTypeClass* OwnerObject) : ObjectTypeExt(OwnerObject)
 		, Array {}
 		, TabIndex {}
@@ -1156,6 +1161,11 @@ public:
 		, ResourceSoylents {}
 		, ResourceProductions {}
 		, ResourceCollectors {}
+
+		, Carryall { false }
+		, Carryall_SizeLimit {}
+		, Carryall_Allowed { true }
+		, Carryall_SpeedMultiplier { 1.0 }
 	{ }
 
 	virtual ~TechnoTypeExt() = default;

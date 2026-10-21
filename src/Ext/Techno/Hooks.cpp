@@ -69,6 +69,7 @@ DEFINE_HOOK(0x736480, UnitClass_AI, 0x6)
 	pExt->DepletedAmmoActions();
 	pExt->UpdateSubterraneanHarvester();
 	pExt->UpdateRecoilData();
+	pExt->UpdateCarryall();
 
 	// Replace vanilla animation counter code in UnitClass::AI.
 	if (pThis->IsAlive && !pExt->DelayedFireSequencePaused && !((pThis->IsWarpingIn() && pThis->TemporalTargetingMe) || pThis->IsBeingWarpedOut()))
@@ -1567,25 +1568,19 @@ DEFINE_HOOK(0x708FC0, TechnoClass_ResponseMove, 0x5)
 
 	GET(TechnoClass*, pThis, ECX);
 
-	const AbstractType rtti = pThis->WhatAmI();
+	int voicePickup = -1;
 
+	const AbstractType rtti = pThis->WhatAmI();
 	if (rtti == AbstractType::Aircraft)
 	{
 		auto const pAircraft = static_cast<AircraftClass*>(pThis);
 		auto const pType = pAircraft->Type;
 
-		if (pType->Carryall && pAircraft->HasAnyLink()
-			&& generic_cast<FootClass*>(pAircraft->Destination))
+		if (pType->Carryall && pAircraft->HasAnyLink() && generic_cast<FootClass*>(pAircraft->Destination))
 		{
 			auto const pTypeExt = AircraftTypeExt::Fetch(pType);
-
 			if (pTypeExt->VoicePickup.isset())
-			{
-				pThis->QueueVoice(pTypeExt->VoicePickup.Get());
-
-				R->EAX(1);
-				return SkipResponse;
-			}
+				voicePickup = pTypeExt->VoicePickup.Get();
 		}
 	}
 	else
@@ -1594,6 +1589,23 @@ DEFINE_HOOK(0x708FC0, TechnoClass_ResponseMove, 0x5)
 
 		if (FootExt::CannotMove(pFoot, true))
 			return SkipResponse;
+
+		auto const pUnit = abstract_cast<UnitClass*>(pThis);
+		auto const pUnitExt = UnitExt::Fetch(pUnit);
+		if (pUnitExt && (pUnitExt->CarryallState == JumpjetCarryallState::MovingToPickup ||
+			(pUnit->Destination && abstract_cast<TechnoClass*>(pUnit->Destination) && pUnitExt->CarryallCanLift(abstract_cast<TechnoClass*>(pUnit->Destination)))))
+		{
+			auto const pTypeExt = UnitTypeExt::Fetch(pUnit->Type);
+			if (pTypeExt && pTypeExt->VoicePickup.isset())
+				voicePickup = pTypeExt->VoicePickup.Get();
+		}
+	}
+
+	if (voicePickup != -1)
+	{
+		pThis->QueueVoice(voicePickup);
+		R->EAX(1);
+		return SkipResponse;
 	}
 
 	return 0;
@@ -1662,6 +1674,27 @@ DEFINE_HOOK(0x7010C1, TechnoClass_CanShowDeployCursor_UnitsAndAircraft, 0x5)
 		// If in tank bunker skip rest of the checks.
 		if (pThis->BunkerLinkedItem)
 			return 0;
+
+		auto const pExt = UnitExt::Fetch(pUnit);
+		if (pExt)
+		{
+			auto const pTypeExt = TechnoTypeExt::Fetch(pUnit->Type);
+			if (pTypeExt && pTypeExt->Carryall)
+			{
+				if (pExt->CarryallCargo)
+				{
+					if (pExt->CarryallState != JumpjetCarryallState::Carrying
+						|| !pExt->CarryallCanDropAt(pUnit->GetCell()))
+					{
+						return DoNotAllowDeploy;
+					}
+				}
+				else if (pExt->CarryallState != JumpjetCarryallState::Idle)
+				{
+					return DoNotAllowDeploy;
+				}
+			}
+		}
 
 		// Ammo-based deploy blocking.
 		if (!UnitExt::HasAmmoToDeploy(pUnit))

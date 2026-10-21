@@ -2050,6 +2050,11 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->VoiceIFVRepair.Read(exINI, pSection, "VoiceIFVRepair");
 	this->ParseVoiceWeaponAttacks(exINI, pSection, this->VoiceWeaponAttacks, this->VoiceEliteWeaponAttacks);
 
+	this->Carryall.Read(exINI, pSection, "Carryall");
+	this->Carryall_SizeLimit.Read(exINI, pSection, "Carryall.SizeLimit");
+	this->Carryall_Allowed.Read(exINI, pSection, "Carryall.Allowed");
+	this->Carryall_SpeedMultiplier.Read(exINI, pSection, "Carryall.SpeedMultiplier");
+
 	this->FlyingProduction.Read(exINI, pSection, "FlyingProduction");
 	if (pThis->WhatAmI() != AbstractType::BuildingType)
 		this->FlyingProduction_SpawnHeight.Read(exINI, pSection, "FlyingProduction.SpawnHeight");
@@ -2648,6 +2653,11 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->AttachmentTopLayerMinHeight)
 		.Process(this->AttachmentUndergroundLayerMaxHeight)
 		.Process(this->AttachmentData)
+
+		.Process(this->Carryall)
+		.Process(this->Carryall_SizeLimit)
+		.Process(this->Carryall_Allowed)
+		.Process(this->Carryall_SpeedMultiplier)
 		;
 }
 void TechnoTypeExt::LoadFromStream(PhobosStreamReader& Stm)

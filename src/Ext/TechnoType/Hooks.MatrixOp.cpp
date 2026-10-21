@@ -3,6 +3,8 @@
 #include <Utilities/AresHelper.h>
 #include <Ext/Unit/Body.h>
 #include <Ext/Aircraft/Body.h>
+#include <TacticalClass.h>
+#include <MapClass.h>
 #include <Ext/Techno/Body.h>
 #include <New/Entity/AttachmentClass.h>
 #include <New/Type/AttachmentTypeClass.h>
@@ -373,19 +375,19 @@ DEFINE_HOOK(0x4CF68D, FlyLocomotionClass_DrawMatrix_OnAirport, 0x5)
 	const auto pThis = static_cast<AircraftClass*>(loco->LinkedTo);
 	if (pThis->GetHeight() <= 0)
 	{
-		REF_STACK(Matrix3D, mat, STACK_OFFSET(0x38, -0x30));
-		const auto slope_idx = MapClass::Instance.GetCellAt(pThis->Location)->SlopeIndex;
-		mat = Matrix3D::VoxelRampMatrix[slope_idx] * mat;
 		const float ars = pThis->AngleRotatedSideways;
 		const float arf = pThis->AngleRotatedForwards;
 		if (std::abs(ars) > 0.005f || std::abs(arf) > 0.005f)
 		{
+			REF_STACK(Matrix3D, mat, STACK_OFFSET(0x38, -0x30));
 			const auto pType = pThis->Type;
 			mat.TranslateZ(float(std::abs(Math::sin(ars)) * pType->VoxelScaleX
 				+ std::abs(Math::sin(arf)) * pType->VoxelScaleY));
 			R->ECX(pThis);
 			return 0x4CF6AD;
 		}
+
+		return 0x4CF809;
 	}
 
 	return 0x4CF6A0;
@@ -548,7 +550,7 @@ DEFINE_HOOK(0x73B748, UnitClass_DrawVXL_ResetKeyForTurretUse, 0x7)
 	const bool isAttached = TechnoExt::IsAttached(pThis) || TechnoExt::HasAttachmentLoco(pThis);
 
 	// Main body drawing completed, then enable accurate drawing of turrets and barrels
-	if (key.Base.Is_Valid_Key() && (isTilted || isAttached))
+	if (key.Base.Is_Valid_Key() && (isTilted || isAttached || pThis->IsOnCarryall))
 		key.Base.Invalidate();
 
 	return 0;
@@ -690,7 +692,8 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 	auto jjloco = locomotion_cast<JumpjetLocomotionClass*>(loco);
 	TechnoClass* pParentTechno = nullptr;
 	TechnoTypeClass* pParentType = nullptr;
-	UnitTypeExt* pParentTypeExt = nullptr;
+	TechnoTypeExt* pParentTechnoTypeExt = nullptr;
+	UnitTypeExt* pParentUnitTypeExt = nullptr;
 
 	if (!jjloco)
 	{
@@ -700,8 +703,9 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 			{
 				pParentTechno = pExt->ParentAttachment->Parent;
 				pParentType = pParentTechno->GetTechnoType();
+				pParentTechnoTypeExt = TechnoTypeExt::Fetch(pParentType);
 				if (auto const pParentUnitType = abstract_cast<UnitTypeClass*>(pParentType))
-					pParentTypeExt = UnitTypeExt::TryFetch(pParentUnitType);
+					pParentUnitTypeExt = UnitTypeExt::TryFetch(pParentUnitType);
 
 				if (auto const pParentFoot = abstract_cast<FootClass*>(pParentTechno))
 				{
@@ -710,11 +714,33 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 				}
 			}
 		}
+
+		if (!pParentTechno && pThis->IsOnCarryall && pThis->Transporter)
+		{
+			pParentTechno = pThis->Transporter;
+			pParentType = pParentTechno->GetTechnoType();
+			pParentTechnoTypeExt = TechnoTypeExt::Fetch(pParentType);
+			if (auto const pParentUnitType = abstract_cast<UnitTypeClass*>(pParentType))
+				pParentUnitTypeExt = UnitTypeExt::TryFetch(pParentUnitType);
+
+			if (auto const pParentFoot = abstract_cast<FootClass*>(pParentTechno))
+			{
+				if (pParentFoot->Locomotor)
+					jjloco = locomotion_cast<JumpjetLocomotionClass*>(pParentFoot->Locomotor);
+			}
+		}
 	}
-	const auto height = pThis->GetHeight();
+
+	if (pThis->IsOnCarryall)
+		vxlIndexKey.Invalidate();
+
+	const auto height = pThis->IsOnCarryall
+		? (jjloco ? jjloco->CurrentHeight : (pParentTechno ? (pParentTechno->Location.Z - MapClass::Instance.GetCellFloorHeight(pParentTechno->Location)) : (pThis->Location.Z - MapClass::Instance.GetCellFloorHeight(pThis->Location))))
+		: pThis->GetHeight();
 	const double baseScale_log = RulesExt::Global()->AirShadowBaseScale_log;
 	const bool isAircraft = pThis->Type->ConsideredAircraft
-		|| (pParentType && pParentType->ConsideredAircraft);
+		|| (pParentType && pParentType->ConsideredAircraft)
+		|| pThis->IsOnCarryall;
 
 	double currentScale = 1.0;
 
@@ -723,8 +749,8 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 		const double minScale = RulesExt::Global()->HeightShadowScaling_MinScale;
 		if (jjloco)
 		{
-			const int defaultHeight = pParentTypeExt
-				? pParentTypeExt->ShadowSizeCharacteristicHeight.Get(jjloco->Height)
+			const int defaultHeight = pParentTechnoTypeExt
+				? pParentTechnoTypeExt->ShadowSizeCharacteristicHeight.Get(jjloco->Height)
 				: jjloco->Height;
 			const float cHeight = static_cast<float>(pDrawTypeExt->ShadowSizeCharacteristicHeight.Get(defaultHeight));
 
@@ -733,14 +759,14 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 				currentScale = std::max(Pade2_2(baseScale_log * height / cHeight), minScale);
 				shadowMatrix.Scale(static_cast<float>(currentScale));
 
-				if (jjloco->State != JumpjetLocomotionClass::State::Hovering)
+				if (pThis->IsOnCarryall || jjloco->State != JumpjetLocomotionClass::State::Hovering)
 					vxlIndexKey.Invalidate();
 			}
 		}
 		else if (pParentType && (pParentType->WhatAmI() == AbstractType::AircraftType || pParentType->ConsideredAircraft))
 		{
-			const int defaultHeight = pParentTypeExt
-				? pParentTypeExt->ShadowSizeCharacteristicHeight.Get(pParentType->GetFlightLevel())
+			const int defaultHeight = pParentTechnoTypeExt
+				? pParentTechnoTypeExt->ShadowSizeCharacteristicHeight.Get(pParentType->GetFlightLevel())
 				: pParentType->GetFlightLevel();
 			const float cHeight = static_cast<float>(pDrawTypeExt->ShadowSizeCharacteristicHeight.Get(defaultHeight));
 
@@ -755,9 +781,10 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 		{
 			const float cHeight = static_cast<float>(pDrawTypeExt->ShadowSizeCharacteristicHeight.Get(RulesClass::Instance->CruiseHeight));
 
-			if (cHeight > 0 && height > 208)
+			if (cHeight > 0 && height > (pThis->IsOnCarryall ? 0 : 208))
 			{
-				currentScale = std::max(Pade2_2(baseScale_log * (height - 208) / cHeight), minScale);
+				const double effHeight = pThis->IsOnCarryall ? height : (height - 208);
+				currentScale = std::max(Pade2_2(baseScale_log * effHeight / cHeight), minScale);
 				shadowMatrix.Scale(static_cast<float>(currentScale));
 				vxlIndexKey.Invalidate();
 			}
@@ -768,7 +795,7 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 		currentScale = Pade2_2(baseScale_log);
 		shadowMatrix.Scale(static_cast<float>(currentScale));
 
-		if (pParentType && pParentType->ConsideredAircraft)
+		if (pThis->IsOnCarryall || (pParentType && pParentType->ConsideredAircraft))
 			vxlIndexKey.Invalidate();
 	}
 
@@ -788,12 +815,33 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 	auto const main_vxl = GetMainVoxel();
 
 	auto shadowPoint = loco->Shadow_Point();
-	auto shadowCenter = *pt + shadowPoint;
+	Point2D shadowCenter;
+
+	if (pThis->IsOnCarryall)
+	{
+		const auto pCell = MapClass::Instance.GetCellAt(pThis->Location);
+		auto groundFloorHeight = MapClass::Instance.GetCellFloorHeight(pThis->Location);
+
+		if (pCell && pCell->ContainsBridge()
+			&& ((pCell->Flags & CellFlags::BridgeDir) && pCell->GetNeighbourCell(FacingType::North)->ContainsBridge()
+				|| !(pCell->Flags & CellFlags::BridgeDir) && pCell->GetNeighbourCell(FacingType::West)->ContainsBridge()))
+		{
+			groundFloorHeight += CellClass::BridgeHeight;
+		}
+
+		const Point2D groundPos = TacticalClass::Instance->CoordsToClient(CoordStruct{ pThis->Location.X, pThis->Location.Y, groundFloorHeight }).first;
+		shadowCenter = groundPos;
+		shadowPoint = shadowCenter - *pt;
+	}
+	else
+	{
+		shadowCenter = *pt + shadowPoint;
+	}
 
 	float arf = pThis->AngleRotatedForwards;
 	float ars = pThis->AngleRotatedSideways;
 	const bool hasJumpjetTilt = pDrawTypeExt->JumpjetTilt.Get(RulesExt::Global()->JumpjetTilt)
-		|| (pParentTypeExt && pParentTypeExt->JumpjetTilt.Get(RulesExt::Global()->JumpjetTilt));
+		|| (pParentTechnoTypeExt && pParentTechnoTypeExt->JumpjetTilt.Get(RulesExt::Global()->JumpjetTilt));
 
 	// lazy, don't want to hook inside Shadow_Matrix
 	if (std::abs(ars) >= 0.005f || std::abs(arf) >= 0.005f)
@@ -813,7 +861,7 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 		&& pThis->Health > 0
 		&& !pThis->IsAttackedByLocomotor)
 	{
-		auto const pTiltExt = (pParentTypeExt && !pDrawTypeExt->JumpjetTilt.isset()) ? pParentTypeExt : pDrawTypeExt;
+		auto const pTiltExt = (pParentTechnoTypeExt && !pDrawTypeExt->JumpjetTilt.isset()) ? pParentTechnoTypeExt : pDrawTypeExt;
 		const float forwardSpeedFactor = static_cast<float>(jjloco->CurrentSpeed * pTiltExt->JumpjetTilt_ForwardSpeedFactor.Get(RulesExt::Global()->JumpjetTilt_ForwardSpeedFactor));
 		const float forwardAccelFactor = static_cast<float>(jjloco->Accel * pTiltExt->JumpjetTilt_ForwardAccelFactor.Get(RulesExt::Global()->JumpjetTilt_ForwardAccelFactor));
 
@@ -843,18 +891,25 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 	auto mtx = Matrix3D::VoxelDefaultMatrix * shadowMatrix;
 
 	if (height > 0)
+	{
 		shadowPoint.Y += 1;
+		if (pThis->IsOnCarryall)
+			shadowCenter.Y += 1;
+	}
 
 	const bool notUseTurretShadow = pDrawType->WhatAmI() != AbstractType::UnitType || !static_cast<UnitTypeClass*>(pDrawType)->UseTurretShadow;
 
 	if (notUseTurretShadow)
 	{
+		auto const pShadowCache = pThis->IsOnCarryall ? nullptr : &pDrawType->VoxelShadowCache;
+		const bool canCache = !pThis->IsOnCarryall;
+
 		if (pDrawTypeExt->ShadowIndices.empty())
 		{
 			if (pDrawType->ShadowIndex >= 0 && pDrawType->ShadowIndex < main_vxl->HVA->LayerCount)
 			{
 				pThis->DrawVoxelShadow(main_vxl, pDrawType->ShadowIndex, vxlIndexKey,
-					&pDrawType->VoxelShadowCache, bnd, &shadowCenter, &mtx, true, surface, shadowPoint);
+					pShadowCache, bnd, &shadowCenter, &mtx, canCache, surface, shadowPoint);
 			}
 		}
 		else
@@ -862,7 +917,7 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 			for (auto& [index, _] : pDrawTypeExt->ShadowIndices)
 			{
 				pThis->DrawVoxelShadow(main_vxl, index, index == pDrawType->ShadowIndex ? vxlIndexKey : VoxelIndexKey(-1),
-					&pDrawType->VoxelShadowCache, bnd, &shadowCenter, &mtx, index == pDrawType->ShadowIndex, surface, shadowPoint);
+					pShadowCache, bnd, &shadowCenter, &mtx, (canCache && index == pDrawType->ShadowIndex), surface, shadowPoint);
 			}
 		}
 	}
@@ -934,8 +989,10 @@ DEFINE_HOOK(0x73C47A, UnitClass_DrawAsVXL_Shadow, 0x5)
 			if (turretInRecoil)
 				mtx_turret.TranslateX(-pTurData->TravelSoFar);
 
-			pThis->DrawVoxelShadow(pTurretVoxel, 0, (shouldRedraw ? VoxelIndexKey(-1) : vxlIndexKey), (shouldRedraw ? nullptr : pCache),
-				bnd, &shadowCenter, &mtx_turret, (!shouldRedraw && pCache != nullptr), surface, shadowPoint);
+			const bool canCacheTurret = !pThis->IsOnCarryall && !shouldRedraw && pCache != nullptr;
+			auto const pTurretCache = (pThis->IsOnCarryall || shouldRedraw) ? nullptr : pCache;
+			pThis->DrawVoxelShadow(pTurretVoxel, 0, (pThis->IsOnCarryall || shouldRedraw ? VoxelIndexKey(-1) : vxlIndexKey), pTurretCache,
+				bnd, &shadowCenter, &mtx_turret, canCacheTurret, surface, shadowPoint);
 
 			if (!haveBar)
 				return;

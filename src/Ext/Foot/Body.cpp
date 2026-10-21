@@ -1151,9 +1151,23 @@ double FootExt::GetCurrentSpeedMultiplier(FootClass* pThis)
 	else
 		houseMultiplier = pThis->Owner->Type->SpeedUnitsMult;
 
-	pExt->CurrentSpeedMultiplier = pThis->SpeedMultiplier * houseMultiplier * pExt->AE.SpeedMultiplier *
+	double multiplier = pThis->SpeedMultiplier * houseMultiplier * pExt->AE.SpeedMultiplier *
 		(pThis->HasAbility(Ability::Faster) ? RulesClass::Instance->VeteranSpeed : 1.0);
 
+	if (auto const pUnit = abstract_cast<UnitClass*>(pThis))
+	{
+		auto const pUnitExt = UnitExt::Fetch(pUnit);
+		if (pUnitExt && pUnitExt->CarryallCargo)
+			multiplier *= pUnitExt->GetTypeExtData()->Carryall_SpeedMultiplier.Get();
+	}
+	else if (auto const pAircraft = abstract_cast<AircraftClass*>(pThis))
+	{
+		auto const pTypeExt = TechnoTypeExt::Fetch(pAircraft->Type);
+		if (pTypeExt && (pAircraft->Type->Carryall || pTypeExt->Carryall) && pAircraft->Passengers.FirstPassenger)
+			multiplier *= pTypeExt->Carryall_SpeedMultiplier.Get();
+	}
+
+	pExt->CurrentSpeedMultiplier = multiplier;
 	return pExt->CurrentSpeedMultiplier;
 }
 
