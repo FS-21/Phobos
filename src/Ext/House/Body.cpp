@@ -723,6 +723,8 @@ void HouseExt::LoadFromINIFile(CCINIClass* const pINI)
 			this->RepairBaseNodes[i] = readBaseNodeRepairInfo[i];
 		}
 	}
+
+	this->AdvancedAI_Campaign.Read(exINI, pSection, "AdvancedAI");
 }
 
 int HouseExt::GetForceEnemyIndex()
@@ -783,6 +785,7 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->Factory_AircraftType)
 		.Process(this->AISuperWeaponDelayTimer)
 		.Process(this->RepairBaseNodes)
+		.Process(this->AdvancedAI_Campaign)
 		.Process(this->RestrictedFactoryPlants)
 		.Process(this->LastBuiltNavalVehicleType)
 		.Process(this->ProducingNavalUnitTypeIndex)
