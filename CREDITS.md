@@ -172,7 +172,7 @@ This page lists all the individual contributions to the project by their author.
   - Warhead shield penetration & breaking
   - Strafing aircraft weapon customization
   - Vehicle `DeployFire` fixes/improvements
-  - Stationary VehicleTypes
+  - Stationary units
   - Burst logic improvements
   - TechnoType auto-firing weapons
   - Secondary weapon fallback customization
@@ -459,7 +459,7 @@ This page lists all the individual contributions to the project by their author.
   - New weapon filter tag `CanTarget.DriverKilled`
   - Ares' Chrono Prisons / Abductors Expansion
   - Fix an issue where vehicles affected by warheads with `IsLocomotor=yes` would have their effects interrupted when deactivated or reactivated
-  - Fixed an issue where Engineers and Spies might not be able to enter target buildings properly when executing vanilla's attack script
+  - Fix an issue where Engineers and Spies might not be able to enter target buildings properly when executing vanilla's attack script
 - **NetsuNegi**:
   - Forbidding parallel AI queues by type
   - Jumpjet crash speed fix when crashing onto building
@@ -593,6 +593,9 @@ This page lists all the individual contributions to the project by their author.
   - Customize turn rate when jumpjet vehicle crashing
   - Customize insignias palette
   - Fix the bug that units keep attacking ground after target wall has been destroyed by adjacent damage/crush/wave damage
+  - Fix the bug that `NoQueueUpToEnter` will cause survivors will return to location where they entered transport after the transport has been destroyed
+  - Customize which of vehicle thief, pilot, and passenger the tag can be transferred to when the unit is destroyed
+  - Fix the bug that crashing or sinking unit can be recruit into taskforce team
 - **Apollo** - Translucent SHP drawing patches
 - **ststl**:
   - Customizable `ShowTimer` priority of superweapons
@@ -706,6 +709,7 @@ This page lists all the individual contributions to the project by their author.
   - RA1-Style multi-turret and multi-barrel
   - Fix the issue of Ares' EMP not suspending the production of AI factories
   - Attach effect when weapon fire
+  - Building placing and deploying logic enhancement
 - **Noble Fish**:
   - Documentation maintenance
   - Chinese documentation maintenance and translation
@@ -947,6 +951,7 @@ This page lists all the individual contributions to the project by their author.
   - Hotkey for deselect object from current selection
   - Hotkey for cycling through the current selection
   - Hotkey for cycling through the types in the current selection
+  - Fix briefing out of bound due to fixed window size
 - **Aephiex** - initial fix for Ares academy not working on the initial payloads of vehicles built from a war factory
 - **Multfinite** - Allow to toggle main exception handler via command line argument `-ExceptionHandler=boolean`
 - **hejiajun107, Xkein** - Fix a jumpjet crash related to voxel shadow drawing
@@ -1003,3 +1008,7 @@ This page lists all the individual contributions to the project by their author.
   - Detonate ivan bomb on impact
   - Allow Ares Academy add country-level filters
 - **Krisztiaan** - Fix mission restart crashes caused by freeing cached TerrainType SHP images
+- **JerryDing07**:
+  - Fix a rare crash when an `IsSonic=true` wave was drawn near the top edge of the screen
+  - Fix a crash or memory corruption when a wave (e.g. `IsSonic=true`) was drawn while its firer was at the same horizontal position as its target
+- **MagicShiba** - Fix briefing out of bound due to fixed window size

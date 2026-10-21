@@ -1369,7 +1369,7 @@ DEFINE_HOOK(0x4DF3A6, FootClass_UpdateAttackMove_Follow, 0x6)
 
 #pragma endregion
 
-DEFINE_HOOK(0x708FC0, TechnoClass_ResponseMove_Pickup, 0x5)
+DEFINE_HOOK(0x708FC0, TechnoClass_ResponseMove, 0x5)
 {
 	enum { SkipResponse = 0x709015 };
 
@@ -1390,12 +1390,14 @@ DEFINE_HOOK(0x708FC0, TechnoClass_ResponseMove_Pickup, 0x5)
 				voicePickup = pTypeExt->VoicePickup.Get();
 		}
 	}
-	else if (rtti == AbstractType::Unit)
+	else
 	{
-		auto const pUnit = static_cast<UnitClass*>(pThis);
-		if (UnitExt::CannotMove(pUnit))
+		auto const pFoot = static_cast<FootClass*>(pThis);
+
+		if (FootExt::CannotMove(pFoot, true))
 			return SkipResponse;
 
+		auto const pUnit = abstract_cast<UnitClass*>(pThis);
 		auto const pUnitExt = UnitExt::Fetch(pUnit);
 		if (pUnitExt && (pUnitExt->CarryallState == JumpjetCarryallState::MovingToPickup ||
 			(pUnit->Destination && abstract_cast<TechnoClass*>(pUnit->Destination) && pUnitExt->CarryallCanLift(abstract_cast<TechnoClass*>(pUnit->Destination)))))
@@ -2079,7 +2081,7 @@ static int __fastcall Building_GetThreatValue_Wrapper(BuildingClass* pThis)
 		return RulesClass::Instance->ThreatPerOccupant * occupantCount;
 
 	if (auto const pLinked = pThis->BunkerLinkedItem)
-		return pLinked->GetThreatValue();
+		return pLinked->GetTechnoType()->ThreatPosed;
 
 	auto const pType = pThis->Type;
 
