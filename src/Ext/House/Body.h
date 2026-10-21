@@ -39,6 +39,16 @@ struct AttackedBuildingRecord
 	}
 };
 
+struct PlacingBuildingStruct
+{
+	BuildingTypeClass* Type;
+	BuildingTypeClass* DrawType;
+	int Times;
+	CDTimerClass Timer;
+	CellStruct TopLeft;
+	size_t PlaceType;
+};
+
 class HouseExt final : public AbstractExt, public Detach::Listener<BuildingClass>
 {
 public:
@@ -274,6 +284,10 @@ public:
 	HouseClass* TargetAlliedFallbackHouse;
 	std::vector<BuildingClass*> Academies;
 
+	std::vector<UnitClass*> OwnedDeployingUnits;
+	PlacingBuildingStruct Common;
+	PlacingBuildingStruct Combat;
+
 	HouseExt(HouseClass* OwnerObject) : AbstractExt(OwnerObject)
 		, TargetAlliedFallbackHouse { nullptr }
 		, PowerPlantEnhancers {}
@@ -377,6 +391,9 @@ public:
 		, CachedExpansionPathTarget { 0, 0 }
 		, CachedExpansionPathStart { 0, 0 }
 		, Academies {}
+		, OwnedDeployingUnits {}
+		, Common { nullptr, nullptr, 0 }
+		, Combat { nullptr, nullptr, 0 }
 	{ }
 
 	bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;
