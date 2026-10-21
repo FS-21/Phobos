@@ -249,7 +249,8 @@ DEFINE_HOOK(0x5F91D7, TerrainTypeClass_ImageLetter, 0x6)
 // VoxelAnim / VeinholeMonster suffix hook
 DEFINE_HOOK(0x74D463, VoxelAnim_Suffix, 0x5)
 {
-	R->EAX(TheaterTypeClass::Suffix_From(ScenarioClass::Instance->Theater));
+	GET(int const, theaterIndex, ECX);
+	R->EAX(TheaterTypeClass::Suffix_From(static_cast<TheaterType>(theaterIndex)));
 	return 0x74D468;
 }
 

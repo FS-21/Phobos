@@ -51,7 +51,7 @@ public:
 		, ImageLetter { '\0' }
 		, IsArctic { false }
 		, IsIceGrowthEnabled { false }
-		, IsVeinGrowthEnabled { false }
+		, IsVeinGrowthEnabled { true }
 		, IsAllowedInMapGenerator { false }
 		, IsGenerateVeinholesInMapGenerator { false }
 		, LowRadarBrightness { 1.0f }
