@@ -30,6 +30,9 @@ public:
 	AbstractClass* FlyingProduction_RallyTarget;
 	BuildingClass* FlyingProduction_SpawnBuilding;
 	DirStruct FlyingProduction_ExitFacing;
+	bool IsZeroSpeed; // Temporary speed multipliers have made this techno stationary.
+	int SpeedMultiplierFrame;
+	double CurrentSpeedMultiplier;
 
 	explicit FootExt(FootClass* const OwnerObject) : TechnoExt(OwnerObject)
 		, LastKillWasTeamTarget { false }
@@ -53,6 +56,9 @@ public:
 		, FlyingProduction_RallyTarget { nullptr }
 		, FlyingProduction_SpawnBuilding { nullptr }
 		, FlyingProduction_ExitFacing { 0 }
+		, IsZeroSpeed { false }
+		, SpeedMultiplierFrame { 0 }
+		, CurrentSpeedMultiplier { 1.0 }
 	{ }
 
 	FootClass* OwnerObject() const
@@ -82,6 +88,7 @@ public:
 	void AmmoAutoConvertActions();
 	void UpdateFlyingProductionDescent();
 	void FlyingProduction_DispatchMove(AbstractClass* pRallyTarget, BuildingClass* pSpawnBuilding, DirStruct facing);
+	void HandleTemporaryZeroSpeed();
 
 	virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 	virtual void SaveToStream(PhobosStreamWriter& Stm) override;
@@ -89,4 +96,8 @@ public:
 private:
 	template <typename T>
 	void Serialize(T& Stm);
+
+public:
+	static double GetCurrentSpeedMultiplier(FootClass* pThis);
+	static bool CannotMove(FootClass* pThis, bool checkSpeedMultiplier);
 };

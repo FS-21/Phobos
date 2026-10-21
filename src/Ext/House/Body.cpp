@@ -830,6 +830,9 @@ void HouseExt::Serialize(T& Stm)
 		//.Process(this->BeaconsPlacedOrder) beacon is not saved, so this follows it.
 		.Process(this->TiberiumStorage)
 		.Process(this->WeedStorage)
+		.Process(this->OwnedDeployingUnits)
+		.Process(this->Common)
+		.Process(this->Combat)
 		;
 
 	int countMapSize = static_cast<int>(this->AICachedBuildCounts.size());

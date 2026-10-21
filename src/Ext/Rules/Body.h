@@ -608,6 +608,7 @@ public:
 
 		Valueable<int> AttachmentTopLayerMinHeight;
 		Valueable<int> AttachmentUndergroundLayerMaxHeight;
+		Valueable<bool> ExtendedBuildingPlacing;
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
@@ -1145,6 +1146,7 @@ public:
 
 			, AttachmentTopLayerMinHeight { 500 }
 			, AttachmentUndergroundLayerMaxHeight { -256 }
+			, ExtendedBuildingPlacing { false }
 		{ }
 
 		virtual ~ExtData() = default;

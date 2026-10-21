@@ -165,6 +165,8 @@ public:
 	ValueableVector<TechnoTypeClass*> Academy_Country_Types[16];
 	ValueableVector<TechnoTypeClass*> Academy_Country_Ignore[16];
 
+	Valueable<bool> AutoUpgrade;
+
 	// Ares 0.2
 	Valueable<bool> CloningFacility;
 
@@ -308,6 +310,8 @@ public:
 		, Academy_Country_Types {}
 		, Academy_Country_Ignore {}
 
+		, AutoUpgrade { false }
+
 		// Ares 0.2
 		, CloningFacility { false }
 		, GapGenerator { false }
@@ -392,4 +396,8 @@ public:
 	static bool HasDisableableSuperWeapons(BuildingTypeClass* pBuildingType);
 	static bool IsAIBaseNormal(const BuildingTypeClass* pType);
 	static bool IsAIInnerBase(const BuildingTypeClass* pType);
+	static bool CheckOccupierCanLeave(HouseClass* pBuildingHouse, HouseClass* pOccupierHouse);
+	static bool CleanUpBuildingSpace(BuildingTypeClass* pBuildingType, CellStruct topLeftCell, HouseClass* pHouse, TechnoClass* pExceptTechno = nullptr);
+	static bool IsSameBuildingType(BuildingTypeClass* pType1, BuildingTypeClass* pType2);
+	static bool AutoUpgradeBuilding(BuildingClass* pBuilding);
 };

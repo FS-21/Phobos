@@ -60,6 +60,16 @@ struct AttackedBuildingRecord
 	}
 };
 
+struct PlacingBuildingStruct
+{
+	BuildingTypeClass* Type;
+	BuildingTypeClass* DrawType;
+	int Times;
+	CDTimerClass Timer;
+	CellStruct TopLeft;
+	size_t PlaceType;
+};
+
 class HouseExt final : public AbstractExt, public Detach::Listener<BuildingClass>
 {
 public:
@@ -336,6 +346,10 @@ public:
 
 	std::vector<BuildingClass*> Academies;
 
+	std::vector<UnitClass*> OwnedDeployingUnits;
+	PlacingBuildingStruct Common;
+	PlacingBuildingStruct Combat;
+
 	HouseExt(HouseClass* OwnerObject) : AbstractExt(OwnerObject)
 		, TargetAlliedFallbackHouse { nullptr }
 		, PowerPlantEnhancers {}
@@ -453,6 +467,9 @@ public:
 		, ActiveEvaVoiceBuildingType { nullptr }
 		, FactoryResourceStates {}
 		, Academies {}
+		, OwnedDeployingUnits {}
+		, Common { nullptr, nullptr, 0 }
+		, Combat { nullptr, nullptr, 0 }
 	{ }
 
 	int GetResourceAmount(int resourceIdx) const;
