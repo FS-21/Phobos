@@ -164,7 +164,13 @@ DEFINE_HOOK(0x741983, UnitClass_AssignDestination_Carryall, 0x6)
 	GET(AbstractClass*, pTarget, EBX);
 
 	if (!pThis || !pThis->IsAlive)
+	{
+		if (pThis)
+			R->EAX(pThis->Type);
 		return ReturnDefault;
+	}
+
+	R->EAX(pThis->Type);
 
 	auto const pTypeExt = TechnoTypeExt::Fetch(pThis->Type);
 	if (!pTypeExt || !pTypeExt->Carryall)
@@ -240,6 +246,9 @@ static bool ShouldEmulateBalloonHover(FootClass* pFoot, TechnoTypeClass* pType)
 
 	if (reinterpret_cast<uintptr_t>(pFoot) >= 0x10000)
 	{
+		if (pType && pType->HoverAttack && (pFoot->Target || pFoot->GetCurrentMission() == Mission::Attack))
+			return true;
+
 		if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
 		{
 			auto const pExt = UnitExt::Fetch(pUnit);

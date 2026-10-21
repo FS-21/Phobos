@@ -796,8 +796,12 @@ void FootExt::UpdateTypeData(TechnoTypeClass* pCurrentType)
 				if (isinAir)
 				{
 					const bool inMove = pJJLoco->Is_Really_Moving_Now();
+					const bool isHoverAttacking = pCurrentType->HoverAttack && (pThis->Target || pThis->GetCurrentMission() == Mission::Attack);
+					auto const pUnit = abstract_cast<UnitClass*>(pThis);
+					auto const pUnitExt = pUnit ? UnitExt::Fetch(pUnit) : nullptr;
+					const bool isCarryallBusy = pUnitExt && (pUnitExt->CarryallCargo || pUnitExt->CarryallState != JumpjetCarryallState::Idle);
 
-					if (pCurrentType->BalloonHover)
+					if (pCurrentType->BalloonHover || isHoverAttacking || isCarryallBusy)
 					{
 						// Makes the jumpjet think it is hovering without actually moving.
 						pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
