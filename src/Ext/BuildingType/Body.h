@@ -398,8 +398,6 @@ public:
 	static bool IsAIInnerBase(const BuildingTypeClass* pType);
 	static bool CheckOccupierCanLeave(HouseClass* pBuildingHouse, HouseClass* pOccupierHouse);
 	static bool CleanUpBuildingSpace(BuildingTypeClass* pBuildingType, CellStruct topLeftCell, HouseClass* pHouse, TechnoClass* pExceptTechno = nullptr);
-	// Returns false if the foundation cannot hold the building at all. noOccupy is set to false if movable technos are standing on it (ExtendedBuildingPlacing).
-	static bool CheckPlacementFoundation(BuildingTypeClass* pBuildingType, CellStruct topLeftCell, HouseClass* pHouse, bool& noOccupy);
 	static bool IsSameBuildingType(BuildingTypeClass* pType1, BuildingTypeClass* pType2);
 	static bool AutoUpgradeBuilding(BuildingClass* pBuilding);
 };
