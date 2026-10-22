@@ -526,11 +526,6 @@ static inline bool CheckBuildingFoundation(BuildingTypeClass* const pBuildingTyp
 	return true;
 }
 
-bool BuildingTypeExt::CheckPlacementFoundation(BuildingTypeClass* pBuildingType, CellStruct topLeftCell, HouseClass* pHouse, bool& noOccupy)
-{
-	return CheckBuildingFoundation(pBuildingType, topLeftCell, pHouse, noOccupy);
-}
-
 // Buildable-upon TechnoTypes Hook #2-1 -> sub_47EC90 - Record cell before draw it then skip vanilla AltFlags check
 DEFINE_HOOK(0x47EEBC, CellClass_DrawPlaceGrid_RecordCell, 0x6)
 {

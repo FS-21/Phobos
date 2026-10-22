@@ -437,6 +437,28 @@ void BuildingExt::Mark_Expansion_As_Done(HouseClass* pHouse)
 	ext->NextBlacklistClearFrame = Unsorted::CurrentFrame + 9000;
 }
 
+// ExtendedBuildingPlacing support: true if movable technos (infantry/vehicles) stand on the building foundation.
+static bool HasMovableTechnosOnFoundation(BuildingTypeClass* pBuildingType, CellStruct topLeftCell)
+{
+	for (auto pFoundation = pBuildingType->GetFoundationData(false); *pFoundation != CellStruct { 0x7FFF, 0x7FFF }; ++pFoundation)
+	{
+		const auto pCell = MapClass::Instance.TryGetCellAt(topLeftCell + *pFoundation);
+
+		if (!pCell)
+			continue;
+
+		for (auto pObject = pCell->FirstObject; pObject; pObject = pObject->NextObject)
+		{
+			const auto absType = pObject->WhatAmI();
+
+			if (absType == AbstractType::Infantry || absType == AbstractType::Unit)
+				return true;
+		}
+	}
+
+	return false;
+}
+
 int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 {
 	HouseClass* owner = pBuilding->Owner;
@@ -445,15 +467,9 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 	const bool canPlace = pBuilding->Type->CanPlaceHere(&cell, owner);
 	const bool overlaps = OverlapsAnyBuilding(cell, pBuilding->Type, pBuilding);
 
-	bool occupied = false;
-
 	// ExtendedBuildingPlacing: CanPlaceHere accepts cells with movable technos, but the building must never be put on top of them.
-	if (canPlace && !overlaps && RulesExt::Global()->ExtendedBuildingPlacing && !pBuilding->Type->PlaceAnywhere)
-	{
-		bool noOccupy = true;
-		if (BuildingTypeExt::CheckPlacementFoundation(pBuilding->Type, cell, owner, noOccupy))
-			occupied = !noOccupy;
-	}
+	const bool occupied = canPlace && !overlaps && RulesExt::Global()->ExtendedBuildingPlacing && !pBuilding->Type->PlaceAnywhere
+		&& HasMovableTechnosOnFoundation(pBuilding->Type, cell);
 
 	if (!canPlace || overlaps || occupied)
 	{
@@ -3581,19 +3597,10 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 					}
 				}
 
-				if (extendedPlacing && !stillObstructed)
+				if (extendedPlacing && !stillObstructed && HasMovableTechnosOnFoundation(pBuilding->Type, houseExt->PendingClearanceCell))
 				{
-					bool noOccupy = true;
-
-					if (!BuildingTypeExt::CheckPlacementFoundation(pBuilding->Type, houseExt->PendingClearanceCell, pBuilding->Owner, noOccupy))
-					{
-						stillObstructed = true;
-					}
-					else if (!noOccupy)
-					{
-						BuildingTypeExt::CleanUpBuildingSpace(pBuilding->Type, houseExt->PendingClearanceCell, pBuilding->Owner);
-						stillObstructed = true;
-					}
+					BuildingTypeExt::CleanUpBuildingSpace(pBuilding->Type, houseExt->PendingClearanceCell, pBuilding->Owner);
+					stillObstructed = true;
 				}
 
 				if (!stillObstructed)
@@ -3861,9 +3868,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 	// waiting in the factory on that very same cell instead of searching for another one.
 	if (houseExt != nullptr && RulesExt::Global()->ExtendedBuildingPlacing && !pBuilding->Type->PlaceAnywhere)
 	{
-		bool noOccupy = true;
-
-		if (BuildingTypeExt::CheckPlacementFoundation(pBuilding->Type, placementCell, pBuilding->Owner, noOccupy) && !noOccupy)
+		if (HasMovableTechnosOnFoundation(pBuilding->Type, placementCell))
 		{
 			if (!BuildingTypeExt::CleanUpBuildingSpace(pBuilding->Type, placementCell, pBuilding->Owner))
 			{
