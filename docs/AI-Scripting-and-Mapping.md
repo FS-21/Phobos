@@ -2560,6 +2560,10 @@ In map file:
 AdvancedAI=false                      ; boolean, campaign only
 ```
 
+```{note}
+The Advanced AI supports `[General] -> ExtendedBuildingPlacing=true`. When the cell chosen for a building has movable infantry or vehicles standing on its foundation, the AI no longer picks another cell: it asks the occupants to leave (using the same logic as the player), keeps the building waiting in the factory on that same cell and places it as soon as the foundation is clear. If the occupants cannot be scattered, or they do not leave in time (about 16 seconds), the usual placement failure and cooldown logic applies. Without `ExtendedBuildingPlacing` the previous behavior is kept.
+```
+
 ### TechTree Building Categories
 - All lists are evaluated and built by selecting a buildable candidate randomly, with the sole exception of `BuildOther`, which is evaluated sequentially in the exact order specified.
 - `SideIndex` The 0-based side index (e.g., `0` for Allies, `1` for Soviets, `2` for Yuri) that this TechTree profile belongs to.
