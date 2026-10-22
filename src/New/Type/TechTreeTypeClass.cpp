@@ -273,19 +273,19 @@ bool TechTreeTypeClass::IsCompleted(HouseClass* pHouse, std::function<bool(Build
 
 	for (const auto& buildOtherPair : BuildOtherCountMap)
 	{
-		if (filter(buildOtherPair.first) && CountSideOwnedBuildings(pHouse, BuildType::BuildOther) < static_cast<size_t>(buildOtherPair.second))
+		if (filter(buildOtherPair.first) && static_cast<size_t>(pHouse->ActiveBuildingTypes.GetItemCount(buildOtherPair.first->ArrayIndex)) < static_cast<size_t>(buildOtherPair.second))
 			return false;
 	}
 
 	for (const auto& buildOtherRandomPair : PreBuildOtherRandomCountMap)
 	{
-		if (filter(buildOtherRandomPair.first) && CountSideOwnedBuildings(pHouse, BuildType::PreBuildOtherRandom) < static_cast<size_t>(buildOtherRandomPair.second))
+		if (filter(buildOtherRandomPair.first) && static_cast<size_t>(pHouse->ActiveBuildingTypes.GetItemCount(buildOtherRandomPair.first->ArrayIndex)) < static_cast<size_t>(buildOtherRandomPair.second))
 			return false;
 	}
 
 	for (const auto& buildOtherRandom2Pair : PostBuildOtherRandomCountMap)
 	{
-		if (filter(buildOtherRandom2Pair.first) && CountSideOwnedBuildings(pHouse, BuildType::PostBuildOtherRandom) < static_cast<size_t>(buildOtherRandom2Pair.second))
+		if (filter(buildOtherRandom2Pair.first) && static_cast<size_t>(pHouse->ActiveBuildingTypes.GetItemCount(buildOtherRandom2Pair.first->ArrayIndex)) < static_cast<size_t>(buildOtherRandom2Pair.second))
 			return false;
 	}
 
