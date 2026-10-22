@@ -1,5 +1,7 @@
 #include "Body.h"
 #include "Ext/House/Body.h"
+#include "Ext/BuildingType/Body.h"
+#include "Ext/Rules/Body.h"
 #include "Ext/SWType/Body.h"
 #include "Ext/TechnoType/Body.h"
 #include "Ext/TerrainType/Body.h"
@@ -443,10 +445,20 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 	const bool canPlace = pBuilding->Type->CanPlaceHere(&cell, owner);
 	const bool overlaps = OverlapsAnyBuilding(cell, pBuilding->Type, pBuilding);
 
-	if (!canPlace || overlaps)
+	bool occupied = false;
+
+	// ExtendedBuildingPlacing: CanPlaceHere accepts cells with movable technos, but the building must never be put on top of them.
+	if (canPlace && !overlaps && RulesExt::Global()->ExtendedBuildingPlacing && !pBuilding->Type->PlaceAnywhere)
 	{
-		Debug::Log("AdvAI: Try_Place failed for %s at (%d,%d) (canPlace: %d, overlaps: %d). Cancelling placement to prevent queue freeze.\n",
-			pBuilding->Type->ID, cell.X, cell.Y, canPlace, overlaps);
+		bool noOccupy = true;
+		if (BuildingTypeExt::CheckPlacementFoundation(pBuilding->Type, cell, owner, noOccupy))
+			occupied = !noOccupy;
+	}
+
+	if (!canPlace || overlaps || occupied)
+	{
+		Debug::Log("AdvAI: Try_Place failed for %s at (%d,%d) (canPlace: %d, overlaps: %d, occupied: %d). Cancelling placement to prevent queue freeze.\n",
+			pBuilding->Type->ID, cell.X, cell.Y, canPlace, overlaps, occupied);
 		return 0;
 	}
 
@@ -3540,6 +3552,8 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 
 				// Check if the footprint at PendingClearanceCell is now clear of obstructing defenses
 				bool stillObstructed = false;
+				// ExtendedBuildingPlacing: units are asked to leave using the shared cleanup logic instead of a blind scatter.
+				const bool extendedPlacing = RulesExt::Global()->ExtendedBuildingPlacing && !pBuilding->Type->PlaceAnywhere;
 				const int width = pBuilding->Type->GetFoundationWidth();
 				const int height = pBuilding->Type->GetFoundationHeight(true);
 
@@ -3558,12 +3572,27 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 								stillObstructed = true;
 
 							// If any friendly units/infantry are on the footprint, force them to scatter
-							if (pCell->GetUnit(false) || pCell->GetInfantry(false))
+							if (!extendedPlacing && (pCell->GetUnit(false) || pCell->GetInfantry(false)))
 							{
 								pCell->ScatterContent(GeneralUtils::CoordinatesFromCell(checkCell), true, true, false);
 								stillObstructed = true;
 							}
 						}
+					}
+				}
+
+				if (extendedPlacing && !stillObstructed)
+				{
+					bool noOccupy = true;
+
+					if (!BuildingTypeExt::CheckPlacementFoundation(pBuilding->Type, houseExt->PendingClearanceCell, pBuilding->Owner, noOccupy))
+					{
+						stillObstructed = true;
+					}
+					else if (!noOccupy)
+					{
+						BuildingTypeExt::CleanUpBuildingSpace(pBuilding->Type, houseExt->PendingClearanceCell, pBuilding->Owner);
+						stillObstructed = true;
 					}
 				}
 
@@ -3584,13 +3613,13 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 
 				// Still obstructed or Try_Place failed this attempt: increment attempts
 				houseExt->ClearanceAttempts++;
-				const int maxAttempts = (pBuilding->Type->Radar ||
+				const int maxAttempts = extendedPlacing ? 16 : ((pBuilding->Type->Radar ||
 										 TechTreeTypeClass::TotalBuildRadar.contains(pBuilding->Type) ||
-										 TechTreeTypeClass::TotalBuildTech.contains(pBuilding->Type)) ? 8 : 4;
+										 TechTreeTypeClass::TotalBuildTech.contains(pBuilding->Type)) ? 8 : 4);
 
 				if (houseExt->ClearanceAttempts < maxAttempts)
 				{
-					houseExt->NextClearanceCheckFrame = Unsorted::CurrentFrame + 75; // wait another 5 seconds (75 frames at 15 FPS)
+					houseExt->NextClearanceCheckFrame = Unsorted::CurrentFrame + (extendedPlacing ? 15 : 75); // wait another 5 seconds (75 frames at 15 FPS), or 1 second when waiting for units to leave
 					Debug::Log("AdvAI Placement: House %d clearance attempt %d/%d for %s at (%d,%d) pending. Re-checking in 5s.\n",
 						pBuilding->Owner->ArrayIndex, houseExt->ClearanceAttempts, maxAttempts, pBuilding->Type->ID,
 						houseExt->PendingClearanceCell.X, houseExt->PendingClearanceCell.Y);
@@ -3826,6 +3855,34 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		}
 
 		return 0;
+	}
+
+	// ExtendedBuildingPlacing: if movable technos stand on the chosen cell, ask them to leave and keep the building
+	// waiting in the factory on that very same cell instead of searching for another one.
+	if (houseExt != nullptr && RulesExt::Global()->ExtendedBuildingPlacing && !pBuilding->Type->PlaceAnywhere)
+	{
+		bool noOccupy = true;
+
+		if (BuildingTypeExt::CheckPlacementFoundation(pBuilding->Type, placementCell, pBuilding->Owner, noOccupy) && !noOccupy)
+		{
+			if (!BuildingTypeExt::CleanUpBuildingSpace(pBuilding->Type, placementCell, pBuilding->Owner))
+			{
+				houseExt->PendingClearanceCell = placementCell;
+				houseExt->PendingClearanceType = pBuilding->Type;
+				houseExt->PendingClearanceFoundationWidth = pBuilding->Type->GetFoundationWidth();
+				houseExt->PendingClearanceFoundationHeight = pBuilding->Type->GetFoundationHeight(true);
+				houseExt->PendingClearanceFoundation = pBuilding->Type->Foundation;
+				houseExt->ClearanceAttempts = 0;
+				houseExt->NextClearanceCheckFrame = Unsorted::CurrentFrame + 15;
+
+				Debug::Log("AdvAI Placement: House %d asked units to leave the footprint of %s at (%d,%d) (ExtendedBuildingPlacing). Waiting in factory.\n",
+					pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, placementCell.X, placementCell.Y);
+
+				return 1; // Keep building waiting in factory!
+			}
+
+			// No room for the occupants to scatter: Try_Place will refuse this cell and the normal failure/cooldown logic applies.
+		}
 	}
 
 	const int result = Try_Place(pBuilding, placementCell);
