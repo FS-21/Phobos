@@ -437,6 +437,37 @@ void BuildingExt::Mark_Expansion_As_Done(HouseClass* pHouse)
 	ext->NextBlacklistClearFrame = Unsorted::CurrentFrame + 9000;
 }
 
+// ExtendedBuildingPlacing preview: the existing feature draws a preview (for allies and observers) from HouseExt::Common/Combat.
+// The AI only publishes/removes that data, the placement feature itself is not modified.
+static void PublishPlacementPreview(HouseExt* pHouseExt, BuildingTypeClass* pType, CellStruct topLeftCell)
+{
+	auto& place = pType->BuildCat != BuildCat::Combat ? pHouseExt->Common : pHouseExt->Combat;
+	place.Type = pType;
+	place.DrawType = pType;
+	place.TopLeft = topLeftCell;
+}
+
+static void ClearReservationAndPreview(HouseExt* pHouseExt)
+{
+	if (pHouseExt->PendingClearanceType)
+	{
+		for (auto* pPlace : { &pHouseExt->Common, &pHouseExt->Combat })
+		{
+			if (pPlace->DrawType && pPlace->TopLeft == pHouseExt->PendingClearanceCell)
+			{
+				pPlace->Type = nullptr;
+				pPlace->DrawType = nullptr;
+				pPlace->Times = 0;
+				pPlace->Timer.Stop();
+				pPlace->TopLeft = CellStruct::Empty;
+				pPlace->PlaceType = 0;
+			}
+		}
+	}
+
+	pHouseExt->ClearClearanceReservation();
+}
+
 // ExtendedBuildingPlacing support: true if movable technos (infantry/vehicles) stand on the building foundation.
 static bool HasMovableTechnosOnFoundation(BuildingTypeClass* pBuildingType, CellStruct topLeftCell)
 {
@@ -3531,7 +3562,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		if (houseExt->PendingClearanceCell.X <= 0 || houseExt->PendingClearanceCell.Y <= 0 ||
 			!MapClass::Instance.CoordinatesLegal(houseExt->PendingClearanceCell))
 		{
-			houseExt->ClearClearanceReservation();
+			ClearReservationAndPreview(houseExt);
 		}
 		else
 		{
@@ -3558,7 +3589,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 				// Mismatch in dimensions/foundation: reset reservation and start fresh search
 				Debug::Log("AdvAI Placement: House %d clearance reservation invalidated for %s (foundation mismatch with %s). Resetting reservation.\n",
 					pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, houseExt->PendingClearanceType->ID);
-				houseExt->ClearClearanceReservation();
+				ClearReservationAndPreview(houseExt);
 			}
 			else
 			{
@@ -3611,7 +3642,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 						Debug::Log("AdvAI Placement: House %d successfully placed %s at reserved clearance cell (%d,%d).\n",
 							pBuilding->Owner->ArrayIndex, pBuilding->Type->ID,
 							houseExt->PendingClearanceCell.X, houseExt->PendingClearanceCell.Y);
-						houseExt->ClearClearanceReservation();
+						ClearReservationAndPreview(houseExt);
 						houseExt->PlacementConsecutiveFailures[pBuilding->Type] = 0;
 						houseExt->PlacementFailedCooldowns.erase(pBuilding->Type);
 						return 2;
@@ -3637,7 +3668,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 					Debug::Log("AdvAI Placement: House %d clearance attempts exhausted for %s at (%d,%d). Resetting reservation.\n",
 						pBuilding->Owner->ArrayIndex, pBuilding->Type->ID,
 						houseExt->PendingClearanceCell.X, houseExt->PendingClearanceCell.Y);
-					houseExt->ClearClearanceReservation();
+					ClearReservationAndPreview(houseExt);
 					houseExt->LastClearanceFailedFrame = Unsorted::CurrentFrame;
 					// Fall through to normal search
 				}
@@ -3880,6 +3911,8 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 				houseExt->ClearanceAttempts = 0;
 				houseExt->NextClearanceCheckFrame = Unsorted::CurrentFrame + 15;
 
+				PublishPlacementPreview(houseExt, pBuilding->Type, placementCell);
+
 				Debug::Log("AdvAI Placement: House %d asked units to leave the footprint of %s at (%d,%d) (ExtendedBuildingPlacing). Waiting in factory.\n",
 					pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, placementCell.X, placementCell.Y);
 
@@ -3908,7 +3941,7 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		{
 			houseExt->PlacementConsecutiveFailures[pBuilding->Type] = 0;
 			houseExt->PlacementFailedCooldowns.erase(pBuilding->Type);
-			houseExt->ClearClearanceReservation();
+			ClearReservationAndPreview(houseExt);
 		}
 
 		if (TechTreeTypeClass::TotalBuildSupport.contains(pBuilding->Type))
