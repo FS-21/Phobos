@@ -1398,7 +1398,7 @@ DEFINE_HOOK(0x708FC0, TechnoClass_ResponseMove, 0x5)
 			return SkipResponse;
 
 		auto const pUnit = abstract_cast<UnitClass*>(pThis);
-		auto const pUnitExt = UnitExt::Fetch(pUnit);
+		auto const pUnitExt = pUnit ? UnitExt::Fetch(pUnit) : nullptr; // Infantry (and other non-UnitClass foots) have no UnitExt
 		if (pUnitExt && (pUnitExt->CarryallState == JumpjetCarryallState::MovingToPickup ||
 			(pUnit->Destination && abstract_cast<TechnoClass*>(pUnit->Destination) && pUnitExt->CarryallCanLift(abstract_cast<TechnoClass*>(pUnit->Destination)))))
 		{
