@@ -1415,6 +1415,15 @@ namespace SmartAutoDeploy
 		if (!ShouldEvaluate(pThis))
 			return;
 
+		// A building that is being constructed (deployed unit) or sold (undeploying) must not be touched,
+		// changing its mission here interrupts the build-up/sell animation and leaves the body undrawn.
+		if (auto const pBuilding = abstract_cast<BuildingClass*>(pThis))
+		{
+			if (pBuilding->CurrentMission == Mission::Construction || pBuilding->QueuedMission == Mission::Construction
+				|| pBuilding->CurrentMission == Mission::Selling || pBuilding->QueuedMission == Mission::Selling)
+				return;
+		}
+
 		auto const pExt = TechnoExt::Fetch(pThis);
 
 		// Handle active repositioning maneuver
@@ -1427,8 +1436,18 @@ namespace SmartAutoDeploy
 		// Handle deploy/undeploy transition completion
 		if (pExt->SmartAutoDeploy_SavedTarget)
 		{
-			HandleTransitionCompletion(pThis, pExt);
-			return;
+			// Buildings only keep the saved tactical state to hand it over to the unit they undeploy into,
+			// they never resume missions by themselves.
+			if (abstract_cast<BuildingClass*>(pThis))
+			{
+				if (pExt->SmartAutoDeploy_TargetAction != SmartAutoDeployAction::None)
+					return;
+			}
+			else
+			{
+				HandleTransitionCompletion(pThis, pExt);
+				return;
+			}
 		}
 
 		// Standard evaluation pipeline
