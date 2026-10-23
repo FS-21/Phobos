@@ -1416,6 +1416,12 @@ void TechnoExt::OnDetach(AirstrikeClass* pTarget, bool removed)
 		AnnounceInvalidPointer(this->AirstrikeTargetingMe, pTarget);
 }
 
+void TechnoExt::OnDetach(AbstractClass* pTarget, bool removed)
+{
+	if (removed)
+		AnnounceInvalidPointer(this->SmartAutoDeploy_SavedTarget, pTarget);
+}
+
 void TechnoExt::LoadFromStream(PhobosStreamReader& Stm)
 {
 	RadioExt::LoadFromStream(Stm);
