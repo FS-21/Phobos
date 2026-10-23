@@ -610,6 +610,9 @@ DEFINE_HOOK(0x75E98E, WaveClass_CTOR_SonicDuration, 0xA)
 	enum { SkipGameCode = 0x75E998 };
 
 	GET(WaveClass*, pThis, ESI);
+	// WaveClass::Owner is only assigned later in the constructor, here it is still uninitialized memory.
+	// The owner passed to the constructor is held in EDX at this point.
+	GET(TechnoClass*, pOwner, EDX);
 
 	auto const pWeapon = FireAtTemp::GetWaveWeapon(pThis);
 	auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
@@ -618,7 +621,7 @@ DEFINE_HOOK(0x75E98E, WaveClass_CTOR_SonicDuration, 0xA)
 
 	if (pWeaponExt && pWeaponExt->IsClassicSonic)
 	{
-		if (auto const pOwner = pThis->Owner)
+		if (pOwner)
 		{
 			const double step = (pWeaponExt->Wave_Step.isset() && pWeaponExt->Wave_Step.Get() > 0.0)
 				? pWeaponExt->Wave_Step.Get() : static_cast<double>(0.05f);
