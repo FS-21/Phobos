@@ -5,6 +5,7 @@
 #include <Ext/TerrainType/Body.h>
 #include <Ext/CaptureManager/Body.h>
 #include <Ext/Building/Body.h>
+#include <Ext/Observer/ObserverUI.h>
 
 #pragma region AllowDeployControlledMCV
 
@@ -94,6 +95,7 @@ DEFINE_HOOK(0x739956, UnitClass_Deploy_Transfer, 0x6)
 	ShieldClass::SyncShieldToAnother(pUnit, pStructure);
 	TechnoExt::SyncInvulnerability(pUnit, pStructure);
 	AttachEffectClass::TransferAttachedEffects(pUnit, pStructure);
+	ObserverUIClass::Instance.RetargetFloatingUnitWindows(pUnit, pStructure);
 
 	return 0;
 }
@@ -107,6 +109,7 @@ DEFINE_HOOK(0x44A03C, BuildingClass_Mi_Selling_Transfer, 0x6)
 	ShieldClass::SyncShieldToAnother(pStructure, pUnit);
 	TechnoExt::SyncInvulnerability(pStructure, pUnit);
 	AttachEffectClass::TransferAttachedEffects(pStructure, pUnit);
+	ObserverUIClass::Instance.RetargetFloatingUnitWindows(pStructure, pUnit);
 
 	// This line will break the bahavior of UnDeploysInto buildings. However, it might serve a purpose that no one knows yet
 	// Comment out the line instead of removing it for now, so we can turn to it if something related goes wrong in the future
