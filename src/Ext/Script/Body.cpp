@@ -488,6 +488,22 @@ void ScriptExt::Mission_Gather_NearTheLeader(TeamClass* pTeam, int countdown)
 
 				if (pUnit->DistanceFrom(pLeaderUnit->GetCell()) > closeEnough)
 				{
+					if (auto const pVeh = abstract_cast<UnitClass*>(pUnit))
+					{
+						if (pVeh->Type->IsSimpleDeployer
+							&& (pVeh->Deployed || pVeh->Deploying || pVeh->Undeploying
+								|| pVeh->GetCurrentMission() == Mission::Unload || pVeh->QueuedMission == Mission::Unload))
+						{
+							if (pVeh->Deployed && !pVeh->Undeploying && pVeh->GetCurrentMission() != Mission::Unload && pVeh->QueuedMission != Mission::Unload)
+							{
+								pVeh->SetTarget(nullptr);
+								pVeh->QueueMission(Mission::Unload, true);
+							}
+
+							continue;
+						}
+					}
+
 					// Leader's location is too far from me. Regroup
 					if (pUnit->Destination != pLeaderUnit)
 					{
@@ -500,7 +516,7 @@ void ScriptExt::Mission_Gather_NearTheLeader(TeamClass* pTeam, int countdown)
 					const auto mission = pUnit->GetCurrentMission();
 
 					// Is near of the leader, then protect the area
-					if (mission != Mission::Area_Guard && mission != Mission::Attack)
+					if (mission != Mission::Area_Guard && mission != Mission::Attack && mission != Mission::Unload && mission != Mission::Selling)
 						pUnit->QueueMission(Mission::Area_Guard, true);
 
 					nTogether++;
@@ -746,6 +762,34 @@ bool ScriptExt::MoveMissionEndStatus(TeamClass* pTeam, TechnoClass* pFocus, Foot
 			&& !pUnit->TemporalTargetingMe
 			&& !pUnit->IsBeingWarpedOut())
 		{
+			auto handleSimpleDeployerMove = [pFocus](FootClass* pMember)
+			{
+				if (auto const pVeh = abstract_cast<UnitClass*>(pMember))
+				{
+					if (pVeh->Type->IsSimpleDeployer)
+					{
+						if (pVeh->Deployed && !pVeh->Undeploying
+							&& pVeh->GetCurrentMission() != Mission::Unload && pVeh->QueuedMission != Mission::Unload)
+						{
+							pVeh->SetTarget(nullptr);
+							pVeh->QueueMission(Mission::Unload, true);
+						}
+						else if (!pVeh->Deployed && !pVeh->Deploying && !pVeh->Undeploying
+							&& pVeh->GetCurrentMission() != Mission::Unload && pVeh->QueuedMission != Mission::Unload
+							&& !pVeh->Destination)
+						{
+							CoordStruct coord = TechnoExt::PassengerKickOutLocation(pFocus, pVeh, 10);
+							coord = coord != CoordStruct::Empty ? coord : pFocus->Location;
+							if (CellClass* pCellDestination = MapClass::Instance.TryGetCellAt(coord))
+							{
+								pVeh->QueueMission(Mission::Move, false);
+								pVeh->SetDestination(pCellDestination, true);
+							}
+						}
+					}
+				}
+			};
+
 			if (mode == 2)
 			{
 				// Default mode: all members in range
@@ -755,6 +799,8 @@ bool ScriptExt::MoveMissionEndStatus(TeamClass* pTeam, TechnoClass* pFocus, Foot
 
 					if (pUnit->WhatAmI() == AbstractType::Aircraft && pUnit->Ammo > 0)
 						pUnit->QueueMission(Mission::Move, false);
+					else
+						handleSimpleDeployerMove(pUnit);
 
 					continue;
 				}
@@ -777,6 +823,8 @@ bool ScriptExt::MoveMissionEndStatus(TeamClass* pTeam, TechnoClass* pFocus, Foot
 					{
 						if (pUnit->WhatAmI() == AbstractType::Aircraft && pUnit->Ammo > 0)
 							pUnit->QueueMission(Mission::Move, false);
+						else
+							handleSimpleDeployerMove(pUnit);
 
 						continue;
 					}
@@ -801,6 +849,8 @@ bool ScriptExt::MoveMissionEndStatus(TeamClass* pTeam, TechnoClass* pFocus, Foot
 						{
 							if (pUnit->WhatAmI() == AbstractType::Aircraft && pUnit->Ammo > 0)
 								pUnit->QueueMission(Mission::Move, false);
+							else
+								handleSimpleDeployerMove(pUnit);
 
 							continue;
 						}

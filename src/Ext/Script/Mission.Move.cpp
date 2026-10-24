@@ -146,6 +146,20 @@ void ScriptExt::Mission_Move(TeamClass* pTeam, int calcThreatMode, bool pickAlli
 					// Reset previous command
 					pFoot->SetTarget(nullptr);
 					pFoot->SetDestination(nullptr, false);
+
+					if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
+					{
+						if (pUnit->Type->IsSimpleDeployer
+							&& (pUnit->Deployed || pUnit->Deploying || pUnit->Undeploying
+								|| pUnit->GetCurrentMission() == Mission::Unload || pUnit->QueuedMission == Mission::Unload))
+						{
+							if (pUnit->Deployed && !pUnit->Undeploying && pUnit->GetCurrentMission() != Mission::Unload && pUnit->QueuedMission != Mission::Unload)
+								pUnit->QueueMission(Mission::Unload, true);
+
+							continue;
+						}
+					}
+
 					pFoot->ForceMission(Mission::Guard);
 
 					// Get a cell near the target

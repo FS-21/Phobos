@@ -1419,7 +1419,14 @@ void TechnoExt::OnDetach(AirstrikeClass* pTarget, bool removed)
 void TechnoExt::OnDetach(AbstractClass* pTarget, bool removed)
 {
 	if (removed)
-		AnnounceInvalidPointer(this->SmartAutoDeploy_SavedTarget, pTarget);
+	{
+		if (this->SmartAutoDeploy_SavedTarget == pTarget)
+		{
+			this->SmartAutoDeploy_SavedTarget = nullptr;
+			this->SmartAutoDeploy_IsRepositioning = false;
+			this->SmartAutoDeploy_RepositionDestination = CoordStruct::Empty;
+		}
+	}
 }
 
 void TechnoExt::LoadFromStream(PhobosStreamReader& Stm)

@@ -2,6 +2,7 @@
 
 #include <Ext/Building/Body.h>
 #include <Ext/BulletType/Body.h>
+#include <Ext/Techno/SmartAutoDeploy.h>
 #include <Ext/Unit/Body.h>
 #include <Ext/WeaponType/Body.h>
 
@@ -220,6 +221,30 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, int calcThreatMode, bool repeat
 				if (pFoot->IsAlive && pFoot->Health > 0 && !pFoot->InLimbo && !pFoot->IsSinking)
 				{
 					const auto pTechnoType = pFoot->GetTechnoType();
+					const auto mission = pFoot->GetCurrentMission();
+					const auto pTechExt = TechnoExt::Fetch(pFoot);
+
+					const auto pUnit = abstract_cast<UnitClass*, true>(pFoot);
+					const bool isTransforming = mission == Mission::Unload
+						|| mission == Mission::Selling
+						|| pFoot->QueuedMission == Mission::Unload
+						|| (pUnit && (pUnit->Deploying || pUnit->Undeploying));
+					const bool isRepositioning = pTechExt->SmartAutoDeploy_IsRepositioning && mission == Mission::Move;
+
+					if (isTransforming || isRepositioning)
+					{
+						pTechExt->SmartAutoDeploy_SavedTarget = pSelectedTarget;
+						pTechExt->SmartAutoDeploy_SavedMission = Mission::Attack;
+
+						if (isTransforming && pTechExt->SmartAutoDeploy_TargetAction == SmartAutoDeployAction::None)
+						{
+							pTechExt->SmartAutoDeploy_TargetAction = SmartAutoDeploy::IsCurrentlyDeployed(pFoot)
+								? SmartAutoDeployAction::Undeploy
+								: SmartAutoDeployAction::Deploy;
+						}
+
+						continue;
+					}
 
 					if (pFoot != pSelectedTarget && pFoot->Target != pSelectedTarget)
 					{
@@ -404,6 +429,30 @@ void ScriptExt::Mission_Attack(TeamClass* pTeam, int calcThreatMode, bool repeat
 					// Other cases
 					if (whatAmI != AbstractType::Aircraft)
 					{
+						const auto pTechExt = TechnoExt::Fetch(pFoot);
+
+						const auto pUnit = abstract_cast<UnitClass*, true>(pFoot);
+						const bool isTransforming = mission == Mission::Unload
+							|| mission == Mission::Selling
+							|| pFoot->QueuedMission == Mission::Unload
+							|| (pUnit && (pUnit->Deploying || pUnit->Undeploying));
+						const bool isRepositioning = pTechExt->SmartAutoDeploy_IsRepositioning && mission == Mission::Move;
+
+						if (isTransforming || isRepositioning)
+						{
+							pTechExt->SmartAutoDeploy_SavedTarget = pFocus;
+							pTechExt->SmartAutoDeploy_SavedMission = Mission::Attack;
+
+							if (isTransforming && pTechExt->SmartAutoDeploy_TargetAction == SmartAutoDeployAction::None)
+							{
+								pTechExt->SmartAutoDeploy_TargetAction = SmartAutoDeploy::IsCurrentlyDeployed(pFoot)
+									? SmartAutoDeployAction::Undeploy
+									: SmartAutoDeployAction::Deploy;
+							}
+
+							continue;
+						}
+
 						if (pFoot->Target != pFocus)
 							pFoot->SetTarget(pFocus);
 
