@@ -259,7 +259,7 @@ namespace
 
 	// ── Damage Evaluation ────────────────────────────────────────────────
 
-	bool CanEnemyWeaponHitForm(WeaponTypeClass* pWeapon, TechnoTypeClass* pEnemyType, TechnoTypeClass* pFormType)
+	bool CanEnemyWeaponHitForm(WeaponTypeClass* pWeapon, TechnoTypeClass* pEnemyType, TechnoTypeClass* pFormType, bool deployedForm = false)
 	{
 		if (!pWeapon || !pWeapon->Warhead || !pFormType)
 			return false;
@@ -267,7 +267,8 @@ namespace
 		if (GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pFormType->Armor) <= 0.0)
 			return false;
 
-		const bool formIsAir = (pFormType->SpeedType == SpeedType::Winged || pFormType->MovementZone == MovementZone::Fly);
+		const bool formIsAir = !(deployedForm && pFormType->DeployToLand)
+			&& (pFormType->SpeedType == SpeedType::Winged || pFormType->MovementZone == MovementZone::Fly);
 		const bool formIsUnderwater = pFormType->Underwater;
 
 		if (formIsAir)
@@ -279,7 +280,7 @@ namespace
 		return !pWeapon->Projectile || pWeapon->Projectile->AG || !pWeapon->Projectile->AA;
 	}
 
-	bool CanTargetDamageForm(TechnoClass* pTargetTechno, TechnoTypeClass* pFormType)
+	bool CanTargetDamageForm(TechnoClass* pTargetTechno, TechnoTypeClass* pFormType, bool deployedForm = false)
 	{
 		if (!pTargetTechno || !pFormType)
 			return true;
@@ -290,7 +291,7 @@ namespace
 		{
 			if (auto const pWeaponStruct = pTargetTechno->GetWeapon(i))
 			{
-				if (CanEnemyWeaponHitForm(pWeaponStruct->WeaponType, pEnemyType, pFormType))
+				if (CanEnemyWeaponHitForm(pWeaponStruct->WeaponType, pEnemyType, pFormType, deployedForm))
 					return true;
 			}
 		}
@@ -533,7 +534,12 @@ namespace
 			if (pUnit)
 			{
 				if (pUnit->Deploying || pUnit->CurrentMission == Mission::Unload || pUnit->QueuedMission == Mission::Unload)
+				{
+					if (pUnit->Target)
+						pUnit->SetTarget(nullptr);
+
 					return true;
+				}
 
 				if (pUnit->Type->DeployToLand && IsTechnoAirborne(pUnit))
 				{
@@ -778,8 +784,21 @@ namespace SmartAutoDeploy
 			{
 				if (pType->DeploysInto || pUnit->Type->IsSimpleDeployer)
 				{
-					StopTechnoMotion(pUnit);
 					pUnit->QueueMission(Mission::Unload, true);
+					StopTechnoMotion(pUnit);
+
+					if (pUnit->Type->DeployToLand && IsTechnoAirborne(pUnit))
+					{
+						if (auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pUnit->Locomotor))
+						{
+							if (auto const pCell = pUnit->GetCell())
+							{
+								pJJLoco->DestinationCoords = pCell->GetCoords();
+								pJJLoco->IsMoving = true;
+							}
+						}
+					}
+
 					return true;
 				}
 			}
@@ -827,12 +846,15 @@ namespace SmartAutoDeploy
 		SmartAutoDeployAction action, bool toDeploy,
 		Mission savedMission = Mission::Attack, bool repositioning = false)
 	{
+		if (!ExecuteTransformation(pThis, toDeploy))
+			return false;
+
 		auto const pExt = TechnoExt::Fetch(pThis);
 		pExt->SmartAutoDeploy_SavedTarget = pTarget;
 		pExt->SmartAutoDeploy_SavedMission = savedMission;
 		pExt->SmartAutoDeploy_TargetAction = action;
 		pExt->SmartAutoDeploy_IsRepositioning = repositioning;
-		return ExecuteTransformation(pThis, toDeploy);
+		return true;
 	}
 
 	// ── Prerequisites ────────────────────────────────────────────────────
@@ -882,6 +904,9 @@ namespace SmartAutoDeploy
 		{
 			if (ShouldCheckMinimumRange(pTypeExt, pAltTypeExt))
 				return SaveAndTransform(pThis, pTarget, SmartAutoDeployAction::Undeploy, false, Mission::Attack, true);
+
+			if (pAltWeapon && currentDist >= pAltWeapon->MinimumRange && CanFormDamageTarget(pAltType, pAltWeapon, pTarget))
+				return SaveAndTransform(pThis, pTarget, SmartAutoDeployAction::Undeploy, false);
 		}
 
 		// ── Inverted HP threshold: flee when health is low ───────────────
@@ -1007,8 +1032,8 @@ namespace SmartAutoDeploy
 			auto const pTargetTechno = abstract_cast<TechnoClass*>(pTarget);
 			if (pTargetTechno)
 			{
-				const bool targetCanHitCurrent = CanTargetDamageForm(pTargetTechno, pType);
-				const bool targetCanHitDeployed = CanTargetDamageForm(pTargetTechno, pAltType);
+				const bool targetCanHitCurrent = CanTargetDamageForm(pTargetTechno, pType, false);
+				const bool targetCanHitDeployed = CanTargetDamageForm(pTargetTechno, pAltType, true);
 
 				if (!targetCanHitDeployed && targetCanHitCurrent)
 					wantsToDeploy = true;
@@ -1186,12 +1211,17 @@ namespace SmartAutoDeploy
 		const int currentSpeed = pType->Speed;
 		const int altSpeed = pAltType->Speed;
 
-		const bool altHasBetterMobility = (altSpeed > currentSpeed) ||
-			(pAltType->MovementZone == MovementZone::Fly && pType->MovementZone != MovementZone::Fly) ||
-			(pAltType->SpeedType == SpeedType::Hover && pType->SpeedType != SpeedType::Hover && pType->SpeedType != SpeedType::Winged);
+		const bool altHasBetterMobility = (pType == pAltType)
+			? (currentlyDeployed && (currentSpeed > 0 || pType->MovementZone == MovementZone::Fly))
+			: ((altSpeed > currentSpeed) ||
+				(pAltType->MovementZone == MovementZone::Fly && pType->MovementZone != MovementZone::Fly) ||
+				(pAltType->SpeedType == SpeedType::Hover && pType->SpeedType != SpeedType::Hover && pType->SpeedType != SpeedType::Winged));
 
 		if (altHasBetterMobility)
+		{
+			ResetSmartAutoDeployState(TechnoExt::Fetch(pThis));
 			return ExecuteTransformation(pThis, !currentlyDeployed);
+		}
 
 		return false;
 	}
@@ -1207,15 +1237,31 @@ namespace SmartAutoDeploy
 			return false;
 
 		const auto pAltTypeExt = TechnoTypeExt::Fetch(pAltType);
+		const bool currentlyDeployed = IsCurrentlyDeployed(pThis);
 
-		if (pTypeExt->SmartAutoDeploy_Idle == pAltTypeExt->SmartAutoDeploy_Idle)
-			return false;
-
-		if (pTypeExt->SmartAutoDeploy_Idle)
+		if (pType == pAltType)
 		{
-			auto const pExt = TechnoExt::Fetch(pThis);
-			pExt->SmartAutoDeploy_IdleTimer.Stop();
-			return false;
+			if (!pTypeExt->SmartAutoDeploy_Idle)
+				return false;
+
+			if (!currentlyDeployed)
+			{
+				auto const pExt = TechnoExt::Fetch(pThis);
+				pExt->SmartAutoDeploy_IdleTimer.Stop();
+				return false;
+			}
+		}
+		else
+		{
+			if (pTypeExt->SmartAutoDeploy_Idle == pAltTypeExt->SmartAutoDeploy_Idle)
+				return false;
+
+			if (pTypeExt->SmartAutoDeploy_Idle)
+			{
+				auto const pExt = TechnoExt::Fetch(pThis);
+				pExt->SmartAutoDeploy_IdleTimer.Stop();
+				return false;
+			}
 		}
 
 		if (pThis->Target || pThis->CurrentMission == Mission::Attack || pThis->CurrentMission == Mission::Move)
@@ -1243,7 +1289,7 @@ namespace SmartAutoDeploy
 		if (pExt->SmartAutoDeploy_IdleTimer.Completed())
 		{
 			pExt->SmartAutoDeploy_IdleTimer.Stop();
-			const bool currentlyDeployed = IsCurrentlyDeployed(pThis);
+			ResetSmartAutoDeployState(pExt);
 			return ExecuteTransformation(pThis, !currentlyDeployed);
 		}
 
@@ -1337,6 +1383,20 @@ namespace SmartAutoDeploy
 	void HandleTransitionCompletion(TechnoClass* pThis, TechnoExt* pExt)
 	{
 		auto const pUnit = abstract_cast<UnitClass*>(pThis);
+
+		// If the saved target died while an airborne DeployToLand unit was still descending
+		// before starting its deploy animation, abort the landing immediately so it stays airborne.
+		if (!IsAliveAndValid(pExt->SmartAutoDeploy_SavedTarget)
+			&& pExt->SmartAutoDeploy_TargetAction == SmartAutoDeployAction::Deploy
+			&& pUnit && pUnit->Type->DeployToLand
+			&& !pUnit->Deployed && !pUnit->Deploying
+			&& IsTechnoAirborne(pUnit))
+		{
+			pUnit->InAir = false;
+			pUnit->QueueMission(Mission::Guard, true);
+			ResetSmartAutoDeployState(pExt);
+			return;
+		}
 
 		// Step 1: Wait if transformation is still animating
 		if (IsTransformInProgress(pThis, pUnit, pExt->SmartAutoDeploy_TargetAction))
@@ -1434,7 +1494,7 @@ namespace SmartAutoDeploy
 		}
 
 		// Handle deploy/undeploy transition completion
-		if (pExt->SmartAutoDeploy_SavedTarget)
+		if (pExt->SmartAutoDeploy_TargetAction != SmartAutoDeployAction::None || pExt->SmartAutoDeploy_SavedTarget)
 		{
 			// Buildings only keep the saved tactical state to hand it over to the unit they undeploy into,
 			// they never resume missions by themselves.

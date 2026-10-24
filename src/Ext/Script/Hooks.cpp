@@ -5,6 +5,7 @@
 #include <ThemeClass.h>
 
 #include <Ext/House/Body.h>
+#include <Ext/Techno/SmartAutoDeploy.h>
 
 enum class BuildingWithProperty : unsigned int
 {
@@ -347,6 +348,31 @@ DEFINE_HOOK(0x6EB7FC, TeamClass_AttackFocus_CaptureAndInfiltrate2, 0x5)
 	GET(FootClass* const, pUnit, ESI);
 
 	auto const pTarget = pThis->Focus;
+	auto const mission = pUnit->GetCurrentMission();
+	auto const pTechExt = TechnoExt::Fetch(pUnit);
+
+	const auto pUnitVeh = abstract_cast<UnitClass*, true>(pUnit);
+	const bool isTransforming = mission == Mission::Unload
+		|| mission == Mission::Selling
+		|| pUnit->QueuedMission == Mission::Unload
+		|| (pUnitVeh && (pUnitVeh->Deploying || pUnitVeh->Undeploying));
+	const bool isRepositioning = pTechExt->SmartAutoDeploy_IsRepositioning && mission == Mission::Move;
+
+	if (isTransforming || isRepositioning)
+	{
+		pTechExt->SmartAutoDeploy_SavedTarget = pTarget;
+		pTechExt->SmartAutoDeploy_SavedMission = Mission::Attack;
+
+		if (isTransforming && pTechExt->SmartAutoDeploy_TargetAction == SmartAutoDeployAction::None)
+		{
+			pTechExt->SmartAutoDeploy_TargetAction = SmartAutoDeploy::IsCurrentlyDeployed(pUnit)
+				? SmartAutoDeployAction::Undeploy
+				: SmartAutoDeployAction::Deploy;
+		}
+
+		return 0x6EB807;
+	}
+
 	pUnit->SetTarget(pTarget);
 
 	if (auto const pInfantry = abstract_cast<InfantryClass*, true>(pUnit))

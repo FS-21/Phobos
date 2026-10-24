@@ -2326,7 +2326,13 @@ void TechnoExt::OnDetach(AbstractClass* pTarget, bool removed)
 		AnnounceInvalidPointer(this->LastAttacker, pTarget);
 		AnnounceInvalidPointer(this->FallingInheritedTarget, pTarget);
 		AnnounceInvalidPointer(this->FallingInheritedDestination, pTarget);
-		AnnounceInvalidPointer(this->SmartAutoDeploy_SavedTarget, pTarget);
+
+		if (this->SmartAutoDeploy_SavedTarget == pTarget)
+		{
+			this->SmartAutoDeploy_SavedTarget = nullptr;
+			this->SmartAutoDeploy_IsRepositioning = false;
+			this->SmartAutoDeploy_RepositionDestination = CoordStruct::Empty;
+		}
 
 		for (auto const& pAttachment : this->ChildAttachments)
 			pAttachment->InvalidatePointer(pTarget);
