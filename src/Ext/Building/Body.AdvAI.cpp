@@ -4033,6 +4033,35 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 			}
 		}
 	}
+	else
+	{
+		// The chosen cell could not be used (e.g. occupants that cannot leave with ExtendedBuildingPlacing).
+		// Apply the usual failure cooldowns, otherwise the AI would select the same building on the very same cell again and again.
+		if (const auto houseExtFail = HouseExt::ExtMap.Find(pBuilding->Owner))
+		{
+			const int failures = ++houseExtFail->PlacementConsecutiveFailures[pBuilding->Type];
+
+			if (failures <= 3)
+			{
+				houseExtFail->PlacementFailedCooldowns[pBuilding->Type] = Unsorted::CurrentFrame + 150;
+				Debug::Log("AdvAI: AI %d failed to place building %s at (%d,%d) (Attempt %d/3). Retrying in 10s.\n",
+						   pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, placementCell.X, placementCell.Y, failures);
+			}
+			else
+			{
+				houseExtFail->PlacementFailedCooldowns[pBuilding->Type] = Unsorted::CurrentFrame + 900;
+				houseExtFail->PlacementConsecutiveFailures[pBuilding->Type] = 0;
+				Debug::Log("AdvAI: AI %d exhausted all 3 placement attempts for %s at (%d,%d). Aborting, cooldown 60s and dropping the current expansion target.\n",
+						   pBuilding->Owner->ArrayIndex, pBuilding->Type->ID, placementCell.X, placementCell.Y);
+
+				if (houseExtFail->NextExpansionPointLocation.X > 0 && houseExtFail->NextExpansionPointLocation.Y > 0)
+				{
+					HouseExt::AdvAI_Add_Failed_Expansion_Point(pBuilding->Owner, houseExtFail->NextExpansionPointLocation);
+					BuildingExt::Mark_Expansion_As_Done(pBuilding->Owner);
+				}
+			}
+		}
+	}
 
 	return result;
 }
