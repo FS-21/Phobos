@@ -161,6 +161,8 @@ public:
 	void RenderFloatingUnitWindows(DSurface* pSurface);
 	bool OpenFloatingWindowForSelectedObject();
 	void ClearFloatingWindows();
+	// Moves the open object cards from an object to the one replacing it (unit deploying into a building and back).
+	void RetargetFloatingUnitWindows(TechnoClass* pFrom, TechnoClass* pTo);
 	void ToggleDisplayMode();
 	static bool IsToggleObserverUIHotkeyBound();
 	static bool IsShowObjectCardHotkeyBound();

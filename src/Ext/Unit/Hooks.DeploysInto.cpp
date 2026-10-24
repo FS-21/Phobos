@@ -7,6 +7,7 @@
 #include <Ext/CaptureManager/Body.h>
 #include <Ext/Building/Body.h>
 #include <TeamClass.h>
+#include <Ext/Observer/ObserverUI.h>
 
 #pragma region AllowDeployControlledMCV
 
@@ -97,6 +98,7 @@ DEFINE_HOOK(0x739956, UnitClass_Deploy_Transfer, 0x6)
 	TechnoExt::SyncInvulnerability(pUnit, pStructure);
 	AttachEffectClass::TransferAttachedEffects(pUnit, pStructure);
 	TechnoExt::HandleAttachmentDeployTransfer(pUnit, pStructure);
+	ObserverUIClass::Instance.RetargetFloatingUnitWindows(pUnit, pStructure);
 
 	auto const pUnitExt = TechnoExt::Fetch(pUnit);
 	float const totalUnitTiberium = pUnitExt ? pUnitExt->GetTotalTiberium() : pUnit->Tiberium.GetTotalAmount();
@@ -162,6 +164,7 @@ DEFINE_HOOK(0x44A03C, BuildingClass_Mi_Selling_Transfer, 0x6)
 	ShieldClass::SyncShieldToAnother(pStructure, pUnit);
 	TechnoExt::SyncInvulnerability(pStructure, pUnit);
 	AttachEffectClass::TransferAttachedEffects(pStructure, pUnit);
+	ObserverUIClass::Instance.RetargetFloatingUnitWindows(pStructure, pUnit);
 	TechnoExt::HandleAttachmentDeployTransfer(pStructure, pUnit);
 
 	const auto pStructureExt = BuildingExt::Fetch(pStructure);

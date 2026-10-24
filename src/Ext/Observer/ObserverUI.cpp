@@ -6539,6 +6539,29 @@ bool ObserverUIClass::IsMouseHoveringUI() const
 	return false;
 }
 
+void ObserverUIClass::RetargetFloatingUnitWindows(TechnoClass* pFrom, TechnoClass* pTo)
+{
+	if (!pFrom || !pTo || pFrom == pTo)
+		return;
+
+	auto const pToBuilding = abstract_cast<BuildingClass*>(pTo);
+	auto const pFromBuilding = abstract_cast<BuildingClass*>(pFrom);
+
+	for (auto& win : this->FloatingUnitWindows)
+	{
+		if (win.IsProductionItem || win.IsSuperweapon)
+			continue;
+
+		if (win.pTargetTechno != pFrom && !(pFromBuilding && win.pTargetBuilding == pFromBuilding))
+			continue;
+
+		win.pTargetBuilding = pToBuilding;
+		win.pTargetTechno = pToBuilding ? nullptr : pTo;
+		win.pType = pTo->GetTechnoType();
+		win.IsDestroyed = false;
+	}
+}
+
 void ObserverUIClass::ClearFloatingWindows()
 {
 	this->FloatingWindows.clear();
