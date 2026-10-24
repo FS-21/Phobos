@@ -241,6 +241,18 @@ DEFINE_HOOK(0x741983, UnitClass_AssignDestination_Carryall, 0x6)
 
 static bool ShouldEmulateBalloonHover(FootClass* pFoot, TechnoTypeClass* pType)
 {
+	if (reinterpret_cast<uintptr_t>(pFoot) >= 0x10000)
+	{
+		if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
+		{
+			if ((pUnit->Type->DeployToLand || pUnit->Type->IsSimpleDeployer || pUnit->Type->DeploysInto)
+				&& (pUnit->CurrentMission == Mission::Unload || pUnit->QueuedMission == Mission::Unload || pUnit->Deploying))
+			{
+				return false;
+			}
+		}
+	}
+
 	if (pType && pType->BalloonHover)
 		return true;
 

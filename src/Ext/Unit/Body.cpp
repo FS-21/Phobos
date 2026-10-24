@@ -212,7 +212,11 @@ void UnitExt::DepletedAmmoActions()
 		if (pUnitType->IsSimpleDeployer && pThis->InAir)
 		{
 			if (auto const pJJLoco = locomotion_cast<JumpjetLocomotionClass*>(pThis->Locomotor))
+			{
+				pThis->InAir = false;
+				pJJLoco->CurrentHeight = pJJLoco->Height;
 				pJJLoco->State = JumpjetLocomotionClass::State::Ascending;
+			}
 		}
 	}
 }
@@ -985,6 +989,9 @@ void UnitExt::UpdateCarryall()
 		}
 		else
 		{
+			const bool wasOnMap = pThis->IsOnMap;
+			pThis->Mark(MarkType::Up);
+			pThis->IsOnMap = wasOnMap;
 			pJJLoco->CurrentHeight = cruiseHeight;
 			pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
 			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
@@ -1101,6 +1108,9 @@ void UnitExt::UpdateCarryall()
 		}
 		else
 		{
+			const bool wasOnMap = pThis->IsOnMap;
+			pThis->Mark(MarkType::Up);
+			pThis->IsOnMap = wasOnMap;
 			pJJLoco->CurrentHeight = cruiseHeight;
 			pJJLoco->State = JumpjetLocomotionClass::State::Hovering;
 			FootExt::Fetch(pThis)->JumpjetStraightAscend = false;
