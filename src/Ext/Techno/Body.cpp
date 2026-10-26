@@ -21,6 +21,7 @@
 #include <Utilities/Enum.h>
 #include <Utilities/Helpers.Alex.h>
 #include <Interop/TechnoExt.h>
+#include <Ext/Observer/ObserverUI.h>
 
 UnitClass* TechnoExt::Deployer = nullptr;
 TechnoClass* TechnoExt::DeployTransferSource = nullptr;
@@ -2378,6 +2379,8 @@ bool TechnoExt::SaveGlobals(PhobosStreamWriter& Stm)
 DEFINE_HOOK(0x6F4500, TechnoClass_DTOR, 0x5)
 {
 	GET(TechnoClass*, pItem, ECX);
+
+	ObserverUIClass::Instance.OnObjectRemoved(pItem, true);
 
 	if (pItem->AbstractFlags & AbstractFlags::Foot)
 		pItem->Owner->RecheckTechTree = true; // for SW.AuxTechons and SW.NegTechnos

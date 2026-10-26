@@ -2,6 +2,7 @@
 
 #include <Ext/Script/Body.h>
 #include <Ext/Building/Body.h>
+#include <Ext/Observer/ObserverUI.h>
 /*
 void TechnoExt::CreateUniversalDeployAnimation(TechnoClass* pThis, AnimTypeClass* pAnimType)
 {
@@ -932,6 +933,7 @@ bool TechnoExt::Techno2TechnoPropertiesTransfer(TechnoClass* pOld, TechnoClass* 
 
 	// Transfer Iron Courtain effect, if applied
 	TechnoExt::SyncInvulnerability(pOld, pNew);
+	ObserverUIClass::Instance.RetargetFloatingUnitWindows(pOld, pNew);
 
 	// Transfer passengers/garrisoned units from old object to the new, if possible
 	TechnoExt::PassengersTransfer(pOld, pNew);

@@ -100,6 +100,13 @@ void ObserverUIClass::ClearData()
 	this->WasEnterPressed = false;
 	this->VerticalScrollOffset = 0;
 	this->MaxVerticalScrollOffset = 0;
+	this->MinimalInspectBtnPos = { 0, 0 };
+	this->HasCustomMinimalInspectBtnPos = false;
+	this->LeftClickHandledThisPress = false;
+	this->IsDraggingMinimalInspectBtn = false;
+	this->MinimalInspectBtnMoved = false;
+	this->MinimalInspectBtnDragStart = { 0, 0 };
+	this->MinimalInspectBtnDragOffset = { 0, 0 };
 }
 
 std::vector<std::wstring> ObserverUIClass::ParseSearchTerms(const std::wstring& query) const
@@ -980,6 +987,10 @@ void ObserverUIClass::Update()
 	}
 
 	bool isLeftPressed = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+	if (!isLeftPressed)
+	{
+		this->LeftClickHandledThisPress = false;
+	}
 	bool anyDragging = false;
 	bool showFloatingCards = (this->DisplayMode == ObserverUIDisplayMode::Full
 		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards
@@ -991,6 +1002,38 @@ void ObserverUIClass::Update()
 	int maxViewY = DSurface::ViewBounds.Y + DSurface::ViewBounds.Height;
 	if (maxViewX <= minViewX) maxViewX = DSurface::Composite ? DSurface::Composite->Width : 1024;
 	if (maxViewY <= minViewY) maxViewY = DSurface::Composite ? DSurface::Composite->Height : 768;
+
+	if (this->IsDraggingMinimalInspectBtn)
+	{
+		if (isLeftPressed && this->DisplayMode == ObserverUIDisplayMode::Minimal)
+		{
+			if (std::abs(mousePos.X - this->MinimalInspectBtnDragStart.X) > 3 ||
+				std::abs(mousePos.Y - this->MinimalInspectBtnDragStart.Y) > 3)
+			{
+				this->MinimalInspectBtnMoved = true;
+				this->HasCustomMinimalInspectBtnPos = true;
+			}
+
+			if (this->MinimalInspectBtnMoved)
+			{
+				int newX = mousePos.X - this->MinimalInspectBtnDragOffset.X;
+				int newY = mousePos.Y - this->MinimalInspectBtnDragOffset.Y;
+				this->MinimalInspectBtnPos.X = std::clamp(newX, minViewX, std::max(minViewX, maxViewX - 54));
+				this->MinimalInspectBtnPos.Y = std::clamp(newY, minViewY, std::max(minViewY, maxViewY - 40));
+			}
+			anyDragging = true;
+		}
+		else
+		{
+			bool triggerClick = !this->MinimalInspectBtnMoved && (this->DisplayMode == ObserverUIDisplayMode::Minimal);
+			this->IsDraggingMinimalInspectBtn = false;
+			this->MinimalInspectBtnMoved = false;
+			if (triggerClick)
+			{
+				this->OpenFloatingWindowForSelectedObject();
+			}
+		}
+	}
 
 	for (auto& win : this->FloatingWindows)
 	{
@@ -1215,6 +1258,12 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	if (this->DisplayMode == ObserverUIDisplayMode::Hidden)
 		return;
 
+	// Capture mouse clicks using GetKeyState across all active display modes
+	bool isLButtonDown = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
+	static bool wasLButtonDown = false;
+	bool isLeftClick = isLButtonDown && !wasLButtonDown;
+	wasLButtonDown = isLButtonDown;
+
 	if (this->DisplayMode == ObserverUIDisplayMode::Minimal)
 	{
 		Point2D mousePos { 0, 0 };
@@ -1227,17 +1276,40 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		this->HasHoveredItem = false;
 		this->HasHoveredPlayer = false;
 
+		int minViewX = DSurface::ViewBounds.X;
+		int minViewY = DSurface::ViewBounds.Y;
+		int maxViewX = DSurface::ViewBounds.X + DSurface::ViewBounds.Width;
+		int maxViewY = DSurface::ViewBounds.Y + DSurface::ViewBounds.Height;
+		if (maxViewX <= minViewX) maxViewX = DSurface::Composite ? DSurface::Composite->Width : 1024;
+		if (maxViewY <= minViewY) maxViewY = DSurface::Composite ? DSurface::Composite->Height : 768;
+
+		Point2D btnPos = this->HasCustomMinimalInspectBtnPos
+			? this->MinimalInspectBtnPos
+			: Point2D { 16, maxViewY - 58 };
+		btnPos.X = std::clamp(btnPos.X, minViewX, std::max(minViewX, maxViewX - 54));
+		btnPos.Y = std::clamp(btnPos.Y, minViewY, std::max(minViewY, maxViewY - 40));
+		if (this->HasCustomMinimalInspectBtnPos)
+		{
+			this->MinimalInspectBtnPos = btnPos;
+		}
+
+		// Inspect Button in Minimal mode is ALWAYS above floating cards
+		this->InspectBtnRect = RectangleStruct { btnPos.X, btnPos.Y, 54, 40 };
+		this->IsHoveringInspectBtn = this->IsDraggingMinimalInspectBtn
+			|| (mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+			&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height));
+
 		// 1. Render Floating Player Windows & Floating Unit Windows
 		this->RenderFloatingWindows(pSurface);
 		this->RenderFloatingUnitWindows(pSurface);
 
-		// 2. Render Inspect Button at bottom-left in Minimal mode (54x40, with 18px bottom padding to avoid covering bottom info text)
-		int screenH = DSurface::ViewBounds.Height;
-		const bool isCoveredByCardMin = this->IsMouseOverFloatingCard(mousePos);
-		this->InspectBtnRect = RectangleStruct { 16, screenH - 58, 54, 40 };
-		this->IsHoveringInspectBtn = !isCoveredByCardMin
-			&& (mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
-			&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height));
+		if (this->IsHoveringInspectBtn)
+		{
+			this->HasHoveredItem = false;
+			this->HasHoveredPlayer = false;
+		}
+
+		// 2. Render Inspect Button ON TOP of floating cards in Minimal mode
 
 		ColorStruct btnBgColor = this->IsHoveringInspectBtn ? ColorStruct { 100, 220, 255 } : ColorStruct { 0, 0, 0 };
 		pSurface->FillRectTrans(&this->InspectBtnRect, &btnBgColor, this->IsHoveringInspectBtn ? 180 : 120);
@@ -1272,6 +1344,11 @@ void ObserverUIClass::Render(DSurface* pSurface)
 			BitFont::Instance->Bounds = oldBounds;
 			BitFont::Instance->Color = oldColor;
 			BitFont::Instance->field_41 = oldField41;
+		}
+
+		if (isLeftClick)
+		{
+			this->HandleMouseClick(mousePos, false);
 		}
 
 		// 3. Render Tooltip for Inspect Button or Floating windows in Minimal mode
@@ -1325,11 +1402,7 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		mousePos.Y = WWMouseClass::Instance->GetY();
 	}
 
-	// Capture mouse clicks using GetKeyState
-	bool isLButtonDown = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
-	static bool wasLButtonDown = false;
-	bool isLeftClick = isLButtonDown && !wasLButtonDown;
-	wasLButtonDown = isLButtonDown;
+
 
 	this->HasHoveredItem = false;
 	this->HasHoveredPlayer = false;
@@ -2212,13 +2285,37 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			addLineSegments({ { textStr, color } });
 		};
 
-		BuildingClass* pBld = IsBuildingValidAndAlive(win.pTargetBuilding) ? win.pTargetBuilding : nullptr;
-		TechnoClass* pTech = IsTechnoValidAndAlive(win.pTargetTechno) ? win.pTargetTechno : nullptr;
+		if (win.IsDestroyed)
+		{
+			win.pTargetBuilding = nullptr;
+			win.pTargetTechno = nullptr;
+		}
+
+		BuildingClass* pBld = (!win.IsDestroyed && win.pTargetBuilding && IsBuildingValidAndAlive(win.pTargetBuilding)
+			&& (win.TargetUniqueID == 0 || win.pTargetBuilding->UniqueID == win.TargetUniqueID))
+			? win.pTargetBuilding
+			: nullptr;
+		TechnoClass* pTech = (!win.IsDestroyed && win.pTargetTechno && IsTechnoValidAndAlive(win.pTargetTechno)
+			&& (win.TargetUniqueID == 0 || win.pTargetTechno->UniqueID == win.TargetUniqueID))
+			? win.pTargetTechno
+			: nullptr;
 
 		if (!pBld && pTech && pTech->WhatAmI() == AbstractType::Building)
 		{
 			pBld = static_cast<BuildingClass*>(pTech);
 			pTech = nullptr;
+		}
+
+		if (pBld && !win.pTargetBuildingType)
+		{
+			win.pTargetBuildingType = pBld->Type;
+		}
+
+		if (!win.IsSuperweapon && !pTech && !pBld && (win.pTargetTechno || win.pTargetBuilding || win.TargetUniqueID != 0))
+		{
+			win.IsDestroyed = true;
+			win.pTargetTechno = nullptr;
+			win.pTargetBuilding = nullptr;
 		}
 
 		TechnoTypeClass* pTargetType = win.pType;
@@ -2242,7 +2339,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			pFact = nullptr;
 		}
 
-		if (!pFact && win.IsProductionItem && pTargetType && pOwner)
+		if (!pFact && win.IsProductionItem && !win.IsDestroyed && win.TargetUniqueID == 0 && pTargetType && pOwner)
 		{
 			AbstractType const abs = pTargetType->WhatAmI();
 			FactoryClass* pCandidateFact = nullptr;
@@ -2295,7 +2392,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			}
 		}
 
-		if (!pBld && win.IsProductionItem && pFact)
+		if (!pBld && win.IsProductionItem && !win.IsDestroyed && win.TargetUniqueID == 0 && pFact)
 		{
 			for (auto pBldObj : BuildingClass::Array)
 			{
@@ -2307,7 +2404,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			}
 		}
 
-		if (!pBld && win.IsProductionItem && pOwner && pTargetType)
+		if (!pBld && win.IsProductionItem && !win.IsDestroyed && win.TargetUniqueID == 0 && pOwner && pTargetType)
 		{
 			AbstractType abs = pTargetType->WhatAmI();
 
@@ -2512,9 +2609,11 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 				win.LastMission = L"";
 				win.LastVeterancy = pBld->Veterancy.Veterancy;
 			}
-			else if (win.pTargetTechno || win.pTargetBuilding)
+			else if (win.IsDestroyed || win.pTargetTechno || win.pTargetBuilding || win.TargetUniqueID != 0)
 			{
 				win.IsDestroyed = true;
+				win.pTargetTechno = nullptr;
+				win.pTargetBuilding = nullptr;
 			}
 
 			// 1. Factory Building Line Determination
@@ -2522,6 +2621,10 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			if (pBld && pBld->Type)
 			{
 				pFactoryBldType = pBld->Type;
+			}
+			else if (win.pTargetBuildingType)
+			{
+				pFactoryBldType = win.pTargetBuildingType;
 			}
 			else if (pFact && pFact->Object && pFact->Object->GetTechnoType())
 			{
@@ -2650,7 +2753,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 					if (pExt && pExt->ShieldType)
 					{
 						maxShield = pExt->ShieldType->Strength.Get();
-						currentShield = maxShield;
+						currentShield = win.IsDestroyed ? 0 : maxShield;
 					}
 				}
 			}
@@ -2819,7 +2922,7 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 			if (!isProductionView && pBaseType && pBaseType->Ammo > 0)
 			{
 				int maxAmmo = pBaseType->Ammo;
-				int curAmmo = maxAmmo;
+				int curAmmo = win.IsDestroyed ? 0 : maxAmmo;
 				if (pTech)
 				{
 					curAmmo = pTech->Ammo;
@@ -3666,10 +3769,14 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 					pLastTech = pBldExt->LastProducedTechno;
 					pLastType = pBldExt->LastProducedType;
+					win.pLastProducedTechno = pLastTech;
+					win.pLastProducedType = pLastType;
 				}
-
-				win.pLastProducedTechno = pLastTech;
-				win.pLastProducedType = pLastType;
+				else
+				{
+					pLastTech = win.pLastProducedTechno;
+					pLastType = win.pLastProducedType;
+				}
 
 				lastProducedLineIndex = static_cast<int>(lines.size());
 
@@ -5778,11 +5885,32 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 	if (this->DisplayMode == ObserverUIDisplayMode::Hidden && !this->HasFloatingWindows())
 		return false;
 
+	if (!isRightClick)
+	{
+		if (this->LeftClickHandledThisPress)
+			return true;
+		this->LeftClickHandledThisPress = true;
+	}
+
 	const bool showFloatingCards = (this->DisplayMode == ObserverUIDisplayMode::Full
 		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards
 		|| this->DisplayMode == ObserverUIDisplayMode::Minimal);
 	const bool showProduction = (this->DisplayMode == ObserverUIDisplayMode::Full
 		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards);
+
+	// 0. In Minimal (cards-only) mode, the Inspect Selected Button [-> [] <-] is rendered ON TOP of all floating cards
+	// and can be clicked (to add a card) or dragged (to reposition it for the match).
+	if (this->DisplayMode == ObserverUIDisplayMode::Minimal && !isRightClick
+		&& this->InspectBtnRect.Width > 0
+		&& mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+		&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height))
+	{
+		this->IsDraggingMinimalInspectBtn = true;
+		this->MinimalInspectBtnMoved = false;
+		this->MinimalInspectBtnDragStart = mousePos;
+		this->MinimalInspectBtnDragOffset = Point2D { mousePos.X - this->InspectBtnRect.X, mousePos.Y - this->InspectBtnRect.Y };
+		return true;
+	}
 
 	// 1. Handle clicks on Floating Unit Status Windows (in reverse order, top-most first)
 	for (int i = showFloatingCards ? static_cast<int>(this->FloatingUnitWindows.size()) - 1 : -1; i >= 0; --i)
@@ -5808,19 +5936,30 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 					ObjectClass::CurrentObjects.GetItem(0)->Deselect();
 				}
 
-				if (win.pTargetTechno && IsTechnoValidAndAlive(win.pTargetTechno) && TacticalClass::Instance)
+				if (!win.IsDestroyed && win.pTargetTechno && IsTechnoValidAndAlive(win.pTargetTechno)
+					&& (win.TargetUniqueID == 0 || win.pTargetTechno->UniqueID == win.TargetUniqueID) && TacticalClass::Instance)
 				{
 					CoordStruct coords = win.pTargetTechno->GetCenterCoords();
 					TacticalClass::Instance->SetTacticalPosition(&coords);
 					win.pTargetTechno->Select();
 					MapClass::Instance.Redraws = TRUE;
 				}
-				else if (win.pTargetBuilding && IsBuildingValidAndAlive(win.pTargetBuilding) && TacticalClass::Instance)
+				else if (!win.IsDestroyed && win.pTargetBuilding && IsBuildingValidAndAlive(win.pTargetBuilding)
+					&& (win.TargetUniqueID == 0 || win.pTargetBuilding->UniqueID == win.TargetUniqueID) && TacticalClass::Instance)
 				{
 					CoordStruct coords = win.pTargetBuilding->GetCenterCoords();
 					TacticalClass::Instance->SetTacticalPosition(&coords);
 					win.pTargetBuilding->Select();
 					MapClass::Instance.Redraws = TRUE;
+				}
+				else if (win.IsDestroyed)
+				{
+					if (win.LastCoords != CellStruct::Empty && TacticalClass::Instance)
+					{
+						CoordStruct coords = CellClass::Cell2Coord(win.LastCoords);
+						TacticalClass::Instance->SetTacticalPosition(&coords);
+						MapClass::Instance.Redraws = TRUE;
+					}
 				}
 				else if (win.pType && win.pOwner && TacticalClass::Instance)
 				{
@@ -5907,13 +6046,13 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 				{
 					auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [pTargetTech, pTargetBld, pTargetType, &win](const ObserverFloatingUnitWindow& w)
 					{
-						if (w.IsProductionItem)
+						if (w.IsProductionItem || w.IsDestroyed)
 							return false;
 
-						if (pTargetBld && w.pTargetBuilding == pTargetBld)
+						if (pTargetBld && w.pTargetBuilding == pTargetBld && (w.TargetUniqueID == 0 || w.TargetUniqueID == pTargetBld->UniqueID))
 							return true;
 
-						if (pTargetTech && w.pTargetTechno == pTargetTech)
+						if (pTargetTech && w.pTargetTechno == pTargetTech && (w.TargetUniqueID == 0 || w.TargetUniqueID == pTargetTech->UniqueID))
 							return true;
 
 						if (!pTargetTech && !pTargetBld && w.pType == pTargetType && w.pOwner == win.pOwner)
@@ -5937,8 +6076,15 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 						newWin.pOwner = win.pOwner;
 						newWin.pTargetTechno = pTargetTech;
 						newWin.pTargetBuilding = pTargetBld;
+						newWin.pTargetBuildingType = pTargetBld ? pTargetBld->Type : nullptr;
+						newWin.TargetUniqueID = pTargetTech ? pTargetTech->UniqueID : (pTargetBld ? pTargetBld->UniqueID : 0);
 						newWin.IsProductionItem = false;
 						newWin.InstanceNumber = 1;
+						if (!pTargetTech && !pTargetBld)
+						{
+							newWin.IsDestroyed = true;
+							newWin.LastMaxHP = pTargetType ? pTargetType->Strength : 0;
+						}
 
 						int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
 						int cardW = 320;
@@ -6165,15 +6311,18 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 
 		// Check if floating window ALREADY exists for this exact specific instance or factory!
 		auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [&item, pTargetTech, pTargetBld, isFromProductionPanel](const ObserverFloatingUnitWindow& w) {
+			if (w.IsDestroyed) return false;
 			if (w.IsProductionItem != isFromProductionPanel) return false;
 			if (isFromProductionPanel)
 			{
+				if (pTargetBld && w.pTargetBuilding)
+					return w.pTargetBuilding == pTargetBld && (w.TargetUniqueID == 0 || w.TargetUniqueID == pTargetBld->UniqueID);
 				return w.pType == item.pType && w.pOwner == item.pOwner;
 			}
 			else
 			{
-				if (pTargetBld && w.pTargetBuilding == pTargetBld) return true;
-				if (pTargetTech && w.pTargetTechno == pTargetTech) return true;
+				if (pTargetBld && w.pTargetBuilding == pTargetBld && (w.TargetUniqueID == 0 || w.TargetUniqueID == pTargetBld->UniqueID)) return true;
+				if (pTargetTech && w.pTargetTechno == pTargetTech && (w.TargetUniqueID == 0 || w.TargetUniqueID == pTargetTech->UniqueID)) return true;
 				return false;
 			}
 		});
@@ -6193,6 +6342,8 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 			newWin.pOwner = item.pOwner;
 			newWin.pTargetTechno = pTargetTech;
 			newWin.pTargetBuilding = pTargetBld;
+			newWin.pTargetBuildingType = pTargetBld ? pTargetBld->Type : nullptr;
+			newWin.TargetUniqueID = pTargetTech ? pTargetTech->UniqueID : (pTargetBld ? pTargetBld->UniqueID : 0);
 			newWin.IsProductionItem = isFromProductionPanel;
 			newWin.InstanceNumber = instanceNum;
 			int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
@@ -6497,7 +6648,7 @@ bool ObserverUIClass::IsMouseHoveringUI() const
 		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards
 		|| this->DisplayMode == ObserverUIDisplayMode::Minimal);
 
-	if (this->IsMouseOverFloatingCard(mousePos))
+	if (this->IsDraggingMinimalInspectBtn || this->IsMouseOverFloatingCard(mousePos))
 	{
 		return true;
 	}
@@ -6603,16 +6754,65 @@ void ObserverUIClass::RetargetFloatingUnitWindows(TechnoClass* pFrom, TechnoClas
 
 	for (auto& win : this->FloatingUnitWindows)
 	{
-		if (win.IsProductionItem || win.IsSuperweapon)
+		if (win.IsProductionItem || win.IsSuperweapon || win.IsDestroyed)
 			continue;
 
 		if (win.pTargetTechno != pFrom && !(pFromBuilding && win.pTargetBuilding == pFromBuilding))
 			continue;
 
+		if (win.TargetUniqueID != 0 && win.TargetUniqueID != pFrom->UniqueID)
+			continue;
+
 		win.pTargetBuilding = pToBuilding;
+		win.pTargetBuildingType = pToBuilding ? pToBuilding->Type : nullptr;
 		win.pTargetTechno = pToBuilding ? nullptr : pTo;
+		win.TargetUniqueID = pTo->UniqueID;
 		win.pType = pTo->GetTechnoType();
 		win.IsDestroyed = false;
+	}
+}
+
+void ObserverUIClass::OnObjectRemoved(AbstractClass* pTarget, bool removed)
+{
+	if (!removed || !pTarget)
+		return;
+
+	for (auto& win : this->FloatingUnitWindows)
+	{
+		if (win.pLastProducedTechno == pTarget)
+		{
+			win.pLastProducedTechno = nullptr;
+		}
+
+		if (win.pTargetTechno == pTarget || win.pTargetBuilding == pTarget)
+		{
+			if (!win.IsSuperweapon)
+			{
+				if (win.pTargetTechno == pTarget)
+				{
+					if (win.LastMaxHP <= 0 && win.pType)
+						win.LastMaxHP = win.pType->Strength;
+					if (win.LastCoords == CellStruct::Empty)
+						win.LastCoords = CellClass::Coord2Cell(win.pTargetTechno->GetCoords());
+					win.LastVeterancy = win.pTargetTechno->Veterancy.Veterancy;
+				}
+				else if (win.pTargetBuilding == pTarget)
+				{
+					if (!win.pTargetBuildingType)
+						win.pTargetBuildingType = win.pTargetBuilding->Type;
+					if (win.LastMaxHP <= 0 && win.pTargetBuildingType)
+						win.LastMaxHP = win.pTargetBuildingType->Strength;
+					if (win.LastCoords == CellStruct::Empty)
+						win.LastCoords = CellClass::Coord2Cell(win.pTargetBuilding->GetCoords());
+					win.LastVeterancy = win.pTargetBuilding->Veterancy.Veterancy;
+				}
+
+				win.IsDestroyed = true;
+			}
+
+			win.pTargetTechno = nullptr;
+			win.pTargetBuilding = nullptr;
+		}
 	}
 }
 
@@ -6703,9 +6903,9 @@ bool ObserverUIClass::OpenFloatingWindowForSelectedObject()
 
 		// Check if floating window ALREADY exists for this exact instance
 		auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [pValidTech, pValidBld](const ObserverFloatingUnitWindow& w) {
-			if (w.IsProductionItem) return false;
-			if (pValidBld && w.pTargetBuilding == pValidBld) return true;
-			if (pValidTech && w.pTargetTechno == pValidTech) return true;
+			if (w.IsProductionItem || w.IsDestroyed) return false;
+			if (pValidBld && w.pTargetBuilding == pValidBld && (w.TargetUniqueID == 0 || w.TargetUniqueID == pValidBld->UniqueID)) return true;
+			if (pValidTech && w.pTargetTechno == pValidTech && (w.TargetUniqueID == 0 || w.TargetUniqueID == pValidTech->UniqueID)) return true;
 			return false;
 		});
 
@@ -6724,6 +6924,8 @@ bool ObserverUIClass::OpenFloatingWindowForSelectedObject()
 			newWin.pOwner = pValidTech ? pValidTech->Owner : (pValidBld ? pValidBld->Owner : nullptr);
 			newWin.pTargetTechno = pValidTech;
 			newWin.pTargetBuilding = pValidBld;
+			newWin.pTargetBuildingType = pValidBld ? pValidBld->Type : nullptr;
+			newWin.TargetUniqueID = pValidTech ? pValidTech->UniqueID : (pValidBld ? pValidBld->UniqueID : 0);
 			newWin.IsProductionItem = false;
 			newWin.InstanceNumber = 1;
 

@@ -121,7 +121,9 @@ struct ObserverFloatingUnitWindow
 	bool IsSuperweapon { false };
 	HouseClass* pOwner { nullptr };
 	BuildingClass* pTargetBuilding { nullptr };
+	BuildingTypeClass* pTargetBuildingType { nullptr };
 	TechnoClass* pTargetTechno { nullptr };
+	DWORD TargetUniqueID { 0 };
 	bool IsProductionItem { false };
 	int InstanceNumber { 1 };
 	Point2D Position { 200, 200 };
@@ -167,6 +169,7 @@ public:
 	void ClearFloatingWindows();
 	// Moves the open object cards from an object to the one replacing it (unit deploying into a building and back).
 	void RetargetFloatingUnitWindows(TechnoClass* pFrom, TechnoClass* pTo);
+	void OnObjectRemoved(AbstractClass* pTarget, bool removed);
 	void ToggleDisplayMode();
 	static bool IsToggleObserverUIHotkeyBound();
 	static bool IsShowObjectCardHotkeyBound();
@@ -195,6 +198,15 @@ private:
 	RectangleStruct ClearBtnRect { 0, 0, 0, 0 };
 	bool IsHoveringInspectBtn { false };
 	bool IsHoveringClearBtn { false };
+
+	// Draggable Inspect button state in Minimal (cards-only) view, preserved for the match
+	Point2D MinimalInspectBtnPos { 0, 0 };
+	bool HasCustomMinimalInspectBtnPos { false };
+	bool LeftClickHandledThisPress { false };
+	bool IsDraggingMinimalInspectBtn { false };
+	bool MinimalInspectBtnMoved { false };
+	Point2D MinimalInspectBtnDragStart { 0, 0 };
+	Point2D MinimalInspectBtnDragOffset { 0, 0 };
 
 	// Vertical player rows scrolling state
 	int VerticalScrollOffset { 0 };

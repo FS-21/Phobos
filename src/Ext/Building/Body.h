@@ -3,7 +3,7 @@
 #include <Ext/BuildingType/Body.h>
 #include <BuildingClass.h>
 
-class BuildingExt final : public TechnoExt, public Detach::Listener<BuildingClass>
+class BuildingExt final : public TechnoExt, public Detach::Listener<TechnoClass>
 {
 public:
 	using base_type = BuildingClass;
@@ -115,7 +115,7 @@ public:
 
 	// virtual void LoadFromINIFile(CCINIClass* pINI) override;
 
-	virtual void OnDetach(BuildingClass* pTarget, bool removed) override
+	virtual void OnDetach(TechnoClass* pTarget, bool removed) override
 	{
 		if (removed)
 		{
