@@ -28,10 +28,10 @@ void ShowObjectCardCommandClass::Execute(WWKey eInput) const
 	if (!Phobos::Config::DevelopmentCommands && !ObserverUIClass::IsActive())
 		return;
 
-	// If display mode is Hidden when adding a card, automatically switch to Minimal mode so the card renders
+	// If display mode is Hidden when adding a card, automatically switch directly to Minimal mode (cards only)
 	if (ObserverUIClass::Instance.GetDisplayMode() == ObserverUIDisplayMode::Hidden)
 	{
-		ObserverUIClass::Instance.ToggleDisplayMode(); // Hidden -> Full or Minimal
+		ObserverUIClass::Instance.SetDisplayMode(ObserverUIDisplayMode::Minimal);
 	}
 
 	ObserverUIClass::Instance.OpenFloatingWindowForSelectedObject();
