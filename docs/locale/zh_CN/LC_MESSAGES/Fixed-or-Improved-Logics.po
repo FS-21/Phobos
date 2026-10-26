@@ -1767,6 +1767,15 @@ msgid ""
 "Fixed the bug that crashing or sinking unit can be recruit into taskforce team."
 msgstr "修复了坠落或沉没中的单位可以被招募进特遣小队的 Bug"
 
+msgid ""
+"Fixed amphibious infantry without `MovementZone=AmphibiousDestroyer` (e.g. "
+"`MovementZone=Amphibious` or `SpeedType=Amphibious`) or playing "
+"`Guard`/`Down`/`Up` sequences in water using land animations instead of "
+"water sequences."
+msgstr ""
+"修复了未设置 `MovementZone=AmphibiousDestroyer`（例如 `MovementZone=Amphibious` 或 "
+"`SpeedType=Amphibious`）的两栖步兵或在水中播放 `Guard`／`Down`／`Up` 序列时使用陆地动画而非水中序列的问题。"
+
 msgid "Fixes / interactions with other extensions"
 msgstr "修复或与其他扩展的交互"
 

@@ -2081,6 +2081,7 @@ HideShakeEffects=false           ; boolean
 - Fixed the bug that crashing or sinking unit can be recruit into taskforce team (by NetsuNegi)
 - Fixed briefing out of bound due to fixed window size (by FrozenFog, based on knowledge of MagicShiba)
 - Units in Tank Bunker with deploy functions no longer perform them when deployed out of Tank Bunker (by Starkku)
+- Fixed amphibious infantry without `MovementZone=AmphibiousDestroyer` (e.g. `MovementZone=Amphibious` or `SpeedType=Amphibious`) or playing `Guard`/`Down`/`Up` sequences in water using land animations instead of water sequences (by FS-21)
 
 #### Phobos fixes:
 - Fixed a game crash when parsing string list with null entry (by Ollerus)

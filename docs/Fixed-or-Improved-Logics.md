@@ -341,6 +341,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed a crash or memory corruption when a wave (e.g. `IsSonic=true`) was drawn while its firer was at the same horizontal position as its target.
 - Fixed the bug that crashing or sinking unit can be recruit into taskforce team.
 - Units in Tank Bunker with deploy functions no longer perform them when deployed out of Tank Bunker.
+- Fixed amphibious infantry without `MovementZone=AmphibiousDestroyer` (e.g. `MovementZone=Amphibious` or `SpeedType=Amphibious`) or playing `Guard`/`Down`/`Up` sequences in water using land animations instead of water sequences.
 
 ## Fixes / interactions with other extensions
 
