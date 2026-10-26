@@ -12,6 +12,7 @@
 #include <Utilities/AresHelper.h>
 #include <Utilities/Helpers.Alex.h>
 #include <Interop/TechnoExt.h>
+#include <Ext/Observer/ObserverUI.h>
 
 TechnoExt::~TechnoExt()
 {
@@ -1444,6 +1445,8 @@ bool TechnoExt::SaveGlobals(PhobosStreamWriter& Stm)
 DEFINE_HOOK(0x6F4500, TechnoClass_DTOR, 0x5)
 {
 	GET(TechnoClass*, pItem, ECX);
+
+	ObserverUIClass::Instance.OnObjectRemoved(pItem, true);
 
 	if (pItem->AbstractFlags & AbstractFlags::Foot)
 		pItem->Owner->RecheckTechTree = true; // for SW.AuxTechons and SW.NegTechnos

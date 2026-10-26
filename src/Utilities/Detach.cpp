@@ -57,6 +57,7 @@
 #include <WarheadTypeClass.h>
 #include <WaveClass.h>
 #include <WeaponTypeClass.h>
+#include <Ext/Observer/ObserverUI.h>
 
 namespace Detach
 {
@@ -103,6 +104,11 @@ namespace Detach
 
 	void NotifyAbstract(AbstractClass* const pTarget, const bool removed)
 	{
+		if (removed)
+		{
+			ObserverUIClass::Instance.OnObjectRemoved(pTarget, removed);
+		}
+
 		switch (pTarget->WhatAmI())
 		{
 		case AbstractType::Unit: NotifyChain<UnitClass>(pTarget, removed); break;
