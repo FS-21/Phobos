@@ -176,7 +176,8 @@ bool ObserverUIClass::MatchesSearchFilter(AbstractTypeClass* pType) const
 			return false;
 	}
 
-	if (this->SearchFilterText.empty())
+	const bool showObjectsAndFilter = (this->DisplayMode == ObserverUIDisplayMode::Full || this->DisplayMode == ObserverUIDisplayMode::NoCardsOrProduction);
+	if (!showObjectsAndFilter || this->SearchFilterText.empty())
 		return true;
 
 	std::vector<std::wstring> terms = this->ParseSearchTerms(this->SearchFilterText);
@@ -704,16 +705,17 @@ void ObserverUIClass::CollectPlayerData()
 			}
 		};
 
-		// Collect from BuildingClass::Array
-		if (this->ActiveFilterTab == ObserverFilterCategory::Defenses
-			|| this->ActiveFilterTab == ObserverFilterCategory::Structures
-			|| this->ActiveFilterTab == ObserverFilterCategory::AllStructures
-			|| this->ActiveFilterTab == ObserverFilterCategory::Vehicles
-			|| this->ActiveFilterTab == ObserverFilterCategory::Naval
-			|| this->ActiveFilterTab == ObserverFilterCategory::AllUnits
-			|| this->ActiveFilterTab == ObserverFilterCategory::Everything)
+		// Collect from pHouse->Buildings
+		if (this->DisplayMode != ObserverUIDisplayMode::ProductionAndCards
+			&& (this->ActiveFilterTab == ObserverFilterCategory::Defenses
+				|| this->ActiveFilterTab == ObserverFilterCategory::Structures
+				|| this->ActiveFilterTab == ObserverFilterCategory::AllStructures
+				|| this->ActiveFilterTab == ObserverFilterCategory::Vehicles
+				|| this->ActiveFilterTab == ObserverFilterCategory::Naval
+				|| this->ActiveFilterTab == ObserverFilterCategory::AllUnits
+				|| this->ActiveFilterTab == ObserverFilterCategory::Everything))
 		{
-			for (auto const pBld : BuildingClass::Array)
+			for (auto const pBld : pHouse->Buildings)
 			{
 				if (pBld && pBld->Owner == pHouse)
 				{
@@ -788,9 +790,9 @@ void ObserverUIClass::CollectPlayerData()
 				item.pOwner = pHouse;
 				item.Count = 1;
 
-				for (int b = 0; b < BuildingClass::Array.Count; ++b)
+				for (int b = 0; b < pHouse->Buildings.Count; ++b)
 				{
-					auto pBldObj = BuildingClass::Array.GetItem(b);
+					auto pBldObj = pHouse->Buildings.GetItem(b);
 					if (pBldObj && pBldObj->Owner == pHouse && pBldObj->IsAlive && !pBldObj->InLimbo && pBldObj->Type)
 					{
 						bool grantsSW = false;
@@ -945,7 +947,10 @@ void ObserverUIClass::Update()
 		{
 			// If Show Object Card hotkey is unassigned, ENTER opens card for hovered/selected object
 			bool cardOpened = false;
-			if (!IsShowObjectCardHotkeyBound())
+			bool canOpenCard = (this->DisplayMode == ObserverUIDisplayMode::Full
+				|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards
+				|| this->DisplayMode == ObserverUIDisplayMode::Minimal);
+			if (canOpenCard && !IsShowObjectCardHotkeyBound())
 			{
 				cardOpened = this->OpenFloatingWindowForSelectedObject();
 			}
@@ -976,20 +981,28 @@ void ObserverUIClass::Update()
 
 	bool isLeftPressed = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
 	bool anyDragging = false;
+	bool showFloatingCards = (this->DisplayMode == ObserverUIDisplayMode::Full
+		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards
+		|| this->DisplayMode == ObserverUIDisplayMode::Minimal);
+
+	int minViewX = DSurface::ViewBounds.X;
+	int minViewY = DSurface::ViewBounds.Y;
+	int maxViewX = DSurface::ViewBounds.X + DSurface::ViewBounds.Width;
+	int maxViewY = DSurface::ViewBounds.Y + DSurface::ViewBounds.Height;
+	if (maxViewX <= minViewX) maxViewX = DSurface::Composite ? DSurface::Composite->Width : 1024;
+	if (maxViewY <= minViewY) maxViewY = DSurface::Composite ? DSurface::Composite->Height : 768;
 
 	for (auto& win : this->FloatingWindows)
 	{
 		if (win.IsDragging)
 		{
-			if (isLeftPressed)
+			if (isLeftPressed && showFloatingCards)
 			{
 				win.Position.X = mousePos.X - win.DragOffset.X;
 				win.Position.Y = mousePos.Y - win.DragOffset.Y;
 
-				int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
-				int screenH = DSurface::Composite ? DSurface::Composite->Height : 768;
-				win.Position.X = std::max(0, std::min(win.Position.X, std::max(0, screenW - win.WindowRect.Width)));
-				win.Position.Y = std::max(0, std::min(win.Position.Y, std::max(0, screenH - win.WindowRect.Height)));
+				win.Position.X = std::clamp(win.Position.X, minViewX, std::max(minViewX, maxViewX - win.WindowRect.Width));
+				win.Position.Y = std::clamp(win.Position.Y, minViewY, std::max(minViewY, maxViewY - win.WindowRect.Height));
 				anyDragging = true;
 			}
 			else
@@ -1003,15 +1016,13 @@ void ObserverUIClass::Update()
 	{
 		if (win.IsDragging)
 		{
-			if (isLeftPressed)
+			if (isLeftPressed && showFloatingCards)
 			{
 				win.Position.X = mousePos.X - win.DragOffset.X;
 				win.Position.Y = mousePos.Y - win.DragOffset.Y;
 
-				int screenW = DSurface::Composite ? DSurface::Composite->Width : 1024;
-				int screenH = DSurface::Composite ? DSurface::Composite->Height : 768;
-				win.Position.X = std::max(0, std::min(win.Position.X, std::max(0, screenW - win.WindowRect.Width)));
-				win.Position.Y = std::max(0, std::min(win.Position.Y, std::max(0, screenH - win.WindowRect.Height)));
+				win.Position.X = std::clamp(win.Position.X, minViewX, std::max(minViewX, maxViewX - win.WindowRect.Width));
+				win.Position.Y = std::clamp(win.Position.Y, minViewY, std::max(minViewY, maxViewY - win.WindowRect.Height));
 				anyDragging = true;
 			}
 			else
@@ -1030,78 +1041,43 @@ void ObserverUIClass::Update()
 	static int heldVK = -1;
 	static unsigned long long firstPressTimeMs = 0;
 	static unsigned long long lastRepeatTimeMs = 0;
+	static bool wasKeyDown[256] = {};
 
 	unsigned long long nowMs = GetTickCount64();
 
 	if (this->IsSearchInputFocused)
 	{
 		bool textChanged = false;
-
-		int currentPressedVK = -1;
-		wchar_t charNormal = L'\0';
-		wchar_t charShift = L'\0';
 		bool isShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 
-		if ((GetAsyncKeyState(VK_BACK) & 0x8000) != 0)
+		auto getKeyChar = [](int vk, bool shift) -> wchar_t
 		{
-			currentPressedVK = VK_BACK;
-		}
-		else if ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0)
-		{
-			currentPressedVK = VK_SPACE;
-			charNormal = L' ';
-			charShift = L' ';
-		}
-		else if ((GetAsyncKeyState(0xDE) & 0x8000) != 0) // Quotes / apostrophe
-		{
-			currentPressedVK = 0xDE;
-			charNormal = L'\'';
-			charShift = L'"';
-		}
-		else if ((GetAsyncKeyState(0xBD) & 0x8000) != 0) // Hyphen / minus
-		{
-			currentPressedVK = 0xBD;
-			charNormal = L'-';
-			charShift = L'_';
-		}
-		else if ((GetAsyncKeyState(0xBE) & 0x8000) != 0) // Period / dot
-		{
-			currentPressedVK = 0xBE;
-			charNormal = L'.';
-			charShift = L'>';
-		}
-		else if ((GetAsyncKeyState(0xBC) & 0x8000) != 0) // Comma
-		{
-			currentPressedVK = 0xBC;
-			charNormal = L',';
-			charShift = L'<';
-		}
-		else
-		{
-			for (int vk = 'A'; vk <= 'Z'; ++vk)
-			{
-				if ((GetAsyncKeyState(vk) & 0x8000) != 0)
-				{
-					currentPressedVK = vk;
-					charNormal = static_cast<wchar_t>('a' + (vk - 'A'));
-					charShift = static_cast<wchar_t>('A' + (vk - 'A'));
-					break;
-				}
-			}
+			if (vk == VK_SPACE) return L' ';
+			if (vk == 0xDE) return shift ? L'"' : L'\'';
+			if (vk == 0xBD) return shift ? L'_' : L'-';
+			if (vk == 0xBE) return shift ? L'>' : L'.';
+			if (vk == 0xBC) return shift ? L'<' : L',';
+			if (vk >= 'A' && vk <= 'Z') return static_cast<wchar_t>((shift ? 'A' : 'a') + (vk - 'A'));
+			if (vk >= '0' && vk <= '9') return static_cast<wchar_t>(vk);
+			return L'\0';
+		};
 
-			if (currentPressedVK == -1)
+		static const int watchedVKs[] = {
+			VK_BACK, VK_SPACE, 0xDE, 0xBD, 0xBE, 0xBC,
+			'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+			'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+			'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+		};
+
+		int newlyPressedVK = -1;
+		for (int vk : watchedVKs)
+		{
+			bool isDown = (GetAsyncKeyState(vk) & 0x8000) != 0;
+			if (isDown && !wasKeyDown[vk] && newlyPressedVK == -1)
 			{
-				for (int vk = '0'; vk <= '9'; ++vk)
-				{
-					if ((GetAsyncKeyState(vk) & 0x8000) != 0)
-					{
-						currentPressedVK = vk;
-						charNormal = static_cast<wchar_t>(vk);
-						charShift = static_cast<wchar_t>(vk);
-						break;
-					}
-				}
+				newlyPressedVK = vk;
 			}
+			wasKeyDown[vk] = isDown;
 		}
 
 		// Escape or Enter -> Unfocus search box
@@ -1111,17 +1087,40 @@ void ObserverUIClass::Update()
 			heldVK = -1;
 			firstPressTimeMs = 0;
 			lastRepeatTimeMs = 0;
+			std::memset(wasKeyDown, 0, sizeof(wasKeyDown));
 		}
-		else if (currentPressedVK != -1)
+		else if (newlyPressedVK != -1)
 		{
-			if (currentPressedVK != heldVK)
+			heldVK = newlyPressedVK;
+			firstPressTimeMs = nowMs;
+			lastRepeatTimeMs = nowMs;
+
+			if (newlyPressedVK == VK_BACK)
 			{
-				// First press event: trigger immediately!
-				heldVK = currentPressedVK;
-				firstPressTimeMs = nowMs;
+				if (!this->SearchFilterText.empty())
+				{
+					this->SearchFilterText.pop_back();
+					textChanged = true;
+				}
+			}
+			else
+			{
+				wchar_t ch = getKeyChar(newlyPressedVK, isShift);
+				if (ch != L'\0')
+				{
+					this->SearchFilterText += ch;
+					textChanged = true;
+				}
+			}
+		}
+		else if (heldVK != -1 && wasKeyDown[heldVK])
+		{
+			// Key is held down: initial delay 450 ms, repeat rate 60 ms
+			if ((nowMs - firstPressTimeMs) >= 450 && (nowMs - lastRepeatTimeMs) >= 60)
+			{
 				lastRepeatTimeMs = nowMs;
 
-				if (currentPressedVK == VK_BACK)
+				if (heldVK == VK_BACK)
 				{
 					if (!this->SearchFilterText.empty())
 					{
@@ -1129,31 +1128,11 @@ void ObserverUIClass::Update()
 						textChanged = true;
 					}
 				}
-				else if (charNormal != L'\0')
+				else
 				{
-					wchar_t ch = isShift ? charShift : charNormal;
-					this->SearchFilterText += ch;
-					textChanged = true;
-				}
-			}
-			else
-			{
-				// Key is held down: initial delay 450 ms, repeat rate 60 ms
-				if ((nowMs - firstPressTimeMs) >= 450 && (nowMs - lastRepeatTimeMs) >= 60)
-				{
-					lastRepeatTimeMs = nowMs;
-
-					if (currentPressedVK == VK_BACK)
+					wchar_t ch = getKeyChar(heldVK, isShift);
+					if (ch != L'\0')
 					{
-						if (!this->SearchFilterText.empty())
-						{
-							this->SearchFilterText.pop_back();
-							textChanged = true;
-						}
-					}
-					else if (charNormal != L'\0')
-					{
-						wchar_t ch = isShift ? charShift : charNormal;
 						this->SearchFilterText += ch;
 						textChanged = true;
 					}
@@ -1177,6 +1156,7 @@ void ObserverUIClass::Update()
 		heldVK = -1;
 		firstPressTimeMs = 0;
 		lastRepeatTimeMs = 0;
+		std::memset(wasKeyDown, 0, sizeof(wasKeyDown));
 	}
 
 	int currentFrame = Unsorted::CurrentFrame;
@@ -1232,8 +1212,6 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	if (!isActive || !pSurface)
 		return;
 
-	this->Update();
-
 	if (this->DisplayMode == ObserverUIDisplayMode::Hidden)
 		return;
 
@@ -1255,8 +1233,10 @@ void ObserverUIClass::Render(DSurface* pSurface)
 
 		// 2. Render Inspect Button at bottom-left in Minimal mode (54x40, with 18px bottom padding to avoid covering bottom info text)
 		int screenH = DSurface::ViewBounds.Height;
+		const bool isCoveredByCardMin = this->IsMouseOverFloatingCard(mousePos);
 		this->InspectBtnRect = RectangleStruct { 16, screenH - 58, 54, 40 };
-		this->IsHoveringInspectBtn = (mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+		this->IsHoveringInspectBtn = !isCoveredByCardMin
+			&& (mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
 			&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height));
 
 		ColorStruct btnBgColor = this->IsHoveringInspectBtn ? ColorStruct { 100, 220, 255 } : ColorStruct { 0, 0, 0 };
@@ -1354,11 +1334,22 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	this->HasHoveredItem = false;
 	this->HasHoveredPlayer = false;
 
+	const bool showObjectsAndFilter = (this->DisplayMode == ObserverUIDisplayMode::Full || this->DisplayMode == ObserverUIDisplayMode::NoCardsOrProduction);
+	const bool showProduction = (this->DisplayMode == ObserverUIDisplayMode::Full || this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards);
+	const bool showFloatingCards = (this->DisplayMode == ObserverUIDisplayMode::Full
+		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards
+		|| this->DisplayMode == ObserverUIDisplayMode::Minimal);
+	const bool alignProductionLeft = (this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards);
+	const bool isMouseCoveredByCard = showFloatingCards && this->IsMouseOverFloatingCard(mousePos);
+
 	// Calculate max production items across all rows so structure sections align perfectly across all players
 	size_t maxProdCount = 0;
-	for (auto const& row : this->PlayerRows)
+	if (showProduction)
 	{
-		maxProdCount = std::max(maxProdCount, row.ProductionItems.size());
+		for (auto const& row : this->PlayerRows)
+		{
+			maxProdCount = std::max(maxProdCount, row.ProductionItems.size());
+		}
 	}
 
 	int infoBoxWidth = 120;
@@ -1368,11 +1359,11 @@ void ObserverUIClass::Render(DSurface* pSurface)
 
 	int structStartX = startX + infoBoxWidth + playerColorBarWidth + sectionGap;
 
-	int prodSectionWidth = (maxProdCount > 0) ? (static_cast<int>(maxProdCount) * (cameoWidth + padding) + padding) : 0;
+	int prodSectionWidth = (showProduction && maxProdCount > 0) ? (static_cast<int>(maxProdCount) * (cameoWidth + padding) + padding) : 0;
 	int prodEndX = screenWidth - rightMargin;
-	int prodStartX = (maxProdCount > 0) ? (prodEndX - prodSectionWidth) : prodEndX;
+	int prodStartX = alignProductionLeft ? structStartX : ((prodSectionWidth > 0) ? (prodEndX - prodSectionWidth) : prodEndX);
 
-	int maxStructEndX = (maxProdCount > 0) ? (prodStartX - playerColorBarWidth - sectionGap) : prodEndX;
+	int maxStructEndX = (!alignProductionLeft && prodSectionWidth > 0) ? (prodStartX - playerColorBarWidth - sectionGap) : prodEndX;
 	int availableStructWidth = maxStructEndX - structStartX - 30; // Reserve room for scroll buttons
 	if (availableStructWidth < 0) availableStructWidth = 0;
 
@@ -1412,35 +1403,42 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		tabWidths.push_back(tabW);
 	}
 
-	int maxTabsAvailableWidth = maxStructEndX - structStartX;
+	// Keep top tabs and filter bar width FIXED relative to screen width (independent of dynamic production queue length)
+	int maxTabsAvailableWidth = prodEndX - structStartX;
 	if (maxTabsAvailableWidth < 100) maxTabsAvailableWidth = 100;
 
 	// Automatically wrap tabs into multiple rows if screen resolution is low or space is constrained
 	std::vector<std::vector<size_t>> tabRows;
 	std::vector<size_t> currentLine;
 	int currentLineWidth = 0;
+	int maxTabRowWidth = 0;
 
-	for (size_t i = 0; i < tabDefs.size(); ++i)
+	if (showObjectsAndFilter)
 	{
-		int tabW = tabWidths[i];
-		int neededWidth = currentLine.empty() ? tabW : (currentLineWidth + tabGap + tabW);
+		for (size_t i = 0; i < tabDefs.size(); ++i)
+		{
+			int tabW = tabWidths[i];
+			int neededWidth = currentLine.empty() ? tabW : (currentLineWidth + tabGap + tabW);
 
-		if (!currentLine.empty() && neededWidth > maxTabsAvailableWidth)
+			if (!currentLine.empty() && neededWidth > maxTabsAvailableWidth)
+			{
+				tabRows.push_back(currentLine);
+				maxTabRowWidth = std::max(maxTabRowWidth, currentLineWidth);
+				currentLine.clear();
+				currentLine.push_back(i);
+				currentLineWidth = tabW;
+			}
+			else
+			{
+				currentLine.push_back(i);
+				currentLineWidth = neededWidth;
+			}
+		}
+		if (!currentLine.empty())
 		{
 			tabRows.push_back(currentLine);
-			currentLine.clear();
-			currentLine.push_back(i);
-			currentLineWidth = tabW;
+			maxTabRowWidth = std::max(maxTabRowWidth, currentLineWidth);
 		}
-		else
-		{
-			currentLine.push_back(i);
-			currentLineWidth = neededWidth;
-		}
-	}
-	if (!currentLine.empty())
-	{
-		tabRows.push_back(currentLine);
 	}
 
 	int tabRowGap = 3;
@@ -1449,7 +1447,7 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	int searchH = 24;
 	int inspectBtnW = 54;
 	int clearW = 24;
-	int availableSectionW = maxStructEndX - structStartX;
+	int availableSectionW = std::max(maxTabRowWidth, inspectBtnW + clearW + 86);
 	int searchW = availableSectionW - inspectBtnW - clearW - 6;
 	if (searchW < 80) searchW = 80;
 
@@ -1486,17 +1484,21 @@ void ObserverUIClass::Render(DSurface* pSurface)
 	int scrollBtnY = needsScroll ? (startY - scrollBtnH - 3) : startY;
 
 	int tabsBaseY = (needsScroll ? scrollBtnY : startY) - 4;
-	int highestTabY = tabsBaseY - (tabRowsCount * tabHeight) - ((tabRowsCount - 1) * tabRowGap);
-	int searchY = highestTabY - searchH - 4;
+	int highestTabY = (tabRowsCount > 0)
+		? (tabsBaseY - (tabRowsCount * tabHeight) - ((tabRowsCount - 1) * tabRowGap))
+		: tabsBaseY;
+	int searchY = highestTabY - searchH - (tabRowsCount > 0 ? 4 : 0);
 
 	if (needsScroll)
 	{
 		this->VertScrollUpBtnRect = RectangleStruct { centerBtnX, scrollBtnY, scrollBtnW, scrollBtnH };
 		this->VertScrollDownBtnRect = RectangleStruct { centerBtnX + scrollBtnW + scrollBtnGap, scrollBtnY, scrollBtnW, scrollBtnH };
 
-		this->IsHoveringVertScrollUp = mousePos.X >= this->VertScrollUpBtnRect.X && mousePos.X <= (this->VertScrollUpBtnRect.X + this->VertScrollUpBtnRect.Width)
+		this->IsHoveringVertScrollUp = !isMouseCoveredByCard
+			&& mousePos.X >= this->VertScrollUpBtnRect.X && mousePos.X <= (this->VertScrollUpBtnRect.X + this->VertScrollUpBtnRect.Width)
 			&& mousePos.Y >= this->VertScrollUpBtnRect.Y && mousePos.Y <= (this->VertScrollUpBtnRect.Y + this->VertScrollUpBtnRect.Height);
-		this->IsHoveringVertScrollDown = mousePos.X >= this->VertScrollDownBtnRect.X && mousePos.X <= (this->VertScrollDownBtnRect.X + this->VertScrollDownBtnRect.Width)
+		this->IsHoveringVertScrollDown = !isMouseCoveredByCard
+			&& mousePos.X >= this->VertScrollDownBtnRect.X && mousePos.X <= (this->VertScrollDownBtnRect.X + this->VertScrollDownBtnRect.Width)
 			&& mousePos.Y >= this->VertScrollDownBtnRect.Y && mousePos.Y <= (this->VertScrollDownBtnRect.Y + this->VertScrollDownBtnRect.Height);
 
 		// Render Scroll Up / Down Buttons (Centered above first player/house)
@@ -1557,134 +1559,145 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		}
 	}
 
-	this->InspectBtnRect = RectangleStruct { inspectX, searchY, inspectBtnW, searchH };
-	this->SearchBoxRect = RectangleStruct { searchX, searchY, searchW, searchH };
-	this->ClearBtnRect = RectangleStruct { searchX + searchW + 3, searchY, clearW, searchH };
+	this->InspectBtnRect = showFloatingCards ? RectangleStruct { inspectX, searchY, inspectBtnW, searchH } : RectangleStruct { 0, 0, 0, 0 };
+	this->SearchBoxRect = showObjectsAndFilter ? RectangleStruct { searchX, searchY, searchW, searchH } : RectangleStruct { 0, 0, 0, 0 };
+	this->ClearBtnRect = showObjectsAndFilter ? RectangleStruct { searchX + searchW + 3, searchY, clearW, searchH } : RectangleStruct { 0, 0, 0, 0 };
+	if (!showObjectsAndFilter)
+	{
+		this->IsSearchInputFocused = false;
+	}
 
-	this->IsHoveringInspectBtn = mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+	this->IsHoveringInspectBtn = showFloatingCards && !isMouseCoveredByCard
+		&& mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
 		&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height);
-	this->IsHoveringClearBtn = mousePos.X >= this->ClearBtnRect.X && mousePos.X <= (this->ClearBtnRect.X + this->ClearBtnRect.Width)
+	this->IsHoveringClearBtn = showObjectsAndFilter && !isMouseCoveredByCard
+		&& mousePos.X >= this->ClearBtnRect.X && mousePos.X <= (this->ClearBtnRect.X + this->ClearBtnRect.Width)
 		&& mousePos.Y >= this->ClearBtnRect.Y && mousePos.Y <= (this->ClearBtnRect.Y + this->ClearBtnRect.Height);
 
 	// Build Tab Buttons
-	for (size_t r = 0; r < tabRows.size(); ++r)
+	if (showObjectsAndFilter)
 	{
-		int rowY = 0;
-		if (needsScroll)
+		for (size_t r = 0; r < tabRows.size(); ++r)
 		{
-			rowY = highestTabY + (static_cast<int>(r) * (tabHeight + tabRowGap));
-		}
-		else
-		{
-			rowY = tabsBaseY - (static_cast<int>(r + 1) * tabHeight) - (static_cast<int>(r) * tabRowGap);
-		}
-
-		const auto& lineIndices = tabRows[r];
-		int lineTotalW = 0;
-		for (size_t idx : lineIndices)
-		{
-			lineTotalW += tabWidths[idx];
-		}
-		lineTotalW += static_cast<int>(lineIndices.size() - 1) * tabGap;
-
-		int lineStartX = structStartX;
-		if (lineStartX + lineTotalW > maxStructEndX)
-		{
-			lineStartX = std::max(structStartX, maxStructEndX - lineTotalW);
-		}
-
-		int curX = lineStartX;
-		for (size_t idx : lineIndices)
-		{
-			ObserverTabButton btn;
-			btn.Category = tabDefs[idx].first;
-			btn.Label = tabDefs[idx].second;
-			btn.Rect = RectangleStruct { curX, rowY, tabWidths[idx], tabHeight };
-			btn.IsHovered = mousePos.X >= btn.Rect.X && mousePos.X <= (btn.Rect.X + btn.Rect.Width)
-				&& mousePos.Y >= btn.Rect.Y && mousePos.Y <= (btn.Rect.Y + btn.Rect.Height);
-			this->TabButtons.push_back(btn);
-
-			if (isLeftClick && btn.IsHovered)
+			int rowY = 0;
+			if (needsScroll)
 			{
-				this->ActiveFilterTab = btn.Category;
-				this->CollectPlayerData();
+				rowY = highestTabY + (static_cast<int>(r) * (tabHeight + tabRowGap));
+			}
+			else
+			{
+				rowY = tabsBaseY - (static_cast<int>(r + 1) * tabHeight) - (static_cast<int>(r) * tabRowGap);
 			}
 
-			curX += tabWidths[idx] + tabGap;
+			const auto& lineIndices = tabRows[r];
+			int lineTotalW = 0;
+			for (size_t idx : lineIndices)
+			{
+				lineTotalW += tabWidths[idx];
+			}
+			lineTotalW += static_cast<int>(lineIndices.size() - 1) * tabGap;
+
+			int lineStartX = structStartX;
+			if (lineStartX + lineTotalW > prodEndX)
+			{
+				lineStartX = std::max(structStartX, prodEndX - lineTotalW);
+			}
+
+			int curX = lineStartX;
+			for (size_t idx : lineIndices)
+			{
+				ObserverTabButton btn;
+				btn.Category = tabDefs[idx].first;
+				btn.Label = tabDefs[idx].second;
+				btn.Rect = RectangleStruct { curX, rowY, tabWidths[idx], tabHeight };
+				btn.IsHovered = !isMouseCoveredByCard
+					&& mousePos.X >= btn.Rect.X && mousePos.X <= (btn.Rect.X + btn.Rect.Width)
+					&& mousePos.Y >= btn.Rect.Y && mousePos.Y <= (btn.Rect.Y + btn.Rect.Height);
+				this->TabButtons.push_back(btn);
+
+				if (isLeftClick && btn.IsHovered)
+				{
+					this->ActiveFilterTab = btn.Category;
+					this->CollectPlayerData();
+				}
+
+				curX += tabWidths[idx] + tabGap;
+			}
 		}
-	}
 
-	// Render Category Filter Tab Buttons
-	for (const auto& btn : this->TabButtons)
-	{
-		bool isTabActive = (btn.Category == this->ActiveFilterTab);
-
-		ColorStruct tabBgColor { 0, 0, 0 };
-		pSurface->FillRectTrans(const_cast<RectangleStruct*>(&btn.Rect), &tabBgColor, isTabActive ? 95 : 60);
-
-		// Border color: Neon Cyan for active tab, Soft White for hovered, Dark Gray for inactive
-		COLORREF borderColor = Drawing::RGB_To_Int(60, 60, 60);
-		if (isTabActive)
+		// Render Category Filter Tab Buttons
+		for (const auto& btn : this->TabButtons)
 		{
-			borderColor = Drawing::RGB_To_Int(0, 255, 255); // Cyan active outline
-		}
-		else if (btn.IsHovered)
-		{
-			borderColor = Drawing::RGB_To_Int(180, 180, 180);
-		}
-		pSurface->DrawRect(const_cast<RectangleStruct*>(&btn.Rect), borderColor);
+			bool isTabActive = (btn.Category == this->ActiveFilterTab);
 
-		// Text color: Bright White for active, Soft White for hovered, Silver for inactive
-		COLORREF textColor = Drawing::RGB_To_Int(160, 160, 160);
-		if (isTabActive)
-		{
-			textColor = Drawing::RGB_To_Int(255, 255, 255);
-		}
-		else if (btn.IsHovered)
-		{
-			textColor = Drawing::RGB_To_Int(220, 220, 220);
-		}
+			ColorStruct tabBgColor { 0, 0, 0 };
+			pSurface->FillRectTrans(const_cast<RectangleStruct*>(&btn.Rect), &tabBgColor, isTabActive ? 95 : 60);
 
-		if (BitFont::Instance && BitText::Instance)
-		{
-			int textW = 0, textH = 0;
-			BitFont::Instance->GetTextDimension(btn.Label.c_str(), &textW, &textH, btn.Rect.Width);
-			int textX = btn.Rect.X + (btn.Rect.Width - textW) / 2;
-			int textY = btn.Rect.Y + (btn.Rect.Height - textH) / 2;
+			// Border color: Neon Cyan for active tab, Soft White for hovered, Dark Gray for inactive
+			COLORREF borderColor = Drawing::RGB_To_Int(60, 60, 60);
+			if (isTabActive)
+			{
+				borderColor = Drawing::RGB_To_Int(0, 255, 255); // Cyan active outline
+			}
+			else if (btn.IsHovered)
+			{
+				borderColor = Drawing::RGB_To_Int(180, 180, 180);
+			}
+			pSurface->DrawRect(const_cast<RectangleStruct*>(&btn.Rect), borderColor);
 
-			LTRBStruct oldBounds = BitFont::Instance->Bounds;
-			WORD oldColor = BitFont::Instance->Color;
-			bool oldField41 = BitFont::Instance->field_41;
+			// Text color: Bright White for active, Soft White for hovered, Silver for inactive
+			COLORREF textColor = Drawing::RGB_To_Int(160, 160, 160);
+			if (isTabActive)
+			{
+				textColor = Drawing::RGB_To_Int(255, 255, 255);
+			}
+			else if (btn.IsHovered)
+			{
+				textColor = Drawing::RGB_To_Int(220, 220, 220);
+			}
 
-			LTRBStruct ltrbBounds = { btn.Rect.X, btn.Rect.Y, btn.Rect.X + btn.Rect.Width, btn.Rect.Y + btn.Rect.Height };
-			BitFont::Instance->field_41 = 1;
-			BitFont::Instance->SetBounds(&ltrbBounds);
-			BitFont::Instance->Color = static_cast<WORD>(textColor);
+			if (BitFont::Instance && BitText::Instance)
+			{
+				int textW = 0, textH = 0;
+				BitFont::Instance->GetTextDimension(btn.Label.c_str(), &textW, &textH, btn.Rect.Width);
+				int textX = btn.Rect.X + (btn.Rect.Width - textW) / 2;
+				int textY = btn.Rect.Y + (btn.Rect.Height - textH) / 2;
 
-			BitText::Instance->DrawText(
-				BitFont::Instance,
-				pSurface,
-				btn.Label.c_str(),
-				textX,
-				textY,
-				textW,
-				textH,
-				0, 0, 0
-			);
+				LTRBStruct oldBounds = BitFont::Instance->Bounds;
+				WORD oldColor = BitFont::Instance->Color;
+				bool oldField41 = BitFont::Instance->field_41;
 
-			BitFont::Instance->Bounds = oldBounds;
-			BitFont::Instance->Color = oldColor;
-			BitFont::Instance->field_41 = oldField41;
+				LTRBStruct ltrbBounds = { btn.Rect.X, btn.Rect.Y, btn.Rect.X + btn.Rect.Width, btn.Rect.Y + btn.Rect.Height };
+				BitFont::Instance->field_41 = 1;
+				BitFont::Instance->SetBounds(&ltrbBounds);
+				BitFont::Instance->Color = static_cast<WORD>(textColor);
+
+				BitText::Instance->DrawText(
+					BitFont::Instance,
+					pSurface,
+					btn.Label.c_str(),
+					textX,
+					textY,
+					textW,
+					textH,
+					0, 0, 0
+				);
+
+				BitFont::Instance->Bounds = oldBounds;
+				BitFont::Instance->Color = oldColor;
+				BitFont::Instance->field_41 = oldField41;
+			}
 		}
 	}
 
 	// Render Inspect Selected Button [-> [] <-]
-	ColorStruct inspectBgColor = this->IsHoveringInspectBtn ? ColorStruct { 0, 140, 180 } : ColorStruct { 30, 30, 30 };
-	pSurface->FillRectTrans(&this->InspectBtnRect, &inspectBgColor, 80);
-	COLORREF inspectBorderColor = this->IsHoveringInspectBtn ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(80, 80, 80);
-	pSurface->DrawRect(&this->InspectBtnRect, inspectBorderColor);
-
+	if (showFloatingCards)
 	{
+		ColorStruct inspectBgColor = this->IsHoveringInspectBtn ? ColorStruct { 0, 140, 180 } : ColorStruct { 30, 30, 30 };
+		pSurface->FillRectTrans(&this->InspectBtnRect, &inspectBgColor, 80);
+		COLORREF inspectBorderColor = this->IsHoveringInspectBtn ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(80, 80, 80);
+		pSurface->DrawRect(&this->InspectBtnRect, inspectBorderColor);
+
 		LTRBStruct oldBounds = BitFont::Instance->Bounds;
 		LTRBStruct btnBounds = { this->InspectBtnRect.X, this->InspectBtnRect.Y, this->InspectBtnRect.X + this->InspectBtnRect.Width, this->InspectBtnRect.Y + this->InspectBtnRect.Height };
 		BitFont::Instance->SetBounds(&btnBounds);
@@ -1696,60 +1709,63 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		BitFont::Instance->Bounds = oldBounds;
 	}
 
-	// Render Search Input Box Background
-	ColorStruct searchBgColor { 15, 15, 15 };
-	pSurface->FillRectTrans(&this->SearchBoxRect, &searchBgColor, this->IsSearchInputFocused ? 90 : 60);
-
-	COLORREF searchBorderColor = this->IsSearchInputFocused ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(60, 60, 60);
-	pSurface->DrawRect(&this->SearchBoxRect, searchBorderColor);
-
-	// Render text inside Search Box
+	if (showObjectsAndFilter)
 	{
-		LTRBStruct oldBounds = BitFont::Instance->Bounds;
-		LTRBStruct searchBounds = { this->SearchBoxRect.X + 2, this->SearchBoxRect.Y + 2, this->SearchBoxRect.X + this->SearchBoxRect.Width - 2, this->SearchBoxRect.Y + this->SearchBoxRect.Height - 2 };
-		BitFont::Instance->SetBounds(&searchBounds);
+		// Render Search Input Box Background
+		ColorStruct searchBgColor { 15, 15, 15 };
+		pSurface->FillRectTrans(&this->SearchBoxRect, &searchBgColor, this->IsSearchInputFocused ? 90 : 60);
 
-		Point2D textPt = { this->SearchBoxRect.X + 8, this->SearchBoxRect.Y + 4 };
-		if (this->SearchFilterText.empty() && !this->IsSearchInputFocused)
+		COLORREF searchBorderColor = this->IsSearchInputFocused ? Drawing::RGB_To_Int(0, 255, 255) : Drawing::RGB_To_Int(60, 60, 60);
+		pSurface->DrawRect(&this->SearchBoxRect, searchBorderColor);
+
+		// Render text inside Search Box
 		{
-			pSurface->DrawTextA(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_FILTER_PLACEHOLDER", L"Filter..."), &DSurface::ViewBounds, &textPt, Drawing::RGB_To_Int(120, 120, 120), 0, TextPrintType::FullShadow | TextPrintType::Point8);
-		}
-		else
-		{
-			std::wstring displayTextW = this->SearchFilterText;
-			if (this->IsSearchInputFocused)
+			LTRBStruct oldBounds = BitFont::Instance->Bounds;
+			LTRBStruct searchBounds = { this->SearchBoxRect.X + 2, this->SearchBoxRect.Y + 2, this->SearchBoxRect.X + this->SearchBoxRect.Width - 2, this->SearchBoxRect.Y + this->SearchBoxRect.Height - 2 };
+			BitFont::Instance->SetBounds(&searchBounds);
+
+			Point2D textPt = { this->SearchBoxRect.X + 8, this->SearchBoxRect.Y + 4 };
+			if (this->SearchFilterText.empty() && !this->IsSearchInputFocused)
 			{
-				if ((Unsorted::CurrentFrame / 15) % 2 == 0)
+				pSurface->DrawTextA(GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_FILTER_PLACEHOLDER", L"Filter..."), &DSurface::ViewBounds, &textPt, Drawing::RGB_To_Int(120, 120, 120), 0, TextPrintType::FullShadow | TextPrintType::Point8);
+			}
+			else
+			{
+				std::wstring displayTextW = this->SearchFilterText;
+				if (this->IsSearchInputFocused)
 				{
-					displayTextW += L"|";
+					if ((Unsorted::CurrentFrame / 15) % 2 == 0)
+					{
+						displayTextW += L"|";
+					}
 				}
-			}
 
-			// Keep visible text length within box width (auto-scroll tail of long query string)
-			int maxVisibleChars = (this->SearchBoxRect.Width - 18) / 8;
-			if (maxVisibleChars < 4) maxVisibleChars = 4;
-			if (displayTextW.length() > static_cast<size_t>(maxVisibleChars))
-			{
-				displayTextW = displayTextW.substr(displayTextW.length() - maxVisibleChars);
-			}
+				// Keep visible text length within box width (auto-scroll tail of long query string)
+				int maxVisibleChars = (this->SearchBoxRect.Width - 18) / 8;
+				if (maxVisibleChars < 4) maxVisibleChars = 4;
+				if (displayTextW.length() > static_cast<size_t>(maxVisibleChars))
+				{
+					displayTextW = displayTextW.substr(displayTextW.length() - maxVisibleChars);
+				}
 
-			pSurface->DrawTextA(displayTextW.c_str(), &DSurface::ViewBounds, &textPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::FullShadow | TextPrintType::Point8);
+				pSurface->DrawTextA(displayTextW.c_str(), &DSurface::ViewBounds, &textPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::FullShadow | TextPrintType::Point8);
+			}
+			BitFont::Instance->Bounds = oldBounds;
 		}
-		BitFont::Instance->Bounds = oldBounds;
-	}
 
-	// Render Clear Button [X]
-	ColorStruct clearBgColor = this->IsHoveringClearBtn ? ColorStruct { 180, 40, 40 } : ColorStruct { 30, 30, 30 };
-	pSurface->FillRectTrans(&this->ClearBtnRect, &clearBgColor, 80);
-	pSurface->DrawRect(&this->ClearBtnRect, Drawing::RGB_To_Int(80, 80, 80));
+		// Render Clear Button [X]
+		ColorStruct clearBgColor = this->IsHoveringClearBtn ? ColorStruct { 180, 40, 40 } : ColorStruct { 30, 30, 30 };
+		pSurface->FillRectTrans(&this->ClearBtnRect, &clearBgColor, 80);
+		pSurface->DrawRect(&this->ClearBtnRect, Drawing::RGB_To_Int(80, 80, 80));
 
-	{
-		LTRBStruct oldBounds = BitFont::Instance->Bounds;
-		LTRBStruct clearBounds = { this->ClearBtnRect.X, this->ClearBtnRect.Y, this->ClearBtnRect.X + this->ClearBtnRect.Width, this->ClearBtnRect.Y + this->ClearBtnRect.Height };
-		BitFont::Instance->SetBounds(&clearBounds);
-		Point2D xPt = { this->ClearBtnRect.X + 8, this->ClearBtnRect.Y + 3 };
-		pSurface->DrawTextA(L"X", &DSurface::ViewBounds, &xPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::FullShadow | TextPrintType::Point8);
-		BitFont::Instance->Bounds = oldBounds;
+		{
+			LTRBStruct oldBounds = BitFont::Instance->Bounds;
+			LTRBStruct clearBounds = { this->ClearBtnRect.X, this->ClearBtnRect.Y, this->ClearBtnRect.X + this->ClearBtnRect.Width, this->ClearBtnRect.Y + this->ClearBtnRect.Height };
+			BitFont::Instance->SetBounds(&clearBounds);
+			Point2D xPt = { this->ClearBtnRect.X + 8, this->ClearBtnRect.Y + 3 };
+			pSurface->DrawTextA(L"X", &DSurface::ViewBounds, &xPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::FullShadow | TextPrintType::Point8);
+			BitFont::Instance->Bounds = oldBounds;
+		}
 	}
 
 	visibleStart = std::clamp(this->VerticalScrollOffset, 0, std::max(0, totalRows - 1));
@@ -1787,7 +1803,8 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		RectangleStruct playerColorBarRect = { startX + infoBoxWidth, currentY, playerColorBarWidth, rowHeight };
 		pSurface->FillRect(&playerColorBarRect, Drawing::RGB_To_Int(row.PlayerColor.R, row.PlayerColor.G, row.PlayerColor.B));
 
-		bool isInfoHovered = mousePos.X >= (startX - teamColorBarWidth) && mousePos.X <= (startX + infoBoxWidth + playerColorBarWidth)
+		bool isInfoHovered = !isMouseCoveredByCard
+			&& mousePos.X >= (startX - teamColorBarWidth) && mousePos.X <= (startX + infoBoxWidth + playerColorBarWidth)
 			&& mousePos.Y >= row.InfoRect.Y && mousePos.Y <= (row.InfoRect.Y + row.InfoRect.Height);
 
 		if (isInfoHovered)
@@ -1814,8 +1831,45 @@ void ObserverUIClass::Render(DSurface* pSurface)
 			BitFont::Instance->SetBounds(&oldBounds);
 		}
 
-		// Section 3: Production Items Section (Anchored to far right of the screen) + Left Player Color Bar
-		if (prodSectionWidth > 0)
+		// Section 3: Production Items Section
+		if (alignProductionLeft)
+		{
+			int rowProdWidth = (!row.ProductionItems.empty()) ? (static_cast<int>(row.ProductionItems.size()) * (cameoWidth + padding) + padding) : 0;
+			int maxAllowedProdW = std::max(0, prodEndX - structStartX);
+			int actualProdW = std::min(rowProdWidth, maxAllowedProdW);
+
+			row.ProdPanelRect = RectangleStruct { structStartX, currentY, actualProdW, rowHeight };
+			if (actualProdW > 0)
+			{
+				pSurface->FillRectTrans(&row.ProdPanelRect, &bgPanelColor, 75);
+				pSurface->DrawRect(&row.ProdPanelRect, Drawing::RGB_To_Int(60, 60, 60));
+
+				int currentProdX = structStartX + padding;
+				for (auto& item : row.ProductionItems)
+				{
+					item.DisplayRect = RectangleStruct { currentProdX, currentY + padding, cameoWidth, cameoHeight };
+
+					if (item.DisplayRect.X >= row.ProdPanelRect.X && (item.DisplayRect.X + item.DisplayRect.Width) <= (row.ProdPanelRect.X + row.ProdPanelRect.Width))
+					{
+						bool isHovered = !isMouseCoveredByCard
+							&& mousePos.X >= item.DisplayRect.X && mousePos.X <= (item.DisplayRect.X + item.DisplayRect.Width)
+							&& mousePos.Y >= item.DisplayRect.Y && mousePos.Y <= (item.DisplayRect.Y + item.DisplayRect.Height);
+
+						if (isHovered)
+						{
+							this->HoveredItem = item;
+							this->HasHoveredItem = true;
+							this->HoveredMousePos = mousePos;
+						}
+
+						this->DrawCameoItem(pSurface, item, isHovered, row.ProdPanelRect, row.PlayerColor);
+					}
+
+					currentProdX += (cameoWidth + padding);
+				}
+			}
+		}
+		else if (prodSectionWidth > 0)
 		{
 			// Vertical Player Color bar attached to the left edge of Section 3 (Production Panel)
 			RectangleStruct prodColorBarRect = { prodStartX - playerColorBarWidth, currentY, playerColorBarWidth, rowHeight };
@@ -1833,7 +1887,8 @@ void ObserverUIClass::Render(DSurface* pSurface)
 				// Strictly render ONLY if item display box fits completely inside ProdPanelRect
 				if (item.DisplayRect.X >= row.ProdPanelRect.X && (item.DisplayRect.X + item.DisplayRect.Width) <= (row.ProdPanelRect.X + row.ProdPanelRect.Width))
 				{
-					bool isHovered = mousePos.X >= item.DisplayRect.X && mousePos.X <= (item.DisplayRect.X + item.DisplayRect.Width)
+					bool isHovered = !isMouseCoveredByCard
+						&& mousePos.X >= item.DisplayRect.X && mousePos.X <= (item.DisplayRect.X + item.DisplayRect.Width)
 						&& mousePos.Y >= item.DisplayRect.Y && mousePos.Y <= (item.DisplayRect.Y + item.DisplayRect.Height);
 
 					if (isHovered)
@@ -1849,76 +1904,104 @@ void ObserverUIClass::Render(DSurface* pSurface)
 				currentProdX -= (cameoWidth + padding);
 			}
 		}
-
-		// Section 2: Filtered Objects Section (Middle Section, expands up to Production Panel boundary)
-		int totalStructWidth = (!row.StructureItems.empty()) ? (static_cast<int>(row.StructureItems.size()) * (cameoWidth + padding) + padding) : 0;
-		row.MaxScrollOffset = std::max(0, totalStructWidth - availableStructWidth);
-		row.ScrollOffset = std::clamp(row.ScrollOffset, 0, row.MaxScrollOffset);
-
-		int structPanelWidth = std::min(totalStructWidth, availableStructWidth);
-		if (structPanelWidth < 0) structPanelWidth = 0;
-
-		row.StructPanelRect = RectangleStruct { structStartX, currentY, structPanelWidth, rowHeight };
-		if (structPanelWidth > 0)
+		else
 		{
-			pSurface->FillRectTrans(&row.StructPanelRect, &bgPanelColor, 75);
-			pSurface->DrawRect(&row.StructPanelRect, Drawing::RGB_To_Int(60, 60, 60));
-
-			int currentStructX = structStartX + padding - row.ScrollOffset;
-			for (auto& item : row.StructureItems)
-			{
-				item.DisplayRect = RectangleStruct { currentStructX, currentY + padding, cameoWidth, cameoHeight };
-
-				// Strictly render ONLY if item display box fits completely inside StructPanelRect (does NOT overlap scroll buttons)
-				if (item.DisplayRect.X >= row.StructPanelRect.X && (item.DisplayRect.X + item.DisplayRect.Width) <= (row.StructPanelRect.X + row.StructPanelRect.Width))
-				{
-					bool isHovered = mousePos.X >= item.DisplayRect.X && mousePos.X <= (item.DisplayRect.X + item.DisplayRect.Width)
-						&& mousePos.Y >= item.DisplayRect.Y && mousePos.Y <= (item.DisplayRect.Y + item.DisplayRect.Height);
-
-					if (isHovered)
-					{
-						this->HoveredItem = item;
-						this->HasHoveredItem = true;
-						this->HoveredMousePos = mousePos;
-					}
-
-					this->DrawCameoItem(pSurface, item, isHovered, row.StructPanelRect, row.PlayerColor);
-				}
-
-				currentStructX += cameoWidth + padding;
-			}
+			row.ProdPanelRect = RectangleStruct { 0, 0, 0, 0 };
 		}
 
-		// Render per-player row scroll buttons if structure list exceeds screen width
-		if (row.MaxScrollOffset > 0)
+		// Section 2: Filtered Objects Section (Middle Section, expands up to Production Panel boundary)
+		if (showObjectsAndFilter)
 		{
-			int btnX = structStartX + structPanelWidth + 4;
-			row.ScrollLeftBtnRect = RectangleStruct { btnX, currentY + padding, 20, cameoHeight / 2 - 1 };
-			row.ScrollRightBtnRect = RectangleStruct { btnX, currentY + padding + cameoHeight / 2 + 1, 20, cameoHeight / 2 - 1 };
+			int totalStructWidth = (!row.StructureItems.empty()) ? (static_cast<int>(row.StructureItems.size()) * (cameoWidth + padding) + padding) : 0;
+			row.MaxScrollOffset = std::max(0, totalStructWidth - availableStructWidth);
+			row.ScrollOffset = std::clamp(row.ScrollOffset, 0, row.MaxScrollOffset);
 
-			row.IsHoveringLeftScroll = (mousePos.X >= row.ScrollLeftBtnRect.X && mousePos.X <= row.ScrollLeftBtnRect.X + row.ScrollLeftBtnRect.Width
-				&& mousePos.Y >= row.ScrollLeftBtnRect.Y && mousePos.Y <= row.ScrollLeftBtnRect.Y + row.ScrollLeftBtnRect.Height);
-			row.IsHoveringRightScroll = (mousePos.X >= row.ScrollRightBtnRect.X && mousePos.X <= row.ScrollRightBtnRect.X + row.ScrollRightBtnRect.Width
-				&& mousePos.Y >= row.ScrollRightBtnRect.Y && mousePos.Y <= row.ScrollRightBtnRect.Y + row.ScrollRightBtnRect.Height);
+			int structPanelWidth = std::min(totalStructWidth, availableStructWidth);
+			if (structPanelWidth < 0) structPanelWidth = 0;
 
-			ColorStruct btnColor = row.IsHoveringLeftScroll ? row.PlayerColor : ColorStruct { 180, 180, 180 };
-			pSurface->FillRectTrans(&row.ScrollLeftBtnRect, &btnColor, 200);
-			pSurface->DrawRect(&row.ScrollLeftBtnRect, Drawing::RGB_To_Int(255, 255, 255));
-
-			btnColor = row.IsHoveringRightScroll ? row.PlayerColor : ColorStruct { 180, 180, 180 };
-			pSurface->FillRectTrans(&row.ScrollRightBtnRect, &btnColor, 200);
-			pSurface->DrawRect(&row.ScrollRightBtnRect, Drawing::RGB_To_Int(255, 255, 255));
-
-			if (BitFont::Instance)
+			row.StructPanelRect = RectangleStruct { structStartX, currentY, structPanelWidth, rowHeight };
+			if (structPanelWidth > 0)
 			{
-				Point2D leftPt = { row.ScrollLeftBtnRect.X + 5, row.ScrollLeftBtnRect.Y + 2 };
-				Point2D rightPt = { row.ScrollRightBtnRect.X + 5, row.ScrollRightBtnRect.Y + 2 };
-				pSurface->DrawTextA(L"<", &DSurface::ViewBounds, &leftPt, Drawing::RGB_To_Int(0, 0, 0), 0, TextPrintType::Point8);
-				pSurface->DrawTextA(L">", &DSurface::ViewBounds, &rightPt, Drawing::RGB_To_Int(0, 0, 0), 0, TextPrintType::Point8);
+				pSurface->FillRectTrans(&row.StructPanelRect, &bgPanelColor, 75);
+				pSurface->DrawRect(&row.StructPanelRect, Drawing::RGB_To_Int(60, 60, 60));
+
+				int currentStructX = structStartX + padding - row.ScrollOffset;
+				for (auto& item : row.StructureItems)
+				{
+					item.DisplayRect = RectangleStruct { currentStructX, currentY + padding, cameoWidth, cameoHeight };
+
+					// Strictly render ONLY if item display box fits completely inside StructPanelRect (does NOT overlap scroll buttons)
+					if (item.DisplayRect.X >= row.StructPanelRect.X && (item.DisplayRect.X + item.DisplayRect.Width) <= (row.StructPanelRect.X + row.StructPanelRect.Width))
+					{
+						bool isHovered = !isMouseCoveredByCard
+							&& mousePos.X >= item.DisplayRect.X && mousePos.X <= (item.DisplayRect.X + item.DisplayRect.Width)
+							&& mousePos.Y >= item.DisplayRect.Y && mousePos.Y <= (item.DisplayRect.Y + item.DisplayRect.Height);
+
+						if (isHovered)
+						{
+							this->HoveredItem = item;
+							this->HasHoveredItem = true;
+							this->HoveredMousePos = mousePos;
+						}
+
+						this->DrawCameoItem(pSurface, item, isHovered, row.StructPanelRect, row.PlayerColor);
+					}
+
+					currentStructX += cameoWidth + padding;
+				}
 			}
+
+			// Render per-player row scroll buttons if structure list exceeds screen width
+			if (row.MaxScrollOffset > 0)
+			{
+				int btnX = structStartX + structPanelWidth + 4;
+				row.ScrollLeftBtnRect = RectangleStruct { btnX, currentY + padding, 20, cameoHeight / 2 - 1 };
+				row.ScrollRightBtnRect = RectangleStruct { btnX, currentY + padding + cameoHeight / 2 + 1, 20, cameoHeight / 2 - 1 };
+
+				row.IsHoveringLeftScroll = !isMouseCoveredByCard
+					&& (mousePos.X >= row.ScrollLeftBtnRect.X && mousePos.X <= row.ScrollLeftBtnRect.X + row.ScrollLeftBtnRect.Width
+					&& mousePos.Y >= row.ScrollLeftBtnRect.Y && mousePos.Y <= row.ScrollLeftBtnRect.Y + row.ScrollLeftBtnRect.Height);
+				row.IsHoveringRightScroll = !isMouseCoveredByCard
+					&& (mousePos.X >= row.ScrollRightBtnRect.X && mousePos.X <= row.ScrollRightBtnRect.X + row.ScrollRightBtnRect.Width
+					&& mousePos.Y >= row.ScrollRightBtnRect.Y && mousePos.Y <= row.ScrollRightBtnRect.Y + row.ScrollRightBtnRect.Height);
+
+				ColorStruct btnColor = row.IsHoveringLeftScroll ? row.PlayerColor : ColorStruct { 180, 180, 180 };
+				pSurface->FillRectTrans(&row.ScrollLeftBtnRect, &btnColor, 200);
+				pSurface->DrawRect(&row.ScrollLeftBtnRect, Drawing::RGB_To_Int(255, 255, 255));
+
+				btnColor = row.IsHoveringRightScroll ? row.PlayerColor : ColorStruct { 180, 180, 180 };
+				pSurface->FillRectTrans(&row.ScrollRightBtnRect, &btnColor, 200);
+				pSurface->DrawRect(&row.ScrollRightBtnRect, Drawing::RGB_To_Int(255, 255, 255));
+
+				if (BitFont::Instance)
+				{
+					Point2D leftPt = { row.ScrollLeftBtnRect.X + 5, row.ScrollLeftBtnRect.Y + 2 };
+					Point2D rightPt = { row.ScrollRightBtnRect.X + 5, row.ScrollRightBtnRect.Y + 2 };
+					pSurface->DrawTextA(L"<", &DSurface::ViewBounds, &leftPt, Drawing::RGB_To_Int(0, 0, 0), 0, TextPrintType::Point8);
+					pSurface->DrawTextA(L">", &DSurface::ViewBounds, &rightPt, Drawing::RGB_To_Int(0, 0, 0), 0, TextPrintType::Point8);
+				}
+			}
+			else
+			{
+				row.ScrollLeftBtnRect = RectangleStruct { 0, 0, 0, 0 };
+				row.ScrollRightBtnRect = RectangleStruct { 0, 0, 0, 0 };
+			}
+		}
+		else
+		{
+			row.StructPanelRect = RectangleStruct { 0, 0, 0, 0 };
+			row.ScrollLeftBtnRect = RectangleStruct { 0, 0, 0, 0 };
+			row.ScrollRightBtnRect = RectangleStruct { 0, 0, 0, 0 };
 		}
 
 		currentY += rowHeight;
+	}
+
+	// Render Floating Windows on top of UI panels
+	if (showFloatingCards)
+	{
+		this->RenderFloatingWindows(pSurface);
+		this->RenderFloatingUnitWindows(pSurface);
 	}
 
 	// Trigger mouse click action after all layout geometry rects have been updated
@@ -1927,36 +2010,35 @@ void ObserverUIClass::Render(DSurface* pSurface)
 		this->HandleMouseClick(mousePos, false);
 	}
 
-	// Render tooltip for inspect button, player info or cameo item
-	if (this->IsHoveringInspectBtn && BitFont::Instance)
+	// Render tooltip for inspect button, player info or cameo item ONLY if not covered by a floating card
+	if (!this->IsMouseOverFloatingCard(mousePos))
 	{
-		std::wstring tooltipText = GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TOOLTIP_INSPECT", L"Inspect Selected Object (Create Card)");
-		int textW = 0, textH = 0;
-		BitFont::Instance->GetTextDimension(tooltipText.c_str(), &textW, &textH, 300);
+		if (this->IsHoveringInspectBtn && BitFont::Instance)
+		{
+			std::wstring tooltipText = GeneralUtils::LoadStringUnlessMissing("TXT_OBSERVER_TOOLTIP_INSPECT", L"Inspect Selected Object (Create Card)");
+			int textW = 0, textH = 0;
+			BitFont::Instance->GetTextDimension(tooltipText.c_str(), &textW, &textH, 300);
 
-		int tipX = std::min(mousePos.X + 12, pSurface->Width - textW - 16);
-		int tipY = std::max(10, mousePos.Y - textH - 12);
+			int tipX = std::min(mousePos.X + 12, pSurface->Width - textW - 16);
+			int tipY = std::max(10, mousePos.Y - textH - 12);
 
-		RectangleStruct tipBgRect = { tipX - 4, tipY - 4, textW + 8, textH + 8 };
-		ColorStruct tipBgColor { 0, 0, 0 };
-		pSurface->FillRectTrans(&tipBgRect, &tipBgColor, 200);
-		pSurface->DrawRect(&tipBgRect, Drawing::RGB_To_Int(140, 140, 140));
+			RectangleStruct tipBgRect = { tipX - 4, tipY - 4, textW + 8, textH + 8 };
+			ColorStruct tipBgColor { 0, 0, 0 };
+			pSurface->FillRectTrans(&tipBgRect, &tipBgColor, 200);
+			pSurface->DrawRect(&tipBgRect, Drawing::RGB_To_Int(140, 140, 140));
 
-		Point2D tipPt { tipX, tipY };
-		pSurface->DrawTextA(tooltipText.c_str(), &DSurface::ViewBounds, &tipPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::Point8);
+			Point2D tipPt { tipX, tipY };
+			pSurface->DrawTextA(tooltipText.c_str(), &DSurface::ViewBounds, &tipPt, Drawing::RGB_To_Int(255, 255, 255), 0, TextPrintType::Point8);
+		}
+		else if (this->HasHoveredPlayer && this->pHoveredPlayer)
+		{
+			this->DrawPlayerTooltip(pSurface, this->pHoveredPlayer, this->HoveredMousePos);
+		}
+		else if (this->HasHoveredItem)
+		{
+			this->DrawTooltip(pSurface, this->HoveredItem, this->HoveredMousePos);
+		}
 	}
-	else if (this->HasHoveredPlayer && this->pHoveredPlayer)
-	{
-		this->DrawPlayerTooltip(pSurface, this->pHoveredPlayer, this->HoveredMousePos);
-	}
-	else if (this->HasHoveredItem)
-	{
-		this->DrawTooltip(pSurface, this->HoveredItem, this->HoveredMousePos);
-	}
-
-	// Render Floating Windows on top of UI
-	this->RenderFloatingWindows(pSurface);
-	this->RenderFloatingUnitWindows(pSurface);
 }
 
 static std::wstring GetMissionNameString(Mission mission)
@@ -3777,7 +3859,21 @@ void ObserverUIClass::RenderFloatingUnitWindows(DSurface* pSurface)
 
 			int requiredHeightWithCameo = lastProducedSectionTop + cameoBoxH + boxPadding * 2;
 			boxHeight = std::max(boxHeight, requiredHeightWithCameo);
+		}
 
+		// Clamp card position to tactical view bounds so dynamic text growth never overflows into sidebar or bottom command bar
+		int minViewX = DSurface::ViewBounds.X;
+		int minViewY = DSurface::ViewBounds.Y;
+		int maxViewX = DSurface::ViewBounds.X + DSurface::ViewBounds.Width;
+		int maxViewY = DSurface::ViewBounds.Y + DSurface::ViewBounds.Height;
+		if (maxViewX <= minViewX) maxViewX = pSurface->GetWidth();
+		if (maxViewY <= minViewY) maxViewY = pSurface->GetHeight();
+
+		win.Position.X = std::clamp(win.Position.X, minViewX, std::max(minViewX, maxViewX - boxWidth));
+		win.Position.Y = std::clamp(win.Position.Y, minViewY, std::max(minViewY, maxViewY - boxHeight));
+
+		if (isFactoryCard && pLastType)
+		{
 			int cameoX = win.Position.X + boxWidth - cameoBoxW - boxPadding;
 			int cameoY = win.Position.Y + boxPadding + lastProducedSectionTop;
 
@@ -4347,6 +4443,17 @@ void ObserverUIClass::RenderFloatingWindows(DSurface* pSurface)
 		int boxPadding = 8;
 		int boxWidth = textWidth + boxPadding * 2 + 20; // 20px extra space for top-right [X] close button
 		int boxHeight = textHeight + boxPadding * 2 + 4;
+
+		// Clamp card position to tactical view bounds so dynamic text growth never overflows into sidebar or bottom command bar
+		int minViewX = DSurface::ViewBounds.X;
+		int minViewY = DSurface::ViewBounds.Y;
+		int maxViewX = DSurface::ViewBounds.X + DSurface::ViewBounds.Width;
+		int maxViewY = DSurface::ViewBounds.Y + DSurface::ViewBounds.Height;
+		if (maxViewX <= minViewX) maxViewX = pSurface->GetWidth();
+		if (maxViewY <= minViewY) maxViewY = pSurface->GetHeight();
+
+		win.Position.X = std::clamp(win.Position.X, minViewX, std::max(minViewX, maxViewX - boxWidth));
+		win.Position.Y = std::clamp(win.Position.Y, minViewY, std::max(minViewY, maxViewY - boxHeight));
 
 		// Update WindowRect & CloseBtnRect
 		win.WindowRect = RectangleStruct { win.Position.X, win.Position.Y, boxWidth, boxHeight };
@@ -5632,7 +5739,7 @@ static CoordStruct GetPlayerStartCoords(HouseClass* pHouse)
 		return CoordStruct::Empty;
 
 	// 1. Try Construction Yard or primary base building
-	for (auto const pBld : BuildingClass::Array)
+	for (auto const pBld : pHouse->Buildings)
 	{
 		if (pBld && pBld->Owner == pHouse && pBld->IsAlive && !pBld->InLimbo && pBld->Type)
 		{
@@ -5642,7 +5749,7 @@ static CoordStruct GetPlayerStartCoords(HouseClass* pHouse)
 	}
 
 	// 2. Try any alive building
-	for (auto const pBld : BuildingClass::Array)
+	for (auto const pBld : pHouse->Buildings)
 	{
 		if (pBld && pBld->Owner == pHouse && pBld->IsAlive && !pBld->InLimbo)
 			return pBld->GetCenterCoords();
@@ -5671,8 +5778,14 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 	if (this->DisplayMode == ObserverUIDisplayMode::Hidden && !this->HasFloatingWindows())
 		return false;
 
+	const bool showFloatingCards = (this->DisplayMode == ObserverUIDisplayMode::Full
+		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards
+		|| this->DisplayMode == ObserverUIDisplayMode::Minimal);
+	const bool showProduction = (this->DisplayMode == ObserverUIDisplayMode::Full
+		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards);
+
 	// 1. Handle clicks on Floating Unit Status Windows (in reverse order, top-most first)
-	for (int i = static_cast<int>(this->FloatingUnitWindows.size()) - 1; i >= 0; --i)
+	for (int i = showFloatingCards ? static_cast<int>(this->FloatingUnitWindows.size()) - 1 : -1; i >= 0; --i)
 	{
 		auto& win = this->FloatingUnitWindows[i];
 
@@ -5862,7 +5975,7 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 	}
 
 	// 2. Handle clicks on Floating Player Status Windows (in reverse order, top-most first)
-	for (int i = static_cast<int>(this->FloatingWindows.size()) - 1; i >= 0; --i)
+	for (int i = showFloatingCards ? static_cast<int>(this->FloatingWindows.size()) - 1 : -1; i >= 0; --i)
 	{
 		auto& win = this->FloatingWindows[i];
 
@@ -5896,7 +6009,7 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 	}
 
 	// 3. Handle Inspect Selected Button [-> [] <-] click
-	if (!isRightClick && this->InspectBtnRect.Width > 0 && mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+	if (showFloatingCards && !isRightClick && this->InspectBtnRect.Width > 0 && mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
 		&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height))
 	{
 		this->OpenFloatingWindowForSelectedObject();
@@ -5980,6 +6093,9 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 	int teamColorBarWidth = 10;
 
 	auto openFloatingWindowForCameo = [&](const ObserverCameoItem& item, bool isFromProductionPanel) {
+		if (!showFloatingCards)
+			return true;
+
 		if (item.IsSuperweapon && item.pSuperType)
 		{
 			auto itWin = std::find_if(this->FloatingUnitWindows.begin(), this->FloatingUnitWindows.end(), [&item](const ObserverFloatingUnitWindow& w) {
@@ -6098,6 +6214,9 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 		{
 			if (isRightClick)
 			{
+				if (!showFloatingCards)
+					return true;
+
 				// Right click on Section 1 opens/toggles a floating window for this player!
 				auto itWin = std::find_if(this->FloatingWindows.begin(), this->FloatingWindows.end(), [&row](const ObserverFloatingWindow& w) {
 					return w.pHouse == row.pHouse;
@@ -6161,7 +6280,8 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 		// Handle clicking on production cameos
 		for (auto& item : row.ProductionItems)
 		{
-			if (mousePos.X >= item.DisplayRect.X && mousePos.X <= item.DisplayRect.X + item.DisplayRect.Width
+			if (showProduction && row.ProdPanelRect.Width > 0
+				&& mousePos.X >= item.DisplayRect.X && mousePos.X <= item.DisplayRect.X + item.DisplayRect.Width
 				&& mousePos.Y >= item.DisplayRect.Y && mousePos.Y <= item.DisplayRect.Y + item.DisplayRect.Height
 				&& mousePos.X >= row.ProdPanelRect.X && mousePos.X <= row.ProdPanelRect.X + row.ProdPanelRect.Width)
 			{
@@ -6216,93 +6336,10 @@ bool ObserverUIClass::HandleMouseClick(Point2D mousePos, bool isRightClick)
 
 bool ObserverUIClass::HandleKeyPress(int keyVal)
 {
-	if (!this->IsSearchInputFocused)
-		return false;
-
-	// Ignore key release events (WWKey::Release = 0x800)
-	if ((keyVal & 0x800) != 0)
-		return true; // Swallow key release event so game doesn't process it
-
-	int vk = keyVal & 0xFF;
-	bool isShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 || (keyVal & 0x100) != 0;
-
-	// Check Enter or Escape -> Unfocus search box
-	if (vk == VK_RETURN || vk == VK_ESCAPE || vk == 0x0D || vk == 0x1B)
-	{
-		this->IsSearchInputFocused = false;
-		return true;
-	}
-
-	// Backspace
-	if (vk == VK_BACK || vk == 0x08)
-	{
-		if (!this->SearchFilterText.empty())
-		{
-			this->SearchFilterText.pop_back();
-			this->CollectPlayerData();
-		}
-		return true;
-	}
-
-	// Space
-	if (vk == VK_SPACE || vk == 0x20)
-	{
-		this->SearchFilterText += L' ';
-		this->CollectPlayerData();
-		return true;
-	}
-
-	// Letters A-Z / a-z
-	if ((vk >= 'A' && vk <= 'Z') || (vk >= 'a' && vk <= 'z'))
-	{
-		wchar_t baseChar = static_cast<wchar_t>(std::tolower(vk));
-		wchar_t ch = isShift ? static_cast<wchar_t>(std::toupper(vk)) : baseChar;
-		this->SearchFilterText += ch;
-		this->CollectPlayerData();
-		return true;
-	}
-
-	// Numbers 0-9
-	if (vk >= '0' && vk <= '9')
-	{
-		this->SearchFilterText += static_cast<wchar_t>(vk);
-		this->CollectPlayerData();
-		return true;
-	}
-
-	// Minus / Hyphen
-	if (vk == VK_OEM_MINUS || vk == 0xBD || vk == '-')
-	{
-		this->SearchFilterText += isShift ? L'_' : L'-';
-		this->CollectPlayerData();
-		return true;
-	}
-
-	// Period / Dot
-	if (vk == VK_OEM_PERIOD || vk == 0xBE || vk == '.')
-	{
-		this->SearchFilterText += isShift ? L'>' : L'.';
-		this->CollectPlayerData();
-		return true;
-	}
-
-	// Comma
-	if (vk == VK_OEM_COMMA || vk == 0xBC || vk == ',')
-	{
-		this->SearchFilterText += isShift ? L'<' : L',';
-		this->CollectPlayerData();
-		return true;
-	}
-
-	// Any printable ASCII character (32..126)
-	if (vk >= 32 && vk <= 126)
-	{
-		this->SearchFilterText += static_cast<wchar_t>(vk);
-		this->CollectPlayerData();
-		return true;
-	}
-
-	return true; // Swallow all other keys while search input box is focused
+	(void)keyVal;
+	// Character insertion and typematic repeat are handled in ObserverUIClass::Update().
+	// Swallow all game key events here while the search box is focused so hotkeys do not trigger.
+	return this->IsSearchInputFocused;
 }
 
 void ObserverUIClass::CenterOnNextBuilding(ObserverCameoItem& item)
@@ -6360,8 +6397,11 @@ bool ObserverUIClass::HandleMouseWheel(bool isUp)
 
 	Point2D mousePos = { WWMouseClass::Instance->GetX(), WWMouseClass::Instance->GetY() };
 
+	if (this->IsMouseOverFloatingCard(mousePos))
+		return true;
+
 	// 1. Check horizontal cameo scrolling if mouse is hovering over a specific player's cameos bar
-	if (this->DisplayMode == ObserverUIDisplayMode::Full)
+	if (this->DisplayMode == ObserverUIDisplayMode::Full || this->DisplayMode == ObserverUIDisplayMode::NoCardsOrProduction)
 	{
 		int scrollStep = 64; // 1 cameo width (60 + 4 padding)
 		for (auto& row : this->PlayerRows)
@@ -6404,6 +6444,41 @@ bool ObserverUIClass::HandleMouseWheel(bool isUp)
 	return false;
 }
 
+bool ObserverUIClass::IsMouseOverFloatingCard(Point2D mousePos) const
+{
+	const bool showFloatingCards = (this->DisplayMode == ObserverUIDisplayMode::Full
+		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards
+		|| this->DisplayMode == ObserverUIDisplayMode::Minimal);
+	if (!showFloatingCards)
+		return false;
+
+	for (const auto& win : this->FloatingUnitWindows)
+	{
+		if (win.IsDragging)
+			return true;
+
+		if (win.WindowRect.Width > 0 && mousePos.X >= win.WindowRect.X && mousePos.X <= (win.WindowRect.X + win.WindowRect.Width)
+			&& mousePos.Y >= win.WindowRect.Y && mousePos.Y <= (win.WindowRect.Y + win.WindowRect.Height))
+		{
+			return true;
+		}
+	}
+
+	for (const auto& win : this->FloatingWindows)
+	{
+		if (win.IsDragging)
+			return true;
+
+		if (win.WindowRect.Width > 0 && mousePos.X >= win.WindowRect.X && mousePos.X <= (win.WindowRect.X + win.WindowRect.Width)
+			&& mousePos.Y >= win.WindowRect.Y && mousePos.Y <= (win.WindowRect.Y + win.WindowRect.Height))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 bool ObserverUIClass::IsMouseHoveringUI() const
 {
 	if (!WWMouseClass::Instance)
@@ -6418,41 +6493,20 @@ bool ObserverUIClass::IsMouseHoveringUI() const
 		return false;
 
 	Point2D mousePos = { WWMouseClass::Instance->GetX(), WWMouseClass::Instance->GetY() };
+	const bool showFloatingCards = (this->DisplayMode == ObserverUIDisplayMode::Full
+		|| this->DisplayMode == ObserverUIDisplayMode::ProductionAndCards
+		|| this->DisplayMode == ObserverUIDisplayMode::Minimal);
 
-	// 0. If any window is currently being dragged, mouse is hovering UI!
-	for (const auto& win : this->FloatingUnitWindows)
+	if (this->IsMouseOverFloatingCard(mousePos))
 	{
-		if (win.IsDragging) return true;
-	}
-	for (const auto& win : this->FloatingWindows)
-	{
-		if (win.IsDragging) return true;
-	}
-
-	// 1. Check Floating Windows (Player & Unit cards)
-	for (const auto& win : this->FloatingUnitWindows)
-	{
-		if (win.WindowRect.Width > 0 && mousePos.X >= win.WindowRect.X && mousePos.X <= (win.WindowRect.X + win.WindowRect.Width)
-			&& mousePos.Y >= win.WindowRect.Y && mousePos.Y <= (win.WindowRect.Y + win.WindowRect.Height))
-		{
-			return true;
-		}
-	}
-
-	for (const auto& win : this->FloatingWindows)
-	{
-		if (win.WindowRect.Width > 0 && mousePos.X >= win.WindowRect.X && mousePos.X <= (win.WindowRect.X + win.WindowRect.Width)
-			&& mousePos.Y >= win.WindowRect.Y && mousePos.Y <= (win.WindowRect.Y + win.WindowRect.Height))
-		{
-			return true;
-		}
+		return true;
 	}
 
 	if (!isUIOpen)
 		return false;
 
 	// 2. Check Inspect Button
-	if (this->InspectBtnRect.Width > 0 && mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
+	if (showFloatingCards && this->InspectBtnRect.Width > 0 && mousePos.X >= this->InspectBtnRect.X && mousePos.X <= (this->InspectBtnRect.X + this->InspectBtnRect.Width)
 		&& mousePos.Y >= this->InspectBtnRect.Y && mousePos.Y <= (this->InspectBtnRect.Y + this->InspectBtnRect.Height))
 	{
 		return true;

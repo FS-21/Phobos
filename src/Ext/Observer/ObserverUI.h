@@ -25,9 +25,11 @@ struct PlayerEconomySample
 
 enum class ObserverUIDisplayMode : int
 {
-	Full = 0,      // Phase 1: Full UI (All panels + floating windows + inspect button)
-	Minimal,       // Phase 2: Minimal View (Only floating windows + bottom-left inspect button)
-	Hidden,        // Phase 3: Hidden (Everything hidden)
+	Full = 0,               // Phase 1: Full UI (All panels + floating windows + inspect button)
+	NoCardsOrProduction,    // Phase 2: Standard UI without production panel and without floating cards
+	ProductionAndCards,     // Phase 3: Player list + left-aligned Production panel + floating cards + inspect button
+	Minimal,                // Phase 4: Minimal View (Only floating windows + bottom-left inspect button)
+	Hidden,                 // Phase 5: Hidden (Everything hidden)
 	Count
 };
 
@@ -153,8 +155,10 @@ public:
 	bool HandleKeyPress(int keyVal);
 	bool HandleMouseWheel(bool isUp);
 	bool IsMouseHoveringUI() const;
+	bool IsMouseOverFloatingCard(Point2D mousePos) const;
 	bool IsSearchFocused() const { return this->IsSearchInputFocused; }
 	ObserverUIDisplayMode GetDisplayMode() const { return this->DisplayMode; }
+	void SetDisplayMode(ObserverUIDisplayMode mode) { this->DisplayMode = mode; }
 	void ClearData();
 
 	void RenderFloatingWindows(DSurface* pSurface);
