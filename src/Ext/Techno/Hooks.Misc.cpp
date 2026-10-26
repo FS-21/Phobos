@@ -892,12 +892,40 @@ static void __fastcall DisplayClass_Submit_Wrapper(DisplayClass* pThis, void* _,
 DEFINE_FUNCTION_JUMP(CALL, 0x54B18E, DisplayClass_Submit_Wrapper);  // JumpjetLocomotionClass_Process
 DEFINE_FUNCTION_JUMP(CALL, 0x4CD4E7, DisplayClass_Submit_Wrapper);  // FlyLocomotionClass_Update
 
+// Allow all amphibious/water infantry (not only MovementZone=AmphibiousDestroyer) to use water sequences and Enter/LeaveWaterSound.
+DEFINE_HOOK(0x51D793, InfantryClass_DoAction_WaterCheck, 0x6)
+{
+	enum { CheckWater = 0x51D7A6, SkipWater = 0x51D8BF };
+
+	GET(InfantryClass*, pThis, ESI);
+
+	if (pThis->Transporter)
+		return SkipWater;
+
+	auto const pType = pThis->Type;
+	const auto mz = pType->MovementZone;
+
+	if (mz == MovementZone::AmphibiousDestroyer
+		|| mz == MovementZone::AmphibiousCrusher
+		|| mz == MovementZone::Amphibious
+		|| mz == MovementZone::Water
+		|| mz == MovementZone::WaterBeach
+		|| pType->SpeedType == SpeedType::Amphibious
+		|| pType->SpeedType == SpeedType::Float
+		|| pType->SpeedType == SpeedType::FloatBeach)
+	{
+		return CheckWater;
+	}
+
+	return SkipWater;
+}
+
 // Oct 26, 2024 - Starkku: Fixes SecondaryFire / SecondaryProne sequences not remapping to WetAttack in water.
 // Ideally there would be WetAttackSecondary but adding new sequences would be a big undertaking.
 // Also adds a toggle for not using water sequences at all
 DEFINE_HOOK(0x51D7E0, InfantryClass_DoAction_Water, 0x5)
 {
-	enum { Continue= 0x51D7EC, SkipWaterSequences = 0x51D842, UseSwim = 0x51D83D, UseWetAttack = 0x51D82F };
+	enum { Continue= 0x51D7EC, SkipWaterSequences = 0x51D842, UseSwim = 0x51D83D, UseTread = 0x51D836, UseWetAttack = 0x51D82F };
 
 	GET(InfantryClass*, pThis, ESI);
 	GET(const Sequence, sequence, EDI);
@@ -910,11 +938,21 @@ DEFINE_HOOK(0x51D7E0, InfantryClass_DoAction_Water, 0x5)
 
 	if (sequence == Sequence::Walk || sequence == Sequence::Crawl) // Restore overridden instructions.
 		return UseSwim;
+	else if (sequence == Sequence::Guard || sequence == Sequence::Down || sequence == Sequence::Up)
+	{
+		if (sequence == Sequence::Up)
+			pThis->Crawling = false;
+
+		return (pThis->Locomotor && pThis->Locomotor->Is_Moving_Now()) ? UseSwim : UseTread;
+	}
 	else if ((sequence == Sequence::SecondaryFire || sequence == Sequence::SecondaryProne) && pTypeExt->SecondaryFireSequenceLandOnly.Get(RulesExt::Global()->SecondaryFireSequenceLandOnly))
 		return UseWetAttack;
 
 	return Continue;
 }
+
+// Transition from Swim through Ready so stopping on land does not leave infantry playing Tread on dry land.
+DEFINE_JUMP(LJMP, 0x5212E5, 0x5212FC);
 
 static bool __fastcall LocomotorCheckForBunkerable(TechnoTypeClass* pType)
 {
