@@ -608,6 +608,20 @@ int BuildingExt::Try_Place(BuildingClass* pBuilding, CellStruct cell)
 		// Check if we placed a refinery.
 		// If yes, check if we were expanding. If yes, the expanding is done.
 		// If not, but we're close to an expansion field, then flag us to build a refinery as our next building.
+		if (pBuilding->Type->ResourceDestination && houseExt->IsBuildingRecoveryRefinery)
+		{
+			if (const auto buildingExt = ExtMap.Find(pBuilding))
+			{
+				buildingExt->IsHarvesterRecoveryRefinery = true;
+				buildingExt->HarvesterRecoveryPlacedFrame = Unsorted::CurrentFrame;
+			}
+			houseExt->IsBuildingRecoveryRefinery = false;
+			houseExt->NextRefineryPlacementLocation = CellStruct(0, 0);
+			houseExt->NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 900;
+			Debug::Log("AdvAI: House %d placed temporary harvester recovery refinery %s at (%d,%d). Will sell once FreeUnit harvester spawns.\n",
+					   owner->ArrayIndex, pBuilding->Type->ID, cell.X, cell.Y);
+		}
+		else
 		if (pBuilding->Type->ResourceDestination)
 		{
 			if (houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0)
@@ -1766,7 +1780,7 @@ int BuildingExt::Refinery_Placement_Cell_Value(CellStruct cell, BuildingClass* p
 	double value = 0;
 
 	// If we have nowhere to expand, then just try placing it somewhere central, hopefully it's safe there.
-	if (houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0)
+	if (houseExt->IsBuildingRecoveryRefinery || houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0)
 	{
 		CellStruct conyardCell;
 		if (pOwner->ConYards.Count > 0 && pOwner->ConYards[0] != nullptr)
@@ -1821,7 +1835,7 @@ RectangleStruct BuildingExt::GetRefinerySearchRect(HouseClass* pHouse, BuildingT
 			}
 		}
 
-		if (pClosestPivot != nullptr)
+		if (!houseExt->IsBuildingRecoveryRefinery && pClosestPivot != nullptr)
 		{
 			int xMin = INT_MAX, yMin = INT_MAX, xMax = INT_MIN, yMax = INT_MIN;
 			bool foundAny = false;
@@ -1885,7 +1899,7 @@ CellStruct BuildingExt::Get_Best_Refinery_Placement_Position(BuildingClass* pBui
 			}
 		}
 
-		if (pClosestPivot != nullptr)
+		if (!houseExt->IsBuildingRecoveryRefinery && pClosestPivot != nullptr)
 		{
 			const CellStruct pivotCoords = pClosestPivot->GetMapCoords();
 
@@ -1955,7 +1969,7 @@ CellStruct BuildingExt::Get_Best_Refinery_Placement_Position(BuildingClass* pBui
 
 	const CellStruct placementCell = Find_Best_Building_Placement_Cell(baseArea, pBuilding, Refinery_Placement_Cell_Value, 0);
 
-	if (placementCell.X > 0 && placementCell.Y > 0 && houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
+	if (!houseExt->IsBuildingRecoveryRefinery && placementCell.X > 0 && placementCell.Y > 0 && houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0)
 	{
 		const BuildingClass* pOurConYard = pOwner->ConYards.Count > 0 ? pOwner->ConYards[0] : nullptr;
 		const CellStruct conyardCell = pOurConYard != nullptr ? pOurConYard->GetMapCoords() : pOwner->Base_Center();
@@ -2269,7 +2283,7 @@ int BuildingExt::Towards_Expansion_Placement_Cell_Value(CellStruct cell, Buildin
 	const auto houseExt = HouseExt::ExtMap.Find(pOwner);
 
 	// If we have nowhere to expand, then just try placing it somewhere that's far from our base (balanced).
-	if (houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0)
+	if (houseExt->IsBuildingRecoveryRefinery || houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0)
 	{
 		CellStruct conyardCell;
 		if (pOwner->ConYards.Count > 0 && pOwner->ConYards[0] != nullptr)
@@ -2782,7 +2796,7 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 							}
 						}
 
-						if (tooCloseToRefinery)
+						if (tooCloseToRefinery && !houseExt->IsBuildingRecoveryRefinery)
 							continue;
 					}
 
@@ -2814,6 +2828,9 @@ CellStruct BuildingExt::Get_Best_Expansion_Placement_Position_Helper(HouseClass*
 			}
 		}
 		double const nearestDist = sqrt(nearestExistingDistSq);
+
+		if (bestCell.X <= 0 && bestCell.Y <= 0 && houseExt->IsBuildingRecoveryRefinery)
+			return CellStruct::Empty;
 
 		if (bestCell.X <= 0 && bestCell.Y <= 0)
 			Debug::Log("AdvAI ExpansionPlacement: House %d: No valid buildable cell found for %s near any anchor building towards waypoint (%d,%d)\n",
@@ -3329,7 +3346,7 @@ CellStruct BuildingExt::Get_Best_Defense_Placement_Position(BuildingClass* pBuil
 		pEnemy = Find_Closest_Opponent(pOwner);
 
 	// Feature 6: ONLY in PASSIVE mode (no active expansion target), use perimeter and directional target angle spread:
-	if (houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0)
+	if (houseExt->IsBuildingRecoveryRefinery || houseExt->NextExpansionPointLocation.X <= 0 || houseExt->NextExpansionPointLocation.Y <= 0)
 	{
 		const int roll = ScenarioClass::Instance->Random.RandomRanged(0, 99);
 		if (roll < 40 && pEnemy != nullptr) // 40% chance: Towards enemy with +-45 deg spread
@@ -3408,6 +3425,16 @@ CellStruct BuildingExt::Get_Best_Placement_Position(BuildingClass* pBuilding)
 	if (pBuilding->Type->ResourceDestination)
 	{
 		const auto houseExt = HouseExt::ExtMap.Find(pBuilding->Owner);
+		if (houseExt->IsBuildingRecoveryRefinery)
+		{
+			if (houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0)
+			{
+				const CellStruct expCell = Get_Best_Expansion_Placement_Position(pBuilding);
+				if (expCell.X > 0 && expCell.Y > 0)
+					return expCell;
+			}
+			return Get_Best_Refinery_Placement_Position(pBuilding);
+		}
 		if ((houseExt->NextExpansionPointLocation.X > 0 && houseExt->NextExpansionPointLocation.Y > 0) ||
 			(houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0))
 		{
@@ -3685,7 +3712,8 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 						{
 							BuildingClass* pOccBld = pCell->GetBuilding();
 
-							if (pOccBld && pOccBld->Owner == pBuilding->Owner && pOccBld->Type->IsBaseDefense)
+							if (pOccBld && pOccBld->Owner == pBuilding->Owner &&
+								(pOccBld->Type->IsBaseDefense || pOccBld->Type->Refinery || pOccBld->Type->ResourceDestination))
 								stillObstructed = true;
 
 							// If any friendly units/infantry are on the footprint, force them to scatter
@@ -3792,6 +3820,139 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		}
 	}
 
+	auto tryReplaceExistingRefineryForHarvester = [&]() -> bool
+	{
+		if (houseExt == nullptr || !houseExt->IsBuildingRecoveryRefinery || !pBuilding->Type->ResourceDestination)
+			return false;
+
+		const int bW = pBuilding->Type->GetFoundationWidth();
+		const int bH = pBuilding->Type->GetFoundationHeight(true);
+		const int adj = std::max(1, pBuilding->Type->Adjacent);
+
+		std::vector<BuildingClass*> damagedIdleCandidates;
+		std::vector<BuildingClass*> idleCandidates;
+		std::vector<BuildingClass*> fallbackCandidates;
+
+		for (const auto pOldRef : pBuilding->Owner->Buildings)
+		{
+			if (!pOldRef || !pOldRef->IsAlive || pOldRef->InLimbo || pOldRef == pBuilding)
+				continue;
+
+			if ((!pOldRef->Type->Refinery && !pOldRef->Type->ResourceDestination) ||
+				pOldRef->Type->ResourceGatherer ||
+				pOldRef->Type->Enslaves != nullptr ||
+				pOldRef->Type->UndeploysInto != nullptr)
+			{
+				continue;
+			}
+
+			if (pOldRef->CurrentMission == Mission::Construction ||
+				pOldRef->QueuedMission == Mission::Construction ||
+				pOldRef->CurrentMission == Mission::Selling ||
+				pOldRef->QueuedMission == Mission::Selling)
+			{
+				continue;
+			}
+
+			if (pOldRef->Type->GetFoundationWidth() != bW ||
+				pOldRef->Type->GetFoundationHeight(true) != bH ||
+				pOldRef->Type->Foundation != pBuilding->Type->Foundation)
+			{
+				continue;
+			}
+
+			const CellStruct oldCell = pOldRef->GetMapCoords();
+			bool hasAdjacentAnchor = false;
+			for (const auto pOther : pBuilding->Owner->Buildings)
+			{
+				if (!pOther || !pOther->IsAlive || pOther->InLimbo || pOther == pOldRef || pOther == pBuilding)
+					continue;
+
+				if (!IsAIBaseNormal(pOther->Type) ||
+					pOther->CurrentMission == Mission::Selling ||
+					pOther->QueuedMission == Mission::Selling)
+				{
+					continue;
+				}
+
+				const CellStruct otherCell = pOther->GetMapCoords();
+				const int otherW = pOther->Type->GetFoundationWidth();
+				const int otherH = pOther->Type->GetFoundationHeight(true);
+
+				const int gapX = std::max(0, std::max(static_cast<int>(oldCell.X) - (static_cast<int>(otherCell.X) + otherW - 1),
+													  static_cast<int>(otherCell.X) - (static_cast<int>(oldCell.X) + bW - 1)));
+				const int gapY = std::max(0, std::max(static_cast<int>(oldCell.Y) - (static_cast<int>(otherCell.Y) + otherH - 1),
+													  static_cast<int>(otherCell.Y) - (static_cast<int>(oldCell.Y) + bH - 1)));
+
+				if (std::max(gapX, gapY) <= adj)
+				{
+					hasAdjacentAnchor = true;
+					break;
+				}
+			}
+
+			if (!hasAdjacentAnchor)
+				continue;
+
+			fallbackCandidates.push_back(pOldRef);
+			if (!pOldRef->HasAnyLink())
+			{
+				idleCandidates.push_back(pOldRef);
+				if (pOldRef->Health < pOldRef->Type->Strength)
+					damagedIdleCandidates.push_back(pOldRef);
+			}
+		}
+
+		const auto& pool = !damagedIdleCandidates.empty()
+			? damagedIdleCandidates
+			: (!idleCandidates.empty() ? idleCandidates : fallbackCandidates);
+
+		if (pool.empty())
+			return false;
+
+		const int randIdx = ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(pool.size()) - 1);
+		BuildingClass* pChosenOldRef = pool[randIdx];
+		const CellStruct replaceCell = pChosenOldRef->GetMapCoords();
+
+		Debug::Log("AdvAI HarvesterRecovery: House %d selling existing refinery %s at (%d,%d) to place new refinery %s in its exact spot.\n",
+			pBuilding->Owner->ArrayIndex, pChosenOldRef->Type->ID, replaceCell.X, replaceCell.Y, pBuilding->Type->ID);
+
+		pChosenOldRef->Sell(1);
+
+		for (int dx = 0; dx < bW; ++dx)
+		{
+			for (int dy = 0; dy < bH; ++dy)
+			{
+				CellStruct checkCell = replaceCell + CellStruct(static_cast<short>(dx), static_cast<short>(dy));
+				if (CellClass* pCell = MapClass::Instance.TryGetCellAt(checkCell))
+					pCell->ScatterContent(GeneralUtils::CoordinatesFromCell(checkCell), true, true, false);
+			}
+		}
+
+		houseExt->PendingClearanceCell = replaceCell;
+		houseExt->PendingClearanceType = pBuilding->Type;
+		houseExt->PendingClearanceFoundationWidth = bW;
+		houseExt->PendingClearanceFoundationHeight = bH;
+		houseExt->PendingClearanceFoundation = pBuilding->Type->Foundation;
+		houseExt->ClearanceAttempts = 0;
+		houseExt->NextClearanceCheckFrame = Unsorted::CurrentFrame + 60;
+		houseExt->IsBuildingRecoveryRefinery = false; // The new refinery permanently replaces the sold one!
+		houseExt->NextRefineryPlacementLocation = CellStruct(0, 0);
+		houseExt->NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 900;
+
+		PublishPlacementPreview(houseExt, pBuilding->Type, replaceCell);
+		return true;
+	};
+
+	// Variant A (50% roll): Sell an existing static refinery at random (preferring damaged/idle ones)
+	// and place the new refinery in its exact footprint as a permanent replacement.
+	if (houseExt != nullptr && houseExt->IsBuildingRecoveryRefinery && pBuilding->Type->ResourceDestination &&
+		ScenarioClass::Instance->Random.RandomRanged(0, 99) < 50)
+	{
+		if (tryReplaceExistingRefineryForHarvester())
+			return 1; // Keep building waiting in factory while old refinery finishes selling
+	}
+
 	// Case 3: Standard 2-Phase placement for non-defense buildings (Phase 1: Own base & expansions first)
 	if (placementCell.X <= 0 || placementCell.Y <= 0)
 	{
@@ -3811,6 +3972,15 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 
 	if (houseExt != nullptr)
 		houseExt->TargetAlliedFallbackHouse = nullptr;
+
+	// Fallback for Harvester Recovery: if no free temporary spot was found in base/expansions,
+	// sell an existing static refinery and place the new one in its exact spot.
+	if ((placementCell.X <= 0 || placementCell.Y <= 0) &&
+		houseExt != nullptr && houseExt->IsBuildingRecoveryRefinery && pBuilding->Type->ResourceDestination)
+	{
+		if (tryReplaceExistingRefineryForHarvester())
+			return 1;
+	}
 
 	const auto houseExtLog = houseExt;
 	if (houseExtLog != nullptr)
@@ -3957,7 +4127,22 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		{
 			if (houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0)
 			{
+			if (houseExt->IsBuildingRecoveryRefinery)
+			{
+				houseExt->IsBuildingRecoveryRefinery = false;
+				houseExt->NextRefineryPlacementLocation = CellStruct(0, 0);
+				houseExt->NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 900;
+			}
+			else if (houseExt->NextRefineryPlacementLocation.X > 0 && houseExt->NextRefineryPlacementLocation.Y > 0)
+			{
 				HouseExt::AdvAI_Add_Failed_Expansion_Point(pBuilding->Owner, houseExt->NextRefineryPlacementLocation);
+				houseExt->NextRefineryPlacementLocation = CellStruct(0, 0);
+			}
+			}
+			if (houseExt->IsBuildingRecoveryRefinery)
+			{
+				houseExt->IsBuildingRecoveryRefinery = false;
+				houseExt->NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 900;
 				houseExt->NextRefineryPlacementLocation = CellStruct(0, 0);
 			}
 		}
@@ -4024,7 +4209,9 @@ int BuildingExt::Exit_Object_Custom_Position(BuildingClass* pBuilding)
 		{
 			if (pBuilding->Type->ResourceDestination)
 			{
-				houseExt->ConsecutiveResourceBuilds++;
+				const auto placedBldExt = ExtMap.Find(pBuilding);
+				if (placedBldExt == nullptr || !placedBldExt->IsHarvesterRecoveryRefinery)
+					houseExt->ConsecutiveResourceBuilds++;
 				if (houseExt->ConsecutiveResourceBuilds >= 2)
 				{
 					houseExt->ConsecutiveCombatBuilds = 0;

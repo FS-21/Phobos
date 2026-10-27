@@ -38,6 +38,8 @@ public:
 	int LastCombatFrame;
 	TechnoClass* LastProducedTechno;
 	TechnoTypeClass* LastProducedType;
+	bool IsHarvesterRecoveryRefinery;
+	int HarvesterRecoveryPlacedFrame;
 
 	/**
 	*  If this building was built by the AI for it to reach an expansion
@@ -72,6 +74,8 @@ public:
 		, LastCombatFrame { 0 }
 		, LastProducedTechno { nullptr }
 		, LastProducedType { nullptr }
+		, IsHarvesterRecoveryRefinery { false }
+		, HarvesterRecoveryPlacedFrame { 0 }
 	{ }
 
 	// typed owner accessor (shadows the TechnoClass one from the base)

@@ -1822,6 +1822,25 @@ bool HouseExt::AdvAI_Can_Build_Building(HouseClass* pHouse,
 			}
 
 			const bool isRefinery = pBuildingType->Refinery || pBuildingType->ResourceDestination;
+			const auto pHouseExtCheck = ExtMap.Find(pHouse);
+			const bool isRecoveryRefineryCheck = isRefinery && pHouseExtCheck != nullptr && pHouseExtCheck->IsBuildingRecoveryRefinery;
+			if (isRecoveryRefineryCheck)
+			{
+				for (const auto pExistingRef : pHouse->Buildings)
+				{
+					if (pExistingRef && pExistingRef->IsAlive && !pExistingRef->InLimbo &&
+						(pExistingRef->Type->Refinery || pExistingRef->Type->ResourceDestination) &&
+						!pExistingRef->Type->ResourceGatherer &&
+						pExistingRef->Type->Enslaves == nullptr &&
+						pExistingRef->Type->UndeploysInto == nullptr &&
+						pExistingRef->Type->GetFoundationWidth() == pBuildingType->GetFoundationWidth() &&
+						pExistingRef->Type->GetFoundationHeight(true) == pBuildingType->GetFoundationHeight(true) &&
+						pExistingRef->Type->Foundation == pBuildingType->Foundation)
+					{
+						return true;
+					}
+				}
+			}
 			const bool canUseCache = (pBuildingType->PowersUpBuilding[0] == '\0' &&
 									  static_cast<int>(pBuildingType->Foundation) != 0x7F &&
 									  !pBuildingType->PlaceAnywhere);
@@ -2830,6 +2849,290 @@ HouseExt::AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse)
 			Debug::Log("AdvAI: Making AI build %s because it has 0 refineries\n",
 					   pRefineryToBuild->Name);
 			return pRefineryToBuild;
+		}
+
+		// Point 3b: If we skipped the 0-refineries emergency (we have >= 1 refinery),
+		// evaluate late-game / low-economy Harvester & Mobile Refinery Recovery right here
+		// before paranoia defenses or multi-factory scaling can drain our remaining credits.
+		if (!isUnderThreat)
+		{
+			const bool hasBasicFactory =
+				TechTreeTypeClass::CountTotalOwnedBuildings(pHouse, TechTreeTypeClass::BuildType::BuildWeapons) >= 1 ||
+				TechTreeTypeClass::CountTotalOwnedBuildings(pHouse, TechTreeTypeClass::BuildType::BuildNavalYard) >= 1;
+			const bool isMobileOnly = AdvAI_IsMobileRefineryHouse(pHouse);
+
+			if (isMobileOnly && (refineryCount <= 1 || hasBasicFactory))
+			{
+				const int targetMobileRefineries = AdvAI_GetMobileRefineryTargetCount(pHouse);
+				if (static_cast<int>(refineryCount) < targetMobileRefineries &&
+					Unsorted::CurrentFrame >= houseExt->NextHarvesterRecoveryFrame &&
+					!IsBuildingTypeQueued(pHouse, TechTreeTypeClass::BuildType::BuildRefinery))
+				{
+					int minMobileCost = 2000;
+					if (pPrimaryTechTree != nullptr)
+					{
+						for (const auto pRef : pPrimaryTechTree->BuildRefinery)
+						{
+							if (pRef != nullptr)
+								minMobileCost = std::min(minMobileCost, pRef->GetActualCost(pHouse));
+						}
+					}
+
+					if (pHouse->Available_Money() <= 3 * minMobileCost &&
+						pHouse->Available_Money() >= minMobileCost)
+					{
+						const int recoveryChance = (refineryCount <= 1) ? 70 : 45;
+						if (ScenarioClass::Instance->Random.RandomRanged(0, 99) < recoveryChance)
+						{
+							const BuildingTypeClass* pMobileRecovery = AdvAI_BuildAtLeastNOfSideAndMInTotal(
+								pHouse, pPrimaryTechTree,
+								TechTreeTypeClass::BuildType::BuildRefinery, 1, targetMobileRefineries,
+								slaveMinerCount);
+							if (pMobileRecovery != nullptr)
+							{
+								houseExt->NextExpansionPointLocation = CellStruct(0, 0);
+								houseExt->ShouldBuildRefinery = false;
+								houseExt->NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 600;
+								Debug::Log("AdvAI HarvesterRecovery: Mobile refinery house %d (%s) low economy (%d <= %d) and mobile refineries (%d < %d). Building %s.\n",
+										   pHouse->ArrayIndex, pHouse->Type->ID, pHouse->Available_Money(), 3 * minMobileCost,
+										   static_cast<int>(refineryCount), targetMobileRefineries, pMobileRecovery->Name);
+								return pMobileRecovery;
+							}
+						}
+						else
+						{
+							houseExt->NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 300;
+						}
+					}
+				}
+			}
+			else if (!isMobileOnly &&
+					 Unsorted::CurrentFrame >= houseExt->NextHarvesterRecoveryFrame &&
+					 !houseExt->IsBuildingRecoveryRefinery &&
+					 !IsBuildingTypeQueued(pHouse, TechTreeTypeClass::BuildType::BuildRefinery))
+			{
+				int staticRefineryCount = 0;
+				bool hasActiveRecoveryRefinery = false;
+
+				for (const auto pBld : pHouse->Buildings)
+				{
+					if (pBld && pBld->IsAlive && !pBld->InLimbo)
+					{
+						const auto bldExt = BuildingExt::ExtMap.Find(pBld);
+						if (bldExt && bldExt->IsHarvesterRecoveryRefinery)
+						{
+							hasActiveRecoveryRefinery = true;
+							break;
+						}
+
+						if ((pBld->Type->Refinery || pBld->Type->ResourceDestination) &&
+							!pBld->Type->ResourceGatherer &&
+							pBld->Type->Enslaves == nullptr &&
+							pBld->Type->UndeploysInto == nullptr &&
+							pBld->CurrentMission != Mission::Selling &&
+							pBld->QueuedMission != Mission::Selling)
+						{
+							staticRefineryCount++;
+						}
+					}
+				}
+
+				if (staticRefineryCount >= 1 && !hasActiveRecoveryRefinery)
+				{
+					int harvesterCount = 0;
+					for (const auto pUnit : UnitClass::Array)
+					{
+						if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive &&
+							(pUnit->Type->Harvester || pUnit->Type->ResourceGatherer) &&
+							pUnit->Type->Enslaves == nullptr &&
+							(pUnit->Type->DeploysInto == nullptr || !pUnit->Type->DeploysInto->ResourceDestination))
+						{
+							harvesterCount++;
+						}
+					}
+
+					// Require either 0 harvesters (critical emergency) or at least 1 basic factory
+					// so we do not interrupt the initial opening build order (Power -> Barracks -> 1st Refinery -> 1st WF).
+					if (harvesterCount == 0 || hasBasicFactory)
+					{
+						BuildingTypeClass* pRecoveryRefinery = nullptr;
+						int minRefineryCost = INT_MAX;
+
+						auto evaluateCandidateRefinery = [&](BuildingTypeClass* pRef)
+						{
+							if (pRef == nullptr || pRef->ResourceGatherer ||
+								pRef->Enslaves != nullptr || pRef->UndeploysInto != nullptr ||
+								(!pRef->Refinery && !pRef->ResourceDestination))
+							{
+								return;
+							}
+
+							if (pRef->FreeUnit == nullptr ||
+								(!pRef->FreeUnit->Harvester && !pRef->FreeUnit->ResourceGatherer))
+							{
+								return;
+							}
+
+							houseExt->IsBuildingRecoveryRefinery = true;
+							const bool canBuildRecoveryRef = AdvAI_Can_Build_Building(pHouse, pRef, true, true);
+							houseExt->IsBuildingRecoveryRefinery = false;
+							if (!canBuildRecoveryRef)
+								return;
+
+							const int refCost = pRef->GetActualCost(pHouse);
+							if (refCost > 0 && refCost < minRefineryCost)
+							{
+								minRefineryCost = refCost;
+								pRecoveryRefinery = pRef;
+							}
+						};
+
+						if (pPrimaryTechTree != nullptr)
+						{
+							for (const auto pRef : pPrimaryTechTree->BuildRefinery)
+								evaluateCandidateRefinery(pRef);
+						}
+
+						for (const auto pRef : RulesClass::Instance->BuildRefinery)
+							evaluateCandidateRefinery(pRef);
+
+						if (pRecoveryRefinery != nullptr && minRefineryCost < INT_MAX)
+						{
+							const int diffIdx = std::clamp(static_cast<int>(pHouse->GetAIDifficultyIndex()), 0, 2);
+							int harvPerRef = 2;
+							if (RulesClass::Instance->HarvestersPerRefinery.Count > diffIdx)
+								harvPerRef = std::max(1, RulesClass::Instance->HarvestersPerRefinery[diffIdx]);
+							else if (RulesClass::Instance->HarvestersPerRefinery.Count > 0)
+								harvPerRef = std::max(1, RulesClass::Instance->HarvestersPerRefinery[0]);
+
+							const int targetHarvesters = staticRefineryCount * harvPerRef;
+							const int currentMoney = pHouse->Available_Money();
+
+							const bool canAffordRecovery = (currentMoney >= minRefineryCost) ||
+								(harvesterCount >= 1 && currentMoney >= (minRefineryCost * 3) / 4);
+
+							if (harvesterCount < targetHarvesters &&
+								currentMoney <= 3 * minRefineryCost &&
+								canAffordRecovery)
+							{
+								if (!SectorsInitialized)
+									InitializeGlobalSectors();
+
+								const BuildingClass* pOurConYard = pHouse->ConYards.Count > 0 ? pHouse->ConYards[0] : nullptr;
+								const CellStruct conyardCell = pOurConYard != nullptr ? pOurConYard->GetMapCoords() : pHouse->Base_Center();
+
+								bool hasReachableTiberium = false;
+								CellStruct bestSafeTiberiumCell = CellStruct(0, 0);
+								double bestSafeDist = std::numeric_limits<double>::max();
+
+								auto evaluateResourcePoint = [&](const CellStruct& resCoords)
+								{
+									if (resCoords.X <= 0 || resCoords.Y <= 0)
+										return;
+
+									if (!GeneralUtils::AreZonesConnected(conyardCell, resCoords, MovementZone::Normal))
+										return;
+
+									hasReachableTiberium = true;
+
+									double minOwnBldDist = std::numeric_limits<double>::max();
+									for (const auto pBld : pHouse->Buildings)
+									{
+										if (pBld && pBld->IsAlive && !pBld->InLimbo)
+										{
+											const auto pBldTypeExt = BuildingTypeExt::ExtMap.Find(pBld->Type);
+											if (pBldTypeExt && pBldTypeExt->AIBaseNormal.Get(pBld->Type->BaseNormal))
+											{
+												const double d = resCoords.DistanceFrom(pBld->GetMapCoords());
+												if (d < minOwnBldDist)
+													minOwnBldDist = d;
+											}
+										}
+									}
+
+									if (minOwnBldDist > 24.0 || minOwnBldDist >= bestSafeDist)
+										return;
+
+									if (houseExt->LastAttackerCoords.X > 0 && resCoords.DistanceFromSquared(houseExt->LastAttackerCoords) < 196.0)
+										return;
+									if (houseExt->FrontlineThreatCoords.X > 0 && resCoords.DistanceFromSquared(houseExt->FrontlineThreatCoords) < 196.0)
+										return;
+
+									for (const auto& unsafeZone : houseExt->UnsafePlacementZones)
+									{
+										if (Unsorted::CurrentFrame <= unsafeZone.ExpiryFrame &&
+											resCoords.DistanceFromSquared(unsafeZone.Coords) < 144.0)
+										{
+											return;
+										}
+									}
+
+									for (const auto pOtherHouse : HouseClass::Array)
+									{
+										if (pOtherHouse && pOtherHouse != pHouse && !pHouse->IsAlliedWith(pOtherHouse) &&
+											!HouseExt::IsNeutralOrSpecialHouse(pOtherHouse))
+										{
+											for (const auto pEnemyBld : pOtherHouse->Buildings)
+											{
+												if (pEnemyBld && pEnemyBld->IsAlive && !pEnemyBld->InLimbo &&
+													resCoords.DistanceFromSquared(pEnemyBld->GetMapCoords()) < 256.0)
+												{
+													return;
+												}
+											}
+										}
+									}
+
+									bestSafeDist = minOwnBldDist;
+									bestSafeTiberiumCell = resCoords;
+								};
+
+								for (auto& sector : GlobalResourceSectors)
+								{
+									if (VerifyAndRefreshSector(sector))
+										evaluateResourcePoint(sector.CachedCoords);
+								}
+
+								for (const auto& treeCoords : GlobalTiberiumTrees)
+								{
+									if (MapClass::Instance.CoordinatesLegal(treeCoords))
+									{
+										if (const CellClass* pCell = MapClass::Instance.GetCellAt(treeCoords))
+										{
+											const TerrainClass* pTerrain = pCell->GetTerrain(false);
+											if (pTerrain && pTerrain->IsAlive && pTerrain->Type->SpawnsTiberium)
+												evaluateResourcePoint(treeCoords);
+										}
+									}
+								}
+
+								if (hasReachableTiberium)
+								{
+									const int recoveryChance = (harvesterCount == 0) ? 70 : 40;
+									if (ScenarioClass::Instance->Random.RandomRanged(0, 99) < recoveryChance)
+									{
+										houseExt->IsBuildingRecoveryRefinery = true;
+										houseExt->NextRefineryPlacementLocation = bestSafeTiberiumCell;
+										houseExt->NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 900;
+
+										Debug::Log("AdvAI HarvesterRecovery: House %d (%s) low economy (%d <= %d) and harvesters (%d < %d for %d refineries). "
+												   "Building recovery refinery %s (safe Tiberium target: (%d,%d)) for FreeUnit %s.\n",
+												   pHouse->ArrayIndex, pHouse->Type->ID, currentMoney, 3 * minRefineryCost,
+												   harvesterCount, targetHarvesters, staticRefineryCount,
+												   pRecoveryRefinery->ID, bestSafeTiberiumCell.X, bestSafeTiberiumCell.Y,
+												   pRecoveryRefinery->FreeUnit->ID);
+										return pRecoveryRefinery;
+									}
+									else
+									{
+										houseExt->NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 300;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 
 		const size_t powerPlantCount =
@@ -5297,6 +5600,9 @@ const BuildingTypeClass*
 HouseExt::AdvAI_Get_Building_To_Build(HouseClass* pHouse)
 {
 	const auto houseExt = ExtMap.Find(pHouse);
+	if (houseExt != nullptr)
+		houseExt->IsBuildingRecoveryRefinery = false;
+
 	if (houseExt != nullptr && !houseExt->UnclaimedTiberiumZones.empty() &&
 		!AdvAI_IsMobileRefineryHouse(pHouse))
 	{
@@ -5505,7 +5811,29 @@ static bool IsLocatedInAlliedBase(BuildingClass* pBuilding,
  */
 void HouseExt::AdvAI_Raise_Money(HouseClass* pHouse)
 {
-	// We should raise money if we are low on funds and have zero refineries.
+	// We should raise money if we are low on funds and have zero refineries,
+	// or if we have refineries but zero harvesters and cannot afford a recovery refinery.
+	int harvesterCount = 0;
+	for (const auto pUnit : UnitClass::Array)
+	{
+		if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive &&
+			(pUnit->Type->Harvester || pUnit->Type->ResourceGatherer) &&
+			pUnit->Type->Enslaves == nullptr &&
+			(pUnit->Type->DeploysInto == nullptr || !pUnit->Type->DeploysInto->ResourceDestination))
+		{
+			harvesterCount++;
+		}
+	}
+
+	const bool needsHarvesterRecoveryCash = (harvesterCount == 0 &&
+		!AdvAI_IsMobileRefineryHouse(pHouse) &&
+		!IsBuildingTypeQueued(pHouse, TechTreeTypeClass::BuildType::BuildRefinery) &&
+		pHouse->Available_Money() < 2000);
+
+	if (!needsHarvesterRecoveryCash && pHouse->Balance > 1000)
+		return;
+
+	if (false)
 
 	if (pHouse->Balance > 1000)
 		return;
@@ -5529,7 +5857,7 @@ void HouseExt::AdvAI_Raise_Money(HouseClass* pHouse)
 		}
 	}
 
-	if (refineryCount > 0)
+	if (refineryCount > 0 && !needsHarvesterRecoveryCash)
 		return;
 
 	// Look for buildings to sell.
@@ -5542,7 +5870,8 @@ void HouseExt::AdvAI_Raise_Money(HouseClass* pHouse)
 	{
 		if (!pBuilding || !pBuilding->IsAlive || pBuilding->InLimbo ||
 			pBuilding->Type->ConstructionYard ||
-			pBuilding->Type->IsBaseDefense || TechTreeTypeClass::TotalBuildDefense.contains(pBuilding->Type))
+			pBuilding->Type->IsBaseDefense || TechTreeTypeClass::TotalBuildDefense.contains(pBuilding->Type) ||
+			(needsHarvesterRecoveryCash && (pBuilding->Type->Refinery || pBuilding->Type->ResourceDestination)))
 		{
 			continue;
 		}
@@ -5627,6 +5956,15 @@ void HouseExt::AdvAI_Economy_Upkeep(HouseClass* pHouse)
 	for (const auto pHarvester : RulesClass::Instance->HarvesterUnit)
 		harvesterCount +=
 			pHouse->ActiveUnitTypes.GetItemCount(pHarvester->ArrayIndex);
+
+	// Keep permanent refineries intact so Harvester Recovery can replenish missing harvesters up to
+	// HarvestersPerRefinery * refineryCount. Only sell an excess refinery if we have 0 harvesters
+	// and cannot afford to build a recovery refinery.
+	if (harvesterCount > 0 || refineryCount <= 1 || pHouse->Available_Money() >= 2000 ||
+		IsBuildingTypeQueued(pHouse, TechTreeTypeClass::BuildType::BuildRefinery))
+	{
+		return;
+	}
 
 	const int toSellCount = refineryCount - harvesterCount;
 	if (toSellCount <= 0)
@@ -5953,6 +6291,53 @@ void HouseExt::AdvAI_ExpertAI(HouseClass* pHouse)
 	// Do some economy upkeep to keep the AI running.
 
 	const int houseStagger = (std::max(0, pHouse->ArrayIndex) % 8) * 31;
+
+	// Sell any temporary Harvester Recovery Refinery once its buildup finishes and its FreeUnit harvester has spawned
+	if ((Unsorted::CurrentFrame + houseStagger) % 15 == 0)
+	{
+		for (const auto pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo)
+				continue;
+
+			const auto bldExt = BuildingExt::ExtMap.Find(pBld);
+			if (!bldExt || !bldExt->IsHarvesterRecoveryRefinery)
+				continue;
+
+			if (pBld->CurrentMission == Mission::Selling ||
+				pBld->QueuedMission == Mission::Selling)
+			{
+				bldExt->IsHarvesterRecoveryRefinery = false;
+				continue;
+			}
+
+			if (pBld->CurrentMission != Mission::Construction &&
+				pBld->QueuedMission != Mission::Construction &&
+				pBld->BState != static_cast<int>(BStateType::Construction) &&
+				Unsorted::CurrentFrame >= bldExt->HarvesterRecoveryPlacedFrame + 75)
+			{
+				for (const auto pUnit : UnitClass::Array)
+				{
+					if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo &&
+						(pUnit->Type->Harvester || pUnit->Type->ResourceGatherer))
+					{
+						if (pUnit->GetMapCoords().DistanceFrom(pBld->GetMapCoords()) <= 8.0 &&
+							pUnit->CurrentMission != Mission::Harvest)
+						{
+							pUnit->QueueMission(Mission::Harvest, false);
+						}
+					}
+				}
+
+				bldExt->IsHarvesterRecoveryRefinery = false;
+				houseExt->NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 900;
+				Debug::Log("AdvAI HarvesterRecovery: House %d selling temporary recovery refinery %s at (%d,%d) after spawning FreeUnit harvester.\n",
+						   pHouse->ArrayIndex, pBld->Type->ID, pBld->GetMapCoords().X, pBld->GetMapCoords().Y);
+				pBld->Sell(1);
+				break;
+			}
+		}
+	}
 
 	if (Unsorted::CurrentFrame > houseExt->LastExcessRefineryCheckFrame + 500 + houseStagger)
 	{
@@ -6344,6 +6729,12 @@ void HouseExt::AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse)
 			pBld->QueuedMission == Mission::Selling)
 		{
 			continue;
+		}
+
+		if (const auto bldExt = BuildingExt::ExtMap.Find(pBld))
+		{
+			if (bldExt->IsHarvesterRecoveryRefinery)
+				continue;
 		}
 
 		// Skip refineries that are close to the core base (ConYard) to avoid

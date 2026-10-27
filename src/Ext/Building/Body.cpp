@@ -967,6 +967,8 @@ void BuildingExt::Serialize(T& Stm)
 		.Process(this->LastCombatFrame)
 		.Process(this->LastProducedTechno)
 		.Process(this->LastProducedType)
+		.Process(this->IsHarvesterRecoveryRefinery)
+		.Process(this->HarvesterRecoveryPlacedFrame)
 		;
 }
 
