@@ -216,7 +216,7 @@ private:
 	bool IsHoveringVertScrollUp { false };
 	bool IsHoveringVertScrollDown { false };
 
-	std::vector<std::wstring> ParseSearchTerms(const std::wstring& query) const;
+	std::vector<std::vector<std::wstring>> ParseSearchTerms(const std::wstring& query) const;
 	bool MatchesSearchFilter(AbstractTypeClass* pType) const;
 
 	std::vector<ObserverPlayerRow> PlayerRows {};

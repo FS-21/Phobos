@@ -307,6 +307,10 @@ PrioritySelectionFiltering=true  ; boolean
 - Displays useful player information and game statistics in campaign and multiplayer.
 - When `DebugKeysEnabled=yes` under `[GlobalControls]` in `rulesmd.ini`, all houses with active objects on the map are listed across all game modes for developer inspection.
 - Supports floating inspection cards to display detailed object and AI debug information.
+- Includes a case-insensitive search filter box to filter displayed structures, units, and superweapons by name (`UIName` or `ID`):
+  - **Double quotes (`"..."`)**: Performs an exact phrase/substring match without splitting on spaces inside the quotes (e.g. `"war factory"`).
+  - **Spaces (` `) or commas (`,`)**: Act as `OR` separators to filter multiple strings simultaneously (e.g. `apoc, kirov` or `"war factory" "ore refinery"`).
+  - **Plus (`+`)**: Acts as an `AND` operator requiring all joined strings to appear together in the same object name (e.g. `soviet+factory` or `"war factory"+soviet, kirov`).
 - Structures lacking a cameo icon automatically display a centered sprite preview with player faction remap and a transparent background.
 - Structures with cash production (`ProduceCashAmount` and `ProduceCashDelay`) show their production rate per minute (`Income: +$X / min`).
 - Structures and harvester units with storage capacity show their current and maximum storage (`Storage: X / Y`), along with a breakdown of stored resource types and quantities. (For refineries and resource destinations, this is enabled when `Refinery.UseStorage=yes`).
