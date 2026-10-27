@@ -109,42 +109,51 @@ void ObserverUIClass::ClearData()
 	this->MinimalInspectBtnDragOffset = { 0, 0 };
 }
 
-std::vector<std::wstring> ObserverUIClass::ParseSearchTerms(const std::wstring& query) const
+std::vector<std::vector<std::wstring>> ObserverUIClass::ParseSearchTerms(const std::wstring& query) const
 {
-	std::vector<std::wstring> terms;
+	std::vector<std::vector<std::wstring>> orGroups;
 	std::wstring currentTerm;
 	bool inQuotes = false;
+	bool connectNextWithAnd = false;
+
+	auto flushTerm = [&]()
+	{
+		if (!currentTerm.empty())
+		{
+			std::transform(currentTerm.begin(), currentTerm.end(), currentTerm.begin(), ::towlower);
+			if (connectNextWithAnd && !orGroups.empty())
+			{
+				orGroups.back().push_back(currentTerm);
+			}
+			else
+			{
+				orGroups.push_back({ currentTerm });
+			}
+			currentTerm.clear();
+			connectNextWithAnd = false;
+		}
+	};
 
 	for (wchar_t ch : query)
 	{
 		if (ch == L'"')
 		{
-			if (inQuotes)
-			{
-				if (!currentTerm.empty())
-				{
-					terms.push_back(currentTerm);
-					currentTerm.clear();
-				}
-				inQuotes = false;
-			}
-			else
-			{
-				if (!currentTerm.empty())
-				{
-					terms.push_back(currentTerm);
-					currentTerm.clear();
-				}
-				inQuotes = true;
-			}
+			flushTerm();
+			inQuotes = !inQuotes;
 		}
-		else if (ch == L' ' && !inQuotes)
+		else if (!inQuotes && ch == L'+')
 		{
-			if (!currentTerm.empty())
-			{
-				terms.push_back(currentTerm);
-				currentTerm.clear();
-			}
+			flushTerm();
+			connectNextWithAnd = true;
+		}
+		else if (!inQuotes && ch == L',')
+		{
+			flushTerm();
+			connectNextWithAnd = false;
+		}
+		else if (!inQuotes && ch == L' ')
+		{
+			flushTerm();
 		}
 		else
 		{
@@ -152,17 +161,8 @@ std::vector<std::wstring> ObserverUIClass::ParseSearchTerms(const std::wstring& 
 		}
 	}
 
-	if (!currentTerm.empty())
-	{
-		terms.push_back(currentTerm);
-	}
-
-	for (auto& term : terms)
-	{
-		std::transform(term.begin(), term.end(), term.begin(), ::towlower);
-	}
-
-	return terms;
+	flushTerm();
+	return orGroups;
 }
 
 bool ObserverUIClass::MatchesSearchFilter(AbstractTypeClass* pType) const
@@ -187,8 +187,8 @@ bool ObserverUIClass::MatchesSearchFilter(AbstractTypeClass* pType) const
 	if (!showObjectsAndFilter || this->SearchFilterText.empty())
 		return true;
 
-	std::vector<std::wstring> terms = this->ParseSearchTerms(this->SearchFilterText);
-	if (terms.empty())
+	std::vector<std::vector<std::wstring>> orGroups = this->ParseSearchTerms(this->SearchFilterText);
+	if (orGroups.empty())
 		return true;
 
 	std::wstring nameW = L"";
@@ -204,15 +204,26 @@ bool ObserverUIClass::MatchesSearchFilter(AbstractTypeClass* pType) const
 
 	std::transform(nameW.begin(), nameW.end(), nameW.begin(), ::towlower);
 
-	for (const auto& term : terms)
+	for (const auto& andGroup : orGroups)
 	{
-		if (nameW.find(term) == std::wstring::npos)
+		if (andGroup.empty())
+			continue;
+
+		bool allMatched = true;
+		for (const auto& term : andGroup)
 		{
-			return false;
+			if (nameW.find(term) == std::wstring::npos)
+			{
+				allMatched = false;
+				break;
+			}
 		}
+
+		if (allMatched)
+			return true;
 	}
 
-	return true;
+	return false;
 }
 
 static HouseClass* GetTargetEnemy(HouseClass* pHouse)
@@ -1097,19 +1108,24 @@ void ObserverUIClass::Update()
 		{
 			if (vk == VK_SPACE) return L' ';
 			if (vk == 0xDE) return shift ? L'"' : L'\'';
+			if (vk == 0xBB || vk == VK_ADD) return L'+';
 			if (vk == 0xBD) return shift ? L'_' : L'-';
 			if (vk == 0xBE) return shift ? L'>' : L'.';
 			if (vk == 0xBC) return shift ? L'<' : L',';
+			if (vk == '2' && shift) return L'"';
 			if (vk >= 'A' && vk <= 'Z') return static_cast<wchar_t>((shift ? 'A' : 'a') + (vk - 'A'));
 			if (vk >= '0' && vk <= '9') return static_cast<wchar_t>(vk);
+			if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) return static_cast<wchar_t>(L'0' + (vk - VK_NUMPAD0));
 			return L'\0';
 		};
 
 		static const int watchedVKs[] = {
-			VK_BACK, VK_SPACE, 0xDE, 0xBD, 0xBE, 0xBC,
+			VK_BACK, VK_SPACE, 0xDE, 0xBB, VK_ADD, 0xBD, 0xBE, 0xBC,
 			'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
 			'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-			'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+			'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+			VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3, VK_NUMPAD4,
+			VK_NUMPAD5, VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD8, VK_NUMPAD9
 		};
 
 		int newlyPressedVK = -1;
