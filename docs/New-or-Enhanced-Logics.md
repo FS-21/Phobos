@@ -3266,7 +3266,7 @@ Ammo.Shared.Group=-1  ; integer
 - `SmartAutoDeploy.AS` controls whether state transitions are considered against submerged targets.
 - `SmartAutoDeploy.Idle` specifies whether this form is preferred when out of combat.
 - `SmartAutoDeploy.IdleDelay` sets the delay in frames before switching to the preferred idle form.
-- `SmartAutoDeploy.Travel` specifies whether this form is preferred for long-distance movement.
+- `SmartAutoDeploy.Travel` specifies whether this form is preferred for long-distance movement. Units transforming between a faster travel form and a combat form with `OpportunityFire=yes` automatically switch to the `OpportunityFire` form when enemies enter weapon range along the way (firing on the move without losing their destination) and resume the faster travel form once out of combat.
 - `SmartAutoDeploy.TravelMinDistance` sets the minimum distance in cells to destination required to trigger travel form switching.
 - `SmartAutoDeploy.ByWeaponDamage` controls whether the unit evaluates combat effectiveness against the target's armor type before deploying, comparing sustained damage per second (taking warhead verses, ambient damage, burst, and rate of fire into account). If damage output is roughly tied, weapon range determines deployment.
 - `SmartAutoDeploy.Guard` controls whether units autonomously deploy when acquiring targets while on Guard mission (`Mission::Guard`). Defaults to false.

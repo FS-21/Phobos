@@ -10,6 +10,7 @@
 #include <ScenarioClass.h>
 #include <TeamClass.h>
 #include <JumpjetLocomotionClass.h>
+#include <VocClass.h>
 
 #include <Ext/Techno/Body.h>
 #include <Ext/TechnoType/Body.h>
@@ -140,6 +141,7 @@ namespace
 
 		return pType->NavalTargeting == NavalTargetingType::Underwater_Only
 			|| pType->NavalTargeting == NavalTargetingType::Underwater_Secondary
+			|| pType->NavalTargeting == NavalTargetingType::Organic_Secondary
 			|| pType->NavalTargeting == NavalTargetingType::Naval_All;
 	}
 
@@ -162,6 +164,10 @@ namespace
 		if (pType->DeployFireWeapon >= 0)
 			return pType->DeployFireWeapon;
 
+		// Units that transform into a different TechnoType on deploy/undeploy use each type's own weapons
+		if (pTypeExt->Convert_Deploy || pTypeExt->Convert_Undeploy || pType->DeploysInto || pType->UndeploysInto)
+			return -1;
+
 		if (auto const pUnitType = abstract_cast<UnitTypeClass*, true>(pType))
 		{
 			if (pUnitType->IsSimpleDeployer || pUnitType->DeployFire)
@@ -170,6 +176,9 @@ namespace
 
 		return -1;
 	}
+
+	bool CanFormDamageTarget(TechnoTypeClass* pFormType, WeaponTypeClass* pWeapon, AbstractClass* pTarget);
+	double CalculateCombatDPS(TechnoTypeClass* pFormType, WeaponTypeClass* pWeapon, AbstractClass* pTarget);
 
 	int GetFormWeaponIndex(TechnoClass* pThis, TechnoTypeClass* pType, bool deployedForm, AbstractClass* pTarget)
 	{
@@ -190,7 +199,7 @@ namespace
 				return (deployWeaponIdx == 0) ? 1 : 0;
 		}
 
-		const int selected = pThis ? pThis->SelectWeapon(pTarget) : 0;
+		const int selected = (pThis && pThis->GetTechnoType() == pType) ? pThis->SelectWeapon(pTarget) : 0;
 		return selected >= 0 ? selected : 0;
 	}
 
@@ -198,6 +207,43 @@ namespace
 	{
 		const bool currentlyDeployed = SmartAutoDeploy::IsCurrentlyDeployed(pThis);
 		const auto pCurrentType = pThis ? pThis->GetTechnoType() : nullptr;
+		const auto pTargetType = (deployedForm == currentlyDeployed) ? pCurrentType : pAltType;
+
+		// For type-converting forms (no fixed deploy weapon slot), evaluate all weapon slots against the target
+		if (pTargetType && pTarget && GetDeployWeaponIndex(pTargetType) < 0)
+		{
+			const bool isLiveType = (pThis && pTargetType == pCurrentType);
+			const int weaponCount = std::min(GetTechnoTypeWeaponCount(pTargetType), TechnoTypeClass::MaxWeapons);
+			WeaponTypeClass* pBestWeapon = nullptr;
+			double bestDPS = -1.0;
+			int bestRange = -1;
+
+			for (int i = 0; i < weaponCount; ++i)
+			{
+				WeaponTypeClass* pCandidate = nullptr;
+				if (isLiveType)
+				{
+					if (auto const pStruct = pThis->GetWeapon(i))
+						pCandidate = pStruct->WeaponType;
+				}
+				if (!pCandidate)
+					pCandidate = pTargetType->Weapon[i].WeaponType;
+
+				if (!pCandidate || !CanFormDamageTarget(pTargetType, pCandidate, pTarget))
+					continue;
+
+				const double dps = CalculateCombatDPS(pTargetType, pCandidate, pTarget);
+				if (dps > bestDPS || (dps == bestDPS && pCandidate->Range > bestRange))
+				{
+					bestDPS = dps;
+					bestRange = pCandidate->Range;
+					pBestWeapon = pCandidate;
+				}
+			}
+
+			if (pBestWeapon)
+				return pBestWeapon;
+		}
 
 		// Priority 1: Live weapon from the current unit instance (if form matches current state)
 		if (pThis && pCurrentType && deployedForm == currentlyDeployed)
@@ -214,7 +260,6 @@ namespace
 		}
 
 		// Priority 2: Static weapon from the target type definition
-		const auto pTargetType = (deployedForm == currentlyDeployed) ? pCurrentType : pAltType;
 		if (pTargetType)
 		{
 			const int weaponIndex = GetFormWeaponIndex(pThis, pTargetType, deployedForm, pTarget);
@@ -270,12 +315,33 @@ namespace
 		const bool formIsAir = !(deployedForm && pFormType->DeployToLand)
 			&& (pFormType->SpeedType == SpeedType::Winged || pFormType->MovementZone == MovementZone::Fly);
 		const bool formIsUnderwater = pFormType->Underwater;
+		const bool formIsNavalSurface = !formIsAir && !formIsUnderwater
+			&& (pFormType->Naval || pFormType->SpeedType == SpeedType::Float);
+		const bool formIsLand = !formIsAir && !formIsUnderwater && !formIsNavalSurface;
 
 		if (formIsAir)
 			return pWeapon->Projectile && pWeapon->Projectile->AA;
 
 		if (formIsUnderwater)
 			return CanTypeHitUnderwater(pEnemyType);
+
+		if (formIsNavalSurface && pEnemyType)
+		{
+			if (pEnemyType->NavalTargeting == NavalTargetingType::Naval_None
+				|| pEnemyType->NavalTargeting == NavalTargetingType::Underwater_Only)
+			{
+				return false;
+			}
+		}
+
+		if (formIsLand)
+		{
+			if (pEnemyType && pEnemyType->LandTargeting == LandTargetingType::Land_Not_OK)
+				return false;
+
+			if (pWeapon->Projectile && pWeapon->Projectile->Level)
+				return false;
+		}
 
 		return !pWeapon->Projectile || pWeapon->Projectile->AG || !pWeapon->Projectile->AA;
 	}
@@ -324,6 +390,30 @@ namespace
 	{
 		if (!pWeapon || !pWeapon->Warhead || !pTarget)
 			return false;
+
+		const auto targetDomain = GetTargetDomain(pTarget);
+
+		if (targetDomain == TargetDomain::Ground)
+		{
+			if (pFormType && pFormType->LandTargeting == LandTargetingType::Land_Not_OK)
+				return false;
+
+			if (pWeapon->Projectile && pWeapon->Projectile->Level)
+				return false;
+		}
+		else if (targetDomain == TargetDomain::Naval)
+		{
+			if (pFormType && (pFormType->NavalTargeting == NavalTargetingType::Naval_None
+				|| pFormType->NavalTargeting == NavalTargetingType::Underwater_Only))
+			{
+				return false;
+			}
+		}
+		else if (targetDomain == TargetDomain::Submerged)
+		{
+			if (!CanTypeHitUnderwater(pFormType))
+				return false;
+		}
 
 		if (auto const pTargetTechno = abstract_cast<TechnoClass*>(pTarget))
 		{
@@ -390,10 +480,18 @@ namespace
 		if (pCell->GetBuilding())
 			return false;
 
-		if (pUnit && pUnit->Type->DeployToLand)
+		if (pUnit)
 		{
-			if (pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach)
-				return false;
+			if (pUnit->Type->Naval || pUnit->Type->MovementZone == MovementZone::Water)
+			{
+				if (pCell->LandType != LandType::Water)
+					return false;
+			}
+			else if (pUnit->Type->DeployToLand)
+			{
+				if (pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach)
+					return false;
+			}
 		}
 
 		for (auto pObj = pCell->FirstObject; pObj; pObj = pObj->NextObject)
@@ -619,6 +717,10 @@ namespace SmartAutoDeploy
 			return pBuilding->Type->UndeploysInto != nullptr || TechnoTypeExt::Fetch(pBuilding->Type)->Convert_Undeploy != nullptr;
 		}
 
+		const auto pTypeExt = TechnoTypeExt::Fetch(pThis->GetTechnoType());
+		if (pTypeExt->Convert_Deploy || pTypeExt->Convert_Undeploy)
+			return pTypeExt->Convert_Undeploy != nullptr && !pTypeExt->Convert_Deploy;
+
 		if (pThis->WhatAmI() == AbstractType::Unit)
 		{
 			const auto pUnit = static_cast<UnitClass*>(pThis);
@@ -626,8 +728,7 @@ namespace SmartAutoDeploy
 				return pUnit->Deployed;
 		}
 
-		const auto pTypeExt = TechnoTypeExt::Fetch(pThis->GetTechnoType());
-		return pTypeExt->Convert_Undeploy != nullptr;
+		return false;
 	}
 
 	// ── Transformation Execution ─────────────────────────────────────────
@@ -777,7 +878,19 @@ namespace SmartAutoDeploy
 				if (auto const pFoot = abstract_cast<FootClass*>(pThis))
 				{
 					StopTechnoMotion(pFoot);
-					return TechnoExt::ConvertToType(pFoot, pTypeExt->Convert_Deploy);
+					if (TechnoExt::ConvertToType(pFoot, pTypeExt->Convert_Deploy))
+					{
+						if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
+						{
+							pUnit->Deployed = false;
+							pUnit->Deploying = false;
+							pUnit->Undeploying = false;
+						}
+						if (pType->DeploySound != -1)
+							VocClass::PlayAt(pType->DeploySound, pThis->GetCoords());
+						return true;
+					}
+					return false;
 				}
 			}
 			else if (auto const pUnit = abstract_cast<UnitClass*>(pThis))
@@ -823,7 +936,19 @@ namespace SmartAutoDeploy
 				if (auto const pFoot = abstract_cast<FootClass*>(pThis))
 				{
 					StopTechnoMotion(pFoot);
-					return TechnoExt::ConvertToType(pFoot, pTypeExt->Convert_Undeploy);
+					if (TechnoExt::ConvertToType(pFoot, pTypeExt->Convert_Undeploy))
+					{
+						if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
+						{
+							pUnit->Deployed = false;
+							pUnit->Deploying = false;
+							pUnit->Undeploying = false;
+						}
+						if (pType->UndeploySound != -1)
+							VocClass::PlayAt(pType->UndeploySound, pThis->GetCoords());
+						return true;
+					}
+					return false;
 				}
 			}
 			else if (auto const pUnit = abstract_cast<UnitClass*>(pThis))
@@ -840,12 +965,98 @@ namespace SmartAutoDeploy
 		return false;
 	}
 
+	// Executes a transformation while preserving the unit's current Destination, ArchiveTarget,
+	// Mission, and optional Target (used for seamless Travel, Chase, and OpportunityFire mode switches).
+	bool ExecuteTravelTransformation(TechnoClass* pThis, bool toDeploy, AbstractClass* pKeepTarget = nullptr)
+	{
+		if (!CanPerformTransformation(pThis, toDeploy))
+			return false;
+
+		auto const pFoot = abstract_cast<FootClass*>(pThis);
+		AbstractClass* const pSavedDest = pFoot ? pFoot->Destination : nullptr;
+		AbstractClass* const pSavedArchive = pFoot ? pFoot->ArchiveTarget : nullptr;
+		const Mission savedMission = pThis->CurrentMission;
+
+		const auto pType = pThis->GetTechnoType();
+		const auto pTypeExt = TechnoTypeExt::Fetch(pType);
+		TechnoTypeClass* const pConvertTo = toDeploy ? pTypeExt->Convert_Deploy.Get() : pTypeExt->Convert_Undeploy.Get();
+
+		if (pFoot && pConvertTo)
+		{
+			if (TechnoExt::ConvertToType(pFoot, pConvertTo))
+			{
+				if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
+				{
+					pUnit->Deployed = false;
+					pUnit->Deploying = false;
+					pUnit->Undeploying = false;
+				}
+
+				const int soundIdx = toDeploy ? pType->DeploySound : pType->UndeploySound;
+				if (soundIdx != -1)
+					VocClass::PlayAt(soundIdx, pThis->GetCoords());
+
+				pThis->SetTarget(pKeepTarget);
+				if (pKeepTarget)
+					pThis->LastTarget = pKeepTarget;
+
+				if (pSavedDest && pFoot->Destination != pSavedDest)
+					pFoot->SetDestination(pSavedDest, true);
+
+				if (pSavedArchive && pFoot->ArchiveTarget != pSavedArchive)
+					pFoot->SetArchiveTarget(pSavedArchive);
+
+				if (savedMission != Mission::None && pThis->CurrentMission != savedMission)
+				{
+					pThis->QueueMission(savedMission, false);
+					pThis->NextMission();
+				}
+
+				return true;
+			}
+			return false;
+		}
+
+		if (!ExecuteTransformation(pThis, toDeploy))
+			return false;
+
+		if (pFoot && pSavedDest)
+			pFoot->SetDestination(pSavedDest, true);
+
+		if (pKeepTarget)
+		{
+			pThis->SetTarget(pKeepTarget);
+			pThis->LastTarget = pKeepTarget;
+		}
+
+		return true;
+	}
+
 	// Saves tactical state and executes a deploy/undeploy transformation.
 	// Consolidates repeated save-target + set-action + execute pattern.
 	bool SaveAndTransform(TechnoClass* pThis, AbstractClass* pTarget,
 		SmartAutoDeployAction action, bool toDeploy,
 		Mission savedMission = Mission::Attack, bool repositioning = false)
 	{
+		const auto pType = pThis->GetTechnoType();
+		const auto pTypeExt = TechnoTypeExt::Fetch(pType);
+		const bool isInstantConvert = toDeploy ? (pTypeExt->Convert_Deploy != nullptr) : (pTypeExt->Convert_Undeploy != nullptr);
+
+		if (isInstantConvert && !repositioning)
+		{
+			if (!ExecuteTravelTransformation(pThis, toDeploy, pTarget))
+				return false;
+
+			if (savedMission != Mission::None && pThis->CurrentMission != savedMission)
+			{
+				pThis->QueueMission(savedMission, false);
+				pThis->NextMission();
+			}
+
+			ResetSmartAutoDeployState(TechnoExt::Fetch(pThis));
+			return true;
+		}
+
 		if (!ExecuteTransformation(pThis, toDeploy))
 			return false;
 
@@ -961,6 +1172,218 @@ namespace SmartAutoDeploy
 		return false;
 	}
 
+	// Scans for a nearby enemy target that the alternate form can engage when the current form
+	// cannot natively acquire targets in that domain (e.g. submerged submarine -> ground/air targets,
+	// or surfaced missile sub -> underwater targets).
+	TechnoClass* FindAlternateFormTarget(TechnoClass* pThis, TechnoTypeClass* pType, TechnoTypeClass* pAltType, bool currentlyDeployed)
+	{
+		if (!pThis || !pType || !pAltType || pType == pAltType || !pThis->Owner)
+			return nullptr;
+
+		const auto mission = pThis->CurrentMission;
+		if (mission != Mission::Guard && mission != Mission::Area_Guard && mission != Mission::Hunt)
+			return nullptr;
+
+		const auto pTypeExt = TechnoTypeExt::Fetch(pType);
+		const auto pAltTypeExt = TechnoTypeExt::Fetch(pAltType);
+		const bool isMobileUnitConvert = (pType != pAltType && pAltType->Speed > 0 && pAltType->WhatAmI() != AbstractType::BuildingType);
+
+		if (!isMobileUnitConvert)
+		{
+			if (mission == Mission::Guard && !(pTypeExt->SmartAutoDeploy_Guard || pAltTypeExt->SmartAutoDeploy_Guard))
+				return nullptr;
+
+			if (mission == Mission::Area_Guard && !(pTypeExt->SmartAutoDeploy_AreaGuard || pAltTypeExt->SmartAutoDeploy_AreaGuard))
+				return nullptr;
+		}
+
+		if (pTypeExt->SmartAutoDeploy_HP_Threshold.isset() && pTypeExt->SmartAutoDeploy_HP_Threshold_Inverted)
+		{
+			const double hpThresh = std::clamp(pTypeExt->SmartAutoDeploy_HP_Threshold.Get(), 0.0, 1.0);
+			if (GetHealthRatio(pThis, pType) < hpThresh)
+				return nullptr;
+		}
+
+		if (pTypeExt->SmartAutoDeploy_SHP_Threshold.isset() && pTypeExt->SmartAutoDeploy_SHP_Threshold_Inverted)
+		{
+			const double shpThresh = std::clamp(pTypeExt->SmartAutoDeploy_SHP_Threshold.Get(), 0.0, 1.0);
+			if (GetShieldRatio(pThis) < shpThresh)
+				return nullptr;
+		}
+
+		if (auto const pFoot = abstract_cast<FootClass*>(pThis))
+		{
+			if (pFoot->Destination && pFoot->Locomotor && pFoot->Locomotor->Is_Moving_Now())
+				return nullptr;
+		}
+
+		TechnoClass* pBestTarget = nullptr;
+		int bestDist = INT_MAX;
+		bool bestIsThreat = false;
+
+		for (auto const pCandidate : TechnoClass::Array)
+		{
+			if (!pCandidate || pCandidate == pThis || !pCandidate->IsAlive || pCandidate->InLimbo)
+				continue;
+
+			if (pCandidate->TemporalTargetingMe || pCandidate->BeingWarpedOut)
+				continue;
+
+			if (!pCandidate->Owner || pThis->Owner->IsAlliedWith(pCandidate->Owner) || pCandidate->Owner->IsNeutral())
+				continue;
+
+			auto const pCandidateType = pCandidate->GetTechnoType();
+			if (!pCandidateType || pCandidateType->Insignificant || pCandidateType->DontScore)
+				continue;
+
+			if (auto const pBld = abstract_cast<BuildingClass*>(pCandidate))
+			{
+				if (pBld->Type->Wall || pBld->Type->Gate)
+					continue;
+			}
+
+			if (pCandidate->CloakState != CloakState::Uncloaked)
+			{
+				auto const pCandCell = pCandidate->GetCell();
+				const bool sensedByHouse = pCandCell && pCandCell->Sensors_InclHouse(pThis->Owner->ArrayIndex);
+				const bool sensedByAlt = pAltType->Sensors && pAltType->SensorsSight > 0
+					&& pThis->DistanceFrom(pCandidate) <= pAltType->SensorsSight * 256;
+				if (!sensedByHouse && !sensedByAlt)
+					continue;
+			}
+
+			const auto domain = GetTargetDomain(pCandidate);
+			if (!IsTargetDomainAllowed(pAltTypeExt, domain))
+				continue;
+
+			auto const pCurrWep = GetFormWeapon(pThis, pAltType, currentlyDeployed, pCandidate);
+			if (CanFormDamageTarget(pType, pCurrWep, pCandidate))
+				continue;
+
+			auto const pAltWep = GetFormWeapon(pThis, pAltType, !currentlyDeployed, pCandidate);
+			if (!pAltWep || !CanFormDamageTarget(pAltType, pAltWep, pCandidate))
+				continue;
+
+			const int dist = pThis->DistanceFrom(pCandidate);
+			if (pAltWep->MinimumRange > 0 && dist < pAltWep->MinimumRange)
+				continue;
+
+			const int airBonus = (pCandidate->IsInAir() && pAltType->AirRangeBonus > 0)
+				? pAltType->AirRangeBonus * 256
+				: 0;
+			const int effectiveRange = pAltWep->Range + airBonus;
+			const int deployMargin = std::min(256, effectiveRange / 8);
+			const int maxDist = (pAltWep->MinimumRange > 0 && effectiveRange > pAltWep->MinimumRange + deployMargin)
+				? std::max(pAltWep->MinimumRange + 128, effectiveRange - deployMargin)
+				: effectiveRange - deployMargin;
+
+			if (dist > maxDist)
+				continue;
+
+			const bool isThreat = CanTargetDamageForm(pCandidate, pAltType, !currentlyDeployed);
+			if (!pBestTarget || (isThreat && !bestIsThreat) || (isThreat == bestIsThreat && dist < bestDist))
+			{
+				pBestTarget = pCandidate;
+				bestDist = dist;
+				bestIsThreat = isThreat;
+			}
+		}
+
+		return pBestTarget;
+	}
+
+	// Scans for a nearby enemy target that an OpportunityFire-capable alternate form can engage
+	// while the unit is moving in its faster non-OpportunityFire travel form (e.g. RA3APOC2 -> RA3APOC).
+	TechnoClass* FindOpportunityFireTarget(TechnoClass* pThis, TechnoTypeClass* pType, TechnoTypeClass* pAltType, bool currentlyDeployed)
+	{
+		if (!pThis || !pType || !pAltType || pType == pAltType || !pThis->Owner)
+			return nullptr;
+
+		const auto pTypeExt = TechnoTypeExt::Fetch(pType);
+		const auto pAltTypeExt = TechnoTypeExt::Fetch(pAltType);
+
+		if (pTypeExt->SmartAutoDeploy_HP_Threshold.isset() && pTypeExt->SmartAutoDeploy_HP_Threshold_Inverted)
+		{
+			const double hpThresh = std::clamp(pTypeExt->SmartAutoDeploy_HP_Threshold.Get(), 0.0, 1.0);
+			if (GetHealthRatio(pThis, pType) < hpThresh)
+				return nullptr;
+		}
+
+		if (pTypeExt->SmartAutoDeploy_SHP_Threshold.isset() && pTypeExt->SmartAutoDeploy_SHP_Threshold_Inverted)
+		{
+			const double shpThresh = std::clamp(pTypeExt->SmartAutoDeploy_SHP_Threshold.Get(), 0.0, 1.0);
+			if (GetShieldRatio(pThis) < shpThresh)
+				return nullptr;
+		}
+
+		TechnoClass* pBestTarget = nullptr;
+		int bestDist = INT_MAX;
+
+		for (auto const pCandidate : TechnoClass::Array)
+		{
+			if (!pCandidate || pCandidate == pThis || !pCandidate->IsAlive || pCandidate->InLimbo)
+				continue;
+
+			if (pCandidate->TemporalTargetingMe || pCandidate->BeingWarpedOut)
+				continue;
+
+			if (!pCandidate->Owner || pThis->Owner->IsAlliedWith(pCandidate->Owner) || pCandidate->Owner->IsNeutral())
+				continue;
+
+			auto const pCandidateType = pCandidate->GetTechnoType();
+			if (!pCandidateType || pCandidateType->Insignificant || pCandidateType->DontScore)
+				continue;
+
+			if (auto const pBld = abstract_cast<BuildingClass*>(pCandidate))
+			{
+				if (pBld->Type->Wall || pBld->Type->Gate)
+					continue;
+			}
+
+			if (pCandidate->CloakState != CloakState::Uncloaked)
+			{
+				auto const pCandCell = pCandidate->GetCell();
+				const bool sensedByHouse = pCandCell && pCandCell->Sensors_InclHouse(pThis->Owner->ArrayIndex);
+				const bool sensedByAlt = pAltType->Sensors && pAltType->SensorsSight > 0
+					&& pThis->DistanceFrom(pCandidate) <= pAltType->SensorsSight * 256;
+				if (!sensedByHouse && !sensedByAlt)
+					continue;
+			}
+
+			const auto domain = GetTargetDomain(pCandidate);
+			if (!IsTargetDomainAllowed(pAltTypeExt, domain))
+				continue;
+
+			auto const pAltWep = GetFormWeapon(pThis, pAltType, !currentlyDeployed, pCandidate);
+			if (!pAltWep || !CanFormDamageTarget(pAltType, pAltWep, pCandidate))
+				continue;
+
+			const int dist = pThis->DistanceFrom(pCandidate);
+			if (pAltWep->MinimumRange > 0 && dist < pAltWep->MinimumRange)
+				continue;
+
+			const int airBonus = (pCandidate->IsInAir() && pAltType->AirRangeBonus > 0)
+				? pAltType->AirRangeBonus * 256
+				: 0;
+			const int effectiveRange = pAltWep->Range + airBonus;
+			const int deployMargin = std::min(256, effectiveRange / 8);
+			const int maxDist = (pAltWep->MinimumRange > 0 && effectiveRange > pAltWep->MinimumRange + deployMargin)
+				? std::max(pAltWep->MinimumRange + 128, effectiveRange - deployMargin)
+				: effectiveRange - deployMargin;
+
+			if (dist > maxDist)
+				continue;
+
+			if (dist < bestDist)
+			{
+				pBestTarget = pCandidate;
+				bestDist = dist;
+			}
+		}
+
+		return pBestTarget;
+	}
+
 	// Evaluates whether a currently undeployed unit should deploy
 	// (defensive thresholds, damage comparison, DPS analysis, range advantage).
 	bool EvaluateUndeployedCombat(TechnoClass* pThis, AbstractClass* pTarget,
@@ -970,22 +1393,22 @@ namespace SmartAutoDeploy
 	{
 		const auto pTypeExt = TechnoTypeExt::Fetch(pType);
 		const auto pAltTypeExt = TechnoTypeExt::Fetch(pAltType);
+		const bool isMobileUnitConvert = (pType != pAltType && pAltType->Speed > 0 && pAltType->WhatAmI() != AbstractType::BuildingType);
 
 		// ── Guard / AreaGuard mission restrictions ────────────────────────
-		if (pThis->CurrentMission == Mission::Guard)
+		if (!isMobileUnitConvert)
 		{
-			if (!(pTypeExt->SmartAutoDeploy_Guard || pAltTypeExt->SmartAutoDeploy_Guard))
-				return false;
+			if (pThis->CurrentMission == Mission::Guard)
+			{
+				if (!(pTypeExt->SmartAutoDeploy_Guard || pAltTypeExt->SmartAutoDeploy_Guard))
+					return false;
+			}
+			else if (pThis->CurrentMission == Mission::Area_Guard)
+			{
+				if (!(pTypeExt->SmartAutoDeploy_AreaGuard || pAltTypeExt->SmartAutoDeploy_AreaGuard))
+					return false;
+			}
 		}
-		else if (pThis->CurrentMission == Mission::Area_Guard)
-		{
-			if (!(pTypeExt->SmartAutoDeploy_AreaGuard || pAltTypeExt->SmartAutoDeploy_AreaGuard))
-				return false;
-		}
-
-		// ── Can the deployed form even damage this target? ───────────────
-		if (!CanFormDamageTarget(pAltType, pAltWeapon, pTarget))
-			return false;
 
 		bool wantsToDeploy = false;
 		bool defensiveDeploy = false;
@@ -1026,7 +1449,100 @@ namespace SmartAutoDeploy
 			}
 		}
 
-		// ── Enemy vulnerability: deploy if enemy can't hit deployed form ─
+		const bool altCanHit = CanFormDamageTarget(pAltType, pAltWeapon, pTarget);
+
+		// Allow emergency dive into a stealth/submerged alternate form even if that form cannot damage the current target
+		if (defensiveDeploy && !altCanHit)
+		{
+			const bool altIsRefuge = (pType != pAltType)
+				&& ((pAltType->Underwater && !pType->Underwater) || (pAltType->Cloakable && !pType->Cloakable));
+			if (altIsRefuge && CanPerformTransformation(pThis, true))
+			{
+				ResetSmartAutoDeployState(TechnoExt::Fetch(pThis));
+				return ExecuteTransformation(pThis, true);
+			}
+			return false;
+		}
+
+		// ── Can the deployed form even damage this target? ───────────────
+		if (!altCanHit)
+		{
+			// If current form is inside its own MinimumRange and CheckMinimumRange is active, reposition to standoff cell
+			if (pCurrentWeapon && pCurrentWeapon->MinimumRange > 0 && currentDist < pCurrentWeapon->MinimumRange
+				&& ShouldCheckMinimumRange(pTypeExt, pAltTypeExt)
+				&& CanFormDamageTarget(pType, pCurrentWeapon, pTarget))
+			{
+				if (auto const pStandoffCell = CalculateStandoffCell(pThis, pTarget, pCurrentWeapon))
+				{
+					if (auto const pFoot = abstract_cast<FootClass*>(pThis))
+					{
+						auto const pExt = TechnoExt::Fetch(pThis);
+						pThis->SetTarget(nullptr);
+						pFoot->SetDestination(pStandoffCell, true);
+						pFoot->QueueMission(Mission::Move, true);
+						pExt->SmartAutoDeploy_SavedTarget = pTarget;
+						pExt->SmartAutoDeploy_SavedMission = Mission::Attack;
+						pExt->SmartAutoDeploy_IsRepositioning = true;
+						pExt->SmartAutoDeploy_RepositionDestination = pStandoffCell->GetCenterCoords();
+						pExt->SmartAutoDeploy_TargetAction = SmartAutoDeployAction::None;
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
+		const auto targetDomain = GetTargetDomain(pTarget);
+		if (pType != pAltType && !defensiveDeploy)
+		{
+			if (!IsTargetDomainAllowed(pAltTypeExt, targetDomain) && IsTargetDomainAllowed(pTypeExt, targetDomain))
+				return false;
+
+			if (IsTargetDomainAllowed(pAltTypeExt, targetDomain) && !IsTargetDomainAllowed(pTypeExt, targetDomain))
+				wantsToDeploy = true;
+		}
+
+		// ── Current form MinimumRange handling (for bidirectional Convert.Deploy units) ──
+		const bool currentCanHit = CanFormDamageTarget(pType, pCurrentWeapon, pTarget);
+		const bool insideCurrentMinRange = currentCanHit && pCurrentWeapon
+			&& pCurrentWeapon->MinimumRange > 0 && currentDist < pCurrentWeapon->MinimumRange;
+
+		if (insideCurrentMinRange)
+		{
+			if (ShouldCheckMinimumRange(pTypeExt, pAltTypeExt))
+			{
+				if (auto const pStandoffCell = CalculateStandoffCell(pThis, pTarget, pCurrentWeapon))
+				{
+					if (auto const pFoot = abstract_cast<FootClass*>(pThis))
+					{
+						auto const pExt = TechnoExt::Fetch(pThis);
+						pThis->SetTarget(nullptr);
+						pFoot->SetDestination(pStandoffCell, true);
+						pFoot->QueueMission(Mission::Move, true);
+						pExt->SmartAutoDeploy_SavedTarget = pTarget;
+						pExt->SmartAutoDeploy_SavedMission = Mission::Attack;
+						pExt->SmartAutoDeploy_IsRepositioning = true;
+						pExt->SmartAutoDeploy_RepositionDestination = pStandoffCell->GetCenterCoords();
+						pExt->SmartAutoDeploy_TargetAction = SmartAutoDeployAction::None;
+						return true;
+					}
+				}
+			}
+
+			if (currentDist >= pAltWeapon->MinimumRange)
+				wantsToDeploy = true;
+		}
+
+		// ── Enemy vulnerability & stealth/submerged advantage ─────────────
+		const bool currentIsStealthSub = (pType != pAltType)
+			&& ((pType->Underwater && !pAltType->Underwater)
+				|| (pType->Cloakable && !pAltType->Cloakable && pCurrentWeapon && !pCurrentWeapon->DecloakToFire));
+		const bool altIsStealthSub = (pType != pAltType)
+			&& ((pAltType->Underwater && !pType->Underwater)
+				|| (pAltType->Cloakable && !pType->Cloakable && pAltWeapon && !pAltWeapon->DecloakToFire));
+
+		bool currentHasImmunityAdvantage = false;
+
 		if (!wantsToDeploy)
 		{
 			auto const pTargetTechno = abstract_cast<TechnoClass*>(pTarget);
@@ -1037,38 +1553,81 @@ namespace SmartAutoDeploy
 
 				if (!targetCanHitDeployed && targetCanHitCurrent)
 					wantsToDeploy = true;
+				else if (!targetCanHitCurrent && targetCanHitDeployed && currentCanHit && !insideCurrentMinRange)
+					currentHasImmunityAdvantage = true;
+			}
+
+			if (!wantsToDeploy && !currentHasImmunityAdvantage)
+			{
+				if (altIsStealthSub)
+					wantsToDeploy = true;
+				else if (currentIsStealthSub && currentCanHit && !insideCurrentMinRange)
+					currentHasImmunityAdvantage = true;
 			}
 		}
 
 		// ── Weapon / DPS comparison ──────────────────────────────────────
-		if (!wantsToDeploy)
+		if (!wantsToDeploy && !currentHasImmunityAdvantage)
 		{
-			const bool currentCanHit = CanFormDamageTarget(pType, pCurrentWeapon, pTarget);
+			auto const pTargetTechno = abstract_cast<TechnoClass*>(pTarget);
+			const int currAirBonus = (pTargetTechno && pTargetTechno->IsInAir() && pType->AirRangeBonus > 0)
+				? pType->AirRangeBonus * 256
+				: 0;
+			const int altAirBonus = (pTargetTechno && pTargetTechno->IsInAir() && pAltType->AirRangeBonus > 0)
+				? pAltType->AirRangeBonus * 256
+				: 0;
+			const int currEffectiveRange = pCurrentWeapon ? (pCurrentWeapon->Range + currAirBonus) : 0;
+			const int altEffectiveRange = pAltWeapon ? (pAltWeapon->Range + altAirBonus) : 0;
+			const int altDeployMargin = std::min(256, altEffectiveRange / 8);
+			const int altMaxDeployDist = (pAltWeapon && pAltWeapon->MinimumRange > 0 && altEffectiveRange > pAltWeapon->MinimumRange + altDeployMargin)
+				? std::max(pAltWeapon->MinimumRange + 128, altEffectiveRange - altDeployMargin)
+				: (altEffectiveRange - altDeployMargin);
 
-			if (byWeaponDamage)
+			const bool currentInRange = currentCanHit && pCurrentWeapon
+				&& currentDist <= currEffectiveRange
+				&& currentDist >= pCurrentWeapon->MinimumRange;
+			const bool altInRange = altCanHit && pAltWeapon
+				&& currentDist <= altMaxDeployDist
+				&& currentDist >= pAltWeapon->MinimumRange;
+
+			if (!currentCanHit)
 			{
-				if (!currentCanHit)
-				{
-					wantsToDeploy = true;
-				}
-				else
-				{
-					const double dpsCurrent = CalculateCombatDPS(pType, pCurrentWeapon, pTarget);
-					const double dpsDeployed = CalculateCombatDPS(pAltType, pAltWeapon, pTarget);
+				wantsToDeploy = true;
+			}
+			else if (!currentInRange && altInRange)
+			{
+				// Current weapon cannot reach the target at this distance, while the alternate weapon is already in range
+				wantsToDeploy = true;
+			}
+			else if (currentInRange && altInRange)
+			{
+				// Both forms can hit the target right now (e.g. melee Grinder vs Cannon at point-blank range):
+				// prefer whichever form has significantly higher DPS, or longer range if DPS is comparable.
+				const double dpsCurrent = CalculateCombatDPS(pType, pCurrentWeapon, pTarget);
+				const double dpsDeployed = CalculateCombatDPS(pAltType, pAltWeapon, pTarget);
 
-					if (dpsDeployed > dpsCurrent * 1.10)
-						wantsToDeploy = true;
-					else if (dpsCurrent > dpsDeployed * 1.10)
-						wantsToDeploy = false;
-					else if (pCurrentWeapon && pAltWeapon->Range > pCurrentWeapon->Range)
-						wantsToDeploy = true;
-				}
+				if (dpsDeployed > dpsCurrent * 1.15)
+					wantsToDeploy = true;
+				else if (dpsCurrent > dpsDeployed * 1.15)
+					wantsToDeploy = false;
+				else if (pCurrentWeapon && pAltWeapon->Range > pCurrentWeapon->Range)
+					wantsToDeploy = true;
+			}
+			else if (byWeaponDamage)
+			{
+				const double dpsCurrent = CalculateCombatDPS(pType, pCurrentWeapon, pTarget);
+				const double dpsDeployed = CalculateCombatDPS(pAltType, pAltWeapon, pTarget);
+
+				if (dpsDeployed > dpsCurrent * 1.10)
+					wantsToDeploy = true;
+				else if (dpsCurrent > dpsDeployed * 1.10)
+					wantsToDeploy = false;
+				else if (pCurrentWeapon && pAltWeapon->Range > pCurrentWeapon->Range)
+					wantsToDeploy = true;
 			}
 			else
 			{
-				if (!currentCanHit)
-					wantsToDeploy = true;
-				else if (pCurrentWeapon && pAltWeapon->Range > pCurrentWeapon->Range)
+				if (pCurrentWeapon && pAltWeapon->Range > pCurrentWeapon->Range)
 					wantsToDeploy = true;
 			}
 		}
@@ -1097,7 +1656,7 @@ namespace SmartAutoDeploy
 						pFoot->SetDestination(pStandoffCell, true);
 						pFoot->QueueMission(Mission::Move, true);
 						pExt->SmartAutoDeploy_SavedTarget = pTarget;
-						pExt->SmartAutoDeploy_SavedMission = pThis->CurrentMission;
+						pExt->SmartAutoDeploy_SavedMission = Mission::Attack;
 						pExt->SmartAutoDeploy_IsRepositioning = true;
 						pExt->SmartAutoDeploy_RepositionDestination = pStandoffCell->GetCenterCoords();
 						pExt->SmartAutoDeploy_TargetAction = SmartAutoDeployAction::None;
@@ -1109,13 +1668,22 @@ namespace SmartAutoDeploy
 		}
 
 		// ── Deploy margin: only deploy well within weapon range ──────────
-		const int deployMargin = std::min(256, pAltWeapon->Range / 8);
-		const int maxDeployDist = (pAltWeapon->MinimumRange > 0 && pAltWeapon->Range > pAltWeapon->MinimumRange + deployMargin)
-			? std::max(pAltWeapon->MinimumRange + 128, pAltWeapon->Range - deployMargin)
-			: pAltWeapon->Range - deployMargin;
+		const bool isMobileStealthSubDive = altIsStealthSub && pAltType->Speed > 0 && pAltType->WhatAmI() != AbstractType::BuildingType;
+		if (!defensiveDeploy && !isMobileStealthSubDive)
+		{
+			auto const pTargetTechno = abstract_cast<TechnoClass*>(pTarget);
+			const int airBonus = (pTargetTechno && pTargetTechno->IsInAir() && pAltType->AirRangeBonus > 0)
+				? pAltType->AirRangeBonus * 256
+				: 0;
+			const int effectiveRange = pAltWeapon->Range + airBonus;
+			const int deployMargin = std::min(256, effectiveRange / 8);
+			const int maxDeployDist = (pAltWeapon->MinimumRange > 0 && effectiveRange > pAltWeapon->MinimumRange + deployMargin)
+				? std::max(pAltWeapon->MinimumRange + 128, effectiveRange - deployMargin)
+				: effectiveRange - deployMargin;
 
-		if (currentDist > maxDeployDist)
-			return false;
+			if (currentDist > maxDeployDist)
+				return false;
+		}
 
 		// ── Execute deployment ────────────────────────────────────────────
 		if (!CanPerformTransformation(pThis, true))
@@ -1133,7 +1701,7 @@ namespace SmartAutoDeploy
 			return false;
 		}
 
-		return SaveAndTransform(pThis, pTarget, SmartAutoDeployAction::Deploy, true, pThis->CurrentMission);
+		return SaveAndTransform(pThis, pTarget, SmartAutoDeployAction::Deploy, true, Mission::Attack);
 	}
 
 	// ── Combat Evaluator (orchestrator) ──────────────────────────────────
@@ -1143,20 +1711,32 @@ namespace SmartAutoDeploy
 		if (pThis->CurrentMission == Mission::Move)
 			return false;
 
+		const auto pType = pThis->GetTechnoType();
+		const auto pTypeExt = TechnoTypeExt::Fetch(pType);
+		const auto pAltType = GetAlternateType(pThis);
+		if (!pAltType)
+			return false;
+
+		const bool currentlyDeployed = IsCurrentlyDeployed(pThis);
+		auto const pFoot = abstract_cast<FootClass*>(pThis);
+
 		AbstractClass* pTarget = pThis->Target;
-		if (!pTarget)
-			pTarget = pThis->LastTarget;
+		if (!pTarget && (!pFoot || !pFoot->Destination) && IsAliveAndValid(pThis->LastTarget))
+		{
+			auto const pCurrWep = GetFormWeapon(pThis, pAltType, currentlyDeployed, pThis->LastTarget);
+			auto const pAltWep = GetFormWeapon(pThis, pAltType, !currentlyDeployed, pThis->LastTarget);
+			const int maxRange = std::max(pCurrWep ? pCurrWep->Range : 0, pAltWep ? pAltWep->Range : 0);
+			if (pThis->DistanceFrom(pThis->LastTarget) <= maxRange + 512)
+				pTarget = pThis->LastTarget;
+		}
+
+		if (!IsAliveAndValid(pTarget))
+			pTarget = FindAlternateFormTarget(pThis, pType, pAltType, currentlyDeployed);
 
 		if (!IsAliveAndValid(pTarget))
 			return false;
 
 		if (pTarget->WhatAmI() == AbstractType::Cell && pThis->CurrentMission != Mission::Attack)
-			return false;
-
-		const auto pType = pThis->GetTechnoType();
-		const auto pTypeExt = TechnoTypeExt::Fetch(pType);
-		const auto pAltType = GetAlternateType(pThis);
-		if (!pAltType)
 			return false;
 
 		const auto pAltTypeExt = TechnoTypeExt::Fetch(pAltType);
@@ -1165,7 +1745,6 @@ namespace SmartAutoDeploy
 		if (!IsTargetDomainAllowed(pTypeExt, targetDomain) && !IsTargetDomainAllowed(pAltTypeExt, targetDomain))
 			return false;
 
-		const bool currentlyDeployed = IsCurrentlyDeployed(pThis);
 		const int currentDist = pThis->DistanceFrom(pTarget);
 		auto const pCurrentWeapon = GetFormWeapon(pThis, pAltType, currentlyDeployed, pTarget);
 		auto const pAltWeapon = GetFormWeapon(pThis, pAltType, !currentlyDeployed, pTarget);
@@ -1185,7 +1764,7 @@ namespace SmartAutoDeploy
 	bool EvaluateTravel(TechnoClass* pThis)
 	{
 		auto const pFoot = abstract_cast<FootClass*>(pThis);
-		if (!pFoot || !pFoot->Destination)
+		if (!pFoot)
 			return false;
 
 		const auto pType = pThis->GetTechnoType();
@@ -1198,29 +1777,148 @@ namespace SmartAutoDeploy
 		if (!pTypeExt->SmartAutoDeploy_Travel && !pAltTypeExt->SmartAutoDeploy_Travel)
 			return false;
 
-		if (pThis->CurrentMission != Mission::Move)
-			return false;
+		const auto mission = pThis->CurrentMission;
+		const bool isPureMove = (mission == Mission::Move || mission == Mission::AttackMove || mission == Mission::Patrol);
+		const bool isCombatOrGuardMove = (mission == Mission::Attack || mission == Mission::Area_Guard || mission == Mission::Guard || mission == Mission::Hunt);
 
-		const int minTravelDistCells = pTypeExt->SmartAutoDeploy_TravelMinDistance.Get();
-		const int minTravelDistLeptons = minTravelDistCells * 256;
-
-		if (pThis->DistanceFrom(pFoot->Destination) < minTravelDistLeptons)
+		if (!isPureMove && !isCombatOrGuardMove)
 			return false;
 
 		const bool currentlyDeployed = IsCurrentlyDeployed(pThis);
+
+		// ── 1. Check if the unit is currently fighting an enemy in weapon range ──
+		if (IsAliveAndValid(pThis->Target))
+		{
+			auto const pTargetTechno = abstract_cast<TechnoClass*>(pThis->Target);
+			auto const pCurrWep = GetFormWeapon(pThis, pAltType, currentlyDeployed, pThis->Target);
+			auto const pAltWep = GetFormWeapon(pThis, pAltType, !currentlyDeployed, pThis->Target);
+			const int distToTarget = pThis->DistanceFrom(pThis->Target);
+
+			const int currAirBonus = (pTargetTechno && pTargetTechno->IsInAir() && pType->AirRangeBonus > 0)
+				? pType->AirRangeBonus * 256
+				: 0;
+			const int altAirBonus = (pTargetTechno && pTargetTechno->IsInAir() && pAltType->AirRangeBonus > 0)
+				? pAltType->AirRangeBonus * 256
+				: 0;
+			const int currEffectiveRange = pCurrWep ? (pCurrWep->Range + currAirBonus) : 0;
+			const int altEffectiveRange = pAltWep ? (pAltWep->Range + altAirBonus) : 0;
+
+			const bool targetInCurrentRange = pCurrWep
+				&& distToTarget <= currEffectiveRange
+				&& distToTarget >= pCurrWep->MinimumRange
+				&& CanFormDamageTarget(pType, pCurrWep, pThis->Target);
+
+			if (isPureMove)
+			{
+				if (targetInCurrentRange && pType->OpportunityFire)
+				{
+					// Actively opportunity-firing while moving: stay in the OpportunityFire form until out of range or dead
+					return false;
+				}
+
+				// Target is out of range (left behind while moving) or current form has no OpportunityFire:
+				// clear target so the unit can resume fast travel toward its Destination.
+				if (!targetInCurrentRange)
+				{
+					pThis->SetTarget(nullptr);
+					pThis->LastTarget = nullptr;
+				}
+			}
+			else
+			{
+				const bool targetInAltRange = pAltWep
+					&& distToTarget <= altEffectiveRange
+					&& distToTarget >= pAltWep->MinimumRange
+					&& CanFormDamageTarget(pAltType, pAltWep, pThis->Target);
+
+				if (targetInCurrentRange || targetInAltRange)
+				{
+					// In combat range of the target — let EvaluateCombat manage form selection
+					return false;
+				}
+
+				// Target is still out of both weapons' ranges (chasing/approaching from afar):
+				// if current form has OpportunityFire and another enemy is right beside us, keep OpportunityFire active
+				if (pType->OpportunityFire && !pAltType->OpportunityFire)
+				{
+					if (FindOpportunityFireTarget(pThis, pAltType, pType, !currentlyDeployed))
+						return false;
+				}
+			}
+		}
+
+		// Determine travel destination (movement Destination or distant Attack Target)
+		AbstractClass* pTravelDest = pFoot->Destination;
+		if (IsAliveAndValid(pThis->Target))
+		{
+			if (!pTravelDest || pThis->DistanceFrom(pThis->Target) > pThis->DistanceFrom(pTravelDest))
+				pTravelDest = pThis->Target;
+		}
+
+		if (!pTravelDest)
+			return false;
+
+		// ── 2. OpportunityFire engagement while traveling in the fast non-OpportunityFire form ──
+		// If currently moving in the faster form (e.g. RA3APOC2) and the alternate form (e.g. RA3APOC)
+		// has OpportunityFire=yes, switch to the OpportunityFire form when an enemy enters its weapon range
+		// while preserving Destination and Mission so it rotates its turret and shoots without deviating.
+		if (pType != pAltType && !pType->OpportunityFire && pAltType->OpportunityFire && pType->Speed > pAltType->Speed)
+		{
+			if (auto const pOppTarget = FindOpportunityFireTarget(pThis, pType, pAltType, currentlyDeployed))
+			{
+				ResetSmartAutoDeployState(TechnoExt::Fetch(pThis));
+				return ExecuteTravelTransformation(pThis, !currentlyDeployed, pOppTarget);
+			}
+		}
+
+		// ── 3. Transform to the faster travel form when not fighting ──
+		const int minTravelDistCells = (pType != pAltType && !pTypeExt->SmartAutoDeploy_Travel && pAltTypeExt->SmartAutoDeploy_Travel)
+			? pAltTypeExt->SmartAutoDeploy_TravelMinDistance.Get()
+			: pTypeExt->SmartAutoDeploy_TravelMinDistance.Get();
+		const int minTravelDistLeptons = minTravelDistCells * 256;
+		const int distToTravelDest = pThis->DistanceFrom(pTravelDest);
+
 		const int currentSpeed = pType->Speed;
 		const int altSpeed = pAltType->Speed;
 
-		const bool altHasBetterMobility = (pType == pAltType)
-			? (currentlyDeployed && (currentSpeed > 0 || pType->MovementZone == MovementZone::Fly))
-			: ((altSpeed > currentSpeed) ||
-				(pAltType->MovementZone == MovementZone::Fly && pType->MovementZone != MovementZone::Fly) ||
-				(pAltType->SpeedType == SpeedType::Hover && pType->SpeedType != SpeedType::Hover && pType->SpeedType != SpeedType::Winged));
+		// Allow resuming the fast travel form after an OpportunityFire engagement along the way
+		// even if the remaining distance to Destination is now under TravelMinDistance (as long as >= 2.5 cells remain).
+		const bool resumingAfterOpportunityFire = (pType != pAltType && pType->OpportunityFire && !pAltType->OpportunityFire
+			&& altSpeed > currentSpeed && distToTravelDest >= 640);
 
-		if (altHasBetterMobility)
+		// Also allow chasing a distant combat target when TargetChase is enabled and target is well beyond weapon range.
+		bool chasingDistantTarget = false;
+		if (isCombatOrGuardMove && IsAliveAndValid(pThis->Target) && altSpeed > currentSpeed
+			&& (pTypeExt->SmartAutoDeploy_TargetChase || pAltTypeExt->SmartAutoDeploy_TargetChase))
+		{
+			auto const pCurrWep = GetFormWeapon(pThis, pAltType, currentlyDeployed, pThis->Target);
+			const int chaseThreshold = pCurrWep ? (pCurrWep->Range + 384) : minTravelDistLeptons;
+			if (distToTravelDest >= chaseThreshold)
+				chasingDistantTarget = true;
+		}
+
+		if (distToTravelDest < minTravelDistLeptons && !resumingAfterOpportunityFire && !chasingDistantTarget)
+			return false;
+
+		bool shouldTransformForTravel = false;
+		if (pType != pAltType && pTypeExt->SmartAutoDeploy_Travel != pAltTypeExt->SmartAutoDeploy_Travel)
+		{
+			shouldTransformForTravel = pAltTypeExt->SmartAutoDeploy_Travel.Get();
+		}
+		else
+		{
+			shouldTransformForTravel = (pType == pAltType)
+				? (currentlyDeployed && (currentSpeed > 0 || pType->MovementZone == MovementZone::Fly))
+				: ((altSpeed > currentSpeed) ||
+					(pAltType->MovementZone == MovementZone::Fly && pType->MovementZone != MovementZone::Fly) ||
+					(pAltType->SpeedType == SpeedType::Hover && pType->SpeedType != SpeedType::Hover && pType->SpeedType != SpeedType::Winged));
+		}
+
+		if (shouldTransformForTravel)
 		{
 			ResetSmartAutoDeployState(TechnoExt::Fetch(pThis));
-			return ExecuteTransformation(pThis, !currentlyDeployed);
+			AbstractClass* const pKeepTarget = isPureMove ? nullptr : pThis->Target;
+			return ExecuteTravelTransformation(pThis, !currentlyDeployed, pKeepTarget);
 		}
 
 		return false;
@@ -1281,7 +1979,9 @@ namespace SmartAutoDeploy
 
 		if (!pExt->SmartAutoDeploy_IdleTimer.IsTicking())
 		{
-			const int delay = pTypeExt->SmartAutoDeploy_IdleDelay.Get();
+			const int delay = (pType != pAltType && pAltTypeExt->SmartAutoDeploy_Idle && pTypeExt->SmartAutoDeploy_IdleDelay == 60)
+				? pAltTypeExt->SmartAutoDeploy_IdleDelay.Get()
+				: pTypeExt->SmartAutoDeploy_IdleDelay.Get();
 			pExt->SmartAutoDeploy_IdleTimer.Start(delay);
 			return false;
 		}
