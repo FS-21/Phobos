@@ -58,6 +58,8 @@ public:
 		, AssignedExpansionPoint {}
 		, IsPlayingRoofProductionAnim { false }
 		, LastCombatFrame { 0 }
+		, IsHarvesterRecoveryRefinery { false }
+		, HarvesterRecoveryPlacedFrame { 0 }
 	{ }
 
 	// typed owner accessor (shadows the TechnoClass one from the base)

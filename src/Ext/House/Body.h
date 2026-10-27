@@ -251,6 +251,8 @@ public:
 	std::vector<CellStruct> UnclaimedTiberiumZones;
 	CellStruct NextRefineryPlacementLocation;
 	int LastUnclaimedTiberiumCheckFrame;
+	bool IsBuildingRecoveryRefinery;
+	int NextHarvesterRecoveryFrame;
 
 	std::vector<CellStruct> CachedReachableResourceFields;
 	int NextReachableResourceScanFrame;
@@ -378,6 +380,8 @@ public:
 		, UnclaimedTiberiumZones {}
 		, NextRefineryPlacementLocation { 0, 0 }
 		, LastUnclaimedTiberiumCheckFrame { 0 }
+		, IsBuildingRecoveryRefinery { false }
+		, NextHarvesterRecoveryFrame { 0 }
 		, CachedReachableResourceFields {}
 		, NextReachableResourceScanFrame { 0 }
 		, CachedResourceCandidates {}
