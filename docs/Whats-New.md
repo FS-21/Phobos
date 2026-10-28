@@ -172,6 +172,7 @@ You can use the migration utility (can be found on [Phobos supplementaries repo]
 CampaignDefaultGameSpeed=4       ; integer
 ShowBriefing=true                ; boolean
 DigitalDisplay.Enable=false      ; boolean
+ProductionBar.ShowType=          ; Displayed ShowType Enumeration (none|cursorhover|selected|idle|all)
 ShowDesignatorRange=false        ; boolean
 PrioritySelectionFiltering=true  ; boolean
 PriorityDeployFiltering=true     ; boolean
@@ -2059,6 +2060,7 @@ HideShakeEffects=false           ; boolean
 - [Improvements to stationary unit logic](Fixed-or-Improved-Logics.md#stationary-units) (by Starkku)
 - [Light flash toggle for ParticleType alpha images](User-Interface.md#visual-effects-toggling) (by Starkku)
 - [Allow customizing if `IsSimpleDeployer` unit can deploy on top of (passable) buildings](Fixed-or-Improved-Logics.md#issimpledeployer-customizations) (by Starkku)
+- [Building production progress bar](User-Interface.md#building-production-progress-bar) (by FS-21)
 
 #### Vanilla fixes:
 - Fixed the bug where a building with `Factory=BuildingType` owned by the AI did not play `ProductionAnim` when placing a produced building (by Noble_Fish)

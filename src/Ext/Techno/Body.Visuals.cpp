@@ -3,6 +3,8 @@
 #include <Ext/Anim/Body.h>
 #include <Ext/SWType/Body.h>
 #include <Ext/House/Body.h>
+#include <Ext/BuildingType/Body.h>
+#include <FactoryClass.h>
 
 void TechnoExt::DrawSelfHealPips(TechnoClass* pThis, Point2D* pLocation, RectangleStruct* pBounds)
 {
@@ -869,6 +871,233 @@ void TechnoExt::GetDigitalDisplayFakeHealth(TechnoClass* pThis, int& value, int&
 			const double ratio = static_cast<double>(value) / maxValue;
 			value = static_cast<int>(ratio * newMaxValue);
 			maxValue = newMaxValue;
+		}
+	}
+}
+
+void TechnoExt::DrawProductionBar(BuildingClass* pThis, int length, RectangleStruct* pBound)
+{
+	if (!pThis || !pThis->Owner)
+		return;
+
+	auto const pBuildingType = pThis->Type;
+
+	if (!pBuildingType || pBuildingType->Factory == AbstractType::None)
+		return;
+
+	auto const pBuildingTypeExt = BuildingTypeExt::Fetch(pBuildingType);
+	auto const pRulesExt = RulesExt::Global();
+
+	if (!pBuildingTypeExt->ProductionBar.Get(pRulesExt->ProductionBar))
+		return;
+
+	if (length <= 0)
+	{
+		const int height = pBuildingType->GetFoundationHeight(false);
+		length = height * 7 + height / 2;
+
+		if (length <= 0)
+			return;
+	}
+
+	const DisplayShowType showType = Phobos::Config::ProductionBar_ShowType_IsSet
+		? static_cast<DisplayShowType>(Phobos::Config::ProductionBar_ShowType)
+		: pBuildingTypeExt->ProductionBar_ShowType.Get(pRulesExt->ProductionBar_ShowType);
+
+	if (showType == DisplayShowType::None)
+		return;
+
+	if (!pBuildingTypeExt->HealthBar_Permanent && showType != DisplayShowType::All)
+	{
+		const bool showHover = (showType & DisplayShowType::CursorHover) != DisplayShowType::None && pThis->IsMouseHovering;
+		const bool showSelected = (showType & DisplayShowType::Selected) != DisplayShowType::None && pThis->IsSelected;
+		const bool showIdle = (showType & DisplayShowType::Idle) != DisplayShowType::None && !pThis->IsMouseHovering && !pThis->IsSelected;
+
+		if (!showHover && !showSelected && !showIdle)
+			return;
+	}
+
+	const AffectedHouse visibleToHouses = pBuildingTypeExt->ProductionBar_VisibleToHouses.Get(pRulesExt->ProductionBar_VisibleToHouses);
+	const bool visibleToObserver = pBuildingTypeExt->ProductionBar_VisibleToHouses_Observer.Get(pRulesExt->ProductionBar_VisibleToHouses_Observer);
+
+	if (HouseClass::IsCurrentPlayerObserver())
+	{
+		if (!visibleToObserver)
+			return;
+	}
+	else if (!EnumFunctions::CanTargetHouse(visibleToHouses, pThis->Owner, HouseClass::CurrentPlayer))
+	{
+		return;
+	}
+
+	FactoryClass* pPrimaryFactory = nullptr;
+	FactoryClass* pSecondaryFactory = nullptr;
+
+	if (pThis->Owner->IsControlledByHuman())
+	{
+		if (pThis->IsPrimaryFactory)
+			pPrimaryFactory = pThis->Owner->GetPrimaryFactory(pBuildingType->Factory, pBuildingType->Naval, BuildCat::DontCare);
+		else
+			pPrimaryFactory = nullptr;
+
+		if (pThis->IsPrimaryFactory && pBuildingType->Factory == AbstractType::BuildingType)
+			pSecondaryFactory = pThis->Owner->Primary_ForDefenses;
+	}
+	else if (pThis->Factory)
+	{
+		pPrimaryFactory = pThis->Factory;
+	}
+
+	const bool hideIfNoProduction = pBuildingTypeExt->ProductionBar_HideIfNoProduction.Get(pRulesExt->ProductionBar_HideIfNoProduction);
+	const bool separateSecondary = (pBuildingType->Factory == AbstractType::BuildingType)
+		&& pBuildingTypeExt->ProductionBar_Secondary.Get(pRulesExt->ProductionBar_Secondary);
+
+	const bool primaryActive = pPrimaryFactory && pPrimaryFactory->Object;
+	const bool secondaryActive = pSecondaryFactory && pSecondaryFactory->Object;
+
+	const int primaryProgress = primaryActive ? pPrimaryFactory->GetProgress() : 0;
+	const int secondaryProgress = secondaryActive ? pSecondaryFactory->GetProgress() : 0;
+
+	bool hasShieldBar = false;
+
+	if (!pBuildingTypeExt->HealthBar_Hide
+		&& (pThis->IsSelected || pThis->IsMouseHovering || pBuildingTypeExt->HealthBar_Permanent))
+	{
+		if (auto const pShieldData = TechnoExt::Fetch(pThis)->Shield.get())
+		{
+			if (!pShieldData->IsBrokenAndNonRespawning()
+				&& !(pShieldData->GetHP() <= 0 && pShieldData->GetType()->Pips_HideIfNoStrength))
+			{
+				hasShieldBar = true;
+			}
+		}
+	}
+
+	Point2D basePosition = TechnoExt::GetBuildingSelectBracketPosition(pThis, pBuildingType, BuildingSelectBracketPosition::Top);
+	basePosition.X -= 6;
+	basePosition.Y -= 3;
+
+	if (hasShieldBar)
+	{
+		basePosition.X -= 6;
+		basePosition.Y -= 3;
+		const Point2D shieldDelta = pBuildingTypeExt->ProductionBar_Offset_ShieldDelta.Get(pRulesExt->ProductionBar_Offset_ShieldDelta);
+		basePosition.X += shieldDelta.X;
+		basePosition.Y += shieldDelta.Y;
+	}
+
+	const Point2D primaryOffset = pBuildingTypeExt->ProductionBar_Offset.Get(pRulesExt->ProductionBar_Offset);
+
+	SHPStruct* const pPrimaryShp = pBuildingTypeExt->ProductionBar_Shape.Get(
+		pRulesExt->ProductionBar_Shape.Get(FileSystem::PIPS_SHP));
+	ConvertClass* const pPrimaryPal = pBuildingTypeExt->ProductionBar_Palette.GetOrDefaultConvert(
+		pRulesExt->ProductionBar_Palette.GetOrDefaultConvert(FileSystem::PALETTE_PAL));
+	const int primaryPip = pBuildingTypeExt->ProductionBar_Pip.Get(pRulesExt->ProductionBar_Pip);
+	const int primaryEmptyPip = pBuildingTypeExt->ProductionBar_Pip_Empty.Get(pRulesExt->ProductionBar_Pip_Empty);
+
+	auto drawBar = [pBound, length](Point2D startPos, int progress, SHPStruct* pShp, ConvertClass* pPal, int filledPip, int emptyPip)
+	{
+		if (!pShp || !pPal)
+			return;
+
+		const double ratio = std::clamp(progress / 54.0, 0.0, 1.0);
+		const int filledLength = Math::clamp(static_cast<int>( std::round(ratio * length)), 0, length);
+
+		if (filledLength > 0 && filledPip >= 0)
+		{
+			for (int frameIdx = filledLength, deltaX = 0, deltaY = 0;
+				frameIdx;
+				frameIdx--, deltaX += 4, deltaY -= 2)
+			{
+				Point2D position = startPos;
+				position.X -= deltaX;
+				position.Y -= deltaY;
+
+				DSurface::Temp->DrawSHP(pPal, pShp,
+					filledPip, &position, pBound, BlitterFlags(0x600), 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
+			}
+		}
+
+		if (filledLength < length && emptyPip >= 0)
+		{
+			for (int frameIdx = length - filledLength, deltaX = 4 * filledLength, deltaY = -2 * filledLength;
+				frameIdx;
+				frameIdx--, deltaX += 4, deltaY -= 2)
+			{
+				Point2D position = startPos;
+				position.X -= deltaX;
+				position.Y -= deltaY;
+
+				DSurface::Temp->DrawSHP(pPal, pShp,
+					emptyPip, &position, pBound, BlitterFlags(0x600), 0, 0, ZGradient::Ground, 1000, 0, 0, 0, 0, 0);
+			}
+		}
+	};
+
+	if (!separateSecondary)
+	{
+		const bool anyActive = primaryActive || secondaryActive;
+
+		if (hideIfNoProduction && !anyActive)
+			return;
+
+		const int sharedProgress = std::max(primaryProgress, secondaryProgress);
+		Point2D pos = basePosition;
+		pos.X += primaryOffset.X;
+		pos.Y += primaryOffset.Y;
+		drawBar(pos, sharedProgress, pPrimaryShp, pPrimaryPal, primaryPip, primaryEmptyPip);
+	}
+	else
+	{
+		const bool showBoth = pBuildingTypeExt->ProductionBar_Secondary_ShowBoth.Get(pRulesExt->ProductionBar_Secondary_ShowBoth);
+		const bool anyActive = primaryActive || secondaryActive;
+		bool drewPrimary = false;
+
+		if (!hideIfNoProduction || primaryActive || (showBoth && anyActive))
+		{
+			Point2D pos1 = basePosition;
+			pos1.X += primaryOffset.X;
+			pos1.Y += primaryOffset.Y;
+			(void)pos1;
+			drewPrimary = true;
+		}
+
+		if (!hideIfNoProduction || secondaryActive || (showBoth && anyActive))
+		{
+			Point2D pos2 = basePosition;
+
+			if (drewPrimary || !hideIfNoProduction || pBuildingTypeExt->ProductionBar_Secondary_Offset.isset() || pRulesExt->ProductionBar_Secondary_Offset.isset())
+			{
+				pos2.X -= 6;
+				pos2.Y -= 3;
+			}
+
+			const Point2D secondaryOffset = pBuildingTypeExt->ProductionBar_Secondary_Offset.Get(
+				pRulesExt->ProductionBar_Secondary_Offset.Get({ 2, 1 }));
+			pos2.X += secondaryOffset.X;
+			pos2.Y += secondaryOffset.Y;
+
+			SHPStruct* const pSecondaryShp = pBuildingTypeExt->ProductionBar_Secondary_Shape.Get(
+				pRulesExt->ProductionBar_Secondary_Shape.Get(pPrimaryShp));
+			ConvertClass* const pSecondaryPal = pBuildingTypeExt->ProductionBar_Secondary_Palette.GetConvert()
+				? pBuildingTypeExt->ProductionBar_Secondary_Palette.GetConvert()
+				: (pRulesExt->ProductionBar_Secondary_Palette.GetConvert()
+					? pRulesExt->ProductionBar_Secondary_Palette.GetConvert()
+					: pPrimaryPal);
+			const int secondaryPip = pBuildingTypeExt->ProductionBar_Secondary_Pip.Get(
+				pRulesExt->ProductionBar_Secondary_Pip.Get(primaryPip));
+			const int secondaryEmptyPip = pBuildingTypeExt->ProductionBar_Secondary_Pip_Empty.Get(
+				pRulesExt->ProductionBar_Secondary_Pip_Empty.Get(primaryEmptyPip));
+
+			drawBar(pos2, secondaryProgress, pSecondaryShp, pSecondaryPal, secondaryPip, secondaryEmptyPip);
+		}
+
+		if (drewPrimary)
+		{
+			Point2D pos1 = basePosition;
+			pos1.X += primaryOffset.X;
+			pos1.Y += primaryOffset.Y;
+			drawBar(pos1, primaryProgress, pPrimaryShp, pPrimaryPal, primaryPip, primaryEmptyPip);
 		}
 	}
 }

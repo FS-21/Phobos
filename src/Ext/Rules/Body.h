@@ -573,6 +573,25 @@ public:
 
 		Valueable<bool> ExtendedBuildingPlacing;
 
+		Valueable<bool> ProductionBar;
+		Valueable<bool> ProductionBar_HideIfNoProduction;
+		Valueable<DisplayShowType> ProductionBar_ShowType;
+		Valueable<AffectedHouse> ProductionBar_VisibleToHouses;
+		Valueable<bool> ProductionBar_VisibleToHouses_Observer;
+		Nullable<SHPStruct*> ProductionBar_Shape;
+		CustomPalette ProductionBar_Palette;
+		Valueable<int> ProductionBar_Pip;
+		Valueable<int> ProductionBar_Pip_Empty;
+		Valueable<Point2D> ProductionBar_Offset;
+		Valueable<Point2D> ProductionBar_Offset_ShieldDelta;
+		Valueable<bool> ProductionBar_Secondary;
+		Valueable<bool> ProductionBar_Secondary_ShowBoth;
+		Nullable<SHPStruct*> ProductionBar_Secondary_Shape;
+		CustomPalette ProductionBar_Secondary_Palette;
+		Nullable<int> ProductionBar_Secondary_Pip;
+		Nullable<int> ProductionBar_Secondary_Pip_Empty;
+		Nullable<Point2D> ProductionBar_Secondary_Offset;
+
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
 			, HarvesterDumpAmount { 0.0f }
@@ -1079,6 +1098,25 @@ public:
 			, MissileKeepTargetCoord { false }
 
 			, ExtendedBuildingPlacing { false }
+
+			, ProductionBar { false }
+			, ProductionBar_HideIfNoProduction { true }
+			, ProductionBar_ShowType { DisplayShowType::Select }
+			, ProductionBar_VisibleToHouses { AffectedHouse::Team }
+			, ProductionBar_VisibleToHouses_Observer { true }
+			, ProductionBar_Shape {}
+			, ProductionBar_Palette {}
+			, ProductionBar_Pip { 3 }
+			, ProductionBar_Pip_Empty { 0 }
+			, ProductionBar_Offset { { 0, 0 } }
+			, ProductionBar_Offset_ShieldDelta { { 0, 0 } }
+			, ProductionBar_Secondary { false }
+			, ProductionBar_Secondary_ShowBoth { true }
+			, ProductionBar_Secondary_Shape {}
+			, ProductionBar_Secondary_Palette {}
+			, ProductionBar_Secondary_Pip {}
+			, ProductionBar_Secondary_Pip_Empty {}
+			, ProductionBar_Secondary_Offset {}
 		{ }
 
 		virtual ~ExtData() = default;

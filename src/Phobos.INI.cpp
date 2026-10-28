@@ -6,6 +6,7 @@
 #include <Utilities/GeneralUtils.h>
 #include <Utilities/Patch.h>
 #include <Utilities/Macro.h>
+#include <Utilities/TemplateDef.h>
 
 #include "Misc/BlittersFix.h"
 
@@ -50,6 +51,8 @@ bool Phobos::Config::ArtImageSwap = false;
 bool Phobos::Config::ShowPlacementPreview = false;
 bool Phobos::Config::EnableSelectBox = false;
 bool Phobos::Config::DigitalDisplay_Enable = false;
+bool Phobos::Config::ProductionBar_ShowType_IsSet = false;
+unsigned char Phobos::Config::ProductionBar_ShowType = 0;
 bool Phobos::Config::MessageApplyHoverState = false;
 bool Phobos::Config::MessageDisplayInCenter = false;
 int Phobos::Config::MessageDisplayInCenter_BoardOpacity = 40;
@@ -114,6 +117,19 @@ DEFINE_HOOK(0x5FACDF, OptionsClass_LoadSettings_LoadPhobosSettings, 0x5)
 	Phobos::Config::RealTimeTimers_Adaptive = CCINIClass::INI_RA2MD.ReadBool(phobosSection, "RealTimeTimers.Adaptive", false);
 	Phobos::Config::EnableSelectBox = CCINIClass::INI_RA2MD.ReadBool(phobosSection, "EnableSelectBox", false);
 	Phobos::Config::DigitalDisplay_Enable = CCINIClass::INI_RA2MD.ReadBool(phobosSection, "DigitalDisplay.Enable", false);
+	{
+		INI_EX exRA2MD(&CCINIClass::INI_RA2MD);
+		DisplayShowType showType = DisplayShowType::None;
+		if (detail::read(showType, exRA2MD, phobosSection, "ProductionBar.ShowType"))
+		{
+			Phobos::Config::ProductionBar_ShowType_IsSet = true;
+			Phobos::Config::ProductionBar_ShowType = static_cast<unsigned char>(showType);
+		}
+		else
+		{
+			Phobos::Config::ProductionBar_ShowType_IsSet = false;
+		}
+	}
 	Phobos::Config::SaveGameOnScenarioStart = CCINIClass::INI_RA2MD.ReadBool(phobosSection, "SaveGameOnScenarioStart", true);
 	Phobos::Config::ShowBriefing = CCINIClass::INI_RA2MD.ReadBool(phobosSection, "ShowBriefing", true);
 	Phobos::Config::ShowPowerDelta = CCINIClass::INI_RA2MD.ReadBool(phobosSection, "ShowPowerDelta", true);

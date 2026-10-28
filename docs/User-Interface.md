@@ -53,6 +53,71 @@ SuperWeaponTimer.Percentage=false  ; boolean
 ShowTimer.Percentage=              ; boolean
 ```
 
+### Building production progress bar
+
+- Factory structures (`Factory` is not `none`) can now display an isometric pip progress bar alongside their health and shield bars to indicate current production progress. Non-factory buildings ignore these settings.
+  - This can be enabled globally in `[AudioVisual] -> ProductionBar` and overridden per building in `[BuildingType] -> ProductionBar`.
+  - `ProductionBar.HideIfNoProduction` controls whether the bar is hidden when the factory is not actively producing an object.
+  - `ProductionBar.ShowType` specifies when the bar is shown. Unlike `DigitalDisplay`, `idle` and `all` also work when `HealthBar.Permanent` is false or `HealthBar.Hide` is true. If `HealthBar.Permanent` is true, the bar is always shown regardless of `ShowType`.
+  - `ProductionBar.VisibleToHouses` and `ProductionBar.VisibleToHouses.Observer` control which players and observers can see the production bar.
+  - `ProductionBar.Shape` and `ProductionBar.Palette` allow specifying a custom shape file and palette.
+  - `ProductionBar.Pip` and `ProductionBar.Pip.Empty` select the zero-based frame index for filled and empty pips (set `ProductionBar.Pip.Empty` to `-1` to hide empty pips).
+  - The bar is automatically positioned one isometric row above the health bar, and shifts one additional row up when a building shield bar is visible so they do not overlap. `ProductionBar.Offset` and `ProductionBar.Offset.ShieldDelta` allow adjusting these positions in pixels.
+  - For Construction Yards (`Factory=BuildingType`), which manage both the main building queue and the defense queue:
+    - Both queues share a single bar displaying whichever queue has the higher progress unless `ProductionBar.Secondary` is enabled (or any `ProductionBar.Secondary.*` tag is set), in which case the defense queue is drawn on a second progress bar stacked one row above the primary bar.
+    - `ProductionBar.Secondary.ShowBoth` controls whether both bars are displayed together whenever either queue is actively producing (when `ProductionBar.HideIfNoProduction` is true), or if each bar hides independently when its own queue is idle.
+
+In `rulesmd.ini`:
+```ini
+[AudioVisual]
+ProductionBar=false                         ; boolean
+ProductionBar.HideIfNoProduction=true       ; boolean
+ProductionBar.ShowType=cursorhover,selected ; Displayed ShowType Enumeration (none|cursorhover|selected|idle|all)
+ProductionBar.VisibleToHouses=owner,allies  ; Affected House Enumeration (none|owner/self|allies/ally|team|enemies/enemy|neutral|others|all)
+ProductionBar.VisibleToHouses.Observer=true ; boolean
+ProductionBar.Shape=pips.shp                ; filename - including the .shp extension
+ProductionBar.Palette=palette.pal           ; filename - including the .pal extension
+ProductionBar.Pip=3                         ; integer, frame of Shape for filled pips
+ProductionBar.Pip.Empty=0                   ; integer, frame of Shape for empty pips
+ProductionBar.Offset=0,0                    ; X,Y, pixel offset relative to default row position
+ProductionBar.Offset.ShieldDelta=0,0        ; X,Y, additional pixel offset when a shield bar is visible
+ProductionBar.Secondary=false               ; boolean
+ProductionBar.Secondary.ShowBoth=true       ; boolean
+ProductionBar.Secondary.Shape=              ; filename - including the .shp extension, defaults to ProductionBar.Shape
+ProductionBar.Secondary.Palette=            ; filename - including the .pal extension, defaults to ProductionBar.Palette
+ProductionBar.Secondary.Pip=                ; integer, defaults to ProductionBar.Pip
+ProductionBar.Secondary.Pip.Empty=          ; integer, defaults to ProductionBar.Pip.Empty
+ProductionBar.Secondary.Offset=2,1          ; X,Y, pixel offset relative to default secondary row position
+
+[SOMEBUILDING]                              ; BuildingType (with Factory != none)
+ProductionBar=                              ; boolean, defaults to [AudioVisual] -> ProductionBar
+ProductionBar.HideIfNoProduction=           ; boolean, defaults to [AudioVisual] -> ProductionBar.HideIfNoProduction
+ProductionBar.ShowType=                     ; Displayed ShowType Enumeration, defaults to [AudioVisual] -> ProductionBar.ShowType
+ProductionBar.VisibleToHouses=              ; Affected House Enumeration, defaults to [AudioVisual] -> ProductionBar.VisibleToHouses
+ProductionBar.VisibleToHouses.Observer=     ; boolean, defaults to [AudioVisual] -> ProductionBar.VisibleToHouses.Observer
+ProductionBar.Shape=                        ; filename - including the .shp extension, defaults to [AudioVisual] -> ProductionBar.Shape
+ProductionBar.Palette=                      ; filename - including the .pal extension, defaults to [AudioVisual] -> ProductionBar.Palette
+ProductionBar.Pip=                          ; integer, defaults to [AudioVisual] -> ProductionBar.Pip
+ProductionBar.Pip.Empty=                    ; integer, defaults to [AudioVisual] -> ProductionBar.Pip.Empty
+ProductionBar.Offset=                       ; X,Y, defaults to [AudioVisual] -> ProductionBar.Offset
+ProductionBar.Offset.ShieldDelta=           ; X,Y, defaults to [AudioVisual] -> ProductionBar.Offset.ShieldDelta
+ProductionBar.Secondary=                    ; boolean, defaults to [AudioVisual] -> ProductionBar.Secondary (auto-enabled if any ProductionBar.Secondary.* is set)
+ProductionBar.Secondary.ShowBoth=           ; boolean, defaults to [AudioVisual] -> ProductionBar.Secondary.ShowBoth
+ProductionBar.Secondary.Shape=              ; filename - including the .shp extension, defaults to ProductionBar.Shape
+ProductionBar.Secondary.Palette=            ; filename - including the .pal extension, defaults to ProductionBar.Palette
+ProductionBar.Secondary.Pip=                ; integer, defaults to ProductionBar.Pip
+ProductionBar.Secondary.Pip.Empty=          ; integer, defaults to ProductionBar.Pip.Empty
+ProductionBar.Secondary.Offset=             ; X,Y, defaults to [AudioVisual] -> ProductionBar.Secondary.Offset
+```
+
+- When the production bar is enabled in the mod (`ProductionBar=true`), users can optionally override when it is displayed (or disable it with `none`) via `RA2MD.INI`. If omitted in `RA2MD.INI`, the `ProductionBar.ShowType` configured in `rulesmd.ini` is used.
+
+In `RA2MD.INI`:
+```ini
+[Phobos]
+ProductionBar.ShowType=                     ; Displayed ShowType Enumeration (none|cursorhover|selected|idle|all), defaults to rulesmd.ini
+```
+
 ### Custom health bars display
 
 ![image](_static/images/healthbar.hide-01.png)

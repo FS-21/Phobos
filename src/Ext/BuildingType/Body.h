@@ -162,7 +162,27 @@ public:
 	Valueable<bool> Tunnel; // temporarily bool: Ares stores TunnelType name (string -> index), not mapped here
 
 	// Ares 3.0
+	// Ares 3.0
 	Nullable<bool> UnitSell;
+
+	Nullable<bool> ProductionBar;
+	Nullable<bool> ProductionBar_HideIfNoProduction;
+	Nullable<DisplayShowType> ProductionBar_ShowType;
+	Nullable<AffectedHouse> ProductionBar_VisibleToHouses;
+	Nullable<bool> ProductionBar_VisibleToHouses_Observer;
+	Nullable<SHPStruct*> ProductionBar_Shape;
+	CustomPalette ProductionBar_Palette;
+	Nullable<int> ProductionBar_Pip;
+	Nullable<int> ProductionBar_Pip_Empty;
+	Nullable<Point2D> ProductionBar_Offset;
+	Nullable<Point2D> ProductionBar_Offset_ShieldDelta;
+	Nullable<bool> ProductionBar_Secondary;
+	Nullable<bool> ProductionBar_Secondary_ShowBoth;
+	Nullable<SHPStruct*> ProductionBar_Secondary_Shape;
+	CustomPalette ProductionBar_Secondary_Palette;
+	Nullable<int> ProductionBar_Secondary_Pip;
+	Nullable<int> ProductionBar_Secondary_Pip_Empty;
+	Nullable<Point2D> ProductionBar_Secondary_Offset;
 
 	BuildingTypeExt(BuildingTypeClass* OwnerObject) : TechnoTypeExt(OwnerObject)
 		, PowersUp_Owner { AffectedHouse::Owner }
@@ -285,6 +305,25 @@ public:
 
 		// Ares 3.0
 		, UnitSell {}
+
+		, ProductionBar {}
+		, ProductionBar_HideIfNoProduction {}
+		, ProductionBar_ShowType {}
+		, ProductionBar_VisibleToHouses {}
+		, ProductionBar_VisibleToHouses_Observer {}
+		, ProductionBar_Shape {}
+		, ProductionBar_Palette {}
+		, ProductionBar_Pip {}
+		, ProductionBar_Pip_Empty {}
+		, ProductionBar_Offset {}
+		, ProductionBar_Offset_ShieldDelta {}
+		, ProductionBar_Secondary {}
+		, ProductionBar_Secondary_ShowBoth {}
+		, ProductionBar_Secondary_Shape {}
+		, ProductionBar_Secondary_Palette {}
+		, ProductionBar_Secondary_Pip {}
+		, ProductionBar_Secondary_Pip_Empty {}
+		, ProductionBar_Secondary_Offset {}
 	{ }
 
 	// typed owner accessor (shadows the TechnoTypeClass one from the base)

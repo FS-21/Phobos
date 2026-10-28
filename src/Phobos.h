@@ -90,6 +90,8 @@ public:
 		static bool EnableBuildingPlacementPreview;
 		static bool EnableSelectBox;
 		static bool DigitalDisplay_Enable;
+		static bool ProductionBar_ShowType_IsSet;
+		static unsigned char ProductionBar_ShowType;
 		static bool MessageApplyHoverState;
 		static bool MessageDisplayInCenter;
 		static int MessageDisplayInCenter_BoardOpacity;

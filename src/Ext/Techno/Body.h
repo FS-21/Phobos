@@ -261,6 +261,7 @@ public:
 	static Point2D GetBuildingSelectBracketPosition(TechnoClass* pThis, TechnoTypeClass* pType, BuildingSelectBracketPosition bracketPosition);
 	static void DrawSelectBox(TechnoClass* pThis, const Point2D* pLocation, const RectangleStruct* pBounds, bool drawBefore = false);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
+	static void DrawProductionBar(BuildingClass* pThis, int length, RectangleStruct* pBound);
 	static int GetDropCrateIndex(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, TechnoTypeClass* pType, DisplayInfoType infoType, int& value, int& maxValue, int infoIndex);
 	static void GetDigitalDisplayFakeHealth(TechnoClass* pThis, int& value, int& maxValue);
