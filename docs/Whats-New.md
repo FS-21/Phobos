@@ -2153,6 +2153,7 @@ PreserveCSFWhitespace=false          ; boolean
 - Units in Tank Bunker with deploy functions no longer perform them when unloaded from of Tank Bunker (by Starkku)
 - Fixed amphibious infantry without `MovementZone=AmphibiousDestroyer` (e.g. `MovementZone=Amphibious` or `SpeedType=Amphibious`) or playing `Guard`/`Down`/`Up` sequences in water using land animations instead of water sequences (by FS-21)
 - Fixed the bug that infantry weapons with both `LimboLaunch=yes` and ammunition logic could not set ReloadTimer properly (by dh381)
+- Fixed the bug that restored cyborg legs when the soldier left transport (by FS-21)
 
 #### Phobos fixes:
 - Fixed an issue where `IsSimpleDeployer=yes` and `BalloonHover=yes` jumpjet units were still forced to land upon reaching destination or when hovering unless actively deploying (by FS-21)
@@ -2490,7 +2491,6 @@ PreserveCSFWhitespace=false          ; boolean
 - Fixed the bug that naval ship will sink even they destroyed in air (by NetsuNegi & Noble_Fish)
 - Fixed MPDebug timer displaying when debug's visibility is off (by 11EJDE11)
 - Fixed the issue that units will goto farest location if target is closer than `MinimumRange` (by NetsuNegi)
-- Fixed the bug that restored cyborg legs when the soldier left transport (by FS-21)
 - Fixed a bug where units can be promoted when created via trigger actions even if they have `Trainable=false` (by NetsuNegi)
 - Fixed the issue where non-repairer units needed sensors to attack cloaked friendly units (by TaranDahl)
 - Fixed an issue that rockets do not consider the destination altitude during climbing (by TaranDahl)
