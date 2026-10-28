@@ -401,6 +401,7 @@ public:
 	static void DrawSelectBox(TechnoClass* pThis, const Point2D* pLocation, const RectangleStruct* pBounds, bool drawBefore = false);
 	static void ProcessDigitalDisplays(TechnoClass* pThis);
 	static AbstractClass* FindRandomTarget(TechnoClass* pFirer, AbstractClass* pOriginalTarget, WeaponTypeClass* pWeapon);
+	static void DrawProductionBar(BuildingClass* pThis, int length, RectangleStruct* pBound);
 	static int GetDropCrateIndex(TechnoClass* pThis);
 	static void GetValuesForDisplay(TechnoClass* pThis, TechnoTypeClass* pType, DisplayInfoType infoType, int& value, int& maxValue, int infoIndex);
 	static bool IsValidTechno(TechnoClass* pTechno, bool checkIfInTransportOrAbsorbed = true);

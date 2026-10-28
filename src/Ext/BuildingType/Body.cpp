@@ -885,6 +885,24 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->FlyingProduction_SpawnHeight.Read(exINI, pSection, "FlyingProduction.SpawnHeight");
 	this->FlyingProduction_SpawnFacing.Read(exINI, pSection, "FlyingProduction.SpawnFacing");
 	this->HasRallyPoint.Read(exINI, pSection, "HasRallyPoint");
+	this->ProductionBar.Read(exINI, pSection, "ProductionBar");
+	this->ProductionBar_HideIfNoProduction.Read(exINI, pSection, "ProductionBar.HideIfNoProduction");
+	this->ProductionBar_ShowType.Read(exINI, pSection, "ProductionBar.ShowType");
+	this->ProductionBar_VisibleToHouses.Read(exINI, pSection, "ProductionBar.VisibleToHouses");
+	this->ProductionBar_VisibleToHouses_Observer.Read(exINI, pSection, "ProductionBar.VisibleToHouses.Observer");
+	this->ProductionBar_Shape.Read(exINI, pSection, "ProductionBar.Shape");
+	this->ProductionBar_Palette.LoadFromINI(pINI, pSection, "ProductionBar.Palette");
+	this->ProductionBar_Pip.Read(exINI, pSection, "ProductionBar.Pip");
+	this->ProductionBar_Pip_Empty.Read(exINI, pSection, "ProductionBar.Pip.Empty");
+	this->ProductionBar_Offset.Read(exINI, pSection, "ProductionBar.Offset");
+	this->ProductionBar_Offset_ShieldDelta.Read(exINI, pSection, "ProductionBar.Offset.ShieldDelta");
+	this->ProductionBar_Secondary.Read(exINI, pSection, "ProductionBar.Secondary");
+	this->ProductionBar_Secondary_ShowBoth.Read(exINI, pSection, "ProductionBar.Secondary.ShowBoth");
+	this->ProductionBar_Secondary_Shape.Read(exINI, pSection, "ProductionBar.Secondary.Shape");
+	this->ProductionBar_Secondary_Palette.LoadFromINI(pINI, pSection, "ProductionBar.Secondary.Palette");
+	this->ProductionBar_Secondary_Pip.Read(exINI, pSection, "ProductionBar.Secondary.Pip");
+	this->ProductionBar_Secondary_Pip_Empty.Read(exINI, pSection, "ProductionBar.Secondary.Pip.Empty");
+	this->ProductionBar_Secondary_Offset.Read(exINI, pSection, "ProductionBar.Secondary.Offset");
 }
 
 bool BuildingTypeExt::HasDisableableSuperWeapons(BuildingTypeClass* pBuildingType)
@@ -1064,6 +1082,24 @@ void BuildingTypeExt::Serialize(T& Stm)
 		.Process(this->FlyingProduction_SpawnHeight)
 		.Process(this->FlyingProduction_SpawnFacing)
 		.Process(this->HasRallyPoint)
+		.Process(this->ProductionBar)
+		.Process(this->ProductionBar_HideIfNoProduction)
+		.Process(this->ProductionBar_ShowType)
+		.Process(this->ProductionBar_VisibleToHouses)
+		.Process(this->ProductionBar_VisibleToHouses_Observer)
+		.Process(this->ProductionBar_Shape)
+		.Process(this->ProductionBar_Palette)
+		.Process(this->ProductionBar_Pip)
+		.Process(this->ProductionBar_Pip_Empty)
+		.Process(this->ProductionBar_Offset)
+		.Process(this->ProductionBar_Offset_ShieldDelta)
+		.Process(this->ProductionBar_Secondary)
+		.Process(this->ProductionBar_Secondary_ShowBoth)
+		.Process(this->ProductionBar_Secondary_Shape)
+		.Process(this->ProductionBar_Secondary_Palette)
+		.Process(this->ProductionBar_Secondary_Pip)
+		.Process(this->ProductionBar_Secondary_Pip_Empty)
+		.Process(this->ProductionBar_Secondary_Offset)
 		;
 }
 

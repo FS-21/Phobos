@@ -1816,6 +1816,7 @@ if(_strcmpi(parser.value(), #name) == 0){ value = __uuidof(name ## LocomotionCla
 		{
 			static const std::pair<const char*, DisplayShowType> Names[] =
 			{
+				{"none", DisplayShowType::None},
 				{"cursorhover", DisplayShowType::CursorHover},
 				{"selected", DisplayShowType::Selected},
 				{"idle", DisplayShowType::Idle},

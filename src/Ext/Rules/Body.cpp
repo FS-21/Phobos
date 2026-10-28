@@ -230,6 +230,25 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->Pips_Tiberiums_DisplayOrder.Read(exINI, GameStrings::AudioVisual, "Pips.Tiberiums.DisplayOrder");
 	this->Pips_Tiberiums_WeedFrame.Read(exINI, GameStrings::AudioVisual, "Pips.Tiberiums.WeedFrame");
 	this->Pips_Tiberiums_WeedEmptyFrame.Read(exINI, GameStrings::AudioVisual, "Pips.Tiberiums.WeedEmptyFrame");
+
+	this->ProductionBar.Read(exINI, GameStrings::AudioVisual, "ProductionBar");
+	this->ProductionBar_HideIfNoProduction.Read(exINI, GameStrings::AudioVisual, "ProductionBar.HideIfNoProduction");
+	this->ProductionBar_ShowType.Read(exINI, GameStrings::AudioVisual, "ProductionBar.ShowType");
+	this->ProductionBar_VisibleToHouses.Read(exINI, GameStrings::AudioVisual, "ProductionBar.VisibleToHouses");
+	this->ProductionBar_VisibleToHouses_Observer.Read(exINI, GameStrings::AudioVisual, "ProductionBar.VisibleToHouses.Observer");
+	this->ProductionBar_Shape.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Shape");
+	this->ProductionBar_Palette.LoadFromINI(pINI, GameStrings::AudioVisual, "ProductionBar.Palette");
+	this->ProductionBar_Pip.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Pip");
+	this->ProductionBar_Pip_Empty.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Pip.Empty");
+	this->ProductionBar_Offset.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Offset");
+	this->ProductionBar_Offset_ShieldDelta.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Offset.ShieldDelta");
+	this->ProductionBar_Secondary.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Secondary");
+	this->ProductionBar_Secondary_ShowBoth.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Secondary.ShowBoth");
+	this->ProductionBar_Secondary_Shape.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Secondary.Shape");
+	this->ProductionBar_Secondary_Palette.LoadFromINI(pINI, GameStrings::AudioVisual, "ProductionBar.Secondary.Palette");
+	this->ProductionBar_Secondary_Pip.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Secondary.Pip");
+	this->ProductionBar_Secondary_Pip_Empty.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Secondary.Pip.Empty");
+	this->ProductionBar_Secondary_Offset.Read(exINI, GameStrings::AudioVisual, "ProductionBar.Secondary.Offset");
 	this->ToolTip_Background_Color.Read(exINI, GameStrings::AudioVisual, "ToolTip.Background.Color");
 	this->ToolTip_Background_Opacity.Read(exINI, GameStrings::AudioVisual, "ToolTip.Background.Opacity");
 	this->ToolTip_Background_BlurSize.Read(exINI, GameStrings::AudioVisual, "ToolTip.Background.BlurSize");
@@ -1496,6 +1515,24 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->AttachmentUndergroundLayerMaxHeight)
 		.Process(this->UseSidebarRadarOffsetFix)
 		.Process(this->ExtendedBuildingPlacing)
+		.Process(this->ProductionBar)
+		.Process(this->ProductionBar_HideIfNoProduction)
+		.Process(this->ProductionBar_ShowType)
+		.Process(this->ProductionBar_VisibleToHouses)
+		.Process(this->ProductionBar_VisibleToHouses_Observer)
+		.Process(this->ProductionBar_Shape)
+		.Process(this->ProductionBar_Palette)
+		.Process(this->ProductionBar_Pip)
+		.Process(this->ProductionBar_Pip_Empty)
+		.Process(this->ProductionBar_Offset)
+		.Process(this->ProductionBar_Offset_ShieldDelta)
+		.Process(this->ProductionBar_Secondary)
+		.Process(this->ProductionBar_Secondary_ShowBoth)
+		.Process(this->ProductionBar_Secondary_Shape)
+		.Process(this->ProductionBar_Secondary_Palette)
+		.Process(this->ProductionBar_Secondary_Pip)
+		.Process(this->ProductionBar_Secondary_Pip_Empty)
+		.Process(this->ProductionBar_Secondary_Offset)
 		;
 }
 

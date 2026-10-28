@@ -211,6 +211,7 @@ This page lists all the individual contributions to the project by their author.
   - Movie subtitles background
   - Fix `Refinery.UseStorage` and `Storage.TiberiumIndex` on Slave Miners
   - Veinhole monster and veins logic fixes and ramp support
+  - Building production progress bar
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

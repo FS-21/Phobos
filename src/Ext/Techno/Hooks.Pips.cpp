@@ -31,6 +31,12 @@ DEFINE_HOOK(0x6F5E37, TechnoClass_DrawExtras_DrawHealthBar, 0x6)
 	{
 		return Permanent;
 	}
+	else if (pThis && !pThis->IsSelected && pThis->WhatAmI() == AbstractType::Building
+		&& !MapClass::Instance.IsLocationShrouded(pThis->GetCoords()))
+	{
+		GET(RectangleStruct*, pBounds, ESI);
+		TechnoExt::DrawProductionBar(static_cast<BuildingClass*>(pThis), 0, pBounds);
+	}
 
 	return 0;
 }
@@ -44,7 +50,16 @@ DEFINE_HOOK(0x6F64A9, TechnoClass_DrawHealthBar_Hide, 0x5)
 	const auto pTypeData = TechnoExt::Fetch(pThis)->TypeExtData;
 
 	if (pTypeData->HealthBar_Hide)
+	{
+		if (pThis->WhatAmI() == AbstractType::Building)
+		{
+			GET_STACK(RectangleStruct*, pBound, STACK_OFFSET(0x4C, 0x8));
+			TechnoExt::DrawProductionBar(static_cast<BuildingClass*>(pThis), 0, pBound);
+		}
+
 		return SkipDraw;
+	}
+
 
 	return 0;
 }
@@ -90,7 +105,17 @@ DEFINE_HOOK(0x6F65D1, TechnoClass_DrawHealthBar_Buildings, 0x6)
 	if (const auto pShieldData = pExt->Shield.get())
 	{
 		if (!pShieldData->IsBrokenAndNonRespawning())
-			pShieldData->DrawShieldBar_Building(length, pBound);
+			(void)0;
+	}
+
+	TechnoExt::DrawProductionBar(pThis, length, pBound);
+
+	if (const auto pShieldData2 = pExt->Shield.get())
+	{
+		if (!pShieldData2->IsBrokenAndNonRespawning())
+			pShieldData2->DrawShieldBar_Building(length, pBound);
+	}
+	{
 	}
 
 	TechnoExt::ProcessDigitalDisplays(pThis);
