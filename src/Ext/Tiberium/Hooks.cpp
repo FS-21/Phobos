@@ -8,6 +8,7 @@
 #include <ScenarioClass.h>
 #include <Theater.h>
 
+#include <algorithm>
 #include <cctype>
 #include <string>
 #include <vector>
@@ -59,15 +60,12 @@ namespace
 			return false;
 
 		if (const auto pExt = TiberiumExt::TryFetch(pTib))
-		{
-			if (pExt->HasRampOverlays())
-				return true;
-		}
+			return pExt->HasRampOverlays();
 
 		if (!pTib->Image)
 			return false;
 
-		const int rampOverlayIdx = pTib->Image->ArrayIndex + pTib->NumFrames;
+		const int rampOverlayIdx = pTib->Image->ArrayIndex + pTib->NumImages;
 		if (rampOverlayIdx >= OverlayTypeClass::Array.Count)
 			return false;
 
@@ -86,10 +84,9 @@ namespace
 		{
 			pRamp = pExt->GetRampOverlay(slopeOffset);
 		}
-
-		if (!pRamp && pTib->Image)
+		else if (pTib->Image)
 		{
-			const int rampOverlayIdx = pTib->Image->ArrayIndex + pTib->NumFrames + slopeOffset;
+			const int rampOverlayIdx = pTib->Image->ArrayIndex + pTib->NumImages + slopeOffset;
 			pRamp = OverlayTypeClass::Array.GetItemOrDefault(rampOverlayIdx);
 		}
 
@@ -555,20 +552,42 @@ DEFINE_HOOK(0x483650, CellClass_CanTiberiumGrow_RampSupport, 0x6)
 	return ContinueChecks;
 }
 
-DEFINE_HOOK(0x4836CF, CellClass_CanTiberiumSpread_RampSupport, 0xA)
+DEFINE_HOOK(0x4819D1, CellClass_TiberiumAdjust_Stage, 0x7)
+{
+	enum { SetStage = 0x4819D8 };
+
+	GET(TiberiumClass*, pTib, ECX);
+
+	static constexpr int AdjTable[9] = { 0, 1, 3, 4, 6, 7, 8, 10, 11 };
+
+	const int numFrames = (pTib && pTib->NumFrames > 0) ? pTib->NumFrames : 12;
+	const int count = std::clamp(static_cast<int>(R->EAX()) * numFrames + static_cast<int>(R->EDX()), 0, 8);
+	int stage = AdjTable[count];
+
+	if (numFrames != 12)
+		stage = (stage * (numFrames - 1)) / 11;
+
+	R->AL(static_cast<BYTE>(stage));
+	return SetStage;
+}
+
+DEFINE_HOOK(0x4836B7, CellClass_CanTiberiumSpread_StageAndRampSupport, 0xA)
 {
 	enum { Disallow = 0x4836D9, ContinueChecks = 0x4836DE };
 
 	GET(CellClass*, pThis, ESI);
+	GET(int, tibIndex, EDI);
 
-	if (pThis->SlopeIndex != 0)
-	{
-		GET(int, tibIndex, EDI);
-		const auto pTib = TiberiumClass::Array.GetItemOrDefault(tibIndex);
+	const auto pTib = TiberiumClass::Array.GetItemOrDefault(tibIndex);
+	if (!pTib)
+		return Disallow;
 
-		if (!CanResourceGerminateOnRamp(pTib, pThis->SlopeIndex))
-			return Disallow;
-	}
+	const int minStage = std::min(tibIndex < 4 ? tibIndex / 2 : 1, pTib->NumFrames - 2);
+	if (static_cast<int>(pThis->OverlayData) <= minStage)
+		return Disallow;
+
+	if (pThis->SlopeIndex != 0 && !CanResourceGerminateOnRamp(pTib, pThis->SlopeIndex))
+		return Disallow;
 
 	return ContinueChecks;
 }
@@ -586,22 +605,39 @@ DEFINE_HOOK(0x483738, CellClass_CanTiberiumGrow_RampCheck, 0xA)
 	return ContinueChecks;
 }
 
-DEFINE_HOOK(0x4837BB, CellClass_SpreadTiberium_RampSupport, 0xA)
+DEFINE_HOOK(0x4837AA, CellClass_SpreadTiberium_StageAndRampSupport, 0xB)
 {
 	enum { Disallow = 0x483800, ContinueSpread = 0x4837C5 };
 
 	GET(CellClass*, pThis, EDI);
+	GET(int, tibIndex, ESI);
 
-	if (pThis->SlopeIndex != 0)
-	{
-		GET(int, tibIndex, ESI);
-		const auto pTib = TiberiumClass::Array.GetItemOrDefault(tibIndex);
+	const auto pTib = TiberiumClass::Array.GetItemOrDefault(tibIndex);
+	if (!pTib)
+		return Disallow;
 
-		if (!CanResourceGerminateOnRamp(pTib, pThis->SlopeIndex))
-			return Disallow;
-	}
+	const int minStage = std::min(tibIndex < 4 ? tibIndex / 2 : 1, pTib->NumFrames - 2);
+	if (static_cast<int>(pThis->OverlayData) <= minStage)
+		return Disallow;
+
+	if (pThis->SlopeIndex != 0 && !CanResourceGerminateOnRamp(pTib, pThis->SlopeIndex))
+		return Disallow;
 
 	return ContinueSpread;
+}
+
+DEFINE_HOOK(0x4871B6, CellClass_IncreaseTiberium_ClampStage, 0x6)
+{
+	enum { ContinuePlace = 0x4871C2, Abort = 0x48761E };
+
+	GET(TiberiumClass*, pTib, EDI);
+	GET(int, stage, EBX);
+
+	if (!pTib || !pTib->Image || pTib->NumFrames <= 0)
+		return Abort;
+
+	R->EBX(std::clamp(stage, 0, pTib->NumFrames - 1));
+	return ContinuePlace;
 }
 
 DEFINE_HOOK(0x487228, CellClass_IncreaseTiberium_RampOverlayType, 0x9)
@@ -622,9 +658,24 @@ DEFINE_HOOK(0x487228, CellClass_IncreaseTiberium_RampOverlayType, 0x9)
 
 	// Replicate stolen instructions if overlay not found
 	R->ECX(R->EDX() + static_cast<int>(pThis->SlopeIndex) * 2);
-	R->EDX(pTib->NumFrames);
+	R->EDX(pTib->NumImages);
 
 	return 0x487231;
+}
+
+DEFINE_HOOK(0x48725C, CellClass_IncreaseTiberium_FlatVariation, 0xA)
+{
+	enum { SkipRandomCall = 0x48726B };
+
+	GET(TiberiumClass*, pTib, EDI);
+
+	const int maxVar = (pTib && pTib->NumImages > 1) ? (pTib->NumImages - 1) : 0;
+	const int variation = ScenarioClass::Instance
+		? ScenarioClass::Instance->Random.RandomRanged(0, maxVar)
+		: 0;
+
+	R->EAX(variation);
+	return SkipRandomCall;
 }
 
 DEFINE_HOOK(0x4872A0, CellClass_IncreaseTiberium_Germinate_RegisterSpread, 0x6)
@@ -786,23 +837,36 @@ DEFINE_HOOK(0x47FC20, CellClass_GetOverlayRect_RampOverlayType, 0x6)
 
 DEFINE_HOOK(0x5FDD28, OverlayClass_GetTiberiumType_RampOverlays, 0x6)
 {
-	enum { FoundTiberium = 0x5FDDCF, ReturnInvalid = 0x5FDDD5, ContinueCheck = 0x5FDD2E };
+	enum { FoundTiberium = 0x5FDDCF, ReturnInvalid = 0x5FDDD5, FallbackLog = 0x5FDDA4 };
 
 	GET(int, overlayTypeIndex, ECX);
 
-	if (overlayTypeIndex == -1)
+	if (overlayTypeIndex < 0)
 		return ReturnInvalid;
 
 	const auto pOverlay = OverlayTypeClass::Array.GetItemOrDefault(overlayTypeIndex);
+	if (!pOverlay)
+		return ReturnInvalid;
 
-	if (pOverlay)
+	for (const auto pTib : TiberiumClass::Array)
 	{
-		for (const auto pTib : TiberiumClass::Array)
-		{
-			if (const auto pExt = TiberiumExt::TryFetch(pTib))
-			{
-				pExt->HasRampOverlays();
+		if (!pTib)
+			continue;
 
+		if (pOverlay->Tiberium && pTib->Image)
+		{
+			const int baseIdx = pTib->Image->ArrayIndex;
+			if (overlayTypeIndex >= baseIdx && overlayTypeIndex < baseIdx + pTib->NumImages)
+			{
+				R->EAX(pTib->ArrayIndex);
+				return FoundTiberium;
+			}
+		}
+
+		if (const auto pExt = TiberiumExt::TryFetch(pTib))
+		{
+			if (pExt->HasRampOverlays())
+			{
 				for (const auto pRampOverlay : pExt->RampOverlays)
 				{
 					if (!pRampOverlay)
@@ -837,8 +901,23 @@ DEFINE_HOOK(0x5FDD28, OverlayClass_GetTiberiumType_RampOverlays, 0x6)
 					}
 				}
 			}
+			continue;
+		}
+
+		if (pOverlay->Tiberium && pTib->Image && pTib->NumSlopes > 0)
+		{
+			const int slopeBase = pTib->Image->ArrayIndex + pTib->NumImages;
+			if (overlayTypeIndex >= slopeBase && overlayTypeIndex < slopeBase + pTib->NumSlopes)
+			{
+				R->EAX(pTib->ArrayIndex);
+				return FoundTiberium;
+			}
 		}
 	}
 
-	return ContinueCheck;
+	if (!pOverlay->Tiberium)
+		return ReturnInvalid;
+
+	R->EAX(pOverlay);
+	return FallbackLog;
 }

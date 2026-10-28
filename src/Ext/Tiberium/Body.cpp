@@ -26,6 +26,9 @@ void TiberiumExt::Serialize(T& Stm)
 
 bool TiberiumExt::HasRampOverlays()
 {
+	if (!this->AllowRamps)
+		return false;
+
 	if (!this->RampOverlays[0])
 		this->AutoDetectRampOverlays();
 
@@ -40,7 +43,7 @@ bool TiberiumExt::HasRampOverlays()
 
 OverlayTypeClass* TiberiumExt::GetRampOverlay(int slopeOffset)
 {
-	if (slopeOffset >= 0 && slopeOffset < 8)
+	if (this->AllowRamps && slopeOffset >= 0 && slopeOffset < 8)
 	{
 		if (!this->RampOverlays[0])
 			this->AutoDetectRampOverlays();
@@ -58,7 +61,13 @@ void TiberiumExt::AutoDetectRampOverlays()
 
 	auto pThis = this->OwnerObject();
 	if (!pThis || !pThis->Image)
+	{
+		this->AllowRamps = false;
+		if (pThis)
+			pThis->NumSlopes = 0;
+
 		return;
+	}
 
 	const int variety = pThis->NumImages > 0 ? pThis->NumImages : 12;
 
@@ -92,7 +101,9 @@ void TiberiumExt::AutoDetectRampOverlays()
 
 		for (const auto& prefix : prefixes)
 		{
+			std::array<OverlayTypeClass*, 8> candidateOverlays {};
 			bool allFound = true;
+
 			for (int i = startRamp; i <= endRamp; ++i)
 			{
 				char buf[64];
@@ -128,11 +139,12 @@ void TiberiumExt::AutoDetectRampOverlays()
 					}
 				}
 
-				this->RampOverlays[i - startRamp] = pFound;
+				candidateOverlays[i - startRamp] = pFound;
 			}
 
 			if (allFound)
 			{
+				this->RampOverlays = candidateOverlays;
 				for (auto pOverlay : this->RampOverlays)
 					pOverlay->Tiberium = true;
 
@@ -145,7 +157,7 @@ void TiberiumExt::AutoDetectRampOverlays()
 	}
 
 	// Fallback detection for contiguous overlays following standard Tiberian Sun indexing.
-	const int baseIdx = pThis->Image->ArrayIndex + pThis->NumFrames;
+	const int baseIdx = pThis->Image->ArrayIndex + variety;
 	if (baseIdx + 8 <= OverlayTypeClass::Array.Count)
 	{
 		bool allContiguousValid = true;
@@ -171,9 +183,9 @@ void TiberiumExt::AutoDetectRampOverlays()
 		}
 	}
 
-	// Ensure cardinal slope count is initialized if ramp germination is explicitly enabled.
-	if (this->AllowRamps && pThis->NumSlopes < 8)
-		pThis->NumSlopes = 8;
+	// If any of the 8 ramp overlay pieces is missing, safely disable ramp support.
+	this->AllowRamps = false;
+	pThis->NumSlopes = 0;
 }
 
 void TiberiumExt::LoadFromINIFile(CCINIClass* const pINI)
@@ -194,37 +206,67 @@ void TiberiumExt::LoadFromINIFile(CCINIClass* const pINI)
 	char prefixBuf[32] = { 0 };
 	pINI->ReadString(pSection, "OverlayPrefix", "", prefixBuf, sizeof(prefixBuf));
 
-	int variety = pINI->ReadInteger(pSection, "Variety", pThis->NumImages > 0 ? pThis->NumImages : 12);
+	if (overlayBuf[0] == '\0' && prefixBuf[0] == '\0' && !pThis->Image)
+	{
+		strncpy_s(prefixBuf, pSection, _TRUNCATE);
+		_strupr_s(prefixBuf);
+	}
+
+	const int variety = pINI->ReadInteger(pSection, "Variety", pThis->NumImages > 0 ? pThis->NumImages : 12);
 	pThis->NumImages = std::max(1, variety);
+
+	const int numFrames = pINI->ReadInteger(pSection, "NumFrames", pThis->NumFrames > 0 ? pThis->NumFrames : 12);
+	pThis->NumFrames = std::max(1, numFrames);
 
 	OverlayTypeClass* pOvl = nullptr;
 	if (overlayBuf[0] != '\0')
 	{
 		pOvl = OverlayTypeClass::Find(overlayBuf);
+		if (pOvl)
+		{
+			pOvl->Tiberium = true;
+			for (int i = 1; i < pThis->NumImages; ++i)
+			{
+				if (const auto pNext = OverlayTypeClass::Array.GetItemOrDefault(pOvl->ArrayIndex + i))
+					pNext->Tiberium = true;
+			}
+		}
 	}
 	else if (prefixBuf[0] != '\0')
 	{
-		char buf[32];
-		_snprintf_s(buf, sizeof(buf), "%s01", prefixBuf);
-		pOvl = OverlayTypeClass::Find(buf);
-		if (!pOvl)
+		for (int i = 1; i <= pThis->NumImages; ++i)
 		{
-			_snprintf_s(buf, sizeof(buf), "%s1", prefixBuf);
-			pOvl = OverlayTypeClass::Find(buf);
+			char buf[32];
+			_snprintf_s(buf, sizeof(buf), _TRUNCATE, "%s%02d", prefixBuf, i);
+			auto pFound = OverlayTypeClass::Find(buf);
+			if (!pFound)
+			{
+				_snprintf_s(buf, sizeof(buf), _TRUNCATE, "%s%d", prefixBuf, i);
+				pFound = OverlayTypeClass::Find(buf);
+			}
+
+			if (pFound)
+			{
+				pFound->Tiberium = true;
+				if (i == 1)
+					pOvl = pFound;
+			}
 		}
 	}
 
 	if (pOvl)
-	{
 		pThis->Image = pOvl;
-		pThis->NumFrames = 12;
-	}
 
 	if (this->AllowRamps)
 	{
 		this->AutoDetectRampOverlays();
-		if (pThis->NumSlopes < 8)
-			pThis->NumSlopes = 8;
+	}
+	else
+	{
+		for (auto& pOverlay : this->RampOverlays)
+			pOverlay = nullptr;
+
+		pThis->NumSlopes = 0;
 	}
 }
 
