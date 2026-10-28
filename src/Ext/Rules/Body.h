@@ -63,6 +63,7 @@ public:
 		Valueable<bool> JumpjetRotateOnCrash;
 
 		Nullable<WarheadTypeClass*> VeinholeWarhead;
+		Valueable<int> VeinAttackHeight;
 
 		PhobosFixedString<32u> MissingCameo;
 
@@ -665,6 +666,7 @@ public:
 			, JumpjetNoWobbles { false }
 			, JumpjetRotateOnCrash { true }
 			, VeinholeWarhead {}
+			, VeinAttackHeight { 5 }
 			, MissingCameo { GameStrings::XXICON_SHP }
 
 			, PlacementGrid_Translucency { 0 }
