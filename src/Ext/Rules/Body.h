@@ -215,6 +215,7 @@ public:
 		Valueable<AffectedHouse> RadialIndicatorVisibility;
 		Valueable<bool> DrawTurretShadow;
 		ValueableIdx<ColorScheme> AnimRemapDefaultColorScheme;
+		Valueable<bool> AnimRemapUseInvokerFallback;
 		ValueableIdx<ColorScheme> TimerBlinkColorScheme;
 		Valueable<bool> AILearning;
 		Valueable<bool> AILearning_Multiplayer;
@@ -799,6 +800,7 @@ public:
 			, Promote_VeteranAnimation {}
 			, Promote_EliteAnimation {}
 			, AnimRemapDefaultColorScheme { 0 }
+			, AnimRemapUseInvokerFallback { false }
 			, TimerBlinkColorScheme { 5 }
 			, Buildings_DefaultDigitalDisplayTypes {}
 			, Infantry_DefaultDigitalDisplayTypes {}

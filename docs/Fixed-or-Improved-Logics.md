@@ -343,8 +343,10 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed a rare crash when an `IsSonic=true` wave was drawn near the top edge of the screen.
 - Fixed a crash or memory corruption when a wave (e.g. `IsSonic=true`) was drawn while its firer was at the same horizontal position as its target.
 - Fixed the bug that crashing or sinking unit can be recruit into taskforce team.
-- Units in Tank Bunker with deploy functions no longer perform them when deployed out of Tank Bunker.
+- Units in Tank Bunker with deploy functions no longer perform them when unloaded from of Tank Bunker.
 - Fixed amphibious infantry without `MovementZone=AmphibiousDestroyer` (e.g. `MovementZone=Amphibious` or `SpeedType=Amphibious`) or playing `Guard`/`Down`/`Up` sequences in water using land animations instead of water sequences.
+- Fixed the bug that infantry weapons with both `LimboLaunch=yes` and ammunition logic could not set ReloadTimer properly.
+- Fixed a bug where units that have `MinDebris` and `MaxDebris` defined but `DebrisTypes` undefined would unconditionally spawn `MetallicDebris` once when they die.
 
 ## Fixes / interactions with other extensions
 
@@ -618,16 +620,6 @@ In `rulesmd.ini`:
 ```ini
 [CombatDamage]
 AutoTarget.InsignificantWhenMindControlled=true  ; boolean
-```
-
-### Customizing default ColorScheme
-
-- In vanilla, an `AltPalette=yes` animation or `Voxel=yes` Projectile image that cannot properly remap will use the first Color Scheme in the `[Colors]` list; now it can be manually specified.
-
-In `rulesmd.ini`:
-```ini
-[AudioVisual]
-AnimRemapDefaultColorScheme=      ; ColorScheme name
 ```
 
 ### Customizing effect of level lighting on air units
@@ -1011,19 +1003,22 @@ SpawnHeight=                 ; integer, height in leptons
 - Animations using `AltPalette` are now remapped to their owner's color scheme instead of first listed color scheme and no longer draw over shroud.
   - Color scheme from `[AudioVisual] -> AnimRemapDefaultColorScheme` is used if anim has no owner, which defaults to first listed color scheme from `[Colors]` still.
   - They can also have map lighting apply on them if `AltPalette.ApplyLighting` is set to true.
+  - If `AltPalette.UseInvokerFallback` is set to true animation's invoker house is used if available if animation has no owner house. Defaults to `[AudioVisual] -> AnimRemapUseInvokerFallback`.
 - `TheaterPalette` can be used to customize whether or not animation is drawn in theater / tile palette. Takes priority all over palette-influencing settings except `IsVeins=true`. Defaults to true for tile animations, otherwise false.
 
 In `rulesmd.ini`:
 ```ini
 [AudioVisual]
-AnimRemapDefaultColorScheme=    ; integer, [Colors] list index
+AnimRemapDefaultColorScheme=       ; Color scheme name
+AnimRemapUseInvokerFallback=false  ; boolean
 ```
 
 In `artmd.ini`:
 ```ini
-[SOMEANIM]                      ; AnimationType
-AltPalette.ApplyLighting=false  ; boolean
-TheaterPalette=                 ; boolean
+[SOMEANIM]                         ; AnimationType
+AltPalette.ApplyLighting=false     ; boolean
+AltPalette.UseInvokerFallback=     ; boolean
+TheaterPalette=                    ; boolean
 ```
 
 ### Animation weapon and damage settings
