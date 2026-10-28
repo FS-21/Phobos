@@ -449,7 +449,6 @@ static void ClearReservationAndPreview(HouseExt* pHouseExt)
 				pPlace->Times = 0;
 				pPlace->Timer.Stop();
 				pPlace->TopLeft = CellStruct::Empty;
-				pPlace->PlaceType = 0;
 			}
 		}
 	}
