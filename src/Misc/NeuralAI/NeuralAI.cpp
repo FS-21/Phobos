@@ -21,6 +21,7 @@
 #include <UnitTypeClass.h>
 #include <AircraftClass.h>
 #include <AircraftTypeClass.h>
+#include <TechnoClass.h>
 
 #include <Ext/BuildingType/Body.h>
 #include <Ext/House/Body.h>
@@ -103,6 +104,67 @@ namespace
 			return 32000;
 
 		return static_cast<int16_t>(val);
+	}
+
+	// Per-house vision map built from the sight of the AI and its allies. Replaces CellClass::IsShrouded, which
+	// reflects the local player's shroud and would desync multiplayer and leak the human's exploration to the AI.
+	constexpr int VisionMapSide = 512;
+	std::vector<uint8_t> VisionMap;
+	int VisionMapFrame = -1;
+	int VisionMapOwner = -1;
+
+	void RebuildVisionMap(HouseClass* pHouse)
+	{
+		VisionMap.assign(static_cast<size_t>(VisionMapSide) * VisionMapSide, 0);
+		VisionMapFrame = Unsorted::CurrentFrame;
+		VisionMapOwner = pHouse->ArrayIndex;
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || pTechno->InLimbo || !pTechno->IsAlive || !pTechno->Owner)
+				continue;
+
+			if (pTechno->Owner != pHouse && !pHouse->IsAlliedWith(pTechno->Owner))
+				continue;
+
+			auto const pType = pTechno->GetTechnoType();
+			if (!pType)
+				continue;
+
+			const CellStruct coords = pTechno->GetMapCoords();
+			const int radius = std::clamp(static_cast<int>(pType->Sight), 1, 24);
+
+			for (int dy = -radius; dy <= radius; ++dy)
+			{
+				const int y = coords.Y + dy;
+				if (y < 0 || y >= VisionMapSide)
+					continue;
+
+				for (int dx = -radius; dx <= radius; ++dx)
+				{
+					const int x = coords.X + dx;
+					if (x < 0 || x >= VisionMapSide || dx * dx + dy * dy > radius * radius)
+						continue;
+
+					VisionMap[static_cast<size_t>(y) * VisionMapSide + x] = 1;
+				}
+			}
+		}
+	}
+
+	bool IsCellVisibleToAI(HouseClass* pHouse, CellClass* pCell)
+	{
+		if (!pHouse || !pCell)
+			return false;
+
+		if (VisionMapFrame != Unsorted::CurrentFrame || VisionMapOwner != pHouse->ArrayIndex)
+			RebuildVisionMap(pHouse);
+
+		const CellStruct coords = pCell->MapCoords;
+		if (coords.X < 0 || coords.X >= VisionMapSide || coords.Y < 0 || coords.Y >= VisionMapSide)
+			return false;
+
+		return VisionMap[static_cast<size_t>(coords.Y) * VisionMapSide + coords.X] != 0;
 	}
 }
 
@@ -394,7 +456,7 @@ void NeuralAI::LoadOrResetBackpack()
 
 	if (NeuralAI::BaseMappedView && NeuralAI::BaseMappedSize >= sizeof(AIBaseHeader))
 	{
-		const auto const pHdr = reinterpret_cast<const AIBaseHeader*>(NeuralAI::BaseMappedView);
+		auto const pHdr = reinterpret_cast<const AIBaseHeader*>(NeuralAI::BaseMappedView);
 		baseModelHash = pHdr->BaseModelHash;
 	}
 
@@ -652,7 +714,7 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 			const int exp = std::clamp(pExt->AIBrain_ActiveExpert, 0, 7);
 			const int delta = won ? 12 : -6;
 
-			uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 17 + arch * 7 + exp) % 512);
+			uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 40 + arch * 8 + exp) % 512);
 			if (NeuralAI::Backpack.NumEntries < 512)
 				NeuralAI::Backpack.NumEntries = std::max(NeuralAI::Backpack.NumEntries, entryIdx + 1);
 
@@ -984,7 +1046,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 		const int ownerIdx = std::clamp(pOwner->ArrayIndex, 0, 7);
 		const bool spyInfiltrated = (pExt->AIBrain_InfiltratedEnemyMask & (1 << ownerIdx)) != 0;
 		const bool cellVisibleToAI = pHouse->SpySatActive
-			|| !pCell->IsShrouded()
+			|| IsCellVisibleToAI(pHouse, pCell)
 			|| spyInfiltrated
 			|| (pOwner->WhoLastHurtMe == pHouse->ArrayIndex);
 
@@ -1193,7 +1255,7 @@ void NeuralAI::RunDeterministicMoE(
 	// Run INT8 Fixed-Point Matrix-Vector Inference on the mapped Base Model
 	if (NeuralAI::BaseMappedView && NeuralAI::BaseMappedSize >= sizeof(AIBaseHeader))
 	{
-		const auto const pHdr = reinterpret_cast<const AIBaseHeader*>(NeuralAI::BaseMappedView);
+		auto const pHdr = reinterpret_cast<const AIBaseHeader*>(NeuralAI::BaseMappedView);
 		uint32_t offset = pHdr->ExpertWeightsOffset[activeExpert % 8];
 		if (offset == 0)
 			offset = pHdr->ExpertWeightsOffset[activeExpert % 6];
@@ -1242,7 +1304,7 @@ void NeuralAI::RunDeterministicMoE(
 
 		// Recall learned strategy outcome deltas from Backpack Entries for this Faction + Archetype + Expert
 		const int curArch = std::clamp(pExt->AIBrain_Archetype, 0, 7);
-		const uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 17 + curArch * 7 + activeExpert) % 512);
+		const uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 40 + curArch * 8 + activeExpert) % 512);
 		const auto& memEntry = NeuralAI::Backpack.Entries[entryIdx];
 		if (memEntry.VisitCount > 0)
 		{
@@ -1931,7 +1993,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 					continue;
 				if (pEBld->Owner == pHouse || pHouse->IsAlliedWith(pEBld->Owner) || pEBld->Owner->IsNeutral())
 					continue;
-				if (!pEBld->GetCell() || pEBld->GetCell()->IsShrouded())
+				if (!pEBld->GetCell() || !IsCellVisibleToAI(pHouse, pEBld->GetCell()))
 					continue;
 
 				int dScore = 0;
@@ -2065,7 +2127,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 					continue;
 				if (pEnemyU->Owner == pHouse || pHouse->IsAlliedWith(pEnemyU->Owner) || pEnemyU->Owner->IsNeutral())
 					continue;
-				if (pEnemyU->GetCell() && !pEnemyU->GetCell()->IsShrouded() && pEnemyU->Type->Cost > bestSpecCost && pInf->DistanceFrom(pEnemyU) <= 4608)
+				if (pEnemyU->GetCell() && IsCellVisibleToAI(pHouse, pEnemyU->GetCell()) && pEnemyU->Type->Cost > bestSpecCost && pInf->DistanceFrom(pEnemyU) <= 4608)
 				{
 					bestSpecCost = pEnemyU->Type->Cost;
 					pBestSpecTarget = pEnemyU;
@@ -2116,7 +2178,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 					continue;
 
 				auto const pCell = pBld->GetCell();
-				if (!pCell || pCell->IsShrouded())
+				if (!pCell || !IsCellVisibleToAI(pHouse, pCell))
 					continue;
 
 				const bool isNeutralTech = pBld->Owner->IsNeutral();
@@ -2184,7 +2246,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 					continue;
 				if (pEnemyU->Type->Naval || pEnemyU->Type->Organic || pEnemyU->ParasiteEatingMe != nullptr)
 					continue;
-				if (pEnemyU->GetCell() && !pEnemyU->GetCell()->IsShrouded() && pEnemyU->Type->Cost > bestTankCost && pInf->DistanceFrom(pEnemyU) <= 5120)
+				if (pEnemyU->GetCell() && IsCellVisibleToAI(pHouse, pEnemyU->GetCell()) && pEnemyU->Type->Cost > bestTankCost && pInf->DistanceFrom(pEnemyU) <= 5120)
 				{
 					bestTankCost = pEnemyU->Type->Cost;
 					pBestStealTank = pEnemyU;
@@ -2227,7 +2289,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 						continue;
 					if (pEnemyShip->Owner == pHouse || pHouse->IsAlliedWith(pEnemyShip->Owner) || pEnemyShip->Owner->IsNeutral())
 						continue;
-					if (pEnemyShip->GetCell() && !pEnemyShip->GetCell()->IsShrouded())
+					if (pEnemyShip->GetCell() && IsCellVisibleToAI(pHouse, pEnemyShip->GetCell()))
 					{
 						const int d = pInf->DistanceFrom(pEnemyShip);
 						if (d < bestC4Dist)
@@ -2324,7 +2386,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 			if (pTechno->OnBridge)
 			{
 				auto const pCell = pTechno->GetCell();
-				if (pCell && pCell->ContainsBridge() && !pCell->IsShrouded())
+				if (pCell && pCell->ContainsBridge() && IsCellVisibleToAI(pHouse, pCell))
 				{
 					pTargetBridgeCell = pCell;
 					break;
@@ -2376,7 +2438,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 
 		const int ownerIdx = std::clamp(pOwner->ArrayIndex, 0, 7);
 		const bool visible = pHouse->SpySatActive
-			|| !pCell->IsShrouded()
+			|| IsCellVisibleToAI(pHouse, pCell)
 			|| ((pExt->AIBrain_InfiltratedEnemyMask & (1 << ownerIdx)) != 0)
 			|| (pOwner->WhoLastHurtMe == pHouse->ArrayIndex);
 
@@ -2857,7 +2919,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 							{
 								const CellStruct tc { static_cast<short>(homeCoords.X + dx), static_cast<short>(homeCoords.Y + dy) };
 								auto const pC = MapClass::Instance.TryGetCellAt(tc);
-								if (!pC || pC->IsShrouded() || pC->GetBuilding() != nullptr)
+								if (!pC || !IsCellVisibleToAI(pHouse, pC) || pC->GetBuilding() != nullptr)
 									continue;
 
 								if (knownWaterCell == CellStruct::Empty && pC->LandType == LandType::Water && !pC->ContainsBridge())
@@ -2902,7 +2964,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 							auto const pOwn = pBld->Owner;
 							if (pOwn == pHouse || pHouse->IsAlliedWith(pOwn) || pOwn->IsNeutral() || pOwn->IsObserver() || pOwn->Defeated)
 								continue;
-							if (pOwn->ArrayIndex != pHouse->EnemyHouseIndex && pBld->GetCell() && !pBld->GetCell()->IsShrouded())
+							if (pOwn->ArrayIndex != pHouse->EnemyHouseIndex && pBld->GetCell() && IsCellVisibleToAI(pHouse, pBld->GetCell()))
 							{
 								CellClass* pAdj = FindSafeIslandLandingCell(pHouse, pBld->GetMapCoords(), -1, false);
 								if (pAdj)
@@ -2924,7 +2986,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 								continue;
 
 							auto const pECell = pEnemyU->GetCell();
-							if (!pECell || pECell->IsShrouded())
+							if (!pECell || !IsCellVisibleToAI(pHouse, pECell))
 								continue;
 
 							const bool isPureGroundUnit = !pEnemyU->Type->Naval
@@ -2980,7 +3042,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 							continue;
 						if (pEnemyInf->Owner == pHouse || pHouse->IsAlliedWith(pEnemyInf->Owner) || pEnemyInf->Owner->IsNeutral())
 							continue;
-						if (pEnemyInf->GetCell() && !pEnemyInf->GetCell()->IsShrouded())
+						if (pEnemyInf->GetCell() && IsCellVisibleToAI(pHouse, pEnemyInf->GetCell()))
 						{
 							const CellStruct ic = pEnemyInf->GetMapCoords();
 							int cnt = 0;
@@ -3019,7 +3081,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(
 							continue;
 						if (pEnemyU->Owner == pHouse || pHouse->IsAlliedWith(pEnemyU->Owner) || pEnemyU->Owner->IsNeutral())
 							continue;
-						if (pEnemyU->GetCell() && !pEnemyU->GetCell()->IsShrouded() && !pEnemyU->Type->ImmuneToPsionics)
+						if (pEnemyU->GetCell() && IsCellVisibleToAI(pHouse, pEnemyU->GetCell()) && !pEnemyU->Type->ImmuneToPsionics)
 						{
 							const CellStruct uc = pEnemyU->GetMapCoords();
 							int val = 0;
