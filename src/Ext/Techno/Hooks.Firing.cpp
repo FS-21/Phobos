@@ -51,6 +51,27 @@ DEFINE_HOOK(0x6F3360, TechnoClass_WhatWeaponShouldIUse_MultiWeapon, 0x6)
 	return 0;
 }
 
+DEFINE_HOOK(0x6F33BF, TechnoClass_WhatWeaponShouldIUse_NeverUse, 0x6)
+{
+	enum { CheckNeverUse = 0x6F33C5, Continue = 0x6F33CD };
+
+	GET(TechnoClass* const, pThis, ESI);
+	GET(WeaponTypeClass* const, pSecondary, EDI);
+
+	auto const pTypeExt = TechnoExt::Fetch(pThis)->TypeExtData;
+	auto const pType = pTypeExt->OwnerObject();
+
+	if (pTypeExt->MultiWeapon
+		|| (pType->Ammo >= 0 && pThis->Ammo <= pTypeExt->NoAmmoAmount
+			&& !pTypeExt->NoAmmoWeapons.empty() && pTypeExt->NoAmmoWeapons_IgnoreNeverUse))
+	{
+		return Continue;
+	}
+
+	R->AL(pSecondary->NeverUse);
+	return CheckNeverUse;
+}
+
 DEFINE_HOOK(0x6F33CD, TechnoClass_WhatWeaponShouldIUse_ForceFire, 0x6)
 {
 	enum { ReturnWeaponIndex = 0x6F37AF };
@@ -64,9 +85,11 @@ DEFINE_HOOK(0x6F33CD, TechnoClass_WhatWeaponShouldIUse_ForceFire, 0x6)
 		auto const pWeaponSecondary = pThis->GetWeapon(1)->WeaponType;
 		auto const pPrimaryExt = WeaponTypeExt::Fetch(pWeaponPrimary);
 
-		if (pWeaponSecondary && !pPrimaryExt->SkipWeaponPicking
-			&& (!EnumFunctions::IsCellEligible(pCell, pPrimaryExt->CanTarget, true, true)
-			|| (pPrimaryExt->AttachEffect_CheckOnFirer && !pPrimaryExt->HasRequiredAttachedEffects(pThis, pThis)))
+		if (pWeaponSecondary
+			&& ((!pPrimaryExt->SkipWeaponPicking
+				&& (!EnumFunctions::IsCellEligible(pCell, pPrimaryExt->CanTarget, true, true)
+				|| (pPrimaryExt->AttachEffect_CheckOnFirer && !pPrimaryExt->HasRequiredAttachedEffects(pThis, pThis))))
+			|| (pThis->GetTechnoType()->Ammo > 0 && pThis->Ammo < pPrimaryExt->Ammo && TechnoExt::MultiWeaponCanFire(pThis, pCell, pWeaponSecondary)))
 			&& (!TechnoExt::Fetch(pThis)->TypeExtData->NoSecondaryWeaponFallback
 			|| TechnoExt::CanFireNoAmmoWeapon(pThis, 1)))
 		{
@@ -109,7 +132,7 @@ DEFINE_HOOK(0x6F3415, TechnoClass_WhatWeaponShouldIUse_NoAmmoWeapon, 0x5)
 
 		for (int weaponIndex : noAmmoWeapons)
 		{
-			if (TechnoExt::MultiWeaponCanFire(pThis, pTarget, pThis->GetWeapon(weaponIndex)->WeaponType), ignoreNeverUse)
+			if (TechnoExt::MultiWeaponCanFire(pThis, pTarget, pThis->GetWeapon(weaponIndex)->WeaponType, ignoreNeverUse))
 			{
 				R->EAX(weaponIndex);
 				return UseWeaponIndex;

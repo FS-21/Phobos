@@ -28,6 +28,7 @@ void AircraftTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->LandingDir.Read(exINI, pSection, "LandingDir");
 	this->CurleyShuffle.Read(exINI, pSection, "CurleyShuffle");
 	this->AvoidOverlap.Read(exINI, pSection, "AvoidOverlap");
+	this->KeepTargetOnAirReload.Read(exINI, pSection, "KeepTargetOnAirReload");
 	this->ExtendedAircraftMissions.Read(exINI, pSection, "ExtendedAircraftMissions");
 	this->ExtendedAircraftMissions_SmoothMoving.Read(exINI, pSection, "ExtendedAircraftMissions.SmoothMoving");
 	this->ExtendedAircraftMissions_EarlyDescend.Read(exINI, pSection, "ExtendedAircraftMissions.EarlyDescend");
@@ -57,6 +58,7 @@ void AircraftTypeExt::Serialize(T& Stm)
 		.Process(this->LandingDir)
 		.Process(this->CurleyShuffle)
 		.Process(this->AvoidOverlap)
+		.Process(this->KeepTargetOnAirReload)
 		.Process(this->ExtendedAircraftMissions)
 		.Process(this->ExtendedAircraftMissions_SmoothMoving)
 		.Process(this->ExtendedAircraftMissions_EarlyDescend)

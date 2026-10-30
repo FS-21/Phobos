@@ -220,6 +220,7 @@ void WeaponTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->Abductor_ChangeOwner_ResetDriverKilled.Read(exINI, pSection, "Abductor.ChangeOwner.ResetDriverKilled");
 	this->Abductor_ChangeOwner_IgnoreDriverKilled.Read(exINI, pSection, "Abductor.ChangeOwner.IgnoreDriverKilled");
 	this->CanTarget_DriverKilled.Read(exINI, pSection, "CanTarget.DriverKilled");
+	this->Ammo.Read(exINI, pSection, "Ammo");
 
 	// handle SkipWeaponPicking
 	if (this->CanTarget != AffectedTarget::All || this->CanTargetHouses != AffectedHouse::All
@@ -341,6 +342,7 @@ void WeaponTypeExt::Serialize(T& Stm)
 		.Process(this->Abductor_ChangeOwner_ResetDriverKilled)
 		.Process(this->Abductor_ChangeOwner_IgnoreDriverKilled)
 		.Process(this->CanTarget_DriverKilled)
+		.Process(this->Ammo)
 		;
 };
 

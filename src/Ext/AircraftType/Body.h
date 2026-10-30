@@ -19,6 +19,7 @@ public:
 	Nullable<int> LandingDir;
 	Nullable<bool> CurleyShuffle;
 	Valueable<bool> AvoidOverlap;
+	Valueable<bool> KeepTargetOnAirReload;
 	Nullable<bool> ExtendedAircraftMissions;
 	Nullable<bool> ExtendedAircraftMissions_SmoothMoving;
 	Nullable<bool> ExtendedAircraftMissions_EarlyDescend;
@@ -44,6 +45,7 @@ public:
 		, LandingDir {}
 		, CurleyShuffle {}
 		, AvoidOverlap { false }
+		, KeepTargetOnAirReload { false }
 		, ExtendedAircraftMissions {}
 		, ExtendedAircraftMissions_SmoothMoving {}
 		, ExtendedAircraftMissions_EarlyDescend {}

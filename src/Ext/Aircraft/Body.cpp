@@ -35,15 +35,163 @@ void AircraftExt::FireWeapon(AircraftClass* pThis, AbstractClass* pTarget)
 
 			if (pWeaponExt->Strafing_UseAmmoPerShot.Get(RulesExt::Global()->Strafing_UseAmmoPerShot))
 			{
-				pThis->Ammo--;
-				pThis->ShouldLoseAmmo = false;
+				AircraftExt::ConsumeAmmo(pThis, pWeaponExt->Ammo);
 
-				if (!pThis->Ammo)
+				if (!AircraftExt::CanContinueAttack(pThis))
 				{
 					pThis->SetTarget(nullptr);
 					pThis->SetDestination(nullptr, true);
 				}
 			}
+		}
+		else
+		{
+			AircraftExt::ConsumeAmmo(pThis, pWeaponExt->Ammo);
+		}
+	}
+}
+
+bool AircraftExt::CanSelfReload(AircraftClass const* pThis)
+{
+	auto const pType = pThis->Type;
+	return pType->Ammo > 0 && !pType->ManualReload && (pType->Reload > 0 || (pThis->Ammo == 0 && pType->EmptyReload > 0));
+}
+
+bool AircraftExt::ShouldWaitForReload(AircraftClass const* pThis)
+{
+	return AircraftExt::CanSelfReload(pThis) && AircraftTypeExt::Fetch(pThis->Type)->KeepTargetOnAirReload;
+}
+
+int AircraftExt::GetSelectedWeaponAmmoCost(AircraftClass* pThis, bool isStrafeLocked)
+{
+	auto const pExt = AircraftExt::Fetch(pThis);
+	int weaponIndex = pExt->CurrentAircraftWeaponIndex;
+
+	if (!isStrafeLocked && pThis->Target)
+	{
+		weaponIndex = Math::max(pThis->SelectWeapon(pThis->Target), 0);
+
+		if (!pExt->Strafe_BombsDroppedThisRound)
+			pExt->CurrentAircraftWeaponIndex = weaponIndex;
+	}
+
+	if (auto const pWeaponStruct = pThis->GetWeapon(weaponIndex))
+	{
+		if (auto const pWeapon = pWeaponStruct->WeaponType)
+			return WeaponTypeExt::Fetch(pWeapon)->Ammo;
+	}
+
+	return 1;
+}
+
+bool AircraftExt::CanFireWithCurrentAmmo(AircraftClass* pThis, bool isStrafeLocked)
+{
+	if (pThis->Type->Ammo <= 0)
+		return true;
+
+	const int cost = AircraftExt::GetSelectedWeaponAmmoCost(pThis, isStrafeLocked);
+	return cost <= 0 ? (pThis->Ammo >= 0) : (pThis->Ammo >= cost);
+}
+
+bool AircraftExt::CanUseAnyWeaponWithCurrentAmmo(AircraftClass const* pThis)
+{
+	auto const pType = pThis->Type;
+
+	if (pType->Ammo <= 0)
+		return true;
+
+	if (pThis->Ammo < 0)
+		return false;
+
+	auto const pTypeExt = AircraftTypeExt::Fetch(pType);
+	auto canFireWeapon = [pThis](int weaponIndex, bool ignoreNeverUse) -> bool
+	{
+		if (weaponIndex < 0)
+			return false;
+
+		auto const pWeaponStruct = pThis->GetWeapon(weaponIndex);
+		auto const pWeapon = pWeaponStruct ? pWeaponStruct->WeaponType : nullptr;
+
+		if (!pWeapon || (!ignoreNeverUse && pWeapon->NeverUse))
+			return false;
+
+		return pThis->Ammo >= WeaponTypeExt::Fetch(pWeapon)->Ammo;
+	};
+
+	if (pThis->Ammo <= pTypeExt->NoAmmoAmount)
+	{
+		for (int const weaponIndex : pTypeExt->NoAmmoWeapons)
+		{
+			if (canFireWeapon(weaponIndex, pTypeExt->NoAmmoWeapons_IgnoreNeverUse))
+				return true;
+		}
+
+		if (pTypeExt->NoAmmoWeapon >= 0 && canFireWeapon(pTypeExt->NoAmmoWeapon, false))
+			return true;
+	}
+
+	if (pTypeExt->MultiWeapon)
+	{
+		int const weaponCount = Math::min(pType->WeaponCount, pTypeExt->MultiWeapon_SelectCount.Get());
+
+		for (int i = 0; i < weaponCount; ++i)
+		{
+			if (canFireWeapon(i, false))
+				return true;
+		}
+
+		return false;
+	}
+
+	if (canFireWeapon(0, true))
+		return true;
+
+	if (!pTypeExt->NoSecondaryWeaponFallback || pTypeExt->NoSecondaryWeaponFallback_AllowAA
+		|| (pThis->Ammo <= pTypeExt->NoAmmoAmount && (pTypeExt->NoAmmoWeapon == 1 || pTypeExt->NoAmmoWeapon == -1)))
+	{
+		if (canFireWeapon(1, false))
+			return true;
+	}
+
+	return false;
+}
+
+bool AircraftExt::CanContinueAttack(AircraftClass* pThis, bool isStrafeLocked)
+{
+	return AircraftExt::CanFireWithCurrentAmmo(pThis, isStrafeLocked) || AircraftExt::ShouldWaitForReload(pThis);
+}
+
+void AircraftExt::ConsumeAmmo(AircraftClass* pThis, int amount)
+{
+	pThis->ShouldLoseAmmo = false;
+	auto const pType = pThis->Type;
+
+	if (pType->Ammo <= 0)
+		return;
+
+	if (amount < 0)
+	{
+		auto const pExt = AircraftExt::Fetch(pThis);
+		auto const pWeaponStruct = pThis->GetWeapon(pExt->CurrentAircraftWeaponIndex);
+		auto const pWeapon = pWeaponStruct ? pWeaponStruct->WeaponType : nullptr;
+		amount = pWeapon ? WeaponTypeExt::Fetch(pWeapon)->Ammo.Get() : 1;
+	}
+
+	if (amount <= 0)
+		return;
+
+	int const oldAmmo = pThis->Ammo;
+	pThis->Ammo = std::max(0, oldAmmo - amount);
+
+	if (pThis->Ammo != oldAmmo)
+	{
+		pThis->Mark(MarkType::Change);
+		TechnoExt::UpdateSharedAmmo(pThis);
+
+		if (AircraftExt::CanSelfReload(pThis)
+			&& (!pThis->ReloadTimer.InProgress() || (oldAmmo > 0 && pThis->Ammo == 0 && pType->EmptyReload > 0)))
+		{
+			pThis->StartReloading();
 		}
 	}
 }
@@ -249,6 +397,38 @@ void AircraftExt::UpdateRoll()
 
 	if (target == 0.0f && std::abs(this->CurrentRoll) < RollEpsilon)
 		this->CurrentRoll = 0.0f;
+}
+
+void AircraftExt::UpdateReload()
+{
+	auto const pThis = this->OwnerObject();
+
+	if (pThis->InLimbo || !pThis->IsAlive || pThis->Health <= 0)
+		return;
+
+	auto const pType = pThis->Type;
+
+	if (pType->Ammo <= 0)
+		return;
+
+	if (pThis->Ammo >= pType->Ammo)
+	{
+		if (pThis->ReloadTimer.IsTicking())
+			pThis->ReloadTimer.Stop();
+
+		return;
+	}
+
+	if (AircraftExt::CanSelfReload(pThis))
+	{
+		if (!pThis->ReloadTimer.IsTicking() || pThis->ReloadTimer.TimeLeft <= 0)
+			pThis->StartReloading();
+		else
+			pThis->Reload();
+
+		if (pThis->Ammo >= pType->Ammo && pThis->ReloadTimer.IsTicking())
+			pThis->ReloadTimer.Stop();
+	}
 }
 
 // =============================

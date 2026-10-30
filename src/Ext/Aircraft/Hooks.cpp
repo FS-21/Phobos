@@ -133,6 +133,8 @@ DEFINE_HOOK(0x4186B6, AircraftClass_Mission_Attack_FireAtTarget2_BurstFix, 0x8)
 {
 	GET(AircraftClass*, pThis, ESI);
 
+	pThis->ShouldLoseAmmo = true;
+
 	AircraftExt::FireWeapon(pThis, pThis->Target);
 
 	return 0x4186D7;
@@ -198,11 +200,81 @@ DEFINE_HOOK(0x418544, AircraftClass_Mission_Attack_StrafingDestinationFix, 0x6)
 	GET(const FireError, fireError, EAX);
 	GET(AircraftClass*, pThis, ESI);
 
+	const bool canContinue = AircraftExt::CanContinueAttack(pThis);
+
 	// The aircraft managed by the spawn manager will not update destination after changing target
-	if (fireError == FireError::RANGE && pThis->Is_Strafe())
+	if (canContinue && (fireError == FireError::RANGE || fireError == FireError::AMMO) && pThis->Is_Strafe())
 		pThis->SetDestination(pThis->Target, true);
 
-	return 0;
+	if (canContinue && R->Origin() == 0x41874E && fireError == FireError::AMMO && pThis->IsCloseEnoughToAttack(pThis->Target))
+	{
+		pThis->MissionStatus = (int)AirAttackStatus::FireAtTarget;
+		return 0x418D1D;
+	}
+
+	R->EAX(canContinue);
+	return R->Origin() + 0x6;
+}
+
+DEFINE_HOOK_AGAIN(0x418BFE, AircraftClass_ConsumePendingAmmo, 0x6)
+DEFINE_HOOK_AGAIN(0x4180AD, AircraftClass_ConsumePendingAmmo, 0x6)
+DEFINE_HOOK_AGAIN(0x418042, AircraftClass_ConsumePendingAmmo, 0x6)
+DEFINE_HOOK(0x415071, AircraftClass_ConsumePendingAmmo, 0x6)
+{
+	GET(AircraftClass* const, pThis, ESI);
+
+	AircraftExt::ConsumeAmmo(pThis);
+	R->EAX(pThis->Ammo);
+
+	switch (R->Origin())
+	{
+	case 0x415071:
+		return 0x41507F;
+	case 0x418042:
+		return 0x418050;
+	case 0x4180AD:
+		return 0x4180BA;
+	default:
+		return 0x418C0F;
+	}
+}
+
+DEFINE_HOOK(0x418064, AircraftClass_Mission_Attack_PickAttackLocation_CheckAmmo, 0x6)
+{
+	GET(AircraftClass* const, pThis, ESI);
+
+	R->ECX(AircraftExt::CanContinueAttack(pThis));
+	return 0x41806A;
+}
+
+DEFINE_HOOK(0x4180D4, AircraftClass_Mission_Attack_FlyToPosition_CheckAmmo, 0x6)
+{
+	GET(AircraftClass* const, pThis, ESI);
+
+	return AircraftExt::CanContinueAttack(pThis) ? 0x4180E0 : 0x4189C5;
+}
+
+DEFINE_HOOK_AGAIN(0x418BC5, AircraftClass_Mission_Attack_CheckAmmo, 0x6)
+DEFINE_HOOK_AGAIN(0x418720, AircraftClass_Mission_Attack_CheckAmmo, 0x6)
+DEFINE_HOOK_AGAIN(0x418634, AircraftClass_Mission_Attack_CheckAmmo, 0x6)
+DEFINE_HOOK_AGAIN(0x418368, AircraftClass_Mission_Attack_CheckAmmo, 0x6)
+DEFINE_HOOK(0x4182B1, AircraftClass_Mission_Attack_CheckAmmo, 0x6)
+{
+	GET(AircraftClass* const, pThis, ESI);
+
+	R->EAX(AircraftExt::CanContinueAttack(pThis));
+	return R->Origin() + 0x6;
+}
+
+DEFINE_HOOK(0x418C15, AircraftClass_Mission_Attack_ReturnToBase_CheckAmmo, 0x6)
+{
+	GET(AircraftClass* const, pThis, ESI);
+
+	const bool canContinue = pThis->Target
+		? AircraftExt::CanContinueAttack(pThis)
+		: (AircraftExt::CanUseAnyWeaponWithCurrentAmmo(pThis) || AircraftExt::ShouldWaitForReload(pThis));
+
+	return canContinue ? 0x418CD1 : 0x418C21;
 }
 
 #pragma region After_Shot_Delays
@@ -215,7 +287,7 @@ static inline int GetDelay(AircraftClass* pThis, bool isLastShot)
 	int delay = pWeapon->ROF;
 
 	if (isLastShot || pExt->Strafe_BombsDroppedThisRound == pWeaponExt->Strafing_Shots.Get(5)
-		|| (pWeaponExt->Strafing_UseAmmoPerShot.Get(RulesExt::Global()->Strafing_UseAmmoPerShot) && !pThis->Ammo))
+		|| (pWeaponExt->Strafing_UseAmmoPerShot.Get(RulesExt::Global()->Strafing_UseAmmoPerShot) && !AircraftExt::CanFireWithCurrentAmmo(pThis, true)))
 	{
 		pExt->Strafe_TargetCell = nullptr;
 		pThis->MissionStatus = (int)AirAttackStatus::FlyToPosition;
@@ -246,7 +318,7 @@ DEFINE_HOOK(0x418506, AircraftClass_Mission_Attack_Delay1B, 0x6)
 	GET(AircraftClass*, pThis, ESI);
 
 	pThis->IsLocked = true;
-	pThis->MissionStatus = pThis->Ammo > 0 ? (int)AirAttackStatus::PickAttackLocation : (int)AirAttackStatus::ReturnToBase;
+	pThis->MissionStatus = (AircraftExt::CanContinueAttack(pThis) || AircraftExt::CanSelfReload(pThis)) ? (int)AirAttackStatus::PickAttackLocation : (int)AirAttackStatus::ReturnToBase;
 	R->EAX(GetDelay(pThis, false));
 
 	return 0x418539;
@@ -808,7 +880,7 @@ DEFINE_HOOK(0x41A5C7, AircraftClass_Mission_Guard_StartAreaGuard, 0x6)
 
 	const auto pArchive = pThis->ArchiveTarget;
 
-	if (!pArchive || !pThis->Ammo)
+	if (!pArchive || (!AircraftExt::CanUseAnyWeaponWithCurrentAmmo(pThis) && !AircraftExt::ShouldWaitForReload(pThis)))
 		return 0;
 
 	pThis->SetDestination(pArchive, true);
@@ -868,11 +940,13 @@ DEFINE_HOOK(0x41A96C, AircraftClass_Mission_AreaGuard, 0x6)
 
 	if (const auto pArchive = pThis->ArchiveTarget)
 	{
-		if (pThis->Ammo)
+		const bool canFire = AircraftExt::CanUseAnyWeaponWithCurrentAmmo(pThis);
+
+		if (canFire || AircraftExt::ShouldWaitForReload(pThis))
 		{
 			auto coords = pArchive->GetCoords();
 
-			if (!pThis->TargetingTimer.HasTimeLeft() && pThis->TargetAndEstimateDamage(coords, ThreatType::Area))
+			if (canFire && !pThis->TargetingTimer.HasTimeLeft() && pThis->TargetAndEstimateDamage(coords, ThreatType::Area))
 			{
 				// Without an airport, there is no need to record the previous location
 				if (pThis->MissionStatus)
@@ -941,7 +1015,7 @@ DEFINE_HOOK(0x6FA68B, TechnoClass_Update_AttackMovePaused, 0xA) // To make aircr
 
 	const bool skip = pThis->WhatAmI() == AbstractType::Aircraft
 		&& static_cast<AircraftExt*>(TechnoExt::Fetch(pThis))->GetTypeExtData()->ExtendedAircraftMissions.Get(RulesExt::Global()->ExtendedAircraftMissions)
-		&& (!pThis->Ammo || !pThis->IsInAir());
+		&& ((!AircraftExt::CanUseAnyWeaponWithCurrentAmmo(static_cast<AircraftClass*>(pThis)) && !AircraftExt::ShouldWaitForReload(static_cast<AircraftClass*>(pThis))) || !pThis->IsInAir());
 
 	return skip ? SkipGameCode : 0;
 }
@@ -1097,7 +1171,7 @@ DEFINE_HOOK(0x4425B6, BuildingClass_ReceiveDamage_NoDestroyLink, 0xA)
 static AbstractClass* __fastcall AircraftClass_GreatestThreat(AircraftClass* pThis, void* _, ThreatType threatType, CoordStruct* pSelectCoords, bool onlyTargetHouseEnemy)
 {
 	if (AircraftTypeExt::Fetch(pThis->Type)->ExtendedAircraftMissions.Get(RulesExt::Global()->ExtendedAircraftMissions)
-		&& !pThis->Team && pThis->Ammo && !pThis->Airstrike && !pThis->IsALoaner)
+		&& !pThis->Team && AircraftExt::CanUseAnyWeaponWithCurrentAmmo(pThis) && !pThis->Airstrike && !pThis->IsALoaner)
 	{
 		if (const auto pPrimaryWeapon = pThis->GetWeapon(0)->WeaponType)
 			threatType |= pPrimaryWeapon->AllowedThreats();
@@ -1156,7 +1230,7 @@ DEFINE_HOOK(0x418CF3, AircraftClass_Mission_Attack_PlanningFix, 0x5)
 
 	GET(AircraftClass*, pThis, ESI);
 
-	return pThis->Ammo <= 0 || !pThis->TryNextPlanningTokenNode() ? 0 : SkipIdle;
+	return (!AircraftExt::CanUseAnyWeaponWithCurrentAmmo(pThis) && !AircraftExt::ShouldWaitForReload(pThis)) || !pThis->TryNextPlanningTokenNode() ? 0 : SkipIdle;
 }
 
 #pragma endregion
@@ -1329,11 +1403,13 @@ DEFINE_HOOK(0x4143A8, AircraftClass_UnLimbo_CargoPlane, 0x6)
 #pragma region AircraftRoll
 
 // Smoothly updates the bank angle applied when the aircraft turns while flying.
-DEFINE_HOOK(0x414DA3, AircraftClass_AI_UpdateRoll, 0x5)
+DEFINE_HOOK(0x414DA3, AircraftClass_AI_UpdateRollAndReload, 0x5)
 {
 	GET(AircraftClass* const, pThis, ESI);
 
-	AircraftExt::Fetch(pThis)->UpdateRoll();
+	auto const pExt = AircraftExt::Fetch(pThis);
+	pExt->UpdateRoll();
+	pExt->UpdateReload();
 
 	return 0;
 }
