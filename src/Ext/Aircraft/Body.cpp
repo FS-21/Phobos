@@ -217,6 +217,40 @@ AircraftTypeClass* AircraftExt::GetAircraftTypeExtra(AircraftClass* pAircraft)
 	return pType;
 }
 
+namespace
+{
+	// Size of the current turn (in DirStruct raw units) at which an aircraft reaches its full bank angle.
+	constexpr float RollFullBankArc = 8192.0f;
+	// Fraction of the distance towards the target bank angle covered each frame.
+	constexpr float RollSmoothing = 0.15f;
+	constexpr float RollEpsilon = 0.002f;
+}
+
+// Eases the bank angle used when an airborne aircraft turns, instead of switching between 0 and RollAngle every frame.
+void AircraftExt::UpdateRoll()
+{
+	const auto pThis = this->OwnerObject();
+	float target = 0.0f;
+
+	if (const auto pFlyLoco = locomotion_cast<FlyLocomotionClass*>(pThis->Locomotor))
+	{
+		const auto pType = pThis->GetTechnoType();
+		const auto& facing = pThis->SecondaryFacing;
+
+		if (pType->RollAngle != 0.0 && pFlyLoco->CurrentSpeed > pType->PitchSpeed
+			&& pThis->GetHeight() > 0 && facing.IsRotating())
+		{
+			const float arc = static_cast<float>(static_cast<short>(facing.Difference().Raw));
+			target = static_cast<float>(pType->RollAngle) * Math::clamp(arc / RollFullBankArc, -1.0f, 1.0f);
+		}
+	}
+
+	this->CurrentRoll += (target - this->CurrentRoll) * RollSmoothing;
+
+	if (target == 0.0f && std::abs(this->CurrentRoll) < RollEpsilon)
+		this->CurrentRoll = 0.0f;
+}
+
 // =============================
 // load / save
 
@@ -227,6 +261,7 @@ void AircraftExt::Serialize(T& Stm)
 		.Process(this->Strafe_BombsDroppedThisRound)
 		.Process(this->Strafe_TargetCell)
 		.Process(this->CurrentAircraftWeaponIndex)
+		.Process(this->CurrentRoll)
 		;
 }
 

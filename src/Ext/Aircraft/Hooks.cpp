@@ -1325,3 +1325,41 @@ DEFINE_HOOK(0x4143A8, AircraftClass_UnLimbo_CargoPlane, 0x6)
 }
 
 #pragma endregion
+
+#pragma region AircraftRoll
+
+// Smoothly updates the bank angle applied when the aircraft turns while flying.
+DEFINE_HOOK(0x414DA3, AircraftClass_AI_UpdateRoll, 0x5)
+{
+	GET(AircraftClass* const, pThis, ESI);
+
+	AircraftExt::Fetch(pThis)->UpdateRoll();
+
+	return 0;
+}
+
+#pragma endregion
+
+#pragma region AvoidOverlap
+
+// Aircraft that avoid overlapping take the cells occupied or reserved by other aircraft into account
+// when choosing where to attack from, even if they are AirportBound.
+DEFINE_HOOK(0x419B90, AircraftClass_CellSeemsOk_AvoidOverlap, 0x6)
+{
+	enum { Continue = 0x419B96, FireLocationCaller = 0x4199A1 };
+
+	GET(AircraftClass* const, pThis, ESI);
+	GET_STACK(const DWORD, caller, STACK_OFFSET(0x1C, 0x0));
+
+	const auto pType = pThis->Type;
+	bool airportBound = pType->AirportBound;
+
+	if (airportBound && caller == FireLocationCaller && AircraftTypeExt::Fetch(pType)->AvoidOverlap)
+		airportBound = false;
+
+	R->CL(airportBound);
+
+	return Continue;
+}
+
+#pragma endregion

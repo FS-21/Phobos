@@ -18,6 +18,7 @@ public:
 	Nullable<int> SpawnHeight;
 	Nullable<int> LandingDir;
 	Nullable<bool> CurleyShuffle;
+	Valueable<bool> AvoidOverlap;
 	Nullable<bool> ExtendedAircraftMissions;
 	Nullable<bool> ExtendedAircraftMissions_SmoothMoving;
 	Nullable<bool> ExtendedAircraftMissions_EarlyDescend;
@@ -42,6 +43,7 @@ public:
 		, SpawnHeight {}
 		, LandingDir {}
 		, CurleyShuffle {}
+		, AvoidOverlap { false }
 		, ExtendedAircraftMissions {}
 		, ExtendedAircraftMissions_SmoothMoving {}
 		, ExtendedAircraftMissions_EarlyDescend {}

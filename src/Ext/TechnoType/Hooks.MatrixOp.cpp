@@ -388,6 +388,77 @@ DEFINE_HOOK(0x4CF68D, FlyLocomotionClass_DrawMatrix_OnAirport, 0x5)
 	return 0x4CF6A0;
 }
 
+// Aircraft draw: the voxel cache key is built like the one of units, with the frame index in the lowest bits
+// and the locomotor state above it, so that the roll, pitch and facing bits do not overwrite the animation frame.
+DEFINE_HOOK(0x41493E, AircraftClass_DrawIt_CleanVoxelKey, 0x5)
+{
+	R->ECX(0);
+
+	return 0;
+}
+
+DEFINE_HOOK(0x41496C, AircraftClass_DrawIt_FinishVoxelKey, 0x5)
+{
+	REF_STACK(VoxelIndexKey, key, STACK_OFFSET(0xCC, -0xBC));
+	GET_STACK(const int, frameIndex, STACK_OFFSET(0xCC, -0x8C));
+
+	if (key.Is_Valid_Key())
+		key.Value = (key.Value << 5) | (frameIndex & 0x1F);
+
+	return 0;
+}
+
+// Applies the eased bank angle of aircraft instead of the fixed RollAngle switched on and off every frame.
+static bool ApplyAircraftRoll(ILocomotion* iloco, VoxelIndexKey* pKey, Matrix3D& mtx)
+{
+	const auto pLinked = static_cast<FlyLocomotionClass*>(iloco)->LinkedTo;
+
+	if (pLinked->WhatAmI() != AbstractType::Aircraft)
+		return false;
+
+	const float roll = AircraftExt::Fetch(static_cast<AircraftClass*>(pLinked))->CurrentRoll;
+
+	if (roll != 0.0f)
+	{
+		if (pKey)
+			pKey->Invalidate();
+
+		mtx.RotateX(roll);
+	}
+
+	return true;
+}
+
+DEFINE_HOOK(0x4CF780, FlyLocomotionClass_DrawMatrix_SmoothRoll, 0x5)
+{
+	enum { SkipGameCode = 0x4CF809 };
+
+	GET(ILocomotion*, iloco, ESI);
+	GET(VoxelIndexKey*, pKey, EDI);
+	REF_STACK(Matrix3D, mtx, STACK_OFFSET(0x38, -0x30));
+
+	return ApplyAircraftRoll(iloco, pKey, mtx) ? SkipGameCode : 0;
+}
+
+// The bank angle also fades out when the aircraft slows down below PitchSpeed.
+DEFINE_HOOK(0x4CF734, FlyLocomotionClass_DrawMatrix_SmoothRollOut, 0x6)
+{
+	enum { Pitch = 0x4CF73A, SkipGameCode = 0x4CF809 };
+
+	GET(ILocomotion*, iloco, ESI);
+	GET(VoxelIndexKey*, pKey, EDI);
+	REF_STACK(Matrix3D, mtx, STACK_OFFSET(0x38, -0x30));
+
+	const auto pLoco = static_cast<FlyLocomotionClass*>(iloco);
+
+	if (pLoco->CurrentSpeed > pLoco->LinkedTo->GetTechnoType()->PitchSpeed)
+		return Pitch;
+
+	ApplyAircraftRoll(iloco, pKey, mtx);
+
+	return SkipGameCode;
+}
+
 namespace JumpjetTiltReference
 {
 	constexpr auto BaseSpeed = 32;

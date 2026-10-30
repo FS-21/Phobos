@@ -14,11 +14,13 @@ public:
 	int Strafe_BombsDroppedThisRound;
 	CellClass* Strafe_TargetCell;
 	int CurrentAircraftWeaponIndex;
+	float CurrentRoll;
 
 	explicit AircraftExt(AircraftClass* const OwnerObject) : FootExt(OwnerObject)
 		, Strafe_BombsDroppedThisRound { 0 }
 		, Strafe_TargetCell { nullptr }
 		, CurrentAircraftWeaponIndex {}
+		, CurrentRoll { 0.0f }
 	{ }
 
 	AircraftClass* OwnerObject() const
@@ -37,6 +39,8 @@ public:
 	static CellStruct PickEdgeCellForPlane(AircraftTypeClass* pPlaneType, CellStruct destCell, Edge edge, bool isOnRetreat = false);
 	static DirType GetLandingDir(AircraftClass* pThis, BuildingClass* pDock = nullptr, bool isProduction = false);
 	static AircraftTypeClass* GetAircraftTypeExtra(AircraftClass* pAircraft);
+
+	void UpdateRoll();
 
 	class ExtContainer final : public Container<AircraftExt>
 	{
