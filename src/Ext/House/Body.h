@@ -96,6 +96,22 @@ public:
 	PlacingBuildingStruct Common;
 	PlacingBuildingStruct Combat;
 
+	Valueable<bool> AIBrain_Campaign;
+	int AIBrain_Archetype;
+	int AIBrain_ActiveExpert;
+	int AIBrain_LastInferenceFrame;
+	int AIBrain_NextBuildingTarget;
+	int AIBrain_NextUnitTarget;
+	int AIBrain_NextNavalTarget;
+	int AIBrain_NextInfantryTarget;
+	int AIBrain_NextAircraftTarget;
+	CellStruct AIBrain_PlannedBuildCell;
+	CellStruct AIBrain_ScoutTargetCell;
+	CellStruct AIBrain_AttackTargetCell;
+	int AIBrain_InfiltratedEnemyMask;
+	int AIBrain_ScoutedEnemyMask;
+	std::array<int, 8> AIBrain_EstimatedEnemyThreat;
+
 	HouseExt(HouseClass* OwnerObject) : AbstractExt(OwnerObject)
 		, PowerPlantEnhancers {}
 		, OwnedLimboDeliveredBuildings {}
@@ -135,6 +151,21 @@ public:
 		, OwnedDeployingUnits {}
 		, Common { nullptr, nullptr, 0 }
 		, Combat { nullptr, nullptr, 0 }
+		, AIBrain_Campaign { false }
+		, AIBrain_Archetype { 0 }
+		, AIBrain_ActiveExpert { 0 }
+		, AIBrain_LastInferenceFrame { 0 }
+		, AIBrain_NextBuildingTarget { -1 }
+		, AIBrain_NextUnitTarget { -1 }
+		, AIBrain_NextNavalTarget { -1 }
+		, AIBrain_NextInfantryTarget { -1 }
+		, AIBrain_NextAircraftTarget { -1 }
+		, AIBrain_PlannedBuildCell { CellStruct::Empty }
+		, AIBrain_ScoutTargetCell { CellStruct::Empty }
+		, AIBrain_AttackTargetCell { CellStruct::Empty }
+		, AIBrain_InfiltratedEnemyMask { 0 }
+		, AIBrain_ScoutedEnemyMask { 0 }
+		, AIBrain_EstimatedEnemyThreat { 0, 0, 0, 0, 0, 0, 0, 0 }
 	{ }
 
 	bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;
@@ -192,6 +223,12 @@ public:
 	static HouseClass* GetHouseKind(OwnerHouseKind kind, bool allowRandom, HouseClass* pDefault, HouseClass* pInvoker = nullptr, HouseClass* pVictim = nullptr);
 	static CellClass* GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass* pCurrentHouse, CoordStruct defaultCurrentCoords, SpeedType speedTypeZone, int extraDistance = 0);
 	static void GetAIChronoshiftSupers(HouseClass* pThis, SuperClass*& pSuperCSphere, SuperClass*& pSuperCWarp);
+	static bool IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* const pItem);
+	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, bool skipSecretLabChecks = false);
+	static bool HasBuildingPrerequisite(HouseClass* const pHouse, int idxBuildingType);
+	static bool HasGenericPrerequisite(int idx, HouseClass* const pHouse);
+	static bool HasPrerequisite(HouseClass* const pHouse, int idx);
+	static int FindGenericPrerequisite(const char* id);
 
 	static void SetForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode = -1);
 	static void SetSkirmishHouseName(HouseClass* pHouse);

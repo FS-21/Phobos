@@ -3,6 +3,7 @@
 #include <commctrl.h>
 
 #include <Misc/ExceptionHandler.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 #include <Utilities/Debug.h>
 #include <Utilities/Patch.h>
@@ -95,6 +96,10 @@ void Phobos::CmdLineParse(char** ppArgs, int nNumArgs)
 		if (_stricmp(pArg, "-FullCrashDump") == 0)
 		{
 			ExceptionHandler::GenerateFullCrashDump = true;
+		}
+
+		NeuralAI::ParseCommandLineArg(pArg);
+		{
 		}
 	}
 
@@ -247,6 +252,7 @@ void Phobos::ExeRun()
 
 void Phobos::ExeTerminate()
 {
+	NeuralAI::Shutdown();
 	Console::Release();
 }
 

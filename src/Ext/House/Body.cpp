@@ -2,6 +2,7 @@
 
 #include <Ext/SWType/Body.h>
 #include <Ext/Techno/Body.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 //Static init
 
@@ -26,6 +27,12 @@ void HouseExt::UpdateVehicleProduction()
 		return;
 
 	const int AIDifficulty = pThis->GetAIDifficultyIndex();
+	if (NeuralAI::IsEnabledForHouse(pThis))
+	{
+		NeuralAI::UpdateUnitProduction(pThis);
+		return;
+	}
+
 	auto& creationFrames = HouseExt::AIProduction_CreationFrames;
 	auto& values = HouseExt::AIProduction_Values;
 	auto& bestChoices = HouseExt::AIProduction_BestChoices;
@@ -630,6 +637,9 @@ void HouseExt::LoadFromINIFile(CCINIClass* const pINI)
 
 	ValueableVector<bool> readBaseNodeRepairInfo;
 	readBaseNodeRepairInfo.Read(exINI, pSection, "RepairBaseNodes");
+	this->AIBrain_Campaign.Read(exINI, pSection, "AIBrain");
+	this->AIBrain_Campaign.Read(exINI, pSection, "NeuralAI");
+	this->AIBrain_Campaign.Read(exINI, pSection, "AdvancedAI");
 	size_t nWritten = readBaseNodeRepairInfo.size();
 
 	if (nWritten <= 3)
@@ -723,6 +733,21 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->OwnedDeployingUnits)
 		.Process(this->Common)
 		.Process(this->Combat)
+		.Process(this->AIBrain_Campaign)
+		.Process(this->AIBrain_Archetype)
+		.Process(this->AIBrain_ActiveExpert)
+		.Process(this->AIBrain_LastInferenceFrame)
+		.Process(this->AIBrain_NextBuildingTarget)
+		.Process(this->AIBrain_NextUnitTarget)
+		.Process(this->AIBrain_NextNavalTarget)
+		.Process(this->AIBrain_NextInfantryTarget)
+		.Process(this->AIBrain_NextAircraftTarget)
+		.Process(this->AIBrain_PlannedBuildCell)
+		.Process(this->AIBrain_ScoutTargetCell)
+		.Process(this->AIBrain_AttackTargetCell)
+		.Process(this->AIBrain_InfiltratedEnemyMask)
+		.Process(this->AIBrain_ScoutedEnemyMask)
+		.Process(this->AIBrain_EstimatedEnemyThreat)
 		;
 }
 

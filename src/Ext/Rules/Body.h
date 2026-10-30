@@ -338,6 +338,10 @@ public:
 
 		Valueable<bool> AnimCraterDestroyTiberium;
 
+		DynamicVectorClass<DynamicVectorClass<int>> GenericPrerequisites;
+		DynamicVectorClass<const char*> GenericPrerequisitesNames;
+		DynamicVectorClass<DynamicVectorClass<TechnoTypeClass*>> GenericPrerequisitesAlternates;
+
 		Valueable<AffectedHouse> BerzerkTargeting;
 		Valueable<bool> AllowBerzerkOnAllies;
 
@@ -575,6 +579,8 @@ public:
 
 		Valueable<bool> ExtendedBuildingPlacing;
 
+		Valueable<bool> AIBrain;
+
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
 			, HarvesterDumpAmount { 0.0f }
@@ -773,6 +779,9 @@ public:
 			, ShowDesignatorRange { true }
 			, ShowPowerPlantEnhancerRange { true }
 			, ShowGameTime { true }
+			, GenericPrerequisites { }
+			, GenericPrerequisitesNames { }
+			, GenericPrerequisitesAlternates { }
 			, DropPodTrailer { }
 			, DropPodDefaultTrailer { }
 			, PodImage { }
@@ -1083,6 +1092,8 @@ public:
 			, MissileKeepTargetCoord { false }
 
 			, ExtendedBuildingPlacing { false }
+
+			, AIBrain { true }
 		{ }
 
 		virtual ~ExtData() = default;
@@ -1126,4 +1137,6 @@ public:
 	{
 		Allocate(RulesClass::Instance);
 	}
+
+	static void FillDefaultPrerequisites();
 };
