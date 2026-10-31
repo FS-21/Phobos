@@ -748,6 +748,7 @@ void HouseExt::Serialize(T& Stm)
 		.Process(this->AIBrain_InfiltratedEnemyMask)
 		.Process(this->AIBrain_ScoutedEnemyMask)
 		.Process(this->AIBrain_EstimatedEnemyThreat)
+		.Process(this->AIBrain_PolicySlot)
 		;
 }
 

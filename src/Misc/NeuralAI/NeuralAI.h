@@ -52,6 +52,7 @@ struct AIBackpackFile
 	int32_t EstimatedELO;
 	int8_t LoRA_A[256 * 16];
 	int8_t LoRA_B[16 * 64];
+	int16_t OutputBias[64];
 	uint32_t NumEntries;
 	AIBackpackEntry Entries[512];
 };
@@ -89,7 +90,8 @@ struct AITrainerSharedTelemetry
 		uint8_t ColorR;
 		uint8_t ColorG;
 		uint8_t ColorB;
-		uint8_t Padding[3];
+		uint8_t PolicySlot;
+		uint8_t Padding[2];
 	} Houses[8];
 	uint8_t RadarCells[128 * 128];
 };
@@ -138,6 +140,8 @@ private:
 
 	static AIBackpackFile Backpack;
 	static bool BackpackLoaded;
+	static AIBackpackFile OpponentBackpack;
+	static bool OpponentLoaded;
 	static bool AllowBackpackInference;
 	static uint64_t CurrentRulesSignature;
 	static uint64_t CurrentBaseSignature;
@@ -152,6 +156,8 @@ private:
 	static void EnsureBaseModelLoaded();
 	static void LoadOrResetBackpack();
 	static void SaveBackpack();
+	static bool LoadBackpackFile(const char* pPath, AIBackpackFile& outBackpack, bool requireSignature);
+	static const AIBackpackFile& PolicyFor(const HouseClass* pHouse);
 	static void InitTelemetrySharedMemory();
 	static void UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool stalemate);
 

@@ -111,6 +111,7 @@ public:
 	int AIBrain_InfiltratedEnemyMask;
 	int AIBrain_ScoutedEnemyMask;
 	std::array<int, 8> AIBrain_EstimatedEnemyThreat;
+	int AIBrain_PolicySlot;
 
 	HouseExt(HouseClass* OwnerObject) : AbstractExt(OwnerObject)
 		, PowerPlantEnhancers {}
@@ -166,6 +167,7 @@ public:
 		, AIBrain_InfiltratedEnemyMask { 0 }
 		, AIBrain_ScoutedEnemyMask { 0 }
 		, AIBrain_EstimatedEnemyThreat { 0, 0, 0, 0, 0, 0, 0, 0 }
+		, AIBrain_PolicySlot { 0 }
 	{ }
 
 	bool OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const;

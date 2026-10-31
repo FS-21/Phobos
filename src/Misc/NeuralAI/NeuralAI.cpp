@@ -50,6 +50,8 @@ AITrainerSharedTelemetry* NeuralAI::TelemetryView = nullptr;
 
 AIBackpackFile NeuralAI::Backpack = {};
 bool NeuralAI::BackpackLoaded = false;
+AIBackpackFile NeuralAI::OpponentBackpack = {};
+bool NeuralAI::OpponentLoaded = false;
 bool NeuralAI::AllowBackpackInference = false;
 uint64_t NeuralAI::CurrentRulesSignature = 0;
 uint64_t NeuralAI::CurrentBaseSignature = 0;
@@ -449,6 +451,42 @@ void NeuralAI::EnsureBaseModelLoaded()
 	}
 }
 
+bool NeuralAI::LoadBackpackFile(const char* pPath, AIBackpackFile& outBackpack, bool requireSignature)
+{
+	HANDLE hFile = CreateFileA(pPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE)
+		return false;
+
+	AIBackpackFile loaded = {};
+	DWORD bytesRead = 0;
+
+	const bool valid = ReadFile(hFile, &loaded, sizeof(AIBackpackFile), &bytesRead, NULL)
+		&& bytesRead == sizeof(AIBackpackFile)
+		&& std::memcmp(loaded.Magic, "PHOBOSBP", 8) == 0
+		&& loaded.SchemaVersion == 2
+		&& (!requireSignature || loaded.BaseSignature == NeuralAI::CurrentBaseSignature);
+
+	CloseHandle(hFile);
+
+	if (valid)
+		outBackpack = loaded;
+
+	return valid;
+}
+
+const AIBackpackFile& NeuralAI::PolicyFor(const HouseClass* pHouse)
+{
+	if (NeuralAI::HeadlessMode && NeuralAI::OpponentLoaded)
+	{
+		auto const pExt = HouseExt::TryFetch(pHouse);
+
+		if (pExt && pExt->AIBrain_PolicySlot == 1)
+			return NeuralAI::OpponentBackpack;
+	}
+
+	return NeuralAI::Backpack;
+}
+
 void NeuralAI::LoadOrResetBackpack()
 {
 	NeuralAI::CurrentRulesSignature = NeuralAI::ComputeRulesSignature();
@@ -475,34 +513,43 @@ void NeuralAI::LoadOrResetBackpack()
 		return;
 	}
 
+	// In headless training the trainer owns both policy files: they are loaded verbatim and never written back
+	if (NeuralAI::HeadlessMode)
+	{
+		char policyPath[MAX_PATH];
+
+		std::memset(&NeuralAI::Backpack, 0, sizeof(AIBackpackFile));
+		std::memcpy(NeuralAI::Backpack.Magic, "PHOBOSBP", 8);
+		NeuralAI::Backpack.SchemaVersion = 2;
+		NeuralAI::Backpack.BaseSignature = NeuralAI::CurrentBaseSignature;
+		NeuralAI::Backpack.EstimatedELO = 1200;
+		std::snprintf(policyPath, sizeof(policyPath), "Resources\\AI\\ai_backpack_slot_%d.dat", NeuralAI::TrainSlotIndex);
+
+		const bool challengerLoaded = NeuralAI::LoadBackpackFile(policyPath, NeuralAI::Backpack, false);
+
+		std::memcpy(&NeuralAI::OpponentBackpack, &NeuralAI::Backpack, sizeof(AIBackpackFile));
+		std::snprintf(policyPath, sizeof(policyPath), "Resources\\AI\\ai_backpack_opp_slot_%d.dat", NeuralAI::TrainSlotIndex);
+		NeuralAI::OpponentLoaded = NeuralAI::LoadBackpackFile(policyPath, NeuralAI::OpponentBackpack, false);
+
+		NeuralAI::AllowBackpackInference = true;
+		NeuralAI::BackpackLoaded = true;
+		Debug::Log("[NeuralAI] Headless policies: challenger=%s opponent=%s\n", challengerLoaded ? "loaded" : "default", NeuralAI::OpponentLoaded ? "loaded" : "shared");
+
+		return;
+	}
+
 	NeuralAI::AllowBackpackInference = true;
 	const char* bpPath = (GetFileAttributesA("Resources\\AI\\ai_backpack.dat") != INVALID_FILE_ATTRIBUTES)
 		? "Resources\\AI\\ai_backpack.dat"
 		: "AI\\ai_backpack.dat";
 
-	HANDLE hFile = CreateFileA(bpPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	bool valid = false;
-
-	if (hFile != INVALID_HANDLE_VALUE)
-	{
-		DWORD bytesRead = 0;
-		if (ReadFile(hFile, &NeuralAI::Backpack, sizeof(AIBackpackFile), &bytesRead, NULL)
-			&& bytesRead == sizeof(AIBackpackFile)
-			&& std::memcmp(NeuralAI::Backpack.Magic, "PHOBOSBP", 8) == 0
-			&& NeuralAI::Backpack.SchemaVersion == 1
-			&& NeuralAI::Backpack.BaseSignature == NeuralAI::CurrentBaseSignature)
-		{
-			valid = true;
-		}
-
-		CloseHandle(hFile);
-	}
+	const bool valid = NeuralAI::LoadBackpackFile(bpPath, NeuralAI::Backpack, true);
 
 	if (!valid)
 	{
 		std::memset(&NeuralAI::Backpack, 0, sizeof(AIBackpackFile));
 		std::memcpy(NeuralAI::Backpack.Magic, "PHOBOSBP", 8);
-		NeuralAI::Backpack.SchemaVersion = 1;
+		NeuralAI::Backpack.SchemaVersion = 2;
 		NeuralAI::Backpack.BaseSignature = NeuralAI::CurrentBaseSignature;
 		NeuralAI::Backpack.EstimatedELO = 1200;
 		NeuralAI::Backpack.BackpackHash = HashBytesFNV1a(&NeuralAI::Backpack.LoRA_A[0], sizeof(NeuralAI::Backpack.LoRA_A));
@@ -610,6 +657,7 @@ void NeuralAI::OnScenarioStart()
 		activeAIHouses++;
 		auto const pExt = HouseExt::Fetch(pHouse);
 		pExt->AIBrain_Archetype = ScenarioClass::Instance->Random.RandomRanged(0, NeuralAI::NumArchetypes - 1);
+		pExt->AIBrain_PolicySlot = NeuralAI::HeadlessMode ? ((activeAIHouses - 1) % 2) : 0;
 		pExt->AIBrain_ActiveExpert = 0;
 		pExt->AIBrain_LastInferenceFrame = -1000;
 		pExt->AIBrain_NextBuildingTarget = -1;
@@ -688,7 +736,7 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 		}
 	}
 
-	if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded)
+	if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded && !NeuralAI::HeadlessMode)
 	{
 		NeuralAI::Backpack.GamesPlayed++;
 
@@ -869,6 +917,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		hs.NetWorthScore = hs.Credits + (hs.KilledUnits * 200) + (hs.KilledBuildings * 450) + (hs.OwnedBuildings * 300) + (hs.OwnedUnits * 200);
 		hs.IsWinner = (pHouse->ArrayIndex == winnerHouseIdx || pHouse->IsWinner) ? 1 : 0;
 		hs.IsDefeated = pHouse->Defeated ? 1 : 0;
+		hs.PolicySlot = static_cast<uint8_t>(pExt->AIBrain_PolicySlot);
 		hs.ColorR = pHouse->Color.R;
 		hs.ColorG = pHouse->Color.G;
 		hs.ColorB = pHouse->Color.B;
@@ -932,11 +981,25 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			for (uint32_t i = 0; i < dst->NumHouses; ++i)
 			{
 				const auto& h = dst->Houses[i];
+				auto const pOwner = (h.ArrayIndex >= 0 && h.ArrayIndex < HouseClass::Array.Count) ? HouseClass::Array.GetItem(h.ArrayIndex) : nullptr;
+				int defenses = 0;
+
+				if (pOwner)
+				{
+					for (auto const pOwned : pOwner->Buildings)
+					{
+						if (pOwned && pOwned->Type && !pOwned->InLimbo && pOwned->Type->BuildCat == BuildCat::Combat)
+							defenses++;
+					}
+				}
+
 				std::fprintf(fp,
-					"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"expert\": %d, \"credits\": %d, \"killedUnits\": %d, \"killedBlds\": %d, \"ownedUnits\": %d, \"ownedBlds\": %d, \"score\": %d, \"winner\": %u, \"defeated\": %u}%s\n",
+					"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"expert\": %d, \"credits\": %d, \"killedUnits\": %d, \"killedBlds\": %d, \"ownedUnits\": %d, \"ownedBlds\": %d, \"score\": %d, \"winner\": %u, \"defeated\": %u, \"policy\": %u, \"harvesters\": %d, \"refineries\": %d, \"warFactories\": %d, \"barracks\": %d, \"defenses\": %d}%s\n",
 					h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, h.ActiveExpert,
 					h.Credits, h.KilledUnits, h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings,
-					h.NetWorthScore, h.IsWinner, h.IsDefeated,
+					h.NetWorthScore, h.IsWinner, h.IsDefeated, h.PolicySlot,
+					pOwner ? pOwner->CountResourceGatherers : 0, pOwner ? pOwner->CountResourceDestinations : 0,
+					pOwner ? pOwner->NumWarFactories : 0, pOwner ? pOwner->NumBarracks : 0, defenses,
 					(i + 1 < dst->NumHouses) ? "," : "");
 			}
 
@@ -1283,12 +1346,13 @@ void NeuralAI::RunDeterministicMoE(
 	// Apply Signed Backpack LoRA delta & Learned Faction Strategy Memory in Skirmish / Headless Training
 	if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded)
 	{
+		const AIBackpackFile& policy = NeuralAI::PolicyFor(pHouse);
 		std::array<int32_t, 16> rankAct = {};
 		for (int r = 0; r < 16; ++r)
 		{
 			int32_t acc = 0;
 			for (int i = 0; i < NeuralAI::InputVectorSize; ++i)
-				acc += static_cast<int32_t>(features[i]) * static_cast<int32_t>(NeuralAI::Backpack.LoRA_A[r * NeuralAI::InputVectorSize + i]);
+				acc += static_cast<int32_t>(features[i]) * static_cast<int32_t>(policy.LoRA_A[r * NeuralAI::InputVectorSize + i]);
 
 			rankAct[r] = acc >> 8;
 		}
@@ -1297,15 +1361,15 @@ void NeuralAI::RunDeterministicMoE(
 		{
 			int32_t delta = 0;
 			for (int r = 0; r < 16; ++r)
-				delta += rankAct[r] * static_cast<int32_t>(NeuralAI::Backpack.LoRA_B[r * NeuralAI::OutputVectorSize + o]);
+				delta += rankAct[r] * static_cast<int32_t>(policy.LoRA_B[r * NeuralAI::OutputVectorSize + o]);
 
-			outScores[o] = ClampInt16(outScores[o] + (delta >> 7));
+			outScores[o] = ClampInt16(outScores[o] + (delta >> 7) + policy.OutputBias[o]);
 		}
 
 		// Recall learned strategy outcome deltas from Backpack Entries for this Faction + Archetype + Expert
 		const int curArch = std::clamp(pExt->AIBrain_Archetype, 0, 7);
 		const uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 40 + curArch * 8 + activeExpert) % 512);
-		const auto& memEntry = NeuralAI::Backpack.Entries[entryIdx];
+		const auto& memEntry = policy.Entries[entryIdx];
 		if (memEntry.VisitCount > 0)
 		{
 			const int16_t learnedBoost = ClampInt16(memEntry.ArchetypeScoreDelta[curArch] * 4 + memEntry.ExpertScoreDelta[activeExpert] * 4);
