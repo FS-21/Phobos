@@ -108,6 +108,8 @@ public:
 
 	static bool HeadlessMode;
 	static int TrainSlotIndex;
+	static int MatchEndWinnerHouse;
+	static bool MatchEndStalemate;
 
 	static void ParseCommandLineArg(const char* pArg);
 	static void Initialize();

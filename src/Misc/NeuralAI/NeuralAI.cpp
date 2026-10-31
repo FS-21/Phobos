@@ -36,9 +36,13 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
+#include <string>
 
 bool NeuralAI::HeadlessMode = false;
 int NeuralAI::TrainSlotIndex = 0;
+int NeuralAI::MatchEndWinnerHouse = -1;
+bool NeuralAI::MatchEndStalemate = false;
 
 HANDLE NeuralAI::BaseFileHandle = INVALID_HANDLE_VALUE;
 HANDLE NeuralAI::BaseMappingHandle = NULL;
@@ -723,8 +727,7 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 		if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver())
 			continue;
 
-		const int score = pHouse->Available_Money()
-			+ (pHouse->TotalKilledUnits * 200)
+		const int score = (pHouse->TotalKilledUnits * 200)
 			+ (pHouse->TotalKilledBuildings * 450)
 			+ (pHouse->OwnedBuildings * 300)
 			+ (pHouse->OwnedUnits * 200);
@@ -781,7 +784,7 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 	}
 
 	if (NeuralAI::HeadlessMode)
-		NeuralAI::UpdateTelemetrySnapshot(true, bestHouseIdx, false);
+		NeuralAI::UpdateTelemetrySnapshot(true, NeuralAI::MatchEndWinnerHouse >= 0 ? NeuralAI::MatchEndWinnerHouse : bestHouseIdx, NeuralAI::MatchEndStalemate);
 }
 
 void NeuralAI::OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled)
@@ -842,7 +845,7 @@ void NeuralAI::OnHeadlessFrameTick()
 	}
 
 	// Stalemate detector: 2,700 frames (3 game minutes) without any kills or captures, or 54,000 frames max match duration
-	const bool stalemate = (frame > 1800 && (frame - NeuralAI::LastCombatFrame) >= 2700) || (frame >= 54000);
+	const bool stalemate = (frame > 9000 && (frame - NeuralAI::LastCombatFrame) >= 5400) || (frame >= 54000);
 	const bool onlyOneLeft = (frame > 300 && aliveCombatHouses <= 1);
 
 	if (stalemate || onlyOneLeft)
@@ -855,8 +858,7 @@ void NeuralAI::OnHeadlessFrameTick()
 			if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver() || pHouse->Defeated)
 				continue;
 
-			const int score = pHouse->Available_Money()
-				+ (pHouse->TotalKilledUnits * 200)
+			const int score = (pHouse->TotalKilledUnits * 200)
 				+ (pHouse->TotalKilledBuildings * 450)
 				+ (pHouse->OwnedBuildings * 300)
 				+ (pHouse->OwnedUnits * 200);
@@ -868,6 +870,8 @@ void NeuralAI::OnHeadlessFrameTick()
 			}
 		}
 
+		NeuralAI::MatchEndWinnerHouse = bestHouseIdx;
+		NeuralAI::MatchEndStalemate = stalemate;
 		NeuralAI::UpdateTelemetrySnapshot(true, bestHouseIdx, stalemate);
 		NeuralAI::OnScenarioEnd(true);
 		Game::IsActive = false;
@@ -914,7 +918,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		hs.OwnedBuildings = pHouse->OwnedBuildings;
 		hs.OwnedInfantry = pHouse->OwnedInfantry;
 		hs.OwnedAircraft = pHouse->OwnedAircraft;
-		hs.NetWorthScore = hs.Credits + (hs.KilledUnits * 200) + (hs.KilledBuildings * 450) + (hs.OwnedBuildings * 300) + (hs.OwnedUnits * 200);
+		hs.NetWorthScore = (hs.KilledUnits * 200) + (hs.KilledBuildings * 450) + (hs.OwnedBuildings * 300) + (hs.OwnedUnits * 200);
 		hs.IsWinner = (pHouse->ArrayIndex == winnerHouseIdx || pHouse->IsWinner) ? 1 : 0;
 		hs.IsDefeated = pHouse->Defeated ? 1 : 0;
 		hs.PolicySlot = static_cast<uint8_t>(pExt->AIBrain_PolicySlot);
@@ -967,6 +971,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"  \"stalemate\": %s,\n"
 				"  \"elo\": %d,\n"
 				"  \"gamesPlayed\": %u,\n"
+				"  \"rulesSignature\": \"%016llX\",\n"
+				"  \"baseSignature\": \"%016llX\",\n"
 				"  \"houses\": [\n",
 				dst->SlotIndex,
 				dst->ProcessId,
@@ -976,7 +982,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				dst->WinnerHouseIndex,
 				stalemate ? "true" : "false",
 				NeuralAI::Backpack.EstimatedELO,
-				NeuralAI::Backpack.GamesPlayed);
+				NeuralAI::Backpack.GamesPlayed,
+				static_cast<unsigned long long>(NeuralAI::CurrentRulesSignature),
+				static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature));
 
 			for (uint32_t i = 0; i < dst->NumHouses; ++i)
 			{
@@ -993,13 +1001,54 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					}
 				}
 
+				std::map<const TechnoTypeClass*, int> composition;
+
+				if (pOwner)
+				{
+					for (auto const pOwnedUnit : UnitClass::Array)
+					{
+						if (pOwnedUnit && pOwnedUnit->Owner == pOwner && pOwnedUnit->Type && !pOwnedUnit->InLimbo && pOwnedUnit->IsAlive)
+							composition[pOwnedUnit->Type]++;
+					}
+
+					for (auto const pOwnedInf : InfantryClass::Array)
+					{
+						if (pOwnedInf && pOwnedInf->Owner == pOwner && pOwnedInf->Type && !pOwnedInf->InLimbo && pOwnedInf->IsAlive)
+							composition[pOwnedInf->Type]++;
+					}
+
+					for (auto const pOwnedAir : AircraftClass::Array)
+					{
+						if (pOwnedAir && pOwnedAir->Owner == pOwner && pOwnedAir->Type && !pOwnedAir->InLimbo && pOwnedAir->IsAlive)
+							composition[pOwnedAir->Type]++;
+					}
+				}
+
+				std::vector<std::pair<int, const TechnoTypeClass*>> ranked;
+
+				for (auto const& entry : composition)
+					ranked.emplace_back(entry.second, entry.first);
+
+				std::sort(ranked.begin(), ranked.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
+
+				std::string compositionText;
+
+				for (size_t r = 0; r < ranked.size() && r < 10; ++r)
+				{
+					if (r > 0)
+						compositionText += ";";
+
+					compositionText += ranked[r].second->ID;
+					compositionText += ":" + std::to_string(ranked[r].first);
+				}
+
 				std::fprintf(fp,
-					"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"expert\": %d, \"credits\": %d, \"killedUnits\": %d, \"killedBlds\": %d, \"ownedUnits\": %d, \"ownedBlds\": %d, \"score\": %d, \"winner\": %u, \"defeated\": %u, \"policy\": %u, \"harvesters\": %d, \"refineries\": %d, \"warFactories\": %d, \"barracks\": %d, \"defenses\": %d}%s\n",
+					"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"expert\": %d, \"credits\": %d, \"killedUnits\": %d, \"killedBlds\": %d, \"ownedUnits\": %d, \"ownedBlds\": %d, \"score\": %d, \"winner\": %u, \"defeated\": %u, \"policy\": %u, \"harvesters\": %d, \"refineries\": %d, \"warFactories\": %d, \"barracks\": %d, \"defenses\": %d, \"units\": \"%s\"}%s\n",
 					h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, h.ActiveExpert,
 					h.Credits, h.KilledUnits, h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings,
 					h.NetWorthScore, h.IsWinner, h.IsDefeated, h.PolicySlot,
 					pOwner ? pOwner->CountResourceGatherers : 0, pOwner ? pOwner->CountResourceDestinations : 0,
-					pOwner ? pOwner->NumWarFactories : 0, pOwner ? pOwner->NumBarracks : 0, defenses,
+					pOwner ? pOwner->NumWarFactories : 0, pOwner ? pOwner->NumBarracks : 0, defenses, compositionText.c_str(),
 					(i + 1 < dst->NumHouses) ? "," : "");
 			}
 
@@ -3508,6 +3557,35 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
+	// Economy capacity: true refineries plus deployed miners define how many harvesting units are useful
+	int trueRefineries = 0;
+	int ownedEconomyUnits = 0;
+
+	for (auto const pOwnBldType : pHouse->Buildings)
+	{
+		if (!pOwnBldType || pOwnBldType->InLimbo || !pOwnBldType->IsAlive || !pOwnBldType->Type)
+			continue;
+
+		if (pOwnBldType->Type->ResourceGatherer)
+			ownedEconomyUnits++;
+		else if (pOwnBldType->Type->Refinery)
+			trueRefineries++;
+	}
+
+	for (auto const pEcoUnit : UnitClass::Array)
+	{
+		if (!pEcoUnit || pEcoUnit->Owner != pHouse || pEcoUnit->InLimbo || !pEcoUnit->IsAlive || !pEcoUnit->Type)
+			continue;
+
+		auto const pEcoType = pEcoUnit->Type;
+		if (pEcoType->Harvester || pEcoType->ResourceGatherer
+			|| (pEcoType->DeploysInto && (pEcoType->DeploysInto->Refinery || pEcoType->DeploysInto->ResourceGatherer)))
+		{
+			ownedEconomyUnits++;
+		}
+	}
+
+	const int economyUnitCap = (trueRefineries > 0) ? std::clamp(2 * trueRefineries + 1, 3, 7) : 4;
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
 		if (!pUnit || !CanBuildUnderHumanRules(pHouse, pUnit))
@@ -3531,7 +3609,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			continue; // Deploy the current Mobile Outpost / Key Structure Core before queuing another one
 
 		const bool isAmphibTransport = IsAmphibiousOrAirTransport(pUnit);
+
+		// Economy units (harvesters and deployable miners) stop being built once the real refinery capacity is covered
+		const bool isEconomyUnit = pUnit->Harvester || pUnit->ResourceGatherer
+			|| (pUnit->DeploysInto && (pUnit->DeploysInto->Refinery || pUnit->DeploysInto->ResourceGatherer));
+
+		if (isEconomyUnit && ownedEconomyUnits >= economyUnitCap)
+			continue;
 		int score = (pUnit->Cost / 4) + (pUnit->Strength / 3);
+
+		// Penalize stacking one unit type so armies stay diverse
+		score -= std::min(900, pHouse->CountOwnedNow(pUnit) * 45);
 		if (pUnit->Naval)
 		{
 			if (isAmphibTransport)
@@ -3605,7 +3693,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 			}
 			else if (pUnit->Harvester || pUnit->ResourceGatherer)
-				score += scores[31];
+				score += scores[31] + ((ownedEconomyUnits < 2) ? 1200 : 0);
 			else if (pUnit->Passengers > 0)
 				score += scores[28] + (isAmphibTransport ? 350 : (features[21] > 0 ? -500 : 0));
 			else if (isAA)
@@ -3629,6 +3717,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	pExt->AIBrain_NextNavalTarget = bestNavalIdx;
 
 	// Infantry Target Selection
+	int ownedEngineers = 0;
+	int ownedInfiltrators = 0;
+
+	for (auto const pOwnInf : InfantryClass::Array)
+	{
+		if (!pOwnInf || pOwnInf->Owner != pHouse || pOwnInf->InLimbo || !pOwnInf->IsAlive || !pOwnInf->Type)
+			continue;
+
+		if (pOwnInf->Type->Engineer)
+			ownedEngineers++;
+		else if (pOwnInf->Type->Infiltrate)
+			ownedInfiltrators++;
+	}
+
 	int bestInfIdx = -1;
 	int bestInfScore = -32000;
 
@@ -3641,14 +3743,27 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			continue;
 
 		int score = (pInf->Cost / 2) + pInf->Strength;
+
+		// Penalize stacking one infantry type so squads stay mixed
+		score -= std::min(600, pHouse->CountOwnedNow(pInf) * 20);
 		const auto pWpnStruct = pInf->GetWeapon(0);
 		const auto pWpn = pWpnStruct ? pWpnStruct->WeaponType : nullptr;
 		const bool isAA = pWpn && pWpn->Projectile && pWpn->Projectile->AA;
 
 		if (pInf->Engineer)
+		{
+			if (ownedEngineers >= 2)
+				continue;
+
 			score += (pHouse->OwnedInfantry < 6) ? -400 : scores[18];
+		}
 		else if (pInf->Infiltrate)
+		{
+			if (ownedInfiltrators >= 1)
+				continue;
+
 			score += (pHouse->OwnedInfantry < 6) ? -400 : scores[19];
+		}
 		else if (isAA || pInf->C4)
 			score += scores[20];
 		else if (pInf->Cost >= 250)
