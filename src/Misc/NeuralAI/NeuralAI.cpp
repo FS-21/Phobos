@@ -1661,6 +1661,28 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 	const int spanX = std::max(32, maxMapX - minMapX);
 	const int spanY = std::max(32, maxMapY - minMapY);
+	const int mapW = MapClass::Instance.MapRect.Width;
+	const int localX = MapClass::Instance.VisibleRect.X;
+	const int localY = MapClass::Instance.VisibleRect.Y;
+	const int localW = MapClass::Instance.VisibleRect.Width;
+	const int localH = MapClass::Instance.VisibleRect.Height;
+	const bool hasIsoBounds = (mapW > 0 && localW > 0 && localH > 0);
+
+	auto projectToRadar = [&](const CellStruct& c, int& outRx, int& outRy)
+	{
+		if (hasIsoBounds)
+		{
+			const int isoX = (static_cast<int>(c.X) - static_cast<int>(c.Y) + mapW - 1) - (2 * localX);
+			const int isoY = (static_cast<int>(c.X) + static_cast<int>(c.Y) - mapW - 1) - (2 * localY);
+			outRx = std::clamp(3 + (isoX * 121) / std::max(1, 2 * localW), 2, 125);
+			outRy = std::clamp(3 + (isoY * 121) / std::max(1, 2 * localH), 2, 125);
+		}
+		else
+		{
+			outRx = std::clamp(6 + ((c.X - minMapX) * 115) / spanX, 4, 123);
+			outRy = std::clamp(6 + ((c.Y - minMapY) * 115) / spanY, 4, 123);
+		}
+	};
 
 	if (matchEnded || (Unsorted::CurrentFrame % 240 == 0))
 	{
@@ -1777,8 +1799,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					break;
 
 				const CellStruct c = pBld->GetMapCoords();
-				const int rx = std::clamp(6 + ((c.X - minMapX) * 115) / spanX, 4, 123);
-				const int ry = std::clamp(6 + ((c.Y - minMapY) * 115) / spanY, 4, 123);
+				int rx = 0;
+				int ry = 0;
+				projectToRadar(c, rx, ry);
 				std::fprintf(fp, "%s[%d,%d,%d,1]", firstPt ? "" : ",", rx, ry, pBld->Owner->ArrayIndex);
 				firstPt = false;
 				ptCount++;
@@ -1793,8 +1816,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					break;
 
 				const CellStruct c = pUnit->GetMapCoords();
-				const int rx = std::clamp(6 + ((c.X - minMapX) * 115) / spanX, 4, 123);
-				const int ry = std::clamp(6 + ((c.Y - minMapY) * 115) / spanY, 4, 123);
+				int rx = 0;
+				int ry = 0;
+				projectToRadar(c, rx, ry);
 				std::fprintf(fp, "%s[%d,%d,%d,0]", firstPt ? "" : ",", rx, ry, pUnit->Owner->ArrayIndex);
 				firstPt = false;
 				ptCount++;
@@ -1813,8 +1837,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					break;
 
 				const CellStruct c = pInf->GetMapCoords();
-				const int rx = std::clamp(6 + ((c.X - minMapX) * 115) / spanX, 4, 123);
-				const int ry = std::clamp(6 + ((c.Y - minMapY) * 115) / spanY, 4, 123);
+				int rx = 0;
+				int ry = 0;
+				projectToRadar(c, rx, ry);
 				std::fprintf(fp, "%s[%d,%d,%d,0]", firstPt ? "" : ",", rx, ry, pInf->Owner->ArrayIndex);
 				firstPt = false;
 				ptCount++;
