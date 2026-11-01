@@ -17,6 +17,12 @@ std::vector<int> HouseExt::AIProduction_BestChoicesNaval;
 void HouseExt::UpdateVehicleProduction()
 {
 	const auto pThis = this->OwnerObject();
+	if (NeuralAI::IsEnabledForHouse(pThis))
+	{
+		NeuralAI::UpdateUnitProduction(pThis);
+		return;
+	}
+
 	const bool skipGround = pThis->ProducingUnitTypeIndex != -1;
 	const bool skipNaval = this->ProducingNavalUnitTypeIndex != -1;
 
@@ -27,11 +33,6 @@ void HouseExt::UpdateVehicleProduction()
 		return;
 
 	const int AIDifficulty = pThis->GetAIDifficultyIndex();
-	if (NeuralAI::IsEnabledForHouse(pThis))
-	{
-		NeuralAI::UpdateUnitProduction(pThis);
-		return;
-	}
 
 	auto& creationFrames = HouseExt::AIProduction_CreationFrames;
 	auto& values = HouseExt::AIProduction_Values;

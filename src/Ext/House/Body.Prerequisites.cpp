@@ -137,6 +137,24 @@ bool HouseExt::IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* con
 		}
 	}
 
+	if (!inOwners)
+	{
+		AbstractType const rtti = pItem->WhatAmI();
+		DWORD const itemOwners = pItem->GetOwners();
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type)
+				continue;
+
+			if (pBld->Type->Factory == rtti && pBld->Type->InOwners(itemOwners))
+			{
+				inOwners = true;
+				break;
+			}
+		}
+	}
+
 	return inOwners && inRequired && !inForbidden;
 }
 

@@ -15,6 +15,7 @@
 #include <Ext/Rules/Body.h>
 #include <TiberiumClass.h>
 #include <algorithm>
+#include <cstring>
 
 #ifdef TESTING_BUILD
 bool HideWarning = false;
@@ -99,8 +100,6 @@ void Phobos::CmdLineParse(char** ppArgs, int nNumArgs)
 		}
 
 		NeuralAI::ParseCommandLineArg(pArg);
-		{
-		}
 	}
 
 	if (foundInclude)
@@ -217,34 +216,58 @@ void Phobos::ExeRun()
 
 	Patch::ApplyStatic();
 
+	char envHeadless[16] = {};
+	const bool unattendedTraining = (std::strstr(GetCommandLineA(), "-TRAIN_HEADLESS") != nullptr)
+		|| (std::strstr(GetCommandLineA(), "-TrainHeadless") != nullptr)
+		|| (GetEnvironmentVariableA("PHOBOS_HEADLESS", envHeadless, sizeof(envHeadless)) > 0 && envHeadless[0] != '0');
+
+	if (unattendedTraining)
+	{
+		NeuralAI::ParseCommandLineArg("-TRAIN_HEADLESS");
+
+		char envSlot[16] = {};
+		if (GetEnvironmentVariableA("PHOBOS_TRAIN_SLOT", envSlot, sizeof(envSlot)) > 0)
+		{
+			char slotArg[32] = {};
+			std::snprintf(slotArg, sizeof(slotArg), "-TrainSlot=%s", envSlot);
+			NeuralAI::ParseCommandLineArg(slotArg);
+		}
+	}
+
 #ifdef DEBUG
 
-	if (Phobos::DetachFromDebugger())
+	// Unattended Neural AI training sessions must never wait for a notice window or open a console
+	const bool detached = Phobos::DetachFromDebugger();
+
+	if (!unattendedTraining)
 	{
-		MessageBoxW(NULL,
-		L"You can now attach a debugger.\n\n"
+		if (detached)
+		{
+			MessageBoxW(NULL,
+			L"You can now attach a debugger.\n\n"
 
-		L"Press OK to continue YR execution.",
-		L"Debugger Notice", MB_OK);
-	}
-	else
-	{
-		MessageBoxW(NULL,
-		L"You can now attach a debugger.\n\n"
+			L"Press OK to continue YR execution.",
+			L"Debugger Notice", MB_OK);
+		}
+		else
+		{
+			MessageBoxW(NULL,
+			L"You can now attach a debugger.\n\n"
 
-		L"To attach a debugger find the YR process in Process Hacker "
-		L"/ Visual Studio processes window and detach debuggers from it, "
-		L"then you can attach your own debugger.\n\n"
+			L"To attach a debugger find the YR process in Process Hacker "
+			L"/ Visual Studio processes window and detach debuggers from it, "
+			L"then you can attach your own debugger.\n\n"
 
-		L"Press OK to continue YR execution.",
-		L"Debugger Notice", MB_OK);
-	}
+			L"Press OK to continue YR execution.",
+			L"Debugger Notice", MB_OK);
+		}
 
-	if (!Console::Create())
-	{
-		MessageBoxW(NULL,
-		L"Failed to allocate the debug console!",
-		L"Debug Console Notice", MB_OK);
+		if (!Console::Create())
+		{
+			MessageBoxW(NULL,
+			L"Failed to allocate the debug console!",
+			L"Debug Console Notice", MB_OK);
+		}
 	}
 
 #endif

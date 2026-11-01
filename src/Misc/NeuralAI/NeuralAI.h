@@ -1,7 +1,7 @@
 #pragma once
 
-#include <YRPP.h>
 #include <Windows.h>
+#include <YRPP.h>
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -51,8 +51,8 @@ struct AIBackpackFile
 	uint32_t WinsCount;
 	int32_t EstimatedELO;
 	int8_t LoRA_A[256 * 16];
-	int8_t LoRA_B[16 * 64];
-	int16_t OutputBias[64];
+	int8_t LoRA_B[16 * 128];
+	int16_t OutputBias[128];
 	uint32_t NumEntries;
 	AIBackpackEntry Entries[512];
 };
@@ -102,7 +102,7 @@ class NeuralAI
 {
 public:
 	static constexpr int InputVectorSize = 256;
-	static constexpr int OutputVectorSize = 64;
+	static constexpr int OutputVectorSize = 128;
 	static constexpr int NumSpecialists = 8;
 	static constexpr int NumArchetypes = 5;
 
@@ -164,14 +164,10 @@ private:
 	static void UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool stalemate);
 
 	static void ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t, InputVectorSize>& features);
-	static void RunDeterministicMoE(
-		HouseClass* pHouse,
-		const std::array<int8_t, InputVectorSize>& features,
+	static void RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features,
 		std::array<int16_t, OutputVectorSize>& outScores);
 
-	static void ExecuteTacticalAndSpecOpsMicro(
-		HouseClass* pHouse,
-		const std::array<int16_t, OutputVectorSize>& scores);
+	static void ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::array<int16_t, OutputVectorSize>& scores);
 
 	static bool IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClass* pType, CellStruct candidateCell);
 };
