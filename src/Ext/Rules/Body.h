@@ -15,14 +15,14 @@ class SelectBoxTypeClass;
 
 class RulesExt
 {
-public:
+  public:
 	using base_type = RulesClass;
 
 	static constexpr DWORD Canary = 0x12341234;
 
 	class ExtData final : public Extension<RulesClass>
 	{
-	public:
+	  public:
 		std::vector<std::vector<TechnoTypeClass*>> AITargetTypesLists;
 		std::vector<std::vector<ScriptTypeClass*>> AIScriptsLists;
 		std::vector<std::vector<HouseTypeClass*>> AIHousesLists;
@@ -631,565 +631,373 @@ public:
 		Nullable<int> ProductionBar_Secondary_Pip_Empty;
 		Nullable<Point2D> ProductionBar_Secondary_Offset;
 
-		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
-			, Storage_TiberiumIndex { -1 }
-			, Storage_AI { false }
-			, Storage_AI_Threshold { 0.85 }
-			, Storage_AI_PenaltyMultiplier { 0.10 }
-			, Storage_AI_MaxPenalty { 0.90 }
-			, HarvesterDumpAmount { 0.0f }
-			, InfantryGainSelfHealCap {}
-			, UnitsGainSelfHealCap {}
-			, GainSelfHealAllowMultiplayPassive { true }
-			, GainSelfHealFromPlayerControl { false }
-			, GainSelfHealFromAllies { false }
-			, EnemyInsignia { true }
-			, DisguiseBlinkingVisibility { AffectedHouse::Owner }
-			, ChronoSparkleDisplayDelay { 24 }
-			, ChronoSparkleBuildingDisplayPositions { ChronoSparkleDisplayPosition::OccupantSlots }
-			, ChronoSpherePreDelay { 60 }
-			, ChronoSphereDelay { 0 }
-			, AIChronoSphereSW {}
-			, AIChronoWarpSW {}
-			, SubterraneanSpeed { 19 }
-			, SubterraneanHeight { -256 }
-			, AISuperWeaponDelay {}
-			, UseGlobalRadApplicationDelay { true }
-			, RadApplicationDelay_Building { 0 }
-			, RadBuildingDamageMaxCount { -1 }
-			, RadSiteWarhead_Detonate { false }
-			, RadSiteWarhead_Detonate_Full { true }
-			, RadHasOwner { false }
-			, RadHasInvoker { false }
-			, ShieldApplyArmorMult { false }
-			, JumpjetCrash { 5.0 }
-			, JumpjetNoWobbles { false }
-			, JumpjetRotateOnCrash { true }
-			, VeinholeWarhead {}
-			, VeinAttackHeight { 5 }
-			, MissingCameo { GameStrings::XXICON_SHP }
-
-			, PlacementGrid_Translucency { 0 }
-			, PlacementGrid_TranslucencyWithPreview { }
-			, PlacementPreview { false }
-			, PlacementPreview_Translucency { 75 }
-
-			, SuperWeaponTimer_Percentage { false }
-			, SuperWeaponSidebar_AllowByDefault { false }
-
-			, Shield_ConditionYellow { }
-			, Shield_ConditionRed { }
-			, Pips_Shield { { -1,-1,-1 } }
-			, Pips_Shield_Background { }
-			, Pips_Shield_Building { { -1,-1,-1 } }
-			, Pips_Shield_Building_Empty { }
-			, Pips_SelfHeal_Infantry { { 13, 20 } }
-			, Pips_SelfHeal_Units { { 13, 20 } }
-			, Pips_SelfHeal_Buildings { { 13, 20 } }
-			, Pips_SelfHeal_Infantry_Offset { { 25, -35 } }
-			, Pips_SelfHeal_Units_Offset { { 33, -32 } }
-			, Pips_SelfHeal_Buildings_Offset { { 15, 10 } }
-			, Pips_Generic_Size { { 4, 0 } }
-			, Pips_Generic_Buildings_Size { { 4, 2 } }
-			, Pips_Ammo_Size { { 4, 0 } }
-			, Pips_Ammo_Buildings_Size { { 4, 2 } }
-			, Pips_Tiberiums_Frames {}
-			, Pips_Tiberiums_EmptyFrame { 0 }
-			, Pips_Tiberiums_DisplayOrder {}
-			, Pips_Tiberiums_WeedFrame { 1 }
-			, Pips_Tiberiums_WeedEmptyFrame { 0 }
-
-			, HeightShadowScaling { false }
-			, HeightShadowScaling_MinScale { 0.0 }
-			, AirShadowBaseScale_log { 0.693376137 }
-
-			, ExtendedAircraftMissions { false }
-			, ExtendedAircraftMissions_UnlandDamage { -1 }
-			, AircraftSpawnFromEdge { EdgeType::Owner }
-			, AircraftRetreatToEdge { EdgeType::Owner }
-			, AmphibiousEnter { false }
-			, AmphibiousUnload { false }
-			, NoQueueUpToEnter { false }
-			, NoQueueUpToEnter_BoardDistance { 384 }
-			, NoQueueUpToUnload { false }
-			, NoQueueUpToEnter_Buildings {}
-			, NoQueueUpToUnload_Buildings {}
-
-			, JumpjetTilt { false }
-			, JumpjetTilt_ForwardAccelFactor { 1.0 }
-			, JumpjetTilt_ForwardSpeedFactor { 1.0 }
-			, JumpjetTilt_SidewaysRotationFactor { 1.0 }
-			, JumpjetTilt_SidewaysSpeedFactor { 1.0 }
-
-			, Spawner_AttackImmediately { false }
-			, Spawner_UseTurretFacing { false }
-			, Spawner_RecycleRange { Leptons(-1) }
-			, Spawner_RecycleOnTurret { false }
-			, Promote_IncludeSpawns { false }
-			, RadarJamHouses { AffectedHouse::Enemies }
-			, RadarJamDelay { 30 }
-			, MindControl_IgnoreSize { true }
-			, MultiMindControl_ReleaseVictim { false }
-			, MindControlLink_VisibleToHouse { AffectedHouse::All }
-			, AlternateFLH_OnTurret { true }
-			, AlternateFLH_ApplyVehicle { false }
-			, DestroyAnim_Random { true }
-			, UseDisguiseMovementSpeed { false }
-			, Convert_ResetMindControl { false }
-			, BuildLimitGroup_ContentIfAnyMatch { false }
-			, BuildLimitGroup_NotBuildableIfQueueMatch { false }
-			, DigitalDisplay_Health_FakeAtDisguise { true }
-			, Overload_ParticleSysCount { 5 }
-			, FallingDownDamage { 1.0 }
-			, FallingDownDamage_AllowEMP { true }
-
-			, ForceWeapon_InRange_TechnoOnly { true }
-			, ForceWeapon_InRange_ApplyRangeModifiers { false }
-			, ForceAAWeapon_InRange_ApplyRangeModifiers { false }
-
-			, BuildingProductionQueue { false }
-
-			, AllowParallelAIQueues { true }
-			, ForbidParallelAIQueues_Aircraft { false }
-			, ForbidParallelAIQueues_Building { false }
-			, ForbidParallelAIQueues_Infantry { false }
-			, ForbidParallelAIQueues_Navy { false }
-			, ForbidParallelAIQueues_Vehicle { false }
-
-			, EnablePowerSurplus { false }
-			, PowerSurplus_ScaleToDrainAmount { 0 }
-
-			, AllowDeployControlledMCV { false }
-
-			, TypeSelectUseIFVMode { false }
-
-			, IronCurtain_KeptOnDeploy { true }
-			, IronCurtain_EffectOnOrganics { IronCurtainEffect::Kill }
-			, IronCurtain_KillOrganicsWarhead { }
-			, ForceShield_KeptOnDeploy { false }
-			, ForceShield_EffectOnOrganics { IronCurtainEffect::Kill }
-			, ForceShield_KillOrganicsWarhead { }
-			, IronCurtain_ExtraTintIntensity { 0.0 }
-			, ForceShield_ExtraTintIntensity { 0.0 }
-			, AllowWeaponSelectAgainstWalls { false }
-			, ColorAddUse8BitRGB { false }
-			, AirstrikeLineColor { { 255, 0, 0 } }
-			, AirstrikeLineZAdjust { 0 }
-			, Strafing_SimulateBurst { false }
-			, Strafing_UseAmmoPerShot { false }
-			, Strafing_TargetCell { false }
-			, OmniFire_TurnToTarget { false }
-			, AmbientDamage_IgnoreTarget { false }
-			, KeepRange_AllowAI { false }
-			, KeepRange_AllowPlayer { false }
-			, KeepRange_EarlyStopFrame { 0 }
-			, AircraftWeapon_KickOutPassengers { true }
-			, CrushSlowdownMultiplier { 0.2 }
-			, SkipCrushSlowdown { false }
-			, LaserPositionUpdate_StopOnFirerConvert { false }
-			, LaserZAdjust { 0 }
-			, EBoltZAdjust { 0 }
-			, EBoltZAdjust_ClampInitialDepthForBuilding { true }
-			, ROF_RandomDelay { { 0 ,2 } }
-			, ToolTip_Background_Color { { 0, 0, 0 } }
-			, ToolTip_Background_Opacity { 100 }
-			, ToolTip_Background_BlurSize { 0.0f }
-			, DisplayIncome { false }
-			, DisplayIncome_Delay { 15 }
-			, DisplayIncome_AllowAI { true }
-			, DisplayIncome_Houses { AffectedHouse::All }
-			, DrainMoneyDisplay { false }
-			, DrainMoneyDisplay_Houses { AffectedHouse::All }
-			, DrainMoneyDisplay_OnTarget { false }
-			, DrainMoneyDisplay_OnTarget_UseDisplayIncome { true }
-			, CrateOnlyOnLand { false }
-			, UnitCrateVehicleCap { 50 }
-			, HealBaseNoScatter { true }
-			, FreeMCV_CreditsThreshold { 1500 }
-			, RadialIndicatorVisibility { AffectedHouse::Allies }
-			, DrawTurretShadow { false }
-			, IsVoiceCreatedGlobal { false }
-			, SetTabBySelectingFactory { false }
-			, SelectionFlashDuration { 0 }
-			, SetRecruitableOnLiberate { -1 }
-			, DrawInsignia_OnlyOnSelected { false }
-			, DrawInsignia_AdjustPos_Infantry { { 5, 2 } }
-			, DrawInsignia_AdjustPos_Buildings { { 10, 6 } }
-			, DrawInsignia_AdjustPos_BuildingsAnchor {}
-			, DrawInsignia_AdjustPos_Units { { 10, 6 } }
-			, DrawInsignia_UsePixelSelectionBracketDelta { { false } }
-			, Promote_VeteranAnimation {}
-			, Promote_EliteAnimation {}
-			, AnimRemapDefaultColorScheme { 0 }
-			, AnimRemapUseInvokerFallback { false }
-			, TimerBlinkColorScheme { 5 }
-			, Buildings_DefaultDigitalDisplayTypes {}
-			, Infantry_DefaultDigitalDisplayTypes {}
-			, Vehicles_DefaultDigitalDisplayTypes {}
-			, Aircraft_DefaultDigitalDisplayTypes {}
-			, DefaultInfantrySelectBox {}
-			, DefaultUnitSelectBox {}
-			, VisualScatter_Min { Leptons(8) }
-			, VisualScatter_Max { Leptons(32) }
-			, ShowDesignatorRange { true }
-			, ShowPowerPlantEnhancerRange { true }
-			, ShowGameTime { true }
-			, GenericPrerequisites { }
-			, GenericPrerequisitesNames { }
-			, GenericPrerequisitesAlternates { }
-			, NewTeamsSelector { false }
-			, NewTeamsSelector_SplitTriggersByCategory { true }
-			, NewTeamsSelector_EnableFallback { false }
-			, NewTeamsSelector_MergeUnclassifiedCategoryWith { -1 }
-			, NewTeamsSelector_UnclassifiedCategoryPercentage { 0.20 }
-			, NewTeamsSelector_GroundCategoryPercentage { 0.20 }
-			, NewTeamsSelector_NavalCategoryPercentage { 0.20 }
-			, NewTeamsSelector_AirCategoryPercentage { 0.20 }
-			, NewTeamsSelector_InfantryCategoryPercentage { 0.20 }
-			, NewTeamsSelector_VIPWeight { 5000.0 }
-			, AILearning { false }
-			, AILearning_Multiplayer { false }
-			, AILearning_LearningRate { 0.2 }
-			, AILearning_DecayRate { 0.05 }
-			, AILearning_ScenarioName { }
-			, AILearning_OnlySupportedMaps { true }
-			, DropPodTrailer { }
-			, DropPodDefaultTrailer { }
-			, PodImage { }
-			, JumpjetClimbPredictHeight { false }
-			, JumpjetClimbWithoutCutOut { false }
-			, JumpjetClimbIgnoreBuilding { false }
-			, FlyingProduction_Jumpjet { false }
-			, FlyingProduction_Aircraft { false }
-
-			, DamageOwnerMultiplier { 1.0 }
-			, DamageAlliesMultiplier { 1.0 }
-			, DamageEnemiesMultiplier { 1.0 }
-			, DamageOwnerMultiplier_NotAffectsEnemies {}
-			, DamageAlliesMultiplier_NotAffectsEnemies {}
-			, DamageOwnerMultiplier_Berzerk {}
-			, DamageAlliesMultiplier_Berzerk {}
-			, DamageEnemiesMultiplier_Berzerk {}
-			, AircraftLevelLightMultiplier { 1.0 }
-			, JumpjetLevelLightMultiplier { 0.0 }
-			, VoxelLightSource { }
-			// , VoxelShadowLightSource { }
-
-			, CombatAlert { false }
-			, CombatAlert_Default {}
-			, CombatAlert_IgnoreBuilding { true }
-			, CombatAlert_SuppressIfInScreen { true }
-			, CombatAlert_Interval { 150 }
-			, CombatAlert_SuppressIfAllyDamage { true }
-			, CombatAlert_MakeAVoice { true }
-			, CombatAlert_UseFeedbackVoice { true }
-			, CombatAlert_UseAttackVoice { true }
-			, CombatAlert_UseEVA { true }
-			, UseFixedVoxelLighting { false }
-			, AIAutoDeployMCV { true }
-			, AISetBaseCenter { true }
-			, AIBiasSpawnCell { false }
-			, AIForbidConYard { false }
-			, AINodeWallsOnly { false }
-			, AICleanWallNode { false }
-			, RandomizeSuperWeaponPriority { false }
-			, AttackMove_Aggressive { false }
-			, AttackMove_UpdateTarget { false }
-			, MindControl_ThreatDelay { 0 }
-			, RecountBurst { false }
-			, NoRearm_UnderEMP { false }
-			, NoRearm_Temporal { false }
-			, NoReload_UnderEMP { false }
-			, NoReload_Temporal { false }
-			, VeteranReload { 1.0 }
-			, VeteranEmptyReload {}
-			, VeteranRange { 1.0 }
-			, VeteranCritChance { 1.0 }
-			, NoTurret_TrackTarget { false }
-			, GatherWhenMCVDeploy { true }
-			, AIFireSale { true }
-			, AIFireSaleDelay { 0 }
-			, AIAllToHunt { true }
-			, RepairBaseNodes { false }
-			, FixRepairStepCost { false }
-			, WarheadParticleAlphaImageIsLightFlash { false }
-			, CombatLightDetailLevel { 0 }
-			, CombatLightDetailLevel_CheckColored { false }
-			, LightFlashAlphaImageDetailLevel { 0 }
-			, UseRetintFix { true }
-			, UseSidebarRadarOffsetFix { true }
-			, AINormalTargetingDelay {}
-			, PlayerNormalTargetingDelay {}
-			, AIGuardAreaTargetingDelay {}
-			, PlayerGuardAreaTargetingDelay {}
-			, AIAttackMoveTargetingDelay {}
-			, PlayerAttackMoveTargetingDelay {}
-			, DistributeTargetingFrame { false }
-			, DistributeTargetingFrame_AIOnly { true }
-			, CanTargetAI_IronCurtained { false }
-			, CanTarget_IronCurtained { true }
-			, AutoTarget_IronCurtained { true }
-			, BuildingWaypoints { false }
-			, BuildingTypeSelectable { false }
-			, ProneSpeed_Crawls { 0.67 }
-			, ProneSpeed_NoCrawls { 1.5 }
-
-			, DamagedSpeed { 0.75 }
-
-			, HarvesterScanAfterUnload { false }
-
-			, AnimCraterDestroyTiberium { true }
-
-			, BerzerkTargeting { AffectedHouse::All }
-			, AllowBerzerkOnAllies { false }
-
-			, TintColorIronCurtain { 0 }
-			, TintColorForceShield { 0 }
-			, TintColorBerserk { 0 }
-
-			, AttackMove_IgnoreWeaponCheck { false }
-
-			, Parasite_GrappleAnim {}
-			, Parasite_AllowWaterExit {}
-			, InfantryAutoDeploy { false }
-			, AdjacentWallDamage { 200 }
-			, WarheadAnimZAdjust { -15 }
-
-			, IvanBombAttachToCenter { false }
-			, IvanBomb_Visibility { AffectedHouse::Owner }
-			, MissileSpawnAttackCell { true }
-
-			, FallingDownTargetingFix { false }
-			, AIAirTargetingFix { false }
-
-			, ReloadInTransport { false }
-			, OpenTopped_IgnoreRangefinding { false }
-			, OpenTopped_AllowFiringIfDeactivated { true }
-			, OpenTopped_AllowFiringIfAttackedByLocomotor { true }
-			, OpenTopped_ShareTransportTarget { true }
-			, OpenTopped_UseTransportRangeModifiers { false }
-			, OpenTopped_CheckTransportDisableWeapons { false }
-			, OpenTopped_DecloakToFire { false }
-			, OpenTopped_FireWhileMoving { true }
-			, OpenTopped_FireWhileMoving_BasedOnDestination{ false }
-			, OpenTransport_RangeBonus { 0 }
-			, OpenTransport_DamageMultiplier { 1.0f }
-			, OpenTransport_FireWhileMoving { true }
-
-			, Passengers_SyncOwner { false }
-			, Passengers_SyncOwner_RevertOnExit { true }
-
-			, Explodes_KillPassengers { true }
-			, Explodes_DuringBuildup { true }
-
-			, AircraftFiringForceScatter { true }
-
-			, HoverDrownable { true }
-
-			, Arcing_AllowElevationInaccuracy { true }
-
-			, Terrain_IsPassable { false }
-			, Tibtree_IsPassable { false }
-			, Terrain_CanBeBuiltOn { false }
-			, Tibtree_CanBeBuiltOn { false }
-
-			, Sinkable {}
-			, Sinkable_SquidGrab { true }
-			, SinkSpeed { 5 }
-
-			, CreateAnimsOnZeroDamage { false }
-			, Conventional_IgnoreUnits { false }
-			, DecloakDamagedTargets { true }
-			, ShakeIsLocal { false }
-			, ApplyModifiersOnNegativeDamage { false }
-			, AllowDamageOnSelf { false }
-			, Debris_Conventional { false }
-			, Parasite_DisableParticleSystem { false }
-
-			, ProjectileInterceptable { false }
-			, Interceptor_GuardRange_IsCylindrical { false }
-			, Interceptor_ApplyFirepowerMult { true }
-
-			, SortCameoByName { false }
-
-			, MergeBuildingDamage { false }
-
-			, BuildingRadioLink_SyncOwner { true }
-
-			, ApplyPerTargetEffectsOnDetonate { true }
-			, AffectsInvokerOnly_IgnoreInvokerState { true }
-
-			, ExtraRange_TargetMoving { Leptons(0) }
-			, ExtraRange_TargetMoving_CloseRangeOnly { false }
-			, ExtraRange_FirerMoving { Leptons(0) }
-			, ExtraRange_Prefiring { Leptons(0) }
-			, ExtraRange_Prefiring_IncludeBurst { true }
-
-			, AutoTarget_NoThreatBuildings { false }
-			, AutoTargetAI_NoThreatBuildings { true }
-
-			, ParadropMission { Mission::Guard }
-			, AIParadropMission { Mission::Hunt }
-			, ParadropDelay { 5 }
-			, ParadropEndDelay { 5 }
-
-			, DefaultToGuardArea { false }
-			, LeptonMindControlOffset { 70 }
-			, MindControlRingOffset { 140 }
-			, Anim_ShouldUseCellDrawer { true }
-
-			, CylinderRangefinding { false }
-
-			, PenetratesTransport_Level { 10 }
-
-			, UnitsUnsellable { false }
-
-			, DriverKilled_KeptPassengers { false }
-			, DriverKilled_KillPassengers { false }
-			, Survivors_ReplaceTagTo { AffectedSurvivor::VehicleThief | AffectedSurvivor::Crew }
-			, DisableOveroptimizationInTargeting { false }
-			, ExtraThreat_IsThreat { 0.0 }
-			, ExtraThreat_InRange { 0.0 }
-			, ExtraThreatCoefficient_InRangeDistance { 0.0 }
-			, ExtraThreatCoefficient_Facing { 0.0 }
-			, ExtraThreatCoefficient_DistanceToLastTarget { 0.0 }
-
-			, BalloonHoverPathingFix { false }
-
-			, WalkLocomotorMakesWake { false }
-			, DriveLocomotorMakesWake { true }
-			, HoverLocomotorMakesWake { true }
-			, ShipLocomotorMakesWake { true }
-			, FiringAnim_Update { false }
-			, ExtendedPlayerRepair { false }
-
-			, Psychedelic_StackingMode { StackingMode::Override }
-			, Shrapnel_AffectsGround { false }
-			, Shrapnel_AffectsBuildings { false }
-			, Shrapnel_UseWeaponTargeting { false }
-			, Shrapnel_IgnoreHitBuildings { false }
-			, Shrapnel_ObeyWarheadTriggerConditions { true }
-			, ReturnWeapon_ApplyFirepowerMult { false }
-			, Splits_TargetingDistance_Cylindrical { false }
-			, Splits_AllowRepeatTargets { false }
-			, Splits_UseWeaponTargeting { false }
-			, Airburst_UseCluster { false }
-			, Airburst_TargetAsSource_SkipHeight { false }
-			, AirburstWeapon_ApplyFirepowerMult { false }
-			, AirburstWeapon_UseFiringEffects { false }
-			, AirburstWeapon_HeadToTarget { false }
-			, AnimDamage_DealtByInvoker { false }
-			, AnimDamage_ApplyFirepowerMult { false }
-			, Crit_ApplyChancePerTarget { false }
-			, Crit_ExtraDamage_ApplyFirepowerMult { false }
-			, Crit_AnimOnAffectedTargets { false }
-			, Crit_SuppressWhenIntercepted { false }
-			, ReturnWarhead_ApplyChancePerTarget { false }
-			, BuildingGuardRetryDelay {}
-			, Vertical_AircraftFix { true }
-			, Temporal_ApplyVersus { false }
-			, Temporal_ApplyMultiplier { false }
-			, Temporal_KillPoweredAnim { true }
-			, DiscardOn_Sequences_Immediate { true }
-			, DiscardOn_MoveBasedOnDestination { false }
-			, DiscardOn_ConsiderHarvestingAsStationary { true }
-			, AttachEffect_ReplaceLongerDuration { false }
-			, RemoveMindControl_Silent { false }
-			, MindControl_Permanent_ReplaceSilent { false }
-
-			, FlyNoWobbles {}
-
-			, DefaultLandingAnim { nullptr }
-			, DefaultLandingAnim_Dropship {}
-			, DefaultLandingAnim_Carryall {}
-
-			, TeamDelays_DynamicType { DynamicTeamDelayType::StartingPoint }
-			, TeamDelays_Count {}
-
-			, BerzerkMission { Mission::Hunt }
-
-			, BunkerStateUpdateDelay { 15 }
-			, AdvancedAI { false }
-			, AdvancedAI_NavalMode { false }
-			, AdvancedAI_MultiConYard { false }
-			, AdvancedAI_MinimumRefineryCount { 2 }
-
-			, AllowChatBoxInSinglePlayer { false }
-
-			, NotHuman_RandomDeathSequence { false }
-			, OnlyUseLandSequences { false }
-			, SecondaryFireSequenceLandOnly { true }
-
-			, AutoRemoveEarliestBeacon { false }
-
-			, AllowBeaconHotKeyInSinglePlayer { false }
-
-			, StartFacing { 0 }
-			, StartFacing_Random { false }
-
-			, AutoDeath_AllowLimboed { true }
-			, AutoDeath_OnOwnerChange_IgnoreRevertOnExit { false }
-			, AutoDeath_TechnosDontExist_AllowLimboed { false }
-			, AutoDeath_TechnosExist_AllowLimboed { false }
-
-			, AircraftDockingDir_DefaultToPoseDir{ true }
-			, PoseDir_Production {}
-			, PoseDir_Field{}
-
-			, ApproachTarget_StopWhenInRange { false }
-
-			, NoAlphaImageOnBuildup { false }
-
-			, ReadyToNextMission_MovingCheck { false }
-
-			, Warhead_PreventScatter { false }
-
-			, ProjectileRange_ApplyModifiers { true }
-
-			, KeepAlive_Infantry { false }
-			, KeepAlive_Units { false }
-			, KeepAlive_Aircraft { false }
-			, KeepAlive_Buildings { true }
-			, KeepAlive_Defenses { true }
-
-			, AutoTarget_InsignificantWhenMindControlled { true }
-
-			, CloakAnims {}
-			, DecloakAnims {}
-			, Cloak_KickOutParasite { false }
-
-			, CustomSequenceRates(42, -1)
-			, CustomSequenceNormalized(42, -1)
-
-			, AttachEffects_AttachOnOwnerChange { false }
-
-			, RevealHouses { AffectedHouse::Team }
-
-			, MissileKeepTargetCoord { false }
-
-			, AttachmentTopLayerMinHeight { 500 }
-			, AttachmentUndergroundLayerMaxHeight { -256 }
-			, ExtendedBuildingPlacing { false }
-
-			, ProductionBar { false }
-			, ProductionBar_HideIfNoProduction { true }
-			, ProductionBar_ShowType { DisplayShowType::Select }
-			, ProductionBar_VisibleToHouses { AffectedHouse::Team }
-			, ProductionBar_VisibleToHouses_Observer { true }
-			, ProductionBar_Shape {}
-			, ProductionBar_Palette {}
-			, ProductionBar_Pip { 3 }
-			, ProductionBar_Pip_Empty { 0 }
-			, ProductionBar_Offset { { 0, 0 } }
-			, ProductionBar_Offset_ShieldDelta { { 0, 0 } }
-			, ProductionBar_Secondary { false }
-			, ProductionBar_Secondary_ShowBoth { true }
-			, ProductionBar_Secondary_Shape {}
-			, ProductionBar_Secondary_Palette {}
-			, ProductionBar_Secondary_Pip {}
-			, ProductionBar_Secondary_Pip_Empty {}
-			, ProductionBar_Secondary_Offset {}
-		{ }
+		Valueable<bool> AIBrain;
+
+		ExtData(RulesClass* OwnerObject)
+		    : Extension<RulesClass>(OwnerObject), Storage_TiberiumIndex{-1}, Storage_AI{false},
+		      Storage_AI_Threshold{0.85}, Storage_AI_PenaltyMultiplier{0.10}, Storage_AI_MaxPenalty{0.90},
+		      HarvesterDumpAmount{0.0f}, InfantryGainSelfHealCap{}, UnitsGainSelfHealCap{},
+		      GainSelfHealAllowMultiplayPassive{true}, GainSelfHealFromPlayerControl{false},
+		      GainSelfHealFromAllies{false}, EnemyInsignia{true}, DisguiseBlinkingVisibility{AffectedHouse::Owner},
+		      ChronoSparkleDisplayDelay{24},
+		      ChronoSparkleBuildingDisplayPositions{ChronoSparkleDisplayPosition::OccupantSlots},
+		      ChronoSpherePreDelay{60}, ChronoSphereDelay{0}, AIChronoSphereSW{}, AIChronoWarpSW{},
+		      SubterraneanSpeed{19}, SubterraneanHeight{-256}, AISuperWeaponDelay{}, UseGlobalRadApplicationDelay{true},
+		      RadApplicationDelay_Building{0}, RadBuildingDamageMaxCount{-1}, RadSiteWarhead_Detonate{false},
+		      RadSiteWarhead_Detonate_Full{true}, RadHasOwner{false}, RadHasInvoker{false}, ShieldApplyArmorMult{false},
+		      JumpjetCrash{5.0}, JumpjetNoWobbles{false}, JumpjetRotateOnCrash{true}, VeinholeWarhead{},
+		      VeinAttackHeight{5}, MissingCameo{GameStrings::XXICON_SHP}
+
+		      ,
+		      PlacementGrid_Translucency{0}, PlacementGrid_TranslucencyWithPreview{}, PlacementPreview{false},
+		      PlacementPreview_Translucency{75}
+
+		      ,
+		      SuperWeaponTimer_Percentage{false}, SuperWeaponSidebar_AllowByDefault{false}
+
+		      ,
+		      Shield_ConditionYellow{}, Shield_ConditionRed{}, Pips_Shield{{-1, -1, -1}}, Pips_Shield_Background{},
+		      Pips_Shield_Building{{-1, -1, -1}}, Pips_Shield_Building_Empty{}, Pips_SelfHeal_Infantry{{13, 20}},
+		      Pips_SelfHeal_Units{{13, 20}}, Pips_SelfHeal_Buildings{{13, 20}},
+		      Pips_SelfHeal_Infantry_Offset{{25, -35}}, Pips_SelfHeal_Units_Offset{{33, -32}},
+		      Pips_SelfHeal_Buildings_Offset{{15, 10}}, Pips_Generic_Size{{4, 0}}, Pips_Generic_Buildings_Size{{4, 2}},
+		      Pips_Ammo_Size{{4, 0}}, Pips_Ammo_Buildings_Size{{4, 2}}, Pips_Tiberiums_Frames{},
+		      Pips_Tiberiums_EmptyFrame{0}, Pips_Tiberiums_DisplayOrder{}, Pips_Tiberiums_WeedFrame{1},
+		      Pips_Tiberiums_WeedEmptyFrame{0}
+
+		      ,
+		      HeightShadowScaling{false}, HeightShadowScaling_MinScale{0.0}, AirShadowBaseScale_log{0.693376137}
+
+		      ,
+		      ExtendedAircraftMissions{false}, ExtendedAircraftMissions_UnlandDamage{-1},
+		      AircraftSpawnFromEdge{EdgeType::Owner}, AircraftRetreatToEdge{EdgeType::Owner}, AmphibiousEnter{false},
+		      AmphibiousUnload{false}, NoQueueUpToEnter{false}, NoQueueUpToEnter_BoardDistance{384},
+		      NoQueueUpToUnload{false}, NoQueueUpToEnter_Buildings{}, NoQueueUpToUnload_Buildings{}
+
+		      ,
+		      JumpjetTilt{false}, JumpjetTilt_ForwardAccelFactor{1.0}, JumpjetTilt_ForwardSpeedFactor{1.0},
+		      JumpjetTilt_SidewaysRotationFactor{1.0}, JumpjetTilt_SidewaysSpeedFactor{1.0}
+
+		      ,
+		      Spawner_AttackImmediately{false}, Spawner_UseTurretFacing{false}, Spawner_RecycleRange{Leptons(-1)},
+		      Spawner_RecycleOnTurret{false}, Promote_IncludeSpawns{false}, RadarJamHouses{AffectedHouse::Enemies},
+		      RadarJamDelay{30}, MindControl_IgnoreSize{true}, MultiMindControl_ReleaseVictim{false},
+		      MindControlLink_VisibleToHouse{AffectedHouse::All}, AlternateFLH_OnTurret{true},
+		      AlternateFLH_ApplyVehicle{false}, DestroyAnim_Random{true}, UseDisguiseMovementSpeed{false},
+		      Convert_ResetMindControl{false}, BuildLimitGroup_ContentIfAnyMatch{false},
+		      BuildLimitGroup_NotBuildableIfQueueMatch{false}, DigitalDisplay_Health_FakeAtDisguise{true},
+		      Overload_ParticleSysCount{5}, FallingDownDamage{1.0}, FallingDownDamage_AllowEMP{true}
+
+		      ,
+		      ForceWeapon_InRange_TechnoOnly{true}, ForceWeapon_InRange_ApplyRangeModifiers{false},
+		      ForceAAWeapon_InRange_ApplyRangeModifiers{false}
+
+		      ,
+		      BuildingProductionQueue{false}
+
+		      ,
+		      AllowParallelAIQueues{true}, ForbidParallelAIQueues_Aircraft{false},
+		      ForbidParallelAIQueues_Building{false}, ForbidParallelAIQueues_Infantry{false},
+		      ForbidParallelAIQueues_Navy{false}, ForbidParallelAIQueues_Vehicle{false}
+
+		      ,
+		      EnablePowerSurplus{false}, PowerSurplus_ScaleToDrainAmount{0}
+
+		      ,
+		      AllowDeployControlledMCV{false}
+
+		      ,
+		      TypeSelectUseIFVMode{false}
+
+		      ,
+		      IronCurtain_KeptOnDeploy{true}, IronCurtain_EffectOnOrganics{IronCurtainEffect::Kill},
+		      IronCurtain_KillOrganicsWarhead{}, ForceShield_KeptOnDeploy{false},
+		      ForceShield_EffectOnOrganics{IronCurtainEffect::Kill}, ForceShield_KillOrganicsWarhead{},
+		      IronCurtain_ExtraTintIntensity{0.0}, ForceShield_ExtraTintIntensity{0.0},
+		      AllowWeaponSelectAgainstWalls{false}, ColorAddUse8BitRGB{false}, AirstrikeLineColor{{255, 0, 0}},
+		      AirstrikeLineZAdjust{0}, Strafing_SimulateBurst{false}, Strafing_UseAmmoPerShot{false},
+		      Strafing_TargetCell{false}, OmniFire_TurnToTarget{false}, AmbientDamage_IgnoreTarget{false},
+		      KeepRange_AllowAI{false}, KeepRange_AllowPlayer{false}, KeepRange_EarlyStopFrame{0},
+		      AircraftWeapon_KickOutPassengers{true}, CrushSlowdownMultiplier{0.2}, SkipCrushSlowdown{false},
+		      LaserPositionUpdate_StopOnFirerConvert{false}, LaserZAdjust{0}, EBoltZAdjust{0},
+		      EBoltZAdjust_ClampInitialDepthForBuilding{true}, ROF_RandomDelay{{0, 2}},
+		      ToolTip_Background_Color{{0, 0, 0}}, ToolTip_Background_Opacity{100}, ToolTip_Background_BlurSize{0.0f},
+		      DisplayIncome{false}, DisplayIncome_Delay{15}, DisplayIncome_AllowAI{true},
+		      DisplayIncome_Houses{AffectedHouse::All}, DrainMoneyDisplay{false},
+		      DrainMoneyDisplay_Houses{AffectedHouse::All}, DrainMoneyDisplay_OnTarget{false},
+		      DrainMoneyDisplay_OnTarget_UseDisplayIncome{true}, CrateOnlyOnLand{false}, UnitCrateVehicleCap{50},
+		      HealBaseNoScatter{true}, FreeMCV_CreditsThreshold{1500}, RadialIndicatorVisibility{AffectedHouse::Allies},
+		      DrawTurretShadow{false}, IsVoiceCreatedGlobal{false}, SetTabBySelectingFactory{false},
+		      SelectionFlashDuration{0}, SetRecruitableOnLiberate{-1}, DrawInsignia_OnlyOnSelected{false},
+		      DrawInsignia_AdjustPos_Infantry{{5, 2}}, DrawInsignia_AdjustPos_Buildings{{10, 6}},
+		      DrawInsignia_AdjustPos_BuildingsAnchor{}, DrawInsignia_AdjustPos_Units{{10, 6}},
+		      DrawInsignia_UsePixelSelectionBracketDelta{{false}}, Promote_VeteranAnimation{}, Promote_EliteAnimation{},
+		      AnimRemapDefaultColorScheme{0}, AnimRemapUseInvokerFallback{false}, TimerBlinkColorScheme{5},
+		      Buildings_DefaultDigitalDisplayTypes{}, Infantry_DefaultDigitalDisplayTypes{},
+		      Vehicles_DefaultDigitalDisplayTypes{}, Aircraft_DefaultDigitalDisplayTypes{}, DefaultInfantrySelectBox{},
+		      DefaultUnitSelectBox{}, VisualScatter_Min{Leptons(8)}, VisualScatter_Max{Leptons(32)},
+		      ShowDesignatorRange{true}, ShowPowerPlantEnhancerRange{true}, ShowGameTime{true}, GenericPrerequisites{},
+		      GenericPrerequisitesNames{}, GenericPrerequisitesAlternates{}, NewTeamsSelector{false},
+		      NewTeamsSelector_SplitTriggersByCategory{true}, NewTeamsSelector_EnableFallback{false},
+		      NewTeamsSelector_MergeUnclassifiedCategoryWith{-1}, NewTeamsSelector_UnclassifiedCategoryPercentage{0.20},
+		      NewTeamsSelector_GroundCategoryPercentage{0.20}, NewTeamsSelector_NavalCategoryPercentage{0.20},
+		      NewTeamsSelector_AirCategoryPercentage{0.20}, NewTeamsSelector_InfantryCategoryPercentage{0.20},
+		      NewTeamsSelector_VIPWeight{5000.0}, AILearning{false}, AILearning_Multiplayer{false},
+		      AILearning_LearningRate{0.2}, AILearning_DecayRate{0.05}, AILearning_ScenarioName{},
+		      AILearning_OnlySupportedMaps{true}, DropPodTrailer{}, DropPodDefaultTrailer{}, PodImage{},
+		      JumpjetClimbPredictHeight{false}, JumpjetClimbWithoutCutOut{false}, JumpjetClimbIgnoreBuilding{false},
+		      FlyingProduction_Jumpjet{false}, FlyingProduction_Aircraft{false}
+
+		      ,
+		      DamageOwnerMultiplier{1.0}, DamageAlliesMultiplier{1.0}, DamageEnemiesMultiplier{1.0},
+		      DamageOwnerMultiplier_NotAffectsEnemies{}, DamageAlliesMultiplier_NotAffectsEnemies{},
+		      DamageOwnerMultiplier_Berzerk{}, DamageAlliesMultiplier_Berzerk{}, DamageEnemiesMultiplier_Berzerk{},
+		      AircraftLevelLightMultiplier{1.0}, JumpjetLevelLightMultiplier{0.0},
+		      VoxelLightSource{} // , VoxelShadowLightSource { }
+
+		      ,
+		      CombatAlert{false}, CombatAlert_Default{}, CombatAlert_IgnoreBuilding{true},
+		      CombatAlert_SuppressIfInScreen{true}, CombatAlert_Interval{150}, CombatAlert_SuppressIfAllyDamage{true},
+		      CombatAlert_MakeAVoice{true}, CombatAlert_UseFeedbackVoice{true}, CombatAlert_UseAttackVoice{true},
+		      CombatAlert_UseEVA{true}, UseFixedVoxelLighting{false}, AIAutoDeployMCV{true}, AISetBaseCenter{true},
+		      AIBiasSpawnCell{false}, AIForbidConYard{false}, AINodeWallsOnly{false}, AICleanWallNode{false},
+		      RandomizeSuperWeaponPriority{false}, AttackMove_Aggressive{false}, AttackMove_UpdateTarget{false},
+		      MindControl_ThreatDelay{0}, RecountBurst{false}, NoRearm_UnderEMP{false}, NoRearm_Temporal{false},
+		      NoReload_UnderEMP{false}, NoReload_Temporal{false}, VeteranReload{1.0}, VeteranEmptyReload{},
+		      VeteranRange{1.0}, VeteranCritChance{1.0}, NoTurret_TrackTarget{false}, GatherWhenMCVDeploy{true},
+		      AIFireSale{true}, AIFireSaleDelay{0}, AIAllToHunt{true}, RepairBaseNodes{false}, FixRepairStepCost{false},
+		      WarheadParticleAlphaImageIsLightFlash{false}, CombatLightDetailLevel{0},
+		      CombatLightDetailLevel_CheckColored{false}, LightFlashAlphaImageDetailLevel{0}, UseRetintFix{true},
+		      UseSidebarRadarOffsetFix{true}, AINormalTargetingDelay{}, PlayerNormalTargetingDelay{},
+		      AIGuardAreaTargetingDelay{}, PlayerGuardAreaTargetingDelay{}, AIAttackMoveTargetingDelay{},
+		      PlayerAttackMoveTargetingDelay{}, DistributeTargetingFrame{false}, DistributeTargetingFrame_AIOnly{true},
+		      CanTargetAI_IronCurtained{false}, CanTarget_IronCurtained{true}, AutoTarget_IronCurtained{true},
+		      BuildingWaypoints{false}, BuildingTypeSelectable{false}, ProneSpeed_Crawls{0.67}, ProneSpeed_NoCrawls{1.5}
+
+		      ,
+		      DamagedSpeed{0.75}
+
+		      ,
+		      HarvesterScanAfterUnload{false}
+
+		      ,
+		      AnimCraterDestroyTiberium{true}
+
+		      ,
+		      BerzerkTargeting{AffectedHouse::All}, AllowBerzerkOnAllies{false}
+
+		      ,
+		      TintColorIronCurtain{0}, TintColorForceShield{0}, TintColorBerserk{0}
+
+		      ,
+		      AttackMove_IgnoreWeaponCheck{false}
+
+		      ,
+		      Parasite_GrappleAnim{}, Parasite_AllowWaterExit{}, InfantryAutoDeploy{false}, AdjacentWallDamage{200},
+		      WarheadAnimZAdjust{-15}
+
+		      ,
+		      IvanBombAttachToCenter{false}, IvanBomb_Visibility{AffectedHouse::Owner}, MissileSpawnAttackCell{true}
+
+		      ,
+		      FallingDownTargetingFix{false}, AIAirTargetingFix{false}
+
+		      ,
+		      ReloadInTransport{false}, OpenTopped_IgnoreRangefinding{false}, OpenTopped_AllowFiringIfDeactivated{true},
+		      OpenTopped_AllowFiringIfAttackedByLocomotor{true}, OpenTopped_ShareTransportTarget{true},
+		      OpenTopped_UseTransportRangeModifiers{false}, OpenTopped_CheckTransportDisableWeapons{false},
+		      OpenTopped_DecloakToFire{false}, OpenTopped_FireWhileMoving{true},
+		      OpenTopped_FireWhileMoving_BasedOnDestination{false}, OpenTransport_RangeBonus{0},
+		      OpenTransport_DamageMultiplier{1.0f}, OpenTransport_FireWhileMoving{true}
+
+		      ,
+		      Passengers_SyncOwner{false}, Passengers_SyncOwner_RevertOnExit{true}
+
+		      ,
+		      Explodes_KillPassengers{true}, Explodes_DuringBuildup{true}
+
+		      ,
+		      AircraftFiringForceScatter{true}
+
+		      ,
+		      HoverDrownable{true}
+
+		      ,
+		      Arcing_AllowElevationInaccuracy{true}
+
+		      ,
+		      Terrain_IsPassable{false}, Tibtree_IsPassable{false}, Terrain_CanBeBuiltOn{false},
+		      Tibtree_CanBeBuiltOn{false}
+
+		      ,
+		      Sinkable{}, Sinkable_SquidGrab{true}, SinkSpeed{5}
+
+		      ,
+		      CreateAnimsOnZeroDamage{false}, Conventional_IgnoreUnits{false}, DecloakDamagedTargets{true},
+		      ShakeIsLocal{false}, ApplyModifiersOnNegativeDamage{false}, AllowDamageOnSelf{false},
+		      Debris_Conventional{false}, Parasite_DisableParticleSystem{false}
+
+		      ,
+		      ProjectileInterceptable{false}, Interceptor_GuardRange_IsCylindrical{false},
+		      Interceptor_ApplyFirepowerMult{true}
+
+		      ,
+		      SortCameoByName{false}
+
+		      ,
+		      MergeBuildingDamage{false}
+
+		      ,
+		      BuildingRadioLink_SyncOwner{true}
+
+		      ,
+		      ApplyPerTargetEffectsOnDetonate{true}, AffectsInvokerOnly_IgnoreInvokerState{true}
+
+		      ,
+		      ExtraRange_TargetMoving{Leptons(0)}, ExtraRange_TargetMoving_CloseRangeOnly{false},
+		      ExtraRange_FirerMoving{Leptons(0)}, ExtraRange_Prefiring{Leptons(0)},
+		      ExtraRange_Prefiring_IncludeBurst{true}
+
+		      ,
+		      AutoTarget_NoThreatBuildings{false}, AutoTargetAI_NoThreatBuildings{true}
+
+		      ,
+		      ParadropMission{Mission::Guard}, AIParadropMission{Mission::Hunt}, ParadropDelay{5}, ParadropEndDelay{5}
+
+		      ,
+		      DefaultToGuardArea{false}, LeptonMindControlOffset{70}, MindControlRingOffset{140},
+		      Anim_ShouldUseCellDrawer{true}
+
+		      ,
+		      CylinderRangefinding{false}
+
+		      ,
+		      PenetratesTransport_Level{10}
+
+		      ,
+		      UnitsUnsellable{false}
+
+		      ,
+		      DriverKilled_KeptPassengers{false}, DriverKilled_KillPassengers{false},
+		      Survivors_ReplaceTagTo{AffectedSurvivor::VehicleThief | AffectedSurvivor::Crew},
+		      DisableOveroptimizationInTargeting{false}, ExtraThreat_IsThreat{0.0}, ExtraThreat_InRange{0.0},
+		      ExtraThreatCoefficient_InRangeDistance{0.0}, ExtraThreatCoefficient_Facing{0.0},
+		      ExtraThreatCoefficient_DistanceToLastTarget{0.0}
+
+		      ,
+		      BalloonHoverPathingFix{false}
+
+		      ,
+		      WalkLocomotorMakesWake{false}, DriveLocomotorMakesWake{true}, HoverLocomotorMakesWake{true},
+		      ShipLocomotorMakesWake{true}, FiringAnim_Update{false}, ExtendedPlayerRepair{false}
+
+		      ,
+		      Psychedelic_StackingMode{StackingMode::Override}, Shrapnel_AffectsGround{false},
+		      Shrapnel_AffectsBuildings{false}, Shrapnel_UseWeaponTargeting{false}, Shrapnel_IgnoreHitBuildings{false},
+		      Shrapnel_ObeyWarheadTriggerConditions{true}, ReturnWeapon_ApplyFirepowerMult{false},
+		      Splits_TargetingDistance_Cylindrical{false}, Splits_AllowRepeatTargets{false},
+		      Splits_UseWeaponTargeting{false}, Airburst_UseCluster{false}, Airburst_TargetAsSource_SkipHeight{false},
+		      AirburstWeapon_ApplyFirepowerMult{false}, AirburstWeapon_UseFiringEffects{false},
+		      AirburstWeapon_HeadToTarget{false}, AnimDamage_DealtByInvoker{false},
+		      AnimDamage_ApplyFirepowerMult{false}, Crit_ApplyChancePerTarget{false},
+		      Crit_ExtraDamage_ApplyFirepowerMult{false}, Crit_AnimOnAffectedTargets{false},
+		      Crit_SuppressWhenIntercepted{false}, ReturnWarhead_ApplyChancePerTarget{false}, BuildingGuardRetryDelay{},
+		      Vertical_AircraftFix{true}, Temporal_ApplyVersus{false}, Temporal_ApplyMultiplier{false},
+		      Temporal_KillPoweredAnim{true}, DiscardOn_Sequences_Immediate{true},
+		      DiscardOn_MoveBasedOnDestination{false}, DiscardOn_ConsiderHarvestingAsStationary{true},
+		      AttachEffect_ReplaceLongerDuration{false}, RemoveMindControl_Silent{false},
+		      MindControl_Permanent_ReplaceSilent{false}
+
+		      ,
+		      FlyNoWobbles{}
+
+		      ,
+		      DefaultLandingAnim{nullptr}, DefaultLandingAnim_Dropship{}, DefaultLandingAnim_Carryall{}
+
+		      ,
+		      TeamDelays_DynamicType{DynamicTeamDelayType::StartingPoint}, TeamDelays_Count{}
+
+		      ,
+		      BerzerkMission{Mission::Hunt}
+
+		      ,
+		      BunkerStateUpdateDelay{15}, AdvancedAI{false}, AdvancedAI_NavalMode{false},
+		      AdvancedAI_MultiConYard{false}, AdvancedAI_MinimumRefineryCount{2}
+
+		      ,
+		      AllowChatBoxInSinglePlayer{false}
+
+		      ,
+		      NotHuman_RandomDeathSequence{false}, OnlyUseLandSequences{false}, SecondaryFireSequenceLandOnly{true}
+
+		      ,
+		      AutoRemoveEarliestBeacon{false}
+
+		      ,
+		      AllowBeaconHotKeyInSinglePlayer{false}
+
+		      ,
+		      StartFacing{0}, StartFacing_Random{false}
+
+		      ,
+		      AutoDeath_AllowLimboed{true}, AutoDeath_OnOwnerChange_IgnoreRevertOnExit{false},
+		      AutoDeath_TechnosDontExist_AllowLimboed{false}, AutoDeath_TechnosExist_AllowLimboed{false}
+
+		      ,
+		      AircraftDockingDir_DefaultToPoseDir{true}, PoseDir_Production{}, PoseDir_Field{}
+
+		      ,
+		      ApproachTarget_StopWhenInRange{false}
+
+		      ,
+		      NoAlphaImageOnBuildup{false}
+
+		      ,
+		      ReadyToNextMission_MovingCheck{false}
+
+		      ,
+		      Warhead_PreventScatter{false}
+
+		      ,
+		      ProjectileRange_ApplyModifiers{true}
+
+		      ,
+		      KeepAlive_Infantry{false}, KeepAlive_Units{false}, KeepAlive_Aircraft{false}, KeepAlive_Buildings{true},
+		      KeepAlive_Defenses{true}
+
+		      ,
+		      AutoTarget_InsignificantWhenMindControlled{true}
+
+		      ,
+		      CloakAnims{}, DecloakAnims{}, Cloak_KickOutParasite{false}
+
+		      ,
+		      CustomSequenceRates(42, -1), CustomSequenceNormalized(42, -1)
+
+		      ,
+		      AttachEffects_AttachOnOwnerChange{false}
+
+		      ,
+		      RevealHouses{AffectedHouse::Team}
+
+		      ,
+		      MissileKeepTargetCoord{false}
+
+		      ,
+		      AttachmentTopLayerMinHeight{500}, AttachmentUndergroundLayerMaxHeight{-256},
+		      ExtendedBuildingPlacing{false}
+
+		      ,
+		      ProductionBar{false}, ProductionBar_HideIfNoProduction{true},
+		      ProductionBar_ShowType{DisplayShowType::Select}, ProductionBar_VisibleToHouses{AffectedHouse::Team},
+		      ProductionBar_VisibleToHouses_Observer{true}, ProductionBar_Shape{}, ProductionBar_Palette{},
+		      ProductionBar_Pip{3}, ProductionBar_Pip_Empty{0}, ProductionBar_Offset{{0, 0}},
+		      ProductionBar_Offset_ShieldDelta{{0, 0}}, ProductionBar_Secondary{false},
+		      ProductionBar_Secondary_ShowBoth{true}, ProductionBar_Secondary_Shape{},
+		      ProductionBar_Secondary_Palette{}, ProductionBar_Secondary_Pip{}, ProductionBar_Secondary_Pip_Empty{},
+		      ProductionBar_Secondary_Offset{}, AIBrain{true}
+		{
+		}
 
 		virtual ~ExtData() = default;
 
@@ -1205,15 +1013,14 @@ public:
 
 		void ReplaceVoxelLightSources();
 
-	private:
-		template <typename T>
-		void Serialize(T& Stm);
+	  private:
+		template <typename T> void Serialize(T& Stm);
 	};
 
-private:
+  private:
 	static std::unique_ptr<ExtData> Data;
 
-public:
+  public:
 	static IStream* g_pStm;
 
 	static void Allocate(RulesClass* pThis);

@@ -22,6 +22,8 @@
   <ItemGroup>
     <!-- src/ -->
     <ClCompile Include="src\Phobos.COM.cpp" />
+    <ClCompile Include="src\Misc\NeuralAI\Hooks.NeuralAI.cpp" />
+    <ClCompile Include="src\Misc\NeuralAI\NeuralAI.cpp" />
     <ClCompile Include="src\Phobos.cpp" />
     <ClCompile Include="src\Phobos.CRT.cpp" />
     <ClCompile Include="src\Phobos.Ext.cpp" />
@@ -69,7 +71,6 @@
     <ClCompile Include="src\Ext\Beacon\Hooks.cpp" />
     <!-- src\Ext\Building -->
     <ClCompile Include="src\Ext\Building\Body.cpp" />
-    <ClCompile Include="src\Ext\Building\Body.AdvAI.cpp" />
     <ClCompile Include="src\Ext\Building\Hooks.cpp" />
     <ClCompile Include="src\Ext\Building\Hooks.DetectDisguise.cpp" />
     <ClCompile Include="src\Ext\Building\Hooks.Grinding.cpp" />
@@ -110,7 +111,6 @@
     <ClCompile Include="src\Ext\Foot\Hooks.DisallowMoving.cpp" />	
     <!-- src\Ext\House -->
     <ClCompile Include="src\Ext\House\Body.cpp" />
-    <ClCompile Include="src\Ext\House\Body.AdvAI.cpp" />
     <ClCompile Include="src\Ext\House\Body.Prerequisites.cpp" />
     <ClCompile Include="src\Ext\House\Hooks.AINavalProduction.cpp" />
     <ClCompile Include="src\Ext\House\Hooks.cpp" />
@@ -146,7 +146,6 @@
     <ClCompile Include="src\Ext\Scenario\Body.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.AILearning.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.cpp" />
-    <ClCompile Include="src\Ext\Scenario\Hooks.NewTeamsSelector.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.Variables.cpp" />
     <ClCompile Include="src\Ext\Scenario\Hooks.Waypoints.cpp" />
     <!-- src\Ext\Script -->
@@ -182,7 +181,6 @@
     <ClCompile Include="src\Ext\TAction\Hooks.cpp" />
     <!-- src\Ext\Team -->
     <ClCompile Include="src\Ext\Team\Body.cpp" />
-    <ClCompile Include="src\Ext\Team\Body.NewTeamsSelector.cpp" />
     <ClCompile Include="src\Ext\Team\Hooks.cpp" />
     <!-- src\Ext\TeamType -->
     <ClCompile Include="src\Ext\TeamType\Body.cpp" />
@@ -358,6 +356,7 @@
     <!-- src/ -->
     <ClInclude Include="src\Phobos.COM.h" />
     <ClInclude Include="src\Phobos.CRT.h" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.h" />
     <ClInclude Include="src\Phobos.h" />
     <ClInclude Include="src\Phobos.version.h" />
     <!-- src\Blowfish\ -->

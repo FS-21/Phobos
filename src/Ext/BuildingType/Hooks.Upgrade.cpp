@@ -1,5 +1,6 @@
 #include <Ext/Building/Body.h>
 #include <Ext/House/Body.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 #include <New/Type/TechTreeTypeClass.h>
 
 bool BuildingTypeExt::CanUpgrade(BuildingClass* pBuilding, BuildingTypeClass* pUpgradeType, HouseClass* pUpgradeOwner)
@@ -22,7 +23,11 @@ bool BuildingTypeExt::CanUpgrade(BuildingClass* pBuilding, BuildingTypeClass* pU
 
 DEFINE_HOOK(0x452678, BuildingClass_CanUpgrade_UpgradeBuildings, 0x8)
 {
-	enum { Continue = 0x4526A7, ForbidUpgrade = 0x4526B5 };
+	enum
+	{
+		Continue = 0x4526A7,
+		ForbidUpgrade = 0x4526B5
+	};
 
 	GET(BuildingClass*, pBuilding, ECX);
 	GET_STACK(BuildingTypeClass*, pUpgrade, 0xC);
@@ -39,7 +44,11 @@ DEFINE_HOOK(0x452678, BuildingClass_CanUpgrade_UpgradeBuildings, 0x8)
 
 DEFINE_HOOK(0x4408EB, BuildingClass_Unlimbo_UpgradeBuildings, 0xA)
 {
-	enum { Continue = 0x440912, ForbidUpgrade = 0x440926 };
+	enum
+	{
+		Continue = 0x440912,
+		ForbidUpgrade = 0x440926
+	};
 
 	GET(BuildingClass*, pBuilding, EDI);
 	GET(BuildingClass*, pUpgrade, ESI);
@@ -63,14 +72,21 @@ static int BuildLimitRemaining(HouseClass const* const pHouse, BuildingTypeClass
 	const int BuildLimit = pItem->BuildLimit;
 
 	if (BuildLimit >= 0)
-		return BuildLimit - BuildingTypeExt::GetUpgradesAmount(const_cast<BuildingTypeClass*>(pItem), const_cast<HouseClass*>(pHouse));
+		return BuildLimit - BuildingTypeExt::GetUpgradesAmount(const_cast<BuildingTypeClass*>(pItem),
+		                                                       const_cast<HouseClass*>(pHouse));
 	else
 		return -BuildLimit - pHouse->CountOwnedEver(pItem);
 }
 
-static int CheckBuildLimit(HouseClass const* const pHouse, BuildingTypeClass const* const pItem, bool const includeQueued)
+static int CheckBuildLimit(HouseClass const* const pHouse, BuildingTypeClass const* const pItem,
+                           bool const includeQueued)
 {
-	enum { NotReached = 1, ReachedPermanently = -1, ReachedTemporarily = 0 };
+	enum
+	{
+		NotReached = 1,
+		ReachedPermanently = -1,
+		ReachedTemporarily = 0
+	};
 
 	const int BuildLimit = pItem->BuildLimit;
 	const int Remaining = BuildLimitRemaining(pHouse, pItem);
@@ -79,7 +95,6 @@ static int CheckBuildLimit(HouseClass const* const pHouse, BuildingTypeClass con
 		return (includeQueued && FactoryClass::FindByOwnerAndProduct(pHouse, pItem)) ? NotReached : ReachedPermanently;
 
 	return Remaining > 0 ? NotReached : ReachedTemporarily;
-
 }
 
 DEFINE_HOOK(0x4F8361, HouseClass_CanBuild_UpgradesInteraction, 0x3)
@@ -107,12 +122,10 @@ DEFINE_HOOK(0x4F7877, HouseClass_CanBuild_UpgradesInteraction_WithoutAres, 0x5)
 	Debug::Log("Hook [HouseClass_CanBuild_UpgradesInteraction] disabled\n");
 
 	Patch::Apply_RAW(0x4F8361, // Disable hook HouseClass_CanBuild_UpgradesInteraction
-		{ 0xC2, 0x0C, 0x00, 0x6E, 0x7D }
-	);
+	                 {0xC2, 0x0C, 0x00, 0x6E, 0x7D});
 
 	Patch::Apply_RAW(0x4F7877, // Disable this hook
-		{ 0x53, 0x55, 0x8B, 0xE9, 0x56 }
-	);
+	                 {0x53, 0x55, 0x8B, 0xE9, 0x56});
 
 	return 0;
 }
@@ -124,7 +137,10 @@ DEFINE_HOOK(0x4F7877, HouseClass_CanBuild_UpgradesInteraction_WithoutAres, 0x5)
 // Always parse all info for PowerUp anims if building can have even one upgrade, including power settings.
 DEFINE_HOOK(0x464749, BuildingTypeClass_ReadINI_PowerUpAnims, 0x6)
 {
-	enum { SkipGameCode = 0x46492E };
+	enum
+	{
+		SkipGameCode = 0x46492E
+	};
 
 	GET(BuildingTypeClass*, pThis, EBP);
 
@@ -180,7 +196,10 @@ DEFINE_HOOK(0x464749, BuildingTypeClass_ReadINI_PowerUpAnims, 0x6)
 
 DEFINE_HOOK(0x440988, BuildingClass_Unlimbo_UpgradeAnims, 0x7)
 {
-	enum { SkipGameCode = 0x4409C7 };
+	enum
+	{
+		SkipGameCode = 0x4409C7
+	};
 
 	GET(BuildingClass*, pThis, ESI);
 	GET(BuildingClass*, pTarget, EDI);
@@ -207,7 +226,10 @@ DEFINE_HOOK(0x440988, BuildingClass_Unlimbo_UpgradeAnims, 0x7)
 
 DEFINE_HOOK(0x451630, BuildingClass_CreateUpgradeAnims_AnimIndex, 0x7)
 {
-	enum { SkipGameCode = 0x451638 };
+	enum
+	{
+		SkipGameCode = 0x451638
+	};
 
 	GET(BuildingClass*, pThis, EBP);
 
@@ -240,7 +262,7 @@ DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
 	GET_STACK(CellStruct*, pOutCell, 0x4);
 	GET_STACK(BuildingTypeClass*, pUpgradeType, 0x8);
 
-	if (!HouseExt::IsAdvancedAIActive(pHouse) || !pUpgradeType || !pOutCell)
+	if (!NeuralAI::IsEnabledForHouse(pHouse) || !pUpgradeType || !pOutCell)
 		return 0;
 
 	bool isPowerUpgrade = false;
@@ -249,9 +271,9 @@ DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
 	{
 		for (auto const pTargetType : pUpgradeExt->PowersUp_Buildings)
 		{
-			if (pTargetType && (TechTreeTypeClass::TotalBuildPower.count(pTargetType) > 0 ||
-								TechTreeTypeClass::TotalBuildAdvancedPower.count(pTargetType) > 0 ||
-								pTargetType->PowerBonus > 0))
+			if (pTargetType &&
+			    (TechTreeTypeClass::TotalBuildPower.count(pTargetType) > 0 ||
+			     TechTreeTypeClass::TotalBuildAdvancedPower.count(pTargetType) > 0 || pTargetType->PowerBonus > 0))
 			{
 				isPowerUpgrade = true;
 				break;
@@ -263,8 +285,7 @@ DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
 		if (auto const pTargetType = BuildingTypeClass::Find(pUpgradeType->PowersUpBuilding))
 		{
 			if (TechTreeTypeClass::TotalBuildPower.count(pTargetType) > 0 ||
-				TechTreeTypeClass::TotalBuildAdvancedPower.count(pTargetType) > 0 ||
-				pTargetType->PowerBonus > 0)
+			    TechTreeTypeClass::TotalBuildAdvancedPower.count(pTargetType) > 0 || pTargetType->PowerBonus > 0)
 			{
 				isPowerUpgrade = true;
 			}
@@ -289,7 +310,8 @@ DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
 		bool isEligible = false;
 		if (pUpgradeExt && BuildingTypeExt::CanUpgrade(pBld, pUpgradeType, pHouse))
 			isEligible = true;
-		else if (pUpgradeType->PowersUpBuilding[0] != '\0' && _stricmp(pBld->Type->ID, pUpgradeType->PowersUpBuilding) == 0 && pBld->Owner == pHouse)
+		else if (pUpgradeType->PowersUpBuilding[0] != '\0' &&
+		         _stricmp(pBld->Type->ID, pUpgradeType->PowersUpBuilding) == 0 && pBld->Owner == pHouse)
 			isEligible = true;
 
 		if (!isEligible)
@@ -303,7 +325,8 @@ DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
 
 		if (isPowerUpgrade)
 		{
-			// Prefer the closest eligible powerplant to the ConYard (base powerplants <= 25.0 will be picked first; if all full and AI lacks power, closest outside)
+			// Prefer the closest eligible powerplant to the ConYard (base powerplants <= 25.0 will be picked first; if
+			// all full and AI lacks power, closest outside)
 			if (dist < bestDistance - 0.5)
 			{
 				bestDistance = dist;
@@ -323,7 +346,8 @@ DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
 		else
 		{
 			// Non-power upgrades (e.g. defenses or plugins): lowest upgrade level first, then closest
-			if (pBld->UpgradeLevel < lowestUpgradeLevel || (pBld->UpgradeLevel == lowestUpgradeLevel && dist < bestDistance))
+			if (pBld->UpgradeLevel < lowestUpgradeLevel ||
+			    (pBld->UpgradeLevel == lowestUpgradeLevel && dist < bestDistance))
 			{
 				bestDistance = dist;
 				lowestUpgradeLevel = pBld->UpgradeLevel;
@@ -337,9 +361,9 @@ DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
 		*pOutCell = pBestBuilding->GetMapCoords();
 
 		Debug::Log("AdvAI: House %d placing upgrade %s on %s at (%d,%d) (Dist to ConYard: %.1f, Upgrades: %d/%d)\n",
-			pHouse->ArrayIndex, pUpgradeType->ID, pBestBuilding->Type->ID,
-			pOutCell->X, pOutCell->Y, pBestBuilding->GetMapCoords().DistanceFrom(centerCell),
-			pBestBuilding->UpgradeLevel, pBestBuilding->Type->Upgrades);
+		           pHouse->ArrayIndex, pUpgradeType->ID, pBestBuilding->Type->ID, pOutCell->X, pOutCell->Y,
+		           pBestBuilding->GetMapCoords().DistanceFrom(centerCell), pBestBuilding->UpgradeLevel,
+		           pBestBuilding->Type->Upgrades);
 
 		R->EAX(pOutCell);
 		return reinterpret_cast<intptr_t>(&HouseClass_Powerups_FindUpgradeTarget_Epilogue);
@@ -349,8 +373,8 @@ DEFINE_HOOK(0x506B90, HouseClass_Powerups_FindUpgradeTarget, 0x6)
 		// Signal failure so it does not upgrade faraway expansion powerplants
 		pOutCell->X = 0;
 		pOutCell->Y = 0;
-		Debug::Log("AdvAI: House %d found no eligible building within 25 cells for upgrade %s\n",
-			pHouse->ArrayIndex, pUpgradeType->ID);
+		Debug::Log("AdvAI: House %d found no eligible building within 25 cells for upgrade %s\n", pHouse->ArrayIndex,
+		           pUpgradeType->ID);
 
 		R->EAX(pOutCell);
 		return reinterpret_cast<intptr_t>(&HouseClass_Powerups_FindUpgradeTarget_Epilogue);

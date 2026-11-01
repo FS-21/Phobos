@@ -66,7 +66,8 @@ bool HouseExt::HasGenericPrerequisite(int idx, HouseClass* const pHouse)
 	// Check alternate technos (vehicles, infantry, aircraft, etc.)
 	if (absoluteIndex < pRulesExt->GenericPrerequisitesAlternates.Count)
 	{
-		DynamicVectorClass<TechnoTypeClass*> const& selectedAlternates = pRulesExt->GenericPrerequisitesAlternates.GetItem(absoluteIndex);
+		DynamicVectorClass<TechnoTypeClass*> const& selectedAlternates =
+		    pRulesExt->GenericPrerequisitesAlternates.GetItem(absoluteIndex);
 		for (auto pTechnoType : selectedAlternates)
 		{
 			if (pHouse->CountOwnedNow(pTechnoType) > 0)
@@ -137,6 +138,24 @@ bool HouseExt::IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* con
 		}
 	}
 
+	if (!inOwners)
+	{
+		AbstractType const rtti = pItem->WhatAmI();
+		DWORD const itemOwners = pItem->GetOwners();
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type)
+				continue;
+
+			if (pBld->Type->Factory == rtti && pBld->Type->InOwners(itemOwners))
+			{
+				inOwners = true;
+				break;
+			}
+		}
+	}
+
 	return inOwners && inRequired && !inForbidden;
 }
 
@@ -163,8 +182,8 @@ bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const 
 
 	// Stolen Tech checks (Chrono Commando, Psi Commando, etc.)
 	if ((pItem->RequiresStolenAlliedTech && !pThis->Side0TechInfiltrated) ||
-		(pItem->RequiresStolenSovietTech && !pThis->Side1TechInfiltrated) ||
-		(pItem->RequiresStolenThirdTech && !pThis->Side2TechInfiltrated))
+	    (pItem->RequiresStolenSovietTech && !pThis->Side1TechInfiltrated) ||
+	    (pItem->RequiresStolenThirdTech && !pThis->Side2TechInfiltrated))
 	{
 		return false;
 	}
@@ -177,28 +196,26 @@ bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const 
 	if (pThis->TechLevel < pItem->TechLevel)
 		return false;
 
-	// BuildLimit checks
+	// BuildLimit checks (including attached building upgrades and UndeploysInto counterparts)
 	if (pItem->BuildLimit > 0)
 	{
 		int nInstances = 0;
-		for (const auto pTechno : TechnoClass::Array)
-		{
-			if (pTechno->Owner == pThis
-				&& pTechno->GetTechnoType() == pItem
-				&& pTechno->IsAlive
-				&& pTechno->Health > 0)
-			{
-				nInstances++;
+		if (auto const pBldType = abstract_cast<BuildingTypeClass*>(pItem))
+			nInstances = BuildingTypeExt::CountOwnedNowWithDeployOrUpgrade(pBldType, pThis);
+		else
+			nInstances = pThis->CountOwnedNow(pItem);
 
-				if (nInstances >= pItem->BuildLimit)
-					return false;
-			}
-		}
+		if (nInstances >= pItem->BuildLimit)
+			return false;
 	}
 	else if (pItem->BuildLimit < 0)
 	{
 		if (pThis->CountOwnedEver(pItem) >= -pItem->BuildLimit)
 			return false;
+	}
+	else if (pItem->BuildLimit == 0)
+	{
+		return false;
 	}
 
 	// Phobos BuildLimitGroup check
@@ -218,6 +235,36 @@ bool HouseExt::PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const 
 	// Main prerequisite checks are skipped if a new secret lab object is in process to be unlocked
 	if (skipSecretLabChecks)
 		return true;
+
+	// If this is a building upgrade (PowersUpBuilding / PowersUp.Buildings), verify an eligible parent building with an
+	// open upgrade slot exists
+	if (auto const pBldType = abstract_cast<BuildingTypeClass*>(pItem))
+	{
+		if (auto const pBldExt = BuildingTypeExt::Fetch(pBldType))
+		{
+			if (!pBldExt->PowersUp_Buildings.empty())
+			{
+				bool foundUpgradeableParent = false;
+				for (auto const pOwned : pThis->Buildings)
+				{
+					if (!pOwned || !pOwned->IsAlive || pOwned->Health <= 0 || pOwned->InLimbo ||
+					    pOwned->CurrentMission == Mission::Selling)
+						continue;
+
+					const int maxSlots =
+					    pOwned->Type->Upgrades > 0 ? pOwned->Type->Upgrades : pOwned->Type->PowersUpToLevel;
+					if (pOwned->UpgradeLevel < maxSlots && pOwned->CanUpgradeBuilding(pBldType, pThis))
+					{
+						foundUpgradeableParent = true;
+						break;
+					}
+				}
+
+				if (!foundUpgradeableParent)
+					return false;
+			}
+		}
+	}
 
 	// PrerequisiteOverride (OR logic: if ANY entry is owned, prerequisites are considered met)
 	DynamicVectorClass<int> const& prerequisiteOverride = pItem->PrerequisiteOverride;

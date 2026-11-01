@@ -1,20 +1,20 @@
 #include "Body.h"
 
-#include <Ext/Aircraft/Body.h>
-#include <Ext/Scenario/Body.h>
-#include <Ext/SWType/Body.h>
-#include "Ext/Techno/Body.h"
 #include "Ext/Building/Body.h"
+#include "Ext/Techno/Body.h"
+#include <Ext/Aircraft/Body.h>
 #include <Ext/Event/Body.h>
+#include <Ext/SWType/Body.h>
+#include <Ext/Scenario/Body.h>
 #include <Ext/Tiberium/Body.h>
-#include <New/Type/ResourceTypeClass.h>
 #include <Misc/FlyingStrings.h>
+#include <New/Type/ResourceTypeClass.h>
 
 #include <BeaconManagerClass.h>
 #include <Utilities/AresHelper.h>
 
-#include <unordered_map>
 #include <algorithm>
+#include <unordered_map>
 #include <utility>
 
 // Trigger power recalculation on gain/loss of any techno, not just buildings.
@@ -79,7 +79,8 @@ DEFINE_HOOK(0x502B63, HouseClass_Add_Building_CustomTiberium, 0x6)
 			if (amount > 0.0f)
 			{
 				if (i >= pHouseExt->TiberiumStorage.size())
-					pHouseExt->TiberiumStorage.resize(std::max(i + 1, static_cast<size_t>(TiberiumClass::Array.Count)), 0.0f);
+					pHouseExt->TiberiumStorage.resize(std::max(i + 1, static_cast<size_t>(TiberiumClass::Array.Count)),
+					                                  0.0f);
 
 				pHouseExt->TiberiumStorage[i] += amount;
 			}
@@ -99,16 +100,16 @@ DEFINE_HOOK(0x508D8D, HouseClass_UpdatePower_AfterBuildings, 0x6)
 	if (Phobos::Config::UnitPowerDrain)
 	{
 		auto updateDrainForThisType = [pThis](const TechnoTypeClass* pType)
-			{
-				const int count = pThis->CountOwnedAndPresent(pType);
-				if (count == 0)
-					return;
-				const auto pExt = TechnoTypeExt::Fetch(pType);
-				if (pExt->Power > 0)
-					pThis->PowerOutput += pExt->Power * count;
-				else
-					pThis->PowerDrain -= pExt->Power * count;
-			};
+		{
+			const int count = pThis->CountOwnedAndPresent(pType);
+			if (count == 0)
+				return;
+			const auto pExt = TechnoTypeExt::Fetch(pType);
+			if (pExt->Power > 0)
+				pThis->PowerOutput += pExt->Power * count;
+			else
+				pThis->PowerDrain -= pExt->Power * count;
+		};
 
 		for (const auto pType : InfantryTypeClass::Array)
 			updateDrainForThisType(pType);
@@ -200,7 +201,8 @@ DEFINE_HOOK(0x73E474, UnitClass_Unload_Storage, 0x6)
 				{
 					if (auto const pBldExt = BuildingExt::TryFetch(pBuilding))
 					{
-						pBldExt->AccumulatedIncome += static_cast<int>(stored * static_cast<float>(pTib->Value) * pBuilding->Owner->Type->IncomeMult);
+						pBldExt->AccumulatedIncome += static_cast<int>(stored * static_cast<float>(pTib->Value) *
+						                                               pBuilding->Owner->Type->IncomeMult);
 					}
 				}
 			}
@@ -214,7 +216,8 @@ DEFINE_HOOK(0x73E474, UnitClass_Unload_Storage, 0x6)
 			{
 				if (const auto pTiberium = TiberiumClass::Array.GetItem(idxTiberium))
 				{
-					const int bonusCredits = static_cast<int>(purifierBonus * pTiberium->Value * pHouse->Type->IncomeMult);
+					const int bonusCredits =
+					    static_cast<int>(purifierBonus * pTiberium->Value * pHouse->Type->IncomeMult);
 					if (bonusCredits > 0)
 					{
 						pHouse->GiveMoney(bonusCredits);
@@ -238,7 +241,8 @@ DEFINE_HOOK(0x4F99A6, HouseClass_UpdateAllSilos_NewRatio, 0x6)
 	{
 		auto const pHouseExt = HouseExt::Fetch(pThis);
 		float const newTib = pHouseExt ? pHouseExt->GetTotalTiberiumStorage() : pThis->OwnedTiberium.GetTotalAmount();
-		newRatio = static_cast<int>((static_cast<double>(newTib) / static_cast<double>(pThis->TotalStorage)) * 4.0 + 0.5);
+		newRatio =
+		    static_cast<int>((static_cast<double>(newTib) / static_cast<double>(pThis->TotalStorage)) * 4.0 + 0.5);
 	}
 
 	R->EAX(newRatio);
@@ -251,7 +255,8 @@ DEFINE_HOOK(0x4F69A9, HouseClass_Available_Money_TotalValue, 0x5)
 	auto const pHouseExt = HouseExt::Fetch(pThis);
 
 	double totalValue = 0.0;
-	size_t const count = std::max(pHouseExt ? pHouseExt->TiberiumStorage.size() : static_cast<size_t>(0), static_cast<size_t>(TiberiumClass::Array.Count));
+	size_t const count = std::max(pHouseExt ? pHouseExt->TiberiumStorage.size() : static_cast<size_t>(0),
+	                              static_cast<size_t>(TiberiumClass::Array.Count));
 	for (size_t i = 0; i < count; ++i)
 	{
 		float amount = 0.0f;
@@ -362,7 +367,7 @@ DEFINE_HOOK(0x4F97DD, HouseClass_TakeMoney_DrainTiberium, 0x7)
 
 namespace RecalcCenterTemp
 {
-	HouseExt* pExtData;
+HouseExt* pExtData;
 }
 
 DEFINE_HOOK(0x4FD166, HouseClass_RecalcCenter_SetContext, 0x5)
@@ -377,13 +382,17 @@ DEFINE_HOOK(0x4FD166, HouseClass_RecalcCenter_SetContext, 0x5)
 DEFINE_HOOK_AGAIN(0x4FD463, HouseClass_RecalcCenter_LimboDelivery, 0x6)
 DEFINE_HOOK(0x4FD1CD, HouseClass_RecalcCenter_LimboDelivery, 0x6)
 {
-	enum { SkipBuilding1 = 0x4FD23B, SkipBuilding2 = 0x4FD4D5 };
+	enum
+	{
+		SkipBuilding1 = 0x4FD23B,
+		SkipBuilding2 = 0x4FD4D5
+	};
 
 	GET(BuildingClass* const, pBuilding, ESI);
 
-	if (!MapClass::Instance.CoordinatesLegal(pBuilding->GetMapCoords())
-		|| (RecalcCenterTemp::pExtData && RecalcCenterTemp::pExtData->OwnsLimboDeliveredBuilding(pBuilding))
-		|| TechnoTypeExt::Fetch(pBuilding->Type)->IgnoreForBaseCenter)
+	if (!MapClass::Instance.CoordinatesLegal(pBuilding->GetMapCoords()) ||
+	    (RecalcCenterTemp::pExtData && RecalcCenterTemp::pExtData->OwnsLimboDeliveredBuilding(pBuilding)) ||
+	    TechnoTypeExt::Fetch(pBuilding->Type)->IgnoreForBaseCenter)
 	{
 		return R->Origin() == 0x4FD1CD ? SkipBuilding1 : SkipBuilding2;
 	}
@@ -393,11 +402,15 @@ DEFINE_HOOK(0x4FD1CD, HouseClass_RecalcCenter_LimboDelivery, 0x6)
 
 DEFINE_HOOK(0x4AC534, DisplayClass_ComputeStartPosition_IllegalCoords, 0x6)
 {
-	enum { SkipTechno = 0x4AC55B };
+	enum
+	{
+		SkipTechno = 0x4AC55B
+	};
 
 	GET(TechnoClass* const, pTechno, ECX);
 
-	if (!MapClass::Instance.CoordinatesLegal(pTechno->GetMapCoords()) || TechnoExt::Fetch(pTechno)->TypeExtData->IgnoreForBaseCenter)
+	if (!MapClass::Instance.CoordinatesLegal(pTechno->GetMapCoords()) ||
+	    TechnoExt::Fetch(pTechno)->TypeExtData->IgnoreForBaseCenter)
 		return SkipTechno;
 
 	return 0;
@@ -406,14 +419,15 @@ DEFINE_HOOK(0x4AC534, DisplayClass_ComputeStartPosition_IllegalCoords, 0x6)
 #pragma region LimboTracking
 
 // These hooks handle tracking objects that are limboed e.g not physically on the map or engaged in game logic updates.
-// The objects are manually updated once after pre-placed objects have been parsed, buildings are ignored as the limboed pre-placed buildings
-// are not relevant (walls that will be converted into overlays etc), after which automatic update on limbo/unlimbo and uninit is enabled.
+// The objects are manually updated once after pre-placed objects have been parsed, buildings are ignored as the limboed
+// pre-placed buildings are not relevant (walls that will be converted into overlays etc), after which automatic update
+// on limbo/unlimbo and uninit is enabled.
 
 namespace LimboTrackingTemp
 {
-	bool Enabled = false;
-	int IsBeingDeleted = 0;
-}
+bool Enabled = false;
+int IsBeingDeleted = 0;
+} // namespace LimboTrackingTemp
 
 DEFINE_HOOK(0x687B18, ScenarioClass_ReadINI_StartTracking, 0x7)
 {
@@ -421,7 +435,8 @@ DEFINE_HOOK(0x687B18, ScenarioClass_ReadINI_StartTracking, 0x7)
 	{
 		auto const pType = pTechno->GetTechnoType();
 
-		if (!pType->Insignificant && !pType->DontScore && pTechno->WhatAmI() != AbstractType::Building && pTechno->InLimbo)
+		if (!pType->Insignificant && !pType->DontScore && pTechno->WhatAmI() != AbstractType::Building &&
+		    pTechno->InLimbo)
 		{
 			auto const pOwnerExt = HouseExt::Fetch(pTechno->Owner);
 			pOwnerExt->AddToLimboTracking(pType);
@@ -503,7 +518,8 @@ DEFINE_HOOK(0x7015C9, TechnoClass_Captured_UpdateTracking, 0x6)
 	bool humanAndComputer = false;
 	bool hasTransporter = false;
 
-	if (pTypeExt->AutoDeath_Behavior.isset() || pExt->AE.HasOwnerChangeDiscardables || pTypeExt->Convert_HumanToComputer.Get() || pTypeExt->Convert_ComputerToHuman.Get())
+	if (pTypeExt->AutoDeath_Behavior.isset() || pExt->AE.HasOwnerChangeDiscardables ||
+	    pTypeExt->Convert_HumanToComputer.Get() || pTypeExt->Convert_ComputerToHuman.Get())
 	{
 		IgnoreRevertOnExit = pFoot ? FootExt::Fetch(pFoot)->IsOwnerChangeFromRevertOnExit : false;
 		I_am_human = pThis->Owner->IsControlledByHuman();
@@ -513,10 +529,14 @@ DEFINE_HOOK(0x7015C9, TechnoClass_Captured_UpdateTracking, 0x6)
 
 	if (pTypeExt->AutoDeath_Behavior.isset())
 	{
-		const bool humanToComputer = pTypeExt->AutoDeath_OnOwnerChange_HumanToComputer.Get(pTypeExt->AutoDeath_OnOwnerChange);
-		const bool computerToHuman = pTypeExt->AutoDeath_OnOwnerChange_ComputerToHuman.Get(pTypeExt->AutoDeath_OnOwnerChange);
+		const bool humanToComputer =
+		    pTypeExt->AutoDeath_OnOwnerChange_HumanToComputer.Get(pTypeExt->AutoDeath_OnOwnerChange);
+		const bool computerToHuman =
+		    pTypeExt->AutoDeath_OnOwnerChange_ComputerToHuman.Get(pTypeExt->AutoDeath_OnOwnerChange);
 
-		if (pTypeExt->AutoDeath_OnOwnerChange_IgnoreRevertOnExit.Get(RulesExt::Global()->AutoDeath_OnOwnerChange_IgnoreRevertOnExit) && IgnoreRevertOnExit)
+		if (pTypeExt->AutoDeath_OnOwnerChange_IgnoreRevertOnExit.Get(
+		        RulesExt::Global()->AutoDeath_OnOwnerChange_IgnoreRevertOnExit) &&
+		    IgnoreRevertOnExit)
 		{
 			pExt->AutoDeathFlag = 0;
 		}
@@ -533,9 +553,8 @@ DEFINE_HOOK(0x7015C9, TechnoClass_Captured_UpdateTracking, 0x6)
 			}
 		}
 
-		if (pExt->AutoDeathFlag == 1 && hasTransporter
-			&& !IgnoreRevertOnExit
-			&& !pTypeExt->AutoDeath_AllowLimboed.Get(RulesExt::Global()->AutoDeath_AllowLimboed))
+		if (pExt->AutoDeathFlag == 1 && hasTransporter && !IgnoreRevertOnExit &&
+		    !pTypeExt->AutoDeath_AllowLimboed.Get(RulesExt::Global()->AutoDeath_AllowLimboed))
 		{
 			pExt->AutoDeathFlag = 0;
 		}
@@ -574,9 +593,8 @@ DEFINE_HOOK(0x7015C9, TechnoClass_Captured_UpdateTracking, 0x6)
 	{
 		if (humanAndComputer)
 		{
-			if (const auto pConvertTo = I_am_human
-				? pTypeExt->Convert_HumanToComputer.Get()
-				: pTypeExt->Convert_ComputerToHuman.Get())
+			if (const auto pConvertTo =
+			        I_am_human ? pTypeExt->Convert_HumanToComputer.Get() : pTypeExt->Convert_ComputerToHuman.Get())
 			{
 				TechnoExt::ConvertToType(pFoot, pConvertTo);
 			}
@@ -645,7 +663,10 @@ DEFINE_HOOK(0x7015C9, TechnoClass_Captured_UpdateTracking, 0x6)
 
 DEFINE_HOOK(0x65EB2D, HouseClass_SendSpyPlane_PickEdgeCell, 0x6)
 {
-	enum { SkipGameCode = 0x65EB4D };
+	enum
+	{
+		SkipGameCode = 0x65EB4D
+	};
 
 	GET(AircraftClass* const, pAircraft, ESI);
 	GET(Edge const, edge, EAX);
@@ -663,7 +684,11 @@ DEFINE_HOOK(0x65EB2D, HouseClass_SendSpyPlane_PickEdgeCell, 0x6)
 
 DEFINE_HOOK(0x65EB8D, HouseClass_SendSpyPlane_PlaceAircraft, 0x6)
 {
-	enum { SkipGameCode = 0x65EBE5, SkipGameCodeNoSuccess = 0x65EC12 };
+	enum
+	{
+		SkipGameCode = 0x65EBE5,
+		SkipGameCodeNoSuccess = 0x65EC12
+	};
 
 	GET(AircraftClass* const, pAircraft, ESI);
 	GET(CellStruct const, edgeCell, EDI);
@@ -675,7 +700,10 @@ DEFINE_HOOK(0x65EB8D, HouseClass_SendSpyPlane_PlaceAircraft, 0x6)
 
 DEFINE_HOOK(0x65E881, HouseClass_SendAirstrike_PickEdgeCell, 0x5)
 {
-	enum { SkipGameCode = 0x65E8A0 };
+	enum
+	{
+		SkipGameCode = 0x65E8A0
+	};
 
 	GET(AircraftTypeClass* const, pAircraftType, EBP);
 	GET(Edge const, edge, EAX);
@@ -693,7 +721,11 @@ DEFINE_HOOK(0x65E881, HouseClass_SendAirstrike_PickEdgeCell, 0x5)
 
 DEFINE_HOOK(0x65E997, HouseClass_SendAirstrike_PlaceAircraft, 0x6)
 {
-	enum { SkipGameCode = 0x65E9EE, SkipGameCodeNoSuccess = 0x65EA8B };
+	enum
+	{
+		SkipGameCode = 0x65E9EE,
+		SkipGameCodeNoSuccess = 0x65EA8B
+	};
 
 	GET(AircraftClass* const, pAircraft, ESI);
 	GET(CellStruct const, edgeCell, EDI);
@@ -705,7 +737,10 @@ DEFINE_HOOK(0x65E997, HouseClass_SendAirstrike_PlaceAircraft, 0x6)
 
 DEFINE_HOOK(0x65E6DB, HouseClass_SendParadrop_PickEdgeCell, 0x6)
 {
-	enum { SkipGameCode = 0x65E6FB };
+	enum
+	{
+		SkipGameCode = 0x65E6FB
+	};
 
 	GET(AircraftClass* const, pAircraft, ESI);
 	GET(Edge const, edge, EAX);
@@ -723,7 +758,11 @@ DEFINE_HOOK(0x65E6DB, HouseClass_SendParadrop_PickEdgeCell, 0x6)
 
 DEFINE_HOOK(0x65E73A, HouseClass_SendParadrop_PlaceAircraft, 0x5)
 {
-	enum { SkipGameCode = 0x65E79B, SkipGameCodeNoSuccess = 0x65E82C };
+	enum
+	{
+		SkipGameCode = 0x65E79B,
+		SkipGameCodeNoSuccess = 0x65E82C
+	};
 
 	GET(AircraftClass* const, pAircraft, ESI);
 	GET(CellStruct const, edgeCell, EDI);
@@ -735,7 +774,10 @@ DEFINE_HOOK(0x65E73A, HouseClass_SendParadrop_PlaceAircraft, 0x5)
 
 DEFINE_HOOK(0x415A7A, AircraftClass_Mission_Retreat_PickEdgeCell, 0x6)
 {
-	enum { SkipGameCode = 0x415A9A };
+	enum
+	{
+		SkipGameCode = 0x415A9A
+	};
 
 	GET(AircraftClass* const, pThis, ESI);
 	GET(Edge const, edge, EAX);
@@ -918,8 +960,10 @@ void HouseExt::AI_TryFireSW_CooldownGroupAware(HouseClass* pThis)
 				groupNames += groupName;
 			}
 
-			Debug::Log("[SW.CooldownGroup] House '%s' has %d ready superweapons in group '%s'; randomly selected [%s].\n",
-				pThis->get_ID(), static_cast<int>(cluster.size()), groupNames.c_str(), cluster[chosenIndex]->Type->get_ID());
+			Debug::Log(
+			    "[SW.CooldownGroup] House '%s' has %d ready superweapons in group '%s'; randomly selected [%s].\n",
+			    pThis->get_ID(), static_cast<int>(cluster.size()), groupNames.c_str(),
+			    cluster[chosenIndex]->Type->get_ID());
 
 			for (size_t k = 0; k < cluster.size(); ++k)
 			{
@@ -1003,7 +1047,10 @@ void HouseExt::AI_TryFireSW_CooldownGroupAware(HouseClass* pThis)
 
 DEFINE_HOOK(0x4FD77C, HouseClass_ExpertAI_Superweapons, 0x5)
 {
-	enum { SkipSWProcess = 0x4FD7A0 };
+	enum
+	{
+		SkipSWProcess = 0x4FD7A0
+	};
 
 	if (RulesExt::Global()->AISuperWeaponDelay.isset())
 		return SkipSWProcess;
@@ -1066,7 +1113,10 @@ DEFINE_HOOK(0x4FF9C9, HouseClass_ExcludeFromMultipleFactoryBonus, 0x6)
 
 DEFINE_HOOK(0x500910, HouseClass_GetFactoryCount, 0x5)
 {
-	enum { SkipGameCode = 0x50095D };
+	enum
+	{
+		SkipGameCode = 0x50095D
+	};
 
 	GET(HouseClass*, pThis, ECX);
 	GET_STACK(AbstractType, rtti, 0x4);
@@ -1081,7 +1131,10 @@ DEFINE_HOOK(0x500910, HouseClass_GetFactoryCount, 0x5)
 // Sell all and all in.
 DEFINE_HOOK(0x4FD8F7, HouseClass_UpdateAI_OnLastLegs, 0x10)
 {
-	enum { ret = 0x4FD907 };
+	enum
+	{
+		ret = 0x4FD907
+	};
 
 	GET(HouseClass*, pThis, EBX);
 
@@ -1103,7 +1156,10 @@ DEFINE_HOOK(0x4FD8F7, HouseClass_UpdateAI_OnLastLegs, 0x10)
 
 DEFINE_HOOK(0x4F8ACC, HouseClass_Update_ResetTeamDelay, 0x6)
 {
-	enum { ResetTeamDelay = 0x4F8AD5 };
+	enum
+	{
+		ResetTeamDelay = 0x4F8AD5
+	};
 
 	GET(HouseClass*, pThis, ESI);
 
@@ -1128,21 +1184,19 @@ DEFINE_HOOK(0x4F8ACC, HouseClass_Update_ResetTeamDelay, 0x6)
 		if (teamDelayType != DynamicTeamDelayType::StartingPoint)
 		{
 			playerCount = 0;
-			const bool checkAlive = teamDelayType == DynamicTeamDelayType::AliveCount
-				|| teamDelayType == DynamicTeamDelayType::AliveAllies
-				|| teamDelayType == DynamicTeamDelayType::AliveEnemies;
-			const bool checkAllies = teamDelayType == DynamicTeamDelayType::Allies
-				|| teamDelayType == DynamicTeamDelayType::AliveAllies;
-			const bool checkEnemies = teamDelayType == DynamicTeamDelayType::Enemies
-				|| teamDelayType == DynamicTeamDelayType::AliveEnemies;
+			const bool checkAlive = teamDelayType == DynamicTeamDelayType::AliveCount ||
+			                        teamDelayType == DynamicTeamDelayType::AliveAllies ||
+			                        teamDelayType == DynamicTeamDelayType::AliveEnemies;
+			const bool checkAllies =
+			    teamDelayType == DynamicTeamDelayType::Allies || teamDelayType == DynamicTeamDelayType::AliveAllies;
+			const bool checkEnemies =
+			    teamDelayType == DynamicTeamDelayType::Enemies || teamDelayType == DynamicTeamDelayType::AliveEnemies;
 
 			for (auto const pHouse : HouseClass::Array)
 			{
-				if ((!checkAlive || !pHouse->Defeated)
-					&& !pHouse->IsObserver()
-					&& !pHouse->IsNeutral()
-					&& (!checkAllies || (pThis != pHouse && pThis->IsAlliedWith(pHouse)))
-					&& (!checkEnemies || !pThis->IsAlliedWith(pHouse)))
+				if ((!checkAlive || !pHouse->Defeated) && !pHouse->IsObserver() && !pHouse->IsNeutral() &&
+				    (!checkAllies || (pThis != pHouse && pThis->IsAlliedWith(pHouse))) &&
+				    (!checkEnemies || !pThis->IsAlliedWith(pHouse)))
 				{
 					playerCount += 1;
 				}
@@ -1180,7 +1234,11 @@ DEFINE_HOOK(0x4F8ACC, HouseClass_Update_ResetTeamDelay, 0x6)
 
 DEFINE_HOOK(0x508E17, HouseClass_UpdateRadar_FreeRadar, 0x8)
 {
-	enum { ForceRadar = 0x508F2F, Continue = 0x508E4A };
+	enum
+	{
+		ForceRadar = 0x508F2F,
+		Continue = 0x508E4A
+	};
 
 	GET(HouseClass*, pThis, ECX);
 	REF_STACK(bool, enableRadar, STACK_OFFSET(0x1C, -0xC));
@@ -1210,7 +1268,10 @@ DEFINE_HOOK(0x508E17, HouseClass_UpdateRadar_FreeRadar, 0x8)
 // WW's code set anger on every houses, even on the allies.
 DEFINE_HOOK(0x4FD616, HouseClass_UpdateAI_DontAngerOnAlly, 0x9)
 {
-	enum { SkipCurrentHouse = 0x4FD6FE };
+	enum
+	{
+		SkipCurrentHouse = 0x4FD6FE
+	};
 
 	GET(HouseClass*, pThis, EBX);
 	GET(HouseClass*, pTargetHouse, ESI);
@@ -1221,9 +1282,13 @@ DEFINE_HOOK(0x4FD616, HouseClass_UpdateAI_DontAngerOnAlly, 0x9)
 // WW calculates the distance from pThis to pThis ...
 DEFINE_HOOK(0x4FD635, HouseClass_UpdateAI_DistCalcFix, 0x5)
 {
-	enum { SkipGameCode = 0x4FD657 };
+	enum
+	{
+		SkipGameCode = 0x4FD657
+	};
 	GET(HouseClass*, pTargetHouse, ESI);
-	auto baseMapCrd = pTargetHouse->BaseCenter == CellStruct::Empty ? pTargetHouse->BaseSpawnCell : pTargetHouse->BaseCenter;
+	auto baseMapCrd =
+	    pTargetHouse->BaseCenter == CellStruct::Empty ? pTargetHouse->BaseSpawnCell : pTargetHouse->BaseCenter;
 	R->EAX(*(int*)&baseMapCrd);
 	return SkipGameCode;
 }
@@ -1231,7 +1296,10 @@ DEFINE_HOOK(0x4FD635, HouseClass_UpdateAI_DistCalcFix, 0x5)
 // Replace game function.
 DEFINE_HOOK(0x50BF60, HouseClass_CalculateCostMultipliers, 0x5)
 {
-	enum { SkipGameCode = 0x50C04A };
+	enum
+	{
+		SkipGameCode = 0x50C04A
+	};
 
 	GET(HouseClass*, pThis, ECX);
 
@@ -1307,7 +1375,11 @@ DEFINE_HOOK(0x6A7AE1, SidebarClass_Update_RepairButton, 0x6)
 
 DEFINE_HOOK(0x45063F, BuildingClass_UpdateRepairSell_PlayerAutoRepair, 0x6)
 {
-	enum { CanAutoRepair = 0x450659, CanNotAutoRepair = 0x450813 };
+	enum
+	{
+		CanAutoRepair = 0x450659,
+		CanNotAutoRepair = 0x450813
+	};
 
 	if (!RulesExt::Global()->ExtendedPlayerRepair)
 		return 0;
@@ -1368,7 +1440,8 @@ DEFINE_HOOK(0x430C64, BeaconManagerClass_PlaceBeacon_RecordOrder, 0x5)
 	const auto pHouse = HouseClass::Array.GetItem(houseIdx);
 	const auto pExt = HouseExt::Fetch(pHouse);
 
-	const int maxVal = std::max({ pExt->BeaconsPlacedOrder[0], pExt->BeaconsPlacedOrder[1], pExt->BeaconsPlacedOrder[2] });
+	const int maxVal =
+	    std::max({pExt->BeaconsPlacedOrder[0], pExt->BeaconsPlacedOrder[1], pExt->BeaconsPlacedOrder[2]});
 	pExt->BeaconsPlacedOrder[beaconIdx] = maxVal + 1;
 
 	return 0;
@@ -1376,7 +1449,10 @@ DEFINE_HOOK(0x430C64, BeaconManagerClass_PlaceBeacon_RecordOrder, 0x5)
 
 DEFINE_HOOK(0x4AC9B2, MouseClass_ToggleBeaconMode_AllUsed, 0x6)
 {
-	enum { RET = 0x4AC9B8 };
+	enum
+	{
+		RET = 0x4AC9B8
+	};
 
 	GET(const bool, canPlace, EAX);
 
@@ -1417,73 +1493,3 @@ DEFINE_HOOK(0x4AC9B2, MouseClass_ToggleBeaconMode_AllUsed, 0x6)
  *
  *  Author: Rampastring
  */
-DEFINE_HOOK(0x4FE3E9, HouseClass_AI_Building_Intercept, 0x7)
-{
-	enum { ReturnEpilogue = 0x4FEA48, ReturnDefault = 0 };
-
-	GET(HouseClass*, pHouse, EBP);
-
-	/**
-	 *  If our custom AI logic is enabled, transfer control to it and return.
-	 */
-	if (HouseExt::IsAdvancedAIActive(pHouse))
-	{
-		HouseExt::AdvAI_Building(pHouse);
-		return ReturnEpilogue;
-	}
-
-	return ReturnDefault;
-}
-
-DEFINE_HOOK(0x4FD50D, HouseClass_Expert_AI_Advanced_AI_Intercept, 0x8)
-{
-	GET(HouseClass*, pHouse, EBX);
-
-	if (HouseExt::IsAdvancedAIActive(pHouse))
-		HouseExt::AdvAI_ExpertAI(pHouse);
-
-	return 0;
-}
-
-// Map action 30 (AutoBaseBuilding) turns a campaign AI house into a "skirmish-like" base builder,
-// so it also opts the house into the Advanced AI logics (see HouseExt::IsAdvancedAIActive).
-DEFINE_HOOK(0x6E0F02, TActionClass_AutoBaseBuilding_Enable, 0x7)
-{
-	GET(HouseClass*, pHouse, ESI);
-
-	if (auto const pExt = HouseExt::ExtMap.Find(pHouse))
-		pExt->AdvancedAI_Campaign = true;
-
-	return 0;
-}
-
-DEFINE_HOOK(0x6E0F7F, TActionClass_AutoBaseBuilding_Disable, 0x7)
-{
-	GET(HouseClass*, pHouse, EAX);
-
-	if (auto const pExt = HouseExt::ExtMap.Find(pHouse))
-		pExt->AdvancedAI_Campaign = false;
-
-	return 0;
-}
-
-// Same as above, inlined copy inside TActionClass::Execute.
-DEFINE_HOOK(0x6DE21B, TActionClass_Execute_AutoBaseBuilding_Enable, 0x7)
-{
-	GET(HouseClass*, pHouse, ESI);
-
-	if (auto const pExt = HouseExt::ExtMap.Find(pHouse))
-		pExt->AdvancedAI_Campaign = true;
-
-	return 0;
-}
-
-DEFINE_HOOK(0x6DE29F, TActionClass_Execute_AutoBaseBuilding_Disable, 0x7)
-{
-	GET(HouseClass*, pHouse, EAX);
-
-	if (auto const pExt = HouseExt::ExtMap.Find(pHouse))
-		pExt->AdvancedAI_Campaign = false;
-
-	return 0;
-}

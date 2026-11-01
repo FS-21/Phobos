@@ -1,15 +1,16 @@
 #include "Body.h"
+#include <Misc/NeuralAI/NeuralAI.h>
 
+#include <BuildingClass.h>
+#include <Ext/BuildingType/Body.h>
+#include <Ext/HouseType/Body.h>
 #include <Ext/SWType/Body.h>
 #include <Ext/Techno/Body.h>
-#include <Ext/BuildingType/Body.h>
-#include <BuildingClass.h>
-#include <Ext/HouseType/Body.h>
 #include <Ext/TechnoType/Body.h>
 #include <FactoryClass.h>
 #include <New/Type/ResourceTypeClass.h>
 
-//Static init
+// Static init
 
 HouseExt::ExtContainer HouseExt::ExtMap;
 
@@ -22,6 +23,11 @@ std::vector<int> HouseExt::AIProduction_BestChoicesNaval;
 void HouseExt::UpdateVehicleProduction()
 {
 	const auto pThis = this->OwnerObject();
+	if (NeuralAI::IsEnabledForHouse(pThis))
+	{
+		NeuralAI::UpdateUnitProduction(pThis);
+		return;
+	}
 	const bool skipGround = pThis->ProducingUnitTypeIndex != -1;
 	const bool skipNaval = this->ProducingNavalUnitTypeIndex != -1;
 
@@ -50,8 +56,8 @@ void HouseExt::UpdateVehicleProduction()
 
 		const int teamCreationFrame = currentTeam->CreationFrame;
 
-		if ((!currentTeam->Type->Reinforce || currentTeam->IsFullStrength)
-			&& (currentTeam->IsForcedActive || currentTeam->IsHasBeen))
+		if ((!currentTeam->Type->Reinforce || currentTeam->IsFullStrength) &&
+		    (currentTeam->IsForcedActive || currentTeam->IsHasBeen))
 		{
 			continue;
 		}
@@ -61,9 +67,8 @@ void HouseExt::UpdateVehicleProduction()
 
 		for (auto const currentMember : taskForceMembers)
 		{
-			if (currentMember->WhatAmI() != UnitTypeClass::AbsID
-				|| (skipGround && !currentMember->Naval)
-				|| (skipNaval && currentMember->Naval))
+			if (currentMember->WhatAmI() != UnitTypeClass::AbsID || (skipGround && !currentMember->Naval) ||
+			    (skipNaval && currentMember->Naval))
 			{
 				continue;
 			}
@@ -106,9 +111,8 @@ void HouseExt::UpdateVehicleProduction()
 		auto const type = UnitTypeClass::Array[static_cast<int>(i)];
 		const int currentValue = values[i];
 
-		if (currentValue <= 0
-			|| pThis->CanBuild(type, false, false) == CanBuildResult::Unbuildable
-			|| type->GetActualCost(pThis) > money)
+		if (currentValue <= 0 || pThis->CanBuild(type, false, false) == CanBuildResult::Unbuildable ||
+		    type->GetActualCost(pThis) > money)
 		{
 			continue;
 		}
@@ -169,19 +173,20 @@ bool HouseExt::UpdateHarvesterProduction()
 	auto const pThis = this->OwnerObject();
 	const int AIDifficulty = pThis->GetAIDifficultyIndex();
 	const int idxParentCountry = pThis->Type->FindParentCountryIndex();
-	auto const pHarvesterUnit = HouseExt::FindOwned(pThis, idxParentCountry, make_iterator(RulesClass::Instance->HarvesterUnit));
+	auto const pHarvesterUnit =
+	    HouseExt::FindOwned(pThis, idxParentCountry, make_iterator(RulesClass::Instance->HarvesterUnit));
 
 	if (pHarvesterUnit)
 	{
 		auto const harvesters = pThis->CountResourceGatherers;
-		auto const maxHarvesters = HouseExt::FindBuildable(
-			pThis, idxParentCountry, make_iterator(RulesClass::Instance->BuildRefinery))
-			? RulesClass::Instance->HarvestersPerRefinery[AIDifficulty] * pThis->CountResourceDestinations
-			: RulesClass::Instance->AISlaveMinerNumber[AIDifficulty];
+		auto const maxHarvesters =
+		    HouseExt::FindBuildable(pThis, idxParentCountry, make_iterator(RulesClass::Instance->BuildRefinery))
+		        ? RulesClass::Instance->HarvestersPerRefinery[AIDifficulty] * pThis->CountResourceDestinations
+		        : RulesClass::Instance->AISlaveMinerNumber[AIDifficulty];
 
-		if (pThis->IQLevel2 >= RulesClass::Instance->Harvester && !pThis->IsTiberiumShort
-			&& !pThis->IsControlledByHuman() && harvesters < maxHarvesters
-			&& pThis->TechLevel >= pHarvesterUnit->TechLevel)
+		if (pThis->IQLevel2 >= RulesClass::Instance->Harvester && !pThis->IsTiberiumShort &&
+		    !pThis->IsControlledByHuman() && harvesters < maxHarvesters &&
+		    pThis->TechLevel >= pHarvesterUnit->TechLevel)
 		{
 			pThis->ProducingUnitTypeIndex = pHarvesterUnit->ArrayIndex;
 			return true;
@@ -193,7 +198,8 @@ bool HouseExt::UpdateHarvesterProduction()
 
 		if (pThis->CountResourceGatherers < maxHarvesters)
 		{
-			auto const pRefinery = FindBuildable(pThis, idxParentCountry, make_iterator(RulesClass::Instance->BuildRefinery));
+			auto const pRefinery =
+			    FindBuildable(pThis, idxParentCountry, make_iterator(RulesClass::Instance->BuildRefinery));
 
 			if (pRefinery)
 			{
@@ -221,9 +227,8 @@ bool HouseExt::OwnsLimboDeliveredBuilding(BuildingClass* pBuilding) const
 	return std::find(vec.begin(), vec.end(), pBuilding) != vec.end();
 }
 
-size_t HouseExt::FindOwnedIndex(
-	HouseClass const* const, int const idxParentCountry,
-	Iterator<TechnoTypeClass const*> const items, size_t const start)
+size_t HouseExt::FindOwnedIndex(HouseClass const* const, int const idxParentCountry,
+                                Iterator<TechnoTypeClass const*> const items, size_t const start)
 {
 	auto const bitOwner = 1u << idxParentCountry;
 
@@ -238,12 +243,10 @@ size_t HouseExt::FindOwnedIndex(
 	return items.size();
 }
 
-bool HouseExt::IsDisabledFromShell(
-	HouseClass const* const pHouse, BuildingTypeClass const* const pItem)
+bool HouseExt::IsDisabledFromShell(HouseClass const* const pHouse, BuildingTypeClass const* const pItem)
 {
 	// SWAllowed does not apply to campaigns any more
-	if (SessionClass::IsCampaign()
-		|| GameModeOptionsClass::Instance.SWAllowed)
+	if (SessionClass::IsCampaign() || GameModeOptionsClass::Instance.SWAllowed)
 	{
 		return false;
 	}
@@ -265,9 +268,8 @@ bool HouseExt::IsDisabledFromShell(
 	return false;
 }
 
-size_t HouseExt::FindBuildableIndex(
-	HouseClass const* const pHouse, int const idxParentCountry,
-	Iterator<TechnoTypeClass const*> const items, size_t const start)
+size_t HouseExt::FindBuildableIndex(HouseClass const* const pHouse, int const idxParentCountry,
+                                    Iterator<TechnoTypeClass const*> const items, size_t const start)
 {
 	for (auto i = start; i < items.size(); ++i)
 	{
@@ -313,8 +315,11 @@ int HouseExt::TotalHarvesterCount(HouseClass* pThis)
 	return result;
 }
 
-// This basically gets same cell that AI script action 53 Gather at Enemy Base uses, and code for that (0x6EF700) was used as reference here.
-CellClass* HouseExt::GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass* pCurrentHouse, CoordStruct defaultCurrentCoords, SpeedType speedTypeZone, int extraDistance)
+// This basically gets same cell that AI script action 53 Gather at Enemy Base uses, and code for that (0x6EF700) was
+// used as reference here.
+CellClass* HouseExt::GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass* pCurrentHouse,
+                                            CoordStruct defaultCurrentCoords, SpeedType speedTypeZone,
+                                            int extraDistance)
 {
 	if (!pTargetHouse || !pCurrentHouse)
 		return nullptr;
@@ -333,7 +338,8 @@ CellClass* HouseExt::GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass
 	const auto newCoords = GeneralUtils::CalculateCoordsFromDistance(currentCoords, targetCoords, distance);
 
 	auto cellStruct = CellClass::Coord2Cell(newCoords);
-	cellStruct = MapClass::Instance.NearByLocation(cellStruct, speedTypeZone, -1, MovementZone::Normal, false, 3, 3, false, false, false, true, cellStruct, false, false);
+	cellStruct = MapClass::Instance.NearByLocation(cellStruct, speedTypeZone, -1, MovementZone::Normal, false, 3, 3,
+	                                               false, false, false, true, cellStruct, false, false);
 
 	if (cellStruct == CellStruct::Empty)
 		return nullptr;
@@ -379,7 +385,8 @@ void HouseExt::GetAIChronoshiftSupers(HouseClass* pThis, SuperClass*& pSuperCSph
 }
 
 // Ares
-HouseClass* HouseExt::GetHouseKind(OwnerHouseKind const kind, bool const allowRandom, HouseClass* const pDefault, HouseClass* const pInvoker, HouseClass* const pVictim)
+HouseClass* HouseExt::GetHouseKind(OwnerHouseKind const kind, bool const allowRandom, HouseClass* const pDefault,
+                                   HouseClass* const pInvoker, HouseClass* const pVictim)
 {
 	switch (kind)
 	{
@@ -396,7 +403,8 @@ HouseClass* HouseExt::GetHouseKind(OwnerHouseKind const kind, bool const allowRa
 		return HouseClass::FindNeutral();
 	case OwnerHouseKind::Random:
 		if (allowRandom)
-			return HouseClass::Array.GetItem(ScenarioClass::Instance->Random.RandomRanged(0, HouseClass::Array.Count - 1));
+			return HouseClass::Array.GetItem(
+			    ScenarioClass::Instance->Random.RandomRanged(0, HouseClass::Array.Count - 1));
 		else
 			return pDefault;
 	case OwnerHouseKind::Default:
@@ -410,11 +418,9 @@ bool HouseExt::IsNeutralOrSpecialHouse(const HouseClass* pHouse)
 	if (!pHouse)
 		return false;
 
-	return pHouse->IsNeutral() ||
-		(pHouse->Type && pHouse->Type->MultiplayPassive) ||
-		pHouse == HouseClass::FindNeutral() ||
-		pHouse == HouseClass::FindSpecial() ||
-		pHouse == HouseClass::FindCivilianSide();
+	return pHouse->IsNeutral() || (pHouse->Type && pHouse->Type->MultiplayPassive) ||
+	       pHouse == HouseClass::FindNeutral() || pHouse == HouseClass::FindSpecial() ||
+	       pHouse == HouseClass::FindCivilianSide();
 }
 
 void HouseExt::AddToLimboTracking(TechnoTypeClass* pTechnoType)
@@ -576,7 +582,8 @@ float HouseExt::GetRestrictedFactoryPlantMult(TechnoTypeClass* pTechnoType) cons
 		if (pTypeExt->FactoryPlant_AllowTypes.size() > 0 && !pTypeExt->FactoryPlant_AllowTypes.Contains(pTechnoType))
 			continue;
 
-		if (pTypeExt->FactoryPlant_DisallowTypes.size() > 0 && pTypeExt->FactoryPlant_DisallowTypes.Contains(pTechnoType))
+		if (pTypeExt->FactoryPlant_DisallowTypes.size() > 0 &&
+		    pTypeExt->FactoryPlant_DisallowTypes.Contains(pTechnoType))
 			continue;
 
 		counts[pType->ArrayIndex]++;
@@ -633,13 +640,14 @@ int HouseExt::GetHouseIndex(int param, TeamClass* pTeam, TActionClass* pTAction)
 			else if (!pHouse->Defeated && !pHouse->IsObserver())
 			{
 				if ((param == -1 && !pHouse->Type->MultiplayPassive) // Random non-neutral player
-					|| (param == -3 && !pHouse->IsObserver())) // Random human player
+				    || (param == -3 && !pHouse->IsObserver()))       // Random human player
 				{
 					housesListIdx.push_back(pHouse->ArrayIndex);
 				}
 
 				if (housesListIdx.size() > 0)
-					houseIdx = housesListIdx.at(ScenarioClass::Instance->Random.RandomRanged(0, housesListIdx.size() - 1));
+					houseIdx =
+					    housesListIdx.at(ScenarioClass::Instance->Random.RandomRanged(0, housesListIdx.size() - 1));
 				else
 					return -1;
 			}
@@ -663,7 +671,8 @@ int HouseExt::GetHouseIndex(int param, TeamClass* pTeam, TActionClass* pTAction)
 	{
 		// Is a invalid index value
 		if (pTAction)
-			Debug::Log(__FUNCTION__": Invalid house index '%d'. This action could be skipped.\n", (int)pTAction->ActionKind, param);
+			Debug::Log(__FUNCTION__ ": Invalid house index '%d'. This action could be skipped.\n",
+			           (int)pTAction->ActionKind, param);
 
 		return -1;
 	}
@@ -683,26 +692,32 @@ void HouseExt::SetForceOnlyTargetHouseEnemy(HouseClass* pThis, int mode)
 	if (mode < 0 || mode > 2)
 		mode = -1;
 
-	enum { ForceFalse = 0, ForceTrue = 1, ForceRandom = 2};
+	enum
+	{
+		ForceFalse = 0,
+		ForceTrue = 1,
+		ForceRandom = 2
+	};
 	pHouseExt->ForceOnlyTargetHouseEnemyMode = mode;
 
 	switch (mode)
 	{
-		case ForceFalse:
-			pHouseExt->ForceOnlyTargetHouseEnemy = false;
-			break;
+	case ForceFalse:
+		pHouseExt->ForceOnlyTargetHouseEnemy = false;
+		break;
 
-		case ForceTrue:
-			pHouseExt->ForceOnlyTargetHouseEnemy = true;
-			break;
+	case ForceTrue:
+		pHouseExt->ForceOnlyTargetHouseEnemy = true;
+		break;
 
-		case ForceRandom:
-			pHouseExt->ForceOnlyTargetHouseEnemy = (bool)ScenarioClass::Instance->Random.RandomRanged(0, 1);;
-			break;
+	case ForceRandom:
+		pHouseExt->ForceOnlyTargetHouseEnemy = (bool)ScenarioClass::Instance->Random.RandomRanged(0, 1);
+		;
+		break;
 
-		default:
-			pHouseExt->ForceOnlyTargetHouseEnemy = false;
-			break;
+	default:
+		pHouseExt->ForceOnlyTargetHouseEnemy = false;
+		break;
 	}
 }
 
@@ -725,6 +740,9 @@ void HouseExt::LoadFromINIFile(CCINIClass* const pINI)
 	}
 
 	this->AdvancedAI_Campaign.Read(exINI, pSection, "AdvancedAI");
+	this->AIBrain_Campaign.Read(exINI, pSection, "AIBrain");
+	this->AIBrain_Campaign.Read(exINI, pSection, "NeuralAI");
+	this->AIBrain_Campaign.Read(exINI, pSection, "AdvancedAI");
 }
 
 int HouseExt::GetForceEnemyIndex()
@@ -767,78 +785,91 @@ void HouseExt::CalculatePowerSurplus(HouseClass* pThis)
 // =============================
 // load / save
 
-template <typename T>
-void HouseExt::Serialize(T& Stm)
+template <typename T> void HouseExt::Serialize(T& Stm)
 {
-	Stm
-		.Process(this->PowerPlantEnhancers)
-		.Process(this->OwnedLimboDeliveredBuildings)
-		.Process(this->OwnedCountedHarvesters)
-		.Process(this->LimboAircraft)
-		.Process(this->LimboBuildings)
-		.Process(this->LimboInfantry)
-		.Process(this->LimboVehicles)
-		.Process(this->Factory_BuildingType)
-		.Process(this->Factory_InfantryType)
-		.Process(this->Factory_VehicleType)
-		.Process(this->Factory_NavyType)
-		.Process(this->Factory_AircraftType)
-		.Process(this->AISuperWeaponDelayTimer)
-		.Process(this->RepairBaseNodes)
-		.Process(this->AdvancedAI_Campaign)
-		.Process(this->RestrictedFactoryPlants)
-		.Process(this->LastBuiltNavalVehicleType)
-		.Process(this->ProducingNavalUnitTypeIndex)
-		.Process(this->CombatAlertTimer)
-		.Process(this->NumAirpads_NonMFB)
-		.Process(this->NumBarracks_NonMFB)
-		.Process(this->NumWarFactories_NonMFB)
-		.Process(this->NumConYards_NonMFB)
-		.Process(this->NumShipyards_NonMFB)
-		.Process(this->AIFireSaleDelayTimer)
-		.Process(this->SuspendedEMPulseSWs)
-		.Process(this->SuperExts)
-		.Process(this->ForceEnemyIndex)
-		.Process(this->AITriggers_ValidList)
-		.Process(this->CustomResources)
-		.Process(this->ResourceCollectorCounts)
-		.Process(this->ForceOnlyTargetHouseEnemy)
-		.Process(this->ForceOnlyTargetHouseEnemyMode)
-		.Process(this->TeamDelay)
-		.Process(this->FreeRadar)
-		.Process(this->ForceRadar)
-		.Process(this->PlayerAutoRepair)
-		.Process(this->DropshipLoadout_Carriers)
-		.Process(this->DropshipLoadout_Cargo)
-		.Process(this->DropshipLoadout_InitialUnits)
-		.Process(this->DropshipLoadout_SWInitialUnits)
-		.Process(this->DropshipLoadout_SWCargo)
-		.Process(this->DropshipLoadout_SWCarrier)
-		.Process(this->DropshipLoadout_InitialUnitsSet)
-		.Process(this->DropshipLoadout_SWInitialUnitsSet)
-		.Process(this->ExpansionPlacementFailures)
-		.Process(this->LastAttackedBuildingCoords)
-		.Process(this->NextRefineryPlacementLocation)
-		.Process(this->UnclaimedTiberiumZones)
-		.Process(this->LastUnclaimedTiberiumCheckFrame)
-		.Process(this->IsBuildingRecoveryRefinery)
-		.Process(this->NextHarvesterRecoveryFrame)
-		.Process(this->CachedResourceCandidates)
-		.Process(this->CachedResourceCandidatesExpiryFrame)
-		.Process(this->LastParanoiaFrame)
-		.Process(this->DefensivePlaceholders)
-		.Process(this->ConsecutiveCombatBuilds)
-		.Process(this->ConsecutiveResourceBuilds)
-		.Process(this->ActiveEvaVoiceBuildingType)
-		.Process(this->FactoryResourceStates)
-		.Process(this->Academies)
-		//.Process(this->BeaconsPlacedOrder) beacon is not saved, so this follows it.
-		.Process(this->TiberiumStorage)
-		.Process(this->WeedStorage)
-		.Process(this->OwnedDeployingUnits)
-		.Process(this->Common)
-		.Process(this->Combat)
-		;
+	Stm.Process(this->PowerPlantEnhancers)
+	    .Process(this->OwnedLimboDeliveredBuildings)
+	    .Process(this->OwnedCountedHarvesters)
+	    .Process(this->LimboAircraft)
+	    .Process(this->LimboBuildings)
+	    .Process(this->LimboInfantry)
+	    .Process(this->LimboVehicles)
+	    .Process(this->Factory_BuildingType)
+	    .Process(this->Factory_InfantryType)
+	    .Process(this->Factory_VehicleType)
+	    .Process(this->Factory_NavyType)
+	    .Process(this->Factory_AircraftType)
+	    .Process(this->AISuperWeaponDelayTimer)
+	    .Process(this->RepairBaseNodes)
+	    .Process(this->AdvancedAI_Campaign)
+	    .Process(this->AIBrain_Campaign)
+	    .Process(this->AIBrain_Archetype)
+	    .Process(this->AIBrain_ActiveExpert)
+	    .Process(this->AIBrain_LastInferenceFrame)
+	    .Process(this->AIBrain_NextBuildingTarget)
+	    .Process(this->AIBrain_NextUnitTarget)
+	    .Process(this->AIBrain_NextNavalTarget)
+	    .Process(this->AIBrain_NextInfantryTarget)
+	    .Process(this->AIBrain_NextAircraftTarget)
+	    .Process(this->AIBrain_PlannedBuildCell)
+	    .Process(this->AIBrain_ScoutTargetCell)
+	    .Process(this->AIBrain_AttackTargetCell)
+	    .Process(this->AIBrain_InfiltratedEnemyMask)
+	    .Process(this->AIBrain_ScoutedEnemyMask)
+	    .Process(this->AIBrain_EstimatedEnemyThreat)
+	    .Process(this->AIBrain_PolicySlot)
+	    .Process(this->RestrictedFactoryPlants)
+	    .Process(this->LastBuiltNavalVehicleType)
+	    .Process(this->ProducingNavalUnitTypeIndex)
+	    .Process(this->CombatAlertTimer)
+	    .Process(this->NumAirpads_NonMFB)
+	    .Process(this->NumBarracks_NonMFB)
+	    .Process(this->NumWarFactories_NonMFB)
+	    .Process(this->NumConYards_NonMFB)
+	    .Process(this->NumShipyards_NonMFB)
+	    .Process(this->AIFireSaleDelayTimer)
+	    .Process(this->SuspendedEMPulseSWs)
+	    .Process(this->SuperExts)
+	    .Process(this->ForceEnemyIndex)
+	    .Process(this->AITriggers_ValidList)
+	    .Process(this->CustomResources)
+	    .Process(this->ResourceCollectorCounts)
+	    .Process(this->ForceOnlyTargetHouseEnemy)
+	    .Process(this->ForceOnlyTargetHouseEnemyMode)
+	    .Process(this->TeamDelay)
+	    .Process(this->FreeRadar)
+	    .Process(this->ForceRadar)
+	    .Process(this->PlayerAutoRepair)
+	    .Process(this->DropshipLoadout_Carriers)
+	    .Process(this->DropshipLoadout_Cargo)
+	    .Process(this->DropshipLoadout_InitialUnits)
+	    .Process(this->DropshipLoadout_SWInitialUnits)
+	    .Process(this->DropshipLoadout_SWCargo)
+	    .Process(this->DropshipLoadout_SWCarrier)
+	    .Process(this->DropshipLoadout_InitialUnitsSet)
+	    .Process(this->DropshipLoadout_SWInitialUnitsSet)
+	    .Process(this->ExpansionPlacementFailures)
+	    .Process(this->LastAttackedBuildingCoords)
+	    .Process(this->NextRefineryPlacementLocation)
+	    .Process(this->UnclaimedTiberiumZones)
+	    .Process(this->LastUnclaimedTiberiumCheckFrame)
+	    .Process(this->IsBuildingRecoveryRefinery)
+	    .Process(this->NextHarvesterRecoveryFrame)
+	    .Process(this->CachedResourceCandidates)
+	    .Process(this->CachedResourceCandidatesExpiryFrame)
+	    .Process(this->LastParanoiaFrame)
+	    .Process(this->DefensivePlaceholders)
+	    .Process(this->ConsecutiveCombatBuilds)
+	    .Process(this->ConsecutiveResourceBuilds)
+	    .Process(this->ActiveEvaVoiceBuildingType)
+	    .Process(this->FactoryResourceStates)
+	    .Process(this->Academies)
+	    //.Process(this->BeaconsPlacedOrder) beacon is not saved, so this follows it.
+	    .Process(this->TiberiumStorage)
+	    .Process(this->WeedStorage)
+	    .Process(this->OwnedDeployingUnits)
+	    .Process(this->Common)
+	    .Process(this->Combat);
 
 	int countMapSize = static_cast<int>(this->AICachedBuildCounts.size());
 	Stm.Process(countMapSize);
@@ -897,20 +928,18 @@ void HouseExt::Serialize(T& Stm)
 		}
 	}
 
-	Stm
-		.Process(this->LastProducedBuilding)
-		.Process(this->LastProducedBuildingType)
-		.Process(this->LastProducedDefense)
-		.Process(this->LastProducedDefenseType)
-		.Process(this->LastProducedInfantry)
-		.Process(this->LastProducedInfantryType)
-		.Process(this->LastProducedUnit)
-		.Process(this->LastProducedUnitType)
-		.Process(this->LastProducedAircraft)
-		.Process(this->LastProducedAircraftType)
-		.Process(this->LastProducedNavy)
-		.Process(this->LastProducedNavyType)
-		;
+	Stm.Process(this->LastProducedBuilding)
+	    .Process(this->LastProducedBuildingType)
+	    .Process(this->LastProducedDefense)
+	    .Process(this->LastProducedDefenseType)
+	    .Process(this->LastProducedInfantry)
+	    .Process(this->LastProducedInfantryType)
+	    .Process(this->LastProducedUnit)
+	    .Process(this->LastProducedUnitType)
+	    .Process(this->LastProducedAircraft)
+	    .Process(this->LastProducedAircraftType)
+	    .Process(this->LastProducedNavy)
+	    .Process(this->LastProducedNavyType);
 }
 
 void HouseExt::LoadFromStream(PhobosStreamReader& Stm)
@@ -927,14 +956,12 @@ void HouseExt::SaveToStream(PhobosStreamWriter& Stm)
 
 bool HouseExt::LoadGlobals(PhobosStreamReader& Stm)
 {
-	return Stm
-		.Success();
+	return Stm.Success();
 }
 
 bool HouseExt::SaveGlobals(PhobosStreamWriter& Stm)
 {
-	return Stm
-		.Success();
+	return Stm.Success();
 }
 
 void HouseExt::OnDetach(BuildingClass* pTarget, bool removed)
@@ -982,7 +1009,9 @@ static int CountOwnedIncludeDeploy(const HouseClass* pThis, const TechnoTypeClas
 static void RemoveProduction(const HouseClass* pHouse, const TechnoTypeClass* pType, int num)
 {
 	const auto absType = pType->WhatAmI();
-	const auto buildCat = (absType == AbstractType::BuildingType ? static_cast<const BuildingTypeClass*>(pType)->BuildCat : BuildCat::DontCare);
+	const auto buildCat =
+	    (absType == AbstractType::BuildingType ? static_cast<const BuildingTypeClass*>(pType)->BuildCat
+	                                           : BuildCat::DontCare);
 	const auto pFactory = pHouse->GetPrimaryFactory(absType, pType->Naval, buildCat);
 
 	if (pFactory)
@@ -999,7 +1028,8 @@ static void RemoveProduction(const HouseClass* pHouse, const TechnoTypeClass* pT
 	}
 }
 
-CanBuildResult HouseExt::BuildLimitGroupUpgradeCheck(const HouseClass* pThis, const TechnoTypeClass* pItem, bool buildLimitOnly, bool includeQueued)
+CanBuildResult HouseExt::BuildLimitGroupUpgradeCheck(const HouseClass* pThis, const TechnoTypeClass* pItem,
+                                                     bool buildLimitOnly, bool includeQueued)
 {
 	const auto pItemExt = TechnoTypeExt::Fetch(pItem);
 
@@ -1061,8 +1091,10 @@ CanBuildResult HouseExt::BuildLimitGroupUpgradeCheck(const HouseClass* pThis, co
 	}
 
 	const int factor = pItemExt->BuildLimitGroup_Factor;
-	const bool notBuildable = pItemExt->BuildLimitGroup_NotBuildableIfQueueMatch.Get(RulesExt::Global()->BuildLimitGroup_NotBuildableIfQueueMatch);
-	const bool contentIfAny = pItemExt->BuildLimitGroup_ContentIfAnyMatch.Get(RulesExt::Global()->BuildLimitGroup_ContentIfAnyMatch);
+	const bool notBuildable = pItemExt->BuildLimitGroup_NotBuildableIfQueueMatch.Get(
+	    RulesExt::Global()->BuildLimitGroup_NotBuildableIfQueueMatch);
+	const bool contentIfAny =
+	    pItemExt->BuildLimitGroup_ContentIfAnyMatch.Get(RulesExt::Global()->BuildLimitGroup_ContentIfAnyMatch);
 
 	if (limits.size() == 1)
 	{
@@ -1165,7 +1197,8 @@ CanBuildResult HouseExt::BuildLimitGroupUpgradeCheck(const HouseClass* pThis, co
 	{
 		int sum = 0;
 
-		for (int c : contributions) sum += c;
+		for (int c : contributions)
+			sum += c;
 
 		if (sum >= limits[0] + 1 - factor)
 		{
@@ -1215,7 +1248,9 @@ CanBuildResult HouseExt::BuildLimitGroupUpgradeCheck(const HouseClass* pThis, co
 static int QueuedNum(const HouseClass* pHouse, const TechnoTypeClass* pType)
 {
 	const AbstractType absType = pType->WhatAmI();
-	const BuildCat buildCat = (absType == AbstractType::BuildingType ? static_cast<const BuildingTypeClass*>(pType)->BuildCat : BuildCat::DontCare);
+	const BuildCat buildCat =
+	    (absType == AbstractType::BuildingType ? static_cast<const BuildingTypeClass*>(pType)->BuildCat
+	                                           : BuildCat::DontCare);
 	const FactoryClass* pFactory = pHouse->GetPrimaryFactory(absType, pType->Naval, buildCat);
 	int queued = 0;
 
@@ -1277,7 +1312,8 @@ bool HouseExt::ReachedBuildLimit(const HouseClass* pHouse, const TechnoTypeClass
 	}
 
 	const int factor = pTypeExt->BuildLimitGroup_Factor;
-	const bool notBuildable = pTypeExt->BuildLimitGroup_NotBuildableIfQueueMatch.Get(RulesExt::Global()->BuildLimitGroup_NotBuildableIfQueueMatch);
+	const bool notBuildable = pTypeExt->BuildLimitGroup_NotBuildableIfQueueMatch.Get(
+	    RulesExt::Global()->BuildLimitGroup_NotBuildableIfQueueMatch);
 
 	if (limits.size() == 1)
 	{
@@ -1322,7 +1358,8 @@ bool HouseExt::ReachedBuildLimit(const HouseClass* pHouse, const TechnoTypeClass
 	else
 	{
 		const size_t size = Math::min(limits.size(), pTypeExt->BuildLimitGroup_Types.size());
-		const bool contentIfAny = pTypeExt->BuildLimitGroup_ContentIfAnyMatch.Get(RulesExt::Global()->BuildLimitGroup_ContentIfAnyMatch);
+		const bool contentIfAny =
+		    pTypeExt->BuildLimitGroup_ContentIfAnyMatch.Get(RulesExt::Global()->BuildLimitGroup_ContentIfAnyMatch);
 		bool reached = true;
 		bool realReached = true;
 
@@ -1603,7 +1640,8 @@ void HouseExt::ClearFactoryResourceState(FactoryClass* pFactory)
 // container
 
 HouseExt::ExtContainer::ExtContainer() : Container("HouseClass")
-{ }
+{
+}
 
 HouseExt::ExtContainer::~ExtContainer() = default;
 
@@ -1660,7 +1698,8 @@ float HouseExt::GetTotalTiberiumStorage() const
 	for (size_t i = 0; i < this->TiberiumStorage.size(); ++i)
 	{
 		if (i < 4 && pOwner)
-			total += (this->TiberiumStorage[i] > 0.0f) ? this->TiberiumStorage[i] : pOwner->OwnedTiberium.GetAmount(static_cast<int>(i));
+			total += (this->TiberiumStorage[i] > 0.0f) ? this->TiberiumStorage[i]
+			                                           : pOwner->OwnedTiberium.GetAmount(static_cast<int>(i));
 		else
 			total += this->TiberiumStorage[i];
 	}
@@ -1713,4 +1752,3 @@ float HouseExt::RemoveTiberiumStorage(float amount, int index)
 
 	return 0.0f;
 }
-

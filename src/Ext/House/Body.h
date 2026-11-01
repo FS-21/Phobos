@@ -4,14 +4,14 @@
 
 #include <Ext/HouseType/Body.h>
 
+#include <Ext/Building/Body.h>
 #include <Utilities/Container.h>
 #include <Utilities/Detach.h>
 #include <Utilities/TemplateDef.h>
-#include <Ext/Building/Body.h>
 
+#include <array>
 #include <map>
 #include <string>
-#include <array>
 #include <vector>
 
 #include "New/Type/TechTreeTypeClass.h"
@@ -21,20 +21,14 @@ class TechnoTypeClass;
 
 struct FactoryResourceState
 {
-	FactoryClass* pFactory { nullptr };
-	TechnoTypeClass* pType { nullptr };
-	int LastStep { 0 };
-	std::vector<int> Spent {};
+	FactoryClass* pFactory{nullptr};
+	TechnoTypeClass* pType{nullptr};
+	int LastStep{0};
+	std::vector<int> Spent{};
 
-	template <typename T>
-	void Serialize(T& Stm)
+	template <typename T> void Serialize(T& Stm)
 	{
-		Stm
-			.Process(this->pFactory)
-			.Process(this->pType)
-			.Process(this->LastStep)
-			.Process(this->Spent)
-			;
+		Stm.Process(this->pFactory).Process(this->pType).Process(this->LastStep).Process(this->Spent);
 	}
 };
 
@@ -48,11 +42,11 @@ enum class ThreatCategory : int
 
 struct AttackedBuildingRecord
 {
-	CellStruct BuildingCoords { 0, 0 };
-	CellStruct AttackerCoords { 0, 0 };
-	TechnoTypeClass* AttackerType { nullptr };
-	ThreatCategory Threat { ThreatCategory::None };
-	int AttackFrame { 0 };
+	CellStruct BuildingCoords{0, 0};
+	CellStruct AttackerCoords{0, 0};
+	TechnoTypeClass* AttackerType{nullptr};
+	ThreatCategory Threat{ThreatCategory::None};
+	int AttackFrame{0};
 
 	bool operator==(const AttackedBuildingRecord& other) const
 	{
@@ -71,7 +65,7 @@ struct PlacingBuildingStruct
 
 class HouseExt final : public AbstractExt, public Detach::Listener<BuildingClass>
 {
-public:
+  public:
 	using base_type = HouseClass;
 
 	// deprecated: the pre-rework nested data class is now the extension class itself
@@ -79,7 +73,7 @@ public:
 
 	static constexpr DWORD Canary = 0x11111111;
 
-public:
+  public:
 	// typed owner accessor
 	HouseClass* OwnerObject() const
 	{
@@ -103,18 +97,18 @@ public:
 	BuildingClass* Factory_NavyType;
 	BuildingClass* Factory_AircraftType;
 
-	TechnoClass* LastProducedBuilding { nullptr };
-	TechnoTypeClass* LastProducedBuildingType { nullptr };
-	TechnoClass* LastProducedDefense { nullptr };
-	TechnoTypeClass* LastProducedDefenseType { nullptr };
-	TechnoClass* LastProducedInfantry { nullptr };
-	TechnoTypeClass* LastProducedInfantryType { nullptr };
-	TechnoClass* LastProducedUnit { nullptr };
-	TechnoTypeClass* LastProducedUnitType { nullptr };
-	TechnoClass* LastProducedAircraft { nullptr };
-	TechnoTypeClass* LastProducedAircraftType { nullptr };
-	TechnoClass* LastProducedNavy { nullptr };
-	TechnoTypeClass* LastProducedNavyType { nullptr };
+	TechnoClass* LastProducedBuilding{nullptr};
+	TechnoTypeClass* LastProducedBuildingType{nullptr};
+	TechnoClass* LastProducedDefense{nullptr};
+	TechnoTypeClass* LastProducedDefenseType{nullptr};
+	TechnoClass* LastProducedInfantry{nullptr};
+	TechnoTypeClass* LastProducedInfantryType{nullptr};
+	TechnoClass* LastProducedUnit{nullptr};
+	TechnoTypeClass* LastProducedUnitType{nullptr};
+	TechnoClass* LastProducedAircraft{nullptr};
+	TechnoTypeClass* LastProducedAircraftType{nullptr};
+	TechnoClass* LastProducedNavy{nullptr};
+	TechnoTypeClass* LastProducedNavyType{nullptr};
 
 	std::vector<int> AITriggers_ValidList;
 
@@ -122,9 +116,25 @@ public:
 	CDTimerClass AISuperWeaponDelayTimer;
 	CDTimerClass AIFireSaleDelayTimer;
 
-	//Read from INI
+	// Read from INI
 	Nullable<bool> RepairBaseNodes[3];
 	Valueable<bool> AdvancedAI_Campaign;
+	Valueable<bool> AIBrain_Campaign;
+	int AIBrain_Archetype;
+	int AIBrain_ActiveExpert;
+	int AIBrain_LastInferenceFrame;
+	int AIBrain_NextBuildingTarget;
+	int AIBrain_NextUnitTarget;
+	int AIBrain_NextNavalTarget;
+	int AIBrain_NextInfantryTarget;
+	int AIBrain_NextAircraftTarget;
+	CellStruct AIBrain_PlannedBuildCell;
+	CellStruct AIBrain_ScoutTargetCell;
+	CellStruct AIBrain_AttackTargetCell;
+	int AIBrain_InfiltratedEnemyMask;
+	int AIBrain_ScoutedEnemyMask;
+	std::array<int, 8> AIBrain_EstimatedEnemyThreat;
+	int AIBrain_PolicySlot;
 
 	// FactoryPlants with Allow/DisallowTypes set.
 	std::vector<BuildingClass*> RestrictedFactoryPlants;
@@ -196,16 +206,16 @@ public:
 
 	struct BlockedExpansionPoint
 	{
-		CellStruct Coords { 0, 0 };
-		int ExpiryFrame { 0 };
-		int FailureCount { 0 };
+		CellStruct Coords{0, 0};
+		int ExpiryFrame{0};
+		int FailureCount{0};
 	};
 
 	/**
 	 *  Locations that we should never expand towards.
 	 *  Basically, locations that are unreachable.
 	 */
-	BlockedExpansionPoint PermanentlyBlockedExpansionPointLocations[20] {};
+	BlockedExpansionPoint PermanentlyBlockedExpansionPointLocations[20]{};
 
 	/**
 	 *  Records whether the AI has reached its expansion point.
@@ -352,130 +362,52 @@ public:
 	PlacingBuildingStruct Common;
 	PlacingBuildingStruct Combat;
 
-	HouseExt(HouseClass* OwnerObject) : AbstractExt(OwnerObject)
-		, TargetAlliedFallbackHouse { nullptr }
-		, PowerPlantEnhancers {}
-		, OwnedLimboDeliveredBuildings {}
-		, OwnedCountedHarvesters {}
-		, LimboAircraft {}
-		, LimboBuildings {}
-		, LimboInfantry {}
-		, LimboVehicles {}
-		, Factory_BuildingType { nullptr }
-		, Factory_InfantryType { nullptr }
-		, Factory_VehicleType { nullptr }
-		, Factory_NavyType { nullptr }
-		, Factory_AircraftType { nullptr }
-		, AISuperWeaponDelayTimer {}
-		, RepairBaseNodes { }
-		, AdvancedAI_Campaign { false }
-		, RestrictedFactoryPlants {}
-		, LastBuiltNavalVehicleType { -1 }
-		, ProducingNavalUnitTypeIndex { -1 }
-		, CombatAlertTimer {}
-		, NumAirpads_NonMFB { 0 }
-		, NumBarracks_NonMFB { 0 }
-		, NumWarFactories_NonMFB { 0 }
-		, NumConYards_NonMFB { 0 }
-		, NumShipyards_NonMFB { 0 }
-		, AIFireSaleDelayTimer {}
-		, SuspendedEMPulseSWs {}
-		, CustomResources {}
-		, ResourceCollectorCounts {}
-		, SuperExts(SuperWeaponTypeClass::Array.Count)
-		, ForceEnemyIndex(-1)
-		, ForceOnlyTargetHouseEnemy { false }
-		, ForceOnlyTargetHouseEnemyMode { -1 }
-		, TeamDelay(-1)
-		, FreeRadar(false)
-		, ForceRadar(false)
-		, PlayerAutoRepair(true)
-		, DropshipLoadout_Carriers {}
-		, DropshipLoadout_Cargo {}
-		, DropshipLoadout_InitialUnits {}
-		, DropshipLoadout_SWInitialUnits {}
-		, DropshipLoadout_SWCargo {}
-		, DropshipLoadout_SWCarrier { nullptr }
-		, DropshipLoadout_InitialUnitsSet { false }
-		, DropshipLoadout_SWInitialUnitsSet { false }
-		, BeaconsPlacedOrder { 0, 0, 0 }
-		, TiberiumStorage {}
-		, WeedStorage {}
-		, PrimaryTechTreeType { nullptr }
-		, SecondaryTechTreeType { nullptr }
-		, NextExpansionPointLocation { 0, 0 }
-		, CombatCrawlingTarget { 0, 0 }
-		, ResourceCrawlingTarget { 0, 0 }
-		, ConsecutiveCombatBuilds { 0 }
-		, ConsecutiveResourceBuilds { 0 }
-		, ResourceShouldBuildRefinery { false }
-		, PermanentlyBlockedExpansionPointLocations {}
-		, ShouldBuildRefinery { false }
-		, ShouldPlaceDefenseAtBlockedEdge { false }
-		, ExpansionPlacementFailures { 0 }
-		, LastFactoryRecycleFrame { 0 }
-		, NextExpansionSearchFrame { 0 }
-		, NextBlacklistClearFrame { 0 }
-		, HasBuiltFirstBarracks { false }
-		, LastExcessRefineryCheckFrame { 0 }
-		, LastObsoleteRefineryCheckFrame { 0 }
-		, LastServiceDepotPlacementFailedFrame { 0 }
-		, LastSleepingHarvesterCheckFrame { 0 }
-		, LastPrimaryFactoryCheckFrame { 0 }
-		, HasPerformedVehicleCharge { false }
-		, IsUnderStartRushThreat { false }
-		, PlacementFailedCooldowns {}
-		, PlacementConsecutiveFailures {}
-		, GroupConsecutiveFailures {}
-		, GroupPlacementCooldowns {}
-		, FeasibilityFailedCooldowns {}
-		, PendingClearanceCell { 0, 0 }
-		, PendingClearanceType { nullptr }
-		, PendingClearanceFoundationWidth { 0 }
-		, PendingClearanceFoundationHeight { 0 }
-		, PendingClearanceFoundation { static_cast<Foundation>(0) }
-		, ClearanceAttempts { 0 }
-		, NextClearanceCheckFrame { 0 }
-		, LastClearanceFailedFrame { 0 }
-		, AICachedBuildCounts {}
-		, LastAttackerType { nullptr }
-		, LastAttackedFrame { 0 }
-		, LastAttackedBuildingCoords { 0, 0 }
-		, LastAttackerCoords { 0, 0 }
-		, FrontlineThreatCoords { 0, 0 }
-		, FrontlineThreatActiveFrames { 0 }
-		, FrontlineThreatNeedsDefenses { 0 }
-		, FrontlineThreatBuildingCoords { 0, 0 }
-		, LastParanoiaFrame { 0 }
-		, DefensivePlaceholders {}
-		, AttackedBuildingsLIFO {}
-		, UnsafePlacementZones {}
-		, UnclaimedTiberiumZones {}
-		, NextRefineryPlacementLocation { 0, 0 }
-		, LastUnclaimedTiberiumCheckFrame { 0 }
-		, IsBuildingRecoveryRefinery { false }
-		, NextHarvesterRecoveryFrame { 0 }
-		, CachedReachableResourceFields {}
-		, NextReachableResourceScanFrame { 0 }
-		, CachedResourceCandidates {}
-		, CachedResourceCandidatesExpiryFrame { 0 }
-		, ExpansionNodeFailureCounts {}
-		, CachedResourcePath {}
-		, CachedResourcePathTarget { 0, 0 }
-		, CachedResourcePathStart { 0, 0 }
-		, CachedCombatPath {}
-		, CachedCombatPathTarget { 0, 0 }
-		, CachedCombatPathStart { 0, 0 }
-		, CachedExpansionPath {}
-		, CachedExpansionPathTarget { 0, 0 }
-		, CachedExpansionPathStart { 0, 0 }
-		, ActiveEvaVoiceBuildingType { nullptr }
-		, FactoryResourceStates {}
-		, Academies {}
-		, OwnedDeployingUnits {}
-		, Common { nullptr, nullptr, 0 }
-		, Combat { nullptr, nullptr, 0 }
-	{ }
+	HouseExt(HouseClass* OwnerObject)
+	    : AbstractExt(OwnerObject), TargetAlliedFallbackHouse{nullptr}, PowerPlantEnhancers{},
+	      OwnedLimboDeliveredBuildings{}, OwnedCountedHarvesters{}, LimboAircraft{}, LimboBuildings{}, LimboInfantry{},
+	      LimboVehicles{}, Factory_BuildingType{nullptr}, Factory_InfantryType{nullptr}, Factory_VehicleType{nullptr},
+	      Factory_NavyType{nullptr}, Factory_AircraftType{nullptr}, AISuperWeaponDelayTimer{}, RepairBaseNodes{},
+	      AdvancedAI_Campaign{false}, AIBrain_Campaign{false}, AIBrain_Archetype{0}, AIBrain_ActiveExpert{0},
+	      AIBrain_LastInferenceFrame{0}, AIBrain_NextBuildingTarget{-1}, AIBrain_NextUnitTarget{-1},
+	      AIBrain_NextNavalTarget{-1}, AIBrain_NextInfantryTarget{-1}, AIBrain_NextAircraftTarget{-1},
+	      AIBrain_PlannedBuildCell{CellStruct::Empty}, AIBrain_ScoutTargetCell{CellStruct::Empty},
+	      AIBrain_AttackTargetCell{CellStruct::Empty}, AIBrain_InfiltratedEnemyMask{0}, AIBrain_ScoutedEnemyMask{0},
+	      AIBrain_EstimatedEnemyThreat{0, 0, 0, 0, 0, 0, 0, 0}, AIBrain_PolicySlot{0}, RestrictedFactoryPlants{},
+	      LastBuiltNavalVehicleType{-1}, ProducingNavalUnitTypeIndex{-1}, CombatAlertTimer{}, NumAirpads_NonMFB{0},
+	      NumBarracks_NonMFB{0}, NumWarFactories_NonMFB{0}, NumConYards_NonMFB{0}, NumShipyards_NonMFB{0},
+	      AIFireSaleDelayTimer{}, SuspendedEMPulseSWs{}, CustomResources{}, ResourceCollectorCounts{},
+	      SuperExts(SuperWeaponTypeClass::Array.Count), ForceEnemyIndex(-1), ForceOnlyTargetHouseEnemy{false},
+	      ForceOnlyTargetHouseEnemyMode{-1}, TeamDelay(-1), FreeRadar(false), ForceRadar(false), PlayerAutoRepair(true),
+	      DropshipLoadout_Carriers{}, DropshipLoadout_Cargo{}, DropshipLoadout_InitialUnits{},
+	      DropshipLoadout_SWInitialUnits{}, DropshipLoadout_SWCargo{}, DropshipLoadout_SWCarrier{nullptr},
+	      DropshipLoadout_InitialUnitsSet{false}, DropshipLoadout_SWInitialUnitsSet{false}, BeaconsPlacedOrder{0, 0, 0},
+	      TiberiumStorage{}, WeedStorage{}, PrimaryTechTreeType{nullptr}, SecondaryTechTreeType{nullptr},
+	      NextExpansionPointLocation{0, 0}, CombatCrawlingTarget{0, 0}, ResourceCrawlingTarget{0, 0},
+	      ConsecutiveCombatBuilds{0}, ConsecutiveResourceBuilds{0}, ResourceShouldBuildRefinery{false},
+	      PermanentlyBlockedExpansionPointLocations{}, ShouldBuildRefinery{false},
+	      ShouldPlaceDefenseAtBlockedEdge{false}, ExpansionPlacementFailures{0}, LastFactoryRecycleFrame{0},
+	      NextExpansionSearchFrame{0}, NextBlacklistClearFrame{0}, HasBuiltFirstBarracks{false},
+	      LastExcessRefineryCheckFrame{0}, LastObsoleteRefineryCheckFrame{0}, LastServiceDepotPlacementFailedFrame{0},
+	      LastSleepingHarvesterCheckFrame{0}, LastPrimaryFactoryCheckFrame{0}, HasPerformedVehicleCharge{false},
+	      IsUnderStartRushThreat{false}, PlacementFailedCooldowns{}, PlacementConsecutiveFailures{},
+	      GroupConsecutiveFailures{}, GroupPlacementCooldowns{}, FeasibilityFailedCooldowns{},
+	      PendingClearanceCell{0, 0}, PendingClearanceType{nullptr}, PendingClearanceFoundationWidth{0},
+	      PendingClearanceFoundationHeight{0}, PendingClearanceFoundation{static_cast<Foundation>(0)},
+	      ClearanceAttempts{0}, NextClearanceCheckFrame{0}, LastClearanceFailedFrame{0}, AICachedBuildCounts{},
+	      LastAttackerType{nullptr}, LastAttackedFrame{0}, LastAttackedBuildingCoords{0, 0}, LastAttackerCoords{0, 0},
+	      FrontlineThreatCoords{0, 0}, FrontlineThreatActiveFrames{0}, FrontlineThreatNeedsDefenses{0},
+	      FrontlineThreatBuildingCoords{0, 0}, LastParanoiaFrame{0}, DefensivePlaceholders{}, AttackedBuildingsLIFO{},
+	      UnsafePlacementZones{}, UnclaimedTiberiumZones{}, NextRefineryPlacementLocation{0, 0},
+	      LastUnclaimedTiberiumCheckFrame{0}, IsBuildingRecoveryRefinery{false}, NextHarvesterRecoveryFrame{0},
+	      CachedReachableResourceFields{}, NextReachableResourceScanFrame{0}, CachedResourceCandidates{},
+	      CachedResourceCandidatesExpiryFrame{0}, ExpansionNodeFailureCounts{}, CachedResourcePath{},
+	      CachedResourcePathTarget{0, 0}, CachedResourcePathStart{0, 0}, CachedCombatPath{},
+	      CachedCombatPathTarget{0, 0}, CachedCombatPathStart{0, 0}, CachedExpansionPath{},
+	      CachedExpansionPathTarget{0, 0}, CachedExpansionPathStart{0, 0}, ActiveEvaVoiceBuildingType{nullptr},
+	      FactoryResourceStates{}, Academies{}, OwnedDeployingUnits{}, Common{nullptr, nullptr, 0},
+	      Combat{nullptr, nullptr, 0}
+	{
+	}
 
 	int GetResourceAmount(int resourceIdx) const;
 	void SetResourceAmount(int resourceIdx, int amount);
@@ -506,7 +438,7 @@ public:
 	virtual ~HouseExt() = default;
 
 	virtual void LoadFromINIFile(CCINIClass* pINI) override;
-	//virtual void Initialize() override;
+	// virtual void Initialize() override;
 	virtual void OnDetach(BuildingClass* pTarget, bool removed) override;
 
 	void UpdateVehicleProduction();
@@ -514,15 +446,14 @@ public:
 	virtual void LoadFromStream(PhobosStreamReader& Stm) override;
 	virtual void SaveToStream(PhobosStreamWriter& Stm) override;
 
-private:
-	template <typename T>
-	void Serialize(T& Stm);
+  private:
+	template <typename T> void Serialize(T& Stm);
 	bool UpdateHarvesterProduction();
 
-public:
+  public:
 	class ExtContainer final : public Container<HouseExt>
 	{
-	public:
+	  public:
 		ExtContainer();
 		~ExtContainer();
 	};
@@ -547,14 +478,18 @@ public:
 
 	static int ActiveHarvesterCount(HouseClass* pThis);
 	static int TotalHarvesterCount(HouseClass* pThis);
-	static HouseClass* GetHouseKind(OwnerHouseKind kind, bool allowRandom, HouseClass* pDefault, HouseClass* pInvoker = nullptr, HouseClass* pVictim = nullptr);
+	static HouseClass* GetHouseKind(OwnerHouseKind kind, bool allowRandom, HouseClass* pDefault,
+	                                HouseClass* pInvoker = nullptr, HouseClass* pVictim = nullptr);
 	static int GetHouseIndex(int param, TeamClass* pTeam, TActionClass* pTAction);
-	static CellClass* GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass* pCurrentHouse, CoordStruct defaultCurrentCoords, SpeedType speedTypeZone, int extraDistance = 0);
+	static CellClass* GetEnemyBaseGatherCell(HouseClass* pTargetHouse, HouseClass* pCurrentHouse,
+	                                         CoordStruct defaultCurrentCoords, SpeedType speedTypeZone,
+	                                         int extraDistance = 0);
 	static void GetAIChronoshiftSupers(HouseClass* pThis, SuperClass*& pSuperCSphere, SuperClass*& pSuperCWarp);
 	static void AI_TryFireSW_CooldownGroupAware(HouseClass* pThis);
 
 	static bool IsAvailableToHouse(HouseClass* const pHouse, TechnoTypeClass* const pItem);
-	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem, bool skipSecretLabChecks = false);
+	static bool PrerequisitesMet(HouseClass* const pThis, TechnoTypeClass* const pItem,
+	                             bool skipSecretLabChecks = false);
 	static bool HasBuildingPrerequisite(HouseClass* const pHouse, int idxBuildingType);
 	static bool HasGenericPrerequisite(int idx, HouseClass* const pHouse);
 	static bool HasPrerequisite(HouseClass* const pHouse, int idx);
@@ -571,13 +506,21 @@ public:
 	static void AdvAI_Add_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Is_Failed_Expansion_Point(HouseClass* pHouse, CellStruct coords);
 	static bool AdvAI_Has_Failed_Placement_Three_Times(HouseClass* pHouse, CellStruct coords);
-	static bool AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* pBuildingType, bool checkPrereqs, bool isTechTree = false);
-	static BuildingTypeClass* AdvAI_Find_Next_Buildable_Prerequisite(HouseClass* pHouse, BuildingTypeClass* pTargetType, BuildingTypeClass* pRootGoalType, std::set<BuildingTypeClass*>& visited, bool& outIsSubPrereq);
+	static bool AdvAI_Can_Build_Building(HouseClass* pHouse, BuildingTypeClass* pBuildingType, bool checkPrereqs,
+	                                     bool isTechTree = false);
+	static BuildingTypeClass* AdvAI_Find_Next_Buildable_Prerequisite(HouseClass* pHouse, BuildingTypeClass* pTargetType,
+	                                                                 BuildingTypeClass* pRootGoalType,
+	                                                                 std::set<BuildingTypeClass*>& visited,
+	                                                                 bool& outIsSubPrereq);
 	static bool AdvAI_Is_Recently_Attacked(HouseClass* pHouse);
 	static bool AdvAI_Is_Under_Start_Rush_Threat(HouseClass* pHouse, int enemyAircraftValue);
 	static int AdvAI_Calculate_Enemy_Aircraft_Value(HouseClass* pHouse);
 	static const BuildingTypeClass* AdvAI_Evaluate_Get_Best_Building(HouseClass* pHouse);
-	static const BuildingTypeClass* AdvAI_BuildAtLeastNOfSideAndMInTotal(HouseClass* pHouse, TechTreeTypeClass* techTree, TechTreeTypeClass::BuildType buildType, int sideBuildingsWanted, int totalBuildingsWanted, int extraCount = 0);
+	static const BuildingTypeClass* AdvAI_BuildAtLeastNOfSideAndMInTotal(HouseClass* pHouse,
+	                                                                     TechTreeTypeClass* techTree,
+	                                                                     TechTreeTypeClass::BuildType buildType,
+	                                                                     int sideBuildingsWanted,
+	                                                                     int totalBuildingsWanted, int extraCount = 0);
 	static const BuildingTypeClass* AdvAI_Get_Building_To_Build(HouseClass* pHouse);
 	static void AdvAI_Raise_Money(HouseClass* pHouse);
 	static void AdvAI_Economy_Upkeep(HouseClass* pHouse);
@@ -587,37 +530,33 @@ public:
 	static void AdvAI_Building(HouseClass* pHouse);
 	static void AdvAI_ExpertAI(HouseClass* pHouse);
 	static void AdvAI_Update_Primary_Factories(HouseClass* pHouse);
-	static void AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval, size_t optimalCount, CellStruct targetCell);
+	static void AdvAI_Recycle_Furthest_Factory(HouseClass* pHouse, AbstractType factoryType, bool isNaval,
+	                                           size_t optimalCount, CellStruct targetCell);
 	static void AdvAI_Recycle_Obsolete_Refineries(HouseClass* pHouse);
 	static void AdvAI_Update_Unclaimed_Tiberium_Zones(HouseClass* pHouse);
 	static void AdvAI_Update_Defensive_Placeholders(HouseClass* pHouse);
 	static void AdvAI_Prune_Attacked_Buildings_LIFO(HouseClass* pHouse);
 	static bool IsNeutralOrSpecialHouse(const HouseClass* pHouse);
 
-	static bool IsDisabledFromShell(
-	HouseClass const* pHouse, BuildingTypeClass const* pItem);
+	static bool IsDisabledFromShell(HouseClass const* pHouse, BuildingTypeClass const* pItem);
 
-	static size_t FindOwnedIndex(
-	HouseClass const* pHouse, int idxParentCountry,
-	Iterator<TechnoTypeClass const*> items, size_t start = 0);
+	static size_t FindOwnedIndex(HouseClass const* pHouse, int idxParentCountry, Iterator<TechnoTypeClass const*> items,
+	                             size_t start = 0);
 
-	static size_t FindBuildableIndex(
-		HouseClass const* pHouse, int idxParentCountry,
-		Iterator<TechnoTypeClass const*> items, size_t start = 0);
+	static size_t FindBuildableIndex(HouseClass const* pHouse, int idxParentCountry,
+	                                 Iterator<TechnoTypeClass const*> items, size_t start = 0);
 
 	template <typename T>
-	static T* FindOwned(
-		HouseClass const* const pHouse, int const idxParent,
-		Iterator<T*> const items, size_t const start = 0)
+	static T* FindOwned(HouseClass const* const pHouse, int const idxParent, Iterator<T*> const items,
+	                    size_t const start = 0)
 	{
 		auto const index = FindOwnedIndex(pHouse, idxParent, items, start);
 		return index < items.size() ? items[index] : nullptr;
 	}
 
 	template <typename T>
-	static T* FindBuildable(
-		HouseClass const* const pHouse, int const idxParent,
-		Iterator<T*> const items, size_t const start = 0)
+	static T* FindBuildable(HouseClass const* const pHouse, int const idxParent, Iterator<T*> const items,
+	                        size_t const start = 0)
 	{
 		auto const index = FindBuildableIndex(pHouse, idxParent, items, start);
 		return index < items.size() ? items[index] : nullptr;
@@ -628,7 +567,8 @@ public:
 	static std::vector<int> AIProduction_BestChoices;
 	static std::vector<int> AIProduction_BestChoicesNaval;
 
-	static CanBuildResult BuildLimitGroupUpgradeCheck(const HouseClass* pThis, const TechnoTypeClass* pItem, bool buildLimitOnly, bool includeQueued);
+	static CanBuildResult BuildLimitGroupUpgradeCheck(const HouseClass* pThis, const TechnoTypeClass* pItem,
+	                                                  bool buildLimitOnly, bool includeQueued);
 	static bool ReachedBuildLimit(const HouseClass* pHouse, const TechnoTypeClass* pType, bool ignoreQueued);
 
 	static void CalculatePowerSurplus(HouseClass* pThis);
