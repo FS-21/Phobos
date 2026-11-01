@@ -34,22 +34,24 @@ namespace
 
 		auto* const base = reinterpret_cast<BYTE*>(hMod);
 		auto* const dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+
 		if (dos->e_magic != IMAGE_DOS_SIGNATURE)
 			return;
 
 		auto* const nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+
 		if (nt->Signature != IMAGE_NT_SIGNATURE)
 			return;
 
 		const auto& impDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+
 		if (!impDir.VirtualAddress || !impDir.Size)
 			return;
 
-		for (auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + impDir.VirtualAddress);
-			desc->Name != 0;
-			++desc)
+		for (auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + impDir.VirtualAddress); desc->Name != 0; ++desc)
 		{
 			const char* const dllName = reinterpret_cast<const char*>(base + desc->Name);
+
 			if (_stricmp(dllName, "user32.dll") != 0)
 				continue;
 
@@ -68,6 +70,7 @@ namespace
 				const char* const fnName = reinterpret_cast<const char*>(byName->Name);
 
 				void* replacement = nullptr;
+
 				if (std::strcmp(fnName, "SetFocus") == 0)
 					replacement = reinterpret_cast<void*>(&Headless_NoOp_SetFocus);
 				else if (std::strcmp(fnName, "SetForegroundWindow") == 0)
@@ -76,6 +79,7 @@ namespace
 				if (replacement)
 				{
 					DWORD oldProt = 0;
+
 					if (VirtualProtect(&iatThunk->u1.Function, sizeof(ULONG_PTR), PAGE_READWRITE, &oldProt))
 					{
 						iatThunk->u1.Function = reinterpret_cast<ULONG_PTR>(replacement);
@@ -93,20 +97,14 @@ namespace
 
 		const LONG exStyle = GetWindowLongA(hWnd, GWL_EXSTYLE);
 		const LONG targetEx = (exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT) & ~WS_EX_APPWINDOW;
+
 		if (exStyle != targetEx)
 			SetWindowLongA(hWnd, GWL_EXSTYLE, targetEx);
 
 		SetLayeredWindowAttributes(hWnd, 0, 0, LWA_ALPHA);
-		SetWindowPos(
-			hWnd,
-			HWND_BOTTOM,
-			32000,
-			32000,
-			0,
-			0,
-			SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
+		SetWindowPos(hWnd, HWND_BOTTOM, 32000, 32000, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
 	}
-}
+} // namespace
 
 // Scenario start initialization
 DEFINE_HOOK(0x6879ED, ScenarioClass_Start_NeuralAI, 0x5)
@@ -218,6 +216,7 @@ DEFINE_HOOK(0x55D377, Main_Loop_FocusOverride_NeuralAI, 0x5)
 		if (Game::hWnd)
 		{
 			LONG exStyle = GetWindowLongA(Game::hWnd, GWL_EXSTYLE);
+
 			if ((exStyle & WS_EX_LAYERED) == 0)
 			{
 				ReleaseCapture();
@@ -359,7 +358,21 @@ DEFINE_HOOK(0x4FF21D, HouseClass_AI_Aircraft_NeuralAI, 0x7)
 	return 0;
 }
 
-// Spatial Tetris Base Architect placement hook in BuildingClass::Exit_Object
+// Reconstructed function epilogue for BuildingClass::Exit_Object when returning custom status
+void NAKED BuildingClass_Exit_Object_Seek_Building_Position_Epilogue_NeuralAI()
+{
+	_asm
+	{
+		pop edi
+		pop esi
+		pop ebp
+		pop ebx
+		add esp, 130h
+		retn 8
+	}
+}
+
+// Spatial Tetris Base Architect & Surgical Space Clearance placement hook in BuildingClass::Exit_Object
 DEFINE_HOOK(0x444F39, BuildingClass_ExitObject_PlaceBuilding_NeuralAI, 0x6)
 {
 	enum { ApplyCustomCoords = 0x4451AA };
@@ -367,15 +380,26 @@ DEFINE_HOOK(0x444F39, BuildingClass_ExitObject_PlaceBuilding_NeuralAI, 0x6)
 	GET(BuildingClass* const, pFactory, ESI);
 	GET(BuildingClass* const, pBuilding, EDI);
 
-	auto const pHouse = pFactory->Owner;
-	if (!pHouse || !pBuilding || !NeuralAI::IsEnabledForHouse(pHouse))
+	auto const pHouse = pFactory ? pFactory->Owner : (pBuilding ? pBuilding->Owner : nullptr);
+
+	if (!pHouse || !pBuilding || !pBuilding->Type || !NeuralAI::IsEnabledForHouse(pHouse))
 		return 0;
 
-	if (NeuralAI::IsCampaignRestricted(pHouse))
+	if (NeuralAI::IsCampaignRestricted(pHouse) || pBuilding->Type->PowersUpBuilding[0] != '\0')
 		return 0;
 
-	const CellStruct bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuilding->Type);
-	if (bestCell == CellStruct::Empty)
+	CellStruct bestCell = CellStruct::Empty;
+	const int placeStatus = NeuralAI::PlaceCompletedBuilding(pFactory, pBuilding, bestCell);
+
+	if (placeStatus == 1)
+	{
+		// Keep building waiting in Construction Yard while obstructing structure sells or units scatter
+		R->EAX(1);
+
+		return reinterpret_cast<intptr_t>(&BuildingClass_Exit_Object_Seek_Building_Position_Epilogue_NeuralAI);
+	}
+
+	if (placeStatus != 2 || bestCell == CellStruct::Empty)
 		return 0;
 
 	pHouse->ProducingBuildingTypeIndex = -1;
@@ -392,4 +416,20 @@ DEFINE_HOOK(0x444F39, BuildingClass_ExitObject_PlaceBuilding_NeuralAI, 0x6)
 	R->Stack<int>(0x34, 0);
 
 	return ApplyCustomCoords;
+}
+
+// Track directional building attacks for NeuralAI reactive defense placement and threat moderation
+DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_TrackThreat_NeuralAI, 0x8)
+{
+	GET(BuildingClass* const, pThis, ESI);
+	GET(const DamageState, state, EAX);
+	GET(TechnoClass* const, pAttacker, EBP);
+	GET_STACK(HouseClass* const, pAttackerHouse, STACK_OFFSET(0x9C, 0x1C));
+
+	auto const pFromHouse = pAttacker ? pAttacker->GetOwningHouse() : pAttackerHouse;
+
+	if (pThis && pThis->Owner && pFromHouse && state != DamageState::Unaffected && !pThis->IsStrange() && !pThis->Owner->IsAlliedWith(pFromHouse))
+		NeuralAI::OnBuildingDamaged(pThis, pAttacker, pFromHouse);
+
+	return 0;
 }

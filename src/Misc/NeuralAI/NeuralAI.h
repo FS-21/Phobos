@@ -7,7 +7,9 @@
 #include <vector>
 
 class HouseClass;
+class BuildingClass;
 class BuildingTypeClass;
+class TechnoClass;
 class TechnoTypeClass;
 
 #pragma pack(push, 1)
@@ -122,6 +124,7 @@ public:
 	static void OnScenarioEnd(bool playerWon);
 	static void OnHeadlessFrameTick();
 	static void OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled);
+	static void OnBuildingDamaged(BuildingClass* pBuilding, TechnoClass* pAttacker, HouseClass* pAttackerHouse);
 
 	static int UpdateExpertAI(HouseClass* pHouse);
 	static void UpdateBuildingProduction(HouseClass* pHouse);
@@ -130,6 +133,7 @@ public:
 	static void UpdateAircraftProduction(HouseClass* pHouse);
 
 	static CellStruct FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingTypeClass* pBuildingType);
+	static int PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBuilding, CellStruct& outCell);
 
 private:
 	static HANDLE BaseFileHandle;
@@ -164,8 +168,7 @@ private:
 	static void UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool stalemate);
 
 	static void ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t, InputVectorSize>& features);
-	static void RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features,
-		std::array<int16_t, OutputVectorSize>& outScores);
+	static void RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features, std::array<int16_t, OutputVectorSize>& outScores);
 
 	static void ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::array<int16_t, OutputVectorSize>& scores);
 
