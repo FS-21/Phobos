@@ -175,6 +175,43 @@ bool IsCellVisibleToAI(HouseClass* pHouse, CellClass* pCell)
 
 	return VisionMap[static_cast<size_t>(coords.Y) * VisionMapSide + coords.X] != 0;
 }
+
+bool IsTunnelNetworkBuilding(const BuildingTypeClass* pBldType)
+{
+	if (!pBldType)
+		return false;
+
+	if (pBldType->Passengers > 0 && pBldType->InfantryAbsorb &&
+	    (pBldType->UnitAbsorb || pBldType->SuperWeapon != -1 || pBldType->SuperWeapon2 != -1))
+	{
+		return true;
+	}
+
+	return pBldType->ID && std::strstr(pBldType->ID, "TUNNEL") != nullptr && pBldType->Passengers > 0;
+}
+
+bool IsTunnelDeliverySuperWeapon(const SuperWeaponTypeClass* pSWType, HouseClass* pOwner)
+{
+	if (!pSWType)
+		return false;
+
+	if (pSWType->ID && (std::strstr(pSWType->ID, "Tunnel") != nullptr || std::strstr(pSWType->ID, "TUNNEL") != nullptr))
+		return true;
+
+	if (pOwner)
+	{
+		for (auto const pBld : pOwner->Buildings)
+		{
+			if (pBld && !pBld->InLimbo && pBld->IsAlive && pBld->Type && IsTunnelNetworkBuilding(pBld->Type))
+			{
+				if (pBld->Type->SuperWeapon == pSWType->ArrayIndex || pBld->Type->SuperWeapon2 == pSWType->ArrayIndex)
+					return true;
+			}
+		}
+	}
+
+	return false;
+}
 } // namespace
 
 void NeuralAI::ParseCommandLineArg(const char* pArg)
@@ -829,7 +866,11 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 
 			const int arch = std::clamp(pExt->AIBrain_Archetype, 0, 7);
 			const int exp = std::clamp(pExt->AIBrain_ActiveExpert, 0, 7);
-			const int delta = won ? 12 : -6;
+			const int fastBonus =
+			    (!NeuralAI::MatchEndStalemate && won && Unsorted::CurrentFrame > 0 && Unsorted::CurrentFrame <= 18000)
+			        ? 4
+			        : 0;
+			const int delta = NeuralAI::MatchEndStalemate ? (won ? -4 : -8) : (won ? (12 + fastBonus) : -6);
 
 			uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 40 + arch * 8 + exp) % 512);
 			if (NeuralAI::Backpack.NumEntries < 512)
@@ -1404,6 +1445,12 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 			     (ownCountryBit != 0 && !pBld->Type->InOwners(ownCountryBit))))
 			{
 				foreignConYardAndCaptureScore += 3;
+			}
+			if (IsTunnelNetworkBuilding(pBld->Type))
+			{
+				amphibiousFleetAndBeachheadScore += 3;
+				foreignConYardAndCaptureScore += 2;
+				camouflageAmbushAndGroveScore += 3;
 			}
 		}
 	}
@@ -5839,7 +5886,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	}
 
 	// CABAL / Faction Research & Tech-Upgrade Unlocks (PreUpgr_SW* /
-	// LimboUpgrade_SW* where DisableableFromShell=no)
+	// LimboUpgrade_SW* where DisableableFromShell=no, excluding Tunnel Delivery SWs)
 	if (homeCoords != CellStruct::Empty && (Unsorted::CurrentFrame % 120 < 25))
 	{
 		for (auto const pSuper : pHouse->Supers)
@@ -5847,10 +5894,304 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pSuper || !pSuper->IsReady || !pSuper->Type)
 				continue;
 
-			if (!pSuper->Type->DisableableFromShell && pSuper->Type->Type != SuperWeaponType::ChronoWarp)
+			if (!pSuper->Type->DisableableFromShell && pSuper->Type->Type != SuperWeaponType::ChronoWarp &&
+			    !IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse))
 			{
 				pSuper->Launch(homeCoords, false);
 				break;
+			}
+		}
+	}
+
+	// CABAL / Ares / Antares Subterranean Tunnel Network (ROBOTTUNNEL + CABALTunnelSpecial -> ROBOTCTUNNEL ->
+	// ROBOTTUNNEL): 1) Creative Tunnel Exit Placement via Tunnel Delivery SW on unprotected enemy flanks, behind
+	// defenses, on islands, or near neutral Techs 2) Two-Way Subterranean Portal Micro: load Infantry, Cyborgs,
+	// Engineers & Size<=2 Vehicles at Home Tunnel -> eject at Forward Tunnel!
+	if (homeCoords != CellStruct::Empty && (Unsorted::CurrentFrame % 45 < 20))
+	{
+		BuildingClass* pHomeTunnel = nullptr;
+		BuildingClass* pForwardTunnel = nullptr;
+		int minHomeTunnelDist = 999999;
+		int maxForwardTunnelDist = -1;
+		int ownTunnelCount = 0;
+
+		if (auto const pHomeCell = MapClass::Instance.TryGetCellAt(homeCoords))
+		{
+			for (auto const pOwnBld : pHouse->Buildings)
+			{
+				if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type ||
+				    !IsTunnelNetworkBuilding(pOwnBld->Type))
+					continue;
+
+				ownTunnelCount++;
+				const int dHome = pOwnBld->DistanceFrom(pHomeCell);
+				if (dHome < minHomeTunnelDist)
+				{
+					minHomeTunnelDist = dHome;
+					pHomeTunnel = pOwnBld;
+				}
+				if (dHome > maxForwardTunnelDist)
+				{
+					maxForwardTunnelDist = dHome;
+					pForwardTunnel = pOwnBld;
+				}
+			}
+		}
+
+		// Step 1: If we own 1 Tunnel (or need a 2nd Tunnel endpoint) and our Tunnel Delivery SW (e.g.
+		// CABALTunnelSpecial) is ready, dig the remote tunnel endpoint at an unprotected enemy flank, island beachhead,
+		// or neutral Tech Building!
+		if (ownTunnelCount == 1 && pHomeTunnel)
+		{
+			for (auto const pSuper : pHouse->Supers)
+			{
+				if (!pSuper || !pSuper->IsReady || !pSuper->Type || !IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse))
+					continue;
+
+				CellStruct bestTunnelCell = CellStruct::Empty;
+				int bestTunnelCellScore = -999999;
+
+				// If our single surviving tunnel is far from home (> 18 cells), our Home Tunnel was destroyed ->
+				// restore Home Tunnel first!
+				if (minHomeTunnelDist > 4608)
+				{
+					if (CellClass* pHomeRestore = FindSafeIslandLandingCell(pHouse, homeCoords, homeGroundZone, false))
+						bestTunnelCell = pHomeRestore->MapCoords;
+				}
+				else
+				{
+					// Evaluate visible enemy buildings and neutral capturable Tech Buildings to find an unprotected
+					// flank/infiltration spot
+					for (auto const pBld : BuildingClass::Array)
+					{
+						if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || !pBld->Type ||
+						    pBld->Type->Immune)
+							continue;
+
+						const bool isNeutralTech = (pBld->Owner->IsNeutral() && pBld->Type->Capturable);
+						const bool isEnemyBld =
+						    (pBld->Owner != pHouse && !pHouse->IsAlliedWith(pBld->Owner) && !pBld->Owner->IsNeutral() &&
+						     !pBld->Owner->IsObserver() && !pBld->Owner->Defeated);
+						if (!isNeutralTech && !isEnemyBld)
+							continue;
+
+						auto const pBldCell = pBld->GetCell();
+						if (!pBldCell || !IsCellVisibleToAI(pHouse, pBldCell))
+							continue;
+
+						const CellStruct bc = pBld->GetMapCoords();
+						const int distFromHomeCells = std::abs(bc.X - homeCoords.X) + std::abs(bc.Y - homeCoords.Y);
+						if (distFromHomeCells < 20)
+							continue;
+
+						const int ringMin = isNeutralTech ? 3 : 6;
+						const int ringMax = isNeutralTech ? 6 : 12;
+						for (int dy = -ringMax; dy <= ringMax; dy += 3)
+						{
+							for (int dx = -ringMax; dx <= ringMax; dx += 3)
+							{
+								const int cheb = std::max(std::abs(dx), std::abs(dy));
+								if (cheb < ringMin || cheb > ringMax)
+									continue;
+
+								const CellStruct tc{static_cast<short>(bc.X + dx), static_cast<short>(bc.Y + dy)};
+								auto const pCand = MapClass::Instance.TryGetCellAt(tc);
+								if (!pCand || !IsCellVisibleToAI(pHouse, pCand))
+									continue;
+								if ((pCand->LandType != LandType::Clear && pCand->LandType != LandType::Road) ||
+								    pCand->ContainsBridge() || pCand->GetBuilding() != nullptr ||
+								    pCand->FirstObject != nullptr)
+								{
+									continue;
+								}
+
+								// Count nearby enemy defensive turrets within 9 cells of this flank candidate
+								int nearbyEnemyTurrets = 0;
+								for (auto const pOtherBld : BuildingClass::Array)
+								{
+									if (!pOtherBld || pOtherBld->InLimbo || !pOtherBld->IsAlive || !pOtherBld->Owner ||
+									    !pOtherBld->Type)
+										continue;
+									if (pOtherBld->Owner == pHouse || pHouse->IsAlliedWith(pOtherBld->Owner) ||
+									    pOtherBld->Owner->IsNeutral())
+										continue;
+									if (pOtherBld->Type->BuildCat == BuildCat::Combat &&
+									    pOtherBld->Type->GetWeapon(0) != nullptr)
+									{
+										const CellStruct oc = pOtherBld->GetMapCoords();
+										if (std::abs(tc.X - oc.X) <= 9 && std::abs(tc.Y - oc.Y) <= 9)
+											nearbyEnemyTurrets++;
+									}
+								}
+
+								int candScore = 400 - nearbyEnemyTurrets * 260;
+								if (nearbyEnemyTurrets == 0)
+									candScore += 450; // Completely unprotected flank / rear blindspot!
+
+								if (isNeutralTech)
+								{
+									candScore += 380 + (scores[36] > 60 ? 200 : 0);
+								}
+								else
+								{
+									if (pBld->Type->ConstructionYard || pBld->Type->SuperWeapon != -1)
+										candScore += 420;
+									else if (pBld->Type->Factory != AbstractType::None || pBld->Type->PowerBonus > 0 ||
+									         pBld->Type->Refinery)
+										candScore += 280;
+								}
+
+								const int candZone =
+								    MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false);
+								if (homeGroundZone >= 0 && candZone >= 0 && candZone != homeGroundZone)
+									candScore += 480; // Disconnected island portal!
+
+								if (candScore > bestTunnelCellScore)
+								{
+									bestTunnelCellScore = candScore;
+									bestTunnelCell = tc;
+								}
+							}
+						}
+					}
+
+					// Fallback: if no visible enemy building yet but pWaveTargetCell is far and visible, place near
+					// frontline
+					if (bestTunnelCell == CellStruct::Empty && pWaveTargetCell)
+					{
+						const CellStruct wc = pWaveTargetCell->MapCoords;
+						if (std::abs(wc.X - homeCoords.X) + std::abs(wc.Y - homeCoords.Y) >= 22)
+						{
+							if (CellClass* pFrontCell = FindSafeIslandLandingCell(pHouse, wc, targetIslandZone, false))
+							{
+								if (IsCellVisibleToAI(pHouse, pFrontCell))
+									bestTunnelCell = pFrontCell->MapCoords;
+							}
+						}
+					}
+				}
+
+				if (bestTunnelCell != CellStruct::Empty)
+				{
+					pSuper->Launch(bestTunnelCell, false);
+					break;
+				}
+			}
+		}
+
+		// Step 2: Active Two-Way Subterranean Tunnel Portal (pHomeTunnel <-> pForwardTunnel)
+		if (ownTunnelCount >= 2 && pHomeTunnel && pForwardTunnel && pHomeTunnel != pForwardTunnel &&
+		    pHomeTunnel->DistanceFrom(pForwardTunnel) >= 3584)
+		{
+			// Keep Home Tunnel in Guard so passengers do not unload back at home; set Forward Tunnel to Unload so units
+			// emerge on the flank!
+			if (pHomeTunnel->CurrentMission == Mission::Unload)
+				pHomeTunnel->QueueMission(Mission::Guard, false);
+			if (pForwardTunnel->CurrentMission != Mission::Unload)
+				pForwardTunnel->QueueMission(Mission::Unload, true);
+
+			// Check if there is a high-value capturable building near pForwardTunnel (within 22 cells = 5632 leptons)
+			BuildingClass* pFlankCaptureTarget = nullptr;
+			BuildingClass* pFlankAttackTarget = nullptr;
+			int bestCapDist = 5632;
+			int bestAtkDist = 6144;
+			for (auto const pBld : BuildingClass::Array)
+			{
+				if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || !pBld->Type || pBld->Type->Immune)
+					continue;
+				if (pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner) || pBld->Owner->IsObserver() ||
+				    pBld->Owner->Defeated)
+					continue;
+
+				const int dFwd = pBld->DistanceFrom(pForwardTunnel);
+				if (dFwd <= bestCapDist && pBld->Type->Capturable &&
+				    (pBld->Owner->IsNeutral() || pBld->Type->ConstructionYard ||
+				     pBld->Type->Factory != AbstractType::None || pBld->Type->Refinery ||
+				     pBld->Type->SuperWeapon != -1 || pBld->Type->TechLevel >= 5))
+				{
+					bestCapDist = dFwd;
+					pFlankCaptureTarget = pBld;
+				}
+				if (!pBld->Owner->IsNeutral() && dFwd <= bestAtkDist)
+				{
+					bestAtkDist = dFwd;
+					pFlankAttackTarget = pBld;
+				}
+			}
+
+			// Feed Engineers, Cyborgs, Infantry & Size<=SizeLimit Vehicles near pHomeTunnel into the subterranean
+			// portal!
+			int sentIntoTunnel = 0;
+			const int maxBatchEnter = std::clamp(static_cast<int>(pHomeTunnel->Type->Passengers), 4, 10);
+
+			if (pFlankCaptureTarget)
+			{
+				for (auto const pInf : InfantryClass::Array)
+				{
+					if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || !pInf->Type ||
+					    !pInf->Type->Engineer)
+						continue;
+					// If Engineer emerged from pForwardTunnel, immediately capture the flank target!
+					if (pInf->DistanceFrom(pForwardTunnel) <= 2560)
+					{
+						if (pInf->CurrentMission != Mission::Capture)
+						{
+							pInf->SetTarget(pFlankCaptureTarget);
+							pInf->SetDestination(pFlankCaptureTarget, true);
+							pInf->QueueMission(Mission::Capture, true);
+						}
+					}
+					else if (pInf->DistanceFrom(pHomeTunnel) <= 7168 && pInf->CurrentMission != Mission::Enter)
+					{
+						pInf->SetDestination(pHomeTunnel, true);
+						pInf->QueueMission(Mission::Enter, true);
+						sentIntoTunnel++;
+					}
+				}
+			}
+
+			for (auto const pI : idleCombatInf)
+			{
+				if (sentIntoTunnel >= maxBatchEnter)
+					break;
+				if (pI->DistanceFrom(pForwardTunnel) <= 2304 && pFlankAttackTarget)
+				{
+					pI->SetTarget(pFlankAttackTarget);
+					pI->QueueMission(Mission::Attack, true);
+				}
+				else if (pI->DistanceFrom(pHomeTunnel) <= 6144 &&
+				         pI->DistanceFrom(pForwardTunnel) > pHomeTunnel->DistanceFrom(pForwardTunnel) - 1024)
+				{
+					pI->SetDestination(pHomeTunnel, true);
+					pI->QueueMission(Mission::Enter, true);
+					sentIntoTunnel++;
+				}
+			}
+
+			if (pHomeTunnel->Type->UnitAbsorb)
+			{
+				const int maxAllowedSize = std::max(1, static_cast<int>(pHomeTunnel->Type->SizeLimit));
+				for (auto const pV : idleCombatUnits)
+				{
+					if (sentIntoTunnel >= maxBatchEnter)
+						break;
+					if (IsAmphibiousOrAirTransport(pV->Type) ||
+					    static_cast<int>(pV->Type->TechnoTypeClass::Size) > maxAllowedSize)
+						continue;
+
+					if (pV->DistanceFrom(pForwardTunnel) <= 2304 && pFlankAttackTarget)
+					{
+						pV->SetTarget(pFlankAttackTarget);
+						pV->QueueMission(Mission::Attack, true);
+					}
+					else if (pV->DistanceFrom(pHomeTunnel) <= 6144 &&
+					         pV->DistanceFrom(pForwardTunnel) > pHomeTunnel->DistanceFrom(pForwardTunnel) - 1024)
+					{
+						pV->SetDestination(pHomeTunnel, true);
+						pV->QueueMission(Mission::Enter, true);
+						sentIntoTunnel++;
+					}
+				}
 			}
 		}
 	}
@@ -6288,11 +6629,14 @@ bool CanBuildUnderHumanRules(HouseClass* pHouse, TechnoTypeClass* pType)
 		{
 			if (auto const pSW = SuperWeaponTypeClass::Array.GetItem(pBld->SuperWeapon))
 			{
-				if (auto const pSWExt = SWTypeExt::Fetch(pSW))
+				if (!IsTunnelNetworkBuilding(pBld))
 				{
-					if (!pSWExt->SW_AllowAI)
-						return false; // Respects SW01_Computers.ini .. SW14_Computers.ini
-						              // (SW.AllowAI=no)
+					if (auto const pSWExt = SWTypeExt::Fetch(pSW))
+					{
+						if (!pSWExt->SW_AllowAI)
+							return false; // Respects SW01_Computers.ini .. SW14_Computers.ini
+							              // (SW.AllowAI=no)
+					}
 				}
 			}
 		}
@@ -6401,7 +6745,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				ownedBarracks++;
 			else if (pOT->Factory == AbstractType::UnitType && !pOT->Naval)
 				ownedWarFactories++;
-			else if (pOT->BuildCat == BuildCat::Combat)
+			else if (pOT->BuildCat == BuildCat::Combat && !IsTunnelNetworkBuilding(pOT))
 			{
 				const auto pWS = pOT->GetWeapon(0);
 				const auto pW = pWS ? pWS->WeaponType : nullptr;
@@ -6546,6 +6890,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (owned >= 2)
 					continue;
 				score = scores[11] - owned * 900;
+			}
+			else if (IsTunnelNetworkBuilding(pBld))
+			{
+				if (!hasCoreEconomyAndProduction || owned >= 1)
+					continue;
+				score = 680 + std::max({static_cast<int>(scores[28]), static_cast<int>(scores[36]),
+				                        static_cast<int>(scores[61]), static_cast<int>(scores[83])});
 			}
 			else if (pBld->BuildCat == BuildCat::Combat)
 			{
