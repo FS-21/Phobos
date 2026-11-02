@@ -15592,9 +15592,40 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	}
 	else if (isNavalBld)
 	{
+		// AdvAI Naval Yard candidate scan: scan INNER-TO-OUTER (r = 1 .. maxRadius)
+		// around coastal BaseNormal/Naval anchors first and around every ConYard,
+		// so shoreline water cells next to the allied base are always evaluated first!
+		const int baseAdjRange = std::max(1, pBuildingType->Adjacent);
+		for (auto const pAnchor : adjacencyAnchors)
+		{
+			if (pAnchor->Type->ConstructionYard)
+				continue;
+
+			const CellStruct ac = pAnchor->GetMapCoords();
+			const int anchorScanRange = baseAdjRange + w + 3;
+			for (int r = 1; r <= anchorScanRange; ++r)
+			{
+				for (int dy = -r; dy <= r; ++dy)
+				{
+					for (int dx = -r; dx <= r; ++dx)
+					{
+						if (std::max(std::abs(dx), std::abs(dy)) != r)
+							continue;
+
+						const CellStruct cand{static_cast<short>(ac.X + dx), static_cast<short>(ac.Y + dy)};
+						if (auto const pC = MapClass::Instance.TryGetCellAt(cand))
+						{
+							if (pC->LandType == LandType::Water)
+								candidateList.push_back(cand);
+						}
+					}
+				}
+			}
+		}
+
 		const int navalMaxAdj = std::max(std::max(1, pBuildingType->Adjacent), RulesClass::Instance ? RulesClass::Instance->AINavalYardAdjacency : 36);
-		const int maxRadius = std::clamp(navalMaxAdj + w + 4, 28, 56);
-		for (int r = maxRadius; r >= 1; --r)
+		const int maxRadius = std::clamp(navalMaxAdj + w + 2, 24, 48);
+		for (int r = 1; r <= maxRadius; ++r)
 		{
 			for (int dy = -r; dy <= r; ++dy)
 			{
@@ -15613,19 +15644,16 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 		}
 
-		const int baseAdjRange = std::max(1, pBuildingType->Adjacent);
 		for (auto const pAnchor : adjacencyAnchors)
 		{
+			if (!pAnchor->Type->ConstructionYard)
+				continue;
+
 			const CellStruct ac = pAnchor->GetMapCoords();
-			const bool isOtherConYard = pAnchor->Type->ConstructionYard;
-			if (isOtherConYard && std::max(std::abs(ac.X - center.X), std::abs(ac.Y - center.Y)) <= 4)
+			if (std::max(std::abs(ac.X - center.X), std::abs(ac.Y - center.Y)) <= 4)
 				continue;
 
-			if (!isOtherConYard && std::max(std::abs(ac.X - center.X), std::abs(ac.Y - center.Y)) <= 8)
-				continue;
-
-			const int anchorScanRange = isOtherConYard ? maxRadius : (baseAdjRange + w + 2);
-			for (int r = anchorScanRange; r >= 1; --r)
+			for (int r = 1; r <= maxRadius; ++r)
 			{
 				for (int dy = -r; dy <= r; ++dy)
 				{
@@ -15664,7 +15692,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
-	const int maxCandidatesToEvaluate = 900;
+	const int maxCandidatesToEvaluate = isNavalBld ? 2400 : 900;
 	// Two-pass evaluation: Pass 0 strictly requires the 1-cell street margin (IsCellClearedOfExitCorridors);
 	// Pass 1 only runs if Pass 0 found 0 valid cells (e.g. tight cliff/island corner), allowing 0-cell touching with a heavy score penalty (like AdvAI).
 	for (int relaxMarginPass = 0; relaxMarginPass < 2 && bestCandidate == CellStruct::Empty; ++relaxMarginPass)
@@ -15827,57 +15855,93 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 				const int candZone = MapClass::Instance.GetMovementZoneType(candidate, MovementZone::Normal, false);
 				const int expansionZoneBonus = (!isNavalBld && targetExpansionZone >= 0 && candZone == targetExpansionZone) ? 650 : 0;
-				int spatialScore = (isNavalBld ? (radius * 28) : (enableBaseCrawl ? (-radius * 5) : (-radius * 10))) - (hasOneCellMargin ? 0 : 4000) + expansionZoneBonus;
+				int spatialScore = (enableBaseCrawl ? (-radius * 5) : (-radius * 10)) - (hasOneCellMargin ? 0 : 4000) + expansionZoneBonus;
 				if (isNavalBld)
 				{
-					int openWaterCells = 0;
-					int coastalBlockedCells = 0;
-					for (int fy = -2; fy <= h + 1; ++fy)
-					{
-						for (int fx = -2; fx <= w + 1; ++fx)
-						{
-							if (fx >= 0 && fx < w && fy >= 0 && fy < h)
-								continue;
+					// Exact AdvAI NavalYard_Placement_Cell_Value + Modify_Rating_By_Terrain_Passability + minNavalDist spacing:
+					// AdvAI minimizes: (conyardDist * 10) + (closestDist * 100), keeping Naval Yards hugged right next to
+					// our closest shoreline structures and ConYard while maintaining >= 5.0 cells between multiple Naval Yards.
+					const CellStruct candCenter{static_cast<short>(candidate.X + w / 2), static_cast<short>(candidate.Y + h / 2)};
+					double closestDistSq = 1e12;
+					double conyardDistSq = 1e12;
+					int navalProximityPenalty = 0;
 
-							const CellStruct wc{static_cast<short>(candidate.X + fx), static_cast<short>(candidate.Y + fy)};
-							auto const pWC = MapClass::Instance.TryGetCellAt(wc);
-							if (pWC && pWC->LandType == LandType::Water && pWC->GetBuilding() == nullptr && !pWC->ContainsBridge())
-								openWaterCells++;
-							else
-								coastalBlockedCells++;
-						}
-					}
-
-					spatialScore += openWaterCells * 35 - coastalBlockedCells * 60;
-
-					int minLandBldDist = 999;
 					for (auto const pOwnB : pHouse->Buildings)
 					{
-						if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type)
+						if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type || pOwnB->Type->InvisibleInGame)
 							continue;
 
 						const CellStruct nbc = pOwnB->GetMapCoords();
-						const int bldDist = std::max(std::abs(candidate.X - nbc.X), std::abs(candidate.Y - nbc.Y));
+						const int oW = pOwnB->Type->GetFoundationWidth();
+						const int oH = pOwnB->Type->GetFoundationHeight(false);
+						const CellStruct otherCenter{static_cast<short>(nbc.X + oW / 2), static_cast<short>(nbc.Y + oH / 2)};
+						const double dxB = static_cast<double>(candCenter.X - otherCenter.X);
+						const double dyB = static_cast<double>(candCenter.Y - otherCenter.Y);
+						const double dSq = dxB * dxB + dyB * dyB;
+
+						if (dSq < closestDistSq)
+							closestDistSq = dSq;
+
+						if (pOwnB->Type->ConstructionYard)
+						{
+							const double dxCY = static_cast<double>(candidate.X - otherCenter.X);
+							const double dyCY = static_cast<double>(candidate.Y - otherCenter.Y);
+							const double cySq = dxCY * dxCY + dyCY * dyCY;
+							if (cySq < conyardDistSq)
+								conyardDistSq = cySq;
+						}
+
 						if (pOwnB->Type->Naval || (pOwnB->Type->SpeedType == SpeedType::Float))
 						{
-							if (bldDist < 8)
-								spatialScore -= 3500;
-						}
-						else
-						{
-							if (bldDist < minLandBldDist)
-								minLandBldDist = bldDist;
+							// AdvAI NavalMode minNavalDist = 5.0 cells between Naval Yards (dSq < 25.0)
+							if (dSq < 25.0)
+								navalProximityPenalty = 50000;
 						}
 					}
 
-					if (minLandBldDist < 999)
-						spatialScore += std::min(minLandBldDist, 42) * 35;
-
-					if (enemyTargetCell != CellStruct::Empty)
+					if (conyardDistSq >= 1e11)
 					{
-						const int distToEnemy = std::abs(candidate.X - enemyTargetCell.X) + std::abs(candidate.Y - enemyTargetCell.Y);
-						spatialScore -= distToEnemy * 6;
+						const double dxC = static_cast<double>(candidate.X - center.X);
+						const double dyC = static_cast<double>(candidate.Y - center.Y);
+						conyardDistSq = dxC * dxC + dyC * dyC;
 					}
+					if (closestDistSq >= 1e11)
+						closestDistSq = conyardDistSq;
+
+					const double closestDist = std::sqrt(closestDistSq);
+					const double conyardDist = std::sqrt(conyardDistSq);
+					int advAiCost = std::max(1, static_cast<int>(conyardDist * 10.0) + static_cast<int>(closestDist * 100.0));
+
+					// AdvAI Modify_Rating_By_Terrain_Passability (4 diagonal water corners around foundation):
+					auto isCornerFloatPassable = [&](short cx, short cy) -> bool
+					{
+						const CellStruct cc{cx, cy};
+						if (!MapClass::Instance.CoordinatesLegal(cc))
+							return true;
+						if (auto const pCorner = MapClass::Instance.TryGetCellAt(cc))
+							return pCorner->IsClearToMove(SpeedType::Float, true, true, 0, MovementZone::Normal, 0, false);
+						return true;
+					};
+
+					const bool passableAbove = isCornerFloatPassable(static_cast<short>(candidate.X - 1), static_cast<short>(candidate.Y - 1));
+					const bool passableBelow = isCornerFloatPassable(static_cast<short>(candidate.X + w), static_cast<short>(candidate.Y + h));
+					const bool passableEast = isCornerFloatPassable(static_cast<short>(candidate.X + w), static_cast<short>(candidate.Y - 1));
+					const bool passableWest = isCornerFloatPassable(static_cast<short>(candidate.X - 1), static_cast<short>(candidate.Y + h));
+
+					if (!passableAbove && !passableBelow)
+						advAiCost *= 3;
+					if (!passableEast && !passableWest)
+						advAiCost *= 3;
+					if (!passableAbove)
+						advAiCost = (advAiCost * 4) / 3;
+					if (!passableBelow)
+						advAiCost = (advAiCost * 4) / 3;
+					if (!passableEast)
+						advAiCost = (advAiCost * 4) / 3;
+					if (!passableWest)
+						advAiCost = (advAiCost * 4) / 3;
+
+					spatialScore = 50000 - advAiCost - navalProximityPenalty - (hasOneCellMargin ? 0 : 4000);
 				}
 				// Bonus when South/East exit of a Factory or Refinery has 2+ clear cells in front of it
 				if (isFactoryOrBarracks || isRefineryOrSlaveMiner)
