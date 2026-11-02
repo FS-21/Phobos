@@ -313,8 +313,12 @@ void SWTypeExt::ExtData::ApplyTypeConversion(SuperClass* pSW)
 
 	if (this->Convert_UseUniversalDeploy.Get())
 	{
-		for (const auto pTarget : *TechnoClass::Array)
-			TypeConvertGroup::UniversalConvert(pTarget, this->Convert_Pairs, pSW->Owner);
+		const std::vector<TechnoClass*> targets(TechnoClass::Array->begin(), TechnoClass::Array->end());
+		for (auto const pTarget : targets)
+		{
+			if (pTarget && TechnoClass::Array->FindItemIndex(pTarget) >= 0)
+				TypeConvertGroup::UniversalConvert(pTarget, this->Convert_Pairs, pSW->Owner);
+		}
 
 		return;
 	}

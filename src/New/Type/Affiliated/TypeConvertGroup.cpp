@@ -51,7 +51,8 @@ void TypeConvertGroup::UniversalConvert(TechnoClass* pTarget, const std::vector<
 						pTargetExt->Convert_UniversalDeploy_RememberTarget = pTarget->Target;
 					}
 
-					bool converted = TechnoExt::UniversalDeployConversion(pTarget, toType) ? true : false;
+					if (TechnoExt::UniversalDeployConversion(pTarget, toType))
+						return;
 
 					break;
 				}
@@ -59,7 +60,8 @@ void TypeConvertGroup::UniversalConvert(TechnoClass* pTarget, const std::vector<
 		}
 		else
 		{
-			TechnoExt::UniversalDeployConversion(pTarget, toType);
+			if (TechnoExt::UniversalDeployConversion(pTarget, toType))
+				return;
 		}
 	}
 }
