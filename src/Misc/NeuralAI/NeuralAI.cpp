@@ -2529,6 +2529,11 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 							if (pOwned->Type->CanBeOccupied && !pOwned->Type->BaseNormal && !pOwned->Type->ConstructionYard && pOwned->Type->TechLevel < 0)
 								continue;
 
+							const bool isDeployedVehicle =
+								pOwned->Type->ResourceGatherer || (pOwned->Type->UndeploysInto != nullptr && !pOwned->Type->ConstructionYard && !pOwned->Type->BaseNormal && !pOwned->Type->Refinery);
+							if (isDeployedVehicle)
+								continue;
+
 							if (pOwned->Type->BuildCat == BuildCat::Combat)
 								defenses++;
 
@@ -2653,7 +2658,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 				projectToRadar(c, rx, ry);
 
-				std::fprintf(fp, "%s[%d,%d,%d,1]", firstPt ? "" : ",", rx, ry, pBld->Owner->ArrayIndex);
+				const bool isDeployedVehicleBld =
+					pBld->Type->ResourceGatherer || (pBld->Type->UndeploysInto != nullptr && !pBld->Type->ConstructionYard && !pBld->Type->BaseNormal && !pBld->Type->Refinery);
+				std::fprintf(fp, "%s[%d,%d,%d,%d]", firstPt ? "" : ",", rx, ry, pBld->Owner->ArrayIndex, isDeployedVehicleBld ? 0 : 1);
 
 				firstPt = false;
 
