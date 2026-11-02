@@ -5546,6 +5546,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (std::find(enemyBaseZones.begin(), enemyBaseZones.end(), cz) != enemyBaseZones.end())
 					continue;
 				bool alreadyColonized = false;
+				bool hasOrphanedHubWithoutConYardOrWarFac = false;
+				int conYardsInCz = 0;
+				int warFacsInCz = 0;
+				int hubsInCz = 0;
 				int minStepStoneDist = std::abs(dx) + std::abs(dy);
 				for (auto const pBld : pHouse->Buildings)
 				{
@@ -5557,14 +5561,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						const int bz = MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, false);
 						if (bz == cz)
 						{
-							alreadyColonized = true;
-							break;
+							hubsInCz++;
+							if (pBld->Type->ConstructionYard)
+								conYardsInCz++;
+							if (pBld->Type->Factory == AbstractType::UnitType && !pBld->Type->Naval)
+								warFacsInCz++;
+							continue;
 						}
 						const int dHub = std::abs(cand.X - bc.X) + std::abs(cand.Y - bc.Y);
 						if (dHub < minStepStoneDist)
 							minStepStoneDist = dHub;
 					}
 				}
+				if (conYardsInCz >= 1 || warFacsInCz >= 1)
+					alreadyColonized = true;
+				else if (hubsInCz >= 1)
+					hasOrphanedHubWithoutConYardOrWarFac = true;
 				if (!alreadyColonized)
 				{
 					for (auto const pOwnMcv : UnitClass::Array)
@@ -5585,7 +5597,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				if (tibVal > 0)
 				{
-					const int sc = std::min(tibVal, 600) - minStepStoneDist * 2;
+					const int sc = std::min(tibVal, 600) - minStepStoneDist * 2 - (hasOrphanedHubWithoutConYardOrWarFac ? 250 : 0);
 					if (sc > bestResScore)
 					{
 						bestResScore = sc;
@@ -5614,6 +5626,76 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			if (auto const pSafe = FindSafeIslandLandingCell(pHouse, pIslandResourceGoalCell->MapCoords, resourceIslandZone, true))
 				pIslandResourceGoalCell = pSafe;
+		}
+		// Orphaned Island Refinery Recovery: If any island has an owned Refinery with 0 Harvesters in its movement zone,
+		// either switch that island's War Factory to PrimaryFactory (if one exists on that island) OR ferry a spare Harvester from another island!
+		if (Unsorted::CurrentFrame % 90 < 20)
+		{
+			for (auto const pRefB : pHouse->Buildings)
+			{
+				if (!pRefB || pRefB->InLimbo || !pRefB->IsAlive || !pRefB->Type)
+					continue;
+				if (!pRefB->Type->Refinery && !pRefB->Type->ResourceDestination)
+					continue;
+				const int rz = MapClass::Instance.GetMovementZoneType(pRefB->GetMapCoords(), MovementZone::Normal, false);
+				if (rz < 0)
+					continue;
+				int harvsInRz = 0;
+				for (auto const pHU : UnitClass::Array)
+				{
+					if (!pHU || pHU->Owner != pHouse || pHU->InLimbo || !pHU->IsAlive || !pHU->Type)
+						continue;
+					if ((pHU->Type->Harvester || pHU->Type->ResourceGatherer) &&
+						MapClass::Instance.GetMovementZoneType(pHU->GetMapCoords(), MovementZone::Normal, false) == rz)
+					{
+						harvsInRz++;
+					}
+				}
+				if (harvsInRz == 0)
+				{
+					BuildingClass* pWarFacInRz = nullptr;
+					for (auto const pWB : pHouse->Buildings)
+					{
+						if (pWB && !pWB->InLimbo && pWB->IsAlive && pWB->Type && pWB->Type->Factory == AbstractType::UnitType && !pWB->Type->Naval &&
+							MapClass::Instance.GetMovementZoneType(pWB->GetMapCoords(), MovementZone::Normal, false) == rz)
+						{
+							pWarFacInRz = pWB;
+							break;
+						}
+					}
+					if (pWarFacInRz)
+					{
+						if (!pWarFacInRz->IsPrimaryFactory)
+							pWarFacInRz->TogglePrimaryFactory();
+					}
+					else if (auto const pRefCell = pRefB->GetCell())
+					{
+						for (auto const pSpareH : UnitClass::Array)
+						{
+							if (!pSpareH || pSpareH->Owner != pHouse || pSpareH->InLimbo || !pSpareH->IsAlive || !pSpareH->Type || !pSpareH->Type->Harvester)
+								continue;
+							const int uz = MapClass::Instance.GetMovementZoneType(pSpareH->GetMapCoords(), MovementZone::Normal, false);
+							if (uz < 0 || uz == rz)
+								continue;
+							int harvsInUz = 0;
+							for (auto const pOtherH : UnitClass::Array)
+							{
+								if (pOtherH && pOtherH->Owner == pHouse && !pOtherH->InLimbo && pOtherH->IsAlive && pOtherH->Type && pOtherH->Type->Harvester &&
+									MapClass::Instance.GetMovementZoneType(pOtherH->GetMapCoords(), MovementZone::Normal, false) == uz)
+								{
+									harvsInUz++;
+								}
+							}
+							if (harvsInUz >= 2 && CanHouseFerryTypeAcrossWater(pHouse, pSpareH->Type))
+							{
+								DispatchFootToTargetOrTransport(pSpareH, pRefCell, Mission::Move, false);
+								break;
+							}
+						}
+					}
+					break;
+				}
+			}
 		}
 		// Enemy Island Offensive Beachhead & Reconquest Discovery: Once all neutral islands in the archipelago are colonized (!pIslandResourceGoalCell),
 		// allow MCVs & Forward Deployers (Outposts, Mobile War Factories/Barracks, Nanocores) to reconquer the weakest/least-defended enemy island!
@@ -10648,7 +10730,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 		CellClass* pActiveIslandGoal = pCustomPassengerGoal ? pCustomPassengerGoal : pIslandGoalCell;
 		int activeIslandZone = pCustomPassengerGoal ? customPassengerZone : targetIslandZone;
-		if ((carryingMCV || carryingHarvester) && pIslandResourceGoalCell)
+		if (!pCustomPassengerGoal && (carryingMCV || carryingHarvester) && pIslandResourceGoalCell)
 		{
 			pActiveIslandGoal = pIslandResourceGoalCell;
 			activeIslandZone = resourceIslandZone;
@@ -11684,14 +11766,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const bool canFerryNomadNow = (pIslandResourceGoalCell != nullptr && yz != resourceIslandZone && ownsLiveMcvTransport);
 
 				bool hasUnharvestedOreNearThisYard = false;
-				for (int dy = -16; dy <= 16 && !hasUnharvestedOreNearThisYard; dy += 4)
+				for (int dy = -20; dy <= 20 && !hasUnharvestedOreNearThisYard; dy += 4)
 				{
-					for (int dx = -16; dx <= 16; dx += 4)
+					for (int dx = -20; dx <= 20; dx += 4)
 					{
 						const CellStruct tc{static_cast<short>(yc.X + dx), static_cast<short>(yc.Y + dy)};
 						if (auto const pC = MapClass::Instance.TryGetCellAt(tc))
 						{
-							if (pC->GetContainedTiberiumValue() > 0 && MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false) == yz)
+							if (MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false) != yz)
+								continue;
+							const auto pTerr = pC->GetTerrain(false);
+							if (pC->GetContainedTiberiumValue() > 0 || (pTerr && pTerr->Type && pTerr->Type->SpawnsTiberium))
 							{
 								hasUnharvestedOreNearThisYard = true;
 								break;
@@ -11701,21 +11786,28 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				int structuresDroppedHere = 0;
-				bool hasRefineryOrFactoryHere = false;
+				int defsDroppedHere = 0;
+				bool hasRefineryHere = false;
+				bool hasWarFacHere = false;
 				for (auto const pNearB : pHouse->Buildings)
 				{
 					if (!pNearB || pNearB == pOwnBld || pNearB->InLimbo || !pNearB->IsAlive || !pNearB->Type)
 						continue;
 					const CellStruct nc = pNearB->GetMapCoords();
-					if (std::max(std::abs(yc.X - nc.X), std::abs(yc.Y - nc.Y)) <= 14 &&
+					if (std::max(std::abs(yc.X - nc.X), std::abs(yc.Y - nc.Y)) <= 16 &&
 						MapClass::Instance.GetMovementZoneType(nc, MovementZone::Normal, false) == yz)
 					{
 						if (pNearB->Type->Refinery || pNearB->Type->ResourceDestination || pNearB->Type->BaseNormal || pNearB->Type->Factory != AbstractType::None || pNearB->Type->IsBaseDefense)
 							structuresDroppedHere++;
-						if (pNearB->Type->Refinery || pNearB->Type->ResourceDestination || (pNearB->Type->Factory != AbstractType::None && !pNearB->Type->Naval))
-							hasRefineryOrFactoryHere = true;
+						if (pNearB->Type->Refinery || pNearB->Type->ResourceDestination)
+							hasRefineryHere = true;
+						if (pNearB->Type->Factory == AbstractType::UnitType && !pNearB->Type->Naval)
+							hasWarFacHere = true;
+						if (pNearB->Type->IsBaseDefense && !IsTunnelNetworkBuilding(pNearB->Type))
+							defsDroppedHere++;
 					}
 				}
+				const bool hasRefineryOrFactoryHere = hasRefineryHere && hasWarFacHere;
 
 				bool hasSameLandmassExpansionOrSiegeGoal = false;
 				if (!hasUnharvestedOreNearThisYard && scores[81] > 75)
@@ -11735,7 +11827,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				const bool isSecondaryConYardReadyToHop = (pHouse->NumConYards >= 2 && pOwnBld != pHouse->ConYards.GetItem(0) &&
-					hasRefineryOrFactoryHere && structuresDroppedHere >= 2 && (canFerryNomadNow || hasSameLandmassExpansionOrSiegeGoal));
+					!hasUnharvestedOreNearThisYard && !canBuildAdditionalMCV && hasRefineryHere && hasWarFacHere && defsDroppedHere >= 2 &&
+					structuresDroppedHere >= 5 && (canFerryNomadNow || hasSameLandmassExpansionOrSiegeGoal));
 				const bool isSingleConYardDepletedHop = (pHouse->NumConYards == 1 && !canBuildAdditionalMCV && !hasUncolonizedOreOnHomeIsland && !hasUnharvestedOreNearThisYard &&
 					pHouse->OwnedBuildings >= 10 && pHouse->NumWarFactories >= 1 && hasRefineryOrFactoryHere && structuresDroppedHere >= 4 &&
 					(canFerryNomadNow || hasSameLandmassExpansionOrSiegeGoal));
@@ -13523,7 +13616,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (!isRemoteOrNomadicCY)
 				continue;
 
-			bool hasRefNearCY = false;
+			int refsNearCY = 0;
 			bool hasWarFacNearCY = false;
 			bool hasBarracksNearCY = false;
 			int defsNearCY = 0;
@@ -13533,10 +13626,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 				const CellStruct bc = pOwnB->GetMapCoords();
 				const int dCheb = std::max(std::abs(cyc.X - bc.X), std::abs(cyc.Y - bc.Y));
-				if (dCheb <= 14 && MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, false) == cyz)
+				if (dCheb <= 18 && MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, false) == cyz)
 				{
 					if (pOwnB->Type->Refinery || pOwnB->Type->ResourceGatherer || pOwnB->Type->ResourceDestination)
-						hasRefNearCY = true;
+						refsNearCY++;
 					else if (pOwnB->Type->Factory == AbstractType::UnitType && !pOwnB->Type->Naval)
 						hasWarFacNearCY = true;
 					else if (pOwnB->Type->Factory == AbstractType::InfantryType)
@@ -13545,23 +13638,31 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						defsNearCY++;
 				}
 			}
+			const bool hasRefNearCY = (refsNearCY >= 1);
 
-			bool hasOreNearCY = false;
-			for (int dy = -20; dy <= 20 && !hasOreNearCY; dy += 4)
+			int oreCellsNearCY = 0;
+			int tiberiumTreesNearCY = 0;
+			for (int dy = -24; dy <= 24; dy += 3)
 			{
-				for (int dx = -20; dx <= 20; dx += 4)
+				for (int dx = -24; dx <= 24; dx += 3)
 				{
 					const CellStruct tc{static_cast<short>(cyc.X + dx), static_cast<short>(cyc.Y + dy)};
 					if (auto const pC = MapClass::Instance.TryGetCellAt(tc))
 					{
-						if (pC->GetContainedTiberiumValue() > 0 && MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false) == cyz)
+						if (MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false) != cyz)
+							continue;
+						if (pC->GetContainedTiberiumValue() > 0)
+							oreCellsNearCY++;
+						if (auto const pTerr = pC->GetTerrain(false))
 						{
-							hasOreNearCY = true;
-							break;
+							if (pTerr->Type && pTerr->Type->SpawnsTiberium)
+								tiberiumTreesNearCY++;
 						}
 					}
 				}
 			}
+			const bool hasOreNearCY = (oreCellsNearCY > 0 || tiberiumTreesNearCY > 0);
+			const bool wantsSecondIslandRefinery = (refsNearCY == 1 && hasWarFacNearCY && (tiberiumTreesNearCY >= 1 || oreCellsNearCY >= 8) && money >= 1400);
 
 			bool enemyNearCY = false;
 			for (auto const pEB : BuildingClass::Array)
@@ -13577,7 +13678,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 			}
 
-			if (!hasRefNearCY && hasOreNearCY)
+			if ((!hasRefNearCY && hasOreNearCY) || wantsSecondIslandRefinery)
 				conYardWithNoRefineryInZone = true;
 
 			if (enemyNearCY || (spawnHomeZone >= 0 && cyz != spawnHomeZone) || !hasOreNearCY)
@@ -13586,7 +13687,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					forwardConYardNeedsWarFactory = true;
 				if (!hasBarracksNearCY && ownedRefineries >= 1)
 					forwardConYardNeedsBarracks = true;
-				if (defsNearCY < 2 && enemyNearCY)
+				if (defsNearCY < 2 && (hasRefNearCY || hasWarFacNearCY || enemyNearCY))
 					forwardConYardNeedsDefense = true;
 			}
 		}
@@ -13939,7 +14040,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (isPureAA && totalAADefenses >= maxAADefenses)
 					continue;
 
-				if (!isPureAA && totalGroundDefenses >= maxGroundDefenses)
+				const bool needsOutpostPointDefense = (!isPureAA && (undefendedRemoteAssetsCount > 0 || forwardConYardNeedsDefense));
+				const int effectiveMaxGroundDefenses = needsOutpostPointDefense ? std::max(maxGroundDefenses + 2, totalGroundDefenses + 1) : maxGroundDefenses;
+				if (!isPureAA && totalGroundDefenses >= effectiveMaxGroundDefenses)
 					continue;
 
 				// Do not queue powered defenses when power cushion is already tight
@@ -13962,11 +14065,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (isPureAA)
 					score -= totalAADefenses * 420 + owned * 500;
 
+				else if (needsOutpostPointDefense)
+				{
+					// Remote/island ConYard or Refinery has < 2 local defenses: do not penalize by home-island defense count!
+					score = std::max(static_cast<int>(scores[5]), 250) + tierQualityBonus + 550;
+				}
 				else
 				{
 					score -= totalGroundDefenses * 480 + owned * 600;
-					if (forwardConYardNeedsDefense)
-						score += 950; // Slot 81 Forward Siege Outpost Turret Push!
 				}
 
 				// Human-like Defense Moderation (Opportunity Cost of ConYard Queue &
@@ -13979,12 +14085,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				// floating > 4000 credits!
 
-				const bool needsOutpostPointDefense = (!isPureAA && undefendedRemoteAssetsCount > 0);
 				const bool hasInitialCoreDefenses = isPureAA ? (totalAADefenses >= 1) : (totalGroundDefenses >= 2);
 
-				if (needsOutpostPointDefense)
-					score += 680; // Proactively guard captured Oil Derricks, Tech Outposts, and remote Refineries against enemy Engineers & raids!
-				else if (hasInitialCoreDefenses && !wasRecentlyAttacked && hasPendingCoreTechOrEco && money < 4000)
+				if (!needsOutpostPointDefense && hasInitialCoreDefenses && !wasRecentlyAttacked && hasPendingCoreTechOrEco && money < 4000)
 					score -= 1150;
 
 				// Reactive Threat Countering (from AttackedBuildingsLIFO):
@@ -14278,8 +14381,47 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			(trueRefineries < 10 && ownedEconomyUnits < 18) && !ownsUndeployedKeyStructure &&
 			(features[21] == 0 || CanHouseFerryTypeAcrossWater(pHouse, pUnit));
 
+		bool hasRefineryZoneWithZeroHarvesters = false;
+		bool hasUnderharvestedIslandWithWarFactory = false;
+		if (pUnit->Harvester || pUnit->ResourceGatherer)
+		{
+			for (auto const pRefB : pHouse->Buildings)
+			{
+				if (!pRefB || pRefB->InLimbo || !pRefB->IsAlive || !pRefB->Type || (!pRefB->Type->Refinery && !pRefB->Type->ResourceDestination))
+					continue;
+				const int rz = MapClass::Instance.GetMovementZoneType(pRefB->GetMapCoords(), MovementZone::Normal, false);
+				if (rz < 0)
+					continue;
+				int refsInRz = 0;
+				int warFacsInRz = 0;
+				for (auto const pOB : pHouse->Buildings)
+				{
+					if (!pOB || pOB->InLimbo || !pOB->IsAlive || !pOB->Type ||
+						MapClass::Instance.GetMovementZoneType(pOB->GetMapCoords(), MovementZone::Normal, false) != rz)
+						continue;
+					if (pOB->Type->Refinery || pOB->Type->ResourceDestination)
+						refsInRz++;
+					else if (pOB->Type->Factory == AbstractType::UnitType && !pOB->Type->Naval)
+						warFacsInRz++;
+				}
+				int harvsInRz = 0;
+				for (auto const pHU : UnitClass::Array)
+				{
+					if (pHU && pHU->Owner == pHouse && !pHU->InLimbo && pHU->IsAlive && pHU->Type &&
+						(pHU->Type->Harvester || pHU->Type->ResourceGatherer) &&
+						MapClass::Instance.GetMovementZoneType(pHU->GetMapCoords(), MovementZone::Normal, false) == rz)
+					{
+						harvsInRz++;
+					}
+				}
+				if (harvsInRz == 0 && (warFacsInRz >= 1 || CanHouseFerryTypeAcrossWater(pHouse, pUnit)))
+					hasRefineryZoneWithZeroHarvesters = true;
+				else if (warFacsInRz >= 1 && harvsInRz < refsInRz * 2)
+					hasUnderharvestedIslandWithWarFactory = true;
+			}
+		}
 		const bool isEconomyUnit = pUnit->Harvester || pUnit->ResourceGatherer || isDeployableRefineryOrMiner;
-		if (isEconomyUnit && ownedEconomyUnits >= economyUnitCap && !allowExpansionRefineryDeployer)
+		if (isEconomyUnit && ownedEconomyUnits >= economyUnitCap && !allowExpansionRefineryDeployer && !hasRefineryZoneWithZeroHarvesters && !hasUnderharvestedIslandWithWarFactory)
 			continue;
 
 		const bool isUnarmedSupportVehicle = (!pUnit->Naval && pWpn == nullptr && !isMCV && !isKeyStructureDeployer && !isEconomyUnit &&
@@ -14444,7 +14586,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			else if (pUnit->Harvester || pUnit->ResourceGatherer)
-				score += scores[31] + ((ownedEconomyUnits < 2) ? 1200 : (allowExpansionRefineryDeployer ? scores[30] : 0));
+				score += scores[31] + (hasRefineryZoneWithZeroHarvesters ? 2600 : (hasUnderharvestedIslandWithWarFactory ? 1350 : ((ownedEconomyUnits < 2) ? 1200 : (allowExpansionRefineryDeployer ? scores[30] : 0))));
 
 			else if (pUnit->Passengers > 0 || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall))
 			{
@@ -14980,9 +15122,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		if (isOtherIsland || (isRemoteHubOnSameLand && isHubAnchor))
 		{
 			int localHubBlds = 0;
+			int localRefs = 0;
+			int localDefs = 0;
 			bool hasLocalWarFac = false;
 			bool hasLocalBarracks = false;
-			bool hasLocalRef = false;
 			for (auto const pCheckB : pHouse->Buildings)
 			{
 				if (!pCheckB || pCheckB == pOwnBld || pCheckB->InLimbo || !pCheckB->IsAlive || !pCheckB->Type || pCheckB->Type->Insignificant || pCheckB->Type->InvisibleInGame)
@@ -14991,7 +15134,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					continue;
 				const CellStruct cbc = pCheckB->GetMapCoords();
 				if (MapClass::Instance.GetMovementZoneType(cbc, MovementZone::Normal, false) == bz &&
-					std::max(std::abs(bc.X - cbc.X), std::abs(bc.Y - cbc.Y)) <= 16)
+					std::max(std::abs(bc.X - cbc.X), std::abs(bc.Y - cbc.Y)) <= 18)
 				{
 					localHubBlds++;
 					if (pCheckB->Type->Factory == AbstractType::UnitType && !pCheckB->Type->Naval)
@@ -14999,9 +15142,12 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					else if (pCheckB->Type->Factory == AbstractType::InfantryType)
 						hasLocalBarracks = true;
 					else if (pCheckB->Type->Refinery || pCheckB->Type->ResourceGatherer || pCheckB->Type->ResourceDestination)
-						hasLocalRef = true;
+						localRefs++;
+					else if (pCheckB->Type->IsBaseDefense && !IsTunnelNetworkBuilding(pCheckB->Type))
+						localDefs++;
 				}
 			}
+			const bool hasLocalRef = (localRefs >= 1);
 			bool enemyInHubZone = false;
 			for (auto const pEB : BuildingClass::Array)
 			{
@@ -15015,7 +15161,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					break;
 				}
 			}
-			const bool missingThisCoreBld = (placingWarFactory && !hasLocalWarFac) || (placingBarracks && !hasLocalBarracks) || (isRefineryOrSlaveMiner && !hasLocalRef);
+			const bool missingThisCoreBld = (placingWarFactory && !hasLocalWarFac) || (placingBarracks && !hasLocalBarracks) ||
+				(isRefineryOrSlaveMiner && (!hasLocalRef || (localRefs == 1 && hasLocalWarFac))) || (pBuildingType->IsBaseDefense && localDefs < 2);
 			if (localHubBlds < 18 || missingThisCoreBld)
 			{
 				int hubScore = (18 - std::min(18, localHubBlds)) * 10 + (pOwnBld->Type->ConstructionYard ? 50 : 0) + (enemyInHubZone ? 250 : 0) + (missingThisCoreBld ? 500 : 0);
