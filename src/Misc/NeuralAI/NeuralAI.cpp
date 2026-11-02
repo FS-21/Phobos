@@ -9627,6 +9627,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 
 				pSuper->Launch(homeCoords, false);
+				pSuper->Reset();
 
 				break;
 			}
@@ -9909,6 +9910,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 
 					pSuper->Launch(bestTunnelCell, false);
+					pSuper->Reset();
 
 					break;
 				}
@@ -10331,6 +10333,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 
 						pSuper->Launch(icTargetCell, false);
+						pSuper->Reset();
 
 						break;
 					}
@@ -10547,12 +10550,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 
 						pSuper->Launch(chronoSrc, false);
-
+						pSuper->Reset();
 						pSuper->ChronoMapCoords = chronoSrc;
-
 						pChronoWarp->ChronoMapCoords = chronoSrc;
-
 						pChronoWarp->Launch(chronoDst, false);
+						pChronoWarp->Reset();
 
 						break;
 					}
@@ -10620,6 +10622,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 
 						pSuper->Launch(bestMutateCell, false);
+						pSuper->Reset();
 
 						break;
 					}
@@ -10687,6 +10690,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 
 						pSuper->Launch(bestDomCell, false);
+						pSuper->Reset();
 
 						break;
 					}
@@ -10701,6 +10705,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 
 					pSuper->Launch(pFallbackEnemyCell->MapCoords, false);
+					pSuper->Reset();
 
 					break;
 				}
@@ -10714,6 +10719,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 
 					pSuper->Launch(pVisibleEnemyBld->GetMapCoords(), false);
+					pSuper->Reset();
 
 					break;
 				}
