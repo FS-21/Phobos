@@ -10,6 +10,7 @@
 #include <GameOptionsClass.h>
 #include <PlanningTokenClass.h>
 #include <TacticalClass.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 #pragma region Update
 
@@ -454,6 +455,21 @@ DEFINE_HOOK(0x441553, BuildingClass_Unlimbo_AddOwned, 0x6)
 
 	if (pBuildingExt)
 		pBuildingExt->InitializeResourceProductions();
+
+	if (pThis->Owner && pThis->Type && pThis->Type->Factory != AbstractType::None && NeuralAI::IsEnabledForHouse(pThis->Owner))
+	{
+		bool otherPrimaryExists = false;
+		for (auto const pBld : pThis->Owner->Buildings)
+		{
+			if (pBld && pBld != pThis && pBld->IsAlive && !pBld->InLimbo && pBld->Type &&
+				pBld->Type->Factory == pThis->Type->Factory && pBld->Type->Naval == pThis->Type->Naval && pBld->IsPrimaryFactory)
+			{
+				otherPrimaryExists = true;
+				break;
+			}
+		}
+		pThis->IsPrimaryFactory = !otherPrimaryExists;
+	}
 
 	if (pTypeExt && pOwnerExt && !pTypeExt->PowerPlantEnhancer_Buildings.empty() &&
 	    (pTypeExt->PowerPlantEnhancer_Amount != 0 || pTypeExt->PowerPlantEnhancer_Factor != 1.0f))

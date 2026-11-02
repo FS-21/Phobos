@@ -12,6 +12,7 @@
 #include <Utilities/Debug.h>
 #include <FactoryClass.h>
 #include <New/Type/ResourceTypeClass.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 DEFINE_HOOK(0x4C9BD5, FactoryClass_AI_ProcessProductionStep, 0x31)
 {
@@ -142,7 +143,7 @@ DEFINE_HOOK(0x4401BB, BuildingClass_AI_PickWithFreeDocks, 0x6)
 	if (RulesExt::Global()->AllowParallelAIQueues && !RulesExt::Global()->ForbidParallelAIQueues_Aircraft && (!pType || !TechnoTypeExt::Fetch(pType)->ForbidParallelAIQueues))
 		return 0;
 
-	if (pOwner->IsCurrentPlayer() || pOwner->IsNeutral())
+	if (pOwner->IsCurrentPlayer() || pOwner->IsNeutral() || NeuralAI::IsEnabledForHouse(pOwner))
 		return 0;
 
 	if (pBuilding->Type->Factory == AbstractType::AircraftType)
@@ -162,6 +163,58 @@ DEFINE_HOOK(0x4502F4, BuildingClass_Update_Factory_Phobos, 0x6)
 {
 	GET(BuildingClass*, pThis, ESI);
 	const HouseClass* pOwner = pThis->Owner;
+
+	if (pOwner && pOwner->Production && NeuralAI::IsEnabledForHouse(pOwner))
+	{
+		enum { Skip = 0x4503CA };
+		auto const pOwnerExt = HouseExt::Fetch(pOwner);
+		auto const pFactory = pThis->Type->Factory;
+		const bool naval = pThis->Type->Naval;
+		BuildingClass** currFactory = nullptr;
+
+		switch (pFactory)
+		{
+		case AbstractType::BuildingType:
+			currFactory = &pOwnerExt->Factory_BuildingType;
+			break;
+		case AbstractType::UnitType:
+			currFactory = naval ? &pOwnerExt->Factory_NavyType : &pOwnerExt->Factory_VehicleType;
+			break;
+		case AbstractType::InfantryType:
+			currFactory = &pOwnerExt->Factory_InfantryType;
+			break;
+		case AbstractType::AircraftType:
+			currFactory = &pOwnerExt->Factory_AircraftType;
+			break;
+		default:
+			break;
+		}
+
+		BuildingClass* pDesignatedPrimary = nullptr;
+		for (auto const pBld : pOwner->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type &&
+				pBld->Type->Factory == pFactory && pBld->Type->Naval == naval &&
+				pBld->IsPrimaryFactory && !pBld->IsUnderEMP() &&
+				pBld->CurrentMission != Mission::Selling && pBld->QueuedMission != Mission::Selling &&
+				pBld->CurrentMission != Mission::Construction)
+			{
+				if (pFactory == AbstractType::AircraftType && !BuildingExt::HasFreeDocks(pBld))
+					continue;
+				pDesignatedPrimary = pBld;
+				break;
+			}
+		}
+
+		if (pDesignatedPrimary)
+		{
+			if (currFactory)
+				*currFactory = pDesignatedPrimary;
+			if (pThis != pDesignatedPrimary)
+				return Skip;
+			return 0;
+		}
+	}
 
 	if (pOwner->Production && RulesExt::Global()->AllowParallelAIQueues)
 	{
