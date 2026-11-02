@@ -3807,6 +3807,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 					continue;
 				const int cellZone = MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false);
 				int minSameZoneYardDist = 9999;
+				bool hasConYardInZone = false;
 				for (auto const pOwnB : pHouse->Buildings)
 				{
 					if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type || pOwnB->Type->Insignificant || pOwnB->Type->InvisibleInGame)
@@ -3817,11 +3818,13 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 					const int yz = MapClass::Instance.GetMovementZoneType(yc, MovementZone::Normal, false);
 					if (cellZone >= 0 && yz != cellZone)
 						continue;
+					if (pOwnB->Type->ConstructionYard)
+						hasConYardInZone = true;
 					const int d = std::max(std::abs(tc.X - yc.X), std::abs(tc.Y - yc.Y));
 					if (d < minSameZoneYardDist)
 						minSameZoneYardDist = d;
 				}
-				if (homeGroundZone >= 0 && cellZone >= 0 && cellZone != homeGroundZone && minSameZoneYardDist > 24 && pCell->GetBuilding() == nullptr)
+				if (homeGroundZone >= 0 && cellZone >= 0 && cellZone != homeGroundZone && !hasConYardInZone && minSameZoneYardDist > 24 && pCell->GetBuilding() == nullptr)
 				{
 					uncolonizedIslandLandCells++;
 				}
@@ -3834,7 +3837,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 				else if (minSameZoneYardDist > 14)
 				{
 					expansionOreCells++;
-					if (homeGroundZone >= 0 && cellZone >= 0 && cellZone != homeGroundZone)
+					if (homeGroundZone >= 0 && cellZone >= 0 && cellZone != homeGroundZone && !hasConYardInZone)
 						islandExpansionOreCells++;
 				}
 			}
@@ -4318,15 +4321,17 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// Slot 30: Multi-Outpost Expansion MCV, Multi-ConYard Production Speed Boost & Nomadic MCV
 	// (No hard cap on NumConYards: the neural network weighs whether to build more MCVs for expansion,
 	// nomadic hopping, or MultipleFactory building speed vs being moderate based on economy & biases)
-	const bool homeCongestedOrIslandTarget = (features[21] > 0 || pHouse->Buildings.Count >= 20 || GetMacroState(pHouse).ConsecutivePlacementFailures > 0);
-	const bool urgentResourceOrIslandExpansion = (localOreDepleting && (features[20] > 6 || homeCongestedOrIslandTarget)) || (features[21] > 0 && pHouse->NumConYards < 8);
+	const bool hasUncolonizedIslandExpansion = (features[21] == 50 || features[21] >= 100);
+	const int maxConYardsForScore = (features[21] > 0) ? (hasUncolonizedIslandExpansion ? 4 : 2) : ((features[20] > 12) ? 3 : 2);
+	const bool homeCongestedOrIslandTarget = (hasUncolonizedIslandExpansion || (features[20] > 10 && (pHouse->Buildings.Count >= 20 || GetMacroState(pHouse).ConsecutivePlacementFailures > 0)));
+	const bool urgentResourceOrIslandExpansion = (localOreDepleting && (features[20] > 6 || homeCongestedOrIslandTarget)) || (hasUncolonizedIslandExpansion && pHouse->NumConYards < 3);
 	const int depleteDiscount = (features[19] < 20 && (features[20] > 6 || homeCongestedOrIslandTarget)) ? 850 : ((features[19] < 28 || homeCongestedOrIslandTarget) ? 500 : 0);
-	const int mcvReserveThreshold = std::clamp(1800 + (pHouse->NumConYards * (features[21] > 0 ? 350 : 750)) - depleteDiscount - (static_cast<int>(outScores[35]) * 2) - (static_cast<int>(outScores[81]) * 2), 1100, 4800);
-	if (pHouse->NumConYards >= 1 && pHouse->NumWarFactories > 0 && (urgentResourceOrIslandExpansion || pHouse->Available_Money() > mcvReserveThreshold) &&
+	const int mcvReserveThreshold = std::clamp(1800 + (pHouse->NumConYards * (features[21] > 0 ? 550 : 850)) - depleteDiscount - (static_cast<int>(outScores[35]) * 2) - (static_cast<int>(outScores[81]) * 2), 1100, 4800);
+	if (pHouse->NumConYards >= 1 && pHouse->NumConYards < maxConYardsForScore && pHouse->NumWarFactories > 0 && (urgentResourceOrIslandExpansion || pHouse->Available_Money() > mcvReserveThreshold) &&
 		(features[20] > 6 || localOreDepleting || homeCongestedOrIslandTarget || outScores[35] > 80 || outScores[81] > 80 || outScores[30] > 160) &&
 		(features[19] < 32 || homeCongestedOrIslandTarget || pHouse->Available_Money() > mcvReserveThreshold + 1000 || outScores[30] > 220 || outScores[81] > 120))
 	{
-		const int perYardPenalty = (features[21] > 0) ? 45 : 160;
+		const int perYardPenalty = (features[21] > 0) ? 280 : 380;
 		outScores[30] = ClampInt16(
 			outScores[30] + 1050 + (localOreDepleting ? 420 : 0) + (homeCongestedOrIslandTarget ? 400 : 0) + (urgentResourceOrIslandExpansion ? 350 : 0) +
 			std::clamp(static_cast<int>(outScores[35]) + (static_cast<int>(outScores[81]) / 2), -400, 800) - ((pHouse->NumConYards - 1) * perYardPenalty));
@@ -5560,6 +5565,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							minStepStoneDist = dHub;
 					}
 				}
+				if (!alreadyColonized)
+				{
+					for (auto const pOwnMcv : UnitClass::Array)
+					{
+						if (!pOwnMcv || pOwnMcv->Owner != pHouse || pOwnMcv->InLimbo || !pOwnMcv->IsAlive || !pOwnMcv->Type || !pOwnMcv->Type->DeploysInto)
+							continue;
+						if (pOwnMcv->Type->DeploysInto->ConstructionYard || pOwnMcv->Type->DeploysInto->Refinery || pOwnMcv->Type->DeploysInto->BaseNormal)
+						{
+							if (MapClass::Instance.GetMovementZoneType(pOwnMcv->GetMapCoords(), MovementZone::Normal, false) == cz)
+							{
+								alreadyColonized = true;
+								break;
+							}
+						}
+					}
+				}
 				if (alreadyColonized)
 					continue;
 				if (tibVal > 0)
@@ -6766,12 +6787,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			const bool isMovingToDest = (pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr && pUnit->DistanceFrom(pUnit->Destination) > 768);
+			const bool isSecondaryIsland = (homeGroundZone >= 0 && mcvZone >= 0 && mcvZone != homeGroundZone);
+			const bool isArchipelagoOrNavalMap = (pIslandResourceGoalCell != nullptr || pIslandTechGoalCell != nullptr || pHouse->NumShipyards > 0 || pLoadingTransport != nullptr || isSecondaryIsland);
+			const bool alreadyHasConYardOnThisIsland = (!isForeignTechMCV && ((isSecondaryIsland && conYardsInMcvZone >= 1) || (isArchipelagoOrNavalMap && conYardsInMcvZone >= 1) || conYardsInMcvZone >= 2));
 			const bool currentIslandAlreadyDeveloped = (conYardsInMcvZone >= 1 ||
 				(hubsAndFactoriesInMcvZone >= 2 && (mcvZone != homeGroundZone || pHouse->NumConYards >= 1 || !hasUncolonizedOreOnHomeIsland || pHouse->OwnedBuildings >= 6)));
-			const bool mustColonizeOtherIsland = (canFerryThisMCV && mcvZone >= 0 && currentIslandAlreadyDeveloped && !isForeignTechMCV &&
-				pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone);
-			const bool wantsMultiConYardSpeed = (pHouse->NumConYards >= 1 && !mustColonizeOtherIsland && ((scores[30] > 400 && scores[35] <= 60 && scores[81] <= 90) || (!canFerryThisMCV && !hasUncolonizedOreOnHomeIsland)));
-			const int requiredAnchorDist = landedOnNewIsland ? 0 : (wantsMultiConYardSpeed ? 4 : 13);
+			const bool mustColonizeOtherIsland = (canFerryThisMCV && mcvZone >= 0 && (currentIslandAlreadyDeveloped || alreadyHasConYardOnThisIsland) && !isForeignTechMCV &&
+				((pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone) || alreadyHasConYardOnThisIsland));
+			const bool wantsMultiConYardSpeed = (pHouse->NumConYards >= 1 && !mustColonizeOtherIsland && !alreadyHasConYardOnThisIsland && !isArchipelagoOrNavalMap &&
+				((scores[30] > 650 && scores[35] <= 60 && scores[81] <= 90) || (!canFerryThisMCV && !hasUncolonizedOreOnHomeIsland)));
+			const int requiredAnchorDist = landedOnNewIsland ? 0 : (wantsMultiConYardSpeed ? 8 : 16);
 
 			if (mustColonizeOtherIsland)
 			{
@@ -6987,7 +7012,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					pUnit->SetDestination(pExpansionDest, true);
 					pUnit->QueueMission(Mission::Move, true);
 				}
-				else if (!enemyNearMCV)
+				else if (!enemyNearMCV && !alreadyHasConYardOnThisIsland)
 				{
 					if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
 					{
@@ -11292,7 +11317,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const int uZone = MapClass::Instance.GetMovementZoneType(pU->GetMapCoords(), MovementZone::Normal, false);
 				const bool isCriticallyDamagedTank = (pRepairDepot && pU->Type->Cost >= 1000 && pU->GetHealthPercentage() < 0.40);
 				const bool isLoadedStrikeAPC = (pU->Type->Passengers >= 3 && pU->Passengers.NumPassengers >= 1 && (pWaveTargetCell || pIslandGoalCell || pIslandTechGoalCell));
-				const bool isIslandExpansionMCV = (pU->Type->DeploysInto != nullptr && pIslandResourceGoalCell && uZone == homeGroundZone &&
+				const bool isIslandExpansionMCV = (pU->Type->DeploysInto != nullptr && pIslandResourceGoalCell && uZone >= 0 && uZone != resourceIslandZone &&
 					(pHouse->NumConYards >= 1 || pHouse->CountOwnedNow(pU->Type) >= 2));
 				const bool isIslandHarvester = ((pU->Type->Harvester || pU->Type->Weeder) && pIslandResourceGoalCell && uZone == homeGroundZone &&
 					pHouse->CountOwnedNow(pU->Type) >= 2);
@@ -11470,16 +11495,41 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			// new tanks and infantry spawn directly on the enemy's island!
 
-			if (enemyOnDisconnectedIsland && !pOwnBld->IsPrimaryFactory && (pOwnBld->Type->Factory == AbstractType::UnitType || pOwnBld->Type->Factory == AbstractType::InfantryType) &&
-
-				!pOwnBld->Type->Naval)
-
+			if (!pOwnBld->IsPrimaryFactory && (pOwnBld->Type->Factory == AbstractType::UnitType || pOwnBld->Type->Factory == AbstractType::InfantryType) &&
+				!pOwnBld->Type->Naval && (Unsorted::CurrentFrame % 90 < 20))
 			{
-
 				const int bldZone = MapClass::Instance.GetMovementZoneType(pOwnBld->GetMapCoords(), MovementZone::Normal, false);
-
-				if (false && bldZone == targetIslandZone)
-					pOwnBld->TogglePrimaryFactory();
+				bool factoryOnEnemyIsland = (enemyOnDisconnectedIsland && bldZone >= 0 && bldZone == targetIslandZone);
+				if (!factoryOnEnemyIsland && bldZone >= 0 && homeGroundZone >= 0 && bldZone != homeGroundZone)
+				{
+					for (auto const pEB : BuildingClass::Array)
+					{
+						if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral())
+							continue;
+						if (MapClass::Instance.GetMovementZoneType(pEB->GetMapCoords(), MovementZone::Normal, false) == bldZone)
+						{
+							factoryOnEnemyIsland = true;
+							break;
+						}
+					}
+				}
+				if (factoryOnEnemyIsland)
+				{
+					bool alreadyHasPrimaryInZone = false;
+					for (auto const pOtherB : pHouse->Buildings)
+					{
+						if (!pOtherB || pOtherB == pOwnBld || pOtherB->InLimbo || !pOtherB->IsAlive || !pOtherB->Type || !pOtherB->IsPrimaryFactory)
+							continue;
+						if (pOtherB->Type->Factory == pOwnBld->Type->Factory && pOtherB->Type->Naval == pOwnBld->Type->Naval &&
+							MapClass::Instance.GetMovementZoneType(pOtherB->GetMapCoords(), MovementZone::Normal, false) == bldZone)
+						{
+							alreadyHasPrimaryInZone = true;
+							break;
+						}
+					}
+					if (!alreadyHasPrimaryInZone)
+						pOwnBld->TogglePrimaryFactory();
+				}
 			}
 
 			const double hpPct = pOwnBld->GetHealthPercentage();
@@ -13519,7 +13569,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral())
 					continue;
 				const CellStruct ec = pEB->GetMapCoords();
-				if (std::max(std::abs(cyc.X - ec.X), std::abs(cyc.Y - ec.Y)) <= 32)
+				if (std::max(std::abs(cyc.X - ec.X), std::abs(cyc.Y - ec.Y)) <= 36 ||
+					MapClass::Instance.GetMovementZoneType(ec, MovementZone::Normal, false) == cyz)
 				{
 					enemyNearCY = true;
 					break;
@@ -13683,7 +13734,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			{
 
-				const int effectiveMaxBarracks = ((needsSteppingStoneCrawlToOre && pBld->BaseNormal) || forwardConYardNeedsBarracks) ? std::max(maxBarracks + 1, 4) : maxBarracks;
+				const int effectiveMaxBarracks = forwardConYardNeedsBarracks
+					? std::max({maxBarracks + 2, owned + 1, 5})
+					: ((needsSteppingStoneCrawlToOre && pBld->BaseNormal) ? std::max(maxBarracks + 1, 4) : maxBarracks);
 				if (owned >= effectiveMaxBarracks)
 					continue;
 
@@ -13695,6 +13748,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score = std::max(static_cast<int>(scores[2]), 350) + 750 + std::clamp(static_cast<int>(scores[82]), 0, 500);
 				}
+				else if (forwardConYardNeedsBarracks)
+				{
+					// Forward Outpost / Island Beachhead ConYard lacks its own Barracks: do not penalize by home-island Barracks count!
+					score = std::max(static_cast<int>(scores[2]), 300) + 1450;
+				}
 				else
 				{
 					score = scores[2] - owned * 820;
@@ -13702,9 +13760,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (ownedBarracks < maxEnemyBarracks && hasTechCenter && money > 1500)
 						score += 420;
 
-					if (forwardConYardNeedsBarracks)
-						score += 950; // Forward Outpost / Beachhead Barracks!
-					else if (needsSteppingStoneCrawlToOre && pBld->BaseNormal && money >= 1300)
+					if (needsSteppingStoneCrawlToOre && pBld->BaseNormal && money >= 1300)
 						score += 780; // Forward Barracks stepping-stone toward uncolonized Ore / Frontline!
 				}
 			}
@@ -13713,7 +13769,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			{
 
-				const int effectiveMaxWarFactories = forwardConYardNeedsWarFactory ? std::max(maxWarFactories + 1, 5) : maxWarFactories;
+				const int effectiveMaxWarFactories = forwardConYardNeedsWarFactory
+					? std::max({maxWarFactories + 2, owned + 1, 6})
+					: maxWarFactories;
 				if (owned >= effectiveMaxWarFactories)
 					continue;
 
@@ -13731,15 +13789,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 					score = std::max(static_cast<int>(scores[3]), 400) + 850 + std::clamp(static_cast<int>(scores[82]), 0, 550);
 				}
-
+				else if (forwardConYardNeedsWarFactory)
+				{
+					// Forward Outpost / Island Beachhead ConYard lacks its own War Factory: do not penalize by home-island War Factory count!
+					score = std::max(static_cast<int>(scores[3]), 400) + 1750;
+				}
 				else
 
 				{
 
 					score = scores[3] - owned * 620;
-
-					if (forwardConYardNeedsWarFactory)
-						score += 1150; // Forward Outpost / Beachhead War Factory!
 
 					// Competitive MultipleFactory Arms Race boost: never fall behind
 
@@ -14142,20 +14201,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 	}
-	const int maxAllowedConYards = (features[21] > 0) ? 10 : 5;
+	const bool hasUncolonizedIslandTarget = (features[21] == 50 || features[21] >= 100 || (features[21] > 0 && features[20] > 6));
+	const int maxAllowedConYards = (features[21] > 0) ? (hasUncolonizedIslandTarget ? 4 : 2) : ((features[20] > 12) ? 3 : 2);
 	const bool canSafelySaveForReplacementMCV =
 		(pHouse->NumConYards == 0 && !ownsUndeployedMCV) && ((ownedEconomyUnits > 0 && trueRefineries > 0 && features[65] < 45) || money >= 1500 || pHouse->OwnedUnits >= 3);
-	const bool needsCrossIslandMCV = (features[21] > 0 && features[19] == 0);
-	const bool wantsArchipelagoExpansion = (features[21] > 0 && canFerryAnyMCVAcrossWater &&
-		(features[19] < 28 || pHouse->Buildings.Count >= 12 || money >= 2200 || pHouse->NumConYards >= 2));
+	const bool needsCrossIslandMCV = (features[21] > 0 && (features[19] == 0 || pHouse->NumConYards >= 1));
+	const bool wantsArchipelagoExpansion = (hasUncolonizedIslandTarget && ownedHeavyIslandTransports >= 1 && pHouse->NumConYards < maxAllowedConYards &&
+		(features[19] < 28 || pHouse->Buildings.Count >= 12 || money >= 2200));
 	const bool desperateIslandOrOreExpansion = (pHouse->NumConYards >= 1 && pHouse->NumConYards < maxAllowedConYards && !ownsUndeployedMCV &&
-		(scores[30] >= 450 || wantsArchipelagoExpansion) &&
-		(!needsCrossIslandMCV || canFerryAnyMCVAcrossWater) &&
+		(features[20] > 6 || hasUncolonizedIslandTarget) && (scores[30] >= 450 || wantsArchipelagoExpansion) &&
+		(!needsCrossIslandMCV || ownedHeavyIslandTransports >= 1 || canFerryAnyMCVAcrossWater) &&
 		(features[19] < 24 || pHouse->Buildings.Count >= 14 || wantsArchipelagoExpansion || scores[81] > 85));
 	const bool canSafelySaveForExpansionMCV =
 		(pHouse->NumConYards >= 1 && pHouse->NumConYards < maxAllowedConYards && !ownsUndeployedMCV &&
-		(scores[30] >= 450 || wantsArchipelagoExpansion) &&
-		(!needsCrossIslandMCV || canFerryAnyMCVAcrossWater) && (money >= 1400 || desperateIslandOrOreExpansion));
+		(features[20] > 6 || hasUncolonizedIslandTarget) && (scores[30] >= 450 || wantsArchipelagoExpansion) &&
+		(!needsCrossIslandMCV || ownedHeavyIslandTransports >= 1 || canFerryAnyMCVAcrossWater) && (money >= 1400 || desperateIslandOrOreExpansion));
 	const bool canSafelySaveForMCV = canSafelySaveForReplacementMCV || canSafelySaveForExpansionMCV;
 	const bool savingForIslandTransport = (features[21] > 0 && pHouse->NumShipyards >= 1 && ownedHeavyIslandTransports == 0 &&
 		(scores[30] >= 450 || wantsArchipelagoExpansion || features[25] > 0) && money < 1200 && pHouse->OwnedUnits >= 2);
@@ -14187,9 +14247,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isMCV = (pUnit->DeploysInto && pUnit->DeploysInto->ConstructionYard);
 		if (isMCV)
 		{
+			const bool isSelfAmphibOrAirMcv = (pUnit->MovementZone == MovementZone::Amphibious || pUnit->MovementZone == MovementZone::AmphibiousDestroyer ||
+				pUnit->MovementZone == MovementZone::AmphibiousCrusher || pUnit->MovementZone == MovementZone::Fly || pUnit->JumpJet);
 			if (ownsUndeployedMCV || (pHouse->NumConYards >= 1 && scores[30] < 400 && scores[81] < 85) || pHouse->NumConYards >= maxAllowedConYards)
 				continue;
-			if (pHouse->NumConYards >= 1 && needsCrossIslandMCV && !CanHouseFerryTypeAcrossWater(pHouse, pUnit))
+			if (pHouse->NumConYards >= 1 && features[20] <= 6 && !hasUncolonizedIslandTarget)
+				continue;
+			if (pHouse->NumConYards >= 1 && needsCrossIslandMCV && (!CanHouseFerryTypeAcrossWater(pHouse, pUnit) || (!isSelfAmphibOrAirMcv && ownedHeavyIslandTransports == 0)))
 				continue;
 			if (canSafelySaveForMCV)
 			{
@@ -14843,12 +14907,14 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					if (!pB || pB == pCY || pB->InLimbo || !pB->IsAlive || !pB->Type)
 						continue;
 
+					if (pB->Type->ConstructionYard)
+						continue;
 					const CellStruct bc = pB->GetMapCoords();
-					if (std::max(std::abs(cyc.X - bc.X), std::abs(cyc.Y - bc.Y)) <= 10)
+					if (std::max(std::abs(cyc.X - bc.X), std::abs(cyc.Y - bc.Y)) <= 12)
 						nearCount++;
 				}
 
-				if (nearCount < 2)
+				if (nearCount < 4)
 				{
 					yardIdx = yi;
 					break;
@@ -14896,7 +14962,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		: ((pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(0)) ? pHouse->ConYards.GetItem(0)->GetMapCoords() : center);
 	const int homeSpawnZone = (homeSpawnRef != CellStruct::Empty) ? MapClass::Instance.GetMovementZoneType(homeSpawnRef, MovementZone::Normal, false) : -1;
 	int targetExpansionZone = -1;
-	int leastDevelopedHubBlds = 8;
+	int bestHubPriorityScore = -9999;
+	const bool placingWarFactory = (pBuildingType->Factory == AbstractType::UnitType && !pBuildingType->Naval);
+	const bool placingBarracks = (pBuildingType->Factory == AbstractType::InfantryType);
 	for (auto const pOwnBld : pHouse->Buildings)
 	{
 		if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Insignificant || pOwnBld->Type->InvisibleInGame)
@@ -14912,22 +14980,51 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		if (isOtherIsland || (isRemoteHubOnSameLand && isHubAnchor))
 		{
 			int localHubBlds = 0;
+			bool hasLocalWarFac = false;
+			bool hasLocalBarracks = false;
+			bool hasLocalRef = false;
 			for (auto const pCheckB : pHouse->Buildings)
 			{
 				if (!pCheckB || pCheckB == pOwnBld || pCheckB->InLimbo || !pCheckB->IsAlive || !pCheckB->Type || pCheckB->Type->Insignificant || pCheckB->Type->InvisibleInGame)
 					continue;
+				if (pCheckB->Type->ConstructionYard)
+					continue;
 				const CellStruct cbc = pCheckB->GetMapCoords();
 				if (MapClass::Instance.GetMovementZoneType(cbc, MovementZone::Normal, false) == bz &&
-					std::max(std::abs(bc.X - cbc.X), std::abs(bc.Y - cbc.Y)) <= 14)
+					std::max(std::abs(bc.X - cbc.X), std::abs(bc.Y - cbc.Y)) <= 16)
 				{
 					localHubBlds++;
+					if (pCheckB->Type->Factory == AbstractType::UnitType && !pCheckB->Type->Naval)
+						hasLocalWarFac = true;
+					else if (pCheckB->Type->Factory == AbstractType::InfantryType)
+						hasLocalBarracks = true;
+					else if (pCheckB->Type->Refinery || pCheckB->Type->ResourceGatherer || pCheckB->Type->ResourceDestination)
+						hasLocalRef = true;
 				}
 			}
-			if (localHubBlds < leastDevelopedHubBlds)
+			bool enemyInHubZone = false;
+			for (auto const pEB : BuildingClass::Array)
 			{
-				leastDevelopedHubBlds = localHubBlds;
-				center = bc;
-				targetExpansionZone = bz;
+				if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral())
+					continue;
+				const CellStruct ec = pEB->GetMapCoords();
+				if ((bz >= 0 && MapClass::Instance.GetMovementZoneType(ec, MovementZone::Normal, false) == bz) ||
+					std::max(std::abs(bc.X - ec.X), std::abs(bc.Y - ec.Y)) <= 36)
+				{
+					enemyInHubZone = true;
+					break;
+				}
+			}
+			const bool missingThisCoreBld = (placingWarFactory && !hasLocalWarFac) || (placingBarracks && !hasLocalBarracks) || (isRefineryOrSlaveMiner && !hasLocalRef);
+			if (localHubBlds < 18 || missingThisCoreBld)
+			{
+				int hubScore = (18 - std::min(18, localHubBlds)) * 10 + (pOwnBld->Type->ConstructionYard ? 50 : 0) + (enemyInHubZone ? 250 : 0) + (missingThisCoreBld ? 500 : 0);
+				if (hubScore > bestHubPriorityScore)
+				{
+					bestHubPriorityScore = hubScore;
+					center = bc;
+					targetExpansionZone = bz;
+				}
 			}
 		}
 	}
