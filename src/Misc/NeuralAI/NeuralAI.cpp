@@ -7966,20 +7966,41 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!isNeutralTech && !IsCellVisibleToAI(pHouse, pCell))
 					continue;
 
-				const bool isHighValueEnemyBld = !isNeutralTech && (pBld->Type->ConstructionYard || pBld->Type->Refinery || pBld->Type->Factory != AbstractType::None ||
+				const bool isCashTechBld = (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0);
 
+				const bool isHighValueEnemyBld = !isNeutralTech && (isCashTechBld || pBld->Type->ConstructionYard || pBld->Type->Refinery || pBld->Type->Factory != AbstractType::None ||
 																	pBld->Type->SuperWeapon != -1 || pBld->Type->PowerBonus > 0);
 
 				const bool canCaptureNow =
-
 					isNeutralTech || (pBld->GetHealthPercentage() <= capLevel + 0.05) || (engCaptureBias > 60 && isHighValueEnemyBld) || (scores[82] > 60 && pBld->Type->ConstructionYard);
 
 				if (!canCaptureNow)
 					continue;
 
+				// Coordinate multiple Engineers: do not send a 2nd Engineer to a neutral tech building already targeted by another friendly Engineer!
+				if (isNeutralTech)
+				{
+					bool alreadyTargetedByOtherEng = false;
+					for (auto const pOtherInf : InfantryClass::Array)
+					{
+						if (pOtherInf && pOtherInf != pInf && pOtherInf->Owner == pHouse && !pOtherInf->InLimbo && pOtherInf->IsAlive && pOtherInf->Type && pOtherInf->Type->Engineer &&
+							pOtherInf->Destination == pBld)
+						{
+							alreadyTargetedByOtherEng = true;
+							break;
+						}
+					}
+					if (alreadyTargetedByOtherEng)
+						continue;
+				}
+
 				const int dist = pInf->DistanceFrom(pBld);
 
-				const int effectiveDist = (!isNeutralTech && pBld->Type->ConstructionYard && scores[82] > 60) ? (dist / 3) : (isNeutralTech ? (dist / 2) : dist);
+				// Strongly prioritize Cash-Producing Oil Derricks (ProduceCashAmount > 0) and BaseNormal expansion hubs!
+				const bool isStrategicTechHub = isCashTechBld || BuildingTypeExt::IsAIBaseNormal(pBld->Type);
+				const int effectiveDist = (!isNeutralTech && (pBld->Type->ConstructionYard || isCashTechBld) && scores[82] > 60)
+					? (dist / 3)
+					: (isNeutralTech ? (isCashTechBld ? (dist / 3) : (isStrategicTechHub ? (dist * 2 / 5) : (dist / 2))) : dist);
 
 				if (effectiveDist < bestCapDist)
 
@@ -11282,63 +11303,121 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool hasPendingCoreTechOrEco = !hasTechCenter || isBehindInFactories || (ownedRefineries < 2);
 
+		// Detect remote captured Tech Buildings (Oil Derricks, Tech Outposts, Hospitals, Airfields) & remote Expansion Refineries
+		// that are far from our main base (> 16 cells) and currently lack a nearby point-defense turret within 10 cells!
+		const CellStruct homeRefCenter = (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(0))
+			? pHouse->ConYards.GetItem(0)->GetMapCoords()
+			: (pHouse->BaseCenter != CellStruct::Empty ? pHouse->BaseCenter : pHouse->BaseSpawnCell);
+		int undefendedRemoteAssetsCount = 0;
+		std::vector<CellStruct> scanOrigins;
+		if (homeRefCenter != CellStruct::Empty)
+			scanOrigins.push_back(homeRefCenter);
+		if (pHouse->ConYards.Count > 1 && pHouse->ConYards.GetItem(pHouse->ConYards.Count - 1))
+			scanOrigins.push_back(pHouse->ConYards.GetItem(pHouse->ConYards.Count - 1)->GetMapCoords());
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->InvisibleInGame)
+				continue;
+
+			auto const pOT = pOwnBld->Type;
+			const CellStruct bc = pOwnBld->GetMapCoords();
+			const bool isCapturedTechOrCash = (pOT->ProduceCashAmount > 0 || pOT->ProduceCashStartup > 0 || (pOT->Capturable && pOT->NeedsEngineer));
+			const bool isRemoteFromHome = (homeRefCenter != CellStruct::Empty && std::max(std::abs(bc.X - homeRefCenter.X), std::abs(bc.Y - homeRefCenter.Y)) > 16);
+
+			if ((isCapturedTechOrCash || isRemoteFromHome) && (pOT->BaseNormal || pOT->ConstructionYard || BuildingTypeExt::IsAIBaseNormal(pOT)))
+			{
+				bool nearExistingOrigin = false;
+				for (const CellStruct& so : scanOrigins)
+				{
+					if (std::max(std::abs(bc.X - so.X), std::abs(bc.Y - so.Y)) <= 24)
+					{
+						nearExistingOrigin = true;
+						break;
+					}
+				}
+				if (!nearExistingOrigin && scanOrigins.size() < 5)
+					scanOrigins.push_back(bc);
+			}
+
+			if (isCapturedTechOrCash || (isRemoteFromHome && (pOT->Refinery || pOT->ConstructionYard || pOT->Factory != AbstractType::None)))
+			{
+				bool hasNearbyGroundTurret = false;
+				for (auto const pDefBld : pHouse->Buildings)
+				{
+					if (!pDefBld || pDefBld->InLimbo || !pDefBld->IsAlive || !pDefBld->Type || pDefBld->Type->BuildCat != BuildCat::Combat || IsTunnelNetworkBuilding(pDefBld->Type))
+						continue;
+					const auto pWS = pDefBld->Type->GetWeapon(0);
+					const auto pW = pWS ? pWS->WeaponType : nullptr;
+					const bool pureAA = pW && pW->Projectile && pW->Projectile->AA && !pW->Projectile->AG;
+					if (pureAA)
+						continue;
+					const CellStruct dc = pDefBld->GetMapCoords();
+					if (std::max(std::abs(bc.X - dc.X), std::abs(bc.Y - dc.Y)) <= 10)
+					{
+						hasNearbyGroundTurret = true;
+						break;
+					}
+				}
+				if (!hasNearbyGroundTurret)
+					undefendedRemoteAssetsCount++;
+			}
+		}
+
 		const int defDensityMod = std::clamp(static_cast<int>(scores[14]) / 240, -1, 2);
 
-		const int baseGroundDefCap = 1 + ownedRefineries + ownedWarFactories + ownedTechStructures + defDensityMod + (wasRecentlyAttacked ? 2 : 0);
+		const int baseGroundDefCap = 1 + ownedRefineries + ownedWarFactories + ownedTechStructures + undefendedRemoteAssetsCount + defDensityMod + (wasRecentlyAttacked ? 2 : 0);
 
-		const int maxGroundDefenses = std::clamp(baseGroundDefCap, 2, (hasTechCenter && money > 4000) ? 10 : 8);
+		const int maxGroundDefenses = std::clamp(baseGroundDefCap, 2, (hasTechCenter && money > 4000) ? 14 : 11);
 
 		const int maxAADefenses = std::clamp(1 + ownedWarFactories + ownedTechStructures + defDensityMod + (underAirAttack ? 2 : 0), 2, 6);
 
 		// AdvAI & StarCraft Resource Expansion State Machine:
-		// Measure minimum Chebyshev distance from our closest BaseNormal/ConYard anchor to the nearest uncolonized Ore/Gem field (>= 10 cells from any owned Refinery).
-		// - If minAnchorDistToUncolonizedOre <= 9: our BaseNormal chain or Expansion ConYard has reached the new Ore field! Trigger ShouldBuildRefinery (+1950)!
-		// - If minAnchorDistToUncolonizedOre is 10..38: boost BaseNormal=yes stepping-stone structures (Power Plants / Barracks / Outposts) so the base actively crawls out of spawn to reach the Ore!
+		// Measure minimum Chebyshev distance from our closest BaseNormal/ConYard/CapturedTech anchor to the nearest uncolonized Ore/Gem field (>= 10 cells from any owned Refinery).
+		// - If minAnchorDistToUncolonizedOre <= 9: our BaseNormal chain, Captured Tech Building, or Expansion ConYard has reached the new Ore field! Trigger ShouldBuildRefinery (+1950)!
+		// - If minAnchorDistToUncolonizedOre is 10..38: boost BaseNormal=yes stepping-stone structures (Power Plants / Barracks / Outposts) so the base actively crawls to reach the Ore!
 		CellStruct nearestUncolonizedOreCell = CellStruct::Empty;
 		int minAnchorDistToUncolonizedOre = 9999;
+		for (const CellStruct& scanOrigin : scanOrigins)
 		{
-			CellStruct scanOrigin = pHouse->BaseCenter != CellStruct::Empty ? pHouse->BaseCenter : pHouse->BaseSpawnCell;
-			if (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(pHouse->ConYards.Count - 1))
-				scanOrigin = pHouse->ConYards.GetItem(pHouse->ConYards.Count - 1)->GetMapCoords();
-
-			if (scanOrigin != CellStruct::Empty)
+			if (scanOrigin == CellStruct::Empty)
+				continue;
+			const int scanRad = (&scanOrigin == &scanOrigins[0]) ? 78 : 42;
+			for (int dy = -scanRad; dy <= scanRad; dy += 3)
 			{
-				for (int dy = -78; dy <= 78; dy += 3)
+				for (int dx = -scanRad; dx <= scanRad; dx += 3)
 				{
-					for (int dx = -78; dx <= 78; dx += 3)
+					const CellStruct tc{static_cast<short>(scanOrigin.X + dx), static_cast<short>(scanOrigin.Y + dy)};
+					auto const pCell = MapClass::Instance.TryGetCellAt(tc);
+					if (!pCell || pCell->GetContainedTiberiumValue() <= 0)
+						continue;
+
+					bool alreadyColonizedByRef = false;
+					int closestAnchorDist = 9999;
+					for (auto const pOwnBld : pHouse->Buildings)
 					{
-						const CellStruct tc{static_cast<short>(scanOrigin.X + dx), static_cast<short>(scanOrigin.Y + dy)};
-						auto const pCell = MapClass::Instance.TryGetCellAt(tc);
-						if (!pCell || pCell->GetContainedTiberiumValue() <= 0)
+						if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->InvisibleInGame)
 							continue;
 
-						bool alreadyColonizedByRef = false;
-						int closestAnchorDist = 9999;
-						for (auto const pOwnBld : pHouse->Buildings)
+						const CellStruct bc = pOwnBld->GetMapCoords();
+						const int dCheb = std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y));
+						if ((pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer || pOwnBld->Type->ResourceDestination) && dCheb < 10)
 						{
-							if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->InvisibleInGame)
-								continue;
-
-							const CellStruct bc = pOwnBld->GetMapCoords();
-							const int dCheb = std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y));
-							if ((pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer || pOwnBld->Type->ResourceDestination) && dCheb < 10)
-							{
-								alreadyColonizedByRef = true;
-								break;
-							}
-
-							if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard)
-							{
-								if (dCheb < closestAnchorDist)
-									closestAnchorDist = dCheb;
-							}
+							alreadyColonizedByRef = true;
+							break;
 						}
 
-						if (!alreadyColonizedByRef && closestAnchorDist < minAnchorDistToUncolonizedOre)
+						if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard || BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
 						{
-							minAnchorDistToUncolonizedOre = closestAnchorDist;
-							nearestUncolonizedOreCell = tc;
+							if (dCheb < closestAnchorDist)
+								closestAnchorDist = dCheb;
 						}
+					}
+
+					if (!alreadyColonizedByRef && closestAnchorDist < minAnchorDistToUncolonizedOre)
+					{
+						minAnchorDistToUncolonizedOre = closestAnchorDist;
+						nearestUncolonizedOreCell = tc;
 					}
 				}
 			}
@@ -11676,9 +11755,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				// floating > 4000 credits!
 
+				const bool needsOutpostPointDefense = (!isPureAA && undefendedRemoteAssetsCount > 0);
 				const bool hasInitialCoreDefenses = isPureAA ? (totalAADefenses >= 1) : (totalGroundDefenses >= 2);
 
-				if (hasInitialCoreDefenses && !wasRecentlyAttacked && hasPendingCoreTechOrEco && money < 4000)
+				if (needsOutpostPointDefense)
+					score += 680; // Proactively guard captured Oil Derricks, Tech Outposts, and remote Refineries against enemy Engineers & raids!
+				else if (hasInitialCoreDefenses && !wasRecentlyAttacked && hasPendingCoreTechOrEco && money < 4000)
 					score -= 1150;
 
 				// Reactive Threat Countering (from AttackedBuildingsLIFO):
@@ -12134,21 +12216,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			ownedInfiltrators++;
 	}
 
-	bool hasCapturableTechOnMap = false;
+	int neutralCapturableCount = 0;
+	int neutralCashDerrickCount = 0;
 
 	for (auto const pMapBld : BuildingClass::Array)
-
 	{
-
 		if (pMapBld && !pMapBld->InLimbo && pMapBld->IsAlive && pMapBld->Type && pMapBld->Owner && pMapBld->Type->Capturable && pMapBld->Owner->IsNeutral())
-
 		{
-
-			hasCapturableTechOnMap = true;
-
-			break;
+			neutralCapturableCount++;
+			if (pMapBld->Type->ProduceCashAmount > 0 || pMapBld->Type->ProduceCashStartup > 0)
+				neutralCashDerrickCount++;
 		}
 	}
+	const bool hasCapturableTechOnMap = (neutralCapturableCount > 0);
 
 	int bestInfIdx = -1;
 
@@ -12177,17 +12257,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isAA = pWpn && pWpn->Projectile && pWpn->Projectile->AA;
 
 		if (pInf->Engineer)
-
 		{
-
-			if (ownedEngineers >= 3)
+			const int maxActiveEngineers = (neutralCapturableCount >= 2) ? std::min(4, neutralCapturableCount) : 3;
+			if (ownedEngineers >= maxActiveEngineers)
 				continue;
 
-			const int techBonus = (hasCapturableTechOnMap && ownedEngineers == 0) ? 700 : (hasCapturableTechOnMap ? 300 : 0);
+			const bool moreTechThanEngineers = (ownedEngineers < neutralCapturableCount);
+			const int cashDerrickBonus = (neutralCashDerrickCount > ownedEngineers) ? 880 : (moreTechThanEngineers ? 680 : 320);
+			const int techBonus = hasCapturableTechOnMap ? cashDerrickBonus : 0;
 
 			if (pHouse->OwnedInfantry < 3 && !hasCapturableTechOnMap && scores[36] <= 80)
 				score -= 300;
-
 			else
 				score += scores[18] + techBonus;
 		}
@@ -12595,7 +12675,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				if ((pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer || pOwnBld->Type->ResourceDestination) && std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y)) < 10)
 					nearExistingRef = true;
 
-				if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard)
+				if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard || BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
 				{
 					const int dAnc = std::abs(tc.X - bc.X) + std::abs(tc.Y - bc.Y);
 					if (dAnc < minAnchorManhattan)
@@ -12876,7 +12956,11 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				powerPlantCells.push_back(bc);
 			}
 
-			if (pOT->ConstructionYard || pOT->Factory == AbstractType::UnitType || pOT->SuperWeapon != -1 || pOT->Refinery)
+			const bool isCapturedTechOrCash = (pOT->ProduceCashAmount > 0 || pOT->ProduceCashStartup > 0 || pOT->ToProtect || (pOT->Capturable && pOT->NeedsEngineer));
+			const bool isRemoteAsset = (std::max(std::abs(bc.X - center.X), std::abs(bc.Y - center.Y)) > 15);
+			if (isCapturedTechOrCash || (isRemoteAsset && (pOT->Refinery || pOT->ConstructionYard || pOT->Factory != AbstractType::None)))
+				priorityAssetCells.insert(priorityAssetCells.begin(), bc); // Highest priority: defend remote Oil Derricks, Tech Outposts & Expansion Refineries!
+			else if (pOT->ConstructionYard || pOT->Factory == AbstractType::UnitType || pOT->SuperWeapon != -1 || pOT->Refinery)
 				priorityAssetCells.push_back(bc);
 		}
 
@@ -12958,7 +13042,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		center = directionalAttackedBld;
 	}
 
-	else if (isCombatDefense && undefendedKeyAssetCell != CellStruct::Empty && totalOwnedDefensesCount < 4)
+	else if (isCombatDefense && undefendedKeyAssetCell != CellStruct::Empty)
 
 	{
 
@@ -12987,7 +13071,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type)
 					continue;
 
-				if (!pOwnBld->Type->BaseNormal && !pOwnBld->Type->ConstructionYard)
+				if (!pOwnBld->Type->BaseNormal && !pOwnBld->Type->ConstructionYard && !BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
 					continue;
 
 				const CellStruct bc = pOwnBld->GetMapCoords();
@@ -13030,7 +13114,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			if (pOwnBld->CurrentMission == Mission::Selling || pOwnBld->QueuedMission == Mission::Selling)
 				continue;
 
-			if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard)
+			if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard || BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
 				adjacencyAnchors.push_back(pOwnBld);
 		}
 
@@ -14070,7 +14154,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 				if (std::find(obstructingBlds.begin(), obstructingBlds.end(), pOwnBld) != obstructingBlds.end())
 					continue;
 
-				if (!pOwnBld->Type->BaseNormal && !pOwnBld->Type->ConstructionYard)
+				if (!pOwnBld->Type->BaseNormal && !pOwnBld->Type->ConstructionYard && !BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
 					continue;
 
 				const CellStruct ac = pOwnBld->GetMapCoords();
