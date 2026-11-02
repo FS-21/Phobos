@@ -10646,14 +10646,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				activeIslandZone = techIslandZone;
 			}
 		}
+		const int waitingArmyWeight = static_cast<int>(idleCombatUnits.size()) * 3 + static_cast<int>(idleCombatInf.size());
+		const int desiredConvoyTransports = (idleCombatUnits.size() >= 9 || waitingArmyWeight >= 28) ? 5
+			: ((idleCombatUnits.size() >= 6 || waitingArmyWeight >= 18) ? 4 : 3);
 		const bool isSoloPriorityCargo = carryingMCV || carryingHarvester || carryingStolenForeignMCV || (carryingEngineer && pIslandTechGoalCell != nullptr);
-		const bool waitForConvoySister = (!isSoloPriorityCargo && homeTransportsStillLoading > 0 && readyCombatConvoyTransports < 3 &&
-			(activeIslandZone < 0 || transZone != activeIslandZone) && !pTrans->HasBeenAttacked && (Unsorted::CurrentFrame % 480 < 380));
+		const bool waitForConvoySister = (!isSoloPriorityCargo && homeTransportsStillLoading > 0 && readyCombatConvoyTransports < desiredConvoyTransports &&
+			(activeIslandZone < 0 || transZone != activeIslandZone) && !pTrans->HasBeenAttacked && (Unsorted::CurrentFrame % 540 < 430));
 		const bool isReadyToSailEffective = isReadyToSail || carryingHarvester || (carryingEngineer && pIslandTechGoalCell != nullptr) || (pCustomPassengerGoal != nullptr);
 		if (isReadyToSailEffective && pActiveIslandGoal && waitForConvoySister)
 		{
-			// Offshore Convoy Staging: If this transport is already full and waiting for sister transport(s) to finish boarding,
-			// pull 3..5 cells out into the water toward the target island so we free the beach cell for our sister transport to beach and load!
+			// Offshore Convoy Staging (supports 4-5 transport armadas!): If this transport is already full and waiting for sister transport(s)
+			// to finish boarding, pull 3..8 cells out into the water with a lateral spread so we free the beach for all 4-5 transports!
 			auto const pTransCell = pTrans->GetCell();
 			if (pTransCell && pTransCell->LandType != LandType::Water)
 			{
@@ -10661,10 +10664,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const int dxG = goalC.X - transCoords.X;
 				const int dyG = goalC.Y - transCoords.Y;
 				const int distG = std::max(1, std::max(std::abs(dxG), std::abs(dyG)));
+				const int latOffset = (static_cast<int>(pTrans->UniqueID % 5) - 2) * 2;
+				const int perpX = (-dyG * latOffset) / distG;
+				const int perpY = (dxG * latOffset) / distG;
 				CellClass* pOffshoreStage = nullptr;
-				for (int step = 3; step <= 6 && !pOffshoreStage; ++step)
+				for (int step = 3; step <= 8 && !pOffshoreStage; ++step)
 				{
-					const CellStruct sc{static_cast<short>(transCoords.X + (dxG * step) / distG), static_cast<short>(transCoords.Y + (dyG * step) / distG)};
+					const CellStruct sc{
+						static_cast<short>(transCoords.X + (dxG * step) / distG + perpX),
+						static_cast<short>(transCoords.Y + (dyG * step) / distG + perpY)
+					};
 					if (auto const pSC = MapClass::Instance.TryGetCellAt(sc))
 					{
 						if (pSC->LandType == LandType::Water && pSC->IsClearToMove(pTrans->Type->SpeedType, true, true, -1, pTrans->Type->MovementZone, -1, false))
@@ -10694,12 +10703,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const bool onTargetIslandLand = (activeIslandZone >= 0 && transZone == activeIslandZone && pTransCell && pTransCell->LandType != LandType::Water && !pTransCell->GetBuilding());
 
 				// Offshore Rendezvous before hitting the enemy beach:
-				// If a loaded sister transport is trailing 4..24 cells behind us in the water, pause briefly at 7..13 cells offshore
-				// (outside coastal turret range) so all 2-3 transports rush the beach and unload together as a single wave!
+				// If loaded sister transports (up to 4-5 in the armada) are trailing 4..28 cells behind us in the water, pause briefly at 7..15 cells offshore
+				// (outside coastal turret range) so all 2-5 transports rush the beach and unload together as a single overwhelming wave!
 				bool pauseOffshoreForTrailingSister = false;
 				if (!isSoloPriorityCargo && pTransCell && pTransCell->LandType == LandType::Water &&
-					distToLanding >= 6.5 && distToLanding <= 13.5 && !pTrans->HasBeenAttacked && pTrans->GetHealthPercentage() >= 0.90 &&
-					(Unsorted::CurrentFrame % 360 < 260))
+					distToLanding >= 6.5 && distToLanding <= 15.0 && !pTrans->HasBeenAttacked && pTrans->GetHealthPercentage() >= 0.90 &&
+					(Unsorted::CurrentFrame % 420 < 310))
 				{
 					for (auto const pSisterT : UnitClass::Array)
 					{
@@ -10708,7 +10717,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						if (pSisterT->Passengers.NumPassengers < 2 && pSisterT->Passengers.GetTotalSize() < 5)
 							continue;
 						const double sisterDist = pSisterT->GetMapCoords().DistanceFrom(pSafeLanding->MapCoords);
-						if (sisterDist > distToLanding + 4.0 && sisterDist <= distToLanding + 24.0)
+						if (sisterDist > distToLanding + 4.0 && sisterDist <= distToLanding + 28.0)
 						{
 							pauseOffshoreForTrailingSister = true;
 							break;
@@ -10716,7 +10725,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 
-				if (onTargetIslandLand && distToLanding <= 7.5)
+				if (onTargetIslandLand && distToLanding <= 10.5)
 				{
 					pTrans->SetDestination(nullptr, true);
 					pTrans->ClearNavigationList();
@@ -10941,13 +10950,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						pTrans->SetDestination(pPickupBeach, true);
 						pTrans->QueueMission(Mission::Move, true);
 					}
-					// If the transport is approaching the pickup beach (within 12 cells), march up to 3 inland units on desiredPickupZone toward the beach!
-					if (transCoords.DistanceFrom(pPickupBeach->MapCoords) <= 12.0)
+					// If the transport is approaching the pickup beach (within 14 cells), march up to 6 inland units on desiredPickupZone toward the beach!
+					if (transCoords.DistanceFrom(pPickupBeach->MapCoords) <= 14.0)
 					{
 						int ralliedToBeach = 0;
 						for (auto const pV : idleCombatUnits)
 						{
-							if (ralliedToBeach >= 3)
+							if (ralliedToBeach >= 6)
 								break;
 							if (IsAmphibiousOrAirTransport(pV->Type) || pV->Type->TechnoTypeClass::Size > pTrans->Type->SizeLimit)
 								continue;
@@ -14249,15 +14258,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (isAmphibTransport)
 			{
 				const bool isHeavyMcvTrans = (static_cast<int>(pUnit->SizeLimit) >= 6);
-				const int maxTransports = (features[21] > 0) ? ((pHouse->OwnedUnits >= 20 || pHouse->NumConYards >= 2) ? 4 : 3) : 2;
+				const int approxOffensiveUnits = std::max(0, pHouse->OwnedUnits - ownedEconomyUnits - ownedAmphibTransports);
+				const int maxTransports = (features[21] > 0)
+					? ((approxOffensiveUnits >= 11 || pHouse->OwnedUnits >= 18) ? 5 : ((approxOffensiveUnits >= 7 || pHouse->OwnedUnits >= 12 || pHouse->NumConYards >= 2) ? 4 : 3))
+					: 2;
 				if ((isHeavyMcvTrans && ownedHeavyIslandTransports >= maxTransports) || (!isHeavyMcvTrans && ownedAmphibTransports >= maxTransports))
 					score -= 1200;
 				else if (isHeavyMcvTrans && ownedHeavyIslandTransports == 0 && (features[21] > 0 || scores[30] >= 450))
 					score += scores[28] + 2200;
-				else if (features[21] > 0 && ownedAmphibTransports == 1 && (pHouse->OwnedUnits >= 6 || (wantsArchipelagoExpansion && pHouse->NumConYards >= 2)))
+				else if (features[21] > 0 && ownedAmphibTransports == 1 && (approxOffensiveUnits >= 4 || pHouse->OwnedUnits >= 6 || (wantsArchipelagoExpansion && pHouse->NumConYards >= 2)))
 					score += std::max(static_cast<int>(scores[28]), 0) + 1350;
-				else if (features[21] > 0 && ownedAmphibTransports == 2 && pHouse->OwnedUnits >= 11)
-					score += std::max(static_cast<int>(scores[28]), 0) + 950;
+				else if (features[21] > 0 && ownedAmphibTransports == 2 && (approxOffensiveUnits >= 6 || pHouse->OwnedUnits >= 10))
+					score += std::max(static_cast<int>(scores[28]), 0) + 1050;
+				else if (features[21] > 0 && ownedAmphibTransports == 3 && (approxOffensiveUnits >= 9 || pHouse->OwnedUnits >= 14))
+					score += std::max(static_cast<int>(scores[28]), 0) + 900;
+				else if (features[21] > 0 && ownedAmphibTransports == 4 && (approxOffensiveUnits >= 12 || pHouse->OwnedUnits >= 18))
+					score += std::max(static_cast<int>(scores[28]), 0) + 800;
 				else
 					score += scores[28] + ((features[21] > 0 && ownedAmphibTransports == 0) ? 900 : 350);
 			}
@@ -14369,13 +14385,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (pUnit->Passengers > 0 || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall))
 			{
 				const bool isAirOrCarryallVehicle = isAmphibTransport || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall);
-				const int maxTransports = (features[21] > 0) ? ((pHouse->OwnedUnits >= 20 || pHouse->NumConYards >= 2) ? 4 : 3) : 2;
+				const int approxOffensiveUnits = std::max(0, pHouse->OwnedUnits - ownedEconomyUnits - ownedAmphibTransports);
+				const int maxTransports = (features[21] > 0)
+					? ((approxOffensiveUnits >= 11 || pHouse->OwnedUnits >= 18) ? 5 : ((approxOffensiveUnits >= 7 || pHouse->OwnedUnits >= 12 || pHouse->NumConYards >= 2) ? 4 : 3))
+					: 2;
 				if (isAirOrCarryallVehicle && ownedAmphibTransports >= maxTransports)
 					score -= 1200;
-				else if (isAirOrCarryallVehicle && features[21] > 0 && ownedAmphibTransports == 1 && pHouse->OwnedUnits >= 6)
+				else if (isAirOrCarryallVehicle && features[21] > 0 && ownedAmphibTransports == 1 && (approxOffensiveUnits >= 4 || pHouse->OwnedUnits >= 6))
 					score += std::max(static_cast<int>(scores[28]), 0) + 1250;
-				else if (isAirOrCarryallVehicle && features[21] > 0 && ownedAmphibTransports == 2 && pHouse->OwnedUnits >= 11)
-					score += std::max(static_cast<int>(scores[28]), 0) + 900;
+				else if (isAirOrCarryallVehicle && features[21] > 0 && ownedAmphibTransports == 2 && (approxOffensiveUnits >= 6 || pHouse->OwnedUnits >= 10))
+					score += std::max(static_cast<int>(scores[28]), 0) + 950;
+				else if (isAirOrCarryallVehicle && features[21] > 0 && ownedAmphibTransports == 3 && (approxOffensiveUnits >= 9 || pHouse->OwnedUnits >= 14))
+					score += std::max(static_cast<int>(scores[28]), 0) + 850;
+				else if (isAirOrCarryallVehicle && features[21] > 0 && ownedAmphibTransports == 4 && (approxOffensiveUnits >= 12 || pHouse->OwnedUnits >= 18))
+					score += std::max(static_cast<int>(scores[28]), 0) + 750;
 				else if (isAirOrCarryallVehicle)
 					score += scores[28] + ((features[21] > 0 && ownedAmphibTransports == 0) ? 900 : 350);
 				else
