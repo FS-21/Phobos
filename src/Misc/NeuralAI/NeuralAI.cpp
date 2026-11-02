@@ -108,6 +108,17 @@ HANDLE NeuralAI::TelemetryShmHandle = NULL;
 
 AITrainerSharedTelemetry* NeuralAI::TelemetryView = nullptr;
 
+namespace
+
+{
+
+	constexpr uint32_t TelemetryJsonShmCapacity = 65536;
+
+	HANDLE TelemetryJsonShmHandle = NULL;
+
+	uint8_t* TelemetryJsonView = nullptr;
+}
+
 AIBackpackFile NeuralAI::Backpack = {};
 
 bool NeuralAI::BackpackLoaded = false;
@@ -1086,6 +1097,24 @@ void NeuralAI::Shutdown()
 
 {
 
+	if (TelemetryJsonView)
+
+	{
+
+		UnmapViewOfFile(TelemetryJsonView);
+
+		TelemetryJsonView = nullptr;
+	}
+
+	if (TelemetryJsonShmHandle)
+
+	{
+
+		CloseHandle(TelemetryJsonShmHandle);
+
+		TelemetryJsonShmHandle = NULL;
+	}
+
 	if (NeuralAI::TelemetryView)
 
 	{
@@ -1624,6 +1653,27 @@ void NeuralAI::SaveBackpack()
 void NeuralAI::InitTelemetrySharedMemory()
 
 {
+
+	if (!TelemetryJsonView)
+
+	{
+
+		char jsonShmName[128];
+
+		std::snprintf(jsonShmName, sizeof(jsonShmName), "Local\\PhobosAITrainerJsonShm_%d", NeuralAI::TrainSlotIndex);
+
+		TelemetryJsonShmHandle = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, TelemetryJsonShmCapacity, jsonShmName);
+
+		if (TelemetryJsonShmHandle)
+
+		{
+
+			TelemetryJsonView = static_cast<uint8_t*>(MapViewOfFile(TelemetryJsonShmHandle, FILE_MAP_ALL_ACCESS, 0, 0, TelemetryJsonShmCapacity));
+
+			if (TelemetryJsonView)
+				std::memset(TelemetryJsonView, 0, 16);
+		}
+	}
 
 	if (NeuralAI::TelemetryView)
 		return;
@@ -2240,7 +2290,7 @@ void NeuralAI::OnHeadlessFrameTick()
 		return;
 	}
 
-	if (frame % 120 == 0)
+	if (frame % 60 == 0)
 		NeuralAI::UpdateTelemetrySnapshot(false, -1, false);
 }
 
@@ -2477,254 +2527,302 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		}
 	};
 
-	if (matchEnded || (Unsorted::CurrentFrame % 240 == 0))
+	if (matchEnded || (Unsorted::CurrentFrame % 60 == 0))
 
 	{
 
-		char jsonPath[MAX_PATH];
+		std::string jsonBuf;
 
-		std::snprintf(jsonPath, sizeof(jsonPath), "AI\\train_telemetry_%d.json", NeuralAI::TrainSlotIndex);
+		jsonBuf.reserve(16384);
 
-		FILE* fp = nullptr;
+		char lineBuf[2048];
 
-		if (fopen_s(&fp, jsonPath, "wb") == 0 && fp)
+		int lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
+			"{\n  \"slot\": %u,\n  \"pid\": %u,\n  \"frame\": %u,\n  \"fps\": %u,\n  \"finished\": %s,\n  \"winnerHouse\": %d,\n  \"stalemate\": %s,\n  \"elo\": %d,\n  \"gamesPlayed\": %u,\n  "
+			"\"rulesSignature\": \"%016llX\",\n  \"baseSignature\": \"%016llX\",\n  \"houses\": [\n",
+			dst->SlotIndex, dst->ProcessId, dst->CurrentFrame, dst->FramesPerSecond, matchEnded ? "true" : "false", dst->WinnerHouseIndex, stalemate ? "true" : "false",
+			NeuralAI::Backpack.EstimatedELO, NeuralAI::Backpack.GamesPlayed, static_cast<unsigned long long>(NeuralAI::CurrentRulesSignature),
+			static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature));
+
+		if (lineLen > 0)
+			jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
+
+		for (uint32_t i = 0; i < dst->NumHouses; ++i)
 
 		{
 
-			std::fprintf(fp,
+			const auto& h = dst->Houses[i];
 
-				"{\n  \"slot\": %u,\n  \"pid\": %u,\n  \"frame\": %u,\n  \"fps\": %u,\n  \"finished\": %s,\n  \"winnerHouse\": %d,\n  \"stalemate\": %s,\n  \"elo\": %d,\n  \"gamesPlayed\": %u,\n  "
-				"\"rulesSignature\": \"%016llX\",\n  \"baseSignature\": \"%016llX\",\n  \"houses\": [\n",
+			auto const pOwner = (h.ArrayIndex >= 0 && h.ArrayIndex < HouseClass::Array.Count) ? HouseClass::Array.GetItem(h.ArrayIndex) : nullptr;
 
-				dst->SlotIndex, dst->ProcessId, dst->CurrentFrame, dst->FramesPerSecond, matchEnded ? "true" : "false", dst->WinnerHouseIndex, stalemate ? "true" : "false",
+			int defenses = 0;
 
-				NeuralAI::Backpack.EstimatedELO, NeuralAI::Backpack.GamesPlayed, static_cast<unsigned long long>(NeuralAI::CurrentRulesSignature),
+			std::map<const BuildingTypeClass*, int> bldComp;
 
-				static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature));
-
-			for (uint32_t i = 0; i < dst->NumHouses; ++i)
+			if (pOwner)
 
 			{
 
-				const auto& h = dst->Houses[i];
-
-				auto const pOwner = (h.ArrayIndex >= 0 && h.ArrayIndex < HouseClass::Array.Count) ? HouseClass::Array.GetItem(h.ArrayIndex) : nullptr;
-
-				int defenses = 0;
-
-				std::map<const BuildingTypeClass*, int> bldComp;
-
-				if (pOwner)
+				for (auto const pOwned : pOwner->Buildings)
 
 				{
 
-					for (auto const pOwned : pOwner->Buildings)
+					if (pOwned && pOwned->Type && !pOwned->InLimbo && pOwned->IsAlive && !pOwned->Type->InvisibleInGame)
 
 					{
 
-						if (pOwned && pOwned->Type && !pOwned->InLimbo && pOwned->IsAlive && !pOwned->Type->InvisibleInGame)
+						if (pOwned->Type->CanBeOccupied && !pOwned->Type->BaseNormal && !pOwned->Type->ConstructionYard && pOwned->Type->TechLevel < 0)
+							continue;
 
-						{
+						const bool isDeployedVehicle =
+							pOwned->Type->ResourceGatherer || (pOwned->Type->UndeploysInto != nullptr && !pOwned->Type->ConstructionYard && !pOwned->Type->BaseNormal && !pOwned->Type->Refinery);
+						if (isDeployedVehicle)
+							continue;
 
-							if (pOwned->Type->CanBeOccupied && !pOwned->Type->BaseNormal && !pOwned->Type->ConstructionYard && pOwned->Type->TechLevel < 0)
-								continue;
+						if (pOwned->Type->BuildCat == BuildCat::Combat)
+							defenses++;
 
-							const bool isDeployedVehicle =
-								pOwned->Type->ResourceGatherer || (pOwned->Type->UndeploysInto != nullptr && !pOwned->Type->ConstructionYard && !pOwned->Type->BaseNormal && !pOwned->Type->Refinery);
-							if (isDeployedVehicle)
-								continue;
-
-							if (pOwned->Type->BuildCat == BuildCat::Combat)
-								defenses++;
-
-							bldComp[pOwned->Type]++;
-						}
+						bldComp[pOwned->Type]++;
 					}
 				}
-
-				std::vector<std::pair<int, const BuildingTypeClass*>> rankedBlds;
-
-				for (auto const& bEntry : bldComp)
-					rankedBlds.emplace_back(bEntry.second, bEntry.first);
-
-				std::sort(rankedBlds.begin(), rankedBlds.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
-
-				std::string bldText;
-
-				for (size_t rb = 0; rb < rankedBlds.size() && rb < 8; ++rb)
-
-				{
-
-					if (rb > 0)
-						bldText += ";";
-
-					bldText += rankedBlds[rb].second->ID;
-
-					bldText += ":" + std::to_string(rankedBlds[rb].first);
-				}
-
-				std::map<const TechnoTypeClass*, int> composition;
-
-				if (pOwner)
-
-				{
-
-					for (auto const pOwnedUnit : UnitClass::Array)
-
-					{
-
-						if (pOwnedUnit && pOwnedUnit->Owner == pOwner && pOwnedUnit->Type && !pOwnedUnit->InLimbo && pOwnedUnit->IsAlive)
-							composition[pOwnedUnit->Type]++;
-					}
-
-					for (auto const pOwnedInf : InfantryClass::Array)
-
-					{
-
-						if (pOwnedInf && pOwnedInf->Owner == pOwner && pOwnedInf->Type && !pOwnedInf->InLimbo && pOwnedInf->IsAlive)
-							composition[pOwnedInf->Type]++;
-					}
-
-					for (auto const pOwnedAir : AircraftClass::Array)
-
-					{
-
-						if (pOwnedAir && pOwnedAir->Owner == pOwner && pOwnedAir->Type && !pOwnedAir->InLimbo && pOwnedAir->IsAlive)
-							composition[pOwnedAir->Type]++;
-					}
-				}
-
-				std::vector<std::pair<int, const TechnoTypeClass*>> ranked;
-
-				for (auto const& entry : composition)
-					ranked.emplace_back(entry.second, entry.first);
-
-				std::sort(ranked.begin(), ranked.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
-
-				std::string compositionText;
-
-				for (size_t r = 0; r < ranked.size() && r < 10; ++r)
-
-				{
-
-					if (r > 0)
-						compositionText += ";";
-
-					compositionText += ranked[r].second->ID;
-
-					compositionText += ":" + std::to_string(ranked[r].first);
-				}
-
-				std::fprintf(fp,
-
-					"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"expert\": %d, \"credits\": %d, \"killedUnits\": %d, \"killedBlds\": %d, \"ownedUnits\": %d, \"ownedBlds\": "
-					"%d, \"score\": %d, \"winner\": %u, \"defeated\": %u, \"policy\": %u, \"conYards\": %d, \"harvesters\": %d, \"refineries\": %d, \"warFactories\": %d, \"barracks\": %d, "
-					"\"defenses\": %d, \"blds\": \"%s\", \"units\": \"%s\"}%s\n",
-
-					h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, h.ActiveExpert, h.Credits, h.KilledUnits, h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner,
-
-					h.IsDefeated, h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0, pOwner ? pOwner->CountResourceDestinations : 0,
-
-					pOwner ? pOwner->NumWarFactories : 0, pOwner ? pOwner->NumBarracks : 0, defenses, bldText.c_str(), compositionText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 			}
 
-			std::fprintf(fp, "  ],\n  \"radar\": [");
+			std::vector<std::pair<int, const BuildingTypeClass*>> rankedBlds;
 
-			bool firstPt = true;
+			for (auto const& bEntry : bldComp)
+				rankedBlds.emplace_back(bEntry.second, bEntry.first);
 
-			int ptCount = 0;
+			std::sort(rankedBlds.begin(), rankedBlds.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
 
-			for (auto const pBld : BuildingClass::Array)
+			std::string bldText;
+
+			for (size_t rb = 0; rb < rankedBlds.size() && rb < 8; ++rb)
 
 			{
 
-				if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || !pBld->Type || pBld->Type->InvisibleInGame || pBld->Owner->IsNeutral() || pBld->Owner->IsObserver())
-					continue;
+				if (rb > 0)
+					bldText += ";";
 
-				if (pBld->Type->CanBeOccupied && !pBld->Type->BaseNormal && !pBld->Type->ConstructionYard && pBld->Type->TechLevel < 0)
-					continue;
+				bldText += rankedBlds[rb].second->ID;
 
-				if (ptCount >= 220)
-					break;
-
-				const CellStruct c = pBld->GetMapCoords();
-
-				if (c.X <= 1 && c.Y <= 1)
-					continue;
-
-				int rx = 0;
-
-				int ry = 0;
-
-				projectToRadar(c, rx, ry);
-
-				const bool isDeployedVehicleBld =
-					pBld->Type->ResourceGatherer || (pBld->Type->UndeploysInto != nullptr && !pBld->Type->ConstructionYard && !pBld->Type->BaseNormal && !pBld->Type->Refinery);
-				std::fprintf(fp, "%s[%d,%d,%d,%d]", firstPt ? "" : ",", rx, ry, pBld->Owner->ArrayIndex, isDeployedVehicleBld ? 0 : 1);
-
-				firstPt = false;
-
-				ptCount++;
+				bldText += ":" + std::to_string(rankedBlds[rb].first);
 			}
 
-			for (auto const pUnit : UnitClass::Array)
+			std::map<const TechnoTypeClass*, int> composition;
+
+			if (pOwner)
 
 			{
 
-				if (!pUnit || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Owner || pUnit->Owner->IsNeutral() || pUnit->Owner->IsObserver())
-					continue;
+				for (auto const pOwnedUnit : UnitClass::Array)
 
-				if (ptCount >= 400)
-					break;
+				{
 
-				const CellStruct c = pUnit->GetMapCoords();
+					if (pOwnedUnit && pOwnedUnit->Owner == pOwner && pOwnedUnit->Type && !pOwnedUnit->InLimbo && pOwnedUnit->IsAlive)
+						composition[pOwnedUnit->Type]++;
+				}
 
-				int rx = 0;
+				for (auto const pOwnedInf : InfantryClass::Array)
 
-				int ry = 0;
+				{
 
-				projectToRadar(c, rx, ry);
+					if (pOwnedInf && pOwnedInf->Owner == pOwner && pOwnedInf->Type && !pOwnedInf->InLimbo && pOwnedInf->IsAlive)
+						composition[pOwnedInf->Type]++;
+				}
 
-				std::fprintf(fp, "%s[%d,%d,%d,0]", firstPt ? "" : ",", rx, ry, pUnit->Owner->ArrayIndex);
+				for (auto const pOwnedAir : AircraftClass::Array)
 
-				firstPt = false;
+				{
 
-				ptCount++;
+					if (pOwnedAir && pOwnedAir->Owner == pOwner && pOwnedAir->Type && !pOwnedAir->InLimbo && pOwnedAir->IsAlive)
+						composition[pOwnedAir->Type]++;
+				}
 			}
 
-			int infStep = 0;
+			std::vector<std::pair<int, const TechnoTypeClass*>> ranked;
 
-			for (auto const pInf : InfantryClass::Array)
+			for (auto const& entry : composition)
+				ranked.emplace_back(entry.second, entry.first);
+
+			std::sort(ranked.begin(), ranked.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
+
+			std::string compositionText;
+
+			for (size_t r = 0; r < ranked.size() && r < 10; ++r)
 
 			{
 
-				if (!pInf || pInf->InLimbo || !pInf->IsAlive || !pInf->Owner || pInf->Owner->IsNeutral() || pInf->Owner->IsObserver())
-					continue;
+				if (r > 0)
+					compositionText += ";";
 
-				if ((infStep++ % 2) != 0)
-					continue;
+				compositionText += ranked[r].second->ID;
 
-				if (ptCount >= 480)
-					break;
-
-				const CellStruct c = pInf->GetMapCoords();
-
-				int rx = 0;
-
-				int ry = 0;
-
-				projectToRadar(c, rx, ry);
-
-				std::fprintf(fp, "%s[%d,%d,%d,0]", firstPt ? "" : ",", rx, ry, pInf->Owner->ArrayIndex);
-
-				firstPt = false;
-
-				ptCount++;
+				compositionText += ":" + std::to_string(ranked[r].first);
 			}
 
-			std::fprintf(fp, "]\n}\n");
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
+				"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"expert\": %d, \"credits\": %d, \"killedUnits\": %d, \"killedBlds\": %d, \"ownedUnits\": %d, \"ownedBlds\": "
+				"%d, \"score\": %d, \"winner\": %u, \"defeated\": %u, \"policy\": %u, \"conYards\": %d, \"harvesters\": %d, \"refineries\": %d, \"warFactories\": %d, \"barracks\": %d, "
+				"\"defenses\": %d, \"blds\": \"%s\", \"units\": \"%s\"}%s\n",
+				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, h.ActiveExpert, h.Credits, h.KilledUnits, h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner,
+				h.IsDefeated, h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0, pOwner ? pOwner->CountResourceDestinations : 0,
+				pOwner ? pOwner->NumWarFactories : 0, pOwner ? pOwner->NumBarracks : 0, defenses, bldText.c_str(), compositionText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
-			std::fclose(fp);
+			if (lineLen > 0)
+				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
+		}
+
+		jsonBuf.append("  ],\n  \"radar\": [");
+
+		bool firstPt = true;
+
+		int ptCount = 0;
+
+		for (auto const pBld : BuildingClass::Array)
+
+		{
+
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || !pBld->Type || pBld->Type->InvisibleInGame || pBld->Owner->IsNeutral() || pBld->Owner->IsObserver())
+				continue;
+
+			if (pBld->Type->CanBeOccupied && !pBld->Type->BaseNormal && !pBld->Type->ConstructionYard && pBld->Type->TechLevel < 0)
+				continue;
+
+			if (ptCount >= 220)
+				break;
+
+			const CellStruct c = pBld->GetMapCoords();
+
+			if (c.X <= 1 && c.Y <= 1)
+				continue;
+
+			int rx = 0;
+
+			int ry = 0;
+
+			projectToRadar(c, rx, ry);
+
+			const bool isDeployedVehicleBld =
+				pBld->Type->ResourceGatherer || (pBld->Type->UndeploysInto != nullptr && !pBld->Type->ConstructionYard && !pBld->Type->BaseNormal && !pBld->Type->Refinery);
+
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%d,%d,%d,%d]", firstPt ? "" : ",", rx, ry, pBld->Owner->ArrayIndex, isDeployedVehicleBld ? 0 : 1);
+
+			if (lineLen > 0)
+				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
+
+			firstPt = false;
+
+			ptCount++;
+		}
+
+		for (auto const pUnit : UnitClass::Array)
+
+		{
+
+			if (!pUnit || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Owner || pUnit->Owner->IsNeutral() || pUnit->Owner->IsObserver())
+				continue;
+
+			if (ptCount >= 400)
+				break;
+
+			const CellStruct c = pUnit->GetMapCoords();
+
+			int rx = 0;
+
+			int ry = 0;
+
+			projectToRadar(c, rx, ry);
+
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%d,%d,%d,0]", firstPt ? "" : ",", rx, ry, pUnit->Owner->ArrayIndex);
+
+			if (lineLen > 0)
+				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
+
+			firstPt = false;
+
+			ptCount++;
+		}
+
+		int infStep = 0;
+
+		for (auto const pInf : InfantryClass::Array)
+
+		{
+
+			if (!pInf || pInf->InLimbo || !pInf->IsAlive || !pInf->Owner || pInf->Owner->IsNeutral() || pInf->Owner->IsObserver())
+				continue;
+
+			if ((infStep++ % 2) != 0)
+				continue;
+
+			if (ptCount >= 480)
+				break;
+
+			const CellStruct c = pInf->GetMapCoords();
+
+			int rx = 0;
+
+			int ry = 0;
+
+			projectToRadar(c, rx, ry);
+
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%d,%d,%d,0]", firstPt ? "" : ",", rx, ry, pInf->Owner->ArrayIndex);
+
+			if (lineLen > 0)
+				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
+
+			firstPt = false;
+
+			ptCount++;
+		}
+
+		jsonBuf.append("]\n}\n");
+
+		if (TelemetryJsonView)
+
+		{
+
+			const uint32_t maxPayload = TelemetryJsonShmCapacity - 16;
+
+			const uint32_t copyLen = static_cast<uint32_t>(std::min<size_t>(jsonBuf.size(), maxPayload));
+
+			volatile uint32_t* pHdr = reinterpret_cast<volatile uint32_t*>(TelemetryJsonView);
+
+			const uint32_t nextOdd = (pHdr[0] | 1u) + 2u;
+
+			pHdr[0] = nextOdd;
+
+			MemoryBarrier();
+
+			pHdr[1] = copyLen;
+
+			std::memcpy(TelemetryJsonView + 8, jsonBuf.data(), copyLen);
+
+			TelemetryJsonView[8 + copyLen] = '\0';
+
+			MemoryBarrier();
+
+			pHdr[0] = nextOdd + 1u;
+		}
+
+		else
+
+		{
+
+			char jsonPath[MAX_PATH];
+
+			std::snprintf(jsonPath, sizeof(jsonPath), "AI\\train_telemetry_%d.json", NeuralAI::TrainSlotIndex);
+
+			FILE* fp = nullptr;
+
+			if (fopen_s(&fp, jsonPath, "wb") == 0 && fp)
+
+			{
+
+				std::fwrite(jsonBuf.data(), 1, jsonBuf.size(), fp);
+
+				std::fclose(fp);
+			}
 		}
 	}
 }
