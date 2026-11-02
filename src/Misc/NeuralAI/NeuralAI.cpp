@@ -12401,6 +12401,30 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (owned >= maxShipyards)
 					continue;
 
+				const int navalAdj = std::max(std::max(1, pBld->Adjacent), RulesClass::Instance ? RulesClass::Instance->AINavalYardAdjacency : 36);
+				const CellStruct baseOrigin = (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(0))
+					? pHouse->ConYards.GetItem(0)->GetMapCoords()
+					: (pHouse->BaseCenter != CellStruct::Empty ? pHouse->BaseCenter : pHouse->BaseSpawnCell);
+				bool hasPlaceableWaterInAdjacency = false;
+				if (baseOrigin != CellStruct::Empty)
+				{
+					for (int dy = -navalAdj; dy <= navalAdj && !hasPlaceableWaterInAdjacency; dy += 2)
+					{
+						for (int dx = -navalAdj; dx <= navalAdj; dx += 2)
+						{
+							CellStruct waterCand{static_cast<short>(baseOrigin.X + dx), static_cast<short>(baseOrigin.Y + dy)};
+							if (MapClass::Instance.CoordinatesLegal(waterCand) && pBld->CanPlaceHere(&waterCand, pHouse))
+							{
+								hasPlaceableWaterInAdjacency = true;
+								break;
+							}
+						}
+					}
+				}
+
+				if (!hasPlaceableWaterInAdjacency)
+					continue;
+
 				score = scores[7] - owned * 950;
 
 				if (ownedShipyards < maxEnemyShipyards && ownedShipyards >= 1 && money >= 1800)
@@ -13612,17 +13636,19 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	const bool isForwardTunnelMouth = (isTunnelBld && !existingTunnelCells.empty());
 
-	const bool isFactoryOrBarracks = (pBuildingType->Factory != AbstractType::None) || pBuildingType->WeaponsFactory || pBuildingType->UnitRepair;
+	const bool isNavalBld = pBuildingType->Naval || (pBuildingType->SpeedType == SpeedType::Float);
+
+	const bool isFactoryOrBarracks = !isNavalBld && ((pBuildingType->Factory != AbstractType::None) || pBuildingType->WeaponsFactory || pBuildingType->UnitRepair);
 
 	const int supportRadius = GetSupportRadius(pBuildingType);
 
-	const bool isSupportRadiusBld = (supportRadius > 0) && !isCombatDefense && !isResourceBld && !isFactoryOrBarracks;
+	const bool isSupportRadiusBld = (supportRadius > 0) && !isCombatDefense && !isResourceBld && !isFactoryOrBarracks && !isNavalBld;
 
 	const bool isPowerPlantBld = (pBuildingType->PowerBonus > pBuildingType->PowerDrain) && !isCombatDefense;
 	// Stepping-Stone BaseNormal Expander (from AdvAI): After our 1st Power Plant, BaseNormal Power Plants (and Outposts)
 	// step outward toward uncolonized Ore fields or the frontline instead of crowding into the rear corner behind the ConYard!
 	const bool isSteppingStoneExpander = pBuildingType->BaseNormal && isPowerPlantBld && (pHouse->PowerOutput >= 150) && (nearestOreCell != CellStruct::Empty || crawlBias > 0);
-	const bool isRearProtected = !isResourceBld && !isCombatDefense && !isFactoryOrBarracks && !isTunnelBld && !isSupportRadiusBld && !isSteppingStoneExpander;
+	const bool isRearProtected = !isNavalBld && !isResourceBld && !isCombatDefense && !isFactoryOrBarracks && !isTunnelBld && !isSupportRadiusBld && !isSteppingStoneExpander;
 
 	// Gather Support Radius coverage & separation targets
 
@@ -13922,8 +13948,6 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	// Collect all valid BaseNormal / ConstructionYard adjacency anchor structures (from AdvAI)
 
-	const bool isNavalBld = pBuildingType->Naval || (pBuildingType->SpeedType == SpeedType::Float);
-
 	std::vector<BuildingClass*> adjacencyAnchors;
 
 	if (!pBuildingType->ConstructionYard)
@@ -13940,7 +13964,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			if (pOwnBld->CurrentMission == Mission::Selling || pOwnBld->QueuedMission == Mission::Selling)
 				continue;
 
-			if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard || BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
+			if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard || BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type) || (isNavalBld && pOwnBld->Type->Naval))
 				adjacencyAnchors.push_back(pOwnBld);
 		}
 
@@ -14072,10 +14096,65 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 		}
 	}
+	else if (isNavalBld)
+	{
+		const int navalMaxAdj = std::max(std::max(1, pBuildingType->Adjacent), RulesClass::Instance ? RulesClass::Instance->AINavalYardAdjacency : 36);
+		const int maxRadius = std::clamp(navalMaxAdj + w + 4, 28, 56);
+		for (int r = maxRadius; r >= 1; --r)
+		{
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::max(std::abs(dx), std::abs(dy)) != r)
+						continue;
+
+					const CellStruct cand{static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy)};
+					if (auto const pC = MapClass::Instance.TryGetCellAt(cand))
+					{
+						if (pC->LandType == LandType::Water)
+							candidateList.push_back(cand);
+					}
+				}
+			}
+		}
+
+		const int baseAdjRange = std::max(1, pBuildingType->Adjacent);
+		for (auto const pAnchor : adjacencyAnchors)
+		{
+			const CellStruct ac = pAnchor->GetMapCoords();
+			const bool isOtherConYard = pAnchor->Type->ConstructionYard;
+			if (isOtherConYard && std::max(std::abs(ac.X - center.X), std::abs(ac.Y - center.Y)) <= 4)
+				continue;
+
+			if (!isOtherConYard && std::max(std::abs(ac.X - center.X), std::abs(ac.Y - center.Y)) <= 8)
+				continue;
+
+			const int anchorScanRange = isOtherConYard ? maxRadius : (baseAdjRange + w + 2);
+			for (int r = anchorScanRange; r >= 1; --r)
+			{
+				for (int dy = -r; dy <= r; ++dy)
+				{
+					for (int dx = -r; dx <= r; ++dx)
+					{
+						if (std::max(std::abs(dx), std::abs(dy)) != r)
+							continue;
+
+						const CellStruct cand{static_cast<short>(ac.X + dx), static_cast<short>(ac.Y + dy)};
+						if (auto const pC = MapClass::Instance.TryGetCellAt(cand))
+						{
+							if (pC->LandType == LandType::Water)
+								candidateList.push_back(cand);
+						}
+					}
+				}
+			}
+		}
+	}
 	else
 	{
 		const int startRadius = 1;
-		const int maxRadius = isNavalBld ? 42 : 28;
+		const int maxRadius = 28;
 		for (int r = startRadius; r <= maxRadius; ++r)
 		{
 			for (int dy = -r; dy <= r; ++dy)
@@ -14258,7 +14337,58 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 				const int candZone = MapClass::Instance.GetMovementZoneType(candidate, MovementZone::Normal, false);
 				const int expansionZoneBonus = (!isNavalBld && targetExpansionZone >= 0 && candZone == targetExpansionZone) ? 650 : 0;
-				int spatialScore = (enableBaseCrawl ? (-radius * 5) : (-radius * 10)) - (hasOneCellMargin ? 0 : 4000) + expansionZoneBonus;
+				int spatialScore = (isNavalBld ? (radius * 28) : (enableBaseCrawl ? (-radius * 5) : (-radius * 10))) - (hasOneCellMargin ? 0 : 4000) + expansionZoneBonus;
+				if (isNavalBld)
+				{
+					int openWaterCells = 0;
+					int coastalBlockedCells = 0;
+					for (int fy = -2; fy <= h + 1; ++fy)
+					{
+						for (int fx = -2; fx <= w + 1; ++fx)
+						{
+							if (fx >= 0 && fx < w && fy >= 0 && fy < h)
+								continue;
+
+							const CellStruct wc{static_cast<short>(candidate.X + fx), static_cast<short>(candidate.Y + fy)};
+							auto const pWC = MapClass::Instance.TryGetCellAt(wc);
+							if (pWC && pWC->LandType == LandType::Water && pWC->GetBuilding() == nullptr && !pWC->ContainsBridge())
+								openWaterCells++;
+							else
+								coastalBlockedCells++;
+						}
+					}
+
+					spatialScore += openWaterCells * 35 - coastalBlockedCells * 60;
+
+					int minLandBldDist = 999;
+					for (auto const pOwnB : pHouse->Buildings)
+					{
+						if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type)
+							continue;
+
+						const CellStruct nbc = pOwnB->GetMapCoords();
+						const int bldDist = std::max(std::abs(candidate.X - nbc.X), std::abs(candidate.Y - nbc.Y));
+						if (pOwnB->Type->Naval || (pOwnB->Type->SpeedType == SpeedType::Float))
+						{
+							if (bldDist < 8)
+								spatialScore -= 3500;
+						}
+						else
+						{
+							if (bldDist < minLandBldDist)
+								minLandBldDist = bldDist;
+						}
+					}
+
+					if (minLandBldDist < 999)
+						spatialScore += std::min(minLandBldDist, 42) * 35;
+
+					if (enemyTargetCell != CellStruct::Empty)
+					{
+						const int distToEnemy = std::abs(candidate.X - enemyTargetCell.X) + std::abs(candidate.Y - enemyTargetCell.Y);
+						spatialScore -= distToEnemy * 6;
+					}
+				}
 				// Bonus when South/East exit of a Factory or Refinery has 2+ clear cells in front of it
 				if (isFactoryOrBarracks || isRefineryOrSlaveMiner)
 				{
