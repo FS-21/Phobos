@@ -175,7 +175,7 @@ static inline bool CheckCanNotExistHere(FootClass* const pTechno, const Building
 	if (pTechno == UnitExt::Deployer
 		|| (pTechno && UnitExt::Deployer && TechnoExt::IsChildOf(pTechno, UnitExt::Deployer))
 		|| (pTechno && TechnoExt::DoesntOccupyCellAsChild(pTechno))
-		|| (pParent && pParent->GetTechnoType()->DeploysInto == pBuildingType))
+		|| (pParent && !UnitExt::Deployer && pParent->GetTechnoType()->DeploysInto == pBuildingType))
 	{
 		skipFlag = true;
 		return false;
@@ -983,7 +983,9 @@ DEFINE_HOOK(0x73946C, UnitClass_TryToDeploy_CleanUpDeploySpace, 0x6)
 	if (!pBuildingType->PlaceAnywhere)
 	{
 		bool noOccupy = true;
+		UnitExt::Deployer = pThis;
 		bool canBuild = CheckBuildingFoundation(pBuildingType, topLeftCell, pThis->Owner, noOccupy);
+		UnitExt::Deployer = nullptr;
 
 		do
 		{
