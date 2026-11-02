@@ -5882,6 +5882,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pType)
 			continue;
 
+		if (pUnit->HasAnyLink())
+		{
+			if (auto const pLinkedBld = abstract_cast<BuildingClass*>(pUnit->GetNthLink(0)))
+			{
+				if (pLinkedBld->Type && (pLinkedBld->Type->WeaponsFactory || pLinkedBld->Type->Factory == AbstractType::UnitType))
+				{
+					if (pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr)
+						continue; // Never interrupt a vehicle's short exit move while still linked to its War Factory / Shipyard bib!
+					pUnit->Scatter(CoordStruct::Empty, true, false);
+					continue;
+				}
+			}
+		}
+
 		// Evade radiation clouds (Desolator / Nuke fallout) immediately so units
 
 		// don't melt in place
@@ -6431,7 +6445,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 					else if (!isMovingToDest || (Unsorted::CurrentFrame % 90 < 25))
 					{
-						if (auto const pHomePickupBeach = FindSafeIslandLandingCell(pHouse, mcvCell, homeGroundZone, false))
+						if (!isMovingToDest && !NeuralAI::IsCellClearedOfExitCorridors(pHouse, pType->DeploysInto, mcvCell))
+						{
+							pUnit->Scatter(CoordStruct::Empty, true, false);
+						}
+						else if (auto const pHomePickupBeach = FindSafeIslandLandingCell(pHouse, mcvCell, homeGroundZone, false))
 						{
 							if (mcvCell.DistanceFrom(pHomePickupBeach->MapCoords) > 2.5)
 							{
@@ -6461,9 +6479,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 				}
-				else if (pUnit->CurrentMission != Mission::Unload)
+				else if (!NeuralAI::IsCellClearedOfExitCorridors(pHouse, pType->DeploysInto, mcvCell))
 				{
-					pUnit->QueueMission(Mission::Unload, true);
+					pUnit->Scatter(CoordStruct::Empty, true, false);
 				}
 			}
 			else if (!isMovingToDest && (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard || pUnit->CurrentMission == Mission::Move))
@@ -6543,6 +6561,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							pUnit->SetDestination(pLocalDest, true);
 							pUnit->QueueMission(Mission::Move, true);
 						}
+					}
+					else if (!NeuralAI::IsCellClearedOfExitCorridors(pHouse, pType->DeploysInto, mcvCell))
+					{
+						pUnit->Scatter(CoordStruct::Empty, true, false);
 					}
 				}
 			}
@@ -10737,23 +10759,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// SWs)
 
 	if (homeCoords != CellStruct::Empty && (Unsorted::CurrentFrame % 120 < 25))
-
 	{
-
 		for (auto const pSuper : pHouse->Supers)
-
 		{
-
 			if (!pSuper || !pSuper->IsReady || !pSuper->Type)
 				continue;
 
-			if (!pSuper->Type->DisableableFromShell && pSuper->Type->Type != SuperWeaponType::ChronoWarp && !IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse))
+			if (_stricmp(pSuper->Type->ID, "DONT_USE_THIS_SW") == 0)
+				continue;
 
+			auto const pSWExt = SWTypeExt::Fetch(pSuper->Type);
+			const bool isLimboResearchUpgrade = pSWExt && (!pSWExt->LimboDelivery_Types.empty() || !pSWExt->LimboKill_IDs.empty() || !pSWExt->Convert_Pairs.empty());
+
+			if (!pSuper->Type->DisableableFromShell && isLimboResearchUpgrade && pSuper->Type->Type != SuperWeaponType::ChronoWarp && !IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse))
 			{
-
 				pSuper->Launch(homeCoords, false);
 				pSuper->Reset();
-
 				break;
 			}
 		}
@@ -11341,18 +11362,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (GameModeOptionsClass::Instance.SWAllowed)
-
 		{
-
 			SuperClass* pChronoWarp = pHouse->FindSuperWeapon(SuperWeaponType::ChronoWarp);
 
 			for (auto const pSuper : pHouse->Supers)
-
 			{
-
 				if (!pSuper || !pSuper->IsReady || !pSuper->Type)
 					continue;
+
+				if (!GameModeOptionsClass::Instance.SWAllowed && pSuper->Type->DisableableFromShell)
+					continue;
+
+				if (_stricmp(pSuper->Type->ID, "DONT_USE_THIS_SW") == 0 || IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse))
+					continue;
+
+				if (auto const pSWExt = SWTypeExt::Fetch(pSuper->Type))
+				{
+					if (!pSWExt->LimboDelivery_Types.empty() || !pSWExt->LimboKill_IDs.empty() || !pSWExt->Convert_Pairs.empty())
+						continue;
+				}
 
 				const SuperWeaponType swType = pSuper->Type->Type;
 
@@ -11822,17 +11850,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				// E) Reconnaissance Superweapons (Psychic Reveal / Spy Plane): Uncover
-
 				// shrouded enemy base candidates!
-
-				if ((swType == SuperWeaponType::PsychicReveal || swType == SuperWeaponType::SpyPlane) && pFallbackEnemyCell)
-
+				if (swType == SuperWeaponType::PsychicReveal || swType == SuperWeaponType::SpyPlane)
 				{
-
-					pSuper->Launch(pFallbackEnemyCell->MapCoords, false);
-					pSuper->Reset();
-
-					break;
+					const CellStruct reconCell = pFallbackEnemyCell ? pFallbackEnemyCell->MapCoords
+						: (pVisibleEnemyBld ? pVisibleEnemyBld->GetMapCoords() : CellStruct::Empty);
+					if (reconCell != CellStruct::Empty)
+					{
+						pSuper->Launch(reconCell, false);
+						pSuper->Reset();
+						break;
+					}
+					continue;
 				}
 
 				// F) Standard Offensive/Support Superweapons (Nuke, Lightning Storm,
@@ -12471,13 +12500,38 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		const bool reachedNewOreField = (conYardWithNoRefineryInZone || (nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre <= 9)) && ownedRefineries >= 1;
-		const bool needsSteppingStoneCrawlToOre = (nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre > 9 && minAnchorDistToUncolonizedOre <= 38 &&
+		const bool needsSteppingStoneCrawlToOre = (GetMacroState(pHouse).ConsecutivePlacementFailures < 2 &&
+												nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre > 9 && minAnchorDistToUncolonizedOre <= 38 &&
 												hasCoreEconomyAndProduction && (features[19] < 32 || ownedRefineries < 3 || scores[34] > 100 || Unsorted::CurrentFrame > 2100));
 
-		for (auto const pBld : BuildingTypeClass::Array)
-
+		int inProgressBldIdx = -1;
+		int inProgressDefIdx = -1;
+		if (FactoryClass* pBldFac = pHouse->GetPrimaryFactory(AbstractType::BuildingType, false, BuildCat::DontCare))
 		{
+			if (pBldFac->Object && pBldFac->Object->GetType())
+				inProgressBldIdx = pBldFac->Object->GetType()->GetArrayIndex();
+		}
+		if (FactoryClass* pDefFac = pHouse->GetPrimaryFactory(AbstractType::BuildingType, false, BuildCat::Combat))
+		{
+			if (pDefFac->Object && pDefFac->Object->GetType())
+				inProgressDefIdx = pDefFac->Object->GetType()->GetArrayIndex();
+		}
+		int ownedCashBuildings = 0;
+		int ownedSlaveMinerBuildings = 0;
+		for (auto const pOwnB : pHouse->Buildings)
+		{
+			if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type)
+				continue;
+			if (pOwnB->Type->ProduceCashAmount > 0)
+				ownedCashBuildings++;
+			if (pOwnB->Type->ResourceGatherer)
+				ownedSlaveMinerBuildings++;
+		}
+		const bool hasActiveBuildingIncome = (ownedCashBuildings >= 1) ||
+			(((ownedRefineries >= 1 && ownedHarvestersCount >= 1) || ownedSlaveMinerBuildings >= 1) && (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
 
+		for (auto const pBld : BuildingTypeClass::Array)
+		{
 			if (!pBld || pBld->Wall || pBld->Gate || pBld->LaserFence || pBld->LaserFencePost || pBld->ToTile)
 				continue;
 
@@ -12492,40 +12546,40 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (cdIt != cooldownMap.end() && Unsorted::CurrentFrame < cdIt->second)
 				continue;
 
-			if (pBld->GetActualCost(pHouse) > money + 1200)
+			const bool isBldInProgress = (pBld->ArrayIndex == inProgressBldIdx || pBld->ArrayIndex == inProgressDefIdx);
+			const bool isRefineryOrSlaveMiner = pBld->Refinery || pBld->ResourceGatherer || pBld->ResourceDestination;
+			const bool isIncomeRecoveryBld = isRefineryOrSlaveMiner ||
+				(pBld->PowerBonus > pBld->PowerDrain && !pBld->IsBaseDefense && (pHouse->HasLowPower() || hasUnpoweredBuildings)) ||
+				(pBld->Factory == AbstractType::UnitType && !pBld->Naval && ownedWarFactories == 0 && ownedHarvestersCount == 0) ||
+				(pBld->Factory == AbstractType::InfantryType && ownedBarracks == 0 && features[20] > 0) ||
+				(pBld->Factory == AbstractType::UnitType && pBld->Naval && ownedShipyards == 0 && features[19] == 0 && features[21] > 0);
+
+			// Human-like credit management:
+			// - When active income is flowing (hasActiveBuildingIncome), never block or delay selecting buildings by upfront cost; start building immediately and pay step-by-step!
+			// - When all income sources are lost (!hasActiveBuildingIncome), strictly ration remaining credits to recover an income source first!
+			if (!hasActiveBuildingIncome && !isBldInProgress && !isIncomeRecoveryBld && pBld->GetActualCost(pHouse) > money)
 				continue;
 
 			const int owned = BuildingTypeExt::CountOwnedNowWithDeployOrUpgrade(pBld, pHouse);
 
-			const bool isRefineryOrSlaveMiner = pBld->Refinery || pBld->ResourceGatherer || pBld->ResourceDestination;
-
 			int score = 0;
 
-			if (GetMacroState(pHouse).ConsecutivePlacementFailures > 0 && pBld->BaseNormal && pBld->GetFoundationWidth() <= 2 && pBld->GetFoundationHeight(false) <= 2)
-				score += 2200; // Small 2x2 BaseNormal anchor to expand legal Adjacent= perimeter out of tight terrain!
-
 			if (pBld->PowerBonus > pBld->PowerDrain && !pBld->IsBaseDefense)
-
 			{
-
-				// Track best buildable power plant for pre-build power interception
-
-				const int plantEfficiencyScore = pBld->PowerBonus * 3 - (pBld->GetActualCost(pHouse) / 5);
-
-				if (plantEfficiencyScore > bestPowerPlantScore && pBld->GetActualCost(pHouse) <= std::max(money + 400, 1000))
-
-				{
-
-					bestPowerPlantScore = plantEfficiencyScore;
-
-					bestPowerPlantIdx = pBld->ArrayIndex;
-				}
-
 				// Hard anti-spam cap: never queue more Power Plants when surplus is
 				// already well above our damaged-plant safety cushion (relaxed by +350 when stepping-stone crawling to a distant Ore patch)!
 				const int maxAllowedSurplus = requiredPowerCushion + ((needsSteppingStoneCrawlToOre && pBld->BaseNormal && money >= 1400) ? 700 : 350);
 				if (!pHouse->HasLowPower() && !hasUnpoweredBuildings && realPowerSurplus >= maxAllowedSurplus)
 					continue;
+
+				// Track best buildable power plant for pre-build power interception (only after verifying we are below maxAllowedSurplus and not placement-locked!)
+				const int plantEfficiencyScore = pBld->PowerBonus * 3 - (pBld->GetActualCost(pHouse) / 5);
+				if ((GetMacroState(pHouse).ConsecutivePlacementFailures < 2 || pHouse->HasLowPower() || hasUnpoweredBuildings) &&
+					plantEfficiencyScore > bestPowerPlantScore && pBld->GetActualCost(pHouse) <= std::max(money + 1000, 1200))
+				{
+					bestPowerPlantScore = plantEfficiencyScore;
+					bestPowerPlantIdx = pBld->ArrayIndex;
+				}
 
 				score = scores[0] + std::min(650, pBld->PowerBonus * 2);
 
@@ -12889,12 +12943,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += 250 + std::clamp(static_cast<int>(scores[82]) / 2, 0, 300);
 			}
 
-			if (score > bestBldScore)
+			if (GetMacroState(pHouse).ConsecutivePlacementFailures == 1 && pBld->BaseNormal && pBld->GetFoundationWidth() <= 2 && pBld->GetFoundationHeight(false) <= 2)
+				score += 900; // Try a compact 2x2 BaseNormal anchor once to expand legal Adjacent= perimeter out of tight terrain!
 
+			if (!hasActiveBuildingIncome)
 			{
+				if (isIncomeRecoveryBld)
+					score += 4500; // Zero-Income Emergency: prioritize restoring an income source above all else!
+				else
+					score -= 3500;
+			}
 
+			if (isBldInProgress && (!pHouse->HasLowPower() || pBld->PowerBonus > pBld->PowerDrain))
+				score += 850; // Commit to finishing partially constructed buildings in the ConYard!
+
+			if (score > bestBldScore)
+			{
 				bestBldScore = score;
-
 				bestBldIdx = pBld->ArrayIndex;
 			}
 		}
@@ -12980,16 +13045,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	int ownedEconomyUnits = 0;
 
+	int ownedCashProduces = 0;
 	for (auto const pOwnBldType : pHouse->Buildings)
-
 	{
-
 		if (!pOwnBldType || pOwnBldType->InLimbo || !pOwnBldType->IsAlive || !pOwnBldType->Type)
 			continue;
 
+		if (pOwnBldType->Type->ProduceCashAmount > 0)
+			ownedCashProduces++;
+
 		if (pOwnBldType->Type->ResourceGatherer)
 			ownedEconomyUnits++;
-
 		else if (pOwnBldType->Type->Refinery)
 			trueRefineries++;
 	}
@@ -13033,11 +13099,27 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	bool canRebuildMCVNow = false;
 	int rebuildMCVCost = 3000;
 
+	int inProgressUnitIdx = -1;
+	int inProgressNavalIdx = -1;
+	if (FactoryClass* pUnitFac = pHouse->GetPrimaryFactory(AbstractType::UnitType, false, BuildCat::DontCare))
+	{
+		if (pUnitFac->Object && pUnitFac->Object->GetType())
+			inProgressUnitIdx = pUnitFac->Object->GetType()->GetArrayIndex();
+	}
+	if (FactoryClass* pNavalFac = pHouse->GetPrimaryFactory(AbstractType::UnitType, true, BuildCat::DontCare))
+	{
+		if (pNavalFac->Object && pNavalFac->Object->GetType())
+			inProgressNavalIdx = pNavalFac->Object->GetType()->GetArrayIndex();
+	}
+	const bool hasActiveUnitIncome = (ownedCashProduces >= 1) ||
+		((trueRefineries >= 1 && ownedEconomyUnits >= 1) && (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
+
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
 		if (!pUnit || !CanBuildUnderHumanRules(pHouse, pUnit))
 			continue;
 
+		const bool isUnitInProgress = (pUnit->ArrayIndex == inProgressUnitIdx || pUnit->ArrayIndex == inProgressNavalIdx);
 		const bool isMCV = (pUnit->DeploysInto && pUnit->DeploysInto->ConstructionYard);
 		if (isMCV)
 		{
@@ -13049,9 +13131,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				rebuildMCVCost = pUnit->GetActualCost(pHouse);
 			}
 		}
-
-		if (pUnit->GetActualCost(pHouse) > money + 800 && !(isMCV && canSafelySaveForMCV))
-			continue;
 
 		const auto pWpnStruct = pUnit->GetWeapon(0);
 		const auto pWpn = pWpnStruct ? pWpnStruct->WeaponType : nullptr;
@@ -13072,8 +13151,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (isEconomyUnit && ownedEconomyUnits >= economyUnitCap && !allowExpansionRefineryDeployer)
 			continue;
 
+		const bool isIncomeRecoveryUnit = isEconomyUnit || (isMCV && canSafelySaveForMCV) || (isAmphibTransport && ownedAmphibTransports == 0 && (features[21] > 0 || features[19] == 0));
+		// Only restrict unit choices by remaining cash when all income sources are lost (!hasActiveUnitIncome)!
+		if (!hasActiveUnitIncome && !isUnitInProgress && !isIncomeRecoveryUnit && pUnit->GetActualCost(pHouse) > money)
+			continue;
+
 		int score = (pUnit->Cost / 4) + (pUnit->Strength / 3);
 		score -= std::min(900, pHouse->CountOwnedNow(pUnit) * 45);
+		if (!hasActiveUnitIncome)
+		{
+			if (isIncomeRecoveryUnit)
+				score += 4500; // Zero-Income Emergency: focus War Factory / Shipyard on restoring Harvester/Miner/MCV/Transport!
+			else
+				score -= 3500;
+		}
+		if (isUnitInProgress)
+			score += 850; // Commit to finishing partially constructed vehicles/ships in the War Factory / Shipyard!
 
 		if (pUnit->Naval)
 		{
@@ -13301,20 +13394,25 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const bool needsCheapInfForBioReactor = (unfilledBioReactorSlotsForInf > 0 && (pHouse->HasLowPower() || (pHouse->PowerOutput - pHouse->PowerDrain) < 350));
 
 	int bestInfIdx = -1;
-
 	int bestInfScore = -32000;
+	int inProgressInfIdx = -1;
+	if (FactoryClass* pInfFac = pHouse->GetPrimaryFactory(AbstractType::InfantryType, false, BuildCat::DontCare))
+	{
+		if (pInfFac->Object && pInfFac->Object->GetType())
+			inProgressInfIdx = pInfFac->Object->GetType()->GetArrayIndex();
+	}
 
 	for (auto const pInf : InfantryTypeClass::Array)
-
 	{
-
 		if (!pInf || !CanBuildUnderHumanRules(pHouse, pInf))
 			continue;
 
-		if (pInf->GetActualCost(pHouse) > money + 400)
+		const bool isInfInProgress = (pInf->ArrayIndex == inProgressInfIdx);
+		const bool isIncomeRecoveryEng = (pInf->Engineer && neutralCashDerrickCount > ownedEngineers);
+		if (!hasActiveUnitIncome && !isInfInProgress && !isIncomeRecoveryEng && pInf->GetActualCost(pHouse) > money)
 			continue;
 
-		int score = (pInf->Cost / 2) + pInf->Strength;
+		int score = (pInf->Cost / 2) + pInf->Strength + (isInfInProgress ? 450 : 0);
 
 		// Penalize stacking one infantry type so squads stay mixed
 
@@ -13383,25 +13481,25 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
-	if (((canRebuildMCVNow && canSafelySaveForMCV && money < rebuildMCVCost) || savingForIslandTransport) && features[65] < 35 && pHouse->OwnedInfantry >= 3 || pHouse->OwnedInfantry >= 45)
-
+	// Only pause secondary queues to ration finite credits when all income sources are lost (!hasActiveUnitIncome)
+	if (!hasActiveUnitIncome && (((canRebuildMCVNow && canSafelySaveForMCV && money < rebuildMCVCost) || savingForIslandTransport || ownedEconomyUnits == 0 || trueRefineries == 0) && features[65] < 35) || pHouse->OwnedInfantry >= 45)
 	{
-		if (bestInfIdx < 0 || !InfantryTypeClass::Array.GetItem(bestInfIdx)->Engineer || ownedEngineers >= 1)
-			bestInfIdx = -1; // Save credits to finish replacement/expansion MCV or island transport!
+		if (bestInfIdx < 0 || !InfantryTypeClass::Array.GetItem(bestInfIdx)->Engineer || ownedEngineers >= std::max(1, neutralCashDerrickCount))
+			bestInfIdx = -1; // Zero-Income Emergency: ration remaining finite credits to recover Refinery/Harvester/MCV or capture an Oil Derrick!
 	}
 
-	if (((canRebuildMCVNow && canSafelySaveForMCV && money < rebuildMCVCost) || savingForIslandTransport) &&
+	if (!hasActiveUnitIncome && ((canRebuildMCVNow && canSafelySaveForMCV && money < rebuildMCVCost) || savingForIslandTransport) &&
 		!pHouse->HasLowPower() && pHouse->CountResourceDestinations >= 1 && pHouse->NumWarFactories >= 1 && pHouse->NumBarracks >= 1 &&
 		(features[21] == 0 || pHouse->NumShipyards >= 1) && pHouse->UnitRepairStations.Count >= 1)
 	{
-		pExt->AIBrain_NextBuildingTarget = -1; // Pause non-essential ConYard spending while saving up for Expansion MCV or Island Transport!
+		pExt->AIBrain_NextBuildingTarget = -1;
 	}
-	if (savingForIslandTransport && bestUnitIdx >= 0)
+	if (!hasActiveUnitIncome && savingForIslandTransport && bestUnitIdx >= 0)
 	{
 		if (auto const pChosenU = UnitTypeClass::Array.GetItem(bestUnitIdx))
 		{
 			if (!pChosenU->Harvester && !pChosenU->ResourceGatherer && !(pChosenU->DeploysInto && pChosenU->DeploysInto->ConstructionYard))
-				pExt->AIBrain_NextUnitTarget = -1; // Let the Shipyard afford the Amphibious Transport first!
+				pExt->AIBrain_NextUnitTarget = -1;
 		}
 	}
 
@@ -13414,17 +13512,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int bestAirScore = -32000;
 
 	if (pHouse->NumAirpads > 0)
-
 	{
+		int inProgressAirIdx = -1;
+		if (FactoryClass* pAirFac = pHouse->GetPrimaryFactory(AbstractType::AircraftType, false, BuildCat::DontCare))
+		{
+			if (pAirFac->Object && pAirFac->Object->GetType())
+				inProgressAirIdx = pAirFac->Object->GetType()->GetArrayIndex();
+		}
 
 		for (auto const pAir : AircraftTypeClass::Array)
-
 		{
-
 			if (!pAir || !CanBuildUnderHumanRules(pHouse, pAir))
 				continue;
 
-			if (pAir->GetActualCost(pHouse) > money + 1000)
+			const bool isAirInProgress = (pAir->ArrayIndex == inProgressAirIdx);
+			if (!hasActiveUnitIncome && !isAirInProgress && !pAir->Carryall && pAir->GetActualCost(pHouse) > money)
 				continue;
 
 			const int slotScore = (pAir->Strength >= 300 || pAir->Cost >= 1500) ? scores[33] : scores[32];
@@ -13440,7 +13542,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				else
 					airTransBonus = scores[28] + ((features[21] > 0 && ownedAmphibTransports == 0 && ownedAirTrans == 0) ? 900 : 350);
 			}
-			const int score = (pAir->Cost / 3) + (pAir->Strength / 2) + slotScore + crossFactionAirBonus + airTransBonus;
+			const int score = (pAir->Cost / 3) + (pAir->Strength / 2) + slotScore + crossFactionAirBonus + airTransBonus + (isAirInProgress ? 850 : 0);
 
 			if (score > bestAirScore)
 
@@ -13453,8 +13555,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
-	if (canRebuildMCVNow && canSafelySaveForMCV && money < rebuildMCVCost)
-		bestAirIdx = -1; // Save credits to finish the replacement/expansion MCV first!
+	if (!hasActiveUnitIncome && ((canRebuildMCVNow && canSafelySaveForMCV && money < rebuildMCVCost) || ownedEconomyUnits == 0 || trueRefineries == 0))
+		bestAirIdx = -1; // Zero-Income Emergency: save remaining finite credits to restore economy/MCV first!
 
 	pExt->AIBrain_NextAircraftTarget = bestAirIdx;
 
@@ -15117,7 +15219,16 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 	{
 		auto& st = GetMacroState(pHouse);
 		st.ConsecutivePlacementFailures++;
-		st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex] = Unsorted::CurrentFrame + std::min(3600, 300 * st.ConsecutivePlacementFailures);
+		const int cdUntil = Unsorted::CurrentFrame + std::min(3600, 300 * st.ConsecutivePlacementFailures);
+		st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex] = cdUntil;
+		if (pBuildingType->PowerBonus > pBuildingType->PowerDrain && !pBuildingType->IsBaseDefense && !pHouse->HasLowPower())
+		{
+			for (auto const pOtherBld : BuildingTypeClass::Array)
+			{
+				if (pOtherBld && pOtherBld->PowerBonus > pOtherBld->PowerDrain && !pOtherBld->IsBaseDefense)
+					st.BuildingPlacementCooldownUntilFrame[pOtherBld->ArrayIndex] = cdUntil;
+			}
+		}
 		if (FactoryClass* pBldFac = pHouse->GetPrimaryFactory(AbstractType::BuildingType, pBuildingType->Naval, pBuildingType->BuildCat))
 			pBldFac->AbandonProduction();
 
