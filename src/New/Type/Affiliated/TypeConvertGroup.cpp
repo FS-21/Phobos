@@ -116,10 +116,15 @@ void TypeConvertGroup::UniversalConvert(TechnoClass* pTarget, const std::vector<
 
 					auto pConverted = TechnoExt::UniversalDeployConversion(pTarget, toType);
 
-					if (pConverted && pAnimType)
+					if (pConverted)
 					{
-						if (auto pAnim = GameCreate<AnimClass>(pAnimType, pConverted->Location))
-							pAnim->SetOwnerObject(pConverted);
+						if (pAnimType)
+						{
+							if (auto pAnim = GameCreate<AnimClass>(pAnimType, pConverted->Location))
+								pAnim->SetOwnerObject(pConverted);
+						}
+
+						return;
 					}
 
 					break;
@@ -130,10 +135,15 @@ void TypeConvertGroup::UniversalConvert(TechnoClass* pTarget, const std::vector<
 		{
 			auto pConverted = TechnoExt::UniversalDeployConversion(pTarget, toType);
 
-			if (pConverted && pAnimType)
+			if (pConverted)
 			{
-				if (auto pAnim = GameCreate<AnimClass>(pAnimType, pConverted->Location))
-					pAnim->SetOwnerObject(pConverted);
+				if (pAnimType)
+				{
+					if (auto pAnim = GameCreate<AnimClass>(pAnimType, pConverted->Location))
+						pAnim->SetOwnerObject(pConverted);
+				}
+
+				return;
 			}
 		}
 	}
