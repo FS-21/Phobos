@@ -594,7 +594,7 @@ namespace
 				outHasUnpoweredBuildings = true;
 			}
 
-			if (pOT->PowerBonus > pOT->PowerDrain && pOT->BuildCat != BuildCat::Combat)
+			if (pOT->PowerBonus > pOT->PowerDrain && !pOT->IsBaseDefense)
 
 			{
 
@@ -605,7 +605,7 @@ namespace
 					outHasAdvancedPowerPlants = true;
 			}
 
-			if ((pOT->BuildCat == BuildCat::Combat || pOT->SuperWeapon != -1) && (pOT->Powered || pOT->PowerDrain > 0))
+			if ((pOT->IsBaseDefense || pOT->SuperWeapon != -1) && (pOT->Powered || pOT->PowerDrain > 0))
 				outPoweredDefAndSWCount++;
 		}
 
@@ -752,13 +752,13 @@ namespace
 			else if (pOT->UnitRepair)
 				prio = 2; // Service Depot
 
-			else if (pOT->SuperWeapon != -1 && pOT->BuildCat != BuildCat::Combat)
+			else if (pOT->SuperWeapon != -1 && !pOT->IsBaseDefense)
 				prio = 3; // Superweapon
 
 			else if (pOT->SpySat || pOT->Radar)
 				prio = 4; // Radar
 
-			else if (pOT->BuildCat == BuildCat::Combat)
+			else if (pOT->IsBaseDefense)
 				prio = 5; // Defense
 
 			if (prio < bestPriority)
@@ -2672,29 +2672,29 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 	const bool hasIsoBounds = (mapW > 0 && localW > 0 && localH > 0);
 
-	auto projectToRadar = [&](const CellStruct& c, int& outRx, int& outRy)
+	auto projectToRadar = [&](const CellStruct& c, float& outRx, float& outRy)
 
 	{
 		if (hasIsoBounds)
 
 		{
 
-			const int isoX = (static_cast<int>(c.X) - static_cast<int>(c.Y) + mapW - 1) - (2 * localX);
+			const float isoX = static_cast<float>((static_cast<int>(c.X) - static_cast<int>(c.Y) + mapW - 1) - (2 * localX));
 
-			const int isoY = (static_cast<int>(c.X) + static_cast<int>(c.Y) - mapW - 1) - (2 * localY);
+			const float isoY = static_cast<float>((static_cast<int>(c.X) + static_cast<int>(c.Y) - mapW - 1) - (2 * localY));
 
-			outRx = std::clamp(3 + (isoX * 121) / std::max(1, 2 * localW), 2, 125);
+			outRx = std::clamp(3.0f + (isoX * 121.0f) / std::max(1.0f, 2.0f * localW), 2.0f, 125.0f);
 
-			outRy = std::clamp(3 + (isoY * 121) / std::max(1, 2 * localH), 2, 125);
+			outRy = std::clamp(3.0f + (isoY * 121.0f) / std::max(1.0f, 2.0f * localH), 2.0f, 125.0f);
 		}
 
 		else
 
 		{
 
-			outRx = std::clamp(6 + ((c.X - minMapX) * 115) / spanX, 4, 123);
+			outRx = std::clamp(6.0f + ((c.X - minMapX) * 115.0f) / spanX, 4.0f, 123.0f);
 
-			outRy = std::clamp(6 + ((c.Y - minMapY) * 115) / spanY, 4, 123);
+			outRy = std::clamp(6.0f + ((c.Y - minMapY) * 115.0f) / spanY, 4.0f, 123.0f);
 		}
 	};
 
@@ -2704,7 +2704,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 		std::string jsonBuf;
 
-		jsonBuf.reserve(16384);
+		jsonBuf.reserve(32768);
 
 		char lineBuf[2048];
 
@@ -2750,7 +2750,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 						if (isDeployedVehicle)
 							continue;
 
-						if (pOwned->Type->BuildCat == BuildCat::Combat)
+						if (pOwned->Type->IsBaseDefense)
 							defenses++;
 
 						bldComp[pOwned->Type]++;
@@ -2845,6 +2845,23 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 		jsonBuf.append("  ],\n  \"radar\": [");
 
+		auto sanitizeJsonStr = [](const char* src, char* out, size_t outCap)
+		{
+			if (!out || outCap == 0)
+				return;
+			size_t w = 0;
+			if (src)
+			{
+				for (size_t i = 0; src[i] != '\0' && w + 1 < outCap; ++i)
+				{
+					const unsigned char ch = static_cast<unsigned char>(src[i]);
+					if (ch >= 32 && ch != '"' && ch != '\\')
+						out[w++] = static_cast<char>(ch);
+				}
+			}
+			out[w] = '\0';
+		};
+
 		bool firstPt = true;
 
 		int ptCount = 0;
@@ -2859,7 +2876,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			if (pBld->Type->CanBeOccupied && !pBld->Type->BaseNormal && !pBld->Type->ConstructionYard && pBld->Type->TechLevel < 0)
 				continue;
 
-			if (ptCount >= 220)
+			if (ptCount >= 320 || jsonBuf.size() > 56000)
 				break;
 
 			const CellStruct c = pBld->GetMapCoords();
@@ -2867,16 +2884,24 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			if (c.X <= 1 && c.Y <= 1)
 				continue;
 
-			int rx = 0;
+			float rx = 0.0f;
 
-			int ry = 0;
+			float ry = 0.0f;
 
 			projectToRadar(c, rx, ry);
 
 			const bool isDeployedVehicleBld =
 				pBld->Type->ResourceGatherer || (pBld->Type->UndeploysInto != nullptr && !pBld->Type->ConstructionYard && !pBld->Type->BaseNormal && !pBld->Type->Refinery);
+			// ptKind: 0 = unit/deployed vehicle, 1 = structure, 2 = defense structure (IsBaseDefense=yes)
+			const int ptKind = isDeployedVehicleBld ? 0 : (pBld->Type->IsBaseDefense ? 2 : 1);
 
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%d,%d,%d,%d]", firstPt ? "" : ",", rx, ry, pBld->Owner->ArrayIndex, isDeployedVehicleBld ? 0 : 1);
+			char idClean[32];
+			char nameClean[64];
+			sanitizeJsonStr(pBld->Type->ID, idClean, sizeof(idClean));
+			sanitizeJsonStr(pBld->Type->Name, nameClean, sizeof(nameClean));
+
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"]",
+				firstPt ? "" : ",", rx, ry, pBld->Owner->ArrayIndex, ptKind, idClean, nameClean);
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -2893,18 +2918,24 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			if (!pUnit || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Owner || pUnit->Owner->IsNeutral() || pUnit->Owner->IsObserver())
 				continue;
 
-			if (ptCount >= 400)
+			if (ptCount >= 460 || jsonBuf.size() > 58000)
 				break;
 
 			const CellStruct c = pUnit->GetMapCoords();
 
-			int rx = 0;
+			float rx = 0.0f;
 
-			int ry = 0;
+			float ry = 0.0f;
 
 			projectToRadar(c, rx, ry);
 
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%d,%d,%d,0]", firstPt ? "" : ",", rx, ry, pUnit->Owner->ArrayIndex);
+			char idClean[32];
+			char nameClean[64];
+			sanitizeJsonStr(pUnit->Type ? pUnit->Type->ID : "", idClean, sizeof(idClean));
+			sanitizeJsonStr(pUnit->Type ? pUnit->Type->Name : "", nameClean, sizeof(nameClean));
+
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"]",
+				firstPt ? "" : ",", rx, ry, pUnit->Owner->ArrayIndex, idClean, nameClean);
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -2926,18 +2957,24 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			if ((infStep++ % 2) != 0)
 				continue;
 
-			if (ptCount >= 480)
+			if (ptCount >= 520 || jsonBuf.size() > 60000)
 				break;
 
 			const CellStruct c = pInf->GetMapCoords();
 
-			int rx = 0;
+			float rx = 0.0f;
 
-			int ry = 0;
+			float ry = 0.0f;
 
 			projectToRadar(c, rx, ry);
 
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%d,%d,%d,0]", firstPt ? "" : ",", rx, ry, pInf->Owner->ArrayIndex);
+			char idClean[32];
+			char nameClean[64];
+			sanitizeJsonStr(pInf->Type ? pInf->Type->ID : "", idClean, sizeof(idClean));
+			sanitizeJsonStr(pInf->Type ? pInf->Type->Name : "", nameClean, sizeof(nameClean));
+
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"]",
+				firstPt ? "" : ",", rx, ry, pInf->Owner->ArrayIndex, idClean, nameClean);
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -3547,7 +3584,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 			if (pBld->Occupants.Count > 0)
 				visibleEnemyGarrisons++;
 
-			if (pBldType && pBldType->BuildCat == BuildCat::Combat)
+			if (pBldType && pBldType->IsBaseDefense)
 				visibleEnemyDefenses++;
 
 			if (pBldType && (pBldType->PowerBonus > 0 || pBldType->SuperWeapon != -1 || pBldType->Factory != AbstractType::None || pBldType->ConstructionYard))
@@ -4652,7 +4689,7 @@ namespace
 
 					{
 
-						if (pBld->Type->BuildCat == BuildCat::Combat)
+						if (pBld->Type->IsBaseDefense)
 							score -= (12 - dist) *
 
 									140; // Heavy penalty for enemy defensive turrets in range!
@@ -5397,7 +5434,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pEBld->Occupants.Count > 0)
 				sScore = 100 + pEBld->Occupants.Count * 15;
 
-			else if (pEBld->Type->BuildCat == BuildCat::Combat)
+			else if (pEBld->Type->IsBaseDefense)
 				sScore = 85;
 
 			if (sScore > bestSiegeScore)
@@ -6276,7 +6313,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			auto const pTargetBld = pType->DeploysInto;
 
-			const bool isKeyStructureDeployer = (pTargetBld != nullptr && (!pType->Harvester && !pType->ResourceGatherer || isIslandColonizerSlaveMiner) && (pTargetBld->BuildCat != BuildCat::Combat || !hasPrimaryWeapon));
+			const bool isKeyStructureDeployer = (pTargetBld != nullptr && (!pType->Harvester && !pType->ResourceGatherer || isIslandColonizerSlaveMiner) && (!pTargetBld->IsBaseDefense || !hasPrimaryWeapon));
 
 			if (isKeyStructureDeployer)
 			{
@@ -6487,7 +6524,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				// factories/ConYard to the defensive perimeter before unpacking!
 
-				if (pTargetBld->BuildCat == BuildCat::Combat)
+				if (pTargetBld->IsBaseDefense)
 
 				{
 
@@ -7502,7 +7539,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 						{
 
-							if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->BuildCat != BuildCat::Combat)
+							if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || !pEB->Type->IsBaseDefense)
 								continue;
 
 							if (pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral())
@@ -7851,7 +7888,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				else if (pEBld->Type->PowerBonus > 0)
 					dScore = 85;
 
-				else if (pEBld->Type->BuildCat == BuildCat::Combat && pEBld->Type->Powered)
+				else if (pEBld->Type->IsBaseDefense && pEBld->Type->Powered)
 					dScore = 75;
 
 				if (dScore > bestDrainScore)
@@ -10107,7 +10144,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			{
 
-				if (pCheckBld && !pCheckBld->InLimbo && pCheckBld->IsAlive && pCheckBld->Type && pCheckBld->Type->BuildCat == BuildCat::Combat && pCheckBld->Type->Powered && pCheckBld->StuffEnabled)
+				if (pCheckBld && !pCheckBld->InLimbo && pCheckBld->IsAlive && pCheckBld->Type && pCheckBld->Type->IsBaseDefense && pCheckBld->Type->Powered && pCheckBld->StuffEnabled)
 
 				{
 
@@ -10141,7 +10178,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			{
 
-				if (isLowPower && hasPoweredDefense && scores[60] > 80 && pOwnBld->StuffEnabled && pOwnBld->Type->BuildCat != BuildCat::Combat && pOwnBld->Type->PowerDrain >= 100 &&
+				if (isLowPower && hasPoweredDefense && scores[60] > 80 && pOwnBld->StuffEnabled && !pOwnBld->Type->IsBaseDefense && pOwnBld->Type->PowerDrain >= 100 &&
 
 					(pOwnBld->Type->SuperWeapon != -1 || pOwnBld->Type->Factory == AbstractType::None))
 
@@ -10266,7 +10303,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 						hostileZone = true;
 
-						if (pEB->Type->BuildCat == BuildCat::Combat && dB <= 10)
+						if (pEB->Type->IsBaseDefense && dB <= 10)
 							closeHostileAttackers++;
 					}
 				}
@@ -10385,7 +10422,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 					if (std::max(std::abs(yc.X - nc.X), std::abs(yc.Y - nc.Y)) <= 10 &&
 
-						(pNearB->Type->Refinery || pNearB->Type->BaseNormal || pNearB->Type->Factory != AbstractType::None || pNearB->Type->BuildCat == BuildCat::Combat))
+						(pNearB->Type->Refinery || pNearB->Type->BaseNormal || pNearB->Type->Factory != AbstractType::None || pNearB->Type->IsBaseDefense))
 
 					{
 
@@ -10408,7 +10445,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			else if (pOwnBld->Type->UndeploysInto != nullptr && !pOwnBld->Type->ConstructionYard && !pOwnBld->Type->Refinery && !pOwnBld->Type->BaseNormal &&
 
-					pOwnBld->Type->BuildCat == BuildCat::Combat && pOwnBld->Target == nullptr && (Unsorted::CurrentFrame % 150 < 30))
+					(pOwnBld->Type->IsBaseDefense || pOwnBld->Type->GetWeapon(0) != nullptr) && pOwnBld->Target == nullptr && (Unsorted::CurrentFrame % 150 < 30))
 
 			{
 
@@ -10695,7 +10732,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 									if (pOtherBld->Owner == pHouse || pHouse->IsAlliedWith(pOtherBld->Owner) || pOtherBld->Owner->IsNeutral())
 										continue;
 
-									if (pOtherBld->Type->BuildCat == BuildCat::Combat && pOtherBld->Type->GetWeapon(0) != nullptr)
+									if (pOtherBld->Type->IsBaseDefense && pOtherBld->Type->GetWeapon(0) != nullptr)
 
 									{
 
@@ -11858,7 +11895,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (pOT->Factory == AbstractType::AircraftType || pOT->Helipad)
 				ownedAirpads++;
 
-			else if (pOT->BuildCat == BuildCat::Combat && !IsTunnelNetworkBuilding(pOT))
+			else if (pOT->IsBaseDefense && !IsTunnelNetworkBuilding(pOT))
 
 			{
 
@@ -12098,7 +12135,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bool hasNearbyGroundTurret = false;
 				for (auto const pDefBld : pHouse->Buildings)
 				{
-					if (!pDefBld || pDefBld->InLimbo || !pDefBld->IsAlive || !pDefBld->Type || pDefBld->Type->BuildCat != BuildCat::Combat || IsTunnelNetworkBuilding(pDefBld->Type))
+					if (!pDefBld || pDefBld->InLimbo || !pDefBld->IsAlive || !pDefBld->Type || !pDefBld->Type->IsBaseDefense || IsTunnelNetworkBuilding(pDefBld->Type))
 						continue;
 					const auto pWS = pDefBld->Type->GetWeapon(0);
 					const auto pW = pWS ? pWS->WeaponType : nullptr;
@@ -12247,7 +12284,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (GetMacroState(pHouse).ConsecutivePlacementFailures > 0 && pBld->BaseNormal && pBld->GetFoundationWidth() <= 2 && pBld->GetFoundationHeight(false) <= 2)
 				score += 2200; // Small 2x2 BaseNormal anchor to expand legal Adjacent= perimeter out of tight terrain!
 
-			if (pBld->PowerBonus > pBld->PowerDrain && pBld->BuildCat != BuildCat::Combat)
+			if (pBld->PowerBonus > pBld->PowerDrain && !pBld->IsBaseDefense)
 
 			{
 
@@ -12520,7 +12557,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score = 460 + tacticalTunnelBias - owned * 140;
 			}
 
-			else if (pBld->BuildCat == BuildCat::Combat)
+			else if (pBld->IsBaseDefense)
 
 			{
 
@@ -12664,7 +12701,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 					const int projectedSurplus = realPowerSurplus - pChosen->PowerDrain;
 
-					const int minSafeAfterBuild = (poweredDefAndSWCount > 0 || (pChosen->BuildCat == BuildCat::Combat && pChosen->Powered)) ? std::max(120, requiredPowerCushion / 2) : 50;
+					const int minSafeAfterBuild = (poweredDefAndSWCount > 0 || (pChosen->IsBaseDefense && pChosen->Powered)) ? std::max(120, requiredPowerCushion / 2) : 50;
 
 					if (pHouse->HasLowPower() || hasUnpoweredBuildings || projectedSurplus < minSafeAfterBuild)
 						bestBldIdx = bestPowerPlantIdx;
@@ -12702,7 +12739,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				ownsUndeployedMCV = true;
 			}
 			else if (pOwnedType->DeploysInto && !pOwnedType->Harvester && !pOwnedType->ResourceGatherer &&
-					(pOwnedType->DeploysInto->BuildCat != BuildCat::Combat || !pOwnedType->GetWeapon(0) || !pOwnedType->GetWeapon(0)->WeaponType))
+					(!pOwnedType->DeploysInto->IsBaseDefense || !pOwnedType->GetWeapon(0) || !pOwnedType->GetWeapon(0)->WeaponType))
 			{
 				ownsUndeployedKeyStructure = true;
 			}
@@ -12796,7 +12833,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const auto pWpn = pWpnStruct ? pWpnStruct->WeaponType : nullptr;
 
 		const bool isKeyStructureDeployer =
-			(pUnit->DeploysInto != nullptr && !isMCV && !pUnit->Harvester && !pUnit->ResourceGatherer && (pUnit->DeploysInto->BuildCat != BuildCat::Combat || pWpn == nullptr));
+			(pUnit->DeploysInto != nullptr && !isMCV && !pUnit->Harvester && !pUnit->ResourceGatherer && (!pUnit->DeploysInto->IsBaseDefense || pWpn == nullptr));
 
 		if (isKeyStructureDeployer && ownsUndeployedKeyStructure)
 			continue;
@@ -12880,7 +12917,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						score += scores[30] - (ownedTargetBld * 600);
 				}
 
-				else if (pTargetBld->PowerBonus > pTargetBld->PowerDrain && pTargetBld->BuildCat != BuildCat::Combat)
+				else if (pTargetBld->PowerBonus > pTargetBld->PowerDrain && !pTargetBld->IsBaseDefense)
 					score += scores[0];
 
 				else if (pTargetBld->Refinery)
@@ -12909,7 +12946,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				else if (pTargetBld->Storage > 0 && !pTargetBld->Refinery)
 					score += scores[11];
 
-				else if (pTargetBld->BuildCat == BuildCat::Combat)
+				else if (pTargetBld->IsBaseDefense)
 
 				{
 
@@ -13262,7 +13299,7 @@ bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClas
 
 	const int candH = pType->GetFoundationHeight(false);
 
-	const bool isCandDefense = (pType->BuildCat == BuildCat::Combat);
+	const bool isCandDefense = pType->IsBaseDefense;
 
 	for (auto const pExisting : BuildingClass::Array)
 
@@ -13291,7 +13328,7 @@ bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClas
 
 		// spreads defenses along the perimeter instead of clumping
 
-		if (isCandDefense && pExType->BuildCat == BuildCat::Combat)
+		if (isCandDefense && pExType->IsBaseDefense)
 
 		{
 
@@ -13304,7 +13341,7 @@ bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClas
 		// Enforce a 1-cell street margin between non-defense structures when Adjacent >= 2 (from AdvAI).
 		// Note: A 1-cell gap equals Chebyshev foundation distance 2, which fits inside standard Adjacent=2
 		// while keeping a passable 1-cell road around all 4 sides of every Factory, Refinery, and ConYard!
-		const int basePad = (!isCandDefense && pExType->BuildCat != BuildCat::Combat && pType->Adjacent >= 2) ? 1 : 0;
+		const int basePad = (!isCandDefense && !pExType->IsBaseDefense && pType->Adjacent >= 2) ? 1 : 0;
 		if (basePad > 0)
 		{
 			const int exMinX = exCell.X - basePad;
@@ -13336,7 +13373,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	{
 		// If we own an expansion or nomadic ConYard, prioritize planting structures around the newest ConYard
 		// (especially when it has < 2 nearby structures so a Nomadic MCV can drop its outpost and hop on!)
-		const bool canBuildAtOutpostYard = isRefineryOrSlaveMiner || pBuildingType->BuildCat == BuildCat::Combat || pBuildingType->Factory == AbstractType::UnitType ||
+		const bool canBuildAtOutpostYard = isRefineryOrSlaveMiner || pBuildingType->IsBaseDefense || pBuildingType->Factory == AbstractType::UnitType ||
 										pBuildingType->Factory == AbstractType::InfantryType || pBuildingType->PowerBonus > 0 || pBuildingType->BaseNormal;
 		int yardIdx = (pHouse->ConYards.Count > 1 && canBuildAtOutpostYard) ? (pHouse->ConYards.Count - 1) : 0;
 		if (pHouse->ConYards.Count > 1)
@@ -13429,7 +13466,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 		}
 	}
-	if (targetExpansionZone < 0 && (isRefineryOrSlaveMiner || pBuildingType->BuildCat == BuildCat::Combat))
+	if (targetExpansionZone < 0 && (isRefineryOrSlaveMiner || pBuildingType->IsBaseDefense))
 	{
 		for (auto const pOwnBld : pHouse->Buildings)
 		{
@@ -13444,7 +13481,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	// around our Ally's ConYard!
 
-	if (GameModeOptionsClass::Instance.BuildOffAlly && (pHouse->ConYards.Count == 0 || pBuildingType->BuildCat == BuildCat::Combat))
+	if (GameModeOptionsClass::Instance.BuildOffAlly && (pHouse->ConYards.Count == 0 || pBuildingType->IsBaseDefense))
 
 	{
 
@@ -13459,7 +13496,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 			{
 
-				if (pHouse->ConYards.Count == 0 || (pBuildingType->BuildCat == BuildCat::Combat && pAllyBld->HasBeenAttacked && pAllyBld->GetHealthPercentage() < 0.80))
+				if (pHouse->ConYards.Count == 0 || (pBuildingType->IsBaseDefense && pAllyBld->HasBeenAttacked && pAllyBld->GetHealthPercentage() < 0.80))
 
 				{
 
@@ -13599,7 +13636,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	const bool isResourceBld = isRefineryOrSlaveMiner || pBuildingType->Storage > 0 || pBuildingType->OrePurifier;
 
-	const bool isCombatDefense = (pBuildingType->BuildCat == BuildCat::Combat);
+	const bool isCombatDefense = pBuildingType->IsBaseDefense;
 
 	const auto pWpnStruct = pBuildingType->GetWeapon(0);
 
@@ -13785,7 +13822,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 			const CellStruct bc = pOwnBld->GetMapCoords();
 
-			if (pOT->BuildCat == BuildCat::Combat && !IsTunnelNetworkBuilding(pOT))
+			if (pOT->IsBaseDefense && !IsTunnelNetworkBuilding(pOT))
 
 			{
 
@@ -14263,7 +14300,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 							break;
 						}
 
-						if (isCombatDefense && pEx->Type->BuildCat == BuildCat::Combat && (std::abs(candidate.X - exC.X) + std::abs(candidate.Y - exC.Y)) < 4)
+						if (isCombatDefense && pEx->Type->IsBaseDefense && (std::abs(candidate.X - exC.X) + std::abs(candidate.Y - exC.Y)) < 4)
 						{
 							overlapsFootprint = true;
 							break;
@@ -14825,7 +14862,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 	{
 		GetMacroState(pHouse).ConsecutivePlacementFailures = 0;
 		GetMacroState(pHouse).BuildingPlacementCooldownUntilFrame.erase(pBuildingType->ArrayIndex);
-		if (pBuildingType->BuildCat == BuildCat::Combat && !GetMacroState(pHouse).AttackedBuildingsLIFO.empty())
+		if (pBuildingType->IsBaseDefense && !GetMacroState(pHouse).AttackedBuildingsLIFO.empty())
 			GetMacroState(pHouse).AttackedBuildingsLIFO.pop_back();
 
 		outCell = bestCell;
@@ -14853,7 +14890,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 
 	const int money = pHouse->Available_Money();
 
-	const bool isCombatDef = (pBuildingType->BuildCat == BuildCat::Combat);
+	const bool isCombatDef = pBuildingType->IsBaseDefense;
 
 	const bool isLateGameHighTierDefense = isCombatDef && pBuildingType->TechLevel >= 6 && pBuildingType->Cost >= 1000 && money > 4000;
 
@@ -15043,7 +15080,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 
 							// exist and power cushion stays safe
 
-							else if (pOT->PowerBonus > pOT->PowerDrain && pOT->PowerBonus <= 200 && pOT->BuildCat != BuildCat::Combat && hasAdvancedPowerPlants &&
+							else if (pOT->PowerBonus > pOT->PowerDrain && pOT->PowerBonus <= 200 && !pOT->IsBaseDefense && hasAdvancedPowerPlants &&
 
 									(realSurplus - (lostPowerBonus + pOT->PowerBonus) - pBuildingType->PowerDrain) >= requiredCushion)
 
@@ -15058,7 +15095,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 
 							// infrastructure or late-game Tier-2/3 defense upgrade)
 
-							else if (pOT->BuildCat == BuildCat::Combat && !IsTunnelNetworkBuilding(pOT) && (!isCombatDef || (isLateGameHighTierDefense && pBuildingType->Cost >= pOT->Cost + 450)))
+							else if (pOT->IsBaseDefense && !IsTunnelNetworkBuilding(pOT) && (!isCombatDef || (isLateGameHighTierDefense && pBuildingType->Cost >= pOT->Cost + 450)))
 
 							{
 
