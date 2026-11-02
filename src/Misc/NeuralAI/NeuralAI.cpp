@@ -817,6 +817,8 @@ namespace
 		int NextClearanceCheckFrame{0};
 
 		int LastClearanceFailedFrame{-1000};
+		int ConsecutivePlacementFailures{0};
+		std::map<int, int> BuildingPlacementCooldownUntilFrame{};
 
 		std::vector<NeuralAttackedBuildingRecord> AttackedBuildingsLIFO{};
 
@@ -846,7 +848,8 @@ namespace
 			this->ClearClearanceReservation();
 
 			this->LastClearanceFailedFrame = -1000;
-
+			this->ConsecutivePlacementFailures = 0;
+			this->BuildingPlacementCooldownUntilFrame.clear();
 			this->AttackedBuildingsLIFO.clear();
 		}
 	};
@@ -3919,12 +3922,11 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	outScores[23] = ClampInt16(outScores[23] + ((arch == 2 || activeExpert == 7) ? 260 : 80));
 
 	// Tactical & Spatial Strategy Output Slots (34..39) driven by Neural MoE +
+	// LoRA + Evolved OutputBias + StarCraft/AdvAI Depleting-Spawn Urgency:
+	const bool localOreDepleting = (features[19] < 28 || (Unsorted::CurrentFrame > 2700 && pHouse->CountResourceDestinations < 3));
+	outScores[34] = ClampInt16(outScores[34] + ((activeExpert == 6 || localOreDepleting || features[20] > 12) ? 420 : 90));
 
-	// LoRA + Evolved OutputBias:
-
-	outScores[34] = ClampInt16(outScores[34] + ((activeExpert == 6 || features[19] < 24 || features[20] > 15) ? 280 : 40));
-
-	outScores[35] = ClampInt16(outScores[35] + ((activeExpert == 6 || features[20] > 12) ? 320 : 20));
+	outScores[35] = ClampInt16(outScores[35] + ((activeExpert == 6 || localOreDepleting || features[20] > 10) ? 440 : 60));
 
 	outScores[36] = ClampInt16(outScores[36] + ((arch == 1 || pHouse->ToCapture >= 0) ? 300 : 80));
 
@@ -4010,11 +4012,14 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// Slot 30: Multi-Outpost Expansion MCV, Multi-ConYard Production Speed Boost & Nomadic MCV
 	// (No hard cap on NumConYards: the neural network weighs whether to build more MCVs for expansion,
 	// nomadic hopping, or MultipleFactory building speed vs being moderate based on economy & biases)
-	const int mcvReserveThreshold = std::clamp(2400 + (pHouse->NumConYards * 900) - (static_cast<int>(outScores[35]) * 2) - (static_cast<int>(outScores[81]) * 2), 1600, 6800);
+	const int depleteDiscount = (features[19] < 20 && features[20] > 6) ? 650 : ((features[19] < 28) ? 350 : 0);
+	const int mcvReserveThreshold = std::clamp(2200 + (pHouse->NumConYards * 850) - depleteDiscount - (static_cast<int>(outScores[35]) * 2) - (static_cast<int>(outScores[81]) * 2), 1400, 6500);
 	if (pHouse->NumConYards >= 1 && pHouse->NumWarFactories > 0 && pHouse->Available_Money() > mcvReserveThreshold &&
-		(features[20] > 8 || outScores[35] > 100 || outScores[81] > 100 || outScores[30] > 180) && (features[19] < 28 || pHouse->Available_Money() > mcvReserveThreshold + 1600 || outScores[30] > 260))
+		(features[20] > 6 || localOreDepleting || outScores[35] > 80 || outScores[81] > 80 || outScores[30] > 160) &&
+		(features[19] < 32 || pHouse->Available_Money() > mcvReserveThreshold + 1200 || outScores[30] > 220 || outScores[81] > 120))
 	{
-		outScores[30] = ClampInt16(outScores[30] + 900 + std::clamp(static_cast<int>(outScores[35]) + (static_cast<int>(outScores[81]) / 2), -450, 750) - ((pHouse->NumConYards - 1) * 220));
+		outScores[30] = ClampInt16(
+			outScores[30] + 980 + (localOreDepleting ? 320 : 0) + std::clamp(static_cast<int>(outScores[35]) + (static_cast<int>(outScores[81]) / 2), -400, 800) - ((pHouse->NumConYards - 1) * 200));
 	}
 	else
 	{
@@ -11174,6 +11179,64 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const int maxAADefenses = std::clamp(1 + ownedWarFactories + ownedTechStructures + defDensityMod + (underAirAttack ? 2 : 0), 2, 6);
 
+		// AdvAI & StarCraft Resource Expansion State Machine:
+		// Measure minimum Chebyshev distance from our closest BaseNormal/ConYard anchor to the nearest uncolonized Ore/Gem field (>= 10 cells from any owned Refinery).
+		// - If minAnchorDistToUncolonizedOre <= 9: our BaseNormal chain or Expansion ConYard has reached the new Ore field! Trigger ShouldBuildRefinery (+1950)!
+		// - If minAnchorDistToUncolonizedOre is 10..38: boost BaseNormal=yes stepping-stone structures (Power Plants / Barracks / Outposts) so the base actively crawls out of spawn to reach the Ore!
+		CellStruct nearestUncolonizedOreCell = CellStruct::Empty;
+		int minAnchorDistToUncolonizedOre = 9999;
+		{
+			CellStruct scanOrigin = pHouse->BaseCenter != CellStruct::Empty ? pHouse->BaseCenter : pHouse->BaseSpawnCell;
+			if (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(pHouse->ConYards.Count - 1))
+				scanOrigin = pHouse->ConYards.GetItem(pHouse->ConYards.Count - 1)->GetMapCoords();
+
+			if (scanOrigin != CellStruct::Empty)
+			{
+				for (int dy = -78; dy <= 78; dy += 3)
+				{
+					for (int dx = -78; dx <= 78; dx += 3)
+					{
+						const CellStruct tc{static_cast<short>(scanOrigin.X + dx), static_cast<short>(scanOrigin.Y + dy)};
+						auto const pCell = MapClass::Instance.TryGetCellAt(tc);
+						if (!pCell || pCell->GetContainedTiberiumValue() <= 0)
+							continue;
+
+						bool alreadyColonizedByRef = false;
+						int closestAnchorDist = 9999;
+						for (auto const pOwnBld : pHouse->Buildings)
+						{
+							if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->InvisibleInGame)
+								continue;
+
+							const CellStruct bc = pOwnBld->GetMapCoords();
+							const int dCheb = std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y));
+							if ((pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer || pOwnBld->Type->ResourceDestination) && dCheb < 10)
+							{
+								alreadyColonizedByRef = true;
+								break;
+							}
+
+							if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard)
+							{
+								if (dCheb < closestAnchorDist)
+									closestAnchorDist = dCheb;
+							}
+						}
+
+						if (!alreadyColonizedByRef && closestAnchorDist < minAnchorDistToUncolonizedOre)
+						{
+							minAnchorDistToUncolonizedOre = closestAnchorDist;
+							nearestUncolonizedOreCell = tc;
+						}
+					}
+				}
+			}
+		}
+
+		const bool reachedNewOreField = (nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre <= 9 && ownedRefineries >= 1);
+		const bool needsSteppingStoneCrawlToOre = (nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre > 9 && minAnchorDistToUncolonizedOre <= 38 &&
+												hasCoreEconomyAndProduction && (features[19] < 32 || ownedRefineries < 3 || scores[34] > 100 || Unsorted::CurrentFrame > 2100));
+
 		for (auto const pBld : BuildingTypeClass::Array)
 
 		{
@@ -11187,6 +11250,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (!CanBuildUnderHumanRules(pHouse, pBld))
 				continue;
 
+			auto const& cooldownMap = GetMacroState(pHouse).BuildingPlacementCooldownUntilFrame;
+			auto const cdIt = cooldownMap.find(pBld->ArrayIndex);
+			if (cdIt != cooldownMap.end() && Unsorted::CurrentFrame < cdIt->second)
+				continue;
+
 			if (pBld->GetActualCost(pHouse) > money + 1200)
 				continue;
 
@@ -11195,6 +11263,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const bool isRefineryOrSlaveMiner = pBld->Refinery || pBld->ResourceGatherer || pBld->ResourceDestination;
 
 			int score = 0;
+
+			if (GetMacroState(pHouse).ConsecutivePlacementFailures > 0 && pBld->BaseNormal && pBld->GetFoundationWidth() <= 2 && pBld->GetFoundationHeight(false) <= 2)
+				score += 2200; // Small 2x2 BaseNormal anchor to expand legal Adjacent= perimeter out of tight terrain!
 
 			if (pBld->PowerBonus > pBld->PowerDrain && pBld->BuildCat != BuildCat::Combat)
 
@@ -11214,42 +11285,35 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 
 				// Hard anti-spam cap: never queue more Power Plants when surplus is
-
-				// already well above our damaged-plant safety cushion!
-
-				if (!pHouse->HasLowPower() && !hasUnpoweredBuildings && realPowerSurplus >= requiredPowerCushion + 350)
+				// already well above our damaged-plant safety cushion (relaxed by +350 when stepping-stone crawling to a distant Ore patch)!
+				const int maxAllowedSurplus = requiredPowerCushion + ((needsSteppingStoneCrawlToOre && pBld->BaseNormal && money >= 1400) ? 700 : 350);
+				if (!pHouse->HasLowPower() && !hasUnpoweredBuildings && realPowerSurplus >= maxAllowedSurplus)
 					continue;
 
 				score = scores[0] + std::min(650, pBld->PowerBonus * 2);
 
 				// Prefer Advanced Reactors (Nuclear/Bio/Tesla >= 300 PowerBonus) over
-
-				// basic power plants once unlocked and affordable
-
-				if (pBld->PowerBonus >= 300 && money >= pBld->GetActualCost(pHouse))
+				// basic power plants once unlocked and affordable, EXCEPT when building a cheap 2x2 BaseNormal stepping stone to reach Ore!
+				if (pBld->PowerBonus >= 300 && money >= pBld->GetActualCost(pHouse) && !needsSteppingStoneCrawlToOre)
 					score += 350;
-
-				else if (hasAdvancedPowerPlants && pBld->PowerBonus < 250 && money >= 1200)
+				else if (hasAdvancedPowerPlants && pBld->PowerBonus < 250 && money >= 1200 && !needsSteppingStoneCrawlToOre)
 					score -= 300;
 
 				if (pHouse->HasLowPower() || hasUnpoweredBuildings || realPowerSurplus < 60)
-
 				{
-
 					score += 1400;
 				}
-
 				else if (realPowerSurplus < requiredPowerCushion)
-
 				{
-
-					score += 450;
+					score += 450 + ((needsSteppingStoneCrawlToOre && pBld->BaseNormal) ? 450 : 0);
 				}
-
-				else
-
+				else if (needsSteppingStoneCrawlToOre && pBld->BaseNormal && pBld->GetFoundationWidth() <= 3 && money >= 1400)
 				{
-
+					// AdvAI Stepping-Stone BaseNormal Crawler: use cheap Power Plants to step the legal Adjacent=2 chain out of spawn toward the uncolonized Ore field!
+					score += 680;
+				}
+				else
+				{
 					score -= 1400;
 				}
 			}
@@ -11258,50 +11322,46 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			{
 
-				const int maxRefineries = (hasTechCenter && money < 3000) ? 5 : 4;
+				const int maxRefineries = (reachedNewOreField || pHouse->NumConYards >= 2 || (hasTechCenter && money < 3000)) ? 6 : 4;
 
 				if (owned >= maxRefineries)
 					continue;
 
-				score = scores[1] - owned * 550;
+				score = scores[1] - owned * 480;
 
 				if (owned == 0)
-					score += 1100;
-
+					score += 1200;
+				else if (reachedNewOreField)
+					score += 1950; // AdvAI ShouldBuildRefinery: our BaseNormal chain or Expansion MCV reached a new Ore field! Claim it immediately!
 				else if (owned == 1 && ownedWarFactories >= 1)
-					score += 380;
+					score += 450;
 			}
 
 			else if (pBld->Factory == AbstractType::InfantryType)
 
 			{
 
-				if (owned >= maxBarracks)
+				const int effectiveMaxBarracks = (needsSteppingStoneCrawlToOre && pBld->BaseNormal) ? std::max(maxBarracks, 3) : maxBarracks;
+				if (owned >= effectiveMaxBarracks)
 					continue;
 
 				// Slot 82 (Cross-Faction Tech Tree): If we already own our native
-
 				// Barracks (ownedBarracks >= 1) and a captured foreign ConYard unlocks
-
 				// a brand-new Foreign Barracks (owned == 0), boost it so we unlock
-
 				// foreign infantry and foreign tech prerequisites!
-
 				if (owned == 0 && ownedBarracks >= 1 && ownedBarracks < 5 && scores[82] > 60)
-
 				{
-
 					score = std::max(static_cast<int>(scores[2]), 350) + 750 + std::clamp(static_cast<int>(scores[82]), 0, 500);
 				}
-
 				else
-
 				{
-
-					score = scores[2] - owned * 950;
+					score = scores[2] - owned * 820;
 
 					if (ownedBarracks < maxEnemyBarracks && hasTechCenter && money > 1500)
 						score += 420;
+
+					if (needsSteppingStoneCrawlToOre && pBld->BaseNormal && money >= 1300)
+						score += 780; // Forward Barracks stepping-stone toward uncolonized Ore / Frontline!
 				}
 			}
 
@@ -12229,50 +12289,21 @@ bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClas
 				return false;
 		}
 
-		// Reserve 3-cell exit corridor south and east of Factories, Barracks,
-
-		// Refineries, Repair Depots, and Subterranean Tunnel Mouths
-
-		const bool needsExit =
-			(pExType->Factory != AbstractType::None) || pExType->Refinery || pExType->ResourceDestination || pExType->UnitRepair || pExType->WeaponsFactory || IsTunnelNetworkBuilding(pExType);
-
-		const bool candNeedsExit =
-			(pType->Factory != AbstractType::None) || pType->Refinery || pType->ResourceDestination || pType->UnitRepair || pType->WeaponsFactory || IsTunnelNetworkBuilding(pType);
-
-		// Enforce a 1-cell breathing margin around all non-defense structures (from AdvAI)
-
-		// so buildings are never glued 0-cells apart when Adjacent >= 2
-
+		// Enforce a 1-cell street margin between non-defense structures when Adjacent >= 2 (from AdvAI).
+		// Note: A 1-cell gap equals Chebyshev foundation distance 2, which fits inside standard Adjacent=2
+		// while keeping a passable 1-cell road around all 4 sides of every Factory, Refinery, and ConYard!
 		const int basePad = (!isCandDefense && pExType->BuildCat != BuildCat::Combat && pType->Adjacent >= 2) ? 1 : 0;
-
-		const int marginSouth = needsExit ? 3 : basePad;
-
-		const int marginEast = needsExit ? 3 : basePad;
-
-		const int exMinX = exCell.X - basePad;
-
-		const int exMaxX = exCell.X + exW + marginEast;
-
-		const int exMinY = exCell.Y - basePad;
-
-		const int exMaxY = exCell.Y + exH + marginSouth;
-
-		const int candMargin = candNeedsExit ? 3 : 0;
-
-		const int candMinX = candidateCell.X;
-
-		const int candMaxX = candidateCell.X + candW + candMargin;
-
-		const int candMinY = candidateCell.Y;
-
-		const int candMaxY = candidateCell.Y + candH + candMargin;
-
-		const bool overlapX = (candMinX < exMaxX) && (candMaxX > exMinX);
-
-		const bool overlapY = (candMinY < exMaxY) && (candMaxY > exMinY);
-
-		if (overlapX && overlapY)
-			return false;
+		if (basePad > 0)
+		{
+			const int exMinX = exCell.X - basePad;
+			const int exMaxX = exCell.X + exW + basePad;
+			const int exMinY = exCell.Y - basePad;
+			const int exMaxY = exCell.Y + exH + basePad;
+			const bool overlapX = (candidateCell.X < exMaxX) && (candidateCell.X + candW > exMinX);
+			const bool overlapY = (candidateCell.Y < exMaxY) && (candidateCell.Y + candH > exMinY);
+			if (overlapX && overlapY)
+				return false;
+		}
 	}
 
 	return true;
@@ -12421,97 +12452,63 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	const int turretCreepBias = static_cast<int>(policy.OutputBias[38]) + ((pExt && pExt->AIBrain_ActiveExpert == 7) ? 220 : 0);
 
-	// Discover nearest Ore/Tiberium patch across a wide 44-cell radius (for
-
-	// Expert 6 & Slot 34: Resource Base-Crawling). When we already own >= 1
-
-	// Refinery, prefer uncolonized Ore patches >= 8 cells from existing
-
-	// Refineries so each new Refinery crawls further along the Ore field!
-
+	// Discover nearest uncolonized Ore/Tiberium patch across an 84-cell radius (for
+	// Expert 6, Slot 34 & AdvAI Stepping-Stone Base-Crawling). Measure distance from our closest
+	// BaseNormal/ConYard anchor and prefer uncolonized Ore patches >= 10 cells from any existing Refinery!
 	CellStruct nearestOreCell = CellStruct::Empty;
-
 	CellStruct fallbackOreCell = CellStruct::Empty;
-
 	int bestOreDist = 9999;
-
 	int bestFallbackOreDist = 9999;
 
-	for (int dy = -44; dy <= 44; dy += 2)
-
+	for (int dy = -84; dy <= 84; dy += (std::abs(dy) <= 44 ? 2 : 3))
 	{
-
-		for (int dx = -44; dx <= 44; dx += 2)
-
+		for (int dx = -84; dx <= 84; dx += (std::abs(dx) <= 44 ? 2 : 3))
 		{
-
-			const int d = std::abs(dx) + std::abs(dy);
-
-			if (d < 4)
+			const int dCenter = std::abs(dx) + std::abs(dy);
+			if (dCenter < 3)
 				continue;
 
 			const CellStruct tc{static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy)};
-
 			auto const pCell = MapClass::Instance.TryGetCellAt(tc);
-
 			if (!pCell || pCell->GetContainedTiberiumValue() <= 0)
 				continue;
 
-			if (d < bestFallbackOreDist)
-
+			bool nearExistingRef = false;
+			int minAnchorManhattan = dCenter;
+			for (auto const pOwnBld : pHouse->Buildings)
 			{
+				if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->InvisibleInGame)
+					continue;
 
-				bestFallbackOreDist = d;
+				const CellStruct bc = pOwnBld->GetMapCoords();
+				if ((pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer || pOwnBld->Type->ResourceDestination) && std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y)) < 10)
+					nearExistingRef = true;
 
+				if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard)
+				{
+					const int dAnc = std::abs(tc.X - bc.X) + std::abs(tc.Y - bc.Y);
+					if (dAnc < minAnchorManhattan)
+						minAnchorManhattan = dAnc;
+				}
+			}
+
+			if (minAnchorManhattan < bestFallbackOreDist)
+			{
+				bestFallbackOreDist = minAnchorManhattan;
 				fallbackOreCell = tc;
 			}
 
-			if (d < bestOreDist && pHouse->CountResourceDestinations >= 1)
-
+			if (pHouse->CountResourceDestinations >= 1)
 			{
-
-				bool nearExistingRef = false;
-
-				for (auto const pOwnBld : pHouse->Buildings)
-
+				if (!nearExistingRef && minAnchorManhattan < bestOreDist)
 				{
-
-					if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type)
-						continue;
-
-					if (pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer || pOwnBld->Type->ResourceDestination)
-
-					{
-
-						const CellStruct bc = pOwnBld->GetMapCoords();
-
-						if (std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y)) < 8)
-
-						{
-
-							nearExistingRef = true;
-
-							break;
-						}
-					}
-				}
-
-				if (!nearExistingRef)
-
-				{
-
-					bestOreDist = d;
-
+					bestOreDist = minAnchorManhattan;
 					nearestOreCell = tc;
 				}
 			}
-
-			else if (d < bestOreDist)
-
+			else if (minAnchorManhattan < bestOreDist)
 			{
-
-				bestOreDist = d;
-
+				bestOreDist = minAnchorManhattan;
 				nearestOreCell = tc;
 			}
 		}
@@ -12604,7 +12601,11 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	const bool isSupportRadiusBld = (supportRadius > 0) && !isCombatDefense && !isResourceBld && !isFactoryOrBarracks;
 
-	const bool isRearProtected = !isResourceBld && !isCombatDefense && !isFactoryOrBarracks && !isTunnelBld && !isSupportRadiusBld;
+	const bool isPowerPlantBld = (pBuildingType->PowerBonus > pBuildingType->PowerDrain) && !isCombatDefense;
+	// Stepping-Stone BaseNormal Expander (from AdvAI): After our 1st Power Plant, BaseNormal Power Plants (and Outposts)
+	// step outward toward uncolonized Ore fields or the frontline instead of crowding into the rear corner behind the ConYard!
+	const bool isSteppingStoneExpander = pBuildingType->BaseNormal && isPowerPlantBld && (pHouse->PowerOutput >= 150) && (nearestOreCell != CellStruct::Empty || crawlBias > 0);
+	const bool isRearProtected = !isResourceBld && !isCombatDefense && !isFactoryOrBarracks && !isTunnelBld && !isSupportRadiusBld && !isSteppingStoneExpander;
 
 	// Gather Support Radius coverage & separation targets
 
@@ -12835,9 +12836,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	// outpost/base-crawl structure!
 
-	const bool enableBaseCrawl = isForwardTunnelMouth || (crawlBias > 30 && (isResourceBld || isFactoryOrBarracks)) ||
-
-								(turretCreepBias > 30 && isCombatDefense && totalOwnedDefensesCount >= 2 && directionalAttackedBld == CellStruct::Empty);
+	const bool enableBaseCrawl = isForwardTunnelMouth || isSteppingStoneExpander ||
+								((isResourceBld || isFactoryOrBarracks) && (crawlBias > -20 || bestOreDist > 10 || pHouse->CountResourceDestinations >= 1)) ||
+								(turretCreepBias > 10 && isCombatDefense && totalOwnedDefensesCount >= 2 && directionalAttackedBld == CellStruct::Empty);
 
 	if (isCombatDefense && directionalAttackedBld != CellStruct::Empty)
 
@@ -12857,9 +12858,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	{
 
+		const bool crawlTowardOre =
+			isResourceBld || isSteppingStoneExpander || (isFactoryOrBarracks && nearestOreCell != CellStruct::Empty && bestOreDist > 10 && pHouse->CountResourceDestinations < 3);
 		const CellStruct crawlGoal =
-
-			isResourceBld ? (nearestOreCell != CellStruct::Empty ? nearestOreCell : enemyTargetCell) : (enemyTargetCell != CellStruct::Empty ? enemyTargetCell : nearestOreCell);
+			crawlTowardOre ? (nearestOreCell != CellStruct::Empty ? nearestOreCell : enemyTargetCell) : (enemyTargetCell != CellStruct::Empty ? enemyTargetCell : nearestOreCell);
 
 		if (crawlGoal != CellStruct::Empty)
 
@@ -13019,28 +13021,64 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	int validCandidatesChecked = 0;
 
-	const int startRadius = 1;
+	std::vector<CellStruct> candidateList;
+	candidateList.reserve(1024);
 
-	const int maxRadius = isNavalBld ? 42 : 28;
-
-	const int maxCandidatesToEvaluate = 600;
-
-	for (int radius = startRadius; radius <= maxRadius; ++radius)
-
+	// 1) Gather exact Adjacent= ring around EVERY BaseNormal / ConstructionYard anchor (from AdvAI)
+	// so we never miss a valid placement slot even when ConYard[0] is surrounded or an expansion is far away!
+	if (!pBuildingType->ConstructionYard && !isNavalBld && !adjacencyAnchors.empty())
 	{
-
-		for (int dy = -radius; dy <= radius; ++dy)
-
+		const int adjRange = std::max(1, pBuildingType->Adjacent);
+		for (auto const pAnchor : adjacencyAnchors)
 		{
-
-			for (int dx = -radius; dx <= radius; ++dx)
-
+			const CellStruct ac = pAnchor->GetMapCoords();
+			const int aW = pAnchor->Type->GetFoundationWidth();
+			const int aH = pAnchor->Type->GetFoundationHeight(false);
+			const int xMin = ac.X - adjRange - w + 1;
+			const int xMax = ac.X + aW + adjRange - 1;
+			const int yMin = ac.Y - adjRange - h + 1;
+			const int yMax = ac.Y + aH + adjRange - 1;
+			for (int cy = yMin; cy <= yMax; ++cy)
 			{
+				for (int cx = xMin; cx <= xMax; ++cx)
+				{
+					// Skip cells directly inside the anchor's own footprint
+					if (cx + w > ac.X && cx < ac.X + aW && cy + h > ac.Y && cy < ac.Y + aH)
+						continue;
 
-				if (std::max(std::abs(dx), std::abs(dy)) != radius)
-					continue;
+					candidateList.push_back(CellStruct{static_cast<short>(cx), static_cast<short>(cy)});
+				}
+			}
+		}
+	}
+	else
+	{
+		const int startRadius = 1;
+		const int maxRadius = isNavalBld ? 42 : 28;
+		for (int r = startRadius; r <= maxRadius; ++r)
+		{
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::max(std::abs(dx), std::abs(dy)) != r)
+						continue;
 
-				const CellStruct candidate{static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy)};
+					candidateList.push_back(CellStruct{static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy)});
+				}
+			}
+		}
+	}
+
+	const int maxCandidatesToEvaluate = 900;
+	// Two-pass evaluation: Pass 0 strictly requires the 1-cell street margin (IsCellClearedOfExitCorridors);
+	// Pass 1 only runs if Pass 0 found 0 valid cells (e.g. tight cliff/island corner), allowing 0-cell touching with a heavy score penalty (like AdvAI).
+	for (int relaxMarginPass = 0; relaxMarginPass < 2 && bestCandidate == CellStruct::Empty; ++relaxMarginPass)
+	{
+		{
+			for (const CellStruct& candidate : candidateList)
+			{
+				const int radius = std::max(1, std::max(std::abs(candidate.X - center.X), std::abs(candidate.Y - center.Y)));
 
 				if (!MapClass::Instance.CoordinatesLegal(candidate))
 					continue;
@@ -13103,8 +13141,38 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				if (!foundationValid)
 					continue;
 
-				if (!NeuralAI::IsCellClearedOfExitCorridors(pHouse, pBuildingType, candidate))
-					continue;
+				const bool hasOneCellMargin = NeuralAI::IsCellClearedOfExitCorridors(pHouse, pBuildingType, candidate);
+				if (!hasOneCellMargin)
+				{
+					if (relaxMarginPass == 0)
+						continue;
+
+					// Even in relaxed pass, never overlap an existing building footprint or clump turrets < 4 cells
+					bool overlapsFootprint = false;
+					for (auto const pEx : BuildingClass::Array)
+					{
+						if (!pEx || pEx->InLimbo || !pEx->IsAlive || !pEx->Type || pEx->Type->InvisibleInGame)
+							continue;
+
+						const CellStruct exC = pEx->GetMapCoords();
+						const int exW = pEx->Type->GetFoundationWidth();
+						const int exH = pEx->Type->GetFoundationHeight(false);
+						if ((candidate.X < exC.X + exW) && (candidate.X + w > exC.X) && (candidate.Y < exC.Y + exH) && (candidate.Y + h > exC.Y))
+						{
+							overlapsFootprint = true;
+							break;
+						}
+
+						if (isCombatDefense && pEx->Type->BuildCat == BuildCat::Combat && (std::abs(candidate.X - exC.X) + std::abs(candidate.Y - exC.Y)) < 4)
+						{
+							overlapsFootprint = true;
+							break;
+						}
+					}
+
+					if (overlapsFootprint)
+						continue;
+				}
 
 				// When placing/deploying a Construction Yard, never pick a cell within
 
@@ -13169,24 +13237,36 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						continue;
 				}
 
-				int spatialScore = enableBaseCrawl ? (-radius * 5) : (-radius * 10);
-
-				if (isResourceBld && nearestOreCell != CellStruct::Empty)
-
+				int spatialScore = (enableBaseCrawl ? (-radius * 5) : (-radius * 10)) - (hasOneCellMargin ? 0 : 4000);
+				// Bonus when South/East exit of a Factory or Refinery has 2+ clear cells in front of it
+				if (isFactoryOrBarracks || isRefineryOrSlaveMiner)
 				{
+					const CellStruct southExit{static_cast<short>(candidate.X + w / 2), static_cast<short>(candidate.Y + h + 1)};
+					const CellStruct eastExit{static_cast<short>(candidate.X + w + 1), static_cast<short>(candidate.Y + h / 2)};
+					if (auto const pSE = MapClass::Instance.TryGetCellAt(southExit))
+					{
+						if (pSE->GetBuilding() == nullptr && pSE->LandType != LandType::Water && pSE->LandType != LandType::Rock)
+							spatialScore += 220;
+					}
 
-					// Expert 6 & Slot 34: Crawl Refineries, Silos & Ore Purifiers
+					if (auto const pEE = MapClass::Instance.TryGetCellAt(eastExit))
+					{
+						if (pEE->GetBuilding() == nullptr && pEE->LandType != LandType::Water && pEE->LandType != LandType::Rock)
+							spatialScore += 220;
+					}
+				}
 
-					// directly toward the nearest Ore/Tiberium patch
-
+				if ((isResourceBld || isSteppingStoneExpander) && nearestOreCell != CellStruct::Empty)
+				{
+					// Expert 6, Slot 34 & AdvAI Stepping-Stone Crawler:
+					// Chain Refineries, Silos, Ore Purifiers AND BaseNormal stepping-stone Power Plants
+					// directly toward the nearest uncolonized Ore/Gem patch!
 					const int distToOre = std::abs(candidate.X - nearestOreCell.X) + std::abs(candidate.Y - nearestOreCell.Y);
-
-					const int orePull = std::clamp(45 + (crawlBias / 10), 25, 85);
-
+					const int orePull = std::clamp(52 + (crawlBias / 8), 32, 95);
 					spatialScore -= distToOre * orePull;
 
-					if (enableBaseCrawl && radius >= 5 && radius <= 13)
-						spatialScore += 180 + std::clamp(crawlBias / 3, 0, 180);
+					if (enableBaseCrawl && radius >= 2 && radius <= 12)
+						spatialScore += 220 + std::clamp(crawlBias / 3, 0, 180);
 				}
 
 				else if (isCombatDefense)
@@ -13413,22 +13493,17 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					}
 				}
 
-				else if (isFactoryOrBarracks && enemyTargetCell != CellStruct::Empty)
-
+				else if (isFactoryOrBarracks && (enemyTargetCell != CellStruct::Empty || nearestOreCell != CellStruct::Empty))
 				{
+					// Place War Factories & Barracks forward along the crawl chain (stepping toward uncolonized Ore when expanding economy, or toward Enemy frontline!)
+					const bool stepFactoryToOre = (nearestOreCell != CellStruct::Empty && bestOreDist > 10 && (pHouse->CountResourceDestinations < 3 || Unsorted::CurrentFrame > 2400));
+					const CellStruct facGoal = stepFactoryToOre ? nearestOreCell : (enemyTargetCell != CellStruct::Empty ? enemyTargetCell : nearestOreCell);
+					const int distToGoal = std::abs(candidate.X - facGoal.X) + std::abs(candidate.Y - facGoal.Y);
+					const int fwdPull = stepFactoryToOre ? std::clamp(38 + (crawlBias / 10), 24, 75) : std::clamp(22 + (crawlBias / 12), 12, 55);
+					spatialScore -= distToGoal * fwdPull;
 
-					// Place War Factories & Barracks forward along the crawl chain with
-
-					// guaranteed 3-cell South/East exit corridors
-
-					const int distToEnemy = std::abs(candidate.X - enemyTargetCell.X) + std::abs(candidate.Y - enemyTargetCell.Y);
-
-					const int fwdPull = std::clamp(14 + (crawlBias / 14), 6, 45);
-
-					spatialScore -= distToEnemy * fwdPull;
-
-					if (enableBaseCrawl && radius >= 5 && radius <= 12)
-						spatialScore += 140;
+					if (enableBaseCrawl && radius >= 2 && radius <= 12)
+						spatialScore += 180;
 				}
 
 				if (spatialScore > bestSpatialScore)
@@ -13596,9 +13671,9 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 	const CellStruct bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
 
 	if (bestCell != CellStruct::Empty)
-
 	{
-
+		GetMacroState(pHouse).ConsecutivePlacementFailures = 0;
+		GetMacroState(pHouse).BuildingPlacementCooldownUntilFrame.erase(pBuildingType->ArrayIndex);
 		if (pBuildingType->BuildCat == BuildCat::Combat && !GetMacroState(pHouse).AttackedBuildingsLIFO.empty())
 			GetMacroState(pHouse).AttackedBuildingsLIFO.pop_back();
 
@@ -13611,8 +13686,19 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 
 	// base is congested and no free cell exists!
 
-	if (Unsorted::CurrentFrame < GetMacroState(pHouse).LastClearanceFailedFrame + 150)
+	auto recordPlacementFailure = [&]() -> int
+	{
+		auto& st = GetMacroState(pHouse);
+		st.ConsecutivePlacementFailures++;
+		st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex] = Unsorted::CurrentFrame + std::min(3600, 300 * st.ConsecutivePlacementFailures);
+		if (FactoryClass* pBldFac = pHouse->GetPrimaryFactory(AbstractType::BuildingType, pBuildingType->Naval, pBuildingType->BuildCat))
+			pBldFac->AbandonProduction();
+
 		return 0;
+	};
+
+	if (Unsorted::CurrentFrame < GetMacroState(pHouse).LastClearanceFailedFrame + 150)
+		return recordPlacementFailure();
 
 	const int money = pHouse->Available_Money();
 
@@ -13621,7 +13707,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 	const bool isLateGameHighTierDefense = isCombatDef && pBuildingType->TechLevel >= 6 && pBuildingType->Cost >= 1000 && money > 4000;
 
 	if (isCombatDef && !isLateGameHighTierDefense)
-		return 0; // Only sacrifice structures for key non-defense buildings or
+		return recordPlacementFailure(); // Only sacrifice structures for key non-defense buildings or
 
 	// late-game high-tier defense upgrades
 
@@ -13970,5 +14056,5 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 
 	GetMacroState(pHouse).LastClearanceFailedFrame = Unsorted::CurrentFrame;
 
-	return 0;
+	return recordPlacementFailure();
 }
