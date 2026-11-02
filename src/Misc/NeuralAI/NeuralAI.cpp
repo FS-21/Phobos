@@ -7550,17 +7550,38 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		{
 
-			if (pBld->Owner == pHouse && !pBioReactor && pHouse->HasLowPower() && pBld->Type->InfantryAbsorb && pBld->Type->PowerBonus > 0 && !IsTunnelNetworkBuilding(pBld->Type) &&
+			if (pBld->Owner == pHouse && pBld->Type->InfantryAbsorb && (pBld->Type->PowerBonus > 0 || pBld->Type->ExtraPowerBonus > 0) && !IsTunnelNetworkBuilding(pBld->Type) &&
 
 				pBld->Passengers.NumPassengers < pBld->Type->Passengers)
 
-				pBioReactor = pBld;
+			{
+				if (!pBioReactor || pBld->Passengers.NumPassengers < pBioReactor->Passengers.NumPassengers)
+					pBioReactor = pBld;
+			}
 
 			if (!pOverpowerCoil && pBld->Type->Overpowerable && (!pBld->IsOverpowered || pBld->Owner->HasLowPower()))
 				pOverpowerCoil = pBld; // Overpower own OR allied Tesla Coils!
 
 			if (!pHospital && pBld->Type->Hospital)
 				pHospital = pBld; // Use own OR allied Hospital!
+		}
+	}
+
+	int infAlreadyHeadingToBioReactor = 0;
+	if (pBioReactor)
+	{
+		for (auto const pCheckInf : InfantryClass::Array)
+		{
+			if (pCheckInf && pCheckInf->Owner == pHouse && !pCheckInf->InLimbo && pCheckInf->IsAlive && pCheckInf->Destination == pBioReactor)
+				infAlreadyHeadingToBioReactor++;
+		}
+		if (pBioReactor->Passengers.NumPassengers + infAlreadyHeadingToBioReactor >= pBioReactor->Type->Passengers)
+			pBioReactor = nullptr;
+	}
+	const bool bioReactorNeedsPower = pBioReactor && (pHouse->HasLowPower() || (pHouse->PowerOutput - pHouse->PowerDrain) < 350);
+	if (false)
+	{
+		{
 		}
 	}
 
@@ -7731,6 +7752,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Yuri's control slot!
 
+		if (pInf->MindControlledBy != nullptr)
+		{
+			if (pBioReactor && pInf->Destination != pBioReactor &&
+				(bioReactorNeedsPower || !pGrinderBld || pInf->DistanceFrom(pBioReactor) <= pInf->DistanceFrom(pGrinderBld) + 1536))
+			{
+				pInf->SetDestination(pBioReactor, true);
+				pInf->QueueMission(Mission::Enter, true);
+				infAlreadyHeadingToBioReactor++;
+				if (pBioReactor->Passengers.NumPassengers + infAlreadyHeadingToBioReactor >= pBioReactor->Type->Passengers)
+					pBioReactor = nullptr;
+				continue;
+			}
+		}
 		if (pGrinderBld && pInf->MindControlledBy != nullptr && scores[65] > 80)
 
 		{
@@ -8456,7 +8490,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// during LowPower!
 
-		if (pBioReactor && isIdle && pInf->Type->Cost <= 250 && pInf->DistanceFrom(pBioReactor) <= 3072)
+		if (pBioReactor && bioReactorNeedsPower && isIdle && pInf->Destination != pBioReactor &&
+			!pInf->Type->Engineer && !pInf->Type->Infiltrate && !pInf->Type->Doggie &&
+			pInf->Type->Cost <= 250 && pInf->DistanceFrom(pBioReactor) <= 4096)
+		{
+			pInf->SetDestination(pBioReactor, true);
+			pInf->QueueMission(Mission::Enter, true);
+			infAlreadyHeadingToBioReactor++;
+			if (pBioReactor->Passengers.NumPassengers + infAlreadyHeadingToBioReactor >= pBioReactor->Type->Passengers)
+				pBioReactor = nullptr;
+			continue;
+		}
+		if (false && pBioReactor && isIdle && pInf->Type->Cost <= 250 && pInf->DistanceFrom(pBioReactor) <= 3072)
 
 		{
 
@@ -11083,6 +11128,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		int ownedHarvestersCount = 0;
 
 		bool hasTechCenter = false;
+		int unfilledBioReactorSlots = 0;
+		int bioReactorPotentialPower = 0;
 
 		for (auto const pOwnBld : pHouse->Buildings)
 
@@ -11093,6 +11140,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			auto const pOT = pOwnBld->Type;
 
+			if (pOT->InfantryAbsorb && (pOT->PowerBonus > 0 || pOT->ExtraPowerBonus > 0) && !IsTunnelNetworkBuilding(pOT) && pOwnBld->Passengers.NumPassengers < pOT->Passengers)
+			{
+				const int freeSlots = pOT->Passengers - pOwnBld->Passengers.NumPassengers;
+				unfilledBioReactorSlots += freeSlots;
+				bioReactorPotentialPower += freeSlots * std::max(50, pOT->ExtraPowerBonus > 0 ? pOT->ExtraPowerBonus : 100);
+			}
 			if (pOT->Refinery || pOT->ResourceGatherer || pOT->ResourceDestination)
 				ownedRefineries++;
 
@@ -11481,6 +11534,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 
 				score = scores[0] + std::min(650, pBld->PowerBonus * 2);
+
+				// Avoid spamming new Bio-Reactors from the ConYard when existing owned Bio-Reactors still have free passenger slots
+				// that our Barracks can fill with cheap infantry or mind-controlled enemies for +100W each!
+				if (pBld->InfantryAbsorb && unfilledBioReactorSlots >= 2 && ownedBarracks >= 1 &&
+					!pHouse->HasLowPower() && !hasUnpoweredBuildings && realPowerSurplus >= 40 &&
+					(realPowerSurplus + bioReactorPotentialPower >= requiredPowerCushion) && !needsSteppingStoneCrawlToOre)
+				{
+					score -= 1100;
+				}
 
 				// Prefer Advanced Reactors (Nuclear/Bio/Tesla >= 300 PowerBonus) over
 				// basic power plants once unlocked and affordable, EXCEPT when building a cheap 2x2 BaseNormal stepping stone to reach Ore!
@@ -12230,6 +12292,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 	const bool hasCapturableTechOnMap = (neutralCapturableCount > 0);
 
+	int unfilledBioReactorSlotsForInf = 0;
+	for (auto const pOwnBld : pHouse->Buildings)
+	{
+		if (pOwnBld && !pOwnBld->InLimbo && pOwnBld->IsAlive && pOwnBld->Type && pOwnBld->Type->InfantryAbsorb &&
+			(pOwnBld->Type->PowerBonus > 0 || pOwnBld->Type->ExtraPowerBonus > 0) && !IsTunnelNetworkBuilding(pOwnBld->Type) &&
+			pOwnBld->Passengers.NumPassengers < pOwnBld->Type->Passengers)
+		{
+			unfilledBioReactorSlotsForInf += (pOwnBld->Type->Passengers - pOwnBld->Passengers.NumPassengers);
+		}
+	}
+	const bool needsCheapInfForBioReactor = (unfilledBioReactorSlotsForInf > 0 && (pHouse->HasLowPower() || (pHouse->PowerOutput - pHouse->PowerDrain) < 350));
+
 	int bestInfIdx = -1;
 
 	int bestInfScore = -32000;
@@ -12290,6 +12364,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		else
 			score += scores[16];
+
+		if (needsCheapInfForBioReactor && !pInf->Engineer && !pInf->Infiltrate && !pInf->Doggie && pInf->Cost <= 220)
+			score += 520; // Train cheap basic infantry (Initiates/Conscripts) to fill unfilled Bio-Reactor slots for +100W ExtraPowerBonus!
 
 		if (features[77] > 0 && !pInf->Engineer && !pInf->Infiltrate && (pInf->ImmuneToPsionics || (pWpn && pWpn->Range >= (6 * 256))))
 			score += 380; // Counter enemy MindControl with Snipers/Virus/Cyborgs/Dogs!
