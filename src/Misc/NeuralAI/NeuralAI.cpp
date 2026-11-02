@@ -4007,26 +4007,18 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	outScores[29] = ClampInt16(outScores[29] + 600 + std::clamp(static_cast<int>(outScores[15]) / 2, -200, 450));
 
-	// Slot 30: Multi-Outpost Expansion MCV (Expert 6 & Slot 35: Builds at most
-
-	// 1 additional Expansion MCV when NumConYards == 1 to colonize a distant Ore field)
-
-	const int mcvReserveThreshold = std::clamp(2800 + (pHouse->NumConYards * 1000) - (static_cast<int>(outScores[35]) * 2), 1800, 4400);
-
-	if (pHouse->NumConYards == 1 && pHouse->NumWarFactories > 0 && pHouse->Available_Money() > mcvReserveThreshold && (features[20] > 8 || outScores[35] > 160) &&
-
-		(features[19] < 24 || pHouse->Available_Money() > mcvReserveThreshold + 2000))
-
+	// Slot 30: Multi-Outpost Expansion MCV, Multi-ConYard Production Speed Boost & Nomadic MCV
+	// (No hard cap on NumConYards: the neural network weighs whether to build more MCVs for expansion,
+	// nomadic hopping, or MultipleFactory building speed vs being moderate based on economy & biases)
+	const int mcvReserveThreshold = std::clamp(2400 + (pHouse->NumConYards * 900) - (static_cast<int>(outScores[35]) * 2) - (static_cast<int>(outScores[81]) * 2), 1600, 6800);
+	if (pHouse->NumConYards >= 1 && pHouse->NumWarFactories > 0 && pHouse->Available_Money() > mcvReserveThreshold &&
+		(features[20] > 8 || outScores[35] > 100 || outScores[81] > 100 || outScores[30] > 180) && (features[19] < 28 || pHouse->Available_Money() > mcvReserveThreshold + 1600 || outScores[30] > 260))
 	{
-
-		outScores[30] = ClampInt16(outScores[30] + 950 + std::clamp(static_cast<int>(outScores[35]), -350, 650));
+		outScores[30] = ClampInt16(outScores[30] + 900 + std::clamp(static_cast<int>(outScores[35]) + (static_cast<int>(outScores[81]) / 2), -450, 750) - ((pHouse->NumConYards - 1) * 220));
 	}
-
 	else
-
 	{
-
-		outScores[30] = ClampInt16(outScores[30] - 1800);
+		outScores[30] = ClampInt16(outScores[30] - 1200);
 	}
 
 	// Slot 31: War Factory Harvester Boom (Dynamic Harvester-to-Refinery ratio
@@ -4199,7 +4191,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	outScores[75] = ClampInt16(outScores[75] + (features[93] * 11) + (features[21] * 10) + ((activeExpert == 4 || activeExpert == 6) ? 320 : 110));
 
-	if (features[21] > 0 && pHouse->NumConYards == 1 && pHouse->Available_Money() > 2500)
+	if (features[21] > 0 && pHouse->NumConYards >= 1 && pHouse->Available_Money() > 2500)
 
 	{
 
@@ -5333,16 +5325,34 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			if (pHouse->NumConYards == 0)
-
+			int minAnchorDist = 9999;
+			CellStruct newestYard = pHouse->BaseCenter != CellStruct::Empty ? pHouse->BaseCenter : mcvCell;
+			for (auto const pOwnBld : pHouse->Buildings)
 			{
+				if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type)
+					continue;
 
+				if (!pOwnBld->Type->ConstructionYard && !pOwnBld->Type->Refinery && !pOwnBld->Type->BaseNormal && pOwnBld->Type->Factory == AbstractType::None)
+					continue;
+
+				const CellStruct bc = pOwnBld->GetMapCoords();
+				if (pOwnBld->Type->ConstructionYard)
+					newestYard = bc;
+
+				const int d = std::max(std::abs(mcvCell.X - bc.X), std::abs(mcvCell.Y - bc.Y));
+				if (d < minAnchorDist)
+					minAnchorDist = d;
+			}
+
+			// If our single ConYard just packed up into a Nomadic MCV (scores[81] > 140) after planting structures
+			// at its previous hub (minAnchorDist <= 10), let it travel to its next destination instead of re-deploying on the same spot!
+			const bool isNomadicSingleMCVHop = (pHouse->NumConYards == 0 && scores[81] > 140 && pHouse->OwnedBuildings >= 6 && pHouse->NumWarFactories >= 1 && minAnchorDist <= 10 && !enemyNearMCV);
+
+			if (pHouse->NumConYards == 0 && !isNomadicSingleMCVHop)
+			{
 				auto const pYardType = pType->DeploysInto;
-
 				// At initial match spawn (no buildings yet and no enemy nearby), unpack
-
 				// immediately on the spot!
-
 				if (pHouse->Buildings.Count == 0 && !enemyNearMCV)
 
 				{
@@ -5586,40 +5596,28 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			int minAnchorDist = 9999;
+			const bool isMovingToDest = (pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr && pUnit->DistanceFrom(pUnit->Destination) > 768);
+			const bool wantsMultiConYardSpeed = (pHouse->NumConYards >= 1 && scores[30] > 400 && scores[35] <= 60 && scores[81] <= 90);
+			const int requiredAnchorDist = wantsMultiConYardSpeed ? 5 : 13;
 
-			CellStruct newestYard = pHouse->BaseCenter != CellStruct::Empty ? pHouse->BaseCenter : mcvCell;
-
-			for (auto const pOwnBld : pHouse->Buildings)
-
+			if (!isMovingToDest && minAnchorDist >= requiredAnchorDist && !enemyNearMCV)
 			{
-
-				if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type)
-					continue;
-
-				if (!pOwnBld->Type->ConstructionYard && !pOwnBld->Type->Refinery && !pOwnBld->Type->BaseNormal && pOwnBld->Type->Factory == AbstractType::None)
-					continue;
-
-				const CellStruct bc = pOwnBld->GetMapCoords();
-
-				if (pOwnBld->Type->ConstructionYard)
-					newestYard = bc;
-
-				const int d = std::max(std::abs(mcvCell.X - bc.X), std::abs(mcvCell.Y - bc.Y));
-
-				if (d < minAnchorDist)
-					minAnchorDist = d;
+				if (NeuralAI::IsCellClearedOfExitCorridors(pHouse, pType->DeploysInto, mcvCell))
+				{
+					if (pUnit->CurrentMission != Mission::Unload)
+						pUnit->QueueMission(Mission::Unload, true);
+				}
+				else
+				{
+					const CellStruct clearCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pType->DeploysInto);
+					if (auto const pClear = MapClass::Instance.TryGetCellAt(clearCell))
+					{
+						pUnit->SetDestination(pClear, true);
+						pUnit->QueueMission(Mission::Move, true);
+					}
+				}
 			}
-
-			if (minAnchorDist >= 13 && !enemyNearMCV)
-
-			{
-
-				if (pUnit->CurrentMission != Mission::Unload)
-					pUnit->QueueMission(Mission::Unload, true);
-			}
-
-			else if (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard)
+			else if (!isMovingToDest && (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard || pUnit->CurrentMission == Mission::Move))
 
 			{
 
@@ -5754,12 +5752,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 
 					else if (!onDifferentIsland)
-
 					{
-
 						pUnit->SetDestination(pExpansionDest, true);
-
 						pUnit->QueueMission(Mission::Move, true);
+					}
+				}
+				else if (!enemyNearMCV)
+				{
+					const CellStruct localYardCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pType->DeploysInto);
+					if (localYardCell != CellStruct::Empty)
+					{
+						if (auto const pLocalDest = MapClass::Instance.TryGetCellAt(localYardCell))
+						{
+							pUnit->SetDestination(pLocalDest, true);
+							pUnit->QueueMission(Mission::Move, true);
+						}
 					}
 				}
 			}
@@ -9472,10 +9479,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			else if (GameModeOptionsClass::Instance.MCVRedeploy && pOwnBld->Type->ConstructionYard && pOwnBld->Type->UndeploysInto != nullptr && scores[81] > 90 &&
-
 					(Unsorted::CurrentFrame % 360 < 15) &&
-
-					(pHouse->NumConYards >= 2 && pOwnBld != pHouse->ConYards.GetItem(0) || (pHouse->NumConYards == 1 && pHouse->OwnedBuildings >= 10 && scores[81] > 180)))
+					((pHouse->NumConYards >= 2 && pOwnBld != pHouse->ConYards.GetItem(0)) ||
+						(pHouse->NumConYards == 1 && pHouse->OwnedBuildings >= 6 && pHouse->NumWarFactories >= 1 && scores[81] > 140)))
 
 			{
 
@@ -11709,10 +11715,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isMCV = (pUnit->DeploysInto && pUnit->DeploysInto->ConstructionYard);
 
 		if (isMCV)
-
 		{
-
-			if (ownsUndeployedMCV || pHouse->NumConYards >= 2 || (pHouse->NumConYards == 1 && scores[30] < 500))
+			if (ownsUndeployedMCV || (pHouse->NumConYards >= 1 && scores[30] < 400))
 				continue;
 
 			if (pHouse->NumConYards == 0 && !ownsUndeployedMCV)
@@ -12286,20 +12290,39 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	const bool isRefineryOrSlaveMiner = pBuildingType->Refinery || pBuildingType->ResourceGatherer || pBuildingType->ResourceDestination;
 
 	if (pHouse->ConYards.Count > 0)
-
 	{
+		// If we own an expansion or nomadic ConYard, prioritize planting structures around the newest ConYard
+		// (especially when it has < 2 nearby structures so a Nomadic MCV can drop its outpost and hop on!)
+		const bool canBuildAtOutpostYard = isRefineryOrSlaveMiner || pBuildingType->BuildCat == BuildCat::Combat || pBuildingType->Factory == AbstractType::UnitType ||
+										pBuildingType->Factory == AbstractType::InfantryType || pBuildingType->PowerBonus > 0 || pBuildingType->BaseNormal;
+		int yardIdx = (pHouse->ConYards.Count > 1 && canBuildAtOutpostYard) ? (pHouse->ConYards.Count - 1) : 0;
+		if (pHouse->ConYards.Count > 1)
+		{
+			for (int yi = pHouse->ConYards.Count - 1; yi >= 1; --yi)
+			{
+				auto const pCY = pHouse->ConYards.GetItem(yi);
+				if (!pCY || pCY->InLimbo || !pCY->IsAlive)
+					continue;
 
-		// If we own an expansion ConYard (especially an Island Beachhead ConYard!),
+				const CellStruct cyc = pCY->GetMapCoords();
+				int nearCount = 0;
+				for (auto const pB : pHouse->Buildings)
+				{
+					if (!pB || pB == pCY || pB->InLimbo || !pB->IsAlive || !pB->Type)
+						continue;
 
-		// allow Refineries, Defenses, War Factories, and Barracks to build around
+					const CellStruct bc = pB->GetMapCoords();
+					if (std::max(std::abs(cyc.X - bc.X), std::abs(cyc.Y - bc.Y)) <= 10)
+						nearCount++;
+				}
 
-		// it!
-
-		const bool canBuildAtOutpostYard =
-
-			isRefineryOrSlaveMiner || pBuildingType->BuildCat == BuildCat::Combat || pBuildingType->Factory == AbstractType::UnitType || pBuildingType->Factory == AbstractType::InfantryType;
-
-		const int yardIdx = (pHouse->ConYards.Count > 1 && canBuildAtOutpostYard) ? (pHouse->ConYards.Count - 1) : 0;
+				if (nearCount < 2)
+				{
+					yardIdx = yi;
+					break;
+				}
+			}
+		}
 
 		center = pHouse->ConYards.GetItem(yardIdx)->GetMapCoords();
 	}
@@ -12851,14 +12874,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type)
 					continue;
 
-				if (!pOwnBld->Type->BaseNormal && !pOwnBld->Type->ConstructionYard && !pOwnBld->Type->Refinery && pOwnBld->Type->Factory == AbstractType::None &&
-
-					pOwnBld->Type->BuildCat != BuildCat::Combat)
-
-				{
-
+				if (!pOwnBld->Type->BaseNormal && !pOwnBld->Type->ConstructionYard)
 					continue;
-				}
 
 				const CellStruct bc = pOwnBld->GetMapCoords();
 
