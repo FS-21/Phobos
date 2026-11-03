@@ -241,6 +241,17 @@ DEFINE_HOOK(0x4502F4, BuildingClass_Update_Factory_Phobos, 0x6)
 			break;
 		}
 
+		if (*currFactory && *currFactory != pThis)
+		{
+			auto const pCurr = *currFactory;
+			if (!pCurr->IsAlive || pCurr->InLimbo || pCurr->Owner != pOwner
+				|| pCurr->CurrentMission == Mission::Selling || pCurr->QueuedMission == Mission::Selling
+				|| !pCurr->Factory)
+			{
+				*currFactory = nullptr;
+			}
+		}
+
 		if (!*currFactory)
 		{
 			*currFactory = pThis;
