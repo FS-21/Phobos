@@ -344,6 +344,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed a bug where units that have `MinDebris` and `MaxDebris` defined but `DebrisTypes` undefined would unconditionally spawn `MetallicDebris` once when they die.
 - Removed the 128 techno limit when executing a command.
 - Raised the 16 nodes limit for planning node mode and the 128 total unit limit for a planning order to 256.
+- Fixed a bug where Gap Generators, Darkness crates, SpySat loss, and reshroud map actions/scripts could shroud the map for an Observer.
 
 ## Fixes / interactions with other extensions
 

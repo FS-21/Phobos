@@ -3531,6 +3531,104 @@ static bool inline ShroudFix_IsCellInvalid(CellStruct* pMapCell)
 	return false;
 }
 
+// Prevent Gap Generators, Darkness crates, SpySat loss, and Reshroud map triggers/scripts from shrouding cells for an observer.
+static inline bool ShroudFix_IsLocalPlayerObserver()
+{
+	auto const pCurrent = HouseClass::CurrentPlayer;
+
+	if (!pCurrent)
+		return false;
+
+	return pCurrent->IsObserver() || pCurrent->IsInitiallyObserver() || Game::ObserverMode;
+}
+
+DEFINE_HOOK(0x6FB2E3, TechnoClass_CreateGap_ObserverSkipShroud, 0x6)
+{
+	enum { SkipEnemyGapShroud = 0x6FB3C1 };
+
+	if (ShroudFix_IsLocalPlayerObserver())
+		return SkipEnemyGapShroud;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6FB3E9, TechnoClass_CreateGap_ObserverMarkIndicator, 0x6)
+{
+	enum { MarkObserverGap = 0x6FB3F9 };
+
+	if (ShroudFix_IsLocalPlayerObserver())
+		return MarkObserverGap;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6FB5CD, TechnoClass_DeleteGap_ObserverSkipShroud, 0x6)
+{
+	enum { SkipEnemyGapUnshroud = 0x6FB69E };
+
+	if (ShroudFix_IsLocalPlayerObserver())
+		return SkipEnemyGapUnshroud;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6FB6C6, TechnoClass_DeleteGap_ObserverUnmarkIndicator, 0x6)
+{
+	enum { UnmarkObserverGap = 0x6FB6D6 };
+
+	if (ShroudFix_IsLocalPlayerObserver())
+		return UnmarkObserverGap;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x577AD0, MapClass_ResetShroud_ObserverSkip, 0x6)
+{
+	enum { SkipObserverReshroud = 0x577B9F };
+
+	if (ShroudFix_IsLocalPlayerObserver())
+		return SkipObserverReshroud;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x577BCE, MapClass_ResetShroudForTMission_ObserverSkip, 0x6)
+{
+	enum { SkipObserverReshroud = 0x577C84 };
+
+	if (ShroudFix_IsLocalPlayerObserver())
+		return SkipObserverReshroud;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x577CAE, MapClass_ResetShroudForTAction_ObserverSkip, 0x6)
+{
+	enum { SkipObserverReshroud = 0x577D88 };
+
+	if (ShroudFix_IsLocalPlayerObserver())
+		return SkipObserverReshroud;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x578043, MapClass_RevealTheMap_ObserverClearGap, 0x5)
+{
+	GET(CellStruct*, pMapCoords, ESI);
+
+	if (ShroudFix_IsLocalPlayerObserver())
+	{
+		if (auto const pCell = MapClass::Instance.TryGetCellAt(*pMapCoords))
+		{
+			pCell->ShroudCounter = 0;
+			pCell->GapsCoveringThisCell = 0;
+			pCell->Flags |= CellFlags::Revealed;
+		}
+	}
+
+	return 0;
+}
+
 DEFINE_HOOK(0x6FB5E5, TechnoClass_DeleteGap_CellCheck, 0x5)
 {
 	enum { SkipCell = 0x6FB6F3 };
