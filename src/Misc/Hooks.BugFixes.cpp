@@ -3582,6 +3582,26 @@ DEFINE_HOOK(0x6FB6C6, TechnoClass_DeleteGap_ObserverUnmarkIndicator, 0x6)
 	return 0;
 }
 
+DEFINE_HOOK(0x6FB43F, TechnoClass_CreateGap_ObserverKeepVisionary, 0x7)
+{
+	enum { KeepVisionary = 0x6FB446 };
+
+	if (ShroudFix_IsLocalPlayerObserver())
+		return KeepVisionary;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x6FB71C, TechnoClass_DeleteGap_ObserverKeepVisionary, 0x7)
+{
+	enum { KeepVisionary = 0x6FB723 };
+
+	if (ShroudFix_IsLocalPlayerObserver())
+		return KeepVisionary;
+
+	return 0;
+}
+
 DEFINE_HOOK(0x577AD0, MapClass_ResetShroud_ObserverSkip, 0x6)
 {
 	enum { SkipObserverReshroud = 0x577B9F };
