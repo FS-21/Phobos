@@ -2160,11 +2160,14 @@ void NeuralAI::OnScenarioStart()
 
 			for (int a = 0; a < NeuralAI::NumArchetypes; ++a)
 			{
-				const uint32_t eIdx = static_cast<uint32_t>((pHouse->SideIndex * 40 + a * 8) % 512);
-
-				const int memBonus = policy.Entries[eIdx].VisitCount > 0
-					? static_cast<int>(policy.Entries[eIdx].ArchetypeScoreDelta[a]) * 6
-					: 0;
+				int memBonus = 0;
+				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+				{
+					const uint32_t eIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + a * 10 + e) % 512);
+					if (policy.Entries[eIdx].VisitCount > 0)
+						memBonus += static_cast<int>(policy.Entries[eIdx].ArchetypeScoreDelta[a]) * 3;
+				}
+				memBonus = std::clamp(memBonus, -1200, 1200);
 
 				const int exploreJitter = ScenarioClass::Instance->Random.RandomRanged(-90, 90);
 				const int archBiasSlot = (a < 5) ? (48 + a) : (86 + (a - 5));
@@ -2332,7 +2335,7 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 
 			const int delta = NeuralAI::MatchEndStalemate ? (won ? -4 : -8) : (won ? (12 + fastBonus) : -6);
 
-			uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 40 + arch * 8 + exp) % 512);
+			uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + arch * 10 + exp) % 512);
 
 			if (NeuralAI::Backpack.NumEntries < 512)
 				NeuralAI::Backpack.NumEntries = std::max(NeuralAI::Backpack.NumEntries, entryIdx + 1);
@@ -3185,7 +3188,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 	features[37] = ClampInt8(pHouse->SideIndex * 32);
 
-	features[38] = ClampInt8(pExt->AIBrain_Archetype * 24);
+	features[38] = ClampInt8(pExt->AIBrain_Archetype * 16);
 
 	// 64..95: Strict Fog-of-War Filtered Enemy Intelligence
 	// We ONLY inspect enemy objects that are on unshrouded cells, or houses
@@ -3980,7 +3983,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		{
 			s += static_cast<int>(policy.OutputBias[(e < 8) ? (40 + e) : (84 + (e - 8))]);
 
-			const uint32_t eIdx = static_cast<uint32_t>((pHouse->SideIndex * 40 + curArch * 8 + e) % 512);
+			const uint32_t eIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + curArch * 10 + e) % 512);
 
 			if (policy.Entries[eIdx].VisitCount > 0)
 			{
@@ -4085,7 +4088,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 		// Recall learned strategy outcome deltas from Backpack Entries for this
 		// Faction + Archetype + Expert
-		const uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 40 + curArch * 8 + activeExpert) % 512);
+		const uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + curArch * 10 + activeExpert) % 512);
 
 		const auto& memEntry = policy.Entries[entryIdx];
 
@@ -4190,7 +4193,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 				? 1950
 				: ((pHouse->Available_Money() > 3200 && pHouse->NumWarFactories < 2) ? 850 : -100)));
 
-	outScores[4] = ClampInt16(outScores[4] + ((pHouse->NumWarFactories > 0) ? 1150 : 100));
+	outScores[4] = ClampInt16(outScores[4] + ((pHouse->NumWarFactories > 0) ? ((arch == 4) ? 1450 : 1150) : 100));
 
 	outScores[5] = ClampInt16(outScores[5] + ((features[65] > 18 || arch == 2) ? 420 : 120));
 
@@ -4200,7 +4203,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		outScores[7] + (((features[67] > 10 || features[21] > 0) && pHouse->NumShipyards == 0) ? 1550 : -200));
 
 	outScores[8] = ClampInt16(
-		outScores[8] + ((pHouse->NumWarFactories > 0 && pHouse->NumAirpads == 0) ? ((arch == 4) ? 1100 : 550) : -150));
+		outScores[8]
+		+ ((pHouse->NumWarFactories > 0 && pHouse->NumAirpads == 0)
+			? ((arch == 6 || activeExpert == 8) ? 1100 : 550)
+			: -150));
 
 	const bool needsDepotForMCVExpansion = (pHouse->NumWarFactories > 0 && pHouse->CountResourceDestinations >= 1
 		&& pHouse->UnitRepairStations.Count == 0
@@ -4211,8 +4217,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 				? (needsDepotForMCVExpansion ? 1650 : 1050)
 				: -250));
 
-	outScores[10] = ClampInt16(
-		outScores[10] + ((GameModeOptionsClass::Instance.SWAllowed && pHouse->Available_Money() > 4500) ? 850 : -600));
+	outScores[10] = ClampInt16(outScores[10]
+		+ ((GameModeOptionsClass::Instance.SWAllowed && pHouse->Available_Money() > (arch == 4 ? 3200 : 4500))
+			? (arch == 4 ? 1150 : 850)
+			: -600));
 
 	outScores[11] = ClampInt16(outScores[11] + ((pHouse->IsTiberiumShort || features[14] < 0) ? 1450 : -300));
 
@@ -4316,8 +4324,8 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		outScores[22] = -3000; // Immune Bridges ON: never waste ammo shooting bridges
 	}
 
-	outScores[24] = ClampInt16(
-		outScores[24] + 800 + (arch == 3 ? 300 : 0) - std::clamp(static_cast<int>(outScores[39]) / 2, -450, 350));
+	outScores[24] = ClampInt16(outScores[24] + 800 + ((arch == 3 || arch == 4) ? 320 : 0)
+		- std::clamp(static_cast<int>(outScores[39]) / 2, -450, 350));
 
 	outScores[25] = ClampInt16(outScores[25] + ((features[64] > 20) ? 700 : 300));
 
@@ -4400,9 +4408,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		outScores[27] = ClampInt16(outScores[27] + 400);
 	}
 
-	outScores[32] = ClampInt16(outScores[32] + ((arch == 4) ? 850 : 400));
+	outScores[32] = ClampInt16(outScores[32] + ((arch == 6 || activeExpert == 8) ? 750 : 400));
 
-	outScores[33] = ClampInt16(outScores[33] + ((arch == 4) ? 900 : 450));
+	outScores[33] = ClampInt16(outScores[33] + ((arch == 6 || activeExpert == 8) ? 800 : 450));
 
 	// New Real Tactical & Economic Hands (Slots 56..60):
 	// Slot 56: Eco-Raid / Enemy Harvester Hunting & Own Harvester Defense
@@ -6759,13 +6767,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pUnitReloadBld && (pEBld->Type->UnitReload || pEBld->Type->UnitRepair || pEBld->Type->Helipad))
 				pUnitReloadBld = pEBld;
 
-			// Expert 9: If an occupied urban building is about to collapse (< 22% HP)
-			// under enemy fire, evacuate our garrisoned infantry so they survive!
-			if (pEBld->Type->CanBeOccupied && pEBld->Occupants.Count > 0 && pEBld->HasBeenAttacked
-				&& pEBld->GetHealthPercentage() < 0.22)
-			{
-				pEBld->KickOutUnit(nullptr, CellStruct::Empty);
-			}
+		}
+
+		// Expert 9: If an occupied urban building or bunker is about to collapse (< 22% HP)
+		// under enemy fire, evacuate our garrisoned infantry so they survive!
+		if (pEBld->Type->CanBeOccupied && pEBld->Occupants.Count > 0 && pEBld->HasBeenAttacked
+			&& pEBld->GetHealthPercentage() < 0.22 && pEBld->Occupants.GetItem(0)
+			&& pEBld->Occupants.GetItem(0)->Owner == pHouse)
+		{
+			pEBld->KickOutUnit(nullptr, CellStruct::Empty);
 		}
 
 		if (pEBld->Type->CanBeOccupied && pEBld->Type->Repairable && pEBld->GetHealthPercentage() < 0.72)
@@ -10596,7 +10606,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				if (auto const pHomeCell = MapClass::Instance.TryGetCellAt(homeCoords))
 				{
-					if (pInf->DistanceFrom(pHomeCell) > 2048)
+					if (pInf->DistanceFrom(pHomeCell) > 6144)
 					{
 						DispatchFootToTargetOrTransport(pInf, pHomeCell, Mission::Area_Guard, false);
 					}
@@ -10729,7 +10739,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				const int maxOcc = std::clamp(pBld->Type->MaxNumberOccupants, 1, 10);
 
-				if (!pBld->CanBeOccupiedBy(pInf) || pBld->Occupants.Count >= maxOcc)
+				if (!pBld->CanBeOccupiedBy(pInf) || pBld->Occupants.Count >= maxOcc || pBld->GetHealthPercentage() < 0.30)
 					continue;
 
 				const int bz
@@ -10982,7 +10992,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const int maxOcc = std::clamp(pBld->Type->MaxNumberOccupants, 1, 10);
 
 				if (pBld->CanBeOccupiedBy(pInf) && pBld->Occupants.Count < maxOcc
-					&& pInf->DistanceFrom(pBld) <= garrisonRange)
+					&& pBld->GetHealthPercentage() >= 0.30 && pInf->DistanceFrom(pBld) <= garrisonRange)
 				{
 					DispatchFootToTargetOrTransport(pInf, pBld, Mission::Enter, false);
 
@@ -16263,8 +16273,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			};
 
 			auto dispatchWallDemolition = [&](AbstractClass* pTarget, const CellStruct& wc, bool wallCrushable,
-											Armor wallArmor) -> bool
+											Armor wallArmor, FootClass* pBlockedFoot) -> bool
 			{
+				if (pBlockedFoot && canFootDemolishWall(pBlockedFoot, wallCrushable, wallArmor))
+				{
+					if (pBlockedFoot->Target != pTarget)
+					{
+						pBlockedFoot->SetTarget(pTarget);
+						pBlockedFoot->QueueMission(Mission::Attack, true);
+					}
+
+					return true;
+				}
+
 				FootClass* pBestDemo = nullptr;
 				int bestDistSq = 14 * 14 + 1;
 
@@ -16273,8 +16294,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (!pOwnU || pOwnU->Owner != pHouse || !canFootDemolishWall(pOwnU, wallCrushable, wallArmor))
 						continue;
 
-					if (pOwnU->Target != nullptr && pOwnU->Target != pTarget)
+					if (pOwnU->Target == pTarget)
+						return true;
+
+					if (pOwnU->Target != nullptr || pOwnU->Destination != nullptr
+						|| (pOwnU->CurrentMission != Mission::Guard && pOwnU->CurrentMission != Mission::Area_Guard))
+					{
 						continue;
+					}
 
 					const CellStruct uc = pOwnU->GetMapCoords();
 					const int dx = static_cast<int>(uc.X) - static_cast<int>(wc.X);
@@ -16292,8 +16319,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (!pOwnI || pOwnI->Owner != pHouse || !canFootDemolishWall(pOwnI, false, wallArmor))
 						continue;
 
-					if (pOwnI->Target != nullptr && pOwnI->Target != pTarget)
+					if (pOwnI->Target == pTarget)
+						return true;
+
+					if (pOwnI->Target != nullptr || pOwnI->Destination != nullptr
+						|| (pOwnI->CurrentMission != Mission::Guard && pOwnI->CurrentMission != Mission::Area_Guard))
+					{
 						continue;
+					}
 
 					const CellStruct ic = pOwnI->GetMapCoords();
 					const int dx = static_cast<int>(ic.X) - static_cast<int>(wc.X);
@@ -16317,7 +16350,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				return false;
 			};
 
-			auto tryUnblockWallAtCell = [&](const CellStruct& wc) -> bool
+			auto tryUnblockWallAtCell = [&](const CellStruct& wc, FootClass* pBlockedFoot) -> bool
 			{
 				auto const pWCell = MapClass::Instance.TryGetCellAt(wc);
 				if (!pWCell)
@@ -16342,7 +16375,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 								&& pHouse->IsAlliedWith(HouseClass::Array.GetItem(pWCell->WallOwnerIndex)));
 							if (!isAlliedWall && !pOv->Immune)
 							{
-								if (dispatchWallDemolition(pWCell, wc, pOv->Crushable, pOv->Armor))
+								if (dispatchWallDemolition(pWCell, wc, pOv->Crushable, pOv->Armor, pBlockedFoot))
 									return true;
 							}
 						}
@@ -16365,7 +16398,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						if (pWBld->Owner != pHouse && (!pWBld->Owner || !pHouse->IsAlliedWith(pWBld->Owner))
 							&& !pWBld->Type->Immune)
 						{
-							if (dispatchWallDemolition(pWBld, wc, false, pWBld->Type->Armor))
+							if (dispatchWallDemolition(pWBld, wc, false, pWBld->Type->Armor, pBlockedFoot))
 								return true;
 						}
 					}
@@ -16396,54 +16429,66 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						if (dx >= 0 && dx < bw && dy >= 0 && dy < bh)
 							continue;
 
-						if (tryUnblockWallAtCell(CellStruct { static_cast<short>(bc.X + dx), static_cast<short>(bc.Y + dy) }))
+						if (tryUnblockWallAtCell(
+								CellStruct { static_cast<short>(bc.X + dx), static_cast<short>(bc.Y + dy) }, nullptr))
+						{
 							unblockedOneWall = true;
+						}
 					}
 				}
 			}
 
 			for (auto const pOwnU : UnitClass::Array)
 			{
-				if (unblockedOneWall || !pOwnU || pOwnU->Owner != pHouse || pOwnU->InLimbo || !pOwnU->IsAlive)
+				if (unblockedOneWall || !pOwnU || pOwnU->Owner != pHouse || pOwnU->InLimbo || !pOwnU->IsAlive
+					|| !pOwnU->Destination)
+				{
 					continue;
+				}
 
-				if (pOwnU->Destination == nullptr && pOwnU->CurrentMission != Mission::Move
-					&& pOwnU->CurrentMission != Mission::Harvest && pOwnU->CurrentMission != Mission::AttackMove
-					&& pOwnU->CurrentMission != Mission::Enter)
+				if (pOwnU->CurrentMission != Mission::Move && pOwnU->CurrentMission != Mission::Harvest
+					&& pOwnU->CurrentMission != Mission::AttackMove && pOwnU->CurrentMission != Mission::Enter)
 				{
 					continue;
 				}
 
 				const CellStruct uc = pOwnU->GetMapCoords();
-				for (int dy = -1; dy <= 1 && !unblockedOneWall; ++dy)
+				const CoordStruct destC = pOwnU->Destination->GetCoords();
+				const CellStruct dc = CellClass::Coord2Cell(destC);
+				const int stepX = std::clamp(static_cast<int>(dc.X) - static_cast<int>(uc.X), -1, 1);
+				const int stepY = std::clamp(static_cast<int>(dc.Y) - static_cast<int>(uc.Y), -1, 1);
+				if (stepX != 0 || stepY != 0)
 				{
-					for (int dx = -1; dx <= 1 && !unblockedOneWall; ++dx)
-					{
-						if (tryUnblockWallAtCell(CellStruct { static_cast<short>(uc.X + dx), static_cast<short>(uc.Y + dy) }))
-							unblockedOneWall = true;
-					}
+					const CellStruct aheadCell { static_cast<short>(uc.X + stepX), static_cast<short>(uc.Y + stepY) };
+					if (tryUnblockWallAtCell(aheadCell, pOwnU))
+						unblockedOneWall = true;
 				}
 			}
 
 			for (auto const pOwnI : InfantryClass::Array)
 			{
-				if (unblockedOneWall || !pOwnI || pOwnI->Owner != pHouse || pOwnI->InLimbo || !pOwnI->IsAlive)
+				if (unblockedOneWall || !pOwnI || pOwnI->Owner != pHouse || pOwnI->InLimbo || !pOwnI->IsAlive
+					|| !pOwnI->Destination)
+				{
 					continue;
+				}
 
-				if (pOwnI->Destination == nullptr && pOwnI->CurrentMission != Mission::Move
-					&& pOwnI->CurrentMission != Mission::AttackMove && pOwnI->CurrentMission != Mission::Enter)
+				if (pOwnI->CurrentMission != Mission::Move && pOwnI->CurrentMission != Mission::AttackMove
+					&& pOwnI->CurrentMission != Mission::Enter)
 				{
 					continue;
 				}
 
 				const CellStruct ic = pOwnI->GetMapCoords();
-				for (int dy = -1; dy <= 1 && !unblockedOneWall; ++dy)
+				const CoordStruct destC = pOwnI->Destination->GetCoords();
+				const CellStruct dc = CellClass::Coord2Cell(destC);
+				const int stepX = std::clamp(static_cast<int>(dc.X) - static_cast<int>(ic.X), -1, 1);
+				const int stepY = std::clamp(static_cast<int>(dc.Y) - static_cast<int>(ic.Y), -1, 1);
+				if (stepX != 0 || stepY != 0)
 				{
-					for (int dx = -1; dx <= 1 && !unblockedOneWall; ++dx)
-					{
-						if (tryUnblockWallAtCell(CellStruct { static_cast<short>(ic.X + dx), static_cast<short>(ic.Y + dy) }))
-							unblockedOneWall = true;
-					}
+					const CellStruct aheadCell { static_cast<short>(ic.X + stepX), static_cast<short>(ic.Y + stepY) };
+					if (tryUnblockWallAtCell(aheadCell, pOwnI))
+						unblockedOneWall = true;
 				}
 			}
 		}
@@ -19679,6 +19724,41 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	}
 
 	const int maxCandidatesToEvaluate = isNavalBld ? 2400 : 900;
+	std::vector<int> strategicWaterZones;
+	if (isNavalBld)
+	{
+		for (auto const pEB : BuildingClass::Array)
+		{
+			if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || !pEB->Type->Naval
+				|| pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral())
+			{
+				continue;
+			}
+
+			const int ewz = MapClass::Instance.GetMovementZoneType(pEB->GetMapCoords(), MovementZone::Water, false);
+			if (ewz >= 0
+				&& std::find(strategicWaterZones.begin(), strategicWaterZones.end(), ewz) == strategicWaterZones.end())
+			{
+				strategicWaterZones.push_back(ewz);
+			}
+		}
+
+		for (auto const pEU : UnitClass::Array)
+		{
+			if (!pEU || pEU->InLimbo || !pEU->IsAlive || !pEU->Owner || !pEU->Type || !pEU->Type->Naval
+				|| pEU->Owner == pHouse || pHouse->IsAlliedWith(pEU->Owner) || pEU->Owner->IsNeutral())
+			{
+				continue;
+			}
+
+			const int uwz = MapClass::Instance.GetMovementZoneType(pEU->GetMapCoords(), MovementZone::Water, false);
+			if (uwz >= 0
+				&& std::find(strategicWaterZones.begin(), strategicWaterZones.end(), uwz) == strategicWaterZones.end())
+			{
+				strategicWaterZones.push_back(uwz);
+			}
+		}
+	}
 	// Two-pass evaluation: Pass 0 strictly requires the 1-cell street margin
 	// (IsCellClearedOfExitCorridors); Pass 1 only runs if Pass 0 found 0 valid
 	// cells (e.g. tight cliff/island corner), allowing 0-cell touching with a
@@ -19977,65 +20057,20 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					// Expert 4 (Naval) -> Expert 1 (BaseBuild) Strategic Water-Body Signaling:
 					// Prefer placing Naval Yards in water bodies (MovementZone::Water) that contain
 					// enemy Naval Yards / warships or border enemy/resource islands, and penalize isolated inland ponds!
-					const int candWaterZone
-						= MapClass::Instance.GetMovementZoneType(candidate, MovementZone::Water, false);
-					if (candWaterZone >= 0)
+					if (!strategicWaterZones.empty())
 					{
-						bool isStrategicSea = false;
-						bool anyStrategicSeaExists = false;
-						for (auto const pEB : BuildingClass::Array)
+						const int candWaterZone
+							= MapClass::Instance.GetMovementZoneType(candidate, MovementZone::Water, false);
+						if (candWaterZone >= 0)
 						{
-							if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type
-								|| pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral())
-							{
-								continue;
-							}
-
-							if (pEB->Type->Naval)
-							{
-								const int ewz = MapClass::Instance.GetMovementZoneType(
-									pEB->GetMapCoords(), MovementZone::Water, false);
-								if (ewz >= 0)
-								{
-									anyStrategicSeaExists = true;
-									if (ewz == candWaterZone)
-									{
-										isStrategicSea = true;
-										break;
-									}
-								}
-							}
+							const bool isStrategicSea
+								= std::find(strategicWaterZones.begin(), strategicWaterZones.end(), candWaterZone)
+								!= strategicWaterZones.end();
+							if (isStrategicSea)
+								spatialScore += 3500;
+							else
+								spatialScore -= 6000;
 						}
-
-						if (!isStrategicSea)
-						{
-							for (auto const pEU : UnitClass::Array)
-							{
-								if (!pEU || pEU->InLimbo || !pEU->IsAlive || !pEU->Owner || !pEU->Type
-									|| !pEU->Type->Naval || pEU->Owner == pHouse || pHouse->IsAlliedWith(pEU->Owner)
-									|| pEU->Owner->IsNeutral())
-								{
-									continue;
-								}
-
-								const int uwz = MapClass::Instance.GetMovementZoneType(
-									pEU->GetMapCoords(), MovementZone::Water, false);
-								if (uwz >= 0)
-								{
-									anyStrategicSeaExists = true;
-									if (uwz == candWaterZone)
-									{
-										isStrategicSea = true;
-										break;
-									}
-								}
-							}
-						}
-
-						if (isStrategicSea)
-							spatialScore += 3500;
-						else if (anyStrategicSeaExists)
-							spatialScore -= 6000;
 					}
 				}
 
