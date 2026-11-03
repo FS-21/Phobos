@@ -6,6 +6,8 @@
 
 #include <HouseClass.h>
 
+#include <MapClass.h>
+
 #include <ScenarioClass.h>
 
 #include <SessionClass.h>
@@ -187,7 +189,9 @@ DEFINE_HOOK(0x6BBE56, WinMain_SkipSingleInstanceMutex_NeuralAI, 0x5)
 
 	enum { ContinueWinMain = 0x6BBFAD };
 
-	if (NeuralAI::HeadlessMode)
+	const char* const cmdLine = GetCommandLineA();
+
+	if (NeuralAI::HeadlessMode || (cmdLine && (std::strstr(cmdLine, "-SPAWN") != nullptr || std::strstr(cmdLine, "-spawn") != nullptr)))
 
 	{
 
@@ -402,6 +406,22 @@ DEFINE_HOOK(0x4FD77C, HouseClass_ExpertAI_NeuralAI, 0x5)
 
 	{
 
+		if (!NeuralAI::HeadlessMode)
+		{
+			if (auto const pCur = HouseClass::CurrentPlayer)
+			{
+				if (HouseClass::IsCurrentPlayerObserver() || Game::ObserverMode || pCur->IsInitiallyObserver() || (pCur->Type && !_stricmp(pCur->Type->ID, "Observer")))
+				{
+					pCur->MakeObserver();
+					if (!pCur->Visionary)
+					{
+						pCur->Visionary = 1;
+						MapClass::Instance.Reveal(pCur);
+					}
+				}
+			}
+		}
+
 		const int delay = NeuralAI::UpdateExpertAI(pHouse);
 
 		R->EAX(delay - 0x69);
@@ -587,5 +607,82 @@ DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_TrackThreat_NeuralAI, 0x8)
 	if (pThis && pThis->Owner && pFromHouse && state != DamageState::Unaffected && !pThis->IsStrange() && !pThis->Owner->IsAlliedWith(pFromHouse))
 		NeuralAI::OnBuildingDamaged(pThis, pAttacker, pFromHouse);
 
+	return 0;
+}
+
+
+namespace
+{
+	inline bool IsLocalObserverPlayer()
+	{
+		if (HouseClass::IsCurrentPlayerObserver() || Game::ObserverMode)
+			return true;
+		if (auto const pCur = HouseClass::CurrentPlayer)
+		{
+			if (pCur->IsInitiallyObserver() || (pCur->Type && !_stricmp(pCur->Type->ID, "Observer")))
+				return true;
+		}
+		return false;
+	}
+}
+
+// Observer MapVisibility & Gap Generator Immunity:
+// MapVisibility options (such as "Eternal darkness" / CoverMapTrigger Action 51 ReshroudMap and 127-cell GapGenerator buildings)
+// must only affect actual players, never Spectators/Observers.
+DEFINE_HOOK(0x50BD10, HouseClass_ReshroudMap_ObserverImmunity, 0x6)
+{
+	enum { SkipReshroudMap = 0x50BD25 };
+	if (IsLocalObserverPlayer())
+	{
+		if (auto const pCur = HouseClass::CurrentPlayer)
+			pCur->Visionary = 1;
+		return SkipReshroudMap;
+	}
+	return 0;
+}
+
+DEFINE_HOOK(0x577AB0, MapClass_Reshroud_ObserverImmunity, 0x6)
+{
+	enum { SkipMapReshroud = 0x577BA1 };
+	if (IsLocalObserverPlayer())
+	{
+		if (auto const pCur = HouseClass::CurrentPlayer)
+			pCur->Visionary = 1;
+		return SkipMapReshroud;
+	}
+	return 0;
+}
+
+DEFINE_HOOK(0x6FB170, TechnoClass_CreateGap_ObserverImmunity, 0x6)
+{
+	enum { SkipCreateGap = 0x6FB460 };
+	if (IsLocalObserverPlayer())
+	{
+		if (auto const pCur = HouseClass::CurrentPlayer)
+			pCur->Visionary = 1;
+		return SkipCreateGap;
+	}
+	return 0;
+}
+
+DEFINE_HOOK(0x6E0F90, TActionClass_GrowShroud_ObserverImmunity, 0x5)
+{
+	enum { SkipGrowShroud = 0x6E0F9A };
+	if (IsLocalObserverPlayer())
+	{
+		if (auto const pCur = HouseClass::CurrentPlayer)
+			pCur->Visionary = 1;
+		return SkipGrowShroud;
+	}
+	return 0;
+}
+
+DEFINE_HOOK(0x6E1A70, TActionClass_ReshroudMapAroundWP_ObserverImmunity, 0x5)
+{
+	if (IsLocalObserverPlayer())
+	{
+		if (auto const pCur = HouseClass::CurrentPlayer)
+			pCur->Visionary = 1;
+	}
 	return 0;
 }
