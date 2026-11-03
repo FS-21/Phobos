@@ -31,7 +31,8 @@ struct AIBaseHeader
 	uint32_t ExpertWeightsOffset[8];
 	int8_t SigmoidLUT[256];
 	int8_t TanhLUT[256];
-	uint8_t ReservedHeader[384];
+	uint32_t ExtraExpertWeightsOffset[2];
+	uint8_t ReservedHeader[376];
 };
 
 struct AIBackpackEntry
@@ -105,8 +106,8 @@ class NeuralAI
 public:
 	static constexpr int InputVectorSize = 256;
 	static constexpr int OutputVectorSize = 128;
-	static constexpr int NumSpecialists = 8;
-	static constexpr int NumArchetypes = 5;
+	static constexpr int NumSpecialists = 10;
+	static constexpr int NumArchetypes = 8;
 
 	static bool HeadlessMode;
 	static int TrainSlotIndex;
