@@ -357,13 +357,15 @@ DEFINE_HOOK(0x4FD77C, HouseClass_ExpertAI_NeuralAI, 0x5)
 					static int lastObserverRevealUniqueID = -1;
 					const int curUniqueID = ScenarioClass::Instance ? ScenarioClass::Instance->UniqueID : 0;
 					pCur->MakeObserver();
-					if (!pCur->Visionary || lastObserverRevealUniqueID != curUniqueID)
+					if (lastObserverRevealUniqueID != curUniqueID)
 					{
 						lastObserverRevealUniqueID = curUniqueID;
-						// MapClass::Reveal (0x577D90) checks `if (CurrentPlayer->Visionary) return;` at 0x577E09
-						// and sets Visionary = 1 itself at 0x577E29 after clearing ShroudCounter & GapsCoveringThisCell!
+						// MapClass::Reveal (0x577D90) checks `if (CurrentPlayer->Visionary) return;` at 0x577E09,
+						// reveals all map cells, and then calls CreateAllGaps (0x4ADCD0) which clears Visionary = 0
+						// at 0x6FB43F. Only run Reveal once per scenario and restore Visionary = 1 afterwards!
 						pCur->Visionary = 0;
 						MapClass::Instance.Reveal(pCur);
+						pCur->Visionary = 1;
 					}
 				}
 			}
