@@ -3677,62 +3677,30 @@ static inline bool ShroudFix_IsLocalPlayerObserver()
 	return pCurrent->IsObserver() || pCurrent->IsInitiallyObserver() || Game::ObserverMode;
 }
 
-DEFINE_HOOK(0x6FB2E3, TechnoClass_CreateGap_ObserverSkipShroud, 0x6)
+DEFINE_HOOK(0x6FB183, TechnoClass_CreateGap_ObserverSkip, 0x6)
 {
-	enum { SkipEnemyGapShroud = 0x6FB3C1 };
+	enum { SkipCreateGap = 0x6FB45C };
 
 	if (ShroudFix_IsLocalPlayerObserver())
-		return SkipEnemyGapShroud;
+	{
+		GET(TechnoClass* const, pThis, ESI);
+		pThis->GeneratingGap = true;
+		return SkipCreateGap;
+	}
 
 	return 0;
 }
 
-DEFINE_HOOK(0x6FB3E9, TechnoClass_CreateGap_ObserverMarkIndicator, 0x6)
+DEFINE_HOOK(0x6FB483, TechnoClass_DeleteGap_ObserverSkip, 0x6)
 {
-	enum { MarkObserverGap = 0x6FB3F9 };
+	enum { SkipDeleteGap = 0x6FB739 };
 
 	if (ShroudFix_IsLocalPlayerObserver())
-		return MarkObserverGap;
-
-	return 0;
-}
-
-DEFINE_HOOK(0x6FB5CD, TechnoClass_DeleteGap_ObserverSkipShroud, 0x6)
-{
-	enum { SkipEnemyGapUnshroud = 0x6FB69E };
-
-	if (ShroudFix_IsLocalPlayerObserver())
-		return SkipEnemyGapUnshroud;
-
-	return 0;
-}
-
-DEFINE_HOOK(0x6FB6C6, TechnoClass_DeleteGap_ObserverUnmarkIndicator, 0x6)
-{
-	enum { UnmarkObserverGap = 0x6FB6D6 };
-
-	if (ShroudFix_IsLocalPlayerObserver())
-		return UnmarkObserverGap;
-
-	return 0;
-}
-
-DEFINE_HOOK(0x6FB43F, TechnoClass_CreateGap_ObserverKeepVisionary, 0x7)
-{
-	enum { KeepVisionary = 0x6FB446 };
-
-	if (ShroudFix_IsLocalPlayerObserver())
-		return KeepVisionary;
-
-	return 0;
-}
-
-DEFINE_HOOK(0x6FB71C, TechnoClass_DeleteGap_ObserverKeepVisionary, 0x7)
-{
-	enum { KeepVisionary = 0x6FB723 };
-
-	if (ShroudFix_IsLocalPlayerObserver())
-		return KeepVisionary;
+	{
+		GET(TechnoClass* const, pThis, ESI);
+		pThis->GeneratingGap = false;
+		return SkipDeleteGap;
+	}
 
 	return 0;
 }
