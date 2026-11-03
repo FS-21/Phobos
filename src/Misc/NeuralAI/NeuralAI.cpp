@@ -830,6 +830,10 @@ namespace
 
 		int LastClearanceFailedFrame{-1000};
 		int ConsecutivePlacementFailures{0};
+		bool IsBuildingRecoveryRefinery{false};
+		int NextHarvesterRecoveryFrame{0};
+		int TargetRecoveryRefineryZone{-1};
+		std::map<unsigned int, int> TemporaryRecoveryRefineryPlacedFrame{};
 		std::map<int, int> BuildingPlacementCooldownUntilFrame{};
 
 		std::vector<NeuralAttackedBuildingRecord> AttackedBuildingsLIFO{};
@@ -861,6 +865,10 @@ namespace
 
 			this->LastClearanceFailedFrame = -1000;
 			this->ConsecutivePlacementFailures = 0;
+			this->IsBuildingRecoveryRefinery = false;
+			this->NextHarvesterRecoveryFrame = 0;
+			this->TargetRecoveryRefineryZone = -1;
+			this->TemporaryRecoveryRefineryPlacedFrame.clear();
 			this->BuildingPlacementCooldownUntilFrame.clear();
 			this->AttackedBuildingsLIFO.clear();
 		}
@@ -13580,18 +13588,50 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const int houseStagger = (std::max(0, pHouse->ArrayIndex) % 8) * 31;
 
-		// Periodic Obsolete Refinery Recycling & Emergency Cash Recovery (from
-
-		// AdvAI)
-
-		if (Unsorted::CurrentFrame > pExt->LastObsoleteRefineryCheckFrame + 450 + houseStagger)
-
+		// Sell any temporary Harvester Recovery Refinery once its buildup finishes and its FreeUnit Harvester has spawned (from AdvAI)
+		if ((Unsorted::CurrentFrame + houseStagger) % 15 == 0 && !GetMacroState(pHouse).TemporaryRecoveryRefineryPlacedFrame.empty())
 		{
+			auto& tempMap = GetMacroState(pHouse).TemporaryRecoveryRefineryPlacedFrame;
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo)
+					continue;
+				auto const it = tempMap.find(pBld->UniqueID);
+				if (it == tempMap.end())
+					continue;
+				if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
+				{
+					tempMap.erase(it);
+					break;
+				}
+				if (pBld->CurrentMission != Mission::Construction && pBld->QueuedMission != Mission::Construction &&
+					pBld->BState != static_cast<int>(BStateType::Construction) && Unsorted::CurrentFrame >= it->second + 75)
+				{
+					for (auto const pUnit : UnitClass::Array)
+					{
+						if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Type &&
+							(pUnit->Type->Harvester || pUnit->Type->ResourceGatherer))
+						{
+							if (pUnit->GetMapCoords().DistanceFrom(pBld->GetMapCoords()) <= 8.0 && pUnit->CurrentMission != Mission::Harvest)
+								pUnit->QueueMission(Mission::Harvest, false);
+						}
+					}
+					tempMap.erase(it);
+					GetMacroState(pHouse).NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 750;
+					Debug::Log("[NeuralAI] HarvesterRecovery: House %d selling temporary recovery refinery %s at (%d,%d) after spawning FreeUnit harvester.\n",
+						pHouse->ArrayIndex, pBld->Type->ID, pBld->GetMapCoords().X, pBld->GetMapCoords().Y);
+					pBld->Sell(1);
+					break;
+				}
+			}
+		}
 
+		// Periodic Obsolete Refinery Recycling & Emergency Cash Recovery (from
+		// AdvAI)
+		if (Unsorted::CurrentFrame > pExt->LastObsoleteRefineryCheckFrame + 450 + houseStagger)
+		{
 			pExt->LastObsoleteRefineryCheckFrame = Unsorted::CurrentFrame;
-
 			RecycleObsoleteRefineries(pHouse);
-
 			RaiseEmergencyMoneyForRefinery(pHouse, ownedRefineries, ownedHarvestersCount, money);
 		}
 
@@ -13962,6 +14002,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 		int ownedCashBuildings = 0;
 		int ownedSlaveMinerBuildings = 0;
+		int staticRefineriesCount = 0;
+		int orphanRefineryZoneNeedsReplacement = -1;
 		for (auto const pOwnB : pHouse->Buildings)
 		{
 			if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type)
@@ -13970,7 +14012,59 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				ownedCashBuildings++;
 			if (pOwnB->Type->ResourceGatherer)
 				ownedSlaveMinerBuildings++;
+			else if ((pOwnB->Type->Refinery || pOwnB->Type->ResourceDestination) && pOwnB->Type->Enslaves == nullptr && pOwnB->Type->UndeploysInto == nullptr &&
+				pOwnB->CurrentMission != Mission::Selling && pOwnB->QueuedMission != Mission::Selling)
+			{
+				staticRefineriesCount++;
+				const CellStruct rCoords = pOwnB->GetMapCoords();
+				const int rz = MapClass::Instance.GetMovementZoneType(rCoords, MovementZone::Normal, false);
+				if (rz >= 0 && orphanRefineryZoneNeedsReplacement < 0)
+				{
+					int harvsInRz = 0;
+					for (auto const pHU : UnitClass::Array)
+					{
+						if (pHU && pHU->Owner == pHouse && !pHU->InLimbo && pHU->IsAlive && pHU->Type &&
+							(pHU->Type->Harvester || pHU->Type->ResourceGatherer) &&
+							MapClass::Instance.GetMovementZoneType(pHU->GetMapCoords(), MovementZone::Normal, false) == rz)
+						{
+							harvsInRz++;
+						}
+					}
+					if (harvsInRz == 0)
+					{
+						const int rW = pOwnB->Type->GetFoundationWidth();
+						const int rH = pOwnB->Type->GetFoundationHeight(false);
+						const int adj = std::max(1, pOwnB->Type->Adjacent);
+						bool hasAnchorInRz = false;
+						for (auto const pAnc : pHouse->Buildings)
+						{
+							if (!pAnc || pAnc == pOwnB || pAnc->InLimbo || !pAnc->IsAlive || !pAnc->Type)
+								continue;
+							if (!pAnc->Type->BaseNormal && !pAnc->Type->ConstructionYard && !BuildingTypeExt::IsAIBaseNormal(pAnc->Type))
+								continue;
+							const CellStruct ac = pAnc->GetMapCoords();
+							const int aW = pAnc->Type->GetFoundationWidth();
+							const int aH = pAnc->Type->GetFoundationHeight(false);
+							const int gapX = std::max(0, std::max(static_cast<int>(rCoords.X) - (static_cast<int>(ac.X) + aW - 1), static_cast<int>(ac.X) - (static_cast<int>(rCoords.X) + rW - 1)));
+							const int gapY = std::max(0, std::max(static_cast<int>(rCoords.Y) - (static_cast<int>(ac.Y) + aH - 1), static_cast<int>(ac.Y) - (static_cast<int>(rCoords.Y) + rH - 1)));
+							if (std::max(gapX, gapY) <= adj)
+							{
+								hasAnchorInRz = true;
+								break;
+							}
+						}
+						if (hasAnchorInRz && !IsRefineryExhausted(pOwnB, CellStruct::Empty))
+							orphanRefineryZoneNeedsReplacement = rz;
+					}
+				}
+			}
 		}
+		const bool wantsHarvesterRecoveryViaRefinery = (pHouse->ConYards.Count >= 1 && staticRefineriesCount >= 1 &&
+			Unsorted::CurrentFrame >= GetMacroState(pHouse).NextHarvesterRecoveryFrame &&
+			GetMacroState(pHouse).TemporaryRecoveryRefineryPlacedFrame.empty() &&
+			(orphanRefineryZoneNeedsReplacement >= 0 ||
+			 (ownedHarvestersCount < staticRefineriesCount * 2 && (ownedHarvestersCount == 0 || ownedWarFactories >= 1) &&
+			  features[19] > 0 && (money >= 900 || ownedHarvestersCount == 0))));
 		const bool hasActiveBuildingIncome = (ownedCashBuildings >= 1) ||
 			(((ownedRefineries >= 1 && ownedHarvestersCount >= 1) || ownedSlaveMinerBuildings >= 1) && (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
 
@@ -14063,13 +14157,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			else if (isRefineryOrSlaveMiner)
-
 			{
-
+				const bool spawnsFreeHarvester = !pBld->ResourceGatherer && pBld->Enslaves == nullptr && pBld->UndeploysInto == nullptr &&
+					pBld->FreeUnit != nullptr && (pBld->FreeUnit->Harvester || pBld->FreeUnit->ResourceGatherer);
+				const bool isHarvRecoveryCandidate = spawnsFreeHarvester && wantsHarvesterRecoveryViaRefinery;
 				const int maxRefineries = (reachedNewOreField || pHouse->NumConYards >= 2 || features[21] > 0 || (hasTechCenter && money < 3000))
 					? std::max(6, pHouse->NumConYards + 4) : 4;
 
-				if (owned >= maxRefineries)
+				if (owned >= maxRefineries && !isHarvRecoveryCandidate)
 					continue;
 
 				score = scores[1] - owned * 480;
@@ -14078,6 +14173,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += 1200;
 				else if (reachedNewOreField)
 					score += 1950; // AdvAI ShouldBuildRefinery: our BaseNormal chain or Expansion MCV reached a new Ore field! Claim it immediately!
+				else if (isHarvRecoveryCandidate && (orphanRefineryZoneNeedsReplacement >= 0 || ownedHarvestersCount < staticRefineriesCount))
+					score = std::max(score, static_cast<int>(scores[1])) + 2150; // AdvAI Harvester Recovery via Refinery Sell-and-Replace (spawns FreeUnit Harvester without tying up War Factory!)
+				else if (isHarvRecoveryCandidate)
+					score = std::max(score, static_cast<int>(scores[1])) + 1150; // Replenish up to 2 Harvesters per Refinery via ConYard while War Factory builds tanks!
 				else if (owned == 1 && ownedWarFactories >= 1)
 					score += 450;
 			}
@@ -14438,6 +14537,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		if (bestBldIdx >= 0)
+		{
+			auto const pChosenBld = BuildingTypeClass::Array.GetItem(bestBldIdx);
+			const bool chosenIsStaticRefWithHarv = pChosenBld && (pChosenBld->Refinery || pChosenBld->ResourceDestination) &&
+				!pChosenBld->ResourceGatherer && pChosenBld->Enslaves == nullptr && pChosenBld->UndeploysInto == nullptr &&
+				pChosenBld->FreeUnit != nullptr && (pChosenBld->FreeUnit->Harvester || pChosenBld->FreeUnit->ResourceGatherer);
+			if (chosenIsStaticRefWithHarv && wantsHarvesterRecoveryViaRefinery && (!reachedNewOreField || orphanRefineryZoneNeedsReplacement >= 0) && staticRefineriesCount >= 1)
+			{
+				GetMacroState(pHouse).IsBuildingRecoveryRefinery = true;
+				GetMacroState(pHouse).TargetRecoveryRefineryZone = orphanRefineryZoneNeedsReplacement;
+			}
+			else if (!chosenIsStaticRefWithHarv)
+			{
+				GetMacroState(pHouse).IsBuildingRecoveryRefinery = false;
+				GetMacroState(pHouse).TargetRecoveryRefineryZone = -1;
+			}
+		}
 		pExt->AIBrain_NextBuildingTarget = bestBldIdx;
 	}
 
@@ -14861,7 +14977,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			else if (pUnit->Harvester || pUnit->ResourceGatherer)
-				score += scores[31] + (hasRefineryZoneWithZeroHarvesters ? 2600 : (hasUnderharvestedIslandWithWarFactory ? 1350 : ((ownedEconomyUnits < 2) ? 1200 : (allowExpansionRefineryDeployer ? scores[30] : 0))));
+			{
+				const bool conYardHandlingHarvRecovery = (GetMacroState(pHouse).IsBuildingRecoveryRefinery && ownedEconomyUnits >= 1 && pHouse->ConYards.Count >= 1);
+				if (conYardHandlingHarvRecovery)
+					score += scores[31] - 900; // Keep War Factory queue focused on combat vehicles while ConYard replenishes Harvester via Refinery replacement!
+				else
+					score += scores[31] + (hasRefineryZoneWithZeroHarvesters ? 2600 : (hasUnderharvestedIslandWithWarFactory ? 1350 : ((ownedEconomyUnits < 2) ? 1200 : (allowExpansionRefineryDeployer ? scores[30] : 0))));
+			}
 
 			else if (pUnit->Passengers > 0 || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall))
 			{
@@ -16890,21 +17012,172 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		}
 	}
 
-	// Step 2: Normal Spatial Tetris placement search
+	// AdvAI Harvester Recovery via Refinery Sell-and-Replace (Variant A) or Temporary Placement (Variant B):
+	// Selling an existing static Refinery (especially one on an island that lost its Harvester, or a damaged/idle Refinery)
+	// and placing the newly built Refinery in its exact footprint spawns a FreeUnit Harvester immediately while recovering 50% cash
+	// and keeping the War Factory vehicle queue 100% dedicated to combat units!
+	const bool isStaticRefineryWithFreeHarv = (pBuildingType->Refinery || pBuildingType->ResourceDestination) &&
+		!pBuildingType->ResourceGatherer && pBuildingType->Enslaves == nullptr && pBuildingType->UndeploysInto == nullptr &&
+		pBuildingType->FreeUnit != nullptr && (pBuildingType->FreeUnit->Harvester || pBuildingType->FreeUnit->ResourceGatherer);
 
+	auto tryReplaceExistingRefineryForHarvester = [&]() -> bool
+	{
+		if (!isStaticRefineryWithFreeHarv)
+			return false;
+
+		const int adj = std::max(1, pBuildingType->Adjacent);
+		const int targetZone = GetMacroState(pHouse).TargetRecoveryRefineryZone;
+		std::vector<BuildingClass*> zeroHarvZoneCandidates;
+		std::vector<BuildingClass*> damagedIdleCandidates;
+		std::vector<BuildingClass*> idleCandidates;
+		std::vector<BuildingClass*> fallbackCandidates;
+
+		for (auto const pOldRef : pHouse->Buildings)
+		{
+			if (!pOldRef || !pOldRef->IsAlive || pOldRef->InLimbo || pOldRef == pBuilding || !pOldRef->Type)
+				continue;
+			if ((!pOldRef->Type->Refinery && !pOldRef->Type->ResourceDestination) ||
+				pOldRef->Type->ResourceGatherer || pOldRef->Type->Enslaves != nullptr || pOldRef->Type->UndeploysInto != nullptr)
+			{
+				continue;
+			}
+			if (pOldRef->CurrentMission == Mission::Construction || pOldRef->QueuedMission == Mission::Construction ||
+				pOldRef->CurrentMission == Mission::Selling || pOldRef->QueuedMission == Mission::Selling)
+			{
+				continue;
+			}
+			if (pOldRef->Type->GetFoundationWidth() != w || pOldRef->Type->GetFoundationHeight(false) != h ||
+				pOldRef->Type->Foundation != pBuildingType->Foundation)
+			{
+				continue;
+			}
+
+			const CellStruct oldCell = pOldRef->GetMapCoords();
+			bool hasAdjacentAnchor = false;
+			for (auto const pOther : pHouse->Buildings)
+			{
+				if (!pOther || !pOther->IsAlive || pOther->InLimbo || pOther == pOldRef || pOther == pBuilding || !pOther->Type)
+					continue;
+				if ((!pOther->Type->BaseNormal && !pOther->Type->ConstructionYard && !BuildingTypeExt::IsAIBaseNormal(pOther->Type)) ||
+					pOther->CurrentMission == Mission::Selling || pOther->QueuedMission == Mission::Selling)
+				{
+					continue;
+				}
+				const CellStruct otherCell = pOther->GetMapCoords();
+				const int otherW = pOther->Type->GetFoundationWidth();
+				const int otherH = pOther->Type->GetFoundationHeight(false);
+				const int gapX = std::max(0, std::max(static_cast<int>(oldCell.X) - (static_cast<int>(otherCell.X) + otherW - 1),
+					static_cast<int>(otherCell.X) - (static_cast<int>(oldCell.X) + w - 1)));
+				const int gapY = std::max(0, std::max(static_cast<int>(oldCell.Y) - (static_cast<int>(otherCell.Y) + otherH - 1),
+					static_cast<int>(otherCell.Y) - (static_cast<int>(oldCell.Y) + h - 1)));
+				if (std::max(gapX, gapY) <= adj)
+				{
+					hasAdjacentAnchor = true;
+					break;
+				}
+			}
+			if (!hasAdjacentAnchor)
+				continue;
+
+			const int oldZone = MapClass::Instance.GetMovementZoneType(oldCell, MovementZone::Normal, false);
+			int harvsInOldZone = 0;
+			if (oldZone >= 0)
+			{
+				for (auto const pHU : UnitClass::Array)
+				{
+					if (pHU && pHU->Owner == pHouse && !pHU->InLimbo && pHU->IsAlive && pHU->Type &&
+						(pHU->Type->Harvester || pHU->Type->ResourceGatherer) &&
+						MapClass::Instance.GetMovementZoneType(pHU->GetMapCoords(), MovementZone::Normal, false) == oldZone)
+					{
+						harvsInOldZone++;
+					}
+				}
+			}
+			if ((targetZone >= 0 && oldZone == targetZone) || (oldZone >= 0 && harvsInOldZone == 0))
+				zeroHarvZoneCandidates.push_back(pOldRef);
+
+			fallbackCandidates.push_back(pOldRef);
+			if (!pOldRef->HasAnyLink())
+			{
+				idleCandidates.push_back(pOldRef);
+				if (pOldRef->Health < pOldRef->Type->Strength)
+					damagedIdleCandidates.push_back(pOldRef);
+			}
+		}
+
+		const auto& pool = !zeroHarvZoneCandidates.empty()
+			? zeroHarvZoneCandidates
+			: (!damagedIdleCandidates.empty() ? damagedIdleCandidates : (!idleCandidates.empty() ? idleCandidates : fallbackCandidates));
+		if (pool.empty())
+			return false;
+
+		const int randIdx = ScenarioClass::Instance->Random.RandomRanged(0, static_cast<int>(pool.size()) - 1);
+		BuildingClass* pChosenOldRef = pool[randIdx];
+		const CellStruct replaceCell = pChosenOldRef->GetMapCoords();
+
+		Debug::Log("[NeuralAI] HarvesterRecovery: House %d selling existing refinery %s at (%d,%d) to place new refinery %s in its exact spot.\n",
+			pHouse->ArrayIndex, pChosenOldRef->Type->ID, replaceCell.X, replaceCell.Y, pBuildingType->ID);
+
+		pChosenOldRef->Sell(1);
+		for (int fy = 0; fy < h; ++fy)
+		{
+			for (int fx = 0; fx < w; ++fx)
+			{
+				const CellStruct fc{static_cast<short>(replaceCell.X + fx), static_cast<short>(replaceCell.Y + fy)};
+				if (auto const pCell = MapClass::Instance.TryGetCellAt(fc))
+					pCell->ScatterContent(CellClass::Cell2Coord(fc), true, true, false);
+			}
+		}
+
+		auto& st = GetMacroState(pHouse);
+		st.PendingClearanceCell = replaceCell;
+		st.PendingClearanceType = pBuildingType;
+		st.PendingClearanceFoundationWidth = w;
+		st.PendingClearanceFoundationHeight = h;
+		st.PendingClearanceFoundation = pBuildingType->Foundation;
+		st.ClearanceAttempts = 0;
+		st.NextClearanceCheckFrame = Unsorted::CurrentFrame + 60;
+		st.IsBuildingRecoveryRefinery = false;
+		st.TargetRecoveryRefineryZone = -1;
+		st.NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 750;
+		return true;
+	};
+
+	if (GetMacroState(pHouse).IsBuildingRecoveryRefinery && isStaticRefineryWithFreeHarv &&
+		(GetMacroState(pHouse).TargetRecoveryRefineryZone >= 0 || ScenarioClass::Instance->Random.RandomRanged(0, 99) < 65))
+	{
+		if (tryReplaceExistingRefineryForHarvester())
+			return 1; // Keep building waiting in ConYard while old refinery finishes selling!
+	}
+
+	// Step 2: Normal Spatial Tetris placement search
 	const CellStruct bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
 
 	if (bestCell != CellStruct::Empty)
 	{
-		GetMacroState(pHouse).ConsecutivePlacementFailures = 0;
-		GetMacroState(pHouse).BuildingPlacementCooldownUntilFrame.erase(pBuildingType->ArrayIndex);
-		if (pBuildingType->IsBaseDefense && !GetMacroState(pHouse).AttackedBuildingsLIFO.empty())
-			GetMacroState(pHouse).AttackedBuildingsLIFO.pop_back();
+		auto& st = GetMacroState(pHouse);
+		st.ConsecutivePlacementFailures = 0;
+		st.BuildingPlacementCooldownUntilFrame.erase(pBuildingType->ArrayIndex);
+		if (pBuildingType->IsBaseDefense && !st.AttackedBuildingsLIFO.empty())
+			st.AttackedBuildingsLIFO.pop_back();
+
+		if (st.IsBuildingRecoveryRefinery && isStaticRefineryWithFreeHarv)
+		{
+			st.TemporaryRecoveryRefineryPlacedFrame[pBuilding->UniqueID] = Unsorted::CurrentFrame;
+			st.IsBuildingRecoveryRefinery = false;
+			st.TargetRecoveryRefineryZone = -1;
+			st.NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 750;
+			Debug::Log("[NeuralAI] HarvesterRecovery: House %d placed temporary recovery refinery %s at (%d,%d). Will sell once FreeUnit harvester spawns.\n",
+				pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y);
+		}
 
 		outCell = bestCell;
-
 		return 2;
 	}
+
+	// Fallback for Refinery / Harvester Recovery when no free cell exists: sell an existing Refinery and place in its exact spot!
+	if (isStaticRefineryWithFreeHarv && tryReplaceExistingRefineryForHarvester())
+		return 1;
 
 	// Step 3: Surgical Space Clearance & Obsolete Structure Replacement when the
 
