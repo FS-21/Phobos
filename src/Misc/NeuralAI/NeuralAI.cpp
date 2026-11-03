@@ -9958,14 +9958,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	if (pIslandGoalCell)
 		targetIslandZone = MapClass::Instance.GetMovementZoneType(pIslandGoalCell->MapCoords, MovementZone::Normal, false);
 
-	// Smart Enemy Island Reconquest Target Selection:
-	// If pIslandGoalCell is in water (e.g. a Naval Yard) or if the enemy occupies multiple islands,
-	// pick the weakest/least-defended enemy land island (ebZone != primaryArmyZone) so our transports
-	// reconquer lightly defended enemy expansion islands first!
+	CellClass* pSecondaryWaveTargetCell = nullptr;
+	CellClass* pSecondaryIslandGoalCell = nullptr;
+	int secondaryIslandZone = -1;
+
+	// Smart Enemy Island Reconquest & Multi-Squadron Parallel Target Selection:
+	// Pick BOTH a primary enemy island objective (pIslandGoalCell) AND a secondary enemy island/flank objective
+	// (pSecondaryIslandGoalCell / pSecondaryWaveTargetCell) so ground armies, transports, and naval squadrons
+	// operate in parallel teams across multiple fronts!
 	{
 		CellClass* pBestEnemyIslandCell = nullptr;
 		int bestEnemyIslandZone = -1;
 		int bestEnemyIslandScore = -999999;
+
+		CellClass* pSecondEnemyIslandCell = nullptr;
+		int secondEnemyIslandZone = -1;
+		int secondEnemyIslandScore = -999999;
+
 		for (auto const pEB : BuildingClass::Array)
 		{
 			if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Immune || pEB->Type->Insignificant || pEB->Type->InvisibleInGame || pEB->Type->Naval)
@@ -9979,6 +9988,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const int ebz = MapClass::Instance.GetMovementZoneType(pECell->MapCoords, MovementZone::Normal, false);
 			if (ebz < 0)
 				continue;
+
+			if (!pSecondaryWaveTargetCell && pWaveTargetCell && pECell->MapCoords.DistanceFrom(pWaveTargetCell->MapCoords) >= 10.0)
+			{
+				pSecondaryWaveTargetCell = pECell;
+			}
+
 			if (primaryArmyZone >= 0 && ebz == primaryArmyZone)
 				continue;
 
@@ -10012,15 +10027,33 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				score += 150;
 			if (score > bestEnemyIslandScore)
 			{
+				if (pBestEnemyIslandCell && (bestEnemyIslandZone != ebz || pECell->MapCoords.DistanceFrom(pBestEnemyIslandCell->MapCoords) >= 14.0))
+				{
+					secondEnemyIslandScore = bestEnemyIslandScore;
+					pSecondEnemyIslandCell = pBestEnemyIslandCell;
+					secondEnemyIslandZone = bestEnemyIslandZone;
+				}
 				bestEnemyIslandScore = score;
 				pBestEnemyIslandCell = pECell;
 				bestEnemyIslandZone = ebz;
+			}
+			else if (score > secondEnemyIslandScore && pBestEnemyIslandCell &&
+				(bestEnemyIslandZone != ebz || pECell->MapCoords.DistanceFrom(pBestEnemyIslandCell->MapCoords) >= 14.0))
+			{
+				secondEnemyIslandScore = score;
+				pSecondEnemyIslandCell = pECell;
+				secondEnemyIslandZone = ebz;
 			}
 		}
 		if (pBestEnemyIslandCell && bestEnemyIslandZone >= 0)
 		{
 			pIslandGoalCell = pBestEnemyIslandCell;
 			targetIslandZone = bestEnemyIslandZone;
+		}
+		if (pSecondEnemyIslandCell && secondEnemyIslandZone >= 0)
+		{
+			pSecondaryIslandGoalCell = pSecondEnemyIslandCell;
+			secondaryIslandZone = secondEnemyIslandZone;
 		}
 	}
 
@@ -10083,12 +10116,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	// Coordinated Offensive Strike Wave when strike force reaches evolved + archetype threshold (Slot 37: Rush vs Mass Timing)
+	// Coordinated Multi-Squadron Offensive Strike Wave (Slot 37: Rush vs Mass Timing)
+	// Splits forces into parallel Squadron Alpha (pWaveTargetCell) and Squadron Bravo (pSecondaryWaveTargetCell)
 	if (pWaveTargetCell && (endgameRemnantHunt || idleCombatUnits.size() >= minWaveUnits || (idleCombatUnits.size() + idleCombatInf.size() >= minWaveUnits + 4)))
 	{
 		const int waveTargetZone = MapClass::Instance.GetMovementZoneType(pWaveTargetCell->MapCoords, MovementZone::Normal, false);
 		const bool waveTargetInWater = (pWaveTargetCell->LandType == LandType::Water);
-		const size_t desiredUnitReserve = endgameRemnantHunt ? 0u : static_cast<size_t>(std::clamp(1 + (reserveBias / 180), 0, 3));
+		const int secWaveZone = pSecondaryWaveTargetCell ? MapClass::Instance.GetMovementZoneType(pSecondaryWaveTargetCell->MapCoords, MovementZone::Normal, false) : -1;
+		const size_t desiredUnitReserve = endgameRemnantHunt ? 0u : static_cast<size_t>(std::clamp(1 + (reserveBias / 180), 0, 2));
 		const size_t reserveCount = idleCombatUnits.size() > (desiredUnitReserve + 1) ? desiredUnitReserve : 0;
 		size_t dispatchedVeh = 0;
 		for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
@@ -10098,13 +10133,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool canCrossWaterDirectly = (pU->Type->MovementZone == MovementZone::Amphibious || pU->Type->MovementZone == MovementZone::AmphibiousDestroyer ||
 				pU->Type->MovementZone == MovementZone::AmphibiousCrusher || pU->Type->MovementZone == MovementZone::Fly ||
 				pU->Type->MovementZone == MovementZone::Subterrannean || pU->Type->JumpJet || pU->Type->Teleporter);
-			if (!canCrossWaterDirectly && (waveTargetInWater || waveTargetZone < 0 || uz < 0 || uz != waveTargetZone || (enemyOnDisconnectedIsland && uz != targetIslandZone)))
+			CellClass* pUnitWaveGoal = pWaveTargetCell;
+			if (pSecondaryWaveTargetCell && idleCombatUnits.size() >= (minWaveUnits + 2) && (pU->UniqueID % 3 == 0) &&
+				(canCrossWaterDirectly || (secWaveZone >= 0 && uz == secWaveZone)))
+			{
+				pUnitWaveGoal = pSecondaryWaveTargetCell;
+			}
+			const int goalZone = (pUnitWaveGoal == pSecondaryWaveTargetCell) ? secWaveZone : waveTargetZone;
+			const bool goalInWater = (pUnitWaveGoal->LandType == LandType::Water);
+			if (!canCrossWaterDirectly && (goalInWater || goalZone < 0 || uz < 0 || uz != goalZone))
 				continue; // Keep ground-only vehicles in Guard state on their island so they board Amphibious/Air Transports!
 
-			if (pU->Type->JumpJet && pU->Type->Strength >= 1000 && pU->DistanceFrom(pWaveTargetCell) > 7680)
+			if (pU->Type->JumpJet && pU->Type->Strength >= 1000 && pU->DistanceFrom(pUnitWaveGoal) > 7680)
 			{
 				const CellStruct uCoords = pU->GetMapCoords();
-				const CellStruct flankCoords{uCoords.X, pWaveTargetCell->MapCoords.Y};
+				const CellStruct flankCoords{uCoords.X, pUnitWaveGoal->MapCoords.Y};
 				if (auto const pFlankCell = MapClass::Instance.TryGetCellAt(flankCoords))
 				{
 					pU->SetDestination(pFlankCell, true);
@@ -10116,7 +10159,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if ((pVisibleEnemyBld || endgameRemnantHunt) && pU->Type->GetWeapon(0) && pU->Type->GetWeapon(0)->WeaponType)
 			{
-				pU->SetDestination(pWaveTargetCell, true);
+				pU->SetDestination(pUnitWaveGoal, true);
 				pU->QueueMission(Mission::AttackMove, true);
 			}
 			else
@@ -10126,7 +10169,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			dispatchedVeh++;
 		}
 
-		const size_t desiredInfReserve = static_cast<size_t>(std::clamp(2 + (reserveBias / 140), 0, 4));
+		const size_t desiredInfReserve = static_cast<size_t>(std::clamp(1 + (reserveBias / 160), 0, 3));
 		const size_t infReserve = idleCombatInf.size() > (desiredInfReserve + 2) ? desiredInfReserve : 0;
 		size_t dispatchedInf = 0;
 		for (size_t i = infReserve; i < idleCombatInf.size(); ++i)
@@ -10135,10 +10178,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const int iz = MapClass::Instance.GetMovementZoneType(pI->GetMapCoords(), MovementZone::Normal, false);
 			const bool canInfCrossWater = (pI->Type->MovementZone == MovementZone::Amphibious || pI->Type->MovementZone == MovementZone::AmphibiousDestroyer ||
 				pI->Type->MovementZone == MovementZone::Fly || pI->Type->JumpJet || pI->Type->Teleporter);
-			if (!canInfCrossWater && (waveTargetInWater || waveTargetZone < 0 || iz < 0 || iz != waveTargetZone || (enemyOnDisconnectedIsland && iz != targetIslandZone)))
+			CellClass* pInfWaveGoal = pWaveTargetCell;
+			if (pSecondaryWaveTargetCell && idleCombatInf.size() >= 5 && (pI->UniqueID % 3 == 0) &&
+				(canInfCrossWater || (secWaveZone >= 0 && iz == secWaveZone)))
+			{
+				pInfWaveGoal = pSecondaryWaveTargetCell;
+			}
+			const int infGoalZone = (pInfWaveGoal == pSecondaryWaveTargetCell) ? secWaveZone : waveTargetZone;
+			const bool infGoalInWater = (pInfWaveGoal->LandType == LandType::Water);
+			if (!canInfCrossWater && (infGoalInWater || infGoalZone < 0 || iz < 0 || iz != infGoalZone))
 				continue; // Keep ground infantry ready on their island to board transports!
 
-			pI->SetDestination(pWaveTargetCell, true);
+			pI->SetDestination(pInfWaveGoal, true);
 			pI->QueueMission(Mission::AttackMove, true);
 			dispatchedInf++;
 		}
@@ -10151,15 +10202,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	// Slot 75 (Immediate Beachhead Ground Push & Zero-Hesitation Target Chaining):
-	// 1) Any combat vehicle or infantry that has landed on an enemy island (uz != homeGroundZone) OR is already
-	//    within 28 cells of an enemy building/unit on the same landmass immediately locks onto the nearest/highest-priority
-	//    enemy target without waiting for minWaveUnits or a slow timer!
-	// 2) Idle Naval Warships immediately engage enemy Naval Yards or coastal structures within bombardment range!
+	// Slot 75 (Parallel Multi-Group Ground Push & Full-Map Naval Coastal Bombardment Saturation):
+	// 1) Combat vehicles/infantry on ANY landmass that shares a MovementZone with enemy structures split into two
+	//    parallel assault groups (primary vs secondary target on that landmass) and push without hesitation!
+	// 2) Naval Warships (including long-range capital ships & missile subs whose land-attack weapon is Primary, Secondary,
+	//    or Spawner, e.g., Dreadnought, Aircraft Carrier, Boomer, Nod Missile Sub, Destroyer) scan the ENTIRE map for
+	//    enemy Naval Yards and coastal/island structures within bombardment reach of water, distribute across up to 4
+	//    coastal targets in parallel, sail to offshore water firing cells, and continuously saturate the enemy coast!
 	{
-		auto findBestSameLandmassEnemyBld = [pHouse](const CellStruct& unitCoords, int unitZone, bool forNavalWarship) -> BuildingClass* {
+		auto findBestSameLandmassEnemyBld = [pHouse](const CellStruct& unitCoords, int unitZone, bool pickSecondaryGroup) -> BuildingClass* {
 			BuildingClass* pBestBld = nullptr;
 			int bestScore = -999999;
+			BuildingClass* pSecondBld = nullptr;
+			int secondScore = -999999;
 			for (auto const pEB : BuildingClass::Array)
 			{
 				if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Immune || pEB->Type->Insignificant || pEB->Type->InvisibleInGame)
@@ -10167,17 +10222,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral() || pEB->Owner->IsObserver() || pEB->Owner->Defeated)
 					continue;
 				const CellStruct ebc = pEB->GetMapCoords();
+				if (pEB->Type->Naval || unitZone < 0 || MapClass::Instance.GetMovementZoneType(ebc, MovementZone::Normal, false) != unitZone)
+					continue;
 				const int distCells = std::abs(ebc.X - unitCoords.X) + std::abs(ebc.Y - unitCoords.Y);
-				if (forNavalWarship)
-				{
-					if (!pEB->Type->Naval && distCells > 26)
-						continue;
-				}
-				else
-				{
-					if (pEB->Type->Naval || unitZone < 0 || MapClass::Instance.GetMovementZoneType(ebc, MovementZone::Normal, false) != unitZone)
-						continue;
-				}
 				int prio = 40;
 				if (pEB->Type->IsBaseDefense && distCells <= 14)
 					prio = 155;
@@ -10187,14 +10234,159 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					prio = 105;
 				else if (pEB->Type->Refinery || pEB->Type->PowerBonus > 0)
 					prio = 85;
-				const int sc = prio - (distCells * 6);
+				const int sc = prio - (distCells * 5);
 				if (sc > bestScore)
 				{
+					if (pBestBld && pBestBld->GetMapCoords().DistanceFrom(ebc) >= 6.0)
+					{
+						secondScore = bestScore;
+						pSecondBld = pBestBld;
+					}
 					bestScore = sc;
 					pBestBld = pEB;
 				}
+				else if (sc > secondScore && pBestBld && pBestBld->GetMapCoords().DistanceFrom(ebc) >= 6.0)
+				{
+					secondScore = sc;
+					pSecondBld = pEB;
+				}
 			}
-			return pBestBld;
+			return (pickSecondaryGroup && pSecondBld) ? pSecondBld : pBestBld;
+		};
+
+		auto findCoastalNavalBombardmentTarget = [pHouse](const CellStruct& shipCoords, int maxStandOffCells, unsigned int shipUniqueID) -> BuildingClass* {
+			struct NavalCand
+			{
+				BuildingClass* Bld;
+				int Score;
+			};
+			NavalCand topCands[4] = {{nullptr, -999999}, {nullptr, -999999}, {nullptr, -999999}, {nullptr, -999999}};
+			const int waterCheckRadius = std::clamp(maxStandOffCells, 6, 26);
+
+			for (auto const pEB : BuildingClass::Array)
+			{
+				if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Immune || pEB->Type->Insignificant || pEB->Type->InvisibleInGame)
+					continue;
+				if (pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral() || pEB->Owner->IsObserver() || pEB->Owner->Defeated)
+					continue;
+				const CellStruct ebc = pEB->GetMapCoords();
+				if (ebc.X <= 1 && ebc.Y <= 1)
+					continue;
+
+				bool reachableFromWater = pEB->Type->Naval;
+				if (!reachableFromWater)
+				{
+					for (int r = 3; r <= waterCheckRadius && !reachableFromWater; r += 3)
+					{
+						const CellStruct probes[8] = {
+							{static_cast<short>(ebc.X + r), ebc.Y},
+							{static_cast<short>(ebc.X - r), ebc.Y},
+							{ebc.X, static_cast<short>(ebc.Y + r)},
+							{ebc.X, static_cast<short>(ebc.Y - r)},
+							{static_cast<short>(ebc.X + (r * 3) / 4), static_cast<short>(ebc.Y + (r * 3) / 4)},
+							{static_cast<short>(ebc.X - (r * 3) / 4), static_cast<short>(ebc.Y + (r * 3) / 4)},
+							{static_cast<short>(ebc.X + (r * 3) / 4), static_cast<short>(ebc.Y - (r * 3) / 4)},
+							{static_cast<short>(ebc.X - (r * 3) / 4), static_cast<short>(ebc.Y - (r * 3) / 4)}
+						};
+						for (const auto& pr : probes)
+						{
+							if (auto const pWC = MapClass::Instance.TryGetCellAt(pr))
+							{
+								if (pWC->LandType == LandType::Water)
+								{
+									reachableFromWater = true;
+									break;
+								}
+							}
+						}
+					}
+				}
+				if (!reachableFromWater)
+					continue;
+
+				const int distCells = std::abs(ebc.X - shipCoords.X) + std::abs(ebc.Y - shipCoords.Y);
+				int prio = 200;
+				if (pEB->Type->Naval || pEB->Type->IsBaseDefense)
+					prio = 360;
+				else if (pEB->Type->ConstructionYard || pEB->Type->SuperWeapon != -1)
+					prio = 330;
+				else if (pEB->Type->Factory != AbstractType::None)
+					prio = 300;
+				else if (pEB->Type->Refinery || pEB->Type->PowerBonus > 0)
+					prio = 260;
+				if (pEB->Owner->ArrayIndex == pHouse->EnemyHouseIndex)
+					prio += 60;
+				const int sc = prio - (distCells * 2);
+
+				for (int k = 0; k < 4; ++k)
+				{
+					if (sc > topCands[k].Score)
+					{
+						for (int m = 3; m > k; --m)
+							topCands[m] = topCands[m - 1];
+						topCands[k] = {pEB, sc};
+						break;
+					}
+				}
+			}
+
+			int validCount = 0;
+			for (int k = 0; k < 4; ++k)
+			{
+				if (topCands[k].Bld != nullptr)
+					validCount++;
+			}
+			if (validCount == 0)
+				return nullptr;
+			return topCands[shipUniqueID % static_cast<unsigned int>(validCount)].Bld;
+		};
+
+		auto findOffshoreFiringWaterCell = [](UnitClass* pShip, const CellStruct& targetCoords, int desiredRangeCells) -> CellClass* {
+			const CellStruct sc = pShip->GetMapCoords();
+			const int dx = sc.X - targetCoords.X;
+			const int dy = sc.Y - targetCoords.Y;
+			const int dist = std::max(1, std::max(std::abs(dx), std::abs(dy)));
+			const int lat = (static_cast<int>(pShip->UniqueID % 5) - 2) * 2;
+			const int perpX = (-dy * lat) / dist;
+			const int perpY = (dx * lat) / dist;
+			const int maxR = std::clamp(desiredRangeCells, 5, 22);
+			for (int r = std::max(4, maxR - 3); r <= maxR; ++r)
+			{
+				const CellStruct probe{
+					static_cast<short>(targetCoords.X + (dx * r) / dist + perpX),
+					static_cast<short>(targetCoords.Y + (dy * r) / dist + perpY)
+				};
+				if (auto const pWC = MapClass::Instance.TryGetCellAt(probe))
+				{
+					if (pWC->LandType == LandType::Water && pWC->IsClearToMove(pShip->Type->SpeedType, true, true, -1, pShip->Type->MovementZone, -1, false))
+						return pWC;
+				}
+			}
+			CellClass* pBestWater = nullptr;
+			int bestWaterDist = 999999;
+			for (int wy = -maxR; wy <= maxR; wy += 2)
+			{
+				for (int wx = -maxR; wx <= maxR; wx += 2)
+				{
+					const int dTarget = std::max(std::abs(wx), std::abs(wy));
+					if (dTarget < 3 || dTarget > maxR)
+						continue;
+					const CellStruct wc{static_cast<short>(targetCoords.X + wx), static_cast<short>(targetCoords.Y + wy)};
+					if (auto const pWC = MapClass::Instance.TryGetCellAt(wc))
+					{
+						if (pWC->LandType == LandType::Water && pWC->IsClearToMove(pShip->Type->SpeedType, true, true, -1, pShip->Type->MovementZone, -1, false))
+						{
+							const int dShip = std::abs(wc.X - sc.X) + std::abs(wc.Y - sc.Y);
+							if (dShip < bestWaterDist)
+							{
+								bestWaterDist = dShip;
+								pBestWater = pWC;
+							}
+						}
+					}
+				}
+			}
+			return pBestWater;
 		};
 
 		auto findNearestSameZoneEnemyUnit = [pHouse](const CellStruct& unitCoords, int unitZone, int maxDistCells) -> UnitClass* {
@@ -10226,19 +10418,48 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pBeachU || !pBeachU->Type || IsAmphibiousOrAirTransport(pBeachU->Type))
 				continue;
 			const auto pWpn0 = pBeachU->Type->GetWeapon(0) ? pBeachU->Type->GetWeapon(0)->WeaponType : nullptr;
-			if (!pWpn0 || pWpn0->Damage <= 0)
+			const auto pWpn1 = pBeachU->Type->GetWeapon(1) ? pBeachU->Type->GetWeapon(1)->WeaponType : nullptr;
+			const bool isCarrierSpawner = (pBeachU->Type->Spawns != nullptr) || (pWpn0 && pWpn0->Spawner) || (pWpn1 && pWpn1->Spawner);
+			if ((!pWpn0 || pWpn0->Damage <= 0) && (!pWpn1 || pWpn1->Damage <= 0) && !isCarrierSpawner)
 				continue;
 			const CellStruct uc = pBeachU->GetMapCoords();
 			if (pBeachU->Type->Naval)
 			{
-				if (pWpn0->Projectile && !pWpn0->Projectile->AG)
-					continue;
-				if (BuildingClass* pNavalTargetBld = findBestSameLandmassEnemyBld(uc, -1, true))
+				const bool wpn0HitsLand = pWpn0 && (pWpn0->Damage > 0 || pWpn0->Spawner) && (!pWpn0->Projectile || pWpn0->Projectile->AG || pWpn0->Spawner || isCarrierSpawner);
+				const bool wpn1HitsLand = pWpn1 && (pWpn1->Damage > 0 || pWpn1->Spawner) && (!pWpn1->Projectile || pWpn1->Projectile->AG || pWpn1->Spawner);
+				const WeaponTypeClass* pLandSiegeWpn = nullptr;
+				if (wpn0HitsLand && wpn1HitsLand)
+					pLandSiegeWpn = (pWpn1->Range > pWpn0->Range) ? pWpn1 : pWpn0;
+				else if (wpn1HitsLand)
+					pLandSiegeWpn = pWpn1;
+				else if (wpn0HitsLand)
+					pLandSiegeWpn = pWpn0;
+
+				if (!pLandSiegeWpn)
 				{
-					if (pBeachU->DistanceFrom(pNavalTargetBld) <= std::max(3072, pWpn0->Range + 1024) && pNavalTargetBld->GetCell() && IsCellVisibleToAI(pHouse, pNavalTargetBld->GetCell()))
+					// Anti-naval / anti-sub warship (Torpedo Sub, Dolphin, Squid): hunt enemy ships or Naval Yards!
+					if (pEnemySubOrShip)
+					{
+						pBeachU->SetTarget(pEnemySubOrShip);
+						pBeachU->QueueMission(Mission::Attack, true);
+					}
+					continue;
+				}
+
+				const int siegeRangeLeptons = std::max(pLandSiegeWpn->Range, isCarrierSpawner ? (18 * 256) : 1536);
+				const int siegeRangeCells = std::clamp(siegeRangeLeptons / 256, 6, 26);
+				if (BuildingClass* pNavalTargetBld = findCoastalNavalBombardmentTarget(uc, siegeRangeCells, pBeachU->UniqueID))
+				{
+					const int distLeptons = pBeachU->DistanceFrom(pNavalTargetBld);
+					if (distLeptons <= std::max(2560, siegeRangeLeptons))
 					{
 						pBeachU->SetTarget(pNavalTargetBld);
 						pBeachU->QueueMission(Mission::Attack, true);
+					}
+					else if (CellClass* pOffshoreFireCell = findOffshoreFiringWaterCell(pBeachU, pNavalTargetBld->GetMapCoords(), std::max(5, siegeRangeCells - 2)))
+					{
+						pBeachU->SetDestination(pOffshoreFireCell, true);
+						pBeachU->QueueMission(Mission::AttackMove, true);
 					}
 					else if (auto const pNCell = pNavalTargetBld->GetCell())
 					{
@@ -10250,7 +10471,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			const int uz = MapClass::Instance.GetMovementZoneType(uc, MovementZone::Normal, false);
-			UnitClass* pCloseEnemyVeh = findNearestSameZoneEnemyUnit(uc, uz, 12);
+			UnitClass* pCloseEnemyVeh = findNearestSameZoneEnemyUnit(uc, uz, 14);
 			if (pCloseEnemyVeh)
 			{
 				pBeachU->SetTarget(pCloseEnemyVeh);
@@ -10258,11 +10479,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			}
 
-			if (BuildingClass* pSameIslBld = findBestSameLandmassEnemyBld(uc, uz, false))
+			if (BuildingClass* pSameIslBld = findBestSameLandmassEnemyBld(uc, uz, (pBeachU->UniqueID & 1) != 0))
 			{
 				const double distToBld = uc.DistanceFrom(pSameIslBld->GetMapCoords());
 				const bool onEnemyIsland = (homeGroundZone >= 0 && uz >= 0 && uz != homeGroundZone);
-				if (onEnemyIsland || distToBld <= 28.0)
+				if (onEnemyIsland || distToBld <= 42.0 || idleCombatUnits.size() >= 3)
 				{
 					if (distToBld <= 15.0 && pSameIslBld->GetCell() && (pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pSameIslBld->GetCell())))
 					{
@@ -10284,11 +10505,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			const CellStruct ic = pBeachI->GetMapCoords();
 			const int iz = MapClass::Instance.GetMovementZoneType(ic, MovementZone::Normal, false);
-			if (BuildingClass* pSameIslBld = findBestSameLandmassEnemyBld(ic, iz, false))
+			if (BuildingClass* pSameIslBld = findBestSameLandmassEnemyBld(ic, iz, (pBeachI->UniqueID & 1) != 0))
 			{
 				const double distToBld = ic.DistanceFrom(pSameIslBld->GetMapCoords());
 				const bool onEnemyIsland = (homeGroundZone >= 0 && iz >= 0 && iz != homeGroundZone);
-				if (onEnemyIsland || distToBld <= 24.0)
+				if (onEnemyIsland || distToBld <= 36.0 || idleCombatInf.size() >= 4)
 				{
 					if (distToBld <= 12.0 && pSameIslBld->GetCell() && (pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pSameIslBld->GetCell())))
 					{
@@ -10730,6 +10951,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 		CellClass* pActiveIslandGoal = pCustomPassengerGoal ? pCustomPassengerGoal : pIslandGoalCell;
 		int activeIslandZone = pCustomPassengerGoal ? customPassengerZone : targetIslandZone;
+		// Parallel Amphibious Task Groups: when multiple combat transports are ready and a secondary enemy island/flank exists,
+		// assign odd-numbered transports to strike the secondary objective in parallel!
+		if (!pCustomPassengerGoal && !carryingMCV && !carryingHarvester && !carryingEngineer &&
+			pSecondaryIslandGoalCell && secondaryIslandZone >= 0 && readyCombatConvoyTransports >= 2 && (pTrans->UniqueID % 2 == 1))
+		{
+			pActiveIslandGoal = pSecondaryIslandGoalCell;
+			activeIslandZone = secondaryIslandZone;
+		}
 		if (!pCustomPassengerGoal && (carryingMCV || carryingHarvester) && pIslandResourceGoalCell)
 		{
 			pActiveIslandGoal = pIslandResourceGoalCell;
@@ -10753,12 +10982,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				activeIslandZone = techIslandZone;
 			}
 		}
-		const int waitingArmyWeight = static_cast<int>(idleCombatUnits.size()) * 3 + static_cast<int>(idleCombatInf.size());
-		const int desiredConvoyTransports = (idleCombatUnits.size() >= 9 || waitingArmyWeight >= 28) ? 5
-			: ((idleCombatUnits.size() >= 6 || waitingArmyWeight >= 18) ? 4 : 3);
+		// Fast Continuous Amphibious Squadron Dispatch:
+		// When we already have military dominance (OwnedUnits >= 15) or >= 2 transports are ready, dispatch immediately
+		// instead of holding transports back waiting for a slow 4-5 ship convoy!
+		const int desiredConvoyTransports = (pHouse->OwnedUnits >= 15) ? 1 : 2;
 		const bool isSoloPriorityCargo = carryingMCV || carryingHarvester || carryingStolenForeignMCV || (carryingEngineer && pIslandTechGoalCell != nullptr);
 		const bool waitForConvoySister = (!isSoloPriorityCargo && homeTransportsStillLoading > 0 && readyCombatConvoyTransports < desiredConvoyTransports &&
-			(activeIslandZone < 0 || transZone != activeIslandZone) && !pTrans->HasBeenAttacked && (Unsorted::CurrentFrame % 540 < 430));
+			(activeIslandZone < 0 || transZone != activeIslandZone) && !pTrans->HasBeenAttacked && (Unsorted::CurrentFrame % 180 < 75));
 		const bool isReadyToSailEffective = isReadyToSail || carryingHarvester || (carryingEngineer && pIslandTechGoalCell != nullptr) || (pCustomPassengerGoal != nullptr);
 		if (isReadyToSailEffective && pActiveIslandGoal && waitForConvoySister)
 		{
@@ -11022,17 +11252,38 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					addCandidateToCluster(pI, 1, 12);
 				}
 
-				int bestClusterVal = -999999;
+				// Parallel Multi-Island Pickup: if the transport is already at an island with waiting units, load there immediately;
+				// otherwise distribute empty transports across all islands that have >= 1 combat vehicle (score >= 35) in parallel!
+				std::vector<IslandArmyCluster> readyIslands;
 				for (const auto& cl : clusters)
 				{
-					int val = cl.score - (cl.minDistToTrans * 2);
 					if (cl.zone == transZone)
-						val += 500; // Strong preference to load troops from the island the transport is already at!
-					if (val > bestClusterVal)
 					{
-						bestClusterVal = val;
 						desiredPickupZone = cl.zone;
 						desiredPickupAnchor = cl.closestUnitCoords;
+						break;
+					}
+					if (cl.score >= 35)
+						readyIslands.push_back(cl);
+				}
+				if (desiredPickupZone < 0 && !readyIslands.empty())
+				{
+					const auto& chosenCl = readyIslands[pTrans->UniqueID % readyIslands.size()];
+					desiredPickupZone = chosenCl.zone;
+					desiredPickupAnchor = chosenCl.closestUnitCoords;
+				}
+				if (desiredPickupZone < 0)
+				{
+					int bestClusterVal = -999999;
+					for (const auto& cl : clusters)
+					{
+						int val = cl.score - (cl.minDistToTrans * 2);
+						if (val > bestClusterVal)
+						{
+							bestClusterVal = val;
+							desiredPickupZone = cl.zone;
+							desiredPickupAnchor = cl.closestUnitCoords;
+						}
 					}
 				}
 				if (desiredPickupZone < 0)
@@ -14486,6 +14737,30 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else
 			{
 				score += scores[29];
+				const auto pWpn1 = pUnit->GetWeapon(1) ? pUnit->GetWeapon(1)->WeaponType : nullptr;
+				const bool isUnitCarrierSpawner = (pUnit->Spawns != nullptr) || (pWpn && pWpn->Spawner) || (pWpn1 && pWpn1->Spawner);
+				const bool wpn0HitsLand = pWpn && (pWpn->Damage > 0 || pWpn->Spawner) && (!pWpn->Projectile || pWpn->Projectile->AG || pWpn->Spawner || isUnitCarrierSpawner);
+				const bool wpn1HitsLand = pWpn1 && (pWpn1->Damage > 0 || pWpn1->Spawner) && (!pWpn1->Projectile || pWpn1->Projectile->AG || pWpn1->Spawner);
+				const int maxLandSiegeRange = std::max(
+					wpn0HitsLand ? (isUnitCarrierSpawner ? std::max(pWpn->Range, 18 * 256) : pWpn->Range) : 0,
+					wpn1HitsLand ? pWpn1->Range : 0);
+				const bool isLongRangeCoastalSiegeShip = (isUnitCarrierSpawner && (wpn0HitsLand || wpn1HitsLand)) || (maxLandSiegeRange >= (10 * 256));
+				const bool isCoastalBombardShip = (maxLandSiegeRange >= (5 * 256));
+
+				if (features[21] > 0 || features[67] > 10)
+				{
+					if (isLongRangeCoastalSiegeShip)
+					{
+						// Continuously produce long-range capital siege warships (Dreadnought, Aircraft Carrier, Boomer,
+						// Nod Missile Sub) to saturate the enemy coastline from afar and end island games rapidly!
+						score += 1150 + std::min(700, maxLandSiegeRange / 6);
+						score += std::min(720, pHouse->CountOwnedNow(pUnit) * 35); // Offset duplicate penalty for capital siege fleets!
+					}
+					else if (isCoastalBombardShip)
+					{
+						score += 520 + std::min(300, maxLandSiegeRange / 10);
+					}
+				}
 			}
 
 			if (features[72] > 0 && pUnit->Sensors)
