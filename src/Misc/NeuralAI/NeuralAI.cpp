@@ -6332,7 +6332,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// - Slot 59: Visible Map Crate to collect
 	// - Slot 60: Leading Heavy/Siege Tank for AA & Sensor Escort
 	UnitClass* pAttackedOwnHarvester = nullptr;
+	UnitClass* attackedOwnHarvesters[6] {};
+	int attackedOwnHarvCount = 0;
 	UnitClass* pVisibleEnemyHarvester = nullptr;
+	UnitClass* visibleEnemyHarvesters[6] {};
+	int visibleEnemyHarvCount = 0;
 	UnitClass* pEnemySlaveMiner = nullptr;
 	UnitClass* pLeadHeavyTank = nullptr;
 	UnitClass* pLeadWarship = nullptr;
@@ -6342,6 +6346,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	InfantryClass* pSampleEnemyInfantry = nullptr;
 	InfantryClass* pEnemySpecialistInf = nullptr;
 	TechnoClass* pDetectedEnemyInfiltrator = nullptr;
+	TechnoClass* detectedEnemyInfiltrators[8] {};
+	int detectedInfiltratorCount = 0;
 	TechnoClass* pHiddenOrStealthEnemy = nullptr;
 	UnitClass* pEnemySubOrShip = nullptr;
 
@@ -6356,8 +6362,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	TechnoClass* pEnemyArtilleryUnit = nullptr;
 	UnitClass* pWoundedEnemyVehicle = nullptr;
 	BuildingClass* pSurgicalEnemyBld = nullptr;
+	BuildingClass* surgicalEnemyBlds[8] {};
+	int surgicalEnemyBldCount = 0;
 	BuildingClass* pPrioritySiegeBld = nullptr;
 	BuildingClass* pEnemyGarrisonToClear = nullptr;
+	BuildingClass* enemyGarrisonsToClear[6] {};
+	int enemyGarrisonCount = 0;
 	BuildingClass* pDamagedUrbanToRepair = nullptr;
 	BuildingClass* pGrinderBld = nullptr;
 	BuildingClass* pEmptyTankBunker = nullptr;
@@ -6418,7 +6428,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if ((pCheckU->Type->Harvester || pCheckU->Type->ResourceGatherer)
 				&& (pCheckU->HasBeenAttacked || pCheckU->GetHealthPercentage() < 0.90))
 			{
-				pAttackedOwnHarvester = pCheckU;
+				if (!pAttackedOwnHarvester)
+					pAttackedOwnHarvester = pCheckU;
+
+				if (attackedOwnHarvCount < 6)
+					attackedOwnHarvesters[attackedOwnHarvCount++] = pCheckU;
 			}
 			else if (!pLeadHeavyTank && !pCheckU->Type->Naval && !pCheckU->Type->Harvester
 				&& !pCheckU->Type->ResourceGatherer)
@@ -6434,8 +6448,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			if (pCheckU->GetCell() && IsCellVisibleToAI(pHouse, pCheckU->GetCell()))
 			{
-				if (!pVisibleEnemyHarvester && (pCheckU->Type->Harvester || pCheckU->Type->ResourceGatherer))
-					pVisibleEnemyHarvester = pCheckU;
+				if (pCheckU->Type->Harvester || pCheckU->Type->ResourceGatherer)
+				{
+					if (!pVisibleEnemyHarvester)
+						pVisibleEnemyHarvester = pCheckU;
+
+					if (visibleEnemyHarvCount < 6)
+						visibleEnemyHarvesters[visibleEnemyHarvCount++] = pCheckU;
+				}
 
 				if (!pEnemySlaveMiner && pCheckU->Type->Enslaves != nullptr)
 					pEnemySlaveMiner = pCheckU;
@@ -6471,10 +6491,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!pEnemyArtilleryUnit && pEW && (pEW->Range >= (8 * 256) || pEW->Spawner) && !pCheckU->Type->Naval)
 					pEnemyArtilleryUnit = pCheckU;
 
-				if (!pDetectedEnemyInfiltrator && pCheckU->Disguised && homeCoords != CellStruct::Empty
+				if (pCheckU->Disguised && homeCoords != CellStruct::Empty
 					&& pCheckU->GetMapCoords().DistanceFrom(homeCoords) <= 22.0)
 				{
-					pDetectedEnemyInfiltrator = pCheckU;
+					if (!pDetectedEnemyInfiltrator)
+						pDetectedEnemyInfiltrator = pCheckU;
+
+					if (detectedInfiltratorCount < 8)
+						detectedEnemyInfiltrators[detectedInfiltratorCount++] = pCheckU;
 				}
 
 				if (pCheckU->Type->Naval
@@ -6542,12 +6566,90 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pEnemySpecialistInf = pCheckInf;
 		}
 
-		if (!pDetectedEnemyInfiltrator && homeCoords != CellStruct::Empty
+		if (homeCoords != CellStruct::Empty
 			&& (pCheckInf->Disguised || pCheckInf->Type->Infiltrate || pCheckInf->Type->Engineer
-				|| pCheckInf->Type->Thief || pCheckInf->Type->VehicleThief || pCheckInf->Type->C4)
-			&& pCheckInf->GetMapCoords().DistanceFrom(homeCoords) <= 20.0)
+				|| pCheckInf->Type->Thief || pCheckInf->Type->VehicleThief || pCheckInf->Type->C4
+				|| pCheckInf->Type->Ivan)
+			&& pCheckInf->GetMapCoords().DistanceFrom(homeCoords) <= 22.0)
 		{
-			pDetectedEnemyInfiltrator = pCheckInf;
+			if (!pDetectedEnemyInfiltrator)
+				pDetectedEnemyInfiltrator = pCheckInf;
+
+			if (detectedInfiltratorCount < 8)
+				detectedEnemyInfiltrators[detectedInfiltratorCount++] = pCheckInf;
+		}
+	}
+
+	struct IncomingAirFlank
+	{
+		FootClass* Target { nullptr };
+		int AssignedInterceptors { 0 };
+	};
+
+	IncomingAirFlank baseAirFlanks[8] {};
+	int baseAirFlankCount = 0;
+
+	if (homeCoords != CellStruct::Empty)
+	{
+		for (auto const pTech : TechnoClass::Array)
+		{
+			if (!pTech || pTech->InLimbo || !pTech->IsAlive || !pTech->Owner)
+				continue;
+
+			if (pTech->Owner == pHouse || pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral())
+				continue;
+
+			auto const pAirFoot = abstract_cast<FootClass*>(pTech);
+
+			if (!pAirFoot)
+				continue;
+
+			const bool isAirborneThreat = (pAirFoot->WhatAmI() == AbstractType::Aircraft || pAirFoot->IsInAir()
+				|| pAirFoot->GetHeight() > 20);
+
+			if (!isAirborneThreat || !pAirFoot->GetCell() || !IsCellVisibleToAI(pHouse, pAirFoot->GetCell()))
+				continue;
+
+			const CellStruct ac = pAirFoot->GetMapCoords();
+			bool threatensBase = (ac.DistanceFrom(homeCoords) <= 22.0);
+
+			if (!threatensBase)
+			{
+				for (auto const pOwnB : pHouse->Buildings)
+				{
+					if (pOwnB && !pOwnB->InLimbo && pOwnB->IsAlive
+						&& ac.DistanceFrom(pOwnB->GetMapCoords()) <= 15.0)
+					{
+						threatensBase = true;
+						break;
+					}
+				}
+			}
+
+			if (threatensBase && baseAirFlankCount < 8)
+			{
+				int interceptors = 0;
+
+				for (auto const pOwnU : UnitClass::Array)
+				{
+					if (pOwnU && pOwnU->Owner == pHouse && !pOwnU->InLimbo && pOwnU->IsAlive
+						&& pOwnU->Target == pAirFoot)
+					{
+						interceptors++;
+					}
+				}
+
+				for (auto const pOwnI : InfantryClass::Array)
+				{
+					if (pOwnI && pOwnI->Owner == pHouse && !pOwnI->InLimbo && pOwnI->IsAlive
+						&& pOwnI->Target == pAirFoot)
+					{
+						interceptors++;
+					}
+				}
+
+				baseAirFlanks[baseAirFlankCount++] = { pAirFoot, interceptors };
+			}
 		}
 	}
 
@@ -6594,8 +6696,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pEBld->GetCell() || !IsCellVisibleToAI(pHouse, pEBld->GetCell()))
 			continue;
 
-		if (pEBld->Type->CanBeOccupied && pEBld->Occupants.Count > 0 && !pEnemyGarrisonToClear)
-			pEnemyGarrisonToClear = pEBld;
+		if (pEBld->Type->CanBeOccupied && pEBld->Occupants.Count > 0)
+		{
+			if (!pEnemyGarrisonToClear)
+				pEnemyGarrisonToClear = pEBld;
+
+			if (enemyGarrisonCount < 6)
+				enemyGarrisonsToClear[enemyGarrisonCount++] = pEBld;
+		}
 
 		if (pEBld->Type->Capturable && pEBld->Type->ConstructionYard && !pCapturableEnemyConYard)
 			pCapturableEnemyConYard = pEBld;
@@ -6609,6 +6717,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				pSurgicalEnemyBld = pEBld;
 			}
+
+			if (surgicalEnemyBldCount < 8)
+				surgicalEnemyBlds[surgicalEnemyBldCount++] = pEBld;
 		}
 
 		if (scores[57] > 150)
@@ -8259,16 +8370,55 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Slot 74 (Anti-Drain Floating Disc Interceptor): Mobile AA units
-		// immediately shoot down any enemy Floating Disc draining our buildings!
-		if (pEnemyDrainer && pPrimaryWpn && pPrimaryWpn->Projectile && pPrimaryWpn->Projectile->AA && scores[74] > 60
-			&& pUnit->DistanceFrom(pEnemyDrainer) <= 4608)
+		const auto pSecondaryWpn = pType->GetWeapon(1) ? pType->GetWeapon(1)->WeaponType : nullptr;
+		const bool hasMobileAAWeapon = (pPrimaryWpn && pPrimaryWpn->Projectile && pPrimaryWpn->Projectile->AA)
+			|| (pSecondaryWpn && pSecondaryWpn->Projectile && pSecondaryWpn->Projectile->AA);
+
+		// Slot 74 (Anti-Drain Floating Disc Interceptor & Multi-Flank Mobile AA Defense):
+		// Mobile AA units immediately shoot down any enemy Floating Disc draining our buildings,
+		// and distribute across multiple simultaneous incoming airborne flanks near our base!
+		if (pEnemyDrainer && hasMobileAAWeapon && scores[74] > 60 && pUnit->DistanceFrom(pEnemyDrainer) <= 4608)
 		{
 			pUnit->SetTarget(pEnemyDrainer);
 
 			pUnit->QueueMission(Mission::Attack, true);
 
 			continue;
+		}
+
+		if (baseAirFlankCount > 0 && hasMobileAAWeapon && isUnitIdle)
+		{
+			int bestAirIdx = -1;
+			int bestAirCost = 999999;
+
+			for (int ai = 0; ai < baseAirFlankCount; ++ai)
+			{
+				auto const pAirT = baseAirFlanks[ai].Target;
+
+				if (!pAirT || pAirT->InLimbo || !pAirT->IsAlive)
+					continue;
+
+				const int distAir = pUnit->DistanceFrom(pAirT);
+
+				if (distAir > 5632)
+					continue;
+
+				const int balancedScore = distAir + (baseAirFlanks[ai].AssignedInterceptors * 1536);
+
+				if (balancedScore < bestAirCost)
+				{
+					bestAirCost = balancedScore;
+					bestAirIdx = ai;
+				}
+			}
+
+			if (bestAirIdx >= 0)
+			{
+				auto const pBestAir = baseAirFlanks[bestAirIdx].Target;
+				baseAirFlanks[bestAirIdx].AssignedInterceptors++;
+				DispatchFootToTargetOrTransport(pUnit, pBestAir, Mission::Attack, true);
+				continue;
+			}
 		}
 
 		// Slot 77 (Wounded Frontline Tank Pull-Back Micro): When our tank is
@@ -8322,15 +8472,34 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		// Slot 79 (Surgical Enemy Power, Superweapon & Factory Snipe): When inside
-		// range of a critical enemy structure, prioritize it over walls/silos!
-		// Only when already within immediate firing range (+1.5 cells), prioritize
-		// a critical structure over adjacent walls/silos without suicidally driving
-		// deep through the enemy base!
-		if (pSurgicalEnemyBld && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Damage > 0 && scores[79] > 80
-			&& pUnit->DistanceFrom(pSurgicalEnemyBld) <= std::max(1280, static_cast<int>(pPrimaryWpn->Range) + 384))
+		// range of a critical enemy structure, prioritize the nearest one over walls/silos!
+		if (surgicalEnemyBldCount > 0 && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Damage > 0 && scores[79] > 80)
 		{
-			DispatchFootToTargetOrTransport(pUnit, pSurgicalEnemyBld, Mission::Attack, true);
-			continue;
+			const int maxSnipeDist = std::max(1280, static_cast<int>(pPrimaryWpn->Range) + 384);
+			BuildingClass* pNearestSurgical = nullptr;
+			int bestSurgDist = maxSnipeDist + 1;
+
+			for (int si = 0; si < surgicalEnemyBldCount; ++si)
+			{
+				auto const pCandBld = surgicalEnemyBlds[si];
+
+				if (!pCandBld || pCandBld->InLimbo || !pCandBld->IsAlive)
+					continue;
+
+				const int d = pUnit->DistanceFrom(pCandBld);
+
+				if (d <= maxSnipeDist && d < bestSurgDist)
+				{
+					bestSurgDist = d;
+					pNearestSurgical = pCandBld;
+				}
+			}
+
+			if (pNearestSurgical)
+			{
+				DispatchFootToTargetOrTransport(pUnit, pNearestSurgical, Mission::Attack, true);
+				continue;
+			}
 		}
 
 		// Slot 80 (Fast Flanker & Jumpjet Counter-Battery vs Enemy Artillery):
@@ -8489,32 +8658,76 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Slot 56 (Own Harvester Defense & Enemy Harvester Eco-Raid):
-		if (pAttackedOwnHarvester && isUnitIdle && pUnit->DistanceFrom(pAttackedOwnHarvester) <= 4608)
+		// Slot 56 (Own Harvester Defense & Enemy Harvester Eco-Raid - Multi-Instance Nearest Match):
+		if (attackedOwnHarvCount > 0 && isUnitIdle)
 		{
-			if (auto const pHarvCell = pAttackedOwnHarvester->GetCell())
-			{
-				DispatchFootToTargetOrTransport(pUnit, pHarvCell, Mission::AttackMove, false);
+			UnitClass* pNearestAttackedHarv = nullptr;
+			int bestOwnHarvDist = 4609;
 
-				continue;
+			for (int hi = 0; hi < attackedOwnHarvCount; ++hi)
+			{
+				auto const pCandH = attackedOwnHarvesters[hi];
+
+				if (!pCandH || pCandH->InLimbo || !pCandH->IsAlive)
+					continue;
+
+				const int d = pUnit->DistanceFrom(pCandH);
+
+				if (d <= 4608 && d < bestOwnHarvDist)
+				{
+					bestOwnHarvDist = d;
+					pNearestAttackedHarv = pCandH;
+				}
+			}
+
+			if (pNearestAttackedHarv)
+			{
+				if (auto const pHarvCell = pNearestAttackedHarv->GetCell())
+				{
+					DispatchFootToTargetOrTransport(pUnit, pHarvCell, Mission::AttackMove, false);
+
+					continue;
+				}
 			}
 		}
-		else if (pVisibleEnemyHarvester && isUnitIdle && scores[56] > 220 && pType->Speed >= 6
-			&& pUnit->DistanceFrom(pVisibleEnemyHarvester) <= 4608)
+
+		if (visibleEnemyHarvCount > 0 && isUnitIdle && scores[56] > 220 && pType->Speed >= 6)
 		{
-			const int distHarv = pUnit->DistanceFrom(pVisibleEnemyHarvester);
-			const int wpnRange = pPrimaryWpn ? static_cast<int>(pPrimaryWpn->Range) : 1280;
-			if (distHarv <= wpnRange + 384)
+			UnitClass* pNearestEnemyHarv = nullptr;
+			int bestEnemyHarvDist = 4609;
+
+			for (int hi = 0; hi < visibleEnemyHarvCount; ++hi)
 			{
-				DispatchFootToTargetOrTransport(pUnit, pVisibleEnemyHarvester, Mission::Attack, true);
-				continue;
+				auto const pCandEH = visibleEnemyHarvesters[hi];
+
+				if (!pCandEH || pCandEH->InLimbo || !pCandEH->IsAlive)
+					continue;
+
+				const int d = pUnit->DistanceFrom(pCandEH);
+
+				if (d <= 4608 && d < bestEnemyHarvDist)
+				{
+					bestEnemyHarvDist = d;
+					pNearestEnemyHarv = pCandEH;
+				}
 			}
-			else if (auto const pEnemyHarvCell = pVisibleEnemyHarvester->GetCell())
+
+			if (pNearestEnemyHarv)
 			{
-				// Use AttackMove when approaching an enemy harvester so raiders fight
-				// back against any enemy units/defenses blocking the path!
-				DispatchFootToTargetOrTransport(pUnit, pEnemyHarvCell, Mission::AttackMove, false);
-				continue;
+				const int wpnRange = pPrimaryWpn ? static_cast<int>(pPrimaryWpn->Range) : 1280;
+
+				if (bestEnemyHarvDist <= wpnRange + 384)
+				{
+					DispatchFootToTargetOrTransport(pUnit, pNearestEnemyHarv, Mission::Attack, true);
+					continue;
+				}
+				else if (auto const pEnemyHarvCell = pNearestEnemyHarv->GetCell())
+				{
+					// Use AttackMove when approaching an enemy harvester so raiders fight
+					// back against any enemy units/defenses blocking the path!
+					DispatchFootToTargetOrTransport(pUnit, pEnemyHarvCell, Mission::AttackMove, false);
+					continue;
+				}
 			}
 		}
 
@@ -8522,12 +8735,34 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Units with PenetratesBunker=yes kill enemy occupants inside civilian
 		// structures without demolishing the building so our infantry can take it!
 		// Long-range siege vehicles prioritize enemy garrisons & base defenses!
-		if (pEnemyGarrisonToClear && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Warhead
-			&& pPrimaryWpn->Warhead->PenetratesBunker
-			&& pUnit->DistanceFrom(pEnemyGarrisonToClear) <= std::max(1536, static_cast<int>(pPrimaryWpn->Range) + 512))
+		if (enemyGarrisonCount > 0 && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Warhead
+			&& pPrimaryWpn->Warhead->PenetratesBunker)
 		{
-			DispatchFootToTargetOrTransport(pUnit, pEnemyGarrisonToClear, Mission::Attack, true);
-			continue;
+			const int maxGarrDist = std::max(1536, static_cast<int>(pPrimaryWpn->Range) + 512);
+			BuildingClass* pNearestGarr = nullptr;
+			int bestGarrDist = maxGarrDist + 1;
+
+			for (int gi = 0; gi < enemyGarrisonCount; ++gi)
+			{
+				auto const pCandG = enemyGarrisonsToClear[gi];
+
+				if (!pCandG || pCandG->InLimbo || !pCandG->IsAlive || pCandG->Occupants.Count <= 0)
+					continue;
+
+				const int d = pUnit->DistanceFrom(pCandG);
+
+				if (d <= maxGarrDist && d < bestGarrDist)
+				{
+					bestGarrDist = d;
+					pNearestGarr = pCandG;
+				}
+			}
+
+			if (pNearestGarr)
+			{
+				DispatchFootToTargetOrTransport(pUnit, pNearestGarr, Mission::Attack, true);
+				continue;
+			}
 		}
 
 		if (pPrioritySiegeBld && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Range >= (7 * 256)
@@ -9775,33 +10010,283 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// Spy Full-Spectrum Sabotage: Infiltrate Enemy Power Plants (Blackout!),
-		// Battle Labs (Secret Tech!), Superweapons, Refineries & Factories
+		// Spy Full-Spectrum Sabotage, Multi-Spy Role Coordination & Pre-Attack Power Plant Staging:
+		// 1) Multiple Spies coordinate so each targets a distinct building/role:
+		//    - Un-infiltrated War Factory / Barracks so newly built units spawn Veteran!
+		//    - Enemy Radar when our AI lacks SpySat / radar vision on that enemy!
+		//    - Enemy Refinery / Silos when we need credits and the enemy has funds!
+		//    - Lightly guarded Enemy Power Plants to black out powered defenses!
+		//    - Enemy Superweapons & Battle Labs (Secret Tech)!
+		// 2) Pre-Attack Power Plant Blackout Staging: When targeting an enemy Power Plant
+		//    while our army is assembling (not yet attacking that enemy house), wait disguised
+		//    5..10 cells away if safe from detectors, and immediately infiltrate as soon as
+		//    our attack wave launches/approaches (or if an enemy detector gets close)!
+		if (pInf->Type->Infiltrate)
+		{
+			BuildingClass* pStagedPowerBld = abstract_cast<BuildingClass*>(
+				pInf->Destination ? pInf->Destination : pInf->ArchiveTarget);
+
+			if (!pStagedPowerBld || !pStagedPowerBld->IsAlive || pStagedPowerBld->InLimbo || !pStagedPowerBld->Owner
+				|| pHouse->IsAlliedWith(pStagedPowerBld->Owner) || pStagedPowerBld->Owner->IsNeutral()
+				|| !pStagedPowerBld->Type || pStagedPowerBld->Type->PowerBonus <= pStagedPowerBld->Type->PowerDrain)
+			{
+				pStagedPowerBld = nullptr;
+
+				if (isIdle)
+				{
+					for (auto const pCandPwr : BuildingClass::Array)
+					{
+						if (!pCandPwr || pCandPwr->InLimbo || !pCandPwr->IsAlive || !pCandPwr->Owner || !pCandPwr->Type)
+							continue;
+
+						if (pHouse->IsAlliedWith(pCandPwr->Owner) || pCandPwr->Owner->IsNeutral())
+							continue;
+
+						if (pCandPwr->Type->Spyable && pCandPwr->Type->PowerBonus > pCandPwr->Type->PowerDrain
+							&& pInf->DistanceFrom(pCandPwr) <= 2816)
+						{
+							pStagedPowerBld = pCandPwr;
+							break;
+						}
+					}
+				}
+			}
+
+			if (pStagedPowerBld && pInf->Disguised)
+			{
+				const int distToPwr = pInf->DistanceFrom(pStagedPowerBld);
+
+				if (distToPwr >= 1024 && distToPwr <= 2816)
+				{
+					HouseClass* const pPwrOwner = pStagedPowerBld->Owner;
+					bool detectorDangerNearSpy = pInf->HasBeenAttacked;
+
+					if (!detectorDangerNearSpy)
+					{
+						for (auto const pDetI : InfantryClass::Array)
+						{
+							if (!pDetI || pDetI->InLimbo || !pDetI->IsAlive || !pDetI->Owner || !pDetI->Type)
+								continue;
+
+							if (pHouse->IsAlliedWith(pDetI->Owner) || pDetI->Owner->IsNeutral())
+								continue;
+
+							if ((pDetI->Type->Doggie || pDetI->Type->DetectDisguise || pDetI->Type->Sensors)
+								&& pInf->DistanceFrom(pDetI) <= 1664)
+							{
+								detectorDangerNearSpy = true;
+								break;
+							}
+						}
+					}
+
+					if (!detectorDangerNearSpy)
+					{
+						for (auto const pDetU : UnitClass::Array)
+						{
+							if (!pDetU || pDetU->InLimbo || !pDetU->IsAlive || !pDetU->Owner || !pDetU->Type)
+								continue;
+
+							if (pHouse->IsAlliedWith(pDetU->Owner) || pDetU->Owner->IsNeutral())
+								continue;
+
+							if (pDetU->Type->Sensors && pInf->DistanceFrom(pDetU) <= 1664)
+							{
+								detectorDangerNearSpy = true;
+								break;
+							}
+						}
+					}
+
+					bool enemyHasPoweredDefenses = false;
+					for (auto const pEB : pPwrOwner->Buildings)
+					{
+						if (pEB && !pEB->InLimbo && pEB->IsAlive && pEB->Type && pEB->Type->IsBaseDefense
+							&& (pEB->Type->Powered || pEB->Type->PoweredSpecial))
+						{
+							enemyHasPoweredDefenses = true;
+							break;
+						}
+					}
+
+					int friendlyWaveApproachingEnemy = 0;
+					const CellStruct pwrCoords = pStagedPowerBld->GetMapCoords();
+
+					for (auto const pOwnU : UnitClass::Array)
+					{
+						if (!pOwnU || pOwnU->Owner != pHouse || pOwnU->InLimbo || !pOwnU->IsAlive || !pOwnU->Type
+							|| pOwnU->Type->Harvester || pOwnU->Type->ResourceGatherer)
+						{
+							continue;
+						}
+
+						if (pOwnU->GetMapCoords().DistanceFrom(pwrCoords) <= 26.0
+							|| (IsFootActivelyAttackingOrMovingToEnemy(pOwnU)
+								&& pOwnU->GetMapCoords().DistanceFrom(pwrCoords) <= 38.0))
+						{
+							friendlyWaveApproachingEnemy++;
+							if (friendlyWaveApproachingEnemy >= 2)
+								break;
+						}
+					}
+
+					const bool blackoutAlreadyActive = (pPwrOwner->PowerBlackoutTimer.GetTimeLeft() > 150);
+					const bool shouldWaitForWave = !detectorDangerNearSpy && enemyHasPoweredDefenses
+						&& !blackoutAlreadyActive && friendlyWaveApproachingEnemy < 2
+						&& (pHouse->OwnedUnits + pHouse->OwnedInfantry >= 4) && distToPwr >= 1280 && distToPwr <= 2560;
+
+					if (shouldWaitForWave)
+					{
+						if (pInf->CurrentMission != Mission::Guard)
+						{
+							pInf->SetDestination(nullptr, true);
+							pInf->QueueMission(Mission::Guard, true);
+						}
+
+						continue;
+					}
+					else if (isIdle && !blackoutAlreadyActive)
+					{
+						DispatchFootToTargetOrTransport(pInf, pStagedPowerBld, Mission::Enter, false);
+						pExt->AIBrain_InfiltratedEnemyMask |= (1 << std::clamp(pPwrOwner->ArrayIndex, 0, 7));
+						continue;
+					}
+				}
+			}
+		}
+
 		if (pInf->Type->Infiltrate && isIdle)
 		{
 			BuildingClass* pBestSpyTarget = nullptr;
-			int bestSpyScore = -1;
+			int bestSpyScore = -9999;
+			const int ourMoney = pHouse->Available_Money();
 
 			for (auto const pEnemyBld : BuildingClass::Array)
 			{
 				if (!pEnemyBld || pEnemyBld->InLimbo || !pEnemyBld->IsAlive || !pEnemyBld->Owner || !pEnemyBld->Type)
 					continue;
 
-				if (pHouse->IsAlliedWith(pEnemyBld->Owner) || pEnemyBld->Owner->IsNeutral())
+				if (!pEnemyBld->Type->Spyable || pHouse->IsAlliedWith(pEnemyBld->Owner)
+					|| pEnemyBld->Owner->IsNeutral())
+				{
 					continue;
+				}
 
+				HouseClass* const pEnemyOwner = pEnemyBld->Owner;
 				int spyScore = 0;
 
 				if (pEnemyBld->Type->SuperWeapon != -1)
-					spyScore = 100; // Reset enemy Superweapon countdown!
-				else if (pEnemyBld->Type->Refinery)
-					spyScore = 90; // Steal enemy credits!
-				else if (pEnemyBld->Type->PowerBonus > 0)
-					spyScore = 85; // Black out enemy base defenses!
-				else if (pEnemyBld->Type->Factory != AbstractType::None)
-					spyScore = 80; // Gain Veteran production!
+				{
+					spyScore = enemySuperImminent ? 160 : 125;
+				}
+				else if (pEnemyBld->Type->Factory == AbstractType::UnitType && !pEnemyBld->Type->Naval)
+				{
+					// Unlock Veteran Vehicle production if our House hasn't infiltrated a War Factory yet!
+					spyScore = !pHouse->WarFactoryInfiltrated ? 145 : 15;
+				}
+				else if (pEnemyBld->Type->Factory == AbstractType::InfantryType)
+				{
+					// Unlock Veteran Infantry production if our House hasn't infiltrated a Barracks yet!
+					spyScore = !pHouse->BarracksInfiltrated ? 135 : 15;
+				}
+				else if (pEnemyBld->Type->Factory == AbstractType::AircraftType || pEnemyBld->Type->Helipad)
+				{
+					spyScore = 95;
+				}
+				else if (pEnemyBld->Type->Radar || pEnemyBld->Type->SpySat)
+				{
+					// Gain enemy Radar / map vision when our AI lacks SpySat and hasn't spied this enemy's radar!
+					const bool alreadyHaveRadarVision
+						= pHouse->SpySatActive || pEnemyOwner->RadarVisibleTo.Contains(pHouse->ArrayIndex);
+					spyScore = !alreadyHaveRadarVision ? 130 : 35;
+				}
+				else if (pEnemyBld->Type->Refinery || pEnemyBld->Type->Storage > 0)
+				{
+					const int enemyMoney = pEnemyOwner->Available_Money();
+					if (enemyMoney < 300)
+						spyScore = 25;
+					else if (ourMoney < 2500 && enemyMoney >= 800)
+						spyScore = 150;
+					else
+						spyScore = 105;
+				}
+				else if (pEnemyBld->Type->PowerBonus > pEnemyBld->Type->PowerDrain)
+				{
+					if (pEnemyOwner->PowerBlackoutTimer.GetTimeLeft() > 150)
+					{
+						spyScore = 15;
+					}
+					else
+					{
+						bool ownerHasPoweredDef = false;
+						for (auto const pEB : pEnemyOwner->Buildings)
+						{
+							if (pEB && !pEB->InLimbo && pEB->IsAlive && pEB->Type && pEB->Type->IsBaseDefense
+								&& (pEB->Type->Powered || pEB->Type->PoweredSpecial))
+							{
+								ownerHasPoweredDef = true;
+								break;
+							}
+						}
+
+						spyScore = ownerHasPoweredDef ? 142 : 115;
+					}
+				}
 				else if (pEnemyBld->Type->TechLevel >= 6)
-					spyScore = 75; // Battle Lab / Radar sabotage!
+				{
+					const int eSide = pEnemyOwner->SideIndex;
+					const bool needStolenTech = (eSide == 0 && !pHouse->Side0TechInfiltrated)
+						|| (eSide == 1 && !pHouse->Side1TechInfiltrated)
+						|| (eSide == 2 && !pHouse->Side2TechInfiltrated);
+					spyScore = needStolenTech ? 128 : 55;
+				}
+
+				if (spyScore <= 0)
+					continue;
+
+				// De-duplicate across multiple friendly Spies so each Spy picks a distinct target/role!
+				for (auto const pOtherSpy : InfantryClass::Array)
+				{
+					if (!pOtherSpy || pOtherSpy == pInf || pOtherSpy->Owner != pHouse || pOtherSpy->InLimbo
+						|| !pOtherSpy->IsAlive || !pOtherSpy->Type || !pOtherSpy->Type->Infiltrate)
+					{
+						continue;
+					}
+
+					if (pOtherSpy->Destination == pEnemyBld || pOtherSpy->ArchiveTarget == pEnemyBld
+						|| LookupPassengerIslandGoal(pOtherSpy->UniqueID) == pEnemyBld->GetMapCoords()
+						|| (pOtherSpy->CurrentMission == Mission::Guard && pOtherSpy->DistanceFrom(pEnemyBld) <= 2816))
+					{
+						spyScore -= 500;
+						break;
+					}
+				}
+
+				// Prefer lightly guarded buildings: penalize nearby enemy dogs/detectors and defense turrets!
+				int detectorPenalty = 0;
+				for (auto const pDetI : InfantryClass::Array)
+				{
+					if (pDetI && !pDetI->InLimbo && pDetI->IsAlive && pDetI->Owner && !pHouse->IsAlliedWith(pDetI->Owner)
+						&& !pDetI->Owner->IsNeutral() && pDetI->Type
+						&& (pDetI->Type->Doggie || pDetI->Type->DetectDisguise || pDetI->Type->Sensors)
+						&& pEnemyBld->DistanceFrom(pDetI) <= 2048)
+					{
+						detectorPenalty += 35;
+					}
+				}
+
+				int turretPenalty = 0;
+				for (auto const pDefB : pEnemyOwner->Buildings)
+				{
+					if (pDefB && !pDefB->InLimbo && pDefB->IsAlive && pDefB->Type && pDefB->Type->IsBaseDefense
+						&& pEnemyBld->DistanceFrom(pDefB) <= 1792)
+					{
+						turretPenalty += 10;
+					}
+				}
+
+				spyScore -= std::min(140, detectorPenalty + turretPenalty);
+				spyScore -= (pInf->DistanceFrom(pEnemyBld) / 1024);
 
 				if (spyScore > bestSpyScore)
 				{
@@ -9821,12 +10306,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Credit Thief (Thief=yes): Infiltrate enemy Refineries & Ore Silos to
-		// steal 50% of the enemy house's credits!
+		// Credit Thief (Thief=yes): Coordinate multiple Thieves to infiltrate distinct
+		// enemy Refineries & Ore Silos (preferring solvent enemy houses)!
 		if (pInf->Type->Thief && !pInf->Type->Infiltrate && isIdle)
 		{
 			BuildingClass* pBestThiefTarget = nullptr;
-			int bestThiefDist = 999999;
+			int bestThiefScore = -999999;
 
 			for (auto const pEnemyBld : BuildingClass::Array)
 			{
@@ -9838,11 +10323,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (pEnemyBld->Type->Refinery || pEnemyBld->Type->Storage > 0)
 				{
-					const int d = pInf->DistanceFrom(pEnemyBld);
+					int thiefScore = 10000 - (pInf->DistanceFrom(pEnemyBld) / 16);
 
-					if (d < bestThiefDist)
+					if (pEnemyBld->Owner->Available_Money() >= 600)
+						thiefScore += 3000;
+
+					for (auto const pOtherThief : InfantryClass::Array)
 					{
-						bestThiefDist = d;
+						if (pOtherThief && pOtherThief != pInf && pOtherThief->Owner == pHouse && !pOtherThief->InLimbo
+							&& pOtherThief->IsAlive && pOtherThief->Type && pOtherThief->Type->Thief
+							&& (pOtherThief->Destination == pEnemyBld || pOtherThief->ArchiveTarget == pEnemyBld))
+						{
+							thiefScore -= 8000;
+							break;
+						}
+					}
+
+					if (thiefScore > bestThiefScore)
+					{
+						bestThiefScore = thiefScore;
 
 						pBestThiefTarget = pEnemyBld;
 					}
@@ -9857,12 +10356,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// Hijacker (VehicleThief=yes): Steal the most expensive visible enemy tank
-		// (Apocalypse, Mammoth Mk.II, Avatar, Prism Tank)!
+		// Hijacker (VehicleThief=yes): Coordinate multiple Hijackers so each steals a
+		// distinct expensive visible enemy tank (Apocalypse, Mammoth Mk.II, Avatar, Prism Tank)!
 		if (pInf->Type->VehicleThief && isIdle)
 		{
 			UnitClass* pBestStealTank = nullptr;
-			int bestTankCost = 700;
+			int bestTankScore = 700;
 
 			for (auto const pEnemyU : UnitClass::Array)
 			{
@@ -9876,11 +10375,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 
 				if (pEnemyU->GetCell() && IsCellVisibleToAI(pHouse, pEnemyU->GetCell())
-					&& pEnemyU->Type->Cost > bestTankCost && pInf->DistanceFrom(pEnemyU) <= 5120)
+					&& pInf->DistanceFrom(pEnemyU) <= 5120)
 				{
-					bestTankCost = pEnemyU->Type->Cost;
+					bool alreadyTargetedByOtherHijacker = false;
 
-					pBestStealTank = pEnemyU;
+					for (auto const pOtherHij : InfantryClass::Array)
+					{
+						if (pOtherHij && pOtherHij != pInf && pOtherHij->Owner == pHouse && !pOtherHij->InLimbo
+							&& pOtherHij->IsAlive && pOtherHij->Type && pOtherHij->Type->VehicleThief
+							&& (pOtherHij->Destination == pEnemyU || pOtherHij->ArchiveTarget == pEnemyU))
+						{
+							alreadyTargetedByOtherHijacker = true;
+							break;
+						}
+					}
+
+					const int stealScore = pEnemyU->Type->Cost - (alreadyTargetedByOtherHijacker ? 5000 : 0);
+
+					if (stealScore > bestTankScore)
+					{
+						bestTankScore = stealScore;
+
+						pBestStealTank = pEnemyU;
+					}
 				}
 			}
 
@@ -9892,16 +10409,54 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// Slot 61 (Guard Dogs & Counter-Spy Detectors): Immediately intercept any
-		// enemy Spy, Engineer, Thief, Hijacker, or Commando approaching our base,
-		// or patrol around our ConYard!
+		// Slot 61 (Guard Dogs & Counter-Spy Detectors - Multi-Infiltrator Interception):
+		// Distribute Dogs/Detectors across all detected enemy Spies, Engineers, Thieves,
+		// Hijackers, or Commandos approaching our base!
 		if ((pInf->Type->Doggie || pInf->Type->DetectDisguise || pInf->Type->Sensors) && isIdle)
 		{
-			if (pDetectedEnemyInfiltrator && pInf->DistanceFrom(pDetectedEnemyInfiltrator) <= 3840)
+			if (detectedInfiltratorCount > 0)
 			{
-				DispatchFootToTargetOrTransport(pInf, pDetectedEnemyInfiltrator, Mission::Attack, true);
+				TechnoClass* pBestInfiltrator = nullptr;
+				int bestInfDistScore = 999999;
 
-				continue;
+				for (int di = 0; di < detectedInfiltratorCount; ++di)
+				{
+					auto const pCandInf = detectedEnemyInfiltrators[di];
+
+					if (!pCandInf || pCandInf->InLimbo || !pCandInf->IsAlive)
+						continue;
+
+					const int d = pInf->DistanceFrom(pCandInf);
+
+					if (d > 4608)
+						continue;
+
+					int dogsAlreadyChasing = 0;
+
+					for (auto const pOtherDog : InfantryClass::Array)
+					{
+						if (pOtherDog && pOtherDog != pInf && pOtherDog->Owner == pHouse && !pOtherDog->InLimbo
+							&& pOtherDog->IsAlive && (pOtherDog->Target == pCandInf || pOtherDog->Destination == pCandInf))
+						{
+							dogsAlreadyChasing++;
+						}
+					}
+
+					const int distScore = d + (dogsAlreadyChasing * 1536);
+
+					if (distScore < bestInfDistScore)
+					{
+						bestInfDistScore = distScore;
+						pBestInfiltrator = pCandInf;
+					}
+				}
+
+				if (pBestInfiltrator)
+				{
+					DispatchFootToTargetOrTransport(pInf, pBestInfiltrator, Mission::Attack, true);
+
+					continue;
+				}
 			}
 
 			if (pHiddenOrStealthEnemy && (Unsorted::CurrentFrame % 90 < 25))
@@ -9928,16 +10483,31 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// C4 Commandos (Tanya, Navy SEAL, Boris, Cyborg Commando): Demolish visible
-		// enemy Warships (if amphibious) or high-value enemy buildings!
+		// C4 Commandos (Tanya, Navy SEAL, Boris, Cyborg Commando): Coordinate multiple
+		// Commandos to demolish distinct visible enemy Warships (if amphibious) or buildings!
 		if (pInf->Type->C4 && isIdle)
 		{
 			TechnoClass* pBestC4Target = nullptr;
-			int bestC4Dist = 5120;
+			int bestC4Dist = 5632;
 
 			const bool canSwim = (pInf->Type->MovementZone == MovementZone::Amphibious
 				|| pInf->Type->MovementZone == MovementZone::AmphibiousDestroyer
 				|| pInf->Type->SpeedType == SpeedType::Hover);
+
+			auto IsTargetedByOtherC4 = [pInf, pHouse](const TechnoClass* pCand) -> bool
+			{
+				for (auto const pOtherC4 : InfantryClass::Array)
+				{
+					if (pOtherC4 && pOtherC4 != pInf && pOtherC4->Owner == pHouse && !pOtherC4->InLimbo
+						&& pOtherC4->IsAlive && pOtherC4->Type && pOtherC4->Type->C4
+						&& (pOtherC4->Target == pCand || pOtherC4->Destination == pCand))
+					{
+						return true;
+					}
+				}
+
+				return false;
+			};
 
 			if (canSwim)
 			{
@@ -9957,7 +10527,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 					if (pEnemyShip->GetCell() && IsCellVisibleToAI(pHouse, pEnemyShip->GetCell()))
 					{
-						const int d = pInf->DistanceFrom(pEnemyShip);
+						const int d = pInf->DistanceFrom(pEnemyShip) + (IsTargetedByOtherC4(pEnemyShip) ? 2560 : 0);
 
 						if (d < bestC4Dist)
 						{
@@ -9965,6 +10535,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 							pBestC4Target = pEnemyShip;
 						}
+					}
+				}
+			}
+
+			if (!pBestC4Target && surgicalEnemyBldCount > 0)
+			{
+				for (int si = 0; si < surgicalEnemyBldCount; ++si)
+				{
+					auto const pCandBld = surgicalEnemyBlds[si];
+
+					if (!pCandBld || pCandBld->InLimbo || !pCandBld->IsAlive || !pCandBld->Type->CanC4)
+						continue;
+
+					const int d = pInf->DistanceFrom(pCandBld) + (IsTargetedByOtherC4(pCandBld) ? 2560 : 0);
+
+					if (d < bestC4Dist)
+					{
+						bestC4Dist = d;
+						pBestC4Target = pCandBld;
 					}
 				}
 			}
@@ -10138,6 +10727,44 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Overpowerable Tesla Coils via Assaulter or IsElectricBolt weapon so they
 		// stay powered during LowPower and gain bonus range/damage!
 		const auto pSecWpn = pInf->Type->GetWeapon(1) ? pInf->Type->GetWeapon(1)->WeaponType : nullptr;
+		const bool hasInfAAWeapon = (pInfWpn && pInfWpn->Projectile && pInfWpn->Projectile->AA)
+			|| (pSecWpn && pSecWpn->Projectile && pSecWpn->Projectile->AA);
+
+		// Multi-Flank Mobile AA Infantry Interception (Flak Troopers, Guardian GIs):
+		if (baseAirFlankCount > 0 && hasInfAAWeapon && isIdle)
+		{
+			int bestInfAirIdx = -1;
+			int bestInfAirCost = 999999;
+
+			for (int ai = 0; ai < baseAirFlankCount; ++ai)
+			{
+				auto const pAirT = baseAirFlanks[ai].Target;
+
+				if (!pAirT || pAirT->InLimbo || !pAirT->IsAlive)
+					continue;
+
+				const int distAir = pInf->DistanceFrom(pAirT);
+
+				if (distAir > 4608)
+					continue;
+
+				const int balancedScore = distAir + (baseAirFlanks[ai].AssignedInterceptors * 1536);
+
+				if (balancedScore < bestInfAirCost)
+				{
+					bestInfAirCost = balancedScore;
+					bestInfAirIdx = ai;
+				}
+			}
+
+			if (bestInfAirIdx >= 0)
+			{
+				auto const pBestAir = baseAirFlanks[bestInfAirIdx].Target;
+				baseAirFlanks[bestInfAirIdx].AssignedInterceptors++;
+				DispatchFootToTargetOrTransport(pInf, pBestAir, Mission::Attack, true);
+				continue;
+			}
+		}
 
 		if (pOverpowerCoil && isIdle
 			&& (pInf->Type->Assaulter || (pInfWpn && pInfWpn->IsElectricBolt) || (pSecWpn && pSecWpn->IsElectricBolt))
@@ -10151,22 +10778,42 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		// Surgical Urban Garrison Clearing (Assaulter=yes or PenetratesBunker=yes):
-		// Evict/kill enemy occupants inside civilian buildings without destroying
-		// the structure so our Engineer can repair it and our infantry can occupy
-		// it!
-		if (pEnemyGarrisonToClear && isIdle && pInf->DistanceFrom(pEnemyGarrisonToClear) <= 3840)
+		// Evict/kill enemy occupants inside the nearest civilian building without destroying
+		// the structure so our Engineer can repair it and our infantry can occupy it!
+		if (enemyGarrisonCount > 0 && isIdle
+			&& (pInf->Type->Assaulter || (pInfWpn && pInfWpn->Warhead && pInfWpn->Warhead->PenetratesBunker)))
 		{
-			if (pInf->Type->Assaulter)
-			{
-				DispatchFootToTargetOrTransport(pInf, pEnemyGarrisonToClear, Mission::Enter, false);
+			BuildingClass* pNearestGarr = nullptr;
+			int bestInfGarrDist = 3841;
 
-				continue;
+			for (int gi = 0; gi < enemyGarrisonCount; ++gi)
+			{
+				auto const pCandG = enemyGarrisonsToClear[gi];
+
+				if (!pCandG || pCandG->InLimbo || !pCandG->IsAlive || pCandG->Occupants.Count <= 0)
+					continue;
+
+				const int d = pInf->DistanceFrom(pCandG);
+
+				if (d <= 3840 && d < bestInfGarrDist)
+				{
+					bestInfGarrDist = d;
+					pNearestGarr = pCandG;
+				}
 			}
-			else if (pInfWpn && pInfWpn->Warhead && pInfWpn->Warhead->PenetratesBunker)
-			{
-				DispatchFootToTargetOrTransport(pInf, pEnemyGarrisonToClear, Mission::Attack, true);
 
-				continue;
+			if (pNearestGarr)
+			{
+				if (pInf->Type->Assaulter)
+				{
+					DispatchFootToTargetOrTransport(pInf, pNearestGarr, Mission::Enter, false);
+					continue;
+				}
+				else
+				{
+					DispatchFootToTargetOrTransport(pInf, pNearestGarr, Mission::Attack, true);
+					continue;
+				}
 			}
 		}
 
