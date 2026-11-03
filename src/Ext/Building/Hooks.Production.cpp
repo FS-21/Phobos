@@ -36,10 +36,12 @@ DEFINE_HOOK(0x4401BB, BuildingClass_AI_PickWithFreeDocks, 0x6)
 
 DEFINE_HOOK(0x4502F4, BuildingClass_Update_Factory_Phobos, 0x6)
 {
-	GET(BuildingClass*, pThis, ESI);
-	const HouseClass* pOwner = pThis->Owner;
+	enum { Skip = 0x4503CA, Continue = 0x4502FA };
 
-	if (pOwner->Production && RulesExt::Global()->AllowParallelAIQueues)
+	GET(BuildingClass*, pThis, ESI);
+	HouseClass* const pOwner = pThis->Owner;
+
+	if (pOwner->Production)
 	{
 		auto const pOwnerExt = HouseExt::Fetch(pOwner);
 		auto const pFactory = pThis->Type->Factory;
@@ -64,59 +66,76 @@ DEFINE_HOOK(0x4502F4, BuildingClass_Update_Factory_Phobos, 0x6)
 			break;
 		}
 
-		if (!*currFactory)
+		if (currFactory)
 		{
-			*currFactory = pThis;
-			return 0;
-		}
-		else if (*currFactory != pThis)
-		{
-			enum { Skip = 0x4503CA };
-
-
-			TechnoTypeClass* pType = nullptr;
-			int index = -1;
-
-			switch (pFactory)
+			if (*currFactory && *currFactory != pThis)
 			{
-			case AbstractType::BuildingType:
-				if (RulesExt::Global()->ForbidParallelAIQueues_Building)
-					return Skip;
-
-				index = pOwner->ProducingBuildingTypeIndex;
-				pType = index >= 0 ? BuildingTypeClass::Array.GetItem(index) : nullptr;
-				break;
-			case AbstractType::InfantryType:
-				if (RulesExt::Global()->ForbidParallelAIQueues_Infantry)
-					return Skip;
-
-				index = pOwner->ProducingInfantryTypeIndex;
-				pType = index >= 0 ? InfantryTypeClass::Array.GetItem(index) : nullptr;
-				break;
-			case AbstractType::AircraftType:
-				if (RulesExt::Global()->ForbidParallelAIQueues_Aircraft)
-					return Skip;
-
-				index = pOwner->ProducingAircraftTypeIndex;
-				pType = index >= 0 ? AircraftTypeClass::Array.GetItem(index) : nullptr;
-				break;
-			case AbstractType::UnitType:
-				if (naval ? RulesExt::Global()->ForbidParallelAIQueues_Navy : RulesExt::Global()->ForbidParallelAIQueues_Vehicle)
-					return Skip;
-
-				index = naval ? HouseExt::Fetch(pOwner)->ProducingNavalUnitTypeIndex : pOwner->ProducingUnitTypeIndex;
-				pType = index >= 0 ? UnitTypeClass::Array.GetItem(index) : nullptr;
-				break;
-			default:
-				break;
+				auto const pCurr = *currFactory;
+				if (!pCurr->IsAlive || pCurr->InLimbo || pCurr->Owner != pOwner
+					|| pCurr->IsUnderEMP() || pCurr->Deactivated
+					|| pCurr->CurrentMission == Mission::Selling || pCurr->QueuedMission == Mission::Selling
+					|| !pCurr->Factory)
+				{
+					*currFactory = nullptr;
+				}
 			}
 
-			if (pType && TechnoTypeExt::Fetch(pType)->ForbidParallelAIQueues)
-				return Skip;
+			if (!*currFactory)
+			{
+				*currFactory = pThis;
+				R->EAX(pOwner);
+				return Continue;
+			}
+			else if (*currFactory != pThis)
+			{
+				if (!RulesExt::Global()->AllowParallelAIQueues)
+					return Skip;
+
+				TechnoTypeClass* pType = nullptr;
+				int index = -1;
+
+				switch (pFactory)
+				{
+				case AbstractType::BuildingType:
+					if (RulesExt::Global()->ForbidParallelAIQueues_Building)
+						return Skip;
+
+					index = pOwner->ProducingBuildingTypeIndex;
+					pType = index >= 0 ? BuildingTypeClass::Array.GetItem(index) : nullptr;
+					break;
+				case AbstractType::InfantryType:
+					if (RulesExt::Global()->ForbidParallelAIQueues_Infantry)
+						return Skip;
+
+					index = pOwner->ProducingInfantryTypeIndex;
+					pType = index >= 0 ? InfantryTypeClass::Array.GetItem(index) : nullptr;
+					break;
+				case AbstractType::AircraftType:
+					if (RulesExt::Global()->ForbidParallelAIQueues_Aircraft)
+						return Skip;
+
+					index = pOwner->ProducingAircraftTypeIndex;
+					pType = index >= 0 ? AircraftTypeClass::Array.GetItem(index) : nullptr;
+					break;
+				case AbstractType::UnitType:
+					if (naval ? RulesExt::Global()->ForbidParallelAIQueues_Navy : RulesExt::Global()->ForbidParallelAIQueues_Vehicle)
+						return Skip;
+
+					index = naval ? pOwnerExt->ProducingNavalUnitTypeIndex : pOwner->ProducingUnitTypeIndex;
+					pType = index >= 0 ? UnitTypeClass::Array.GetItem(index) : nullptr;
+					break;
+				default:
+					break;
+				}
+
+				if (pType && TechnoTypeExt::Fetch(pType)->ForbidParallelAIQueues)
+					return Skip;
+			}
 		}
 	}
 
-	return 0;
+	R->EAX(pOwner);
+	return Continue;
 }
 
 //const byte old_empty_log[] = { 0xC3 };
@@ -138,39 +157,26 @@ DEFINE_HOOK(0x4CA07A, FactoryClass_AbandonProduction_Phobos, 0x8)
 			, pTechno->get_ID());
 	}
 
-	if (!RulesExt::Global()->AllowParallelAIQueues)
-		return 0;
-
 	auto const pOwnerExt = HouseExt::Fetch(pFactory->Owner);
 	auto const pTypeExt = TechnoExt::Fetch(pTechno)->TypeExtData;
 	auto const pType = pTypeExt->OwnerObject();
-	const bool forbid = pTypeExt->ForbidParallelAIQueues;
 
 	switch (pTechno->WhatAmI())
 	{
 	case AbstractType::Building:
-		if (RulesExt::Global()->ForbidParallelAIQueues_Building || forbid)
-			pOwnerExt->Factory_BuildingType = nullptr;
+		pOwnerExt->Factory_BuildingType = nullptr;
 		break;
 	case AbstractType::Unit:
 		if (!pType->Naval)
-		{
-			if (RulesExt::Global()->ForbidParallelAIQueues_Vehicle || forbid)
-				pOwnerExt->Factory_VehicleType = nullptr;
-		}
+			pOwnerExt->Factory_VehicleType = nullptr;
 		else
-		{
-			if (RulesExt::Global()->ForbidParallelAIQueues_Navy || forbid)
-				pOwnerExt->Factory_NavyType = nullptr;
-		}
+			pOwnerExt->Factory_NavyType = nullptr;
 		break;
 	case AbstractType::Infantry:
-		if (RulesExt::Global()->ForbidParallelAIQueues_Infantry || forbid)
-			pOwnerExt->Factory_InfantryType = nullptr;
+		pOwnerExt->Factory_InfantryType = nullptr;
 		break;
 	case AbstractType::Aircraft:
-		if (RulesExt::Global()->ForbidParallelAIQueues_Aircraft || forbid)
-			pOwnerExt->Factory_AircraftType = nullptr;
+		pOwnerExt->Factory_AircraftType = nullptr;
 		break;
 	default:
 		break;
