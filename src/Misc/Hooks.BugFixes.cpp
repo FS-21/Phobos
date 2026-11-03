@@ -3793,3 +3793,43 @@ DEFINE_HOOK(0x6F1E54, TeamTypeClass_CanRecruitUnit_CrashOrSinking, 0x6)
 	return (pUnit->IsCrashing && !pUnit->IsAttackedByLocomotor) || pUnit->IsSinking ? ReturnFalse : 0;
 }
 
+#pragma region HouseCanAffordBaseNullFix
+
+// Vanilla HouseClass::CanAffordBase (0x4F6540) dereferences nullptr in multiple branches:
+// - 0x4F66C5 & 0x4F66F5: compiler-inlined nullptr->GetActualCost(this) when no BuildBarracks entry matches.
+// - 0x4F671D: FirstBuildableFromArray(&BuildRefinery) return value is not null-checked before calling GetActualCost.
+// - 0x4F6794: FirstBuildableFromArray(&BuildPower) return value is not null-checked before calling GetActualCost.
+DEFINE_JUMP(LJMP, 0x4F66C5, 0x4F6706);
+DEFINE_JUMP(LJMP, 0x4F66F5, 0x4F6706);
+
+DEFINE_HOOK(0x4F6706, HouseClass_CanAffordBase_BarracksNullCost, 0x5)
+{
+	enum { ContinueToRefinery = 0x4F670B };
+
+	R->EDI(0);
+	return ContinueToRefinery;
+}
+
+DEFINE_HOOK(0x4F671D, HouseClass_CanAffordBase_RefineryNullCheck, 0x5)
+{
+	enum { AfterRefineryCost = 0x4F672A };
+
+	GET(BuildingTypeClass* const, pRefinery, EAX);
+	GET(HouseClass* const, pThis, ESI);
+
+	R->EBX(pRefinery ? pRefinery->GetActualCost(pThis) : 0);
+	return AfterRefineryCost;
+}
+
+DEFINE_HOOK(0x4F6794, HouseClass_CanAffordBase_PowerNullCheck, 0x5)
+{
+	enum { AfterPowerCost = 0x4F679F };
+
+	GET(BuildingTypeClass* const, pPower, EAX);
+	GET(HouseClass* const, pThis, ESI);
+
+	R->EAX(pPower ? pPower->GetActualCost(pThis) : 0);
+	return AfterPowerCost;
+}
+
+#pragma endregion
