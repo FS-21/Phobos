@@ -4801,10 +4801,18 @@ namespace
 	{
 		if (!pFoot || !pEnterTarget || pFoot->InLimbo || !pFoot->IsAlive || pEnterTarget->InLimbo || !pEnterTarget->IsAlive)
 			return;
-		if ((pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter) &&
-			(pFoot->ContainsLink(pEnterTarget) || pFoot->ArchiveTarget == pEnterTarget || pFoot->Destination == pEnterTarget))
+		if (pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter)
 		{
-			return;
+			if (pFoot->ContainsLink(pEnterTarget) || pFoot->ArchiveTarget == pEnterTarget || pFoot->Destination == pEnterTarget)
+				return;
+			// When FootClass::Mission_Enter is driving a large vehicle (e.g. Slave Miner / MCV) onto the boarding cell next to pEnterTarget,
+			// the YR engine sets pFoot->Destination to that adjacent CellClass*. Do NOT reset its navigation list or spam SetDestination!
+			if (pFoot->Destination != nullptr)
+			{
+				const CellStruct dc = CellClass::Coord2Cell(pFoot->Destination->GetCoords());
+				if (dc.DistanceFrom(pEnterTarget->GetMapCoords()) <= 3.5)
+					return;
+			}
 		}
 		// Match EventClass::Execute (MEGA_MISSION, 0x004C73B9-0x004C747C) exact call order:
 		// UnitClass::Assign_Destination (0x00741C54) and InfantryClass::Assign_Destination (0x0051AC2A)
@@ -4832,6 +4840,21 @@ namespace
 				{
 					return true;
 				}
+			}
+		}
+		const CellStruct tc = pTrans->GetMapCoords();
+		for (auto const pU : UnitClass::Array)
+		{
+			if (!pU || pU == pTrans || pU->Owner != pTrans->Owner || pU->InLimbo || !pU->IsAlive)
+				continue;
+			if (pU->CurrentMission != Mission::Enter && pU->QueuedMission != Mission::Enter)
+				continue;
+			if (pU->ContainsLink(pTrans) || pU->ArchiveTarget == pTrans || pU->Destination == pTrans)
+				return true;
+			if (pU->Destination != nullptr && pU->GetMapCoords().DistanceFrom(tc) <= 6.0 &&
+				CellClass::Coord2Cell(pU->Destination->GetCoords()).DistanceFrom(tc) <= 3.0)
+			{
+				return true;
 			}
 		}
 		return false;
@@ -5018,8 +5041,43 @@ namespace
 					}
 				}
 
+				if (!nearCoast)
+				{
+					const CellStruct ring3[4] = {
+						{static_cast<short>(cand.X + 3), cand.Y}, {static_cast<short>(cand.X - 3), cand.Y},
+						{cand.X, static_cast<short>(cand.Y + 3)}, {cand.X, static_cast<short>(cand.Y - 3)}};
+					for (const auto& nc3 : ring3)
+					{
+						if (auto const pNC3 = MapClass::Instance.TryGetCellAt(nc3))
+						{
+							if ((pNC3->LandType == LandType::Water || pNC3->LandType == LandType::Beach) &&
+								std::abs(static_cast<int>(pCell->Level) - static_cast<int>(pNC3->Level)) <= 1)
+							{
+								nearCoast = true;
+								break;
+							}
+						}
+					}
+				}
+				bool allImmediateNeighborsDryLand = (pCell->LandType != LandType::Beach);
+				for (int ndy = -1; ndy <= 1 && allImmediateNeighborsDryLand; ++ndy)
+				{
+					for (int ndx = -1; ndx <= 1; ++ndx)
+					{
+						if (ndx == 0 && ndy == 0)
+							continue;
+						const CellStruct adj{static_cast<short>(cand.X + ndx), static_cast<short>(cand.Y + ndy)};
+						auto const pAdj = MapClass::Instance.TryGetCellAt(adj);
+						if (!pAdj || pAdj->LandType == LandType::Water || pAdj->GetBuilding() != nullptr ||
+							!pAdj->IsClearToMove(SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false))
+						{
+							allImmediateNeighborsDryLand = false;
+							break;
+						}
+					}
+				}
 				if (nearCoast)
-					score += 900;
+					score += 900 + (allImmediateNeighborsDryLand ? 350 : 0);
 				else
 					score -= 600;
 
@@ -5620,7 +5678,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					refineriesOnHomeIsland++;
 					if (refineriesOnHomeIsland >= 3)
-						pExtraHomeSlaveMiner = pOwnU;
+					{
+						if (!pExtraHomeSlaveMiner ||
+							pOwnU->CurrentMission == Mission::Enter || pOwnU->QueuedMission == Mission::Enter)
+						{
+							pExtraHomeSlaveMiner = pOwnU;
+						}
+					}
 				}
 			}
 		}
@@ -6691,11 +6755,71 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		const int unitZoneForEco = MapClass::Instance.GetMovementZoneType(pUnit->GetMapCoords(), MovementZone::Normal, false);
+		// Only treat pExtraHomeSlaveMiner as a transport passenger while it is still on homeGroundZone waiting to sail to resourceIslandZone!
+		// Once a Slave Miner lands on another island (unitZoneForEco != homeGroundZone), it must work normally via Mission::Harvest
+		// and NEVER be forced to deploy on a barren beach (which causes YAREFN to loop in Mission::Selling)!
 		const bool isIslandColonizerSlaveMiner = (pType->ResourceGatherer && pType->DeploysInto != nullptr &&
-			((pUnit == pExtraHomeSlaveMiner && CanHouseFerryTypeAcrossWater(pHouse, pType) && (pIslandResourceGoalCell != nullptr || !hasUncolonizedOreOnHomeIsland)) ||
-			(homeGroundZone >= 0 && unitZoneForEco >= 0 && unitZoneForEco != homeGroundZone)));
+			pUnit == pExtraHomeSlaveMiner && homeGroundZone >= 0 && unitZoneForEco == homeGroundZone &&
+			CanHouseFerryTypeAcrossWater(pHouse, pType) && pIslandResourceGoalCell != nullptr && resourceIslandZone != homeGroundZone);
 		if ((pType->Harvester || pType->ResourceGatherer) && !isIslandColonizerSlaveMiner)
 		{
+			const bool canHarvCrossWater = (pType->MovementZone == MovementZone::Amphibious || pType->MovementZone == MovementZone::AmphibiousDestroyer ||
+				pType->MovementZone == MovementZone::AmphibiousCrusher || pType->MovementZone == MovementZone::Fly || pType->JumpJet || pType->Teleporter);
+			ClearStaleEnterOrUnreachableCrossIslandMission(pUnit, canHarvCrossWater);
+			if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter)
+				continue;
+
+			// If a Slave Miner (ResourceGatherer && DeploysInto != nullptr) just unloaded on an island beach far from ore,
+			// guide it to the nearest ore patch on the SAME landmass and switch to Mission::Harvest so the YR engine
+			// natively deploys YAREFN right on the ore patch!
+			if (pType->ResourceGatherer && pType->DeploysInto != nullptr && !pType->Teleporter)
+			{
+				const CellStruct uc = pUnit->GetMapCoords();
+				bool hasNearOre = false;
+				CellClass* pBestSameZoneOre = nullptr;
+				int bestOreDist = 999999;
+				for (int dy = -48; dy <= 48; dy += 2)
+				{
+					for (int dx = -48; dx <= 48; dx += 2)
+					{
+						const CellStruct tc{static_cast<short>(uc.X + dx), static_cast<short>(uc.Y + dy)};
+						auto const pC = MapClass::Instance.TryGetCellAt(tc);
+						if (!pC || pC->GetContainedTiberiumValue() <= 0)
+							continue;
+						if (unitZoneForEco >= 0 && MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false) != unitZoneForEco)
+							continue;
+						const int d = std::max(std::abs(dx), std::abs(dy));
+						if (d <= 6)
+						{
+							hasNearOre = true;
+							break;
+						}
+						if (d < bestOreDist)
+						{
+							bestOreDist = d;
+							pBestSameZoneOre = pC;
+						}
+					}
+					if (hasNearOre)
+						break;
+				}
+				if (!hasNearOre && pBestSameZoneOre &&
+					(pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard ||
+					 pUnit->CurrentMission == Mission::Sleep || pUnit->CurrentMission == Mission::None))
+				{
+					pUnit->SetDestination(pBestSameZoneOre, true);
+					pUnit->QueueMission(Mission::Move, true);
+					continue;
+				}
+				if (hasNearOre && (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard ||
+					pUnit->CurrentMission == Mission::Sleep || pUnit->CurrentMission == Mission::None ||
+					(pUnit->CurrentMission == Mission::Move && bestOreDist <= 4)))
+				{
+					pUnit->QueueMission(Mission::Harvest, true);
+					continue;
+				}
+			}
+
 			// IMPORTANT: Never call SetDestination() on Harvesters or Chrono Miners
 			// (Teleporter=yes)! In Yuri's Revenge, calling SetDestination() on a
 			// ChronoLocomotionClass unit triggers an immediate Chrono-shift and
@@ -6703,8 +6827,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// Allied Chrono Miners to loop-teleport endlessly to the Refinery
 			// entrance cell. Vanilla Mission_Harvest natively handles ore/gem search
 			// and Chrono return.
-			if (pUnit->CurrentMission == Mission::Sleep || pUnit->CurrentMission == Mission::None)
+			if (pUnit->CurrentMission == Mission::Sleep || pUnit->CurrentMission == Mission::None ||
+				((pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard) && !pUnit->HasAnyLink()))
+			{
 				pUnit->QueueMission(Mission::Harvest, false);
+			}
 
 			continue;
 		}
@@ -7030,49 +7157,58 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 				else
 				{
-					UnitClass* pBeachedMcvTrans = nullptr;
-					int bestTransDist = 999999;
-					for (auto const pT : UnitClass::Array)
+					ClearStaleEnterOrUnreachableCrossIslandMission(pUnit, false);
+					if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter)
 					{
-						if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type || !IsAmphibiousOrAirTransport(pT->Type))
-							continue;
-						if (static_cast<int>(pType->TechnoTypeClass::Size) > static_cast<int>(pT->Type->SizeLimit) ||
-							(pT->Passengers.GetTotalSize() + static_cast<int>(pType->TechnoTypeClass::Size)) > pT->Type->Passengers)
-							continue;
-						auto const pTCell = pT->GetCell();
-						const int tz = MapClass::Instance.GetMovementZoneType(pT->GetMapCoords(), MovementZone::Normal, false);
-						if (tz == mcvZone && pTCell && pTCell->LandType != LandType::Water)
+						// Already actively boarding a valid transport: do NOT overwrite or spam orders!
+					}
+					else
+					{
+						UnitClass* pBeachedMcvTrans = nullptr;
+						int bestTransDist = 999999;
+						for (auto const pT : UnitClass::Array)
 						{
-							const int d = pUnit->DistanceFrom(pT);
-							if (d < bestTransDist)
+							if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type || !IsAmphibiousOrAirTransport(pT->Type))
+								continue;
+							if (static_cast<int>(pType->TechnoTypeClass::Size) > static_cast<int>(pT->Type->SizeLimit) ||
+								(pT->Passengers.GetTotalSize() + static_cast<int>(pType->TechnoTypeClass::Size)) > pT->Type->Passengers)
+								continue;
+							auto const pTCell = pT->GetCell();
+							const int tz = MapClass::Instance.GetMovementZoneType(pT->GetMapCoords(), MovementZone::Normal, false);
+							if (tz == mcvZone && pTCell && pTCell->LandType != LandType::Water)
 							{
-								bestTransDist = d;
-								pBeachedMcvTrans = pT;
+								const int d = pUnit->DistanceFrom(pT);
+								if (d < bestTransDist)
+								{
+									bestTransDist = d;
+									pBeachedMcvTrans = pT;
+								}
 							}
 						}
-					}
-					if (pBeachedMcvTrans)
-					{
-						if (pBeachedMcvTrans->CurrentMission == Mission::Move || (pBeachedMcvTrans->Destination != nullptr && !HasActiveBoardingPassenger(pBeachedMcvTrans, mcvZone)))
+						if (pBeachedMcvTrans)
 						{
-							pBeachedMcvTrans->SetDestination(nullptr, true);
-							pBeachedMcvTrans->ClearNavigationList();
-							pBeachedMcvTrans->ForceMission(Mission::Guard);
-						}
-						OrderFootToEnter(pUnit, pBeachedMcvTrans);
-					}
-					else if (!isMovingToDest || (Unsorted::CurrentFrame % 90 < 25))
-					{
-						if (!isMovingToDest && !NeuralAI::IsCellClearedOfExitCorridors(pHouse, pType->DeploysInto, mcvCell))
-						{
-							pUnit->Scatter(CoordStruct::Empty, true, false);
-						}
-						else if (auto const pIslandPickupBeach = FindSafeIslandLandingCell(pHouse, mcvCell, mcvZone, false))
-						{
-							if (mcvCell.DistanceFrom(pIslandPickupBeach->MapCoords) > 2.5)
+							if (!HasActiveBoardingPassenger(pBeachedMcvTrans, mcvZone) &&
+								(pBeachedMcvTrans->CurrentMission == Mission::Move || pBeachedMcvTrans->Destination != nullptr))
 							{
-								pUnit->SetDestination(pIslandPickupBeach, true);
-								pUnit->QueueMission(Mission::Move, true);
+								pBeachedMcvTrans->SetDestination(nullptr, true);
+								pBeachedMcvTrans->ClearNavigationList();
+								pBeachedMcvTrans->ForceMission(Mission::Guard);
+							}
+							OrderFootToEnter(pUnit, pBeachedMcvTrans);
+						}
+						else if (!isMovingToDest)
+						{
+							if (!NeuralAI::IsCellClearedOfExitCorridors(pHouse, pType->DeploysInto, mcvCell))
+							{
+								pUnit->Scatter(CoordStruct::Empty, true, false);
+							}
+							else if (auto const pIslandPickupBeach = FindSafeIslandLandingCell(pHouse, mcvCell, mcvZone, false))
+							{
+								if (mcvCell.DistanceFrom(pIslandPickupBeach->MapCoords) > 4.0)
+								{
+									pUnit->SetDestination(pIslandPickupBeach, true);
+									pUnit->QueueMission(Mission::Move, true);
+								}
 							}
 						}
 					}
@@ -7352,49 +7488,64 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 						else
 						{
-							UnitClass* pBeachedTrans = nullptr;
-							int bestTransDist = 999999;
-							for (auto const pT : UnitClass::Array)
+							ClearStaleEnterOrUnreachableCrossIslandMission(pUnit, false);
+							if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter)
 							{
-								if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type || !IsAmphibiousOrAirTransport(pT->Type))
-									continue;
-								if (static_cast<int>(pType->TechnoTypeClass::Size) > static_cast<int>(pT->Type->SizeLimit) ||
-									(pT->Passengers.GetTotalSize() + static_cast<int>(pType->TechnoTypeClass::Size)) > pT->Type->Passengers)
-									continue;
-								auto const pTCell = pT->GetCell();
-								const int tz = MapClass::Instance.GetMovementZoneType(pT->GetMapCoords(), MovementZone::Normal, false);
-								if (tz == nanoZone && pTCell && pTCell->LandType != LandType::Water)
+								// Already actively boarding a valid transport: do NOT overwrite or spam orders!
+							}
+							else
+							{
+								UnitClass* pBeachedTrans = nullptr;
+								int bestTransDist = 999999;
+								for (auto const pT : UnitClass::Array)
 								{
-									const int d = pUnit->DistanceFrom(pT);
-									if (d < bestTransDist)
+									if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type || !IsAmphibiousOrAirTransport(pT->Type))
+										continue;
+									if (static_cast<int>(pType->TechnoTypeClass::Size) > static_cast<int>(pT->Type->SizeLimit) ||
+										(pT->Passengers.GetTotalSize() + static_cast<int>(pType->TechnoTypeClass::Size)) > pT->Type->Passengers)
+										continue;
+									auto const pTCell = pT->GetCell();
+									const int tz = MapClass::Instance.GetMovementZoneType(pT->GetMapCoords(), MovementZone::Normal, false);
+									if (tz == nanoZone && pTCell && pTCell->LandType != LandType::Water)
 									{
-										bestTransDist = d;
-										pBeachedTrans = pT;
+										const int d = pUnit->DistanceFrom(pT);
+										if (d < bestTransDist)
+										{
+											bestTransDist = d;
+											pBeachedTrans = pT;
+										}
 									}
 								}
-							}
-							if (pBeachedTrans)
-							{
-								if (pBeachedTrans->CurrentMission == Mission::Move || (pBeachedTrans->Destination != nullptr && !HasActiveBoardingPassenger(pBeachedTrans, nanoZone)))
+								if (pBeachedTrans)
 								{
-									pBeachedTrans->SetDestination(nullptr, true);
-									pBeachedTrans->ClearNavigationList();
-									pBeachedTrans->ForceMission(Mission::Guard);
-								}
-								OrderFootToEnter(pUnit, pBeachedTrans);
-							}
-							else if (!isNanoMoving || (Unsorted::CurrentFrame % 90 < 25))
-							{
-								if (auto const pIslandPickupBeach = FindSafeIslandLandingCell(pHouse, nanoCell, nanoZone, false))
-								{
-									if (nanoCell.DistanceFrom(pIslandPickupBeach->MapCoords) > 2.5)
+									if (!HasActiveBoardingPassenger(pBeachedTrans, nanoZone) &&
+										(pBeachedTrans->CurrentMission == Mission::Move || pBeachedTrans->Destination != nullptr))
 									{
-										pUnit->SetDestination(pIslandPickupBeach, true);
-										pUnit->QueueMission(Mission::Move, true);
+										pBeachedTrans->SetDestination(nullptr, true);
+										pBeachedTrans->ClearNavigationList();
+										pBeachedTrans->ForceMission(Mission::Guard);
+									}
+									OrderFootToEnter(pUnit, pBeachedTrans);
+								}
+								else if (!isNanoMoving)
+								{
+									if (auto const pIslandPickupBeach = FindSafeIslandLandingCell(pHouse, nanoCell, nanoZone, false))
+									{
+										if (nanoCell.DistanceFrom(pIslandPickupBeach->MapCoords) > 4.0)
+										{
+											pUnit->SetDestination(pIslandPickupBeach, true);
+											pUnit->QueueMission(Mission::Move, true);
+										}
 									}
 								}
 							}
 						}
+					}
+					else if (isIslandColonizerSlaveMiner)
+					{
+						// Never force OrderDeployerUnpack on a Slave Miner; let Mission::Harvest manage deployment on ore!
+						if (pUnit->CurrentMission != Mission::Harvest && pUnit->CurrentMission != Mission::Enter && pUnit->CurrentMission != Mission::Move)
+							pUnit->QueueMission(Mission::Harvest, false);
 					}
 					else if (landedOnNewIsland || (!isNanoMoving && minDistFromRefOrYard >= 10))
 					{
@@ -7774,12 +7925,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// range of a critical enemy structure, prioritize it over walls/silos!
 
-		if (pSurgicalEnemyBld && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Damage > 0 && scores[79] > 80 && pUnit->DistanceFrom(pSurgicalEnemyBld) <= 2816)
-
+		// Only when already within immediate firing range (+1.5 cells), prioritize a critical structure over adjacent walls/silos
+		// without suicidally driving deep through the enemy base!
+		if (pSurgicalEnemyBld && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Damage > 0 && scores[79] > 80 &&
+			pUnit->DistanceFrom(pSurgicalEnemyBld) <= std::max(1280, static_cast<int>(pPrimaryWpn->Range) + 384))
 		{
-
 			DispatchFootToTargetOrTransport(pUnit, pSurgicalEnemyBld, Mission::Attack, true);
-
 			continue;
 		}
 
@@ -7995,13 +8146,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		else if (pVisibleEnemyHarvester && isUnitIdle && scores[56] > 220 && pType->Speed >= 6 && pUnit->DistanceFrom(pVisibleEnemyHarvester) <= 6144)
-
+		else if (pVisibleEnemyHarvester && isUnitIdle && scores[56] > 220 && pType->Speed >= 6 && pUnit->DistanceFrom(pVisibleEnemyHarvester) <= 4608)
 		{
-
-			DispatchFootToTargetOrTransport(pUnit, pVisibleEnemyHarvester, Mission::Attack, true);
-
-			continue;
+			const int distHarv = pUnit->DistanceFrom(pVisibleEnemyHarvester);
+			const int wpnRange = pPrimaryWpn ? static_cast<int>(pPrimaryWpn->Range) : 1280;
+			if (distHarv <= wpnRange + 384)
+			{
+				DispatchFootToTargetOrTransport(pUnit, pVisibleEnemyHarvester, Mission::Attack, true);
+				continue;
+			}
+			else if (auto const pEnemyHarvCell = pVisibleEnemyHarvester->GetCell())
+			{
+				// Use AttackMove when approaching an enemy harvester so raiders fight back against any enemy units/defenses blocking the path!
+				DispatchFootToTargetOrTransport(pUnit, pEnemyHarvCell, Mission::AttackMove, false);
+				continue;
+			}
 		}
 
 		// Slot 57 (Surgical Bunker/Garrison Penetrator & Siege Focus):
@@ -8012,21 +8171,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// 2) Long-range siege vehicles prioritize enemy garrisons & base defenses!
 
-		if (pEnemyGarrisonToClear && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Warhead && pPrimaryWpn->Warhead->PenetratesBunker && pUnit->DistanceFrom(pEnemyGarrisonToClear) <= 4608)
-
+		if (pEnemyGarrisonToClear && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Warhead && pPrimaryWpn->Warhead->PenetratesBunker &&
+			pUnit->DistanceFrom(pEnemyGarrisonToClear) <= std::max(1536, static_cast<int>(pPrimaryWpn->Range) + 512))
 		{
-
 			DispatchFootToTargetOrTransport(pUnit, pEnemyGarrisonToClear, Mission::Attack, true);
-
 			continue;
 		}
 
-		if (pPrioritySiegeBld && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Range >= (7 * 256) && pUnit->DistanceFrom(pPrioritySiegeBld) <= 5632)
-
+		if (pPrioritySiegeBld && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Range >= (7 * 256) &&
+			pUnit->DistanceFrom(pPrioritySiegeBld) <= static_cast<int>(pPrimaryWpn->Range) + 512)
 		{
-
 			DispatchFootToTargetOrTransport(pUnit, pPrioritySiegeBld, Mission::Attack, true);
-
 			continue;
 		}
 
@@ -10015,6 +10170,34 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	CellClass* pFallbackEnemyCell = nullptr;
 	int bestFallbackEnemyScore = -999999;
 
+	// First pass: find the closest enemy structure distance on our landmass (outer perimeter reference)
+	// and count enemy base defenses so we peel the enemy base from the outside in instead of driving
+	// suicidally through half the enemy base to reach a deep interior ConYard/Superweapon!
+	int minSameZoneEnemyBldDist = 999999;
+	int minAnyEnemyBldDist = 999999;
+	int totalEnemyBaseDefenses = 0;
+	for (auto const pEnemyBld : BuildingClass::Array)
+	{
+		if (!pEnemyBld || pEnemyBld->InLimbo || !pEnemyBld->IsAlive || !pEnemyBld->Owner || !pEnemyBld->Type || pEnemyBld->Type->Immune || pEnemyBld->Type->Insignificant || pEnemyBld->Type->InvisibleInGame)
+			continue;
+		const CellStruct ebc = pEnemyBld->GetMapCoords();
+		if (ebc.X <= 1 && ebc.Y <= 1)
+			continue;
+		auto const pOwner = pEnemyBld->Owner;
+		if (pOwner == pHouse || pHouse->IsAlliedWith(pOwner) || pOwner->IsNeutral() || pOwner->IsObserver() || pOwner->Defeated)
+			continue;
+		if (pEnemyBld->Type->IsBaseDefense)
+			totalEnemyBaseDefenses++;
+		const int distHome = (homeCoords != CellStruct::Empty)
+			? (std::abs(ebc.X - homeCoords.X) + std::abs(ebc.Y - homeCoords.Y))
+			: 0;
+		if (distHome < minAnyEnemyBldDist)
+			minAnyEnemyBldDist = distHome;
+		const int ebz = MapClass::Instance.GetMovementZoneType(ebc, MovementZone::Normal, false);
+		if (homeGroundZone >= 0 && ebz == homeGroundZone && distHome < minSameZoneEnemyBldDist)
+			minSameZoneEnemyBldDist = distHome;
+	}
+
 	for (auto const pEnemyBld : BuildingClass::Array)
 	{
 		if (!pEnemyBld || pEnemyBld->InLimbo || !pEnemyBld->IsAlive || !pEnemyBld->Owner || !pEnemyBld->Type || pEnemyBld->Type->Immune || pEnemyBld->Type->Insignificant || pEnemyBld->Type->InvisibleInGame)
@@ -10035,16 +10218,27 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			? (std::abs(ebc.X - homeCoords.X) + std::abs(ebc.Y - homeCoords.Y))
 			: 0;
 		const int ebz = MapClass::Instance.GetMovementZoneType(ebc, MovementZone::Normal, false);
-		int bldCandScore = 1000 - (distHome * 4);
+		const int refMinDist = (homeGroundZone >= 0 && ebz == homeGroundZone && minSameZoneEnemyBldDist < 999999)
+			? minSameZoneEnemyBldDist
+			: (minAnyEnemyBldDist < 999999 ? minAnyEnemyBldDist : distHome);
+		const int depthIntoEnemyBase = std::max(0, distHome - refMinDist);
+
+		// Perimeter-First Scoring: heavily penalize targets that sit deep behind the enemy's outer perimeter (> 6 cells deeper than the closest enemy structure)
+		// so our battalions chew through the closest enemy structures/defenses on the outer ring first instead of driving through half the enemy base!
+		int bldCandScore = 1000 - (distHome * 8) - (depthIntoEnemyBase > 6 ? (depthIntoEnemyBase - 6) * 18 : 0);
+		if (depthIntoEnemyBase <= 6)
+			bldCandScore += 220; // Outer-perimeter target facing our approach!
 		if (pOwner->ArrayIndex == pHouse->EnemyHouseIndex)
 			bldCandScore += 220;
 		if (homeGroundZone >= 0 && ebz == homeGroundZone)
 			bldCandScore += 350;
 		if (!pEnemyBld->Type->Naval && pCell->LandType != LandType::Water)
 			bldCandScore += 180;
-		if (pEnemyBld->Type->ConstructionYard || pEnemyBld->Type->Factory != AbstractType::None || pEnemyBld->Type->SuperWeapon != -1)
-			bldCandScore += 140;
-		else if (pEnemyBld->Type->IsBaseDefense || pEnemyBld->Type->Refinery || pEnemyBld->Type->PowerBonus > 0)
+		if (pEnemyBld->Type->IsBaseDefense && depthIntoEnemyBase <= 8)
+			bldCandScore += 135; // Clear outer base defenses blocking our approach!
+		else if (pEnemyBld->Type->ConstructionYard || pEnemyBld->Type->Factory != AbstractType::None || pEnemyBld->Type->SuperWeapon != -1)
+			bldCandScore += 110;
+		else if (pEnemyBld->Type->Refinery || pEnemyBld->Type->PowerBonus > 0)
 			bldCandScore += 90;
 
 		if (bldCandScore > bestFallbackEnemyScore)
@@ -10217,9 +10411,73 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	const int arch = pExt->AIBrain_Archetype;
 	const int rushWaveBias = NeuralAI::PolicyFor(pHouse).OutputBias[37];
 	const int reserveBias = -rushWaveBias;
-	const int baseWave = (arch == 3) ? 3 : ((arch == 2 || arch == 4) ? 7 : 5);
-	const size_t minWaveUnits = endgameRemnantHunt ? 1u : static_cast<size_t>(std::clamp(baseWave - (rushWaveBias / 140), 2, 10));
+	// Critical-Mass Team Scaling (Lanchester's Law):
+	// In RA2/YR, larger battalions are exponentially more devastating against fortified AI/human bases.
+	// Scale minimum battalion size up when the enemy has base defenses or when our industrial capacity is mature!
+	const int baseWave = (arch == 3) ? 4 : ((arch == 2 || arch == 4) ? 8 : 6);
+	const int defenseMassBonus = std::clamp(totalEnemyBaseDefenses / 2, 0, 4) + ((pHouse->OwnedUnits >= 18) ? 2 : 0);
+	const size_t minWaveUnits = endgameRemnantHunt
+		? 1u
+		: static_cast<size_t>(std::clamp(baseWave + defenseMassBonus - (rushWaveBias / 160), 3, 14));
 	const int blindPushFrame = (rushWaveBias > 100) ? 1350 : 3200;
+
+	// Multi-Purpose Map Unit Recall ("utilizarlas para diferentes propósitos por el mapa y a la hora de la verdad
+	// reúne las que necesite en un lugar y mandarlas contra objetivos enemigos"):
+	// While accumulating forces, units can ambush in tree groves, patrol outposts, hunt crates, or guard harvesters.
+	// When recalling those non-engaged map units brings our strike force to critical mass (>= minWaveUnits),
+	// recruit them into idleCombatUnits so the entire army rallies for the decisive offensive push!
+	if (!endgameRemnantHunt && idleCombatUnits.size() < minWaveUnits)
+	{
+		std::vector<UnitClass*> recallableMapUnits;
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
+				continue;
+			if (pUnit->Type->Naval || pUnit->Type->Harvester || pUnit->Type->ResourceGatherer || IsAmphibiousOrAirTransport(pUnit->Type))
+				continue;
+			if ((pUnit->Type->DeploysInto && pUnit->Type->DeploysInto->ConstructionYard) || IsImmobileUnitTypeOnLand(pUnit->Type))
+				continue;
+			if (pUnit->GetHealthPercentage() < 0.65 || pUnit->HasBeenAttacked || pUnit->Target != nullptr)
+				continue;
+			const auto pW0 = pUnit->Type->GetWeapon(0) ? pUnit->Type->GetWeapon(0)->WeaponType : nullptr;
+			if (!pW0 || pW0->Damage <= 0)
+				continue;
+			if (std::find(idleCombatUnits.begin(), idleCombatUnits.end(), pUnit) != idleCombatUnits.end())
+				continue;
+			if (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard || pUnit->CurrentMission == Mission::Move)
+			{
+				recallableMapUnits.push_back(pUnit);
+			}
+		}
+		if (idleCombatUnits.size() + recallableMapUnits.size() >= minWaveUnits)
+		{
+			for (auto const pRecU : recallableMapUnits)
+			{
+				idleCombatUnits.push_back(pRecU);
+			}
+		}
+	}
+
+	// Helper: returns true ONLY if a sister transport is actively beaching/unloading right next to pFoot (within 10 cells)
+	// and is alive and NOT intercepted/attacked. If a transport was destroyed or intercepted at sea, immediately ignore it!
+	auto isWaitingForSisterTransportUnload = [pHouse](FootClass* pFoot, bool canCrossWaterDirectly) -> bool {
+		if (!pFoot || canCrossWaterDirectly || pFoot->HasBeenAttacked || (Unsorted::CurrentFrame % 180 >= 110))
+			return false;
+		const CellStruct fc = pFoot->GetMapCoords();
+		for (auto const pCheckT : UnitClass::Array)
+		{
+			if (!pCheckT || pCheckT->Owner != pHouse || pCheckT->InLimbo || !pCheckT->IsAlive || !pCheckT->Type || !IsAmphibiousOrAirTransport(pCheckT->Type))
+				continue;
+			if (pCheckT->Passengers.NumPassengers == 0)
+				continue;
+			// If the sister transport was intercepted/attacked or is critically damaged, ignore it so landed units march immediately!
+			if (pCheckT->HasBeenAttacked || pCheckT->GetHealthPercentage() < 0.65)
+				continue;
+			if (fc.DistanceFrom(pCheckT->GetMapCoords()) <= 10.0)
+				return true;
+		}
+		return false;
+	};
 
 	CellClass* pWaveTargetCell = pVisibleEnemyBld ? pVisibleEnemyBld->GetCell() : ((endgameRemnantHunt || Unsorted::CurrentFrame > blindPushFrame) ? pFallbackEnemyCell : nullptr);
 	CellClass* pIslandGoalCell = pWaveTargetCell ? pWaveTargetCell : pFallbackEnemyCell;
@@ -10394,6 +10652,91 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const int secWaveZone = pSecondaryWaveTargetCell ? MapClass::Instance.GetMovementZoneType(pSecondaryWaveTargetCell->MapCoords, MovementZone::Normal, false) : -1;
 		const size_t desiredUnitReserve = endgameRemnantHunt ? 0u : static_cast<size_t>(std::clamp(1 + (reserveBias / 180), 0, 2));
 		const size_t reserveCount = idleCombatUnits.size() > (desiredUnitReserve + 1) ? desiredUnitReserve : 0;
+
+		// Forward Staging / Rally Assembly ("reúne las que necesite en un lugar y mandarlas contra objetivos enemigos"):
+		// If our battalion units on the target landmass are scattered across the map (e.g., > 35% of them are > 15 cells away from
+		// the forward staging point outside the enemy perimeter), rally them at a safe Staging Cell (~15 cells from pWaveTargetCell
+		// toward our army centroid) first so they hit the enemy perimeter together as one devastating wall of armor instead of trickling!
+		CellClass* pForwardStagingCell = nullptr;
+		bool holdAtForwardStaging = false;
+		if (!endgameRemnantHunt && waveTargetZone >= 0 && !waveTargetInWater)
+		{
+			int sameZoneCount = 0;
+			int sumX = 0;
+			int sumY = 0;
+			for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
+			{
+				auto const pCheckU = idleCombatUnits[i];
+				if (!pCheckU || pCheckU->Type->Naval || IsAmphibiousOrAirTransport(pCheckU->Type))
+					continue;
+				const CellStruct cuc = pCheckU->GetMapCoords();
+				if (MapClass::Instance.GetMovementZoneType(cuc, MovementZone::Normal, false) == waveTargetZone)
+				{
+					sameZoneCount++;
+					sumX += cuc.X;
+					sumY += cuc.Y;
+				}
+			}
+			if (sameZoneCount >= 4)
+			{
+				const CellStruct armyCenter{static_cast<short>(sumX / sameZoneCount), static_cast<short>(sumY / sameZoneCount)};
+				const CellStruct tc = pWaveTargetCell->MapCoords;
+				const int dx = armyCenter.X - tc.X;
+				const int dy = armyCenter.Y - tc.Y;
+				const int distToTarget = std::max(1, static_cast<int>(tc.DistanceFrom(armyCenter)));
+				if (distToTarget >= 18)
+				{
+					const int stageDist = std::clamp(distToTarget - 6, 13, 17);
+					const CellStruct rawStage{
+						static_cast<short>(tc.X + (dx * stageDist) / distToTarget),
+						static_cast<short>(tc.Y + (dy * stageDist) / distToTarget)
+					};
+					for (int r = 0; r <= 6 && !pForwardStagingCell; r += 2)
+					{
+						for (int sy = -r; sy <= r && !pForwardStagingCell; sy += 2)
+						{
+							for (int sx = -r; sx <= r; sx += 2)
+							{
+								const CellStruct sc{static_cast<short>(rawStage.X + sx), static_cast<short>(rawStage.Y + sy)};
+								if (auto const pSC = MapClass::Instance.TryGetCellAt(sc))
+								{
+									if (pSC->LandType != LandType::Water &&
+										MapClass::Instance.GetMovementZoneType(sc, MovementZone::Normal, false) == waveTargetZone &&
+										pSC->IsClearToMove(SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false))
+									{
+										pForwardStagingCell = pSC;
+										break;
+									}
+								}
+							}
+						}
+					}
+					if (pForwardStagingCell)
+					{
+						int gatheredNearStage = 0;
+						bool anyVanguardUnderFire = false;
+						for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
+						{
+							auto const pCheckU = idleCombatUnits[i];
+							if (!pCheckU || pCheckU->Type->Naval || IsAmphibiousOrAirTransport(pCheckU->Type))
+								continue;
+							const CellStruct cuc = pCheckU->GetMapCoords();
+							if (MapClass::Instance.GetMovementZoneType(cuc, MovementZone::Normal, false) != waveTargetZone)
+								continue;
+							if (pCheckU->HasBeenAttacked || cuc.DistanceFrom(tc) <= 13.0)
+								anyVanguardUnderFire = true;
+							if (cuc.DistanceFrom(pForwardStagingCell->MapCoords) <= 13.0)
+								gatheredNearStage++;
+						}
+						if (!anyVanguardUnderFire && gatheredNearStage * 100 < sameZoneCount * 65)
+						{
+							holdAtForwardStaging = true;
+						}
+					}
+				}
+			}
+		}
+
 		size_t dispatchedVeh = 0;
 		for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
 		{
@@ -10402,25 +10745,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool canCrossWaterDirectly = (pU->Type->MovementZone == MovementZone::Amphibious || pU->Type->MovementZone == MovementZone::AmphibiousDestroyer ||
 				pU->Type->MovementZone == MovementZone::AmphibiousCrusher || pU->Type->MovementZone == MovementZone::Fly ||
 				pU->Type->MovementZone == MovementZone::Subterrannean || pU->Type->JumpJet || pU->Type->Teleporter);
-			// If this unit was ferried across islands by transport, check if sister transports of the battalion are still unloading right next to us (within 20 cells)
-			if (!canCrossWaterDirectly && !pU->HasBeenAttacked && (Unsorted::CurrentFrame % 180 < 120))
-			{
-				bool sisterTransportUnloadingBattalion = false;
-				for (auto const pCheckT : UnitClass::Array)
-				{
-					if (!pCheckT || pCheckT->Owner != pHouse || pCheckT->InLimbo || !pCheckT->IsAlive || !pCheckT->Type || !IsAmphibiousOrAirTransport(pCheckT->Type))
-						continue;
-					if (pCheckT->Passengers.NumPassengers == 0)
-						continue;
-					if (pU->GetMapCoords().DistanceFrom(pCheckT->GetMapCoords()) <= 20.0)
-					{
-						sisterTransportUnloadingBattalion = true;
-						break;
-					}
-				}
-				if (sisterTransportUnloadingBattalion)
-					continue; // Regroup battalion on beachhead while sister transport(s) finish unloading!
-			}
+			// If this unit was ferried across islands by transport, check if an unattacked sister transport of the battalion is still unloading right next to us (<= 10 cells)
+			if (isWaitingForSisterTransportUnload(pU, canCrossWaterDirectly))
+				continue; // Regroup battalion on beachhead while unattacked sister transport finishes unloading!
 
 			CellClass* pUnitWaveGoal = pWaveTargetCell;
 			int goalZone = waveTargetZone;
@@ -10464,7 +10791,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			if ((pVisibleEnemyBld || endgameRemnantHunt) && pU->Type->GetWeapon(0) && pU->Type->GetWeapon(0)->WeaponType)
+			if (holdAtForwardStaging && pForwardStagingCell && uz == waveTargetZone && pUnitWaveGoal == pWaveTargetCell)
+			{
+				pU->SetDestination(pForwardStagingCell, true);
+				pU->QueueMission(Mission::AttackMove, true);
+			}
+			else if ((pVisibleEnemyBld || endgameRemnantHunt) && pU->Type->GetWeapon(0) && pU->Type->GetWeapon(0)->WeaponType)
 			{
 				pU->SetDestination(pUnitWaveGoal, true);
 				pU->QueueMission(Mission::AttackMove, true);
@@ -10536,6 +10868,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	//    coastal targets in parallel, sail to offshore water firing cells, and continuously saturate the enemy coast!
 	{
 		auto findBestSameLandmassEnemyBld = [pHouse](const CellStruct& unitCoords, int unitZone, bool pickSecondaryGroup) -> BuildingClass* {
+			// First find the closest enemy structure distance on this landmass so our units peel the outer perimeter first
+			// instead of suicidally driving through half the enemy base to reach an interior ConYard/Superweapon!
+			int minDistOnLandmass = 999999;
+			for (auto const pEB : BuildingClass::Array)
+			{
+				if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Immune || pEB->Type->Insignificant || pEB->Type->InvisibleInGame)
+					continue;
+				if (pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral() || pEB->Owner->IsObserver() || pEB->Owner->Defeated)
+					continue;
+				const CellStruct ebc = pEB->GetMapCoords();
+				if (pEB->Type->Naval || unitZone < 0 || MapClass::Instance.GetMovementZoneType(ebc, MovementZone::Normal, false) != unitZone)
+					continue;
+				const int d = std::abs(ebc.X - unitCoords.X) + std::abs(ebc.Y - unitCoords.Y);
+				if (d < minDistOnLandmass)
+					minDistOnLandmass = d;
+			}
+
 			BuildingClass* pBestBld = nullptr;
 			int bestScore = -999999;
 			BuildingClass* pSecondBld = nullptr;
@@ -10550,16 +10899,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (pEB->Type->Naval || unitZone < 0 || MapClass::Instance.GetMovementZoneType(ebc, MovementZone::Normal, false) != unitZone)
 					continue;
 				const int distCells = std::abs(ebc.X - unitCoords.X) + std::abs(ebc.Y - unitCoords.Y);
-				int prio = 40;
+				const int depthBeyondPerimeter = std::max(0, distCells - minDistOnLandmass);
+				int prio = 60;
 				if (pEB->Type->IsBaseDefense && distCells <= 14)
-					prio = 155;
-				else if (pEB->Type->ConstructionYard || pEB->Type->SuperWeapon != -1)
-					prio = 120;
-				else if (pEB->Type->Factory != AbstractType::None)
-					prio = 105;
-				else if (pEB->Type->Refinery || pEB->Type->PowerBonus > 0)
-					prio = 85;
-				const int sc = prio - (distCells * 5);
+					prio = 165;
+				else if (depthBeyondPerimeter <= 6)
+				{
+					// Among outer-perimeter structures within 6 cells of the front edge, prioritize high-value targets!
+					if (pEB->Type->ConstructionYard || pEB->Type->SuperWeapon != -1)
+						prio = 125;
+					else if (pEB->Type->Factory != AbstractType::None)
+						prio = 115;
+					else if (pEB->Type->Refinery || pEB->Type->PowerBonus > 0)
+						prio = 95;
+					else
+						prio = 80;
+				}
+				const int sc = prio - (distCells * 12) - (depthBeyondPerimeter > 6 ? (depthBeyondPerimeter - 6) * 20 : 0);
 				if (sc > bestScore)
 				{
 					if (pBestBld && pBestBld->GetMapCoords().DistanceFrom(ebc) >= 6.0)
@@ -10796,21 +11152,57 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			const int uz = MapClass::Instance.GetMovementZoneType(uc, MovementZone::Normal, false);
-			UnitClass* pCloseEnemyVeh = findNearestSameZoneEnemyUnit(uc, uz, 14);
+			const bool canBeachUCrossWater = (pBeachU->Type->MovementZone == MovementZone::Amphibious || pBeachU->Type->MovementZone == MovementZone::AmphibiousDestroyer ||
+				pBeachU->Type->MovementZone == MovementZone::AmphibiousCrusher || pBeachU->Type->MovementZone == MovementZone::Fly ||
+				pBeachU->Type->MovementZone == MovementZone::Subterrannean || pBeachU->Type->JumpJet || pBeachU->Type->Teleporter);
+			if (isWaitingForSisterTransportUnload(pBeachU, canBeachUCrossWater))
+				continue; // Wait on beachhead while unattacked adjacent sister transport finishes unloading!
+
+			const int maxWpnRangeLeptons = std::max(
+				pWpn0 ? static_cast<int>(pWpn0->Range) : 1280,
+				pWpn1 ? static_cast<int>(pWpn1->Range) : 1280);
+			UnitClass* pCloseEnemyVeh = findNearestSameZoneEnemyUnit(uc, uz, 12);
 			if (pCloseEnemyVeh)
 			{
-				pBeachU->SetTarget(pCloseEnemyVeh);
-				pBeachU->QueueMission(Mission::Attack, true);
+				if (pBeachU->DistanceFrom(pCloseEnemyVeh) <= maxWpnRangeLeptons + 384)
+				{
+					pBeachU->SetTarget(pCloseEnemyVeh);
+					pBeachU->QueueMission(Mission::Attack, true);
+				}
+				else if (auto const pCloseECell = pCloseEnemyVeh->GetCell())
+				{
+					pBeachU->SetDestination(pCloseECell, true);
+					pBeachU->QueueMission(Mission::AttackMove, true);
+				}
 				continue;
+			}
+
+			// Resume pre-transport initial objective if this unit just landed on its target island!
+			const CellStruct preGoal = LookupPassengerIslandGoal(pBeachU->UniqueID);
+			if (preGoal != CellStruct::Empty && uz >= 0 && MapClass::Instance.GetMovementZoneType(preGoal, MovementZone::Normal, false) == uz)
+			{
+				if (uc.DistanceFrom(preGoal) <= 5.0)
+				{
+					ClearPassengerIslandGoal(pBeachU->UniqueID);
+				}
+				else if (CellClass* pPreGoalCell = MapClass::Instance.TryGetCellAt(preGoal))
+				{
+					pBeachU->SetDestination(pPreGoalCell, true);
+					pBeachU->QueueMission(Mission::AttackMove, true);
+					continue;
+				}
 			}
 
 			if (BuildingClass* pSameIslBld = findBestSameLandmassEnemyBld(uc, uz, (pBeachU->UniqueID & 1) != 0))
 			{
 				const double distToBld = uc.DistanceFrom(pSameIslBld->GetMapCoords());
 				const bool onEnemyIsland = (homeGroundZone >= 0 && uz >= 0 && uz != homeGroundZone);
-				if (onEnemyIsland || distToBld <= 42.0 || idleCombatUnits.size() >= 3)
+				// Do NOT trickle units 1-by-1 from our home base when idleCombatUnits.size() < minWaveUnits!
+				// Only engage on home island once critical mass (>= minWaveUnits) is assembled, or if the enemy structure is encroaching right on our perimeter (<= 15 cells)!
+				if (onEnemyIsland || endgameRemnantHunt || distToBld <= 15.0 || idleCombatUnits.size() >= minWaveUnits)
 				{
-					if (distToBld <= 15.0 && pSameIslBld->GetCell() && (pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pSameIslBld->GetCell())))
+					if (pBeachU->DistanceFrom(pSameIslBld) <= maxWpnRangeLeptons + 384 && pSameIslBld->GetCell() &&
+						(pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pSameIslBld->GetCell())))
 					{
 						pBeachU->SetTarget(pSameIslBld);
 						pBeachU->QueueMission(Mission::Attack, true);
@@ -10830,13 +11222,36 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			const CellStruct ic = pBeachI->GetMapCoords();
 			const int iz = MapClass::Instance.GetMovementZoneType(ic, MovementZone::Normal, false);
+			const bool canBeachICrossWater = (pBeachI->Type->MovementZone == MovementZone::Amphibious || pBeachI->Type->MovementZone == MovementZone::AmphibiousDestroyer ||
+				pBeachI->Type->MovementZone == MovementZone::Fly || pBeachI->Type->JumpJet || pBeachI->Type->Teleporter);
+			if (isWaitingForSisterTransportUnload(pBeachI, canBeachICrossWater))
+				continue;
+
+			const CellStruct preInfGoal = LookupPassengerIslandGoal(pBeachI->UniqueID);
+			if (preInfGoal != CellStruct::Empty && iz >= 0 && MapClass::Instance.GetMovementZoneType(preInfGoal, MovementZone::Normal, false) == iz)
+			{
+				if (ic.DistanceFrom(preInfGoal) <= 5.0)
+				{
+					ClearPassengerIslandGoal(pBeachI->UniqueID);
+				}
+				else if (CellClass* pPreInfCell = MapClass::Instance.TryGetCellAt(preInfGoal))
+				{
+					pBeachI->SetDestination(pPreInfCell, true);
+					pBeachI->QueueMission(Mission::AttackMove, true);
+					continue;
+				}
+			}
+
 			if (BuildingClass* pSameIslBld = findBestSameLandmassEnemyBld(ic, iz, (pBeachI->UniqueID & 1) != 0))
 			{
 				const double distToBld = ic.DistanceFrom(pSameIslBld->GetMapCoords());
 				const bool onEnemyIsland = (homeGroundZone >= 0 && iz >= 0 && iz != homeGroundZone);
-				if (onEnemyIsland || distToBld <= 36.0 || idleCombatInf.size() >= 4)
+				if (onEnemyIsland || endgameRemnantHunt || distToBld <= 14.0 || idleCombatUnits.size() >= minWaveUnits || idleCombatInf.size() >= (minWaveUnits + 3))
 				{
-					if (distToBld <= 12.0 && pSameIslBld->GetCell() && (pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pSameIslBld->GetCell())))
+					const auto pInfW0 = pBeachI->Type->GetWeapon(0) ? pBeachI->Type->GetWeapon(0)->WeaponType : nullptr;
+					const int infWpnRange = pInfW0 ? static_cast<int>(pInfW0->Range) : 1024;
+					if (pBeachI->DistanceFrom(pSameIslBld) <= infWpnRange + 384 && pSameIslBld->GetCell() &&
+						(pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pSameIslBld->GetCell())))
 					{
 						pBeachI->SetTarget(pSameIslBld);
 						pBeachI->QueueMission(Mission::Attack, true);
@@ -10949,6 +11364,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		// If a loading transport is intercepted/under attack, do NOT count it as a loading convoy sister so other transports sail immediately!
+		if (pCheckT->HasBeenAttacked || pCheckT->GetHealthPercentage() < 0.65)
+			continue;
 		const bool activelyBoarding = HasActiveBoardingPassenger(pCheckT, tz);
 		const bool nearPickupIsland = (tz == homeGroundZone || tz == primaryArmyZone ||
 			(homeCoords != CellStruct::Empty && checkCoords.DistanceFrom(homeCoords) <= 28.0));
@@ -11315,7 +11733,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool isSoloPriorityCargo = carryingMCV || carryingHarvester || carryingStolenForeignMCV || (carryingEngineer && pIslandTechGoalCell != nullptr);
 		const bool waitForConvoySister = (!isSoloPriorityCargo && homeTransportsStillLoading > 0 && readyCombatConvoyTransports < desiredConvoyTransports &&
 			(activeIslandZone < 0 || transZone != activeIslandZone) && !pTrans->HasBeenAttacked && (Unsorted::CurrentFrame % 210 < 120));
-		const bool isReadyToSailEffective = isReadyToSail || carryingHarvester || (carryingEngineer && pIslandTechGoalCell != nullptr) || (pCustomPassengerGoal != nullptr);
+		// If this transport already has passengers (numPass >= 1) and is intercepted/under attack during boarding, depart immediately with what we have!
+		const bool emergencyDepartUnderFire = (numPass >= 1 && (pTrans->HasBeenAttacked || pTrans->GetHealthPercentage() < 0.70));
+		const bool isReadyToSailEffective = isReadyToSail || emergencyDepartUnderFire || carryingHarvester || (carryingEngineer && pIslandTechGoalCell != nullptr) || (pCustomPassengerGoal != nullptr);
 		if (isReadyToSailEffective && pActiveIslandGoal && waitForConvoySister)
 		{
 			// Offshore Convoy Staging (supports 4-5 transport armadas!): If this transport is already full and waiting for sister transport(s)
@@ -11376,6 +11796,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					for (auto const pSisterT : UnitClass::Array)
 					{
 						if (!pSisterT || pSisterT == pTrans || pSisterT->Owner != pHouse || pSisterT->InLimbo || !pSisterT->IsAlive || !pSisterT->Type || !IsAmphibiousOrAirTransport(pSisterT->Type))
+							continue;
+						// If the trailing sister transport is intercepted/under attack or damaged, ignore it immediately so surviving transports rush the beach!
+						if (pSisterT->HasBeenAttacked || pSisterT->GetHealthPercentage() < 0.75 || pSisterT->CurrentMission != Mission::Move)
 							continue;
 						if (pSisterT->Passengers.NumPassengers < 2 && pSisterT->Passengers.GetTotalSize() < 5)
 							continue;
@@ -11450,13 +11873,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 				if (onDeployerLand)
 				{
-					if (pTrans->CurrentMission == Mission::Move || (pTrans->Destination != nullptr && !activelyLoadingLinkedUnit))
+					if (!activelyLoadingLinkedUnit && (pTrans->CurrentMission == Mission::Move || pTrans->Destination != nullptr))
 					{
 						pTrans->SetDestination(nullptr, true);
 						pTrans->ClearNavigationList();
 						pTrans->ForceMission(Mission::Guard);
 					}
-					OrderFootToEnter(pHomeExpansionDeployer, pTrans);
+					if ((pHomeExpansionDeployer->CurrentMission != Mission::Enter && pHomeExpansionDeployer->QueuedMission != Mission::Enter) ||
+						pHomeExpansionDeployer->ContainsLink(pTrans) || pHomeExpansionDeployer->ArchiveTarget == pTrans || pHomeExpansionDeployer->Destination == pTrans)
+					{
+						OrderFootToEnter(pHomeExpansionDeployer, pTrans);
+					}
 					continue;
 				}
 			}
@@ -11682,8 +12109,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			// CRITICAL (UnitClass::Receive_Message @ 0x00737806):
 			// A transport in Mission::Move (2) with Destination != nullptr or Locomotor->Is_Moving() rejects RequestLoading with AnswerLeave (0x0A)!
-			// Put the beached transport into Mission::Guard before ordering units to board it!
-			if (pTrans->CurrentMission == Mission::Move || (pTrans->Destination != nullptr && !activelyLoadingLinkedUnit))
+			// Put the beached transport into Mission::Guard before ordering units to board it (unless a linked unit is already actively boarding)!
+			if (!activelyLoadingLinkedUnit && (pTrans->CurrentMission == Mission::Move || pTrans->Destination != nullptr))
 			{
 				pTrans->SetDestination(nullptr, true);
 				pTrans->ClearNavigationList();
@@ -12232,14 +12659,47 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				if (!pBld || !pBld->Type || !pBld->Type->UndeploysInto)
 					return;
+				// Never manually force-undeploy a Slave Miner / ResourceGatherer building via Sell(1);
+				// its native BuildingClass::Mission_Harvest state machine handles undeployment when moving between ore patches!
+				if (pBld->Type->ResourceGatherer || pBld->Type->Enslaves != nullptr)
+					return;
 				if (pBld->CurrentMission == Mission::Construction || pBld->CurrentMission == Mission::Selling ||
 					pBld->QueuedMission == Mission::Construction || pBld->QueuedMission == Mission::Selling)
 					return;
 				const CellStruct bc = pBld->GetMapCoords();
-				const CellStruct targetCoords = (goalCoords != CellStruct::Empty && goalCoords != bc)
-					? goalCoords
-					: CellStruct{static_cast<short>(bc.X + 3), static_cast<short>(bc.Y + 3)};
-				CellClass* pDestCell = MapClass::Instance.TryGetCellAt(targetCoords);
+				const int bZone = MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, false);
+				CellClass* pDestCell = nullptr;
+				if (goalCoords != CellStruct::Empty && goalCoords != bc)
+				{
+					if (auto const pGC = MapClass::Instance.TryGetCellAt(goalCoords))
+					{
+						if (pGC->LandType != LandType::Water &&
+							(bZone < 0 || MapClass::Instance.GetMovementZoneType(goalCoords, MovementZone::Normal, false) == bZone))
+						{
+							pDestCell = pGC;
+						}
+					}
+				}
+				if (!pDestCell)
+				{
+					for (int dy = -3; dy <= 3 && !pDestCell; ++dy)
+					{
+						for (int dx = -3; dx <= 3 && !pDestCell; ++dx)
+						{
+							if (dx == 0 && dy == 0)
+								continue;
+							const CellStruct nc{static_cast<short>(bc.X + dx), static_cast<short>(bc.Y + dy)};
+							if (auto const pNC = MapClass::Instance.TryGetCellAt(nc))
+							{
+								if (pNC->LandType != LandType::Water && pNC->GetBuilding() == nullptr &&
+									(bZone < 0 || MapClass::Instance.GetMovementZoneType(nc, MovementZone::Normal, false) == bZone))
+								{
+									pDestCell = pNC;
+								}
+							}
+						}
+					}
+				}
 				if (!pDestCell)
 					pDestCell = pBld->GetCell();
 				if (pDestCell)
@@ -12439,14 +12899,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			if (!handledConYardAction && hpPct < sellDodgeThresh && !pOwnBld->Type->ConstructionYard && pOwnBld->Type->Cost >= 500 && pOwnBld->CurrentMission != Mission::Selling)
+			if (!handledConYardAction && hpPct < sellDodgeThresh && !pOwnBld->Type->ConstructionYard &&
+				!pOwnBld->Type->ResourceGatherer && pOwnBld->Type->Enslaves == nullptr &&
+				pOwnBld->Type->Cost >= 500 && pOwnBld->CurrentMission != Mission::Selling)
 			{
 				// Classic C&C Sell-Dodge right before destruction!
 				pOwnBld->SetArchiveTarget(nullptr);
 				pOwnBld->Sell(1);
 			}
-			else if (!handledConYardAction && pOwnBld->Type->UndeploysInto != nullptr && !pOwnBld->Type->ConstructionYard && !pOwnBld->Type->Refinery && !pOwnBld->Type->BaseNormal &&
-					(pOwnBld->Type->IsBaseDefense || pOwnBld->Type->GetWeapon(0) != nullptr) && pOwnBld->Target == nullptr && (Unsorted::CurrentFrame % 150 < 30))
+			else if (!handledConYardAction && pOwnBld->Type->UndeploysInto != nullptr && !pOwnBld->Type->ConstructionYard &&
+					!pOwnBld->Type->Refinery && !pOwnBld->Type->ResourceGatherer && !pOwnBld->Type->ResourceDestination &&
+					pOwnBld->Type->Enslaves == nullptr && !pOwnBld->Type->BaseNormal && !IsTrueBaseStructureTarget(pOwnBld->Type) &&
+					(pOwnBld->Type->IsBaseDefense || (pOwnBld->Type->GetWeapon(0) != nullptr && pOwnBld->Type->GetWeapon(0)->WeaponType != nullptr)) &&
+					pOwnBld->Target == nullptr && (Unsorted::CurrentFrame % 150 < 30))
 			{
 				// Slot 57 (Re-Mobilize Deployed Siege Unit): When a deployed Siege
 				// Chopper, Tick Tank, or Nod Artillery has finished combat and no
