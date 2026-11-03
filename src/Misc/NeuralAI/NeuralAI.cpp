@@ -928,8 +928,26 @@ namespace
 		{
 			state.UnsafePlacementZones.erase(
 				std::remove_if(state.UnsafePlacementZones.begin(), state.UnsafePlacementZones.end(),
-					[](const NeuralUnsafeZone& z)
-					{ return z.Coords == CellStruct::Empty || Unsorted::CurrentFrame >= z.ExpirationFrame; }),
+					[&](const NeuralUnsafeZone& z)
+					{
+						if (z.Coords == CellStruct::Empty || Unsorted::CurrentFrame >= z.ExpirationFrame)
+							return true;
+
+						// Once a ground defense turret secures this zone (within 7 cells), lift the unsafe penalty!
+						for (auto const pDef : pHouse->Buildings)
+						{
+							if (!pDef || !pDef->IsAlive || pDef->InLimbo || !pDef->Type || !pDef->Type->IsBaseDefense
+								|| IsTunnelNetworkBuilding(pDef->Type))
+							{
+								continue;
+							}
+
+							if (pDef->GetMapCoords().DistanceFromSquared(z.Coords) <= 49.0)
+								return true;
+						}
+
+						return false;
+					}),
 				state.UnsafePlacementZones.end());
 		}
 
@@ -18676,7 +18694,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						}
 					}
 
-					if (enemyThreatNearCandidate)
+					if (enemyThreatNearCandidate && relaxMarginPass == 0)
 						continue;
 				}
 
@@ -18686,18 +18704,19 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				int spatialScore = (enableBaseCrawl ? (-radius * 5) : (-radius * 10)) - (hasOneCellMargin ? 0 : 4000)
 					+ expansionZoneBonus;
 
-				// AdvAI UnsafePlacementZones Avoidance: avoid placing non-defense buildings on cells
-				// where an allied building was recently destroyed/critically damaged (< 35% HP) or
-				// inside a congested 3+ touching cluster!
+				// AdvAI UnsafePlacementZones Graduated Soft-Avoidance (Never a hard block!):
+				// Apply a distance-graduated penalty within 6 cells of a recently destroyed/critically
+				// damaged building so the AI prefers building on the safer opposite side of its base,
+				// while NEVER self-blocking if the whole buildable area is small or under attack!
 				if (!isCombatDefense && !isNavalBld && relaxMarginPass == 0 && !macroState.UnsafePlacementZones.empty())
 				{
 					for (const auto& uz : macroState.UnsafePlacementZones)
 					{
-						const int dxU = candidate.X - uz.Coords.X;
-						const int dyU = candidate.Y - uz.Coords.Y;
-						if (dxU * dxU + dyU * dyU <= 100)
+						const int dChebU
+							= std::max(std::abs(candidate.X - uz.Coords.X), std::abs(candidate.Y - uz.Coords.Y));
+						if (dChebU <= 6)
 						{
-							spatialScore -= 2200;
+							spatialScore -= (7 - dChebU) * 280;
 							break;
 						}
 					}
