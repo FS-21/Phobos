@@ -2271,9 +2271,10 @@ void NeuralAI::OnScenarioStart()
 			|| (pCur->Type && !_stricmp(pCur->Type->ID, "Observer"));
 		if (isObs)
 		{
-			pCur->MakeObserver();
-			pCur->Visionary = 1;
-			MapClass::Instance.Reveal(pCur);
+			// 0x6879ED runs BEFORE 0x6879FF (MapClass::Read_INI). Do NOT set Visionary = 1 here,
+			// because MapClass::Reveal (0x577E09) and MapClass::RevealTheMap (0x577F9F) early-return
+			// if Visionary != 0! Reset Visionary = 0 so Frame 1 reveals all newly loaded cells.
+			pCur->Visionary = 0;
 		}
 	}
 }

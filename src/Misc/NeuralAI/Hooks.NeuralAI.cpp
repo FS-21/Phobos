@@ -341,17 +341,22 @@ DEFINE_HOOK(0x4FD77C, HouseClass_ExpertAI_NeuralAI, 0x5)
 
 	if (NeuralAI::IsEnabledForHouse(pHouse))
 	{
-		if (!NeuralAI::HeadlessMode)
+		if (!NeuralAI::HeadlessMode && Unsorted::CurrentFrame >= 1)
 		{
 			if (auto const pCur = HouseClass::CurrentPlayer)
 			{
 				if (HouseClass::IsCurrentPlayerObserver() || Game::ObserverMode || pCur->IsInitiallyObserver()
 					|| (pCur->Type && !_stricmp(pCur->Type->ID, "Observer")))
 				{
+					static int lastObserverRevealUniqueID = -1;
+					const int curUniqueID = ScenarioClass::Instance ? ScenarioClass::Instance->UniqueID : 0;
 					pCur->MakeObserver();
-					if (!pCur->Visionary)
+					if (!pCur->Visionary || lastObserverRevealUniqueID != curUniqueID)
 					{
-						pCur->Visionary = 1;
+						lastObserverRevealUniqueID = curUniqueID;
+						// MapClass::Reveal (0x577D90) checks `if (CurrentPlayer->Visionary) return;` at 0x577E09
+						// and sets Visionary = 1 itself at 0x577E29 after clearing ShroudCounter & GapsCoveringThisCell!
+						pCur->Visionary = 0;
 						MapClass::Instance.Reveal(pCur);
 					}
 				}
@@ -557,46 +562,7 @@ DEFINE_HOOK(0x50BD10, HouseClass_ReshroudMap_ObserverImmunity, 0x6)
 		SkipReshroudMap = 0x50BD25
 	};
 	if (IsLocalObserverPlayer())
-	{
-		if (auto const pCur = HouseClass::CurrentPlayer)
-			pCur->Visionary = 1;
-
 		return SkipReshroudMap;
-	}
-
-	return 0;
-}
-
-DEFINE_HOOK(0x577AB0, MapClass_Reshroud_ObserverImmunity, 0x6)
-{
-	enum
-	{
-		SkipMapReshroud = 0x577BA1
-	};
-	if (IsLocalObserverPlayer())
-	{
-		if (auto const pCur = HouseClass::CurrentPlayer)
-			pCur->Visionary = 1;
-
-		return SkipMapReshroud;
-	}
-
-	return 0;
-}
-
-DEFINE_HOOK(0x6FB170, TechnoClass_CreateGap_ObserverImmunity, 0x6)
-{
-	enum
-	{
-		SkipCreateGap = 0x6FB460
-	};
-	if (IsLocalObserverPlayer())
-	{
-		if (auto const pCur = HouseClass::CurrentPlayer)
-			pCur->Visionary = 1;
-
-		return SkipCreateGap;
-	}
 
 	return 0;
 }
@@ -608,23 +574,7 @@ DEFINE_HOOK(0x6E0F90, TActionClass_GrowShroud_ObserverImmunity, 0x5)
 		SkipGrowShroud = 0x6E0F9A
 	};
 	if (IsLocalObserverPlayer())
-	{
-		if (auto const pCur = HouseClass::CurrentPlayer)
-			pCur->Visionary = 1;
-
 		return SkipGrowShroud;
-	}
-
-	return 0;
-}
-
-DEFINE_HOOK(0x6E1A70, TActionClass_ReshroudMapAroundWP_ObserverImmunity, 0x5)
-{
-	if (IsLocalObserverPlayer())
-	{
-		if (auto const pCur = HouseClass::CurrentPlayer)
-			pCur->Visionary = 1;
-	}
 
 	return 0;
 }
