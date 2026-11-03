@@ -339,6 +339,12 @@ DEFINE_HOOK(0x4FD77C, HouseClass_ExpertAI_NeuralAI, 0x5)
 
 	GET(HouseClass* const, pHouse, EBX);
 
+	if (pHouse && (pHouse->Defeated || pHouse->IsObserver()))
+	{
+		R->EAX(100 - 0x69);
+		return ReturnWithCustomDelay;
+	}
+
 	if (NeuralAI::IsEnabledForHouse(pHouse))
 	{
 		if (!NeuralAI::HeadlessMode && Unsorted::CurrentFrame >= 1)
