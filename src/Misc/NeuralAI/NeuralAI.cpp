@@ -360,6 +360,91 @@ namespace
 		return isTunnel;
 	}
 
+	bool HasNoManualUnload(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+		if (auto const pTypeExt = TechnoTypeExt::TryFetch(const_cast<TechnoTypeClass*>(pType)))
+		{
+			if (pTypeExt->NoManualUnload.Get(false))
+				return true;
+		}
+		static std::map<const TechnoTypeClass*, int8_t> NoManualUnloadCache;
+		auto const it = NoManualUnloadCache.find(pType);
+		if (it != NoManualUnloadCache.end())
+			return it->second != 0;
+		bool val = false;
+		if (CCINIClass::INI_Rules && pType->ID && pType->ID[0] != '\0')
+			val = CCINIClass::INI_Rules->ReadBool(pType->ID, "NoManualUnload", false);
+		NoManualUnloadCache[pType] = val ? 1 : 0;
+		return val;
+	}
+
+	bool HasNoManualEnter(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+		static std::map<const TechnoTypeClass*, int8_t> NoManualEnterCache;
+		auto const it = NoManualEnterCache.find(pType);
+		if (it != NoManualEnterCache.end())
+			return it->second != 0;
+		bool val = false;
+		if (CCINIClass::INI_Rules && pType->ID && pType->ID[0] != '\0')
+			val = CCINIClass::INI_Rules->ReadBool(pType->ID, "NoManualEnter", false);
+		if (!val && HasNoManualUnload(pType) && static_cast<int>(pType->SizeLimit) >= 50)
+			val = true;
+		NoManualEnterCache[pType] = val ? 1 : 0;
+		return val;
+	}
+
+	bool IsImmobileUnitTypeOnLand(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+		if (auto const pTypeExt = TechnoTypeExt::TryFetch(const_cast<TechnoTypeClass*>(pType)))
+		{
+			if (pTypeExt->NoManualMove.Get())
+				return true;
+		}
+		return (pType->Speed <= 0) || (!pType->Naval && pType->SpeedType == SpeedType::Float);
+	}
+
+	TechnoTypeClass* GetConvertDeployTargetType(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return nullptr;
+		if (auto const pTypeExt = TechnoTypeExt::TryFetch(const_cast<TechnoTypeClass*>(pType)))
+		{
+			if (auto const pCD = pTypeExt->Convert_Deploy.Get())
+				return pCD;
+			if (auto const pCUD = pTypeExt->Convert_UniversalDeploy.Get())
+				return pCUD;
+		}
+		return nullptr;
+	}
+
+	// Matches Phobos CanEnterNow (Hooks.Transport.cpp:255-280):
+	// Enforces individual unit Size <= Transport->SizeLimit AND total capacity (respecting Passengers.BySize).
+	bool CanPassengerFitInTransport(const TechnoClass* pTransport, const TechnoTypeClass* pPassengerType, int pendingCount = 0, int pendingSize = 0, int reservedSize = 0)
+	{
+		if (!pTransport || !pPassengerType)
+			return false;
+		const auto pTransportType = pTransport->GetTechnoType();
+		if (!pTransportType || pTransportType->Passengers <= 0)
+			return false;
+		const int passengerSize = std::max(1, static_cast<int>(pPassengerType->Size));
+		if (passengerSize > static_cast<int>(pTransportType->SizeLimit))
+			return false;
+		const auto pTransportTypeExt = TechnoTypeExt::Fetch(pTransportType);
+		const bool bySize = pTransportTypeExt ? pTransportTypeExt->Passengers_BySize.Get() : true;
+		const int maxAllowed = std::max(0, pTransportType->Passengers - reservedSize);
+		if ((pTransport->Passengers.NumPassengers + pendingCount + 1) > pTransportType->Passengers)
+			return false;
+		if (bySize)
+			return (pTransport->Passengers.GetTotalSize() + pendingSize + passengerSize) <= maxAllowed;
+		return (pTransport->Passengers.NumPassengers + pendingCount + 1) <= maxAllowed;
+	}
+
 	bool IsTunnelDeliverySuperWeapon(const SuperWeaponTypeClass* pSWType, HouseClass* pOwner)
 
 	{
@@ -4779,8 +4864,7 @@ namespace
 				}
 				else if (pEnterType && pEnterType->Passengers > 0)
 				{
-					const bool hasRoom = (pEnterT->Passengers.NumPassengers < pEnterType->Passengers) &&
-						((pEnterT->Passengers.GetTotalSize() + footSize) <= pEnterType->Passengers);
+					const bool hasRoom = CanPassengerFitInTransport(pEnterT, pFootType);
 					const auto pECell = pEnterT->GetCell();
 					const bool reachableShore = canCrossWaterDirectly || (fz >= 0 && ez == fz) ||
 						(pFoot->ContainsLink(pEnterT)) ||
@@ -6498,13 +6582,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// Slot 70 (Dying Transport / Battle Fortress Emergency Passenger Unload):
-
+		// Slot 70 (Dying Transport / OpenTopped Emergency Passenger Unload):
 		// If a transport or OpenTopped vehicle carrying passengers on land is about
-
 		// to explode (< 24% HP), immediately Unload so the squad inside survives!
-
-		if (pUnit->Passengers.NumPassengers > 0 && !pType->Naval && pUnit->GetHealthPercentage() < 0.24 && scores[70] > 60)
+		// Strictly respect NoManualUnload / NoManualEnter (dummy sub-weapon passenger hacks in any mod).
+		if (pUnit->Passengers.NumPassengers > 0 && !pType->Naval && !HasNoManualUnload(pType) && !HasNoManualEnter(pType) &&
+			pUnit->GetHealthPercentage() < 0.24 && scores[70] > 60)
 
 		{
 
@@ -8683,6 +8766,99 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// Generalized Deployable OpenTopped Bunker Vehicles across any mod (IsSimpleDeployer with Convert.Deploy / Convert.UniversalDeploy -> OpenTopped transport/bunker):
+		// Before deploying into an immobile OpenTopped bunker, ensure we are >= 4 cells away from any Factory/Refinery/ConYard exit so we never block production doors!
+		if (isUnitIdle && !pType->Naval && pType->IsSimpleDeployer && !pType->OpenTopped && (Unsorted::CurrentFrame % 90 < 25))
+		{
+			TechnoTypeClass* pConvTarget = GetConvertDeployTargetType(pType);
+			if (pConvTarget && pConvTarget->OpenTopped && pConvTarget->Passengers > 0 && !HasNoManualEnter(pConvTarget) && !HasNoManualUnload(pConvTarget))
+			{
+				const CellStruct uc = pUnit->GetMapCoords();
+				bool tooCloseToBaseDoor = false;
+				for (auto const pOwnB : pHouse->Buildings)
+				{
+					if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type)
+						continue;
+					if (pOwnB->Type->Factory != AbstractType::None || pOwnB->Type->Refinery || pOwnB->Type->ConstructionYard)
+					{
+						const CellStruct bc = pOwnB->GetMapCoords();
+						const int bw = pOwnB->Type->GetFoundationWidth();
+						const int bh = pOwnB->Type->GetFoundationHeight(false);
+						if (uc.X >= bc.X - 3 && uc.X <= bc.X + bw + 2 && uc.Y >= bc.Y - 3 && uc.Y <= bc.Y + bh + 3)
+						{
+							tooCloseToBaseDoor = true;
+							break;
+						}
+					}
+				}
+				if (tooCloseToBaseDoor)
+				{
+					pUnit->Scatter(CoordStruct::Empty, true, false);
+					continue;
+				}
+				int nearbyFriendlyInf = 0;
+				for (auto const pOwnI : InfantryClass::Array)
+				{
+					if (pOwnI && pOwnI->Owner == pHouse && !pOwnI->InLimbo && pOwnI->IsAlive && pOwnI->Type &&
+						!pOwnI->Type->Engineer && !pOwnI->Type->Infiltrate && pOwnI->DistanceFrom(pUnit) <= 2816)
+					{
+						nearbyFriendlyInf++;
+					}
+				}
+				if (nearbyFriendlyInf >= 2 || pUnit->Passengers.NumPassengers > 0)
+				{
+					pUnit->QueueMission(Mission::Unload, true);
+					continue;
+				}
+			}
+		}
+
+		// Armed Vehicles (any unit with Size <= transport SizeLimit) boarding OpenTopped transports (Slot 53):
+		const int unitPassSize = std::max(1, static_cast<int>(pType->TechnoTypeClass::Size));
+		if (isUnitIdle && !pType->Naval && !pType->Harvester && !pType->ResourceGatherer && !pType->OpenTopped && !pType->Gunner &&
+			pType->Passengers == 0 && pType->DeploysInto == nullptr && GetConvertDeployTargetType(pType) == nullptr &&
+			pPrimaryWpn && pPrimaryWpn->Damage > 0 && (Unsorted::CurrentFrame % 90 < 25))
+		{
+			bool unitBoardedOpenTopped = false;
+			for (auto const pOTVeh : UnitClass::Array)
+			{
+				if (!pOTVeh || pOTVeh == pUnit || pOTVeh->Owner != pHouse || pOTVeh->InLimbo || !pOTVeh->IsAlive || !pOTVeh->Type)
+					continue;
+				if (!pOTVeh->Type->OpenTopped || HasNoManualEnter(pOTVeh->Type) || HasNoManualUnload(pOTVeh->Type))
+					continue;
+				if (unitPassSize > static_cast<int>(pOTVeh->Type->SizeLimit))
+					continue;
+				int pendingCount = 0;
+				int pendingSize = 0;
+				for (auto const pOtherI : InfantryClass::Array)
+				{
+					if (pOtherI && pOtherI->Owner == pHouse && !pOtherI->InLimbo && pOtherI->IsAlive &&
+						pOtherI->CurrentMission == Mission::Enter && pOtherI->Destination == pOTVeh)
+					{
+						pendingCount++;
+						pendingSize += std::max(1, static_cast<int>(pOtherI->Type->TechnoTypeClass::Size));
+					}
+				}
+				for (auto const pOtherU : UnitClass::Array)
+				{
+					if (pOtherU && pOtherU != pUnit && pOtherU->Owner == pHouse && !pOtherU->InLimbo && pOtherU->IsAlive &&
+						pOtherU->CurrentMission == Mission::Enter && pOtherU->Destination == pOTVeh)
+					{
+						pendingCount++;
+						pendingSize += std::max(1, static_cast<int>(pOtherU->Type->TechnoTypeClass::Size));
+					}
+				}
+				if (CanPassengerFitInTransport(pOTVeh, pType, pendingCount, pendingSize) && pUnit->DistanceFrom(pOTVeh) <= 2560)
+				{
+					DispatchFootToTargetOrTransport(pUnit, pOTVeh, Mission::Enter, false);
+					unitBoardedOpenTopped = true;
+					break;
+				}
+			}
+			if (unitBoardedOpenTopped)
+				continue;
+		}
+
 		// Tank Bunker Garrisoning (Bunkerable=yes into empty owned Tank Bunker):
 
 		// Fortify base perimeter!
@@ -9523,57 +9699,77 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// IFV (Gunner=yes), Battle Fortress (OpenTopped=yes) & Subterranean/Ground
-
+		// IFV (Gunner=yes), OpenTopped Transports/Bunkers (OpenTopped=yes) & Subterranean/Ground
 		// APC Strike Team Boarding (Slot 53)!
-
+		// Generalized & cross-faction agnostic: any armed infantry of any faction (native or unlocked from a foreign tech tree)
+		// can board any owned OpenTopped or Gunner vehicle, while strictly respecting NoManualEnter & NoManualUnload!
 		const int apcBoardBias = static_cast<int>(scores[53]);
-
-		const int apcBoardWindow = std::clamp(20 + (apcBoardBias / 20), 10, 45);
-
-		const int apcBoardRange = std::clamp(2304 + apcBoardBias * 2, 1536, 3840);
+		const int apcBoardWindow = std::clamp(25 + (apcBoardBias / 18), 15, 55);
+		const int apcBoardRange = std::clamp(2560 + apcBoardBias * 2, 1792, 4096);
+		const auto pInfWpn1 = pInf->Type->GetWeapon(1) ? pInf->Type->GetWeapon(1)->WeaponType : nullptr;
+		const auto pInfEliteWpn0 = pInf->Type->GetEliteWeapon(0) ? pInf->Type->GetEliteWeapon(0)->WeaponType : nullptr;
+		const auto pInfEliteWpn1 = pInf->Type->GetEliteWeapon(1) ? pInf->Type->GetEliteWeapon(1)->WeaponType : nullptr;
+		const WeaponTypeClass* pBestInfGun = nullptr;
+		for (auto const pCandW : {pInfWpn, pInfWpn1, pInfEliteWpn0, pInfEliteWpn1})
+		{
+			if (pCandW && pCandW->Damage > 0 && (!pBestInfGun || pCandW->Range > pBestInfGun->Range))
+				pBestInfGun = pCandW;
+		}
 
 		if (isIdle && !pInf->Type->Infiltrate && (Unsorted::CurrentFrame % 90 < apcBoardWindow))
-
 		{
-
 			bool boardedCombatVehicle = false;
-
 			for (auto const pCombVeh : UnitClass::Array)
-
 			{
-
 				if (!pCombVeh || pCombVeh->Owner != pHouse || pCombVeh->InLimbo || !pCombVeh->IsAlive || !pCombVeh->Type)
+					continue;
+				if (HasNoManualEnter(pCombVeh->Type) || HasNoManualUnload(pCombVeh->Type))
 					continue;
 
 				const int infPassengerSize = std::max(1, static_cast<int>(pInf->Type->TechnoTypeClass::Size));
+				if (infPassengerSize > static_cast<int>(pCombVeh->Type->SizeLimit))
+					continue;
 
-				const bool fitsInVehicle = infPassengerSize <= pCombVeh->Type->SizeLimit && (pCombVeh->Passengers.GetTotalSize() + infPassengerSize) <= pCombVeh->Type->Passengers;
+				int pendingBoardersCount = 0;
+				int pendingBoardersSize = 0;
+				for (auto const pOtherInf : InfantryClass::Array)
+				{
+					if (pOtherInf && pOtherInf != pInf && pOtherInf->Owner == pHouse && !pOtherInf->InLimbo && pOtherInf->IsAlive &&
+						pOtherInf->CurrentMission == Mission::Enter && pOtherInf->Destination == pCombVeh)
+					{
+						pendingBoardersCount++;
+						pendingBoardersSize += std::max(1, static_cast<int>(pOtherInf->Type->TechnoTypeClass::Size));
+					}
+				}
+				for (auto const pOtherU : UnitClass::Array)
+				{
+					if (pOtherU && pOtherU != pCombVeh && pOtherU->Owner == pHouse && !pOtherU->InLimbo && pOtherU->IsAlive &&
+						pOtherU->CurrentMission == Mission::Enter && pOtherU->Destination == pCombVeh)
+					{
+						pendingBoardersCount++;
+						pendingBoardersSize += std::max(1, static_cast<int>(pOtherU->Type->TechnoTypeClass::Size));
+					}
+				}
 
-				const bool isUsefulOpenToppedGunner = !pInf->Type->Engineer && !pInf->Type->Doggie && !pInf->Type->Thief && !pInf->Type->VehicleThief && !pInf->Type->Ivan && pInfWpn &&
+				if (!CanPassengerFitInTransport(pCombVeh, pInf->Type, pendingBoardersCount, pendingBoardersSize))
+					continue;
 
-													pInfWpn->Damage > 0 && pInfWpn->Range >= (4 * 256);
+				const bool isUsefulOpenToppedGunner = !pInf->Type->Engineer && !pInf->Type->Doggie && !pInf->Type->Thief && !pInf->Type->VehicleThief && !pInf->Type->Ivan &&
+					pBestInfGun != nullptr && pBestInfGun->Damage > 0 && pBestInfGun->Range >= 384;
 
-				const bool isUsefulIFVPassenger = !pInf->Type->Doggie && !pInf->Type->Thief && !pInf->Type->VehicleThief && (!pInf->Type->Engineer || pParasitedOwnUnit != nullptr);
+				const bool isUsefulIFVPassenger = !pInf->Type->Doggie && !pInf->Type->Thief && !pInf->Type->VehicleThief &&
+					(pBestInfGun != nullptr || pInf->Type->IFVMode > 0) && (!pInf->Type->Engineer || pParasitedOwnUnit != nullptr);
 
-				const bool isGunnerIFV = (fitsInVehicle && isUsefulIFVPassenger && pCombVeh->Type->Gunner && pCombVeh->Passengers.NumPassengers == 0);
-
-				const bool isOpenToppedFortress = (fitsInVehicle && isUsefulOpenToppedGunner && pCombVeh->Type->OpenTopped && pCombVeh->Passengers.NumPassengers < pCombVeh->Type->Passengers);
-
+				const bool isGunnerIFV = (isUsefulIFVPassenger && pCombVeh->Type->Gunner && (pCombVeh->Passengers.NumPassengers + pendingBoardersCount) == 0);
+				const bool isOpenToppedFortress = (isUsefulOpenToppedGunner && pCombVeh->Type->OpenTopped && (pCombVeh->Passengers.NumPassengers + pendingBoardersCount) < pCombVeh->Type->Passengers);
 				const bool isSubterraneanOrGroundAPC = (!pCombVeh->Type->Naval && !pCombVeh->Type->Gunner && !pCombVeh->Type->OpenTopped && pCombVeh->Type->Passengers >= 3 &&
-
-														pCombVeh->Passengers.NumPassengers < pCombVeh->Type->Passengers &&
-
-														(pCombVeh->Type->MovementZone == MovementZone::Subterrannean || pInf->Type->Engineer || pInf->Type->C4 || apcBoardBias > 80));
+					!IsAmphibiousOrAirTransport(pCombVeh->Type) && (pCombVeh->Passengers.NumPassengers + pendingBoardersCount) < pCombVeh->Type->Passengers &&
+					(pCombVeh->Type->MovementZone == MovementZone::Subterrannean || pInf->Type->Engineer || pInf->Type->C4 || apcBoardBias > 80));
 
 				if ((isGunnerIFV || isOpenToppedFortress || isSubterraneanOrGroundAPC) && pInf->DistanceFrom(pCombVeh) <= apcBoardRange)
-
 				{
-
 					DispatchFootToTargetOrTransport(pInf, pCombVeh, Mission::Enter, false);
-
 					boardedCombatVehicle = true;
-
 					break;
 				}
 			}
@@ -9900,6 +10096,26 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pUnit->Type->MovementZone == MovementZone::AmphibiousCrusher || pUnit->Type->MovementZone == MovementZone::Fly ||
 			pUnit->Type->MovementZone == MovementZone::Subterrannean || pUnit->Type->JumpJet || pUnit->Type->Teleporter);
 		ClearStaleEnterOrUnreachableCrossIslandMission(pUnit, canCrossWaterDirectly);
+
+		if (IsImmobileUnitTypeOnLand(pUnit->Type))
+			continue; // Static deployed vehicle bunker (NoManualMove=yes / Speed=0): stay in Area_Guard and let OpenTopped passengers fire!
+
+		if ((pUnit->Type->Gunner || pUnit->Type->OpenTopped) && !HasNoManualEnter(pUnit->Type) && !HasNoManualUnload(pUnit->Type) &&
+			pUnit->Passengers.NumPassengers < pUnit->Type->Passengers && !pUnit->HasBeenAttacked)
+		{
+			bool passengerWalkingToBoard = false;
+			for (auto const pCheckI : InfantryClass::Array)
+			{
+				if (pCheckI && pCheckI->Owner == pHouse && !pCheckI->InLimbo && pCheckI->IsAlive &&
+					pCheckI->CurrentMission == Mission::Enter && pCheckI->Destination == pUnit && pCheckI->DistanceFrom(pUnit) <= 3840)
+				{
+					passengerWalkingToBoard = true;
+					break;
+				}
+			}
+			if (passengerWalkingToBoard)
+				continue; // Wait a few seconds for the nearby gunner/passenger to climb inside before driving away!
+		}
 
 		if (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard)
 			idleCombatUnits.push_back(pUnit);
@@ -10652,10 +10868,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 
 		// Subterranean APC / Ground APC Strike Team: If carrying Engineers or >= 3
-
-		// Infantry, burrow/drive to enemy base and Unload!
-
-		if (!IsAmphibiousOrAirTransport(pTrans->Type) && pTrans->Type->Passengers >= 3 && !pTrans->Type->OpenTopped && !pTrans->Type->Gunner)
+		// Infantry, burrow/drive to enemy base and Unload! (Never unload NoManualUnload/NoManualEnter units!)
+		if (!IsAmphibiousOrAirTransport(pTrans->Type) && pTrans->Type->Passengers >= 3 && !pTrans->Type->OpenTopped && !pTrans->Type->Gunner &&
+			!HasNoManualUnload(pTrans->Type) && !HasNoManualEnter(pTrans->Type))
 
 		{
 
@@ -11142,7 +11357,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 			}
-			else if (pHomeIslandEngineer != nullptr && !carryingEngineer && (totalPassSize + 1) <= pTrans->Type->Passengers)
+			else if (pHomeIslandEngineer != nullptr && !carryingEngineer && CanPassengerFitInTransport(pTrans, pHomeIslandEngineer->Type))
 			{
 				const int engZone = MapClass::Instance.GetMovementZoneType(pHomeIslandEngineer->GetMapCoords(), MovementZone::Normal, false);
 				CellClass* pEngPickupBeach = FindSafeIslandLandingCell(pHouse, pHomeIslandEngineer->GetMapCoords(), engZone, false);
@@ -11257,7 +11472,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 				for (auto const pI : idleCombatInf)
 				{
-					addCandidateToCluster(pI, 1, 12);
+					addCandidateToCluster(pI, std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size)), 12);
 				}
 
 				// Parallel Multi-Island Pickup: if the transport is already at an island with waiting units, load there immediately;
@@ -11382,7 +11597,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					(pCheckI->ContainsLink(pTrans) || pCheckI->ArchiveTarget == pTrans || pCheckI->Destination == pTrans))
 				{
 					boardedNow++;
-					sizeNow += 1;
+					sizeNow += std::max(1, static_cast<int>(pCheckI->Type->TechnoTypeClass::Size));
 				}
 			}
 
@@ -11420,8 +11635,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				sizeNow += static_cast<int>(pBestV->Type->TechnoTypeClass::Size);
 			}
 
-			// Recruit the closest available infantry on the same island (iz == transZone)
-			while (boardedNow < pTrans->Type->Passengers && (sizeNow + 1) <= maxAllowedPassSize && static_cast<int>(pTrans->Type->SizeLimit) >= 1)
+			// Recruit the closest available infantry on the same island (iz == transZone) respecting SizeLimit & Size
+			while (boardedNow < pTrans->Type->Passengers && sizeNow < maxAllowedPassSize && static_cast<int>(pTrans->Type->SizeLimit) >= 1)
 			{
 				InfantryClass* pBestI = nullptr;
 				double bestDist = 999999.0;
@@ -11430,6 +11645,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					if (!pI || pI->InLimbo || !pI->IsAlive || !pI->Type)
 						continue;
 					if (pI->CurrentMission == Mission::Enter || pI->QueuedMission == Mission::Enter)
+						continue;
+					const int infSize = std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size));
+					if (infSize > static_cast<int>(pTrans->Type->SizeLimit) || (sizeNow + infSize) > maxAllowedPassSize)
 						continue;
 					const int iz = MapClass::Instance.GetMovementZoneType(pI->GetMapCoords(), MovementZone::Normal, false);
 					if (transZone >= 0 && iz != transZone)
@@ -11445,7 +11663,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					break;
 				OrderFootToEnter(pBestI, pTrans);
 				boardedNow++;
-				sizeNow += 1;
+				sizeNow += std::max(1, static_cast<int>(pBestI->Type->TechnoTypeClass::Size));
 			}
 		}
 	}
@@ -11600,16 +11818,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 				for (auto const pI : idleCombatInf)
 				{
-					if (boardedAir >= pAir->Type->Passengers || (sizeAir + 1) > pAir->Type->Passengers)
+					if (boardedAir >= pAir->Type->Passengers)
 						break;
 					if (pI->CurrentMission == Mission::Enter || pI->QueuedMission == Mission::Enter)
 						continue;
+					const int infSize = std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size));
+					if (infSize > static_cast<int>(pAir->Type->SizeLimit) || (sizeAir + infSize) > pAir->Type->Passengers)
+						continue;
 					const int iz = MapClass::Instance.GetMovementZoneType(pI->GetMapCoords(), MovementZone::Normal, false);
-					if (static_cast<int>(pAir->Type->SizeLimit) >= 1 && iz == airZone && pI->GetMapCoords().DistanceFrom(airCoords) <= 28.0)
+					if (iz == airZone && pI->GetMapCoords().DistanceFrom(airCoords) <= 28.0)
 					{
 						OrderFootToEnter(pI, pAir);
 						boardedAir++;
-						sizeAir += 1;
+						sizeAir += infSize;
 					}
 				}
 			}
@@ -14791,8 +15012,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (isEconomyUnit && ownedEconomyUnits >= economyUnitCap && !allowExpansionRefineryDeployer && !hasRefineryZoneWithZeroHarvesters && !hasUnderharvestedIslandWithWarFactory)
 			continue;
 
+		TechnoTypeClass* pConvDeployType = GetConvertDeployTargetType(pUnit);
+		const bool isConvertToOpenToppedOrCombat = (pConvDeployType != nullptr) &&
+			((pConvDeployType->OpenTopped && pConvDeployType->Passengers > 0) ||
+			 (pConvDeployType->GetWeapon(0) && pConvDeployType->GetWeapon(0)->WeaponType && pConvDeployType->GetWeapon(0)->WeaponType->Damage > 0));
+		if (isConvertToOpenToppedOrCombat && pConvDeployType->OpenTopped && pConvDeployType->Passengers > 0)
+		{
+			const int ownedConvTotal = pHouse->CountOwnedNow(pUnit) + (abstract_cast<UnitTypeClass*>(pConvDeployType) ? pHouse->CountOwnedNow(abstract_cast<UnitTypeClass*>(pConvDeployType)) : 0);
+			if (ownedConvTotal >= 2 || pHouse->OwnedInfantry < 3 || canSafelySaveForMCV || savingForIslandTransport)
+				continue;
+		}
 		const bool isUnarmedSupportVehicle = (!pUnit->Naval && pWpn == nullptr && !isMCV && !isKeyStructureDeployer && !isEconomyUnit &&
-			pUnit->Passengers == 0 && !(TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall));
+			!isConvertToOpenToppedOrCombat && pUnit->Passengers == 0 && !(TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall));
 		if (isUnarmedSupportVehicle)
 		{
 			// Hard cap unarmed support/detector/jammer vehicles (Mobile Radar Jammer MRJ_SOV/MRJ_ALL, Mobile Stealth Generator SGEN/GGEN,
