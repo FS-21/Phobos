@@ -5309,6 +5309,46 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return CellStruct::Empty;
 	};
 
+	auto ClearPassengerIslandGoal = [](DWORD uid)
+	{
+		for (int i = 0; i < 64; ++i)
+		{
+			if (s_PassengerIslandGoals[i].UniqueID == uid)
+			{
+				s_PassengerIslandGoals[i] = {0, CellStruct::Empty, 0};
+				return;
+			}
+		}
+	};
+
+	auto countPendingBoardersOn = [&](TechnoClass* pT, FootClass* pExcludeFoot, int& outCount, int& outSize)
+	{
+		outCount = 0;
+		outSize = 0;
+		for (auto const pCheckU : UnitClass::Array)
+		{
+			if (!pCheckU || pCheckU->Owner != pHouse || pCheckU->InLimbo || !pCheckU->IsAlive || !pCheckU->Type || pCheckU == pT || pCheckU == pExcludeFoot)
+				continue;
+			if ((pCheckU->CurrentMission == Mission::Enter || pCheckU->QueuedMission == Mission::Enter) &&
+				(pCheckU->ContainsLink(pT) || pCheckU->ArchiveTarget == pT || pCheckU->Destination == pT))
+			{
+				outCount++;
+				outSize += std::max(1, static_cast<int>(pCheckU->Type->TechnoTypeClass::Size));
+			}
+		}
+		for (auto const pCheckI : InfantryClass::Array)
+		{
+			if (!pCheckI || pCheckI->Owner != pHouse || pCheckI->InLimbo || !pCheckI->IsAlive || !pCheckI->Type || pCheckI == pExcludeFoot)
+				continue;
+			if ((pCheckI->CurrentMission == Mission::Enter || pCheckI->QueuedMission == Mission::Enter) &&
+				(pCheckI->ContainsLink(pT) || pCheckI->ArchiveTarget == pT || pCheckI->Destination == pT))
+			{
+				outCount++;
+				outSize += std::max(1, static_cast<int>(pCheckI->Type->TechnoTypeClass::Size));
+			}
+		}
+	};
+
 	auto CanFootCrossWaterDirectly = [](const FootClass* pF) -> bool
 	{
 		if (!pF)
@@ -5426,7 +5466,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			if (!pU || pU->Owner != pHouse || pU->InLimbo || !pU->IsAlive || !pU->Type || !IsAmphibiousOrAirTransport(pU->Type))
 				continue;
-			if (passSize > static_cast<int>(pU->Type->SizeLimit) || (pU->Passengers.GetTotalSize() + passSize) > pU->Type->Passengers)
+			int pendCnt = 0, pendSz = 0;
+			countPendingBoardersOn(pU, pFoot, pendCnt, pendSz);
+			if (!CanPassengerFitInTransport(pU, pFootType, pendCnt, pendSz))
 				continue;
 			auto const pTC = pU->GetCell();
 			const int tz = MapClass::Instance.GetMovementZoneType(pU->GetMapCoords(), MovementZone::Normal, false);
@@ -5446,9 +5488,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				if (!pAirT || pAirT->Owner != pHouse || pAirT->InLimbo || !pAirT->IsAlive || !pAirT->Type)
 					continue;
-				if (!pAirT->Type->Carryall && pAirT->Type->Passengers >= 1 && !pAirT->IsInAir() && pAirT->GetHeight() == 0 &&
-					passSize <= static_cast<int>(pAirT->Type->SizeLimit) && (pAirT->Passengers.GetTotalSize() + passSize) <= pAirT->Type->Passengers)
+				if (!pAirT->Type->Carryall && pAirT->Type->Passengers >= 1 && !pAirT->IsInAir() && pAirT->GetHeight() == 0)
 				{
+					int pendCnt = 0, pendSz = 0;
+					countPendingBoardersOn(pAirT, pFoot, pendCnt, pendSz);
+					if (!CanPassengerFitInTransport(pAirT, pFootType, pendCnt, pendSz))
+						continue;
 					const int tz = MapClass::Instance.GetMovementZoneType(pAirT->GetMapCoords(), MovementZone::Normal, false);
 					if (tz == footZone)
 					{
@@ -10357,13 +10402,51 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool canCrossWaterDirectly = (pU->Type->MovementZone == MovementZone::Amphibious || pU->Type->MovementZone == MovementZone::AmphibiousDestroyer ||
 				pU->Type->MovementZone == MovementZone::AmphibiousCrusher || pU->Type->MovementZone == MovementZone::Fly ||
 				pU->Type->MovementZone == MovementZone::Subterrannean || pU->Type->JumpJet || pU->Type->Teleporter);
+			// If this unit was ferried across islands by transport, check if sister transports of the battalion are still unloading right next to us (within 20 cells)
+			if (!canCrossWaterDirectly && !pU->HasBeenAttacked && (Unsorted::CurrentFrame % 180 < 120))
+			{
+				bool sisterTransportUnloadingBattalion = false;
+				for (auto const pCheckT : UnitClass::Array)
+				{
+					if (!pCheckT || pCheckT->Owner != pHouse || pCheckT->InLimbo || !pCheckT->IsAlive || !pCheckT->Type || !IsAmphibiousOrAirTransport(pCheckT->Type))
+						continue;
+					if (pCheckT->Passengers.NumPassengers == 0)
+						continue;
+					if (pU->GetMapCoords().DistanceFrom(pCheckT->GetMapCoords()) <= 20.0)
+					{
+						sisterTransportUnloadingBattalion = true;
+						break;
+					}
+				}
+				if (sisterTransportUnloadingBattalion)
+					continue; // Regroup battalion on beachhead while sister transport(s) finish unloading!
+			}
+
 			CellClass* pUnitWaveGoal = pWaveTargetCell;
-			if (pSecondaryWaveTargetCell && idleCombatUnits.size() >= (minWaveUnits + 2) && (pU->UniqueID % 3 == 0) &&
+			int goalZone = waveTargetZone;
+			const CellStruct preTransportGoal = LookupPassengerIslandGoal(pU->UniqueID);
+			if (preTransportGoal != CellStruct::Empty)
+			{
+				const int ptz = MapClass::Instance.GetMovementZoneType(preTransportGoal, MovementZone::Normal, false);
+				if (ptz >= 0 && uz == ptz)
+				{
+					if (pU->GetMapCoords().DistanceFrom(preTransportGoal) <= 5.0)
+					{
+						ClearPassengerIslandGoal(pU->UniqueID);
+					}
+					else if (CellClass* pPreCell = MapClass::Instance.TryGetCellAt(preTransportGoal))
+					{
+						pUnitWaveGoal = pPreCell;
+						goalZone = ptz;
+					}
+				}
+			}
+			if (pUnitWaveGoal == pWaveTargetCell && pSecondaryWaveTargetCell && idleCombatUnits.size() >= (minWaveUnits + 2) && (pU->UniqueID % 3 == 0) &&
 				(canCrossWaterDirectly || (secWaveZone >= 0 && uz == secWaveZone)))
 			{
 				pUnitWaveGoal = pSecondaryWaveTargetCell;
+				goalZone = secWaveZone;
 			}
-			const int goalZone = (pUnitWaveGoal == pSecondaryWaveTargetCell) ? secWaveZone : waveTargetZone;
 			const bool goalInWater = (pUnitWaveGoal->LandType == LandType::Water);
 			if (!canCrossWaterDirectly && (goalInWater || goalZone < 0 || uz < 0 || uz != goalZone))
 				continue; // Keep ground-only vehicles in Guard state on their island so they board Amphibious/Air Transports!
@@ -10403,12 +10486,30 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool canInfCrossWater = (pI->Type->MovementZone == MovementZone::Amphibious || pI->Type->MovementZone == MovementZone::AmphibiousDestroyer ||
 				pI->Type->MovementZone == MovementZone::Fly || pI->Type->JumpJet || pI->Type->Teleporter);
 			CellClass* pInfWaveGoal = pWaveTargetCell;
-			if (pSecondaryWaveTargetCell && idleCombatInf.size() >= 5 && (pI->UniqueID % 3 == 0) &&
+			int infGoalZone = waveTargetZone;
+			const CellStruct preTransportInfGoal = LookupPassengerIslandGoal(pI->UniqueID);
+			if (preTransportInfGoal != CellStruct::Empty)
+			{
+				const int ptz = MapClass::Instance.GetMovementZoneType(preTransportInfGoal, MovementZone::Normal, false);
+				if (ptz >= 0 && iz == ptz)
+				{
+					if (pI->GetMapCoords().DistanceFrom(preTransportInfGoal) <= 5.0)
+					{
+						ClearPassengerIslandGoal(pI->UniqueID);
+					}
+					else if (CellClass* pPreCell = MapClass::Instance.TryGetCellAt(preTransportInfGoal))
+					{
+						pInfWaveGoal = pPreCell;
+						infGoalZone = ptz;
+					}
+				}
+			}
+			if (pInfWaveGoal == pWaveTargetCell && pSecondaryWaveTargetCell && idleCombatInf.size() >= 5 && (pI->UniqueID % 3 == 0) &&
 				(canInfCrossWater || (secWaveZone >= 0 && iz == secWaveZone)))
 			{
 				pInfWaveGoal = pSecondaryWaveTargetCell;
+				infGoalZone = secWaveZone;
 			}
-			const int infGoalZone = (pInfWaveGoal == pSecondaryWaveTargetCell) ? secWaveZone : waveTargetZone;
 			const bool infGoalInWater = (pInfWaveGoal->LandType == LandType::Water);
 			if (!canInfCrossWater && (infGoalInWater || infGoalZone < 0 || iz < 0 || iz != infGoalZone))
 				continue; // Keep ground infantry ready on their island to board transports!
@@ -11208,10 +11309,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Fast Continuous Amphibious Squadron Dispatch:
 		// When we already have military dominance (OwnedUnits >= 15) or >= 2 transports are ready, dispatch immediately
 		// instead of holding transports back waiting for a slow 4-5 ship convoy!
-		const int desiredConvoyTransports = (pHouse->OwnedUnits >= 15) ? 1 : 2;
+		const int desiredConvoyTransports = (homeTransportsStillLoading > 0)
+			? std::clamp(readyCombatConvoyTransports + homeTransportsStillLoading, 2, 6)
+			: ((pHouse->OwnedUnits >= 15) ? 1 : 2);
 		const bool isSoloPriorityCargo = carryingMCV || carryingHarvester || carryingStolenForeignMCV || (carryingEngineer && pIslandTechGoalCell != nullptr);
 		const bool waitForConvoySister = (!isSoloPriorityCargo && homeTransportsStillLoading > 0 && readyCombatConvoyTransports < desiredConvoyTransports &&
-			(activeIslandZone < 0 || transZone != activeIslandZone) && !pTrans->HasBeenAttacked && (Unsorted::CurrentFrame % 180 < 75));
+			(activeIslandZone < 0 || transZone != activeIslandZone) && !pTrans->HasBeenAttacked && (Unsorted::CurrentFrame % 210 < 120));
 		const bool isReadyToSailEffective = isReadyToSail || carryingHarvester || (carryingEngineer && pIslandTechGoalCell != nullptr) || (pCustomPassengerGoal != nullptr);
 		if (isReadyToSailEffective && pActiveIslandGoal && waitForConvoySister)
 		{
@@ -11384,12 +11487,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else if (!pendingCrossIslandOrders.empty())
 			{
+				int pendCntOnThisTrans = 0;
+				int pendSzOnThisTrans = 0;
+				countPendingBoardersOn(pTrans, nullptr, pendCntOnThisTrans, pendSzOnThisTrans);
+
 				bool handledPendingOrder = false;
 				for (auto const& ord : pendingCrossIslandOrders)
 				{
 					if (!ord.Passenger || !ord.Passenger->IsAlive || ord.Passenger->InLimbo)
 						continue;
-					if (ord.PassengerSize > static_cast<int>(pTrans->Type->SizeLimit) || (totalPassSize + ord.PassengerSize) > pTrans->Type->Passengers)
+					if ((ord.Passenger->CurrentMission == Mission::Enter || ord.Passenger->QueuedMission == Mission::Enter) &&
+						!ord.Passenger->ContainsLink(pTrans) && ord.Passenger->ArchiveTarget != pTrans && ord.Passenger->Destination != pTrans)
+					{
+						continue; // Already boarding another transport of the armada!
+					}
+					if (!CanPassengerFitInTransport(pTrans, ord.Passenger->GetTechnoType(), pendCntOnThisTrans, pendSzOnThisTrans, reservedSizeForDeployer))
 						continue;
 					CellClass* pOrdPickupBeach = FindSafeIslandLandingCell(pHouse, ord.Passenger->GetMapCoords(), ord.PickupZone, false);
 					const bool onOrdLand = (transZone == ord.PickupZone && pTransCell && pTransCell->LandType != LandType::Water);
@@ -11411,12 +11523,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							pTrans->ClearNavigationList();
 							pTrans->ForceMission(Mission::Guard);
 						}
-						OrderFootToEnter(ord.Passenger, pTrans);
+						if (ord.Passenger->CurrentMission != Mission::Enter && ord.Passenger->QueuedMission != Mission::Enter)
+						{
+							OrderFootToEnter(ord.Passenger, pTrans);
+							pendCntOnThisTrans++;
+							pendSzOnThisTrans += ord.PassengerSize;
+						}
 						handledPendingOrder = true;
-						break;
+						// Do not break after 1 unit: keep filling this transport with as many battalion units on this beach as fit!
 					}
 				}
-				if (handledPendingOrder)
+				if (handledPendingOrder && (pTrans->Passengers.NumPassengers + pendCntOnThisTrans) >= pTrans->Type->Passengers)
 					continue;
 			}
 
@@ -14795,6 +14912,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedAmphibTransports = 0;
 	int ownedHeavyIslandTransports = 0;
 	int ownedUnarmedSupportVehicles = 0;
+	int ownedTransportTotalCapacity = 0;
+	int waitingBattalionSizeOnIslands = 0;
 
 	for (auto const pOwnedU : UnitClass::Array)
 	{
@@ -14814,6 +14933,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (IsAmphibiousOrAirTransport(pOwnedType) || (TechnoTypeExt::Fetch(pOwnedType) && TechnoTypeExt::Fetch(pOwnedType)->Carryall))
 			{
 				ownedAmphibTransports++;
+				ownedTransportTotalCapacity += std::max(1, static_cast<int>(pOwnedType->Passengers));
 				if (static_cast<int>(pOwnedType->SizeLimit) >= 6 || (TechnoTypeExt::Fetch(pOwnedType) && TechnoTypeExt::Fetch(pOwnedType)->Carryall))
 					ownedHeavyIslandTransports++;
 			}
@@ -14821,6 +14941,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				ownedUnarmedSupportVehicles++;
 			}
+			else if (!pOwnedType->Naval && !pOwnedType->Harvester && !pOwnedType->ResourceGatherer && !IsImmobileUnitTypeOnLand(pOwnedType) &&
+				pOwnedType->MovementZone != MovementZone::Amphibious && pOwnedType->MovementZone != MovementZone::AmphibiousDestroyer &&
+				pOwnedType->MovementZone != MovementZone::AmphibiousCrusher && pOwnedType->MovementZone != MovementZone::Fly &&
+				pOwnedType->SpeedType != SpeedType::Hover && !pOwnedType->JumpJet && !pOwnedType->Teleporter)
+			{
+				waitingBattalionSizeOnIslands += std::max(1, static_cast<int>(pOwnedType->TechnoTypeClass::Size));
+			}
+		}
+	}
+	for (auto const pOwnedInf : InfantryClass::Array)
+	{
+		if (pOwnedInf && pOwnedInf->Owner == pHouse && !pOwnedInf->InLimbo && pOwnedInf->IsAlive && pOwnedInf->Type &&
+			pOwnedInf->Type->MovementZone != MovementZone::Amphibious && pOwnedInf->Type->MovementZone != MovementZone::Fly &&
+			!pOwnedInf->Type->JumpJet && !pOwnedInf->Type->Teleporter)
+		{
+			waitingBattalionSizeOnIslands += std::max(1, static_cast<int>(pOwnedInf->Type->TechnoTypeClass::Size));
 		}
 	}
 	for (auto const pOwnB : pHouse->Buildings)
@@ -15063,13 +15199,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				const bool isHeavyMcvTrans = (static_cast<int>(pUnit->SizeLimit) >= 6);
 				const int approxOffensiveUnits = std::max(0, pHouse->OwnedUnits - ownedEconomyUnits - ownedAmphibTransports);
-				const int maxTransports = (features[21] > 0)
+				const int unitPassCap = std::max(1, static_cast<int>(pUnit->Passengers));
+				const int neededForBattalion = (features[21] > 0 && waitingBattalionSizeOnIslands > 0)
+					? ((waitingBattalionSizeOnIslands + unitPassCap - 1) / unitPassCap)
+					: 0;
+				const int baseMaxTransports = (features[21] > 0)
 					? ((approxOffensiveUnits >= 11 || pHouse->OwnedUnits >= 18) ? 5 : ((approxOffensiveUnits >= 7 || pHouse->OwnedUnits >= 12 || pHouse->NumConYards >= 2) ? 4 : 3))
 					: 2;
+				const int maxTransports = (features[21] > 0) ? std::clamp(std::max(baseMaxTransports, neededForBattalion), 3, 10) : 2;
+				const bool battalionExceedsCurrentFleet = (features[21] > 0 && waitingBattalionSizeOnIslands > ownedTransportTotalCapacity && ownedAmphibTransports < maxTransports);
+
 				if ((isHeavyMcvTrans && ownedHeavyIslandTransports >= maxTransports) || (!isHeavyMcvTrans && ownedAmphibTransports >= maxTransports))
 					score -= 1200;
 				else if (isHeavyMcvTrans && ownedHeavyIslandTransports == 0 && (features[21] > 0 || scores[30] >= 450))
 					score += scores[28] + 2200;
+				else if (battalionExceedsCurrentFleet)
+					score += std::max(static_cast<int>(scores[28]), 0) + 1100;
 				else if (features[21] > 0 && ownedAmphibTransports == 1 && (approxOffensiveUnits >= 4 || pHouse->OwnedUnits >= 6 || (wantsArchipelagoExpansion && pHouse->NumConYards >= 2)))
 					score += std::max(static_cast<int>(scores[28]), 0) + 1350;
 				else if (features[21] > 0 && ownedAmphibTransports == 2 && (approxOffensiveUnits >= 6 || pHouse->OwnedUnits >= 10))
@@ -15220,11 +15365,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				const bool isAirOrCarryallVehicle = isAmphibTransport || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall);
 				const int approxOffensiveUnits = std::max(0, pHouse->OwnedUnits - ownedEconomyUnits - ownedAmphibTransports);
-				const int maxTransports = (features[21] > 0)
+				const int unitPassCap = std::max(1, static_cast<int>(pUnit->Passengers));
+				const int neededForBattalion = (features[21] > 0 && waitingBattalionSizeOnIslands > 0)
+					? ((waitingBattalionSizeOnIslands + unitPassCap - 1) / unitPassCap)
+					: 0;
+				const int baseMaxTransports = (features[21] > 0)
 					? ((approxOffensiveUnits >= 11 || pHouse->OwnedUnits >= 18) ? 5 : ((approxOffensiveUnits >= 7 || pHouse->OwnedUnits >= 12 || pHouse->NumConYards >= 2) ? 4 : 3))
 					: 2;
+				const int maxTransports = (features[21] > 0) ? std::clamp(std::max(baseMaxTransports, neededForBattalion), 3, 10) : 2;
+				const bool battalionExceedsCurrentFleet = (features[21] > 0 && waitingBattalionSizeOnIslands > ownedTransportTotalCapacity && ownedAmphibTransports < maxTransports);
 				if (isAirOrCarryallVehicle && ownedAmphibTransports >= maxTransports)
 					score -= 1200;
+				else if (isAirOrCarryallVehicle && battalionExceedsCurrentFleet)
+					score += std::max(static_cast<int>(scores[28]), 0) + 1050;
 				else if (isAirOrCarryallVehicle && features[21] > 0 && ownedAmphibTransports == 1 && (approxOffensiveUnits >= 4 || pHouse->OwnedUnits >= 6))
 					score += std::max(static_cast<int>(scores[28]), 0) + 1250;
 				else if (isAirOrCarryallVehicle && features[21] > 0 && ownedAmphibTransports == 2 && (approxOffensiveUnits >= 6 || pHouse->OwnedUnits >= 10))
