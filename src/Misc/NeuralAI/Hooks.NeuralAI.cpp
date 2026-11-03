@@ -1,56 +1,38 @@
 #include "NeuralAI.h"
 
 #include <BuildingClass.h>
-
 #include <BuildingTypeClass.h>
-
 #include <HouseClass.h>
-
 #include <MapClass.h>
-
 #include <ScenarioClass.h>
-
 #include <SessionClass.h>
-
 #include <Ext/House/Body.h>
-
 #include <Ext/Rules/Body.h>
-
 #include <Utilities/Macro.h>
-
 #include <cstring>
 
 namespace
-
 {
-
 	using SetFocus_t = HWND(WINAPI*)(HWND);
 
 	using SetForegroundWindow_t = BOOL(WINAPI*)(HWND);
 
 	HWND WINAPI Headless_NoOp_SetFocus(HWND hWnd)
-
 	{
-
 		return hWnd;
 	}
 
 	BOOL WINAPI Headless_NoOp_SetForegroundWindow(HWND)
-
 	{
-
 		return TRUE;
 	}
 
 	void PatchModuleFocusIAT(HMODULE hMod)
-
 	{
-
 		if (!hMod)
 			return;
 
 		auto* const base = reinterpret_cast<BYTE*>(hMod);
-
 		auto* const dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
 
 		if (dos->e_magic != IMAGE_DOS_SIGNATURE)
@@ -66,10 +48,9 @@ namespace
 		if (!impDir.VirtualAddress || !impDir.Size)
 			return;
 
-		for (auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + impDir.VirtualAddress); desc->Name != 0; ++desc)
-
+		for (auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + impDir.VirtualAddress); desc->Name != 0;
+			++desc)
 		{
-
 			const char* const dllName = reinterpret_cast<const char*>(base + desc->Name);
 
 			if (_stricmp(dllName, "user32.dll") != 0)
@@ -79,13 +60,10 @@ namespace
 				continue;
 
 			auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(base + desc->OriginalFirstThunk);
-
 			auto* iatThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(base + desc->FirstThunk);
 
 			for (; origThunk->u1.AddressOfData != 0; ++origThunk, ++iatThunk)
-
 			{
-
 				if (IMAGE_SNAP_BY_ORDINAL(origThunk->u1.Ordinal))
 					continue;
 
@@ -97,20 +75,15 @@ namespace
 
 				if (std::strcmp(fnName, "SetFocus") == 0)
 					replacement = reinterpret_cast<void*>(&Headless_NoOp_SetFocus);
-
 				else if (std::strcmp(fnName, "SetForegroundWindow") == 0)
 					replacement = reinterpret_cast<void*>(&Headless_NoOp_SetForegroundWindow);
 
 				if (replacement)
-
 				{
-
 					DWORD oldProt = 0;
 
 					if (VirtualProtect(&iatThunk->u1.Function, sizeof(ULONG_PTR), PAGE_READWRITE, &oldProt))
-
 					{
-
 						iatThunk->u1.Function = reinterpret_cast<ULONG_PTR>(replacement);
 
 						VirtualProtect(&iatThunk->u1.Function, sizeof(ULONG_PTR), oldProt, &oldProt);
@@ -121,36 +94,30 @@ namespace
 	}
 
 	void ApplyHeadlessStealthWindow(HWND hWnd)
-
 	{
-
 		if (!hWnd || !IsWindow(hWnd))
 			return;
 
 		const LONG exStyle = GetWindowLongA(hWnd, GWL_EXSTYLE);
 
-		const LONG targetEx = (exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT) & ~WS_EX_APPWINDOW;
+		const LONG targetEx
+			= (exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT) & ~WS_EX_APPWINDOW;
 
 		if (exStyle != targetEx)
 			SetWindowLongA(hWnd, GWL_EXSTYLE, targetEx);
 
 		SetLayeredWindowAttributes(hWnd, 0, 0, LWA_ALPHA);
 
-		SetWindowPos(hWnd, HWND_BOTTOM, 32000, 32000, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
+		SetWindowPos(hWnd, HWND_BOTTOM, 32000, 32000, 0, 0,
+			SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
 	}
-
 } // namespace
 
 // Scenario start initialization
-
 DEFINE_HOOK(0x6879ED, ScenarioClass_Start_NeuralAI, 0x5)
-
 {
-
 	if (NeuralAI::HeadlessMode && Game::hWnd)
-
 	{
-
 		ReleaseCapture();
 
 		ApplyHeadlessStealthWindow(Game::hWnd);
@@ -162,39 +129,33 @@ DEFINE_HOOK(0x6879ED, ScenarioClass_Start_NeuralAI, 0x5)
 }
 
 // Scenario victory & defeat hooks
-
 DEFINE_HOOK(0x6856A5, Do_Win_NeuralAI, 0x7)
-
 {
-
 	NeuralAI::OnScenarioEnd(true);
 
 	return 0;
 }
 
 DEFINE_HOOK(0x685DE7, Do_Lose_NeuralAI, 0x5)
-
 {
-
 	NeuralAI::OnScenarioEnd(false);
 
 	return 0;
 }
 
 // Headless Turbo Training Mode (-TRAIN_HEADLESS) multi-instance mutex, window & Main_Loop hooks
-
 DEFINE_HOOK(0x6BBE56, WinMain_SkipSingleInstanceMutex_NeuralAI, 0x5)
-
 {
-
-	enum { ContinueWinMain = 0x6BBFAD };
+	enum
+	{
+		ContinueWinMain = 0x6BBFAD
+	};
 
 	const char* const cmdLine = GetCommandLineA();
 
-	if (NeuralAI::HeadlessMode || (cmdLine && (std::strstr(cmdLine, "-SPAWN") != nullptr || std::strstr(cmdLine, "-spawn") != nullptr)))
-
+	if (NeuralAI::HeadlessMode
+		|| (cmdLine && (std::strstr(cmdLine, "-SPAWN") != nullptr || std::strstr(cmdLine, "-spawn") != nullptr)))
 	{
-
 		*reinterpret_cast<HANDLE*>(0xB0BCE4) = NULL;
 
 		*reinterpret_cast<HANDLE*>(0xB0BCE8) = NULL;
@@ -206,13 +167,9 @@ DEFINE_HOOK(0x6BBE56, WinMain_SkipSingleInstanceMutex_NeuralAI, 0x5)
 }
 
 DEFINE_HOOK(0x777C30, Create_Main_Window_Entry_NeuralAI, 0x6)
-
 {
-
 	if (NeuralAI::HeadlessMode)
-
 	{
-
 		PatchModuleFocusIAT(GetModuleHandleA(nullptr));
 
 		PatchModuleFocusIAT(GetModuleHandleA("ddraw.dll"));
@@ -222,19 +179,16 @@ DEFINE_HOOK(0x777C30, Create_Main_Window_Entry_NeuralAI, 0x6)
 }
 
 DEFINE_HOOK(0x777DA1, Create_Main_Window_ShowWindow_NeuralAI, 0x5)
-
 {
-
-	enum { SkipShowAndFocus = 0x777DCF };
+	enum
+	{
+		SkipShowAndFocus = 0x777DCF
+	};
 
 	if (NeuralAI::HeadlessMode)
-
 	{
-
 		if (Game::hWnd)
-
 		{
-
 			ApplyHeadlessStealthWindow(Game::hWnd);
 
 			ShowWindow(Game::hWnd, SW_SHOWNOACTIVATE);
@@ -251,13 +205,9 @@ DEFINE_HOOK(0x777DA1, Create_Main_Window_ShowWindow_NeuralAI, 0x5)
 }
 
 DEFINE_HOOK(0x4A44D2, Set_Video_Mode_Done_NeuralAI, 0x5)
-
 {
-
 	if (NeuralAI::HeadlessMode && Game::hWnd)
-
 	{
-
 		ReleaseCapture();
 
 		ApplyHeadlessStealthWindow(Game::hWnd);
@@ -269,15 +219,14 @@ DEFINE_HOOK(0x4A44D2, Set_Video_Mode_Done_NeuralAI, 0x5)
 }
 
 DEFINE_HOOK(0x7778A0, Main_Window_Proc_ActivateApp_NeuralAI, 0x6)
-
 {
-
-	enum { IgnoreFocusChange = 0x777949 };
+	enum
+	{
+		IgnoreFocusChange = 0x777949
+	};
 
 	if (NeuralAI::HeadlessMode)
-
 	{
-
 		Game::IsFocused = true;
 
 		return IgnoreFocusChange;
@@ -287,23 +236,15 @@ DEFINE_HOOK(0x7778A0, Main_Window_Proc_ActivateApp_NeuralAI, 0x6)
 }
 
 DEFINE_HOOK(0x55D377, Main_Loop_FocusOverride_NeuralAI, 0x5)
-
 {
-
 	if (NeuralAI::HeadlessMode)
-
 	{
-
 		if (Game::hWnd)
-
 		{
-
 			LONG exStyle = GetWindowLongA(Game::hWnd, GWL_EXSTYLE);
 
 			if ((exStyle & WS_EX_LAYERED) == 0)
-
 			{
-
 				ReleaseCapture();
 
 				ApplyHeadlessStealthWindow(Game::hWnd);
@@ -319,10 +260,11 @@ DEFINE_HOOK(0x55D377, Main_Loop_FocusOverride_NeuralAI, 0x5)
 }
 
 DEFINE_HOOK(0x55D8ED, Main_Loop_SkipRender_NeuralAI, 0x5)
-
 {
-
-	enum { SkipRender = 0x55D8F7 };
+	enum
+	{
+		SkipRender = 0x55D8F7
+	};
 
 	if (NeuralAI::HeadlessMode)
 		return SkipRender;
@@ -331,15 +273,14 @@ DEFINE_HOOK(0x55D8ED, Main_Loop_SkipRender_NeuralAI, 0x5)
 }
 
 DEFINE_HOOK(0x55DE9A, Main_Loop_SkipSyncDelay_NeuralAI, 0x5)
-
 {
-
-	enum { SkipSyncDelay = 0x55DE9F };
+	enum
+	{
+		SkipSyncDelay = 0x55DE9F
+	};
 
 	if (NeuralAI::HeadlessMode)
-
 	{
-
 		NeuralAI::OnHeadlessFrameTick();
 
 		return SkipSyncDelay;
@@ -349,13 +290,10 @@ DEFINE_HOOK(0x55DE9A, Main_Loop_SkipSyncDelay_NeuralAI, 0x5)
 }
 
 // Map Action 30 (Auto Base Building) enable/disable hooks for Campaign AI
-
 DEFINE_HOOK_AGAIN(0x6DE21B, TActionClass_AutoBaseBuilding_Enable_NeuralAI, 0x7)
 
 DEFINE_HOOK(0x6E0F02, TActionClass_AutoBaseBuilding_Enable_NeuralAI, 0x7)
-
 {
-
 	GET(HouseClass* const, pHouse, ESI);
 
 	NeuralAI::OnAutoBaseBuildingTriggered(pHouse, true);
@@ -366,9 +304,7 @@ DEFINE_HOOK(0x6E0F02, TActionClass_AutoBaseBuilding_Enable_NeuralAI, 0x7)
 DEFINE_HOOK_AGAIN(0x6DE29F, TActionClass_AutoBaseBuilding_Disable_NeuralAI, 0x7)
 
 DEFINE_HOOK(0x6E0F7F, TActionClass_AutoBaseBuilding_Disable_NeuralAI, 0x7)
-
 {
-
 	GET(HouseClass* const, pHouse, EAX);
 
 	NeuralAI::OnAutoBaseBuildingTriggered(pHouse, false);
@@ -377,12 +313,12 @@ DEFINE_HOOK(0x6E0F7F, TActionClass_AutoBaseBuilding_Disable_NeuralAI, 0x7)
 }
 
 // Bypass legacy aimd.ini AITriggerTypes / TeamTypes / ScriptTypes in Skirmish & Multiplayer
-
 DEFINE_HOOK(0x4F8A27, HouseClass_AI_SkipLegacyTeams_NeuralAI, 0x5)
-
 {
-
-	enum { SkipLegacyAITriggers = 0x4F8B08 };
+	enum
+	{
+		SkipLegacyAITriggers = 0x4F8B08
+	};
 
 	GET(HouseClass* const, pHouse, ESI);
 
@@ -392,25 +328,25 @@ DEFINE_HOOK(0x4F8A27, HouseClass_AI_SkipLegacyTeams_NeuralAI, 0x5)
 	return 0;
 }
 
-// HouseClass::Expert_AI evaluation hook after EnemyHouseIndex update, bypassing legacy SuperWeapon_AI, AI_Raise_Money & Fire_Sale
-
+// HouseClass::Expert_AI evaluation hook after EnemyHouseIndex update, bypassing legacy SuperWeapon_AI, AI_Raise_Money &
+// Fire_Sale
 DEFINE_HOOK(0x4FD77C, HouseClass_ExpertAI_NeuralAI, 0x5)
-
 {
-
-	enum { ReturnWithCustomDelay = 0x4FD927 };
+	enum
+	{
+		ReturnWithCustomDelay = 0x4FD927
+	};
 
 	GET(HouseClass* const, pHouse, EBX);
 
 	if (NeuralAI::IsEnabledForHouse(pHouse))
-
 	{
-
 		if (!NeuralAI::HeadlessMode)
 		{
 			if (auto const pCur = HouseClass::CurrentPlayer)
 			{
-				if (HouseClass::IsCurrentPlayerObserver() || Game::ObserverMode || pCur->IsInitiallyObserver() || (pCur->Type && !_stricmp(pCur->Type->ID, "Observer")))
+				if (HouseClass::IsCurrentPlayerObserver() || Game::ObserverMode || pCur->IsInitiallyObserver()
+					|| (pCur->Type && !_stricmp(pCur->Type->ID, "Observer")))
 				{
 					pCur->MakeObserver();
 					if (!pCur->Visionary)
@@ -433,19 +369,17 @@ DEFINE_HOOK(0x4FD77C, HouseClass_ExpertAI_NeuralAI, 0x5)
 }
 
 // HouseClass::AI_Building production hook
-
 DEFINE_HOOK(0x4FE3E9, HouseClass_AI_Building_NeuralAI, 0x7)
-
 {
-
-	enum { Epilogue = 0x4FEA48 };
+	enum
+	{
+		Epilogue = 0x4FEA48
+	};
 
 	GET(HouseClass* const, pHouse, EBP);
 
 	if (NeuralAI::IsEnabledForHouse(pHouse))
-
 	{
-
 		NeuralAI::UpdateBuildingProduction(pHouse);
 
 		return Epilogue;
@@ -455,19 +389,17 @@ DEFINE_HOOK(0x4FE3E9, HouseClass_AI_Building_NeuralAI, 0x7)
 }
 
 // HouseClass::AI_Infantry production hook
-
 DEFINE_HOOK(0x4FEEED, HouseClass_AI_Infantry_NeuralAI, 0x7)
-
 {
-
-	enum { Epilogue = 0x4FEEF6 };
+	enum
+	{
+		Epilogue = 0x4FEEF6
+	};
 
 	GET(HouseClass* const, pHouse, EBP);
 
 	if (NeuralAI::IsEnabledForHouse(pHouse))
-
 	{
-
 		NeuralAI::UpdateInfantryProduction(pHouse);
 
 		return Epilogue;
@@ -477,19 +409,17 @@ DEFINE_HOOK(0x4FEEED, HouseClass_AI_Infantry_NeuralAI, 0x7)
 }
 
 // HouseClass::AI_Aircraft production hook
-
 DEFINE_HOOK(0x4FF21D, HouseClass_AI_Aircraft_NeuralAI, 0x7)
-
 {
-
-	enum { Epilogue = 0x4FF226 };
+	enum
+	{
+		Epilogue = 0x4FF226
+	};
 
 	GET(HouseClass* const, pHouse, EBP);
 
 	if (NeuralAI::IsEnabledForHouse(pHouse))
-
 	{
-
 		NeuralAI::UpdateAircraftProduction(pHouse);
 
 		return Epilogue;
@@ -499,29 +429,26 @@ DEFINE_HOOK(0x4FF21D, HouseClass_AI_Aircraft_NeuralAI, 0x7)
 }
 
 // Reconstructed function epilogue for BuildingClass::Exit_Object when returning custom status
-
 void NAKED BuildingClass_Exit_Object_Seek_Building_Position_Epilogue_NeuralAI()
-
 {
-
 	_asm
-	{
+		{
 		pop edi
 		pop esi
 		pop ebp
 		pop ebx
 		add esp, 130h
 		retn 8
-	}
+		}
 }
 
 // Spatial Tetris Base Architect & Surgical Space Clearance placement hook in BuildingClass::Exit_Object
-
 DEFINE_HOOK(0x444F39, BuildingClass_ExitObject_PlaceBuilding_NeuralAI, 0x6)
-
 {
-
-	enum { ApplyCustomCoords = 0x4451AA };
+	enum
+	{
+		ApplyCustomCoords = 0x4451AA
+	};
 
 	GET(BuildingClass* const, pFactory, ESI);
 
@@ -536,26 +463,20 @@ DEFINE_HOOK(0x444F39, BuildingClass_ExitObject_PlaceBuilding_NeuralAI, 0x6)
 		return 0;
 
 	CellStruct bestCell = CellStruct::Empty;
-
 	const int placeStatus = NeuralAI::PlaceCompletedBuilding(pFactory, pBuilding, bestCell);
 
 	if (placeStatus == 1)
-
 	{
-
 		// Keep building waiting in Construction Yard while obstructing structure sells or units scatter
-
 		R->EAX(1);
 
 		return reinterpret_cast<intptr_t>(&BuildingClass_Exit_Object_Seek_Building_Position_Epilogue_NeuralAI);
 	}
 
 	if (placeStatus != 2 || bestCell == CellStruct::Empty)
-
 	{
-
-		// Never fall through to vanilla 0x444F39 placement (which glues buildings chaotically); return 0 in EAX to cancel/refund
-
+		// Never fall through to vanilla 0x444F39 placement (which glues buildings chaotically); return 0 in EAX to
+		// cancel/refund
 		pHouse->ProducingBuildingTypeIndex = -1;
 
 		R->EAX(0);
@@ -566,7 +487,6 @@ DEFINE_HOOK(0x444F39, BuildingClass_ExitObject_PlaceBuilding_NeuralAI, 0x6)
 	pHouse->ProducingBuildingTypeIndex = -1;
 
 	const int coordX = (static_cast<int>(bestCell.X) << 8) + 128;
-
 	const int coordY = (static_cast<int>(bestCell.Y) << 8) + 128;
 
 	R->EAX(coordX);
@@ -589,11 +509,8 @@ DEFINE_HOOK(0x444F39, BuildingClass_ExitObject_PlaceBuilding_NeuralAI, 0x6)
 }
 
 // Track directional building attacks for NeuralAI reactive defense placement and threat moderation
-
 DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_TrackThreat_NeuralAI, 0x8)
-
 {
-
 	GET(BuildingClass* const, pThis, ESI);
 
 	GET(const DamageState, state, EAX);
@@ -604,12 +521,14 @@ DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_TrackThreat_NeuralAI, 0x8)
 
 	auto const pFromHouse = pAttacker ? pAttacker->GetOwningHouse() : pAttackerHouse;
 
-	if (pThis && pThis->Owner && pFromHouse && state != DamageState::Unaffected && !pThis->IsStrange() && !pThis->Owner->IsAlliedWith(pFromHouse))
+	if (pThis && pThis->Owner && pFromHouse && state != DamageState::Unaffected && !pThis->IsStrange()
+		&& !pThis->Owner->IsAlliedWith(pFromHouse))
+	{
 		NeuralAI::OnBuildingDamaged(pThis, pAttacker, pFromHouse);
+	}
 
 	return 0;
 }
-
 
 namespace
 {
@@ -617,63 +536,85 @@ namespace
 	{
 		if (HouseClass::IsCurrentPlayerObserver() || Game::ObserverMode)
 			return true;
+
 		if (auto const pCur = HouseClass::CurrentPlayer)
 		{
 			if (pCur->IsInitiallyObserver() || (pCur->Type && !_stricmp(pCur->Type->ID, "Observer")))
 				return true;
 		}
+
 		return false;
 	}
-}
+} // namespace
 
 // Observer MapVisibility & Gap Generator Immunity:
-// MapVisibility options (such as "Eternal darkness" / CoverMapTrigger Action 51 ReshroudMap and 127-cell GapGenerator buildings)
-// must only affect actual players, never Spectators/Observers.
+// MapVisibility options (such as "Eternal darkness" / CoverMapTrigger Action 51 ReshroudMap and 127-cell GapGenerator
+// buildings) must only affect actual players, never Spectators/Observers.
 DEFINE_HOOK(0x50BD10, HouseClass_ReshroudMap_ObserverImmunity, 0x6)
 {
-	enum { SkipReshroudMap = 0x50BD25 };
+	enum
+	{
+		SkipReshroudMap = 0x50BD25
+	};
 	if (IsLocalObserverPlayer())
 	{
 		if (auto const pCur = HouseClass::CurrentPlayer)
 			pCur->Visionary = 1;
+
 		return SkipReshroudMap;
 	}
+
 	return 0;
 }
 
 DEFINE_HOOK(0x577AB0, MapClass_Reshroud_ObserverImmunity, 0x6)
 {
-	enum { SkipMapReshroud = 0x577BA1 };
+	enum
+	{
+		SkipMapReshroud = 0x577BA1
+	};
 	if (IsLocalObserverPlayer())
 	{
 		if (auto const pCur = HouseClass::CurrentPlayer)
 			pCur->Visionary = 1;
+
 		return SkipMapReshroud;
 	}
+
 	return 0;
 }
 
 DEFINE_HOOK(0x6FB170, TechnoClass_CreateGap_ObserverImmunity, 0x6)
 {
-	enum { SkipCreateGap = 0x6FB460 };
+	enum
+	{
+		SkipCreateGap = 0x6FB460
+	};
 	if (IsLocalObserverPlayer())
 	{
 		if (auto const pCur = HouseClass::CurrentPlayer)
 			pCur->Visionary = 1;
+
 		return SkipCreateGap;
 	}
+
 	return 0;
 }
 
 DEFINE_HOOK(0x6E0F90, TActionClass_GrowShroud_ObserverImmunity, 0x5)
 {
-	enum { SkipGrowShroud = 0x6E0F9A };
+	enum
+	{
+		SkipGrowShroud = 0x6E0F9A
+	};
 	if (IsLocalObserverPlayer())
 	{
 		if (auto const pCur = HouseClass::CurrentPlayer)
 			pCur->Visionary = 1;
+
 		return SkipGrowShroud;
 	}
+
 	return 0;
 }
 
@@ -684,5 +625,7 @@ DEFINE_HOOK(0x6E1A70, TActionClass_ReshroudMapAroundWP_ObserverImmunity, 0x5)
 		if (auto const pCur = HouseClass::CurrentPlayer)
 			pCur->Visionary = 1;
 	}
+
 	return 0;
 }
+

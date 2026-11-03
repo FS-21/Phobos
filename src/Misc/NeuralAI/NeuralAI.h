@@ -168,9 +168,11 @@ private:
 	static void UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool stalemate);
 
 	static void ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t, InputVectorSize>& features);
-	static void RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features, std::array<int16_t, OutputVectorSize>& outScores);
+	static void RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features,
+		std::array<int16_t, OutputVectorSize>& outScores);
 
 	static void ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::array<int16_t, OutputVectorSize>& scores);
 
 	static bool IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClass* pType, CellStruct candidateCell);
 };
+
