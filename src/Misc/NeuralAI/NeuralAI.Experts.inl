@@ -110,6 +110,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	pExt->NeuralAI_ActiveExpert = activeExpert;
 
+	if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+		ExpertTicks[pHouse->ArrayIndex][activeExpert]++;
+
 	// Run INT8 Fixed-Point Matrix-Vector Inference on the mapped Base Model
 	if (NeuralAI::BaseMappedView && NeuralAI::BaseMappedSize >= sizeof(AIBaseHeader))
 	{
