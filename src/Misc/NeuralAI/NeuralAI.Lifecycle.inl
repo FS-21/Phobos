@@ -680,6 +680,7 @@ void NeuralAI::OnScenarioStart()
 		ms.Reset();
 
 	FerryTrips.fill(NeuralFerryTripRecord {});
+	ResetBridgePlanner();
 	AirRoutes.clear();
 	AirPickups.clear();
 	HouseStyleSalt.fill(0);
