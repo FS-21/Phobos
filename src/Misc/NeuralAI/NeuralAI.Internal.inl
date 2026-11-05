@@ -96,6 +96,7 @@ namespace
 		AttackMoveStalled,
 		FieldScoutSent,
 		WaveStragglerRegroup,
+		FerryLandingRerouted,
 		Count
 	};
 
@@ -103,7 +104,7 @@ namespace
 		"ferryUnloadAtGoal", "ferryCargoReturned", "safeLaneDetour", "moveIssued", "moveSkipped", "slotGateOpen",
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
-		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup" };
+		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -423,6 +424,85 @@ namespace
 			SectionMaxMs[this->HouseIndex][s] = std::max(SectionMaxMs[this->HouseIndex][s], ms);
 		}
 	};
+
+	// Spatial index of live, placed technos (map state, rebuilt once per AI house tick on first
+	// use): 8x8-cell buckets holding pointers in TechnoClass::Array order, scanned row by row, so
+	// the result order is the same on every client (MP safe). "Who is within N cells of here"
+	// then reads only the buckets in range instead of every object on the map.
+	struct NeuralSpatialIndex
+	{
+		static constexpr int BucketShift = 3; // 8 cells
+		int Frame { -1 };
+		int HouseIndex { -2 };
+		int Columns { 0 };
+		int Rows { 0 };
+		std::vector<std::vector<TechnoClass*>> Buckets {};
+	};
+
+	NeuralSpatialIndex TechnoSpatialIndex {};
+
+	void RebuildTechnoSpatialIndexIfNeeded()
+	{
+		auto& index = TechnoSpatialIndex;
+
+		// Rebuilt per house tick (not per frame): an object removed between two houses' ticks of
+		// the same frame must never be handed out.
+		if (index.Frame == Unsorted::CurrentFrame && index.HouseIndex == CurrentAIHouseIndex && !index.Buckets.empty())
+			return;
+
+		index.Frame = Unsorted::CurrentFrame;
+		index.HouseIndex = CurrentAIHouseIndex;
+		index.Columns = (512 >> NeuralSpatialIndex::BucketShift) + 1;
+		index.Rows = index.Columns;
+
+		if (index.Buckets.size() != static_cast<size_t>(index.Columns * index.Rows))
+			index.Buckets.assign(static_cast<size_t>(index.Columns * index.Rows), {});
+		else
+			for (auto& bucket : index.Buckets)
+				bucket.clear();
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || !pTechno->IsAlive || pTechno->InLimbo)
+				continue;
+
+			const CellStruct c = pTechno->GetMapCoords();
+			const int bx = std::clamp(static_cast<int>(c.X) >> NeuralSpatialIndex::BucketShift, 0, index.Columns - 1);
+			const int by = std::clamp(static_cast<int>(c.Y) >> NeuralSpatialIndex::BucketShift, 0, index.Rows - 1);
+			index.Buckets[static_cast<size_t>(by * index.Columns + bx)].push_back(pTechno);
+		}
+	}
+
+	// Calls fn(TechnoClass*) for every live placed techno whose cell is within `radiusCells`
+	// (Chebyshev) of `center`; fn returns false to stop early.
+	template <typename Fn>
+	void ForEachTechnoNear(const CellStruct& center, int radiusCells, Fn&& fn)
+	{
+		RebuildTechnoSpatialIndexIfNeeded();
+		auto const& index = TechnoSpatialIndex;
+		const int shift = NeuralSpatialIndex::BucketShift;
+		const int bx0 = std::clamp((static_cast<int>(center.X) - radiusCells) >> shift, 0, index.Columns - 1);
+		const int bx1 = std::clamp((static_cast<int>(center.X) + radiusCells) >> shift, 0, index.Columns - 1);
+		const int by0 = std::clamp((static_cast<int>(center.Y) - radiusCells) >> shift, 0, index.Rows - 1);
+		const int by1 = std::clamp((static_cast<int>(center.Y) + radiusCells) >> shift, 0, index.Rows - 1);
+
+		for (int by = by0; by <= by1; ++by)
+		{
+			for (int bx = bx0; bx <= bx1; ++bx)
+			{
+				for (auto const pTechno : index.Buckets[static_cast<size_t>(by * index.Columns + bx)])
+				{
+					const CellStruct c = pTechno->GetMapCoords();
+
+					if (std::max(std::abs(c.X - center.X), std::abs(c.Y - center.Y)) > radiusCells)
+						continue;
+
+					if (!fn(pTechno))
+						return;
+				}
+			}
+		}
+	}
 
 	struct NeuralTickTimer
 	{

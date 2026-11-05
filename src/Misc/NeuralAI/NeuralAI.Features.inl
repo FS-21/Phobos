@@ -673,6 +673,28 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 	int visibleCratesNearby = 0;
 	int nearbyTreeGroveCells = 0;
 	int uncolonizedIslandLandCells = 0;
+	struct ScanHub
+	{
+		CellStruct Cell;
+		int Zone;
+		bool IsConYard;
+	};
+
+	std::vector<ScanHub> ownScanHubs;
+
+	for (auto const pOwnB : pHouse->Buildings)
+	{
+		if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type || pOwnB->Type->Insignificant || pOwnB->Type->InvisibleInGame)
+			continue;
+
+		if (!pOwnB->Type->ConstructionYard && !pOwnB->Type->Refinery && !pOwnB->Type->ResourceDestination && !pOwnB->Type->BaseNormal)
+			continue;
+
+		const CellStruct yc = pOwnB->GetMapCoords();
+		ownScanHubs.push_back({ yc, MapClass::Instance.GetMovementZoneType(yc, MovementZone::Normal, pOwnB->OnBridge),
+			pOwnB->Type->ConstructionYard });
+	}
+
 	if (baseCenter != CellStruct::Empty)
 	{
 		for (int dy = -144; dy <= 144; dy += (std::abs(dy) <= 48 ? 3 : (std::abs(dy) <= 96 ? 6 : 8)))
@@ -704,29 +726,18 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 				const int cellZone = MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false);
 				int minSameZoneYardDist = 9999;
 				bool hasConYardInZone = false;
-				for (auto const pOwnB : pHouse->Buildings)
+
+				// Own hubs gathered once before the scan (it walked every building for every sampled
+				// cell: the heaviest part of the feature extraction).
+				for (auto const& hub : ownScanHubs)
 				{
-					if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type || pOwnB->Type->Insignificant
-						|| pOwnB->Type->InvisibleInGame)
-					{
-						continue;
-					}
-
-					if (!pOwnB->Type->ConstructionYard && !pOwnB->Type->Refinery && !pOwnB->Type->ResourceDestination
-						&& !pOwnB->Type->BaseNormal)
-					{
-						continue;
-					}
-
-					const CellStruct yc = pOwnB->GetMapCoords();
-					const int yz = MapClass::Instance.GetMovementZoneType(yc, MovementZone::Normal, pOwnB->OnBridge);
-					if (cellZone >= 0 && yz != cellZone)
+					if (cellZone >= 0 && hub.Zone != cellZone)
 						continue;
 
-					if (pOwnB->Type->ConstructionYard)
+					if (hub.IsConYard)
 						hasConYardInZone = true;
 
-					const int d = std::max(std::abs(tc.X - yc.X), std::abs(tc.Y - yc.Y));
+					const int d = std::max(std::abs(tc.X - hub.Cell.X), std::abs(tc.Y - hub.Cell.Y));
 					if (d < minSameZoneYardDist)
 						minSameZoneYardDist = d;
 				}
