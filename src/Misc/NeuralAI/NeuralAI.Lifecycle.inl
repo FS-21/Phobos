@@ -701,6 +701,10 @@ void NeuralAI::OnScenarioStart()
 
 	for (auto& sections : SectionMaxMs)
 		sections.fill(0.0);
+
+	for (auto& peaks : TickPeaks)
+		peaks.clear();
+
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;
 	MapClassApplied = false;
@@ -812,6 +816,7 @@ void NeuralAI::OnScenarioStart()
 					if (policy.Entries[eIdx].VisitCount > 0)
 						memBonus += static_cast<int>(policy.Entries[eIdx].ArchetypeScoreDelta[a]) * 3;
 				}
+
 				memBonus = std::clamp(memBonus, -1200, 1200);
 
 				const int exploreJitter = ScenarioClass::Instance->Random.RandomRanged(-90, 90);
@@ -993,9 +998,8 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 				? 4
 				: 0;
 
-			// Stalemates: zero-sum and small (+3 ahead on score / -3 behind). They used to cost both
-			// sides (-4 / -8), which taught the backpack that the long-game experts (expansion,
-			// crawl, siege) are bad simply because long games end on the timer.
+			// Stalemates are zero-sum and small (+3 ahead on score / -3 behind), so experts that
+			// play long games (expansion, crawl, siege) are not penalized for ending on the timer.
 			const int delta = NeuralAI::MatchEndStalemate ? (won ? 3 : -3) : (won ? (12 + fastBonus) : -6);
 
 			uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + arch * 10 + exp) % 512);
