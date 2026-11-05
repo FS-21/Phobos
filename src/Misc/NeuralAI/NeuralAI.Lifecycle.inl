@@ -695,6 +695,12 @@ void NeuralAI::OnScenarioStart()
 	}
 
 	TickCosts.fill(NeuralTickCost {});
+
+	for (auto& sections : SectionTotalMs)
+		sections.fill(0.0);
+
+	for (auto& sections : SectionMaxMs)
+		sections.fill(0.0);
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;
 	MapClassApplied = false;

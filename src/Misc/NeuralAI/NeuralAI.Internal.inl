@@ -93,6 +93,9 @@ namespace
 		YardUndeployBlocked,
 		FerryWaitTimeout,
 		FerryIdleWithDemand,
+		AttackMoveStalled,
+		FieldScoutSent,
+		WaveStragglerRegroup,
 		Count
 	};
 
@@ -100,7 +103,7 @@ namespace
 		"ferryUnloadAtGoal", "ferryCargoReturned", "safeLaneDetour", "moveIssued", "moveSkipped", "slotGateOpen",
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
-		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand" };
+		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -365,6 +368,61 @@ namespace
 		return (pHouse->TotalKilledUnits * 200) + (pHouse->TotalKilledBuildings * 450) + (pHouse->OwnedUnits * 200) + value
 			+ static_cast<int>(territory * 300.0) + static_cast<int>(ore * 1200.0);
 	}
+
+	// AI tick cost per section (telemetry only, wall clock: never read by a decision, so it cannot
+	// desync): which parts of the tick are worth optimizing. Placement is also called from
+	// production, so it overlaps that section.
+	enum class NeuralSection : uint8_t
+	{
+		Features,
+		MoE,
+		Tactics,
+		Micro,
+		Plans,
+		Watchdogs,
+		Production,
+		Placement,
+		Count
+	};
+
+	constexpr const char* NeuralSectionNames[] = { "features", "moe", "tactics", "micro", "plans", "watchdogs",
+		"production", "placement" };
+
+	static_assert(std::size(NeuralSectionNames) == static_cast<size_t>(NeuralSection::Count));
+
+	std::array<std::array<double, static_cast<size_t>(NeuralSection::Count)>, 32> SectionTotalMs {};
+	std::array<std::array<double, static_cast<size_t>(NeuralSection::Count)>, 32> SectionMaxMs {};
+
+	struct NeuralSectionTimer
+	{
+		int HouseIndex;
+		NeuralSection Section;
+		LARGE_INTEGER Start {};
+
+		NeuralSectionTimer(int houseIndex, NeuralSection section) : HouseIndex { houseIndex }, Section { section }
+		{
+			QueryPerformanceCounter(&this->Start);
+		}
+
+		~NeuralSectionTimer()
+		{
+			if (this->HouseIndex < 0 || this->HouseIndex >= 32)
+				return;
+
+			LARGE_INTEGER end {};
+			LARGE_INTEGER frequency {};
+			QueryPerformanceCounter(&end);
+			QueryPerformanceFrequency(&frequency);
+
+			if (frequency.QuadPart <= 0)
+				return;
+
+			const double ms = static_cast<double>(end.QuadPart - this->Start.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
+			const size_t s = static_cast<size_t>(this->Section);
+			SectionTotalMs[this->HouseIndex][s] += ms;
+			SectionMaxMs[this->HouseIndex][s] = std::max(SectionMaxMs[this->HouseIndex][s], ms);
+		}
+	};
 
 	struct NeuralTickTimer
 	{
