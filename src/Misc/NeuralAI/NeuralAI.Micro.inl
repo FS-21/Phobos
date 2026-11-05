@@ -4,6 +4,9 @@
 
 void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::array<int16_t, OutputVectorSize>& scores)
 {
+	// Phase stopwatch (telemetry only): which part of the micro is heavy.
+	NeuralPhaseClock microClock { pHouse ? pHouse->ArrayIndex : -1, NeuralSection::MicroSetup };
+
 	auto const FindDeployableFoundationNearCellUncached
 		= [](HouseClass* pH, BuildingTypeClass* pBldType, const CellStruct& originCell, int requiredZone,
 			UnitClass* pDeployerUnit) -> CellStruct
@@ -1109,6 +1112,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	if (bestEnemyIdx >= 0)
 		pHouse->EnemyHouseIndex = bestEnemyIdx;
 
+	microClock.Mark(NeuralSection::MicroSensors);
+
 	// Tactical Squad Micro: Retreat damaged expensive/Elite/Parasited vehicles to
 	// Service Depot, Chrono-Miner Warp escape, Beacons & Allied Base Rescue!
 	BuildingClass* pRepairDepot
@@ -2049,6 +2054,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 			}
+
 			if (fc.DistanceFrom(dc) > 2.0)
 			{
 				for (auto const pEB : BuildingClass::Array)
@@ -2148,6 +2154,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		return nearEnemy;
 	};
+
+	microClock.Mark(NeuralSection::MicroUnits);
 
 	for (auto const pUnit : UnitClass::Array)
 	{
@@ -2418,9 +2426,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			// A packed-up yard MCV sent across water (FerryingMcvs) keeps asking the transport
-			// controller each tick and must not unpack where it stands: the "new island without a
-			// ConYard" rule used to redeploy it on the spot, and the yard packed up again. Other
-			// island MCVs keep their own boarding logic below.
+			// controller each tick and skips the "new island without a ConYard" deploy rule, which
+			// would unpack it on the spot. Other island MCVs keep their own boarding logic below.
 			{
 				auto& ferrying = GetMacroState(pHouse).FerryingMcvs;
 				auto const itFerry = std::find(ferrying.begin(), ferrying.end(), pUnit->UniqueID);
@@ -2994,8 +3001,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				// Distant Uncolonized Ore / Difficult Map Zone Expansion (scan up to
 				// [-128, 128] across the landmass):
-				// Nearest worthy field over the whole scan (the loop used to stop at the first row that
-				// had any ore, so it took the top-most patch, lone cells included).
+				// Nearest worthy field (>= 4 ore cells in 5x5) over the whole scan, not the first row
+				// that has any ore.
 				int bestExpDist = 99999;
 				const bool siegeDestFound = (pExpansionDest != nullptr);
 				for (int dy = -128; dy <= 128 && !siegeDestFound; dy += (std::abs(dy) <= 56 ? 3 : 4))
@@ -4780,6 +4787,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	microClock.Mark(NeuralSection::MicroInfantry);
+
 	// Special Operations: Spies, Bridge Repair, Urban Garrisoning, Bio-Reactors,
 	// Tesla Overpowering, Hospitals, Medics, Crazy Ivan & Bridge Demolition
 	BuildingClass* pTargetBridgeHut = nullptr;
@@ -6169,6 +6178,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	microClock.Mark(NeuralSection::MicroWaves);
+
 	// Autonomous Fog-of-War Scouting & Coordinated Multi-Wave Offensive Dispatch
 	// (Replaces legacy aimd.ini TeamScripts)
 	BuildingClass* pVisibleEnemyBld = nullptr;
@@ -6983,6 +6994,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					dx = static_cast<int>(bestUX * distToTarget);
 					dy = static_cast<int>(bestUY * distToTarget);
 				}
+
 				if (distToTarget >= 21)
 				{
 					// Prefer staging 20 to 30 cells outside the enemy perimeter (outside
@@ -7717,6 +7729,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				continue;
 			}
+
 			if (isWaitingForSisterTransportUnload(pBeachU, canBeachUCrossWater))
 			{
 				continue; // Wait on beachhead while unattacked adjacent sister
@@ -7843,6 +7856,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 	}
+
+	microClock.Mark(NeuralSection::MicroTransports);
 
 	// Count how many amphibious transports are currently loading on our home
 	// island so loaded transports can synchronize and sail together as a D-Day
@@ -8425,6 +8440,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 		}
+
 		bool carryingMCV = false;
 		bool carryingStolenForeignMCV = false;
 
@@ -9506,10 +9522,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!pPickupBeach && homeCoords != CellStruct::Empty)
 					pPickupBeach = FindSafeIslandLandingCell(pHouse, homeCoords, homeGroundZone, false);
 
-				// The waiting passengers stand on (and around) the same beach cell, so the transport
-				// could never land there: it idled on the water next to them and nobody boarded. Use
-				// the nearest free shore cell (land, same zone, next to water, enterable by this
-				// transport) within 8 cells instead.
+				// The waiting passengers stand on and around the pickup beach cell, so a transport
+				// that cannot enter it lands on the nearest free shore cell instead (land, same zone,
+				// next to water, enterable by this transport, within 8 cells).
 				if (pPickupBeach
 					&& !pPickupBeach->IsClearToMove(pTrans->Type->SpeedType, true, true, -1, pTrans->Type->MovementZone, -1, false))
 				{
@@ -9740,6 +9755,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	microClock.Mark(NeuralSection::MicroAircraft);
+
 	// Dispatch loaded/idle combat Aircraft, Carryall «Matryoshka» Airlift &
 	// Emergency Sell-Dodge / ConYard Undeploy
 	// Air harassment (slot 32): armed aircraft that re-arm on pads also hunt exposed enemy units
@@ -9864,7 +9881,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		// A hovering aircraft that reached the end of a move stays in Mission::Move with its
-		// destination under it: it is idle too (it used to hover there forever, never harassing).
+		// destination under it: treat it as idle so it can be given new work.
 		const bool isAirIdle = (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Area_Guard
 			|| pAir->CurrentMission == Mission::Sleep
 			|| (pAir->CurrentMission == Mission::Move && pAir->Target == nullptr
@@ -9941,6 +9958,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						break;
 					}
 				}
+
 				if (!moreUnitsFitAir && static_cast<int>(pAir->Type->SizeLimit) >= 1)
 				{
 					for (auto const pI : idleCombatInf)
@@ -10037,6 +10055,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 				}
+
 				if (!pNextAirPass)
 				{
 					for (auto const pV : idleCombatUnits)
@@ -10060,6 +10079,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 				}
+
 				if (!pNextAirPass && static_cast<int>(pAir->Type->SizeLimit) >= 1)
 				{
 					for (auto const pI : idleCombatInf)
@@ -10083,6 +10103,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 				}
+
 				if (pNextAirPass)
 					OrderFootToEnter(pNextAirPass, pAir);
 			}
@@ -10270,6 +10291,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 	}
+
+	microClock.Mark(NeuralSection::MicroBuildings);
 
 	// Dying Garrison Evacuation, Re-Mobilizing Deployed Siege Units (Slot 57),
 	// Smart Wrench Building Repair (Slot 59), Emergency Sell-Dodge & ConYard
@@ -10849,9 +10872,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// A secondary ConYard leapfrogs once its outpost stands on its own (a refinery, or a
 				// siege outpost, with two defenses and five structures): the outpost stays as a
 				// building anchor and the yard moves on to the next free field, or creeps toward the
-				// enemy when no field is left. It no longer waits for the local ore to run out (ore
-				// that regrows never does) nor for the house to be unable to build another MCV, which
-				// kept the nomad from ever moving.
+				// enemy when no field is left. Regrowing ore and MCV availability do not hold it back.
 				const bool isSecondaryConYardReadyToHop = isSecondaryYard
 					&& (hasRefineryHere || pSiegeCreepGoalCell != nullptr) && defsDroppedHere >= 2 && structuresDroppedHere >= 5
 					&& (pNomadicResourceGoalCell != nullptr || pSiegeCreepGoalCell != nullptr);

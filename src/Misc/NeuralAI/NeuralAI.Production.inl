@@ -218,6 +218,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const int parentCountryIdx = (rawParentIdx >= 0) ? rawParentIdx : (pHouse->Type ? pHouse->Type->ArrayIndex2 : -1);
 	const unsigned int ownHouseBit = (parentCountryIdx >= 0 && parentCountryIdx < 32) ? (1u << parentCountryIdx) : 0u;
 
+	NeuralPhaseClock productionClock { pHouse->ArrayIndex, NeuralSection::ProdBuildings };
+
 	// Building Target Selection
 	if (NeuralAI::IsCampaignRestricted(pHouse))
 	{
@@ -2117,6 +2119,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		pExt->NeuralAI_NextBuildingTarget = bestBldIdx;
 	}
 
+	productionClock.Mark(NeuralSection::ProdUnits);
+
 	// Unit & Naval Target Selection
 	int bestUnitIdx = -1;
 	int bestUnitScore = -32000;
@@ -2752,6 +2756,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (!shipyardOnUsefulWater || !HouseNeedsNaval(pHouse))
 				continue;
 		}
+
 		const bool isDeployableRefineryOrMiner = (pUnit->DeploysInto
 			&& (pUnit->DeploysInto->Refinery || pUnit->DeploysInto->ResourceGatherer
 				|| pUnit->DeploysInto->ResourceDestination));
@@ -3168,6 +3173,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	pExt->NeuralAI_NextNavalTarget = bestNavalIdx;
 
+	productionClock.Mark(NeuralSection::ProdInfantry);
+
 	// Infantry Target Selection
 	int ownedEngineers = 0;
 	int ownedInfiltrators = 0;
@@ -3412,6 +3419,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	pExt->NeuralAI_NextInfantryTarget = bestInfIdx;
+
+	productionClock.Mark(NeuralSection::ProdAircraft);
 
 	// Aircraft Target Selection
 	int bestAirIdx = -1;
