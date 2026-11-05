@@ -178,6 +178,10 @@ namespace
 		Counterattack,
 		StuckUnitReleased,
 		UnreachableOrderDropped,
+		IdleHarvesterSent,
+		CrawlStoneForward,
+		CrawlStoneLost,
+		IdleFlyerStrike,
 		Count
 	};
 
@@ -185,7 +189,7 @@ namespace
 		"ferryUnloadAtGoal", "ferryCargoReturned", "safeLaneDetour", "moveIssued", "moveSkipped", "slotGateOpen",
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
-		"stuckReleased", "unreachableDropped" };
+		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -201,6 +205,160 @@ namespace
 	};
 
 	std::array<NeuralTickCost, 32> TickCosts {};
+
+	// Territory telemetry (reward only: the match score and the trainer read it, no decision does,
+	// so it may look through the fog). Every 900 frames, per house: the 8x8 map blocks holding one
+	// of its structures (walls and insignificant structures excluded), the ore fields (12x12 blocks
+	// with >= 5 ore cells) whose nearest resource hub (refinery / resource destination / ConYard)
+	// within 14 cells is its own, and the total cost of its structures.
+	struct NeuralTerritoryStat
+	{
+		int Territory { 0 };
+		int OreFields { 0 };
+		int BuildingValue { 0 };
+		int64_t TerritorySum { 0 };
+		int64_t OreFieldSum { 0 };
+		int Samples { 0 };
+
+		double TerritoryAvg() const
+		{
+			return this->Samples > 0 ? static_cast<double>(this->TerritorySum) / this->Samples : this->Territory;
+		}
+
+		double OreFieldsAvg() const
+		{
+			return this->Samples > 0 ? static_cast<double>(this->OreFieldSum) / this->Samples : this->OreFields;
+		}
+	};
+
+	std::array<NeuralTerritoryStat, 32> TerritoryStats {};
+	int TerritoryLastFrame { -1 };
+
+	void SampleTerritory(bool force)
+	{
+		const int now = Unsorted::CurrentFrame;
+
+		if (TerritoryLastFrame == now || (!force && TerritoryLastFrame >= 0 && now - TerritoryLastFrame < 900))
+			return;
+
+		TerritoryLastFrame = now;
+
+		std::array<std::vector<int>, 32> blocks {};
+		std::array<int, 32> value {};
+		std::array<int, 32> oreFields {};
+		std::vector<std::pair<CellStruct, int>> hubs;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner || pBld->Owner->IsNeutral())
+				continue;
+
+			const int idx = pBld->Owner->ArrayIndex;
+			auto const pType = pBld->Type;
+
+			if (idx < 0 || idx >= 32 || pType->Insignificant || pType->InvisibleInGame || pType->Wall)
+				continue;
+
+			const CellStruct c = pBld->GetMapCoords();
+			blocks[idx].push_back((c.X / 8) * 4096 + (c.Y / 8));
+			value[idx] += std::max(0, pType->Cost);
+
+			if (pType->ConstructionYard || pType->Refinery || pType->ResourceDestination)
+				hubs.emplace_back(c, idx);
+		}
+
+		LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
+
+		if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
+			bounds = LTRBStruct { 0, 0, 511, 511 };
+
+		for (int by = std::max(0, bounds.Top); by <= bounds.Bottom; by += 12)
+		{
+			for (int bx = std::max(0, bounds.Left); bx <= bounds.Right; bx += 12)
+			{
+				int cells = 0;
+				int sumX = 0;
+				int sumY = 0;
+
+				for (int y = by; y < by + 12; ++y)
+				{
+					for (int x = bx; x < bx + 12; ++x)
+					{
+						auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(x), static_cast<short>(y) });
+
+						if (pCell && pCell->GetContainedTiberiumValue() > 0)
+						{
+							++cells;
+							sumX += x;
+							sumY += y;
+						}
+					}
+				}
+
+				if (cells < 5)
+					continue;
+
+				const CellStruct mid { static_cast<short>(sumX / cells), static_cast<short>(sumY / cells) };
+				int bestIdx = -1;
+				int bestDist = 15;
+
+				for (auto const& [hubCell, hubIdx] : hubs)
+				{
+					const int d = std::max(std::abs(hubCell.X - mid.X), std::abs(hubCell.Y - mid.Y));
+
+					if (d < bestDist)
+					{
+						bestDist = d;
+						bestIdx = hubIdx;
+					}
+				}
+
+				if (bestIdx >= 0)
+					oreFields[bestIdx]++;
+			}
+		}
+
+		for (int idx = 0; idx < 32; ++idx)
+		{
+			auto& list = blocks[idx];
+			std::sort(list.begin(), list.end());
+			list.erase(std::unique(list.begin(), list.end()), list.end());
+
+			auto& stat = TerritoryStats[idx];
+			stat.Territory = static_cast<int>(list.size());
+			stat.OreFields = oreFields[idx];
+			stat.BuildingValue = value[idx] / 100;
+			stat.TerritorySum += stat.Territory;
+			stat.OreFieldSum += stat.OreFields;
+			stat.Samples++;
+		}
+	}
+
+	// Match score used to decide stalemates and to credit the backpack: kills, surviving units,
+	// the value of the structures (not their number: a wall post or a cheap tower no longer
+	// counts like a ConYard), and the ground held (map blocks and ore fields, half final, half
+	// average over the match), so holding the map pays and a fortified blob alone does not.
+	int HouseMatchScore(const HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return 0;
+
+		double territory = 0.0;
+		double ore = 0.0;
+		int value = pHouse->OwnedBuildings * 300;
+		const int idx = pHouse->ArrayIndex;
+
+		if (idx >= 0 && idx < 32 && TerritoryStats[idx].Samples > 0)
+		{
+			auto const& stat = TerritoryStats[idx];
+			territory = (stat.Territory + stat.TerritoryAvg()) / 2.0;
+			ore = (stat.OreFields + stat.OreFieldsAvg()) / 2.0;
+			value = stat.BuildingValue * 25;
+		}
+
+		return (pHouse->TotalKilledUnits * 200) + (pHouse->TotalKilledBuildings * 450) + (pHouse->OwnedUnits * 200) + value
+			+ static_cast<int>(territory * 300.0) + static_cast<int>(ore * 1200.0);
+	}
 
 	struct NeuralTickTimer
 	{
@@ -298,6 +456,10 @@ namespace
 		Started,
 		Succeeded,
 		Failed,
+		// The plan found a target and a group (context utility > 0) and asked the learned gate:
+		// eligible but never started = held back by its learned preference; never eligible =
+		// its preconditions never happen on these maps.
+		Eligible,
 		Count
 	};
 
@@ -962,7 +1124,12 @@ namespace
 
 		for (auto const pBld : pHouse->Buildings)
 		{
-			if (IsRefineryExhausted(pBld, baseCenter) && !pBld->HasAnyLink())
+			// Selling a refinery removes its storage: only when what we have stored still fits in
+			// the rest (nothing stored is lost), as AdvAI-style recycling should.
+			const int storageAfterSale = pHouse->TotalStorage - (pBld && pBld->Type ? std::max(0, pBld->Type->Storage) : 0);
+			const bool storedResourcesFit = pHouse->OwnedTiberium.GetTotalAmount() <= static_cast<float>(storageAfterSale);
+
+			if (storedResourcesFit && IsRefineryExhausted(pBld, baseCenter) && !pBld->HasAnyLink())
 			{
 				Debug::Log("[NeuralAI] House %d recycling exhausted distant refinery %s "
 						"at (%d,%d).\n",
@@ -1135,6 +1302,9 @@ namespace
 		int AuxPeak { 0 };
 		// Several targets at once (Factory Decapitation) or per-group sizes (Three-Front Assault).
 		std::vector<DWORD> Targets {};
+		// Sub-targets destroyed so far (chain plans: Rolling Siege), so a plan that did real
+		// damage before its deadline is not scored as a plain failure.
+		int Progress { 0 };
 	};
 
 	struct NeuralStuckTrack
@@ -1232,6 +1402,21 @@ namespace
 		// Stuck order watchdog (UpdateStuckUnits): by unit UniqueID, the cell where it has been
 		// standing with a destination and since when. Keyed lookups only, never iterated.
 		std::unordered_map<DWORD, NeuralStuckTrack> StuckTracks {};
+		// Expansion drive: ore fields (12x12 blocks) on our landmass more than 14 cells from any
+		// of our hubs (feature scan), and how close the base crawl has brought a building anchor
+		// to the nearest free worthy field (placement scan) so a refinery is wanted there.
+		int UncolonizedOreFields { 0 };
+		// Idle harvester dispatcher (UpdateIdleHarvesters), same keyed shape as StuckTracks.
+		std::unordered_map<DWORD, NeuralStuckTrack> IdleHarvesterTracks {};
+		// Offensive base crawl bookkeeping (UpdateOffensiveStones): cells chosen for a stone toward
+		// the enemy and not yet confirmed placed, then the placed stones by UniqueID, so how many
+		// forward stones survive is counted (crawlStoneForward / crawlStoneLost) for the trainer.
+		std::vector<std::pair<CellStruct, int>> OffensiveStoneCells {};
+		std::vector<DWORD> OffensiveStones {};
+		int LastStoneCheckFrame { -100000 };
+		int LastIdleFlyerCheckFrame { -100000 };
+		int FreeFieldAnchorDist { 9999 };
+		int FreeFieldFrame { -100000 };
 		// Last airlift that turned back (damaged carrier or a defended drop zone).
 		int LastAirDropAbortFrame { -100000 };
 
@@ -1333,6 +1518,14 @@ namespace
 			this->AirLossTracks.clear();
 			this->AirDangerSpots.clear();
 			this->StuckTracks.clear();
+			this->UncolonizedOreFields = 0;
+			this->IdleHarvesterTracks.clear();
+			this->OffensiveStoneCells.clear();
+			this->OffensiveStones.clear();
+			this->LastStoneCheckFrame = -100000;
+			this->LastIdleFlyerCheckFrame = -100000;
+			this->FreeFieldAnchorDist = 9999;
+			this->FreeFieldFrame = -100000;
 			this->LastAirDropAbortFrame = -100000;
 			this->IslandHoldCell = CellStruct::Empty;
 			this->IslandHoldUntilFrame = -1;
@@ -3391,6 +3584,8 @@ void NeuralAI::OnScenarioStart()
 		counts.fill(0);
 
 	TickCosts.fill(NeuralTickCost {});
+	TerritoryStats.fill(NeuralTerritoryStat {});
+	TerritoryLastFrame = -1;
 
 	for (auto& housePlans : PlanStats)
 	{
@@ -3627,13 +3822,14 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 	int bestHouseIdx = -1;
 	int bestScore = -1;
 
+	SampleTerritory(true);
+
 	for (auto const pHouse : HouseClass::Array)
 	{
 		if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver())
 			continue;
 
-		const int score = (pHouse->TotalKilledUnits * 200) + (pHouse->TotalKilledBuildings * 450)
-			+ (pHouse->OwnedBuildings * 300) + (pHouse->OwnedUnits * 200);
+		const int score = HouseMatchScore(pHouse);
 
 		if (pHouse->IsWinner || (!pHouse->Defeated && score > bestScore))
 		{
@@ -3674,7 +3870,10 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 				? 4
 				: 0;
 
-			const int delta = NeuralAI::MatchEndStalemate ? (won ? -4 : -8) : (won ? (12 + fastBonus) : -6);
+			// Stalemates: zero-sum and small (+3 ahead on score / -3 behind). They used to cost both
+			// sides (-4 / -8), which taught the backpack that the long-game experts (expansion,
+			// crawl, siege) are bad simply because long games end on the timer.
+			const int delta = NeuralAI::MatchEndStalemate ? (won ? 3 : -3) : (won ? (12 + fastBonus) : -6);
 
 			uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + arch * 10 + exp) % 512);
 
@@ -3897,13 +4096,14 @@ void NeuralAI::OnHeadlessFrameTick()
 		int bestHouseIdx = lastAliveHouseIdx;
 		int bestScore = -1;
 
+		SampleTerritory(true);
+
 		for (auto const pHouse : HouseClass::Array)
 		{
 			if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver() || pHouse->Defeated)
 				continue;
 
-			const int score = (pHouse->TotalKilledUnits * 200) + (pHouse->TotalKilledBuildings * 450)
-				+ (pHouse->OwnedBuildings * 300) + (pHouse->OwnedUnits * 200);
+			const int score = HouseMatchScore(pHouse);
 
 			if (score > bestScore)
 			{
@@ -3933,6 +4133,8 @@ void NeuralAI::OnHeadlessFrameTick()
 void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool stalemate)
 {
 	AITrainerSharedTelemetry localSnap = {};
+
+	SampleTerritory(matchEnded);
 
 	AITrainerSharedTelemetry* dst = NeuralAI::TelemetryView ? NeuralAI::TelemetryView : &localSnap;
 
@@ -3991,8 +4193,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 		hs.OwnedAircraft = pHouse->OwnedAircraft;
 
-		hs.NetWorthScore
-			= (hs.KilledUnits * 200) + (hs.KilledBuildings * 450) + (hs.OwnedBuildings * 300) + (hs.OwnedUnits * 200);
+		hs.NetWorthScore = HouseMatchScore(pHouse);
 
 		hs.IsWinner = (pHouse->ArrayIndex == winnerHouseIdx || pHouse->IsWinner) ? 1 : 0;
 
@@ -4277,8 +4478,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				{
 					auto const& st = PlanStats[h.ArrayIndex][pl];
 					char planBuf[96];
-					std::snprintf(planBuf, sizeof(planBuf), "%s\"%s\": [%u, %u, %u]", pl > 0 ? ", " : "", NeuralPlanNames[pl],
-						st[0], st[1], st[2]);
+					std::snprintf(planBuf, sizeof(planBuf), "%s\"%s\": [%u, %u, %u, %u]", pl > 0 ? ", " : "", NeuralPlanNames[pl],
+						st[0], st[1], st[2], st[3]);
 					plansText += planBuf;
 				}
 			}
@@ -4308,6 +4509,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				}
 			}
 
+			const NeuralTerritoryStat terr
+				= (h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TerritoryStats[h.ArrayIndex] : NeuralTerritoryStat {};
+
 			lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
 				"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"opening\": %d, "
 				"\"expert\": %d, \"credits\": %d, \"killedUnits\": %d, "
@@ -4315,13 +4519,15 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"%d, \"score\": %d, \"winner\": %u, \"defeated\": %u, \"policy\": "
 				"%u, \"conYards\": %d, \"harvesters\": %d, \"refineries\": %d, "
 				"\"warFactories\": %d, \"barracks\": %d, "
-				"\"defenses\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
+				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
+				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
 				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"enemyMix\": \"%s\", \"decisions\": {%s}, \"plans\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
 				pOwner ? pOwner->CountResourceDestinations : 0, pOwner ? pOwner->NumWarFactories : 0,
-				pOwner ? pOwner->NumBarracks : 0, defenses, bldText.c_str(), compositionText.c_str(),
+				pOwner ? pOwner->NumBarracks : 0, defenses, terr.Territory, terr.TerritoryAvg(), terr.OreFields,
+				terr.OreFieldsAvg(), terr.BuildingValue, bldText.c_str(), compositionText.c_str(),
 				pOwner ? GetMacroState(pOwner).AirThreatValue : 0, pOwner ? GetMacroState(pOwner).OwnAACapacity : 0,
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
@@ -5189,6 +5395,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 	int localOreCells = 0;
 	int expansionOreCells = 0;
 	int islandExpansionOreCells = 0;
+	std::vector<int> expansionFieldBlocks;
 	int visibleCratesNearby = 0;
 	int nearbyTreeGroveCells = 0;
 	int uncolonizedIslandLandCells = 0;
@@ -5266,12 +5473,17 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 				else if (minSameZoneYardDist > 14)
 				{
 					expansionOreCells++;
+					expansionFieldBlocks.push_back((tc.X / 12) * 4096 + (tc.Y / 12));
 					if (homeGroundZone >= 0 && cellZone >= 0 && cellZone != homeGroundZone && !hasConYardInZone)
 						islandExpansionOreCells++;
 				}
 			}
 		}
 	}
+
+	std::sort(expansionFieldBlocks.begin(), expansionFieldBlocks.end());
+	expansionFieldBlocks.erase(std::unique(expansionFieldBlocks.begin(), expansionFieldBlocks.end()), expansionFieldBlocks.end());
+	GetMacroState(pHouse).UncolonizedOreFields = static_cast<int>(expansionFieldBlocks.size());
 
 	const bool lowMoneyAndScarceLocalOre = (pHouse->Available_Money() < 1600 && localOreCells <= 8
 		&& (expansionOreCells > 0 || islandExpansionOreCells > 0 || islandCapturableTechs > 0));
@@ -5357,6 +5569,12 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			&& pHouse->Available_Money() >= 1200))
 	{
 		expScores[6] += desperateForExpansionResources ? 720 : 480; // Expert 6: Base-Crawling & Ore Outpost Expansion
+	}
+	else if (GetMacroState(pHouse).UncolonizedOreFields >= 2 && pHouse->Available_Money() >= 15000)
+	{
+		// Plenty of money and ore fields nobody of ours holds yet: claim them anyway. Fields are a
+		// life insurance (stolen or drained money comes back) and denied ground for the enemy.
+		expScores[6] += 380;
 	}
 
 	if ((features[68] > 12 || features[65] > 18 || features[69] > 16 || features[29] > 0 || features[31] > 0
@@ -5612,6 +5830,19 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 						: ((pHouse->CountResourceDestinations < 3 && pHouse->Available_Money() > 2200) ? 650
 																										: -150))));
 
+	// Base crawl reached a free ore field (a building anchor within 12 cells of it, seen by the
+	// placement scan in the last 1800 frames): a refinery there claims it (AdvAI's
+	// ShouldBuildRefinery after a crawl step lands next to Tiberium).
+	{
+		auto const& fieldMacro = GetMacroState(pHouse);
+
+		if (fieldMacro.FreeFieldAnchorDist <= 12 && Unsorted::CurrentFrame - fieldMacro.FreeFieldFrame <= 1800
+			&& pHouse->CountResourceDestinations >= 1)
+		{
+			outScores[1] = ClampInt16(outScores[1] + 950);
+		}
+	}
+
 	outScores[2] = ClampInt16(outScores[2] + ((pHouse->NumBarracks == 0) ? 1750 : -200));
 
 	outScores[3] = ClampInt16(outScores[3]
@@ -5793,8 +6024,13 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// whether to build more MCVs for expansion, nomadic hopping, or
 	// MultipleFactory building speed vs being moderate based on economy & biases)
 	const bool hasUncolonizedIslandExpansion = (features[21] == 50 || features[21] >= 100);
-	const int maxConYardsForScore
-		= (features[21] > 0) ? (hasUncolonizedIslandExpansion ? 4 : 2) : ((features[20] > 12) ? 3 : 2);
+	// ConYard cap from what there is to take, not a fixed 2: one more per free ore field on our
+	// landmass (up to 3), one more with a big bank (money is no limit, building speed is), 4 when
+	// an island waits to be colonized. Nomadic yards (slot 81) leapfrog past it anyway.
+	const int freeOreFields = GetMacroState(pHouse).UncolonizedOreFields;
+	const bool richBank = pHouse->Available_Money() >= 15000;
+	const int maxConYardsForScore = std::clamp(
+		std::max(hasUncolonizedIslandExpansion ? 4 : 2, 2 + std::min(3, freeOreFields) + (richBank ? 1 : 0)), 2, 6);
 	const bool homeCongestedOrIslandTarget = (hasUncolonizedIslandExpansion
 		|| (features[20] > 10
 			&& (pHouse->Buildings.Count >= 20 || GetMacroState(pHouse).ConsecutivePlacementFailures > 0)));
@@ -5810,13 +6046,14 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	if (pHouse->NumConYards >= 1 && pHouse->NumConYards < maxConYardsForScore && pHouse->NumWarFactories > 0
 		&& (urgentResourceOrIslandExpansion || pHouse->Available_Money() > mcvReserveThreshold)
 		&& (features[20] > 6 || localOreDepleting || homeCongestedOrIslandTarget || outScores[35] > 80
-			|| outScores[81] > 80 || outScores[30] > 160)
+			|| outScores[81] > 80 || outScores[30] > 160 || freeOreFields > 0)
 		&& (features[19] < 32 || homeCongestedOrIslandTarget || pHouse->Available_Money() > mcvReserveThreshold + 1000
-			|| outScores[30] > 220 || outScores[81] > 120))
+			|| outScores[30] > 220 || outScores[81] > 120 || (freeOreFields > 0 && richBank)))
 	{
-		const int perYardPenalty = (features[21] > 0) ? 280 : 380;
+		const int perYardPenalty = richBank ? 180 : ((features[21] > 0) ? 280 : 380);
 		outScores[30] = ClampInt16(outScores[30] + 1050 + (localOreDepleting ? 420 : 0)
 			+ (homeCongestedOrIslandTarget ? 400 : 0) + (urgentResourceOrIslandExpansion ? 350 : 0)
+			+ (freeOreFields > 0 ? 250 + 80 * std::min(3, freeOreFields) : 0) + (richBank ? 300 : 0)
 			+ std::clamp(static_cast<int>(outScores[35]) + (static_cast<int>(outScores[81]) / 2), -400, 800)
 			- ((pHouse->NumConYards - 1) * perYardPenalty));
 	}
@@ -6539,6 +6776,210 @@ namespace
 			check(pInf, false);
 
 		macro.StuckTracks = std::move(next);
+	}
+
+	// Idle harvester dispatcher: an empty harvester on Harvest that has not left its cell for 900
+	// frames found no ore within its scan (vanilla then waits there forever, e.g. on a depleted
+	// field on a hill). Send it to the nearest worthy ore field (>= 4 ore cells in 5x5) on its own
+	// landmass within 96 cells, 8+ cells away and 10+ cells from known enemy structures; on
+	// arrival it falls back to Guard and the harvester logic puts it back on Harvest.
+	// Chrono miners (Teleporter) and deployable gatherers are left alone: a destination makes a
+	// chrono miner loop-teleport, and slave miners have their own routing.
+	void UpdateIdleHarvesters(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		std::unordered_map<DWORD, NeuralStuckTrack> next;
+		const int now = Unsorted::CurrentFrame;
+		std::vector<CellStruct> enemyStructures;
+		bool enemyStructuresKnown = false;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type
+				|| !pUnit->Type->Harvester || pUnit->Type->Teleporter || pUnit->Type->DeploysInto || pUnit->IsInAir())
+			{
+				continue;
+			}
+
+			if (pUnit->CurrentMission != Mission::Harvest || pUnit->HasAnyLink()
+				|| pUnit->Tiberium.GetTotalAmount() > 0.0f)
+			{
+				continue;
+			}
+
+			const CellStruct here = pUnit->GetMapCoords();
+			NeuralStuckTrack track { here, now };
+
+			if (auto const it = macro.IdleHarvesterTracks.find(pUnit->UniqueID);
+				it != macro.IdleHarvesterTracks.end() && it->second.Cell.DistanceFrom(here) <= 1.5)
+			{
+				track = it->second;
+			}
+
+			if (now - track.SinceFrame < 900)
+			{
+				next.emplace(pUnit->UniqueID, track);
+				continue;
+			}
+
+			if (!enemyStructuresKnown)
+			{
+				enemyStructuresKnown = true;
+
+				for (auto const pEB : BuildingClass::Array)
+				{
+					if (pEB && pEB->IsAlive && !pEB->InLimbo && pEB->Owner && pEB->Type && pEB->Owner != pHouse
+						&& !pHouse->IsAlliedWith(pEB->Owner) && !pEB->Owner->IsNeutral() && IsEnemyBuildingKnown(pHouse, pEB))
+					{
+						enemyStructures.push_back(pEB->GetMapCoords());
+					}
+				}
+			}
+
+			const MovementZone mz = pUnit->Type->MovementZone;
+			const int unitZone = ObjectZone(pUnit, mz);
+			CellClass* pBestOre = nullptr;
+			int bestDist = INT_MAX;
+
+			for (int dy = -96; dy <= 96; dy += 3)
+			{
+				for (int dx = -96; dx <= 96; dx += 3)
+				{
+					const int d = std::max(std::abs(dx), std::abs(dy));
+
+					if (d < 8 || d >= bestDist)
+						continue;
+
+					const CellStruct tc { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) };
+					auto const pCell = MapClass::Instance.TryGetCellAt(tc);
+
+					if (!pCell || pCell->GetContainedTiberiumValue() <= 0)
+						continue;
+
+					if (unitZone >= 0 && MapClass::Instance.GetMovementZoneType(tc, mz, false) != unitZone)
+						continue;
+
+					bool nearEnemy = false;
+
+					for (auto const& ec : enemyStructures)
+					{
+						if (std::max(std::abs(ec.X - tc.X), std::abs(ec.Y - tc.Y)) < 10)
+						{
+							nearEnemy = true;
+							break;
+						}
+					}
+
+					if (nearEnemy)
+						continue;
+
+					int fieldCells = 0;
+
+					for (int fy = -2; fy <= 2; ++fy)
+					{
+						for (int fx = -2; fx <= 2; ++fx)
+						{
+							auto const pFC = MapClass::Instance.TryGetCellAt(
+								CellStruct { static_cast<short>(tc.X + fx), static_cast<short>(tc.Y + fy) });
+
+							if (pFC && pFC->GetContainedTiberiumValue() > 0)
+								fieldCells++;
+						}
+					}
+
+					if (fieldCells < 4)
+						continue;
+
+					bestDist = d;
+					pBestOre = pCell;
+				}
+			}
+
+			if (pBestOre)
+			{
+				pUnit->SetDestination(pBestOre, true);
+				pUnit->QueueMission(Mission::Move, true);
+				CountDecision(NeuralDecision::IdleHarvesterSent, pHouse->ArrayIndex);
+				continue; // A new track starts when it is back on Harvest.
+			}
+
+			// No field in reach: look again in 900 frames rather than scanning every tick.
+			track.SinceFrame = now;
+			next.emplace(pUnit->UniqueID, track);
+		}
+
+		macro.IdleHarvesterTracks = std::move(next);
+	}
+
+	// Offensive crawl bookkeeping: confirm the cells chosen for stones toward the enemy once a
+	// structure of ours stands there, then count the confirmed stones that are destroyed. The
+	// trainer credits slots 38 / 81 with how well forward stones survive.
+	void UpdateOffensiveStones(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - macro.LastStoneCheckFrame < 150)
+			return;
+
+		macro.LastStoneCheckFrame = now;
+
+		auto findOwnAt = [pHouse](const CellStruct& cell) -> BuildingClass*
+		{
+			for (auto const pB : pHouse->Buildings)
+			{
+				if (pB && pB->IsAlive && !pB->InLimbo && pB->Type && pB->GetMapCoords() == cell)
+					return pB;
+			}
+
+			return nullptr;
+		};
+
+		std::vector<std::pair<CellStruct, int>> stillPending;
+
+		for (auto const& [cell, frame] : macro.OffensiveStoneCells)
+		{
+			if (auto const pPlaced = findOwnAt(cell))
+			{
+				macro.OffensiveStones.push_back(pPlaced->UniqueID);
+				CountDecision(NeuralDecision::CrawlStoneForward, pHouse->ArrayIndex);
+			}
+			else if (now - frame <= 1800)
+			{
+				stillPending.emplace_back(cell, frame);
+			}
+		}
+
+		macro.OffensiveStoneCells = std::move(stillPending);
+
+		std::vector<DWORD> alive;
+
+		for (const DWORD id : macro.OffensiveStones)
+		{
+			bool found = false;
+
+			for (auto const pB : pHouse->Buildings)
+			{
+				if (pB && pB->IsAlive && !pB->InLimbo && pB->UniqueID == id)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if (found)
+				alive.push_back(id);
+			else
+				CountDecision(NeuralDecision::CrawlStoneLost, pHouse->ArrayIndex);
+		}
+
+		macro.OffensiveStones = std::move(alive);
 	}
 
 	// Per-tick match tactics feeding the wave logic:
@@ -8068,6 +8509,85 @@ namespace
 		return pHome;
 	}
 
+	// Idle flyer strike: an armed flying unit that is not an aircraft (airship, jumpjet bomber, no
+	// ammo / airpad cycle) idling with no target and no plan, with known enemy structures within
+	// 30 cells, attacks the best of them (valuable types first, fewer known anti-air, closer)
+	// instead of hovering in place over the enemy base. Every 150 frames per house.
+	void UpdateIdleAirborneStrikers(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - macro.LastIdleFlyerCheckFrame < 150)
+			return;
+
+		macro.LastIdleFlyerCheckFrame = now;
+		auto const& knownBuildings = GetKnownEnemyBuildingCache(pHouse).Buildings;
+
+		if (knownBuildings.empty())
+			return;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type
+				|| !IsAirborneThreatTechno(pUnit) || GroundRangeOf(pUnit->Type) <= 0 || pUnit->Target != nullptr
+				|| macro.PlanMembers.contains(pUnit->UniqueID) || pUnit->GetHealthPercentage() < 0.25)
+			{
+				continue;
+			}
+
+			if (pUnit->CurrentMission != Mission::Guard && pUnit->CurrentMission != Mission::Area_Guard
+				&& pUnit->CurrentMission != Mission::Sleep && pUnit->CurrentMission != Mission::None)
+			{
+				continue;
+			}
+
+			const CellStruct here = pUnit->GetMapCoords();
+			BuildingClass* pBest = nullptr;
+			int bestScore = INT_MIN;
+
+			for (auto const pBld : knownBuildings)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner || pBld->Owner == pHouse
+					|| pHouse->IsAlliedWith(pBld->Owner) || pBld->Owner->IsNeutral() || pBld->Type->Insignificant
+					|| pBld->Type->InvisibleInGame || pBld->Type->Wall)
+				{
+					continue;
+				}
+
+				const CellStruct bc = pBld->GetMapCoords();
+				const int dist = std::max(std::abs(bc.X - here.X), std::abs(bc.Y - here.Y));
+
+				if (dist > 30)
+					continue;
+
+				auto const pT = pBld->Type;
+				const int worth = (pT->SuperWeapon != -1) ? 400
+					: (pT->ConstructionYard || pT->Factory != AbstractType::None) ? 300
+					: (pT->PowerBonus > 0) ? 280
+					: (pT->Refinery || pT->ResourceDestination) ? 260
+					: std::min(200, std::max(0, pT->Cost) / 10);
+				const int score = worth - CountKnownEnemyDefensesNear(pHouse, bc, 8.0, true) * 150 - dist * 4;
+
+				if (score > bestScore)
+				{
+					bestScore = score;
+					pBest = pBld;
+				}
+			}
+
+			if (pBest)
+			{
+				pUnit->SetTarget(pBest);
+				pUnit->QueueMission(Mission::Attack, true);
+				CountDecision(NeuralDecision::IdleFlyerStrike, pHouse->ArrayIndex);
+			}
+		}
+	}
+
 	BuildingClass* FindBuildingByID(DWORD uid)
 	{
 		for (auto const pBld : BuildingClass::Array)
@@ -8129,7 +8649,15 @@ namespace
 
 		auto isFreeForPlan = [&](FootClass* pFoot) -> bool
 		{
-			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID) || pFoot->GetHealthPercentage() < 0.6)
+			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID))
+				return false;
+
+			// Heavy flyers that are not aircraft (airships, jumpjet bombers) cannot land at a repair
+			// depot and often self-heal only up to a cap below 60%: a 0.6 floor benched them forever.
+			const bool heavyFlyer = pFoot->WhatAmI() != AbstractType::Aircraft && IsAirborneThreatTechno(pFoot)
+				&& pFoot->GetTechnoType() && pFoot->GetTechnoType()->Strength >= 600;
+
+			if (pFoot->GetHealthPercentage() < (heavyFlyer ? 0.35 : 0.6))
 				return false;
 
 			const bool idle = (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
@@ -8182,6 +8710,9 @@ namespace
 
 			// 300..600 frames between attempts, varying per match and per plan (point 30).
 			macro.PlanNextAttemptFrame[i] = Unsorted::CurrentFrame + 300 + StyleJitter(houseIdx, static_cast<int>(i), 450, 301);
+
+			if (contextUtility > 0)
+				CountPlanOutcome(houseIdx, id, NeuralPlanOutcome::Eligible);
 			const int slot = NeuralPlanSlots[i];
 			// Combo chains (point 56) boost the plans they lead into for 900 frames.
 			const int boost = macro.PlanBoostUntilFrame[i] > Unsorted::CurrentFrame ? macro.PlanBoost[i] : 0;
@@ -8928,7 +9459,7 @@ namespace
 
 				if (!pTarget)
 				{
-					finishPlan(NeuralPlanId::HeavyAirPush, true, true);
+					finishPlan(NeuralPlanId::HeavyAirPush, true, false);
 				}
 				else if (itHeavy == ownFoots.end() || Unsorted::CurrentFrame >= plan.Deadline)
 				{
@@ -8966,7 +9497,7 @@ namespace
 					auto const pType = pFoot->GetTechnoType();
 
 					if (!pType || pType->Strength < 600 || !IsAirborneThreatTechno(pFoot) || GroundRangeOf(pType) <= 0
-						|| macro.PlanMembers.contains(uid) || pFoot->Target != nullptr || pFoot->GetHealthPercentage() < 0.6)
+						|| macro.PlanMembers.contains(uid) || pFoot->Target != nullptr || pFoot->GetHealthPercentage() < 0.35)
 					{
 						continue;
 					}
@@ -9013,7 +9544,7 @@ namespace
 						group.push_back(escorts[e]);
 
 					startPlan(NeuralPlanId::HeavyAirPush, group, pTarget->GetMapCoords(), CellStruct::Empty, pTarget->UniqueID,
-						5400);
+						5400 + static_cast<int>(pTarget->GetMapCoords().DistanceFrom(pHeavy->GetMapCoords())) * 45);
 				}
 			}
 		}
@@ -9112,7 +9643,9 @@ namespace
 						const int aaNear = CountKnownEnemyDefensesNear(pHouse, pBld->GetMapCoords(), 10.0, true);
 						const int targetScore = worth - aaNear * 220;
 
-						if (aaNear <= 1 && targetScore > bestTargetScore)
+						// Late game nearly every valuable building has 2+ AA around it: a bigger wing may
+						// still go (up to one AA site per two strikers), the score keeps the least covered.
+						if (aaNear <= std::max<int>(1, static_cast<int>(strikers.size()) / 2) && targetScore > bestTargetScore)
 						{
 							bestTargetScore = targetScore;
 							pBestTarget = pBld;
@@ -10436,8 +10969,20 @@ namespace
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::SuperweaponRace, utility))
 				{
+					// Deadline from the trip, not only the timer: with the weapon already ready the plan
+					// had 900 frames (one minute) and could never succeed. Killing it before it fires
+					// again is still the point.
+					int travelFrames = 0;
+
+					for (auto const pFoot : group)
+					{
+						const int framesPerCell = pFoot->WhatAmI() == AbstractType::Aircraft ? 12 : 40;
+						travelFrames = std::max(travelFrames,
+							static_cast<int>(pFoot->GetMapCoords().DistanceFrom(pTarget->GetMapCoords())) * framesPerCell);
+					}
+
 					startPlan(NeuralPlanId::SuperweaponRace, group, pTarget->GetMapCoords(), CellStruct::Empty, pTarget->UniqueID,
-						std::max(0, bestLeft) + 900);
+						std::max(std::max(0, bestLeft), travelFrames) + 1800);
 
 					for (auto const pFoot : group)
 					{
@@ -12307,12 +12852,14 @@ namespace
 							continue;
 
 						const bool inPlace = pFoot->GetMapCoords().DistanceFrom(plan.StagingCell) <= 3.0;
-						const bool reaches = GroundRangeOf(pFoot->GetTechnoType())
-							>= static_cast<int>(pFoot->GetMapCoords().DistanceFrom(pTarget->GetMapCoords()) * Unsorted::LeptonsPerCell);
+						const bool isArtillery = GroundRangeOf(pFoot->GetTechnoType()) >= 8 * Unsorted::LeptonsPerCell;
 
-						if (inPlace && reaches)
+						// The stage is measured from the refinery's corner, so a gun at the stage can be a
+						// cell or two short: in place, artillery gets the attack order and closes in by
+						// itself (it used to wait there forever, neither in range nor moving).
+						if (inPlace && isArtillery)
 						{
-							if (pFoot->Target != pTarget && pFoot->Target == nullptr)
+							if (pFoot->Target != pTarget)
 							{
 								pFoot->SetTarget(pTarget);
 								pFoot->QueueMission(Mission::Attack, true);
@@ -12452,6 +12999,9 @@ namespace
 				BuildingClass* pDefense = FindBuildingByID(plan.TargetID);
 				const int artilleryRange = groupArtilleryRange(plan.Members);
 
+				if (!pDefense)
+					plan.Progress++; // The current defense fell.
+
 				if (!pDefense && artilleryRange > 0)
 				{
 					auto const [pNext, pNextStage] = pickNextDefense(plan.TargetCell, artilleryRange);
@@ -12467,13 +13017,15 @@ namespace
 
 				auto const pStage = MapClass::Instance.TryGetCellAt(plan.StagingCell);
 
+				// Success = the chain ran out of defenses in reach, or at least two defenses fell before
+				// the deadline / the battery was worn down (a fortified base never runs out of them).
 				if (!pDefense || artilleryRange <= 0)
 				{
-					finishPlan(NeuralPlanId::RollingSiege, !pDefense, true);
+					finishPlan(NeuralPlanId::RollingSiege, !pDefense || plan.Progress >= 2, true);
 				}
 				else if (!pStage || memberValue(plan) * 100 < plan.InitialValue * 35 || Unsorted::CurrentFrame >= plan.Deadline)
 				{
-					finishPlan(NeuralPlanId::RollingSiege, false, true);
+					finishPlan(NeuralPlanId::RollingSiege, plan.Progress >= 2, true);
 				}
 				else
 				{
@@ -12715,7 +13267,10 @@ namespace
 				}
 				else if (memberValue(plan) * 100 < plan.InitialValue * 35 || Unsorted::CurrentFrame >= plan.Deadline)
 				{
-					finishPlan(NeuralPlanId::FactoryDecapitation, false, true);
+					// At least half of the targeted factories destroyed counts as a success: losing
+					// most of its production is what the plan is for.
+					const size_t destroyed = plan.Targets.size() - standing.size();
+					finishPlan(NeuralPlanId::FactoryDecapitation, destroyed * 2 >= plan.Targets.size(), true);
 				}
 				else
 				{
@@ -15840,8 +16395,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				// Distant Uncolonized Ore / Difficult Map Zone Expansion (scan up to
 				// [-128, 128] across the landmass):
+				// Nearest worthy field over the whole scan (the loop used to stop at the first row that
+				// had any ore, so it took the top-most patch, lone cells included).
 				int bestExpDist = 99999;
-				for (int dy = -128; dy <= 128 && !pExpansionDest; dy += (std::abs(dy) <= 56 ? 3 : 4))
+				const bool siegeDestFound = (pExpansionDest != nullptr);
+				for (int dy = -128; dy <= 128 && !siegeDestFound; dy += (std::abs(dy) <= 56 ? 3 : 4))
 				{
 					for (int dx = -128; dx <= 128; dx += (std::abs(dx) <= 56 ? 3 : 4))
 					{
@@ -15887,6 +16445,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						const int distFromMCV = std::abs(tc.X - mcvCell.X) + std::abs(tc.Y - mcvCell.Y);
 						if (distFromMCV < bestExpDist)
 						{
+							int fieldCells = 0;
+
+							for (int fy = -2; fy <= 2; ++fy)
+							{
+								for (int fx = -2; fx <= 2; ++fx)
+								{
+									auto const pFC = MapClass::Instance.TryGetCellAt(
+										CellStruct { static_cast<short>(tc.X + fx), static_cast<short>(tc.Y + fy) });
+
+									if (pFC && pFC->GetContainedTiberiumValue() > 0)
+										fieldCells++;
+								}
+							}
+
+							if (fieldCells < 4)
+								continue;
+
 							bestExpDist = distFromMCV;
 							pExpansionDest = pCell;
 						}
@@ -23511,10 +24086,63 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				CellClass* pNomadicResourceGoalCell
 					= canFerryNomadNow ? pIslandResourceGoalCell : pDistantUncolonizedLandOreCell;
 
-				const bool isSecondaryConYardReadyToHop
-					= (pHouse->NumConYards >= 2 && pOwnBld != pHouse->ConYards.GetItem(0)
-						&& !hasUnharvestedOreNearThisYard && !canBuildAdditionalMCV && hasRefineryHere && hasWarFacHere
-						&& defsDroppedHere >= 2 && structuresDroppedHere >= 5 && pNomadicResourceGoalCell != nullptr);
+				// Siege creep goal for a secondary yard with no free field left (slot 81): 18 cells short
+				// of the nearest known enemy structure on this landmass, when it is 36+ cells away.
+				CellClass* pSiegeCreepGoalCell = nullptr;
+				const bool isSecondaryYard = (pHouse->NumConYards >= 2 && pOwnBld != pHouse->ConYards.GetItem(0));
+
+				if (isSecondaryYard && pNomadicResourceGoalCell == nullptr && SlotGate(scores[81], 75, 81))
+				{
+					CellStruct nearestEnemy = CellStruct::Empty;
+					int nearestEnemyDist = INT_MAX;
+
+					for (auto const pEB : BuildingClass::Array)
+					{
+						if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Insignificant
+							|| pEB->Type->InvisibleInGame || pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner)
+							|| pEB->Owner->IsNeutral() || !IsEnemyBuildingKnown(pHouse, pEB))
+						{
+							continue;
+						}
+
+						const CellStruct ec = pEB->GetMapCoords();
+
+						if (MapClass::Instance.GetMovementZoneType(ec, MovementZone::Normal, pEB->OnBridge) != yz)
+							continue;
+
+						const int d = std::max(std::abs(ec.X - yc.X), std::abs(ec.Y - yc.Y));
+
+						if (d < nearestEnemyDist)
+						{
+							nearestEnemyDist = d;
+							nearestEnemy = ec;
+						}
+					}
+
+					if (nearestEnemy != CellStruct::Empty && nearestEnemyDist >= 36)
+					{
+						const int step = nearestEnemyDist - 18;
+						const CellStruct goal { static_cast<short>(yc.X + ((nearestEnemy.X - yc.X) * step) / nearestEnemyDist),
+							static_cast<short>(yc.Y + ((nearestEnemy.Y - yc.Y) * step) / nearestEnemyDist) };
+						auto const pGoalCell = MapClass::Instance.TryGetCellAt(goal);
+
+						if (pGoalCell && MapClass::Instance.GetMovementZoneType(goal, MovementZone::Normal, false) == yz)
+							pSiegeCreepGoalCell = pGoalCell;
+					}
+				}
+
+				// A secondary ConYard leapfrogs once its outpost stands on its own (a refinery, or a
+				// siege outpost, with two defenses and five structures): the outpost stays as a
+				// building anchor and the yard moves on to the next free field, or creeps toward the
+				// enemy when no field is left. It no longer waits for the local ore to run out (ore
+				// that regrows never does) nor for the house to be unable to build another MCV, which
+				// kept the nomad from ever moving.
+				const bool isSecondaryConYardReadyToHop = isSecondaryYard
+					&& (hasRefineryHere || pSiegeCreepGoalCell != nullptr) && defsDroppedHere >= 2 && structuresDroppedHere >= 5
+					&& (pNomadicResourceGoalCell != nullptr || pSiegeCreepGoalCell != nullptr);
+
+				if (pNomadicResourceGoalCell == nullptr && isSecondaryConYardReadyToHop)
+					pNomadicResourceGoalCell = pSiegeCreepGoalCell;
 
 				const bool isSingleConYardDepletedHop = (pHouse->NumConYards == 1 && !canBuildAdditionalMCV
 					&& !hasUnharvestedOreNearThisYard && pHouse->OwnedBuildings >= 10 && pHouse->NumWarFactories >= 1
@@ -24863,6 +25491,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Release units parked by orders they cannot complete (destroyed bridge, endless jam).
 	UpdateStuckUnits(pHouse);
+
+	// Empty harvesters waiting where the ore ran out go to the nearest free field.
+	UpdateIdleHarvesters(pHouse);
+
+	// Forward crawl stones placed / lost (trainer credit for the offensive crawl).
+	UpdateOffensiveStones(pHouse);
+
+	// Idle airships / jumpjet bombers near known enemy structures attack them.
+	UpdateIdleAirborneStrikers(pHouse);
 
 	// Select next targets for Building, Unit, Infantry, and Aircraft queues
 	const int money = pHouse->Available_Money();
@@ -28504,20 +29141,32 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
-	auto measureOreField = [](const CellStruct& oreCell) -> int
+	// Ore cells in the 7x7 around a cell, and whether a resource-spawning tree (renewable field)
+	// stands within 4 cells of it.
+	auto measureOreField = [](const CellStruct& oreCell, bool& hasSpawnerTree) -> int
 	{
 		int fieldCells = 0;
+		hasSpawnerTree = false;
 
-		for (int fy = -3; fy <= 3; ++fy)
+		for (int fy = -4; fy <= 4; ++fy)
 		{
-			for (int fx = -3; fx <= 3; ++fx)
+			for (int fx = -4; fx <= 4; ++fx)
 			{
 				const CellStruct fc { static_cast<short>(oreCell.X + fx), static_cast<short>(oreCell.Y + fy) };
 
 				if (auto const pFieldCell = MapClass::Instance.TryGetCellAt(fc))
 				{
-					if (pFieldCell->GetContainedTiberiumValue() > 0)
+					if (std::abs(fx) <= 3 && std::abs(fy) <= 3 && pFieldCell->GetContainedTiberiumValue() > 0)
 						fieldCells++;
+
+					if (!hasSpawnerTree)
+					{
+						if (auto const pTerrain = pFieldCell->GetTerrain(false))
+						{
+							if (pTerrain->IsAlive && pTerrain->Type && pTerrain->Type->SpawnsTiberium)
+								hasSpawnerTree = true;
+						}
+					}
 				}
 			}
 		}
@@ -28525,9 +29174,43 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		return fieldCells;
 	};
 
-	for (int dy = -84; dy <= 84; dy += (std::abs(dy) <= 44 ? 2 : 3))
+	// Our refineries and building anchors on this landmass, gathered once (the ore scan used to
+	// walk every building for every ore cell, which also kept its radius short).
+	std::vector<CellStruct> ownRefineryCells;
+	std::vector<CellStruct> ownAnchorCells;
+
+	for (auto const pOwnBld : pHouse->Buildings)
 	{
-		for (int dx = -84; dx <= 84; dx += (std::abs(dx) <= 44 ? 2 : 3))
+		if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Insignificant
+			|| pOwnBld->Type->InvisibleInGame)
+		{
+			continue;
+		}
+
+		const CellStruct bc = pOwnBld->GetMapCoords();
+
+		if (centerZone >= 0
+			&& MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pOwnBld->OnBridge) != centerZone)
+		{
+			continue;
+		}
+
+		if (pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer || pOwnBld->Type->ResourceDestination)
+			ownRefineryCells.push_back(bc);
+
+		if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard || BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
+			ownAnchorCells.push_back(bc);
+	}
+
+	// Scattered ore (maps without spawner trees, small patches spread on the ground): a free
+	// patch of 2..4 cells is a second tier, still taken before any already colonized ore.
+	CellStruct smallPatchCell = CellStruct::Empty;
+	int bestSmallPatchMetric = INT_MAX;
+	int smallPatchDist = 9999;
+
+	for (int dy = -120; dy <= 120; dy += (std::abs(dy) <= 44 ? 2 : (std::abs(dy) <= 84 ? 3 : 4)))
+	{
+		for (int dx = -120; dx <= 120; dx += (std::abs(dx) <= 44 ? 2 : (std::abs(dx) <= 84 ? 3 : 4)))
 		{
 			const int dCenter = std::abs(dx) + std::abs(dy);
 			if (dCenter < 3)
@@ -28547,40 +29230,29 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 			bool nearExistingRef = false;
 			int minAnchorManhattan = dCenter;
-			for (auto const pOwnBld : pHouse->Buildings)
+
+			for (auto const& rc : ownRefineryCells)
 			{
-				if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Insignificant
-					|| pOwnBld->Type->InvisibleInGame)
-				{
-					continue;
-				}
-
-				const CellStruct bc = pOwnBld->GetMapCoords();
-				if (centerZone >= 0
-					&& MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pOwnBld->OnBridge) != centerZone)
-				{
-					continue;
-				}
-
-				if ((pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer || pOwnBld->Type->ResourceDestination)
-					&& std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y)) < 10)
+				if (std::max(std::abs(tc.X - rc.X), std::abs(tc.Y - rc.Y)) < 10)
 				{
 					nearExistingRef = true;
-				}
-
-				if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard
-					|| BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
-				{
-					const int dAnc = std::abs(tc.X - bc.X) + std::abs(tc.Y - bc.Y);
-					if (dAnc < minAnchorManhattan)
-						minAnchorManhattan = dAnc;
+					break;
 				}
 			}
 
-			// Field size (ore cells in 7x7, max 49) shortens the effective distance;
-			// tiny patches (< 5 cells) and fields within 12 cells of an enemy base
-			// are only used when nothing better exists.
-			const int fieldCells = measureOreField(tc);
+			for (auto const& ac : ownAnchorCells)
+			{
+				const int dAnc = std::abs(tc.X - ac.X) + std::abs(tc.Y - ac.Y);
+
+				if (dAnc < minAnchorManhattan)
+					minAnchorManhattan = dAnc;
+			}
+
+			// Field size (ore cells in 7x7, max 49) shortens the effective distance, a spawner
+			// tree (renewable field) by 10 more cells; tiny patches (< 5 cells) are a second tier
+			// and fields within 12 cells of an enemy base are only used when nothing better exists.
+			bool hasSpawnerTree = false;
+			const int fieldCells = measureOreField(tc, hasSpawnerTree);
 			bool nearEnemyBase = false;
 
 			for (auto const& ebc : enemyBaseCells)
@@ -28593,7 +29265,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 
 			const bool isWorthyField = fieldCells >= 5 && !nearEnemyBase;
-			const int oreMetric = minAnchorManhattan - fieldCells / 2 + (isWorthyField ? 0 : 1000);
+			const int oreMetric = minAnchorManhattan - fieldCells / 2 - (hasSpawnerTree ? 10 : 0) + (isWorthyField ? 0 : 1000);
 
 			if (oreMetric < bestFallbackOreMetric)
 			{
@@ -28602,7 +29274,18 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 
 			if (!isWorthyField)
+			{
+				const int smallMetric = minAnchorManhattan - fieldCells - (hasSpawnerTree ? 10 : 0);
+
+				if (fieldCells >= 2 && !nearEnemyBase && !nearExistingRef && smallMetric < bestSmallPatchMetric)
+				{
+					bestSmallPatchMetric = smallMetric;
+					smallPatchCell = tc;
+					smallPatchDist = minAnchorManhattan;
+				}
+
 				continue;
+			}
 
 			if ((pHouse->CountResourceDestinations == 0 || !nearExistingRef) && oreMetric < bestOreMetric)
 			{
@@ -28611,6 +29294,21 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				nearestOreCell = tc;
 			}
 		}
+	}
+
+	if (nearestOreCell == CellStruct::Empty && smallPatchCell != CellStruct::Empty)
+	{
+		nearestOreCell = smallPatchCell;
+		bestOreDist = smallPatchDist;
+	}
+
+	const bool hasUncolonizedOre = (nearestOreCell != CellStruct::Empty);
+
+	if (hasUncolonizedOre)
+	{
+		auto& fieldMacro = GetMacroState(pHouse);
+		fieldMacro.FreeFieldAnchorDist = bestOreDist;
+		fieldMacro.FreeFieldFrame = Unsorted::CurrentFrame;
 	}
 
 	if (nearestOreCell == CellStruct::Empty)
@@ -28716,6 +29414,96 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		&& (nearestOreCell != CellStruct::Empty || crawlBias > 0);
 	const bool isRearProtected = !isNavalBld && !isResourceBld && !isCombatDefense && !isFactoryOrBarracks
 		&& !isTunnelBld && !isSupportRadiusBld && !isSteppingStoneExpander;
+
+	// Offensive base crawl (asphyxiation, AdvAI's combat crawling target): once every worthy ore
+	// field in reach is ours, stepping stones march toward the enemy base instead of clumping
+	// around colonized ore; while free fields remain, one stone in four still goes toward the
+	// enemy (two in four with a strong learned creep preference: slot 38 Forward Turret Creep +
+	// half of slot 81 Nomadic Siege Creep) so the front moves too. Defenses then anchor at the
+	// most forward structure (turret creep). Stones stay out of reach of known enemy structures.
+	const AIBackpackFile& crawlPolicy = NeuralAI::PolicyFor(pHouse);
+	const int offensiveCrawlBias
+		= static_cast<int>(crawlPolicy.OutputBias[38]) + static_cast<int>(crawlPolicy.OutputBias[81]) / 2;
+	const int stoneIndex = isSteppingStoneExpander ? pHouse->CountOwnedNow(pBuildingType) : 0;
+	const bool stoneTowardEnemy = isSteppingStoneExpander && enemyTargetCell != CellStruct::Empty
+		&& offensiveCrawlBias > -400
+		&& (!hasUncolonizedOre || (stoneIndex % 4) == 3 || (offensiveCrawlBias > 300 && (stoneIndex % 4) == 1));
+	const CellStruct stoneGoal = stoneTowardEnemy ? enemyTargetCell : nearestOreCell;
+	std::vector<std::pair<CellStruct, int>> enemyStructureReach;
+
+	if (stoneTowardEnemy)
+	{
+		for (auto const pEB : BuildingClass::Array)
+		{
+			if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Insignificant
+				|| pEB->Type->InvisibleInGame || pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner)
+				|| pEB->Owner->IsNeutral() || !IsEnemyBuildingKnown(pHouse, pEB))
+			{
+				continue;
+			}
+
+			int reach = 10;
+
+			if (auto const pWS = pEB->GetWeapon(0); pWS && pWS->WeaponType)
+				reach = std::max(reach, pWS->WeaponType->Range / 256 + 3);
+
+			enemyStructureReach.emplace_back(pEB->GetMapCoords(), reach);
+		}
+	}
+
+	// Forward factories: once the offensive crawl holds a front (forward stones alive), extra War
+	// Factories / Barracks (never the first one) and repair depots go next to it, behind our
+	// towers and off the crawl lane, so reinforcements reach the fight sooner.
+	const bool frontFactory = isFactoryOrBarracks && enemyTargetCell != CellStruct::Empty
+		&& !GetMacroState(pHouse).OffensiveStones.empty()
+		&& ((pBuildingType->Factory == AbstractType::UnitType && pHouse->NumWarFactories >= 1)
+			|| (pBuildingType->Factory == AbstractType::InfantryType && pHouse->NumBarracks >= 1)
+			|| pBuildingType->UnitRepair);
+
+	if (frontFactory && enemyStructureReach.empty())
+	{
+		for (auto const pEB : BuildingClass::Array)
+		{
+			if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Insignificant
+				|| pEB->Type->InvisibleInGame || pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner)
+				|| pEB->Owner->IsNeutral() || !IsEnemyBuildingKnown(pHouse, pEB))
+			{
+				continue;
+			}
+
+			int reach = 10;
+
+			if (auto const pWS = pEB->GetWeapon(0); pWS && pWS->WeaponType)
+				reach = std::max(reach, pWS->WeaponType->Range / 256 + 3);
+
+			enemyStructureReach.emplace_back(pEB->GetMapCoords(), reach);
+		}
+	}
+
+	// Our ground defenses: a stone covered by two or more of them may step inside enemy reach
+	// (the crawl cycle: stone, towers, next stone under their cover, toward the enemy's heart).
+	std::vector<CellStruct> ownCoverDefenses;
+
+	if (stoneTowardEnemy || frontFactory)
+	{
+		for (auto const pOwnB : pHouse->Buildings)
+		{
+			if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type || !pOwnB->Type->IsBaseDefense
+				|| IsTunnelNetworkBuilding(pOwnB->Type))
+			{
+				continue;
+			}
+
+			auto const pWS = pOwnB->GetWeapon(0);
+
+			if (pWS && pWS->WeaponType && pWS->WeaponType->Projectile && pWS->WeaponType->Projectile->AG)
+				ownCoverDefenses.push_back(pOwnB->GetMapCoords());
+		}
+	}
+
+	// Turret creep front (set below when defenses anchor at the most forward structure toward
+	// the enemy): towers consolidate beside the crawl lane, never on it.
+	CellStruct creepFrontGoal = CellStruct::Empty;
 
 	// Gather Support Radius coverage & separation targets
 	// (Gap/Cloak/Sensor/Jammer)
@@ -29027,6 +29815,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		const CellStruct crawlGoal = (enemyTargetCell != CellStruct::Empty) ? enemyTargetCell : nearestOreCell;
 		if (crawlGoal != CellStruct::Empty)
 		{
+			if (crawlGoal == enemyTargetCell)
+				creepFrontGoal = crawlGoal;
+
 			int bestAnchorDist = std::abs(center.X - crawlGoal.X) + std::abs(center.Y - crawlGoal.Y);
 			for (auto const pOwnBld : pHouse->Buildings)
 			{
@@ -29065,11 +29856,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	else if (enableBaseCrawl)
 	{
 		const bool crawlTowardOre = isResourceBld || isSteppingStoneExpander
-			|| (isFactoryOrBarracks && nearestOreCell != CellStruct::Empty && bestOreDist > 10
+			|| (isFactoryOrBarracks && !frontFactory && nearestOreCell != CellStruct::Empty && bestOreDist > 10
 				&& pHouse->CountResourceDestinations < 3);
-		const CellStruct crawlGoal = crawlTowardOre
-			? (nearestOreCell != CellStruct::Empty ? nearestOreCell : enemyTargetCell)
-			: (enemyTargetCell != CellStruct::Empty ? enemyTargetCell : nearestOreCell);
+		const CellStruct crawlGoal = (isSteppingStoneExpander && stoneGoal != CellStruct::Empty)
+			? stoneGoal
+			: frontFactory ? enemyTargetCell
+			: (crawlTowardOre ? (nearestOreCell != CellStruct::Empty ? nearestOreCell : enemyTargetCell)
+							  : (enemyTargetCell != CellStruct::Empty ? enemyTargetCell : nearestOreCell));
 
 		if (crawlGoal != CellStruct::Empty)
 		{
@@ -29478,7 +30271,74 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
+	// Evaluate the anchor rings nearest the chosen anchor first (and each cell once): the list
+	// was built in building order, so in a big base the 900-candidate budget ran out on the
+	// oldest buildings and the forward anchor of a crawl was never even looked at.
+	if (!pBuildingType->ConstructionYard && !isNavalBld && candidateList.size() > 1)
+	{
+		auto ringDistance = [&center](const CellStruct& c)
+		{
+			return std::max(std::abs(c.X - center.X), std::abs(c.Y - center.Y));
+		};
+
+		std::sort(candidateList.begin(), candidateList.end(), [&ringDistance](const CellStruct& a, const CellStruct& b)
+		{
+			const int da = ringDistance(a);
+			const int db = ringDistance(b);
+
+			if (da != db)
+				return da < db;
+
+			return a.Y != b.Y ? a.Y < b.Y : a.X < b.X;
+		});
+
+		candidateList.erase(std::unique(candidateList.begin(), candidateList.end()), candidateList.end());
+	}
+
 	const int maxCandidatesToEvaluate = isNavalBld ? 2400 : 900;
+
+	// Crawl lane from the anchor (center) toward a goal, integer geometry (MP safe): 0 = ahead of
+	// the anchor within ~2.5 cells of the axis (kept free for the next stone), 1 = flank 3..7
+	// cells off the axis, 2 = elsewhere.
+	auto laneSide = [&center](const CellStruct& cell, const CellStruct& goal) -> int
+	{
+		const int ax = goal.X - center.X;
+		const int ay = goal.Y - center.Y;
+		const long long len2 = static_cast<long long>(ax) * ax + static_cast<long long>(ay) * ay;
+
+		if (len2 < 16)
+			return 2;
+
+		const int cx = cell.X - center.X;
+		const int cy = cell.Y - center.Y;
+		const long long dot = static_cast<long long>(cx) * ax + static_cast<long long>(cy) * ay;
+		const long long cross = static_cast<long long>(cx) * ay - static_cast<long long>(cy) * ax;
+		const long long cross2 = cross * cross;
+
+		if (dot > 0 && 4 * cross2 < 25 * len2)
+			return 0;
+
+		return (cross2 >= 9 * len2 && cross2 <= 49 * len2) ? 1 : 2;
+	};
+
+	// A stone toward the enemy: remember its cell (UpdateOffensiveStones confirms the placement).
+	auto rememberOffensiveStone = [&](const CellStruct& chosen) -> CellStruct
+	{
+		if (stoneTowardEnemy && chosen != CellStruct::Empty)
+		{
+			auto& pending = GetMacroState(pHouse).OffensiveStoneCells;
+
+			if (std::none_of(pending.begin(), pending.end(), [&chosen](auto const& entry) { return entry.first == chosen; }))
+			{
+				if (pending.size() >= 8)
+					pending.erase(pending.begin());
+
+				pending.emplace_back(chosen, Unsorted::CurrentFrame);
+			}
+		}
+
+		return chosen;
+	};
 	std::vector<int> strategicWaterZones;
 	if (isNavalBld)
 	{
@@ -29681,6 +30541,25 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				int spatialScore = (enableBaseCrawl ? (-radius * 5) : (-radius * 10)) - (hasOneCellMargin ? 0 : 4000)
 					+ expansionZoneBonus;
 
+				if (!isCombatDefense)
+				{
+					int oreUnderFoundation = 0;
+
+					for (int fy = 0; fy < h; ++fy)
+					{
+						for (int fx = 0; fx < w; ++fx)
+						{
+							auto const pFC = MapClass::Instance.TryGetCellAt(
+								CellStruct { static_cast<short>(candidate.X + fx), static_cast<short>(candidate.Y + fy) });
+
+							if (pFC && pFC->GetContainedTiberiumValue() > 0)
+								oreUnderFoundation++;
+						}
+					}
+
+					spatialScore -= oreUnderFoundation * 250;
+				}
+
 				// AdvAI UnsafePlacementZones Graduated Soft-Avoidance (Never a hard block!):
 				// Apply a distance-graduated penalty within 6 cells of a recently destroyed/critically
 				// damaged building so the AI prefers building on the safer opposite side of its base,
@@ -29856,16 +30735,45 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					}
 				}
 
-				if ((isResourceBld || isSteppingStoneExpander) && nearestOreCell != CellStruct::Empty)
+				const CellStruct pullGoal
+					= (isSteppingStoneExpander && !isResourceBld && stoneGoal != CellStruct::Empty) ? stoneGoal : nearestOreCell;
+
+				if ((isResourceBld || isSteppingStoneExpander) && pullGoal != CellStruct::Empty)
 				{
 					// Expert 6, Slot 34 & AdvAI Stepping-Stone Crawler:
 					// Chain Refineries, Silos, Ore Purifiers AND BaseNormal
 					// stepping-stone Power Plants directly toward the nearest uncolonized
-					// Ore/Gem patch!
+					// Ore/Gem patch (or toward the enemy base: offensive crawl).
 					const int distToOre
-						= std::abs(candidate.X - nearestOreCell.X) + std::abs(candidate.Y - nearestOreCell.Y);
+						= std::abs(candidate.X - pullGoal.X) + std::abs(candidate.Y - pullGoal.Y);
 					const int orePull = std::clamp(52 + (crawlBias / 8), 32, 95);
 					spatialScore -= distToOre * orePull;
+
+					int cover = 0;
+
+					for (auto const& dc : ownCoverDefenses)
+					{
+						if (std::max(std::abs(candidate.X - dc.X), std::abs(candidate.Y - dc.Y)) <= 6)
+							cover++;
+					}
+
+					for (auto const& [enemyCell, reach] : enemyStructureReach)
+					{
+						const int dE = std::max(std::abs(candidate.X - enemyCell.X), std::abs(candidate.Y - enemyCell.Y));
+
+						if (cover >= 2)
+						{
+							// Under our towers: advance, only never hug an enemy structure.
+							if (dE <= 5)
+								spatialScore -= 2500;
+							else if (dE <= reach)
+								spatialScore -= 300;
+						}
+						else if (dE <= reach)
+						{
+							spatialScore -= 2500 + (reach - dE) * 150;
+						}
+					}
 
 					if (enableBaseCrawl && radius >= 2 && radius <= 12)
 						spatialScore += 220 + std::clamp(crawlBias / 3, 0, 180);
@@ -30047,7 +30955,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					// Place War Factories & Barracks forward along the crawl chain
 					// (stepping toward uncolonized Ore when expanding economy, or toward
 					// Enemy frontline!)
-					const bool stepFactoryToOre = (nearestOreCell != CellStruct::Empty && bestOreDist > 10
+					const bool stepFactoryToOre = !frontFactory && (nearestOreCell != CellStruct::Empty && bestOreDist > 10
 						&& (pHouse->CountResourceDestinations < 3 || Unsorted::CurrentFrame > 2400));
 					const CellStruct facGoal = stepFactoryToOre
 						? nearestOreCell
@@ -30059,6 +30967,61 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 					if (enableBaseCrawl && radius >= 2 && radius <= 12)
 						spatialScore += 180;
+				}
+
+				if (creepFrontGoal != CellStruct::Empty && isGroundDefense)
+				{
+					// Lane from the forward anchor to the enemy's heart (integer geometry, MP safe):
+					// cells ahead of the anchor within ~2.5 cells of that axis stay free for the next
+					// stone; flanks 3..7 cells off the axis are preferred, forward is better, and a
+					// tower that already reaches enemy structures is worth more.
+					const int side = laneSide(candidate, creepFrontGoal);
+
+					if (side == 0)
+						spatialScore -= 1800;
+					else if (side == 1)
+						spatialScore += 250;
+
+					spatialScore -= (std::abs(candidate.X - creepFrontGoal.X) + std::abs(candidate.Y - creepFrontGoal.Y)) * 15;
+
+					const int towerRange = (pWpn && pWpn->Range > 0) ? (pWpn->Range / 256) : 0;
+
+					if (towerRange > 0)
+					{
+						int inRange = 0;
+
+						for (auto const& ec : enemyBaseCells)
+						{
+							if (std::max(std::abs(candidate.X - ec.X), std::abs(candidate.Y - ec.Y)) <= towerRange)
+								inRange++;
+						}
+
+						spatialScore += std::min(3, inRange) * 350;
+					}
+				}
+
+				if (frontFactory)
+				{
+					int cover = 0;
+
+					for (auto const& dc : ownCoverDefenses)
+					{
+						if (std::max(std::abs(candidate.X - dc.X), std::abs(candidate.Y - dc.Y)) <= 7)
+							cover++;
+					}
+
+					spatialScore += std::min(3, cover) * 200;
+
+					for (auto const& [enemyCell, reach] : enemyStructureReach)
+					{
+						const int dE = std::max(std::abs(candidate.X - enemyCell.X), std::abs(candidate.Y - enemyCell.Y));
+
+						if (dE <= reach)
+							spatialScore -= (cover >= 3 ? 600 : 2500) + (reach - dE) * 100;
+					}
+
+					if (laneSide(candidate, enemyTargetCell) == 0)
+						spatialScore -= 1800;
 				}
 
 				for (auto const& anchor : swSpreadAnchors)
@@ -30077,12 +31040,12 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				}
 
 				if (++validCandidatesChecked >= maxCandidatesToEvaluate)
-					return bestCandidate;
+					return rememberOffensiveStone(bestCandidate);
 			}
 		}
 	}
 
-	return bestCandidate;
+	return rememberOffensiveStone(bestCandidate);
 }
 
 int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBuilding, CellStruct& outCell)
