@@ -116,6 +116,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	if (!pHouse || !pBuildingType || pBuildingType->PowersUpBuilding[0])
 		return CellStruct::Empty;
 
+	const NeuralSectionTimer placementTimer { pHouse->ArrayIndex, NeuralSection::Placement };
+
 	CellStruct center = pHouse->BaseCenter != CellStruct::Empty ? pHouse->BaseCenter : pHouse->BaseSpawnCell;
 
 	const bool isRefineryOrSlaveMiner
@@ -664,7 +666,46 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// BaseNormal Power Plants (and Outposts) step outward toward uncolonized Ore
 	// fields or the frontline instead of crowding into the rear corner behind the
 	// ConYard!
-	const bool isSteppingStoneExpander = pBuildingType->BaseNormal && isPowerPlantBld && (pHouse->PowerOutput >= 150)
+	// Precious or explosive structures (expensive, or blowing up on death like a nuclear reactor)
+	// never act as crawl stones and keep away from known enemy structures: a stone is the
+	// cheapest power plant we can build (within 1.5x of it), never a reactor at the enemy's door.
+	const bool isExplosiveBld = pBuildingType->Explodes || pBuildingType->DeathWeapon != nullptr;
+	// A power plant that will give >= 25% of the house's output is a critical power source: losing
+	// it at the front could black the base out, so it stays at the rear like a precious structure.
+	const bool isCriticalPowerSource = isPowerPlantBld && pBuildingType->PowerBonus > 0
+		&& pBuildingType->PowerBonus * 4 >= pHouse->PowerOutput + pBuildingType->PowerBonus;
+	const bool isPreciousBld = !isCombatDefense && !isFactoryOrBarracks && !isResourceBld && !isNavalBld
+		&& (isExplosiveBld || pBuildingType->GetActualCost(pHouse) >= 1500 || isCriticalPowerSource);
+	int cheapestPowerPlantCost = INT_MAX;
+	int cheapestPowerPlantArea = INT_MAX;
+
+	if (isPowerPlantBld && pBuildingType->BaseNormal)
+	{
+		for (auto const pBT : BuildingTypeClass::Array)
+		{
+			if (pBT && pBT->BaseNormal && pBT->PowerBonus > pBT->PowerDrain && !pBT->IsBaseDefense && pBT->Cost > 0
+				&& CanBuildUnderHumanRules(pHouse, pBT))
+			{
+				const int btCost = pBT->GetActualCost(pHouse);
+
+				if (btCost < cheapestPowerPlantCost)
+				{
+					cheapestPowerPlantCost = btCost;
+					cheapestPowerPlantArea = pBT->GetFoundationWidth() * pBT->GetFoundationHeight(false);
+				}
+			}
+		}
+	}
+
+	// A stone is expendable: cheap (<= 1.5x the cheapest plant), no bigger than the cheapest plant's
+	// footprint, not explosive, and the house already has a power surplus without it (it is never
+	// the plant that fixes a shortage, so losing it never blacks the base out).
+	const bool isCheapStone = !isExplosiveBld && !isCriticalPowerSource
+		&& pHouse->PowerOutput >= pHouse->PowerDrain + 50
+		&& (cheapestPowerPlantCost == INT_MAX
+			|| (pBuildingType->GetActualCost(pHouse) * 2 <= cheapestPowerPlantCost * 3
+				&& pBuildingType->GetFoundationWidth() * pBuildingType->GetFoundationHeight(false) <= cheapestPowerPlantArea));
+	const bool isSteppingStoneExpander = pBuildingType->BaseNormal && isPowerPlantBld && isCheapStone && (pHouse->PowerOutput >= 150)
 		&& (nearestOreCell != CellStruct::Empty || crawlBias > 0);
 	const bool isRearProtected = !isNavalBld && !isResourceBld && !isCombatDefense && !isFactoryOrBarracks
 		&& !isTunnelBld && !isSupportRadiusBld && !isSteppingStoneExpander;
@@ -682,7 +723,66 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	const bool stoneTowardEnemy = isSteppingStoneExpander && enemyTargetCell != CellStruct::Empty
 		&& offensiveCrawlBias > -400
 		&& (!hasUncolonizedOre || (stoneIndex % 4) == 3 || (offensiveCrawlBias > 300 && (stoneIndex % 4) == 1));
-	const CellStruct stoneGoal = stoneTowardEnemy ? enemyTargetCell : nearestOreCell;
+	// Several enemies (free-for-all): the offensive crawl heads for the nearest known enemy base,
+	// rotating stone by stone between every enemy within 1.5x of that distance, so it can choke
+	// several neighbours instead of only the main enemy.
+	CellStruct crawlEnemyGoal = enemyTargetCell;
+
+	if (stoneTowardEnemy)
+	{
+		std::array<int, 32> sumX {};
+		std::array<int, 32> sumY {};
+		std::array<int, 32> known {};
+
+		for (auto const pEnemyBld : BuildingClass::Array)
+		{
+			if (!pEnemyBld || pEnemyBld->InLimbo || !pEnemyBld->IsAlive || !pEnemyBld->Owner || pEnemyBld->Owner == pHouse
+				|| pHouse->IsAlliedWith(pEnemyBld->Owner) || pEnemyBld->Owner->IsNeutral() || !IsEnemyBuildingKnown(pHouse, pEnemyBld))
+			{
+				continue;
+			}
+
+			const int idx = pEnemyBld->Owner->ArrayIndex;
+
+			if (idx < 0 || idx >= 32)
+				continue;
+
+			const CellStruct ebc = pEnemyBld->GetMapCoords();
+
+			if (centerZone >= 0 && MapClass::Instance.GetMovementZoneType(ebc, MovementZone::Normal, pEnemyBld->OnBridge) != centerZone)
+				continue;
+
+			sumX[idx] += ebc.X;
+			sumY[idx] += ebc.Y;
+			known[idx]++;
+		}
+
+		std::vector<std::pair<double, CellStruct>> enemyBases;
+
+		for (int idx = 0; idx < 32; ++idx)
+		{
+			if (known[idx] == 0)
+				continue;
+
+			const CellStruct c { static_cast<short>(sumX[idx] / known[idx]), static_cast<short>(sumY[idx] / known[idx]) };
+			enemyBases.emplace_back(c.DistanceFrom(center), c);
+		}
+
+		if (!enemyBases.empty())
+		{
+			std::sort(enemyBases.begin(), enemyBases.end(), [](auto const& a, auto const& b)
+				{ return a.first != b.first ? a.first < b.first : (a.second.X != b.second.X ? a.second.X < b.second.X : a.second.Y < b.second.Y); });
+
+			size_t eligible = 1;
+
+			while (eligible < enemyBases.size() && enemyBases[eligible].first <= enemyBases.front().first * 1.5)
+				eligible++;
+
+			crawlEnemyGoal = enemyBases[static_cast<size_t>(stoneIndex) % eligible].second;
+		}
+	}
+
+	const CellStruct stoneGoal = stoneTowardEnemy ? crawlEnemyGoal : nearestOreCell;
 	std::vector<std::pair<CellStruct, int>> enemyStructureReach;
 
 	if (stoneTowardEnemy)
@@ -2280,6 +2380,17 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 					if (laneSide(candidate, enemyTargetCell) == 0)
 						spatialScore -= 1800;
+				}
+
+				if (isPreciousBld && !enemyBaseCells.empty())
+				{
+					int nearestEnemy = INT_MAX;
+
+					for (auto const& ec : enemyBaseCells)
+						nearestEnemy = std::min(nearestEnemy, std::max(std::abs(candidate.X - ec.X), std::abs(candidate.Y - ec.Y)));
+
+					if (nearestEnemy < 22)
+						spatialScore -= (22 - nearestEnemy) * 120;
 				}
 
 				for (auto const& anchor : swSpreadAnchors)
