@@ -144,12 +144,20 @@ namespace
 				destCell, pType->MovementZone, pDestObject && pDestObject->OnBridge);
 			const bool unreachable = footZone > 1 && destZone != footZone;
 
-			if ((unreachable && stuckFrames >= 450) || stuckFrames >= 1800)
+			// Stalled attack-move: the unit fell back to Guard (typically after a fight) with its
+			// attack-move still pending and does not resume it. Every "send if MegaMission !=
+			// AttackMove" order path treats it as already on its way, so it would idle forever: drop
+			// the stale order after 150 frames so its owner logic sends it again.
+			const bool stalledAttackMove = (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard)
+				&& pFoot->MegaMission == Mission::AttackMove;
+
+			if ((unreachable && stuckFrames >= 450) || stuckFrames >= 1800 || (stalledAttackMove && stuckFrames >= 150))
 			{
 				pFoot->ClearMegaMissionData();
 				pFoot->SetDestination(nullptr, true);
 				pFoot->QueueMission(Mission::Guard, true);
-				CountDecision(unreachable ? NeuralDecision::UnreachableOrderDropped : NeuralDecision::StuckUnitReleased,
+				CountDecision(unreachable ? NeuralDecision::UnreachableOrderDropped
+					: (stalledAttackMove ? NeuralDecision::AttackMoveStalled : NeuralDecision::StuckUnitReleased),
 					pHouse->ArrayIndex);
 				return; // Its next order starts a new track.
 			}
@@ -371,6 +379,113 @@ namespace
 		}
 
 		macro.OffensiveStones = std::move(alive);
+	}
+
+	// Field scouting: one fast, cheap idle ground unit at a time visits the nearest free ore field
+	// (map-wide cache) not scouted in the last 5400 frames, so an enemy outpost there is known
+	// before an MCV is sent (free-field searches skip fields near known enemy structures).
+	void UpdateFieldScouting(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - macro.LastFieldScoutFrame < 300)
+			return;
+
+		macro.LastFieldScoutFrame = now;
+
+		// The current scout is still on its way.
+		if (macro.FieldScoutUid != 0)
+		{
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (pUnit && pUnit->UniqueID == macro.FieldScoutUid && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pHouse
+					&& pUnit->CurrentMission == Mission::Move && pUnit->Destination)
+				{
+					return;
+				}
+			}
+
+			macro.FieldScoutUid = 0;
+		}
+
+		macro.ScoutedFields.erase(std::remove_if(macro.ScoutedFields.begin(), macro.ScoutedFields.end(),
+			[now](auto const& entry) { return now - entry.second > 5400; }), macro.ScoutedFields.end());
+
+		UnitClass* pScout = nullptr;
+		int bestSpeed = 0;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type || pUnit->Type->Harvester
+				|| pUnit->Type->ResourceGatherer || pUnit->Type->DeploysInto || pUnit->Type->Naval || pUnit->IsInAir()
+				|| pUnit->Type->MovementZone == MovementZone::Fly || pUnit->Type->Cost > 1200 || pUnit->Target != nullptr
+				|| pUnit->GetHealthPercentage() < 0.6 || macro.PlanMembers.contains(pUnit->UniqueID)
+				|| (pUnit->CurrentMission != Mission::Guard && pUnit->CurrentMission != Mission::Area_Guard))
+			{
+				continue;
+			}
+
+			if (pUnit->Type->Speed > bestSpeed)
+			{
+				bestSpeed = pUnit->Type->Speed;
+				pScout = pUnit;
+			}
+		}
+
+		if (!pScout)
+			return;
+
+		const CellStruct from = pScout->GetMapCoords();
+		const int zone = ObjectZone(pScout, MovementZone::Normal);
+		CellClass* pField = nullptr;
+		int bestDist = INT_MAX;
+
+		for (auto const& field : GetOreFields())
+		{
+			const int dist = std::max(std::abs(field.Cell.X - from.X), std::abs(field.Cell.Y - from.Y));
+
+			if (dist < 20 || dist >= bestDist || MapClass::Instance.GetMovementZoneType(field.Cell, MovementZone::Normal, false) != zone)
+				continue;
+
+			const bool scouted = std::any_of(macro.ScoutedFields.begin(), macro.ScoutedFields.end(),
+				[&field](auto const& entry) { return entry.first.DistanceFrom(field.Cell) <= 12.0; });
+
+			if (scouted)
+				continue;
+
+			// Only fields we do not hold already.
+			bool ours = false;
+
+			for (auto const pOwnB : pHouse->Buildings)
+			{
+				if (pOwnB && pOwnB->IsAlive && pOwnB->Type && pOwnB->GetMapCoords().DistanceFrom(field.Cell) <= 14.0)
+				{
+					ours = true;
+					break;
+				}
+			}
+
+			if (ours)
+				continue;
+
+			if (auto const pCell = MapClass::Instance.TryGetCellAt(field.Cell))
+			{
+				bestDist = dist;
+				pField = pCell;
+			}
+		}
+
+		if (!pField)
+			return;
+
+		macro.ScoutedFields.emplace_back(pField->MapCoords, now);
+		macro.FieldScoutUid = pScout->UniqueID;
+		IssueMoveOrder(pScout, pField, 3.0);
+		CountDecision(NeuralDecision::FieldScoutSent, pHouse->ArrayIndex);
 	}
 
 	// Per-tick match tactics feeding the wave logic:

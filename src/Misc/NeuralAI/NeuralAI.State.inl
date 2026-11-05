@@ -238,6 +238,10 @@ namespace
 		int BankWindowFailures { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
 		std::vector<DWORD> FerryingMcvs {};
+		// Field scouting (UpdateFieldScouting): the current scout and the free fields visited.
+		DWORD FieldScoutUid { 0 };
+		int LastFieldScoutFrame { -100000 };
+		std::vector<std::pair<CellStruct, int>> ScoutedFields {};
 		// Ferry wait safety net (DispatchFootToTargetOrTransport): since when a unit has been asking
 		// for a crossing, and until when it may not ask again after giving up. Keyed lookups only.
 		std::unordered_map<DWORD, int> FerryWaitSince {};
@@ -362,6 +366,9 @@ namespace
 			this->BankWindowFactories = 0;
 			this->BankWindowFailures = 0;
 			this->FerryingMcvs.clear();
+			this->FieldScoutUid = 0;
+			this->LastFieldScoutFrame = -100000;
+			this->ScoutedFields.clear();
 			this->FerryWaitSince.clear();
 			this->FerryBlockedUntil.clear();
 			this->FreeFieldAnchorDist = 9999;
