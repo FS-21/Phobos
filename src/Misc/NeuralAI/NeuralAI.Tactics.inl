@@ -142,7 +142,30 @@ namespace
 			const int footZone = ObjectZone(pFoot, pType->MovementZone);
 			const int destZone = MapClass::Instance.GetMovementZoneType(
 				destCell, pType->MovementZone, pDestObject && pDestObject->OnBridge);
-			const bool unreachable = footZone > 1 && destZone != footZone;
+			bool unreachable = footZone > 1 && destZone != footZone;
+
+			// A destination on an impassable cell (a building, an obstacle) is reachable when a cell
+			// next to it (up to 2 away) is in our zone: attack-moves onto enemy buildings were all
+			// flagged unreachable (zone 1 under the building) and dropped by the hundred.
+			if (unreachable && destZone <= 1)
+			{
+				for (int r = 1; r <= 2 && unreachable; ++r)
+				{
+					for (int dy = -r; dy <= r && unreachable; ++dy)
+					{
+						for (int dx = -r; dx <= r && unreachable; ++dx)
+						{
+							if (std::abs(dx) != r && std::abs(dy) != r)
+								continue;
+
+							const CellStruct nc { static_cast<short>(destCell.X + dx), static_cast<short>(destCell.Y + dy) };
+
+							if (MapClass::Instance.GetMovementZoneType(nc, pType->MovementZone, false) == footZone)
+								unreachable = false;
+						}
+					}
+				}
+			}
 
 			// Stalled attack-move: the unit fell back to Guard (typically after a fight) with its
 			// attack-move still pending and does not resume it. Every "send if MegaMission !=
