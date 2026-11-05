@@ -655,6 +655,9 @@ public:
 	Nullable<int> Carryall_SizeLimit;
 	Valueable<bool> Carryall_Allowed;
 	Valueable<double> Carryall_SpeedMultiplier;
+	Valueable<bool> Carryall_ExclusiveWithPassengers;
+	ValueableVector<TechnoTypeClass*> Carryall_AllowTypes;
+	ValueableVector<TechnoTypeClass*> Carryall_IgnoreTypes;
 
 	TechnoTypeExt(TechnoTypeClass* OwnerObject) : ObjectTypeExt(OwnerObject)
 		, Array {}
@@ -1166,6 +1169,9 @@ public:
 		, Carryall_SizeLimit {}
 		, Carryall_Allowed { true }
 		, Carryall_SpeedMultiplier { 1.0 }
+		, Carryall_ExclusiveWithPassengers { false }
+		, Carryall_AllowTypes {}
+		, Carryall_IgnoreTypes {}
 	{ }
 
 	virtual ~TechnoTypeExt() = default;

@@ -70,6 +70,7 @@ public:
 	void RecordRecoilData();
 	void UpdateCarryall();
 	bool CarryallCanLift(TechnoClass* pTarget) const;
+	bool CarryallBlocksPassengers() const;
 	bool CarryallCanDropAt(CellClass* pCell) const;
 	static bool CanCargoLandOnCell(UnitClass* pCargo, CellClass* pCell);
 	void CarryallPickup(UnitClass* pTarget);
