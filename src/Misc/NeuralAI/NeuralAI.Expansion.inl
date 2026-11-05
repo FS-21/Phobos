@@ -223,7 +223,14 @@ namespace
 				held.push_back(field.BlockKey);
 		}
 
+		// The block a refinery stands in is held too, even when it was placed at the edge of the
+		// block far from the field's centre (more refineries kept piling up there).
+		for (auto const& hub : hubs)
+			held.push_back(OreBlockKey(hub));
+
 		std::sort(held.begin(), held.end());
+		held.erase(std::unique(held.begin(), held.end()), held.end());
+
 		return held;
 	}
 
