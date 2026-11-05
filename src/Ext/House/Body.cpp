@@ -740,9 +740,8 @@ void HouseExt::LoadFromINIFile(CCINIClass* const pINI)
 	}
 
 	this->AdvancedAI_Campaign.Read(exINI, pSection, "AdvancedAI");
-	this->AIBrain_Campaign.Read(exINI, pSection, "AIBrain");
-	this->AIBrain_Campaign.Read(exINI, pSection, "NeuralAI");
-	this->AIBrain_Campaign.Read(exINI, pSection, "AdvancedAI");
+	this->NeuralAI_Campaign.Read(exINI, pSection, "NeuralAI");
+	this->NeuralAI_Campaign.Read(exINI, pSection, "AdvancedAI");
 }
 
 int HouseExt::GetForceEnemyIndex()
@@ -802,22 +801,22 @@ template <typename T> void HouseExt::Serialize(T& Stm)
 	    .Process(this->AISuperWeaponDelayTimer)
 	    .Process(this->RepairBaseNodes)
 	    .Process(this->AdvancedAI_Campaign)
-	    .Process(this->AIBrain_Campaign)
-	    .Process(this->AIBrain_Archetype)
-	    .Process(this->AIBrain_ActiveExpert)
-	    .Process(this->AIBrain_LastInferenceFrame)
-	    .Process(this->AIBrain_NextBuildingTarget)
-	    .Process(this->AIBrain_NextUnitTarget)
-	    .Process(this->AIBrain_NextNavalTarget)
-	    .Process(this->AIBrain_NextInfantryTarget)
-	    .Process(this->AIBrain_NextAircraftTarget)
-	    .Process(this->AIBrain_PlannedBuildCell)
-	    .Process(this->AIBrain_ScoutTargetCell)
-	    .Process(this->AIBrain_AttackTargetCell)
-	    .Process(this->AIBrain_InfiltratedEnemyMask)
-	    .Process(this->AIBrain_ScoutedEnemyMask)
-	    .Process(this->AIBrain_EstimatedEnemyThreat)
-	    .Process(this->AIBrain_PolicySlot)
+	    .Process(this->NeuralAI_Campaign)
+	    .Process(this->NeuralAI_Archetype)
+	    .Process(this->NeuralAI_ActiveExpert)
+	    .Process(this->NeuralAI_LastInferenceFrame)
+	    .Process(this->NeuralAI_NextBuildingTarget)
+	    .Process(this->NeuralAI_NextUnitTarget)
+	    .Process(this->NeuralAI_NextNavalTarget)
+	    .Process(this->NeuralAI_NextInfantryTarget)
+	    .Process(this->NeuralAI_NextAircraftTarget)
+	    .Process(this->NeuralAI_PlannedBuildCell)
+	    .Process(this->NeuralAI_ScoutTargetCell)
+	    .Process(this->NeuralAI_AttackTargetCell)
+	    .Process(this->NeuralAI_InfiltratedEnemyMask)
+	    .Process(this->NeuralAI_ScoutedEnemyMask)
+	    .Process(this->NeuralAI_EstimatedEnemyThreat)
+	    .Process(this->NeuralAI_PolicySlot)
 	    .Process(this->RestrictedFactoryPlants)
 	    .Process(this->LastBuiltNavalVehicleType)
 	    .Process(this->ProducingNavalUnitTypeIndex)

@@ -119,22 +119,22 @@ class HouseExt final : public AbstractExt, public Detach::Listener<BuildingClass
 	// Read from INI
 	Nullable<bool> RepairBaseNodes[3];
 	Valueable<bool> AdvancedAI_Campaign;
-	Valueable<bool> AIBrain_Campaign;
-	int AIBrain_Archetype;
-	int AIBrain_ActiveExpert;
-	int AIBrain_LastInferenceFrame;
-	int AIBrain_NextBuildingTarget;
-	int AIBrain_NextUnitTarget;
-	int AIBrain_NextNavalTarget;
-	int AIBrain_NextInfantryTarget;
-	int AIBrain_NextAircraftTarget;
-	CellStruct AIBrain_PlannedBuildCell;
-	CellStruct AIBrain_ScoutTargetCell;
-	CellStruct AIBrain_AttackTargetCell;
-	int AIBrain_InfiltratedEnemyMask;
-	int AIBrain_ScoutedEnemyMask;
-	std::array<int, 8> AIBrain_EstimatedEnemyThreat;
-	int AIBrain_PolicySlot;
+	Valueable<bool> NeuralAI_Campaign;
+	int NeuralAI_Archetype;
+	int NeuralAI_ActiveExpert;
+	int NeuralAI_LastInferenceFrame;
+	int NeuralAI_NextBuildingTarget;
+	int NeuralAI_NextUnitTarget;
+	int NeuralAI_NextNavalTarget;
+	int NeuralAI_NextInfantryTarget;
+	int NeuralAI_NextAircraftTarget;
+	CellStruct NeuralAI_PlannedBuildCell;
+	CellStruct NeuralAI_ScoutTargetCell;
+	CellStruct NeuralAI_AttackTargetCell;
+	int NeuralAI_InfiltratedEnemyMask;
+	int NeuralAI_ScoutedEnemyMask;
+	std::array<int, 8> NeuralAI_EstimatedEnemyThreat;
+	int NeuralAI_PolicySlot;
 
 	// FactoryPlants with Allow/DisallowTypes set.
 	std::vector<BuildingClass*> RestrictedFactoryPlants;
@@ -367,12 +367,12 @@ class HouseExt final : public AbstractExt, public Detach::Listener<BuildingClass
 	      OwnedLimboDeliveredBuildings{}, OwnedCountedHarvesters{}, LimboAircraft{}, LimboBuildings{}, LimboInfantry{},
 	      LimboVehicles{}, Factory_BuildingType{nullptr}, Factory_InfantryType{nullptr}, Factory_VehicleType{nullptr},
 	      Factory_NavyType{nullptr}, Factory_AircraftType{nullptr}, AISuperWeaponDelayTimer{}, RepairBaseNodes{},
-	      AdvancedAI_Campaign{false}, AIBrain_Campaign{false}, AIBrain_Archetype{0}, AIBrain_ActiveExpert{0},
-	      AIBrain_LastInferenceFrame{0}, AIBrain_NextBuildingTarget{-1}, AIBrain_NextUnitTarget{-1},
-	      AIBrain_NextNavalTarget{-1}, AIBrain_NextInfantryTarget{-1}, AIBrain_NextAircraftTarget{-1},
-	      AIBrain_PlannedBuildCell{CellStruct::Empty}, AIBrain_ScoutTargetCell{CellStruct::Empty},
-	      AIBrain_AttackTargetCell{CellStruct::Empty}, AIBrain_InfiltratedEnemyMask{0}, AIBrain_ScoutedEnemyMask{0},
-	      AIBrain_EstimatedEnemyThreat{0, 0, 0, 0, 0, 0, 0, 0}, AIBrain_PolicySlot{0}, RestrictedFactoryPlants{},
+	      AdvancedAI_Campaign{false}, NeuralAI_Campaign{false}, NeuralAI_Archetype{0}, NeuralAI_ActiveExpert{0},
+	      NeuralAI_LastInferenceFrame{0}, NeuralAI_NextBuildingTarget{-1}, NeuralAI_NextUnitTarget{-1},
+	      NeuralAI_NextNavalTarget{-1}, NeuralAI_NextInfantryTarget{-1}, NeuralAI_NextAircraftTarget{-1},
+	      NeuralAI_PlannedBuildCell{CellStruct::Empty}, NeuralAI_ScoutTargetCell{CellStruct::Empty},
+	      NeuralAI_AttackTargetCell{CellStruct::Empty}, NeuralAI_InfiltratedEnemyMask{0}, NeuralAI_ScoutedEnemyMask{0},
+	      NeuralAI_EstimatedEnemyThreat{0, 0, 0, 0, 0, 0, 0, 0}, NeuralAI_PolicySlot{0}, RestrictedFactoryPlants{},
 	      LastBuiltNavalVehicleType{-1}, ProducingNavalUnitTypeIndex{-1}, CombatAlertTimer{}, NumAirpads_NonMFB{0},
 	      NumBarracks_NonMFB{0}, NumWarFactories_NonMFB{0}, NumConYards_NonMFB{0}, NumShipyards_NonMFB{0},
 	      AIFireSaleDelayTimer{}, SuspendedEMPulseSWs{}, CustomResources{}, ResourceCollectorCounts{},
