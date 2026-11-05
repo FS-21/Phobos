@@ -2089,60 +2089,64 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return false;
 	};
 
+	// Same test as before (known enemy structure within 18.5 cells, visible enemy vehicle within
+	// 13, same landmass unless naval) through the spatial index instead of scanning every
+	// building and vehicle for every unit. A yes / no answer, so the scan order does not matter.
 	auto IsFootNearEnemyFrontline = [pHouse](const FootClass* pFoot, int footZone) -> bool
 	{
 		if (!pFoot || !pFoot->IsAlive || pFoot->InLimbo)
 			return false;
 
 		const CellStruct fc = pFoot->GetMapCoords();
-		for (auto const pEB : BuildingClass::Array)
+		bool nearEnemy = false;
+
+		ForEachTechnoNear(fc, 19, [&](TechnoClass* pTechno) -> bool
 		{
-			if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Insignificant
-				|| pEB->Type->InvisibleInGame)
-			{
-				continue;
-			}
+			auto const pOwner = pTechno->Owner;
 
-			if (pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || !IsEnemyBuildingKnown(pHouse, pEB) || pEB->Owner->IsNeutral()
-				|| pEB->Owner->IsObserver() || pEB->Owner->Defeated)
+			if (!pOwner || pOwner == pHouse || pHouse->IsAlliedWith(pOwner) || pOwner->IsNeutral() || pOwner->IsObserver()
+				|| pOwner->Defeated)
 			{
-				continue;
-			}
-
-			const CellStruct ebc = pEB->GetMapCoords();
-			if (footZone >= 0 && !pEB->Type->Naval
-				&& MapClass::Instance.GetMovementZoneType(ebc, MovementZone::Normal, pEB->OnBridge) != footZone)
-			{
-				continue;
-			}
-
-			if (fc.DistanceFrom(ebc) <= 18.5)
 				return true;
-		}
-
-		for (auto const pEU : UnitClass::Array)
-		{
-			if (!pEU || pEU->InLimbo || !pEU->IsAlive || !pEU->Owner || !pEU->Type)
-				continue;
-
-			if (pEU->Owner == pHouse || pHouse->IsAlliedWith(pEU->Owner) || !IsCellVisibleToAI(pHouse, pEU->GetCell()) || pEU->Owner->IsNeutral()
-				|| pEU->Owner->IsObserver() || pEU->Owner->Defeated)
-			{
-				continue;
 			}
 
-			const CellStruct euc = pEU->GetMapCoords();
-			if (footZone >= 0 && !pEU->Type->Naval
-				&& MapClass::Instance.GetMovementZoneType(euc, MovementZone::Normal, pEU->OnBridge) != footZone)
+			if (auto const pEB = abstract_cast<BuildingClass*>(pTechno))
 			{
-				continue;
+				if (!pEB->Type || pEB->Type->Insignificant || pEB->Type->InvisibleInGame || !IsEnemyBuildingKnown(pHouse, pEB))
+					return true;
+
+				const CellStruct ebc = pEB->GetMapCoords();
+
+				if (footZone >= 0 && !pEB->Type->Naval
+					&& MapClass::Instance.GetMovementZoneType(ebc, MovementZone::Normal, pEB->OnBridge) != footZone)
+				{
+					return true;
+				}
+
+				if (fc.DistanceFrom(ebc) <= 18.5)
+					nearEnemy = true;
+			}
+			else if (auto const pEU = abstract_cast<UnitClass*>(pTechno))
+			{
+				if (!pEU->Type || !IsCellVisibleToAI(pHouse, pEU->GetCell()))
+					return true;
+
+				const CellStruct euc = pEU->GetMapCoords();
+
+				if (footZone >= 0 && !pEU->Type->Naval
+					&& MapClass::Instance.GetMovementZoneType(euc, MovementZone::Normal, pEU->OnBridge) != footZone)
+				{
+					return true;
+				}
+
+				if (fc.DistanceFrom(euc) <= 13.0)
+					nearEnemy = true;
 			}
 
-			if (fc.DistanceFrom(euc) <= 13.0)
-				return true;
-		}
+			return !nearEnemy;
+		});
 
-		return false;
+		return nearEnemy;
 	};
 
 	for (auto const pUnit : UnitClass::Array)
@@ -4859,21 +4863,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& (IsAITickWindow(45, 15)))
 			{
 				int enemiesInRadRange = 0;
-
-				for (auto const pET : TechnoClass::Array)
+				ForEachTechnoNear(pInf->GetMapCoords(), 7, [&](TechnoClass* pET) -> bool
 				{
-					if (!pET || pET->InLimbo || !pET->IsAlive || !pET->Owner || pET->WhatAmI() == AbstractType::Building
-						|| pET->WhatAmI() == AbstractType::Aircraft)
-					{
-						continue;
-					}
+					if (!pET->Owner || pET->WhatAmI() == AbstractType::Building || pET->WhatAmI() == AbstractType::Aircraft)
+						return true;
 
 					if (pET->Owner == pHouse || pHouse->IsAlliedWith(pET->Owner) || !IsCellVisibleToAI(pHouse, pET->GetCell()) || pET->Owner->IsNeutral())
-						continue;
+						return true;
 
 					if (pInf->DistanceFrom(pET) <= 1536)
 						enemiesInRadRange++;
-				}
+
+					return true;
+				});
 
 				if (!pInf->IsDeployed() && enemiesInRadRange >= 2 && cellRad < 180)
 				{
@@ -9504,6 +9506,68 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!pPickupBeach && homeCoords != CellStruct::Empty)
 					pPickupBeach = FindSafeIslandLandingCell(pHouse, homeCoords, homeGroundZone, false);
 
+				// The waiting passengers stand on (and around) the same beach cell, so the transport
+				// could never land there: it idled on the water next to them and nobody boarded. Use
+				// the nearest free shore cell (land, same zone, next to water, enterable by this
+				// transport) within 8 cells instead.
+				if (pPickupBeach
+					&& !pPickupBeach->IsClearToMove(pTrans->Type->SpeedType, true, true, -1, pTrans->Type->MovementZone, -1, false))
+				{
+					const CellStruct beach = pPickupBeach->MapCoords;
+					const int beachZone = MapClass::Instance.GetMovementZoneType(beach, MovementZone::Normal, false);
+					CellClass* pFreeShore = nullptr;
+
+					for (int r = 1; r <= 8 && !pFreeShore; ++r)
+					{
+						int bestD = INT_MAX;
+
+						for (int dy = -r; dy <= r; ++dy)
+						{
+							for (int dx = -r; dx <= r; ++dx)
+							{
+								if (std::abs(dx) != r && std::abs(dy) != r)
+									continue;
+
+								const CellStruct c { static_cast<short>(beach.X + dx), static_cast<short>(beach.Y + dy) };
+								auto const pC = MapClass::Instance.TryGetCellAt(c);
+
+								if (!pC || pC->LandType == LandType::Water || pC->GetBuilding()
+									|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != beachZone
+									|| !pC->IsClearToMove(pTrans->Type->SpeedType, true, true, -1, pTrans->Type->MovementZone, -1, false))
+								{
+									continue;
+								}
+
+								bool nextToWater = false;
+
+								for (int ny = -1; ny <= 1 && !nextToWater; ++ny)
+								{
+									for (int nx = -1; nx <= 1 && !nextToWater; ++nx)
+									{
+										auto const pN = MapClass::Instance.TryGetCellAt(
+											CellStruct { static_cast<short>(c.X + nx), static_cast<short>(c.Y + ny) });
+										nextToWater = pN && pN->LandType == LandType::Water;
+									}
+								}
+
+								const int d = dx * dx + dy * dy;
+
+								if (nextToWater && d < bestD)
+								{
+									bestD = d;
+									pFreeShore = pC;
+								}
+							}
+						}
+					}
+
+					if (pFreeShore)
+					{
+						pPickupBeach = pFreeShore;
+						CountDecision(NeuralDecision::FerryLandingRerouted, pHouse->ArrayIndex);
+					}
+				}
+
 				if (pPickupBeach)
 				{
 					if (pTrans->CurrentMission == Mission::Guard || pTrans->CurrentMission == Mission::Area_Guard
@@ -10452,24 +10516,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const CellStruct yc = pOwnBld->GetMapCoords();
 				const int yz = MapClass::Instance.GetMovementZoneType(yc, MovementZone::Normal, pOwnBld->OnBridge);
 				bool closeAttackerNearCY = false;
-
-				for (auto const pET : TechnoClass::Array)
+				ForEachTechnoNear(yc, 12, [&](TechnoClass* pET) -> bool
 				{
-					if (!pET || pET->InLimbo || !pET->IsAlive || !pET->Owner
-						|| pET->WhatAmI() == AbstractType::Building)
-					{
-						continue;
-					}
+					if (!pET->Owner || pET->WhatAmI() == AbstractType::Building)
+						return true;
 
 					if (pET->Owner == pHouse || pHouse->IsAlliedWith(pET->Owner) || !IsCellVisibleToAI(pHouse, pET->GetCell()) || pET->Owner->IsNeutral())
-						continue;
+						return true;
 
 					if (pOwnBld->DistanceFrom(pET) <= 2048)
-					{
 						closeAttackerNearCY = true;
-						break;
-					}
-				}
+
+					return !closeAttackerNearCY;
+				});
 
 				CellStruct safeRetreatHub = CellStruct::Empty;
 
@@ -10527,20 +10586,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						closeHostileAttackers++;
 				}
 
-				for (auto const pET : TechnoClass::Array)
+				ForEachTechnoNear(yc, 14, [&](TechnoClass* pET) -> bool
 				{
-					if (!pET || pET->InLimbo || !pET->IsAlive || !pET->Owner
-						|| pET->WhatAmI() == AbstractType::Building)
-					{
-						continue;
-					}
+					if (!pET->Owner || pET->WhatAmI() == AbstractType::Building)
+						return true;
 
 					if (pET->Owner == pHouse || pHouse->IsAlliedWith(pET->Owner) || !IsCellVisibleToAI(pHouse, pET->GetCell()) || pET->Owner->IsNeutral())
-						continue;
+						return true;
 
 					if (pOwnBld->DistanceFrom(pET) <= 2560)
 						closeHostileAttackers++;
-				}
+
+					return true;
+				});
 
 				const bool hostileZone = (closeHostileAttackers >= 1)
 					&& (pOwnBld->HasBeenAttacked || hpPct < 0.75 || closeHostileAttackers >= 2);
@@ -10834,20 +10892,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// enemies are within 12 cells, pack back into a mobile vehicle so it
 				// advances with the army!
 				bool enemyInRange = false;
-				for (auto const pETech : TechnoClass::Array)
+				ForEachTechnoNear(pOwnBld->GetMapCoords(), 16, [&](TechnoClass* pETech) -> bool
 				{
-					if (!pETech || pETech->InLimbo || !pETech->IsAlive || !pETech->Owner)
-						continue;
+					if (!pETech->Owner)
+						return true;
 
 					if (pETech->Owner == pHouse || pHouse->IsAlliedWith(pETech->Owner) || !IsCellVisibleToAI(pHouse, pETech->GetCell()) || pETech->Owner->IsNeutral())
-						continue;
+						return true;
 
 					if (pOwnBld->DistanceFrom(pETech) <= 3072)
-					{
 						enemyInRange = true;
-						break;
-					}
-				}
+
+					return !enemyInRange;
+				});
 
 				if (!enemyInRange)
 				{
