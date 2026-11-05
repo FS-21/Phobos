@@ -201,6 +201,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		: -1;
 	int targetExpansionZone = -1;
 	int bestHubPriorityScore = -9999;
+	// The chosen hub lacks this very factory or barracks: it is built there, never moved on by
+	// the crawl (a remote ConYard kept asking for a barracks the crawl always placed elsewhere).
+	bool anchoredAtMissingFactoryHub = false;
 	const bool placingWarFactory = (pBuildingType->Factory == AbstractType::UnitType && !pBuildingType->Naval);
 	const bool placingBarracks = (pBuildingType->Factory == AbstractType::InfantryType);
 
@@ -324,6 +327,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				if (hubScore > bestHubPriorityScore)
 				{
 					bestHubPriorityScore = hubScore;
+					anchoredAtMissingFactoryHub = missingThisCoreBld && (placingWarFactory || placingBarracks);
 					center = bc;
 					targetExpansionZone = bz;
 				}
@@ -1160,7 +1164,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// from Construction Yard) ALWAYS anchor at our most forward
 	// outpost/base-crawl structure!
 	const bool enableBaseCrawl = isForwardTunnelMouth || isSteppingStoneExpander
-		|| ((isResourceBld || isFactoryOrBarracks)
+		|| ((isResourceBld || (isFactoryOrBarracks && !anchoredAtMissingFactoryHub))
 			&& (crawlBias > -20 || bestOreDist > 10 || pHouse->CountResourceDestinations >= 1))
 		|| (isCombatDefense && !isPureAA && (turretCreepBias > -20 || crawlBias > 0 || totalOwnedDefensesCount >= 1)
 			&& directionalAttackedBld == CellStruct::Empty);

@@ -1764,7 +1764,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (pBld->Factory == AbstractType::InfantryType)
 			{
 				const int effectiveMaxBarracks = forwardConYardNeedsBarracks
-					? std::max({ maxBarracks + 2, owned + 1, 5 })
+					? std::max(maxBarracks + 2, 5) + pHouse->NumConYards
 					: ((needsSteppingStoneCrawlToOre && pBld->BaseNormal) ? std::max(maxBarracks + 1, 4) : maxBarracks);
 				if (owned >= effectiveMaxBarracks)
 					continue;
@@ -1801,7 +1801,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (pBld->Factory == AbstractType::UnitType && !pBld->Naval)
 			{
 				const int effectiveMaxWarFactories
-					= forwardConYardNeedsWarFactory ? std::max({ maxWarFactories + 2, owned + 1, 6 }) : maxWarFactories;
+					= forwardConYardNeedsWarFactory ? std::max(maxWarFactories + 2, 6) + pHouse->NumConYards : maxWarFactories;
 				if (owned >= effectiveMaxWarFactories)
 					continue;
 
@@ -2847,7 +2847,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		bool hasRefineryZoneWithZeroHarvesters = false;
 		bool hasUnderharvestedIslandWithWarFactory = false;
-		if (pUnit->Harvester || pUnit->ResourceGatherer)
+		// Only for real harvesters: a slave miner deploys into its own refinery and then counts as
+		// a building, never as a harvester of the zone, so these exceptions let Yuri build them
+		// without end (77 deployed slave miners in one match).
+		if ((pUnit->Harvester || pUnit->ResourceGatherer) && !isDeployableRefineryOrMiner)
 		{
 			for (auto const pRefB : pHouse->Buildings)
 			{
