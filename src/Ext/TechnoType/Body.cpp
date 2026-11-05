@@ -1970,6 +1970,9 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->Carryall_SizeLimit.Read(exINI, pSection, "Carryall.SizeLimit");
 	this->Carryall_Allowed.Read(exINI, pSection, "Carryall.Allowed");
 	this->Carryall_SpeedMultiplier.Read(exINI, pSection, "Carryall.SpeedMultiplier");
+	this->Carryall_ExclusiveWithPassengers.Read(exINI, pSection, "Carryall.ExclusiveWithPassengers");
+	this->Carryall_AllowTypes.Read(exINI, pSection, "Carryall.AllowTypes");
+	this->Carryall_IgnoreTypes.Read(exINI, pSection, "Carryall.IgnoreTypes");
 
 	this->FlyingProduction.Read(exINI, pSection, "FlyingProduction");
 	if (pThis->WhatAmI() != AbstractType::BuildingType)
@@ -2574,6 +2577,9 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->Carryall_SizeLimit)
 		.Process(this->Carryall_Allowed)
 		.Process(this->Carryall_SpeedMultiplier)
+		.Process(this->Carryall_ExclusiveWithPassengers)
+		.Process(this->Carryall_AllowTypes)
+		.Process(this->Carryall_IgnoreTypes)
 		;
 }
 void TechnoTypeExt::LoadFromStream(PhobosStreamReader& Stm)

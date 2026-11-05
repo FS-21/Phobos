@@ -3612,6 +3612,9 @@ FireUp.ResetInRetarget=true     ; boolean
 - `Carryall.SizeLimit` determines the maximum cargo size the unit can lift. If not set, any size vehicle can be carried.
 - `Carryall.Allowed` determines whether a vehicle is eligible to be carried by Carryalls.
 - `Carryall.SpeedMultiplier` specifies a speed multiplier applied to the carrier while slinging cargo. Supported for both Jumpjets and native `AircraftClass` carryalls.
+- `Carryall.ExclusiveWithPassengers` makes troop transport and vehicle lifting exclusive on a carrier that also has `Passengers`: while it carries passengers it cannot lift vehicles, and while it slings a vehicle (or is on its way to pick one up) it accepts no passengers. By default the carrier can do both at the same time.
+- `Carryall.AllowTypes` lists vehicle types this carrier can lift whatever their size, ignoring `Carryall.SizeLimit`. They still need `Carryall.Allowed=true`.
+- `Carryall.IgnoreTypes` lists vehicle types this carrier never lifts, even when they meet every other condition. It takes precedence over `Carryall.AllowTypes`.
 - `VoicePickup` defines the voice line played when a Carryall is ordered to pick up a unit.
 - For hovering jumpjets (`BalloonHover=yes`, such as Kirovs, Zeppelins, or flying platforms):
   - Normal movement orders fly to the destination and remain hovering without dropping cargo.
@@ -3626,6 +3629,9 @@ Carryall=false                                       ; boolean
 Carryall.SizeLimit=                                  ; integer
 Carryall.Allowed=true                                ; boolean
 Carryall.SpeedMultiplier=1.0                         ; floating point
+Carryall.ExclusiveWithPassengers=false               ; boolean
+Carryall.AllowTypes=                                 ; List of VehicleTypes
+Carryall.IgnoreTypes=                                ; List of VehicleTypes
 
 [SOMEVEHICLE]                                        ; VehicleType
 VoicePickup=                                         ; Sound
