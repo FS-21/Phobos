@@ -348,6 +348,14 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			std::string gatesText;
 			std::string sectionsText;
 			std::string peaksText;
+			std::string expertTicksText;
+
+			// Expert choices of this match, one count per expert (index = expert).
+			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+			{
+				const int ticks = (h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? ExpertTicks[h.ArrayIndex][e] : 0;
+				expertTicksText += (e ? ", " : "") + std::to_string(ticks);
+			}
 
 			// Slowest ticks: [frame, ms, live objects, "three heaviest phases"].
 			if (h.ArrayIndex >= 0 && h.ArrayIndex < 32)
@@ -437,7 +445,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"enemyMix\": \"%s\", \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"enemyMix\": \"%s\", \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -448,7 +456,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), enemyMixText.c_str(), decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), enemyMixText.c_str(), decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));

@@ -705,6 +705,9 @@ void NeuralAI::OnScenarioStart()
 	for (auto& peaks : TickPeaks)
 		peaks.clear();
 
+	for (auto& ticks : ExpertTicks)
+		ticks.fill(0);
+
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;
 	MapClassApplied = false;
