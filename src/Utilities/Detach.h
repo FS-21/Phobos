@@ -22,27 +22,38 @@ namespace Detach
 
 		static void Add(Listener<T>* const pListener)
 		{
-			pListener->RegistryIndex = Listeners.size();
-			Listeners.push_back(pListener);
+			auto& listeners = Listeners();
+			pListener->RegistryIndex = listeners.size();
+			listeners.push_back(pListener);
 		}
 
 		static void Remove(Listener<T>* const pListener)
 		{
+			auto& listeners = Listeners();
 			const size_t index = pListener->RegistryIndex;
-			Listeners[index] = Listeners.back();
-			Listeners[index]->RegistryIndex = index;
-			Listeners.pop_back();
+			listeners[index] = listeners.back();
+			listeners[index]->RegistryIndex = index;
+			listeners.pop_back();
 		}
 
 		static void Notify(T* const pTarget, const bool removed)
 		{
+			auto& listeners = Listeners();
+
 			// backwards: a listener may unregister itself from within OnDetach
-			for (size_t i = Listeners.size(); i-- > 0;)
-				Listeners[i]->OnDetach(pTarget, removed);
+			for (size_t i = listeners.size(); i-- > 0;)
+				listeners[i]->OnDetach(pTarget, removed);
 		}
 
 	private:
-		static inline std::vector<Listener<T>*> Listeners {};
+		// Allocated on first use and never freed: listeners with static storage unregister from
+		// their destructors at process exit, and the destruction order of statics across
+		// translation units is unspecified, so a static vector could already be gone by then.
+		static std::vector<Listener<T>*>& Listeners()
+		{
+			static std::vector<Listener<T>*>* const pListeners = new std::vector<Listener<T>*>();
+			return *pListeners;
+		}
 	};
 
 	template <typename T>
