@@ -319,7 +319,13 @@ namespace
 			const bool idle = (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
 				|| pFoot->CurrentMission == Mission::Sleep) && pFoot->Target == nullptr;
 
-			return idle;
+			// Units marching in a generic wave (attack-move, no target yet) are available too: the
+			// waves keep most of the army on the move, so plans needing big groups (Three-Front 15,
+			// Feint 8, Timing Rush 6) were never eligible. Plans keep the last word on their members.
+			const bool marchingInWave = pFoot->MegaMission == Mission::AttackMove && pFoot->Target == nullptr
+				&& (pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::Guard);
+
+			return idle || marchingInWave;
 		};
 
 		auto finishPlan = [&](NeuralPlanId id, bool success, bool sendHome)

@@ -7187,7 +7187,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			const CellStruct uCellCoords = pU->GetMapCoords();
-			const bool canUseForwardStaging = holdAtForwardStaging && pForwardStagingCell && uz == waveTargetZone
+			// Cohesion for stragglers: once the wave is released, a unit still > 30 cells behind the
+			// staging point (late production, slow units) goes through the staging point instead of
+			// crossing the map alone straight into the enemy.
+			const bool isWaveStraggler = !holdAtForwardStaging && pForwardStagingCell && uz == waveTargetZone
+				&& pUnitWaveGoal == pWaveTargetCell && uCellCoords.DistanceFrom(pForwardStagingCell->MapCoords) > 30.0;
+
+			if (isWaveStraggler && pU->CurrentMission == Mission::Guard)
+				CountDecision(NeuralDecision::WaveStragglerRegroup, pHouse->ArrayIndex);
+
+			const bool canUseForwardStaging = (holdAtForwardStaging || isWaveStraggler) && pForwardStagingCell && uz == waveTargetZone
 				&& pUnitWaveGoal == pWaveTargetCell
 				&& (uCellCoords.DistanceFrom(pUnitWaveGoal->MapCoords)
 					> pForwardStagingCell->MapCoords.DistanceFrom(pUnitWaveGoal->MapCoords) + 2.0);

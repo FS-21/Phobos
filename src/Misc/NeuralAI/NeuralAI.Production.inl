@@ -155,12 +155,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	std::array<int16_t, OutputVectorSize> scores;
 
-	NeuralAI::ExtractFogFilteredFeatures(pHouse, features);
+	{
+		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Features };
+		NeuralAI::ExtractFogFilteredFeatures(pHouse, features);
+	}
 
 	// The fog scan may have marked new enemy buildings as seen: rebuild the known-building cache.
 	InvalidateKnownEnemyBuildings(pHouse);
 
-	NeuralAI::RunDeterministicMoE(pHouse, features, scores);
+	{
+		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::MoE };
+		NeuralAI::RunDeterministicMoE(pHouse, features, scores);
+	}
 
 	// Per-match style, opening and surprise tech switch on top of the trained scores.
 	ApplyMatchStyle(pHouse, scores);
@@ -168,15 +174,26 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	pExt->NeuralAI_LastInferenceFrame = Unsorted::CurrentFrame;
 
 	// Before any air lane is planned this tick: remember where our flyers were shot down.
-	UpdateAirLossMemory(pHouse);
-	UpdateMatchTactics(pHouse, scores);
+	{
+		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Tactics };
+		UpdateAirLossMemory(pHouse);
+		UpdateMatchTactics(pHouse, scores);
+	}
 
-	NeuralAI::ExecuteTacticalAndSpecOpsMicro(pHouse, scores);
+	{
+		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Micro };
+		NeuralAI::ExecuteTacticalAndSpecOpsMicro(pHouse, scores);
+	}
 
 	// Strategic plans run after the tactical micro so they keep the last word on their units.
-	UpdateStrategicPlans(pHouse, scores);
+	{
+		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Plans };
+		UpdateStrategicPlans(pHouse, scores);
+	}
 
 	// Release units parked by orders they cannot complete (destroyed bridge, endless jam).
+	{
+	const NeuralSectionTimer watchdogTimer { pHouse->ArrayIndex, NeuralSection::Watchdogs };
 	UpdateStuckUnits(pHouse);
 
 	// Empty harvesters waiting where the ore ran out go to the nearest free field.
@@ -187,6 +204,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Idle airships / jumpjet bombers near known enemy structures attack them.
 	UpdateIdleAirborneStrikers(pHouse);
+
+	// One scout at a time checks free ore fields before expanding there.
+	UpdateFieldScouting(pHouse);
+	}
+
+	// Production: from here to the end of the tick.
+	const NeuralSectionTimer productionTimer { pHouse->ArrayIndex, NeuralSection::Production };
 
 	// Select next targets for Building, Unit, Infantry, and Aircraft queues
 	const int money = pHouse->Available_Money();
