@@ -423,6 +423,10 @@ namespace
 
 	std::array<std::vector<NeuralTickPeak>, 32> TickPeaks {};
 
+	// Expert selections per house in the current match (one count per expert choice), so the
+	// trainer can measure how long each expert runs and how the house does while it runs.
+	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> ExpertTicks {};
+
 	void AddSectionTime(int houseIndex, NeuralSection section, double ms)
 	{
 		if (houseIndex < 0 || houseIndex >= 32)
