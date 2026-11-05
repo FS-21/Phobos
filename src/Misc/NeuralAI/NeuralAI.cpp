@@ -67,7 +67,9 @@ AITrainerSharedTelemetry* NeuralAI::TelemetryView = nullptr;
 
 namespace
 {
-	constexpr uint32_t TelemetryJsonShmCapacity = 65536;
+	// 256 KB: radar points carry per-object details (mission, health, target, destination) for
+	// the dashboard's map inspector. The trainer opens the same size.
+	constexpr uint32_t TelemetryJsonShmCapacity = 262144;
 
 	HANDLE TelemetryJsonShmHandle = NULL;
 
@@ -182,6 +184,7 @@ namespace
 		CrawlStoneForward,
 		CrawlStoneLost,
 		IdleFlyerStrike,
+		YardUndeployBlocked,
 		Count
 	};
 
@@ -189,11 +192,15 @@ namespace
 		"ferryUnloadAtGoal", "ferryCargoReturned", "safeLaneDetour", "moveIssued", "moveSkipped", "slotGateOpen",
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
-		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike" };
+		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
 	std::array<std::array<uint32_t, static_cast<size_t>(NeuralDecision::Count)>, 32> DecisionCounts {};
+
+	// Learned gate verdicts per house and slot this match ([open, closed]): the trainer finds the
+	// slots pushed so far that the gate always gives the same answer (no gradient reaches them).
+	std::array<std::array<std::array<uint32_t, 2>, 128>, 32> GateCounts {};
 
 	// CPU cost of each house's AI ticks this match (milliseconds). Telemetry only: it never feeds
 	// a decision (wall-clock time differs between machines), so it cannot desync.
@@ -233,6 +240,76 @@ namespace
 
 	std::array<NeuralTerritoryStat, 32> TerritoryStats {};
 	int TerritoryLastFrame { -1 };
+
+	// Map class for the trainer (telemetry only): size, share of water cells, and whether the
+	// starting bases are linked by land. Computed once per match, once two bases exist.
+	struct NeuralMapInfo
+	{
+		bool Computed { false };
+		int Cells { 0 };
+		int WaterPct { 0 };
+		bool LandLinked { true };
+	};
+
+	NeuralMapInfo MapInfo {};
+
+	void ComputeMapInfo()
+	{
+		if (MapInfo.Computed || Unsorted::CurrentFrame < 30)
+			return;
+
+		std::vector<int> baseZones;
+
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver() || pHouse->Defeated)
+				continue;
+
+			CellStruct base = pHouse->BaseSpawnCell;
+
+			if (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(0))
+				base = pHouse->ConYards.GetItem(0)->GetMapCoords();
+
+			if (base == CellStruct::Empty)
+				continue;
+
+			const int zone = MapClass::Instance.GetMovementZoneType(base, MovementZone::Normal, false);
+
+			if (zone > 1)
+				baseZones.push_back(zone);
+		}
+
+		if (baseZones.size() < 2)
+			return;
+
+		MapInfo.Computed = true;
+		MapInfo.LandLinked = std::all_of(baseZones.begin(), baseZones.end(), [&](int z) { return z == baseZones.front(); });
+		MapInfo.Cells = MapClass::Instance.MapRect.Width * MapClass::Instance.MapRect.Height;
+
+		LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
+
+		if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
+			bounds = LTRBStruct { 0, 0, 511, 511 };
+
+		int total = 0;
+		int water = 0;
+
+		for (int y = std::max(0, bounds.Top); y <= bounds.Bottom; y += 2)
+		{
+			for (int x = std::max(0, bounds.Left); x <= bounds.Right; x += 2)
+			{
+				if (auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(x), static_cast<short>(y) }))
+				{
+					total++;
+
+					if (pCell->LandType == LandType::Water)
+						water++;
+				}
+			}
+		}
+
+		MapInfo.WaterPct = total > 0 ? (water * 100) / total : 0;
+	}
 
 	void SampleTerritory(bool force)
 	{
@@ -535,6 +612,9 @@ namespace
 
 		const bool open = static_cast<double>(h % 10000u) < probability * 10000.0;
 		CountDecision(open ? NeuralDecision::SlotGateOpen : NeuralDecision::SlotGateClosed);
+
+		if (CurrentAIHouseIndex >= 0 && CurrentAIHouseIndex < 32 && slot >= 0 && slot < 128)
+			GateCounts[CurrentAIHouseIndex][slot][open ? 0 : 1]++;
 
 		return open;
 	}
@@ -1415,6 +1495,24 @@ namespace
 		std::vector<DWORD> OffensiveStones {};
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
+		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
+		CellStruct LastYardUndeployCell { CellStruct::Empty };
+		int LastYardUndeployFrame { -100000 };
+		// Bank-driven factory scaling checks (every 900 frames): share of the non-defense
+		// structures we can build now that we already own, and whether a war factory still fits.
+		// Naval need (HouseNeedsNaval, every 900 frames).
+		int NavalNeedFrame { -100000 };
+		bool NavalNeed { false };
+		int BankCheckFrame { -100000 };
+		int TechCoveragePct { 0 };
+		bool BankFactoryRoom { false };
+		// Bank window bookkeeping: factories owned when the current 900-frame window opened and
+		// the placement failure count then (one boosted factory per window, none after a failure).
+		int BankWindow { -1 };
+		int BankWindowFactories { 0 };
+		int BankWindowFailures { 0 };
+		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
+		std::vector<DWORD> FerryingMcvs {};
 		int FreeFieldAnchorDist { 9999 };
 		int FreeFieldFrame { -100000 };
 		// Last airlift that turned back (damaged carrier or a defended drop zone).
@@ -1524,6 +1622,17 @@ namespace
 			this->OffensiveStones.clear();
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
+			this->LastYardUndeployCell = CellStruct::Empty;
+			this->LastYardUndeployFrame = -100000;
+			this->NavalNeedFrame = -100000;
+			this->NavalNeed = false;
+			this->BankCheckFrame = -100000;
+			this->TechCoveragePct = 0;
+			this->BankFactoryRoom = false;
+			this->BankWindow = -1;
+			this->BankWindowFactories = 0;
+			this->BankWindowFailures = 0;
+			this->FerryingMcvs.clear();
 			this->FreeFieldAnchorDist = 9999;
 			this->FreeFieldFrame = -100000;
 			this->LastAirDropAbortFrame = -100000;
@@ -1879,6 +1988,322 @@ namespace
 		auto const& seen = GetMacroState(pHouse).SeenEnemyBuildings;
 
 		return seen.find(pBld->UniqueID) != seen.end();
+	}
+
+	// Map-wide ore fields (shared by every house, map state only, so deterministic): 12x12
+	// blocks with >= 4 ore cells, as the ore cell nearest the block's ore centroid, refreshed
+	// every 900 frames. The local scans (84..144 cells) never saw the fields at the other end of
+	// a big map, so the AI kept to its main base with millions in the bank.
+	struct NeuralOreField
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int OreCells { 0 };
+		bool SpawnerTree { false };
+	};
+
+	std::vector<NeuralOreField> OreFieldCache;
+	int OreFieldCacheFrame { -100000 };
+
+	const std::vector<NeuralOreField>& GetOreFields()
+	{
+		if (Unsorted::CurrentFrame - OreFieldCacheFrame < 900 && OreFieldCacheFrame <= Unsorted::CurrentFrame)
+			return OreFieldCache;
+
+		OreFieldCacheFrame = Unsorted::CurrentFrame;
+		OreFieldCache.clear();
+
+		LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
+
+		if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
+			bounds = LTRBStruct { 0, 0, 511, 511 };
+
+		for (int by = std::max(0, bounds.Top); by <= bounds.Bottom; by += 12)
+		{
+			for (int bx = std::max(0, bounds.Left); bx <= bounds.Right; bx += 12)
+			{
+				int cells = 0;
+				int sumX = 0;
+				int sumY = 0;
+				bool tree = false;
+
+				for (int y = by; y < by + 12; ++y)
+				{
+					for (int x = bx; x < bx + 12; ++x)
+					{
+						auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(x), static_cast<short>(y) });
+
+						if (!pCell)
+							continue;
+
+						if (pCell->GetContainedTiberiumValue() > 0)
+						{
+							cells++;
+							sumX += x;
+							sumY += y;
+						}
+
+						if (!tree)
+						{
+							if (auto const pTerrain = pCell->GetTerrain(false))
+								tree = pTerrain->IsAlive && pTerrain->Type && pTerrain->Type->SpawnsTiberium;
+						}
+					}
+				}
+
+				if (cells < 4)
+					continue;
+
+				const int cx = sumX / cells;
+				const int cy = sumY / cells;
+				CellStruct best = CellStruct::Empty;
+				int bestDist = INT_MAX;
+
+				for (int y = by; y < by + 12; ++y)
+				{
+					for (int x = bx; x < bx + 12; ++x)
+					{
+						auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(x), static_cast<short>(y) });
+
+						if (pCell && pCell->GetContainedTiberiumValue() > 0)
+						{
+							const int d = std::abs(x - cx) + std::abs(y - cy);
+
+							if (d < bestDist)
+							{
+								bestDist = d;
+								best = CellStruct { static_cast<short>(x), static_cast<short>(y) };
+							}
+						}
+					}
+				}
+
+				OreFieldCache.push_back({ best, cells, tree });
+			}
+		}
+
+		return OreFieldCache;
+	}
+
+	// Nearest free ore field anywhere on the map for this house: same movement zone as `from`
+	// (when zone >= 0), at least minDist cells away, no own refinery / resource destination /
+	// ConYard within 14 cells (unless ownHubsOk: harvesters may use our own fields) and no
+	// known enemy structure within 12. Spawner trees count the field as 10 cells closer, bigger
+	// fields up to 4 cells closer.
+	CellClass* FindFreeOreFieldCell(HouseClass* pHouse, const CellStruct& from, int zone, int minDist, bool ownHubsOk = false)
+	{
+		if (!pHouse || from == CellStruct::Empty)
+			return nullptr;
+
+		std::vector<CellStruct> ownHubs;
+		std::vector<CellStruct> enemyStructures;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner)
+				continue;
+
+			if (pBld->Owner == pHouse)
+			{
+				if (!ownHubsOk && (pBld->Type->Refinery || pBld->Type->ResourceDestination || pBld->Type->ConstructionYard))
+					ownHubs.push_back(pBld->GetMapCoords());
+			}
+			else if (!pHouse->IsAlliedWith(pBld->Owner) && !pBld->Owner->IsNeutral() && IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				enemyStructures.push_back(pBld->GetMapCoords());
+			}
+		}
+
+		CellClass* pBest = nullptr;
+		int bestMetric = INT_MAX;
+
+		for (auto const& field : GetOreFields())
+		{
+			const int dist = std::max(std::abs(field.Cell.X - from.X), std::abs(field.Cell.Y - from.Y));
+
+			if (dist < minDist)
+				continue;
+
+			const int metric = dist - (field.SpawnerTree ? 10 : 0) - std::min(4, field.OreCells / 10);
+
+			if (metric >= bestMetric)
+				continue;
+
+			if (zone >= 0 && MapClass::Instance.GetMovementZoneType(field.Cell, MovementZone::Normal, false) != zone)
+				continue;
+
+			bool taken = false;
+
+			for (auto const& hub : ownHubs)
+			{
+				if (std::max(std::abs(hub.X - field.Cell.X), std::abs(hub.Y - field.Cell.Y)) <= 14)
+				{
+					taken = true;
+					break;
+				}
+			}
+
+			for (size_t e = 0; !taken && e < enemyStructures.size(); ++e)
+			{
+				if (std::max(std::abs(enemyStructures[e].X - field.Cell.X), std::abs(enemyStructures[e].Y - field.Cell.Y)) <= 12)
+					taken = true;
+			}
+
+			if (taken)
+				continue;
+
+			if (auto const pCell = MapClass::Instance.TryGetCellAt(field.Cell))
+			{
+				bestMetric = metric;
+				pBest = pCell;
+			}
+		}
+
+		return pBest;
+	}
+
+	// Water bodies (map state, computed once per match): cells per water movement zone. Useful
+	// water = >= 150 cells and >= 1/5 of the largest body: the open sea or a big lake, never an
+	// enclosed pond where a shipyard only traps its ships.
+	std::map<int, int> WaterZoneCells;
+	int LargestWaterZoneCells { -1 };
+
+	bool IsUsefulWaterZone(int waterZone)
+	{
+		if (LargestWaterZoneCells < 0)
+		{
+			LargestWaterZoneCells = 0;
+			LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
+
+			if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
+				bounds = LTRBStruct { 0, 0, 511, 511 };
+
+			for (int y = std::max(0, bounds.Top); y <= bounds.Bottom; ++y)
+			{
+				for (int x = std::max(0, bounds.Left); x <= bounds.Right; ++x)
+				{
+					const CellStruct c { static_cast<short>(x), static_cast<short>(y) };
+					auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pCell || pCell->LandType != LandType::Water)
+						continue;
+
+					const int zone = MapClass::Instance.GetMovementZoneType(c, MovementZone::Water, false);
+
+					if (zone > 1)
+						WaterZoneCells[zone]++;
+				}
+			}
+
+			for (auto const& [zone, cells] : WaterZoneCells)
+				LargestWaterZoneCells = std::max(LargestWaterZoneCells, cells);
+		}
+
+		auto const it = WaterZoneCells.find(waterZone);
+
+		if (it == WaterZoneCells.end())
+			return false;
+
+		return it->second >= 150 && it->second * 5 >= LargestWaterZoneCells;
+	}
+
+	bool IsUsefulWaterCell(const CellStruct& cell)
+	{
+		return IsUsefulWaterZone(MapClass::Instance.GetMovementZoneType(cell, MovementZone::Water, false));
+	}
+
+	int CountFreeOreFields(HouseClass* pHouse, const CellStruct& from, int zone)
+	{
+		if (!pHouse || from == CellStruct::Empty)
+			return 0;
+
+		std::vector<CellStruct> ownHubs;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type
+				&& (pBld->Type->Refinery || pBld->Type->ResourceDestination || pBld->Type->ConstructionYard))
+			{
+				ownHubs.push_back(pBld->GetMapCoords());
+			}
+		}
+
+		int count = 0;
+
+		for (auto const& field : GetOreFields())
+		{
+			if (zone >= 0 && MapClass::Instance.GetMovementZoneType(field.Cell, MovementZone::Normal, false) != zone)
+				continue;
+
+			const bool taken = std::any_of(ownHubs.begin(), ownHubs.end(), [&field](const CellStruct& hub)
+				{ return std::max(std::abs(hub.X - field.Cell.X), std::abs(hub.Y - field.Cell.Y)) <= 14; });
+
+			if (!taken)
+				count++;
+		}
+
+		return count;
+	}
+
+	// A navy is a need, not a habit: a known enemy across water (or, with no enemy known yet, starting
+	// bases not linked by land), an enemy warship seen on useful water, or free ore fields only
+	// reachable across water. Cached every 900 frames.
+	bool HouseNeedsNaval(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return false;
+
+		auto& macro = GetMacroState(pHouse);
+
+		if (Unsorted::CurrentFrame - macro.NavalNeedFrame < 900 && macro.NavalNeedFrame <= Unsorted::CurrentFrame)
+			return macro.NavalNeed;
+
+		macro.NavalNeedFrame = Unsorted::CurrentFrame;
+		CellStruct home = pHouse->BaseSpawnCell;
+
+		if (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(0))
+			home = pHouse->ConYards.GetItem(0)->GetMapCoords();
+
+		const int homeZone = home != CellStruct::Empty ? MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false) : -1;
+		bool need = false;
+		bool knowsEnemy = false;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Owner || pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner)
+				|| pBld->Owner->IsNeutral() || !IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				continue;
+			}
+
+			knowsEnemy = true;
+
+			if (homeZone > 1 && MapClass::Instance.GetMovementZoneType(pBld->GetMapCoords(), MovementZone::Normal, pBld->OnBridge) != homeZone)
+			{
+				need = true;
+				break;
+			}
+		}
+
+		if (!need && !knowsEnemy && MapInfo.Computed)
+			need = !MapInfo.LandLinked;
+
+		for (size_t u = 0; !need && u < static_cast<size_t>(UnitClass::Array.Count); ++u)
+		{
+			auto const pUnit = UnitClass::Array.GetItem(static_cast<int>(u));
+
+			if (pUnit && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Type && pUnit->Type->Naval && pUnit->Owner
+				&& pUnit->Owner != pHouse && !pHouse->IsAlliedWith(pUnit->Owner) && !pUnit->Owner->IsNeutral()
+				&& IsCellVisibleToAI(pHouse, pUnit->GetCell()) && IsUsefulWaterCell(pUnit->GetMapCoords()))
+			{
+				need = true;
+			}
+		}
+
+		if (!need && homeZone > 1 && CountFreeOreFields(pHouse, home, homeZone) == 0 && CountFreeOreFields(pHouse, home, -1) > 0)
+			need = true;
+
+		macro.NavalNeed = need;
+		return need;
 	}
 
 	// Multiplayer start locations are waypoints 0..7 (public map knowledge). While no
@@ -3583,9 +4008,20 @@ void NeuralAI::OnScenarioStart()
 	for (auto& counts : DecisionCounts)
 		counts.fill(0);
 
+	for (auto& houseGates : GateCounts)
+	{
+		for (auto& slotGates : houseGates)
+			slotGates.fill(0);
+	}
+
 	TickCosts.fill(NeuralTickCost {});
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;
+	OreFieldCache.clear();
+	OreFieldCacheFrame = -100000;
+	WaterZoneCells.clear();
+	LargestWaterZoneCells = -1;
+	MapInfo = NeuralMapInfo {};
 
 	for (auto& housePlans : PlanStats)
 	{
@@ -4135,6 +4571,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 	AITrainerSharedTelemetry localSnap = {};
 
 	SampleTerritory(matchEnded);
+	ComputeMapInfo();
 
 	AITrainerSharedTelemetry* dst = NeuralAI::TelemetryView ? NeuralAI::TelemetryView : &localSnap;
 
@@ -4341,20 +4778,22 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 	{
 		std::string jsonBuf;
 
-		jsonBuf.reserve(32768);
+		jsonBuf.reserve(131072);
 
-		char lineBuf[8192];
+		char lineBuf[16384]; // one house line carries decisions, plans and gate counts
 
 		int lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
 			"{\n  \"slot\": %u,\n  \"pid\": %u,\n  \"frame\": %u,\n  \"fps\": "
 			"%u,\n  \"finished\": %s,\n  \"winnerHouse\": %d,\n  \"stalemate\": "
 			"%s,\n  \"elo\": %d,\n  \"gamesPlayed\": %u,\n  "
-			"\"rulesSignature\": \"%016llX\",\n  \"baseSignature\": \"%016llX\",\n "
+			"\"rulesSignature\": \"%016llX\",\n  \"baseSignature\": \"%016llX\",\n  "
+			"\"mapInfo\": {\"cells\": %d, \"waterPct\": %d, \"landLinked\": %s, \"known\": %s},\n "
 			" \"houses\": [\n",
 			dst->SlotIndex, dst->ProcessId, dst->CurrentFrame, dst->FramesPerSecond, matchEnded ? "true" : "false",
 			dst->WinnerHouseIndex, stalemate ? "true" : "false", NeuralAI::Backpack.EstimatedELO,
 			NeuralAI::Backpack.GamesPlayed, static_cast<unsigned long long>(NeuralAI::CurrentRulesSignature),
-			static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature));
+			static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature), MapInfo.Cells, MapInfo.WaterPct,
+			MapInfo.LandLinked ? "true" : "false", MapInfo.Computed ? "true" : "false");
 
 		if (lineLen > 0)
 			jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -4471,6 +4910,22 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			std::string decisionsText;
 			std::string enemyMixText;
 			std::string plansText;
+			std::string gatesText;
+
+			if (h.ArrayIndex >= 0 && h.ArrayIndex < 32)
+			{
+				for (int gs = 0; gs < 128; ++gs)
+				{
+					auto const& gc = GateCounts[h.ArrayIndex][gs];
+
+					if (gc[0] + gc[1] == 0)
+						continue;
+
+					char gateBuf[48];
+					std::snprintf(gateBuf, sizeof(gateBuf), "%s\"%d\": [%u, %u]", gatesText.empty() ? "" : ", ", gs, gc[0], gc[1]);
+					gatesText += gateBuf;
+				}
+			}
 
 			if (h.ArrayIndex >= 0 && h.ArrayIndex < 32)
 			{
@@ -4521,7 +4976,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"enemyMix\": \"%s\", \"decisions\": {%s}, \"plans\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"enemyMix\": \"%s\", \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -4532,7 +4987,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, enemyMixText.c_str(), decisionsText.c_str(), plansText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, enemyMixText.c_str(), decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -4559,6 +5014,67 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			out[w] = '\0';
 		};
 
+		// Map inspector details appended to every radar point (observer telemetry, never read by a
+		// decision): ,uid,health%,mission,megaMission,target,destination where target is
+		// [rx,ry,health% or -1,uid] or 0 and destination is [rx,ry] or 0.
+		auto objectDetail = [&](TechnoClass* pTechno, char* out, size_t outCap)
+		{
+			if (!out || outCap == 0)
+				return;
+
+			out[0] = '\0';
+
+			if (!pTechno)
+				return;
+
+			const int hp = static_cast<int>(pTechno->GetHealthPercentage() * 100.0 + 0.5);
+			auto const pFoot = abstract_cast<FootClass*>(pTechno);
+			const int mega = pFoot ? static_cast<int>(pFoot->MegaMission) : -1;
+			char targetText[64] = "0";
+			char destText[40] = "0";
+
+			if (AbstractClass* const pTarget = pTechno->Target)
+			{
+				float tx = 0.0f;
+				float ty = 0.0f;
+				projectToRadar(CellClass::Coord2Cell(pTarget->GetCoords()), tx, ty);
+				auto const pTargetTechno = abstract_cast<TechnoClass*>(pTarget);
+				const int targetHp = pTargetTechno ? static_cast<int>(pTargetTechno->GetHealthPercentage() * 100.0 + 0.5) : -1;
+				std::snprintf(targetText, sizeof(targetText), "[%.1f,%.1f,%d,%u]", tx, ty, targetHp,
+					pTargetTechno ? static_cast<unsigned>(pTargetTechno->UniqueID) : 0u);
+			}
+
+			if (pFoot)
+			{
+				AbstractClass* const pDest = pFoot->Destination ? pFoot->Destination : pFoot->MegaDestination;
+
+				if (pDest)
+				{
+					float dx = 0.0f;
+					float dy = 0.0f;
+					projectToRadar(CellClass::Coord2Cell(pDest->GetCoords()), dx, dy);
+					std::snprintf(destText, sizeof(destText), "[%.1f,%.1f]", dx, dy);
+				}
+			}
+
+			// Deploy / undeploy counterpart type ID: the dashboard follows an object into its new
+			// form only when the new object is exactly that type.
+			const char* transformId = "";
+			auto const pType = pTechno->GetTechnoType();
+
+			if (auto const pUnitType = abstract_cast<UnitTypeClass*>(pType); pUnitType && pUnitType->DeploysInto)
+				transformId = pUnitType->DeploysInto->ID;
+			else if (auto const pBldType = abstract_cast<BuildingTypeClass*>(pType); pBldType && pBldType->UndeploysInto)
+				transformId = pBldType->UndeploysInto->ID;
+
+			char transformClean[32];
+			sanitizeJsonStr(transformId, transformClean, sizeof(transformClean));
+
+			std::snprintf(out, outCap, ",%u,%d,%d,%d,%s,%s,\"%s\"", static_cast<unsigned>(pTechno->UniqueID), hp,
+				static_cast<int>(pTechno->CurrentMission), mega, targetText, destText, transformClean);
+		};
+
+		char detailBuf[160];
 		bool firstPt = true;
 		int ptCount = 0;
 
@@ -4576,7 +5092,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				continue;
 			}
 
-			if (ptCount >= 320 || jsonBuf.size() > 56000)
+			if (ptCount >= 900 || jsonBuf.size() > 200000)
 				break;
 
 			const CellStruct c = pBld->GetMapCoords();
@@ -4601,8 +5117,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(pBld->Type->ID, idClean, sizeof(idClean));
 			sanitizeJsonStr(pBld->Type->Name, nameClean, sizeof(nameClean));
 
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"]", firstPt ? "" : ",",
-				rx, ry, pBld->Owner->ArrayIndex, ptKind, idClean, nameClean);
+			objectDetail(pBld, detailBuf, sizeof(detailBuf));
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
+				rx, ry, pBld->Owner->ArrayIndex, ptKind, idClean, nameClean, detailBuf);
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -4620,7 +5137,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				continue;
 			}
 
-			if (ptCount >= 460 || jsonBuf.size() > 58000)
+			if (ptCount >= 1700 || jsonBuf.size() > 225000)
 				break;
 
 			const CellStruct c = pUnit->GetMapCoords();
@@ -4634,8 +5151,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(pUnit->Type ? pUnit->Type->ID : "", idClean, sizeof(idClean));
 			sanitizeJsonStr(pUnit->Type ? pUnit->Type->Name : "", nameClean, sizeof(nameClean));
 
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"]", firstPt ? "" : ",",
-				rx, ry, pUnit->Owner->ArrayIndex, idClean, nameClean);
+			objectDetail(pUnit, detailBuf, sizeof(detailBuf));
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
+				rx, ry, pUnit->Owner->ArrayIndex, idClean, nameClean, detailBuf);
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -4655,10 +5173,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				continue;
 			}
 
-			if ((infStep++ % 2) != 0)
-				continue;
+			infStep++;
 
-			if (ptCount >= 520 || jsonBuf.size() > 60000)
+			if (ptCount >= 2400 || jsonBuf.size() > 250000)
 				break;
 
 			const CellStruct c = pInf->GetMapCoords();
@@ -4672,8 +5189,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(pInf->Type ? pInf->Type->ID : "", idClean, sizeof(idClean));
 			sanitizeJsonStr(pInf->Type ? pInf->Type->Name : "", nameClean, sizeof(nameClean));
 
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"]", firstPt ? "" : ",",
-				rx, ry, pInf->Owner->ArrayIndex, idClean, nameClean);
+			objectDetail(pInf, detailBuf, sizeof(detailBuf));
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
+				rx, ry, pInf->Owner->ArrayIndex, idClean, nameClean, detailBuf);
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -5483,7 +6001,11 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 	std::sort(expansionFieldBlocks.begin(), expansionFieldBlocks.end());
 	expansionFieldBlocks.erase(std::unique(expansionFieldBlocks.begin(), expansionFieldBlocks.end()), expansionFieldBlocks.end());
-	GetMacroState(pHouse).UncolonizedOreFields = static_cast<int>(expansionFieldBlocks.size());
+	// Map-wide count on our landmass (the local scan above stops at 144 cells); the local block
+	// count stays as a floor.
+	GetMacroState(pHouse).UncolonizedOreFields = std::max(static_cast<int>(expansionFieldBlocks.size()),
+		CountFreeOreFields(pHouse, baseCenter,
+			baseCenter != CellStruct::Empty ? MapClass::Instance.GetMovementZoneType(baseCenter, MovementZone::Normal, false) : -1));
 
 	const bool lowMoneyAndScarceLocalOre = (pHouse->Available_Money() < 1600 && localOreCells <= 8
 		&& (expansionOreCells > 0 || islandExpansionOreCells > 0 || islandCapturableTechs > 0));
@@ -6897,6 +7419,9 @@ namespace
 					pBestOre = pCell;
 				}
 			}
+
+			if (!pBestOre)
+				pBestOre = FindFreeOreFieldCell(pHouse, here, ObjectZone(pUnit, MovementZone::Normal), 8, true);
 
 			if (pBestOre)
 			{
@@ -15845,8 +16370,60 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				AbstractClass* const pArchDest = pUnit->ArchiveTarget;
 				pUnit->SetArchiveTarget(nullptr);
-				pUnit->SetDestination(pArchDest, true);
-				pUnit->ForceMission(Mission::Move);
+
+				const int packedZone = ObjectZone(pUnit, MovementZone::Normal);
+				const int goalZone = MapClass::Instance.GetMovementZoneType(
+					CellClass::Coord2Cell(pArchDest->GetCoords()), MovementZone::Normal, false);
+
+				// Goal across water (a yard packed up on another island to go home, or a nomad
+				// heading to an island): ask for a transport like any other unit, instead of a
+				// ground move it can never finish.
+				if (packedZone >= 0 && goalZone >= 0 && packedZone != goalZone && CanHouseFerryTypeAcrossWater(pHouse, pType))
+				{
+					DispatchFootToTargetOrTransport(pUnit, pArchDest, Mission::Move, false);
+					auto& ferryingList = GetMacroState(pHouse).FerryingMcvs;
+
+					if (ferryingList.size() >= 16)
+						ferryingList.erase(ferryingList.begin()); // Lost MCVs never leave by themselves.
+
+					ferryingList.push_back(pUnit->UniqueID);
+				}
+				else
+				{
+					pUnit->SetDestination(pArchDest, true);
+					pUnit->ForceMission(Mission::Move);
+				}
+			}
+
+			// A packed-up yard MCV sent across water (FerryingMcvs) keeps asking the transport
+			// controller each tick and must not unpack where it stands: the "new island without a
+			// ConYard" rule used to redeploy it on the spot, and the yard packed up again. Other
+			// island MCVs keep their own boarding logic below.
+			{
+				auto& ferrying = GetMacroState(pHouse).FerryingMcvs;
+				auto const itFerry = std::find(ferrying.begin(), ferrying.end(), pUnit->UniqueID);
+
+				if (itFerry != ferrying.end())
+				{
+					const CellStruct ferryGoal = LookupPassengerIslandGoal(pUnit->UniqueID);
+					const int standZone = ObjectZone(pUnit, MovementZone::Normal);
+
+					if (ferryGoal != CellStruct::Empty && standZone >= 0
+						&& MapClass::Instance.GetMovementZoneType(ferryGoal, MovementZone::Normal, false) != standZone
+						&& CanHouseFerryTypeAcrossWater(pHouse, pType))
+					{
+						if (pUnit->CurrentMission != Mission::Enter && pUnit->QueuedMission != Mission::Enter)
+						{
+							if (auto const pFerryGoalCell = MapClass::Instance.TryGetCellAt(ferryGoal))
+								DispatchFootToTargetOrTransport(pUnit, pFerryGoalCell, Mission::Move, false);
+						}
+
+						continue;
+					}
+
+					// Landed on the goal's landmass, or the goal expired: normal MCV logic again.
+					ferrying.erase(itFerry);
+				}
 			}
 
 			const CellStruct mcvCell = pUnit->GetMapCoords();
@@ -16467,6 +17044,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 				}
+
+				// Nothing in the local scan: the nearest free field anywhere on our landmass.
+				if (!pExpansionDest)
+					pExpansionDest = FindFreeOreFieldCell(pHouse, mcvCell, mcvZone, 14);
 
 				if (pExpansionDest)
 				{
@@ -23723,7 +24304,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// Revenge engine, BuildingClass undeployment requires setting a non-null
 			// ArchiveTarget cell and calling Sell(1) (whereas selling for cash
 			// requires ArchiveTarget == nullptr).
-			auto UndeployBuildingToVehicle = [](BuildingClass* pBld, const CellStruct& goalCoords)
+			auto UndeployBuildingToVehicleRaw = [](BuildingClass* pBld, const CellStruct& goalCoords)
 			{
 				if (!pBld || !pBld->Type || !pBld->Type->UndeploysInto)
 					return;
@@ -23789,6 +24370,31 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					pBld->SetArchiveTarget(pDestCell);
 					pBld->Sell(1);
 				}
+			};
+
+			auto UndeployBuildingToVehicle = [&](BuildingClass* pBld, const CellStruct& goalCoords)
+			{
+				if (!pBld || !pBld->Type)
+					return;
+
+				if (pBld->Type->ConstructionYard)
+				{
+					auto& yardMacro = GetMacroState(pHouse);
+					const CellStruct here = pBld->GetMapCoords();
+
+					if (Unsorted::CurrentFrame - yardMacro.LastYardUndeployFrame < 3600
+						&& yardMacro.LastYardUndeployCell != CellStruct::Empty
+						&& here.DistanceFrom(yardMacro.LastYardUndeployCell) <= 8.0)
+					{
+						CountDecision(NeuralDecision::YardUndeployBlocked, pHouse->ArrayIndex);
+						return;
+					}
+
+					yardMacro.LastYardUndeployCell = here;
+					yardMacro.LastYardUndeployFrame = Unsorted::CurrentFrame;
+				}
+
+				UndeployBuildingToVehicleRaw(pBld, goalCoords);
 			};
 
 			// Always activate wrench repair immediately on any damaged Construction Yard
@@ -23932,9 +24538,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						pOwnBld->SetArchiveTarget(nullptr);
 						pOwnBld->Sell(1);
 					}
-					else if (canUndeployToMCV)
+					else if (canUndeployToMCV
+						&& (!onEnemyIsland || CanHouseFerryTypeAcrossWater(pHouse, pOwnBld->Type->UndeploysInto)))
 					{
+						// Across water the MCV asks for a transport home (MCV logic above).
 						UndeployBuildingToVehicle(pOwnBld, homeCoords);
+					}
+					else if (onEnemyIsland)
+					{
+						// Home is across water and nothing can carry the MCV: packing up only made an MCV
+						// that redeployed on the spot and packed up again, in a loop. Stay and repair.
+						if (pOwnBld->Type->ClickRepairable && hpPct < 0.90 && currentCredits > 600 && !pOwnBld->IsBeingRepaired)
+							pOwnBld->SetRepairState(1);
 					}
 					else if (pOwnBld->Type->ClickRepairable && hpPct < 0.90 && currentCredits > 600
 						&& !pOwnBld->IsBeingRepaired)
@@ -24049,6 +24664,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					if (hasUnharvestedOreNearThisYard)
 						break;
 				}
+
+				if (!pDistantUncolonizedLandOreCell)
+					pDistantUncolonizedLandOreCell = FindFreeOreFieldCell(pHouse, yc, yz, 26);
 
 				int structuresDroppedHere = 0;
 				int defsDroppedHere = 0;
@@ -26082,14 +26700,92 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const int ecoWarFactoryCap = (ownedRefineries >= 6) ? (ownedRefineries / 2) : (1 + ownedRefineries / 3);
 
+		// Banked money is wasted production: with a big bank, extra factories (production speed
+		// multipliers stack) turn it into an army. One step per 15000 credits (max 6), only while
+		// placements succeed (there is room to build).
+		// Only when (a) there is room to build: a real placement probe for a war factory every 900
+		// frames (narrow maps) plus no streak of failed placements, and (b) the tech tree is
+		// mostly covered: >= 80% of the non-defense structures we can build now are owned, so
+		// the money does not go into factories before the tech that makes their units good.
+		auto& bankMacro = GetMacroState(pHouse);
+
+		if (money >= 15000 && Unsorted::CurrentFrame - bankMacro.BankCheckFrame >= 900)
+		{
+			bankMacro.BankCheckFrame = Unsorted::CurrentFrame;
+			int buildableTypes = 0;
+			int ownedTypes = 0;
+			BuildingTypeClass* pRoomProbe = nullptr;
+
+			for (auto const pBT : BuildingTypeClass::Array)
+			{
+				// Defenses count too: the tech tree is "covered" when we own one of each kind.
+				if (!pBT || pBT->Wall || pBT->Insignificant || pBT->InvisibleInGame || pBT->Cost <= 0
+					|| pBT->ConstructionYard || !CanBuildUnderHumanRules(pHouse, pBT))
+				{
+					continue;
+				}
+
+				buildableTypes++;
+
+				if (pHouse->CountOwnedNow(pBT) > 0)
+					ownedTypes++;
+
+				if (!pRoomProbe && pBT->Factory == AbstractType::UnitType && !pBT->Naval)
+					pRoomProbe = pBT;
+			}
+
+			bankMacro.TechCoveragePct = buildableTypes > 0 ? (ownedTypes * 100) / buildableTypes : 100;
+			bankMacro.BankFactoryRoom = pRoomProbe && NeuralAI::FindSpatialTetrisBuildCell(pHouse, pRoomProbe) != CellStruct::Empty;
+		}
+
+		// Never a production loop: the boost only exists in every other 900-frame window (in the
+		// others, defenses and tech compete as before), at most one boosted factory per window,
+		// and none once a placement failed in the window (until the next room probe).
+		const int bankWindow = Unsorted::CurrentFrame / 900;
+		const int ownedFactoriesNow = pHouse->NumWarFactories + pHouse->NumBarracks;
+
+		if (bankWindow != bankMacro.BankWindow)
+		{
+			bankMacro.BankWindow = bankWindow;
+			bankMacro.BankWindowFactories = ownedFactoriesNow;
+			bankMacro.BankWindowFailures = bankMacro.ConsecutivePlacementFailures;
+		}
+
+		const bool bankWindowOpen = (bankWindow % 2) == 0 && ownedFactoriesNow <= bankMacro.BankWindowFactories
+			&& bankMacro.ConsecutivePlacementFailures <= bankMacro.BankWindowFailures;
+
+		// Expansion first: while one of our MCVs is on its way to expand, the bank pays for that.
+		bool expansionMcvUnderway = false;
+
+		for (auto const pOwnUnit : UnitClass::Array)
+		{
+			if (pOwnUnit && pOwnUnit->Owner == pHouse && pOwnUnit->IsAlive && !pOwnUnit->InLimbo && pOwnUnit->Type
+				&& pOwnUnit->Type->DeploysInto && pOwnUnit->Type->DeploysInto->ConstructionYard)
+			{
+				expansionMcvUnderway = true;
+				break;
+			}
+		}
+
+		// No fixed cap: room bounds it (the placement probe and the failure checks above), so a
+		// huge map can keep turning its bank into factories.
+		const int bankSteps = (money >= 15000 && bankMacro.TechCoveragePct >= 90 && bankMacro.BankFactoryRoom
+			&& bankMacro.ConsecutivePlacementFailures <= 2 && bankWindowOpen && !expansionMcvUnderway)
+			? money / 15000
+			: 0;
+
+		// Offensive fronts: forward stones alive raise the factory caps (2 more per 4 stones, up
+		// to 8), so the hot zones keep receiving factories after the home base has its share.
+		const int frontFactoryRoom = std::min(8, static_cast<int>(bankMacro.OffensiveStones.size()) / 2);
+
 		const int maxWarFactories = (hasTechCenter || money >= 2400)
-			? std::clamp(std::max(ecoWarFactoryCap, maxEnemyWarFactories + 1), 2, 7)
+			? std::clamp(std::max(ecoWarFactoryCap, maxEnemyWarFactories + 1), 2, 7) + bankSteps + frontFactoryRoom
 			: std::clamp(ecoWarFactoryCap, 1, 3);
 
 		const int ecoBarracksCap = (ownedRefineries >= 4) ? 2 : 1;
 
 		const int maxBarracks = (hasTechCenter || money >= 2500)
-			? std::clamp(std::max(ecoBarracksCap, maxEnemyBarracks), 2, 4)
+			? std::clamp(std::max(ecoBarracksCap, maxEnemyBarracks), 2, 4) + bankSteps / 2 + frontFactoryRoom / 2
 			: std::clamp(ecoBarracksCap, 1, 2);
 
 		const int maxShipyards
@@ -26935,7 +27631,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					score = scores[2] - owned * 820;
+					score = scores[2] - owned * (bankSteps > 0 ? 420 : 820) + (bankSteps > 0 ? 250 + 120 * std::min(6, bankSteps) : 0);
 
 					if (ownedBarracks < maxEnemyBarracks && hasTechCenter && money > 1500)
 						score += 420;
@@ -26971,7 +27667,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					score = scores[3] - owned * 620;
+					score = scores[3] - owned * (bankSteps > 0 ? 300 : 620) + (bankSteps > 0 ? 400 + 150 * std::min(6, bankSteps) : 0);
 
 					// Competitive MultipleFactory Arms Race boost: never fall behind
 					// the enemy in War Factory count or when floating macro cash!
@@ -26987,7 +27683,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (owned >= maxShipyards)
 					continue;
 
-				if (NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
+				if (!HouseNeedsNaval(pHouse) || NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
 					continue;
 
 				score = scores[7] - owned * 950;
@@ -27944,6 +28640,25 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			continue;
 
 		const bool isAmphibTransport = IsAmphibiousOrAirTransport(pUnit);
+
+		if (pUnit->Naval && !isAmphibTransport && pUnit->MovementZone != MovementZone::Amphibious
+			&& pUnit->MovementZone != MovementZone::AmphibiousDestroyer && pUnit->MovementZone != MovementZone::AmphibiousCrusher)
+		{
+			bool shipyardOnUsefulWater = false;
+
+			for (auto const pOwnB : pHouse->Buildings)
+			{
+				if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->Type && pOwnB->Type->Naval
+					&& pOwnB->Type->Factory == AbstractType::UnitType && IsUsefulWaterCell(pOwnB->GetMapCoords()))
+				{
+					shipyardOnUsefulWater = true;
+					break;
+				}
+			}
+
+			if (!shipyardOnUsefulWater || !HouseNeedsNaval(pHouse))
+				continue;
+		}
 		const bool isDeployableRefineryOrMiner = (pUnit->DeploysInto
 			&& (pUnit->DeploysInto->Refinery || pUnit->DeploysInto->ResourceGatherer
 				|| pUnit->DeploysInto->ResourceDestination));
@@ -28975,6 +29690,23 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	int bestHubPriorityScore = -9999;
 	const bool placingWarFactory = (pBuildingType->Factory == AbstractType::UnitType && !pBuildingType->Naval);
 	const bool placingBarracks = (pBuildingType->Factory == AbstractType::InfantryType);
+
+	// Factory dispersal: same-kind factories at the main base (within 16 cells of the spawn).
+	// Once it has two, further ones prefer the outpost with the fewest, so a superweapon or a
+	// blitz on the main base cannot take all the production at once.
+	int homeSameKindFactories = 0;
+
+	if ((placingWarFactory || placingBarracks) && homeSpawnRef != CellStruct::Empty)
+	{
+		for (auto const pOwnB : pHouse->Buildings)
+		{
+			if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->Type && pOwnB->Type->Factory == pBuildingType->Factory
+				&& pOwnB->Type->Naval == pBuildingType->Naval && pOwnB->GetMapCoords().DistanceFrom(homeSpawnRef) <= 16.0)
+			{
+				homeSameKindFactories++;
+			}
+		}
+	}
 	for (auto const pOwnBld : pHouse->Buildings)
 	{
 		if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Insignificant
@@ -28999,6 +29731,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			int localHubBlds = 0;
 			int localRefs = 0;
 			int localDefs = 0;
+			int localSameKindFactories = 0;
 			bool hasLocalWarFac = false;
 			bool hasLocalBarracks = false;
 			for (auto const pCheckB : pHouse->Buildings)
@@ -29017,6 +29750,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					&& std::max(std::abs(bc.X - cbc.X), std::abs(bc.Y - cbc.Y)) <= 18)
 				{
 					localHubBlds++;
+
+					if ((placingWarFactory || placingBarracks) && pCheckB->Type->Factory == pBuildingType->Factory
+						&& pCheckB->Type->Naval == pBuildingType->Naval)
+					{
+						localSameKindFactories++;
+					}
+
 					if (pCheckB->Type->Factory == AbstractType::UnitType && !pCheckB->Type->Naval)
 					{
 						hasLocalWarFac = true;
@@ -29060,10 +29800,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				|| (placingBarracks && !hasLocalBarracks)
 				|| (isRefineryOrSlaveMiner && (!hasLocalRef || (localRefs == 1 && hasLocalWarFac)))
 				|| (pBuildingType->IsBaseDefense && localDefs < 2);
-			if (localHubBlds < 18 || missingThisCoreBld)
+			const bool disperseFactoryHere = homeSameKindFactories >= 2 && localSameKindFactories < homeSameKindFactories;
+
+			if (localHubBlds < 18 || missingThisCoreBld || disperseFactoryHere)
 			{
 				int hubScore = (18 - std::min(18, localHubBlds)) * 10 + (pOwnBld->Type->ConstructionYard ? 50 : 0)
-					+ (enemyInHubZone ? 250 : 0) + (missingThisCoreBld ? 500 : 0);
+					+ (enemyInHubZone ? 250 : 0) + (missingThisCoreBld ? 500 : 0)
+					+ (disperseFactoryHere ? 300 + (homeSameKindFactories - localSameKindFactories) * 100 : 0);
 				if (hubScore > bestHubPriorityScore)
 				{
 					bestHubPriorityScore = hubScore;
@@ -30387,6 +31130,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					= std::max(1, std::max(std::abs(candidate.X - center.X), std::abs(candidate.Y - center.Y)));
 
 				if (!MapClass::Instance.CoordinatesLegal(candidate))
+					continue;
+
+				// Naval structures only on useful water (no enclosed ponds).
+				if (isNavalBld && !IsUsefulWaterCell(candidate))
 					continue;
 
 				// Strictly enforce BaseNormal Adjacency (Adjacent= /
