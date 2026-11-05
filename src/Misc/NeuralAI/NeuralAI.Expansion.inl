@@ -4,9 +4,8 @@
 namespace
 {
 	// Map-wide ore fields (shared by every house, map state only, so deterministic): 12x12
-	// blocks with >= 4 ore cells, as the ore cell nearest the block's ore centroid, refreshed
-	// every 900 frames. The local scans (84..144 cells) never saw the fields at the other end of
-	// a big map, so the AI kept to its main base with millions in the bank.
+	// blocks with >= 4 ore cells, stored as the ore cell nearest the block's ore centroid and
+	// refreshed every 900 frames, so expansion can target fields beyond the local scan radius.
 	struct NeuralOreField
 	{
 		CellStruct Cell { CellStruct::Empty };

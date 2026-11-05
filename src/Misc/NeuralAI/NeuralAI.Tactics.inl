@@ -144,9 +144,9 @@ namespace
 				destCell, pType->MovementZone, pDestObject && pDestObject->OnBridge);
 			bool unreachable = footZone > 1 && destZone != footZone;
 
-			// A destination on an impassable cell (a building, an obstacle) is reachable when a cell
-			// next to it (up to 2 away) is in our zone: attack-moves onto enemy buildings were all
-			// flagged unreachable (zone 1 under the building) and dropped by the hundred.
+			// A destination on an impassable cell (a building, an obstacle; zone 1) is reachable
+			// when a cell next to it (up to 2 away) is in our zone, as for attack-moves onto enemy
+			// buildings.
 			if (unreachable && destZone <= 1)
 			{
 				for (int r = 1; r <= 2 && unreachable; ++r)
@@ -168,9 +168,9 @@ namespace
 			}
 
 			// Stalled attack-move: the unit fell back to Guard (typically after a fight) with its
-			// attack-move still pending and does not resume it. Every "send if MegaMission !=
-			// AttackMove" order path treats it as already on its way, so it would idle forever: drop
-			// the stale order after 150 frames so its owner logic sends it again.
+			// attack-move still pending and does not resume it, while the order paths that check
+			// "MegaMission != AttackMove" treat it as already on its way. Drop the stale order after
+			// 150 frames so its owner logic sends it again.
 			const bool stalledAttackMove = (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard)
 				&& pFoot->MegaMission == Mission::AttackMove;
 
@@ -198,8 +198,8 @@ namespace
 	}
 
 	// Idle harvester dispatcher: an empty harvester on Harvest that has not left its cell for 900
-	// frames found no ore within its scan (vanilla then waits there forever, e.g. on a depleted
-	// field on a hill). Send it to the nearest worthy ore field (>= 4 ore cells in 5x5) on its own
+	// frames found no ore within its scan, and vanilla keeps it waiting in place (e.g. on a
+	// depleted field). Send it to the nearest worthy ore field (>= 4 ore cells in 5x5) on its own
 	// landmass within 96 cells, 8+ cells away and 10+ cells from known enemy structures; on
 	// arrival it falls back to Guard and the harvester logic puts it back on Harvest.
 	// Chrono miners (Teleporter) and deployable gatherers are left alone: a destination makes a

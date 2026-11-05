@@ -309,7 +309,7 @@ namespace
 				return false;
 
 			// Heavy flyers that are not aircraft (airships, jumpjet bombers) cannot land at a repair
-			// depot and often self-heal only up to a cap below 60%: a 0.6 floor benched them forever.
+			// depot and often self-heal only up to a cap below 60%, so their health floor is lower.
 			const bool heavyFlyer = pFoot->WhatAmI() != AbstractType::Aircraft && IsAirborneThreatTechno(pFoot)
 				&& pFoot->GetTechnoType() && pFoot->GetTechnoType()->Strength >= 600;
 
@@ -320,8 +320,8 @@ namespace
 				|| pFoot->CurrentMission == Mission::Sleep) && pFoot->Target == nullptr;
 
 			// Units marching in a generic wave (attack-move, no target yet) are available too: the
-			// waves keep most of the army on the move, so plans needing big groups (Three-Front 15,
-			// Feint 8, Timing Rush 6) were never eligible. Plans keep the last word on their members.
+			// waves keep most of the army on the move, and plans needing big groups (Three-Front 15,
+			// Feint 8, Timing Rush 6) recruit from them. Plans keep the last word on their members.
 			const bool marchingInWave = pFoot->MegaMission == Mission::AttackMove && pFoot->Target == nullptr
 				&& (pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::Guard);
 
@@ -375,6 +375,7 @@ namespace
 
 			if (contextUtility > 0)
 				CountPlanOutcome(houseIdx, id, NeuralPlanOutcome::Eligible);
+
 			const int slot = NeuralPlanSlots[i];
 			// Combo chains (point 56) boost the plans they lead into for 900 frames.
 			const int boost = macro.PlanBoostUntilFrame[i] > Unsorted::CurrentFrame ? macro.PlanBoost[i] : 0;
@@ -2631,9 +2632,8 @@ namespace
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::SuperweaponRace, utility))
 				{
-					// Deadline from the trip, not only the timer: with the weapon already ready the plan
-					// had 900 frames (one minute) and could never succeed. Killing it before it fires
-					// again is still the point.
+					// Deadline from the trip, not only the timer, so a weapon that is already ready can
+					// still be reached and destroyed before it fires again.
 					int travelFrames = 0;
 
 					for (auto const pFoot : group)
@@ -4518,7 +4518,7 @@ namespace
 
 						// The stage is measured from the refinery's corner, so a gun at the stage can be a
 						// cell or two short: in place, artillery gets the attack order and closes in by
-						// itself (it used to wait there forever, neither in range nor moving).
+						// itself.
 						if (inPlace && isArtillery)
 						{
 							if (pFoot->Target != pTarget)
