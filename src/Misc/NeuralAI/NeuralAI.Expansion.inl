@@ -11,10 +11,28 @@ namespace
 		CellStruct Cell { CellStruct::Empty };
 		int OreCells { 0 };
 		bool SpawnerTree { false };
+		int BlockKey { -1 };
 	};
 
 	std::vector<NeuralOreField> OreFieldCache;
 	int OreFieldCacheFrame { -100000 };
+
+	// Key of the 12x12 ore block a cell falls in (the grid GetOreFields scans), -1 off the grid.
+	int OreBlockKey(const CellStruct& cell)
+	{
+		LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
+
+		if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
+			bounds = LTRBStruct { 0, 0, 511, 511 };
+
+		const int left = std::max(0, bounds.Left);
+		const int top = std::max(0, bounds.Top);
+
+		if (cell.X < left || cell.Y < top)
+			return -1;
+
+		return ((cell.X - left) / 12) * 4096 + (cell.Y - top) / 12;
+	}
 
 	const std::vector<NeuralOreField>& GetOreFields()
 	{
@@ -89,7 +107,7 @@ namespace
 					}
 				}
 
-				OreFieldCache.push_back({ best, cells, tree });
+				OreFieldCache.push_back({ best, cells, tree, OreBlockKey(CellStruct { static_cast<short>(bx), static_cast<short>(by) }) });
 			}
 		}
 
@@ -171,6 +189,47 @@ namespace
 		}
 
 		return pBest;
+	}
+
+	// Ore blocks this house already mines: fields (GetOreFields) with one of its refineries or
+	// resource destinations within 14 cells. Sorted keys for IsOreCellInHeldField. Without it the
+	// edge of a field we already mine (10+ cells from its refinery) looked like a new field, so
+	// the base never went for real new ones. A ConYard alone does not hold its field: an
+	// expansion yard still needs its refinery there.
+	std::vector<int> GetHeldOreBlocks(HouseClass* pHouse)
+	{
+		std::vector<int> held;
+
+		if (!pHouse)
+			return held;
+
+		std::vector<CellStruct> hubs;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type
+				&& (pBld->Type->Refinery || pBld->Type->ResourceDestination))
+			{
+				hubs.push_back(pBld->GetMapCoords());
+			}
+		}
+
+		for (auto const& field : GetOreFields())
+		{
+			const bool isHeld = std::any_of(hubs.begin(), hubs.end(), [&field](const CellStruct& hub)
+				{ return std::max(std::abs(hub.X - field.Cell.X), std::abs(hub.Y - field.Cell.Y)) <= 14; });
+
+			if (isHeld)
+				held.push_back(field.BlockKey);
+		}
+
+		std::sort(held.begin(), held.end());
+		return held;
+	}
+
+	bool IsOreCellInHeldField(const std::vector<int>& heldBlocks, const CellStruct& cell)
+	{
+		return std::binary_search(heldBlocks.begin(), heldBlocks.end(), OreBlockKey(cell));
 	}
 
 	// Water bodies (map state, computed once per match): cells per water movement zone. Useful

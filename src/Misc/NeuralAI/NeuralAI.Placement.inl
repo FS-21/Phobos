@@ -374,7 +374,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// Discover nearest uncolonized Ore/Tiberium patch across an 84-cell radius
 	// (for Expert 6, Slot 34 & AdvAI Stepping-Stone Base-Crawling). Measure
 	// distance from our closest BaseNormal/ConYard anchor and prefer uncolonized
-	// Ore patches >= 10 cells from any existing Refinery!
+	// Ore patches >= 10 cells from any existing Refinery, outside the ore blocks we
+	// already hold (GetHeldOreBlocks).
 	const int centerZone = MapClass::Instance.GetMovementZoneType(center, MovementZone::Normal, false);
 	CellStruct nearestOreCell = CellStruct::Empty;
 	CellStruct fallbackOreCell = CellStruct::Empty;
@@ -464,6 +465,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	CellStruct smallPatchCell = CellStruct::Empty;
 	int bestSmallPatchMetric = INT_MAX;
 	int smallPatchDist = 9999;
+	const std::vector<int> heldOreBlocks = GetHeldOreBlocks(pHouse);
 
 	for (int dy = -120; dy <= 120; dy += (std::abs(dy) <= 44 ? 2 : (std::abs(dy) <= 84 ? 3 : 4)))
 	{
@@ -485,16 +487,15 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						// different island!
 			}
 
-			bool nearExistingRef = false;
+			bool nearExistingRef = IsOreCellInHeldField(heldOreBlocks, tc);
 			int minAnchorManhattan = dCenter;
 
-			for (auto const& rc : ownRefineryCells)
+			for (size_t r = 0; !nearExistingRef && r < ownRefineryCells.size(); ++r)
 			{
+				auto const& rc = ownRefineryCells[r];
+
 				if (std::max(std::abs(tc.X - rc.X), std::abs(tc.Y - rc.Y)) < 10)
-				{
 					nearExistingRef = true;
-					break;
-				}
 			}
 
 			for (auto const& ac : ownAnchorCells)
