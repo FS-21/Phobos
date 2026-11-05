@@ -97,6 +97,11 @@ namespace
 		FieldScoutSent,
 		WaveStragglerRegroup,
 		FerryLandingRerouted,
+		BridgeAmbush,
+		BridgeSeaLane,
+		BridgeMoat,
+		BridgeFleetBlock,
+		BridgeRoute,
 		Count
 	};
 
@@ -104,7 +109,8 @@ namespace
 		"ferryUnloadAtGoal", "ferryCargoReturned", "safeLaneDetour", "moveIssued", "moveSkipped", "slotGateOpen",
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
-		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted" };
+		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
+		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -843,6 +849,8 @@ namespace
 	constexpr int VisionMapSide = 512;
 
 	std::vector<uint8_t> VisionMap;
+	// Cells in sight of the AI and its allies right now (the explored map only ever grows).
+	std::vector<uint8_t> CurrentSightMap;
 	std::array<std::vector<uint8_t>, 8> HouseExploredMaps;
 	int LastExploredResetFrame = -1;
 
@@ -872,6 +880,8 @@ namespace
 		VisionMapFrame = Unsorted::CurrentFrame;
 
 		VisionMapOwner = pHouse->ArrayIndex;
+
+		CurrentSightMap.assign(totalCells, 0);
 
 		for (auto const pTechno : TechnoClass::Array)
 		{
@@ -903,12 +913,28 @@ namespace
 					if (x < 0 || x >= VisionMapSide || dx * dx + dy * dy > radius * radius)
 						continue;
 
-					explored[static_cast<size_t>(y) * VisionMapSide + x] = 1;
+					const size_t idx = static_cast<size_t>(y) * VisionMapSide + x;
+					explored[idx] = 1;
+					CurrentSightMap[idx] = 1;
 				}
 			}
 		}
 
 		VisionMap = explored;
+	}
+
+	bool IsCellInSightOfAI(HouseClass* pHouse, const CellStruct& coords)
+	{
+		if (!pHouse)
+			return false;
+
+		if (VisionMapFrame != Unsorted::CurrentFrame || VisionMapOwner != pHouse->ArrayIndex)
+			RebuildVisionMap(pHouse);
+
+		if (coords.X < 0 || coords.X >= VisionMapSide || coords.Y < 0 || coords.Y >= VisionMapSide)
+			return false;
+
+		return CurrentSightMap[static_cast<size_t>(coords.Y) * VisionMapSide + coords.X] != 0;
 	}
 
 	bool IsCellVisibleToAI(HouseClass* pHouse, CellClass* pCell)

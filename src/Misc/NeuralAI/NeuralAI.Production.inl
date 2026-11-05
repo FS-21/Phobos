@@ -157,6 +157,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	{
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Features };
+		UpdateBridgePlanner(pHouse);
 		NeuralAI::ExtractFogFilteredFeatures(pHouse, features);
 	}
 

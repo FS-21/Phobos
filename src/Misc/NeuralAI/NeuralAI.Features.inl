@@ -67,7 +67,6 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 	int visibleEnemyDefenses = 0;
 	int visibleEnemyBuildings = 0;
 	int visibleEnemiesOnBridge = 0;
-	int destroyedBridgesCount = 0;
 	int ownParasitedOrControlled = 0;
 	int ownEliteUnits = 0;
 	int visibleEnemyAirShips = 0;
@@ -121,9 +120,6 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 		{
 			continue;
 		}
-
-		if (pBld->Type->BridgeRepairHut && MapClass::Instance.IsLinkedBridgeDestroyed(pBld->GetMapCoords()))
-			destroyedBridgesCount++;
 
 		if (pBld->Owner && pBld->Owner->IsNeutral() && pBld->Type->Capturable)
 		{
@@ -547,7 +543,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 	features[69] = ClampInt8(visibleEnemyBuildings * 4);
 
-	features[70] = ClampInt8(visibleEnemiesOnBridge * 35);
+	features[70] = ClampInt8(std::max(visibleEnemiesOnBridge, GetBridgeState(pHouse).AmbushCount) * 35);
 
 	features[71] = ClampInt8(visibleEnemyAirShips * 45);
 
@@ -599,7 +595,10 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 	features[95] = ClampInt8((enemyExposedPowerAndFactories + visibleEnemyArtillery * 2) * 18);
 
-	features[18] = ClampInt8(destroyedBridgesCount * 30);
+	auto const& bridgeState = GetBridgeState(pHouse);
+
+	// Bridges this house has seen broken (fog-fair: a bridge broken in the fog still reads as standing).
+	features[18] = ClampInt8(bridgeState.KnownBroken * 30);
 
 	features[22] = ClampInt8(ownParasitedOrControlled * 40);
 
@@ -805,12 +804,16 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 	features[132] = GameModeOptionsClass::Instance.MCVRedeploy ? 60 : -60;
 
-	const bool bridgesDestroyable = RulesClass::Instance && RulesClass::Instance->BridgeStrength < 1000000;
-
-	features[134] = bridgesDestroyable ? 80 : -80;
+	features[134] = AreBridgesDestroyable() ? 80 : -80;
 
 	const bool multiEngineerActive = RulesClass::Instance && RulesClass::Instance->EngineerCaptureLevel < 0.99;
 
 	features[135] = multiEngineerActive ? 80 : -80;
+
+	// Our fleet waits behind a standing low bridge with its targets on the other side.
+	features[136] = bridgeState.SeaLaneSpan >= 0 ? 80 : 0;
+
+	// An enemy fleet is about to sail through the gap of a broken low bridge toward us.
+	features[137] = bridgeState.FleetBlockSpan >= 0 ? 80 : 0;
 }
 
