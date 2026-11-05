@@ -1,4 +1,5 @@
 #include <Ext/Foot/Body.h>
+#include <Ext/Unit/Body.h>
 #include <Ext/Scenario/Body.h>
 #include <Utilities/AresHelper.h>
 #include <Utilities/AresFunctions.h>
@@ -243,6 +244,10 @@ static inline bool CanEnterNow(UnitClass* pTransport, FootClass* pPassenger)
 	const auto pManager = pPassenger->CaptureManager;
 
 	if (pManager && pManager->IsControllingSomething())
+		return false;
+
+	// A carryall that does not mix troops and cargo takes no passengers while it slings a vehicle
+	if (auto const pTransportExt = UnitExt::Fetch(pTransport); pTransportExt && pTransportExt->CarryallBlocksPassengers())
 		return false;
 
 	const auto pTransportType = pTransport->Type;
@@ -506,7 +511,12 @@ DEFINE_HOOK(0x73769E, UnitClass_ReceiveCommand_NoEnterOnBridge, 0x6)
 	GET(UnitClass* const, pThis, ESI);
 	GET(TechnoClass* const, pCall, EDI);
 	// If both the transport vehicle and passengers are on the bridge, they should not board
-	return pThis->OnBridge && pCall->OnBridge ? NoEnter : 0;
+	if (pThis->OnBridge && pCall->OnBridge)
+		return NoEnter;
+
+	// A carryall that does not mix troops and cargo takes no passengers while it slings a vehicle
+	auto const pExt = UnitExt::Fetch(pThis);
+	return pExt && pExt->CarryallBlocksPassengers() ? NoEnter : 0;
 }
 
 DEFINE_HOOK(0x70D842, FootClass_UpdateEnter_NoMoveToBridge, 0x5)
