@@ -719,8 +719,11 @@ void RulesExt::ExtData::LoadBeforeTypeData(RulesClass* pThis, CCINIClass* pINI)
 	this->RevealHouses.Read(exINI, GameStrings::AudioVisual, "RevealHouses");
 	this->MissileKeepTargetCoord.Read(exINI, GameStrings::General, "MissileKeepTargetCoord");
 	this->ExtendedBuildingPlacing.Read(exINI, GameStrings::General, "ExtendedBuildingPlacing");
-	this->AIBrain.Read(exINI, GameStrings::General, "AIBrain");
-	this->AIBrain.Read(exINI, GameStrings::AI, "AIBrain");
+	this->NeuralAI_Enabled.Read(exINI, GameStrings::General, "NeuralAI");
+	this->NeuralAI_Enabled.Read(exINI, GameStrings::AI, "NeuralAI");
+	this->NeuralAI_StyleVariance.Read(exINI, GameStrings::AI, "NeuralAI.StyleVariance");
+	// Needs the type lists, so it is read after the type data.
+	this->NeuralAI_IgnoreTypes.Read(exINI, GameStrings::AI, "NeuralAI.IgnoreTypes");
 }
 
 // this should load everything that TypeData is not dependant on
@@ -1334,7 +1337,9 @@ void RulesExt::ExtData::Serialize(T& Stm)
 		.Process(this->MissileKeepTargetCoord)
 		.Process(this->UseSidebarRadarOffsetFix)
 		.Process(this->ExtendedBuildingPlacing)
-		.Process(this->AIBrain)
+		.Process(this->NeuralAI_Enabled)
+		.Process(this->NeuralAI_IgnoreTypes)
+		.Process(this->NeuralAI_StyleVariance)
     ;
 }
 

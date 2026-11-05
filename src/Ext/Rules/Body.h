@@ -579,7 +579,11 @@ public:
 
 		Valueable<bool> ExtendedBuildingPlacing;
 
-		Valueable<bool> AIBrain;
+		Valueable<bool> NeuralAI_Enabled;
+		// Types Neural AI must never build (e.g. a mod's AI-only variants or fake structures):
+		// the mod decides, the engine never matches type names.
+		ValueableVector<TechnoTypeClass*> NeuralAI_IgnoreTypes;
+		Valueable<int> NeuralAI_StyleVariance;
 
 		ExtData(RulesClass* OwnerObject) : Extension<RulesClass>(OwnerObject)
 			, Storage_TiberiumIndex { -1 }
@@ -1093,7 +1097,9 @@ public:
 
 			, ExtendedBuildingPlacing { false }
 
-			, AIBrain { true }
+			, NeuralAI_Enabled { true }
+			, NeuralAI_IgnoreTypes {}
+			, NeuralAI_StyleVariance { 150 }
 		{ }
 
 		virtual ~ExtData() = default;
