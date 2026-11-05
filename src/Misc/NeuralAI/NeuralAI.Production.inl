@@ -1184,15 +1184,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// AdvAI & StarCraft Resource Expansion State Machine:
 		// Measure minimum Chebyshev distance from our closest
 		// BaseNormal/ConYard/CapturedTech anchor to the nearest uncolonized Ore/Gem
-		// field (>= 10 cells from any owned Refinery).
+		// field (>= 10 cells from any owned Refinery, outside the ore blocks we already
+		// hold: the edge of our own field is not a new one).
 		// - If minAnchorDistToUncolonizedOre <= 9: our BaseNormal chain, Captured
 		// Tech Building, or Expansion ConYard has reached the new Ore field!
 		// Trigger ShouldBuildRefinery (+1950)!
-		// - If minAnchorDistToUncolonizedOre is 10..38: boost BaseNormal=yes
+		// - If minAnchorDistToUncolonizedOre is 10..60: boost BaseNormal=yes
 		// stepping-stone structures (Power Plants / Barracks / Outposts) so the
 		// base actively crawls to reach the Ore!
 		CellStruct nearestUncolonizedOreCell = CellStruct::Empty;
 		int minAnchorDistToUncolonizedOre = 9999;
+		const std::vector<int> heldOreBlocks = GetHeldOreBlocks(pHouse);
 		for (const CellStruct& scanOrigin : scanOrigins)
 		{
 			if (scanOrigin == CellStruct::Empty)
@@ -1210,7 +1212,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						continue;
 
 					const int oreZone = MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false);
-					if (oreZone < 0)
+					if (oreZone < 0 || IsOreCellInHeldField(heldOreBlocks, tc))
 						continue;
 
 					bool alreadyColonizedByRef = false;
@@ -1413,7 +1415,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& ownedRefineries >= 1;
 		const bool needsSteppingStoneCrawlToOre = (GetMacroState(pHouse).ConsecutivePlacementFailures < 2
 			&& nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre > 9
-			&& minAnchorDistToUncolonizedOre <= 38 && hasCoreEconomyAndProduction
+			&& minAnchorDistToUncolonizedOre <= 60 && hasCoreEconomyAndProduction
 			&& (features[19] < 32 || ownedRefineries < 3 || scores[34] > 100 || Unsorted::CurrentFrame > 2100));
 
 		// AdvAI Start-Rush Emergency Defense Interception:
@@ -1542,6 +1544,39 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool hasActiveBuildingIncome = (ownedCashBuildings >= 1)
 			|| (((ownedRefineries >= 1 && ownedHarvestersCount >= 1) || ownedSlaveMinerBuildings >= 1)
 				&& (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
+
+		// Expansion MCV prerequisites: a house that wants to expand (slot 30, free ore fields) but
+		// cannot build any MCV yet is often missing one building of the MCV's Prerequisite list
+		// (YR asks for a service depot besides the war factory). Those buildings get a bonus.
+		std::vector<int> mcvPrerequisites;
+
+		if (pHouse->NumConYards >= 1 && pHouse->NumConYards < 6 && scores[30] >= 450 && money >= 2000
+			&& GetMacroState(pHouse).UncolonizedOreFields > 0)
+		{
+			bool mcvBuildable = false;
+			std::vector<int> missing;
+
+			for (auto const pMcvType : UnitTypeClass::Array)
+			{
+				if (!pMcvType || !pMcvType->DeploysInto || !pMcvType->DeploysInto->ConstructionYard || pMcvType->TechLevel < 0
+					|| (ownHouseBit != 0u && !pMcvType->InOwners(ownHouseBit)))
+				{
+					continue;
+				}
+
+				if (pHouse->CanBuild(pMcvType, false, false) == CanBuildResult::Buildable)
+				{
+					mcvBuildable = true;
+					break;
+				}
+
+				for (int pi = 0; pi < pMcvType->Prerequisite.Count; ++pi)
+					missing.push_back(pMcvType->Prerequisite.GetItem(pi));
+			}
+
+			if (!mcvBuildable)
+				mcvPrerequisites = std::move(missing);
+		}
 
 		for (auto const pBld : BuildingTypeClass::Array)
 		{
@@ -1678,11 +1713,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += 1200;
 				}
-				else if (reachedNewOreField)
+				else if (reachedNewOreField && ownedRefineries < std::max(maxRefineries, pHouse->NumConYards * 3))
 				{
-					score += 1950; // AdvAI ShouldBuildRefinery: our BaseNormal chain or
-								// Expansion MCV reached a new Ore field! Claim it
-								// immediately!
+					// AdvAI ShouldBuildRefinery: our BaseNormal chain or Expansion MCV reached
+					// a new Ore field! Claim it immediately! Like a forward Barracks, it is not
+					// penalized by the refineries of the home field (6 of them sank it below
+					// any other building, so expansion ConYards stood on unmined ore).
+					score = std::max(static_cast<int>(scores[1]), 300) + 1950;
 				}
 				else if (isHarvRecoveryCandidate
 					&& (orphanRefineryZoneNeedsReplacement >= 0 || ownedHarvestersCount < staticRefineriesCount))
@@ -2058,6 +2095,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score -= 3500;
 				}
+			}
+
+			if (!mcvPrerequisites.empty() && pHouse->CountOwnedNow(pBld) == 0
+				&& std::find(mcvPrerequisites.begin(), mcvPrerequisites.end(), pBld->ArrayIndex) != mcvPrerequisites.end())
+			{
+				// Ahead of routine picks, whatever the learned slot of that building says: without it
+				// the house never builds another MCV.
+				score = std::max(score + 900, 2600 + static_cast<int>(scores[30]) / 4);
 			}
 
 			if (isBldInProgress && (!pHouse->HasLowPower() || pBld->PowerBonus > pBld->PowerDrain))
@@ -2519,12 +2564,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	const bool hasUncolonizedIslandTarget
 		= (features[21] == 50 || features[21] >= 100 || (features[21] > 0 && features[20] > 6));
-	const int maxAllowedConYards
-		= (features[21] > 0) ? (hasUncolonizedIslandTarget ? 4 : 2) : ((features[20] > 12) ? 3 : 2);
+	// Free ore fields on our landmass raise the ConYard cap like the slot 30 score does (one more
+	// per free field up to 3, one more with a big bank): a fixed 3 kept rich houses at home.
+	// They also come before islands: an island waiting to be colonized used to send every
+	// expansion MCV to wait for a ferry while the home landmass stayed empty.
+	const int freeOreFieldsForYards = GetMacroState(pHouse).UncolonizedOreFields;
+	const CellStruct mcvHomeCell = (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(0))
+		? pHouse->ConYards.GetItem(0)->GetMapCoords()
+		: pHouse->BaseSpawnCell;
+	const bool hasFreeHomeLandField = mcvHomeCell != CellStruct::Empty
+		&& FindFreeOreFieldCell(pHouse, mcvHomeCell, MapClass::Instance.GetMovementZoneType(mcvHomeCell, MovementZone::Normal, false), 0) != nullptr;
+	const int landYardCap = std::clamp(2 + std::min(3, freeOreFieldsForYards) + (money >= 15000 ? 1 : 0), 3, 6);
+	const int maxAllowedConYards = (features[21] > 0)
+		? std::max(hasUncolonizedIslandTarget ? 4 : 2, (hasFreeHomeLandField && features[20] > 12) ? landYardCap : 0)
+		: ((features[20] > 12) ? landYardCap : 2);
 	const bool canSafelySaveForReplacementMCV = (pHouse->NumConYards == 0 && !ownsUndeployedMCV)
 		&& ((ownedEconomyUnits > 0 && trueRefineries > 0 && features[65] < 45) || money >= 1500
 			|| pHouse->OwnedUnits >= 3);
-	const bool needsCrossIslandMCV = (features[21] > 0 && (features[19] == 0 || pHouse->NumConYards >= 1));
+	const bool needsCrossIslandMCV = (features[21] > 0 && !hasFreeHomeLandField && (features[19] == 0 || pHouse->NumConYards >= 1));
 
 	// Island expansion is one more airlift job when a carryall may lift the MCV (or a spare
 	// harvester for the new island's resources): mods can forbid it with Carryall.Allowed=no.
@@ -2705,7 +2762,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				|| pUnit->JumpJet);
 			if (ownsUndeployedMCV || (pHouse->NumConYards >= 1 && scores[30] < 400 && scores[81] < 85)
 				|| pHouse->NumConYards >= maxAllowedConYards
-				|| (pHouse->NumConYards >= 1 && (pHouse->Buildings.Count >= 35 || ownedGroundCombatUnits + ownedNavalOrAmphibCombatUnits >= 40)))
+				|| (pHouse->NumConYards >= 1 && (pHouse->Buildings.Count >= 35 || ownedGroundCombatUnits + ownedNavalOrAmphibCombatUnits >= 40)
+					&& (freeOreFieldsForYards == 0 || money < 5000)))
 			{
 				continue;
 			}

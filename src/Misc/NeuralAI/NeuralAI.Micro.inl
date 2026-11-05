@@ -2752,14 +2752,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool isSecondaryIsland = (homeGroundZone >= 0 && mcvZone >= 0 && mcvZone != homeGroundZone);
 			const bool isArchipelagoOrNavalMap = (pIslandResourceGoalCell != nullptr || pIslandTechGoalCell != nullptr
 				|| pHouse->NumShipyards > 0 || pLoadingTransport != nullptr || isSecondaryIsland);
-			const bool alreadyHasConYardOnThisIsland = (!isForeignTechMCV
+			// A free ore field on this landmass is the next expansion: the MCV goes there instead of
+			// waiting at a beach for a ferry to another island.
+			const bool hasFreeLandFieldInMcvZone = !isForeignTechMCV && mcvZone >= 0
+				&& FindFreeOreFieldCell(pHouse, mcvCell, mcvZone, 14) != nullptr;
+			const bool alreadyHasConYardOnThisIsland = (!isForeignTechMCV && !hasFreeLandFieldInMcvZone
 				&& ((isSecondaryIsland && conYardsInMcvZone >= 1) || (isArchipelagoOrNavalMap && conYardsInMcvZone >= 1)
 					|| conYardsInMcvZone >= 2));
 			const bool currentIslandAlreadyDeveloped = (conYardsInMcvZone >= 1
 				|| (hubsAndFactoriesInMcvZone >= 2
 					&& (mcvZone != homeGroundZone || pHouse->NumConYards >= 1 || !hasUncolonizedOreOnHomeIsland
 						|| pHouse->OwnedBuildings >= 6)));
-			const bool mustColonizeOtherIsland = (canFerryThisMCV && mcvZone >= 0
+			const bool mustColonizeOtherIsland = (canFerryThisMCV && mcvZone >= 0 && !hasFreeLandFieldInMcvZone
 				&& (currentIslandAlreadyDeveloped || alreadyHasConYardOnThisIsland) && !isForeignTechMCV
 				&& ((pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone)
 					|| alreadyHasConYardOnThisIsland));
@@ -2767,7 +2771,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& !alreadyHasConYardOnThisIsland && !isArchipelagoOrNavalMap
 				&& ((scores[30] > 650 && scores[35] <= 60 && scores[81] <= 90)
 					|| (!canFerryThisMCV && !hasUncolonizedOreOnHomeIsland)));
-			const int requiredAnchorDist = landedOnNewIsland ? 0 : (wantsMultiConYardSpeed ? 8 : 16);
+			// Below the 14 cells the expansion destinations keep from our hubs: an MCV that reached a
+			// field 14..15 cells from a power plant never deployed and wandered from field to field.
+			const int requiredAnchorDist = landedOnNewIsland ? 0 : (wantsMultiConYardSpeed ? 8 : 12);
+			// Two expansion MCVs that reach the same field together both saw no ConYard there and
+			// deployed side by side. The one with the lower UniqueID deploys first; this one waits
+			// until that ConYard stands and then picks another field.
+			bool twinMcvNearby = false;
+
+			for (auto const pOtherMcv : UnitClass::Array)
+			{
+				if (pOtherMcv && pOtherMcv != pUnit && pOtherMcv->Owner == pHouse && pOtherMcv->IsAlive && !pOtherMcv->InLimbo
+					&& pOtherMcv->Type && pOtherMcv->Type->DeploysInto && pOtherMcv->Type->DeploysInto->ConstructionYard
+					&& pOtherMcv->UniqueID < pUnit->UniqueID)
+				{
+					const CellStruct oc = pOtherMcv->GetMapCoords();
+
+					if (std::max(std::abs(oc.X - mcvCell.X), std::abs(oc.Y - mcvCell.Y)) <= 12)
+					{
+						twinMcvNearby = true;
+						break;
+					}
+				}
+			}
 
 			if (mustColonizeOtherIsland)
 			{
@@ -2852,7 +2878,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 			}
-			else if (landedOnNewIsland || (!isMovingToDest && minAnchorDist >= requiredAnchorDist && !enemyNearMCV))
+			else if (!twinMcvNearby && (landedOnNewIsland || (!isMovingToDest && minAnchorDist >= requiredAnchorDist && !enemyNearMCV)))
 			{
 				if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
 				{
@@ -3082,7 +3108,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					IssueMoveOrder(pUnit, pExpansionDest, 3.0);
 				}
-				else if (!enemyNearMCV && !alreadyHasConYardOnThisIsland)
+				else if (!enemyNearMCV && !alreadyHasConYardOnThisIsland && !twinMcvNearby)
 				{
 					if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
 					{
