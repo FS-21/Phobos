@@ -4791,7 +4791,30 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	// Special Operations: Spies, Bridge Repair, Urban Garrisoning, Bio-Reactors,
 	// Tesla Overpowering, Hospitals, Medics, Crazy Ivan & Bridge Demolition
-	BuildingClass* pTargetBridgeHut = nullptr;
+	int targetBridgeSpan = -1;
+	BuildingClass* pTargetBridgeHut = (scores[21] > 400) ? PickBridgeToRepair(pHouse, targetBridgeSpan) : nullptr;
+
+	// A unit whose warhead repairs a bridge from its hut does it in one hit, no engineer needed.
+	if (pTargetBridgeHut)
+	{
+		for (auto const pFoot : FootClass::Array)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo
+				|| IsFootActivelyAttackingOrMovingToEnemy(pFoot)
+				|| pFoot->DistanceFrom(pTargetBridgeHut) > 40 * Unsorted::LeptonsPerCell
+				|| !CanWorkBridgeFromHut(pFoot, pTargetBridgeHut))
+			{
+				continue;
+			}
+
+			NoteBridgeWorker(pHouse, targetBridgeSpan, pFoot,
+				DispatchFootToTargetOrTransport(pFoot, pTargetBridgeHut, Mission::Attack, true));
+			pTargetBridgeHut = nullptr;
+
+			break;
+		}
+	}
+
 	BuildingClass* pBioReactor = nullptr;
 	BuildingClass* pOverpowerCoil = nullptr;
 	BuildingClass* pHospital = nullptr;
@@ -4800,12 +4823,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	{
 		if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type)
 			continue;
-
-		if (scores[21] > 400 && !pTargetBridgeHut && pBld->Type->BridgeRepairHut
-			&& MapClass::Instance.IsLinkedBridgeDestroyed(pBld->GetMapCoords()))
-		{
-			pTargetBridgeHut = pBld;
-		}
 
 		if (pBld->Owner && pHouse->IsAlliedWith(pBld->Owner))
 		{
@@ -5107,7 +5124,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (pTargetBridgeHut)
 			{
-				DispatchFootToTargetOrTransport(pInf, pTargetBridgeHut, Mission::Enter, false);
+				NoteBridgeWorker(pHouse, targetBridgeSpan, pInf,
+					DispatchFootToTargetOrTransport(pInf, pTargetBridgeHut, Mission::Enter, false));
 
 				pTargetBridgeHut = nullptr; // One engineer per hut is enough
 
@@ -6123,58 +6141,88 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	// Tactical Bridge Demolition (Ambush enemy units crossing a bridge when
-	// Immune Bridges is OFF)
-	if (scores[22] > 600 && RulesClass::Instance && RulesClass::Instance->BridgeStrength < 1000000)
+	// Bridge demolition: an ambush on a crowded deck, a sea lane for our fleet, or a moat against
+	// a stronger force (see PickBridgeToDestroy).
+	if (scores[22] > 600 && AreBridgesDestroyable())
 	{
-		CellClass* pTargetBridgeCell = nullptr;
+		const NeuralBridgeDemolition demolition = PickBridgeToDestroy(pHouse);
+		auto const pDeckCell = demolition.Span >= 0 ? MapClass::Instance.TryGetCellAt(demolition.Cell) : nullptr;
 
-		for (auto const pTechno : TechnoClass::Array)
+		if (pDeckCell)
 		{
-			if (!pTechno || pTechno->InLimbo || !pTechno->IsAlive || !pTechno->Owner)
-				continue;
+			auto const& span = BridgeSpans[demolition.Span];
+			auto const pHut = GetBridgeHut(span);
+			bool ordered = false;
 
-			if (pTechno->Owner == pHouse || pHouse->IsAlliedWith(pTechno->Owner) || pTechno->Owner->IsNeutral())
-				continue;
-
-			if (pTechno->OnBridge)
+			// A warhead that brings the bridge down from its hut drops the whole span at once.
+			if (pHut)
 			{
-				auto const pCell = pTechno->GetCell();
-
-				if (pCell && pCell->ContainsBridge() && IsCellVisibleToAI(pHouse, pCell))
+				for (auto const pFoot : FootClass::Array)
 				{
-					pTargetBridgeCell = pCell;
+					if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo
+						|| IsFootActivelyAttackingOrMovingToEnemy(pFoot)
+						|| pFoot->DistanceFrom(pHut) > 40 * Unsorted::LeptonsPerCell || !CanWorkBridgeFromHut(pFoot, pHut))
+					{
+						continue;
+					}
 
-					break;
-				}
-			}
-		}
+					ordered = DispatchFootToTargetOrTransport(pFoot, pHut, Mission::Attack, true);
 
-		if (pTargetBridgeCell)
-		{
-			int assignedDemolishers = 0;
-
-			for (auto const pUnit : UnitClass::Array)
-			{
-				if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
-					continue;
-
-				if (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer || pUnit->OnBridge)
-					continue;
-
-				if (IsFootActivelyAttackingOrMovingToEnemy(pUnit))
-					continue;
-
-				if (pUnit->DistanceFrom(pTargetBridgeCell) <= 3072) // Within 12 cells of the bridge
-				{
-					pUnit->SetTarget(pTargetBridgeCell);
-
-					pUnit->QueueMission(Mission::Attack, true);
-
-					if (++assignedDemolishers >= 4)
+					if (ordered)
 						break;
 				}
 			}
+
+			if (!ordered)
+			{
+				int assigned = 0;
+
+				for (auto const pUnit : UnitClass::Array)
+				{
+					if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Target == pDeckCell)
+						assigned++;
+				}
+
+				const int wanted = demolition.FleetZone > 1 ? 6 : 4;
+
+				for (auto const pUnit : UnitClass::Array)
+				{
+					if (assigned >= wanted)
+						break;
+
+					if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type
+						|| pUnit->Target == pDeckCell)
+					{
+						continue;
+					}
+
+					if (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer || pUnit->OnBridge
+						|| BridgeSpanAt(pUnit->GetMapCoords()) >= 0 || IsFootActivelyAttackingOrMovingToEnemy(pUnit))
+					{
+						continue;
+					}
+
+					if (BridgeDemolitionDamage(pUnit, span.Low) <= 0)
+						continue;
+
+					const bool naval = pUnit->Type->Naval || pUnit->Type->SpeedType == SpeedType::Float;
+					const int rangeCells = naval ? 30 : 12;
+
+					if (naval && ObjectZone(pUnit, MovementZone::Water) != demolition.FleetZone)
+						continue;
+
+					if (pUnit->DistanceFrom(pDeckCell) > rangeCells * Unsorted::LeptonsPerCell)
+						continue;
+
+					pUnit->SetTarget(pDeckCell);
+					pUnit->QueueMission(Mission::Attack, true);
+					assigned++;
+					ordered = true;
+				}
+			}
+
+			if (ordered)
+				NoteBridgeAction(pHouse, demolition.Span, NeuralBridgeAction::Destroy);
 		}
 	}
 

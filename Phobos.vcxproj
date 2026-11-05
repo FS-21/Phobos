@@ -358,6 +358,7 @@
     <ClInclude Include="src\Phobos.CRT.h" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.h" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Air.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Bridges.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Economy.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Expansion.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Experts.inl" />
