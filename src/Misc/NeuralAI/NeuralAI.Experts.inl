@@ -433,11 +433,13 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	outScores[18] = ClampInt16(outScores[18] + std::clamp(static_cast<int>(outScores[36]), -300, 750));
 
-	// Slot 21: Repair Destroyed Bridge via Engineer + BridgeRepairHut (only when
-	// ready to push offensively)
+	// Slot 21: Repair Destroyed Bridge via Engineer + BridgeRepairHut (to close the gap
+	// in front of an enemy fleet, or to reopen a ground route when ready to push)
 	if (features[18] > 0)
 	{
-		if (pHouse->OwnedUnits * 6 >= features[65] && pHouse->OwnedUnits >= 4)
+		if (features[137] > 0)
+			outScores[21] = ClampInt16(outScores[21] + 1600); // Close the channel before the enemy fleet sails through
+		else if (pHouse->OwnedUnits * 6 >= features[65] && pHouse->OwnedUnits >= 4)
 			outScores[21] = ClampInt16(outScores[21] + 1200); // We have ground superiority: repair bridge
 		else
 			outScores[21] = ClampInt16(outScores[21] - 1500); // Outnumbered: keep broken bridge as a moat!
@@ -457,6 +459,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			outScores[22] = ClampInt16(outScores[22] + 1100);
 		else
 			outScores[22] = ClampInt16(outScores[22] - 1000);
+
+		if (features[136] > 0)
+			outScores[22] = ClampInt16(outScores[22] + 2000); // Open a sea lane for our fleet
 	}
 	else
 	{
