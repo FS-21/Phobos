@@ -434,9 +434,11 @@ DEFINE_HOOK(0x73D63B, UnitClass_MissionUnload_Carryall, 0x6)
 	return ReturnDefault;
 }
 
+// The hook sits on the first instruction, before the function pushes ecx and esi, so the early
+// exit must land on the final retn (0x4D949B), not on the pop esi / pop ecx epilogue.
 DEFINE_HOOK(0x4D9290, FootClass_MissionEnter_Carryall, 0x6)
 {
-	enum { ReturnDone = 0x4D9499, ReturnDefault = 0 };
+	enum { ReturnDone = 0x4D949B, ReturnDefault = 0 };
 
 	GET(FootClass*, pThis, ECX);
 
