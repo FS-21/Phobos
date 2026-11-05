@@ -281,7 +281,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 			std::string bldText;
 
-			for (size_t rb = 0; rb < rankedBlds.size() && rb < 8; ++rb)
+			for (size_t rb = 0; rb < rankedBlds.size() && rb < 12; ++rb)
 			{
 				if (rb > 0)
 					bldText += ";";
