@@ -513,15 +513,38 @@ bool UnitExt::CarryallCanLift(TechnoClass* pTarget) const
 	if (!pThis->Owner->IsAlliedWith(pTargetUnit->Owner))
 		return false;
 
+	auto const pCarrierTypeExt = this->GetTypeExtData();
+
+	// Carrying troops and slinging a vehicle exclude each other on this carrier.
+	if (pCarrierTypeExt->Carryall_ExclusiveWithPassengers && pThis->Passengers.NumPassengers > 0)
+		return false;
+
+	if (pCarrierTypeExt->Carryall_IgnoreTypes.Contains(pTargetUnit->Type))
+		return false;
+
 	auto const pTargetTypeExt = TechnoTypeExt::Fetch(pTargetUnit->Type);
 	if (!pTargetTypeExt->Carryall_Allowed.Get())
 		return false;
 
-	auto const pCarrierTypeExt = this->GetTypeExtData();
-	if (pCarrierTypeExt->Carryall_SizeLimit.isset() && static_cast<int>(pTargetUnit->GetTechnoType()->Size) > pCarrierTypeExt->Carryall_SizeLimit.Get())
+	// Carryall.AllowTypes can lift those types whatever their size.
+	if (pCarrierTypeExt->Carryall_SizeLimit.isset() && static_cast<int>(pTargetUnit->GetTechnoType()->Size) > pCarrierTypeExt->Carryall_SizeLimit.Get()
+		&& !pCarrierTypeExt->Carryall_AllowTypes.Contains(pTargetUnit->Type))
+	{
 		return false;
+	}
 
 	return true;
+}
+
+bool UnitExt::CarryallBlocksPassengers() const
+{
+	auto const pTypeExt = this->GetTypeExtData();
+
+	if (!pTypeExt->Carryall || !pTypeExt->Carryall_ExclusiveWithPassengers)
+		return false;
+
+	// Slinging a vehicle or on the way to pick one up.
+	return this->CarryallCargo != nullptr || this->CarryallState != JumpjetCarryallState::Idle;
 }
 
 bool UnitExt::CarryallCanDropAt(CellClass* pCell) const
