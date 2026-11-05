@@ -185,6 +185,8 @@ namespace
 		CrawlStoneLost,
 		IdleFlyerStrike,
 		YardUndeployBlocked,
+		FerryWaitTimeout,
+		FerryIdleWithDemand,
 		Count
 	};
 
@@ -192,7 +194,7 @@ namespace
 		"ferryUnloadAtGoal", "ferryCargoReturned", "safeLaneDetour", "moveIssued", "moveSkipped", "slotGateOpen",
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
-		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked" };
+		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -252,6 +254,27 @@ namespace
 	};
 
 	NeuralMapInfo MapInfo {};
+
+	// Per map class policy corrections (trainer: shared theta + delta per class). Outside training,
+	// the delta of this map's class is added once to the loaded backpack biases when the class is
+	// known. File: Resources\AI\ai_mapclass.dat = "PHOBOSMC", uint32 version 1, uint32 classes,
+	// int16 delta[classes][128]. Classes: 0 small land, 1 large land, 2 naval (bases not linked by land).
+	constexpr int NumMapClasses = 3;
+	std::array<std::array<int16_t, 128>, NumMapClasses> MapClassDeltas {};
+	bool MapClassLoaded { false };
+	bool MapClassApplied { false };
+	std::array<int16_t, 128> MapClassOriginalBias {};
+
+	int CurrentMapClass()
+	{
+		if (!MapInfo.Computed)
+			return -1;
+
+		if (!MapInfo.LandLinked)
+			return 2;
+
+		return MapInfo.Cells >= 15000 ? 1 : 0;
+	}
 
 	void ComputeMapInfo()
 	{
@@ -1513,6 +1536,10 @@ namespace
 		int BankWindowFailures { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
 		std::vector<DWORD> FerryingMcvs {};
+		// Ferry wait safety net (DispatchFootToTargetOrTransport): since when a unit has been asking
+		// for a crossing, and until when it may not ask again after giving up. Keyed lookups only.
+		std::unordered_map<DWORD, int> FerryWaitSince {};
+		std::unordered_map<DWORD, int> FerryBlockedUntil {};
 		int FreeFieldAnchorDist { 9999 };
 		int FreeFieldFrame { -100000 };
 		// Last airlift that turned back (damaged carrier or a defended drop zone).
@@ -1633,6 +1660,8 @@ namespace
 			this->BankWindowFactories = 0;
 			this->BankWindowFailures = 0;
 			this->FerryingMcvs.clear();
+			this->FerryWaitSince.clear();
+			this->FerryBlockedUntil.clear();
 			this->FreeFieldAnchorDist = 9999;
 			this->FreeFieldFrame = -100000;
 			this->LastAirDropAbortFrame = -100000;
@@ -3869,6 +3898,36 @@ void NeuralAI::LoadOrResetBackpack()
 
 	const bool valid = NeuralAI::LoadBackpackFile(bpPath, NeuralAI::Backpack, true);
 
+	MapClassLoaded = false;
+
+	for (const char* mcPath : { "Resources\\AI\\ai_mapclass.dat", "AI\\ai_mapclass.dat" })
+	{
+		HANDLE hMc = CreateFileA(mcPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+		if (hMc == INVALID_HANDLE_VALUE)
+			continue;
+
+		struct
+		{
+			char Magic[8];
+			uint32_t Version;
+			uint32_t Classes;
+		} mcHeader {};
+
+		DWORD read = 0;
+
+		if (ReadFile(hMc, &mcHeader, sizeof(mcHeader), &read, NULL) && read == sizeof(mcHeader)
+			&& std::memcmp(mcHeader.Magic, "PHOBOSMC", 8) == 0 && mcHeader.Version == 1 && mcHeader.Classes == NumMapClasses)
+		{
+			MapClassLoaded = ReadFile(hMc, MapClassDeltas.data(), sizeof(MapClassDeltas), &read, NULL) && read == sizeof(MapClassDeltas);
+		}
+
+		CloseHandle(hMc);
+
+		if (MapClassLoaded)
+			break;
+	}
+
 	if (!valid)
 	{
 		std::memset(&NeuralAI::Backpack, 0, sizeof(AIBackpackFile));
@@ -4017,6 +4076,7 @@ void NeuralAI::OnScenarioStart()
 	TickCosts.fill(NeuralTickCost {});
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;
+	MapClassApplied = false;
 	OreFieldCache.clear();
 	OreFieldCacheFrame = -100000;
 	WaterZoneCells.clear();
@@ -7040,10 +7100,67 @@ namespace
 	// (UnitClass::Assign_Destination, 0x741A80). keepWithinCells adds hysteresis: a freshly
 	// recomputed cell close to the one the unit is already heading to (e.g. a landing
 	// beach re-scored by occupancy) keeps the current order instead of zig-zagging.
+	// Ships (water-only movement): a destination outside their water body, e.g. a land cell on the
+	// enemy's coast, can never be reached; the pathfinder gives up and the ship freezes in Guard.
+	// Returns the nearest cell of the ship's own zone within 12 cells of the target (nullptr when
+	// the target is fine, the unit is not water-only, or nothing is found).
+	CellClass* NearestReachableNavalCell(FootClass* pFoot, const CellStruct& target)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || (pType->MovementZone != MovementZone::Water && pType->MovementZone != MovementZone::WaterBeach))
+			return nullptr;
+
+		const int ownZone = ObjectZone(pFoot, pType->MovementZone);
+
+		if (ownZone < 0 || MapClass::Instance.GetMovementZoneType(target, pType->MovementZone, false) == ownZone)
+			return nullptr;
+
+		for (int r = 1; r <= 12; ++r)
+		{
+			CellClass* pBest = nullptr;
+			int bestDist = INT_MAX;
+
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::abs(dx) != r && std::abs(dy) != r)
+						continue;
+
+					const CellStruct c { static_cast<short>(target.X + dx), static_cast<short>(target.Y + dy) };
+					auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pCell || MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != ownZone)
+						continue;
+
+					const int d = dx * dx + dy * dy;
+
+					if (d < bestDist)
+					{
+						bestDist = d;
+						pBest = pCell;
+					}
+				}
+			}
+
+			if (pBest)
+				return pBest;
+		}
+
+		return nullptr;
+	}
+
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5)
 	{
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
 			return false;
+
+		if (auto const pDestAsCell = abstract_cast<CellClass*>(pDest))
+		{
+			if (auto const pReach = NearestReachableNavalCell(pFoot, pDestAsCell->MapCoords))
+				pDest = pReach;
+		}
 
 		const bool isMoving = pFoot->CurrentMission == Mission::Move || pFoot->QueuedMission == Mission::Move;
 
@@ -7242,7 +7359,8 @@ namespace
 
 			auto const pType = pFoot->GetTechnoType();
 
-			if (!pType || pType->Naval || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly)
+			// Ships included: an unreachable naval order (land cell) is dropped like any other.
+			if (!pType || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly)
 				return;
 
 			const bool moving = pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::AttackMove
@@ -7953,6 +8071,16 @@ namespace
 				pDestCell = pBestAdj;
 				if (pDest->WhatAmI() == AbstractType::Cell)
 					pResolvedDest = pBestAdj;
+			}
+		}
+
+		// Ships cannot attack-move onto land: the nearest water cell of their own body instead.
+		if (pDestCell)
+		{
+			if (auto const pReach = NearestReachableNavalCell(pFoot, pDestCell->MapCoords))
+			{
+				pDestCell = pReach;
+				pResolvedDest = pReach;
 			}
 		}
 
@@ -9064,8 +9192,11 @@ namespace
 				continue;
 			}
 
+			const bool parkedAfterMove = pUnit->CurrentMission == Mission::Move
+				&& (!pUnit->Destination || pUnit->DistanceFrom(pUnit->Destination) <= 384);
+
 			if (pUnit->CurrentMission != Mission::Guard && pUnit->CurrentMission != Mission::Area_Guard
-				&& pUnit->CurrentMission != Mission::Sleep && pUnit->CurrentMission != Mission::None)
+				&& pUnit->CurrentMission != Mission::Sleep && pUnit->CurrentMission != Mission::None && !parkedAfterMove)
 			{
 				continue;
 			}
@@ -14498,6 +14629,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (footZone < 0 || targetZone < 0 || footZone == targetZone || CanFootCrossWaterDirectly(pFoot)
 			|| canShootFromHere)
 		{
+			GetMacroState(pHouse).FerryWaitSince.erase(pFoot->UniqueID);
+
 			if (useSetTarget || desiredMission == Mission::Attack)
 			{
 				pFoot->ClearMegaMissionData();
@@ -14524,6 +14657,40 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (!CanHouseFerryTypeAcrossWater(pHouse, pFootType))
 			return false;
+
+		// Safety net: a unit that has asked for a crossing for 3600 frames without ever boarding
+		// (no transport came, or it could not reach the pickup) is released to other jobs and may
+		// not ask again for 9000 frames, instead of waiting on the beach for the rest of the match.
+		{
+			auto& ferryMacro = GetMacroState(pHouse);
+			const int now = Unsorted::CurrentFrame;
+
+			if (auto const itBlocked = ferryMacro.FerryBlockedUntil.find(pFoot->UniqueID);
+				itBlocked != ferryMacro.FerryBlockedUntil.end() && now < itBlocked->second)
+			{
+				return false;
+			}
+
+			if (pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter)
+			{
+				ferryMacro.FerryWaitSince.erase(pFoot->UniqueID);
+			}
+			else
+			{
+				auto const [itWait, inserted] = ferryMacro.FerryWaitSince.try_emplace(pFoot->UniqueID, now);
+
+				if (!inserted && now - itWait->second >= 3600)
+				{
+					ferryMacro.FerryWaitSince.erase(itWait);
+					ferryMacro.FerryBlockedUntil[pFoot->UniqueID] = now + 9000;
+					ClearPassengerIslandGoal(pFoot->UniqueID);
+					pFoot->SetDestination(nullptr, true);
+					pFoot->QueueMission(Mission::Guard, true);
+					CountDecision(NeuralDecision::FerryWaitTimeout, pHouse->ArrayIndex);
+					return false;
+				}
+			}
+		}
 
 		RecordPassengerIslandGoal(pFoot->UniqueID, targetCoords);
 		const int passSize = std::max(1, static_cast<int>(pFootType->Size));
@@ -22810,6 +22977,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool canFitMoreOnPickupIsland = onSafePickupShore
 			&& (pSingleActiveBoarder != nullptr || hasMoreBoardableUnitsOnIsland(transZone, 0));
 
+		if (numPass == 0 && onSafePickupShore && pSingleActiveBoarder == nullptr
+			&& (pTrans->CurrentMission == Mission::Guard || pTrans->CurrentMission == Mission::Area_Guard)
+			&& std::any_of(pendingCrossIslandOrders.begin(), pendingCrossIslandOrders.end(),
+				[transZone](const PendingCrossIslandOrder& ord) { return ord.PickupZone == transZone; }))
+		{
+			CountDecision(NeuralDecision::FerryIdleWithDemand, pHouse->ArrayIndex);
+		}
+
 		const bool hasCargoInTransitOrUnloading = (numPass >= 1) && !onSafePickupShore
 			&& (tripDeparted || (activeIslandZone >= 0 && transZone == activeIslandZone)
 				|| pTrans->CurrentMission == Mission::Unload
@@ -23764,8 +23939,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		// A hovering aircraft that reached the end of a move stays in Mission::Move with its
+		// destination under it: it is idle too (it used to hover there forever, never harassing).
 		const bool isAirIdle = (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Area_Guard
-			|| pAir->CurrentMission == Mission::Sleep);
+			|| pAir->CurrentMission == Mission::Sleep
+			|| (pAir->CurrentMission == Mission::Move && pAir->Target == nullptr
+				&& (!pAir->Destination || pAir->DistanceFrom(pAir->Destination) <= 384)));
 
 		// Carryall «Matryoshka / Muñeca Rusa» Airlift (Slot 53): Pick up loaded
 		// APCs, Expansion Nanocores/MCVs, or rescue critically damaged tanks!
@@ -26074,6 +26253,27 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Measures this whole AI tick (telemetry "aiMsAvg" / "aiMsMax").
 	const NeuralTickTimer tickTimer { pHouse->ArrayIndex };
+
+	// Map class policy correction (outside training: the trainer sends combined policies).
+	if (!NeuralAI::HeadlessMode && MapClassLoaded && !MapClassApplied && NeuralAI::AllowBackpackInference)
+	{
+		ComputeMapInfo();
+		const int mapClass = CurrentMapClass();
+
+		if (mapClass >= 0)
+		{
+			MapClassApplied = true;
+			MapClassOriginalBias = std::to_array(NeuralAI::Backpack.OutputBias);
+
+			for (int i = 0; i < 128; ++i)
+			{
+				NeuralAI::Backpack.OutputBias[i] = static_cast<int16_t>(
+					std::clamp(static_cast<int>(NeuralAI::Backpack.OutputBias[i]) + MapClassDeltas[mapClass][i], -1500, 1500));
+			}
+
+			Debug::Log("[NeuralAI] Map class %d policy correction applied.\n", mapClass);
+		}
+	}
 
 	auto const pExt = HouseExt::Fetch(pHouse);
 	const int diffIdx = pHouse->GetAIDifficultyIndex();
