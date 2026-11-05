@@ -1184,7 +1184,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// AdvAI & StarCraft Resource Expansion State Machine:
 		// Measure minimum Chebyshev distance from our closest
 		// BaseNormal/ConYard/CapturedTech anchor to the nearest uncolonized Ore/Gem
-		// field (>= 10 cells from any owned Refinery, outside the ore blocks we already
+		// field (>= 14 cells from any owned Refinery, outside the ore blocks we already
 		// hold: the edge of our own field is not a new one).
 		// - If minAnchorDistToUncolonizedOre <= 9: our BaseNormal chain, Captured
 		// Tech Building, or Expansion ConYard has reached the new Ore field!
@@ -1195,6 +1195,27 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		CellStruct nearestUncolonizedOreCell = CellStruct::Empty;
 		int minAnchorDistToUncolonizedOre = 9999;
 		const std::vector<int> heldOreBlocks = GetHeldOreBlocks(pHouse);
+		// With two refineries standing, a building within 8 cells of one does not count as having
+		// reached a field (AdvAI spacing): the refinery would stand next to the others again, so
+		// the stepping stones go on until one stands clear of them.
+		std::vector<CellStruct> spacingRefineryCells;
+
+		for (auto const pRefBld : pHouse->Buildings)
+		{
+			if (pRefBld && pRefBld->IsAlive && !pRefBld->InLimbo && pRefBld->Type
+				&& (pRefBld->Type->Refinery || pRefBld->Type->ResourceDestination))
+			{
+				spacingRefineryCells.push_back(pRefBld->GetMapCoords());
+			}
+		}
+
+		auto const crowdsRefinery = [&spacingRefineryCells](const CellStruct& cell)
+		{
+			return spacingRefineryCells.size() >= 2
+				&& std::any_of(spacingRefineryCells.begin(), spacingRefineryCells.end(), [&cell](const CellStruct& rc)
+					{ return std::max(std::abs(cell.X - rc.X), std::abs(cell.Y - rc.Y)) <= 8; });
+		};
+
 		for (const CellStruct& scanOrigin : scanOrigins)
 		{
 			if (scanOrigin == CellStruct::Empty)
@@ -1233,14 +1254,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						const int dCheb = std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y));
 						if ((pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer
 								|| pOwnBld->Type->ResourceDestination)
-							&& dCheb < 10)
+							&& dCheb < 14)
 						{
 							alreadyColonizedByRef = true;
 							break;
 						}
 
-						if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard
-							|| BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
+						if ((pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard
+								|| BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
+							&& !crowdsRefinery(bc))
 						{
 							if (dCheb < closestAnchorDist)
 								closestAnchorDist = dCheb;

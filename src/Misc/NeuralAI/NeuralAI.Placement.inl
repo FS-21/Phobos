@@ -374,7 +374,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// Discover nearest uncolonized Ore/Tiberium patch across an 84-cell radius
 	// (for Expert 6, Slot 34 & AdvAI Stepping-Stone Base-Crawling). Measure
 	// distance from our closest BaseNormal/ConYard anchor and prefer uncolonized
-	// Ore patches >= 10 cells from any existing Refinery, outside the ore blocks we
+	// Ore patches >= 14 cells from any existing Refinery, outside the ore blocks we
 	// already hold (GetHeldOreBlocks).
 	const int centerZone = MapClass::Instance.GetMovementZoneType(center, MovementZone::Normal, false);
 	CellStruct nearestOreCell = CellStruct::Empty;
@@ -494,7 +494,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			{
 				auto const& rc = ownRefineryCells[r];
 
-				if (std::max(std::abs(tc.X - rc.X), std::abs(tc.Y - rc.Y)) < 10)
+				// 14 cells between refineries, as AdvAI spaced them on scattered ore.
+				if (std::max(std::abs(tc.X - rc.X), std::abs(tc.Y - rc.Y)) < 14)
 					nearExistingRef = true;
 			}
 
@@ -554,7 +555,11 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
-	if (nearestOreCell == CellStruct::Empty && smallPatchCell != CellStruct::Empty)
+	// A free scattered patch in reach beats a worthy field far away (12 cells of handicap): on
+	// maps with ore spread thin every refinery used to march toward a field 60+ cells away,
+	// each one placed 5 cells past the last like a stepping stone.
+	if (smallPatchCell != CellStruct::Empty
+		&& (nearestOreCell == CellStruct::Empty || bestSmallPatchMetric + 12 < bestOreMetric))
 	{
 		nearestOreCell = smallPatchCell;
 		bestOreDist = smallPatchDist;
@@ -1234,6 +1239,18 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 				if (!pOwnBld->Type->BaseNormal && !pOwnBld->Type->ConstructionYard
 					&& !BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
+				{
+					continue;
+				}
+
+				// A refinery never anchors the next one, nor does a building within 8 cells of one
+				// once two stand (AdvAI): chained refineries stood 5 cells apart on the way to the ore.
+				// Stepping stones carry the crawl, the refinery comes once one of them reaches the field.
+				if (pBuildingType->Refinery
+					&& (pOwnBld->Type->Refinery || pOwnBld->Type->ResourceDestination
+						|| (ownRefineryCells.size() >= 2
+							&& std::any_of(ownRefineryCells.begin(), ownRefineryCells.end(), [pOwnBld](const CellStruct& rc)
+								{ return std::max(std::abs(pOwnBld->GetMapCoords().X - rc.X), std::abs(pOwnBld->GetMapCoords().Y - rc.Y)) <= 8; }))))
 				{
 					continue;
 				}
@@ -2109,6 +2126,19 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						= std::abs(candidate.X - pullGoal.X) + std::abs(candidate.Y - pullGoal.Y);
 					const int orePull = std::clamp(52 + (crawlBias / 8), 32, 95);
 					spatialScore -= distToOre * orePull;
+
+					// Once two refineries stand, the next keeps 10 cells from the others (AdvAI
+					// spacing on scattered ore): next to another one it only shares its ore.
+					if (pBuildingType->Refinery && ownRefineryCells.size() >= 2)
+					{
+						int nearestRefinery = INT_MAX;
+
+						for (auto const& rc : ownRefineryCells)
+							nearestRefinery = std::min(nearestRefinery, static_cast<int>(std::max(std::abs(candidate.X - rc.X), std::abs(candidate.Y - rc.Y))));
+
+						if (nearestRefinery < 10)
+							spatialScore -= (10 - nearestRefinery) * 300;
+					}
 
 					int cover = 0;
 
