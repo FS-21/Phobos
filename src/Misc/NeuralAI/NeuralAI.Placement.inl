@@ -220,6 +220,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 		}
 	}
+
 	for (auto const pOwnBld : pHouse->Buildings)
 	{
 		if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Insignificant
@@ -1487,6 +1488,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 		}
 	}
+
 	int validCandidatesChecked = 0;
 
 	std::vector<CellStruct> candidateList;
@@ -1625,9 +1627,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
-	// Evaluate the anchor rings nearest the chosen anchor first (and each cell once): the list
-	// was built in building order, so in a big base the 900-candidate budget ran out on the
-	// oldest buildings and the forward anchor of a crawl was never even looked at.
+	// Evaluate the anchor rings nearest the chosen anchor first, each cell once, so the
+	// 900-candidate budget is spent around the anchor (the crawl front) rather than on the
+	// oldest buildings of a big base.
 	if (!pBuildingType->ConstructionYard && !isNavalBld && candidateList.size() > 1)
 	{
 		auto ringDistance = [&center](const CellStruct& c)

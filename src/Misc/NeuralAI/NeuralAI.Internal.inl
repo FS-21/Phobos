@@ -345,9 +345,9 @@ namespace
 	}
 
 	// Match score used to decide stalemates and to credit the backpack: kills, surviving units,
-	// the value of the structures (not their number: a wall post or a cheap tower no longer
-	// counts like a ConYard), and the ground held (map blocks and ore fields, half final, half
-	// average over the match), so holding the map pays and a fortified blob alone does not.
+	// the value of the structures (by cost, so cheap posts and towers weigh little) and the
+	// ground held (map blocks and ore fields, half final, half average over the match), so
+	// holding the map pays more than fortifying a single base.
 	int HouseMatchScore(const HouseClass* pHouse)
 	{
 		if (!pHouse)
@@ -383,16 +383,91 @@ namespace
 		Watchdogs,
 		Production,
 		Placement,
+		// Phases inside the micro and the production (finer view of the two big sections).
+		MicroSetup,
+		MicroSensors,
+		MicroUnits,
+		MicroInfantry,
+		MicroWaves,
+		MicroTransports,
+		MicroAircraft,
+		MicroBuildings,
+		ProdBuildings,
+		ProdUnits,
+		ProdInfantry,
+		ProdAircraft,
 		Count
 	};
 
 	constexpr const char* NeuralSectionNames[] = { "features", "moe", "tactics", "micro", "plans", "watchdogs",
-		"production", "placement" };
+		"production", "placement", "micro.setup", "micro.sensors", "micro.units", "micro.infantry", "micro.waves",
+		"micro.transports", "micro.aircraft", "micro.buildings", "prod.buildings", "prod.units", "prod.infantry",
+		"prod.aircraft" };
 
 	static_assert(std::size(NeuralSectionNames) == static_cast<size_t>(NeuralSection::Count));
 
 	std::array<std::array<double, static_cast<size_t>(NeuralSection::Count)>, 32> SectionTotalMs {};
 	std::array<std::array<double, static_cast<size_t>(NeuralSection::Count)>, 32> SectionMaxMs {};
+	// This tick's time per section (reset when the tick starts), for the peak breakdown.
+	std::array<std::array<double, static_cast<size_t>(NeuralSection::Count)>, 32> TickSectionMs {};
+
+	// The 10 slowest AI ticks of the match per house (>= 15 ms): frame, ms, live objects and the
+	// three heaviest phases, so the heavy process shows itself with its circumstances.
+	struct NeuralTickPeak
+	{
+		int Frame { 0 };
+		double Ms { 0.0 };
+		int Objects { 0 };
+		std::string Breakdown {};
+	};
+
+	std::array<std::vector<NeuralTickPeak>, 32> TickPeaks {};
+
+	void AddSectionTime(int houseIndex, NeuralSection section, double ms)
+	{
+		if (houseIndex < 0 || houseIndex >= 32)
+			return;
+
+		const size_t s = static_cast<size_t>(section);
+		SectionTotalMs[houseIndex][s] += ms;
+		SectionMaxMs[houseIndex][s] = std::max(SectionMaxMs[houseIndex][s], ms);
+		TickSectionMs[houseIndex][s] += ms;
+	}
+
+	double ElapsedMs(const LARGE_INTEGER& start)
+	{
+		LARGE_INTEGER end {};
+		LARGE_INTEGER frequency {};
+		QueryPerformanceCounter(&end);
+		QueryPerformanceFrequency(&frequency);
+
+		return frequency.QuadPart > 0 ? static_cast<double>(end.QuadPart - start.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart) : 0.0;
+	}
+
+	// Times consecutive phases of one long function: Mark(next) closes the current phase.
+	struct NeuralPhaseClock
+	{
+		int HouseIndex;
+		NeuralSection Current;
+		LARGE_INTEGER Start {};
+
+		NeuralPhaseClock(int houseIndex, NeuralSection first) : HouseIndex { houseIndex }, Current { first }
+		{
+			QueryPerformanceCounter(&this->Start);
+		}
+
+		void Mark(NeuralSection next)
+		{
+			AddSectionTime(this->HouseIndex, this->Current, ElapsedMs(this->Start));
+			this->Current = next;
+			QueryPerformanceCounter(&this->Start);
+		}
+
+		~NeuralPhaseClock()
+		{
+			AddSectionTime(this->HouseIndex, this->Current, ElapsedMs(this->Start));
+		}
+	};
 
 	struct NeuralSectionTimer
 	{
@@ -419,9 +494,7 @@ namespace
 				return;
 
 			const double ms = static_cast<double>(end.QuadPart - this->Start.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
-			const size_t s = static_cast<size_t>(this->Section);
-			SectionTotalMs[this->HouseIndex][s] += ms;
-			SectionMaxMs[this->HouseIndex][s] = std::max(SectionMaxMs[this->HouseIndex][s], ms);
+			AddSectionTime(this->HouseIndex, this->Section, ms);
 		}
 	};
 
@@ -511,6 +584,9 @@ namespace
 
 		explicit NeuralTickTimer(int houseIndex) : HouseIndex { houseIndex }
 		{
+			if (houseIndex >= 0 && houseIndex < 32)
+				TickSectionMs[houseIndex].fill(0.0);
+
 			QueryPerformanceCounter(&this->Start);
 		}
 
@@ -532,6 +608,43 @@ namespace
 			cost.TotalMs += ms;
 			cost.MaxMs = std::max(cost.MaxMs, ms);
 			cost.Ticks++;
+
+			if (ms >= 15.0)
+			{
+				auto& peaks = TickPeaks[this->HouseIndex];
+
+				if (peaks.size() < 10 || ms > peaks.back().Ms)
+				{
+					// Three heaviest leaf phases (the aggregate micro / production entries excluded).
+					std::vector<std::pair<double, size_t>> parts;
+					auto const& tick = TickSectionMs[this->HouseIndex];
+
+					for (size_t sec = 0; sec < tick.size(); ++sec)
+					{
+						if (sec != static_cast<size_t>(NeuralSection::Micro) && sec != static_cast<size_t>(NeuralSection::Production)
+							&& tick[sec] >= 0.5)
+						{
+							parts.emplace_back(tick[sec], sec);
+						}
+					}
+
+					std::sort(parts.begin(), parts.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
+					std::string text;
+
+					for (size_t k = 0; k < parts.size() && k < 3; ++k)
+					{
+						char part[64];
+						std::snprintf(part, sizeof(part), "%s%s %.1f", k ? ", " : "", NeuralSectionNames[parts[k].second], parts[k].first);
+						text += part;
+					}
+
+					peaks.push_back({ Unsorted::CurrentFrame, ms, TechnoClass::Array.Count, text });
+					std::sort(peaks.begin(), peaks.end(), [](auto const& a, auto const& b) { return a.Ms > b.Ms; });
+
+					if (peaks.size() > 10)
+						peaks.resize(10);
+				}
+			}
 		}
 	};
 

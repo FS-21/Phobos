@@ -800,6 +800,7 @@ namespace
 						if (dist < minEnemyDefDist)
 							minEnemyDefDist = dist;
 					}
+
 					if (dist < minEnemyBldDist)
 						minEnemyBldDist = dist;
 				}
@@ -825,6 +826,7 @@ namespace
 								if (dTrans <= 3)
 									score -= (4 - dTrans) * 450;
 							}
+
 							if (pEnemyU->Destination != nullptr)
 							{
 								const CellStruct dc = CellClass::Coord2Cell(pEnemyU->Destination->GetCoords());
@@ -836,6 +838,7 @@ namespace
 								}
 							}
 						}
+
 						continue;
 					}
 
