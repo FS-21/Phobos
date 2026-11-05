@@ -631,7 +631,11 @@ class RulesExt
 		Nullable<int> ProductionBar_Secondary_Pip_Empty;
 		Nullable<Point2D> ProductionBar_Secondary_Offset;
 
-		Valueable<bool> AIBrain;
+		Valueable<bool> NeuralAI_Enabled;
+		// Types Neural AI must never build (e.g. a mod's AI-only variants or fake structures):
+		// the mod decides, the engine never matches type names.
+		ValueableVector<TechnoTypeClass*> NeuralAI_IgnoreTypes;
+		Valueable<int> NeuralAI_StyleVariance;
 
 		ExtData(RulesClass* OwnerObject)
 		    : Extension<RulesClass>(OwnerObject), Storage_TiberiumIndex{-1}, Storage_AI{false},
@@ -995,7 +999,7 @@ class RulesExt
 		      ProductionBar_Offset_ShieldDelta{{0, 0}}, ProductionBar_Secondary{false},
 		      ProductionBar_Secondary_ShowBoth{true}, ProductionBar_Secondary_Shape{},
 		      ProductionBar_Secondary_Palette{}, ProductionBar_Secondary_Pip{}, ProductionBar_Secondary_Pip_Empty{},
-		      ProductionBar_Secondary_Offset{}, AIBrain{true}
+		      ProductionBar_Secondary_Offset{}, NeuralAI_Enabled{true}, NeuralAI_IgnoreTypes{}, NeuralAI_StyleVariance{150}
 		{
 		}
 
