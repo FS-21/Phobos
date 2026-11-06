@@ -35,8 +35,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	if (pExt->NeuralAI_Archetype == 1 || (IsAITickWindow(300, 60) && pHouse->OwnedUnits >= 4))
 		expScores[4] += 360; // Expert 4: Special Operations & Trickster
 
+	// Expert 5: Tactical Squad Micro, Kiting & Beacons: an army in contact (enemy tanks seen),
+	// stronger the bigger it is.
 	if (pHouse->OwnedUnits >= 3 || pHouse->OwnedInfantry >= 5)
-		expScores[5] += 300; // Expert 5: Tactical Squad Micro, Kiting & Beacons
+		expScores[5] += 300 + (features[65] > 0 ? std::min(300, (pHouse->OwnedUnits + pHouse->OwnedInfantry / 2) * 10) : 0);
 
 	const bool desperateForExpansionResources
 		= (features[19] < 28 && (features[20] > 6 || features[21] > 0 || features[25] > 0));
@@ -53,11 +55,17 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		expScores[6] += 380;
 	}
 
-	if ((features[68] > 12 || features[65] > 18 || features[69] > 16 || features[29] > 0 || features[31] > 0
-			|| pExt->NeuralAI_Archetype == 2 || pExt->NeuralAI_Archetype == 4)
-		&& pHouse->OwnedBuildings >= 5)
+	// Expert 7: Forward Defense Crawling & Chokepoint Siege, graded by real pressure: enemy defenses
+	// facing us (8 per visible one), enemy tanks seen (6 each), our buildings damaged, harvesters
+	// under attack. Merely seeing the enemy base (visible buildings) used to give the full bonus,
+	// so Expert 7 ran 94% of the time and the others never trained.
+	if (pHouse->OwnedBuildings >= 5)
 	{
-		expScores[7] += (features[65] > 24 || features[29] > 0 || features[31] > 0) ? 680 : 520; // Expert 7: Forward Defense Crawling & Chokepoint Siege
+		const int pressure = (features[68] / 8) * 60 + (features[65] / 6) * 25 + (features[29] > 0 ? 200 : 0)
+			+ (features[31] > 0 ? 250 : 0) + ((pExt->NeuralAI_Archetype == 2 || pExt->NeuralAI_Archetype == 4) ? 200 : 0);
+
+		if (pressure >= 150)
+			expScores[7] += std::min(680, pressure);
 	}
 
 	if (pHouse->NumAirpads > 0 || pHouse->OwnedAircraft >= 2 || features[66] > 20 || features[24] > 0
@@ -72,6 +80,8 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	}
 
 	const int curArch = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);
+	const int previousExpert = std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1);
+	std::array<int, 10> finalScores {};
 	int activeExpert = 0;
 	int bestExpScore = -999999;
 
@@ -81,18 +91,27 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 		if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded)
 		{
-			s += static_cast<int>(policy.OutputBias[(e < 8) ? (40 + e) : (84 + (e - 8))]);
+			// Learning tilts the choice, the situation makes it: the learned routing bias is capped
+			// at +-200 and the per-faction memory at +-150, so no expert is shut out (or made
+			// permanent) by a bias the others never get the chance to answer.
+			s += std::clamp(static_cast<int>(policy.OutputBias[(e < 8) ? (40 + e) : (84 + (e - 8))]), -200, 200);
 
 			const uint32_t eIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + curArch * 10 + e) % 512);
 
 			if (policy.Entries[eIdx].VisitCount > 0)
 			{
-				s += static_cast<int>(
+				s += std::clamp(static_cast<int>(
 					(e < 8)
 						? policy.Entries[eIdx].ExpertScoreDelta[e]
-						: policy.Entries[eIdx].BuildCategoryDelta[14 + (e - 8)]) * 6;
+						: policy.Entries[eIdx].BuildCategoryDelta[14 + (e - 8)]) * 6, -150, 150);
 			}
 		}
+
+		// Hysteresis: the current expert keeps the lead on near ties instead of flapping each tick.
+		if (e == previousExpert)
+			s += 60;
+
+		finalScores[e] = s;
 
 		if (s > bestExpScore)
 		{
@@ -100,6 +119,28 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 			activeExpert = e;
 		}
+	}
+
+	// Training exploration (trainer matches only, PHOBOS_TRAIN_SLOT): every 900-frame window an
+	// expert within 300 points of the best takes over for that window, the best one twice as
+	// often, so close alternatives get matches to prove themselves. Deterministic (frame, house),
+	// never the game RNG. Real games always take the best.
+	if (NeuralAI::TrainingMode)
+	{
+		std::array<int, 11> pool {};
+		int poolSize = 0;
+
+		pool[poolSize++] = activeExpert;
+
+		for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+		{
+			if (finalScores[e] >= bestExpScore - 300)
+				pool[poolSize++] = e;
+		}
+
+		const uint32_t window = static_cast<uint32_t>(Unsorted::CurrentFrame / 900);
+		const uint32_t mix = (window * 2654435761u) ^ (static_cast<uint32_t>(pHouse->ArrayIndex + 1) * 40503u);
+		activeExpert = pool[mix % static_cast<uint32_t>(poolSize)];
 	}
 
 	// Easy difficulty disables Spec-Ops Trickster and advanced tactical kiting

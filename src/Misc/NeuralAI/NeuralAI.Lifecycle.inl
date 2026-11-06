@@ -16,6 +16,7 @@ void NeuralAI::ParseCommandLineArg(const char* pArg)
 	else if (_strnicmp(pArg, "-TrainSlot=", 11) == 0)
 	{
 		NeuralAI::TrainSlotIndex = std::clamp(std::atoi(pArg + 11), 0, 63);
+		NeuralAI::TrainingMode = true;
 
 		Debug::Log("[NeuralAI] Training Slot Index set to %d.\n", NeuralAI::TrainSlotIndex);
 	}
