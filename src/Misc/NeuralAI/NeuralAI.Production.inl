@@ -220,6 +220,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Expert 0: economy peaks and crisis actions (blackout, broke, harvester balance).
 	UpdateEconomyCrisis(pHouse);
+
+	// Expert 3: which enemy to hit in a free-for-all.
+	UpdateFfaTargets(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -851,7 +854,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			bankMacro.TechCoveragePct = buildableTypes > 0 ? (ownedTypes * 100) / buildableTypes : 100;
-			bankMacro.BankFactoryRoom = pRoomProbe && NeuralAI::FindSpatialTetrisBuildCell(pHouse, pRoomProbe) != CellStruct::Empty;
+			bankMacro.BankFactoryRoom = pRoomProbe && CachedTetrisBuildCell(pHouse, pRoomProbe) != CellStruct::Empty;
 		}
 
 		// Never a production loop: the boost only exists in every other 900-frame window (in the
@@ -1668,7 +1671,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// up to one harvester per refinery: the war factory builds the second (economyUnitCap). Aiming
 		// at two kept the ConYard selling and rebuilding refineries all match (30 times in one test
 		// house), so radar, tech center and defenses never got their turn.
+		// Not while broke (UpdateEconomyCrisis): selling a working refinery to rebuild it splits the
+		// last credits between the refinery and the harvester the war factory builds.
 		const bool wantsHarvesterRecoveryViaRefinery = (pHouse->ConYards.Count >= 1 && staticRefineriesCount >= 1
+			&& !GetMacroState(pHouse).BrokeHoldActive
 			&& Unsorted::CurrentFrame >= GetMacroState(pHouse).NextHarvesterRecoveryFrame
 			&& GetMacroState(pHouse).TemporaryRecoveryRefineryPlacedFrame.empty()
 			&& (orphanRefineryZoneNeedsReplacement >= 0
@@ -2059,7 +2065,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (owned >= maxShipyards + (islandYardNeedsShipyard ? 1 : 0))
 					continue;
 
-				if (!(HouseNeedsNaval(pHouse) || islandYardNeedsShipyard) || NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
+				if (!(HouseNeedsNaval(pHouse) || islandYardNeedsShipyard) || CachedTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
 					continue;
 
 				score = scores[7] - owned * 950;
@@ -3027,6 +3033,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			if (pHouse->NumConYards >= 1 && features[20] <= 6 && !hasUncolonizedIslandTarget)
+				continue;
+
+			// A house with a ConYard but nothing gathering rebuilds its income first (a harvester, or a
+			// refinery and its free harvester): an expansion MCV would take its last credits and the
+			// new base would have no harvester either.
+			if (pHouse->NumConYards >= 1 && ownedEconomyUnits == 0 && ownedCashProduces == 0)
 				continue;
 
 			if (pHouse->NumConYards >= 1 && needsCrossIslandMCV

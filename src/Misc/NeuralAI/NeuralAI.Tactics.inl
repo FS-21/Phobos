@@ -870,12 +870,14 @@ namespace
 	// Expert 0 (Economy & Crisis) bookkeeping and actions, every 150 frames. The peaks of static
 	// refineries and harvesters are tracked for every house; EconomyRecoveryActive is set when a raid
 	// cost a third of either (production then rebuilds the economy first while Expert 0 runs).
+	// Any house, whatever the expert (without income it is dead anyway):
+	// - Broke: no income and less than a harvester's price: sell the least useful structure, one per
+	//   600 frames: a factory copy, a defense copy far from any known enemy structure, a power plant
+	//   copy the power surplus can spare, any defense copy, then a lone support structure that is no
+	//   factory. Never a ConYard or a refinery.
 	// While Expert 0 is in charge it also acts:
 	// - Blackout: with low power, high-drain structures that are neither factories nor defenses go
 	//   offline (the existing micro brings them back online once the surplus is >= 150).
-	// - Broke: no income and less than a harvester's price: sell the least useful structure, one per
-	//   600 frames (a factory copy, then a defense far from any known enemy structure). Never the
-	//   last of a type, a ConYard, a refinery or a power plant.
 	// - Harvester balance: a refinery with 3+ harvesters waiting next to it sends one to the ore of a
 	//   refinery of ours that has none (one per 450 frames).
 	void UpdateEconomyCrisis(HouseClass* pHouse)
@@ -894,11 +896,15 @@ namespace
 		std::vector<BuildingClass*> refineries;
 		std::vector<UnitClass*> harvesters;
 		int deployedGatherers = 0;
+		int cashBuildings = 0;
 
 		for (auto const pBld : pHouse->Buildings)
 		{
 			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->CurrentMission == Mission::Selling)
 				continue;
+
+			if (pBld->Type->ProduceCashAmount > 0)
+				cashBuildings++;
 
 			// A deployed slave miner (ResourceGatherer, Yuri) gathers by itself: counted with the
 			// gatherers, not the refineries, so deploying one never looks like a lost harvester.
@@ -910,8 +916,9 @@ namespace
 
 		for (auto const pUnit : UnitClass::Array)
 		{
-			// Mobile slave miners (they deploy into their refinery) gather too.
-			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && pUnit->Type
+			// Mobile slave miners (they deploy into their refinery) gather too. Not one in limbo: the
+			// harvester a factory is building exists already, waiting for the credits it needs.
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Type
 				&& (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
 					|| (pUnit->Type->DeploysInto && (pUnit->Type->DeploysInto->Refinery || pUnit->Type->DeploysInto->ResourceGatherer))))
 			{
@@ -928,12 +935,13 @@ namespace
 
 		auto const pExt = HouseExt::Fetch(pHouse);
 
-
-		if (!pExt || pExt->NeuralAI_ActiveExpert != 0)
+		if (!pExt)
 			return;
 
+		const bool expertInCharge = pExt->NeuralAI_ActiveExpert == 0;
+
 		// Blackout.
-		if (pHouse->HasLowPower())
+		if (expertInCharge && pHouse->HasLowPower())
 		{
 			for (auto const pBld : pHouse->Buildings)
 			{
@@ -951,12 +959,121 @@ namespace
 
 		for (auto const pType : UnitTypeClass::Array)
 		{
-			if (pType && (pType->Harvester || pType->ResourceGatherer) && !pType->DeploysInto && CanBuildUnderHumanRules(pHouse, pType))
+			if (pType && (pType->Harvester || pType->ResourceGatherer)
+				&& (!pType->DeploysInto || pType->DeploysInto->Refinery || pType->DeploysInto->ResourceGatherer)
+				&& CanBuildUnderHumanRules(pHouse, pType))
 				cheapestHarvester = std::min(cheapestHarvester, pType->GetActualCost(pHouse));
+		}
+
+		const bool harvesterBuildable = cheapestHarvester != INT_MAX;
+
+		// Without a refinery no harvester can be built: the cheapest refinery (with its free
+		// harvester) is then what the credits are kept for.
+		if (!harvesterBuildable && refCount == 0)
+		{
+			for (auto const pType : BuildingTypeClass::Array)
+			{
+				if (pType && (pType->Refinery || pType->ResourceGatherer) && CanBuildUnderHumanRules(pHouse, pType))
+					cheapestHarvester = std::min(cheapestHarvester, pType->GetActualCost(pHouse));
+			}
 		}
 
 		// No income: nothing gathers (harvesters, slave miners deployed or not).
 		const bool noIncome = harvCount == 0;
+
+		// Broke hold: while nothing gathers, no cash building pays and a harvester (or, with no
+		// refinery left, a refinery) can be built, every production that does not restore income stops
+		// spending, so the last credits and what a broke sale returns go to that one item. A refinery
+		// waits while a harvester can be built (it costs more for the same income), a power plant
+		// goes on under low power. The vehicle in the war factory is cancelled (refunded; the harvester
+		// needs that queue), the others are put on hold and resumed once something gathers.
+		const bool holdForHarvester = noIncome && cashBuildings == 0 && cheapestHarvester != INT_MAX;
+		macro.BrokeHoldActive = holdForHarvester;
+
+		// No repairs while broke: wrench repairs stop, units on a repair station (service depot,
+		// shipyard) step off it.
+		if (holdForHarvester)
+		{
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type)
+					continue;
+
+				if (pBld->IsBeingRepaired)
+					pBld->SetRepairState(0);
+
+				if (!pBld->Type->UnitRepair)
+					continue;
+
+				const CellStruct exitCell = pBld->GetMapCoords() + CellStruct { static_cast<short>(pBld->Type->GetFoundationWidth() + 2), 0 };
+
+				for (int i = 0; pBld->RadioLinks.IsAllocated && i < pBld->RadioLinks.Capacity; ++i)
+				{
+					auto const pDocked = abstract_cast<FootClass*>(pBld->GetNthLink(i));
+
+					if (!pDocked || !pDocked->IsAlive || pDocked->Owner != pHouse || pDocked->GetHealthPercentage() >= 1.0)
+						continue;
+
+					if (auto const pExitCell = MapClass::Instance.TryGetCellAt(exitCell))
+					{
+						pDocked->SetDestination(pExitCell, true);
+						pDocked->QueueMission(Mission::Move, false);
+					}
+				}
+			}
+		}
+
+		for (auto const pFactory : FactoryClass::Array)
+		{
+			if (!pFactory || pFactory->Owner != pHouse || !pFactory->Object)
+				continue;
+
+			auto const pObject = pFactory->Object;
+			auto const pType = pObject->GetTechnoType();
+			const DWORD objectId = pObject->UniqueID;
+			auto const held = std::find(macro.BrokeHeldObjects.begin(), macro.BrokeHeldObjects.end(), objectId);
+
+			if (!holdForHarvester)
+			{
+				if (held != macro.BrokeHeldObjects.end() && pFactory->IsSuspended)
+					pFactory->Unsuspend(true);
+
+				continue;
+			}
+
+			if (!pType || pFactory->IsSuspended || pFactory->IsDone() || held != macro.BrokeHeldObjects.end())
+				continue;
+
+			auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
+			auto const pBldType = abstract_cast<BuildingTypeClass*>(pType);
+			auto const pInfType = abstract_cast<InfantryTypeClass*>(pType);
+			const bool restoresIncome = (pUnitType
+					&& (pUnitType->Harvester || pUnitType->ResourceGatherer
+						|| (pUnitType->DeploysInto
+							&& (pUnitType->DeploysInto->Refinery || pUnitType->DeploysInto->ResourceGatherer
+								|| (pUnitType->DeploysInto->ConstructionYard && pHouse->ConYards.Count == 0)))))
+				|| (pBldType && (((pBldType->Refinery || pBldType->ResourceGatherer) && !harvesterBuildable)
+					|| pBldType->ProduceCashAmount > 0
+					|| (pBldType->PowerBonus > pBldType->PowerDrain && pHouse->HasLowPower())))
+				|| (pInfType && pInfType->Engineer);
+
+			if (restoresIncome)
+				continue;
+
+			if (pUnitType && !pUnitType->Naval)
+			{
+				Debug::Log("[NeuralAI] House %d broke: cancelling %s for a harvester.\n", pHouse->ArrayIndex, pType->ID);
+				pFactory->AbandonProduction();
+			}
+			else
+			{
+				pFactory->Suspend(true);
+				macro.BrokeHeldObjects.push_back(objectId);
+			}
+		}
+
+		if (!holdForHarvester)
+			macro.BrokeHeldObjects.clear();
 
 		if (noIncome && cheapestHarvester != INT_MAX && pHouse->Available_Money() < cheapestHarvester
 			&& now - macro.LastBrokeSaleFrame >= 600)
@@ -987,23 +1104,33 @@ namespace
 			{
 				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->CurrentMission == Mission::Selling
 					|| pBld->Type->ConstructionYard || pBld->Type->Refinery || pBld->Type->ResourceDestination
-					|| pBld->Type->PowerBonus > pBld->Type->PowerDrain || pBld->Type->Unsellable || pBld->Type->InvisibleInGame
-					|| typeCounts[pBld->Type->ArrayIndex] < 2)
+					|| pBld->Type->Unsellable || pBld->Type->InvisibleInGame)
 				{
 					continue;
 				}
 
 				const CellStruct bc = pBld->GetMapCoords();
+				const bool hasCopy = typeCounts[pBld->Type->ArrayIndex] >= 2;
+				const int netPower = pBld->Type->PowerBonus - pBld->Type->PowerDrain;
 				int tier = INT_MAX;
 
-				if (pBld->Type->Factory != AbstractType::None)
+				if (netPower > 0)
+				{
+					if (hasCopy && pHouse->PowerOutput - pHouse->PowerDrain >= netPower)
+						tier = 2;
+				}
+				else if (hasCopy && pBld->Type->Factory != AbstractType::None)
 				{
 					tier = 0;
 				}
-				else if (pBld->Type->IsBaseDefense
-					&& std::none_of(enemyCells.begin(), enemyCells.end(), [&bc](const CellStruct& e) { return bc.DistanceFrom(e) <= 30.0; }))
+				else if (hasCopy && pBld->Type->IsBaseDefense)
 				{
-					tier = 1;
+					tier = std::none_of(enemyCells.begin(), enemyCells.end(), [&bc](const CellStruct& e) { return bc.DistanceFrom(e) <= 30.0; })
+						? 1 : 3;
+				}
+				else if (pBld->Type->Factory == AbstractType::None && !pBld->Type->IsBaseDefense)
+				{
+					tier = 4;
 				}
 
 				if (tier < bestTier)
@@ -1021,6 +1148,9 @@ namespace
 				pSell->Sell(1);
 			}
 		}
+
+		if (!expertInCharge)
+			return;
 
 		// Harvester balance.
 		if (refCount >= 2 && now - macro.LastHarvesterBalanceFrame >= 450)
@@ -1072,6 +1202,180 @@ namespace
 					}
 				}
 			}
+		}
+	}
+
+	// FindSpatialTetrisBuildCell costs 20-55 ms in a late game. Questions that only need a rough
+	// answer (is there room for it, where would it go: deploy stands, a fleeing MCV, the shipyard
+	// check) share one answer per house and building type for 240 frames; real placement always
+	// searches. Lookups only, keyed by house and type index, tied to NeuralMatchSerial.
+	CellStruct CachedTetrisBuildCell(HouseClass* pHouse, BuildingTypeClass* pType)
+	{
+		if (!pHouse || !pType)
+			return CellStruct::Empty;
+
+		struct Entry
+		{
+			int MatchSerial;
+			int Frame;
+			CellStruct Cell;
+		};
+
+		static std::unordered_map<int, Entry> cache;
+		const int key = pHouse->ArrayIndex * 8192 + pType->ArrayIndex;
+		const int now = Unsorted::CurrentFrame;
+
+		if (auto const it = cache.find(key); it != cache.end() && it->second.MatchSerial == NeuralMatchSerial
+			&& now >= it->second.Frame && now - it->second.Frame < 240)
+		{
+			return it->second.Cell;
+		}
+
+		const CellStruct cell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pType);
+		cache[key] = Entry { NeuralMatchSerial, now, cell };
+		return cell;
+	}
+
+	// Expert 3 (FFA opportunism), every 450 frames, only with two or more living enemies and Expert 3
+	// in charge: a priority bonus per enemy house for the main enemy choice (Micro), from what this
+	// house has seen only (fog-fair):
+	// - up to +600 (40 per unit) to an enemy caught fighting someone else (its visible units next to a
+	//   third house's known structures, or a third house's visible units next to its known structures):
+	//   hit it while busy.
+	// - +500 to an enemy whose visible units are inside our base (12 cells of our buildings): never
+	//   two fronts, answer the one at the door first.
+	// - up to +400 to the weakest by known structures, +150 to the nearest known base.
+	// - the visible threat of an enemy not at our door counts 40%: let the others wear the big one down.
+	void UpdateFfaTargets(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - macro.LastFfaTargetFrame < 450 && now >= macro.LastFfaTargetFrame)
+			return;
+
+		macro.LastFfaTargetFrame = now;
+		macro.FfaEnemyBonus.fill(0);
+		macro.FfaThreatScale.fill(100);
+
+		auto const pExt = HouseExt::Fetch(pHouse);
+
+		if (!pExt || pExt->NeuralAI_ActiveExpert != 3)
+			return;
+
+		std::vector<HouseClass*> enemies;
+
+		for (auto const pOther : HouseClass::Array)
+		{
+			if (pOther && pOther != pHouse && !pHouse->IsAlliedWith(pOther) && !pOther->IsNeutral() && !pOther->IsObserver()
+				&& !pOther->Defeated && pOther->ArrayIndex >= 0 && pOther->ArrayIndex < 8)
+			{
+				enemies.push_back(pOther);
+			}
+		}
+
+		if (enemies.size() < 2)
+			return;
+
+		// Known structures per house (enemies and third parties alike) and our own building cells.
+		std::map<int, std::vector<CellStruct>> knownStructures;
+		std::vector<CellStruct> ownCells;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Owner || !pBld->Type || pBld->Type->InvisibleInGame)
+				continue;
+
+			if (pBld->Owner == pHouse)
+				ownCells.push_back(pBld->GetMapCoords());
+			else if (!pBld->Owner->IsNeutral() && IsEnemyBuildingKnown(pHouse, pBld))
+				knownStructures[pBld->Owner->ArrayIndex].push_back(pBld->GetMapCoords());
+		}
+
+		auto isNear = [](const std::vector<CellStruct>& cells, const CellStruct& c, int range)
+		{
+			return std::any_of(cells.begin(), cells.end(),
+				[&](const CellStruct& o) { return std::max(std::abs(o.X - c.X), std::abs(o.Y - c.Y)) <= range; });
+		};
+
+		std::array<int, 8> busy {};
+		std::array<bool, 8> atOurDoor {};
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || !pTechno->IsAlive || pTechno->InLimbo || !pTechno->Owner || pTechno->Owner == pHouse
+				|| pTechno->Owner->IsNeutral() || pTechno->WhatAmI() == AbstractType::Building
+				|| pTechno->Owner->ArrayIndex < 0 || pTechno->Owner->ArrayIndex >= 8
+				|| !IsCellVisibleToAI(pHouse, pTechno->GetCell()))
+			{
+				continue;
+			}
+
+			const int owner = pTechno->Owner->ArrayIndex;
+			const CellStruct c = pTechno->GetMapCoords();
+
+			if (!pHouse->IsAlliedWith(pTechno->Owner) && isNear(ownCells, c, 12))
+				atOurDoor[owner] = true;
+
+			for (auto const& [third, cells] : knownStructures)
+			{
+				if (third == owner || third < 0 || third >= 8)
+					continue;
+
+				if (isNear(cells, c, 12))
+				{
+					busy[owner]++; // its units at a third house's base
+					busy[third]++; // that third house is under attack
+				}
+			}
+		}
+
+		int maxKnown = 1;
+
+		for (auto const pEnemy : enemies)
+			maxKnown = std::max(maxKnown, static_cast<int>(knownStructures[pEnemy->ArrayIndex].size()));
+
+		const CellStruct home = pHouse->ConYards.Count > 0 ? pHouse->ConYards.GetItem(0)->GetMapCoords() : pHouse->BaseSpawnCell;
+		int nearestIdx = -1;
+		int nearestDist = INT_MAX;
+
+		for (auto const pEnemy : enemies)
+		{
+			for (auto const& c : knownStructures[pEnemy->ArrayIndex])
+			{
+				const int d = std::max(std::abs(c.X - home.X), std::abs(c.Y - home.Y));
+
+				if (d < nearestDist)
+				{
+					nearestDist = d;
+					nearestIdx = pEnemy->ArrayIndex;
+				}
+			}
+		}
+
+		for (auto const pEnemy : enemies)
+		{
+			const int idx = pEnemy->ArrayIndex;
+			const int known = static_cast<int>(knownStructures[idx].size());
+			int bonus = 0;
+
+			// Graded: a few units trading at a border do not make a house busy, a siege does.
+			bonus += std::min(600, 40 * busy[idx]);
+
+			if (atOurDoor[idx])
+				bonus += 500;
+
+			if (known > 0)
+				bonus += 400 * (maxKnown - known) / maxKnown;
+
+			if (idx == nearestIdx)
+				bonus += 150;
+
+			macro.FfaEnemyBonus[idx] = bonus;
+			macro.FfaThreatScale[idx] = atOurDoor[idx] ? 100 : 40;
 		}
 	}
 
