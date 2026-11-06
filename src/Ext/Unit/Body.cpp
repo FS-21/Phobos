@@ -1196,6 +1196,16 @@ void UnitExt::UpdateCarryall()
 	}
 }
 
+void UnitExt::OnDetach(TechnoClass* pTarget, bool removed)
+{
+	if (removed)
+	{
+		AnnounceInvalidPointer(this->CarryallTarget, pTarget);
+		AnnounceInvalidPointer(this->CarryallCargo, pTarget);
+		AnnounceInvalidPointer(this->SubterraneanHarvRallyPoint, pTarget);
+	}
+}
+
 void UnitExt::LoadFromStream(PhobosStreamReader& Stm)
 {
 	FootExt::LoadFromStream(Stm);

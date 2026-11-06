@@ -19,7 +19,7 @@ enum class JumpjetCarryallState : unsigned char
 // Concrete leaf extension for UnitClass. Empty for now: all techno-level data lives
 // in TechnoExt; this leaf only exists so a unit's extension has its own
 // concrete type (TechnoExt itself is never instantiated).
-class UnitExt final : public FootExt
+class UnitExt final : public FootExt, public Detach::Listener<TechnoClass>
 {
 public:
 	using base_type = UnitClass;
@@ -61,6 +61,11 @@ public:
 	{ }
 
 	virtual ~UnitExt() override;
+
+	// Clears the carryall target / cargo and the subterranean harvester rally point when that
+	// object is deleted, so a carryall never reads a unit that died before the pickup.
+	// (This branch notifies by type: technos are what these fields hold.)
+	virtual void OnDetach(TechnoClass* pTarget, bool removed) override;
 
 	void UpdateSubterraneanHarvester();
 	void UpdateKeepTargetOnMove();
