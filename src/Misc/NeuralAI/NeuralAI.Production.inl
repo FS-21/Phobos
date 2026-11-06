@@ -217,6 +217,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Highest unit tier allowed now (super units come step by step).
 	UpdateUnitTierCap(pHouse);
+
+	// Expert 0: economy peaks and crisis actions (blackout, broke, harvester balance).
+	UpdateEconomyCrisis(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -1966,6 +1969,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score -= 2500;
 				}
+
+				// Expert 0 after a raid: refineries back to their peak first.
+				if (pExt->NeuralAI_ActiveExpert == 0 && GetMacroState(pHouse).EconomyRecoveryActive
+					&& ownedRefineries < GetMacroState(pHouse).PeakRefineries)
+				{
+					score += 1500;
+				}
 			}
 			else if (pBld->Factory == AbstractType::InfantryType)
 			{
@@ -3468,6 +3478,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += 280;
 				}
+			}
+
+			// Expert 0 after a raid: harvesters back to their peak first.
+			if ((pUnit->Harvester || pUnit->ResourceGatherer) && !isDeployableRefineryOrMiner
+				&& pExt->NeuralAI_ActiveExpert == 0 && GetMacroState(pHouse).EconomyRecoveryActive
+				&& ownedEconomyUnits < GetMacroState(pHouse).PeakHarvesters)
+			{
+				score += 1500;
 			}
 
 			if (score > bestUnitScore)

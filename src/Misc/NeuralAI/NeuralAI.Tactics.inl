@@ -867,6 +867,214 @@ namespace
 		return tier <= macro.UnitTierCap;
 	}
 
+	// Expert 0 (Economy & Crisis) bookkeeping and actions, every 150 frames. The peaks of static
+	// refineries and harvesters are tracked for every house; EconomyRecoveryActive is set when a raid
+	// cost a third of either (production then rebuilds the economy first while Expert 0 runs).
+	// While Expert 0 is in charge it also acts:
+	// - Blackout: with low power, high-drain structures that are neither factories nor defenses go
+	//   offline (the existing micro brings them back online once the surplus is >= 150).
+	// - Broke: no income and less than a harvester's price: sell the least useful structure, one per
+	//   600 frames (a factory copy, then a defense far from any known enemy structure). Never the
+	//   last of a type, a ConYard, a refinery or a power plant.
+	// - Harvester balance: a refinery with 3+ harvesters waiting next to it sends one to the ore of a
+	//   refinery of ours that has none (one per 450 frames).
+	void UpdateEconomyCrisis(HouseClass* pHouse)
+	{
+		if (!pHouse || pHouse->Defeated)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - macro.LastEconomyCrisisFrame < 150 && now >= macro.LastEconomyCrisisFrame)
+			return;
+
+		macro.LastEconomyCrisisFrame = now;
+
+		std::vector<BuildingClass*> refineries;
+		std::vector<UnitClass*> harvesters;
+		int deployedGatherers = 0;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->CurrentMission == Mission::Selling)
+				continue;
+
+			// A deployed slave miner (ResourceGatherer, Yuri) gathers by itself: counted with the
+			// gatherers, not the refineries, so deploying one never looks like a lost harvester.
+			if (pBld->Type->ResourceGatherer)
+				deployedGatherers++;
+			else if (pBld->Type->Refinery || pBld->Type->ResourceDestination)
+				refineries.push_back(pBld);
+		}
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			// Mobile slave miners (they deploy into their refinery) gather too.
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && pUnit->Type
+				&& (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
+					|| (pUnit->Type->DeploysInto && (pUnit->Type->DeploysInto->Refinery || pUnit->Type->DeploysInto->ResourceGatherer))))
+			{
+				harvesters.push_back(pUnit);
+			}
+		}
+
+		const int refCount = static_cast<int>(refineries.size());
+		const int harvCount = static_cast<int>(harvesters.size()) + deployedGatherers;
+		macro.PeakRefineries = std::max(macro.PeakRefineries, refCount);
+		macro.PeakHarvesters = std::max(macro.PeakHarvesters, harvCount);
+		macro.EconomyRecoveryActive = (macro.PeakRefineries >= 2 && refCount * 3 < macro.PeakRefineries * 2)
+			|| (macro.PeakHarvesters >= 3 && harvCount * 3 < macro.PeakHarvesters * 2);
+
+		auto const pExt = HouseExt::Fetch(pHouse);
+
+
+		if (!pExt || pExt->NeuralAI_ActiveExpert != 0)
+			return;
+
+		// Blackout.
+		if (pHouse->HasLowPower())
+		{
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->TogglePower && pBld->StuffEnabled
+					&& !pBld->IsIronCurtained() && !pBld->Type->IsBaseDefense && pBld->Type->Factory == AbstractType::None
+					&& !pBld->Type->ConstructionYard && !pBld->Type->Refinery && pBld->Type->PowerDrain >= 100)
+				{
+					pBld->GoOffline();
+				}
+			}
+		}
+
+		// Broke.
+		int cheapestHarvester = INT_MAX;
+
+		for (auto const pType : UnitTypeClass::Array)
+		{
+			if (pType && (pType->Harvester || pType->ResourceGatherer) && !pType->DeploysInto && CanBuildUnderHumanRules(pHouse, pType))
+				cheapestHarvester = std::min(cheapestHarvester, pType->GetActualCost(pHouse));
+		}
+
+		// No income: nothing gathers (harvesters, slave miners deployed or not).
+		const bool noIncome = harvCount == 0;
+
+		if (noIncome && cheapestHarvester != INT_MAX && pHouse->Available_Money() < cheapestHarvester
+			&& now - macro.LastBrokeSaleFrame >= 600)
+		{
+			std::map<int, int> typeCounts;
+
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->CurrentMission != Mission::Selling)
+					typeCounts[pBld->Type->ArrayIndex]++;
+			}
+
+			std::vector<CellStruct> enemyCells;
+
+			for (auto const pEB : BuildingClass::Array)
+			{
+				if (pEB && pEB->IsAlive && !pEB->InLimbo && pEB->Owner && pEB->Owner != pHouse && !pEB->Owner->IsNeutral()
+					&& !pHouse->IsAlliedWith(pEB->Owner) && IsEnemyBuildingKnown(pHouse, pEB))
+				{
+					enemyCells.push_back(pEB->GetMapCoords());
+				}
+			}
+
+			BuildingClass* pSell = nullptr;
+			int bestTier = INT_MAX;
+
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->CurrentMission == Mission::Selling
+					|| pBld->Type->ConstructionYard || pBld->Type->Refinery || pBld->Type->ResourceDestination
+					|| pBld->Type->PowerBonus > pBld->Type->PowerDrain || pBld->Type->Unsellable || pBld->Type->InvisibleInGame
+					|| typeCounts[pBld->Type->ArrayIndex] < 2)
+				{
+					continue;
+				}
+
+				const CellStruct bc = pBld->GetMapCoords();
+				int tier = INT_MAX;
+
+				if (pBld->Type->Factory != AbstractType::None)
+				{
+					tier = 0;
+				}
+				else if (pBld->Type->IsBaseDefense
+					&& std::none_of(enemyCells.begin(), enemyCells.end(), [&bc](const CellStruct& e) { return bc.DistanceFrom(e) <= 30.0; }))
+				{
+					tier = 1;
+				}
+
+				if (tier < bestTier)
+				{
+					bestTier = tier;
+					pSell = pBld;
+				}
+			}
+
+			if (pSell)
+			{
+				macro.LastBrokeSaleFrame = now;
+				Debug::Log("[NeuralAI] House %d broke (no income, %d credits): selling %s at (%d,%d) for a harvester.\n",
+					pHouse->ArrayIndex, pHouse->Available_Money(), pSell->Type->ID, pSell->GetMapCoords().X, pSell->GetMapCoords().Y);
+				pSell->Sell(1);
+			}
+		}
+
+		// Harvester balance.
+		if (refCount >= 2 && now - macro.LastHarvesterBalanceFrame >= 450)
+		{
+			BuildingClass* pCrowded = nullptr;
+			BuildingClass* pIdle = nullptr;
+			int crowdedQueue = 2;
+
+			for (auto const pRef : refineries)
+			{
+				int queuedNear = 0;
+
+				for (auto const pHarv : harvesters)
+				{
+					if (pHarv->DistanceFrom(pRef) <= 6 * 256)
+						queuedNear++;
+				}
+
+				const bool anyAssigned = std::any_of(harvesters.begin(), harvesters.end(),
+					[pRef](UnitClass* pHarv) { return pHarv->DistanceFrom(pRef) <= 14 * 256; });
+
+				if (queuedNear > crowdedQueue)
+				{
+					crowdedQueue = queuedNear;
+					pCrowded = pRef;
+				}
+
+				if (!anyAssigned && !pIdle)
+					pIdle = pRef;
+			}
+
+			if (pCrowded && pIdle && pCrowded != pIdle)
+			{
+				CellClass* pOre = FindFreeOreFieldCell(pHouse, pIdle->GetMapCoords(),
+					MapClass::Instance.GetMovementZoneType(pIdle->GetMapCoords(), MovementZone::Normal, false), 0, true);
+
+				if (pOre && pOre->MapCoords.DistanceFrom(pIdle->GetMapCoords()) <= 16.0)
+				{
+					for (auto const pHarv : harvesters)
+					{
+						if (pHarv->DistanceFrom(pCrowded) <= 6 * 256 && !pHarv->InLimbo && pHarv->CurrentMission != Mission::Enter
+							&& pHarv->CurrentMission != Mission::Unload)
+						{
+							macro.LastHarvesterBalanceFrame = now;
+							pHarv->SetDestination(pOre, true);
+							pHarv->QueueMission(Mission::Harvest, false);
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Field scouting: one fast, cheap idle ground unit at a time visits the nearest free ore field
 	// (map-wide cache) not scouted in the last 5400 frames, so an enemy outpost there is known
 	// before an MCV is sent (free-field searches skip fields near known enemy structures).
