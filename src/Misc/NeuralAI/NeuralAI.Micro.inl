@@ -1,6 +1,24 @@
 // NeuralAI.Micro.inl: Tactical and special operations micro (one function).
 // Part of NeuralAI.cpp (included in order; one translation unit).
 
+// InfantryClass::Scatter runs the locomotor right away (0x51D478), so a scattered unit can leave its
+// cell and be relinked into another cell's object list inside the call. Walking FirstObject/NextObject
+// while scattering then follows the moved unit into the other list and can revisit units forever (the
+// game frame froze on "(4) The Honeymoon"). Copy the cell's foot units first and act on the copy.
+static void CollectCellFoots(CellClass* pCell, std::vector<FootClass*>& foots)
+{
+	if (!pCell)
+		return;
+
+	for (ObjectClass* pObj = pCell->FirstObject; pObj; pObj = pObj->NextObject)
+	{
+		if (auto const pFoot = abstract_cast<FootClass*>(pObj))
+		{
+			if (std::find(foots.begin(), foots.end(), pFoot) == foots.end())
+				foots.push_back(pFoot);
+		}
+	}
+}
 
 void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::array<int16_t, OutputVectorSize>& scores)
 {
@@ -182,41 +200,41 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pFC)
 				return false;
 
-			for (ObjectClass* pObj = pFC->FirstObject; pObj; pObj = pObj->NextObject)
+			std::vector<FootClass*> cellFoots;
+			CollectCellFoots(pFC, cellFoots);
+
+			for (auto const pFoot : cellFoots)
 			{
-				if (pObj == pDeployerUnit)
+				if (pFoot == pDeployerUnit)
 					continue;
 
-				if (auto const pFoot = abstract_cast<FootClass*>(pObj))
+				if (pFoot->Owner != pH || !pFoot->IsAlive || pFoot->InLimbo)
+					continue;
+
+				auto const pOtherU = abstract_cast<UnitClass*>(pFoot);
+				if (pOtherU && pOtherU->Type
+					&& (pOtherU->Type->DeploysInto != nullptr || IsAmphibiousOrAirTransport(pOtherU->Type)))
 				{
-					if (pFoot->Owner == pH && pFoot->IsAlive && !pFoot->InLimbo)
+					occupiedByOtherDeployerOrTrans = true;
+					if (pOtherU->Type->DeploysInto != nullptr)
 					{
-						auto const pOtherU = abstract_cast<UnitClass*>(pFoot);
-						if (pOtherU && pOtherU->Type
-							&& (pOtherU->Type->DeploysInto != nullptr || IsAmphibiousOrAirTransport(pOtherU->Type)))
+						if (pOtherU->UniqueID > pDeployerUnit->UniqueID
+							&& pOtherU->CurrentMission != Mission::Move)
 						{
-							occupiedByOtherDeployerOrTrans = true;
-							if (pOtherU->Type->DeploysInto != nullptr)
-							{
-								if (pOtherU->UniqueID > pDeployerUnit->UniqueID
-									&& pOtherU->CurrentMission != Mission::Move)
-								{
-									pOtherU->Scatter(CoordStruct::Empty, true, false);
-								}
-							}
-							else if (!IsAmphibiousOrAirTransport(pOtherU->Type) && pOtherU->CurrentMission != Mission::Move)
-							{
-								pOtherU->Scatter(CoordStruct::Empty, true, false);
-							}
+							pOtherU->Scatter(CoordStruct::Empty, true, false);
 						}
-						else if (pFoot->CurrentMission != Mission::Move)
-						{
-							if (!pOtherU || !pOtherU->Type
-								|| (!pOtherU->Type->Harvester && !pOtherU->Type->ResourceGatherer))
-							{
-								pFoot->Scatter(CoordStruct::Empty, true, false);
-							}
-						}
+					}
+					else if (!IsAmphibiousOrAirTransport(pOtherU->Type) && pOtherU->CurrentMission != Mission::Move)
+					{
+						pOtherU->Scatter(CoordStruct::Empty, true, false);
+					}
+				}
+				else if (pFoot->CurrentMission != Mission::Move)
+				{
+					if (!pOtherU || !pOtherU->Type
+						|| (!pOtherU->Type->Harvester && !pOtherU->Type->ResourceGatherer))
+					{
+						pFoot->Scatter(CoordStruct::Empty, true, false);
 					}
 				}
 			}
@@ -8226,6 +8244,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Keep the 8 adjacent cells around pTransport clear of any non-boarding friendly units
 		// so pChosenBoarder has a clear path into pTransport without getting jammed!
+		// Gather all of them first: a scattered unit may walk into the next cell and must not be revisited.
+		std::vector<FootClass*> adjacentFoots;
+
 		for (int dy = -1; dy <= 1; ++dy)
 		{
 			for (int dx = -1; dx <= 1; ++dx)
@@ -8237,29 +8258,26 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					static_cast<short>(trCoords.X + dx),
 					static_cast<short>(trCoords.Y + dy)
 				};
-				auto const pAdjCell = MapClass::Instance.TryGetCellAt(adjC);
-				if (!pAdjCell)
-					continue;
-
-				for (ObjectClass* pObj = pAdjCell->FirstObject; pObj != nullptr; pObj = pObj->NextObject)
-				{
-					auto const pFootAdj = abstract_cast<FootClass*>(pObj);
-					if (!pFootAdj || pFootAdj->Owner != pHouse || !pFootAdj->IsAlive || pFootAdj->InLimbo
-						|| pFootAdj == pTransport || pFootAdj == pChosenBoarder)
-					{
-						continue;
-					}
-
-					if (auto const pUnitAdj = abstract_cast<UnitClass*>(pFootAdj))
-					{
-						if (IsAmphibiousOrAirTransport(pUnitAdj->Type))
-							continue; // Never move parked transports!
-					}
-
-					if (pFootAdj->CurrentMission != Mission::Move && pFootAdj->CurrentMission != Mission::Attack)
-						pFootAdj->Scatter(CoordStruct::Empty, true, false);
-				}
+				CollectCellFoots(MapClass::Instance.TryGetCellAt(adjC), adjacentFoots);
 			}
+		}
+
+		for (auto const pFootAdj : adjacentFoots)
+		{
+			if (pFootAdj->Owner != pHouse || !pFootAdj->IsAlive || pFootAdj->InLimbo
+				|| pFootAdj == pTransport || pFootAdj == pChosenBoarder)
+			{
+				continue;
+			}
+
+			if (auto const pUnitAdj = abstract_cast<UnitClass*>(pFootAdj))
+			{
+				if (IsAmphibiousOrAirTransport(pUnitAdj->Type))
+					continue; // Never move parked transports!
+			}
+
+			if (pFootAdj->CurrentMission != Mission::Move && pFootAdj->CurrentMission != Mission::Attack)
+				pFootAdj->Scatter(CoordStruct::Empty, true, false);
 		}
 
 		return pChosenBoarder;
@@ -9185,22 +9203,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							}
 							else
 							{
-								for (ObjectClass* pObj = pAdj->FirstObject; pObj; pObj = pObj->NextObject)
-								{
-									if (auto const pFootAdj = abstract_cast<FootClass*>(pObj))
-									{
-										if (pFootAdj->Owner == pHouse && pFootAdj->IsAlive && !pFootAdj->InLimbo
-											&& pFootAdj->CurrentMission != Mission::Move
-											&& pFootAdj->CurrentMission != Mission::Attack)
-										{
-											if (auto const pUAdj = abstract_cast<UnitClass*>(pFootAdj))
-											{
-												if (IsAmphibiousOrAirTransport(pUAdj->Type))
-													continue;
-											}
+								std::vector<FootClass*> adjFoots;
+								CollectCellFoots(pAdj, adjFoots);
 
-											pFootAdj->Scatter(CoordStruct::Empty, true, false);
+								for (auto const pFootAdj : adjFoots)
+								{
+									if (pFootAdj->Owner == pHouse && pFootAdj->IsAlive && !pFootAdj->InLimbo
+										&& pFootAdj->CurrentMission != Mission::Move
+										&& pFootAdj->CurrentMission != Mission::Attack)
+									{
+										if (auto const pUAdj = abstract_cast<UnitClass*>(pFootAdj))
+										{
+											if (IsAmphibiousOrAirTransport(pUAdj->Type))
+												continue;
 										}
+
+										pFootAdj->Scatter(CoordStruct::Empty, true, false);
 									}
 								}
 							}
