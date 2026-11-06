@@ -218,6 +218,10 @@ namespace
 		// forward stones survive is counted (crawlStoneForward / crawlStoneLost) for the trainer.
 		std::vector<std::pair<CellStruct, int>> OffensiveStoneCells {};
 		std::vector<DWORD> OffensiveStones {};
+		// Last sale of a factory over the difficulty cap (SellFactoriesOverDifficultyCap): no factory
+		// is built past the cap for an outpost within 4500 frames of it, so a factory that lands
+		// at another hub (the outpost still asking) cannot loop build-and-sell.
+		int LastFactoryCapSaleFrame { -100000 };
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -353,6 +357,7 @@ namespace
 			this->IdleHarvesterTracks.clear();
 			this->OffensiveStoneCells.clear();
 			this->OffensiveStones.clear();
+			this->LastFactoryCapSaleFrame = -100000;
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;
