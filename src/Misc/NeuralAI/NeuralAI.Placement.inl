@@ -1793,7 +1793,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	//   spaced wider than the splash of the enemy weapons this house has seen;
 	// - with a known enemy superweapon, high-value buildings keep its strike radius apart;
 	// - a lost key building is rebuilt where it stood while that spot is safe.
-	const bool isHighValueBld = !isCombatDefense && !isNavalBld && !isTunnelBld
+	// Refineries and silos stand where the ore is: never pushed apart for a superweapon.
+	const bool isHighValueBld = !isCombatDefense && !isNavalBld && !isTunnelBld && !isResourceBld
 		&& (pBuildingType->ConstructionYard || isFactoryOrBarracks || pBuildingType->Radar || pBuildingType->HasSuperWeapon()
 			|| pBuildingType->GetActualCost(pHouse) >= 1000);
 	std::vector<ArchitectRect> architectExitLanes;
@@ -1857,7 +1858,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				architectCoverAssets.push_back(mid);
 			}
 
-			if (isHighValueBld && !pOT->Naval
+			if (isHighValueBld && !pOT->Naval && !pOT->Refinery && !pOT->ResourceDestination && !pOT->ResourceGatherer
+				&& pOT->Storage <= 0 && !pOT->OrePurifier
 				&& (pOT->ConstructionYard || pOT->Factory != AbstractType::None || pOT->WeaponsFactory || pOT->Radar
 					|| pOT->HasSuperWeapon() || pOT->GetActualCost(pHouse) >= 1000))
 			{
