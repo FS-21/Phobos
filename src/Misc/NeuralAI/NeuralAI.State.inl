@@ -222,6 +222,23 @@ namespace
 		// is built past the cap for an outpost within 4500 frames of it, so a factory that lands
 		// at another hub (the outpost still asking) cannot loop build-and-sell.
 		int LastFactoryCapSaleFrame { -100000 };
+		// Failed refinery placements in a row: the 10-cell reach to its field (FindSpatialTetrisBuildCell)
+		// grows 4 cells per failure and is dropped after 3, so a map too rugged to build next to its
+		// ore still gets its refinery.
+		int RefineryReachFailures { 0 };
+		// Refineries placed with that widened reach (UniqueIDs): the best spot a rugged map allowed,
+		// so the strict refinery audit of the resource hoarder never sells them (it would only
+		// rebuild them as far away again).
+		std::vector<DWORD> RelaxedReachRefineries {};
+		// Resource claim (UpdateResourceClaim, the resource hoarder of Expert 6): the best ore field
+		// not mined by us yet, chosen by value (spawner tree, size), distance and risk (tier 0 away
+		// from known enemy structures, 1 near them). MCVs, the crawl and refineries head there.
+		// TreeCell is the field's spawner tree, where its refinery is pulled.
+		CellStruct ResourceClaimCell { CellStruct::Empty };
+		CellStruct ResourceClaimTreeCell { CellStruct::Empty };
+		int ResourceClaimTier { -1 };
+		int ResourceClaimZone { -1 };
+		int LastResourceClaimFrame { -100000 };
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -358,6 +375,13 @@ namespace
 			this->OffensiveStoneCells.clear();
 			this->OffensiveStones.clear();
 			this->LastFactoryCapSaleFrame = -100000;
+			this->RefineryReachFailures = 0;
+			this->RelaxedReachRefineries.clear();
+			this->ResourceClaimCell = CellStruct::Empty;
+			this->ResourceClaimTreeCell = CellStruct::Empty;
+			this->ResourceClaimTier = -1;
+			this->ResourceClaimZone = -1;
+			this->LastResourceClaimFrame = -100000;
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;

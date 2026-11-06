@@ -471,6 +471,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	int smallPatchDist = 9999;
 	const std::vector<int> heldOreBlocks = GetHeldOreBlocks(pHouse);
 
+	// Resource claim (UpdateResourceClaim): its field pulls the crawl and the refineries, hard for
+	// the resource hoarder (Expert 6), lightly for everyone else.
+	const CellStruct claimCell = GetMacroState(pHouse).ResourceClaimCell;
+	const int refineryReachFailures = GetMacroState(pHouse).RefineryReachFailures;
+	const int refineryReach = refineryReachFailures >= 3 ? INT_MAX : 10 + 4 * refineryReachFailures;
+	const int claimPull = (pExt && pExt->NeuralAI_ActiveExpert == 6) ? 25 : 10;
+
 	for (int dy = -120; dy <= 120; dy += (std::abs(dy) <= 44 ? 2 : (std::abs(dy) <= 84 ? 3 : 4)))
 	{
 		for (int dx = -120; dx <= 120; dx += (std::abs(dx) <= 44 ? 2 : (std::abs(dx) <= 84 ? 3 : 4)))
@@ -528,7 +535,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 
 			const bool isWorthyField = fieldCells >= 5 && !nearEnemyBase;
-			const int oreMetric = minAnchorManhattan - fieldCells / 2 - (hasSpawnerTree ? 10 : 0) + (isWorthyField ? 0 : 1000);
+			const bool inClaimedField = claimCell != CellStruct::Empty
+				&& std::max(std::abs(tc.X - claimCell.X), std::abs(tc.Y - claimCell.Y)) <= 8;
+			const int oreMetric = minAnchorManhattan - fieldCells / 2 - (hasSpawnerTree ? 10 : 0) + (isWorthyField ? 0 : 1000)
+				- ((inClaimedField && isWorthyField) ? claimPull : 0);
 
 			if (oreMetric < bestFallbackOreMetric)
 			{
@@ -580,6 +590,33 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	if (nearestOreCell == CellStruct::Empty)
 		nearestOreCell = fallbackOreCell;
+
+	// Spawner tree of the target field (within 6 cells of its ore cell): a refinery goes next to the
+	// tree, the renewable heart of the field, not at whatever edge the crawl reached first.
+	CellStruct oreTreeCell = CellStruct::Empty;
+
+	if (nearestOreCell != CellStruct::Empty && pBuildingType->Refinery)
+	{
+		int bestTreeDist = INT_MAX;
+
+		for (int ty = -6; ty <= 6; ++ty)
+		{
+			for (int tx = -6; tx <= 6; ++tx)
+			{
+				const CellStruct treeCell { static_cast<short>(nearestOreCell.X + tx), static_cast<short>(nearestOreCell.Y + ty) };
+
+				if (auto const pTreeCell = MapClass::Instance.TryGetCellAt(treeCell))
+				{
+					if (auto const pTerrain = pTreeCell->GetTerrain(false); pTerrain && pTerrain->IsAlive && pTerrain->Type
+						&& pTerrain->Type->SpawnsTiberium && std::abs(tx) + std::abs(ty) < bestTreeDist)
+					{
+						bestTreeDist = std::abs(tx) + std::abs(ty);
+						oreTreeCell = treeCell;
+					}
+				}
+			}
+		}
+	}
 
 	// Discover primary Enemy Threat Vector (for Expert 7 & Slot 38: Forward
 	// Defense Crawling & Rear Tech Shielding)
@@ -2117,8 +2154,20 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					}
 				}
 
-				const CellStruct pullGoal
-					= (isSteppingStoneExpander && !isResourceBld && stoneGoal != CellStruct::Empty) ? stoneGoal : nearestOreCell;
+				const CellStruct pullGoal = (isSteppingStoneExpander && !isResourceBld && stoneGoal != CellStruct::Empty)
+					? stoneGoal
+					: (oreTreeCell != CellStruct::Empty ? oreTreeCell : nearestOreCell);
+
+				// A refinery is never a stepping stone: one placed halfway to a far field stands on
+				// bare ground. Past the first one it goes within 10 cells of its field or waits
+				// (cooldown) while power plants and barracks crawl there; each failed placement in a
+				// row widens that by 4 cells and after 3 any cell will do (rugged maps).
+				if (pBuildingType->Refinery && !ownRefineryCells.empty() && pullGoal != CellStruct::Empty
+					&& refineryReach != INT_MAX
+					&& std::max(std::abs(candidate.X + w / 2 - pullGoal.X), std::abs(candidate.Y + h / 2 - pullGoal.Y)) > refineryReach)
+				{
+					continue;
+				}
 
 				if ((isResourceBld || isSteppingStoneExpander) && pullGoal != CellStruct::Empty)
 				{
@@ -2130,6 +2179,14 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						= std::abs(candidate.X - pullGoal.X) + std::abs(candidate.Y - pullGoal.Y);
 					const int orePull = std::clamp(52 + (crawlBias / 8), 32, 95);
 					spatialScore -= distToOre * orePull;
+
+					// Next to its tree, never hugging it: the cells around a tree are where it grows
+					// new ore.
+					if (pullGoal == oreTreeCell && oreTreeCell != CellStruct::Empty
+						&& std::max(std::abs(candidate.X - oreTreeCell.X), std::abs(candidate.Y - oreTreeCell.Y)) < 3)
+					{
+						spatialScore -= 600;
+					}
 
 					// Once two refineries stand, the next keeps 10 cells from the others (AdvAI
 					// spacing on scattered ore): next to another one it only shares its ore.
@@ -2761,6 +2818,15 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		auto& st = GetMacroState(pHouse);
 		st.ConsecutivePlacementFailures = 0;
 		st.BuildingPlacementCooldownUntilFrame.erase(pBuildingType->ArrayIndex);
+
+		if (pBuildingType->Refinery)
+		{
+			if (st.RefineryReachFailures > 0)
+				st.RelaxedReachRefineries.push_back(pBuilding->UniqueID);
+
+			st.RefineryReachFailures = 0;
+		}
+
 		if (pBuildingType->IsBaseDefense)
 		{
 			bool defAntiInf = false;
@@ -2909,6 +2975,10 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 	{
 		auto& st = GetMacroState(pHouse);
 		st.ConsecutivePlacementFailures++;
+
+		if (pBuildingType->Refinery)
+			st.RefineryReachFailures++;
+
 		const int cdUntil = Unsorted::CurrentFrame + std::min(3600, 300 * st.ConsecutivePlacementFailures);
 		st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex] = cdUntil;
 		if (pBuildingType->PowerBonus > pBuildingType->PowerDrain && !pBuildingType->IsBaseDefense

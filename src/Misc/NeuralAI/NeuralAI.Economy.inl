@@ -4,8 +4,10 @@
 namespace
 {
 	// Checks if a distant static refinery (> 20 cells from ConYard) has exhausted
-	// all ore within 27 cells and trees within 22 cells
-	bool IsRefineryExhausted(BuildingClass* pBld, CellStruct baseCenter)
+	// all ore within 27 cells and trees within 22 cells. Strict (the resource hoarder, Expert 6):
+	// > 14 cells from the ConYard, no ore within 12 and no spawner tree within 14, so refineries
+	// left behind by a field that ran out are sold and rebuilt where the ore is.
+	bool IsRefineryExhausted(BuildingClass* pBld, CellStruct baseCenter, bool strict = false)
 	{
 		if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type)
 			return false;
@@ -24,14 +26,19 @@ namespace
 
 		const CellStruct refCoords = pBld->GetMapCoords();
 
-		if (baseCenter != CellStruct::Empty && refCoords.DistanceFrom(baseCenter) < 20.0)
+		const int oreRadius = strict ? 12 : 27;
+		const int treeRadius = strict ? 14 : 22;
+
+		if (baseCenter != CellStruct::Empty && refCoords.DistanceFrom(baseCenter) < (strict ? 14.0 : 20.0))
 			return false;
 
-		for (int dy = -27; dy <= 27; ++dy)
+		const int scanRadius = std::max(oreRadius, treeRadius);
+
+		for (int dy = -scanRadius; dy <= scanRadius; ++dy)
 		{
-			for (int dx = -27; dx <= 27; ++dx)
+			for (int dx = -scanRadius; dx <= scanRadius; ++dx)
 			{
-				if (dx * dx + dy * dy > 729)
+				if (dx * dx + dy * dy > scanRadius * scanRadius)
 					continue;
 
 				const CellStruct scanCell { static_cast<short>(refCoords.X + dx),
@@ -42,10 +49,10 @@ namespace
 
 				if (auto const pCell = MapClass::Instance.TryGetCellAt(scanCell))
 				{
-					if (pCell->GetContainedTiberiumValue() > 0)
+					if (dx * dx + dy * dy <= oreRadius * oreRadius && pCell->GetContainedTiberiumValue() > 0)
 						return false;
 
-					if (dx * dx + dy * dy <= 484)
+					if (dx * dx + dy * dy <= treeRadius * treeRadius)
 					{
 						if (auto const pTerrain = pCell->GetTerrain(false))
 						{
@@ -60,7 +67,9 @@ namespace
 		return true;
 	}
 
-	void RecycleObsoleteRefineries(HouseClass* pHouse)
+	// strict: the resource hoarder's audit (IsRefineryExhausted strict), never applied to the
+	// refineries in relaxedReach (placed as near their field as a rugged map allowed).
+	void RecycleObsoleteRefineries(HouseClass* pHouse, bool strict, const std::vector<DWORD>& relaxedReach)
 	{
 		if (!pHouse || pHouse->ConYards.Count <= 0)
 			return;
@@ -89,7 +98,9 @@ namespace
 			const int storageAfterSale = pHouse->TotalStorage - (pBld && pBld->Type ? std::max(0, pBld->Type->Storage) : 0);
 			const bool storedResourcesFit = pHouse->OwnedTiberium.GetTotalAmount() <= static_cast<float>(storageAfterSale);
 
-			if (storedResourcesFit && IsRefineryExhausted(pBld, baseCenter) && !pBld->HasAnyLink())
+			if (storedResourcesFit && IsRefineryExhausted(pBld, baseCenter,
+					strict && std::find(relaxedReach.begin(), relaxedReach.end(), pBld->UniqueID) == relaxedReach.end())
+				&& !pBld->HasAnyLink())
 			{
 				Debug::Log("[NeuralAI] House %d recycling exhausted distant refinery %s "
 						"at (%d,%d).\n",
