@@ -244,6 +244,13 @@ namespace
 		std::unordered_map<int, int> TechUnlocks {};
 		bool HasBuildableTechUnlock { false };
 		int TechUnlockFrame { -100000 };
+		// Progressive unit tier (UpdateUnitTierCap): highest TechLevel of combat units it may build
+		// now, the highest tier of enemy units it has seen, and its peak building count (a house
+		// that lost half its base unlocks one tier more).
+		int UnitTierCap { 2 };
+		int SeenEnemyUnitTier { 0 };
+		int PeakOwnedBuildings { 0 };
+		int LastUnitTierFrame { -100000 };
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -390,6 +397,10 @@ namespace
 			this->TechUnlocks.clear();
 			this->HasBuildableTechUnlock = false;
 			this->TechUnlockFrame = -100000;
+			this->UnitTierCap = 2;
+			this->SeenEnemyUnitTier = 0;
+			this->PeakOwnedBuildings = 0;
+			this->LastUnitTierFrame = -100000;
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;

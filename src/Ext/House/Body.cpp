@@ -741,7 +741,6 @@ void HouseExt::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->AdvancedAI_Campaign.Read(exINI, pSection, "AdvancedAI");
 	this->NeuralAI_Campaign.Read(exINI, pSection, "NeuralAI");
-	this->NeuralAI_Campaign.Read(exINI, pSection, "AdvancedAI");
 }
 
 int HouseExt::GetForceEnemyIndex()
