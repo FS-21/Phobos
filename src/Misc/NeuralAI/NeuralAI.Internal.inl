@@ -433,6 +433,11 @@ namespace
 	// trainer can measure how long each expert runs and how the house does while it runs.
 	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> ExpertTicks {};
 
+	// Bumped when a match starts (OnScenarioStart): function-level caches compare it so nothing of a
+	// previous match (same frames, same unique IDs, even the same seed in training) is ever reused.
+	// Two clients that played different matches before must decide identically (multiplayer sync).
+	int NeuralMatchSerial { 0 };
+
 	// Fair credit per expert (trainer only, never read by AI decisions): every 60 frames the change
 	// of each house's advantage (value of its units, buildings and half its money, minus the
 	// average of its living enemies', in tens of credits) goes to the expert running at that

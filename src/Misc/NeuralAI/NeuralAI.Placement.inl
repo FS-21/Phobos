@@ -206,6 +206,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	bool anchoredAtMissingFactoryHub = false;
 	const bool placingWarFactory = (pBuildingType->Factory == AbstractType::UnitType && !pBuildingType->Naval);
 	const bool placingBarracks = (pBuildingType->Factory == AbstractType::InfantryType);
+	const bool placingShipyard = (pBuildingType->Factory == AbstractType::UnitType && pBuildingType->Naval);
 
 	// Factory dispersal: same-kind factories at the main base (within 16 cells of the spawn).
 	// Once it has two, further ones prefer the outpost with the fewest, so a superweapon or a
@@ -313,8 +314,16 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				}
 			}
 
+			// A conquered island without a shipyard of ours within 22 cells (shipyards stand on water,
+			// so the land zone filter above never counts them).
+			const bool islandLacksShipyard = placingShipyard && isOtherIsland
+				&& std::none_of(pHouse->Buildings.begin(), pHouse->Buildings.end(), [&bc](BuildingClass* pB)
+					{
+						return pB && pB->IsAlive && !pB->InLimbo && pB->Type && pB->Type->Factory == AbstractType::UnitType
+							&& pB->Type->Naval && pB->GetMapCoords().DistanceFrom(bc) <= 22.0;
+					});
 			const bool missingThisCoreBld = (placingWarFactory && !hasLocalWarFac)
-				|| (placingBarracks && !hasLocalBarracks)
+				|| (placingBarracks && !hasLocalBarracks) || islandLacksShipyard
 				|| (isRefineryOrSlaveMiner && (!hasLocalRef || (localRefs == 1 && hasLocalWarFac)))
 				|| (pBuildingType->IsBaseDefense && localDefs < 2);
 			const bool disperseFactoryHere = homeSameKindFactories >= 2 && localSameKindFactories < homeSameKindFactories;

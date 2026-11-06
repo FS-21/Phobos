@@ -782,6 +782,7 @@ void NeuralAI::OnScenarioStart()
 	MapClassApplied = false;
 	OreFieldCache.clear();
 	OreFieldCacheFrame = -100000;
+	NeuralMatchSerial++;
 	WaterZoneCells.clear();
 	LargestWaterZoneCells = -1;
 	MapInfo = NeuralMapInfo {};

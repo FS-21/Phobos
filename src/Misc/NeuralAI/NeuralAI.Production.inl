@@ -1299,6 +1299,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		bool forwardConYardNeedsWarFactory = false;
 		bool forwardConYardNeedsBarracks = false;
 		bool forwardConYardNeedsDefense = false;
+		// A ConYard of ours on another landmass with useful water close by and no shipyard of ours
+		// within 22 cells: each conquered island gets its own shipyard (sea control there).
+		bool islandYardNeedsShipyard = false;
 		const int spawnHomeZone = (pHouse->BaseSpawnCell != CellStruct::Empty)
 			? MapClass::Instance.GetMovementZoneType(pHouse->BaseSpawnCell, MovementZone::Normal, false)
 			: -1;
@@ -1446,6 +1449,33 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (defsNearCY < 2 && (hasRefNearCY || hasWarFacNearCY || enemyNearCY))
 					forwardConYardNeedsDefense = true;
+			}
+
+			if (!islandYardNeedsShipyard && spawnHomeZone >= 0 && cyz != spawnHomeZone && !enemyNearCY)
+			{
+				const bool hasShipyardNear = std::any_of(pHouse->Buildings.begin(), pHouse->Buildings.end(), [&cyc](BuildingClass* pB)
+					{
+						return pB && pB->IsAlive && !pB->InLimbo && pB->Type && pB->Type->Factory == AbstractType::UnitType
+							&& pB->Type->Naval && pB->GetMapCoords().DistanceFrom(cyc) <= 22.0;
+					});
+
+				if (!hasShipyardNear)
+				{
+					for (int wy = -12; wy <= 12 && !islandYardNeedsShipyard; wy += 3)
+					{
+						for (int wx = -12; wx <= 12; wx += 3)
+						{
+							const CellStruct wc { static_cast<short>(cyc.X + wx), static_cast<short>(cyc.Y + wy) };
+							auto const pWaterCell = MapClass::Instance.TryGetCellAt(wc);
+
+							if (pWaterCell && pWaterCell->LandType == LandType::Water && IsUsefulWaterCell(wc))
+							{
+								islandYardNeedsShipyard = true;
+								break;
+							}
+						}
+					}
+				}
 			}
 
 			if (islandHoldActive && defsNearCY < 3 && cyc.DistanceFrom(holdMacro.IslandHoldCell) <= 2.0)
@@ -1698,6 +1728,26 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		// Naval matches (HouseNeedsNaval: starts not linked by land, free ore only across water, enemy
+		// warships seen): the sea decides where we can expand, so the first shipyard comes before the
+		// first war factory, when shipyards are allowed and buildable now.
+		bool navalFirst = false;
+
+		if (ownedShipyards == 0 && HouseNeedsNaval(pHouse))
+		{
+			for (auto const pYardType : BuildingTypeClass::Array)
+			{
+				if (pYardType && pYardType->Factory == AbstractType::UnitType && pYardType->Naval
+					&& CanBuildUnderHumanRules(pHouse, pYardType))
+				{
+					navalFirst = true;
+					break;
+				}
+			}
+		}
+
+		const bool firstFactoryPending = groundWarFactoryBuildableNow || navalFirst;
+
 		for (auto const pBld : BuildingTypeClass::Array)
 		{
 			if (!pBld || pBld->Wall || pBld->FirestormWall || pBld->Gate || pBld->LaserFence || pBld->LaserFencePost
@@ -1752,7 +1802,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				const bool outpostNeedsIt = (category == 0)
 					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
-					: (category == 1 && (forwardConYardNeedsWarFactory || frontNeedsWarFactory));
+					: (category == 1 ? (forwardConYardNeedsWarFactory || frontNeedsWarFactory) : islandYardNeedsShipyard);
 				const bool newFactoryType = owned == 0;
 				const bool saleCooldownOver = Unsorted::CurrentFrame - GetMacroState(pHouse).LastFactoryCapSaleFrame >= 4500;
 
@@ -1908,10 +1958,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += 450;
 				}
 
-				// Opening order (groundWarFactoryBuildableNow): after two refineries, or after one when
-				// the next refinery has just failed to find a cell, the war factory comes first. Applied
+				// Opening order (firstFactoryPending): after two refineries, or after one when the next
+				// refinery has just failed to find a cell, the first war factory (or shipyard) comes first. Applied
 				// after every branch above, the new-field one included.
-				if (groundWarFactoryBuildableNow && !isHarvRecoveryCandidate
+				if (firstFactoryPending && !isHarvRecoveryCandidate
 					&& (ownedRefineries >= 2 || (ownedRefineries >= 1 && GetMacroState(pHouse).RefineryReachFailures > 0)))
 				{
 					score -= 2500;
@@ -1980,9 +2030,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score = scores[3] - owned * (bankSteps > 0 ? 300 : 620) + (bankSteps > 0 ? 400 + 150 * std::min(6, bankSteps) : 0);
 
-					// The first war factory once a refinery stands (see groundWarFactoryBuildableNow).
+					// The first war factory once a refinery stands (see groundWarFactoryBuildableNow),
+					// after the first shipyard on a naval match (navalFirst).
 					if (ownedWarFactories == 0 && ownedRefineries >= 1)
-						score += 1200;
+						score += navalFirst ? -800 : 1200;
 
 					// Competitive MultipleFactory Arms Race boost: never fall behind
 					// the enemy in War Factory count or when floating macro cash!
@@ -1995,13 +2046,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 			else if (pBld->Factory == AbstractType::UnitType && pBld->Naval)
 			{
-				if (owned >= maxShipyards)
+				if (owned >= maxShipyards + (islandYardNeedsShipyard ? 1 : 0))
 					continue;
 
-				if (!HouseNeedsNaval(pHouse) || NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
+				if (!(HouseNeedsNaval(pHouse) || islandYardNeedsShipyard) || NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
 					continue;
 
 				score = scores[7] - owned * 950;
+
+				// The first shipyard of a naval match once a refinery stands (navalFirst).
+				if (navalFirst && ownedRefineries >= 1)
+					score += 1600;
+
+				// A conquered island's own shipyard (islandYardNeedsShipyard).
+				if (islandYardNeedsShipyard)
+					score += 1300;
 
 				if (ownedShipyards < maxEnemyShipyards && ownedShipyards >= 1 && money >= 1800)
 					score += 400;

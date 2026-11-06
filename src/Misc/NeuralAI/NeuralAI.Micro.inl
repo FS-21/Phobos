@@ -138,6 +138,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		};
 
 		static std::unordered_map<uint64_t, DeploySiteMemo> memo;
+		static int memoMatchSerial = -1;
+
+		if (memoMatchSerial != NeuralMatchSerial)
+		{
+			memoMatchSerial = NeuralMatchSerial;
+			memo.clear();
+		}
 
 		uint64_t key = 1469598103934665603ULL;
 
@@ -274,11 +281,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return CellStruct::Empty;
 
 		// A full placement search (FindSpatialTetrisBuildCell) costs 25-55 ms in a late game and
-		// several deploy branches ask every tick: reuse a unit's answer for 120 frames (same match:
-		// game seed checked, so a previous match's entry is never used).
+		// several deploy branches ask every tick: reuse a unit's answer for 120 frames (same match only:
+		// NeuralMatchSerial, so a previous match's entry is never used).
 		struct DeployStandCache
 		{
-			int Seed;
+			int MatchSerial;
 			int Frame;
 			int TypeIndex;
 			int Zone;
@@ -295,7 +302,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			auto const& cached = it->second;
 
-			if (cached.Seed == Game::Seed && now >= cached.Frame && now - cached.Frame < 120 && cached.TypeIndex == pBldType->ArrayIndex
+			if (cached.MatchSerial == NeuralMatchSerial && now >= cached.Frame && now - cached.Frame < 120 && cached.TypeIndex == pBldType->ArrayIndex
 				&& cached.Zone == requiredZone)
 			{
 				return cached.Cell;
@@ -304,7 +311,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		auto remember = [&](const CellStruct& cell)
 		{
-			standCache[pDeployerUnit->UniqueID] = DeployStandCache { Game::Seed, now, pBldType->ArrayIndex, requiredZone, cell };
+			standCache[pDeployerUnit->UniqueID] = DeployStandCache { NeuralMatchSerial, now, pBldType->ArrayIndex, requiredZone, cell };
 			return cell;
 		};
 

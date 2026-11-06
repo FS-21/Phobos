@@ -572,16 +572,16 @@ namespace
 	// building through Prerequisite.Negative, or are excluded by one. Building one closes the other
 	// branch (two tech labs, rival defense lines), so a player picks by taste, not by a fixed rule.
 	std::vector<char> BranchChoiceBuildings;
-	int BranchChoiceSeed { 0 };
+	int BranchChoiceMatchSerial { -1 };
 	bool BranchChoiceReady { false };
 
 	bool IsBranchChoiceBuilding(int buildingIdx)
 	{
-		if (!BranchChoiceReady || BranchChoiceSeed != Game::Seed
+		if (!BranchChoiceReady || BranchChoiceMatchSerial != NeuralMatchSerial
 			|| static_cast<int>(BranchChoiceBuildings.size()) != BuildingTypeClass::Array.Count)
 		{
 			BranchChoiceReady = true;
-			BranchChoiceSeed = Game::Seed;
+			BranchChoiceMatchSerial = NeuralMatchSerial;
 			BranchChoiceBuildings.assign(static_cast<size_t>(BuildingTypeClass::Array.Count), 0);
 
 			std::vector<int> excluded;
