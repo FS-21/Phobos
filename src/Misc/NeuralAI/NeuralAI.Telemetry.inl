@@ -209,6 +209,16 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		}
 	};
 
+	// Cell of a radar point: radar coordinates first, then the real cell, so the dashboard can
+	// measure distances in cells. Reads the map only (observer telemetry, never a decision).
+	auto projectWithCell = [&](const CellStruct& c, char* out, size_t outCap)
+	{
+		float rx = 0.0f;
+		float ry = 0.0f;
+		projectToRadar(c, rx, ry);
+		std::snprintf(out, outCap, "%.1f,%.1f,%d,%d", rx, ry, static_cast<int>(c.X), static_cast<int>(c.Y));
+	};
+
 	if (matchEnded || (Unsorted::CurrentFrame % 60 == 0))
 	{
 		SampleExpertGains();
@@ -226,13 +236,16 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			"\"rulesSignature\": \"%016llX\",\n  \"baseSignature\": \"%016llX\",\n  "
 			"\"mapInfo\": {\"cells\": %d, \"waterPct\": %d, \"landLinked\": %s, \"known\": %s},\n "
 			" \"contextRouting\": {\"challenger\": %s, \"opponent\": %s, \"phaseFrames\": [%d, %d]},\n "
+			" \"mapGeom\": {\"mapRect\": [%d, %d], \"visibleRect\": [%d, %d, %d, %d], \"iso\": %s, \"bounds\": [%d, %d, %d, %d]},\n "
 			" \"houses\": [\n",
 			dst->SlotIndex, dst->ProcessId, dst->CurrentFrame, dst->FramesPerSecond, matchEnded ? "true" : "false",
 			dst->WinnerHouseIndex, stalemate ? "true" : "false", NeuralAI::Backpack.EstimatedELO,
 			NeuralAI::Backpack.GamesPlayed, static_cast<unsigned long long>(NeuralAI::CurrentRulesSignature),
 			static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature), MapInfo.Cells, MapInfo.WaterPct,
 			MapInfo.LandLinked ? "true" : "false", MapInfo.Computed ? "true" : "false", ContextRouting.Loaded ? "true" : "false",
-			OpponentContextRouting.Loaded ? "true" : "false", RoutingMidPhaseFrame, RoutingLatePhaseFrame);
+			OpponentContextRouting.Loaded ? "true" : "false", RoutingMidPhaseFrame, RoutingLatePhaseFrame, mapW,
+			static_cast<int>(MapClass::Instance.MapRect.Height), localX, localY, localW, localH, hasIsoBounds ? "true" : "false",
+			minMapX, minMapY, spanX, spanY);
 
 		if (lineLen > 0)
 			jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -462,6 +475,24 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			const NeuralTerritoryStat terr
 				= (h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TerritoryStats[h.ArrayIndex] : NeuralTerritoryStat {};
 
+			// Resource claim (UpdateResourceClaim): [rx, ry, cellX, cellY, tier, treeX, treeY] or null.
+			char claimText[96] = "null";
+
+			if (pOwner)
+			{
+				auto const& claimMacro = GetMacroState(pOwner);
+
+				if (claimMacro.ResourceClaimCell != CellStruct::Empty)
+				{
+					char claimCell[48];
+					projectWithCell(claimMacro.ResourceClaimCell, claimCell, sizeof(claimCell));
+					const bool hasTree = claimMacro.ResourceClaimTreeCell != CellStruct::Empty;
+					std::snprintf(claimText, sizeof(claimText), "[%s,%d,%d,%d]", claimCell, claimMacro.ResourceClaimTier,
+						hasTree ? static_cast<int>(claimMacro.ResourceClaimTreeCell.X) : -1,
+						hasTree ? static_cast<int>(claimMacro.ResourceClaimTreeCell.Y) : -1);
+				}
+			}
+
 			lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
 				"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"opening\": %d, "
 				"\"expert\": %d, \"credits\": %d, \"killedUnits\": %d, "
@@ -471,7 +502,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"enemyMix\": \"%s\", \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -482,13 +513,67 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), enemyMixText.c_str(), decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), enemyMixText.c_str(), claimText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
 		}
 
-		jsonBuf.append("  ],\n  \"radar\": [");
+		// Ore fields (the GetOreFields cache the AI already keeps; read as is, so telemetry never
+		// changes when the AI refreshes it): [rx, ry, cellX, cellY, ore cells, spawner tree, holder]
+		// where holder is the house with the nearest refinery / resource destination within 14
+		// cells (as GetHeldOreBlocks counts it), else -1. Rebuilt at most every 900 frames.
+		static std::string oreFieldsText;
+		static int oreFieldsFrame = -100000;
+		const int nowFrame = Unsorted::CurrentFrame;
+
+		if (nowFrame < oreFieldsFrame || nowFrame - oreFieldsFrame >= 900 || (oreFieldsText.empty() && !OreFieldCache.empty()))
+		{
+			oreFieldsFrame = nowFrame;
+			oreFieldsText.clear();
+
+			std::vector<std::pair<CellStruct, int>> hubs;
+
+			for (auto const pBld : BuildingClass::Array)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Owner && !pBld->Owner->IsNeutral()
+					&& (pBld->Type->Refinery || pBld->Type->ResourceDestination))
+				{
+					hubs.emplace_back(pBld->GetMapCoords(), pBld->Owner->ArrayIndex);
+				}
+			}
+
+			for (auto const& field : OreFieldCache)
+			{
+				if (oreFieldsText.size() > 12000)
+					break;
+
+				int holder = -1;
+				int holderDist = 15;
+
+				for (auto const& [hubCell, hubHouse] : hubs)
+				{
+					const int d = std::max(std::abs(hubCell.X - field.Cell.X), std::abs(hubCell.Y - field.Cell.Y));
+
+					if (d < holderDist)
+					{
+						holderDist = d;
+						holder = hubHouse;
+					}
+				}
+
+				char fieldCell[48];
+				char fieldBuf[96];
+				projectWithCell(field.Cell, fieldCell, sizeof(fieldCell));
+				std::snprintf(fieldBuf, sizeof(fieldBuf), "%s[%s,%d,%d,%d]", oreFieldsText.empty() ? "" : ",", fieldCell,
+					field.OreCells, field.SpawnerTree ? 1 : 0, holder);
+				oreFieldsText += fieldBuf;
+			}
+		}
+
+		jsonBuf.append("  ],\n  \"oreFields\": [");
+		jsonBuf.append(oreFieldsText);
+		jsonBuf.append("],\n  \"radar\": [");
 
 		auto sanitizeJsonStr = [](const char* src, char* out, size_t outCap)
 		{
@@ -510,8 +595,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		};
 
 		// Map inspector details appended to every radar point (observer telemetry, never read by a
-		// decision): ,uid,health%,mission,megaMission,target,destination where target is
-		// [rx,ry,health% or -1,uid] or 0 and destination is [rx,ry] or 0.
+		// decision): ,uid,health%,mission,megaMission,target,destination,transform where target is
+		// [rx,ry,health% or -1,uid,cellX,cellY] or 0 and destination is [rx,ry,cellX,cellY] or 0.
+		// The point's own cell follows as the last two fields.
 		auto objectDetail = [&](TechnoClass* pTechno, char* out, size_t outCap)
 		{
 			if (!out || outCap == 0)
@@ -525,18 +611,20 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			const int hp = static_cast<int>(pTechno->GetHealthPercentage() * 100.0 + 0.5);
 			auto const pFoot = abstract_cast<FootClass*>(pTechno);
 			const int mega = pFoot ? static_cast<int>(pFoot->MegaMission) : -1;
-			char targetText[64] = "0";
-			char destText[40] = "0";
+			char targetText[80] = "0";
+			char destText[48] = "0";
 
 			if (AbstractClass* const pTarget = pTechno->Target)
 			{
 				float tx = 0.0f;
 				float ty = 0.0f;
-				projectToRadar(CellClass::Coord2Cell(pTarget->GetCoords()), tx, ty);
+				const CellStruct targetCell = CellClass::Coord2Cell(pTarget->GetCoords());
+				projectToRadar(targetCell, tx, ty);
 				auto const pTargetTechno = abstract_cast<TechnoClass*>(pTarget);
 				const int targetHp = pTargetTechno ? static_cast<int>(pTargetTechno->GetHealthPercentage() * 100.0 + 0.5) : -1;
-				std::snprintf(targetText, sizeof(targetText), "[%.1f,%.1f,%d,%u]", tx, ty, targetHp,
-					pTargetTechno ? static_cast<unsigned>(pTargetTechno->UniqueID) : 0u);
+				std::snprintf(targetText, sizeof(targetText), "[%.1f,%.1f,%d,%u,%d,%d]", tx, ty, targetHp,
+					pTargetTechno ? static_cast<unsigned>(pTargetTechno->UniqueID) : 0u, static_cast<int>(targetCell.X),
+					static_cast<int>(targetCell.Y));
 			}
 
 			if (pFoot)
@@ -545,10 +633,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 				if (pDest)
 				{
-					float dx = 0.0f;
-					float dy = 0.0f;
-					projectToRadar(CellClass::Coord2Cell(pDest->GetCoords()), dx, dy);
-					std::snprintf(destText, sizeof(destText), "[%.1f,%.1f]", dx, dy);
+					char destCell[48];
+					projectWithCell(CellClass::Coord2Cell(pDest->GetCoords()), destCell, sizeof(destCell));
+					std::snprintf(destText, sizeof(destText), "[%s]", destCell);
 				}
 			}
 
@@ -565,11 +652,13 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			char transformClean[32];
 			sanitizeJsonStr(transformId, transformClean, sizeof(transformClean));
 
-			std::snprintf(out, outCap, ",%u,%d,%d,%d,%s,%s,\"%s\"", static_cast<unsigned>(pTechno->UniqueID), hp,
-				static_cast<int>(pTechno->CurrentMission), mega, targetText, destText, transformClean);
+			const CellStruct ownCell = pTechno->GetMapCoords();
+			std::snprintf(out, outCap, ",%u,%d,%d,%d,%s,%s,\"%s\",%d,%d", static_cast<unsigned>(pTechno->UniqueID), hp,
+				static_cast<int>(pTechno->CurrentMission), mega, targetText, destText, transformClean, static_cast<int>(ownCell.X),
+				static_cast<int>(ownCell.Y));
 		};
 
-		char detailBuf[160];
+		char detailBuf[224];
 		bool firstPt = true;
 		int ptCount = 0;
 
@@ -722,19 +811,36 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 			pHdr[0] = nextOdd + 1u;
 		}
-		else
+
+		// No trainer reading the mapping (developer repro runs): the same JSON goes to the
+		// instance's AI folder, written to a temporary file first and swapped in, so a reader
+		// never sees half a snapshot.
+		if (!TelemetryJsonView || !TelemetryJsonShmFromTrainer)
 		{
 			char jsonPath[MAX_PATH];
+			char tmpPath[MAX_PATH];
 
 			std::snprintf(jsonPath, sizeof(jsonPath), "AI\\train_telemetry_%d.json", NeuralAI::TrainSlotIndex);
+			std::snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", jsonPath);
+
+			static bool loggedFileTelemetry = false;
+
+			if (!loggedFileTelemetry)
+			{
+				loggedFileTelemetry = true;
+				Debug::Log("[NeuralAI] No trainer telemetry mapping: writing %s every 60 frames.\n", jsonPath);
+			}
 
 			FILE* fp = nullptr;
 
-			if (fopen_s(&fp, jsonPath, "wb") == 0 && fp)
+			if (fopen_s(&fp, tmpPath, "wb") == 0 && fp)
 			{
-				std::fwrite(jsonBuf.data(), 1, jsonBuf.size(), fp);
+				const bool written = std::fwrite(jsonBuf.data(), 1, jsonBuf.size(), fp) == jsonBuf.size();
 
 				std::fclose(fp);
+
+				if (!written || !MoveFileExA(tmpPath, jsonPath, MOVEFILE_REPLACE_EXISTING))
+					DeleteFileA(tmpPath);
 			}
 		}
 	}
