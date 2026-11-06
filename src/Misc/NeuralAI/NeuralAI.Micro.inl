@@ -3192,10 +3192,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Mobile factory (NeuralAI.MobileFactory.inl): drive to its spot (an outpost lacking that
-		// factory kind, or behind the front) and unfold there. With no spot it unfolds where it
-		// stands, like any base deployer, unless it just fled a spot: then it falls back home first.
-		if (IsMobileFactoryUnit(pType))
+		// Factory deployer (NeuralAI.MobileFactory.inl): drive to its spot and unfold there. A mobile
+		// factory (it can pack up again) re-checks the spot on the way; a one-way deployer picks it
+		// once. With no spot it unfolds where it stands, like any base deployer, unless it just fled:
+		// then it heads for the place it fled to first.
+		if (IsFactoryDeployerUnit(pType))
 		{
 			if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload || pUnit->CurrentMission == Mission::Enter
 				|| pUnit->QueuedMission == Mission::Enter)
@@ -3208,21 +3209,67 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const CellStruct unitCell = pUnit->GetMapCoords();
 			const int unitZone = ObjectZone(pUnit, MovementZone::Normal);
 			auto const pFactoryType = pType->DeploysInto;
+			const bool isMobile = IsMobileFactoryUnit(pType);
 
 			if (mobileMacro.MobileFactoryGoals.size() > 16)
-				std::erase_if(mobileMacro.MobileFactoryGoals, [now](const auto& entry) { return now - entry.second.PickFrame > 900; });
+				std::erase_if(mobileMacro.MobileFactoryGoals, [now](const auto& entry) { return now - entry.second.ProgressFrame > 9000; });
 
 			auto& goal = mobileMacro.MobileFactoryGoals[pUnit->UniqueID];
+			const bool firstVisit = goal.StartFrame < 0;
 
-			if (goal.StartFrame < 0)
+			if (firstVisit)
 			{
 				goal.StartFrame = now;
 				goal.ProgressFrame = now;
+
+				// The vehicle a mobile factory just packed into keeps the goal it was packed up for: picked
+				// afresh, without its building, the spot it left could look empty and win again.
+				if (isMobile && now - mobileMacro.MobileFactoryLastPackFrame <= 300
+					&& mobileMacro.MobileFactoryPackCell != CellStruct::Empty
+					&& unitCell.DistanceFrom(mobileMacro.MobileFactoryPackCell) <= 5.0)
+				{
+					goal.Cell = mobileMacro.MobileFactoryPackTarget;
+					goal.Reason = mobileMacro.MobileFactoryPackReason;
+					goal.PickFrame = now;
+					goal.HoldUntil = now + 1800;
+				}
 			}
 
-			if (now - goal.PickFrame >= 150 || now < goal.PickFrame)
+			if (isMobile)
+				mobileMacro.MobileFactoryVehicleSeenFrame = now;
+
+			// A packed mobile factory caught by more than our forces around it turns back for a quiet
+			// hub, as a deployed one would flee.
+			if (isMobile && now >= goal.HoldUntil && IsAITickWindow(90, 15))
 			{
-				const MobileFactorySpot spot = FindMobileFactorySpot(pHouse, pFactoryType, nullptr, unitCell, unitZone, goal.Cell);
+				const int threat = VisibleEnemyThreatNear(pHouse, unitCell, 8);
+
+				if (threat >= 80 && threat * 4 > OwnDefenseNear(pHouse, unitCell, 8) * 5)
+				{
+					const CellStruct retreat
+						= FindMobileFactoryRetreat(pHouse, unitCell, unitZone, CanHouseFerryTypeAcrossWater(pHouse, pType));
+
+					if (retreat != CellStruct::Empty && retreat.DistanceFrom(unitCell) >= 8.0)
+					{
+						mobileMacro.MobileFactoryAvoidCell = unitCell;
+						mobileMacro.MobileFactoryAvoidFrame = now;
+						goal.Cell = retreat;
+						goal.Reason = MobileFactoryReasonNone;
+						goal.PickFrame = now;
+						goal.HoldUntil = now + 1200;
+						goal.BestDist = INT_MAX;
+						goal.ProgressFrame = now;
+						goal.DeployTries = 0;
+					}
+				}
+			}
+
+			const bool holding = now < goal.HoldUntil;
+
+			if ((firstVisit && !holding) || (isMobile && !holding && (now - goal.PickFrame >= 150 || now < goal.PickFrame)))
+			{
+				const MobileFactorySpot spot
+					= FindMobileFactorySpot(pHouse, pFactoryType, nullptr, unitCell, unitZone, pUnit->UniqueID, goal.Cell);
 				CellStruct newCell = spot.Cell;
 
 				const bool fledHere = mobileMacro.MobileFactoryAvoidCell != CellStruct::Empty
@@ -3241,6 +3288,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				goal.Cell = newCell;
 				goal.Reason = spot.Reason;
+				goal.PickFrame = now;
+			}
+			else if (!isMobile || holding)
+			{
+				// Keep the spot reserved while a one-way deployer, or a vehicle holding the goal it was
+				// packed up for, drives there.
 				goal.PickFrame = now;
 			}
 
@@ -3266,21 +3319,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					// Another routine can hold the unit in its own mission so the queued unpack never
 					// starts: force it after a few tries. When the engine keeps refusing the spot, step
 					// aside and try again from a nearby cell.
-					if (goal.DeployTries >= 24)
+					if (goal.DeployTries == 0 || IsAITickWindow(45, 15))
 					{
-						goal.DeployTries = 0;
-						pUnit->Scatter(CoordStruct::Empty, true, false);
-					}
-					else
-					{
-						OrderDeployerUnpack(pUnit);
+						if (goal.DeployTries >= 12)
+						{
+							goal.DeployTries = 0;
+							pUnit->Scatter(CoordStruct::Empty, true, false);
+						}
+						else
+						{
+							OrderDeployerUnpack(pUnit);
 
-						if (++goal.DeployTries >= 4)
-							pUnit->ForceMission(Mission::Unload);
+							if (++goal.DeployTries >= 3)
+								pUnit->ForceMission(Mission::Unload);
+						}
 					}
 				}
-				else if (reachedOrNoDest || IsAITickWindow(45, 15))
+				else if (reachedOrNoDest && IsAITickWindow(45, 15))
 				{
+					// The first deployable foundation near the spot (or here, once stalled) is good.
 					const CellStruct origin = (goal.Cell != CellStruct::Empty && !stalled) ? goal.Cell : unitCell;
 					CellStruct stand = FindDeployableFoundationNearCell(pHouse, pFactoryType, origin, unitZone, pUnit);
 
@@ -3294,7 +3351,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 			}
-			else if (reachedOrNoDest || IsAITickWindow(90, 15))
+			else if (IsAITickWindow(90, 15))
 			{
 				if (auto const pGoalCell = MapClass::Instance.TryGetCellAt(goal.Cell))
 				{
@@ -11153,63 +11210,81 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			// Deployed mobile factory (NeuralAI.MobileFactory.inl): production uses it like any other
-			// factory (UpdatePrimaryFactories picks the one closest to the front). It packs up and leaves
-			// when the spot comes under heavy attack or into the reach of a newly seen enemy defense, or,
-			// after standing three minutes idle and quiet, when its spot moved 35+ cells away (the front
-			// advanced, or another outpost lacks this factory kind). Near death packing up takes too long
-			// to save it: it stays and is repaired.
-			if (!handledConYardAction && IsMobileFactoryBuilding(pOwnBld->Type) && hpPct >= 0.2
+			// factory (UpdatePrimaryFactories picks the one closest to the front). It flees (packs up for
+			// the main base or the nearest quiet hub) when the enemy it sees around outweighs our local
+			// defense or its health fell sharply. Otherwise, after standing MobileFactoryDwellFrames and
+			// MobileFactoryPackCooldownFrames after the house's last pack-up, it moves when its spot is
+			// elsewhere: the front moved 30+ cells past it (leapfrog, only with an idle queue), the main
+			// base needs hidden production, or a known enemy defense now reaches it. Only buildings
+			// that pack back into their vehicle (UndeploysInto) ever move; the MCVRedeploy option only
+			// concerns ConYards.
+			if (!handledConYardAction && IsMobileFactoryBuilding(pOwnBld->Type) && hpPct >= 0.12
 				&& pOwnBld->CurrentMission != Mission::Construction && pOwnBld->CurrentMission != Mission::Selling
 				&& IsAITickWindow(90, 20))
 			{
 				auto& mobileMacro = GetMacroState(pHouse);
 				const int now = Unsorted::CurrentFrame;
 				const CellStruct fc = pOwnBld->GetMapCoords();
+				const int fz = ObjectZone(pOwnBld, MovementZone::Normal);
 
-				if (mobileMacro.MobileFactorySince.size() > 16)
-					std::erase_if(mobileMacro.MobileFactorySince, [now](const auto& entry) { return now - entry.second > 54000; });
-
-				auto const sinceIt = mobileMacro.MobileFactorySince.try_emplace(pOwnBld->UniqueID, now).first;
-				const int stoodFor = now - sinceIt->second;
-
-				int hostiles = 0;
-
-				ForEachTechnoNear(fc, 9, [&](TechnoClass* pET) -> bool
+				if (mobileMacro.MobileFactoryStands.size() > 16)
 				{
-					if (!pET->Owner || pET->Owner == pHouse || pHouse->IsAlliedWith(pET->Owner) || pET->Owner->IsNeutral()
-						|| !IsCellVisibleToAI(pHouse, pET->GetCell()))
-					{
-						return true;
-					}
-
-					auto const pETType = pET->GetTechnoType();
-
-					if (pETType && GroundRangeOf(pETType) > 0)
-						hostiles++;
-
-					return true;
-				});
-
-				// A defense in reach with no attack yet only moves it when a safe spot exists elsewhere
-				// (an enemy tower reaching our home base must not make it pack and unpack in a loop).
-				const bool heavyAttack = (hostiles >= 3 && hpPct < 0.6) || (hostiles >= 1 && hpPct < 0.4);
-				const bool inDefenseReach = !heavyAttack && IsCellInKnownEnemyDefenseReach(pHouse, fc, 1);
-				const bool producing = pOwnBld->Factory != nullptr && pOwnBld->Factory->Object != nullptr;
-
-				if (heavyAttack)
-				{
-					mobileMacro.MobileFactoryAvoidCell = fc;
-					mobileMacro.MobileFactoryAvoidFrame = now;
-					UndeployBuildingToVehicle(pOwnBld, homeCoords);
-					handledConYardAction = true;
+					std::erase_if(mobileMacro.MobileFactoryStands,
+						[now](const auto& entry) { return now - entry.second.HealthFrame > 9000; });
 				}
-				else if (inDefenseReach || (!producing && hostiles == 0 && stoodFor >= 2700))
-				{
-					const MobileFactorySpot spot
-						= FindMobileFactorySpot(pHouse, pOwnBld->Type, pOwnBld, fc, ObjectZone(pOwnBld, MovementZone::Normal));
-					const double minMove = inDefenseReach ? 10.0 : 35.0;
 
-					if (spot.Reason != MobileFactoryReasonNone && spot.Cell.DistanceFrom(fc) >= minMove)
+				auto const [standIt, justDeployed] = mobileMacro.MobileFactoryStands.try_emplace(pOwnBld->UniqueID,
+					NeuralMobileFactoryStand { now, hpPct, now });
+				auto& stand = standIt->second;
+
+				if (justDeployed)
+					mobileMacro.MobileFactoryDeployFrame = now;
+
+				const int stoodFor = now - stand.Since;
+				const bool healthDropped = stand.Health - hpPct >= 0.2;
+
+				if (now - stand.HealthFrame >= 600 || hpPct > stand.Health)
+				{
+					stand.Health = hpPct;
+					stand.HealthFrame = now;
+				}
+
+				const int threat = VisibleEnemyThreatNear(pHouse, fc, 10);
+				const int localDefense = OwnDefenseNear(pHouse, fc, 10);
+				const bool flee = (threat >= 80 && threat * 4 > localDefense * 5 && (stoodFor >= 300 || hpPct < 0.5))
+					|| (healthDropped && stoodFor >= 150);
+				const bool producing = pOwnBld->Factory != nullptr && pOwnBld->Factory->Object != nullptr;
+				auto const pVehicle = pOwnBld->Type->UndeploysInto;
+
+				if (flee)
+				{
+					const CellStruct retreat
+						= FindMobileFactoryRetreat(pHouse, fc, fz, CanHouseFerryTypeAcrossWater(pHouse, pVehicle));
+
+					if (retreat != CellStruct::Empty && retreat.DistanceFrom(fc) >= 8.0)
+					{
+						mobileMacro.MobileFactoryAvoidCell = fc;
+						mobileMacro.MobileFactoryAvoidFrame = now;
+						mobileMacro.MobileFactoryPackCell = fc;
+						mobileMacro.MobileFactoryPackTarget = retreat;
+						mobileMacro.MobileFactoryPackReason = MobileFactoryReasonNone;
+						mobileMacro.MobileFactoryLastPackFrame = now;
+						UndeployBuildingToVehicle(pOwnBld, retreat);
+						handledConYardAction = true;
+					}
+				}
+				else if (threat == 0 && stoodFor >= MobileFactoryDwellFrames
+					&& now - mobileMacro.MobileFactoryLastPackFrame >= MobileFactoryPackCooldownFrames)
+				{
+					const bool inDefenseReach = IsCellInKnownEnemyDefenseReach(pHouse, fc, 1);
+					const MobileFactorySpot spot
+						= FindMobileFactorySpot(pHouse, pOwnBld->Type, pOwnBld, fc, fz, pOwnBld->UniqueID);
+					// Evasive moves (hidden production, a defense in reach) may interrupt production, as
+					// fleeing does; a planned move (leapfrog, a better spot) waits until the queue is idle.
+					const bool evasive = inDefenseReach || spot.Reason == MobileFactoryReasonHidden;
+					const double minMove = evasive ? 10.0 : MobileFactoryLeapfrogCells;
+
+					if (spot.Reason != MobileFactoryReasonNone && (evasive || !producing) && spot.Cell.DistanceFrom(fc) >= minMove)
 					{
 						if (inDefenseReach)
 						{
@@ -11217,6 +11292,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							mobileMacro.MobileFactoryAvoidFrame = now;
 						}
 
+						mobileMacro.MobileFactoryLastPackFrame = now;
+						mobileMacro.MobileFactoryPackCell = fc;
+						mobileMacro.MobileFactoryPackTarget = spot.Cell;
+						mobileMacro.MobileFactoryPackReason = spot.Reason;
 						UndeployBuildingToVehicle(pOwnBld, spot.Cell);
 						handledConYardAction = true;
 					}
