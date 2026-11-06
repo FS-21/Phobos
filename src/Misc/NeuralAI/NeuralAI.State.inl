@@ -268,8 +268,17 @@ namespace
 		// Tech tree progress (UpdateTechUnlocks): per building type index, how many types it would
 		// unlock as a missing prerequisite; whether one of those is buildable right now.
 		std::unordered_map<int, int> TechUnlocks {};
+		// The not yet buildable types behind each of those buildings (same scan), so a building can
+		// be valued by what it would open, not only by how much.
+		std::unordered_map<int, std::vector<TechnoTypeClass*>> TechUnlockTypes {};
 		bool HasBuildableTechUnlock { false };
 		int TechUnlockFrame { -100000 };
+		// Counter composition (UpdateCounterComposition, Expert 2): production score shift per
+		// buildable combat type against the enemy army seen so far, and the extra priority of the
+		// first of a building that would unlock a better counter than any we can build now.
+		std::unordered_map<const TechnoTypeClass*, int> CounterBonus {};
+		std::unordered_map<int, int> CounterUnlockBonus {};
+		int CounterFrame { -100000 };
 		// Progressive unit tier (UpdateUnitTierCap): highest TechLevel of combat units it may build
 		// now, the highest tier of enemy units it has seen, and its peak building count (a house
 		// that lost half its base unlocks one tier more).
@@ -459,8 +468,12 @@ namespace
 			this->ResourceClaimZone = -1;
 			this->LastResourceClaimFrame = -100000;
 			this->TechUnlocks.clear();
+			this->TechUnlockTypes.clear();
 			this->HasBuildableTechUnlock = false;
 			this->TechUnlockFrame = -100000;
+			this->CounterBonus.clear();
+			this->CounterUnlockBonus.clear();
+			this->CounterFrame = -100000;
 			this->UnitTierCap = 2;
 			this->SeenEnemyUnitTier = 0;
 			this->PeakOwnedBuildings = 0;
