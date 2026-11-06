@@ -55,7 +55,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	const AIBackpackFile& policy = NeuralAI::PolicyFor(pHouse);
 
 	// Select active specialist expert (0..9) combining situational priors +
-	// evolved Expert Routing Bias (Slots 40..47 & 84..85) + learned Faction Memory
+	// evolved Expert Routing Bias (Slots 40..47 & 84..85) + learned Faction Memory + context routing
 	std::array<int, 10> expScores = { 100, 100, 100, 80, 100, 160, 110, 110, 95, 95 };
 
 	if (pHouse->HasLowPower() || pHouse->CountResourceGatherers == 0 || pHouse->CountResourceDestinations == 0
@@ -141,6 +141,18 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		: 60;
 	int activeExpert = 0;
 	int bestExpScore = -999999;
+	const int routingPhase = RoutingPhase(Unsorted::CurrentFrame);
+
+	// Context routing (learned per game phase and map class), capped at +-150 so the situation
+	// priors still decide. Only with a loaded table and a known map class: otherwise 0.
+	const NeuralContextRouting& contextRouting = ContextRoutingFor(pHouse);
+	int routingMapClass = -1;
+
+	if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded && contextRouting.Loaded)
+	{
+		ComputeMapInfo();
+		routingMapClass = CurrentMapClass();
+	}
 
 	for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
 	{
@@ -162,6 +174,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 						? policy.Entries[eIdx].ExpertScoreDelta[e]
 						: policy.Entries[eIdx].BuildCategoryDelta[14 + (e - 8)]) * 6, -150, 150);
 			}
+
+			if (routingMapClass >= 0)
+				s += std::clamp(static_cast<int>(contextRouting.Bias[routingPhase][routingMapClass][e]), -ContextRoutingCap, ContextRoutingCap);
 		}
 
 		// Hysteresis: the current expert keeps the lead on near ties instead of flapping each tick.
@@ -226,7 +241,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	pExt->NeuralAI_ActiveExpert = activeExpert;
 
 	if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+	{
 		ExpertTicks[pHouse->ArrayIndex][activeExpert]++;
+		ExpertTicksByPhase[pHouse->ArrayIndex][routingPhase][activeExpert]++;
+	}
 
 	// Run INT8 Fixed-Point Matrix-Vector Inference on the mapped Base Model
 	if (NeuralAI::BaseMappedView && NeuralAI::BaseMappedSize >= sizeof(AIBaseHeader))

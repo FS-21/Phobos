@@ -403,6 +403,47 @@ static bool LoadBackpackFromSharedMemory(const char* pName, AIBackpackFile& outB
 	return valid;
 }
 
+// Context routing tables (see NeuralContextRouting). Headless training: the challenger's and the
+// opponent's from the trainer's RAM handoff, slot files as fallback; the opponent shares the
+// challenger's when it has none. Otherwise Resources\AI\ai_context.dat (or AI\ai_context.dat).
+static void LoadContextRoutingTables()
+{
+	ContextRouting = NeuralContextRouting {};
+	OpponentContextRouting = NeuralContextRouting {};
+
+	char path[MAX_PATH];
+
+	if (NeuralAI::HeadlessMode)
+	{
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIContext_%d", NeuralAI::TrainSlotIndex);
+
+		if (!LoadContextRoutingFromSharedMemory(path, ContextRouting))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_context_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadContextRoutingFile(path, ContextRouting);
+		}
+
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIContextOpp_%d", NeuralAI::TrainSlotIndex);
+
+		if (!LoadContextRoutingFromSharedMemory(path, OpponentContextRouting))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_context_opp_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadContextRoutingFile(path, OpponentContextRouting);
+		}
+	}
+	else
+	{
+		for (const char* pPath : { "Resources\\AI\\ai_context.dat", "AI\\ai_context.dat" })
+		{
+			if (LoadContextRoutingFile(pPath, ContextRouting))
+				break;
+		}
+	}
+
+	Debug::Log("[NeuralAI] Context routing: %s, opponent %s.\n", ContextRouting.Loaded ? "loaded" : "none",
+		OpponentContextRouting.Loaded ? "loaded" : "shared");
+}
+
 const AIBackpackFile& NeuralAI::PolicyFor(const HouseClass* pHouse)
 {
 	if (NeuralAI::HeadlessMode && NeuralAI::OpponentLoaded)
@@ -430,6 +471,10 @@ void NeuralAI::LoadOrResetBackpack()
 	}
 
 	NeuralAI::CurrentBaseSignature = HashValueFNV1a(baseModelHash, NeuralAI::CurrentRulesSignature);
+
+	// No context routing unless this match loads it below (campaign and human multiplayer never do).
+	ContextRouting = NeuralContextRouting {};
+	OpponentContextRouting = NeuralContextRouting {};
 
 	// Campaign and standard Multiplayer use only the shared deterministic base
 	// brain.
@@ -502,6 +547,8 @@ void NeuralAI::LoadOrResetBackpack()
 
 		Debug::Log("[NeuralAI] Headless policy source: %s\n", challengerFromShm ? "shared memory" : "files");
 
+		LoadContextRoutingTables();
+
 		NeuralAI::AllowBackpackInference = true;
 
 		NeuralAI::BackpackLoaded = true;
@@ -549,6 +596,8 @@ void NeuralAI::LoadOrResetBackpack()
 		if (MapClassLoaded)
 			break;
 	}
+
+	LoadContextRoutingTables();
 
 	if (!valid)
 	{
@@ -712,6 +761,18 @@ void NeuralAI::OnScenarioStart()
 
 	for (auto& gains : ExpertGain)
 		gains.fill(0);
+
+	for (auto& phases : ExpertTicksByPhase)
+	{
+		for (auto& ticks : phases)
+			ticks.fill(0);
+	}
+
+	for (auto& phases : ExpertGainByPhase)
+	{
+		for (auto& gains : phases)
+			gains.fill(0);
+	}
 
 	LastHouseAdvantage.fill(0);
 	HasLastHouseAdvantage.fill(false);
