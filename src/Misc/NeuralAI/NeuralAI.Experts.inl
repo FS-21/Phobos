@@ -80,6 +80,19 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	if (features[66] > 24 || features[65] > 36)
 		expScores[2] += 420; // Expert 2: Dynamic Counter-Strategy
 
+	// A counter-composition pays most against a lopsided army: 8 points per share point of the
+	// dominant seen enemy category above 45% (up to 320), scaled by the opponent model confidence.
+	{
+		auto const& seenFoe = GetMacroState(pHouse).OpponentProfile;
+		int dominantShare = 0;
+
+		for (int c = 0; c < static_cast<int>(EnemyForceCategory::Count); ++c)
+			dominantShare = std::max(dominantShare, seenFoe.Share(static_cast<EnemyForceCategory>(c)));
+
+		if (dominantShare > 45)
+			expScores[2] += std::min(320, (dominantShare - 45) * 8) * seenFoe.Confidence() / 100;
+	}
+
 	if (HouseClass::Array.Count > 4 && (IsAITickWindow(240, 60)))
 		expScores[3] += 380; // Expert 3: Multi-Player Opportunism & Diplomacy
 
@@ -634,6 +647,22 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// Early pressure near our base (rush) -> ground defenses now.
 	outScores[5] = ClampInt16(outScores[5] + std::clamp(foe.RushPressure * 3, 0, 900));
 	outScores[14] = ClampInt16(outScores[14] + std::clamp(foe.RushPressure * 2, 0, 500));
+
+	// Expert 2 picks the counter type itself (UpdateCounterComposition); here it asks for the
+	// buildings those counters need: anti-air defenses and an airfield for fighters against an air
+	// force, a shipyard against a navy (only placed where naval play is possible), and fewer static
+	// defenses against artillery that outranges them.
+	if (activeExpert == 2)
+	{
+		outScores[6] = ClampInt16(outScores[6] + counterBonus(foeAir, 700));
+		outScores[8] = ClampInt16(outScores[8] + counterBonus(foeAir, 500));
+		outScores[20] = ClampInt16(outScores[20] + counterBonus(foeAir, 400));
+		outScores[26] = ClampInt16(outScores[26] + counterBonus(foeAir, 400));
+		outScores[7] = ClampInt16(outScores[7] + counterBonus(foeNaval, 600));
+		outScores[29] = ClampInt16(outScores[29] + counterBonus(foeNaval, 400));
+		outScores[14] = ClampInt16(outScores[14] - counterBonus(foeArtillery, 300));
+		outScores[80] = ClampInt16(outScores[80] + counterBonus(foeArtillery, 500));
+	}
 
 	outScores[27] = ClampInt16(outScores[27] + ((features[68] > 16 || arch == 4 || activeExpert == 7) ? 950 : 350));
 
