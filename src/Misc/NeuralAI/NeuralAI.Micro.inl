@@ -273,6 +273,41 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pH || !pBldType || !pDeployerUnit)
 			return CellStruct::Empty;
 
+		// A full placement search (FindSpatialTetrisBuildCell) costs 25-55 ms in a late game and
+		// several deploy branches ask every tick: reuse a unit's answer for 120 frames (same match:
+		// game seed checked, so a previous match's entry is never used).
+		struct DeployStandCache
+		{
+			int Seed;
+			int Frame;
+			int TypeIndex;
+			int Zone;
+			CellStruct Cell;
+		};
+
+		static std::unordered_map<DWORD, DeployStandCache> standCache;
+		const int now = Unsorted::CurrentFrame;
+
+		if (standCache.size() > 512)
+			standCache.clear();
+
+		if (auto const it = standCache.find(pDeployerUnit->UniqueID); it != standCache.end())
+		{
+			auto const& cached = it->second;
+
+			if (cached.Seed == Game::Seed && now >= cached.Frame && now - cached.Frame < 120 && cached.TypeIndex == pBldType->ArrayIndex
+				&& cached.Zone == requiredZone)
+			{
+				return cached.Cell;
+			}
+		}
+
+		auto remember = [&](const CellStruct& cell)
+		{
+			standCache[pDeployerUnit->UniqueID] = DeployStandCache { Game::Seed, now, pBldType->ArrayIndex, requiredZone, cell };
+			return cell;
+		};
+
 		const CellStruct tetrisTopLeft = NeuralAI::FindSpatialTetrisBuildCell(pH, pBldType);
 		if (tetrisTopLeft != CellStruct::Empty)
 		{
@@ -283,11 +318,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const CellStruct nearTetris = FindDeployableFoundationNearCell(
 				pH, pBldType, tetrisTopLeft + standOffset, requiredZone, pDeployerUnit);
 			if (nearTetris != CellStruct::Empty)
-				return nearTetris;
+				return remember(nearTetris);
 		}
 
-		return FindDeployableFoundationNearCell(
-			pH, pBldType, pDeployerUnit->GetMapCoords(), requiredZone, pDeployerUnit);
+		return remember(FindDeployableFoundationNearCell(
+			pH, pBldType, pDeployerUnit->GetMapCoords(), requiredZone, pDeployerUnit));
 	};
 
 	auto const pExt = HouseExt::Fetch(pHouse);
