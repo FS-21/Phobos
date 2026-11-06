@@ -121,7 +121,8 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 			continue;
 		}
 
-		if (pBld->Owner && pBld->Owner->IsNeutral() && pBld->Type->Capturable)
+		// Neutral techs count once their cell has been seen (fog-fair).
+		if (pBld->Owner && pBld->Owner->IsNeutral() && pBld->Type->Capturable && IsCellVisibleToAI(pHouse, pBld->GetCell()))
 		{
 			neutralCapturableTechs++;
 			if (earlyHomeZone >= 0)

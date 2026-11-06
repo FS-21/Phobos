@@ -50,6 +50,10 @@ namespace
 
 		return false;
 	}
+
+	// Expert 4 work summary (NeuralAI.SpecOps.inl, refreshed every 150 frames).
+	int SpecOpsOpportunity(HouseClass* pHouse);
+	void GetSpecOpsWork(HouseClass* pHouse, int& outTechValue, int& outSpyTargets, bool& outBridgeRepair, bool& outBridgeDemolition);
 }
 
 void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features,
@@ -96,8 +100,11 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	if (HouseClass::Array.Count > 4 && (IsAITickWindow(240, 60)))
 		expScores[3] += 380; // Expert 3: Multi-Player Opportunism & Diplomacy
 
-	if (pExt->NeuralAI_Archetype == 1 || (IsAITickWindow(300, 60) && pHouse->OwnedUnits >= 4))
-		expScores[4] += 360; // Expert 4: Special Operations & Trickster
+	// Expert 4: Special Operations, graded by the work there is for it now (fog-fair): known
+	// reachable neutral techs out of enemy defense reach and an engineer to take them, enemy
+	// buildings worth a spy, bridges to repair or bring down, captures under way (up to 780).
+	const int specOpsOpportunity = SpecOpsOpportunity(pHouse);
+	expScores[4] += specOpsOpportunity + (pExt->NeuralAI_Archetype == 1 ? 200 : 0);
 
 	// Expert 5: Tactical Squad Micro, Kiting & Beacons: an army in contact (enemy tanks seen),
 	// stronger the bigger it is.
@@ -146,8 +153,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// Common-sense vetoes: an expert that cannot do its job here is never chosen, whatever the
 	// learned bias says. Airforce with no aircraft we could ever build, own or fight; Urban with no
 	// building to occupy, no garrison and no allied coalition; Expansion on a map without any
-	// ore field or capturable tech.
+	// ore field or capturable tech; Special Operations with nothing to capture, spy or bridge.
 	std::array<bool, 10> vetoed {};
+	vetoed[4] = specOpsOpportunity == 0 && pExt->NeuralAI_Archetype != 1;
 	vetoed[8] = pHouse->OwnedAircraft == 0 && pHouse->NumAirpads == 0 && features[66] <= 20 && !HouseCanEverFieldAircraft(pHouse);
 	vetoed[9] = features[26] == 0 && features[79] == 0 && features[96] == 0 && features[97] == 0
 		&& pExt->NeuralAI_Archetype != 7;
@@ -619,6 +627,32 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	else
 	{
 		outScores[22] = -3000; // Immune Bridges ON: never waste ammo shooting bridges
+	}
+
+	// Expert 4 in charge: train the engineers and spies its work needs and back the bridge
+	// planner's repair and demolition calls over the generic strength checks.
+	if (activeExpert == 4)
+	{
+		int techValue = 0;
+		int spyTargets = 0;
+		bool bridgeRepair = false;
+		bool bridgeDemolition = false;
+		GetSpecOpsWork(pHouse, techValue, spyTargets, bridgeRepair, bridgeDemolition);
+
+		if (techValue > 0 || bridgeRepair)
+			outScores[18] = ClampInt16(outScores[18] + 300 + std::min(400, techValue * 60));
+
+		if (techValue > 0)
+			outScores[36] = ClampInt16(outScores[36] + 300);
+
+		if (spyTargets > 0)
+			outScores[19] = ClampInt16(outScores[19] + 250 + spyTargets * 80);
+
+		if (bridgeRepair && features[18] > 0)
+			outScores[21] = ClampInt16(outScores[21] + 700);
+
+		if (bridgeDemolition && features[134] > 0)
+			outScores[22] = ClampInt16(outScores[22] + 600);
 	}
 
 	outScores[24] = ClampInt16(outScores[24] + 800 + ((arch == 3 || arch == 4) ? 320 : 0)

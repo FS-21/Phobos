@@ -497,7 +497,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const int fz = ObjectZone(pFoot, MovementZone::Normal);
 		const CellStruct gc = CellClass::Coord2Cell(pGoal->GetCoords());
 		const int gz = MapClass::Instance.GetMovementZoneType(gc, MovementZone::Normal, false);
-		if (fz >= 0 && gz >= 0 && fz != gz)
+		if (fz >= 0 && gz >= 0 && fz != gz && !IsBuildingEnterableFromZone(abstract_cast<BuildingClass*>(pGoal), fz))
 		{
 			if (pFoot->Target && pFoot->CurrentMission == Mission::Attack && pFoot->GetTechnoType())
 			{
@@ -530,8 +530,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const int footZone = MapClass::Instance.GetMovementZoneType(footCoords, MovementZone::Normal, pFoot->OnBridge);
 		const CellStruct targetCoords = CellClass::Coord2Cell(pTarget->GetCoords());
 		auto const pTargetObject = abstract_cast<ObjectClass*>(pTarget);
-		const int targetZone = MapClass::Instance.GetMovementZoneType(
+		int targetZone = MapClass::Instance.GetMovementZoneType(
 			targetCoords, MovementZone::Normal, pTargetObject && pTargetObject->OnBridge);
+
+		// A building answers for the ground around it (its own cells may carry another zone).
+		if (footZone >= 0 && targetZone != footZone && IsBuildingEnterableFromZone(abstract_cast<BuildingClass*>(pTarget), footZone))
+			targetZone = footZone;
+
 		bool canShootFromHere = false;
 		if (useSetTarget || desiredMission == Mission::Attack)
 		{
@@ -1104,6 +1109,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 
 			if (!pCivBld->Owner || (!pCivBld->Owner->IsNeutral() && pHouse->IsAlliedWith(pCivBld->Owner)))
+				continue;
+
+			// Fog-fair: a tech we saw as neutral, or an enemy building we have seen.
+			if (pCivBld->Owner->IsNeutral() ? !IsKnownNeutralTech(pHouse, pCivBld) : !IsEnemyBuildingKnown(pHouse, pCivBld))
 				continue;
 
 			const CellStruct bc = pCivBld->GetMapCoords();
@@ -5462,11 +5471,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			}
 
+			auto const pHoarderExt = HouseExt::Fetch(pHouse);
+
+			// Expert 4 (Special Operations): the best known safe neutral tech, with an escort first
+			// when enemies were seen near it. Captures already under way finish under any expert.
+			if (RunSpecOpsEngineer(pHouse, pInf, pHoarderExt && pHoarderExt->NeuralAI_ActiveExpert == 4,
+				DispatchFootToTargetOrTransport))
+			{
+				continue;
+			}
+
 			const double capLevel = RulesClass::Instance ? RulesClass::Instance->EngineerCaptureLevel : 1.0;
 			const int engCaptureBias = NeuralAI::PolicyFor(pHouse).OutputBias[36];
 			// The resource hoarder (Expert 6) takes visible enemy oil derricks too, as eagerly as
 			// neutral ones.
-			auto const pHoarderExt = HouseExt::Fetch(pHouse);
 			const bool resourceHoarder = pHoarderExt && pHoarderExt->NeuralAI_ActiveExpert == 6;
 			BuildingClass* pBestCapBld = nullptr;
 			int bestCapDist = 999999;
@@ -5486,10 +5504,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				const bool isNeutralTech = pBld->Owner->IsNeutral();
 
-				// Neutral map tech structures (Oil Derricks, Hospitals, Outposts,
-				// Secret Labs) are known map landmarks; Enemy buildings require
-				// line-of-sight or active Engineer raid bias.
-				if (!isNeutralTech && !IsCellVisibleToAI(pHouse, pCell))
+				// Fog-fair: neutral techs only once seen as neutral, out of known enemy defense reach
+				// and not taken by an Expert 4 capture; enemy buildings require line of sight.
+				if (isNeutralTech ? !IsSpecOpsTechAvailable(pHouse, pBld, pInf->UniqueID) : !IsCellVisibleToAI(pHouse, pCell))
 					continue;
 
 				const bool isCashTechBld = (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0);
@@ -5664,11 +5681,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 
+					// Powered defenses of that owner we have seen (fog-fair).
 					bool enemyHasPoweredDefenses = false;
-					for (auto const pEB : pPwrOwner->Buildings)
+					for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
 					{
-						if (pEB && !pEB->InLimbo && pEB->IsAlive && pEB->Type && pEB->Type->IsBaseDefense
-							&& (pEB->Type->Powered || pEB->Type->PoweredSpecial))
+						if (info.IsDefense && info.Building->Owner == pPwrOwner
+							&& (info.Building->Type->Powered || info.Building->Type->PoweredSpecial))
 						{
 							enemyHasPoweredDefenses = true;
 							break;
@@ -5713,7 +5731,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 					else if (isIdle && !blackoutAlreadyActive)
 					{
-						DispatchFootToTargetOrTransport(pInf, pStagedPowerBld, Mission::Enter, false);
+						if (DispatchFootToTargetOrTransport(pInf, pStagedPowerBld, Mission::Enter, false))
+							NoteSpecOpsSpy(pHouse, pInf, pStagedPowerBld);
 						pExt->NeuralAI_InfiltratedEnemyMask |= (1 << std::clamp(pPwrOwner->ArrayIndex, 0, 7));
 						continue;
 					}
@@ -5733,7 +5752,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 
 				if (!pEnemyBld->Type->Spyable || pHouse->IsAlliedWith(pEnemyBld->Owner)
-					|| pEnemyBld->Owner->IsNeutral())
+					|| pEnemyBld->Owner->IsNeutral() || !IsEnemyBuildingKnown(pHouse, pEnemyBld))
 				{
 					continue;
 				}
@@ -5768,13 +5787,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 				else if (pEnemyBld->Type->Refinery || pEnemyBld->Type->Storage > 0)
 				{
-					const int enemyMoney = pEnemyOwner->Available_Money();
-					if (enemyMoney < 300)
-						spyScore = 25;
-					else if (ourMoney < 2500 && enemyMoney >= 800)
-						spyScore = 150;
-					else
-						spyScore = 105;
+					// The enemy's money is hidden: a refinery pays most when we are short ourselves.
+					spyScore = (ourMoney < 2500) ? 150 : 105;
 				}
 				else if (pEnemyBld->Type->PowerBonus > pEnemyBld->Type->PowerDrain)
 				{
@@ -5784,11 +5798,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 					else
 					{
+						// Powered defenses of that owner we have seen (fog-fair).
 						bool ownerHasPoweredDef = false;
-						for (auto const pEB : pEnemyOwner->Buildings)
+						for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
 						{
-							if (pEB && !pEB->InLimbo && pEB->IsAlive && pEB->Type && pEB->Type->IsBaseDefense
-								&& (pEB->Type->Powered || pEB->Type->PoweredSpecial))
+							if (info.IsDefense && info.Building->Owner == pEnemyOwner
+								&& (info.Building->Type->Powered || info.Building->Type->PoweredSpecial))
 							{
 								ownerHasPoweredDef = true;
 								break;
@@ -5864,7 +5879,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (pBestSpyTarget)
 			{
-				DispatchFootToTargetOrTransport(pInf, pBestSpyTarget, Mission::Enter, false);
+				if (DispatchFootToTargetOrTransport(pInf, pBestSpyTarget, Mission::Enter, false))
+					NoteSpecOpsSpy(pHouse, pInf, pBestSpyTarget);
 
 				pExt->NeuralAI_InfiltratedEnemyMask |= (1 << std::clamp(pBestSpyTarget->Owner->ArrayIndex, 0, 7));
 			}

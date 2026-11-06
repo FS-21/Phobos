@@ -372,6 +372,7 @@
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Orders.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Placement.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Plans.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.SpecOps.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Production.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.State.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Tactics.inl" />

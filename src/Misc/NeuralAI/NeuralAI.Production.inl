@@ -226,6 +226,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Expert 2: which buildable types and missing tech answer the enemy army seen so far.
 	UpdateCounterComposition(pHouse);
+
+	// Expert 4: neutral techs seen, capture / spy / bridge work and the engineers and spies out.
+	UpdateSpecOps(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -3568,8 +3571,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		const bool isCashDerrick = pMapBld->Type->ProduceCashAmount > 0 || pMapBld->Type->ProduceCashStartup > 0;
-		const bool isNeutral = pMapBld->Owner->IsNeutral();
-		const bool isVisibleEnemyDerrick = resourceHoarder && isCashDerrick && !isNeutral && pMapBld->Owner != pHouse
+		// Fog-fair: only neutral techs this house has seen (and still remembers as neutral).
+		const bool isNeutral = pMapBld->Owner->IsNeutral() && IsKnownNeutralTech(pHouse, pMapBld);
+		const bool isVisibleEnemyDerrick = resourceHoarder && isCashDerrick && !pMapBld->Owner->IsNeutral() && pMapBld->Owner != pHouse
 			&& !pHouse->IsAlliedWith(pMapBld->Owner) && IsCellVisibleToAI(pHouse, pMapBld->GetCell());
 
 		if (isNeutral || isVisibleEnemyDerrick)
@@ -3802,6 +3806,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	pExt->NeuralAI_NextInfantryTarget = bestInfIdx;
+
+	// Ares replaces HouseClass::AI_Infantry from its first instruction (and only picks a type while
+	// the index is -1), so the AI_Infantry hook of UpdateInfantryProduction never runs with Ares:
+	// hand the choice to the barracks here, or no infantry (engineers, spies) is ever trained.
+	pHouse->ProducingInfantryTypeIndex = bestInfIdx;
 
 	productionClock.Mark(NeuralSection::ProdAircraft);
 
