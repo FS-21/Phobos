@@ -470,6 +470,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	int bestSmallPatchMetric = INT_MAX;
 	int smallPatchDist = 9999;
 	const std::vector<int> heldOreBlocks = GetHeldOreBlocks(pHouse);
+	std::vector<CellStruct> nearbyOreCells;
 
 	// Resource claim (UpdateResourceClaim): its field pulls the crawl and the refineries, hard for
 	// the resource hoarder (Expert 6), lightly for everyone else.
@@ -492,6 +493,11 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				continue;
 
 			const int oreZone = MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false);
+
+			// Ore near the base (sampled by this scan): a refinery may stand next to any of it.
+			if (std::abs(dx) <= 44 && std::abs(dy) <= 44 && (centerZone < 0 || oreZone == centerZone))
+				nearbyOreCells.push_back(tc);
+
 			if (centerZone >= 0 && oreZone != centerZone)
 			{
 				continue; // Never try to Adjacent=2 base-crawl across water to a
@@ -589,6 +595,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	}
 
 	if (nearestOreCell == CellStruct::Empty)
+		nearestOreCell = fallbackOreCell;
+
+	// A refinery for the ore we can reach: when the nearest free field is far from every building of
+	// ours (the crawl or an MCV goes there), the refinery serves the nearest ore instead, our own
+	// field included. Pulled toward a field 50 cells away, every candidate around the base failed the
+	// reach check and the ConYard kept building refineries it could not place.
+	if (pBuildingType->Refinery && hasUncolonizedOre && bestOreDist > 20 && fallbackOreCell != CellStruct::Empty)
 		nearestOreCell = fallbackOreCell;
 
 	// Spawner tree of the target field (within 6 cells of its ore cell): a refinery goes next to the
@@ -2163,10 +2176,18 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				// (cooldown) while power plants and barracks crawl there; each failed placement in a
 				// row widens that by 4 cells and after 3 any cell will do (rugged maps).
 				if (pBuildingType->Refinery && !ownRefineryCells.empty() && pullGoal != CellStruct::Empty
-					&& refineryReach != INT_MAX
-					&& std::max(std::abs(candidate.X + w / 2 - pullGoal.X), std::abs(candidate.Y + h / 2 - pullGoal.Y)) > refineryReach)
+					&& refineryReach != INT_MAX)
 				{
-					continue;
+					const CellStruct refCenter { static_cast<short>(candidate.X + w / 2), static_cast<short>(candidate.Y + h / 2) };
+					const bool nearGoal = std::max(std::abs(refCenter.X - pullGoal.X), std::abs(refCenter.Y - pullGoal.Y)) <= refineryReach;
+
+					// Any ore of this landmass within 8 cells will do too: a field whose heart is walled
+					// by cliffs is still mined from its open edge.
+					const bool nearAnyOre = nearGoal || std::any_of(nearbyOreCells.begin(), nearbyOreCells.end(),
+						[&refCenter](const CellStruct& ore) { return std::max(std::abs(refCenter.X - ore.X), std::abs(refCenter.Y - ore.Y)) <= 8; });
+
+					if (!nearAnyOre)
+						continue;
 				}
 
 				if ((isResourceBld || isSteppingStoneExpander) && pullGoal != CellStruct::Empty)
@@ -2824,7 +2845,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 			if (st.RefineryReachFailures > 0)
 				st.RelaxedReachRefineries.push_back(pBuilding->UniqueID);
 
-			st.RefineryReachFailures = 0;
+			st.RefineryReachFailures = std::max(0, st.RefineryReachFailures - 1);
 		}
 
 		if (pBuildingType->IsBaseDefense)
@@ -2984,10 +3005,24 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 	auto recordPlacementFailure = [&]() -> int
 	{
 		auto& st = GetMacroState(pHouse);
-		st.ConsecutivePlacementFailures++;
 
-		const int cdUntil = Unsorted::CurrentFrame + std::min(3600, 300 * st.ConsecutivePlacementFailures);
-		st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex] = cdUntil;
+		// A refinery with no cell near its ore waits longer (1800 frames per failure, up to 5400) and
+		// does not count as a general placement failure: those switch off the stepping-stone crawl,
+		// the very thing that brings buildable cells next to the ore. The ConYard is free meanwhile.
+		if (pBuildingType->Refinery)
+		{
+			st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex]
+				= Unsorted::CurrentFrame + std::min(5400, 1800 * std::max(1, st.RefineryReachFailures));
+		}
+		else
+		{
+			st.ConsecutivePlacementFailures++;
+		}
+
+		const int cdUntil = Unsorted::CurrentFrame + std::min(3600, 300 * std::max(1, st.ConsecutivePlacementFailures));
+
+		if (!pBuildingType->Refinery)
+			st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex] = cdUntil;
 		if (pBuildingType->PowerBonus > pBuildingType->PowerDrain && !pBuildingType->IsBaseDefense
 			&& !pHouse->HasLowPower())
 		{
