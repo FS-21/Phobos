@@ -208,6 +208,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// One scout at a time checks free ore fields before expanding there.
 	UpdateFieldScouting(pHouse);
+
+	// Best ore field not mined yet (Expert 6 hoards: claims contested fields too).
+	UpdateResourceClaim(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -455,7 +458,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (Unsorted::CurrentFrame > pExt->LastObsoleteRefineryCheckFrame + 450 + houseStagger)
 		{
 			pExt->LastObsoleteRefineryCheckFrame = Unsorted::CurrentFrame;
-			RecycleObsoleteRefineries(pHouse);
+			auto& relaxedReach = GetMacroState(pHouse).RelaxedReachRefineries;
+			relaxedReach.erase(std::remove_if(relaxedReach.begin(), relaxedReach.end(), [pHouse](DWORD id)
+				{
+					return std::none_of(pHouse->Buildings.begin(), pHouse->Buildings.end(),
+						[id](BuildingClass* pB) { return pB && pB->IsAlive && pB->UniqueID == id; });
+				}), relaxedReach.end());
+			RecycleObsoleteRefineries(pHouse, pExt->NeuralAI_ActiveExpert == 6, relaxedReach);
 			if (SellFactoriesOverDifficultyCap(pHouse, GetNewestOffensiveStoneCell(pHouse)))
 				GetMacroState(pHouse).LastFactoryCapSaleFrame = Unsorted::CurrentFrame;
 			RaiseEmergencyMoneyForRefinery(pHouse, ownedRefineries, ownedHarvestersCount, money);
@@ -1322,10 +1331,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (cyz < 0)
 				continue;
 
-			const bool isRemoteOrNomadicCY = (yi >= 1)
+			// Remote as placement sees a hub (FindSpatialTetrisBuildCell): another landmass, or more
+			// than 16 cells from the spawn. A second yard deployed inside the home base is not an
+			// outpost: its missing factory was never placed next to it (placement anchors at hubs
+			// only), so it kept asking for one forever.
+			const bool isRemoteOrNomadicCY = (spawnHomeZone >= 0 && cyz != spawnHomeZone)
 				|| (pHouse->BaseSpawnCell != CellStruct::Empty
-					&& std::max(std::abs(cyc.X - pHouse->BaseSpawnCell.X), std::abs(cyc.Y - pHouse->BaseSpawnCell.Y))
-						> 16);
+					? std::max(std::abs(cyc.X - pHouse->BaseSpawnCell.X), std::abs(cyc.Y - pHouse->BaseSpawnCell.Y)) > 16
+					: yi >= 1);
 			if (!isRemoteOrNomadicCY)
 				continue;
 
@@ -1708,6 +1721,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (!outpostNeedsIt || !saleCooldownOver || owned > factoryTypeCap)
 					continue;
+
 			}
 
 			int score = 0;
@@ -3340,13 +3354,28 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int neutralCapturableCount = 0;
 	int neutralCashDerrickCount = 0;
 
+	// The resource hoarder (Expert 6) also counts visible enemy oil derricks as engineer work.
+	auto const pHoarderExt = HouseExt::Fetch(pHouse);
+	const bool resourceHoarder = pHoarderExt && pHoarderExt->NeuralAI_ActiveExpert == 6;
+
 	for (auto const pMapBld : BuildingClass::Array)
 	{
-		if (pMapBld && !pMapBld->InLimbo && pMapBld->IsAlive && pMapBld->Type && pMapBld->Owner
-			&& pMapBld->Type->Capturable && pMapBld->Owner->IsNeutral())
+		if (!pMapBld || pMapBld->InLimbo || !pMapBld->IsAlive || !pMapBld->Type || !pMapBld->Owner
+			|| !pMapBld->Type->Capturable)
+		{
+			continue;
+		}
+
+		const bool isCashDerrick = pMapBld->Type->ProduceCashAmount > 0 || pMapBld->Type->ProduceCashStartup > 0;
+		const bool isNeutral = pMapBld->Owner->IsNeutral();
+		const bool isVisibleEnemyDerrick = resourceHoarder && isCashDerrick && !isNeutral && pMapBld->Owner != pHouse
+			&& !pHouse->IsAlliedWith(pMapBld->Owner) && IsCellVisibleToAI(pHouse, pMapBld->GetCell());
+
+		if (isNeutral || isVisibleEnemyDerrick)
 		{
 			neutralCapturableCount++;
-			if (pMapBld->Type->ProduceCashAmount > 0 || pMapBld->Type->ProduceCashStartup > 0)
+
+			if (isCashDerrick)
 				neutralCashDerrickCount++;
 		}
 	}

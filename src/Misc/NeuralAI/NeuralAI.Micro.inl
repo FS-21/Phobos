@@ -3025,6 +3025,44 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 
+				// Resource claim (UpdateResourceClaim): the field the house picked by value and risk,
+				// when it is on this landmass, 16+ cells from every ConYard of ours and 12+ from any
+				// building of ours (the MCV can deploy there).
+				if (!pExpansionDest)
+				{
+					auto const& claimMacro = GetMacroState(pHouse);
+					const CellStruct claimCell = claimMacro.ResourceClaimCell;
+
+					if (claimCell != CellStruct::Empty && mcvZone >= 0 && claimMacro.ResourceClaimZone == mcvZone)
+					{
+						bool deployableThere = true;
+
+						for (int yi = 0; yi < pHouse->ConYards.Count && deployableThere; ++yi)
+						{
+							if (auto const pYard = pHouse->ConYards.GetItem(yi))
+							{
+								const CellStruct yc = pYard->GetMapCoords();
+								deployableThere = std::max(std::abs(yc.X - claimCell.X), std::abs(yc.Y - claimCell.Y)) >= 16;
+							}
+						}
+
+						for (auto const pOwnBld : pHouse->Buildings)
+						{
+							if (!deployableThere)
+								break;
+
+							if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo)
+							{
+								const CellStruct bc = pOwnBld->GetMapCoords();
+								deployableThere = std::max(std::abs(bc.X - claimCell.X), std::abs(bc.Y - claimCell.Y)) >= 12;
+							}
+						}
+
+						if (deployableThere)
+							pExpansionDest = MapClass::Instance.TryGetCellAt(claimCell);
+					}
+				}
+
 				// Distant Uncolonized Ore / Difficult Map Zone Expansion (scan up to
 				// [-128, 128] across the landmass):
 				// Nearest worthy field (>= 4 ore cells in 5x5) over the whole scan, not the first row
@@ -5172,6 +5210,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			const double capLevel = RulesClass::Instance ? RulesClass::Instance->EngineerCaptureLevel : 1.0;
 			const int engCaptureBias = NeuralAI::PolicyFor(pHouse).OutputBias[36];
+			// The resource hoarder (Expert 6) takes visible enemy oil derricks too, as eagerly as
+			// neutral ones.
+			auto const pHoarderExt = HouseExt::Fetch(pHouse);
+			const bool resourceHoarder = pHoarderExt && pHoarderExt->NeuralAI_ActiveExpert == 6;
 			BuildingClass* pBestCapBld = nullptr;
 			int bestCapDist = 999999;
 
@@ -5204,7 +5246,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						|| pBld->Type->PowerBonus > 0);
 
 				const bool canCaptureNow = isNeutralTech || (pBld->GetHealthPercentage() <= capLevel + 0.05)
-					|| (engCaptureBias > 60 && isHighValueEnemyBld)
+					|| (engCaptureBias > 60 && isHighValueEnemyBld) || (resourceHoarder && isCashTechBld)
 					|| (SlotGate(scores[82], 60, 82) && pBld->Type->ConstructionYard);
 
 				if (!canCaptureNow)
@@ -5236,7 +5278,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// and BaseNormal expansion hubs!
 				const bool isStrategicTechHub = isCashTechBld || BuildingTypeExt::IsAIBaseNormal(pBld->Type);
 				const int effectiveDist
-					= (!isNeutralTech && (pBld->Type->ConstructionYard || isCashTechBld) && SlotGate(scores[82], 60, 82))
+					= (!isNeutralTech && (pBld->Type->ConstructionYard || isCashTechBld)
+						  && (SlotGate(scores[82], 60, 82) || (resourceHoarder && isCashTechBld)))
 					? (dist / 3)
 					: (isNeutralTech ? (isCashTechBld ? (dist / 3) : (isStrategicTechHub ? (dist * 2 / 5) : (dist / 2)))
 									: dist);

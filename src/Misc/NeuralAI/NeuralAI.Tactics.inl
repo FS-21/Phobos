@@ -421,6 +421,142 @@ namespace
 		return CellStruct::Empty;
 	}
 
+	// Resource hoarder (Expert 6 at full strength, every house a little): the best ore field we
+	// do not mine yet. Value = ore cells + 40 for a spawner tree (a renewable field); risk tier 0 =
+	// no known enemy structure within 20 cells, 1 = one is near (only Expert 6 claims those, after
+	// every tier 0 field); fields held by a known enemy refinery or ConYard (14 cells) are left to
+	// the raid plans. Fog-fair: enemy structures count only when known. Only fields on the
+	// landmass of one of our ConYards (the MCV / crawl can reach them).
+	void UpdateResourceClaim(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - macro.LastResourceClaimFrame < 300)
+			return;
+
+		macro.LastResourceClaimFrame = now;
+		macro.ResourceClaimCell = CellStruct::Empty;
+		macro.ResourceClaimTreeCell = CellStruct::Empty;
+		macro.ResourceClaimTier = -1;
+		macro.ResourceClaimZone = -1;
+
+		auto const pExt = HouseExt::Fetch(pHouse);
+		const bool hoarder = pExt && pExt->NeuralAI_ActiveExpert == 6;
+
+		std::vector<CellStruct> ownHubs;
+		std::vector<std::pair<CellStruct, int>> ownAnchors; // cell, zone
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type)
+				continue;
+
+			const CellStruct bc = pBld->GetMapCoords();
+
+			if (pBld->Type->Refinery || pBld->Type->ResourceDestination)
+				ownHubs.push_back(bc);
+
+			if (pBld->Type->ConstructionYard)
+				ownAnchors.emplace_back(bc, MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pBld->OnBridge));
+		}
+
+		if (ownAnchors.empty())
+			return;
+
+		std::vector<CellStruct> enemyStructures;
+		std::vector<CellStruct> enemyHubs;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner || pBld->Owner == pHouse
+				|| pHouse->IsAlliedWith(pBld->Owner) || pBld->Owner->IsNeutral() || pBld->Type->Insignificant
+				|| pBld->Type->InvisibleInGame || !IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				continue;
+			}
+
+			const CellStruct bc = pBld->GetMapCoords();
+			enemyStructures.push_back(bc);
+
+			if (pBld->Type->Refinery || pBld->Type->ResourceDestination || pBld->Type->ConstructionYard)
+				enemyHubs.push_back(bc);
+		}
+
+		auto chebyshev = [](const CellStruct& a, const CellStruct& b)
+		{
+			return std::max(std::abs(a.X - b.X), std::abs(a.Y - b.Y));
+		};
+
+		int bestMetric = INT_MAX;
+
+		for (auto const& field : GetOreFields())
+		{
+			if (std::any_of(ownHubs.begin(), ownHubs.end(), [&](const CellStruct& h) { return chebyshev(h, field.Cell) <= 14; }))
+				continue;
+
+			if (std::any_of(enemyHubs.begin(), enemyHubs.end(), [&](const CellStruct& h) { return chebyshev(h, field.Cell) <= 14; }))
+				continue;
+
+			const int tier = std::any_of(enemyStructures.begin(), enemyStructures.end(),
+				[&](const CellStruct& e) { return chebyshev(e, field.Cell) <= 20; }) ? 1 : 0;
+
+			if (tier == 1 && !hoarder)
+				continue;
+
+			const int fieldZone = MapClass::Instance.GetMovementZoneType(field.Cell, MovementZone::Normal, false);
+			int dist = INT_MAX;
+
+			for (auto const& [anchorCell, anchorZone] : ownAnchors)
+			{
+				if (anchorZone == fieldZone)
+					dist = std::min(dist, chebyshev(anchorCell, field.Cell));
+			}
+
+			if (dist == INT_MAX)
+				continue;
+
+			const int value = field.OreCells + (field.SpawnerTree ? 40 : 0);
+			const int metric = tier * 100000 + dist * 3 - value;
+
+			if (metric < bestMetric)
+			{
+				bestMetric = metric;
+				macro.ResourceClaimCell = field.Cell;
+				macro.ResourceClaimTier = tier;
+				macro.ResourceClaimZone = fieldZone;
+			}
+		}
+
+		// The field's spawner tree (within 6 cells of its cell): its refinery goes next to it.
+		if (macro.ResourceClaimCell != CellStruct::Empty)
+		{
+			int bestTree = INT_MAX;
+
+			for (int dy = -6; dy <= 6; ++dy)
+			{
+				for (int dx = -6; dx <= 6; ++dx)
+				{
+					const CellStruct tc { static_cast<short>(macro.ResourceClaimCell.X + dx), static_cast<short>(macro.ResourceClaimCell.Y + dy) };
+
+					if (auto const pCell = MapClass::Instance.TryGetCellAt(tc))
+					{
+						if (auto const pTerrain = pCell->GetTerrain(false);
+							pTerrain && pTerrain->IsAlive && pTerrain->Type && pTerrain->Type->SpawnsTiberium
+							&& std::abs(dx) + std::abs(dy) < bestTree)
+						{
+							bestTree = std::abs(dx) + std::abs(dy);
+							macro.ResourceClaimTreeCell = tc;
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Field scouting: one fast, cheap idle ground unit at a time visits the nearest free ore field
 	// (map-wide cache) not scouted in the last 5400 frames, so an enemy outpost there is known
 	// before an MCV is sent (free-field searches skip fields near known enemy structures).
