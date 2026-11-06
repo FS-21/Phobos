@@ -121,7 +121,14 @@ static bool __fastcall ApplyPermaMC_Wrapper(WarheadTypeClass** pExt_Ares, void*,
 static bool __fastcall PermaMC_FreeUnit_SetContext(CaptureManagerClass* pManager, void*, TechnoClass* pTechno)
 {
 	PermaMCTemp::Selected = pTechno->IsSelected;
-	return CaptureManagerExt::FreeUnit(pManager, pTechno, WarheadTypeExt::Fetch(PermaMCTemp::Warhead)->RemoveMindControl_Silent.Get(RulesExt::Global()->MindControl_Permanent_ReplaceSilent));
+
+	// Ares also reaches this call outside ApplyPermaMC (no warhead set): the global default applies.
+	const bool silentDefault = RulesExt::Global()->MindControl_Permanent_ReplaceSilent;
+	const bool silent = PermaMCTemp::Warhead
+		? WarheadTypeExt::Fetch(PermaMCTemp::Warhead)->RemoveMindControl_Silent.Get(silentDefault)
+		: silentDefault;
+
+	return CaptureManagerExt::FreeUnit(pManager, pTechno, silent);
 }
 
 static bool __fastcall PermaMC_SetOwningHouse_Select(TechnoClass* pTechno, void*, HouseClass* pHouse, bool announce)

@@ -62,6 +62,10 @@ public:
 
 	virtual ~UnitExt() override;
 
+	// Clears the carryall target / cargo and the subterranean harvester rally point when that
+	// object is deleted, so a carryall never reads a unit that died before the pickup.
+	virtual void OnDetach(AbstractClass* pTarget, bool removed) override;
+
 	void UpdateSubterraneanHarvester();
 	void UpdateKeepTargetOnMove();
 	void DepletedAmmoActions();
