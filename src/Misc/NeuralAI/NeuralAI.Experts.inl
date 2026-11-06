@@ -1,6 +1,50 @@
 // NeuralAI.Experts.inl: Deterministic mixture of experts and slot scoring.
 // Part of NeuralAI.cpp (included in order; one translation unit).
 
+namespace
+{
+	// Whether this house can ever field an air force (an aircraft or an aircraft factory its side
+	// and tech level allow, prerequisites aside). Cached per house for 1800 frames.
+	std::array<int, 32> AirTechCheckFrame {};
+	std::array<bool, 32> AirTechPossible {};
+
+	bool HouseCanEverFieldAircraft(HouseClass* pHouse)
+	{
+		const int idx = pHouse->ArrayIndex;
+
+		if (idx < 0 || idx >= 32)
+			return true;
+
+		const int now = Unsorted::CurrentFrame;
+
+		if (AirTechCheckFrame[idx] > 0 && now >= AirTechCheckFrame[idx] && now - AirTechCheckFrame[idx] < 1800)
+			return AirTechPossible[idx];
+
+		AirTechCheckFrame[idx] = std::max(1, now);
+		AirTechPossible[idx] = false;
+
+		for (auto const pType : AircraftTypeClass::Array)
+		{
+			if (pType && !pType->Spawned && pHouse->CanBuild(pType, false, true) != CanBuildResult::Unbuildable)
+			{
+				AirTechPossible[idx] = true;
+				return true;
+			}
+		}
+
+		for (auto const pType : BuildingTypeClass::Array)
+		{
+			if (pType && pType->Factory == AbstractType::AircraftType && pHouse->CanBuild(pType, false, true) != CanBuildResult::Unbuildable)
+			{
+				AirTechPossible[idx] = true;
+				return true;
+			}
+		}
+
+		return false;
+	}
+}
+
 void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features,
 	std::array<int16_t, OutputVectorSize>& outScores)
 {
@@ -79,9 +123,22 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		expScores[9] += 430; // Expert 9: Urban Garrison & Allied Coalition Warfare
 	}
 
+	// Common-sense vetoes: an expert that cannot do its job here is never chosen, whatever the
+	// learned bias says. Airforce with no aircraft we could ever build, own or fight; Urban with no
+	// building to occupy, no garrison and no allied coalition; Expansion on a map without any
+	// ore field or capturable tech.
+	std::array<bool, 10> vetoed {};
+	vetoed[8] = pHouse->OwnedAircraft == 0 && pHouse->NumAirpads == 0 && features[66] <= 20 && !HouseCanEverFieldAircraft(pHouse);
+	vetoed[9] = features[26] == 0 && features[79] == 0 && features[96] == 0 && features[97] == 0
+		&& pExt->NeuralAI_Archetype != 7;
+	vetoed[6] = GetOreFields().empty() && features[25] == 0;
+
 	const int curArch = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);
 	const int previousExpert = std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1);
 	std::array<int, 10> finalScores {};
+	const int hysteresis = (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded)
+		? std::clamp(60 + static_cast<int>(policy.OutputBias[127]), 0, 200)
+		: 60;
 	int activeExpert = 0;
 	int bestExpScore = -999999;
 
@@ -108,8 +165,12 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		}
 
 		// Hysteresis: the current expert keeps the lead on near ties instead of flapping each tick.
+		// 60 points plus the learned slot 127 (Expert Hysteresis), from 0 to 200.
 		if (e == previousExpert)
-			s += 60;
+			s += hysteresis;
+
+		if (vetoed[e])
+			s = -999999;
 
 		finalScores[e] = s;
 
@@ -123,8 +184,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// Training exploration (trainer matches only, PHOBOS_TRAIN_SLOT): every 900-frame window an
 	// expert within 300 points of the best takes over for that window, the best one twice as
-	// often, so close alternatives get matches to prove themselves. Deterministic (frame, house),
-	// never the game RNG. Real games always take the best.
+	// often, so close alternatives get matches to prove themselves. The less an expert has been
+	// tried for this side and archetype (faction memory visits), the further behind it may be and
+	// still get its turn: up to 250 more points when untried. Deterministic (frame, house), never
+	// the game RNG. Real games always take the best.
 	if (NeuralAI::TrainingMode)
 	{
 		std::array<int, 11> pool {};
@@ -134,7 +197,18 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 		for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
 		{
-			if (finalScores[e] >= bestExpScore - 300)
+			if (vetoed[e])
+				continue;
+
+			int uncertainty = 250;
+
+			if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded)
+			{
+				const uint32_t eIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + curArch * 10 + e) % 512);
+				uncertainty = static_cast<int>(250.0 / std::sqrt(1.0 + static_cast<double>(policy.Entries[eIdx].VisitCount)));
+			}
+
+			if (finalScores[e] + uncertainty >= bestExpScore - 300)
 				pool[poolSize++] = e;
 		}
 
