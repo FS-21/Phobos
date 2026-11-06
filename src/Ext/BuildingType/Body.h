@@ -60,6 +60,9 @@ public:
 	Valueable<bool> SpyEffect_Custom;
 	ValueableIdx<SuperWeaponTypeClass> SpyEffect_VictimSuperWeapon;
 	ValueableIdx<SuperWeaponTypeClass> SpyEffect_InfiltratorSuperWeapon;
+	// Neural AI: what spying this building is worth (spy target choice), from the Ares
+	// SpyEffect.* tags of a custom infiltration; -1 keeps the AI's default rules.
+	int SpyEffect_AIWorth;
 
 	Nullable<bool> ConsideredVehicle;
 	Valueable<bool> ZShapePointMove_OnBuildup;
@@ -252,6 +255,7 @@ public:
 		, SpyEffect_Custom { false }
 		, SpyEffect_VictimSuperWeapon {}
 		, SpyEffect_InfiltratorSuperWeapon {}
+		, SpyEffect_AIWorth { -1 }
 		, ConsideredVehicle {}
 		, ZShapePointMove_OnBuildup { false }
 		, SellBuildupLength { 23 }

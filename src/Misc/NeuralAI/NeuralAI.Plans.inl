@@ -2259,13 +2259,15 @@ namespace
 					}
 					else if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
 					{
-						// Flying transport vehicles, or burrowing ones (they travel unseen under the
-						// defenses, so a commando team needs no air lane).
+						// Flying transport vehicles (HIND, transport disk), amphibious APCs (around by sea,
+						// on the same safe lane), or burrowing ones (they travel unseen under the
+						// defenses, so a commando team needs no lane).
 						const bool flying = pUnit->Type && IsAmphibiousOrAirTransport(pUnit->Type)
 							&& (pUnit->Type->JumpJet || pUnit->Type->ConsideredAircraft || pUnit->Type->MovementZone == MovementZone::Fly);
+						const bool underground = IsUndergroundTransportType(pUnit->Type);
 
-						isCandidate = pUnit->Type && (flying || IsUndergroundTransportType(pUnit->Type))
-							&& pUnit->Type->Passengers >= (flying ? 3 : 1) && isFreeForPlan(pUnit) && !FindFerryTrip(uid);
+						isCandidate = pUnit->Type && (flying || underground || IsAmphibiousGroundTransportType(pUnit->Type))
+							&& pUnit->Type->Passengers >= (underground ? 1 : 3) && isFreeForPlan(pUnit) && !FindFerryTrip(uid);
 					}
 
 					if (isCandidate)
@@ -2281,16 +2283,48 @@ namespace
 				bool freeRaider = false;
 				std::vector<FootClass*> specialists;
 
+				// Volley damage of one soldier (primary weapon, burst included, against the building's
+				// armor when one is given): a squad of 4 or more worth 200 a volley (shock troopers,
+				// flamethrowers) wrecks a building before anyone answers.
+				auto volleyOf = [](FootClass* pFoot, BuildingClass* pBuilding)
+				{
+					auto const pType = pFoot->GetTechnoType();
+					auto const pSlot = pType ? pType->GetWeapon(0) : nullptr;
+					auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+					if (!pWeapon || !pWeapon->Warhead)
+						return 0;
+
+					const double verses = pBuilding ? GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBuilding, pBuilding->Type) : 1.0;
+
+					return static_cast<int>(std::max(0, pWeapon->Damage) * std::max(1, pWeapon->Burst) * verses);
+				};
+
+				int freeSquad = 0;
+				int freeSquadVolley = 0;
+
 				for (auto const& [uid, pFoot] : ownFoots)
 				{
 					auto const pInf = abstract_cast<InfantryClass*>(pFoot);
 
-					if (!pInf || !pTransport || ObjectZone(pFoot, MovementZone::Normal) != transportZone)
+					if (!pTransport || ObjectZone(pFoot, MovementZone::Normal) != transportZone)
 						continue;
 
-					if (IsRaiderInfantryType(pInf->Type) && isArmedGroundFoot(pFoot) && isFreeForPlan(pFoot))
+					// A demolition vehicle that fits the transport is a raider too.
+					if (auto const pUnit = abstract_cast<UnitClass*>(pFoot); pUnit && pFoot != pTransport && IsVehicleRaiderType(pUnit->Type)
+						&& pUnit->GetTechnoType()->Size <= pTransport->GetTechnoType()->SizeLimit && isFreeForPlan(pFoot))
 					{
 						freeRaider = true;
+					}
+
+					if (!pInf)
+						continue;
+
+					if (isArmedGroundFoot(pFoot) && isFreeForPlan(pFoot) && !IsSpecialistInfantryType(pInf->Type))
+					{
+						freeRaider |= IsRaiderInfantryType(pInf->Type);
+						freeSquad++;
+						freeSquadVolley += volleyOf(pFoot, nullptr);
 					}
 					else if (IsSpecialistInfantryType(pInf->Type) && !macro.PlanMembers.contains(uid)
 						&& !(pInf->Type->Engineer && IsSpecOpsEngineerBusy(pHouse, uid)) && pFoot->GetHealthPercentage() >= 0.6
@@ -2319,11 +2353,14 @@ namespace
 					return count;
 				};
 
+				const size_t seats = pTransport ? static_cast<size_t>(std::max(0, pTransport->GetTechnoType()->Passengers)) : 0;
+				const bool freeStrikeSquad = seats >= 4 && freeSquad >= 4 && freeSquadVolley >= 200;
+
 				BuildingClass* pTarget = nullptr;
 				CellClass* pDrop = nullptr;
 				int bestScore = INT_MIN;
 
-				if ((mainAttack || freeRaider || !specialists.empty()) && pTransport)
+				if ((mainAttack || freeRaider || freeStrikeSquad || !specialists.empty()) && pTransport)
 				{
 					const int defensesAllowed = mainAttack ? 1 : 0;
 
@@ -2334,8 +2371,8 @@ namespace
 
 						const int workers = specialistsFor(pBld->Type);
 
-						// Without a main attack only raiders or a specialist job justify the trip.
-						if (!mainAttack && !freeRaider && workers == 0)
+						// Without a main attack only raiders, a strike squad or a specialist job justify the trip.
+						if (!mainAttack && !freeRaider && !freeStrikeSquad && workers == 0)
 							continue;
 
 						const int worth = valuableBuildingWorth(pBld->Type) + workers * 150;
@@ -2363,8 +2400,9 @@ namespace
 					}
 				}
 
-				// Boarding order: raiders, the specialists with a job there, the other soldiers by
-				// UniqueID, then vehicle thieves in the seats left.
+				// Boarding order: raiders (soldiers, then demolition vehicles that fit), the specialists
+				// with a job there, the other soldiers by UniqueID, then vehicle thieves; seats are
+				// counted by passenger Size, each passenger within the transport's SizeLimit.
 				std::vector<FootClass*> infantry;
 				int raiders = 0;
 				int workersAboard = 0;
@@ -2373,19 +2411,27 @@ namespace
 				{
 					auto isRaider = [](FootClass* pFoot)
 					{
-						auto const pInf = abstract_cast<InfantryClass*>(pFoot);
-						return pInf && IsRaiderInfantryType(pInf->Type);
+						if (auto const pInf = abstract_cast<InfantryClass*>(pFoot))
+							return IsRaiderInfantryType(pInf->Type);
+
+						auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+						return pUnit && IsVehicleRaiderType(pUnit->Type);
 					};
 
+					auto const pTransportType = pTransport->GetTechnoType();
 					std::vector<FootClass*> soldiers;
+					std::vector<FootClass*> vehicles;
 
 					for (auto const& [uid, pFoot] : ownFoots)
 					{
-						if (abstract_cast<InfantryClass*>(pFoot) && isArmedGroundFoot(pFoot) && isFreeForPlan(pFoot)
-							&& ObjectZone(pFoot, MovementZone::Normal) == transportZone)
-						{
+						if (!isFreeForPlan(pFoot) || ObjectZone(pFoot, MovementZone::Normal) != transportZone)
+							continue;
+
+						if (abstract_cast<InfantryClass*>(pFoot) && isArmedGroundFoot(pFoot))
 							soldiers.push_back(pFoot);
-						}
+						else if (auto const pUnit = abstract_cast<UnitClass*>(pFoot); pUnit && pFoot != pTransport
+							&& IsVehicleRaiderType(pUnit->Type) && pUnit->GetTechnoType()->Size <= pTransportType->SizeLimit)
+							vehicles.push_back(pFoot);
 					}
 
 					std::sort(soldiers.begin(), soldiers.end(), [&](FootClass* a, FootClass* b)
@@ -2395,41 +2441,58 @@ namespace
 						return ra != rb ? ra : a->UniqueID < b->UniqueID;
 					});
 
-					const size_t capacity = static_cast<size_t>(std::max(0, pTransport->GetTechnoType()->Passengers));
+					std::sort(vehicles.begin(), vehicles.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
+
+					std::vector<FootClass*> order;
 					auto const firstOther = std::find_if(soldiers.begin(), soldiers.end(), [&](FootClass* pFoot) { return !isRaider(pFoot); });
-					infantry.assign(soldiers.begin(), firstOther);
+					order.assign(soldiers.begin(), firstOther);
+					order.insert(order.end(), vehicles.begin(), vehicles.end());
 
 					for (auto const pFoot : specialists)
 					{
 						if (SpecialistWorksBuilding(static_cast<InfantryClass*>(pFoot)->Type, pTarget->Type))
-							infantry.push_back(pFoot);
+							order.push_back(pFoot);
 					}
 
-					infantry.insert(infantry.end(), firstOther, soldiers.end());
+					order.insert(order.end(), firstOther, soldiers.end());
 
 					for (auto const pFoot : specialists)
 					{
 						if (static_cast<InfantryClass*>(pFoot)->Type->VehicleThief)
-							infantry.push_back(pFoot);
+							order.push_back(pFoot);
 					}
 
-					if (infantry.size() > capacity)
-						infantry.resize(capacity);
+					const int capacity = std::max(0, pTransportType->Passengers);
+					int usedSeats = 0;
 
-					for (auto const pFoot : infantry)
+					for (auto const pFoot : order)
 					{
-						auto const pInf = static_cast<InfantryClass*>(pFoot);
+						const int size = std::max(1, static_cast<int>(pFoot->GetTechnoType()->Size));
+
+						if (usedSeats + size > capacity)
+							continue;
+
+						usedSeats += size;
+						infantry.push_back(pFoot);
+
+						auto const pInf = abstract_cast<InfantryClass*>(pFoot);
 
 						if (isRaider(pFoot))
 							raiders++;
-						else if (SpecialistWorksBuilding(pInf->Type, pTarget->Type))
+						else if (pInf && SpecialistWorksBuilding(pInf->Type, pTarget->Type))
 							workersAboard++;
 					}
 				}
 
-				// A raid without a main attack must carry a raider or a specialist with a job there;
-				// one is a team by itself.
-				const bool teamReady = raiders > 0 || workersAboard > 0 || (mainAttack && infantry.size() >= 3);
+				// A raid without a main attack must carry a raider, a specialist with a job there (one is
+				// a team by itself) or a strike squad of 4+ soldiers worth 200 a volley.
+				int teamVolley = 0;
+
+				for (auto const pFoot : infantry)
+					teamVolley += volleyOf(pFoot, pTarget);
+
+				const bool strikeSquad = infantry.size() >= 4 && teamVolley >= 200;
+				const bool teamReady = raiders > 0 || workersAboard > 0 || strikeSquad || (mainAttack && infantry.size() >= 3);
 				const int utility = (pTarget && teamReady) ? (320 + bestScore / 6 + raiders * 150 + workersAboard * 120) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::AirborneFront, utility))

@@ -2904,7 +2904,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
 
 	// Raid transport demand (AirborneFront plan): a raider or spy of ours waits for a ride behind
-	// the enemy lines and no flying passenger transport (3 seats or more) is owned yet: one is
+	// the enemy lines and no flying or amphibious passenger transport (3 seats or more) is owned: one is
 	// worth building even without a water crossing.
 	bool raidTransportWanted = false;
 	{
@@ -2923,7 +2923,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 			else if (auto const pOwnType = pOwnFoot->GetTechnoType(); pOwnType && pOwnType->Passengers >= 3
 				&& (pOwnFoot->WhatAmI() == AbstractType::Aircraft || pOwnType->JumpJet || pOwnType->ConsideredAircraft
-					|| pOwnType->MovementZone == MovementZone::Fly))
+					|| pOwnType->MovementZone == MovementZone::Fly
+					|| IsAmphibiousGroundTransportType(abstract_cast<UnitTypeClass*>(pOwnType))))
 			{
 				raidTransports++;
 			}
@@ -2932,7 +2933,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		raidTransportWanted = raidCandidates > 0 && raidTransports == 0;
 	}
 
-	// Bonus for a flying passenger transport that would answer the raid demand.
+	// Bonus for a flying or amphibious passenger transport that would answer the raid demand.
 	auto raidTransportBonus = [&](const TechnoTypeClass* pCandidate) -> int
 	{
 		if (!raidTransportWanted || !pCandidate || pCandidate->Passengers < 3)
@@ -2940,8 +2941,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool flies = pCandidate->WhatAmI() == AbstractType::AircraftType || pCandidate->JumpJet
 			|| pCandidate->ConsideredAircraft || pCandidate->MovementZone == MovementZone::Fly;
+		const bool amphibious = IsAmphibiousGroundTransportType(abstract_cast<const UnitTypeClass*>(pCandidate));
 
-		return flies ? 350 : -1000;
+		return (flies || amphibious) ? 350 : -1000;
 	};
 
 	// Ferry transport demand-driven scoring shared by the Shipyard and War Factory.

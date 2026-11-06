@@ -1160,6 +1160,14 @@ namespace
 		return pType && !pType->Naval && pType->Passengers > 0 && pType->MovementZone == MovementZone::Subterrannean;
 	}
 
+	// A ground transport that also swims (amphibious APC): it can go around by sea.
+	bool IsAmphibiousGroundTransportType(const UnitTypeClass* pType)
+	{
+		return pType && !pType->Naval && pType->Passengers >= 3
+			&& (pType->SpeedType == SpeedType::Amphibious || pType->MovementZone == MovementZone::Amphibious
+				|| pType->MovementZone == MovementZone::AmphibiousCrusher || pType->MovementZone == MovementZone::AmphibiousDestroyer);
+	}
+
 	// A commando: an armed soldier that blows up buildings with C4 (Tanya, Navy SEAL, ...).
 	bool IsCommandoInfantryType(const InfantryTypeClass* pType)
 	{
@@ -1189,8 +1197,15 @@ namespace
 		return false;
 	}
 
-	// Infantry that deploys into an area weapon (Desolator: Deployer= with DeployFire=), or whose
-	// primary weapon hits a wide area (warhead CellSpread 1.5 cells or more, e.g. suicide bombers).
+	// A warhead that hits an area hard enough to matter (CellSpread 1 cell or more, 50 damage).
+	bool IsAreaWeapon(const WeaponTypeClass* pWeapon)
+	{
+		return pWeapon && pWeapon->Warhead && pWeapon->Warhead->CellSpread >= 1.0f && pWeapon->Damage >= 50;
+	}
+
+	// Infantry that deploys into an area weapon (Desolator: Deployer= with DeployFire=), a suicide
+	// bomber (weapon Suicide=, or a Phobos FeedbackWeapon= with an area warhead that blows up the
+	// firer: cheap but deadly in a crowd), or one whose primary weapon hits an area (flamethrowers).
 	bool IsAreaDamageInfantryType(const InfantryTypeClass* pType)
 	{
 		if (!pType)
@@ -1202,7 +1217,37 @@ namespace
 		auto const pSlot = const_cast<InfantryTypeClass*>(pType)->GetWeapon(0);
 		auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
 
-		return pWeapon && pWeapon->Warhead && pWeapon->Warhead->CellSpread >= 1.5f && pWeapon->Damage >= 50;
+		if (!pWeapon || !pWeapon->Warhead)
+			return false;
+
+		if (pWeapon->Suicide)
+			return true;
+
+		if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon); pWeaponExt && IsAreaWeapon(pWeaponExt->FeedbackWeapon.Get()))
+			return true;
+
+		return IsAreaWeapon(pWeapon);
+	}
+
+	// A vehicle that blows up among the enemy (demolition truck): weapon Suicide= or an area
+	// FeedbackWeapon=, or Explodes= with an area DeathWeapon=.
+	bool IsVehicleRaiderType(const UnitTypeClass* pType)
+	{
+		if (!pType || pType->Naval)
+			return false;
+
+		auto const pSlot = const_cast<UnitTypeClass*>(pType)->GetWeapon(0);
+
+		if (auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr)
+		{
+			if (pWeapon->Suicide)
+				return true;
+
+			if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon); pWeaponExt && IsAreaWeapon(pWeaponExt->FeedbackWeapon.Get()))
+				return true;
+		}
+
+		return pType->Explodes && IsAreaWeapon(pType->DeathWeapon);
 	}
 
 	// A raider for a drop behind the lines: a commando, a bomber (Ivan=), an area damage soldier,

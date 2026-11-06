@@ -38,6 +38,7 @@
 #include <Ext/Unit/Body.h>
 #include <Ext/TerrainType/Body.h>
 #include <Ext/WarheadType/Body.h>
+#include <Ext/WeaponType/Body.h>
 #include <Utilities/Debug.h>
 #include <Utilities/GeneralUtils.h>
 #include <algorithm>

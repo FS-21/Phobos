@@ -5802,6 +5802,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					spyScore = needStolenTech ? 128 : 55;
 				}
 
+				// A custom infiltration (Ares SpyEffect.* tags) is worth what its effects give.
+				if (auto const pSpyBldExt = BuildingTypeExt::Fetch(pEnemyBld->Type); pSpyBldExt && pSpyBldExt->SpyEffect_AIWorth >= 0)
+					spyScore = pSpyBldExt->SpyEffect_AIWorth;
+
 				if (spyScore <= 0)
 					continue;
 

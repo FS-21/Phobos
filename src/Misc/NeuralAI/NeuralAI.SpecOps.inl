@@ -72,8 +72,9 @@ namespace
 		int InfiltrationCount { 0 };
 		// Frames of the last spies killed on their way (oldest first, 4 at most).
 		std::vector<int> SpyLossFrames {};
-		// Spy UniqueID -> disguise kit shots ordered (key access only); after 3 the spy stops trying.
-		std::unordered_map<DWORD, int> KitShots {};
+		// Spy UniqueID -> disguise kit shots ordered and the frame of the first one (key access
+		// only); 3 shots per 900 frames, so a spy that cannot be disguised still goes.
+		std::unordered_map<DWORD, std::pair<int, int>> KitShots {};
 	};
 
 	std::array<NeuralSpecOpsState, 32> SpecOpsStates {};
@@ -313,7 +314,9 @@ namespace
 				continue;
 
 			auto const pOwner = info.Building->Owner;
-			const bool worth = (pType->Factory == AbstractType::UnitType && !pType->Naval && !pHouse->WarFactoryInfiltrated)
+			auto const pSpyBldExt = BuildingTypeExt::Fetch(pType);
+			const bool worth = (pSpyBldExt && pSpyBldExt->SpyEffect_AIWorth >= 0) ? pSpyBldExt->SpyEffect_AIWorth >= 100
+				: (pType->Factory == AbstractType::UnitType && !pType->Naval && !pHouse->WarFactoryInfiltrated)
 				|| (pType->Factory == AbstractType::InfantryType && !pHouse->BarracksInfiltrated)
 				|| ((pType->Radar || pType->SpySat) && !pHouse->SpySatActive && !pOwner->RadarVisibleTo.Contains(pHouse->ArrayIndex))
 				|| pType->SuperWeapon != -1;
@@ -399,7 +402,7 @@ namespace
 
 	// Copies a soldier's colors: at once when the engine allows a direct disguise, otherwise the
 	// way a player does it, firing the disguise kit (a MakesDisguise= warhead, e.g. MakeupKit with
-	// an endless range and FireOnce) at that soldier; 3 shots at most per spy. True while the copy
+	// an endless range and FireOnce) at that soldier; 3 shots per 900 frames. True while the copy
 	// is done or under way.
 	bool CopySoldierDisguise(HouseClass* pHouse, InfantryClass* pSpy, InfantryClass* pSoldier)
 	{
@@ -415,7 +418,13 @@ namespace
 		if (pSpy->Target == pSoldier)
 			return true;
 
-		int& shots = GetSpecOpsState(pHouse).KitShots[pSpy->UniqueID];
+		auto& [shots, firstShotFrame] = GetSpecOpsState(pHouse).KitShots[pSpy->UniqueID];
+
+		if (Unsorted::CurrentFrame - firstShotFrame > 900 || Unsorted::CurrentFrame < firstShotFrame)
+		{
+			shots = 0;
+			firstShotFrame = Unsorted::CurrentFrame;
+		}
 
 		if (!HasDisguiseKit(pSpy->Type) || shots >= 3)
 			return false;
