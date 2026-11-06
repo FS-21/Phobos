@@ -225,12 +225,14 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			"%s,\n  \"elo\": %d,\n  \"gamesPlayed\": %u,\n  "
 			"\"rulesSignature\": \"%016llX\",\n  \"baseSignature\": \"%016llX\",\n  "
 			"\"mapInfo\": {\"cells\": %d, \"waterPct\": %d, \"landLinked\": %s, \"known\": %s},\n "
+			" \"contextRouting\": {\"challenger\": %s, \"opponent\": %s, \"phaseFrames\": [%d, %d]},\n "
 			" \"houses\": [\n",
 			dst->SlotIndex, dst->ProcessId, dst->CurrentFrame, dst->FramesPerSecond, matchEnded ? "true" : "false",
 			dst->WinnerHouseIndex, stalemate ? "true" : "false", NeuralAI::Backpack.EstimatedELO,
 			NeuralAI::Backpack.GamesPlayed, static_cast<unsigned long long>(NeuralAI::CurrentRulesSignature),
 			static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature), MapInfo.Cells, MapInfo.WaterPct,
-			MapInfo.LandLinked ? "true" : "false", MapInfo.Computed ? "true" : "false");
+			MapInfo.LandLinked ? "true" : "false", MapInfo.Computed ? "true" : "false", ContextRouting.Loaded ? "true" : "false",
+			OpponentContextRouting.Loaded ? "true" : "false", RoutingMidPhaseFrame, RoutingLatePhaseFrame);
 
 		if (lineLen > 0)
 			jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -352,6 +354,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			std::string peaksText;
 			std::string expertTicksText;
 			std::string expertGainText;
+			std::string expertTicksByPhaseText;
+			std::string expertGainByPhaseText;
 
 			// Expert choices of this match, one count per expert (index = expert).
 			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
@@ -360,6 +364,23 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				expertTicksText += (e ? ", " : "") + std::to_string(ticks);
 				const int gain = (h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? ExpertGain[h.ArrayIndex][e] : 0;
 				expertGainText += (e ? ", " : "") + std::to_string(gain);
+			}
+
+			// The same per game phase (early, mid, late; see RoutingPhase): one row of experts per phase.
+			for (int phase = 0; phase < NumRoutingPhases; ++phase)
+			{
+				const bool known = h.ArrayIndex >= 0 && h.ArrayIndex < 32;
+				std::string ticksRow;
+				std::string gainRow;
+
+				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+				{
+					ticksRow += (e ? ", " : "") + std::to_string(known ? ExpertTicksByPhase[h.ArrayIndex][phase][e] : 0);
+					gainRow += (e ? ", " : "") + std::to_string(known ? ExpertGainByPhase[h.ArrayIndex][phase][e] : 0);
+				}
+
+				expertTicksByPhaseText += (phase ? ", [" : "[") + ticksRow + "]";
+				expertGainByPhaseText += (phase ? ", [" : "[") + gainRow + "]";
 			}
 
 			// Slowest ticks: [frame, ms, live objects, "three heaviest phases"].
@@ -450,7 +471,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"enemyMix\": \"%s\", \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"enemyMix\": \"%s\", \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -461,7 +482,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), enemyMixText.c_str(), decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), enemyMixText.c_str(), decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
