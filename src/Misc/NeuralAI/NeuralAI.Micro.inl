@@ -3192,6 +3192,124 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		// Mobile factory (NeuralAI.MobileFactory.inl): drive to its spot (an outpost lacking that
+		// factory kind, or behind the front) and unfold there. With no spot it unfolds where it
+		// stands, like any base deployer, unless it just fled a spot: then it falls back home first.
+		if (IsMobileFactoryUnit(pType))
+		{
+			if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload || pUnit->CurrentMission == Mission::Enter
+				|| pUnit->QueuedMission == Mission::Enter)
+			{
+				continue;
+			}
+
+			auto& mobileMacro = GetMacroState(pHouse);
+			const int now = Unsorted::CurrentFrame;
+			const CellStruct unitCell = pUnit->GetMapCoords();
+			const int unitZone = ObjectZone(pUnit, MovementZone::Normal);
+			auto const pFactoryType = pType->DeploysInto;
+
+			if (mobileMacro.MobileFactoryGoals.size() > 16)
+				std::erase_if(mobileMacro.MobileFactoryGoals, [now](const auto& entry) { return now - entry.second.PickFrame > 900; });
+
+			auto& goal = mobileMacro.MobileFactoryGoals[pUnit->UniqueID];
+
+			if (goal.StartFrame < 0)
+			{
+				goal.StartFrame = now;
+				goal.ProgressFrame = now;
+			}
+
+			if (now - goal.PickFrame >= 150 || now < goal.PickFrame)
+			{
+				const MobileFactorySpot spot = FindMobileFactorySpot(pHouse, pFactoryType, nullptr, unitCell, unitZone, goal.Cell);
+				CellStruct newCell = spot.Cell;
+
+				const bool fledHere = mobileMacro.MobileFactoryAvoidCell != CellStruct::Empty
+					&& now - mobileMacro.MobileFactoryAvoidFrame < MobileFactoryAvoidFrames
+					&& unitCell.DistanceFrom(mobileMacro.MobileFactoryAvoidCell) <= MobileFactoryAvoidRadius;
+
+				if (newCell == CellStruct::Empty && fledHere)
+					newCell = homeCoords;
+
+				if (newCell != goal.Cell)
+				{
+					goal.BestDist = INT_MAX;
+					goal.ProgressFrame = now;
+					goal.DeployTries = 0;
+				}
+
+				goal.Cell = newCell;
+				goal.Reason = spot.Reason;
+				goal.PickFrame = now;
+			}
+
+			const int goalDist = goal.Cell != CellStruct::Empty ? static_cast<int>(unitCell.DistanceFrom(goal.Cell)) : 0;
+
+			if (goalDist < goal.BestDist)
+			{
+				goal.BestDist = goalDist;
+				goal.ProgressFrame = now;
+			}
+
+			// No cell closer to the spot for 1800 frames (a blocked path, or a ferry that never comes):
+			// unfold where it is instead of wandering. Progress, not trip time: these vehicles are slow.
+			const bool stalled = now - goal.ProgressFrame > 1800;
+			const bool atGoal = goal.Cell == CellStruct::Empty || stalled || goalDist <= 6;
+			const bool reachedOrNoDest = pUnit->Destination == nullptr || pUnit->CurrentMission != Mission::Move
+				|| CellClass::Coord2Cell(pUnit->Destination->GetCoords()) == unitCell;
+
+			if (atGoal)
+			{
+				if (CanDeployerUnpackHere(pHouse, pFactoryType, pUnit))
+				{
+					// Another routine can hold the unit in its own mission so the queued unpack never
+					// starts: force it after a few tries. When the engine keeps refusing the spot, step
+					// aside and try again from a nearby cell.
+					if (goal.DeployTries >= 24)
+					{
+						goal.DeployTries = 0;
+						pUnit->Scatter(CoordStruct::Empty, true, false);
+					}
+					else
+					{
+						OrderDeployerUnpack(pUnit);
+
+						if (++goal.DeployTries >= 4)
+							pUnit->ForceMission(Mission::Unload);
+					}
+				}
+				else if (reachedOrNoDest || IsAITickWindow(45, 15))
+				{
+					const CellStruct origin = (goal.Cell != CellStruct::Empty && !stalled) ? goal.Cell : unitCell;
+					CellStruct stand = FindDeployableFoundationNearCell(pHouse, pFactoryType, origin, unitZone, pUnit);
+
+					if (stand == CellStruct::Empty)
+						stand = FindBestDeployStandCell(pHouse, pFactoryType, pUnit, unitZone);
+
+					if (stand != unitCell)
+					{
+						if (auto const pStand = MapClass::Instance.TryGetCellAt(stand))
+							IssueMoveOrder(pUnit, pStand, 0.0);
+					}
+				}
+			}
+			else if (reachedOrNoDest || IsAITickWindow(90, 15))
+			{
+				if (auto const pGoalCell = MapClass::Instance.TryGetCellAt(goal.Cell))
+				{
+					const int goalZone = MapClass::Instance.GetMovementZoneType(goal.Cell, MovementZone::Normal, false);
+
+					if (goalZone < 0 || unitZone < 0 || goalZone == unitZone)
+						IssueMoveOrder(pUnit, pGoalCell, 4.0);
+					else
+						DispatchFootToTargetOrTransport(pUnit, pGoalCell, Mission::Move, false);
+				}
+			}
+
+			continue;
+		}
+
 		// Tactical Combat Deployment (Tick Tank, Nod Artillery, Juggernaut, Siege
 		// Chopper) & Universal Deployable Key Structures across all mods (Mobile
 		// Outposts/Explorers, Mobile Refineries/Factories, Power/Tech/Turret Cores,
@@ -11027,7 +11145,88 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
+			// A damaged mobile factory is always repaired (it is never sell-dodged, see below).
+			if (IsMobileFactoryBuilding(pOwnBld->Type) && pOwnBld->Type->ClickRepairable && hpPct < 0.82 && currentCredits > 600
+				&& !pOwnBld->IsBeingRepaired)
+			{
+				pOwnBld->SetRepairState(1);
+			}
+
+			// Deployed mobile factory (NeuralAI.MobileFactory.inl): production uses it like any other
+			// factory (UpdatePrimaryFactories picks the one closest to the front). It packs up and leaves
+			// when the spot comes under heavy attack or into the reach of a newly seen enemy defense, or,
+			// after standing three minutes idle and quiet, when its spot moved 35+ cells away (the front
+			// advanced, or another outpost lacks this factory kind). Near death packing up takes too long
+			// to save it: it stays and is repaired.
+			if (!handledConYardAction && IsMobileFactoryBuilding(pOwnBld->Type) && hpPct >= 0.2
+				&& pOwnBld->CurrentMission != Mission::Construction && pOwnBld->CurrentMission != Mission::Selling
+				&& IsAITickWindow(90, 20))
+			{
+				auto& mobileMacro = GetMacroState(pHouse);
+				const int now = Unsorted::CurrentFrame;
+				const CellStruct fc = pOwnBld->GetMapCoords();
+
+				if (mobileMacro.MobileFactorySince.size() > 16)
+					std::erase_if(mobileMacro.MobileFactorySince, [now](const auto& entry) { return now - entry.second > 54000; });
+
+				auto const sinceIt = mobileMacro.MobileFactorySince.try_emplace(pOwnBld->UniqueID, now).first;
+				const int stoodFor = now - sinceIt->second;
+
+				int hostiles = 0;
+
+				ForEachTechnoNear(fc, 9, [&](TechnoClass* pET) -> bool
+				{
+					if (!pET->Owner || pET->Owner == pHouse || pHouse->IsAlliedWith(pET->Owner) || pET->Owner->IsNeutral()
+						|| !IsCellVisibleToAI(pHouse, pET->GetCell()))
+					{
+						return true;
+					}
+
+					auto const pETType = pET->GetTechnoType();
+
+					if (pETType && GroundRangeOf(pETType) > 0)
+						hostiles++;
+
+					return true;
+				});
+
+				// A defense in reach with no attack yet only moves it when a safe spot exists elsewhere
+				// (an enemy tower reaching our home base must not make it pack and unpack in a loop).
+				const bool heavyAttack = (hostiles >= 3 && hpPct < 0.6) || (hostiles >= 1 && hpPct < 0.4);
+				const bool inDefenseReach = !heavyAttack && IsCellInKnownEnemyDefenseReach(pHouse, fc, 1);
+				const bool producing = pOwnBld->Factory != nullptr && pOwnBld->Factory->Object != nullptr;
+
+				if (heavyAttack)
+				{
+					mobileMacro.MobileFactoryAvoidCell = fc;
+					mobileMacro.MobileFactoryAvoidFrame = now;
+					UndeployBuildingToVehicle(pOwnBld, homeCoords);
+					handledConYardAction = true;
+				}
+				else if (inDefenseReach || (!producing && hostiles == 0 && stoodFor >= 2700))
+				{
+					const MobileFactorySpot spot
+						= FindMobileFactorySpot(pHouse, pOwnBld->Type, pOwnBld, fc, ObjectZone(pOwnBld, MovementZone::Normal));
+					const double minMove = inDefenseReach ? 10.0 : 35.0;
+
+					if (spot.Reason != MobileFactoryReasonNone && spot.Cell.DistanceFrom(fc) >= minMove)
+					{
+						if (inDefenseReach)
+						{
+							mobileMacro.MobileFactoryAvoidCell = fc;
+							mobileMacro.MobileFactoryAvoidFrame = now;
+						}
+
+						UndeployBuildingToVehicle(pOwnBld, spot.Cell);
+						handledConYardAction = true;
+					}
+				}
+			}
+
+			// A mobile factory is not sell-dodged: selling it only packs it back into its vehicle, which
+			// unfolds again at once. It is repaired instead (wrench repair below).
 			if (!handledConYardAction && hpPct < sellDodgeThresh && !pOwnBld->Type->ConstructionYard
+				&& !IsMobileFactoryBuilding(pOwnBld->Type)
 				&& !pOwnBld->Type->ResourceGatherer && pOwnBld->Type->Enslaves == nullptr && pOwnBld->Type->Cost >= 500
 				&& pOwnBld->CurrentMission != Mission::Selling)
 			{
