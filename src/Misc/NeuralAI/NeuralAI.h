@@ -128,6 +128,7 @@ public:
 	static void OnHeadlessFrameTick();
 	static void OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled);
 	static void OnBuildingDamaged(BuildingClass* pBuilding, TechnoClass* pAttacker, HouseClass* pAttackerHouse);
+	static void OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller);
 
 	static int UpdateExpertAI(HouseClass* pHouse);
 	static void UpdateBuildingProduction(HouseClass* pHouse);
