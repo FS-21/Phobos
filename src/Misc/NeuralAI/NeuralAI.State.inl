@@ -222,9 +222,10 @@ namespace
 		// is built past the cap for an outpost within 4500 frames of it, so a factory that lands
 		// at another hub (the outpost still asking) cannot loop build-and-sell.
 		int LastFactoryCapSaleFrame { -100000 };
-		// Failed refinery placements in a row: the 10-cell reach to its field (FindSpatialTetrisBuildCell)
-		// grows 4 cells per failure and is dropped after 3, so a map too rugged to build next to its
-		// ore still gets its refinery.
+		// Failed refinery placements: the 10-cell reach to its field (FindSpatialTetrisBuildCell) grows
+		// 4 cells per failure and is dropped after 3, so a map too rugged to build next to its ore still
+		// gets its refinery. A success lowers it by one only, so a cramped base does not fail twice
+		// before every refinery (the ConYard lost its time on them).
 		int RefineryReachFailures { 0 };
 		// Refineries placed with that widened reach (UniqueIDs): the best spot a rugged map allowed,
 		// so the strict refinery audit of the resource hoarder never sells them (it would only

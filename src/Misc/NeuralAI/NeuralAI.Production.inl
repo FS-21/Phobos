@@ -1679,6 +1679,25 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				mcvPrerequisites = std::move(missing);
 		}
 
+		// Opening order of a player: a refinery or two, then the war factory. Without one, and with a
+		// ground war factory buildable now, the first war factory is pushed and further refineries
+		// wait (one Soviet test house built six refineries, most failing to place, before its first
+		// war factory at frame 24000+).
+		bool groundWarFactoryBuildableNow = false;
+
+		if (ownedWarFactories == 0)
+		{
+			for (auto const pFactoryType : BuildingTypeClass::Array)
+			{
+				if (pFactoryType && pFactoryType->Factory == AbstractType::UnitType && !pFactoryType->Naval
+					&& !pFactoryType->UndeploysInto && CanBuildUnderHumanRules(pHouse, pFactoryType))
+				{
+					groundWarFactoryBuildableNow = true;
+					break;
+				}
+			}
+		}
+
 		for (auto const pBld : BuildingTypeClass::Array)
 		{
 			if (!pBld || pBld->Wall || pBld->FirestormWall || pBld->Gate || pBld->LaserFence || pBld->LaserFencePost
@@ -1888,6 +1907,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += 450;
 				}
+
+				// Opening order (groundWarFactoryBuildableNow): after two refineries, or after one when
+				// the next refinery has just failed to find a cell, the war factory comes first. Applied
+				// after every branch above, the new-field one included.
+				if (groundWarFactoryBuildableNow && !isHarvRecoveryCandidate
+					&& (ownedRefineries >= 2 || (ownedRefineries >= 1 && GetMacroState(pHouse).RefineryReachFailures > 0)))
+				{
+					score -= 2500;
+				}
 			}
 			else if (pBld->Factory == AbstractType::InfantryType)
 			{
@@ -1951,6 +1979,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				else
 				{
 					score = scores[3] - owned * (bankSteps > 0 ? 300 : 620) + (bankSteps > 0 ? 400 + 150 * std::min(6, bankSteps) : 0);
+
+					// The first war factory once a refinery stands (see groundWarFactoryBuildableNow).
+					if (ownedWarFactories == 0 && ownedRefineries >= 1)
+						score += 1200;
 
 					// Competitive MultipleFactory Arms Race boost: never fall behind
 					// the enemy in War Factory count or when floating macro cash!
