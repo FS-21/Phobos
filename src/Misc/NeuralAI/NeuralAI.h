@@ -111,6 +111,8 @@ public:
 
 	static bool HeadlessMode;
 	static int TrainSlotIndex;
+	// Started by the trainer (-TrainSlot=, PHOBOS_TRAIN_SLOT): enables expert exploration.
+	static bool TrainingMode;
 	static int MatchEndWinnerHouse;
 	static bool MatchEndStalemate;
 

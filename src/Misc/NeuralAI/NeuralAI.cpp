@@ -50,6 +50,7 @@
 
 bool NeuralAI::HeadlessMode = false;
 int NeuralAI::TrainSlotIndex = 0;
+bool NeuralAI::TrainingMode = false;
 int NeuralAI::MatchEndWinnerHouse = -1;
 bool NeuralAI::MatchEndStalemate = false;
 
