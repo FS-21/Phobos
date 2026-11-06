@@ -131,6 +131,31 @@ namespace
 		int Frame { 0 };
 	};
 
+	// Where a packed factory deployer is heading (NeuralAI.MobileFactory.inl): the spot, why, when it
+	// was last picked, when the trip started, the closest it got and when (a trip that stops getting
+	// closer ends in a deploy on the spot), the unpack orders given where it stands, and until when
+	// it keeps the goal it was packed up for without picking again.
+	struct NeuralMobileFactoryGoal
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Reason { 0 };
+		int PickFrame { -100000 };
+		int StartFrame { -1 };
+		int BestDist { INT_MAX };
+		int ProgressFrame { 0 };
+		int DeployTries { 0 };
+		int HoldUntil { -1 };
+	};
+
+	// A deployed mobile factory: since when it stands, and its health at the last sample (a sharp
+	// drop since then makes it flee even from an attacker it cannot see).
+	struct NeuralMobileFactoryStand
+	{
+		int Since { 0 };
+		double Health { 1.0 };
+		int HealthFrame { 0 };
+	};
+
 	struct NeuralGroundLossTrack
 	{
 		DWORD ID { 0 };
@@ -348,6 +373,27 @@ namespace
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoostUntilFrame {};
 		std::map<int, int> SuperReadySinceFrame {};
 
+		// Mobile factories (NeuralAI.MobileFactory.inl): the trip of each packed factory deployer (by
+		// unit UniqueID), each deployed mobile factory (by building UniqueID), the last spot one fled
+		// from, the last pack-up (where, toward what and why, handed to the vehicle it becomes),
+		// whether the main base ever had a fixed factory of each kind (unit, infantry, aircraft), the
+		// main base ConYard, when a packed one was last seen and when one last unfolded (a vehicle that
+		// vanished in between was lost), and the cached build answers (by unit type index: frame,
+		// wanted). Keyed lookups only.
+		std::unordered_map<DWORD, NeuralMobileFactoryGoal> MobileFactoryGoals {};
+		std::unordered_map<DWORD, NeuralMobileFactoryStand> MobileFactoryStands {};
+		CellStruct MobileFactoryAvoidCell { CellStruct::Empty };
+		int MobileFactoryAvoidFrame { -100000 };
+		int MobileFactoryLastPackFrame { -100000 };
+		CellStruct MobileFactoryPackCell { CellStruct::Empty };
+		CellStruct MobileFactoryPackTarget { CellStruct::Empty };
+		int MobileFactoryPackReason { 0 };
+		std::array<bool, 3> MobileFactoryMainHad {};
+		DWORD MobileFactoryHomeID { 0 };
+		int MobileFactoryVehicleSeenFrame { -100000 };
+		int MobileFactoryDeployFrame { -100000 };
+		std::unordered_map<int, std::pair<int, bool>> MobileFactoryWanted {};
+
 		void ClearClearanceReservation()
 		{
 			this->PendingClearanceCell = CellStruct::Empty;
@@ -479,6 +525,19 @@ namespace
 			this->PlanBoost.fill(0);
 			this->PlanBoostUntilFrame.fill(0);
 			this->SuperReadySinceFrame.clear();
+			this->MobileFactoryGoals.clear();
+			this->MobileFactoryStands.clear();
+			this->MobileFactoryAvoidCell = CellStruct::Empty;
+			this->MobileFactoryAvoidFrame = -100000;
+			this->MobileFactoryLastPackFrame = -100000;
+			this->MobileFactoryPackCell = CellStruct::Empty;
+			this->MobileFactoryPackTarget = CellStruct::Empty;
+			this->MobileFactoryPackReason = 0;
+			this->MobileFactoryMainHad.fill(false);
+			this->MobileFactoryHomeID = 0;
+			this->MobileFactoryVehicleSeenFrame = -100000;
+			this->MobileFactoryDeployFrame = -100000;
+			this->MobileFactoryWanted.clear();
 		}
 	};
 
