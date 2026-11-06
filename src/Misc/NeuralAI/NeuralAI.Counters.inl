@@ -167,7 +167,7 @@ namespace
 		{
 			auto const pInf = static_cast<InfantryTypeClass*>(pType);
 
-			if (pInf->Engineer || pInf->Infiltrate)
+			if (pInf->Engineer || IsSpyInfantryType(pInf))
 				return -1;
 
 			return static_cast<int>(NeuralCounterQueue::Infantry);

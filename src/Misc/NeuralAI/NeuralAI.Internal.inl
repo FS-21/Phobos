@@ -1147,6 +1147,72 @@ namespace
 		return VisionMap[static_cast<size_t>(coords.Y) * VisionMapSide + coords.X] != 0;
 	}
 
+	// A spy: it enters enemy buildings for the spy effects (Agent=). The engine also sets Infiltrate
+	// on engineers and C4 commandos, which fight or capture instead.
+	bool IsSpyInfantryType(const InfantryTypeClass* pType)
+	{
+		return pType && pType->Infiltrate && pType->Agent;
+	}
+
+	// A ground transport that burrows (subterranean movement zone).
+	bool IsUndergroundTransportType(const UnitTypeClass* pType)
+	{
+		return pType && !pType->Naval && pType->Passengers > 0 && pType->MovementZone == MovementZone::Subterrannean;
+	}
+
+	// A commando: an armed soldier that blows up buildings with C4 (Tanya, Navy SEAL, ...).
+	bool IsCommandoInfantryType(const InfantryTypeClass* pType)
+	{
+		return pType && pType->C4 && !pType->Engineer && !IsSpyInfantryType(pType);
+	}
+
+	// A specialist that works a building or a vehicle instead of fighting: engineer, spy (which
+	// also robs refineries and silos), vehicle thief.
+	bool IsSpecialistInfantryType(const InfantryTypeClass* pType)
+	{
+		return pType && (pType->Engineer || IsSpyInfantryType(pType) || pType->VehicleThief);
+	}
+
+	// A specialist of this type has a job inside this building (it enters it): engineers capture,
+	// spies infiltrate.
+	bool SpecialistWorksBuilding(const InfantryTypeClass* pType, const BuildingTypeClass* pBldType)
+	{
+		if (!pType || !pBldType)
+			return false;
+
+		if (pType->Engineer)
+			return pBldType->Capturable;
+
+		if (IsSpyInfantryType(pType))
+			return pBldType->Spyable;
+
+		return false;
+	}
+
+	// Infantry that deploys into an area weapon (Desolator: Deployer= with DeployFire=), or whose
+	// primary weapon hits a wide area (warhead CellSpread 1.5 cells or more, e.g. suicide bombers).
+	bool IsAreaDamageInfantryType(const InfantryTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		if (pType->Deployer && pType->DeployFire)
+			return true;
+
+		auto const pSlot = const_cast<InfantryTypeClass*>(pType)->GetWeapon(0);
+		auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+		return pWeapon && pWeapon->Warhead && pWeapon->Warhead->CellSpread >= 1.5f && pWeapon->Damage >= 50;
+	}
+
+	// A raider for a drop behind the lines: a commando, a bomber (Ivan=), an area damage soldier,
+	// or another elite soldier (cost 1000 or more); never a specialist.
+	bool IsRaiderInfantryType(const InfantryTypeClass* pType)
+	{
+		return pType && !IsSpecialistInfantryType(pType)
+			&& (IsCommandoInfantryType(pType) || pType->Ivan || IsAreaDamageInfantryType(pType) || pType->Cost >= 1000);
+	}
+
 	bool IsTunnelNetworkBuilding(const BuildingTypeClass* pBldType)
 	{
 		if (!pBldType)

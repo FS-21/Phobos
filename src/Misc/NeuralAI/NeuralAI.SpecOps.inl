@@ -44,6 +44,8 @@ namespace
 		// Distance (cells) from the target's map cell at which a vanished spy counts as gone in.
 		int DoorDistance { 3 };
 		int StartFrame { 0 };
+		// House whose colors the spy wore on its last tick in sight (-1: none of an enemy).
+		int DisguiseOwner { -1 };
 	};
 
 	struct NeuralSpecOpsState
@@ -70,6 +72,8 @@ namespace
 		int InfiltrationCount { 0 };
 		// Frames of the last spies killed on their way (oldest first, 4 at most).
 		std::vector<int> SpyLossFrames {};
+		// Spy UniqueID -> disguise kit shots ordered (key access only); after 3 the spy stops trying.
+		std::unordered_map<DWORD, int> KitShots {};
 	};
 
 	std::array<NeuralSpecOpsState, 32> SpecOpsStates {};
@@ -294,6 +298,8 @@ namespace
 			}), state.Techs.end());
 	}
 
+	int CountKnownDisguiseDetectorBuildings(HouseClass* pHouse, const CellStruct& cell, int marginCells);
+
 	// Enemy buildings this house knows and would gain something from spying now.
 	int CountSpecOpsSpyTargets(HouseClass* pHouse)
 	{
@@ -303,7 +309,7 @@ namespace
 		{
 			auto const pType = info.Building->Type;
 
-			if (!pType->Spyable)
+			if (!pType->Spyable || CountKnownDisguiseDetectorBuildings(pHouse, info.Building->GetMapCoords(), 1) > 0)
 				continue;
 
 			auto const pOwner = info.Building->Owner;
@@ -319,29 +325,199 @@ namespace
 		return targets;
 	}
 
-	// Combat value of the armed enemy units in sight of this house right now within radius of a
-	// cell (not the ones standing in fog over ground explored earlier).
-	int SpecOpsThreatNear(HouseClass* pHouse, const CellStruct& cell, int radius)
+	// The enemy house whose colors a spy wears, or nullptr. A new spy shows the default disguise of
+	// its own house, which fools nobody; copying a soldier takes that soldier's house.
+	HouseClass* SpyDisguiseHouse(const InfantryClass* pSpy)
 	{
-		int threat = 0;
+		if (!pSpy || !pSpy->Disguised || !pSpy->Owner)
+			return nullptr;
 
-		ForEachTechnoNear(cell, radius, [&](TechnoClass* pTech) -> bool
+		auto const pAs = pSpy->DisguisedAsHouse;
+
+		if (!pAs || pAs == pSpy->Owner || pSpy->Owner->IsAlliedWith(pAs))
+			return nullptr;
+
+		return pAs;
+	}
+
+	// A disguise only fools the copied house and its allies: in a free for all, the soldiers of a
+	// third house still shoot a spy dressed as somebody else.
+	bool IsSpyDisguisedFor(const InfantryClass* pSpy, HouseClass* pVictim)
+	{
+		auto const pAs = SpyDisguiseHouse(pSpy);
+
+		return pAs && pVictim && (pAs == pVictim || pVictim->IsAlliedWith(pAs));
+	}
+
+	// A soldier of the victim's side (the victim or an ally of it, never ours) in our sight right
+	// now, nearest to the spy first (UniqueID on ties): a player can only copy a soldier in sight.
+	InfantryClass* FindSpyDisguiseSource(HouseClass* pHouse, InfantryClass* pSpy, HouseClass* pVictim)
+	{
+		InfantryClass* pBest = nullptr;
+		int bestDist = INT_MAX;
+
+		for (auto const pInf : InfantryClass::Array)
 		{
-			if (!pTech->Owner || pTech->Owner == pHouse || pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral()
+			if (!pInf || pInf->InLimbo || !pInf->IsAlive || !pInf->Owner || !pInf->Type || pInf->Type->Doggie
+				|| pInf->Type->Slaved || pInf->IsDisguised())
+			{
+				continue;
+			}
+
+			if ((pInf->Owner != pVictim && !pVictim->IsAlliedWith(pInf->Owner)) || pHouse->IsAlliedWith(pInf->Owner)
+				|| pInf->Owner->IsNeutral() || !IsCellInSightOfAI(pHouse, pInf->GetMapCoords()))
+			{
+				continue;
+			}
+
+			const int dist = pSpy->DistanceFrom(pInf);
+
+			if (dist < bestDist || (dist == bestDist && pInf->UniqueID < pBest->UniqueID))
+			{
+				bestDist = dist;
+				pBest = pInf;
+			}
+		}
+
+		return pBest;
+	}
+
+	// The spy carries a disguise kit: a weapon whose warhead copies the target (MakesDisguise=).
+	bool HasDisguiseKit(InfantryTypeClass* pType)
+	{
+		for (int i = 0; pType && i < 2; ++i)
+		{
+			auto const pSlot = pType->GetWeapon(i);
+			auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+			if (pWeapon && pWeapon->Warhead && pWeapon->Warhead->MakesDisguise)
+				return true;
+		}
+
+		return false;
+	}
+
+	// Copies a soldier's colors: at once when the engine allows a direct disguise, otherwise the
+	// way a player does it, firing the disguise kit (a MakesDisguise= warhead, e.g. MakeupKit with
+	// an endless range and FireOnce) at that soldier; 3 shots at most per spy. True while the copy
+	// is done or under way.
+	bool CopySoldierDisguise(HouseClass* pHouse, InfantryClass* pSpy, InfantryClass* pSoldier)
+	{
+		if (!pSpy || !pSoldier)
+			return false;
+
+		if (pSpy->CanDisguiseAs(pSoldier))
+		{
+			pSpy->DisguiseAs(pSoldier);
+			return true;
+		}
+
+		if (pSpy->Target == pSoldier)
+			return true;
+
+		int& shots = GetSpecOpsState(pHouse).KitShots[pSpy->UniqueID];
+
+		if (!HasDisguiseKit(pSpy->Type) || shots >= 3)
+			return false;
+
+		shots++;
+		pSpy->SetTarget(pSoldier);
+		pSpy->QueueMission(Mission::Attack, false);
+
+		return true;
+	}
+
+	// Puts on the victim's colors as soon as one of its soldiers is in sight. True when the spy
+	// fools the victim now or is copying one of its soldiers.
+	bool DisguiseSpyFor(HouseClass* pHouse, InfantryClass* pSpy, HouseClass* pVictim)
+	{
+		if (!pHouse || !pSpy || !pVictim || !pSpy->Type || !pSpy->Type->CanDisguise || pSpy->InLimbo)
+			return false;
+
+		if (IsSpyDisguisedFor(pSpy, pVictim))
+			return true;
+
+		auto const pSource = FindSpyDisguiseSource(pHouse, pSpy, pVictim);
+
+		return pSource && CopySoldierDisguise(pHouse, pSpy, pSource);
+	}
+
+	// The enemy house a spy of ours is going to: its building target, or the one SpecOps noted.
+	HouseClass* GetSpyVictim(HouseClass* pHouse, InfantryClass* pSpy)
+	{
+		auto const pGoal = abstract_cast<BuildingClass*>(pSpy->Destination ? pSpy->Destination : pSpy->ArchiveTarget);
+
+		if (pGoal && pGoal->IsAlive && pGoal->Owner && !pGoal->Owner->IsNeutral() && !pHouse->IsAlliedWith(pGoal->Owner))
+			return pGoal->Owner;
+
+		for (auto const& spy : GetSpecOpsState(pHouse).Spies)
+		{
+			if (spy.SpyID == pSpy->UniqueID && spy.TargetOwner >= 0 && spy.TargetOwner < HouseClass::Array.Count)
+			{
+				auto const pOwner = HouseClass::Array.GetItem(spy.TargetOwner);
+
+				return (pOwner && !pOwner->Defeated && !pHouse->IsAlliedWith(pOwner)) ? pOwner : nullptr;
+			}
+		}
+
+		return nullptr;
+	}
+
+	// Known enemy buildings that see through disguises (DetectDisguise=, radius DetectDisguiseRange=
+	// in cells) covering a cell, plus marginCells. Their power is not always visible, so all count.
+	int CountKnownDisguiseDetectorBuildings(HouseClass* pHouse, const CellStruct& cell, int marginCells)
+	{
+		int count = 0;
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			auto const pType = info.Building->Type;
+
+			if (!pType->DetectDisguise || pType->DetectDisguiseRange <= 0)
+				continue;
+
+			if (info.Building->GetMapCoords().DistanceFrom(cell) <= static_cast<double>(pType->DetectDisguiseRange + marginCells))
+				count++;
+		}
+
+		return count;
+	}
+
+	// A disguise is no use in this cell: a known detector building covers it, or an enemy unit or
+	// soldier that sees through disguises (DetectDisguise=, dogs, Sensors=) is in sight near it.
+	bool IsCellWatchedByDisguiseDetector(HouseClass* pHouse, const CellStruct& cell, int marginCells)
+	{
+		if (CountKnownDisguiseDetectorBuildings(pHouse, cell, marginCells) > 0)
+			return true;
+
+		bool watched = false;
+
+		ForEachTechnoNear(cell, 12 + marginCells, [&](TechnoClass* pTech) -> bool
+		{
+			if (!pTech->Owner || pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral()
 				|| pTech->WhatAmI() == AbstractType::Building || !IsCellInSightOfAI(pHouse, pTech->GetMapCoords()))
 			{
 				return true;
 			}
 
 			auto const pType = pTech->GetTechnoType();
+			auto const pInfType = abstract_cast<InfantryTypeClass*>(pType);
 
-			if (pType && GroundRangeOf(pType) > 0)
-				threat += GetCombatValueOfType(pType, false);
+			if (!pType || !(pType->DetectDisguise || pType->Sensors || (pInfType && pInfType->Doggie)))
+				return true;
+
+			const int range = (pType->DetectDisguiseRange > 0 ? pType->DetectDisguiseRange : 6) + marginCells;
+
+			if (pTech->GetMapCoords().DistanceFrom(cell) <= static_cast<double>(range))
+			{
+				watched = true;
+				return false;
+			}
 
 			return true;
 		});
 
-		return threat;
+		return watched;
 	}
 
 	// Combat value of the house's own armed units within radius of a cell.
@@ -424,7 +600,7 @@ namespace
 
 			for (auto const pType : InfantryTypeClass::Array)
 			{
-				if (!pType || (!pType->Engineer && !pType->Infiltrate))
+				if (!pType || (!pType->Engineer && !IsSpyInfantryType(pType)))
 					continue;
 
 				const bool usable = pHouse->CountOwnedNow(pType) > 0 || CanBuildUnderHumanRules(pHouse, pType);
@@ -434,7 +610,7 @@ namespace
 
 				if (pType->Engineer && !state.EngineerType)
 					state.EngineerType = pType;
-				else if (pType->Infiltrate)
+				else if (IsSpyInfantryType(pType))
 					state.SpyAvailable = true;
 			}
 
@@ -466,7 +642,7 @@ namespace
 					continue;
 				}
 
-				const bool contested = SpecOpsThreatNear(pHouse, tech.Cell, 7) > 0;
+				const bool contested = VisibleEnemyThreatNear(pHouse, tech.Cell, 7) > 0;
 				const int dist = (home != CellStruct::Empty) ? static_cast<int>(home.DistanceFrom(tech.Cell)) : 40;
 				int worth = tech.Value * 30 * 40 / std::max(40, dist);
 
@@ -551,7 +727,7 @@ namespace
 
 				if (engCell.DistanceFrom(capture.TargetCell) > 5.0 && now - capture.DispatchFrame >= 150)
 				{
-					const int threat = SpecOpsThreatNear(pHouse, engCell, 5);
+					const int threat = VisibleEnemyThreatNear(pHouse, engCell, 5);
 
 					if (threat > 0 && threat > OwnArmedValueNear(pHouse, engCell, 6))
 					{
@@ -585,8 +761,9 @@ namespace
 				if (spy.LastDistance <= spy.DoorDistance)
 				{
 					state.InfiltrationCount++;
-					Debug::Log("[NeuralAI] House %d SpecOps: spy %u infiltrated the building at (%d,%d) of house %d, frame %d (infiltrations %d).\n",
-						pHouse->ArrayIndex, spy.SpyID, spy.TargetCell.X, spy.TargetCell.Y, spy.TargetOwner, now, state.InfiltrationCount);
+					Debug::Log("[NeuralAI] House %d SpecOps: spy %u infiltrated the building at (%d,%d) of house %d disguised as house %d, frame %d (infiltrations %d).\n",
+						pHouse->ArrayIndex, spy.SpyID, spy.TargetCell.X, spy.TargetCell.Y, spy.TargetOwner, spy.DisguiseOwner, now,
+						state.InfiltrationCount);
 				}
 				else
 				{
@@ -595,8 +772,9 @@ namespace
 					if (state.SpyLossFrames.size() > 4)
 						state.SpyLossFrames.erase(state.SpyLossFrames.begin());
 
-					Debug::Log("[NeuralAI] House %d SpecOps: spy %u lost %d cells from (%d,%d), frame %d.\n", pHouse->ArrayIndex,
-						spy.SpyID, spy.LastDistance, spy.TargetCell.X, spy.TargetCell.Y, now);
+					Debug::Log("[NeuralAI] House %d SpecOps: spy %u lost %d cells from (%d,%d) of house %d disguised as house %d, frame %d.\n",
+						pHouse->ArrayIndex, spy.SpyID, spy.LastDistance, spy.TargetCell.X, spy.TargetCell.Y, spy.TargetOwner,
+						spy.DisguiseOwner, now);
 				}
 
 				done = true;
@@ -608,6 +786,8 @@ namespace
 			else if (!pSpy->InLimbo)
 			{
 				spy.LastDistance = static_cast<int>(pSpy->GetMapCoords().DistanceFrom(spy.TargetCell));
+				auto const pDisguiseHouse = SpyDisguiseHouse(abstract_cast<InfantryClass*>(pSpy));
+				spy.DisguiseOwner = pDisguiseHouse ? pDisguiseHouse->ArrayIndex : -1;
 			}
 
 			if (done)
@@ -615,6 +795,18 @@ namespace
 			else
 				++i;
 		}
+	}
+
+	// The engineer is on a SpecOps capture (Plans leave it there).
+	bool IsSpecOpsEngineerBusy(HouseClass* pHouse, DWORD engineerID)
+	{
+		for (auto const& capture : GetSpecOpsState(pHouse).Captures)
+		{
+			if (capture.EngineerID == engineerID)
+				return true;
+		}
+
+		return false;
 	}
 
 	int SpecOpsOpportunity(HouseClass* pHouse)
@@ -663,9 +855,12 @@ namespace
 		spy.DoorDistance = 2 + (pTarget->Type ? std::max<int>(pTarget->Type->GetFoundationWidth(), pTarget->Type->GetFoundationHeight(false)) : 1);
 		spy.LastDistance = static_cast<int>(pSpy->GetMapCoords().DistanceFrom(spy.TargetCell));
 		spy.StartFrame = Unsorted::CurrentFrame;
+		auto const pDisguiseHouse = SpyDisguiseHouse(abstract_cast<InfantryClass*>(pSpy));
+		spy.DisguiseOwner = pDisguiseHouse ? pDisguiseHouse->ArrayIndex : -1;
 		state.Spies.push_back(spy);
-		Debug::Log("[NeuralAI] House %d SpecOps: spy %u -> %s of house %d at (%d,%d), frame %d.\n", pHouse->ArrayIndex,
-			spy.SpyID, pTarget->Type ? pTarget->Type->ID : "?", spy.TargetOwner, spy.TargetCell.X, spy.TargetCell.Y,
+		Debug::Log("[NeuralAI] House %d SpecOps: spy %u (%s) -> %s of house %d at (%d,%d) disguised as house %d, frame %d.\n",
+			pHouse->ArrayIndex, spy.SpyID, pSpy->GetTechnoType() ? pSpy->GetTechnoType()->ID : "?",
+			pTarget->Type ? pTarget->Type->ID : "?", spy.TargetOwner, spy.TargetCell.X, spy.TargetCell.Y, spy.DisguiseOwner,
 			spy.StartFrame);
 	}
 
@@ -701,7 +896,7 @@ namespace
 				continue;
 			}
 
-			const int threat = SpecOpsThreatNear(pHouse, pTech->Cell, 7);
+			const int threat = VisibleEnemyThreatNear(pHouse, pTech->Cell, 7);
 			// After a loss there (or next to it) the next engineer goes with an escort.
 			const bool contested = threat > 0 || pTech->Failures > 0;
 
@@ -723,40 +918,57 @@ namespace
 		return pBest;
 	}
 
-	// Idle armed ground units of ours near a tech, nearest first (UniqueID on ties), not in a
-	// plan nor escorting another capture.
+	// Idle armed ground units and soldiers of ours near a tech, nearest first (UniqueID on ties),
+	// not in a plan nor escorting another capture. Specialists (engineers, spies, thieves) and
+	// harvesters never escort.
 	void CollectSpecOpsEscorts(HouseClass* pHouse, const CellStruct& cell, int maxCount, std::vector<FootClass*>& out)
 	{
 		out.clear();
 		auto const& state = GetSpecOpsState(pHouse);
-		std::vector<std::pair<int, UnitClass*>> candidates;
+		std::vector<std::pair<int, FootClass*>> candidates;
 
-		for (auto const pUnit : UnitClass::Array)
+		auto consider = [&](FootClass* pFoot)
 		{
-			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type || pUnit->Type->Naval
-				|| pUnit->Type->Harvester || pUnit->Type->ResourceGatherer || pUnit->Type->DeploysInto
-				|| GroundRangeOf(pUnit->Type) <= 0 || pUnit->Target
-				|| (pUnit->CurrentMission != Mission::Guard && pUnit->CurrentMission != Mission::Area_Guard)
-				|| IsPlanMember(pHouse, pUnit->UniqueID))
-			{
-				continue;
-			}
+			// Guarding, or just repositioning (a move with no target, out of any plan, healthy):
+			// units entering, rescuing or retreating to repair keep their job.
+			const bool repositioning = pFoot->CurrentMission == Mission::Move && pFoot->GetHealthPercentage() >= 0.6;
 
-			bool busy = false;
+			if (pFoot->Target || IsPlanMember(pHouse, pFoot->UniqueID)
+				|| (pFoot->CurrentMission != Mission::Guard && pFoot->CurrentMission != Mission::Area_Guard && !repositioning))
+			{
+				return;
+			}
 
 			for (auto const& capture : state.Captures)
 			{
-				if (std::find(capture.Escorts.begin(), capture.Escorts.end(), pUnit->UniqueID) != capture.Escorts.end())
-				{
-					busy = true;
-					break;
-				}
+				if (std::find(capture.Escorts.begin(), capture.Escorts.end(), pFoot->UniqueID) != capture.Escorts.end())
+					return;
 			}
 
-			const int dist = static_cast<int>(pUnit->GetMapCoords().DistanceFrom(cell));
+			const int dist = static_cast<int>(pFoot->GetMapCoords().DistanceFrom(cell));
 
-			if (!busy && dist <= 45)
-				candidates.emplace_back(dist, pUnit);
+			if (dist <= 45)
+				candidates.emplace_back(dist, pFoot);
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Type && !pUnit->Type->Naval
+				&& !pUnit->Type->Harvester && !pUnit->Type->ResourceGatherer && !pUnit->Type->DeploysInto
+				&& GroundRangeOf(pUnit->Type) > 0)
+			{
+				consider(pUnit);
+			}
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->Owner == pHouse && pInf->IsAlive && !pInf->InLimbo && pInf->Type && !pInf->Type->Engineer
+				&& !IsSpyInfantryType(pInf->Type) && !pInf->Type->Agent && !pInf->Type->Thief && !pInf->Type->VehicleThief
+				&& !pInf->Type->Slaved && GroundRangeOf(pInf->Type) > 0)
+			{
+				consider(pInf);
+			}
 		}
 
 		std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b)
@@ -764,12 +976,12 @@ namespace
 			return a.first != b.first ? a.first < b.first : a.second->UniqueID < b.second->UniqueID;
 		});
 
-		for (auto const& [dist, pUnit] : candidates)
+		for (auto const& [dist, pFoot] : candidates)
 		{
 			if (static_cast<int>(out.size()) >= maxCount)
 				break;
 
-			out.push_back(pUnit);
+			out.push_back(pFoot);
 		}
 	}
 
@@ -826,8 +1038,15 @@ namespace
 					return false;
 				}
 
+				auto const pEscortGoal = MapClass::Instance.TryGetCellAt(capture.TargetCell);
+
 				for (auto const pEscort : escorts)
+				{
 					capture.Escorts.push_back(pEscort->UniqueID);
+
+					if (pEscortGoal)
+						dispatch(pEscort, pEscortGoal, Mission::AttackMove, false);
+				}
 			}
 
 			state.Captures.push_back(capture);
@@ -864,7 +1083,7 @@ namespace
 				dispatch(pEscort, pTargetCell, Mission::AttackMove, false);
 		}
 
-		const int threat = SpecOpsThreatNear(pHouse, pCapture->TargetCell, 7);
+		const int threat = VisibleEnemyThreatNear(pHouse, pCapture->TargetCell, 7);
 		const bool waitForEscort = escortsAlive > 0 && !escortArrived && now - pCapture->StartFrame < 1800;
 		const bool go = (threat == 0 && !waitForEscort) || escortArrived
 			|| (escortsAlive == 0 && now - pCapture->StartFrame >= 900 && threat < 600);

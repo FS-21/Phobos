@@ -1470,14 +1470,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pSampleEnemyInfantry = pCheckInf;
 
 		if (!pEnemySpecialistInf
-			&& (pCheckInf->Type->Engineer || pCheckInf->Type->Infiltrate || pCheckInf->Type->C4 || pCheckInf->Type->Ivan
+			&& (pCheckInf->Type->Engineer || IsSpyInfantryType(pCheckInf->Type) || pCheckInf->Type->C4 || pCheckInf->Type->Ivan
 				|| pCheckInf->Type->Deployer || pCheckInf->Type->VehicleThief || pCheckInf->Type->Thief))
 		{
 			pEnemySpecialistInf = pCheckInf;
 		}
 
 		if (homeCoords != CellStruct::Empty
-			&& (pCheckInf->Disguised || pCheckInf->Type->Infiltrate || pCheckInf->Type->Engineer
+			&& (pCheckInf->Disguised || IsSpyInfantryType(pCheckInf->Type) || pCheckInf->Type->Engineer
 				|| pCheckInf->Type->Thief || pCheckInf->Type->VehicleThief || pCheckInf->Type->C4
 				|| pCheckInf->Type->Ivan)
 			&& pCheckInf->GetMapCoords().DistanceFrom(homeCoords) <= 22.0)
@@ -4486,11 +4486,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			bool ambushSpotted = (pUnit->GetHealthPercentage() < 0.78)
 				|| (pUnit->HasBeenAttacked && pUnit->GetHealthPercentage() < 0.92);
 
-			if (!ambushSpotted && pUC && pHouse->EnemyHouseIndex >= 0 && pHouse->EnemyHouseIndex < 24
-				&& pUC->DisguiseSensors_InclHouse(static_cast<unsigned int>(pHouse->EnemyHouseIndex)))
-			{
+			// Inside the reach of a disguise detector we know of (the hidden sensor map is not read).
+			if (!ambushSpotted && pUC && IsCellWatchedByDisguiseDetector(pHouse, pUC->MapCoords, 0))
 				ambushSpotted = true;
-			}
 
 			if (!ambushSpotted)
 			{
@@ -5014,7 +5012,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				for (auto const pOwnI : InfantryClass::Array)
 				{
 					if (pOwnI && pOwnI->Owner == pHouse && !pOwnI->InLimbo && pOwnI->IsAlive && pOwnI->Type
-						&& !pOwnI->Type->Engineer && !pOwnI->Type->Infiltrate && pOwnI->DistanceFrom(pUnit) <= 2816)
+						&& !pOwnI->Type->Engineer && !IsSpyInfantryType(pOwnI->Type) && pOwnI->DistanceFrom(pUnit) <= 2816)
 					{
 						nearbyFriendlyInf++;
 					}
@@ -5249,6 +5247,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool isIdle = (pInf->CurrentMission == Mission::Guard || pInf->CurrentMission == Mission::Area_Guard)
 			&& !IsFootActivelyAttackingOrMovingToEnemy(pInf);
 
+		// Specialists flying a plan (airborne raid) take their orders from it.
+		const bool inPlan = IsSpecialistInfantryType(pInf->Type) && IsPlanMember(pHouse, pInf->UniqueID);
 		const auto pInfWpn = pInf->Type->GetWeapon(0) ? pInf->Type->GetWeapon(0)->WeaponType : nullptr;
 
 		// Slot 82 (Infantry Human Shield & Anti-Engineer Recapture Screen for
@@ -5256,7 +5256,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// cells) immediately gun down enemy Engineers trying to recapture our
 		// stolen ConYard, or form a human shield perimeter around the stolen
 		// ConYard/MCV to absorb enemy fire during extraction!
-		if (pStolenConYardOrMCV && !pInf->Type->Engineer && !pInf->Type->Infiltrate && SlotGate(scores[82], 60, 82)
+		if (pStolenConYardOrMCV && !pInf->Type->Engineer && !IsSpyInfantryType(pInf->Type) && SlotGate(scores[82], 60, 82)
 			&& pInf->DistanceFrom(pStolenConYardOrMCV) <= 3584)
 		{
 			if (pThreatToStolenAsset && pInfWpn && pInfWpn->Damage > 0 && pInf->Target != pThreatToStolenAsset)
@@ -5426,7 +5426,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// buildings/tanks, repair destroyed bridges, or capture Neutral Tech
 		// Buildings (Oil Derricks, Tech Outposts, Airports) and damaged enemy
 		// buildings (respecting Multi-Engineer)
-		if (pInf->Type->Engineer && isIdle)
+		if (pInf->Type->Engineer && isIdle && !inPlan)
 		{
 			// Disarm any attached Crazy Ivan Bomb on our own OR allied high-value
 			// buildings!
@@ -5571,13 +5571,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Slot 61 (Dynamic Spy Disguise via DisguiseAs): Ensure our Spy disguises
-		// specifically as an enemy infantryman rather than a friendly/default unit!
-		if (pInf->Type->CanDisguise && pSampleEnemyInfantry && SlotGate(scores[61], 60, 61)
-			&& (!pInf->Disguised || !pInf->DisguisedAsHouse || pHouse->IsAlliedWith(pInf->DisguisedAsHouse))
-			&& pInf->CanDisguiseAs(pSampleEnemyInfantry))
+		// Spy disguise: it only fools the copied house and its allies, so a spy on its way wears
+		// the colors of its target's owner, copied from one of that house's soldiers in sight.
+		// Without a target yet (Slot 61) it copies any enemy soldier, which is right in a duel.
+		if (pInf->Type->CanDisguise)
 		{
-			pInf->DisguiseAs(pSampleEnemyInfantry);
+			auto const pVictim = IsSpyInfantryType(pInf->Type) ? GetSpyVictim(pHouse, pInf) : nullptr;
+
+			// Until a soldier of the victim is in sight, any enemy colors beat its own (they fool at
+			// least that house on the way).
+			const bool victimColors = pVictim && DisguiseSpyFor(pHouse, pInf, pVictim);
+
+			if (!victimColors && pSampleEnemyInfantry && (pVictim || SlotGate(scores[61], 60, 61))
+				&& !SpyDisguiseHouse(pInf) && IsCellInSightOfAI(pHouse, pSampleEnemyInfantry->GetMapCoords()))
+			{
+				CopySoldierDisguise(pHouse, pInf, pSampleEnemyInfantry);
+			}
 		}
 
 		// Slot 62 (Slave Miner Liberation for Infantry): Redirect fire from Slaved
@@ -5604,7 +5613,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		//    while our army is assembling (not yet attacking that enemy house), wait disguised
 		//    5..10 cells away if safe from detectors, and immediately infiltrate as soon as
 		//    our attack wave launches/approaches (or if an enemy detector gets close)!
-		if (pInf->Type->Infiltrate)
+		if (IsSpyInfantryType(pInf->Type) && !inPlan)
 		{
 			BuildingClass* pStagedPowerBld = abstract_cast<BuildingClass*>(
 				pInf->Destination ? pInf->Destination : pInf->ArchiveTarget);
@@ -5635,51 +5644,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			if (pStagedPowerBld && pInf->Disguised)
+			// Waiting next to the base is only safe in the colors of the plant's owner.
+			if (pStagedPowerBld && IsSpyDisguisedFor(pInf, pStagedPowerBld->Owner))
 			{
 				const int distToPwr = pInf->DistanceFrom(pStagedPowerBld);
 
 				if (distToPwr >= 1024 && distToPwr <= 2816)
 				{
 					HouseClass* const pPwrOwner = pStagedPowerBld->Owner;
-					bool detectorDangerNearSpy = pInf->HasBeenAttacked;
-
-					if (!detectorDangerNearSpy)
-					{
-						for (auto const pDetI : InfantryClass::Array)
-						{
-							if (!pDetI || pDetI->InLimbo || !pDetI->IsAlive || !pDetI->Owner || !pDetI->Type)
-								continue;
-
-							if (pHouse->IsAlliedWith(pDetI->Owner) || !IsCellVisibleToAI(pHouse, pDetI->GetCell()) || pDetI->Owner->IsNeutral())
-								continue;
-
-							if ((pDetI->Type->Doggie || pDetI->Type->DetectDisguise || pDetI->Type->Sensors)
-								&& pInf->DistanceFrom(pDetI) <= 1664)
-							{
-								detectorDangerNearSpy = true;
-								break;
-							}
-						}
-					}
-
-					if (!detectorDangerNearSpy)
-					{
-						for (auto const pDetU : UnitClass::Array)
-						{
-							if (!pDetU || pDetU->InLimbo || !pDetU->IsAlive || !pDetU->Owner || !pDetU->Type)
-								continue;
-
-							if (pHouse->IsAlliedWith(pDetU->Owner) || !IsCellVisibleToAI(pHouse, pDetU->GetCell()) || pDetU->Owner->IsNeutral())
-								continue;
-
-							if (pDetU->Type->Sensors && pInf->DistanceFrom(pDetU) <= 1664)
-							{
-								detectorDangerNearSpy = true;
-								break;
-							}
-						}
-					}
+					// Revealed by a known detector building, or a dog / detector in sight close by: go in now.
+					const bool detectorDangerNearSpy = pInf->HasBeenAttacked
+						|| IsCellWatchedByDisguiseDetector(pHouse, pInf->GetMapCoords(), 0);
 
 					// Powered defenses of that owner we have seen (fog-fair).
 					bool enemyHasPoweredDefenses = false;
@@ -5740,11 +5715,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (pInf->Type->Infiltrate && isIdle)
+		if (IsSpyInfantryType(pInf->Type) && isIdle && !inPlan)
 		{
 			BuildingClass* pBestSpyTarget = nullptr;
 			int bestSpyScore = -9999;
 			const int ourMoney = pHouse->Available_Money();
+			// Per enemy house: 2 when the spy already wears its colors, 1 when one of its soldiers is
+			// in sight to copy, 0 otherwise (-1: not computed yet). The disguise is what gets the spy
+			// past that house's defenses, so those houses' buildings come first.
+			std::array<int8_t, 32> disguiseFit {};
+			disguiseFit.fill(-1);
 
 			for (auto const pEnemyBld : BuildingClass::Array)
 			{
@@ -5825,11 +5805,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (spyScore <= 0)
 					continue;
 
+				const size_t ownerSlot = static_cast<size_t>(std::clamp(pEnemyOwner->ArrayIndex, 0, 31));
+
+				if (disguiseFit[ownerSlot] < 0)
+				{
+					disguiseFit[ownerSlot] = IsSpyDisguisedFor(pInf, pEnemyOwner) ? 2
+						: (pInf->Type->CanDisguise && FindSpyDisguiseSource(pHouse, pInf, pEnemyOwner)) ? 1 : 0;
+				}
+
+				spyScore += disguiseFit[ownerSlot] == 2 ? 40 : (disguiseFit[ownerSlot] == 1 ? 20 : 0);
+
 				// De-duplicate across multiple friendly Spies so each Spy picks a distinct target/role!
 				for (auto const pOtherSpy : InfantryClass::Array)
 				{
 					if (!pOtherSpy || pOtherSpy == pInf || pOtherSpy->Owner != pHouse || pOtherSpy->InLimbo
-						|| !pOtherSpy->IsAlive || !pOtherSpy->Type || !pOtherSpy->Type->Infiltrate)
+						|| !pOtherSpy->IsAlive || !pOtherSpy->Type || !IsSpyInfantryType(pOtherSpy->Type))
 					{
 						continue;
 					}
@@ -5843,14 +5833,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 
-				// Prefer lightly guarded buildings: penalize nearby enemy dogs/detectors and defense turrets!
-				int detectorPenalty = 0;
-				for (auto const pDetI : InfantryClass::Array)
+				// Prefer lightly guarded buildings: a known detector building covering it (DetectDisguise=
+				// with DetectDisguiseRange=) strips the disguise at the door; dogs and detector units in
+				// sight nearby hunt spies; defense turrets shoot a revealed one.
+				int detectorPenalty = 60 * CountKnownDisguiseDetectorBuildings(pHouse, pEnemyBld->GetMapCoords(), 1);
+				for (auto const pDet : FootClass::Array)
 				{
-					if (pDetI && !pDetI->InLimbo && pDetI->IsAlive && pDetI->Owner && !pHouse->IsAlliedWith(pDetI->Owner)
-						&& !pDetI->Owner->IsNeutral() && pDetI->Type && IsCellVisibleToAI(pHouse, pDetI->GetCell())
-						&& (pDetI->Type->Doggie || pDetI->Type->DetectDisguise || pDetI->Type->Sensors)
-						&& pEnemyBld->DistanceFrom(pDetI) <= 2048)
+					auto const pDetType = pDet ? pDet->GetTechnoType() : nullptr;
+					auto const pDetInfType = abstract_cast<InfantryTypeClass*>(pDetType);
+
+					if (pDetType && !pDet->InLimbo && pDet->IsAlive && pDet->Owner && !pHouse->IsAlliedWith(pDet->Owner)
+						&& !pDet->Owner->IsNeutral() && IsCellInSightOfAI(pHouse, pDet->GetMapCoords())
+						&& (pDetType->DetectDisguise || pDetType->Sensors || (pDetInfType && pDetInfType->Doggie))
+						&& pEnemyBld->DistanceFrom(pDet) <= 2048)
 					{
 						detectorPenalty += 35;
 					}
@@ -5879,7 +5874,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (pBestSpyTarget)
 			{
-				if (DispatchFootToTargetOrTransport(pInf, pBestSpyTarget, Mission::Enter, false))
+				// While the spy fires its disguise kit at a soldier of the owner it is not sent yet (the
+				// walk order would cancel the shot); it is idle again right after and goes then.
+				const bool copying = DisguiseSpyFor(pHouse, pInf, pBestSpyTarget->Owner)
+					&& !IsSpyDisguisedFor(pInf, pBestSpyTarget->Owner);
+
+				if (!copying && DispatchFootToTargetOrTransport(pInf, pBestSpyTarget, Mission::Enter, false))
 					NoteSpecOpsSpy(pHouse, pInf, pBestSpyTarget);
 
 				pExt->NeuralAI_InfiltratedEnemyMask |= (1 << std::clamp(pBestSpyTarget->Owner->ArrayIndex, 0, 7));
@@ -5890,7 +5890,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Credit Thief (Thief=yes): Coordinate multiple Thieves to infiltrate distinct
 		// enemy Refineries & Ore Silos (preferring solvent enemy houses)!
-		if (pInf->Type->Thief && !pInf->Type->Infiltrate && isIdle)
+		if (pInf->Type->Thief && !IsSpyInfantryType(pInf->Type) && isIdle && !inPlan)
 		{
 			BuildingClass* pBestThiefTarget = nullptr;
 			int bestThiefScore = -999999;
@@ -6207,7 +6207,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Immediately man any owned under-filled Battle Bunker (IsBaseDefense && CanBeOccupied)
 		// with nearby compatible Occupier infantry before considering APC boarding or offensive waves
-		if (isIdle && pInf->Type->Occupier && !pInf->Type->Engineer && !pInf->Type->Infiltrate)
+		if (isIdle && pInf->Type->Occupier && !pInf->Type->Engineer && !IsSpyInfantryType(pInf->Type))
 		{
 			const int infZoneForBunker
 				= ObjectZone(pInf, MovementZone::Normal);
@@ -6264,7 +6264,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (isIdle && !pInf->Type->Infiltrate && (IsAITickWindow(90, apcBoardWindow)))
+		if (isIdle && !IsSpyInfantryType(pInf->Type) && (IsAITickWindow(90, apcBoardWindow)))
 		{
 			bool boardedCombatVehicle = false;
 			for (auto const pCombVeh : UnitClass::Array)
@@ -6364,7 +6364,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		// Opportunistic local strike for idle combat infantry.
-		if (isIdle && pInfWpn && !pInf->Type->Engineer && !pInf->Type->Infiltrate
+		if (isIdle && pInfWpn && !pInf->Type->Engineer && !IsSpyInfantryType(pInf->Type)
 			&& pInf->GetHealthPercentage() >= 0.45)
 		{
 			if (auto const pLocalTarget = findOpportunityTarget(pInf, pInfWpn, pSecWpn))
@@ -6431,7 +6431,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Yuri Bio-Reactor Power Surge: Enter Bio-Reactor with basic infantry
 		// during LowPower!
 		if (pBioReactor && bioReactorNeedsPower && isIdle && pInf->Destination != pBioReactor && !pInf->Type->Engineer
-			&& !pInf->Type->Infiltrate && !pInf->Type->Doggie && pInf->Type->Cost <= 250
+			&& !IsSpyInfantryType(pInf->Type) && !pInf->Type->Doggie && pInf->Type->Cost <= 250
 			&& pInf->DistanceFrom(pBioReactor) <= 4096)
 		{
 			DispatchFootToTargetOrTransport(pInf, pBioReactor, Mission::Enter, false);
@@ -6842,7 +6842,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || !pInf->Type)
 			continue;
 
-		if (pInf->Type->Engineer || pInf->Type->Infiltrate)
+		if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type))
 			continue;
 
 		const bool canInfCrossWater = (pInf->Type->MovementZone == MovementZone::Amphibious
@@ -10675,6 +10675,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pAir->SetTarget(pVisibleEnemyBld);
 
 				pAir->QueueMission(Mission::Attack, true);
+			}
+			else
+			{
+				// Nothing to strike: patrol the route of key points (NeuralAI.AirPatrol.inl).
+				AssignAirPatrol(pHouse, pAir);
 			}
 		}
 	}

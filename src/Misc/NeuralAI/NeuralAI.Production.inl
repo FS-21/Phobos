@@ -299,7 +299,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		for (auto const pOwnInf : InfantryClass::Array)
 		{
 			if (pOwnInf && pOwnInf->Owner == pHouse && !pOwnInf->InLimbo && pOwnInf->IsAlive && pOwnInf->Type
-				&& pOwnInf->Type->Occupier && !pOwnInf->Type->Engineer && !pOwnInf->Type->Infiltrate)
+				&& pOwnInf->Type->Occupier && !pOwnInf->Type->Engineer && !IsSpyInfantryType(pOwnInf->Type))
 			{
 				compatibleOccupierInfCount++;
 			}
@@ -2903,6 +2903,47 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		|| ((trueRefineries >= 1 && ownedEconomyUnits >= 1)
 			&& (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
 
+	// Raid transport demand (AirborneFront plan): a raider or spy of ours waits for a ride behind
+	// the enemy lines and no flying passenger transport (3 seats or more) is owned yet: one is
+	// worth building even without a water crossing.
+	bool raidTransportWanted = false;
+	{
+		int raidCandidates = 0;
+		int raidTransports = 0;
+
+		for (auto const pOwnFoot : FootClass::Array)
+		{
+			if (!pOwnFoot || pOwnFoot->Owner != pHouse || !pOwnFoot->IsAlive)
+				continue;
+
+			if (auto const pOwnInf = abstract_cast<InfantryClass*>(pOwnFoot))
+			{
+				if (IsRaiderInfantryType(pOwnInf->Type) || IsSpyInfantryType(pOwnInf->Type))
+					raidCandidates++;
+			}
+			else if (auto const pOwnType = pOwnFoot->GetTechnoType(); pOwnType && pOwnType->Passengers >= 3
+				&& (pOwnFoot->WhatAmI() == AbstractType::Aircraft || pOwnType->JumpJet || pOwnType->ConsideredAircraft
+					|| pOwnType->MovementZone == MovementZone::Fly))
+			{
+				raidTransports++;
+			}
+		}
+
+		raidTransportWanted = raidCandidates > 0 && raidTransports == 0;
+	}
+
+	// Bonus for a flying passenger transport that would answer the raid demand.
+	auto raidTransportBonus = [&](const TechnoTypeClass* pCandidate) -> int
+	{
+		if (!raidTransportWanted || !pCandidate || pCandidate->Passengers < 3)
+			return -1000;
+
+		const bool flies = pCandidate->WhatAmI() == AbstractType::AircraftType || pCandidate->JumpJet
+			|| pCandidate->ConsideredAircraft || pCandidate->MovementZone == MovementZone::Fly;
+
+		return flies ? 350 : -1000;
+	};
+
 	// Ferry transport demand-driven scoring shared by the Shipyard and War Factory.
 	// Transports are reusable shuttles: one stays ready on island maps, and more are
 	// only built (up to 3) while the real waiting cargo exceeds one trip of the fleet.
@@ -3273,7 +3314,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// A transport the demand rules reject is not a candidate at all: otherwise the
 				// queue keeps building it whenever nothing else scores higher (e.g. no buildable
 				// warship), producing whole fleets of unneeded transports.
-				const int ferryDelta = scoreFerryTransport(pUnit);
+				const int ferryDelta = std::max(scoreFerryTransport(pUnit), raidTransportBonus(pUnit));
 
 				if (ferryDelta <= -900)
 					continue;
@@ -3441,7 +3482,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					const int ferryDelta = scoreFerryTransport(pUnit);
+					const int ferryDelta = std::max(scoreFerryTransport(pUnit), raidTransportBonus(pUnit));
 
 					if (ferryDelta <= -900)
 						continue; // Not needed: never built just because nothing else scores higher.
@@ -3551,7 +3592,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (pOwnInf->Type->Engineer)
 			ownedEngineers++;
-		else if (pOwnInf->Type->Infiltrate)
+		else if (IsSpyInfantryType(pOwnInf->Type))
 			ownedInfiltrators++;
 	}
 
@@ -3648,7 +3689,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else
 				score += scores[18] + techBonus;
 		}
-		else if (pInf->Infiltrate)
+		else if (IsSpyInfantryType(pInf))
 		{
 			const int maxActiveSpies
 				= (scores[19] > 180 || pExt->NeuralAI_Archetype == 1 || pExt->NeuralAI_ActiveExpert == 3) ? 3 : 2;
@@ -3670,7 +3711,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			score += scores[16];
 		}
 
-		if (needsCheapInfForBioReactor && !pInf->Engineer && !pInf->Infiltrate && !pInf->Doggie && pInf->Cost <= 220)
+		if (needsCheapInfForBioReactor && !pInf->Engineer && !IsSpyInfantryType(pInf) && !pInf->Doggie && pInf->Cost <= 220)
 		{
 			score += 520;
 		}
@@ -3681,14 +3722,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pOwnB && !pOwnB->InLimbo && pOwnB->IsAlive && pOwnB->Type && pOwnB->Type->IsBaseDefense
 				&& pOwnB->Type->CanBeOccupied
 				&& pOwnB->Occupants.Count < std::clamp(pOwnB->Type->MaxNumberOccupants, 1, 10) && pInf->Occupier
-				&& !pInf->Engineer && !pInf->Infiltrate)
+				&& !pInf->Engineer && !IsSpyInfantryType(pInf))
 			{
 				score += 650;
 				break;
 			}
 		}
 
-		if (features[77] > 0 && !pInf->Engineer && !pInf->Infiltrate
+		if (features[77] > 0 && !pInf->Engineer && !IsSpyInfantryType(pInf)
 			&& (pInf->ImmuneToPsionics || (pWpn && pWpn->Range >= (6 * 256))))
 		{
 			score += 380; // Counter enemy MindControl with Snipers/Virus/Cyborgs/Dogs!
@@ -3872,7 +3913,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				// Passenger aircraft shuttle across water like amphibious transports, under
 				// the same ferry demand (aircraft and ground transports counted together).
-				const int ferryDelta = scoreFerryTransport(pAir);
+				const int ferryDelta = std::max(scoreFerryTransport(pAir), raidTransportBonus(pAir));
 
 				if (ferryDelta <= -900 && !isAirInProgress)
 					continue;
@@ -3913,6 +3954,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	pExt->NeuralAI_NextAircraftTarget = bestAirIdx;
+
+	// Ares replaces HouseClass::AI_Aircraft the same way (0x4FF210 jumps past the
+	// UpdateAircraftProduction hook), so the airfields get the choice here too.
+	pHouse->ProducingAircraftTypeIndex = bestAirIdx;
 
 	if (IsAITickWindow(450, evalDelay))
 	{

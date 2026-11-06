@@ -256,6 +256,27 @@ namespace
 	}
 
 	bool CanBuildUnderHumanRules(HouseClass* pHouse, TechnoTypeClass* pType);
+	bool IsSpecOpsEngineerBusy(HouseClass* pHouse, DWORD engineerID);
+
+	// Flying transports that dropped a raid team keep the safe air lane home even after their plan
+	// is over (target gone or captured): UniqueIDs in drop order, one list per house.
+	struct NeuralSafeReturnState
+	{
+		int MatchSerial { -1 };
+		std::vector<DWORD> Flights {};
+	};
+
+	std::array<NeuralSafeReturnState, 32> SafeReturnStates {};
+
+	NeuralSafeReturnState& GetSafeReturnState(const HouseClass* pHouse)
+	{
+		auto& state = SafeReturnStates[std::clamp(pHouse ? pHouse->ArrayIndex : 0, 0, 31)];
+
+		if (state.MatchSerial != NeuralMatchSerial)
+			state = NeuralSafeReturnState { NeuralMatchSerial };
+
+		return state;
+	}
 
 	void UpdateStrategicPlans(HouseClass* pHouse, const std::array<int16_t, NeuralAI::OutputVectorSize>& scores)
 	{
@@ -741,7 +762,7 @@ namespace
 
 				if (auto const pInf = abstract_cast<InfantryClass*>(pFoot))
 				{
-					if (pInf->Type->Engineer || pInf->Type->Infiltrate)
+					if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type))
 						continue;
 				}
 
@@ -1529,7 +1550,7 @@ namespace
 			}
 			else if (auto const pInf = abstract_cast<InfantryClass*>(pFoot))
 			{
-				if (pInf->Type->Engineer || pInf->Type->Infiltrate)
+				if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type))
 					return false;
 			}
 
@@ -2029,6 +2050,34 @@ namespace
 			}
 		}
 
+		// Safe return flights: a transport out of its plan that is still flying home empty keeps
+		// the air lane around known anti-air; a new job (cargo, another plan, an attack) or home ends it.
+		{
+			auto& flights = GetSafeReturnState(pHouse).Flights;
+
+			for (size_t i = 0; i < flights.size();)
+			{
+				auto const pFlyer = findOwnFoot(flights[i]);
+				auto const pHome = pFlyer ? FindCarrierHomeCell(pHouse, pFlyer) : nullptr;
+				const bool inRaid = planOf(NeuralPlanId::AirborneFront).Active && macro.PlanMembers.contains(flights[i]);
+				const bool done = !pFlyer || !pHome || pFlyer->Passengers.NumPassengers > 0 || pFlyer->Target
+					|| (!inRaid && macro.PlanMembers.contains(flights[i]))
+					|| pFlyer->GetMapCoords().DistanceFrom(pHome->MapCoords) <= 4.0;
+
+				if (done)
+				{
+					flights.erase(flights.begin() + static_cast<std::ptrdiff_t>(i));
+					continue;
+				}
+
+				// While its raid runs, the plan flies it home itself.
+				if (!inRaid)
+					IssueMoveOrder(pFlyer, GetSafeAirHop(pHouse, pFlyer, pHome), 4.0);
+
+				++i;
+			}
+		}
+
 		// ---------------------------------------------------------------- Plan 9: Airborne Front
 		// While our ground army is attacking, an air transport (passenger aircraft or flying
 		// transport vehicle) drops infantry on a known valuable building away from the fighting,
@@ -2043,6 +2092,8 @@ namespace
 				auto const pTarget = FindBuildingByID(plan.TargetID);
 				auto const pDrop = MapClass::Instance.TryGetCellAt(plan.StagingCell);
 				const std::vector<DWORD> infantry(plan.Members.empty() ? plan.Members.end() : plan.Members.begin() + 1, plan.Members.end());
+				auto const pTransportUnit = abstract_cast<UnitClass*>(pTransport);
+				const bool underground = pTransportUnit && IsUndergroundTransportType(pTransportUnit->Type);
 
 				if (!pTarget)
 				{
@@ -2087,6 +2138,11 @@ namespace
 						plan.AuxBaseline = 2;
 						plan.Arrived = true;
 						plan.ArrivedFrame = Unsorted::CurrentFrame;
+						Debug::Log("[NeuralAI] House %d AirborneFront: team dropped at (%d,%d) by %s, frame %d.\n", pHouse->ArrayIndex,
+							plan.StagingCell.X, plan.StagingCell.Y, pTransport->GetTechnoType()->ID, Unsorted::CurrentFrame);
+
+						if (!underground)
+							GetSafeReturnState(pHouse).Flights.push_back(pTransport->UniqueID);
 					}
 					else if (pTransport->GetMapCoords().DistanceFrom(pDrop->MapCoords) <= 3.0)
 					{
@@ -2102,22 +2158,62 @@ namespace
 					}
 					else
 					{
-						IssueMoveOrder(pTransport, GetSafeAirHop(pHouse, pTransport, pDrop), 2.0);
+						// Flyers take the safe air lane; a burrowing transport goes straight under.
+						IssueMoveOrder(pTransport, underground ? pDrop : GetSafeAirHop(pHouse, pTransport, pDrop), 2.0);
 					}
 				}
 				else
 				{
-					// Dropped: the infantry attack the target, the transport flies home.
-					attackTargetGroup(infantry, pTarget);
+					// Dropped: specialists go into the target (capture, infiltrate), area damage
+					// soldiers deploy among the enemy, vehicle thieves are left to hunt vehicles, the
+					// rest attack; the transport flies home.
+					std::vector<DWORD> fighters;
+					int alive = 0;
+
+					for (const DWORD uid : infantry)
+					{
+						auto const pFoot = findOwnFoot(uid);
+						auto const pInf = abstract_cast<InfantryClass*>(pFoot);
+
+						if (!pFoot)
+							continue;
+
+						alive++;
+
+						if (pInf && SpecialistWorksBuilding(pInf->Type, pTarget->Type))
+							OrderFootToEnter(pFoot, pTarget);
+						else if (pInf && pInf->Type->VehicleThief)
+							continue;
+						else if (pInf && pInf->Type->Deployer && pInf->Type->DeployFire && !pInf->IsDeployed())
+						{
+							if (pFoot->GetMapCoords().DistanceFrom(pTarget->GetMapCoords()) <= 6.0)
+								pFoot->QueueMission(Mission::Unload, true);
+							else
+								fighters.push_back(uid);
+						}
+						else if (!(pInf && pInf->IsDeployed()))
+							fighters.push_back(uid);
+					}
+
+					attackTargetGroup(fighters, pTarget);
 
 					if (pTransport)
 					{
 						if (auto const pHome = FindCarrierHomeCell(pHouse, pTransport))
-							IssueMoveOrder(pTransport, GetSafeAirHop(pHouse, pTransport, pHome), 4.0);
+							IssueMoveOrder(pTransport, underground ? pHome : GetSafeAirHop(pHouse, pTransport, pHome), 4.0);
 					}
 
-					if (groupValue(infantry) <= 0)
+					// Captured (engineers) or the whole team gone.
+					if (pTarget->Owner && pHouse->IsAlliedWith(pTarget->Owner))
+					{
+						Debug::Log("[NeuralAI] House %d AirborneFront: %s at (%d,%d) captured, frame %d.\n", pHouse->ArrayIndex,
+							pTarget->Type->ID, plan.TargetCell.X, plan.TargetCell.Y, Unsorted::CurrentFrame);
+						finishPlan(NeuralPlanId::AirborneFront, true, false);
+					}
+					else if (alive == 0)
+					{
 						finishPlan(NeuralPlanId::AirborneFront, false, false);
+					}
 				}
 			}
 			else if (planReady(NeuralPlanId::AirborneFront))
@@ -2163,31 +2259,90 @@ namespace
 					}
 					else if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
 					{
-						isCandidate = pUnit->Type && pUnit->Type->Passengers >= 3 && IsAmphibiousOrAirTransport(pUnit->Type)
-							&& (pUnit->Type->JumpJet || pUnit->Type->ConsideredAircraft || pUnit->Type->MovementZone == MovementZone::Fly)
-							&& isFreeForPlan(pUnit) && !FindFerryTrip(uid);
+						// Flying transport vehicles, or burrowing ones (they travel unseen under the
+						// defenses, so a commando team needs no air lane).
+						const bool flying = pUnit->Type && IsAmphibiousOrAirTransport(pUnit->Type)
+							&& (pUnit->Type->JumpJet || pUnit->Type->ConsideredAircraft || pUnit->Type->MovementZone == MovementZone::Fly);
+
+						isCandidate = pUnit->Type && (flying || IsUndergroundTransportType(pUnit->Type))
+							&& pUnit->Type->Passengers >= (flying ? 3 : 1) && isFreeForPlan(pUnit) && !FindFerryTrip(uid);
 					}
 
 					if (isCandidate)
 						pTransport = pFoot;
 				}
 
+				// Raiders (C4 commandos and other elite soldiers) or specialists (engineers, spies)
+				// dropped behind the lines need no main attack to hide behind, but then only
+				// go for a building with no known defense around it. A specialist rides along only to
+				// a building it can work (capture, infiltrate); vehicle thieves only fill seats
+				// and hunt vehicles once down.
+				const int transportZone = pTransport ? ObjectZone(pTransport, MovementZone::Normal) : -1;
+				bool freeRaider = false;
+				std::vector<FootClass*> specialists;
+
+				for (auto const& [uid, pFoot] : ownFoots)
+				{
+					auto const pInf = abstract_cast<InfantryClass*>(pFoot);
+
+					if (!pInf || !pTransport || ObjectZone(pFoot, MovementZone::Normal) != transportZone)
+						continue;
+
+					if (IsRaiderInfantryType(pInf->Type) && isArmedGroundFoot(pFoot) && isFreeForPlan(pFoot))
+					{
+						freeRaider = true;
+					}
+					else if (IsSpecialistInfantryType(pInf->Type) && !macro.PlanMembers.contains(uid)
+						&& !(pInf->Type->Engineer && IsSpecOpsEngineerBusy(pHouse, uid)) && pFoot->GetHealthPercentage() >= 0.6
+						&& (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard))
+					{
+						specialists.push_back(pFoot);
+					}
+				}
+
+				std::sort(specialists.begin(), specialists.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
+
+				if (specialists.size() > 3)
+					specialists.resize(3);
+
+				// Specialists of ours that have a job inside this building.
+				auto specialistsFor = [&](BuildingTypeClass* pBldType)
+				{
+					int count = 0;
+
+					for (auto const pFoot : specialists)
+					{
+						if (SpecialistWorksBuilding(static_cast<InfantryClass*>(pFoot)->Type, pBldType))
+							count++;
+					}
+
+					return count;
+				};
+
 				BuildingClass* pTarget = nullptr;
 				CellClass* pDrop = nullptr;
 				int bestScore = INT_MIN;
 
-				if (mainAttack && pTransport)
+				if ((mainAttack || freeRaider || !specialists.empty()) && pTransport)
 				{
+					const int defensesAllowed = mainAttack ? 1 : 0;
+
 					for (auto const pBld : knownEnemyBuildingList)
 					{
 						if (!isKnownEnemyBuilding(pBld))
 							continue;
 
-						const int worth = valuableBuildingWorth(pBld->Type);
+						const int workers = specialistsFor(pBld->Type);
+
+						// Without a main attack only raiders or a specialist job justify the trip.
+						if (!mainAttack && !freeRaider && workers == 0)
+							continue;
+
+						const int worth = valuableBuildingWorth(pBld->Type) + workers * 150;
 						const CellStruct bc = pBld->GetMapCoords();
 
-						if (worth <= 0 || CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > 1
-							|| CountVisibleEnemyMobileAANear(pHouse, bc, 9.0) > 1)
+						if (worth <= 0 || CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > defensesAllowed
+							|| CountVisibleEnemyMobileAANear(pHouse, bc, 9.0) > defensesAllowed)
 						{
 							continue;
 						}
@@ -2208,26 +2363,74 @@ namespace
 					}
 				}
 
+				// Boarding order: raiders, the specialists with a job there, the other soldiers by
+				// UniqueID, then vehicle thieves in the seats left.
 				std::vector<FootClass*> infantry;
+				int raiders = 0;
+				int workersAboard = 0;
 
 				if (pTarget)
 				{
-					const int transportZone = ObjectZone(pTransport, MovementZone::Normal);
+					auto isRaider = [](FootClass* pFoot)
+					{
+						auto const pInf = abstract_cast<InfantryClass*>(pFoot);
+						return pInf && IsRaiderInfantryType(pInf->Type);
+					};
+
+					std::vector<FootClass*> soldiers;
 
 					for (auto const& [uid, pFoot] : ownFoots)
 					{
 						if (abstract_cast<InfantryClass*>(pFoot) && isArmedGroundFoot(pFoot) && isFreeForPlan(pFoot)
 							&& ObjectZone(pFoot, MovementZone::Normal) == transportZone)
 						{
-							infantry.push_back(pFoot);
+							soldiers.push_back(pFoot);
 						}
 					}
 
-					std::sort(infantry.begin(), infantry.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
-					infantry.resize(std::min<size_t>(infantry.size(), static_cast<size_t>(pTransport->GetTechnoType()->Passengers)));
+					std::sort(soldiers.begin(), soldiers.end(), [&](FootClass* a, FootClass* b)
+					{
+						const bool ra = isRaider(a);
+						const bool rb = isRaider(b);
+						return ra != rb ? ra : a->UniqueID < b->UniqueID;
+					});
+
+					const size_t capacity = static_cast<size_t>(std::max(0, pTransport->GetTechnoType()->Passengers));
+					auto const firstOther = std::find_if(soldiers.begin(), soldiers.end(), [&](FootClass* pFoot) { return !isRaider(pFoot); });
+					infantry.assign(soldiers.begin(), firstOther);
+
+					for (auto const pFoot : specialists)
+					{
+						if (SpecialistWorksBuilding(static_cast<InfantryClass*>(pFoot)->Type, pTarget->Type))
+							infantry.push_back(pFoot);
+					}
+
+					infantry.insert(infantry.end(), firstOther, soldiers.end());
+
+					for (auto const pFoot : specialists)
+					{
+						if (static_cast<InfantryClass*>(pFoot)->Type->VehicleThief)
+							infantry.push_back(pFoot);
+					}
+
+					if (infantry.size() > capacity)
+						infantry.resize(capacity);
+
+					for (auto const pFoot : infantry)
+					{
+						auto const pInf = static_cast<InfantryClass*>(pFoot);
+
+						if (isRaider(pFoot))
+							raiders++;
+						else if (SpecialistWorksBuilding(pInf->Type, pTarget->Type))
+							workersAboard++;
+					}
 				}
 
-				const int utility = (pTarget && infantry.size() >= 3) ? (320 + bestScore / 6) : -1000;
+				// A raid without a main attack must carry a raider or a specialist with a job there;
+				// one is a team by itself.
+				const bool teamReady = raiders > 0 || workersAboard > 0 || (mainAttack && infantry.size() >= 3);
+				const int utility = (pTarget && teamReady) ? (320 + bestScore / 6 + raiders * 150 + workersAboard * 120) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::AirborneFront, utility))
 				{
@@ -2235,6 +2438,10 @@ namespace
 					group.insert(group.end(), infantry.begin(), infantry.end());
 					startPlan(NeuralPlanId::AirborneFront, group, pTarget->GetMapCoords(), pDrop->MapCoords, pTarget->UniqueID, 4500);
 					planOf(NeuralPlanId::AirborneFront).AuxBaseline = 0;
+					Debug::Log("[NeuralAI] House %d AirborneFront: %s %u carries %d soldiers (%d raiders, %d specialists) to %s of house %d at (%d,%d)%s, frame %d.\n",
+						pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID, static_cast<int>(infantry.size()),
+						raiders, workersAboard, pTarget->Type->ID, pTarget->Owner ? pTarget->Owner->ArrayIndex : -1, pDrop->MapCoords.X,
+						pDrop->MapCoords.Y, mainAttack ? "" : " (stealth raid)", Unsorted::CurrentFrame);
 				}
 			}
 		}
@@ -3992,7 +4199,7 @@ namespace
 				{
 					if (auto const pFoot = findOwnFoot(uid))
 					{
-						if (auto const pInf = abstract_cast<InfantryClass*>(pFoot); pInf && pInf->Type->Infiltrate)
+						if (auto const pInf = abstract_cast<InfantryClass*>(pFoot); pInf && IsSpyInfantryType(pInf->Type))
 							spyLeft = true;
 					}
 				}
@@ -4058,7 +4265,7 @@ namespace
 					{
 						auto const pInf = abstract_cast<InfantryClass*>(pFoot);
 
-						if (pInf && pInf->Type->Infiltrate && isFreeForPlan(pInf) && ObjectZone(pInf, MovementZone::Normal) == ObjectZone(pTarget, MovementZone::Normal)
+						if (pInf && IsSpyInfantryType(pInf->Type) && isFreeForPlan(pInf) && ObjectZone(pInf, MovementZone::Normal) == ObjectZone(pTarget, MovementZone::Normal)
 							&& (group.empty() || uid < group.front()->UniqueID))
 						{
 							group.assign(1, pInf);

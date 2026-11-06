@@ -438,7 +438,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 			if (auto const pEIType = abstract_cast<InfantryTypeClass*>(pTType))
 			{
-				if (pEIType->Engineer || pEIType->Infiltrate || pEIType->C4 || pEIType->Ivan || pEIType->Deployer)
+				if (pEIType->Engineer || IsSpyInfantryType(pEIType) || pEIType->C4 || pEIType->Ivan || pEIType->Deployer)
 					sniperPoisonChaosAndTiberiumHealers++;
 			}
 

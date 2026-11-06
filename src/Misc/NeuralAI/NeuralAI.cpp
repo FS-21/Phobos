@@ -28,6 +28,7 @@
 #include <TerrainTypeClass.h>
 #include <UnitClass.h>
 #include <UnitTypeClass.h>
+#include <Ext/AircraftType/Body.h>
 #include <Ext/BuildingType/Body.h>
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
@@ -120,6 +121,7 @@ int NeuralAI::CurrentMeasuredFPS = 0;
 #include "NeuralAI.Plans.inl"
 #include "NeuralAI.MobileFactory.inl"
 #include "NeuralAI.SpecOps.inl"
+#include "NeuralAI.AirPatrol.inl"
 #include "NeuralAI.Micro.inl"
 #include "NeuralAI.Production.inl"
 #include "NeuralAI.Placement.inl"
