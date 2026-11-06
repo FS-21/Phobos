@@ -11,7 +11,8 @@ namespace
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
-		if (!pHouse || !pType)
+		// Repairs cost credits: none while broke (UpdateEconomyCrisis).
+		if (!pHouse || !pType || GetMacroState(pHouse).BrokeHoldActive)
 			return nullptr;
 
 		const CellStruct fc = pFoot->GetMapCoords();

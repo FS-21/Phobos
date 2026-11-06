@@ -315,7 +315,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return cell;
 		};
 
-		const CellStruct tetrisTopLeft = NeuralAI::FindSpatialTetrisBuildCell(pH, pBldType);
+		const CellStruct tetrisTopLeft = CachedTetrisBuildCell(pH, pBldType);
 		if (tetrisTopLeft != CellStruct::Empty)
 		{
 			const CellStruct standOffset
@@ -1153,13 +1153,32 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		const int idx = std::clamp(pOther->ArrayIndex, 0, 7);
-		int priority = pExt->NeuralAI_EstimatedEnemyThreat[idx];
+		int priority = pExt->NeuralAI_EstimatedEnemyThreat[idx] * GetMacroState(pHouse).FfaThreatScale[idx] / 100;
 
 		if (pHouse->WhoLastHurtMe == pOther->ArrayIndex)
 			priority += 250;
 
-		if (focusBias > 40 && pOther->OwnedBuildings <= 4)
-			priority += std::clamp(focusBias / 2, 40, 260);
+		// Finish a weak enemy: judged by the structures of it we know of (its real building count
+		// would see through the fog).
+		if (focusBias > 40)
+		{
+			int knownStructures = 0;
+
+			for (auto const pEnemyBld : pOther->Buildings)
+			{
+				if (pEnemyBld && pEnemyBld->IsAlive && !pEnemyBld->InLimbo && IsEnemyBuildingKnown(pHouse, pEnemyBld)
+					&& ++knownStructures > 4)
+				{
+					break;
+				}
+			}
+
+			if (knownStructures > 0 && knownStructures <= 4)
+				priority += std::clamp(focusBias / 2, 40, 260);
+		}
+
+		// Expert 3 (UpdateFfaTargets): busy, at our door, weakest, nearest.
+		priority += GetMacroState(pHouse).FfaEnemyBonus[idx];
 
 		if (priority > bestEnemyPriority)
 		{
@@ -1177,7 +1196,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Tactical Squad Micro: Retreat damaged expensive/Elite/Parasited vehicles to
 	// Service Depot, Chrono-Miner Warp escape, Beacons & Allied Base Rescue!
 	BuildingClass* pRepairDepot
-		= pHouse->UnitRepairStations.Count > 0 ? pHouse->UnitRepairStations.GetItem(0) : nullptr;
+		= (pHouse->UnitRepairStations.Count > 0 && !GetMacroState(pHouse).BrokeHoldActive) ? pHouse->UnitRepairStations.GetItem(0) : nullptr;
 
 	BuildingClass* pGrinder = pHouse->Grinders.Count > 0 ? pHouse->Grinders.GetItem(0) : nullptr;
 
@@ -2771,7 +2790,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					if (pUnit->CurrentMission != Mission::Move || (IsAITickWindow(60, 15)))
 					{
 						const CellStruct safeHomeCell
-							= NeuralAI::FindSpatialTetrisBuildCell(pHouse, pType->DeploysInto);
+							= CachedTetrisBuildCell(pHouse, pType->DeploysInto);
 
 						const CellStruct goalCoords = (safeHomeCell != CellStruct::Empty) ? safeHomeCell : homeCoords;
 
@@ -10492,7 +10511,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		const double sellDodgeThresh = std::clamp(0.09 + static_cast<double>(scores[54]) * 0.0001, 0.05, 0.16);
 		const double undeployThresh = std::clamp(0.14 + static_cast<double>(scores[54]) * 0.00012, 0.08, 0.22);
-		const int currentCredits = pHouse->Available_Money();
+		// Wrench repairs cost credits: none while broke (UpdateEconomyCrisis), they go to a harvester.
+		const int currentCredits = GetMacroState(pHouse).BrokeHoldActive ? 0 : pHouse->Available_Money();
 		const bool isLowPower = pHouse->HasLowPower();
 		bool hasPoweredDefense = false;
 

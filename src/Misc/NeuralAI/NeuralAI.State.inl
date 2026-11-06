@@ -257,8 +257,18 @@ namespace
 		int PeakHarvesters { 0 };
 		bool EconomyRecoveryActive { false };
 		int LastEconomyCrisisFrame { -100000 };
+		// Productions put on hold while broke (UpdateEconomyCrisis), by the UniqueID of their object.
+		std::vector<DWORD> BrokeHeldObjects {};
+		// Broke hold on: no repairs (wrench, service depot, shipyard) either.
+		bool BrokeHoldActive { false };
 		int LastBrokeSaleFrame { -100000 };
 		int LastHarvesterBalanceFrame { -100000 };
+		// Expert 3 (UpdateFfaTargets): main enemy choice bonus per enemy house index (0..7).
+		std::array<int, 8> FfaEnemyBonus {};
+		// Percent of an enemy's visible threat its main enemy priority keeps (Expert 3: 40 unless it is
+		// at our door, so the biggest visible base is not the default target of a free-for-all).
+		std::array<int, 8> FfaThreatScale { 100, 100, 100, 100, 100, 100, 100, 100 };
+		int LastFfaTargetFrame { -100000 };
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -413,8 +423,13 @@ namespace
 			this->PeakHarvesters = 0;
 			this->EconomyRecoveryActive = false;
 			this->LastEconomyCrisisFrame = -100000;
+			this->BrokeHeldObjects.clear();
+			this->BrokeHoldActive = false;
 			this->LastBrokeSaleFrame = -100000;
 			this->LastHarvesterBalanceFrame = -100000;
+			this->FfaEnemyBonus.fill(0);
+			this->FfaThreatScale.fill(100);
+			this->LastFfaTargetFrame = -100000;
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;
