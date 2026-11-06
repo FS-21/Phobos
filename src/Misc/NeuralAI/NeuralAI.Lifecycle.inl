@@ -680,6 +680,8 @@ void NeuralAI::InitTelemetrySharedMemory()
 		TelemetryJsonShmHandle
 			= CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, TelemetryJsonShmCapacity, jsonShmName);
 
+		TelemetryJsonShmFromTrainer = TelemetryJsonShmHandle && GetLastError() == ERROR_ALREADY_EXISTS;
+
 		if (TelemetryJsonShmHandle)
 		{
 			TelemetryJsonView = static_cast<uint8_t*>(

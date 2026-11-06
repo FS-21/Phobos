@@ -75,6 +75,10 @@ namespace
 	HANDLE TelemetryJsonShmHandle = NULL;
 
 	uint8_t* TelemetryJsonView = nullptr;
+
+	// The trainer created the JSON mapping before starting the game (it reads it). Otherwise
+	// (developer repro runs) the snapshot also goes to AI\train_telemetry_<slot>.json.
+	bool TelemetryJsonShmFromTrainer = false;
 } // namespace
 
 AIBackpackFile NeuralAI::Backpack = {};
