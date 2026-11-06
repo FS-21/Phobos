@@ -239,6 +239,11 @@ namespace
 		int ResourceClaimTier { -1 };
 		int ResourceClaimZone { -1 };
 		int LastResourceClaimFrame { -100000 };
+		// Tech tree progress (UpdateTechUnlocks): per building type index, how many types it would
+		// unlock as a missing prerequisite; whether one of those is buildable right now.
+		std::unordered_map<int, int> TechUnlocks {};
+		bool HasBuildableTechUnlock { false };
+		int TechUnlockFrame { -100000 };
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -382,6 +387,9 @@ namespace
 			this->ResourceClaimTier = -1;
 			this->ResourceClaimZone = -1;
 			this->LastResourceClaimFrame = -100000;
+			this->TechUnlocks.clear();
+			this->HasBuildableTechUnlock = false;
+			this->TechUnlockFrame = -100000;
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;

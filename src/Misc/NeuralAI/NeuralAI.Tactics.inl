@@ -557,6 +557,174 @@ namespace
 		}
 	}
 
+	bool CanBuildUnderHumanRules(HouseClass* pHouse, TechnoTypeClass* pType);
+
+	// A real structure a player can place: not a hidden switch, limbo upgrade or wall.
+	bool IsPlayerFacingBuilding(BuildingTypeClass* pType)
+	{
+		return pType && pType->Selectable && !pType->InvisibleInGame && !pType->Insignificant && !pType->Wall
+			&& !pType->Gate && pType->TechLevel >= 0 && pType->TechLevel <= 10;
+	}
+
+	// Building types that satisfy one prerequisite entry: the building itself (index >= 0), or the
+	// members of a generic prerequisite group (index < 0: Phobos [GenericPrerequisites] when
+	// defined, else the vanilla POWER / FACTORY / BARRACKS / RADAR / TECH / PROC lists).
+	void CollectPrerequisiteBuildings(int prereq, std::vector<int>& out, int depth = 0)
+	{
+		if (prereq >= 0)
+		{
+			out.push_back(prereq);
+			return;
+		}
+
+		if (depth > 4)
+			return;
+
+		auto const pRulesExt = RulesExt::Global();
+		const int group = -prereq;
+
+		if (pRulesExt && group < pRulesExt->GenericPrerequisites.Count && pRulesExt->GenericPrerequisites.GetItem(group).Count > 0)
+		{
+			for (const int member : pRulesExt->GenericPrerequisites.GetItem(group))
+				CollectPrerequisiteBuildings(member, out, depth + 1);
+
+			return;
+		}
+
+		auto const pRules = RulesClass::Instance;
+
+		if (!pRules)
+			return;
+
+		TypeList<int>* pList = nullptr;
+
+		switch (prereq)
+		{
+		case -1: pList = &pRules->PrerequisitePower; break;
+		case -2: pList = &pRules->PrerequisiteFactory; break;
+		case -3: pList = &pRules->PrerequisiteBarracks; break;
+		case -4: pList = &pRules->PrerequisiteRadar; break;
+		case -5: pList = &pRules->PrerequisiteTech; break;
+		case -6: pList = &pRules->PrerequisiteProc; break;
+		default: break;
+		}
+
+		if (pList)
+		{
+			for (const int member : *pList)
+				out.push_back(member);
+		}
+	}
+
+	// Tech tree progress like a human player (every 900 frames): for each building type we do not
+	// own, how many unit or building types of our tree (not buildable yet) list it, or a generic
+	// group it belongs to, among their missing prerequisites. Read from the prerequisite lists, nothing named, so captured ConYards that
+	// open foreign trees count the same way. HasBuildableTechUnlock: one of those unlockers can be
+	// built right now (its own prerequisites are met), so the tech tree is not done yet.
+	void UpdateTechUnlocks(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - macro.TechUnlockFrame < 900 && now >= macro.TechUnlockFrame)
+			return;
+
+		macro.TechUnlockFrame = now;
+		macro.TechUnlocks.clear();
+		macro.HasBuildableTechUnlock = false;
+
+		std::vector<int> satisfiers;
+
+		// Our tree: types our country owns, or the country of a ConYard we hold (a captured one
+		// opens its owners' tree), within our tech level. "Not buildable yet" is judged under human
+		// rules (CanBuildUnderHumanRules): for an AI house the game's CanBuild skips prerequisites
+		// and even ownership, so it calls nearly everything buildable.
+		DWORD ownerMask = (pHouse->Type && pHouse->Type->ArrayIndex >= 0 && pHouse->Type->ArrayIndex < 32)
+			? (1u << pHouse->Type->ArrayIndex)
+			: 0u;
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (pOwnBld && pOwnBld->IsAlive && pOwnBld->Type && pOwnBld->Type->ConstructionYard)
+				ownerMask |= pOwnBld->Type->OwnerFlags;
+		}
+
+		auto scanType = [&](TechnoTypeClass* pType)
+		{
+			if (!pType || pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel || !(pType->OwnerFlags & ownerMask)
+				|| CanBuildUnderHumanRules(pHouse, pType))
+			{
+				return;
+			}
+
+			std::vector<int> unlockers;
+
+			for (const int prereq : pType->Prerequisite)
+			{
+				const bool met = prereq >= 0 ? HouseExt::HasBuildingPrerequisite(pHouse, prereq)
+					: (RulesExt::Global() && -prereq < RulesExt::Global()->GenericPrerequisites.Count
+						&& RulesExt::Global()->GenericPrerequisites.GetItem(-prereq).Count > 0
+						? HouseExt::HasGenericPrerequisite(prereq, pHouse)
+						: false);
+
+				if (met)
+					continue;
+
+				satisfiers.clear();
+				CollectPrerequisiteBuildings(prereq, satisfiers);
+
+				// A vanilla group we already own a member of is met as well.
+				if (prereq < 0 && std::any_of(satisfiers.begin(), satisfiers.end(),
+						[pHouse](int b) { return HouseExt::HasBuildingPrerequisite(pHouse, b); }))
+				{
+					continue;
+				}
+
+				for (const int b : satisfiers)
+				{
+					if (b >= 0 && b < BuildingTypeClass::Array.Count && IsPlayerFacingBuilding(BuildingTypeClass::Array.GetItem(b)))
+						unlockers.push_back(b);
+				}
+			}
+
+			std::sort(unlockers.begin(), unlockers.end());
+			unlockers.erase(std::unique(unlockers.begin(), unlockers.end()), unlockers.end());
+
+			for (const int b : unlockers)
+				macro.TechUnlocks[b]++;
+		};
+
+		for (auto const pType : InfantryTypeClass::Array)
+			scanType(pType);
+
+		for (auto const pType : UnitTypeClass::Array)
+			scanType(pType);
+
+		for (auto const pType : AircraftTypeClass::Array)
+			scanType(pType);
+
+		for (auto const pType : BuildingTypeClass::Array)
+		{
+			if (IsPlayerFacingBuilding(pType))
+				scanType(pType);
+		}
+
+		for (auto const& [buildingIdx, count] : macro.TechUnlocks)
+		{
+			auto const pBld = BuildingTypeClass::Array.GetItem(buildingIdx);
+
+			if (count > 0 && IsPlayerFacingBuilding(pBld) && pHouse->CountOwnedNow(pBld) == 0
+				&& CanBuildUnderHumanRules(pHouse, pBld))
+			{
+				macro.HasBuildableTechUnlock = true;
+				break;
+			}
+		}
+	}
+
 	// Field scouting: one fast, cheap idle ground unit at a time visits the nearest free ore field
 	// (map-wide cache) not scouted in the last 5400 frames, so an enemy outpost there is known
 	// before an MCV is sent (free-field searches skip fields near known enemy structures).

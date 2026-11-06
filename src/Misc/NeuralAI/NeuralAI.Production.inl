@@ -211,6 +211,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Best ore field not mined yet (Expert 6 hoards: claims contested fields too).
 	UpdateResourceClaim(pHouse);
+
+	// What each missing building would unlock in the tech tree.
+	UpdateTechUnlocks(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -442,7 +445,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					}
 
 					tempMap.erase(it);
-					GetMacroState(pHouse).NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 750;
+					GetMacroState(pHouse).NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 1800;
 					Debug::Log("[NeuralAI] HarvesterRecovery: House %d selling temporary "
 							"recovery refinery %s at (%d,%d) after spawning FreeUnit "
 							"harvester.\n",
@@ -1618,11 +1621,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		// Harvester recovery through a refinery's FreeUnit (sell-and-replace or a temporary one) only
+		// up to one harvester per refinery: the war factory builds the second (economyUnitCap). Aiming
+		// at two kept the ConYard selling and rebuilding refineries all match (30 times in one test
+		// house), so radar, tech center and defenses never got their turn.
 		const bool wantsHarvesterRecoveryViaRefinery = (pHouse->ConYards.Count >= 1 && staticRefineriesCount >= 1
 			&& Unsorted::CurrentFrame >= GetMacroState(pHouse).NextHarvesterRecoveryFrame
 			&& GetMacroState(pHouse).TemporaryRecoveryRefineryPlacedFrame.empty()
 			&& (orphanRefineryZoneNeedsReplacement >= 0
-				|| (ownedHarvestersCount < staticRefineriesCount * 2
+				|| (ownedHarvestersCount < staticRefineriesCount
 					&& (ownedHarvestersCount == 0 || ownedWarFactories >= 1) && features[19] > 0
 					&& (money >= 900 || ownedHarvestersCount == 0))));
 		const bool hasActiveBuildingIncome = (ownedCashBuildings >= 1)
@@ -1721,7 +1728,35 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (!outpostNeedsIt || !saleCooldownOver || owned > factoryTypeCap)
 					continue;
+			}
 
+			// Tech before copies, as a human player: no second Barracks or War Factory of a type
+			// while a building that unlocks new units or buildings can be built right now, unless
+			// an outpost needs it. Airfields keep following the demand of the docking aircraft.
+			const bool isGroundFactoryOrBarracks = pBld->Factory == AbstractType::InfantryType
+				|| (pBld->Factory == AbstractType::UnitType && !pBld->Naval);
+
+			if (isGroundFactoryOrBarracks && owned >= 1 && GetMacroState(pHouse).HasBuildableTechUnlock)
+			{
+				const bool outpostNeedsCopy = (pBld->Factory == AbstractType::InfantryType)
+					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
+					: (forwardConYardNeedsWarFactory || frontNeedsWarFactory);
+
+				if (!outpostNeedsCopy)
+					continue;
+			}
+
+			// Tech tree unlockers (UpdateTechUnlocks): the first of a building that opens new units
+			// or buildings gets 300 + 120 per type it unlocks (up to 1400) once the core economy
+			// and production stand.
+			int techUnlockBonus = 0;
+
+			if (owned == 0 && hasCoreEconomyAndProduction)
+			{
+				auto const& unlocks = GetMacroState(pHouse).TechUnlocks;
+
+				if (auto const it = unlocks.find(pBld->ArrayIndex); it != unlocks.end() && it->second > 0)
+					techUnlockBonus = std::min(1400, 300 + 120 * it->second);
 			}
 
 			int score = 0;
@@ -2174,6 +2209,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (pHouse->NumConYards >= 2 && SlotGate(scores[82], 60, 82))
 					score += 250 + std::clamp(static_cast<int>(scores[82]) / 2, 0, 300);
 			}
+
+			score += techUnlockBonus;
 
 			if (GetMacroState(pHouse).ConsecutivePlacementFailures == 1 && pBld->BaseNormal
 				&& pBld->GetFoundationWidth() <= 2 && pBld->GetFoundationHeight(false) <= 2)
