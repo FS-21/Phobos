@@ -442,6 +442,124 @@ namespace
 	std::array<int, 32> LastHouseAdvantage {};
 	std::array<bool, 32> HasLastHouseAdvantage {};
 
+	// Context routing: a learned bias per (game phase, map class, expert) added to the expert
+	// selection on top of the global routing bias, so an expert that pays off on naval maps or
+	// late in the match is preferred there and not everywhere. Phases by game frame (15 logic
+	// frames per game second): early until 5400 (first 6 minutes: base, factories, first
+	// expansion), mid until 18000 (20 minutes: armies, expansions, first sieges), late after.
+	// Map classes as CurrentMapClass (0 small land, 1 large land, 2 naval).
+	// File: "PHOBOSCR", uint32 version 1, uint32 phases, uint32 classes, uint32 experts,
+	// int16 bias[phases][classes][experts]. Without it the term is 0 and the choice is unchanged.
+	constexpr int NumRoutingPhases = 3;
+	constexpr int RoutingMidPhaseFrame = 5400;
+	constexpr int RoutingLatePhaseFrame = 18000;
+	constexpr int ContextRoutingCap = 150;
+
+	struct NeuralContextRouting
+	{
+		bool Loaded { false };
+		std::array<std::array<std::array<int16_t, NeuralAI::NumSpecialists>, NumMapClasses>, NumRoutingPhases> Bias {};
+	};
+
+	NeuralContextRouting ContextRouting {};
+	NeuralContextRouting OpponentContextRouting {};
+
+	int RoutingPhase(int frame)
+	{
+		if (frame < RoutingMidPhaseFrame)
+			return 0;
+
+		return frame < RoutingLatePhaseFrame ? 1 : 2;
+	}
+
+	struct NeuralContextRoutingHeader
+	{
+		char Magic[8];
+		uint32_t Version;
+		uint32_t Phases;
+		uint32_t Classes;
+		uint32_t Experts;
+	};
+
+	constexpr size_t ContextRoutingFileSize = sizeof(NeuralContextRoutingHeader) + sizeof(NeuralContextRouting::Bias);
+
+	bool ParseContextRouting(const uint8_t* pData, size_t size, NeuralContextRouting& out)
+	{
+		NeuralContextRoutingHeader header {};
+
+		if (!pData || size < ContextRoutingFileSize)
+			return false;
+
+		std::memcpy(&header, pData, sizeof(header));
+
+		if (std::memcmp(header.Magic, "PHOBOSCR", 8) != 0 || header.Version != 1 || header.Phases != NumRoutingPhases
+			|| header.Classes != NumMapClasses || header.Experts != NeuralAI::NumSpecialists)
+		{
+			return false;
+		}
+
+		std::memcpy(out.Bias.data(), pData + sizeof(header), sizeof(out.Bias));
+		out.Loaded = true;
+
+		return true;
+	}
+
+	bool LoadContextRoutingFile(const char* pPath, NeuralContextRouting& out)
+	{
+		HANDLE hFile = CreateFileA(pPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+		if (hFile == INVALID_HANDLE_VALUE)
+			return false;
+
+		std::array<uint8_t, 256> buffer {};
+		DWORD read = 0;
+		const bool ok = ReadFile(hFile, buffer.data(), static_cast<DWORD>(buffer.size()), &read, NULL) != FALSE;
+
+		CloseHandle(hFile);
+
+		return ok && ParseContextRouting(buffer.data(), read, out);
+	}
+
+	// The trainer hands each match's tables over through named page-file mappings (RAM only).
+	bool LoadContextRoutingFromSharedMemory(const char* pName, NeuralContextRouting& out)
+	{
+		HANDLE hMapping = OpenFileMappingA(FILE_MAP_READ, FALSE, pName);
+
+		if (!hMapping)
+			return false;
+
+		bool ok = false;
+
+		if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, ContextRoutingFileSize)))
+		{
+			ok = ParseContextRouting(pView, ContextRoutingFileSize, out);
+			UnmapViewOfFile(pView);
+		}
+
+		CloseHandle(hMapping);
+
+		return ok;
+	}
+
+	// The table of the policy this house plays (the trainer gives challenger and opponent their own).
+	const NeuralContextRouting& ContextRoutingFor(const HouseClass* pHouse)
+	{
+		if (NeuralAI::HeadlessMode && OpponentContextRouting.Loaded)
+		{
+			auto const pExt = HouseExt::TryFetch(pHouse);
+
+			if (pExt && pExt->NeuralAI_PolicySlot == 1)
+				return OpponentContextRouting;
+		}
+
+		return ContextRouting;
+	}
+
+	// Expert choices and fair gain per game phase (trainer only, never read by AI decisions), so
+	// the trainer can credit the context routing per phase; the match gives the map class.
+	std::array<std::array<std::array<int, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> ExpertTicksByPhase {};
+	std::array<std::array<std::array<int, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> ExpertGainByPhase {};
+
 	void SampleExpertGains()
 	{
 		std::array<int64_t, 32> assets {};
@@ -493,6 +611,10 @@ namespace
 				const int expert = pExt ? std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1) : 0;
 				ExpertGain[idx][expert] = static_cast<int>(std::clamp<int64_t>(
 					static_cast<int64_t>(ExpertGain[idx][expert]) + advantage - LastHouseAdvantage[idx], INT_MIN / 2, INT_MAX / 2));
+
+				int& phaseGain = ExpertGainByPhase[idx][RoutingPhase(Unsorted::CurrentFrame)][expert];
+				phaseGain = static_cast<int>(std::clamp<int64_t>(
+					static_cast<int64_t>(phaseGain) + advantage - LastHouseAdvantage[idx], INT_MIN / 2, INT_MAX / 2));
 			}
 
 			LastHouseAdvantage[idx] = advantage;
