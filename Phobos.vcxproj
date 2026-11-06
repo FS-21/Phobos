@@ -367,6 +367,7 @@
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Internal.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Lifecycle.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Micro.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.MobileFactory.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Orders.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Placement.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Plans.inl" />

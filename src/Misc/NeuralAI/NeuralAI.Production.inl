@@ -3065,6 +3065,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (isKeyStructureDeployer && ownsUndeployedKeyStructure)
 			continue;
 
+		// A mobile factory is built only with a spot waiting for it (forward production, an island or
+		// expansion hub without that factory kind, a lost main factory, see NeuralAI.MobileFactory.inl);
+		// otherwise it would unfold next to its own maker.
+		const bool isMobileFactory = IsMobileFactoryUnit(pUnit);
+
+		if (isMobileFactory && !isUnitInProgress && !HouseWantsMobileFactory(pHouse, pUnit))
+			continue;
+
 		const bool isAmphibTransport = IsAmphibiousOrAirTransport(pUnit);
 
 		if (pUnit->Naval && !isAmphibTransport && pUnit->MovementZone != MovementZone::Amphibious
@@ -3384,6 +3392,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += scores[4] - (ownedTargetBld * 900);
 				}
+
+				// A mobile factory past the reason gate above has a spot waiting for it.
+				if (isMobileFactory)
+					score += 500;
 			}
 			else if (pUnit->Harvester || pUnit->ResourceGatherer)
 			{
