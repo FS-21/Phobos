@@ -590,6 +590,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	const int crawlBias
 		= static_cast<int>(policy.OutputBias[34]) + ((pExt && pExt->NeuralAI_ActiveExpert == 6) ? 220 : 0);
 
+	// Expert 1 (Spatial Base Architect) leads: the base is laid out like a careful player's (see the
+	// architect block before the candidate list).
+	const bool architectActive = pExt && pExt->NeuralAI_ActiveExpert == 1;
+
 	const int turretCreepBias
 		= static_cast<int>(policy.OutputBias[38]) + ((pExt && pExt->NeuralAI_ActiveExpert == 7) ? 220 : 0);
 
@@ -984,8 +988,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		&& (cheapestPowerPlantCost == INT_MAX
 			|| (pBuildingType->GetActualCost(pHouse) * 2 <= cheapestPowerPlantCost * 3
 				&& pBuildingType->GetFoundationWidth() * pBuildingType->GetFoundationHeight(false) <= cheapestPowerPlantArea));
+	// Under Expert 1 a stone only carries the crawl to free ore: with every field in reach taken it is
+	// a plain power plant grouped behind the core, never a plant marching to the enemy's door.
 	const bool isSteppingStoneExpander = pBuildingType->BaseNormal && isPowerPlantBld && isCheapStone && (pHouse->PowerOutput >= 150)
-		&& (nearestOreCell != CellStruct::Empty || crawlBias > 0);
+		&& (nearestOreCell != CellStruct::Empty || crawlBias > 0) && (!architectActive || hasUncolonizedOre);
 	const bool isRearProtected = !isNavalBld && !isResourceBld && !isCombatDefense && !isFactoryOrBarracks
 		&& !isTunnelBld && !isSupportRadiusBld && !isSteppingStoneExpander;
 
@@ -999,7 +1005,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	const int offensiveCrawlBias
 		= static_cast<int>(crawlPolicy.OutputBias[38]) + static_cast<int>(crawlPolicy.OutputBias[81]) / 2;
 	const int stoneIndex = isSteppingStoneExpander ? pHouse->CountOwnedNow(pBuildingType) : 0;
-	const bool stoneTowardEnemy = isSteppingStoneExpander && enemyTargetCell != CellStruct::Empty
+	const bool stoneTowardEnemy = isSteppingStoneExpander && enemyTargetCell != CellStruct::Empty && !architectActive
 		&& offensiveCrawlBias > -400
 		&& (!hasUncolonizedOre || (stoneIndex % 4) == 3 || (offensiveCrawlBias > 300 && (stoneIndex % 4) == 1));
 	// Several enemies (free-for-all): the offensive crawl heads for the nearest known enemy base,
@@ -1782,12 +1788,11 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// Expert 1 (Spatial Base Architect): while it leads, the base is laid out like a careful
 	// player's. Everything below is gated on it, so other experts place exactly as before.
 	// - factory exit lanes stay free and new buildings line up on 1-cell streets;
-	// - power plants group behind the core, away from the threat side;
+	// - power plants group behind the core, away from the threat side (stones only crawl to free ore);
 	// - defenses sit on the threat side of the refineries / ConYard / factories they cover,
 	//   spaced wider than the splash of the enemy weapons this house has seen;
 	// - with a known enemy superweapon, high-value buildings keep its strike radius apart;
 	// - a lost key building is rebuilt where it stood while that spot is safe.
-	const bool architectActive = pExt && pExt->NeuralAI_ActiveExpert == 1;
 	const bool isHighValueBld = !isCombatDefense && !isNavalBld && !isTunnelBld
 		&& (pBuildingType->ConstructionYard || isFactoryOrBarracks || pBuildingType->Radar || pBuildingType->HasSuperWeapon()
 			|| pBuildingType->GetActualCost(pHouse) >= 1000);
