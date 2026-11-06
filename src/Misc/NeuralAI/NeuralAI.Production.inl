@@ -223,6 +223,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Expert 3: which enemy to hit in a free-for-all.
 	UpdateFfaTargets(pHouse);
+
+	// Expert 2: which buildable types and missing tech answer the enemy army seen so far.
+	UpdateCounterComposition(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -1846,6 +1849,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (auto const it = unlocks.find(pBld->ArrayIndex); it != unlocks.end() && it->second > 0)
 					techUnlockBonus = std::min(1400, 300 + 120 * it->second);
+
+				// Expert 2: more when it opens a better counter of the seen enemy army.
+				techUnlockBonus += CounterUnlockBonusFor(pHouse, pBld);
 			}
 
 			// Branch choices (Prerequisite.Negative: two tech labs, rival defense lines): the first of
@@ -2218,7 +2224,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const int tierQualityBonus
 					= isUnarmedBunker ? 100 : std::min(950, (pBld->Cost / 2) + std::max(0, pBld->TechLevel) * 150);
 
-				score = (isPureAA ? scores[6] : std::max(static_cast<int>(scores[5]), 320)) + tierQualityBonus;
+				score = (isPureAA ? scores[6] : std::max(static_cast<int>(scores[5]), 320)) + tierQualityBonus
+					+ CounterBonusFor(pHouse, pBld);
 
 				if (islandHoldActive && (isPureAA ? islandHoldNeedsAA : !isUnarmedBunker))
 					score += 450;
@@ -3253,6 +3260,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						// in the War Factory / Shipyard!
 		}
 
+		// Expert 2: counters of the seen enemy army lead their factory (combat types only).
+		score += CounterBonusFor(pHouse, pUnit);
+
 		if (pUnit->Naval)
 		{
 			if (isAmphibTransport)
@@ -3707,6 +3717,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		score += CounterBonusFor(pHouse, pInf);
+
 		if (score > bestInfScore)
 		{
 			bestInfScore = score;
@@ -3872,7 +3884,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				: 0;
 
 			const int score = (pAir->Cost / 3) + (pAir->Strength / 2) + slotScore + crossFactionAirBonus + airTransBonus
-				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0);
+				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0) + CounterBonusFor(pHouse, pAir);
 
 			if (score > bestAirScore)
 			{

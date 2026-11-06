@@ -692,6 +692,7 @@ namespace
 
 		macro.TechUnlockFrame = now;
 		macro.TechUnlocks.clear();
+		macro.TechUnlockTypes.clear();
 		macro.HasBuildableTechUnlock = false;
 
 		std::vector<int> satisfiers;
@@ -755,7 +756,10 @@ namespace
 			unlockers.erase(std::unique(unlockers.begin(), unlockers.end()), unlockers.end());
 
 			for (const int b : unlockers)
+			{
 				macro.TechUnlocks[b]++;
+				macro.TechUnlockTypes[b].push_back(pType);
+			}
 		};
 
 		for (auto const pType : InfantryTypeClass::Array)
