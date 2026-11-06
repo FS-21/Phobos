@@ -214,6 +214,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// What each missing building would unlock in the tech tree.
 	UpdateTechUnlocks(pHouse);
+
+	// Highest unit tier allowed now (super units come step by step).
+	UpdateUnitTierCap(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -2903,6 +2906,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool isUnitInProgress
 			= (pUnit->ArrayIndex == inProgressUnitIdx || pUnit->ArrayIndex == inProgressNavalIdx);
+
+		if (!isUnitInProgress && !IsUnitTierAllowed(pHouse, pUnit))
+			continue;
+
 		const bool isMCV = (pUnit->DeploysInto && pUnit->DeploysInto->ConstructionYard);
 		if (isMCV)
 		{
@@ -3461,6 +3468,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			continue;
 
 		const bool isInfInProgress = (pInf->ArrayIndex == inProgressInfIdx);
+
+		if (!isInfInProgress && !IsUnitTierAllowed(pHouse, pInf))
+			continue;
+
 		const bool isIncomeRecoveryEng = (pInf->Engineer && neutralCashDerrickCount > ownedEngineers);
 		if (!hasActiveUnitIncome && !isInfInProgress && !isIncomeRecoveryEng && pInf->GetActualCost(pHouse) > money)
 			continue;
@@ -3678,6 +3689,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				continue;
 
 			const bool isAirInProgress = (pAir->ArrayIndex == inProgressAirIdx);
+
+			if (!isAirInProgress && !IsUnitTierAllowed(pHouse, pAir))
+				continue;
+
 			if (!hasActiveUnitIncome && !isAirInProgress && !pAir->Carryall && pAir->GetActualCost(pHouse) > money)
 				continue;
 

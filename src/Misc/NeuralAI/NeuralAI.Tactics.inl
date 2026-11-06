@@ -786,6 +786,87 @@ namespace
 		}
 	}
 
+	// Progressive unit tier (every 150 frames): super units come in step by step, as the tech a
+	// player can afford grows, even when the tech tree is complete from minute 0. The cap starts at
+	// TechLevel 2 and rises one level every 3 / 2 / 1 game minutes (Easy / Normal / Hard), up to the
+	// house's tech level (the map's limit), where it ends. It rises sooner when the house has seen an
+	// enemy unit of a higher tier (seen tier + 1, fog-fair) or has lost half its peak buildings.
+	void UpdateUnitTierCap(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - macro.LastUnitTierFrame < 150 && now >= macro.LastUnitTierFrame)
+			return;
+
+		macro.LastUnitTierFrame = now;
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || !pTechno->IsAlive || pTechno->InLimbo || !pTechno->Owner || pTechno->Owner == pHouse
+				|| pTechno->Owner->IsNeutral() || pHouse->IsAlliedWith(pTechno->Owner)
+				|| pTechno->WhatAmI() == AbstractType::Building || !IsCellVisibleToAI(pHouse, pTechno->GetCell()))
+			{
+				continue;
+			}
+
+			if (auto const pType = pTechno->GetTechnoType())
+				macro.SeenEnemyUnitTier = std::max(macro.SeenEnemyUnitTier, std::clamp(pType->TechLevel, 0, 10));
+		}
+
+		macro.PeakOwnedBuildings = std::max(macro.PeakOwnedBuildings, pHouse->OwnedBuildings);
+
+		const int diffIdx = static_cast<int>(pHouse->GetAIDifficultyIndex());
+		const int framesPerTier = 900 * (diffIdx >= 2 ? 3 : (diffIdx == 1 ? 2 : 1));
+		int cap = 2 + std::max(0, now) / framesPerTier;
+
+		if (macro.SeenEnemyUnitTier > 0)
+			cap = std::max(cap, macro.SeenEnemyUnitTier + 1);
+
+		if (macro.PeakOwnedBuildings >= 8 && pHouse->OwnedBuildings * 2 < macro.PeakOwnedBuildings)
+			cap++;
+
+		macro.UnitTierCap = std::min(cap, std::max(0, pHouse->TechLevel));
+	}
+
+	// Whether the progressive tier lets this house build this unit now. Economy and utility units are
+	// never held back (harvesters, MCVs and other deployers, engineers, unarmed transports, carryalls),
+	// and a very expensive unit counts as at least tier 7 whatever its TechLevel says.
+	bool IsUnitTierAllowed(HouseClass* pHouse, TechnoTypeClass* pType)
+	{
+		if (!pHouse || !pType)
+			return false;
+
+		auto const& macro = GetMacroState(pHouse);
+
+		if (macro.UnitTierCap >= std::max(0, pHouse->TechLevel))
+			return true;
+
+		if (auto const pUnitType = abstract_cast<UnitTypeClass*>(pType))
+		{
+			if (pUnitType->Harvester || pUnitType->ResourceGatherer || pUnitType->DeploysInto)
+				return true;
+		}
+
+		if (auto const pInfType = abstract_cast<InfantryTypeClass*>(pType); pInfType && pInfType->Engineer)
+			return true;
+
+		auto const pWeapon = pType->GetWeapon(0);
+		const bool armed = pWeapon && pWeapon->WeaponType && pWeapon->WeaponType->Damage > 0;
+
+		auto const pAirType = abstract_cast<AircraftTypeClass*>(pType);
+
+		if (!armed && (pType->Passengers > 0 || (pAirType && pAirType->Carryall)))
+			return true;
+
+		const int tier = std::max(std::clamp(pType->TechLevel, 0, 10), pType->Cost >= 2000 ? 7 : 0);
+
+		return tier <= macro.UnitTierCap;
+	}
+
 	// Field scouting: one fast, cheap idle ground unit at a time visits the nearest free ore field
 	// (map-wide cache) not scouted in the last 5400 frames, so an enemy outpost there is known
 	// before an MCV is sent (free-field searches skip fields near known enemy structures).
