@@ -2795,7 +2795,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		st.NextClearanceCheckFrame = Unsorted::CurrentFrame + 60;
 		st.IsBuildingRecoveryRefinery = false;
 		st.TargetRecoveryRefineryZone = -1;
-		st.NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 750;
+		st.NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 1800;
 		return true;
 	};
 
@@ -2954,7 +2954,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 			st.TemporaryRecoveryRefineryPlacedFrame[pBuilding->UniqueID] = Unsorted::CurrentFrame;
 			st.IsBuildingRecoveryRefinery = false;
 			st.TargetRecoveryRefineryZone = -1;
-			st.NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 750;
+			st.NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 1800;
 			Debug::Log("[NeuralAI] HarvesterRecovery: House %d placed temporary recovery "
 					"refinery %s at (%d,%d). Will sell once FreeUnit harvester spawns.\n",
 				pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y);
@@ -2964,10 +2964,20 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		return 2;
 	}
 
-	// Fallback for Refinery / Harvester Recovery when no free cell exists: sell
-	// an existing Refinery and place in its exact spot!
-	if (isStaticRefineryWithFreeHarv && tryReplaceExistingRefineryForHarvester())
+	// No cell for a refinery: count it for the widening reach (FindSpatialTetrisBuildCell) before
+	// anything else, or a map too rugged for the 10-cell reach never widens it.
+	if (pBuildingType->Refinery)
+		GetMacroState(pHouse).RefineryReachFailures++;
+
+	// Harvester recovery with no free cell: sell an existing refinery and place the new one in its
+	// exact spot. Only for a real recovery: as a fallback for any refinery that found no cell it
+	// sold and rebuilt the same refinery forever (one free harvester per round, the ConYard never
+	// free for anything else: Polar Oblong).
+	if (isStaticRefineryWithFreeHarv && GetMacroState(pHouse).IsBuildingRecoveryRefinery
+		&& tryReplaceExistingRefineryForHarvester())
+	{
 		return 1;
+	}
 
 	// Step 3: Surgical Space Clearance & Obsolete Structure Replacement when the
 	// base is congested and no free cell exists!
@@ -2975,9 +2985,6 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 	{
 		auto& st = GetMacroState(pHouse);
 		st.ConsecutivePlacementFailures++;
-
-		if (pBuildingType->Refinery)
-			st.RefineryReachFailures++;
 
 		const int cdUntil = Unsorted::CurrentFrame + std::min(3600, 300 * st.ConsecutivePlacementFailures);
 		st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex] = cdUntil;
