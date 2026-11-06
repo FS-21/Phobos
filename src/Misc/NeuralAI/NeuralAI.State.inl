@@ -252,6 +252,13 @@ namespace
 		int SeenEnemyUnitTier { 0 };
 		int PeakOwnedBuildings { 0 };
 		int LastUnitTierFrame { -100000 };
+		// Expert 0 (UpdateEconomyCrisis): economy peaks, raid recovery flag and action timers.
+		int PeakRefineries { 0 };
+		int PeakHarvesters { 0 };
+		bool EconomyRecoveryActive { false };
+		int LastEconomyCrisisFrame { -100000 };
+		int LastBrokeSaleFrame { -100000 };
+		int LastHarvesterBalanceFrame { -100000 };
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -402,6 +409,12 @@ namespace
 			this->SeenEnemyUnitTier = 0;
 			this->PeakOwnedBuildings = 0;
 			this->LastUnitTierFrame = -100000;
+			this->PeakRefineries = 0;
+			this->PeakHarvesters = 0;
+			this->EconomyRecoveryActive = false;
+			this->LastEconomyCrisisFrame = -100000;
+			this->LastBrokeSaleFrame = -100000;
+			this->LastHarvesterBalanceFrame = -100000;
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;
