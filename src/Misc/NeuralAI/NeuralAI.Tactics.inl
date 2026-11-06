@@ -566,10 +566,68 @@ namespace
 			&& !pType->Gate && pType->TechLevel >= 0 && pType->TechLevel <= 10;
 	}
 
+	void CollectPrerequisiteBuildings(int prereq, std::vector<int>& out, int depth);
+
+	// Branch choices (map-wide, computed once per match): building types that exclude another
+	// building through Prerequisite.Negative, or are excluded by one. Building one closes the other
+	// branch (two tech labs, rival defense lines), so a player picks by taste, not by a fixed rule.
+	std::vector<char> BranchChoiceBuildings;
+	int BranchChoiceSeed { 0 };
+	bool BranchChoiceReady { false };
+
+	bool IsBranchChoiceBuilding(int buildingIdx)
+	{
+		if (!BranchChoiceReady || BranchChoiceSeed != Game::Seed
+			|| static_cast<int>(BranchChoiceBuildings.size()) != BuildingTypeClass::Array.Count)
+		{
+			BranchChoiceReady = true;
+			BranchChoiceSeed = Game::Seed;
+			BranchChoiceBuildings.assign(static_cast<size_t>(BuildingTypeClass::Array.Count), 0);
+
+			std::vector<int> excluded;
+
+			for (auto const pType : BuildingTypeClass::Array)
+			{
+				auto const pTypeExt = pType ? TechnoTypeExt::Fetch(pType) : nullptr;
+
+				if (!pTypeExt || pTypeExt->Prerequisite_Negative.empty())
+					continue;
+
+				for (const int negative : pTypeExt->Prerequisite_Negative)
+				{
+					excluded.clear();
+					CollectPrerequisiteBuildings(negative, excluded, 0);
+
+					for (const int b : excluded)
+					{
+						if (b >= 0 && b < BuildingTypeClass::Array.Count)
+						{
+							BranchChoiceBuildings[static_cast<size_t>(b)] = 1;
+							BranchChoiceBuildings[static_cast<size_t>(pType->ArrayIndex)] = 1;
+						}
+					}
+				}
+			}
+		}
+
+		return buildingIdx >= 0 && buildingIdx < static_cast<int>(BranchChoiceBuildings.size())
+			&& BranchChoiceBuildings[static_cast<size_t>(buildingIdx)] != 0;
+	}
+
+	// Deterministic per-match taste in [-range, range] for one house and one type (game seed,
+	// house, type): the same all match, different between matches, identical on every client.
+	int MatchTaste(HouseClass* pHouse, int typeIdx, int range)
+	{
+		const uint32_t taste = (static_cast<uint32_t>(Game::Seed) * 2654435761u)
+			^ (static_cast<uint32_t>(pHouse->ArrayIndex + 1) * 40503u)
+			^ (static_cast<uint32_t>(typeIdx + 1) * 2246822519u);
+		return static_cast<int>(taste % static_cast<uint32_t>(2 * range + 1)) - range;
+	}
+
 	// Building types that satisfy one prerequisite entry: the building itself (index >= 0), or the
 	// members of a generic prerequisite group (index < 0: Phobos [GenericPrerequisites] when
 	// defined, else the vanilla POWER / FACTORY / BARRACKS / RADAR / TECH / PROC lists).
-	void CollectPrerequisiteBuildings(int prereq, std::vector<int>& out, int depth = 0)
+	void CollectPrerequisiteBuildings(int prereq, std::vector<int>& out, int depth)
 	{
 		if (prereq >= 0)
 		{
@@ -638,23 +696,26 @@ namespace
 
 		std::vector<int> satisfiers;
 
-		// Our tree: types our country owns, or the country of a ConYard we hold (a captured one
-		// opens its owners' tree), within our tech level. "Not buildable yet" is judged under human
-		// rules (CanBuildUnderHumanRules): for an AI house the game's CanBuild skips prerequisites
-		// and even ownership, so it calls nearly everything buildable.
-		DWORD ownerMask = (pHouse->Type && pHouse->Type->ArrayIndex >= 0 && pHouse->Type->ArrayIndex < 32)
-			? (1u << pHouse->Type->ArrayIndex)
-			: 0u;
+		// Our tree: types available to our country (HouseExt::IsAvailableToHouse: owners, required
+		// and forbidden houses, parent country), or owned by the country of a foreign ConYard we hold
+		// (a captured one opens its owners' tree), within our tech level. "Not buildable yet" is
+		// judged under human rules (CanBuildUnderHumanRules): for an AI house the game's CanBuild
+		// skips prerequisites and even ownership, so it calls nearly everything buildable.
+		DWORD foreignYardOwners = 0u;
 
 		for (auto const pOwnBld : pHouse->Buildings)
 		{
-			if (pOwnBld && pOwnBld->IsAlive && pOwnBld->Type && pOwnBld->Type->ConstructionYard)
-				ownerMask |= pOwnBld->Type->OwnerFlags;
+			if (pOwnBld && pOwnBld->IsAlive && pOwnBld->Type && pOwnBld->Type->ConstructionYard
+				&& !HouseExt::IsAvailableToHouse(pHouse, pOwnBld->Type))
+			{
+				foreignYardOwners |= pOwnBld->Type->OwnerFlags;
+			}
 		}
 
 		auto scanType = [&](TechnoTypeClass* pType)
 		{
-			if (!pType || pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel || !(pType->OwnerFlags & ownerMask)
+			if (!pType || pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel
+				|| !(HouseExt::IsAvailableToHouse(pHouse, pType) || (pType->OwnerFlags & foreignYardOwners))
 				|| CanBuildUnderHumanRules(pHouse, pType))
 			{
 				return;
@@ -674,7 +735,7 @@ namespace
 					continue;
 
 				satisfiers.clear();
-				CollectPrerequisiteBuildings(prereq, satisfiers);
+				CollectPrerequisiteBuildings(prereq, satisfiers, 0);
 
 				// A vanilla group we already own a member of is met as well.
 				if (prereq < 0 && std::any_of(satisfiers.begin(), satisfiers.end(),

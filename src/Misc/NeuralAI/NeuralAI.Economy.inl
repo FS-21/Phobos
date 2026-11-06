@@ -113,22 +113,60 @@ namespace
 		}
 	}
 
-	// Factory cap of one type by difficulty (Easy 4, Normal 10, Hard none). An outpost may still
-	// get its factory past the cap; one factory of that type is then sold here.
-	int GetFactoryTypeCap(HouseClass* pHouse)
+	// Factory cap by difficulty, per category: every barracks counts together, every ground war
+	// factory together (whatever faction it comes from, captured trees included), every shipyard
+	// together. Easy 4, Normal 10, Hard none. Airfields are not capped here: they follow the demand
+	// of the docking aircraft.
+	int GetFactoryCategoryCap(HouseClass* pHouse)
 	{
 		const int diffIdx = pHouse ? static_cast<int>(pHouse->GetAIDifficultyIndex()) : 0;
 		return diffIdx >= 2 ? 4 : (diffIdx == 1 ? 10 : INT_MAX);
 	}
 
-	// Sells one factory of a type above the difficulty cap (an outpost factory was placed past
-	// it). Never the newest one (the outpost's own) nor one whose sale would leave a ConYard
-	// (18 cells) or the newest forward stone of the offensive crawl (15 cells) without a factory
-	// of that type, or the next check would ask for it again; outside the main base first.
-	// Nothing qualifies: the extra factory stays. True when one was sold.
+	// 0 barracks, 1 ground war factory, 2 shipyard, -1 not capped. A deployed mobile factory (a unit
+	// that unfolds into a factory and can pack up again, UndeploysInto) is a unit, not a ConYard
+	// building: never counted nor sold here.
+	int FactoryCapCategory(BuildingTypeClass* pType)
+	{
+		if (!pType || pType->ConstructionYard || pType->UndeploysInto)
+			return -1;
+
+		if (pType->Factory == AbstractType::InfantryType)
+			return 0;
+
+		if (pType->Factory == AbstractType::UnitType)
+			return pType->Naval ? 2 : 1;
+
+		return -1;
+	}
+
+	// Living factories of a category that are not being sold (under construction included).
+	int CountFactoriesInCategory(HouseClass* pHouse, int category)
+	{
+		int count = 0;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && FactoryCapCategory(pBld->Type) == category
+				&& pBld->CurrentMission != Mission::Selling && pBld->QueuedMission != Mission::Selling)
+			{
+				count++;
+			}
+		}
+
+		return count;
+	}
+
+	// Sells one factory of a category above the difficulty cap (an outpost factory, or the first of
+	// a new factory type a captured tree opened, was placed past it). Never the newest one, never
+	// the last of its type (our own faction's factory stays, and so does the new one), never one
+	// whose sale would leave a ConYard (18 cells) or the newest forward stone of the offensive crawl
+	// (15 cells) without a factory of that category. The type with the most copies goes first,
+	// outside the main base before inside. Nothing qualifies: the extra factory stays.
+	// True when one was sold.
 	bool SellFactoriesOverDifficultyCap(HouseClass* pHouse, const CellStruct& frontStoneCell)
 	{
-		const int cap = GetFactoryTypeCap(pHouse);
+		const int cap = GetFactoryCategoryCap(pHouse);
 		if (!pHouse || cap == INT_MAX)
 			return false;
 
@@ -141,27 +179,28 @@ namespace
 			return std::max(std::abs(a.X - b.X), std::abs(a.Y - b.Y));
 		};
 
-		std::map<int, std::vector<BuildingClass*>> byType;
-		std::unordered_set<int> typesUnderConstruction;
+		std::array<std::vector<BuildingClass*>, 3> byCategory;
+		std::array<bool, 3> underConstruction {};
+		std::map<int, int> typeCounts;
 
 		for (auto const pBld : pHouse->Buildings)
 		{
-			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Factory == AbstractType::None
-				|| pBld->Type->ConstructionYard)
-			{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo)
 				continue;
-			}
 
-			if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
+			const int category = FactoryCapCategory(pBld->Type);
+
+			if (category < 0 || pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
 				continue;
 
 			if (pBld->CurrentMission == Mission::Construction || pBld->QueuedMission == Mission::Construction)
-				typesUnderConstruction.insert(pBld->Type->ArrayIndex);
+				underConstruction[category] = true;
 
-			byType[pBld->Type->ArrayIndex].push_back(pBld);
+			byCategory[category].push_back(pBld);
+			typeCounts[pBld->Type->ArrayIndex]++;
 		}
 
-		// Anchors that need a factory of each type nearby, with their radius.
+		// Anchors that need a factory of each category nearby, with their radius.
 		std::vector<std::pair<CellStruct, int>> anchors;
 
 		for (int i = 0; i < pHouse->ConYards.Count; ++i)
@@ -173,9 +212,11 @@ namespace
 		if (frontStoneCell != CellStruct::Empty)
 			anchors.emplace_back(frontStoneCell, 15);
 
-		for (auto& [typeIdx, blds] : byType)
+		for (int category = 0; category < 3; ++category)
 		{
-			if (static_cast<int>(blds.size()) <= cap || typesUnderConstruction.count(typeIdx))
+			auto const& blds = byCategory[category];
+
+			if (static_cast<int>(blds.size()) <= cap || underConstruction[category])
 				continue;
 
 			BuildingClass* pNewest = blds.front();
@@ -187,11 +228,14 @@ namespace
 			}
 
 			BuildingClass* pBest = nullptr;
-			int bestTier = INT_MAX;
+			int bestCopies = 0;
+			bool bestInMainBase = true;
 
 			for (auto const pBld : blds)
 			{
-				if (pBld == pNewest)
+				const int copies = typeCounts[pBld->Type->ArrayIndex];
+
+				if (pBld == pNewest || copies < 2)
 					continue;
 
 				const CellStruct bc = pBld->GetMapCoords();
@@ -223,18 +267,19 @@ namespace
 				if (soleCover)
 					continue;
 
-				const int tier = (mainBase != CellStruct::Empty && chebyshev(bc, mainBase) <= 20) ? 1 : 0;
+				const bool inMainBase = mainBase != CellStruct::Empty && chebyshev(bc, mainBase) <= 20;
 
-				if (tier < bestTier)
+				if (!pBest || copies > bestCopies || (copies == bestCopies && bestInMainBase && !inMainBase))
 				{
-					bestTier = tier;
 					pBest = pBld;
+					bestCopies = copies;
+					bestInMainBase = inMainBase;
 				}
 			}
 
 			if (pBest)
 			{
-				Debug::Log("[NeuralAI] House %d over the factory cap (%d) for %s: selling the one at (%d,%d).\n",
+				Debug::Log("[NeuralAI] House %d over the factory cap (%d per category): selling %s at (%d,%d).\n",
 					pHouse->ArrayIndex, cap, pBest->Type->ID, pBest->GetMapCoords().X, pBest->GetMapCoords().Y);
 
 				pBest->Sell(1);

@@ -1470,11 +1470,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// Outposts that may get a factory past the difficulty cap (SellFactoriesOverDifficultyCap
 		// then sells another of its type): a forward or island ConYard without one, or the front of
 		// an offensive crawl (newest forward stone) without one within 15 cells.
-		const int factoryTypeCap = GetFactoryTypeCap(pHouse);
+		const int factoryCategoryCap = GetFactoryCategoryCap(pHouse);
+		std::array<int, 3> factoryCategoryCounts {};
+
+		if (factoryCategoryCap != INT_MAX)
+		{
+			for (int category = 0; category < 3; ++category)
+				factoryCategoryCounts[category] = CountFactoriesInCategory(pHouse, category);
+		}
 		bool frontNeedsBarracks = false;
 		bool frontNeedsWarFactory = false;
 
-		if (factoryTypeCap != INT_MAX)
+		if (factoryCategoryCap != INT_MAX)
 		{
 			const CellStruct stoneCell = GetNewestOffensiveStoneCell(pHouse);
 
@@ -1713,20 +1720,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			const int owned = BuildingTypeExt::CountOwnedNowWithDeployOrUpgrade(pBld, pHouse);
 
-			// Difficulty cap on factories of one type (barracks, war factory, shipyard, airfield):
-			// 4 on Easy, 10 on Normal, none on Hard. An outpost needing a Barracks / War Factory
-			// gets one more (not within 4500 frames of the last such sale);
-			// SellFactoriesOverDifficultyCap then sells another of that type.
-			if (factoryTypeCap != INT_MAX && pBld->Factory != AbstractType::None && !pBld->ConstructionYard
-				&& owned >= factoryTypeCap)
+			// Difficulty cap per factory category (all barracks together, all ground war factories
+			// together, all shipyards together: 4 on Easy, 10 on Normal, none on Hard). At the cap one
+			// more is allowed for an outpost that needs it or for the first of a new type a captured
+			// tree opened (not within 4500 frames of the last cap sale); SellFactoriesOverDifficultyCap
+			// then sells a copy of that category.
+			if (const int category = FactoryCapCategory(pBld);
+				factoryCategoryCap != INT_MAX && category >= 0 && factoryCategoryCounts[category] >= factoryCategoryCap)
 			{
-				const bool outpostNeedsIt = (pBld->Factory == AbstractType::InfantryType)
+				const bool outpostNeedsIt = (category == 0)
 					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
-					: (pBld->Factory == AbstractType::UnitType && !pBld->Naval
-						&& (forwardConYardNeedsWarFactory || frontNeedsWarFactory));
+					: (category == 1 && (forwardConYardNeedsWarFactory || frontNeedsWarFactory));
+				const bool newFactoryType = owned == 0;
 				const bool saleCooldownOver = Unsorted::CurrentFrame - GetMacroState(pHouse).LastFactoryCapSaleFrame >= 4500;
 
-				if (!outpostNeedsIt || !saleCooldownOver || owned > factoryTypeCap)
+				if (!(outpostNeedsIt || newFactoryType) || !saleCooldownOver || factoryCategoryCounts[category] > factoryCategoryCap)
 					continue;
 			}
 
@@ -1758,6 +1766,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (auto const it = unlocks.find(pBld->ArrayIndex); it != unlocks.end() && it->second > 0)
 					techUnlockBonus = std::min(1400, 300 + 120 * it->second);
 			}
+
+			// Branch choices (Prerequisite.Negative: two tech labs, rival defense lines): the first of
+			// each gets a per-match taste of +-250, so one match goes one way and another the other,
+			// as players do. Deterministic in multiplayer (game seed, house, building).
+			if (owned == 0 && IsBranchChoiceBuilding(pBld->ArrayIndex))
+				techUnlockBonus += MatchTaste(pHouse, pBld->ArrayIndex, 250);
 
 			int score = 0;
 
