@@ -456,6 +456,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			pExt->LastObsoleteRefineryCheckFrame = Unsorted::CurrentFrame;
 			RecycleObsoleteRefineries(pHouse);
+			if (SellFactoriesOverDifficultyCap(pHouse, GetNewestOffensiveStoneCell(pHouse)))
+				GetMacroState(pHouse).LastFactoryCapSaleFrame = Unsorted::CurrentFrame;
 			RaiseEmergencyMoneyForRefinery(pHouse, ownedRefineries, ownedHarvestersCount, money);
 		}
 
@@ -1435,6 +1437,53 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			= (conYardWithNoRefineryInZone
 				|| (nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre <= 9))
 			&& ownedRefineries >= 1;
+
+		// Permanent refinery cap: a home cap, raised to 3 per ConYard while a new
+		// field waits for its refinery. Past it a refinery is only built as a Harvester Recovery
+		// refinery (replaced in place or sold once its FreeUnit spawns), never kept: a permanent
+		// one past the cap raised the harvester target (2 per refinery), which asked for another
+		// recovery refinery, and the chain filled the map with refineries far from any field.
+		const int homeRefineryCap = (reachedNewOreField || pHouse->NumConYards >= 2 || features[21] > 0
+										|| (hasTechCenter && money < 3000))
+			? std::max(6, pHouse->NumConYards + 4)
+			: 4;
+		const bool permanentRefineryCapReached = reachedNewOreField
+			? ownedRefineries >= std::max(homeRefineryCap, pHouse->NumConYards * 3)
+			: ownedRefineries >= homeRefineryCap;
+
+		// Outposts that may get a factory past the difficulty cap (SellFactoriesOverDifficultyCap
+		// then sells another of its type): a forward or island ConYard without one, or the front of
+		// an offensive crawl (newest forward stone) without one within 15 cells.
+		const int factoryTypeCap = GetFactoryTypeCap(pHouse);
+		bool frontNeedsBarracks = false;
+		bool frontNeedsWarFactory = false;
+
+		if (factoryTypeCap != INT_MAX)
+		{
+			const CellStruct stoneCell = GetNewestOffensiveStoneCell(pHouse);
+
+			if (stoneCell != CellStruct::Empty)
+			{
+				frontNeedsBarracks = true;
+				frontNeedsWarFactory = true;
+
+				for (auto const pOwnB : pHouse->Buildings)
+				{
+					if (!pOwnB || !pOwnB->IsAlive || pOwnB->InLimbo || !pOwnB->Type)
+						continue;
+
+					const CellStruct bc = pOwnB->GetMapCoords();
+					if (std::max(std::abs(bc.X - stoneCell.X), std::abs(bc.Y - stoneCell.Y)) > 15)
+						continue;
+
+					if (pOwnB->Type->Factory == AbstractType::InfantryType)
+						frontNeedsBarracks = false;
+					else if (pOwnB->Type->Factory == AbstractType::UnitType && !pOwnB->Type->Naval)
+						frontNeedsWarFactory = false;
+				}
+			}
+		}
+
 		const bool needsSteppingStoneCrawlToOre = (GetMacroState(pHouse).ConsecutivePlacementFailures < 2
 			&& nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre > 9
 			&& minAnchorDistToUncolonizedOre <= 60 && hasCoreEconomyAndProduction
@@ -1643,6 +1692,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			const int owned = BuildingTypeExt::CountOwnedNowWithDeployOrUpgrade(pBld, pHouse);
+
+			// Difficulty cap on factories of one type (barracks, war factory, shipyard, airfield):
+			// 4 on Easy, 10 on Normal, none on Hard. An outpost needing a Barracks / War Factory
+			// gets one more (not within 4500 frames of the last such sale);
+			// SellFactoriesOverDifficultyCap then sells another of that type.
+			if (factoryTypeCap != INT_MAX && pBld->Factory != AbstractType::None && !pBld->ConstructionYard
+				&& owned >= factoryTypeCap)
+			{
+				const bool outpostNeedsIt = (pBld->Factory == AbstractType::InfantryType)
+					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
+					: (pBld->Factory == AbstractType::UnitType && !pBld->Naval
+						&& (forwardConYardNeedsWarFactory || frontNeedsWarFactory));
+				const bool saleCooldownOver = Unsorted::CurrentFrame - GetMacroState(pHouse).LastFactoryCapSaleFrame >= 4500;
+
+				if (!outpostNeedsIt || !saleCooldownOver || owned > factoryTypeCap)
+					continue;
+			}
+
 			int score = 0;
 
 			if (pBld->PowerBonus > pBld->PowerDrain && !pBld->IsBaseDefense)
@@ -1721,12 +1788,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					&& pBld->UndeploysInto == nullptr && pBld->FreeUnit != nullptr
 					&& (pBld->FreeUnit->Harvester || pBld->FreeUnit->ResourceGatherer);
 				const bool isHarvRecoveryCandidate = spawnsFreeHarvester && wantsHarvesterRecoveryViaRefinery;
-				const int maxRefineries = (reachedNewOreField || pHouse->NumConYards >= 2 || features[21] > 0
-											|| (hasTechCenter && money < 3000))
-					? std::max(6, pHouse->NumConYards + 4)
-					: 4;
-
-				if (owned >= maxRefineries && !isHarvRecoveryCandidate)
+				if (permanentRefineryCapReached && !isHarvRecoveryCandidate)
 					continue;
 
 				score = scores[1] - owned * 480;
@@ -1735,7 +1797,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += 1200;
 				}
-				else if (reachedNewOreField && ownedRefineries < std::max(maxRefineries, pHouse->NumConYards * 3))
+				else if (reachedNewOreField && !permanentRefineryCapReached)
 				{
 					// AdvAI ShouldBuildRefinery: our BaseNormal chain or Expansion MCV reached
 					// a new Ore field! Claim it immediately! Like a forward Barracks, it is not
@@ -2172,7 +2234,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				&& pChosenBld->FreeUnit != nullptr
 				&& (pChosenBld->FreeUnit->Harvester || pChosenBld->FreeUnit->ResourceGatherer);
 			if (chosenIsStaticRefWithHarv && wantsHarvesterRecoveryViaRefinery
-				&& (!reachedNewOreField || orphanRefineryZoneNeedsReplacement >= 0) && staticRefineriesCount >= 1)
+				&& (!reachedNewOreField || orphanRefineryZoneNeedsReplacement >= 0 || permanentRefineryCapReached)
+				&& staticRefineriesCount >= 1)
 			{
 				GetMacroState(pHouse).IsBuildingRecoveryRefinery = true;
 				GetMacroState(pHouse).TargetRecoveryRefineryZone = orphanRefineryZoneNeedsReplacement;

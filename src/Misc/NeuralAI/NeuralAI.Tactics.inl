@@ -404,6 +404,23 @@ namespace
 		macro.OffensiveStones = std::move(alive);
 	}
 
+	// Cell of the newest forward stone of the offensive crawl still standing (the front), or Empty.
+	CellStruct GetNewestOffensiveStoneCell(HouseClass* pHouse)
+	{
+		auto const& stones = GetMacroState(pHouse).OffensiveStones;
+
+		if (stones.empty())
+			return CellStruct::Empty;
+
+		for (auto const pOwnB : pHouse->Buildings)
+		{
+			if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->UniqueID == stones.back())
+				return pOwnB->GetMapCoords();
+		}
+
+		return CellStruct::Empty;
+	}
+
 	// Field scouting: one fast, cheap idle ground unit at a time visits the nearest free ore field
 	// (map-wide cache) not scouted in the last 5400 frames, so an enemy outpost there is known
 	// before an MCV is sent (free-field searches skip fields near known enemy structures).

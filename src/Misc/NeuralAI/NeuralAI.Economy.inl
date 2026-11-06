@@ -102,6 +102,138 @@ namespace
 		}
 	}
 
+	// Factory cap of one type by difficulty (Easy 4, Normal 10, Hard none). An outpost may still
+	// get its factory past the cap; one factory of that type is then sold here.
+	int GetFactoryTypeCap(HouseClass* pHouse)
+	{
+		const int diffIdx = pHouse ? static_cast<int>(pHouse->GetAIDifficultyIndex()) : 0;
+		return diffIdx >= 2 ? 4 : (diffIdx == 1 ? 10 : INT_MAX);
+	}
+
+	// Sells one factory of a type above the difficulty cap (an outpost factory was placed past
+	// it). Never the newest one (the outpost's own) nor one whose sale would leave a ConYard
+	// (18 cells) or the newest forward stone of the offensive crawl (15 cells) without a factory
+	// of that type, or the next check would ask for it again; outside the main base first.
+	// Nothing qualifies: the extra factory stays. True when one was sold.
+	bool SellFactoriesOverDifficultyCap(HouseClass* pHouse, const CellStruct& frontStoneCell)
+	{
+		const int cap = GetFactoryTypeCap(pHouse);
+		if (!pHouse || cap == INT_MAX)
+			return false;
+
+		const CellStruct mainBase = (pHouse->BaseSpawnCell != CellStruct::Empty)
+			? pHouse->BaseSpawnCell
+			: (pHouse->ConYards.Count > 0 ? pHouse->ConYards.GetItem(0)->GetMapCoords() : CellStruct::Empty);
+
+		auto chebyshev = [](const CellStruct& a, const CellStruct& b)
+		{
+			return std::max(std::abs(a.X - b.X), std::abs(a.Y - b.Y));
+		};
+
+		std::map<int, std::vector<BuildingClass*>> byType;
+		std::unordered_set<int> typesUnderConstruction;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Factory == AbstractType::None
+				|| pBld->Type->ConstructionYard)
+			{
+				continue;
+			}
+
+			if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
+				continue;
+
+			if (pBld->CurrentMission == Mission::Construction || pBld->QueuedMission == Mission::Construction)
+				typesUnderConstruction.insert(pBld->Type->ArrayIndex);
+
+			byType[pBld->Type->ArrayIndex].push_back(pBld);
+		}
+
+		// Anchors that need a factory of each type nearby, with their radius.
+		std::vector<std::pair<CellStruct, int>> anchors;
+
+		for (int i = 0; i < pHouse->ConYards.Count; ++i)
+		{
+			if (auto const pCY = pHouse->ConYards.GetItem(i); pCY && pCY->IsAlive && !pCY->InLimbo)
+				anchors.emplace_back(pCY->GetMapCoords(), 18);
+		}
+
+		if (frontStoneCell != CellStruct::Empty)
+			anchors.emplace_back(frontStoneCell, 15);
+
+		for (auto& [typeIdx, blds] : byType)
+		{
+			if (static_cast<int>(blds.size()) <= cap || typesUnderConstruction.count(typeIdx))
+				continue;
+
+			BuildingClass* pNewest = blds.front();
+
+			for (auto const pBld : blds)
+			{
+				if (pBld->UniqueID > pNewest->UniqueID)
+					pNewest = pBld;
+			}
+
+			BuildingClass* pBest = nullptr;
+			int bestTier = INT_MAX;
+
+			for (auto const pBld : blds)
+			{
+				if (pBld == pNewest)
+					continue;
+
+				const CellStruct bc = pBld->GetMapCoords();
+				bool soleCover = false;
+
+				for (auto const& [anchorCell, radius] : anchors)
+				{
+					if (chebyshev(bc, anchorCell) > radius)
+						continue;
+
+					bool otherCovers = false;
+
+					for (auto const pOther : blds)
+					{
+						if (pOther != pBld && chebyshev(pOther->GetMapCoords(), anchorCell) <= radius)
+						{
+							otherCovers = true;
+							break;
+						}
+					}
+
+					if (!otherCovers)
+					{
+						soleCover = true;
+						break;
+					}
+				}
+
+				if (soleCover)
+					continue;
+
+				const int tier = (mainBase != CellStruct::Empty && chebyshev(bc, mainBase) <= 20) ? 1 : 0;
+
+				if (tier < bestTier)
+				{
+					bestTier = tier;
+					pBest = pBld;
+				}
+			}
+
+			if (pBest)
+			{
+				Debug::Log("[NeuralAI] House %d over the factory cap (%d) for %s: selling the one at (%d,%d).\n",
+					pHouse->ArrayIndex, cap, pBest->Type->ID, pBest->GetMapCoords().X, pBest->GetMapCoords().Y);
+
+				pBest->Sell(1);
+				return true; // one per check
+			}
+		}
+
+		return false;
+	}
+
 	// Emergency cash recovery (AdvAI_Raise_Money): ONLY when the AI has 0
 	// refineries, 0 harvesters, and < 1000 credits
 	void RaiseEmergencyMoneyForRefinery(HouseClass* pHouse, int ownedRefineries, int ownedEconomyUnits, int money)
