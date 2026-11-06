@@ -7,6 +7,7 @@ namespace
 	// and tech level allow, prerequisites aside). Cached per house for 1800 frames.
 	std::array<int, 32> AirTechCheckFrame {};
 	std::array<bool, 32> AirTechPossible {};
+	int AirTechMatchSerial { -1 };
 
 	bool HouseCanEverFieldAircraft(HouseClass* pHouse)
 	{
@@ -16,6 +17,12 @@ namespace
 			return true;
 
 		const int now = Unsorted::CurrentFrame;
+
+		if (AirTechMatchSerial != NeuralMatchSerial)
+		{
+			AirTechMatchSerial = NeuralMatchSerial;
+			AirTechCheckFrame.fill(0);
+		}
 
 		if (AirTechCheckFrame[idx] > 0 && now >= AirTechCheckFrame[idx] && now - AirTechCheckFrame[idx] < 1800)
 			return AirTechPossible[idx];
