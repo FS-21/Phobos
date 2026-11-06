@@ -2952,8 +2952,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (isKeyStructureDeployer && ownsUndeployedKeyStructure)
 			continue;
 
-		// A mobile factory is built only with a reason (an outpost lacking that factory kind, or a far
-		// front, see NeuralAI.MobileFactory.inl); otherwise it would unfold next to its own maker.
+		// A mobile factory is built only with a spot waiting for it (forward production, an island or
+		// expansion hub without that factory kind, a lost main factory, see NeuralAI.MobileFactory.inl);
+		// otherwise it would unfold next to its own maker.
 		const bool isMobileFactory = IsMobileFactoryUnit(pUnit);
 
 		if (isMobileFactory && !isUnitInProgress && !HouseWantsMobileFactory(pHouse, pUnit))
