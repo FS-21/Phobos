@@ -710,6 +710,12 @@ void NeuralAI::OnScenarioStart()
 	for (auto& ticks : ExpertTicks)
 		ticks.fill(0);
 
+	for (auto& gains : ExpertGain)
+		gains.fill(0);
+
+	LastHouseAdvantage.fill(0);
+	HasLastHouseAdvantage.fill(false);
+
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;
 	MapClassApplied = false;
@@ -996,7 +1002,33 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 			}
 
 			const int arch = std::clamp(pExt->NeuralAI_Archetype, 0, 7);
-			const int exp = std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1);
+			// Fair credit: the result is shared by every expert that ran for at least 5% of this
+			// house's expert choices, in proportion (twice its share, up to the full delta), not
+			// given whole to the expert in charge when the match ended. The most used one carries
+			// the archetype memory and the LoRA step.
+			std::array<int, NeuralAI::NumSpecialists> ticks {};
+			int totalTicks = 0;
+
+			if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+				ticks = ExpertTicks[pHouse->ArrayIndex];
+
+			for (const int t : ticks)
+				totalTicks += t;
+
+			if (totalTicks <= 0)
+			{
+				ticks.fill(0);
+				ticks[std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1)] = 1;
+				totalTicks = 1;
+			}
+
+			int exp = 0;
+
+			for (int e = 1; e < NeuralAI::NumSpecialists; ++e)
+			{
+				if (ticks[e] > ticks[exp])
+					exp = e;
+			}
 
 			const int fastBonus
 				= (!NeuralAI::MatchEndStalemate && won && Unsorted::CurrentFrame > 0 && Unsorted::CurrentFrame <= 18000)
@@ -1007,24 +1039,33 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 			// play long games (expansion, crawl, siege) are not penalized for ending on the timer.
 			const int delta = NeuralAI::MatchEndStalemate ? (won ? 3 : -3) : (won ? (12 + fastBonus) : -6);
 
-			uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + arch * 10 + exp) % 512);
+			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+			{
+				if (ticks[e] * 20 < totalTicks)
+					continue;
 
-			if (NeuralAI::Backpack.NumEntries < 512)
-				NeuralAI::Backpack.NumEntries = std::max(NeuralAI::Backpack.NumEntries, entryIdx + 1);
+				const int expertDelta = std::clamp((delta * 2 * ticks[e] + (delta >= 0 ? totalTicks / 2 : -totalTicks / 2)) / totalTicks,
+					-std::abs(delta), std::abs(delta));
+				const uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + arch * 10 + e) % 512);
 
-			auto& entry = NeuralAI::Backpack.Entries[entryIdx];
+				if (NeuralAI::Backpack.NumEntries < 512)
+					NeuralAI::Backpack.NumEntries = std::max(NeuralAI::Backpack.NumEntries, entryIdx + 1);
 
-			entry.StateClusterHash = (static_cast<uint32_t>(pHouse->SideIndex) << 16) | static_cast<uint32_t>(arch << 8)
-				| static_cast<uint32_t>(exp);
+				auto& entry = NeuralAI::Backpack.Entries[entryIdx];
 
-			entry.ArchetypeScoreDelta[arch] = ClampInt16(entry.ArchetypeScoreDelta[arch] + delta);
+				entry.StateClusterHash = (static_cast<uint32_t>(pHouse->SideIndex) << 16) | static_cast<uint32_t>(arch << 8)
+					| static_cast<uint32_t>(e);
 
-			if (exp < 8)
-				entry.ExpertScoreDelta[exp] = ClampInt16(entry.ExpertScoreDelta[exp] + delta);
-			else
-				entry.BuildCategoryDelta[14 + (exp - 8)] = ClampInt16(entry.BuildCategoryDelta[14 + (exp - 8)] + delta);
+				if (e == exp)
+					entry.ArchetypeScoreDelta[arch] = ClampInt16(entry.ArchetypeScoreDelta[arch] + delta);
 
-			entry.VisitCount++;
+				if (e < 8)
+					entry.ExpertScoreDelta[e] = ClampInt16(entry.ExpertScoreDelta[e] + expertDelta);
+				else
+					entry.BuildCategoryDelta[14 + (e - 8)] = ClampInt16(entry.BuildCategoryDelta[14 + (e - 8)] + expertDelta);
+
+				entry.VisitCount++;
+			}
 
 			// Update LoRA rank-16 adapter weights deterministically
 			const int loraIdx = (arch * 64 + exp * 8) % (256 * 16);

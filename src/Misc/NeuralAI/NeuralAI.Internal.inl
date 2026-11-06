@@ -433,6 +433,73 @@ namespace
 	// trainer can measure how long each expert runs and how the house does while it runs.
 	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> ExpertTicks {};
 
+	// Fair credit per expert (trainer only, never read by AI decisions): every 60 frames the change
+	// of each house's advantage (value of its units, buildings and half its money, minus the
+	// average of its living enemies', in tens of credits) goes to the expert running at that
+	// moment, so an expert is judged by what happened while it ran, not by who was in charge
+	// when the match ended.
+	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> ExpertGain {};
+	std::array<int, 32> LastHouseAdvantage {};
+	std::array<bool, 32> HasLastHouseAdvantage {};
+
+	void SampleExpertGains()
+	{
+		std::array<int64_t, 32> assets {};
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || !pTechno->IsAlive || !pTechno->Owner || pTechno->Owner->ArrayIndex < 0 || pTechno->Owner->ArrayIndex >= 32)
+				continue;
+
+			if (auto const pType = pTechno->GetTechnoType())
+				assets[pTechno->Owner->ArrayIndex] += std::max(0, static_cast<int>(pType->Cost));
+		}
+
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (pHouse && pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+				assets[pHouse->ArrayIndex] += std::max(0, static_cast<int>(pHouse->Available_Money())) / 2;
+		}
+
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32 || pHouse->IsNeutral() || pHouse->Defeated)
+				continue;
+
+			const int idx = pHouse->ArrayIndex;
+			int64_t enemySum = 0;
+			int enemies = 0;
+
+			for (auto const pOther : HouseClass::Array)
+			{
+				if (pOther && pOther != pHouse && !pOther->IsNeutral() && !pOther->Defeated && !pHouse->IsAlliedWith(pOther)
+					&& pOther->ArrayIndex >= 0 && pOther->ArrayIndex < 32)
+				{
+					enemySum += assets[pOther->ArrayIndex];
+					enemies++;
+				}
+			}
+
+			const int advantage = static_cast<int>(std::clamp<int64_t>(
+				(assets[idx] - (enemies > 0 ? enemySum / enemies : 0)) / 10, -2000000, 2000000));
+			int ticksSum = 0;
+
+			for (const int t : ExpertTicks[idx])
+				ticksSum += t;
+
+			if (HasLastHouseAdvantage[idx] && ticksSum > 0)
+			{
+				auto const pExt = HouseExt::Fetch(pHouse);
+				const int expert = pExt ? std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1) : 0;
+				ExpertGain[idx][expert] = static_cast<int>(std::clamp<int64_t>(
+					static_cast<int64_t>(ExpertGain[idx][expert]) + advantage - LastHouseAdvantage[idx], INT_MIN / 2, INT_MAX / 2));
+			}
+
+			LastHouseAdvantage[idx] = advantage;
+			HasLastHouseAdvantage[idx] = true;
+		}
+	}
+
 	void AddSectionTime(int houseIndex, NeuralSection section, double ms)
 	{
 		if (houseIndex < 0 || houseIndex >= 32)
