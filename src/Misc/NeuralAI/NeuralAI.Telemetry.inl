@@ -811,19 +811,36 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 			pHdr[0] = nextOdd + 1u;
 		}
-		else
+
+		// No trainer reading the mapping (developer repro runs): the same JSON goes to the
+		// instance's AI folder, written to a temporary file first and swapped in, so a reader
+		// never sees half a snapshot.
+		if (!TelemetryJsonView || !TelemetryJsonShmFromTrainer)
 		{
 			char jsonPath[MAX_PATH];
+			char tmpPath[MAX_PATH];
 
 			std::snprintf(jsonPath, sizeof(jsonPath), "AI\\train_telemetry_%d.json", NeuralAI::TrainSlotIndex);
+			std::snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", jsonPath);
+
+			static bool loggedFileTelemetry = false;
+
+			if (!loggedFileTelemetry)
+			{
+				loggedFileTelemetry = true;
+				Debug::Log("[NeuralAI] No trainer telemetry mapping: writing %s every 60 frames.\n", jsonPath);
+			}
 
 			FILE* fp = nullptr;
 
-			if (fopen_s(&fp, jsonPath, "wb") == 0 && fp)
+			if (fopen_s(&fp, tmpPath, "wb") == 0 && fp)
 			{
-				std::fwrite(jsonBuf.data(), 1, jsonBuf.size(), fp);
+				const bool written = std::fwrite(jsonBuf.data(), 1, jsonBuf.size(), fp) == jsonBuf.size();
 
 				std::fclose(fp);
+
+				if (!written || !MoveFileExA(tmpPath, jsonPath, MOVEFILE_REPLACE_EXISTING))
+					DeleteFileA(tmpPath);
 			}
 		}
 	}
