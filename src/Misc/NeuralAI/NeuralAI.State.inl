@@ -131,6 +131,20 @@ namespace
 		int Frame { 0 };
 	};
 
+	// Where a packed mobile factory is heading (NeuralAI.MobileFactory.inl): the spot, why, when it
+	// was last picked, when the trip started, the closest it got and when (a trip that stops getting
+	// closer ends in a deploy on the spot), and the unpack orders given where it stands.
+	struct NeuralMobileFactoryGoal
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Reason { 0 };
+		int PickFrame { -100000 };
+		int StartFrame { -1 };
+		int BestDist { INT_MAX };
+		int ProgressFrame { 0 };
+		int DeployTries { 0 };
+	};
+
 	struct NeuralGroundLossTrack
 	{
 		DWORD ID { 0 };
@@ -330,6 +344,15 @@ namespace
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoostUntilFrame {};
 		std::map<int, int> SuperReadySinceFrame {};
 
+		// Mobile factories (NeuralAI.MobileFactory.inl): the trip of each packed one (by unit UniqueID),
+		// since when each deployed one stands (by building UniqueID), the last spot one was driven out
+		// of, and the cached build answers (by unit type index: frame, wanted). Keyed lookups only.
+		std::unordered_map<DWORD, NeuralMobileFactoryGoal> MobileFactoryGoals {};
+		std::unordered_map<DWORD, int> MobileFactorySince {};
+		CellStruct MobileFactoryAvoidCell { CellStruct::Empty };
+		int MobileFactoryAvoidFrame { -100000 };
+		std::unordered_map<int, std::pair<int, bool>> MobileFactoryWanted {};
+
 		void ClearClearanceReservation()
 		{
 			this->PendingClearanceCell = CellStruct::Empty;
@@ -450,6 +473,11 @@ namespace
 			this->PlanBoost.fill(0);
 			this->PlanBoostUntilFrame.fill(0);
 			this->SuperReadySinceFrame.clear();
+			this->MobileFactoryGoals.clear();
+			this->MobileFactorySince.clear();
+			this->MobileFactoryAvoidCell = CellStruct::Empty;
+			this->MobileFactoryAvoidFrame = -100000;
+			this->MobileFactoryWanted.clear();
 		}
 	};
 
