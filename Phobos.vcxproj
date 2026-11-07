@@ -374,6 +374,7 @@
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Plans.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.SpecOps.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.AirPatrol.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Scouting.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Production.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.RouteHeat.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.State.inl" />

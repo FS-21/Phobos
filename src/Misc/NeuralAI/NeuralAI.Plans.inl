@@ -2657,35 +2657,6 @@ namespace
 			macro.DelayedRetreats = std::move(still);
 		}
 
-		// ---------------------------------------------------------------- Point 35: periodic scouting
-		// Every 3600 +- 900 frames (drawn per match) one cheap fast idle unit runs to the known
-		// enemy base to refresh what we know of its army and tech (fog-fair: it has to see it).
-		if (knownEnemyCentroid != CellStruct::Empty && Unsorted::CurrentFrame >= macro.NextScoutRunFrame)
-		{
-			macro.NextScoutRunFrame = Unsorted::CurrentFrame + 2700 + StyleJitter(houseIdx, 2000, 3600, 1801);
-
-			std::vector<FootClass*> idle = collectIdleGround(false);
-			FootClass* pScout = nullptr;
-
-			for (auto const pFoot : idle)
-			{
-				auto const pType = pFoot->GetTechnoType();
-
-				if (pType->Cost <= 600 && !isElite(pFoot)
-					&& (!pScout || pType->Speed > pScout->GetTechnoType()->Speed
-						|| (pType->Speed == pScout->GetTechnoType()->Speed && pFoot->UniqueID < pScout->UniqueID)))
-				{
-					pScout = pFoot;
-				}
-			}
-
-			if (pScout && idle.size() >= 4)
-			{
-				if (auto const pLook = landCellInZone(pointAlong(knownEnemyCentroid, homeCell, 6.0, 0.0), homeZone, 4))
-					IssueMoveOrder(pScout, pLook, 3.0);
-			}
-		}
-
 		// ---------------------------------------------------------------- Plan 37: Combo Blackout Push
 		// Chain (point 56): while a successful Blackout keeps the enemy defenses offline, the
 		// multi-front attacks and the airborne front are started at once (cooldowns skipped,

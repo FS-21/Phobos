@@ -210,8 +210,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Idle airships / jumpjet bombers near known enemy structures attack them.
 	UpdateIdleAirborneStrikers(pHouse);
 
-	// One scout at a time checks free ore fields before expanding there.
-	UpdateFieldScouting(pHouse);
+	// Scouts go where information is worth most (stale fields, approaches, enemy bases and armies).
+	UpdatePurposefulScouting(pHouse);
 
 	// Best ore field not mined yet (Expert 6 hoards: claims contested fields too).
 	UpdateResourceClaim(pHouse);

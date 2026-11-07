@@ -1,6 +1,12 @@
 // NeuralAI.Micro.inl: Tactical and special operations micro (one function).
 // Part of NeuralAI.cpp (included in order; one translation unit).
 
+namespace
+{
+	// Defined in NeuralAI.Scouting.inl.
+	bool IsActiveScout(HouseClass* pHouse, DWORD uid);
+}
+
 // InfantryClass::Scatter runs the locomotor right away (0x51D478), so a scattered unit can leave its
 // cell and be relinked into another cell's object list inside the call. Walking FirstObject/NextObject
 // while scattering then follows the moved unit into the other list and can revisit units forever (the
@@ -2253,6 +2259,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		auto const pType = pUnit->Type;
 
 		if (!pType)
+			continue;
+
+		// Scouts on a trip take their orders from it.
+		if (IsActiveScout(pHouse, pUnit->UniqueID))
 			continue;
 
 		if (pUnit->HasAnyLink())
@@ -5201,6 +5211,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	{
 		// Slaves work for their slave master, which overrides any order given to them.
 		if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || !pInf->Type || pInf->SlaveOwner)
+			continue;
+
+		// Scouts on a trip take their orders from it (the dog leash and the patrols below would call
+		// them home every tick).
+		if (IsActiveScout(pHouse, pInf->UniqueID))
 			continue;
 
 		// Evade radiation puddles (Desolator / Nuke fallout) immediately if not

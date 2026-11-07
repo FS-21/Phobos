@@ -122,6 +122,18 @@ namespace
 		WaveFloorLaunch,
 		WaveLaunchRatioSum,
 		WaveLaunchUnitsSum,
+		ScoutTrip,
+		ScoutAirTrip,
+		ScoutStart,
+		ScoutRoute,
+		ScoutBase,
+		ScoutArmy,
+		ScoutBuildingFound,
+		ScoutLost,
+		EnemyExpansionKnown,
+		EnemyExpansionByScout,
+		EnemyExpansionDelay,
+		EnemyExpansionBlindFrames,
 		Count
 	};
 
@@ -134,7 +146,9 @@ namespace
 		"allySiteBuilding", "allyCrawlAnchor", "allyDefense", "baseThreatTicks", "baseThreatIntercepts", "baseThreatRepelled",
 		"airAttackStalled", "planDeadlineExtended", "routeTowerPlaced", "routeAmbushSpot", "routeHarvesterDetour",
 		"wavesHeld", "waveHeldTicks", "wavesLaunched", "waveWindowLaunches", "waveFloorLaunches",
-		"waveLaunchRatioSum", "waveLaunchUnitsSum" };
+		"waveLaunchRatioSum", "waveLaunchUnitsSum",
+		"scoutTrips", "scoutAirTrips", "scoutStart", "scoutRoute", "scoutBase", "scoutArmy",
+		"scoutBldFound", "scoutLost", "enemyExpKnown", "enemyExpByScout", "enemyExpDelayFrames", "enemyExpBlindFrames" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
