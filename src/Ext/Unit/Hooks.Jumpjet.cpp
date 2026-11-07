@@ -190,6 +190,24 @@ DEFINE_HOOK(0x54C8F6, JumpjetLocomotionClass_State4_CheckLinkedTo, 0x7)
 	return 0;
 }
 
+// Bugfix: a jumpjet that deploys on landing into a type with another locomotor (DeployToLand +
+// Convert.Deploy) is unlinked inside its state handler, and Process then read the selection flag
+// of the owner it no longer has.
+DEFINE_HOOK(0x54B07D, JumpjetLocomotionClass_Process_CheckLinkedTo, 0x9)
+{
+	GET(ILocomotion*, pThis, ESI);
+	enum { ExitFunction = 0x54B193, Continue = 0x54B086 };
+
+	auto const pLinkedTo = static_cast<JumpjetLocomotionClass*>(pThis)->LinkedTo;
+
+	if (!pLinkedTo)
+		return ExitFunction;
+
+	R->EAX(pLinkedTo);
+	R->CL(pLinkedTo->IsSelected);
+	return Continue;
+}
+
 // We no longer explicitly check TiltCrashJumpjet when drawing, do it when crashing
 DEFINE_HOOK(0x70B649, TechnoClass_RigidBodyDynamics_NoTiltCrashBlyat, 0x6)
 {
