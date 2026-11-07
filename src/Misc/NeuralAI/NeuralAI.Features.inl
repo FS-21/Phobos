@@ -121,7 +121,8 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 			continue;
 		}
 
-		if (pBld->Owner && pBld->Owner->IsNeutral() && pBld->Type->Capturable)
+		// Neutral techs count once their cell has been seen (fog-fair).
+		if (pBld->Owner && pBld->Owner->IsNeutral() && pBld->Type->Capturable && IsCellVisibleToAI(pHouse, pBld->GetCell()))
 		{
 			neutralCapturableTechs++;
 			if (earlyHomeZone >= 0)
@@ -136,13 +137,19 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 			}
 		}
 
-		if (pBld->Type->CanBeOccupied)
+		// Occupiable buildings count once explored; occupants and health are only read while in
+		// sight (or ours / allied): a building in the fog counts as empty and undamaged.
+		const bool urbanKnown = pBld->Type->CanBeOccupied && IsCellVisibleToAI(pHouse, pBld->GetCell());
+		const bool urbanInSight = urbanKnown && (pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner)
+			|| IsCellInSightOfAI(pHouse, pBld->GetMapCoords()));
+
+		if (urbanKnown)
 		{
-			if (pBld->Occupants.Count == 0)
+			if (!urbanInSight || pBld->Occupants.Count == 0)
 			{
 				emptyUrbanOccupiables++;
 
-				if (pBld->Type->Repairable && pBld->GetHealthPercentage() < 0.72)
+				if (urbanInSight && pBld->Type->Repairable && pBld->GetHealthPercentage() < 0.72)
 					damagedUrbanGarrisons++;
 			}
 			else if (pBld->Occupants.GetItem(0) && pHouse->IsAlliedWith(pBld->Occupants.GetItem(0)->Owner)
@@ -437,7 +444,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 			if (auto const pEIType = abstract_cast<InfantryTypeClass*>(pTType))
 			{
-				if (pEIType->Engineer || pEIType->Infiltrate || pEIType->C4 || pEIType->Ivan || pEIType->Deployer)
+				if (pEIType->Engineer || IsSpyInfantryType(pEIType) || pEIType->C4 || pEIType->Ivan || pEIType->Deployer)
 					sniperPoisonChaosAndTiberiumHealers++;
 			}
 
@@ -788,6 +795,10 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 	features[98] = ClampInt8(
 		camouflageAmbushAndGroveScore * 16 + std::min(40, nearbyTreeGroveCells * 2) + visibleEnemyHarvesters * 12);
+
+	// Our army against the strongest known enemy (army + defenses, fog-fair, previous AI tick):
+	// 0 at parity, +100 at 3x or more, -50 with no army.
+	features[99] = ClampInt8(std::clamp((GetWaveTimingState(pHouse).AdvantageRatio - 100) / 2, -100, 100));
 
 	if (features[21] > 0 && features[67] < 40)
 		features[67] = 40; // Ensure Shipyard is prioritized whenever an enemy or

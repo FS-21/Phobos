@@ -4,6 +4,7 @@
 #include <Ext/Techno/Body.h>
 #include <Ext/Building/Body.h>
 #include <Ext/House/Body.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 DEFINE_HOOK(0x4FB63A, HouseClass_UnitFromFactory_DisablingEVAUnitReady, 0xF)
 {
@@ -167,6 +168,9 @@ DEFINE_HOOK(0x4FB6B0, HouseClass_JustBuilt_TrackLastProduced, 0x5)
 			pHouseExt->LastProducedAircraft = pTechno;
 			pHouseExt->LastProducedAircraftType = pType;
 		}
+
+		if (NeuralAI::IsEnabledForHouse(pThis))
+			NeuralAI::OnTechnoProduced(pThis, pTechno);
 	}
 
 	return 0;

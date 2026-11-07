@@ -731,6 +731,12 @@ void NeuralAI::OnScenarioStart()
 	for (auto& ms : MacroStates)
 		ms.Reset();
 
+	for (auto& routeHeat : RouteHeatStates)
+		routeHeat.Reset();
+
+	WaveTimingStates.fill(NeuralWaveTimingState {});
+	ResetTeamBoards();
+
 	FerryTrips.fill(NeuralFerryTripRecord {});
 	ResetBridgePlanner();
 	AirRoutes.clear();
@@ -778,9 +784,11 @@ void NeuralAI::OnScenarioStart()
 
 	LastHouseAdvantage.fill(0);
 	HasLastHouseAdvantage.fill(false);
+	ResetExpertCredit();
 
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;
+	BankStats.fill(NeuralBankStat {});
 	MapClassApplied = false;
 	OreFieldCache.clear();
 	OreFieldCacheFrame = -100000;
@@ -1159,6 +1167,125 @@ void NeuralAI::OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled)
 	{
 		if (auto const pExt = HouseExt::TryFetch(pHouse))
 			pExt->NeuralAI_Campaign = true;
+	}
+}
+
+// Damage to a Neural AI house's units or buildings by another player house (the victim always
+// knows who hit it). Aimed: the attacker's target was ours (or there was no attacking unit, as for a
+// superweapon). Expert 3 diplomacy reads it:
+// - inside the grace window of a truce (PactGraceFrames) damage between the partners counts for
+//   nothing, either way (missiles, shells, storms launched before the truce);
+// - every hit feeds our grudge against that house (aimed in full, the rest a quarter);
+// - from a truce partner, aimed damage in force within BetrayalWindowFrames is a betrayal: the truce
+//   ends at once, the pact at the next update, and the partner is a traitor to us for the rest of
+//   the match, unless we hit back a third as hard in that window (a skirmish of units clashing at
+//   the shared target); anything less (splash, stray hits while both fire at the target) is collateral, and
+//   the truce ends without blame once it passes CollateralDamageLimit within CollateralWindowFrames.
+void NeuralAI::OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed)
+{
+	if (!pVictim || !pAttacker || pVictim == pAttacker || damage <= 0)
+		return;
+
+	const int victim = pVictim->ArrayIndex;
+	const int attacker = pAttacker->ArrayIndex;
+
+	if (victim < 0 || victim >= 8 || attacker < 0 || attacker >= 8 || pVictim->IsAlliedWith(pAttacker))
+		return;
+
+	const int now = Unsorted::CurrentFrame;
+
+	// The attacker's own books: damage it did to its partner inside the grace window, and the aimed
+	// damage it did to a partner (the skirmish test of the betrayal rule).
+	if (NeuralAI::IsEnabledForHouse(pAttacker))
+	{
+		auto& attackerCoal = GetMacroState(pAttacker).Coalition;
+
+		if (IsInPactGrace(pAttacker, victim))
+		{
+			attackerCoal.GraceDamageIgnored += damage;
+		}
+		else if (aimed && attackerCoal.Target >= 0 && attackerCoal.TruceSinceFrame[victim] >= 0)
+		{
+			if (now - attackerCoal.AimedDealtFrame[victim] > BetrayalWindowFrames || now < attackerCoal.AimedDealtFrame[victim])
+			{
+				attackerCoal.AimedDealtFrame[victim] = now;
+				attackerCoal.AimedDealt[victim] = 0;
+			}
+
+			attackerCoal.AimedDealt[victim] += damage;
+		}
+	}
+
+	if (!NeuralAI::IsEnabledForHouse(pVictim))
+		return;
+
+	auto& coal = GetMacroState(pVictim).Coalition;
+
+	if (IsInPactGrace(pVictim, attacker))
+	{
+		coal.GraceDamageIgnored += damage;
+		return;
+	}
+
+	coal.Grudge[attacker] = std::min(1000000, coal.Grudge[attacker] + (aimed ? damage : damage / 4));
+
+	if (aimed)
+		coal.HurtByFrame[attacker] = now;
+
+	const bool partner = coal.Target >= 0 && attacker != coal.Target && coal.TruceSinceFrame[attacker] >= 0
+		&& (coal.RevokedMask & (1u << attacker)) == 0;
+
+	if (!partner)
+		return;
+
+	if (aimed)
+	{
+		if (now - coal.AimedWindowFrame[attacker] > BetrayalWindowFrames || now < coal.AimedWindowFrame[attacker])
+		{
+			coal.AimedWindowFrame[attacker] = now;
+			coal.AimedDamage[attacker] = 0;
+		}
+
+		coal.AimedDamage[attacker] += damage;
+
+		// A trade of shots (we hit back a third as hard in the same window) is a skirmish: collateral.
+		const bool weTradedShots = now - coal.AimedDealtFrame[attacker] <= BetrayalWindowFrames
+			&& coal.AimedDealt[attacker] * 3 >= coal.AimedDamage[attacker];
+
+		if (coal.AimedDamage[attacker] >= BetrayalDamage && !weTradedShots)
+		{
+			coal.RevokedMask |= 1u << attacker;
+			coal.Revoked++;
+			coal.TruceEnds[static_cast<size_t>(NeuralTruceEnd::Betrayal)]++;
+			coal.BetrayalsSuffered++;
+			coal.TraitorScore[attacker]++;
+			coal.Grudge[attacker] = std::min(1000000, coal.Grudge[attacker] + 3000);
+			coal.BetrayedPending = true;
+			BetrayalsCommitted[attacker]++;
+			CountDecision(NeuralDecision::TruceRevoked, victim);
+			Debug::Log("[NeuralAI] House %d Coalition: betrayed by house %d at frame %d (aimed damage %d in %d frames).\n",
+				victim, attacker, now, coal.AimedDamage[attacker], now - coal.AimedWindowFrame[attacker]);
+			return;
+		}
+	}
+
+	if (now - coal.CollateralWindowFrame[attacker] > CollateralWindowFrames || now < coal.CollateralWindowFrame[attacker])
+	{
+		coal.CollateralWindowFrame[attacker] = now;
+		coal.CollateralDamage[attacker] = 0;
+	}
+
+	coal.CollateralDamage[attacker] += damage;
+
+	if (coal.CollateralDamage[attacker] >= CollateralDamageLimit)
+	{
+		coal.RevokedMask |= 1u << attacker;
+		coal.Revoked++;
+		coal.TruceEnds[static_cast<size_t>(NeuralTruceEnd::Collateral)]++;
+		coal.ExPartnerUntil[attacker] = now + ExPartnerCooldownFrames;
+		CountDecision(NeuralDecision::TruceRevoked, victim);
+		Debug::Log("[NeuralAI] House %d Coalition: truce with house %d ends at frame %d, collateral losses %d.\n", victim,
+			attacker, now, coal.CollateralDamage[attacker]);
 	}
 }
 

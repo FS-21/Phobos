@@ -102,6 +102,76 @@ namespace
 		BridgeMoat,
 		BridgeFleetBlock,
 		BridgeRoute,
+		HarvesterRetreat,
+		HarvesterRebalance,
+		AllySiteBuilding,
+		AllyCrawlAnchor,
+		AllyDefense,
+		BaseThreatTick,
+		BaseThreatIntercept,
+		BaseThreatRepelled,
+		AirAttackStalled,
+		PlanDeadlineExtended,
+		RouteTowerPlaced,
+		RouteAmbushSpot,
+		RouteHarvesterDetour,
+		WaveHeld,
+		WaveHeldTick,
+		WaveLaunched,
+		WaveWindowLaunch,
+		WaveFloorLaunch,
+		WaveLaunchRatioSum,
+		WaveLaunchUnitsSum,
+		ScoutTrip,
+		ScoutAirTrip,
+		ScoutStart,
+		ScoutRoute,
+		ScoutBase,
+		ScoutArmy,
+		ScoutBuildingFound,
+		ScoutLost,
+		EnemyExpansionKnown,
+		EnemyExpansionByScout,
+		EnemyExpansionDelay,
+		EnemyExpansionBlindFrames,
+		RepairRetreat,
+		RepairByDepot,
+		RepairByHospital,
+		RepairByRepairer,
+		RepairBySelfHeal,
+		RepairSaved,
+		RepairLostOnTrip,
+		RepairAbandoned,
+		RepairHeldWinning,
+		PlanAbortEnemyGrew,
+		PlanAbortValueLost,
+		PlanAbortTargetGone,
+		CoalitionJoined,
+		CoalitionDeclined,
+		TruceRevoked,
+		CoalitionTargetWave,
+		TeamTargetSet,
+		TeamWaveHold,
+		TeamWaveLaunch,
+		TeamSplitFronts,
+		TeamWaveJoined,
+		TeamHelpRequest,
+		TeamHelpAnswered,
+		TeamClaimYield,
+		TeamExpansionYield,
+		BankFactoryPick,
+		BankYardPick,
+		AirWing,
+		AirWingSortie,
+		AirInterceptSortie,
+		AirSoloStrike,
+		AirFrontPatrol,
+		AircraftFielded,
+		AircraftLost,
+		UrbanGarrison,
+		UrbanEvacuate,
+		UrbanClear,
+		AllyTechYield,
 		Count
 	};
 
@@ -110,7 +180,22 @@ namespace
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
 		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
-		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute" };
+		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute", "harvesterRetreat", "harvesterRebalance",
+		"allySiteBuilding", "allyCrawlAnchor", "allyDefense", "baseThreatTicks", "baseThreatIntercepts", "baseThreatRepelled",
+		"airAttackStalled", "planDeadlineExtended", "routeTowerPlaced", "routeAmbushSpot", "routeHarvesterDetour",
+		"wavesHeld", "waveHeldTicks", "wavesLaunched", "waveWindowLaunches", "waveFloorLaunches",
+		"waveLaunchRatioSum", "waveLaunchUnitsSum",
+		"scoutTrips", "scoutAirTrips", "scoutStart", "scoutRoute", "scoutBase", "scoutArmy",
+		"scoutBldFound", "scoutLost", "enemyExpKnown", "enemyExpByScout", "enemyExpDelayFrames", "enemyExpBlindFrames",
+		"repairRetreats", "repairByDepot", "repairByHospital", "repairByRepairer", "repairBySelfHeal", "repairSaved",
+		"repairLostOnTrip", "repairAbandoned", "repairHeldWinning", "planAbortEnemyGrew", "planAbortValueLost", "planAbortTargetGone",
+		"coalitionJoined", "coalitionDeclined", "truceRevoked", "coalitionTargetWaves",
+		"teamTargetSet", "teamWaveHold", "teamWaveLaunch", "teamSplitFronts", "teamWaveJoined", "teamHelpRequest",
+		"teamHelpAnswered", "teamClaimYield", "teamExpansionYield",
+		"bankFactoryPick", "bankYardPick",
+		"airWings", "airWingSorties", "airInterceptSorties", "airSoloStrikes", "airFrontPatrols", "aircraftFielded",
+		"aircraftLost",
+		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -158,6 +243,34 @@ namespace
 
 	std::array<NeuralTerritoryStat, 32> TerritoryStats {};
 	int TerritoryLastFrame { -1 };
+
+	// Bank telemetry (reward and diagnosis only, no decision reads it), sampled every AI tick:
+	// peak and summed credits, ticks with a rich bank (>= 5000), and per production queue
+	// (building, vehicle, naval, infantry, aircraft) the rich ticks with no target chosen and the
+	// rich ticks whose primary factory of that kind sat empty.
+	enum class NeuralBankQueue : int
+	{
+		Building,
+		Vehicle,
+		Naval,
+		Infantry,
+		Aircraft,
+
+		Count
+	};
+
+	struct NeuralBankStat
+	{
+		int PeakCredits { 0 };
+		int64_t CreditsSum { 0 };
+		uint32_t Ticks { 0 };
+		uint32_t RichTicks { 0 };
+		uint32_t GovernorTicks { 0 };
+		std::array<uint32_t, static_cast<size_t>(NeuralBankQueue::Count)> NoTarget {};
+		std::array<uint32_t, static_cast<size_t>(NeuralBankQueue::Count)> FactoryIdle {};
+	};
+
+	std::array<NeuralBankStat, 32> BankStats {};
 
 	// Map class for the trainer (telemetry only): size, share of water cells, and whether the
 	// starting bases are linked by land. Computed once per match, once two bases exist.
@@ -894,6 +1007,9 @@ namespace
 		TechTreeCut,
 		ComboBlackoutPush,
 		ComboWatchStrike,
+		AllyBackup,
+		AllyForwardOutpost,
+		BaseThreatIntercept,
 		Count
 	};
 
@@ -902,12 +1018,15 @@ namespace
 		"harvesterAmbush", "pickets", "keyPointHold", "survival", "preemptiveStrike", "baitAmbush", "allyJointAttack",
 		"forwardRepair", "navalStrike", "engineerAssault", "sabotage", "huntKeyUnits", "rotatingRaids", "airCorridor",
 		"silentInfiltration", "artilleryEcoSiege", "rollingSiege", "delayingAction", "threeFront", "factoryDecapitation",
-		"cutReinforcements", "techTreeCut", "comboBlackoutPush", "comboWatchStrike" };
+		"cutReinforcements", "techTreeCut", "comboBlackoutPush", "comboWatchStrike", "allyBackup", "allyForwardOutpost", "baseThreatIntercept" };
 
 	// Trained preference of each plan: free reserve output slots 89.. (see the trainer's
-	// OUTPUT_SLOT_NAMES), learned by ES like any other slot.
+	// OUTPUT_SLOT_NAMES), learned by ES like any other slot. The ally site plans share the slot of
+	// the plan closest to them: Ally Backup with Survival (106), Ally Forward Outpost with Ally Joint
+	// Attack (109). Base Threat Intercept shares Preemptive Strike's slot (107): both hit an enemy
+	// force with a stronger idle group before it reaches us.
 	constexpr int NeuralPlanSlots[] = { 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
-		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126 };
+		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 106, 109, 107 };
 
 	static_assert(std::size(NeuralPlanNames) == static_cast<size_t>(NeuralPlanId::Count));
 	static_assert(std::size(NeuralPlanSlots) == static_cast<size_t>(NeuralPlanId::Count));
@@ -921,6 +1040,15 @@ namespace
 		// eligible but never started = held back by its learned preference; never eligible =
 		// its preconditions never happen on these maps.
 		Eligible,
+		// The learned gate opened but the plan did not start: no group of free units fit it, so the
+		// plan is held back by unit availability, not by its learned preference.
+		NoGroup,
+		// Part of Failed: the plan ran out of time (its deadline), not out of units or of target.
+		// Most such groups are still far from their target: the route took longer than the plan.
+		TimedOut,
+		// Ended because we entered a tacit truce with the house it was against (Expert 3): neither a
+		// success nor a failure, no credit either way.
+		Pact,
 		Count
 	};
 
@@ -939,6 +1067,191 @@ namespace
 
 		if (idx >= 0 && idx < 32)
 			DecisionCounts[idx][static_cast<size_t>(decision)]++;
+	}
+
+	// Decision credit per expert (trainer only, never read by AI decisions). expertGain gives each
+	// 60-frame change of a house's advantage to the expert in charge at that moment, but most
+	// results come from earlier decisions of other experts: a refinery started under Expert 0 pays
+	// for minutes, a wave sent under Expert 5 lands while Expert 7 runs. Here every own techno is
+	// tagged with the expert in charge when it first exists (production start, placement, capture;
+	// a deployer passes its tag to what it deploys into) and with the expert whose plan or wave
+	// last sent it. A techno that appears outside production takes the tags of what made it: the
+	// launcher of a spawn, the mind controller, the slave master, the building that gives it as a
+	// free unit, or an own techno gone nearby (crew leaving a wreck, an engineer that captured).
+	// The same advantage change is split into the parts that have an author: Built (cost of a new
+	// techno, to the expert that started it), Lost (cost of a techno gone, to the expert that sent
+	// it; one nobody sent goes to the expert that started it, but when an enemy killed it half goes
+	// to the recently active experts, who let the attack through), Spent (money paid into
+	// productions, to the experts that started them, by cost), Income (ore unloaded goes half to
+	// the expert that started the gatherer and half to the one that started the refinery; other
+	// income goes to the experts that started the economic technos, by cost), Kills (enemy
+	// assets destroyed, to the expert that sent or started the killer) and Shared (the rest:
+	// enemy growth, third-party fights, defeats), which goes to the recently active experts by an
+	// eligibility trace (expert choices, decaying by 7/8 per sample, about 20 game seconds).
+	// The parts add up to the advantage change, so the totals match expertGain; only the
+	// author changes. Each part is booked in the game phase of the decision that earned it.
+	enum class NeuralCreditPart : uint8_t
+	{
+		Built,
+		Lost,
+		Spent,
+		Income,
+		Kills,
+		Shared,
+		Count
+	};
+
+	struct NeuralCreditTag
+	{
+		TechnoTypeClass* Type { nullptr };
+		// Where it was at the last sample, to find what left crew or captured nearby.
+		CoordStruct Location {};
+		int Cost { 0 };
+		int Stamp { 0 };
+		int CommandFrame { 0 };
+		int8_t Origin { 0 };
+		int8_t OriginPhase { 0 };
+		int8_t Command { -1 };
+		int8_t CommandPhase { 0 };
+		// Plan id of the last command, CreditSourceWave for an offensive wave, -1 none.
+		int16_t CommandSource { -1 };
+		bool Credited { false };
+		bool Economic { false };
+		bool KilledByEnemy { false };
+	};
+
+	struct NeuralCreditGone
+	{
+		DWORD ID;
+		NeuralCreditTag Tag;
+		bool Transformed;
+	};
+
+	constexpr int16_t CreditSourceWave = 1000;
+	// How far from its source a techno that appears outside production may be (6 cells).
+	constexpr int CreditParentRange = 6 * 256;
+
+	std::array<std::unordered_map<DWORD, NeuralCreditTag>, 32> CreditTags {};
+	// In credits (telemetry divides by 10 like expertGain).
+	std::array<std::array<int64_t, NeuralAI::NumSpecialists>, 32> ExpertCredit {};
+	std::array<std::array<std::array<int64_t, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> ExpertCreditByPhase {};
+	std::array<std::array<std::array<int64_t, static_cast<size_t>(NeuralCreditPart::Count)>, NeuralAI::NumSpecialists>, 32> ExpertCreditParts {};
+	// Enemy asset value killed since the last sample, by the killer's author [phase][expert].
+	std::array<std::array<std::array<int64_t, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> PendingKillCredit {};
+	// Money from ore unloaded since the last sample, by the authors of the gatherer and the dock.
+	std::array<std::array<std::array<int64_t, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> PendingHarvestCredit {};
+	// Own technos gone at the last sample, sorted by UniqueID: crew may appear one sample later.
+	std::array<std::vector<NeuralCreditGone>, 32> CreditRecentGone {};
+	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> CreditTrace {};
+	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> CreditTraceTicks {};
+	std::array<int64_t, 32> CreditLastAdvantage {};
+	std::array<int, 32> CreditLastHalfMoney {};
+	std::array<int, 32> CreditLastSpent {};
+	std::array<bool, 32> CreditHasLast {};
+	std::array<std::array<int8_t, static_cast<size_t>(NeuralPlanId::Count)>, 32> PlanStarterExpert {};
+	std::array<std::array<int8_t, static_cast<size_t>(NeuralPlanId::Count)>, 32> PlanStarterPhase {};
+	int CreditSerial { 0 };
+	int CreditLastFrame { -1 };
+
+	void ResetExpertCredit()
+	{
+		for (auto& tags : CreditTags)
+			tags.clear();
+
+		ExpertCredit = {};
+		ExpertCreditByPhase = {};
+		ExpertCreditParts = {};
+		PendingKillCredit = {};
+		PendingHarvestCredit = {};
+
+		for (auto& recent : CreditRecentGone)
+			recent.clear();
+
+		CreditTrace = {};
+		CreditTraceTicks = {};
+		CreditLastAdvantage.fill(0);
+		CreditLastHalfMoney.fill(0);
+		CreditLastSpent.fill(0);
+		CreditHasLast.fill(false);
+
+		for (auto& starters : PlanStarterExpert)
+			starters.fill(-1);
+
+		PlanStarterPhase = {};
+		CreditSerial = 0;
+		CreditLastFrame = -1;
+	}
+
+	int CreditActiveExpert(const HouseClass* pHouse)
+	{
+		auto const pExt = HouseExt::TryFetch(pHouse);
+		return pExt ? std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1) : 0;
+	}
+
+	// What earns the house money: refineries, gatherers, cash and purifier buildings.
+	bool IsCreditEconomicType(TechnoTypeClass* pType)
+	{
+		if (pType->ResourceGatherer || pType->ResourceDestination)
+			return true;
+
+		if (auto const pBldType = abstract_cast<BuildingTypeClass*>(pType))
+			return pBldType->Refinery || pBldType->ProduceCashAmount > 0 || pBldType->OrePurifier;
+
+		if (auto const pUnitType = abstract_cast<UnitTypeClass*>(pType))
+			return pUnitType->Harvester;
+
+		return false;
+	}
+
+	// The tag of an own techno, created with the expert in charge now when it has none.
+	NeuralCreditTag* CreditTagFor(int houseIdx, TechnoClass* pTechno, int expert, int phase)
+	{
+		auto const pType = pTechno->GetTechnoType();
+
+		if (!pType)
+			return nullptr;
+
+		auto& tag = CreditTags[houseIdx][pTechno->UniqueID];
+
+		if (!tag.Type)
+		{
+			tag.Type = pType;
+			tag.Cost = std::max(0, static_cast<int>(pType->Cost));
+			tag.Origin = static_cast<int8_t>(expert);
+			tag.OriginPhase = static_cast<int8_t>(phase);
+			tag.Economic = IsCreditEconomicType(pType);
+		}
+
+		return &tag;
+	}
+
+	// A plan or a wave sends this techno: its losses and kills from now on belong to the expert in
+	// charge now (headless only, where the credit is measured).
+	void NoteExpertCommand(HouseClass* pHouse, TechnoClass* pTechno, int16_t source)
+	{
+		if (!NeuralAI::HeadlessMode || !pHouse || !pTechno || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return;
+
+		const int expert = CreditActiveExpert(pHouse);
+		const int phase = RoutingPhase(Unsorted::CurrentFrame);
+
+		if (auto const pTag = CreditTagFor(pHouse->ArrayIndex, pTechno, expert, phase))
+		{
+			pTag->Command = static_cast<int8_t>(expert);
+			pTag->CommandPhase = static_cast<int8_t>(phase);
+			pTag->CommandSource = source;
+			pTag->CommandFrame = Unsorted::CurrentFrame;
+		}
+	}
+
+	// The expert that started a plan also commands the units the plan recruits later.
+	void NoteExpertPlanStart(HouseClass* pHouse, NeuralPlanId plan)
+	{
+		if (!NeuralAI::HeadlessMode || !pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return;
+
+		PlanStarterExpert[pHouse->ArrayIndex][static_cast<size_t>(plan)] = static_cast<int8_t>(CreditActiveExpert(pHouse));
+		PlanStarterPhase[pHouse->ArrayIndex][static_cast<size_t>(plan)] = static_cast<int8_t>(RoutingPhase(Unsorted::CurrentFrame));
 	}
 
 	// exp(x) for |x| <= 8 using only IEEE + - * /, so every client computes bit-identical
@@ -1145,6 +1458,136 @@ namespace
 			return false;
 
 		return VisionMap[static_cast<size_t>(coords.Y) * VisionMapSide + coords.X] != 0;
+	}
+
+	// A spy: it enters enemy buildings for the spy effects (Agent=). The engine also sets Infiltrate
+	// on engineers and C4 commandos, which fight or capture instead.
+	bool IsSpyInfantryType(const InfantryTypeClass* pType)
+	{
+		return pType && pType->Infiltrate && pType->Agent;
+	}
+
+	// A ground transport that burrows (subterranean movement zone).
+	bool IsUndergroundTransportType(const UnitTypeClass* pType)
+	{
+		return pType && !pType->Naval && pType->Passengers > 0 && pType->MovementZone == MovementZone::Subterrannean;
+	}
+
+	// A transport that moves on land and water (amphibious APC, hovercraft built at a shipyard):
+	// it can go around by sea and still drive up to the target.
+	bool IsAmphibiousGroundTransportType(const UnitTypeClass* pType)
+	{
+		return pType && pType->Passengers >= 3
+			&& (pType->SpeedType == SpeedType::Amphibious || pType->MovementZone == MovementZone::Amphibious
+				|| pType->MovementZone == MovementZone::AmphibiousCrusher || pType->MovementZone == MovementZone::AmphibiousDestroyer);
+	}
+
+	// A commando: an armed soldier that blows up buildings with C4 (Tanya, Navy SEAL, ...).
+	bool IsCommandoInfantryType(const InfantryTypeClass* pType)
+	{
+		return pType && pType->C4 && !pType->Engineer && !IsSpyInfantryType(pType);
+	}
+
+	// A specialist that works a building or a vehicle instead of fighting: engineer, spy (which
+	// also robs refineries and silos), vehicle thief.
+	bool IsSpecialistInfantryType(const InfantryTypeClass* pType)
+	{
+		return pType && (pType->Engineer || IsSpyInfantryType(pType) || pType->VehicleThief);
+	}
+
+	// A specialist of this type has a job inside this building (it enters it): engineers capture,
+	// spies infiltrate.
+	bool SpecialistWorksBuilding(const InfantryTypeClass* pType, const BuildingTypeClass* pBldType)
+	{
+		if (!pType || !pBldType)
+			return false;
+
+		if (pType->Engineer)
+			return pBldType->Capturable;
+
+		if (IsSpyInfantryType(pType))
+			return pBldType->Spyable;
+
+		return false;
+	}
+
+	// A warhead that hits an area hard enough to matter (CellSpread 1 cell or more, 50 damage).
+	bool IsAreaWeapon(const WeaponTypeClass* pWeapon)
+	{
+		return pWeapon && pWeapon->Warhead && pWeapon->Warhead->CellSpread >= 1.0f && pWeapon->Damage >= 50;
+	}
+
+	// Infantry that deploys into an area weapon (Desolator: Deployer= with DeployFire=), a suicide
+	// bomber (weapon Suicide=, or a Phobos FeedbackWeapon= with an area warhead that blows up the
+	// firer: cheap but deadly in a crowd), or one whose primary weapon hits an area (flamethrowers).
+	bool IsAreaDamageInfantryType(const InfantryTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		if (pType->Deployer && pType->DeployFire)
+			return true;
+
+		auto const pSlot = const_cast<InfantryTypeClass*>(pType)->GetWeapon(0);
+		auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+		if (!pWeapon || !pWeapon->Warhead)
+			return false;
+
+		if (pWeapon->Suicide)
+			return true;
+
+		if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon); pWeaponExt && IsAreaWeapon(pWeaponExt->FeedbackWeapon.Get()))
+			return true;
+
+		return IsAreaWeapon(pWeapon);
+	}
+
+	// A vehicle that blows up among the enemy (demolition truck): weapon Suicide= or an area
+	// FeedbackWeapon=, or Explodes= with an area DeathWeapon=.
+	bool IsVehicleRaiderType(const UnitTypeClass* pType)
+	{
+		if (!pType || pType->Naval)
+			return false;
+
+		auto const pSlot = const_cast<UnitTypeClass*>(pType)->GetWeapon(0);
+
+		if (auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr)
+		{
+			if (pWeapon->Suicide)
+				return true;
+
+			if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon); pWeaponExt && IsAreaWeapon(pWeaponExt->FeedbackWeapon.Get()))
+				return true;
+		}
+
+		return pType->Explodes && IsAreaWeapon(pType->DeathWeapon);
+	}
+
+	// A soldier that blows itself up among the enemy (terrorist): weapon Suicide=, or a Phobos
+	// FeedbackWeapon= with an area warhead.
+	bool IsSuicideInfantryType(const InfantryTypeClass* pType)
+	{
+		auto const pSlot = pType ? const_cast<InfantryTypeClass*>(pType)->GetWeapon(0) : nullptr;
+		auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+		if (!pWeapon || !pWeapon->Warhead)
+			return false;
+
+		if (pWeapon->Suicide)
+			return true;
+
+		auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+		return pWeaponExt && IsAreaWeapon(pWeaponExt->FeedbackWeapon.Get());
+	}
+
+	// A raider for a drop behind the lines: a commando, a bomber (Ivan=), an area damage soldier,
+	// or another elite soldier (cost 1000 or more); never a specialist.
+	bool IsRaiderInfantryType(const InfantryTypeClass* pType)
+	{
+		return pType && !IsSpecialistInfantryType(pType)
+			&& (IsCommandoInfantryType(pType) || pType->Ivan || IsAreaDamageInfantryType(pType) || pType->Cost >= 1000);
 	}
 
 	bool IsTunnelNetworkBuilding(const BuildingTypeClass* pBldType)

@@ -28,6 +28,7 @@
 #include <TerrainTypeClass.h>
 #include <UnitClass.h>
 #include <UnitTypeClass.h>
+#include <Ext/AircraftType/Body.h>
 #include <Ext/BuildingType/Body.h>
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
@@ -37,6 +38,7 @@
 #include <Ext/Unit/Body.h>
 #include <Ext/TerrainType/Body.h>
 #include <Ext/WarheadType/Body.h>
+#include <Ext/WeaponType/Body.h>
 #include <Utilities/Debug.h>
 #include <Utilities/GeneralUtils.h>
 #include <algorithm>
@@ -105,8 +107,10 @@ int NeuralAI::CurrentMeasuredFPS = 0;
 #include "NeuralAI.Internal.inl"
 #include "NeuralAI.Economy.inl"
 #include "NeuralAI.State.inl"
+#include "NeuralAI.RouteHeat.inl"
 #include "NeuralAI.Expansion.inl"
 #include "NeuralAI.Intel.inl"
+#include "NeuralAI.Team.inl"
 #include "NeuralAI.Bridges.inl"
 #include "NeuralAI.Lifecycle.inl"
 #include "NeuralAI.Telemetry.inl"
@@ -114,11 +118,20 @@ int NeuralAI::CurrentMeasuredFPS = 0;
 #include "NeuralAI.Experts.inl"
 #include "NeuralAI.Transport.inl"
 #include "NeuralAI.Tactics.inl"
+#include "NeuralAI.WaveTiming.inl"
 #include "NeuralAI.Counters.inl"
 #include "NeuralAI.Orders.inl"
 #include "NeuralAI.Air.inl"
+#include "NeuralAI.Preservation.inl"
 #include "NeuralAI.Plans.inl"
+#include "NeuralAI.Diplomacy.inl"
 #include "NeuralAI.MobileFactory.inl"
+#include "NeuralAI.SpecOps.inl"
+#include "NeuralAI.AirForce.inl"
+#include "NeuralAI.AirPatrol.inl"
+#include "NeuralAI.Urban.inl"
+#include "NeuralAI.Defense.inl"
 #include "NeuralAI.Micro.inl"
+#include "NeuralAI.Scouting.inl"
 #include "NeuralAI.Production.inl"
 #include "NeuralAI.Placement.inl"

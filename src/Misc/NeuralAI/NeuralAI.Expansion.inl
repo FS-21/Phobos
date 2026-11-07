@@ -14,6 +14,9 @@ namespace
 		int BlockKey { -1 };
 	};
 
+	// Team blackboard (NeuralAI.Team.inl): a teammate already holds this field.
+	bool IsOreFieldTakenByTeam(HouseClass* pHouse, const NeuralOreField& field);
+
 	std::vector<NeuralOreField> OreFieldCache;
 	int OreFieldCacheFrame { -100000 };
 
@@ -225,7 +228,8 @@ namespace
 					taken = true;
 			}
 
-			if (taken)
+			// Expansion use: not a field a teammate already holds (harvesters may share it).
+			if (taken || (!ownHubsOk && IsOreFieldTakenByTeam(pHouse, field)))
 				continue;
 
 			if (auto const pCell = MapClass::Instance.TryGetCellAt(field.Cell))

@@ -128,12 +128,18 @@ public:
 	static void OnHeadlessFrameTick();
 	static void OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled);
 	static void OnBuildingDamaged(BuildingClass* pBuilding, TechnoClass* pAttacker, HouseClass* pAttackerHouse);
+	static void OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller);
+	static void OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, TechnoClass* pDock, int money);
+	static void OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed);
+	static void OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller);
 
 	static int UpdateExpertAI(HouseClass* pHouse);
 	static void UpdateBuildingProduction(HouseClass* pHouse);
 	static void UpdateUnitProduction(HouseClass* pHouse);
 	static void UpdateInfantryProduction(HouseClass* pHouse);
 	static void UpdateAircraftProduction(HouseClass* pHouse);
+	static void RefreshProductionIndices(HouseClass* pHouse);
+	static void OnTechnoProduced(HouseClass* pHouse, TechnoClass* pTechno);
 
 	static CellStruct FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingTypeClass* pBuildingType);
 	static int PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBuilding, CellStruct& outCell);

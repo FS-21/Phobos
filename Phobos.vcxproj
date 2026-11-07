@@ -358,8 +358,11 @@
     <ClInclude Include="src\Phobos.CRT.h" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.h" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Air.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Preservation.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Bridges.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Counters.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Diplomacy.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Defense.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Economy.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Expansion.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Experts.inl" />
@@ -372,11 +375,19 @@
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Orders.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Placement.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Plans.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.SpecOps.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.AirForce.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.AirPatrol.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Scouting.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Urban.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Production.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.RouteHeat.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.State.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Team.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Tactics.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Telemetry.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Transport.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.WaveTiming.inl" />
     <ClInclude Include="src\Phobos.h" />
     <ClInclude Include="src\Phobos.version.h" />
     <!-- src\Blowfish\ -->

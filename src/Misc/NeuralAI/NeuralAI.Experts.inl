@@ -50,6 +50,17 @@ namespace
 
 		return false;
 	}
+
+	// Expert 4 work summary (NeuralAI.SpecOps.inl, refreshed every 150 frames).
+	int SpecOpsOpportunity(HouseClass* pHouse);
+	void GetSpecOpsWork(HouseClass* pHouse, int& outTechValue, int& outSpyTargets, bool& outBridgeRepair, bool& outBridgeDemolition);
+
+	// Expert 8 work summary (NeuralAI.AirForce.inl, refreshed every 150 frames).
+	int AirForceOpportunity(HouseClass* pHouse);
+	// Expert 9 work summary (NeuralAI.Urban.inl, refreshed every 150 frames).
+	int UrbanOpportunity(HouseClass* pHouse);
+	// Defined in NeuralAI.Defense.inl.
+	void RefreshDefenseBudget(HouseClass* pHouse);
 }
 
 void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features,
@@ -63,13 +74,13 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// Select active specialist expert (0..9) combining situational priors +
 	// evolved Expert Routing Bias (Slots 40..47 & 84..85) + learned Faction Memory + context routing
-	std::array<int, 10> expScores = { 100, 100, 100, 80, 100, 160, 110, 110, 95, 95 };
+	std::array<int, 10> expScores = { 100, 100, 100, 80, 100, 100, 110, 110, 95, 95 };
 
-	if (pHouse->HasLowPower() || pHouse->CountResourceGatherers == 0 || pHouse->CountResourceDestinations == 0
-		|| pHouse->NumConYards == 0)
-	{
-		expScores[0] += 950; // Expert 0: Economy, Silos & Crisis Micro
-	}
+	// Expert 0: Economy, Silos & Crisis Micro, graded by the trouble it can act on (UpdateEconomyCrisis:
+	// nothing gathering, a raid on the economy, lasting low power, harvesters under fire, a refinery
+	// nobody serves, storage nearly full; up to 950). A lost ConYard alone is no work for it.
+	auto const& economyMacro = GetMacroState(pHouse);
+	expScores[0] += economyMacro.EconomyTrouble;
 
 	if (pHouse->NumBarracks == 0 || pHouse->NumWarFactories == 0
 		|| (pHouse->Available_Money() > 2500 && pHouse->OwnedBuildings < 8))
@@ -96,62 +107,86 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	if (HouseClass::Array.Count > 4 && (IsAITickWindow(240, 60)))
 		expScores[3] += 380; // Expert 3: Multi-Player Opportunism & Diplomacy
 
-	if (pExt->NeuralAI_Archetype == 1 || (IsAITickWindow(300, 60) && pHouse->OwnedUnits >= 4))
-		expScores[4] += 360; // Expert 4: Special Operations & Trickster
+	// A tacit coalition on (UpdateTacitCoalition) is Expert 3's work.
+	if (CoalitionTargetOf(pHouse) >= 0)
+		expScores[3] += 650;
 
-	// Expert 5: Tactical Squad Micro, Kiting & Beacons: an army in contact (enemy tanks seen),
-	// stronger the bigger it is.
-	if (pHouse->OwnedUnits >= 3 || pHouse->OwnedInfantry >= 5)
-		expScores[5] += 300 + (features[65] > 0 ? std::min(300, (pHouse->OwnedUnits + pHouse->OwnedInfantry / 2) * 10) : 0);
+	// Leading by far (Expert 3 low profile): secure expansion and defense rather than provoking a
+	// coalition against us.
+	const bool lowProfile = GetMacroState(pHouse).Coalition.LowProfile;
 
-	const bool desperateForExpansionResources
-		= (features[19] < 28 && (features[20] > 6 || features[21] > 0 || features[25] > 0));
-	if (desperateForExpansionResources
-		|| ((pHouse->CountResourceDestinations < 3 || features[19] < 28) && features[20] > 10
-			&& pHouse->Available_Money() >= 1200))
+	// Expert 4: Special Operations, graded by the work there is for it now (fog-fair): known
+	// reachable neutral techs out of enemy defense reach and an engineer to take them, enemy
+	// buildings worth a spy, bridges to repair or bring down, captures under way (up to 780).
+	const int specOpsOpportunity = SpecOpsOpportunity(pHouse);
+	expScores[4] += specOpsOpportunity + (pExt->NeuralAI_Archetype == 1 ? 200 : 0);
+
+	// Expert 5: Tactical Squad Micro, Kiting & Beacons: only in a real fight, our army and visible
+	// armed enemies within reach of each other (measured by the micro, kept 450 frames after the
+	// last contact so a flickering fight keeps its expert), stronger the bigger the fight. Owning
+	// an army is not enough: in quiet times its micro has nothing to do.
 	{
-		expScores[6] += desperateForExpansionResources ? 720 : 480; // Expert 6: Base-Crawling & Ore Outpost Expansion
+		auto const& contactMacro = GetMacroState(pHouse);
+
+		if (Unsorted::CurrentFrame - contactMacro.LastArmyContactFrame <= 450)
+			expScores[5] += 260 + std::min(360, std::min(contactMacro.ArmyContactOwn, contactMacro.ArmyContactEnemy) / 2);
 	}
-	else if (GetMacroState(pHouse).UncolonizedOreFields >= 2 && pHouse->Available_Money() >= 15000)
-	{
-		// Plenty of money and ore fields nobody of ours holds yet: claim them anyway. Fields are a
-		// life insurance (stolen or drained money comes back) and denied ground for the enemy.
-		expScores[6] += 380;
-	}
 
-	// Expert 7: Forward Defense Crawling & Chokepoint Siege, graded by real pressure: enemy defenses
-	// facing us (8 per visible one), enemy tanks seen (6 each), our buildings damaged, harvesters
-	// under attack. Merely seeing the enemy base (visible buildings) used to give the full bonus,
-	// so Expert 7 ran 94% of the time and the others never trained.
-	if (pHouse->OwnedBuildings >= 5)
+	// Expert 6: Base-Crawling & Ore Outpost Expansion, graded by the free ore fields we know and can
+	// take now (UpdateResourceClaim: explored, out of known enemy defense reach, by value over
+	// distance, the best three, beyond the crawl only with an MCV possible; up to 450). Home ore
+	// running low makes that work more urgent, but is no work by itself.
+	if (economyMacro.ExpansionOpportunity > 0)
+		expScores[6] += economyMacro.ExpansionOpportunity + (features[19] < 28 ? 80 : 0);
+
+	if (lowProfile && economyMacro.ExpansionOpportunity > 0)
+		expScores[6] += 120;
+
+	// Expert 7: Forward Defense Crawling & Chokepoint Siege, graded by the defense pressure of
+	// RefreshDefenseBudget: enemy forces seen at our structures, structures and harvesters under
+	// fire now, enemy towers facing us; less when our army at home holds, when the defense budget is
+	// spent or our towers die without paying back, none when broke. Enemy towers and tanks seen
+	// anywhere, or old unrepaired damage, are no reason for more towers.
+	RefreshDefenseBudget(pHouse);
+
+	// Siege and turtle archetypes lean on towers, but only once something is really coming.
 	{
-		const int pressure = (features[68] / 8) * 60 + (features[65] / 6) * 25 + (features[29] > 0 ? 200 : 0)
-			+ (features[31] > 0 ? 250 : 0) + ((pExt->NeuralAI_Archetype == 2 || pExt->NeuralAI_Archetype == 4) ? 200 : 0);
+		const int defensePressure = GetMacroState(pHouse).DefensePressure;
+		const int pressure = defensePressure
+			+ ((defensePressure >= 60 && (pExt->NeuralAI_Archetype == 2 || pExt->NeuralAI_Archetype == 4)) ? 120 : 0);
 
 		if (pressure >= 150)
 			expScores[7] += std::min(680, pressure);
 	}
 
-	if (pHouse->NumAirpads > 0 || pHouse->OwnedAircraft >= 2 || features[66] > 20 || features[24] > 0
-		|| pExt->NeuralAI_Archetype == 6)
-	{
-		expScores[8] += 450; // Expert 8: Airforce & Sky Dominance
-	}
+	if (lowProfile && pHouse->OwnedBuildings >= 5)
+		expScores[7] += 120;
 
-	if (features[26] > 0 || features[96] > 0 || features[97] > 0 || features[79] > 0 || pExt->NeuralAI_Archetype == 7)
-	{
-		expScores[9] += 430; // Expert 9: Urban Garrison & Allied Coalition Warfare
-	}
+	// Expert 8: Airforce & Sky Dominance, graded by real air work (fog-fair): our armed aircraft,
+	// known targets a strike can reach past known anti-air, enemy air seen that our interceptors
+	// can answer (up to 760). Owning an airfield or seeing enemy air used to give 450 for free, so
+	// it ran in houses with one aircraft or none (enemy air alone is anti-air defense work).
+	const int airForceOpportunity = AirForceOpportunity(pHouse);
+	expScores[8] += airForceOpportunity + (pExt->NeuralAI_Archetype == 6 ? 120 : 0);
+
+	// Expert 9: Urban Garrison & Allied Coalition Warfare, graded by the work there is for it now
+	// (fog-fair): known buildings worth holding and occupiers to fill them, enemy garrisons seen
+	// near our base, battle bunkers to man, garrisons to evacuate, allies to rescue or join (up to
+	// 720). It used to get +430 whenever any occupiable building stood anywhere on the map.
+	const int urbanOpportunity = UrbanOpportunity(pHouse);
+	expScores[9] += urbanOpportunity + (pExt->NeuralAI_Archetype == 7 ? 200 : 0);
 
 	// Common-sense vetoes: an expert that cannot do its job here is never chosen, whatever the
-	// learned bias says. Airforce with no aircraft we could ever build, own or fight; Urban with no
-	// building to occupy, no garrison and no allied coalition; Expansion on a map without any
-	// ore field or capturable tech.
+	// learned bias says. Airforce with no air work (no armed aircraft, no target or enemy air it
+	// could answer, unless archetype 6 can still build its air force); Urban with no building to
+	// occupy, no garrison and no allied coalition; Economy with no trouble to fix; Expansion with
+	// no free field it knows and can take; Special Operations with nothing to capture, spy or bridge.
 	std::array<bool, 10> vetoed {};
-	vetoed[8] = pHouse->OwnedAircraft == 0 && pHouse->NumAirpads == 0 && features[66] <= 20 && !HouseCanEverFieldAircraft(pHouse);
-	vetoed[9] = features[26] == 0 && features[79] == 0 && features[96] == 0 && features[97] == 0
-		&& pExt->NeuralAI_Archetype != 7;
-	vetoed[6] = GetOreFields().empty() && features[25] == 0;
+	vetoed[0] = economyMacro.EconomyTrouble == 0;
+	vetoed[4] = specOpsOpportunity == 0 && pExt->NeuralAI_Archetype != 1;
+	vetoed[8] = airForceOpportunity == 0 && (pExt->NeuralAI_Archetype != 6 || !HouseCanEverFieldAircraft(pHouse));
+	vetoed[9] = urbanOpportunity == 0 && pExt->NeuralAI_Archetype != 7;
+	vetoed[6] = economyMacro.ExpansionOpportunity == 0;
 
 	const int curArch = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);
 	const int previousExpert = std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1);
@@ -514,7 +549,8 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			? (arch == 4 ? 1150 : 850)
 			: -600));
 
-	outScores[11] = ClampInt16(outScores[11] + ((pHouse->IsTiberiumShort || features[14] < 0) ? 1450 : -300));
+	// Slot 11: silos, only while storage really limits our income (Refinery.UseStorage, nearly full).
+	outScores[11] = ClampInt16(outScores[11] + (economyMacro.StorageNearlyFull ? 1450 : -300));
 
 	// Macro Scaling & Tech/Defense/Naval Bias Slots (12..15): 12: Dual Factory
 	// Production Scaling (2nd War Factory / 2nd Barracks) 13: Early Tech Center &
@@ -619,6 +655,32 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	else
 	{
 		outScores[22] = -3000; // Immune Bridges ON: never waste ammo shooting bridges
+	}
+
+	// Expert 4 in charge: train the engineers and spies its work needs and back the bridge
+	// planner's repair and demolition calls over the generic strength checks.
+	if (activeExpert == 4)
+	{
+		int techValue = 0;
+		int spyTargets = 0;
+		bool bridgeRepair = false;
+		bool bridgeDemolition = false;
+		GetSpecOpsWork(pHouse, techValue, spyTargets, bridgeRepair, bridgeDemolition);
+
+		if (techValue > 0 || bridgeRepair)
+			outScores[18] = ClampInt16(outScores[18] + 300 + std::min(400, techValue * 60));
+
+		if (techValue > 0)
+			outScores[36] = ClampInt16(outScores[36] + 300);
+
+		if (spyTargets > 0)
+			outScores[19] = ClampInt16(outScores[19] + 250 + spyTargets * 80);
+
+		if (bridgeRepair && features[18] > 0)
+			outScores[21] = ClampInt16(outScores[21] + 700);
+
+		if (bridgeDemolition && features[134] > 0)
+			outScores[22] = ClampInt16(outScores[22] + 600);
 	}
 
 	outScores[24] = ClampInt16(outScores[24] + 800 + ((arch == 3 || arch == 4) ? 320 : 0)
@@ -729,6 +791,16 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	else
 		outScores[31] = ClampInt16(outScores[31] - 1200);
 
+	// Expert 0 in charge: power plants while low power lasts, silos while storage is nearly full.
+	if (activeExpert == 0)
+	{
+		if (economyMacro.LowPowerSinceFrame >= 0)
+			outScores[0] = ClampInt16(outScores[0] + 600);
+
+		if (economyMacro.StorageNearlyFull)
+			outScores[11] = ClampInt16(outScores[11] + 900);
+	}
+
 	// Expert 6 & Expert 7 spatial specialization boosts
 	if (activeExpert == 6)
 	{
@@ -741,6 +813,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		outScores[38] = ClampInt16(outScores[38] + 320);
 
 		outScores[31] = ClampInt16(outScores[31] + 300);
+
+		// The claimed field lies beyond the crawl: an expansion MCV takes it.
+		if (economyMacro.ClaimNeedsMCV)
+			outScores[30] = ClampInt16(outScores[30] + 450);
 	}
 	else if (activeExpert == 7)
 	{
