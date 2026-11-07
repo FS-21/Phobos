@@ -218,6 +218,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Highest unit tier allowed now (super units come step by step).
 	UpdateUnitTierCap(pHouse);
 
+	// Factories the bank can pay for (the production queues spend at a fixed rate per factory).
+	UpdateBankGovernor(pHouse);
+
 	// Expert 0: economy peaks and crisis actions (blackout, broke, harvester balance).
 	UpdateEconomyCrisis(pHouse);
 
@@ -898,6 +901,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& bankMacro.ConsecutivePlacementFailures <= 2 && bankWindowOpen && !expansionMcvUnderway)
 			? money / 15000
 			: 0;
+
+		// Bank governor (UpdateBankGovernor): the factories it wants come past the caps, never into
+		// a streak of failed placements. The best of them is remembered for the pick after the loop.
+		const bool bankGovernorBuilds = bankMacro.BankGovernorActive && bankMacro.ConsecutivePlacementFailures <= 2;
+		int bankFactoryIdx = -1;
+		int bankFactoryBest = -32000;
+
+		// The queue with the largest deficit first, then the best score among its factories.
+		auto const rememberBankFactory = [&bankFactoryIdx, &bankFactoryBest](BuildingTypeClass* pType, int score, int deficit)
+		{
+			const int rank = std::min(deficit, 20) * 10000 + std::clamp(score, -9999, 9999);
+
+			if (rank > bankFactoryBest)
+			{
+				bankFactoryBest = rank;
+				bankFactoryIdx = pType->ArrayIndex;
+			}
+		};
 
 		// Offensive fronts: forward stones alive raise the factory caps (2 more per 4 stones, up
 		// to 8), so the hot zones keep receiving factories after the home base has its share.
@@ -1897,13 +1918,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const bool isGroundFactoryOrBarracks = pBld->Factory == AbstractType::InfantryType
 				|| (pBld->Factory == AbstractType::UnitType && !pBld->Naval);
 
+			// The bank governor's copies stay: a bank that outgrows the queues pays for both, and the
+			// tech keeps the windows the governor leaves (bankFactoryWindow).
 			if (isGroundFactoryOrBarracks && owned >= 1 && GetMacroState(pHouse).HasBuildableTechUnlock)
 			{
 				const bool outpostNeedsCopy = (pBld->Factory == AbstractType::InfantryType)
 					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
 					: (forwardConYardNeedsWarFactory || frontNeedsWarFactory);
+				const bool bankNeedsCopy = bankGovernorBuilds
+					&& ((pBld->Factory == AbstractType::InfantryType)
+						? BankFactoryDeficit(pHouse, BankQueue::Infantry, pHouse->NumBarracks) > 0
+						: BankFactoryDeficit(pHouse, BankQueue::Vehicle, pHouse->NumWarFactories) > 0);
 
-				if (!outpostNeedsCopy)
+				if (!outpostNeedsCopy && !bankNeedsCopy)
 					continue;
 			}
 
@@ -2063,7 +2090,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const int effectiveMaxBarracks = forwardConYardNeedsBarracks
 					? std::max(maxBarracks + 2, 5) + pHouse->NumConYards
 					: ((needsSteppingStoneCrawlToOre && pBld->BaseNormal) ? std::max(maxBarracks + 1, 4) : maxBarracks);
-				if (owned >= effectiveMaxBarracks)
+				const int bankBarracks = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Infantry, pHouse->NumBarracks) : 0;
+
+				if (owned >= effectiveMaxBarracks && bankBarracks == 0)
 					continue;
 
 				// Slot 82 (Cross-Faction Tech Tree): If we already own our native
@@ -2094,12 +2123,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 									// Ore / Frontline!
 					}
 				}
+
+				if (bankBarracks > 0)
+					rememberBankFactory(pBld, score, bankBarracks);
 			}
 			else if (pBld->Factory == AbstractType::UnitType && !pBld->Naval)
 			{
 				const int effectiveMaxWarFactories
 					= forwardConYardNeedsWarFactory ? std::max(maxWarFactories + 2, 6) + pHouse->NumConYards : maxWarFactories;
-				if (owned >= effectiveMaxWarFactories)
+				const int bankWarFactories = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Vehicle, pHouse->NumWarFactories) : 0;
+
+				if (owned >= effectiveMaxWarFactories && bankWarFactories == 0)
 					continue;
 
 				// Slot 82 (Cross-Faction Tech Tree): If we already own our native War
@@ -2134,10 +2168,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (ownedWarFactories < ecoWarFactoryCap && money >= 2000)
 						score += 420;
 				}
+
+				if (bankWarFactories > 0)
+					rememberBankFactory(pBld, score, bankWarFactories);
 			}
 			else if (pBld->Factory == AbstractType::UnitType && pBld->Naval)
 			{
-				if (owned >= maxShipyards + (islandYardNeedsShipyard ? 1 : 0))
+				const int bankShipyards = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Naval, pHouse->NumShipyards) : 0;
+
+				if (owned >= maxShipyards + (islandYardNeedsShipyard ? 1 : 0) && bankShipyards == 0)
 					continue;
 
 				if (!(HouseNeedsNaval(pHouse) || islandYardNeedsShipyard) || CachedTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
@@ -2155,10 +2194,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (ownedShipyards < maxEnemyShipyards && ownedShipyards >= 1 && money >= 1800)
 					score += 400;
+
+				if (bankShipyards > 0)
+					rememberBankFactory(pBld, score, bankShipyards);
 			}
 			else if (pBld->Factory == AbstractType::AircraftType)
 			{
-				if (owned >= maxAirpads)
+				const int bankAirpads = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Aircraft, pHouse->NumAirpads) : 0;
+
+				if (owned >= maxAirpads && bankAirpads == 0)
 					continue;
 
 				if (owned == 0 && pHouse->NumAirpads >= 1 && pHouse->NumAirpads < 4 && SlotGate(scores[82], 60, 82))
@@ -2173,6 +2217,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (ownedAirpads < maxEnemyAirpads && hasTechCenter && money >= 2000)
 						score += 350;
 				}
+
+				if (bankAirpads > 0)
+					rememberBankFactory(pBld, score, bankAirpads);
 			}
 			else if (pBld->UnitRepair)
 			{
@@ -2458,6 +2505,26 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestBldScore = score;
 				bestBldIdx = pBld->ArrayIndex;
 			}
+		}
+
+		// Bank governor: in its share of the 900-frame windows the next structure is the factory it
+		// wants most; the other windows keep the usual picks (tech, defenses, power, refineries).
+		// Building time is what a big bank lacks, so the share grows with the surplus: two windows
+		// in four, three from 50000 credits beyond the reserve, all from 100000. Under attack or
+		// facing a frontline threat none below 30000, one from 30000, two from 100000. Never while
+		// restoring income.
+		const bool bankUnderThreat = wasRecentlyAttacked || effectiveFrontlineThreat;
+		const int bankSurplus = bankMacro.BankSurplus;
+		const int bankWindowShare = bankUnderThreat ? (bankSurplus >= 100000 ? 2 : (bankSurplus >= 30000 ? 1 : 0))
+			: (bankSurplus >= 100000 ? 4 : (bankSurplus >= 50000 ? 3 : 2));
+		const bool bankFactoryWindow = (bankWindow % 4) < bankWindowShare;
+
+		if (bankFactoryIdx >= 0 && bestBldIdx != bankFactoryIdx && bankFactoryWindow && hasActiveBuildingIncome)
+		{
+			bestBldIdx = bankFactoryIdx;
+
+			if (IsAITickWindow(450, evalDelay))
+				CountDecision(NeuralDecision::BankFactoryPick, pHouse->ArrayIndex);
 		}
 
 		// Ally site plans (Ally Backup, Ally Forward Outpost) ask for one building next to an ally's
@@ -3281,6 +3348,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	};
 
+	// Bank governor (UpdateBankGovernor): one more ConYard for the building queue on land maps,
+	// past the expansion gates; the MCV unfolds near the base (wantsMultiConYardSpeed in Micro).
+	const bool bankWantsYard = GetMacroState(pHouse).BankGovernorActive && GetMacroState(pHouse).BankWantedYards > pHouse->NumConYards
+		&& pHouse->NumConYards >= 1 && features[21] == 0;
+	int bankYardMcvIdx = -1;
+
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
 		if (!pUnit || !CanBuildUnderHumanRules(pHouse, pUnit))
@@ -3299,15 +3372,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				|| pUnit->MovementZone == MovementZone::AmphibiousDestroyer
 				|| pUnit->MovementZone == MovementZone::AmphibiousCrusher || pUnit->MovementZone == MovementZone::Fly
 				|| pUnit->JumpJet);
-			if (ownsUndeployedMCV || (pHouse->NumConYards >= 1 && scores[30] < 400 && scores[81] < 85)
-				|| pHouse->NumConYards >= maxAllowedConYards
-				|| (pHouse->NumConYards >= 1 && (pHouse->Buildings.Count >= 35 || ownedGroundCombatUnits + ownedNavalOrAmphibCombatUnits >= 40)
-					&& (freeOreFieldsForYards == 0 || money < 5000)))
+			if (ownsUndeployedMCV
+				|| (!bankWantsYard
+					&& ((pHouse->NumConYards >= 1 && scores[30] < 400 && scores[81] < 85)
+						|| pHouse->NumConYards >= maxAllowedConYards
+						|| (pHouse->NumConYards >= 1
+							&& (pHouse->Buildings.Count >= 35 || ownedGroundCombatUnits + ownedNavalOrAmphibCombatUnits >= 40)
+							&& (freeOreFieldsForYards == 0 || money < 5000)))))
 			{
 				continue;
 			}
 
-			if (pHouse->NumConYards >= 1 && features[20] <= 6 && !hasUncolonizedIslandTarget)
+			if (!bankWantsYard && pHouse->NumConYards >= 1 && features[20] <= 6 && !hasUncolonizedIslandTarget)
 				continue;
 
 			// A house with a ConYard but nothing gathering rebuilds its income first (a harvester, or a
@@ -3454,7 +3530,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const int ownedUnitWithConv = CountOwnedUnitWithConversions(pHouse, pUnit);
 		if (!isEconomyUnit && !isMCV && !isKeyStructureDeployer && !isAmphibTransport)
 		{
-			const int maxPerCombatType = pUnit->Naval ? 10 : 18;
+			// A bank beyond the reserve (UpdateBankGovernor) buys a bigger army: the queues would
+			// otherwise stop at the caps while the money piles up.
+			const int bankArmyRoom = GetMacroState(pHouse).BankSurplus > 0 ? 1 : 0;
+			const int maxPerCombatType = pUnit->Naval ? 10 + 2 * bankArmyRoom : 18 + 6 * bankArmyRoom;
 			if (ownedUnitWithConv >= maxPerCombatType)
 				continue;
 
@@ -3462,7 +3541,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pUnit->Naval && ownedNavalOrAmphibCombatUnits >= maxNavalFleet)
 				continue;
 
-			if (!pUnit->Naval && ownedGroundCombatUnits >= 50)
+			if (!pUnit->Naval && ownedGroundCombatUnits >= 50 + 20 * bankArmyRoom)
 				continue;
 		}
 
@@ -3558,6 +3637,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					? 12000
 					: (scores[30] + (canSafelySaveForExpansionMCV ? 1800 : 0)
 						+ ((wantsArchipelagoExpansion && hasIslandMcvLift) ? 900 : 0));
+
+				if (bankWantsYard)
+					bankYardMcvIdx = pUnit->ArrayIndex;
 			}
 			else if (isKeyStructureDeployer)
 			{
@@ -3756,6 +3838,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestUnitIdx = pUnit->ArrayIndex;
 			}
 		}
+	}
+
+	// The governor's MCV starts in every other 900-frame window (the odd ones: the building queue
+	// takes the governor's factories in the even ones).
+	if (bankYardMcvIdx >= 0 && bestUnitIdx != bankYardMcvIdx && ((Unsorted::CurrentFrame / 900) % 2) != 0
+		&& hasActiveUnitIncome)
+	{
+		bestUnitIdx = bankYardMcvIdx;
+
+		if (IsAITickWindow(450, evalDelay))
+			CountDecision(NeuralDecision::BankYardPick, pHouse->ArrayIndex);
 	}
 
 	pExt->NeuralAI_NextUnitTarget = bestUnitIdx;
@@ -3988,7 +4081,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const bool islandInfantryQueueFull
 		= (features[21] > 0 && waitingBattalionSizeOnIslands > ownedTransportTotalCapacity + 12);
 	const int dynamicMaxInfantry = (money >= 4000 && congestedBaseInfantry < 20 && !islandInfantryQueueFull)
-		? 85
+		? (GetMacroState(pHouse).BankSurplus > 0 ? 100 : 85)
 		: ((money >= 2500 && congestedBaseInfantry < 18 && !islandInfantryQueueFull) ? 62 : 45);
 	const bool baseInfantrySaturated = (pHouse->OwnedInfantry >= dynamicMaxInfantry) || (congestedBaseInfantry >= 24);
 
@@ -4030,6 +4123,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	pExt->NeuralAI_NextInfantryTarget = bestInfIdx;
+
+	// The war factories and shipyards get the choice at once, like the barracks and airfields below
+	// (RefreshProductionIndices repeats it every 8 frames).
+	pHouse->ProducingUnitTypeIndex = pExt->NeuralAI_NextUnitTarget;
+	pExt->ProducingNavalUnitTypeIndex = pExt->NeuralAI_NextNavalTarget;
 
 	// Ares replaces HouseClass::AI_Infantry from its first instruction (and only picks a type while
 	// the index is -1), so the AI_Infantry hook of UpdateInfantryProduction never runs with Ares:
@@ -4142,6 +4240,71 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// UpdateAircraftProduction hook), so the airfields get the choice here too.
 	pHouse->ProducingAircraftTypeIndex = bestAirIdx;
 
+	// Bank telemetry: which queues stay empty while the bank is rich.
+	// 0 when one of our factories is building an object of that kind, 1 when none is although a
+	// factory building of that kind exists, -1 without such a building.
+	auto const queueFactoryIdle = [pHouse](AbstractType kind, bool naval) -> int
+	{
+		for (auto const pFactory : FactoryClass::Array)
+		{
+			if (!pFactory || pFactory->Owner != pHouse || !pFactory->Object || pFactory->OnHold)
+				continue;
+
+			auto const pObjType = pFactory->Object->GetTechnoType();
+
+			if (!pObjType || pObjType->WhatAmI() != kind
+				|| (kind == AbstractType::UnitType && static_cast<UnitTypeClass*>(pObjType)->Naval != naval))
+			{
+				continue;
+			}
+
+			return 0;
+		}
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->Type && pOwnBld->Type->Factory == kind
+				&& (kind != AbstractType::UnitType || pOwnBld->Type->Naval == naval))
+			{
+				return 1;
+			}
+		}
+
+		return -1;
+	};
+
+	if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+	{
+		auto& bank = BankStats[pHouse->ArrayIndex];
+		bank.PeakCredits = std::max(bank.PeakCredits, money);
+		bank.CreditsSum += money;
+		bank.Ticks++;
+
+		if (GetMacroState(pHouse).BankGovernorActive)
+			bank.GovernorTicks++;
+
+		if (money >= 5000)
+		{
+			bank.RichTicks++;
+			const int targets[] = { pExt->NeuralAI_NextBuildingTarget, bestUnitIdx, bestNavalIdx, bestInfIdx, bestAirIdx };
+			const int idle[] = { queueFactoryIdle(AbstractType::BuildingType, false), queueFactoryIdle(AbstractType::UnitType, false),
+				queueFactoryIdle(AbstractType::UnitType, true), queueFactoryIdle(AbstractType::InfantryType, false),
+				queueFactoryIdle(AbstractType::AircraftType, false) };
+
+			for (size_t q = 0; q < static_cast<size_t>(NeuralBankQueue::Count); ++q)
+			{
+				if (idle[q] < 0)
+					continue;
+
+				if (targets[q] < 0)
+					bank.NoTarget[q]++;
+
+				if (idle[q] > 0)
+					bank.FactoryIdle[q]++;
+			}
+		}
+	}
+
 	if (IsAITickWindow(450, evalDelay))
 	{
 		const int bldIdx = pExt->NeuralAI_NextBuildingTarget;
@@ -4169,6 +4332,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				"| NextBld=%s | NextUnit=%s | NextNaval=%s | NextInf=%s | NextAir=%s\n",
 			Unsorted::CurrentFrame, pHouse->ArrayIndex, (pHouse->Type && pHouse->Type->ID[0]) ? pHouse->Type->ID : "AI",
 			pExt->NeuralAI_ActiveExpert, pExt->NeuralAI_Archetype, money, bldName, unitName, navalName, infName, airName);
+
+		// Bank governor state (UpdateBankGovernor): army caps, factory counts and what the queues
+		// can spend against the income and the surplus to spend (credits per 1000 frames).
+		auto const& govMacro = GetMacroState(pHouse);
+		Debug::Log("[NeuralAI] Bank | House #%d | Spent=%d | Gnd=%d Nav=%d Inf=%d/%d Air=%d Blds=%d | cy=%d wf=%d rax=%d air=%d "
+				"ship=%d | governor=%d income=%d capacity=%d needed=%d surplus=%d wants=%d/%d/%d/%d yards=%d\n",
+			pHouse->ArrayIndex, pHouse->CreditsSpent, ownedGroundCombatUnits, ownedNavalOrAmphibCombatUnits, pHouse->OwnedInfantry,
+			dynamicMaxInfantry, pHouse->OwnedAircraft, pHouse->Buildings.Count, pHouse->NumConYards, pHouse->NumWarFactories,
+			pHouse->NumBarracks, pHouse->NumAirpads, pHouse->NumShipyards, govMacro.BankGovernorActive ? 1 : 0,
+			govMacro.BankIncomeRate, govMacro.BankSpendCapacity, govMacro.BankSpendNeeded, govMacro.BankSurplus,
+			govMacro.BankWantedFactories[0], govMacro.BankWantedFactories[1], govMacro.BankWantedFactories[2],
+			govMacro.BankWantedFactories[3], govMacro.BankWantedYards);
 	}
 
 	return evalDelay;
@@ -4204,6 +4379,62 @@ void NeuralAI::UpdateInfantryProduction(HouseClass* pHouse)
 		NeuralAI::UpdateExpertAI(pHouse);
 
 	pHouse->ProducingInfantryTypeIndex = pExt->NeuralAI_NextInfantryTarget;
+}
+
+// The house production check (every 8 frames) hands every queue the pick of the last AI tick and
+// skips the legacy AI_Building / AI_Unit / AI_Infantry / AI_Aircraft chain. That chain ran whenever
+// one queue had no free factory (an airfield with every dock taken), and the Ares AI_Infantry and
+// AI_Aircraft in it cleared the Neural AI picks, so barracks and airfields sat idle with money in
+// the bank. A queue whose object just left also gets its next pick at once instead of at the next
+// AI tick (15 to 105 frames by difficulty), like a human's repeat queue.
+void NeuralAI::RefreshProductionIndices(HouseClass* pHouse)
+{
+	NeuralAI::UpdateBuildingProduction(pHouse);
+	NeuralAI::UpdateUnitProduction(pHouse);
+	NeuralAI::UpdateInfantryProduction(pHouse);
+	NeuralAI::UpdateAircraftProduction(pHouse);
+}
+
+// One-off picks (MCVs and other deployers, harvesters, engineers, spies, unarmed transports and
+// support units) are never repeated by RefreshProductionIndices: the next AI tick decides again
+// whether another one is needed.
+void NeuralAI::OnTechnoProduced(HouseClass* pHouse, TechnoClass* pTechno)
+{
+	auto const pType = pTechno ? pTechno->GetTechnoType() : nullptr;
+
+	if (!pType || pTechno->WhatAmI() == AbstractType::Building)
+		return;
+
+	auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
+	auto const pInfType = abstract_cast<InfantryTypeClass*>(pType);
+	auto const pWeapon = pType->GetWeapon(0);
+	const bool armed = pWeapon && pWeapon->WeaponType && pWeapon->WeaponType->Damage > 0;
+	const bool oneOff = !armed || (pUnitType && (pUnitType->DeploysInto || pUnitType->Harvester || pUnitType->ResourceGatherer))
+		|| (pInfType && (pInfType->Engineer || IsSpyInfantryType(pInfType)));
+
+	if (!oneOff)
+		return;
+
+	auto const pExt = HouseExt::Fetch(pHouse);
+	const int index = pType->GetArrayIndex();
+
+	if (pUnitType)
+	{
+		if (pExt->NeuralAI_NextUnitTarget == index)
+			pExt->NeuralAI_NextUnitTarget = -1;
+
+		if (pExt->NeuralAI_NextNavalTarget == index)
+			pExt->NeuralAI_NextNavalTarget = -1;
+	}
+	else if (pInfType)
+	{
+		if (pExt->NeuralAI_NextInfantryTarget == index)
+			pExt->NeuralAI_NextInfantryTarget = -1;
+	}
+	else if (pExt->NeuralAI_NextAircraftTarget == index)
+	{
+		pExt->NeuralAI_NextAircraftTarget = -1;
+	}
 }
 
 void NeuralAI::UpdateAircraftProduction(HouseClass* pHouse)

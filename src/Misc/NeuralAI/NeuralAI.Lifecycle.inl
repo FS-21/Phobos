@@ -781,6 +781,7 @@ void NeuralAI::OnScenarioStart()
 
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;
+	BankStats.fill(NeuralBankStat {});
 	MapClassApplied = false;
 	OreFieldCache.clear();
 	OreFieldCacheFrame = -100000;

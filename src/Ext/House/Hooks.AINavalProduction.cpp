@@ -1,6 +1,7 @@
 #include "Body.h"
 
 #include <Ext/Building/Body.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 // AI Naval queue bugfix hooks
 
@@ -117,6 +118,14 @@ DEFINE_HOOK(0x4F91A4, HouseClass_AI_BuildingProductionCheck, 0x6)
 	enum { SkipGameCode = 0x4F9265, CheckBuildingProduction = 0x4F9240 };
 
 	GET(HouseClass* const, pThis, ESI);
+
+	// Neural AI houses pick for every queue themselves (see RefreshProductionIndices).
+	if (NeuralAI::IsEnabledForHouse(pThis))
+	{
+		NeuralAI::RefreshProductionIndices(pThis);
+
+		return SkipGameCode;
+	}
 
 	auto const pExt = HouseExt::Fetch(pThis);
 

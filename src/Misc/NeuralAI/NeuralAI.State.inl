@@ -335,6 +335,21 @@ namespace
 		int BankWindow { -1 };
 		int BankWindowFactories { 0 };
 		int BankWindowFailures { 0 };
+		// Bank governor (UpdateBankGovernor, every 450 frames): credits earned per 1000 frames
+		// (smoothed), the earned total and frame of the last sample, and while the bank beyond
+		// the reserve outgrows what the production queues can spend, the factory count wanted
+		// per queue (BankQueue order: vehicle, infantry, aircraft, naval).
+		int BankIncomeFrame { -100000 };
+		int BankIncomeEarned { 0 };
+		int BankIncomeRate { -1 };
+		bool BankGovernorActive { false };
+		int BankSpendCapacity { 0 };
+		int BankSpendNeeded { 0 };
+		// Credits held beyond the reserve at the last sample (0 when none): army caps grow with it.
+		int BankSurplus { 0 };
+		std::array<int, 4> BankWantedFactories {};
+		// ConYard count wanted by the governor for the building queue (0 when none).
+		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
 		std::vector<DWORD> FerryingMcvs {};
 		// Field scouting (UpdateFieldScouting): the current scout and the free fields visited.
@@ -539,6 +554,15 @@ namespace
 			this->BankWindow = -1;
 			this->BankWindowFactories = 0;
 			this->BankWindowFailures = 0;
+			this->BankIncomeFrame = -100000;
+			this->BankIncomeEarned = 0;
+			this->BankIncomeRate = -1;
+			this->BankGovernorActive = false;
+			this->BankSpendCapacity = 0;
+			this->BankSpendNeeded = 0;
+			this->BankSurplus = 0;
+			this->BankWantedFactories.fill(0);
+			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
 			this->FieldScoutUid = 0;
 			this->LastFieldScoutFrame = -100000;
