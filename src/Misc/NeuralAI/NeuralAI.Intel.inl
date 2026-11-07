@@ -361,18 +361,34 @@ namespace
 			return;
 
 		const CellStruct coords = pTechno->GetMapCoords();
-		bool nearOurBase = false;
+		auto& macro = GetMacroState(pHouse);
+
+		// Where it was at its previous sighting, for the route heat (closing in or not).
+		CellStruct prevCoords = CellStruct::Empty;
+		int prevFrame = -1;
+
+		if (auto const known = macro.EnemySightings.find(pTechno->UniqueID); known != macro.EnemySightings.end())
+		{
+			prevCoords = known->second.LastCoords;
+			prevFrame = known->second.LastSeenFrame;
+		}
+
+		double distNow = 1.0e9;
+		double distPrev = 1.0e9;
 
 		for (auto const pOwnB : pHouse->Buildings)
 		{
-			if (pOwnB && !pOwnB->InLimbo && pOwnB->IsAlive && coords.DistanceFrom(pOwnB->GetMapCoords()) <= 18.0)
-			{
-				nearOurBase = true;
-				break;
-			}
+			if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive)
+				continue;
+
+			const CellStruct bc = pOwnB->GetMapCoords();
+			distNow = std::min(distNow, coords.DistanceFrom(bc));
+
+			if (prevCoords != CellStruct::Empty)
+				distPrev = std::min(distPrev, prevCoords.DistanceFrom(bc));
 		}
 
-		auto& macro = GetMacroState(pHouse);
+		const bool nearOurBase = distNow <= 18.0;
 		auto& sighting = macro.EnemySightings[pTechno->UniqueID];
 		sighting.Category = ClassifyEnemyForce(pTechno);
 		sighting.Value = GetCombatValueOfType(pType, false);
@@ -389,6 +405,9 @@ namespace
 			if (sector >= 0)
 				macro.AttackSectorWeight[sector] += sighting.Value;
 		}
+
+		if (sighting.Category != EnemyForceCategory::Air && sighting.Category != EnemyForceCategory::Naval)
+			RecordRouteHeatSighting(pHouse, pTechno, coords, prevCoords, prevFrame, distNow, distPrev);
 
 		sighting.NearOurBase = sighting.NearOurBase || nearOurBase;
 		sighting.LastCoords = coords;

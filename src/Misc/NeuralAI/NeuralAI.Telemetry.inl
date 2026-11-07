@@ -1201,7 +1201,92 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 		jsonBuf.append("  ],\n  \"oreFields\": [");
 		jsonBuf.append(oreFieldsText);
-		jsonBuf.append("],\n  \"radar\": [");
+		jsonBuf.append("],\n  \"routeHeat\": [");
+
+		// Route heat (NeuralAI.RouteHeat.inl), one entry per house that has any: bucket count and
+		// total heat, the 24 hottest buckets [rx, ry, cellX, cellY, heat], the defense and ambush
+		// spots [rx, ry, cellX, cellY, heat, width, flags, baseDist, cover, score] and the towers
+		// placed covering a defense spot [rx, ry, cellX, cellY, spotX, spotY].
+		{
+			bool firstHouse = true;
+			char routeCell[48];
+			char routeBuf[160];
+
+			for (int hi = 0; hi < 32; ++hi)
+			{
+				auto const& routeHeat = RouteHeatStates[hi];
+
+				if (routeHeat.Buckets.empty())
+					continue;
+
+				std::vector<std::pair<int, CellStruct>> hottest;
+				int totalHeat = 0;
+
+				for (auto const& [index, bucket] : routeHeat.Buckets)
+				{
+					const int heat = DecayedRouteHeat(bucket);
+					totalHeat += heat;
+
+					if (heat <= 0)
+						continue;
+
+					const CellStruct cell = bucket.RepCell != CellStruct::Empty
+						? bucket.RepCell
+						: CellStruct { static_cast<short>((index % RouteHeatBucketsPerRow) * RouteHeatBucketCells + RouteHeatBucketCells / 2),
+							static_cast<short>((index / RouteHeatBucketsPerRow) * RouteHeatBucketCells + RouteHeatBucketCells / 2) };
+					hottest.emplace_back(heat, cell);
+				}
+
+				std::stable_sort(hottest.begin(), hottest.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+
+				if (hottest.size() > 24)
+					hottest.resize(24);
+
+				std::snprintf(routeBuf, sizeof(routeBuf), "%s\n    {\"idx\": %d, \"buckets\": %d, \"heat\": %d, \"cells\": [",
+					firstHouse ? "" : ",", hi, static_cast<int>(routeHeat.Buckets.size()), totalHeat);
+				jsonBuf.append(routeBuf);
+				firstHouse = false;
+
+				for (size_t k = 0; k < hottest.size(); ++k)
+				{
+					projectWithCell(hottest[k].second, routeCell, sizeof(routeCell));
+					std::snprintf(routeBuf, sizeof(routeBuf), "%s[%s,%d]", k ? "," : "", routeCell, hottest[k].first);
+					jsonBuf.append(routeBuf);
+				}
+
+				auto appendSpots = [&](const char* name, const std::vector<NeuralRouteSpot>& spots)
+				{
+					std::snprintf(routeBuf, sizeof(routeBuf), "], \"%s\": [", name);
+					jsonBuf.append(routeBuf);
+
+					for (size_t k = 0; k < spots.size(); ++k)
+					{
+						auto const& spot = spots[k];
+						projectWithCell(spot.Cell, routeCell, sizeof(routeCell));
+						std::snprintf(routeBuf, sizeof(routeBuf), "%s[%s,%d,%d,%d,%d,%d,%d]", k ? "," : "", routeCell, spot.Heat, spot.Width,
+							spot.Flags, spot.BaseDist, spot.Cover, spot.Score);
+						jsonBuf.append(routeBuf);
+					}
+				};
+
+				appendSpots("defenseSpots", routeHeat.DefenseSpots);
+				appendSpots("ambushSpots", routeHeat.AmbushSpots);
+				jsonBuf.append("], \"towers\": [");
+
+				for (size_t k = 0; k < routeHeat.RouteTowers.size(); ++k)
+				{
+					auto const& [towerCell, spotCell] = routeHeat.RouteTowers[k];
+					projectWithCell(towerCell, routeCell, sizeof(routeCell));
+					std::snprintf(routeBuf, sizeof(routeBuf), "%s[%s,%d,%d]", k ? "," : "", routeCell, static_cast<int>(spotCell.X),
+						static_cast<int>(spotCell.Y));
+					jsonBuf.append(routeBuf);
+				}
+
+				jsonBuf.append("]}");
+			}
+		}
+
+		jsonBuf.append("\n  ],\n  \"radar\": [");
 
 		auto sanitizeJsonStr = [](const char* src, char* out, size_t outCap)
 		{

@@ -1599,6 +1599,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
+	// Route heat spot this ground tower is anchored to cover (Empty: none).
+	CellStruct routeDefenseSpot = CellStruct::Empty;
+
 	// Strategic plan anchors (UpdateStrategicPlans): defenses of a new island ConYard go next to
 	// it (Island Hold), a second repair station next to our structure closest to the front
 	// (Forward Repair). A defense needed where we are being attacked keeps priority.
@@ -1607,20 +1610,40 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 		const int mainAttackSector = isCombatDefense ? GetMainAttackSector(pHouse) : -1;
 
+		// Route heat: the hottest approach our towers do not cover yet (chokepoints first) is a
+		// better target than the side we were attacked from. Only spots this tower can reach from
+		// a cell next to our structures (its range plus its Adjacent distance).
+		const int routeReachCells = GroundRangeOf(pBuildingType) / Unsorted::LeptonsPerCell
+			+ std::max(1, static_cast<int>(pBuildingType->Adjacent)) + 1;
+		auto const pRouteSpot = (isCombatDefense && !isPureAA && directionalAttackedBld == CellStruct::Empty)
+			? BestRouteDefenseSpot(pHouse, routeReachCells)
+			: nullptr;
+
 		if (isCombatDefense && directionalAttackedBld == CellStruct::Empty
 			&& planMacro.IslandHoldUntilFrame > Unsorted::CurrentFrame && planMacro.IslandHoldCell != CellStruct::Empty)
 		{
 			center = planMacro.IslandHoldCell;
 		}
-		else if (mainAttackSector >= 0 && directionalAttackedBld == CellStruct::Empty
+		else if ((pRouteSpot || mainAttackSector >= 0) && directionalAttackedBld == CellStruct::Empty
 			&& center.DistanceFrom(GetHouseHomeCell(pHouse)) <= 24.0) // Forward turret creep keeps its own anchor.
 		{
-			// Attack route memory: fortify the side we have really been attacked from, anchored
-			// at our structure closest to that side of the base.
+			// Attack route memory: fortify the route the enemy really takes (else the side we have
+			// really been attacked from), anchored at our structure closest to it.
 			const CellStruct home = GetHouseHomeCell(pHouse);
-			const int reach = (AttackSectorDX[mainAttackSector] != 0 && AttackSectorDY[mainAttackSector] != 0) ? 10 : 14;
-			const CellStruct routePoint { static_cast<short>(home.X + AttackSectorDX[mainAttackSector] * reach),
-				static_cast<short>(home.Y + AttackSectorDY[mainAttackSector] * reach) };
+			CellStruct routePoint = CellStruct::Empty;
+
+			if (pRouteSpot)
+			{
+				routePoint = pRouteSpot->Cell;
+				routeDefenseSpot = routePoint;
+			}
+			else
+			{
+				const int reach = (AttackSectorDX[mainAttackSector] != 0 && AttackSectorDY[mainAttackSector] != 0) ? 10 : 14;
+				routePoint = CellStruct { static_cast<short>(home.X + AttackSectorDX[mainAttackSector] * reach),
+					static_cast<short>(home.Y + AttackSectorDY[mainAttackSector] * reach) };
+			}
+
 			const int homeZoneForRoute = MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false);
 			double bestAnchorDist = center.DistanceFrom(routePoint);
 			bool moved = false;
@@ -1636,7 +1659,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 				const CellStruct bc = pOwnBld->GetMapCoords();
 
-				if (bc.DistanceFrom(home) > 24.0
+				if ((bc.DistanceFrom(home) > 24.0 && (!pRouteSpot || bc.DistanceFrom(routePoint) > 16.0))
 					|| MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pOwnBld->OnBridge) != homeZoneForRoute)
 				{
 					continue;
@@ -1867,6 +1890,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	CellStruct bestCandidate = CellStruct::Empty;
 	int bestSpatialScore = -999999;
+
+	// Ground reach of this tower, for the route heat coverage score.
+	const int routeTowerRangeCells = isCombatDefense ? GroundRangeOf(pBuildingType) / Unsorted::LeptonsPerCell : 0;
 
 	// Base spread against superweapons (point 43): while an enemy owns a superweapon with a
 	// public countdown (ShowTimer=yes, visible to every player), our expensive non-defense
@@ -2986,7 +3012,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 							spatialScore -= distToEnemy * 16;
 						}
 					}
-					else if (isGroundDefense && enemyTargetCell != CellStruct::Empty)
+					else if (isGroundDefense && enemyTargetCell != CellStruct::Empty && routeDefenseSpot == CellStruct::Empty)
 					{
 						// Priority 3: Frontline perimeter facing the enemy
 						const int distToEnemy
@@ -3006,6 +3032,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						if (radius >= 5 && radius <= 11)
 							spatialScore += 180;
 					}
+
+					// Route heat: cover the approaches the enemy really takes, above all the chosen spot.
+					if (isGroundDefense && routeTowerRangeCells > 0)
+						spatialScore += RouteDefenseCellShift(pHouse, candidate, routeTowerRangeCells, routeDefenseSpot);
 				}
 				else if (isSupportRadiusBld)
 				{
@@ -3697,6 +3727,20 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 			bool defPureAA = false;
 			bool defUnarmedBunker = false;
 			GetDefenseCapabilities(pBuildingType, defAntiInf, defAntiArmor, defAntiAir, defPureAA, defUnarmedBunker);
+
+			// A ground tower in range of a hot enemy approach (route heat telemetry).
+			if (const int routeRange = GroundRangeOf(pBuildingType) / Unsorted::LeptonsPerCell; routeRange > 0)
+			{
+				CellStruct coveredSpot = CellStruct::Empty;
+
+				if (FindRouteSpotCovered(pHouse, bestCell, routeRange, coveredSpot))
+				{
+					CountDecision(NeuralDecision::RouteTowerPlaced, pHouse->ArrayIndex);
+					RecordRouteTowerPlaced(pHouse, bestCell, coveredSpot);
+					Debug::Log("[NeuralAI] House %d route tower: %s at (%d,%d) covers (%d,%d)\n", pHouse->ArrayIndex, pBuildingType->ID,
+						bestCell.X, bestCell.Y, coveredSpot.X, coveredSpot.Y);
+				}
+			}
 
 			if (!defPureAA && st.FrontlineThreatNeedsDefenses > 0
 				&& Unsorted::CurrentFrame <= st.FrontlineThreatActiveFrames)

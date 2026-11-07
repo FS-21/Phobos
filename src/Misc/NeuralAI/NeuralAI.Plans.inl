@@ -3596,13 +3596,28 @@ namespace
 
 				std::sort(army.begin(), army.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
 				const int ourValue = feetValue(army);
-				auto const pRally = landCellInZone(ownDefenseCentroid, homeZone, 4);
+
+				// Hold just behind the hottest approach our towers cover (route heat), else at the
+				// middle of our home defenses.
+				CellClass* pRally = nullptr;
+
+				if (auto const pHoldSpot = BestRouteHoldSpot(pHouse, homeCell, 26))
+					pRally = landCellInZone(pointAlong(pHoldSpot->Cell, homeCell, 4.0, 0.0), homeZone, 4);
+
+				const bool rallyOnRoute = pRally != nullptr;
+
+				if (!pRally)
+					pRally = landCellInZone(ownDefenseCentroid, homeZone, 4);
+
 				const int utility = (pRally && !army.empty() && enemyNear >= 120 && enemyNear * 10 > ourValue * 13) ? 380 : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::HoldUnderTowers, utility))
 				{
 					startPlan(NeuralPlanId::HoldUnderTowers, army, homeCell, pRally->MapCoords, 0, 3600);
 					planOf(NeuralPlanId::HoldUnderTowers).AuxBaseline = 0;
+
+					if (rallyOnRoute)
+						CountDecision(NeuralDecision::RouteAmbushSpot, pHouse->ArrayIndex);
 				}
 			}
 		}
@@ -4023,7 +4038,16 @@ namespace
 
 			auto picketPoint = [&](size_t index) -> CellClass*
 			{
-				// The first sentry watches the side we are really attacked from (attack route memory).
+				// Each sentry watches its own hot enemy route (route heat), a few cells off the path.
+				const CellStruct routeWatch = RouteAmbushCell(pHouse, index, 3);
+
+				if (routeWatch != CellStruct::Empty)
+				{
+					if (auto const pWatch = landCellInZone(routeWatch, homeZone, 3))
+						return pWatch;
+				}
+
+				// Else the first one watches the side we are really attacked from (attack route memory).
 				if (index == 0)
 				{
 					const int sector = GetMainAttackSector(pHouse);
@@ -4105,6 +4129,9 @@ namespace
 				{
 					startPlan(NeuralPlanId::Pickets, cheap, knownEnemyCentroid, CellStruct::Empty, 0, 9000);
 					planOf(NeuralPlanId::Pickets).AuxPeak = 0;
+
+					if (RouteAmbushCell(pHouse, 0, 3) != CellStruct::Empty)
+						CountDecision(NeuralDecision::RouteAmbushSpot, pHouse->ArrayIndex);
 				}
 			}
 		}
@@ -4190,7 +4217,9 @@ namespace
 							}
 						}
 
-						const int score = richness - static_cast<int>(std::abs(dHome - dEnemy) * 10.0);
+						// A field on a hot enemy route draws their army onto the holders (route heat).
+						const int score = richness - static_cast<int>(std::abs(dHome - dEnemy) * 10.0)
+							- std::min(RouteHeatNear(pHouse, c, 1), 3000) / 2;
 
 						if (score > bestScore)
 						{

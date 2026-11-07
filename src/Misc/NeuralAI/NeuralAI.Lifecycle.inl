@@ -731,6 +731,9 @@ void NeuralAI::OnScenarioStart()
 	for (auto& ms : MacroStates)
 		ms.Reset();
 
+	for (auto& routeHeat : RouteHeatStates)
+		routeHeat.Reset();
+
 	FerryTrips.fill(NeuralFerryTripRecord {});
 	ResetBridgePlanner();
 	AirRoutes.clear();
