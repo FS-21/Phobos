@@ -118,6 +118,16 @@ namespace
 		int SinceFrame { 0 };
 	};
 
+	// Aircraft attack watchdog (UpdateStuckUnits): where an aircraft on Mission::Attack stands and
+	// since when, and its ammo and since when it last changed (a shot fired or a reload).
+	struct NeuralAirStallTrack
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int SinceFrame { 0 };
+		int Ammo { 0 };
+		int AmmoSinceFrame { 0 };
+	};
+
 	struct NeuralAirLossTrack
 	{
 		DWORD ID { 0 };
@@ -236,6 +246,8 @@ namespace
 		// Stuck order watchdog (UpdateStuckUnits): by unit UniqueID, the cell where it has been
 		// standing with a destination and since when. Keyed lookups only, never iterated.
 		std::unordered_map<DWORD, NeuralStuckTrack> StuckTracks {};
+		// Aircraft attack watchdog (UpdateStuckUnits), keyed the same way.
+		std::unordered_map<DWORD, NeuralAirStallTrack> AirStallTracks {};
 		// Expansion drive: ore fields (12x12 blocks) on our landmass more than 14 cells from any
 		// of our hubs (feature scan), and how close the base crawl has brought a building anchor
 		// to the nearest free worthy field (placement scan) so a refinery is wanted there.
@@ -490,6 +502,7 @@ namespace
 			this->AirLossTracks.clear();
 			this->AirDangerSpots.clear();
 			this->StuckTracks.clear();
+			this->AirStallTracks.clear();
 			this->UncolonizedOreFields = 0;
 			this->IdleHarvesterTracks.clear();
 			this->OffensiveStoneCells.clear();

@@ -440,9 +440,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				for (size_t pl = 0; pl < static_cast<size_t>(NeuralPlanId::Count); ++pl)
 				{
 					auto const& st = PlanStats[h.ArrayIndex][pl];
-					char planBuf[96];
-					std::snprintf(planBuf, sizeof(planBuf), "%s\"%s\": [%u, %u, %u, %u]", pl > 0 ? ", " : "", NeuralPlanNames[pl],
-						st[0], st[1], st[2], st[3]);
+					char planBuf[128];
+					std::snprintf(planBuf, sizeof(planBuf), "%s\"%s\": [%u, %u, %u, %u, %u]", pl > 0 ? ", " : "", NeuralPlanNames[pl],
+						st[0], st[1], st[2], st[3], st[4]);
 					plansText += planBuf;
 				}
 			}

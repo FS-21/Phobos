@@ -695,6 +695,28 @@ namespace
 			return idle || marchingInWave;
 		};
 
+		// Armed strike aircraft a plan may take: idle, or still on the ground with an attack order
+		// it has not flown yet. The air micro runs first and gives every idle aircraft a harass
+		// target, so requiring no target at all kept every air plan without aircraft; a landed
+		// aircraft has not committed to that harass, and the plan keeps the last word on it.
+		auto isFreeAirStriker = [&](AircraftClass* pAir) -> bool
+		{
+			if (!pAir || !pAir->Type || pAir->Type->Carryall || pAir->Type->Passengers > 0 || pAir->Type->Spawned
+				|| GroundRangeOf(pAir->Type) <= 0 || macro.PlanMembers.contains(pAir->UniqueID)
+				|| (pAir->Ammo == 0 && pAir->Type->Ammo >= 0) || pAir->GetHealthPercentage() < 0.6)
+			{
+				return false;
+			}
+
+			if (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Sleep
+				|| pAir->CurrentMission == Mission::Area_Guard)
+			{
+				return pAir->Target == nullptr || !pAir->IsInAir();
+			}
+
+			return pAir->CurrentMission == Mission::Attack && !pAir->IsInAir();
+		};
+
 		auto finishPlan = [&](NeuralPlanId id, bool success, bool sendHome)
 		{
 			auto& plan = macro.Plans[static_cast<size_t>(id)];
@@ -730,6 +752,9 @@ namespace
 			macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + (success ? 1800 : 2700);
 		};
 
+		// Plans whose learned gate opened this tick and that have not started yet (telemetry NoGroup).
+		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> gateOpenedUnstarted {};
+
 		auto shouldTryStart = [&](NeuralPlanId id, int contextUtility) -> bool
 		{
 			const size_t i = static_cast<size_t>(id);
@@ -747,7 +772,12 @@ namespace
 			// Combo chains (point 56) boost the plans they lead into for 900 frames.
 			const int boost = macro.PlanBoostUntilFrame[i] > Unsorted::CurrentFrame ? macro.PlanBoost[i] : 0;
 
-			return SlotGate(static_cast<int>(scores[slot]) + contextUtility + (contextUtility > 0 ? boost : 0), 300, slot);
+			const bool open = SlotGate(static_cast<int>(scores[slot]) + contextUtility + (contextUtility > 0 ? boost : 0), 300, slot);
+
+			if (open && contextUtility > 0)
+				gateOpenedUnstarted[i] = true;
+
+			return open;
 		};
 
 		auto startPlan = [&](NeuralPlanId id, std::vector<FootClass*> const& group, const CellStruct& target,
@@ -770,10 +800,11 @@ namespace
 
 			plan.InitialValue = std::max(1, memberValue(plan));
 			CountPlanOutcome(houseIdx, id, NeuralPlanOutcome::Started);
+			gateOpenedUnstarted[static_cast<size_t>(id)] = false;
 		};
 
 		// ---------------------------------------------------------------- Plan 1: Eco Raid
-		// A small group of the fastest idle armed vehicles attack-moves into a known enemy
+		// A small group of the fastest idle armed units attack-moves into a known enemy
 		// refinery that has no known defenses around it, kills harvesters, then goes home.
 		{
 			auto& plan = macro.Plans[static_cast<size_t>(NeuralPlanId::EcoRaid)];
@@ -864,19 +895,30 @@ namespace
 				{
 					std::vector<FootClass*> candidates;
 
+					// Armed vehicles and armed infantry: many sides field their army on foot and keep few
+					// vehicles besides harvesters and deployers, which never fit a raid.
 					for (auto const& [uid, pFoot] : ownFoots)
 					{
-						auto const pUnit = abstract_cast<UnitClass*>(pFoot);
-
-						if (!pUnit || !pUnit->Type || pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
-							|| pUnit->Type->Naval || pUnit->Type->DeploysInto || IsAmphibiousOrAirTransport(pUnit->Type)
-							|| GroundRangeOf(pUnit->Type) <= 0 || !isFreeForPlan(pUnit)
-							|| ObjectZone(pUnit, MovementZone::Normal) != homeZone)
-						{
+						if (!isFreeForPlan(pFoot) || IsAirborneThreatTechno(pFoot) || ObjectZone(pFoot, MovementZone::Normal) != homeZone)
 							continue;
-						}
 
-						candidates.push_back(pUnit);
+						if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
+						{
+							if (!pUnit->Type || pUnit->Type->Harvester || pUnit->Type->ResourceGatherer || pUnit->Type->Naval
+								|| pUnit->Type->DeploysInto || IsAmphibiousOrAirTransport(pUnit->Type) || GroundRangeOf(pUnit->Type) <= 0)
+							{
+								continue;
+							}
+
+							candidates.push_back(pUnit);
+						}
+						else if (auto const pInf = abstract_cast<InfantryClass*>(pFoot))
+						{
+							if (!pInf->Type || pInf->Type->Engineer || IsSpyInfantryType(pInf->Type) || GroundRangeOf(pInf->Type) <= 0)
+								continue;
+
+							candidates.push_back(pInf);
+						}
 					}
 
 					// Fastest first; ties by UniqueID keep the choice identical on every client.
@@ -887,9 +929,20 @@ namespace
 							return sa != sb ? sa > sb : a->UniqueID < b->UniqueID;
 						});
 
-					if (candidates.size() >= 3)
+					// Three vehicles make a raid; with soldiers among the fastest five it takes four of
+					// them and up to six, since they hit harvesters softer.
+					size_t raidSize = std::min<size_t>(candidates.size(), 5);
+					bool onFoot = false;
+
+					for (size_t i = 0; i < raidSize; ++i)
+						onFoot = onFoot || candidates[i]->WhatAmI() == AbstractType::Infantry;
+
+					if (onFoot)
+						raidSize = std::min<size_t>(candidates.size(), 6);
+
+					if (raidSize >= (onFoot ? 4u : 3u))
 					{
-						candidates.resize(std::min<size_t>(candidates.size(), 5));
+						candidates.resize(raidSize);
 						startPlan(NeuralPlanId::EcoRaid, candidates, pBestRefinery->GetMapCoords(), CellStruct::Empty,
 							pBestRefinery->UniqueID, 3600);
 					}
@@ -1203,11 +1256,7 @@ namespace
 					{
 						auto const pAir = abstract_cast<AircraftClass*>(pFoot);
 
-						if (pAir && pAir->Type && !pAir->Type->Carryall && pAir->Type->Passengers <= 0 && !pAir->Type->Spawned
-							&& GroundRangeOf(pAir->Type) > 0 && !macro.PlanMembers.contains(uid) && pAir->Target == nullptr
-							&& (pAir->Ammo != 0 || pAir->Type->Ammo < 0) && pAir->GetHealthPercentage() >= 0.6
-							&& (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Sleep
-								|| pAir->CurrentMission == Mission::Area_Guard))
+						if (isFreeAirStriker(pAir))
 						{
 							group.push_back(pAir);
 						}
@@ -1628,18 +1677,8 @@ namespace
 				{
 					auto const pAir = abstract_cast<AircraftClass*>(pFoot);
 
-					if (!pAir || !pAir->Type || pAir->Type->Carryall || pAir->Type->Passengers > 0 || pAir->Type->Spawned
-						|| GroundRangeOf(pAir->Type) <= 0 || macro.PlanMembers.contains(uid) || pAir->Target != nullptr
-						|| (pAir->Ammo == 0 && pAir->Type->Ammo >= 0) || pAir->GetHealthPercentage() < 0.6)
-					{
-						continue;
-					}
-
-					if (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Sleep
-						|| pAir->CurrentMission == Mission::Area_Guard)
-					{
+					if (isFreeAirStriker(pAir))
 						strikers.push_back(pAir);
-					}
 				}
 
 				BuildingClass* pBestTarget = nullptr;
@@ -2390,11 +2429,7 @@ namespace
 		{
 			auto const pAir = abstract_cast<AircraftClass*>(pFoot);
 
-			return pAir && pAir->Type && !pAir->Type->Carryall && pAir->Type->Passengers <= 0 && !pAir->Type->Spawned
-				&& GroundRangeOf(pAir->Type) > 0 && !macro.PlanMembers.contains(pAir->UniqueID) && pAir->Target == nullptr
-				&& (pAir->Ammo != 0 || pAir->Type->Ammo < 0) && pAir->GetHealthPercentage() >= 0.6
-				&& (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Sleep
-					|| pAir->CurrentMission == Mission::Area_Guard);
+			return isFreeAirStriker(pAir);
 		};
 
 		auto collectAirStrikers = [&]() -> std::vector<FootClass*>
@@ -3612,11 +3647,7 @@ namespace
 						{
 							auto const pAir = abstract_cast<AircraftClass*>(pFoot);
 
-							if (pAir && pAir->Type && !pAir->Type->Carryall && pAir->Type->Passengers <= 0 && !pAir->Type->Spawned
-								&& GroundRangeOf(pAir->Type) > 0 && !macro.PlanMembers.contains(uid) && pAir->Target == nullptr
-								&& (pAir->Ammo != 0 || pAir->Type->Ammo < 0) && pAir->GetHealthPercentage() >= 0.6
-								&& (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Sleep
-									|| pAir->CurrentMission == Mission::Area_Guard))
+							if (isFreeAirStriker(pAir))
 							{
 								group.push_back(pAir);
 							}
@@ -6391,6 +6422,12 @@ namespace
 					strikeWithMembers(planOf(NeuralPlanId::TechTreeCut).Members, pTarget);
 				}
 			}
+		}
+
+		for (size_t i = 0; i < gateOpenedUnstarted.size(); ++i)
+		{
+			if (gateOpenedUnstarted[i])
+				CountPlanOutcome(houseIdx, static_cast<NeuralPlanId>(i), NeuralPlanOutcome::NoGroup);
 		}
 
 		// Rebuild the member set used to keep plan units out of the generic recruitment.
