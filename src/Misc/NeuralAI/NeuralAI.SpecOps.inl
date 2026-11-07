@@ -48,6 +48,23 @@ namespace
 		int DisguiseOwner { -1 };
 	};
 
+	// One shot of the disguise kit is enough: a spy fires again only for the colors of another
+	// house (its target changed) or after losing the ones it had, or when the shot never landed.
+	struct NeuralSpyKitShot
+	{
+		int House { -1 };
+		int Frame { 0 };
+		bool Landed { false };
+	};
+
+	// A demolition truck or a terrorist on its way to blow up a target without a transport.
+	struct NeuralSneakStrike
+	{
+		DWORD Target { 0 };
+		int StartFrame { 0 };
+		bool Charging { false };
+	};
+
 	struct NeuralSpecOpsState
 	{
 		int MatchSerial { -1 };
@@ -72,9 +89,12 @@ namespace
 		int InfiltrationCount { 0 };
 		// Frames of the last spies killed on their way (oldest first, 4 at most).
 		std::vector<int> SpyLossFrames {};
-		// Spy UniqueID -> disguise kit shots ordered and the frame of the first one (key access
-		// only); 3 shots per 900 frames, so a spy that cannot be disguised still goes.
-		std::unordered_map<DWORD, std::pair<int, int>> KitShots {};
+		// Spy UniqueID -> its last disguise kit shot (key access only).
+		std::unordered_map<DWORD, NeuralSpyKitShot> KitShots {};
+		// Suicide raiders sneaking to a target on foot or on their own wheels: UniqueID -> strike
+		// (key access only; orders go out in UnitClass / InfantryClass array order).
+		std::unordered_map<DWORD, NeuralSneakStrike> SneakStrikes {};
+		int LastSneakFrame { -1 };
 	};
 
 	std::array<NeuralSpecOpsState, 32> SpecOpsStates {};
@@ -400,13 +420,28 @@ namespace
 		return false;
 	}
 
+	// Notes that the last kit shot of a spy gave it the colors it went for.
+	void UpdateSpyKitShot(HouseClass* pHouse, InfantryClass* pSpy)
+	{
+		auto& kitShots = GetSpecOpsState(pHouse).KitShots;
+		auto const it = kitShots.find(pSpy->UniqueID);
+
+		if (it == kitShots.end() || it->second.Landed || it->second.House < 0 || it->second.House >= HouseClass::Array.Count)
+			return;
+
+		if (IsSpyDisguisedFor(pSpy, HouseClass::Array.GetItem(it->second.House)))
+			it->second.Landed = true;
+	}
+
 	// Copies a soldier's colors: at once when the engine allows a direct disguise, otherwise the
 	// way a player does it, firing the disguise kit (a MakesDisguise= warhead, e.g. MakeupKit with
-	// an endless range and FireOnce) at that soldier; 3 shots per 900 frames. True while the copy
-	// is done or under way.
+	// an endless range and FireOnce) at that soldier. One shot is enough; another one only for the
+	// colors of another house, after the colors were lost (the spy was found out), or when the shot
+	// did not land within 450 frames (the soldier died or walked off). True while the copy is done
+	// or under way.
 	bool CopySoldierDisguise(HouseClass* pHouse, InfantryClass* pSpy, InfantryClass* pSoldier)
 	{
-		if (!pSpy || !pSoldier)
+		if (!pSpy || !pSoldier || !pSoldier->Owner)
 			return false;
 
 		if (pSpy->CanDisguiseAs(pSoldier))
@@ -418,20 +453,28 @@ namespace
 		if (pSpy->Target == pSoldier)
 			return true;
 
-		auto& [shots, firstShotFrame] = GetSpecOpsState(pHouse).KitShots[pSpy->UniqueID];
-
-		if (Unsorted::CurrentFrame - firstShotFrame > 900 || Unsorted::CurrentFrame < firstShotFrame)
-		{
-			shots = 0;
-			firstShotFrame = Unsorted::CurrentFrame;
-		}
-
-		if (!HasDisguiseKit(pSpy->Type) || shots >= 3)
+		if (!HasDisguiseKit(pSpy->Type))
 			return false;
 
-		shots++;
+		UpdateSpyKitShot(pHouse, pSpy);
+
+		auto& shot = GetSpecOpsState(pHouse).KitShots[pSpy->UniqueID];
+		const int want = pSoldier->Owner->ArrayIndex;
+		const bool missed = !shot.Landed
+			&& (Unsorted::CurrentFrame - shot.Frame > 450 || Unsorted::CurrentFrame < shot.Frame);
+
+		if (shot.House == want && !shot.Landed && !missed)
+			return false;
+
+		const char* const reason = shot.House < 0 ? "first" : shot.House != want ? "new house"
+			: shot.Landed ? "colors lost" : "missed";
+		shot.House = want;
+		shot.Frame = Unsorted::CurrentFrame;
+		shot.Landed = false;
 		pSpy->SetTarget(pSoldier);
 		pSpy->QueueMission(Mission::Attack, false);
+		Debug::Log("[NeuralAI] House %d spy %s %u fires its disguise kit at %s of house %d (%s shot), frame %d.\n",
+			pHouse->ArrayIndex, pSpy->Type->ID, pSpy->UniqueID, pSoldier->Type->ID, want, reason, Unsorted::CurrentFrame);
 
 		return true;
 	}
@@ -444,7 +487,10 @@ namespace
 			return false;
 
 		if (IsSpyDisguisedFor(pSpy, pVictim))
+		{
+			UpdateSpyKitShot(pHouse, pSpy);
 			return true;
+		}
 
 		auto const pSource = FindSpyDisguiseSource(pHouse, pSpy, pVictim);
 
@@ -472,61 +518,174 @@ namespace
 		return nullptr;
 	}
 
-	// Known enemy buildings that see through disguises (DetectDisguise=, radius DetectDisguiseRange=
-	// in cells) covering a cell, plus marginCells. Their power is not always visible, so all count.
-	int CountKnownDisguiseDetectorBuildings(HouseClass* pHouse, const CellStruct& cell, int marginCells)
+	// How far a techno sees through disguises, in cells (0: it does not). DetectDisguiseRange= when
+	// set (it marks those cells for its whole house); a detector without one still unmasks and
+	// shoots a spy within its own weapon reach (Psychic Tower, Guard Tower), else within its sight.
+	// Dogs (Doggie=) sniff spies out as well.
+	int DisguiseDetectionReach(TechnoTypeClass* pType)
 	{
-		int count = 0;
+		auto const pInfType = abstract_cast<InfantryTypeClass*>(pType);
+
+		if (!pType || !(pType->DetectDisguise || (pInfType && pInfType->Doggie)))
+			return 0;
+
+		int reach = std::max(0, pType->DetectDisguiseRange);
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pSlot = pType->GetWeapon(i);
+			auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+			if (pWeapon && pWeapon->Range > 0)
+				reach = std::max(reach, pWeapon->Range / Unsorted::LeptonsPerCell);
+		}
+
+		return reach > 0 ? reach : std::max(1, pType->Sight);
+	}
+
+	// A detector that takes a spy over (mind control: Yuri clones, the Psychic Tower) is worse than
+	// one that kills it: the enemy gets the spy.
+	bool IsMindControlDetector(TechnoTypeClass* pType)
+	{
+		for (int i = 0; pType && i < 2; ++i)
+		{
+			auto const pSlot = pType->GetWeapon(i);
+			auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+			if (pWeapon && pWeapon->Warhead && pWeapon->Warhead->MindControl)
+				return true;
+		}
+
+		return false;
+	}
+
+	// An enemy that sees through disguises: known building, or unit / soldier in current sight.
+	struct NeuralDisguiseDetector
+	{
+		CellStruct Cell;
+		int Reach;
+		bool Building;
+		bool MindControl;
+	};
+
+	struct NeuralDisguiseDetectorCache
+	{
+		int Frame { -1 };
+		std::vector<NeuralDisguiseDetector> Detectors {};
+	};
+
+	std::array<NeuralDisguiseDetectorCache, 32> DisguiseDetectorCaches {};
+
+	// The disguise detectors a house knows of this frame: known enemy buildings (their power is not
+	// always visible, so all count) in the order of the known building cache, then enemy units and
+	// soldiers in current sight in FootClass array order.
+	const std::vector<NeuralDisguiseDetector>& GetKnownDisguiseDetectors(HouseClass* pHouse)
+	{
+		auto& cache = DisguiseDetectorCaches[std::clamp(pHouse ? pHouse->ArrayIndex : 0, 0, 31)];
+
+		if (cache.Frame == Unsorted::CurrentFrame || !pHouse)
+			return cache.Detectors;
+
+		cache.Frame = Unsorted::CurrentFrame;
+		cache.Detectors.clear();
 
 		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
 		{
 			auto const pType = info.Building->Type;
 
-			if (!pType->DetectDisguise || pType->DetectDisguiseRange <= 0)
-				continue;
+			if (const int reach = DisguiseDetectionReach(pType))
+				cache.Detectors.push_back({ info.Building->GetMapCoords(), reach, true, IsMindControlDetector(pType) });
+		}
 
-			if (info.Building->GetMapCoords().DistanceFrom(cell) <= static_cast<double>(pType->DetectDisguiseRange + marginCells))
+		for (auto const pFoot : FootClass::Array)
+		{
+			if (!pFoot || pFoot->InLimbo || !pFoot->IsAlive || !pFoot->Owner || pHouse->IsAlliedWith(pFoot->Owner)
+				|| pFoot->Owner->IsNeutral())
+			{
+				continue;
+			}
+
+			auto const pType = pFoot->GetTechnoType();
+			const int reach = DisguiseDetectionReach(pType);
+
+			if (reach > 0 && IsCellInSightOfAI(pHouse, pFoot->GetMapCoords()))
+				cache.Detectors.push_back({ pFoot->GetMapCoords(), reach, false, IsMindControlDetector(pType) });
+		}
+
+		return cache.Detectors;
+	}
+
+	// Known enemy buildings that see through disguises covering a cell, plus marginCells.
+	int CountKnownDisguiseDetectorBuildings(HouseClass* pHouse, const CellStruct& cell, int marginCells)
+	{
+		int count = 0;
+
+		for (auto const& detector : GetKnownDisguiseDetectors(pHouse))
+		{
+			if (detector.Building && detector.Cell.DistanceFrom(cell) <= static_cast<double>(detector.Reach + marginCells))
 				count++;
 		}
 
 		return count;
 	}
 
-	// A disguise is no use in this cell: a known detector building covers it, or an enemy unit or
-	// soldier that sees through disguises (DetectDisguise=, dogs, Sensors=) is in sight near it.
+	// A disguise is no use in this cell: a known detector building, or an enemy unit or soldier
+	// in sight that sees through disguises (DetectDisguise=, dogs), covers it.
 	bool IsCellWatchedByDisguiseDetector(HouseClass* pHouse, const CellStruct& cell, int marginCells)
 	{
-		if (CountKnownDisguiseDetectorBuildings(pHouse, cell, marginCells) > 0)
-			return true;
-
-		bool watched = false;
-
-		ForEachTechnoNear(cell, 12 + marginCells, [&](TechnoClass* pTech) -> bool
+		for (auto const& detector : GetKnownDisguiseDetectors(pHouse))
 		{
-			if (!pTech->Owner || pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral()
-				|| pTech->WhatAmI() == AbstractType::Building || !IsCellInSightOfAI(pHouse, pTech->GetMapCoords()))
-			{
+			if (detector.Cell.DistanceFrom(cell) <= static_cast<double>(detector.Reach + marginCells))
 				return true;
-			}
+		}
 
-			auto const pType = pTech->GetTechnoType();
-			auto const pInfType = abstract_cast<InfantryTypeClass*>(pType);
+		return false;
+	}
 
-			if (!pType || !(pType->DetectDisguise || pType->Sensors || (pInfType && pInfType->Doggie)))
-				return true;
+	// Danger for a spy of the detectors around a target building: 60 per building and 35 per unit
+	// covering it, twice that for a mind controller.
+	int DisguiseDetectorPenaltyAt(HouseClass* pHouse, const CellStruct& cell)
+	{
+		int penalty = 0;
 
-			const int range = (pType->DetectDisguiseRange > 0 ? pType->DetectDisguiseRange : 6) + marginCells;
+		for (auto const& detector : GetKnownDisguiseDetectors(pHouse))
+		{
+			if (detector.Cell.DistanceFrom(cell) <= static_cast<double>(detector.Reach + 1))
+				penalty += (detector.Building ? 60 : 35) * (detector.MindControl ? 2 : 1);
+		}
 
-			if (pTech->GetMapCoords().DistanceFrom(cell) <= static_cast<double>(range))
+		return penalty;
+	}
+
+	// Danger for a spy of the detectors along its straight walk (a cell every 3 on the way, the
+	// last 2 cells left to DisguiseDetectorPenaltyAt): 25 per detector crossed, 50 for a mind
+	// controller.
+	int DisguiseDetectorPenaltyOnWay(HouseClass* pHouse, const CellStruct& from, const CellStruct& to)
+	{
+		const int dx = to.X - from.X;
+		const int dy = to.Y - from.Y;
+		const int length = std::max(std::abs(dx), std::abs(dy));
+
+		if (length <= 3)
+			return 0;
+
+		int penalty = 0;
+
+		for (auto const& detector : GetKnownDisguiseDetectors(pHouse))
+		{
+			for (int step = 0; step <= length - 2; step += 3)
 			{
-				watched = true;
-				return false;
+				const CellStruct point { static_cast<short>(from.X + dx * step / length), static_cast<short>(from.Y + dy * step / length) };
+
+				if (detector.Cell.DistanceFrom(point) <= static_cast<double>(detector.Reach))
+				{
+					penalty += detector.MindControl ? 50 : 25;
+					break;
+				}
 			}
+		}
 
-			return true;
-		});
-
-		return watched;
+		return penalty;
 	}
 
 	// Combat value of the house's own armed units within radius of a cell.
@@ -1115,5 +1274,249 @@ namespace
 		}
 
 		return true;
+	}
+
+	// The blast a suicide raider sets off: the Phobos FeedbackWeapon= that blows up the firer,
+	// a Suicide= primary weapon, or the DeathWeapon= of a vehicle that Explodes=.
+	WeaponTypeClass* GetSuicideBlastWeapon(TechnoTypeClass* pType)
+	{
+		auto const pSlot = pType ? pType->GetWeapon(0) : nullptr;
+		auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+		if (pWeapon)
+		{
+			if (auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon); pWeaponExt && IsAreaWeapon(pWeaponExt->FeedbackWeapon.Get()))
+				return pWeaponExt->FeedbackWeapon.Get();
+
+			if (pWeapon->Suicide)
+				return pWeapon;
+		}
+
+		if (pType && pType->Explodes && IsAreaWeapon(pType->DeathWeapon))
+			return pType->DeathWeapon;
+
+		return pWeapon;
+	}
+
+	// A raid transport of ours that can carry a raider of this size (passenger aircraft, flying,
+	// burrowing or amphibious transport): the raider waits for an airborne raid instead of walking.
+	bool HasRaidTransportFor(HouseClass* pHouse, double size)
+	{
+		for (auto const pFoot : FootClass::Array)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->WhatAmI() == AbstractType::Infantry)
+				continue;
+
+			auto const pType = pFoot->GetTechnoType();
+
+			if (!pType || pType->Passengers <= 0 || size > pType->SizeLimit)
+				continue;
+
+			auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
+			const bool flies = pFoot->WhatAmI() == AbstractType::Aircraft || pType->JumpJet || pType->ConsideredAircraft
+				|| pType->MovementZone == MovementZone::Fly;
+
+			if (flies || IsUndergroundTransportType(pUnitType) || IsAmphibiousGroundTransportType(pUnitType))
+				return true;
+		}
+
+		return false;
+	}
+
+	// Where a suicide raider does the most harm: the known enemy building whose blast area holds the
+	// most building value (cost / 100 of every known building within the warhead's CellSpread plus
+	// one cell), less 6 per known defense within 7 cells of it and a cell of the walk per 8.
+	// Reachable by the raider's movement zone only; UniqueID breaks ties.
+	BuildingClass* PickSneakStrikeTarget(HouseClass* pHouse, FootClass* pRaider)
+	{
+		auto const pType = pRaider->GetTechnoType();
+		auto const pBlast = GetSuicideBlastWeapon(pType);
+		const double spread = (pBlast && pBlast->Warhead ? pBlast->Warhead->CellSpread : 1.0) + 1.0;
+		const CellStruct from = pRaider->GetMapCoords();
+		auto const& entries = GetKnownEnemyBuildingCache(pHouse).Entries;
+		BuildingClass* pBest = nullptr;
+		int bestScore = 0;
+
+		for (auto const& info : entries)
+		{
+			auto const pBld = info.Building;
+
+			if (!pBld->IsAlive || pBld->InLimbo || !pBld->Owner || pBld->Type->Insignificant || pBld->Type->InvisibleInGame
+				|| !AreZonesConnected(from, info.Coords, pType->MovementZone))
+			{
+				continue;
+			}
+
+			int worth = 0;
+			int defenses = 0;
+
+			for (auto const& other : entries)
+			{
+				const double dist = other.Coords.DistanceFrom(info.Coords);
+
+				if (dist <= spread)
+					worth += other.Building->Type->Cost / 100;
+
+				if (other.IsDefense && other.Building != pBld && dist <= 7.0)
+					defenses++;
+			}
+
+			const int score = worth - defenses * 6 - static_cast<int>(from.DistanceFrom(info.Coords)) / 8;
+
+			if (score > bestScore || (score == bestScore && pBest && pBld->UniqueID < pBest->UniqueID))
+			{
+				bestScore = score;
+				pBest = pBld;
+			}
+		}
+
+		return pBest;
+	}
+
+	// A suicide raider of ours is sneaking to (or charging) a target: the micro leaves it alone.
+	bool IsSneakStrikeActive(HouseClass* pHouse, DWORD id)
+	{
+		auto const& strikes = GetSpecOpsState(pHouse).SneakStrikes;
+		auto const it = strikes.find(id);
+
+		return it != strikes.end() && it->second.Target != 0;
+	}
+
+	// Suicide raiders without a ride (demolition trucks, terrorists): fragile and only useful once
+	// they blow up among buildings, so they do not join the army. An idle one with no enemy close
+	// waits up to 2700 frames for a raid transport that can carry it (AirborneFront takes it), then
+	// sneaks to the best known target along a detour around known defenses and armed enemies in
+	// sight (FindSafeFerryWaypoint, land mode) and charges it from 8 cells, or from 14 once shot at
+	// or with enemies close in. A strike gives up after 9000 frames; a raid that boards the raider
+	// ends it. Every 60 frames.
+	void UpdateSneakStrikes(HouseClass* pHouse)
+	{
+		if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return;
+
+		auto& state = GetSpecOpsState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - state.LastSneakFrame < 60 && now >= state.LastSneakFrame)
+			return;
+
+		state.LastSneakFrame = now;
+		auto& strikes = state.SneakStrikes;
+		std::unordered_set<DWORD> seen;
+
+		auto findTarget = [pHouse](DWORD id) -> BuildingClass*
+		{
+			for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+			{
+				if (info.Building->UniqueID == id)
+					return (info.Building->IsAlive && !info.Building->InLimbo) ? info.Building : nullptr;
+			}
+
+			return nullptr;
+		};
+
+		auto handle = [&](FootClass* pFoot)
+		{
+			const DWORD id = pFoot->UniqueID;
+			const double size = pFoot->GetTechnoType()->Size;
+			seen.insert(id);
+			auto it = strikes.find(id);
+
+			if (IsPlanMember(pHouse, id))
+			{
+				if (it != strikes.end())
+					strikes.erase(it);
+
+				return;
+			}
+
+			const bool idle = (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard)
+				&& !pFoot->Target;
+
+			if (it == strikes.end() || it->second.Target == 0)
+			{
+				if (!idle)
+					return;
+
+				if (it == strikes.end())
+					it = strikes.emplace(id, NeuralSneakStrike { 0, now, false }).first;
+
+				if (VisibleEnemyThreatNear(pHouse, pFoot->GetMapCoords(), 8) > 0)
+					return;
+
+				const bool waitForRide = now - it->second.StartFrame < 2700 && now >= it->second.StartFrame;
+
+				if (waitForRide && HasRaidTransportFor(pHouse, size))
+					return;
+
+				auto const pTarget = PickSneakStrikeTarget(pHouse, pFoot);
+
+				if (!pTarget)
+					return;
+
+				it->second = NeuralSneakStrike { pTarget->UniqueID, now, false };
+				const CellStruct cell = pTarget->GetMapCoords();
+				Debug::Log("[NeuralAI] House %d SneakStrike: %s %u sneaks to %s of house %d at (%d,%d), %d cells, frame %d.\n",
+					pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, id, pTarget->Type->ID, pTarget->Owner->ArrayIndex,
+					cell.X, cell.Y, static_cast<int>(pFoot->GetMapCoords().DistanceFrom(cell)), now);
+			}
+
+			auto& strike = it->second;
+			auto const pTarget = findTarget(strike.Target);
+
+			if (!pTarget || pHouse->IsAlliedWith(pTarget->Owner) || now - strike.StartFrame > 9000 || now < strike.StartFrame)
+			{
+				// Target gone or too long on the way: pick again at once next time it is idle.
+				strike = NeuralSneakStrike { 0, now - 2700, false };
+				return;
+			}
+
+			if (strike.Charging)
+			{
+				if (pFoot->Target != pTarget)
+				{
+					pFoot->SetTarget(pTarget);
+					pFoot->QueueMission(Mission::Attack, false);
+				}
+
+				return;
+			}
+
+			const CellStruct cell = pTarget->GetMapCoords();
+			const double dist = pFoot->GetMapCoords().DistanceFrom(cell);
+			const bool pressed = pFoot->HasBeenAttacked || VisibleEnemyThreatNear(pHouse, pFoot->GetMapCoords(), 4) > 0;
+			CellClass* const pGoal = pTarget->GetCell();
+
+			if (dist <= 8.0 || (pressed && dist <= 14.0))
+			{
+				strike.Charging = true;
+				pFoot->SetTarget(pTarget);
+				pFoot->QueueMission(Mission::Attack, false);
+				Debug::Log("[NeuralAI] House %d SneakStrike: %s %u charges %s of house %d from %d cells, frame %d.\n",
+					pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, id, pTarget->Type->ID, pTarget->Owner->ArrayIndex,
+					static_cast<int>(dist), now);
+			}
+			else
+			{
+				// Toward the target, around known defenses and armed enemies in sight while a detour
+				// is clearly safer (recomputed every 450 frames).
+				CellClass* const pHop = GetSafeAirHop(pHouse, pFoot, pGoal);
+				IssueMoveOrder(pFoot, pHop ? pHop : pGoal, 3.0);
+			}
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && IsVehicleRaiderType(pUnit->Type))
+				handle(pUnit);
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->Owner == pHouse && pInf->IsAlive && !pInf->InLimbo && IsSuicideInfantryType(pInf->Type))
+				handle(pInf);
+		}
+
+		std::erase_if(strikes, [&seen](const auto& entry) { return !seen.contains(entry.first); });
 	}
 }

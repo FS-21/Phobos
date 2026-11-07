@@ -2255,6 +2255,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pType)
 			continue;
 
+		// A demolition truck sneaking in takes its orders from UpdateSneakStrikes.
+		if (IsSneakStrikeActive(pHouse, pUnit->UniqueID))
+			continue;
+
 		if (pUnit->HasAnyLink())
 		{
 			if (auto const pLinkedBld = abstract_cast<BuildingClass*>(pUnit->GetNthLink(0)))
@@ -5196,6 +5200,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || !pInf->Type)
 			continue;
 
+		// A terrorist sneaking in takes its orders from UpdateSneakStrikes.
+		if (IsSneakStrikeActive(pHouse, pInf->UniqueID))
+			continue;
+
 		// Evade radiation puddles (Desolator / Nuke fallout) immediately if not
 		// radiation-immune; if we ARE a radiation-immune Deployer (Desolator,
 		// Slot 63), tactically deploy to irradiate nearby enemy squads/slaves and
@@ -5837,23 +5845,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 
-				// Prefer lightly guarded buildings: a known detector building covering it (DetectDisguise=
-				// with DetectDisguiseRange=) strips the disguise at the door; dogs and detector units in
-				// sight nearby hunt spies; defense turrets shoot a revealed one.
-				int detectorPenalty = 60 * CountKnownDisguiseDetectorBuildings(pHouse, pEnemyBld->GetMapCoords(), 1);
-				for (auto const pDet : FootClass::Array)
-				{
-					auto const pDetType = pDet ? pDet->GetTechnoType() : nullptr;
-					auto const pDetInfType = abstract_cast<InfantryTypeClass*>(pDetType);
-
-					if (pDetType && !pDet->InLimbo && pDet->IsAlive && pDet->Owner && !pHouse->IsAlliedWith(pDet->Owner)
-						&& !pDet->Owner->IsNeutral() && IsCellInSightOfAI(pHouse, pDet->GetMapCoords())
-						&& (pDetType->DetectDisguise || pDetType->Sensors || (pDetInfType && pDetInfType->Doggie))
-						&& pEnemyBld->DistanceFrom(pDet) <= 2048)
-					{
-						detectorPenalty += 35;
-					}
-				}
+				// Prefer lightly guarded buildings: detectors covering it (known DetectDisguise= buildings,
+				// dogs and detector units in sight; mind controllers count twice, they take the spy over)
+				// strip the disguise at the door, detectors on the straight walk in do it on the way, and
+				// defense turrets shoot a revealed spy.
+				const CellStruct spyTargetCell = pEnemyBld->GetMapCoords();
+				const int detectorPenalty = DisguiseDetectorPenaltyAt(pHouse, spyTargetCell)
+					+ DisguiseDetectorPenaltyOnWay(pHouse, pInf->GetMapCoords(), spyTargetCell);
 
 				int turretPenalty = 0;
 				for (auto const pDefB : pEnemyOwner->Buildings)
@@ -5865,7 +5863,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 
-				spyScore -= std::min(140, detectorPenalty + turretPenalty);
+				spyScore -= std::min(300, detectorPenalty + turretPenalty);
 				spyScore -= (pInf->DistanceFrom(pEnemyBld) / 1024);
 
 				if (spyScore > bestSpyScore)
@@ -5876,7 +5874,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			if (pBestSpyTarget)
+			// Every target is watched (a Psychic Sensor covering the whole base, mind controllers at
+			// the doors): the spy waits for the detectors to fall or another house to open up.
+			if (pBestSpyTarget && bestSpyScore > 0)
 			{
 				// While the spy fires its disguise kit at a soldier of the owner it is not sent yet (the
 				// walk order would cancel the shot); it is idle again right after and goes then.

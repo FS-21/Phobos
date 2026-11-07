@@ -1160,10 +1160,11 @@ namespace
 		return pType && !pType->Naval && pType->Passengers > 0 && pType->MovementZone == MovementZone::Subterrannean;
 	}
 
-	// A ground transport that also swims (amphibious APC): it can go around by sea.
+	// A transport that moves on land and water (amphibious APC, hovercraft built at a shipyard):
+	// it can go around by sea and still drive up to the target.
 	bool IsAmphibiousGroundTransportType(const UnitTypeClass* pType)
 	{
-		return pType && !pType->Naval && pType->Passengers >= 3
+		return pType && pType->Passengers >= 3
 			&& (pType->SpeedType == SpeedType::Amphibious || pType->MovementZone == MovementZone::Amphibious
 				|| pType->MovementZone == MovementZone::AmphibiousCrusher || pType->MovementZone == MovementZone::AmphibiousDestroyer);
 	}
@@ -1248,6 +1249,24 @@ namespace
 		}
 
 		return pType->Explodes && IsAreaWeapon(pType->DeathWeapon);
+	}
+
+	// A soldier that blows itself up among the enemy (terrorist): weapon Suicide=, or a Phobos
+	// FeedbackWeapon= with an area warhead.
+	bool IsSuicideInfantryType(const InfantryTypeClass* pType)
+	{
+		auto const pSlot = pType ? const_cast<InfantryTypeClass*>(pType)->GetWeapon(0) : nullptr;
+		auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+		if (!pWeapon || !pWeapon->Warhead)
+			return false;
+
+		if (pWeapon->Suicide)
+			return true;
+
+		auto const pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+
+		return pWeaponExt && IsAreaWeapon(pWeaponExt->FeedbackWeapon.Get());
 	}
 
 	// A raider for a drop behind the lines: a commando, a bomber (Ivan=), an area damage soldier,

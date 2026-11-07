@@ -217,6 +217,9 @@ namespace
 		std::array<NeuralPlanInstance, static_cast<size_t>(NeuralPlanId::Count)> Plans {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanNextAttemptFrame {};
 		std::unordered_set<DWORD> PlanMembers {};
+		// Airborne raid transports nobody managed to board: UniqueID -> frame they may be used
+		// again (key access only).
+		std::unordered_map<DWORD, int> RaidTransportBanUntil {};
 		// Blackout plan success opens a window where the main wave launches earlier.
 		int BlackoutUntilFrame { -1 };
 
@@ -450,6 +453,7 @@ namespace
 			this->Plans.fill(NeuralPlanInstance {});
 			this->PlanNextAttemptFrame.fill(0);
 			this->PlanMembers.clear();
+			this->RaidTransportBanUntil.clear();
 			this->BlackoutUntilFrame = -1;
 			this->BloodyBeaches.clear();
 			this->AirLossTracks.clear();

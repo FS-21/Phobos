@@ -2094,24 +2094,37 @@ namespace
 				const std::vector<DWORD> infantry(plan.Members.empty() ? plan.Members.end() : plan.Members.begin() + 1, plan.Members.end());
 				auto const pTransportUnit = abstract_cast<UnitClass*>(pTransport);
 				const bool underground = pTransportUnit && IsUndergroundTransportType(pTransportUnit->Type);
+				constexpr const char* PhaseNames[] = { "boarding", "on the way", "dropped" };
+				auto logEnd = [&](const char* reason)
+				{
+					Debug::Log("[NeuralAI] House %d AirborneFront: ends while %s (%s), frame %d.\n", pHouse->ArrayIndex,
+						PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], reason, Unsorted::CurrentFrame);
+				};
 
 				if (!pTarget)
 				{
+					logEnd("target gone");
 					finishPlan(NeuralPlanId::AirborneFront, plan.AuxBaseline >= 2, true);
 				}
 				else if (Unsorted::CurrentFrame >= plan.Deadline || !pDrop)
 				{
+					logEnd("out of time");
 					finishPlan(NeuralPlanId::AirborneFront, false, true);
 				}
 				else if (plan.AuxBaseline < 2 && !pTransport)
 				{
 					// Shot down (or lost) before the drop.
+					logEnd("transport lost");
 					finishPlan(NeuralPlanId::AirborneFront, false, false);
 				}
 				else if (plan.AuxBaseline == 0)
 				{
 					// Boarding: the infantry walk in (they are in limbo, hence not found, once aboard).
+					// The transport comes to meet the nearest one (UniqueID on ties): a hovercraft left
+					// at sea or a flyer parked across the base is out of the soldiers' reach otherwise.
 					int waiting = 0;
+					FootClass* pNearest = nullptr;
+					int nearestDist = INT_MAX;
 
 					for (const DWORD uid : infantry)
 					{
@@ -2121,6 +2134,28 @@ namespace
 
 							if (pInf->CurrentMission != Mission::Enter && pInf->QueuedMission != Mission::Enter)
 								OrderFootToEnter(pInf, pTransport);
+
+							const int dist = pTransport->DistanceFrom(pInf);
+
+							if (dist < nearestDist || (dist == nearestDist && pInf->UniqueID < pNearest->UniqueID))
+							{
+								nearestDist = dist;
+								pNearest = pInf;
+							}
+						}
+					}
+
+					if (pNearest && pTransport->CurrentMission != Mission::Unload)
+					{
+						if (nearestDist > 4 * Unsorted::LeptonsPerCell)
+						{
+							IssueMoveOrder(pTransport, pNearest->GetCell(), 2.0);
+						}
+						else if (pTransport->CurrentMission == Mission::Move)
+						{
+							// Close enough: a moving transport takes nobody in, so it stops and waits.
+							pTransport->SetDestination(nullptr, true);
+							pTransport->ForceMission(Mission::Guard);
 						}
 					}
 
@@ -2129,7 +2164,17 @@ namespace
 					if (aboard > 0 && (waiting == 0 || Unsorted::CurrentFrame - plan.StartFrame >= 900))
 						plan.AuxBaseline = 1;
 					else if (aboard == 0 && Unsorted::CurrentFrame - plan.StartFrame >= 1500)
+					{
+						// Not this transport again for a while: the same failure would repeat.
+						auto const pTransportCell = pTransport->GetCell();
+						Debug::Log("[NeuralAI] House %d AirborneFront: %s %u not boarded at (%d,%d)%s, nearest soldier %d cells away in mission %d.\n",
+							pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID, pTransport->GetMapCoords().X,
+							pTransport->GetMapCoords().Y, (pTransportCell && pTransportCell->LandType == LandType::Water) ? " on water" : "",
+							pNearest ? nearestDist / Unsorted::LeptonsPerCell : -1, pNearest ? static_cast<int>(pNearest->CurrentMission) : -1);
+						macro.RaidTransportBanUntil[pTransport->UniqueID] = Unsorted::CurrentFrame + 9000;
+						logEnd("nobody boarded");
 						finishPlan(NeuralPlanId::AirborneFront, false, true);
+					}
 				}
 				else if (plan.AuxBaseline == 1)
 				{
@@ -2154,6 +2199,7 @@ namespace
 					}
 					else if (pTransport->GetHealthPercentage() < 0.35)
 					{
+						logEnd("transport badly hit");
 						finishPlan(NeuralPlanId::AirborneFront, false, true);
 					}
 					else
@@ -2212,6 +2258,7 @@ namespace
 					}
 					else if (alive == 0)
 					{
+						logEnd("team gone");
 						finishPlan(NeuralPlanId::AirborneFront, false, false);
 					}
 				}
@@ -2249,6 +2296,12 @@ namespace
 						continue;
 					}
 
+					if (auto const ban = macro.RaidTransportBanUntil.find(uid);
+						ban != macro.RaidTransportBanUntil.end() && Unsorted::CurrentFrame < ban->second)
+					{
+						continue;
+					}
+
 					bool isCandidate = false;
 
 					if (auto const pAir = abstract_cast<AircraftClass*>(pFoot))
@@ -2259,15 +2312,20 @@ namespace
 					}
 					else if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
 					{
-						// Flying transport vehicles (HIND, transport disk), amphibious APCs (around by sea,
-						// on the same safe lane), or burrowing ones (they travel unseen under the
+						// Flying transport vehicles (HIND, transport disk), amphibious APCs and hovercraft
+						// (around by sea, on the same safe lane), or burrowing ones (they travel unseen under the
 						// defenses, so a commando team needs no lane).
 						const bool flying = pUnit->Type && IsAmphibiousOrAirTransport(pUnit->Type)
 							&& (pUnit->Type->JumpJet || pUnit->Type->ConsideredAircraft || pUnit->Type->MovementZone == MovementZone::Fly);
 						const bool underground = IsUndergroundTransportType(pUnit->Type);
 
+						// An empty transport waiting on a pickup shore keeps a ferry record that has not left
+						// (Departed=no) for as long as some ferry demand exists, even on a land map; only a
+						// trip under way holds it. The ferry loop skips plan members.
+						auto const pFerryTrip = FindFerryTrip(uid);
 						isCandidate = pUnit->Type && (flying || underground || IsAmphibiousGroundTransportType(pUnit->Type))
-							&& pUnit->Type->Passengers >= (underground ? 1 : 3) && isFreeForPlan(pUnit) && !FindFerryTrip(uid);
+							&& pUnit->Type->Passengers >= (underground ? 1 : 3) && isFreeForPlan(pUnit)
+							&& !(pFerryTrip && pFerryTrip->Departed);
 					}
 
 					if (isCandidate)
@@ -2500,6 +2558,7 @@ namespace
 					std::vector<FootClass*> group { pTransport };
 					group.insert(group.end(), infantry.begin(), infantry.end());
 					startPlan(NeuralPlanId::AirborneFront, group, pTarget->GetMapCoords(), pDrop->MapCoords, pTarget->UniqueID, 4500);
+					ClearFerryTrip(pTransport->UniqueID);
 					planOf(NeuralPlanId::AirborneFront).AuxBaseline = 0;
 					Debug::Log("[NeuralAI] House %d AirborneFront: %s %u carries %d soldiers (%d raiders, %d specialists) to %s of house %d at (%d,%d)%s, frame %d.\n",
 						pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID, static_cast<int>(infantry.size()),
