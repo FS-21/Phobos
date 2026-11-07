@@ -191,6 +191,10 @@ namespace
 		return pTech && pTech->OwnerIndex < 0;
 	}
 
+	// Coalition (NeuralAI.Urban.inl): an allied engineer walks into it or an allied Neural AI
+	// has picked it, so we leave it to them.
+	bool IsTechClaimedByAlly(HouseClass* pHouse, DWORD buildingID);
+
 	bool IsSpecOpsCaptureTarget(HouseClass* pHouse, DWORD targetID, DWORD exceptEngineer)
 	{
 		for (auto const& capture : GetSpecOpsState(pHouse).Captures)
@@ -203,7 +207,8 @@ namespace
 	}
 
 	// May any engineer of ours walk to this neutral building now? Known as neutral, not blocked by
-	// recent failures, not taken by an Expert 4 capture and out of known enemy defense reach.
+	// recent failures, not taken by an Expert 4 capture nor claimed by an ally, and out of known
+	// enemy defense reach.
 	bool IsSpecOpsTechAvailable(HouseClass* pHouse, const BuildingClass* pBld, DWORD engineerID)
 	{
 		if (!pHouse || !pBld)
@@ -213,7 +218,8 @@ namespace
 		auto const pTech = FindKnownTech(state, pBld->UniqueID);
 
 		return pTech && pTech->OwnerIndex < 0 && Unsorted::CurrentFrame >= pTech->BlockedUntilFrame
-			&& !IsSpecOpsCaptureTarget(pHouse, pTech->ID, engineerID) && !IsCellInKnownEnemyDefenseReach(pHouse, pTech->Cell, 2);
+			&& !IsSpecOpsCaptureTarget(pHouse, pTech->ID, engineerID) && !IsTechClaimedByAlly(pHouse, pTech->ID)
+			&& !IsCellInKnownEnemyDefenseReach(pHouse, pTech->Cell, 2);
 	}
 
 	bool CanEngineerReachTech(HouseClass* pHouse, const NeuralKnownTech& tech, int engineerZone, const InfantryTypeClass* pEngineerType)
@@ -1054,6 +1060,12 @@ namespace
 			}
 
 			auto const pTech = FindKnownTech(state, pBld->UniqueID);
+
+			if (pTech && pTech->OwnerIndex < 0 && IsTechClaimedByAlly(pHouse, pTech->ID))
+			{
+				CountDecision(NeuralDecision::AllyTechYield, pHouse->ArrayIndex);
+				continue;
+			}
 
 			if (!pTech || pTech->OwnerIndex >= 0 || now < pTech->BlockedUntilFrame
 				|| IsSpecOpsCaptureTarget(pHouse, pTech->ID, pEngineer->UniqueID)

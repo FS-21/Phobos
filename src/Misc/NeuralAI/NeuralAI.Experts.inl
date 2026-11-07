@@ -57,6 +57,8 @@ namespace
 
 	// Expert 8 work summary (NeuralAI.AirForce.inl, refreshed every 150 frames).
 	int AirForceOpportunity(HouseClass* pHouse);
+	// Expert 9 work summary (NeuralAI.Urban.inl, refreshed every 150 frames).
+	int UrbanOpportunity(HouseClass* pHouse);
 }
 
 void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features,
@@ -161,10 +163,12 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	const int airForceOpportunity = AirForceOpportunity(pHouse);
 	expScores[8] += airForceOpportunity + (pExt->NeuralAI_Archetype == 6 ? 120 : 0);
 
-	if (features[26] > 0 || features[96] > 0 || features[97] > 0 || features[79] > 0 || pExt->NeuralAI_Archetype == 7)
-	{
-		expScores[9] += 430; // Expert 9: Urban Garrison & Allied Coalition Warfare
-	}
+	// Expert 9: Urban Garrison & Allied Coalition Warfare, graded by the work there is for it now
+	// (fog-fair): known buildings worth holding and occupiers to fill them, enemy garrisons seen
+	// near our base, battle bunkers to man, garrisons to evacuate, allies to rescue or join (up to
+	// 720). It used to get +430 whenever any occupiable building stood anywhere on the map.
+	const int urbanOpportunity = UrbanOpportunity(pHouse);
+	expScores[9] += urbanOpportunity + (pExt->NeuralAI_Archetype == 7 ? 200 : 0);
 
 	// Common-sense vetoes: an expert that cannot do its job here is never chosen, whatever the
 	// learned bias says. Airforce with no air work (no armed aircraft, no target or enemy air it
@@ -175,8 +179,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	vetoed[0] = economyMacro.EconomyTrouble == 0;
 	vetoed[4] = specOpsOpportunity == 0 && pExt->NeuralAI_Archetype != 1;
 	vetoed[8] = airForceOpportunity == 0 && (pExt->NeuralAI_Archetype != 6 || !HouseCanEverFieldAircraft(pHouse));
-	vetoed[9] = features[26] == 0 && features[79] == 0 && features[96] == 0 && features[97] == 0
-		&& pExt->NeuralAI_Archetype != 7;
+	vetoed[9] = urbanOpportunity == 0 && pExt->NeuralAI_Archetype != 7;
 	vetoed[6] = economyMacro.ExpansionOpportunity == 0;
 
 	const int curArch = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);

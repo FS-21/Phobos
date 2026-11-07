@@ -244,6 +244,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Expert 4: demolition trucks and terrorists sneaking in without a transport.
 	UpdateSneakStrikes(pHouse);
+	// Expert 9: occupiable buildings seen, garrisons to hold, evacuate or clear, coalition work.
+	UpdateUrban(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -3932,6 +3934,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int bestInfIdx = -1;
 	int bestInfScore = -32000;
 	int inProgressInfIdx = -1;
+
+	// Expert 9 in charge: fill the buildings worth holding (soldiers with the strongest weapon
+	// inside first) and bring a clearer when an enemy garrison near us has nobody to answer it.
+	int urbanGarrisonRoom = 0;
+	bool urbanNeedClearer = false;
+
+	if (pExt->NeuralAI_ActiveExpert == 9)
+		GetUrbanProductionNeeds(pHouse, urbanGarrisonRoom, urbanNeedClearer);
+
 	if (FactoryClass* pInfFac = pHouse->GetPrimaryFactory(AbstractType::InfantryType, false, BuildCat::DontCare))
 	{
 		if (pInfFac->Object && pInfFac->Object->GetType())
@@ -4003,6 +4014,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			score += 520;
 		}
+
+		if (urbanGarrisonRoom > 0 && IsGarrisonOccupierType(pInf))
+			score += 260 + std::min(240, GarrisonFirepowerOf(pInf)) + std::min(4, urbanGarrisonRoom) * 30;
+
+		if (urbanNeedClearer && IsGarrisonClearerType(pInf))
+			score += 450;
 
 		// Train compatible Occupier infantry whenever we own an empty or under-filled Battle Bunker
 		for (auto const pOwnB : pHouse->Buildings)

@@ -168,6 +168,10 @@ namespace
 		AirFrontPatrol,
 		AircraftFielded,
 		AircraftLost,
+		UrbanGarrison,
+		UrbanEvacuate,
+		UrbanClear,
+		AllyTechYield,
 		Count
 	};
 
@@ -190,7 +194,8 @@ namespace
 		"teamHelpAnswered", "teamClaimYield", "teamExpansionYield",
 		"bankFactoryPick", "bankYardPick",
 		"airWings", "airWingSorties", "airInterceptSorties", "airSoloStrikes", "airFrontPatrols", "aircraftFielded",
-		"aircraftLost" };
+		"aircraftLost",
+		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
