@@ -159,6 +159,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Features };
 		UpdateBridgePlanner(pHouse);
 		NeuralAI::ExtractFogFilteredFeatures(pHouse, features);
+
+		// Defense and ambush spots from the enemy routes the fog scan just recorded.
+		UpdateRouteHeat(pHouse);
 	}
 
 	// The fog scan may have marked new enemy buildings as seen: rebuild the known-building cache.

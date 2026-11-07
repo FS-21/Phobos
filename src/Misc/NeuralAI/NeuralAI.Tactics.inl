@@ -324,7 +324,11 @@ namespace
 			const MovementZone mz = pUnit->Type->MovementZone;
 			const int unitZone = ObjectZone(pUnit, mz);
 			CellClass* pBestOre = nullptr;
-			int bestDist = INT_MAX;
+			// Distance plus the enemy route heat the straight way there crosses (40 heat = 1 cell),
+			// so a harvester does not cross the hottest enemy routes for a slightly closer field.
+			int bestCost = INT_MAX;
+			CellClass* pNearestOre = nullptr;
+			int nearestDist = INT_MAX;
 
 			for (int dy = -96; dy <= 96; dy += 3)
 			{
@@ -332,7 +336,7 @@ namespace
 				{
 					const int d = std::max(std::abs(dx), std::abs(dy));
 
-					if (d < 8 || d >= bestDist)
+					if (d < 8 || (d >= bestCost && d >= nearestDist))
 						continue;
 
 					const CellStruct tc { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) };
@@ -375,10 +379,24 @@ namespace
 					if (fieldCells < 4)
 						continue;
 
-					bestDist = d;
-					pBestOre = pCell;
+					if (d < nearestDist)
+					{
+						nearestDist = d;
+						pNearestOre = pCell;
+					}
+
+					const int cost = d + RouteHeatAlong(pHouse, here, tc) / 40;
+
+					if (cost < bestCost)
+					{
+						bestCost = cost;
+						pBestOre = pCell;
+					}
 				}
 			}
+
+			if (pBestOre && pNearestOre && pBestOre != pNearestOre && pBestOre->MapCoords.DistanceFrom(pNearestOre->MapCoords) > 6.0)
+				CountDecision(NeuralDecision::RouteHarvesterDetour, pHouse->ArrayIndex);
 
 			if (!pBestOre)
 				pBestOre = FindFreeOreFieldCell(pHouse, here, ObjectZone(pUnit, MovementZone::Normal), 8, true);
@@ -1112,7 +1130,10 @@ namespace
 
 				const int harvZone = ObjectZone(pHarv, pHarv->Type->MovementZone);
 				BuildingClass* pHome = nullptr;
-				int bestDist = INT_MAX;
+				BuildingClass* pNearestHome = nullptr;
+				// Distance plus the enemy route heat the straight way home crosses (40 heat = 1 cell).
+				int bestCost = INT_MAX;
+				int nearestDist = INT_MAX;
 
 				for (auto const pRef : refineries)
 				{
@@ -1121,15 +1142,32 @@ namespace
 
 					const int dist = static_cast<int>(pRef->GetMapCoords().DistanceFrom(hc));
 
-					if (dist < 6 || dist > 60 || dist >= bestDist || VisibleEnemyThreatNear(pHouse, pRef->GetMapCoords(), 8) > 0)
+					if (dist < 6 || dist > 60 || (dist >= bestCost && dist >= nearestDist)
+						|| VisibleEnemyThreatNear(pHouse, pRef->GetMapCoords(), 8) > 0)
+					{
 						continue;
+					}
 
-					bestDist = dist;
-					pHome = pRef;
+					if (dist < nearestDist)
+					{
+						nearestDist = dist;
+						pNearestHome = pRef;
+					}
+
+					const int cost = dist + RouteHeatAlong(pHouse, hc, pRef->GetMapCoords()) / 40;
+
+					if (cost < bestCost)
+					{
+						bestCost = cost;
+						pHome = pRef;
+					}
 				}
 
 				if (!pHome)
 					continue;
+
+				if (pHome != pNearestHome)
+					CountDecision(NeuralDecision::RouteHarvesterDetour, pHouse->ArrayIndex);
 
 				OrderFootToEnter(pHarv, pHome);
 				keptRetreats[pHarv->UniqueID] = now;
