@@ -1138,8 +1138,21 @@ namespace
 			}
 		}
 
-		macro.StorageNearlyFull = storageLimited && pHouse->TotalStorage > 0
+		bool nearlyFull = storageLimited && pHouse->TotalStorage > 0
 			&& pHouse->OwnedTiberium.GetTotalAmount() >= static_cast<float>(pHouse->TotalStorage) * 0.85f;
+
+		// Only trouble Expert 0 can fix: a silo we can build now (a silo may need a refinery type
+		// the storage option disables, so a full house can have none).
+		if (nearlyFull)
+		{
+			nearlyFull = std::any_of(BuildingTypeClass::Array.begin(), BuildingTypeClass::Array.end(), [pHouse](BuildingTypeClass* pType)
+				{
+					return pType && pType->Storage > 0 && !pType->Refinery && !pType->ResourceGatherer && !pType->ResourceDestination
+						&& CanBuildUnderHumanRules(pHouse, pType);
+				});
+		}
+
+		macro.StorageNearlyFull = nearlyFull;
 
 		if (pHouse->HasLowPower())
 		{

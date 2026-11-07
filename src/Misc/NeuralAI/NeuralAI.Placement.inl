@@ -553,10 +553,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
-	// Allied Base-Sharing (BuildOffAlly=yes): If we lost our ConYard OR an Ally's
-	// ConYard is under attack (< 80% HP) while placing a Base Defense, build
-	// around our Ally's ConYard!
-	if (GameModeOptionsClass::Instance.BuildOffAlly && (pHouse->ConYards.Count == 0 || pBuildingType->IsBaseDefense))
+	// Allied Base-Sharing (BuildOffAlly=yes): with no ConYard of our own we build around an
+	// ally's base. Defenses for an ally under attack now are anchored later (AllyDefenseCell).
+	if (GameModeOptionsClass::Instance.BuildOffAlly && pHouse->ConYards.Count == 0)
 	{
 		for (auto const pAllyBld : BuildingClass::Array)
 		{
@@ -566,14 +565,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			if (pAllyBld->Owner != pHouse && pHouse->IsAlliedWith(pAllyBld->Owner) && !pAllyBld->Owner->IsNeutral()
 				&& pAllyBld->Type->EligibileForAllyBuilding)
 			{
-				if (pHouse->ConYards.Count == 0
-					|| (pBuildingType->IsBaseDefense && pAllyBld->HasBeenAttacked
-						&& pAllyBld->GetHealthPercentage() < 0.80))
-				{
-					center = pAllyBld->GetMapCoords();
+				center = pAllyBld->GetMapCoords();
 
-					break;
-				}
+				break;
 			}
 		}
 	}
@@ -1443,6 +1437,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		|| (isCombatDefense && !isPureAA && (turretCreepBias > -20 || crawlBias > 0 || totalOwnedDefensesCount >= 1)
 			&& directionalAttackedBld == CellStruct::Empty);
 
+	// Team games: the crawl starts from an ally building closer to the ore (below).
+	bool crawlFromAllyAnchor = false;
+
 	if (isCombatDefense && directionalAttackedBld != CellStruct::Empty)
 	{
 		center = directionalAttackedBld;
@@ -1549,6 +1546,56 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					center = bc;
 				}
 			}
+
+			// Team games (BuildOffAlly): an ally building 6+ cells closer to the ore carries the
+			// crawl while the ally keeps room there; candidates then keep a free cell from its
+			// buildings and 4 from its ConYard (allySiteKeepClear). Its refineries never anchor, nor
+			// does a building within 20 cells of a ConYard of ours: when the starts are next to each
+			// other only the ally's expansions are worth crawling from.
+			if (crawlTowardOre && GameModeOptionsClass::Instance.BuildOffAlly)
+			{
+				BuildingClass* pAllyAnchor = nullptr;
+				int bestAllyDist = bestAnchorDist - 6;
+
+				for (auto const pAllyBld : BuildingClass::Array)
+				{
+					if (!pAllyBld || !pAllyBld->IsAlive || pAllyBld->InLimbo || !pAllyBld->Type || !pAllyBld->Owner
+						|| pAllyBld->Owner == pHouse || !pHouse->IsAlliedWith(pAllyBld->Owner) || pAllyBld->Owner->IsNeutral()
+						|| !pAllyBld->Type->EligibileForAllyBuilding || !pAllyBld->Type->BaseNormal || pAllyBld->Type->Refinery
+						|| pAllyBld->Type->ResourceDestination)
+					{
+						continue;
+					}
+
+					const CellStruct bc = pAllyBld->GetMapCoords();
+
+					if (std::any_of(pHouse->ConYards.begin(), pHouse->ConYards.end(),
+							[&bc](BuildingClass* pYard) { return pYard && pYard->GetMapCoords().DistanceFrom(bc) < 20.0; }))
+					{
+						continue;
+					}
+
+					if (centerZone >= 0
+						&& MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pAllyBld->OnBridge) != centerZone)
+					{
+						continue;
+					}
+
+					const int dGoal = std::abs(bc.X - crawlGoal.X) + std::abs(bc.Y - crawlGoal.Y);
+
+					if (dGoal < bestAllyDist || (dGoal == bestAllyDist && pAllyAnchor && pAllyBld->UniqueID < pAllyAnchor->UniqueID))
+					{
+						bestAllyDist = dGoal;
+						pAllyAnchor = pAllyBld;
+					}
+				}
+
+				if (pAllyAnchor && AllyKeepsRoomAround(pAllyAnchor->GetMapCoords(), pAllyAnchor->Owner, pBuildingType))
+				{
+					center = pAllyAnchor->GetMapCoords();
+					crawlFromAllyAnchor = true;
+				}
+			}
 		}
 	}
 
@@ -1638,6 +1685,78 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
+	// Ally site plans: this building goes next to the ally's base, from the cell the plan chose
+	// (its side of that base); expansion zones and old sites of lost buildings do not apply there.
+	auto const& allySiteMacro = GetMacroState(pHouse);
+	const bool placingAtAllySite = GameModeOptionsClass::Instance.BuildOffAlly
+		&& allySiteMacro.AllySiteUntilFrame > Unsorted::CurrentFrame && allySiteMacro.AllySiteBuildType == pBuildingType->ArrayIndex
+		&& allySiteMacro.AllySiteCell != CellStruct::Empty && allySiteMacro.AllySiteYardCell != CellStruct::Empty;
+
+	// Ally buildings we keep clear of. Near the site, the ally crawl anchor or an ally defense spot:
+	// a free cell from each of its buildings (its lanes and the room it builds into) and 4 from its
+	// ConYard.
+	std::vector<ArchitectRect> allySiteKeepClear;
+
+	if (placingAtAllySite)
+	{
+		center = allySiteMacro.AllySiteCell;
+		targetExpansionZone = -1;
+	}
+
+	// An ally building attacked lately (production, AllyDefenseCell): our armed defense goes there,
+	// after every other anchor so none of them moves it home. Once the enemy is no longer in sight
+	// there, a hot spot of ours (a building of ours attacked, an active front, a key asset without
+	// cover, chosen above) wins; with none the ally spot is still reinforced.
+	const bool ownHotSpot = directionalAttackedBld != CellStruct::Empty || undefendedKeyAssetCell != CellStruct::Empty
+		|| (allySiteMacro.FrontlineThreatNeedsDefenses > 0 && Unsorted::CurrentFrame <= allySiteMacro.FrontlineThreatActiveFrames);
+	const bool defendingAlly = !placingAtAllySite && pBuildingType->IsBaseDefense && GroundRangeOf(pBuildingType) > 0
+		&& GameModeOptionsClass::Instance.BuildOffAlly && allySiteMacro.AllyDefenseUntilFrame > Unsorted::CurrentFrame
+		&& allySiteMacro.AllyDefenseCell != CellStruct::Empty
+		&& (!ownHotSpot || VisibleEnemyThreatNear(pHouse, allySiteMacro.AllyDefenseCell, 10) > 0);
+
+	if (defendingAlly)
+	{
+		center = allySiteMacro.AllyDefenseCell;
+		targetExpansionZone = -1;
+	}
+
+	// Whatever we place never touches an ally's factory, refinery, repair station or ConYard (their
+	// exits and docks stay open): a free cell from each, in both passes.
+	for (auto const& fp : GetBuildingFootprints())
+	{
+		if (!fp.Owner || fp.Owner == pHouse || !pHouse->IsAlliedWith(fp.Owner) || fp.Owner->IsNeutral()
+			|| std::max(std::abs(fp.X - center.X), std::abs(fp.Y - center.Y)) > 40)
+		{
+			continue;
+		}
+
+		if (fp.Type->Factory != AbstractType::None || fp.Type->Refinery || fp.Type->ResourceDestination
+			|| fp.Type->ConstructionYard || fp.Type->UnitRepair)
+		{
+			allySiteKeepClear.push_back({ static_cast<short>(fp.X - 1), static_cast<short>(fp.Y - 1),
+				static_cast<short>(fp.X + fp.W), static_cast<short>(fp.Y + fp.H) });
+		}
+	}
+
+	if (placingAtAllySite || crawlFromAllyAnchor || defendingAlly)
+	{
+		for (auto const pAllyBld : BuildingClass::Array)
+		{
+			if (!pAllyBld || !pAllyBld->IsAlive || pAllyBld->InLimbo || !pAllyBld->Type || !pAllyBld->Owner
+				|| pAllyBld->Owner == pHouse || !pHouse->IsAlliedWith(pAllyBld->Owner)
+				|| pAllyBld->GetMapCoords().DistanceFrom(center) > 40.0)
+			{
+				continue;
+			}
+
+			const CellStruct bc = pAllyBld->GetMapCoords();
+			const short margin = pAllyBld->Type->ConstructionYard ? 4 : 1;
+			allySiteKeepClear.push_back({ static_cast<short>(bc.X - margin), static_cast<short>(bc.Y - margin),
+				static_cast<short>(bc.X + pAllyBld->Type->GetFoundationWidth() - 1 + margin),
+				static_cast<short>(bc.Y + pAllyBld->Type->GetFoundationHeight(false) - 1 + margin) });
+		}
+	}
+
 	const bool hasPendingClearanceForOther =
 
 		(GetMacroState(pHouse).PendingClearanceType != nullptr
@@ -1665,7 +1784,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 		}
 
-		if (GameModeOptionsClass::Instance.BuildOffAlly && !isRefineryOrSlaveMiner)
+		// A refinery leans on ally buildings only when the crawl to its ore starts from one.
+		if (GameModeOptionsClass::Instance.BuildOffAlly && (!isRefineryOrSlaveMiner || crawlFromAllyAnchor))
 		{
 			for (auto const pAllyBld : BuildingClass::Array)
 			{
@@ -2175,8 +2295,15 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	}
 
 	// Expert 1: the old site of a lost key building is always evaluated, even past the budget.
-	if (architectRebuildCell != CellStruct::Empty)
+	if (architectRebuildCell != CellStruct::Empty && !placingAtAllySite && !defendingAlly)
 		candidateList.insert(candidateList.begin(), architectRebuildCell);
+
+	// Ally site: the cell found before production is tried first and kept while still valid.
+	const bool hasAllySiteReservation = placingAtAllySite && allySiteMacro.AllySiteReservedType == pBuildingType->ArrayIndex
+		&& allySiteMacro.AllySiteReservedCell != CellStruct::Empty;
+
+	if (hasAllySiteReservation)
+		candidateList.insert(candidateList.begin(), allySiteMacro.AllySiteReservedCell);
 
 	const int maxCandidatesToEvaluate = isNavalBld ? 2400 : 900;
 
@@ -2329,6 +2456,29 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 				if (!foundationValid)
 					continue;
+
+				// Ally site: within 20 cells of the ally's ConYard. Never inside an ally keep-clear
+				// rectangle (allySiteKeepClear), in both passes: a cramped ally base is not squeezed
+				// further.
+				if (placingAtAllySite && candidate.DistanceFrom(allySiteMacro.AllySiteYardCell) > 20.0)
+					continue;
+
+				if (!allySiteKeepClear.empty())
+				{
+					bool touchesAlly = false;
+
+					for (auto const& rect : allySiteKeepClear)
+					{
+						if (rect.Overlaps(candidate.X, candidate.Y, w, h))
+						{
+							touchesAlly = true;
+							break;
+						}
+					}
+
+					if (touchesAlly)
+						continue;
+				}
 
 				// Expert 1: never stand in a factory's exit lane, and a new factory needs its own lane
 				// open (its door cell free, most of the lane walkable). The strict pass skips such
@@ -2488,6 +2638,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					= (!isNavalBld && targetExpansionZone >= 0 && candZone == targetExpansionZone) ? 650 : 0;
 				int spatialScore = (enableBaseCrawl ? (-radius * 5) : (-radius * 10)) - (hasOneCellMargin ? 0 : 4000)
 					+ expansionZoneBonus;
+
+				if (hasAllySiteReservation && candidate == allySiteMacro.AllySiteReservedCell)
+					spatialScore += 100000;
 
 				if (!isCombatDefense)
 				{
@@ -3474,7 +3627,53 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 	}
 
 	// Step 2: Normal Spatial Tetris placement search
-	const CellStruct bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
+	CellStruct bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
+
+	// A building an ally site plan wanted found no room there: it goes home (the failure code below
+	// would count it against the home crawl and may sell buildings to clear space) and the plan
+	// ends (AllySiteFailedFrame).
+	{
+		auto& siteSt = GetMacroState(pHouse);
+		const bool wantedAtSite = siteSt.AllySiteUntilFrame > Unsorted::CurrentFrame
+			&& siteSt.AllySiteBuildType == pBuildingType->ArrayIndex;
+
+		if (wantedAtSite && bestCell == CellStruct::Empty)
+		{
+			siteSt.AllySiteFailedFrame = Unsorted::CurrentFrame;
+			siteSt.AllySiteUntilFrame = -1;
+			bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
+		}
+		else if (wantedAtSite)
+		{
+			CountDecision(NeuralDecision::AllySiteBuilding, pHouse->ArrayIndex);
+		}
+	}
+
+	// Placed next to an ally building: a defense for an ally under attack, or our crawl using ally
+	// space for our expansion.
+	if (bestCell != CellStruct::Empty && pBuildingType->IsBaseDefense
+		&& GetMacroState(pHouse).AllyDefenseUntilFrame > Unsorted::CurrentFrame
+		&& bestCell.DistanceFrom(GetMacroState(pHouse).AllyDefenseCell) <= 14.0)
+	{
+		CountDecision(NeuralDecision::AllyDefense, pHouse->ArrayIndex);
+	}
+	else if (bestCell != CellStruct::Empty && GameModeOptionsClass::Instance.BuildOffAlly)
+	{
+		const int bw = pBuildingType->GetFoundationWidth();
+		const int bh = pBuildingType->GetFoundationHeight(false);
+
+		for (auto const pAllyBld : BuildingClass::Array)
+		{
+			if (pAllyBld && pAllyBld->IsAlive && !pAllyBld->InLimbo && pAllyBld->Type && pAllyBld->Owner
+				&& pAllyBld->Owner != pHouse && pHouse->IsAlliedWith(pAllyBld->Owner)
+				&& pAllyBld->GetMapCoords().DistanceFrom(bestCell) <= static_cast<double>(std::max(bw, bh) + 4)
+				&& GetMacroState(pHouse).AllySiteBuildType != pBuildingType->ArrayIndex)
+			{
+				CountDecision(NeuralDecision::AllyCrawlAnchor, pHouse->ArrayIndex);
+				break;
+			}
+		}
+	}
 
 	if (bestCell != CellStruct::Empty)
 	{

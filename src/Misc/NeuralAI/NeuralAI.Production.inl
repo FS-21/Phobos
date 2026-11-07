@@ -1691,6 +1691,72 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			|| (((ownedRefineries >= 1 && ownedHarvestersCount >= 1) || ownedSlaveMinerBuildings >= 1)
 				&& (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
 
+		// Team games: an ally building under attack now (an armed enemy in our sight within 8 cells,
+		// the building below 80%) while our own base is not (no armed enemy in sight within 16 cells
+		// of any ConYard of ours): armed ground defenses get a bonus and placement puts them there
+		// (AllyDefenseCell), while we have fewer than 2 within 10 cells. Not within 15 cells of a
+		// ConYard of ours: there our own defenses already cover both bases.
+		CellStruct allyDefenseCell = CellStruct::Empty;
+		const bool ownYardsQuiet = std::none_of(pHouse->ConYards.begin(), pHouse->ConYards.end(), [pHouse](BuildingClass* pYard)
+			{
+				return pYard && VisibleEnemyThreatNear(pHouse, pYard->GetMapCoords(), 16) > 0;
+			});
+
+		if (GameModeOptionsClass::Instance.BuildOffAlly && pHouse->ConYards.Count > 0 && ownYardsQuiet
+			&& !frontlineThreatActive && money >= 1500)
+		{
+			int bestThreat = 0;
+
+			for (auto const pAllyBld : BuildingClass::Array)
+			{
+				if (!pAllyBld || !pAllyBld->IsAlive || pAllyBld->InLimbo || !pAllyBld->Type || !pAllyBld->Owner
+					|| pAllyBld->Owner == pHouse || !pHouse->IsAlliedWith(pAllyBld->Owner) || pAllyBld->Owner->IsNeutral()
+					|| !pAllyBld->Type->EligibileForAllyBuilding || pAllyBld->GetHealthPercentage() >= 0.80)
+				{
+					continue;
+				}
+
+				const CellStruct bc = pAllyBld->GetMapCoords();
+
+				if (std::any_of(pHouse->ConYards.begin(), pHouse->ConYards.end(),
+						[&bc](BuildingClass* pYard) { return pYard && pYard->GetMapCoords().DistanceFrom(bc) < 15.0; }))
+				{
+					continue;
+				}
+
+				const int threat = VisibleEnemyThreatNear(pHouse, bc, 8);
+
+				if (threat <= bestThreat)
+					continue;
+
+				const int ownDefensesThere = static_cast<int>(std::count_if(pHouse->Buildings.begin(), pHouse->Buildings.end(),
+					[&bc](BuildingClass* pOwn)
+					{
+						return pOwn && pOwn->IsAlive && !pOwn->InLimbo && pOwn->Type && pOwn->Type->IsBaseDefense
+							&& pOwn->GetMapCoords().DistanceFrom(bc) <= 10.0;
+					}));
+
+				if (ownDefensesThere >= 2)
+					continue;
+
+				bestThreat = threat;
+				allyDefenseCell = bc;
+			}
+		}
+
+		// The spot stays valid 1800 frames after the threat was last seen: the defense chosen for it
+		// takes a while to build and must still go there once ready.
+		if (allyDefenseCell != CellStruct::Empty)
+		{
+			GetMacroState(pHouse).AllyDefenseCell = allyDefenseCell;
+			GetMacroState(pHouse).AllyDefenseUntilFrame = Unsorted::CurrentFrame + 1800;
+		}
+		else if (GetMacroState(pHouse).AllyDefenseUntilFrame <= Unsorted::CurrentFrame)
+		{
+			GetMacroState(pHouse).AllyDefenseCell = CellStruct::Empty;
+			GetMacroState(pHouse).AllyDefenseUntilFrame = -1;
+		}
+
 		// Expansion MCV prerequisites: a house that wants to expand (slot 30, free ore fields) but
 		// cannot build any MCV yet is often missing one building of the MCV's Prerequisite list
 		// (YR asks for a service depot besides the war factory). Those buildings get a bonus.
@@ -2347,6 +2413,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			score += techUnlockBonus;
 
+			if (allyDefenseCell != CellStruct::Empty && pBld->IsBaseDefense && GroundRangeOf(pBld) > 0 && !pBld->CanBeOccupied
+				&& !pBld->Bunker)
+			{
+				score += 900;
+			}
+
 			if (GetMacroState(pHouse).ConsecutivePlacementFailures == 1 && pBld->BaseNormal
 				&& pBld->GetFoundationWidth() <= 2 && pBld->GetFoundationHeight(false) <= 2)
 			{
@@ -2385,6 +2457,30 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				bestBldScore = score;
 				bestBldIdx = pBld->ArrayIndex;
+			}
+		}
+
+		// Ally site plans (Ally Backup, Ally Forward Outpost) ask for one building next to an ally's
+		// base: it comes before routine picks, never before restoring income, a building already
+		// under construction or anything scored as an emergency (2700+).
+		{
+			auto const& siteMacro = GetMacroState(pHouse);
+
+			if (siteMacro.AllySiteUntilFrame > Unsorted::CurrentFrame && siteMacro.AllySiteBuildType >= 0
+				&& siteMacro.AllySiteBuildType < BuildingTypeClass::Array.Count && hasActiveBuildingIncome
+				&& inProgressBldIdx < 0 && bestBldScore < 2700)
+			{
+				auto const pSiteType = BuildingTypeClass::Array.GetItem(siteMacro.AllySiteBuildType);
+				auto const cdIt = siteMacro.BuildingPlacementCooldownUntilFrame.find(siteMacro.AllySiteBuildType);
+				const bool coolingDown = cdIt != siteMacro.BuildingPlacementCooldownUntilFrame.end()
+					&& Unsorted::CurrentFrame < cdIt->second;
+
+				if (pSiteType && !coolingDown && !HouseExt::IsDisabledFromShell(pHouse, pSiteType)
+					&& CanBuildUnderHumanRules(pHouse, pSiteType) && money >= pSiteType->GetActualCost(pHouse))
+				{
+					bestBldIdx = siteMacro.AllySiteBuildType;
+					bestBldScore = 2700;
+				}
 			}
 		}
 

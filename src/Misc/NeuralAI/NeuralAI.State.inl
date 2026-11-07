@@ -356,6 +356,22 @@ namespace
 		int IslandHoldUntilFrame { -1 };
 		CellStruct ForwardRepairCell { CellStruct::Empty };
 		int ForwardRepairUntilFrame { -1 };
+		// Ally site plans (Ally Backup, Ally Forward Outpost): the next building we want next to an
+		// ally's base, the ally ConYard it belongs to and the cell its side of that base starts at.
+		int AllySiteBuildType { -1 };
+		CellStruct AllySiteCell { CellStruct::Empty };
+		CellStruct AllySiteYardCell { CellStruct::Empty };
+		int AllySiteUntilFrame { -1 };
+		// Last frame the wanted building found no room at the ally site (it was placed at home).
+		int AllySiteFailedFrame { -1 };
+		// Cell found for the wanted building before paying for it (placement tries it first), the
+		// type it was found for and when it was last checked.
+		CellStruct AllySiteReservedCell { CellStruct::Empty };
+		int AllySiteReservedType { -1 };
+		int AllySiteReservedFrame { -1 };
+		// An ally building under attack right now that our next armed defense goes to (production).
+		CellStruct AllyDefenseCell { CellStruct::Empty };
+		int AllyDefenseUntilFrame { -1 };
 		// Survival plan: next frame a building may be sold to fund a replacement MCV.
 		int SurvivalNextSellFrame { 0 };
 
@@ -536,6 +552,16 @@ namespace
 			this->IslandHoldUntilFrame = -1;
 			this->ForwardRepairCell = CellStruct::Empty;
 			this->ForwardRepairUntilFrame = -1;
+			this->AllySiteBuildType = -1;
+			this->AllySiteCell = CellStruct::Empty;
+			this->AllySiteYardCell = CellStruct::Empty;
+			this->AllySiteUntilFrame = -1;
+			this->AllySiteFailedFrame = -1;
+			this->AllySiteReservedCell = CellStruct::Empty;
+			this->AllySiteReservedType = -1;
+			this->AllySiteReservedFrame = -1;
+			this->AllyDefenseCell = CellStruct::Empty;
+			this->AllyDefenseUntilFrame = -1;
 			this->SurvivalNextSellFrame = 0;
 			this->AttackSectorWeight.fill(0);
 			this->AttackSectorDecayFrame = 0;

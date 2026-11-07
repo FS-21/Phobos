@@ -104,6 +104,9 @@ namespace
 		BridgeRoute,
 		HarvesterRetreat,
 		HarvesterRebalance,
+		AllySiteBuilding,
+		AllyCrawlAnchor,
+		AllyDefense,
 		Count
 	};
 
@@ -112,7 +115,8 @@ namespace
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
 		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
-		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute", "harvesterRetreat", "harvesterRebalance" };
+		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute", "harvesterRetreat", "harvesterRebalance",
+		"allySiteBuilding", "allyCrawlAnchor", "allyDefense" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -896,6 +900,8 @@ namespace
 		TechTreeCut,
 		ComboBlackoutPush,
 		ComboWatchStrike,
+		AllyBackup,
+		AllyForwardOutpost,
 		Count
 	};
 
@@ -904,12 +910,14 @@ namespace
 		"harvesterAmbush", "pickets", "keyPointHold", "survival", "preemptiveStrike", "baitAmbush", "allyJointAttack",
 		"forwardRepair", "navalStrike", "engineerAssault", "sabotage", "huntKeyUnits", "rotatingRaids", "airCorridor",
 		"silentInfiltration", "artilleryEcoSiege", "rollingSiege", "delayingAction", "threeFront", "factoryDecapitation",
-		"cutReinforcements", "techTreeCut", "comboBlackoutPush", "comboWatchStrike" };
+		"cutReinforcements", "techTreeCut", "comboBlackoutPush", "comboWatchStrike", "allyBackup", "allyForwardOutpost" };
 
 	// Trained preference of each plan: free reserve output slots 89.. (see the trainer's
-	// OUTPUT_SLOT_NAMES), learned by ES like any other slot.
+	// OUTPUT_SLOT_NAMES), learned by ES like any other slot. The ally site plans share the slot of
+	// the plan closest to them: Ally Backup with Survival (106), Ally Forward Outpost with Ally Joint
+	// Attack (109).
 	constexpr int NeuralPlanSlots[] = { 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
-		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126 };
+		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 106, 109 };
 
 	static_assert(std::size(NeuralPlanNames) == static_cast<size_t>(NeuralPlanId::Count));
 	static_assert(std::size(NeuralPlanSlots) == static_cast<size_t>(NeuralPlanId::Count));

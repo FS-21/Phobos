@@ -258,6 +258,352 @@ namespace
 	bool CanBuildUnderHumanRules(HouseClass* pHouse, TechnoTypeClass* pType);
 	bool IsSpecOpsEngineerBusy(HouseClass* pHouse, DWORD engineerID);
 
+	// Whether a building of type idxType satisfies prerequisite entry idx: a building type index,
+	// or (negative) a group of [GenericPrerequisites], nested groups included.
+	bool BuildingTypeSatisfiesPrerequisite(int idxType, int idx, int depth = 0)
+	{
+		if (idx >= 0)
+			return idx == idxType;
+
+		auto const& groups = RulesExt::Global()->GenericPrerequisites;
+		const int group = -idx;
+
+		if (depth > 4 || group >= groups.Count)
+			return false;
+
+		for (const int item : groups.GetItem(group))
+		{
+			if (BuildingTypeSatisfiesPrerequisite(idxType, item, depth + 1))
+				return true;
+		}
+
+		return false;
+	}
+
+	// The alternative prerequisite lists of a type: Prerequisite= and every Ares
+	// Prerequisite.ListN= (meeting any one of them is enough).
+	std::vector<std::vector<int>> PrerequisiteListsOf(TechnoTypeClass* pType)
+	{
+		std::vector<std::vector<int>> lists;
+		auto const pTypeExt = TechnoTypeExt::Fetch(pType);
+
+		if (!pTypeExt)
+			return lists;
+
+		if (!pTypeExt->Prerequisite.empty())
+			lists.push_back(pTypeExt->Prerequisite);
+
+		if (pTypeExt->Prerequisite_Lists.Get() > 0)
+		{
+			for (auto const& list : pTypeExt->Prerequisite_ListVector)
+			{
+				if (list.Count > 0)
+					lists.emplace_back(list.begin(), list.end());
+			}
+		}
+
+		if (lists.empty())
+			lists.emplace_back();
+
+		return lists;
+	}
+
+	// MCV types this house may own (owners, tech level), in array order.
+	std::vector<UnitTypeClass*> HouseMCVTypes(HouseClass* pHouse)
+	{
+		std::vector<UnitTypeClass*> types;
+
+		for (auto const pType : UnitTypeClass::Array)
+		{
+			if (pType && pType->DeploysInto && pType->DeploysInto->ConstructionYard && pType->TechLevel >= 0
+				&& pType->TechLevel <= pHouse->TechLevel && HouseExt::IsAvailableToHouse(pHouse, pType))
+			{
+				types.push_back(pType);
+			}
+		}
+
+		return types;
+	}
+
+	// A building that one of our MCV prerequisite lists names: selling it (Survival) would leave the
+	// house unable to build an MCV again.
+	bool IsMCVPrerequisiteType(HouseClass* pHouse, BuildingTypeClass* pType)
+	{
+		for (auto const pMcv : HouseMCVTypes(pHouse))
+		{
+			for (auto const& list : PrerequisiteListsOf(pMcv))
+			{
+				for (const int idx : list)
+				{
+					if (BuildingTypeSatisfiesPrerequisite(pType->ArrayIndex, idx))
+						return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	// The cheapest building type we can build now that satisfies prerequisite entry idx (ties by
+	// array index), or nullptr when none is buildable (a tech building we can only capture).
+	BuildingTypeClass* CheapestBuildableForPrerequisite(HouseClass* pHouse, int idx)
+	{
+		BuildingTypeClass* pBest = nullptr;
+		int bestCost = 0;
+
+		for (auto const pType : BuildingTypeClass::Array)
+		{
+			if (!pType || pType->Naval || !BuildingTypeSatisfiesPrerequisite(pType->ArrayIndex, idx)
+				|| !CanBuildUnderHumanRules(pHouse, pType))
+			{
+				continue;
+			}
+
+			const int cost = pType->GetActualCost(pHouse);
+
+			if (!pBest || cost < bestCost)
+			{
+				pBest = pType;
+				bestCost = cost;
+			}
+		}
+
+		return pBest;
+	}
+
+	// The cheapest ground factory of the given kind (UnitType: war factory, InfantryType: barracks)
+	// we can build now, or nullptr.
+	BuildingTypeClass* CheapestBuildableGroundFactory(HouseClass* pHouse, AbstractType kind)
+	{
+		BuildingTypeClass* pBest = nullptr;
+		int bestCost = 0;
+
+		for (auto const pType : BuildingTypeClass::Array)
+		{
+			if (!pType || pType->Factory != kind || pType->Naval || pType->UndeploysInto || pType->ConstructionYard
+				|| !CanBuildUnderHumanRules(pHouse, pType))
+			{
+				continue;
+			}
+
+			const int cost = pType->GetActualCost(pHouse);
+
+			if (!pBest || cost < bestCost)
+			{
+				pBest = pType;
+				bestCost = cost;
+			}
+		}
+
+		return pBest;
+	}
+
+	// Our buildings standing next to an ally's base (within 18 cells of its ConYard).
+	std::vector<BuildingClass*> OwnBuildingsAtAllySite(HouseClass* pHouse, const CellStruct& yardCell)
+	{
+		std::vector<BuildingClass*> found;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->CurrentMission != Mission::Selling
+				&& pBld->GetMapCoords().DistanceFrom(yardCell) <= 18.0)
+			{
+				found.push_back(pBld);
+			}
+		}
+
+		return found;
+	}
+
+	// What an ally backup site still lacks to build an MCV there once every ConYard and MCV is
+	// lost: the cheapest of our MCV prerequisite lists not yet met by our buildings at the site,
+	// each missing entry as the cheapest buildable type, plus a ground war factory when the list
+	// names none. Empty with ok = true when the site is complete; ok = false when no list can be
+	// completed (prerequisites we can only capture, or no MCV we could build today).
+	std::vector<BuildingTypeClass*> MissingForAllyBackup(HouseClass* pHouse, const CellStruct& yardCell, bool& ok)
+	{
+		ok = false;
+		std::vector<BuildingTypeClass*> best;
+		int bestCost = 0;
+		auto const siteBuildings = OwnBuildingsAtAllySite(pHouse, yardCell);
+
+		auto metAtSite = [&siteBuildings](int idx)
+		{
+			return std::any_of(siteBuildings.begin(), siteBuildings.end(), [idx](BuildingClass* pBld)
+				{
+					return BuildingTypeSatisfiesPrerequisite(pBld->Type->ArrayIndex, idx);
+				});
+		};
+
+		for (auto const pMcv : HouseMCVTypes(pHouse))
+		{
+			// Only an MCV we could build today: the backup copies a base that works.
+			if (!HouseExt::PrerequisitesMet(pHouse, pMcv))
+				continue;
+
+			for (auto const& list : PrerequisiteListsOf(pMcv))
+			{
+				std::vector<BuildingTypeClass*> missing;
+				bool listOk = true;
+				bool namesFactory = false;
+				int cost = 0;
+
+				for (const int idx : list)
+				{
+					auto const pResolved = CheapestBuildableForPrerequisite(pHouse, idx);
+
+					if (pResolved && pResolved->Factory == AbstractType::UnitType)
+						namesFactory = true;
+
+					if (metAtSite(idx))
+						continue;
+
+					if (!pResolved)
+					{
+						listOk = false;
+						break;
+					}
+
+					if (std::find(missing.begin(), missing.end(), pResolved) == missing.end())
+					{
+						missing.push_back(pResolved);
+						cost += pResolved->GetActualCost(pHouse);
+					}
+				}
+
+				if (!listOk)
+					continue;
+
+				if (!namesFactory)
+				{
+					const bool hasFactory = std::any_of(siteBuildings.begin(), siteBuildings.end(), [](BuildingClass* pBld)
+						{
+							return pBld->Type->Factory == AbstractType::UnitType && !pBld->Type->Naval;
+						});
+
+					if (!hasFactory)
+					{
+						auto const pFactory = CheapestBuildableGroundFactory(pHouse, AbstractType::UnitType);
+
+						if (!pFactory)
+							continue;
+
+						missing.push_back(pFactory);
+						cost += pFactory->GetActualCost(pHouse);
+					}
+				}
+
+				// War factory first: it is the part that produces the MCV.
+				std::stable_sort(missing.begin(), missing.end(), [](BuildingTypeClass* a, BuildingTypeClass* b)
+					{
+						return (a->Factory == AbstractType::UnitType) > (b->Factory == AbstractType::UnitType);
+					});
+
+				if (!ok || cost < bestCost)
+				{
+					ok = true;
+					best = std::move(missing);
+					bestCost = cost;
+				}
+			}
+		}
+
+		return best;
+	}
+
+	// Whether the ally keeps room to grow if we put a building of pType next to its buildings
+	// around `around`: on a cramped map every free cell near its base is one it needs, so we only
+	// take a small share. Counts the cells within 12 where pType could stand (free, buildable).
+	bool AllyKeepsRoomAround(const CellStruct& around, HouseClass* pAlly, BuildingTypeClass* pType)
+	{
+		const CellStruct yc = around;
+		int freeCells = 0;
+
+		for (short dy = -12; dy <= 12; ++dy)
+		{
+			for (short dx = -12; dx <= 12; ++dx)
+			{
+				const CellStruct c { static_cast<short>(yc.X + dx), static_cast<short>(yc.Y + dy) };
+
+				if (!MapClass::Instance.CoordinatesLegal(c))
+					continue;
+
+				auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+				if (pCell && !pCell->GetBuilding() && pCell->CanThisExistHere(pType->SpeedType, pType, pAlly))
+					freeCells++;
+			}
+		}
+
+		const int footprint = (pType->GetFoundationWidth() + 2) * (pType->GetFoundationHeight(false) + 2);
+
+		return freeCells >= 4 * footprint + 60;
+	}
+
+	bool AllyKeepsRoomFor(BuildingClass* pAllyYard, BuildingTypeClass* pType)
+	{
+		return AllyKeepsRoomAround(pAllyYard->GetMapCoords(), pAllyYard->Owner, pType);
+	}
+
+	// Ally ConYards we may build next to (BuildOffAlly), sorted by UniqueID.
+	std::vector<BuildingClass*> AllyYardsForSites(HouseClass* pHouse)
+	{
+		std::vector<BuildingClass*> yards;
+
+		if (!GameModeOptionsClass::Instance.BuildOffAlly)
+			return yards;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner || pBld->Owner == pHouse
+				|| !pBld->Type->ConstructionYard || !pBld->Type->EligibileForAllyBuilding || !pHouse->IsAlliedWith(pBld->Owner)
+				|| pBld->Owner->IsNeutral() || pBld->Owner->IsObserver() || pBld->Owner->Defeated)
+			{
+				continue;
+			}
+
+			yards.push_back(pBld);
+		}
+
+		std::sort(yards.begin(), yards.end(), [](BuildingClass* a, BuildingClass* b) { return a->UniqueID < b->UniqueID; });
+
+		return yards;
+	}
+
+	// Where our site starts next to an ally's base: just past the edge of its buildings around
+	// pYard, toward `reference` (or straight away from it when `away`), shifted `side` cells, on a
+	// legal cell. Placement looks for room around it and keeps a free cell from every ally building.
+	CellStruct AllySiteCellFor(BuildingClass* pYard, const CellStruct& reference, bool away, int side)
+	{
+		const CellStruct yc = pYard->GetMapCoords();
+		double extent = 4.0;
+
+		for (auto const pBld : pYard->Owner->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo)
+			{
+				const double d = pBld->GetMapCoords().DistanceFrom(yc);
+
+				if (d <= 20.0)
+					extent = std::max(extent, d);
+			}
+		}
+
+		CellStruct goal = reference;
+
+		if (away)
+			goal = CellStruct { static_cast<short>(2 * yc.X - reference.X), static_cast<short>(2 * yc.Y - reference.Y) };
+
+		const double dx = static_cast<double>(goal.X - yc.X);
+		const double dy = static_cast<double>(goal.Y - yc.Y);
+		const double len = std::max(1.0, std::sqrt(dx * dx + dy * dy));
+		const double cells = extent + 3.0;
+		const CellStruct site { static_cast<short>(yc.X + dx / len * cells - dy / len * side),
+			static_cast<short>(yc.Y + dy / len * cells + dx / len * side) };
+
+		return MapClass::Instance.CoordinatesLegal(site) ? site : yc;
+	}
+
 	// Flying transports that dropped a raid team keep the safe air lane home even after their plan
 	// is over (target gone or captured): UniqueIDs in drop order, one list per house.
 	struct NeuralSafeReturnState
@@ -3489,7 +3835,7 @@ namespace
 							if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type || pBld->Type->Unsellable
 								|| pBld->Type->Insignificant || pBld->Type->InvisibleInGame || pBld->Type->ConstructionYard
 								|| (pBld->Type->Factory == AbstractType::UnitType && !pBld->Type->Naval) || pBld->Type->Refinery
-								|| pBld->Type->ResourceDestination || pBld->Type->Cost < 300
+								|| pBld->Type->ResourceDestination || pBld->Type->Cost < 300 || IsMCVPrerequisiteType(pHouse, pBld->Type)
 								|| (pBld->Type->PowerBonus > 0 && pHouse->PowerOutput - pBld->Type->PowerBonus < pHouse->PowerDrain))
 							{
 								continue;
@@ -3912,6 +4258,243 @@ namespace
 					macro.ForwardRepairCell = forward;
 					macro.ForwardRepairUntilFrame = planOf(NeuralPlanId::ForwardRepair).Deadline;
 				}
+			}
+		}
+
+		// ---------------------------------------------------------------- Plans 39 and 40: ally sites
+		// Team games with BuildOffAlly: a few of our buildings next to an ally's base, one at a time
+		// (AllySite*, read by the building selector and placement). Never while the ally would be
+		// left short of room (AllyKeepsRoomFor), and placement keeps a free cell from its buildings.
+		// - Ally Backup (39, contingency): late in the match, at an ally base away from ours, the
+		//   cheapest MCV prerequisite list (war factory first), on the side of its base away from the
+		//   enemy: losing every ConYard and MCV no longer ends the match (Survival builds the MCV).
+		// - Ally Forward Outpost (40, chosen by Experts 3, 7 and 9): an ally base much closer to the
+		//   known enemy than our war factories gets a war factory and a barracks of ours on its flank
+		//   toward the enemy; UpdatePrimaryFactories then builds from them, near the front.
+		{
+			auto& backup = planOf(NeuralPlanId::AllyBackup);
+			auto& outpost = planOf(NeuralPlanId::AllyForwardOutpost);
+			auto const pSiteExt = HouseExt::Fetch(pHouse);
+			const int activeExpert = pSiteExt ? pSiteExt->NeuralAI_ActiveExpert : -1;
+			auto const allyYards = AllyYardsForSites(pHouse);
+
+			auto clearSite = [&]()
+			{
+				macro.AllySiteBuildType = -1;
+				macro.AllySiteCell = CellStruct::Empty;
+				macro.AllySiteYardCell = CellStruct::Empty;
+				macro.AllySiteUntilFrame = -1;
+				macro.AllySiteReservedCell = CellStruct::Empty;
+				macro.AllySiteReservedType = -1;
+				macro.AllySiteReservedFrame = -1;
+			};
+
+			// Placement failed for the wanted building (cooldown set by the placement code): the
+			// site has no room left that suits both of us.
+			auto placementBlocked = [&](BuildingTypeClass* pType)
+			{
+				auto const it = macro.BuildingPlacementCooldownUntilFrame.find(pType->ArrayIndex);
+
+				return it != macro.BuildingPlacementCooldownUntilFrame.end() && Unsorted::CurrentFrame < it->second;
+			};
+
+			// Forward outpost needs: a war factory and a barracks of ours at the site.
+			auto missingForOutpost = [&](const CellStruct& yardCell)
+			{
+				std::vector<BuildingTypeClass*> missing;
+				auto const siteBuildings = OwnBuildingsAtAllySite(pHouse, yardCell);
+
+				for (const AbstractType kind : { AbstractType::UnitType, AbstractType::InfantryType })
+				{
+					const bool has = std::any_of(siteBuildings.begin(), siteBuildings.end(), [kind](BuildingClass* pBld)
+						{
+							return pBld->Type->Factory == kind && !pBld->Type->Naval;
+						});
+
+					if (!has)
+					{
+						if (auto const pType = CheapestBuildableGroundFactory(pHouse, kind))
+							missing.push_back(pType);
+					}
+				}
+
+				return missing;
+			};
+
+			// Drives an active site plan: the next missing building, or the end of the plan.
+			auto runSite = [&](NeuralPlanId id, NeuralPlanInstance& plan, std::vector<BuildingTypeClass*> const& missing, bool ok)
+			{
+				auto const pYard = FindBuildingByID(plan.TargetID);
+
+				if (!pYard || !pYard->Owner || !pHouse->IsAlliedWith(pYard->Owner) || pHouse->ConYards.Count == 0
+					|| Unsorted::CurrentFrame >= plan.Deadline || !ok || macro.AllySiteFailedFrame >= plan.StartFrame)
+				{
+					clearSite();
+					finishPlan(id, false, false);
+					return;
+				}
+
+				if (missing.empty())
+				{
+					clearSite();
+					finishPlan(id, true, false);
+					return;
+				}
+
+				auto const pNext = missing.front();
+
+				if (placementBlocked(pNext) || !AllyKeepsRoomFor(pYard, pNext))
+				{
+					clearSite();
+					finishPlan(id, false, false);
+					return;
+				}
+
+				macro.AllySiteBuildType = pNext->ArrayIndex;
+				macro.AllySiteCell = plan.StagingCell;
+				macro.AllySiteYardCell = pYard->GetMapCoords();
+				macro.AllySiteUntilFrame = plan.Deadline;
+
+				// Before paying for it: a cell must exist at the site now (checked again every 600
+				// frames while we wait). None means no room that suits both of us: the plan ends and
+				// the money stays.
+				if (macro.AllySiteReservedType != pNext->ArrayIndex || macro.AllySiteReservedCell == CellStruct::Empty
+					|| Unsorted::CurrentFrame - macro.AllySiteReservedFrame >= 600)
+				{
+					macro.AllySiteReservedType = pNext->ArrayIndex;
+					macro.AllySiteReservedFrame = Unsorted::CurrentFrame;
+					macro.AllySiteReservedCell = CellStruct::Empty;
+					macro.AllySiteReservedCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pNext);
+
+					if (macro.AllySiteReservedCell == CellStruct::Empty)
+					{
+						clearSite();
+						finishPlan(id, false, false);
+					}
+				}
+			};
+
+			if (backup.Active)
+			{
+				auto const pYard = FindBuildingByID(backup.TargetID);
+				bool ok = pYard != nullptr;
+				auto const missing = pYard ? MissingForAllyBackup(pHouse, pYard->GetMapCoords(), ok) : std::vector<BuildingTypeClass*> {};
+				runSite(NeuralPlanId::AllyBackup, backup, missing, ok);
+			}
+			else if (outpost.Active)
+			{
+				auto const pYard = FindBuildingByID(outpost.TargetID);
+				auto const missing = pYard ? missingForOutpost(pYard->GetMapCoords()) : std::vector<BuildingTypeClass*> {};
+				runSite(NeuralPlanId::AllyForwardOutpost, outpost, missing, pYard != nullptr);
+			}
+			else if (!allyYards.empty() && pHouse->ConYards.Count > 0)
+			{
+				clearSite();
+				const int money = pHouse->Available_Money();
+
+				// Backup: the ally ConYard at least 30 cells from all of ours, farthest from the
+				// known enemy (else from us).
+				if (planReady(NeuralPlanId::AllyBackup) && Unsorted::CurrentFrame >= 27000 && money >= 3000)
+				{
+					const CellStruct threat = knownEnemyCentroid != CellStruct::Empty ? knownEnemyCentroid : homeCell;
+					BuildingClass* pBest = nullptr;
+					double bestDist = -1.0;
+
+					for (auto const pYard : allyYards)
+					{
+						const CellStruct yc = pYard->GetMapCoords();
+						bool farFromOurs = true;
+
+						for (auto const pOwnYard : pHouse->ConYards)
+						{
+							if (pOwnYard && pOwnYard->GetMapCoords().DistanceFrom(yc) < 30.0)
+								farFromOurs = false;
+						}
+
+						const double d = yc.DistanceFrom(threat);
+
+						if (farFromOurs && d > bestDist)
+						{
+							bestDist = d;
+							pBest = pYard;
+						}
+					}
+
+					bool ok = false;
+					auto const missing = pBest ? MissingForAllyBackup(pHouse, pBest->GetMapCoords(), ok) : std::vector<BuildingTypeClass*> {};
+					int missingCost = 0;
+
+					for (auto const pType : missing)
+						missingCost += pType->GetActualCost(pHouse);
+
+					const bool fits = ok && !missing.empty() && money >= missingCost + 1000 && AllyKeepsRoomFor(pBest, missing.front());
+					const int utility = fits
+						? 380 + (activeExpert == 9 || activeExpert == 1 ? 200 : 0) + (pHouse->ConYards.Count == 1 ? 150 : 0)
+						: -1000;
+
+					if (utility > 0 && shouldTryStart(NeuralPlanId::AllyBackup, utility))
+					{
+						const CellStruct site = AllySiteCellFor(pBest, threat, true, 0);
+						startPlan(NeuralPlanId::AllyBackup, std::vector<FootClass*> {}, pBest->GetMapCoords(), site, pBest->UniqueID, 9000);
+					}
+				}
+
+				// Forward outpost: the ally ConYard on our landmass nearest the known enemy, at least
+				// 25 cells closer to it than our nearest ground war factory.
+				if (!planOf(NeuralPlanId::AllyBackup).Active && planReady(NeuralPlanId::AllyForwardOutpost)
+					&& (activeExpert == 3 || activeExpert == 7 || activeExpert == 9) && knownEnemyCentroid != CellStruct::Empty
+					&& money >= 4000)
+				{
+					double ourFront = -1.0;
+
+					for (auto const pBld : pHouse->Buildings)
+					{
+						if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Factory == AbstractType::UnitType
+							&& !pBld->Type->Naval)
+						{
+							const double d = pBld->GetMapCoords().DistanceFrom(knownEnemyCentroid);
+
+							if (ourFront < 0.0 || d < ourFront)
+								ourFront = d;
+						}
+					}
+
+					BuildingClass* pBest = nullptr;
+					double bestDist = 0.0;
+
+					for (auto const pYard : allyYards)
+					{
+						const CellStruct yc = pYard->GetMapCoords();
+						const double d = yc.DistanceFrom(knownEnemyCentroid);
+
+						if (ourFront >= 0.0 && zoneOf(yc) == homeZone && d <= ourFront - 25.0 && (!pBest || d < bestDist))
+						{
+							bestDist = d;
+							pBest = pYard;
+						}
+					}
+
+					auto const missing = pBest ? missingForOutpost(pBest->GetMapCoords()) : std::vector<BuildingTypeClass*> {};
+					int missingCost = 0;
+
+					for (auto const pType : missing)
+						missingCost += pType->GetActualCost(pHouse);
+
+					const bool fits = !missing.empty() && money >= missingCost + 1500 && AllyKeepsRoomFor(pBest, missing.front());
+					const int utility = fits ? 330 + 150 + static_cast<int>(std::min(120.0, ourFront - bestDist)) : -1000;
+
+					if (utility > 0 && shouldTryStart(NeuralPlanId::AllyForwardOutpost, utility))
+					{
+						// On the flank toward the enemy, not in the ally's line of fire or its exits.
+						const int side = (houseIdx % 2 == 0) ? 6 : -6;
+						const CellStruct site = AllySiteCellFor(pBest, knownEnemyCentroid, false, side);
+						startPlan(NeuralPlanId::AllyForwardOutpost, std::vector<FootClass*> {}, pBest->GetMapCoords(), site, pBest->UniqueID, 9000);
+					}
+				}
+			}
+			else
+			{
+				clearSite();
 			}
 		}
 
