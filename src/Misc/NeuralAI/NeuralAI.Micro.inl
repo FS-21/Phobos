@@ -5199,7 +5199,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	for (auto const pInf : InfantryClass::Array)
 	{
-		if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || !pInf->Type)
+		// Slaves work for their slave master, which overrides any order given to them.
+		if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || !pInf->Type || pInf->SlaveOwner)
 			continue;
 
 		// Evade radiation puddles (Desolator / Nuke fallout) immediately if not

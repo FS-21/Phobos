@@ -655,6 +655,55 @@ namespace
 			}
 		}
 
+		// Plan deadlines are fixed lengths, and a group crossing a large map is often still on its
+		// way when its deadline comes. Every 600 frames each plan with members checks whether they
+		// got at least 6 cells nearer to the target; a group still closing in and not there yet
+		// (over 10 cells away) gets 900 more frames when its deadline comes, up to twice the
+		// length the plan started with. A group that stopped closing in keeps its deadline.
+		for (auto& plan : macro.Plans)
+		{
+			if (!plan.Active || plan.Members.empty() || plan.TargetCell == CellStruct::Empty || plan.BaseDuration <= 0)
+				continue;
+
+			int alive = 0;
+			int distanceSum = 0;
+
+			for (const DWORD uid : plan.Members)
+			{
+				auto const it = ownFoots.find(uid);
+
+				if (it == ownFoots.end())
+					continue;
+
+				alive++;
+				distanceSum += static_cast<int>(it->second->GetMapCoords().DistanceFrom(plan.TargetCell));
+			}
+
+			if (alive == 0)
+				continue;
+
+			const int distance = distanceSum / alive;
+
+			if (plan.ProgressCheckDistance < 0)
+			{
+				plan.ProgressCheckDistance = distance;
+				plan.ProgressCheckFrame = Unsorted::CurrentFrame;
+			}
+			else if (Unsorted::CurrentFrame - plan.ProgressCheckFrame >= 600)
+			{
+				plan.ClosingIn = plan.ProgressCheckDistance - distance >= 6;
+				plan.ProgressCheckDistance = distance;
+				plan.ProgressCheckFrame = Unsorted::CurrentFrame;
+			}
+
+			if (Unsorted::CurrentFrame >= plan.Deadline && plan.ClosingIn && distance > 10
+				&& plan.Deadline - plan.StartFrame + 900 <= plan.BaseDuration * 2)
+			{
+				plan.Deadline += 900;
+				CountDecision(NeuralDecision::PlanDeadlineExtended, houseIdx);
+			}
+		}
+
 		auto memberValue = [&](const NeuralPlanInstance& plan) -> int
 		{
 			int value = 0;
@@ -673,6 +722,11 @@ namespace
 		auto isFreeForPlan = [&](FootClass* pFoot) -> bool
 		{
 			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID))
+				return false;
+
+			// A slave obeys its slave master only: it goes back to work whatever a plan orders, and
+			// the plan waits for it until its deadline.
+			if (pFoot->SlaveOwner)
 				return false;
 
 			// Heavy flyers that are not aircraft (airships, jumpjet bombers) cannot land at a repair
@@ -792,6 +846,8 @@ namespace
 			plan.Active = true;
 			plan.StartFrame = Unsorted::CurrentFrame;
 			plan.Deadline = Unsorted::CurrentFrame + durationFrames;
+			plan.BaseDuration = durationFrames;
+			plan.ProgressCheckFrame = Unsorted::CurrentFrame;
 			plan.TargetCell = target;
 			plan.StagingCell = staging;
 			plan.TargetID = targetID;
@@ -1926,7 +1982,8 @@ namespace
 		{
 			auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
-			if (!pType || pFoot->WhatAmI() == AbstractType::Aircraft || pType->Naval || IsAirborneThreatTechno(pFoot)
+			// Slaves work for their slave master and take no other orders.
+			if (!pType || pFoot->SlaveOwner || pFoot->WhatAmI() == AbstractType::Aircraft || pType->Naval || IsAirborneThreatTechno(pFoot)
 				|| GroundRangeOf(pType) <= 0)
 			{
 				return false;
