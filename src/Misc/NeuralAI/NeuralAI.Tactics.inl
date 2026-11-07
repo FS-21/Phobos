@@ -480,7 +480,10 @@ namespace
 		}
 
 		if (ownAnchors.empty())
+		{
+			NoteTeamResourceClaim(pHouse, CellStruct::Empty);
 			return;
+		}
 
 		// An expansion MCV is possible: a ground war factory and money for it, below the yard cap the
 		// production uses (2 + free fields up to 3, + 1 with a big bank, at most 6).
@@ -514,6 +517,8 @@ namespace
 		};
 
 		int bestMetric = INT_MAX;
+		// Best field left to a teammate (team blackboard: an ally mines it or claimed it first).
+		int bestYieldedMetric = INT_MAX;
 
 		for (auto const& field : GetOreFields())
 		{
@@ -549,6 +554,12 @@ namespace
 				crawlDist = std::min(crawlDist, chebyshev(sc, field.Cell));
 
 			const bool beyondCrawl = crawlDist > 60;
+
+			if (IsOreFieldTakenByTeam(pHouse, field))
+			{
+				bestYieldedMetric = std::min(bestYieldedMetric, metric);
+				continue;
+			}
 
 			if (metric < bestMetric)
 			{
@@ -592,6 +603,19 @@ namespace
 			opportunity /= 2;
 
 		macro.ExpansionOpportunity = std::min(450, opportunity);
+
+		if (bestYieldedMetric < bestMetric)
+		{
+			CountDecision(NeuralDecision::TeamClaimYield, pHouse->ArrayIndex);
+
+			if (macro.ResourceClaimCell != CellStruct::Empty && OreBlockKey(macro.ResourceClaimCell) != TeamReports[pHouse->ArrayIndex].ClaimBlock)
+			{
+				Debug::Log("[NeuralAI] Frame %d | Team | House #%d leaves a better ore field to its team, claims (%d,%d)\n", now,
+					pHouse->ArrayIndex, macro.ResourceClaimCell.X, macro.ResourceClaimCell.Y);
+			}
+		}
+
+		NoteTeamResourceClaim(pHouse, macro.ResourceClaimCell);
 
 		// The field's spawner tree (within 6 cells of its cell): its refinery goes next to it.
 		if (macro.ResourceClaimCell != CellStruct::Empty)

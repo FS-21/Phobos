@@ -1189,6 +1189,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Expert 3 (UpdateFfaTargets): busy, at our door, weakest, nearest.
 		priority += GetMacroState(pHouse).FfaEnemyBonus[idx];
 
+		// Team blackboard: the enemy this house covers for its team (its front).
+		priority += TeamFrontBonus(pHouse, pOther->ArrayIndex);
+
 		if (priority > bestEnemyPriority)
 		{
 			bestEnemyPriority = priority;
@@ -3156,6 +3159,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// Nearest worthy field (>= 4 ore cells in 5x5) over the whole scan, not the first row
 				// that has any ore.
 				int bestExpDist = 99999;
+				bool teamYieldedSite = false;
 				const bool siegeDestFound = (pExpansionDest != nullptr);
 				for (int dy = -128; dy <= 128 && !siegeDestFound; dy += (std::abs(dy) <= 56 ? 3 : 4))
 				{
@@ -3201,6 +3205,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							continue;
 
 						const int distFromMCV = std::abs(tc.X - mcvCell.X) + std::abs(tc.Y - mcvCell.Y);
+
+						// Team blackboard: not a field an ally mines or a teammate's MCV is heading to.
+						if (distFromMCV < bestExpDist && IsExpansionCellTakenByTeam(pHouse, tc))
+						{
+							teamYieldedSite = true;
+							continue;
+						}
+
 						if (distFromMCV < bestExpDist)
 						{
 							int fieldCells = 0;
@@ -3230,9 +3242,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!pExpansionDest)
 					pExpansionDest = FindFreeOreFieldCell(pHouse, mcvCell, mcvZone, 14);
 
+				if (teamYieldedSite)
+					CountDecision(NeuralDecision::TeamExpansionYield, pHouse->ArrayIndex);
+
 				if (pExpansionDest)
 				{
 					IssueMoveOrder(pUnit, pExpansionDest, 3.0);
+					NoteTeamExpansionSite(pHouse, pExpansionDest->MapCoords);
 				}
 				else if (!enemyNearMCV && !alreadyHasConYardOnThisIsland && !twinMcvNearby)
 				{
@@ -7084,6 +7100,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// Team blackboard (NeuralAI.Team.inl): allied Neural AI houses push one target at one time (the
+	// far armies leave first), split fronts when each is strong enough, and the house with the idle
+	// army answers a teammate's call for help. Alone, the order is empty.
+	const NeuralTeamWaveOrder teamOrder = UpdateTeamWave(pHouse, idleCombatUnits, idleCombatInf, static_cast<int>(minWaveUnits),
+		pVisibleEnemyBld, homeCoords, endgameRemnantHunt);
+
+	if (teamOrder.TargetCell != CellStruct::Empty)
+	{
+		if (auto const pTeamCell = MapClass::Instance.TryGetCellAt(teamOrder.TargetCell))
+		{
+			pWaveTargetCell = pTeamCell;
+
+			// A team target building is what the wave (and the superweapons) attack; a call for help
+			// is a spot to attack-move to.
+			if (teamOrder.pTarget)
+				pVisibleEnemyBld = teamOrder.pTarget;
+		}
+	}
+
+	const size_t waveUnitsNeeded = teamOrder.MinWaveUnits > 0
+		? std::min(minWaveUnits, static_cast<size_t>(teamOrder.MinWaveUnits))
+		: minWaveUnits;
+
 	CellClass* pIslandGoalCell = pWaveTargetCell ? pWaveTargetCell : pFallbackEnemyCell;
 	int targetIslandZone = -1;
 	if (pIslandGoalCell)
@@ -7280,9 +7319,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Coordinated Multi-Squadron Offensive Strike Wave (Slot 37: Rush vs Mass
 	// Timing) Splits forces into parallel Squadron Alpha (pWaveTargetCell) and
 	// Squadron Bravo (pSecondaryWaveTargetCell)
-	if (pWaveTargetCell
-		&& (endgameRemnantHunt || idleCombatUnits.size() >= minWaveUnits
-			|| (idleCombatUnits.size() + idleCombatInf.size() >= minWaveUnits + 4)))
+	if (pWaveTargetCell && !teamOrder.Hold
+		&& (endgameRemnantHunt || idleCombatUnits.size() >= waveUnitsNeeded
+			|| (idleCombatUnits.size() + idleCombatInf.size() >= waveUnitsNeeded + 4)))
 	{
 		const int waveTargetZone
 			= MapClass::Instance.GetMovementZoneType(pWaveTargetCell->MapCoords, MovementZone::Normal, false);
@@ -7719,6 +7758,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			waveMacro.LastWaveDispatchFrame = Unsorted::CurrentFrame;
 			waveMacro.LastWaveTargetCell = pWaveTargetCell->MapCoords;
+			NoteTeamWaveDispatched(pHouse, teamOrder, dispatchedVeh, dispatchedInf);
 
 			Debug::Log("[NeuralAI] Frame %d | House #%d (%s) launched Offensive Wave "
 					"(%zu Vehicles + %zu Infantry) -> Target Cell (%d,%d)\n",

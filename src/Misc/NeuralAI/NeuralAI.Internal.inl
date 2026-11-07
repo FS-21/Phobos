@@ -107,6 +107,15 @@ namespace
 		AllySiteBuilding,
 		AllyCrawlAnchor,
 		AllyDefense,
+		TeamTargetSet,
+		TeamWaveHold,
+		TeamWaveLaunch,
+		TeamSplitFronts,
+		TeamWaveJoined,
+		TeamHelpRequest,
+		TeamHelpAnswered,
+		TeamClaimYield,
+		TeamExpansionYield,
 		Count
 	};
 
@@ -116,7 +125,8 @@ namespace
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
 		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
 		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute", "harvesterRetreat", "harvesterRebalance",
-		"allySiteBuilding", "allyCrawlAnchor", "allyDefense" };
+		"allySiteBuilding", "allyCrawlAnchor", "allyDefense", "teamTargetSet", "teamWaveHold", "teamWaveLaunch", "teamSplitFronts",
+		"teamWaveJoined", "teamHelpRequest", "teamHelpAnswered", "teamClaimYield", "teamExpansionYield" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
