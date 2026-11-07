@@ -146,6 +146,36 @@ DEFINE_HOOK(0x54CB0E, JumpjetLocomotionClass_State5_CrashSpin, 0x7)
 	return pTypeExt->JumpjetRotateOnCrash ? 0 : 0x54CB3E;
 }
 
+// Bugfix: Prevent crash in JumpjetLocomotionClass State4 (Descending) if unit died, deployed, or unlinked during landing (vt_entry_18C)
+DEFINE_HOOK(0x54C8F6, JumpjetLocomotionClass_State4_CheckLinkedTo, 0x7)
+{
+	GET(JumpjetLocomotionClass*, pThis, ESI);
+	enum { ExitFunction = 0x54CA7C };
+
+	if (!pThis->LinkedTo)
+		return ExitFunction;
+
+	return 0;
+}
+
+// Bugfix: a jumpjet that deploys on landing into a type with another locomotor (DeployToLand +
+// Convert.Deploy) is unlinked inside its state handler, and Process then read the selection flag
+// of the owner it no longer has.
+DEFINE_HOOK(0x54B07D, JumpjetLocomotionClass_Process_CheckLinkedTo, 0x9)
+{
+	GET(ILocomotion*, pThis, ESI);
+	enum { ExitFunction = 0x54B193, Continue = 0x54B086 };
+
+	auto const pLinkedTo = static_cast<JumpjetLocomotionClass*>(pThis)->LinkedTo;
+
+	if (!pLinkedTo)
+		return ExitFunction;
+
+	R->EAX(pLinkedTo);
+	R->CL(pLinkedTo->IsSelected);
+	return Continue;
+}
+
 
 // These are subject to changes if someone wants to properly implement jumpjet tilting
 DEFINE_HOOK(0x54DCCF, JumpjetLocomotionClass_DrawMatrix_TiltCrashJumpjet, 0x5)
