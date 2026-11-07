@@ -7285,12 +7285,57 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// Strength gate on top of the unit count: the main wave (and the same-landmass push below)
+	// waits until our idle army clearly outweighs what this house knows of the enemy at the
+	// target, or a window opens (see EvaluateWaveLaunch). The endgame remnant hunt never waits.
+	const bool waveCountReady = idleCombatUnits.size() >= minWaveUnits
+		|| idleCombatUnits.size() + idleCombatInf.size() >= minWaveUnits + 4 || idleCombatInf.size() >= minWaveUnits + 3;
+	NeuralWaveCheck waveCheck {};
+	waveCheck.Launch = true;
+
+	if (pWaveTargetCell && !endgameRemnantHunt && waveCountReady)
+	{
+		const CellStruct gateTarget = pWaveTargetCell->MapCoords;
+		const int gateZone = MapClass::Instance.GetMovementZoneType(gateTarget, MovementZone::Normal, false);
+		int readyValue = 0;
+
+		auto addReadyValue = [&](FootClass* pFoot, bool canCrossWater)
+		{
+			const int footZone = ObjectZone(pFoot, MovementZone::Normal);
+
+			if ((canCrossWater || (gateZone >= 0 && footZone == gateZone)) && pFoot->GetMapCoords().DistanceFrom(gateTarget) > 14.0)
+				readyValue += OwnGroundFighterValue(pFoot);
+		};
+
+		for (auto const pU : idleCombatUnits)
+		{
+			const auto mz = pU->Type->MovementZone;
+			addReadyValue(pU, mz == MovementZone::Amphibious || mz == MovementZone::AmphibiousDestroyer
+				|| mz == MovementZone::AmphibiousCrusher || mz == MovementZone::Fly || mz == MovementZone::Subterrannean
+				|| pU->Type->JumpJet || pU->Type->Teleporter);
+		}
+
+		for (auto const pI : idleCombatInf)
+		{
+			const auto mz = pI->Type->MovementZone;
+			addReadyValue(pI, mz == MovementZone::Amphibious || mz == MovementZone::AmphibiousDestroyer || mz == MovementZone::Fly
+				|| pI->Type->JumpJet || pI->Type->Teleporter);
+		}
+
+		waveCheck = EvaluateWaveLaunch(pHouse, gateTarget, readyValue,
+			counterattackWindow || waveMacro.BlackoutUntilFrame > Unsorted::CurrentFrame);
+
+		NoteWaveDecision(pHouse, waveCheck, false, 0);
+	}
+
+	const bool waveStrengthReady = waveCheck.Launch;
+
 	// Coordinated Multi-Squadron Offensive Strike Wave (Slot 37: Rush vs Mass
 	// Timing) Splits forces into parallel Squadron Alpha (pWaveTargetCell) and
 	// Squadron Bravo (pSecondaryWaveTargetCell)
 	if (pWaveTargetCell
-		&& (endgameRemnantHunt || idleCombatUnits.size() >= minWaveUnits
-			|| (idleCombatUnits.size() + idleCombatInf.size() >= minWaveUnits + 4)))
+		&& (endgameRemnantHunt || ((idleCombatUnits.size() >= minWaveUnits
+			|| (idleCombatUnits.size() + idleCombatInf.size() >= minWaveUnits + 4)) && waveStrengthReady)))
 	{
 		const int waveTargetZone
 			= MapClass::Instance.GetMovementZoneType(pWaveTargetCell->MapCoords, MovementZone::Normal, false);
@@ -7726,6 +7771,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				|| waveMacro.LastWaveTargetCell.DistanceFrom(pWaveTargetCell->MapCoords) > 12.0)
 			{
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;
+
+				if (!endgameRemnantHunt)
+					NoteWaveDecision(pHouse, waveCheck, true, static_cast<int>(dispatchedVeh + dispatchedInf));
 			}
 
 			waveMacro.LastWaveDispatchFrame = Unsorted::CurrentFrame;
@@ -8183,7 +8231,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// idleCombatUnits.size() < minWaveUnits! Only engage on home island
 				// once critical mass (>= minWaveUnits) is assembled, or if the unit is
 				// already at the enemy perimeter (<= 20 cells)!
-				if (onEnemyIsland || endgameRemnantHunt || distToBld <= 20.0 || idleCombatUnits.size() >= minWaveUnits)
+				if (onEnemyIsland || endgameRemnantHunt || distToBld <= 20.0 || (idleCombatUnits.size() >= minWaveUnits && waveStrengthReady))
 				{
 					if (CanFootDamageBuildings(pBeachU) && pBeachU->DistanceFrom(pSameIslBld) <= maxWpnRangeLeptons + 384
 						&& pSameIslBld->GetCell()
@@ -8238,8 +8286,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				const double distToBld = ic.DistanceFrom(pSameIslBld->GetMapCoords());
 				const bool onEnemyIsland = (homeGroundZone >= 0 && iz >= 0 && iz != homeGroundZone);
-				if (onEnemyIsland || endgameRemnantHunt || distToBld <= 20.0 || idleCombatUnits.size() >= minWaveUnits
-					|| idleCombatInf.size() >= (minWaveUnits + 3))
+				if (onEnemyIsland || endgameRemnantHunt || distToBld <= 20.0
+					|| ((idleCombatUnits.size() >= minWaveUnits || idleCombatInf.size() >= (minWaveUnits + 3)) && waveStrengthReady))
 				{
 					const auto pInfW0 = pBeachI->Type->GetWeapon(0) ? pBeachI->Type->GetWeapon(0)->WeaponType : nullptr;
 					const int infWpnRange = pInfW0 ? static_cast<int>(pInfW0->Range) : 1024;

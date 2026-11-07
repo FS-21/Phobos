@@ -182,6 +182,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Tactics };
 		UpdateAirLossMemory(pHouse);
 		UpdateMatchTactics(pHouse, scores);
+		UpdateEnemyStrength(pHouse);
 	}
 
 	{
