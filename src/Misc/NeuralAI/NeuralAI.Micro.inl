@@ -1920,28 +1920,28 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	{
 		auto const pOwnFoot = abstract_cast<FootClass*>(own.Techno);
 
-		if (pOwnFoot && (isAtOrBoundForRepair(pOwnFoot) || repairTripRecent(pOwnFoot)))
+		if (pOwnFoot && (isAtOrBoundForRepair(pOwnFoot) || repairTripRecent(pOwnFoot) || IsOnRepairTrip(pHouse, pOwnFoot->UniqueID)))
 			repairTripsActive++;
 	}
 
 	const int repairTripsCap = std::max(1, static_cast<int>(ownCombatContacts.size()) / 3);
 
-	// A repair trip pays when the station is close enough for what the unit is worth, the repair
-	// money is there, no visible armed enemy covers the station or a stretch of the way that gets
-	// closer to it than the unit is now, no known enemy defense sits on the way, and the trip cap
-	// above leaves the fight to the rest (a unit about to die may always go).
-	auto repairTripPays = [&](FootClass* pFoot, BuildingClass* pStation) -> bool
+	// A repair trip pays when the place it heals at (station, hospital, repairer, self-heal spot) is
+	// close enough for what the unit is worth, the repair money is there (paid repairs: depots), no
+	// visible armed enemy covers that place or a stretch of the way that gets closer to it than the
+	// unit is now, no known enemy defense sits on the way, and the trip cap above leaves the fight to
+	// the rest (a unit about to die may always go).
+	auto repairTripPays = [&](FootClass* pFoot, const CellStruct& to, bool paid) -> bool
 	{
 		auto const pFootType = pFoot->GetTechnoType();
 		const CellStruct from = pFoot->GetMapCoords();
-		const CellStruct to = pStation->GetMapCoords();
 		const double tripCells = from.DistanceFrom(to);
 
 		if (tripCells > std::clamp(20.0 + pFootType->Cost / 20.0, 30.0, 100.0))
 			return false;
 
 		const double health = pFoot->GetHealthPercentage();
-		const int repairCost = static_cast<int>(pFootType->GetActualCost(pHouse) * (1.0 - health) * RulesClass::Instance->RepairPercent);
+		const int repairCost = paid ? static_cast<int>(pFootType->GetActualCost(pHouse) * (1.0 - health) * RulesClass::Instance->RepairPercent) : 0;
 
 		if (pHouse->Available_Money() < repairCost)
 			return false;
@@ -1984,6 +1984,179 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		return true;
+	};
+
+	// A fight is being won around a unit when our fighting units within 8 cells (not on a repair
+	// trip) bring twice the firepower of the visible armed enemies there, both weighted by health.
+	// A damaged unit stays in such a fight: leaving would cost the fire that wins it.
+	auto fightWonAround = [&](FootClass* pFoot) -> bool
+	{
+		const CellStruct fc = pFoot->GetMapCoords();
+		int enemyFire = 0;
+		int ownFire = 0;
+
+		for (auto const& contact : enemyContacts)
+		{
+			if (contact.Firepower > 0 && contact.Coords.DistanceFrom(fc) <= 8.0)
+				enemyFire += static_cast<int>(contact.Firepower * contact.Techno->GetHealthPercentage());
+		}
+
+		if (enemyFire <= 0)
+			return false;
+
+		for (auto const& own : ownCombatContacts)
+		{
+			if (own.Coords.DistanceFrom(fc) <= 8.0 && !IsOnRepairTrip(pHouse, own.Techno->UniqueID))
+				ownFire += static_cast<int>(own.Firepower * own.Techno->GetHealthPercentage());
+		}
+
+		return ownFire >= enemyFire * 2;
+	};
+
+	const int armyAverageCost = GetArmyAverageCost(pHouse);
+
+	// Hospitals (Hospital=yes) of ours and our allies: infantry walks in to be healed.
+	std::vector<BuildingClass*> repairHospitals;
+
+	for (auto const pBld : BuildingClass::Array)
+	{
+		if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Hospital && pBld->Owner
+			&& (pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner)) && pBld->CurrentMission != Mission::Selling)
+		{
+			repairHospitals.push_back(pBld);
+		}
+	}
+
+	// Repair retreat of a damaged valuable unit: a depot (vehicles that can be repaired there), a
+	// hospital (infantry), one of our units with a healing weapon for it, or a wait next to our
+	// buildings while the house self-heal works, the first of them whose trip pays. Never while it
+	// helps win a fight (unless about to die), never twice in a row (UpdateRepairTrips follows the
+	// trip and sends the unit back to its group or plan once healed). True when a trip started.
+	auto tryRepairRetreat = [&](FootClass* pFoot, double threshold) -> bool
+	{
+		const double health = pFoot->GetHealthPercentage();
+
+		if (health >= threshold || !IsRepairTripAllowed(pHouse, pFoot->UniqueID))
+			return false;
+
+		if (health >= 0.2 && fightWonAround(pFoot))
+		{
+			CountDecision(NeuralDecision::RepairHeldWinning, pHouse->ArrayIndex);
+			return false;
+		}
+
+		auto const pType = pFoot->GetTechnoType();
+		const bool isInfantry = pFoot->WhatAmI() == AbstractType::Infantry;
+		const int footZone = ObjectZone(pFoot, MovementZone::Normal);
+
+		// A deployed unit cannot drive anywhere.
+		if (auto const pFootUnit = abstract_cast<UnitClass*>(pFoot))
+		{
+			if (pFootUnit->Deployed)
+				return false;
+		}
+
+		// Infantry heals between fights: a soldier walking off under fire is shot in the back and
+		// stops shooting, so it stays while armed enemies are in sight within 6 cells.
+		if (isInfantry)
+		{
+			const CellStruct fc = pFoot->GetMapCoords();
+
+			for (auto const& contact : enemyContacts)
+			{
+				if (contact.Firepower > 0 && contact.Coords.DistanceFrom(fc) <= 6.0)
+					return false;
+			}
+		}
+
+		if (!isInfantry && pRepairDepot && pType->Repairable && !pType->Organic && !IsAmphibiousOrAirTransport(pType)
+			&& !IsRepairStationFailed(pHouse, pType, NeuralRepairKind::Depot))
+		{
+			if (auto const pStation = FindBestRepairStation(pHouse, pFoot))
+			{
+				if (repairTripPays(pFoot, pStation->GetMapCoords(), true))
+				{
+					repairTripsActive++;
+					repairTripFrames[pFoot->UniqueID] = repairNow;
+					DispatchFootToTargetOrTransport(pFoot, pStation, Mission::Enter, false);
+					BeginRepairTrip(pHouse, pFoot, NeuralRepairKind::Depot, pStation->UniqueID, CellStruct::Empty);
+
+					return true;
+				}
+			}
+		}
+
+		if (isInfantry && !pType->Naval && !IsRepairStationFailed(pHouse, pType, NeuralRepairKind::Hospital))
+		{
+			BuildingClass* pBestHospital = nullptr;
+			double bestDist = 1e9;
+
+			for (auto const pHospitalBld : repairHospitals)
+			{
+				const double d = pHospitalBld->GetMapCoords().DistanceFrom(pFoot->GetMapCoords());
+
+				if (d < bestDist && IsBuildingEnterableFromZone(pHospitalBld, footZone))
+				{
+					bestDist = d;
+					pBestHospital = pHospitalBld;
+				}
+			}
+
+			if (pBestHospital && repairTripPays(pFoot, pBestHospital->GetMapCoords(), false))
+			{
+				repairTripsActive++;
+				OrderFootToEnter(pFoot, pBestHospital);
+				BeginRepairTrip(pHouse, pFoot, NeuralRepairKind::Hospital, pBestHospital->UniqueID, CellStruct::Empty);
+
+				return true;
+			}
+		}
+
+		if (auto const pRepairer = FindFieldRepairer(pHouse, pFoot, 20.0))
+		{
+			// A repairer in the same fight heals the unit where it stands: walking over to it would
+			// only stop the unit's fire.
+			if (pRepairer->GetMapCoords().DistanceFrom(pFoot->GetMapCoords()) <= 6.0)
+			{
+				if (pRepairer->Target != pFoot)
+				{
+					pRepairer->SetTarget(pFoot);
+					pRepairer->QueueMission(Mission::Attack, true);
+				}
+
+				return false;
+			}
+
+			if (repairTripPays(pFoot, pRepairer->GetMapCoords(), false))
+			{
+				repairTripsActive++;
+				IssueMoveOrder(pFoot, pRepairer->GetCell(), 2.0);
+				pRepairer->SetTarget(pFoot);
+				pRepairer->QueueMission(Mission::Attack, true);
+				BeginRepairTrip(pHouse, pFoot, NeuralRepairKind::Repairer, pRepairer->UniqueID, CellStruct::Empty);
+
+				return true;
+			}
+		}
+
+		// Self-heal only when it brings the unit back within 3600 frames.
+		const double selfHealRate = SelfHealRateOf(pHouse, pFoot);
+
+		if (selfHealRate > 0.0 && (pType->Strength * 0.9 - pFoot->Health) / selfHealRate <= 3600.0)
+		{
+			const CellStruct waitCell = FindSelfHealWaitCell(pHouse, pFoot, std::clamp(20.0 + pType->Cost / 20.0, 30.0, 100.0));
+
+			if (waitCell != CellStruct::Empty && repairTripPays(pFoot, waitCell, false))
+			{
+				repairTripsActive++;
+				IssueMoveOrder(pFoot, MapClass::Instance.TryGetCellAt(waitCell), 2.0);
+				BeginRepairTrip(pHouse, pFoot, NeuralRepairKind::SelfHeal, 0, waitCell);
+
+				return true;
+			}
+		}
+
+		return false;
 	};
 
 	// Best nearby enemy an idle unit can reach and hit while we hold local
@@ -2613,6 +2786,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			}
 		}
+
+		// A unit on a repair trip takes its orders from UpdateRepairTrips until it is back.
+		if (IsOnRepairTrip(pHouse, pUnit->UniqueID))
+			continue;
 
 		const int unitZoneForEco
 			= ObjectZone(pUnit, MovementZone::Normal);
@@ -4068,21 +4245,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Retreat): If a Terror Drone or Squid is eating our vehicle
 		// (ParasiteEatingMe != nullptr), rush to Service Depot immediately even at
 		// 99% HP so the repair arm kills the parasite!
-		// Transports are repaired by the ferry controller (only when empty). A damaged unit only
-		// leaves when the trip pays (repairTripPays); a trip under way is not judged again.
+		// Transports are repaired by the ferry controller (only when empty). A damaged valuable
+		// unit retreats when the trip pays (tryRepairRetreat: depot, repairer or self-heal); a trip
+		// under way is not judged again.
 		const bool parasiteToRemove = pUnit->ParasiteEatingMe != nullptr && SlotGate(scores[64], 60, 64);
 
-		if (pRepairDepot && !IsAmphibiousOrAirTransport(pType)
-			&& (parasiteToRemove
-				|| ((pType->Cost >= 800 || pUnit->Veterancy.IsElite())
-					&& pUnit->GetHealthPercentage() < repairThreshold)))
-		{
-			if (auto const pStation = FindBestRepairStation(pHouse, pUnit))
-			{
-				if (pUnit->CurrentMission == Mission::Enter || isAtOrBoundForRepair(pUnit) || repairTripRecent(pUnit))
-					continue;
+		// Worth a repair trip: expensive, veteran, or clearly above what our army fields on average
+		// (an army of cheap units has no 800 credit tanks to save).
+		const bool valuableUnit = pType->Cost >= 800 || pUnit->Veterancy.IsElite() || pUnit->Veterancy.IsVeteran()
+			|| (pType->Cost >= 400 && pType->Cost * 4 >= armyAverageCost * 5);
 
-				if (parasiteToRemove || repairTripPays(pUnit, pStation))
+		if (pRepairDepot && !IsAmphibiousOrAirTransport(pType)
+			&& (parasiteToRemove || (valuableUnit && pUnit->GetHealthPercentage() < repairThreshold)))
+		{
+			if (pUnit->CurrentMission == Mission::Enter || isAtOrBoundForRepair(pUnit) || repairTripRecent(pUnit))
+				continue;
+
+			if (parasiteToRemove)
+			{
+				if (auto const pStation = FindBestRepairStation(pHouse, pUnit))
 				{
 					repairTripsActive++;
 					repairTripFrames[pUnit->UniqueID] = repairNow;
@@ -4092,6 +4273,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 		}
+
+		if (valuableUnit && !IsAmphibiousOrAirTransport(pType) && tryRepairRetreat(pUnit, repairThreshold))
+			continue;
 
 		// Slot 65 (Grinder Mind-Control Recycling & Salvage): Send mind-controlled
 		// vehicles we captured (MindControlledBy != nullptr) into our Grinder for
@@ -5461,7 +5645,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	BuildingClass* pBioReactor = nullptr;
 	BuildingClass* pOverpowerCoil = nullptr;
-	BuildingClass* pHospital = nullptr;
 
 	for (auto const pBld : BuildingClass::Array)
 	{
@@ -5480,9 +5663,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (!pOverpowerCoil && pBld->Type->Overpowerable && (!pBld->IsOverpowered || pBld->Owner->HasLowPower()))
 				pOverpowerCoil = pBld; // Overpower own OR allied Tesla Coils!
-
-			if (!pHospital && pBld->Type->Hospital)
-				pHospital = pBld; // Use own OR allied Hospital!
 		}
 	}
 
@@ -5561,6 +5741,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 		}
+
+		// A soldier on a repair trip takes its orders from UpdateRepairTrips until it is back.
+		if (IsOnRepairTrip(pHouse, pInf->UniqueID))
+			continue;
 
 		UnstickCrossIslandFoot(pInf);
 		const bool isIdle = (pInf->CurrentMission == Mission::Guard || pInf->CurrentMission == Mission::Area_Guard)
@@ -5674,16 +5858,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Retreat wounded valuable/Elite infantry (< 55% HP) to Hospital if owned!
-		if (pHospital && !pInf->Type->Engineer && (pInf->Type->Cost >= 300 || pInf->Veterancy.IsElite())
-			&& pInf->GetHealthPercentage() < 0.55)
+		// Wounded valuable or veteran infantry (< 55% HP) retreats to a hospital, a medic or the
+		// house self-heal (tryRepairRetreat).
+		if (!pInf->Type->Engineer && (pInf->Type->Cost >= 300 || pInf->Veterancy.IsElite() || pInf->Veterancy.IsVeteran()
+			|| (pInf->Type->Cost >= 200 && pInf->Type->Cost * 4 >= armyAverageCost * 5))
+			&& pInf->CurrentMission != Mission::Enter && tryRepairRetreat(pInf, 0.55))
 		{
-			if (pInf->CurrentMission != Mission::Enter && pInf->DistanceFrom(pHospital) <= 4096)
-			{
-				DispatchFootToTargetOrTransport(pInf, pHospital, Mission::Enter, false);
-
-				continue;
-			}
+			continue;
 		}
 
 		// Combat Medics / Field Mechanics (Damage < 0): Heal wounded own OR allied

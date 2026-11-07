@@ -110,6 +110,12 @@ namespace
 		// Sub-targets destroyed so far (chain plans: Rolling Siege), so a plan that did real
 		// damage before its deadline is not scored as a plain failure.
 		int Progress { 0 };
+		// Combat value of the group at the start weighted by health (early abort checks), and the
+		// last frame the target was in current sight (Hunt Key Units).
+		int InitialStrength { 0 };
+		int TargetSeenFrame { 0 };
+		// Per member: a frame (Pickets: until when a sentry holds back, when it last saw something).
+		std::vector<int> MemberFrames {};
 	};
 
 	struct NeuralStuckTrack

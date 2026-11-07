@@ -111,6 +111,18 @@ namespace
 		BaseThreatIntercept,
 		BaseThreatRepelled,
 		AirAttackStalled,
+		RepairRetreat,
+		RepairByDepot,
+		RepairByHospital,
+		RepairByRepairer,
+		RepairBySelfHeal,
+		RepairSaved,
+		RepairLostOnTrip,
+		RepairAbandoned,
+		RepairHeldWinning,
+		PlanAbortEnemyGrew,
+		PlanAbortValueLost,
+		PlanAbortTargetGone,
 		Count
 	};
 
@@ -121,7 +133,9 @@ namespace
 		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
 		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute", "harvesterRetreat", "harvesterRebalance",
 		"allySiteBuilding", "allyCrawlAnchor", "allyDefense", "baseThreatTicks", "baseThreatIntercepts", "baseThreatRepelled",
-		"airAttackStalled" };
+		"airAttackStalled", "repairRetreats", "repairByDepot", "repairByHospital", "repairByRepairer", "repairBySelfHeal",
+		"repairSaved", "repairLostOnTrip", "repairAbandoned", "repairHeldWinning", "planAbortEnemyGrew", "planAbortValueLost",
+		"planAbortTargetGone" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
