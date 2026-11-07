@@ -493,6 +493,19 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				}
 			}
 
+			// Economy experts (0 and 6): credits earned so far (spent + held: harvests, sales, crates),
+			// Expert 0 trouble, Expert 6 opportunity, harvesters under fire, refineries no harvester
+			// serves, storage nearly full.
+			char econText[96] = "0, 0, 0, 0, 0, 0";
+
+			if (pOwner)
+			{
+				auto const& econMacro = GetMacroState(pOwner);
+				std::snprintf(econText, sizeof(econText), "%d, %d, %d, %d, %d, %d", pOwner->CreditsSpent + pOwner->Available_Money(),
+					econMacro.EconomyTrouble, econMacro.ExpansionOpportunity, econMacro.HarvestersUnderFire,
+					econMacro.StarvedRefineries, econMacro.StorageNearlyFull ? 1 : 0);
+			}
+
 			lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
 				"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"opening\": %d, "
 				"\"expert\": %d, \"credits\": %d, \"killedUnits\": %d, "
@@ -502,7 +515,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"econ\": [%s], \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -513,7 +526,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), enemyMixText.c_str(), claimText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), enemyMixText.c_str(), claimText, econText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));

@@ -297,6 +297,20 @@ namespace
 		bool BrokeHoldActive { false };
 		int LastBrokeSaleFrame { -100000 };
 		int LastHarvesterBalanceFrame { -100000 };
+		// Expert 0 work (UpdateEconomyCrisis, every 150 frames): the selector prior from the economy
+		// trouble there is now, and what it is made of. Own state and current sight only.
+		int EconomyTrouble { 0 };
+		int LowPowerSinceFrame { -1 };
+		int HarvestersUnderFire { 0 };
+		int StarvedRefineries { 0 };
+		bool StorageNearlyFull { false };
+		// Harvesters sent home from a seen threat (UniqueID -> frame of the order), so one is not
+		// ordered again every AI tick.
+		std::unordered_map<DWORD, int> HarvesterRetreatFrames {};
+		// Expert 6 work (UpdateResourceClaim, every 300 frames): value of the free ore fields this
+		// house knows and can take now, and whether the best one is beyond the crawl's reach.
+		int ExpansionOpportunity { 0 };
+		bool ClaimNeedsMCV { false };
 		// Expert 3 (UpdateFfaTargets): main enemy choice bonus per enemy house index (0..7).
 		std::array<int, 8> FfaEnemyBonus {};
 		// Percent of an enemy's visible threat its main enemy priority keeps (Expert 3: 40 unless it is
@@ -486,6 +500,14 @@ namespace
 			this->BrokeHoldActive = false;
 			this->LastBrokeSaleFrame = -100000;
 			this->LastHarvesterBalanceFrame = -100000;
+			this->EconomyTrouble = 0;
+			this->LowPowerSinceFrame = -1;
+			this->HarvestersUnderFire = 0;
+			this->StarvedRefineries = 0;
+			this->StorageNearlyFull = false;
+			this->HarvesterRetreatFrames.clear();
+			this->ExpansionOpportunity = 0;
+			this->ClaimNeedsMCV = false;
 			this->FfaEnemyBonus.fill(0);
 			this->FfaThreatScale.fill(100);
 			this->LastFfaTargetFrame = -100000;

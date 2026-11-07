@@ -212,6 +212,9 @@ namespace
 		auto& macro = GetMacroState(pHouse);
 		std::unordered_map<DWORD, NeuralStuckTrack> next;
 		const int now = Unsorted::CurrentFrame;
+		// Expert 0 in charge moves a harvester stuck on a drained field three times sooner.
+		auto const pIdleExt = HouseExt::Fetch(pHouse);
+		const int idleWait = (pIdleExt && pIdleExt->NeuralAI_ActiveExpert == 0) ? 300 : 900;
 		std::vector<CellStruct> enemyStructures;
 		bool enemyStructuresKnown = false;
 
@@ -238,7 +241,7 @@ namespace
 				track = it->second;
 			}
 
-			if (now - track.SinceFrame < 900)
+			if (now - track.SinceFrame < idleWait)
 			{
 				next.emplace(pUnit->UniqueID, track);
 				continue;
@@ -427,6 +430,12 @@ namespace
 	// every tier 0 field); fields held by a known enemy refinery or ConYard (14 cells) are left to
 	// the raid plans. Fog-fair: enemy structures count only when known. Only fields on the
 	// landmass of one of our ConYards (the MCV / crawl can reach them).
+	// The same pass grades the work there is for Expert 6 (ExpansionOpportunity, the selector
+	// prior): explored free fields out of known enemy defense reach, by value over distance, the
+	// best three; those beyond the crawl's reach (60 cells from any structure of ours) only count
+	// while an expansion MCV can be built. Fields matter less the more we already mine.
+	bool IsCellInKnownEnemyDefenseReach(HouseClass* pHouse, const CellStruct& cell, int marginCells);
+
 	void UpdateResourceClaim(HouseClass* pHouse)
 	{
 		if (!pHouse)
@@ -443,12 +452,15 @@ namespace
 		macro.ResourceClaimTreeCell = CellStruct::Empty;
 		macro.ResourceClaimTier = -1;
 		macro.ResourceClaimZone = -1;
+		macro.ExpansionOpportunity = 0;
+		macro.ClaimNeedsMCV = false;
 
 		auto const pExt = HouseExt::Fetch(pHouse);
 		const bool hoarder = pExt && pExt->NeuralAI_ActiveExpert == 6;
 
 		std::vector<CellStruct> ownHubs;
 		std::vector<std::pair<CellStruct, int>> ownAnchors; // cell, zone
+		std::vector<CellStruct> ownStructures;
 
 		for (auto const pBld : pHouse->Buildings)
 		{
@@ -462,10 +474,20 @@ namespace
 
 			if (pBld->Type->ConstructionYard)
 				ownAnchors.emplace_back(bc, MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pBld->OnBridge));
+
+			if (!pBld->Type->Wall && !pBld->Type->Insignificant && !pBld->Type->InvisibleInGame)
+				ownStructures.push_back(bc);
 		}
 
 		if (ownAnchors.empty())
 			return;
+
+		// An expansion MCV is possible: a ground war factory and money for it, below the yard cap the
+		// production uses (2 + free fields up to 3, + 1 with a big bank, at most 6).
+		const int money = pHouse->Available_Money();
+		const bool canSendMCV = pHouse->NumWarFactories > 0 && money >= 2500
+			&& pHouse->NumConYards < std::clamp(2 + std::min(3, macro.UncolonizedOreFields) + (money >= 15000 ? 1 : 0), 2, 6);
+		std::array<int, 3> bestWorth {};
 
 		std::vector<CellStruct> enemyStructures;
 		std::vector<CellStruct> enemyHubs;
@@ -521,6 +543,12 @@ namespace
 
 			const int value = field.OreCells + (field.SpawnerTree ? 40 : 0);
 			const int metric = tier * 100000 + dist * 3 - value;
+			int crawlDist = INT_MAX;
+
+			for (auto const& sc : ownStructures)
+				crawlDist = std::min(crawlDist, chebyshev(sc, field.Cell));
+
+			const bool beyondCrawl = crawlDist > 60;
 
 			if (metric < bestMetric)
 			{
@@ -528,8 +556,42 @@ namespace
 				macro.ResourceClaimCell = field.Cell;
 				macro.ResourceClaimTier = tier;
 				macro.ResourceClaimZone = fieldZone;
+				macro.ClaimNeedsMCV = beyondCrawl;
+			}
+
+			// Work for Expert 6: only what it knows (explored ground) and can take now.
+			if (beyondCrawl && !canSendMCV)
+				continue;
+
+			auto const pFieldCell = MapClass::Instance.TryGetCellAt(field.Cell);
+
+			if (!pFieldCell || !IsCellVisibleToAI(pHouse, pFieldCell) || IsCellInKnownEnemyDefenseReach(pHouse, field.Cell, 3))
+				continue;
+
+			int worth = std::min(120, value) * 2 * 30 / std::max(30, dist);
+
+			if (tier == 1)
+				worth /= 2;
+
+			for (auto& slot : bestWorth)
+			{
+				if (worth > slot)
+					std::swap(worth, slot);
 			}
 		}
+
+		// Each field more is worth less the more we already mine (5% per refinery of ours, 8% with a
+		// bank of 30000+ where income stopped being the limit; denied ground still counts, so never
+		// below a third): on maps with ore everywhere the three best fields always look perfect.
+		int opportunity = bestWorth[0] + bestWorth[1] + bestWorth[2];
+		const int perRefinery = money >= 30000 ? 8 : 5;
+		opportunity = opportunity * std::max(34, 100 - perRefinery * static_cast<int>(ownHubs.size())) / 100;
+
+		// Nothing to gather with: the money for the first step of a crawl or a refinery is missing.
+		if (money < 1500 && pHouse->CountResourceGatherers == 0)
+			opportunity /= 2;
+
+		macro.ExpansionOpportunity = std::min(450, opportunity);
 
 		// The field's spawner tree (within 6 cells of its cell): its refinery goes next to it.
 		if (macro.ResourceClaimCell != CellStruct::Empty)
@@ -871,6 +933,10 @@ namespace
 		return tier <= macro.UnitTierCap;
 	}
 
+	int VisibleEnemyThreatNear(HouseClass* pHouse, const CellStruct& cell, int radius);
+	bool IsBuildingEnterableFromZone(const BuildingClass* pBld, int zone);
+	void OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget);
+
 	// Expert 0 (Economy & Crisis) bookkeeping and actions, every 150 frames. The peaks of static
 	// refineries and harvesters are tracked for every house; EconomyRecoveryActive is set when a raid
 	// cost a third of either (production then rebuilds the economy first while Expert 0 runs).
@@ -879,7 +945,10 @@ namespace
 	//   600 frames: a factory copy, a defense copy far from any known enemy structure, a power plant
 	//   copy the power surplus can spare, any defense copy, then a lone support structure that is no
 	//   factory. Never a ConYard or a refinery.
+	// - Harvesters under fire: a damaged one goes home to a refinery with no enemy in sight.
+	// - EconomyTrouble: the selector prior of Expert 0 (what it could fix now; 0 vetoes it).
 	// While Expert 0 is in charge it also acts:
+	// - Harvesters under fire go home at the first enemy seen near them, damaged or not.
 	// - Blackout: with low power, high-drain structures that are neither factories nor defenses go
 	//   offline (the existing micro brings them back online once the surplus is >= 150).
 	// - Harvester balance: a refinery with 3+ harvesters waiting next to it sends one to the ore of a
@@ -943,6 +1012,132 @@ namespace
 			return;
 
 		const bool expertInCharge = pExt->NeuralAI_ActiveExpert == 0;
+
+		// Harvesters under fire: an armed enemy in our sight within 7 cells. A damaged one (any one
+		// while Expert 0 is in charge) goes home to the nearest refinery it can reach with no enemy in
+		// sight around it, so the load is not lost and the guards there take over. One order per
+		// harvester per 600 frames. Chrono miners are counted but never ordered (an order makes
+		// them loop-teleport); slave miners deploy where they stop.
+		int underFire = 0;
+		{
+			std::unordered_map<DWORD, int> keptRetreats;
+
+			for (auto const pHarv : harvesters)
+			{
+				if (!pHarv->Type->Harvester || pHarv->Type->DeploysInto || pHarv->IsInAir())
+					continue;
+
+				const CellStruct hc = pHarv->GetMapCoords();
+
+				if (VisibleEnemyThreatNear(pHouse, hc, 7) <= 0)
+					continue;
+
+				underFire++;
+
+				if (pHarv->Type->Teleporter)
+					continue;
+
+				auto const lastIt = macro.HarvesterRetreatFrames.find(pHarv->UniqueID);
+				const bool recentOrder = lastIt != macro.HarvesterRetreatFrames.end() && now - lastIt->second < 600;
+
+				if (recentOrder)
+					keptRetreats.emplace(pHarv->UniqueID, lastIt->second);
+
+				if (recentOrder || (!expertInCharge && pHarv->GetHealthPercentage() >= 0.9)
+					|| pHarv->CurrentMission == Mission::Enter || pHarv->CurrentMission == Mission::Unload
+					|| pHarv->QueuedMission == Mission::Enter || pHarv->HasAnyLink())
+				{
+					continue;
+				}
+
+				const int harvZone = ObjectZone(pHarv, pHarv->Type->MovementZone);
+				BuildingClass* pHome = nullptr;
+				int bestDist = INT_MAX;
+
+				for (auto const pRef : refineries)
+				{
+					if (!pRef->Type->Refinery || !IsBuildingEnterableFromZone(pRef, harvZone))
+						continue;
+
+					const int dist = static_cast<int>(pRef->GetMapCoords().DistanceFrom(hc));
+
+					if (dist < 6 || dist > 60 || dist >= bestDist || VisibleEnemyThreatNear(pHouse, pRef->GetMapCoords(), 8) > 0)
+						continue;
+
+					bestDist = dist;
+					pHome = pRef;
+				}
+
+				if (!pHome)
+					continue;
+
+				OrderFootToEnter(pHarv, pHome);
+				keptRetreats[pHarv->UniqueID] = now;
+				CountDecision(NeuralDecision::HarvesterRetreat, pHouse->ArrayIndex);
+			}
+
+			macro.HarvesterRetreatFrames = std::move(keptRetreats);
+		}
+
+		macro.HarvestersUnderFire = underFire;
+
+		// Refineries no harvester serves while another has 3+ waiting next to it (the balance below
+		// has work), and storage nearly full while it limits our income (Storage.AI).
+		BuildingClass* pCrowded = nullptr;
+		BuildingClass* pIdle = nullptr;
+		int starvedRefineries = 0;
+
+		if (refCount >= 2)
+		{
+			int crowdedQueue = 2;
+
+			for (auto const pRef : refineries)
+			{
+				int queuedNear = 0;
+				bool anyAssigned = false;
+
+				for (auto const pHarv : harvesters)
+				{
+					const int dist = pHarv->DistanceFrom(pRef);
+
+					if (dist <= 6 * 256)
+						queuedNear++;
+
+					if (dist <= 14 * 256)
+						anyAssigned = true;
+				}
+
+				if (queuedNear > crowdedQueue)
+				{
+					crowdedQueue = queuedNear;
+					pCrowded = pRef;
+				}
+
+				if (!anyAssigned)
+				{
+					starvedRefineries++;
+
+					if (!pIdle)
+						pIdle = pRef;
+				}
+			}
+		}
+
+		macro.StarvedRefineries = pCrowded ? starvedRefineries : 0;
+
+		const float storedAmount = pExt->GetTotalTiberiumStorage();
+		macro.StorageNearlyFull = RulesExt::Global()->Storage_AI && pHouse->TotalStorage > 0
+			&& storedAmount >= static_cast<float>(pHouse->TotalStorage * RulesExt::Global()->Storage_AI_Threshold);
+
+		if (pHouse->HasLowPower())
+		{
+			if (macro.LowPowerSinceFrame < 0 || macro.LowPowerSinceFrame > now)
+				macro.LowPowerSinceFrame = now;
+		}
+		else
+		{
+			macro.LowPowerSinceFrame = -1;
+		}
 
 		// Blackout.
 		if (expertInCharge && pHouse->HasLowPower())
@@ -1153,39 +1348,45 @@ namespace
 			}
 		}
 
+		// Selector prior of Expert 0: the economy trouble it can act on now. Nothing gathering (with a
+		// harvester or a refinery buildable), harvesters with no refinery, a raid that cost a third of
+		// the economy, low power that lasted 300 frames (worse the bigger the deficit), harvesters
+		// under fire, a refinery no harvester serves while another is crowded, storage nearly full.
+		// 0 = nothing to do: Expert 0 is vetoed.
+		{
+			int trouble = 0;
+			// Only harvesters that unload at a refinery need one (a slave miner is its own refinery).
+			const bool dockingHarvesterOwned = std::any_of(harvesters.begin(), harvesters.end(),
+				[](UnitClass* pHarv) { return pHarv->Type->Harvester && !pHarv->Type->DeploysInto; });
+
+			if (noIncome && cheapestHarvester != INT_MAX)
+				trouble += 900;
+			else if (refCount == 0 && dockingHarvesterOwned)
+				trouble += 600;
+
+			if (macro.EconomyRecoveryActive)
+				trouble += 450;
+
+			if (macro.LowPowerSinceFrame >= 0 && now - macro.LowPowerSinceFrame >= 300)
+				trouble += 250 + std::clamp((pHouse->PowerDrain - pHouse->PowerOutput) * 2, 0, 250);
+
+			trouble += 150 * std::min(2, underFire);
+
+			if (macro.StarvedRefineries > 0)
+				trouble += 200;
+
+			if (macro.StorageNearlyFull)
+				trouble += 350;
+
+			macro.EconomyTrouble = std::min(950, trouble);
+		}
+
 		if (!expertInCharge)
 			return;
 
 		// Harvester balance.
 		if (refCount >= 2 && now - macro.LastHarvesterBalanceFrame >= 450)
 		{
-			BuildingClass* pCrowded = nullptr;
-			BuildingClass* pIdle = nullptr;
-			int crowdedQueue = 2;
-
-			for (auto const pRef : refineries)
-			{
-				int queuedNear = 0;
-
-				for (auto const pHarv : harvesters)
-				{
-					if (pHarv->DistanceFrom(pRef) <= 6 * 256)
-						queuedNear++;
-				}
-
-				const bool anyAssigned = std::any_of(harvesters.begin(), harvesters.end(),
-					[pRef](UnitClass* pHarv) { return pHarv->DistanceFrom(pRef) <= 14 * 256; });
-
-				if (queuedNear > crowdedQueue)
-				{
-					crowdedQueue = queuedNear;
-					pCrowded = pRef;
-				}
-
-				if (!anyAssigned && !pIdle)
-					pIdle = pRef;
-			}
-
 			if (pCrowded && pIdle && pCrowded != pIdle)
 			{
 				CellClass* pOre = FindFreeOreFieldCell(pHouse, pIdle->GetMapCoords(),
@@ -1195,12 +1396,15 @@ namespace
 				{
 					for (auto const pHarv : harvesters)
 					{
+						// Chrono miners loop-teleport on a destination, slave miners deploy where they stop.
 						if (pHarv->DistanceFrom(pCrowded) <= 6 * 256 && !pHarv->InLimbo && pHarv->CurrentMission != Mission::Enter
-							&& pHarv->CurrentMission != Mission::Unload)
+							&& pHarv->CurrentMission != Mission::Unload && pHarv->Type->Harvester && !pHarv->Type->Teleporter
+							&& !pHarv->Type->DeploysInto)
 						{
 							macro.LastHarvesterBalanceFrame = now;
 							pHarv->SetDestination(pOre, true);
 							pHarv->QueueMission(Mission::Harvest, false);
+							CountDecision(NeuralDecision::HarvesterRebalance, pHouse->ArrayIndex);
 							break;
 						}
 					}

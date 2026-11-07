@@ -2132,8 +2132,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 			else if (pBld->Storage > 0 && !isRefineryOrSlaveMiner)
 			{
-				// Only build Ore Silos when storage is actually full/short, max 2
-				if (owned >= 2 || (!pHouse->IsTiberiumShort && money < 3500))
+				// Silos only while storage really limits our income (Storage.AI, nearly full), at most
+				// 2. Without Storage.AI the harvested credits never wait in storage for an AI house, so
+				// a silo would be money thrown away.
+				if (owned >= 2 || !GetMacroState(pHouse).StorageNearlyFull)
 					continue;
 
 				score = scores[11] - owned * 900;
@@ -2727,7 +2729,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	const int ecoBiasMod = std::clamp(static_cast<int>(scores[39]) / 220, -1, 2);
-	const int economyUnitCap = (trueRefineries > 0) ? std::clamp(2 * trueRefineries + 1 + ecoBiasMod, 2, 18) : 4;
+	// About 2 harvesters per refinery, at most 18; one per refinery with a bank of 50000+ credits
+	// (income is not what limits that house: more harvesters only crowd the refineries).
+	const int economyUnitCap = (trueRefineries > 0)
+		? std::clamp((money >= 50000 ? trueRefineries + 1 : 2 * trueRefineries + 1 + ecoBiasMod), 2, 18)
+		: 4;
 
 	// Emergency ConYard Reconstruction: If we lost all ConYards and have no MCV
 	// on the map, check if our War Factory + Service Depot/Grinder/Tech can
@@ -3059,6 +3065,127 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		return -900;
 	};
 
+	// Exceptions to the economy unit cap for real harvesters, computed once per tick: a refinery
+	// zone no harvester of ours works (with or without a war factory there), or another landmass
+	// than the main base with a war factory and fewer than 2 harvesters per refinery. A building
+	// stands in the zone of the cells around its foundation (the cells under it can carry another
+	// zone), harvesters in limbo (being built, inside a transport, mid chrono jump) still count,
+	// and the main base never takes the island exception (2 harvesters per refinery there would
+	// pass the cap whenever the base has more than 9 refineries).
+	bool economyZonesComputed = false;
+	bool zeroHarvesterZoneWithFactory = false;
+	bool zeroHarvesterZoneNoFactory = false;
+	bool underharvestedIslandWithFactory = false;
+
+	auto const computeEconomyZones = [&]()
+	{
+		economyZonesComputed = true;
+
+		auto const groundZoneOf = [](const BuildingClass* pBld) -> int
+		{
+			const CellStruct cell = pBld->GetMapCoords();
+			const int width = pBld->Type->GetFoundationWidth();
+			const int height = pBld->Type->GetFoundationHeight(false);
+			std::map<int, int> zoneCounts;
+
+			for (int dy = -1; dy <= height; ++dy)
+			{
+				for (int dx = -1; dx <= width; ++dx)
+				{
+					if (dx >= 0 && dx < width && dy >= 0 && dy < height)
+						continue;
+
+					const CellStruct around { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
+
+					if (!MapClass::Instance.CoordinatesLegal(around))
+						continue;
+
+					const int zone = MapClass::Instance.GetMovementZoneType(around, MovementZone::Normal, false);
+
+					if (zone > 0)
+						zoneCounts[zone]++;
+				}
+			}
+
+			int bestZone = -1;
+			int bestCount = 0;
+
+			for (auto const& [zone, count] : zoneCounts)
+			{
+				if (count > bestCount)
+				{
+					bestCount = count;
+					bestZone = zone;
+				}
+			}
+
+			return bestZone;
+		};
+
+		std::map<int, int> refineriesInZone;
+		std::map<int, int> factoriesInZone;
+		std::map<int, int> harvestersInZone;
+		int mainZone = -1;
+
+		for (auto const pOB : pHouse->Buildings)
+		{
+			if (!pOB || pOB->InLimbo || !pOB->IsAlive || !pOB->Type)
+				continue;
+
+			const bool isRefinery = pOB->Type->Refinery || pOB->Type->ResourceDestination;
+			const bool isWarFactory = pOB->Type->Factory == AbstractType::UnitType && !pOB->Type->Naval;
+
+			if (!isRefinery && !isWarFactory && !(pOB->Type->ConstructionYard && mainZone < 0))
+				continue;
+
+			const int zone = groundZoneOf(pOB);
+
+			if (zone < 0)
+				continue;
+
+			if (isRefinery)
+				refineriesInZone[zone]++;
+
+			if (isWarFactory)
+				factoriesInZone[zone]++;
+
+			if (pOB->Type->ConstructionYard && mainZone < 0)
+				mainZone = zone;
+		}
+
+		if (mainZone < 0 && pHouse->BaseSpawnCell != CellStruct::Empty)
+			mainZone = MapClass::Instance.GetMovementZoneType(pHouse->BaseSpawnCell, MovementZone::Normal, false);
+
+		for (auto const pHU : UnitClass::Array)
+		{
+			if (pHU && pHU->Owner == pHouse && pHU->IsAlive && pHU->Type && (pHU->Type->Harvester || pHU->Type->ResourceGatherer)
+				&& !pHU->Type->DeploysInto)
+			{
+				harvestersInZone[ObjectZone(pHU, MovementZone::Normal)]++;
+			}
+		}
+
+		for (auto const& [zone, refineries] : refineriesInZone)
+		{
+			auto const harvIt = harvestersInZone.find(zone);
+			const int harvesters = harvIt != harvestersInZone.end() ? harvIt->second : 0;
+			auto const facIt = factoriesInZone.find(zone);
+			const bool hasFactory = facIt != factoriesInZone.end() && facIt->second > 0;
+
+			if (harvesters == 0)
+			{
+				if (hasFactory)
+					zeroHarvesterZoneWithFactory = true;
+				else
+					zeroHarvesterZoneNoFactory = true;
+			}
+			else if (hasFactory && zone != mainZone && harvesters < refineries * 2)
+			{
+				underharvestedIslandWithFactory = true;
+			}
+		}
+	};
+
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
 		if (!pUnit || !CanBuildUnderHumanRules(pHouse, pUnit))
@@ -3161,53 +3288,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// without end (77 deployed slave miners in one match).
 		if ((pUnit->Harvester || pUnit->ResourceGatherer) && !isDeployableRefineryOrMiner)
 		{
-			for (auto const pRefB : pHouse->Buildings)
-			{
-				if (!pRefB || pRefB->InLimbo || !pRefB->IsAlive || !pRefB->Type
-					|| (!pRefB->Type->Refinery && !pRefB->Type->ResourceDestination))
-				{
-					continue;
-				}
+			if (!economyZonesComputed)
+				computeEconomyZones();
 
-				const int rz
-					= ObjectZone(pRefB, MovementZone::Normal);
-				if (rz < 0)
-					continue;
-
-				int refsInRz = 0;
-				int warFacsInRz = 0;
-				for (auto const pOB : pHouse->Buildings)
-				{
-					if (!pOB || pOB->InLimbo || !pOB->IsAlive || !pOB->Type
-						|| ObjectZone(pOB, MovementZone::Normal)
-							!= rz)
-					{
-						continue;
-					}
-
-					if (pOB->Type->Refinery || pOB->Type->ResourceDestination)
-						refsInRz++;
-					else if (pOB->Type->Factory == AbstractType::UnitType && !pOB->Type->Naval)
-						warFacsInRz++;
-				}
-
-				int harvsInRz = 0;
-				for (auto const pHU : UnitClass::Array)
-				{
-					if (pHU && pHU->Owner == pHouse && !pHU->InLimbo && pHU->IsAlive && pHU->Type
-						&& (pHU->Type->Harvester || pHU->Type->ResourceGatherer)
-						&& ObjectZone(pHU, MovementZone::Normal)
-							== rz)
-					{
-						harvsInRz++;
-					}
-				}
-
-				if (harvsInRz == 0 && (warFacsInRz >= 1 || CanHouseFerryTypeAcrossWater(pHouse, pUnit)))
-					hasRefineryZoneWithZeroHarvesters = true;
-				else if (warFacsInRz >= 1 && harvsInRz < refsInRz * 2)
-					hasUnderharvestedIslandWithWarFactory = true;
-			}
+			hasRefineryZoneWithZeroHarvesters = zeroHarvesterZoneWithFactory
+				|| (zeroHarvesterZoneNoFactory && CanHouseFerryTypeAcrossWater(pHouse, pUnit));
+			hasUnderharvestedIslandWithWarFactory = underharvestedIslandWithFactory;
 		}
 
 		const bool isEconomyUnit = pUnit->Harvester || pUnit->ResourceGatherer || isDeployableRefineryOrMiner;
