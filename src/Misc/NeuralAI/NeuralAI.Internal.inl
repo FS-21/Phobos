@@ -107,6 +107,7 @@ namespace
 		AllySiteBuilding,
 		AllyCrawlAnchor,
 		AllyDefense,
+		AirAttackStalled,
 		Count
 	};
 
@@ -116,7 +117,7 @@ namespace
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
 		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
 		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute", "harvesterRetreat", "harvesterRebalance",
-		"allySiteBuilding", "allyCrawlAnchor", "allyDefense" };
+		"allySiteBuilding", "allyCrawlAnchor", "allyDefense", "airAttackStalled" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -931,6 +932,9 @@ namespace
 		// eligible but never started = held back by its learned preference; never eligible =
 		// its preconditions never happen on these maps.
 		Eligible,
+		// The learned gate opened but the plan did not start: no group of free units fit it, so the
+		// plan is held back by unit availability, not by its learned preference.
+		NoGroup,
 		Count
 	};
 

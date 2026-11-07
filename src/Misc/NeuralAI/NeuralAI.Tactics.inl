@@ -91,6 +91,7 @@ namespace
 	// after 450 frames when the destination is in another movement zone (unreachable: e.g. the
 	// only bridge was destroyed and the pathfinder parks it on the near bank forever), after 1800
 	// frames otherwise (a traffic jam that does not clear). Units fighting are never touched.
+	// Aircraft stuck on an attack they never fly are released as well (see below).
 	void UpdateStuckUnits(HouseClass* pHouse)
 	{
 		if (!pHouse)
@@ -195,6 +196,65 @@ namespace
 			check(pInf, false);
 
 		macro.StuckTracks = std::move(next);
+
+		// Aircraft on Mission::Attack that neither move nor fire: when the engine finds no fire
+		// location for the target it goes back to "return to base" and, still armed and targeting,
+		// straight back to picking a location, so the aircraft sits on its pad for the rest of the
+		// match, never reloading and never free for other work. Released (target cleared, idle
+		// mode: back to the pad and reload) after 450 frames on the ground without moving or a
+		// shot, or 1800 frames in the air without a shot. Plan members are left to their plan.
+		std::unordered_map<DWORD, NeuralAirStallTrack> nextAir;
+
+		for (auto const pAir : AircraftClass::Array)
+		{
+			if (!pAir || pAir->Owner != pHouse || !pAir->IsAlive || pAir->InLimbo || !pAir->Type || pAir->Type->Spawned
+				|| pAir->CurrentMission != Mission::Attack || !pAir->Target || macro.PlanMembers.contains(pAir->UniqueID))
+			{
+				continue;
+			}
+
+			const CellStruct here = pAir->GetMapCoords();
+			NeuralAirStallTrack track { here, now, pAir->Ammo, now };
+
+			if (auto const it = macro.AirStallTracks.find(pAir->UniqueID); it != macro.AirStallTracks.end())
+			{
+				track = it->second;
+
+				if (track.Cell.DistanceFrom(here) > 1.5)
+				{
+					track.Cell = here;
+					track.SinceFrame = now;
+				}
+
+				if (track.Ammo != pAir->Ammo)
+				{
+					track.Ammo = pAir->Ammo;
+					track.AmmoSinceFrame = now;
+				}
+			}
+
+			if (pAir->IsFiring)
+			{
+				track.SinceFrame = now;
+				track.AmmoSinceFrame = now;
+			}
+
+			const bool parked = !pAir->IsInAir() && now - track.SinceFrame >= 450 && now - track.AmmoSinceFrame >= 450;
+			const bool idleFlight = pAir->IsInAir() && now - track.AmmoSinceFrame >= 1800;
+
+			if (parked || idleFlight)
+			{
+				pAir->SetTarget(nullptr);
+				pAir->SetDestination(nullptr, true);
+				pAir->EnterIdleMode(false, true);
+				CountDecision(NeuralDecision::AirAttackStalled, pHouse->ArrayIndex);
+				continue; // Its next attack starts a new track.
+			}
+
+			nextAir.emplace(pAir->UniqueID, track);
+		}
+
+		macro.AirStallTracks = std::move(nextAir);
 	}
 
 	// Idle harvester dispatcher: an empty harvester on Harvest that has not left its cell for 900
