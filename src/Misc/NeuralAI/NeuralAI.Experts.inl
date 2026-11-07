@@ -54,6 +54,9 @@ namespace
 	// Expert 4 work summary (NeuralAI.SpecOps.inl, refreshed every 150 frames).
 	int SpecOpsOpportunity(HouseClass* pHouse);
 	void GetSpecOpsWork(HouseClass* pHouse, int& outTechValue, int& outSpyTargets, bool& outBridgeRepair, bool& outBridgeDemolition);
+
+	// Expert 8 work summary (NeuralAI.AirForce.inl, refreshed every 150 frames).
+	int AirForceOpportunity(HouseClass* pHouse);
 }
 
 void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features,
@@ -139,11 +142,12 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			expScores[7] += std::min(680, pressure);
 	}
 
-	if (pHouse->NumAirpads > 0 || pHouse->OwnedAircraft >= 2 || features[66] > 20 || features[24] > 0
-		|| pExt->NeuralAI_Archetype == 6)
-	{
-		expScores[8] += 450; // Expert 8: Airforce & Sky Dominance
-	}
+	// Expert 8: Airforce & Sky Dominance, graded by real air work (fog-fair): our armed aircraft,
+	// known targets a strike can reach past known anti-air, enemy air seen that our interceptors
+	// can answer (up to 760). Owning an airfield or seeing enemy air used to give 450 for free, so
+	// it ran in houses with one aircraft or none (enemy air alone is anti-air defense work).
+	const int airForceOpportunity = AirForceOpportunity(pHouse);
+	expScores[8] += airForceOpportunity + (pExt->NeuralAI_Archetype == 6 ? 120 : 0);
 
 	if (features[26] > 0 || features[96] > 0 || features[97] > 0 || features[79] > 0 || pExt->NeuralAI_Archetype == 7)
 	{
@@ -151,12 +155,13 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	}
 
 	// Common-sense vetoes: an expert that cannot do its job here is never chosen, whatever the
-	// learned bias says. Airforce with no aircraft we could ever build, own or fight; Urban with no
+	// learned bias says. Airforce with no air work (no armed aircraft, no target or enemy air it
+	// could answer, unless archetype 6 can still build its air force); Urban with no
 	// building to occupy, no garrison and no allied coalition; Expansion on a map without any
 	// ore field or capturable tech; Special Operations with nothing to capture, spy or bridge.
 	std::array<bool, 10> vetoed {};
 	vetoed[4] = specOpsOpportunity == 0 && pExt->NeuralAI_Archetype != 1;
-	vetoed[8] = pHouse->OwnedAircraft == 0 && pHouse->NumAirpads == 0 && features[66] <= 20 && !HouseCanEverFieldAircraft(pHouse);
+	vetoed[8] = airForceOpportunity == 0 && (pExt->NeuralAI_Archetype != 6 || !HouseCanEverFieldAircraft(pHouse));
 	vetoed[9] = features[26] == 0 && features[79] == 0 && features[96] == 0 && features[97] == 0
 		&& pExt->NeuralAI_Archetype != 7;
 	vetoed[6] = GetOreFields().empty() && features[25] == 0;

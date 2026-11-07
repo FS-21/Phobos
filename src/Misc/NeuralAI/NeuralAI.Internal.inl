@@ -102,6 +102,13 @@ namespace
 		BridgeMoat,
 		BridgeFleetBlock,
 		BridgeRoute,
+		AirWing,
+		AirWingSortie,
+		AirInterceptSortie,
+		AirSoloStrike,
+		AirFrontPatrol,
+		AircraftFielded,
+		AircraftLost,
 		Count
 	};
 
@@ -110,7 +117,8 @@ namespace
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
 		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
-		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute" };
+		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute", "airWings", "airWingSorties",
+		"airInterceptSorties", "airSoloStrikes", "airFrontPatrols", "aircraftFielded", "aircraftLost" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

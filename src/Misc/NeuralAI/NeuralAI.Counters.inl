@@ -281,7 +281,7 @@ namespace
 	{
 		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
 
-		if (!pExt || pExt->NeuralAI_ActiveExpert != 2)
+		if (!pExt || (pExt->NeuralAI_ActiveExpert != 2 && pExt->NeuralAI_ActiveExpert != 8))
 			return;
 
 		auto& macro = GetMacroState(pHouse);
@@ -403,12 +403,18 @@ namespace
 		}
 	}
 
-	// Production score shift of a type from the counter composition; 0 unless Expert 2 is active.
+	// Production score shift of a type from the counter composition; 0 unless Expert 2 is active
+	// (Expert 8 uses it for its aircraft only).
 	int CounterBonusFor(HouseClass* pHouse, const TechnoTypeClass* pType)
 	{
 		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
 
-		if (!pExt || pExt->NeuralAI_ActiveExpert != 2 || !pType)
+		if (!pExt || !pType)
+			return 0;
+
+		const int expert = pExt->NeuralAI_ActiveExpert;
+
+		if (expert != 2 && (expert != 8 || pType->WhatAmI() != AbstractType::AircraftType))
 			return 0;
 
 		auto const& bonus = GetMacroState(pHouse).CounterBonus;
