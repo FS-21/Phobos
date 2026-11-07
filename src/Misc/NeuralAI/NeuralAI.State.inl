@@ -203,6 +203,10 @@ namespace
 		int OwnAACapacity { 0 };
 		int HeavyAirThreats { 0 };
 
+		// Spaced sightings of enemy ground units near our or an ally's base (same layout and
+		// extrapolation as the air tracks), read by the Base Threat Intercept plan.
+		std::vector<NeuralAirThreatTrack> GroundThreatTracks {};
+
 		// Enemy buildings this house has actually seen (fog-fair base knowledge).
 		std::unordered_set<DWORD> SeenEnemyBuildings {};
 
@@ -473,6 +477,7 @@ namespace
 			this->AirThreatValue = 0;
 			this->OwnAACapacity = 0;
 			this->HeavyAirThreats = 0;
+			this->GroundThreatTracks.clear();
 			this->SeenEnemyBuildings.clear();
 			this->ScoutedStartMask = 0;
 			this->EnemySightings.clear();

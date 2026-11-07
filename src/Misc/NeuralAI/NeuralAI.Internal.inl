@@ -107,6 +107,9 @@ namespace
 		AllySiteBuilding,
 		AllyCrawlAnchor,
 		AllyDefense,
+		BaseThreatTick,
+		BaseThreatIntercept,
+		BaseThreatRepelled,
 		Count
 	};
 
@@ -116,7 +119,7 @@ namespace
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
 		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
 		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute", "harvesterRetreat", "harvesterRebalance",
-		"allySiteBuilding", "allyCrawlAnchor", "allyDefense" };
+		"allySiteBuilding", "allyCrawlAnchor", "allyDefense", "baseThreatTicks", "baseThreatIntercepts", "baseThreatRepelled" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -902,6 +905,7 @@ namespace
 		ComboWatchStrike,
 		AllyBackup,
 		AllyForwardOutpost,
+		BaseThreatIntercept,
 		Count
 	};
 
@@ -910,14 +914,15 @@ namespace
 		"harvesterAmbush", "pickets", "keyPointHold", "survival", "preemptiveStrike", "baitAmbush", "allyJointAttack",
 		"forwardRepair", "navalStrike", "engineerAssault", "sabotage", "huntKeyUnits", "rotatingRaids", "airCorridor",
 		"silentInfiltration", "artilleryEcoSiege", "rollingSiege", "delayingAction", "threeFront", "factoryDecapitation",
-		"cutReinforcements", "techTreeCut", "comboBlackoutPush", "comboWatchStrike", "allyBackup", "allyForwardOutpost" };
+		"cutReinforcements", "techTreeCut", "comboBlackoutPush", "comboWatchStrike", "allyBackup", "allyForwardOutpost", "baseThreatIntercept" };
 
 	// Trained preference of each plan: free reserve output slots 89.. (see the trainer's
 	// OUTPUT_SLOT_NAMES), learned by ES like any other slot. The ally site plans share the slot of
 	// the plan closest to them: Ally Backup with Survival (106), Ally Forward Outpost with Ally Joint
-	// Attack (109).
+	// Attack (109). Base Threat Intercept shares Preemptive Strike's slot (107): both hit an enemy
+	// force with a stronger idle group before it reaches us.
 	constexpr int NeuralPlanSlots[] = { 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
-		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 106, 109 };
+		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 106, 109, 107 };
 
 	static_assert(std::size(NeuralPlanNames) == static_cast<size_t>(NeuralPlanId::Count));
 	static_assert(std::size(NeuralPlanSlots) == static_cast<size_t>(NeuralPlanId::Count));

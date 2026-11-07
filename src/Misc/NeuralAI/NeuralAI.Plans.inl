@@ -1989,6 +1989,400 @@ namespace
 
 		auto planOf = [&](NeuralPlanId id) -> NeuralPlanInstance& { return macro.Plans[static_cast<size_t>(id)]; };
 
+		// ---------------------------------------------------------------- Plan 41: Base Threat Intercept
+		// Visible enemy ground units with orders against our or an ally's base are met on the way by
+		// an idle group sized to beat them, before they get there. A unit is a base threat when its
+		// target is one of those buildings or harvesters, when its move or attack-move destination
+		// lies next to one of those buildings, or when its course over the last sightings leads into
+		// them. Only units in our current sight count. The group comes from free units near the
+		// threat (never plan members or units marching in a wave), leaves a home reserve when the
+		// fight is away from our own buildings, and stops at known enemy defenses or once the threat
+		// is gone. TargetID = lead threat, StagingCell = the building it was after, AuxBaseline =
+		// threat value at the start, AuxPeak = its distance to that building at the start (cells).
+		// It runs before plans 23..38 so it gets the idle units first.
+		{
+			auto& plan = planOf(NeuralPlanId::BaseThreatIntercept);
+
+			auto endIntercept = [&](bool success)
+			{
+				Debug::Log("[NeuralAI] House %d BaseThreatIntercept: %s after %d frames, group value %d of %d, frame %d.\n", houseIdx,
+					success ? "repelled" : "failed", Unsorted::CurrentFrame - plan.StartFrame, memberValue(plan), plan.InitialValue,
+					Unsorted::CurrentFrame);
+				finishPlan(NeuralPlanId::BaseThreatIntercept, success, true);
+
+				// Base threats come one after another: be ready for the next one soon.
+				macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::BaseThreatIntercept)] = Unsorted::CurrentFrame + 150;
+
+				if (success)
+					CountDecision(NeuralDecision::BaseThreatRepelled, houseIdx);
+			};
+
+			if (plan.Active)
+			{
+				auto const pLead = findTechnoByID(plan.TargetID);
+				const bool leadSeen = pLead && IsCellInSightOfAI(pHouse, pLead->GetMapCoords());
+				const CellStruct center = leadSeen ? pLead->GetMapCoords() : seenEnemyCentroidNear(plan.TargetCell, 10.0, 150);
+				const CellStruct ourCenter = groupCentroid(plan.Members);
+
+				if (!plan.Arrived && ourCenter != CellStruct::Empty && center != CellStruct::Empty && ourCenter.DistanceFrom(center) <= 7.0)
+				{
+					plan.Arrived = true;
+					plan.ArrivedFrame = Unsorted::CurrentFrame;
+				}
+
+				if (memberValue(plan) * 100 < plan.InitialValue * 40 || Unsorted::CurrentFrame >= plan.Deadline)
+				{
+					endIntercept(false);
+				}
+				else if (center == CellStruct::Empty || center.DistanceFrom(plan.StagingCell) > plan.AuxPeak + 8.0
+					|| CountKnownEnemyDefensesNear(pHouse, center, 8.0, false) > 0)
+				{
+					// Killed, or turned back out of sight or toward its own defenses: the base is safe and
+					// the group does not chase it any further.
+					endIntercept(true);
+				}
+				else if (plan.Arrived && seenEnemyValueNear(center, 8.0, 90) * 10 <= plan.AuxBaseline * 3)
+				{
+					endIntercept(true);
+				}
+				else if (auto const pCenterCell = MapClass::Instance.TryGetCellAt(center))
+				{
+					// Follow the threat: aim the attack-move again once it moved away from the last aim point.
+					const bool moved = center.DistanceFrom(plan.TargetCell) > 4.0;
+
+					if (moved)
+						plan.TargetCell = center;
+
+					for (const DWORD uid : plan.Members)
+					{
+						auto const pFoot = findOwnFoot(uid);
+
+						if (pFoot && pFoot->Target == nullptr && (moved || pFoot->MegaMission != Mission::AttackMove))
+							OrderFootToAttackMove(pFoot, pCenterCell);
+					}
+				}
+			}
+			else
+			{
+				auto& tracks = macro.GroundThreatTracks;
+				std::erase_if(tracks, [](const NeuralAirThreatTrack& track) { return Unsorted::CurrentFrame - track.LastSeenFrame > 300; });
+
+				// Our and our allies' buildings worth defending (array order), with whether they are ours.
+				std::vector<std::pair<CellStruct, bool>> sites;
+
+				for (auto const pBld : BuildingClass::Array)
+				{
+					if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type || !pBld->Owner || pBld->Type->Insignificant
+						|| pBld->Type->InvisibleInGame || pBld->Owner->IsNeutral() || pBld->Owner->IsObserver() || pBld->Owner->Defeated
+						|| (pBld->Owner != pHouse && !pHouse->IsAlliedWith(pBld->Owner)))
+					{
+						continue;
+					}
+
+					sites.emplace_back(pBld->GetMapCoords(), pBld->Owner == pHouse);
+				}
+
+				// Index of the protected building nearest to a cell within maxDist (-1 when none).
+				auto nearestSite = [&](const CellStruct& cell, double maxDist) -> int
+				{
+					int best = -1;
+					double bestDist = maxDist + 0.001;
+
+					for (size_t i = 0; i < sites.size(); ++i)
+					{
+						const double d = sites[i].first.DistanceFrom(cell);
+
+						if (d < bestDist)
+						{
+							bestDist = d;
+							best = static_cast<int>(i);
+						}
+					}
+
+					return best;
+				};
+
+				// Owner of our or an ally's building or harvester (walls and other insignificant
+				// structures do not count), nullptr for anything else.
+				auto protectedOwner = [&](AbstractClass* pTarget) -> HouseClass*
+				{
+					auto const pTechno = abstract_cast<TechnoClass*>(pTarget);
+
+					if (!pTechno || !pTechno->IsAlive || !pTechno->Owner || pTechno->Owner->IsNeutral()
+						|| (pTechno->Owner != pHouse && !pHouse->IsAlliedWith(pTechno->Owner)))
+					{
+						return nullptr;
+					}
+
+					if (auto const pBld = abstract_cast<BuildingClass*>(pTechno))
+						return pBld->Type && !pBld->Type->Insignificant ? pBld->Owner : nullptr;
+
+					auto const pUnit = abstract_cast<UnitClass*>(pTechno);
+
+					return pUnit && pUnit->Type && (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer) ? pUnit->Owner : nullptr;
+				};
+
+				struct BaseThreat
+				{
+					TechnoClass* Techno;
+					CellStruct Cell;
+					CellStruct Goal;
+					int Value;
+					double GoalDistance;
+					bool OwnGoal;
+					const char* Reason;
+				};
+
+				std::vector<BaseThreat> threats;
+
+				// Visible enemy ground units with a target, destination or course into a protected building.
+				for (auto const pTech : TechnoClass::Array)
+				{
+					if (sites.empty())
+						break;
+
+					auto const pFoot = abstract_cast<FootClass*>(pTech);
+					auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+					if (!pType || !pFoot->IsAlive || pFoot->InLimbo || !pFoot->Owner || pFoot->Owner == pHouse
+						|| pHouse->IsAlliedWith(pFoot->Owner) || pFoot->Owner->IsNeutral() || pType->Naval
+						|| IsAirborneThreatTechno(pFoot) || pFoot->CloakState == CloakState::Cloaked || pFoot->Disguised)
+					{
+						continue;
+					}
+
+					const CellStruct cell = pFoot->GetMapCoords();
+
+					if (!IsCellInSightOfAI(pHouse, cell) || ObjectZone(pFoot, MovementZone::Normal) != homeZone)
+						continue;
+
+					// Unarmed engineers and spies walking into our buildings are threats too.
+					auto const pInf = abstract_cast<InfantryClass*>(pFoot);
+					const bool saboteur = pInf && (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type));
+					const bool armed = GroundRangeOf(pType) > 0;
+					const int here = (armed || saboteur) ? nearestSite(cell, 45.0) : -1;
+
+					if (here < 0)
+						continue;
+
+					const int value = std::max(GetCombatValueOfType(pType, false), saboteur ? 40 : 0);
+					CellStruct goal = CellStruct::Empty;
+					bool ownGoal = false;
+					const char* reason = "target";
+
+					for (auto const pOrder : { pFoot->Target, pFoot->MegaTarget, pFoot->MegaDestination, pFoot->Destination })
+					{
+						if (!pOrder)
+							continue;
+
+						if (auto const pOwner = protectedOwner(pOrder))
+						{
+							goal = CellClass::Coord2Cell(pOrder->GetCoords());
+							ownGoal = pOwner == pHouse;
+							break;
+						}
+
+						// A cell next to one of those buildings: the unit is on its way there. Other units
+						// are not places (chasing one of ours is the tactical micro's business).
+						if (!abstract_cast<TechnoClass*>(pOrder))
+						{
+							const int site = nearestSite(CellClass::Coord2Cell(pOrder->GetCoords()), 6.0);
+
+							if (site >= 0)
+							{
+								goal = sites[site].first;
+								ownGoal = sites[site].second;
+								reason = "destination";
+								break;
+							}
+						}
+					}
+
+					// Course memory: two sightings at least 45 frames apart give the heading.
+					auto itTrack = std::find_if(tracks.begin(), tracks.end(),
+						[&](const NeuralAirThreatTrack& track) { return track.UniqueID == pFoot->UniqueID; });
+
+					if (itTrack == tracks.end())
+					{
+						if (tracks.size() >= 64)
+						{
+							tracks.erase(std::min_element(tracks.begin(), tracks.end(),
+								[](const NeuralAirThreatTrack& a, const NeuralAirThreatTrack& b) { return a.LastSeenFrame < b.LastSeenFrame; }));
+						}
+
+						NeuralAirThreatTrack track {};
+						track.UniqueID = pFoot->UniqueID;
+						track.LastCoords = cell;
+						track.LastSeenFrame = Unsorted::CurrentFrame;
+						track.ThreatValue = value;
+						tracks.push_back(track);
+						itTrack = tracks.end() - 1;
+					}
+					else if (Unsorted::CurrentFrame - itTrack->LastSeenFrame >= 45)
+					{
+						itTrack->PrevCoords = itTrack->LastCoords;
+						itTrack->PrevSeenFrame = itTrack->LastSeenFrame;
+						itTrack->LastCoords = cell;
+						itTrack->LastSeenFrame = Unsorted::CurrentFrame;
+					}
+
+					// No order against us but closing in: where it will be in 30 seconds on this course.
+					if (goal == CellStruct::Empty && armed && itTrack->PrevSeenFrame >= 0 && sites[here].first.DistanceFrom(cell) > 6.0)
+					{
+						const int site = nearestSite(PredictAirThreatPosition(*itTrack, 450), 5.0);
+
+						if (site >= 0
+							&& itTrack->PrevCoords.DistanceFrom(sites[site].first) >= itTrack->LastCoords.DistanceFrom(sites[site].first) + 1.5)
+						{
+							goal = sites[site].first;
+							ownGoal = sites[site].second;
+							reason = "course";
+						}
+					}
+
+					// Far from the building it is after, it is not a base threat yet (it may never come).
+					if (goal != CellStruct::Empty && cell.DistanceFrom(goal) <= 35.0)
+						threats.push_back({ pFoot, cell, goal, value, cell.DistanceFrom(goal), ownGoal, reason });
+				}
+
+				if (!threats.empty())
+				{
+					CountDecision(NeuralDecision::BaseThreatTick, houseIdx);
+
+					// The most urgent first: closest to the building it is after, ties by UniqueID.
+					std::sort(threats.begin(), threats.end(), [](const BaseThreat& a, const BaseThreat& b)
+						{
+							return a.GoalDistance != b.GoalDistance ? a.GoalDistance < b.GoalDistance : a.Techno->UniqueID < b.Techno->UniqueID;
+						});
+
+					const std::vector<FootClass*> idle = collectIdleGround(false);
+					const size_t leads = std::min<size_t>(threats.size(), 4);
+
+					for (size_t li = 0; li < leads; ++li)
+					{
+						auto const& lead = threats[li];
+						int threatValue = 0;
+
+						for (auto const& other : threats)
+						{
+							if (other.Cell.DistanceFrom(lead.Cell) <= 8.0)
+								threatValue += other.Value;
+						}
+
+						threatValue = std::max(threatValue, seenEnemyValueNear(lead.Cell, 8.0, 60));
+
+						// Our armed units already next to it fight it anyway: skip it when they suffice.
+						int engaged = 0;
+
+						for (auto const& [uid, pOwn] : ownFoots)
+						{
+							if (isArmedGroundFoot(pOwn) && pOwn->GetMapCoords().DistanceFrom(lead.Cell) <= 6.0)
+								engaged += GetCombatValueOfType(pOwn->GetTechnoType(), false);
+						}
+
+						if (engaged * 10 >= threatValue * 13)
+							continue;
+
+						// Meet it a few cells ahead of where it is, on its way to the building.
+						const CellStruct aim = lead.GoalDistance > 4.0 ? pointAlong(lead.Cell, lead.Goal, 3.0, 0.0) : lead.Cell;
+						auto const pAimCell = landCellInZone(aim, homeZone, 3);
+
+						if (!pAimCell)
+							continue;
+
+						const CellStruct aimCell = pAimCell->MapCoords;
+
+						// Our base defenses covering the meeting point take part in the fight.
+						int towers = 0;
+
+						for (auto const pBld : pHouse->Buildings)
+						{
+							if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->IsBaseDefense
+								&& GroundRangeOf(pBld->Type) > 0 && pBld->GetMapCoords().DistanceFrom(aimCell) <= 7.0)
+							{
+								towers += GetCombatValueOfType(pBld->Type, false);
+							}
+						}
+
+						// At least its own value even under our towers: a lone unit sent against a stronger
+						// threat only dies on the way.
+						const int need = std::max(threatValue * 13 / 10 - engaged - towers / 2, threatValue);
+						std::vector<FootClass*> pool;
+
+						for (auto const pFoot : idle)
+						{
+							if (pFoot->MegaMission != Mission::AttackMove && pFoot->GetMapCoords().DistanceFrom(aimCell) <= 40.0)
+								pool.push_back(pFoot);
+						}
+
+						// Nearest first, ties by UniqueID.
+						std::sort(pool.begin(), pool.end(), [&](FootClass* a, FootClass* b)
+							{
+								const CellStruct ca = a->GetMapCoords();
+								const CellStruct cb = b->GetMapCoords();
+								const int da = (ca.X - aimCell.X) * (ca.X - aimCell.X) + (ca.Y - aimCell.Y) * (ca.Y - aimCell.Y);
+								const int db = (cb.X - aimCell.X) * (cb.X - aimCell.X) + (cb.Y - aimCell.Y) * (cb.Y - aimCell.Y);
+								return da != db ? da < db : a->UniqueID < b->UniqueID;
+							});
+
+						// Unless the fight is at our own buildings, a third of the free value at home stays there.
+						const bool atOwnBuildings = lead.OwnGoal && aimCell.DistanceFrom(lead.Goal) <= 12.0;
+						int homeValue = 0;
+
+						for (auto const pFoot : pool)
+						{
+							if (pFoot->GetMapCoords().DistanceFrom(homeCell) <= 18.0)
+								homeValue += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+						}
+
+						const int maxFromHome = atOwnBuildings ? INT_MAX : homeValue * 2 / 3;
+						std::vector<FootClass*> group;
+						int interceptValue = 0;
+						int fromHome = 0;
+
+						for (auto const pFoot : pool)
+						{
+							if (interceptValue >= need || group.size() >= 14)
+								break;
+
+							const int value = GetCombatValueOfType(pFoot->GetTechnoType(), false);
+							const bool atHome = pFoot->GetMapCoords().DistanceFrom(homeCell) <= 18.0;
+
+							if (atHome && fromHome + value > maxFromHome)
+								continue;
+
+							group.push_back(pFoot);
+							interceptValue += value;
+
+							if (atHome)
+								fromHome += value;
+						}
+
+						if (interceptValue < need)
+							continue;
+
+						const int utility = 380 + std::min(200, threatValue / 2) + (lead.OwnGoal ? 80 : 0);
+
+						if (shouldTryStart(NeuralPlanId::BaseThreatIntercept, utility))
+						{
+							startPlan(NeuralPlanId::BaseThreatIntercept, group, aimCell, lead.Goal, lead.Techno->UniqueID, 1800);
+							planOf(NeuralPlanId::BaseThreatIntercept).AuxBaseline = threatValue;
+							planOf(NeuralPlanId::BaseThreatIntercept).AuxPeak = static_cast<int>(lead.GoalDistance);
+							attackMoveGroup(planOf(NeuralPlanId::BaseThreatIntercept).Members, pAimCell);
+							CountDecision(NeuralDecision::BaseThreatIntercept, houseIdx);
+							Debug::Log("[NeuralAI] House %d BaseThreatIntercept: %s of house %d (%s) %d cells from %s building at (%d,%d), "
+								"threat %d, %d units value %d meet it at (%d,%d), frame %d.\n", houseIdx, lead.Techno->GetTechnoType()->ID,
+								lead.Techno->Owner->ArrayIndex, lead.Reason, static_cast<int>(lead.GoalDistance), lead.OwnGoal ? "our" : "an ally",
+								lead.Goal.X, lead.Goal.Y, threatValue, static_cast<int>(group.size()), interceptValue, aimCell.X, aimCell.Y,
+								Unsorted::CurrentFrame);
+						}
+
+						break;
+					}
+				}
+			}
+		}
+
 		// =================================================================================
 		// Plans 23..38 (slots 111..126; 127 stays free) and plan-side helpers of points 25, 35 and 56.
 		// =================================================================================
