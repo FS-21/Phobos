@@ -380,6 +380,7 @@
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Production.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.RouteHeat.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.State.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Team.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Tactics.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Telemetry.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Transport.inl" />

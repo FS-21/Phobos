@@ -150,6 +150,15 @@ namespace
 		CoalitionDeclined,
 		TruceRevoked,
 		CoalitionTargetWave,
+		TeamTargetSet,
+		TeamWaveHold,
+		TeamWaveLaunch,
+		TeamSplitFronts,
+		TeamWaveJoined,
+		TeamHelpRequest,
+		TeamHelpAnswered,
+		TeamClaimYield,
+		TeamExpansionYield,
 		Count
 	};
 
@@ -167,7 +176,9 @@ namespace
 		"scoutBldFound", "scoutLost", "enemyExpKnown", "enemyExpByScout", "enemyExpDelayFrames", "enemyExpBlindFrames",
 		"repairRetreats", "repairByDepot", "repairByHospital", "repairByRepairer", "repairBySelfHeal", "repairSaved",
 		"repairLostOnTrip", "repairAbandoned", "repairHeldWinning", "planAbortEnemyGrew", "planAbortValueLost", "planAbortTargetGone",
-		"coalitionJoined", "coalitionDeclined", "truceRevoked", "coalitionTargetWaves" };
+		"coalitionJoined", "coalitionDeclined", "truceRevoked", "coalitionTargetWaves",
+		"teamTargetSet", "teamWaveHold", "teamWaveLaunch", "teamSplitFronts", "teamWaveJoined", "teamHelpRequest",
+		"teamHelpAnswered", "teamClaimYield", "teamExpansionYield" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
