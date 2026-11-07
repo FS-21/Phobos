@@ -137,13 +137,19 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 			}
 		}
 
-		if (pBld->Type->CanBeOccupied)
+		// Occupiable buildings count once explored; occupants and health are only read while in
+		// sight (or ours / allied): a building in the fog counts as empty and undamaged.
+		const bool urbanKnown = pBld->Type->CanBeOccupied && IsCellVisibleToAI(pHouse, pBld->GetCell());
+		const bool urbanInSight = urbanKnown && (pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner)
+			|| IsCellInSightOfAI(pHouse, pBld->GetMapCoords()));
+
+		if (urbanKnown)
 		{
-			if (pBld->Occupants.Count == 0)
+			if (!urbanInSight || pBld->Occupants.Count == 0)
 			{
 				emptyUrbanOccupiables++;
 
-				if (pBld->Type->Repairable && pBld->GetHealthPercentage() < 0.72)
+				if (urbanInSight && pBld->Type->Repairable && pBld->GetHealthPercentage() < 0.72)
 					damagedUrbanGarrisons++;
 			}
 			else if (pBld->Occupants.GetItem(0) && pHouse->IsAlliedWith(pBld->Occupants.GetItem(0)->Owner)

@@ -1824,16 +1824,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		}
 
-		// Expert 9: If an occupied urban building or bunker is about to collapse (< 22% HP)
-		// under enemy fire, evacuate our garrisoned infantry so they survive!
-		if (pEBld->Type->CanBeOccupied && pEBld->Occupants.Count > 0 && pEBld->HasBeenAttacked
-			&& pEBld->GetHealthPercentage() < 0.22 && pEBld->Occupants.GetItem(0)
-			&& pEBld->Occupants.GetItem(0)->Owner == pHouse)
-		{
-			pEBld->KickOutUnit(nullptr, CellStruct::Empty);
-		}
-
-		if (pEBld->Type->CanBeOccupied && pEBld->Type->Repairable && pEBld->GetHealthPercentage() < 0.72)
+		// Damaged occupiable buildings an engineer could repair: their health is only known while
+		// they are ours or in sight (fog-fair). Evacuations are UpdateUrban's job (Urban.inl).
+		if (pEBld->Type->CanBeOccupied && pEBld->Type->Repairable && pEBld->GetHealthPercentage() < 0.72
+			&& (pEBld->Owner == pHouse || IsCellInSightOfAI(pHouse, pEBld->GetMapCoords())))
 		{
 			const bool isFriendlyOrEmpty = (pEBld->Occupants.Count == 0)
 				|| (pEBld->Occupants.GetItem(0) && pHouse->IsAlliedWith(pEBld->Occupants.GetItem(0)->Owner));
@@ -1848,7 +1842,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pEBld->GetCell() || !IsCellVisibleToAI(pHouse, pEBld->GetCell()))
 			continue;
 
-		if (pEBld->Type->CanBeOccupied && pEBld->Occupants.Count > 0)
+		// Occupants are only known while the building is in sight now.
+		const bool enemyGarrisonInSight = pEBld->Type->CanBeOccupied && pEBld->Occupants.Count > 0
+			&& IsCellInSightOfAI(pHouse, pEBld->GetMapCoords());
+
+		if (enemyGarrisonInSight)
 		{
 			if (!pEnemyGarrisonToClear)
 				pEnemyGarrisonToClear = pEBld;
@@ -1878,7 +1876,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			int sScore = 0;
 
-			if (pEBld->Occupants.Count > 0)
+			if (enemyGarrisonInSight)
 				sScore = 100 + pEBld->Occupants.Count * 15;
 			else if (pEBld->Type->IsBaseDefense)
 				sScore = 85;
@@ -4259,14 +4257,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// local superiority and reachability, and slot 56 scales the harvester priority), while
 		// planned raids on refineries are the Eco Raid plan: no duplicate chase logic here.
 
-		// Slot 57 (Surgical Bunker/Garrison Penetrator & Siege Focus):
-		// Units with PenetratesBunker=yes kill enemy occupants inside civilian
-		// structures without demolishing the building so our infantry can take it!
-		// Long-range siege vehicles prioritize enemy garrisons & base defenses!
-		if (enemyGarrisonCount > 0 && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Warhead
-			&& pPrimaryWpn->Warhead->PenetratesBunker)
+		// Slot 57 (Garrison Penetrator & Siege Focus): units whose weapon kills the occupants
+		// through the walls (Phobos PenetratesGarrison) empty enemy garrisons in sight without
+		// demolishing the building, so our infantry can take it; up to 8 cells beyond their range
+		// while Expert 9 is in charge. Long-range siege vehicles go for garrisons and defenses.
+		if (enemyGarrisonCount > 0 && isUnitIdle && pPrimaryWpn && HasGarrisonPenetratingWeapon(pType))
 		{
-			const int maxGarrDist = std::max(1536, static_cast<int>(pPrimaryWpn->Range) + 512);
+			const int maxGarrDist = std::max(1536, static_cast<int>(pPrimaryWpn->Range)
+				+ (pExt->NeuralAI_ActiveExpert == 9 ? 8 : 2) * Unsorted::LeptonsPerCell);
 			BuildingClass* pNearestGarr = nullptr;
 			int bestGarrDist = maxGarrDist + 1;
 
@@ -4286,9 +4284,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			if (pNearestGarr)
+			if (pNearestGarr && DispatchFootToTargetOrTransport(pUnit, pNearestGarr, Mission::Attack, true))
 			{
-				DispatchFootToTargetOrTransport(pUnit, pNearestGarr, Mission::Attack, true);
+				NoteUrbanClearOrder(pHouse, pUnit, pNearestGarr);
 				continue;
 			}
 		}
@@ -6392,14 +6390,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Surgical Urban Garrison Clearing (Assaulter=yes or PenetratesBunker=yes):
-		// Evict/kill enemy occupants inside the nearest civilian building without destroying
-		// the structure so our Engineer can repair it and our infantry can occupy it!
-		if (enemyGarrisonCount > 0 && isIdle
-			&& (pInf->Type->Assaulter || (pInfWpn && pInfWpn->Warhead && pInfWpn->Warhead->PenetratesBunker)))
+		// Surgical Urban Garrison Clearing: an Assaulter walks in and kills the occupants, a
+		// PenetratesGarrison weapon shoots them through the walls; the building stays for our
+		// engineers and occupiers. Enemy garrisons in sight within 15 cells (30 while Expert 9 is
+		// in charge).
+		if (enemyGarrisonCount > 0 && isIdle && IsGarrisonClearerType(pInf->Type) && pInf->GetHealthPercentage() >= 0.45)
 		{
+			const int clearRange = (pExt->NeuralAI_ActiveExpert == 9 ? 30 : 15) * Unsorted::LeptonsPerCell;
 			BuildingClass* pNearestGarr = nullptr;
-			int bestInfGarrDist = 3841;
+			int bestInfGarrDist = clearRange + 1;
 
 			for (int gi = 0; gi < enemyGarrisonCount; ++gi)
 			{
@@ -6410,25 +6409,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				const int d = pInf->DistanceFrom(pCandG);
 
-				if (d <= 3840 && d < bestInfGarrDist)
+				if (d <= clearRange && d < bestInfGarrDist)
 				{
 					bestInfGarrDist = d;
 					pNearestGarr = pCandG;
 				}
 			}
 
-			if (pNearestGarr)
+			if (pNearestGarr
+				&& DispatchFootToTargetOrTransport(pInf, pNearestGarr, pInf->Type->Assaulter ? Mission::Enter : Mission::Attack, !pInf->Type->Assaulter))
 			{
-				if (pInf->Type->Assaulter)
-				{
-					DispatchFootToTargetOrTransport(pInf, pNearestGarr, Mission::Enter, false);
-					continue;
-				}
-				else
-				{
-					DispatchFootToTargetOrTransport(pInf, pNearestGarr, Mission::Attack, true);
-					continue;
-				}
+				NoteUrbanClearOrder(pHouse, pInf, pNearestGarr);
+				continue;
 			}
 		}
 
@@ -6457,30 +6449,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Urban Garrisoning (Slot 23): Occupy nearby empty Civilian Buildings /
-		// Battle Bunkers with Occupier infantry up to their real
-		// MaxNumberOccupants!
+		// Urban Garrisoning (Slot 23): idle occupiers go into the best known building worth
+		// holding (RunUrbanGarrison: fog-fair memory, out of enemy fire, room left after the
+		// soldiers already walking in, a capped share of our occupiers). Slot 23 sets how often
+		// and how far (6..16 cells); under Expert 9 every tick and up to 64 cells.
 		const int garrisonBias = static_cast<int>(scores[23]);
 		const int garrisonWindow = std::clamp(15 + (garrisonBias / 20), 6, 40);
-		const int garrisonRange = std::clamp(2560 + garrisonBias * 2, 1536, 4096);
+		const int garrisonRangeCells = std::clamp(10 + garrisonBias / 128, 6, 16);
+		const bool urbanExpert = pExt->NeuralAI_ActiveExpert == 9;
 
-		if (pInf->Type->Occupier && isIdle && (IsAITickWindow(90, garrisonWindow)))
+		if (isIdle && (urbanExpert || IsAITickWindow(90, garrisonWindow))
+			&& RunUrbanGarrison(pHouse, pInf, urbanExpert, garrisonRangeCells, DispatchFootToTargetOrTransport))
 		{
-			for (auto const pBld : BuildingClass::Array)
-			{
-				if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type || !pBld->Type->CanBeOccupied)
-					continue;
-
-				const int maxOcc = std::clamp(pBld->Type->MaxNumberOccupants, 1, 10);
-
-				if (pBld->CanBeOccupiedBy(pInf) && pBld->Occupants.Count < maxOcc
-					&& pBld->GetHealthPercentage() >= 0.30 && pInf->DistanceFrom(pBld) <= garrisonRange)
-				{
-					DispatchFootToTargetOrTransport(pInf, pBld, Mission::Enter, false);
-
-					break;
-				}
-			}
+			continue;
 		}
 	}
 

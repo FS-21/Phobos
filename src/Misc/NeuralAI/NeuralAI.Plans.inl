@@ -3835,19 +3835,22 @@ namespace
 					}
 				}
 
-				auto const pTarget = bestCount >= 4 ? FindBuildingByID(bestID) : nullptr;
+				// Expert 9 (coalition) joins smaller allied attacks, with a bigger group and more eagerly.
+				auto const pCoalitionExt = HouseExt::Fetch(pHouse);
+				const bool coalitionExpert = pCoalitionExt && pCoalitionExt->NeuralAI_ActiveExpert == 9;
+				auto const pTarget = bestCount >= (coalitionExpert ? 3 : 4) ? FindBuildingByID(bestID) : nullptr;
 				std::vector<FootClass*> group;
 
 				if (pTarget && ObjectZone(pTarget, MovementZone::Normal) == homeZone)
 				{
 					group = collectIdleGround(false);
-					group.resize(std::min<size_t>(group.size(), 10));
+					group.resize(std::min<size_t>(group.size(), coalitionExpert ? 14 : 10));
 
-					if (group.size() < 4)
+					if (group.size() < (coalitionExpert ? 3u : 4u))
 						group.clear();
 				}
 
-				const int utility = !group.empty() ? (300 + std::min(200, bestCount * 20)) : -1000;
+				const int utility = !group.empty() ? (300 + std::min(200, bestCount * 20) + (coalitionExpert ? 250 : 0)) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::AllyJointAttack, utility))
 					startPlan(NeuralPlanId::AllyJointAttack, group, pTarget->GetMapCoords(), CellStruct::Empty, pTarget->UniqueID, 4500);

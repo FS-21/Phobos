@@ -102,6 +102,10 @@ namespace
 		BridgeMoat,
 		BridgeFleetBlock,
 		BridgeRoute,
+		UrbanGarrison,
+		UrbanEvacuate,
+		UrbanClear,
+		AllyTechYield,
 		Count
 	};
 
@@ -110,7 +114,8 @@ namespace
 		"slotGateClosed", "airThreatTicks", "airliftJobs", "airliftRescues", "airliftDrops", "airCarrierLost",
 		"pickupDetours", "dropAborts", "combatEvacs", "airHarass", "attackRouteDefense", "counterattacks",
 		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
-		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute" };
+		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute",
+		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
