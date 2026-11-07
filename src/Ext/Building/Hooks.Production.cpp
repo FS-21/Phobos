@@ -8,6 +8,7 @@
 #include <CellClass.h>
 #include <FlyLocomotionClass.h>
 #include <JumpjetLocomotionClass.h>
+#include <MapClass.h>
 #include <Unsorted.h>
 #include <Utilities/Debug.h>
 #include <FactoryClass.h>
@@ -138,6 +139,10 @@ DEFINE_HOOK(0x4401BB, BuildingClass_AI_PickWithFreeDocks, 0x6)
 	auto const pOwner = pBuilding->Owner;
 	const int index = pOwner->ProducingAircraftTypeIndex;
 	auto const pType = index >= 0 ? AircraftTypeClass::Array.GetItem(index) : nullptr;
+
+	// An aircraft that needs no dock comes out of any air base, full or not.
+	if (pType && !pType->AirportBound)
+		return 0;
 
 	if (RulesExt::Global()->AllowParallelAIQueues && !RulesExt::Global()->ForbidParallelAIQueues_Aircraft && (!pType || !TechnoTypeExt::Fetch(pType)->ForbidParallelAIQueues))
 		return 0;
@@ -401,6 +406,10 @@ KickOutResult BuildingExt::TrySpawnFlyingProduction(BuildingClass* pFactory, Tec
 	if (!pTypeExt || !pTypeExt->IsFlyingProductionEnabled())
 		return KickOutResult::Failed;
 
+	// Only an aircraft that must land on a dock (AirportBound) waits for a free one and takes it.
+	auto const pProducedAircraft = abstract_cast<AircraftClass*>(pProduction);
+	const bool needsDock = pProducedAircraft && pProducedAircraft->Type->AirportBound;
+
 	// Resolve which building should physically spawn the unit
 	BuildingClass* pSpawnBuilding = nullptr;
 
@@ -414,7 +423,7 @@ KickOutResult BuildingExt::TrySpawnFlyingProduction(BuildingClass* pFactory, Tec
 			// If the factory itself matches this target type and has free dock (or doesn't need docks), it takes immediate precedence
 			if (pFactory->Type == pTargetType)
 			{
-				if (pProduction->WhatAmI() != AbstractType::Aircraft || pFactory->Type->NumberOfDocks <= 0 || pFactory->HasFreeLink())
+				if (!needsDock || pFactory->Type->NumberOfDocks <= 0 || pFactory->HasFreeLink())
 				{
 					pSpawnBuilding = pFactory;
 					break;
@@ -432,7 +441,7 @@ KickOutResult BuildingExt::TrySpawnFlyingProduction(BuildingClass* pFactory, Tec
 
 				if (pBld->Type == pTargetType)
 				{
-					if (pProduction->WhatAmI() == AbstractType::Aircraft && pBld->Type->NumberOfDocks > 0 && !pBld->HasFreeLink())
+					if (needsDock && pBld->Type->NumberOfDocks > 0 && !pBld->HasFreeLink())
 						continue;
 
 					if (pBld->IsPrimaryFactory)
@@ -462,7 +471,7 @@ KickOutResult BuildingExt::TrySpawnFlyingProduction(BuildingClass* pFactory, Tec
 		pSpawnBuilding = pFactory;
 
 	// If this is an aircraft and the spawn building has docks, ensure there is an available dock slot
-	if (pProduction->WhatAmI() == AbstractType::Aircraft && pSpawnBuilding->Type->NumberOfDocks > 0)
+	if (needsDock && pSpawnBuilding->Type->NumberOfDocks > 0)
 	{
 		if (!pSpawnBuilding->HasFreeLink())
 			return KickOutResult::Busy;
@@ -557,7 +566,7 @@ KickOutResult BuildingExt::TrySpawnFlyingProduction(BuildingClass* pFactory, Tec
 
 	if (auto const pAircraft = abstract_cast<AircraftClass*>(pProduction))
 	{
-		if (pSpawnBuilding->Type->NumberOfDocks > 0)
+		if (needsDock && pSpawnBuilding->Type->NumberOfDocks > 0)
 		{
 			pSpawnBuilding->SendCommand(RadioCommand::RequestLink, pAircraft);
 			pSpawnBuilding->SendCommand(RadioCommand::RequestTether, pAircraft);
@@ -731,6 +740,114 @@ DEFINE_HOOK(0x443C60, BuildingClass_KickOutUnit_FlyingProduction, 0x6)
 	}
 
 	return 0;
+}
+
+// An aircraft that needs no dock (AirportBound=no) leaves its factory in the air over it and flies
+// to the rally point, or next to the factory, to land there. It never takes a dock, so the docks
+// stay free for the aircraft that must land on them.
+bool BuildingExt::KickOutUndockedAircraft(BuildingClass* pFactory, AircraftClass* pAircraft)
+{
+	auto const pType = pAircraft->Type;
+	const int typeFlightLevel = pType->GetFlightLevel();
+	const int flightLevel = typeFlightLevel > 0 ? typeFlightLevel : RulesClass::Instance->FlightLevel;
+
+	CoordStruct coords = pFactory->GetCoords();
+	coords.Z += flightLevel;
+
+	const DirStruct facing = pFactory->PrimaryFacing.Current().Raw != 0 ? pFactory->PrimaryFacing.Current() : DirStruct(128);
+	bool unlimboed = false;
+
+	{
+		++Unsorted::ScenarioInit;
+		unlimboed = pAircraft->Unlimbo(coords, facing.GetDir());
+		--Unsorted::ScenarioInit;
+	}
+
+	if (!unlimboed)
+		return false;
+
+	pAircraft->SetLocation(coords);
+	pAircraft->InAir = true;
+	pAircraft->IsALoaner = false;
+	pAircraft->PrimaryFacing.SetCurrent(facing);
+	pAircraft->PrimaryFacing.SetDesired(facing);
+	pAircraft->SetHeight(flightLevel);
+
+	if (auto const pFlyLoco = locomotion_cast<FlyLocomotionClass*>(pAircraft->Locomotor))
+	{
+		pFlyLoco->FlightLevel = flightLevel;
+		pFlyLoco->CurrentSpeed = 0.0;
+		pFlyLoco->TargetSpeed = 0.0;
+		pFlyLoco->IsTakingOff = 0;
+		pFlyLoco->IsLanding = false;
+	}
+
+	AbstractClass* pDestination = pFactory->ArchiveTarget;
+
+	if (!pDestination)
+	{
+		CellStruct cell = CellStruct::Empty;
+		pAircraft->NearbyLocation(&cell, pFactory);
+
+		if (cell != CellStruct::Empty)
+			pDestination = MapClass::Instance.TryGetCellAt(cell);
+	}
+
+	if (pDestination)
+	{
+		pAircraft->SetDestination(pDestination, true);
+		pAircraft->QueueMission(Mission::Move, true);
+	}
+
+	return true;
+}
+
+// Aircraft that need no dock (AirportBound=no) never take one, even a free one: they leave in the
+// air (KickOutUndockedAircraft). The original code docked them when a dock was free and otherwise
+// brought them in from the map edge. During an ion storm they keep the original way, since
+// aircraft cannot fly then.
+DEFINE_HOOK(0x443CD9, BuildingClass_KickOutUnit_UndockedAircraft, 0x8)
+{
+	enum { ToDock = 0x443F54, NoFreeDock = 0x443CE1, Succeeded = 0x444971, Failed = 0x445696 };
+
+	GET(BuildingClass*, pFactory, ESI);
+	GET(AircraftClass*, pAircraft, EBP);
+
+	const bool hasFreeDock = R->AL() != 0;
+
+	if (!pAircraft || pAircraft->Type->AirportBound || (pFactory->Owner && pFactory->Owner->IonSensitivesShouldBeOffline()))
+		return hasFreeDock ? ToDock : NoFreeDock;
+
+	if (!BuildingExt::KickOutUndockedAircraft(pFactory, pAircraft))
+		return Failed;
+
+	// The common success exit lowers ScenarioInit once, as it does after the original ways out.
+	++Unsorted::ScenarioInit;
+	return Succeeded;
+}
+
+// Production start (0x4FA350): Ares' FindFactory takes an air base whose docks are all taken for no
+// factory at all. A click on the cameo then started nothing, and an item started from the queue
+// fell back to the occupied air base and began suspended as if the player had paused it, which a
+// new click cannot undo, so the production stayed stuck. An aircraft that needs no dock
+// (AirportBound=no) takes the occupied air base as a normal factory instead.
+DEFINE_HOOK(0x4FA43E, HouseClass_BeginProduction_UndockedAircraft, 0x7)
+{
+	enum { FactoryFound = 0x4FA46A, NoFactory = 0x4FA447 };
+
+	GET(BuildingClass*, pFactory, EAX);
+	GET(TechnoTypeClass*, pType, EBP);
+	GET(HouseClass*, pHouse, EDI);
+
+	R->Stack(0x1C, false);
+
+	if (!pFactory && pType && pType->WhatAmI() == AbstractType::AircraftType && !static_cast<AircraftTypeClass*>(pType)->AirportBound)
+	{
+		pFactory = pType->FindFactory(true, true, true, pHouse);
+		R->EAX(pFactory);
+	}
+
+	return pFactory ? FactoryFound : NoFactory;
 }
 
 DEFINE_HOOK(0x455DA0, BuildingClass_IsUnitFactory_HasRallyPoint, 0x6)

@@ -3,6 +3,8 @@
 #include <Ext/BuildingType/Body.h>
 #include <BuildingClass.h>
 
+class AircraftClass;
+
 class BuildingExt final : public TechnoExt, public Detach::Listener<TechnoClass>
 {
 public:
@@ -179,6 +181,7 @@ public:
 	static int GetTurretFrame(BuildingClass* pThis);
 	static bool BuildingOnline(BuildingClass* pThis);
 	static KickOutResult TrySpawnFlyingProduction(BuildingClass* pFactory, TechnoClass* pProduction);
+	static bool KickOutUndockedAircraft(BuildingClass* pFactory, AircraftClass* pAircraft);
 
 	static HouseClass* Find_Closest_Opponent(const HouseClass* pHouse);
 	static int Get_Distance_To_Primary_Enemy(CellStruct cell, HouseClass* pHouse);
