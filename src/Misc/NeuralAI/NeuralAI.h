@@ -129,6 +129,7 @@ public:
 	static void OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled);
 	static void OnBuildingDamaged(BuildingClass* pBuilding, TechnoClass* pAttacker, HouseClass* pAttackerHouse);
 	static void OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller);
+	static void OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, TechnoClass* pDock, int money);
 
 	static int UpdateExpertAI(HouseClass* pHouse);
 	static void UpdateBuildingProduction(HouseClass* pHouse);

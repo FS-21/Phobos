@@ -967,11 +967,16 @@ namespace
 	// for minutes, a wave sent under Expert 5 lands while Expert 7 runs. Here every own techno is
 	// tagged with the expert in charge when it first exists (production start, placement, capture;
 	// a deployer passes its tag to what it deploys into) and with the expert whose plan or wave
-	// last sent it. The same advantage change is split into the parts that have an author:
-	// Built (cost of a new techno, to the expert that started it), Lost (cost of a techno gone,
-	// to the expert that sent it, else the one that started it), Spent (money paid into
-	// productions, to the experts that started them, by cost), Income (money earned, to the
-	// experts that started the refineries, gatherers and cash buildings, by cost), Kills (enemy
+	// last sent it. A techno that appears outside production takes the tags of what made it: the
+	// launcher of a spawn, the mind controller, the slave master, the building that gives it as a
+	// free unit, or an own techno gone nearby (crew leaving a wreck, an engineer that captured).
+	// The same advantage change is split into the parts that have an author: Built (cost of a new
+	// techno, to the expert that started it), Lost (cost of a techno gone, to the expert that sent
+	// it; one nobody sent goes to the expert that started it, but when an enemy killed it half goes
+	// to the recently active experts, who let the attack through), Spent (money paid into
+	// productions, to the experts that started them, by cost), Income (ore unloaded goes half to
+	// the expert that started the gatherer and half to the one that started the refinery; other
+	// income goes to the experts that started the economic technos, by cost), Kills (enemy
 	// assets destroyed, to the expert that sent or started the killer) and Shared (the rest:
 	// enemy growth, third-party fights, defeats), which goes to the recently active experts by an
 	// eligibility trace (expert choices, decaying by 7/8 per sample, about 20 game seconds).
@@ -991,6 +996,8 @@ namespace
 	struct NeuralCreditTag
 	{
 		TechnoTypeClass* Type { nullptr };
+		// Where it was at the last sample, to find what left crew or captured nearby.
+		CoordStruct Location {};
 		int Cost { 0 };
 		int Stamp { 0 };
 		int CommandFrame { 0 };
@@ -1002,9 +1009,19 @@ namespace
 		int16_t CommandSource { -1 };
 		bool Credited { false };
 		bool Economic { false };
+		bool KilledByEnemy { false };
+	};
+
+	struct NeuralCreditGone
+	{
+		DWORD ID;
+		NeuralCreditTag Tag;
+		bool Transformed;
 	};
 
 	constexpr int16_t CreditSourceWave = 1000;
+	// How far from its source a techno that appears outside production may be (6 cells).
+	constexpr int CreditParentRange = 6 * 256;
 
 	std::array<std::unordered_map<DWORD, NeuralCreditTag>, 32> CreditTags {};
 	// In credits (telemetry divides by 10 like expertGain).
@@ -1013,6 +1030,10 @@ namespace
 	std::array<std::array<std::array<int64_t, static_cast<size_t>(NeuralCreditPart::Count)>, NeuralAI::NumSpecialists>, 32> ExpertCreditParts {};
 	// Enemy asset value killed since the last sample, by the killer's author [phase][expert].
 	std::array<std::array<std::array<int64_t, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> PendingKillCredit {};
+	// Money from ore unloaded since the last sample, by the authors of the gatherer and the dock.
+	std::array<std::array<std::array<int64_t, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> PendingHarvestCredit {};
+	// Own technos gone at the last sample, sorted by UniqueID: crew may appear one sample later.
+	std::array<std::vector<NeuralCreditGone>, 32> CreditRecentGone {};
 	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> CreditTrace {};
 	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> CreditTraceTicks {};
 	std::array<int64_t, 32> CreditLastAdvantage {};
@@ -1033,6 +1054,11 @@ namespace
 		ExpertCreditByPhase = {};
 		ExpertCreditParts = {};
 		PendingKillCredit = {};
+		PendingHarvestCredit = {};
+
+		for (auto& recent : CreditRecentGone)
+			recent.clear();
+
 		CreditTrace = {};
 		CreditTraceTicks = {};
 		CreditLastAdvantage.fill(0);

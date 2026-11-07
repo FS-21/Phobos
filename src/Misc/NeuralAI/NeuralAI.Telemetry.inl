@@ -74,12 +74,28 @@ namespace
 		const int now = Unsorted::CurrentFrame;
 		const int nowPhase = RoutingPhase(now);
 
+		struct Newcomer
+		{
+			DWORD ID;
+			TechnoClass* Techno;
+		};
+
+		// An own building that gives a free unit when placed.
+		struct FreeUnitSource
+		{
+			DWORD ID;
+			TechnoTypeClass* FreeUnit;
+			CoordStruct Location;
+		};
+
 		std::array<int64_t, 32> assets {};
 		std::array<bool, 32> tracked {};
 		std::array<int, 32> active {};
 		std::array<CreditWeights, 32> spendWeights {};
 		std::array<CreditWeights, 32> incomeWeights {};
-		std::array<std::vector<DWORD>, 32> newcomers {};
+		std::array<std::vector<Newcomer>, 32> newcomers {};
+		std::array<std::vector<FreeUnitSource>, 32> freeUnitSources {};
+		std::array<std::vector<DWORD>, 32> producing {};
 
 		for (auto const pHouse : HouseClass::Array)
 		{
@@ -114,12 +130,19 @@ namespace
 				continue;
 
 			pTag->Stamp = serial;
+			pTag->Location = pTechno->Location;
 
 			if (!pTag->Credited)
-				newcomers[idx].push_back(pTechno->UniqueID);
+				newcomers[idx].push_back({ pTechno->UniqueID, pTechno });
 
 			if (pTag->Economic)
 				incomeWeights[idx][pTag->OriginPhase][pTag->Origin] += pTag->Cost;
+
+			if (auto const pBuilding = abstract_cast<BuildingClass*>(pTechno))
+			{
+				if (pBuilding->Type->FreeUnit && !pBuilding->InLimbo)
+					freeUnitSources[idx].push_back({ pTechno->UniqueID, pBuilding->Type->FreeUnit, pTechno->Location });
+			}
 		}
 
 		// Money goes into the objects in production (they exist, in limbo, from the start).
@@ -131,21 +154,16 @@ namespace
 				continue;
 			}
 
-			auto const& tags = CreditTags[pFactory->Owner->ArrayIndex];
+			const int idx = pFactory->Owner->ArrayIndex;
+			auto const& tags = CreditTags[idx];
 			auto const it = tags.find(pFactory->Object->UniqueID);
+			producing[idx].push_back(pFactory->Object->UniqueID);
 
 			if (it != tags.end())
-				spendWeights[pFactory->Owner->ArrayIndex][it->second.OriginPhase][it->second.Origin] += std::max(1, it->second.Cost);
+				spendWeights[idx][it->second.OriginPhase][it->second.Origin] += std::max(1, it->second.Cost);
 		}
 
-		struct GoneTag
-		{
-			DWORD ID;
-			NeuralCreditTag Tag;
-			bool Transformed;
-		};
-
-		std::vector<GoneTag> gone;
+		std::vector<NeuralCreditGone> gone;
 
 		for (auto const pHouse : HouseClass::Array)
 		{
@@ -160,6 +178,8 @@ namespace
 				tags.clear();
 				CreditHasLast[idx] = false;
 				PendingKillCredit[idx] = {};
+				PendingHarvestCredit[idx] = {};
+				CreditRecentGone[idx].clear();
 				continue;
 			}
 
@@ -211,14 +231,50 @@ namespace
 				}
 			}
 
-			std::sort(gone.begin(), gone.end(), [](const GoneTag& a, const GoneTag& b) { return a.ID < b.ID; });
-			std::sort(newcomers[idx].begin(), newcomers[idx].end());
+			auto const byID = [](auto const& a, auto const& b) { return a.ID < b.ID; };
+			std::sort(gone.begin(), gone.end(), byID);
+			std::sort(newcomers[idx].begin(), newcomers[idx].end(), byID);
+			std::sort(freeUnitSources[idx].begin(), freeUnitSources[idx].end(), byID);
+			std::sort(producing[idx].begin(), producing[idx].end());
 
-			// A deployer hands its tags to what it deploys into (MCV to construction yard, slave
-			// miner to refinery and back): the decision stays with the expert that started it.
-			for (const DWORD uid : newcomers[idx])
+			// A techno made by another takes over its decision tags (and its share of the income
+			// weights when it earns money).
+			auto const inherit = [&](NeuralCreditTag& tag, const NeuralCreditTag& from)
 			{
-				auto& tag = tags[uid];
+				if (tag.Economic)
+				{
+					incomeWeights[idx][tag.OriginPhase][tag.Origin] -= tag.Cost;
+					incomeWeights[idx][from.OriginPhase][from.Origin] += tag.Cost;
+				}
+
+				tag.Origin = from.Origin;
+				tag.OriginPhase = from.OriginPhase;
+				tag.Command = from.Command;
+				tag.CommandPhase = from.CommandPhase;
+				tag.CommandSource = from.CommandSource;
+				tag.CommandFrame = from.CommandFrame;
+			};
+
+			auto const distanceSq = [](const CoordStruct& a, const CoordStruct& b)
+			{
+				const int64_t dx = a.X - b.X;
+				const int64_t dy = a.Y - b.Y;
+				return dx * dx + dy * dy;
+			};
+
+			const int64_t rangeSq = static_cast<int64_t>(CreditParentRange) * CreditParentRange;
+
+			for (auto const& n : newcomers[idx])
+			{
+				auto& tag = tags[n.ID];
+
+				// Production started under the expert in charge, which the tag already says.
+				if (std::binary_search(producing[idx].begin(), producing[idx].end(), n.ID))
+					continue;
+
+				// A deployer hands its tags to what it deploys into (MCV to construction yard, slave
+				// miner to refinery and back).
+				bool found = false;
 
 				for (auto& g : gone)
 				{
@@ -231,21 +287,80 @@ namespace
 					if (!deployed && !undeployed)
 						continue;
 
-					if (tag.Economic)
-					{
-						incomeWeights[idx][tag.OriginPhase][tag.Origin] -= tag.Cost;
-						incomeWeights[idx][g.Tag.OriginPhase][g.Tag.Origin] += tag.Cost;
-					}
-
-					tag.Origin = g.Tag.Origin;
-					tag.OriginPhase = g.Tag.OriginPhase;
-					tag.Command = g.Tag.Command;
-					tag.CommandPhase = g.Tag.CommandPhase;
-					tag.CommandSource = g.Tag.CommandSource;
-					tag.CommandFrame = g.Tag.CommandFrame;
+					inherit(tag, g.Tag);
 					g.Transformed = true;
+					found = true;
 					break;
 				}
+
+				if (found)
+					continue;
+
+				// Spawns, mind controlled technos and slaves belong to whoever made or took them.
+				auto const pTechno = n.Techno;
+				TechnoClass* pParent = pTechno->SpawnOwner;
+
+				if (!pParent)
+					pParent = pTechno->MindControlledBy;
+
+				if (!pParent)
+					pParent = pTechno->SlaveOwner;
+
+				if (pParent && pParent->IsAlive && pParent->Owner == pHouse)
+				{
+					auto const it = tags.find(pParent->UniqueID);
+
+					if (it != tags.end())
+					{
+						inherit(tag, it->second);
+						continue;
+					}
+				}
+
+				// The free unit of a building placed nearby (the harvester of a refinery).
+				const NeuralCreditTag* pSource = nullptr;
+				int64_t bestSq = rangeSq + 1;
+
+				if (pTechno->WhatAmI() == AbstractType::Unit)
+				{
+					for (auto const& source : freeUnitSources[idx])
+					{
+						const int64_t sq = distanceSq(source.Location, pTechno->Location);
+
+						if (source.FreeUnit != tag.Type || sq >= bestSq)
+							continue;
+
+						auto const it = tags.find(source.ID);
+
+						if (it != tags.end())
+						{
+							pSource = &it->second;
+							bestSq = sq;
+						}
+					}
+				}
+
+				// Otherwise an own techno gone nearby, now or at the last sample: the wreck its
+				// crew left, the engineer that captured it.
+				if (!pSource)
+				{
+					for (auto const pList : { &gone, &CreditRecentGone[idx] })
+					{
+						for (auto const& g : *pList)
+						{
+							const int64_t sq = distanceSq(g.Tag.Location, pTechno->Location);
+
+							if (!g.Transformed && g.Tag.Type && sq < bestSq)
+							{
+								pSource = &g.Tag;
+								bestSq = sq;
+							}
+						}
+					}
+				}
+
+				if (pSource)
+					inherit(tag, *pSource);
 			}
 
 			int ticksSum = 0;
@@ -258,9 +373,27 @@ namespace
 			const bool crediting = CreditHasLast[idx] && ticksSum > 0;
 			int64_t attributed = 0;
 
-			for (const DWORD uid : newcomers[idx])
+			// Eligibility trace of the expert choices since the last sample.
+			CreditWeights traceWeights {};
+
+			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
 			{
-				auto& tag = tags[uid];
+				const int choices = std::max(0, ExpertTicks[idx][e] - CreditTraceTicks[idx][e]);
+				CreditTrace[idx][e] = CreditTrace[idx][e] * 7 / 8 + choices * 64;
+				CreditTraceTicks[idx][e] = ExpertTicks[idx][e];
+				traceWeights[nowPhase][e] = CreditTrace[idx][e];
+			}
+
+			// Books an amount to the recently active experts, the expert in charge without a trace.
+			auto const addToTrace = [&](int64_t amount, NeuralCreditPart part)
+			{
+				if (!SplitExpertCredit(idx, amount, traceWeights, part, attributed))
+					AddExpertCredit(idx, active[idx], nowPhase, amount, part, attributed);
+			};
+
+			for (auto const& n : newcomers[idx])
+			{
+				auto& tag = tags[n.ID];
 
 				if (crediting)
 					AddExpertCredit(idx, tag.Origin, tag.OriginPhase, tag.Cost, NeuralCreditPart::Built, attributed);
@@ -272,9 +405,23 @@ namespace
 			{
 				for (auto const& g : gone)
 				{
-					const bool byCommand = !g.Transformed && g.Tag.Command >= 0;
-					AddExpertCredit(idx, byCommand ? g.Tag.Command : g.Tag.Origin, byCommand ? g.Tag.CommandPhase : g.Tag.OriginPhase,
-						-static_cast<int64_t>(g.Tag.Cost), NeuralCreditPart::Lost, attributed);
+					const int64_t loss = -static_cast<int64_t>(g.Tag.Cost);
+
+					if (!g.Transformed && g.Tag.Command >= 0)
+					{
+						AddExpertCredit(idx, g.Tag.Command, g.Tag.CommandPhase, loss, NeuralCreditPart::Lost, attributed);
+					}
+					else if (!g.Transformed && g.Tag.KilledByEnemy)
+					{
+						// Nobody sent it there: placing it was one decision, letting the enemy
+						// through was another.
+						AddExpertCredit(idx, g.Tag.Origin, g.Tag.OriginPhase, loss / 2, NeuralCreditPart::Lost, attributed);
+						addToTrace(loss - loss / 2, NeuralCreditPart::Lost);
+					}
+					else
+					{
+						AddExpertCredit(idx, g.Tag.Origin, g.Tag.OriginPhase, loss, NeuralCreditPart::Lost, attributed);
+					}
 				}
 			}
 
@@ -291,9 +438,28 @@ namespace
 				SplitExpertCredit(idx, spendPart, spendWeights[idx], NeuralCreditPart::Spent, attributed);
 
 				if (incomePart > 0)
-					SplitExpertCredit(idx, incomePart, incomeWeights[idx], NeuralCreditPart::Income, attributed);
+				{
+					// Ore unloaded goes to the authors of the gatherer and the dock, the rest of
+					// the income (cash buildings, sales, refunds) by the economic technos' cost.
+					int64_t harvested = 0;
+
+					for (auto const& byExpert : PendingHarvestCredit[idx])
+					{
+						for (const int64_t money : byExpert)
+							harvested += money;
+					}
+
+					const int64_t harvestPart = std::min(incomePart, harvested / 2);
+					int64_t rest = incomePart;
+
+					if (harvestPart > 0 && SplitExpertCredit(idx, harvestPart, PendingHarvestCredit[idx], NeuralCreditPart::Income, attributed))
+						rest -= harvestPart;
+
+					SplitExpertCredit(idx, rest, incomeWeights[idx], NeuralCreditPart::Income, attributed);
+				}
 			}
 
+			PendingHarvestCredit[idx] = {};
 			int64_t enemySum = 0;
 			int enemies = 0;
 
@@ -317,34 +483,16 @@ namespace
 			}
 
 			PendingKillCredit[idx] = {};
-
-			// Eligibility trace of the expert choices since the last sample.
-			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
-			{
-				const int choices = std::max(0, ExpertTicks[idx][e] - CreditTraceTicks[idx][e]);
-				CreditTrace[idx][e] = CreditTrace[idx][e] * 7 / 8 + choices * 64;
-				CreditTraceTicks[idx][e] = ExpertTicks[idx][e];
-			}
-
 			const int64_t advantage = assets[idx] - (enemies > 0 ? enemySum / enemies : 0);
 
 			if (crediting)
-			{
-				CreditWeights traceWeights {};
-
-				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
-					traceWeights[nowPhase][e] = CreditTrace[idx][e];
-
-				const int64_t shared = advantage - CreditLastAdvantage[idx] - attributed;
-
-				if (!SplitExpertCredit(idx, shared, traceWeights, NeuralCreditPart::Shared, attributed))
-					AddExpertCredit(idx, active[idx], nowPhase, shared, NeuralCreditPart::Shared, attributed);
-			}
+				addToTrace(advantage - CreditLastAdvantage[idx] - attributed, NeuralCreditPart::Shared);
 
 			CreditLastAdvantage[idx] = advantage;
 			CreditLastHalfMoney[idx] = halfMoney;
 			CreditLastSpent[idx] = spent;
 			CreditHasLast[idx] = true;
+			CreditRecentGone[idx] = gone;
 		}
 	}
 }
@@ -361,12 +509,21 @@ void NeuralAI::OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller)
 	auto const pKillerHouse = pKiller->Owner;
 	auto const pVictimHouse = pVictim->Owner;
 
-	if (!pKillerHouse || !pVictimHouse || pKillerHouse == pVictimHouse || pKillerHouse->ArrayIndex < 0 || pKillerHouse->ArrayIndex >= 32
-		|| pVictimHouse->IsNeutral() || pVictimHouse->Defeated || pKillerHouse->IsAlliedWith(pVictimHouse)
-		|| !NeuralAI::IsEnabledForHouse(pKillerHouse))
+	if (!pKillerHouse || !pVictimHouse || pKillerHouse == pVictimHouse || pKillerHouse->IsAlliedWith(pVictimHouse)
+		|| pKillerHouse->ArrayIndex < 0 || pKillerHouse->ArrayIndex >= 32 || pVictimHouse->ArrayIndex < 0 || pVictimHouse->ArrayIndex >= 32)
 	{
 		return;
 	}
+
+	// The victim's loss is booked at the next sample, which needs to know an enemy did it.
+	auto& victimTags = CreditTags[pVictimHouse->ArrayIndex];
+	auto const victimIt = victimTags.find(pVictim->UniqueID);
+
+	if (victimIt != victimTags.end())
+		victimIt->second.KilledByEnemy = true;
+
+	if (pVictimHouse->IsNeutral() || pVictimHouse->Defeated || !NeuralAI::IsEnabledForHouse(pKillerHouse))
+		return;
 
 	auto const pType = pVictim->GetTechnoType();
 
@@ -387,6 +544,44 @@ void NeuralAI::OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller)
 	}
 
 	PendingKillCredit[idx][std::clamp(phase, 0, NumRoutingPhases - 1)][std::clamp(expert, 0, NeuralAI::NumSpecialists - 1)] += pType->Cost;
+}
+
+void NeuralAI::OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, TechnoClass* pDock, int money)
+{
+	if (!NeuralAI::HeadlessMode || !pHouse || money <= 0 || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+		return;
+
+	// The money of an unload goes half to the expert that started the gatherer and half to the
+	// one that started the dock; an untagged side leaves its half to the other.
+	const int idx = pHouse->ArrayIndex;
+	auto const& tags = CreditTags[idx];
+	std::array<const NeuralCreditTag*, 2> authors { nullptr, nullptr };
+	int count = 0;
+
+	for (auto const pTechno : { pGatherer, pDock })
+	{
+		if (!pTechno || pTechno->Owner != pHouse)
+			continue;
+
+		auto const it = tags.find(pTechno->UniqueID);
+
+		if (it != tags.end())
+			authors[count++] = &it->second;
+	}
+
+	auto& pending = PendingHarvestCredit[idx];
+
+	if (count == 0)
+	{
+		pending[RoutingPhase(Unsorted::CurrentFrame)][CreditActiveExpert(pHouse)] += money;
+		return;
+	}
+
+	const int first = count == 2 ? money / 2 : money;
+	pending[authors[0]->OriginPhase][authors[0]->Origin] += first;
+
+	if (count == 2)
+		pending[authors[1]->OriginPhase][authors[1]->Origin] += money - first;
 }
 
 void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool stalemate)
