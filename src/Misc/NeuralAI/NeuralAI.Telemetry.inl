@@ -1170,6 +1170,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					coal.DistrustRefusals, coal.PlansCancelled, coal.UnitsRecalled, coal.UnitsRedirected, coal.PartnerTargetsCleared,
 					coal.GraceDamageIgnored, coal.SuperweaponsCancelled, coal.LowProfileFrames, coal.DuelHoldFrames,
 					coal.PostDuelStrikes, coal.DyingRushes, coal.DyingWaves, coal.StalemateUpdates);
+			}
 
 			// Bank: [end credits, peak, average, spent, army value, AI ticks, rich ticks, governor
 			// ticks, no target per queue (bld, veh, nav, inf, air), idle factory per queue].
@@ -1202,6 +1203,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					pOwner->CreditsSpent, armyValue, bank.Ticks, bank.RichTicks, bank.GovernorTicks, bank.NoTarget[0],
 					bank.NoTarget[1], bank.NoTarget[2], bank.NoTarget[3], bank.NoTarget[4], bank.FactoryIdle[0], bank.FactoryIdle[1],
 					bank.FactoryIdle[2], bank.FactoryIdle[3], bank.FactoryIdle[4]);
+			}
 
 			// Defense ledger: [spent on defenses, built, lost, lost without a kill, kills, killed value,
 			// total credits spent, value of our defenses now, defense budget, payback percent, Expert 7 pressure].
