@@ -2132,9 +2132,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 			else if (pBld->Storage > 0 && !isRefineryOrSlaveMiner)
 			{
-				// Silos only while storage really limits our income (Storage.AI, nearly full), at most
-				// 2. Without Storage.AI the harvested credits never wait in storage for an AI house, so
-				// a silo would be money thrown away.
+				// Silos only while storage really limits our income (refineries with
+				// Refinery.UseStorage nearly full), at most 2. Without that a silo is money thrown away.
 				if (owned >= 2 || !GetMacroState(pHouse).StorageNearlyFull)
 					continue;
 

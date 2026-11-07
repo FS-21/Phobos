@@ -1082,7 +1082,7 @@ namespace
 		macro.HarvestersUnderFire = underFire;
 
 		// Refineries no harvester serves while another has 3+ waiting next to it (the balance below
-		// has work), and storage nearly full while it limits our income (Storage.AI).
+		// has work), and storage nearly full while it limits our income.
 		BuildingClass* pCrowded = nullptr;
 		BuildingClass* pIdle = nullptr;
 		int starvedRefineries = 0;
@@ -1125,9 +1125,21 @@ namespace
 
 		macro.StarvedRefineries = pCrowded ? starvedRefineries : 0;
 
-		const float storedAmount = pExt->GetTotalTiberiumStorage();
-		macro.StorageNearlyFull = RulesExt::Global()->Storage_AI && pHouse->TotalStorage > 0
-			&& storedAmount >= static_cast<float>(pHouse->TotalStorage * RulesExt::Global()->Storage_AI_Threshold);
+		// Storage only limits income where a refinery keeps the harvest (Refinery.UseStorage, the
+		// same rule a human player has): 85% full means the next unloads will be lost.
+		bool storageLimited = false;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld->IsOnMap && !pBld->InLimbo && BuildingTypeExt::Fetch(pBld->Type)->Refinery_UseStorage)
+			{
+				storageLimited = true;
+				break;
+			}
+		}
+
+		macro.StorageNearlyFull = storageLimited && pHouse->TotalStorage > 0
+			&& pHouse->OwnedTiberium.GetTotalAmount() >= static_cast<float>(pHouse->TotalStorage) * 0.85f;
 
 		if (pHouse->HasLowPower())
 		{

@@ -516,7 +516,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			? (arch == 4 ? 1150 : 850)
 			: -600));
 
-	// Slot 11: silos, only while storage really limits our income (Storage.AI and nearly full).
+	// Slot 11: silos, only while storage really limits our income (Refinery.UseStorage, nearly full).
 	outScores[11] = ClampInt16(outScores[11] + (economyMacro.StorageNearlyFull ? 1450 : -300));
 
 	// Macro Scaling & Tech/Defense/Naval Bias Slots (12..15): 12: Dual Factory
