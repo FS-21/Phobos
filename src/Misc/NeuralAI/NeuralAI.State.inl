@@ -110,6 +110,7 @@ namespace
 		// Sub-targets destroyed so far (chain plans: Rolling Siege), so a plan that did real
 		// damage before its deadline is not scored as a plain failure.
 		int Progress { 0 };
+<<<<<<< HEAD
 		// Deadline extension for groups still closing in on their target (UpdateStrategicPlans):
 		// the length the plan was started with, the last progress check (frame and the members'
 		// mean distance to the target, -1 before the first check) and whether that check found
@@ -118,6 +119,12 @@ namespace
 		int ProgressCheckFrame { 0 };
 		int ProgressCheckDistance { -1 };
 		bool ClosingIn { false };
+		// Combat value of the group at the start weighted by health (early abort checks), and the
+		// last frame the target was in current sight (Hunt Key Units).
+		int InitialStrength { 0 };
+		int TargetSeenFrame { 0 };
+		// Per member: a frame (Pickets: until when a sentry holds back, when it last saw something).
+		std::vector<int> MemberFrames {};
 	};
 
 	struct NeuralStuckTrack
@@ -341,6 +348,14 @@ namespace
 		// at our door, so the biggest visible base is not the default target of a free-for-all).
 		std::array<int, 8> FfaThreatScale { 100, 100, 100, 100, 100, 100, 100, 100 };
 		int LastFfaTargetFrame { -100000 };
+		// Expert 5 selector: combat value of our units and of the visible armed enemies within reach
+		// of each other (a real fight), measured by the micro each AI tick, and when it last happened.
+		int ArmyContactOwn { 0 };
+		int ArmyContactEnemy { 0 };
+		int LastArmyContactFrame { -100000 };
+		// Frame of the last repair trip ordered per unit (UniqueID): a trip is not ordered again for
+		// 450 frames, so another routine moving the unit cannot turn it into one order per AI tick.
+		std::unordered_map<DWORD, int> RepairTripFrames {};
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -548,6 +563,10 @@ namespace
 			this->FfaEnemyBonus.fill(0);
 			this->FfaThreatScale.fill(100);
 			this->LastFfaTargetFrame = -100000;
+			this->ArmyContactOwn = 0;
+			this->ArmyContactEnemy = 0;
+			this->LastArmyContactFrame = -100000;
+			this->RepairTripFrames.clear();
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;

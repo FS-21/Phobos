@@ -121,6 +121,7 @@ int NeuralAI::CurrentMeasuredFPS = 0;
 #include "NeuralAI.Counters.inl"
 #include "NeuralAI.Orders.inl"
 #include "NeuralAI.Air.inl"
+#include "NeuralAI.Preservation.inl"
 #include "NeuralAI.Plans.inl"
 #include "NeuralAI.MobileFactory.inl"
 #include "NeuralAI.SpecOps.inl"

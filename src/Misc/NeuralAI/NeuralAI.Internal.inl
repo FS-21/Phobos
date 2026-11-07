@@ -134,6 +134,18 @@ namespace
 		EnemyExpansionByScout,
 		EnemyExpansionDelay,
 		EnemyExpansionBlindFrames,
+		RepairRetreat,
+		RepairByDepot,
+		RepairByHospital,
+		RepairByRepairer,
+		RepairBySelfHeal,
+		RepairSaved,
+		RepairLostOnTrip,
+		RepairAbandoned,
+		RepairHeldWinning,
+		PlanAbortEnemyGrew,
+		PlanAbortValueLost,
+		PlanAbortTargetGone,
 		Count
 	};
 
@@ -148,7 +160,9 @@ namespace
 		"wavesHeld", "waveHeldTicks", "wavesLaunched", "waveWindowLaunches", "waveFloorLaunches",
 		"waveLaunchRatioSum", "waveLaunchUnitsSum",
 		"scoutTrips", "scoutAirTrips", "scoutStart", "scoutRoute", "scoutBase", "scoutArmy",
-		"scoutBldFound", "scoutLost", "enemyExpKnown", "enemyExpByScout", "enemyExpDelayFrames", "enemyExpBlindFrames" };
+		"scoutBldFound", "scoutLost", "enemyExpKnown", "enemyExpByScout", "enemyExpDelayFrames", "enemyExpBlindFrames",
+		"repairRetreats", "repairByDepot", "repairByHospital", "repairByRepairer", "repairBySelfHeal", "repairSaved",
+		"repairLostOnTrip", "repairAbandoned", "repairHeldWinning", "planAbortEnemyGrew", "planAbortValueLost", "planAbortTargetGone" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

@@ -721,7 +721,7 @@ namespace
 
 		auto isFreeForPlan = [&](FootClass* pFoot) -> bool
 		{
-			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID))
+			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID) || IsOnRepairTrip(pHouse, pFoot->UniqueID))
 				return false;
 
 			// A slave obeys its slave master only: it goes back to work whatever a plan orders, and
@@ -810,6 +810,19 @@ namespace
 			macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + (success ? 1800 : 2700);
 		};
 
+		// Early abort of a plan whose expected outcome turned bad (the seen enemy strength at the
+		// target grew, the group lost most of its strength, the target is gone): the members go home
+		// before the losses grow, the plan counts as failed, the reason goes to the telemetry.
+		auto abortPlan = [&](NeuralPlanId id, NeuralDecision reason, int strength)
+		{
+			auto const& plan = macro.Plans[static_cast<size_t>(id)];
+			Debug::Log("[NeuralAI] House %d plan %s aborted (%s) after %d frames, strength %d of %d.\n", houseIdx,
+				NeuralPlanNames[static_cast<size_t>(id)], NeuralDecisionNames[static_cast<size_t>(reason)],
+				Unsorted::CurrentFrame - plan.StartFrame, strength, plan.InitialStrength);
+			CountDecision(reason, houseIdx);
+			finishPlan(id, false, true);
+		};
+
 		// Plans whose learned gate opened this tick and that have not started yet (telemetry NoGroup).
 		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> gateOpenedUnstarted {};
 
@@ -864,6 +877,13 @@ namespace
 			}
 
 			plan.InitialValue = std::max(1, memberValue(plan));
+			plan.TargetSeenFrame = Unsorted::CurrentFrame;
+			int strength = 0;
+
+			for (auto const pFoot : group)
+				strength += static_cast<int>(GetCombatValueOfType(pFoot->GetTechnoType(), false) * pFoot->GetHealthPercentage());
+
+			plan.InitialStrength = std::max(1, strength);
 			CountPlanOutcome(houseIdx, id, NeuralPlanOutcome::Started);
 			gateOpenedUnstarted[static_cast<size_t>(id)] = false;
 		};
@@ -910,7 +930,7 @@ namespace
 
 						// Re-issue only when the unit dropped out of its attack-move (the order resolves a
 						// building cell to an adjacent free cell, so comparing destinations would churn).
-						if (pFoot->Target == nullptr && pFoot->MegaMission != Mission::AttackMove)
+						if (pFoot->Target == nullptr && pFoot->MegaMission != Mission::AttackMove && !IsOnRepairTrip(pHouse, uid))
 							OrderFootToAttackMove(pFoot, pTargetCell);
 					}
 
@@ -1245,7 +1265,7 @@ namespace
 			{
 				auto const it = ownFoots.find(uid);
 
-				if (it != ownFoots.end() && it->second->Target != pTarget)
+				if (it != ownFoots.end() && it->second->Target != pTarget && !IsOnRepairTrip(pHouse, uid))
 				{
 					it->second->SetTarget(pTarget);
 					it->second->QueueMission(Mission::Attack, true);
@@ -1815,6 +1835,13 @@ namespace
 			return it != ownFoots.end() ? it->second : nullptr;
 		};
 
+		// A plan member on a repair trip follows the trip (UpdateRepairTrips); the group orders below
+		// take it again once it is back.
+		auto findOrderableFoot = [&](DWORD uid) -> FootClass*
+		{
+			return IsOnRepairTrip(pHouse, uid) ? nullptr : findOwnFoot(uid);
+		};
+
 		auto findTechnoByID = [](DWORD uid) -> TechnoClass*
 		{
 			for (auto const pTech : TechnoClass::Array)
@@ -1839,6 +1866,21 @@ namespace
 			{
 				if (auto const pFoot = findOwnFoot(uid))
 					value += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+			}
+
+			return value;
+		};
+
+		// What a group brings to its fight right now: combat value weighted by health, without the
+		// members away on a repair trip. The early abort checks compare it with the start value.
+		auto groupStrength = [&](const std::vector<DWORD>& uids) -> int
+		{
+			int value = 0;
+
+			for (const DWORD uid : uids)
+			{
+				if (auto const pFoot = findOrderableFoot(uid))
+					value += static_cast<int>(GetCombatValueOfType(pFoot->GetTechnoType(), false) * pFoot->GetHealthPercentage());
 			}
 
 			return value;
@@ -1871,7 +1913,7 @@ namespace
 
 			for (const DWORD uid : uids)
 			{
-				auto const pFoot = findOwnFoot(uid);
+				auto const pFoot = findOrderableFoot(uid);
 
 				if (pFoot && pFoot->Target == nullptr && pFoot->MegaMission != Mission::AttackMove)
 					OrderFootToAttackMove(pFoot, pCell);
@@ -1885,7 +1927,7 @@ namespace
 
 			for (const DWORD uid : uids)
 			{
-				if (auto const pFoot = findOwnFoot(uid))
+				if (auto const pFoot = findOrderableFoot(uid))
 					IssueMoveOrder(pFoot, pCell, keepWithin);
 			}
 		};
@@ -1894,7 +1936,7 @@ namespace
 		{
 			for (const DWORD uid : uids)
 			{
-				auto const pFoot = findOwnFoot(uid);
+				auto const pFoot = findOrderableFoot(uid);
 
 				if (pFoot && pTarget && pFoot->Target != pTarget)
 				{
@@ -3526,9 +3568,21 @@ namespace
 			if (plan.Active)
 			{
 				auto const pRally = MapClass::Instance.TryGetCellAt(plan.StagingCell);
-				const int enemyNear = seenEnemyValueNear(homeCell, 26.0, 150);
+				// Same radius as the start check, so a force 27..30 cells out that started the plan is
+				// not read as one that never came.
+				const int enemyNear = seenEnemyValueNear(homeCell, 30.0, 150);
 				const int ourValue = memberValue(plan);
+				const int strength = groupStrength(plan.Members);
 				plan.AuxPeak = std::max(plan.AuxPeak, enemyNear);
+
+				// The enemy is still at our towers when the time is up and the group holds: hold on
+				// (once, 1800 frames) instead of releasing the army in the middle of the defense.
+				if (pRally && Unsorted::CurrentFrame >= plan.Deadline && plan.Progress == 0 && enemyNear > 0
+					&& strength * 100 >= plan.InitialStrength * 40)
+				{
+					plan.Progress = 1;
+					plan.Deadline += 1800;
+				}
 
 				if (!pRally || Unsorted::CurrentFrame >= plan.Deadline)
 				{
@@ -3540,15 +3594,24 @@ namespace
 
 					if (enemyNear == 0 && Unsorted::CurrentFrame - plan.StartFrame >= 900)
 						finishPlan(NeuralPlanId::HoldUnderTowers, false, false); // They never came.
-					else if (plan.AuxPeak > 0 && (enemyNear * 10 <= plan.AuxPeak * 6 || ourValue * 10 >= enemyNear * 12))
+					else if (plan.AuxPeak > 0 && (enemyNear * 10 <= plan.AuxPeak * 6 || strength * 10 >= enemyNear * 12))
 						plan.AuxBaseline = 1;
 				}
 				else
 				{
 					const CellStruct enemyCenter = seenEnemyCentroidNear(homeCell, 30.0, 150);
 
-					if (enemyCenter == CellStruct::Empty)
+					// The counterattack meets more than it can take: back under the towers.
+					if (enemyCenter != CellStruct::Empty && seenEnemyValueNear(enemyCenter, 10.0, 150) * 10 > strength * 12)
+					{
+						plan.AuxBaseline = 0;
+						plan.AuxPeak = enemyNear;
+						moveGroup(plan.Members, pRally, 5.0);
+					}
+					else if (enemyCenter == CellStruct::Empty)
+					{
 						finishPlan(NeuralPlanId::HoldUnderTowers, true, false);
+					}
 					else
 						attackMoveGroup(plan.Members, MapClass::Instance.TryGetCellAt(enemyCenter));
 				}
@@ -4009,10 +4072,13 @@ namespace
 		{
 			auto& plan = planOf(NeuralPlanId::Pickets);
 
-			auto picketPoint = [&](size_t index) -> CellClass*
+			// A sentry that saw nothing for 3000 frames moves on to the next post of its line (45%, 30%
+			// and 60% of the way): a post off every route watches nothing for the whole plan.
+			auto picketPoint = [&](size_t index, int shift) -> CellClass*
 			{
-				// Each sentry watches its own hot enemy route (route heat), a few cells off the path.
-				const CellStruct routeWatch = RouteAmbushCell(pHouse, index, 3);
+				// Each sentry watches its own hot enemy route (route heat), a few cells off the path, until
+				// it moves on for seeing nothing there.
+				const CellStruct routeWatch = shift % 2 == 0 ? RouteAmbushCell(pHouse, index, 3) : CellStruct::Empty;
 
 				if (routeWatch != CellStruct::Empty)
 				{
@@ -4021,7 +4087,7 @@ namespace
 				}
 
 				// Else the first one watches the side we are really attacked from (attack route memory).
-				if (index == 0)
+				if (index == 0 && shift % 2 == 0)
 				{
 					const int sector = GetMainAttackSector(pHouse);
 
@@ -4039,7 +4105,8 @@ namespace
 				if (knownEnemyCentroid == CellStruct::Empty)
 					return nullptr;
 
-				const double dist = homeCell.DistanceFrom(knownEnemyCentroid) * 0.45;
+				constexpr double Distances[] = { 0.45, 0.3, 0.6 };
+				const double dist = homeCell.DistanceFrom(knownEnemyCentroid) * Distances[static_cast<size_t>(shift) % 3];
 				constexpr double Sides[] = { 0.0, 0.7, -0.7 }; // tan(35 deg) ~= 0.7
 
 				return landCellInZone(pointAlong(homeCell, knownEnemyCentroid, dist, dist * Sides[index % 3]), homeZone, 4);
@@ -4048,6 +4115,10 @@ namespace
 			if (plan.Active)
 			{
 				int alive = 0;
+				// MemberFrames: per sentry the last frame it saw an enemy (or arrived), then the frame
+				// until which it holds back from a stronger enemy; plan.Targets: its post shift.
+				plan.MemberFrames.resize(plan.Members.size() * 2, Unsorted::CurrentFrame);
+				plan.Targets.resize(plan.Members.size(), 0);
 
 				for (size_t i = 0; i < plan.Members.size(); ++i)
 				{
@@ -4057,12 +4128,43 @@ namespace
 						continue;
 
 					alive++;
+					const CellStruct fc = pFoot->GetMapCoords();
 
-					if (seenEnemyValueNear(pFoot->GetMapCoords(), 9.0, 30) > 0)
+					if (seenEnemyValueNear(fc, 9.0, 30) > 0)
+					{
 						plan.AuxPeak++;
+						plan.MemberFrames[i] = Unsorted::CurrentFrame;
+					}
 
-					if (auto const pPost = picketPoint(i))
-						IssueMoveOrder(pFoot, pPost, 2.0);
+					if (IsOnRepairTrip(pHouse, plan.Members[i]))
+						continue;
+
+					// A sentry has done its job once it sees them coming: it steps back from a force that
+					// would kill it (twice its value within 7 cells) and keeps watching from there.
+					if (seenEnemyValueNear(fc, 7.0, 60) > GetCombatValueOfType(pFoot->GetTechnoType(), false) * 2)
+						plan.MemberFrames[plan.Members.size() + i] = Unsorted::CurrentFrame + 450;
+
+					if (Unsorted::CurrentFrame - plan.MemberFrames[i] >= 3000)
+					{
+						plan.Targets[i]++;
+						plan.MemberFrames[i] = Unsorted::CurrentFrame;
+					}
+
+					auto const pPost = picketPoint(i, static_cast<int>(plan.Targets[i]));
+
+					if (!pPost)
+						continue;
+
+					// Held back: 6 cells from its post toward home.
+					if (Unsorted::CurrentFrame < plan.MemberFrames[plan.Members.size() + i])
+					{
+						if (auto const pBack = landCellInZone(pointAlong(pPost->MapCoords, homeCell, 6.0, 0.0), homeZone, 3))
+							IssueMoveOrder(pFoot, pBack, 2.0);
+
+						continue;
+					}
+
+					IssueMoveOrder(pFoot, pPost, 2.0);
 				}
 
 				if (alive == 0 || Unsorted::CurrentFrame >= plan.Deadline)
@@ -4096,7 +4198,7 @@ namespace
 				cheap.resize(std::min<size_t>(cheap.size(), 3));
 
 				// Never strip a small army for sentries.
-				const int utility = (cheap.size() >= 2 && idle.size() >= 6 && picketPoint(0)) ? 240 : -1000;
+				const int utility = (cheap.size() >= 2 && idle.size() >= 6 && picketPoint(0, 0)) ? 240 : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::Pickets, utility))
 				{
@@ -4120,9 +4222,20 @@ namespace
 			{
 				auto const pPoint = MapClass::Instance.TryGetCellAt(plan.StagingCell);
 				const int value = memberValue(plan);
+				const int strength = groupStrength(plan.Members);
 
-				if (!pPoint || value * 100 < plan.InitialValue * 40
-					|| seenEnemyValueNear(plan.StagingCell, 10.0, 150) * 10 > value * 16)
+				// Leave when most of the group is dead or a clearly stronger force (1.6x the group)
+				// comes to the point. The group walks there with a plain move: fighting everything on
+				// the way cost it the strength to hold the point.
+				if (pPoint && value * 100 < plan.InitialValue * 40)
+				{
+					abortPlan(NeuralPlanId::KeyPointHold, NeuralDecision::PlanAbortValueLost, strength);
+				}
+				else if (pPoint && seenEnemyValueNear(plan.StagingCell, 10.0, 150) * 10 > value * 16)
+				{
+					abortPlan(NeuralPlanId::KeyPointHold, NeuralDecision::PlanAbortEnemyGrew, strength);
+				}
+				else if (!pPoint)
 				{
 					finishPlan(NeuralPlanId::KeyPointHold, false, true);
 				}
@@ -4212,16 +4325,35 @@ namespace
 
 					if (group.size() >= 8)
 					{
+						// The six best fighters (combat value, not hit points: the toughest units are often
+						// support vehicles that hold nothing).
 						std::sort(group.begin(), group.end(), [](FootClass* a, FootClass* b)
 							{
-								const int sa = a->GetTechnoType()->Strength;
-								const int sb = b->GetTechnoType()->Strength;
+								const int sa = GetCombatValueOfType(a->GetTechnoType(), false);
+								const int sb = GetCombatValueOfType(b->GetTechnoType(), false);
 								return sa != sb ? sa > sb : a->UniqueID < b->UniqueID;
 							});
 
 						group.resize(6);
 					}
 					else
+					{
+						group.clear();
+					}
+				}
+
+				// Never a point the enemy army walks through or covers with defenses (enemies seen there
+				// in the last 900 frames worth more than 60% of the group, or a known defense within 10
+				// cells): the group would meet a stronger force there and fall back.
+				if (!group.empty())
+				{
+					int groupStrengthNow = 0;
+
+					for (auto const pFoot : group)
+						groupStrengthNow += static_cast<int>(GetCombatValueOfType(pFoot->GetTechnoType(), false) * pFoot->GetHealthPercentage());
+
+					if (seenEnemyValueNear(bestCell, 14.0, 900) * 10 > groupStrengthNow * 6
+						|| CountKnownEnemyDefensesNear(pHouse, bestCell, 10.0, false) > 0)
 					{
 						group.clear();
 					}
@@ -5468,18 +5600,46 @@ namespace
 			if (plan.Active)
 			{
 				auto const pTarget = findTechnoByID(plan.TargetID);
+				const int strength = groupStrength(plan.Members);
+				// Tracked in current sight only: explored cells would show it through the fog.
+				const bool targetSeen = pTarget && pTarget->CloakState == CloakState::Uncloaked
+					&& IsCellInSightOfAI(pHouse, pTarget->GetMapCoords());
+
+				if (targetSeen)
+				{
+					plan.TargetCell = pTarget->GetMapCoords();
+					plan.TargetSeenFrame = Unsorted::CurrentFrame;
+				}
+
+				const CellStruct center = groupCentroid(plan.Members);
 
 				if (!pTarget)
 				{
 					finishPlan(NeuralPlanId::HuntKeyUnits, true, true);
 				}
-				else if (memberValue(plan) * 100 < plan.InitialValue * 40 || Unsorted::CurrentFrame >= plan.Deadline)
+				else if (memberValue(plan) * 100 < plan.InitialValue * 45 || strength * 100 < plan.InitialStrength * 30)
+				{
+					abortPlan(NeuralPlanId::HuntKeyUnits, NeuralDecision::PlanAbortValueLost, strength);
+				}
+				else if (seenEnemyValueNear(plan.TargetCell, 7.0, 150) * 10 > strength * 15
+					|| CountKnownEnemyDefensesNear(pHouse, plan.TargetCell, 7.0, false) > 0)
+				{
+					// Its escort grew past the group, or it ran under its defenses.
+					abortPlan(NeuralPlanId::HuntKeyUnits, NeuralDecision::PlanAbortEnemyGrew, strength);
+				}
+				else if (!targetSeen && (Unsorted::CurrentFrame - plan.TargetSeenFrame >= 1350
+					|| (Unsorted::CurrentFrame - plan.TargetSeenFrame >= 300 && center != CellStruct::Empty
+						&& center.DistanceFrom(plan.TargetCell) <= 5.0)))
+				{
+					// Lost from sight and not where it was last seen.
+					abortPlan(NeuralPlanId::HuntKeyUnits, NeuralDecision::PlanAbortTargetGone, strength);
+				}
+				else if (Unsorted::CurrentFrame >= plan.Deadline)
 				{
 					finishPlan(NeuralPlanId::HuntKeyUnits, false, true);
 				}
-				else if (IsCellVisibleToAI(pHouse, pTarget->GetCell()))
+				else if (targetSeen)
 				{
-					plan.TargetCell = pTarget->GetMapCoords();
 					attackTargetGroup(plan.Members, pTarget);
 				}
 				else
@@ -5496,7 +5656,7 @@ namespace
 				{
 					if (!pTech || !pTech->IsAlive || pTech->InLimbo || !pTech->Owner || pTech->Owner == pHouse
 						|| pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral() || pTech->CloakState != CloakState::Uncloaked
-						|| !IsCellVisibleToAI(pHouse, pTech->GetCell()))
+						|| !IsCellInSightOfAI(pHouse, pTech->GetMapCoords()))
 					{
 						continue;
 					}
@@ -5504,8 +5664,11 @@ namespace
 					const int value = keyUnitValue(pTech);
 					const CellStruct tc = pTech->GetMapCoords();
 
-					if (value <= 0 || tc.DistanceFrom(homeCell) > 45.0 || seenEnemyValueNear(tc, 7.0, 150) > 400)
+					if (value <= 0 || tc.DistanceFrom(homeCell) > 45.0 || seenEnemyValueNear(tc, 7.0, 150) > 400
+						|| CountKnownEnemyDefensesNear(pHouse, tc, 8.0, false) > 0)
+					{
 						continue;
+					}
 
 					const int score = value - static_cast<int>(tc.DistanceFrom(homeCell)) * 5;
 
@@ -5529,23 +5692,21 @@ namespace
 					{
 						group = collectIdleGround(airborneTarget);
 
-						if (!airborneTarget)
-						{
-							std::vector<FootClass*> sameZone;
-
-							for (auto const pFoot : group)
-							{
-								if (ObjectZone(pBest, MovementZone::Normal) == homeZone)
-									sameZone.push_back(pFoot);
-							}
-
-							group = sameZone;
-						}
+						// A ground target off our landmass cannot be reached by the ground group.
+						if (!airborneTarget && ObjectZone(pBest, MovementZone::Normal) != homeZone)
+							group.clear();
 
 						sortFastest(group);
 						group.resize(std::min<size_t>(group.size(), 6));
+						int huntStrength = 0;
 
-						if (group.size() < 3 || feetValue(group) * 10 < seenEnemyValueNear(pBest->GetMapCoords(), 7.0, 150) * 12)
+						for (auto const pFoot : group)
+							huntStrength += static_cast<int>(GetCombatValueOfType(pFoot->GetTechnoType(), false) * pFoot->GetHealthPercentage());
+
+						// 1.3x what the enemy has around the target (10 cells: the escort we will meet on the
+						// way in, not only what stands next to it), health weighted; the run aborts when the
+						// escort grows past 1.5x the group.
+						if (group.size() < 3 || huntStrength * 10 < seenEnemyValueNear(pBest->GetMapCoords(), 10.0, 300) * 13)
 							group.clear();
 					}
 					else

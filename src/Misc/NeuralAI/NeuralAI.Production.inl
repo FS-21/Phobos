@@ -187,6 +187,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	{
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Micro };
+		UpdateArmyLedger(pHouse);
+		UpdateRepairTrips(pHouse);
 		NeuralAI::ExecuteTacticalAndSpecOpsMicro(pHouse, scores);
 	}
 

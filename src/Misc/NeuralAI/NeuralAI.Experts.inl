@@ -67,7 +67,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// Select active specialist expert (0..9) combining situational priors +
 	// evolved Expert Routing Bias (Slots 40..47 & 84..85) + learned Faction Memory + context routing
-	std::array<int, 10> expScores = { 100, 100, 100, 80, 100, 160, 110, 110, 95, 95 };
+	std::array<int, 10> expScores = { 100, 100, 100, 80, 100, 100, 110, 110, 95, 95 };
 
 	// Expert 0: Economy, Silos & Crisis Micro, graded by the trouble it can act on (UpdateEconomyCrisis:
 	// nothing gathering, a raid on the economy, lasting low power, harvesters under fire, a refinery
@@ -106,10 +106,16 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	const int specOpsOpportunity = SpecOpsOpportunity(pHouse);
 	expScores[4] += specOpsOpportunity + (pExt->NeuralAI_Archetype == 1 ? 200 : 0);
 
-	// Expert 5: Tactical Squad Micro, Kiting & Beacons: an army in contact (enemy tanks seen),
-	// stronger the bigger it is.
-	if (pHouse->OwnedUnits >= 3 || pHouse->OwnedInfantry >= 5)
-		expScores[5] += 300 + (features[65] > 0 ? std::min(300, (pHouse->OwnedUnits + pHouse->OwnedInfantry / 2) * 10) : 0);
+	// Expert 5: Tactical Squad Micro, Kiting & Beacons: only in a real fight, our army and visible
+	// armed enemies within reach of each other (measured by the micro, kept 450 frames after the
+	// last contact so a flickering fight keeps its expert), stronger the bigger the fight. Owning
+	// an army is not enough: in quiet times its micro has nothing to do.
+	{
+		auto const& contactMacro = GetMacroState(pHouse);
+
+		if (Unsorted::CurrentFrame - contactMacro.LastArmyContactFrame <= 450)
+			expScores[5] += 260 + std::min(360, std::min(contactMacro.ArmyContactOwn, contactMacro.ArmyContactEnemy) / 2);
+	}
 
 	// Expert 6: Base-Crawling & Ore Outpost Expansion, graded by the free ore fields we know and can
 	// take now (UpdateResourceClaim: explored, out of known enemy defense reach, by value over
