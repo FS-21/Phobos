@@ -159,6 +159,8 @@ namespace
 		TeamHelpAnswered,
 		TeamClaimYield,
 		TeamExpansionYield,
+		BankFactoryPick,
+		BankYardPick,
 		Count
 	};
 
@@ -178,7 +180,8 @@ namespace
 		"repairLostOnTrip", "repairAbandoned", "repairHeldWinning", "planAbortEnemyGrew", "planAbortValueLost", "planAbortTargetGone",
 		"coalitionJoined", "coalitionDeclined", "truceRevoked", "coalitionTargetWaves",
 		"teamTargetSet", "teamWaveHold", "teamWaveLaunch", "teamSplitFronts", "teamWaveJoined", "teamHelpRequest",
-		"teamHelpAnswered", "teamClaimYield", "teamExpansionYield" };
+		"teamHelpAnswered", "teamClaimYield", "teamExpansionYield",
+		"bankFactoryPick", "bankYardPick" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -226,6 +229,34 @@ namespace
 
 	std::array<NeuralTerritoryStat, 32> TerritoryStats {};
 	int TerritoryLastFrame { -1 };
+
+	// Bank telemetry (reward and diagnosis only, no decision reads it), sampled every AI tick:
+	// peak and summed credits, ticks with a rich bank (>= 5000), and per production queue
+	// (building, vehicle, naval, infantry, aircraft) the rich ticks with no target chosen and the
+	// rich ticks whose primary factory of that kind sat empty.
+	enum class NeuralBankQueue : int
+	{
+		Building,
+		Vehicle,
+		Naval,
+		Infantry,
+		Aircraft,
+
+		Count
+	};
+
+	struct NeuralBankStat
+	{
+		int PeakCredits { 0 };
+		int64_t CreditsSum { 0 };
+		uint32_t Ticks { 0 };
+		uint32_t RichTicks { 0 };
+		uint32_t GovernorTicks { 0 };
+		std::array<uint32_t, static_cast<size_t>(NeuralBankQueue::Count)> NoTarget {};
+		std::array<uint32_t, static_cast<size_t>(NeuralBankQueue::Count)> FactoryIdle {};
+	};
+
+	std::array<NeuralBankStat, 32> BankStats {};
 
 	// Map class for the trainer (telemetry only): size, share of water cells, and whether the
 	// starting bases are linked by land. Computed once per match, once two bases exist.

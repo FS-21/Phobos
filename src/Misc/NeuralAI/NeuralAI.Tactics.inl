@@ -1035,6 +1035,148 @@ namespace
 		return tier <= macro.UnitTierCap;
 	}
 
+	// Production queues the bank governor may grow, in tie-break order.
+	enum class BankQueue : int
+	{
+		Vehicle,
+		Infantry,
+		Aircraft,
+		Naval,
+
+		Count
+	};
+
+	// Bank governor (every 450 frames). A production queue builds one object at a time, so its
+	// spending rate is fixed by the rules (BuildSpeed: minutes per 1000 credits) and the factory
+	// count (each extra factory of the kind divides the build time by MultipleFactory), whatever
+	// the object costs. A bank beyond the reserve is wasted strength when the queues cannot spend
+	// it: the governor compares what they can spend with the measured income plus the surplus
+	// spread over 9000 frames, and while they fall short it wants one more factory at a time in
+	// the slowest queue until they would not. Only game state is read (money spent and held,
+	// factory counts, rules), so every machine computes the same wants.
+	void UpdateBankGovernor(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		const int money = pHouse->Available_Money();
+		const int earned = pHouse->CreditsSpent + money;
+
+		if (macro.BankIncomeFrame < 0 || now < macro.BankIncomeFrame)
+		{
+			macro.BankIncomeFrame = now;
+			macro.BankIncomeEarned = earned;
+
+			return;
+		}
+
+		const int elapsed = now - macro.BankIncomeFrame;
+
+		if (elapsed < 450)
+			return;
+
+		const int sample = static_cast<int>(std::max<int64_t>(0, static_cast<int64_t>(earned - macro.BankIncomeEarned)) * 1000 / elapsed);
+		macro.BankIncomeRate = macro.BankIncomeRate < 0 ? sample : (macro.BankIncomeRate + sample) / 2;
+		macro.BankIncomeFrame = now;
+		macro.BankIncomeEarned = earned;
+		macro.BankGovernorActive = false;
+		macro.BankWantedFactories.fill(0);
+		macro.BankWantedYards = 0;
+		macro.BankSurplus = 0;
+
+		RulesClass* const pRules = RulesClass::Instance;
+
+		if (!pRules || pRules->BuildSpeed <= 0.0 || pHouse->NumConYards <= 0 || macro.BankIncomeRate <= 0)
+			return;
+
+		// Credits one factory spends per 1000 frames (900 frames per game minute), and the gain
+		// of each extra factory in permille.
+		const int64_t baseRate = static_cast<int64_t>(1000000.0 / (pRules->BuildSpeed * 900.0));
+		const int multiplePermille = static_cast<int>(pRules->MultipleFactory * 1000.0f);
+
+		if (baseRate <= 0 || multiplePermille <= 0 || multiplePermille >= 1000)
+			return;
+
+		auto const queueRate = [baseRate, multiplePermille](int factories) -> int64_t
+		{
+			int64_t rate = baseRate;
+
+			for (int i = 1; i < factories && rate < 100000000; ++i)
+				rate = rate * 1000 / multiplePermille;
+
+			return factories > 0 ? rate : 0;
+		};
+
+		std::array<int, static_cast<size_t>(BankQueue::Count)> counts {};
+		counts[static_cast<size_t>(BankQueue::Vehicle)] = pHouse->NumWarFactories;
+		counts[static_cast<size_t>(BankQueue::Infantry)] = pHouse->NumBarracks;
+		counts[static_cast<size_t>(BankQueue::Aircraft)] = pHouse->NumAirpads;
+		counts[static_cast<size_t>(BankQueue::Naval)] = HouseNeedsNaval(pHouse) ? pHouse->NumShipyards : 0;
+
+		int64_t capacity = queueRate(pHouse->NumConYards);
+
+		for (auto const count : counts)
+			capacity += queueRate(count);
+
+		// The reserve covers an expansion MCV, ferries and a raid on the harvesters: plans and
+		// economy rebuilds never wait for money the governor spent.
+		const int reserve = 15000 + macro.BankIncomeRate;
+		const int64_t surplus = static_cast<int64_t>(money) - reserve;
+		const int64_t needed = macro.BankIncomeRate + std::max<int64_t>(0, surplus) * 1000 / 9000;
+		macro.BankSpendCapacity = static_cast<int>(std::min<int64_t>(capacity, INT_MAX));
+		macro.BankSpendNeeded = static_cast<int>(std::min<int64_t>(needed, INT_MAX));
+		macro.BankSurplus = static_cast<int>(std::clamp<int64_t>(surplus, 0, INT_MAX));
+
+		if (surplus <= 0 || needed <= capacity)
+			return;
+
+		auto wanted = counts;
+
+		for (int added = 0; added < 8 && capacity < needed; ++added)
+		{
+			int best = -1;
+
+			for (int q = 0; q < static_cast<int>(BankQueue::Count); ++q)
+			{
+				if (counts[q] > 0 && (best < 0 || wanted[q] < wanted[best]))
+					best = q;
+			}
+
+			if (best < 0)
+				break;
+
+			capacity += queueRate(wanted[best] + 1) - queueRate(wanted[best]);
+			wanted[best]++;
+		}
+
+		macro.BankGovernorActive = true;
+		macro.BankWantedFactories = wanted;
+
+		// The building queue builds those factories one at a time: while three or more are wanted,
+		// one more ConYard (its own MultipleFactory gain), up to four, six from 100000 credits
+		// beyond the reserve.
+		int factoryDeficit = 0;
+
+		for (int q = 0; q < static_cast<int>(BankQueue::Count); ++q)
+			factoryDeficit += wanted[q] - counts[q];
+
+		if (factoryDeficit >= 3 && pHouse->NumConYards < (surplus >= 100000 ? 6 : 4))
+			macro.BankWantedYards = pHouse->NumConYards + 1;
+	}
+
+	// Factories the bank governor still wants in this queue (0 when it is idle).
+	int BankFactoryDeficit(HouseClass* pHouse, BankQueue queue, int owned)
+	{
+		auto const& macro = GetMacroState(pHouse);
+
+		if (!macro.BankGovernorActive)
+			return 0;
+
+		return std::max(0, macro.BankWantedFactories[static_cast<size_t>(queue)] - owned);
+	}
+
 	int VisibleEnemyThreatNear(HouseClass* pHouse, const CellStruct& cell, int radius);
 	bool IsBuildingEnterableFromZone(const BuildingClass* pBld, int zone);
 	void OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget);

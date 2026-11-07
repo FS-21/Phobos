@@ -137,6 +137,8 @@ public:
 	static void UpdateUnitProduction(HouseClass* pHouse);
 	static void UpdateInfantryProduction(HouseClass* pHouse);
 	static void UpdateAircraftProduction(HouseClass* pHouse);
+	static void RefreshProductionIndices(HouseClass* pHouse);
+	static void OnTechnoProduced(HouseClass* pHouse, TechnoClass* pTechno);
 
 	static CellStruct FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingTypeClass* pBuildingType);
 	static int PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBuilding, CellStruct& outCell);

@@ -3305,7 +3305,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool wantsMultiConYardSpeed = (pHouse->NumConYards >= 1 && !mustColonizeOtherIsland
 				&& !alreadyHasConYardOnThisIsland && !isArchipelagoOrNavalMap
 				&& ((scores[30] > 650 && scores[35] <= 60 && scores[81] <= 90)
-					|| (!canFerryThisMCV && !hasUncolonizedOreOnHomeIsland)));
+					|| (!canFerryThisMCV && !hasUncolonizedOreOnHomeIsland)
+					|| GetMacroState(pHouse).BankWantedYards > pHouse->NumConYards));
 			// Below the 14 cells the expansion destinations keep from our hubs: an MCV that reached a
 			// field 14..15 cells from a power plant never deployed and wandered from field to field.
 			const int requiredAnchorDist = landedOnNewIsland ? 0 : (wantsMultiConYardSpeed ? 8 : 12);
