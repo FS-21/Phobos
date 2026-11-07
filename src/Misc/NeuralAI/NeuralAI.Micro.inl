@@ -5116,8 +5116,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	// Special Operations: Spies, Bridge Repair, Urban Garrisoning, Bio-Reactors,
 	// Tesla Overpowering, Hospitals, Medics, Crazy Ivan & Bridge Demolition
+	// The learned gate (slot 21) is asked only when a hut is worth working: a smooth gate keeps a
+	// gradient and reaches the trainer's gate report, where a fixed 400 threshold above the
+	// learned score kept every repair from happening.
 	int targetBridgeSpan = -1;
-	BuildingClass* pTargetBridgeHut = (scores[21] > 400) ? PickBridgeToRepair(pHouse, targetBridgeSpan) : nullptr;
+	BuildingClass* pTargetBridgeHut = PickBridgeToRepair(pHouse, targetBridgeSpan);
+
+	if (pTargetBridgeHut && !SlotGate(scores[21], 400, 21))
+		pTargetBridgeHut = nullptr;
 
 	// A unit whose warhead repairs a bridge from its hut does it in one hit, no engineer needed.
 	if (pTargetBridgeHut)
@@ -6485,11 +6491,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	}
 
 	// Bridge demolition: an ambush on a crowded deck, a sea lane for our fleet, or a moat against
-	// a stronger force (see PickBridgeToDestroy).
-	if (scores[22] > 600 && AreBridgesDestroyable())
+	// a stronger force (see PickBridgeToDestroy). The learned gate (slot 22) is asked only when
+	// there is a bridge to bring down, like the repair gate above.
+	if (AreBridgesDestroyable())
 	{
 		const NeuralBridgeDemolition demolition = PickBridgeToDestroy(pHouse);
-		auto const pDeckCell = demolition.Span >= 0 ? MapClass::Instance.TryGetCellAt(demolition.Cell) : nullptr;
+		auto const pDeckCell = (demolition.Span >= 0 && SlotGate(scores[22], 600, 22)) ? MapClass::Instance.TryGetCellAt(demolition.Cell) : nullptr;
 
 		if (pDeckCell)
 		{

@@ -1056,8 +1056,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				{
 					auto const& st = PlanStats[h.ArrayIndex][pl];
 					char planBuf[128];
-					std::snprintf(planBuf, sizeof(planBuf), "%s\"%s\": [%u, %u, %u, %u, %u]", pl > 0 ? ", " : "", NeuralPlanNames[pl],
-						st[0], st[1], st[2], st[3], st[4]);
+					std::snprintf(planBuf, sizeof(planBuf), "%s\"%s\": [%u, %u, %u, %u, %u, %u]", pl > 0 ? ", " : "", NeuralPlanNames[pl],
+						st[0], st[1], st[2], st[3], st[4], st[5]);
 					plansText += planBuf;
 				}
 			}

@@ -748,6 +748,10 @@ namespace
 			}
 
 			CountPlanOutcome(houseIdx, id, success ? NeuralPlanOutcome::Succeeded : NeuralPlanOutcome::Failed);
+
+			if (!success && Unsorted::CurrentFrame >= plan.Deadline)
+				CountPlanOutcome(houseIdx, id, NeuralPlanOutcome::TimedOut);
+
 			plan = NeuralPlanInstance {};
 			macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + (success ? 1800 : 2700);
 		};

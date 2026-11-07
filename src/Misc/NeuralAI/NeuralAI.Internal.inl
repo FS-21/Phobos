@@ -941,6 +941,9 @@ namespace
 		// The learned gate opened but the plan did not start: no group of free units fit it, so the
 		// plan is held back by unit availability, not by its learned preference.
 		NoGroup,
+		// Part of Failed: the plan ran out of time (its deadline), not out of units or of target.
+		// Most such groups are still far from their target: the route took longer than the plan.
+		TimedOut,
 		Count
 	};
 
