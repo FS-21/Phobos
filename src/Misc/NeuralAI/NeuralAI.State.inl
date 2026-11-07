@@ -173,6 +173,70 @@ namespace
 		int Value { 0 };
 	};
 
+	// A spot where this house saw another house's army hitting its coalition target.
+	struct NeuralCoalitionFront
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Frame { 0 };
+	};
+
+	// Tacit coalition (Expert 3, UpdateTacitCoalition): this house's own reading of a dangerous
+	// house and of the houses it saw fighting it. Never a real alliance, never shared with another
+	// house; houses of a preset team never get one. Indices are house ArrayIndex 0..7.
+	struct NeuralCoalitionState
+	{
+		// The house we lean against (-1 none), why (1 a house was eliminated by it, 2 runaway
+		// leader), since and until when.
+		int Target { -1 };
+		int Reason { 0 };
+		int SinceFrame { -1 };
+		int UntilFrame { -1 };
+		// Peak seen strength and known structures of the target while the coalition lasts.
+		int TargetPeakStrength { 0 };
+		int TargetPeakBuildings { 0 };
+		// Last decision: the target and trigger it was taken for, and whether we joined.
+		int DecidedTarget { -1 };
+		int DecidedSerial { -1 };
+		bool DecidedJoin { false };
+		// No new coalition against a house before this frame (one against it ended).
+		std::array<int, 8> CooldownUntil {};
+		// Last frame each house was seen fighting our target, when our truce with it began, and
+		// the truces revoked (it hit us) until the coalition ends.
+		std::array<int, 8> PartnerSeenFrame { -100000, -100000, -100000, -100000, -100000, -100000, -100000, -100000 };
+		std::array<int, 8> TruceSinceFrame { -1, -1, -1, -1, -1, -1, -1, -1 };
+		uint32_t RevokedMask { 0 };
+		// Last frame each house hit one of ours on purpose (damage hook: the victim always knows).
+		std::array<int, 8> HurtByFrame { -100000, -100000, -100000, -100000, -100000, -100000, -100000, -100000 };
+		// Where we saw other houses' armies hitting the target (merged within 8 cells).
+		std::vector<NeuralCoalitionFront> Fronts {};
+		// Per house: last known base (centroid of its known structures) and how many we knew.
+		std::array<CellStruct, 8> LastKnownBase {};
+		std::array<int, 8> LastKnownBuildings {};
+		// Fighting seen, [victim][attacker]: value of attacker units seen in sight next to the
+		// victim's known structures, decayed x0.85 every update.
+		std::array<std::array<int, 8>, 8> FightSeen {};
+		// Houses whose defeat we already looked at.
+		uint32_t DefeatSeenMask { 0 };
+		int LastUpdateFrame { -100000 };
+		int LastFullFrame { -100000 };
+		// Telemetry: frames in coalition, joins, declines (all, as second strongest), truces
+		// started and revoked, waves at the target / at truce partners / at others while active and
+		// waves with no coalition on, the last target and the last decline reason
+		// (NeuralCoalitionDecline).
+		int ActiveFrames { 0 };
+		int Joined { 0 };
+		int Declined { 0 };
+		int DeclinedSecond { 0 };
+		int Truces { 0 };
+		int Revoked { 0 };
+		int TargetWaves { 0 };
+		int PartnerWaves { 0 };
+		int OtherWaves { 0 };
+		int FreeWaves { 0 };
+		int LastTarget { -1 };
+		int LastDeclineReason { 0 };
+	};
+
 	struct NeuralHouseMacroState
 	{
 		CellStruct PendingClearanceCell { CellStruct::Empty };
@@ -333,6 +397,8 @@ namespace
 		// at our door, so the biggest visible base is not the default target of a free-for-all).
 		std::array<int, 8> FfaThreatScale { 100, 100, 100, 100, 100, 100, 100, 100 };
 		int LastFfaTargetFrame { -100000 };
+		// Expert 3 tacit coalition against a dangerous house (UpdateTacitCoalition).
+		NeuralCoalitionState Coalition {};
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -545,6 +611,7 @@ namespace
 			this->FfaEnemyBonus.fill(0);
 			this->FfaThreatScale.fill(100);
 			this->LastFfaTargetFrame = -100000;
+			this->Coalition = NeuralCoalitionState {};
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;
@@ -726,6 +793,51 @@ namespace
 		const int idx = pHouse ? std::clamp(pHouse->ArrayIndex, 0, 31) : 0;
 
 		return MacroStates[idx];
+	}
+
+	// Tacit coalitions (Expert 3): how many different houses are coalition targets right now, and
+	// the peak this match. Telemetry only, it never feeds a decision.
+	int CoalitionConcurrentNow { 0 };
+	int CoalitionConcurrentPeak { 0 };
+	int CoalitionConcurrentSerial { -1 };
+
+	int CoalitionTargetOf(HouseClass* pHouse)
+	{
+		return pHouse ? GetMacroState(pHouse).Coalition.Target : -1;
+	}
+
+	// A house we saw fighting our coalition target recently and that has not hit us since.
+	bool IsTacitTrucePartner(HouseClass* pHouse, int idx)
+	{
+		if (!pHouse || idx < 0 || idx >= 8)
+			return false;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+
+		if (coal.Target < 0 || idx == coal.Target || (coal.RevokedMask & (1u << idx)) != 0 || coal.TruceSinceFrame[idx] < 0)
+			return false;
+
+		return Unsorted::CurrentFrame - coal.PartnerSeenFrame[idx] <= 5400;
+	}
+
+	// Whether another house's army was seen hitting our coalition target within range of a cell in
+	// the last 2700 frames: that front is theirs, ours goes elsewhere.
+	bool IsCoalitionFrontNear(HouseClass* pHouse, const CellStruct& cell, int range)
+	{
+		if (!pHouse)
+			return false;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+
+		if (coal.Target < 0)
+			return false;
+
+		const int now = Unsorted::CurrentFrame;
+
+		return std::any_of(coal.Fronts.begin(), coal.Fronts.end(), [&](const NeuralCoalitionFront& front)
+			{
+				return now - front.Frame <= 2700 && std::max(std::abs(front.Cell.X - cell.X), std::abs(front.Cell.Y - cell.Y)) <= range;
+			});
 	}
 
 	// Match style (point 28/29): at scenario start every Neural AI house draws, from the synced

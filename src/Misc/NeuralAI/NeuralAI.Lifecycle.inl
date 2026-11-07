@@ -1162,6 +1162,38 @@ void NeuralAI::OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled)
 	}
 }
 
+// Damage to a Neural AI house's units or buildings by another player house (the victim always
+// knows who hit it). Aimed: the attacker's target was ours (or there was no attacking unit, as for a
+// superweapon); splash from a fight against someone else is not an attack on us. A tacit coalition
+// truce with that house ends at once on an aimed hit.
+void NeuralAI::OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, bool aimed)
+{
+	if (!pVictim || !pAttacker || pVictim == pAttacker || !aimed)
+		return;
+
+	const int victim = pVictim->ArrayIndex;
+	const int attacker = pAttacker->ArrayIndex;
+
+	if (victim < 0 || victim >= 8 || attacker < 0 || attacker >= 8 || pVictim->IsAlliedWith(pAttacker)
+		|| !NeuralAI::IsEnabledForHouse(pVictim))
+	{
+		return;
+	}
+
+	auto& coal = GetMacroState(pVictim).Coalition;
+	coal.HurtByFrame[attacker] = Unsorted::CurrentFrame;
+
+	if (coal.Target >= 0 && attacker != coal.Target && coal.TruceSinceFrame[attacker] >= 0
+		&& (coal.RevokedMask & (1u << attacker)) == 0)
+	{
+		coal.RevokedMask |= 1u << attacker;
+		coal.Revoked++;
+		CountDecision(NeuralDecision::TruceRevoked, victim);
+		Debug::Log("[NeuralAI] House %d Coalition: tacit truce with house %d revoked at frame %d (it hit us).\n", victim,
+			attacker, Unsorted::CurrentFrame);
+	}
+}
+
 void NeuralAI::OnBuildingDamaged(BuildingClass* pBuilding, TechnoClass* pAttacker, HouseClass* pAttackerHouse)
 {
 	if (!pBuilding || !pBuilding->Owner || !NeuralAI::IsEnabledForHouse(pBuilding->Owner))

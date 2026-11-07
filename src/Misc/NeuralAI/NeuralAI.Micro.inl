@@ -1189,6 +1189,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Expert 3 (UpdateFfaTargets): busy, at our door, weakest, nearest.
 		priority += GetMacroState(pHouse).FfaEnemyBonus[idx];
 
+		// Expert 3 tacit coalition: lean on its target, spare the houses seen fighting it.
+		if (pOther->ArrayIndex == CoalitionTargetOf(pHouse))
+			priority += 700;
+		else if (IsTacitTrucePartner(pHouse, pOther->ArrayIndex))
+			priority -= 800;
+
 		if (priority > bestEnemyPriority)
 		{
 			bestEnemyPriority = priority;
@@ -6578,6 +6584,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	CellClass* pFallbackEnemyCell = nullptr;
 	int bestFallbackEnemyScore = -999999;
 	bool anyEnemyBuildingExists = false;
+	const int coalitionTarget = CoalitionTargetOf(pHouse);
 
 	// First pass: find the closest enemy structure distance on our landmass
 	// (outer perimeter reference) and count enemy base defenses so we peel the
@@ -6663,6 +6670,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Focus the clearly weakest enemy (FFA, or the weakest member of the enemy team).
 		if (pOwner->ArrayIndex == GetMacroState(pHouse).FocusEnemyIndex)
 			bldCandScore += 300;
+
+		// Expert 3 tacit coalition: its target's buildings first, but not where another house's
+		// army is already hitting it (spread the fronts); truce partners' buildings last.
+		if (pOwner->ArrayIndex == coalitionTarget)
+			bldCandScore += IsCoalitionFrontNear(pHouse, ebc, 10) ? 350 : 700;
+		else if (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, pOwner->ArrayIndex))
+			bldCandScore -= 600;
 
 		if (homeGroundZone >= 0 && ebz == homeGroundZone)
 			bldCandScore += 350;
@@ -7084,6 +7098,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// Expert 3 tacit coalition: this wave goes for the coalition target (approach away from the
+	// spots other houses' armies are hitting).
+	const bool waveAtCoalitionTarget = coalitionTarget >= 0 && pVisibleEnemyBld && pVisibleEnemyBld->Owner
+		&& pVisibleEnemyBld->Owner->ArrayIndex == coalitionTarget && pWaveTargetCell == pVisibleEnemyBld->GetCell();
+
 	CellClass* pIslandGoalCell = pWaveTargetCell ? pWaveTargetCell : pFallbackEnemyCell;
 	int targetIslandZone = -1;
 	if (pIslandGoalCell)
@@ -7372,7 +7391,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 						const int sector = AttackSectorOf(tc, probe);
 						const int cost = CountKnownEnemyDefensesNear(pHouse, probe, 10.0, false) * 100
-							+ (sector >= 0 ? waveMacro.FailedApproachWeight[sector] / 4 : 0) + RotPenalty[k];
+							+ (sector >= 0 ? waveMacro.FailedApproachWeight[sector] / 4 : 0) + RotPenalty[k]
+							+ (waveAtCoalitionTarget && IsCoalitionFrontNear(pHouse, probe, 8) ? 150 : 0);
 
 						if (cost < bestApproachCost)
 						{
@@ -7715,6 +7735,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				|| waveMacro.LastWaveTargetCell.DistanceFrom(pWaveTargetCell->MapCoords) > 12.0)
 			{
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;
+
+				// Coalition telemetry: whose building this new wave goes for.
+				auto const pWaveBld = pWaveTargetCell->GetBuilding();
+				const int waveOwner = (pWaveBld && pWaveBld->Owner) ? pWaveBld->Owner->ArrayIndex : -1;
+				auto& waveCoal = waveMacro.Coalition;
+
+				if (coalitionTarget < 0)
+				{
+					waveCoal.FreeWaves++;
+				}
+				else if (waveOwner == coalitionTarget)
+				{
+					waveCoal.TargetWaves++;
+					CountDecision(NeuralDecision::CoalitionTargetWave, pHouse->ArrayIndex);
+				}
+				else if (IsTacitTrucePartner(pHouse, waveOwner))
+				{
+					waveCoal.PartnerWaves++;
+				}
+				else
+				{
+					waveCoal.OtherWaves++;
+				}
 			}
 
 			waveMacro.LastWaveDispatchFrame = Unsorted::CurrentFrame;

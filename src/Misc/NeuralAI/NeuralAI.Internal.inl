@@ -111,6 +111,10 @@ namespace
 		BaseThreatIntercept,
 		BaseThreatRepelled,
 		AirAttackStalled,
+		CoalitionJoined,
+		CoalitionDeclined,
+		TruceRevoked,
+		CoalitionTargetWave,
 		Count
 	};
 
@@ -121,7 +125,7 @@ namespace
 		"stuckReleased", "unreachableDropped", "idleHarvesterSent", "crawlStoneForward", "crawlStoneLost", "idleFlyerStrike", "yardUndeployBlocked", "ferryWaitTimeout", "ferryIdleWithDemand", "attackMoveStalled", "fieldScoutSent", "waveStragglerRegroup", "ferryLandingRerouted",
 		"bridgeAmbush", "bridgeSeaLane", "bridgeMoat", "bridgeFleetBlock", "bridgeRoute", "harvesterRetreat", "harvesterRebalance",
 		"allySiteBuilding", "allyCrawlAnchor", "allyDefense", "baseThreatTicks", "baseThreatIntercepts", "baseThreatRepelled",
-		"airAttackStalled" };
+		"airAttackStalled", "coalitionJoined", "coalitionDeclined", "truceRevoked", "coalitionTargetWaves" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

@@ -100,6 +100,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	if (HouseClass::Array.Count > 4 && (IsAITickWindow(240, 60)))
 		expScores[3] += 380; // Expert 3: Multi-Player Opportunism & Diplomacy
 
+	// A tacit coalition on (UpdateTacitCoalition) is Expert 3's work.
+	if (CoalitionTargetOf(pHouse) >= 0)
+		expScores[3] += 450;
+
 	// Expert 4: Special Operations, graded by the work there is for it now (fog-fair): known
 	// reachable neutral techs out of enemy defense reach and an engineer to take them, enemy
 	// buildings worth a spy, bridges to repair or bring down, captures under way (up to 780).
