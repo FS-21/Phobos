@@ -943,4 +943,48 @@ namespace
 		return seen.find(pBld->UniqueID) != seen.end();
 	}
 
+	// Fog-fair strength of one enemy house as another house knows it (UpdateEnemyStrength): the
+	// remembered army (sightings weighted by age), the part of it seen lately far from that
+	// house's known base, the value of its units we watched die lately, its known defenses and
+	// the centre of its known buildings.
+	struct NeuralEnemyStrength
+	{
+		int Army { 0 };
+		int ArmyAway { 0 };
+		int RecentLosses { 0 };
+		int DefenseValue { 0 };
+		int KnownBuildings { 0 };
+		CellStruct BaseCenter { CellStruct::Empty };
+	};
+
+	struct NeuralEnemyLoss
+	{
+		int Frame { 0 };
+		int OwnerIndex { -1 };
+		int Value { 0 };
+	};
+
+	// Wave timing (NeuralAI.WaveTiming.inl): the strength estimate per enemy house index, the
+	// sighted enemy units we watched die (keyed lookups only) and their losses, our army value,
+	// the advantage against the strongest known enemy (percent, read by feature 99 and the main
+	// assault plans) and whether the main wave is being held for strength.
+	struct NeuralWaveTimingState
+	{
+		std::array<NeuralEnemyStrength, 32> Enemies {};
+		std::unordered_set<DWORD> SeenDead {};
+		std::vector<NeuralEnemyLoss> Losses {};
+		int LastUpdateFrame { -100000 };
+		int OwnArmyValue { 0 };
+		int AdvantageRatio { 100 };
+		bool Holding { false };
+		int HoldSinceFrame { -1 };
+	};
+
+	std::array<NeuralWaveTimingState, 32> WaveTimingStates {};
+
+	NeuralWaveTimingState& GetWaveTimingState(const HouseClass* pHouse)
+	{
+		return WaveTimingStates[pHouse ? std::clamp(pHouse->ArrayIndex, 0, 31) : 0];
+	}
+
 } // namespace

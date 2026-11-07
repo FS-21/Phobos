@@ -790,6 +790,10 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 	features[98] = ClampInt8(
 		camouflageAmbushAndGroveScore * 16 + std::min(40, nearbyTreeGroveCells * 2) + visibleEnemyHarvesters * 12);
 
+	// Our army against the strongest known enemy (army + defenses, fog-fair, previous AI tick):
+	// 0 at parity, +100 at 3x or more, -50 with no army.
+	features[99] = ClampInt8(std::clamp((GetWaveTimingState(pHouse).AdvantageRatio - 100) / 2, -100, 100));
+
 	if (features[21] > 0 && features[67] < 40)
 		features[67] = 40; // Ensure Shipyard is prioritized whenever an enemy or
 
