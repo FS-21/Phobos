@@ -945,6 +945,9 @@ namespace
 		// The learned gate opened but the plan did not start: no group of free units fit it, so the
 		// plan is held back by unit availability, not by its learned preference.
 		NoGroup,
+		// Ended because we entered a tacit truce with the house it was against (Expert 3): neither a
+		// success nor a failure, no credit either way.
+		Pact,
 		Count
 	};
 

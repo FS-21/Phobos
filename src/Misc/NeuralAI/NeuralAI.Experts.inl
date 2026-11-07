@@ -102,7 +102,11 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// A tacit coalition on (UpdateTacitCoalition) is Expert 3's work.
 	if (CoalitionTargetOf(pHouse) >= 0)
-		expScores[3] += 450;
+		expScores[3] += 650;
+
+	// Leading by far (Expert 3 low profile): secure expansion and defense rather than provoking a
+	// coalition against us.
+	const bool lowProfile = GetMacroState(pHouse).Coalition.LowProfile;
 
 	// Expert 4: Special Operations, graded by the work there is for it now (fog-fair): known
 	// reachable neutral techs out of enemy defense reach and an engineer to take them, enemy
@@ -122,6 +126,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	if (economyMacro.ExpansionOpportunity > 0)
 		expScores[6] += economyMacro.ExpansionOpportunity + (features[19] < 28 ? 80 : 0);
 
+	if (lowProfile && economyMacro.ExpansionOpportunity > 0)
+		expScores[6] += 120;
+
 	// Expert 7: Forward Defense Crawling & Chokepoint Siege, graded by real pressure: enemy defenses
 	// facing us (8 per visible one), enemy tanks seen (6 each), our buildings damaged, harvesters
 	// under attack. Merely seeing the enemy base (visible buildings) used to give the full bonus,
@@ -134,6 +141,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		if (pressure >= 150)
 			expScores[7] += std::min(680, pressure);
 	}
+
+	if (lowProfile && pHouse->OwnedBuildings >= 5)
+		expScores[7] += 120;
 
 	if (pHouse->NumAirpads > 0 || pHouse->OwnedAircraft >= 2 || features[66] > 20 || features[24] > 0
 		|| pExt->NeuralAI_Archetype == 6)

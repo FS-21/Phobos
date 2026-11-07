@@ -441,8 +441,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				{
 					auto const& st = PlanStats[h.ArrayIndex][pl];
 					char planBuf[128];
-					std::snprintf(planBuf, sizeof(planBuf), "%s\"%s\": [%u, %u, %u, %u, %u]", pl > 0 ? ", " : "", NeuralPlanNames[pl],
-						st[0], st[1], st[2], st[3], st[4]);
+					std::snprintf(planBuf, sizeof(planBuf), "%s\"%s\": [%u, %u, %u, %u, %u, %u]", pl > 0 ? ", " : "", NeuralPlanNames[pl],
+						st[0], st[1], st[2], st[3], st[4], st[5]);
 					plansText += planBuf;
 				}
 			}
@@ -511,6 +511,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			// revoked, waves at the target, at truce partners, at others while on, waves with none on,
 			// coalition targets standing now over all houses, peak of that this match].
 			char coalitionText[160] = "0, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0";
+			// Expert 3 diplomacy details by name (NeuralAI.Diplomacy.inl).
+			char diplomacyText[1400] = "";
 
 			if (pOwner)
 			{
@@ -519,6 +521,23 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					coal.ActiveFrames, coal.Target, coal.LastTarget, coal.Joined, coal.Declined, coal.DeclinedSecond,
 					coal.LastDeclineReason, coal.Truces, coal.Revoked, coal.TargetWaves, coal.PartnerWaves, coal.OtherWaves,
 					coal.FreeWaves, CoalitionConcurrentNow, CoalitionConcurrentPeak);
+				std::snprintf(diplomacyText, sizeof(diplomacyText),
+					"\"reason\": %d, \"choice\": %d, \"joinElimination\": %d, \"joinLeader\": %d, \"joinStalemate\": %d, "
+					"\"joinTraitor\": %d, \"choiceGrudge\": %d, \"choiceFragile\": %d, \"choicePoorest\": %d, \"choiceTraitor\": %d, "
+					"\"declinedStrongest\": %d, \"endBetrayal\": %d, \"endWeakened\": %d, \"endTargetGone\": %d, \"endTimeout\": %d, "
+					"\"endTeam\": %d, \"truceEndBetrayal\": %d, \"truceEndCollateral\": %d, \"betrayalsSuffered\": %d, "
+					"\"betrayalsCommitted\": %d, \"betrayalsWitnessed\": %d, \"distrustRefusals\": %d, \"plansCancelled\": %d, "
+					"\"unitsRecalled\": %d, \"unitsRedirected\": %d, \"partnerTargetsCleared\": %d, \"graceDamageIgnored\": %d, "
+					"\"swCancelled\": %d, \"lowProfileFrames\": %d, \"duelHoldFrames\": %d, \"postDuelStrikes\": %d, "
+					"\"dyingRushes\": %d, \"dyingWaves\": %d, \"stalemateUpdates\": %d",
+					coal.Reason, coal.TargetChoice, coal.JoinsByReason[1], coal.JoinsByReason[2], coal.JoinsByReason[3],
+					coal.JoinsByReason[4], coal.JoinsByChoice[1], coal.JoinsByChoice[2], coal.JoinsByChoice[3], coal.JoinsByChoice[4],
+					coal.DeclinedStrongest, coal.PactEnds[0], coal.PactEnds[1], coal.PactEnds[2], coal.PactEnds[3], coal.PactEnds[4],
+					coal.TruceEnds[0], coal.TruceEnds[1], coal.BetrayalsSuffered,
+					(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? BetrayalsCommitted[h.ArrayIndex] : 0, coal.BetrayalsWitnessed,
+					coal.DistrustRefusals, coal.PlansCancelled, coal.UnitsRecalled, coal.UnitsRedirected, coal.PartnerTargetsCleared,
+					coal.GraceDamageIgnored, coal.SuperweaponsCancelled, coal.LowProfileFrames, coal.DuelHoldFrames,
+					coal.PostDuelStrikes, coal.DyingRushes, coal.DyingWaves, coal.StalemateUpdates);
 			}
 
 			lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
@@ -530,7 +549,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"econ\": [%s], \"coalition\": [%s], \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"econ\": [%s], \"coalition\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -541,7 +560,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), enemyMixText.c_str(), claimText, econText, coalitionText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), enemyMixText.c_str(), claimText, econText, coalitionText, diplomacyText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));

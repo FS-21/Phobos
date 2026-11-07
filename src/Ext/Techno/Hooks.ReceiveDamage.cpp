@@ -58,7 +58,7 @@ DEFINE_HOOK(0x701900, TechnoClass_ReceiveDamage_Shield, 0x6)
 	{
 		auto const pAimedAt = pAttacker ? abstract_cast<TechnoClass*>(pAttacker->Target) : nullptr;
 		const bool aimed = !pAttacker || (pAimedAt && pAimedAt->Owner == pTargetHouse);
-		NeuralAI::OnHouseDamaged(pTargetHouse, pSourceHouse, aimed);
+		NeuralAI::OnHouseDamaged(pTargetHouse, pSourceHouse, damage, aimed);
 	}
 
 	if (!args->IgnoreDefenses && pExt->ParentAttachment && !pExt->ParentAttachment->GetType()->Damageable && !isHealing)

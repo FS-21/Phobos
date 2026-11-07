@@ -1189,11 +1189,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Expert 3 (UpdateFfaTargets): busy, at our door, weakest, nearest.
 		priority += GetMacroState(pHouse).FfaEnemyBonus[idx];
 
-		// Expert 3 tacit coalition: lean on its target, spare the houses seen fighting it.
-		if (pOther->ArrayIndex == CoalitionTargetOf(pHouse))
-			priority += 700;
-		else if (IsTacitTrucePartner(pHouse, pOther->ArrayIndex))
-			priority -= 800;
+		// Expert 3 diplomacy (NeuralAI.Diplomacy.inl): the coalition target, never a truce partner, an
+		// ex-partner not for a while, two houses at war left to it, the dying house first.
+		priority += DiplomacyTargetBias(pHouse, pOther->ArrayIndex, false);
 
 		if (priority > bestEnemyPriority)
 		{
@@ -6612,6 +6610,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		if (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, pOwner->ArrayIndex))
+			continue;
+
 		if (pEnemyBld->Type->IsBaseDefense)
 			totalEnemyBaseDefenses++;
 
@@ -6644,6 +6645,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		// Never a wave at a truce partner (Expert 3 diplomacy).
+		if (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, pOwner->ArrayIndex))
+			continue;
+
 		auto const pCell = pEnemyBld->GetCell();
 		if (!pCell)
 			continue;
@@ -6671,12 +6676,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (pOwner->ArrayIndex == GetMacroState(pHouse).FocusEnemyIndex)
 			bldCandScore += 300;
 
-		// Expert 3 tacit coalition: its target's buildings first, but not where another house's
-		// army is already hitting it (spread the fronts); truce partners' buildings last.
+		// Expert 3 diplomacy: the coalition target's buildings first, but not where another house's
+		// army is already hitting it (spread the fronts); see DiplomacyTargetBias for the rest.
 		if (pOwner->ArrayIndex == coalitionTarget)
 			bldCandScore += IsCoalitionFrontNear(pHouse, ebc, 10) ? 350 : 700;
-		else if (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, pOwner->ArrayIndex))
-			bldCandScore -= 600;
+
+		bldCandScore += DiplomacyTargetBias(pHouse, pOwner->ArrayIndex, true);
 
 		if (homeGroundZone >= 0 && ebz == homeGroundZone)
 			bldCandScore += 350;
@@ -6760,6 +6765,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					continue;
 				}
+
+				if (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, pRO->ArrayIndex))
+					continue;
 
 				if (auto const pRC = pRemT->GetCell())
 				{
@@ -7740,6 +7748,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				auto const pWaveBld = pWaveTargetCell->GetBuilding();
 				const int waveOwner = (pWaveBld && pWaveBld->Owner) ? pWaveBld->Owner->ArrayIndex : -1;
 				auto& waveCoal = waveMacro.Coalition;
+
+				if (waveOwner >= 0 && waveOwner == waveCoal.DyingTarget && Unsorted::CurrentFrame < waveCoal.DyingUntil)
+					waveCoal.DyingWaves++;
 
 				if (coalitionTarget < 0)
 				{
@@ -12485,7 +12496,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 
-					if (bestMutateCell != CellStruct::Empty)
+					if (bestMutateCell != CellStruct::Empty && MaySuperweaponHit(pHouse, bestMutateCell))
 					{
 						pSuper->Launch(bestMutateCell, false);
 						pSuper->Reset();
@@ -12544,7 +12555,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 
-					if (bestDomCell != CellStruct::Empty)
+					if (bestDomCell != CellStruct::Empty && MaySuperweaponHit(pHouse, bestDomCell))
 					{
 						pSuper->Launch(bestDomCell, false);
 						pSuper->Reset();
@@ -12601,6 +12612,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						if (arrived < 3)
 							continue;
 					}
+
+					// Never on a truce partner (Expert 3 diplomacy): keep the charge.
+					if (!MaySuperweaponHit(pHouse, pVisibleEnemyBld->GetMapCoords()))
+						break;
 
 					swMacro.SuperReadySinceFrame.erase(swIndex);
 					pSuper->Launch(pVisibleEnemyBld->GetMapCoords(), false);
