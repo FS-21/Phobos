@@ -110,7 +110,6 @@ namespace
 		// Sub-targets destroyed so far (chain plans: Rolling Siege), so a plan that did real
 		// damage before its deadline is not scored as a plain failure.
 		int Progress { 0 };
-<<<<<<< HEAD
 		// Deadline extension for groups still closing in on their target (UpdateStrategicPlans):
 		// the length the plan was started with, the last progress check (frame and the members'
 		// mean distance to the target, -1 before the first check) and whether that check found
