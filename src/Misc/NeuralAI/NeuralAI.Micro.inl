@@ -7586,6 +7586,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (auto const pFlankCell = MapClass::Instance.TryGetCellAt(flankCoords))
 				{
 					IssueMoveOrder(pU, pFlankCell, 6.0);
+					NoteExpertCommand(pHouse, pU, CreditSourceWave);
 					dispatchedVeh++;
 					continue;
 				}
@@ -7639,6 +7640,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pU->QueueMission(Mission::Hunt, true);
 			}
 
+			NoteExpertCommand(pHouse, pU, CreditSourceWave);
 			dispatchedVeh++;
 		}
 
@@ -7705,6 +7707,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				OrderFootToAttackMove(pI, pInfWaveGoal);
 			}
 
+			NoteExpertCommand(pHouse, pI, CreditSourceWave);
 			dispatchedInf++;
 		}
 

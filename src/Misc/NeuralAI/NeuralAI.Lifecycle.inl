@@ -778,6 +778,7 @@ void NeuralAI::OnScenarioStart()
 
 	LastHouseAdvantage.fill(0);
 	HasLastHouseAdvantage.fill(false);
+	ResetExpertCredit();
 
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;

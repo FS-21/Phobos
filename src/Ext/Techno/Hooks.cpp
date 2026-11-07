@@ -14,6 +14,7 @@
 #include <Utilities/AresFunctions.h>
 #include <Ext/TEvent/Body.h>
 #include <Misc/FlyingStrings.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 #pragma region GetTechnoType
 
@@ -688,6 +689,7 @@ DEFINE_HOOK(0x702E4E, TechnoClass_RegisterDestruction_SaveKillerInfo, 0x6)
 	if (pKiller && pVictim)
 	{
 		TechnoExt::ObjectKilledBy(pVictim, pKiller);
+		NeuralAI::OnTechnoKilled(pVictim, pKiller);
 
 		if (pVictim->WhatAmI() == AbstractType::Building)
 		{

@@ -1,6 +1,394 @@
 // NeuralAI.Telemetry.inl: Trainer telemetry snapshot (RAM only).
 // Part of NeuralAI.cpp (included in order; one translation unit).
 
+namespace
+{
+	using CreditWeights = std::array<std::array<int64_t, NeuralAI::NumSpecialists>, NumRoutingPhases>;
+
+	void AddExpertCredit(int idx, int expert, int phase, int64_t amount, NeuralCreditPart part, int64_t& attributed)
+	{
+		if (amount == 0)
+			return;
+
+		expert = std::clamp(expert, 0, NeuralAI::NumSpecialists - 1);
+		phase = std::clamp(phase, 0, NumRoutingPhases - 1);
+		ExpertCredit[idx][expert] += amount;
+		ExpertCreditByPhase[idx][phase][expert] += amount;
+		ExpertCreditParts[idx][expert][static_cast<size_t>(part)] += amount;
+		attributed += amount;
+	}
+
+	// Splits an amount over (phase, expert) cells by weight, exactly: the rounding remainder goes
+	// to the heaviest cell (the first one on ties). False when there is no weight.
+	bool SplitExpertCredit(int idx, int64_t amount, const CreditWeights& weights, NeuralCreditPart part, int64_t& attributed)
+	{
+		int64_t total = 0;
+		int bestPhase = 0;
+		int bestExpert = 0;
+
+		for (int p = 0; p < NumRoutingPhases; ++p)
+		{
+			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+			{
+				total += weights[p][e];
+
+				if (weights[p][e] > weights[bestPhase][bestExpert])
+				{
+					bestPhase = p;
+					bestExpert = e;
+				}
+			}
+		}
+
+		if (total <= 0)
+			return false;
+
+		int64_t given = 0;
+
+		for (int p = 0; p < NumRoutingPhases; ++p)
+		{
+			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+			{
+				if (weights[p][e] <= 0)
+					continue;
+
+				const int64_t share = amount * weights[p][e] / total;
+				AddExpertCredit(idx, e, p, share, part, attributed);
+				given += share;
+			}
+		}
+
+		AddExpertCredit(idx, bestExpert, bestPhase, amount - given, part, attributed);
+		return true;
+	}
+
+	// Decision credit sample (see NeuralCreditPart), every 60 frames with the telemetry. The
+	// advantage is the one of SampleExpertGains, in credits.
+	void SampleExpertCredit()
+	{
+		if (Unsorted::CurrentFrame == CreditLastFrame)
+			return;
+
+		CreditLastFrame = Unsorted::CurrentFrame;
+		const int serial = ++CreditSerial;
+		const int now = Unsorted::CurrentFrame;
+		const int nowPhase = RoutingPhase(now);
+
+		std::array<int64_t, 32> assets {};
+		std::array<bool, 32> tracked {};
+		std::array<int, 32> active {};
+		std::array<CreditWeights, 32> spendWeights {};
+		std::array<CreditWeights, 32> incomeWeights {};
+		std::array<std::vector<DWORD>, 32> newcomers {};
+
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+				continue;
+
+			const int idx = pHouse->ArrayIndex;
+			assets[idx] += std::max(0, static_cast<int>(pHouse->Available_Money())) / 2;
+			tracked[idx] = !pHouse->IsNeutral() && !pHouse->Defeated && NeuralAI::IsEnabledForHouse(pHouse);
+			active[idx] = CreditActiveExpert(pHouse);
+		}
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || !pTechno->IsAlive || !pTechno->Owner || pTechno->Owner->ArrayIndex < 0 || pTechno->Owner->ArrayIndex >= 32)
+				continue;
+
+			auto const pType = pTechno->GetTechnoType();
+
+			if (!pType)
+				continue;
+
+			const int idx = pTechno->Owner->ArrayIndex;
+			assets[idx] += std::max(0, static_cast<int>(pType->Cost));
+
+			if (!tracked[idx])
+				continue;
+
+			auto const pTag = CreditTagFor(idx, pTechno, active[idx], nowPhase);
+
+			if (!pTag)
+				continue;
+
+			pTag->Stamp = serial;
+
+			if (!pTag->Credited)
+				newcomers[idx].push_back(pTechno->UniqueID);
+
+			if (pTag->Economic)
+				incomeWeights[idx][pTag->OriginPhase][pTag->Origin] += pTag->Cost;
+		}
+
+		// Money goes into the objects in production (they exist, in limbo, from the start).
+		for (auto const pFactory : FactoryClass::Array)
+		{
+			if (!pFactory || !pFactory->Object || !pFactory->Owner || pFactory->Owner->ArrayIndex < 0 || pFactory->Owner->ArrayIndex >= 32
+				|| !tracked[pFactory->Owner->ArrayIndex])
+			{
+				continue;
+			}
+
+			auto const& tags = CreditTags[pFactory->Owner->ArrayIndex];
+			auto const it = tags.find(pFactory->Object->UniqueID);
+
+			if (it != tags.end())
+				spendWeights[pFactory->Owner->ArrayIndex][it->second.OriginPhase][it->second.Origin] += std::max(1, it->second.Cost);
+		}
+
+		struct GoneTag
+		{
+			DWORD ID;
+			NeuralCreditTag Tag;
+			bool Transformed;
+		};
+
+		std::vector<GoneTag> gone;
+
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+				continue;
+
+			const int idx = pHouse->ArrayIndex;
+			auto& tags = CreditTags[idx];
+
+			if (!tracked[idx])
+			{
+				tags.clear();
+				CreditHasLast[idx] = false;
+				PendingKillCredit[idx] = {};
+				continue;
+			}
+
+			// Plan members answer to the expert that started their plan, late recruits included.
+			auto const& macro = GetMacroState(pHouse);
+
+			for (size_t p = 0; p < macro.Plans.size(); ++p)
+			{
+				auto const& plan = macro.Plans[p];
+				const int starter = PlanStarterExpert[idx][p];
+
+				if (!plan.Active || starter < 0)
+					continue;
+
+				for (const DWORD uid : plan.Members)
+				{
+					auto const it = tags.find(uid);
+
+					if (it == tags.end())
+						continue;
+
+					auto& tag = it->second;
+
+					if (tag.CommandSource != static_cast<int16_t>(p) || tag.CommandFrame < plan.StartFrame)
+					{
+						tag.Command = static_cast<int8_t>(starter);
+						tag.CommandPhase = PlanStarterPhase[idx][p];
+						tag.CommandSource = static_cast<int16_t>(p);
+						tag.CommandFrame = now;
+					}
+				}
+			}
+
+			// Technos gone since the last sample (killed, sold, captured, deployed), by UniqueID.
+			gone.clear();
+
+			for (auto it = tags.begin(); it != tags.end();)
+			{
+				if (it->second.Stamp != serial)
+				{
+					if (it->second.Credited)
+						gone.push_back({ it->first, it->second, false });
+
+					it = tags.erase(it);
+				}
+				else
+				{
+					++it;
+				}
+			}
+
+			std::sort(gone.begin(), gone.end(), [](const GoneTag& a, const GoneTag& b) { return a.ID < b.ID; });
+			std::sort(newcomers[idx].begin(), newcomers[idx].end());
+
+			// A deployer hands its tags to what it deploys into (MCV to construction yard, slave
+			// miner to refinery and back): the decision stays with the expert that started it.
+			for (const DWORD uid : newcomers[idx])
+			{
+				auto& tag = tags[uid];
+
+				for (auto& g : gone)
+				{
+					if (g.Transformed || !g.Tag.Type)
+						continue;
+
+					const bool deployed = g.Tag.Type->DeploysInto && static_cast<TechnoTypeClass*>(g.Tag.Type->DeploysInto) == tag.Type;
+					const bool undeployed = g.Tag.Type->UndeploysInto && static_cast<TechnoTypeClass*>(g.Tag.Type->UndeploysInto) == tag.Type;
+
+					if (!deployed && !undeployed)
+						continue;
+
+					if (tag.Economic)
+					{
+						incomeWeights[idx][tag.OriginPhase][tag.Origin] -= tag.Cost;
+						incomeWeights[idx][g.Tag.OriginPhase][g.Tag.Origin] += tag.Cost;
+					}
+
+					tag.Origin = g.Tag.Origin;
+					tag.OriginPhase = g.Tag.OriginPhase;
+					tag.Command = g.Tag.Command;
+					tag.CommandPhase = g.Tag.CommandPhase;
+					tag.CommandSource = g.Tag.CommandSource;
+					tag.CommandFrame = g.Tag.CommandFrame;
+					g.Transformed = true;
+					break;
+				}
+			}
+
+			int ticksSum = 0;
+
+			for (const int t : ExpertTicks[idx])
+				ticksSum += t;
+
+			// Like expertGain: nothing is credited before the house has a previous sample and has
+			// chosen an expert, so the starting units are nobody's decision.
+			const bool crediting = CreditHasLast[idx] && ticksSum > 0;
+			int64_t attributed = 0;
+
+			for (const DWORD uid : newcomers[idx])
+			{
+				auto& tag = tags[uid];
+
+				if (crediting)
+					AddExpertCredit(idx, tag.Origin, tag.OriginPhase, tag.Cost, NeuralCreditPart::Built, attributed);
+
+				tag.Credited = true;
+			}
+
+			if (crediting)
+			{
+				for (auto const& g : gone)
+				{
+					const bool byCommand = !g.Transformed && g.Tag.Command >= 0;
+					AddExpertCredit(idx, byCommand ? g.Tag.Command : g.Tag.Origin, byCommand ? g.Tag.CommandPhase : g.Tag.OriginPhase,
+						-static_cast<int64_t>(g.Tag.Cost), NeuralCreditPart::Lost, attributed);
+				}
+			}
+
+			const int halfMoney = std::max(0, static_cast<int>(pHouse->Available_Money())) / 2;
+			const int spent = pHouse->CreditsSpent;
+
+			if (crediting)
+			{
+				// Half the money counts in the advantage: what was paid is half the spending, the
+				// rest of the change of half the money is income (sales and refunds included).
+				const int64_t spendPart = -static_cast<int64_t>(std::max(0, spent - CreditLastSpent[idx]) / 2);
+				const int64_t incomePart = static_cast<int64_t>(halfMoney - CreditLastHalfMoney[idx]) - spendPart;
+
+				SplitExpertCredit(idx, spendPart, spendWeights[idx], NeuralCreditPart::Spent, attributed);
+
+				if (incomePart > 0)
+					SplitExpertCredit(idx, incomePart, incomeWeights[idx], NeuralCreditPart::Income, attributed);
+			}
+
+			int64_t enemySum = 0;
+			int enemies = 0;
+
+			for (auto const pOther : HouseClass::Array)
+			{
+				if (pOther && pOther != pHouse && !pOther->IsNeutral() && !pOther->Defeated && !pHouse->IsAlliedWith(pOther)
+					&& pOther->ArrayIndex >= 0 && pOther->ArrayIndex < 32)
+				{
+					enemySum += assets[pOther->ArrayIndex];
+					enemies++;
+				}
+			}
+
+			if (crediting && enemies > 0)
+			{
+				for (int p = 0; p < NumRoutingPhases; ++p)
+				{
+					for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+						AddExpertCredit(idx, e, p, PendingKillCredit[idx][p][e] / enemies, NeuralCreditPart::Kills, attributed);
+				}
+			}
+
+			PendingKillCredit[idx] = {};
+
+			// Eligibility trace of the expert choices since the last sample.
+			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+			{
+				const int choices = std::max(0, ExpertTicks[idx][e] - CreditTraceTicks[idx][e]);
+				CreditTrace[idx][e] = CreditTrace[idx][e] * 7 / 8 + choices * 64;
+				CreditTraceTicks[idx][e] = ExpertTicks[idx][e];
+			}
+
+			const int64_t advantage = assets[idx] - (enemies > 0 ? enemySum / enemies : 0);
+
+			if (crediting)
+			{
+				CreditWeights traceWeights {};
+
+				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+					traceWeights[nowPhase][e] = CreditTrace[idx][e];
+
+				const int64_t shared = advantage - CreditLastAdvantage[idx] - attributed;
+
+				if (!SplitExpertCredit(idx, shared, traceWeights, NeuralCreditPart::Shared, attributed))
+					AddExpertCredit(idx, active[idx], nowPhase, shared, NeuralCreditPart::Shared, attributed);
+			}
+
+			CreditLastAdvantage[idx] = advantage;
+			CreditLastHalfMoney[idx] = halfMoney;
+			CreditLastSpent[idx] = spent;
+			CreditHasLast[idx] = true;
+		}
+	}
+}
+
+void NeuralAI::OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller)
+{
+	if (!NeuralAI::HeadlessMode || !pVictim || !pKiller)
+		return;
+
+	// A spawned missile or aircraft kills for its launcher.
+	if (pKiller->SpawnOwner && pKiller->SpawnOwner->IsAlive)
+		pKiller = pKiller->SpawnOwner;
+
+	auto const pKillerHouse = pKiller->Owner;
+	auto const pVictimHouse = pVictim->Owner;
+
+	if (!pKillerHouse || !pVictimHouse || pKillerHouse == pVictimHouse || pKillerHouse->ArrayIndex < 0 || pKillerHouse->ArrayIndex >= 32
+		|| pVictimHouse->IsNeutral() || pVictimHouse->Defeated || pKillerHouse->IsAlliedWith(pVictimHouse)
+		|| !NeuralAI::IsEnabledForHouse(pKillerHouse))
+	{
+		return;
+	}
+
+	auto const pType = pVictim->GetTechnoType();
+
+	if (!pType || pType->Cost <= 0)
+		return;
+
+	const int idx = pKillerHouse->ArrayIndex;
+	int expert = CreditActiveExpert(pKillerHouse);
+	int phase = RoutingPhase(Unsorted::CurrentFrame);
+	auto const& tags = CreditTags[idx];
+	auto const it = tags.find(pKiller->UniqueID);
+
+	if (it != tags.end())
+	{
+		const bool byCommand = it->second.Command >= 0;
+		expert = byCommand ? it->second.Command : it->second.Origin;
+		phase = byCommand ? it->second.CommandPhase : it->second.OriginPhase;
+	}
+
+	PendingKillCredit[idx][std::clamp(phase, 0, NumRoutingPhases - 1)][std::clamp(expert, 0, NeuralAI::NumSpecialists - 1)] += pType->Cost;
+}
+
 void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool stalemate)
 {
 	AITrainerSharedTelemetry localSnap = {};
@@ -222,6 +610,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 	if (matchEnded || (Unsorted::CurrentFrame % 60 == 0))
 	{
 		SampleExpertGains();
+		SampleExpertCredit();
 
 		std::string jsonBuf;
 
@@ -396,6 +785,37 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				expertGainByPhaseText += (phase ? ", [" : "[") + gainRow + "]";
 			}
 
+			// Decision credit (see NeuralCreditPart), in tens of credits like expertGain: per expert,
+			// per phase of the decision, and per expert its parts [built, lost, spent, income, kills,
+			// shared].
+			std::string expertCreditText;
+			std::string expertCreditByPhaseText;
+			std::string expertCreditPartsText;
+
+			if (h.ArrayIndex >= 0 && h.ArrayIndex < 32)
+			{
+				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+				{
+					expertCreditText += (e ? ", " : "") + std::to_string(ExpertCredit[h.ArrayIndex][e] / 10);
+					std::string partsRow;
+
+					for (size_t part = 0; part < static_cast<size_t>(NeuralCreditPart::Count); ++part)
+						partsRow += (part ? ", " : "") + std::to_string(ExpertCreditParts[h.ArrayIndex][e][part] / 10);
+
+					expertCreditPartsText += (e ? ", [" : "[") + partsRow + "]";
+				}
+
+				for (int phase = 0; phase < NumRoutingPhases; ++phase)
+				{
+					std::string creditRow;
+
+					for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+						creditRow += (e ? ", " : "") + std::to_string(ExpertCreditByPhase[h.ArrayIndex][phase][e] / 10);
+
+					expertCreditByPhaseText += (phase ? ", [" : "[") + creditRow + "]";
+				}
+			}
+
 			// Slowest ticks: [frame, ms, live objects, "three heaviest phases"].
 			if (h.ArrayIndex >= 0 && h.ArrayIndex < 32)
 			{
@@ -515,7 +935,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"econ\": [%s], \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"econ\": [%s], \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -526,7 +946,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), enemyMixText.c_str(), claimText, econText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), expertCreditText.c_str(), expertCreditByPhaseText.c_str(), expertCreditPartsText.c_str(), enemyMixText.c_str(), claimText, econText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));

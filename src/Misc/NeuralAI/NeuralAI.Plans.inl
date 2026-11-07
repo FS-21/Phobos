@@ -792,10 +792,13 @@ namespace
 			plan.StagingCell = staging;
 			plan.TargetID = targetID;
 
+			NoteExpertPlanStart(pHouse, id);
+
 			for (auto const pFoot : group)
 			{
 				plan.Members.push_back(pFoot->UniqueID);
 				macro.PlanMembers.insert(pFoot->UniqueID);
+				NoteExpertCommand(pHouse, pFoot, static_cast<int16_t>(id));
 			}
 
 			plan.InitialValue = std::max(1, memberValue(plan));

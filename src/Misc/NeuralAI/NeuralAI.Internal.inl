@@ -961,6 +961,165 @@ namespace
 			DecisionCounts[idx][static_cast<size_t>(decision)]++;
 	}
 
+	// Decision credit per expert (trainer only, never read by AI decisions). expertGain gives each
+	// 60-frame change of a house's advantage to the expert in charge at that moment, but most
+	// results come from earlier decisions of other experts: a refinery started under Expert 0 pays
+	// for minutes, a wave sent under Expert 5 lands while Expert 7 runs. Here every own techno is
+	// tagged with the expert in charge when it first exists (production start, placement, capture;
+	// a deployer passes its tag to what it deploys into) and with the expert whose plan or wave
+	// last sent it. The same advantage change is split into the parts that have an author:
+	// Built (cost of a new techno, to the expert that started it), Lost (cost of a techno gone,
+	// to the expert that sent it, else the one that started it), Spent (money paid into
+	// productions, to the experts that started them, by cost), Income (money earned, to the
+	// experts that started the refineries, gatherers and cash buildings, by cost), Kills (enemy
+	// assets destroyed, to the expert that sent or started the killer) and Shared (the rest:
+	// enemy growth, third-party fights, defeats), which goes to the recently active experts by an
+	// eligibility trace (expert choices, decaying by 7/8 per sample, about 20 game seconds).
+	// The parts add up to the advantage change, so the totals match expertGain; only the
+	// author changes. Each part is booked in the game phase of the decision that earned it.
+	enum class NeuralCreditPart : uint8_t
+	{
+		Built,
+		Lost,
+		Spent,
+		Income,
+		Kills,
+		Shared,
+		Count
+	};
+
+	struct NeuralCreditTag
+	{
+		TechnoTypeClass* Type { nullptr };
+		int Cost { 0 };
+		int Stamp { 0 };
+		int CommandFrame { 0 };
+		int8_t Origin { 0 };
+		int8_t OriginPhase { 0 };
+		int8_t Command { -1 };
+		int8_t CommandPhase { 0 };
+		// Plan id of the last command, CreditSourceWave for an offensive wave, -1 none.
+		int16_t CommandSource { -1 };
+		bool Credited { false };
+		bool Economic { false };
+	};
+
+	constexpr int16_t CreditSourceWave = 1000;
+
+	std::array<std::unordered_map<DWORD, NeuralCreditTag>, 32> CreditTags {};
+	// In credits (telemetry divides by 10 like expertGain).
+	std::array<std::array<int64_t, NeuralAI::NumSpecialists>, 32> ExpertCredit {};
+	std::array<std::array<std::array<int64_t, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> ExpertCreditByPhase {};
+	std::array<std::array<std::array<int64_t, static_cast<size_t>(NeuralCreditPart::Count)>, NeuralAI::NumSpecialists>, 32> ExpertCreditParts {};
+	// Enemy asset value killed since the last sample, by the killer's author [phase][expert].
+	std::array<std::array<std::array<int64_t, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> PendingKillCredit {};
+	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> CreditTrace {};
+	std::array<std::array<int, NeuralAI::NumSpecialists>, 32> CreditTraceTicks {};
+	std::array<int64_t, 32> CreditLastAdvantage {};
+	std::array<int, 32> CreditLastHalfMoney {};
+	std::array<int, 32> CreditLastSpent {};
+	std::array<bool, 32> CreditHasLast {};
+	std::array<std::array<int8_t, static_cast<size_t>(NeuralPlanId::Count)>, 32> PlanStarterExpert {};
+	std::array<std::array<int8_t, static_cast<size_t>(NeuralPlanId::Count)>, 32> PlanStarterPhase {};
+	int CreditSerial { 0 };
+	int CreditLastFrame { -1 };
+
+	void ResetExpertCredit()
+	{
+		for (auto& tags : CreditTags)
+			tags.clear();
+
+		ExpertCredit = {};
+		ExpertCreditByPhase = {};
+		ExpertCreditParts = {};
+		PendingKillCredit = {};
+		CreditTrace = {};
+		CreditTraceTicks = {};
+		CreditLastAdvantage.fill(0);
+		CreditLastHalfMoney.fill(0);
+		CreditLastSpent.fill(0);
+		CreditHasLast.fill(false);
+
+		for (auto& starters : PlanStarterExpert)
+			starters.fill(-1);
+
+		PlanStarterPhase = {};
+		CreditSerial = 0;
+		CreditLastFrame = -1;
+	}
+
+	int CreditActiveExpert(const HouseClass* pHouse)
+	{
+		auto const pExt = HouseExt::TryFetch(pHouse);
+		return pExt ? std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1) : 0;
+	}
+
+	// What earns the house money: refineries, gatherers, cash and purifier buildings.
+	bool IsCreditEconomicType(TechnoTypeClass* pType)
+	{
+		if (pType->ResourceGatherer || pType->ResourceDestination)
+			return true;
+
+		if (auto const pBldType = abstract_cast<BuildingTypeClass*>(pType))
+			return pBldType->Refinery || pBldType->ProduceCashAmount > 0 || pBldType->OrePurifier;
+
+		if (auto const pUnitType = abstract_cast<UnitTypeClass*>(pType))
+			return pUnitType->Harvester;
+
+		return false;
+	}
+
+	// The tag of an own techno, created with the expert in charge now when it has none.
+	NeuralCreditTag* CreditTagFor(int houseIdx, TechnoClass* pTechno, int expert, int phase)
+	{
+		auto const pType = pTechno->GetTechnoType();
+
+		if (!pType)
+			return nullptr;
+
+		auto& tag = CreditTags[houseIdx][pTechno->UniqueID];
+
+		if (!tag.Type)
+		{
+			tag.Type = pType;
+			tag.Cost = std::max(0, static_cast<int>(pType->Cost));
+			tag.Origin = static_cast<int8_t>(expert);
+			tag.OriginPhase = static_cast<int8_t>(phase);
+			tag.Economic = IsCreditEconomicType(pType);
+		}
+
+		return &tag;
+	}
+
+	// A plan or a wave sends this techno: its losses and kills from now on belong to the expert in
+	// charge now (headless only, where the credit is measured).
+	void NoteExpertCommand(HouseClass* pHouse, TechnoClass* pTechno, int16_t source)
+	{
+		if (!NeuralAI::HeadlessMode || !pHouse || !pTechno || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return;
+
+		const int expert = CreditActiveExpert(pHouse);
+		const int phase = RoutingPhase(Unsorted::CurrentFrame);
+
+		if (auto const pTag = CreditTagFor(pHouse->ArrayIndex, pTechno, expert, phase))
+		{
+			pTag->Command = static_cast<int8_t>(expert);
+			pTag->CommandPhase = static_cast<int8_t>(phase);
+			pTag->CommandSource = source;
+			pTag->CommandFrame = Unsorted::CurrentFrame;
+		}
+	}
+
+	// The expert that started a plan also commands the units the plan recruits later.
+	void NoteExpertPlanStart(HouseClass* pHouse, NeuralPlanId plan)
+	{
+		if (!NeuralAI::HeadlessMode || !pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return;
+
+		PlanStarterExpert[pHouse->ArrayIndex][static_cast<size_t>(plan)] = static_cast<int8_t>(CreditActiveExpert(pHouse));
+		PlanStarterPhase[pHouse->ArrayIndex][static_cast<size_t>(plan)] = static_cast<int8_t>(RoutingPhase(Unsorted::CurrentFrame));
+	}
+
 	// exp(x) for |x| <= 8 using only IEEE + - * /, so every client computes bit-identical
 	// results regardless of which CRT math implementation its CPU selects.
 	double DeterministicExp(double x)
