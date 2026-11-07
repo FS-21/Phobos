@@ -227,6 +227,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Expert 0: economy peaks and crisis actions (blackout, broke, harvester balance).
 	UpdateEconomyCrisis(pHouse);
 
+	// Expert 3: tacit coalition against a dangerous house (outside preset teams only).
+	UpdateTacitCoalition(pHouse);
+
 	// Expert 3: which enemy to hit in a free-for-all.
 	UpdateFfaTargets(pHouse);
 

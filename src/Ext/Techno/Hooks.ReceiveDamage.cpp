@@ -13,6 +13,7 @@
 #include <New/Type/AttachmentTypeClass.h>
 #include <Utilities/AresHelper.h>
 #include <Utilities/GeneralUtils.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 namespace ReceiveDamageTemp
 {
@@ -51,6 +52,14 @@ DEFINE_HOOK(0x701900, TechnoClass_ReceiveDamage_Shield, 0x6)
 
 	if (args->Attacker && !isHealing && damage > 0)
 		pExt->LastAttacker = abstract_cast<TechnoClass*>(args->Attacker);
+
+	// Neural AI: who hit whom on purpose (tacit coalition truces end the moment a partner hits us).
+	if (!isHealing && damage > 0 && pSourceHouse && pTargetHouse && pSourceHouse != pTargetHouse)
+	{
+		auto const pAimedAt = pAttacker ? abstract_cast<TechnoClass*>(pAttacker->Target) : nullptr;
+		const bool aimed = !pAttacker || (pAimedAt && pAimedAt->Owner == pTargetHouse);
+		NeuralAI::OnHouseDamaged(pTargetHouse, pSourceHouse, damage, aimed);
+	}
 
 	if (!args->IgnoreDefenses && pExt->ParentAttachment && !pExt->ParentAttachment->GetType()->Damageable && !isHealing)
 	{

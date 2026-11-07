@@ -146,6 +146,10 @@ namespace
 		PlanAbortEnemyGrew,
 		PlanAbortValueLost,
 		PlanAbortTargetGone,
+		CoalitionJoined,
+		CoalitionDeclined,
+		TruceRevoked,
+		CoalitionTargetWave,
 		Count
 	};
 
@@ -162,7 +166,8 @@ namespace
 		"scoutTrips", "scoutAirTrips", "scoutStart", "scoutRoute", "scoutBase", "scoutArmy",
 		"scoutBldFound", "scoutLost", "enemyExpKnown", "enemyExpByScout", "enemyExpDelayFrames", "enemyExpBlindFrames",
 		"repairRetreats", "repairByDepot", "repairByHospital", "repairByRepairer", "repairBySelfHeal", "repairSaved",
-		"repairLostOnTrip", "repairAbandoned", "repairHeldWinning", "planAbortEnemyGrew", "planAbortValueLost", "planAbortTargetGone" };
+		"repairLostOnTrip", "repairAbandoned", "repairHeldWinning", "planAbortEnemyGrew", "planAbortValueLost", "planAbortTargetGone",
+		"coalitionJoined", "coalitionDeclined", "truceRevoked", "coalitionTargetWaves" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -985,6 +990,9 @@ namespace
 		// Part of Failed: the plan ran out of time (its deadline), not out of units or of target.
 		// Most such groups are still far from their target: the route took longer than the plan.
 		TimedOut,
+		// Ended because we entered a tacit truce with the house it was against (Expert 3): neither a
+		// success nor a failure, no credit either way.
+		Pact,
 		Count
 	};
 

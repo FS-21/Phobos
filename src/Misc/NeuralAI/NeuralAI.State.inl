@@ -187,6 +187,188 @@ namespace
 		int Value { 0 };
 	};
 
+	// Expert 3 diplomacy (NeuralAI.Diplomacy.inl), frames unless noted.
+	// Grace window at the start of a truce: attacks launched before it (missiles, artillery shells,
+	// a superweapon or a storm already running) cannot be called back, so damage between the new
+	// partners in the first 10 seconds of game time counts for nothing.
+	constexpr int PactGraceFrames = 150;
+	// A coalition stays small (2 or 3 houses from our point of view): at most two truce partners.
+	constexpr int PactMaxPartners = 2;
+	// Betrayal: aimed damage from a partner in force (an assault, not a stray shot) within a window.
+	constexpr int BetrayalDamage = 1500;
+	constexpr int BetrayalWindowFrames = 450;
+	// Collateral: any other damage from a partner (splash, units that hit us while firing at the
+	// shared target, small aimed hits) over a window; above the limit the truce with it ends.
+	constexpr int CollateralDamageLimit = 2500;
+	constexpr int CollateralWindowFrames = 1800;
+	// After a truce ends without betrayal the ex-partner is not our main target for a while.
+	constexpr int ExPartnerCooldownFrames = 1800;
+	// Stalemate: not before this frame (about 30 minutes of game time), no defeat for this long.
+	constexpr int StalemateMinFrame = 27000;
+	constexpr int StalemateNoDefeatFrames = 18000;
+
+	// Why a coalition ended (telemetry and log), and why a truce with one partner ended.
+	enum class NeuralPactEnd : int
+	{
+		Betrayal = 0,
+		Weakened = 1,
+		TargetGone = 2,
+		Timeout = 3,
+		Team = 4,
+		Count = 5
+	};
+
+	enum class NeuralTruceEnd : int
+	{
+		Betrayal = 0,
+		Collateral = 1,
+		Count = 2
+	};
+
+	// A spot where this house saw another house's army hitting its coalition target.
+	struct NeuralCoalitionFront
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Frame { 0 };
+	};
+
+	// Expert 3 diplomacy (NeuralAI.Diplomacy.inl): this house's own reading of the other houses
+	// (seen strength, who fights whom, grudges, traitors) and its tacit coalition. Never a real
+	// alliance, never shared with another house; houses of a preset team never get one. Indices are
+	// house ArrayIndex 0..7.
+	struct NeuralCoalitionState
+	{
+		// The house we lean against (-1 none), the trigger (1 elimination, 2 runaway leader,
+		// 3 stalemate, 4 traitor), how the target was chosen (0 by the trigger, 1 grudge, 2 most
+		// fragile, 3 poorest, 4 traitor), since and until when.
+		int Target { -1 };
+		int Reason { 0 };
+		int TargetChoice { 0 };
+		int SinceFrame { -1 };
+		int UntilFrame { -1 };
+		// Peak seen strength and known structures of the target while the coalition lasts.
+		int TargetPeakStrength { 0 };
+		int TargetPeakBuildings { 0 };
+		// Last decision: the target and trigger it was taken for, and whether we joined.
+		int DecidedTarget { -1 };
+		int DecidedSerial { -1 };
+		bool DecidedJoin { false };
+		// No new coalition against a house before this frame (one against it ended).
+		std::array<int, 8> CooldownUntil {};
+		// Last frame each house was seen fighting our target, when our truce with it began (-1 none),
+		// and the truces that ended (betrayal, collateral) until the coalition ends.
+		std::array<int, 8> PartnerSeenFrame { -100000, -100000, -100000, -100000, -100000, -100000, -100000, -100000 };
+		std::array<int, 8> TruceSinceFrame { -1, -1, -1, -1, -1, -1, -1, -1 };
+		uint32_t RevokedMask { 0 };
+		// Would-be partners refused this coalition because we distrust them (telemetry once each).
+		uint32_t DistrustMask { 0 };
+		// Last frame each house hit one of ours on purpose (damage hook: the victim always knows).
+		std::array<int, 8> HurtByFrame { -100000, -100000, -100000, -100000, -100000, -100000, -100000, -100000 };
+		// Damage taken from each partner in the current windows: aimed (betrayal test) and any other
+		// (collateral test), with the frame each window opened.
+		std::array<int, 8> AimedDamage {};
+		std::array<int, 8> AimedWindowFrame {};
+		std::array<int, 8> CollateralDamage {};
+		std::array<int, 8> CollateralWindowFrame {};
+		// Aimed damage we did to each partner in the same kind of window: when both sides trade
+		// shots (units clashing at the shared target) it is a skirmish, not a betrayal.
+		std::array<int, 8> AimedDealt {};
+		std::array<int, 8> AimedDealtFrame {};
+		// A partner betrayed us: the coalition ends at the next update (the truce at once).
+		bool BetrayedPending { false };
+		// An ex-partner is not our main target before this frame (no betrayal).
+		std::array<int, 8> ExPartnerUntil {};
+		// Grudge per house: damage it did to us (aimed in full, other a quarter), x0.98 per update,
+		// +3000 per betrayal. Feeds the "worst suits us" target choice.
+		std::array<int, 8> Grudge {};
+		// Betrayals by each house that we suffered or saw ourselves (never decays): distrust.
+		std::array<int, 8> TraitorScore {};
+		// Last frame we saw houses a and b both hitting the same third house (inferred partners),
+		// and the last betrayal of b by a that we witnessed.
+		std::array<std::array<int, 8>, 8> SideBySideFrame {};
+		std::array<std::array<int, 8>, 8> WitnessedFrame {};
+		// Most harvesters of each house seen in sight at once, slowly forgotten (poorest choice).
+		std::array<int, 8> HarvestersSeen {};
+		// Where we saw other houses' armies hitting the target (merged within 8 cells).
+		std::vector<NeuralCoalitionFront> Fronts {};
+		// Per house: last known base (centroid of its known structures), how many we knew, and the
+		// most we ever knew at once.
+		std::array<CellStruct, 8> LastKnownBase {};
+		std::array<int, 8> LastKnownBuildings {};
+		std::array<int, 8> PeakKnownBuildings {};
+		// Fighting seen, [victim][attacker]: value of attacker units seen in sight next to the
+		// victim's known structures, decayed every update.
+		std::array<std::array<int, 8>, 8> FightSeen {};
+		// Houses whose defeat we already looked at, and the frame of the last one.
+		uint32_t DefeatSeenMask { 0 };
+		int LastDefeatFrame { 0 };
+		// Stalemate samples every 2700 frames (oldest first): known structures of the other houses,
+		// our money and the waves we started so far.
+		std::array<int, 5> FrontSamples {};
+		std::array<int, 5> MoneySamples {};
+		std::array<int, 5> WaveSamples {};
+		int SampleCount { 0 };
+		int LastSampleFrame { -100000 };
+		bool Stalemate { false };
+		// Two other houses at war: hold our attacks on them while it lasts, then strike the one it
+		// left weakest (PostDuelTarget until PostDuelUntil).
+		int DuelA { -1 };
+		int DuelB { -1 };
+		int DuelQuietUpdates { 0 };
+		std::array<int, 2> DuelStartStrength {};
+		std::array<int, 2> DuelStartBuildings {};
+		int PostDuelTarget { -1 };
+		int PostDuelUntil { -1 };
+		// A house about to fall: reach its base before its aggressor.
+		int DyingTarget { -1 };
+		int DyingUntil { -1 };
+		// We are clearly the strongest: do not provoke a coalition; the nearest known base stays fair game.
+		bool LowProfile { false };
+		int LowProfileNearest { -1 };
+		int LastUpdateFrame { -100000 };
+		int LastFullFrame { -100000 };
+		// Telemetry: frames in coalition, joins, declines (all, as second strongest, as strongest),
+		// truces started and ended, waves at the target / partners / others while on / with none on
+		// / at a dying house, the last target and the last decline reason (NeuralCoalitionDecline),
+		// joins by trigger and by target choice, coalition and truce ends by reason, betrayals
+		// suffered and witnessed, partners refused for distrust, pact start work (plans cancelled,
+		// units recalled, redirected, partner targets cleared later), grace damage ignored,
+		// superweapon launches cancelled, low profile / duel hold frames, post-duel strikes, dying
+		// house rushes and updates in stalemate.
+		int ActiveFrames { 0 };
+		int Joined { 0 };
+		int Declined { 0 };
+		int DeclinedSecond { 0 };
+		int DeclinedStrongest { 0 };
+		int Truces { 0 };
+		int Revoked { 0 };
+		int TargetWaves { 0 };
+		int PartnerWaves { 0 };
+		int OtherWaves { 0 };
+		int FreeWaves { 0 };
+		int DyingWaves { 0 };
+		int LastTarget { -1 };
+		int LastDeclineReason { 0 };
+		std::array<int, 5> JoinsByReason {};
+		std::array<int, 5> JoinsByChoice {};
+		std::array<int, static_cast<size_t>(NeuralPactEnd::Count)> PactEnds {};
+		std::array<int, static_cast<size_t>(NeuralTruceEnd::Count)> TruceEnds {};
+		int BetrayalsSuffered { 0 };
+		int BetrayalsWitnessed { 0 };
+		int DistrustRefusals { 0 };
+		int PlansCancelled { 0 };
+		int UnitsRecalled { 0 };
+		int UnitsRedirected { 0 };
+		int PartnerTargetsCleared { 0 };
+		int GraceDamageIgnored { 0 };
+		int SuperweaponsCancelled { 0 };
+		int LowProfileFrames { 0 };
+		int DuelHoldFrames { 0 };
+		int PostDuelStrikes { 0 };
+		int DyingRushes { 0 };
+		int StalemateUpdates { 0 };
+	};
+
 	struct NeuralHouseMacroState
 	{
 		CellStruct PendingClearanceCell { CellStruct::Empty };
@@ -355,6 +537,8 @@ namespace
 		// Frame of the last repair trip ordered per unit (UniqueID): a trip is not ordered again for
 		// 450 frames, so another routine moving the unit cannot turn it into one order per AI tick.
 		std::unordered_map<DWORD, int> RepairTripFrames {};
+		// Expert 3 diplomacy: tacit coalition, truces, grudges, traitors (NeuralAI.Diplomacy.inl).
+		NeuralCoalitionState Coalition {};
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -566,6 +750,7 @@ namespace
 			this->ArmyContactEnemy = 0;
 			this->LastArmyContactFrame = -100000;
 			this->RepairTripFrames.clear();
+			this->Coalition = NeuralCoalitionState {};
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;
@@ -743,6 +928,108 @@ namespace
 		const int idx = pHouse ? std::clamp(pHouse->ArrayIndex, 0, 31) : 0;
 
 		return MacroStates[idx];
+	}
+
+	// Tacit coalitions (Expert 3): how many different houses are coalition targets right now, the
+	// peak this match, and the betrayals each house committed as its victims saw them. Telemetry
+	// only, it never feeds a decision.
+	int CoalitionConcurrentNow { 0 };
+	int CoalitionConcurrentPeak { 0 };
+	int CoalitionConcurrentSerial { -1 };
+	std::array<int, 32> BetrayalsCommitted {};
+
+	int CoalitionTargetOf(HouseClass* pHouse)
+	{
+		return pHouse ? GetMacroState(pHouse).Coalition.Target : -1;
+	}
+
+	// A house in a truce with us now: seen fighting our coalition target recently, and the truce
+	// has not ended (betrayal, collateral).
+	bool IsTacitTrucePartner(HouseClass* pHouse, int idx)
+	{
+		if (!pHouse || idx < 0 || idx >= 8)
+			return false;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+
+		if (coal.Target < 0 || idx == coal.Target || (coal.RevokedMask & (1u << idx)) != 0 || coal.TruceSinceFrame[idx] < 0)
+			return false;
+
+		return Unsorted::CurrentFrame - coal.PartnerSeenFrame[idx] <= 5400;
+	}
+
+	// Inside the grace window at the start of our truce with that house.
+	bool IsInPactGrace(HouseClass* pHouse, int idx)
+	{
+		if (!pHouse || idx < 0 || idx >= 8)
+			return false;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+		const int since = coal.TruceSinceFrame[idx];
+
+		return coal.Target >= 0 && since >= 0 && (coal.RevokedMask & (1u << idx)) == 0
+			&& Unsorted::CurrentFrame - since < PactGraceFrames && Unsorted::CurrentFrame >= since;
+	}
+
+	// Whether another house's army was seen hitting our coalition target within range of a cell in
+	// the last 2700 frames: that front is theirs, ours goes elsewhere.
+	bool IsCoalitionFrontNear(HouseClass* pHouse, const CellStruct& cell, int range)
+	{
+		if (!pHouse)
+			return false;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+
+		if (coal.Target < 0)
+			return false;
+
+		const int now = Unsorted::CurrentFrame;
+
+		return std::any_of(coal.Fronts.begin(), coal.Fronts.end(), [&](const NeuralCoalitionFront& front)
+			{
+				return now - front.Frame <= 2700 && std::max(std::abs(front.Cell.X - cell.X), std::abs(front.Cell.Y - cell.Y)) <= range;
+			});
+	}
+
+	// Expert 3 diplomacy bias for picking a house to fight (main enemy, or a wave's building with
+	// wave set): coalition target first (the wave bonus with its fronts is added by the caller),
+	// truce partners never, an ex-partner not for a while, two houses at war left alone until it is
+	// over and then the one it left weakest, a dying house before its aggressor gets there; while we
+	// lead by far, no far adventures against houses that leave us alone.
+	int DiplomacyTargetBias(HouseClass* pHouse, int idx, bool wave)
+	{
+		if (!pHouse || idx < 0 || idx >= 8)
+			return 0;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+		const int now = Unsorted::CurrentFrame;
+		const bool hurtUsRecently = now - coal.HurtByFrame[idx] <= 1800;
+		int bias = 0;
+
+		if (idx == coal.Target)
+			bias += wave ? 0 : 700;
+		else if (IsTacitTrucePartner(pHouse, idx))
+			return -2000;
+
+		if (coal.ExPartnerUntil[idx] > now && coal.TraitorScore[idx] == 0)
+			bias -= 600;
+
+		if ((idx == coal.DuelA || idx == coal.DuelB) && idx != coal.Target && !hurtUsRecently)
+			bias -= wave ? 400 : 300;
+
+		if (idx == coal.PostDuelTarget && now < coal.PostDuelUntil)
+			bias += 500;
+
+		if (idx == coal.DyingTarget && now < coal.DyingUntil)
+			bias += wave ? 800 : 600;
+
+		if (wave && coal.LowProfile && idx != coal.LowProfileNearest && idx != coal.Target
+			&& now - coal.HurtByFrame[idx] > 5400)
+		{
+			bias -= 300;
+		}
+
+		return bias;
 	}
 
 	// Match style (point 28/29): at scenario start every Neural AI house draws, from the synced

@@ -1707,6 +1707,19 @@ namespace
 
 			macro.FfaEnemyBonus[idx] = bonus;
 			macro.FfaThreatScale[idx] = atOurDoor[idx] ? 100 : 40;
+
+			// Tacit coalition: its target is the one to wear down now, at full threat; a truce
+			// partner busy with it is no opportunity.
+			if (idx == macro.Coalition.Target)
+			{
+				macro.FfaEnemyBonus[idx] += 300;
+				macro.FfaThreatScale[idx] = 100;
+			}
+			else if (IsTacitTrucePartner(pHouse, idx))
+			{
+				macro.FfaEnemyBonus[idx] = 0;
+				macro.FfaThreatScale[idx] = 20;
+			}
 		}
 	}
 
