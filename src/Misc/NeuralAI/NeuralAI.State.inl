@@ -353,10 +353,6 @@ namespace
 		int BankWindowFailures { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
 		std::vector<DWORD> FerryingMcvs {};
-		// Field scouting (UpdateFieldScouting): the current scout and the free fields visited.
-		DWORD FieldScoutUid { 0 };
-		int LastFieldScoutFrame { -100000 };
-		std::vector<std::pair<CellStruct, int>> ScoutedFields {};
 		// Ferry wait safety net (DispatchFootToTargetOrTransport): since when a unit has been asking
 		// for a crossing, and until when it may not ask again after giving up. Keyed lookups only.
 		std::unordered_map<DWORD, int> FerryWaitSince {};
@@ -420,10 +416,9 @@ namespace
 		int FocusEnemyIndex { -1 };
 		int TacticsRefreshFrame { -100000 };
 
-		// Plans 23..38: staggered retreats waiting their turn, the next scouting run, combo boosts
+		// Plans 23..38: staggered retreats waiting their turn, combo boosts
 		// per plan and the frame each ready offensive superweapon became ready (SW + army, point 37).
 		std::vector<NeuralDelayedRetreat> DelayedRetreats {};
-		int NextScoutRunFrame { 3600 };
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoost {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoostUntilFrame {};
 		std::map<int, int> SuperReadySinceFrame {};
@@ -558,9 +553,6 @@ namespace
 			this->BankWindowFactories = 0;
 			this->BankWindowFailures = 0;
 			this->FerryingMcvs.clear();
-			this->FieldScoutUid = 0;
-			this->LastFieldScoutFrame = -100000;
-			this->ScoutedFields.clear();
 			this->FerryWaitSince.clear();
 			this->FerryBlockedUntil.clear();
 			this->FreeFieldAnchorDist = 9999;
@@ -600,7 +592,6 @@ namespace
 			this->FocusEnemyIndex = -1;
 			this->TacticsRefreshFrame = -100000;
 			this->DelayedRetreats.clear();
-			this->NextScoutRunFrame = 3600;
 			this->PlanBoost.fill(0);
 			this->PlanBoostUntilFrame.fill(0);
 			this->SuperReadySinceFrame.clear();
