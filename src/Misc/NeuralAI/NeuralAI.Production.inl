@@ -4164,6 +4164,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		const bool airForceShotDown = AirForceSurvivalPercent(RefreshAirForceSummary(pHouse)) < 50;
+
 		int inProgressAirIdx = -1;
 		if (FactoryClass* pAirFac = pHouse->GetPrimaryFactory(AbstractType::AircraftType, false, BuildCat::DontCare))
 		{
@@ -4179,6 +4181,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const bool isAirInProgress = (pAir->ArrayIndex == inProgressAirIdx);
 
 			if (!isAirInProgress && !IsUnitTierAllowed(pHouse, pAir))
+				continue;
+
+			// An air force shot down as fast as it is built gets no more combat aircraft until the
+			// losses fade (NeuralAI.AirForce.inl); transports and carryalls are not affected.
+			if (!isAirInProgress && airForceShotDown && IsAirForceCraft(pAir))
 				continue;
 
 			if (!hasActiveUnitIncome && !isAirInProgress && !pAir->Carryall && pAir->GetActualCost(pHouse) > money)
@@ -4227,7 +4234,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				: 0;
 
 			const int score = (pAir->Cost / 3) + (pAir->Strength / 2) + slotScore + crossFactionAirBonus + airTransBonus
-				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0) + CounterBonusFor(pHouse, pAir);
+				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0) + CounterBonusFor(pHouse, pAir)
+				+ AirForceProductionBonus(pHouse, pAir);
 
 			if (score > bestAirScore)
 			{

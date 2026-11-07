@@ -56,10 +56,14 @@ namespace
 
 	// Patrol stops in route order: techs an engineer of ours is walking to (air cover), then our
 	// captured techs and refineries, each group by UniqueID. Stops inside known enemy defenses
-	// are left out.
+	// are left out. With Expert 8 in charge, the front of our army and the target of an airborne
+	// raid under way replace the route while there is one (NeuralAI.AirForce.inl).
 	void CollectAirPatrolPoints(HouseClass* pHouse, std::vector<CellStruct>& out)
 	{
-		out.clear();
+		CollectAirForcePriorityStops(pHouse, out);
+
+		if (!out.empty())
+			return;
 
 		for (auto const& capture : GetSpecOpsState(pHouse).Captures)
 		{
@@ -123,6 +127,9 @@ namespace
 
 		if (!pCell)
 			return false;
+
+		if (GetAirForceState(pHouse).FrontCell == point)
+			CountDecision(NeuralDecision::AirFrontPatrol, pHouse->ArrayIndex);
 
 		pAir->SetTarget(nullptr);
 		pAir->SetArchiveTarget(pCell);

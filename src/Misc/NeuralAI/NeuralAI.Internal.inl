@@ -161,6 +161,13 @@ namespace
 		TeamExpansionYield,
 		BankFactoryPick,
 		BankYardPick,
+		AirWing,
+		AirWingSortie,
+		AirInterceptSortie,
+		AirSoloStrike,
+		AirFrontPatrol,
+		AircraftFielded,
+		AircraftLost,
 		Count
 	};
 
@@ -181,7 +188,9 @@ namespace
 		"coalitionJoined", "coalitionDeclined", "truceRevoked", "coalitionTargetWaves",
 		"teamTargetSet", "teamWaveHold", "teamWaveLaunch", "teamSplitFronts", "teamWaveJoined", "teamHelpRequest",
 		"teamHelpAnswered", "teamClaimYield", "teamExpansionYield",
-		"bankFactoryPick", "bankYardPick" };
+		"bankFactoryPick", "bankYardPick",
+		"airWings", "airWingSorties", "airInterceptSorties", "airSoloStrikes", "airFrontPatrols", "aircraftFielded",
+		"aircraftLost" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
