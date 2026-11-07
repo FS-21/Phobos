@@ -2349,6 +2349,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 				}
 
+				// Defense budget (NeuralAI.Defense.inl): none while broke, none beyond the value our army
+				// and economy justify, fewer when our towers die without paying back or seen enemy
+				// artillery outranges this one. A tower already in construction is finished.
+				int defenseBudgetShift = 0;
+
+				if (!isBldInProgress)
+				{
+					bool budgetBlocked = false;
+					defenseBudgetShift = DefenseBudgetShift(pHouse, pBld, isPureAA, totalGroundDefenses, totalAADefenses, budgetBlocked);
+
+					if (budgetBlocked)
+						continue;
+				}
+
 				const bool isAntiArmorOrHighTierDefense = !isPureAA && !isUnarmedBunker && isAntiArmor;
 				const bool isBasicAntiInfantryDefense = !isPureAA && !isUnarmedBunker && isAntiInf && !isAntiArmor;
 
@@ -2356,7 +2370,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					= isUnarmedBunker ? 100 : std::min(950, (pBld->Cost / 2) + std::max(0, pBld->TechLevel) * 150);
 
 				score = (isPureAA ? scores[6] : std::max(static_cast<int>(scores[5]), 320)) + tierQualityBonus
-					+ CounterBonusFor(pHouse, pBld);
+					+ CounterBonusFor(pHouse, pBld) + defenseBudgetShift;
 
 				if (islandHoldActive && (isPureAA ? islandHoldNeedsAA : !isUnarmedBunker))
 					score += 450;

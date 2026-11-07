@@ -281,7 +281,8 @@ namespace
 	{
 		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
 
-		if (!pExt || (pExt->NeuralAI_ActiveExpert != 2 && pExt->NeuralAI_ActiveExpert != 8))
+		// Expert 8 uses the same view for its aircraft, Expert 7 for the tower type that beats what we saw.
+		if (!pExt || (pExt->NeuralAI_ActiveExpert != 2 && pExt->NeuralAI_ActiveExpert != 7 && pExt->NeuralAI_ActiveExpert != 8))
 			return;
 
 		auto& macro = GetMacroState(pHouse);
@@ -404,7 +405,7 @@ namespace
 	}
 
 	// Production score shift of a type from the counter composition; 0 unless Expert 2 is active
-	// (Expert 8 uses it for its aircraft only).
+	// (Expert 8 uses it for its aircraft only, Expert 7 for defenses only).
 	int CounterBonusFor(HouseClass* pHouse, const TechnoTypeClass* pType)
 	{
 		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
@@ -414,8 +415,17 @@ namespace
 
 		const int expert = pExt->NeuralAI_ActiveExpert;
 
-		if (expert != 2 && (expert != 8 || pType->WhatAmI() != AbstractType::AircraftType))
+		if (expert == 7)
+		{
+			auto const pBldType = abstract_cast<const BuildingTypeClass*>(pType);
+
+			if (!pBldType || !pBldType->IsBaseDefense)
+				return 0;
+		}
+		else if (expert != 2 && (expert != 8 || pType->WhatAmI() != AbstractType::AircraftType))
+		{
 			return 0;
+		}
 
 		auto const& bonus = GetMacroState(pHouse).CounterBonus;
 		auto const it = bonus.find(pType);

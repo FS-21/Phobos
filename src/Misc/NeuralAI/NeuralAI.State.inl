@@ -29,6 +29,15 @@ namespace
 		int ExpirationFrame { 0 };
 	};
 
+	// A defense of ours destroyed before it killed anything, and the ground reach (cells) of what
+	// destroyed it: the spot did not pay, so the next tower keeps away from it for a while.
+	struct NeuralWastedDefenseSpot
+	{
+		CellStruct Coords { CellStruct::Empty };
+		int Frame { 0 };
+		int KillerRangeCells { 0 };
+	};
+
 	// Last sightings of an enemy airborne unit, used to estimate its heading and
 	// time of arrival over our base after it vanishes into the fog.
 	struct NeuralAirThreatTrack
@@ -526,6 +535,35 @@ namespace
 		// house knows and can take now, and whether the best one is beyond the crawl's reach.
 		int ExpansionOpportunity { 0 };
 		bool ClaimNeedsMCV { false };
+		// Defense ledger (NeuralAI.Defense.inl): what our defenses cost and what they paid back, per
+		// match. Kills are counted per defense UniqueID (keyed lookups only, never iterated).
+		int DefenseSpent { 0 };
+		int DefensesBuilt { 0 };
+		int DefensesLost { 0 };
+		int DefensesLostNoKill { 0 };
+		int DefenseLostValue { 0 };
+		int DefenseKills { 0 };
+		int DefenseKillValue { 0 };
+		// Value of our towers lost lately (x3/4 every 900 frames): rebuilding what keeps dying is spending too.
+		int RecentDefenseLossValue { 0 };
+		int RecentDefenseLossDecayFrame { 0 };
+		std::unordered_map<DWORD, int> DefenseKillsById {};
+		std::vector<NeuralWastedDefenseSpot> WastedDefenseSpots {};
+		// Defense budget and Expert 7 pressure (RefreshDefenseBudget, every 60 frames): value of our
+		// defenses and armed army, the defense value we allow, the payback percent of our defenses,
+		// the seen enemy artillery (value share, longest ground range in cells) and the pressure that
+		// grades Expert 7 in the selector.
+		int DefenseBudgetFrame { -100000 };
+		int OwnDefenseValue { 0 };
+		int OwnArmyValue { 0 };
+		int DefenseValueCap { 0 };
+		int DefenseEfficiencyPct { 100 };
+		int SeenArtilleryShare { 0 };
+		int SeenArtilleryRangeCells { 0 };
+		int DefensePressure { 0 };
+		// Longest ground reach (cells) of the towers we can build now, refreshed every 900 frames.
+		int BestTowerRangeCells { 0 };
+		int BestTowerRangeFrame { -100000 };
 		// Expert 3 (UpdateFfaTargets): main enemy choice bonus per enemy house index (0..7).
 		std::array<int, 8> FfaEnemyBonus {};
 		// Percent of an enemy's visible threat its main enemy priority keeps (Expert 3: 40 unless it is
@@ -762,6 +800,27 @@ namespace
 			this->HarvesterRetreatFrames.clear();
 			this->ExpansionOpportunity = 0;
 			this->ClaimNeedsMCV = false;
+			this->DefenseSpent = 0;
+			this->DefensesBuilt = 0;
+			this->DefensesLost = 0;
+			this->DefensesLostNoKill = 0;
+			this->DefenseLostValue = 0;
+			this->DefenseKills = 0;
+			this->DefenseKillValue = 0;
+			this->RecentDefenseLossValue = 0;
+			this->RecentDefenseLossDecayFrame = 0;
+			this->DefenseKillsById.clear();
+			this->WastedDefenseSpots.clear();
+			this->DefenseBudgetFrame = -100000;
+			this->OwnDefenseValue = 0;
+			this->OwnArmyValue = 0;
+			this->DefenseValueCap = 0;
+			this->DefenseEfficiencyPct = 100;
+			this->SeenArtilleryShare = 0;
+			this->SeenArtilleryRangeCells = 0;
+			this->DefensePressure = 0;
+			this->BestTowerRangeCells = 0;
+			this->BestTowerRangeFrame = -100000;
 			this->FfaEnemyBonus.fill(0);
 			this->FfaThreatScale.fill(100);
 			this->LastFfaTargetFrame = -100000;

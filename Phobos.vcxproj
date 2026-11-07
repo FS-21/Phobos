@@ -362,6 +362,7 @@
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Bridges.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Counters.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Diplomacy.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Defense.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Economy.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Expansion.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Experts.inl" />

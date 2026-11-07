@@ -588,8 +588,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// architect block before the candidate list).
 	const bool architectActive = pExt && pExt->NeuralAI_ActiveExpert == 1;
 
-	const int turretCreepBias
-		= static_cast<int>(policy.OutputBias[38]) + ((pExt && pExt->NeuralAI_ActiveExpert == 7) ? 220 : 0);
+	// Expert 7 puts towers where the enemy really came (FindDefenseNeed), never creeping them toward
+	// the enemy base on its own.
+	const bool expert7Defense = pExt && pExt->NeuralAI_ActiveExpert == 7;
+	const int turretCreepBias = static_cast<int>(policy.OutputBias[38]);
 
 	// Discover nearest uncolonized Ore/Tiberium patch across an 84-cell radius
 	// (for Expert 6, Slot 34 & AdvAI Stepping-Stone Base-Crawling). Measure
@@ -1267,6 +1269,22 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 		}
 
+		// Expert 7: our structure most in need from what really came at us (sightings and hits),
+		// ahead of a forward building that merely stands near the enemy.
+		if (expert7Defense)
+		{
+			CellStruct needAsset = CellStruct::Empty;
+			CellStruct needThreat = CellStruct::Empty;
+
+			if (FindDefenseNeed(pHouse, isPureAA, GroundRangeOf(pBuildingType) / Unsorted::LeptonsPerCell, needAsset, needThreat))
+			{
+				directionalAttackedBld = needAsset;
+				directionalAttacker = needThreat;
+				Debug::Log("[NeuralAI] House %d Expert 7: %s guards (%d,%d) against (%d,%d)\n", pHouse->ArrayIndex,
+					pBuildingType->ID, needAsset.X, needAsset.Y, needThreat.X, needThreat.Y);
+			}
+		}
+
 		std::vector<CellStruct> powerPlantCells;
 
 		std::vector<CellStruct> priorityAssetCells;
@@ -1350,8 +1368,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 		// If no directionalAttackedBld is set yet for a ground defense, check if any of our
 		// buildings is within 26 cells of an enemy building/unit OR contesting an Ore patch
-		// with fewer than 4 local ground defenses (Base-Crawling Siege & Resource Choke Harassment!):
-		if (!isPureAA && directionalAttackedBld == CellStruct::Empty)
+		// with fewer than 4 local ground defenses (Base-Crawling Siege & Resource Choke Harassment!).
+		// Not under Expert 7: a building near enemy structures is no sign of where they attack.
+		if (!isPureAA && directionalAttackedBld == CellStruct::Empty && !expert7Defense)
 		{
 			int bestChokeScore = -999999;
 			for (auto const pOwnBld : pHouse->Buildings)
@@ -1435,7 +1454,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		|| ((isResourceBld || (isFactoryOrBarracks && !anchoredAtMissingFactoryHub))
 			&& (crawlBias > -20 || bestOreDist > 10 || pHouse->CountResourceDestinations >= 1))
 		|| (isCombatDefense && !isPureAA && (turretCreepBias > -20 || crawlBias > 0 || totalOwnedDefensesCount >= 1)
-			&& directionalAttackedBld == CellStruct::Empty);
+			&& directionalAttackedBld == CellStruct::Empty && !expert7Defense);
 
 	// Team games: the crawl starts from an ally building closer to the ore (below).
 	bool crawlFromAllyAnchor = false;
@@ -1891,8 +1910,14 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	CellStruct bestCandidate = CellStruct::Empty;
 	int bestSpatialScore = -999999;
 
-	// Ground reach of this tower, for the route heat coverage score.
-	const int routeTowerRangeCells = isCombatDefense ? GroundRangeOf(pBuildingType) / Unsorted::LeptonsPerCell : 0;
+	// Defense spots that do not pay (DefenseSpotShift): inside the reach of a known enemy tower
+	// that outranges this one, or where one of our towers died without a kill. The tower's ground
+	// reach also scores how much of a hot enemy route it covers (route heat).
+	std::vector<std::pair<CellStruct, int>> enemyDefenseReach;
+	const int ownTowerRangeCells = isCombatDefense ? GroundRangeOf(pBuildingType) / Unsorted::LeptonsPerCell : 0;
+
+	if (isCombatDefense)
+		CollectEnemyDefenseReach(pHouse, enemyDefenseReach);
 
 	// Base spread against superweapons (point 43): while an enemy owns a superweapon with a
 	// public countdown (ShowTimer=yes, visible to every player), our expensive non-defense
@@ -2705,6 +2730,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					}
 				}
 
+				if (isCombatDefense)
+					spatialScore += DefenseSpotShift(pHouse, candidate, ownTowerRangeCells, enemyDefenseReach);
+
 				if (isNavalBld)
 				{
 					// Exact AdvAI NavalYard_Placement_Cell_Value +
@@ -3034,8 +3062,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					}
 
 					// Route heat: cover the approaches the enemy really takes, above all the chosen spot.
-					if (isGroundDefense && routeTowerRangeCells > 0)
-						spatialScore += RouteDefenseCellShift(pHouse, candidate, routeTowerRangeCells, routeDefenseSpot);
+					if (isGroundDefense && ownTowerRangeCells > 0)
+						spatialScore += RouteDefenseCellShift(pHouse, candidate, ownTowerRangeCells, routeDefenseSpot);
 				}
 				else if (isSupportRadiusBld)
 				{
@@ -3721,6 +3749,8 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 
 		if (pBuildingType->IsBaseDefense)
 		{
+			RecordDefensePlaced(pHouse, pBuildingType);
+
 			bool defAntiInf = false;
 			bool defAntiArmor = false;
 			bool defAntiAir = false;

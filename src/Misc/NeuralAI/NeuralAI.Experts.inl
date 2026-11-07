@@ -59,6 +59,8 @@ namespace
 	int AirForceOpportunity(HouseClass* pHouse);
 	// Expert 9 work summary (NeuralAI.Urban.inl, refreshed every 150 frames).
 	int UrbanOpportunity(HouseClass* pHouse);
+	// Defined in NeuralAI.Defense.inl.
+	void RefreshDefenseBudget(HouseClass* pHouse);
 }
 
 void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, InputVectorSize>& features,
@@ -140,14 +142,18 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	if (lowProfile && economyMacro.ExpansionOpportunity > 0)
 		expScores[6] += 120;
 
-	// Expert 7: Forward Defense Crawling & Chokepoint Siege, graded by real pressure: enemy defenses
-	// facing us (8 per visible one), enemy tanks seen (6 each), our buildings damaged, harvesters
-	// under attack. Merely seeing the enemy base (visible buildings) used to give the full bonus,
-	// so Expert 7 ran 94% of the time and the others never trained.
-	if (pHouse->OwnedBuildings >= 5)
+	// Expert 7: Forward Defense Crawling & Chokepoint Siege, graded by the defense pressure of
+	// RefreshDefenseBudget: enemy forces seen at our structures, structures and harvesters under
+	// fire now, enemy towers facing us; less when our army at home holds, when the defense budget is
+	// spent or our towers die without paying back, none when broke. Enemy towers and tanks seen
+	// anywhere, or old unrepaired damage, are no reason for more towers.
+	RefreshDefenseBudget(pHouse);
+
+	// Siege and turtle archetypes lean on towers, but only once something is really coming.
 	{
-		const int pressure = (features[68] / 8) * 60 + (features[65] / 6) * 25 + (features[29] > 0 ? 200 : 0)
-			+ (features[31] > 0 ? 250 : 0) + ((pExt->NeuralAI_Archetype == 2 || pExt->NeuralAI_Archetype == 4) ? 200 : 0);
+		const int defensePressure = GetMacroState(pHouse).DefensePressure;
+		const int pressure = defensePressure
+			+ ((defensePressure >= 60 && (pExt->NeuralAI_Archetype == 2 || pExt->NeuralAI_Archetype == 4)) ? 120 : 0);
 
 		if (pressure >= 150)
 			expScores[7] += std::min(680, pressure);
