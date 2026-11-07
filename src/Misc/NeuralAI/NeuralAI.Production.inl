@@ -241,6 +241,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Expert 4: neutral techs seen, capture / spy / bridge work and the engineers and spies out.
 	UpdateSpecOps(pHouse);
+
+	// Expert 4: demolition trucks and terrorists sneaking in without a transport.
+	UpdateSneakStrikes(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
