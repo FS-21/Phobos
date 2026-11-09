@@ -587,3 +587,14 @@ DEFINE_HOOK(0x6E0F90, TActionClass_GrowShroud_ObserverImmunity, 0x5)
 	return 0;
 }
 
+// Decision credit: every techno a Neural AI house produces is tagged with the expert in charge.
+DEFINE_HOOK(0x4FB6B0, HouseClass_JustBuilt_NeuralAI, 0x5)
+{
+	GET(HouseClass* const, pThis, ECX);
+	GET_STACK(TechnoClass*, pTechno, 0x4);
+
+	if (pThis && pTechno && NeuralAI::IsEnabledForHouse(pThis))
+		NeuralAI::OnTechnoProduced(pThis, pTechno);
+
+	return 0;
+}

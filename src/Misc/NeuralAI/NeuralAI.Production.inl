@@ -159,6 +159,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Features };
 		UpdateBridgePlanner(pHouse);
 		NeuralAI::ExtractFogFilteredFeatures(pHouse, features);
+
+		// Defense and ambush spots from the enemy routes the fog scan just recorded.
+		UpdateRouteHeat(pHouse);
 	}
 
 	// The fog scan may have marked new enemy buildings as seen: rebuild the known-building cache.
@@ -179,10 +182,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Tactics };
 		UpdateAirLossMemory(pHouse);
 		UpdateMatchTactics(pHouse, scores);
+		UpdateEnemyStrength(pHouse);
 	}
 
 	{
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Micro };
+		UpdateArmyLedger(pHouse);
+		UpdateRepairTrips(pHouse);
 		NeuralAI::ExecuteTacticalAndSpecOpsMicro(pHouse, scores);
 	}
 
@@ -206,8 +212,40 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Idle airships / jumpjet bombers near known enemy structures attack them.
 	UpdateIdleAirborneStrikers(pHouse);
 
-	// One scout at a time checks free ore fields before expanding there.
-	UpdateFieldScouting(pHouse);
+	// Scouts go where information is worth most (stale fields, approaches, enemy bases and armies).
+	UpdatePurposefulScouting(pHouse);
+
+	// Best ore field not mined yet (Expert 6 hoards: claims contested fields too).
+	UpdateResourceClaim(pHouse);
+
+	// What each missing building would unlock in the tech tree.
+	UpdateTechUnlocks(pHouse);
+
+	// Highest unit tier allowed now (super units come step by step).
+	UpdateUnitTierCap(pHouse);
+
+	// Factories the bank can pay for (the production queues spend at a fixed rate per factory).
+	UpdateBankGovernor(pHouse);
+
+	// Expert 0: economy peaks and crisis actions (blackout, broke, harvester balance).
+	UpdateEconomyCrisis(pHouse);
+
+	// Expert 3: tacit coalition against a dangerous house (outside preset teams only).
+	UpdateTacitCoalition(pHouse);
+
+	// Expert 3: which enemy to hit in a free-for-all.
+	UpdateFfaTargets(pHouse);
+
+	// Expert 2: which buildable types and missing tech answer the enemy army seen so far.
+	UpdateCounterComposition(pHouse);
+
+	// Expert 4: neutral techs seen, capture / spy / bridge work and the engineers and spies out.
+	UpdateSpecOps(pHouse);
+
+	// Expert 4: demolition trucks and terrorists sneaking in without a transport.
+	UpdateSneakStrikes(pHouse);
+	// Expert 9: occupiable buildings seen, garrisons to hold, evacuate or clear, coalition work.
+	UpdateUrban(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -278,7 +316,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		for (auto const pOwnInf : InfantryClass::Array)
 		{
 			if (pOwnInf && pOwnInf->Owner == pHouse && !pOwnInf->InLimbo && pOwnInf->IsAlive && pOwnInf->Type
-				&& pOwnInf->Type->Occupier && !pOwnInf->Type->Engineer && !pOwnInf->Type->Infiltrate)
+				&& pOwnInf->Type->Occupier && !pOwnInf->Type->Engineer && !IsSpyInfantryType(pOwnInf->Type))
 			{
 				compatibleOccupierInfCount++;
 			}
@@ -439,7 +477,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					}
 
 					tempMap.erase(it);
-					GetMacroState(pHouse).NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 750;
+					GetMacroState(pHouse).NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 1800;
 					Debug::Log("[NeuralAI] HarvesterRecovery: House %d selling temporary "
 							"recovery refinery %s at (%d,%d) after spawning FreeUnit "
 							"harvester.\n",
@@ -455,7 +493,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (Unsorted::CurrentFrame > pExt->LastObsoleteRefineryCheckFrame + 450 + houseStagger)
 		{
 			pExt->LastObsoleteRefineryCheckFrame = Unsorted::CurrentFrame;
-			RecycleObsoleteRefineries(pHouse);
+			auto& relaxedReach = GetMacroState(pHouse).RelaxedReachRefineries;
+			relaxedReach.erase(std::remove_if(relaxedReach.begin(), relaxedReach.end(), [pHouse](DWORD id)
+				{
+					return std::none_of(pHouse->Buildings.begin(), pHouse->Buildings.end(),
+						[id](BuildingClass* pB) { return pB && pB->IsAlive && pB->UniqueID == id; });
+				}), relaxedReach.end());
+			RecycleObsoleteRefineries(pHouse, pExt->NeuralAI_ActiveExpert == 6, relaxedReach);
+			if (SellFactoriesOverDifficultyCap(pHouse, GetNewestOffensiveStoneCell(pHouse)))
+				GetMacroState(pHouse).LastFactoryCapSaleFrame = Unsorted::CurrentFrame;
 			RaiseEmergencyMoneyForRefinery(pHouse, ownedRefineries, ownedHarvestersCount, money);
 		}
 
@@ -831,7 +877,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			bankMacro.TechCoveragePct = buildableTypes > 0 ? (ownedTypes * 100) / buildableTypes : 100;
-			bankMacro.BankFactoryRoom = pRoomProbe && NeuralAI::FindSpatialTetrisBuildCell(pHouse, pRoomProbe) != CellStruct::Empty;
+			bankMacro.BankFactoryRoom = pRoomProbe && CachedTetrisBuildCell(pHouse, pRoomProbe) != CellStruct::Empty;
 		}
 
 		// Never a production loop: the boost only exists in every other 900-frame window (in the
@@ -869,6 +915,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& bankMacro.ConsecutivePlacementFailures <= 2 && bankWindowOpen && !expansionMcvUnderway)
 			? money / 15000
 			: 0;
+
+		// Bank governor (UpdateBankGovernor): the factories it wants come past the caps, never into
+		// a streak of failed placements. The best of them is remembered for the pick after the loop.
+		const bool bankGovernorBuilds = bankMacro.BankGovernorActive && bankMacro.ConsecutivePlacementFailures <= 2;
+		int bankFactoryIdx = -1;
+		int bankFactoryBest = -32000;
+
+		// The queue with the largest deficit first, then the best score among its factories.
+		auto const rememberBankFactory = [&bankFactoryIdx, &bankFactoryBest](BuildingTypeClass* pType, int score, int deficit)
+		{
+			const int rank = std::min(deficit, 20) * 10000 + std::clamp(score, -9999, 9999);
+
+			if (rank > bankFactoryBest)
+			{
+				bankFactoryBest = rank;
+				bankFactoryIdx = pType->ArrayIndex;
+			}
+		};
 
 		// Offensive fronts: forward stones alive raise the factory caps (2 more per 4 stones, up
 		// to 8), so the hot zones keep receiving factories after the home base has its share.
@@ -1184,15 +1248,38 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// AdvAI & StarCraft Resource Expansion State Machine:
 		// Measure minimum Chebyshev distance from our closest
 		// BaseNormal/ConYard/CapturedTech anchor to the nearest uncolonized Ore/Gem
-		// field (>= 10 cells from any owned Refinery).
+		// field (>= 14 cells from any owned Refinery, outside the ore blocks we already
+		// hold: the edge of our own field is not a new one).
 		// - If minAnchorDistToUncolonizedOre <= 9: our BaseNormal chain, Captured
 		// Tech Building, or Expansion ConYard has reached the new Ore field!
 		// Trigger ShouldBuildRefinery (+1950)!
-		// - If minAnchorDistToUncolonizedOre is 10..38: boost BaseNormal=yes
+		// - If minAnchorDistToUncolonizedOre is 10..60: boost BaseNormal=yes
 		// stepping-stone structures (Power Plants / Barracks / Outposts) so the
 		// base actively crawls to reach the Ore!
 		CellStruct nearestUncolonizedOreCell = CellStruct::Empty;
 		int minAnchorDistToUncolonizedOre = 9999;
+		const std::vector<int> heldOreBlocks = GetHeldOreBlocks(pHouse);
+		// With two refineries standing, a building within 8 cells of one does not count as having
+		// reached a field (AdvAI spacing): the refinery would stand next to the others again, so
+		// the stepping stones go on until one stands clear of them.
+		std::vector<CellStruct> spacingRefineryCells;
+
+		for (auto const pRefBld : pHouse->Buildings)
+		{
+			if (pRefBld && pRefBld->IsAlive && !pRefBld->InLimbo && pRefBld->Type
+				&& (pRefBld->Type->Refinery || pRefBld->Type->ResourceDestination))
+			{
+				spacingRefineryCells.push_back(pRefBld->GetMapCoords());
+			}
+		}
+
+		auto const crowdsRefinery = [&spacingRefineryCells](const CellStruct& cell)
+		{
+			return spacingRefineryCells.size() >= 2
+				&& std::any_of(spacingRefineryCells.begin(), spacingRefineryCells.end(), [&cell](const CellStruct& rc)
+					{ return std::max(std::abs(cell.X - rc.X), std::abs(cell.Y - rc.Y)) <= 8; });
+		};
+
 		for (const CellStruct& scanOrigin : scanOrigins)
 		{
 			if (scanOrigin == CellStruct::Empty)
@@ -1210,7 +1297,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						continue;
 
 					const int oreZone = MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false);
-					if (oreZone < 0)
+					if (oreZone < 0 || IsOreCellInHeldField(heldOreBlocks, tc))
 						continue;
 
 					bool alreadyColonizedByRef = false;
@@ -1231,14 +1318,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						const int dCheb = std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y));
 						if ((pOwnBld->Type->Refinery || pOwnBld->Type->ResourceGatherer
 								|| pOwnBld->Type->ResourceDestination)
-							&& dCheb < 10)
+							&& dCheb < 14)
 						{
 							alreadyColonizedByRef = true;
 							break;
 						}
 
-						if (pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard
-							|| BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
+						if ((pOwnBld->Type->BaseNormal || pOwnBld->Type->ConstructionYard
+								|| BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type))
+							&& !crowdsRefinery(bc))
 						{
 							if (dCheb < closestAnchorDist)
 								closestAnchorDist = dCheb;
@@ -1258,6 +1346,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		bool forwardConYardNeedsWarFactory = false;
 		bool forwardConYardNeedsBarracks = false;
 		bool forwardConYardNeedsDefense = false;
+		// A ConYard of ours on another landmass with useful water close by and no shipyard of ours
+		// within 22 cells: each conquered island gets its own shipyard (sea control there).
+		bool islandYardNeedsShipyard = false;
 		const int spawnHomeZone = (pHouse->BaseSpawnCell != CellStruct::Empty)
 			? MapClass::Instance.GetMovementZoneType(pHouse->BaseSpawnCell, MovementZone::Normal, false)
 			: -1;
@@ -1296,10 +1387,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (cyz < 0)
 				continue;
 
-			const bool isRemoteOrNomadicCY = (yi >= 1)
+			// Remote as placement sees a hub (FindSpatialTetrisBuildCell): another landmass, or more
+			// than 16 cells from the spawn. A second yard deployed inside the home base is not an
+			// outpost: its missing factory was never placed next to it (placement anchors at hubs
+			// only), so it kept asking for one forever.
+			const bool isRemoteOrNomadicCY = (spawnHomeZone >= 0 && cyz != spawnHomeZone)
 				|| (pHouse->BaseSpawnCell != CellStruct::Empty
-					&& std::max(std::abs(cyc.X - pHouse->BaseSpawnCell.X), std::abs(cyc.Y - pHouse->BaseSpawnCell.Y))
-						> 16);
+					? std::max(std::abs(cyc.X - pHouse->BaseSpawnCell.X), std::abs(cyc.Y - pHouse->BaseSpawnCell.Y)) > 16
+					: yi >= 1);
 			if (!isRemoteOrNomadicCY)
 				continue;
 
@@ -1403,6 +1498,33 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					forwardConYardNeedsDefense = true;
 			}
 
+			if (!islandYardNeedsShipyard && spawnHomeZone >= 0 && cyz != spawnHomeZone && !enemyNearCY)
+			{
+				const bool hasShipyardNear = std::any_of(pHouse->Buildings.begin(), pHouse->Buildings.end(), [&cyc](BuildingClass* pB)
+					{
+						return pB && pB->IsAlive && !pB->InLimbo && pB->Type && pB->Type->Factory == AbstractType::UnitType
+							&& pB->Type->Naval && pB->GetMapCoords().DistanceFrom(cyc) <= 22.0;
+					});
+
+				if (!hasShipyardNear)
+				{
+					for (int wy = -12; wy <= 12 && !islandYardNeedsShipyard; wy += 3)
+					{
+						for (int wx = -12; wx <= 12; wx += 3)
+						{
+							const CellStruct wc { static_cast<short>(cyc.X + wx), static_cast<short>(cyc.Y + wy) };
+							auto const pWaterCell = MapClass::Instance.TryGetCellAt(wc);
+
+							if (pWaterCell && pWaterCell->LandType == LandType::Water && IsUsefulWaterCell(wc))
+							{
+								islandYardNeedsShipyard = true;
+								break;
+							}
+						}
+					}
+				}
+			}
+
 			if (islandHoldActive && defsNearCY < 3 && cyc.DistanceFrom(holdMacro.IslandHoldCell) <= 2.0)
 				forwardConYardNeedsDefense = true;
 		}
@@ -1411,9 +1533,63 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			= (conYardWithNoRefineryInZone
 				|| (nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre <= 9))
 			&& ownedRefineries >= 1;
+
+		// Permanent refinery cap: a home cap, raised to 3 per ConYard while a new
+		// field waits for its refinery. Past it a refinery is only built as a Harvester Recovery
+		// refinery (replaced in place or sold once its FreeUnit spawns), never kept: a permanent
+		// one past the cap raised the harvester target (2 per refinery), which asked for another
+		// recovery refinery, and the chain filled the map with refineries far from any field.
+		const int homeRefineryCap = (reachedNewOreField || pHouse->NumConYards >= 2 || features[21] > 0
+										|| (hasTechCenter && money < 3000))
+			? std::max(6, pHouse->NumConYards + 4)
+			: 4;
+		const bool permanentRefineryCapReached = reachedNewOreField
+			? ownedRefineries >= std::max(homeRefineryCap, pHouse->NumConYards * 3)
+			: ownedRefineries >= homeRefineryCap;
+
+		// Outposts that may get a factory past the difficulty cap (SellFactoriesOverDifficultyCap
+		// then sells another of its type): a forward or island ConYard without one, or the front of
+		// an offensive crawl (newest forward stone) without one within 15 cells.
+		const int factoryCategoryCap = GetFactoryCategoryCap(pHouse);
+		std::array<int, 3> factoryCategoryCounts {};
+
+		if (factoryCategoryCap != INT_MAX)
+		{
+			for (int category = 0; category < 3; ++category)
+				factoryCategoryCounts[category] = CountFactoriesInCategory(pHouse, category);
+		}
+		bool frontNeedsBarracks = false;
+		bool frontNeedsWarFactory = false;
+
+		if (factoryCategoryCap != INT_MAX)
+		{
+			const CellStruct stoneCell = GetNewestOffensiveStoneCell(pHouse);
+
+			if (stoneCell != CellStruct::Empty)
+			{
+				frontNeedsBarracks = true;
+				frontNeedsWarFactory = true;
+
+				for (auto const pOwnB : pHouse->Buildings)
+				{
+					if (!pOwnB || !pOwnB->IsAlive || pOwnB->InLimbo || !pOwnB->Type)
+						continue;
+
+					const CellStruct bc = pOwnB->GetMapCoords();
+					if (std::max(std::abs(bc.X - stoneCell.X), std::abs(bc.Y - stoneCell.Y)) > 15)
+						continue;
+
+					if (pOwnB->Type->Factory == AbstractType::InfantryType)
+						frontNeedsBarracks = false;
+					else if (pOwnB->Type->Factory == AbstractType::UnitType && !pOwnB->Type->Naval)
+						frontNeedsWarFactory = false;
+				}
+			}
+		}
+
 		const bool needsSteppingStoneCrawlToOre = (GetMacroState(pHouse).ConsecutivePlacementFailures < 2
 			&& nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre > 9
-			&& minAnchorDistToUncolonizedOre <= 38 && hasCoreEconomyAndProduction
+			&& minAnchorDistToUncolonizedOre <= 60 && hasCoreEconomyAndProduction
 			&& (features[19] < 32 || ownedRefineries < 3 || scores[34] > 100 || Unsorted::CurrentFrame > 2100));
 
 		// AdvAI Start-Rush Emergency Defense Interception:
@@ -1532,16 +1708,161 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		// Harvester recovery through a refinery's FreeUnit (sell-and-replace or a temporary one) only
+		// up to one harvester per refinery: the war factory builds the second (economyUnitCap). Aiming
+		// at two kept the ConYard selling and rebuilding refineries all match (30 times in one test
+		// house), so radar, tech center and defenses never got their turn.
+		// Not while broke (UpdateEconomyCrisis): selling a working refinery to rebuild it splits the
+		// last credits between the refinery and the harvester the war factory builds.
 		const bool wantsHarvesterRecoveryViaRefinery = (pHouse->ConYards.Count >= 1 && staticRefineriesCount >= 1
+			&& !GetMacroState(pHouse).BrokeHoldActive
 			&& Unsorted::CurrentFrame >= GetMacroState(pHouse).NextHarvesterRecoveryFrame
 			&& GetMacroState(pHouse).TemporaryRecoveryRefineryPlacedFrame.empty()
 			&& (orphanRefineryZoneNeedsReplacement >= 0
-				|| (ownedHarvestersCount < staticRefineriesCount * 2
+				|| (ownedHarvestersCount < staticRefineriesCount
 					&& (ownedHarvestersCount == 0 || ownedWarFactories >= 1) && features[19] > 0
 					&& (money >= 900 || ownedHarvestersCount == 0))));
 		const bool hasActiveBuildingIncome = (ownedCashBuildings >= 1)
 			|| (((ownedRefineries >= 1 && ownedHarvestersCount >= 1) || ownedSlaveMinerBuildings >= 1)
 				&& (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
+
+		// Team games: an ally building under attack now (an armed enemy in our sight within 8 cells,
+		// the building below 80%) while our own base is not (no armed enemy in sight within 16 cells
+		// of any ConYard of ours): armed ground defenses get a bonus and placement puts them there
+		// (AllyDefenseCell), while we have fewer than 2 within 10 cells. Not within 15 cells of a
+		// ConYard of ours: there our own defenses already cover both bases.
+		CellStruct allyDefenseCell = CellStruct::Empty;
+		const bool ownYardsQuiet = std::none_of(pHouse->ConYards.begin(), pHouse->ConYards.end(), [pHouse](BuildingClass* pYard)
+			{
+				return pYard && VisibleEnemyThreatNear(pHouse, pYard->GetMapCoords(), 16) > 0;
+			});
+
+		if (GameModeOptionsClass::Instance.BuildOffAlly && pHouse->ConYards.Count > 0 && ownYardsQuiet
+			&& !frontlineThreatActive && money >= 1500)
+		{
+			int bestThreat = 0;
+
+			for (auto const pAllyBld : BuildingClass::Array)
+			{
+				if (!pAllyBld || !pAllyBld->IsAlive || pAllyBld->InLimbo || !pAllyBld->Type || !pAllyBld->Owner
+					|| pAllyBld->Owner == pHouse || !pHouse->IsAlliedWith(pAllyBld->Owner) || pAllyBld->Owner->IsNeutral()
+					|| !pAllyBld->Type->EligibileForAllyBuilding || pAllyBld->GetHealthPercentage() >= 0.80)
+				{
+					continue;
+				}
+
+				const CellStruct bc = pAllyBld->GetMapCoords();
+
+				if (std::any_of(pHouse->ConYards.begin(), pHouse->ConYards.end(),
+						[&bc](BuildingClass* pYard) { return pYard && pYard->GetMapCoords().DistanceFrom(bc) < 15.0; }))
+				{
+					continue;
+				}
+
+				const int threat = VisibleEnemyThreatNear(pHouse, bc, 8);
+
+				if (threat <= bestThreat)
+					continue;
+
+				const int ownDefensesThere = static_cast<int>(std::count_if(pHouse->Buildings.begin(), pHouse->Buildings.end(),
+					[&bc](BuildingClass* pOwn)
+					{
+						return pOwn && pOwn->IsAlive && !pOwn->InLimbo && pOwn->Type && pOwn->Type->IsBaseDefense
+							&& pOwn->GetMapCoords().DistanceFrom(bc) <= 10.0;
+					}));
+
+				if (ownDefensesThere >= 2)
+					continue;
+
+				bestThreat = threat;
+				allyDefenseCell = bc;
+			}
+		}
+
+		// The spot stays valid 1800 frames after the threat was last seen: the defense chosen for it
+		// takes a while to build and must still go there once ready.
+		if (allyDefenseCell != CellStruct::Empty)
+		{
+			GetMacroState(pHouse).AllyDefenseCell = allyDefenseCell;
+			GetMacroState(pHouse).AllyDefenseUntilFrame = Unsorted::CurrentFrame + 1800;
+		}
+		else if (GetMacroState(pHouse).AllyDefenseUntilFrame <= Unsorted::CurrentFrame)
+		{
+			GetMacroState(pHouse).AllyDefenseCell = CellStruct::Empty;
+			GetMacroState(pHouse).AllyDefenseUntilFrame = -1;
+		}
+
+		// Expansion MCV prerequisites: a house that wants to expand (slot 30, free ore fields) but
+		// cannot build any MCV yet is often missing one building of the MCV's Prerequisite list
+		// (YR asks for a service depot besides the war factory). Those buildings get a bonus.
+		std::vector<int> mcvPrerequisites;
+
+		if (pHouse->NumConYards >= 1 && pHouse->NumConYards < 6 && scores[30] >= 450 && money >= 2000
+			&& GetMacroState(pHouse).UncolonizedOreFields > 0)
+		{
+			bool mcvBuildable = false;
+			std::vector<int> missing;
+
+			for (auto const pMcvType : UnitTypeClass::Array)
+			{
+				if (!pMcvType || !pMcvType->DeploysInto || !pMcvType->DeploysInto->ConstructionYard || pMcvType->TechLevel < 0
+					|| (ownHouseBit != 0u && !pMcvType->InOwners(ownHouseBit)))
+				{
+					continue;
+				}
+
+				if (pHouse->CanBuild(pMcvType, false, false) == CanBuildResult::Buildable)
+				{
+					mcvBuildable = true;
+					break;
+				}
+
+				for (int pi = 0; pi < pMcvType->Prerequisite.Count; ++pi)
+					missing.push_back(pMcvType->Prerequisite.GetItem(pi));
+			}
+
+			if (!mcvBuildable)
+				mcvPrerequisites = std::move(missing);
+		}
+
+		// Opening order of a player: a refinery or two, then the war factory. Without one, and with a
+		// ground war factory buildable now, the first war factory is pushed and further refineries
+		// wait (one Soviet test house built six refineries, most failing to place, before its first
+		// war factory at frame 24000+).
+		bool groundWarFactoryBuildableNow = false;
+
+		if (ownedWarFactories == 0)
+		{
+			for (auto const pFactoryType : BuildingTypeClass::Array)
+			{
+				if (pFactoryType && pFactoryType->Factory == AbstractType::UnitType && !pFactoryType->Naval
+					&& !pFactoryType->UndeploysInto && CanBuildUnderHumanRules(pHouse, pFactoryType))
+				{
+					groundWarFactoryBuildableNow = true;
+					break;
+				}
+			}
+		}
+
+		// Naval matches (HouseNeedsNaval: starts not linked by land, free ore only across water, enemy
+		// warships seen): the sea decides where we can expand, so the first shipyard comes before the
+		// first war factory, when shipyards are allowed and buildable now.
+		bool navalFirst = false;
+
+		if (ownedShipyards == 0 && HouseNeedsNaval(pHouse))
+		{
+			for (auto const pYardType : BuildingTypeClass::Array)
+			{
+				if (pYardType && pYardType->Factory == AbstractType::UnitType && pYardType->Naval
+					&& CanBuildUnderHumanRules(pHouse, pYardType))
+				{
+					navalFirst = true;
+					break;
+				}
+			}
+		}
+
+		const bool firstFactoryPending = groundWarFactoryBuildableNow || navalFirst;
 
 		for (auto const pBld : BuildingTypeClass::Array)
 		{
@@ -1586,6 +1907,69 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			const int owned = BuildingTypeExt::CountOwnedNowWithDeployOrUpgrade(pBld, pHouse);
+
+			// Difficulty cap per factory category (all barracks together, all ground war factories
+			// together, all shipyards together: 4 on Easy, 10 on Normal, none on Hard). At the cap one
+			// more is allowed for an outpost that needs it or for the first of a new type a captured
+			// tree opened (not within 4500 frames of the last cap sale); SellFactoriesOverDifficultyCap
+			// then sells a copy of that category.
+			if (const int category = FactoryCapCategory(pBld);
+				factoryCategoryCap != INT_MAX && category >= 0 && factoryCategoryCounts[category] >= factoryCategoryCap)
+			{
+				const bool outpostNeedsIt = (category == 0)
+					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
+					: (category == 1 ? (forwardConYardNeedsWarFactory || frontNeedsWarFactory) : islandYardNeedsShipyard);
+				const bool newFactoryType = owned == 0;
+				const bool saleCooldownOver = Unsorted::CurrentFrame - GetMacroState(pHouse).LastFactoryCapSaleFrame >= 4500;
+
+				if (!(outpostNeedsIt || newFactoryType) || !saleCooldownOver || factoryCategoryCounts[category] > factoryCategoryCap)
+					continue;
+			}
+
+			// Tech before copies, as a human player: no second Barracks or War Factory of a type
+			// while a building that unlocks new units or buildings can be built right now, unless
+			// an outpost needs it. Airfields keep following the demand of the docking aircraft.
+			const bool isGroundFactoryOrBarracks = pBld->Factory == AbstractType::InfantryType
+				|| (pBld->Factory == AbstractType::UnitType && !pBld->Naval);
+
+			// The bank governor's copies stay: a bank that outgrows the queues pays for both, and the
+			// tech keeps the windows the governor leaves (bankFactoryWindow).
+			if (isGroundFactoryOrBarracks && owned >= 1 && GetMacroState(pHouse).HasBuildableTechUnlock)
+			{
+				const bool outpostNeedsCopy = (pBld->Factory == AbstractType::InfantryType)
+					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
+					: (forwardConYardNeedsWarFactory || frontNeedsWarFactory);
+				const bool bankNeedsCopy = bankGovernorBuilds
+					&& ((pBld->Factory == AbstractType::InfantryType)
+						? BankFactoryDeficit(pHouse, BankQueue::Infantry, pHouse->NumBarracks) > 0
+						: BankFactoryDeficit(pHouse, BankQueue::Vehicle, pHouse->NumWarFactories) > 0);
+
+				if (!outpostNeedsCopy && !bankNeedsCopy)
+					continue;
+			}
+
+			// Tech tree unlockers (UpdateTechUnlocks): the first of a building that opens new units
+			// or buildings gets 300 + 120 per type it unlocks (up to 1400) once the core economy
+			// and production stand.
+			int techUnlockBonus = 0;
+
+			if (owned == 0 && hasCoreEconomyAndProduction)
+			{
+				auto const& unlocks = GetMacroState(pHouse).TechUnlocks;
+
+				if (auto const it = unlocks.find(pBld->ArrayIndex); it != unlocks.end() && it->second > 0)
+					techUnlockBonus = std::min(1400, 300 + 120 * it->second);
+
+				// Expert 2: more when it opens a better counter of the seen enemy army.
+				techUnlockBonus += CounterUnlockBonusFor(pHouse, pBld);
+			}
+
+			// Branch choices (Prerequisite.Negative: two tech labs, rival defense lines): the first of
+			// each gets a per-match taste of +-250, so one match goes one way and another the other,
+			// as players do. Deterministic in multiplayer (game seed, house, building).
+			if (owned == 0 && IsBranchChoiceBuilding(pBld->ArrayIndex))
+				techUnlockBonus += MatchTaste(pHouse, pBld->ArrayIndex, 250);
+
 			int score = 0;
 
 			if (pBld->PowerBonus > pBld->PowerDrain && !pBld->IsBaseDefense)
@@ -1664,12 +2048,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					&& pBld->UndeploysInto == nullptr && pBld->FreeUnit != nullptr
 					&& (pBld->FreeUnit->Harvester || pBld->FreeUnit->ResourceGatherer);
 				const bool isHarvRecoveryCandidate = spawnsFreeHarvester && wantsHarvesterRecoveryViaRefinery;
-				const int maxRefineries = (reachedNewOreField || pHouse->NumConYards >= 2 || features[21] > 0
-											|| (hasTechCenter && money < 3000))
-					? std::max(6, pHouse->NumConYards + 4)
-					: 4;
-
-				if (owned >= maxRefineries && !isHarvRecoveryCandidate)
+				if (permanentRefineryCapReached && !isHarvRecoveryCandidate)
 					continue;
 
 				score = scores[1] - owned * 480;
@@ -1678,11 +2057,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += 1200;
 				}
-				else if (reachedNewOreField)
+				else if (reachedNewOreField && !permanentRefineryCapReached)
 				{
-					score += 1950; // AdvAI ShouldBuildRefinery: our BaseNormal chain or
-								// Expansion MCV reached a new Ore field! Claim it
-								// immediately!
+					// AdvAI ShouldBuildRefinery: our BaseNormal chain or Expansion MCV reached
+					// a new Ore field! Claim it immediately! Like a forward Barracks, it is not
+					// penalized by the refineries of the home field (6 of them sank it below
+					// any other building, so expansion ConYards stood on unmined ore).
+					score = std::max(static_cast<int>(scores[1]), 300) + 1950;
 				}
 				else if (isHarvRecoveryCandidate
 					&& (orphanRefineryZoneNeedsReplacement >= 0 || ownedHarvestersCount < staticRefineriesCount))
@@ -1701,13 +2082,31 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += 450;
 				}
+
+				// Opening order (firstFactoryPending): after two refineries, or after one when the next
+				// refinery has just failed to find a cell, the first war factory (or shipyard) comes first. Applied
+				// after every branch above, the new-field one included.
+				if (firstFactoryPending && !isHarvRecoveryCandidate
+					&& (ownedRefineries >= 2 || (ownedRefineries >= 1 && GetMacroState(pHouse).RefineryReachFailures > 0)))
+				{
+					score -= 2500;
+				}
+
+				// Expert 0 after a raid: refineries back to their peak first.
+				if (pExt->NeuralAI_ActiveExpert == 0 && GetMacroState(pHouse).EconomyRecoveryActive
+					&& ownedRefineries < GetMacroState(pHouse).PeakRefineries)
+				{
+					score += 1500;
+				}
 			}
 			else if (pBld->Factory == AbstractType::InfantryType)
 			{
 				const int effectiveMaxBarracks = forwardConYardNeedsBarracks
-					? std::max({ maxBarracks + 2, owned + 1, 5 })
+					? std::max(maxBarracks + 2, 5) + pHouse->NumConYards
 					: ((needsSteppingStoneCrawlToOre && pBld->BaseNormal) ? std::max(maxBarracks + 1, 4) : maxBarracks);
-				if (owned >= effectiveMaxBarracks)
+				const int bankBarracks = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Infantry, pHouse->NumBarracks) : 0;
+
+				if (owned >= effectiveMaxBarracks && bankBarracks == 0)
 					continue;
 
 				// Slot 82 (Cross-Faction Tech Tree): If we already own our native
@@ -1738,12 +2137,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 									// Ore / Frontline!
 					}
 				}
+
+				if (bankBarracks > 0)
+					rememberBankFactory(pBld, score, bankBarracks);
 			}
 			else if (pBld->Factory == AbstractType::UnitType && !pBld->Naval)
 			{
 				const int effectiveMaxWarFactories
-					= forwardConYardNeedsWarFactory ? std::max({ maxWarFactories + 2, owned + 1, 6 }) : maxWarFactories;
-				if (owned >= effectiveMaxWarFactories)
+					= forwardConYardNeedsWarFactory ? std::max(maxWarFactories + 2, 6) + pHouse->NumConYards : maxWarFactories;
+				const int bankWarFactories = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Vehicle, pHouse->NumWarFactories) : 0;
+
+				if (owned >= effectiveMaxWarFactories && bankWarFactories == 0)
 					continue;
 
 				// Slot 82 (Cross-Faction Tech Tree): If we already own our native War
@@ -1765,6 +2169,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score = scores[3] - owned * (bankSteps > 0 ? 300 : 620) + (bankSteps > 0 ? 400 + 150 * std::min(6, bankSteps) : 0);
 
+					// The first war factory once a refinery stands (see groundWarFactoryBuildableNow),
+					// after the first shipyard on a naval match (navalFirst).
+					if (ownedWarFactories == 0 && ownedRefineries >= 1)
+						score += navalFirst ? -800 : 1200;
+
 					// Competitive MultipleFactory Arms Race boost: never fall behind
 					// the enemy in War Factory count or when floating macro cash!
 					if (ownedWarFactories < maxEnemyWarFactories && ownedRefineries >= 2)
@@ -1773,23 +2182,41 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (ownedWarFactories < ecoWarFactoryCap && money >= 2000)
 						score += 420;
 				}
+
+				if (bankWarFactories > 0)
+					rememberBankFactory(pBld, score, bankWarFactories);
 			}
 			else if (pBld->Factory == AbstractType::UnitType && pBld->Naval)
 			{
-				if (owned >= maxShipyards)
+				const int bankShipyards = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Naval, pHouse->NumShipyards) : 0;
+
+				if (owned >= maxShipyards + (islandYardNeedsShipyard ? 1 : 0) && bankShipyards == 0)
 					continue;
 
-				if (!HouseNeedsNaval(pHouse) || NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
+				if (!(HouseNeedsNaval(pHouse) || islandYardNeedsShipyard) || CachedTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
 					continue;
 
 				score = scores[7] - owned * 950;
 
+				// The first shipyard of a naval match once a refinery stands (navalFirst).
+				if (navalFirst && ownedRefineries >= 1)
+					score += 1600;
+
+				// A conquered island's own shipyard (islandYardNeedsShipyard).
+				if (islandYardNeedsShipyard)
+					score += 1300;
+
 				if (ownedShipyards < maxEnemyShipyards && ownedShipyards >= 1 && money >= 1800)
 					score += 400;
+
+				if (bankShipyards > 0)
+					rememberBankFactory(pBld, score, bankShipyards);
 			}
 			else if (pBld->Factory == AbstractType::AircraftType)
 			{
-				if (owned >= maxAirpads)
+				const int bankAirpads = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Aircraft, pHouse->NumAirpads) : 0;
+
+				if (owned >= maxAirpads && bankAirpads == 0)
 					continue;
 
 				if (owned == 0 && pHouse->NumAirpads >= 1 && pHouse->NumAirpads < 4 && SlotGate(scores[82], 60, 82))
@@ -1804,6 +2231,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (ownedAirpads < maxEnemyAirpads && hasTechCenter && money >= 2000)
 						score += 350;
 				}
+
+				if (bankAirpads > 0)
+					rememberBankFactory(pBld, score, bankAirpads);
 			}
 			else if (pBld->UnitRepair)
 			{
@@ -1829,8 +2259,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 			else if (pBld->Storage > 0 && !isRefineryOrSlaveMiner)
 			{
-				// Only build Ore Silos when storage is actually full/short, max 2
-				if (owned >= 2 || (!pHouse->IsTiberiumShort && money < 3500))
+				// Silos only while storage really limits our income (refineries with
+				// Refinery.UseStorage nearly full), at most 2. Without that a silo is money thrown away.
+				if (owned >= 2 || !GetMacroState(pHouse).StorageNearlyFull)
 					continue;
 
 				score = scores[11] - owned * 900;
@@ -1918,13 +2349,28 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 				}
 
+				// Defense budget (NeuralAI.Defense.inl): none while broke, none beyond the value our army
+				// and economy justify, fewer when our towers die without paying back or seen enemy
+				// artillery outranges this one. A tower already in construction is finished.
+				int defenseBudgetShift = 0;
+
+				if (!isBldInProgress)
+				{
+					bool budgetBlocked = false;
+					defenseBudgetShift = DefenseBudgetShift(pHouse, pBld, isPureAA, totalGroundDefenses, totalAADefenses, budgetBlocked);
+
+					if (budgetBlocked)
+						continue;
+				}
+
 				const bool isAntiArmorOrHighTierDefense = !isPureAA && !isUnarmedBunker && isAntiArmor;
 				const bool isBasicAntiInfantryDefense = !isPureAA && !isUnarmedBunker && isAntiInf && !isAntiArmor;
 
 				const int tierQualityBonus
 					= isUnarmedBunker ? 100 : std::min(950, (pBld->Cost / 2) + std::max(0, pBld->TechLevel) * 150);
 
-				score = (isPureAA ? scores[6] : std::max(static_cast<int>(scores[5]), 320)) + tierQualityBonus;
+				score = (isPureAA ? scores[6] : std::max(static_cast<int>(scores[5]), 320)) + tierQualityBonus
+					+ CounterBonusFor(pHouse, pBld) + defenseBudgetShift;
 
 				if (islandHoldActive && (isPureAA ? islandHoldNeedsAA : !isUnarmedBunker))
 					score += 450;
@@ -2040,6 +2486,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += 250 + std::clamp(static_cast<int>(scores[82]) / 2, 0, 300);
 			}
 
+			score += techUnlockBonus;
+
+			if (allyDefenseCell != CellStruct::Empty && pBld->IsBaseDefense && GroundRangeOf(pBld) > 0 && !pBld->CanBeOccupied
+				&& !pBld->Bunker)
+			{
+				score += 900;
+			}
+
 			if (GetMacroState(pHouse).ConsecutivePlacementFailures == 1 && pBld->BaseNormal
 				&& pBld->GetFoundationWidth() <= 2 && pBld->GetFoundationHeight(false) <= 2)
 			{
@@ -2060,6 +2514,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 			}
 
+			if (!mcvPrerequisites.empty() && pHouse->CountOwnedNow(pBld) == 0
+				&& std::find(mcvPrerequisites.begin(), mcvPrerequisites.end(), pBld->ArrayIndex) != mcvPrerequisites.end())
+			{
+				// Ahead of routine picks, whatever the learned slot of that building says: without it
+				// the house never builds another MCV.
+				score = std::max(score + 900, 2600 + static_cast<int>(scores[30]) / 4);
+			}
+
 			if (isBldInProgress && (!pHouse->HasLowPower() || pBld->PowerBonus > pBld->PowerDrain))
 			{
 				score += 850; // Commit to finishing partially constructed buildings in
@@ -2070,6 +2532,50 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				bestBldScore = score;
 				bestBldIdx = pBld->ArrayIndex;
+			}
+		}
+
+		// Bank governor: in its share of the 900-frame windows the next structure is the factory it
+		// wants most; the other windows keep the usual picks (tech, defenses, power, refineries).
+		// Building time is what a big bank lacks, so the share grows with the surplus: two windows
+		// in four, three from 50000 credits beyond the reserve, all from 100000. Under attack or
+		// facing a frontline threat none below 30000, one from 30000, two from 100000. Never while
+		// restoring income.
+		const bool bankUnderThreat = wasRecentlyAttacked || effectiveFrontlineThreat;
+		const int bankSurplus = bankMacro.BankSurplus;
+		const int bankWindowShare = bankUnderThreat ? (bankSurplus >= 100000 ? 2 : (bankSurplus >= 30000 ? 1 : 0))
+			: (bankSurplus >= 100000 ? 4 : (bankSurplus >= 50000 ? 3 : 2));
+		const bool bankFactoryWindow = (bankWindow % 4) < bankWindowShare;
+
+		if (bankFactoryIdx >= 0 && bestBldIdx != bankFactoryIdx && bankFactoryWindow && hasActiveBuildingIncome)
+		{
+			bestBldIdx = bankFactoryIdx;
+
+			if (IsAITickWindow(450, evalDelay))
+				CountDecision(NeuralDecision::BankFactoryPick, pHouse->ArrayIndex);
+		}
+
+		// Ally site plans (Ally Backup, Ally Forward Outpost) ask for one building next to an ally's
+		// base: it comes before routine picks, never before restoring income, a building already
+		// under construction or anything scored as an emergency (2700+).
+		{
+			auto const& siteMacro = GetMacroState(pHouse);
+
+			if (siteMacro.AllySiteUntilFrame > Unsorted::CurrentFrame && siteMacro.AllySiteBuildType >= 0
+				&& siteMacro.AllySiteBuildType < BuildingTypeClass::Array.Count && hasActiveBuildingIncome
+				&& inProgressBldIdx < 0 && bestBldScore < 2700)
+			{
+				auto const pSiteType = BuildingTypeClass::Array.GetItem(siteMacro.AllySiteBuildType);
+				auto const cdIt = siteMacro.BuildingPlacementCooldownUntilFrame.find(siteMacro.AllySiteBuildType);
+				const bool coolingDown = cdIt != siteMacro.BuildingPlacementCooldownUntilFrame.end()
+					&& Unsorted::CurrentFrame < cdIt->second;
+
+				if (pSiteType && !coolingDown && !HouseExt::IsDisabledFromShell(pHouse, pSiteType)
+					&& CanBuildUnderHumanRules(pHouse, pSiteType) && money >= pSiteType->GetActualCost(pHouse))
+				{
+					bestBldIdx = siteMacro.AllySiteBuildType;
+					bestBldScore = 2700;
+				}
 			}
 		}
 
@@ -2105,7 +2611,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				&& pChosenBld->FreeUnit != nullptr
 				&& (pChosenBld->FreeUnit->Harvester || pChosenBld->FreeUnit->ResourceGatherer);
 			if (chosenIsStaticRefWithHarv && wantsHarvesterRecoveryViaRefinery
-				&& (!reachedNewOreField || orphanRefineryZoneNeedsReplacement >= 0) && staticRefineriesCount >= 1)
+				&& (!reachedNewOreField || orphanRefineryZoneNeedsReplacement >= 0 || permanentRefineryCapReached)
+				&& staticRefineriesCount >= 1)
 			{
 				GetMacroState(pHouse).IsBuildingRecoveryRefinery = true;
 				GetMacroState(pHouse).TargetRecoveryRefineryZone = orphanRefineryZoneNeedsReplacement;
@@ -2412,7 +2919,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	const int ecoBiasMod = std::clamp(static_cast<int>(scores[39]) / 220, -1, 2);
-	const int economyUnitCap = (trueRefineries > 0) ? std::clamp(2 * trueRefineries + 1 + ecoBiasMod, 2, 18) : 4;
+	// About 2 harvesters per refinery, at most 18; one per refinery with a bank of 50000+ credits
+	// (income is not what limits that house: more harvesters only crowd the refineries).
+	const int economyUnitCap = (trueRefineries > 0)
+		? std::clamp((money >= 50000 ? trueRefineries + 1 : 2 * trueRefineries + 1 + ecoBiasMod), 2, 18)
+		: 4;
 
 	// Emergency ConYard Reconstruction: If we lost all ConYards and have no MCV
 	// on the map, check if our War Factory + Service Depot/Grinder/Tech can
@@ -2519,12 +3030,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	const bool hasUncolonizedIslandTarget
 		= (features[21] == 50 || features[21] >= 100 || (features[21] > 0 && features[20] > 6));
-	const int maxAllowedConYards
-		= (features[21] > 0) ? (hasUncolonizedIslandTarget ? 4 : 2) : ((features[20] > 12) ? 3 : 2);
+	// Free ore fields on our landmass raise the ConYard cap like the slot 30 score does (one more
+	// per free field up to 3, one more with a big bank): a fixed 3 kept rich houses at home.
+	// They also come before islands: an island waiting to be colonized used to send every
+	// expansion MCV to wait for a ferry while the home landmass stayed empty.
+	const int freeOreFieldsForYards = GetMacroState(pHouse).UncolonizedOreFields;
+	const CellStruct mcvHomeCell = (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(0))
+		? pHouse->ConYards.GetItem(0)->GetMapCoords()
+		: pHouse->BaseSpawnCell;
+	const bool hasFreeHomeLandField = mcvHomeCell != CellStruct::Empty
+		&& FindFreeOreFieldCell(pHouse, mcvHomeCell, MapClass::Instance.GetMovementZoneType(mcvHomeCell, MovementZone::Normal, false), 0) != nullptr;
+	const int landYardCap = std::clamp(2 + std::min(3, freeOreFieldsForYards) + (money >= 15000 ? 1 : 0), 3, 6);
+	const int maxAllowedConYards = (features[21] > 0)
+		? std::max(hasUncolonizedIslandTarget ? 4 : 2, (hasFreeHomeLandField && features[20] > 12) ? landYardCap : 0)
+		: ((features[20] > 12) ? landYardCap : 2);
 	const bool canSafelySaveForReplacementMCV = (pHouse->NumConYards == 0 && !ownsUndeployedMCV)
 		&& ((ownedEconomyUnits > 0 && trueRefineries > 0 && features[65] < 45) || money >= 1500
 			|| pHouse->OwnedUnits >= 3);
-	const bool needsCrossIslandMCV = (features[21] > 0 && (features[19] == 0 || pHouse->NumConYards >= 1));
+	const bool needsCrossIslandMCV = (features[21] > 0 && !hasFreeHomeLandField && (features[19] == 0 || pHouse->NumConYards >= 1));
 
 	// Island expansion is one more airlift job when a carryall may lift the MCV (or a spare
 	// harvester for the new island's resources): mods can forbid it with Carryall.Allowed=no.
@@ -2575,6 +3098,49 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const bool hasActiveUnitIncome = (ownedCashProduces >= 1)
 		|| ((trueRefineries >= 1 && ownedEconomyUnits >= 1)
 			&& (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
+
+	// Raid transport demand (AirborneFront plan): a raider or spy of ours waits for a ride behind
+	// the enemy lines and no flying or amphibious passenger transport (3 seats or more) is owned: one is
+	// worth building even without a water crossing.
+	bool raidTransportWanted = false;
+	{
+		int raidCandidates = 0;
+		int raidTransports = 0;
+
+		for (auto const pOwnFoot : FootClass::Array)
+		{
+			if (!pOwnFoot || pOwnFoot->Owner != pHouse || !pOwnFoot->IsAlive)
+				continue;
+
+			if (auto const pOwnInf = abstract_cast<InfantryClass*>(pOwnFoot))
+			{
+				if (IsRaiderInfantryType(pOwnInf->Type) || IsSpyInfantryType(pOwnInf->Type))
+					raidCandidates++;
+			}
+			else if (auto const pOwnType = pOwnFoot->GetTechnoType(); pOwnType && pOwnType->Passengers >= 3
+				&& (pOwnFoot->WhatAmI() == AbstractType::Aircraft || pOwnType->JumpJet || pOwnType->ConsideredAircraft
+					|| pOwnType->MovementZone == MovementZone::Fly
+					|| IsAmphibiousGroundTransportType(abstract_cast<UnitTypeClass*>(pOwnType))))
+			{
+				raidTransports++;
+			}
+		}
+
+		raidTransportWanted = raidCandidates > 0 && raidTransports == 0;
+	}
+
+	// Bonus for a flying or amphibious passenger transport that would answer the raid demand.
+	auto raidTransportBonus = [&](const TechnoTypeClass* pCandidate) -> int
+	{
+		if (!raidTransportWanted || !pCandidate || pCandidate->Passengers < 3)
+			return -1000;
+
+		const bool flies = pCandidate->WhatAmI() == AbstractType::AircraftType || pCandidate->JumpJet
+			|| pCandidate->ConsideredAircraft || pCandidate->MovementZone == MovementZone::Fly;
+		const bool amphibious = IsAmphibiousGroundTransportType(abstract_cast<const UnitTypeClass*>(pCandidate));
+
+		return (flies || amphibious) ? 350 : -1000;
+	};
 
 	// Ferry transport demand-driven scoring shared by the Shipyard and War Factory.
 	// Transports are reusable shuttles: one stays ready on island maps, and more are
@@ -2689,6 +3255,133 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		return -900;
 	};
 
+	// Exceptions to the economy unit cap for real harvesters, computed once per tick: a refinery
+	// zone no harvester of ours works (with or without a war factory there), or another landmass
+	// than the main base with a war factory and fewer than 2 harvesters per refinery. A building
+	// stands in the zone of the cells around its foundation (the cells under it can carry another
+	// zone), harvesters in limbo (being built, inside a transport, mid chrono jump) still count,
+	// and the main base never takes the island exception (2 harvesters per refinery there would
+	// pass the cap whenever the base has more than 9 refineries).
+	bool economyZonesComputed = false;
+	bool zeroHarvesterZoneWithFactory = false;
+	bool zeroHarvesterZoneNoFactory = false;
+	bool underharvestedIslandWithFactory = false;
+
+	auto const computeEconomyZones = [&]()
+	{
+		economyZonesComputed = true;
+
+		auto const groundZoneOf = [](const BuildingClass* pBld) -> int
+		{
+			const CellStruct cell = pBld->GetMapCoords();
+			const int width = pBld->Type->GetFoundationWidth();
+			const int height = pBld->Type->GetFoundationHeight(false);
+			std::map<int, int> zoneCounts;
+
+			for (int dy = -1; dy <= height; ++dy)
+			{
+				for (int dx = -1; dx <= width; ++dx)
+				{
+					if (dx >= 0 && dx < width && dy >= 0 && dy < height)
+						continue;
+
+					const CellStruct around { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
+
+					if (!MapClass::Instance.CoordinatesLegal(around))
+						continue;
+
+					const int zone = MapClass::Instance.GetMovementZoneType(around, MovementZone::Normal, false);
+
+					if (zone > 0)
+						zoneCounts[zone]++;
+				}
+			}
+
+			int bestZone = -1;
+			int bestCount = 0;
+
+			for (auto const& [zone, count] : zoneCounts)
+			{
+				if (count > bestCount)
+				{
+					bestCount = count;
+					bestZone = zone;
+				}
+			}
+
+			return bestZone;
+		};
+
+		std::map<int, int> refineriesInZone;
+		std::map<int, int> factoriesInZone;
+		std::map<int, int> harvestersInZone;
+		int mainZone = -1;
+
+		for (auto const pOB : pHouse->Buildings)
+		{
+			if (!pOB || pOB->InLimbo || !pOB->IsAlive || !pOB->Type)
+				continue;
+
+			const bool isRefinery = pOB->Type->Refinery || pOB->Type->ResourceDestination;
+			const bool isWarFactory = pOB->Type->Factory == AbstractType::UnitType && !pOB->Type->Naval;
+
+			if (!isRefinery && !isWarFactory && !(pOB->Type->ConstructionYard && mainZone < 0))
+				continue;
+
+			const int zone = groundZoneOf(pOB);
+
+			if (zone < 0)
+				continue;
+
+			if (isRefinery)
+				refineriesInZone[zone]++;
+
+			if (isWarFactory)
+				factoriesInZone[zone]++;
+
+			if (pOB->Type->ConstructionYard && mainZone < 0)
+				mainZone = zone;
+		}
+
+		if (mainZone < 0 && pHouse->BaseSpawnCell != CellStruct::Empty)
+			mainZone = MapClass::Instance.GetMovementZoneType(pHouse->BaseSpawnCell, MovementZone::Normal, false);
+
+		for (auto const pHU : UnitClass::Array)
+		{
+			if (pHU && pHU->Owner == pHouse && pHU->IsAlive && pHU->Type && (pHU->Type->Harvester || pHU->Type->ResourceGatherer)
+				&& !pHU->Type->DeploysInto)
+			{
+				harvestersInZone[ObjectZone(pHU, MovementZone::Normal)]++;
+			}
+		}
+
+		for (auto const& [zone, refineries] : refineriesInZone)
+		{
+			auto const harvIt = harvestersInZone.find(zone);
+			const int harvesters = harvIt != harvestersInZone.end() ? harvIt->second : 0;
+			auto const facIt = factoriesInZone.find(zone);
+			const bool hasFactory = facIt != factoriesInZone.end() && facIt->second > 0;
+
+			if (harvesters == 0)
+			{
+				if (hasFactory)
+					zeroHarvesterZoneWithFactory = true;
+				else
+					zeroHarvesterZoneNoFactory = true;
+			}
+			else if (hasFactory && zone != mainZone && harvesters < refineries * 2)
+			{
+				underharvestedIslandWithFactory = true;
+			}
+		}
+	};
+
+	// Bank governor (UpdateBankGovernor): one more ConYard for the building queue on land maps,
+	// past the expansion gates; the MCV unfolds near the base (wantsMultiConYardSpeed in Micro).
+	const bool bankWantsYard = GetMacroState(pHouse).BankGovernorActive && GetMacroState(pHouse).BankWantedYards > pHouse->NumConYards
+		&& pHouse->NumConYards >= 1 && features[21] == 0;
+	int bankYardMcvIdx = -1;
+
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
 		if (!pUnit || !CanBuildUnderHumanRules(pHouse, pUnit))
@@ -2696,6 +3389,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool isUnitInProgress
 			= (pUnit->ArrayIndex == inProgressUnitIdx || pUnit->ArrayIndex == inProgressNavalIdx);
+
+		if (!isUnitInProgress && !IsUnitTierAllowed(pHouse, pUnit))
+			continue;
+
 		const bool isMCV = (pUnit->DeploysInto && pUnit->DeploysInto->ConstructionYard);
 		if (isMCV)
 		{
@@ -2703,14 +3400,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				|| pUnit->MovementZone == MovementZone::AmphibiousDestroyer
 				|| pUnit->MovementZone == MovementZone::AmphibiousCrusher || pUnit->MovementZone == MovementZone::Fly
 				|| pUnit->JumpJet);
-			if (ownsUndeployedMCV || (pHouse->NumConYards >= 1 && scores[30] < 400 && scores[81] < 85)
-				|| pHouse->NumConYards >= maxAllowedConYards
-				|| (pHouse->NumConYards >= 1 && (pHouse->Buildings.Count >= 35 || ownedGroundCombatUnits + ownedNavalOrAmphibCombatUnits >= 40)))
+			if (ownsUndeployedMCV
+				|| (!bankWantsYard
+					&& ((pHouse->NumConYards >= 1 && scores[30] < 400 && scores[81] < 85)
+						|| pHouse->NumConYards >= maxAllowedConYards
+						|| (pHouse->NumConYards >= 1
+							&& (pHouse->Buildings.Count >= 35 || ownedGroundCombatUnits + ownedNavalOrAmphibCombatUnits >= 40)
+							&& (freeOreFieldsForYards == 0 || money < 5000)))))
 			{
 				continue;
 			}
 
-			if (pHouse->NumConYards >= 1 && features[20] <= 6 && !hasUncolonizedIslandTarget)
+			if (!bankWantsYard && pHouse->NumConYards >= 1 && features[20] <= 6 && !hasUncolonizedIslandTarget)
+				continue;
+
+			// A house with a ConYard but nothing gathering rebuilds its income first (a harvester, or a
+			// refinery and its free harvester): an expansion MCV would take its last credits and the
+			// new base would have no harvester either.
+			if (pHouse->NumConYards >= 1 && ownedEconomyUnits == 0 && ownedCashProduces == 0)
 				continue;
 
 			if (pHouse->NumConYards >= 1 && needsCrossIslandMCV
@@ -2735,6 +3442,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& (!pUnit->DeploysInto->IsBaseDefense || pWpn == nullptr));
 
 		if (isKeyStructureDeployer && ownsUndeployedKeyStructure)
+			continue;
+
+		// A mobile factory is built only with a spot waiting for it (forward production, an island or
+		// expansion hub without that factory kind, a lost main factory, see NeuralAI.MobileFactory.inl);
+		// otherwise it would unfold next to its own maker.
+		const bool isMobileFactory = IsMobileFactoryUnit(pUnit);
+
+		if (isMobileFactory && !isUnitInProgress && !HouseWantsMobileFactory(pHouse, pUnit))
 			continue;
 
 		const bool isAmphibTransport = IsAmphibiousOrAirTransport(pUnit);
@@ -2767,55 +3482,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		bool hasRefineryZoneWithZeroHarvesters = false;
 		bool hasUnderharvestedIslandWithWarFactory = false;
-		if (pUnit->Harvester || pUnit->ResourceGatherer)
+		// Only for real harvesters: a slave miner deploys into its own refinery and then counts as
+		// a building, never as a harvester of the zone, so these exceptions let Yuri build them
+		// without end (77 deployed slave miners in one match).
+		if ((pUnit->Harvester || pUnit->ResourceGatherer) && !isDeployableRefineryOrMiner)
 		{
-			for (auto const pRefB : pHouse->Buildings)
-			{
-				if (!pRefB || pRefB->InLimbo || !pRefB->IsAlive || !pRefB->Type
-					|| (!pRefB->Type->Refinery && !pRefB->Type->ResourceDestination))
-				{
-					continue;
-				}
+			if (!economyZonesComputed)
+				computeEconomyZones();
 
-				const int rz
-					= ObjectZone(pRefB, MovementZone::Normal);
-				if (rz < 0)
-					continue;
-
-				int refsInRz = 0;
-				int warFacsInRz = 0;
-				for (auto const pOB : pHouse->Buildings)
-				{
-					if (!pOB || pOB->InLimbo || !pOB->IsAlive || !pOB->Type
-						|| ObjectZone(pOB, MovementZone::Normal)
-							!= rz)
-					{
-						continue;
-					}
-
-					if (pOB->Type->Refinery || pOB->Type->ResourceDestination)
-						refsInRz++;
-					else if (pOB->Type->Factory == AbstractType::UnitType && !pOB->Type->Naval)
-						warFacsInRz++;
-				}
-
-				int harvsInRz = 0;
-				for (auto const pHU : UnitClass::Array)
-				{
-					if (pHU && pHU->Owner == pHouse && !pHU->InLimbo && pHU->IsAlive && pHU->Type
-						&& (pHU->Type->Harvester || pHU->Type->ResourceGatherer)
-						&& ObjectZone(pHU, MovementZone::Normal)
-							== rz)
-					{
-						harvsInRz++;
-					}
-				}
-
-				if (harvsInRz == 0 && (warFacsInRz >= 1 || CanHouseFerryTypeAcrossWater(pHouse, pUnit)))
-					hasRefineryZoneWithZeroHarvesters = true;
-				else if (warFacsInRz >= 1 && harvsInRz < refsInRz * 2)
-					hasUnderharvestedIslandWithWarFactory = true;
-			}
+			hasRefineryZoneWithZeroHarvesters = zeroHarvesterZoneWithFactory
+				|| (zeroHarvesterZoneNoFactory && CanHouseFerryTypeAcrossWater(pHouse, pUnit));
+			hasUnderharvestedIslandWithWarFactory = underharvestedIslandWithFactory;
 		}
 
 		const bool isEconomyUnit = pUnit->Harvester || pUnit->ResourceGatherer || isDeployableRefineryOrMiner;
@@ -2881,7 +3558,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const int ownedUnitWithConv = CountOwnedUnitWithConversions(pHouse, pUnit);
 		if (!isEconomyUnit && !isMCV && !isKeyStructureDeployer && !isAmphibTransport)
 		{
-			const int maxPerCombatType = pUnit->Naval ? 10 : 18;
+			// A bank beyond the reserve (UpdateBankGovernor) buys a bigger army: the queues would
+			// otherwise stop at the caps while the money piles up.
+			const int bankArmyRoom = GetMacroState(pHouse).BankSurplus > 0 ? 1 : 0;
+			const int maxPerCombatType = pUnit->Naval ? 10 + 2 * bankArmyRoom : 18 + 6 * bankArmyRoom;
 			if (ownedUnitWithConv >= maxPerCombatType)
 				continue;
 
@@ -2889,7 +3569,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pUnit->Naval && ownedNavalOrAmphibCombatUnits >= maxNavalFleet)
 				continue;
 
-			if (!pUnit->Naval && ownedGroundCombatUnits >= 50)
+			if (!pUnit->Naval && ownedGroundCombatUnits >= 50 + 20 * bankArmyRoom)
 				continue;
 		}
 
@@ -2914,6 +3594,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						// in the War Factory / Shipyard!
 		}
 
+		// Expert 2: counters of the seen enemy army lead their factory (combat types only).
+		score += CounterBonusFor(pHouse, pUnit);
+
 		if (pUnit->Naval)
 		{
 			if (isAmphibTransport)
@@ -2921,7 +3604,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// A transport the demand rules reject is not a candidate at all: otherwise the
 				// queue keeps building it whenever nothing else scores higher (e.g. no buildable
 				// warship), producing whole fleets of unneeded transports.
-				const int ferryDelta = scoreFerryTransport(pUnit);
+				const int ferryDelta = std::max(scoreFerryTransport(pUnit), raidTransportBonus(pUnit));
 
 				if (ferryDelta <= -900)
 					continue;
@@ -2982,6 +3665,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					? 12000
 					: (scores[30] + (canSafelySaveForExpansionMCV ? 1800 : 0)
 						+ ((wantsArchipelagoExpansion && hasIslandMcvLift) ? 900 : 0));
+
+				if (bankWantsYard)
+					bankYardMcvIdx = pUnit->ArrayIndex;
 			}
 			else if (isKeyStructureDeployer)
 			{
@@ -3053,6 +3739,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += scores[4] - (ownedTargetBld * 900);
 				}
+
+				// A mobile factory past the reason gate above has a spot waiting for it.
+				if (isMobileFactory)
+					score += 500;
 			}
 			else if (pUnit->Harvester || pUnit->ResourceGatherer)
 			{
@@ -3085,7 +3775,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					const int ferryDelta = scoreFerryTransport(pUnit);
+					const int ferryDelta = std::max(scoreFerryTransport(pUnit), raidTransportBonus(pUnit));
 
 					if (ferryDelta <= -900)
 						continue; // Not needed: never built just because nothing else scores higher.
@@ -3161,6 +3851,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 			}
 
+			// Expert 0 after a raid: harvesters back to their peak first.
+			if ((pUnit->Harvester || pUnit->ResourceGatherer) && !isDeployableRefineryOrMiner
+				&& pExt->NeuralAI_ActiveExpert == 0 && GetMacroState(pHouse).EconomyRecoveryActive
+				&& ownedEconomyUnits < GetMacroState(pHouse).PeakHarvesters)
+			{
+				score += 1500;
+			}
+
 			if (score > bestUnitScore)
 			{
 				bestUnitScore = score;
@@ -3168,6 +3866,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestUnitIdx = pUnit->ArrayIndex;
 			}
 		}
+	}
+
+	// The governor's MCV starts in every other 900-frame window (the odd ones: the building queue
+	// takes the governor's factories in the even ones).
+	if (bankYardMcvIdx >= 0 && bestUnitIdx != bankYardMcvIdx && ((Unsorted::CurrentFrame / 900) % 2) != 0
+		&& hasActiveUnitIncome)
+	{
+		bestUnitIdx = bankYardMcvIdx;
+
+		if (IsAITickWindow(450, evalDelay))
+			CountDecision(NeuralDecision::BankYardPick, pHouse->ArrayIndex);
 	}
 
 	pExt->NeuralAI_NextUnitTarget = bestUnitIdx;
@@ -3187,20 +3896,36 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (pOwnInf->Type->Engineer)
 			ownedEngineers++;
-		else if (pOwnInf->Type->Infiltrate)
+		else if (IsSpyInfantryType(pOwnInf->Type))
 			ownedInfiltrators++;
 	}
 
 	int neutralCapturableCount = 0;
 	int neutralCashDerrickCount = 0;
 
+	// The resource hoarder (Expert 6) also counts visible enemy oil derricks as engineer work.
+	auto const pHoarderExt = HouseExt::Fetch(pHouse);
+	const bool resourceHoarder = pHoarderExt && pHoarderExt->NeuralAI_ActiveExpert == 6;
+
 	for (auto const pMapBld : BuildingClass::Array)
 	{
-		if (pMapBld && !pMapBld->InLimbo && pMapBld->IsAlive && pMapBld->Type && pMapBld->Owner
-			&& pMapBld->Type->Capturable && pMapBld->Owner->IsNeutral())
+		if (!pMapBld || pMapBld->InLimbo || !pMapBld->IsAlive || !pMapBld->Type || !pMapBld->Owner
+			|| !pMapBld->Type->Capturable)
+		{
+			continue;
+		}
+
+		const bool isCashDerrick = pMapBld->Type->ProduceCashAmount > 0 || pMapBld->Type->ProduceCashStartup > 0;
+		// Fog-fair: only neutral techs this house has seen (and still remembers as neutral).
+		const bool isNeutral = pMapBld->Owner->IsNeutral() && IsKnownNeutralTech(pHouse, pMapBld);
+		const bool isVisibleEnemyDerrick = resourceHoarder && isCashDerrick && !pMapBld->Owner->IsNeutral() && pMapBld->Owner != pHouse
+			&& !pHouse->IsAlliedWith(pMapBld->Owner) && IsCellVisibleToAI(pHouse, pMapBld->GetCell());
+
+		if (isNeutral || isVisibleEnemyDerrick)
 		{
 			neutralCapturableCount++;
-			if (pMapBld->Type->ProduceCashAmount > 0 || pMapBld->Type->ProduceCashStartup > 0)
+
+			if (isCashDerrick)
 				neutralCashDerrickCount++;
 		}
 	}
@@ -3223,6 +3948,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int bestInfIdx = -1;
 	int bestInfScore = -32000;
 	int inProgressInfIdx = -1;
+
+	// Expert 9 in charge: fill the buildings worth holding (soldiers with the strongest weapon
+	// inside first) and bring a clearer when an enemy garrison near us has nobody to answer it.
+	int urbanGarrisonRoom = 0;
+	bool urbanNeedClearer = false;
+
+	if (pExt->NeuralAI_ActiveExpert == 9)
+		GetUrbanProductionNeeds(pHouse, urbanGarrisonRoom, urbanNeedClearer);
+
 	if (FactoryClass* pInfFac = pHouse->GetPrimaryFactory(AbstractType::InfantryType, false, BuildCat::DontCare))
 	{
 		if (pInfFac->Object && pInfFac->Object->GetType())
@@ -3235,6 +3969,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			continue;
 
 		const bool isInfInProgress = (pInf->ArrayIndex == inProgressInfIdx);
+
+		if (!isInfInProgress && !IsUnitTierAllowed(pHouse, pInf))
+			continue;
+
 		const bool isIncomeRecoveryEng = (pInf->Engineer && neutralCashDerrickCount > ownedEngineers);
 		if (!hasActiveUnitIncome && !isInfInProgress && !isIncomeRecoveryEng && pInf->GetActualCost(pHouse) > money)
 			continue;
@@ -3264,7 +4002,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else
 				score += scores[18] + techBonus;
 		}
-		else if (pInf->Infiltrate)
+		else if (IsSpyInfantryType(pInf))
 		{
 			const int maxActiveSpies
 				= (scores[19] > 180 || pExt->NeuralAI_Archetype == 1 || pExt->NeuralAI_ActiveExpert == 3) ? 3 : 2;
@@ -3286,10 +4024,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			score += scores[16];
 		}
 
-		if (needsCheapInfForBioReactor && !pInf->Engineer && !pInf->Infiltrate && !pInf->Doggie && pInf->Cost <= 220)
+		if (needsCheapInfForBioReactor && !pInf->Engineer && !IsSpyInfantryType(pInf) && !pInf->Doggie && pInf->Cost <= 220)
 		{
 			score += 520;
 		}
+
+		if (urbanGarrisonRoom > 0 && IsGarrisonOccupierType(pInf))
+			score += 260 + std::min(240, GarrisonFirepowerOf(pInf)) + std::min(4, urbanGarrisonRoom) * 30;
+
+		if (urbanNeedClearer && IsGarrisonClearerType(pInf))
+			score += 450;
 
 		// Train compatible Occupier infantry whenever we own an empty or under-filled Battle Bunker
 		for (auto const pOwnB : pHouse->Buildings)
@@ -3297,14 +4041,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pOwnB && !pOwnB->InLimbo && pOwnB->IsAlive && pOwnB->Type && pOwnB->Type->IsBaseDefense
 				&& pOwnB->Type->CanBeOccupied
 				&& pOwnB->Occupants.Count < std::clamp(pOwnB->Type->MaxNumberOccupants, 1, 10) && pInf->Occupier
-				&& !pInf->Engineer && !pInf->Infiltrate)
+				&& !pInf->Engineer && !IsSpyInfantryType(pInf))
 			{
 				score += 650;
 				break;
 			}
 		}
 
-		if (features[77] > 0 && !pInf->Engineer && !pInf->Infiltrate
+		if (features[77] > 0 && !pInf->Engineer && !IsSpyInfantryType(pInf)
 			&& (pInf->ImmuneToPsionics || (pWpn && pWpn->Range >= (6 * 256))))
 		{
 			score += 380; // Counter enemy MindControl with Snipers/Virus/Cyborgs/Dogs!
@@ -3336,6 +4080,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				score += 250;
 			}
 		}
+
+		score += CounterBonusFor(pHouse, pInf);
 
 		if (score > bestInfScore)
 		{
@@ -3378,7 +4124,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const bool islandInfantryQueueFull
 		= (features[21] > 0 && waitingBattalionSizeOnIslands > ownedTransportTotalCapacity + 12);
 	const int dynamicMaxInfantry = (money >= 4000 && congestedBaseInfantry < 20 && !islandInfantryQueueFull)
-		? 85
+		? (GetMacroState(pHouse).BankSurplus > 0 ? 100 : 85)
 		: ((money >= 2500 && congestedBaseInfantry < 18 && !islandInfantryQueueFull) ? 62 : 45);
 	const bool baseInfantrySaturated = (pHouse->OwnedInfantry >= dynamicMaxInfantry) || (congestedBaseInfantry >= 24);
 
@@ -3421,6 +4167,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	pExt->NeuralAI_NextInfantryTarget = bestInfIdx;
 
+	// The war factories and shipyards get the choice at once, like the barracks and airfields below
+	// (RefreshProductionIndices repeats it every 8 frames).
+	pHouse->ProducingUnitTypeIndex = pExt->NeuralAI_NextUnitTarget;
+	pExt->ProducingNavalUnitTypeIndex = pExt->NeuralAI_NextNavalTarget;
+
+	// Ares replaces HouseClass::AI_Infantry from its first instruction (and only picks a type while
+	// the index is -1), so the AI_Infantry hook of UpdateInfantryProduction never runs with Ares:
+	// hand the choice to the barracks here, or no infantry (engineers, spies) is ever trained.
+	pHouse->ProducingInfantryTypeIndex = bestInfIdx;
+
 	productionClock.Mark(NeuralSection::ProdAircraft);
 
 	// Aircraft Target Selection
@@ -3439,6 +4195,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		const bool airForceShotDown = AirForceSurvivalPercent(RefreshAirForceSummary(pHouse)) < 50;
+
 		int inProgressAirIdx = -1;
 		if (FactoryClass* pAirFac = pHouse->GetPrimaryFactory(AbstractType::AircraftType, false, BuildCat::DontCare))
 		{
@@ -3452,6 +4210,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				continue;
 
 			const bool isAirInProgress = (pAir->ArrayIndex == inProgressAirIdx);
+
+			if (!isAirInProgress && !IsUnitTierAllowed(pHouse, pAir))
+				continue;
+
+			// An air force shot down as fast as it is built gets no more combat aircraft until the
+			// losses fade (NeuralAI.AirForce.inl); transports and carryalls are not affected.
+			if (!isAirInProgress && airForceShotDown && IsAirForceCraft(pAir))
+				continue;
+
 			if (!hasActiveUnitIncome && !isAirInProgress && !pAir->Carryall && pAir->GetActualCost(pHouse) > money)
 				continue;
 
@@ -3477,7 +4244,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				// Passenger aircraft shuttle across water like amphibious transports, under
 				// the same ferry demand (aircraft and ground transports counted together).
-				const int ferryDelta = scoreFerryTransport(pAir);
+				const int ferryDelta = std::max(scoreFerryTransport(pAir), raidTransportBonus(pAir));
 
 				if (ferryDelta <= -900 && !isAirInProgress)
 					continue;
@@ -3498,7 +4265,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				: 0;
 
 			const int score = (pAir->Cost / 3) + (pAir->Strength / 2) + slotScore + crossFactionAirBonus + airTransBonus
-				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0);
+				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0) + CounterBonusFor(pHouse, pAir)
+				+ AirForceProductionBonus(pHouse, pAir);
 
 			if (score > bestAirScore)
 			{
@@ -3518,6 +4286,75 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	pExt->NeuralAI_NextAircraftTarget = bestAirIdx;
+
+	// Ares replaces HouseClass::AI_Aircraft the same way (0x4FF210 jumps past the
+	// UpdateAircraftProduction hook), so the airfields get the choice here too.
+	pHouse->ProducingAircraftTypeIndex = bestAirIdx;
+
+	// Bank telemetry: which queues stay empty while the bank is rich.
+	// 0 when one of our factories is building an object of that kind, 1 when none is although a
+	// factory building of that kind exists, -1 without such a building.
+	auto const queueFactoryIdle = [pHouse](AbstractType kind, bool naval) -> int
+	{
+		for (auto const pFactory : FactoryClass::Array)
+		{
+			if (!pFactory || pFactory->Owner != pHouse || !pFactory->Object || pFactory->OnHold)
+				continue;
+
+			auto const pObjType = pFactory->Object->GetTechnoType();
+
+			if (!pObjType || pObjType->WhatAmI() != kind
+				|| (kind == AbstractType::UnitType && static_cast<UnitTypeClass*>(pObjType)->Naval != naval))
+			{
+				continue;
+			}
+
+			return 0;
+		}
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->Type && pOwnBld->Type->Factory == kind
+				&& (kind != AbstractType::UnitType || pOwnBld->Type->Naval == naval))
+			{
+				return 1;
+			}
+		}
+
+		return -1;
+	};
+
+	if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+	{
+		auto& bank = BankStats[pHouse->ArrayIndex];
+		bank.PeakCredits = std::max(bank.PeakCredits, money);
+		bank.CreditsSum += money;
+		bank.Ticks++;
+
+		if (GetMacroState(pHouse).BankGovernorActive)
+			bank.GovernorTicks++;
+
+		if (money >= 5000)
+		{
+			bank.RichTicks++;
+			const int targets[] = { pExt->NeuralAI_NextBuildingTarget, bestUnitIdx, bestNavalIdx, bestInfIdx, bestAirIdx };
+			const int idle[] = { queueFactoryIdle(AbstractType::BuildingType, false), queueFactoryIdle(AbstractType::UnitType, false),
+				queueFactoryIdle(AbstractType::UnitType, true), queueFactoryIdle(AbstractType::InfantryType, false),
+				queueFactoryIdle(AbstractType::AircraftType, false) };
+
+			for (size_t q = 0; q < static_cast<size_t>(NeuralBankQueue::Count); ++q)
+			{
+				if (idle[q] < 0)
+					continue;
+
+				if (targets[q] < 0)
+					bank.NoTarget[q]++;
+
+				if (idle[q] > 0)
+					bank.FactoryIdle[q]++;
+			}
+		}
+	}
 
 	if (IsAITickWindow(450, evalDelay))
 	{
@@ -3546,6 +4383,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				"| NextBld=%s | NextUnit=%s | NextNaval=%s | NextInf=%s | NextAir=%s\n",
 			Unsorted::CurrentFrame, pHouse->ArrayIndex, (pHouse->Type && pHouse->Type->ID[0]) ? pHouse->Type->ID : "AI",
 			pExt->NeuralAI_ActiveExpert, pExt->NeuralAI_Archetype, money, bldName, unitName, navalName, infName, airName);
+
+		// Bank governor state (UpdateBankGovernor): army caps, factory counts and what the queues
+		// can spend against the income and the surplus to spend (credits per 1000 frames).
+		auto const& govMacro = GetMacroState(pHouse);
+		Debug::Log("[NeuralAI] Bank | House #%d | Spent=%d | Gnd=%d Nav=%d Inf=%d/%d Air=%d Blds=%d | cy=%d wf=%d rax=%d air=%d "
+				"ship=%d | governor=%d income=%d capacity=%d needed=%d surplus=%d wants=%d/%d/%d/%d yards=%d\n",
+			pHouse->ArrayIndex, pHouse->CreditsSpent, ownedGroundCombatUnits, ownedNavalOrAmphibCombatUnits, pHouse->OwnedInfantry,
+			dynamicMaxInfantry, pHouse->OwnedAircraft, pHouse->Buildings.Count, pHouse->NumConYards, pHouse->NumWarFactories,
+			pHouse->NumBarracks, pHouse->NumAirpads, pHouse->NumShipyards, govMacro.BankGovernorActive ? 1 : 0,
+			govMacro.BankIncomeRate, govMacro.BankSpendCapacity, govMacro.BankSpendNeeded, govMacro.BankSurplus,
+			govMacro.BankWantedFactories[0], govMacro.BankWantedFactories[1], govMacro.BankWantedFactories[2],
+			govMacro.BankWantedFactories[3], govMacro.BankWantedYards);
 	}
 
 	return evalDelay;
@@ -3581,6 +4430,62 @@ void NeuralAI::UpdateInfantryProduction(HouseClass* pHouse)
 		NeuralAI::UpdateExpertAI(pHouse);
 
 	pHouse->ProducingInfantryTypeIndex = pExt->NeuralAI_NextInfantryTarget;
+}
+
+// The house production check (every 8 frames) hands every queue the pick of the last AI tick and
+// skips the legacy AI_Building / AI_Unit / AI_Infantry / AI_Aircraft chain. That chain ran whenever
+// one queue had no free factory (an airfield with every dock taken), and the Ares AI_Infantry and
+// AI_Aircraft in it cleared the Neural AI picks, so barracks and airfields sat idle with money in
+// the bank. A queue whose object just left also gets its next pick at once instead of at the next
+// AI tick (15 to 105 frames by difficulty), like a human's repeat queue.
+void NeuralAI::RefreshProductionIndices(HouseClass* pHouse)
+{
+	NeuralAI::UpdateBuildingProduction(pHouse);
+	NeuralAI::UpdateUnitProduction(pHouse);
+	NeuralAI::UpdateInfantryProduction(pHouse);
+	NeuralAI::UpdateAircraftProduction(pHouse);
+}
+
+// One-off picks (MCVs and other deployers, harvesters, engineers, spies, unarmed transports and
+// support units) are never repeated by RefreshProductionIndices: the next AI tick decides again
+// whether another one is needed.
+void NeuralAI::OnTechnoProduced(HouseClass* pHouse, TechnoClass* pTechno)
+{
+	auto const pType = pTechno ? pTechno->GetTechnoType() : nullptr;
+
+	if (!pType || pTechno->WhatAmI() == AbstractType::Building)
+		return;
+
+	auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
+	auto const pInfType = abstract_cast<InfantryTypeClass*>(pType);
+	auto const pWeapon = pType->GetWeapon(0);
+	const bool armed = pWeapon && pWeapon->WeaponType && pWeapon->WeaponType->Damage > 0;
+	const bool oneOff = !armed || (pUnitType && (pUnitType->DeploysInto || pUnitType->Harvester || pUnitType->ResourceGatherer))
+		|| (pInfType && (pInfType->Engineer || IsSpyInfantryType(pInfType)));
+
+	if (!oneOff)
+		return;
+
+	auto const pExt = HouseExt::Fetch(pHouse);
+	const int index = pType->GetArrayIndex();
+
+	if (pUnitType)
+	{
+		if (pExt->NeuralAI_NextUnitTarget == index)
+			pExt->NeuralAI_NextUnitTarget = -1;
+
+		if (pExt->NeuralAI_NextNavalTarget == index)
+			pExt->NeuralAI_NextNavalTarget = -1;
+	}
+	else if (pInfType)
+	{
+		if (pExt->NeuralAI_NextInfantryTarget == index)
+			pExt->NeuralAI_NextInfantryTarget = -1;
+	}
+	else if (pExt->NeuralAI_NextAircraftTarget == index)
+	{
+		pExt->NeuralAI_NextAircraftTarget = -1;
+	}
 }
 
 void NeuralAI::UpdateAircraftProduction(HouseClass* pHouse)

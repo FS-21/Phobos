@@ -29,6 +29,15 @@ namespace
 		int ExpirationFrame { 0 };
 	};
 
+	// A defense of ours destroyed before it killed anything, and the ground reach (cells) of what
+	// destroyed it: the spot did not pay, so the next tower keeps away from it for a while.
+	struct NeuralWastedDefenseSpot
+	{
+		CellStruct Coords { CellStruct::Empty };
+		int Frame { 0 };
+		int KillerRangeCells { 0 };
+	};
+
 	// Last sightings of an enemy airborne unit, used to estimate its heading and
 	// time of arrival over our base after it vanishes into the fog.
 	struct NeuralAirThreatTrack
@@ -110,12 +119,36 @@ namespace
 		// Sub-targets destroyed so far (chain plans: Rolling Siege), so a plan that did real
 		// damage before its deadline is not scored as a plain failure.
 		int Progress { 0 };
+		// Deadline extension for groups still closing in on their target (UpdateStrategicPlans):
+		// the length the plan was started with, the last progress check (frame and the members'
+		// mean distance to the target, -1 before the first check) and whether that check found
+		// the group nearer than the one before.
+		int BaseDuration { 0 };
+		int ProgressCheckFrame { 0 };
+		int ProgressCheckDistance { -1 };
+		bool ClosingIn { false };
+		// Combat value of the group at the start weighted by health (early abort checks), and the
+		// last frame the target was in current sight (Hunt Key Units).
+		int InitialStrength { 0 };
+		int TargetSeenFrame { 0 };
+		// Per member: a frame (Pickets: until when a sentry holds back, when it last saw something).
+		std::vector<int> MemberFrames {};
 	};
 
 	struct NeuralStuckTrack
 	{
 		CellStruct Cell { CellStruct::Empty };
 		int SinceFrame { 0 };
+	};
+
+	// Aircraft attack watchdog (UpdateStuckUnits): where an aircraft on Mission::Attack stands and
+	// since when, and its ammo and since when it last changed (a shot fired or a reload).
+	struct NeuralAirStallTrack
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int SinceFrame { 0 };
+		int Ammo { 0 };
+		int AmmoSinceFrame { 0 };
 	};
 
 	struct NeuralAirLossTrack
@@ -131,11 +164,218 @@ namespace
 		int Frame { 0 };
 	};
 
+	// Where a packed factory deployer is heading (NeuralAI.MobileFactory.inl): the spot, why, when it
+	// was last picked, when the trip started, the closest it got and when (a trip that stops getting
+	// closer ends in a deploy on the spot), the unpack orders given where it stands, and until when
+	// it keeps the goal it was packed up for without picking again.
+	struct NeuralMobileFactoryGoal
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Reason { 0 };
+		int PickFrame { -100000 };
+		int StartFrame { -1 };
+		int BestDist { INT_MAX };
+		int ProgressFrame { 0 };
+		int DeployTries { 0 };
+		int HoldUntil { -1 };
+	};
+
+	// A deployed mobile factory: since when it stands, and its health at the last sample (a sharp
+	// drop since then makes it flee even from an attacker it cannot see).
+	struct NeuralMobileFactoryStand
+	{
+		int Since { 0 };
+		double Health { 1.0 };
+		int HealthFrame { 0 };
+	};
+
 	struct NeuralGroundLossTrack
 	{
 		DWORD ID { 0 };
 		CellStruct Coords { CellStruct::Empty };
 		int Value { 0 };
+	};
+
+	// Expert 3 diplomacy (NeuralAI.Diplomacy.inl), frames unless noted.
+	// Grace window at the start of a truce: attacks launched before it (missiles, artillery shells,
+	// a superweapon or a storm already running) cannot be called back, so damage between the new
+	// partners in the first 10 seconds of game time counts for nothing.
+	constexpr int PactGraceFrames = 150;
+	// A coalition stays small (2 or 3 houses from our point of view): at most two truce partners.
+	constexpr int PactMaxPartners = 2;
+	// Betrayal: aimed damage from a partner in force (an assault, not a stray shot) within a window.
+	constexpr int BetrayalDamage = 1500;
+	constexpr int BetrayalWindowFrames = 450;
+	// Collateral: any other damage from a partner (splash, units that hit us while firing at the
+	// shared target, small aimed hits) over a window; above the limit the truce with it ends.
+	constexpr int CollateralDamageLimit = 2500;
+	constexpr int CollateralWindowFrames = 1800;
+	// After a truce ends without betrayal the ex-partner is not our main target for a while.
+	constexpr int ExPartnerCooldownFrames = 1800;
+	// Stalemate: not before this frame (about 30 minutes of game time), no defeat for this long.
+	constexpr int StalemateMinFrame = 27000;
+	constexpr int StalemateNoDefeatFrames = 18000;
+
+	// Why a coalition ended (telemetry and log), and why a truce with one partner ended.
+	enum class NeuralPactEnd : int
+	{
+		Betrayal = 0,
+		Weakened = 1,
+		TargetGone = 2,
+		Timeout = 3,
+		Team = 4,
+		Count = 5
+	};
+
+	enum class NeuralTruceEnd : int
+	{
+		Betrayal = 0,
+		Collateral = 1,
+		Count = 2
+	};
+
+	// A spot where this house saw another house's army hitting its coalition target.
+	struct NeuralCoalitionFront
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Frame { 0 };
+	};
+
+	// Expert 3 diplomacy (NeuralAI.Diplomacy.inl): this house's own reading of the other houses
+	// (seen strength, who fights whom, grudges, traitors) and its tacit coalition. Never a real
+	// alliance, never shared with another house; houses of a preset team never get one. Indices are
+	// house ArrayIndex 0..7.
+	struct NeuralCoalitionState
+	{
+		// The house we lean against (-1 none), the trigger (1 elimination, 2 runaway leader,
+		// 3 stalemate, 4 traitor), how the target was chosen (0 by the trigger, 1 grudge, 2 most
+		// fragile, 3 poorest, 4 traitor), since and until when.
+		int Target { -1 };
+		int Reason { 0 };
+		int TargetChoice { 0 };
+		int SinceFrame { -1 };
+		int UntilFrame { -1 };
+		// Peak seen strength and known structures of the target while the coalition lasts.
+		int TargetPeakStrength { 0 };
+		int TargetPeakBuildings { 0 };
+		// Last decision: the target and trigger it was taken for, and whether we joined.
+		int DecidedTarget { -1 };
+		int DecidedSerial { -1 };
+		bool DecidedJoin { false };
+		// No new coalition against a house before this frame (one against it ended).
+		std::array<int, 8> CooldownUntil {};
+		// Last frame each house was seen fighting our target, when our truce with it began (-1 none),
+		// and the truces that ended (betrayal, collateral) until the coalition ends.
+		std::array<int, 8> PartnerSeenFrame { -100000, -100000, -100000, -100000, -100000, -100000, -100000, -100000 };
+		std::array<int, 8> TruceSinceFrame { -1, -1, -1, -1, -1, -1, -1, -1 };
+		uint32_t RevokedMask { 0 };
+		// Would-be partners refused this coalition because we distrust them (telemetry once each).
+		uint32_t DistrustMask { 0 };
+		// Last frame each house hit one of ours on purpose (damage hook: the victim always knows).
+		std::array<int, 8> HurtByFrame { -100000, -100000, -100000, -100000, -100000, -100000, -100000, -100000 };
+		// Damage taken from each partner in the current windows: aimed (betrayal test) and any other
+		// (collateral test), with the frame each window opened.
+		std::array<int, 8> AimedDamage {};
+		std::array<int, 8> AimedWindowFrame {};
+		std::array<int, 8> CollateralDamage {};
+		std::array<int, 8> CollateralWindowFrame {};
+		// Aimed damage we did to each partner in the same kind of window: when both sides trade
+		// shots (units clashing at the shared target) it is a skirmish, not a betrayal.
+		std::array<int, 8> AimedDealt {};
+		std::array<int, 8> AimedDealtFrame {};
+		// A partner betrayed us: the coalition ends at the next update (the truce at once).
+		bool BetrayedPending { false };
+		// An ex-partner is not our main target before this frame (no betrayal).
+		std::array<int, 8> ExPartnerUntil {};
+		// Grudge per house: damage it did to us (aimed in full, other a quarter), x0.98 per update,
+		// +3000 per betrayal. Feeds the "worst suits us" target choice.
+		std::array<int, 8> Grudge {};
+		// Betrayals by each house that we suffered or saw ourselves (never decays): distrust.
+		std::array<int, 8> TraitorScore {};
+		// Last frame we saw houses a and b both hitting the same third house (inferred partners),
+		// and the last betrayal of b by a that we witnessed.
+		std::array<std::array<int, 8>, 8> SideBySideFrame {};
+		std::array<std::array<int, 8>, 8> WitnessedFrame {};
+		// Most harvesters of each house seen in sight at once, slowly forgotten (poorest choice).
+		std::array<int, 8> HarvestersSeen {};
+		// Where we saw other houses' armies hitting the target (merged within 8 cells).
+		std::vector<NeuralCoalitionFront> Fronts {};
+		// Per house: last known base (centroid of its known structures), how many we knew, and the
+		// most we ever knew at once.
+		std::array<CellStruct, 8> LastKnownBase {};
+		std::array<int, 8> LastKnownBuildings {};
+		std::array<int, 8> PeakKnownBuildings {};
+		// Fighting seen, [victim][attacker]: value of attacker units seen in sight next to the
+		// victim's known structures, decayed every update.
+		std::array<std::array<int, 8>, 8> FightSeen {};
+		// Houses whose defeat we already looked at, and the frame of the last one.
+		uint32_t DefeatSeenMask { 0 };
+		int LastDefeatFrame { 0 };
+		// Stalemate samples every 2700 frames (oldest first): known structures of the other houses,
+		// our money and the waves we started so far.
+		std::array<int, 5> FrontSamples {};
+		std::array<int, 5> MoneySamples {};
+		std::array<int, 5> WaveSamples {};
+		int SampleCount { 0 };
+		int LastSampleFrame { -100000 };
+		bool Stalemate { false };
+		// Two other houses at war: hold our attacks on them while it lasts, then strike the one it
+		// left weakest (PostDuelTarget until PostDuelUntil).
+		int DuelA { -1 };
+		int DuelB { -1 };
+		int DuelQuietUpdates { 0 };
+		std::array<int, 2> DuelStartStrength {};
+		std::array<int, 2> DuelStartBuildings {};
+		int PostDuelTarget { -1 };
+		int PostDuelUntil { -1 };
+		// A house about to fall: reach its base before its aggressor.
+		int DyingTarget { -1 };
+		int DyingUntil { -1 };
+		// We are clearly the strongest: do not provoke a coalition; the nearest known base stays fair game.
+		bool LowProfile { false };
+		int LowProfileNearest { -1 };
+		int LastUpdateFrame { -100000 };
+		int LastFullFrame { -100000 };
+		// Telemetry: frames in coalition, joins, declines (all, as second strongest, as strongest),
+		// truces started and ended, waves at the target / partners / others while on / with none on
+		// / at a dying house, the last target and the last decline reason (NeuralCoalitionDecline),
+		// joins by trigger and by target choice, coalition and truce ends by reason, betrayals
+		// suffered and witnessed, partners refused for distrust, pact start work (plans cancelled,
+		// units recalled, redirected, partner targets cleared later), grace damage ignored,
+		// superweapon launches cancelled, low profile / duel hold frames, post-duel strikes, dying
+		// house rushes and updates in stalemate.
+		int ActiveFrames { 0 };
+		int Joined { 0 };
+		int Declined { 0 };
+		int DeclinedSecond { 0 };
+		int DeclinedStrongest { 0 };
+		int Truces { 0 };
+		int Revoked { 0 };
+		int TargetWaves { 0 };
+		int PartnerWaves { 0 };
+		int OtherWaves { 0 };
+		int FreeWaves { 0 };
+		int DyingWaves { 0 };
+		int LastTarget { -1 };
+		int LastDeclineReason { 0 };
+		std::array<int, 5> JoinsByReason {};
+		std::array<int, 5> JoinsByChoice {};
+		std::array<int, static_cast<size_t>(NeuralPactEnd::Count)> PactEnds {};
+		std::array<int, static_cast<size_t>(NeuralTruceEnd::Count)> TruceEnds {};
+		int BetrayalsSuffered { 0 };
+		int BetrayalsWitnessed { 0 };
+		int DistrustRefusals { 0 };
+		int PlansCancelled { 0 };
+		int UnitsRecalled { 0 };
+		int UnitsRedirected { 0 };
+		int PartnerTargetsCleared { 0 };
+		int GraceDamageIgnored { 0 };
+		int SuperweaponsCancelled { 0 };
+		int LowProfileFrames { 0 };
+		int DuelHoldFrames { 0 };
+		int PostDuelStrikes { 0 };
+		int DyingRushes { 0 };
+		int StalemateUpdates { 0 };
 	};
 
 	struct NeuralHouseMacroState
@@ -178,6 +418,10 @@ namespace
 		int OwnAACapacity { 0 };
 		int HeavyAirThreats { 0 };
 
+		// Spaced sightings of enemy ground units near our or an ally's base (same layout and
+		// extrapolation as the air tracks), read by the Base Threat Intercept plan.
+		std::vector<NeuralAirThreatTrack> GroundThreatTracks {};
+
 		// Enemy buildings this house has actually seen (fog-fair base knowledge).
 		std::unordered_set<DWORD> SeenEnemyBuildings {};
 
@@ -192,6 +436,9 @@ namespace
 		std::array<NeuralPlanInstance, static_cast<size_t>(NeuralPlanId::Count)> Plans {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanNextAttemptFrame {};
 		std::unordered_set<DWORD> PlanMembers {};
+		// Airborne raid transports nobody managed to board: UniqueID -> frame they may be used
+		// again (key access only).
+		std::unordered_map<DWORD, int> RaidTransportBanUntil {};
 		// Blackout plan success opens a window where the main wave launches earlier.
 		int BlackoutUntilFrame { -1 };
 
@@ -207,6 +454,8 @@ namespace
 		// Stuck order watchdog (UpdateStuckUnits): by unit UniqueID, the cell where it has been
 		// standing with a destination and since when. Keyed lookups only, never iterated.
 		std::unordered_map<DWORD, NeuralStuckTrack> StuckTracks {};
+		// Aircraft attack watchdog (UpdateStuckUnits), keyed the same way.
+		std::unordered_map<DWORD, NeuralAirStallTrack> AirStallTracks {};
 		// Expansion drive: ore fields (12x12 blocks) on our landmass more than 14 cells from any
 		// of our hubs (feature scan), and how close the base crawl has brought a building anchor
 		// to the nearest free worthy field (placement scan) so a refinery is wanted there.
@@ -218,6 +467,119 @@ namespace
 		// forward stones survive is counted (crawlStoneForward / crawlStoneLost) for the trainer.
 		std::vector<std::pair<CellStruct, int>> OffensiveStoneCells {};
 		std::vector<DWORD> OffensiveStones {};
+		// Last sale of a factory over the difficulty cap (SellFactoriesOverDifficultyCap): no factory
+		// is built past the cap for an outpost within 4500 frames of it, so a factory that lands
+		// at another hub (the outpost still asking) cannot loop build-and-sell.
+		int LastFactoryCapSaleFrame { -100000 };
+		// Failed refinery placements: the 10-cell reach to its field (FindSpatialTetrisBuildCell) grows
+		// 4 cells per failure and is dropped after 3, so a map too rugged to build next to its ore still
+		// gets its refinery. A success lowers it by one only, so a cramped base does not fail twice
+		// before every refinery (the ConYard lost its time on them).
+		int RefineryReachFailures { 0 };
+		// Refineries placed with that widened reach (UniqueIDs): the best spot a rugged map allowed,
+		// so the strict refinery audit of the resource hoarder never sells them (it would only
+		// rebuild them as far away again).
+		std::vector<DWORD> RelaxedReachRefineries {};
+		// Resource claim (UpdateResourceClaim, the resource hoarder of Expert 6): the best ore field
+		// not mined by us yet, chosen by value (spawner tree, size), distance and risk (tier 0 away
+		// from known enemy structures, 1 near them). MCVs, the crawl and refineries head there.
+		// TreeCell is the field's spawner tree, where its refinery is pulled.
+		CellStruct ResourceClaimCell { CellStruct::Empty };
+		CellStruct ResourceClaimTreeCell { CellStruct::Empty };
+		int ResourceClaimTier { -1 };
+		int ResourceClaimZone { -1 };
+		int LastResourceClaimFrame { -100000 };
+		// Tech tree progress (UpdateTechUnlocks): per building type index, how many types it would
+		// unlock as a missing prerequisite; whether one of those is buildable right now.
+		std::unordered_map<int, int> TechUnlocks {};
+		// The not yet buildable types behind each of those buildings (same scan), so a building can
+		// be valued by what it would open, not only by how much.
+		std::unordered_map<int, std::vector<TechnoTypeClass*>> TechUnlockTypes {};
+		bool HasBuildableTechUnlock { false };
+		int TechUnlockFrame { -100000 };
+		// Counter composition (UpdateCounterComposition, Expert 2): production score shift per
+		// buildable combat type against the enemy army seen so far, and the extra priority of the
+		// first of a building that would unlock a better counter than any we can build now.
+		std::unordered_map<const TechnoTypeClass*, int> CounterBonus {};
+		std::unordered_map<int, int> CounterUnlockBonus {};
+		int CounterFrame { -100000 };
+		// Progressive unit tier (UpdateUnitTierCap): highest TechLevel of combat units it may build
+		// now, the highest tier of enemy units it has seen, and its peak building count (a house
+		// that lost half its base unlocks one tier more).
+		int UnitTierCap { 2 };
+		int SeenEnemyUnitTier { 0 };
+		int PeakOwnedBuildings { 0 };
+		int LastUnitTierFrame { -100000 };
+		// Expert 0 (UpdateEconomyCrisis): economy peaks, raid recovery flag and action timers.
+		int PeakRefineries { 0 };
+		int PeakHarvesters { 0 };
+		bool EconomyRecoveryActive { false };
+		int LastEconomyCrisisFrame { -100000 };
+		// Productions put on hold while broke (UpdateEconomyCrisis), by the UniqueID of their object.
+		std::vector<DWORD> BrokeHeldObjects {};
+		// Broke hold on: no repairs (wrench, service depot, shipyard) either.
+		bool BrokeHoldActive { false };
+		int LastBrokeSaleFrame { -100000 };
+		int LastHarvesterBalanceFrame { -100000 };
+		// Expert 0 work (UpdateEconomyCrisis, every 150 frames): the selector prior from the economy
+		// trouble there is now, and what it is made of. Own state and current sight only.
+		int EconomyTrouble { 0 };
+		int LowPowerSinceFrame { -1 };
+		int HarvestersUnderFire { 0 };
+		int StarvedRefineries { 0 };
+		bool StorageNearlyFull { false };
+		// Harvesters sent home from a seen threat (UniqueID -> frame of the order), so one is not
+		// ordered again every AI tick.
+		std::unordered_map<DWORD, int> HarvesterRetreatFrames {};
+		// Expert 6 work (UpdateResourceClaim, every 300 frames): value of the free ore fields this
+		// house knows and can take now, and whether the best one is beyond the crawl's reach.
+		int ExpansionOpportunity { 0 };
+		bool ClaimNeedsMCV { false };
+		// Defense ledger (NeuralAI.Defense.inl): what our defenses cost and what they paid back, per
+		// match. Kills are counted per defense UniqueID (keyed lookups only, never iterated).
+		int DefenseSpent { 0 };
+		int DefensesBuilt { 0 };
+		int DefensesLost { 0 };
+		int DefensesLostNoKill { 0 };
+		int DefenseLostValue { 0 };
+		int DefenseKills { 0 };
+		int DefenseKillValue { 0 };
+		// Value of our towers lost lately (x3/4 every 900 frames): rebuilding what keeps dying is spending too.
+		int RecentDefenseLossValue { 0 };
+		int RecentDefenseLossDecayFrame { 0 };
+		std::unordered_map<DWORD, int> DefenseKillsById {};
+		std::vector<NeuralWastedDefenseSpot> WastedDefenseSpots {};
+		// Defense budget and Expert 7 pressure (RefreshDefenseBudget, every 60 frames): value of our
+		// defenses and armed army, the defense value we allow, the payback percent of our defenses,
+		// the seen enemy artillery (value share, longest ground range in cells) and the pressure that
+		// grades Expert 7 in the selector.
+		int DefenseBudgetFrame { -100000 };
+		int OwnDefenseValue { 0 };
+		int OwnArmyValue { 0 };
+		int DefenseValueCap { 0 };
+		int DefenseEfficiencyPct { 100 };
+		int SeenArtilleryShare { 0 };
+		int SeenArtilleryRangeCells { 0 };
+		int DefensePressure { 0 };
+		// Longest ground reach (cells) of the towers we can build now, refreshed every 900 frames.
+		int BestTowerRangeCells { 0 };
+		int BestTowerRangeFrame { -100000 };
+		// Expert 3 (UpdateFfaTargets): main enemy choice bonus per enemy house index (0..7).
+		std::array<int, 8> FfaEnemyBonus {};
+		// Percent of an enemy's visible threat its main enemy priority keeps (Expert 3: 40 unless it is
+		// at our door, so the biggest visible base is not the default target of a free-for-all).
+		std::array<int, 8> FfaThreatScale { 100, 100, 100, 100, 100, 100, 100, 100 };
+		int LastFfaTargetFrame { -100000 };
+		// Expert 5 selector: combat value of our units and of the visible armed enemies within reach
+		// of each other (a real fight), measured by the micro each AI tick, and when it last happened.
+		int ArmyContactOwn { 0 };
+		int ArmyContactEnemy { 0 };
+		int LastArmyContactFrame { -100000 };
+		// Frame of the last repair trip ordered per unit (UniqueID): a trip is not ordered again for
+		// 450 frames, so another routine moving the unit cannot turn it into one order per AI tick.
+		std::unordered_map<DWORD, int> RepairTripFrames {};
+		// Expert 3 diplomacy: tacit coalition, truces, grudges, traitors (NeuralAI.Diplomacy.inl).
+		NeuralCoalitionState Coalition {};
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
@@ -236,12 +598,23 @@ namespace
 		int BankWindow { -1 };
 		int BankWindowFactories { 0 };
 		int BankWindowFailures { 0 };
+		// Bank governor (UpdateBankGovernor, every 450 frames): credits earned per 1000 frames
+		// (smoothed), the earned total and frame of the last sample, and while the bank beyond
+		// the reserve outgrows what the production queues can spend, the factory count wanted
+		// per queue (BankQueue order: vehicle, infantry, aircraft, naval).
+		int BankIncomeFrame { -100000 };
+		int BankIncomeEarned { 0 };
+		int BankIncomeRate { -1 };
+		bool BankGovernorActive { false };
+		int BankSpendCapacity { 0 };
+		int BankSpendNeeded { 0 };
+		// Credits held beyond the reserve at the last sample (0 when none): army caps grow with it.
+		int BankSurplus { 0 };
+		std::array<int, 4> BankWantedFactories {};
+		// ConYard count wanted by the governor for the building queue (0 when none).
+		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
 		std::vector<DWORD> FerryingMcvs {};
-		// Field scouting (UpdateFieldScouting): the current scout and the free fields visited.
-		DWORD FieldScoutUid { 0 };
-		int LastFieldScoutFrame { -100000 };
-		std::vector<std::pair<CellStruct, int>> ScoutedFields {};
 		// Ferry wait safety net (DispatchFootToTargetOrTransport): since when a unit has been asking
 		// for a crossing, and until when it may not ask again after giving up. Keyed lookups only.
 		std::unordered_map<DWORD, int> FerryWaitSince {};
@@ -257,6 +630,22 @@ namespace
 		int IslandHoldUntilFrame { -1 };
 		CellStruct ForwardRepairCell { CellStruct::Empty };
 		int ForwardRepairUntilFrame { -1 };
+		// Ally site plans (Ally Backup, Ally Forward Outpost): the next building we want next to an
+		// ally's base, the ally ConYard it belongs to and the cell its side of that base starts at.
+		int AllySiteBuildType { -1 };
+		CellStruct AllySiteCell { CellStruct::Empty };
+		CellStruct AllySiteYardCell { CellStruct::Empty };
+		int AllySiteUntilFrame { -1 };
+		// Last frame the wanted building found no room at the ally site (it was placed at home).
+		int AllySiteFailedFrame { -1 };
+		// Cell found for the wanted building before paying for it (placement tries it first), the
+		// type it was found for and when it was last checked.
+		CellStruct AllySiteReservedCell { CellStruct::Empty };
+		int AllySiteReservedType { -1 };
+		int AllySiteReservedFrame { -1 };
+		// An ally building under attack right now that our next armed defense goes to (production).
+		CellStruct AllyDefenseCell { CellStruct::Empty };
+		int AllyDefenseUntilFrame { -1 };
 		// Survival plan: next frame a building may be sold to fund a replacement MCV.
 		int SurvivalNextSellFrame { 0 };
 
@@ -289,13 +678,33 @@ namespace
 		int FocusEnemyIndex { -1 };
 		int TacticsRefreshFrame { -100000 };
 
-		// Plans 23..38: staggered retreats waiting their turn, the next scouting run, combo boosts
+		// Plans 23..38: staggered retreats waiting their turn, combo boosts
 		// per plan and the frame each ready offensive superweapon became ready (SW + army, point 37).
 		std::vector<NeuralDelayedRetreat> DelayedRetreats {};
-		int NextScoutRunFrame { 3600 };
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoost {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoostUntilFrame {};
 		std::map<int, int> SuperReadySinceFrame {};
+
+		// Mobile factories (NeuralAI.MobileFactory.inl): the trip of each packed factory deployer (by
+		// unit UniqueID), each deployed mobile factory (by building UniqueID), the last spot one fled
+		// from, the last pack-up (where, toward what and why, handed to the vehicle it becomes),
+		// whether the main base ever had a fixed factory of each kind (unit, infantry, aircraft), the
+		// main base ConYard, when a packed one was last seen and when one last unfolded (a vehicle that
+		// vanished in between was lost), and the cached build answers (by unit type index: frame,
+		// wanted). Keyed lookups only.
+		std::unordered_map<DWORD, NeuralMobileFactoryGoal> MobileFactoryGoals {};
+		std::unordered_map<DWORD, NeuralMobileFactoryStand> MobileFactoryStands {};
+		CellStruct MobileFactoryAvoidCell { CellStruct::Empty };
+		int MobileFactoryAvoidFrame { -100000 };
+		int MobileFactoryLastPackFrame { -100000 };
+		CellStruct MobileFactoryPackCell { CellStruct::Empty };
+		CellStruct MobileFactoryPackTarget { CellStruct::Empty };
+		int MobileFactoryPackReason { 0 };
+		std::array<bool, 3> MobileFactoryMainHad {};
+		DWORD MobileFactoryHomeID { 0 };
+		int MobileFactoryVehicleSeenFrame { -100000 };
+		int MobileFactoryDeployFrame { -100000 };
+		std::unordered_map<int, std::pair<int, bool>> MobileFactoryWanted {};
 
 		void ClearClearanceReservation()
 		{
@@ -337,6 +746,7 @@ namespace
 			this->AirThreatValue = 0;
 			this->OwnAACapacity = 0;
 			this->HeavyAirThreats = 0;
+			this->GroundThreatTracks.clear();
 			this->SeenEnemyBuildings.clear();
 			this->ScoutedStartMask = 0;
 			this->EnemySightings.clear();
@@ -344,15 +754,81 @@ namespace
 			this->Plans.fill(NeuralPlanInstance {});
 			this->PlanNextAttemptFrame.fill(0);
 			this->PlanMembers.clear();
+			this->RaidTransportBanUntil.clear();
 			this->BlackoutUntilFrame = -1;
 			this->BloodyBeaches.clear();
 			this->AirLossTracks.clear();
 			this->AirDangerSpots.clear();
 			this->StuckTracks.clear();
+			this->AirStallTracks.clear();
 			this->UncolonizedOreFields = 0;
 			this->IdleHarvesterTracks.clear();
 			this->OffensiveStoneCells.clear();
 			this->OffensiveStones.clear();
+			this->LastFactoryCapSaleFrame = -100000;
+			this->RefineryReachFailures = 0;
+			this->RelaxedReachRefineries.clear();
+			this->ResourceClaimCell = CellStruct::Empty;
+			this->ResourceClaimTreeCell = CellStruct::Empty;
+			this->ResourceClaimTier = -1;
+			this->ResourceClaimZone = -1;
+			this->LastResourceClaimFrame = -100000;
+			this->TechUnlocks.clear();
+			this->TechUnlockTypes.clear();
+			this->HasBuildableTechUnlock = false;
+			this->TechUnlockFrame = -100000;
+			this->CounterBonus.clear();
+			this->CounterUnlockBonus.clear();
+			this->CounterFrame = -100000;
+			this->UnitTierCap = 2;
+			this->SeenEnemyUnitTier = 0;
+			this->PeakOwnedBuildings = 0;
+			this->LastUnitTierFrame = -100000;
+			this->PeakRefineries = 0;
+			this->PeakHarvesters = 0;
+			this->EconomyRecoveryActive = false;
+			this->LastEconomyCrisisFrame = -100000;
+			this->BrokeHeldObjects.clear();
+			this->BrokeHoldActive = false;
+			this->LastBrokeSaleFrame = -100000;
+			this->LastHarvesterBalanceFrame = -100000;
+			this->EconomyTrouble = 0;
+			this->LowPowerSinceFrame = -1;
+			this->HarvestersUnderFire = 0;
+			this->StarvedRefineries = 0;
+			this->StorageNearlyFull = false;
+			this->HarvesterRetreatFrames.clear();
+			this->ExpansionOpportunity = 0;
+			this->ClaimNeedsMCV = false;
+			this->DefenseSpent = 0;
+			this->DefensesBuilt = 0;
+			this->DefensesLost = 0;
+			this->DefensesLostNoKill = 0;
+			this->DefenseLostValue = 0;
+			this->DefenseKills = 0;
+			this->DefenseKillValue = 0;
+			this->RecentDefenseLossValue = 0;
+			this->RecentDefenseLossDecayFrame = 0;
+			this->DefenseKillsById.clear();
+			this->WastedDefenseSpots.clear();
+			this->DefenseBudgetFrame = -100000;
+			this->OwnDefenseValue = 0;
+			this->OwnArmyValue = 0;
+			this->DefenseValueCap = 0;
+			this->DefenseEfficiencyPct = 100;
+			this->SeenArtilleryShare = 0;
+			this->SeenArtilleryRangeCells = 0;
+			this->DefensePressure = 0;
+			this->BestTowerRangeCells = 0;
+			this->BestTowerRangeFrame = -100000;
+			this->FfaEnemyBonus.fill(0);
+			this->FfaThreatScale.fill(100);
+			this->LastFfaTargetFrame = -100000;
+			this->ArmyContactOwn = 0;
+			this->ArmyContactEnemy = 0;
+			this->LastArmyContactFrame = -100000;
+			this->RepairTripFrames.clear();
+			this->Coalition = NeuralCoalitionState {};
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
 			this->LastYardUndeployCell = CellStruct::Empty;
@@ -365,10 +841,16 @@ namespace
 			this->BankWindow = -1;
 			this->BankWindowFactories = 0;
 			this->BankWindowFailures = 0;
+			this->BankIncomeFrame = -100000;
+			this->BankIncomeEarned = 0;
+			this->BankIncomeRate = -1;
+			this->BankGovernorActive = false;
+			this->BankSpendCapacity = 0;
+			this->BankSpendNeeded = 0;
+			this->BankSurplus = 0;
+			this->BankWantedFactories.fill(0);
+			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
-			this->FieldScoutUid = 0;
-			this->LastFieldScoutFrame = -100000;
-			this->ScoutedFields.clear();
 			this->FerryWaitSince.clear();
 			this->FerryBlockedUntil.clear();
 			this->FreeFieldAnchorDist = 9999;
@@ -378,6 +860,16 @@ namespace
 			this->IslandHoldUntilFrame = -1;
 			this->ForwardRepairCell = CellStruct::Empty;
 			this->ForwardRepairUntilFrame = -1;
+			this->AllySiteBuildType = -1;
+			this->AllySiteCell = CellStruct::Empty;
+			this->AllySiteYardCell = CellStruct::Empty;
+			this->AllySiteUntilFrame = -1;
+			this->AllySiteFailedFrame = -1;
+			this->AllySiteReservedCell = CellStruct::Empty;
+			this->AllySiteReservedType = -1;
+			this->AllySiteReservedFrame = -1;
+			this->AllyDefenseCell = CellStruct::Empty;
+			this->AllyDefenseUntilFrame = -1;
 			this->SurvivalNextSellFrame = 0;
 			this->AttackSectorWeight.fill(0);
 			this->AttackSectorDecayFrame = 0;
@@ -398,10 +890,22 @@ namespace
 			this->FocusEnemyIndex = -1;
 			this->TacticsRefreshFrame = -100000;
 			this->DelayedRetreats.clear();
-			this->NextScoutRunFrame = 3600;
 			this->PlanBoost.fill(0);
 			this->PlanBoostUntilFrame.fill(0);
 			this->SuperReadySinceFrame.clear();
+			this->MobileFactoryGoals.clear();
+			this->MobileFactoryStands.clear();
+			this->MobileFactoryAvoidCell = CellStruct::Empty;
+			this->MobileFactoryAvoidFrame = -100000;
+			this->MobileFactoryLastPackFrame = -100000;
+			this->MobileFactoryPackCell = CellStruct::Empty;
+			this->MobileFactoryPackTarget = CellStruct::Empty;
+			this->MobileFactoryPackReason = 0;
+			this->MobileFactoryMainHad.fill(false);
+			this->MobileFactoryHomeID = 0;
+			this->MobileFactoryVehicleSeenFrame = -100000;
+			this->MobileFactoryDeployFrame = -100000;
+			this->MobileFactoryWanted.clear();
 		}
 	};
 
@@ -511,6 +1015,108 @@ namespace
 		const int idx = pHouse ? std::clamp(pHouse->ArrayIndex, 0, 31) : 0;
 
 		return MacroStates[idx];
+	}
+
+	// Tacit coalitions (Expert 3): how many different houses are coalition targets right now, the
+	// peak this match, and the betrayals each house committed as its victims saw them. Telemetry
+	// only, it never feeds a decision.
+	int CoalitionConcurrentNow { 0 };
+	int CoalitionConcurrentPeak { 0 };
+	int CoalitionConcurrentSerial { -1 };
+	std::array<int, 32> BetrayalsCommitted {};
+
+	int CoalitionTargetOf(HouseClass* pHouse)
+	{
+		return pHouse ? GetMacroState(pHouse).Coalition.Target : -1;
+	}
+
+	// A house in a truce with us now: seen fighting our coalition target recently, and the truce
+	// has not ended (betrayal, collateral).
+	bool IsTacitTrucePartner(HouseClass* pHouse, int idx)
+	{
+		if (!pHouse || idx < 0 || idx >= 8)
+			return false;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+
+		if (coal.Target < 0 || idx == coal.Target || (coal.RevokedMask & (1u << idx)) != 0 || coal.TruceSinceFrame[idx] < 0)
+			return false;
+
+		return Unsorted::CurrentFrame - coal.PartnerSeenFrame[idx] <= 5400;
+	}
+
+	// Inside the grace window at the start of our truce with that house.
+	bool IsInPactGrace(HouseClass* pHouse, int idx)
+	{
+		if (!pHouse || idx < 0 || idx >= 8)
+			return false;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+		const int since = coal.TruceSinceFrame[idx];
+
+		return coal.Target >= 0 && since >= 0 && (coal.RevokedMask & (1u << idx)) == 0
+			&& Unsorted::CurrentFrame - since < PactGraceFrames && Unsorted::CurrentFrame >= since;
+	}
+
+	// Whether another house's army was seen hitting our coalition target within range of a cell in
+	// the last 2700 frames: that front is theirs, ours goes elsewhere.
+	bool IsCoalitionFrontNear(HouseClass* pHouse, const CellStruct& cell, int range)
+	{
+		if (!pHouse)
+			return false;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+
+		if (coal.Target < 0)
+			return false;
+
+		const int now = Unsorted::CurrentFrame;
+
+		return std::any_of(coal.Fronts.begin(), coal.Fronts.end(), [&](const NeuralCoalitionFront& front)
+			{
+				return now - front.Frame <= 2700 && std::max(std::abs(front.Cell.X - cell.X), std::abs(front.Cell.Y - cell.Y)) <= range;
+			});
+	}
+
+	// Expert 3 diplomacy bias for picking a house to fight (main enemy, or a wave's building with
+	// wave set): coalition target first (the wave bonus with its fronts is added by the caller),
+	// truce partners never, an ex-partner not for a while, two houses at war left alone until it is
+	// over and then the one it left weakest, a dying house before its aggressor gets there; while we
+	// lead by far, no far adventures against houses that leave us alone.
+	int DiplomacyTargetBias(HouseClass* pHouse, int idx, bool wave)
+	{
+		if (!pHouse || idx < 0 || idx >= 8)
+			return 0;
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+		const int now = Unsorted::CurrentFrame;
+		const bool hurtUsRecently = now - coal.HurtByFrame[idx] <= 1800;
+		int bias = 0;
+
+		if (idx == coal.Target)
+			bias += wave ? 0 : 700;
+		else if (IsTacitTrucePartner(pHouse, idx))
+			return -2000;
+
+		if (coal.ExPartnerUntil[idx] > now && coal.TraitorScore[idx] == 0)
+			bias -= 600;
+
+		if ((idx == coal.DuelA || idx == coal.DuelB) && idx != coal.Target && !hurtUsRecently)
+			bias -= wave ? 400 : 300;
+
+		if (idx == coal.PostDuelTarget && now < coal.PostDuelUntil)
+			bias += 500;
+
+		if (idx == coal.DyingTarget && now < coal.DyingUntil)
+			bias += wave ? 800 : 600;
+
+		if (wave && coal.LowProfile && idx != coal.LowProfileNearest && idx != coal.Target
+			&& now - coal.HurtByFrame[idx] > 5400)
+		{
+			bias -= 300;
+		}
+
+		return bias;
 	}
 
 	// Match style (point 28/29): at scenario start every Neural AI house draws, from the synced
@@ -726,6 +1332,50 @@ namespace
 		auto const& seen = GetMacroState(pHouse).SeenEnemyBuildings;
 
 		return seen.find(pBld->UniqueID) != seen.end();
+	}
+
+	// Fog-fair strength of one enemy house as another house knows it (UpdateEnemyStrength): the
+	// remembered army (sightings weighted by age), the part of it seen lately far from that
+	// house's known base, the value of its units we watched die lately, its known defenses and
+	// the centre of its known buildings.
+	struct NeuralEnemyStrength
+	{
+		int Army { 0 };
+		int ArmyAway { 0 };
+		int RecentLosses { 0 };
+		int DefenseValue { 0 };
+		int KnownBuildings { 0 };
+		CellStruct BaseCenter { CellStruct::Empty };
+	};
+
+	struct NeuralEnemyLoss
+	{
+		int Frame { 0 };
+		int OwnerIndex { -1 };
+		int Value { 0 };
+	};
+
+	// Wave timing (NeuralAI.WaveTiming.inl): the strength estimate per enemy house index, the
+	// sighted enemy units we watched die (keyed lookups only) and their losses, our army value,
+	// the advantage against the strongest known enemy (percent, read by feature 99 and the main
+	// assault plans) and whether the main wave is being held for strength.
+	struct NeuralWaveTimingState
+	{
+		std::array<NeuralEnemyStrength, 32> Enemies {};
+		std::unordered_set<DWORD> SeenDead {};
+		std::vector<NeuralEnemyLoss> Losses {};
+		int LastUpdateFrame { -100000 };
+		int OwnArmyValue { 0 };
+		int AdvantageRatio { 100 };
+		bool Holding { false };
+		int HoldSinceFrame { -1 };
+	};
+
+	std::array<NeuralWaveTimingState, 32> WaveTimingStates {};
+
+	NeuralWaveTimingState& GetWaveTimingState(const HouseClass* pHouse)
+	{
+		return WaveTimingStates[pHouse ? std::clamp(pHouse->ArrayIndex, 0, 31) : 0];
 	}
 
 } // namespace

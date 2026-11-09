@@ -1,6 +1,7 @@
 #include "Body.h"
 
 #include <Misc/FlyingStrings.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 // The method of calculating the income is subject to each specific situation,
 // which may probably subject to further changes if anyone wants to extend the harvesting logic in the future.
@@ -22,14 +23,18 @@ DEFINE_HOOK(0x73E3DB, UnitClass_Mission_Unload_NoteBalanceBefore, 0x6)
 
 DEFINE_HOOK(0x73E4D0, UnitClass_Mission_Unload_CheckBalanceAfter, 0xA)
 {
+	GET(UnitClass* const, pThis, ESI);
 	GET(HouseClass* const, pHouse, EBX);
 	GET(BuildingClass* const, pDock, EDI);
 
+	const int money = pHouse->Available_Money() - OwnerBalanceBefore::HarversterUnloads;
+
 	if (auto const pBldExt = BuildingExt::TryFetch(pDock))
 	{
-		pBldExt->AccumulatedIncome += pHouse->Available_Money() - OwnerBalanceBefore::HarversterUnloads;
+		pBldExt->AccumulatedIncome += money;
 	}
 
+	NeuralAI::OnHarvestIncome(pHouse, pThis, pDock, money);
 	return 0;
 }
 
@@ -45,6 +50,7 @@ DEFINE_HOOK(0x522E4F, InfantryClass_SlaveGiveMoney_CheckBalanceAfter, 0x6)
 	GET_STACK(TechnoClass* const, slaveMiner, STACK_OFFSET(0x18, 0x4));
 
 	const int money = slaveMiner->Owner->Available_Money() - OwnerBalanceBefore::SlaveComesBack;
+	NeuralAI::OnHarvestIncome(slaveMiner->Owner, slaveMiner, nullptr, money);
 
 	if (auto const pBld = abstract_cast<BuildingClass*>(slaveMiner))
 	{

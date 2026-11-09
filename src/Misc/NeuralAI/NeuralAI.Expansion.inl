@@ -11,86 +11,154 @@ namespace
 		CellStruct Cell { CellStruct::Empty };
 		int OreCells { 0 };
 		bool SpawnerTree { false };
+		int BlockKey { -1 };
 	};
+
+	// Team blackboard (NeuralAI.Team.inl): a teammate already holds this field.
+	bool IsOreFieldTakenByTeam(HouseClass* pHouse, const NeuralOreField& field);
 
 	std::vector<NeuralOreField> OreFieldCache;
 	int OreFieldCacheFrame { -100000 };
 
-	const std::vector<NeuralOreField>& GetOreFields()
+	// Key of the 12x12 ore block a cell falls in (the grid GetOreFields scans), -1 off the grid.
+	int OreBlockKey(const CellStruct& cell)
 	{
-		if (Unsorted::CurrentFrame - OreFieldCacheFrame < 900 && OreFieldCacheFrame <= Unsorted::CurrentFrame)
-			return OreFieldCache;
-
-		OreFieldCacheFrame = Unsorted::CurrentFrame;
-		OreFieldCache.clear();
-
 		LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
 
 		if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
 			bounds = LTRBStruct { 0, 0, 511, 511 };
 
-		for (int by = std::max(0, bounds.Top); by <= bounds.Bottom; by += 12)
+		const int left = std::max(0, bounds.Left);
+		const int top = std::max(0, bounds.Top);
+
+		if (cell.X < left || cell.Y < top)
+			return -1;
+
+		return ((cell.X - left) / 12) * 4096 + (cell.Y - top) / 12;
+	}
+
+	// The scan of one row of 12x12 blocks, appended to `out`.
+	void ScanOreFieldBlockRow(int by, const LTRBStruct& bounds, std::vector<NeuralOreField>& out)
+	{
+		for (int bx = std::max(0, bounds.Left); bx <= bounds.Right; bx += 12)
 		{
-			for (int bx = std::max(0, bounds.Left); bx <= bounds.Right; bx += 12)
+			int cells = 0;
+			int sumX = 0;
+			int sumY = 0;
+			bool tree = false;
+
+			for (int y = by; y < by + 12; ++y)
 			{
-				int cells = 0;
-				int sumX = 0;
-				int sumY = 0;
-				bool tree = false;
-
-				for (int y = by; y < by + 12; ++y)
+				for (int x = bx; x < bx + 12; ++x)
 				{
-					for (int x = bx; x < bx + 12; ++x)
+					auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(x), static_cast<short>(y) });
+
+					if (!pCell)
+						continue;
+
+					if (pCell->GetContainedTiberiumValue() > 0)
 					{
-						auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(x), static_cast<short>(y) });
+						cells++;
+						sumX += x;
+						sumY += y;
+					}
 
-						if (!pCell)
-							continue;
-
-						if (pCell->GetContainedTiberiumValue() > 0)
-						{
-							cells++;
-							sumX += x;
-							sumY += y;
-						}
-
-						if (!tree)
-						{
-							if (auto const pTerrain = pCell->GetTerrain(false))
-								tree = pTerrain->IsAlive && pTerrain->Type && pTerrain->Type->SpawnsTiberium;
-						}
+					if (!tree)
+					{
+						if (auto const pTerrain = pCell->GetTerrain(false))
+							tree = pTerrain->IsAlive && pTerrain->Type && pTerrain->Type->SpawnsTiberium;
 					}
 				}
-
-				if (cells < 4)
-					continue;
-
-				const int cx = sumX / cells;
-				const int cy = sumY / cells;
-				CellStruct best = CellStruct::Empty;
-				int bestDist = INT_MAX;
-
-				for (int y = by; y < by + 12; ++y)
-				{
-					for (int x = bx; x < bx + 12; ++x)
-					{
-						auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(x), static_cast<short>(y) });
-
-						if (pCell && pCell->GetContainedTiberiumValue() > 0)
-						{
-							const int d = std::abs(x - cx) + std::abs(y - cy);
-
-							if (d < bestDist)
-							{
-								bestDist = d;
-								best = CellStruct { static_cast<short>(x), static_cast<short>(y) };
-							}
-						}
-					}
-				}
-
-				OreFieldCache.push_back({ best, cells, tree });
 			}
+
+			if (cells < 4)
+				continue;
+
+			const int cx = sumX / cells;
+			const int cy = sumY / cells;
+			CellStruct best = CellStruct::Empty;
+			int bestDist = INT_MAX;
+
+			for (int y = by; y < by + 12; ++y)
+			{
+				for (int x = bx; x < bx + 12; ++x)
+				{
+					auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(x), static_cast<short>(y) });
+
+					if (pCell && pCell->GetContainedTiberiumValue() > 0)
+					{
+						const int d = std::abs(x - cx) + std::abs(y - cy);
+
+						if (d < bestDist)
+						{
+							bestDist = d;
+							best = CellStruct { static_cast<short>(x), static_cast<short>(y) };
+						}
+					}
+				}
+			}
+
+			out.push_back({ best, cells, tree, OreBlockKey(CellStruct { static_cast<short>(bx), static_cast<short>(by) }) });
+		}
+	}
+
+	// Refresh in progress: the next block row to scan, the fields found so far, the last frame a
+	// slice ran and the match the cache belongs to.
+	std::vector<NeuralOreField> OreFieldBuild;
+	int OreFieldBuildRow { -1 };
+	int OreFieldBuildSliceFrame { -100000 };
+	int OreFieldCacheSerial { -1 };
+
+	const std::vector<NeuralOreField>& GetOreFields()
+	{
+		LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
+
+		if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
+			bounds = LTRBStruct { 0, 0, 511, 511 };
+
+		const int now = Unsorted::CurrentFrame;
+		const int top = std::max(0, bounds.Top);
+
+		// New match: one full scan, so nothing reads the previous map's fields.
+		if (OreFieldCacheSerial != NeuralMatchSerial || now < OreFieldCacheFrame)
+		{
+			OreFieldCacheSerial = NeuralMatchSerial;
+			OreFieldCacheFrame = now;
+			OreFieldBuildRow = -1;
+			OreFieldBuild.clear();
+			OreFieldCache.clear();
+
+			for (int by = top; by <= bounds.Bottom; by += 12)
+				ScanOreFieldBlockRow(by, bounds, OreFieldCache);
+
+			return OreFieldCache;
+		}
+
+		// Every 900 frames the map is scanned again, 4 block rows per frame so no single AI tick pays
+		// for the whole map; the previous fields serve until the new scan is complete.
+		if (OreFieldBuildRow < 0)
+		{
+			if (now - OreFieldCacheFrame < 900)
+				return OreFieldCache;
+
+			OreFieldBuildRow = top;
+			OreFieldBuild.clear();
+		}
+
+		if (OreFieldBuildSliceFrame == now)
+			return OreFieldCache;
+
+		OreFieldBuildSliceFrame = now;
+
+		for (int rows = 0; rows < 4 && OreFieldBuildRow <= bounds.Bottom; ++rows, OreFieldBuildRow += 12)
+			ScanOreFieldBlockRow(OreFieldBuildRow, bounds, OreFieldBuild);
+
+		if (OreFieldBuildRow > bounds.Bottom)
+		{
+			OreFieldCache.swap(OreFieldBuild);
+			OreFieldBuild.clear();
+			OreFieldCacheFrame = now;
+			OreFieldBuildRow = -1;
 		}
 
 		return OreFieldCache;
@@ -160,7 +228,8 @@ namespace
 					taken = true;
 			}
 
-			if (taken)
+			// Expansion use: not a field a teammate already holds (harvesters may share it).
+			if (taken || (!ownHubsOk && IsOreFieldTakenByTeam(pHouse, field)))
 				continue;
 
 			if (auto const pCell = MapClass::Instance.TryGetCellAt(field.Cell))
@@ -171,6 +240,54 @@ namespace
 		}
 
 		return pBest;
+	}
+
+	// Ore blocks this house already mines: fields (GetOreFields) with one of its refineries or
+	// resource destinations within 14 cells. Sorted keys for IsOreCellInHeldField. Without it the
+	// edge of a field we already mine (10+ cells from its refinery) looked like a new field, so
+	// the base never went for real new ones. A ConYard alone does not hold its field: an
+	// expansion yard still needs its refinery there.
+	std::vector<int> GetHeldOreBlocks(HouseClass* pHouse)
+	{
+		std::vector<int> held;
+
+		if (!pHouse)
+			return held;
+
+		std::vector<CellStruct> hubs;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type
+				&& (pBld->Type->Refinery || pBld->Type->ResourceDestination))
+			{
+				hubs.push_back(pBld->GetMapCoords());
+			}
+		}
+
+		for (auto const& field : GetOreFields())
+		{
+			const bool isHeld = std::any_of(hubs.begin(), hubs.end(), [&field](const CellStruct& hub)
+				{ return std::max(std::abs(hub.X - field.Cell.X), std::abs(hub.Y - field.Cell.Y)) <= 14; });
+
+			if (isHeld)
+				held.push_back(field.BlockKey);
+		}
+
+		// The block a refinery stands in is held too, even when it was placed at the edge of the
+		// block far from the field's centre (more refineries kept piling up there).
+		for (auto const& hub : hubs)
+			held.push_back(OreBlockKey(hub));
+
+		std::sort(held.begin(), held.end());
+		held.erase(std::unique(held.begin(), held.end()), held.end());
+
+		return held;
+	}
+
+	bool IsOreCellInHeldField(const std::vector<int>& heldBlocks, const CellStruct& cell)
+	{
+		return std::binary_search(heldBlocks.begin(), heldBlocks.end(), OreBlockKey(cell));
 	}
 
 	// Water bodies (map state, computed once per match): cells per water movement zone. Useful

@@ -11,7 +11,8 @@ namespace
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
-		if (!pHouse || !pType)
+		// Repairs cost credits: none while broke (UpdateEconomyCrisis).
+		if (!pHouse || !pType || GetMacroState(pHouse).BrokeHoldActive)
 			return nullptr;
 
 		const CellStruct fc = pFoot->GetMapCoords();
@@ -888,6 +889,13 @@ namespace
 
 		const bool isAirborneTransport = pTransType->WhatAmI() == AbstractType::AircraftType
 			|| pTransType->MovementZone == MovementZone::Fly || pTransType->JumpJet || pTransType->ConsideredAircraft;
+		const MovementZone zone = pTransType->MovementZone;
+		// A land mover (a demolition truck or a terrorist sneaking in) detours over land and keeps
+		// away from every armed enemy in sight, not only from warships.
+		const bool isLandMover = !isAirborneTransport && !pTransType->Naval && zone != MovementZone::Water
+			&& zone != MovementZone::WaterBeach && zone != MovementZone::Amphibious
+			&& zone != MovementZone::AmphibiousCrusher && zone != MovementZone::AmphibiousDestroyer
+			&& pTransType->SpeedType != SpeedType::Amphibious;
 
 		struct FerryThreat
 		{
@@ -955,7 +963,7 @@ namespace
 
 			auto const pEnemyType = pEnemy->GetTechnoType();
 
-			if (!pEnemyType || (!isAirborneTransport && !pEnemyType->Naval))
+			if (!pEnemyType || (!isAirborneTransport && !isLandMover && !pEnemyType->Naval))
 				continue;
 
 			if (pEnemy->Owner == pHouse || pHouse->IsAlliedWith(pEnemy->Owner) || pEnemy->Owner->IsNeutral()
@@ -972,7 +980,7 @@ namespace
 			if (weaponRange > 0)
 			{
 				const CellStruct ec = pEnemy->GetMapCoords();
-				threats.push_back({ ec.X, ec.Y, weaponRange + 1, 2 });
+				threats.push_back({ ec.X, ec.Y, weaponRange + (isLandMover ? 3 : 1), 2 });
 			}
 		}
 
@@ -1050,7 +1058,17 @@ namespace
 				if (!pCandCell || !MapClass::Instance.CoordinatesLegal(candidate))
 					continue;
 
-				if (!isAirborneTransport)
+				if (isLandMover)
+				{
+					if (pCandCell->LandType == LandType::Water
+						|| !pCandCell->IsClearToMove(
+							pTransType->SpeedType, true, true, -1, pTransType->MovementZone, -1, false)
+						|| !AreZonesConnected(fromCell, candidate, pTransType->MovementZone))
+					{
+						continue;
+					}
+				}
+				else if (!isAirborneTransport)
 				{
 					// Surface transports detour through open water reachable from here.
 					if (pCandCell->LandType != LandType::Water

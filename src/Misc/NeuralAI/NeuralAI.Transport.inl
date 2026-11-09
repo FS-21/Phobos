@@ -299,6 +299,19 @@ namespace
 			}
 		}
 
+		// Already standing there: the engine clears the destination on arrival, so without this a
+		// group holding a point got the same move order every AI tick.
+		if (!isMoving && keepWithinCells > 0.0)
+		{
+			auto const pDestCell = abstract_cast<CellClass*>(pDest);
+
+			if (pDestCell && pFoot->GetMapCoords().DistanceFrom(pDestCell->MapCoords) <= keepWithinCells)
+			{
+				CountDecision(NeuralDecision::MoveOrderSkipped, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
+				return false;
+			}
+		}
+
 		pFoot->SetDestination(pDest, true);
 		pFoot->QueueMission(Mission::Move, true);
 		CountDecision(NeuralDecision::MoveOrderIssued, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);

@@ -639,7 +639,6 @@ void HouseExt::LoadFromINIFile(CCINIClass* const pINI)
 	ValueableVector<bool> readBaseNodeRepairInfo;
 	readBaseNodeRepairInfo.Read(exINI, pSection, "RepairBaseNodes");
 	this->NeuralAI_Campaign.Read(exINI, pSection, "NeuralAI");
-	this->NeuralAI_Campaign.Read(exINI, pSection, "AdvancedAI");
 	size_t nWritten = readBaseNodeRepairInfo.size();
 
 	if (nWritten <= 3)

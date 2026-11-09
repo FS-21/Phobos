@@ -513,11 +513,11 @@ namespace
 		return best;
 	}
 
-	// Units and infantry with a warhead that repairs or destroys a bridge from its hut in one hit.
-	// This branch has no such warheads, so only engineers and deck fire work bridges here.
+	// Units and infantry with a warhead that repairs or destroys a bridge from its hut in one hit
+	// (FakeEngineer.CanRepairBridges / FakeEngineer.CanDestroyBridges).
 	bool CanWorkBridgeFromHut(TechnoClass* pTechno, BuildingClass* pHut)
 	{
-		return false;
+		return TechnoExt::CanBeAffectedByFakeEngineer(pTechno, pHut, true);
 	}
 
 	struct NeuralBridgeUnitDot

@@ -13,6 +13,7 @@
 #include <Utilities/AresHelper.h>
 #include <Utilities/AresFunctions.h>
 #include <Misc/FlyingStrings.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 #pragma region GetTechnoType
 
@@ -680,7 +681,12 @@ DEFINE_HOOK(0x702E4E, TechnoClass_RegisterDestruction_SaveKillerInfo, 0x6)
 
 	// Note: Some SW never had a "killer" or a "house" (hello "NukeSpecial"), probably never scored to the killer?
 	if (pKiller && pVictim)
+	{
 		TechnoExt::ObjectKilledBy(pVictim, pKiller);
+		NeuralAI::OnTechnoKilled(pVictim, pKiller);
+	}
+
+	NeuralAI::OnTechnoDestroyed(pVictim, pKiller);
 
 	// Drop crate if is dead
 	const int nSelectedPowerup = TechnoExt::GetDropCrateIndex(pVictim);

@@ -784,6 +784,64 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 		this->SpyEffect_InfiltratorSuperWeapon.Read(exINI, pSection, "SpyEffect.InfiltratorSuperWeapon");
 	}
 
+	// Neural AI spy worth. Ares applies these effects; they are only read here, and only an INI
+	// that sets one of them changes the worth (a later INI without them keeps it).
+	if (this->SpyEffect_Custom)
+	{
+		bool found = false;
+
+		auto readBool = [&](const char* pKey)
+		{
+			bool value = false;
+			found |= exINI.ReadBool(pSection, pKey, &value);
+			return value;
+		};
+
+		auto readInt = [&](const char* pKey)
+		{
+			int value = 0;
+			found |= exINI.ReadInteger(pSection, pKey, &value);
+			return value;
+		};
+
+		auto present = [&](const char* pKey)
+		{
+			const bool set = exINI.ReadString(pSection, pKey) > 0;
+			found |= set;
+			return set;
+		};
+
+		int worth = 0;
+		worth += readBool("SpyEffect.RevealProduction") ? 20 : 0;
+		worth += readBool("SpyEffect.ResetSuperweapons") ? 90 : 0;
+		worth += readBool("SpyEffect.ResetRadar") ? 40 : 0;
+		worth += readBool("SpyEffect.RevealRadar") ? 60 : 0;
+		worth += readBool("SpyEffect.KeepRadar") ? 20 : 0;
+		worth += readBool("SpyEffect.UnitVeterancy") ? 70 : 0;
+		worth += readBool("SpyEffect.InfantryVeterancy") ? 70 : 0;
+		worth += readBool("SpyEffect.VehicleVeterancy") ? 80 : 0;
+		worth += readBool("SpyEffect.NavalVeterancy") ? 50 : 0;
+		worth += readBool("SpyEffect.AircraftVeterancy") ? 60 : 0;
+		worth += readBool("SpyEffect.BuildingVeterancy") ? 30 : 0;
+		worth += readBool("SpyEffect.UndoReverseEngineer") ? 20 : 0;
+
+		const int outage = readInt("SpyEffect.PowerOutageDuration");
+		worth += outage > 0 ? 60 + std::min(60, outage / 100) : 0;
+		worth += readInt("SpyEffect.SabotageDelay") > 0 ? 120 : 0;
+		worth += std::min(120, std::max(0, readInt("SpyEffect.StolenMoneyAmount")) / 25);
+
+		double stolenShare = 0.0;
+		found |= exINI.ReadDouble(pSection, "SpyEffect.StolenMoneyPercentage", &stolenShare);
+		worth += std::min(120, static_cast<int>(std::max(0.0, stolenShare) * 300.0));
+
+		worth += present("SpyEffect.SuperWeapon") ? 140 : 0;
+		worth += present("SpyEffect.StolenTechIndex") ? 130 : 0;
+		worth += this->SpyEffect_InfiltratorSuperWeapon.Get() >= 0 ? 140 : 0;
+
+		if (found || this->SpyEffect_AIWorth < 0)
+			this->SpyEffect_AIWorth = std::min(200, worth);
+	}
+
 	if (pThis->MaxNumberOccupants > 10)
 	{
 		this->OccupierMuzzleFlashes.clear();
@@ -875,6 +933,7 @@ void BuildingTypeExt::Serialize(T& Stm)
 		.Process(this->SpyEffect_Custom)
 		.Process(this->SpyEffect_VictimSuperWeapon)
 		.Process(this->SpyEffect_InfiltratorSuperWeapon)
+		.Process(this->SpyEffect_AIWorth)
 		.Process(this->ConsideredVehicle)
 		.Process(this->ZShapePointMove_OnBuildup)
 		.Process(this->SellBuildupLength)

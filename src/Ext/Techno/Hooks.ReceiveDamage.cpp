@@ -5,6 +5,8 @@
 #include <Ext/WarheadType/Body.h>
 #include <Ext/WeaponType/Body.h>
 #include <Utilities/AresHelper.h>
+#include <Utilities/GeneralUtils.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 namespace ReceiveDamageTemp
 {
@@ -35,6 +37,15 @@ DEFINE_HOOK(0x701900, TechnoClass_ReceiveDamage_Shield, 0x6)
 	const auto pExt = TechnoExt::Fetch(pThis);
 	const auto pSourceHouse = pAttacker ? pAttacker->Owner : args->SourceHouse;
 	const auto pTargetHouse = pThis->Owner;
+
+	// Neural AI: who hit whom on purpose (tacit coalition truces end the moment a partner hits us).
+	if (damage > 0 && pSourceHouse && pTargetHouse && pSourceHouse != pTargetHouse
+		&& (!args->WH || GeneralUtils::GetWarheadVersusArmor(args->WH, pThis, pThis->GetTechnoType()) >= 0.0))
+	{
+		auto const pAimedAt = pAttacker ? abstract_cast<TechnoClass*>(pAttacker->Target) : nullptr;
+		const bool aimed = !pAttacker || (pAimedAt && pAimedAt->Owner == pTargetHouse);
+		NeuralAI::OnHouseDamaged(pTargetHouse, pSourceHouse, damage, aimed);
+	}
 
 	// Apply warhead effects
 	if (damage && !pWHExt->ApplyPerTargetEffectsOnDetonate.Get(RulesExt::Global()->ApplyPerTargetEffectsOnDetonate))

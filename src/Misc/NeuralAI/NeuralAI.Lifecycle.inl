@@ -16,6 +16,7 @@ void NeuralAI::ParseCommandLineArg(const char* pArg)
 	else if (_strnicmp(pArg, "-TrainSlot=", 11) == 0)
 	{
 		NeuralAI::TrainSlotIndex = std::clamp(std::atoi(pArg + 11), 0, 63);
+		NeuralAI::TrainingMode = true;
 
 		Debug::Log("[NeuralAI] Training Slot Index set to %d.\n", NeuralAI::TrainSlotIndex);
 	}
@@ -402,6 +403,47 @@ static bool LoadBackpackFromSharedMemory(const char* pName, AIBackpackFile& outB
 	return valid;
 }
 
+// Context routing tables (see NeuralContextRouting). Headless training: the challenger's and the
+// opponent's from the trainer's RAM handoff, slot files as fallback; the opponent shares the
+// challenger's when it has none. Otherwise Resources\AI\ai_context.dat (or AI\ai_context.dat).
+static void LoadContextRoutingTables()
+{
+	ContextRouting = NeuralContextRouting {};
+	OpponentContextRouting = NeuralContextRouting {};
+
+	char path[MAX_PATH];
+
+	if (NeuralAI::HeadlessMode)
+	{
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIContext_%d", NeuralAI::TrainSlotIndex);
+
+		if (!LoadContextRoutingFromSharedMemory(path, ContextRouting))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_context_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadContextRoutingFile(path, ContextRouting);
+		}
+
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIContextOpp_%d", NeuralAI::TrainSlotIndex);
+
+		if (!LoadContextRoutingFromSharedMemory(path, OpponentContextRouting))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_context_opp_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadContextRoutingFile(path, OpponentContextRouting);
+		}
+	}
+	else
+	{
+		for (const char* pPath : { "Resources\\AI\\ai_context.dat", "AI\\ai_context.dat" })
+		{
+			if (LoadContextRoutingFile(pPath, ContextRouting))
+				break;
+		}
+	}
+
+	Debug::Log("[NeuralAI] Context routing: %s, opponent %s.\n", ContextRouting.Loaded ? "loaded" : "none",
+		OpponentContextRouting.Loaded ? "loaded" : "shared");
+}
+
 const AIBackpackFile& NeuralAI::PolicyFor(const HouseClass* pHouse)
 {
 	if (NeuralAI::HeadlessMode && NeuralAI::OpponentLoaded)
@@ -429,6 +471,10 @@ void NeuralAI::LoadOrResetBackpack()
 	}
 
 	NeuralAI::CurrentBaseSignature = HashValueFNV1a(baseModelHash, NeuralAI::CurrentRulesSignature);
+
+	// No context routing unless this match loads it below (campaign and human multiplayer never do).
+	ContextRouting = NeuralContextRouting {};
+	OpponentContextRouting = NeuralContextRouting {};
 
 	// Campaign and standard Multiplayer use only the shared deterministic base
 	// brain.
@@ -501,6 +547,8 @@ void NeuralAI::LoadOrResetBackpack()
 
 		Debug::Log("[NeuralAI] Headless policy source: %s\n", challengerFromShm ? "shared memory" : "files");
 
+		LoadContextRoutingTables();
+
 		NeuralAI::AllowBackpackInference = true;
 
 		NeuralAI::BackpackLoaded = true;
@@ -548,6 +596,8 @@ void NeuralAI::LoadOrResetBackpack()
 		if (MapClassLoaded)
 			break;
 	}
+
+	LoadContextRoutingTables();
 
 	if (!valid)
 	{
@@ -630,6 +680,8 @@ void NeuralAI::InitTelemetrySharedMemory()
 		TelemetryJsonShmHandle
 			= CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, TelemetryJsonShmCapacity, jsonShmName);
 
+		TelemetryJsonShmFromTrainer = TelemetryJsonShmHandle && GetLastError() == ERROR_ALREADY_EXISTS;
+
 		if (TelemetryJsonShmHandle)
 		{
 			TelemetryJsonView = static_cast<uint8_t*>(
@@ -679,6 +731,12 @@ void NeuralAI::OnScenarioStart()
 	for (auto& ms : MacroStates)
 		ms.Reset();
 
+	for (auto& routeHeat : RouteHeatStates)
+		routeHeat.Reset();
+
+	WaveTimingStates.fill(NeuralWaveTimingState {});
+	ResetTeamBoards();
+
 	FerryTrips.fill(NeuralFerryTripRecord {});
 	ResetBridgePlanner();
 	AirRoutes.clear();
@@ -709,11 +767,32 @@ void NeuralAI::OnScenarioStart()
 	for (auto& ticks : ExpertTicks)
 		ticks.fill(0);
 
+	for (auto& gains : ExpertGain)
+		gains.fill(0);
+
+	for (auto& phases : ExpertTicksByPhase)
+	{
+		for (auto& ticks : phases)
+			ticks.fill(0);
+	}
+
+	for (auto& phases : ExpertGainByPhase)
+	{
+		for (auto& gains : phases)
+			gains.fill(0);
+	}
+
+	LastHouseAdvantage.fill(0);
+	HasLastHouseAdvantage.fill(false);
+	ResetExpertCredit();
+
 	TerritoryStats.fill(NeuralTerritoryStat {});
 	TerritoryLastFrame = -1;
+	BankStats.fill(NeuralBankStat {});
 	MapClassApplied = false;
 	OreFieldCache.clear();
 	OreFieldCacheFrame = -100000;
+	NeuralMatchSerial++;
 	WaterZoneCells.clear();
 	LargestWaterZoneCells = -1;
 	MapInfo = NeuralMapInfo {};
@@ -995,7 +1074,33 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 			}
 
 			const int arch = std::clamp(pExt->NeuralAI_Archetype, 0, 7);
-			const int exp = std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1);
+			// Fair credit: the result is shared by every expert that ran for at least 5% of this
+			// house's expert choices, in proportion (twice its share, up to the full delta), not
+			// given whole to the expert in charge when the match ended. The most used one carries
+			// the archetype memory and the LoRA step.
+			std::array<int, NeuralAI::NumSpecialists> ticks {};
+			int totalTicks = 0;
+
+			if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+				ticks = ExpertTicks[pHouse->ArrayIndex];
+
+			for (const int t : ticks)
+				totalTicks += t;
+
+			if (totalTicks <= 0)
+			{
+				ticks.fill(0);
+				ticks[std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1)] = 1;
+				totalTicks = 1;
+			}
+
+			int exp = 0;
+
+			for (int e = 1; e < NeuralAI::NumSpecialists; ++e)
+			{
+				if (ticks[e] > ticks[exp])
+					exp = e;
+			}
 
 			const int fastBonus
 				= (!NeuralAI::MatchEndStalemate && won && Unsorted::CurrentFrame > 0 && Unsorted::CurrentFrame <= 18000)
@@ -1006,24 +1111,33 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 			// play long games (expansion, crawl, siege) are not penalized for ending on the timer.
 			const int delta = NeuralAI::MatchEndStalemate ? (won ? 3 : -3) : (won ? (12 + fastBonus) : -6);
 
-			uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + arch * 10 + exp) % 512);
+			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+			{
+				if (ticks[e] * 20 < totalTicks)
+					continue;
 
-			if (NeuralAI::Backpack.NumEntries < 512)
-				NeuralAI::Backpack.NumEntries = std::max(NeuralAI::Backpack.NumEntries, entryIdx + 1);
+				const int expertDelta = std::clamp((delta * 2 * ticks[e] + (delta >= 0 ? totalTicks / 2 : -totalTicks / 2)) / totalTicks,
+					-std::abs(delta), std::abs(delta));
+				const uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + arch * 10 + e) % 512);
 
-			auto& entry = NeuralAI::Backpack.Entries[entryIdx];
+				if (NeuralAI::Backpack.NumEntries < 512)
+					NeuralAI::Backpack.NumEntries = std::max(NeuralAI::Backpack.NumEntries, entryIdx + 1);
 
-			entry.StateClusterHash = (static_cast<uint32_t>(pHouse->SideIndex) << 16) | static_cast<uint32_t>(arch << 8)
-				| static_cast<uint32_t>(exp);
+				auto& entry = NeuralAI::Backpack.Entries[entryIdx];
 
-			entry.ArchetypeScoreDelta[arch] = ClampInt16(entry.ArchetypeScoreDelta[arch] + delta);
+				entry.StateClusterHash = (static_cast<uint32_t>(pHouse->SideIndex) << 16) | static_cast<uint32_t>(arch << 8)
+					| static_cast<uint32_t>(e);
 
-			if (exp < 8)
-				entry.ExpertScoreDelta[exp] = ClampInt16(entry.ExpertScoreDelta[exp] + delta);
-			else
-				entry.BuildCategoryDelta[14 + (exp - 8)] = ClampInt16(entry.BuildCategoryDelta[14 + (exp - 8)] + delta);
+				if (e == exp)
+					entry.ArchetypeScoreDelta[arch] = ClampInt16(entry.ArchetypeScoreDelta[arch] + delta);
 
-			entry.VisitCount++;
+				if (e < 8)
+					entry.ExpertScoreDelta[e] = ClampInt16(entry.ExpertScoreDelta[e] + expertDelta);
+				else
+					entry.BuildCategoryDelta[14 + (e - 8)] = ClampInt16(entry.BuildCategoryDelta[14 + (e - 8)] + expertDelta);
+
+				entry.VisitCount++;
+			}
 
 			// Update LoRA rank-16 adapter weights deterministically
 			const int loraIdx = (arch * 64 + exp * 8) % (256 * 16);
@@ -1053,6 +1167,125 @@ void NeuralAI::OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled)
 	{
 		if (auto const pExt = HouseExt::TryFetch(pHouse))
 			pExt->NeuralAI_Campaign = true;
+	}
+}
+
+// Damage to a Neural AI house's units or buildings by another player house (the victim always
+// knows who hit it). Aimed: the attacker's target was ours (or there was no attacking unit, as for a
+// superweapon). Expert 3 diplomacy reads it:
+// - inside the grace window of a truce (PactGraceFrames) damage between the partners counts for
+//   nothing, either way (missiles, shells, storms launched before the truce);
+// - every hit feeds our grudge against that house (aimed in full, the rest a quarter);
+// - from a truce partner, aimed damage in force within BetrayalWindowFrames is a betrayal: the truce
+//   ends at once, the pact at the next update, and the partner is a traitor to us for the rest of
+//   the match, unless we hit back a third as hard in that window (a skirmish of units clashing at
+//   the shared target); anything less (splash, stray hits while both fire at the target) is collateral, and
+//   the truce ends without blame once it passes CollateralDamageLimit within CollateralWindowFrames.
+void NeuralAI::OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed)
+{
+	if (!pVictim || !pAttacker || pVictim == pAttacker || damage <= 0)
+		return;
+
+	const int victim = pVictim->ArrayIndex;
+	const int attacker = pAttacker->ArrayIndex;
+
+	if (victim < 0 || victim >= 8 || attacker < 0 || attacker >= 8 || pVictim->IsAlliedWith(pAttacker))
+		return;
+
+	const int now = Unsorted::CurrentFrame;
+
+	// The attacker's own books: damage it did to its partner inside the grace window, and the aimed
+	// damage it did to a partner (the skirmish test of the betrayal rule).
+	if (NeuralAI::IsEnabledForHouse(pAttacker))
+	{
+		auto& attackerCoal = GetMacroState(pAttacker).Coalition;
+
+		if (IsInPactGrace(pAttacker, victim))
+		{
+			attackerCoal.GraceDamageIgnored += damage;
+		}
+		else if (aimed && attackerCoal.Target >= 0 && attackerCoal.TruceSinceFrame[victim] >= 0)
+		{
+			if (now - attackerCoal.AimedDealtFrame[victim] > BetrayalWindowFrames || now < attackerCoal.AimedDealtFrame[victim])
+			{
+				attackerCoal.AimedDealtFrame[victim] = now;
+				attackerCoal.AimedDealt[victim] = 0;
+			}
+
+			attackerCoal.AimedDealt[victim] += damage;
+		}
+	}
+
+	if (!NeuralAI::IsEnabledForHouse(pVictim))
+		return;
+
+	auto& coal = GetMacroState(pVictim).Coalition;
+
+	if (IsInPactGrace(pVictim, attacker))
+	{
+		coal.GraceDamageIgnored += damage;
+		return;
+	}
+
+	coal.Grudge[attacker] = std::min(1000000, coal.Grudge[attacker] + (aimed ? damage : damage / 4));
+
+	if (aimed)
+		coal.HurtByFrame[attacker] = now;
+
+	const bool partner = coal.Target >= 0 && attacker != coal.Target && coal.TruceSinceFrame[attacker] >= 0
+		&& (coal.RevokedMask & (1u << attacker)) == 0;
+
+	if (!partner)
+		return;
+
+	if (aimed)
+	{
+		if (now - coal.AimedWindowFrame[attacker] > BetrayalWindowFrames || now < coal.AimedWindowFrame[attacker])
+		{
+			coal.AimedWindowFrame[attacker] = now;
+			coal.AimedDamage[attacker] = 0;
+		}
+
+		coal.AimedDamage[attacker] += damage;
+
+		// A trade of shots (we hit back a third as hard in the same window) is a skirmish: collateral.
+		const bool weTradedShots = now - coal.AimedDealtFrame[attacker] <= BetrayalWindowFrames
+			&& coal.AimedDealt[attacker] * 3 >= coal.AimedDamage[attacker];
+
+		if (coal.AimedDamage[attacker] >= BetrayalDamage && !weTradedShots)
+		{
+			coal.RevokedMask |= 1u << attacker;
+			coal.Revoked++;
+			coal.TruceEnds[static_cast<size_t>(NeuralTruceEnd::Betrayal)]++;
+			coal.BetrayalsSuffered++;
+			coal.TraitorScore[attacker]++;
+			coal.Grudge[attacker] = std::min(1000000, coal.Grudge[attacker] + 3000);
+			coal.BetrayedPending = true;
+			BetrayalsCommitted[attacker]++;
+			CountDecision(NeuralDecision::TruceRevoked, victim);
+			Debug::Log("[NeuralAI] House %d Coalition: betrayed by house %d at frame %d (aimed damage %d in %d frames).\n",
+				victim, attacker, now, coal.AimedDamage[attacker], now - coal.AimedWindowFrame[attacker]);
+			return;
+		}
+	}
+
+	if (now - coal.CollateralWindowFrame[attacker] > CollateralWindowFrames || now < coal.CollateralWindowFrame[attacker])
+	{
+		coal.CollateralWindowFrame[attacker] = now;
+		coal.CollateralDamage[attacker] = 0;
+	}
+
+	coal.CollateralDamage[attacker] += damage;
+
+	if (coal.CollateralDamage[attacker] >= CollateralDamageLimit)
+	{
+		coal.RevokedMask |= 1u << attacker;
+		coal.Revoked++;
+		coal.TruceEnds[static_cast<size_t>(NeuralTruceEnd::Collateral)]++;
+		coal.ExPartnerUntil[attacker] = now + ExPartnerCooldownFrames;
+		CountDecision(NeuralDecision::TruceRevoked, victim);
+		Debug::Log("[NeuralAI] House %d Coalition: truce with house %d ends at frame %d, collateral losses %d.\n", victim,
+			attacker, now, coal.CollateralDamage[attacker]);
 	}
 }
 
