@@ -2101,6 +2101,7 @@ PreserveCSFWhitespace=false      ; boolean
 - Fixed an issue in Ares where vehicles would occasionally continue to fire and move even after the driver had been killed (by FlyStar)
 - [Ares' Chrono Prisons / Abductors Expansion](Fixed-or-Improved-Logics.md#ares-chrono-prisons-abductors-expansion) (by FlyStar)
 - [Allow Ares Academy add country-level filters](New-or-Enhanced-Logics.md#allow-ares-academy-add-country-level-filters) (by dh381)
+- Fixed aircraft with `AirportBound=no` getting stuck in production when every dock is taken, and made them leave without taking a dock (by FS-21)
 ```
 
 ### 0.5

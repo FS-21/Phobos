@@ -3,6 +3,8 @@
 #include <Ext/BuildingType/Body.h>
 #include <BuildingClass.h>
 
+class AircraftClass;
+
 class BuildingExt final : public TechnoExt, public Detach::Listener<BuildingClass>
 {
 public:
@@ -113,6 +115,7 @@ public:
 
 	static int CountOccupiedDocks(BuildingClass* pBuilding);
 	static bool HasFreeDocks(BuildingClass* pBuilding);
+	static bool KickOutUndockedAircraft(BuildingClass* pFactory, AircraftClass* pAircraft);
 	static bool CanGrindTechno(BuildingClass* pBuilding, TechnoClass* pTechno);
 	static bool DoGrindingExtras(BuildingClass* pBuilding, TechnoClass* pTechno, int refund);
 	static bool CanUndeployOnSell(BuildingClass* pThis);
