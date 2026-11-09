@@ -742,17 +742,19 @@ DEFINE_HOOK(0x443C60, BuildingClass_KickOutUnit_FlyingProduction, 0x6)
 	return 0;
 }
 
-// An aircraft that needs no dock (AirportBound=no) leaves its factory in the air over it and flies
-// to the rally point, or next to the factory, to land there. It never takes a dock, so the docks
-// stay free for the aircraft that must land on them.
+// An aircraft that needs no dock (AirportBound=no) leaves its factory landed at the height of a
+// docked aircraft (the factory's ground plus the Z of its first docking offset), then takes off to
+// the rally point, or next to the factory, and lands there. It never takes a dock, so the docks stay
+// free for the aircraft that must land on them.
 bool BuildingExt::KickOutUndockedAircraft(BuildingClass* pFactory, AircraftClass* pAircraft)
 {
 	auto const pType = pAircraft->Type;
 	const int typeFlightLevel = pType->GetFlightLevel();
 	const int flightLevel = typeFlightLevel > 0 ? typeFlightLevel : RulesClass::Instance->FlightLevel;
+	const int dockHeight = pFactory->Type->NumberOfDocks > 0 ? std::max(0, pFactory->Type->DockingOffsets[0].Z) : 0;
 
 	CoordStruct coords = pFactory->GetCoords();
-	coords.Z += flightLevel;
+	coords.Z += dockHeight;
 
 	const DirStruct facing = pFactory->PrimaryFacing.Current().Raw != 0 ? pFactory->PrimaryFacing.Current() : DirStruct(128);
 	bool unlimboed = false;
@@ -767,11 +769,11 @@ bool BuildingExt::KickOutUndockedAircraft(BuildingClass* pFactory, AircraftClass
 		return false;
 
 	pAircraft->SetLocation(coords);
-	pAircraft->InAir = true;
+	pAircraft->InAir = false;
 	pAircraft->IsALoaner = false;
 	pAircraft->PrimaryFacing.SetCurrent(facing);
 	pAircraft->PrimaryFacing.SetDesired(facing);
-	pAircraft->SetHeight(flightLevel);
+	pAircraft->SetHeight(dockHeight);
 
 	if (auto const pFlyLoco = locomotion_cast<FlyLocomotionClass*>(pAircraft->Locomotor))
 	{
@@ -802,10 +804,10 @@ bool BuildingExt::KickOutUndockedAircraft(BuildingClass* pFactory, AircraftClass
 	return true;
 }
 
-// Aircraft that need no dock (AirportBound=no) never take one, even a free one: they leave in the
-// air (KickOutUndockedAircraft). The original code docked them when a dock was free and otherwise
-// brought them in from the map edge. During an ion storm they keep the original way, since
-// aircraft cannot fly then.
+// Aircraft that need no dock (AirportBound=no) never take one, even a free one: they leave landed
+// over the factory and take off from there (KickOutUndockedAircraft). The original code docked
+// them when a dock was free and otherwise brought them in from the map edge. During an ion storm
+// they keep the original way, since aircraft cannot fly then.
 DEFINE_HOOK(0x443CD9, BuildingClass_KickOutUnit_UndockedAircraft, 0x8)
 {
 	enum { ToDock = 0x443F54, NoFreeDock = 0x443CE1, Succeeded = 0x444971, Failed = 0x445696 };
