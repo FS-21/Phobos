@@ -3,6 +3,8 @@
 
 namespace
 {
+	int AirSortieDamageVs(AircraftClass* pAir, BuildingClass* pTarget);
+
 	bool IsPlanMember(HouseClass* pHouse, DWORD uid)
 	{
 		if (!pHouse)
@@ -1799,7 +1801,19 @@ namespace
 
 						// Late game nearly every valuable building has 2+ AA around it: a bigger wing may
 						// still go (up to one AA site per two strikers), the score keeps the least covered.
-						if (aaNear <= std::max<int>(1, static_cast<int>(strikers.size()) / 2) && targetScore > bestTargetScore)
+						if (aaNear > std::max<int>(1, static_cast<int>(strikers.size()) / 2) || targetScore <= bestTargetScore)
+							continue;
+
+						// At least two of the strikers must damage it (some bombs do nothing to structures).
+						int able = 0;
+
+						for (auto const pStriker : strikers)
+						{
+							if (AirSortieDamageVs(static_cast<AircraftClass*>(pStriker), pBld) > 0)
+								++able;
+						}
+
+						if (able >= 2)
 						{
 							bestTargetScore = targetScore;
 							pBestTarget = pBld;
@@ -1811,6 +1825,11 @@ namespace
 
 				if (pBestTarget && shouldTryStart(NeuralPlanId::AirStrike, utility))
 				{
+					std::erase_if(strikers, [pBestTarget](FootClass* pFoot)
+					{
+						return AirSortieDamageVs(static_cast<AircraftClass*>(pFoot), pBestTarget) <= 0;
+					});
+
 					std::sort(strikers.begin(), strikers.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
 					strikers.resize(std::min<size_t>(strikers.size(), 6));
 					startPlan(NeuralPlanId::AirStrike, strikers, pBestTarget->GetMapCoords(), CellStruct::Empty,
@@ -2610,6 +2629,16 @@ namespace
 			if (knownAARiskAt(pTarget->GetMapCoords()) <= 2)
 			{
 				group = collectAirStrikers();
+
+				// Some bombs do nothing against structures (Chaos gas, mind control): only aircraft that
+				// damage this building fly the strike.
+				std::erase_if(group, [pTarget](FootClass* pFoot)
+				{
+					auto const pAir = abstract_cast<AircraftClass*>(pFoot);
+
+					return !pAir || AirSortieDamageVs(pAir, pTarget) <= 0;
+				});
+
 				group.resize(std::min<size_t>(group.size(), 6));
 
 				if (group.size() >= 2)
