@@ -877,6 +877,66 @@ namespace
 			}
 		}
 
+		// Research: a superweapon that delivers hidden (limbo) buildings opens what lists them as
+		// prerequisites. Those buildings are never on the sidebar, so the unlock counts for the
+		// visible building that grants the superweapon. A two-step research (a hidden marker that
+		// grants the finishing superweapon) is followed back to the visible building too.
+		std::unordered_map<int, std::vector<int>> limboHosts;
+
+		for (auto const pHostType : BuildingTypeClass::Array)
+		{
+			if (!pHostType || pHostType->TechLevel > pHouse->TechLevel)
+				continue;
+
+			auto const pHostExt = BuildingTypeExt::Fetch(pHostType);
+			const int swSlots = 2 + static_cast<int>(pHostExt->SuperWeapons.size());
+
+			for (int i = 0; i < swSlots; ++i)
+			{
+				auto const pSWType = SuperWeaponTypeClass::Array.GetItemOrDefault(pHostExt->GetSuperWeaponIndex(i));
+
+				if (!pSWType)
+					continue;
+
+				for (auto const pDelivered : SWTypeExt::Fetch(pSWType)->LimboDelivery_Types)
+				{
+					if (pDelivered && pDelivered != pHostType && !IsPlayerFacingBuilding(pDelivered))
+						limboHosts[pDelivered->ArrayIndex].push_back(pHostType->ArrayIndex);
+				}
+			}
+		}
+
+		// Visible buildings of our tree that grant (directly or through a hidden marker) the
+		// superweapon delivering this hidden building, in building array order.
+		auto researchHostsOf = [&](int limboIdx, std::vector<int>& out)
+		{
+			std::vector<int> pending { limboIdx };
+			std::vector<int> seen;
+
+			for (size_t step = 0; step < pending.size() && step < 16; ++step)
+			{
+				auto const it = limboHosts.find(pending[step]);
+
+				if (it == limboHosts.end())
+					continue;
+
+				for (const int host : it->second)
+				{
+					if (std::find(seen.begin(), seen.end(), host) != seen.end())
+						continue;
+
+					seen.push_back(host);
+					auto const pHost = BuildingTypeClass::Array.GetItem(host);
+
+					if (!IsPlayerFacingBuilding(pHost))
+						pending.push_back(host);
+					else if (pHost->TechLevel >= 0
+						&& (HouseExt::IsAvailableToHouse(pHouse, pHost) || (pHost->OwnerFlags & foreignYardOwners)))
+						out.push_back(host);
+				}
+			}
+		};
+
 		auto scanType = [&](TechnoTypeClass* pType)
 		{
 			if (!pType || pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel
@@ -911,8 +971,13 @@ namespace
 
 				for (const int b : satisfiers)
 				{
-					if (b >= 0 && b < BuildingTypeClass::Array.Count && IsPlayerFacingBuilding(BuildingTypeClass::Array.GetItem(b)))
+					if (b < 0 || b >= BuildingTypeClass::Array.Count)
+						continue;
+
+					if (IsPlayerFacingBuilding(BuildingTypeClass::Array.GetItem(b)))
 						unlockers.push_back(b);
+					else
+						researchHostsOf(b, unlockers);
 				}
 			}
 
