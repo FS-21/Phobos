@@ -403,7 +403,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Allowed `SW.ShowCameo` and `SW.ManualFire` to work independently of `SW.AutoFire`.
 - Fixed the bug that Ares tunnel-type buildings cannot unload via the Deploy hotkey or command bar button.
 - Fixed an issue in Ares where vehicles would occasionally continue to fire and move even after the driver had been killed.
-- Fixed aircraft with `AirportBound=no` getting stuck in production once every dock of their air bases is taken. They now leave the air base in the air and land at the rally point or next to it, without taking a dock, so the docks stay free for `AirportBound=yes` aircraft.
+- Fixed aircraft with `AirportBound=no` getting stuck in production once every dock of their air bases is taken. They now appear landed over the air base at the height of its docks (`DockingOffset0`), take off and land at the rally point or next to it, without taking a dock, so the docks stay free for `AirportBound=yes` aircraft.
 
 ## Newly added global settings
 
