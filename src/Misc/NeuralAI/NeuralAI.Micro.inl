@@ -8291,7 +8291,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				|| pI->Type->MovementZone == MovementZone::AmphibiousDestroyer
 				|| pI->Type->MovementZone == MovementZone::Fly || pI->Type->JumpJet || pI->Type->Teleporter);
 			CellClass* pInfWaveGoal = pWaveTargetCell;
-			int infGoalZone = waveTargetZone;
 			const CellStruct preTransportInfGoal = LookupPassengerIslandGoal(pI->UniqueID);
 			if (preTransportInfGoal != CellStruct::Empty)
 			{
@@ -8306,7 +8305,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					else if (CellClass* pPreCell = MapClass::Instance.TryGetCellAt(preTransportInfGoal))
 					{
 						pInfWaveGoal = pPreCell;
-						infGoalZone = ptz;
 					}
 				}
 			}
@@ -8315,15 +8313,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& (pI->UniqueID % 3 == 0) && (canInfCrossWater || (secWaveZone >= 0 && iz == secWaveZone)))
 			{
 				pInfWaveGoal = pSecondaryWaveTargetCell;
-				infGoalZone = secWaveZone;
 			}
 
+			// Reachability on foot uses the soldier's own movement zone, since infantry walks where
+			// vehicles cannot. Ground infantry that cannot walk there stays to board transports.
 			const bool infGoalInWater = (pInfWaveGoal->LandType == LandType::Water);
-			if (!canInfCrossWater && (infGoalInWater || infGoalZone < 0 || iz < 0 || iz != infGoalZone))
-			{
-				continue; // Keep ground infantry ready on their island to board
-						// transports!
-			}
+			const int footZone = ObjectZone(pI, pI->Type->MovementZone);
+			const int goalFootZone = MapClass::Instance.GetMovementZoneType(pInfWaveGoal->MapCoords, pI->Type->MovementZone, false);
+
+			if (!canInfCrossWater && (infGoalInWater || footZone < 0 || footZone != goalFootZone))
+				continue;
 
 			const int infWpnRange = (pI->Type->GetWeapon(0) && pI->Type->GetWeapon(0)->WeaponType)
 				? pI->Type->GetWeapon(0)->WeaponType->Range
