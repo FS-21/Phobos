@@ -230,7 +230,9 @@ namespace
 		if (ownZone < 0 || MapClass::Instance.GetMovementZoneType(target, pType->MovementZone, false) == ownZone)
 			return nullptr;
 
-		for (int r = 1; r <= 12; ++r)
+		// Up to 32 cells: a wave target deep inland (12 was too short) left ships with a land cell
+		// they could never reach, so their attack-move stalled and was sent again in a loop.
+		for (int r = 1; r <= 32; ++r)
 		{
 			CellClass* pBest = nullptr;
 			int bestDist = INT_MAX;
@@ -345,6 +347,81 @@ namespace
 		}
 
 		return pCell;
+	}
+
+	// Coarse sea route for a ship: breadth-first search over the cells of its movement zone on a
+	// 3-cell grid (8 directions, fixed order), from the ship to target (a cell of its zone). Returns
+	// the first cell of the route at least `hop` cells from the ship, or nullptr when the target is
+	// within reach of one order (hop + 5) or no route is found (6000 grid nodes at most). A long
+	// naval order then goes in hops the engine path finder can manage.
+	CellClass* NavalRouteHop(FootClass* pFoot, const CellStruct& target, int hop)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || (pType->MovementZone != MovementZone::Water && pType->MovementZone != MovementZone::WaterBeach))
+			return nullptr;
+
+		const CellStruct from = pFoot->GetMapCoords();
+
+		if (from.DistanceFrom(target) <= hop + 5.0)
+			return nullptr;
+
+		const MovementZone mz = pType->MovementZone;
+		const int zone = ObjectZone(pFoot, mz);
+
+		if (zone < 0 || MapClass::Instance.GetMovementZoneType(target, mz, false) != zone)
+			return nullptr;
+
+		constexpr int Step = 3;
+		constexpr int DirX[8] = { 1, 1, 0, -1, -1, -1, 0, 1 };
+		constexpr int DirY[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+		auto const key = [](const CellStruct& c) { return (static_cast<uint32_t>(static_cast<uint16_t>(c.X)) << 16) | static_cast<uint16_t>(c.Y); };
+
+		std::unordered_map<uint32_t, CellStruct> parent;
+		std::vector<CellStruct> queue { from };
+		parent.emplace(key(from), from);
+		CellStruct reached = CellStruct::Empty;
+
+		for (size_t head = 0; head < queue.size() && queue.size() < 6000; ++head)
+		{
+			const CellStruct node = queue[head];
+
+			if (node.DistanceFrom(target) <= Step + 0.5)
+			{
+				reached = node;
+				break;
+			}
+
+			for (int d = 0; d < 8; ++d)
+			{
+				const CellStruct next { static_cast<short>(node.X + DirX[d] * Step), static_cast<short>(node.Y + DirY[d] * Step) };
+
+				if (!MapClass::Instance.CoordinatesLegal(next) || parent.contains(key(next))
+					|| MapClass::Instance.GetMovementZoneType(next, mz, false) != zone)
+				{
+					continue;
+				}
+
+				parent.emplace(key(next), node);
+				queue.push_back(next);
+			}
+		}
+
+		if (reached == CellStruct::Empty)
+			return nullptr;
+
+		std::vector<CellStruct> route;
+
+		for (CellStruct c = reached; c != from; c = parent[key(c)])
+			route.push_back(c);
+
+		for (auto it = route.rbegin(); it != route.rend(); ++it)
+		{
+			if (from.DistanceFrom(*it) >= hop)
+				return MapClass::Instance.TryGetCellAt(*it);
+		}
+
+		return nullptr;
 	}
 
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5)

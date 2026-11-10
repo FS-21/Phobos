@@ -1438,6 +1438,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					pEnemySubOrShip = pCheckU;
 				}
 
+				if (pCheckU->Type->Naval && pCheckU->Type->Cloakable && homeCoords != CellStruct::Empty
+					&& pCheckU->GetMapCoords().DistanceFrom(homeCoords) <= 30.0)
+				{
+					GetMacroState(pHouse).SubThreatUntil = Unsorted::CurrentFrame + 1800;
+				}
+
 				if (!pCheckU->Type->Naval && !pHiddenOrStealthEnemy
 					&& (pCheckU->CloakState != CloakState::Uncloaked || pCheckU->Disguised || pCheckU->Type->Cloakable
 						|| pCheckU->Type->CanDisguise || pCheckU->Type->PermaDisguise))
@@ -4651,7 +4657,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// outside the enemy's reach but still inside its own, then fires again. Only
 		// when the threat is not faster than us, otherwise retreating just loses DPS.
 		// The trained slot only scales the safety margin; it never switches it off.
-		if (pPrimaryWpn && pPrimaryWpn->Damage > 0 && !pType->Naval && !pType->Harvester && !pType->ResourceGatherer
+		if (pPrimaryWpn && pPrimaryWpn->Damage > 0 && !pType->Harvester && !pType->ResourceGatherer
 			&& !IsAmphibiousOrAirTransport(pType) && !IsImmobileUnitTypeOnLand(pType))
 		{
 			const int ownRange = std::max(pPrimaryWpn->Range, pSecondaryWpn && pSecondaryWpn->Damage > 0 ? pSecondaryWpn->Range : 0);
@@ -5413,7 +5419,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Slot 69 (Submarine Cloak Ambush & Anti-Submarine Destroyer Escort). While only enemy ships or
 		// submarines remain (NavalRemnantUntil) the hunt runs whatever the learned gate says.
-		if (pType->Naval && (SlotGate(scores[69], 80, 69) || GetMacroState(pHouse).NavalRemnantUntil > Unsorted::CurrentFrame))
+		if (pType->Naval && (SlotGate(scores[69], 80, 69) || GetMacroState(pHouse).NavalRemnantUntil > Unsorted::CurrentFrame
+			|| GetMacroState(pHouse).SubThreatUntil > Unsorted::CurrentFrame))
 		{
 			if (pType->Cloakable && pUnit->GetHealthPercentage() < 0.45 && homeCoords != CellStruct::Empty
 				&& pUnit->CurrentMission != Mission::Move)
@@ -5427,7 +5434,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 			}
-			else if (isUnitIdle && pEnemySubOrShip && (pType->Sensors || (pPrimaryWpn && pPrimaryWpn->Damage > 0)))
+			// Against a submarine only ships that hit under water (NavalTargeting) or carry sonar go.
+			else if (isUnitIdle && pEnemySubOrShip
+				&& (pType->Sensors || pType->NavalTargeting == NavalTargetingType::Underwater_Secondary
+					|| pType->NavalTargeting == NavalTargetingType::Underwater_Only
+					|| pType->NavalTargeting == NavalTargetingType::Organic_Secondary
+					|| (!pEnemySubOrShip->Type->Cloakable && pPrimaryWpn && pPrimaryWpn->Damage > 0)))
 			{
 				if (auto const pSubCell = pEnemySubOrShip->GetCell())
 				{
@@ -7429,6 +7441,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			continue;
 		}
+
+		// Capital units go out in their own groups (UpdateCapitalGroups).
+		if (GetMacroState(pHouse).CapitalHeld.contains(pUnit->UniqueID))
+			continue;
 
 		if (pUnit->GetHealthPercentage() < 0.40)
 			continue;

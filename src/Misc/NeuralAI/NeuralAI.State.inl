@@ -109,6 +109,15 @@ namespace
 		int Frame { 0 };
 	};
 
+	// A group of capital units of one domain (ground, air, sea): UpdateCapitalGroups.
+	struct NeuralCapitalGroup
+	{
+		std::vector<DWORD> Members {};
+		bool Attacking { false };
+		DWORD TargetID { 0 };
+		int StartValue { 0 };
+	};
+
 	struct NeuralPlanInstance
 	{
 		bool Active { false };
@@ -635,8 +644,17 @@ namespace
 		// The enemy has no building left that counts and still has ships or submarines: until this
 		// frame the house builds and sends sonar ships and ships that hit under water.
 		int NavalRemnantUntil { -1 };
+		// An enemy submarine (Naval, Cloakable) was seen within 30 cells of our base: until this frame
+		// the house builds and sends ships that hit under water or carry sonar.
+		int SubThreatUntil { -1 };
+		// The unit on its way to a repair station to be sold for emergency money (0 when none).
+		DWORD DepotSaleUnit { 0 };
 		// Plan members by UniqueID (UpdateStrategicPlans); dropped 600 frames after the last sight.
 		std::unordered_map<DWORD, NeuralPlanMemberTrace> PlanMemberTraces;
+		// Capital groups by domain (0 ground, 1 air, 2 sea) and the capital units they hold back from
+		// waves and lone strikes (UpdateCapitalGroups).
+		std::array<NeuralCapitalGroup, 3> CapitalGroups {};
+		std::unordered_set<DWORD> CapitalHeld {};
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
@@ -881,7 +899,11 @@ namespace
 			this->EnemyAcrossWater = false;
 			this->NoRoomIslandUntil.clear();
 			this->NavalRemnantUntil = -1;
+			this->SubThreatUntil = -1;
+			this->DepotSaleUnit = 0;
 			this->PlanMemberTraces.clear();
+			this->CapitalGroups = {};
+			this->CapitalHeld.clear();
 			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
 			this->FerryWaitSince.clear();

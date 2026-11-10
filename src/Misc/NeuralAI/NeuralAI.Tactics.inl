@@ -1287,6 +1287,128 @@ namespace
 	//   offline (the existing micro brings them back online once the surplus is >= 150).
 	// - Harvester balance: a refinery with 3+ harvesters waiting next to it sends one to the ore of a
 	//   refinery of ours that has none (one per 450 frames).
+	int GroundRangeOf(TechnoTypeClass* pType);
+
+	// Emergency sale on a repair station, as a player can do (Phobos: a unit standing on a building
+	// with UnitSell, default UnitRepair, is sold; Unsellable / UnitsUnsellable respected). While the
+	// income has to be restored and the credits do not cover it, the least needed sellable vehicle
+	// (armed, no harvester, deployer, transport or naval unit, in no plan, 300+ credits; most
+	// expensive first, nearer first) drives onto our nearest such station and is sold there, one
+	// at a time, until the credits reach targetMoney.
+	void UpdateDepotEmergencySale(HouseClass* pHouse, bool needed, int targetMoney)
+	{
+		auto& macro = GetMacroState(pHouse);
+
+		if (!needed || targetMoney == INT_MAX || pHouse->Available_Money() >= targetMoney)
+		{
+			macro.DepotSaleUnit = 0;
+			return;
+		}
+
+		std::vector<BuildingClass*> depots;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && !pBld->Type->Naval
+				&& BuildingTypeExt::ExtMap.Find(pBld->Type)->UnitSell.Get(pBld->Type->UnitRepair))
+			{
+				depots.push_back(pBld);
+			}
+		}
+
+		if (depots.empty())
+		{
+			macro.DepotSaleUnit = 0;
+			return;
+		}
+
+		auto const sellable = [pHouse, &macro](UnitClass* pUnit)
+		{
+			auto const pType = pUnit ? pUnit->Type : nullptr;
+
+			if (!pType || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || pType->Naval || pType->Harvester
+				|| pType->ResourceGatherer || pType->DeploysInto || IsAmphibiousOrAirTransport(pType) || pType->Cost < 300
+				|| pUnit->Passengers.NumPassengers > 0 || GroundRangeOf(pType) <= 0 || macro.PlanMembers.contains(pUnit->UniqueID)
+				|| IsAirborneThreatTechno(pUnit))
+			{
+				return false;
+			}
+
+			auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
+
+			return !(pTypeExt && pTypeExt->Unsellable.Get(RulesExt::Global()->UnitsUnsellable));
+		};
+
+		UnitClass* pSale = nullptr;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->UniqueID == macro.DepotSaleUnit)
+			{
+				pSale = sellable(pUnit) ? pUnit : nullptr;
+				break;
+			}
+		}
+
+		auto const nearestDepot = [&depots](UnitClass* pUnit)
+		{
+			BuildingClass* pBest = nullptr;
+			int bestDist = INT_MAX;
+
+			for (auto const pDepot : depots)
+			{
+				const int d = pUnit->DistanceFrom(pDepot);
+
+				if (d < bestDist)
+				{
+					bestDist = d;
+					pBest = pDepot;
+				}
+			}
+
+			return pBest;
+		};
+
+		if (!pSale)
+		{
+			int bestScore = INT_MIN;
+
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (!sellable(pUnit))
+					continue;
+
+				auto const pDepot = nearestDepot(pUnit);
+				const int score = pUnit->Type->Cost - pUnit->DistanceFrom(pDepot) / Unsorted::LeptonsPerCell * 20;
+
+				if (score > bestScore || (score == bestScore && pSale && pUnit->UniqueID < pSale->UniqueID))
+				{
+					bestScore = score;
+					pSale = pUnit;
+				}
+			}
+
+			if (!pSale)
+				return;
+
+			macro.DepotSaleUnit = pSale->UniqueID;
+		}
+
+		auto const pDepot = nearestDepot(pSale);
+		auto const pCell = pSale->GetCell();
+
+		if (pCell && std::find(depots.begin(), depots.end(), pCell->GetBuilding()) != depots.end())
+		{
+			pSale->Sell(-1);
+			macro.DepotSaleUnit = 0;
+			CountDecision(NeuralDecision::DepotEmergencySale, pHouse->ArrayIndex);
+		}
+		else if (pSale->CurrentMission != Mission::Enter)
+		{
+			OrderFootToEnter(pSale, pDepot);
+		}
+	}
+
 	void UpdateEconomyCrisis(HouseClass* pHouse)
 	{
 		if (!pHouse || pHouse->Defeated)
@@ -1568,6 +1690,35 @@ namespace
 		const bool holdForHarvester = noIncome && cashBuildings == 0 && cheapestHarvester != INT_MAX;
 		macro.BrokeHoldActive = holdForHarvester;
 
+		// Emergency money from units sold on a repair station: for the item that restores income,
+		// or for an MCV when no ConYard and no MCV is left.
+		{
+			bool hasMcv = false;
+			int mcvCost = INT_MAX;
+
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && pUnit->Type && pUnit->Type->DeploysInto
+					&& pUnit->Type->DeploysInto->ConstructionYard)
+				{
+					hasMcv = true;
+					break;
+				}
+			}
+
+			if (pHouse->ConYards.Count == 0 && !hasMcv)
+			{
+				for (auto const pType : UnitTypeClass::Array)
+				{
+					if (pType && pType->DeploysInto && pType->DeploysInto->ConstructionYard && CanBuildUnderHumanRules(pHouse, pType))
+						mcvCost = std::min(mcvCost, pType->GetActualCost(pHouse));
+				}
+			}
+
+			const bool needMcv = mcvCost != INT_MAX;
+			UpdateDepotEmergencySale(pHouse, holdForHarvester || needMcv, needMcv ? mcvCost : cheapestHarvester);
+		}
+
 		// No repairs while broke: wrench repairs stop, units on a repair station (service depot,
 		// shipyard) step off it.
 		if (holdForHarvester)
@@ -1589,8 +1740,11 @@ namespace
 				{
 					auto const pDocked = abstract_cast<FootClass*>(pBld->GetNthLink(i));
 
-					if (!pDocked || !pDocked->IsAlive || pDocked->Owner != pHouse || pDocked->GetHealthPercentage() >= 1.0)
+					if (!pDocked || !pDocked->IsAlive || pDocked->Owner != pHouse || pDocked->GetHealthPercentage() >= 1.0
+						|| pDocked->UniqueID == macro.DepotSaleUnit)
+					{
 						continue;
+					}
 
 					if (auto const pExitCell = MapClass::Instance.TryGetCellAt(exitCell))
 					{

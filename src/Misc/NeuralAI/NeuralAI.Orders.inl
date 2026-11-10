@@ -298,6 +298,14 @@ namespace
 				pDestCell = pReach;
 				pResolvedDest = pReach;
 			}
+
+			// A far naval order goes in hops of 25 cells along a sea route (NavalRouteHop); the owner
+			// logic sends it again once the ship is there.
+			if (auto const pHop = NavalRouteHop(pFoot, pDestCell->MapCoords, 25))
+			{
+				pDestCell = pHop;
+				pResolvedDest = pHop;
+			}
 		}
 
 		// Hysteresis: a unit already attack-moving to (almost) the same place keeps its order.

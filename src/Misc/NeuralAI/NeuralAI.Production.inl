@@ -209,6 +209,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Forward crawl stones placed / lost (trainer credit for the offensive crawl).
 	UpdateOffensiveStones(pHouse);
 
+	// Capital units gather and strike in groups.
+	UpdateCapitalGroups(pHouse);
+
+	// Submarines keep out of known enemy sonar.
+	UpdateSubmarineStealth(pHouse);
+
+	// Veinhole monsters near us and destroyable cliffs that open a way.
+	UpdateMapObstacles(pHouse);
+
 	// Idle airships / jumpjet bombers near known enemy structures attack them.
 	UpdateIdleAirborneStrikers(pHouse);
 
@@ -3666,13 +3675,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				// Only enemy ships or submarines are left: sonar (Sensors) to find them and weapons
 				// that hit under water (NavalTargeting) to sink them.
-				if (GetMacroState(pHouse).NavalRemnantUntil > Unsorted::CurrentFrame)
+				// An enemy submarine near our base: the same, with less weight.
+				const bool remnantHunt = GetMacroState(pHouse).NavalRemnantUntil > Unsorted::CurrentFrame;
+
+				if (remnantHunt || GetMacroState(pHouse).SubThreatUntil > Unsorted::CurrentFrame)
 				{
 					const auto targeting = pUnit->NavalTargeting;
 					const bool hitsUnderwater = targeting == NavalTargetingType::Underwater_Secondary
 						|| targeting == NavalTargetingType::Underwater_Only || targeting == NavalTargetingType::Organic_Secondary;
 
-					score += (hitsUnderwater ? 900 : -600) + (pUnit->Sensors ? 400 : 0);
+					score += remnantHunt ? ((hitsUnderwater ? 900 : -600) + (pUnit->Sensors ? 400 : 0))
+										 : ((hitsUnderwater ? 500 : 0) + (pUnit->Sensors ? 250 : 0));
 				}
 
 				const auto pWpn1 = pUnit->GetWeapon(1) ? pUnit->GetWeapon(1)->WeaponType : nullptr;
