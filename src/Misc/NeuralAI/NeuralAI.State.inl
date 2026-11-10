@@ -618,6 +618,9 @@ namespace
 		// A known enemy base stands on land we cannot walk to from home (features[21] at the last
 		// production tick): harassment from range is how an offensive bank presses it.
 		bool EnemyAcrossWater { false };
+		// Islands (movement zone -> frame until) where an expansion deployer found no room for its
+		// building: the island search skips them until then.
+		std::map<int, int> NoRoomIslandUntil;
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
@@ -859,6 +862,7 @@ namespace
 			this->BankQueueTicks.fill(0);
 			this->BankQueueBusyTicks.fill(0);
 			this->EnemyAcrossWater = false;
+			this->NoRoomIslandUntil.clear();
 			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
 			this->FerryWaitSince.clear();

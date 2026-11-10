@@ -172,6 +172,7 @@ namespace
 		UrbanEvacuate,
 		UrbanClear,
 		AllyTechYield,
+		DeployerIslandNoRoom,
 		Count
 	};
 
@@ -195,7 +196,7 @@ namespace
 		"bankFactoryPick", "bankYardPick",
 		"airWings", "airWingSorties", "airInterceptSorties", "airSoloStrikes", "airFrontPatrols", "aircraftFielded",
 		"aircraftLost",
-		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield" };
+		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

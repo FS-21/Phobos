@@ -1119,7 +1119,8 @@ namespace
 	// spread over 9000 frames, and while they fall short it wants one more factory at a time in
 	// the slowest queue until they would not. Only a queue that kept producing (85% of the AI
 	// ticks since the last sample) gets one: a queue that waits for something to build (army caps,
-	// no target) does not spend faster with more factories. Only game state is read (money spent
+	// no target) does not spend faster with more factories. Airfields are never added: they are
+	// hangars that follow the docks the aircraft need. Only game state is read (money spent
 	// and held, factory counts, factories producing, rules), so every machine computes the same
 	// wants.
 	void UpdateBankGovernor(HouseClass* pHouse)
@@ -1216,8 +1217,11 @@ namespace
 
 			for (int q = 0; q < static_cast<int>(BankQueue::Count); ++q)
 			{
-				if (counts[q] > 0 && queueKeptBusy[q] && (best < 0 || wanted[q] < wanted[best]))
+				if (q != static_cast<int>(BankQueue::Aircraft) && counts[q] > 0 && queueKeptBusy[q]
+					&& (best < 0 || wanted[q] < wanted[best]))
+				{
 					best = q;
+				}
 			}
 
 			if (best < 0)

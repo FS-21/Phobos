@@ -113,16 +113,6 @@ namespace
 		}
 	}
 
-	// Factory cap by difficulty, per category: every barracks counts together, every ground war
-	// factory together (whatever faction it comes from, captured trees included), every shipyard
-	// together. Easy 4, Normal 10, Hard none. Airfields are not capped here: they follow the demand
-	// of the docking aircraft.
-	int GetFactoryCategoryCap(HouseClass* pHouse)
-	{
-		const int diffIdx = pHouse ? static_cast<int>(pHouse->GetAIDifficultyIndex()) : 0;
-		return diffIdx >= 2 ? 4 : (diffIdx == 1 ? 10 : INT_MAX);
-	}
-
 	// 0 barracks, 1 ground war factory, 2 shipyard, -1 not capped. A deployed mobile factory (a unit
 	// that unfolds into a factory and can pack up again, UndeploysInto) is a unit, not a ConYard
 	// building: never counted nor sold here.
@@ -138,6 +128,48 @@ namespace
 			return pType->Naval ? 2 : 1;
 
 		return -1;
+	}
+
+	bool IsEnemyBuildingKnown(HouseClass* pHouse, const BuildingClass* pBld);
+
+	// Factory cap by difficulty, per category: every barracks counts together, every ground war
+	// factory together (whatever faction it comes from, captured trees included), every shipyard
+	// together. Easy 4, Normal 10, Hard 20. Airfields are not capped here: they follow the demand
+	// of the docking aircraft.
+	int GetFactoryCategorySellCap(HouseClass* pHouse)
+	{
+		const int diffIdx = pHouse ? static_cast<int>(pHouse->GetAIDifficultyIndex()) : 0;
+		return diffIdx >= 2 ? 4 : (diffIdx == 1 ? 10 : 20);
+	}
+
+	// Cap for new factories of a category. On Hard it follows the main enemy: one more than the
+	// factories of that category we know it has, never below 10 nor above 20 (20 with no main
+	// enemy). Easy and Normal keep their fixed cap.
+	int GetFactoryCategoryCap(HouseClass* pHouse, int category)
+	{
+		const int sellCap = GetFactoryCategorySellCap(pHouse);
+
+		if (!pHouse || sellCap != 20)
+			return sellCap;
+
+		const int enemyIdx = pHouse->EnemyHouseIndex;
+		auto const pEnemy = (enemyIdx >= 0 && enemyIdx < HouseClass::Array.Count) ? HouseClass::Array.GetItem(enemyIdx) : nullptr;
+
+		if (!pEnemy || pEnemy == pHouse || pEnemy->Defeated || pEnemy->IsObserver())
+			return sellCap;
+
+		int enemyFactories = 0;
+
+		for (auto const pBld : pEnemy->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && FactoryCapCategory(pBld->Type) == category
+				&& IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				enemyFactories++;
+			}
+		}
+
+		return std::clamp(enemyFactories + 1, 10, sellCap);
 	}
 
 	// Living factories of a category that are not being sold (under construction included).
@@ -166,9 +198,10 @@ namespace
 	// True when one was sold.
 	bool SellFactoriesOverDifficultyCap(HouseClass* pHouse, const CellStruct& frontStoneCell)
 	{
-		const int cap = GetFactoryCategoryCap(pHouse);
-		if (!pHouse || cap == INT_MAX)
+		if (!pHouse)
 			return false;
+
+		const int cap = GetFactoryCategorySellCap(pHouse);
 
 		const CellStruct mainBase = (pHouse->BaseSpawnCell != CellStruct::Empty)
 			? pHouse->BaseSpawnCell

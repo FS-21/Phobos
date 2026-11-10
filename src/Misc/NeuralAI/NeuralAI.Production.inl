@@ -951,15 +951,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const int maxShipyards
 			= (hasTechCenter && maxEnemyShipyards >= 2) ? std::clamp(maxEnemyShipyards + 1, 2, 4) : 2;
 
+		// Aircraft that need a dock, the ones in production included (they hold one already).
 		int ownedDockingAircraft = 0;
 		for (auto const pOwnAir : AircraftClass::Array)
 		{
-			if (pOwnAir && pOwnAir->Owner == pHouse && !pOwnAir->InLimbo && pOwnAir->IsAlive && pOwnAir->Type
+			if (pOwnAir && pOwnAir->Owner == pHouse && pOwnAir->IsAlive && pOwnAir->Type
 				&& !pOwnAir->SpawnOwner && (pOwnAir->Type->AirportBound || pOwnAir->Type->Dock.Count > 0))
 			{
 				ownedDockingAircraft++;
 			}
 		}
+
+		// Another airfield only when every dock is taken: an airfield is a hangar, not a faster factory.
+		const bool airDocksFull = ownedDockingAircraft >= pHouse->AirportDocks;
 
 		const bool expert8NeedsMoreAirpadDocks = (ownedAirpads >= 1 && ownedDockingAircraft >= pHouse->AirportDocks
 			&& (scores[32] > 160 || scores[33] > 160 || pExt->NeuralAI_ActiveExpert == 8
@@ -1550,40 +1554,36 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// Outposts that may get a factory past the difficulty cap (SellFactoriesOverDifficultyCap
 		// then sells another of its type): a forward or island ConYard without one, or the front of
 		// an offensive crawl (newest forward stone) without one within 15 cells.
-		const int factoryCategoryCap = GetFactoryCategoryCap(pHouse);
+		std::array<int, 3> factoryCategoryCaps {};
 		std::array<int, 3> factoryCategoryCounts {};
 
-		if (factoryCategoryCap != INT_MAX)
+		for (int category = 0; category < 3; ++category)
 		{
-			for (int category = 0; category < 3; ++category)
-				factoryCategoryCounts[category] = CountFactoriesInCategory(pHouse, category);
+			factoryCategoryCaps[category] = GetFactoryCategoryCap(pHouse, category);
+			factoryCategoryCounts[category] = CountFactoriesInCategory(pHouse, category);
 		}
+
 		bool frontNeedsBarracks = false;
 		bool frontNeedsWarFactory = false;
 
-		if (factoryCategoryCap != INT_MAX)
+		if (const CellStruct stoneCell = GetNewestOffensiveStoneCell(pHouse); stoneCell != CellStruct::Empty)
 		{
-			const CellStruct stoneCell = GetNewestOffensiveStoneCell(pHouse);
+			frontNeedsBarracks = true;
+			frontNeedsWarFactory = true;
 
-			if (stoneCell != CellStruct::Empty)
+			for (auto const pOwnB : pHouse->Buildings)
 			{
-				frontNeedsBarracks = true;
-				frontNeedsWarFactory = true;
+				if (!pOwnB || !pOwnB->IsAlive || pOwnB->InLimbo || !pOwnB->Type)
+					continue;
 
-				for (auto const pOwnB : pHouse->Buildings)
-				{
-					if (!pOwnB || !pOwnB->IsAlive || pOwnB->InLimbo || !pOwnB->Type)
-						continue;
+				const CellStruct bc = pOwnB->GetMapCoords();
+				if (std::max(std::abs(bc.X - stoneCell.X), std::abs(bc.Y - stoneCell.Y)) > 15)
+					continue;
 
-					const CellStruct bc = pOwnB->GetMapCoords();
-					if (std::max(std::abs(bc.X - stoneCell.X), std::abs(bc.Y - stoneCell.Y)) > 15)
-						continue;
-
-					if (pOwnB->Type->Factory == AbstractType::InfantryType)
-						frontNeedsBarracks = false;
-					else if (pOwnB->Type->Factory == AbstractType::UnitType && !pOwnB->Type->Naval)
-						frontNeedsWarFactory = false;
-				}
+				if (pOwnB->Type->Factory == AbstractType::InfantryType)
+					frontNeedsBarracks = false;
+				else if (pOwnB->Type->Factory == AbstractType::UnitType && !pOwnB->Type->Naval)
+					frontNeedsWarFactory = false;
 			}
 		}
 
@@ -1944,12 +1944,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const int owned = BuildingTypeExt::CountOwnedNowWithDeployOrUpgrade(pBld, pHouse);
 
 			// Difficulty cap per factory category (all barracks together, all ground war factories
-			// together, all shipyards together: 4 on Easy, 10 on Normal, none on Hard). At the cap one
-			// more is allowed for an outpost that needs it or for the first of a new type a captured
-			// tree opened (not within 4500 frames of the last cap sale); SellFactoriesOverDifficultyCap
-			// then sells a copy of that category.
+			// together, all shipyards together: 4 on Easy, 10 on Normal, on Hard one more than the
+			// main enemy has, 10 to 20; see GetFactoryCategoryCap). At the cap one more is allowed for
+			// an outpost that needs it or for the first of a new type a captured tree opened (not
+			// within 4500 frames of the last cap sale); SellFactoriesOverDifficultyCap then sells a
+			// copy of that category once it passes the difficulty ceiling.
 			if (const int category = FactoryCapCategory(pBld);
-				factoryCategoryCap != INT_MAX && category >= 0 && factoryCategoryCounts[category] >= factoryCategoryCap)
+				category >= 0 && factoryCategoryCounts[category] >= factoryCategoryCaps[category])
 			{
 				const bool outpostNeedsIt = (category == 0)
 					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
@@ -1957,7 +1958,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const bool newFactoryType = owned == 0;
 				const bool saleCooldownOver = Unsorted::CurrentFrame - GetMacroState(pHouse).LastFactoryCapSaleFrame >= 4500;
 
-				if (!(outpostNeedsIt || newFactoryType) || !saleCooldownOver || factoryCategoryCounts[category] > factoryCategoryCap)
+				if (!(outpostNeedsIt || newFactoryType) || !saleCooldownOver || factoryCategoryCounts[category] > factoryCategoryCaps[category])
 					continue;
 			}
 
@@ -2254,9 +2255,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 			else if (pBld->Factory == AbstractType::AircraftType)
 			{
-				const int bankAirpads = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Aircraft, pHouse->NumAirpads) : 0;
+				// Airfields stay apart from the other factories (no bank governor, no category cap):
+				// another one only when every dock is taken, or the first of a new type (a captured
+				// tree), which opens other aircraft.
+				const bool newAirfieldType = owned == 0 && pHouse->NumAirpads >= 1;
 
-				if (owned >= maxAirpads && bankAirpads == 0)
+				if (pHouse->NumAirpads >= 1 && !airDocksFull && !newAirfieldType)
+					continue;
+
+				if (owned >= maxAirpads)
 					continue;
 
 				if (owned == 0 && pHouse->NumAirpads >= 1 && pHouse->NumAirpads < 4 && SlotGate(scores[82], 60, 82))
@@ -2272,8 +2279,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						score += 350;
 				}
 
-				if (bankAirpads > 0)
-					rememberBankFactory(pBld, score, bankAirpads);
 			}
 			else if (pBld->UnitRepair)
 			{

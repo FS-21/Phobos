@@ -826,6 +826,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (std::find(enemyBaseZones.begin(), enemyBaseZones.end(), cz) != enemyBaseZones.end())
 					continue;
 
+				// An expansion deployer found no room for its building there lately.
+				if (auto const& noRoom = GetMacroState(pHouse).NoRoomIslandUntil;
+					noRoom.contains(cz) && noRoom.at(cz) > Unsorted::CurrentFrame)
+				{
+					continue;
+				}
+
 				bool alreadyColonized = false;
 				bool hasOrphanedHubWithoutConYardOrWarFac = false;
 				int conYardsInCz = 0;
@@ -2832,67 +2839,53 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter)
 				continue;
 
-			// If a Slave Miner (ResourceGatherer && DeploysInto != nullptr) just
-			// unloaded on an island beach far from ore, guide it to the nearest ore
-			// patch on the SAME landmass and switch to Mission::Harvest so the YR
-			// engine natively deploys YAREFN right on the ore patch!
+			// An idle Slave Miner (ResourceGatherer, DeploysInto) gets the nearest ore of its own land
+			// as Destination before Mission::Harvest: SlaveManagerClass::Harvest looks for a deploy
+			// spot only around the Destination and sends the miner back to Guard without one, so a
+			// miner told to harvest next to the ore just stood there. Once every 150 frames per miner.
 			if (pType->ResourceGatherer && pType->DeploysInto != nullptr && !pType->Teleporter)
 			{
+				const bool minerIdle = pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard
+					|| pUnit->CurrentMission == Mission::Sleep || pUnit->CurrentMission == Mission::None;
+				const int minerPhase = static_cast<int>((static_cast<unsigned>(Unsorted::CurrentFrame) + pUnit->UniqueID) % 150);
+
+				if (!minerIdle || minerPhase >= std::max(15, CurrentAITickFrames))
+					continue;
+
 				const CellStruct uc = pUnit->GetMapCoords();
-				bool hasNearOre = false;
-				CellClass* pBestSameZoneOre = nullptr;
-				int bestOreDist = 999999;
+				CellClass* pNearestOre = nullptr;
+				int nearestOreDist = INT_MAX;
+
 				for (int dy = -48; dy <= 48; dy += 2)
 				{
 					for (int dx = -48; dx <= 48; dx += 2)
 					{
+						const int d = std::max(std::abs(dx), std::abs(dy));
+
+						if (d >= nearestOreDist)
+							continue;
+
 						const CellStruct tc { static_cast<short>(uc.X + dx), static_cast<short>(uc.Y + dy) };
 						auto const pC = MapClass::Instance.TryGetCellAt(tc);
+
 						if (!pC || pC->GetContainedTiberiumValue() <= 0)
 							continue;
 
-						if (unitZoneForEco >= 0
-							&& MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false)
-								!= unitZoneForEco)
-						{
+						if (unitZoneForEco >= 0 && MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false) != unitZoneForEco)
 							continue;
-						}
 
-						const int d = std::max(std::abs(dx), std::abs(dy));
-						if (d <= 6)
-						{
-							hasNearOre = true;
-							break;
-						}
-
-						if (d < bestOreDist)
-						{
-							bestOreDist = d;
-							pBestSameZoneOre = pC;
-						}
+						nearestOreDist = d;
+						pNearestOre = pC;
 					}
-
-					if (hasNearOre)
-						break;
 				}
 
-				if (!hasNearOre && pBestSameZoneOre
-					&& (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard
-						|| pUnit->CurrentMission == Mission::Sleep || pUnit->CurrentMission == Mission::None))
+				if (pNearestOre)
 				{
-					pUnit->SetDestination(pBestSameZoneOre, true);
-					pUnit->QueueMission(Mission::Move, true);
-					continue;
-				}
-
-				if (hasNearOre
-					&& (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard
-						|| pUnit->CurrentMission == Mission::Sleep || pUnit->CurrentMission == Mission::None
-						|| (pUnit->CurrentMission == Mission::Move && bestOreDist <= 4)))
-				{
+					pUnit->SetDestination(pNearestOre, true);
 					pUnit->QueueMission(Mission::Harvest, true);
-					continue;
 				}
+
+				continue;
 			}
 
 			// IMPORTANT: Never call SetDestination() on Harvesters or Chrono Miners
@@ -3301,7 +3294,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				|| (hubsAndFactoriesInMcvZone >= 2
 					&& (mcvZone != homeGroundZone || pHouse->NumConYards >= 1 || !hasUncolonizedOreOnHomeIsland
 						|| pHouse->OwnedBuildings >= 6)));
-			const bool mustColonizeOtherIsland = (canFerryThisMCV && mcvZone >= 0 && !hasFreeLandFieldInMcvZone
+			// A landmass with a ConYard sends its expansion MCV to the free island (the uncolonized
+			// one in pIslandResourceGoalCell) even while fields remain on it: a big island always has
+			// one, and the island was never colonized. Once that island holds a ConYard it is no
+			// longer the goal and the next MCVs take the fields at home again.
+			const bool islandExpansionDue = conYardsInMcvZone >= 1 && pIslandResourceGoalCell != nullptr
+				&& mcvZone != resourceIslandZone;
+			const bool mustColonizeOtherIsland = (canFerryThisMCV && mcvZone >= 0
+				&& (!hasFreeLandFieldInMcvZone || islandExpansionDue)
 				&& (currentIslandAlreadyDeveloped || alreadyHasConYardOnThisIsland) && !isForeignTechMCV
 				&& ((pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone)
 					|| alreadyHasConYardOnThisIsland));
@@ -3983,10 +3983,26 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (isExpansionDeployer)
 				{
+					auto& noRoomIslands = GetMacroState(pHouse).NoRoomIslandUntil;
+					const bool nanoIslandHasNoRoom = nanoZone >= 0 && noRoomIslands.contains(nanoZone)
+						&& noRoomIslands.at(nanoZone) > Unsorted::CurrentFrame;
 					const bool mustColonizeIslandWithDeployer = (canFerryDeployer && nanoZone >= 0
-						&& hubsInNanoZone >= 1 && pIslandResourceGoalCell != nullptr && nanoZone != resourceIslandZone);
-					const bool landedOnNewIsland
-						= (homeGroundZone >= 0 && nanoZone >= 0 && nanoZone != homeGroundZone && hubsInNanoZone == 0);
+						&& (hubsInNanoZone >= 1 || nanoIslandHasNoRoom) && pIslandResourceGoalCell != nullptr
+						&& nanoZone != resourceIslandZone);
+					const bool landedOnNewIsland = (homeGroundZone >= 0 && nanoZone >= 0 && nanoZone != homeGroundZone
+						&& hubsInNanoZone == 0 && !nanoIslandHasNoRoom);
+
+					// Stranded on an island without room and no other island to go to: back home.
+					if (nanoIslandHasNoRoom && !mustColonizeIslandWithDeployer && hubsInNanoZone == 0)
+					{
+						if ((!isNanoMoving || IsAITickWindow(300, 15)) && homeCoords != CellStruct::Empty)
+						{
+							if (auto const pHomeCell = MapClass::Instance.TryGetCellAt(homeCoords))
+								DispatchFootToTargetOrTransport(pUnit, pHomeCell, Mission::Move, false);
+						}
+
+						continue;
+					}
 
 					if (mustColonizeIslandWithDeployer)
 					{
@@ -4103,6 +4119,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							else if (isIslandColonizerSlaveMiner)
 							{
 								pUnit->QueueMission(Mission::Harvest, false);
+							}
+							else if (landedOnNewIsland)
+							{
+								// No foundation for this building anywhere near on this island: the
+								// island search skips it for 9000 frames and the deployer moves on.
+								noRoomIslands[nanoZone] = Unsorted::CurrentFrame + 9000;
+								CountDecision(NeuralDecision::DeployerIslandNoRoom, pHouse->ArrayIndex);
 							}
 						}
 					}
@@ -7319,6 +7342,73 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	const bool endgameRemnantHunt
 		= (!pVisibleEnemyBld && pFallbackEnemyCell != nullptr && (allEnemyBldsGone || combatStalledForHunt));
+
+	// Remnants in the air (aircraft, jumpjets) once the enemy has no building left: a ground wave
+	// sent to their cell cannot hit them, so the 12 nearest units with an anti-air weapon attack
+	// each one directly. Every 150 frames.
+	if (endgameRemnantHunt && allEnemyBldsGone && IsAITickWindow(150, 15))
+	{
+		auto const hitsAir = [](TechnoTypeClass* pType)
+		{
+			for (int i = 0; i < 2; ++i)
+			{
+				auto const pWS = pType->GetWeapon(i);
+
+				if (pWS && pWS->WeaponType && pWS->WeaponType->Damage > 0 && pWS->WeaponType->Projectile
+					&& pWS->WeaponType->Projectile->AA)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		};
+
+		for (auto const pRemnant : TechnoClass::Array)
+		{
+			if (!pRemnant || pRemnant->InLimbo || !pRemnant->IsAlive || !pRemnant->IsInAir() || !pRemnant->Owner
+				|| pRemnant->WhatAmI() == AbstractType::Building)
+			{
+				continue;
+			}
+
+			auto const pRO = pRemnant->Owner;
+
+			if (pRO == pHouse || pHouse->IsAlliedWith(pRO) || pRO->IsNeutral() || pRO->IsObserver() || pRO->Defeated
+				|| (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, pRO->ArrayIndex)))
+			{
+				continue;
+			}
+
+			std::vector<std::pair<int, FootClass*>> hunters;
+
+			for (auto const pTechno : TechnoClass::Array)
+			{
+				auto const pFoot = abstract_cast<FootClass*>(pTechno);
+
+				if (!pFoot || pFoot->Owner != pHouse || pFoot->InLimbo || !pFoot->IsAlive || pFoot->Target == pRemnant)
+					continue;
+
+				auto const pType = pFoot->GetTechnoType();
+
+				if (!pType || pType->Spawned || !hitsAir(pType))
+					continue;
+
+				hunters.emplace_back(pFoot->DistanceFrom(pRemnant), pFoot);
+			}
+
+			std::sort(hunters.begin(), hunters.end(), [](auto const& a, auto const& b)
+				{
+					return a.first != b.first ? a.first < b.first : a.second->UniqueID < b.second->UniqueID;
+				});
+
+			for (size_t i = 0; i < hunters.size() && i < 12; ++i)
+			{
+				hunters[i].second->SetTarget(pRemnant);
+				hunters[i].second->QueueMission(Mission::Attack, false);
+			}
+		}
+	}
 
 	// Count idle combat units and infantry ready at base
 	std::vector<UnitClass*> idleCombatUnits;
