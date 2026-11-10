@@ -1512,6 +1512,33 @@ namespace
 		return pType && (pType->Engineer || IsSpyInfantryType(pType) || pType->VehicleThief);
 	}
 
+	// A soldier that only heals or repairs (every weapon it has does negative damage): a medic or a
+	// field mechanic, support for the army and no fighter of its own.
+	bool IsHealerInfantryType(const InfantryTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		bool heals = false;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWS = const_cast<InfantryTypeClass*>(pType)->GetWeapon(i);
+			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+			if (!pWeapon)
+				continue;
+
+			if (pWeapon->Damage > 0)
+				return false;
+
+			if (pWeapon->Damage < 0)
+				heals = true;
+		}
+
+		return heals;
+	}
+
 	// A specialist of this type has a job inside this building (it enters it): engineers capture,
 	// spies infiltrate.
 	bool SpecialistWorksBuilding(const InfantryTypeClass* pType, const BuildingTypeClass* pBldType)

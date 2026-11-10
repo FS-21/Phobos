@@ -438,11 +438,12 @@ namespace
 	// Coarse land route for a ground unit: breadth-first search over the cells of its movement zone,
 	// one cell at a time (a cliff line must never be stepped over; a diagonal step needs both of its
 	// side cells in the zone), 8 directions in a fixed order, 40000 cells at most. The route is cached
-	// per movement zone, start and target (4-cell grid) for 900 frames. Returns the first route cell
-	// at least `hop` cells from the unit, or nullptr when the target is within hop + 10 cells, out of
-	// the zone, or no route is found. Match #6194 (Polar Knot): both bases sit on cliff-ringed plateaus
-	// about 100 cells apart, the engine path finder gave up ("Regular findpath failure") and whole
-	// waves stood in their own base for thousands of frames; in hops it finds every leg.
+	// per movement zone, start and target (4-cell grid) for 900 frames. Returns the route cell `hop`
+	// steps ahead of the unit, or nullptr when the target is within hop + 10 cells, out of the zone,
+	// or no route is found. Match #6194 (Polar Knot): both bases sit on plateaus whose cliff tiles
+	// are missing from the theater; they load as flat cells, the zone map links their one-level steps
+	// and the engine path finder fails inside a corridor over them ("Regular findpath failure"), so
+	// whole waves stood in their own base. Legs along a route with the real step rule get out.
 	CellClass* GroundRouteHop(FootClass* pFoot, const CellStruct& target, int hop)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
@@ -502,13 +503,30 @@ namespace
 				return pCell && pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false);
 			};
 
-			// One step between two such cells: at most one height level apart (a ramp); two cells of one
-			// zone on both sides of a cliff edge share the zone through another way round.
+			// One step between two such cells, as the engine path finder allows it (FootClass::Can_Reach):
+			// the same height level, or one level apart with the lower cell a slope (SlopeIndex != 0; a
+			// slope cell rises from its own level to the next one).
+			// The zone map links any two cells less than 2 levels apart, so a flat step of one level
+			// shares the zone although no unit can climb it (Polar Knot: cliff and ramp tiles of tile sets
+			// missing from the theater load as flat clear cells).
 			auto const canStep = [](const CellStruct& a, const CellStruct& b)
 			{
 				auto const pA = MapClass::Instance.TryGetCellAt(a);
 				auto const pB = MapClass::Instance.TryGetCellAt(b);
-				return pA && pB && std::abs(static_cast<int>(pA->Level) - static_cast<int>(pB->Level)) <= 1;
+
+				if (!pA || !pB)
+					return false;
+
+				const int levelA = pA->Level;
+				const int levelB = pB->Level;
+
+				if (levelA == levelB)
+					return true;
+
+				if (std::abs(levelA - levelB) != 1)
+					return false;
+
+				return (levelA < levelB ? pA : pB)->SlopeIndex != 0;
 			};
 
 			std::unordered_map<uint32_t, CellStruct> parent;
@@ -610,10 +628,12 @@ namespace
 					landText, minLevel, maxLevel, maxStep, static_cast<int>(queue.size()));
 
 				// The ground of the first 40 route cells (first route of the match only): 'r' route, '#'
-				// building, '~' water, '^' not clear for this unit, 'u' a unit, digits the height level.
-				if (routeLogCount == 1 && !route.Cells.empty())
+				// building, '~' water, '^' not clear for this unit, '/' a slope, 'u' a unit, digits the height level.
+				if (routeLogCount == 1)
 				{
-					int x0 = from.X, x1 = from.X, y0 = from.Y, y1 = from.Y;
+					// Without a route, the ground around the start.
+					const int around = route.Cells.empty() ? 24 : 0;
+					int x0 = from.X - around, x1 = from.X + around, y0 = from.Y - around, y1 = from.Y + around;
 
 					for (size_t i = 0; i < route.Cells.size() && i < 40; ++i)
 					{
@@ -648,6 +668,8 @@ namespace
 									ch = '^';
 								else if (onRoute)
 									ch = 'r';
+								else if (pC->SlopeIndex != 0)
+									ch = '/';
 								else if (pC->FirstObject)
 									ch = 'u';
 								else
@@ -665,20 +687,36 @@ namespace
 			it = routes.insert_or_assign(routeKey, std::move(route)).first;
 		}
 
-		// The first cell of the route at least `hop` from where this unit stands (units of one group
-		// share a cached route from a start up to 4 cells away).
+		// The route cell `hop` steps ahead of the route cell nearest to this unit (units of one group
+		// share a cached route from a start up to 4 cells away). Counted in steps, not in straight
+		// distance: a leg is then a stretch of the route itself, which the engine path finder walks
+		// even where its zone map links cells no unit can step between (Polar Knot: a 25-cell
+		// straight leg around a plateau edge still failed).
 		auto const& cells = it->second.Cells;
 
-		for (size_t i = 0; i < cells.size(); ++i)
+		if (cells.empty())
+			return nullptr;
+
+		size_t nearest = 0;
+		double nearestDist = from.DistanceFrom(cells[0]);
+
+		for (size_t i = 1; i < cells.size(); ++i)
 		{
-			if (from.DistanceFrom(cells[i]) >= hop)
+			const double dist = from.DistanceFrom(cells[i]);
+
+			if (dist < nearestDist)
 			{
-				// Further along the route than this unit is: the cell nearest to it ahead of the hop.
-				return MapClass::Instance.TryGetCellAt(cells[i]);
+				nearestDist = dist;
+				nearest = i;
 			}
 		}
 
-		return nullptr;
+		const size_t next = std::min(cells.size() - 1, nearest + static_cast<size_t>(std::max(1, hop)));
+
+		if (from.DistanceFrom(cells[next]) < 3.0)
+			return nullptr;
+
+		return MapClass::Instance.TryGetCellAt(cells[next]);
 	}
 
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5)

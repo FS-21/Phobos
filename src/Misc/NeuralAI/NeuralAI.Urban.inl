@@ -65,6 +65,8 @@ namespace
 		int OwnGarrisons { 0 };
 		int OwnOccupants { 0 };
 		int GarrisonWorth { 0 };
+		// Known buildings worth holding at the last scan; 6 or more make an urban map.
+		int WorthyBuildings { 0 };
 		int ThreatGarrisons { 0 };
 		int BunkersToMan { 0 };
 		int GarrisonsInDanger { 0 };
@@ -79,6 +81,10 @@ namespace
 		int PeakGarrisons { 0 };
 		int PeakOccupants { 0 };
 		int LastReportFrame { 0 };
+		// Garrison tries since the last report: idle occupiers looked at, over the share, no building.
+		int TriesSinceReport { 0 };
+		int OverCapSinceReport { 0 };
+		int NoBuildingSinceReport { 0 };
 	};
 
 	std::array<NeuralUrbanState, 32> UrbanStates {};
@@ -186,11 +192,26 @@ namespace
 
 		const int homeDist = static_cast<int>(home.DistanceFrom(known.Cell));
 		int anchorDist = homeDist;
+		// Our own garrisons hold the ground around them too: a city is taken block by block from the
+		// buildings already held (10 cells further than from a structure).
+		int reachDist = homeDist;
 
 		for (auto const pBld : pHouse->Buildings)
 		{
-			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && !pBld->Type->CanBeOccupied)
-				anchorDist = std::min(anchorDist, static_cast<int>(pBld->GetMapCoords().DistanceFrom(known.Cell)));
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type)
+				continue;
+
+			const int dist = static_cast<int>(pBld->GetMapCoords().DistanceFrom(known.Cell));
+
+			if (!pBld->Type->CanBeOccupied)
+			{
+				anchorDist = std::min(anchorDist, dist);
+				reachDist = std::min(reachDist, dist);
+			}
+			else if (pBld->Occupants.Count > 0 && pBld->UniqueID != known.ID)
+			{
+				reachDist = std::min(reachDist, dist + 10);
+			}
 		}
 
 		int techBonus = 0;
@@ -204,10 +225,10 @@ namespace
 			}
 		}
 
-		if (anchorDist > 72 || IsCellInKnownEnemyDefenseReach(pHouse, known.Cell, 1))
+		if (std::min(anchorDist, reachDist) > 72 || IsCellInKnownEnemyDefenseReach(pHouse, known.Cell, 1))
 			return 0;
 
-		if (anchorDist > 28 && OwnDefenseNear(pHouse, known.Cell, 8) < 300)
+		if (reachDist > 28 && OwnDefenseNear(pHouse, known.Cell, 8) < 300)
 			return 0;
 
 		int enemyDist = 999;
@@ -542,6 +563,7 @@ namespace
 		const int mainAttackSector = GetMainAttackSector(pHouse);
 		std::array<int, 3> bestWorth {};
 		state.ThreatGarrisons = 0;
+		state.WorthyBuildings = 0;
 
 		for (auto& known : state.Buildings)
 		{
@@ -572,6 +594,9 @@ namespace
 			}
 
 			const int room = known.MaxOccupants - known.Occupants;
+
+			if (known.Worth > 0)
+				state.WorthyBuildings++;
 
 			if (known.Worth <= 0 || room <= 0 || now < known.BlockedUntilFrame)
 				continue;
@@ -653,17 +678,27 @@ namespace
 		if (now - state.LastReportFrame >= 1800)
 		{
 			state.LastReportFrame = now;
-			Debug::Log("[NeuralAI] House %d Urban: %d garrisons, %d occupants (peak %d/%d), known %d, worth %d, enemy garrisons %d, "
-				"allies %d, opportunity %d, orders %d, evacuations %d, clears %d, frame %d.\n",
+			Debug::Log("[NeuralAI] House %d Urban: %d garrisons, %d occupants (peak %d/%d), known %d (worthy %d), worth %d, enemy garrisons %d, "
+				"allies %d, opportunity %d, orders %d, evacuations %d, clears %d; occupiers %d, tries %d (over share %d, no building %d), frame %d.\n",
 				pHouse->ArrayIndex, state.OwnGarrisons, state.OwnOccupants, state.PeakGarrisons, state.PeakOccupants,
-				static_cast<int>(state.Buildings.size()), state.GarrisonWorth, state.ThreatGarrisons, state.Allies,
-				state.Opportunity, state.GarrisonOrders, state.Evacuations, state.ClearOrders, now);
+				static_cast<int>(state.Buildings.size()), state.WorthyBuildings, state.GarrisonWorth, state.ThreatGarrisons, state.Allies,
+				state.Opportunity, state.GarrisonOrders, state.Evacuations, state.ClearOrders, state.OwnOccupierInfantry,
+				state.TriesSinceReport, state.OverCapSinceReport, state.NoBuildingSinceReport, now);
+			state.TriesSinceReport = 0;
+			state.OverCapSinceReport = 0;
+			state.NoBuildingSinceReport = 0;
 		}
 	}
 
 	int UrbanOpportunity(HouseClass* pHouse)
 	{
 		return GetUrbanState(pHouse).Opportunity;
+	}
+
+	// An urban map for this house: 6 or more known buildings worth holding.
+	bool IsUrbanMapFor(HouseClass* pHouse)
+	{
+		return GetUrbanState(pHouse).WorthyBuildings >= 6;
 	}
 
 	// Is this tech building claimed by an ally (its engineer walks in or its capture is planned)?
@@ -731,7 +766,7 @@ namespace
 	// reach (up to 64 cells while Expert 9 is in charge, else rangeCells), with room
 	// left after the soldiers (ours and allied) already walking in. At most a share of our
 	// occupiers sits in buildings: 55% under Expert 9, 30% otherwise; on an urban map (6+ known
-	// buildings worth holding) 70% / 50%. A building we already hold scores double and is filled up
+	// buildings worth holding) 70% / 50%, and up to 32 cells away without Expert 9. A building we already hold scores double and is filled up
 	// even past that share: full garrisons instead of one or two soldiers in many buildings.
 	template <typename DispatchFn>
 	bool RunUrbanGarrison(HouseClass* pHouse, InfantryClass* pInf, bool expertActive, int rangeCells, DispatchFn&& dispatch)
@@ -745,23 +780,21 @@ namespace
 		for (auto const& entering : state.Entering)
 			pendingTotal += entering.Own;
 
-		int worthyBuildings = 0;
-
-		for (auto const& known : state.Buildings)
-		{
-			if (known.Worth > 0)
-				++worthyBuildings;
-		}
-
-		const bool urbanMap = worthyBuildings >= 6;
+		const bool urbanMap = state.WorthyBuildings >= 6;
 		const int sharePercent = expertActive ? (urbanMap ? 70 : 55) : (urbanMap ? 50 : 30);
 		const int cap = std::max(expertActive ? 4 : 2, state.OwnOccupierInfantry * sharePercent / 100);
 		const bool overCap = state.OwnOccupants + pendingTotal >= cap;
+		state.TriesSinceReport++;
+
+		if (overCap)
+			state.OverCapSinceReport++;
 
 		RefreshUrbanLivePointers(state);
 		const int infZone = ObjectZone(pInf, MovementZone::Normal);
 		const CellStruct infCell = pInf->GetMapCoords();
-		const int maxRange = expertActive ? 64 : rangeCells;
+		// On an urban map the city is worth a walk: 32 cells without Expert 9 (its slot range is
+		// 6..16 cells, the next block of a city is often further).
+		const int maxRange = expertActive ? 64 : (urbanMap ? std::max(rangeCells, 32) : rangeCells);
 		const int now = Unsorted::CurrentFrame;
 		BuildingClass* pBest = nullptr;
 		NeuralKnownUrbanBuilding* pBestKnown = nullptr;
@@ -825,7 +858,10 @@ namespace
 		}
 
 		if (!pBest)
+		{
+			state.NoBuildingSinceReport++;
 			return false;
+		}
 
 		// Ordered to the same building again soon after: the last order did not get it in. Three
 		// such failures block the building for a while (the way is cut, or the engine refuses).

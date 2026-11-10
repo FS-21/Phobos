@@ -4250,18 +4250,37 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int bestInfScore = -32000;
 	int inProgressInfIdx = -1;
 
-	// Expert 9 in charge: fill the buildings worth holding (soldiers with the strongest weapon
-	// inside first) and bring a clearer when an enemy garrison near us has nobody to answer it.
+	// Expert 9 in charge, or an urban map: fill the buildings worth holding (soldiers with the
+	// strongest weapon inside first) and bring a clearer when an enemy garrison near us has nobody
+	// to answer it. Without Expert 9 the garrison bonus is halved.
 	int urbanGarrisonRoom = 0;
 	bool urbanNeedClearer = false;
+	const bool urbanExpertInCharge = pExt->NeuralAI_ActiveExpert == 9;
 
-	if (pExt->NeuralAI_ActiveExpert == 9)
+	if (urbanExpertInCharge || IsUrbanMapFor(pHouse))
 		GetUrbanProductionNeeds(pHouse, urbanGarrisonRoom, urbanNeedClearer);
 
 	if (FactoryClass* pInfFac = pHouse->GetPrimaryFactory(AbstractType::InfantryType, false, BuildCat::DontCare))
 	{
 		if (pInfFac->Object && pInfFac->Object->GetType())
 			inProgressInfIdx = pInfFac->Object->GetType()->GetArrayIndex();
+	}
+
+	// Healers (medics, field mechanics) are support: at most one for five fighting soldiers. The
+	// score below grows with the cost, so an expensive medic used to win every pick (match #6368,
+	// Capital Coup: 39 medics and 3 riflemen, no soldier left to garrison the city).
+	int ownedHealerInfantry = 0;
+	int ownedFighterInfantry = 0;
+
+	for (auto const pOwnI : InfantryClass::Array)
+	{
+		if (!pOwnI || pOwnI->Owner != pHouse || !pOwnI->IsAlive || !pOwnI->Type)
+			continue;
+
+		if (IsHealerInfantryType(pOwnI->Type))
+			ownedHealerInfantry++;
+		else if (!IsSpecialistInfantryType(pOwnI->Type) && pOwnI->Type->GetWeapon(0) && pOwnI->Type->GetWeapon(0)->WeaponType)
+			ownedFighterInfantry++;
 	}
 
 	for (auto const pInf : InfantryTypeClass::Array)
@@ -4272,6 +4291,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isInfInProgress = (pInf->ArrayIndex == inProgressInfIdx);
 
 		if (!isInfInProgress && !IsUnitTierAllowed(pHouse, pInf))
+			continue;
+
+		if (!isInfInProgress && IsHealerInfantryType(pInf) && ownedHealerInfantry * 5 >= std::max(1, ownedFighterInfantry))
 			continue;
 
 		const bool isIncomeRecoveryEng = (pInf->Engineer && neutralCashDerrickCount > ownedEngineers);
@@ -4331,7 +4353,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		if (urbanGarrisonRoom > 0 && IsGarrisonOccupierType(pInf))
-			score += 260 + std::min(240, GarrisonFirepowerOf(pInf)) + std::min(4, urbanGarrisonRoom) * 30;
+		{
+			const int garrisonBonus = 260 + std::min(240, GarrisonFirepowerOf(pInf)) + std::min(4, urbanGarrisonRoom) * 30;
+			score += urbanExpertInCharge ? garrisonBonus : garrisonBonus / 2;
+		}
 
 		if (urbanNeedClearer && IsGarrisonClearerType(pInf))
 			score += 450;
