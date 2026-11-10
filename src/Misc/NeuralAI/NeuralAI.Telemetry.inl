@@ -1725,3 +1725,106 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 	}
 }
 
+namespace
+{
+	// Determinism trace for the trainer's LAN desync test (training slots 60..63, both clients of
+	// one match): a checksum of everything a house owns that its orders change (type, mission,
+	// queued mission, target, destination, position, health, ammo) plus its money and the match
+	// random generator, logged before and after every AI tick of the house. The first line that
+	// differs between the two clients' debug logs gives the frame and house where the match
+	// diverged, and whether the AI tick (pre equal, post differs) or the engine between ticks (pre
+	// differs) did it.
+	bool IsDesyncTraceOn()
+	{
+		return NeuralAI::TrainSlotIndex >= 60;
+	}
+
+	uint32_t DesyncTraceMix(uint32_t hash, uint32_t value)
+	{
+		for (int i = 0; i < 4; ++i)
+		{
+			hash ^= (value >> (i * 8)) & 0xFF;
+			hash *= 16777619u;
+		}
+
+		return hash;
+	}
+
+	uint32_t DesyncTraceAbstract(uint32_t hash, AbstractClass* pAbstract)
+	{
+		if (!pAbstract)
+			return DesyncTraceMix(hash, 0xFFFFFFFFu);
+
+		auto const pObject = abstract_cast<ObjectClass*>(pAbstract);
+		hash = DesyncTraceMix(hash, static_cast<uint32_t>(pAbstract->WhatAmI()));
+		hash = DesyncTraceMix(hash, pObject ? static_cast<uint32_t>(pObject->UniqueID) : 0u);
+		const CoordStruct coords = pAbstract->GetCoords();
+		hash = DesyncTraceMix(hash, static_cast<uint32_t>(coords.X));
+		return DesyncTraceMix(hash, static_cast<uint32_t>(coords.Y));
+	}
+
+	uint32_t DesyncTraceHouse(HouseClass* pHouse, int& outCount)
+	{
+		uint32_t hash = 2166136261u;
+		outCount = 0;
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || pTechno->Owner != pHouse)
+				continue;
+
+			++outCount;
+			auto const pType = pTechno->GetTechnoType();
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->UniqueID));
+			hash = DesyncTraceMix(hash, pType ? static_cast<uint32_t>(pType->GetArrayIndex()) : 0u);
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->CurrentMission));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->QueuedMission));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Health));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Ammo));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Location.X));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Location.Y));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Location.Z));
+			hash = DesyncTraceMix(hash, pTechno->InLimbo ? 1u : 0u);
+			hash = DesyncTraceAbstract(hash, pTechno->Target);
+
+			if (auto const pFoot = abstract_cast<FootClass*>(pTechno))
+				hash = DesyncTraceAbstract(hash, pFoot->Destination);
+		}
+
+		hash = DesyncTraceMix(hash, static_cast<uint32_t>(pHouse->Available_Money()));
+		auto const& random = ScenarioClass::Instance->Random;
+		hash = DesyncTraceMix(hash, static_cast<uint32_t>(random.Next1));
+		return DesyncTraceMix(hash, static_cast<uint32_t>(random.Next2));
+	}
+
+	// Logs the house checksum when made and again when it goes out of scope (end of the AI tick).
+	struct NeuralDesyncTraceScope
+	{
+		HouseClass* House { nullptr };
+		uint32_t Pre { 0 };
+		int PreCount { 0 };
+
+		explicit NeuralDesyncTraceScope(HouseClass* pHouse)
+		{
+			if (!IsDesyncTraceOn() || !pHouse || !ScenarioClass::Instance)
+				return;
+
+			this->House = pHouse;
+			this->Pre = DesyncTraceHouse(pHouse, this->PreCount);
+		}
+
+		~NeuralDesyncTraceScope()
+		{
+			if (!this->House)
+				return;
+
+			int postCount = 0;
+			const uint32_t post = DesyncTraceHouse(this->House, postCount);
+			Debug::Log("[NeuralAI] Desync trace frame %d house %d pre %08X (%d) post %08X (%d)\n", Unsorted::CurrentFrame,
+				this->House->ArrayIndex, this->Pre, this->PreCount, post, postCount);
+		}
+
+		NeuralDesyncTraceScope(const NeuralDesyncTraceScope&) = delete;
+		NeuralDesyncTraceScope& operator=(const NeuralDesyncTraceScope&) = delete;
+	};
+}

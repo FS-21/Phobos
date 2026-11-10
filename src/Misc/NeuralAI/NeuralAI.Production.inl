@@ -122,6 +122,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Measures this whole AI tick (telemetry "aiMsAvg" / "aiMsMax").
 	const NeuralTickTimer tickTimer { pHouse->ArrayIndex };
+	// LAN desync test only: house checksum before and after this tick.
+	const NeuralDesyncTraceScope desyncTrace { pHouse };
 
 	// Map class policy correction (outside training: the trainer sends combined policies).
 	if (!NeuralAI::HeadlessMode && MapClassLoaded && !MapClassApplied && NeuralAI::AllowBackpackInference)
