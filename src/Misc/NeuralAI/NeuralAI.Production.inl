@@ -3110,9 +3110,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			trueRefineries++;
 	}
 
+	// Harvesters in limbo count too (mid chrono jump, inside a transport, being built).
 	for (auto const pEcoUnit : UnitClass::Array)
 	{
-		if (!pEcoUnit || pEcoUnit->Owner != pHouse || pEcoUnit->InLimbo || !pEcoUnit->IsAlive || !pEcoUnit->Type)
+		if (!pEcoUnit || pEcoUnit->Owner != pHouse || !pEcoUnit->IsAlive || !pEcoUnit->Type)
 			continue;
 
 		auto const pEcoType = pEcoUnit->Type;
@@ -3783,6 +3784,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			continue;
 		}
+
+		// The zone exceptions never pass 2 harvesters per refinery + 2 (24 at most): a harvester
+		// built for an island or an empty refinery zone may not stay there (a chrono miner teleports
+		// to any refinery and mines where the ore is), the zone keeps looking empty and every pick
+		// built another one (match #6439, No Rest for the Wicked: 200 Chrono Miners jammed on two
+		// bridges, 6 refineries).
+		if (isEconomyUnit && !isDeployableRefineryOrMiner && !isUnitInProgress
+			&& ownedEconomyUnits >= std::max(economyUnitCap, std::min(24, 2 * trueRefineries + 2)))
+			continue;
 
 		TechnoTypeClass* pConvDeployType = GetConvertDeployTargetType(pUnit);
 		const bool isConvertToOpenToppedOrCombat = (pConvDeployType != nullptr)
