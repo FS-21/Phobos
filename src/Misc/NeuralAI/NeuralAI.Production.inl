@@ -2057,6 +2057,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			const bool isBldInProgress = (pBld->ArrayIndex == inProgressBldIdx || pBld->ArrayIndex == inProgressDefIdx);
 			const bool isRefineryOrSlaveMiner = pBld->Refinery || pBld->ResourceGatherer || pBld->ResourceDestination;
+
+			// Dry economy (UpdateEconomyCrisis): no refinery or silo while our gatherers bring nothing in.
+			if (!isBldInProgress && GetMacroState(pHouse).DryEconomyActive && (isRefineryOrSlaveMiner || (pBld->Storage > 0 && !pBld->Refinery)))
+				continue;
 			const bool isIncomeRecoveryBld = isRefineryOrSlaveMiner
 				|| (pBld->PowerBonus > pBld->PowerDrain && !pBld->IsBaseDefense
 					&& (pHouse->HasLowPower() || hasUnpoweredBuildings))
@@ -3794,6 +3798,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// bridges, 6 refineries).
 		if (isEconomyUnit && !isDeployableRefineryOrMiner && !isUnitInProgress
 			&& ownedEconomyUnits >= std::max(economyUnitCap, std::min(24, 2 * trueRefineries + 2)))
+			continue;
+
+		// Dry economy (UpdateEconomyCrisis): our gatherers bring nothing in, another one would not either.
+		if (isEconomyUnit && !isUnitInProgress && GetMacroState(pHouse).DryEconomyActive)
 			continue;
 
 		TechnoTypeClass* pConvDeployType = GetConvertDeployTargetType(pUnit);

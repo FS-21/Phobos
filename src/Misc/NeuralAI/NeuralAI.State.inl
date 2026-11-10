@@ -542,6 +542,12 @@ namespace
 		// Broke hold on: no repairs (wrench, service depot, shipyard) either.
 		bool BrokeHoldActive { false };
 		int LastBrokeSaleFrame { -100000 };
+		// Dry economy (UpdateEconomyCrisis): the last frame a gatherer of ours brought money in (-1:
+		// never), whether our gatherers have brought nothing for a long time while we are broke (the
+		// fields are gone), and the last sale it made.
+		int LastHarvestIncomeFrame { -1 };
+		bool DryEconomyActive { false };
+		int LastDrySaleFrame { -100000 };
 		int LastHarvesterBalanceFrame { -100000 };
 		// Expert 0 work (UpdateEconomyCrisis, every 150 frames): the selector prior from the economy
 		// trouble there is now, and what it is made of. Own state and current sight only.
@@ -876,6 +882,9 @@ namespace
 			this->BrokeHeldObjects.clear();
 			this->BrokeHoldActive = false;
 			this->LastBrokeSaleFrame = -100000;
+			this->LastHarvestIncomeFrame = -1;
+			this->DryEconomyActive = false;
+			this->LastDrySaleFrame = -100000;
 			this->LastHarvesterBalanceFrame = -100000;
 			this->EconomyTrouble = 0;
 			this->LowPowerSinceFrame = -1;

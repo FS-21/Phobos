@@ -2444,6 +2444,26 @@ namespace
 		const bool holdForHarvester = noIncome && cashBuildings == 0 && cheapestHarvester != INT_MAX;
 		macro.BrokeHoldActive = holdForHarvester;
 
+		// Dry economy: we own gatherers and refineries, yet no unload has paid for 3600 frames (never
+		// one after frame 9000) while we hold less than 1500 credits: the fields within reach are
+		// gone (match #6526, Siberian Wastes, minute 129: three houses at $2-$24 with 5-8
+		// harvesters each and no ore left on the map). No more harvesters or refineries then, and
+		// every 300 frames one building that earns nothing more is sold for an army (SellForDryEconomy).
+		const int lastHarvest = macro.LastHarvestIncomeFrame;
+		const int money = pHouse->Available_Money();
+		// The fields themselves must be gone too: half or more of our refineries have fewer than 6
+		// ore cells around them (Production.inl depletion check), so harvesters chased off by an
+		// attack for a while never trigger it.
+		const bool fieldsDepleted = macro.RefineriesChecked > 0 && macro.RefineriesDepleted * 2 >= macro.RefineriesChecked;
+		macro.DryEconomyActive = harvCount > 0 && refCount > 0 && cashBuildings == 0 && money < 1500 && now > 9000
+			&& fieldsDepleted && (lastHarvest < 0 || now - lastHarvest > 3600);
+
+		if (macro.DryEconomyActive && now - macro.LastDrySaleFrame >= 300)
+		{
+			if (SellForDryEconomy(pHouse))
+				macro.LastDrySaleFrame = now;
+		}
+
 		// Emergency money from units sold on a repair station: for the item that restores income,
 		// or for an MCV when no ConYard and no MCV is left.
 		{

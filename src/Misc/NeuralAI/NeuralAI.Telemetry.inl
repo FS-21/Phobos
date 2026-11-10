@@ -551,6 +551,10 @@ void NeuralAI::OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller)
 
 void NeuralAI::OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, TechnoClass* pDock, int money)
 {
+	// Every client sees the same unloads: the dry economy check reads this in matches too.
+	if (pHouse && money > 0 && pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+		GetMacroState(pHouse).LastHarvestIncomeFrame = Unsorted::CurrentFrame;
+
 	if (!NeuralAI::HeadlessMode || !pHouse || money <= 0 || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
 		return;
 

@@ -636,6 +636,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					ferryMacro.FerryWaitSince.erase(itWait);
 					ferryMacro.FerryBlockedUntil[pFoot->UniqueID] = now + 9000;
+
+					static int timeoutLogSerial = -1;
+					static int timeoutLogCount = 0;
+
+					if (timeoutLogSerial != NeuralMatchSerial)
+					{
+						timeoutLogSerial = NeuralMatchSerial;
+						timeoutLogCount = 0;
+					}
+
+					if (++timeoutLogCount <= 40)
+					{
+						Debug::Log("[NeuralAI] Ferry wait timeout house %d frame %d: %s %u at (%d,%d) zone %d mission %d -> target (%d,%d) zone %d.\n",
+							pHouse->ArrayIndex, now, pFootType->ID, pFoot->UniqueID, footCoords.X, footCoords.Y, footZone,
+							static_cast<int>(pFoot->CurrentMission), targetCoords.X, targetCoords.Y, targetZone);
+					}
 					ClearPassengerIslandGoal(pFoot->UniqueID);
 					pFoot->SetDestination(nullptr, true);
 					pFoot->QueueMission(Mission::Guard, true);
@@ -7640,6 +7656,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	int notIdleBusy = 0;
 	int notIdlePlan = 0;
 	int notIdleMission = 0;
+	// More reasons (wave gate log): low health, immobile deployed vehicle, entering / linked, and for
+	// infantry busy, mission and plan.
+	int notIdleHealth = 0;
+	int notIdleImmobile = 0;
+	int notIdleLinked = 0;
+	int notIdleInfBusy = 0;
+	int notIdleInfMission = 0;
+	int notIdleInfPlan = 0;
+	int notIdleInfLinked = 0;
 
 	std::vector<InfantryClass*> idleCombatInf;
 
@@ -7667,6 +7692,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			&& (IsOnRepairTrip(pHouse, pUnit->UniqueID) || isAtOrBoundForRepair(pUnit) || repairTripRecent(pUnit)
 				|| homeCoords == CellStruct::Empty || pUnit->GetMapCoords().DistanceFrom(homeCoords) <= 30.0))
 		{
+			++notIdleHealth;
 			continue;
 		}
 
@@ -7686,6 +7712,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (IsImmobileUnitTypeOnLand(pUnit->Type))
 		{
+			++notIdleImmobile;
 			continue; // Static deployed vehicle bunker (NoManualMove=yes / Speed=0):
 					// stay in Area_Guard and let OpenTopped passengers fire!
 		}
@@ -7716,6 +7743,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter
 			|| pUnit->BunkerLinkedItem != nullptr || pUnit->HasAnyLink())
 		{
+			++notIdleLinked;
 			continue;
 		}
 
@@ -7762,11 +7790,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter || pInf->HasAnyLink())
 		{
+			++notIdleInfLinked;
 			continue;
 		}
 
 		if (IsFootActivelyAttackingOrMovingToEnemy(pInf))
+		{
+			++notIdleInfBusy;
 			continue;
+		}
 
 		if (pInf->CurrentMission == Mission::Guard || pInf->CurrentMission == Mission::Area_Guard
 			|| pInf->CurrentMission == Mission::AttackMove
@@ -7779,6 +7811,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (IsHealerInfantryType(pInf->Type))
 					healersForWave++;
 			}
+			else
+			{
+				++notIdleInfPlan;
+			}
+		}
+		else
+		{
+			++notIdleInfMission;
 		}
 	}
 
@@ -8226,9 +8266,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Wave gate inputs, every 900 frames per house: why a house with an army never reaches the wave.
 	if (IsAITickWindow(900, 0))
 	{
-		Debug::Log("[NeuralAI] Frame %d | House #%d wave gate: idle units %d inf %d needed %d, not idle busy %d plan %d mission %d, target %s (%d,%d) hold %d remnant %d\n",
+		Debug::Log("[NeuralAI] Frame %d | House #%d wave gate: idle units %d inf %d needed %d, not idle busy %d plan %d mission %d "
+			"health %d immobile %d linked %d, inf busy %d plan %d mission %d linked %d, target %s (%d,%d) hold %d remnant %d\n",
 			Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(idleCombatUnits.size()), static_cast<int>(idleCombatInf.size()),
-			static_cast<int>(waveUnitsNeeded), notIdleBusy, notIdlePlan, notIdleMission, pWaveTargetCell ? "yes" : "none",
+			static_cast<int>(waveUnitsNeeded), notIdleBusy, notIdlePlan, notIdleMission, notIdleHealth, notIdleImmobile, notIdleLinked,
+			notIdleInfBusy, notIdleInfPlan, notIdleInfMission, notIdleInfLinked, pWaveTargetCell ? "yes" : "none",
 			pWaveTargetCell ? pWaveTargetCell->MapCoords.X : -1, pWaveTargetCell ? pWaveTargetCell->MapCoords.Y : -1,
 			teamOrder.Hold ? 1 : 0, endgameRemnantHunt ? 1 : 0);
 	}
@@ -10341,6 +10383,24 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				[transZone](const PendingCrossIslandOrder& ord) { return ord.PickupZone == transZone; }))
 		{
 			CountDecision(NeuralDecision::FerryIdleWithDemand, pHouse->ArrayIndex);
+		}
+
+		// Ferry diagnostics, every 900 frames: each transport's state against the demand around it.
+		if (IsAITickWindow(900, 0))
+		{
+			int pendingHere = 0;
+			int pendingElsewhere = 0;
+
+			for (auto const& ord : pendingCrossIslandOrders)
+				(ord.PickupZone == transZone ? pendingHere : pendingElsewhere)++;
+
+			Debug::Log("[NeuralAI] Ferry diag house %d frame %d: %s %u at (%d,%d) zone %d cell %s mission %d pass %d/%d departed %d "
+				"pickupShore %d boarder %u canFitMore %d, pending here %d elsewhere %d, idle units %d inf %d\n",
+				pHouse->ArrayIndex, Unsorted::CurrentFrame, pTrans->Type->ID, pTrans->UniqueID, pTrans->GetMapCoords().X,
+				pTrans->GetMapCoords().Y, transZone, (pCurTransCell && pCurTransCell->LandType == LandType::Water) ? "water" : "land",
+				static_cast<int>(pTrans->CurrentMission), numPass, pTrans->Type->Passengers, tripDeparted ? 1 : 0,
+				onSafePickupShore ? 1 : 0, pSingleActiveBoarder ? pSingleActiveBoarder->UniqueID : 0u, canFitMoreOnPickupIsland ? 1 : 0,
+				pendingHere, pendingElsewhere, static_cast<int>(idleCombatUnits.size()), static_cast<int>(idleCombatInf.size()));
 		}
 
 		const bool hasCargoInTransitOrUnloading = (numPass >= 1) && !onSafePickupShore

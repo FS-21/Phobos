@@ -379,4 +379,88 @@ namespace
 		}
 	}
 
+	// Dry economy sale (UpdateEconomyCrisis): one building that brings nothing in without ore, in
+	// this order: a silo, a refinery past the first (one stays in case the fields grow back), a
+	// service depot past the first, a factory past the first of its category, a power plant whose
+	// output is not needed. Never a ConYard, a base defense, a superweapon, a radar, a captured
+	// tech building, the last building of a type, or one under construction. True when one was sold.
+	bool SellForDryEconomy(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return false;
+
+		std::map<int, int> typeCounts;
+		int refineries = 0;
+		int repairDepots = 0;
+		std::array<int, 3> factories {};
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->CurrentMission == Mission::Selling
+				|| pBld->QueuedMission == Mission::Selling)
+			{
+				continue;
+			}
+
+			typeCounts[pBld->Type->ArrayIndex]++;
+
+			if (pBld->Type->Refinery && !pBld->Type->ResourceGatherer)
+				refineries++;
+
+			if (pBld->Type->UnitRepair && !pBld->Type->Naval)
+				repairDepots++;
+
+			if (const int category = FactoryCapCategory(pBld->Type); category >= 0)
+				factories[category]++;
+		}
+
+		const int powerSpare = pHouse->PowerOutput - pHouse->PowerDrain;
+		BuildingClass* pBest = nullptr;
+		int bestRank = INT_MAX;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type)
+				continue;
+
+			auto const pType = pBld->Type;
+
+			if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling
+				|| pBld->CurrentMission == Mission::Construction || pType->ConstructionYard || pType->IsBaseDefense
+				|| pType->SuperWeapon != -1 || pType->Radar || pType->SpySat || pType->Capturable || pType->Unsellable
+				|| typeCounts[pType->ArrayIndex] < 2)
+			{
+				continue;
+			}
+
+			int rank = INT_MAX;
+
+			if (pType->Storage > 0 && !pType->Refinery)
+				rank = 1;
+			else if (pType->Refinery && !pType->ResourceGatherer && refineries > 1)
+				rank = 2;
+			else if (pType->UnitRepair && !pType->Naval && repairDepots > 1)
+				rank = 3;
+			else if (const int category = FactoryCapCategory(pType); category >= 0 && factories[category] > 1)
+				rank = 4;
+			else if (pType->PowerBonus > 0 && pType->Factory == AbstractType::None && powerSpare - pType->PowerBonus + pType->PowerDrain >= 0)
+				rank = 5;
+
+			if (rank < bestRank || (rank == bestRank && pBest && pBld->UniqueID < pBest->UniqueID))
+			{
+				bestRank = rank;
+				pBest = pBld;
+			}
+		}
+
+		if (!pBest || bestRank == INT_MAX)
+			return false;
+
+		Debug::Log("[NeuralAI] House %d dry economy (no harvest income, %d credits): selling %s at (%d,%d).\n",
+			pHouse->ArrayIndex, pHouse->Available_Money(), pBest->Type->ID, pBest->GetMapCoords().X, pBest->GetMapCoords().Y);
+		pBest->Sell(1);
+		CountDecision(NeuralDecision::DryEconomySale, pHouse->ArrayIndex);
+		return true;
+	}
+
 } // namespace
