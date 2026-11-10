@@ -1408,7 +1408,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		// decision): ,uid,health%,mission,megaMission,target,destination,transform where target is
 		// [rx,ry,health% or -1,uid,cellX,cellY] or 0 and destination is [rx,ry,cellX,cellY] or 0.
 		// The point's own cell follows, then the garrison (infantry inside a building) and 1 when a
-		// vehicle sits in it (tank bunker); both 0 for anything else.
+		// vehicle sits in it (tank bunker); both 0 for anything else. Last, what is inside as
+		// "TYPE:count;..." (garrison, bunker vehicle, passengers, slung vehicle; 6 types at most).
 		auto objectDetail = [&](TechnoClass* pTechno, char* out, size_t outCap)
 		{
 			if (!out || outCap == 0)
@@ -1467,12 +1468,74 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			auto const pAsBld = abstract_cast<BuildingClass*>(pTechno);
 			const int garrison = pAsBld ? pAsBld->Occupants.Count : 0;
 			const int bunkered = (pAsBld && pAsBld->BunkerLinkedItem) ? 1 : 0;
-			std::snprintf(out, outCap, ",%u,%d,%d,%d,%s,%s,\"%s\",%d,%d,%d,%d", static_cast<unsigned>(pTechno->UniqueID), hp,
+
+			std::vector<std::pair<const char*, int>> insideTypes;
+
+			auto const addInside = [&insideTypes](TechnoClass* pInside)
+			{
+				auto const pInsideType = pInside ? pInside->GetTechnoType() : nullptr;
+
+				if (!pInsideType)
+					return;
+
+				for (auto& entry : insideTypes)
+				{
+					if (entry.first == pInsideType->ID)
+					{
+						++entry.second;
+						return;
+					}
+				}
+
+				if (insideTypes.size() < 6)
+					insideTypes.emplace_back(pInsideType->ID, 1);
+			};
+
+			if (pAsBld)
+			{
+				for (int i = 0; i < pAsBld->Occupants.Count; ++i)
+					addInside(pAsBld->Occupants.GetItem(i));
+
+				addInside(pAsBld->BunkerLinkedItem);
+			}
+
+			int paxGuard = 0;
+
+			for (auto pPax = pTechno->Passengers.GetFirstPassenger(); pPax && paxGuard < 32;
+				pPax = abstract_cast<FootClass*>(pPax->NextObject), ++paxGuard)
+			{
+				addInside(pPax);
+			}
+
+			if (auto const pAsUnit = abstract_cast<UnitClass*>(pTechno))
+			{
+				if (auto const pUnitExt = UnitExt::Fetch(pAsUnit); pUnitExt && pUnitExt->CarryallCargo)
+					addInside(pUnitExt->CarryallCargo);
+			}
+
+			char insideRaw[96] = "";
+			size_t insideLen = 0;
+
+			for (auto const& [insideId, insideCount] : insideTypes)
+			{
+				const int written = std::snprintf(insideRaw + insideLen, sizeof(insideRaw) - insideLen, "%s%s:%d",
+					insideLen ? ";" : "", insideId, insideCount);
+
+				if (written <= 0 || insideLen + static_cast<size_t>(written) >= sizeof(insideRaw))
+					break;
+
+				insideLen += static_cast<size_t>(written);
+			}
+
+			char insideClean[96];
+			sanitizeJsonStr(insideRaw, insideClean, sizeof(insideClean));
+
+			std::snprintf(out, outCap, ",%u,%d,%d,%d,%s,%s,\"%s\",%d,%d,%d,%d,\"%s\"", static_cast<unsigned>(pTechno->UniqueID), hp,
 				static_cast<int>(pTechno->CurrentMission), mega, targetText, destText, transformClean, static_cast<int>(ownCell.X),
-				static_cast<int>(ownCell.Y), garrison, bunkered);
+				static_cast<int>(ownCell.Y), garrison, bunkered, insideClean);
 		};
 
-		char detailBuf[224];
+		char detailBuf[336];
 		bool firstPt = true;
 		int ptCount = 0;
 

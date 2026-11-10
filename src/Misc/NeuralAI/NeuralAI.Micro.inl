@@ -218,11 +218,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			for (auto const pFoot : cellFoots)
 			{
-				if (pFoot == pDeployerUnit)
+				if (pFoot == pDeployerUnit || !pFoot->IsAlive || pFoot->InLimbo || !pFoot->Owner)
 					continue;
 
-				if (pFoot->Owner != pH || !pFoot->IsAlive || pFoot->InLimbo)
+				// An ally's unit standing on the foundation blocks the deploy as much as ours (match
+				// #6198: a Soviet MCV among its ally's units never deployed): it is asked to step aside.
+				if (pFoot->Owner != pH)
+				{
+					if (pH->IsAlliedWith(pFoot->Owner) && pFoot->CurrentMission != Mission::Move)
+						pFoot->Scatter(CoordStruct::Empty, true, false);
+
 					continue;
+				}
 
 				auto const pOtherU = abstract_cast<UnitClass*>(pFoot);
 				if (pOtherU && pOtherU->Type
@@ -3202,6 +3209,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						OrderDeployerUnpack(pUnit);
 					}
+					else if (safeYardStandCell == mcvCell && noYardTooLong)
+					{
+						// Its own cell is the best stand but the deploy is refused there (units on the
+						// foundation, the cell itself): step aside and try the cells around.
+						pUnit->Scatter(CoordStruct::Empty, true, false);
+					}
 					else if (safeYardStandCell != CellStruct::Empty)
 					{
 						if (auto const pSafeDest = MapClass::Instance.TryGetCellAt(safeYardStandCell))
@@ -3209,7 +3222,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							IssueMoveOrder(pUnit, pSafeDest, 3.0);
 						}
 					}
-					else if (!enemyNearMCV)
+					else if (!enemyNearMCV || noYardTooLong)
 					{
 						pUnit->Scatter(CoordStruct::Empty, true, false);
 					}

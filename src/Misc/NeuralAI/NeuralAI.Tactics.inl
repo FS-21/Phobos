@@ -585,6 +585,10 @@ namespace
 	// down; a jumpjet cannot settle on water, so its move never ends and nothing gave it new work).
 	// Its orders are dropped and it flies home (FindCarrierHomeCell); the carryall / transport logic
 	// takes it from there. The state is logged so the order that left it there can be traced.
+	// Landed or near our base it is also released (orders dropped, free for the AI's next job, no trip
+	// home) when what it holds is a dead order: a move it already finished, or a target out of reach
+	// it does not go after (match #6176: a HIND landed on an island coast, Move to its own cell and a
+	// target 67 cells away, for minutes; the ground watchdog skips jumpjets).
 	void UpdateHoveringFlyers(HouseClass* pHouse)
 	{
 		auto& macro = GetMacroState(pHouse);
@@ -593,7 +597,7 @@ namespace
 
 		for (auto const pUnit : UnitClass::Array)
 		{
-			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type || !pUnit->IsInAir()
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type
 				|| !(pUnit->Type->JumpJet || pUnit->Type->MovementZone == MovementZone::Fly))
 			{
 				continue;
@@ -620,9 +624,10 @@ namespace
 			}
 
 			auto const pCell = pUnit->GetCell();
-			bool exposed = pCell && pCell->LandType == LandType::Water;
+			const bool inAir = pUnit->IsInAir();
+			bool exposed = inAir && pCell && pCell->LandType == LandType::Water;
 
-			if (!exposed)
+			if (inAir && !exposed)
 			{
 				exposed = true;
 
@@ -636,16 +641,21 @@ namespace
 				}
 			}
 
-			if (!exposed)
+			auto const pDestCell = abstract_cast<CellClass*>(pUnit->Destination);
+			const bool finishedMove = pUnit->CurrentMission == Mission::Move
+				&& (!pUnit->Destination || CellClass::Coord2Cell(pUnit->Destination->GetCoords()).DistanceFrom(here) <= 1.5);
+			const bool targetOutOfReach = pUnit->Target && !pUnit->IsCloseEnoughToAttack(pUnit->Target);
+			const bool deadOrder = finishedMove || targetOutOfReach;
+
+			if (!exposed && !deadOrder)
 			{
 				next.emplace(pUnit->UniqueID, track);
 				continue;
 			}
 
-			auto const pDestCell = abstract_cast<CellClass*>(pUnit->Destination);
 			auto const pTargetObj = abstract_cast<ObjectClass*>(pUnit->Target);
 			auto const pCarryExt = UnitExt::Fetch(pUnit);
-			Debug::Log("[NeuralAI] Frame %d | House #%d hovering %s #%u at (%d,%d) for %d frames: mission %d mega %d dest (%d,%d) target %s (%d,%d) passengers %d carryall state %d cargo %s plan %d -> home\n",
+			Debug::Log("[NeuralAI] Frame %d | House #%d hovering %s #%u at (%d,%d) for %d frames: mission %d mega %d dest (%d,%d) target %s (%d,%d) passengers %d carryall state %d cargo %s plan %d -> %s\n",
 				now, pHouse->ArrayIndex, pUnit->Type->ID, pUnit->UniqueID, here.X, here.Y, now - track.SinceFrame,
 				static_cast<int>(pUnit->CurrentMission), static_cast<int>(pUnit->MegaMission),
 				pDestCell ? pDestCell->MapCoords.X : -1, pDestCell ? pDestCell->MapCoords.Y : -1,
@@ -653,13 +663,15 @@ namespace
 				pTargetObj ? pTargetObj->GetMapCoords().X : -1, pTargetObj ? pTargetObj->GetMapCoords().Y : -1,
 				pUnit->Passengers.NumPassengers, pCarryExt ? static_cast<int>(pCarryExt->CarryallState) : -1,
 				(pCarryExt && pCarryExt->CarryallCargo && pCarryExt->CarryallCargo->GetTechnoType()) ? pCarryExt->CarryallCargo->GetTechnoType()->ID : "-",
-				inPlan ? 1 : 0);
+				inPlan ? 1 : 0, exposed ? "home" : "released");
 
 			pUnit->SetTarget(nullptr);
 			pUnit->ClearMegaMissionData();
 			pUnit->SetDestination(nullptr, true);
 
-			if (auto const pHome = FindCarrierHomeCell(pHouse, pUnit))
+			if (!exposed)
+				pUnit->QueueMission(Mission::Guard, true);
+			else if (auto const pHome = FindCarrierHomeCell(pHouse, pUnit))
 				IssueMoveOrder(pUnit, pHome, 0.0);
 			else
 				pUnit->QueueMission(Mission::Guard, true);

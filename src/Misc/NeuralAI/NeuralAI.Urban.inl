@@ -730,7 +730,9 @@ namespace
 	// Garrison order for one idle occupier soldier: the best known building worth holding within
 	// reach (up to 64 cells while Expert 9 is in charge, else rangeCells), with room
 	// left after the soldiers (ours and allied) already walking in. At most a share of our
-	// occupiers sits in buildings: 55% under Expert 9, 30% otherwise.
+	// occupiers sits in buildings: 55% under Expert 9, 30% otherwise; on an urban map (6+ known
+	// buildings worth holding) 70% / 50%. A building we already hold scores double and is filled up
+	// even past that share: full garrisons instead of one or two soldiers in many buildings.
 	template <typename DispatchFn>
 	bool RunUrbanGarrison(HouseClass* pHouse, InfantryClass* pInf, bool expertActive, int rangeCells, DispatchFn&& dispatch)
 	{
@@ -743,11 +745,18 @@ namespace
 		for (auto const& entering : state.Entering)
 			pendingTotal += entering.Own;
 
-		const int cap = expertActive ? std::max(4, state.OwnOccupierInfantry * 55 / 100)
-			: std::max(2, state.OwnOccupierInfantry * 30 / 100);
+		int worthyBuildings = 0;
 
-		if (state.OwnOccupants + pendingTotal >= cap)
-			return false;
+		for (auto const& known : state.Buildings)
+		{
+			if (known.Worth > 0)
+				++worthyBuildings;
+		}
+
+		const bool urbanMap = worthyBuildings >= 6;
+		const int sharePercent = expertActive ? (urbanMap ? 70 : 55) : (urbanMap ? 50 : 30);
+		const int cap = std::max(expertActive ? 4 : 2, state.OwnOccupierInfantry * sharePercent / 100);
+		const bool overCap = state.OwnOccupants + pendingTotal >= cap;
 
 		RefreshUrbanLivePointers(state);
 		const int infZone = ObjectZone(pInf, MovementZone::Normal);
@@ -796,10 +805,16 @@ namespace
 			if (inside + coming >= known.MaxOccupants)
 				continue;
 
+			// Over the share only a building we already hold is still filled up.
+			const bool partlyOurs = own && inside + coming > 0;
+
+			if (overCap && !partlyOurs)
+				continue;
+
 			if (infZone >= 0 && !IsBuildingEnterableFromZone(pBld, infZone))
 				continue;
 
-			const int score = known.Worth * 100 / (100 + dist * 4);
+			const int score = known.Worth * 100 / (100 + dist * 4) * (partlyOurs ? 2 : 1);
 
 			if (score > bestScore)
 			{

@@ -313,6 +313,15 @@ namespace
 				continue;
 			}
 
+			// Armed transports and carryalls (a transport helicopter) ferry: a strike on a far building
+			// left them targeting it while the transport logic kept them home (Move / Unload), doing
+			// neither (matches #6164, #6176). Their guns still answer what comes near.
+			if (IsAmphibiousOrAirTransport(pUnit->Type)
+				|| (TechnoTypeExt::Fetch(pUnit->Type) && TechnoTypeExt::Fetch(pUnit->Type)->Carryall))
+			{
+				continue;
+			}
+
 			const bool parkedAfterMove = pUnit->CurrentMission == Mission::Move
 				&& (!pUnit->Destination || pUnit->DistanceFrom(pUnit->Destination) <= 384);
 

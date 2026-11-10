@@ -2830,6 +2830,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedGroundCombatUnits = 0;
 	int ownedLandStrikeTransports = 0;
 	int idleLandStrikeTransports = 0;
+	// Unit carryalls (transport helicopters with Carryall=yes): owned, and empty ones doing nothing.
+	int ownedUnitCarryalls = 0;
+	int idleUnitCarryalls = 0;
 	int ownedExpensiveVehicles = 0;
 	int carryallLiftJobs = 0;
 	int liftableUndeployedMCVs = 0;
@@ -2924,10 +2927,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (effLimit >= 6 && passCap > 0)
 					ownedHeavyIslandTransports++;
 
-				// An empty transport parked without orders is unused shuttle capacity.
+				// An empty transport parked without orders is unused shuttle capacity (an empty one left
+				// on Unload with nothing to unload too: transport helicopters sat like that by the dozen).
 				const bool isParkedEmpty = pOwnedU->Passengers.NumPassengers == 0 && pOwnedU->Destination == nullptr
 					&& (pOwnedU->CurrentMission == Mission::Guard || pOwnedU->CurrentMission == Mission::Area_Guard
-						|| pOwnedU->CurrentMission == Mission::Sleep);
+						|| pOwnedU->CurrentMission == Mission::Sleep || pOwnedU->CurrentMission == Mission::Unload);
+
+				if (unitCarryall)
+				{
+					ownedUnitCarryalls++;
+					auto const pCarryState = UnitExt::Fetch(pOwnedU);
+
+					if (isParkedEmpty && (!pCarryState || !pCarryState->CarryallCargo))
+						idleUnitCarryalls++;
+				}
 
 				if (isParkedEmpty)
 					ownedIdleEmptyTransByLimit[effLimit]++;
@@ -3404,7 +3417,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// only built (up to 3) while the real waiting cargo exceeds one trip of the fleet.
 	auto scoreFerryTransport = [&](const TechnoTypeClass* pCandidate) -> int
 	{
-		const int candSizeLimit = std::max(1, getTransportEffectiveSizeLimit(pCandidate));
+		// A unit carryall ferries with its passenger hold (own SizeLimit), as the owned ones are
+		// counted: judged by its Carryall.SizeLimit it never saw the ones already built and the
+		// queue built transport helicopters without end (match #6194: 22 HIND, 17 parked).
+		auto const pCandTypeExt = TechnoTypeExt::Fetch(pCandidate);
+		const bool candUnitCarryall = pCandidate->WhatAmI() == AbstractType::UnitType && pCandTypeExt && pCandTypeExt->Carryall;
+		const int candSizeLimit = std::max(1, candUnitCarryall ? static_cast<int>(pCandidate->SizeLimit)
+			: getTransportEffectiveSizeLimit(pCandidate));
 		const int candPassCap = std::max(1, static_cast<int>(pCandidate->Passengers));
 
 		int fittingDemandSize = 0;
@@ -3447,7 +3466,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (!IsAmphibiousOrAirTransport(pBuilding) && !(pBuildingExt && pBuildingExt->Carryall))
 				continue;
 
-			const int buildingLimit = getTransportEffectiveSizeLimit(pBuilding);
+			const int buildingLimit = (pBuildingExt && pBuildingExt->Carryall)
+				? static_cast<int>(pBuilding->SizeLimit) : getTransportEffectiveSizeLimit(pBuilding);
 
 			if (buildingLimit >= candSizeLimit)
 				ownedForLimit++;
@@ -3484,8 +3504,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pCandExt && pCandExt->Carryall)
 			{
 				// Airlift (damaged vehicle rescue, loaded strike APC drops).
-				if (ownedForLimit + ownedCarryallAircraft < wantedCarryalls && idleEmptyForLimit == 0
-					&& idleCarryallAircraft == 0)
+				const int ownedCarriers = (candUnitCarryall ? ownedUnitCarryalls : ownedForLimit) + ownedCarryallAircraft;
+				const int idleCarriers = (candUnitCarryall ? idleUnitCarryalls : idleEmptyForLimit) + idleCarryallAircraft;
+
+				if (ownedCarriers < wantedCarryalls && idleCarriers == 0)
 				{
 					return std::max(static_cast<int>(scores[28]), 0) + (carryallLiftJobs > 0 ? 700 : 350);
 				}
