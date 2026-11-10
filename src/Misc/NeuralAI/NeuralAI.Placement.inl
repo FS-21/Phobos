@@ -986,8 +986,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				&& pBuildingType->GetFoundationWidth() * pBuildingType->GetFoundationHeight(false) <= cheapestPowerPlantArea));
 	// Under Expert 1 a stone only carries the crawl to free ore: with every field in reach taken it is
 	// a plain power plant grouped behind the core, never a plant marching to the enemy's door.
+	const bool offensiveBank = HasOffensiveBank(pHouse);
 	const bool isSteppingStoneExpander = pBuildingType->BaseNormal && isPowerPlantBld && isCheapStone && (pHouse->PowerOutput >= 150)
-		&& (nearestOreCell != CellStruct::Empty || crawlBias > 0) && (!architectActive || hasUncolonizedOre);
+		&& (nearestOreCell != CellStruct::Empty || crawlBias > 0 || offensiveBank) && (!architectActive || hasUncolonizedOre);
 	const bool isRearProtected = !isNavalBld && !isResourceBld && !isCombatDefense && !isFactoryOrBarracks
 		&& !isTunnelBld && !isSupportRadiusBld && !isSteppingStoneExpander;
 
@@ -995,15 +996,16 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// field in reach is ours, stepping stones march toward the enemy base instead of clumping
 	// around colonized ore; while free fields remain, one stone in four still goes toward the
 	// enemy (two in four with a strong learned creep preference: slot 38 Forward Turret Creep +
-	// half of slot 81 Nomadic Siege Creep) so the front moves too. Defenses then anchor at the
-	// most forward structure (turret creep). Stones stay out of reach of known enemy structures.
+	// half of slot 81 Nomadic Siege Creep) so the front moves too; with an offensive bank
+	// (HasOffensiveBank) every stone does. Defenses then anchor at the most forward structure
+	// (turret creep). Stones stay out of reach of known enemy structures.
 	const AIBackpackFile& crawlPolicy = NeuralAI::PolicyFor(pHouse);
 	const int offensiveCrawlBias
 		= static_cast<int>(crawlPolicy.OutputBias[38]) + static_cast<int>(crawlPolicy.OutputBias[81]) / 2;
 	const int stoneIndex = isSteppingStoneExpander ? pHouse->CountOwnedNow(pBuildingType) : 0;
 	const bool stoneTowardEnemy = isSteppingStoneExpander && enemyTargetCell != CellStruct::Empty && !architectActive
 		&& offensiveCrawlBias > -400
-		&& (!hasUncolonizedOre || (stoneIndex % 4) == 3 || (offensiveCrawlBias > 300 && (stoneIndex % 4) == 1));
+		&& (!hasUncolonizedOre || offensiveBank || (stoneIndex % 4) == 3 || (offensiveCrawlBias > 300 && (stoneIndex % 4) == 1));
 	// Several enemies (free-for-all): the offensive crawl heads for the nearest known enemy base,
 	// rotating stone by stone between every enemy within 1.5x of that distance, so it can choke
 	// several neighbours instead of only the main enemy.

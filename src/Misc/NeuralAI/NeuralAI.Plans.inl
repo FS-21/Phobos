@@ -844,8 +844,9 @@ namespace
 			const int slot = NeuralPlanSlots[i];
 			// Combo chains (point 56) boost the plans they lead into for 900 frames.
 			const int boost = macro.PlanBoostUntilFrame[i] > Unsorted::CurrentFrame ? macro.PlanBoost[i] : 0;
-			// Main assaults also weigh our army advantage (see MainAssaultAdvantageUtility).
-			const int advantage = contextUtility > 0 ? MainAssaultAdvantageUtility(houseIdx, id) : 0;
+			// Main assaults also weigh our army advantage (see MainAssaultAdvantageUtility), and an
+			// offensive bank pushes harassment or assaults (OffensiveBankPlanUtility).
+			const int advantage = contextUtility > 0 ? MainAssaultAdvantageUtility(houseIdx, id) + OffensiveBankPlanUtility(pHouse, id) : 0;
 
 			const bool open = SlotGate(static_cast<int>(scores[slot]) + contextUtility + (contextUtility > 0 ? boost : 0) + advantage, 300, slot);
 

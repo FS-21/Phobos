@@ -1029,8 +1029,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Enemy Island Offensive Beachhead & Reconquest Discovery: Once all neutral
 		// islands in the archipelago are colonized (!pIslandResourceGoalCell),
 		// allow MCVs & Forward Deployers (Outposts, Mobile War Factories/Barracks,
-		// Nanocores) to reconquer the weakest/least-defended enemy island!
-		if (!pIslandResourceGoalCell)
+		// Nanocores) to reconquer the weakest/least-defended enemy island! With an
+		// offensive bank (HasOffensiveBank) the enemy island comes before the free ones.
+		if (!pIslandResourceGoalCell || HasOffensiveBank(pHouse))
 		{
 			int bestEnemyReconqScore = -999999;
 			for (auto const pEB : BuildingClass::Array)

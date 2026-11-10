@@ -611,6 +611,13 @@ namespace
 		// Credits held beyond the reserve at the last sample (0 when none): army caps grow with it.
 		int BankSurplus { 0 };
 		std::array<int, 4> BankWantedFactories {};
+		// AI ticks since the last governor sample at which each queue (BankQueue order) had a
+		// factory of its kind, and those at which one of them was producing.
+		std::array<int, 4> BankQueueTicks {};
+		std::array<int, 4> BankQueueBusyTicks {};
+		// A known enemy base stands on land we cannot walk to from home (features[21] at the last
+		// production tick): harassment from range is how an offensive bank presses it.
+		bool EnemyAcrossWater { false };
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
@@ -849,6 +856,9 @@ namespace
 			this->BankSpendNeeded = 0;
 			this->BankSurplus = 0;
 			this->BankWantedFactories.fill(0);
+			this->BankQueueTicks.fill(0);
+			this->BankQueueBusyTicks.fill(0);
+			this->EnemyAcrossWater = false;
 			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
 			this->FerryWaitSince.clear();

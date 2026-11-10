@@ -1117,8 +1117,11 @@ namespace
 	// the object costs. A bank beyond the reserve is wasted strength when the queues cannot spend
 	// it: the governor compares what they can spend with the measured income plus the surplus
 	// spread over 9000 frames, and while they fall short it wants one more factory at a time in
-	// the slowest queue until they would not. Only game state is read (money spent and held,
-	// factory counts, rules), so every machine computes the same wants.
+	// the slowest queue until they would not. Only a queue that kept producing (85% of the AI
+	// ticks since the last sample) gets one: a queue that waits for something to build (army caps,
+	// no target) does not spend faster with more factories. Only game state is read (money spent
+	// and held, factory counts, factories producing, rules), so every machine computes the same
+	// wants.
 	void UpdateBankGovernor(HouseClass* pHouse)
 	{
 		if (!pHouse)
@@ -1148,6 +1151,14 @@ namespace
 		macro.BankIncomeEarned = earned;
 		macro.BankGovernorActive = false;
 		macro.BankWantedFactories.fill(0);
+
+		std::array<bool, static_cast<size_t>(BankQueue::Count)> queueKeptBusy {};
+
+		for (size_t q = 0; q < queueKeptBusy.size(); ++q)
+			queueKeptBusy[q] = macro.BankQueueTicks[q] > 0 && macro.BankQueueBusyTicks[q] * 100 >= macro.BankQueueTicks[q] * 85;
+
+		macro.BankQueueTicks.fill(0);
+		macro.BankQueueBusyTicks.fill(0);
 		macro.BankWantedYards = 0;
 		macro.BankSurplus = 0;
 
@@ -1205,7 +1216,7 @@ namespace
 
 			for (int q = 0; q < static_cast<int>(BankQueue::Count); ++q)
 			{
-				if (counts[q] > 0 && (best < 0 || wanted[q] < wanted[best]))
+				if (counts[q] > 0 && queueKeptBusy[q] && (best < 0 || wanted[q] < wanted[best]))
 					best = q;
 			}
 
@@ -1229,6 +1240,16 @@ namespace
 
 		if (factoryDeficit >= 3 && pHouse->NumConYards < (surplus >= 100000 ? 6 : 4))
 			macro.BankWantedYards = pHouse->NumConYards + 1;
+	}
+
+	// Credits beyond the governor's reserve that make a house play offensively: losses are bought
+	// back at once, so waves leave with less advantage, forward stones go toward the enemy and an
+	// enemy across the water is harassed from range and invaded with a beachhead.
+	constexpr int OffensiveBankSurplus = 25000;
+
+	bool HasOffensiveBank(HouseClass* pHouse)
+	{
+		return pHouse && GetMacroState(pHouse).BankSurplus >= OffensiveBankSurplus;
 	}
 
 	// Factories the bank governor still wants in this queue (0 when it is idle).

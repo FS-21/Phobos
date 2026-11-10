@@ -1592,6 +1592,41 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& minAnchorDistToUncolonizedOre <= 60 && hasCoreEconomyAndProduction
 			&& (features[19] < 32 || ownedRefineries < 3 || scores[34] > 100 || Unsorted::CurrentFrame > 2100));
 
+		// Offensive bank (HasOffensiveBank) with a known enemy base on the land of one of our ConYards
+		// (our own land, or a beachhead on the enemy island): the house keeps building stepping stones,
+		// which the placement sends toward the enemy (offensive crawl), up to 16 forward stones alive.
+		GetMacroState(pHouse).EnemyAcrossWater = features[21] > 0;
+		bool bankOffensiveCrawl = HasOffensiveBank(pHouse) && hasCoreEconomyAndProduction
+			&& GetMacroState(pHouse).ConsecutivePlacementFailures < 2 && GetMacroState(pHouse).OffensiveStones.size() < 16;
+
+		if (bankOffensiveCrawl && features[21] > 0)
+		{
+			bool enemyOnYardLand = false;
+
+			for (int i = 0; i < pHouse->ConYards.Count && !enemyOnYardLand; ++i)
+			{
+				auto const pYard = pHouse->ConYards.GetItem(i);
+
+				if (!pYard || !pYard->IsAlive || pYard->InLimbo)
+					continue;
+
+				const int yardZone = ObjectZone(pYard, MovementZone::Normal);
+
+				for (auto const pEnemyBld : BuildingClass::Array)
+				{
+					if (pEnemyBld && pEnemyBld->IsAlive && !pEnemyBld->InLimbo && pEnemyBld->Owner && pEnemyBld->Owner != pHouse
+						&& !pHouse->IsAlliedWith(pEnemyBld->Owner) && !pEnemyBld->Owner->IsNeutral()
+						&& IsEnemyBuildingKnown(pHouse, pEnemyBld) && ObjectZone(pEnemyBld, MovementZone::Normal) == yardZone)
+					{
+						enemyOnYardLand = true;
+						break;
+					}
+				}
+			}
+
+			bankOffensiveCrawl = enemyOnYardLand;
+		}
+
 		// AdvAI Start-Rush Emergency Defense Interception:
 		// If we are rushed early (CurrentFrame <= with at least 1 Refinery + 1 Barracks
 		// and 0 ground defenses while our ConYard is constructing a non-essential building,
@@ -1978,7 +2013,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// already well above our damaged-plant safety cushion (relaxed by +350
 				// when stepping-stone crawling to a distant Ore patch)!
 				const int maxAllowedSurplus = requiredPowerCushion
-					+ ((needsSteppingStoneCrawlToOre && pBld->BaseNormal && money >= 1400) ? 700 : 350);
+					+ ((needsSteppingStoneCrawlToOre && pBld->BaseNormal && money >= 1400) ? 700 : 350)
+					+ ((bankOffensiveCrawl && pBld->BaseNormal) ? 2000 : 0);
 				if (!pHouse->HasLowPower() && !hasUnpoweredBuildings && realPowerSurplus >= maxAllowedSurplus)
 					continue;
 
@@ -2035,6 +2071,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					// AdvAI Stepping-Stone BaseNormal Crawler: use cheap Power Plants to
 					// step the legal Adjacent=2 chain out of spawn toward the uncolonized
 					// Ore field!
+					score += 680;
+				}
+				else if (bankOffensiveCrawl && pBld->BaseNormal && pBld->GetFoundationWidth() <= 3)
+				{
 					score += 680;
 				}
 				else
@@ -3565,7 +3605,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (ownedUnitWithConv >= maxPerCombatType)
 				continue;
 
-			const int maxNavalFleet = (features[21] > 0) ? 20 : 12;
+			// An offensive bank against an enemy across the water keeps a bigger siege fleet.
+			const int maxNavalFleet = (features[21] > 0) ? (HasOffensiveBank(pHouse) ? 30 : 20) : 12;
 			if (pUnit->Naval && ownedNavalOrAmphibCombatUnits >= maxNavalFleet)
 				continue;
 
@@ -4264,9 +4305,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				? std::clamp(airDeficit * 4, 0, 800)
 				: 0;
 
+			// An offensive bank against an enemy across the water buys aircraft that strike the ground.
+			const int bankStrikeBonus = (HasOffensiveBank(pHouse) && features[21] > 0 && GroundRangeOf(pAir) > 0) ? 450 : 0;
+
 			const int score = (pAir->Cost / 3) + (pAir->Strength / 2) + slotScore + crossFactionAirBonus + airTransBonus
 				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0) + CounterBonusFor(pHouse, pAir)
-				+ AirForceProductionBonus(pHouse, pAir);
+				+ AirForceProductionBonus(pHouse, pAir) + bankStrikeBonus;
 
 			if (score > bestAirScore)
 			{
@@ -4323,6 +4367,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		return -1;
 	};
+
+	// Bank governor input (UpdateBankGovernor): whether each queue it may grow is producing.
+	{
+		auto& queueMacro = GetMacroState(pHouse);
+		const int queueIdle[] = { queueFactoryIdle(AbstractType::UnitType, false), queueFactoryIdle(AbstractType::InfantryType, false),
+			queueFactoryIdle(AbstractType::AircraftType, false), queueFactoryIdle(AbstractType::UnitType, true) };
+
+		for (size_t q = 0; q < std::size(queueIdle); ++q)
+		{
+			if (queueIdle[q] < 0)
+				continue;
+
+			queueMacro.BankQueueTicks[q]++;
+
+			if (queueIdle[q] == 0)
+				queueMacro.BankQueueBusyTicks[q]++;
+		}
+	}
 
 	if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
 	{
