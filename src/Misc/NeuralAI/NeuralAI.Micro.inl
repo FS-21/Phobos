@@ -6070,10 +6070,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Combat Medics / Field Mechanics (Damage < 0): Heal wounded own OR allied
-		// infantry nearby!
-		if (pInfWpn && pInfWpn->Damage < 0 && isIdle)
+		// Combat Medics / Field Mechanics (Damage < 0): they go with the soldiers of their team and
+		// keep an eye on them (user: medics escort their squad, watching for the wounded). Healing
+		// first: a wounded own or allied soldier within 10 cells, whatever the medic was doing. Else
+		// the medic follows the nearest own soldier on the move or in a fight within 24 cells (two
+		// medics per soldier group at most: one already followed or with two medics within 6 cells
+		// is skipped), keeping within 4 cells of it; with nobody out it stays where it is.
+		if (pInfWpn && pInfWpn->Damage < 0)
 		{
+			auto const pHealTarget = abstract_cast<TechnoClass*>(pInf->Target);
+
+			if (pHealTarget && pHealTarget->IsAlive && !pHealTarget->InLimbo && pHealTarget->Owner
+				&& pHouse->IsAlliedWith(pHealTarget->Owner) && pHealTarget->GetHealthPercentage() < 1.0)
+			{
+				continue;
+			}
+
+			InfantryClass* pWounded = nullptr;
+			int woundedDist = 2561;
+
 			for (auto const pAllyInf : InfantryClass::Array)
 			{
 				if (!pAllyInf || pAllyInf == pInf || !pAllyInf->Owner || !pHouse->IsAlliedWith(pAllyInf->Owner)
@@ -6082,12 +6097,86 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 
-				if (pAllyInf->GetHealthPercentage() < 0.85 && pInf->DistanceFrom(pAllyInf) <= 2560)
-				{
-					DispatchFootToTargetOrTransport(pInf, pAllyInf, Mission::Attack, true);
+				const int dist = pInf->DistanceFrom(pAllyInf);
 
-					break;
+				if (pAllyInf->GetHealthPercentage() < 0.85 && dist < woundedDist)
+				{
+					woundedDist = dist;
+					pWounded = pAllyInf;
 				}
+			}
+
+			if (pWounded)
+			{
+				DispatchFootToTargetOrTransport(pInf, pWounded, Mission::Attack, true);
+				continue;
+			}
+
+			// The soldier to escort: own fighting infantry on the move or in a fight. The one followed
+			// now is kept while it still is (no switching between soldiers of one group).
+			InfantryClass* pEscorted = nullptr;
+			int escortDist = 24 * Unsorted::LeptonsPerCell + 1;
+
+			if (auto const pFollowed = abstract_cast<InfantryClass*>(pInf->Destination))
+			{
+				const Mission followedMission = pFollowed->IsAlive ? pFollowed->GetCurrentMission() : Mission::None;
+
+				if (pFollowed->Owner == pHouse && !pFollowed->InLimbo && pFollowed->Type && !IsHealerInfantryType(pFollowed->Type)
+					&& (followedMission == Mission::Move || followedMission == Mission::AttackMove || followedMission == Mission::Attack
+						|| followedMission == Mission::Hunt)
+					&& pInf->DistanceFrom(pFollowed) < escortDist)
+				{
+					continue;
+				}
+			}
+
+			for (auto const pOwnI : InfantryClass::Array)
+			{
+				if (!pOwnI || pOwnI == pInf || pOwnI->Owner != pHouse || pOwnI->InLimbo || !pOwnI->IsAlive || !pOwnI->Type
+					|| IsHealerInfantryType(pOwnI->Type) || IsSpecialistInfantryType(pOwnI->Type) || !pOwnI->Type->GetWeapon(0)
+					|| !pOwnI->Type->GetWeapon(0)->WeaponType)
+				{
+					continue;
+				}
+
+				const Mission mission = pOwnI->GetCurrentMission();
+
+				if (mission != Mission::Move && mission != Mission::AttackMove && mission != Mission::Attack && mission != Mission::Hunt)
+					continue;
+
+				const int dist = pInf->DistanceFrom(pOwnI);
+
+				if (dist >= escortDist)
+					continue;
+
+				int medicsWithIt = 0;
+
+				for (auto const pOtherHealer : InfantryClass::Array)
+				{
+					if (!pOtherHealer || pOtherHealer == pInf || pOtherHealer->Owner != pHouse || pOtherHealer->InLimbo
+						|| !pOtherHealer->IsAlive || !IsHealerInfantryType(pOtherHealer->Type))
+					{
+						continue;
+					}
+
+					if (pOtherHealer->Destination == pOwnI || pOtherHealer->DistanceFrom(pOwnI) <= 6 * Unsorted::LeptonsPerCell)
+						medicsWithIt++;
+				}
+
+				if (medicsWithIt >= 2)
+					continue;
+
+				escortDist = dist;
+				pEscorted = pOwnI;
+			}
+
+			if (pEscorted && escortDist > 4 * Unsorted::LeptonsPerCell && pInf->Destination != pEscorted)
+			{
+				pInf->ClearMegaMissionData();
+				pInf->SetTarget(nullptr);
+				pInf->SetDestination(pEscorted, true);
+				pInf->QueueMission(Mission::Move, false);
+				CountDecision(NeuralDecision::MedicEscort, pHouse->ArrayIndex);
 			}
 
 			continue;
@@ -7171,7 +7260,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool urbanExpert = pExt->NeuralAI_ActiveExpert == 9;
 
 		if (isIdle && (urbanExpert || IsAITickWindow(90, garrisonWindow))
-			&& RunUrbanGarrison(pHouse, pInf, urbanExpert, garrisonRangeCells, DispatchFootToTargetOrTransport))
+			&& RunUrbanGarrison(pHouse, pInf, urbanExpert, garrisonRangeCells, DispatchFootToTargetOrTransport,
+				IsFootActivelyAttackingOrMovingToEnemy))
 		{
 			continue;
 		}
@@ -7641,12 +7731,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// Two healers (medics, field mechanics) at most go with a wave: soldiers first, the rest heal
+	// at home (user: a GDI squad wants two medics, not a Red Cross column).
+	int healersForWave = 0;
+
 	for (auto const pInf : InfantryClass::Array)
 	{
 		if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || !pInf->Type)
 			continue;
 
 		if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type))
+			continue;
+
+		if (IsHealerInfantryType(pInf->Type) && healersForWave >= 2)
 			continue;
 
 		const bool canInfCrossWater = (pInf->Type->MovementZone == MovementZone::Amphibious
@@ -7667,7 +7764,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| (pInf->CurrentMission == Mission::Move && pInf->MegaMission == Mission::AttackMove))
 		{
 			if (!IsPlanMember(pHouse, pInf->UniqueID))
+			{
 				idleCombatInf.push_back(pInf);
+
+				if (IsHealerInfantryType(pInf->Type))
+					healersForWave++;
+			}
 		}
 	}
 

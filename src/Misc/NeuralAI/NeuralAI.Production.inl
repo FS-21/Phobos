@@ -4266,9 +4266,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			inProgressInfIdx = pInfFac->Object->GetType()->GetArrayIndex();
 	}
 
-	// Healers (medics, field mechanics) are support: at most one for five fighting soldiers. The
-	// score below grows with the cost, so an expensive medic used to win every pick (match #6368,
-	// Capital Coup: 39 medics and 3 riflemen, no soldier left to garrison the city).
+	// Healers (medics, field mechanics) are support: one for five fighting soldiers, two for a squad
+	// of ten (a wave takes two at most, two escort one soldier group). The score below grows with the
+	// cost, so an expensive medic used to win every pick (match #6368, Capital Coup: 39 medics and 3
+	// riflemen, no soldier left to garrison the city).
 	int ownedHealerInfantry = 0;
 	int ownedFighterInfantry = 0;
 

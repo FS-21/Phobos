@@ -187,6 +187,8 @@ namespace
 		MouthCleared,
 		HoverReleased,
 		GroundRouteHop,
+		MedicEscort,
+		GarrisonSquad,
 		Count
 	};
 
@@ -212,7 +214,7 @@ namespace
 		"aircraftLost",
 		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom", "stuckUnloadMoved", "capitalGroupLaunched", "capitalGroupRetreat", "submarineSonarAvoided", "depotEmergencySale", "veinholeAttack", "cliffOpened", "stealthRevealFired",
 		"stagingHoldTimedOut", "jamCleared", "jamYielded", "mouthCleared",
-		"hoverReleased", "groundRouteHop" };
+		"hoverReleased", "groundRouteHop", "medicEscort", "garrisonSquad" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
