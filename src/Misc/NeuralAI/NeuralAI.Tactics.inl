@@ -422,8 +422,110 @@ namespace
 			if (yielded > 0)
 				CountDecision(NeuralDecision::JamYielded, pHouse->ArrayIndex);
 
-			Debug::Log("[NeuralAI] Frame %d | House #%d jam at (%d,%d)%s: %d held units, %d idle moved out, %d backed off\n",
-				now, pHouse->ArrayIndex, center.X, center.Y, narrow ? " in a narrow passage" : "", n, moved, yielded);
+			Debug::Log("[NeuralAI] Frame %d | House #%d jam at (%d,%d)%s: %d held units, %d idle moved out (of %d idle), %d backed off\n",
+				now, pHouse->ArrayIndex, center.X, center.Y, narrow ? " in a narrow passage" : "", n, moved,
+				static_cast<int>(idle.size()), yielded);
+		}
+
+		// What the block is made of (diagnostics, at most once per 900 frames): held units by mission,
+		// the destinations most of them share, their types.
+		if (now - macro.LastJamDiagFrame >= 900 || now < macro.LastJamDiagFrame)
+		{
+			macro.LastJamDiagFrame = now;
+			std::map<int, int> byMission;
+			std::map<std::pair<short, short>, int> byDest;
+			std::map<std::string, int> byType;
+
+			for (auto const& [pHeld, want] : block)
+			{
+				if (!pHeld || !pHeld->Foot)
+					continue;
+
+				byMission[static_cast<int>(pHeld->Foot->CurrentMission)]++;
+				byDest[{ pHeld->Dest.X, pHeld->Dest.Y }]++;
+
+				if (auto const pHeldType = pHeld->Foot->GetTechnoType())
+					byType[pHeldType->ID]++;
+			}
+
+			std::string text;
+
+			for (auto const& [mission, count] : byMission)
+				text += "m" + std::to_string(mission) + "x" + std::to_string(count) + " ";
+
+			std::vector<std::pair<int, std::pair<short, short>>> dests;
+
+			for (auto const& [cell, count] : byDest)
+				dests.push_back({ count, cell });
+
+			std::sort(dests.begin(), dests.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
+			text += "| dest ";
+
+			for (size_t i = 0; i < dests.size() && i < 4; ++i)
+				text += "(" + std::to_string(dests[i].second.first) + "," + std::to_string(dests[i].second.second) + ")x" + std::to_string(dests[i].first) + " ";
+
+			text += "| types ";
+
+			for (auto const& [typeId, count] : byType)
+				text += typeId + "x" + std::to_string(count) + " ";
+
+			Debug::Log("[NeuralAI] Frame %d | House #%d jam detail at (%d,%d): %s\n", now, pHouse->ArrayIndex, center.X, center.Y, text.c_str());
+
+			// The ground around the first block of each house (diagnostics): '#' building, '~' water,
+			// '^' impassable for tracked vehicles, 'u' our unit, 'e' another house's unit, 'H' a held
+			// unit of the block, '.' free; 31 x 21 cells, row by row.
+			if (!macro.JamMapLogged)
+			{
+				macro.JamMapLogged = true;
+				Debug::Log("[NeuralAI] House #%d jam map around (%d,%d), x %d..%d:\n", pHouse->ArrayIndex, center.X, center.Y,
+					center.X - 15, center.X + 15);
+
+				for (int dy = -10; dy <= 10; ++dy)
+				{
+					char row[40] = {};
+
+					for (int dx = -15; dx <= 15; ++dx)
+					{
+						const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+						auto const pCell = MapClass::Instance.TryGetCellAt(c);
+						char ch = ' ';
+
+						if (pCell)
+						{
+							ch = '.';
+
+							if (pCell->GetBuilding())
+								ch = '#';
+							else if (pCell->LandType == LandType::Water)
+								ch = '~';
+							else if (!pCell->IsClearToMove(SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false))
+								ch = '^';
+
+							if (ch == '.')
+							{
+								for (auto const& [pHeld, want] : block)
+								{
+									if (pHeld && pHeld->Cell == c)
+									{
+										ch = 'H';
+										break;
+									}
+								}
+							}
+
+							if (ch == '.')
+							{
+								if (auto const pTechno = abstract_cast<TechnoClass*>(pCell->FirstObject); pTechno && pTechno->Owner)
+									ch = pTechno->Owner == pHouse ? 'u' : 'e';
+							}
+						}
+
+						row[dx + 15] = ch;
+					}
+
+					Debug::Log("[NeuralAI]   y %3d %s\n", center.Y + dy, row);
+				}
+			}
 		}
 	}
 

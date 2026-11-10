@@ -435,6 +435,252 @@ namespace
 		return nullptr;
 	}
 
+	// Coarse land route for a ground unit: breadth-first search over the cells of its movement zone,
+	// one cell at a time (a cliff line must never be stepped over; a diagonal step needs both of its
+	// side cells in the zone), 8 directions in a fixed order, 40000 cells at most. The route is cached
+	// per movement zone, start and target (4-cell grid) for 900 frames. Returns the first route cell
+	// at least `hop` cells from the unit, or nullptr when the target is within hop + 10 cells, out of
+	// the zone, or no route is found. Match #6194 (Polar Knot): both bases sit on cliff-ringed plateaus
+	// about 100 cells apart, the engine path finder gave up ("Regular findpath failure") and whole
+	// waves stood in their own base for thousands of frames; in hops it finds every leg.
+	CellClass* GroundRouteHop(FootClass* pFoot, const CellStruct& target, int hop)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || pType->Naval || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly
+			|| pType->MovementZone == MovementZone::Subterrannean || pType->MovementZone == MovementZone::Water
+			|| pType->MovementZone == MovementZone::WaterBeach || pFoot->IsInAir())
+		{
+			return nullptr;
+		}
+
+		const CellStruct from = pFoot->GetMapCoords();
+
+		if (from.DistanceFrom(target) <= hop + 10.0)
+			return nullptr;
+
+		const MovementZone mz = pType->MovementZone;
+		const int zone = ObjectZone(pFoot, mz);
+
+		if (zone <= 1 || MapClass::Instance.GetMovementZoneType(target, mz, false) != zone)
+			return nullptr;
+
+		struct GroundRoute
+		{
+			int MatchSerial;
+			int Frame;
+			std::vector<CellStruct> Cells; // start -> target
+		};
+
+		static std::unordered_map<uint64_t, GroundRoute> routes;
+		const int now = Unsorted::CurrentFrame;
+		const uint64_t routeKey = (static_cast<uint64_t>(static_cast<uint16_t>(zone)) << 48)
+			| (static_cast<uint64_t>(static_cast<uint8_t>(mz)) << 40)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(from.X / 4)) << 30) | (static_cast<uint64_t>(static_cast<uint16_t>(from.Y / 4)) << 20)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(target.X / 4)) << 10) | static_cast<uint64_t>(static_cast<uint16_t>(target.Y / 4));
+
+		if (routes.size() > 256)
+		{
+			std::erase_if(routes, [now](const auto& entry)
+				{ return entry.second.MatchSerial != NeuralMatchSerial || now < entry.second.Frame || now - entry.second.Frame > 900; });
+		}
+
+		auto it = routes.find(routeKey);
+
+		if (it == routes.end() || it->second.MatchSerial != NeuralMatchSerial || now < it->second.Frame || now - it->second.Frame > 900)
+		{
+			constexpr int DirX[8] = { 1, 0, -1, 0, 1, -1, -1, 1 };
+			constexpr int DirY[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
+			auto const key = [](const CellStruct& c) { return (static_cast<uint32_t>(static_cast<uint16_t>(c.X)) << 16) | static_cast<uint16_t>(c.Y); };
+			// A cell the unit can stand on: in its zone and clear for its speed type (other units ignored).
+			auto const inZone = [&](const CellStruct& c)
+			{
+				if (!MapClass::Instance.CoordinatesLegal(c) || MapClass::Instance.GetMovementZoneType(c, mz, false) != zone)
+					return false;
+
+				auto const pCell = MapClass::Instance.TryGetCellAt(c);
+				return pCell && pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false);
+			};
+
+			// One step between two such cells: at most one height level apart (a ramp); two cells of one
+			// zone on both sides of a cliff edge share the zone through another way round.
+			auto const canStep = [](const CellStruct& a, const CellStruct& b)
+			{
+				auto const pA = MapClass::Instance.TryGetCellAt(a);
+				auto const pB = MapClass::Instance.TryGetCellAt(b);
+				return pA && pB && std::abs(static_cast<int>(pA->Level) - static_cast<int>(pB->Level)) <= 1;
+			};
+
+			std::unordered_map<uint32_t, CellStruct> parent;
+			parent.reserve(16384);
+			std::vector<CellStruct> queue { from };
+			queue.reserve(16384);
+			parent.emplace(key(from), from);
+			CellStruct reached = CellStruct::Empty;
+
+			for (size_t head = 0; head < queue.size() && queue.size() < 40000; ++head)
+			{
+				const CellStruct node = queue[head];
+
+				if (node.DistanceFrom(target) <= 1.5)
+				{
+					reached = node;
+					break;
+				}
+
+				for (int d = 0; d < 8; ++d)
+				{
+					const CellStruct next { static_cast<short>(node.X + DirX[d]), static_cast<short>(node.Y + DirY[d]) };
+
+					if (parent.contains(key(next)) || !inZone(next) || !canStep(node, next))
+						continue;
+
+					if (d >= 4)
+					{
+						const CellStruct sideA { next.X, node.Y };
+						const CellStruct sideB { node.X, next.Y };
+
+						if (!inZone(sideA) || !inZone(sideB) || !canStep(node, sideA) || !canStep(node, sideB)
+							|| !canStep(sideA, next) || !canStep(sideB, next))
+						{
+							continue;
+						}
+					}
+
+					parent.emplace(key(next), node);
+					queue.push_back(next);
+				}
+			}
+
+			GroundRoute route { NeuralMatchSerial, now, {} };
+
+			if (reached != CellStruct::Empty)
+			{
+				for (CellStruct c = reached; c != from; c = parent[key(c)])
+					route.Cells.push_back(c);
+
+				std::reverse(route.Cells.begin(), route.Cells.end());
+			}
+
+			// Diagnostics, the first 4 routes of a match: land types and heights along the route.
+			static int routeLogSerial = -1;
+			static int routeLogCount = 0;
+
+			if (routeLogSerial != NeuralMatchSerial)
+			{
+				routeLogSerial = NeuralMatchSerial;
+				routeLogCount = 0;
+			}
+
+			if (routeLogCount < 4)
+			{
+				++routeLogCount;
+				int landCounts[16] = {};
+				int minLevel = 999;
+				int maxLevel = -999;
+				int maxStep = 0;
+				int prevLevel = INT_MIN;
+
+				for (auto const& c : route.Cells)
+				{
+					if (auto const pC = MapClass::Instance.TryGetCellAt(c))
+					{
+						landCounts[std::clamp(static_cast<int>(pC->LandType), 0, 15)]++;
+						minLevel = std::min(minLevel, static_cast<int>(pC->Level));
+						maxLevel = std::max(maxLevel, static_cast<int>(pC->Level));
+
+						if (prevLevel != INT_MIN)
+							maxStep = std::max(maxStep, std::abs(static_cast<int>(pC->Level) - prevLevel));
+
+						prevLevel = pC->Level;
+					}
+				}
+
+				char landText[160] = "";
+				size_t landLen = 0;
+
+				for (int lt = 0; lt < 16; ++lt)
+				{
+					if (landCounts[lt] > 0 && landLen < sizeof(landText) - 16)
+						landLen += std::snprintf(landText + landLen, sizeof(landText) - landLen, "L%d:%d ", lt, landCounts[lt]);
+				}
+
+				Debug::Log("[NeuralAI] Ground route %s (%d,%d)->(%d,%d) mz %d zone %d: %d cells, land %s levels %d..%d max step %d, searched %d\n",
+					pType->ID, from.X, from.Y, target.X, target.Y, static_cast<int>(mz), zone, static_cast<int>(route.Cells.size()),
+					landText, minLevel, maxLevel, maxStep, static_cast<int>(queue.size()));
+
+				// The ground of the first 40 route cells (first route of the match only): 'r' route, '#'
+				// building, '~' water, '^' not clear for this unit, 'u' a unit, digits the height level.
+				if (routeLogCount == 1 && !route.Cells.empty())
+				{
+					int x0 = from.X, x1 = from.X, y0 = from.Y, y1 = from.Y;
+
+					for (size_t i = 0; i < route.Cells.size() && i < 40; ++i)
+					{
+						x0 = std::min<int>(x0, route.Cells[i].X);
+						x1 = std::max<int>(x1, route.Cells[i].X);
+						y0 = std::min<int>(y0, route.Cells[i].Y);
+						y1 = std::max<int>(y1, route.Cells[i].Y);
+					}
+
+					x0 -= 4; x1 = std::min(x1 + 4, x0 + 59); y0 -= 4; y1 = std::min(y1 + 4, y0 + 49);
+
+					for (int y = y0; y <= y1; ++y)
+					{
+						char row[64] = {};
+
+						for (int x = x0; x <= x1; ++x)
+						{
+							const CellStruct c { static_cast<short>(x), static_cast<short>(y) };
+							auto const pC = MapClass::Instance.TryGetCellAt(c);
+							char ch = ' ';
+
+							if (pC)
+							{
+								const bool onRoute = std::find(route.Cells.begin(), route.Cells.begin() + std::min<size_t>(40, route.Cells.size()), c)
+									!= route.Cells.begin() + std::min<size_t>(40, route.Cells.size());
+
+								if (pC->GetBuilding())
+									ch = '#';
+								else if (pC->LandType == LandType::Water)
+									ch = '~';
+								else if (!pC->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false))
+									ch = '^';
+								else if (onRoute)
+									ch = 'r';
+								else if (pC->FirstObject)
+									ch = 'u';
+								else
+									ch = static_cast<char>('0' + std::clamp(static_cast<int>(pC->Level), 0, 9));
+							}
+
+							row[x - x0] = ch;
+						}
+
+						Debug::Log("[NeuralAI]   route y %3d x%3d %s\n", y, x0, row);
+					}
+				}
+			}
+
+			it = routes.insert_or_assign(routeKey, std::move(route)).first;
+		}
+
+		// The first cell of the route at least `hop` from where this unit stands (units of one group
+		// share a cached route from a start up to 4 cells away).
+		auto const& cells = it->second.Cells;
+
+		for (size_t i = 0; i < cells.size(); ++i)
+		{
+			if (from.DistanceFrom(cells[i]) >= hop)
+			{
+				// Further along the route than this unit is: the cell nearest to it ahead of the hop.
+				return MapClass::Instance.TryGetCellAt(cells[i]);
+			}
+		}
+
+		return nullptr;
+	}
+
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5)
 	{
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)

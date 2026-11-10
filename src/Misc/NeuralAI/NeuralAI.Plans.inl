@@ -313,20 +313,37 @@ namespace
 				continue;
 			}
 
-			// Armed transports and carryalls (a transport helicopter) ferry: a strike on a far building
-			// left them targeting it while the transport logic kept them home (Move / Unload), doing
-			// neither (matches #6164, #6176). Their guns still answer what comes near.
-			if (IsAmphibiousOrAirTransport(pUnit->Type)
-				|| (TechnoTypeExt::Fetch(pUnit->Type) && TechnoTypeExt::Fetch(pUnit->Type)->Carryall))
+			// Armed transports and carryalls (a transport helicopter, a Nighthawk) ferry first: they only
+			// strike while empty (no passengers, nothing slung), with nobody waiting for a ferry (fresh
+			// demand) and only targets within 30 cells. A far strike left them targeting it while the
+			// transport logic kept them home (Move / Unload), doing neither (matches #6164, #6176).
+			// Parked empty on Unload counts as idle for them.
+			auto const pStrikerTypeExt = TechnoTypeExt::Fetch(pUnit->Type);
+			const bool armedTransport = IsAmphibiousOrAirTransport(pUnit->Type) || (pStrikerTypeExt && pStrikerTypeExt->Carryall);
+
+			if (armedTransport)
 			{
-				continue;
+				auto const pCarryState = UnitExt::Fetch(pUnit);
+				const bool empty = pUnit->Passengers.NumPassengers == 0
+					&& (!pCarryState || (!pCarryState->CarryallCargo && pCarryState->CarryallState == JumpjetCarryallState::Idle));
+				bool ferryWanted = false;
+
+				if (macro.FerryDemandFrame >= 0 && now - macro.FerryDemandFrame <= 600 && now >= macro.FerryDemandFrame)
+				{
+					for (const int demand : macro.FerryDemandSizeBySize)
+						ferryWanted = ferryWanted || demand > 0;
+				}
+
+				if (!empty || ferryWanted)
+					continue;
 			}
 
 			const bool parkedAfterMove = pUnit->CurrentMission == Mission::Move
 				&& (!pUnit->Destination || pUnit->DistanceFrom(pUnit->Destination) <= 384);
 
 			if (pUnit->CurrentMission != Mission::Guard && pUnit->CurrentMission != Mission::Area_Guard
-				&& pUnit->CurrentMission != Mission::Sleep && pUnit->CurrentMission != Mission::None && !parkedAfterMove)
+				&& pUnit->CurrentMission != Mission::Sleep && pUnit->CurrentMission != Mission::None && !parkedAfterMove
+				&& !(armedTransport && pUnit->CurrentMission == Mission::Unload && !pUnit->Destination))
 			{
 				continue;
 			}
@@ -346,6 +363,10 @@ namespace
 
 				const CellStruct bc = pBld->GetMapCoords();
 				const int dist = std::max(std::abs(bc.X - here.X), std::abs(bc.Y - here.Y));
+
+				if (armedTransport && dist > 30)
+					continue;
+
 				auto const pT = pBld->Type;
 				const int worth = (pT->SuperWeapon != -1) ? 400
 					: (pT->ConstructionYard || pT->Factory != AbstractType::None) ? 300

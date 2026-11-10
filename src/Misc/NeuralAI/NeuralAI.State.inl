@@ -750,6 +750,8 @@ namespace
 		int LastJamBreakFrame { -1 };
 		int LastJamCheckFrame { -1 };
 		int LastMouthClearFrame { -1 };
+		int LastJamDiagFrame { -1 };
+		bool JamMapLogged { false };
 		int FailedApproachDecayFrame { 0 };
 		std::vector<NeuralGroundLossTrack> GroundLossTracks {};
 		int HomeThreatPeak { 0 };
@@ -991,6 +993,8 @@ namespace
 			this->LastJamBreakFrame = -1;
 			this->LastJamCheckFrame = -1;
 			this->LastMouthClearFrame = -1;
+			this->LastJamDiagFrame = -1;
+			this->JamMapLogged = false;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
 			this->HomeThreatPeak = 0;

@@ -300,11 +300,56 @@ namespace
 			}
 
 			// A far naval order goes in hops of 25 cells along a sea route (NavalRouteHop); the owner
-			// logic sends it again once the ship is there.
+			// logic sends it again once the ship is there. A far ground order likewise along a land route
+			// (GroundRouteHop): the engine path finder gives up on long winding ways.
 			if (auto const pHop = NavalRouteHop(pFoot, pDestCell->MapCoords, 25))
 			{
 				pDestCell = pHop;
 				pResolvedDest = pHop;
+			}
+			else if (auto const pGroundHop = [&]() -> CellClass*
+				{
+					// Only as a fallback: a unit that has not left its cell for 300 frames (the engine
+					// path finder gave up on the long way), and then for 1200 frames after its last hop
+					// so it does not fall back to the long order between legs. Where the engine finds its
+					// way the order stays whole: hops everywhere made more path failures on maps it
+					// handled (fs_duel).
+					static std::unordered_map<DWORD, int> hoppingSince;
+					const int nowFrame = Unsorted::CurrentFrame;
+
+					if (hoppingSince.size() > 2048)
+						std::erase_if(hoppingSince, [nowFrame](const auto& e) { return nowFrame < e.second || nowFrame - e.second > 1200; });
+
+					auto const itHop = hoppingSince.find(pFoot->UniqueID);
+					const bool hopping = itHop != hoppingSince.end() && nowFrame >= itHop->second && nowFrame - itHop->second <= 1200;
+
+					if (!hopping && !(pFoot->Owner && IsFootHeldStill(pFoot->Owner, pFoot, 300)))
+						return nullptr;
+
+					auto const pHopCell = GroundRouteHop(pFoot, pDestCell->MapCoords, 25);
+
+					if (pHopCell)
+						hoppingSince[pFoot->UniqueID] = nowFrame;
+
+					return pHopCell;
+				}())
+			{
+				// Already attack-moving to an earlier hop that is still 6+ cells away and closer to the
+				// goal than the unit: it keeps that leg (a new hop every few cells re-paths it each time).
+				const CellStruct goal = pDestCell->MapCoords;
+				const CellStruct here = pFoot->GetMapCoords();
+
+				if (auto const pOldHop = abstract_cast<CellClass*>(pFoot->MegaDestination);
+					pOldHop && pFoot->MegaMission == Mission::AttackMove && here.DistanceFrom(pOldHop->MapCoords) > 6.0
+					&& pOldHop->MapCoords.DistanceFrom(goal) + 5.0 < here.DistanceFrom(goal))
+				{
+					CountDecision(NeuralDecision::MoveOrderSkipped, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
+					return;
+				}
+
+				pDestCell = pGroundHop;
+				pResolvedDest = pGroundHop;
+				CountDecision(NeuralDecision::GroundRouteHop, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
 			}
 		}
 

@@ -7545,6 +7545,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	// Count idle combat units and infantry ready at base
 	std::vector<UnitClass*> idleCombatUnits;
+	// Why combat vehicles were not idle (wave gate log): busy attacking / heading to the enemy, in a
+	// plan, other (health, capital group, Enter, links, mission).
+	int notIdleBusy = 0;
+	int notIdlePlan = 0;
+	int notIdleMission = 0;
 
 	std::vector<InfantryClass*> idleCombatInf;
 
@@ -7616,7 +7621,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		if (IsFootActivelyAttackingOrMovingToEnemy(pUnit))
+		{
+			++notIdleBusy;
 			continue;
+		}
 
 		if (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard
 			|| pUnit->CurrentMission == Mission::AttackMove
@@ -7624,6 +7632,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			if (!IsPlanMember(pHouse, pUnit->UniqueID))
 				idleCombatUnits.push_back(pUnit);
+			else
+				++notIdlePlan;
+		}
+		else
+		{
+			++notIdleMission;
 		}
 	}
 
@@ -8097,6 +8111,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// The unit count a team wave asks for (waveUnitsNeeded) may be below our own minimum.
 	const bool waveCountReady = idleCombatUnits.size() >= waveUnitsNeeded
 		|| idleCombatUnits.size() + idleCombatInf.size() >= waveUnitsNeeded + 4 || idleCombatInf.size() >= waveUnitsNeeded + 3;
+
+	// Wave gate inputs, every 900 frames per house: why a house with an army never reaches the wave.
+	if (IsAITickWindow(900, 0))
+	{
+		Debug::Log("[NeuralAI] Frame %d | House #%d wave gate: idle units %d inf %d needed %d, not idle busy %d plan %d mission %d, target %s (%d,%d) hold %d remnant %d\n",
+			Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(idleCombatUnits.size()), static_cast<int>(idleCombatInf.size()),
+			static_cast<int>(waveUnitsNeeded), notIdleBusy, notIdlePlan, notIdleMission, pWaveTargetCell ? "yes" : "none",
+			pWaveTargetCell ? pWaveTargetCell->MapCoords.X : -1, pWaveTargetCell ? pWaveTargetCell->MapCoords.Y : -1,
+			teamOrder.Hold ? 1 : 0, endgameRemnantHunt ? 1 : 0);
+	}
 	NeuralWaveCheck waveCheck {};
 	waveCheck.Launch = true;
 
