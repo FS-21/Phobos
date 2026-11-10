@@ -86,6 +86,498 @@ namespace
 		macro.AirLossTracks = std::move(next);
 	}
 
+	// A unit of ours held on one cell with an order pending, where it stands and where it wants to go.
+	struct NeuralHeldOrder
+	{
+		FootClass* Foot { nullptr };
+		CellStruct Cell { CellStruct::Empty };
+		CellStruct Dest { CellStruct::Empty };
+	};
+
+	// A unit of ours that has stood on one cell for `frames` (UpdateStuckUnits keeps the record for
+	// every ground unit) without firing in the last 300 frames and without a target within reach:
+	// whatever its order says it is doing nothing, so the "busy" filters (attacking, at the front) let
+	// other jobs take it. Before, a unit with a live target out of reach, or anywhere within 18.5 cells
+	// of an enemy building (bases next to each other), was busy for good.
+	bool IsFootHeldStill(const HouseClass* pHouse, const FootClass* pFoot, int frames)
+	{
+		if (!pHouse || !pFoot || pFoot->IsFiring)
+			return false;
+
+		const int now = Unsorted::CurrentFrame;
+
+		if (pFoot->LastFireBulletFrame > 0 && now >= pFoot->LastFireBulletFrame && now - pFoot->LastFireBulletFrame < 300)
+			return false;
+
+		auto const& progress = GetMacroState(pHouse).FootProgress;
+		auto const it = progress.find(pFoot->UniqueID);
+
+		if (it == progress.end() || now < it->second.SinceFrame || now - it->second.SinceFrame < frames)
+			return false;
+
+		return !(pFoot->Target && pFoot->IsCloseEnoughToAttack(pFoot->Target));
+	}
+
+	bool IsBridgeOrTubeCell(const CellClass* pCell)
+	{
+		return pCell && (pCell->ContainsBridge() || pCell->ContainsBridgeEx() || pCell->TubeIndex >= 0);
+	}
+
+	// A narrow passage: a bridge deck, bridge head or tunnel tube within 1 cell, or fewer than 25 of
+	// the 7x7 cells around free ground (no building, water or cliff).
+	bool IsNarrowPassage(const CellStruct& center)
+	{
+		int freeCells = 0;
+
+		for (int dy = -3; dy <= 3; ++dy)
+		{
+			for (int dx = -3; dx <= 3; ++dx)
+			{
+				auto const pCell = MapClass::Instance.TryGetCellAt(
+					CellStruct { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) });
+
+				if (!pCell)
+					continue;
+
+				if (std::abs(dx) <= 1 && std::abs(dy) <= 1 && IsBridgeOrTubeCell(pCell))
+					return true;
+
+				if (!pCell->GetBuilding() && pCell->LandType != LandType::Water
+					&& pCell->IsClearToMove(SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false))
+				{
+					++freeCells;
+				}
+			}
+		}
+
+		return freeCells < 25;
+	}
+
+	// Idle for the jam breaker and the mouth clearing: a ground unit of ours on Guard / Area Guard /
+	// Sleep with no target, not firing, not a gatherer, not deployed, not in a plan.
+	bool IsIdleBlocker(HouseClass* pHouse, FootClass* pFoot)
+	{
+		if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir() || pFoot->Transporter
+			|| pFoot->Target || pFoot->IsFiring)
+		{
+			return false;
+		}
+
+		auto const pType = pFoot->GetTechnoType();
+		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+		if (!pType || pType->JumpJet || pType->MovementZone == MovementZone::Fly || pType->ResourceGatherer
+			|| (pUnit && (pUnit->Deployed || (pUnit->Type && pUnit->Type->Harvester))))
+		{
+			return false;
+		}
+
+		if (pFoot->CurrentMission != Mission::Guard && pFoot->CurrentMission != Mission::Area_Guard
+			&& pFoot->CurrentMission != Mission::Sleep)
+		{
+			return false;
+		}
+
+		return !GetMacroState(pHouse).PlanMembers.contains(pFoot->UniqueID);
+	}
+
+	// Free ground for a unit moved out of the way: a cell of its zone on the rings minRing..maxRing
+	// (step 2) around `center`, not a bridge or tube cell, scored by the units already near it, cells
+	// already handed out and, when (prefX, prefY) is set, going that way (cost up to 200).
+	CellClass* FindClearingCell(FootClass* pFoot, const CellStruct& center, int minRing, int maxRing, double prefX, double prefY,
+		const std::vector<CellStruct>& occupied, const std::vector<CellStruct>& taken)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType)
+			return nullptr;
+
+		const int zone = ObjectZone(pFoot, pType->MovementZone);
+		CellClass* pBest = nullptr;
+		int bestScore = INT_MAX;
+
+		for (int r = minRing; r <= maxRing; r += 2)
+		{
+			for (int dy = -r; dy <= r; dy += 2)
+			{
+				for (int dx = -r; dx <= r; dx += 2)
+				{
+					if (std::abs(dx) != r && std::abs(dy) != r)
+						continue;
+
+					const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+					auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pCell || pCell->GetBuilding() || pCell->LandType == LandType::Water || IsBridgeOrTubeCell(pCell)
+						|| MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
+						|| !pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false))
+					{
+						continue;
+					}
+
+					int crowd = 0;
+
+					for (auto const& o : occupied)
+					{
+						if (std::abs(o.X - c.X) <= 2 && std::abs(o.Y - c.Y) <= 2)
+							++crowd;
+					}
+
+					for (auto const& tk : taken)
+					{
+						if (std::abs(tk.X - c.X) <= 1 && std::abs(tk.Y - c.Y) <= 1)
+							crowd += 4;
+					}
+
+					const double dot = (dx * prefX + dy * prefY) / std::max(1.0, std::sqrt(static_cast<double>(dx * dx + dy * dy)));
+					const int score = crowd * 30 + static_cast<int>(std::max(0.0, dot) * 200.0) + r * 5;
+
+					if (score < bestScore)
+					{
+						bestScore = score;
+						pBest = pCell;
+					}
+				}
+			}
+		}
+
+		return pBest;
+	}
+
+	// Jam breaker: our units held 450+ frames with an order pending, 8+ within 4 cells of each other in
+	// open ground or 5+ in a narrow passage (bridge, tunnel tube, a corridor with fewer than 25 free
+	// cells in 7x7), are a block (a rally point in a gap, two-way traffic at a choke). Looked for every
+	// 60 frames, cleared at most once per 300:
+	// - our idle ground units within 6 cells of it are moved out to free ground 8..14 cells away,
+	//   preferably not toward where the held units want to go (up to 16);
+	// - in a narrow passage with traffic both ways, the smaller side backs off (orders dropped, 8..14
+	//   cells away on its own side; the AI gives it a new job) so the other side gets through.
+	void UpdateJamBreaker(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (held.size() < 5 || (macro.LastJamBreakFrame >= 0 && now >= macro.LastJamBreakFrame && now - macro.LastJamBreakFrame < 300)
+			|| (macro.LastJamCheckFrame >= 0 && now >= macro.LastJamCheckFrame && now - macro.LastJamCheckFrame < 60))
+		{
+			return;
+		}
+
+		macro.LastJamCheckFrame = now;
+
+		auto const inBlock = [](const CellStruct& a, const CellStruct& b)
+		{ return std::abs(a.X - b.X) <= 4 && std::abs(a.Y - b.Y) <= 4; };
+
+		// The block with the most held units over what it takes there.
+		size_t bestIdx = held.size();
+		double bestRatio = 0.0;
+		bool narrow = false;
+
+		for (size_t i = 0; i < held.size(); ++i)
+		{
+			int count = 0;
+
+			for (auto const& other : held)
+			{
+				if (inBlock(other.Cell, held[i].Cell))
+					++count;
+			}
+
+			if (count < 5)
+				continue;
+
+			const bool isNarrow = IsNarrowPassage(held[i].Cell);
+			const int need = isNarrow ? 5 : 8;
+			const double ratio = static_cast<double>(count) / need;
+
+			if (count >= need && ratio > bestRatio)
+			{
+				bestRatio = ratio;
+				bestIdx = i;
+				narrow = isNarrow;
+			}
+		}
+
+		if (bestIdx >= held.size())
+			return;
+
+		const CellStruct seed = held[bestIdx].Cell;
+		std::vector<std::pair<const NeuralHeldOrder*, std::pair<double, double>>> block;
+		int sumX = 0, sumY = 0;
+		double wantX = 0.0, wantY = 0.0;
+
+		for (auto const& h : held)
+		{
+			if (!inBlock(h.Cell, seed))
+				continue;
+
+			const double len = std::max(1.0, h.Cell.DistanceFrom(h.Dest));
+			const double wx = (h.Dest.X - h.Cell.X) / len;
+			const double wy = (h.Dest.Y - h.Cell.Y) / len;
+			block.push_back({ &h, { wx, wy } });
+			sumX += h.Cell.X;
+			sumY += h.Cell.Y;
+			wantX += wx;
+			wantY += wy;
+		}
+
+		const int n = static_cast<int>(block.size());
+		const CellStruct center { static_cast<short>(sumX / n), static_cast<short>(sumY / n) };
+		const double wantLen = std::sqrt(wantX * wantX + wantY * wantY);
+		const double avgX = wantLen > 0.0 ? wantX / wantLen : 0.0;
+		const double avgY = wantLen > 0.0 ? wantY / wantLen : 0.0;
+
+		std::vector<FootClass*> idle;
+		std::vector<CellStruct> occupied;
+
+		auto const consider = [&](FootClass* pFoot)
+		{
+			if (!pFoot || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir())
+				return;
+
+			const CellStruct here = pFoot->GetMapCoords();
+
+			if (here.DistanceFrom(center) > 14.0)
+				return;
+
+			occupied.push_back(here);
+
+			if (here.DistanceFrom(center) <= 6.0 && IsIdleBlocker(pHouse, pFoot))
+				idle.push_back(pFoot);
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			consider(pUnit);
+
+		for (auto const pInf : InfantryClass::Array)
+			consider(pInf);
+
+		std::vector<CellStruct> taken;
+		int moved = 0;
+
+		for (auto const pFoot : idle)
+		{
+			if (moved >= 16)
+				break;
+
+			if (auto const pCell = FindClearingCell(pFoot, center, 8, 14, avgX, avgY, occupied, taken))
+			{
+				taken.push_back(pCell->MapCoords);
+
+				if (IssueMoveOrder(pFoot, pCell, 0.0))
+					++moved;
+			}
+		}
+
+		// Two-way traffic in a narrow passage: the smaller side backs off.
+		int yielded = 0;
+
+		if (narrow)
+		{
+			const bool clearAxis = wantLen >= 0.3 * n;
+			const double axisX = clearAxis ? avgX : block.front().second.first;
+			const double axisY = clearAxis ? avgY : block.front().second.second;
+			std::vector<std::pair<FootClass*, std::pair<double, double>>> forward, backward;
+
+			for (auto const& [pHeld, want] : block)
+			{
+				const double dot = want.first * axisX + want.second * axisY;
+
+				if (dot > 0.3)
+					forward.push_back({ pHeld->Foot, want });
+				else if (dot < -0.3)
+					backward.push_back({ pHeld->Foot, want });
+			}
+
+			if (!forward.empty() && !backward.empty())
+			{
+				auto& yielders = backward.size() <= forward.size() ? backward : forward;
+
+				for (auto const& [pFoot, want] : yielders)
+				{
+					if (yielded >= 12 || !pFoot || !pFoot->IsAlive || pFoot->InLimbo)
+						continue;
+
+					if (auto const pCell = FindClearingCell(pFoot, center, 8, 14, want.first, want.second, occupied, taken))
+					{
+						taken.push_back(pCell->MapCoords);
+						pFoot->ClearMegaMissionData();
+						pFoot->SetTarget(nullptr);
+						pFoot->SetDestination(nullptr, true);
+
+						if (IssueMoveOrder(pFoot, pCell, 0.0))
+							++yielded;
+					}
+				}
+			}
+		}
+
+		if (moved > 0 || yielded > 0)
+		{
+			macro.LastJamBreakFrame = now;
+
+			if (moved > 0)
+				CountDecision(NeuralDecision::JamCleared, pHouse->ArrayIndex);
+
+			if (yielded > 0)
+				CountDecision(NeuralDecision::JamYielded, pHouse->ArrayIndex);
+
+			Debug::Log("[NeuralAI] Frame %d | House #%d jam at (%d,%d)%s: %d held units, %d idle moved out, %d backed off\n",
+				now, pHouse->ArrayIndex, center.X, center.Y, narrow ? " in a narrow passage" : "", n, moved, yielded);
+		}
+	}
+
+	// Bridge and tunnel mouths kept clear: every 300 frames, our idle ground units (IsIdleBlocker)
+	// standing on a bridge deck or within 2 cells of one, within 2 cells of a tunnel tube's entry or exit
+	// cell, or within 3 cells of a tunnel building of ours or an ally (Ares Tunnel=), are moved 4..8
+	// cells away (not onto a bridge or tube) when one of our units within 6 cells waits there with an
+	// order (move, attack-move, enter, harvest; 90+ frames on its cell). Up to 12 per pass.
+	void UpdateJamMouths(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.LastMouthClearFrame >= 0 && now >= macro.LastMouthClearFrame && now - macro.LastMouthClearFrame < 300)
+			return;
+
+		macro.LastMouthClearFrame = now;
+
+		std::vector<std::pair<CellStruct, double>> mouths;
+
+		for (auto const pTube : TubeClass::Array)
+		{
+			if (!pTube)
+				continue;
+
+			mouths.emplace_back(pTube->EnterCell, 2.0);
+			mouths.emplace_back(pTube->ExitCell, 2.0);
+		}
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner || !pHouse->IsAlliedWith(pBld->Owner))
+				continue;
+
+			auto const pBldExt = BuildingTypeExt::ExtMap.Find(pBld->Type);
+
+			if (pBldExt && pBldExt->Tunnel)
+			{
+				const double reach = 3.0 + std::max(pBld->Type->GetFoundationWidth(), pBld->Type->GetFoundationHeight(false)) / 2.0;
+				mouths.emplace_back(pBld->GetMapCoords(), reach);
+			}
+		}
+
+		// Our units waiting with an order: the traffic a mouth is kept clear for.
+		std::vector<CellStruct> waiting;
+
+		auto const collectWaiting = [&](FootClass* pFoot)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir())
+				return;
+
+			const bool ordered = pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::AttackMove
+				|| pFoot->MegaMission == Mission::AttackMove || pFoot->CurrentMission == Mission::Enter
+				|| ((pFoot->CurrentMission == Mission::Harvest || pFoot->CurrentMission == Mission::Return) && pFoot->Destination);
+
+			if (!ordered)
+				return;
+
+			auto const it = macro.FootProgress.find(pFoot->UniqueID);
+
+			if (it != macro.FootProgress.end() && now >= it->second.SinceFrame && now - it->second.SinceFrame >= 90)
+				waiting.push_back(pFoot->GetMapCoords());
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			collectWaiting(pUnit);
+
+		for (auto const pInf : InfantryClass::Array)
+			collectWaiting(pInf);
+
+		if (waiting.empty())
+			return;
+
+		auto const atMouth = [&](const CellStruct& here) -> bool
+		{
+			for (auto const& [cell, reach] : mouths)
+			{
+				if (here.DistanceFrom(cell) <= reach)
+					return true;
+			}
+
+			for (int dy = -2; dy <= 2; ++dy)
+			{
+				for (int dx = -2; dx <= 2; ++dx)
+				{
+					auto const pCell = MapClass::Instance.TryGetCellAt(
+						CellStruct { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) });
+
+					if (pCell && (pCell->ContainsBridge() || pCell->ContainsBridgeEx()))
+						return true;
+				}
+			}
+
+			return false;
+		};
+
+		std::vector<CellStruct> occupied;
+		std::vector<CellStruct> taken;
+		int moved = 0;
+
+		auto const clearFoot = [&](FootClass* pFoot)
+		{
+			if (moved >= 12 || !IsIdleBlocker(pHouse, pFoot))
+				return;
+
+			const CellStruct here = pFoot->GetMapCoords();
+			bool trafficNear = false;
+
+			for (auto const& w : waiting)
+			{
+				if (w != here && w.DistanceFrom(here) <= 6.0)
+				{
+					trafficNear = true;
+					break;
+				}
+			}
+
+			if (!trafficNear || !atMouth(here))
+				return;
+
+			if (occupied.empty())
+			{
+				for (auto const pU : UnitClass::Array)
+				{
+					if (pU && pU->IsAlive && !pU->InLimbo)
+						occupied.push_back(pU->GetMapCoords());
+				}
+			}
+
+			if (auto const pCell = FindClearingCell(pFoot, here, 4, 8, 0.0, 0.0, occupied, taken))
+			{
+				if (atMouth(pCell->MapCoords))
+					return;
+
+				taken.push_back(pCell->MapCoords);
+
+				if (IssueMoveOrder(pFoot, pCell, 0.0))
+					++moved;
+			}
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			clearFoot(pUnit);
+
+		for (auto const pInf : InfantryClass::Array)
+			clearFoot(pInf);
+
+		if (moved > 0)
+		{
+			CountDecision(NeuralDecision::MouthCleared, pHouse->ArrayIndex);
+			Debug::Log("[NeuralAI] Frame %d | House #%d cleared %d idle units from bridge/tunnel mouths\n", now, pHouse->ArrayIndex, moved);
+		}
+	}
+
 	// Stuck order watchdog: a ground unit with a move or attack-move destination that has not
 	// left its cell is released (orders cleared, back to Guard) so the AI gives it a new job:
 	// after 450 frames when the destination is in another movement zone (unreachable: e.g. the
@@ -100,6 +592,8 @@ namespace
 		auto& macro = GetMacroState(pHouse);
 		std::unordered_map<DWORD, NeuralStuckTrack> next;
 		const int now = Unsorted::CurrentFrame;
+		// Units of ours held 450+ frames on one cell with an order pending, and where they want to go.
+		std::vector<NeuralHeldOrder> stuckOrders;
 
 		auto check = [&](FootClass* pFoot, bool skip)
 		{
@@ -112,9 +606,20 @@ namespace
 			if (!pType || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly)
 				return;
 
+			// An attack on a target out of reach counts as a move toward it: in a block of our own
+			// units it waits for a path forever.
+			const bool attackingOutOfReach = pFoot->CurrentMission == Mission::Attack && pFoot->Target
+				&& !pFoot->IsCloseEnoughToAttack(pFoot->Target);
+			// Entering a building (a tunnel, a depot, a bio reactor) waits in the queue like a move; a
+			// transport's boarding has its own one-by-one control.
+			BuildingClass* const pEnterBuilding = pFoot->CurrentMission == Mission::Enter
+				? abstract_cast<BuildingClass*>(pFoot->Destination ? pFoot->Destination : pFoot->Target)
+				: nullptr;
 			const bool moving = pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::AttackMove
-				|| pFoot->MegaMission == Mission::AttackMove;
-			AbstractClass* const pDest = pFoot->Destination ? pFoot->Destination : pFoot->MegaDestination;
+				|| pFoot->MegaMission == Mission::AttackMove || attackingOutOfReach || pEnterBuilding;
+			AbstractClass* const pDest = pEnterBuilding ? pEnterBuilding
+				: (pFoot->Destination ? pFoot->Destination
+					: (pFoot->MegaDestination ? pFoot->MegaDestination : (attackingOutOfReach ? pFoot->Target : nullptr)));
 
 			if (!moving || !pDest)
 				return;
@@ -135,8 +640,13 @@ namespace
 
 			auto const pTargetTechno = abstract_cast<TechnoClass*>(pFoot->Target);
 
-			if (pFoot->IsFiring || (pTargetTechno && pTargetTechno->IsAlive && !pTargetTechno->InLimbo))
+			// Fighting: firing, or a live target within reach. A target out of reach does not keep a
+			// unit that never moves from being released.
+			if (pFoot->IsFiring
+				|| (pTargetTechno && pTargetTechno->IsAlive && !pTargetTechno->InLimbo && pFoot->IsCloseEnoughToAttack(pTargetTechno)))
+			{
 				track.SinceFrame = now;
+			}
 
 			const int stuckFrames = now - track.SinceFrame;
 			auto const pDestObject = abstract_cast<ObjectClass*>(pDest);
@@ -186,6 +696,9 @@ namespace
 				return; // Its next order starts a new track.
 			}
 
+			if (stuckFrames >= 450)
+				stuckOrders.push_back({ pFoot, here, destCell });
+
 			next.emplace(pFoot->UniqueID, track);
 		};
 
@@ -196,6 +709,39 @@ namespace
 			check(pInf, false);
 
 		macro.StuckTracks = std::move(next);
+
+		// Where every ground unit of ours stands and since when (firing restarts it): IsFootHeldStill.
+		{
+			std::unordered_map<DWORD, NeuralStuckTrack> progress;
+
+			auto const trackProgress = [&](FootClass* pFoot)
+			{
+				if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir())
+					return;
+
+				const CellStruct here = pFoot->GetMapCoords();
+				NeuralStuckTrack track { here, now };
+
+				if (auto const it = macro.FootProgress.find(pFoot->UniqueID);
+					it != macro.FootProgress.end() && it->second.Cell.DistanceFrom(here) <= 1.5 && !pFoot->IsFiring)
+				{
+					track = it->second;
+				}
+
+				progress.emplace(pFoot->UniqueID, track);
+			};
+
+			for (auto const pUnit : UnitClass::Array)
+				trackProgress(pUnit);
+
+			for (auto const pInf : InfantryClass::Array)
+				trackProgress(pInf);
+
+			macro.FootProgress = std::move(progress);
+		}
+
+		UpdateJamBreaker(pHouse, stuckOrders);
+		UpdateJamMouths(pHouse);
 
 		// Aircraft on Mission::Attack that neither move nor fire: when the engine finds no fire
 		// location for the target it goes back to "return to base" and, still armed and targeting,

@@ -2574,6 +2574,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pFoot || !pFoot->IsAlive || pFoot->InLimbo)
 			return false;
 
+		// Held 600+ frames on one cell, not firing, target (if any) out of reach: doing nothing,
+		// whatever its order says (a block of our own units, a target it cannot get to).
+		if (IsFootHeldStill(pHouse, pFoot, 600))
+			return false;
+
 		if (pFoot->Target != nullptr)
 		{
 			if (auto const pTargetTech = abstract_cast<TechnoClass*>(pFoot->Target))
@@ -2673,6 +2678,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	auto IsFootNearEnemyFrontline = [pHouse](const FootClass* pFoot, int footZone) -> bool
 	{
 		if (!pFoot || !pFoot->IsAlive || pFoot->InLimbo)
+			return false;
+
+		// Near the enemy but held still 600+ frames without firing: not fighting there.
+		if (IsFootHeldStill(pHouse, pFoot, 600))
 			return false;
 
 		const CellStruct fc = pFoot->GetMapCoords();
@@ -8146,6 +8155,41 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// perimeter together as one devastating wall of armor instead of trickling!
 		CellClass* pForwardStagingCell = nullptr;
 		bool holdAtForwardStaging = false;
+
+		// A staging point needs room for the wave: most of the 7x7 cells around it free ground of the
+		// target zone (no building, water or cliff) and no building of ours or an ally within 3 cells.
+		// A point in a gap between our buildings, a corridor or a bridgehead (bases next to each other)
+		// packed the wave into a block that stopped our own traffic, harvesters included, for good.
+		auto const isOpenStagingArea = [&](const CellStruct& center, int minFree) -> bool
+		{
+			int freeCells = 0;
+
+			for (int dy = -3; dy <= 3; ++dy)
+			{
+				for (int dx = -3; dx <= 3; ++dx)
+				{
+					const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+					auto const pC = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pC)
+						continue;
+
+					auto const pB = pC->GetBuilding();
+
+					if (pB && pB->Owner && pHouse->IsAlliedWith(pB->Owner))
+						return false;
+
+					if (!pB && pC->LandType != LandType::Water
+						&& MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) == waveTargetZone)
+					{
+						++freeCells;
+					}
+				}
+			}
+
+			return freeCells >= minFree;
+		};
+
 		if (!endgameRemnantHunt && idleCombatUnits.size() < 20 && waveTargetZone >= 0 && !waveTargetInWater)
 		{
 			int sameZoneCount = 0;
@@ -8262,7 +8306,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 													sc, MovementZone::Normal, false)
 													== waveTargetZone
 												&& pSC->IsClearToMove(
-													SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false))
+													SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false)
+												&& isOpenStagingArea(sc, pass == 0 ? 38 : 30))
 											{
 												bool safeFromLongRangeDef = true;
 												const double minSafeDefDist = (pass == 0) ? 20.0 : 15.0;
@@ -8356,6 +8401,32 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 				}
+			}
+		}
+
+		// A hold that has not gathered the wave in 2700 frames (blocked route, units that never
+		// arrive) releases it and rests 2700 frames: the wave goes as it is instead of waiting forever.
+		{
+			const int nowFrame = Unsorted::CurrentFrame;
+
+			if (!holdAtForwardStaging)
+			{
+				waveMacro.StagingHoldSince = -1;
+			}
+			else if (nowFrame < waveMacro.StagingHoldPauseUntil)
+			{
+				holdAtForwardStaging = false;
+			}
+			else if (waveMacro.StagingHoldSince < 0 || waveMacro.StagingHoldSince > nowFrame)
+			{
+				waveMacro.StagingHoldSince = nowFrame;
+			}
+			else if (nowFrame - waveMacro.StagingHoldSince > 2700)
+			{
+				waveMacro.StagingHoldPauseUntil = nowFrame + 2700;
+				waveMacro.StagingHoldSince = -1;
+				holdAtForwardStaging = false;
+				CountDecision(NeuralDecision::StagingHoldTimedOut, pHouse->ArrayIndex);
 			}
 		}
 

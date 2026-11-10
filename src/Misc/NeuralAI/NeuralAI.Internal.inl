@@ -181,6 +181,10 @@ namespace
 		VeinholeAttack,
 		CliffOpened,
 		StealthRevealFired,
+		StagingHoldTimedOut,
+		JamCleared,
+		JamYielded,
+		MouthCleared,
 		Count
 	};
 
@@ -204,7 +208,8 @@ namespace
 		"bankFactoryPick", "bankYardPick",
 		"airWings", "airWingSorties", "airInterceptSorties", "airSoloStrikes", "airFrontPatrols", "aircraftFielded",
 		"aircraftLost",
-		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom", "stuckUnloadMoved", "capitalGroupLaunched", "capitalGroupRetreat", "submarineSonarAvoided", "depotEmergencySale", "veinholeAttack", "cliffOpened", "stealthRevealFired" };
+		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom", "stuckUnloadMoved", "capitalGroupLaunched", "capitalGroupRetreat", "submarineSonarAvoided", "depotEmergencySale", "veinholeAttack", "cliffOpened", "stealthRevealFired",
+		"stagingHoldTimedOut", "jamCleared", "jamYielded", "mouthCleared" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

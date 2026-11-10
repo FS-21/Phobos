@@ -44,6 +44,41 @@ namespace
 		return true;
 	}
 
+	// Type-level carryall rule, the one UnitExt::CarryallCanLift applies to a unit carrier: a vehicle
+	// (not organic, naval or NonVehicle) whose type allows lifting (Carryall.Allowed), not listed in the
+	// carrier's Carryall.IgnoreTypes, and within its size limit (Carryall.SizeLimit, and SizeLimit for
+	// an aircraft carryall) unless the carrier lists it in Carryall.AllowTypes. Carryall.ExclusiveWithPassengers
+	// depends on the carrier's passengers right now: the engine check covers it for unit carriers.
+	bool CarryallTypeCanLiftType(const TechnoTypeClass* pCarryType, const TechnoTypeClass* pCargoType)
+	{
+		auto const pCargo = abstract_cast<const UnitTypeClass*>(pCargoType);
+
+		if (!pCarryType || !pCargo || pCargo->Organic || pCargo->Naval || pCargo->NonVehicle)
+			return false;
+
+		auto const pCargoExt = TechnoTypeExt::Fetch(pCargo);
+		auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType);
+
+		if (pCargoExt && !pCargoExt->Carryall_Allowed.Get())
+			return false;
+
+		if (pCarryExt && pCarryExt->Carryall_IgnoreTypes.Contains(const_cast<UnitTypeClass*>(pCargo)))
+			return false;
+
+		if (pCarryExt && pCarryExt->Carryall_AllowTypes.Contains(const_cast<UnitTypeClass*>(pCargo)))
+			return true;
+
+		const int cargoSize = static_cast<int>(pCargo->TechnoTypeClass::Size);
+
+		if (pCarryType->WhatAmI() == AbstractType::AircraftType && pCarryType->SizeLimit > 0
+			&& cargoSize > static_cast<int>(pCarryType->SizeLimit))
+		{
+			return false;
+		}
+
+		return !(pCarryExt && pCarryExt->Carryall_SizeLimit.isset() && cargoSize > pCarryExt->Carryall_SizeLimit.Get());
+	}
+
 	// Finds a safe coastal/flank cell on a target island (matching
 	// targetIslandZone) away from enemy turrets & units
 	// Validates Carryall pickup against rulesmd.ini tags (Carryall.Allowed,
@@ -67,29 +102,17 @@ namespace
 			return false;
 		}
 
-		if (pUnitType->Organic || pUnitType->Naval || pUnitType->NonVehicle)
-			return false;
-
-		if (pCarryType->SizeLimit > 0
-			&& static_cast<int>(pUnitType->TechnoTypeClass::Size) > static_cast<int>(pCarryType->SizeLimit))
+		// Troops aboard and a slung vehicle exclude each other on this carrier.
+		if (pCarryall->Passengers.NumPassengers > 0)
 		{
-			return false;
-		}
+			auto const pCarryTypeExt = TechnoTypeExt::Fetch(pCarryType);
 
-		if (auto const pCarryTypeExt = TechnoTypeExt::Fetch(pCarryType))
-		{
-			if (pCarryTypeExt->Carryall_SizeLimit.isset()
-				&& static_cast<int>(pUnitType->TechnoTypeClass::Size) > pCarryTypeExt->Carryall_SizeLimit.Get())
-			{
-				return false;
-			}
-		}
-
-		if (auto const pUnitTypeExt = TechnoTypeExt::Fetch(pUnitType))
-		{
-			if (!pUnitTypeExt->Carryall_Allowed.Get())
+			if (pCarryTypeExt && pCarryTypeExt->Carryall_ExclusiveWithPassengers)
 				return false;
 		}
+
+		if (!CarryallTypeCanLiftType(pCarryType, pUnitType))
+			return false;
 
 		return !pUnit->Transporter;
 	}
@@ -119,19 +142,7 @@ namespace
 		auto CanCarryallTypeLift = [&](const TechnoTypeClass* pCarryType, bool isCarryallFlag) -> bool
 		{
 			// Passengers is irrelevant here: a carryall lifts one vehicle even when it is unset.
-			if (!isCarryallFlag || !isLiftableVehicle || !pCarryType)
-				return false;
-
-			if (pCarryType->SizeLimit > 0 && passSize > static_cast<int>(pCarryType->SizeLimit))
-				return false;
-
-			if (auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType))
-			{
-				if (pCarryExt->Carryall_SizeLimit.isset() && passSize > pCarryExt->Carryall_SizeLimit.Get())
-					return false;
-			}
-
-			return true;
+			return isCarryallFlag && isLiftableVehicle && CarryallTypeCanLiftType(pCarryType, pFootType);
 		};
 
 		for (auto const pU : UnitClass::Array)

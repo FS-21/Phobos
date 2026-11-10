@@ -472,6 +472,8 @@ namespace
 		// Stuck order watchdog (UpdateStuckUnits): by unit UniqueID, the cell where it has been
 		// standing with a destination and since when. Keyed lookups only, never iterated.
 		std::unordered_map<DWORD, NeuralStuckTrack> StuckTracks {};
+		// Every ground unit of ours: the cell it stands on and since when, without firing (IsFootHeldStill).
+		std::unordered_map<DWORD, NeuralStuckTrack> FootProgress {};
 		// Aircraft attack watchdog (UpdateStuckUnits), keyed the same way.
 		std::unordered_map<DWORD, NeuralAirStallTrack> AirStallTracks {};
 		// Expansion drive: ore fields (12x12 blocks) on our landmass more than 14 cells from any
@@ -737,6 +739,15 @@ namespace
 		int LastWaveDispatchFrame { -100000 };
 		int WaveStartFrame { -100000 };
 		std::array<int, 8> FailedApproachWeight {};
+		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
+		// that never gathered the wave in 2700 frames rests 2700).
+		int StagingHoldSince { -1 };
+		int StagingHoldPauseUntil { -1 };
+		// Last frame the jam breaker cleared a block of our units, last frame it looked for one, last
+		// frame bridge and tunnel mouths were cleared (UpdateStuckUnits).
+		int LastJamBreakFrame { -1 };
+		int LastJamCheckFrame { -1 };
+		int LastMouthClearFrame { -1 };
 		int FailedApproachDecayFrame { 0 };
 		std::vector<NeuralGroundLossTrack> GroundLossTracks {};
 		int HomeThreatPeak { 0 };
@@ -828,6 +839,7 @@ namespace
 			this->AirLossTracks.clear();
 			this->AirDangerSpots.clear();
 			this->StuckTracks.clear();
+			this->FootProgress.clear();
 			this->AirStallTracks.clear();
 			this->UncolonizedOreFields = 0;
 			this->IdleHarvesterTracks.clear();
@@ -971,6 +983,11 @@ namespace
 			this->LastWaveDispatchFrame = -100000;
 			this->WaveStartFrame = -100000;
 			this->FailedApproachWeight.fill(0);
+			this->StagingHoldSince = -1;
+			this->StagingHoldPauseUntil = -1;
+			this->LastJamBreakFrame = -1;
+			this->LastJamCheckFrame = -1;
+			this->LastMouthClearFrame = -1;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
 			this->HomeThreatPeak = 0;

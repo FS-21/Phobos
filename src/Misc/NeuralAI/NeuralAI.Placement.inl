@@ -102,6 +102,56 @@ namespace
 		return true;
 	}
 
+	// The launch ring of the ring-limited superweapons (SW.RangeMaximum > 0, e.g. an EMP cannon) a
+	// building type fires: listed in their EMPulse.Cannons, else EMPulseCannon=yes for an EMPulse type,
+	// else granting the superweapon itself. The largest maximum (cells) and its minimum; 0 when none.
+	double GetLaunchRingOf(const BuildingTypeClass* pType, double& outMin)
+	{
+		outMin = 0.0;
+		double best = 0.0;
+
+		if (!pType)
+			return best;
+
+		auto const pBldExt = BuildingTypeExt::ExtMap.Find(const_cast<BuildingTypeClass*>(pType));
+
+		for (auto const pSWType : SuperWeaponTypeClass::Array)
+		{
+			if (!pSWType)
+				continue;
+
+			auto const& aim = GetSWTargeting(pSWType);
+
+			if (aim.RangeMax <= 0.0 || aim.RangeMax <= best)
+				continue;
+
+			bool fires = false;
+
+			if (!aim.Cannons.empty())
+			{
+				fires = std::any_of(aim.Cannons.begin(), aim.Cannons.end(),
+					[pType](const std::string& id) { return _stricmp(id.c_str(), pType->ID) == 0; });
+			}
+			else if (aim.IsEMPulse)
+			{
+				fires = pType->EMPulseCannon;
+			}
+			else if (pBldExt)
+			{
+				for (int i = 0; i < pBldExt->GetSuperWeaponCount() && !fires; ++i)
+					fires = pBldExt->GetSuperWeaponIndex(i) == pSWType->ArrayIndex;
+			}
+
+			if (fires)
+			{
+				best = aim.RangeMax;
+				outMin = std::max(0.0, aim.RangeMin);
+			}
+		}
+
+		return best;
+	}
+
 	// Radius in cells of the area a superweapon type destroys, read from its own data (Phobos
 	// Detonate weapon / warhead, its WeaponType, the rules' nuke, lightning storm and dominator
 	// settings). 0 for superweapons that hit no area (Iron Curtain, Chronosphere, paradrops, spy
@@ -434,6 +484,44 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
+	// Superweapons and the other expensive buildings that produce nothing (tech labs, radars, any
+	// structure of 1500+ credits that is no factory, refinery, power plant or defense) stay where the
+	// base is strong: an outpost hub draws them only when it has a ConYard and 3+ defenses and no known
+	// enemy on its land. Before, every building went to the least developed hub, and a captured oil
+	// derrick alone on an islet got the Puppet Master and the Genetic Mutator with no protection.
+	// A ring-limited launcher (EMP cannon: SW.RangeMinimum..SW.RangeMaximum around it) goes to the
+	// strong base, contested or not, whose ring holds the most known enemy value when that beats the
+	// main base's by half again: a forward base the crawl made strong becomes its harassment platform.
+	double launchRingMin = 0.0;
+	const double launchRing = GetLaunchRingOf(pBuildingType, launchRingMin);
+	const bool keepAtStrongBase = launchRing > 0.0
+		|| (!pBuildingType->IsBaseDefense && !pBuildingType->ConstructionYard && pBuildingType->Factory == AbstractType::None
+			&& !pBuildingType->Refinery && !pBuildingType->ResourceGatherer && pBuildingType->PowerBonus <= pBuildingType->PowerDrain
+			&& (pBuildingType->HasSuperWeapon() || pBuildingType->Radar || pBuildingType->GetActualCost(pHouse) >= 1500));
+
+	auto const enemyValueInRing = [&](const CellStruct& site) -> int
+	{
+		int value = 0;
+
+		for (auto const pEB : BuildingClass::Array)
+		{
+			if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Owner == pHouse
+				|| pHouse->IsAlliedWith(pEB->Owner) || pEB->Owner->IsNeutral() || !IsEnemyBuildingKnown(pHouse, pEB))
+			{
+				continue;
+			}
+
+			const double d = site.DistanceFrom(pEB->GetMapCoords());
+
+			if (d >= launchRingMin + 2.0 && d <= launchRing - 2.0)
+				value += pEB->Type->Cost;
+		}
+
+		return value;
+	};
+
+	const int homeRingValue = (launchRing > 0.0 && homeSpawnRef != CellStruct::Empty) ? enemyValueInRing(homeSpawnRef) : 0;
+
 	for (auto const pOwnBld : pHouse->Buildings)
 	{
 		if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Insignificant
@@ -458,6 +546,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			int localHubBlds = 0;
 			int localRefs = 0;
 			int localDefs = 0;
+			int localYards = 0;
 			int localSameKindFactories = 0;
 			bool hasLocalWarFac = false;
 			bool hasLocalBarracks = false;
@@ -469,12 +558,19 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					continue;
 				}
 
-				if (pCheckB->Type->ConstructionYard)
-					continue;
-
 				const CellStruct cbc = pCheckB->GetMapCoords();
-				if (MapClass::Instance.GetMovementZoneType(cbc, MovementZone::Normal, pCheckB->OnBridge) == bz
-					&& std::max(std::abs(bc.X - cbc.X), std::abs(bc.Y - cbc.Y)) <= 18)
+				const bool isLocal = MapClass::Instance.GetMovementZoneType(cbc, MovementZone::Normal, pCheckB->OnBridge) == bz
+					&& std::max(std::abs(bc.X - cbc.X), std::abs(bc.Y - cbc.Y)) <= 18;
+
+				if (pCheckB->Type->ConstructionYard)
+				{
+					if (isLocal)
+						localYards++;
+
+					continue;
+				}
+
+				if (isLocal)
 				{
 					localHubBlds++;
 
@@ -536,11 +632,27 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				|| (isRefineryOrSlaveMiner && (!hasLocalRef || (localRefs == 1 && hasLocalWarFac)))
 				|| (pBuildingType->IsBaseDefense && localDefs < 2);
 			const bool disperseFactoryHere = homeSameKindFactories >= 2 && localSameKindFactories < homeSameKindFactories;
+			const bool strongHub = (pOwnBld->Type->ConstructionYard || localYards > 0) && localDefs >= 3;
 
-			if (localHubBlds < 18 || missingThisCoreBld || disperseFactoryHere)
+			if (keepAtStrongBase && (!strongHub || (enemyInHubZone && launchRing <= 0.0)))
+				continue;
+
+			int ringBonus = 0;
+
+			if (launchRing > 0.0)
+			{
+				const int ringValue = enemyValueInRing(bc);
+
+				if (ringValue <= 0 || ringValue * 2 <= homeRingValue * 3)
+					continue; // The main base reaches as much: the launcher stays home.
+
+				ringBonus = 1000 + std::min(2000, ringValue / 10);
+			}
+
+			if (localHubBlds < 18 || missingThisCoreBld || disperseFactoryHere || ringBonus > 0)
 			{
 				int hubScore = (18 - std::min(18, localHubBlds)) * 10 + (pOwnBld->Type->ConstructionYard ? 50 : 0)
-					+ (enemyInHubZone ? 250 : 0) + (missingThisCoreBld ? 500 : 0)
+					+ (enemyInHubZone ? 250 : 0) + (missingThisCoreBld ? 500 : 0) + ringBonus
 					+ (disperseFactoryHere ? 300 + (homeSameKindFactories - localSameKindFactories) * 100 : 0);
 				if (hubScore > bestHubPriorityScore)
 				{

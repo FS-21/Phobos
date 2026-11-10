@@ -3133,27 +3133,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// vehicle type? Same rules as the dispatcher's CanCarryallLiftUnit, at type level.
 	auto const carryallCanLiftType = [](const TechnoTypeClass* pCarryType, bool isCarryall, const UnitTypeClass* pCargo) -> bool
 	{
-		if (!isCarryall || !pCarryType || !pCargo || pCargo->Organic || pCargo->Naval || pCargo->NonVehicle)
-			return false;
-
-		if (auto const pCargoExt = TechnoTypeExt::Fetch(pCargo))
-		{
-			if (!pCargoExt->Carryall_Allowed.Get())
-				return false;
-		}
-
-		const int cargoSize = static_cast<int>(pCargo->TechnoTypeClass::Size);
-
-		if (pCarryType->SizeLimit > 0 && cargoSize > static_cast<int>(pCarryType->SizeLimit))
-			return false;
-
-		if (auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType))
-		{
-			if (pCarryExt->Carryall_SizeLimit.isset() && cargoSize > pCarryExt->Carryall_SizeLimit.Get())
-				return false;
-		}
-
-		return true;
+		return isCarryall && CarryallTypeCanLiftType(pCarryType, pCargo);
 	};
 
 	auto const ownsCarryallLifting = [&](const UnitTypeClass* pCargo) -> bool
