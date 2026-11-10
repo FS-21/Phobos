@@ -165,9 +165,9 @@ namespace
 	}
 
 	// Idle flyer strike: an armed flying unit that is not an aircraft (airship, jumpjet bomber, no
-	// ammo / airpad cycle) idling with no target and no plan, with known enemy structures within
-	// 30 cells, attacks the best of them (valuable types first, fewer known anti-air, closer)
-	// instead of hovering in place over the enemy base. Every 150 frames per house.
+	// ammo / airpad cycle) idling with no target and no plan attacks the best known enemy structure
+	// (valuable types first, fewer known anti-air, closer; within 30 cells first, else anywhere)
+	// instead of hovering in place. Every 150 frames per house.
 	void UpdateIdleAirborneStrikers(HouseClass* pHouse)
 	{
 		if (!pHouse)
@@ -218,17 +218,15 @@ namespace
 
 				const CellStruct bc = pBld->GetMapCoords();
 				const int dist = std::max(std::abs(bc.X - here.X), std::abs(bc.Y - here.Y));
-
-				if (dist > 30)
-					continue;
-
 				auto const pT = pBld->Type;
 				const int worth = (pT->SuperWeapon != -1) ? 400
 					: (pT->ConstructionYard || pT->Factory != AbstractType::None) ? 300
 					: (pT->PowerBonus > 0) ? 280
 					: (pT->Refinery || pT->ResourceDestination) ? 260
 					: std::min(200, std::max(0, pT->Cost) / 10);
-				const int score = worth - CountKnownEnemyDefensesNear(pHouse, bc, 8.0, true) * 150 - dist * 4;
+				// Beyond 30 cells only when nothing nearer is known: those come first.
+				const int score = worth - CountKnownEnemyDefensesNear(pHouse, bc, 8.0, true) * 150 - dist * 4
+					- (dist > 30 ? 1000 : 0);
 
 				if (score > bestScore)
 				{

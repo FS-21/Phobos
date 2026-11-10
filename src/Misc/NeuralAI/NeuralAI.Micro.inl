@@ -5411,8 +5411,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Slot 69 (Submarine Cloak Ambush & Anti-Submarine Destroyer Escort):
-		if (pType->Naval && SlotGate(scores[69], 80, 69))
+		// Slot 69 (Submarine Cloak Ambush & Anti-Submarine Destroyer Escort). While only enemy ships or
+		// submarines remain (NavalRemnantUntil) the hunt runs whatever the learned gate says.
+		if (pType->Naval && (SlotGate(scores[69], 80, 69) || GetMacroState(pHouse).NavalRemnantUntil > Unsorted::CurrentFrame))
 		{
 			if (pType->Cloakable && pUnit->GetHealthPercentage() < 0.45 && homeCoords != CellStruct::Empty
 				&& pUnit->CurrentMission != Mission::Move)
@@ -7342,6 +7343,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	const bool endgameRemnantHunt
 		= (!pVisibleEnemyBld && pFallbackEnemyCell != nullptr && (allEnemyBldsGone || combatStalledForHunt));
+
+	if (allEnemyBldsGone && pEnemySubOrShip)
+		GetMacroState(pHouse).NavalRemnantUntil = Unsorted::CurrentFrame + 900;
 
 	// Remnants in the air (aircraft, jumpjets) once the enemy has no building left: a ground wave
 	// sent to their cell cannot hit them, so the 12 nearest units with an anti-air weapon attack

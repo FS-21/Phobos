@@ -621,6 +621,9 @@ namespace
 		// Islands (movement zone -> frame until) where an expansion deployer found no room for its
 		// building: the island search skips them until then.
 		std::map<int, int> NoRoomIslandUntil;
+		// The enemy has no building left that counts and still has ships or submarines: until this
+		// frame the house builds and sends sonar ships and ships that hit under water.
+		int NavalRemnantUntil { -1 };
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
@@ -863,6 +866,7 @@ namespace
 			this->BankQueueBusyTicks.fill(0);
 			this->EnemyAcrossWater = false;
 			this->NoRoomIslandUntil.clear();
+			this->NavalRemnantUntil = -1;
 			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
 			this->FerryWaitSince.clear();

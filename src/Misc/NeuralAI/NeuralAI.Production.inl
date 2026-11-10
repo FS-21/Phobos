@@ -3660,6 +3660,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else
 			{
 				score += scores[29];
+
+				// Only enemy ships or submarines are left: sonar (Sensors) to find them and weapons
+				// that hit under water (NavalTargeting) to sink them.
+				if (GetMacroState(pHouse).NavalRemnantUntil > Unsorted::CurrentFrame)
+				{
+					const auto targeting = pUnit->NavalTargeting;
+					const bool hitsUnderwater = targeting == NavalTargetingType::Underwater_Secondary
+						|| targeting == NavalTargetingType::Underwater_Only || targeting == NavalTargetingType::Organic_Secondary;
+
+					score += (hitsUnderwater ? 900 : -600) + (pUnit->Sensors ? 400 : 0);
+				}
+
 				const auto pWpn1 = pUnit->GetWeapon(1) ? pUnit->GetWeapon(1)->WeaponType : nullptr;
 				const bool isUnitCarrierSpawner
 					= (pUnit->Spawns != nullptr) || (pWpn && pWpn->Spawner) || (pWpn1 && pWpn1->Spawner);

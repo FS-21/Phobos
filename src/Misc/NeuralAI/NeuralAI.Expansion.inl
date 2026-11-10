@@ -383,6 +383,9 @@ namespace
 
 		auto& macro = GetMacroState(pHouse);
 
+		if (macro.NavalRemnantUntil > Unsorted::CurrentFrame)
+			return true;
+
 		if (Unsorted::CurrentFrame - macro.NavalNeedFrame < 900 && macro.NavalNeedFrame <= Unsorted::CurrentFrame)
 			return macro.NavalNeed;
 
