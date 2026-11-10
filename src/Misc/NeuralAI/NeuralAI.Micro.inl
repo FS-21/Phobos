@@ -259,6 +259,27 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return UnitExt::CanDeployIntoBuilding(pDeployerUnit);
 	};
 
+	// Whether a gun of `range` leptons at `from` can hit pTarget: a living, seen object on the ground
+	// (not in the air, not a submerged or cloaked ship) within range.
+	auto const DeployedGunCanHit = [pHouse](const CoordStruct& from, AbstractClass* pTarget, int range) -> bool
+	{
+		auto const pTechno = abstract_cast<TechnoClass*>(pTarget);
+
+		if (!pTechno || !pTechno->IsAlive || pTechno->InLimbo || range <= 0 || pTechno->IsInAir()
+			|| !IsCellVisibleToAI(pHouse, pTechno->GetCell()))
+		{
+			return false;
+		}
+
+		if (auto const pType = pTechno->GetTechnoType();
+			pType && pType->Naval && (pType->Underwater || pType->Cloakable || pTechno->CloakState != CloakState::Uncloaked))
+		{
+			return false;
+		}
+
+		return pTechno->GetCoords().DistanceFrom(from) <= range;
+	};
+
 	auto const OrderDeployerUnpack = [](UnitClass* pDeployerUnit) -> void
 	{
 		if (!pDeployerUnit)
@@ -1442,6 +1463,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					&& pCheckU->GetMapCoords().DistanceFrom(homeCoords) <= 30.0)
 				{
 					GetMacroState(pHouse).SubThreatUntil = Unsorted::CurrentFrame + 1800;
+				}
+
+				if (pCheckU->Type->Cloakable || pCheckU->Type->Underwater || pCheckU->CloakState != CloakState::Uncloaked)
+				{
+					auto& sightings = GetMacroState(pHouse).StealthSightings;
+
+					if (sightings.size() > 256)
+					{
+						std::erase_if(sightings, [](const auto& e) { return Unsorted::CurrentFrame - e.second.second > 3000; });
+					}
+
+					sightings[pCheckU->UniqueID] = { pCheckU->GetMapCoords(), Unsorted::CurrentFrame };
 				}
 
 				if (!pCheckU->Type->Naval && !pHiddenOrStealthEnemy
@@ -3123,9 +3156,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					&& pUnit->Destination != nullptr && pUnit->DistanceFrom(pUnit->Destination) > 1280)
 				|| pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter;
 
+			// Without any ConYard for 2700 frames the MCV stops waiting for a ferry or a far field and
+			// deploys where it can, enemies near or not: no base at all is worse.
+			auto& yardMacro = GetMacroState(pHouse);
+
+			if (pHouse->NumConYards > 0)
+				yardMacro.NoYardSinceFrame = -1;
+			else if (yardMacro.NoYardSinceFrame < 0 || yardMacro.NoYardSinceFrame > Unsorted::CurrentFrame)
+				yardMacro.NoYardSinceFrame = Unsorted::CurrentFrame;
+
+			const bool noYardTooLong = pHouse->NumConYards == 0 && Unsorted::CurrentFrame - yardMacro.NoYardSinceFrame >= 2700;
+
 			// Keep a nomadic single MCV undeployed while it is actively migrating to a distant
 			// resource expansion or boarding/sailing on a live transport to a resource island
-			const bool isNomadicSingleMCVHop = (pHouse->NumConYards == 0 && hubsAndFactoriesInMcvZone >= 3
+			const bool isNomadicSingleMCVHop = (pHouse->NumConYards == 0 && !noYardTooLong && hubsAndFactoriesInMcvZone >= 3
 				&& pHouse->NumWarFactories >= 1 && !enemyNearMCV
 				&& ((ownsLiveMcvTransportNow && pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone)
 					|| isMovingToDestEarly));
@@ -3133,7 +3177,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pHouse->NumConYards == 0 && !isNomadicSingleMCVHop)
 			{
 				auto const pYardType = pType->DeploysInto;
-				if (!enemyNearMCV && CanDeployerUnpackHere(pHouse, pYardType, pUnit))
+				if ((!enemyNearMCV || noYardTooLong) && CanDeployerUnpackHere(pHouse, pYardType, pUnit))
 				{
 					OrderDeployerUnpack(pUnit);
 					continue;
@@ -3144,7 +3188,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (reachedOrNoDest || (IsAITickWindow(45, 15)))
 				{
 					const CellStruct safeYardStandCell = FindBestDeployStandCell(pHouse, pYardType, pUnit, mcvZone);
-					if (safeYardStandCell == mcvCell && !enemyNearMCV
+					if (safeYardStandCell == mcvCell && (!enemyNearMCV || noYardTooLong)
 						&& CanDeployerUnpackHere(pHouse, pYardType, pUnit))
 					{
 						OrderDeployerUnpack(pUnit);
@@ -4266,7 +4310,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				continue;
 			}
-			else if (pUnit->Target != nullptr && pUnit->CurrentMission == Mission::Attack)
+			// Deploy to fire only at a target the deployed gun reaches and can hit: deploying at
+			// anything (an out-of-reach or submerged target) made siege units deploy and pack up
+			// again in a loop at the enemy gates.
+			else if (pUnit->Target != nullptr && pUnit->CurrentMission == Mission::Attack
+				&& DeployedGunCanHit(pUnit->GetCoords(), pUnit->Target, GroundRangeOf(pType->DeploysInto)))
 			{
 				OrderDeployerUnpack(pUnit);
 
@@ -4649,6 +4697,53 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				DispatchFootToTargetOrTransport(pUnit, pCrushCell, Mission::Move, false);
 
 				continue;
+			}
+		}
+
+		// Minimum range: when the weapon the engine picks for our target (SelectWeapon) has a minimum
+		// range and the target is inside it (e.g. a missile sub next to the shore it should shell),
+		// the unit steps straight away from it to a cell between the minimum + 1 and the range - 2,
+		// clear for it (to the sides when straight back is blocked). Every 30 frames.
+		if (auto const pMinTarget = abstract_cast<TechnoClass*>(pUnit->Target);
+			pMinTarget && pMinTarget->IsAlive && IsAITickWindow(30, 15) && pUnit->CurrentMission != Mission::Move)
+		{
+			auto const pChosen = pUnit->GetWeapon(pUnit->SelectWeapon(pMinTarget));
+			auto const pMinWpn = pChosen ? pChosen->WeaponType : nullptr;
+			const int dist = pUnit->DistanceFrom(pMinTarget);
+
+			if (pMinWpn && pMinWpn->MinimumRange > 0 && dist < pMinWpn->MinimumRange)
+			{
+				const double desired = (pMinWpn->MinimumRange + Unsorted::LeptonsPerCell
+					+ std::max(pMinWpn->MinimumRange + Unsorted::LeptonsPerCell, pMinWpn->Range - 2 * Unsorted::LeptonsPerCell))
+					/ 2.0 / Unsorted::LeptonsPerCell;
+				const CellStruct uc = pUnit->GetMapCoords();
+				const CellStruct tc = pMinTarget->GetMapCoords();
+				const double dx = uc.X - tc.X;
+				const double dy = uc.Y - tc.Y;
+				const double len = std::max(1.0, std::sqrt(dx * dx + dy * dy));
+				CellClass* pBackCell = nullptr;
+
+				for (const double sideBias : { 0.0, 0.6, -0.6, 1.2, -1.2 })
+				{
+					const double dirX = dx / len - (dy / len) * sideBias;
+					const double dirY = dy / len + (dx / len) * sideBias;
+					const double dirLen = std::max(0.01, std::sqrt(dirX * dirX + dirY * dirY));
+					const CellStruct cand { static_cast<short>(tc.X + dirX / dirLen * desired), static_cast<short>(tc.Y + dirY / dirLen * desired) };
+					auto const pCand = MapClass::Instance.CoordinatesLegal(cand) ? MapClass::Instance.TryGetCellAt(cand) : nullptr;
+
+					if (pCand && pCand->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false))
+					{
+						pBackCell = pCand;
+						break;
+					}
+				}
+
+				if (pBackCell)
+				{
+					pUnit->SetDestination(pBackCell, true);
+					pUnit->QueueMission(Mission::Move, true);
+					continue;
+				}
 			}
 		}
 
@@ -12295,23 +12390,31 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& (IsAITickWindow(150, 30)))
 			{
 				// Slot 57 (Re-Mobilize Deployed Siege Unit), not while a plan holds it: When a deployed Siege
-				// Chopper, Tick Tank, or Nod Artillery has finished combat and no
-				// enemies are within 12 cells, pack back into a mobile vehicle so it
-				// advances with the army!
-				bool enemyInRange = false;
-				ForEachTechnoNear(pOwnBld->GetMapCoords(), 16, [&](TechnoClass* pETech) -> bool
+				// Chopper, Tick Tank, or Nod Artillery has finished combat (no enemy its gun can hit within
+				// its reach) and has stood deployed for 450 frames, pack back into a mobile vehicle so it
+				// advances with the army.
+				auto& deployedSince = GetMacroState(pHouse).DeployedSiegeSince;
+
+				if (deployedSince.size() > 512)
+					std::erase_if(deployedSince, [](const auto& e) { return Unsorted::CurrentFrame - e.second > 9000; });
+
+				const int sinceFrame = deployedSince.try_emplace(pOwnBld->UniqueID, Unsorted::CurrentFrame).first->second;
+				const int gunRange = GroundRangeOf(pOwnBld->Type);
+				bool enemyInRange = Unsorted::CurrentFrame - sinceFrame < 450;
+
+				if (!enemyInRange)
 				{
-					if (!pETech->Owner)
-						return true;
+					ForEachTechnoNear(pOwnBld->GetMapCoords(), std::max(8, gunRange / Unsorted::LeptonsPerCell + 1), [&](TechnoClass* pETech) -> bool
+					{
+						if (!pETech->Owner || pETech->Owner == pHouse || pHouse->IsAlliedWith(pETech->Owner) || pETech->Owner->IsNeutral())
+							return true;
 
-					if (pETech->Owner == pHouse || pHouse->IsAlliedWith(pETech->Owner) || !IsCellVisibleToAI(pHouse, pETech->GetCell()) || pETech->Owner->IsNeutral())
-						return true;
+						if (DeployedGunCanHit(pOwnBld->GetCoords(), pETech, gunRange))
+							enemyInRange = true;
 
-					if (pOwnBld->DistanceFrom(pETech) <= 3072)
-						enemyInRange = true;
-
-					return !enemyInRange;
-				});
+						return !enemyInRange;
+					});
+				}
 
 				if (!enemyInRange)
 				{
@@ -13075,11 +13178,96 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 
+					// The effect this weapon has on a unit type (Phobos IronCurtain.Effect / ForceShield.Effect,
+					// organics default to [CombatDamage] IronCurtain.EffectOnOrganics / ForceShield.EffectOnOrganics).
+					auto const effectOn = [swType](TechnoTypeClass* pType)
+					{
+						auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
+						auto const pRules = RulesExt::Global();
+
+						if (swType == SuperWeaponType::ForceShield)
+						{
+							return pTypeExt && pTypeExt->ForceShield_Effect.isset() ? pTypeExt->ForceShield_Effect.Get()
+								: (pType->Organic ? pRules->ForceShield_EffectOnOrganics.Get() : IronCurtainEffect::Invulnerable);
+						}
+
+						return pTypeExt && pTypeExt->IronCurtain_Effect.isset() ? pTypeExt->IronCurtain_Effect.Get()
+							: (pType->Organic ? pRules->IronCurtain_EffectOnOrganics.Get() : IronCurtainEffect::Invulnerable);
+					};
+
+					// Never where it would kill infantry of ours or an ally (within 2 cells).
+					auto const killsFriends = [&](const CellStruct& cell)
+					{
+						for (auto const pInf : InfantryClass::Array)
+						{
+							if (pInf && pInf->IsAlive && !pInf->InLimbo && pInf->Owner && pHouse->IsAlliedWith(pInf->Owner)
+								&& pInf->GetMapCoords().DistanceFrom(cell) <= 2.0 && effectOn(pInf->Type) == IronCurtainEffect::Kill)
+							{
+								return true;
+							}
+						}
+
+						return false;
+					};
+
+					if (icTargetCell != CellStruct::Empty && killsFriends(icTargetCell))
+						icTargetCell = CellStruct::Empty;
+
+					// Desperate use: enemy infantry it kills that is about to capture, sabotage or
+					// infiltrate (engineers, C4 commandos, spies) within 12 cells of our buildings: on the
+					// cell with the most of them (the cost of the others it kills there counts too).
+					if (icTargetCell == CellStruct::Empty)
+					{
+						int bestValue = 0;
+
+						for (auto const pInf : InfantryClass::Array)
+						{
+							if (!pInf || !pInf->IsAlive || pInf->InLimbo || !pInf->Type || !pInf->Owner || pHouse->IsAlliedWith(pInf->Owner)
+								|| pInf->Owner->IsNeutral() || !IsCellVisibleToAI(pHouse, pInf->GetCell())
+								|| effectOn(pInf->Type) != IronCurtainEffect::Kill
+								|| !(pInf->Type->Engineer || pInf->Type->C4 || pInf->Type->Infiltrate))
+							{
+								continue;
+							}
+
+							const CellStruct ic = pInf->GetMapCoords();
+							bool nearOurs = false;
+
+							for (auto const pOwnBld : pHouse->Buildings)
+							{
+								if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->GetMapCoords().DistanceFrom(ic) <= 12.0)
+								{
+									nearOurs = true;
+									break;
+								}
+							}
+
+							if (!nearOurs || killsFriends(ic))
+								continue;
+
+							int value = 0;
+
+							for (auto const pOther : InfantryClass::Array)
+							{
+								if (pOther && pOther->IsAlive && !pOther->InLimbo && pOther->Owner && !pHouse->IsAlliedWith(pOther->Owner)
+									&& pOther->GetMapCoords().DistanceFrom(ic) <= 1.5 && effectOn(pOther->Type) == IronCurtainEffect::Kill)
+								{
+									value += std::max(200, pOther->Type->Cost) * ((pOther->Type->Engineer || pOther->Type->C4 || pOther->Type->Infiltrate) ? 3 : 1);
+								}
+							}
+
+							if (value > bestValue)
+							{
+								bestValue = value;
+								icTargetCell = ic;
+							}
+						}
+					}
+
 					if (icTargetCell != CellStruct::Empty)
 					{
 						pSuper->Launch(icTargetCell, false);
 						pSuper->Reset();
-
 						break;
 					}
 
@@ -13101,6 +13289,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					// known clear land cell (for beaching enemy ships)
 					CellStruct knownWaterCell = CellStruct::Empty;
 					CellStruct knownDryLandCell = CellStruct::Empty;
+					CellStruct knownRockCell = CellStruct::Empty;
 
 					if (homeCoords != CellStruct::Empty)
 					{
@@ -13127,6 +13316,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								{
 									knownDryLandCell = tc;
 								}
+
+								// Rock (cliffs): no ground unit can stand there either.
+								if (knownRockCell == CellStruct::Empty && pC->LandType == LandType::Rock && pC->FirstObject == nullptr)
+									knownRockCell = tc;
 							}
 						}
 					}
@@ -13201,66 +13394,191 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							}
 						}
 
+						// Every candidate is scored and the best one is shifted (cost of what it destroys, an
+						// enemy MCV first: a base it never builds). Units Chronoshift.Allow=no cannot be
+						// shifted; a source cell with units of ours or an ally within 1 cell is skipped.
+						auto const pINI = CCINIClass::INI_Rules;
+						auto const shiftable = [pINI](TechnoTypeClass* pType)
+						{
+							return !pINI || pINI->ReadBool(pType->ID, "Chronoshift.Allow", true);
+						};
+
+						auto const hitsFriends = [&](const CellStruct& cell)
+						{
+							for (auto const pTech : TechnoClass::Array)
+							{
+								if (pTech && pTech->IsAlive && !pTech->InLimbo && pTech->Owner && pHouse->IsAlliedWith(pTech->Owner)
+									&& pTech->WhatAmI() != AbstractType::Building && pTech->GetMapCoords().DistanceFrom(cell) <= 1.5)
+								{
+									return true;
+								}
+							}
+
+							return false;
+						};
+
+						const CellStruct groundDeathCell = knownWaterCell != CellStruct::Empty ? knownWaterCell : knownRockCell;
+						const bool killsOrganics = !pINI || pINI->ReadBool(pSuper->Type->ID, "Chronosphere.KillOrganic", true);
+						int bestScore = 0;
+
 						for (auto const pEnemyU : UnitClass::Array)
 						{
 							if (!pEnemyU || pEnemyU->InLimbo || !pEnemyU->IsAlive || !pEnemyU->Owner || !pEnemyU->Type)
 								continue;
 
-							if (pEnemyU->Owner == pHouse || pHouse->IsAlliedWith(pEnemyU->Owner)
-								|| pEnemyU->Owner->IsNeutral())
+							if (pEnemyU->Owner == pHouse || pHouse->IsAlliedWith(pEnemyU->Owner) || pEnemyU->Owner->IsNeutral())
+								continue;
+
+							if (pEnemyU->IsIronCurtained() || pEnemyU->Type->Teleporter || pEnemyU->Type->Organic || !shiftable(pEnemyU->Type)
+								|| pEnemyU->IsInAir())
 							{
 								continue;
 							}
-
-							if (pEnemyU->IsIronCurtained() || pEnemyU->Type->Teleporter || pEnemyU->Type->Organic)
-								continue;
 
 							auto const pECell = pEnemyU->GetCell();
 
-							if (!pECell || !IsCellVisibleToAI(pHouse, pECell))
+							if (!pECell || !IsCellVisibleToAI(pHouse, pECell) || hitsFriends(pEnemyU->GetMapCoords()))
 								continue;
 
-							const bool isPureGroundUnit = !pEnemyU->Type->Naval
-								&& pEnemyU->Type->SpeedType != SpeedType::Hover
+							const bool isPureGroundUnit = !pEnemyU->Type->Naval && pEnemyU->Type->SpeedType != SpeedType::Hover
+								&& pEnemyU->Type->MovementZone != MovementZone::Amphibious && !pEnemyU->Type->JumpJet;
+							const bool isPureNavalShip = pEnemyU->Type->Naval && pEnemyU->Type->SpeedType != SpeedType::Hover
 								&& pEnemyU->Type->MovementZone != MovementZone::Amphibious;
-
-							const bool isPureNavalShip = pEnemyU->Type->Naval
-								&& pEnemyU->Type->SpeedType != SpeedType::Hover
-								&& pEnemyU->Type->MovementZone != MovementZone::Amphibious;
-
-							// Mode 2: Pit Enemy A's ground tanks directly inside Enemy B's
-							// base to trigger mutual attrition!
-							if (isPureGroundUnit && rivalEnemyBaseCell != CellStruct::Empty
-								&& pEnemyU->Owner->ArrayIndex != rivalEnemyHouseIdx)
-							{
-								chronoSrc = pEnemyU->GetMapCoords();
-
-								chronoDst = rivalEnemyBaseCell;
-
-								break;
-							}
-
-							// Mode 3 (Slot 55): Drown Enemy ground tanks/MCVs in water!
+							const bool isMcv = pEnemyU->Type->DeploysInto && pEnemyU->Type->DeploysInto->ConstructionYard;
+							const int cost = std::max(100, pEnemyU->Type->Cost);
 							const int drownMinCost = std::clamp(700 - static_cast<int>(scores[55]), 450, 950);
 
-							if (isPureGroundUnit && knownWaterCell != CellStruct::Empty
-								&& pEnemyU->Type->Cost >= drownMinCost)
+							// Mode 3 (Slot 55): ground units (an MCV above all) into water or onto rock.
+							if (isPureGroundUnit && groundDeathCell != CellStruct::Empty && (isMcv || cost >= drownMinCost))
 							{
-								chronoSrc = pEnemyU->GetMapCoords();
+								const int score = isMcv ? cost * 3 + 2000 : cost;
 
-								chronoDst = knownWaterCell;
-
-								break;
+								if (score > bestScore)
+								{
+									bestScore = score;
+									chronoSrc = pEnemyU->GetMapCoords();
+									chronoDst = groundDeathCell;
+								}
 							}
 
-							// Mode 4: Beach Enemy naval warships onto dry land!
-							if (isPureNavalShip && knownDryLandCell != CellStruct::Empty)
+							// Mode 4: ships onto dry land.
+							if (isPureNavalShip && knownDryLandCell != CellStruct::Empty && cost > bestScore)
 							{
+								bestScore = cost;
 								chronoSrc = pEnemyU->GetMapCoords();
-
 								chronoDst = knownDryLandCell;
+							}
 
-								break;
+							// Mode 2: ground units of one enemy into the base of another (they fight there).
+							if (isPureGroundUnit && rivalEnemyBaseCell != CellStruct::Empty
+								&& pEnemyU->Owner->ArrayIndex != rivalEnemyHouseIdx && cost * 6 / 10 > bestScore)
+							{
+								bestScore = cost * 6 / 10;
+								chronoSrc = pEnemyU->GetMapCoords();
+								chronoDst = rivalEnemyBaseCell;
+							}
+						}
+
+						// Mode 5: enemy infantry it kills (Chronosphere.KillOrganic, not Chronoshift.IsVehicle):
+						// the densest group (3 or more within 1 cell), sent anywhere.
+						if (killsOrganics && knownDryLandCell != CellStruct::Empty)
+						{
+							for (auto const pInf : InfantryClass::Array)
+							{
+								if (!pInf || !pInf->IsAlive || pInf->InLimbo || !pInf->Type || !pInf->Owner || pHouse->IsAlliedWith(pInf->Owner)
+									|| pInf->Owner->IsNeutral() || !IsCellVisibleToAI(pHouse, pInf->GetCell()))
+								{
+									continue;
+								}
+
+								const CellStruct ic = pInf->GetMapCoords();
+								int count = 0;
+								int value = 0;
+
+								for (auto const pOther : InfantryClass::Array)
+								{
+									if (pOther && pOther->IsAlive && !pOther->InLimbo && pOther->Type && pOther->Owner && !pHouse->IsAlliedWith(pOther->Owner)
+										&& pOther->GetMapCoords().DistanceFrom(ic) <= 1.5 && shiftable(pOther->Type)
+										&& !(pINI && pINI->ReadBool(pOther->Type->ID, "Chronoshift.IsVehicle", false)))
+									{
+										count++;
+										value += std::max(100, pOther->Type->Cost);
+									}
+								}
+
+								if (count >= 3 && value > bestScore && !hitsFriends(ic))
+								{
+									bestScore = value;
+									chronoSrc = ic;
+									chronoDst = knownDryLandCell;
+								}
+							}
+						}
+					}
+
+					// Mode 6: strategic insertion. With nothing better, a group of 5+ of our armed vehicles
+					// standing together goes next to the known enemy refinery, factory or ConYard with the
+					// fewest known defenses around it (at most 1 within 8 cells).
+					if (chronoSrc == CellStruct::Empty)
+					{
+						CellStruct groupCell = CellStruct::Empty;
+						int groupSize = 0;
+
+						for (auto const pU : UnitClass::Array)
+						{
+							if (!pU || pU->Owner != pHouse || !pU->IsAlive || pU->InLimbo || !pU->Type || pU->Type->Naval
+								|| pU->Type->Harvester || pU->Type->Organic || GroundRangeOf(pU->Type) <= 0 || IsAirborneThreatTechno(pU))
+							{
+								continue;
+							}
+
+							int around = 0;
+
+							for (auto const pOther : UnitClass::Array)
+							{
+								if (pOther && pOther->Owner == pHouse && pOther->IsAlive && !pOther->InLimbo && pOther->Type && !pOther->Type->Naval
+									&& !pOther->Type->Organic && GroundRangeOf(pOther->Type) > 0 && pOther->GetMapCoords().DistanceFrom(pU->GetMapCoords()) <= 1.5)
+								{
+									around++;
+								}
+							}
+
+							if (around > groupSize)
+							{
+								groupSize = around;
+								groupCell = pU->GetMapCoords();
+							}
+						}
+
+						if (groupSize >= 5)
+						{
+							BuildingClass* pWeakest = nullptr;
+							int weakestDefenses = INT_MAX;
+
+							for (auto const pEnemyBld : GetKnownEnemyBuildingCache(pHouse).Buildings)
+							{
+								if (!pEnemyBld || !pEnemyBld->IsAlive || !pEnemyBld->Type
+									|| !(pEnemyBld->Type->Refinery || pEnemyBld->Type->ConstructionYard || pEnemyBld->Type->Factory != AbstractType::None))
+								{
+									continue;
+								}
+
+								const int defenses = CountKnownEnemyDefensesNear(pHouse, pEnemyBld->GetMapCoords(), 8.0, false);
+
+								if (defenses < weakestDefenses && MaySuperweaponHit(pHouse, pEnemyBld->GetMapCoords()))
+								{
+									weakestDefenses = defenses;
+									pWeakest = pEnemyBld;
+								}
+							}
+
+							if (pWeakest && weakestDefenses <= 1)
+							{
+								if (auto const pDrop = FindSafeIslandLandingCell(pHouse, pWeakest->GetMapCoords(), -1, false))
+								{
+									chronoSrc = groupCell;
+									chronoDst = pDrop->MapCoords;
+								}
 							}
 						}
 					}
@@ -13407,6 +13725,279 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						pSuper->Launch(reconCell, false);
 						pSuper->Reset();
+						break;
+					}
+
+					continue;
+				}
+
+				// G) Stealth reveal (SW.AITargeting=Stealth, e.g. a sonar pulse): on the cell with the most
+				// stealthy enemy units seen in the last 3000 frames within its range (one seen in the
+				// last 1800 frames at least), when our armed units are within its range + 6 to use the
+				// reveal or the spot is within 30 cells of home. SW.RequiresTarget=water and
+				// SW.FireIntoShroud=no are respected.
+				const auto& swAim = GetSWTargeting(pSuper->Type);
+
+				if (swAim.Mode == "stealth")
+				{
+					auto& sightings = GetMacroState(pHouse).StealthSightings;
+					std::erase_if(sightings, [](const auto& e) { return Unsorted::CurrentFrame - e.second.second > 3000; });
+					const double range = std::max(3.0, swAim.Range);
+					CellStruct bestCell = CellStruct::Empty;
+					int bestCount = 0;
+
+					for (auto const& [uid, seen] : sightings)
+					{
+						if (Unsorted::CurrentFrame - seen.second > 1800)
+							continue;
+
+						auto const pCell = MapClass::Instance.TryGetCellAt(seen.first);
+
+						if (!pCell || (swAim.RequiresWater && pCell->LandType != LandType::Water)
+							|| (!swAim.FireIntoShroud && !IsCellVisibleToAI(pHouse, pCell)))
+						{
+							continue;
+						}
+
+						int count = 0;
+
+						for (auto const& [otherID, other] : sightings)
+						{
+							if (other.first.DistanceFrom(seen.first) <= range)
+								count++;
+						}
+
+						if (count > bestCount || (count == bestCount && bestCell != CellStruct::Empty && seen.first.X + seen.first.Y < bestCell.X + bestCell.Y))
+						{
+							bestCount = count;
+							bestCell = seen.first;
+						}
+					}
+
+					bool useful = bestCell != CellStruct::Empty
+						&& homeCoords != CellStruct::Empty && bestCell.DistanceFrom(homeCoords) <= 30.0;
+
+					if (bestCell != CellStruct::Empty && !useful)
+					{
+						for (auto const pOwnU : UnitClass::Array)
+						{
+							if (pOwnU && pOwnU->Owner == pHouse && pOwnU->IsAlive && !pOwnU->InLimbo && pOwnU->Type
+								&& GroundRangeOf(pOwnU->Type) > 0 && pOwnU->GetMapCoords().DistanceFrom(bestCell) <= range + 6.0)
+							{
+								useful = true;
+								break;
+							}
+						}
+					}
+
+					if (useful && MaySuperweaponHit(pHouse, bestCell))
+					{
+						pSuper->Launch(bestCell, false);
+						pSuper->Reset();
+						CountDecision(NeuralDecision::StealthRevealFired, pHouse->ArrayIndex);
+						break;
+					}
+
+					continue;
+				}
+
+				// Modes that do not aim at the enemy, fired as Ares fires them (Antares
+				// Ext/SWType/Hooks.Targeting.cpp): NoTarget at once, Attack while our base is under
+				// attack, LowPower under low power, LowPowerAttack with both (the cell does not matter:
+				// our base); Base on our base center; Self on the building that grants it. None,
+				// IronCurtain and ForceShield (own branches for the vanilla ones) are kept.
+				if (!IsOffensiveSWTargetingMode(swAim.Mode))
+				{
+					const bool attacked = pHouse->LATime > 0 && Unsorted::CurrentFrame - pHouse->LATime < 1350;
+					const bool lowPower = pHouse->HasLowPower();
+					CellStruct ownCell = CellStruct::Empty;
+
+					if (swAim.Mode == "notarget" || (swAim.Mode == "attack" && attacked) || (swAim.Mode == "lowpower" && lowPower)
+						|| (swAim.Mode == "lowpowerattack" && attacked && lowPower) || swAim.Mode == "base")
+					{
+						ownCell = homeCoords;
+					}
+					else if (swAim.Mode == "self")
+					{
+						for (auto const pOwnBld : pHouse->Buildings)
+						{
+							if (!pOwnBld || !pOwnBld->IsAlive || pOwnBld->InLimbo || !pOwnBld->Type || !pOwnBld->IsPowerOnline())
+								continue;
+
+							auto const pBldExt = BuildingTypeExt::ExtMap.Find(pOwnBld->Type);
+
+							for (int i = 0; pBldExt && i < pBldExt->GetSuperWeaponCount(); ++i)
+							{
+								if (pBldExt->GetSuperWeaponIndex(i) == pSuper->Type->ArrayIndex)
+								{
+									ownCell = pOwnBld->GetMapCoords();
+									break;
+								}
+							}
+
+							if (ownCell != CellStruct::Empty)
+								break;
+						}
+					}
+
+					if (ownCell != CellStruct::Empty)
+					{
+						pSuper->Launch(ownCell, false);
+						pSuper->Reset();
+						break;
+					}
+
+					continue;
+				}
+
+				// Ring-limited superweapons (SW.RangeMinimum / SW.RangeMaximum, e.g. an EMP cannon): the
+				// target has to be inside the ring of one of our launch sites (powered). Among the known
+				// enemy buildings and enemy units in sight inside a ring, the cell whose SW.Range holds the
+				// most enemy value (buildings by cost, units by cost) is hit; with nothing in reach the
+				// weapon is kept.
+				if (swAim.RangeMax > 0.0)
+				{
+					std::vector<CellStruct> sites;
+
+					for (auto const pOwnBld : pHouse->Buildings)
+					{
+						if (!pOwnBld || !pOwnBld->IsAlive || pOwnBld->InLimbo || !pOwnBld->Type || !pOwnBld->IsPowerOnline())
+							continue;
+
+						bool isSite = false;
+
+						if (!swAim.Cannons.empty())
+						{
+							isSite = std::any_of(swAim.Cannons.begin(), swAim.Cannons.end(),
+								[pOwnBld](const std::string& id) { return _stricmp(id.c_str(), pOwnBld->Type->ID) == 0; });
+						}
+						else if (swAim.IsEMPulse)
+						{
+							isSite = pOwnBld->Type->EMPulseCannon;
+						}
+						else if (auto const pBldExt = BuildingTypeExt::ExtMap.Find(pOwnBld->Type))
+						{
+							for (int i = 0; i < pBldExt->GetSuperWeaponCount() && !isSite; ++i)
+								isSite = pBldExt->GetSuperWeaponIndex(i) == pSuper->Type->ArrayIndex;
+						}
+
+						if (isSite)
+							sites.push_back(pOwnBld->GetMapCoords());
+					}
+
+					auto const inRing = [&](const CellStruct& c)
+					{
+						return std::any_of(sites.begin(), sites.end(), [&](const CellStruct& s)
+							{
+								const double d = s.DistanceFrom(c);
+								return d <= swAim.RangeMax && d >= std::max(0.0, swAim.RangeMin);
+							});
+					};
+
+					struct EnemyMark
+					{
+						CellStruct Cell;
+						int Value;
+					};
+
+					std::vector<EnemyMark> marks;
+
+					for (auto const pEnemyBld : GetKnownEnemyBuildingCache(pHouse).Buildings)
+					{
+						if (pEnemyBld && pEnemyBld->IsAlive && !pEnemyBld->InLimbo && pEnemyBld->Type && !pEnemyBld->Type->Insignificant)
+							marks.push_back({ pEnemyBld->GetMapCoords(), std::max(100, pEnemyBld->Type->Cost) });
+					}
+
+					for (auto const pEnemyU : UnitClass::Array)
+					{
+						if (pEnemyU && pEnemyU->IsAlive && !pEnemyU->InLimbo && pEnemyU->Type && pEnemyU->Owner && pEnemyU->Owner != pHouse
+							&& !pHouse->IsAlliedWith(pEnemyU->Owner) && !pEnemyU->Owner->IsNeutral()
+							&& IsCellInSightOfAI(pHouse, pEnemyU->GetMapCoords()))
+						{
+							// An EMP weapon is a defense first: enemy units closing on our base count double.
+							const bool threat = swAim.IsEMP && homeCoords != CellStruct::Empty
+								&& pEnemyU->GetMapCoords().DistanceFrom(homeCoords) <= 35.0;
+							marks.push_back({ pEnemyU->GetMapCoords(), std::max(100, pEnemyU->Type->Cost) * (threat ? 2 : 1) });
+						}
+					}
+
+					const double blast = std::max(1.0, swAim.Range);
+					CellStruct bestCell = CellStruct::Empty;
+					int bestValue = 0;
+
+					for (auto const& mark : marks)
+					{
+						auto const pMarkCell = MapClass::Instance.TryGetCellAt(mark.Cell);
+
+						if (!pMarkCell || !inRing(mark.Cell) || (!swAim.FireIntoShroud && !IsCellVisibleToAI(pHouse, pMarkCell))
+							|| !MaySuperweaponHit(pHouse, mark.Cell))
+						{
+							continue;
+						}
+
+						int value = 0;
+
+						for (auto const& other : marks)
+						{
+							if (other.Cell.DistanceFrom(mark.Cell) <= blast)
+								value += other.Value;
+						}
+
+						if (value > bestValue || (value == bestValue && bestCell != CellStruct::Empty
+							&& (mark.Cell.X < bestCell.X || (mark.Cell.X == bestCell.X && mark.Cell.Y < bestCell.Y))))
+						{
+							bestValue = value;
+							bestCell = mark.Cell;
+						}
+					}
+
+					if (bestCell != CellStruct::Empty)
+					{
+						pSuper->Launch(bestCell, false);
+						pSuper->Reset();
+
+						// After an EMP, idle armed ground units within 25 cells (close enough to arrive
+						// while the paralysis lasts; not in plans or capital groups; nearest first)
+						// attack-move into the paralysed enemies until their cost matches the enemy value
+						// hit (20 units at most).
+						if (swAim.IsEMP)
+						{
+							auto& empMacro = GetMacroState(pHouse);
+							std::vector<std::pair<int, UnitClass*>> followers;
+
+							for (auto const pOwnU : UnitClass::Array)
+							{
+								if (!pOwnU || pOwnU->Owner != pHouse || !pOwnU->IsAlive || pOwnU->InLimbo || !pOwnU->Type || pOwnU->Type->Naval
+									|| pOwnU->Type->Harvester || pOwnU->Type->ResourceGatherer || pOwnU->Type->DeploysInto
+									|| IsAirborneThreatTechno(pOwnU) || GroundRangeOf(pOwnU->Type) <= 0 || pOwnU->Target != nullptr
+									|| empMacro.PlanMembers.contains(pOwnU->UniqueID) || empMacro.CapitalHeld.contains(pOwnU->UniqueID)
+									|| (pOwnU->CurrentMission != Mission::Guard && pOwnU->CurrentMission != Mission::Area_Guard))
+								{
+									continue;
+								}
+
+								const int d = static_cast<int>(pOwnU->GetMapCoords().DistanceFrom(bestCell));
+
+								if (d <= 25)
+									followers.emplace_back(d, pOwnU);
+							}
+
+							std::sort(followers.begin(), followers.end(), [](const auto& a, const auto& b)
+								{
+									return a.first != b.first ? a.first < b.first : a.second->UniqueID < b.second->UniqueID;
+								});
+
+							auto const pStrikeCell = MapClass::Instance.TryGetCellAt(bestCell);
+
+							int sentCost = 0;
+
+							for (size_t i = 0; pStrikeCell && i < followers.size() && i < 20 && sentCost < bestValue; ++i)
+							{
+								OrderFootToAttackMove(followers[i].second, pStrikeCell);
+								sentCost += followers[i].second->Type->Cost;
+							}
+						}
+
 						break;
 					}
 

@@ -6173,6 +6173,7 @@ namespace
 				std::vector<FootClass*> siegeShips;
 				std::vector<FootClass*> escorts;
 				int fleetRange = 0;
+				int fleetMinRange = 0;
 				int fleetZone = -1;
 
 				for (auto const& [uid, pFoot] : ownFoots)
@@ -6186,6 +6187,16 @@ namespace
 					{
 						siegeShips.push_back(pUnit);
 						fleetRange = std::max(fleetRange, std::max(GroundRangeOf(pUnit->Type), pUnit->Type->Spawns ? 18 * Unsorted::LeptonsPerCell : 0));
+
+						// Minimum range of its ground weapons (e.g. a missile sub's launcher): the firing
+						// spot keeps outside the largest one of the fleet.
+						for (int i = 0; i < 2; ++i)
+						{
+							auto const pWS = pUnit->Type->GetWeapon(i);
+
+							if (pWS && pWS->WeaponType && WeaponHitsGround(pWS->WeaponType))
+								fleetMinRange = std::max(fleetMinRange, pWS->WeaponType->MinimumRange);
+						}
 					}
 					else if (GetCombatValueOfType(pUnit->Type, false) > 0)
 					{
@@ -6244,7 +6255,9 @@ namespace
 						const CellStruct bc = pBld->GetMapCoords();
 						CellStruct spot = CellStruct::Empty;
 
-						for (int r = rangeCells - 1; r >= 4 && spot == CellStruct::Empty; r -= 2)
+						const int minRangeCells = std::max(4, fleetMinRange / Unsorted::LeptonsPerCell + 1);
+
+						for (int r = rangeCells - 1; r >= minRangeCells && spot == CellStruct::Empty; r -= 2)
 						{
 							for (int k = 0; k < 16 && spot == CellStruct::Empty; ++k)
 							{

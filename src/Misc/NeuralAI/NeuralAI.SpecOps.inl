@@ -1038,9 +1038,12 @@ namespace
 			spy.StartFrame);
 	}
 
-	// Best known neutral tech for this engineer: worth over distance, reachable, out of known
-	// enemy defense reach, not blocked by recent failures nor taken by another engineer.
-	// outContested: enemies were seen near it (an escort should go first).
+	// Best known tech for this engineer: worth over distance, reachable, out of known enemy defense
+	// reach, not blocked by recent failures nor taken by another engineer. Neutral techs, and techs
+	// an enemy took (worth double when they pay: we gain the cash and the enemy loses it). A tech
+	// that lets us build around it (BaseNormal) on another landmass than ours counts 2 more: it
+	// opens an expansion without an MCV. outContested: enemies were seen near it (an escort should
+	// go first).
 	BuildingClass* PickSpecOpsCaptureTarget(HouseClass* pHouse, FootClass* pEngineer, bool& outContested)
 	{
 		outContested = false;
@@ -1054,12 +1057,14 @@ namespace
 		for (auto const pBld : BuildingClass::Array)
 		{
 			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type || !pBld->Type->Capturable || !pBld->Owner
-				|| !pBld->Owner->IsNeutral())
+				|| pBld->Owner == pHouse || (!pBld->Owner->IsNeutral() && pHouse->IsAlliedWith(pBld->Owner)))
 			{
 				continue;
 			}
 
 			auto const pTech = FindKnownTech(state, pBld->UniqueID);
+			const bool enemyHeld = pTech && pTech->OwnerIndex >= 0 && pTech->OwnerIndex != pHouse->ArrayIndex
+				&& !pBld->Owner->IsNeutral();
 
 			if (pTech && pTech->OwnerIndex < 0 && IsTechClaimedByAlly(pHouse, pTech->ID))
 			{
@@ -1067,7 +1072,7 @@ namespace
 				continue;
 			}
 
-			if (!pTech || pTech->OwnerIndex >= 0 || now < pTech->BlockedUntilFrame
+			if (!pTech || (pTech->OwnerIndex >= 0 && !enemyHeld) || now < pTech->BlockedUntilFrame
 				|| IsSpecOpsCaptureTarget(pHouse, pTech->ID, pEngineer->UniqueID)
 				|| !CanEngineerReachTech(pHouse, *pTech, engineerZone, abstract_cast<InfantryClass*>(pEngineer)
 					? abstract_cast<InfantryClass*>(pEngineer)->Type : nullptr)
@@ -1085,7 +1090,10 @@ namespace
 				continue;
 
 			const int dist = static_cast<int>(from.DistanceFrom(pTech->Cell));
-			const int score = pTech->Value * 1000 / (dist + 12) - (contested ? 15 : 0);
+			const bool opensExpansion = pBld->Type->BaseNormal && engineerZone >= 0
+				&& std::find(pTech->Zones.begin(), pTech->Zones.end(), engineerZone) == pTech->Zones.end();
+			const int worth = (pTech->Value + (opensExpansion ? 2 : 0)) * ((enemyHeld && pTech->Cash) ? 2 : 1);
+			const int score = worth * 1000 / (dist + 12) - (contested ? 15 : 0);
 
 			if (score > bestScore)
 			{

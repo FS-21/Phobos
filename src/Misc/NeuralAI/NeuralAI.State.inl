@@ -649,6 +649,30 @@ namespace
 		int SubThreatUntil { -1 };
 		// The unit on its way to a repair station to be sold for emergency money (0 when none).
 		DWORD DepotSaleUnit { 0 };
+		// Our refineries and those with fewer than 6 ore cells left within 12 cells (sampled every 2
+		// cells), refreshed every 900 frames (UpdateRefineryDepletion).
+		int RefineriesChecked { 0 };
+		int RefineriesDepleted { 0 };
+		int RefineryDepletionFrame { -100000 };
+		// Deployed siege structures of ours: UniqueID -> first frame seen deployed (they stay at least
+		// 450 frames before packing up again).
+		std::unordered_map<DWORD, int> DeployedSiegeSince;
+		// First frame without any ConYard of ours (-1 while we have one).
+		int NoYardSinceFrame { -1 };
+		// Our fields ran dry and an expansion MCV is wanted: what it costs (0 when not saving for one).
+		// UpdateEconomyCrisis holds the other production until the credits reach it.
+		int ExpansionSaveTarget { 0 };
+		// The other economic investments the production wants and cannot pay yet (0 when none): a
+		// harvester while we have fewer than refineries, a refinery for a newly reached field.
+		int HarvesterSaveTarget { 0 };
+		int RefinerySaveTarget { 0 };
+		// Economy hold bookkeeping: first frame of the current hold, and no hold before this frame (a
+		// hold that bought nothing for 3600 frames rests 1800).
+		int EconomyHoldSince { -1 };
+		int EconomyHoldPauseUntil { -1 };
+		// Enemy units seen cloaked, cloakable or under water: UniqueID -> (cell, frame), for
+		// superweapons that reveal stealth (SW.AITargeting=Stealth).
+		std::unordered_map<DWORD, std::pair<CellStruct, int>> StealthSightings;
 		// Plan members by UniqueID (UpdateStrategicPlans); dropped 600 frames after the last sight.
 		std::unordered_map<DWORD, NeuralPlanMemberTrace> PlanMemberTraces;
 		// Capital groups by domain (0 ground, 1 air, 2 sea) and the capital units they hold back from
@@ -901,6 +925,17 @@ namespace
 			this->NavalRemnantUntil = -1;
 			this->SubThreatUntil = -1;
 			this->DepotSaleUnit = 0;
+			this->RefineriesChecked = 0;
+			this->RefineriesDepleted = 0;
+			this->RefineryDepletionFrame = -100000;
+			this->DeployedSiegeSince.clear();
+			this->NoYardSinceFrame = -1;
+			this->ExpansionSaveTarget = 0;
+			this->HarvesterSaveTarget = 0;
+			this->RefinerySaveTarget = 0;
+			this->EconomyHoldSince = -1;
+			this->EconomyHoldPauseUntil = -1;
+			this->StealthSightings.clear();
 			this->PlanMemberTraces.clear();
 			this->CapitalGroups = {};
 			this->CapitalHeld.clear();

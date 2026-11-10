@@ -1716,8 +1716,41 @@ namespace
 			}
 
 			const bool needMcv = mcvCost != INT_MAX;
-			UpdateDepotEmergencySale(pHouse, holdForHarvester || needMcv, needMcv ? mcvCost : cheapestHarvester);
+			const bool savingForExpansion = !holdForHarvester && !needMcv && macro.ExpansionSaveTarget > 0;
+			UpdateDepotEmergencySale(pHouse, holdForHarvester || needMcv || savingForExpansion,
+				needMcv ? mcvCost : (savingForExpansion ? macro.ExpansionSaveTarget : cheapestHarvester));
 		}
+
+		// Economy hold: an economic investment the production wants and cannot pay yet, in this
+		// order: a harvester (fewer than refineries), a refinery for a newly reached field, the expansion
+		// MCV when our fields ran dry. Until the credits reach it the other production waits
+		// (suspended, never cancelled), except harvesters, refineries, MCVs, transports, income,
+		// power under low power, and nothing waits while our base is under attack. A hold that
+		// bought nothing for 3600 frames rests 1800 (the investment may be blocked elsewhere).
+		// Without it the trickle of income went to the army and the investment never came.
+		const bool baseUnderAttack = pHouse->LATime > 0 && now - pHouse->LATime < 1350;
+		const int economyTarget = macro.HarvesterSaveTarget > 0 ? macro.HarvesterSaveTarget
+			: (macro.RefinerySaveTarget > 0 ? macro.RefinerySaveTarget : macro.ExpansionSaveTarget);
+		bool holdForEconomy = !holdForHarvester && !baseUnderAttack && economyTarget > 0
+			&& pHouse->Available_Money() < economyTarget && now >= macro.EconomyHoldPauseUntil;
+
+		if (!holdForEconomy)
+		{
+			macro.EconomyHoldSince = -1;
+		}
+		else if (macro.EconomyHoldSince < 0 || macro.EconomyHoldSince > now)
+		{
+			macro.EconomyHoldSince = now;
+		}
+		else if (now - macro.EconomyHoldSince > 3600)
+		{
+			macro.EconomyHoldPauseUntil = now + 1800;
+			macro.EconomyHoldSince = -1;
+			holdForEconomy = false;
+		}
+
+		const bool holdForExpansion = holdForEconomy;
+		const bool holdProduction = holdForHarvester || holdForEconomy;
 
 		// No repairs while broke: wrench repairs stop, units on a repair station (service depot,
 		// shipyard) step off it.
@@ -1765,7 +1798,7 @@ namespace
 			const DWORD objectId = pObject->UniqueID;
 			auto const held = std::find(macro.BrokeHeldObjects.begin(), macro.BrokeHeldObjects.end(), objectId);
 
-			if (!holdForHarvester)
+			if (!holdProduction)
 			{
 				if (held != macro.BrokeHeldObjects.end() && pFactory->IsSuspended)
 					pFactory->Unsuspend(true);
@@ -1787,12 +1820,15 @@ namespace
 				|| (pBldType && (((pBldType->Refinery || pBldType->ResourceGatherer) && !harvesterBuildable)
 					|| pBldType->ProduceCashAmount > 0
 					|| (pBldType->PowerBonus > pBldType->PowerDrain && pHouse->HasLowPower())))
-				|| (pInfType && pInfType->Engineer);
+				|| (pInfType && pInfType->Engineer)
+				|| (holdForExpansion && pUnitType
+					&& (IsAmphibiousOrAirTransport(pUnitType) || (pUnitType->DeploysInto && pUnitType->DeploysInto->ConstructionYard)))
+				|| (holdForEconomy && pBldType && (pBldType->Refinery || pBldType->ResourceGatherer));
 
 			if (restoresIncome)
 				continue;
 
-			if (pUnitType && !pUnitType->Naval)
+			if (pUnitType && !pUnitType->Naval && holdForHarvester)
 			{
 				Debug::Log("[NeuralAI] House %d broke: cancelling %s for a harvester.\n", pHouse->ArrayIndex, pType->ID);
 				pFactory->AbandonProduction();
@@ -1804,7 +1840,7 @@ namespace
 			}
 		}
 
-		if (!holdForHarvester)
+		if (!holdProduction)
 			macro.BrokeHeldObjects.clear();
 
 		if (noIncome && cheapestHarvester != INT_MAX && pHouse->Available_Money() < cheapestHarvester
