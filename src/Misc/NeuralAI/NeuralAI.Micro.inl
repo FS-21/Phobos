@@ -7658,8 +7658,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (GetMacroState(pHouse).CapitalHeld.contains(pUnit->UniqueID))
 			continue;
 
-		if (pUnit->GetHealthPercentage() < 0.40)
+		// A damaged unit sits out the waves while it repairs (on a trip, bound for or standing on a
+		// station, a trip ordered lately) or near home, where it guards the base. Out in the field
+		// with no repair it can take (the station too far for the trip to pay, none at all) it fights
+		// with the rest instead of idling next to the enemy (match #6487, Cranberry Island: a Yuri
+		// Boomer at 32% 150 cells from its naval yard sat in Area Guard beside the enemy island).
+		if (pUnit->GetHealthPercentage() < 0.40
+			&& (IsOnRepairTrip(pHouse, pUnit->UniqueID) || isAtOrBoundForRepair(pUnit) || repairTripRecent(pUnit)
+				|| homeCoords == CellStruct::Empty || pUnit->GetMapCoords().DistanceFrom(homeCoords) <= 30.0))
+		{
 			continue;
+		}
 
 		if (!endgameRemnantHunt && (pUnit->Type->CanDisguise || pUnit->Type->PermaDisguise) && SlotGate(scores[83], 60, 83)
 			&& homeCoords != CellStruct::Empty && pUnit->GetMapCoords().DistanceFrom(homeCoords) > 11.0)
