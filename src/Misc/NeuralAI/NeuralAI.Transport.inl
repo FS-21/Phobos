@@ -265,6 +265,88 @@ namespace
 		return nullptr;
 	}
 
+	// A flyer (jumpjet, aircraft) only finishes a move once it can settle on its cell: several sent
+	// to the same cell kept hovering there in Mission::Move and got the order again and again. When
+	// another unit of ours already has that cell as destination or stands on it, the flyer gets the
+	// nearest cell within 5 that is free of both (ring by ring, fixed order, so a flyer keeps the cell
+	// it already has).
+	CellClass* SpreadFlyerDestination(FootClass* pFoot, CellClass* pCell)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || !pCell || !pFoot->Owner
+			|| !(pType->JumpJet || pType->MovementZone == MovementZone::Fly || pFoot->WhatAmI() == AbstractType::Aircraft))
+		{
+			return pCell;
+		}
+
+		std::vector<CellStruct> claimed;
+
+		auto const claim = [&](FootClass* pOther)
+		{
+			if (!pOther || pOther == pFoot || pOther->Owner != pFoot->Owner || !pOther->IsAlive || pOther->InLimbo)
+				return;
+
+			if (auto const pOtherDest = abstract_cast<CellClass*>(pOther->Destination))
+				claimed.push_back(pOtherDest->MapCoords);
+			else
+				claimed.push_back(pOther->GetMapCoords());
+		};
+
+		const CellStruct target = pCell->MapCoords;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->GetMapCoords().DistanceFrom(target) <= 8.0)
+				claim(pUnit);
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->GetMapCoords().DistanceFrom(target) <= 8.0)
+				claim(pInf);
+		}
+
+		for (auto const pAir : AircraftClass::Array)
+		{
+			if (pAir && pAir->GetMapCoords().DistanceFrom(target) <= 8.0)
+				claim(pAir);
+		}
+
+		auto const isClaimed = [&](const CellStruct& c)
+		{
+			return std::find(claimed.begin(), claimed.end(), c) != claimed.end();
+		};
+
+		if (!isClaimed(target))
+			return pCell;
+
+		for (int r = 1; r <= 5; ++r)
+		{
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::abs(dx) != r && std::abs(dy) != r)
+						continue;
+
+					const CellStruct c { static_cast<short>(target.X + dx), static_cast<short>(target.Y + dy) };
+					auto const pCand = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pCand || isClaimed(c) || pCand->GetBuilding()
+						|| !pCand->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false))
+					{
+						continue;
+					}
+
+					return pCand;
+				}
+			}
+		}
+
+		return pCell;
+	}
+
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5)
 	{
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
@@ -274,6 +356,8 @@ namespace
 		{
 			if (auto const pReach = NearestReachableNavalCell(pFoot, pDestAsCell->MapCoords))
 				pDest = pReach;
+			else
+				pDest = SpreadFlyerDestination(pFoot, pDestAsCell);
 		}
 
 		const bool isMoving = pFoot->CurrentMission == Mission::Move || pFoot->QueuedMission == Mission::Move;
