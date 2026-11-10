@@ -474,6 +474,8 @@ namespace
 		std::unordered_map<DWORD, NeuralStuckTrack> StuckTracks {};
 		// Every ground unit of ours: the cell it stands on and since when, without firing (IsFootHeldStill).
 		std::unordered_map<DWORD, NeuralStuckTrack> FootProgress {};
+		// Our flying ground units (jumpjets): the cell they hover over and since when (UpdateHoveringFlyers).
+		std::unordered_map<DWORD, NeuralStuckTrack> HoverTracks {};
 		// Aircraft attack watchdog (UpdateStuckUnits), keyed the same way.
 		std::unordered_map<DWORD, NeuralAirStallTrack> AirStallTracks {};
 		// Expansion drive: ore fields (12x12 blocks) on our landmass more than 14 cells from any
@@ -840,6 +842,7 @@ namespace
 			this->AirDangerSpots.clear();
 			this->StuckTracks.clear();
 			this->FootProgress.clear();
+			this->HoverTracks.clear();
 			this->AirStallTracks.clear();
 			this->UncolonizedOreFields = 0;
 			this->IdleHarvesterTracks.clear();

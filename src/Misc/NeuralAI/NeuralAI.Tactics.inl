@@ -578,6 +578,99 @@ namespace
 		}
 	}
 
+	// Hovering flyer watchdog: a flying unit of ours (jumpjet, or a Fly unit that is no aircraft) held
+	// in the air over one cell (within 1.5) for 600 frames, 900 when it is in a plan, without firing in
+	// the last 300 frames, over water or 12+ cells from any building of ours, is doing nothing where
+	// anti-air finds it (match #6164: a HIND hovered over the ocean on a finished move until shot
+	// down; a jumpjet cannot settle on water, so its move never ends and nothing gave it new work).
+	// Its orders are dropped and it flies home (FindCarrierHomeCell); the carryall / transport logic
+	// takes it from there. The state is logged so the order that left it there can be traced.
+	void UpdateHoveringFlyers(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		std::unordered_map<DWORD, NeuralStuckTrack> next;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type || !pUnit->IsInAir()
+				|| !(pUnit->Type->JumpJet || pUnit->Type->MovementZone == MovementZone::Fly))
+			{
+				continue;
+			}
+
+			const CellStruct here = pUnit->GetMapCoords();
+			NeuralStuckTrack track { here, now };
+
+			if (auto const it = macro.HoverTracks.find(pUnit->UniqueID);
+				it != macro.HoverTracks.end() && it->second.Cell.DistanceFrom(here) <= 1.5 && now >= it->second.SinceFrame)
+			{
+				track = it->second;
+			}
+
+			if (pUnit->IsFiring || (pUnit->LastFireBulletFrame > 0 && now >= pUnit->LastFireBulletFrame && now - pUnit->LastFireBulletFrame < 300))
+				track.SinceFrame = now;
+
+			const bool inPlan = macro.PlanMembers.contains(pUnit->UniqueID);
+
+			if (now - track.SinceFrame < (inPlan ? 900 : 600))
+			{
+				next.emplace(pUnit->UniqueID, track);
+				continue;
+			}
+
+			auto const pCell = pUnit->GetCell();
+			bool exposed = pCell && pCell->LandType == LandType::Water;
+
+			if (!exposed)
+			{
+				exposed = true;
+
+				for (auto const pOwnBld : pHouse->Buildings)
+				{
+					if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->GetMapCoords().DistanceFrom(here) <= 12.0)
+					{
+						exposed = false;
+						break;
+					}
+				}
+			}
+
+			if (!exposed)
+			{
+				next.emplace(pUnit->UniqueID, track);
+				continue;
+			}
+
+			auto const pDestCell = abstract_cast<CellClass*>(pUnit->Destination);
+			auto const pTargetObj = abstract_cast<ObjectClass*>(pUnit->Target);
+			auto const pCarryExt = UnitExt::Fetch(pUnit);
+			Debug::Log("[NeuralAI] Frame %d | House #%d hovering %s #%u at (%d,%d) for %d frames: mission %d mega %d dest (%d,%d) target %s (%d,%d) passengers %d carryall state %d cargo %s plan %d -> home\n",
+				now, pHouse->ArrayIndex, pUnit->Type->ID, pUnit->UniqueID, here.X, here.Y, now - track.SinceFrame,
+				static_cast<int>(pUnit->CurrentMission), static_cast<int>(pUnit->MegaMission),
+				pDestCell ? pDestCell->MapCoords.X : -1, pDestCell ? pDestCell->MapCoords.Y : -1,
+				pTargetObj && pTargetObj->GetType() ? pTargetObj->GetType()->ID : "-",
+				pTargetObj ? pTargetObj->GetMapCoords().X : -1, pTargetObj ? pTargetObj->GetMapCoords().Y : -1,
+				pUnit->Passengers.NumPassengers, pCarryExt ? static_cast<int>(pCarryExt->CarryallState) : -1,
+				(pCarryExt && pCarryExt->CarryallCargo && pCarryExt->CarryallCargo->GetTechnoType()) ? pCarryExt->CarryallCargo->GetTechnoType()->ID : "-",
+				inPlan ? 1 : 0);
+
+			pUnit->SetTarget(nullptr);
+			pUnit->ClearMegaMissionData();
+			pUnit->SetDestination(nullptr, true);
+
+			if (auto const pHome = FindCarrierHomeCell(pHouse, pUnit))
+				IssueMoveOrder(pUnit, pHome, 0.0);
+			else
+				pUnit->QueueMission(Mission::Guard, true);
+
+			CountDecision(NeuralDecision::HoverReleased, pHouse->ArrayIndex);
+			// Its next stop starts a new track.
+		}
+
+		macro.HoverTracks = std::move(next);
+	}
+
 	// Stuck order watchdog: a ground unit with a move or attack-move destination that has not
 	// left its cell is released (orders cleared, back to Guard) so the AI gives it a new job:
 	// after 450 frames when the destination is in another movement zone (unreachable: e.g. the
@@ -742,6 +835,7 @@ namespace
 
 		UpdateJamBreaker(pHouse, stuckOrders);
 		UpdateJamMouths(pHouse);
+		UpdateHoveringFlyers(pHouse);
 
 		// Aircraft on Mission::Attack that neither move nor fire: when the engine finds no fire
 		// location for the target it goes back to "return to base" and, still armed and targeting,

@@ -1407,7 +1407,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		// Map inspector details appended to every radar point (observer telemetry, never read by a
 		// decision): ,uid,health%,mission,megaMission,target,destination,transform where target is
 		// [rx,ry,health% or -1,uid,cellX,cellY] or 0 and destination is [rx,ry,cellX,cellY] or 0.
-		// The point's own cell follows as the last two fields.
+		// The point's own cell follows, then the garrison (infantry inside a building) and 1 when a
+		// vehicle sits in it (tank bunker); both 0 for anything else.
 		auto objectDetail = [&](TechnoClass* pTechno, char* out, size_t outCap)
 		{
 			if (!out || outCap == 0)
@@ -1463,9 +1464,12 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(transformId, transformClean, sizeof(transformClean));
 
 			const CellStruct ownCell = pTechno->GetMapCoords();
-			std::snprintf(out, outCap, ",%u,%d,%d,%d,%s,%s,\"%s\",%d,%d", static_cast<unsigned>(pTechno->UniqueID), hp,
+			auto const pAsBld = abstract_cast<BuildingClass*>(pTechno);
+			const int garrison = pAsBld ? pAsBld->Occupants.Count : 0;
+			const int bunkered = (pAsBld && pAsBld->BunkerLinkedItem) ? 1 : 0;
+			std::snprintf(out, outCap, ",%u,%d,%d,%d,%s,%s,\"%s\",%d,%d,%d,%d", static_cast<unsigned>(pTechno->UniqueID), hp,
 				static_cast<int>(pTechno->CurrentMission), mega, targetText, destText, transformClean, static_cast<int>(ownCell.X),
-				static_cast<int>(ownCell.Y));
+				static_cast<int>(ownCell.Y), garrison, bunkered);
 		};
 
 		char detailBuf[224];
@@ -1480,8 +1484,10 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				continue;
 			}
 
+			// Empty civilian garrison buildings are scenery; garrisoned ones belong to the occupants' house
+			// and are shown.
 			if (pBld->Type->CanBeOccupied && !pBld->Type->BaseNormal && !pBld->Type->ConstructionYard
-				&& pBld->Type->TechLevel < 0)
+				&& pBld->Type->TechLevel < 0 && pBld->Occupants.Count == 0)
 			{
 				continue;
 			}

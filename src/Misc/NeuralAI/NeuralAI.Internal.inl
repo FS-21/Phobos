@@ -185,6 +185,7 @@ namespace
 		JamCleared,
 		JamYielded,
 		MouthCleared,
+		HoverReleased,
 		Count
 	};
 
@@ -209,7 +210,8 @@ namespace
 		"airWings", "airWingSorties", "airInterceptSorties", "airSoloStrikes", "airFrontPatrols", "aircraftFielded",
 		"aircraftLost",
 		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom", "stuckUnloadMoved", "capitalGroupLaunched", "capitalGroupRetreat", "submarineSonarAvoided", "depotEmergencySale", "veinholeAttack", "cliffOpened", "stealthRevealFired",
-		"stagingHoldTimedOut", "jamCleared", "jamYielded", "mouthCleared" };
+		"stagingHoldTimedOut", "jamCleared", "jamYielded", "mouthCleared",
+		"hoverReleased" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

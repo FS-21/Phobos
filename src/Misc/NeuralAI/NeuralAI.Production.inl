@@ -2903,12 +2903,25 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (IsAmphibiousOrAirTransport(pOwnedType)
 				|| (TechnoTypeExt::Fetch(pOwnedType) && TechnoTypeExt::Fetch(pOwnedType)->Carryall))
 			{
-				const int effLimit = getTransportEffectiveSizeLimit(pOwnedType);
-				const int passCap = std::max(1, static_cast<int>(pOwnedType->Passengers));
-				ownedTransCountByLimit[effLimit]++;
-				ownedTransCapByLimit[effLimit] += passCap;
+				// A unit carryall (e.g. a transport helicopter with Carryall=yes) slings one vehicle per
+				// trip: as ferry capacity it only counts with its passenger hold (Passengers up to its
+				// own SizeLimit, infantry in practice). Counted as Passengers places for vehicles up to
+				// Carryall.SizeLimit, three of them "covered" the whole fleet and no amphibious
+				// transport was ever built for an army waiting on its island (match #6164).
+				auto const pOwnedTransExt = TechnoTypeExt::Fetch(pOwnedType);
+				const bool unitCarryall = pOwnedTransExt && pOwnedTransExt->Carryall;
+				const int effLimit = unitCarryall ? std::clamp(static_cast<int>(pOwnedType->SizeLimit), 0, 15)
+					: getTransportEffectiveSizeLimit(pOwnedType);
+				const int passCap = unitCarryall ? static_cast<int>(pOwnedType->Passengers)
+					: std::max(1, static_cast<int>(pOwnedType->Passengers));
 
-				if (effLimit >= 6)
+				if (passCap > 0)
+				{
+					ownedTransCountByLimit[effLimit]++;
+					ownedTransCapByLimit[effLimit] += passCap;
+				}
+
+				if (effLimit >= 6 && passCap > 0)
 					ownedHeavyIslandTransports++;
 
 				// An empty transport parked without orders is unused shuttle capacity.
@@ -3446,9 +3459,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isIslandWar = features[21] >= 75;
 		const bool isIslandMap = features[21] > 0;
 		const int neededForDemand = (fittingDemandSize + candPassCap - 1) / candPassCap;
-		const int targetFleet = isIslandWar
-			? std::clamp(neededForDemand, 1, 3)
-			: ((isIslandMap || neededForDemand > 0) ? 1 : 0);
+		// The fleet follows what is waiting, with no fixed cap (a cap of 3 left armies of 100+ units
+		// on their island with three boats shuttling, match #6164). What keeps it from spamming is
+		// reuse: while a transport of this size sits empty and idle nothing new is built (below),
+		// and the transport controller gives it the waiting cargo. An island map keeps one at least.
+		const int targetFleet = isIslandWar ? std::max(1, neededForDemand)
+			: (neededForDemand > 0 ? neededForDemand : (isIslandMap ? 1 : 0));
 		const bool needsHeavyMcvTransport = candSizeLimit >= 6 && ownedHeavyIslandTransports == 0
 			&& !compatibleHeavyInProgress && (isIslandMap || scores[30] >= 450);
 
