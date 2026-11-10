@@ -212,6 +212,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Idle airships / jumpjet bombers near known enemy structures attack them.
 	UpdateIdleAirborneStrikers(pHouse);
 
+	// Transports that cannot unload where they stand try a free cell nearby.
+	UpdateStuckUnloads(pHouse);
+
 	// Scouts go where information is worth most (stale fields, approaches, enemy bases and armies).
 	UpdatePurposefulScouting(pHouse);
 

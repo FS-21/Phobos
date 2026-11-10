@@ -100,6 +100,15 @@ namespace
 
 	// One running strategic plan (members and targets are kept by UniqueID, never by
 	// pointer, and resolved every AI tick).
+	// Last type and cell seen of a plan member, so a member that deploys into a structure or packs
+	// up again (a new object with a new UniqueID) is followed into what it became.
+	struct NeuralPlanMemberTrace
+	{
+		const TechnoTypeClass* Type { nullptr };
+		CellStruct Cell { CellStruct::Empty };
+		int Frame { 0 };
+	};
+
 	struct NeuralPlanInstance
 	{
 		bool Active { false };
@@ -582,6 +591,8 @@ namespace
 		NeuralCoalitionState Coalition {};
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
+		// Transports in Mission::Unload: UniqueID -> (cell, first frame seen there) (UpdateStuckUnloads).
+		std::unordered_map<DWORD, std::pair<CellStruct, int>> UnloadWatch;
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
 		CellStruct LastYardUndeployCell { CellStruct::Empty };
 		int LastYardUndeployFrame { -100000 };
@@ -624,6 +635,8 @@ namespace
 		// The enemy has no building left that counts and still has ships or submarines: until this
 		// frame the house builds and sends sonar ships and ships that hit under water.
 		int NavalRemnantUntil { -1 };
+		// Plan members by UniqueID (UpdateStrategicPlans); dropped 600 frames after the last sight.
+		std::unordered_map<DWORD, NeuralPlanMemberTrace> PlanMemberTraces;
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
@@ -844,6 +857,7 @@ namespace
 			this->Coalition = NeuralCoalitionState {};
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
+			this->UnloadWatch.clear();
 			this->LastYardUndeployCell = CellStruct::Empty;
 			this->LastYardUndeployFrame = -100000;
 			this->NavalNeedFrame = -100000;
@@ -867,6 +881,7 @@ namespace
 			this->EnemyAcrossWater = false;
 			this->NoRoomIslandUntil.clear();
 			this->NavalRemnantUntil = -1;
+			this->PlanMemberTraces.clear();
 			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
 			this->FerryWaitSince.clear();

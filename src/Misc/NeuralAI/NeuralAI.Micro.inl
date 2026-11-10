@@ -12253,8 +12253,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			// A mobile factory is not sell-dodged: selling it only packs it back into its vehicle, which
 			// unfolds again at once. It is repaired instead (wrench repair below).
-			if (!handledConYardAction && hpPct < sellDodgeThresh && !pOwnBld->Type->ConstructionYard
-				&& !IsMobileFactoryBuilding(pOwnBld->Type)
+			if (!handledConYardAction && hpPct < sellDodgeThresh && IsDeployedSiegeBuildingType(pOwnBld->Type)
+				&& pOwnBld->CurrentMission != Mission::Selling && pOwnBld->QueuedMission != Mission::Selling)
+			{
+				// A deployed siege unit about to die packs up and drives home instead (selling one
+				// packs it up in place: Phobos BuildingExt::CanUndeployOnSell).
+				UndeployBuildingToVehicle(pOwnBld, homeCoords);
+			}
+			else if (!handledConYardAction && hpPct < sellDodgeThresh && !pOwnBld->Type->ConstructionYard
+				&& !IsMobileFactoryBuilding(pOwnBld->Type) && !pOwnBld->Type->Unsellable && !IsDeployedSiegeBuildingType(pOwnBld->Type)
 				&& !pOwnBld->Type->ResourceGatherer && pOwnBld->Type->Enslaves == nullptr && pOwnBld->Type->Cost >= 500
 				&& pOwnBld->CurrentMission != Mission::Selling)
 			{
@@ -12268,9 +12275,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& !pOwnBld->Type->BaseNormal && !IsTrueBaseStructureTarget(pOwnBld->Type)
 				&& (pOwnBld->Type->IsBaseDefense
 					|| (pOwnBld->Type->GetWeapon(0) != nullptr && pOwnBld->Type->GetWeapon(0)->WeaponType != nullptr))
-				&& pOwnBld->Target == nullptr && (IsAITickWindow(150, 30)))
+				&& pOwnBld->Target == nullptr && !GetMacroState(pHouse).PlanMembers.contains(pOwnBld->UniqueID)
+				&& (IsAITickWindow(150, 30)))
 			{
-				// Slot 57 (Re-Mobilize Deployed Siege Unit): When a deployed Siege
+				// Slot 57 (Re-Mobilize Deployed Siege Unit), not while a plan holds it: When a deployed Siege
 				// Chopper, Tick Tank, or Nod Artillery has finished combat and no
 				// enemies are within 12 cells, pack back into a mobile vehicle so it
 				// advances with the army!

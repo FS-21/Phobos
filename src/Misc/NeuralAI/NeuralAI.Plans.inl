@@ -38,6 +38,39 @@ namespace
 		return range;
 	}
 
+	// A structure a siege unit unfolded into: armed against the ground, packs up again
+	// (UndeploysInto), not a ConYard, refinery, slave miner or base extender. Nod artillery,
+	// Juggernaut, Tick Tank in C&C Reloaded; nothing is matched by name.
+	bool IsDeployedSiegeBuildingType(BuildingTypeClass* pType)
+	{
+		return pType && pType->UndeploysInto && !pType->ConstructionYard && !pType->Refinery && !pType->ResourceGatherer
+			&& !pType->BaseNormal && pType->Enslaves == nullptr && GroundRangeOf(pType) > 0;
+	}
+
+	// A unit that unfolds into such a structure and back into the same unit.
+	bool IsDeployableSiegeUnitType(UnitTypeClass* pType)
+	{
+		return pType && pType->DeploysInto && IsDeployedSiegeBuildingType(pType->DeploysInto)
+			&& pType->DeploysInto->UndeploysInto == pType;
+	}
+
+	// Ground range a siege plan can count on: for a deployable siege unit the longer of its own
+	// gun and the gun of the structure it unfolds into.
+	int SiegeRangeOf(TechnoTypeClass* pType)
+	{
+		int range = GroundRangeOf(pType);
+
+		if (pType && pType->WhatAmI() == AbstractType::UnitType)
+		{
+			auto const pUnitType = static_cast<UnitTypeClass*>(pType);
+
+			if (IsDeployableSiegeUnitType(pUnitType))
+				range = std::max(range, GroundRangeOf(pUnitType->DeploysInto));
+		}
+
+		return range;
+	}
+
 	// Per-tick cache of the enemy buildings a house knows (alive, not ours/allied/neutral, seen),
 	// rebuilt once per frame and house (and right after each AI tick's fog scan, see
 	// InvalidateKnownEnemyBuildings), so the many "known defenses near X" queries of the plans,
@@ -168,6 +201,91 @@ namespace
 	// ammo / airpad cycle) idling with no target and no plan attacks the best known enemy structure
 	// (valuable types first, fewer known anti-air, closer; within 30 cells first, else anywhere)
 	// instead of hovering in place. Every 150 frames per house.
+	// A transport that stays in Mission::Unload on the same cell for 450 frames cannot drop its
+	// cargo there (a jumpjet that cannot settle, a blocked or steep cell): empty, it is just put on
+	// guard; loaded, it moves to the nearest free cell within 6 where it can settle and its cargo
+	// can stand (no building, no object, land, clear for both), and unloads again from there. Every
+	// 150 frames per house.
+	void UpdateStuckUnloads(HouseClass* pHouse)
+	{
+		if (!pHouse || !IsAITickWindow(150, 15))
+			return;
+
+		auto& watch = GetMacroState(pHouse).UnloadWatch;
+		const int now = Unsorted::CurrentFrame;
+		std::unordered_set<DWORD> seen;
+
+		auto const handle = [&](FootClass* pTrans)
+		{
+			auto const pType = pTrans ? pTrans->GetTechnoType() : nullptr;
+
+			if (!pType || pType->Passengers <= 0 || pTrans->Owner != pHouse || !pTrans->IsAlive || pTrans->InLimbo
+				|| pTrans->CurrentMission != Mission::Unload)
+			{
+				return;
+			}
+
+			const CellStruct here = pTrans->GetMapCoords();
+			seen.insert(pTrans->UniqueID);
+			auto [it, inserted] = watch.try_emplace(pTrans->UniqueID, here, now);
+
+			if (!inserted && it->second.first != here)
+				it->second = { here, now };
+
+			if (now - it->second.second < 450)
+				return;
+
+			it->second = { here, now };
+
+			if (pTrans->Passengers.NumPassengers <= 0)
+			{
+				pTrans->ForceMission(Mission::Guard);
+				return;
+			}
+
+			auto const pCargoType = pTrans->Passengers.GetFirstPassenger()
+				? pTrans->Passengers.GetFirstPassenger()->GetTechnoType()
+				: nullptr;
+
+			for (int r = 1; r <= 6; ++r)
+			{
+				for (int dy = -r; dy <= r; ++dy)
+				{
+					for (int dx = -r; dx <= r; ++dx)
+					{
+						if (std::abs(dx) != r && std::abs(dy) != r)
+							continue;
+
+						const CellStruct c { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) };
+						auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+						if (!pCell || pCell->GetBuilding() || pCell->FirstObject || pCell->LandType == LandType::Water
+							|| pCell->LandType == LandType::Rock || pCell->LandType == LandType::Wall
+							|| !pCell->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false)
+							|| (pCargoType && !pCell->IsClearToMove(pCargoType->SpeedType, false, false, -1, pCargoType->MovementZone, -1, false)))
+						{
+							continue;
+						}
+
+						pTrans->SetDestination(pCell, true);
+						pTrans->QueueMission(Mission::Move, true);
+						CountDecision(NeuralDecision::StuckUnloadMoved, pHouse->ArrayIndex);
+
+						return;
+					}
+				}
+			}
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			handle(pUnit);
+
+		for (auto const pAir : AircraftClass::Array)
+			handle(pAir);
+
+		std::erase_if(watch, [&](const auto& entry) { return !seen.contains(entry.first); });
+	}
+
 	void UpdateIdleAirborneStrikers(HouseClass* pHouse)
 	{
 		if (!pHouse)
@@ -655,6 +773,105 @@ namespace
 			}
 		}
 
+		// Our siege units deployed into structures (IsDeployedSiegeBuildingType), by UniqueID: they
+		// stay plan members while deployed.
+		std::unordered_map<DWORD, BuildingClass*> ownSiegeBuildings;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && IsDeployedSiegeBuildingType(pBld->Type))
+				ownSiegeBuildings[pBld->UniqueID] = pBld;
+		}
+
+		// A member that unfolds into a structure or packs up again is a new object: follow it. The
+		// successor is our object of the type it turns into (DeploysInto / UndeploysInto), newer
+		// than the member (higher UniqueID), within 3 cells of where the member was last seen
+		// (within 300 frames), not in any plan yet; the lowest such UniqueID.
+		{
+			const int now = Unsorted::CurrentFrame;
+			auto& traces = macro.PlanMemberTraces;
+			std::unordered_set<DWORD> inPlans;
+
+			for (auto const& plan : macro.Plans)
+			{
+				if (plan.Active)
+					inPlans.insert(plan.Members.begin(), plan.Members.end());
+			}
+
+			for (auto& plan : macro.Plans)
+			{
+				if (!plan.Active)
+					continue;
+
+				for (DWORD& uid : plan.Members)
+				{
+					if (auto const itFoot = ownFoots.find(uid); itFoot != ownFoots.end())
+					{
+						traces[uid] = { itFoot->second->GetTechnoType(), itFoot->second->GetMapCoords(), now };
+						continue;
+					}
+
+					if (auto const itBld = ownSiegeBuildings.find(uid); itBld != ownSiegeBuildings.end())
+					{
+						traces[uid] = { itBld->second->Type, itBld->second->GetMapCoords(), now };
+						continue;
+					}
+
+					auto const itTrace = traces.find(uid);
+
+					if (itTrace == traces.end() || now - itTrace->second.Frame > 300 || !itTrace->second.Type)
+						continue;
+
+					auto const pOldType = itTrace->second.Type;
+					const CellStruct oldCell = itTrace->second.Cell;
+					DWORD successor = 0;
+					const TechnoTypeClass* pNewType = nullptr;
+					CellStruct newCell = CellStruct::Empty;
+
+					if (pOldType->WhatAmI() == AbstractType::UnitType)
+					{
+						auto const pInto = static_cast<const UnitTypeClass*>(pOldType)->DeploysInto;
+
+						for (auto const& [bldID, pBld] : ownSiegeBuildings)
+						{
+							if (pInto && pBld->Type == pInto && bldID > uid && !inPlans.contains(bldID)
+								&& pBld->GetMapCoords().DistanceFrom(oldCell) <= 3.0 && (successor == 0 || bldID < successor))
+							{
+								successor = bldID;
+								pNewType = pBld->Type;
+								newCell = pBld->GetMapCoords();
+							}
+						}
+					}
+					else if (pOldType->WhatAmI() == AbstractType::BuildingType)
+					{
+						auto const pInto = static_cast<const BuildingTypeClass*>(pOldType)->UndeploysInto;
+
+						for (auto const& [footID, pFoot] : ownFoots)
+						{
+							if (pInto && pFoot->GetTechnoType() == pInto && footID > uid && !inPlans.contains(footID)
+								&& pFoot->GetMapCoords().DistanceFrom(oldCell) <= 3.0 && (successor == 0 || footID < successor))
+							{
+								successor = footID;
+								pNewType = pInto;
+								newCell = pFoot->GetMapCoords();
+							}
+						}
+					}
+
+					if (successor != 0)
+					{
+						inPlans.erase(uid);
+						inPlans.insert(successor);
+						traces[successor] = { pNewType, newCell, now };
+						uid = successor;
+					}
+				}
+			}
+
+			std::erase_if(traces, [now](const auto& entry) { return now - entry.second.Frame > 600 || entry.second.Frame > now; });
+		}
+
 		// Plan deadlines are fixed lengths, and a group crossing a large map is often still on its
 		// way when its deadline comes. Every 600 frames each plan with members checks whether they
 		// got at least 6 cells nearer to the target; a group still closing in and not there yet
@@ -710,13 +927,64 @@ namespace
 
 			for (const DWORD uid : plan.Members)
 			{
-				auto const it = ownFoots.find(uid);
-
-				if (it != ownFoots.end())
+				if (auto const it = ownFoots.find(uid); it != ownFoots.end())
 					value += GetCombatValueOfType(it->second->GetTechnoType(), false);
+				else if (auto const itBld = ownSiegeBuildings.find(uid); itBld != ownSiegeBuildings.end())
+					value += GetCombatValueOfType(itBld->second->Type, false);
 			}
 
 			return value;
+		};
+
+		// Siege plan member that is or can become a structure. Deployed: fires at the target when
+		// it is in reach, else packs up (it comes back as a unit and walks to the stage). A
+		// deployable unit at its stage with the target in reach of the deployed gun unfolds there.
+		// True when the member was handled; otherwise the plan gives its usual unit orders.
+		auto handleSiegeDeployMember = [&](DWORD uid, BuildingClass* pTarget, CellClass* pStage) -> bool
+		{
+			if (auto const itBld = ownSiegeBuildings.find(uid); itBld != ownSiegeBuildings.end())
+			{
+				auto const pBld = itBld->second;
+
+				if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling
+					|| pBld->CurrentMission == Mission::Construction)
+				{
+					return true;
+				}
+
+				if (pTarget && pBld->DistanceFrom(pTarget) <= GroundRangeOf(pBld->Type))
+				{
+					if (pBld->Target != pTarget)
+						pBld->SetTarget(pTarget);
+				}
+				else if (pStage)
+				{
+					pBld->SetArchiveTarget(pStage);
+					pBld->Sell(1);
+				}
+
+				return true;
+			}
+
+			auto const itFoot = ownFoots.find(uid);
+			auto const pUnit = itFoot != ownFoots.end() ? abstract_cast<UnitClass*>(itFoot->second) : nullptr;
+
+			if (!pUnit || !pTarget || !pStage || !IsDeployableSiegeUnitType(pUnit->Type)
+				|| pUnit->GetMapCoords().DistanceFrom(pStage->MapCoords) > 3.0
+				|| pUnit->DistanceFrom(pTarget) > GroundRangeOf(pUnit->Type->DeploysInto))
+			{
+				return false;
+			}
+
+			if (pUnit->CurrentMission != Mission::Unload)
+			{
+				pUnit->SetDestination(nullptr, true);
+				pUnit->ClearNavigationList();
+				pUnit->SetTarget(nullptr);
+				pUnit->QueueMission(Mission::Unload, true);
+			}
+
+			return true;
 		};
 
 		auto isFreeForPlan = [&](FootClass* pFoot) -> bool
@@ -1061,13 +1329,16 @@ namespace
 
 					for (const DWORD uid : plan.Members)
 					{
+						if (handleSiegeDeployMember(uid, pDefense, pStaging))
+							continue;
+
 						auto const it = ownFoots.find(uid);
 
 						if (it == ownFoots.end())
 							continue;
 
 						auto const pFoot = it->second;
-						const bool outranges = GroundRangeOf(pFoot->GetTechnoType()) >= defenseRange + 2 * Unsorted::LeptonsPerCell;
+						const bool outranges = SiegeRangeOf(pFoot->GetTechnoType()) >= defenseRange + 2 * Unsorted::LeptonsPerCell;
 						const bool atStaging = pFoot->GetMapCoords().DistanceFrom(plan.StagingCell) <= 3.0;
 
 						if (outranges && atStaging)
@@ -1096,14 +1367,15 @@ namespace
 				{
 					auto const pUnit = abstract_cast<UnitClass*>(pFoot);
 
-					if (!pUnit || !pUnit->Type || pUnit->Type->Naval || pUnit->Type->Harvester || pUnit->Type->DeploysInto
+					if (!pUnit || !pUnit->Type || pUnit->Type->Naval || pUnit->Type->Harvester
+						|| (pUnit->Type->DeploysInto && !IsDeployableSiegeUnitType(pUnit->Type))
 						|| IsAmphibiousOrAirTransport(pUnit->Type) || !isFreeForPlan(pUnit)
 						|| ObjectZone(pUnit, MovementZone::Normal) != homeZone)
 					{
 						continue;
 					}
 
-					const int range = GroundRangeOf(pUnit->Type);
+					const int range = SiegeRangeOf(pUnit->Type);
 
 					if (range >= 8 * Unsorted::LeptonsPerCell)
 					{
@@ -1227,7 +1499,7 @@ namespace
 		// loops below scan this short list instead of every building on the map.
 		const std::vector<BuildingClass*> knownEnemyBuildingList = GetKnownEnemyBuildingCache(pHouse).Buildings;
 
-		auto collectIdleGround = [&](bool requireAntiAir) -> std::vector<FootClass*>
+		auto collectIdleGround = [&](bool requireAntiAir, bool allowSiegeDeployers = false) -> std::vector<FootClass*>
 		{
 			std::vector<FootClass*> result;
 
@@ -1237,7 +1509,8 @@ namespace
 				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
 
 				if (!pType || pFoot->WhatAmI() == AbstractType::Aircraft || pType->Naval || IsAirborneThreatTechno(pFoot)
-					|| (pUnit && (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer || pUnit->Type->DeploysInto
+					|| (pUnit && (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
+						|| (pUnit->Type->DeploysInto && !(allowSiegeDeployers && IsDeployableSiegeUnitType(pUnit->Type)))
 						|| IsAmphibiousOrAirTransport(pUnit->Type)))
 					|| !isFreeForPlan(pFoot)
 					|| ObjectZone(pFoot, MovementZone::Normal) != homeZone)
@@ -6126,13 +6399,16 @@ namespace
 				{
 					for (const DWORD uid : plan.Members)
 					{
+						if (handleSiegeDeployMember(uid, pTarget, pStage))
+							continue;
+
 						auto const pFoot = findOwnFoot(uid);
 
 						if (!pFoot)
 							continue;
 
 						const bool inPlace = pFoot->GetMapCoords().DistanceFrom(plan.StagingCell) <= 3.0;
-						const bool isArtillery = GroundRangeOf(pFoot->GetTechnoType()) >= 8 * Unsorted::LeptonsPerCell;
+						const bool isArtillery = SiegeRangeOf(pFoot->GetTechnoType()) >= 8 * Unsorted::LeptonsPerCell;
 
 						// The stage is measured from the refinery's corner, so a gun at the stage can be a
 						// cell or two short: in place, artillery gets the attack order and closes in by
@@ -6158,9 +6434,9 @@ namespace
 				std::vector<FootClass*> escorts;
 				int artilleryRange = INT_MAX;
 
-				for (auto const pFoot : collectIdleGround(false))
+				for (auto const pFoot : collectIdleGround(false, true))
 				{
-					const int range = GroundRangeOf(pFoot->GetTechnoType());
+					const int range = SiegeRangeOf(pFoot->GetTechnoType());
 
 					if (range >= 8 * Unsorted::LeptonsPerCell)
 					{
@@ -6262,13 +6538,17 @@ namespace
 
 				for (const DWORD uid : uids)
 				{
-					if (auto const pFoot = findOwnFoot(uid))
-					{
-						const int r = GroundRangeOf(pFoot->GetTechnoType());
+					TechnoTypeClass* pMemberType = nullptr;
 
-						if (r >= 8 * Unsorted::LeptonsPerCell)
-							range = range == 0 ? r : std::min(range, r);
-					}
+					if (auto const pFoot = findOwnFoot(uid))
+						pMemberType = pFoot->GetTechnoType();
+					else if (auto const itBld = ownSiegeBuildings.find(uid); itBld != ownSiegeBuildings.end())
+						pMemberType = itBld->second->Type;
+
+					const int r = SiegeRangeOf(pMemberType);
+
+					if (r >= 8 * Unsorted::LeptonsPerCell)
+						range = range == 0 ? r : std::min(range, r);
 				}
 
 				return range;
@@ -6311,12 +6591,15 @@ namespace
 				{
 					for (const DWORD uid : plan.Members)
 					{
+						if (handleSiegeDeployMember(uid, pDefense, pStage))
+							continue;
+
 						auto const pFoot = findOwnFoot(uid);
 
 						if (!pFoot)
 							continue;
 
-						const bool isArtillery = GroundRangeOf(pFoot->GetTechnoType()) >= 8 * Unsorted::LeptonsPerCell;
+						const bool isArtillery = SiegeRangeOf(pFoot->GetTechnoType()) >= 8 * Unsorted::LeptonsPerCell;
 						const bool inPlace = pFoot->GetMapCoords().DistanceFrom(plan.StagingCell) <= 3.0;
 
 						if (isArtillery && inPlace)
@@ -6341,9 +6624,9 @@ namespace
 				std::vector<FootClass*> escorts;
 				int artilleryRange = INT_MAX;
 
-				for (auto const pFoot : collectIdleGround(false))
+				for (auto const pFoot : collectIdleGround(false, true))
 				{
-					const int range = GroundRangeOf(pFoot->GetTechnoType());
+					const int range = SiegeRangeOf(pFoot->GetTechnoType());
 
 					if (range >= 8 * Unsorted::LeptonsPerCell)
 					{
