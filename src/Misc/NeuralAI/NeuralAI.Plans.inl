@@ -2170,6 +2170,32 @@ namespace
 		{
 			auto& plan = planOf(NeuralPlanId::BaseThreatIntercept);
 
+			// Long-range members (artillery: 9+ cells against the ground) attack the lead threat from
+			// where they are, so the engine only brings them into range; the rest attack-move.
+			auto isStandoffFoot = [](FootClass* pFoot)
+			{
+				return pFoot && GroundRangeOf(pFoot->GetTechnoType()) >= 9 * Unsorted::LeptonsPerCell;
+			};
+
+			auto orderInterceptor = [&](FootClass* pFoot, TechnoClass* pLead, CellClass* pCell, bool reaim)
+			{
+				if (!pFoot || pFoot->Target != nullptr)
+					return;
+
+				if (isStandoffFoot(pFoot))
+				{
+					if (pLead)
+					{
+						pFoot->SetTarget(pLead);
+						pFoot->QueueMission(Mission::Attack, true);
+					}
+				}
+				else if (pCell && (reaim || pFoot->MegaMission != Mission::AttackMove))
+				{
+					OrderFootToAttackMove(pFoot, pCell);
+				}
+			};
+
 			auto endIntercept = [&](bool success)
 			{
 				Debug::Log("[NeuralAI] House %d BaseThreatIntercept: %s after %d frames, group value %d of %d, frame %d.\n", houseIdx,
@@ -2221,12 +2247,7 @@ namespace
 						plan.TargetCell = center;
 
 					for (const DWORD uid : plan.Members)
-					{
-						auto const pFoot = findOwnFoot(uid);
-
-						if (pFoot && pFoot->Target == nullptr && (moved || pFoot->MegaMission != Mission::AttackMove))
-							OrderFootToAttackMove(pFoot, pCenterCell);
-					}
+						orderInterceptor(findOwnFoot(uid), leadSeen ? pLead : nullptr, pCenterCell, moved);
 				}
 			}
 			else
@@ -2535,7 +2556,9 @@ namespace
 							startPlan(NeuralPlanId::BaseThreatIntercept, group, aimCell, lead.Goal, lead.Techno->UniqueID, 1800);
 							planOf(NeuralPlanId::BaseThreatIntercept).AuxBaseline = threatValue;
 							planOf(NeuralPlanId::BaseThreatIntercept).AuxPeak = static_cast<int>(lead.GoalDistance);
-							attackMoveGroup(planOf(NeuralPlanId::BaseThreatIntercept).Members, pAimCell);
+							for (auto const pFoot : group)
+								orderInterceptor(pFoot, lead.Techno, pAimCell, false);
+
 							CountDecision(NeuralDecision::BaseThreatIntercept, houseIdx);
 							Debug::Log("[NeuralAI] House %d BaseThreatIntercept: %s of house %d (%s) %d cells from %s building at (%d,%d), "
 								"threat %d, %d units value %d meet it at (%d,%d), frame %d.\n", houseIdx, lead.Techno->GetTechnoType()->ID,
