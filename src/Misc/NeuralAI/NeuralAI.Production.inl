@@ -4767,6 +4767,60 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			govMacro.BankIncomeRate, govMacro.BankSpendCapacity, govMacro.BankSpendNeeded, govMacro.BankSurplus,
 			govMacro.BankWantedFactories[0], govMacro.BankWantedFactories[1], govMacro.BankWantedFactories[2],
 			govMacro.BankWantedFactories[3], govMacro.BankWantedYards);
+
+		// TEMP diagnostic, stalled production (match #7132: Yuri with 230000-290000 credits spent
+		// almost nothing for 40 minutes, 17 units, never finished the last enemy): with 20000+ credits
+		// and nothing spent for 2700 frames, what each factory holds and the power. Telemetry only.
+		static std::array<int, 32> stallSpent {};
+		static std::array<int, 32> stallSinceFrame {};
+		static std::array<int, 32> stallSerial {};
+		const int stallIdx = std::clamp(pHouse->ArrayIndex, 0, 31);
+		const int nowFrame = Unsorted::CurrentFrame;
+
+		if (stallSerial[stallIdx] != NeuralMatchSerial || pHouse->CreditsSpent != stallSpent[stallIdx] || nowFrame < stallSinceFrame[stallIdx])
+		{
+			stallSerial[stallIdx] = NeuralMatchSerial;
+			stallSpent[stallIdx] = pHouse->CreditsSpent;
+			stallSinceFrame[stallIdx] = nowFrame;
+		}
+		else if (money >= 20000 && nowFrame - stallSinceFrame[stallIdx] >= 2700)
+		{
+			std::string factories;
+			auto const describe = [&](const char* tag, AbstractType kind, bool naval, BuildCat cat)
+			{
+				auto const pFactory = pHouse->GetPrimaryFactory(kind, naval, cat);
+				char part[160];
+
+				if (!pFactory)
+				{
+					std::snprintf(part, sizeof(part), " %s=none", tag);
+				}
+				else
+				{
+					auto const pObject = pFactory->Object;
+					std::snprintf(part, sizeof(part), " %s=%s/%d%%%s%s%s", tag,
+						pObject && pObject->GetTechnoType() ? pObject->GetTechnoType()->ID : "empty",
+						pFactory->GetProgress() * 100 / 54, pFactory->OnHold ? " onhold" : "",
+						pFactory->IsSuspended ? " suspended" : "", pFactory->IsDone() ? " done" : "");
+				}
+
+				factories += part;
+			};
+
+			describe("bld", AbstractType::BuildingType, false, BuildCat::DontCare);
+			describe("def", AbstractType::BuildingType, false, BuildCat::Combat);
+			describe("unit", AbstractType::UnitType, false, BuildCat::DontCare);
+			describe("naval", AbstractType::UnitType, true, BuildCat::DontCare);
+			describe("inf", AbstractType::InfantryType, false, BuildCat::DontCare);
+			describe("air", AbstractType::AircraftType, false, BuildCat::DontCare);
+
+			auto const& stallMacro = GetMacroState(pHouse);
+			Debug::Log("[NeuralAI] Production stall | House #%d | %d frames without spending, %d credits | power %d/%d%s | broke %d dry %d "
+				"| next bld %s unit %s inf %s |%s\n",
+				pHouse->ArrayIndex, nowFrame - stallSinceFrame[stallIdx], money, pHouse->PowerOutput, pHouse->PowerDrain,
+				pHouse->HasLowPower() ? " LOW" : "", stallMacro.BrokeHoldActive ? 1 : 0, stallMacro.DryEconomyActive ? 1 : 0, bldName,
+				unitName, infName, factories.c_str());
+		}
 	}
 
 	return evalDelay;

@@ -2442,7 +2442,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	TechnoClass* pThreatToStolenAsset = nullptr;
 	UnitClass* pStrandedStolenMCVOnIsland = nullptr;
 
-	if (SlotGate(scores[82], 60, 82) && homeCoords != CellStruct::Empty)
+	// Not slot-gated any more (match #7132: a captured NODMCV held for an hour, never deployed):
+	// keeping and using what we captured is not optional. Slot 82 still decides the heists.
+	if (homeCoords != CellStruct::Empty)
 	{
 		for (auto const pOwnB : pHouse->Buildings)
 		{
@@ -3279,8 +3281,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// perimeter so we can build its foreign tech tree!
 			const bool landedOnNewIsland = (homeGroundZone >= 0 && mcvZone >= 0 && mcvZone != homeGroundZone
 				&& conYardsInMcvZone == 0 && hubsAndFactoriesInMcvZone < 2);
-			if (SlotGate(scores[82], 60, 82) && homeCoords != CellStruct::Empty && !landedOnNewIsland
-				&& (enemyNearMCV || isForeignTechMCV))
+			// Not slot-gated (see the stolen asset scan above).
+			if (homeCoords != CellStruct::Empty && !landedOnNewIsland && (enemyNearMCV || isForeignTechMCV))
 			{
 				const bool onDisconnectedEnemyIsland
 					= (homeGroundZone >= 0 && mcvZone >= 0 && mcvZone != homeGroundZone);
@@ -5024,7 +5026,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// cells) immediately intercepts enemy Engineers/tanks threatening it, or
 		// moves directly around the stolen ConYard/MCV as a protective human shield
 		// to draw enemy fire away while it escapes!
-		if (pStolenConYardOrMCV && pUnit != pStolenConYardOrMCV && !pType->Naval && SlotGate(scores[82], 60, 82)
+		if (pStolenConYardOrMCV && pUnit != pStolenConYardOrMCV && !pType->Naval
 			&& pUnit->DistanceFrom(pStolenConYardOrMCV) <= 4096)
 		{
 			if (pThreatToStolenAsset && pPrimaryWpn && pPrimaryWpn->Damage > 0 && pUnit->Target != pThreatToStolenAsset)
@@ -6000,7 +6002,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// cells) immediately gun down enemy Engineers trying to recapture our
 		// stolen ConYard, or form a human shield perimeter around the stolen
 		// ConYard/MCV to absorb enemy fire during extraction!
-		if (pStolenConYardOrMCV && !pInf->Type->Engineer && !IsSpyInfantryType(pInf->Type) && SlotGate(scores[82], 60, 82)
+		if (pStolenConYardOrMCV && !pInf->Type->Engineer && !IsSpyInfantryType(pInf->Type)
 			&& pInf->DistanceFrom(pStolenConYardOrMCV) <= 3584)
 		{
 			if (pThreatToStolenAsset && pInfWpn && pInfWpn->Damage > 0 && pInf->Target != pThreatToStolenAsset)
@@ -10264,7 +10266,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// If this transport is carrying a stolen foreign-faction MCV from an
 		// enemy island, sail straight back to our safe Home Island (homeCoords /
 		// homeGroundZone) and unload it there so it can deploy safely!
-		if (carryingStolenForeignMCV && homeCoords != CellStruct::Empty && SlotGate(scores[82], 60, 82))
+		if (carryingStolenForeignMCV && homeCoords != CellStruct::Empty)
 		{
 			if (CellClass* pHomeSafeLanding = FindSafeIslandLandingCell(pHouse, homeCoords, homeGroundZone, true))
 			{
@@ -10291,7 +10293,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// If we have a stolen foreign MCV stranded on an enemy island
 		// (pStrandedStolenMCVOnIsland) and this transport is empty, dispatch it to
 		// the island beach near the stolen MCV to pick it up!
-		if (numPass == 0 && pStrandedStolenMCVOnIsland && SlotGate(scores[82], 60, 82))
+		if (numPass == 0 && pStrandedStolenMCVOnIsland)
 		{
 			const CellStruct mcvIslandCell = pStrandedStolenMCVOnIsland->GetMapCoords();
 
