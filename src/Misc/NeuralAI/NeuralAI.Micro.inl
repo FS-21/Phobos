@@ -11902,7 +11902,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				? enforceSingleActiveBoarderOn(pAir, airZone)
 				: nullptr;
 			const int freeAirCap = pAir->Type->Passengers - totalAirPassSize;
-			bool moreUnitsFitAir = (pSingleAirBoarder != nullptr);
+			const bool airParked = !pAir->IsInAir() && pAir->GetHeight() == 0;
+
+			if (!airParked)
+				dropFerryReservationsOf(pAir->UniqueID);
+
+			int airQueuedSize = 0;
+			std::vector<FootClass*> airQueue = airParked ? ferryQueueOf(pAir, airZone, airQueuedSize) : std::vector<FootClass*> {};
+			bool moreUnitsFitAir = (pSingleAirBoarder != nullptr) || !airQueue.empty();
 			if (!moreUnitsFitAir && !pAir->IsInAir() && pAir->GetHeight() == 0 && freeAirCap > 0
 				&& numAirPass < pAir->Type->Passengers)
 			{
@@ -11939,6 +11946,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool airReadyToFly = airCarryingMCV || airCarryingHarvester
 				|| (airCarryingEngineer && pIslandTechGoalCell != nullptr)
 				|| (numAirPass >= 1 && (pAir->IsInAir() || !moreUnitsFitAir));
+
+			if (airReadyToFly)
+				dropFerryReservationsOf(pAir->UniqueID);
+
 			if (airReadyToFly)
 			{
 				CellClass* pAirGoal = pAirCustomPassGoal ? pAirCustomPassGoal : pIslandGoalCell;
@@ -11992,80 +12003,139 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						IssueMoveOrder(pAir, GetSafeAirHop(pHouse, pAir, pHomeAirBeach), 3.0);
 				}
 			}
-			else if (!pAir->IsInAir() && pAir->GetHeight() == 0 && pSingleAirBoarder == nullptr && freeAirCap > 0
+			else if (!pAir->IsInAir() && pAir->GetHeight() == 0 && freeAirCap > 0
 				&& (!pendingCrossIslandOrders.empty() || enemyOnDisconnectedIsland || pIslandResourceGoalCell != nullptr
 					|| pIslandTechGoalCell != nullptr || scores[28] > 600 || SlotGate(scores[75], 100, 75)))
 			{
-				FootClass* pNextAirPass = nullptr;
-				double bestAirPassDist = 999999.0;
-				for (auto const& ord : pendingCrossIslandOrders)
-				{
-					if (!ord.Passenger || !ord.Passenger->IsAlive || ord.Passenger->InLimbo || ord.PickupZone != airZone)
-						continue;
-					if (ord.Passenger->CurrentMission == Mission::Enter || ord.Passenger->QueuedMission == Mission::Enter)
-						continue;
-					const int osz = std::max(1, ord.PassengerSize);
-					if (osz <= static_cast<int>(pAir->Type->SizeLimit) && osz <= freeAirCap)
-					{
-						const double d = ord.Passenger->GetMapCoords().DistanceFrom(airCoords);
-						if (d < bestAirPassDist)
-						{
-							bestAirPassDist = d;
-							pNextAirPass = ord.Passenger;
-						}
-					}
-				}
+				// Loading by what fits, as the ground ferries (user: any valid transport, flying ones
+				// too): reserve passengers up to the free room by size, one boards at a time (a single
+				// radio link), the others walk up and wait next to it.
+				const bool activeAirBoarderQueued = pSingleAirBoarder
+					&& std::find(airQueue.begin(), airQueue.end(), pSingleAirBoarder) != airQueue.end();
+				int airRoom = freeAirCap - airQueuedSize
+					- ((pSingleAirBoarder && !activeAirBoarderQueued) ? std::max(1, static_cast<int>(pSingleAirBoarder->GetTechnoType()->Size)) : 0);
 
-				if (!pNextAirPass)
+				for (int airReserveGuard = 0; airReserveGuard < 16 && airRoom > 0; ++airReserveGuard)
 				{
-					for (auto const pV : idleCombatUnits)
+					FootClass* pNextAirPass = nullptr;
+					double bestAirPassDist = 999999.0;
+					for (auto const& ord : pendingCrossIslandOrders)
 					{
-						if (!pV || pV->InLimbo || !pV->IsAlive || IsAmphibiousOrAirTransport(pV->Type))
+						if (!ord.Passenger || !ord.Passenger->IsAlive || ord.Passenger->InLimbo || ord.PickupZone != airZone)
 							continue;
-						if (pV->CurrentMission == Mission::Enter || pV->QueuedMission == Mission::Enter)
+						if (ord.Passenger->CurrentMission == Mission::Enter || ord.Passenger->QueuedMission == Mission::Enter
+							|| IsFerryReserved(pHouse, ord.Passenger->UniqueID))
 							continue;
-						const int vehSize = std::max(1, static_cast<int>(pV->Type->TechnoTypeClass::Size));
-						const int uz = ObjectZone(pV, MovementZone::Normal);
-						if (IsFootActivelyAttackingOrMovingToEnemy(pV) || IsFootNearEnemyFrontline(pV, uz))
-							continue;
-						if (uz == airZone && vehSize <= static_cast<int>(pAir->Type->SizeLimit) && vehSize <= freeAirCap)
+						const int osz = std::max(1, ord.PassengerSize);
+						if (osz <= static_cast<int>(pAir->Type->SizeLimit) && osz <= airRoom)
 						{
-							const double d = pV->GetMapCoords().DistanceFrom(airCoords);
+							const double d = ord.Passenger->GetMapCoords().DistanceFrom(airCoords);
 							if (d < bestAirPassDist)
 							{
 								bestAirPassDist = d;
-								pNextAirPass = pV;
+								pNextAirPass = ord.Passenger;
 							}
 						}
 					}
-				}
 
-				if (!pNextAirPass && static_cast<int>(pAir->Type->SizeLimit) >= 1)
-				{
-					for (auto const pI : idleCombatInf)
+					if (!pNextAirPass)
 					{
-						if (!pI || pI->InLimbo || !pI->IsAlive)
-							continue;
-						if (pI->CurrentMission == Mission::Enter || pI->QueuedMission == Mission::Enter)
-							continue;
-						const int infSize = std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size));
-						const int iz = ObjectZone(pI, MovementZone::Normal);
-						if (IsFootActivelyAttackingOrMovingToEnemy(pI) || IsFootNearEnemyFrontline(pI, iz))
-							continue;
-						if (iz == airZone && infSize <= static_cast<int>(pAir->Type->SizeLimit) && infSize <= freeAirCap)
+						for (auto const pV : idleCombatUnits)
 						{
-							const double d = pI->GetMapCoords().DistanceFrom(airCoords);
-							if (d < bestAirPassDist)
+							if (!pV || pV->InLimbo || !pV->IsAlive || IsAmphibiousOrAirTransport(pV->Type))
+								continue;
+							if (pV->CurrentMission == Mission::Enter || pV->QueuedMission == Mission::Enter
+								|| IsFerryReserved(pHouse, pV->UniqueID))
+								continue;
+							const int vehSize = std::max(1, static_cast<int>(pV->Type->TechnoTypeClass::Size));
+							const int uz = ObjectZone(pV, MovementZone::Normal);
+							if (IsFootActivelyAttackingOrMovingToEnemy(pV) || IsFootNearEnemyFrontline(pV, uz))
+								continue;
+							if (uz == airZone && vehSize <= static_cast<int>(pAir->Type->SizeLimit) && vehSize <= airRoom)
 							{
-								bestAirPassDist = d;
-								pNextAirPass = pI;
+								const double d = pV->GetMapCoords().DistanceFrom(airCoords);
+								if (d < bestAirPassDist)
+								{
+									bestAirPassDist = d;
+									pNextAirPass = pV;
+								}
 							}
 						}
 					}
+
+					if (!pNextAirPass && static_cast<int>(pAir->Type->SizeLimit) >= 1)
+					{
+						for (auto const pI : idleCombatInf)
+						{
+							if (!pI || pI->InLimbo || !pI->IsAlive)
+								continue;
+							if (pI->CurrentMission == Mission::Enter || pI->QueuedMission == Mission::Enter
+								|| IsFerryReserved(pHouse, pI->UniqueID))
+								continue;
+							const int infSize = std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size));
+							const int iz = ObjectZone(pI, MovementZone::Normal);
+							if (IsFootActivelyAttackingOrMovingToEnemy(pI) || IsFootNearEnemyFrontline(pI, iz))
+								continue;
+							if (iz == airZone && infSize <= static_cast<int>(pAir->Type->SizeLimit) && infSize <= airRoom)
+							{
+								const double d = pI->GetMapCoords().DistanceFrom(airCoords);
+								if (d < bestAirPassDist)
+								{
+									bestAirPassDist = d;
+									pNextAirPass = pI;
+								}
+							}
+						}
+					}
+
+
+					if (!pNextAirPass)
+						break;
+
+					auto& airMacroState = GetMacroState(pHouse);
+					airMacroState.FerryReserved[pNextAirPass->UniqueID] = { pAir->UniqueID, Unsorted::CurrentFrame };
+					airMacroState.FerryWaitSince.erase(pNextAirPass->UniqueID);
+					ferryReservedFoot[pNextAirPass->UniqueID] = pNextAirPass;
+					airQueue.push_back(pNextAirPass);
+					airRoom -= std::max(1, static_cast<int>(pNextAirPass->GetTechnoType()->Size));
+					CountDecision(NeuralDecision::FerryReserved, pHouse->ArrayIndex);
 				}
 
-				if (pNextAirPass)
-					OrderFootToEnter(pNextAirPass, pAir);
+				if (pSingleAirBoarder)
+				{
+					if (!pSingleAirBoarder->ContainsLink(pAir))
+						OrderFootToEnter(pSingleAirBoarder, pAir);
+				}
+				else if (!airQueue.empty())
+				{
+					FootClass* pNearestAir = nullptr;
+					double nearestAirDist = 999999.0;
+
+					for (auto const pQueued : airQueue)
+					{
+						const double d = pQueued->GetMapCoords().DistanceFrom(airCoords);
+
+						if (d < nearestAirDist)
+						{
+							nearestAirDist = d;
+							pNearestAir = pQueued;
+						}
+					}
+
+					pSingleAirBoarder = pNearestAir;
+					OrderFootToEnter(pNearestAir, pAir);
+				}
+
+				for (auto const pQueued : airQueue)
+				{
+					if (pQueued == pSingleAirBoarder || pQueued->CurrentMission == Mission::Enter
+						|| pQueued->QueuedMission == Mission::Enter || pQueued->GetMapCoords().DistanceFrom(airCoords) <= 4.0)
+					{
+						continue;
+					}
+
+					IssueMoveOrder(pQueued, pAir, 3.0);
+				}
 			}
 
 			continue;

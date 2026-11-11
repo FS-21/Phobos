@@ -3679,6 +3679,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isUnitInProgress
 			= (pUnit->ArrayIndex == inProgressUnitIdx || pUnit->ArrayIndex == inProgressNavalIdx);
 
+		// A pick the engine never started (see WatchProductionPick).
+		if (!isUnitInProgress && !pUnit->Naval && IsProductionBanned(pHouse, 1, pUnit->ArrayIndex))
+			continue;
+
 		if (!isUnitInProgress && !IsUnitTierAllowed(pHouse, pUnit))
 			continue;
 
@@ -4315,6 +4319,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool isInfInProgress = (pInf->ArrayIndex == inProgressInfIdx);
 
+		// A pick the engine never started (see WatchProductionPick).
+		if (!isInfInProgress && IsProductionBanned(pHouse, 2, pInf->ArrayIndex))
+			continue;
+
 		if (!isInfInProgress && !IsUnitTierAllowed(pHouse, pInf))
 			continue;
 
@@ -4527,6 +4535,68 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// the index is -1), so the AI_Infantry hook of UpdateInfantryProduction never runs with Ares:
 	// hand the choice to the barracks here, or no infantry (engineers, spies) is ever trained.
 	pHouse->ProducingInfantryTypeIndex = bestInfIdx;
+
+	// WatchProductionPick: a pick that the engine leaves unstarted for 900 frames while its queue is
+	// empty, a factory of the kind exists and the money covers it is banned for 5400 frames, so the
+	// next best type is picked (match #7132: a Yuri AI with 230000-290000 credits and 11 war
+	// factories built nothing for 40 minutes; training: "Production stall | ... next unit HTK inf
+	// SENGINEER | unit=none inf=none" with 66000 credits). The engine's own AI verdict is logged to
+	// find the rule behind it (the picks use the human-rules check).
+	{
+		auto& pickMacro = GetMacroState(pHouse);
+		const int pickNow = Unsorted::CurrentFrame;
+		auto const watchPick = [&](int queue, int typeIdx, TechnoTypeClass* pType, AbstractType kind, int factories)
+		{
+			int& watchedIdx = pickMacro.ProductionPickIdx[static_cast<size_t>(queue)];
+			int& watchedSince = pickMacro.ProductionPickSince[static_cast<size_t>(queue)];
+			auto const pFactory = pHouse->GetPrimaryFactory(kind, false, BuildCat::DontCare);
+
+			if (typeIdx < 0 || !pType || (pFactory && pFactory->Object) || factories <= 0
+				|| pHouse->Available_Money() < pType->GetActualCost(pHouse))
+			{
+				watchedIdx = -1;
+				return;
+			}
+
+			if (watchedIdx != typeIdx || pickNow < watchedSince)
+			{
+				watchedIdx = typeIdx;
+				watchedSince = pickNow;
+				return;
+			}
+
+			if (pickNow - watchedSince < 900)
+				return;
+
+			pickMacro.ProductionBanUntil[queue * 100000 + typeIdx] = pickNow + 5400;
+			watchedIdx = -1;
+
+			static int banLogSerial = -1;
+			static int banLogCount = 0;
+
+			if (banLogSerial != NeuralMatchSerial)
+			{
+				banLogSerial = NeuralMatchSerial;
+				banLogCount = 0;
+			}
+
+			if (banLogCount++ < 30)
+			{
+				Debug::Log("[NeuralAI] House %d production: %s never started in 900 frames (%d credits, %d factories, engine AI verdict %d), "
+					"banned for 5400 frames, frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, pHouse->Available_Money(), factories,
+					static_cast<int>(pHouse->CanBuild(pType, false, false)), pickNow);
+			}
+
+			CountDecision(NeuralDecision::ProductionPickBanned, pHouse->ArrayIndex);
+		};
+
+		const int unitPick = pExt->NeuralAI_NextUnitTarget;
+		watchPick(1, unitPick, (unitPick >= 0 && unitPick < UnitTypeClass::Array.Count) ? UnitTypeClass::Array.GetItem(unitPick) : nullptr,
+			AbstractType::UnitType, pHouse->NumWarFactories);
+		watchPick(2, bestInfIdx, (bestInfIdx >= 0 && bestInfIdx < InfantryTypeClass::Array.Count) ? InfantryTypeClass::Array.GetItem(bestInfIdx) : nullptr,
+			AbstractType::InfantryType, pHouse->NumBarracks);
+	}
 
 	productionClock.Mark(NeuralSection::ProdAircraft);
 

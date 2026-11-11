@@ -706,6 +706,13 @@ namespace
 			int Frame { 0 };
 		};
 		std::map<DWORD, FerryReservation> FerryReserved {};
+		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
+		// factories idle for thousands of frames, the AI picking the same type every tick): the pick
+		// of a queue that stays empty 900 frames with money and factories is banned 5400 frames.
+		// Key: queue (1 vehicles, 2 infantry) * 100000 + type index -> frame the ban ends.
+		std::map<int, int> ProductionBanUntil {};
+		std::array<int, 3> ProductionPickIdx { -1, -1, -1 };
+		std::array<int, 3> ProductionPickSince { 0, 0, 0 };
 		int FreeFieldAnchorDist { 9999 };
 		int FreeFieldFrame { -100000 };
 		// Last airlift that turned back (damaged carrier or a defended drop zone).
@@ -979,6 +986,9 @@ namespace
 			this->FerryWaitSince.clear();
 			this->FerryBlockedUntil.clear();
 			this->FerryReserved.clear();
+			this->ProductionBanUntil.clear();
+			this->ProductionPickIdx = { -1, -1, -1 };
+			this->ProductionPickSince = { 0, 0, 0 };
 			this->FreeFieldAnchorDist = 9999;
 			this->FreeFieldFrame = -100000;
 			this->LastAirDropAbortFrame = -100000;
@@ -1161,6 +1171,15 @@ namespace
 
 		return it != reserved.end() && Unsorted::CurrentFrame - it->second.Frame < FerryReservationFrames
 			&& Unsorted::CurrentFrame >= it->second.Frame;
+	}
+
+	// A vehicle (queue 1) or infantry (queue 2) type the engine did not start for 900 frames.
+	bool IsProductionBanned(const HouseClass* pHouse, int queue, int typeIndex)
+	{
+		auto const& bans = GetMacroState(pHouse).ProductionBanUntil;
+		auto const it = bans.find(queue * 100000 + typeIndex);
+
+		return it != bans.end() && Unsorted::CurrentFrame < it->second;
 	}
 
 	// Tacit coalitions (Expert 3): how many different houses are coalition targets right now, the
