@@ -614,7 +614,7 @@ namespace
 				const int dz = MapClass::Instance.GetMovementZoneType(dc, MovementZone::Normal, false);
 				auto const pDCell = MapClass::Instance.TryGetCellAt(dc);
 
-				if ((dz >= 0 && dz != fz) || (pDCell && pDCell->LandType == LandType::Water))
+				if ((dz >= 0 && dz != fz && !IsSameGroundForFoot(pFoot, dc)) || (pDCell && pDCell->LandType == LandType::Water))
 				{
 					pFoot->ClearMegaMissionData();
 					pFoot->SetDestination(nullptr, true);

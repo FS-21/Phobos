@@ -2071,7 +2071,7 @@ namespace
 	}
 
 	int VisibleEnemyThreatNear(HouseClass* pHouse, const CellStruct& cell, int radius);
-	bool IsBuildingEnterableFromZone(const BuildingClass* pBld, int zone);
+	bool IsBuildingEnterableFromZone(const BuildingClass* pBld, int zone, MovementZone movementZone = MovementZone::Normal);
 	void OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget);
 
 	// Expert 0 (Economy & Crisis) bookkeeping and actions, every 150 frames. The peaks of static

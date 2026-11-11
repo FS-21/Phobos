@@ -533,6 +533,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const int gz = MapClass::Instance.GetMovementZoneType(gc, MovementZone::Normal, false);
 		if (fz >= 0 && gz >= 0 && fz != gz && !IsBuildingEnterableFromZone(abstract_cast<BuildingClass*>(pGoal), fz))
 		{
+			// Ground the unit itself can walk is no island crossing.
+			if (IsSameGroundForFoot(pFoot, gc))
+			{
+				// TEMP diagnostic: orders kept by this rule.
+				static int keptLogSerial = -1;
+				static int keptLogCount = 0;
+
+				if (keptLogSerial != NeuralMatchSerial)
+				{
+					keptLogSerial = NeuralMatchSerial;
+					keptLogCount = 0;
+				}
+
+				if (keptLogCount++ < 20)
+				{
+					Debug::Log("[NeuralAI] House %d order kept: %s %u at (%d,%d) vehicle zone %d, goal (%d,%d) vehicle zone %d, same ground on foot, mission %d.\n",
+						pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, pFoot->UniqueID, pFoot->GetMapCoords().X, pFoot->GetMapCoords().Y, fz,
+						gc.X, gc.Y, gz, static_cast<int>(pFoot->CurrentMission));
+				}
+
+				return false;
+			}
+
 			if (pFoot->Target && pFoot->CurrentMission == Mission::Attack && pFoot->GetTechnoType())
 			{
 				const auto pW

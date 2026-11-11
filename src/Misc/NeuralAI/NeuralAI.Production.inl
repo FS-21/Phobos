@@ -3186,6 +3186,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int trueRefineries = 0;
 	int ownedEconomyUnits = 0;
 	int ownedCashProduces = 0;
+	int deployedGatherers = 0;
 	for (auto const pOwnBldType : pHouse->Buildings)
 	{
 		if (!pOwnBldType || pOwnBldType->InLimbo || !pOwnBldType->IsAlive || !pOwnBldType->Type)
@@ -3195,9 +3196,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			ownedCashProduces++;
 
 		if (pOwnBldType->Type->ResourceGatherer)
+		{
+			deployedGatherers++;
 			ownedEconomyUnits++;
+		}
 		else if (pOwnBldType->Type->Refinery)
+		{
 			trueRefineries++;
+		}
 	}
 
 	// Harvesters in limbo count too (mid chrono jump, inside a transport, being built).
@@ -3523,9 +3529,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			inProgressNavalIdx = pNavalFac->Object->GetType()->GetArrayIndex();
 	}
 
+	// A deployed miner (a building that gathers by itself, like the Slave Miner) is refinery and
+	// harvester in one: a house living on those owns no refinery at all and still has an income.
+	// Money that keeps coming in (the bank governor's measure, credits per 1000 frames) is income
+	// too, whatever brings it.
 	const bool hasActiveUnitIncome = (ownedCashProduces >= 1)
-		|| ((trueRefineries >= 1 && ownedEconomyUnits >= 1)
-			&& (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
+		|| (((trueRefineries >= 1 && ownedEconomyUnits >= 1) || deployedGatherers >= 1)
+			&& (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0))
+		|| GetMacroState(pHouse).BankIncomeRate >= 1000;
 
 	// Raid transport demand (AirborneFront plan): a raider or spy of ours waits for a ride behind
 	// the enemy lines and no flying or amphibious passenger transport (3 seats or more) is owned: one is
@@ -3920,7 +3931,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isDeployableRefineryOrMiner = (pUnit->DeploysInto
 			&& (pUnit->DeploysInto->Refinery || pUnit->DeploysInto->ResourceGatherer
 				|| pUnit->DeploysInto->ResourceDestination));
-		const bool allowExpansionRefineryDeployer = isDeployableRefineryOrMiner
+		// Not with 50000+ credits in the bank: income is not what limits that house, and the miners
+		// would keep the vehicle queue from the army.
+		const bool allowExpansionRefineryDeployer = isDeployableRefineryOrMiner && money < 50000
 			&& (features[21] > 0 || scores[30] >= 500) && (trueRefineries < 10 && ownedEconomyUnits < 18)
 			&& !ownsUndeployedKeyStructure && (features[21] == 0 || CanHouseFerryTypeAcrossWater(pHouse, pUnit));
 
@@ -4439,6 +4452,34 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	if (urbanExpertInCharge || IsUrbanMapFor(pHouse) || urbanOpportunityNow)
 		GetUrbanProductionNeeds(pHouse, urbanGarrisonRoom, urbanNeedClearer);
 
+	// Soldiers inside buildings by type (type index, count): they hold their seats, so they count
+	// neither for the type mix of the squads nor for the infantry cap below.
+	std::vector<std::pair<int, int>> garrisonedByType;
+	int garrisonedInfantry = 0;
+
+	for (auto const pOwnBld : pHouse->Buildings)
+	{
+		if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || !pOwnBld->Type->CanBeOccupied)
+			continue;
+
+		for (auto const pOccupant : pOwnBld->Occupants)
+		{
+			if (!pOccupant || !pOccupant->Type)
+				continue;
+
+			const int typeIndex = pOccupant->Type->ArrayIndex;
+			auto const it = std::find_if(garrisonedByType.begin(), garrisonedByType.end(),
+				[typeIndex](const std::pair<int, int>& entry) { return entry.first == typeIndex; });
+
+			if (it != garrisonedByType.end())
+				it->second++;
+			else
+				garrisonedByType.emplace_back(typeIndex, 1);
+
+			garrisonedInfantry++;
+		}
+	}
+
 	if (FactoryClass* pInfFac = pHouse->GetPrimaryFactory(AbstractType::InfantryType, false, BuildCat::DontCare))
 	{
 		if (pInfFac->Object && pInfFac->Object->GetType())
@@ -4486,8 +4527,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		int score = (pInf->Cost / 2) + pInf->Strength + (isInfInProgress ? 450 : 0);
 
-		// Penalize stacking one infantry type so squads stay mixed
-		score -= std::min(600, pHouse->CountOwnedNow(pInf) * 20);
+		// Penalize stacking one infantry type so squads stay mixed (soldiers in garrisons aside)
+		auto const itGarrisoned = std::find_if(garrisonedByType.begin(), garrisonedByType.end(),
+			[pInf](const std::pair<int, int>& entry) { return entry.first == pInf->ArrayIndex; });
+		const int garrisonedOfType = itGarrisoned != garrisonedByType.end() ? itGarrisoned->second : 0;
+		score -= std::min(600, std::max(0, pHouse->CountOwnedNow(pInf) - garrisonedOfType) * 20);
 
 		const auto pWpnStruct = pInf->GetWeapon(0);
 		const auto pWpn = pWpnStruct ? pWpnStruct->WeaponType : nullptr;
@@ -4538,8 +4582,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (urbanGarrisonRoom > 0 && IsGarrisonOccupierType(pInf))
 		{
-			const int garrisonBonus = 260 + std::min(240, GarrisonFirepowerOf(pInf)) + std::min(4, urbanGarrisonRoom) * 30;
+			// A city to fill (more than a squad of seats left): the bonus grows with the seats, and a
+			// cheap soldier holds a seat as well as an expensive one, so the cost no longer adds.
+			constexpr int SquadSeats = 4;
+			constexpr int CitySeatsCounted = 24;
+			constexpr int CitySeatBonus = 40;
+			const int cityRoom = std::min(CitySeatsCounted, std::max(0, urbanGarrisonRoom - SquadSeats));
+			const int garrisonBonus = 260 + std::min(240, GarrisonFirepowerOf(pInf)) + std::min(SquadSeats, urbanGarrisonRoom) * 30
+				+ cityRoom * CitySeatBonus;
 			score += (urbanExpertInCharge || urbanOpportunityNow) ? garrisonBonus : garrisonBonus / 2;
+
+			if (cityRoom > 0)
+				score -= pInf->Cost / 2;
 		}
 
 		if (urbanNeedClearer && IsGarrisonClearerType(pInf))
@@ -4636,7 +4690,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const int dynamicMaxInfantry = (money >= 4000 && congestedBaseInfantry < 20 && !islandInfantryQueueFull)
 		? (GetMacroState(pHouse).BankSurplus > 0 ? 100 : 85)
 		: ((money >= 2500 && congestedBaseInfantry < 18 && !islandInfantryQueueFull) ? 62 : 45);
-	const bool baseInfantrySaturated = (pHouse->OwnedInfantry >= dynamicMaxInfantry) || (congestedBaseInfantry >= 24);
+	const bool baseInfantrySaturated = (pHouse->OwnedInfantry - garrisonedInfantry >= dynamicMaxInfantry)
+		|| (congestedBaseInfantry >= 24);
 
 	// Only pause secondary queues to ration finite credits when all income
 	// sources are lost (!hasActiveUnitIncome) or when the base is saturated
@@ -4700,9 +4755,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			int& watchedIdx = pickMacro.ProductionPickIdx[static_cast<size_t>(queue)];
 			int& watchedSince = pickMacro.ProductionPickSince[static_cast<size_t>(queue)];
-			auto const pFactory = pHouse->GetPrimaryFactory(kind, false, BuildCat::DontCare);
+			// The queue is busy while any factory of ours holds an object of its kind (the house's
+			// primary factory pointer is empty for AI houses, which build through their buildings).
+			bool queueBusy = false;
 
-			if (typeIdx < 0 || !pType || (pFactory && pFactory->Object) || factories <= 0
+			for (auto const pFactory : FactoryClass::Array)
+			{
+				auto const pObjType = (pFactory && pFactory->Owner == pHouse && pFactory->Object) ? pFactory->Object->GetTechnoType() : nullptr;
+
+				if (pObjType && pObjType->WhatAmI() == kind
+					&& (kind != AbstractType::UnitType || !static_cast<UnitTypeClass*>(pObjType)->Naval))
+				{
+					queueBusy = true;
+					break;
+				}
+			}
+
+			if (typeIdx < 0 || !pType || queueBusy || factories <= 0
 				|| pHouse->Available_Money() < pType->GetActualCost(pHouse))
 			{
 				watchedIdx = -1;
@@ -4741,6 +4810,38 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					pHouse->ArrayIndex, pType->ID, pHouse->Available_Money(), factories,
 					static_cast<int>(pHouse->CanBuild(pType, false, false)), pFactoryBld ? pFactoryBld->Type->ID : "none",
 					pHouse->ProducingUnitTypeIndex, pHouse->ProducingInfantryTypeIndex, pHouse->ProducingBuildingTypeIndex, pickNow);
+
+				// TEMP diagnostic: every factory building of the queue (primary flag, mission, power,
+				// retry timer, its factory object and progress).
+				std::string factoryStates;
+				int listed = 0;
+
+				for (auto const pOwnBld : pHouse->Buildings)
+				{
+					if (!pOwnBld || !pOwnBld->IsAlive || pOwnBld->InLimbo || !pOwnBld->Type || pOwnBld->Type->Factory != kind
+						|| pOwnBld->Type->Naval || listed >= 8)
+					{
+						continue;
+					}
+
+					char entry[192];
+					auto const pBldFactory = pOwnBld->Factory;
+					_snprintf_s(entry, _TRUNCATE, " %s%s[mission %d power %d emp %d off %d timer %d factory %s obj %s rate %d step %d susp %d hold %d]",
+						pOwnBld->Type->ID, pOwnBld->IsPrimaryFactory ? "*" : "", static_cast<int>(pOwnBld->CurrentMission),
+						pOwnBld->HasPower ? 1 : 0, pOwnBld->IsUnderEMP() ? 1 : 0, pOwnBld->Deactivated ? 1 : 0,
+						pOwnBld->FactoryRetryTimer.GetTimeLeft(), pBldFactory ? "yes" : "no",
+						(pBldFactory && pBldFactory->Object) ? pBldFactory->Object->GetTechnoType()->ID : "none",
+						pBldFactory ? pBldFactory->Production.Rate : -1, pBldFactory ? pBldFactory->Production.Value : -1,
+						(pBldFactory && pBldFactory->IsSuspended) ? 1 : 0, (pBldFactory && pBldFactory->OnHold) ? 1 : 0);
+					factoryStates += entry;
+					++listed;
+				}
+
+				auto const pFreeFactory = pType->FindFactory(false, true, true, pHouse);
+				auto const pAnyFactory = pType->FindFactory(true, false, false, pHouse);
+				Debug::Log("[NeuralAI] House %d production DIAG: %s factories:%s; production %d, low power %d, free factory %s, any factory %s.\n",
+					pHouse->ArrayIndex, pType->ID, factoryStates.c_str(), pHouse->Production ? 1 : 0, pHouse->HasLowPower() ? 1 : 0,
+					pFreeFactory ? pFreeFactory->Type->ID : "none", pAnyFactory ? pAnyFactory->Type->ID : "none");
 			}
 
 			CountDecision(NeuralDecision::ProductionPickBanned, pHouse->ArrayIndex);
