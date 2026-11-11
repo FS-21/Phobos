@@ -318,6 +318,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	UpdateSneakStrikes(pHouse);
 	// Expert 9: occupiable buildings seen, garrisons to hold, evacuate or clear, coalition work.
 	UpdateUrban(pHouse);
+
+	// TEMP diagnostic: siege units that start to unfold, who ordered it and what they aim at.
 	LogSiegeDeploys(pHouse);
 	}
 

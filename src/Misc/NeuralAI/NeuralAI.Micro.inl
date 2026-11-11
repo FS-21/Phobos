@@ -10335,10 +10335,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool tripOnWater = pTripCell && pTripCell->LandType == LandType::Water;
 		NeuralFerryTripRecord* pTrip = nullptr;
 
-		// TEMP diagnostic: what a transport leaves its shore with and why it was let go. Reason is the
-		// SailReason of the last decision on the shore (1 MCV, 2 stolen MCV, 4 harvester, 8 engineer,
-		// 16 under fire, 32 in transit, 64 nothing more to load), 0 when it left without one, -1 for
-		// a loaded transport found at sea with no trip.
+		// TEMP diagnostic: what a transport leaves its shore with and the FerrySail flags of the last
+		// decision there (0 when it left without one, -1 for a loaded transport found at sea with no
+		// trip).
 		auto const logFerryDeparture = [&](int reason)
 		{
 			static int departLogSerial = -1;
@@ -10524,11 +10523,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// A transport with passengers aboard that is under fire now (hit in the last 300 frames)
-		// leaves with what it has. The engine's HasBeenAttacked flag is never cleared and a damaged
-		// transport is only repaired empty, so neither tells "now": with them a transport hit once
-		// sailed with its first passenger for the rest of the match.
-		const bool emergencyDepartUnderFire = numPass >= 1 && pTrip && Unsorted::CurrentFrame - pTrip->HitFrame < 300;
+		// A transport with passengers aboard that is under fire now leaves with what it has. The
+		// engine's HasBeenAttacked flag is never cleared and a damaged transport is only repaired
+		// empty, so neither of them means now: only a recent hit does.
+		const bool emergencyDepartUnderFire = numPass >= 1 && pTrip
+			&& Unsorted::CurrentFrame - pTrip->HitFrame < FerryUnderFireFrames;
 
 		auto hasEnemyPresenceInIslandZone = [&](int checkZone) -> bool
 		{
@@ -10781,11 +10780,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// A combat cargo waits on its shore for a real load (user: a lone vehicle that lands is
-		// finished off by any defender, cross with the transport as full as it can be): under half
-		// the room up to 5400 frames, under three quarters up to 2700, counted from the first frame
-		// it sat there short of that. MCVs, harvesters, engineers and a transport under fire still
-		// leave at once.
+		// A combat cargo waits on its shore for a real load, since a lone vehicle that lands is
+		// finished off by any defender: longer under half the room than under three quarters of it,
+		// counted from the first frame it sat there short of that. MCVs, harvesters, engineers and a
+		// transport under fire still leave at once.
 		bool underfilledHold = false;
 		const int transRoom = pTrans->Type->Passengers;
 
@@ -10795,7 +10793,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pTrip->UnderfilledSince < 0 || Unsorted::CurrentFrame < pTrip->UnderfilledSince)
 				pTrip->UnderfilledSince = Unsorted::CurrentFrame;
 
-			underfilledHold = Unsorted::CurrentFrame - pTrip->UnderfilledSince < (totalPassSize * 2 < transRoom ? 5400 : 2700);
+			const int waitFrames = totalPassSize * 2 < transRoom ? FerryHalfLoadWaitFrames : FerryMostLoadWaitFrames;
+			underfilledHold = Unsorted::CurrentFrame - pTrip->UnderfilledSince < waitFrames;
 		}
 		else if (pTrip)
 		{
@@ -10809,9 +10808,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (pTrip && !tripDeparted)
 		{
-			pTrip->SailReason = (carryingMCV ? 1 : 0) | (carryingStolenForeignMCV ? 2 : 0) | (carryingHarvester ? 4 : 0)
-				| ((carryingEngineer && pIslandTechGoalCell != nullptr) ? 8 : 0) | (emergencyDepartUnderFire ? 16 : 0)
-				| (hasCargoInTransitOrUnloading ? 32 : 0) | (nothingMoreToLoad ? 64 : 0);
+			const bool engineerForTech = carryingEngineer && pIslandTechGoalCell != nullptr;
+
+			pTrip->SailReason = (carryingMCV ? FerrySailBaseDeployer : 0)
+				| (carryingStolenForeignMCV ? FerrySailStolenDeployer : 0)
+				| (carryingHarvester ? FerrySailHarvester : 0)
+				| (engineerForTech ? FerrySailEngineer : 0)
+				| (emergencyDepartUnderFire ? FerrySailUnderFire : 0)
+				| (hasCargoInTransitOrUnloading ? FerrySailInTransit : 0)
+				| (nothingMoreToLoad ? FerrySailNothingMoreToLoad : 0);
 		}
 
 		// Sailing: the passengers still walking up are free again (repro: a hovercraft that left with
