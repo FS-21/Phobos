@@ -551,6 +551,10 @@ void NeuralAI::OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller)
 
 void NeuralAI::OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, TechnoClass* pDock, int money)
 {
+	// Every client sees the same unloads: the dry economy check reads this in matches too.
+	if (pHouse && money > 0 && pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+		GetMacroState(pHouse).LastHarvestIncomeFrame = Unsorted::CurrentFrame;
+
 	if (!NeuralAI::HeadlessMode || !pHouse || money <= 0 || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
 		return;
 
@@ -1145,10 +1149,27 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			char coalitionText[160] = "0, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0";
 			// Expert 3 diplomacy details by name (NeuralAI.Diplomacy.inl).
 			char diplomacyText[1400] = "";
+			// Truces in force now (dashboard: who has a tacit non-aggression pact with whom):
+			// [partner house, frame the truce began] for each partner.
+			char truceText[160] = "";
 
 			if (pOwner)
 			{
 				auto const& coal = GetMacroState(pOwner).Coalition;
+				size_t truceLen = 0;
+
+				for (int p = 0; p < 8 && truceLen + 24 < sizeof(truceText); ++p)
+				{
+					if (IsTacitTrucePartner(pOwner, p))
+					{
+						const int written = std::snprintf(truceText + truceLen, sizeof(truceText) - truceLen, "%s[%d, %d]",
+							truceLen ? ", " : "", p, coal.TruceSinceFrame[p]);
+
+						if (written > 0)
+							truceLen += static_cast<size_t>(written);
+					}
+				}
+
 				std::snprintf(coalitionText, sizeof(coalitionText), "%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d",
 					coal.ActiveFrames, coal.Target, coal.LastTarget, coal.Joined, coal.Declined, coal.DeclinedSecond,
 					coal.LastDeclineReason, coal.Truces, coal.Revoked, coal.TargetWaves, coal.PartnerWaves, coal.OtherWaves,
@@ -1227,7 +1248,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"defense\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"team\": %s, \"econ\": [%s], \"bank\": [%s], \"army\": [%s], \"coalition\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"defense\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"team\": %s, \"econ\": [%s], \"bank\": [%s], \"army\": [%s], \"coalition\": [%s], \"truces\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -1238,7 +1259,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), expertCreditText.c_str(), expertCreditByPhaseText.c_str(), expertCreditPartsText.c_str(), defenseText, enemyMixText.c_str(), claimText, teamText, econText, bankText, armyText, coalitionText, diplomacyText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), expertCreditText.c_str(), expertCreditByPhaseText.c_str(), expertCreditPartsText.c_str(), defenseText, enemyMixText.c_str(), claimText, teamText, econText, bankText, armyText, coalitionText, truceText, diplomacyText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -1407,7 +1428,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		// Map inspector details appended to every radar point (observer telemetry, never read by a
 		// decision): ,uid,health%,mission,megaMission,target,destination,transform where target is
 		// [rx,ry,health% or -1,uid,cellX,cellY] or 0 and destination is [rx,ry,cellX,cellY] or 0.
-		// The point's own cell follows as the last two fields.
+		// The point's own cell follows, then the garrison (infantry inside a building) and 1 when a
+		// vehicle sits in it (tank bunker); both 0 for anything else. Last, what is inside as
+		// "TYPE:count;..." (garrison, bunker vehicle, passengers, slung vehicle; 6 types at most).
 		auto objectDetail = [&](TechnoClass* pTechno, char* out, size_t outCap)
 		{
 			if (!out || outCap == 0)
@@ -1463,12 +1486,81 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(transformId, transformClean, sizeof(transformClean));
 
 			const CellStruct ownCell = pTechno->GetMapCoords();
-			std::snprintf(out, outCap, ",%u,%d,%d,%d,%s,%s,\"%s\",%d,%d", static_cast<unsigned>(pTechno->UniqueID), hp,
+			auto const pAsBld = abstract_cast<BuildingClass*>(pTechno);
+			const int garrison = pAsBld ? pAsBld->Occupants.Count : 0;
+			const int bunkered = (pAsBld && pAsBld->BunkerLinkedItem) ? 1 : 0;
+
+			std::vector<std::pair<const char*, int>> insideTypes;
+
+			auto const addInside = [&insideTypes](TechnoClass* pInside)
+			{
+				auto const pInsideType = pInside ? pInside->GetTechnoType() : nullptr;
+
+				if (!pInsideType)
+					return;
+
+				for (auto& entry : insideTypes)
+				{
+					if (entry.first == pInsideType->ID)
+					{
+						++entry.second;
+						return;
+					}
+				}
+
+				if (insideTypes.size() < 6)
+					insideTypes.emplace_back(pInsideType->ID, 1);
+			};
+
+			if (pAsBld)
+			{
+				for (int i = 0; i < pAsBld->Occupants.Count; ++i)
+					addInside(pAsBld->Occupants.GetItem(i));
+
+				addInside(pAsBld->BunkerLinkedItem);
+			}
+
+			int paxGuard = 0;
+			// A transport nobody may unload (NoManualUnload=yes) carries its passengers as extra guns
+			// (a mod trick, not real passengers): they are not listed nor counted (user).
+			auto const pTechnoTypeExt = pType ? TechnoTypeExt::ExtMap.Find(pType) : nullptr;
+			const bool fixedPassengers = pTechnoTypeExt && pTechnoTypeExt->NoManualUnload.Get(false);
+
+			for (auto pPax = fixedPassengers ? nullptr : pTechno->Passengers.GetFirstPassenger(); pPax && paxGuard < 32;
+				pPax = abstract_cast<FootClass*>(pPax->NextObject), ++paxGuard)
+			{
+				addInside(pPax);
+			}
+
+			if (auto const pAsUnit = abstract_cast<UnitClass*>(pTechno))
+			{
+				if (auto const pUnitExt = UnitExt::Fetch(pAsUnit); pUnitExt && pUnitExt->CarryallCargo)
+					addInside(pUnitExt->CarryallCargo);
+			}
+
+			char insideRaw[96] = "";
+			size_t insideLen = 0;
+
+			for (auto const& [insideId, insideCount] : insideTypes)
+			{
+				const int written = std::snprintf(insideRaw + insideLen, sizeof(insideRaw) - insideLen, "%s%s:%d",
+					insideLen ? ";" : "", insideId, insideCount);
+
+				if (written <= 0 || insideLen + static_cast<size_t>(written) >= sizeof(insideRaw))
+					break;
+
+				insideLen += static_cast<size_t>(written);
+			}
+
+			char insideClean[96];
+			sanitizeJsonStr(insideRaw, insideClean, sizeof(insideClean));
+
+			std::snprintf(out, outCap, ",%u,%d,%d,%d,%s,%s,\"%s\",%d,%d,%d,%d,\"%s\"", static_cast<unsigned>(pTechno->UniqueID), hp,
 				static_cast<int>(pTechno->CurrentMission), mega, targetText, destText, transformClean, static_cast<int>(ownCell.X),
-				static_cast<int>(ownCell.Y));
+				static_cast<int>(ownCell.Y), garrison, bunkered, insideClean);
 		};
 
-		char detailBuf[224];
+		char detailBuf[336];
 		bool firstPt = true;
 		int ptCount = 0;
 
@@ -1480,8 +1572,10 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				continue;
 			}
 
+			// Empty civilian garrison buildings are scenery; garrisoned ones belong to the occupants' house
+			// and are shown.
 			if (pBld->Type->CanBeOccupied && !pBld->Type->BaseNormal && !pBld->Type->ConstructionYard
-				&& pBld->Type->TechLevel < 0)
+				&& pBld->Type->TechLevel < 0 && pBld->Occupants.Count == 0)
 			{
 				continue;
 			}
@@ -1502,9 +1596,10 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			const bool isDeployedVehicleBld = pBld->Type->ResourceGatherer
 				|| (pBld->Type->UndeploysInto != nullptr && !pBld->Type->ConstructionYard && !pBld->Type->BaseNormal
 					&& !pBld->Type->Refinery);
-			// ptKind: 0 = unit/deployed vehicle, 1 = structure, 2 = defense structure
-			// (IsBaseDefense=yes)
-			const int ptKind = isDeployedVehicleBld ? 0 : (pBld->Type->IsBaseDefense ? 2 : 1);
+			// ptKind: 0 = unit, 1 = structure, 2 = defense structure (IsBaseDefense=yes), 3 = deployed
+			// vehicle structure (drawn as a unit, listed as a structure: a deployed Slave Miner is a
+			// YAREFN building, not a unit; user), -1 = slave bound to its miner.
+			const int ptKind = isDeployedVehicleBld ? 3 : (pBld->Type->IsBaseDefense ? 2 : 1);
 
 			char idClean[32];
 			char nameClean[64];
@@ -1567,6 +1662,10 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				continue;
 			}
 
+			// Slaves still bound to their miner add noise to the map (user): kind -1, drawn as a small
+			// dot. Freed slaves (no SlaveOwner) are kind 0 as any soldier.
+			const int pointKind = pInf->SlaveOwner ? -1 : 0;
+
 			infStep++;
 
 			if (ptCount >= 2400 || jsonBuf.size() > 250000)
@@ -1584,8 +1683,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(pInf->Type ? pInf->Type->Name : "", nameClean, sizeof(nameClean));
 
 			objectDetail(pInf, detailBuf, sizeof(detailBuf));
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
-				rx, ry, pInf->Owner->ArrayIndex, idClean, nameClean, detailBuf);
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
+				rx, ry, pInf->Owner->ArrayIndex, pointKind, idClean, nameClean, detailBuf);
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -1656,3 +1755,106 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 	}
 }
 
+namespace
+{
+	// Determinism trace for the trainer's LAN desync test (training slots 60..63, both clients of
+	// one match): a checksum of everything a house owns that its orders change (type, mission,
+	// queued mission, target, destination, position, health, ammo) plus its money and the match
+	// random generator, logged before and after every AI tick of the house. The first line that
+	// differs between the two clients' debug logs gives the frame and house where the match
+	// diverged, and whether the AI tick (pre equal, post differs) or the engine between ticks (pre
+	// differs) did it.
+	bool IsDesyncTraceOn()
+	{
+		return NeuralAI::TrainSlotIndex >= 60;
+	}
+
+	uint32_t DesyncTraceMix(uint32_t hash, uint32_t value)
+	{
+		for (int i = 0; i < 4; ++i)
+		{
+			hash ^= (value >> (i * 8)) & 0xFF;
+			hash *= 16777619u;
+		}
+
+		return hash;
+	}
+
+	uint32_t DesyncTraceAbstract(uint32_t hash, AbstractClass* pAbstract)
+	{
+		if (!pAbstract)
+			return DesyncTraceMix(hash, 0xFFFFFFFFu);
+
+		auto const pObject = abstract_cast<ObjectClass*>(pAbstract);
+		hash = DesyncTraceMix(hash, static_cast<uint32_t>(pAbstract->WhatAmI()));
+		hash = DesyncTraceMix(hash, pObject ? static_cast<uint32_t>(pObject->UniqueID) : 0u);
+		const CoordStruct coords = pAbstract->GetCoords();
+		hash = DesyncTraceMix(hash, static_cast<uint32_t>(coords.X));
+		return DesyncTraceMix(hash, static_cast<uint32_t>(coords.Y));
+	}
+
+	uint32_t DesyncTraceHouse(HouseClass* pHouse, int& outCount)
+	{
+		uint32_t hash = 2166136261u;
+		outCount = 0;
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || pTechno->Owner != pHouse)
+				continue;
+
+			++outCount;
+			auto const pType = pTechno->GetTechnoType();
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->UniqueID));
+			hash = DesyncTraceMix(hash, pType ? static_cast<uint32_t>(pType->GetArrayIndex()) : 0u);
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->CurrentMission));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->QueuedMission));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Health));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Ammo));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Location.X));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Location.Y));
+			hash = DesyncTraceMix(hash, static_cast<uint32_t>(pTechno->Location.Z));
+			hash = DesyncTraceMix(hash, pTechno->InLimbo ? 1u : 0u);
+			hash = DesyncTraceAbstract(hash, pTechno->Target);
+
+			if (auto const pFoot = abstract_cast<FootClass*>(pTechno))
+				hash = DesyncTraceAbstract(hash, pFoot->Destination);
+		}
+
+		hash = DesyncTraceMix(hash, static_cast<uint32_t>(pHouse->Available_Money()));
+		auto const& random = ScenarioClass::Instance->Random;
+		hash = DesyncTraceMix(hash, static_cast<uint32_t>(random.Next1));
+		return DesyncTraceMix(hash, static_cast<uint32_t>(random.Next2));
+	}
+
+	// Logs the house checksum when made and again when it goes out of scope (end of the AI tick).
+	struct NeuralDesyncTraceScope
+	{
+		HouseClass* House { nullptr };
+		uint32_t Pre { 0 };
+		int PreCount { 0 };
+
+		explicit NeuralDesyncTraceScope(HouseClass* pHouse)
+		{
+			if (!IsDesyncTraceOn() || !pHouse || !ScenarioClass::Instance)
+				return;
+
+			this->House = pHouse;
+			this->Pre = DesyncTraceHouse(pHouse, this->PreCount);
+		}
+
+		~NeuralDesyncTraceScope()
+		{
+			if (!this->House)
+				return;
+
+			int postCount = 0;
+			const uint32_t post = DesyncTraceHouse(this->House, postCount);
+			Debug::Log("[NeuralAI] Desync trace frame %d house %d pre %08X (%d) post %08X (%d)\n", Unsorted::CurrentFrame,
+				this->House->ArrayIndex, this->Pre, this->PreCount, post, postCount);
+		}
+
+		NeuralDesyncTraceScope(const NeuralDesyncTraceScope&) = delete;
+		NeuralDesyncTraceScope& operator=(const NeuralDesyncTraceScope&) = delete;
+	};
+}

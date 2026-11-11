@@ -1,11 +1,13 @@
 #include "NeuralAI.h"
 
+#include <AircraftClass.h>
 #include <BuildingClass.h>
 #include <BuildingTypeClass.h>
 #include <HouseClass.h>
 #include <MapClass.h>
 #include <ScenarioClass.h>
 #include <SessionClass.h>
+#include <UnitClass.h>
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
 #include <Utilities/Macro.h>
@@ -521,6 +523,120 @@ DEFINE_HOOK(0x444F39, BuildingClass_ExitObject_PlaceBuilding_NeuralAI, 0x6)
 	return ApplyCustomCoords;
 }
 
+// TechnoClass::Base_Is_Attacked sends the nearest units of a computer house at whoever hit its base
+// (Mission::Rescue or Area_Guard, whatever they are: artillery and anti-air into melee) and
+// suspends its teams. The Neural AI answers base threats itself (Base Threat Intercept) and moves
+// the units of its houses in campaigns too (there only the buildings follow the scenario), so the
+// engine response is skipped for all of them.
+void NAKED TechnoClass_BaseIsAttacked_Return_NeuralAI()
+{
+	_asm
+		{
+		retn 4
+		}
+}
+
+DEFINE_HOOK(0x708080, TechnoClass_BaseIsAttacked_NeuralAI, 0x6)
+{
+	GET(TechnoClass* const, pThis, ECX);
+
+	if (NeuralAI::IsEnabledForHouse(pThis ? pThis->Owner : nullptr))
+		return reinterpret_cast<DWORD>(&TechnoClass_BaseIsAttacked_Return_NeuralAI);
+
+	return 0;
+}
+
+// BuildingClass::Repair_AI sells a computer house's building in the red when its money is below
+// the repair threshold (IQSellBack, at random). The Neural AI decides its own sales (broke mode,
+// factory caps, obsolete refineries), so that branch is skipped for its houses; the repair branch
+// stays, and so does the sale in campaigns, where the buildings follow the scenario.
+DEFINE_HOOK(0x450781, BuildingClass_RepairAI_SkipSellBack_NeuralAI, 0x5)
+{
+	enum
+	{
+		SkipSellBack = 0x450813
+	};
+
+	GET(BuildingClass* const, pThis, ESI);
+
+	auto const pHouse = pThis ? pThis->Owner : nullptr;
+
+	if (NeuralAI::IsEnabledForHouse(pHouse) && !NeuralAI::IsCampaignRestricted(pHouse))
+		return SkipSellBack;
+
+	return 0;
+}
+
+// UnitClass::AI sends any damaged vehicle of a computer house that idles in Guard or Area_Guard to a
+// repair station every 16 frames, even at 99% health. The Neural AI plans its repair trips itself
+// (thresholds, reserves, broke mode), so that branch is skipped for its houses.
+DEFINE_HOOK(0x736740, UnitClass_AI_SkipAutoRepair_NeuralAI, 0x6)
+{
+	enum
+	{
+		SkipAutoRepair = 0x73681D
+	};
+
+	GET(UnitClass* const, pThis, ESI);
+
+	if (NeuralAI::IsEnabledForHouse(pThis->Owner))
+		return SkipAutoRepair;
+
+	return 0;
+}
+
+// UnitClass::AI puts an MCV of a computer house that has no ConYard in Mission::Hunt (find a spot
+// and deploy), and UnitClass::Mission_Guard deploys an idle one where it stands. The Neural AI
+// decides where its MCVs go and deploy (expansions, islands, ferries), so both are skipped for its
+// houses; in campaigns that follow the scenario base they stay.
+DEFINE_HOOK(0x736414, UnitClass_AI_SkipMcvHunt_NeuralAI, 0x6)
+{
+	enum
+	{
+		SkipMcvHunt = 0x736461
+	};
+
+	GET(UnitClass* const, pThis, ESI);
+
+	if (NeuralAI::IsEnabledForHouse(pThis->Owner) && !NeuralAI::IsCampaignRestricted(pThis->Owner))
+		return SkipMcvHunt;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x7409F8, UnitClass_MissionGuard_SkipMcvDeploy_NeuralAI, 0x6)
+{
+	enum
+	{
+		SkipMcvDeploy = 0x740A50
+	};
+
+	GET(UnitClass* const, pThis, ESI);
+
+	if (NeuralAI::IsEnabledForHouse(pThis->Owner) && !NeuralAI::IsCampaignRestricted(pThis->Owner))
+		return SkipMcvDeploy;
+
+	return 0;
+}
+
+// AircraftClass::Mission_Guard sends an idle armed aircraft of a computer house at the house's
+// "juicy target" (HouseClass::Find_Juicy_Target) on its own. The Neural AI air experts pick strikes
+// by damage, safe lanes and escorts, so that branch is skipped for its houses.
+DEFINE_HOOK(0x41A882, AircraftClass_MissionGuard_SkipJuicyTarget_NeuralAI, 0x6)
+{
+	enum
+	{
+		SkipJuicyTarget = 0x41A8DC
+	};
+
+	GET(AircraftClass* const, pThis, ESI);
+
+	if (NeuralAI::IsEnabledForHouse(pThis->Owner))
+		return SkipJuicyTarget;
+
+	return 0;
+}
+
 // Track directional building attacks for NeuralAI reactive defense placement and threat moderation
 DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_TrackThreat_NeuralAI, 0x8)
 {
@@ -587,14 +703,3 @@ DEFINE_HOOK(0x6E0F90, TActionClass_GrowShroud_ObserverImmunity, 0x5)
 	return 0;
 }
 
-// Decision credit: every techno a Neural AI house produces is tagged with the expert in charge.
-DEFINE_HOOK(0x4FB6B0, HouseClass_JustBuilt_NeuralAI, 0x5)
-{
-	GET(HouseClass* const, pThis, ECX);
-	GET_STACK(TechnoClass*, pTechno, 0x4);
-
-	if (pThis && pTechno && NeuralAI::IsEnabledForHouse(pThis))
-		NeuralAI::OnTechnoProduced(pThis, pTechno);
-
-	return 0;
-}

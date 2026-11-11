@@ -298,6 +298,59 @@ namespace
 				pDestCell = pReach;
 				pResolvedDest = pReach;
 			}
+
+			// A far naval order goes in hops of 25 cells along a sea route (NavalRouteHop); the owner
+			// logic sends it again once the ship is there. A far ground order likewise along a land route
+			// (GroundRouteHop): the engine path finder gives up on long winding ways.
+			if (auto const pHop = NavalRouteHop(pFoot, pDestCell->MapCoords, 25))
+			{
+				pDestCell = pHop;
+				pResolvedDest = pHop;
+			}
+			else if (auto const pGroundHop = [&]() -> CellClass*
+				{
+					// Only as a fallback: a unit that has not left its cell for 300 frames (the engine
+					// path finder gave up on the long way), and then for 1200 frames after its last hop
+					// so it does not fall back to the long order between legs. Where the engine finds its
+					// way the order stays whole: hops everywhere made more path failures on maps it
+					// handled (fs_duel).
+					static std::unordered_map<DWORD, int> hoppingSince;
+					const int nowFrame = Unsorted::CurrentFrame;
+
+					if (hoppingSince.size() > 2048)
+						std::erase_if(hoppingSince, [nowFrame](const auto& e) { return nowFrame < e.second || nowFrame - e.second > 1200; });
+
+					auto const itHop = hoppingSince.find(pFoot->UniqueID);
+					const bool hopping = itHop != hoppingSince.end() && nowFrame >= itHop->second && nowFrame - itHop->second <= 1200;
+
+					if (!hopping && !(pFoot->Owner && IsFootHeldStill(pFoot->Owner, pFoot, 300)))
+						return nullptr;
+
+					auto const pHopCell = GroundRouteHop(pFoot, pDestCell->MapCoords, 25);
+
+					if (pHopCell)
+						hoppingSince[pFoot->UniqueID] = nowFrame;
+
+					return pHopCell;
+				}())
+			{
+				// Already attack-moving to an earlier hop that is still 6+ cells away and closer to the
+				// goal than the unit: it keeps that leg (a new hop every few cells re-paths it each time).
+				const CellStruct goal = pDestCell->MapCoords;
+				const CellStruct here = pFoot->GetMapCoords();
+
+				if (auto const pOldHop = abstract_cast<CellClass*>(pFoot->MegaDestination);
+					pOldHop && pFoot->MegaMission == Mission::AttackMove && here.DistanceFrom(pOldHop->MapCoords) > 6.0
+					&& pOldHop->MapCoords.DistanceFrom(goal) + 5.0 < here.DistanceFrom(goal))
+				{
+					CountDecision(NeuralDecision::MoveOrderSkipped, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
+					return;
+				}
+
+				pDestCell = pGroundHop;
+				pResolvedDest = pGroundHop;
+				CountDecision(NeuralDecision::GroundRouteHop, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
+			}
 		}
 
 		// Hysteresis: a unit already attack-moving to (almost) the same place keeps its order.
@@ -611,7 +664,38 @@ namespace
 			|| (pTargetBld->TechLevel >= 0 && pTargetBld->TechLevel <= 10));
 	}
 
+	CellClass* FindSafeIslandLandingCellUncached(
+		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre);
+
+	// One search per house, island reference, zone and ore preference per frame (user's profile:
+	// FindSafeIslandLandingCell was the AI's costliest function, called once per soldier of a wave
+	// ordered across water with the very same arguments, thousands of cells each).
 	CellClass* FindSafeIslandLandingCell(
+		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre)
+	{
+		static int cacheFrame = -1;
+		static std::unordered_map<uint64_t, CellStruct> cache;
+
+		if (cacheFrame != Unsorted::CurrentFrame)
+		{
+			cacheFrame = Unsorted::CurrentFrame;
+			cache.clear();
+		}
+
+		const uint64_t key = (static_cast<uint64_t>(static_cast<uint8_t>(pHouse ? pHouse->ArrayIndex : 255)) << 56)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(targetIslandZone)) << 40)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(islandRefCell.X)) << 24)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(islandRefCell.Y)) << 8) | (preferOre ? 1u : 0u);
+
+		if (auto const it = cache.find(key); it != cache.end())
+			return it->second == CellStruct::Empty ? nullptr : MapClass::Instance.TryGetCellAt(it->second);
+
+		CellClass* const pResult = FindSafeIslandLandingCellUncached(pHouse, islandRefCell, targetIslandZone, preferOre);
+		cache.emplace(key, pResult ? pResult->MapCoords : CellStruct::Empty);
+		return pResult;
+	}
+
+	CellClass* FindSafeIslandLandingCellUncached(
 		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre)
 	{
 		bool islandHasEnemyPresence = false;
@@ -645,12 +729,97 @@ namespace
 			}
 		}
 
+		// What a landing is judged by, gathered once: known enemy defenses with their real reach (weapon
+		// range + 4 cells, at least 10), known enemy structures (cost, and whether a known defense
+		// covers them), enemy units in sight, our transports and where they are going.
+		struct LandingDefense { CellStruct Cell; int Reach; };
+		struct LandingStructure { CellStruct Cell; int Value; bool Covered; };
+		std::vector<LandingDefense> landingDefenses;
+		std::vector<LandingStructure> landingStructures;
+		std::vector<CellStruct> landingEnemyUnits;
+		std::vector<CellStruct> landingOwnTransports;
+		std::vector<CellStruct> landingOwnTransportDests;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || !pBld->Type || pBld->Type->Insignificant
+				|| pBld->Type->InvisibleInGame || pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner)
+				|| pBld->Owner->IsNeutral() || !IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				continue;
+			}
+
+			const CellStruct bc = pBld->GetMapCoords();
+
+			if (pBld->Type->IsBaseDefense)
+			{
+				int rangeCells = 0;
+
+				for (int w = 0; w < 2; ++w)
+				{
+					if (auto const pWeaponStruct = pBld->GetWeapon(w); pWeaponStruct && pWeaponStruct->WeaponType)
+						rangeCells = std::max(rangeCells, pWeaponStruct->WeaponType->Range / 256);
+				}
+
+				landingDefenses.push_back({ bc, std::max(10, rangeCells + 4) });
+			}
+			else
+			{
+				landingStructures.push_back({ bc, std::max(100, pBld->Type->Cost), false });
+			}
+		}
+
+		for (auto& structure : landingStructures)
+		{
+			for (auto const& defense : landingDefenses)
+			{
+				// Covered: inside the defense's own weapon range (its reach less the 4-cell margin).
+				if (std::max(std::abs(structure.Cell.X - defense.Cell.X), std::abs(structure.Cell.Y - defense.Cell.Y))
+					<= defense.Reach - 3)
+				{
+					structure.Covered = true;
+					break;
+				}
+			}
+		}
+
+		for (auto const pUnitScan : UnitClass::Array)
+		{
+			if (!pUnitScan || pUnitScan->InLimbo || !pUnitScan->IsAlive || !pUnitScan->Owner)
+				continue;
+
+			if (pUnitScan->Owner == pHouse)
+			{
+				if (pUnitScan->Type && IsAmphibiousOrAirTransport(pUnitScan->Type))
+				{
+					landingOwnTransports.push_back(pUnitScan->GetMapCoords());
+
+					if (pUnitScan->Destination)
+						landingOwnTransportDests.push_back(CellClass::Coord2Cell(pUnitScan->Destination->GetCoords()));
+				}
+
+				continue;
+			}
+
+			if (pHouse->IsAlliedWith(pUnitScan->Owner) || pUnitScan->Owner->IsNeutral()
+				|| !IsCellVisibleToAI(pHouse, pUnitScan->GetCell()))
+			{
+				continue;
+			}
+
+			landingEnemyUnits.push_back(pUnitScan->GetMapCoords());
+		}
+
 		CellClass* pBestLanding = nullptr;
 		int bestScore = -999999;
-		const int maxR = 64;
-		for (int dy = -maxR; dy <= maxR; dy += (std::abs(dy) <= 32 ? 2 : 3))
+		// The whole island: 96 cells around the reference when the island is known (big islands
+		// have undefended coasts far from the target), sampled more sparsely far out.
+		const int maxR = targetIslandZone >= 0 ? 96 : 64;
+		auto const sampleStep = [](int d) { return std::abs(d) <= 32 ? 2 : (std::abs(d) <= 64 ? 3 : 4); };
+
+		for (int dy = -maxR; dy <= maxR; dy += sampleStep(dy))
 		{
-			for (int dx = -maxR; dx <= maxR; dx += (std::abs(dx) <= 32 ? 2 : 3))
+			for (int dx = -maxR; dx <= maxR; dx += sampleStep(dx))
 			{
 				const CellStruct cand { static_cast<short>(islandRefCell.X + dx),
 					static_cast<short>(islandRefCell.Y + dy) };
@@ -720,12 +889,26 @@ namespace
 					continue;
 
 				const int distFromRef = std::abs(dx) + std::abs(dy);
-				// On an enemy-occupied island, islandRefCell is typically an enemy building:
-				// prefer landing 20..36 cells away on an uncontested part of the island rather than
-				// right on top of islandRefCell! On a friendly/neutral island, prefer close to islandRefCell.
-				int score = islandHasEnemyPresence
-					? (900 - std::abs(distFromRef - 26) * 4)
-					: (900 - distFromRef * 3);
+				// On an enemy-occupied island the landing is chosen for the damage it can do: the value of
+				// the enemy structures no known defense covers within 6..22 cells (an undefended coast by
+				// refineries and power plants), distance to the target only weighing beyond 40 cells.
+				// On a friendly / neutral island, close to islandRefCell.
+				int score = 900 - distFromRef * 3;
+
+				if (islandHasEnemyPresence)
+				{
+					int softValue = 0;
+
+					for (auto const& structure : landingStructures)
+					{
+						const int d = std::max(std::abs(cand.X - structure.Cell.X), std::abs(cand.Y - structure.Cell.Y));
+
+						if (!structure.Covered && d >= 6 && d <= 22)
+							softValue += structure.Value;
+					}
+
+					score = 900 - std::max(0, distFromRef - 40) * 3 + std::min(2600, softValue / 3);
+				}
 				if (pCell->FirstObject != nullptr)
 				{
 					score -= 550; // Prefer an unoccupied beach cell so multiple
@@ -778,90 +961,69 @@ namespace
 						score -= 2500 - static_cast<int>(dBloody * 150.0);
 				}
 
-				int minEnemyDefDist = 9999;
-				int minEnemyBldDist = 9999;
-				for (auto const pBld : BuildingClass::Array)
+				// Threats: a known defense whose real reach covers the cell, a structure a defense covers
+				// within 14 cells, any structure within 5 (no room to land), enemy units in sight within 11.
+				// Our other transports (and where they are heading) spread the landings.
+				int defenseThreat = 0;
+
+				for (auto const& defense : landingDefenses)
 				{
-					if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || !pBld->Type
-						|| pBld->Type->Insignificant || pBld->Type->InvisibleInGame)
-					{
-						continue;
-					}
+					const int d = std::max(std::abs(cand.X - defense.Cell.X), std::abs(cand.Y - defense.Cell.Y));
 
-					if (pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner) || pBld->Owner->IsNeutral()
-						|| !IsEnemyBuildingKnown(pHouse, pBld))
-					{
-						continue;
-					}
+					if (d <= defense.Reach)
+						defenseThreat = std::max(defenseThreat, defense.Reach + 1 - d);
+				}
 
-					const CellStruct bc = pBld->GetMapCoords();
-					const int dist = std::max(std::abs(cand.X - bc.X), std::abs(cand.Y - bc.Y));
-					if (pBld->Type->IsBaseDefense)
-					{
-						if (dist < minEnemyDefDist)
-							minEnemyDefDist = dist;
-					}
+				int minCoveredBldDist = 9999;
+				int minAnyBldDist = 9999;
 
-					if (dist < minEnemyBldDist)
-						minEnemyBldDist = dist;
+				for (auto const& structure : landingStructures)
+				{
+					const int d = std::max(std::abs(cand.X - structure.Cell.X), std::abs(cand.Y - structure.Cell.Y));
+					minAnyBldDist = std::min(minAnyBldDist, d);
+
+					if (structure.Covered)
+						minCoveredBldDist = std::min(minCoveredBldDist, d);
 				}
 
 				int minEnemyUnitDist = 9999;
-				for (auto const pEnemyU : UnitClass::Array)
+
+				for (auto const& uc : landingEnemyUnits)
+					minEnemyUnitDist = std::min(minEnemyUnitDist, static_cast<int>(std::max(std::abs(cand.X - uc.X), std::abs(cand.Y - uc.Y))));
+
+				for (auto const& tc : landingOwnTransports)
 				{
-					if (!pEnemyU || pEnemyU->InLimbo || !pEnemyU->IsAlive || !pEnemyU->Owner)
+					if (tc == islandRefCell)
 						continue;
 
-					// Our own transports are always known; enemy units only when in sight.
-					if (pEnemyU->Owner != pHouse && !IsCellVisibleToAI(pHouse, pEnemyU->GetCell()))
-						continue;
+					const int dTrans = std::max(std::abs(cand.X - tc.X), std::abs(cand.Y - tc.Y));
 
-					if (pEnemyU->Owner == pHouse)
-					{
-						if (pEnemyU->Type && IsAmphibiousOrAirTransport(pEnemyU->Type))
-						{
-							const CellStruct tc = pEnemyU->GetMapCoords();
-							if (tc != islandRefCell)
-							{
-								const int dTrans = std::max(std::abs(cand.X - tc.X), std::abs(cand.Y - tc.Y));
-								if (dTrans <= 3)
-									score -= (4 - dTrans) * 450;
-							}
-
-							if (pEnemyU->Destination != nullptr)
-							{
-								const CellStruct dc = CellClass::Coord2Cell(pEnemyU->Destination->GetCoords());
-								if (dc != islandRefCell)
-								{
-									const int dDest = std::max(std::abs(cand.X - dc.X), std::abs(cand.Y - dc.Y));
-									if (dDest <= 2)
-										score -= (3 - dDest) * 350;
-								}
-							}
-						}
-
-						continue;
-					}
-
-					if (pHouse->IsAlliedWith(pEnemyU->Owner) || pEnemyU->Owner->IsNeutral())
-						continue;
-
-					const CellStruct uc = pEnemyU->GetMapCoords();
-					const int dist = std::max(std::abs(cand.X - uc.X), std::abs(cand.Y - uc.Y));
-					if (dist < minEnemyUnitDist)
-						minEnemyUnitDist = dist;
+					if (dTrans <= 3)
+						score -= (4 - dTrans) * 450;
 				}
 
-				// Strongly avoid landing inside an enemy base or within range of enemy defenses/units!
-				if (minEnemyDefDist <= 16)
-					score -= 5000 + (17 - minEnemyDefDist) * 350;
-				if (minEnemyBldDist <= 14)
-					score -= 3800 + (15 - minEnemyBldDist) * 260;
+				for (auto const& dc : landingOwnTransportDests)
+				{
+					if (dc == islandRefCell)
+						continue;
+
+					const int dDest = std::max(std::abs(cand.X - dc.X), std::abs(cand.Y - dc.Y));
+
+					if (dDest <= 2)
+						score -= (3 - dDest) * 350;
+				}
+
+				if (defenseThreat > 0)
+					score -= 5000 + defenseThreat * 350;
+				if (minCoveredBldDist <= 14)
+					score -= 3800 + (15 - minCoveredBldDist) * 260;
+				if (minAnyBldDist <= 5)
+					score -= 1500 + (6 - minAnyBldDist) * 200;
 				if (minEnemyUnitDist <= 11)
 					score -= 2400 + (12 - minEnemyUnitDist) * 200;
 
 				// Reward completely uncontested beachheads on the island outside enemy range!
-				if (islandHasEnemyPresence && minEnemyDefDist >= 17 && minEnemyBldDist >= 15 && minEnemyUnitDist >= 12)
+				if (islandHasEnemyPresence && defenseThreat == 0 && minCoveredBldDist >= 15 && minEnemyUnitDist >= 12)
 				{
 					score += 1400;
 				}

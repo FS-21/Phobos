@@ -44,6 +44,41 @@ namespace
 		return true;
 	}
 
+	// Type-level carryall rule, the one UnitExt::CarryallCanLift applies to a unit carrier: a vehicle
+	// (not organic, naval or NonVehicle) whose type allows lifting (Carryall.Allowed), not listed in the
+	// carrier's Carryall.IgnoreTypes, and within its size limit (Carryall.SizeLimit, and SizeLimit for
+	// an aircraft carryall) unless the carrier lists it in Carryall.AllowTypes. Carryall.ExclusiveWithPassengers
+	// depends on the carrier's passengers right now: the engine check covers it for unit carriers.
+	bool CarryallTypeCanLiftType(const TechnoTypeClass* pCarryType, const TechnoTypeClass* pCargoType)
+	{
+		auto const pCargo = abstract_cast<const UnitTypeClass*>(pCargoType);
+
+		if (!pCarryType || !pCargo || pCargo->Organic || pCargo->Naval || pCargo->NonVehicle)
+			return false;
+
+		auto const pCargoExt = TechnoTypeExt::Fetch(pCargo);
+		auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType);
+
+		if (pCargoExt && !pCargoExt->Carryall_Allowed.Get())
+			return false;
+
+		if (pCarryExt && pCarryExt->Carryall_IgnoreTypes.Contains(const_cast<UnitTypeClass*>(pCargo)))
+			return false;
+
+		if (pCarryExt && pCarryExt->Carryall_AllowTypes.Contains(const_cast<UnitTypeClass*>(pCargo)))
+			return true;
+
+		const int cargoSize = static_cast<int>(pCargo->TechnoTypeClass::Size);
+
+		if (pCarryType->WhatAmI() == AbstractType::AircraftType && pCarryType->SizeLimit > 0
+			&& cargoSize > static_cast<int>(pCarryType->SizeLimit))
+		{
+			return false;
+		}
+
+		return !(pCarryExt && pCarryExt->Carryall_SizeLimit.isset() && cargoSize > pCarryExt->Carryall_SizeLimit.Get());
+	}
+
 	// Finds a safe coastal/flank cell on a target island (matching
 	// targetIslandZone) away from enemy turrets & units
 	// Validates Carryall pickup against rulesmd.ini tags (Carryall.Allowed,
@@ -67,29 +102,17 @@ namespace
 			return false;
 		}
 
-		if (pUnitType->Organic || pUnitType->Naval || pUnitType->NonVehicle)
-			return false;
-
-		if (pCarryType->SizeLimit > 0
-			&& static_cast<int>(pUnitType->TechnoTypeClass::Size) > static_cast<int>(pCarryType->SizeLimit))
+		// Troops aboard and a slung vehicle exclude each other on this carrier.
+		if (pCarryall->Passengers.NumPassengers > 0)
 		{
-			return false;
-		}
+			auto const pCarryTypeExt = TechnoTypeExt::Fetch(pCarryType);
 
-		if (auto const pCarryTypeExt = TechnoTypeExt::Fetch(pCarryType))
-		{
-			if (pCarryTypeExt->Carryall_SizeLimit.isset()
-				&& static_cast<int>(pUnitType->TechnoTypeClass::Size) > pCarryTypeExt->Carryall_SizeLimit.Get())
-			{
-				return false;
-			}
-		}
-
-		if (auto const pUnitTypeExt = TechnoTypeExt::Fetch(pUnitType))
-		{
-			if (!pUnitTypeExt->Carryall_Allowed.Get())
+			if (pCarryTypeExt && pCarryTypeExt->Carryall_ExclusiveWithPassengers)
 				return false;
 		}
+
+		if (!CarryallTypeCanLiftType(pCarryType, pUnitType))
+			return false;
 
 		return !pUnit->Transporter;
 	}
@@ -119,19 +142,7 @@ namespace
 		auto CanCarryallTypeLift = [&](const TechnoTypeClass* pCarryType, bool isCarryallFlag) -> bool
 		{
 			// Passengers is irrelevant here: a carryall lifts one vehicle even when it is unset.
-			if (!isCarryallFlag || !isLiftableVehicle || !pCarryType)
-				return false;
-
-			if (pCarryType->SizeLimit > 0 && passSize > static_cast<int>(pCarryType->SizeLimit))
-				return false;
-
-			if (auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType))
-			{
-				if (pCarryExt->Carryall_SizeLimit.isset() && passSize > pCarryExt->Carryall_SizeLimit.Get())
-					return false;
-			}
-
-			return true;
+			return isCarryallFlag && isLiftableVehicle && CarryallTypeCanLiftType(pCarryType, pFootType);
 		};
 
 		for (auto const pU : UnitClass::Array)
@@ -230,7 +241,9 @@ namespace
 		if (ownZone < 0 || MapClass::Instance.GetMovementZoneType(target, pType->MovementZone, false) == ownZone)
 			return nullptr;
 
-		for (int r = 1; r <= 12; ++r)
+		// Up to 32 cells: a wave target deep inland (12 was too short) left ships with a land cell
+		// they could never reach, so their attack-move stalled and was sent again in a loop.
+		for (int r = 1; r <= 32; ++r)
 		{
 			CellClass* pBest = nullptr;
 			int bestDist = INT_MAX;
@@ -265,6 +278,484 @@ namespace
 		return nullptr;
 	}
 
+	// A flyer (jumpjet, aircraft) only finishes a move once it can settle on its cell: several sent
+	// to the same cell kept hovering there in Mission::Move and got the order again and again. When
+	// another unit of ours already has that cell as destination or stands on it, the flyer gets the
+	// nearest cell within 5 that is free of both (ring by ring, fixed order, so a flyer keeps the cell
+	// it already has).
+	CellClass* SpreadFlyerDestination(FootClass* pFoot, CellClass* pCell)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || !pCell || !pFoot->Owner
+			|| !(pType->JumpJet || pType->MovementZone == MovementZone::Fly || pFoot->WhatAmI() == AbstractType::Aircraft))
+		{
+			return pCell;
+		}
+
+		std::vector<CellStruct> claimed;
+
+		auto const claim = [&](FootClass* pOther)
+		{
+			if (!pOther || pOther == pFoot || pOther->Owner != pFoot->Owner || !pOther->IsAlive || pOther->InLimbo)
+				return;
+
+			if (auto const pOtherDest = abstract_cast<CellClass*>(pOther->Destination))
+				claimed.push_back(pOtherDest->MapCoords);
+			else
+				claimed.push_back(pOther->GetMapCoords());
+		};
+
+		const CellStruct target = pCell->MapCoords;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->GetMapCoords().DistanceFrom(target) <= 8.0)
+				claim(pUnit);
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->GetMapCoords().DistanceFrom(target) <= 8.0)
+				claim(pInf);
+		}
+
+		for (auto const pAir : AircraftClass::Array)
+		{
+			if (pAir && pAir->GetMapCoords().DistanceFrom(target) <= 8.0)
+				claim(pAir);
+		}
+
+		auto const isClaimed = [&](const CellStruct& c)
+		{
+			return std::find(claimed.begin(), claimed.end(), c) != claimed.end();
+		};
+
+		if (!isClaimed(target))
+			return pCell;
+
+		for (int r = 1; r <= 5; ++r)
+		{
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::abs(dx) != r && std::abs(dy) != r)
+						continue;
+
+					const CellStruct c { static_cast<short>(target.X + dx), static_cast<short>(target.Y + dy) };
+					auto const pCand = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pCand || isClaimed(c) || pCand->GetBuilding()
+						|| !pCand->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false))
+					{
+						continue;
+					}
+
+					return pCand;
+				}
+			}
+		}
+
+		return pCell;
+	}
+
+	// Coarse sea route for a ship: breadth-first search over the cells of its movement zone on a
+	// 3-cell grid (8 directions, fixed order), from the ship to target (a cell of its zone). Returns
+	// the first cell of the route at least `hop` cells from the ship, or nullptr when the target is
+	// within reach of one order (hop + 5) or no route is found (6000 grid nodes at most). A long
+	// naval order then goes in hops the engine path finder can manage.
+	CellClass* NavalRouteHop(FootClass* pFoot, const CellStruct& target, int hop)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || (pType->MovementZone != MovementZone::Water && pType->MovementZone != MovementZone::WaterBeach))
+			return nullptr;
+
+		const CellStruct from = pFoot->GetMapCoords();
+
+		if (from.DistanceFrom(target) <= hop + 5.0)
+			return nullptr;
+
+		const MovementZone mz = pType->MovementZone;
+		const int zone = ObjectZone(pFoot, mz);
+
+		if (zone < 0 || MapClass::Instance.GetMovementZoneType(target, mz, false) != zone)
+			return nullptr;
+
+		constexpr int Step = 3;
+		constexpr int DirX[8] = { 1, 1, 0, -1, -1, -1, 0, 1 };
+		constexpr int DirY[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+		auto const key = [](const CellStruct& c) { return (static_cast<uint32_t>(static_cast<uint16_t>(c.X)) << 16) | static_cast<uint16_t>(c.Y); };
+
+		std::unordered_map<uint32_t, CellStruct> parent;
+		std::vector<CellStruct> queue { from };
+		parent.emplace(key(from), from);
+		CellStruct reached = CellStruct::Empty;
+
+		for (size_t head = 0; head < queue.size() && queue.size() < 6000; ++head)
+		{
+			const CellStruct node = queue[head];
+
+			if (node.DistanceFrom(target) <= Step + 0.5)
+			{
+				reached = node;
+				break;
+			}
+
+			for (int d = 0; d < 8; ++d)
+			{
+				const CellStruct next { static_cast<short>(node.X + DirX[d] * Step), static_cast<short>(node.Y + DirY[d] * Step) };
+
+				if (!MapClass::Instance.CoordinatesLegal(next) || parent.contains(key(next))
+					|| MapClass::Instance.GetMovementZoneType(next, mz, false) != zone)
+				{
+					continue;
+				}
+
+				parent.emplace(key(next), node);
+				queue.push_back(next);
+			}
+		}
+
+		if (reached == CellStruct::Empty)
+			return nullptr;
+
+		std::vector<CellStruct> route;
+
+		for (CellStruct c = reached; c != from; c = parent[key(c)])
+			route.push_back(c);
+
+		for (auto it = route.rbegin(); it != route.rend(); ++it)
+		{
+			if (from.DistanceFrom(*it) >= hop)
+				return MapClass::Instance.TryGetCellAt(*it);
+		}
+
+		return nullptr;
+	}
+
+	// Coarse land route for a ground unit: breadth-first search over the cells of its movement zone,
+	// one cell at a time (a cliff line must never be stepped over; a diagonal step needs both of its
+	// side cells in the zone), 8 directions in a fixed order, 40000 cells at most. The route is cached
+	// per movement zone, start and target (4-cell grid) for 900 frames. Returns the route cell `hop`
+	// steps ahead of the unit, or nullptr when the target is within hop + 10 cells, out of the zone,
+	// or no route is found. Match #6194 (Polar Knot): both bases sit on plateaus whose cliff tiles
+	// are missing from the theater; they load as flat cells, the zone map links their one-level steps
+	// and the engine path finder fails inside a corridor over them ("Regular findpath failure"), so
+	// whole waves stood in their own base. Legs along a route with the real step rule get out.
+	CellClass* GroundRouteHop(FootClass* pFoot, const CellStruct& target, int hop)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly
+			|| pType->MovementZone == MovementZone::Subterrannean || pFoot->IsInAir())
+		{
+			return nullptr;
+		}
+
+		// Ships too (match #7061, Fludded Recources: a naval yard built across a narrow channel; the
+		// zone map still links both sides, so the engine kept sending 15 ships into the blocked
+		// channel although open sea led around the island). Water is flat: no step rule.
+		const bool naval = pType->Naval || pType->MovementZone == MovementZone::Water
+			|| pType->MovementZone == MovementZone::WaterBeach;
+		const CellStruct from = pFoot->GetMapCoords();
+		CellStruct goal = target;
+
+		if (from.DistanceFrom(goal) <= hop + 10.0)
+			return nullptr;
+
+		const MovementZone mz = pType->MovementZone;
+		const int zone = ObjectZone(pFoot, mz);
+
+		if (zone <= 1)
+			return nullptr;
+
+		// A ship sent at a land cell goes for the nearest water of its zone within 8 cells.
+		if (naval && MapClass::Instance.GetMovementZoneType(goal, mz, false) != zone)
+		{
+			bool found = false;
+
+			for (int r = 1; r <= 8 && !found; ++r)
+			{
+				for (int dy = -r; dy <= r && !found; ++dy)
+				{
+					for (int dx = -r; dx <= r && !found; ++dx)
+					{
+						if (std::max(std::abs(dx), std::abs(dy)) != r)
+							continue;
+
+						const CellStruct c { static_cast<short>(target.X + dx), static_cast<short>(target.Y + dy) };
+
+						if (MapClass::Instance.CoordinatesLegal(c) && MapClass::Instance.GetMovementZoneType(c, mz, false) == zone)
+						{
+							goal = c;
+							found = true;
+						}
+					}
+				}
+			}
+		}
+
+		if (MapClass::Instance.GetMovementZoneType(goal, mz, false) != zone)
+			return nullptr;
+
+		struct GroundRoute
+		{
+			int MatchSerial;
+			int Frame;
+			std::vector<CellStruct> Cells; // start -> target
+		};
+
+		static std::unordered_map<uint64_t, GroundRoute> routes;
+		const int now = Unsorted::CurrentFrame;
+		const uint64_t routeKey = (static_cast<uint64_t>(static_cast<uint16_t>(zone)) << 48)
+			| (static_cast<uint64_t>(static_cast<uint8_t>(mz)) << 40)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(from.X / 4)) << 30) | (static_cast<uint64_t>(static_cast<uint16_t>(from.Y / 4)) << 20)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(goal.X / 4)) << 10) | static_cast<uint64_t>(static_cast<uint16_t>(goal.Y / 4));
+
+		if (routes.size() > 256)
+		{
+			std::erase_if(routes, [now](const auto& entry)
+				{ return entry.second.MatchSerial != NeuralMatchSerial || now < entry.second.Frame || now - entry.second.Frame > 900; });
+		}
+
+		auto it = routes.find(routeKey);
+
+		if (it == routes.end() || it->second.MatchSerial != NeuralMatchSerial || now < it->second.Frame || now - it->second.Frame > 900)
+		{
+			constexpr int DirX[8] = { 1, 0, -1, 0, 1, -1, -1, 1 };
+			constexpr int DirY[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
+			auto const key = [](const CellStruct& c) { return (static_cast<uint32_t>(static_cast<uint16_t>(c.X)) << 16) | static_cast<uint16_t>(c.Y); };
+			// A cell the unit can stand on: in its zone and clear for its speed type (other units ignored).
+			auto const inZone = [&](const CellStruct& c)
+			{
+				if (!MapClass::Instance.CoordinatesLegal(c) || MapClass::Instance.GetMovementZoneType(c, mz, false) != zone)
+					return false;
+
+				auto const pCell = MapClass::Instance.TryGetCellAt(c);
+				return pCell && pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false);
+			};
+
+			// One step between two such cells, as the engine path finder allows it (FootClass::Can_Reach):
+			// the same height level, or one level apart with the lower cell a slope (SlopeIndex != 0; a
+			// slope cell rises from its own level to the next one).
+			// The zone map links any two cells less than 2 levels apart, so a flat step of one level
+			// shares the zone although no unit can climb it (Polar Knot: cliff and ramp tiles of tile sets
+			// missing from the theater load as flat clear cells).
+			auto const canStep = [naval](const CellStruct& a, const CellStruct& b)
+			{
+				if (naval)
+					return true;
+
+				auto const pA = MapClass::Instance.TryGetCellAt(a);
+				auto const pB = MapClass::Instance.TryGetCellAt(b);
+
+				if (!pA || !pB)
+					return false;
+
+				const int levelA = pA->Level;
+				const int levelB = pB->Level;
+
+				if (levelA == levelB)
+					return true;
+
+				if (std::abs(levelA - levelB) != 1)
+					return false;
+
+				return (levelA < levelB ? pA : pB)->SlopeIndex != 0;
+			};
+
+			std::unordered_map<uint32_t, CellStruct> parent;
+			parent.reserve(16384);
+			std::vector<CellStruct> queue { from };
+			queue.reserve(16384);
+			parent.emplace(key(from), from);
+			CellStruct reached = CellStruct::Empty;
+
+			for (size_t head = 0; head < queue.size() && queue.size() < 40000; ++head)
+			{
+				const CellStruct node = queue[head];
+
+				if (node.DistanceFrom(goal) <= 1.5)
+				{
+					reached = node;
+					break;
+				}
+
+				for (int d = 0; d < 8; ++d)
+				{
+					const CellStruct next { static_cast<short>(node.X + DirX[d]), static_cast<short>(node.Y + DirY[d]) };
+
+					if (parent.contains(key(next)) || !inZone(next) || !canStep(node, next))
+						continue;
+
+					if (d >= 4)
+					{
+						const CellStruct sideA { next.X, node.Y };
+						const CellStruct sideB { node.X, next.Y };
+
+						if (!inZone(sideA) || !inZone(sideB) || !canStep(node, sideA) || !canStep(node, sideB)
+							|| !canStep(sideA, next) || !canStep(sideB, next))
+						{
+							continue;
+						}
+					}
+
+					parent.emplace(key(next), node);
+					queue.push_back(next);
+				}
+			}
+
+			GroundRoute route { NeuralMatchSerial, now, {} };
+
+			if (reached != CellStruct::Empty)
+			{
+				for (CellStruct c = reached; c != from; c = parent[key(c)])
+					route.Cells.push_back(c);
+
+				std::reverse(route.Cells.begin(), route.Cells.end());
+			}
+
+			// Diagnostics, the first 4 routes of a match: land types and heights along the route.
+			static int routeLogSerial = -1;
+			static int routeLogCount = 0;
+
+			if (routeLogSerial != NeuralMatchSerial)
+			{
+				routeLogSerial = NeuralMatchSerial;
+				routeLogCount = 0;
+			}
+
+			if (routeLogCount < 4)
+			{
+				++routeLogCount;
+				int landCounts[16] = {};
+				int minLevel = 999;
+				int maxLevel = -999;
+				int maxStep = 0;
+				int prevLevel = INT_MIN;
+
+				for (auto const& c : route.Cells)
+				{
+					if (auto const pC = MapClass::Instance.TryGetCellAt(c))
+					{
+						landCounts[std::clamp(static_cast<int>(pC->LandType), 0, 15)]++;
+						minLevel = std::min(minLevel, static_cast<int>(pC->Level));
+						maxLevel = std::max(maxLevel, static_cast<int>(pC->Level));
+
+						if (prevLevel != INT_MIN)
+							maxStep = std::max(maxStep, std::abs(static_cast<int>(pC->Level) - prevLevel));
+
+						prevLevel = pC->Level;
+					}
+				}
+
+				char landText[160] = "";
+				size_t landLen = 0;
+
+				for (int lt = 0; lt < 16; ++lt)
+				{
+					if (landCounts[lt] > 0 && landLen < sizeof(landText) - 16)
+						landLen += std::snprintf(landText + landLen, sizeof(landText) - landLen, "L%d:%d ", lt, landCounts[lt]);
+				}
+
+				Debug::Log("[NeuralAI] Ground route %s (%d,%d)->(%d,%d) mz %d zone %d: %d cells, land %s levels %d..%d max step %d, searched %d\n",
+					pType->ID, from.X, from.Y, target.X, target.Y, static_cast<int>(mz), zone, static_cast<int>(route.Cells.size()),
+					landText, minLevel, maxLevel, maxStep, static_cast<int>(queue.size()));
+
+				// The ground of the first 40 route cells (first route of the match only): 'r' route, '#'
+				// building, '~' water, '^' not clear for this unit, '/' a slope, 'u' a unit, digits the height level.
+				if (routeLogCount == 1)
+				{
+					// Without a route, the ground around the start.
+					const int around = route.Cells.empty() ? 24 : 0;
+					int x0 = from.X - around, x1 = from.X + around, y0 = from.Y - around, y1 = from.Y + around;
+
+					for (size_t i = 0; i < route.Cells.size() && i < 40; ++i)
+					{
+						x0 = std::min<int>(x0, route.Cells[i].X);
+						x1 = std::max<int>(x1, route.Cells[i].X);
+						y0 = std::min<int>(y0, route.Cells[i].Y);
+						y1 = std::max<int>(y1, route.Cells[i].Y);
+					}
+
+					x0 -= 4; x1 = std::min(x1 + 4, x0 + 59); y0 -= 4; y1 = std::min(y1 + 4, y0 + 49);
+
+					for (int y = y0; y <= y1; ++y)
+					{
+						char row[64] = {};
+
+						for (int x = x0; x <= x1; ++x)
+						{
+							const CellStruct c { static_cast<short>(x), static_cast<short>(y) };
+							auto const pC = MapClass::Instance.TryGetCellAt(c);
+							char ch = ' ';
+
+							if (pC)
+							{
+								const bool onRoute = std::find(route.Cells.begin(), route.Cells.begin() + std::min<size_t>(40, route.Cells.size()), c)
+									!= route.Cells.begin() + std::min<size_t>(40, route.Cells.size());
+
+								if (pC->GetBuilding())
+									ch = '#';
+								else if (pC->LandType == LandType::Water)
+									ch = '~';
+								else if (!pC->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false))
+									ch = '^';
+								else if (onRoute)
+									ch = 'r';
+								else if (pC->SlopeIndex != 0)
+									ch = '/';
+								else if (pC->FirstObject)
+									ch = 'u';
+								else
+									ch = static_cast<char>('0' + std::clamp(static_cast<int>(pC->Level), 0, 9));
+							}
+
+							row[x - x0] = ch;
+						}
+
+						Debug::Log("[NeuralAI]   route y %3d x%3d %s\n", y, x0, row);
+					}
+				}
+			}
+
+			it = routes.insert_or_assign(routeKey, std::move(route)).first;
+		}
+
+		// The route cell `hop` steps ahead of the route cell nearest to this unit (units of one group
+		// share a cached route from a start up to 4 cells away). Counted in steps, not in straight
+		// distance: a leg is then a stretch of the route itself, which the engine path finder walks
+		// even where its zone map links cells no unit can step between (Polar Knot: a 25-cell
+		// straight leg around a plateau edge still failed).
+		auto const& cells = it->second.Cells;
+
+		if (cells.empty())
+			return nullptr;
+
+		size_t nearest = 0;
+		double nearestDist = from.DistanceFrom(cells[0]);
+
+		for (size_t i = 1; i < cells.size(); ++i)
+		{
+			const double dist = from.DistanceFrom(cells[i]);
+
+			if (dist < nearestDist)
+			{
+				nearestDist = dist;
+				nearest = i;
+			}
+		}
+
+		const size_t next = std::min(cells.size() - 1, nearest + static_cast<size_t>(std::max(1, hop)));
+
+		if (from.DistanceFrom(cells[next]) < 3.0)
+			return nullptr;
+
+		return MapClass::Instance.TryGetCellAt(cells[next]);
+	}
+
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5)
 	{
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
@@ -274,6 +765,8 @@ namespace
 		{
 			if (auto const pReach = NearestReachableNavalCell(pFoot, pDestAsCell->MapCoords))
 				pDest = pReach;
+			else
+				pDest = SpreadFlyerDestination(pFoot, pDestAsCell);
 		}
 
 		const bool isMoving = pFoot->CurrentMission == Mission::Move || pFoot->QueuedMission == Mission::Move;

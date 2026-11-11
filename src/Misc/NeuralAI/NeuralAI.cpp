@@ -25,6 +25,8 @@
 #include <TechnoClass.h>
 #include <TemporalClass.h>
 #include <TerrainClass.h>
+#include <TubeClass.h>
+#include <VeinholeMonsterClass.h>
 #include <TerrainTypeClass.h>
 #include <UnitClass.h>
 #include <UnitTypeClass.h>

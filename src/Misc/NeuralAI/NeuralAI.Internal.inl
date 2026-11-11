@@ -172,6 +172,26 @@ namespace
 		UrbanEvacuate,
 		UrbanClear,
 		AllyTechYield,
+		DeployerIslandNoRoom,
+		StuckUnloadMoved,
+		CapitalGroupLaunched,
+		CapitalGroupRetreat,
+		SubmarineSonarAvoided,
+		DepotEmergencySale,
+		VeinholeAttack,
+		CliffOpened,
+		StealthRevealFired,
+		StagingHoldTimedOut,
+		JamCleared,
+		JamYielded,
+		MouthCleared,
+		HoverReleased,
+		GroundRouteHop,
+		MedicEscort,
+		GarrisonSquad,
+		DryEconomySale,
+		FerryReserved,
+		ProductionPickBanned,
 		Count
 	};
 
@@ -195,7 +215,9 @@ namespace
 		"bankFactoryPick", "bankYardPick",
 		"airWings", "airWingSorties", "airInterceptSorties", "airSoloStrikes", "airFrontPatrols", "aircraftFielded",
 		"aircraftLost",
-		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield" };
+		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom", "stuckUnloadMoved", "capitalGroupLaunched", "capitalGroupRetreat", "submarineSonarAvoided", "depotEmergencySale", "veinholeAttack", "cliffOpened", "stealthRevealFired",
+		"stagingHoldTimedOut", "jamCleared", "jamYielded", "mouthCleared",
+		"hoverReleased", "groundRouteHop", "medicEscort", "garrisonSquad", "dryEconomySale", "ferryReserved", "productionPickBanned" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -1495,6 +1517,36 @@ namespace
 		return pType && (pType->Engineer || IsSpyInfantryType(pType) || pType->VehicleThief);
 	}
 
+	// A soldier that only heals or repairs (every weapon it has does negative damage): a medic or a
+	// field mechanic, support for the army and no fighter of its own. NeverUse weapons (target
+	// scanners such as C&C Reloaded's VirtualScanner, Damage=1) never fire and do not count: with
+	// them counted the medic was a fighter, so no healer cap, no wave limit and no escort (match
+	// #7002: 37 medics).
+	bool IsHealerInfantryType(const InfantryTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		bool heals = false;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWS = const_cast<InfantryTypeClass*>(pType)->GetWeapon(i);
+			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+			if (!pWeapon || pWeapon->NeverUse)
+				continue;
+
+			if (pWeapon->Damage > 0)
+				return false;
+
+			if (pWeapon->Damage < 0)
+				heals = true;
+		}
+
+		return heals;
+	}
+
 	// A specialist of this type has a job inside this building (it enters it): engineers capture,
 	// spies infiltrate.
 	bool SpecialistWorksBuilding(const InfantryTypeClass* pType, const BuildingTypeClass* pBldType)
@@ -1749,6 +1801,127 @@ namespace
 			return (pTransport->Passengers.GetTotalSize() + pendingSize + passengerSize) <= maxAllowed;
 
 		return (pTransport->Passengers.NumPassengers + pendingCount + 1) <= maxAllowed;
+	}
+
+	// What the rules say about how a superweapon is aimed (Ares tags Phobos does not keep): the
+	// SW.AITargeting mode in lower case ("" when not set), SW.RequiresTarget mentions water,
+	// SW.FireIntoShroud, and SW.Range (cells, Range when not set). Read once per type.
+	struct NeuralSWTargeting
+	{
+		std::string Mode {};
+		bool RequiresWater { false };
+		bool FireIntoShroud { true };
+		double Range { 0.0 };
+		// Launch-site ring (SW.RangeMinimum / SW.RangeMaximum, cells; < 0 when not set) and the
+		// buildings that fire it: EMPulse.Cannons, else any building with EMPulseCannon=yes for an
+		// EMPulse, else the buildings that grant it.
+		double RangeMin { -1.0 };
+		double RangeMax { -1.0 };
+		bool IsEMPulse { false };
+		// Its warhead (SW.Warhead) paralyses (EMEffect): aimed at threats near our base, followed up.
+		bool IsEMP { false };
+		std::vector<std::string> Cannons {};
+	};
+
+	const NeuralSWTargeting& GetSWTargeting(const SuperWeaponTypeClass* pSWType)
+	{
+		static std::unordered_map<const SuperWeaponTypeClass*, NeuralSWTargeting> cache;
+		static int cacheSerial = -1;
+
+		if (cacheSerial != NeuralMatchSerial)
+		{
+			cacheSerial = NeuralMatchSerial;
+			cache.clear();
+		}
+
+		auto [it, inserted] = cache.try_emplace(pSWType);
+
+		if (inserted && pSWType && CCINIClass::INI_Rules)
+		{
+			auto const pINI = CCINIClass::INI_Rules;
+			char buffer[128] {};
+
+			pINI->ReadString(pSWType->ID, "SW.AITargeting", "", buffer, sizeof(buffer));
+			std::string mode = buffer;
+			std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			mode.erase(std::remove_if(mode.begin(), mode.end(), [](unsigned char c) { return std::isspace(c); }), mode.end());
+
+			// Not set: the default Ares gives each of its own types (Antares Misc/SWTypes, Initialize).
+			// Vanilla types keep "" (their own branches aim them).
+			if (mode.empty())
+			{
+				char typeName[64] {};
+				pINI->ReadString(pSWType->ID, "Type", "", typeName, sizeof(typeName));
+				std::string type = typeName;
+				std::transform(type.begin(), type.end(), type.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+				type.erase(std::remove_if(type.begin(), type.end(), [](unsigned char c) { return std::isspace(c); }), type.end());
+
+				mode = type == "sonarpulse" ? "stealth"
+					: type == "battery" ? "lowpower"
+					: (type == "droppod" || type == "unitdelivery") ? "paradrop"
+					: type == "genericwarhead" ? "offensive"
+					: type == "hunterseeker" ? "hunterseeker"
+					: type == "protect" ? "forceshield"
+					: (type == "empulse" || type == "firestorm") ? "none"
+					: "";
+			}
+
+			it->second.Mode = mode;
+
+			char required[128] {};
+			pINI->ReadString(pSWType->ID, "SW.RequiresTarget", "", required, sizeof(required));
+			std::string req = required;
+			std::transform(req.begin(), req.end(), req.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			it->second.RequiresWater = req.find("water") != std::string::npos && req.find("land") == std::string::npos;
+
+			char shroud[32] {};
+			pINI->ReadString(pSWType->ID, "SW.FireIntoShroud", "yes", shroud, sizeof(shroud));
+			it->second.FireIntoShroud = !(shroud[0] == 'n' || shroud[0] == 'N' || shroud[0] == 'f' || shroud[0] == 'F' || shroud[0] == '0');
+
+			it->second.Range = pINI->ReadDouble(pSWType->ID, "SW.Range", pINI->ReadDouble(pSWType->ID, "Range", 0.0));
+			it->second.RangeMin = pINI->ReadDouble(pSWType->ID, "SW.RangeMinimum", -1.0);
+			it->second.RangeMax = pINI->ReadDouble(pSWType->ID, "SW.RangeMaximum", -1.0);
+
+			char typeName[64] {};
+			pINI->ReadString(pSWType->ID, "Type", "", typeName, sizeof(typeName));
+			it->second.IsEMPulse = _stricmp(typeName, "EMPulse") == 0;
+
+			char warhead[64] {};
+			pINI->ReadString(pSWType->ID, "SW.Warhead", "", warhead, sizeof(warhead));
+			auto const pWarhead = warhead[0] ? WarheadTypeClass::Find(warhead) : nullptr;
+			it->second.IsEMP = pWarhead && pWarhead->EMEffect;
+
+			char cannons[512] {};
+			pINI->ReadString(pSWType->ID, "EMPulse.Cannons", "", cannons, sizeof(cannons));
+			std::string list = cannons;
+			size_t start = 0;
+
+			while (start < list.size())
+			{
+				size_t end = list.find(',', start);
+
+				if (end == std::string::npos)
+					end = list.size();
+
+				std::string id = list.substr(start, end - start);
+				id.erase(std::remove_if(id.begin(), id.end(), [](unsigned char c) { return std::isspace(c); }), id.end());
+
+				if (!id.empty())
+					it->second.Cannons.push_back(id);
+
+				start = end + 1;
+			}
+		}
+
+		return it->second;
+	}
+
+	// Modes that aim at the enemy: the generic "fire at a visible enemy building" branch fits them.
+	bool IsOffensiveSWTargetingMode(const std::string& mode)
+	{
+		return mode.empty() || mode == "nuke" || mode == "lightningstorm" || mode == "offensive" || mode == "enemybase"
+			|| mode == "multimissile" || mode == "attack" || mode == "paradrop" || mode == "droppod" || mode == "lightningrandom"
+			|| mode == "lighningrandom" || mode == "geneticmutator" || mode == "psychicdominator" || mode == "hunterseeker";
 	}
 
 	bool IsTunnelDeliverySuperWeapon(const SuperWeaponTypeClass* pSWType, HouseClass* pOwner)

@@ -100,6 +100,24 @@ namespace
 
 	// One running strategic plan (members and targets are kept by UniqueID, never by
 	// pointer, and resolved every AI tick).
+	// Last type and cell seen of a plan member, so a member that deploys into a structure or packs
+	// up again (a new object with a new UniqueID) is followed into what it became.
+	struct NeuralPlanMemberTrace
+	{
+		const TechnoTypeClass* Type { nullptr };
+		CellStruct Cell { CellStruct::Empty };
+		int Frame { 0 };
+	};
+
+	// A group of capital units of one domain (ground, air, sea): UpdateCapitalGroups.
+	struct NeuralCapitalGroup
+	{
+		std::vector<DWORD> Members {};
+		bool Attacking { false };
+		DWORD TargetID { 0 };
+		int StartValue { 0 };
+	};
+
 	struct NeuralPlanInstance
 	{
 		bool Active { false };
@@ -454,6 +472,10 @@ namespace
 		// Stuck order watchdog (UpdateStuckUnits): by unit UniqueID, the cell where it has been
 		// standing with a destination and since when. Keyed lookups only, never iterated.
 		std::unordered_map<DWORD, NeuralStuckTrack> StuckTracks {};
+		// Every ground unit of ours: the cell it stands on and since when, without firing (IsFootHeldStill).
+		std::unordered_map<DWORD, NeuralStuckTrack> FootProgress {};
+		// Our flying ground units (jumpjets): the cell they hover over and since when (UpdateHoveringFlyers).
+		std::unordered_map<DWORD, NeuralStuckTrack> HoverTracks {};
 		// Aircraft attack watchdog (UpdateStuckUnits), keyed the same way.
 		std::unordered_map<DWORD, NeuralAirStallTrack> AirStallTracks {};
 		// Expansion drive: ore fields (12x12 blocks) on our landmass more than 14 cells from any
@@ -520,6 +542,12 @@ namespace
 		// Broke hold on: no repairs (wrench, service depot, shipyard) either.
 		bool BrokeHoldActive { false };
 		int LastBrokeSaleFrame { -100000 };
+		// Dry economy (UpdateEconomyCrisis): the last frame a gatherer of ours brought money in (-1:
+		// never), whether our gatherers have brought nothing for a long time while we are broke (the
+		// fields are gone), and the last sale it made.
+		int LastHarvestIncomeFrame { -1 };
+		bool DryEconomyActive { false };
+		int LastDrySaleFrame { -100000 };
 		int LastHarvesterBalanceFrame { -100000 };
 		// Expert 0 work (UpdateEconomyCrisis, every 150 frames): the selector prior from the economy
 		// trouble there is now, and what it is made of. Own state and current sight only.
@@ -582,6 +610,8 @@ namespace
 		NeuralCoalitionState Coalition {};
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
+		// Transports in Mission::Unload: UniqueID -> (cell, first frame seen there) (UpdateStuckUnloads).
+		std::unordered_map<DWORD, std::pair<CellStruct, int>> UnloadWatch;
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
 		CellStruct LastYardUndeployCell { CellStruct::Empty };
 		int LastYardUndeployFrame { -100000 };
@@ -611,6 +641,72 @@ namespace
 		// Credits held beyond the reserve at the last sample (0 when none): army caps grow with it.
 		int BankSurplus { 0 };
 		std::array<int, 4> BankWantedFactories {};
+		// AI ticks since the last governor sample at which each queue (BankQueue order) had a
+		// factory of its kind, and those at which one of them was producing.
+		std::array<int, 4> BankQueueTicks {};
+		std::array<int, 4> BankQueueBusyTicks {};
+		// A known enemy base stands on land we cannot walk to from home (features[21] at the last
+		// production tick): harassment from range is how an offensive bank presses it.
+		bool EnemyAcrossWater { false };
+		// Islands (movement zone -> frame until) where an expansion deployer found no room for its
+		// building: the island search skips them until then.
+		std::map<int, int> NoRoomIslandUntil;
+		// The enemy has no building left that counts and still has ships or submarines: until this
+		// frame the house builds and sends sonar ships and ships that hit under water.
+		int NavalRemnantUntil { -1 };
+		// An enemy submarine (Naval, Cloakable) was seen within 30 cells of our base: until this frame
+		// the house builds and sends ships that hit under water or carry sonar.
+		int SubThreatUntil { -1 };
+		// The unit on its way to a repair station to be sold for emergency money (0 when none).
+		DWORD DepotSaleUnit { 0 };
+		// Our refineries and those with fewer than 6 ore cells left within 12 cells (sampled every 2
+		// cells), refreshed every 900 frames (UpdateRefineryDepletion).
+		int RefineriesChecked { 0 };
+		int RefineriesDepleted { 0 };
+		int RefineryDepletionFrame { -100000 };
+		// Deployed siege structures of ours: UniqueID -> first frame seen deployed (they stay at least
+		// 450 frames before packing up again).
+		std::unordered_map<DWORD, int> DeployedSiegeSince;
+		// First frame without any ConYard of ours (-1 while we have one).
+		int NoYardSinceFrame { -1 };
+		// Our fields ran dry and an expansion MCV is wanted: what it costs (0 when not saving for one).
+		// UpdateEconomyCrisis holds the other production until the credits reach it.
+		int ExpansionSaveTarget { 0 };
+		// Island ore outlook (UpdateIslandOreOutlook, every 900 frames): credits of ore left in the
+		// fields of the landmasses we hold (a ConYard or refinery there), what they lost per 900
+		// frames (smoothed; IslandHubZoneKey names the landmasses and field blocks of that sample),
+		// how many frames the rest lasts at that pace, the nearest free field on another landmass,
+		// and whether an MCV must go there now, while the credits for it and its ride are still
+		// there. LastIslandSaleFrame paces the sales that pay for that MCV once the home ore is gone.
+		int IslandOutlookFrame { -100000 };
+		int IslandHomeOre { 0 };
+		int IslandOreRunway { -1 };
+		int IslandOreDrain { -1 };
+		unsigned int IslandHubZoneKey { 0 };
+		CellStruct IslandExpansionField { CellStruct::Empty };
+		bool IslandExpansionUrgent { false };
+		int IslandExpansionLogFrame { -100000 };
+		int LastIslandSaleFrame { -100000 };
+		int IslandMcvLogFrame { -100000 };
+		// The buildings of our MCV's Prerequisite list we still lack while that expansion is urgent.
+		std::vector<int> IslandMcvPrerequisites {};
+		// The other economic investments the production wants and cannot pay yet (0 when none): a
+		// harvester while we have fewer than refineries, a refinery for a newly reached field.
+		int HarvesterSaveTarget { 0 };
+		int RefinerySaveTarget { 0 };
+		// Economy hold bookkeeping: first frame of the current hold, and no hold before this frame (a
+		// hold that bought nothing for 3600 frames rests 1800).
+		int EconomyHoldSince { -1 };
+		int EconomyHoldPauseUntil { -1 };
+		// Enemy units seen cloaked, cloakable or under water: UniqueID -> (cell, frame), for
+		// superweapons that reveal stealth (SW.AITargeting=Stealth).
+		std::unordered_map<DWORD, std::pair<CellStruct, int>> StealthSightings;
+		// Plan members by UniqueID (UpdateStrategicPlans); dropped 600 frames after the last sight.
+		std::unordered_map<DWORD, NeuralPlanMemberTrace> PlanMemberTraces;
+		// Capital groups by domain (0 ground, 1 air, 2 sea) and the capital units they hold back from
+		// waves and lone strikes (UpdateCapitalGroups).
+		std::array<NeuralCapitalGroup, 3> CapitalGroups {};
+		std::unordered_set<DWORD> CapitalHeld {};
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
@@ -619,6 +715,22 @@ namespace
 		// for a crossing, and until when it may not ask again after giving up. Keyed lookups only.
 		std::unordered_map<DWORD, int> FerryWaitSince {};
 		std::unordered_map<DWORD, int> FerryBlockedUntil {};
+		// Ferry loading (user: divide the work by what fits): passengers reserved by a transport
+		// parked on a pickup shore, up to its free room by size. Passenger UniqueID -> transport
+		// UniqueID and the frame it was reserved. Ordered map: walked in a deterministic order.
+		struct FerryReservation
+		{
+			DWORD Transport { 0 };
+			int Frame { 0 };
+		};
+		std::map<DWORD, FerryReservation> FerryReserved {};
+		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
+		// factories idle for thousands of frames, the AI picking the same type every tick): the pick
+		// of a queue that stays empty 900 frames with money and factories is banned 5400 frames.
+		// Key: queue (1 vehicles, 2 infantry) * 100000 + type index -> frame the ban ends.
+		std::map<int, int> ProductionBanUntil {};
+		std::array<int, 3> ProductionPickIdx { -1, -1, -1 };
+		std::array<int, 3> ProductionPickSince { 0, 0, 0 };
 		int FreeFieldAnchorDist { 9999 };
 		int FreeFieldFrame { -100000 };
 		// Last airlift that turned back (damaged carrier or a defended drop zone).
@@ -669,6 +781,17 @@ namespace
 		int LastWaveDispatchFrame { -100000 };
 		int WaveStartFrame { -100000 };
 		std::array<int, 8> FailedApproachWeight {};
+		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
+		// that never gathered the wave in 2700 frames rests 2700).
+		int StagingHoldSince { -1 };
+		int StagingHoldPauseUntil { -1 };
+		// Last frame the jam breaker cleared a block of our units, last frame it looked for one, last
+		// frame bridge and tunnel mouths were cleared (UpdateStuckUnits).
+		int LastJamBreakFrame { -1 };
+		int LastJamCheckFrame { -1 };
+		int LastMouthClearFrame { -1 };
+		int LastJamDiagFrame { -1 };
+		bool JamMapLogged { false };
 		int FailedApproachDecayFrame { 0 };
 		std::vector<NeuralGroundLossTrack> GroundLossTracks {};
 		int HomeThreatPeak { 0 };
@@ -760,6 +883,8 @@ namespace
 			this->AirLossTracks.clear();
 			this->AirDangerSpots.clear();
 			this->StuckTracks.clear();
+			this->FootProgress.clear();
+			this->HoverTracks.clear();
 			this->AirStallTracks.clear();
 			this->UncolonizedOreFields = 0;
 			this->IdleHarvesterTracks.clear();
@@ -791,6 +916,9 @@ namespace
 			this->BrokeHeldObjects.clear();
 			this->BrokeHoldActive = false;
 			this->LastBrokeSaleFrame = -100000;
+			this->LastHarvestIncomeFrame = -1;
+			this->DryEconomyActive = false;
+			this->LastDrySaleFrame = -100000;
 			this->LastHarvesterBalanceFrame = -100000;
 			this->EconomyTrouble = 0;
 			this->LowPowerSinceFrame = -1;
@@ -831,6 +959,7 @@ namespace
 			this->Coalition = NeuralCoalitionState {};
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
+			this->UnloadWatch.clear();
 			this->LastYardUndeployCell = CellStruct::Empty;
 			this->LastYardUndeployFrame = -100000;
 			this->NavalNeedFrame = -100000;
@@ -849,10 +978,46 @@ namespace
 			this->BankSpendNeeded = 0;
 			this->BankSurplus = 0;
 			this->BankWantedFactories.fill(0);
+			this->BankQueueTicks.fill(0);
+			this->BankQueueBusyTicks.fill(0);
+			this->EnemyAcrossWater = false;
+			this->NoRoomIslandUntil.clear();
+			this->NavalRemnantUntil = -1;
+			this->SubThreatUntil = -1;
+			this->DepotSaleUnit = 0;
+			this->RefineriesChecked = 0;
+			this->RefineriesDepleted = 0;
+			this->RefineryDepletionFrame = -100000;
+			this->DeployedSiegeSince.clear();
+			this->NoYardSinceFrame = -1;
+			this->ExpansionSaveTarget = 0;
+			this->IslandOutlookFrame = -100000;
+			this->IslandHomeOre = 0;
+			this->IslandOreRunway = -1;
+			this->IslandOreDrain = -1;
+			this->IslandHubZoneKey = 0;
+			this->IslandExpansionField = CellStruct::Empty;
+			this->IslandExpansionUrgent = false;
+			this->IslandExpansionLogFrame = -100000;
+			this->LastIslandSaleFrame = -100000;
+			this->IslandMcvLogFrame = -100000;
+			this->IslandMcvPrerequisites.clear();
+			this->HarvesterSaveTarget = 0;
+			this->RefinerySaveTarget = 0;
+			this->EconomyHoldSince = -1;
+			this->EconomyHoldPauseUntil = -1;
+			this->StealthSightings.clear();
+			this->PlanMemberTraces.clear();
+			this->CapitalGroups = {};
+			this->CapitalHeld.clear();
 			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
 			this->FerryWaitSince.clear();
 			this->FerryBlockedUntil.clear();
+			this->FerryReserved.clear();
+			this->ProductionBanUntil.clear();
+			this->ProductionPickIdx = { -1, -1, -1 };
+			this->ProductionPickSince = { 0, 0, 0 };
 			this->FreeFieldAnchorDist = 9999;
 			this->FreeFieldFrame = -100000;
 			this->LastAirDropAbortFrame = -100000;
@@ -881,6 +1046,13 @@ namespace
 			this->LastWaveDispatchFrame = -100000;
 			this->WaveStartFrame = -100000;
 			this->FailedApproachWeight.fill(0);
+			this->StagingHoldSince = -1;
+			this->StagingHoldPauseUntil = -1;
+			this->LastJamBreakFrame = -1;
+			this->LastJamCheckFrame = -1;
+			this->LastMouthClearFrame = -1;
+			this->LastJamDiagFrame = -1;
+			this->JamMapLogged = false;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
 			this->HomeThreatPeak = 0;
@@ -937,6 +1109,13 @@ namespace
 		int ReadyFrame { -1 };
 		CellStruct LastCoords { CellStruct::Empty };
 		int HouseIndex { -1 };
+
+		// The landing a loaded transport committed to once within 14 cells of it: kept to the end
+		// (user: transports turned away 10-15 cells from the shore when his troops came near, the
+		// landing being re-picked every tick with enemy units in sight weighing -2400).
+		CellStruct CommittedLanding { CellStruct::Empty };
+		// First frame a combat cargo sat loaded but under half full on its pickup shore.
+		int UnderfilledSince { -1 };
 	};
 
 	constexpr int FerryTripCapacity = 128;
@@ -1015,6 +1194,28 @@ namespace
 		const int idx = pHouse ? std::clamp(pHouse->ArrayIndex, 0, 31) : 0;
 
 		return MacroStates[idx];
+	}
+
+	// A passenger reserved by one of our transports loading on a pickup shore: it walks to that
+	// transport and boards it, no other job takes it meanwhile.
+	constexpr int FerryReservationFrames = 1800;
+
+	bool IsFerryReserved(const HouseClass* pHouse, DWORD uid)
+	{
+		auto const& reserved = GetMacroState(pHouse).FerryReserved;
+		auto const it = reserved.find(uid);
+
+		return it != reserved.end() && Unsorted::CurrentFrame - it->second.Frame < FerryReservationFrames
+			&& Unsorted::CurrentFrame >= it->second.Frame;
+	}
+
+	// A vehicle (queue 1) or infantry (queue 2) type the engine did not start for 900 frames.
+	bool IsProductionBanned(const HouseClass* pHouse, int queue, int typeIndex)
+	{
+		auto const& bans = GetMacroState(pHouse).ProductionBanUntil;
+		auto const it = bans.find(queue * 100000 + typeIndex);
+
+		return it != bans.end() && Unsorted::CurrentFrame < it->second;
 	}
 
 	// Tacit coalitions (Expert 3): how many different houses are coalition targets right now, the

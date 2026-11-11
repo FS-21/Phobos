@@ -642,7 +642,8 @@ namespace
 
 		for (auto const pInf : InfantryClass::Array)
 		{
-			if (pInf && isIdleGround(pInf, pInf->Type) && !pInf->Type->Engineer && !pInf->Type->Slaved && !IsSpyInfantryType(pInf->Type))
+			if (pInf && isIdleGround(pInf, pInf->Type) && !pInf->Type->Engineer && !pInf->Type->Slaved && !IsSpyInfantryType(pInf->Type)
+				&& !IsHealerInfantryType(pInf->Type))
 				ground.push_back(MakeScoutUnit(pInf, false));
 		}
 

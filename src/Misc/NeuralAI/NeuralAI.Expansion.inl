@@ -383,6 +383,9 @@ namespace
 
 		auto& macro = GetMacroState(pHouse);
 
+		if (macro.NavalRemnantUntil > Unsorted::CurrentFrame || macro.SubThreatUntil > Unsorted::CurrentFrame)
+			return true;
+
 		if (Unsorted::CurrentFrame - macro.NavalNeedFrame < 900 && macro.NavalNeedFrame <= Unsorted::CurrentFrame)
 			return macro.NavalNeed;
 
@@ -433,6 +436,210 @@ namespace
 
 		macro.NavalNeed = need;
 		return need;
+	}
+
+	// Island ore outlook, every 900 frames: how long the ore of the landmasses we hold (a ConYard or
+	// a refinery there) lasts, and the nearest free ore field on another landmass. On a map of small
+	// islands the income is spent as it comes in, and once the island's ore is gone there is no money
+	// left for the MCV and the transport that would reach the next one (matches #7051 and #7053,
+	// Heisenberg: most houses at $1-$15 on a bare island, the other islands' fields untouched; a
+	// repro had 2500-4400 credits per 1000 frames for 20000 frames, then a flat 400). The expansion
+	// is urgent while that ore lasts less than 20 minutes at the pace it is drained, or holds less
+	// than 25000 credits (a small island: planned from the start). Map state, our own objects and the
+	// enemy buildings we know, walked in a fixed order: every machine computes the same.
+	void UpdateIslandOreOutlook(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - macro.IslandOutlookFrame < 900 && macro.IslandOutlookFrame <= now)
+			return;
+
+		const bool wasUrgent = macro.IslandExpansionUrgent;
+		macro.IslandOutlookFrame = now;
+		macro.IslandExpansionUrgent = false;
+		macro.IslandExpansionField = CellStruct::Empty;
+
+		std::vector<int> hubZones;
+		CellStruct home = CellStruct::Empty;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type
+				|| !(pBld->Type->ConstructionYard || pBld->Type->Refinery || pBld->Type->ResourceDestination))
+			{
+				continue;
+			}
+
+			const int zone = MapClass::Instance.GetMovementZoneType(pBld->GetMapCoords(), MovementZone::Normal, pBld->OnBridge);
+
+			if (zone >= 0)
+				hubZones.push_back(zone);
+
+			if (home == CellStruct::Empty && pBld->Type->ConstructionYard)
+				home = pBld->GetMapCoords();
+		}
+
+		std::sort(hubZones.begin(), hubZones.end());
+		hubZones.erase(std::unique(hubZones.begin(), hubZones.end()), hubZones.end());
+
+		if (home == CellStruct::Empty || hubZones.empty())
+		{
+			macro.IslandHomeOre = 0;
+			macro.IslandOreDrain = -1;
+			macro.IslandOreRunway = -1;
+			macro.IslandHubZoneKey = 0;
+			return;
+		}
+
+		auto const isHubZone = [&hubZones](int zone)
+		{
+			return std::binary_search(hubZones.begin(), hubZones.end(), zone);
+		};
+
+		// Known enemy structures: a field within 12 cells of one is theirs, neither ours to mine nor free.
+		std::vector<CellStruct> enemyStructures;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Owner && pBld->Owner != pHouse
+				&& !pHouse->IsAlliedWith(pBld->Owner) && !pBld->Owner->IsNeutral() && IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				enemyStructures.push_back(pBld->GetMapCoords());
+			}
+		}
+
+		auto const nearEnemy = [&enemyStructures](const CellStruct& cell)
+		{
+			return std::any_of(enemyStructures.begin(), enemyStructures.end(), [&cell](const CellStruct& e)
+				{ return std::max(std::abs(e.X - cell.X), std::abs(e.Y - cell.Y)) <= 12; });
+		};
+
+		// Ore left on those landmasses: every field block there, the ones we mine and the free ones a
+		// land expansion would take (a field counts by its 12x12 block, so one patch is often two or
+		// three blocks and a free block next to our refinery is no new field), but not the enemy's.
+		// Meanwhile the nearest free field on any other landmass, the island expansion target (same
+		// rules as FindFreeOreFieldCell: no own hub within 14 cells, not a teammate's).
+		LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
+
+		if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
+			bounds = LTRBStruct { 0, 0, 511, 511 };
+
+		const int left = std::max(0, bounds.Left);
+		const int top = std::max(0, bounds.Top);
+		int homeOre = 0;
+		int homeFields = 0;
+		unsigned int countedKey = 2166136261u;
+		const NeuralOreField* pIslandField = nullptr;
+		int islandFieldZone = -1;
+		int islandFieldMetric = INT_MAX;
+
+		for (auto const& field : GetOreFields())
+		{
+			if (field.BlockKey < 0 || nearEnemy(field.Cell))
+				continue;
+
+			const int fieldZone = MapClass::Instance.GetMovementZoneType(field.Cell, MovementZone::Normal, false);
+
+			if (fieldZone < 0)
+				continue;
+
+			if (!isHubZone(fieldZone))
+			{
+				const int dist = std::max(std::abs(field.Cell.X - home.X), std::abs(field.Cell.Y - home.Y));
+				const int metric = dist - (field.SpawnerTree ? 10 : 0) - std::min(4, field.OreCells / 10);
+
+				if (metric < islandFieldMetric && !IsOreFieldTakenByTeam(pHouse, field))
+				{
+					islandFieldMetric = metric;
+					pIslandField = &field;
+					islandFieldZone = fieldZone;
+				}
+
+				continue;
+			}
+
+			homeFields++;
+			countedKey = (countedKey ^ static_cast<unsigned int>(field.BlockKey)) * 16777619u;
+			const int bx = left + (field.BlockKey / 4096) * 12;
+			const int by = top + (field.BlockKey % 4096) * 12;
+
+			for (int y = by; y < by + 12; ++y)
+			{
+				for (int x = bx; x < bx + 12; ++x)
+				{
+					const CellStruct c { static_cast<short>(x), static_cast<short>(y) };
+					auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pCell)
+						continue;
+
+					const int value = pCell->GetContainedTiberiumValue();
+
+					if (value > 0 && isHubZone(MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false)))
+						homeOre += value;
+				}
+			}
+		}
+
+		// Drain per 900 frames from the previous sample of the same field blocks (a new refinery or
+		// yard elsewhere, or an enemy base found next to a field, changes what is counted, so that
+		// sample is skipped). It is net of what spawner trees grow back and counts what a neighbour
+		// on the same island mines too.
+		unsigned int zoneKey = countedKey;
+
+		for (const int zone : hubZones)
+			zoneKey = (zoneKey ^ static_cast<unsigned int>(zone)) * 16777619u;
+
+		if (macro.IslandHubZoneKey == zoneKey && now >= 1800)
+		{
+			const int sample = std::max(0, macro.IslandHomeOre - homeOre);
+			macro.IslandOreDrain = macro.IslandOreDrain < 0 ? sample : (macro.IslandOreDrain + sample) / 2;
+		}
+
+		macro.IslandHubZoneKey = zoneKey;
+		macro.IslandHomeOre = homeOre;
+		macro.IslandOreRunway = macro.IslandOreDrain > 0
+			? static_cast<int>(std::min<int64_t>(INT_MAX, static_cast<int64_t>(homeOre) * 900 / macro.IslandOreDrain))
+			: -1;
+
+		// The island field must be free of our own hubs (an outpost refinery there makes it held land).
+		if (pIslandField)
+		{
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type
+					&& (pBld->Type->Refinery || pBld->Type->ResourceDestination || pBld->Type->ConstructionYard)
+					&& std::max(std::abs(pBld->GetMapCoords().X - pIslandField->Cell.X), std::abs(pBld->GetMapCoords().Y - pIslandField->Cell.Y)) <= 14)
+				{
+					pIslandField = nullptr;
+					break;
+				}
+			}
+		}
+
+		// Urgent while the ore of our land lasts less than 20 minutes at the pace it is drained, or
+		// holds less than 25000 credits: such a small island is spent long before its ore runs out (the
+		// houses of the Heisenberg repro held 14000-18000 and had no credits left by frame 9000), so
+		// its expansion is planned from the start, while the starting credits pay the MCV's
+		// prerequisites, the MCV and its ride.
+		const bool runningOut = pIslandField
+			&& (homeOre < 25000 || (macro.IslandOreRunway >= 0 && macro.IslandOreRunway < 18000));
+		macro.IslandExpansionUrgent = runningOut;
+		macro.IslandExpansionField = pIslandField ? pIslandField->Cell : CellStruct::Empty;
+
+		if (runningOut != wasUrgent || now - macro.IslandExpansionLogFrame >= (runningOut ? 4500 : 9000))
+		{
+			macro.IslandExpansionLogFrame = now;
+			Debug::Log("[NeuralAI] House %d IslandExpansion: %s, home ore %d in %d fields (drain %d per 900 frames, runway %d frames), "
+				"%d landmasses held, free field across water at (%d,%d) zone %d, %d credits, frame %d.\n",
+				pHouse->ArrayIndex, runningOut ? "urgent" : "not urgent", homeOre, homeFields, macro.IslandOreDrain, macro.IslandOreRunway,
+				static_cast<int>(hubZones.size()), macro.IslandExpansionField.X, macro.IslandExpansionField.Y, islandFieldZone,
+				pHouse->Available_Money(), now);
+		}
 	}
 
 	// Multiplayer start locations are waypoints 0..7 (public map knowledge). While no

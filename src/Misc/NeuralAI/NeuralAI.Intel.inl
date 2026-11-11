@@ -475,6 +475,63 @@ namespace
 		return MapClass::Instance.GetMovementZoneType(pObject->GetMapCoords(), movementZone, pObject->OnBridge);
 	}
 
+	// The ground zone a transport parked on a shore serves: the land zone most cells within 2 hold
+	// (the shore cell under a hovercraft often carries a zone of its own, so it took nobody while
+	// 49 soldiers waited next to it; user's own game, islands). Water: the cell's own zone.
+	int TransportLandZone(const CellStruct& cell, bool onBridge)
+	{
+		const int ownZone = MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, onBridge);
+		auto const pOwnCell = MapClass::Instance.TryGetCellAt(cell);
+
+		if (!pOwnCell || pOwnCell->LandType == LandType::Water)
+			return ownZone;
+
+		int bestZone = ownZone;
+		int bestCount = 0;
+		int ownCount = 0;
+		std::array<std::pair<int, int>, 25> counts {};
+		size_t used = 0;
+
+		for (int dy = -2; dy <= 2; ++dy)
+		{
+			for (int dx = -2; dx <= 2; ++dx)
+			{
+				const CellStruct c { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
+				auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+				if (!pCell || pCell->LandType == LandType::Water || pCell->GetBuilding())
+					continue;
+
+				const int zone = MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false);
+
+				if (zone < 0)
+					continue;
+
+				size_t i = 0;
+
+				while (i < used && counts[i].first != zone)
+					++i;
+
+				if (i == used)
+					counts[used++] = { zone, 0 };
+
+				const int count = ++counts[i].second;
+
+				if (zone == ownZone)
+					ownCount = count;
+
+				if (count > bestCount || (count == bestCount && zone < bestZone))
+				{
+					bestCount = count;
+					bestZone = zone;
+				}
+			}
+		}
+
+		// The cell's own zone wins whenever it is as common as any other.
+		return (ownZone >= 0 && ownCount >= bestCount) ? ownZone : bestZone;
+	}
+
 	bool AreZonesConnected(CellStruct fromCell, CellStruct toCell, MovementZone movementZone)
 	{
 		if (!MapClass::Instance.CoordinatesLegal(fromCell) || !MapClass::Instance.CoordinatesLegal(toCell))

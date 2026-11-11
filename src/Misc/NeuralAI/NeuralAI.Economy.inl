@@ -113,16 +113,6 @@ namespace
 		}
 	}
 
-	// Factory cap by difficulty, per category: every barracks counts together, every ground war
-	// factory together (whatever faction it comes from, captured trees included), every shipyard
-	// together. Easy 4, Normal 10, Hard none. Airfields are not capped here: they follow the demand
-	// of the docking aircraft.
-	int GetFactoryCategoryCap(HouseClass* pHouse)
-	{
-		const int diffIdx = pHouse ? static_cast<int>(pHouse->GetAIDifficultyIndex()) : 0;
-		return diffIdx >= 2 ? 4 : (diffIdx == 1 ? 10 : INT_MAX);
-	}
-
 	// 0 barracks, 1 ground war factory, 2 shipyard, -1 not capped. A deployed mobile factory (a unit
 	// that unfolds into a factory and can pack up again, UndeploysInto) is a unit, not a ConYard
 	// building: never counted nor sold here.
@@ -138,6 +128,48 @@ namespace
 			return pType->Naval ? 2 : 1;
 
 		return -1;
+	}
+
+	bool IsEnemyBuildingKnown(HouseClass* pHouse, const BuildingClass* pBld);
+
+	// Factory cap by difficulty, per category: every barracks counts together, every ground war
+	// factory together (whatever faction it comes from, captured trees included), every shipyard
+	// together. Easy 4, Normal 10, Hard 20. Airfields are not capped here: they follow the demand
+	// of the docking aircraft.
+	int GetFactoryCategorySellCap(HouseClass* pHouse)
+	{
+		const int diffIdx = pHouse ? static_cast<int>(pHouse->GetAIDifficultyIndex()) : 0;
+		return diffIdx >= 2 ? 4 : (diffIdx == 1 ? 10 : 20);
+	}
+
+	// Cap for new factories of a category. On Hard it follows the main enemy: one more than the
+	// factories of that category we know it has, never below 10 nor above 20 (20 with no main
+	// enemy). Easy and Normal keep their fixed cap.
+	int GetFactoryCategoryCap(HouseClass* pHouse, int category)
+	{
+		const int sellCap = GetFactoryCategorySellCap(pHouse);
+
+		if (!pHouse || sellCap != 20)
+			return sellCap;
+
+		const int enemyIdx = pHouse->EnemyHouseIndex;
+		auto const pEnemy = (enemyIdx >= 0 && enemyIdx < HouseClass::Array.Count) ? HouseClass::Array.GetItem(enemyIdx) : nullptr;
+
+		if (!pEnemy || pEnemy == pHouse || pEnemy->Defeated || pEnemy->IsObserver())
+			return sellCap;
+
+		int enemyFactories = 0;
+
+		for (auto const pBld : pEnemy->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && FactoryCapCategory(pBld->Type) == category
+				&& IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				enemyFactories++;
+			}
+		}
+
+		return std::clamp(enemyFactories + 1, 10, sellCap);
 	}
 
 	// Living factories of a category that are not being sold (under construction included).
@@ -166,9 +198,10 @@ namespace
 	// True when one was sold.
 	bool SellFactoriesOverDifficultyCap(HouseClass* pHouse, const CellStruct& frontStoneCell)
 	{
-		const int cap = GetFactoryCategoryCap(pHouse);
-		if (!pHouse || cap == INT_MAX)
+		if (!pHouse)
 			return false;
+
+		const int cap = GetFactoryCategorySellCap(pHouse);
 
 		const CellStruct mainBase = (pHouse->BaseSpawnCell != CellStruct::Empty)
 			? pHouse->BaseSpawnCell
@@ -344,6 +377,91 @@ namespace
 
 			pBestToSell->Sell(1);
 		}
+	}
+
+	// Dry economy sale (UpdateEconomyCrisis): one building that brings nothing in without ore, in
+	// this order: a silo, a refinery past the first (one stays in case the fields grow back), a
+	// service depot past the first, a factory past the first of its category, a power plant whose
+	// output is not needed. Never a ConYard, a base defense, a superweapon, a radar, a captured
+	// tech building, the last building of a type, or one under construction. True when one was sold.
+	bool SellForDryEconomy(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return false;
+
+		std::map<int, int> typeCounts;
+		int refineries = 0;
+		int repairDepots = 0;
+		std::array<int, 3> factories {};
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->CurrentMission == Mission::Selling
+				|| pBld->QueuedMission == Mission::Selling)
+			{
+				continue;
+			}
+
+			typeCounts[pBld->Type->ArrayIndex]++;
+
+			if (pBld->Type->Refinery && !pBld->Type->ResourceGatherer)
+				refineries++;
+
+			if (pBld->Type->UnitRepair && !pBld->Type->Naval)
+				repairDepots++;
+
+			if (const int category = FactoryCapCategory(pBld->Type); category >= 0)
+				factories[category]++;
+		}
+
+		const int powerSpare = pHouse->PowerOutput - pHouse->PowerDrain;
+		BuildingClass* pBest = nullptr;
+		int bestRank = INT_MAX;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type)
+				continue;
+
+			auto const pType = pBld->Type;
+
+			if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling
+				|| pBld->CurrentMission == Mission::Construction || pType->ConstructionYard || pType->IsBaseDefense
+				|| pType->SuperWeapon != -1 || pType->Radar || pType->SpySat || pType->Capturable || pType->Unsellable
+				|| pType->Naval || typeCounts[pType->ArrayIndex] < 2)
+				// Naval: on an island map the yard is the only way off the island (user).
+			{
+				continue;
+			}
+
+			int rank = INT_MAX;
+
+			if (pType->Storage > 0 && !pType->Refinery)
+				rank = 1;
+			else if (pType->Refinery && !pType->ResourceGatherer && refineries > 1)
+				rank = 2;
+			else if (pType->UnitRepair && !pType->Naval && repairDepots > 1)
+				rank = 3;
+			else if (const int category = FactoryCapCategory(pType); category >= 0 && factories[category] > 1)
+				rank = 4;
+			else if (pType->PowerBonus > 0 && pType->Factory == AbstractType::None && powerSpare - pType->PowerBonus + pType->PowerDrain >= 0)
+				rank = 5;
+
+			if (rank < bestRank || (rank == bestRank && pBest && pBld->UniqueID < pBest->UniqueID))
+			{
+				bestRank = rank;
+				pBest = pBld;
+			}
+		}
+
+		if (!pBest || bestRank == INT_MAX)
+			return false;
+
+		Debug::Log("[NeuralAI] House %d dry economy (no harvest income, %d credits): selling %s at (%d,%d).\n",
+			pHouse->ArrayIndex, pHouse->Available_Money(), pBest->Type->ID, pBest->GetMapCoords().X, pBest->GetMapCoords().Y);
+		pBest->Sell(1);
+		CountDecision(NeuralDecision::DryEconomySale, pHouse->ArrayIndex);
+		return true;
 	}
 
 } // namespace

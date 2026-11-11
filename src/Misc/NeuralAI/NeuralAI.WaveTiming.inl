@@ -192,7 +192,9 @@ namespace
 	// base). Goes at 130% of that, 10 points less per minute already held (down to 90%, so two
 	// equal armies do not wait for each other forever), 90% in a window (army away, heavy recent
 	// losses, weak known defenses near the target, our counterattack or blackout window), at the
-	// cost floor unless outmatched (60%), or at 1.5x the floor regardless.
+	// cost floor unless outmatched (60%), or at 1.5x the floor regardless. With an offensive bank
+	// (HasOffensiveBank) losses are bought back at once: 100% (75% held, 70% in a window) and the
+	// floor from 45%.
 	NeuralWaveCheck EvaluateWaveLaunch(HouseClass* pHouse, const CellStruct& target, int readyValue, bool tacticalWindow)
 	{
 		NeuralWaveCheck check {};
@@ -301,13 +303,17 @@ namespace
 		const int minimum = WaveMinimumValue(now);
 		const int floor = WaveCostFloor(now);
 		check.HeldFrames = state.Holding ? now - state.HoldSinceFrame : 0;
-		const int required = check.Window ? 90 : std::max(90, 130 - check.HeldFrames / 90);
+		const bool offensiveBank = HasOffensiveBank(pHouse);
+		const int required = offensiveBank
+			? (check.Window ? 70 : std::max(75, 100 - check.HeldFrames / 90))
+			: (check.Window ? 90 : std::max(90, 130 - check.HeldFrames / 90));
 		const bool byRatio = check.OurValue >= minimum && check.Ratio >= required;
-		check.Floor = !byRatio && ((check.OurValue >= floor && check.Ratio >= 60) || check.OurValue >= floor * 3 / 2);
+		check.Floor = !byRatio && ((check.OurValue >= floor && check.Ratio >= (offensiveBank ? 45 : 60)) || check.OurValue >= floor * 3 / 2);
 		check.Launch = byRatio || check.Floor;
 		check.Reason = check.Floor ? "floor"
 			: (!check.Launch ? "held"
-				: (armyAway ? "armyAway" : (heavyLosses ? "losses" : (weakDefenses ? "weakDefenses" : (tacticalWindow ? "tactical" : "ratio")))));
+				: (armyAway ? "armyAway" : (heavyLosses ? "losses" : (weakDefenses ? "weakDefenses"
+					: (tacticalWindow ? "tactical" : (offensiveBank ? "bank" : "ratio"))))));
 
 		return check;
 	}
@@ -354,6 +360,42 @@ namespace
 			Unsorted::CurrentFrame, idx, units, check.OurValue, check.EnemyValue, check.Ratio, check.Reason,
 			check.HeldFrames);
 		state.Holding = false;
+	}
+
+	// Offensive bank (HasOffensiveBank): against an enemy across the water the harassment from range
+	// (naval shelling, artillery on the economy, air strikes and corridors, rotating raids, siege
+	// batteries) gets +350 when its context is there; on shared land the main assaults get +200.
+	int OffensiveBankPlanUtility(HouseClass* pHouse, NeuralPlanId plan)
+	{
+		if (!HasOffensiveBank(pHouse))
+			return 0;
+
+		if (GetMacroState(pHouse).EnemyAcrossWater)
+		{
+			switch (plan)
+			{
+			case NeuralPlanId::NavalStrikeGroup:
+			case NeuralPlanId::ArtilleryEcoSiege:
+			case NeuralPlanId::AirStrike:
+			case NeuralPlanId::AirCorridor:
+			case NeuralPlanId::RotatingRaids:
+			case NeuralPlanId::SiegeBattery:
+				return 350;
+			default:
+				return 0;
+			}
+		}
+
+		switch (plan)
+		{
+		case NeuralPlanId::TimingRush:
+		case NeuralPlanId::Pincer:
+		case NeuralPlanId::ThreeFrontAssault:
+		case NeuralPlanId::RollingSiege:
+			return 200;
+		default:
+			return 0;
+		}
 	}
 
 	// Main assault plans (everything idle against a base) weigh our advantage: up to +150 when

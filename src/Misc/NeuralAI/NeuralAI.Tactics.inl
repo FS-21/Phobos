@@ -86,6 +86,754 @@ namespace
 		macro.AirLossTracks = std::move(next);
 	}
 
+	// A unit of ours held on one cell with an order pending, where it stands and where it wants to go.
+	struct NeuralHeldOrder
+	{
+		FootClass* Foot { nullptr };
+		CellStruct Cell { CellStruct::Empty };
+		CellStruct Dest { CellStruct::Empty };
+	};
+
+	// A unit of ours that has stood on one cell for `frames` (UpdateStuckUnits keeps the record for
+	// every ground unit) without firing in the last 300 frames and without a target within reach:
+	// whatever its order says it is doing nothing, so the "busy" filters (attacking, at the front) let
+	// other jobs take it. Before, a unit with a live target out of reach, or anywhere within 18.5 cells
+	// of an enemy building (bases next to each other), was busy for good.
+	bool IsFootHeldStill(const HouseClass* pHouse, const FootClass* pFoot, int frames)
+	{
+		if (!pHouse || !pFoot || pFoot->IsFiring)
+			return false;
+
+		const int now = Unsorted::CurrentFrame;
+
+		if (pFoot->LastFireBulletFrame > 0 && now >= pFoot->LastFireBulletFrame && now - pFoot->LastFireBulletFrame < 300)
+			return false;
+
+		auto const& progress = GetMacroState(pHouse).FootProgress;
+		auto const it = progress.find(pFoot->UniqueID);
+
+		if (it == progress.end() || now < it->second.SinceFrame || now - it->second.SinceFrame < frames)
+			return false;
+
+		return !(pFoot->Target && pFoot->IsCloseEnoughToAttack(pFoot->Target));
+	}
+
+	bool IsBridgeOrTubeCell(const CellClass* pCell)
+	{
+		return pCell && (pCell->ContainsBridge() || pCell->ContainsBridgeEx() || pCell->TubeIndex >= 0);
+	}
+
+	// A narrow passage: a bridge deck, bridge head or tunnel tube within 1 cell, or fewer than 25 of
+	// the 7x7 cells around free ground (no building, water or cliff).
+	bool IsNarrowPassage(const CellStruct& center)
+	{
+		int freeCells = 0;
+
+		for (int dy = -3; dy <= 3; ++dy)
+		{
+			for (int dx = -3; dx <= 3; ++dx)
+			{
+				auto const pCell = MapClass::Instance.TryGetCellAt(
+					CellStruct { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) });
+
+				if (!pCell)
+					continue;
+
+				if (std::abs(dx) <= 1 && std::abs(dy) <= 1 && IsBridgeOrTubeCell(pCell))
+					return true;
+
+				if (!pCell->GetBuilding() && pCell->LandType != LandType::Water
+					&& pCell->IsClearToMove(SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false))
+				{
+					++freeCells;
+				}
+			}
+		}
+
+		return freeCells < 25;
+	}
+
+	// Idle for the jam breaker and the mouth clearing: a ground unit of ours on Guard / Area Guard /
+	// Sleep with no target, not firing, not a gatherer, not deployed, not in a plan.
+	bool IsIdleBlocker(HouseClass* pHouse, FootClass* pFoot)
+	{
+		if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir() || pFoot->Transporter
+			|| pFoot->Target || pFoot->IsFiring)
+		{
+			return false;
+		}
+
+		auto const pType = pFoot->GetTechnoType();
+		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+		if (!pType || pType->JumpJet || pType->MovementZone == MovementZone::Fly || pType->ResourceGatherer
+			|| (pUnit && (pUnit->Deployed || (pUnit->Type && pUnit->Type->Harvester))))
+		{
+			return false;
+		}
+
+		if (pFoot->CurrentMission != Mission::Guard && pFoot->CurrentMission != Mission::Area_Guard
+			&& pFoot->CurrentMission != Mission::Sleep)
+		{
+			return false;
+		}
+
+		return !GetMacroState(pHouse).PlanMembers.contains(pFoot->UniqueID);
+	}
+
+	// Free ground for a unit moved out of the way: a cell of its zone on the rings minRing..maxRing
+	// (step 2) around `center`, not a bridge or tube cell, scored by the units already near it, cells
+	// already handed out and, when (prefX, prefY) is set, going that way (cost up to 200).
+	CellClass* FindClearingCell(FootClass* pFoot, const CellStruct& center, int minRing, int maxRing, double prefX, double prefY,
+		const std::vector<CellStruct>& occupied, const std::vector<CellStruct>& taken)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType)
+			return nullptr;
+
+		const int zone = ObjectZone(pFoot, pType->MovementZone);
+		// Ships make room on water (they never found a cell: water was always skipped, so a two-way
+		// jam of submarines in a strait was never broken, match repro on Fludded Recources).
+		const bool naval = pType->Naval || pType->MovementZone == MovementZone::Water
+			|| pType->MovementZone == MovementZone::WaterBeach;
+		CellClass* pBest = nullptr;
+		int bestScore = INT_MAX;
+
+		for (int r = minRing; r <= maxRing; r += 2)
+		{
+			for (int dy = -r; dy <= r; dy += 2)
+			{
+				for (int dx = -r; dx <= r; dx += 2)
+				{
+					if (std::abs(dx) != r && std::abs(dy) != r)
+						continue;
+
+					const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+					auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pCell || pCell->GetBuilding() || (pCell->LandType == LandType::Water) != naval || IsBridgeOrTubeCell(pCell)
+						|| MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
+						|| !pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false))
+					{
+						continue;
+					}
+
+					int crowd = 0;
+
+					for (auto const& o : occupied)
+					{
+						if (std::abs(o.X - c.X) <= 2 && std::abs(o.Y - c.Y) <= 2)
+							++crowd;
+					}
+
+					for (auto const& tk : taken)
+					{
+						if (std::abs(tk.X - c.X) <= 1 && std::abs(tk.Y - c.Y) <= 1)
+							crowd += 4;
+					}
+
+					const double dot = (dx * prefX + dy * prefY) / std::max(1.0, std::sqrt(static_cast<double>(dx * dx + dy * dy)));
+					const int score = crowd * 30 + static_cast<int>(std::max(0.0, dot) * 200.0) + r * 5;
+
+					if (score < bestScore)
+					{
+						bestScore = score;
+						pBest = pCell;
+					}
+				}
+			}
+		}
+
+		return pBest;
+	}
+
+	// Jam breaker: our units held 450+ frames with an order pending, 8+ within 4 cells of each other in
+	// open ground or 5+ in a narrow passage (bridge, tunnel tube, a corridor with fewer than 25 free
+	// cells in 7x7), are a block (a rally point in a gap, two-way traffic at a choke). Looked for every
+	// 60 frames, cleared at most once per 300:
+	// - our idle ground units within 6 cells of it are moved out to free ground 8..14 cells away,
+	//   preferably not toward where the held units want to go (up to 16);
+	// - in a narrow passage with traffic both ways, the smaller side backs off (orders dropped, 8..14
+	//   cells away on its own side; the AI gives it a new job) so the other side gets through.
+	void UpdateJamBreaker(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (held.size() < 5 || (macro.LastJamBreakFrame >= 0 && now >= macro.LastJamBreakFrame && now - macro.LastJamBreakFrame < 300)
+			|| (macro.LastJamCheckFrame >= 0 && now >= macro.LastJamCheckFrame && now - macro.LastJamCheckFrame < 60))
+		{
+			return;
+		}
+
+		macro.LastJamCheckFrame = now;
+
+		auto const inBlock = [](const CellStruct& a, const CellStruct& b)
+		{ return std::abs(a.X - b.X) <= 4 && std::abs(a.Y - b.Y) <= 4; };
+
+		// The block with the most held units over what it takes there.
+		size_t bestIdx = held.size();
+		double bestRatio = 0.0;
+		bool narrow = false;
+
+		for (size_t i = 0; i < held.size(); ++i)
+		{
+			int count = 0;
+
+			for (auto const& other : held)
+			{
+				if (inBlock(other.Cell, held[i].Cell))
+					++count;
+			}
+
+			if (count < 5)
+				continue;
+
+			const bool isNarrow = IsNarrowPassage(held[i].Cell);
+			const int need = isNarrow ? 5 : 8;
+			const double ratio = static_cast<double>(count) / need;
+
+			if (count >= need && ratio > bestRatio)
+			{
+				bestRatio = ratio;
+				bestIdx = i;
+				narrow = isNarrow;
+			}
+		}
+
+		if (bestIdx >= held.size())
+			return;
+
+		const CellStruct seed = held[bestIdx].Cell;
+		std::vector<std::pair<const NeuralHeldOrder*, std::pair<double, double>>> block;
+		int sumX = 0, sumY = 0;
+		double wantX = 0.0, wantY = 0.0;
+
+		for (auto const& h : held)
+		{
+			if (!inBlock(h.Cell, seed))
+				continue;
+
+			const double len = std::max(1.0, h.Cell.DistanceFrom(h.Dest));
+			const double wx = (h.Dest.X - h.Cell.X) / len;
+			const double wy = (h.Dest.Y - h.Cell.Y) / len;
+			block.push_back({ &h, { wx, wy } });
+			sumX += h.Cell.X;
+			sumY += h.Cell.Y;
+			wantX += wx;
+			wantY += wy;
+		}
+
+		const int n = static_cast<int>(block.size());
+		const CellStruct center { static_cast<short>(sumX / n), static_cast<short>(sumY / n) };
+		const double wantLen = std::sqrt(wantX * wantX + wantY * wantY);
+		const double avgX = wantLen > 0.0 ? wantX / wantLen : 0.0;
+		const double avgY = wantLen > 0.0 ? wantY / wantLen : 0.0;
+
+		std::vector<FootClass*> idle;
+		std::vector<CellStruct> occupied;
+
+		auto const consider = [&](FootClass* pFoot)
+		{
+			if (!pFoot || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir())
+				return;
+
+			const CellStruct here = pFoot->GetMapCoords();
+
+			if (here.DistanceFrom(center) > 14.0)
+				return;
+
+			occupied.push_back(here);
+
+			if (here.DistanceFrom(center) <= 6.0 && IsIdleBlocker(pHouse, pFoot))
+				idle.push_back(pFoot);
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			consider(pUnit);
+
+		for (auto const pInf : InfantryClass::Array)
+			consider(pInf);
+
+		std::vector<CellStruct> taken;
+		int moved = 0;
+
+		for (auto const pFoot : idle)
+		{
+			if (moved >= 16)
+				break;
+
+			if (auto const pCell = FindClearingCell(pFoot, center, 8, 14, avgX, avgY, occupied, taken))
+			{
+				taken.push_back(pCell->MapCoords);
+
+				if (IssueMoveOrder(pFoot, pCell, 0.0))
+					++moved;
+			}
+		}
+
+		// Two-way traffic in a narrow passage: the smaller side backs off.
+		int yielded = 0;
+
+		if (narrow)
+		{
+			const bool clearAxis = wantLen >= 0.3 * n;
+			const double axisX = clearAxis ? avgX : block.front().second.first;
+			const double axisY = clearAxis ? avgY : block.front().second.second;
+			std::vector<std::pair<FootClass*, std::pair<double, double>>> forward, backward;
+
+			for (auto const& [pHeld, want] : block)
+			{
+				const double dot = want.first * axisX + want.second * axisY;
+
+				if (dot > 0.3)
+					forward.push_back({ pHeld->Foot, want });
+				else if (dot < -0.3)
+					backward.push_back({ pHeld->Foot, want });
+			}
+
+			if (!forward.empty() && !backward.empty())
+			{
+				auto& yielders = backward.size() <= forward.size() ? backward : forward;
+
+				for (auto const& [pFoot, want] : yielders)
+				{
+					if (yielded >= 12 || !pFoot || !pFoot->IsAlive || pFoot->InLimbo)
+						continue;
+
+					// On a long bridge the 8..14 ring is all deck or water: the side that backs off then
+					// goes past the bridge end (16..26 cells; match #7080, 20-25 units held for minutes on
+					// a bridge in two-way traffic, 0-3 backed off per break).
+					auto pCell = FindClearingCell(pFoot, center, 8, 14, want.first, want.second, occupied, taken);
+
+					if (!pCell)
+						pCell = FindClearingCell(pFoot, center, 16, 26, want.first, want.second, occupied, taken);
+
+					if (pCell)
+					{
+						taken.push_back(pCell->MapCoords);
+						pFoot->ClearMegaMissionData();
+						pFoot->SetTarget(nullptr);
+						pFoot->SetDestination(nullptr, true);
+
+						if (IssueMoveOrder(pFoot, pCell, 0.0))
+							++yielded;
+					}
+				}
+			}
+		}
+
+		// Ships in the block take a leg of a real water route (GroundRouteHop: cell by cell, buildings
+		// block) to their destination: match #7061, Fludded Recources, 15 ships held for minutes in a
+		// channel our own naval yard closed, with open sea all around the island.
+		int detoured = 0;
+
+		for (auto const& [pHeld, want] : block)
+		{
+			FootClass* const pShip = pHeld ? pHeld->Foot : nullptr;
+
+			if (detoured >= 12 || !pShip || !pShip->IsAlive || pShip->InLimbo)
+				continue;
+
+			auto const pShipType = pShip->GetTechnoType();
+
+			if (!pShipType || !(pShipType->Naval || pShipType->MovementZone == MovementZone::Water
+				|| pShipType->MovementZone == MovementZone::WaterBeach))
+			{
+				continue;
+			}
+
+			if (auto const pHop = GroundRouteHop(pShip, pHeld->Dest, 14))
+			{
+				pShip->ClearMegaMissionData();
+				pShip->SetTarget(nullptr);
+
+				if (IssueMoveOrder(pShip, pHop, 1.5))
+					++detoured;
+			}
+		}
+
+		if (detoured > 0)
+		{
+			CountDecision(NeuralDecision::GroundRouteHop, pHouse->ArrayIndex);
+			Debug::Log("[NeuralAI] Frame %d | House #%d naval jam at (%d,%d): %d ships sent along a water route around it\n",
+				now, pHouse->ArrayIndex, center.X, center.Y, detoured);
+		}
+
+		if (moved > 0 || yielded > 0 || detoured > 0)
+		{
+			macro.LastJamBreakFrame = now;
+
+			if (moved > 0)
+				CountDecision(NeuralDecision::JamCleared, pHouse->ArrayIndex);
+
+			if (yielded > 0)
+				CountDecision(NeuralDecision::JamYielded, pHouse->ArrayIndex);
+
+			Debug::Log("[NeuralAI] Frame %d | House #%d jam at (%d,%d)%s: %d held units, %d idle moved out (of %d idle), %d backed off\n",
+				now, pHouse->ArrayIndex, center.X, center.Y, narrow ? " in a narrow passage" : "", n, moved,
+				static_cast<int>(idle.size()), yielded);
+		}
+
+		// What the block is made of (diagnostics, at most once per 900 frames): held units by mission,
+		// the destinations most of them share, their types.
+		if (now - macro.LastJamDiagFrame >= 900 || now < macro.LastJamDiagFrame)
+		{
+			macro.LastJamDiagFrame = now;
+			std::map<int, int> byMission;
+			std::map<std::pair<short, short>, int> byDest;
+			std::map<std::string, int> byType;
+
+			for (auto const& [pHeld, want] : block)
+			{
+				if (!pHeld || !pHeld->Foot)
+					continue;
+
+				byMission[static_cast<int>(pHeld->Foot->CurrentMission)]++;
+				byDest[{ pHeld->Dest.X, pHeld->Dest.Y }]++;
+
+				if (auto const pHeldType = pHeld->Foot->GetTechnoType())
+					byType[pHeldType->ID]++;
+			}
+
+			std::string text;
+
+			for (auto const& [mission, count] : byMission)
+				text += "m" + std::to_string(mission) + "x" + std::to_string(count) + " ";
+
+			std::vector<std::pair<int, std::pair<short, short>>> dests;
+
+			for (auto const& [cell, count] : byDest)
+				dests.push_back({ count, cell });
+
+			std::sort(dests.begin(), dests.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
+			text += "| dest ";
+
+			for (size_t i = 0; i < dests.size() && i < 4; ++i)
+				text += "(" + std::to_string(dests[i].second.first) + "," + std::to_string(dests[i].second.second) + ")x" + std::to_string(dests[i].first) + " ";
+
+			text += "| types ";
+
+			for (auto const& [typeId, count] : byType)
+				text += typeId + "x" + std::to_string(count) + " ";
+
+			Debug::Log("[NeuralAI] Frame %d | House #%d jam detail at (%d,%d): %s\n", now, pHouse->ArrayIndex, center.X, center.Y, text.c_str());
+
+			// The ground around the first block of each house (diagnostics): '#' building, '~' water,
+			// '^' impassable for tracked vehicles, 'u' our unit, 'e' another house's unit, 'H' a held
+			// unit of the block, '.' free; 31 x 21 cells, row by row.
+			if (!macro.JamMapLogged)
+			{
+				macro.JamMapLogged = true;
+				Debug::Log("[NeuralAI] House #%d jam map around (%d,%d), x %d..%d:\n", pHouse->ArrayIndex, center.X, center.Y,
+					center.X - 15, center.X + 15);
+
+				for (int dy = -10; dy <= 10; ++dy)
+				{
+					char row[40] = {};
+
+					for (int dx = -15; dx <= 15; ++dx)
+					{
+						const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+						auto const pCell = MapClass::Instance.TryGetCellAt(c);
+						char ch = ' ';
+
+						if (pCell)
+						{
+							ch = '.';
+
+							if (pCell->GetBuilding())
+								ch = '#';
+							else if (pCell->LandType == LandType::Water)
+								ch = '~';
+							else if (!pCell->IsClearToMove(SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false))
+								ch = '^';
+
+							if (ch == '.')
+							{
+								for (auto const& [pHeld, want] : block)
+								{
+									if (pHeld && pHeld->Cell == c)
+									{
+										ch = 'H';
+										break;
+									}
+								}
+							}
+
+							if (ch == '.')
+							{
+								if (auto const pTechno = abstract_cast<TechnoClass*>(pCell->FirstObject); pTechno && pTechno->Owner)
+									ch = pTechno->Owner == pHouse ? 'u' : 'e';
+							}
+						}
+
+						row[dx + 15] = ch;
+					}
+
+					Debug::Log("[NeuralAI]   y %3d %s\n", center.Y + dy, row);
+				}
+			}
+		}
+	}
+
+	// Bridge and tunnel mouths kept clear: every 300 frames, our idle ground units (IsIdleBlocker)
+	// standing on a bridge deck or within 2 cells of one, within 2 cells of a tunnel tube's entry or exit
+	// cell, or within 3 cells of a tunnel building of ours or an ally (Ares Tunnel=), are moved 4..8
+	// cells away (not onto a bridge or tube) when one of our units within 6 cells waits there with an
+	// order (move, attack-move, enter, harvest; 90+ frames on its cell). Up to 12 per pass.
+	void UpdateJamMouths(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.LastMouthClearFrame >= 0 && now >= macro.LastMouthClearFrame && now - macro.LastMouthClearFrame < 300)
+			return;
+
+		macro.LastMouthClearFrame = now;
+
+		std::vector<std::pair<CellStruct, double>> mouths;
+
+		for (auto const pTube : TubeClass::Array)
+		{
+			if (!pTube)
+				continue;
+
+			mouths.emplace_back(pTube->EnterCell, 2.0);
+			mouths.emplace_back(pTube->ExitCell, 2.0);
+		}
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner || !pHouse->IsAlliedWith(pBld->Owner))
+				continue;
+
+			auto const pBldExt = BuildingTypeExt::ExtMap.Find(pBld->Type);
+
+			if (pBldExt && pBldExt->Tunnel)
+			{
+				const double reach = 3.0 + std::max(pBld->Type->GetFoundationWidth(), pBld->Type->GetFoundationHeight(false)) / 2.0;
+				mouths.emplace_back(pBld->GetMapCoords(), reach);
+			}
+		}
+
+		// Our units waiting with an order: the traffic a mouth is kept clear for.
+		std::vector<CellStruct> waiting;
+
+		auto const collectWaiting = [&](FootClass* pFoot)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir())
+				return;
+
+			const bool ordered = pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::AttackMove
+				|| pFoot->MegaMission == Mission::AttackMove || pFoot->CurrentMission == Mission::Enter
+				|| ((pFoot->CurrentMission == Mission::Harvest || pFoot->CurrentMission == Mission::Return) && pFoot->Destination);
+
+			if (!ordered)
+				return;
+
+			auto const it = macro.FootProgress.find(pFoot->UniqueID);
+
+			if (it != macro.FootProgress.end() && now >= it->second.SinceFrame && now - it->second.SinceFrame >= 90)
+				waiting.push_back(pFoot->GetMapCoords());
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			collectWaiting(pUnit);
+
+		for (auto const pInf : InfantryClass::Array)
+			collectWaiting(pInf);
+
+		if (waiting.empty())
+			return;
+
+		auto const atMouth = [&](const CellStruct& here) -> bool
+		{
+			for (auto const& [cell, reach] : mouths)
+			{
+				if (here.DistanceFrom(cell) <= reach)
+					return true;
+			}
+
+			for (int dy = -2; dy <= 2; ++dy)
+			{
+				for (int dx = -2; dx <= 2; ++dx)
+				{
+					auto const pCell = MapClass::Instance.TryGetCellAt(
+						CellStruct { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) });
+
+					if (pCell && (pCell->ContainsBridge() || pCell->ContainsBridgeEx()))
+						return true;
+				}
+			}
+
+			return false;
+		};
+
+		std::vector<CellStruct> occupied;
+		std::vector<CellStruct> taken;
+		int moved = 0;
+
+		auto const clearFoot = [&](FootClass* pFoot)
+		{
+			if (moved >= 12 || !IsIdleBlocker(pHouse, pFoot))
+				return;
+
+			const CellStruct here = pFoot->GetMapCoords();
+			bool trafficNear = false;
+
+			for (auto const& w : waiting)
+			{
+				if (w != here && w.DistanceFrom(here) <= 6.0)
+				{
+					trafficNear = true;
+					break;
+				}
+			}
+
+			if (!trafficNear || !atMouth(here))
+				return;
+
+			if (occupied.empty())
+			{
+				for (auto const pU : UnitClass::Array)
+				{
+					if (pU && pU->IsAlive && !pU->InLimbo)
+						occupied.push_back(pU->GetMapCoords());
+				}
+			}
+
+			if (auto const pCell = FindClearingCell(pFoot, here, 4, 8, 0.0, 0.0, occupied, taken))
+			{
+				if (atMouth(pCell->MapCoords))
+					return;
+
+				taken.push_back(pCell->MapCoords);
+
+				if (IssueMoveOrder(pFoot, pCell, 0.0))
+					++moved;
+			}
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			clearFoot(pUnit);
+
+		for (auto const pInf : InfantryClass::Array)
+			clearFoot(pInf);
+
+		if (moved > 0)
+		{
+			CountDecision(NeuralDecision::MouthCleared, pHouse->ArrayIndex);
+			Debug::Log("[NeuralAI] Frame %d | House #%d cleared %d idle units from bridge/tunnel mouths\n", now, pHouse->ArrayIndex, moved);
+		}
+	}
+
+	// Hovering flyer watchdog: a flying unit of ours (jumpjet, or a Fly unit that is no aircraft) held
+	// in the air over one cell (within 1.5) for 600 frames, 900 when it is in a plan, without firing in
+	// the last 300 frames, over water or 12+ cells from any building of ours, is doing nothing where
+	// anti-air finds it (match #6164: a HIND hovered over the ocean on a finished move until shot
+	// down; a jumpjet cannot settle on water, so its move never ends and nothing gave it new work).
+	// Its orders are dropped and it flies home (FindCarrierHomeCell); the carryall / transport logic
+	// takes it from there. The state is logged so the order that left it there can be traced.
+	// Landed or near our base it is also released (orders dropped, free for the AI's next job, no trip
+	// home) when what it holds is a dead order: a move it already finished, or a target out of reach
+	// it does not go after (match #6176: a HIND landed on an island coast, Move to its own cell and a
+	// target 67 cells away, for minutes; the ground watchdog skips jumpjets).
+	void UpdateHoveringFlyers(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		std::unordered_map<DWORD, NeuralStuckTrack> next;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type
+				|| !(pUnit->Type->JumpJet || pUnit->Type->MovementZone == MovementZone::Fly))
+			{
+				continue;
+			}
+
+			const CellStruct here = pUnit->GetMapCoords();
+			NeuralStuckTrack track { here, now };
+
+			if (auto const it = macro.HoverTracks.find(pUnit->UniqueID);
+				it != macro.HoverTracks.end() && it->second.Cell.DistanceFrom(here) <= 1.5 && now >= it->second.SinceFrame)
+			{
+				track = it->second;
+			}
+
+			if (pUnit->IsFiring || (pUnit->LastFireBulletFrame > 0 && now >= pUnit->LastFireBulletFrame && now - pUnit->LastFireBulletFrame < 300))
+				track.SinceFrame = now;
+
+			const bool inPlan = macro.PlanMembers.contains(pUnit->UniqueID);
+
+			if (now - track.SinceFrame < (inPlan ? 900 : 600))
+			{
+				next.emplace(pUnit->UniqueID, track);
+				continue;
+			}
+
+			auto const pCell = pUnit->GetCell();
+			const bool inAir = pUnit->IsInAir();
+			bool exposed = inAir && pCell && pCell->LandType == LandType::Water;
+
+			if (inAir && !exposed)
+			{
+				exposed = true;
+
+				for (auto const pOwnBld : pHouse->Buildings)
+				{
+					if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->GetMapCoords().DistanceFrom(here) <= 12.0)
+					{
+						exposed = false;
+						break;
+					}
+				}
+			}
+
+			auto const pDestCell = abstract_cast<CellClass*>(pUnit->Destination);
+			const bool finishedMove = pUnit->CurrentMission == Mission::Move
+				&& (!pUnit->Destination || CellClass::Coord2Cell(pUnit->Destination->GetCoords()).DistanceFrom(here) <= 1.5);
+			const bool targetOutOfReach = pUnit->Target && !pUnit->IsCloseEnoughToAttack(pUnit->Target);
+			const bool deadOrder = finishedMove || targetOutOfReach;
+
+			if (!exposed && !deadOrder)
+			{
+				next.emplace(pUnit->UniqueID, track);
+				continue;
+			}
+
+			auto const pTargetObj = abstract_cast<ObjectClass*>(pUnit->Target);
+			auto const pCarryExt = UnitExt::Fetch(pUnit);
+			Debug::Log("[NeuralAI] Frame %d | House #%d hovering %s #%u at (%d,%d) for %d frames: mission %d mega %d dest (%d,%d) target %s (%d,%d) passengers %d carryall state %d cargo %s plan %d -> %s\n",
+				now, pHouse->ArrayIndex, pUnit->Type->ID, pUnit->UniqueID, here.X, here.Y, now - track.SinceFrame,
+				static_cast<int>(pUnit->CurrentMission), static_cast<int>(pUnit->MegaMission),
+				pDestCell ? pDestCell->MapCoords.X : -1, pDestCell ? pDestCell->MapCoords.Y : -1,
+				pTargetObj && pTargetObj->GetType() ? pTargetObj->GetType()->ID : "-",
+				pTargetObj ? pTargetObj->GetMapCoords().X : -1, pTargetObj ? pTargetObj->GetMapCoords().Y : -1,
+				pUnit->Passengers.NumPassengers, pCarryExt ? static_cast<int>(pCarryExt->CarryallState) : -1,
+				(pCarryExt && pCarryExt->CarryallCargo && pCarryExt->CarryallCargo->GetTechnoType()) ? pCarryExt->CarryallCargo->GetTechnoType()->ID : "-",
+				inPlan ? 1 : 0, exposed ? "home" : "released");
+
+			pUnit->SetTarget(nullptr);
+			pUnit->ClearMegaMissionData();
+			pUnit->SetDestination(nullptr, true);
+
+			if (!exposed)
+				pUnit->QueueMission(Mission::Guard, true);
+			else if (auto const pHome = FindCarrierHomeCell(pHouse, pUnit))
+				IssueMoveOrder(pUnit, pHome, 0.0);
+			else
+				pUnit->QueueMission(Mission::Guard, true);
+
+			CountDecision(NeuralDecision::HoverReleased, pHouse->ArrayIndex);
+			// Its next stop starts a new track.
+		}
+
+		macro.HoverTracks = std::move(next);
+	}
+
 	// Stuck order watchdog: a ground unit with a move or attack-move destination that has not
 	// left its cell is released (orders cleared, back to Guard) so the AI gives it a new job:
 	// after 450 frames when the destination is in another movement zone (unreachable: e.g. the
@@ -100,6 +848,8 @@ namespace
 		auto& macro = GetMacroState(pHouse);
 		std::unordered_map<DWORD, NeuralStuckTrack> next;
 		const int now = Unsorted::CurrentFrame;
+		// Units of ours held 450+ frames on one cell with an order pending, and where they want to go.
+		std::vector<NeuralHeldOrder> stuckOrders;
 
 		auto check = [&](FootClass* pFoot, bool skip)
 		{
@@ -112,9 +862,20 @@ namespace
 			if (!pType || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly)
 				return;
 
+			// An attack on a target out of reach counts as a move toward it: in a block of our own
+			// units it waits for a path forever.
+			const bool attackingOutOfReach = pFoot->CurrentMission == Mission::Attack && pFoot->Target
+				&& !pFoot->IsCloseEnoughToAttack(pFoot->Target);
+			// Entering a building (a tunnel, a depot, a bio reactor) waits in the queue like a move; a
+			// transport's boarding has its own one-by-one control.
+			BuildingClass* const pEnterBuilding = pFoot->CurrentMission == Mission::Enter
+				? abstract_cast<BuildingClass*>(pFoot->Destination ? pFoot->Destination : pFoot->Target)
+				: nullptr;
 			const bool moving = pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::AttackMove
-				|| pFoot->MegaMission == Mission::AttackMove;
-			AbstractClass* const pDest = pFoot->Destination ? pFoot->Destination : pFoot->MegaDestination;
+				|| pFoot->MegaMission == Mission::AttackMove || attackingOutOfReach || pEnterBuilding;
+			AbstractClass* const pDest = pEnterBuilding ? pEnterBuilding
+				: (pFoot->Destination ? pFoot->Destination
+					: (pFoot->MegaDestination ? pFoot->MegaDestination : (attackingOutOfReach ? pFoot->Target : nullptr)));
 
 			if (!moving || !pDest)
 				return;
@@ -135,8 +896,13 @@ namespace
 
 			auto const pTargetTechno = abstract_cast<TechnoClass*>(pFoot->Target);
 
-			if (pFoot->IsFiring || (pTargetTechno && pTargetTechno->IsAlive && !pTargetTechno->InLimbo))
+			// Fighting: firing, or a live target within reach. A target out of reach does not keep a
+			// unit that never moves from being released.
+			if (pFoot->IsFiring
+				|| (pTargetTechno && pTargetTechno->IsAlive && !pTargetTechno->InLimbo && pFoot->IsCloseEnoughToAttack(pTargetTechno)))
+			{
 				track.SinceFrame = now;
+			}
 
 			const int stuckFrames = now - track.SinceFrame;
 			auto const pDestObject = abstract_cast<ObjectClass*>(pDest);
@@ -186,6 +952,9 @@ namespace
 				return; // Its next order starts a new track.
 			}
 
+			if (stuckFrames >= 450)
+				stuckOrders.push_back({ pFoot, here, destCell });
+
 			next.emplace(pFoot->UniqueID, track);
 		};
 
@@ -196,6 +965,40 @@ namespace
 			check(pInf, false);
 
 		macro.StuckTracks = std::move(next);
+
+		// Where every ground unit of ours stands and since when (firing restarts it): IsFootHeldStill.
+		{
+			std::unordered_map<DWORD, NeuralStuckTrack> progress;
+
+			auto const trackProgress = [&](FootClass* pFoot)
+			{
+				if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir())
+					return;
+
+				const CellStruct here = pFoot->GetMapCoords();
+				NeuralStuckTrack track { here, now };
+
+				if (auto const it = macro.FootProgress.find(pFoot->UniqueID);
+					it != macro.FootProgress.end() && it->second.Cell.DistanceFrom(here) <= 1.5 && !pFoot->IsFiring)
+				{
+					track = it->second;
+				}
+
+				progress.emplace(pFoot->UniqueID, track);
+			};
+
+			for (auto const pUnit : UnitClass::Array)
+				trackProgress(pUnit);
+
+			for (auto const pInf : InfantryClass::Array)
+				trackProgress(pInf);
+
+			macro.FootProgress = std::move(progress);
+		}
+
+		UpdateJamBreaker(pHouse, stuckOrders);
+		UpdateJamMouths(pHouse);
+		UpdateHoveringFlyers(pHouse);
 
 		// Aircraft on Mission::Attack that neither move nor fire: when the engine finds no fire
 		// location for the target it goes back to "return to base" and, still armed and targeting,
@@ -877,6 +1680,66 @@ namespace
 			}
 		}
 
+		// Research: a superweapon that delivers hidden (limbo) buildings opens what lists them as
+		// prerequisites. Those buildings are never on the sidebar, so the unlock counts for the
+		// visible building that grants the superweapon. A two-step research (a hidden marker that
+		// grants the finishing superweapon) is followed back to the visible building too.
+		std::unordered_map<int, std::vector<int>> limboHosts;
+
+		for (auto const pHostType : BuildingTypeClass::Array)
+		{
+			if (!pHostType || pHostType->TechLevel > pHouse->TechLevel)
+				continue;
+
+			auto const pHostExt = BuildingTypeExt::Fetch(pHostType);
+			const int swSlots = 2 + static_cast<int>(pHostExt->SuperWeapons.size());
+
+			for (int i = 0; i < swSlots; ++i)
+			{
+				auto const pSWType = SuperWeaponTypeClass::Array.GetItemOrDefault(pHostExt->GetSuperWeaponIndex(i));
+
+				if (!pSWType)
+					continue;
+
+				for (auto const pDelivered : SWTypeExt::Fetch(pSWType)->LimboDelivery_Types)
+				{
+					if (pDelivered && pDelivered != pHostType && !IsPlayerFacingBuilding(pDelivered))
+						limboHosts[pDelivered->ArrayIndex].push_back(pHostType->ArrayIndex);
+				}
+			}
+		}
+
+		// Visible buildings of our tree that grant (directly or through a hidden marker) the
+		// superweapon delivering this hidden building, in building array order.
+		auto researchHostsOf = [&](int limboIdx, std::vector<int>& out)
+		{
+			std::vector<int> pending { limboIdx };
+			std::vector<int> seen;
+
+			for (size_t step = 0; step < pending.size() && step < 16; ++step)
+			{
+				auto const it = limboHosts.find(pending[step]);
+
+				if (it == limboHosts.end())
+					continue;
+
+				for (const int host : it->second)
+				{
+					if (std::find(seen.begin(), seen.end(), host) != seen.end())
+						continue;
+
+					seen.push_back(host);
+					auto const pHost = BuildingTypeClass::Array.GetItem(host);
+
+					if (!IsPlayerFacingBuilding(pHost))
+						pending.push_back(host);
+					else if (pHost->TechLevel >= 0
+						&& (HouseExt::IsAvailableToHouse(pHouse, pHost) || (pHost->OwnerFlags & foreignYardOwners)))
+						out.push_back(host);
+				}
+			}
+		};
+
 		auto scanType = [&](TechnoTypeClass* pType)
 		{
 			if (!pType || pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel
@@ -911,8 +1774,13 @@ namespace
 
 				for (const int b : satisfiers)
 				{
-					if (b >= 0 && b < BuildingTypeClass::Array.Count && IsPlayerFacingBuilding(BuildingTypeClass::Array.GetItem(b)))
+					if (b < 0 || b >= BuildingTypeClass::Array.Count)
+						continue;
+
+					if (IsPlayerFacingBuilding(BuildingTypeClass::Array.GetItem(b)))
 						unlockers.push_back(b);
+					else
+						researchHostsOf(b, unlockers);
 				}
 			}
 
@@ -1052,8 +1920,12 @@ namespace
 	// the object costs. A bank beyond the reserve is wasted strength when the queues cannot spend
 	// it: the governor compares what they can spend with the measured income plus the surplus
 	// spread over 9000 frames, and while they fall short it wants one more factory at a time in
-	// the slowest queue until they would not. Only game state is read (money spent and held,
-	// factory counts, rules), so every machine computes the same wants.
+	// the slowest queue until they would not. Only a queue that kept producing (85% of the AI
+	// ticks since the last sample) gets one: a queue that waits for something to build (army caps,
+	// no target) does not spend faster with more factories. Airfields are never added: they are
+	// hangars that follow the docks the aircraft need. Only game state is read (money spent
+	// and held, factory counts, factories producing, rules), so every machine computes the same
+	// wants.
 	void UpdateBankGovernor(HouseClass* pHouse)
 	{
 		if (!pHouse)
@@ -1083,6 +1955,14 @@ namespace
 		macro.BankIncomeEarned = earned;
 		macro.BankGovernorActive = false;
 		macro.BankWantedFactories.fill(0);
+
+		std::array<bool, static_cast<size_t>(BankQueue::Count)> queueKeptBusy {};
+
+		for (size_t q = 0; q < queueKeptBusy.size(); ++q)
+			queueKeptBusy[q] = macro.BankQueueTicks[q] > 0 && macro.BankQueueBusyTicks[q] * 100 >= macro.BankQueueTicks[q] * 85;
+
+		macro.BankQueueTicks.fill(0);
+		macro.BankQueueBusyTicks.fill(0);
 		macro.BankWantedYards = 0;
 		macro.BankSurplus = 0;
 
@@ -1140,8 +2020,11 @@ namespace
 
 			for (int q = 0; q < static_cast<int>(BankQueue::Count); ++q)
 			{
-				if (counts[q] > 0 && (best < 0 || wanted[q] < wanted[best]))
+				if (q != static_cast<int>(BankQueue::Aircraft) && counts[q] > 0 && queueKeptBusy[q]
+					&& (best < 0 || wanted[q] < wanted[best]))
+				{
 					best = q;
+				}
 			}
 
 			if (best < 0)
@@ -1164,6 +2047,16 @@ namespace
 
 		if (factoryDeficit >= 3 && pHouse->NumConYards < (surplus >= 100000 ? 6 : 4))
 			macro.BankWantedYards = pHouse->NumConYards + 1;
+	}
+
+	// Credits beyond the governor's reserve that make a house play offensively: losses are bought
+	// back at once, so waves leave with less advantage, forward stones go toward the enemy and an
+	// enemy across the water is harassed from range and invaded with a beachhead.
+	constexpr int OffensiveBankSurplus = 25000;
+
+	bool HasOffensiveBank(HouseClass* pHouse)
+	{
+		return pHouse && GetMacroState(pHouse).BankSurplus >= OffensiveBankSurplus;
 	}
 
 	// Factories the bank governor still wants in this queue (0 when it is idle).
@@ -1197,6 +2090,128 @@ namespace
 	//   offline (the existing micro brings them back online once the surplus is >= 150).
 	// - Harvester balance: a refinery with 3+ harvesters waiting next to it sends one to the ore of a
 	//   refinery of ours that has none (one per 450 frames).
+	int GroundRangeOf(TechnoTypeClass* pType);
+
+	// Emergency sale on a repair station, as a player can do (Phobos: a unit standing on a building
+	// with UnitSell, default UnitRepair, is sold; Unsellable / UnitsUnsellable respected). While the
+	// income has to be restored and the credits do not cover it, the least needed sellable vehicle
+	// (armed, no harvester, deployer, transport or naval unit, in no plan, 300+ credits; most
+	// expensive first, nearer first) drives onto our nearest such station and is sold there, one
+	// at a time, until the credits reach targetMoney.
+	void UpdateDepotEmergencySale(HouseClass* pHouse, bool needed, int targetMoney)
+	{
+		auto& macro = GetMacroState(pHouse);
+
+		if (!needed || targetMoney == INT_MAX || pHouse->Available_Money() >= targetMoney)
+		{
+			macro.DepotSaleUnit = 0;
+			return;
+		}
+
+		std::vector<BuildingClass*> depots;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && !pBld->Type->Naval
+				&& BuildingTypeExt::ExtMap.Find(pBld->Type)->UnitSell.Get(pBld->Type->UnitRepair))
+			{
+				depots.push_back(pBld);
+			}
+		}
+
+		if (depots.empty())
+		{
+			macro.DepotSaleUnit = 0;
+			return;
+		}
+
+		auto const sellable = [pHouse, &macro](UnitClass* pUnit)
+		{
+			auto const pType = pUnit ? pUnit->Type : nullptr;
+
+			if (!pType || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || pType->Naval || pType->Harvester
+				|| pType->ResourceGatherer || pType->DeploysInto || IsAmphibiousOrAirTransport(pType) || pType->Cost < 300
+				|| pUnit->Passengers.NumPassengers > 0 || GroundRangeOf(pType) <= 0 || macro.PlanMembers.contains(pUnit->UniqueID)
+				|| IsAirborneThreatTechno(pUnit))
+			{
+				return false;
+			}
+
+			auto const pTypeExt = TechnoTypeExt::ExtMap.Find(pType);
+
+			return !(pTypeExt && pTypeExt->Unsellable.Get(RulesExt::Global()->UnitsUnsellable));
+		};
+
+		UnitClass* pSale = nullptr;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->UniqueID == macro.DepotSaleUnit)
+			{
+				pSale = sellable(pUnit) ? pUnit : nullptr;
+				break;
+			}
+		}
+
+		auto const nearestDepot = [&depots](UnitClass* pUnit)
+		{
+			BuildingClass* pBest = nullptr;
+			int bestDist = INT_MAX;
+
+			for (auto const pDepot : depots)
+			{
+				const int d = pUnit->DistanceFrom(pDepot);
+
+				if (d < bestDist)
+				{
+					bestDist = d;
+					pBest = pDepot;
+				}
+			}
+
+			return pBest;
+		};
+
+		if (!pSale)
+		{
+			int bestScore = INT_MIN;
+
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (!sellable(pUnit))
+					continue;
+
+				auto const pDepot = nearestDepot(pUnit);
+				const int score = pUnit->Type->Cost - pUnit->DistanceFrom(pDepot) / Unsorted::LeptonsPerCell * 20;
+
+				if (score > bestScore || (score == bestScore && pSale && pUnit->UniqueID < pSale->UniqueID))
+				{
+					bestScore = score;
+					pSale = pUnit;
+				}
+			}
+
+			if (!pSale)
+				return;
+
+			macro.DepotSaleUnit = pSale->UniqueID;
+		}
+
+		auto const pDepot = nearestDepot(pSale);
+		auto const pCell = pSale->GetCell();
+
+		if (pCell && std::find(depots.begin(), depots.end(), pCell->GetBuilding()) != depots.end())
+		{
+			pSale->Sell(-1);
+			macro.DepotSaleUnit = 0;
+			CountDecision(NeuralDecision::DepotEmergencySale, pHouse->ArrayIndex);
+		}
+		else if (pSale->CurrentMission != Mission::Enter)
+		{
+			OrderFootToEnter(pSale, pDepot);
+		}
+	}
+
 	void UpdateEconomyCrisis(HouseClass* pHouse)
 	{
 		if (!pHouse || pHouse->Defeated)
@@ -1478,6 +2493,108 @@ namespace
 		const bool holdForHarvester = noIncome && cashBuildings == 0 && cheapestHarvester != INT_MAX;
 		macro.BrokeHoldActive = holdForHarvester;
 
+		// Dry economy: we own gatherers and refineries, yet no unload has paid for 3600 frames (never
+		// one after frame 9000) while we hold less than 1500 credits: the fields within reach are
+		// gone (match #6526, Siberian Wastes, minute 129: three houses at $2-$24 with 5-8
+		// harvesters each and no ore left on the map). No more harvesters or refineries then, and
+		// every 300 frames one building that earns nothing more is sold for an army (SellForDryEconomy).
+		const int lastHarvest = macro.LastHarvestIncomeFrame;
+		const int money = pHouse->Available_Money();
+		// The fields themselves must be gone too: half or more of our refineries have fewer than 6
+		// ore cells around them (Production.inl depletion check), so harvesters chased off by an
+		// attack for a while never trigger it.
+		const bool fieldsDepleted = macro.RefineriesChecked > 0 && macro.RefineriesDepleted * 2 >= macro.RefineriesChecked;
+		macro.DryEconomyActive = harvCount > 0 && refCount > 0 && cashBuildings == 0 && money < 1500 && now > 9000
+			&& fieldsDepleted && (lastHarvest < 0 || now - lastHarvest > 3600);
+
+		if (macro.DryEconomyActive && now - macro.LastDrySaleFrame >= 300)
+		{
+			if (SellForDryEconomy(pHouse))
+				macro.LastDrySaleFrame = now;
+		}
+
+		// Emergency money from units sold on a repair station: for the item that restores income,
+		// or for an MCV when no ConYard and no MCV is left.
+		{
+			bool hasMcv = false;
+			int mcvCost = INT_MAX;
+
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && pUnit->Type && pUnit->Type->DeploysInto
+					&& pUnit->Type->DeploysInto->ConstructionYard)
+				{
+					hasMcv = true;
+					break;
+				}
+			}
+
+			if (pHouse->ConYards.Count == 0 && !hasMcv)
+			{
+				for (auto const pType : UnitTypeClass::Array)
+				{
+					if (pType && pType->DeploysInto && pType->DeploysInto->ConstructionYard && CanBuildUnderHumanRules(pHouse, pType))
+						mcvCost = std::min(mcvCost, pType->GetActualCost(pHouse));
+				}
+			}
+
+			const bool needMcv = mcvCost != INT_MAX;
+			const bool savingForExpansion = !holdForHarvester && !needMcv && macro.ExpansionSaveTarget > 0;
+			UpdateDepotEmergencySale(pHouse, holdForHarvester || needMcv || savingForExpansion,
+				needMcv ? mcvCost : (savingForExpansion ? macro.ExpansionSaveTarget : cheapestHarvester));
+		}
+
+		// Economy hold: an economic investment the production wants and cannot pay yet, in this
+		// order: a harvester (fewer than refineries), a refinery for a newly reached field, the expansion
+		// MCV when our fields ran dry. Until the credits reach it the other production waits
+		// (suspended, never cancelled), except harvesters, refineries, MCVs, transports, income,
+		// power under low power, and nothing waits while our base is under attack. A hold that
+		// bought nothing for 3600 frames rests 1800 (the investment may be blocked elsewhere).
+		// Without it the trickle of income went to the army and the investment never came.
+		const bool baseUnderAttack = pHouse->LATime > 0 && now - pHouse->LATime < 1350;
+		const int economyTarget = macro.HarvesterSaveTarget > 0 ? macro.HarvesterSaveTarget
+			: (macro.RefinerySaveTarget > 0 ? macro.RefinerySaveTarget : macro.ExpansionSaveTarget);
+		bool holdForEconomy = !holdForHarvester && !baseUnderAttack && economyTarget > 0
+			&& pHouse->Available_Money() < economyTarget && now >= macro.EconomyHoldPauseUntil;
+		// Saving for the island MCV on a slow trickle of income takes longer than 3600 frames, and the
+		// rest after it gave the credits back to the army before the MCV was ever paid.
+		const bool islandHold = macro.IslandExpansionUrgent && economyTarget == macro.ExpansionSaveTarget;
+
+		// Island expansion (UpdateIslandOreOutlook) and the fields we hold nearly gone: every 450
+		// frames one building that earns nothing more is sold toward the island MCV.
+		// SellForDryEconomy keeps ConYards, naval buildings, defenses and the last of each type.
+		if (islandHold && macro.ExpansionSaveTarget > 0 && pHouse->Available_Money() < macro.ExpansionSaveTarget
+			&& !macro.DryEconomyActive && now - macro.LastIslandSaleFrame >= 450
+			&& (macro.IslandHomeOre < 3000 || (macro.IslandOreRunway >= 0 && macro.IslandOreRunway < 2700)))
+		{
+			const int moneyBefore = pHouse->Available_Money();
+			macro.LastIslandSaleFrame = now;
+
+			if (SellForDryEconomy(pHouse))
+			{
+				Debug::Log("[NeuralAI] House %d IslandExpansion: home ore %d, %d of %d credits for the MCV, that sale goes to it, frame %d.\n",
+					pHouse->ArrayIndex, macro.IslandHomeOre, moneyBefore, macro.ExpansionSaveTarget, now);
+			}
+		}
+
+		if (!holdForEconomy)
+		{
+			macro.EconomyHoldSince = -1;
+		}
+		else if (macro.EconomyHoldSince < 0 || macro.EconomyHoldSince > now)
+		{
+			macro.EconomyHoldSince = now;
+		}
+		else if (now - macro.EconomyHoldSince > (islandHold ? 9000 : 3600))
+		{
+			macro.EconomyHoldPauseUntil = now + 1800;
+			macro.EconomyHoldSince = -1;
+			holdForEconomy = false;
+		}
+
+		const bool holdForExpansion = holdForEconomy;
+		const bool holdProduction = holdForHarvester || holdForEconomy;
+
 		// No repairs while broke: wrench repairs stop, units on a repair station (service depot,
 		// shipyard) step off it.
 		if (holdForHarvester)
@@ -1499,8 +2616,11 @@ namespace
 				{
 					auto const pDocked = abstract_cast<FootClass*>(pBld->GetNthLink(i));
 
-					if (!pDocked || !pDocked->IsAlive || pDocked->Owner != pHouse || pDocked->GetHealthPercentage() >= 1.0)
+					if (!pDocked || !pDocked->IsAlive || pDocked->Owner != pHouse || pDocked->GetHealthPercentage() >= 1.0
+						|| pDocked->UniqueID == macro.DepotSaleUnit)
+					{
 						continue;
+					}
 
 					if (auto const pExitCell = MapClass::Instance.TryGetCellAt(exitCell))
 					{
@@ -1521,7 +2641,7 @@ namespace
 			const DWORD objectId = pObject->UniqueID;
 			auto const held = std::find(macro.BrokeHeldObjects.begin(), macro.BrokeHeldObjects.end(), objectId);
 
-			if (!holdForHarvester)
+			if (!holdProduction)
 			{
 				if (held != macro.BrokeHeldObjects.end() && pFactory->IsSuspended)
 					pFactory->Unsuspend(true);
@@ -1543,12 +2663,21 @@ namespace
 				|| (pBldType && (((pBldType->Refinery || pBldType->ResourceGatherer) && !harvesterBuildable)
 					|| pBldType->ProduceCashAmount > 0
 					|| (pBldType->PowerBonus > pBldType->PowerDrain && pHouse->HasLowPower())))
-				|| (pInfType && pInfType->Engineer);
+				|| (pInfType && pInfType->Engineer)
+				|| (holdForExpansion && pUnitType
+					&& (IsAmphibiousOrAirTransport(pUnitType) || (pUnitType->DeploysInto && pUnitType->DeploysInto->ConstructionYard)))
+				// The island MCV and its ride come out of the first war factory and shipyard, and the MCV
+				// needs the buildings of its prerequisite list we lack.
+				|| (holdForExpansion && macro.IslandExpansionUrgent && pBldType
+					&& ((pBldType->Factory == AbstractType::UnitType && (pBldType->Naval ? pHouse->NumShipyards == 0 : pHouse->NumWarFactories == 0))
+						|| std::find(macro.IslandMcvPrerequisites.begin(), macro.IslandMcvPrerequisites.end(), pBldType->ArrayIndex)
+							!= macro.IslandMcvPrerequisites.end()))
+				|| (holdForEconomy && pBldType && (pBldType->Refinery || pBldType->ResourceGatherer));
 
 			if (restoresIncome)
 				continue;
 
-			if (pUnitType && !pUnitType->Naval)
+			if (pUnitType && !pUnitType->Naval && holdForHarvester)
 			{
 				Debug::Log("[NeuralAI] House %d broke: cancelling %s for a harvester.\n", pHouse->ArrayIndex, pType->ID);
 				pFactory->AbandonProduction();
@@ -1560,7 +2689,7 @@ namespace
 			}
 		}
 
-		if (!holdForHarvester)
+		if (!holdProduction)
 			macro.BrokeHeldObjects.clear();
 
 		if (noIncome && cheapestHarvester != INT_MAX && pHouse->Available_Money() < cheapestHarvester
@@ -1592,8 +2721,10 @@ namespace
 			{
 				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->CurrentMission == Mission::Selling
 					|| pBld->Type->ConstructionYard || pBld->Type->Refinery || pBld->Type->ResourceDestination
-					|| pBld->Type->Unsellable || pBld->Type->InvisibleInGame)
+					|| pBld->Type->Unsellable || pBld->Type->InvisibleInGame || pBld->Type->Naval)
 				{
+					// Never a naval building: on an island map the yard is the only way off the
+					// island for an MCV or an army (user: selling it is a death sentence).
 					continue;
 				}
 
