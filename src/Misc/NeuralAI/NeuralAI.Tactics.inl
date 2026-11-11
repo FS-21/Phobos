@@ -193,6 +193,10 @@ namespace
 			return nullptr;
 
 		const int zone = ObjectZone(pFoot, pType->MovementZone);
+		// Ships make room on water (they never found a cell: water was always skipped, so a two-way
+		// jam of submarines in a strait was never broken, match repro on Fludded Recources).
+		const bool naval = pType->Naval || pType->MovementZone == MovementZone::Water
+			|| pType->MovementZone == MovementZone::WaterBeach;
 		CellClass* pBest = nullptr;
 		int bestScore = INT_MAX;
 
@@ -208,7 +212,7 @@ namespace
 					const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
 					auto const pCell = MapClass::Instance.TryGetCellAt(c);
 
-					if (!pCell || pCell->GetBuilding() || pCell->LandType == LandType::Water || IsBridgeOrTubeCell(pCell)
+					if (!pCell || pCell->GetBuilding() || (pCell->LandType == LandType::Water) != naval || IsBridgeOrTubeCell(pCell)
 						|| MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
 						|| !pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false))
 					{
@@ -398,7 +402,15 @@ namespace
 					if (yielded >= 12 || !pFoot || !pFoot->IsAlive || pFoot->InLimbo)
 						continue;
 
-					if (auto const pCell = FindClearingCell(pFoot, center, 8, 14, want.first, want.second, occupied, taken))
+					// On a long bridge the 8..14 ring is all deck or water: the side that backs off then
+					// goes past the bridge end (16..26 cells; match #7080, 20-25 units held for minutes on
+					// a bridge in two-way traffic, 0-3 backed off per break).
+					auto pCell = FindClearingCell(pFoot, center, 8, 14, want.first, want.second, occupied, taken);
+
+					if (!pCell)
+						pCell = FindClearingCell(pFoot, center, 16, 26, want.first, want.second, occupied, taken);
+
+					if (pCell)
 					{
 						taken.push_back(pCell->MapCoords);
 						pFoot->ClearMegaMissionData();
