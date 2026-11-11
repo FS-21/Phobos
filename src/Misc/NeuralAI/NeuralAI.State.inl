@@ -1080,6 +1080,13 @@ namespace
 		int ReadyFrame { -1 };
 		CellStruct LastCoords { CellStruct::Empty };
 		int HouseIndex { -1 };
+
+		// The landing a loaded transport committed to once within 14 cells of it: kept to the end
+		// (user: transports turned away 10-15 cells from the shore when his troops came near, the
+		// landing being re-picked every tick with enemy units in sight weighing -2400).
+		CellStruct CommittedLanding { CellStruct::Empty };
+		// First frame a combat cargo sat loaded but under half full on its pickup shore.
+		int UnderfilledSince { -1 };
 	};
 
 	constexpr int FerryTripCapacity = 128;

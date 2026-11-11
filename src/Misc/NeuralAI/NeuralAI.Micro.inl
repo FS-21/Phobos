@@ -10260,7 +10260,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		const CellStruct transCoords = pTrans->GetMapCoords();
-		const int transZone = MapClass::Instance.GetMovementZoneType(transCoords, MovementZone::Normal, pTrans->OnBridge);
+		// The land around a parked transport, not the shore cell's own zone (see TransportLandZone).
+		const int transZone = TransportLandZone(transCoords, pTrans->OnBridge);
 
 		// Slot 82 (Island Extraction of Stolen Foreign MCV to Safe Home Island):
 		// If this transport is carrying a stolen foreign-faction MCV from an
@@ -10725,10 +10726,28 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// A combat cargo under half the room waits up to 900 frames on its shore for more (user: one
+		// Tick Tank per crossing is slow and toothless); MCVs, harvesters, engineers and a transport
+		// under fire still leave at once.
+		bool underfilledHold = false;
+
+		if (pTrip && numPass >= 1 && onSafePickupShore && !carryingMCV && !carryingStolenForeignMCV && !carryingHarvester
+			&& !carryingEngineer && !emergencyDepartUnderFire && totalPassSize * 2 < pTrans->Type->Passengers)
+		{
+			if (pTrip->UnderfilledSince < 0 || Unsorted::CurrentFrame < pTrip->UnderfilledSince)
+				pTrip->UnderfilledSince = Unsorted::CurrentFrame;
+
+			underfilledHold = Unsorted::CurrentFrame - pTrip->UnderfilledSince < 900;
+		}
+		else if (pTrip)
+		{
+			pTrip->UnderfilledSince = -1;
+		}
+
 		const bool isReadyToSailEffective = carryingMCV || carryingStolenForeignMCV || carryingHarvester
 			|| (carryingEngineer && pIslandTechGoalCell != nullptr)
 			|| emergencyDepartUnderFire || hasCargoInTransitOrUnloading
-			|| (numPass >= 1 && onSafePickupShore && !canFitMoreOnPickupIsland && !convoyHold);
+			|| (numPass >= 1 && onSafePickupShore && !canFitMoreOnPickupIsland && !convoyHold && !underfilledHold);
 
 		// Sailing: the passengers still walking up are free again (repro: a hovercraft that left with
 		// an engineer stayed on the shore for 1800 frames, boxed in by its own reserved passengers).
@@ -10782,6 +10801,31 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			CellClass* pSafeLanding = FindSafeIslandLandingCell(
 				pHouse, pActiveIslandGoal->MapCoords, activeIslandZone, carryingMCV || carryingHarvester);
+
+			// Landing commitment: within 14 cells of a landing the transport keeps it and unloads,
+			// enemy units coming near or not (they made the pick jump away every tick and the
+			// transport turned back with its cargo). A cell no longer usable (a building on it,
+			// water) is dropped.
+			if (pTrip && tripDeparted)
+			{
+				auto const pCommitted = pTrip->CommittedLanding != CellStruct::Empty
+					? MapClass::Instance.TryGetCellAt(pTrip->CommittedLanding)
+					: nullptr;
+
+				if (pCommitted && pCommitted->LandType != LandType::Water && !pCommitted->GetBuilding()
+					&& MapClass::Instance.GetMovementZoneType(pTrip->CommittedLanding, MovementZone::Normal, false) == activeIslandZone)
+				{
+					pSafeLanding = pCommitted;
+				}
+				else
+				{
+					pTrip->CommittedLanding = CellStruct::Empty;
+
+					if (pSafeLanding && transCoords.DistanceFrom(pSafeLanding->MapCoords) <= 14.0)
+						pTrip->CommittedLanding = pSafeLanding->MapCoords;
+				}
+			}
+
 			if (pSafeLanding)
 			{
 				auto const pTransCell = pTrans->GetCell();
@@ -11856,7 +11900,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const int numAirPass = pAir->Passengers.NumPassengers;
 			const int totalAirPassSize = pAir->Passengers.GetTotalSize();
 			const CellStruct airCoords = pAir->GetMapCoords();
-			const int airZone = MapClass::Instance.GetMovementZoneType(airCoords, MovementZone::Normal, pAir->OnBridge);
+			const int airZone = TransportLandZone(airCoords, pAir->OnBridge);
 			bool airCarryingMCV = false;
 			bool airCarryingHarvester = false;
 			bool airCarryingEngineer = false;

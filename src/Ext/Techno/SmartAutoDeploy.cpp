@@ -1,5 +1,7 @@
 #include "SmartAutoDeploy.h"
 
+#include <Misc/NeuralAI/NeuralAI.h>
+
 #include <TechnoClass.h>
 #include <UnitClass.h>
 #include <BuildingClass.h>
@@ -1080,6 +1082,12 @@ namespace SmartAutoDeploy
 			return false;
 
 		const bool isAI = !pOwner->IsControlledByHuman();
+
+		// The Neural AI deploys and packs up its siege units itself (Micro.inl, slot 57); both at once
+		// made a Tick Tank deploy and pack up in a loop when an enemy stayed just out of its range.
+		if (isAI && NeuralAI::IsEnabledForHouse(pOwner))
+			return false;
+
 		const auto pTypeExt = TechnoTypeExt::Fetch(pThis->GetTechnoType());
 		const bool enabledOnCurrent = isAI ? pTypeExt->SmartAutoDeploy_AI.Get() : pTypeExt->SmartAutoDeploy_Player.Get();
 

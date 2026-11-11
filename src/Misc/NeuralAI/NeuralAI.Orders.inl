@@ -664,7 +664,38 @@ namespace
 			|| (pTargetBld->TechLevel >= 0 && pTargetBld->TechLevel <= 10));
 	}
 
+	CellClass* FindSafeIslandLandingCellUncached(
+		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre);
+
+	// One search per house, island reference, zone and ore preference per frame (user's profile:
+	// FindSafeIslandLandingCell was the AI's costliest function, called once per soldier of a wave
+	// ordered across water with the very same arguments, thousands of cells each).
 	CellClass* FindSafeIslandLandingCell(
+		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre)
+	{
+		static int cacheFrame = -1;
+		static std::unordered_map<uint64_t, CellStruct> cache;
+
+		if (cacheFrame != Unsorted::CurrentFrame)
+		{
+			cacheFrame = Unsorted::CurrentFrame;
+			cache.clear();
+		}
+
+		const uint64_t key = (static_cast<uint64_t>(static_cast<uint8_t>(pHouse ? pHouse->ArrayIndex : 255)) << 56)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(targetIslandZone)) << 40)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(islandRefCell.X)) << 24)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(islandRefCell.Y)) << 8) | (preferOre ? 1u : 0u);
+
+		if (auto const it = cache.find(key); it != cache.end())
+			return it->second == CellStruct::Empty ? nullptr : MapClass::Instance.TryGetCellAt(it->second);
+
+		CellClass* const pResult = FindSafeIslandLandingCellUncached(pHouse, islandRefCell, targetIslandZone, preferOre);
+		cache.emplace(key, pResult ? pResult->MapCoords : CellStruct::Empty);
+		return pResult;
+	}
+
+	CellClass* FindSafeIslandLandingCellUncached(
 		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre)
 	{
 		bool islandHasEnemyPresence = false;
