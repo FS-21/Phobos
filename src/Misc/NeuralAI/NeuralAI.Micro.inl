@@ -10673,6 +10673,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| emergencyDepartUnderFire || hasCargoInTransitOrUnloading
 			|| (numPass >= 1 && onSafePickupShore && !canFitMoreOnPickupIsland && !convoyHold);
 
+		// Sailing: the passengers still walking up are free again (repro: a hovercraft that left with
+		// an engineer stayed on the shore for 1800 frames, boxed in by its own reserved passengers).
+		if (isReadyToSailEffective)
+			dropFerryReservationsOf(pTrans->UniqueID);
+
 		// Prevent AttackMove.Follow=true (e.g. on GDI APC/APCW) from hijacking transports into escorting warships!
 		pTrans->ClearMegaMissionData();
 
