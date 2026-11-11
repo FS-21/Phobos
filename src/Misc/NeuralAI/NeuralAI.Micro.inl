@@ -4406,17 +4406,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				continue;
 			}
-			// Deploy to fire only at a target the deployed gun reaches and can hit: deploying at
-			// anything (an out-of-reach or submerged target) made siege units deploy and pack up
-			// again in a loop at the enemy gates.
-			else if (pUnit->Target != nullptr && pUnit->CurrentMission == Mission::Attack
+			// A unit that unfolds to fire does it only at a target the deployed gun reaches and can
+			// hit, while it fights or stands guard: unfolding at anything else (out of reach, submerged
+			// or flying) only starts a loop of unfolding and packing up.
+			else if (pUnit->Target != nullptr
+				&& (pUnit->CurrentMission == Mission::Attack || pUnit->CurrentMission == Mission::Guard
+					|| pUnit->CurrentMission == Mission::Area_Guard || pUnit->CurrentMission == Mission::Hunt)
 				&& DeployedGunCanHit(pUnit->GetCoords(), pUnit->Target, GroundRangeOf(pType->DeploysInto)))
 			{
 				OrderDeployerUnpack(pUnit);
 
 				continue;
 			}
-			else if (pTargetBld != nullptr && !IsTrueBaseStructureTarget(pTargetBld))
+			// Siege units (Tick Tank, artillery) are left to the rule above: an enemy vehicle near them
+			// may be one their gun cannot hit, such as a flying one.
+			else if (pTargetBld != nullptr && !IsTrueBaseStructureTarget(pTargetBld) && !IsDeployableSiegeUnitType(pType))
 			{
 				// Tactical Support Deployers (Mobile Stealth Generator SGEN/GGEN,
 				// Mobile Sensor Array LPST/NLPST, Limpet Drone): Only deploy when near
@@ -10276,7 +10280,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			if (auto const pPassUnit = abstract_cast<UnitClass*>(pPass))
 			{
-				if (pPassUnit->Type && pPassUnit->Type->DeploysInto != nullptr)
+				// A siege unit (Tick Tank, artillery) also unfolds into a building, but it is combat cargo:
+				// it waits for a full load like any tank instead of crossing alone as an MCV does.
+				if (pPassUnit->Type && pPassUnit->Type->DeploysInto != nullptr && !IsDeployableSiegeUnitType(pPassUnit->Type))
 				{
 					carryingMCV = true; // MCV or Red Alert 3-style CABAL Expansion Nanocore!
 					const unsigned int ownHouseBit
@@ -12023,7 +12029,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (auto const pPassUnit = abstract_cast<UnitClass*>(pPass))
 				{
-					if (pPassUnit->Type && pPassUnit->Type->DeploysInto != nullptr)
+					if (pPassUnit->Type && pPassUnit->Type->DeploysInto != nullptr && !IsDeployableSiegeUnitType(pPassUnit->Type))
 						airCarryingMCV = true;
 					else if (pPassUnit->Type && (pPassUnit->Type->Harvester || pPassUnit->Type->Weeder))
 						airCarryingHarvester = true;

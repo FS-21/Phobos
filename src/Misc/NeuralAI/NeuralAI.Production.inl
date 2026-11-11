@@ -377,6 +377,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		int ownedTechStructures = 0;
 		int totalGroundDefenses = 0;
 		int totalAADefenses = 0;
+		// Defenses with any gun that shoots up, pure anti-air or not.
+		int totalAntiAirDefenses = 0;
 		int ownedBattleBunkers = 0;
 		int emptyOwnedBattleBunkers = 0;
 		int ownedTankBunkers = 0;
@@ -464,6 +466,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (pOwnBld->BunkerLinkedItem == nullptr)
 						emptyOwnedTankBunkers++;
 				}
+
+				const auto pSecondWS = pOT->GetWeapon(1);
+				const auto pSecondW = pSecondWS ? pSecondWS->WeaponType : nullptr;
+				const bool shootsUp = (pW && pW->Projectile && pW->Projectile->AA)
+					|| (pSecondW && pSecondW->Projectile && pSecondW->Projectile->AA);
+
+				if (shootsUp)
+					totalAntiAirDefenses++;
 
 				const bool isPureAA = pW && pW->Projectile && pW->Projectile->AA && !pW->Projectile->AG;
 
@@ -1328,9 +1338,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if ((underAirAttack || enemyAirValue > 0) && IsAITickWindow(900, 0))
 		{
 			Debug::Log("[NeuralAI] House %d AirDefense DIAG: enemy air value %d, under air attack %d, threat category %d, recently attacked %d, "
-				"AA defenses %d of %d, ground defenses %d, credits %d, frame %d.\n",
+				"AA defenses %d of %d, shooting up %d, ground defenses %d, credits %d, frame %d.\n",
 				pHouse->ArrayIndex, enemyAirValue, underAirAttack ? 1 : 0, static_cast<int>(activeThreatCat), wasRecentlyAttacked ? 1 : 0,
-				totalAADefenses, maxAADefenses, totalGroundDefenses, money, Unsorted::CurrentFrame);
+				totalAADefenses, maxAADefenses, totalAntiAirDefenses, totalGroundDefenses, money, Unsorted::CurrentFrame);
 		}
 
 		// AdvAI & StarCraft Resource Expansion State Machine:
@@ -2570,7 +2580,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// Allow building base defenses once core Economy + Barracks + War Factory exist,
 				// OR during an early rush / frontline threat once at least 1 Refinery + 1 Barracks exist (from AdvAI)
 				const bool canBuildEmergencyDefense = (ownedRefineries >= 1 && ownedBarracks >= 1
-					&& (wasRecentlyAttacked || frontlineThreatActive || undefendedRemoteAssetsCount > 0));
+					&& (wasRecentlyAttacked || frontlineThreatActive || undefendedRemoteAssetsCount > 0 || underAirAttack));
 				if (!hasCoreEconomyAndProduction && !canBuildEmergencyDefense && pHouse->ConYards.Count > 0)
 					continue;
 
@@ -2698,9 +2708,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += std::min(550, enemyAirValue * 4);
 				}
 
-				if (wasRecentlyAttacked || effectiveFrontlineThreat)
+				// An air raid asks for anti-air whether or not the engine counts it as an attack on the
+				// house: flying units that hit our units leave that mark untouched. With nothing of ours
+				// that shoots up, such a defense comes before anything else.
+				constexpr int airDefenseUrgentValue = 20;
+				constexpr int airDefenseFirstBonus = 900;
+				const bool airRaid = underAirAttack || activeThreatCat == NeuralThreatCategory::Air;
+
+				if (isAntiAir && totalAntiAirDefenses == 0 && (airRaid || enemyAirValue >= airDefenseUrgentValue))
+					score += airDefenseFirstBonus;
+
+				if (wasRecentlyAttacked || effectiveFrontlineThreat || (airRaid && isAntiAir))
 				{
-					if ((underAirAttack || activeThreatCat == NeuralThreatCategory::Air) && isAntiAir)
+					if (airRaid && isAntiAir)
 					{
 						score += 650 + (isPureAA ? 250 : 0);
 					}
