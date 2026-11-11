@@ -5966,7 +5966,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 
 		UnstickCrossIslandFoot(pInf);
-		const bool isIdle = (pInf->CurrentMission == Mission::Guard || pInf->CurrentMission == Mission::Area_Guard)
+		// A finished Move counts as idle too (a jumpjet soldier hovers in Move over its last cell).
+		const bool moveOver = pInf->CurrentMission == Mission::Move && pInf->MegaMission != Mission::AttackMove
+			&& (!pInf->Destination || CellClass::Coord2Cell(pInf->Destination->GetCoords()).DistanceFrom(pInf->GetMapCoords()) <= 1.5);
+		const bool isIdle = (pInf->CurrentMission == Mission::Guard || pInf->CurrentMission == Mission::Area_Guard || moveOver)
 			&& !IsFootActivelyAttackingOrMovingToEnemy(pInf);
 
 		// Specialists flying a plan (airborne raid) take their orders from it.
@@ -7668,6 +7671,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	std::vector<InfantryClass*> idleCombatInf;
 
+	// A Move that is over (destination reached or gone) is idle too: jumpjets (Jumpjet Infantry)
+	// hover in Move over the cell they were sent to instead of falling back to Guard (match #6879,
+	// Prince of Darkness: 30 of a house's soldiers out of every wave, hovering in its base).
+	auto const isFinishedMove = [](const FootClass* pFoot)
+	{
+		if (pFoot->CurrentMission != Mission::Move || pFoot->MegaMission == Mission::AttackMove)
+			return false;
+
+		return !pFoot->Destination
+			|| CellClass::Coord2Cell(pFoot->Destination->GetCoords()).DistanceFrom(pFoot->GetMapCoords()) <= 1.5;
+	};
+
 	for (auto const pUnit : UnitClass::Array)
 	{
 		if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
@@ -7755,7 +7770,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard
 			|| pUnit->CurrentMission == Mission::AttackMove
-			|| (pUnit->CurrentMission == Mission::Move && pUnit->MegaMission == Mission::AttackMove))
+			|| (pUnit->CurrentMission == Mission::Move && pUnit->MegaMission == Mission::AttackMove) || isFinishedMove(pUnit))
 		{
 			if (!IsPlanMember(pHouse, pUnit->UniqueID))
 				idleCombatUnits.push_back(pUnit);
@@ -7802,7 +7817,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (pInf->CurrentMission == Mission::Guard || pInf->CurrentMission == Mission::Area_Guard
 			|| pInf->CurrentMission == Mission::AttackMove
-			|| (pInf->CurrentMission == Mission::Move && pInf->MegaMission == Mission::AttackMove))
+			|| (pInf->CurrentMission == Mission::Move && pInf->MegaMission == Mission::AttackMove) || isFinishedMove(pInf))
 		{
 			if (!IsPlanMember(pHouse, pInf->UniqueID))
 			{
