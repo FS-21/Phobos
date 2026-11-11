@@ -1149,10 +1149,27 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			char coalitionText[160] = "0, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0";
 			// Expert 3 diplomacy details by name (NeuralAI.Diplomacy.inl).
 			char diplomacyText[1400] = "";
+			// Truces in force now (dashboard: who has a tacit non-aggression pact with whom):
+			// [partner house, frame the truce began] for each partner.
+			char truceText[160] = "";
 
 			if (pOwner)
 			{
 				auto const& coal = GetMacroState(pOwner).Coalition;
+				size_t truceLen = 0;
+
+				for (int p = 0; p < 8 && truceLen + 24 < sizeof(truceText); ++p)
+				{
+					if (IsTacitTrucePartner(pOwner, p))
+					{
+						const int written = std::snprintf(truceText + truceLen, sizeof(truceText) - truceLen, "%s[%d, %d]",
+							truceLen ? ", " : "", p, coal.TruceSinceFrame[p]);
+
+						if (written > 0)
+							truceLen += static_cast<size_t>(written);
+					}
+				}
+
 				std::snprintf(coalitionText, sizeof(coalitionText), "%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d",
 					coal.ActiveFrames, coal.Target, coal.LastTarget, coal.Joined, coal.Declined, coal.DeclinedSecond,
 					coal.LastDeclineReason, coal.Truces, coal.Revoked, coal.TargetWaves, coal.PartnerWaves, coal.OtherWaves,
@@ -1231,7 +1248,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"defense\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"team\": %s, \"econ\": [%s], \"bank\": [%s], \"army\": [%s], \"coalition\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"defense\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"team\": %s, \"econ\": [%s], \"bank\": [%s], \"army\": [%s], \"coalition\": [%s], \"truces\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -1242,7 +1259,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), expertCreditText.c_str(), expertCreditByPhaseText.c_str(), expertCreditPartsText.c_str(), defenseText, enemyMixText.c_str(), claimText, teamText, econText, bankText, armyText, coalitionText, diplomacyText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), expertCreditText.c_str(), expertCreditByPhaseText.c_str(), expertCreditPartsText.c_str(), defenseText, enemyMixText.c_str(), claimText, teamText, econText, bankText, armyText, coalitionText, truceText, diplomacyText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -1504,8 +1521,12 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			}
 
 			int paxGuard = 0;
+			// A transport nobody may unload (NoManualUnload=yes) carries its passengers as extra guns
+			// (a mod trick, not real passengers): they are not listed nor counted (user).
+			auto const pTechnoTypeExt = pType ? TechnoTypeExt::ExtMap.Find(pType) : nullptr;
+			const bool fixedPassengers = pTechnoTypeExt && pTechnoTypeExt->NoManualUnload.Get(false);
 
-			for (auto pPax = pTechno->Passengers.GetFirstPassenger(); pPax && paxGuard < 32;
+			for (auto pPax = fixedPassengers ? nullptr : pTechno->Passengers.GetFirstPassenger(); pPax && paxGuard < 32;
 				pPax = abstract_cast<FootClass*>(pPax->NextObject), ++paxGuard)
 			{
 				addInside(pPax);
@@ -1640,6 +1661,10 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				continue;
 			}
 
+			// Slaves still bound to their miner add noise to the map (user): kind -1, drawn as a small
+			// dot. Freed slaves (no SlaveOwner) are kind 0 as any soldier.
+			const int pointKind = pInf->SlaveOwner ? -1 : 0;
+
 			infStep++;
 
 			if (ptCount >= 2400 || jsonBuf.size() > 250000)
@@ -1657,8 +1682,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(pInf->Type ? pInf->Type->Name : "", nameClean, sizeof(nameClean));
 
 			objectDetail(pInf, detailBuf, sizeof(detailBuf));
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
-				rx, ry, pInf->Owner->ArrayIndex, idClean, nameClean, detailBuf);
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
+				rx, ry, pInf->Owner->ArrayIndex, pointKind, idClean, nameClean, detailBuf);
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));

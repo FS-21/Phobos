@@ -6131,10 +6131,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			}
 
-			// The soldier to escort: own fighting infantry on the move or in a fight. The one followed
-			// now is kept while it still is (no switching between soldiers of one group).
+			// The soldier to escort: own fighting infantry on the move or in a fight, anywhere on
+			// ground the medic can walk to (user: idle medics at home are taken back into missions,
+			// no distance limit, only reachable ground). The one followed now is kept while it still
+			// is (no switching between soldiers of one group).
 			InfantryClass* pEscorted = nullptr;
-			int escortDist = 24 * Unsorted::LeptonsPerCell + 1;
+			int escortDist = INT_MAX;
+			const int medicZone = ObjectZone(pInf, MovementZone::Normal);
 
 			if (auto const pFollowed = abstract_cast<InfantryClass*>(pInf->Destination))
 			{
@@ -6143,7 +6146,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (pFollowed->Owner == pHouse && !pFollowed->InLimbo && pFollowed->Type && !IsHealerInfantryType(pFollowed->Type)
 					&& (followedMission == Mission::Move || followedMission == Mission::AttackMove || followedMission == Mission::Attack
 						|| followedMission == Mission::Hunt)
-					&& pInf->DistanceFrom(pFollowed) < escortDist)
+					&& (medicZone < 0 || ObjectZone(pFollowed, MovementZone::Normal) == medicZone))
 				{
 					continue;
 				}
@@ -6165,7 +6168,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				const int dist = pInf->DistanceFrom(pOwnI);
 
-				if (dist >= escortDist)
+				if (dist >= escortDist || (medicZone >= 0 && ObjectZone(pOwnI, MovementZone::Normal) != medicZone))
 					continue;
 
 				int medicsWithIt = 0;
@@ -6273,9 +6276,34 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// Repair heavily damaged friendly-occupied or empty urban garrisonable
 			// buildings (CanBeOccupied && Repairable) to 100% full health so our
 			// infantry hold an unbreakable urban stronghold!
-			if (pDamagedUrbanToRepair && pInf->DistanceFrom(pDamagedUrbanToRepair) <= 4096)
+			// No distance limit (was 16 cells): reachable ground is what counts. Once repaired the
+			// building is worth holding again (RateUrbanBuilding needs 45% health) and is re-garrisoned.
+			if (pDamagedUrbanToRepair && pInf->Destination == pDamagedUrbanToRepair)
 			{
-				DispatchFootToTargetOrTransport(pInf, pDamagedUrbanToRepair, Mission::Enter, false);
+				pDamagedUrbanToRepair = nullptr;
+				continue;
+			}
+
+			if (pDamagedUrbanToRepair && IsBuildingEnterableFromZone(pDamagedUrbanToRepair, ObjectZone(pInf, MovementZone::Normal))
+				&& DispatchFootToTargetOrTransport(pInf, pDamagedUrbanToRepair, Mission::Enter, false))
+			{
+				static int urbanRepairLogSerial = -1;
+				static int urbanRepairLogCount = 0;
+
+				if (urbanRepairLogSerial != NeuralMatchSerial)
+				{
+					urbanRepairLogSerial = NeuralMatchSerial;
+					urbanRepairLogCount = 0;
+				}
+
+				if (urbanRepairLogCount++ < 30)
+				{
+					Debug::Log("[NeuralAI] House %d Urban: engineer %u -> repair %s at (%d,%d), %d%% health, owner %d, %d inside, frame %d.\n",
+						pHouse->ArrayIndex, pInf->UniqueID, pDamagedUrbanToRepair->Type->ID, pDamagedUrbanToRepair->GetMapCoords().X,
+						pDamagedUrbanToRepair->GetMapCoords().Y, static_cast<int>(pDamagedUrbanToRepair->GetHealthPercentage() * 100.0),
+						pDamagedUrbanToRepair->Owner ? pDamagedUrbanToRepair->Owner->ArrayIndex : -1,
+						pDamagedUrbanToRepair->Occupants.Count, Unsorted::CurrentFrame);
+				}
 
 				pDamagedUrbanToRepair = nullptr;
 
@@ -7244,11 +7272,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// Yuri Bio-Reactor Power Surge: Enter Bio-Reactor with basic infantry
-		// during LowPower!
+		// Yuri Bio-Reactor Power Surge: Enter Bio-Reactor with basic infantry while the power is low
+		// or its surplus under 350. No distance limit (was 16 cells): any idle cheap soldier on ground
+		// that reaches the reactor (same zone, or a ferry through the dispatcher).
 		if (pBioReactor && bioReactorNeedsPower && isIdle && pInf->Destination != pBioReactor && !pInf->Type->Engineer
-			&& !IsSpyInfantryType(pInf->Type) && !pInf->Type->Doggie && pInf->Type->Cost <= 250
-			&& pInf->DistanceFrom(pBioReactor) <= 4096)
+			&& !IsSpyInfantryType(pInf->Type) && !pInf->Type->Doggie && !IsHealerInfantryType(pInf->Type) && pInf->Type->Cost <= 250
+			&& IsBuildingEnterableFromZone(pBioReactor, ObjectZone(pInf, MovementZone::Normal)))
 		{
 			DispatchFootToTargetOrTransport(pInf, pBioReactor, Mission::Enter, false);
 			infAlreadyHeadingToBioReactor++;
@@ -12668,9 +12697,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			else if (!handledConYardAction && hpPct < sellDodgeThresh && !pOwnBld->Type->ConstructionYard
 				&& !IsMobileFactoryBuilding(pOwnBld->Type) && !pOwnBld->Type->Unsellable && !IsDeployedSiegeBuildingType(pOwnBld->Type)
 				&& !pOwnBld->Type->ResourceGatherer && pOwnBld->Type->Enslaves == nullptr && pOwnBld->Type->Cost >= 500
-				&& pOwnBld->CurrentMission != Mission::Selling)
+				&& !pOwnBld->Type->CanBeOccupied && pOwnBld->CurrentMission != Mission::Selling)
 			{
-				// Classic C&C Sell-Dodge right before destruction!
+				// Classic C&C Sell-Dodge right before destruction! Never a garrison (a civilian
+				// building we hold: at red health the engine evicts the soldiers and gives it back).
 				pOwnBld->SetArchiveTarget(nullptr);
 				pOwnBld->Sell(1);
 			}
@@ -12718,10 +12748,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else if (pOwnBld->Type->ClickRepairable)
 			{
+				// A garrison we hold is a free bunker (user): repaired below 75% whenever 600 credits are
+				// there, not left to the slot 59 gate (at red health the engine evicts the soldiers).
+				const bool heldGarrison = pOwnBld->Type->CanBeOccupied && pOwnBld->Occupants.Count > 0;
+
+				if (heldGarrison && hpPct < 0.75 && currentCredits > 600 && !pOwnBld->IsBeingRepaired)
+				{
+					pOwnBld->SetRepairState(1);
+				}
 				// Slot 59 (Smart Wrench Building Repair): Activate engine wrench repair
 				// on damaged key structures when credits are healthy, and pause repair
 				// if credits drop critically low!
-				if (hpPct < 0.82 && hpPct >= sellDodgeThresh && SlotGate(scores[59], 80, 59) && currentCredits > 1200
+				else if (hpPct < 0.82 && hpPct >= sellDodgeThresh && SlotGate(scores[59], 80, 59) && currentCredits > 1200
 					&& !pOwnBld->IsBeingRepaired)
 				{
 					pOwnBld->SetRepairState(1);

@@ -23,6 +23,9 @@ namespace
 		int BlockedUntilFrame { 0 };
 		// Orders that did not get a soldier in (it was ordered there again soon after).
 		int Failures { 0 };
+		// Last frame an enemy harvester was seen in current sight within 7 cells (a garrison
+		// there cuts the enemy's supply line).
+		int EnemySupplySeenFrame { -100000 };
 	};
 
 	// The last garrison order of one soldier.
@@ -223,17 +226,19 @@ namespace
 
 		for (auto const& tech : GetSpecOpsState(pHouse).Techs)
 		{
-			if ((tech.OwnerIndex < 0 || tech.OwnerIndex == pHouse->ArrayIndex) && tech.Cell.DistanceFrom(known.Cell) <= 7.0)
-			{
-				techBonus = tech.OwnerIndex == pHouse->ArrayIndex ? 80 : 60;
-				break;
-			}
+			// A captured structure of ours is guarded by the garrison next to it (user).
+			if ((tech.OwnerIndex < 0 || tech.OwnerIndex == pHouse->ArrayIndex) && tech.Cell.DistanceFrom(known.Cell) <= 9.0)
+				techBonus = std::max(techBonus, tech.OwnerIndex == pHouse->ArrayIndex ? 120 : 60);
 		}
 
 		if (std::min(anchorDist, reachDist) > 72 || IsCellInKnownEnemyDefenseReach(pHouse, known.Cell, 1))
 			return 0;
 
-		if (reachDist > 28 && OwnDefenseNear(pHouse, known.Cell, 8) < 300)
+		// A full garrison is a free bunker: on an enemy supply line (an enemy harvester seen within 7
+		// cells in the last 4500 frames) it is worth holding further out too.
+		const bool onEnemySupplyLine = Unsorted::CurrentFrame - known.EnemySupplySeenFrame <= 4500;
+
+		if (reachDist > 28 && !onEnemySupplyLine && OwnDefenseNear(pHouse, known.Cell, 8) < 300)
 			return 0;
 
 		int enemyDist = 999;
@@ -271,6 +276,9 @@ namespace
 				break;
 			}
 		}
+
+		if (onEnemySupplyLine)
+			worth += 80;
 
 		if (VisibleEnemyThreatNear(pHouse, known.Cell, 6) > 0)
 			worth /= 2;
@@ -565,6 +573,29 @@ namespace
 			}
 		}
 
+		// Enemy supply lines, fog-fair: enemy harvesters in current sight mark the buildings within 7
+		// cells of them.
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type || !pUnit->Owner || pUnit->Owner == pHouse
+				|| pHouse->IsAlliedWith(pUnit->Owner) || pUnit->Owner->IsNeutral() || !IsCreditEconomicType(pUnit->Type)
+				|| !pUnit->Type->ResourceGatherer)
+			{
+				continue;
+			}
+
+			const CellStruct harvCell = pUnit->GetMapCoords();
+
+			if (!IsCellInSightOfAI(pHouse, harvCell))
+				continue;
+
+			for (auto& known : state.Buildings)
+			{
+				if (known.Cell.DistanceFrom(harvCell) <= 7.0)
+					known.EnemySupplySeenFrame = now;
+			}
+		}
+
 		const int mainAttackSector = GetMainAttackSector(pHouse);
 		std::array<int, 3> bestWorth {};
 		state.ThreatGarrisons = 0;
@@ -772,13 +803,18 @@ namespace
 
 	// Garrison order for one idle occupier soldier: the best known building worth holding within
 	// reach (up to 64 cells while Expert 9 is in charge, else rangeCells), with room
-	// left after the soldiers (ours and allied) already walking in. At most a share of our
-	// occupiers sits in buildings: 55% under Expert 9, 30% otherwise; on an urban map (6+ known
-	// buildings worth holding) 70% / 50%, and up to 32 cells away without Expert 9. A building we
-	// already hold scores double and is filled up even past that share.
+	// left after the soldiers (ours and allied) already walking in.
+	// No distance limit (user: reachable ground is what counts, not how far): the building must be
+	// enterable from the soldier's zone and worth holding (RateUrbanBuilding already drops what
+	// covers nothing of ours); distance only orders the choice (rangeCells, the slot 23 range,
+	// sets how fast the score falls with it; 16 under Expert 9).
+	// A full garrison is a free bunker (user): buildings we hold are filled first, a new building is
+	// started only while none of ours within reach has room. Starting new ones stops at a share of
+	// our occupiers inside: 60% under Expert 9, 40% otherwise; on an urban map (6+ known buildings
+	// worth holding) 80% / 60%. Filling a building we hold ignores that share.
 	// A building is taken by a squad (user: many soldiers at once, not one or two; once it is full
 	// the next building, the rest back to the pool): the soldier picks the building and the idle
-	// occupiers within 14 cells of it go along, as many as there is room for. A building nobody of
+	// occupiers within 20 cells of it go along, as many as there is room for. A building nobody of
 	// ours holds or walks into needs a squad of 3 (or its room when smaller), else the soldiers stay
 	// free for other missions. Soldiers that find it full are idle again and go for the next one.
 	// isBusy: the caller's test for a soldier already attacking or heading to the enemy.
@@ -796,7 +832,7 @@ namespace
 			pendingTotal += entering.Own;
 
 		const bool urbanMap = state.WorthyBuildings >= 6;
-		const int sharePercent = expertActive ? (urbanMap ? 70 : 55) : (urbanMap ? 50 : 30);
+		const int sharePercent = expertActive ? (urbanMap ? 80 : 60) : (urbanMap ? 60 : 40);
 		const int cap = std::max(expertActive ? 4 : 2, state.OwnOccupierInfantry * sharePercent / 100);
 		const bool overCap = state.OwnOccupants + pendingTotal >= cap;
 		state.TriesSinceReport++;
@@ -807,14 +843,18 @@ namespace
 		RefreshUrbanLivePointers(state);
 		const int infZone = ObjectZone(pInf, MovementZone::Normal);
 		const CellStruct infCell = pInf->GetMapCoords();
-		// On an urban map the city is worth a walk: 32 cells without Expert 9 (its slot range is
-		// 6..16 cells, the next block of a city is often further).
-		const int maxRange = expertActive ? 64 : (urbanMap ? std::max(rangeCells, 32) : rangeCells);
+		// Score per cell of walk: 4 at a 10-cell slot range, less with a longer one.
+		const int distanceScale = std::max(6, expertActive ? 16 : (urbanMap ? std::max(rangeCells, 16) : rangeCells));
 		const int now = Unsorted::CurrentFrame;
 		BuildingClass* pBest = nullptr;
 		NeuralKnownUrbanBuilding* pBestKnown = nullptr;
 		int bestScore = 0;
 		int bestTaken = 0;
+		// The best building we already hold with room left (filled first).
+		BuildingClass* pBestHeld = nullptr;
+		NeuralKnownUrbanBuilding* pBestHeldKnown = nullptr;
+		int bestHeldScore = 0;
+		int bestHeldTaken = 0;
 
 		for (size_t i = 0; i < state.Buildings.size(); ++i)
 		{
@@ -824,10 +864,6 @@ namespace
 				continue;
 
 			const int dist = static_cast<int>(infCell.DistanceFrom(known.Cell));
-
-			if (dist > maxRange)
-				continue;
-
 			auto const pBld = state.Live[i];
 
 			if (!pBld || !pBld->CanBeOccupiedBy(pInf))
@@ -863,7 +899,15 @@ namespace
 			if (infZone >= 0 && !IsBuildingEnterableFromZone(pBld, infZone))
 				continue;
 
-			const int score = known.Worth * 100 / (100 + dist * 4) * (partlyOurs ? 2 : 1);
+			const int score = known.Worth * 100 / (100 + dist * 40 / distanceScale) * (partlyOurs ? 2 : 1);
+
+			if (partlyOurs && score > bestHeldScore)
+			{
+				bestHeldScore = score;
+				pBestHeld = pBld;
+				pBestHeldKnown = &known;
+				bestHeldTaken = inside + coming;
+			}
 
 			if (score > bestScore)
 			{
@@ -872,6 +916,14 @@ namespace
 				pBestKnown = &known;
 				bestTaken = inside + coming;
 			}
+		}
+
+		// Fill what we hold before starting another building.
+		if (pBestHeld)
+		{
+			pBest = pBestHeld;
+			pBestKnown = pBestHeldKnown;
+			bestTaken = bestHeldTaken;
 		}
 
 		if (!pBest)
@@ -895,15 +947,20 @@ namespace
 					continue;
 				}
 
-				if ((pMate->CurrentMission != Mission::Guard && pMate->CurrentMission != Mission::Area_Guard) || isBusy(pMate)
-					|| IsPlanMember(pHouse, pMate->UniqueID) || IsOnRepairTrip(pHouse, pMate->UniqueID))
+				// Idle as the caller sees it: guarding, or a finished Move.
+				const bool mateMoveOver = pMate->CurrentMission == Mission::Move && pMate->MegaMission != Mission::AttackMove
+					&& (!pMate->Destination
+						|| CellClass::Coord2Cell(pMate->Destination->GetCoords()).DistanceFrom(pMate->GetMapCoords()) <= 1.5);
+
+				if ((pMate->CurrentMission != Mission::Guard && pMate->CurrentMission != Mission::Area_Guard && !mateMoveOver)
+					|| isBusy(pMate) || IsPlanMember(pHouse, pMate->UniqueID) || IsOnRepairTrip(pHouse, pMate->UniqueID))
 				{
 					continue;
 				}
 
 				const int dist = pMate->DistanceFrom(pInf);
 
-				if (dist > 14 * Unsorted::LeptonsPerCell || !pBest->CanBeOccupiedBy(pMate)
+				if (dist > 20 * Unsorted::LeptonsPerCell || !pBest->CanBeOccupiedBy(pMate)
 					|| (infZone >= 0 && ObjectZone(pMate, MovementZone::Normal) != infZone))
 				{
 					continue;
@@ -938,6 +995,28 @@ namespace
 
 			if (itOrder != state.Orders.end() && itOrder->InfantryID == pSoldier->UniqueID)
 			{
+				if (itOrder->BuildingID == pBest->UniqueID)
+				{
+					// TEMP diagnostic: why a soldier sent in is idle again.
+					static int reorderLogSerial = -1;
+					static int reorderLogCount = 0;
+
+					if (reorderLogSerial != NeuralMatchSerial)
+					{
+						reorderLogSerial = NeuralMatchSerial;
+						reorderLogCount = 0;
+					}
+
+					if (reorderLogCount++ < 60)
+					{
+						Debug::Log("[NeuralAI] House %d Urban DIAG: %s %u re-sent to %s owner %d after %d frames, mission %d mega %d dest %s at %d cells, own %d, inside %d.\n",
+							pHouse->ArrayIndex, pSoldier->GetTechnoType()->ID, pSoldier->UniqueID, pBest->Type->ID, pBest->Owner ? pBest->Owner->ArrayIndex : -1,
+							now - itOrder->Frame, static_cast<int>(pSoldier->CurrentMission), static_cast<int>(pSoldier->MegaMission),
+							pSoldier->Destination ? (pSoldier->Destination == pBest ? "building" : "other") : "none",
+							pSoldier->DistanceFrom(pBest) / Unsorted::LeptonsPerCell, pBest->Owner == pHouse ? 1 : 0, pBest->Occupants.Count);
+					}
+				}
+
 				if (itOrder->BuildingID == pBest->UniqueID && ++itOrder->Tries >= 3)
 				{
 					state.Orders.erase(itOrder);
@@ -964,9 +1043,26 @@ namespace
 				state.Orders.insert(itOrder, NeuralUrbanOrder { pSoldier->UniqueID, pBest->UniqueID, now, 1 });
 			}
 
-			// A building we already hold refuses Enter (the destination is dropped at once); more
-			// soldiers go in through the capture mission, like the garrison order of a player.
-			if (pBest->Owner == pHouse)
+			// The garrison order of a player is the capture mission (FootClass::Mission_Capture has the
+			// occupier branch). Enter is dropped by the engine: at once into a building we hold, and
+			// into a neutral one too (repro: soldiers back in Guard with no destination 3-9 cells from
+			// an empty bunker, re-sent until the building was blocked). Enter (through the dispatcher)
+			// is kept only for a soldier that needs a ferry to get there.
+			const int soldierZone = ObjectZone(pSoldier, MovementZone::Normal);
+
+			// The capture order is dropped from far away (repro: soldiers 60 cells off back in Area_Guard
+			// with no destination): beyond 12 cells the soldier walks there first and gets the
+			// capture order when it is idle again next to the building.
+			if (soldierZone >= 0 && IsBuildingEnterableFromZone(pBest, soldierZone)
+				&& pSoldier->DistanceFrom(pBest) > 12 * Unsorted::LeptonsPerCell)
+			{
+				pSoldier->ClearMegaMissionData();
+				pSoldier->SetTarget(nullptr);
+				pSoldier->SetDestination(pBest, true);
+				pSoldier->QueueMission(Mission::Move, false);
+				pSoldier->NextMission();
+			}
+			else if (soldierZone >= 0 && IsBuildingEnterableFromZone(pBest, soldierZone))
 			{
 				pSoldier->ClearMegaMissionData();
 				pSoldier->SetTarget(nullptr);

@@ -1516,7 +1516,10 @@ namespace
 	}
 
 	// A soldier that only heals or repairs (every weapon it has does negative damage): a medic or a
-	// field mechanic, support for the army and no fighter of its own.
+	// field mechanic, support for the army and no fighter of its own. NeverUse weapons (target
+	// scanners such as C&C Reloaded's VirtualScanner, Damage=1) never fire and do not count: with
+	// them counted the medic was a fighter, so no healer cap, no wave limit and no escort (match
+	// #7002: 37 medics).
 	bool IsHealerInfantryType(const InfantryTypeClass* pType)
 	{
 		if (!pType)
@@ -1529,7 +1532,7 @@ namespace
 			auto const pWS = const_cast<InfantryTypeClass*>(pType)->GetWeapon(i);
 			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
 
-			if (!pWeapon)
+			if (!pWeapon || pWeapon->NeverUse)
 				continue;
 
 			if (pWeapon->Damage > 0)
