@@ -2344,7 +2344,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool isFriendlyOrEmpty = (pEBld->Occupants.Count == 0)
 				|| (pEBld->Occupants.GetItem(0) && pHouse->IsAlliedWith(pEBld->Occupants.GetItem(0)->Owner));
 
+			// One engineer per building: none while one of ours already walks into it.
+			bool engineerOnTheWay = false;
+
 			if (isFriendlyOrEmpty && !pDamagedUrbanToRepair)
+			{
+				for (auto const pOwnEng : InfantryClass::Array)
+				{
+					if (pOwnEng && pOwnEng->Owner == pHouse && pOwnEng->IsAlive && !pOwnEng->InLimbo && pOwnEng->Type
+						&& pOwnEng->Type->Engineer && pOwnEng->Destination == pEBld)
+					{
+						engineerOnTheWay = true;
+						break;
+					}
+				}
+			}
+
+			if (isFriendlyOrEmpty && !pDamagedUrbanToRepair && !engineerOnTheWay)
 				pDamagedUrbanToRepair = pEBld;
 		}
 
@@ -6301,8 +6317,40 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			}
 
+			// The repair order: a garrison we (or an ally) hold refuses Enter like it does for soldiers
+			// (repro, Fort Urban Square: 30 engineers sent into a 71% bunker of ours, none got in), so
+			// it goes through the capture mission (FootClass::Mission_Capture handles the engineer's
+			// repair as it does the occupier); beyond 12 cells the engineer walks next to it first.
+			// An empty civilian building keeps the Enter order.
+			auto const repairOrder = [&](InfantryClass* pEngineer, BuildingClass* pBld) -> bool
+			{
+				const bool heldByFriend = pBld->Owner && (pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner))
+					&& !pBld->Owner->IsNeutral();
+
+				if (!heldByFriend)
+					return DispatchFootToTargetOrTransport(pEngineer, pBld, Mission::Enter, false);
+
+				if (pEngineer->DistanceFrom(pBld) > 12 * Unsorted::LeptonsPerCell)
+					return IssueMoveOrder(pEngineer, pBld->GetCell(), 6.0) || pEngineer->CurrentMission == Mission::Move;
+
+				// The player's repair click (user: the engineer gets the repair cursor on a garrison with
+				// soldiers inside) runs EventClass MEGAMISSION -> TechnoClass::ClickedMission, which sets
+				// the capture mission with the building as its TARGET (Mission_Capture works on the
+				// target); a Destination alone was dropped. Called directly: no network event, the same
+				// on every client.
+				pEngineer->ClearMegaMissionData();
+				return pEngineer->ClickedMission(Mission::Capture, pBld, pBld->GetCell(), nullptr);
+			};
+
+			// TEMP diagnostic: the engineer's state when the order is given (a repeated order shows
+			// where the previous one ended).
+			const int preRepairMission = static_cast<int>(pInf->CurrentMission);
+			const int preRepairCells = pDamagedUrbanToRepair ? pInf->DistanceFrom(pDamagedUrbanToRepair) / Unsorted::LeptonsPerCell : -1;
+			const char* const preRepairDest = !pInf->Destination ? "none"
+				: (pInf->Destination == pDamagedUrbanToRepair ? "building" : "other");
+
 			if (pDamagedUrbanToRepair && IsBuildingEnterableFromZone(pDamagedUrbanToRepair, ObjectZone(pInf, MovementZone::Normal))
-				&& DispatchFootToTargetOrTransport(pInf, pDamagedUrbanToRepair, Mission::Enter, false))
+				&& repairOrder(pInf, pDamagedUrbanToRepair))
 			{
 				static int urbanRepairLogSerial = -1;
 				static int urbanRepairLogCount = 0;
@@ -6315,11 +6363,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (urbanRepairLogCount++ < 30)
 				{
-					Debug::Log("[NeuralAI] House %d Urban: engineer %u -> repair %s at (%d,%d), %d%% health, owner %d, %d inside, frame %d.\n",
+					Debug::Log("[NeuralAI] House %d Urban: engineer %u -> repair %s at (%d,%d), %d%% health, owner %d, %d inside, frame %d "
+						"(before: mission %d dest %s %d cells; now mission %d).\n",
 						pHouse->ArrayIndex, pInf->UniqueID, pDamagedUrbanToRepair->Type->ID, pDamagedUrbanToRepair->GetMapCoords().X,
 						pDamagedUrbanToRepair->GetMapCoords().Y, static_cast<int>(pDamagedUrbanToRepair->GetHealthPercentage() * 100.0),
 						pDamagedUrbanToRepair->Owner ? pDamagedUrbanToRepair->Owner->ArrayIndex : -1,
-						pDamagedUrbanToRepair->Occupants.Count, Unsorted::CurrentFrame);
+						pDamagedUrbanToRepair->Occupants.Count, Unsorted::CurrentFrame, preRepairMission, preRepairDest, preRepairCells,
+						static_cast<int>(pInf->CurrentMission));
 				}
 
 				pDamagedUrbanToRepair = nullptr;

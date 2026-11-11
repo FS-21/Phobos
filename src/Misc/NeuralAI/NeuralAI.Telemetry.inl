@@ -1596,9 +1596,10 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			const bool isDeployedVehicleBld = pBld->Type->ResourceGatherer
 				|| (pBld->Type->UndeploysInto != nullptr && !pBld->Type->ConstructionYard && !pBld->Type->BaseNormal
 					&& !pBld->Type->Refinery);
-			// ptKind: 0 = unit/deployed vehicle, 1 = structure, 2 = defense structure
-			// (IsBaseDefense=yes)
-			const int ptKind = isDeployedVehicleBld ? 0 : (pBld->Type->IsBaseDefense ? 2 : 1);
+			// ptKind: 0 = unit, 1 = structure, 2 = defense structure (IsBaseDefense=yes), 3 = deployed
+			// vehicle structure (drawn as a unit, listed as a structure: a deployed Slave Miner is a
+			// YAREFN building, not a unit; user), -1 = slave bound to its miner.
+			const int ptKind = isDeployedVehicleBld ? 3 : (pBld->Type->IsBaseDefense ? 2 : 1);
 
 			char idClean[32];
 			char nameClean[64];
