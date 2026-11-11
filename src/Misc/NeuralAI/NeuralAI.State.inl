@@ -1114,8 +1114,15 @@ namespace
 		// (user: transports turned away 10-15 cells from the shore when his troops came near, the
 		// landing being re-picked every tick with enemy units in sight weighing -2400).
 		CellStruct CommittedLanding { CellStruct::Empty };
-		// First frame a combat cargo sat loaded but under half full on its pickup shore.
+		// First frame a combat cargo sat loaded but short of three quarters of the room on its
+		// pickup shore.
 		int UnderfilledSince { -1 };
+		// Health at the last tick and the last frame it dropped (under fire now).
+		int LastHealth { -1 };
+		int HitFrame { -100000 };
+		// Why the cargo was let go the last time it was decided on the pickup shore, as bit flags
+		// (departure log).
+		int SailReason { 0 };
 	};
 
 	constexpr int FerryTripCapacity = 128;

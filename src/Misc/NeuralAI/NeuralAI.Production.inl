@@ -318,6 +318,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	UpdateSneakStrikes(pHouse);
 	// Expert 9: occupiable buildings seen, garrisons to hold, evacuate or clear, coalition work.
 	UpdateUrban(pHouse);
+	LogSiegeDeploys(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -1320,6 +1321,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const int maxGroundDefenses = std::clamp(baseGroundDefCap, 4, (hasTechCenter || money > 3000 || effectiveFrontlineThreat) ? 20 : 14);
 		const int baseMaxAA = 1 + ownedWarFactories + ownedTechStructures + defDensityMod + (underAirAttack ? 2 : 0);
 		const int maxAADefenses = std::clamp(std::max(baseMaxAA, 1 + enemyAirValue / 30), 2, 8);
+
+		// TEMP diagnostic: what the base knows of the air threat and what it has against it.
+		if ((underAirAttack || enemyAirValue > 0) && IsAITickWindow(900, 0))
+		{
+			Debug::Log("[NeuralAI] House %d AirDefense DIAG: enemy air value %d, under air attack %d, threat category %d, recently attacked %d, "
+				"AA defenses %d of %d, ground defenses %d, credits %d, frame %d.\n",
+				pHouse->ArrayIndex, enemyAirValue, underAirAttack ? 1 : 0, static_cast<int>(activeThreatCat), wasRecentlyAttacked ? 1 : 0,
+				totalAADefenses, maxAADefenses, totalGroundDefenses, money, Unsorted::CurrentFrame);
+		}
 
 		// AdvAI & StarCraft Resource Expansion State Machine:
 		// Measure minimum Chebyshev distance from our closest
