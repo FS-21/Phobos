@@ -54,6 +54,86 @@ namespace
 			&& pType->DeploysInto->UndeploysInto == pType;
 	}
 
+	// Last frame the Neural AI itself ordered a vehicle to unfold, by unit (LogSiegeDeploys).
+	std::unordered_map<DWORD, int> NeuralDeployOrderFrame {};
+
+	// TEMP diagnostic: every siege unit of this house that starts to unfold, with who ordered it
+	// (the Neural AI in the last 90 frames, or the engine / another system) and what it was aiming
+	// at: type, in the air or not, distance and the reach of the deployed gun.
+	void LogSiegeDeploys(HouseClass* pHouse)
+	{
+		static int logSerial = -1;
+		static int logCount = 0;
+		static std::unordered_map<DWORD, int> loggedFrame;
+
+		if (logSerial != NeuralMatchSerial)
+		{
+			logSerial = NeuralMatchSerial;
+			logCount = 0;
+			loggedFrame.clear();
+			NeuralDeployOrderFrame.clear();
+		}
+
+		if (logCount >= 80)
+			return;
+
+		const int now = Unsorted::CurrentFrame;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type
+				|| !IsDeployableSiegeUnitType(pUnit->Type))
+			{
+				continue;
+			}
+
+			if (pUnit->CurrentMission != Mission::Unload && pUnit->QueuedMission != Mission::Unload && !pUnit->IsDeploying)
+				continue;
+
+			auto const itLogged = loggedFrame.find(pUnit->UniqueID);
+
+			if (itLogged != loggedFrame.end() && now - itLogged->second < 600)
+				continue;
+
+			loggedFrame[pUnit->UniqueID] = now;
+			logCount++;
+
+			auto const itOrder = NeuralDeployOrderFrame.find(pUnit->UniqueID);
+			const bool byNeural = itOrder != NeuralDeployOrderFrame.end() && now - itOrder->second <= 90;
+			auto const pTarget = abstract_cast<TechnoClass*>(pUnit->Target);
+			// The nearest enemy within 12 cells, whatever it is.
+			TechnoClass* pNearest = nullptr;
+			int nearestDist = 12 * Unsorted::LeptonsPerCell;
+
+			for (auto const pTechno : TechnoClass::Array)
+			{
+				if (!pTechno || !pTechno->IsAlive || pTechno->InLimbo || !pTechno->Owner || pTechno->Owner == pHouse
+					|| pHouse->IsAlliedWith(pTechno->Owner) || pTechno->Owner->IsNeutral())
+				{
+					continue;
+				}
+
+				const int dist = pUnit->DistanceFrom(pTechno);
+
+				if (dist < nearestDist)
+				{
+					nearestDist = dist;
+					pNearest = pTechno;
+				}
+			}
+
+			Debug::Log("[NeuralAI] House %d SiegeDeploy DIAG: %s %u at (%d,%d) unfolds, ordered by %s, mission %d queued %d, "
+				"target %s (in air %d, height %d, %d cells), nearest enemy %s (in air %d, %d cells), deployed reach %d cells, frame %d.\n",
+				pHouse->ArrayIndex, pUnit->Type->ID, pUnit->UniqueID, pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y,
+				byNeural ? "neural" : "engine", static_cast<int>(pUnit->CurrentMission), static_cast<int>(pUnit->QueuedMission),
+				pTarget ? pTarget->GetTechnoType()->ID : (pUnit->Target ? "cell" : "none"), pTarget && pTarget->IsInAir() ? 1 : 0,
+				pTarget ? pTarget->GetHeight() : 0, pTarget ? pUnit->DistanceFrom(pTarget) / Unsorted::LeptonsPerCell : -1,
+				pNearest ? pNearest->GetTechnoType()->ID : "none", pNearest && pNearest->IsInAir() ? 1 : 0,
+				pNearest ? nearestDist / Unsorted::LeptonsPerCell : -1,
+				GroundRangeOf(pUnit->Type->DeploysInto) / Unsorted::LeptonsPerCell, now);
+		}
+	}
+
 	// Ground range a siege plan can count on: for a deployable siege unit the longer of its own
 	// gun and the gun of the structure it unfolds into.
 	int SiegeRangeOf(TechnoTypeClass* pType)
@@ -1580,6 +1660,7 @@ namespace
 
 			if (pUnit->CurrentMission != Mission::Unload)
 			{
+				NeuralDeployOrderFrame[pUnit->UniqueID] = Unsorted::CurrentFrame;
 				pUnit->SetDestination(nullptr, true);
 				pUnit->ClearNavigationList();
 				pUnit->SetTarget(nullptr);

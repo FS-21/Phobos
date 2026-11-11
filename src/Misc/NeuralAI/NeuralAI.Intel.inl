@@ -475,6 +475,21 @@ namespace
 		return MapClass::Instance.GetMovementZoneType(pObject->GetMapCoords(), movementZone, pObject->OnBridge);
 	}
 
+	// Do the unit's own movement rules link its cell with this one? The island tests compare the
+	// zones of a vehicle, and a soldier walks ground no vehicle can (city blocks, stairs, narrow
+	// passes): along such a way those zones differ although the soldier gets there on foot.
+	bool IsSameGroundForFoot(const FootClass* pFoot, const CellStruct& cell)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || pType->MovementZone == MovementZone::Normal)
+			return false;
+
+		const int ownZone = ObjectZone(pFoot, pType->MovementZone);
+
+		return ownZone >= 0 && ownZone == MapClass::Instance.GetMovementZoneType(cell, pType->MovementZone, false);
+	}
+
 	// The ground zone a transport parked on a shore serves: the land zone most cells within 2 hold
 	// (the shore cell under a hovercraft often carries a zone of its own, so it took nobody while
 	// 49 soldiers waited next to it; user's own game, islands). Water: the cell's own zone.

@@ -162,7 +162,7 @@ namespace
 	// Can a ground unit standing in this movement zone (Normal) walk up to the building? The cells
 	// under a building often carry another zone than the ground around it (map tech placed at map
 	// start), so the zone of the building's own cell says nothing; the cells around it do.
-	bool IsBuildingEnterableFromZone(const BuildingClass* pBld, int zone)
+	bool IsBuildingEnterableFromZone(const BuildingClass* pBld, int zone, MovementZone movementZone)
 	{
 		if (!pBld || !pBld->Type || zone < 0)
 			return false;
@@ -181,7 +181,7 @@ namespace
 				const CellStruct around { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
 
 				if (MapClass::Instance.CoordinatesLegal(around)
-					&& MapClass::Instance.GetMovementZoneType(around, MovementZone::Normal, false) == zone)
+					&& MapClass::Instance.GetMovementZoneType(around, movementZone, false) == zone)
 				{
 					return true;
 				}
