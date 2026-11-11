@@ -1114,9 +1114,30 @@ namespace
 		// (user: transports turned away 10-15 cells from the shore when his troops came near, the
 		// landing being re-picked every tick with enemy units in sight weighing -2400).
 		CellStruct CommittedLanding { CellStruct::Empty };
-		// First frame a combat cargo sat loaded but under half full on its pickup shore.
+		// First frame a combat cargo sat loaded but short of three quarters of the room on its
+		// pickup shore.
 		int UnderfilledSince { -1 };
+		// Health at the last tick and the last frame it dropped (under fire now).
+		int LastHealth { -1 };
+		int HitFrame { -100000 };
+		// Why the cargo was let go at the last decision on the pickup shore (FerrySail flags).
+		int SailReason { 0 };
 	};
+
+	// Reasons a transport is let go from its pickup shore (NeuralFerryTripRecord::SailReason).
+	constexpr int FerrySailBaseDeployer = 1;
+	constexpr int FerrySailStolenDeployer = 2;
+	constexpr int FerrySailHarvester = 4;
+	constexpr int FerrySailEngineer = 8;
+	constexpr int FerrySailUnderFire = 16;
+	constexpr int FerrySailInTransit = 32;
+	constexpr int FerrySailNothingMoreToLoad = 64;
+
+	// How long a combat cargo waits on its shore for more: under half the room, and under three
+	// quarters of it. A transport counts as under fire this long after a hit.
+	constexpr int FerryHalfLoadWaitFrames = 5400;
+	constexpr int FerryMostLoadWaitFrames = 2700;
+	constexpr int FerryUnderFireFrames = 300;
 
 	constexpr int FerryTripCapacity = 128;
 	std::array<NeuralFerryTripRecord, FerryTripCapacity> FerryTrips {};
