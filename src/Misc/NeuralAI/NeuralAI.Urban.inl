@@ -1072,11 +1072,44 @@ namespace
 			if (soldierZone >= 0 && IsBuildingEnterableFromZone(pBest, soldierZone)
 				&& pSoldier->DistanceFrom(pBest) > 12 * Unsorted::LeptonsPerCell)
 			{
-				pSoldier->ClearMegaMissionData();
-				pSoldier->SetTarget(nullptr);
-				pSoldier->SetDestination(pBest, true);
-				pSoldier->QueueMission(Mission::Move, false);
-				pSoldier->NextMission();
+				// To a free cell next to the building in the soldier's zone (a Move with the building as
+				// its destination was dropped: match #7106, soldiers 54 cells off back in Area_Guard 15
+				// frames later, re-sent until the building was blocked).
+				const CellStruct bldCell = pBest->GetMapCoords();
+				const int bw = pBest->Type->GetFoundationWidth();
+				const int bh = pBest->Type->GetFoundationHeight(false);
+				const CellStruct soldierCell = pSoldier->GetMapCoords();
+				CellClass* pApproach = nullptr;
+				double approachDist = 1e9;
+
+				for (int dy = -1; dy <= bh; ++dy)
+				{
+					for (int dx = -1; dx <= bw; ++dx)
+					{
+						if (dx >= 0 && dx < bw && dy >= 0 && dy < bh)
+							continue;
+
+						const CellStruct c { static_cast<short>(bldCell.X + dx), static_cast<short>(bldCell.Y + dy) };
+						auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+						if (!pCell || pCell->GetBuilding()
+							|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != soldierZone)
+						{
+							continue;
+						}
+
+						const double d = soldierCell.DistanceFrom(c);
+
+						if (d < approachDist)
+						{
+							approachDist = d;
+							pApproach = pCell;
+						}
+					}
+				}
+
+				if (!pApproach || !IssueMoveOrder(pSoldier, pApproach, 2.0))
+					return false;
 			}
 			else if (soldierZone >= 0 && IsBuildingEnterableFromZone(pBest, soldierZone))
 			{

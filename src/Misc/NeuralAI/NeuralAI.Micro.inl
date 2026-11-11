@@ -2308,8 +2308,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	for (auto const pEBld : BuildingClass::Array)
 	{
+		// Occupiable buildings pass even when Insignificant: C&C Reloaded marks 167 of its 169
+		// garrisonable civilian buildings Insignificant=yes, so no damaged garrison was ever found for
+		// an engineer to repair (0 repair orders in every match).
 		if (!pEBld || pEBld->InLimbo || !pEBld->IsAlive || !pEBld->Type || pEBld->Type->Immune
-			|| pEBld->Type->Insignificant || pEBld->Type->InvisibleInGame)
+			|| (pEBld->Type->Insignificant && !pEBld->Type->CanBeOccupied) || pEBld->Type->InvisibleInGame)
 		{
 			continue;
 		}
@@ -7838,7 +7841,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || !pInf->Type)
 			continue;
 
-		if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type))
+		// Slaves belong to their miner (match #7106: a Yuri slave on an attack-move to the enemy base
+		// 110 cells away, pulled back by its master, standing still between the two orders).
+		if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type) || pInf->SlaveOwner)
 			continue;
 
 		if (IsHealerInfantryType(pInf->Type) && healersForWave >= 2)
