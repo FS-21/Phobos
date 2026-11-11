@@ -697,6 +697,15 @@ namespace
 		// for a crossing, and until when it may not ask again after giving up. Keyed lookups only.
 		std::unordered_map<DWORD, int> FerryWaitSince {};
 		std::unordered_map<DWORD, int> FerryBlockedUntil {};
+		// Ferry loading (user: divide the work by what fits): passengers reserved by a transport
+		// parked on a pickup shore, up to its free room by size. Passenger UniqueID -> transport
+		// UniqueID and the frame it was reserved. Ordered map: walked in a deterministic order.
+		struct FerryReservation
+		{
+			DWORD Transport { 0 };
+			int Frame { 0 };
+		};
+		std::map<DWORD, FerryReservation> FerryReserved {};
 		int FreeFieldAnchorDist { 9999 };
 		int FreeFieldFrame { -100000 };
 		// Last airlift that turned back (damaged carrier or a defended drop zone).
@@ -969,6 +978,7 @@ namespace
 			this->FerryingMcvs.clear();
 			this->FerryWaitSince.clear();
 			this->FerryBlockedUntil.clear();
+			this->FerryReserved.clear();
 			this->FreeFieldAnchorDist = 9999;
 			this->FreeFieldFrame = -100000;
 			this->LastAirDropAbortFrame = -100000;
@@ -1138,6 +1148,19 @@ namespace
 		const int idx = pHouse ? std::clamp(pHouse->ArrayIndex, 0, 31) : 0;
 
 		return MacroStates[idx];
+	}
+
+	// A passenger reserved by one of our transports loading on a pickup shore: it walks to that
+	// transport and boards it, no other job takes it meanwhile.
+	constexpr int FerryReservationFrames = 1800;
+
+	bool IsFerryReserved(const HouseClass* pHouse, DWORD uid)
+	{
+		auto const& reserved = GetMacroState(pHouse).FerryReserved;
+		auto const it = reserved.find(uid);
+
+		return it != reserved.end() && Unsorted::CurrentFrame - it->second.Frame < FerryReservationFrames
+			&& Unsorted::CurrentFrame >= it->second.Frame;
 	}
 
 	// Tacit coalitions (Expert 3): how many different houses are coalition targets right now, the

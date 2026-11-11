@@ -93,6 +93,10 @@ namespace
 		// Squads sent since the last report, and new buildings left alone for want of soldiers.
 		int SquadsSinceReport { 0 };
 		int SmallSquadSinceReport { 0 };
+		// Zones where no building was available this frame: the other idle soldiers there skip the
+		// search (with every tick from the start, 150 idle soldiers would repeat the same answer).
+		int NoBuildingFrame { -1 };
+		std::vector<int> NoBuildingZones {};
 	};
 
 	std::array<NeuralUrbanState, 32> UrbanStates {};
@@ -840,8 +844,19 @@ namespace
 		if (overCap)
 			state.OverCapSinceReport++;
 
-		RefreshUrbanLivePointers(state);
 		const int infZone = ObjectZone(pInf, MovementZone::Normal);
+
+		if (state.NoBuildingFrame != Unsorted::CurrentFrame)
+		{
+			state.NoBuildingFrame = Unsorted::CurrentFrame;
+			state.NoBuildingZones.clear();
+		}
+		else if (std::find(state.NoBuildingZones.begin(), state.NoBuildingZones.end(), infZone) != state.NoBuildingZones.end())
+		{
+			return false;
+		}
+
+		RefreshUrbanLivePointers(state);
 		const CellStruct infCell = pInf->GetMapCoords();
 		// Score per cell of walk: 4 at a 10-cell slot range, less with a longer one.
 		const int distanceScale = std::max(6, expertActive ? 16 : (urbanMap ? std::max(rangeCells, 16) : rangeCells));
@@ -929,6 +944,7 @@ namespace
 		if (!pBest)
 		{
 			state.NoBuildingSinceReport++;
+			state.NoBuildingZones.push_back(infZone);
 			return false;
 		}
 

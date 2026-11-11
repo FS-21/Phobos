@@ -412,7 +412,44 @@ namespace
 			}
 		}
 
-		if (moved > 0 || yielded > 0)
+		// Ships in the block take a leg of a real water route (GroundRouteHop: cell by cell, buildings
+		// block) to their destination: match #7061, Fludded Recources, 15 ships held for minutes in a
+		// channel our own naval yard closed, with open sea all around the island.
+		int detoured = 0;
+
+		for (auto const& [pHeld, want] : block)
+		{
+			FootClass* const pShip = pHeld ? pHeld->Foot : nullptr;
+
+			if (detoured >= 12 || !pShip || !pShip->IsAlive || pShip->InLimbo)
+				continue;
+
+			auto const pShipType = pShip->GetTechnoType();
+
+			if (!pShipType || !(pShipType->Naval || pShipType->MovementZone == MovementZone::Water
+				|| pShipType->MovementZone == MovementZone::WaterBeach))
+			{
+				continue;
+			}
+
+			if (auto const pHop = GroundRouteHop(pShip, pHeld->Dest, 14))
+			{
+				pShip->ClearMegaMissionData();
+				pShip->SetTarget(nullptr);
+
+				if (IssueMoveOrder(pShip, pHop, 1.5))
+					++detoured;
+			}
+		}
+
+		if (detoured > 0)
+		{
+			CountDecision(NeuralDecision::GroundRouteHop, pHouse->ArrayIndex);
+			Debug::Log("[NeuralAI] Frame %d | House #%d naval jam at (%d,%d): %d ships sent along a water route around it\n",
+				now, pHouse->ArrayIndex, center.X, center.Y, detoured);
+		}
+
+		if (moved > 0 || yielded > 0 || detoured > 0)
 		{
 			macro.LastJamBreakFrame = now;
 
@@ -2646,8 +2683,10 @@ namespace
 			{
 				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->CurrentMission == Mission::Selling
 					|| pBld->Type->ConstructionYard || pBld->Type->Refinery || pBld->Type->ResourceDestination
-					|| pBld->Type->Unsellable || pBld->Type->InvisibleInGame)
+					|| pBld->Type->Unsellable || pBld->Type->InvisibleInGame || pBld->Type->Naval)
 				{
+					// Never a naval building: on an island map the yard is the only way off the
+					// island for an MCV or an army (user: selling it is a death sentence).
 					continue;
 				}
 

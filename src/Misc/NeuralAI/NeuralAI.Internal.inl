@@ -190,6 +190,7 @@ namespace
 		MedicEscort,
 		GarrisonSquad,
 		DryEconomySale,
+		FerryReserved,
 		Count
 	};
 
@@ -215,7 +216,7 @@ namespace
 		"aircraftLost",
 		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom", "stuckUnloadMoved", "capitalGroupLaunched", "capitalGroupRetreat", "submarineSonarAvoided", "depotEmergencySale", "veinholeAttack", "cliffOpened", "stealthRevealFired",
 		"stagingHoldTimedOut", "jamCleared", "jamYielded", "mouthCleared",
-		"hoverReleased", "groundRouteHop", "medicEscort", "garrisonSquad", "dryEconomySale" };
+		"hoverReleased", "groundRouteHop", "medicEscort", "garrisonSquad", "dryEconomySale", "ferryReserved" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

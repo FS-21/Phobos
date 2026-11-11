@@ -428,7 +428,8 @@ namespace
 			if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling
 				|| pBld->CurrentMission == Mission::Construction || pType->ConstructionYard || pType->IsBaseDefense
 				|| pType->SuperWeapon != -1 || pType->Radar || pType->SpySat || pType->Capturable || pType->Unsellable
-				|| typeCounts[pType->ArrayIndex] < 2)
+				|| pType->Naval || typeCounts[pType->ArrayIndex] < 2)
+				// Naval: on an island map the yard is the only way off the island (user).
 			{
 				continue;
 			}

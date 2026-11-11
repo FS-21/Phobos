@@ -4277,7 +4277,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	bool urbanNeedClearer = false;
 	const bool urbanExpertInCharge = pExt->NeuralAI_ActiveExpert == 9;
 
-	if (urbanExpertInCharge || IsUrbanMapFor(pHouse))
+	// Strategic positions from the start (user: holding them can decide a match, the vanilla AI took
+	// them steadily too): buildings worth holding (urban opportunity >= 150) count under any expert.
+	const bool urbanOpportunityNow = UrbanOpportunity(pHouse) >= 150;
+
+	if (urbanExpertInCharge || IsUrbanMapFor(pHouse) || urbanOpportunityNow)
 		GetUrbanProductionNeeds(pHouse, urbanGarrisonRoom, urbanNeedClearer);
 
 	if (FactoryClass* pInfFac = pHouse->GetPrimaryFactory(AbstractType::InfantryType, false, BuildCat::DontCare))
@@ -4376,7 +4380,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (urbanGarrisonRoom > 0 && IsGarrisonOccupierType(pInf))
 		{
 			const int garrisonBonus = 260 + std::min(240, GarrisonFirepowerOf(pInf)) + std::min(4, urbanGarrisonRoom) * 30;
-			score += urbanExpertInCharge ? garrisonBonus : garrisonBonus / 2;
+			score += (urbanExpertInCharge || urbanOpportunityNow) ? garrisonBonus : garrisonBonus / 2;
 		}
 
 		if (urbanNeedClearer && IsGarrisonClearerType(pInf))

@@ -448,22 +448,56 @@ namespace
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
-		if (!pType || pType->Naval || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly
-			|| pType->MovementZone == MovementZone::Subterrannean || pType->MovementZone == MovementZone::Water
-			|| pType->MovementZone == MovementZone::WaterBeach || pFoot->IsInAir())
+		if (!pType || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly
+			|| pType->MovementZone == MovementZone::Subterrannean || pFoot->IsInAir())
 		{
 			return nullptr;
 		}
 
+		// Ships too (match #7061, Fludded Recources: a naval yard built across a narrow channel; the
+		// zone map still links both sides, so the engine kept sending 15 ships into the blocked
+		// channel although open sea led around the island). Water is flat: no step rule.
+		const bool naval = pType->Naval || pType->MovementZone == MovementZone::Water
+			|| pType->MovementZone == MovementZone::WaterBeach;
 		const CellStruct from = pFoot->GetMapCoords();
+		CellStruct goal = target;
 
-		if (from.DistanceFrom(target) <= hop + 10.0)
+		if (from.DistanceFrom(goal) <= hop + 10.0)
 			return nullptr;
 
 		const MovementZone mz = pType->MovementZone;
 		const int zone = ObjectZone(pFoot, mz);
 
-		if (zone <= 1 || MapClass::Instance.GetMovementZoneType(target, mz, false) != zone)
+		if (zone <= 1)
+			return nullptr;
+
+		// A ship sent at a land cell goes for the nearest water of its zone within 8 cells.
+		if (naval && MapClass::Instance.GetMovementZoneType(goal, mz, false) != zone)
+		{
+			bool found = false;
+
+			for (int r = 1; r <= 8 && !found; ++r)
+			{
+				for (int dy = -r; dy <= r && !found; ++dy)
+				{
+					for (int dx = -r; dx <= r && !found; ++dx)
+					{
+						if (std::max(std::abs(dx), std::abs(dy)) != r)
+							continue;
+
+						const CellStruct c { static_cast<short>(target.X + dx), static_cast<short>(target.Y + dy) };
+
+						if (MapClass::Instance.CoordinatesLegal(c) && MapClass::Instance.GetMovementZoneType(c, mz, false) == zone)
+						{
+							goal = c;
+							found = true;
+						}
+					}
+				}
+			}
+		}
+
+		if (MapClass::Instance.GetMovementZoneType(goal, mz, false) != zone)
 			return nullptr;
 
 		struct GroundRoute
@@ -478,7 +512,7 @@ namespace
 		const uint64_t routeKey = (static_cast<uint64_t>(static_cast<uint16_t>(zone)) << 48)
 			| (static_cast<uint64_t>(static_cast<uint8_t>(mz)) << 40)
 			| (static_cast<uint64_t>(static_cast<uint16_t>(from.X / 4)) << 30) | (static_cast<uint64_t>(static_cast<uint16_t>(from.Y / 4)) << 20)
-			| (static_cast<uint64_t>(static_cast<uint16_t>(target.X / 4)) << 10) | static_cast<uint64_t>(static_cast<uint16_t>(target.Y / 4));
+			| (static_cast<uint64_t>(static_cast<uint16_t>(goal.X / 4)) << 10) | static_cast<uint64_t>(static_cast<uint16_t>(goal.Y / 4));
 
 		if (routes.size() > 256)
 		{
@@ -509,8 +543,11 @@ namespace
 			// The zone map links any two cells less than 2 levels apart, so a flat step of one level
 			// shares the zone although no unit can climb it (Polar Knot: cliff and ramp tiles of tile sets
 			// missing from the theater load as flat clear cells).
-			auto const canStep = [](const CellStruct& a, const CellStruct& b)
+			auto const canStep = [naval](const CellStruct& a, const CellStruct& b)
 			{
+				if (naval)
+					return true;
+
 				auto const pA = MapClass::Instance.TryGetCellAt(a);
 				auto const pB = MapClass::Instance.TryGetCellAt(b);
 
@@ -540,7 +577,7 @@ namespace
 			{
 				const CellStruct node = queue[head];
 
-				if (node.DistanceFrom(target) <= 1.5)
+				if (node.DistanceFrom(goal) <= 1.5)
 				{
 					reached = node;
 					break;

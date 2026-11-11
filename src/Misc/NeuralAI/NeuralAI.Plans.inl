@@ -3902,19 +3902,20 @@ namespace
 					// Boarding: the infantry walk in (they are in limbo, hence not found, once aboard).
 					// The transport comes to meet the nearest one (UniqueID on ties): a hovercraft left
 					// at sea or a flyer parked across the base is out of the soldiers' reach otherwise.
+					// One boards at a time (a transport has a single radio link for loading: all of them
+					// ordered to Enter at once stole it from each other and jammed at the door, Heisenberg:
+					// 10-15 "nobody boarded" per match with soldiers 0-2 cells away in Enter); the others
+					// walk up and wait within 3 cells for their turn.
 					int waiting = 0;
 					FootClass* pNearest = nullptr;
 					int nearestDist = INT_MAX;
+					FootClass* pBoarding = nullptr;
 
 					for (const DWORD uid : infantry)
 					{
 						if (auto const pInf = findOwnFoot(uid))
 						{
 							waiting++;
-
-							if (pInf->CurrentMission != Mission::Enter && pInf->QueuedMission != Mission::Enter)
-								OrderFootToEnter(pInf, pTransport);
-
 							const int dist = pTransport->DistanceFrom(pInf);
 
 							if (dist < nearestDist || (dist == nearestDist && pInf->UniqueID < pNearest->UniqueID))
@@ -3922,7 +3923,41 @@ namespace
 								nearestDist = dist;
 								pNearest = pInf;
 							}
+
+							const bool enteringThis = (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter)
+								&& (pInf->ContainsLink(pTransport) || pInf->Destination == pTransport || pInf->ArchiveTarget == pTransport);
+
+							if (enteringThis && (!pBoarding || pInf->ContainsLink(pTransport)))
+								pBoarding = pInf;
 						}
+					}
+
+					for (const DWORD uid : infantry)
+					{
+						auto const pInf = findOwnFoot(uid);
+
+						if (!pInf || pInf == pBoarding)
+							continue;
+
+						if (!pBoarding && pInf == pNearest)
+						{
+							OrderFootToEnter(pInf, pTransport);
+							pBoarding = pInf;
+							continue;
+						}
+
+						if (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter)
+						{
+							if (pInf->ContainsLink(pTransport))
+								pInf->SendCommand(RadioCommand::NotifyUnlink, pTransport);
+
+							pInf->SetArchiveTarget(nullptr);
+							pInf->SetDestination(nullptr, true);
+							pInf->ForceMission(Mission::Guard);
+						}
+
+						if (pTransport->DistanceFrom(pInf) > 3 * Unsorted::LeptonsPerCell)
+							IssueMoveOrder(pInf, pTransport, 3.0);
 					}
 
 					if (pNearest && pTransport->CurrentMission != Mission::Unload)

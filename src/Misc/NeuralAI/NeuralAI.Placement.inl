@@ -2574,6 +2574,46 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				if (isNavalBld && !IsUsefulWaterCell(candidate))
 					continue;
 
+				// Never across a channel: both opposite sides of the footprint closed (less than half
+				// open water in the 2-cell strip beside it) means it would cut the waterway (match
+				// #7061: a naval yard built across a 4-cell channel held 15 ships for minutes). A yard
+				// on a coast has land on one side only.
+				if (isNavalBld)
+				{
+					auto const sideOpen = [](int x0, int y0, int x1, int y1)
+					{
+						int water = 0;
+						int total = 0;
+
+						for (int y = y0; y <= y1; ++y)
+						{
+							for (int x = x0; x <= x1; ++x)
+							{
+								const CellStruct c { static_cast<short>(x), static_cast<short>(y) };
+								auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+								++total;
+
+								if (pCell && pCell->LandType == LandType::Water && !pCell->GetBuilding())
+									++water;
+							}
+						}
+
+						return water * 2 >= total;
+					};
+
+					const int x0 = candidate.X;
+					const int y0 = candidate.Y;
+					const int x1 = candidate.X + w - 1;
+					const int y1 = candidate.Y + h - 1;
+					const bool westOpen = sideOpen(x0 - 2, y0, x0 - 1, y1);
+					const bool eastOpen = sideOpen(x1 + 1, y0, x1 + 2, y1);
+					const bool northOpen = sideOpen(x0, y0 - 2, x1, y0 - 1);
+					const bool southOpen = sideOpen(x0, y1 + 1, x1, y1 + 2);
+
+					if ((!westOpen && !eastOpen) || (!northOpen && !southOpen))
+						continue;
+				}
+
 				// Strictly enforce BaseNormal Adjacency (Adjacent= /
 				// AINavalYardAdjacency)
 				if (!passesBaseAdjacency(candidate))
