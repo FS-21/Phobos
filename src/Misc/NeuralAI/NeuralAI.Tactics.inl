@@ -2556,6 +2556,26 @@ namespace
 			: (macro.RefinerySaveTarget > 0 ? macro.RefinerySaveTarget : macro.ExpansionSaveTarget);
 		bool holdForEconomy = !holdForHarvester && !baseUnderAttack && economyTarget > 0
 			&& pHouse->Available_Money() < economyTarget && now >= macro.EconomyHoldPauseUntil;
+		// Saving for the island MCV on a slow trickle of income takes longer than 3600 frames, and the
+		// rest after it gave the credits back to the army before the MCV was ever paid.
+		const bool islandHold = macro.IslandExpansionUrgent && economyTarget == macro.ExpansionSaveTarget;
+
+		// Island expansion (UpdateIslandOreOutlook) and the fields we hold nearly gone: every 450
+		// frames one building that earns nothing more is sold toward the island MCV.
+		// SellForDryEconomy keeps ConYards, naval buildings, defenses and the last of each type.
+		if (islandHold && macro.ExpansionSaveTarget > 0 && pHouse->Available_Money() < macro.ExpansionSaveTarget
+			&& !macro.DryEconomyActive && now - macro.LastIslandSaleFrame >= 450
+			&& (macro.IslandHomeOre < 3000 || (macro.IslandOreRunway >= 0 && macro.IslandOreRunway < 2700)))
+		{
+			const int moneyBefore = pHouse->Available_Money();
+			macro.LastIslandSaleFrame = now;
+
+			if (SellForDryEconomy(pHouse))
+			{
+				Debug::Log("[NeuralAI] House %d IslandExpansion: home ore %d, %d of %d credits for the MCV, that sale goes to it, frame %d.\n",
+					pHouse->ArrayIndex, macro.IslandHomeOre, moneyBefore, macro.ExpansionSaveTarget, now);
+			}
+		}
 
 		if (!holdForEconomy)
 		{
@@ -2565,7 +2585,7 @@ namespace
 		{
 			macro.EconomyHoldSince = now;
 		}
-		else if (now - macro.EconomyHoldSince > 3600)
+		else if (now - macro.EconomyHoldSince > (islandHold ? 9000 : 3600))
 		{
 			macro.EconomyHoldPauseUntil = now + 1800;
 			macro.EconomyHoldSince = -1;
@@ -2646,6 +2666,12 @@ namespace
 				|| (pInfType && pInfType->Engineer)
 				|| (holdForExpansion && pUnitType
 					&& (IsAmphibiousOrAirTransport(pUnitType) || (pUnitType->DeploysInto && pUnitType->DeploysInto->ConstructionYard)))
+				// The island MCV and its ride come out of the first war factory and shipyard, and the MCV
+				// needs the buildings of its prerequisite list we lack.
+				|| (holdForExpansion && macro.IslandExpansionUrgent && pBldType
+					&& ((pBldType->Factory == AbstractType::UnitType && (pBldType->Naval ? pHouse->NumShipyards == 0 : pHouse->NumWarFactories == 0))
+						|| std::find(macro.IslandMcvPrerequisites.begin(), macro.IslandMcvPrerequisites.end(), pBldType->ArrayIndex)
+							!= macro.IslandMcvPrerequisites.end()))
 				|| (holdForEconomy && pBldType && (pBldType->Refinery || pBldType->ResourceGatherer));
 
 			if (restoresIncome)

@@ -82,6 +82,64 @@ namespace
 		return res == CanBuildResult::Buildable;
 	}
 
+	// The buildings a type still needs from us: of its prerequisite lists (Prerequisite and the
+	// Prerequisite.ListN alternatives), the one with the fewest entries missing. A missing generic
+	// group (NODTECH, GDIWEAP...) lists every building in it; the production builds the one it can.
+	// The vanilla list drops generic names, so the Phobos lists are read first.
+	std::vector<int> MissingTypePrerequisites(HouseClass* pHouse, TechnoTypeClass* pType)
+	{
+		std::vector<int> best;
+		int bestMissing = INT_MAX;
+		auto const pExt = pType ? TechnoTypeExt::Fetch(pType) : nullptr;
+
+		if (!pHouse || !pExt)
+			return best;
+
+		auto const& generics = RulesExt::Global()->GenericPrerequisites;
+		auto const consider = [&](auto const& list)
+		{
+			std::vector<int> buildings;
+			int missing = 0;
+
+			for (const int idx : list)
+			{
+				if (HouseExt::HasPrerequisite(pHouse, idx))
+					continue;
+
+				missing++;
+
+				if (idx >= 0)
+				{
+					buildings.push_back(idx);
+				}
+				else if (-idx < generics.Count)
+				{
+					for (const int member : generics.GetItem(-idx))
+					{
+						if (member >= 0)
+							buildings.push_back(member);
+					}
+				}
+			}
+
+			if (missing < bestMissing)
+			{
+				bestMissing = missing;
+				best = std::move(buildings);
+			}
+		};
+
+		if (!pExt->Prerequisite.empty())
+			consider(pExt->Prerequisite);
+		else
+			consider(pType->Prerequisite);
+
+		for (auto const& list : pExt->Prerequisite_ListVector)
+			consider(list);
+
+		return best;
+	}
+
 	int CountOwnedUnitWithConversions(HouseClass* pHouse, const UnitTypeClass* pUnit)
 	{
 		if (!pHouse || !pUnit)
@@ -1966,11 +2024,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		// Expansion MCV prerequisites: a house that wants to expand (slot 30, free ore fields) but
 		// cannot build any MCV yet is often missing one building of the MCV's Prerequisite list
-		// (YR asks for a service depot besides the war factory). Those buildings get a bonus.
+		// (YR asks for a service depot besides the war factory). Those buildings get a bonus. An
+		// island expansion due (UpdateIslandOreOutlook) asks for them whatever slot 30 and the bank
+		// say: its houses live on the trickle of income and the depot never came (Heisenberg repro).
 		std::vector<int> mcvPrerequisites;
 
-		if (pHouse->NumConYards >= 1 && pHouse->NumConYards < 6 && scores[30] >= 450 && money >= 2000
-			&& GetMacroState(pHouse).UncolonizedOreFields > 0)
+		if (pHouse->NumConYards >= 1 && pHouse->NumConYards < 6
+			&& ((scores[30] >= 450 && money >= 2000 && GetMacroState(pHouse).UncolonizedOreFields > 0)
+				|| GetMacroState(pHouse).IslandExpansionUrgent))
 		{
 			bool mcvBuildable = false;
 			std::vector<int> missing;
@@ -1983,18 +2044,32 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 				}
 
-				if (pHouse->CanBuild(pMcvType, false, false) == CanBuildResult::Buildable)
+				// Human rules, as the MCV production itself: the engine's AI check let an MCV pass
+				// without its service depot, so the depot was never asked for.
+				if (CanBuildUnderHumanRules(pHouse, pMcvType))
 				{
 					mcvBuildable = true;
 					break;
 				}
 
-				for (int pi = 0; pi < pMcvType->Prerequisite.Count; ++pi)
-					missing.push_back(pMcvType->Prerequisite.GetItem(pi));
+				const std::vector<int> typeMissing = MissingTypePrerequisites(pHouse, pMcvType);
+				missing.insert(missing.end(), typeMissing.begin(), typeMissing.end());
 			}
 
 			if (!mcvBuildable)
 				mcvPrerequisites = std::move(missing);
+		}
+
+		// The island expansion's saving hold lets these buildings through (UpdateEconomyCrisis).
+		{
+			auto& islandPrereqs = GetMacroState(pHouse).IslandMcvPrerequisites;
+			islandPrereqs.clear();
+
+			if (GetMacroState(pHouse).IslandExpansionUrgent)
+			{
+				std::copy_if(mcvPrerequisites.begin(), mcvPrerequisites.end(), std::back_inserter(islandPrereqs),
+					[](int idx) { return idx >= 0 && idx < BuildingTypeClass::Array.Count; });
+			}
 		}
 
 		// Opening order of a player: a refinery or two, then the war factory. Without one, and with a
@@ -2356,6 +2431,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (ownedWarFactories == 0 && ownedRefineries >= 1)
 						score += navalFirst ? -800 : 1200;
 
+					// The island MCV comes from it (UpdateIslandOreOutlook): before the money is gone.
+					if (ownedWarFactories == 0 && !navalFirst && GetMacroState(pHouse).IslandExpansionUrgent)
+						score += 900;
+
 					// Competitive MultipleFactory Arms Race boost: never fall behind
 					// the enemy in War Factory count or when floating macro cash!
 					if (ownedWarFactories < maxEnemyWarFactories && ownedRefineries >= 2)
@@ -2704,8 +2783,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				&& std::find(mcvPrerequisites.begin(), mcvPrerequisites.end(), pBld->ArrayIndex) != mcvPrerequisites.end())
 			{
 				// Ahead of routine picks, whatever the learned slot of that building says: without it
-				// the house never builds another MCV.
+				// the house never builds another MCV. For the island expansion it comes before
+				// everything else (Heisenberg repro: an Allied house with 9600 credits put them into
+				// turrets and destroyers and never built the service depot its MCV needs).
 				score = std::max(score + 900, 2600 + static_cast<int>(scores[30]) / 4);
+
+				if (GetMacroState(pHouse).IslandExpansionUrgent)
+					score = std::max(score, 5000);
 			}
 
 			if (isBldInProgress && (!pHouse->HasLowPower() || pBld->PowerBonus > pBld->PowerDrain))
@@ -3241,8 +3325,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
+	// The ore of the landmasses we hold runs out soon and the next field is across the water
+	// (UpdateIslandOreOutlook): the island MCV is wanted now, while it can still be paid.
+	UpdateIslandOreOutlook(pHouse);
+	const bool islandOreRunningOut = GetMacroState(pHouse).IslandExpansionUrgent;
 	const bool hasUncolonizedIslandTarget
-		= (features[21] == 50 || features[21] >= 100 || (features[21] > 0 && features[20] > 6));
+		= (features[21] == 50 || features[21] >= 100 || (features[21] > 0 && features[20] > 6) || islandOreRunningOut);
 
 	// Our fields running dry (half or more of our refineries with fewer than 6 ore cells left
 	// within 12 cells) while a free field or island is there to take: the next MCV is wanted
@@ -3305,7 +3393,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const bool canSafelySaveForReplacementMCV = (pHouse->NumConYards == 0 && !ownsUndeployedMCV)
 		&& ((ownedEconomyUnits > 0 && trueRefineries > 0 && features[65] < 45) || money >= 1500
 			|| pHouse->OwnedUnits >= 3);
-	const bool needsCrossIslandMCV = (features[21] > 0 && !hasFreeHomeLandField && (features[19] == 0 || pHouse->NumConYards >= 1));
+	const bool needsCrossIslandMCV = islandOreRunningOut
+		|| (features[21] > 0 && !hasFreeHomeLandField && (features[19] == 0 || pHouse->NumConYards >= 1));
 
 	// Island expansion is one more airlift job when a carryall may lift the MCV (or a spare
 	// harvester for the new island's resources): mods can forbid it with Carryall.Allowed=no.
@@ -3330,17 +3419,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const bool canSafelySaveForExpansionMCV
 		= (pHouse->NumConYards >= 1 && pHouse->NumConYards < maxAllowedConYards && !ownsUndeployedMCV
 			&& (features[20] > 6 || hasUncolonizedIslandTarget || fieldsRunningDry)
-			&& (scores[30] >= 450 || wantsArchipelagoExpansion || fieldsRunningDry)
+			&& (scores[30] >= 450 || wantsArchipelagoExpansion || fieldsRunningDry || islandOreRunningOut)
 			&& (!needsCrossIslandMCV || ownedHeavyIslandTransports >= 1 || canFerryAnyMCVAcrossWater)
-			&& (money >= 1400 || desperateIslandOrOreExpansion || fieldsRunningDry));
+			&& (money >= 1400 || desperateIslandOrOreExpansion || fieldsRunningDry || islandOreRunningOut));
 	const bool canSafelySaveForMCV = canSafelySaveForReplacementMCV || canSafelySaveForExpansionMCV;
 
-	// Fields dry and an expansion MCV wanted: the price of the cheapest buildable MCV is the saving
-	// target the economy crisis logic holds the rest of the production for.
+	// Fields dry (or the island ones running out) and an expansion MCV wanted: the price of the
+	// cheapest buildable MCV is the saving target the economy crisis logic holds the rest of the
+	// production for.
 	{
 		int expansionCost = 0;
 
-		if (fieldsRunningDry && canSafelySaveForExpansionMCV && !ownsUndeployedMCV)
+		if ((fieldsRunningDry || islandOreRunningOut) && canSafelySaveForExpansionMCV && !ownsUndeployedMCV)
 		{
 			for (auto const pType : UnitTypeClass::Array)
 			{
@@ -3349,7 +3439,68 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		// An island expansion saves for its MCV while the MCV's missing buildings (a service depot,
+		// a tech center) are built, as long as one of them can be built now: the credits went to the
+		// army before the MCV became buildable (Heisenberg repro). Those buildings are not held.
+		if (expansionCost == 0 && islandOreRunningOut && canSafelySaveForExpansionMCV && !ownsUndeployedMCV)
+		{
+			auto const& islandPrereqs = GetMacroState(pHouse).IslandMcvPrerequisites;
+			const bool prereqBuildable = std::any_of(islandPrereqs.begin(), islandPrereqs.end(),
+				[pHouse](int idx) { return CanBuildUnderHumanRules(pHouse, BuildingTypeClass::Array.GetItem(idx)); });
+
+			for (auto const pType : UnitTypeClass::Array)
+			{
+				if (prereqBuildable && pType && pType->DeploysInto && pType->DeploysInto->ConstructionYard && pType->TechLevel >= 0
+					&& (ownHouseBit == 0u || pType->InOwners(ownHouseBit)))
+				{
+					expansionCost = expansionCost == 0 ? pType->GetActualCost(pHouse) : std::min(expansionCost, pType->GetActualCost(pHouse));
+				}
+			}
+		}
+
 		GetMacroState(pHouse).ExpansionSaveTarget = expansionCost;
+	}
+
+	// With each IslandExpansion outlook line, what the island MCV waits for.
+	if (islandOreRunningOut && GetMacroState(pHouse).IslandExpansionLogFrame == Unsorted::CurrentFrame)
+	{
+		// Our side's MCVs: buildable, or the buildings of their Prerequisite list we lack.
+		std::string mcvState;
+
+		for (auto const pMcvType : UnitTypeClass::Array)
+		{
+			if (!pMcvType || !pMcvType->DeploysInto || !pMcvType->DeploysInto->ConstructionYard || pMcvType->TechLevel < 0
+				|| (ownHouseBit != 0u && !pMcvType->InOwners(ownHouseBit)))
+			{
+				continue;
+			}
+
+			mcvState += ' ';
+			mcvState += pMcvType->ID;
+
+			if (CanBuildUnderHumanRules(pHouse, pMcvType))
+			{
+				mcvState += " buildable";
+				continue;
+			}
+
+			mcvState += " lacks";
+
+			for (const int prereq : MissingTypePrerequisites(pHouse, pMcvType))
+			{
+				if (prereq < BuildingTypeClass::Array.Count)
+				{
+					mcvState += ' ';
+					mcvState += BuildingTypeClass::Array.GetItem(prereq)->ID;
+				}
+			}
+		}
+
+		Debug::Log("[NeuralAI] House %d IslandExpansion gates: war factories %d, shipyards %d, heavy transports %d, MCV ferryable %d, "
+			"MCV owned %d, yards %d/%d, saving %d (target %d), %d credits, MCV:%s.\n",
+			pHouse->ArrayIndex, pHouse->NumWarFactories, pHouse->NumShipyards, ownedHeavyIslandTransports, canFerryAnyMCVAcrossWater ? 1 : 0,
+			ownsUndeployedMCV ? 1 : 0, pHouse->NumConYards, maxAllowedConYards, canSafelySaveForExpansionMCV ? 1 : 0,
+			GetMacroState(pHouse).ExpansionSaveTarget, money, mcvState.c_str());
 	}
 
 	const bool savingForIslandTransport = (features[21] > 0 && pHouse->NumShipyards >= 1
@@ -3493,7 +3644,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const int targetFleet = isIslandWar ? std::max(1, neededForDemand)
 			: (neededForDemand > 0 ? neededForDemand : (isIslandMap ? 1 : 0));
 		const bool needsHeavyMcvTransport = candSizeLimit >= 6 && ownedHeavyIslandTransports == 0
-			&& !compatibleHeavyInProgress && (isIslandMap || scores[30] >= 450);
+			&& !compatibleHeavyInProgress && (isIslandMap || scores[30] >= 450 || islandOreRunningOut);
 
 		if (needsHeavyMcvTransport)
 			return scores[28] + 2200;
@@ -3691,7 +3842,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				|| pUnit->JumpJet);
 			if (ownsUndeployedMCV
 				|| (!bankWantsYard
-					&& ((pHouse->NumConYards >= 1 && scores[30] < 400 && scores[81] < 85 && !fieldsRunningDry)
+					&& ((pHouse->NumConYards >= 1 && scores[30] < 400 && scores[81] < 85 && !fieldsRunningDry && !islandOreRunningOut)
 						|| pHouse->NumConYards >= maxAllowedConYards
 						|| (pHouse->NumConYards >= 1
 							&& (pHouse->Buildings.Count >= 35 || ownedGroundCombatUnits + ownedNavalOrAmphibCombatUnits >= 40)
