@@ -4568,7 +4568,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pickNow - watchedSince < 900)
 				return;
 
-			pickMacro.ProductionBanUntil[queue * 100000 + typeIdx] = pickNow + 5400;
+			// Diagnostic only for now: the first training run banned harvesters, engineers and riflemen
+			// the engine called buildable (AI verdict 1 in all 31 cases), so the block is elsewhere and
+			// a ban only removed good picks. The log keeps what the engine sees at that moment.
 			watchedIdx = -1;
 
 			static int banLogSerial = -1;
@@ -4582,10 +4584,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			if (banLogCount++ < 30)
 			{
-				Debug::Log("[NeuralAI] House %d production: %s never started in 900 frames (%d credits, %d factories, engine AI verdict %d), "
-					"banned for 5400 frames, frame %d.\n",
+				auto const pFactoryBld = pType->FindFactory(true, true, true, pHouse);
+				Debug::Log("[NeuralAI] House %d production: %s never started in 900 frames (%d credits, %d factories, engine AI verdict %d, "
+					"factory found %s, engine indices unit %d inf %d bld %d), frame %d.\n",
 					pHouse->ArrayIndex, pType->ID, pHouse->Available_Money(), factories,
-					static_cast<int>(pHouse->CanBuild(pType, false, false)), pickNow);
+					static_cast<int>(pHouse->CanBuild(pType, false, false)), pFactoryBld ? pFactoryBld->Type->ID : "none",
+					pHouse->ProducingUnitTypeIndex, pHouse->ProducingInfantryTypeIndex, pHouse->ProducingBuildingTypeIndex, pickNow);
 			}
 
 			CountDecision(NeuralDecision::ProductionPickBanned, pHouse->ArrayIndex);
