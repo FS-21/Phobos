@@ -672,6 +672,24 @@ namespace
 		// Our fields ran dry and an expansion MCV is wanted: what it costs (0 when not saving for one).
 		// UpdateEconomyCrisis holds the other production until the credits reach it.
 		int ExpansionSaveTarget { 0 };
+		// Island ore outlook (UpdateIslandOreOutlook, every 900 frames): credits of ore left in the
+		// fields of the landmasses we hold (a ConYard or refinery there), what they lost per 900
+		// frames (smoothed; IslandHubZoneKey names the landmasses and field blocks of that sample),
+		// how many frames the rest lasts at that pace, the nearest free field on another landmass,
+		// and whether an MCV must go there now, while the credits for it and its ride are still
+		// there. LastIslandSaleFrame paces the sales that pay for that MCV once the home ore is gone.
+		int IslandOutlookFrame { -100000 };
+		int IslandHomeOre { 0 };
+		int IslandOreRunway { -1 };
+		int IslandOreDrain { -1 };
+		unsigned int IslandHubZoneKey { 0 };
+		CellStruct IslandExpansionField { CellStruct::Empty };
+		bool IslandExpansionUrgent { false };
+		int IslandExpansionLogFrame { -100000 };
+		int LastIslandSaleFrame { -100000 };
+		int IslandMcvLogFrame { -100000 };
+		// The buildings of our MCV's Prerequisite list we still lack while that expansion is urgent.
+		std::vector<int> IslandMcvPrerequisites {};
 		// The other economic investments the production wants and cannot pay yet (0 when none): a
 		// harvester while we have fewer than refineries, a refinery for a newly reached field.
 		int HarvesterSaveTarget { 0 };
@@ -973,6 +991,17 @@ namespace
 			this->DeployedSiegeSince.clear();
 			this->NoYardSinceFrame = -1;
 			this->ExpansionSaveTarget = 0;
+			this->IslandOutlookFrame = -100000;
+			this->IslandHomeOre = 0;
+			this->IslandOreRunway = -1;
+			this->IslandOreDrain = -1;
+			this->IslandHubZoneKey = 0;
+			this->IslandExpansionField = CellStruct::Empty;
+			this->IslandExpansionUrgent = false;
+			this->IslandExpansionLogFrame = -100000;
+			this->LastIslandSaleFrame = -100000;
+			this->IslandMcvLogFrame = -100000;
+			this->IslandMcvPrerequisites.clear();
 			this->HarvesterSaveTarget = 0;
 			this->RefinerySaveTarget = 0;
 			this->EconomyHoldSince = -1;

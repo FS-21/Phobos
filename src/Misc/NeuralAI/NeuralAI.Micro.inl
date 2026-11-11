@@ -3443,6 +3443,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
+			// Island expansion due (UpdateIslandOreOutlook): where its MCV is and what it was told,
+			// every 2700 frames, so a crossing that never happens shows up in the log.
+			if (auto& islandMacro = GetMacroState(pHouse); islandMacro.IslandExpansionUrgent
+				&& Unsorted::CurrentFrame - islandMacro.IslandMcvLogFrame >= 2700)
+			{
+				islandMacro.IslandMcvLogFrame = Unsorted::CurrentFrame;
+				Debug::Log("[NeuralAI] House %d IslandExpansion MCV: %s %u at (%d,%d) zone %d mission %d, colonize %d (free land field %d, "
+					"goal %s zone %d), enemy near %d, transport able %d, frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, mcvCell.X, mcvCell.Y, mcvZone, static_cast<int>(pUnit->CurrentMission),
+					mustColonizeOtherIsland ? 1 : 0, hasFreeLandFieldInMcvZone ? 1 : 0, pIslandResourceGoalCell ? "yes" : "none",
+					resourceIslandZone, enemyNearMCV ? 1 : 0, ownsLiveMcvTransportNow ? 1 : 0, Unsorted::CurrentFrame);
+			}
+
 			if (mustColonizeOtherIsland)
 			{
 				const bool isSelfAmphibOrAir = (pType->MovementZone == MovementZone::Amphibious
