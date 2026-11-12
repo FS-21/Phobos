@@ -63,6 +63,10 @@ class RulesExt
 		Valueable<bool> JumpjetRotateOnCrash;
 
 		Nullable<WarheadTypeClass*> VeinholeWarhead;
+		// The Ares tags of the cargo explosion of a destroyed vehicle, read here too: that explosion
+		// is done by Phobos so that it counts every resource type.
+		Nullable<WarheadTypeClass*> TiberiumExplosiveWarhead;
+		Nullable<AnimTypeClass*> TiberiumExplosiveAnim;
 		Valueable<int> VeinAttackHeight;
 
 		PhobosFixedString<32u> MissingCameo;
@@ -649,7 +653,7 @@ class RulesExt
 		      SubterraneanSpeed{19}, SubterraneanHeight{-256}, AISuperWeaponDelay{}, UseGlobalRadApplicationDelay{true},
 		      RadApplicationDelay_Building{0}, RadBuildingDamageMaxCount{-1}, RadSiteWarhead_Detonate{false},
 		      RadSiteWarhead_Detonate_Full{true}, RadHasOwner{false}, RadHasInvoker{false}, ShieldApplyArmorMult{false},
-		      JumpjetCrash{5.0}, JumpjetNoWobbles{false}, JumpjetRotateOnCrash{true}, VeinholeWarhead{},
+		      JumpjetCrash{5.0}, JumpjetNoWobbles{false}, JumpjetRotateOnCrash{true}, VeinholeWarhead{}, TiberiumExplosiveWarhead{}, TiberiumExplosiveAnim{},
 		      VeinAttackHeight{5}, MissingCameo{GameStrings::XXICON_SHP}
 
 		      ,
