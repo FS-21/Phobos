@@ -2327,6 +2327,10 @@ void TechnoExt::OnDetach(AbstractClass* pTarget, bool removed)
 		AnnounceInvalidPointer(this->LastAttacker, pTarget);
 		AnnounceInvalidPointer(this->FallingInheritedTarget, pTarget);
 		AnnounceInvalidPointer(this->FallingInheritedDestination, pTarget);
+		// The target a webbed soldier goes back to and the web drawn on it: read when the web ends,
+		// long after either may be gone (a dead target left here made multiplayer games desync).
+		AnnounceInvalidPointer(this->WebbyLastTarget, pTarget);
+		AnnounceInvalidPointer(this->WebbyAnim, pTarget);
 
 		if (this->SmartAutoDeploy_SavedTarget == pTarget)
 		{
