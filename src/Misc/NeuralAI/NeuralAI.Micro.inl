@@ -2824,6 +2824,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (IsSneakStrikeActive(pHouse, pUnit->UniqueID))
 			continue;
 
+		// A transport parked to load takes its orders from the transport loader.
+		if (IsFerryParkedToLoad(pHouse, pUnit->UniqueID))
+			continue;
+
 		if (pUnit->HasAnyLink())
 		{
 			if (auto const pLinkedBld = abstract_cast<BuildingClass*>(pUnit->GetNthLink(0)))
@@ -10165,7 +10169,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			landing.Target = CellStruct::Empty;
 		}
 
-		if (landing.Cell != from || !passengersWaiting)
+		// Hovering drifts it over the cells around: only a real move starts the count again.
+		if (landing.Cell == CellStruct::Empty || landing.Cell.DistanceFrom(from) > FerryLandingDriftCells || !passengersWaiting)
 		{
 			landing.Cell = from;
 			landing.Since = now;
@@ -10693,6 +10698,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 		}
+
+		// Whatever the loader orders from here on is its own doing.
+		GetMacroState(pHouse).ParkedFerries.erase(pTrans->UniqueID);
 
 		const CellStruct transCoords = pTrans->GetMapCoords();
 		// The land around a parked transport, not the shore cell's own zone (see TransportLandZone).
@@ -12024,6 +12032,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pTrans->ClearNavigationList();
 				pTrans->ForceMission(Mission::Guard);
 			}
+
+			// Parked with something to load or loaded: nobody else orders it about, and whoever
+			// moves it all the same is logged.
+			if (pSingleActiveBoarder != nullptr || hasFerryQueue || numPass >= 1)
+				GetMacroState(pHouse).ParkedFerries[pTrans->UniqueID] = { pTrans, Unsorted::CurrentFrame };
 
 			if (!pActiveIslandGoal && !enemyOnDisconnectedIsland && pIslandResourceGoalCell == nullptr
 				&& pIslandTechGoalCell == nullptr && pendingCrossIslandOrders.empty())
@@ -14115,6 +14128,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (bestTunnelCell != CellStruct::Empty)
 				{
+					// TEMP diagnostic: the second tunnel mouth is dug here.
+					Debug::Log("[NeuralAI] House %d Tunnel: %s fired at (%d,%d), score %d, home mouth %d leptons from home, frame %d.\n",
+						pHouse->ArrayIndex, pSuper->Type->ID, bestTunnelCell.X, bestTunnelCell.Y, bestTunnelCellScore, minHomeTunnelDist,
+						Unsorted::CurrentFrame);
 					pSuper->Launch(bestTunnelCell, false);
 					pSuper->Reset();
 

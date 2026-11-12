@@ -943,6 +943,29 @@ namespace
 
 			if ((unreachable && stuckFrames >= 450) || stuckFrames >= 1800 || (stalledAttackMove && stuckFrames >= 150))
 			{
+				// TEMP diagnostic: a ship that never left its cell, where it was sent and why it is released.
+				if (pType->Naval)
+				{
+					static int shipLogSerial = -1;
+					static int shipLogCount = 0;
+
+					if (shipLogSerial != NeuralMatchSerial)
+					{
+						shipLogSerial = NeuralMatchSerial;
+						shipLogCount = 0;
+					}
+
+					if (shipLogCount++ < 30)
+					{
+						Debug::Log("[NeuralAI] Naval DIAG house %d frame %d: %s %u held at (%d,%d) for %d frames, sent to (%d,%d) %d cells away, "
+							"zones %d and %d, unreachable %d, stalled attack-move %d, mission %d mega %d, destination land type %d.\n",
+							pHouse->ArrayIndex, now, pType->ID, pFoot->UniqueID, here.X, here.Y, stuckFrames, destCell.X, destCell.Y,
+							static_cast<int>(here.DistanceFrom(destCell)), footZone, destZone, unreachable ? 1 : 0, stalledAttackMove ? 1 : 0,
+							static_cast<int>(pFoot->CurrentMission), static_cast<int>(pFoot->MegaMission),
+							MapClass::Instance.TryGetCellAt(destCell) ? static_cast<int>(MapClass::Instance.TryGetCellAt(destCell)->LandType) : -1);
+					}
+				}
+
 				pFoot->ClearMegaMissionData();
 				pFoot->SetDestination(nullptr, true);
 				pFoot->QueueMission(Mission::Guard, true);

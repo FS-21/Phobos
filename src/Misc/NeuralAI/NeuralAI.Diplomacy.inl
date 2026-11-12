@@ -16,7 +16,7 @@ namespace
 	};
 
 	constexpr const char* NeuralCoalitionDeclineNames[] = { "none", "roll", "secondStrongest", "alone", "stronger", "strongest" };
-	constexpr const char* NeuralCoalitionReasonNames[] = { "none", "elimination", "leader", "stalemate", "traitor" };
+	constexpr const char* NeuralCoalitionReasonNames[] = { "none", "elimination", "leader", "stalemate", "traitor", "call" };
 	constexpr const char* NeuralCoalitionChoiceNames[] = { "trigger", "grudge", "fragile", "poorest", "traitor" };
 	constexpr const char* NeuralPactEndNames[] = { "betrayal", "weakened", "target gone", "timeout", "team" };
 
@@ -297,8 +297,14 @@ namespace
 	// - Without a coalition: two other houses at war are left alone until it ends, then the one it
 	//   left weakest is hit; a dying house is reached before its aggressor; while we lead by far we
 	//   keep a low profile (no far attacks on houses that leave us alone, expansion and defense first).
-	// Several coalitions can stand at once: each house picks its own target; no message, no shared
-	// state between houses.
+	// - Call to arms: a house that stands against a target calls the others. A house without a
+	//   coalition and without a defeat or a traitor to answer weighs the call first (the target with
+	//   most houses against it, then the strongest), with PactCallBonus added to the situation, before
+	//   looking for a leader of its own: houses that each saw a different leader used to end up alone
+	//   against different targets, pacts of one. The houses against one target are partners by the
+	//   pact itself (truce between them, seen fighting it or not, beyond the limit of tacit partners).
+	// Several coalitions can stand at once. The call is the only thing houses share: who stands
+	// against whom; what each one knows of the map stays its own.
 	void UpdateTacitCoalition(HouseClass* pHouse)
 	{
 		if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 8)
@@ -931,6 +937,17 @@ namespace
 				return;
 			}
 
+			// The houses that stand against the same target are partners by the pact itself.
+			std::array<bool, 8> declared {};
+
+			for (int p = 0; p < 8; ++p)
+			{
+				declared[p] = p != self && alive[p] && !team[p] && MacroStates[p].Coalition.Target == t;
+
+				if (declared[p])
+					partnerSeen[p] = true;
+			}
+
 			CellClass* const pTargetCell = pickTargetCell(t);
 			int partners = 0;
 
@@ -986,7 +1003,7 @@ namespace
 					continue;
 				}
 
-				if (partners >= PactMaxPartners || now - coal.HurtByFrame[p] <= 450)
+				if ((partners >= PactMaxPartners && !declared[p]) || now - coal.HurtByFrame[p] <= 450)
 					continue;
 
 				coal.TruceSinceFrame[p] = now;
@@ -1002,7 +1019,13 @@ namespace
 				const int redirectedBefore = coal.UnitsRedirected;
 				ApplyTruceStart(pHouse, p, knownCells[p], pTargetCell);
 
-				if (partnerSpot[p] != CellStruct::Empty)
+				if (declared[p])
+				{
+					Debug::Log("[NeuralAI] House %d Coalition: pact truce with house %d, both against house %d; "
+						"%d plans cancelled, %d units recalled, %d redirected.\n", self, p, t, coal.PlansCancelled - plansBefore,
+						coal.UnitsRecalled - recalledBefore, coal.UnitsRedirected - redirectedBefore);
+				}
+				else if (partnerSpot[p] != CellStruct::Empty)
 				{
 					Debug::Log("[NeuralAI] House %d Coalition: tacit truce with house %d, seen fighting house %d at (%d,%d); "
 						"%d plans cancelled, %d units recalled, %d redirected.\n", self, p, t, partnerSpot[p].X, partnerSpot[p].Y,
@@ -1088,6 +1111,38 @@ namespace
 				triggerReason = 4;
 				triggerChoice = 4;
 				triggerSerial = 200 + triggerTarget;
+			}
+		}
+
+		// A call to arms: another house already stands against one we know. Joining it makes the pact.
+		if (triggerTarget < 0)
+		{
+			std::array<int, 8> callers {};
+
+			for (int i = 0; i < 8; ++i)
+			{
+				const int called = MacroStates[i].Coalition.Target;
+
+				if (i != self && alive[i] && !team[i] && called >= 0 && called < 8 && called != self)
+					callers[called]++;
+			}
+
+			for (int i = 0; i < 8; ++i)
+			{
+				if (callers[i] == 0 || !targetable(i))
+					continue;
+
+				if (triggerTarget < 0 || callers[i] > callers[triggerTarget]
+					|| (callers[i] == callers[triggerTarget] && strength[i] > strength[triggerTarget]))
+				{
+					triggerTarget = i;
+				}
+			}
+
+			if (triggerTarget >= 0)
+			{
+				triggerReason = 5;
+				triggerSerial = 400 + triggerTarget;
 			}
 		}
 
@@ -1243,6 +1298,9 @@ namespace
 
 			if (triggerReason == 1)
 				situation += 10;
+
+			if (triggerReason == 5)
+				situation += PactCallBonus;
 
 			if (coal.TraitorScore[triggerTarget] > 0)
 				situation += 20;

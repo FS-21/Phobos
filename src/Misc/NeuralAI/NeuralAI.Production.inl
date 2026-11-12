@@ -215,6 +215,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	std::array<int16_t, OutputVectorSize> scores;
 
+	// TEMP diagnostic: parked transports moved since the last tick of this house.
+	TraceParkedFerries(pHouse->ArrayIndex, "the engine or another house between ticks");
+
 	{
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Features };
 		UpdateBridgePlanner(pHouse);
@@ -243,12 +246,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		UpdateAirLossMemory(pHouse);
 		UpdateMatchTactics(pHouse, scores);
 		UpdateEnemyStrength(pHouse);
+		TraceParkedFerries(pHouse->ArrayIndex, "features, style and tactics");
 	}
 
 	{
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Micro };
 		UpdateArmyLedger(pHouse);
 		UpdateRepairTrips(pHouse);
+		TraceParkedFerries(pHouse->ArrayIndex, "army ledger and repair trips");
 		NeuralAI::ExecuteTacticalAndSpecOpsMicro(pHouse, scores);
 	}
 
@@ -256,36 +261,46 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	{
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Plans };
 		UpdateStrategicPlans(pHouse, scores);
+		TraceParkedFerries(pHouse->ArrayIndex, "strategic plans");
 	}
 
 	// Release units parked by orders they cannot complete (destroyed bridge, endless jam).
 	{
 	const NeuralSectionTimer watchdogTimer { pHouse->ArrayIndex, NeuralSection::Watchdogs };
 	UpdateStuckUnits(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "stuck units watchdog");
 
 	// Empty harvesters waiting where the ore ran out go to the nearest free field.
 	UpdateIdleHarvesters(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "idle harvesters");
 
 	// Forward crawl stones placed / lost (trainer credit for the offensive crawl).
 	UpdateOffensiveStones(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "offensive stones");
 
 	// Capital units gather and strike in groups.
 	UpdateCapitalGroups(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "capital groups");
 
 	// Submarines keep out of known enemy sonar.
 	UpdateSubmarineStealth(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "submarine stealth");
 
 	// Veinhole monsters near us and destroyable cliffs that open a way.
 	UpdateMapObstacles(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "map obstacles");
 
 	// Idle airships / jumpjet bombers near known enemy structures attack them.
 	UpdateIdleAirborneStrikers(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "idle airborne strikers");
 
 	// Transports that cannot unload where they stand try a free cell nearby.
 	UpdateStuckUnloads(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "stuck unloads");
 
 	// Scouts go where information is worth most (stale fields, approaches, enemy bases and armies).
 	UpdatePurposefulScouting(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "scouting");
 
 	// Best ore field not mined yet (Expert 6 hoards: claims contested fields too).
 	UpdateResourceClaim(pHouse);
@@ -301,23 +316,29 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Expert 0: economy peaks and crisis actions (blackout, broke, harvester balance).
 	UpdateEconomyCrisis(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "economy crisis");
 
 	// Expert 3: tacit coalition against a dangerous house (outside preset teams only).
 	UpdateTacitCoalition(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "coalition");
 
 	// Expert 3: which enemy to hit in a free-for-all.
 	UpdateFfaTargets(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "free-for-all targets");
 
 	// Expert 2: which buildable types and missing tech answer the enemy army seen so far.
 	UpdateCounterComposition(pHouse);
 
 	// Expert 4: neutral techs seen, capture / spy / bridge work and the engineers and spies out.
 	UpdateSpecOps(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "special operations");
 
 	// Expert 4: demolition trucks and terrorists sneaking in without a transport.
 	UpdateSneakStrikes(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "sneak strikes");
 	// Expert 9: occupiable buildings seen, garrisons to hold, evacuate or clear, coalition work.
 	UpdateUrban(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "urban");
 
 	// TEMP diagnostic: siege units that start to unfold, who ordered it and what they aim at.
 	LogSiegeDeploys(pHouse);
@@ -3117,6 +3138,32 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Unit & Naval Target Selection
 	int bestUnitIdx = -1;
 	int bestUnitScore = -32000;
+	// Tank bunkers of ours standing empty beyond the free tanks that fit them: a tank is built for
+	// each on purpose (user: the original AI built units for its bunkers), the best one that fits.
+	int bestBunkerTankIdx = -1;
+	int bestBunkerTankScore = -32000;
+	int tankBunkersToFill = 0;
+
+	for (auto const pOwnBld : pHouse->Buildings)
+	{
+		if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->Type && pOwnBld->Type->Bunker
+			&& pOwnBld->BunkerLinkedItem == nullptr)
+		{
+			tankBunkersToFill++;
+		}
+	}
+
+	for (auto const pOwnU : UnitClass::Array)
+	{
+		if (tankBunkersToFill <= 0)
+			break;
+
+		if (pOwnU && pOwnU->Owner == pHouse && pOwnU->IsAlive && !pOwnU->InLimbo && pOwnU->Type && pOwnU->Type->Bunkerable
+			&& !pOwnU->Type->Naval && !pOwnU->Type->Harvester && !pOwnU->Type->ResourceGatherer && pOwnU->BunkerLinkedItem == nullptr)
+		{
+			tankBunkersToFill--;
+		}
+	}
 	int bestNavalIdx = -1;
 	int bestNavalScore = -32000;
 	bool ownsUndeployedMCV = false;
@@ -4282,8 +4329,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						// in the War Factory / Shipyard!
 		}
 
-		// Expert 2: counters of the seen enemy army lead their factory (combat types only).
+		// Counters of the seen enemy army and of what attacks the base lead their factory (combat
+		// types only).
 		score += CounterBonusFor(pHouse, pUnit);
+
+		// Under attack the answer to the threat is built first. What the house cannot do without
+		// stays: the MCV when there is no yard, a harvester per refinery, anything while no income is left.
+		if (GetMacroState(pHouse).CounterUnderAttack && hasActiveUnitIncome
+			&& ((isMCV && pHouse->NumConYards > 0) || (isKeyStructureDeployer && !isMCV)
+				|| (isEconomyUnit && ownedEconomyUnits >= std::max(1, trueRefineries))))
+		{
+			score -= ThreatFirstPenalty;
+		}
 
 		if (pUnit->Naval)
 		{
@@ -4569,7 +4626,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				bestUnitIdx = pUnit->ArrayIndex;
 			}
+
+			if (tankBunkersToFill > 0 && pUnit->Bunkerable && !isEconomyUnit && !isMCV && !isKeyStructureDeployer
+				&& score > bestBunkerTankScore)
+			{
+				bestBunkerTankScore = score;
+				bestBunkerTankIdx = pUnit->ArrayIndex;
+			}
 		}
+	}
+
+	// A tank for an empty tank bunker goes ahead of the scored pick while the house has income and
+	// the money for it; under attack the answer to the threat goes first.
+	if (bestBunkerTankIdx >= 0 && bestUnitIdx != bestBunkerTankIdx && hasActiveUnitIncome
+		&& !GetMacroState(pHouse).CounterUnderAttack
+		&& money >= UnitTypeClass::Array.GetItem(bestBunkerTankIdx)->GetActualCost(pHouse) + GarrisonTrainingReserve)
+	{
+		bestUnitIdx = bestBunkerTankIdx;
+		CountDecision(NeuralDecision::GarrisonTraining, pHouse->ArrayIndex);
 	}
 
 	// The governor's MCV starts in every other 900-frame window (the odd ones: the building queue
@@ -4651,6 +4725,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	int bestInfIdx = -1;
 	int bestInfScore = -32000;
+	// The best soldier for a seat in a building worth holding, and the seats left for such soldiers
+	// under any expert and on any map (the squad for the best positions, or the city).
+	int bestGarrisonIdx = -1;
+	int bestGarrisonScore = -32000;
+	int garrisonSeatsToFill = 0;
+	{
+		bool unusedNeedClearer = false;
+		GetUrbanProductionNeeds(pHouse, garrisonSeatsToFill, unusedNeedClearer);
+	}
 	int inProgressInfIdx = -1;
 
 	// Expert 9 in charge, or an urban map: fill the buildings worth holding (soldiers with the
@@ -4862,11 +4945,38 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		score += CounterBonusFor(pHouse, pInf);
 
+		// Under attack captures and infiltrations wait for the answer to the threat.
+		if (GetMacroState(pHouse).CounterUnderAttack && (pInf->Engineer || IsSpyInfantryType(pInf)))
+			score -= ThreatFirstPenalty;
+
 		if (score > bestInfScore)
 		{
 			bestInfScore = score;
 
 			bestInfIdx = pInf->ArrayIndex;
+		}
+
+		if (garrisonSeatsToFill > 0 && IsGarrisonOccupierType(pInf) && score > bestGarrisonScore)
+		{
+			bestGarrisonScore = score;
+			bestGarrisonIdx = pInf->ArrayIndex;
+		}
+	}
+
+	// Soldiers for the buildings are trained on purpose (user: do not wait for soldiers that happen
+	// to be idle, produce them for those bunkers): while buildings worth holding have seats left
+	// beyond the occupiers we have outside, the barracks train the best soldier for a seat ahead of
+	// the scored pick, with or without money in hand (a soldier is cheap and is paid as the money
+	// comes in; a house is often broke for minutes and the seat would go to a dearer pick). The
+	// first engineer still goes first, and under attack the answer to the threat does.
+	if (bestGarrisonIdx >= 0 && bestInfIdx != bestGarrisonIdx && !GetMacroState(pHouse).CounterUnderAttack)
+	{
+		auto const pScoredPick = bestInfIdx >= 0 ? InfantryTypeClass::Array.GetItem(bestInfIdx) : nullptr;
+
+		if (!pScoredPick || !pScoredPick->Engineer || ownedEngineers >= 1)
+		{
+			bestInfIdx = bestGarrisonIdx;
+			CountDecision(NeuralDecision::GarrisonTraining, pHouse->ArrayIndex);
 		}
 	}
 

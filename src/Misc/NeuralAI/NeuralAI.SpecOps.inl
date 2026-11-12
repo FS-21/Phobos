@@ -1290,6 +1290,38 @@ namespace
 			spy.StartFrame);
 	}
 
+	// May this engineer take a tech another engineer of ours already goes for? Only when it stands
+	// on the tech's own ground and the other one does not, or is more than twice as far: the
+	// engineer on the spot captures, the far one picks something else. (An engineer landed next to
+	// two oil derricks was sent across the water because two engineers that never arrived had them.)
+	bool IsBetterPlacedForTech(HouseClass* pHouse, const NeuralKnownTech& tech, FootClass* pEngineer, int engineerZone)
+	{
+		if (engineerZone < 0 || std::find(tech.Zones.begin(), tech.Zones.end(), engineerZone) == tech.Zones.end())
+			return false;
+
+		for (auto const& capture : GetSpecOpsState(pHouse).Captures)
+		{
+			if (capture.TargetID != tech.ID || capture.EngineerID == pEngineer->UniqueID)
+				continue;
+
+			auto const pOther = FindOwnFootByID(pHouse, capture.EngineerID);
+
+			// Riding a transport: it is on its way and keeps the tech.
+			if (!pOther || pOther->InLimbo)
+				return false;
+
+			const int otherZone = ObjectZone(pOther, MovementZone::Normal);
+			const bool otherOnTheGround = std::find(tech.Zones.begin(), tech.Zones.end(), otherZone) != tech.Zones.end();
+			const double ownDist = pEngineer->GetMapCoords().DistanceFrom(tech.Cell);
+			const double otherDist = pOther->GetMapCoords().DistanceFrom(tech.Cell);
+
+			if (otherOnTheGround && otherDist <= 2.0 * ownDist + 10.0)
+				return false;
+		}
+
+		return true;
+	}
+
 	// Best known tech for this engineer: worth over distance, reachable, out of known enemy defense
 	// reach, not blocked by recent failures nor taken by another engineer. Neutral techs, and techs
 	// an enemy took (worth double when they pay: we gain the cash and the enemy loses it). A tech
@@ -1304,6 +1336,7 @@ namespace
 		auto& state = GetSpecOpsState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 		const int engineerZone = ObjectZone(pEngineer, MovementZone::Normal);
+		const bool ferryBlocked = IsFerryBlocked(pHouse, pEngineer->UniqueID);
 		const CellStruct from = pEngineer->GetMapCoords();
 		BuildingClass* pBest = nullptr;
 		int bestScore = 0;
@@ -1327,11 +1360,17 @@ namespace
 			}
 
 			if (!pTech || (pTech->OwnerIndex >= 0 && !enemyHeld) || now < pTech->BlockedUntilFrame
-				|| IsSpecOpsCaptureTarget(pHouse, pTech->ID, pEngineer->UniqueID)
+				|| (IsSpecOpsCaptureTarget(pHouse, pTech->ID, pEngineer->UniqueID)
+					&& !IsBetterPlacedForTech(pHouse, *pTech, pEngineer, engineerZone))
 				|| IsCellInKnownEnemyDefenseReach(pHouse, pTech->Cell, 2))
 			{
 				continue;
 			}
+
+			// No ferry for this engineer for a while (it gave up waiting for one): only what it can
+			// walk to.
+			if (ferryBlocked && std::find(pTech->Zones.begin(), pTech->Zones.end(), engineerZone) == pTech->Zones.end())
+				continue;
 
 			NeuralTechBreach breach;
 			const NeuralTechWall wall = GetTechWallState(pHouse, pBld, engineerZone, from, breach);
@@ -1625,6 +1664,23 @@ namespace
 
 		BuildingClass* pTarget = pCapture ? FindBuildingByID(pCapture->TargetID) : nullptr;
 
+		// An engineer that gave up waiting for a ferry cannot get to a tech across the water: that
+		// capture ends and it picks a tech it can walk to, instead of standing there with it.
+		if (pCapture && IsFerryBlocked(pHouse, pEngineer->UniqueID))
+		{
+			auto const pTech = FindKnownTech(state, pCapture->TargetID);
+			const int engineerZone = ObjectZone(pEngineer, MovementZone::Normal);
+
+			if (!pTech || std::find(pTech->Zones.begin(), pTech->Zones.end(), engineerZone) == pTech->Zones.end())
+			{
+				Debug::Log("[NeuralAI] House %d SpecOps: engineer %u without a ferry drops the tech at (%d,%d), frame %d.\n",
+					pHouse->ArrayIndex, pEngineer->UniqueID, pCapture->TargetCell.X, pCapture->TargetCell.Y, now);
+				state.Captures.erase(state.Captures.begin() + (pCapture - state.Captures.data()));
+				pCapture = nullptr;
+				pTarget = nullptr;
+			}
+		}
+
 		if (!pCapture)
 		{
 			if (!expertActive)
@@ -1636,6 +1692,18 @@ namespace
 
 			if (!pTarget)
 				return false;
+
+			// The tech of an engineer worse placed for it goes to this one.
+			for (size_t i = state.Captures.size(); i-- > 0;)
+			{
+				if (state.Captures[i].TargetID != pTarget->UniqueID)
+					continue;
+
+				Debug::Log("[NeuralAI] House %d SpecOps: engineer %u on the spot takes %s at (%d,%d) from engineer %u, frame %d.\n",
+					pHouse->ArrayIndex, pEngineer->UniqueID, pTarget->Type->ID, pTarget->GetMapCoords().X, pTarget->GetMapCoords().Y,
+					state.Captures[i].EngineerID, now);
+				state.Captures.erase(state.Captures.begin() + static_cast<std::ptrdiff_t>(i));
+			}
 
 			NeuralSpecOpsCapture capture;
 			capture.EngineerID = pEngineer->UniqueID;

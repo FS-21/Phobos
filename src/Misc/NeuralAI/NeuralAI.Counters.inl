@@ -35,6 +35,10 @@ namespace
 	constexpr int CounterThreatNowFrames = 1800;
 	constexpr int CounterThreatNowWeight = 3;
 	constexpr int CounterShareOtherExperts = 50;
+	// While the base is under attack what can wait (engineers, spies, a harvester beyond one per
+	// refinery, an expansion MCV, a deployer) loses this much production score: the answer to the
+	// threat is built first.
+	constexpr int ThreatFirstPenalty = 3000;
 
 	// Production queues compared separately: a counter is chosen among what one factory can build.
 	enum class NeuralCounterQueue : int
