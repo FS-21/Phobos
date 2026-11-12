@@ -14004,30 +14004,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Building!
 		if (ownTunnelCount == 1 && pHomeTunnel)
 		{
-			// TEMP diagnostic: why the second mouth is not dug (no such superweapon, not charged,
-			// or no cell found for it).
-			if (IsAITickWindow(1800, 20))
-			{
-				int tunnelSupers = 0;
-				int tunnelSupersReady = 0;
-				int tunnelSupersGranted = 0;
-
-				for (auto const pSuper : pHouse->Supers)
-				{
-					if (!pSuper || !pSuper->Type || !IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse))
-						continue;
-
-					tunnelSupers++;
-					tunnelSupersReady += pSuper->IsReady ? 1 : 0;
-					tunnelSupersGranted += pSuper->IsPresent ? 1 : 0;
-				}
-
-				Debug::Log("[NeuralAI] House %d Tunnel: one mouth %d leptons from home, delivery superweapons %d (granted %d, ready %d), "
-					"wave target %s, frame %d.\n",
-					pHouse->ArrayIndex, minHomeTunnelDist, tunnelSupers, tunnelSupersGranted, tunnelSupersReady,
-					pWaveTargetCell ? "yes" : "none", Unsorted::CurrentFrame);
-			}
-
 			for (auto const pSuper : pHouse->Supers)
 			{
 				if (!pSuper || !pSuper->IsReady || !pSuper->Type || !IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse))
