@@ -10849,8 +10849,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pTrip->UnderfilledSince = -1;
 		}
 
-		// Loading that stalls (units on the island that fit and never get aboard) does not hold the
-		// cargo for good: with no new passenger in FerryLoadStallFrames the load counts as complete.
+		// Loading that stalls (units on the island that fit and never get aboard) does not hold a
+		// real load for good: at half the room or more, with no new passenger in FerryLoadStallFrames
+		// the load counts as complete. Under half it keeps waiting, a lone vehicle is not worth the trip.
 		bool loadStalled = false;
 
 		if (pTrip && numPass >= 1 && onSafePickupShore)
@@ -10861,7 +10862,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pTrip->LastBoardFrame = Unsorted::CurrentFrame;
 			}
 
-			loadStalled = Unsorted::CurrentFrame - pTrip->LastBoardFrame >= FerryLoadStallFrames;
+			loadStalled = totalPassSize * 2 >= transRoom && Unsorted::CurrentFrame - pTrip->LastBoardFrame >= FerryLoadStallFrames;
 		}
 
 		const bool nothingMoreToLoad = numPass >= 1 && onSafePickupShore && (!canFitMoreOnPickupIsland || loadStalled) && !convoyHold
