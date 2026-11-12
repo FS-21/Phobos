@@ -346,7 +346,8 @@ namespace
 
 			occupied.push_back(here);
 
-			if (here.DistanceFrom(center) <= 6.0 && IsIdleBlocker(pHouse, pFoot))
+			// Never a slave of a slave miner: it works in a crowd around its miner by design.
+			if (here.DistanceFrom(center) <= 6.0 && !pFoot->SlaveOwner && IsIdleBlocker(pHouse, pFoot))
 				idle.push_back(pFoot);
 		};
 
@@ -854,6 +855,13 @@ namespace
 		auto check = [&](FootClass* pFoot, bool skip)
 		{
 			if (skip || !pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir())
+				return;
+
+			// The slaves of a slave miner walk between it and the ore in a crowd, and its slave manager
+			// drives them: they are neither stuck nor in a jam, and an order of ours takes them off
+			// their work (slaves were the unit most often "freed" from jams; a Yuri house sat at 5
+			// credits for half an hour with its miners deployed).
+			if (pFoot->SlaveOwner)
 				return;
 
 			auto const pType = pFoot->GetTechnoType();

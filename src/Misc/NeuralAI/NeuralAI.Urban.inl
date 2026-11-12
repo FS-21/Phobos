@@ -14,6 +14,17 @@ namespace
 	constexpr int UrbanCitySeats = 60;
 	// A tank for an empty tank bunker is built on purpose only with this much money left after it.
 	constexpr int GarrisonTrainingReserve = 600;
+	// Below this health a building is not garrisoned (it throws its soldiers out before it falls).
+	constexpr int UrbanGarrisonMinHealthPercent = 45;
+	// An engineer repairs a garrison held by us or an ally below this share of health. An empty
+	// building is repaired only when idle occupiers within UrbanRepairReachCells of it asked for it
+	// in the last UrbanRepairWantedFrames: they have no other building to take and only its damage
+	// keeps them out (user: never a repair for its own sake).
+	constexpr double UrbanRepairHeldBelow = 0.5;
+	constexpr int UrbanRepairReachCells = 40;
+	constexpr int UrbanRepairWantedFrames = 900;
+	// A spy or a vehicle thief is trained only with this many times its price in the bank.
+	constexpr int SpyLuxuryMoneyFactor = 2;
 	// Frames a soldier may spend on one capture order before it is called off, and frames a
 	// soldier whose orders failed is left out of the garrisons.
 	constexpr int UrbanCaptureOrderFrames = 600;
@@ -33,6 +44,9 @@ namespace
 		int SeenFrame { 0 };
 		// Value of holding it now (0: not worth it or unsafe), refreshed by every scan.
 		int Worth { 0 };
+		// The same with its health back: a building too damaged to take soldiers is worth an
+		// engineer only when we would garrison it afterwards.
+		int WorthIfRepaired { 0 };
 		int BlockedUntilFrame { 0 };
 		// Orders that did not get a soldier in (it was ordered there again soon after).
 		int Failures { 0 };
@@ -121,6 +135,10 @@ namespace
 		// search (with every tick from the start, 150 idle soldiers would repeat the same answer).
 		int NoBuildingFrame { -1 };
 		std::vector<int> NoBuildingZones {};
+		// The building idle occupiers would take if it were not too damaged, and when they last
+		// asked for it: the one an engineer may repair.
+		DWORD RepairWantedID { 0 };
+		int RepairWantedFrame { -100000 };
 	};
 
 	std::array<NeuralUrbanState, 32> UrbanStates {};
@@ -228,14 +246,14 @@ namespace
 	// stands (the front, up to 72 cells; a lone soldier walking to the middle of the map holds
 	// nothing). Fog-fair: enemy buildings from the known cache, enemy units in current sight only.
 	int RateUrbanBuilding(HouseClass* pHouse, NeuralKnownUrbanBuilding& known, const CellStruct& home,
-		int mainAttackSector, const CellStruct& nearestEnemyCell)
+		int mainAttackSector, const CellStruct& nearestEnemyCell, bool asIfRepaired = false)
 	{
 		known.ReachDist = 999;
 
 		if (known.OccupantOwner >= 0 && known.OccupantOwner != pHouse->ArrayIndex)
 			return 0;
 
-		if (known.HealthPercent < 45 || home == CellStruct::Empty)
+		if ((!asIfRepaired && known.HealthPercent < UrbanGarrisonMinHealthPercent) || home == CellStruct::Empty)
 			return 0;
 
 		const int homeDist = static_cast<int>(home.DistanceFrom(known.Cell));
@@ -695,6 +713,9 @@ namespace
 		for (auto& known : state.Buildings)
 		{
 			known.Worth = RateUrbanBuilding(pHouse, known, home, mainAttackSector, nearestEnemyCell);
+			known.WorthIfRepaired = known.HealthPercent < UrbanGarrisonMinHealthPercent
+				? RateUrbanBuilding(pHouse, known, home, mainAttackSector, nearestEnemyCell, true)
+				: known.Worth;
 
 			auto const pOccupantOwner = (known.OccupantOwner >= 0 && known.OccupantOwner < HouseClass::Array.Count)
 				? HouseClass::Array.GetItem(known.OccupantOwner)
@@ -1058,6 +1079,29 @@ namespace
 
 		if (!pBest)
 		{
+			// Soldiers ready for a garrison and no building to take: the best one within their reach
+			// that only its damage keeps them out of is the one an engineer repairs (user: never a
+			// repair for its own sake, only for a building we are about to man).
+			if (!overCap)
+			{
+				int bestRepairWorth = 0;
+
+				for (size_t i = 0; i < state.Buildings.size(); ++i)
+				{
+					auto const& known = state.Buildings[i];
+					auto const pBld = state.Live[i];
+
+					if (pBld && known.Worth <= 0 && known.WorthIfRepaired > bestRepairWorth && known.OccupantOwner < 0
+						&& known.HealthPercent < UrbanGarrisonMinHealthPercent && now >= known.BlockedUntilFrame
+						&& infCell.DistanceFrom(known.Cell) <= UrbanRepairReachCells && IsBuildingEnterableFromZone(pBld, infZone, moveZone))
+					{
+						bestRepairWorth = known.WorthIfRepaired;
+						state.RepairWantedID = known.ID;
+						state.RepairWantedFrame = now;
+					}
+				}
+			}
+
 			state.NoBuildingSinceReport++;
 			state.NoBuildingZones.push_back(infZone);
 			return false;

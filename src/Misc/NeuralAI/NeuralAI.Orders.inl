@@ -579,6 +579,14 @@ namespace
 				pDestCell = pReach;
 				pResolvedDest = pReach;
 			}
+			else if (IsOutOfNavalReach(pFoot, pDestCell->MapCoords, INT_MAX))
+			{
+				// A target in another body of water with none of ours near it: the ship can never get
+				// there (20 ships shut in a lake took 1022 such orders in one match, each dropped by the
+				// stuck watchdog 450 frames later and given again).
+				CountDecision(NeuralDecision::MoveOrderSkipped, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
+				return;
+			}
 
 			// A far naval order goes in hops of 25 cells along a sea route (NavalRouteHop); the owner
 			// logic sends it again once the ship is there. A far ground order likewise along a land route
