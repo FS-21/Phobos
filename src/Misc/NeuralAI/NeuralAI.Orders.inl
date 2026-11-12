@@ -231,6 +231,68 @@ namespace
 		return pFoot->LastMapCoords == pFoot->GetMapCoords();
 	}
 
+	// TEMP diagnostic: a transport the loader left parked to load (Guard or landing, no destination)
+	// that is found with other orders after a part of the AI tick: that part, or the engine between
+	// two ticks, moved it. Logged once per departure from the parking; the loader parks it again.
+	void TraceParkedFerries(int houseIndex, const char* part)
+	{
+		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
+
+		if (!pHouse)
+			return;
+
+		auto& parked = GetMacroState(pHouse).ParkedFerries;
+
+		if (parked.empty())
+			return;
+
+		static int traceLogSerial = -1;
+		static int traceLogCount = 0;
+
+		if (traceLogSerial != NeuralMatchSerial)
+		{
+			traceLogSerial = NeuralMatchSerial;
+			traceLogCount = 0;
+		}
+
+		for (auto it = parked.begin(); it != parked.end();)
+		{
+			UnitClass* const pUnit = it->second;
+
+			if (UnitClass::Array.FindItemIndex(pUnit) < 0 || pUnit->UniqueID != it->first || !pUnit->IsAlive || pUnit->InLimbo)
+			{
+				it = parked.erase(it);
+				continue;
+			}
+
+			const bool stillParked = (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Unload)
+				&& !pUnit->Destination;
+
+			if (stillParked)
+			{
+				++it;
+				continue;
+			}
+
+			if (traceLogCount++ < 80)
+			{
+				auto const pDestCell = abstract_cast<CellClass*>(pUnit->Destination);
+				auto const pDestObject = abstract_cast<ObjectClass*>(pUnit->Destination);
+				auto const pTargetObject = abstract_cast<ObjectClass*>(pUnit->Target);
+				Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: parked %s %u moved by %s: mission %d queued %d mega %d, dest %s (%d,%d), "
+					"target %s, pass %d, at (%d,%d).\n",
+					houseIndex, Unsorted::CurrentFrame, pUnit->Type->ID, pUnit->UniqueID, part, static_cast<int>(pUnit->CurrentMission),
+					static_cast<int>(pUnit->QueuedMission), static_cast<int>(pUnit->MegaMission),
+					pDestCell ? "cell" : (pDestObject && pDestObject->GetType() ? pDestObject->GetType()->ID : "none"),
+					pDestCell ? pDestCell->MapCoords.X : -1, pDestCell ? pDestCell->MapCoords.Y : -1,
+					pTargetObject && pTargetObject->GetType() ? pTargetObject->GetType()->ID : "none", pUnit->Passengers.NumPassengers,
+					pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y);
+			}
+
+			it = parked.erase(it);
+		}
+	}
+
 	bool CanFootDamageBuildings(const FootClass* pFoot)
 	{
 		if (!pFoot)

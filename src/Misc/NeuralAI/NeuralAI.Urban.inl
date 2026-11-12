@@ -12,6 +12,8 @@ namespace
 	// Seats the barracks are asked to fill at a time: a squad for the best positions, or a city.
 	constexpr int UrbanSquadSeats = 12;
 	constexpr int UrbanCitySeats = 60;
+	// Soldiers for the buildings are trained on purpose only with this much money left.
+	constexpr int GarrisonTrainingReserve = 600;
 	// Frames a soldier may spend on one capture order before it is called off, and frames a
 	// soldier whose orders failed is left out of the garrisons.
 	constexpr int UrbanCaptureOrderFrames = 600;

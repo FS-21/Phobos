@@ -10694,6 +10694,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// TEMP diagnostic: whatever the loader orders from here on is its own doing.
+		GetMacroState(pHouse).ParkedFerries.erase(pTrans->UniqueID);
+
 		const CellStruct transCoords = pTrans->GetMapCoords();
 		// The land around a parked transport, not the shore cell's own zone (see TransportLandZone).
 		const int transZone = TransportLandZone(transCoords, pTrans->OnBridge);
@@ -12024,6 +12027,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pTrans->ClearNavigationList();
 				pTrans->ForceMission(Mission::Guard);
 			}
+
+			// TEMP diagnostic: parked with something to load or loaded; who moves it next is logged.
+			if (pSingleActiveBoarder != nullptr || hasFerryQueue || numPass >= 1)
+				GetMacroState(pHouse).ParkedFerries[pTrans->UniqueID] = pTrans;
 
 			if (!pActiveIslandGoal && !enemyOnDisconnectedIsland && pIslandResourceGoalCell == nullptr
 				&& pIslandTechGoalCell == nullptr && pendingCrossIslandOrders.empty())
@@ -14115,6 +14122,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (bestTunnelCell != CellStruct::Empty)
 				{
+					// TEMP diagnostic: the second tunnel mouth is dug here.
+					Debug::Log("[NeuralAI] House %d Tunnel: %s fired at (%d,%d), score %d, home mouth %d leptons from home, frame %d.\n",
+						pHouse->ArrayIndex, pSuper->Type->ID, bestTunnelCell.X, bestTunnelCell.Y, bestTunnelCellScore, minHomeTunnelDist,
+						Unsorted::CurrentFrame);
 					pSuper->Launch(bestTunnelCell, false);
 					pSuper->Reset();
 

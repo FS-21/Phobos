@@ -758,6 +758,8 @@ namespace
 			int Tries { 0 };
 		};
 		std::unordered_map<DWORD, FerryLanding> FerryLandings {};
+		// TEMP diagnostic: transports the loader left parked to load (TraceParkedFerries).
+		std::unordered_map<DWORD, UnitClass*> ParkedFerries {};
 		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
 		// factories idle for thousands of frames, the AI picking the same type every tick): the pick
 		// of a queue that stays empty 900 frames with money and factories is banned 5400 frames.
@@ -1053,6 +1055,7 @@ namespace
 			this->FerryReserved.clear();
 			this->FerryBoardTurns.clear();
 			this->FerryLandings.clear();
+			this->ParkedFerries.clear();
 			this->ProductionBanUntil.clear();
 			this->ProductionPickIdx = { -1, -1, -1 };
 			this->ProductionPickSince = { 0, 0, 0 };

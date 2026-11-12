@@ -197,6 +197,7 @@ namespace
 		FerryTargetDropped,
 		FerryDoorCellMove,
 		FerryLandingRetried,
+		GarrisonTraining,
 		Count
 	};
 
@@ -223,7 +224,7 @@ namespace
 		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom", "stuckUnloadMoved", "capitalGroupLaunched", "capitalGroupRetreat", "submarineSonarAvoided", "depotEmergencySale", "veinholeAttack", "cliffOpened", "stealthRevealFired",
 		"stagingHoldTimedOut", "jamCleared", "jamYielded", "mouthCleared",
 		"hoverReleased", "groundRouteHop", "medicEscort", "garrisonSquad", "dryEconomySale", "ferryReserved", "productionPickBanned",
-		"ferryDoorRegistered", "ferryStrayLinkCut", "ferryTargetDropped", "ferryDoorCellMove", "ferryLandingRetried" };
+		"ferryDoorRegistered", "ferryStrayLinkCut", "ferryTargetDropped", "ferryDoorCellMove", "ferryLandingRetried", "garrisonTraining" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -790,6 +791,10 @@ namespace
 	}
 
 	// Times consecutive phases of one long function: Mark(next) closes the current phase.
+	// TEMP diagnostic (NeuralAI.Orders.inl): names the part of the AI tick that moved a transport
+	// the loader left parked to load.
+	void TraceParkedFerries(int houseIndex, const char* part);
+
 	struct NeuralPhaseClock
 	{
 		int HouseIndex;
@@ -803,6 +808,7 @@ namespace
 
 		void Mark(NeuralSection next)
 		{
+			TraceParkedFerries(this->HouseIndex, NeuralSectionNames[static_cast<size_t>(this->Current)]);
 			AddSectionTime(this->HouseIndex, this->Current, ElapsedMs(this->Start));
 			this->Current = next;
 			QueryPerformanceCounter(&this->Start);
@@ -810,6 +816,7 @@ namespace
 
 		~NeuralPhaseClock()
 		{
+			TraceParkedFerries(this->HouseIndex, NeuralSectionNames[static_cast<size_t>(this->Current)]);
 			AddSectionTime(this->HouseIndex, this->Current, ElapsedMs(this->Start));
 		}
 	};
