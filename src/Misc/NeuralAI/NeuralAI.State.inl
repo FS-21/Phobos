@@ -651,6 +651,8 @@ namespace
 		// Islands (movement zone -> frame until) where an expansion deployer found no room for its
 		// building: the island search skips them until then.
 		std::map<int, int> NoRoomIslandUntil;
+		// Deployers (unit -> frame since) standing on a new island with no site for their building.
+		std::unordered_map<DWORD, int> DeployerNoSiteSince;
 		// The enemy has no building left that counts and still has ships or submarines: until this
 		// frame the house builds and sends sonar ships and ships that hit under water.
 		int NavalRemnantUntil { -1 };
@@ -736,6 +738,8 @@ namespace
 		{
 			DWORD Boarder { 0 };
 			int NearSince { -1 };
+			// TEMP diagnostic: last frame its shut door was logged.
+			int DoorLogFrame { -1 };
 		};
 		std::unordered_map<DWORD, FerryBoardTurn> FerryBoardTurns {};
 		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
@@ -996,6 +1000,7 @@ namespace
 			this->BankQueueBusyTicks.fill(0);
 			this->EnemyAcrossWater = false;
 			this->NoRoomIslandUntil.clear();
+			this->DeployerNoSiteSince.clear();
 			this->NavalRemnantUntil = -1;
 			this->SubThreatUntil = -1;
 			this->DepotSaleUnit = 0;
@@ -1251,6 +1256,10 @@ namespace
 	constexpr int FerryBoardTurnFrames = 300;
 	constexpr double FerryBoardTurnCells = 6.0;
 	constexpr int FerryBoardFailedFrames = 2700;
+	// A deployer on a new island with no site for its building gives the island up after this long
+	// (something passing may only be in the way), and the island stays given up for NoRoomIslandFrames.
+	constexpr int DeployerNoSiteFrames = 450;
+	constexpr int NoRoomIslandFrames = 9000;
 
 	bool IsFerryReserved(const HouseClass* pHouse, DWORD uid)
 	{
@@ -1259,6 +1268,18 @@ namespace
 
 		return it != reserved.end() && Unsorted::CurrentFrame - it->second.Frame < FerryReservationFrames
 			&& Unsorted::CurrentFrame >= it->second.Frame;
+	}
+
+	// A transport with passengers reserved is loading and takes no other job meanwhile.
+	bool IsFerryLoading(const HouseClass* pHouse, DWORD transportUid)
+	{
+		for (auto const& entry : GetMacroState(pHouse).FerryReserved)
+		{
+			if (entry.second.Transport == transportUid)
+				return true;
+		}
+
+		return false;
 	}
 
 	// A unit that gave up waiting for a crossing or lost its boarding turn: no transport takes it for a while.

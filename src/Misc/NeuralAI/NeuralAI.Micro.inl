@@ -3303,8 +3303,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// foreign-faction MCV reaches our safe home base (<= 16 cells from
 			// homeCoords and !enemyNearMCV), deploy it safely inside our base
 			// perimeter so we can build its foreign tech tree!
+			// An island where this house found no room for a yard lately is not tried again: the MCV
+			// leaves it.
+			auto& mcvNoRoomIslands = GetMacroState(pHouse).NoRoomIslandUntil;
+			const bool mcvIslandHasNoRoom = mcvZone >= 0 && mcvNoRoomIslands.contains(mcvZone)
+				&& mcvNoRoomIslands.at(mcvZone) > Unsorted::CurrentFrame;
 			const bool landedOnNewIsland = (homeGroundZone >= 0 && mcvZone >= 0 && mcvZone != homeGroundZone
-				&& conYardsInMcvZone == 0 && hubsAndFactoriesInMcvZone < 2);
+				&& conYardsInMcvZone == 0 && hubsAndFactoriesInMcvZone < 2 && !mcvIslandHasNoRoom);
 			// Not slot-gated (see the stolen asset scan above).
 			if (homeCoords != CellStruct::Empty && !landedOnNewIsland && (enemyNearMCV || isForeignTechMCV))
 			{
@@ -3434,8 +3439,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool islandExpansionDue = conYardsInMcvZone >= 1 && pIslandResourceGoalCell != nullptr
 				&& mcvZone != resourceIslandZone;
 			const bool mustColonizeOtherIsland = (canFerryThisMCV && mcvZone >= 0
-				&& (!hasFreeLandFieldInMcvZone || islandExpansionDue)
-				&& (currentIslandAlreadyDeveloped || alreadyHasConYardOnThisIsland) && !isForeignTechMCV
+				&& (!hasFreeLandFieldInMcvZone || islandExpansionDue || mcvIslandHasNoRoom)
+				&& (currentIslandAlreadyDeveloped || alreadyHasConYardOnThisIsland || mcvIslandHasNoRoom) && !isForeignTechMCV
 				&& ((pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone)
 					|| alreadyHasConYardOnThisIsland));
 			const bool wantsMultiConYardSpeed = (pHouse->NumConYards >= 1 && !mustColonizeOtherIsland
@@ -3478,6 +3483,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, mcvCell.X, mcvCell.Y, mcvZone, static_cast<int>(pUnit->CurrentMission),
 					mustColonizeOtherIsland ? 1 : 0, hasFreeLandFieldInMcvZone ? 1 : 0, pIslandResourceGoalCell ? "yes" : "none",
 					resourceIslandZone, enemyNearMCV ? 1 : 0, ownsLiveMcvTransportNow ? 1 : 0, Unsorted::CurrentFrame);
+			}
+
+			// Stranded on an island without room and no other island to go to: back home.
+			if (mcvIslandHasNoRoom && !mustColonizeOtherIsland && conYardsInMcvZone == 0 && mcvZone != homeGroundZone
+				&& homeCoords != CellStruct::Empty)
+			{
+				if (!isMovingToDest || IsAITickWindow(300, 15))
+				{
+					if (auto const pHomeCell = MapClass::Instance.TryGetCellAt(homeCoords))
+						DispatchFootToTargetOrTransport(pUnit, pHomeCell, Mission::Move, false);
+				}
+
+				continue;
 			}
 
 			if (mustColonizeOtherIsland)
@@ -3565,8 +3583,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else if (!twinMcvNearby && (landedOnNewIsland || (!isMovingToDest && minAnchorDist >= requiredAnchorDist && !enemyNearMCV)))
 			{
+				auto& noSiteSince = GetMacroState(pHouse).DeployerNoSiteSince;
+
 				if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
 				{
+					noSiteSince.erase(pUnit->UniqueID);
 					OrderDeployerUnpack(pUnit);
 				}
 				else
@@ -3575,6 +3596,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						= FindDeployableFoundationNearCell(pHouse, pType->DeploysInto, mcvCell, mcvZone, pUnit);
 					if (deployCell != CellStruct::Empty)
 					{
+						noSiteSince.erase(pUnit->UniqueID);
+
 						if (!isMovingToDest || (IsAITickWindow(45, 15)))
 						{
 							if (auto const pClear = MapClass::Instance.TryGetCellAt(deployCell))
@@ -3582,6 +3605,28 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								pUnit->SetDestination(pClear, true);
 								pUnit->QueueMission(Mission::Move, true);
 							}
+						}
+					}
+					else if (landedOnNewIsland)
+					{
+						// No site for the yard anywhere on this island. Something passing may only be
+						// in the way, so the MCV gives it DeployerNoSiteFrames; after that the island
+						// search skips the island and the MCV asks for a transport to its next goal,
+						// or back home when there is none.
+						auto const [itSince, firstTime] = noSiteSince.try_emplace(pUnit->UniqueID, Unsorted::CurrentFrame);
+
+						if (!firstTime && Unsorted::CurrentFrame - itSince->second >= DeployerNoSiteFrames)
+						{
+							mcvNoRoomIslands[mcvZone] = Unsorted::CurrentFrame + NoRoomIslandFrames;
+							noSiteSince.erase(itSince);
+							CountDecision(NeuralDecision::DeployerIslandNoRoom, pHouse->ArrayIndex);
+							// TEMP diagnostic: the island an MCV gave up.
+							Debug::Log("[NeuralAI] House %d IslandExpansion MCV: %s %u found no site for its yard on island zone %d at (%d,%d), island given up, frame %d.\n",
+								pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, mcvZone, mcvCell.X, mcvCell.Y, Unsorted::CurrentFrame);
+						}
+						else
+						{
+							pUnit->Scatter(CoordStruct::Empty, true, false);
 						}
 					}
 					else
@@ -4270,7 +4315,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							{
 								// No foundation for this building anywhere near on this island: the
 								// island search skips it for 9000 frames and the deployer moves on.
-								noRoomIslands[nanoZone] = Unsorted::CurrentFrame + 9000;
+								noRoomIslands[nanoZone] = Unsorted::CurrentFrame + NoRoomIslandFrames;
 								CountDecision(NeuralDecision::DeployerIslandNoRoom, pHouse->ArrayIndex);
 							}
 						}
@@ -9606,8 +9651,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			const bool isExpMCV = (pUT->DeploysInto->ConstructionYard && (conYardsInUz >= 1 || hubsInUz >= 2));
-			const bool isExpOutpostOrRef = (!pUT->DeploysInto->ConstructionYard && hubsInUz >= 1
+			// A deployer on an island given up for lack of room waits there for a transport as well.
+			auto const& noRoomForPickup = GetMacroState(pHouse).NoRoomIslandUntil;
+			const bool strandedWithoutRoom = noRoomForPickup.contains(uz) && noRoomForPickup.at(uz) > Unsorted::CurrentFrame;
+			const bool isExpMCV = (pUT->DeploysInto->ConstructionYard && (conYardsInUz >= 1 || hubsInUz >= 2 || strandedWithoutRoom));
+			const bool isExpOutpostOrRef = (!pUT->DeploysInto->ConstructionYard && (hubsInUz >= 1 || strandedWithoutRoom)
 				&& (pOwnU == pExtraHomeSlaveMiner
 					|| (!pUT->Harvester && !pUT->ResourceGatherer
 						&& (pUT->DeploysInto->Refinery || pUT->DeploysInto->ResourceDestination
@@ -9730,6 +9778,60 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			readyCombatConvoyTransports++;
 	}
 
+	// A transport takes a passenger in only when it is at rest and the cells the engine has on
+	// record for both lie in one zone. A record left behind (transport halted at the shore before
+	// the centre of its cell, jumpjet landed) keeps the door shut for every passenger, so it is
+	// brought up to date. A passenger sent while the transport still glides to the centre of its
+	// cell, or is in the air, walks onto that very cell and the transport never arrives. True when
+	// the passenger may ask to load.
+	auto const openFerryDoor = [&](FootClass* pTransport, FootClass* pBoarder) -> bool
+	{
+		const FerryDoorZones doorBefore = GetFerryDoorZones(pTransport, pBoarder);
+		const bool atRest = !pTransport->Locomotor->Is_Moving();
+
+		if (doorBefore.Match() && atRest)
+			return true;
+
+		const bool transportBehind = pTransport->LastMapCoords != pTransport->GetMapCoords();
+		const bool boarderBehind = pBoarder->LastMapCoords != pBoarder->GetMapCoords();
+		const bool transportRegistered = RegisterStoppedFootCell(pTransport);
+		const bool boarderRegistered = !GetFerryDoorZones(pTransport, pBoarder).Match() && RegisterStoppedFootCell(pBoarder);
+		const FerryDoorZones doorAfter = GetFerryDoorZones(pTransport, pBoarder);
+
+		if (transportRegistered || boarderRegistered)
+			CountDecision(NeuralDecision::FerryDoorRegistered, pHouse->ArrayIndex);
+
+		// TEMP diagnostic: what kept the door shut and whether registering the cell opened it.
+		static int doorLogSerial = -1;
+		static int doorLogCount = 0;
+
+		if (doorLogSerial != NeuralMatchSerial)
+		{
+			doorLogSerial = NeuralMatchSerial;
+			doorLogCount = 0;
+		}
+
+		int& doorLogFrame = GetMacroState(pHouse).FerryBoardTurns[pTransport->UniqueID].DoorLogFrame;
+		const bool doorLogDue = doorLogFrame < 0 || Unsorted::CurrentFrame - doorLogFrame >= FerryBoardTurnFrames;
+
+		if ((transportRegistered || boarderRegistered || doorLogDue) && doorLogCount++ < 60)
+		{
+			doorLogFrame = Unsorted::CurrentFrame;
+			Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: door of %s %u shut to %s %u, zones %d and %d, last cells behind %d and %d, "
+				"transport height %d mission %d moving %d dest %d on %s; registered %d and %d, zones now %d and %d, land type %d, plain zones %d and %d.\n",
+				pHouse->ArrayIndex, Unsorted::CurrentFrame, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
+				pBoarder->GetTechnoType()->ID, pBoarder->UniqueID, doorBefore.Transport, doorBefore.Boarder,
+				transportBehind ? 1 : 0, boarderBehind ? 1 : 0, pTransport->GetHeight(), static_cast<int>(pTransport->CurrentMission),
+				pTransport->Locomotor->Is_Moving() ? 1 : 0, pTransport->Destination ? 1 : 0,
+				pTransport->GetCell()->LandType == LandType::Water ? "water" : "land",
+				transportRegistered ? 1 : 0, boarderRegistered ? 1 : 0, doorAfter.Transport, doorAfter.Boarder,
+				static_cast<int>(pTransport->GetCell()->LandType), ObjectZone(pTransport, MovementZone::Normal),
+				ObjectZone(pBoarder, MovementZone::Normal));
+		}
+
+		return doorAfter.Match() && atRest;
+	};
+
 	// Helper: Enforce strict 1-by-1 boarding on a transport (UnitClass or AircraftClass).
 	// Because TechnoClass/RadioClass only has 1 radio link slot for RequestLoading (0x0073781E),
 	// if multiple units are in Mission::Enter targeting the same transport simultaneously, they
@@ -9809,13 +9911,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Gather all of them first: a scattered unit may walk into the next cell and must not be revisited.
 		std::vector<FootClass*> adjacentFoots;
 
+		// Its own cell counts too: a unit standing where the transport still has to settle or land
+		// keeps it from arriving.
 		for (int dy = -1; dy <= 1; ++dy)
 		{
 			for (int dx = -1; dx <= 1; ++dx)
 			{
-				if (dx == 0 && dy == 0)
-					continue;
-
 				const CellStruct adjC {
 					static_cast<short>(trCoords.X + dx),
 					static_cast<short>(trCoords.Y + dy)
@@ -9848,10 +9949,72 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// every other passenger waiting behind it.
 		auto& macroTurns = GetMacroState(pHouse);
 		auto& turn = macroTurns.FerryBoardTurns[pTransport->UniqueID];
+		auto const endTurn = [&turn]()
+		{
+			turn.Boarder = 0;
+			turn.NearSince = -1;
+		};
+
+		// The transport has a single radio link. Left with a unit that is no longer boarding (called
+		// away to fight, sent elsewhere) it shuts every other passenger out.
+		if (auto const pLinked = abstract_cast<FootClass*>(pTransport->GetNthLink(0));
+			pLinked && pLinked != pChosenBoarder && pLinked->Owner == pHouse && !pLinked->InLimbo
+			&& pLinked->CurrentMission != Mission::Enter && pLinked->QueuedMission != Mission::Enter
+			&& !pLinked->IsTether && !pTransport->IsTether)
+		{
+			auto const pTransportUnit = abstract_cast<UnitClass*>(pTransport);
+			auto const pCarryState = pTransportUnit ? UnitExt::Fetch(pTransportUnit) : nullptr;
+
+			if (!pCarryState || (!pCarryState->CarryallCargo && pCarryState->CarryallState == JumpjetCarryallState::Idle))
+			{
+				// TEMP diagnostic: who held the link and what it was doing.
+				static int strayLogSerial = -1;
+				static int strayLogCount = 0;
+
+				if (strayLogSerial != NeuralMatchSerial)
+				{
+					strayLogSerial = NeuralMatchSerial;
+					strayLogCount = 0;
+				}
+
+				if (strayLogCount++ < 30)
+				{
+					Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: %s %u held the radio link of %s %u without boarding, mission %d, %d cells away.\n",
+						pHouse->ArrayIndex, Unsorted::CurrentFrame, pLinked->GetTechnoType()->ID, pLinked->UniqueID,
+						pTransport->GetTechnoType()->ID, pTransport->UniqueID, static_cast<int>(pLinked->CurrentMission),
+						static_cast<int>(pLinked->GetMapCoords().DistanceFrom(trCoords)));
+				}
+
+				pTransport->SendCommand(RadioCommand::NotifyUnlink, pLinked);
+				CountDecision(NeuralDecision::FerryStrayLinkCut, pHouse->ArrayIndex);
+
+				// Whatever took it away keeps it: asked to board again it would link, leave and
+				// shut the door once more, so no transport takes it for a while.
+				auto& strayMacro = GetMacroState(pHouse);
+				strayMacro.FerryReserved.erase(pLinked->UniqueID);
+				strayMacro.FerryBlockedUntil[pLinked->UniqueID] = Unsorted::CurrentFrame + FerryBoardFailedFrames;
+			}
+		}
+
+		// With the door shut every request to load only sends the transport towards the boarder, so
+		// the boarder lets go until the door opens. Aircraft answer a request to load in their own way.
+		if (pChosenBoarder && pTransport->WhatAmI() == AbstractType::Unit && !openFerryDoor(pTransport, pChosenBoarder))
+		{
+			if (pChosenBoarder->ContainsLink(pTransport))
+				pChosenBoarder->SendCommand(RadioCommand::NotifyUnlink, pTransport);
+
+			pChosenBoarder->SetArchiveTarget(nullptr);
+			pChosenBoarder->SetDestination(nullptr, true);
+			pChosenBoarder->ClearNavigationList();
+			pChosenBoarder->ForceMission(Mission::Guard);
+			endTurn();
+
+			return nullptr;
+		}
 
 		if (!pChosenBoarder || pChosenBoarder->GetMapCoords().DistanceFrom(trCoords) > FerryBoardTurnCells)
 		{
-			turn = {};
+			endTurn();
 			return pChosenBoarder;
 		}
 
@@ -9879,8 +10042,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			auto const pLinked = abstract_cast<FootClass*>(pTransport->GetNthLink(0));
 			auto const pBoarderDest = pChosenBoarder->Destination;
+			const FerryDoorZones lostDoor = GetFerryDoorZones(pTransport, pChosenBoarder);
 			Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: %s %u lost its boarding turn on %s %u after %d frames, %d cells away, mission %d queued %d "
-				"mega %d dest %s, boarding link %d, in the air %d, size %d of %d free, transport mission %d pass %d on %s linked to %s %u.\n",
+				"mega %d dest %s, boarding link %d, in the air %d, size %d of %d free, transport mission %d pass %d on %s linked to %s %u, "
+				"door zones %d and %d, last cells behind %d and %d, transport height %d moving %d dest %d tether %d and %d.\n",
 				pHouse->ArrayIndex, Unsorted::CurrentFrame, pChosenBoarder->GetTechnoType()->ID, pChosenBoarder->UniqueID,
 				pTransport->GetTechnoType()->ID, pTransport->UniqueID, Unsorted::CurrentFrame - turn.NearSince,
 				static_cast<int>(pChosenBoarder->GetMapCoords().DistanceFrom(trCoords)), static_cast<int>(pChosenBoarder->CurrentMission),
@@ -9889,7 +10054,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pChosenBoarder->IsInAir() ? 1 : 0, static_cast<int>(pChosenBoarder->GetTechnoType()->Size),
 				pTransport->GetTechnoType()->Passengers - pTransport->Passengers.GetTotalSize(), static_cast<int>(pTransport->CurrentMission),
 				pTransport->Passengers.NumPassengers, pTransport->GetCell()->LandType == LandType::Water ? "water" : "land",
-				pLinked ? pLinked->GetTechnoType()->ID : "nobody", pLinked ? pLinked->UniqueID : 0u);
+				pLinked ? pLinked->GetTechnoType()->ID : "nobody", pLinked ? pLinked->UniqueID : 0u,
+				lostDoor.Transport, lostDoor.Boarder, pTransport->LastMapCoords != trCoords ? 1 : 0,
+				pChosenBoarder->LastMapCoords != pChosenBoarder->GetMapCoords() ? 1 : 0, pTransport->GetHeight(),
+				pTransport->Locomotor->Is_Moving() ? 1 : 0, pTransport->Destination ? 1 : 0, pTransport->IsTether ? 1 : 0,
+				pChosenBoarder->IsTether ? 1 : 0);
 		}
 
 		if (pChosenBoarder->ContainsLink(pTransport))
@@ -9901,9 +10070,59 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		pChosenBoarder->ForceMission(Mission::Guard);
 		macroTurns.FerryReserved.erase(pChosenBoarder->UniqueID);
 		macroTurns.FerryBlockedUntil[pChosenBoarder->UniqueID] = Unsorted::CurrentFrame + FerryBoardFailedFrames;
-		turn = {};
+		endTurn();
 
 		return nullptr;
+	};
+
+	// Passengers cannot step onto every cell a transport stands on: where nothing on foot, tracks
+	// or wheels crosses the beach, the engine refuses to load there and sends the transport
+	// towards the passenger. The transport moves on to the nearest free cell of the island that
+	// its passengers can reach; true while it is on its way there.
+	auto const moveToBoardableCell = [&](UnitClass* pTransport, const CellStruct& from, int landZone) -> bool
+	{
+		if (MapClass::Instance.GetMovementZoneType(from, MovementZone::Normal, false) == landZone)
+			return false;
+
+		constexpr int doorSearchCells = 4;
+		CellClass* pDoorCell = nullptr;
+		double doorDist = 999999.0;
+
+		for (int dy = -doorSearchCells; dy <= doorSearchCells; ++dy)
+		{
+			for (int dx = -doorSearchCells; dx <= doorSearchCells; ++dx)
+			{
+				const CellStruct c { static_cast<short>(from.X + dx), static_cast<short>(from.Y + dy) };
+				auto const pC = MapClass::Instance.TryGetCellAt(c);
+
+				if (!pC || pC->LandType == LandType::Water || pC->GetBuilding()
+					|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != landZone
+					|| !pC->IsClearToMove(pTransport->Type->SpeedType, false, false, -1, pTransport->Type->MovementZone, -1, false))
+				{
+					continue;
+				}
+
+				const double d = c.DistanceFrom(from);
+
+				if (d < doorDist)
+				{
+					doorDist = d;
+					pDoorCell = pC;
+				}
+			}
+		}
+
+		if (!pDoorCell)
+			return false;
+
+		if (pTransport->Destination != pDoorCell || pTransport->CurrentMission != Mission::Move)
+		{
+			pTransport->SetDestination(pDoorCell, true);
+			pTransport->QueueMission(Mission::Move, true);
+			CountDecision(NeuralDecision::FerryDoorCellMove, pHouse->ArrayIndex);
+		}
+
+		return true;
 	};
 
 	// A passenger a transport may reserve: it needs one to cross water and no transport gave up on it lately.
@@ -9986,7 +10205,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						auto const pTransDest = pTransportFoot->Destination;
 						Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: %s %u reserved by %s %u expired, %d cells away, passenger mission %d dest %s, "
 							"transport mission %d mega %d dest (%d,%d) at (%d,%d) pass %d, enter orders %d, walk orders %d, queue seen %d frames ago, "
-							"zones %d and %d, transport height %d, boarding link %d, passenger queued %d mega %d.\n",
+							"zones %d and %d, transport height %d, boarding link %d, passenger queued %d mega %d, transport linked to %s, door zones %d and %d.\n",
 							pHouse->ArrayIndex, nowFrame, pPassenger->GetTechnoType()->ID, pPassenger->UniqueID, pTransportFoot->GetTechnoType()->ID,
 							pTransportFoot->UniqueID, static_cast<int>(pPassenger->GetMapCoords().DistanceFrom(pTransportFoot->GetMapCoords())),
 							static_cast<int>(pPassenger->CurrentMission), pPassenger->Destination == pTransportFoot ? "transport" : (pPassenger->Destination ? "other" : "none"),
@@ -9996,7 +10215,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							it->second.EnterOrders, it->second.WalkOrders, it->second.QueueFrame >= 0 ? nowFrame - it->second.QueueFrame : -1,
 							ObjectZone(pPassenger, MovementZone::Normal), ObjectZone(pTransportFoot, MovementZone::Normal),
 							pTransportFoot->GetHeight(), pPassenger->ContainsLink(pTransportFoot) ? 1 : 0,
-							static_cast<int>(pPassenger->QueuedMission), static_cast<int>(pPassenger->MegaMission));
+							static_cast<int>(pPassenger->QueuedMission), static_cast<int>(pPassenger->MegaMission),
+								pTransportFoot->GetNthLink(0) ? pTransportFoot->GetNthLink(0)->GetTechnoType()->ID : "nobody",
+								GetFerryDoorZones(pTransportFoot, pPassenger).Transport, GetFerryDoorZones(pTransportFoot, pPassenger).Boarder);
 					}
 				}
 
@@ -11405,6 +11626,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (onDeployerLand)
 				{
+					if (moveToBoardableCell(pTrans, transCoords, transZone))
+						continue;
+
 					// Stay 100% still on the land spot where the transport is parked!
 					if (pTrans->CurrentMission != Mission::Guard || pTrans->Destination != nullptr)
 					{
@@ -11413,8 +11637,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						pTrans->ForceMission(Mission::Guard);
 					}
 
-					if (pSingleActiveBoarder == nullptr || pSingleActiveBoarder == pHomeExpansionDeployer)
+					if ((pSingleActiveBoarder == nullptr || pSingleActiveBoarder == pHomeExpansionDeployer)
+						&& openFerryDoor(pTrans, pHomeExpansionDeployer))
+					{
 						OrderFootToEnter(pHomeExpansionDeployer, pTrans);
+					}
 
 					continue;
 				}
@@ -11446,6 +11673,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (onEngLand)
 				{
+					if (moveToBoardableCell(pTrans, transCoords, transZone))
+						continue;
+
 					if (pTrans->CurrentMission != Mission::Guard || pTrans->Destination != nullptr)
 					{
 						pTrans->SetDestination(nullptr, true);
@@ -11453,7 +11683,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						pTrans->ForceMission(Mission::Guard);
 					}
 
-					if (pSingleActiveBoarder == nullptr || pSingleActiveBoarder == pHomeIslandEngineer)
+					if ((pSingleActiveBoarder == nullptr || pSingleActiveBoarder == pHomeIslandEngineer)
+						&& openFerryDoor(pTrans, pHomeIslandEngineer))
 					{
 						OrderFootToEnter(pHomeIslandEngineer, pTrans);
 						pSingleActiveBoarder = pHomeIslandEngineer;
@@ -11687,6 +11918,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// 2) Send units strictly ONE BY ONE (only when pSingleActiveBoarder == nullptr)
 			//    so the single radio link (0x0073781E) is never stolen and no jamming occurs!
 			// =========================================================================
+			if (moveToBoardableCell(pTrans, transCoords, transZone))
+				continue;
+
+			// An armed transport with a target stays in the air to shoot (HoverAttack) and nobody can
+			// board it: with passengers to take it drops the target.
+			if (pTrans->Target && (pSingleActiveBoarder != nullptr || hasFerryQueue))
+			{
+				pTrans->SetTarget(nullptr);
+				CountDecision(NeuralDecision::FerryTargetDropped, pHouse->ArrayIndex);
+			}
+
 			if ((pTrans->Type->MovementZone == MovementZone::Fly || pTrans->Type->JumpJet) && pTrans->GetHeight() > 0
 				&& pTrans->Destination == nullptr && pTransCell && pTransCell->LandType != LandType::Water
 				&& !pTransCell->GetBuilding())
@@ -11878,9 +12120,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 
-				pSingleActiveBoarder = pNearest;
-				OrderFootToEnter(pNearest, pTrans);
-				GetMacroState(pHouse).FerryReserved[pNearest->UniqueID].EnterOrders++;
+				if (openFerryDoor(pTrans, pNearest))
+				{
+					pSingleActiveBoarder = pNearest;
+					OrderFootToEnter(pNearest, pTrans);
+					GetMacroState(pHouse).FerryReserved[pNearest->UniqueID].EnterOrders++;
+				}
 			}
 
 			// The others walk up and wait FerryWaitCells away.
