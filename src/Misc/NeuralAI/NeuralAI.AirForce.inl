@@ -11,6 +11,7 @@ namespace
 	{
 		DWORD TargetID { 0 };
 		int Frame { 0 };
+		CellStruct TargetCell { CellStruct::Empty };
 	};
 
 	struct NeuralAirForceState
@@ -36,6 +37,8 @@ namespace
 		CellStruct FrontCell { CellStruct::Empty };
 		// Aircraft UniqueID -> the strike it flies for a wing. Key access only.
 		std::unordered_map<DWORD, NeuralAirStrikeOrder> Orders {};
+		// Aircraft UniqueID -> the building it last went for alone, outside a wing. Key access only.
+		std::unordered_map<DWORD, NeuralAirStrikeOrder> SoloStrikes {};
 		// Aircraft fielded this match, by UniqueID (sorted: the lost count never depends on order).
 		std::map<DWORD, int> Fielded {};
 		int WingsLaunched { 0 };
@@ -47,6 +50,10 @@ namespace
 
 	// How long a wing keeps flying (and rearming for) the same strike.
 	constexpr int AirStrikeOrderFrames = 4500;
+	// A lone strike is what an aircraft was doing when it is lost within this long of the order.
+	constexpr int AirSoloStrikeLossFrames = 1800;
+	// A lone strike needs this much of the aircraft's strength, like a wing's.
+	constexpr double AirSoloStrikeMinHealth = 0.5;
 
 	NeuralAirForceState& GetAirForceState(const HouseClass* pHouse)
 	{
@@ -352,8 +359,42 @@ namespace
 
 			CountDecision(NeuralDecision::AircraftLost, pHouse->ArrayIndex);
 			state.RecentLosses += 100;
+
+			// What it was striking when it was lost: the target is marked dangerous as well as the cell
+			// where the aircraft fell, which is often farther from the target than the reach the danger
+			// memory is read with (the next aircraft would go for the same building).
+			auto const itWing = state.Orders.find(it->first);
+			auto const itSolo = state.SoloStrikes.find(it->first);
+			const NeuralAirStrikeOrder* pOrder = nullptr;
+			const char* kind = "no";
+
+			if (itWing != state.Orders.end())
+			{
+				pOrder = &itWing->second;
+				kind = "a wing";
+			}
+			else if (itSolo != state.SoloStrikes.end() && now >= itSolo->second.Frame && now - itSolo->second.Frame <= AirSoloStrikeLossFrames)
+			{
+				pOrder = &itSolo->second;
+				kind = "a lone";
+			}
+
+			if (pOrder && pOrder->TargetCell != CellStruct::Empty)
+				GetMacroState(pHouse).AirDangerSpots.emplace_back(pOrder->TargetCell, now);
+
+			auto const pLostType = AircraftTypeClass::Array.GetItemOrDefault(it->second);
+			Debug::Log("[NeuralAI] House %d AirForce: lost %s %u on %s strike, target at (%d,%d), frame %d.\n", pHouse->ArrayIndex,
+				pLostType ? pLostType->ID : "?", it->first, kind, pOrder ? pOrder->TargetCell.X : -1, pOrder ? pOrder->TargetCell.Y : -1, now);
+
 			state.Orders.erase(it->first);
+			state.SoloStrikes.erase(it->first);
 			it = state.Fielded.erase(it);
+		}
+
+		if (state.SoloStrikes.size() > 256)
+		{
+			std::erase_if(state.SoloStrikes, [now](const auto& entry)
+				{ return now < entry.second.Frame || now - entry.second.Frame > AirSoloStrikeLossFrames; });
 		}
 
 		if (pHouse->NumAirpads > 0)
@@ -523,6 +564,28 @@ namespace
 		return true;
 	}
 
+	// A lone aircraft's strike on a building (any expert in charge): flown along the safe lane like a
+	// wing's, and remembered so that a loss on it marks the target. Lone strikes are most of what the
+	// air force flies (2155 against 27 wing sorties over 19 houses, 72 of 111 aircraft lost).
+	void FlySoloAirStrike(HouseClass* pHouse, AircraftClass* pAir, BuildingClass* pTarget)
+	{
+		GetAirForceState(pHouse).SoloStrikes[pAir->UniqueID]
+			= NeuralAirStrikeOrder { pTarget->UniqueID, Unsorted::CurrentFrame, pTarget->GetMapCoords() };
+
+		auto const pTargetCell = pTarget->GetCell();
+		auto const pHop = GetSafeAirHop(pHouse, pAir, pTargetCell);
+
+		if (!pHop || pHop == pTargetCell)
+		{
+			pAir->SetTarget(pTarget);
+			pAir->QueueMission(Mission::Attack, true);
+		}
+		else
+		{
+			IssueMoveOrder(pAir, pHop, 3.0);
+		}
+	}
+
 	// Strike wings (Expert 8 in charge): idle strike aircraft with a full load and at least half
 	// their strength wait until up to three of them are ready, then fly together at the best known
 	// target their number can take (one point of anti-air risk per aircraft beyond the first). A
@@ -653,7 +716,7 @@ namespace
 
 			for (auto const pMember : wing)
 			{
-				state.Orders[pMember->UniqueID] = NeuralAirStrikeOrder { pTarget->UniqueID, Unsorted::CurrentFrame };
+				state.Orders[pMember->UniqueID] = NeuralAirStrikeOrder { pTarget->UniqueID, Unsorted::CurrentFrame, targetCell };
 				CountDecision(NeuralDecision::AirWingSortie, pHouse->ArrayIndex);
 				ContinueAirStrike(pHouse, pMember);
 			}
