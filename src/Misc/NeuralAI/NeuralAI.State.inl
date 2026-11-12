@@ -758,8 +758,15 @@ namespace
 			int Tries { 0 };
 		};
 		std::unordered_map<DWORD, FerryLanding> FerryLandings {};
-		// TEMP diagnostic: transports the loader left parked to load (TraceParkedFerries).
-		std::unordered_map<DWORD, UnitClass*> ParkedFerries {};
+		// Transports the loader left parked with something to load or cargo aboard, and when:
+		// nobody else gives them orders meanwhile (IsFerryParkedToLoad). TraceParkedFerries (TEMP
+		// diagnostic) names whoever moved one all the same.
+		struct ParkedFerry
+		{
+			UnitClass* Unit { nullptr };
+			int Frame { -1 };
+		};
+		std::unordered_map<DWORD, ParkedFerry> ParkedFerries {};
 		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
 		// factories idle for thousands of frames, the AI picking the same type every tick): the pick
 		// of a queue that stays empty 900 frames with money and factories is banned 5400 frames.
@@ -1281,6 +1288,9 @@ namespace
 	// ring of cells farther each time up to FerryLandingMaxRing.
 	constexpr int FerryLandingFrames = 300;
 	constexpr int FerryLandingMaxRing = 5;
+	// A transport counts as parked to load for this long after the loader last left it so (a
+	// transport the loader stops handling is free again).
+	constexpr int FerryParkedFrames = 300;
 	// A deployer on a new island with no site for its building gives the island up after this long
 	// (something passing may only be in the way), and the island stays given up for NoRoomIslandFrames.
 	constexpr int DeployerNoSiteFrames = 450;
@@ -1305,6 +1315,18 @@ namespace
 		}
 
 		return false;
+	}
+
+	// A transport the loader left parked to load lately. The combat micro and the waves took it for
+	// a combat unit (armed or not) and sent it off on attack-moves and strikes while its passengers
+	// walked up: it takes its orders from the loader alone.
+	bool IsFerryParkedToLoad(const HouseClass* pHouse, DWORD uid)
+	{
+		auto const& parked = GetMacroState(pHouse).ParkedFerries;
+		auto const it = parked.find(uid);
+
+		return it != parked.end() && Unsorted::CurrentFrame - it->second.Frame <= FerryParkedFrames
+			&& Unsorted::CurrentFrame >= it->second.Frame;
 	}
 
 	// A unit that gave up waiting for a crossing or lost its boarding turn: no transport takes it for a while.

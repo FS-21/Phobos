@@ -257,7 +257,7 @@ namespace
 
 		for (auto it = parked.begin(); it != parked.end();)
 		{
-			UnitClass* const pUnit = it->second;
+			UnitClass* const pUnit = it->second.Unit;
 
 			if (UnitClass::Array.FindItemIndex(pUnit) < 0 || pUnit->UniqueID != it->first || !pUnit->IsAlive || pUnit->InLimbo)
 			{
@@ -333,6 +333,10 @@ namespace
 	void OrderFootToAttackMove(FootClass* pFoot, AbstractClass* pDest)
 	{
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
+			return;
+
+		// A transport parked to load stays where its passengers go.
+		if (pFoot->Owner && IsFerryParkedToLoad(pFoot->Owner, pFoot->UniqueID))
 			return;
 
 		AbstractClass* pResolvedDest = pDest;

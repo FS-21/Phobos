@@ -2824,6 +2824,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (IsSneakStrikeActive(pHouse, pUnit->UniqueID))
 			continue;
 
+		// A transport parked to load takes its orders from the transport loader.
+		if (IsFerryParkedToLoad(pHouse, pUnit->UniqueID))
+			continue;
+
 		if (pUnit->HasAnyLink())
 		{
 			if (auto const pLinkedBld = abstract_cast<BuildingClass*>(pUnit->GetNthLink(0)))
@@ -10694,7 +10698,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// TEMP diagnostic: whatever the loader orders from here on is its own doing.
+		// Whatever the loader orders from here on is its own doing.
 		GetMacroState(pHouse).ParkedFerries.erase(pTrans->UniqueID);
 
 		const CellStruct transCoords = pTrans->GetMapCoords();
@@ -12028,9 +12032,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pTrans->ForceMission(Mission::Guard);
 			}
 
-			// TEMP diagnostic: parked with something to load or loaded; who moves it next is logged.
+			// Parked with something to load or loaded: nobody else orders it about, and whoever
+			// moves it all the same is logged.
 			if (pSingleActiveBoarder != nullptr || hasFerryQueue || numPass >= 1)
-				GetMacroState(pHouse).ParkedFerries[pTrans->UniqueID] = pTrans;
+				GetMacroState(pHouse).ParkedFerries[pTrans->UniqueID] = { pTrans, Unsorted::CurrentFrame };
 
 			if (!pActiveIslandGoal && !enemyOnDisconnectedIsland && pIslandResourceGoalCell == nullptr
 				&& pIslandTechGoalCell == nullptr && pendingCrossIslandOrders.empty())
