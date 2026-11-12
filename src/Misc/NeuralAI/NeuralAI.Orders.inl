@@ -507,9 +507,19 @@ namespace
 					longestGroundRange = std::max(longestGroundRange, pW->Range);
 			}
 
+			// Only from near its target, and never for a unit that already stands held with it: an attack
+			// order on a building across the map leaves the unit where the engine path finder gives up,
+			// still on its Attack mission, so nothing takes it for idle and nothing moves it (match #8533,
+			// No Rest for the Wicked: howitzers and V3 launchers standing in the three-cell necks of the
+			// bridges, both armies shut in behind them). From afar it travels like the rest of the wave
+			// (attack-move, route legs when held).
+			const bool nearEnough = pEnemyBld
+				&& pFoot->DistanceFrom(pEnemyBld) <= longestGroundRange + LongRangeDirectAttackCells * Unsorted::LeptonsPerCell;
+			const bool heldWithIt = pFoot->Owner && IsFootHeldStill(pFoot->Owner, pFoot, LongRangeHeldFrames);
+
 			if (pEnemyBld && pEnemyBld->IsAlive && !pEnemyBld->InLimbo && pEnemyBld->Owner && pFoot->Owner
 				&& pEnemyBld->Owner != pFoot->Owner && !pFoot->Owner->IsAlliedWith(pEnemyBld->Owner)
-				&& longestGroundRange >= 8 * Unsorted::LeptonsPerCell
+				&& longestGroundRange >= 8 * Unsorted::LeptonsPerCell && nearEnough && !heldWithIt
 				&& !IsOutOfNavalReach(pFoot, pEnemyBld->GetMapCoords(), longestGroundRange))
 			{
 				if (pFoot->Target != pEnemyBld)
@@ -683,12 +693,38 @@ namespace
 					|| pFoot->HaveAttackMoveTarget);
 			const AbstractClass* pNewMegaTarget = (pResolvedDest->WhatAmI() == AbstractType::Cell) ? nullptr : pResolvedDest;
 
-			if (stillAttackMoving && pOldMegaCell && pNewMegaCell && pFoot->MegaTarget == pNewMegaTarget
-				&& pOldMegaCell->MapCoords.DistanceFrom(pNewMegaCell->MapCoords) <= 3.0)
+			const bool sameOrder = pFoot->MegaMission == Mission::AttackMove && pOldMegaCell && pNewMegaCell
+				&& pFoot->MegaTarget == pNewMegaTarget && pOldMegaCell->MapCoords.DistanceFrom(pNewMegaCell->MapCoords) <= 3.0;
+
+			if (stillAttackMoving && sameOrder)
 			{
 				CountDecision(NeuralDecision::MoveOrderSkipped, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
 				return;
 			}
+
+			// The engine left it waiting with that same order pending (it found no path, or the way is
+			// blocked). Given again every AI tick the order makes the engine search the same path every
+			// time and the unit shuffle in place (match #8533: 448000 orders for one house, 1.4 million
+			// failed path searches), so it is given again only every AttackMoveRetryFrames. Key access only.
+			static std::unordered_map<DWORD, int> lastIssued;
+			const int nowFrame = Unsorted::CurrentFrame;
+
+			if (lastIssued.size() > 4096)
+			{
+				std::erase_if(lastIssued, [nowFrame](const auto& entry)
+					{ return nowFrame < entry.second || nowFrame - entry.second >= AttackMoveRetryFrames; });
+			}
+
+			auto const itIssued = lastIssued.find(pFoot->UniqueID);
+
+			if (sameOrder && itIssued != lastIssued.end() && nowFrame >= itIssued->second
+				&& nowFrame - itIssued->second < AttackMoveRetryFrames)
+			{
+				CountDecision(NeuralDecision::MoveOrderSkipped, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
+				return;
+			}
+
+			lastIssued[pFoot->UniqueID] = nowFrame;
 		}
 
 		CountDecision(NeuralDecision::MoveOrderIssued, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);

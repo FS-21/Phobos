@@ -537,6 +537,7 @@ namespace
 			int MatchSerial;
 			int Frame;
 			std::vector<CellStruct> Cells; // start -> target
+			std::vector<uint8_t> OnDeck; // per route cell: on the deck of a high bridge
 		};
 
 		static std::unordered_map<uint64_t, GroundRoute> routes;
@@ -593,56 +594,91 @@ namespace
 			constexpr int DirY[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
 			// Per cell tables of one search instead of hash maps (a search of 12000 cells took 10 to 30 ms
 			// with them): the cell each one was reached from, and whether the unit can stand on it.
+			// A cell has two places to stand on: its ground, and the deck of a high bridge over it. A
+			// search over the ground alone never leaves an island joined to the rest by high bridges
+			// (match #8533, No Rest for the Wicked, 16 of them: no route at all for either army).
 			constexpr int GridSide = 512;
-			static std::vector<uint32_t> cameFrom(GridSide * GridSide);
-			static std::vector<uint8_t> standable(GridSide * GridSide);
+			constexpr size_t GridCells = static_cast<size_t>(GridSide) * GridSide;
+			static std::vector<uint32_t> cameFrom(GridCells * 2);
+			static std::vector<uint8_t> standable(GridCells * 2);
 			std::fill(cameFrom.begin(), cameFrom.end(), 0u);
 			std::fill(standable.begin(), standable.end(), static_cast<uint8_t>(0));
+
+			struct RouteNode
+			{
+				CellStruct Cell;
+				bool Deck;
+			};
+
 			auto const onGrid = [](const CellStruct& c) { return c.X >= 0 && c.Y >= 0 && c.X < GridSide && c.Y < GridSide; };
-			auto const slot = [](const CellStruct& c) { return static_cast<size_t>(c.Y) * GridSide + static_cast<size_t>(c.X); };
+			auto const slot = [](const RouteNode& n)
+			{ return (n.Deck ? GridCells : 0) + static_cast<size_t>(n.Cell.Y) * GridSide + static_cast<size_t>(n.Cell.X); };
 
 			if (!onGrid(from))
 				return nullptr;
 
-			// A cell the unit can stand on: in its zone and clear for its speed type (other units ignored).
-			auto const inZone = [&](const CellStruct& c)
+			// A place the unit can stand on. Ground: in its zone and clear for its speed type (other units
+			// ignored). Deck: a standing high bridge whose deck is in its zone (ships stay on the water).
+			// Buildings found on ground of the zone are kept: when no route is found they are its walls.
+			std::vector<BuildingClass*> walls;
+
+			auto const canStand = [&](const RouteNode& n)
 			{
-				if (!onGrid(c))
+				if (!onGrid(n.Cell))
 					return false;
 
-				uint8_t& known = standable[slot(c)];
+				uint8_t& known = standable[slot(n)];
 
 				if (known == 0)
 				{
-					auto const pCell = MapClass::Instance.CoordinatesLegal(c) && MapClass::Instance.GetMovementZoneType(c, mz, false) == zone
-						? MapClass::Instance.TryGetCellAt(c) : nullptr;
-					const bool clear = pCell && pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false)
-						&& (!avoidResources || pCell->GetContainedTiberiumIndex() < 0 || c.DistanceFrom(from) <= 2.5);
+					auto const pCell = MapClass::Instance.CoordinatesLegal(n.Cell) ? MapClass::Instance.TryGetCellAt(n.Cell) : nullptr;
+					bool clear = false;
+
+					if (pCell && n.Deck)
+					{
+						clear = !naval && pCell->ContainsBridge() && MapClass::Instance.GetMovementZoneType(n.Cell, mz, true) == zone;
+					}
+					else if (pCell && MapClass::Instance.GetMovementZoneType(n.Cell, mz, false) == zone)
+					{
+						clear = pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false)
+							&& (!avoidResources || pCell->GetContainedTiberiumIndex() < 0 || n.Cell.DistanceFrom(from) <= 2.5);
+
+						if (!clear && walls.size() < RouteWallsKept)
+						{
+							auto const pWall = pCell->GetBuilding();
+
+							if (pWall && std::find(walls.begin(), walls.end(), pWall) == walls.end())
+								walls.push_back(pWall);
+						}
+					}
+
 					known = clear ? 1 : 2;
 				}
 
 				return known == 1;
 			};
 
-			// One step between two such cells, as the engine path finder allows it (FootClass::Can_Reach):
-			// the same height level, or one level apart with the lower cell a slope (SlopeIndex != 0; a
-			// slope cell rises from its own level to the next one).
+			// One step between two such places, as the engine path finder allows it (FootClass::Can_Reach):
+			// the same height level, or one level apart with the lower one a ground slope (SlopeIndex != 0;
+			// a slope cell rises from its own level to the next one). A deck stands CellClass::BridgeLevels
+			// over its cell, level with the ground at both of its ends: that is where a unit gets on and
+			// off it, and ground under a bridge never links to the deck above.
 			// The zone map links any two cells less than 2 levels apart, so a flat step of one level
 			// shares the zone although no unit can climb it (Polar Knot: cliff and ramp tiles of tile sets
 			// missing from the theater load as flat clear cells).
-			auto const canStep = [naval](const CellStruct& a, const CellStruct& b)
+			auto const canStep = [naval](const RouteNode& a, const RouteNode& b)
 			{
 				if (naval)
 					return true;
 
-				auto const pA = MapClass::Instance.TryGetCellAt(a);
-				auto const pB = MapClass::Instance.TryGetCellAt(b);
+				auto const pA = MapClass::Instance.TryGetCellAt(a.Cell);
+				auto const pB = MapClass::Instance.TryGetCellAt(b.Cell);
 
 				if (!pA || !pB)
 					return false;
 
-				const int levelA = pA->Level;
-				const int levelB = pB->Level;
+				const int levelA = pA->Level + (a.Deck ? CellClass::BridgeLevels : 0);
+				const int levelB = pB->Level + (b.Deck ? CellClass::BridgeLevels : 0);
 
 				if (levelA == levelB)
 					return true;
@@ -650,62 +686,126 @@ namespace
 				if (std::abs(levelA - levelB) != 1)
 					return false;
 
-				return (levelA < levelB ? pA : pB)->SlopeIndex != 0;
+				const RouteNode& lower = levelA < levelB ? a : b;
+
+				return !lower.Deck && (levelA < levelB ? pA : pB)->SlopeIndex != 0;
 			};
 
-			std::vector<CellStruct> queue { from };
+			// A side cell of a diagonal step lets it through on either of its two places.
+			auto const sideOpen = [&](const RouteNode& node, const CellStruct& side, const RouteNode& next)
+			{
+				for (int deck = 0; deck < 2; ++deck)
+				{
+					const RouteNode via { side, deck != 0 };
+
+					if (canStand(via) && canStep(node, via) && canStep(via, next))
+						return true;
+				}
+
+				return false;
+			};
+
+			const RouteNode start { from, !naval && pFoot->OnBridge };
+			std::vector<RouteNode> queue { start };
 			queue.reserve(16384);
-			cameFrom[slot(from)] = static_cast<uint32_t>(slot(from)) + 1;
-			CellStruct reached = CellStruct::Empty;
+			cameFrom[slot(start)] = static_cast<uint32_t>(slot(start)) + 1;
+			bool found = false;
+			RouteNode reached { CellStruct::Empty, false };
 
 			const size_t maxNodes = avoidResources ? ResourceDetourMaxNodes : 40000;
 
 			for (size_t head = 0; head < queue.size() && queue.size() < maxNodes; ++head)
 			{
-				const CellStruct node = queue[head];
+				const RouteNode node = queue[head];
 
-				if (node.DistanceFrom(goal) <= 1.5)
+				if (node.Cell.DistanceFrom(goal) <= 1.5)
 				{
 					reached = node;
+					found = true;
 					break;
 				}
 
 				for (int d = 0; d < 8; ++d)
 				{
-					const CellStruct next { static_cast<short>(node.X + DirX[d]), static_cast<short>(node.Y + DirY[d]) };
+					const CellStruct nextCell { static_cast<short>(node.Cell.X + DirX[d]), static_cast<short>(node.Cell.Y + DirY[d]) };
 
-					if (!inZone(next) || cameFrom[slot(next)] != 0 || !canStep(node, next))
-						continue;
-
-					if (d >= 4)
+					for (int deck = 0; deck < 2; ++deck)
 					{
-						const CellStruct sideA { next.X, node.Y };
-						const CellStruct sideB { node.X, next.Y };
+						const RouteNode next { nextCell, deck != 0 };
 
-						if (!inZone(sideA) || !inZone(sideB) || !canStep(node, sideA) || !canStep(node, sideB)
-							|| !canStep(sideA, next) || !canStep(sideB, next))
+						if (!canStand(next) || cameFrom[slot(next)] != 0 || !canStep(node, next))
+							continue;
+
+						if (d >= 4 && (!sideOpen(node, CellStruct { nextCell.X, node.Cell.Y }, next)
+							|| !sideOpen(node, CellStruct { node.Cell.X, nextCell.Y }, next)))
 						{
 							continue;
 						}
-					}
 
-					cameFrom[slot(next)] = static_cast<uint32_t>(slot(node)) + 1;
-					queue.push_back(next);
+						cameFrom[slot(next)] = static_cast<uint32_t>(slot(node)) + 1;
+						queue.push_back(next);
+					}
 				}
 			}
 
-			GroundRoute route { NeuralMatchSerial, now, {} };
+			GroundRoute route { NeuralMatchSerial, now, {}, {} };
 
-			if (reached != CellStruct::Empty)
+			if (found)
 			{
-				for (CellStruct c = reached; c != from;)
+				for (RouteNode n = reached; n.Cell != from || n.Deck != start.Deck;)
 				{
-					route.Cells.push_back(c);
-					const int back = static_cast<int>(cameFrom[slot(c)]) - 1;
-					c = CellStruct { static_cast<short>(back % GridSide), static_cast<short>(back / GridSide) };
+					route.Cells.push_back(n.Cell);
+					route.OnDeck.push_back(n.Deck ? 1 : 0);
+					const size_t back = static_cast<size_t>(cameFrom[slot(n)]) - 1;
+					const size_t cell = back % GridCells;
+					n = RouteNode { CellStruct { static_cast<short>(cell % GridSide), static_cast<short>(cell / GridSide) }, back >= GridCells };
 				}
 
 				std::reverse(route.Cells.begin(), route.Cells.end());
+				std::reverse(route.OnDeck.begin(), route.OnDeck.end());
+			}
+			else if (!avoidResources && queue.size() < maxNodes)
+			{
+				// The whole ground the unit can walk was searched and the target, in its zone, is not on
+				// it: buildings close the way (the zone map does not know them). Logged a few times per
+				// match with the buildings the search ran into that stand nearest to the target.
+				static int wallLogSerial = -1;
+				static int wallLogCount = 0;
+
+				if (wallLogSerial != NeuralMatchSerial)
+				{
+					wallLogSerial = NeuralMatchSerial;
+					wallLogCount = 0;
+				}
+
+				if (wallLogCount < RouteWallLogsPerMatch)
+				{
+					++wallLogCount;
+					std::string wallText;
+
+					std::sort(walls.begin(), walls.end(), [&goal](BuildingClass* a, BuildingClass* b)
+					{
+						const double distA = a->GetMapCoords().DistanceFrom(goal);
+						const double distB = b->GetMapCoords().DistanceFrom(goal);
+
+						return distA != distB ? distA < distB : a->UniqueID < b->UniqueID;
+					});
+
+					if (walls.size() > RouteWallsLogged)
+						walls.resize(RouteWallsLogged);
+
+					for (auto const pWall : walls)
+					{
+						const CellStruct wc = pWall->GetMapCoords();
+						char item[64];
+						std::snprintf(item, sizeof(item), " %s h%d (%d,%d)", pWall->Type->ID, pWall->Owner ? pWall->Owner->ArrayIndex : -1, wc.X, wc.Y);
+						wallText += item;
+					}
+
+					Debug::Log("[NeuralAI] Ground route closed: %s of house %d (%d,%d)->(%d,%d) mz %d zone %d, searched %d, frame %d, buildings on its edge:%s\n",
+						pType->ID, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1, from.X, from.Y, goal.X, goal.Y, static_cast<int>(mz), zone,
+						static_cast<int>(queue.size()), now, wallText.empty() ? " none" : wallText.c_str());
+				}
 			}
 
 			// Diagnostics, the first 4 routes of a match: land types and heights along the route.
@@ -751,8 +851,9 @@ namespace
 						landLen += std::snprintf(landText + landLen, sizeof(landText) - landLen, "L%d:%d ", lt, landCounts[lt]);
 				}
 
-				Debug::Log("[NeuralAI] Ground route %s (%d,%d)->(%d,%d) mz %d zone %d: %d cells, land %s levels %d..%d max step %d, searched %d\n",
+				Debug::Log("[NeuralAI] Ground route %s (%d,%d)->(%d,%d) mz %d zone %d: %d cells (%d on bridges), land %s levels %d..%d max step %d, searched %d\n",
 					pType->ID, from.X, from.Y, target.X, target.Y, static_cast<int>(mz), zone, static_cast<int>(route.Cells.size()),
+					static_cast<int>(std::count(route.OnDeck.begin(), route.OnDeck.end(), static_cast<uint8_t>(1))),
 					landText, minLevel, maxLevel, maxStep, static_cast<int>(queue.size()));
 
 				// The ground of the first 40 route cells (first route of the match only): 'r' route, '#'
@@ -839,7 +940,19 @@ namespace
 			}
 		}
 
-		const size_t next = std::min(cells.size() - 1, nearest + static_cast<size_t>(std::max(1, hop)));
+		size_t next = std::min(cells.size() - 1, nearest + static_cast<size_t>(std::max(1, hop)));
+
+		// A leg never ends on a bridge or at its mouth, where the units of the wave would stop in each
+		// other's way: it runs on to the ground past the far end.
+		auto const& onDeck = it->second.OnDeck;
+
+		if (next < onDeck.size() && onDeck[next])
+		{
+			while (next + 1 < cells.size() && onDeck[next])
+				++next;
+
+			next = std::min(cells.size() - 1, next + RouteLegPastBridgeCells);
+		}
 
 		if (from.DistanceFrom(cells[next]) < 3.0)
 			return nullptr;

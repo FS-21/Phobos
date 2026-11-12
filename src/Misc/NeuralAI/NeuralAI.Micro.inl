@@ -12977,11 +12977,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				pAir->QueueMission(Mission::Attack, true);
 			}
-			else if (!airForceInCharge && isAirForceCraft && AircraftHitsGround(pAir->Type) && getSoloStrikeTarget()
+			else if (!airForceInCharge && isAirForceCraft && AircraftHitsGround(pAir->Type)
+				&& pAir->GetHealthPercentage() >= AirSoloStrikeMinHealth && getSoloStrikeTarget()
 				&& AirSortieDamageVs(pAir, pSoloStrikeTarget) > 0)
 			{
-				pAir->SetTarget(pSoloStrikeTarget);
-				pAir->QueueMission(Mission::Attack, true);
+				FlySoloAirStrike(pHouse, pAir, pSoloStrikeTarget);
 				CountDecision(NeuralDecision::AirSoloStrike, pHouse->ArrayIndex);
 			}
 			else
