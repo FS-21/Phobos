@@ -219,8 +219,12 @@ namespace
 	// a superweapon or a storm already running) cannot be called back, so damage between the new
 	// partners in the first 10 seconds of game time counts for nothing.
 	constexpr int PactGraceFrames = 150;
-	// A coalition stays small (2 or 3 houses from our point of view): at most two truce partners.
+	// At most two truce partners that were only seen fighting the target; the houses that stand
+	// against the same target by a call are partners beyond that limit.
 	constexpr int PactMaxPartners = 2;
+	// A call to arms (another house already stands against the target) adds this to the situation
+	// of the house that weighs joining: a pact that exists is worth more than one to be started.
+	constexpr int PactCallBonus = 25;
 	// Betrayal: aimed damage from a partner in force (an assault, not a stray shot) within a window.
 	constexpr int BetrayalDamage = 1500;
 	constexpr int BetrayalWindowFrames = 450;
@@ -376,7 +380,7 @@ namespace
 		int DyingWaves { 0 };
 		int LastTarget { -1 };
 		int LastDeclineReason { 0 };
-		std::array<int, 5> JoinsByReason {};
+		std::array<int, 6> JoinsByReason {};
 		std::array<int, 5> JoinsByChoice {};
 		std::array<int, static_cast<size_t>(NeuralPactEnd::Count)> PactEnds {};
 		std::array<int, static_cast<size_t>(NeuralTruceEnd::Count)> TruceEnds {};
@@ -754,6 +758,15 @@ namespace
 			int Tries { 0 };
 		};
 		std::unordered_map<DWORD, FerryLanding> FerryLandings {};
+		// Transports the loader left parked with something to load or cargo aboard, and when:
+		// nobody else gives them orders meanwhile (IsFerryParkedToLoad). TraceParkedFerries (TEMP
+		// diagnostic) names whoever moved one all the same.
+		struct ParkedFerry
+		{
+			UnitClass* Unit { nullptr };
+			int Frame { -1 };
+		};
+		std::unordered_map<DWORD, ParkedFerry> ParkedFerries {};
 		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
 		// factories idle for thousands of frames, the AI picking the same type every tick): the pick
 		// of a queue that stays empty 900 frames with money and factories is banned 5400 frames.
@@ -1049,6 +1062,7 @@ namespace
 			this->FerryReserved.clear();
 			this->FerryBoardTurns.clear();
 			this->FerryLandings.clear();
+			this->ParkedFerries.clear();
 			this->ProductionBanUntil.clear();
 			this->ProductionPickIdx = { -1, -1, -1 };
 			this->ProductionPickSince = { 0, 0, 0 };
@@ -1274,6 +1288,10 @@ namespace
 	// ring of cells farther each time up to FerryLandingMaxRing.
 	constexpr int FerryLandingFrames = 300;
 	constexpr int FerryLandingMaxRing = 5;
+	constexpr double FerryLandingDriftCells = 1.5;
+	// A transport counts as parked to load for this long after the loader last left it so (a
+	// transport the loader stops handling is free again).
+	constexpr int FerryParkedFrames = 300;
 	// A deployer on a new island with no site for its building gives the island up after this long
 	// (something passing may only be in the way), and the island stays given up for NoRoomIslandFrames.
 	constexpr int DeployerNoSiteFrames = 450;
@@ -1298,6 +1316,18 @@ namespace
 		}
 
 		return false;
+	}
+
+	// A transport the loader left parked to load lately. The combat micro and the waves took it for
+	// a combat unit (armed or not) and sent it off on attack-moves and strikes while its passengers
+	// walked up: it takes its orders from the loader alone.
+	bool IsFerryParkedToLoad(const HouseClass* pHouse, DWORD uid)
+	{
+		auto const& parked = GetMacroState(pHouse).ParkedFerries;
+		auto const it = parked.find(uid);
+
+		return it != parked.end() && Unsorted::CurrentFrame - it->second.Frame <= FerryParkedFrames
+			&& Unsorted::CurrentFrame >= it->second.Frame;
 	}
 
 	// A unit that gave up waiting for a crossing or lost its boarding turn: no transport takes it for a while.
