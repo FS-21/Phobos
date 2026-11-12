@@ -7,6 +7,9 @@
 
 #include <vector>
 
+class TechnoClass;
+class WarheadTypeClass;
+
 // These determine how many of each type of sync log event are stored in the buffers.
 // Any events added beyond this count overwrite old ones.
 static constexpr unsigned int RNGCalls_Size = 4096;
@@ -15,6 +18,7 @@ static constexpr unsigned int TargetChanges_Size = 1024;
 static constexpr unsigned int DestinationChanges_Size = 1024;
 static constexpr unsigned int MissionOverrides_Size = 256;
 static constexpr unsigned int AnimCreations_Size = 512;
+static constexpr unsigned int DamageEvents_Size = 2048;
 
 // Intention: Data structure that stores sync event records.
 // Stores fixed amount of items determined by size template arg. Any further additions
@@ -143,6 +147,29 @@ struct AnimCreationSyncLogEvent : SyncLogEvent
 	{ }
 };
 
+// A techno about to take damage: what it is, what hits it and from whom, and whether it already
+// carries its damage smoke (a new one draws from the match random generator).
+struct DamageSyncLogEvent : SyncLogEvent
+{
+	AbstractType Type;
+	DWORD ID;
+	int TypeIndex;
+	int Health;
+	int Damage;
+	int Warhead;
+	AbstractType AttackerType;
+	DWORD AttackerID;
+	bool HasDamageSmoke;
+
+	DamageSyncLogEvent() : SyncLogEvent() { }
+
+	DamageSyncLogEvent(const AbstractType& Type, const DWORD& ID, int TypeIndex, int Health, int Damage, int Warhead,
+		const AbstractType& AttackerType, const DWORD& AttackerID, bool HasDamageSmoke, unsigned int Caller, unsigned int Frame)
+		: Type(Type), ID(ID), TypeIndex(TypeIndex), Health(Health), Damage(Damage), Warhead(Warhead), AttackerType(AttackerType)
+		, AttackerID(AttackerID), HasDamageSmoke(HasDamageSmoke), SyncLogEvent(Caller, Frame)
+	{ }
+};
+
 class SyncLogger
 {
 private:
@@ -152,6 +179,7 @@ private:
 	static SyncLogEventBuffer<TargetChangeSyncLogEvent, DestinationChanges_Size> DestinationChanges;
 	static SyncLogEventBuffer<MissionOverrideSyncLogEvent, MissionOverrides_Size> MissionOverrides;
 	static SyncLogEventBuffer<AnimCreationSyncLogEvent, AnimCreations_Size> AnimCreations;
+	static SyncLogEventBuffer<DamageSyncLogEvent, DamageEvents_Size> DamageEvents;
 
 	static void WriteRNGCalls(FILE* const pLogFile, int frameDigits);
 	static void WriteFacingChanges(FILE* const pLogFile, int frameDigits);
@@ -159,6 +187,7 @@ private:
 	static void WriteDestinationChanges(FILE* const pLogFile, int frameDigits);
 	static void WriteMissionOverrides(FILE* const pLogFile, int frameDigits);
 	static void WriteAnimCreations(FILE* const pLogFile, int frameDigits);
+	static void WriteDamageEvents(FILE* const pLogFile, int frameDigits);
 	static void WriteTeams(FILE* const pLogFile);
 public:
 	static int AnimCreations_HighestX;
@@ -175,6 +204,7 @@ public:
 	static void AddDestinationChangeSyncLogEvent(AbstractClass* pObject, AbstractClass* pTarget, unsigned int callerAddress);
 	static void AddMissionOverrideSyncLogEvent(AbstractClass* pObject, int mission, unsigned int callerAddress);
 	static void AddAnimCreationSyncLogEvent(const CoordStruct& coords, unsigned int callerAddress);
+	static void AddDamageSyncLogEvent(TechnoClass* pTarget, int damage, WarheadTypeClass* pWarhead, TechnoClass* pAttacker, unsigned int callerAddress);
 	static void WriteSyncLog(const char* logFilename);
 	static void SetTeamLoggingPadding(TeamClass* pTeam);
 };
