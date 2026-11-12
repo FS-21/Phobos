@@ -722,12 +722,22 @@ namespace
 		{
 			DWORD Transport { 0 };
 			int Frame { 0 };
-			// TEMP diagnostic: orders it got from its transport and the last frame the transport handled its queue.
+			// TEMP diagnostic: orders it got from its transport.
 			int EnterOrders { 0 };
 			int WalkOrders { 0 };
+			// Last frame the transport handled it in its queue (-1 until then): a transport that stops
+			// loading lets its passengers go after FerryQueueStaleFrames.
 			int QueueFrame { -1 };
 		};
 		std::map<DWORD, FerryReservation> FerryReserved {};
+		// Boarding turn of each loading transport: who holds it and since when it stands next to the
+		// transport without getting aboard. Transport UniqueID -> turn. Keyed lookups only.
+		struct FerryBoardTurn
+		{
+			DWORD Boarder { 0 };
+			int NearSince { -1 };
+		};
+		std::unordered_map<DWORD, FerryBoardTurn> FerryBoardTurns {};
 		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
 		// factories idle for thousands of frames, the AI picking the same type every tick): the pick
 		// of a queue that stays empty 900 frames with money and factories is banned 5400 frames.
@@ -1019,6 +1029,7 @@ namespace
 			this->FerryWaitSince.clear();
 			this->FerryBlockedUntil.clear();
 			this->FerryReserved.clear();
+			this->FerryBoardTurns.clear();
 			this->ProductionBanUntil.clear();
 			this->ProductionPickIdx = { -1, -1, -1 };
 			this->ProductionPickSince = { 0, 0, 0 };
@@ -1229,6 +1240,17 @@ namespace
 	// A passenger reserved by one of our transports loading on a pickup shore: it walks to that
 	// transport and boards it, no other job takes it meanwhile.
 	constexpr int FerryReservationFrames = 1800;
+	// A reservation its transport has not handled for this long is dropped (the transport left, got
+	// another job or the passenger is on other ground).
+	constexpr int FerryQueueStaleFrames = 120;
+	// Reserved passengers wait this far from their transport, so the cells next to it stay free for
+	// the one boarding.
+	constexpr double FerryWaitCells = 4.0;
+	// The one boarding loses its turn after this long within FerryBoardTurnCells of the transport
+	// without getting aboard, and is not reserved again for FerryBoardFailedFrames.
+	constexpr int FerryBoardTurnFrames = 300;
+	constexpr double FerryBoardTurnCells = 6.0;
+	constexpr int FerryBoardFailedFrames = 2700;
 
 	bool IsFerryReserved(const HouseClass* pHouse, DWORD uid)
 	{
@@ -1237,6 +1259,15 @@ namespace
 
 		return it != reserved.end() && Unsorted::CurrentFrame - it->second.Frame < FerryReservationFrames
 			&& Unsorted::CurrentFrame >= it->second.Frame;
+	}
+
+	// A unit that gave up waiting for a crossing or lost its boarding turn: no transport takes it for a while.
+	bool IsFerryBlocked(const HouseClass* pHouse, DWORD uid)
+	{
+		auto const& blocked = GetMacroState(pHouse).FerryBlockedUntil;
+		auto const it = blocked.find(uid);
+
+		return it != blocked.end() && Unsorted::CurrentFrame < it->second;
 	}
 
 	// A vehicle (queue 1) or infantry (queue 2) type the engine did not start for 900 frames.

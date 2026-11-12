@@ -379,6 +379,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		int totalAADefenses = 0;
 		// Defenses with any gun that shoots up, pure anti-air or not.
 		int totalAntiAirDefenses = 0;
+		// Their worth in AntiAirValue points, the measure the Advanced AI uses; one that declares none counts as a typical one.
+		constexpr int airDefenseTypicalValue = 20;
+		int ownedAntiAirValue = 0;
 		int ownedBattleBunkers = 0;
 		int emptyOwnedBattleBunkers = 0;
 		int ownedTankBunkers = 0;
@@ -473,7 +476,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					|| (pSecondW && pSecondW->Projectile && pSecondW->Projectile->AA);
 
 				if (shootsUp)
+				{
 					totalAntiAirDefenses++;
+					ownedAntiAirValue += pOT->AntiAirValue > 0 ? pOT->AntiAirValue : airDefenseTypicalValue;
+				}
 
 				const bool isPureAA = pW && pW->Projectile && pW->Projectile->AA && !pW->Projectile->AG;
 
@@ -1335,20 +1341,34 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			+ std::max(frontlineDefenseDeficit, frontlineThreatActive ? macroState.FrontlineThreatNeedsDefenses : 0);
 
 		const int maxGroundDefenses = std::clamp(baseGroundDefCap, 4, (hasTechCenter || money > 3000 || effectiveFrontlineThreat) ? 20 : 14);
-		const int baseMaxAA = 1 + ownedWarFactories + ownedTechStructures + defDensityMod + (underAirAttack ? 2 : 0);
-		const int maxAADefenses = std::clamp(std::max(baseMaxAA, 1 + enemyAirValue / 30), 2, 8);
 
-		// Defenses that shoot up the seen enemy air power asks for. During a raid one per 30 points of
-		// it (a Kirov is about 26) and never fewer than two; with no raid one per 60 points once that
-		// air power is worth a gun.
+		// Defenses that shoot up the base wants, measured as the Advanced AI does: points of
+		// AntiAirValue (a typical defense gives airDefenseTypicalValue). Once the enemy air power is
+		// worth a gun, a standing amount that grows with the economy plus that air power; while a
+		// raid lasts, a margin on top. Of that total, the enemy air power plus the margin is what the
+		// raid itself asks for: only that part goes ahead of other picks, the rest is built at leisure.
 		constexpr int airDefenseUrgentValue = 20;
-		constexpr int airValuePerRaidDefense = 30;
-		constexpr int airValuePerQuietDefense = 60;
+		constexpr int airDefenseBaseValue = 40;
+		constexpr int airDefenseValuePerRefinery = 10;
+		constexpr int airDefenseRaidValue = 60;
+		constexpr int maxWantedAirDefenses = 8;
 		const bool airRaid = underAirAttack || activeThreatCat == NeuralThreatCategory::Air;
-		const int wantedAirDefenses = airRaid ? std::clamp(1 + enemyAirValue / airValuePerRaidDefense, 2, 8)
-			: (enemyAirValue >= airDefenseUrgentValue ? std::clamp(1 + enemyAirValue / airValuePerQuietDefense, 1, 4) : 0);
-		const int airDefenseDeficit = std::max(0, wantedAirDefenses - totalAntiAirDefenses);
-		const bool airRaidShortOfDefenses = airRaid && airDefenseDeficit > 0;
+		const int raidAirValue = airRaid ? enemyAirValue + airDefenseRaidValue : 0;
+		const int wantedAirValue = (airRaid || enemyAirValue >= airDefenseUrgentValue)
+			? airDefenseBaseValue + ownedRefineries * airDefenseValuePerRefinery + enemyAirValue + (airRaid ? airDefenseRaidValue : 0)
+			: 0;
+		auto const airDefensesMissingFor = [&](int value) -> int
+		{
+			return std::min((std::max(0, value - ownedAntiAirValue) + airDefenseTypicalValue - 1) / airDefenseTypicalValue,
+				std::max(0, maxWantedAirDefenses - totalAntiAirDefenses));
+		};
+
+		const int airDefenseDeficit = airDefensesMissingFor(wantedAirValue);
+		const int raidDefenseDeficit = airDefensesMissingFor(raidAirValue);
+		const int wantedAirDefenses = totalAntiAirDefenses + airDefenseDeficit;
+		const int baseMaxAA = 1 + ownedWarFactories + ownedTechStructures + defDensityMod + (underAirAttack ? 2 : 0);
+		const int maxAADefenses = std::clamp(std::max({ baseMaxAA, 1 + enemyAirValue / 30, wantedAirDefenses }), 2, maxWantedAirDefenses);
+		const bool airRaidShortOfDefenses = raidDefenseDeficit > 0;
 		// With no ground attack on top, a raid short of guns leaves the towers that cannot shoot up for later.
 		const bool airRaidOnly = airRaidShortOfDefenses && !underVehicleAttack && !underInfantryAttack && !effectiveFrontlineThreat;
 		bool bestFillsAirDeficit = false;
@@ -2807,7 +2827,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 
 				// AdvAI Proactive Enemy Air Value Scaling
-				if (isAntiAir && enemyAirValue > 0 && totalAADefenses < (1 + enemyAirValue / 35))
+				if (isAntiAir && enemyAirValue > 0 && airDefenseDeficit > 0)
 				{
 					score += std::min(550, enemyAirValue * 4);
 				}
@@ -3080,10 +3100,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			};
 
 			Debug::Log("[NeuralAI] House %d AirDefense DIAG: enemy air value %d, under air attack %d, threat category %d, recently attacked %d, "
-				"AA defenses %d of %d, shooting up %d of %d wanted, ground defenses %d, credits %d, best %s stage %d score %d, "
+				"AA defenses %d of %d, shooting up %d of %d wanted (%d for the raid), ground defenses %d, credits %d, best %s stage %d score %d, "
 				"scored pick %s score %d, final pick %s, in progress %s and %s, yards %d, barracks %d, factories %d, power %d, frame %d.\n",
 				pHouse->ArrayIndex, enemyAirValue, underAirAttack ? 1 : 0, static_cast<int>(activeThreatCat), wasRecentlyAttacked ? 1 : 0,
-				totalAADefenses, maxAADefenses, totalAntiAirDefenses, wantedAirDefenses, totalGroundDefenses, money,
+				totalAADefenses, maxAADefenses, totalAntiAirDefenses, wantedAirDefenses, totalAntiAirDefenses + raidDefenseDeficit, totalGroundDefenses, money,
 				airDiagName, airDiagStage, airDiagScore, typeName(scoredBldIdx), bestBldScore, typeName(bestBldIdx),
 				typeName(inProgressBldIdx), typeName(inProgressDefIdx), pHouse->ConYards.Count, ownedBarracks, ownedWarFactories,
 				realPowerSurplus, Unsorted::CurrentFrame);
