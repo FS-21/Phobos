@@ -465,7 +465,9 @@ namespace
 	// are missing from the theater; they load as flat cells, the zone map links their one-level steps
 	// and the engine path finder fails inside a corridor over them ("Regular findpath failure"), so
 	// whole waves stood in their own base. Legs along a route with the real step rule get out.
-	CellClass* GroundRouteHop(FootClass* pFoot, const CellStruct& target, int hop)
+	// With avoidResources the route keeps off resource cells (past the first cells around the unit,
+	// so one standing in a field can leave it) and is given for any target more than hop + 2 away.
+	CellClass* GroundRouteHop(FootClass* pFoot, const CellStruct& target, int hop, bool avoidResources = false)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
@@ -483,7 +485,7 @@ namespace
 		const CellStruct from = pFoot->GetMapCoords();
 		CellStruct goal = target;
 
-		if (from.DistanceFrom(goal) <= hop + 10.0)
+		if (from.DistanceFrom(goal) <= hop + (avoidResources ? 2.0 : 10.0))
 			return nullptr;
 
 		const MovementZone mz = pType->MovementZone;
@@ -521,6 +523,15 @@ namespace
 		if (MapClass::Instance.GetMovementZoneType(goal, mz, false) != zone)
 			return nullptr;
 
+		// A goal on a resource cell has no way to it that keeps off them.
+		if (avoidResources)
+		{
+			auto const pGoalCell = MapClass::Instance.TryGetCellAt(goal);
+
+			if (!pGoalCell || pGoalCell->GetContainedTiberiumIndex() >= 0)
+				return nullptr;
+		}
+
 		struct GroundRoute
 		{
 			int MatchSerial;
@@ -533,7 +544,8 @@ namespace
 		const uint64_t routeKey = (static_cast<uint64_t>(static_cast<uint16_t>(zone)) << 48)
 			| (static_cast<uint64_t>(static_cast<uint8_t>(mz)) << 40)
 			| (static_cast<uint64_t>(static_cast<uint16_t>(from.X / 4)) << 30) | (static_cast<uint64_t>(static_cast<uint16_t>(from.Y / 4)) << 20)
-			| (static_cast<uint64_t>(static_cast<uint16_t>(goal.X / 4)) << 10) | static_cast<uint64_t>(static_cast<uint16_t>(goal.Y / 4));
+			| (static_cast<uint64_t>(static_cast<uint16_t>(goal.X / 4)) << 10) | static_cast<uint64_t>(static_cast<uint16_t>(goal.Y / 4))
+			| (avoidResources ? (1ull << 63) : 0ull);
 
 		if (routes.size() > 256)
 		{
@@ -555,7 +567,11 @@ namespace
 					return false;
 
 				auto const pCell = MapClass::Instance.TryGetCellAt(c);
-				return pCell && pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false);
+
+				if (!pCell || !pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false))
+					return false;
+
+				return !avoidResources || pCell->GetContainedTiberiumIndex() < 0 || c.DistanceFrom(from) <= 2.5;
 			};
 
 			// One step between two such cells, as the engine path finder allows it (FootClass::Can_Reach):
@@ -594,7 +610,9 @@ namespace
 			parent.emplace(key(from), from);
 			CellStruct reached = CellStruct::Empty;
 
-			for (size_t head = 0; head < queue.size() && queue.size() < 40000; ++head)
+			const size_t maxNodes = avoidResources ? ResourceDetourMaxNodes : 40000;
+
+			for (size_t head = 0; head < queue.size() && queue.size() < maxNodes; ++head)
 			{
 				const CellStruct node = queue[head];
 

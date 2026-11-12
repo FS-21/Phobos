@@ -330,6 +330,144 @@ namespace
 		return false;
 	}
 
+	// Resource cells on the straight line between two cells, over its first maxCells.
+	int ResourceCellsOnLine(const CellStruct& from, const CellStruct& to, int maxCells)
+	{
+		const int dx = to.X - from.X;
+		const int dy = to.Y - from.Y;
+		const int span = std::max(std::abs(dx), std::abs(dy));
+		const int steps = std::min(span, maxCells);
+		int count = 0;
+
+		for (int i = 1; i <= steps; ++i)
+		{
+			const CellStruct cell { static_cast<short>(from.X + dx * i / span), static_cast<short>(from.Y + dy * i / span) };
+			auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+			if (pCell && pCell->GetContainedTiberiumIndex() >= 0)
+				++count;
+		}
+
+		return count;
+	}
+
+	// The next leg of a way around the resource fields for a unit their cells hurt, when walking
+	// straight to the goal would cost it a good share of its health (in large fields soldiers died
+	// before reaching the other side). nullptr when the straight way is cheap or no way keeps off them.
+	CellClass* ResourceDetourHop(FootClass* pFoot, const CellStruct& goal)
+	{
+		const int damage = ResourceCellDamage(pFoot->GetTechnoType());
+
+		if (damage <= 0 || pFoot->IsInAir())
+			return nullptr;
+
+		const int cells = ResourceCellsOnLine(pFoot->GetMapCoords(), goal, ResourceLineCells);
+
+		if (cells * damage * 100 < pFoot->Health * ResourceDetourHealthPercent)
+			return nullptr;
+
+		return GroundRouteHop(pFoot, goal, ResourceDetourHopSteps, true);
+	}
+
+	// A wounded unit that resource cells heal stops on one near its way before it goes on with its
+	// order. True while it stays there (or walks to it): the order is not given.
+	bool HoldsToHealOnResources(FootClass* pFoot, const CellStruct& goal)
+	{
+		auto const pType = pFoot->GetTechnoType();
+
+		if (!pFoot->Owner || !HealsOnResourceCells(pType) || pFoot->IsInAir())
+			return false;
+
+		auto& since = GetMacroState(pFoot->Owner).ResourceHealSince;
+		const int now = Unsorted::CurrentFrame;
+		const double health = pFoot->GetHealthPercentage();
+		bool started = false;
+
+		if (since.size() > 512)
+		{
+			std::erase_if(since, [now](const auto& entry)
+				{ return now < entry.second || now - entry.second >= ResourceHealMaxFrames + ResourceHealCooldownFrames; });
+		}
+
+		if (auto const it = since.find(pFoot->UniqueID); it != since.end())
+		{
+			const int elapsed = now - it->second;
+
+			if (elapsed < 0 || elapsed >= ResourceHealMaxFrames + ResourceHealCooldownFrames)
+				since.erase(it);
+			else if (elapsed >= ResourceHealMaxFrames || health >= ResourceHealUntil)
+				return false;
+			else
+				started = true;
+		}
+
+		if (!started && health >= ResourceHealBelow)
+			return false;
+
+		// The cell it stands on, else the nearest resource cell of its ground that does not take it
+		// away from its goal.
+		const CellStruct here = pFoot->GetMapCoords();
+		CellClass* pHealCell = MapClass::Instance.TryGetCellAt(here);
+		const bool standsOnOne = pHealCell && pHealCell->GetContainedTiberiumIndex() >= 0;
+
+		if (!standsOnOne)
+		{
+			pHealCell = nullptr;
+			const int zone = ObjectZone(pFoot, pType->MovementZone);
+			const double hereToGoal = here.DistanceFrom(goal);
+
+			for (int r = 1; r <= ResourceHealSearchCells && !pHealCell; ++r)
+			{
+				for (int dy = -r; dy <= r && !pHealCell; ++dy)
+				{
+					for (int dx = -r; dx <= r && !pHealCell; ++dx)
+					{
+						if (std::max(std::abs(dx), std::abs(dy)) != r)
+							continue;
+
+						const CellStruct cell { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) };
+						auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+						if (pCell && pCell->GetContainedTiberiumIndex() >= 0 && cell.DistanceFrom(goal) <= hereToGoal + 4.0
+							&& MapClass::Instance.GetMovementZoneType(cell, pType->MovementZone, false) == zone)
+						{
+							pHealCell = pCell;
+						}
+					}
+				}
+			}
+		}
+
+		if (!pHealCell)
+		{
+			since.erase(pFoot->UniqueID);
+			return false;
+		}
+
+		if (!started)
+		{
+			since[pFoot->UniqueID] = now;
+			CountDecision(NeuralDecision::ResourceHealStop, pFoot->Owner->ArrayIndex);
+		}
+
+		if (standsOnOne)
+		{
+			if (pFoot->MegaMission == Mission::AttackMove || pFoot->CurrentMission == Mission::Move)
+			{
+				pFoot->ClearMegaMissionData();
+				pFoot->SetDestination(nullptr, true);
+				pFoot->QueueMission(Mission::Guard, true);
+			}
+		}
+		else
+		{
+			pFoot->ClearMegaMissionData();
+			IssueMoveOrder(pFoot, pHealCell, 0.5);
+		}
+
+		return true;
+	}
+
 	void OrderFootToAttackMove(FootClass* pFoot, AbstractClass* pDest)
 	{
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
@@ -343,6 +481,9 @@ namespace
 		CellClass* pDestCell = (pDest->WhatAmI() == AbstractType::Cell)
 			? static_cast<CellClass*>(pDest)
 			: MapClass::Instance.TryGetCellAt(CellClass::Coord2Cell(pDest->GetCoords()));
+
+		if (pDestCell && HoldsToHealOnResources(pFoot, pDestCell->MapCoords))
+			return;
 
 		// Long-range units (ground weapon or drone launcher reaching >= 8 cells) sent against an
 		// enemy building attack it directly, like a player's attack order: the engine stops them
@@ -442,12 +583,7 @@ namespace
 			// A far naval order goes in hops of 25 cells along a sea route (NavalRouteHop); the owner
 			// logic sends it again once the ship is there. A far ground order likewise along a land route
 			// (GroundRouteHop): the engine path finder gives up on long winding ways.
-			if (auto const pHop = NavalRouteHop(pFoot, pDestCell->MapCoords, 25))
-			{
-				pDestCell = pHop;
-				pResolvedDest = pHop;
-			}
-			else if (auto const pGroundHop = [&]() -> CellClass*
+			auto const stepRouteHop = [&]() -> CellClass*
 				{
 					// Only as a fallback: a unit that has not left its cell for 300 frames (the engine
 					// path finder gave up on the long way), and then for 1200 frames after its last hop
@@ -472,16 +608,45 @@ namespace
 						hoppingSince[pFoot->UniqueID] = nowFrame;
 
 					return pHopCell;
-				}())
+				};
+
+			// A ship that has not left its cell takes the cell by cell route first. The sea route only
+			// follows the zone map: it runs through a channel one of our buildings closed, and its legs
+			// are measured in a straight line, so one can end behind a headland the engine does not
+			// path around (match #8133, Nora Island: nine Sea Scorpions in a row for the whole match).
+			auto const pHopType = pFoot->GetTechnoType();
+			const bool ship = pHopType && (pHopType->Naval || pHopType->MovementZone == MovementZone::Water
+				|| pHopType->MovementZone == MovementZone::WaterBeach);
+			// A unit that resource cells hurt goes around a field that lies across its way.
+			CellClass* const pDetourHop = ResourceDetourHop(pFoot, pDestCell->MapCoords);
+			CellClass* pGroundHop = pDetourHop ? pDetourHop : (ship ? stepRouteHop() : nullptr);
+			CellClass* const pSeaHop = pGroundHop ? nullptr : NavalRouteHop(pFoot, pDestCell->MapCoords, 25);
+
+			if (!pGroundHop && !pSeaHop && !ship)
+				pGroundHop = stepRouteHop();
+
+			if (pSeaHop)
+			{
+				pDestCell = pSeaHop;
+				pResolvedDest = pSeaHop;
+			}
+			else if (pGroundHop)
 			{
 				// Already attack-moving to an earlier hop that is still 6+ cells away and closer to the
 				// goal than the unit: it keeps that leg (a new hop every few cells re-paths it each time).
 				const CellStruct goal = pDestCell->MapCoords;
 				const CellStruct here = pFoot->GetMapCoords();
 
+				// A leg around a field is short and need not be nearer to the goal: it is kept while it is
+				// off the resource cells and still ahead.
 				if (auto const pOldHop = abstract_cast<CellClass*>(pFoot->MegaDestination);
-					pOldHop && pFoot->MegaMission == Mission::AttackMove && here.DistanceFrom(pOldHop->MapCoords) > 6.0
-					&& pOldHop->MapCoords.DistanceFrom(goal) + 5.0 < here.DistanceFrom(goal))
+					pOldHop && pFoot->MegaMission == Mission::AttackMove
+					&& (pDetourHop
+						? (here.DistanceFrom(pOldHop->MapCoords) > 3.0
+							&& here.DistanceFrom(pOldHop->MapCoords) <= ResourceDetourHopSteps + 4.0
+							&& pOldHop->GetContainedTiberiumIndex() < 0)
+						: (here.DistanceFrom(pOldHop->MapCoords) > 6.0
+							&& pOldHop->MapCoords.DistanceFrom(goal) + 5.0 < here.DistanceFrom(goal))))
 				{
 					CountDecision(NeuralDecision::MoveOrderSkipped, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
 					return;
@@ -489,7 +654,8 @@ namespace
 
 				pDestCell = pGroundHop;
 				pResolvedDest = pGroundHop;
-				CountDecision(NeuralDecision::GroundRouteHop, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
+				CountDecision(pDetourHop ? NeuralDecision::ResourceDetour : NeuralDecision::GroundRouteHop,
+					pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
 			}
 		}
 

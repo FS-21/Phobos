@@ -198,6 +198,8 @@ namespace
 		FerryDoorCellMove,
 		FerryLandingRetried,
 		GarrisonTraining,
+		ResourceDetour,
+		ResourceHealStop,
 		Count
 	};
 
@@ -224,7 +226,8 @@ namespace
 		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom", "stuckUnloadMoved", "capitalGroupLaunched", "capitalGroupRetreat", "submarineSonarAvoided", "depotEmergencySale", "veinholeAttack", "cliffOpened", "stealthRevealFired",
 		"stagingHoldTimedOut", "jamCleared", "jamYielded", "mouthCleared",
 		"hoverReleased", "groundRouteHop", "medicEscort", "garrisonSquad", "dryEconomySale", "ferryReserved", "productionPickBanned",
-		"ferryDoorRegistered", "ferryStrayLinkCut", "ferryTargetDropped", "ferryDoorCellMove", "ferryLandingRetried", "garrisonTraining" };
+		"ferryDoorRegistered", "ferryStrayLinkCut", "ferryTargetDropped", "ferryDoorCellMove", "ferryLandingRetried", "garrisonTraining",
+		"resourceDetour", "resourceHealStop" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -1754,6 +1757,88 @@ namespace
 
 		NoManualEnterCache[pType] = val ? 1 : 0;
 		return val;
+	}
+
+	// Damage and healing of resource cells (Ares tags the engine types do not carry): whether each is
+	// on, and what a unit takes for entering a cell of each resource type that hurts.
+	struct NeuralResourceCellRules
+	{
+		int MatchSerial { -1 };
+		bool HealEnabled { false };
+		std::vector<std::pair<int, WarheadTypeClass*>> Damages;
+		std::map<const TechnoTypeClass*, int> DamageByType;
+	};
+
+	NeuralResourceCellRules& GetResourceCellRules()
+	{
+		static NeuralResourceCellRules rules;
+
+		if (rules.MatchSerial == NeuralMatchSerial)
+			return rules;
+
+		rules = NeuralResourceCellRules {};
+		rules.MatchSerial = NeuralMatchSerial;
+		auto const pINI = CCINIClass::INI_Rules;
+
+		if (!pINI)
+			return rules;
+
+		rules.HealEnabled = pINI->ReadBool("General", "TiberiumHealEnabled", false);
+
+		if (!pINI->ReadBool("General", "TiberiumDamageEnabled", false))
+			return rules;
+
+		for (auto const pTiberium : TiberiumClass::Array)
+		{
+			if (!pTiberium || !pTiberium->ID || pTiberium->ID[0] == '\0')
+				continue;
+
+			const int damage = pINI->ReadInteger(pTiberium->ID, "Damage", std::max(1, pTiberium->Power / 10));
+			char warheadID[0x40] = "";
+			pINI->ReadString(pTiberium->ID, "Warhead", "", warheadID, sizeof(warheadID));
+			auto pWarhead = warheadID[0] != '\0' ? WarheadTypeClass::Find(warheadID) : nullptr;
+
+			if (!pWarhead)
+				pWarhead = RulesClass::Instance->C4Warhead;
+
+			if (damage > 0 && pWarhead)
+				rules.Damages.push_back({ damage, pWarhead });
+		}
+
+		return rules;
+	}
+
+	// What a unit of this type loses for each resource cell it enters: 0 when they do not hurt it
+	// (soldiers are hurt unless marked proof, everything else is proof unless marked otherwise).
+	int ResourceCellDamage(const TechnoTypeClass* pType)
+	{
+		if (!pType || !pType->ID || pType->ID[0] == '\0')
+			return 0;
+
+		auto& rules = GetResourceCellRules();
+
+		if (rules.Damages.empty())
+			return 0;
+
+		if (auto const it = rules.DamageByType.find(pType); it != rules.DamageByType.end())
+			return it->second;
+
+		int worst = 0;
+		const bool proofByDefault = pType->WhatAmI() != AbstractType::InfantryType;
+
+		if (!CCINIClass::INI_Rules->ReadBool(pType->ID, "TiberiumProof", proofByDefault))
+		{
+			for (auto const& [damage, pWarhead] : rules.Damages)
+				worst = std::max(worst, MapClass::GetTotalDamage(damage, pWarhead, pType->Armor, 0));
+		}
+
+		rules.DamageByType[pType] = worst;
+		return worst;
+	}
+
+	bool HealsOnResourceCells(const TechnoTypeClass* pType)
+	{
+		return pType && pType->TiberiumHeal && GetResourceCellRules().HealEnabled;
 	}
 
 	bool IsImmobileUnitTypeOnLand(const TechnoTypeClass* pType)
