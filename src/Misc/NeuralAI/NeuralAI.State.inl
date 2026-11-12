@@ -1308,6 +1308,20 @@ namespace
 	constexpr int ResourceDetourMaxNodes = 12000;
 	// Cell by cell route searches (GroundRouteHop) a house may start in one AI tick.
 	constexpr int GroundRouteSearchesPerTick = 2;
+	// A route leg that would end on a bridge deck runs this many route cells past its far end.
+	constexpr size_t RouteLegPastBridgeCells = 4;
+	// A search that finds its target walled in by buildings keeps up to RouteWallsKept of those it ran
+	// into and logs the RouteWallsLogged nearest to the target, RouteWallLogsPerMatch times per match.
+	constexpr size_t RouteWallsKept = 256;
+	constexpr size_t RouteWallsLogged = 6;
+	constexpr int RouteWallLogsPerMatch = 12;
+	// A unit the engine left waiting with its attack-move pending (no path, a blocked way) gets the
+	// same order again only after this long.
+	constexpr int AttackMoveRetryFrames = 90;
+	// A long-range unit gets a direct attack order on an enemy building only within its weapon range
+	// plus this many cells, and not while it has stood held for LongRangeHeldFrames.
+	constexpr int LongRangeDirectAttackCells = 12;
+	constexpr int LongRangeHeldFrames = 300;
 	// A unit that resource cells heal, wounded below ResourceHealBelow, stops on one within
 	// ResourceHealSearchCells until it is back at ResourceHealUntil, for ResourceHealMaxFrames at
 	// most, and then not again for ResourceHealCooldownFrames.
