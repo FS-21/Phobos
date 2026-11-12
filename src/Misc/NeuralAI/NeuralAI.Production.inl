@@ -4851,14 +4851,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else
 				score += scores[18] + techBonus;
 		}
-		else if (IsSpyInfantryType(pInf))
+		else if (IsSpyInfantryType(pInf) || pInf->VehicleThief)
 		{
 			const int maxActiveSpies
 				= (scores[19] > 180 || pExt->NeuralAI_Archetype == 1 || pExt->NeuralAI_ActiveExpert == 3) ? 3 : 2;
 			if (ownedInfiltrators >= maxActiveSpies)
 				continue;
 
-			score += (pHouse->OwnedInfantry < 6) ? -400 : scores[19];
+			// A luxury: never saved for (a 1500 credit spy stayed the next soldier for 25 minutes
+			// while its house ran out of infantry), and its price is no measure of its worth.
+			if (!isInfInProgress && pInf->GetActualCost(pHouse) * SpyLuxuryMoneyFactor > money)
+				continue;
+
+			score += ((pHouse->OwnedInfantry < 6) ? -400 : scores[19]) - (pInf->Cost / 2);
 		}
 		else if (isAA || pInf->C4)
 		{
