@@ -219,8 +219,12 @@ namespace
 	// a superweapon or a storm already running) cannot be called back, so damage between the new
 	// partners in the first 10 seconds of game time counts for nothing.
 	constexpr int PactGraceFrames = 150;
-	// A coalition stays small (2 or 3 houses from our point of view): at most two truce partners.
+	// At most two truce partners that were only seen fighting the target; the houses that stand
+	// against the same target by a call are partners beyond that limit.
 	constexpr int PactMaxPartners = 2;
+	// A call to arms (another house already stands against the target) adds this to the situation
+	// of the house that weighs joining: a pact that exists is worth more than one to be started.
+	constexpr int PactCallBonus = 25;
 	// Betrayal: aimed damage from a partner in force (an assault, not a stray shot) within a window.
 	constexpr int BetrayalDamage = 1500;
 	constexpr int BetrayalWindowFrames = 450;
@@ -376,7 +380,7 @@ namespace
 		int DyingWaves { 0 };
 		int LastTarget { -1 };
 		int LastDeclineReason { 0 };
-		std::array<int, 5> JoinsByReason {};
+		std::array<int, 6> JoinsByReason {};
 		std::array<int, 5> JoinsByChoice {};
 		std::array<int, static_cast<size_t>(NeuralPactEnd::Count)> PactEnds {};
 		std::array<int, static_cast<size_t>(NeuralTruceEnd::Count)> TruceEnds {};

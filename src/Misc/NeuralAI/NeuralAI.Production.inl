@@ -4282,8 +4282,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						// in the War Factory / Shipyard!
 		}
 
-		// Expert 2: counters of the seen enemy army lead their factory (combat types only).
+		// Counters of the seen enemy army and of what attacks the base lead their factory (combat
+		// types only).
 		score += CounterBonusFor(pHouse, pUnit);
+
+		// Under attack the answer to the threat is built first. What the house cannot do without
+		// stays: the MCV when there is no yard, a harvester per refinery, anything while no income is left.
+		if (GetMacroState(pHouse).CounterUnderAttack && hasActiveUnitIncome
+			&& ((isMCV && pHouse->NumConYards > 0) || (isKeyStructureDeployer && !isMCV)
+				|| (isEconomyUnit && ownedEconomyUnits >= std::max(1, trueRefineries))))
+		{
+			score -= ThreatFirstPenalty;
+		}
 
 		if (pUnit->Naval)
 		{
@@ -4861,6 +4871,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		score += CounterBonusFor(pHouse, pInf);
+
+		// Under attack captures and infiltrations wait for the answer to the threat.
+		if (GetMacroState(pHouse).CounterUnderAttack && (pInf->Engineer || IsSpyInfantryType(pInf)))
+			score -= ThreatFirstPenalty;
 
 		if (score > bestInfScore)
 		{
