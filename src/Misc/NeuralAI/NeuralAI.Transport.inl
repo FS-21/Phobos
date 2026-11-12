@@ -541,9 +541,13 @@ namespace
 
 		static std::unordered_map<uint64_t, GroundRoute> routes;
 		const int now = Unsorted::CurrentFrame;
-		const uint64_t routeKey = (static_cast<uint64_t>(static_cast<uint16_t>(zone)) << 48)
+		// Units around one start share a route: a wider square for the way around a field, whose legs
+		// are short and start from the route cell nearest to each unit.
+		const int startGrid = avoidResources ? 8 : 4;
+		const uint64_t routeKey =(static_cast<uint64_t>(static_cast<uint16_t>(zone)) << 48)
 			| (static_cast<uint64_t>(static_cast<uint8_t>(mz)) << 40)
-			| (static_cast<uint64_t>(static_cast<uint16_t>(from.X / 4)) << 30) | (static_cast<uint64_t>(static_cast<uint16_t>(from.Y / 4)) << 20)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(from.X / startGrid)) << 30)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(from.Y / startGrid)) << 20)
 			| (static_cast<uint64_t>(static_cast<uint16_t>(goal.X / 4)) << 10) | static_cast<uint64_t>(static_cast<uint16_t>(goal.Y / 4))
 			| (avoidResources ? (1ull << 63) : 0ull);
 
@@ -555,7 +559,35 @@ namespace
 
 		auto it = routes.find(routeKey);
 
-		if (it == routes.end() || it->second.MatchSerial != NeuralMatchSerial || now < it->second.Frame || now - it->second.Frame > 900)
+		bool search = it == routes.end() || it->second.MatchSerial != NeuralMatchSerial || now < it->second.Frame
+			|| now - it->second.Frame > 900;
+
+		// A search floods thousands of cells: a house starts a few per tick. Past that an old route of
+		// this match serves once more, and a unit with none waits for the next tick (a wave spread over
+		// many start cells cost 30 ms of one tick).
+		if (search)
+		{
+			static int searchFrame = -1;
+			static std::array<int, 32> searches {};
+
+			if (searchFrame != now)
+			{
+				searchFrame = now;
+				searches.fill(0);
+			}
+
+			const int owner = pFoot->Owner ? pFoot->Owner->ArrayIndex : -1;
+
+			if (owner >= 0 && owner < 32 && searches[owner]++ >= GroundRouteSearchesPerTick)
+			{
+				if (it == routes.end() || it->second.MatchSerial != NeuralMatchSerial)
+					return nullptr;
+
+				search = false;
+			}
+		}
+
+		if (search)
 		{
 			constexpr int DirX[8] = { 1, 0, -1, 0, 1, -1, -1, 1 };
 			constexpr int DirY[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
