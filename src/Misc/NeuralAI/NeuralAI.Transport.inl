@@ -591,19 +591,37 @@ namespace
 		{
 			constexpr int DirX[8] = { 1, 0, -1, 0, 1, -1, -1, 1 };
 			constexpr int DirY[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
-			auto const key = [](const CellStruct& c) { return (static_cast<uint32_t>(static_cast<uint16_t>(c.X)) << 16) | static_cast<uint16_t>(c.Y); };
+			// Per cell tables of one search instead of hash maps (a search of 12000 cells took 10 to 30 ms
+			// with them): the cell each one was reached from, and whether the unit can stand on it.
+			constexpr int GridSide = 512;
+			static std::vector<uint32_t> cameFrom(GridSide * GridSide);
+			static std::vector<uint8_t> standable(GridSide * GridSide);
+			std::fill(cameFrom.begin(), cameFrom.end(), 0u);
+			std::fill(standable.begin(), standable.end(), static_cast<uint8_t>(0));
+			auto const onGrid = [](const CellStruct& c) { return c.X >= 0 && c.Y >= 0 && c.X < GridSide && c.Y < GridSide; };
+			auto const slot = [](const CellStruct& c) { return static_cast<size_t>(c.Y) * GridSide + static_cast<size_t>(c.X); };
+
+			if (!onGrid(from))
+				return nullptr;
+
 			// A cell the unit can stand on: in its zone and clear for its speed type (other units ignored).
 			auto const inZone = [&](const CellStruct& c)
 			{
-				if (!MapClass::Instance.CoordinatesLegal(c) || MapClass::Instance.GetMovementZoneType(c, mz, false) != zone)
+				if (!onGrid(c))
 					return false;
 
-				auto const pCell = MapClass::Instance.TryGetCellAt(c);
+				uint8_t& known = standable[slot(c)];
 
-				if (!pCell || !pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false))
-					return false;
+				if (known == 0)
+				{
+					auto const pCell = MapClass::Instance.CoordinatesLegal(c) && MapClass::Instance.GetMovementZoneType(c, mz, false) == zone
+						? MapClass::Instance.TryGetCellAt(c) : nullptr;
+					const bool clear = pCell && pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false)
+						&& (!avoidResources || pCell->GetContainedTiberiumIndex() < 0 || c.DistanceFrom(from) <= 2.5);
+					known = clear ? 1 : 2;
+				}
 
-				return !avoidResources || pCell->GetContainedTiberiumIndex() < 0 || c.DistanceFrom(from) <= 2.5;
+				return known == 1;
 			};
 
 			// One step between two such cells, as the engine path finder allows it (FootClass::Can_Reach):
@@ -635,11 +653,9 @@ namespace
 				return (levelA < levelB ? pA : pB)->SlopeIndex != 0;
 			};
 
-			std::unordered_map<uint32_t, CellStruct> parent;
-			parent.reserve(16384);
 			std::vector<CellStruct> queue { from };
 			queue.reserve(16384);
-			parent.emplace(key(from), from);
+			cameFrom[slot(from)] = static_cast<uint32_t>(slot(from)) + 1;
 			CellStruct reached = CellStruct::Empty;
 
 			const size_t maxNodes = avoidResources ? ResourceDetourMaxNodes : 40000;
@@ -658,7 +674,7 @@ namespace
 				{
 					const CellStruct next { static_cast<short>(node.X + DirX[d]), static_cast<short>(node.Y + DirY[d]) };
 
-					if (parent.contains(key(next)) || !inZone(next) || !canStep(node, next))
+					if (!inZone(next) || cameFrom[slot(next)] != 0 || !canStep(node, next))
 						continue;
 
 					if (d >= 4)
@@ -673,7 +689,7 @@ namespace
 						}
 					}
 
-					parent.emplace(key(next), node);
+					cameFrom[slot(next)] = static_cast<uint32_t>(slot(node)) + 1;
 					queue.push_back(next);
 				}
 			}
@@ -682,8 +698,12 @@ namespace
 
 			if (reached != CellStruct::Empty)
 			{
-				for (CellStruct c = reached; c != from; c = parent[key(c)])
+				for (CellStruct c = reached; c != from;)
+				{
 					route.Cells.push_back(c);
+					const int back = static_cast<int>(cameFrom[slot(c)]) - 1;
+					c = CellStruct { static_cast<short>(back % GridSide), static_cast<short>(back / GridSide) };
+				}
 
 				std::reverse(route.Cells.begin(), route.Cells.end());
 			}
