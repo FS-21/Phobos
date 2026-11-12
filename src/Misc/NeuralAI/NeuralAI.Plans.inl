@@ -407,8 +407,9 @@ namespace
 
 			// Armed transports and carryalls (a transport helicopter, a Nighthawk) ferry first: they only
 			// strike while empty (no passengers, nothing slung), with nobody waiting for a ferry (fresh
-			// demand) and only targets within 30 cells. A far strike left them targeting it while the
-			// transport logic kept them home (Move / Unload), doing neither (matches #6164, #6176).
+			// demand, no passenger reserved) and only targets within 30 cells. A far strike left them
+			// targeting it while the transport logic kept them home (Move / Unload), doing neither
+			// (matches #6164, #6176).
 			// Parked empty on Unload counts as idle for them.
 			auto const pStrikerTypeExt = TechnoTypeExt::Fetch(pUnit->Type);
 			const bool armedTransport = IsAmphibiousOrAirTransport(pUnit->Type) || (pStrikerTypeExt && pStrikerTypeExt->Carryall);
@@ -426,7 +427,7 @@ namespace
 						ferryWanted = ferryWanted || demand > 0;
 				}
 
-				if (!empty || ferryWanted)
+				if (!empty || ferryWanted || IsFerryLoading(pHouse, pUnit->UniqueID))
 					continue;
 			}
 

@@ -183,6 +183,54 @@ namespace
 		return true;
 	}
 
+	// The zones a transport compares when a passenger asks to load (UnitClass::Receive_Message):
+	// those of the last cell each of them occupied, read for the passenger's movement zone. With
+	// different zones it sets out for the passenger instead of taking it in, and the passenger
+	// waits linked to it.
+	struct FerryDoorZones
+	{
+		int Transport { -1 };
+		int Boarder { -1 };
+
+		bool Match() const
+		{
+			return this->Transport == this->Boarder;
+		}
+	};
+
+	FerryDoorZones GetFerryDoorZones(const FootClass* pTransport, const FootClass* pBoarder)
+	{
+		const MovementZone movementZone = pBoarder->GetTechnoType()->MovementZone;
+
+		return { MapClass::Instance.GetMovementZoneType(pTransport->LastMapCoords, movementZone, false),
+			MapClass::Instance.GetMovementZoneType(pBoarder->LastMapCoords, movementZone, false) };
+	}
+
+	// A transport that flies and is off the ground.
+	bool IsFerryAloft(const FootClass* pTransport)
+	{
+		auto const pType = pTransport->GetTechnoType();
+
+		return (pType->JumpJet || pType->MovementZone == MovementZone::Fly) && pTransport->GetHeight() > 0;
+	}
+
+	// The engine records the cell a unit occupies when it reaches the cell's centre
+	// (FootClass::Per_Cell_Process), so one halted short of the centre, or a jumpjet that landed,
+	// still counts as standing on the cell before: water for a transport stopped at the shore.
+	// Runs that step for a unit at rest on the ground; true when its record was behind and caught up.
+	bool RegisterStoppedFootCell(FootClass* pFoot)
+	{
+		if (pFoot->LastMapCoords == pFoot->GetMapCoords() || pFoot->Destination || pFoot->Locomotor->Is_Moving()
+			|| IsFerryAloft(pFoot))
+		{
+			return false;
+		}
+
+		pFoot->UpdatePosition(PCPType::End);
+
+		return pFoot->LastMapCoords == pFoot->GetMapCoords();
+	}
+
 	bool CanFootDamageBuildings(const FootClass* pFoot)
 	{
 		if (!pFoot)
