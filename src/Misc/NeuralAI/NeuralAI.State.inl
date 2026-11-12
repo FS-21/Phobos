@@ -1306,6 +1306,8 @@ namespace
 	constexpr int ResourceLineCells = 40;
 	constexpr int ResourceDetourHopSteps = 8;
 	constexpr int ResourceDetourMaxNodes = 12000;
+	// Cell by cell route searches (GroundRouteHop) a house may start in one AI tick.
+	constexpr int GroundRouteSearchesPerTick = 2;
 	// A unit that resource cells heal, wounded below ResourceHealBelow, stops on one within
 	// ResourceHealSearchCells until it is back at ResourceHealUntil, for ResourceHealMaxFrames at
 	// most, and then not again for ResourceHealCooldownFrames.
