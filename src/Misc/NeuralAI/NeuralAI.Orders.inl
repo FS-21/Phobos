@@ -610,7 +610,11 @@ namespace
 					if (!hopping && !(pFoot->Owner && IsFootHeldStill(pFoot->Owner, pFoot, 300)))
 						return nullptr;
 
-					auto const pHopCell = GroundRouteHop(pFoot, pDestCell->MapCoords, 25);
+					// A route is only given past its leg plus 10 cells, so a goal nearer than that takes
+					// shorter legs (ships held in a row 26 cells from their goal got no route at all).
+					const double goalDist = pFoot->GetMapCoords().DistanceFrom(pDestCell->MapCoords);
+					const int hopSteps = goalDist > 35.0 ? 25 : (goalDist > 22.0 ? 12 : 6);
+					auto const pHopCell = GroundRouteHop(pFoot, pDestCell->MapCoords, hopSteps);
 
 					if (pHopCell)
 						hoppingSince[pFoot->UniqueID] = nowFrame;
