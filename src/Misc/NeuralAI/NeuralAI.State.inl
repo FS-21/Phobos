@@ -1288,6 +1288,7 @@ namespace
 	// ring of cells farther each time up to FerryLandingMaxRing.
 	constexpr int FerryLandingFrames = 300;
 	constexpr int FerryLandingMaxRing = 5;
+	constexpr double FerryLandingDriftCells = 1.5;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
 	constexpr int FerryParkedFrames = 300;

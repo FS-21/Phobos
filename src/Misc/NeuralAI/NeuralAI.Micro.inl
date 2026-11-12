@@ -10169,7 +10169,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			landing.Target = CellStruct::Empty;
 		}
 
-		if (landing.Cell != from || !passengersWaiting)
+		// Hovering drifts it over the cells around: only a real move starts the count again.
+		if (landing.Cell == CellStruct::Empty || landing.Cell.DistanceFrom(from) > FerryLandingDriftCells || !passengersWaiting)
 		{
 			landing.Cell = from;
 			landing.Since = now;

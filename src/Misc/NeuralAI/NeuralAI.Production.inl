@@ -4966,10 +4966,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Soldiers for the buildings are trained on purpose (user: do not wait for soldiers that happen
 	// to be idle, produce them for those bunkers): while buildings worth holding have seats left
 	// beyond the occupiers we have outside, the barracks train the best soldier for a seat ahead of
-	// the scored pick. The first engineer still goes first, and under attack the answer to the
-	// threat does.
-	if (bestGarrisonIdx >= 0 && bestInfIdx != bestGarrisonIdx && money >= GarrisonTrainingReserve
-		&& !GetMacroState(pHouse).CounterUnderAttack)
+	// the scored pick, with or without money in hand (a soldier is cheap and is paid as the money
+	// comes in; a house is often broke for minutes and the seat would go to a dearer pick). The
+	// first engineer still goes first, and under attack the answer to the threat does.
+	if (bestGarrisonIdx >= 0 && bestInfIdx != bestGarrisonIdx && !GetMacroState(pHouse).CounterUnderAttack)
 	{
 		auto const pScoredPick = bestInfIdx >= 0 ? InfantryTypeClass::Array.GetItem(bestInfIdx) : nullptr;
 
