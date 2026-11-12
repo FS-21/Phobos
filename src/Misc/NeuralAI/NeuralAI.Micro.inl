@@ -9450,13 +9450,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 
-				const int siegeRangeLeptons = std::max(pLandSiegeWpn->Range, isCarrierSpawner ? (18 * 256) : 1536);
+				// A ship with a gun that hits land shells the coast with it, at the gun's range, whatever
+				// else it launches (a destroyer's anti-submarine plane made it a carrier with 18 cells
+				// of reach and sent it at buildings far inland). Only a ship without such a gun counts
+				// on its aircraft.
+				const WeaponTypeClass* pLandGun = nullptr;
+
+				for (auto const pGun : { pWpn0, pWpn1 })
+				{
+					if (pGun && !pGun->Spawner && pGun->Damage > 0 && (!pGun->Projectile || pGun->Projectile->AG)
+						&& (!pLandGun || pGun->Range > pLandGun->Range))
+					{
+						pLandGun = pGun;
+					}
+				}
+
+				const int siegeRangeLeptons = pLandGun ? pLandGun->Range
+					: std::max(pLandSiegeWpn->Range, isCarrierSpawner ? (18 * 256) : 1536);
 				const int siegeRangeCells = std::clamp(siegeRangeLeptons / 256, 6, 26);
 				if (BuildingClass* pNavalTargetBld
 					= findCoastalNavalBombardmentTarget(uc, siegeRangeCells, pBeachU->UniqueID))
 				{
-					const int distLeptons = pBeachU->DistanceFrom(pNavalTargetBld);
-					if (distLeptons <= std::max(2560, siegeRangeLeptons))
+					// The engine's own reach test: the attack order only when it can fire from here.
+					if (pBeachU->IsCloseEnoughToAttack(pNavalTargetBld))
 					{
 						pBeachU->ClearMegaMissionData();
 						pBeachU->SetTarget(pNavalTargetBld);
@@ -13969,6 +13985,30 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Building!
 		if (ownTunnelCount == 1 && pHomeTunnel)
 		{
+			// TEMP diagnostic: why the second mouth is not dug (no such superweapon, not charged,
+			// or no cell found for it).
+			if (IsAITickWindow(1800, 20))
+			{
+				int tunnelSupers = 0;
+				int tunnelSupersReady = 0;
+				int tunnelSupersGranted = 0;
+
+				for (auto const pSuper : pHouse->Supers)
+				{
+					if (!pSuper || !pSuper->Type || !IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse))
+						continue;
+
+					tunnelSupers++;
+					tunnelSupersReady += pSuper->IsReady ? 1 : 0;
+					tunnelSupersGranted += pSuper->IsPresent ? 1 : 0;
+				}
+
+				Debug::Log("[NeuralAI] House %d Tunnel: one mouth %d leptons from home, delivery superweapons %d (granted %d, ready %d), "
+					"wave target %s, frame %d.\n",
+					pHouse->ArrayIndex, minHomeTunnelDist, tunnelSupers, tunnelSupersGranted, tunnelSupersReady,
+					pWaveTargetCell ? "yes" : "none", Unsorted::CurrentFrame);
+			}
+
 			for (auto const pSuper : pHouse->Supers)
 			{
 				if (!pSuper || !pSuper->IsReady || !pSuper->Type || !IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse))

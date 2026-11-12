@@ -659,6 +659,8 @@ namespace
 		std::map<int, int> NoRoomIslandUntil;
 		// Deployers (unit -> frame since) standing on a new island with no site for their building.
 		std::unordered_map<DWORD, int> DeployerNoSiteSince;
+		// Wounded units (unit -> frame since) that stopped on resource cells that heal them.
+		std::unordered_map<DWORD, int> ResourceHealSince;
 		// The enemy has no building left that counts and still has ships or submarines: until this
 		// frame the house builds and sends sonar ships and ships that hit under water.
 		int NavalRemnantUntil { -1 };
@@ -1027,6 +1029,7 @@ namespace
 			this->EnemyAcrossWater = false;
 			this->NoRoomIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
+			this->ResourceHealSince.clear();
 			this->NavalRemnantUntil = -1;
 			this->SubThreatUntil = -1;
 			this->DepotSaleUnit = 0;
@@ -1296,6 +1299,21 @@ namespace
 	// (something passing may only be in the way), and the island stays given up for NoRoomIslandFrames.
 	constexpr int DeployerNoSiteFrames = 450;
 	constexpr int NoRoomIslandFrames = 9000;
+	// A unit that resource cells hurt goes around a field when the straight way to its goal (the
+	// first ResourceLineCells of it) would cost it this share of its health, in legs of
+	// ResourceDetourHopSteps along a route that keeps off those cells.
+	constexpr int ResourceDetourHealthPercent = 20;
+	constexpr int ResourceLineCells = 40;
+	constexpr int ResourceDetourHopSteps = 8;
+	constexpr int ResourceDetourMaxNodes = 12000;
+	// A unit that resource cells heal, wounded below ResourceHealBelow, stops on one within
+	// ResourceHealSearchCells until it is back at ResourceHealUntil, for ResourceHealMaxFrames at
+	// most, and then not again for ResourceHealCooldownFrames.
+	constexpr double ResourceHealBelow = 0.7;
+	constexpr double ResourceHealUntil = 0.95;
+	constexpr int ResourceHealSearchCells = 8;
+	constexpr int ResourceHealMaxFrames = 900;
+	constexpr int ResourceHealCooldownFrames = 900;
 
 	bool IsFerryReserved(const HouseClass* pHouse, DWORD uid)
 	{

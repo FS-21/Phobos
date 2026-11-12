@@ -489,12 +489,14 @@ namespace
 		return ownField || macro.CounterUnderAttack ? it->second : it->second * CounterShareOtherExperts / 100;
 	}
 
-	// Extra tech priority of a missing building that unlocks a better counter; 0 unless Expert 2 is active.
+	// Extra tech priority of a missing building that unlocks a better counter: for Expert 2, and for
+	// everyone while the base is under attack (half of the houses raided from the air that never got
+	// an anti-air gun had none they could build yet).
 	int CounterUnlockBonusFor(HouseClass* pHouse, const BuildingTypeClass* pBld)
 	{
 		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
 
-		if (!pExt || pExt->NeuralAI_ActiveExpert != 2 || !pBld)
+		if (!pExt || !pBld || (pExt->NeuralAI_ActiveExpert != 2 && !GetMacroState(pHouse).CounterUnderAttack))
 			return 0;
 
 		auto const& bonus = GetMacroState(pHouse).CounterUnlockBonus;
