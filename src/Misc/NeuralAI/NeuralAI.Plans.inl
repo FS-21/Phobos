@@ -3998,7 +3998,7 @@ namespace
 					// One boards at a time (a transport has a single radio link for loading: all of them
 					// ordered to Enter at once stole it from each other and jammed at the door, Heisenberg:
 					// 10-15 "nobody boarded" per match with soldiers 0-2 cells away in Enter); the others
-					// walk up and wait within 3 cells for their turn.
+					// walk up and wait FerryWaitCells away for their turn.
 					int waiting = 0;
 					FootClass* pNearest = nullptr;
 					int nearestDist = INT_MAX;
@@ -4049,7 +4049,7 @@ namespace
 							pInf->ForceMission(Mission::Guard);
 						}
 
-						if (pTransport->DistanceFrom(pInf) > 3 * Unsorted::LeptonsPerCell)
+						if (!HoldFerryWaiter(pInf, pTransport))
 							IssueMoveOrder(pInf, pTransport, 3.0);
 					}
 
