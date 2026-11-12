@@ -722,6 +722,10 @@ namespace
 		{
 			DWORD Transport { 0 };
 			int Frame { 0 };
+			// TEMP diagnostic: orders it got from its transport and the last frame the transport handled its queue.
+			int EnterOrders { 0 };
+			int WalkOrders { 0 };
+			int QueueFrame { -1 };
 		};
 		std::map<DWORD, FerryReservation> FerryReserved {};
 		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war

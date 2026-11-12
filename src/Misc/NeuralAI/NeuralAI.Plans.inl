@@ -54,6 +54,18 @@ namespace
 			&& pType->DeploysInto->UndeploysInto == pType;
 	}
 
+	// Frames a siege unit may sit on its unfold order before it counts as stuck: the unfold itself
+	// takes far less.
+	constexpr int SiegeUnfoldStuckFrames = 150;
+
+	// An unfold that cannot happen (its ground is taken or unfit) leaves the unit on the order for
+	// good, out of the fight.
+	bool IsSiegeUnfoldStuck(UnitClass* pUnit)
+	{
+		return IsDeployableSiegeUnitType(pUnit->Type) && pUnit->CurrentMission == Mission::Unload && !pUnit->IsDeploying
+			&& Unsorted::CurrentFrame - pUnit->CurrentMissionStartTime >= SiegeUnfoldStuckFrames;
+	}
+
 	// Last frame the Neural AI itself ordered a vehicle to unfold, by unit (LogSiegeDeploys).
 	std::unordered_map<DWORD, int> NeuralDeployOrderFrame {};
 
