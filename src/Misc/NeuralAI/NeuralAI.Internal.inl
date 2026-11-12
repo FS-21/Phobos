@@ -196,6 +196,7 @@ namespace
 		FerryStrayLinkCut,
 		FerryTargetDropped,
 		FerryDoorCellMove,
+		FerryLandingRetried,
 		Count
 	};
 
@@ -222,7 +223,7 @@ namespace
 		"urbanGarrison", "urbanEvacuate", "urbanClear", "allyTechYield", "deployerIslandNoRoom", "stuckUnloadMoved", "capitalGroupLaunched", "capitalGroupRetreat", "submarineSonarAvoided", "depotEmergencySale", "veinholeAttack", "cliffOpened", "stealthRevealFired",
 		"stagingHoldTimedOut", "jamCleared", "jamYielded", "mouthCleared",
 		"hoverReleased", "groundRouteHop", "medicEscort", "garrisonSquad", "dryEconomySale", "ferryReserved", "productionPickBanned",
-		"ferryDoorRegistered", "ferryStrayLinkCut", "ferryTargetDropped", "ferryDoorCellMove" };
+		"ferryDoorRegistered", "ferryStrayLinkCut", "ferryTargetDropped", "ferryDoorCellMove", "ferryLandingRetried" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

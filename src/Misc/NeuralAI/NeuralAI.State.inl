@@ -519,12 +519,14 @@ namespace
 		std::unordered_map<int, std::vector<TechnoTypeClass*>> TechUnlockTypes {};
 		bool HasBuildableTechUnlock { false };
 		int TechUnlockFrame { -100000 };
-		// Counter composition (UpdateCounterComposition, Expert 2): production score shift per
-		// buildable combat type against the enemy army seen so far, and the extra priority of the
-		// first of a building that would unlock a better counter than any we can build now.
+		// Counter composition (UpdateCounterComposition): production score shift per buildable
+		// combat type against the enemy army seen so far and what is attacking the base now, the
+		// extra priority of the first of a building that would unlock a better counter than any we
+		// can build now, and whether the base was under attack at the last update.
 		std::unordered_map<const TechnoTypeClass*, int> CounterBonus {};
 		std::unordered_map<int, int> CounterUnlockBonus {};
 		int CounterFrame { -100000 };
+		bool CounterUnderAttack { false };
 		// Progressive unit tier (UpdateUnitTierCap): highest TechLevel of combat units it may build
 		// now, the highest tier of enemy units it has seen, and its peak building count (a house
 		// that lost half its base unlocks one tier more).
@@ -742,6 +744,16 @@ namespace
 			int DoorLogFrame { -1 };
 		};
 		std::unordered_map<DWORD, FerryBoardTurn> FerryBoardTurns {};
+		// Flying transports that hang over a cell without touching down while passengers wait:
+		// the cell, since when, the cell they were sent to instead and how many times they moved on.
+		struct FerryLanding
+		{
+			CellStruct Cell { CellStruct::Empty };
+			int Since { -1 };
+			CellStruct Target { CellStruct::Empty };
+			int Tries { 0 };
+		};
+		std::unordered_map<DWORD, FerryLanding> FerryLandings {};
 		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
 		// factories idle for thousands of frames, the AI picking the same type every tick): the pick
 		// of a queue that stays empty 900 frames with money and factories is banned 5400 frames.
@@ -923,6 +935,7 @@ namespace
 			this->CounterBonus.clear();
 			this->CounterUnlockBonus.clear();
 			this->CounterFrame = -100000;
+			this->CounterUnderAttack = false;
 			this->UnitTierCap = 2;
 			this->SeenEnemyUnitTier = 0;
 			this->PeakOwnedBuildings = 0;
@@ -1035,6 +1048,7 @@ namespace
 			this->FerryBlockedUntil.clear();
 			this->FerryReserved.clear();
 			this->FerryBoardTurns.clear();
+			this->FerryLandings.clear();
 			this->ProductionBanUntil.clear();
 			this->ProductionPickIdx = { -1, -1, -1 };
 			this->ProductionPickSince = { 0, 0, 0 };
@@ -1256,6 +1270,10 @@ namespace
 	constexpr int FerryBoardTurnFrames = 300;
 	constexpr double FerryBoardTurnCells = 6.0;
 	constexpr int FerryBoardFailedFrames = 2700;
+	// A flying transport that has not touched down after this long over one cell tries another, one
+	// ring of cells farther each time up to FerryLandingMaxRing.
+	constexpr int FerryLandingFrames = 300;
+	constexpr int FerryLandingMaxRing = 5;
 	// A deployer on a new island with no site for its building gives the island up after this long
 	// (something passing may only be in the way), and the island stays given up for NoRoomIslandFrames.
 	constexpr int DeployerNoSiteFrames = 450;

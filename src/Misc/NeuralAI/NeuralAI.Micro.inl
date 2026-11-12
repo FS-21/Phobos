@@ -10075,51 +10075,133 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return nullptr;
 	};
 
-	// Passengers cannot step onto every cell a transport stands on: where nothing on foot, tracks
-	// or wheels crosses the beach, the engine refuses to load there and sends the transport
-	// towards the passenger. The transport moves on to the nearest free cell of the island that
-	// its passengers can reach; true while it is on its way there.
-	auto const moveToBoardableCell = [&](UnitClass* pTransport, const CellStruct& from, int landZone) -> bool
+	// Where a transport stands to load. Passengers cannot step onto every cell: where nothing on
+	// foot, tracks or wheels crosses the beach, the engine refuses to load there and sends the
+	// transport towards the passenger, so the transport moves on to the nearest free cell of the
+	// island that its passengers can reach. A flying one that hangs over a cell for
+	// FerryLandingFrames without touching down while passengers wait tries to land on another cell
+	// near, one ring farther each time. True while it is on its way to such a cell.
+	auto const moveToLoadingCell = [&](UnitClass* pTransport, const CellStruct& from, int landZone, bool passengersWaiting) -> bool
 	{
-		if (MapClass::Instance.GetMovementZoneType(from, MovementZone::Normal, false) == landZone)
-			return false;
-
-		constexpr int doorSearchCells = 4;
-		CellClass* pDoorCell = nullptr;
-		double doorDist = 999999.0;
-
-		for (int dy = -doorSearchCells; dy <= doorSearchCells; ++dy)
+		auto const nearestLoadingCell = [&](int minRing, int maxRing) -> CellClass*
 		{
-			for (int dx = -doorSearchCells; dx <= doorSearchCells; ++dx)
+			CellClass* pBest = nullptr;
+			double bestDist = 999999.0;
+
+			for (int dy = -maxRing; dy <= maxRing; ++dy)
 			{
-				const CellStruct c { static_cast<short>(from.X + dx), static_cast<short>(from.Y + dy) };
-				auto const pC = MapClass::Instance.TryGetCellAt(c);
-
-				if (!pC || pC->LandType == LandType::Water || pC->GetBuilding()
-					|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != landZone
-					|| !pC->IsClearToMove(pTransport->Type->SpeedType, false, false, -1, pTransport->Type->MovementZone, -1, false))
+				for (int dx = -maxRing; dx <= maxRing; ++dx)
 				{
-					continue;
-				}
+					if (std::max(std::abs(dx), std::abs(dy)) < minRing)
+						continue;
 
-				const double d = c.DistanceFrom(from);
+					const CellStruct c { static_cast<short>(from.X + dx), static_cast<short>(from.Y + dy) };
+					auto const pC = MapClass::Instance.TryGetCellAt(c);
 
-				if (d < doorDist)
-				{
-					doorDist = d;
-					pDoorCell = pC;
+					if (!pC || pC->LandType == LandType::Water || pC->GetBuilding()
+						|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != landZone
+						|| !pC->IsClearToMove(pTransport->Type->SpeedType, false, false, -1, pTransport->Type->MovementZone, -1, false))
+					{
+						continue;
+					}
+
+					const double d = c.DistanceFrom(from);
+
+					if (d < bestDist)
+					{
+						bestDist = d;
+						pBest = pC;
+					}
 				}
 			}
+
+			return pBest;
+		};
+
+		auto const sendTo = [pTransport](CellClass* pCell)
+		{
+			if (pTransport->Destination != pCell || pTransport->CurrentMission != Mission::Move)
+			{
+				pTransport->SetDestination(pCell, true);
+				pTransport->QueueMission(Mission::Move, true);
+			}
+		};
+
+		constexpr int doorSearchCells = 4;
+
+		if (MapClass::Instance.GetMovementZoneType(from, MovementZone::Normal, false) != landZone)
+		{
+			auto const pDoorCell = nearestLoadingCell(0, doorSearchCells);
+
+			if (!pDoorCell)
+				return false;
+
+			if (pTransport->Destination != pDoorCell)
+				CountDecision(NeuralDecision::FerryDoorCellMove, pHouse->ArrayIndex);
+
+			sendTo(pDoorCell);
+
+			return true;
 		}
 
-		if (!pDoorCell)
+		auto& landings = GetMacroState(pHouse).FerryLandings;
+
+		if (!IsFerryAloft(pTransport))
+		{
+			landings.erase(pTransport->UniqueID);
+			return false;
+		}
+
+		auto& landing = landings[pTransport->UniqueID];
+		const int now = Unsorted::CurrentFrame;
+
+		if (landing.Target != CellStruct::Empty)
+		{
+			auto const pGoing = abstract_cast<CellClass*>(pTransport->Destination);
+
+			if (pGoing && pGoing->MapCoords == landing.Target)
+				return true;
+
+			landing.Target = CellStruct::Empty;
+		}
+
+		if (landing.Cell != from || !passengersWaiting)
+		{
+			landing.Cell = from;
+			landing.Since = now;
+			return false;
+		}
+
+		if (now - landing.Since < FerryLandingFrames)
 			return false;
 
-		if (pTransport->Destination != pDoorCell || pTransport->CurrentMission != Mission::Move)
+		const int ring = std::min(landing.Tries + 1, FerryLandingMaxRing);
+		auto const pLandingCell = nearestLoadingCell(ring, FerryLandingMaxRing);
+		landing.Since = now;
+
+		if (!pLandingCell)
+			return false;
+
+		landing.Tries++;
+		landing.Target = pLandingCell->MapCoords;
+		sendTo(pLandingCell);
+		CountDecision(NeuralDecision::FerryLandingRetried, pHouse->ArrayIndex);
+
+		// TEMP diagnostic: a flying transport that could not land where it was.
+		static int landingLogSerial = -1;
+		static int landingLogCount = 0;
+
+		if (landingLogSerial != NeuralMatchSerial)
 		{
-			pTransport->SetDestination(pDoorCell, true);
-			pTransport->QueueMission(Mission::Move, true);
-			CountDecision(NeuralDecision::FerryDoorCellMove, pHouse->ArrayIndex);
+			landingLogSerial = NeuralMatchSerial;
+			landingLogCount = 0;
+		}
+
+		if (landingLogCount++ < 30)
+		{
+			Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: %s %u hung over (%d,%d) at height %d mission %d, landing try %d at (%d,%d).\n",
+				pHouse->ArrayIndex, now, pTransport->Type->ID, pTransport->UniqueID, from.X, from.Y, pTransport->GetHeight(),
+				static_cast<int>(pTransport->CurrentMission), landing.Tries, landing.Target.X, landing.Target.Y);
 		}
 
 		return true;
@@ -11626,7 +11708,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (onDeployerLand)
 				{
-					if (moveToBoardableCell(pTrans, transCoords, transZone))
+					if (moveToLoadingCell(pTrans, transCoords, transZone, true))
 						continue;
 
 					// Stay 100% still on the land spot where the transport is parked!
@@ -11673,7 +11755,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (onEngLand)
 				{
-					if (moveToBoardableCell(pTrans, transCoords, transZone))
+					if (moveToLoadingCell(pTrans, transCoords, transZone, true))
 						continue;
 
 					if (pTrans->CurrentMission != Mission::Guard || pTrans->Destination != nullptr)
@@ -11918,7 +12000,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// 2) Send units strictly ONE BY ONE (only when pSingleActiveBoarder == nullptr)
 			//    so the single radio link (0x0073781E) is never stolen and no jamming occurs!
 			// =========================================================================
-			if (moveToBoardableCell(pTrans, transCoords, transZone))
+			if (moveToLoadingCell(pTrans, transCoords, transZone, pSingleActiveBoarder != nullptr || hasFerryQueue))
 				continue;
 
 			// An armed transport with a target stays in the air to shoot (HoverAttack) and nobody can
