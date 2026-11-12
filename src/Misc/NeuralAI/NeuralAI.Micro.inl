@@ -2362,11 +2362,30 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Damaged occupiable buildings an engineer could repair: their health is only known while
 		// they are ours or in sight (fog-fair). Evacuations are UpdateUrban's job (Urban.inl).
-		if (pEBld->Type->CanBeOccupied && pEBld->Type->Repairable && pEBld->GetHealthPercentage() < 0.72
-			&& (pEBld->Owner == pHouse || IsCellInSightOfAI(pHouse, pEBld->GetMapCoords())))
+		// A repair uses the engineer up: one with soldiers of ours or of an ally inside is worth it once
+		// it is half gone, an empty one only when our idle occupiers asked for it (RunUrbanGarrison:
+		// nothing else to take, only its damage keeps them out; 178 of 251 repair orders went to
+		// empty buildings nobody was going to man, up to 79% health).
+		const bool urbanHeldByFriend = pEBld->Occupants.Count > 0 && pEBld->Occupants.GetItem(0)
+			&& pHouse->IsAlliedWith(pEBld->Occupants.GetItem(0)->Owner);
+		auto const wantedAsGarrison = [pHouse, pEBld]()
 		{
-			const bool isFriendlyOrEmpty = (pEBld->Occupants.Count == 0)
-				|| (pEBld->Occupants.GetItem(0) && pHouse->IsAlliedWith(pEBld->Occupants.GetItem(0)->Owner));
+			auto const& urban = GetUrbanState(pHouse);
+
+			return urban.RepairWantedID == pEBld->UniqueID
+				&& Unsorted::CurrentFrame - urban.RepairWantedFrame <= UrbanRepairWantedFrames;
+		};
+		const bool urbanRepairCandidate = pEBld->Type->CanBeOccupied && pEBld->Type->Repairable
+			&& (pEBld->Owner == pHouse || IsCellInSightOfAI(pHouse, pEBld->GetMapCoords()));
+		const bool urbanWorthAnEngineer = urbanRepairCandidate
+			&& (urbanHeldByFriend
+				? pEBld->GetHealthPercentage() < UrbanRepairHeldBelow
+				: (pEBld->Occupants.Count == 0 && pEBld->GetHealthPercentage() * 100.0 < UrbanGarrisonMinHealthPercent
+					&& wantedAsGarrison()));
+
+		if (urbanWorthAnEngineer)
+		{
+			const bool isFriendlyOrEmpty = true;
 
 			// One engineer per building: none while one of ours already walks into it.
 			bool engineerOnTheWay = false;
