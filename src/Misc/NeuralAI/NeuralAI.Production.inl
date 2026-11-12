@@ -1253,6 +1253,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 				}
 
+				// Flying vehicles are an air raid: ground towers cannot hit them, so they ask for none.
+				if (pEU->Type->JumpJet || pEU->Type->MovementZone == MovementZone::Fly || pEU->IsInAir())
+					continue;
+
 				const CellStruct euc = pEU->GetMapCoords();
 				const int dCheb = std::max(std::abs(bc.X - euc.X), std::abs(bc.Y - euc.Y));
 				if (dCheb <= 20)

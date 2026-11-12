@@ -3994,6 +3994,10 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 					continue;
 				}
 
+				// Flying units ask for anti-air, not for the ground towers this flag builds.
+				if (pTechno->WhatAmI() == AbstractType::Aircraft || pTechno->GetTechnoType()->JumpJet || pTechno->IsInAir())
+					continue;
+
 				const CellStruct tc = pTechno->GetMapCoords();
 				const double dx = static_cast<double>(bestCell.X - tc.X);
 				const double dy = static_cast<double>(bestCell.Y - tc.Y);
