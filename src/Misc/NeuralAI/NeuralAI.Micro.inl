@@ -9847,6 +9847,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	};
 
 	bool deployerTransportAssigned = false;
+	bool engineerTransportAssigned = false;
 
 	// Ferry reservations: the live passenger of each one for this tick; stale ones go (passenger
 	// dead or already aboard, transport gone, older than FerryReservationFrames). A transport that
@@ -10848,7 +10849,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pTrip->UnderfilledSince = -1;
 		}
 
-		const bool nothingMoreToLoad = numPass >= 1 && onSafePickupShore && !canFitMoreOnPickupIsland && !convoyHold && !underfilledHold;
+		// Loading that stalls (units on the island that fit and never get aboard) does not hold the
+		// cargo for good: with no new passenger in FerryLoadStallFrames the load counts as complete.
+		bool loadStalled = false;
+
+		if (pTrip && numPass >= 1 && onSafePickupShore)
+		{
+			if (numPass != pTrip->LastPassCount || pTrip->LastBoardFrame < 0)
+			{
+				pTrip->LastPassCount = numPass;
+				pTrip->LastBoardFrame = Unsorted::CurrentFrame;
+			}
+
+			loadStalled = Unsorted::CurrentFrame - pTrip->LastBoardFrame >= FerryLoadStallFrames;
+		}
+
+		const bool nothingMoreToLoad = numPass >= 1 && onSafePickupShore && (!canFitMoreOnPickupIsland || loadStalled) && !convoyHold
+			&& !underfilledHold;
 		const bool isReadyToSailEffective = carryingMCV || carryingStolenForeignMCV || carryingHarvester
 			|| (carryingEngineer && pIslandTechGoalCell != nullptr)
 			|| emergencyDepartUnderFire || hasCargoInTransitOrUnloading || nothingMoreToLoad;
@@ -10863,7 +10880,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				| (engineerForTech ? FerrySailEngineer : 0)
 				| (emergencyDepartUnderFire ? FerrySailUnderFire : 0)
 				| (hasCargoInTransitOrUnloading ? FerrySailInTransit : 0)
-				| (nothingMoreToLoad ? FerrySailNothingMoreToLoad : 0);
+				| (nothingMoreToLoad ? FerrySailNothingMoreToLoad : 0)
+				| (nothingMoreToLoad && loadStalled ? FerrySailLoadStalled : 0);
 		}
 
 		// Sailing: the passengers still walking up are free again (repro: a hovercraft that left with
@@ -11330,9 +11348,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 			}
-			else if (pHomeIslandEngineer != nullptr && !carryingEngineer
-				&& CanPassengerFitInTransport(pTrans, pHomeIslandEngineer->Type))
+			// One transport for the engineer, the one it is already boarding if any: asked by every
+			// transport on its island, it was sent from one to the next and held them all.
+			else if (pHomeIslandEngineer != nullptr && !carryingEngineer && !engineerTransportAssigned
+				&& CanPassengerFitInTransport(pTrans, pHomeIslandEngineer->Type)
+				&& !((pHomeIslandEngineer->CurrentMission == Mission::Enter || pHomeIslandEngineer->QueuedMission == Mission::Enter)
+					&& !pHomeIslandEngineer->ContainsLink(pTrans) && pHomeIslandEngineer->ArchiveTarget != pTrans
+					&& pHomeIslandEngineer->Destination != pTrans))
 			{
+				engineerTransportAssigned = true;
 				const int engZone = ObjectZone(pHomeIslandEngineer, MovementZone::Normal);
 				CellClass* pEngPickupBeach
 					= FindSafeIslandLandingCell(pHouse, pHomeIslandEngineer->GetMapCoords(), engZone, false);

@@ -1352,6 +1352,50 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// With no ground attack on top, a raid short of guns leaves the towers that cannot shoot up for later.
 		const bool airRaidOnly = airRaidShortOfDefenses && !underVehicleAttack && !underInfantryAttack && !effectiveFrontlineThreat;
 		bool bestFillsAirDeficit = false;
+		int bestAirDefenseIdx = -1;
+		int bestAirDefenseScore = -32000;
+
+		// A raid short of guns with no defense that shoots up buildable yet: the buildings those
+		// defenses still miss come ahead of routine picks.
+		std::vector<int> airDefensePrerequisites;
+
+		if (airRaidShortOfDefenses)
+		{
+			bool airDefenseBuildable = false;
+			std::vector<int> missing;
+
+			for (auto const pDefType : BuildingTypeClass::Array)
+			{
+				if (!pDefType || !pDefType->IsBaseDefense || pDefType->TechLevel < 0
+					|| (ownHouseBit != 0u && !pDefType->InOwners(ownHouseBit)))
+				{
+					continue;
+				}
+
+				bool antiInf = false;
+				bool antiArmor = false;
+				bool antiAir = false;
+				bool pureAA = false;
+				bool unarmedBunker = false;
+				GetDefenseCapabilities(pDefType, antiInf, antiArmor, antiAir, pureAA, unarmedBunker);
+
+				if (!antiAir)
+					continue;
+
+				if (CanBuildUnderHumanRules(pHouse, pDefType))
+				{
+					airDefenseBuildable = true;
+
+					break;
+				}
+
+				const std::vector<int> typeMissing = MissingTypePrerequisites(pHouse, pDefType);
+				missing.insert(missing.end(), typeMissing.begin(), typeMissing.end());
+			}
+
+			if (!airDefenseBuildable)
+				airDefensePrerequisites = std::move(missing);
+		}
 
 		// TEMP diagnostic: how far the best defense that shoots up got in this pass and with what score.
 		int airDiagStage = 0;
@@ -2824,6 +2868,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				candidateFillsAirDeficit = fillsAirDeficit;
 
+				if (fillsAirDeficit && score > bestAirDefenseScore)
+				{
+					bestAirDefenseScore = score;
+					bestAirDefenseIdx = pBld->ArrayIndex;
+				}
+
 				if (isAntiAir)
 					noteAirDefense(pBld, 6, score);
 			}
@@ -2895,6 +2945,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score = std::max(score, 5000);
 			}
 
+			constexpr int airDefensePrerequisiteBonus = 1500;
+
+			if (!airDefensePrerequisites.empty() && pHouse->CountOwnedNow(pBld) == 0
+				&& std::find(airDefensePrerequisites.begin(), airDefensePrerequisites.end(), pBld->ArrayIndex) != airDefensePrerequisites.end())
+			{
+				score += airDefensePrerequisiteBonus;
+			}
+
 			if (isBldInProgress && (!pHouse->HasLowPower() || pBld->PowerBonus > pBld->PowerDrain))
 			{
 				score += 850; // Commit to finishing partially constructed buildings in
@@ -2910,6 +2968,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		const int scoredBldIdx = bestBldIdx;
+
+		// A raid with nothing of ours that shoots up: the best such defense comes before any other
+		// pick, except restoring income and a building the yard is already working on.
+		if (airRaidShortOfDefenses && totalAntiAirDefenses == 0 && bestAirDefenseIdx >= 0 && bestBldIdx != bestAirDefenseIdx
+			&& hasActiveBuildingIncome && inProgressBldIdx < 0 && inProgressDefIdx < 0)
+		{
+			bestBldIdx = bestAirDefenseIdx;
+			bestBldScore = std::max(bestBldScore, bestAirDefenseScore);
+			bestFillsAirDeficit = true;
+		}
 
 		// Bank governor: in its share of the 900-frame windows the next structure is the factory it
 		// wants most; the other windows keep the usual picks (tech, defenses, power, refineries).
