@@ -4406,6 +4406,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				continue;
 			}
+			// A siege unit stuck on an unfold that never happens goes back on guard, where the rules
+			// below pick it up again.
+			else if (IsSiegeUnfoldStuck(pUnit))
+			{
+				// TEMP diagnostic: how long it sat on the order.
+				Debug::Log("[NeuralAI] House %d SiegeDeploy DIAG: %s %u at (%d,%d) freed from a stuck unfold after %d frames, frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y,
+					Unsorted::CurrentFrame - pUnit->CurrentMissionStartTime, Unsorted::CurrentFrame);
+				pUnit->ForceMission(Mission::Guard);
+
+				continue;
+			}
 			// A unit that unfolds to fire does it only at a target the deployed gun reaches and can
 			// hit, while it fights or stands guard: unfolding at anything else (out of reach, submerged
 			// or flying) only starts a loop of unfolding and packing up.
@@ -8897,8 +8909,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else
 			{
+				// A unit that unfolds into a building is not sent hunting: Tick Tanks on that mission
+				// were seen unfolding at targets beyond their reach.
 				pU->ClearMegaMissionData();
-				pU->QueueMission(Mission::Hunt, true);
+				pU->QueueMission(pU->Type->DeploysInto ? Mission::Area_Guard : Mission::Hunt, true);
 			}
 
 			NoteExpertCommand(pHouse, pU, CreditSourceWave);
@@ -9901,13 +9915,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						auto const pTransDest = pTransportFoot->Destination;
 						Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: %s %u reserved by %s %u expired, %d cells away, passenger mission %d dest %s, "
-							"transport mission %d mega %d dest (%d,%d) at (%d,%d) pass %d.\n",
+							"transport mission %d mega %d dest (%d,%d) at (%d,%d) pass %d, enter orders %d, walk orders %d, queue seen %d frames ago, "
+							"zones %d and %d, transport height %d, boarding link %d.\n",
 							pHouse->ArrayIndex, nowFrame, pPassenger->GetTechnoType()->ID, pPassenger->UniqueID, pTransportFoot->GetTechnoType()->ID,
 							pTransportFoot->UniqueID, static_cast<int>(pPassenger->GetMapCoords().DistanceFrom(pTransportFoot->GetMapCoords())),
 							static_cast<int>(pPassenger->CurrentMission), pPassenger->Destination == pTransportFoot ? "transport" : (pPassenger->Destination ? "other" : "none"),
 							static_cast<int>(pTransportFoot->CurrentMission), static_cast<int>(pTransportFoot->MegaMission),
 							pTransDest ? CellClass::Coord2Cell(pTransDest->GetCoords()).X : -1, pTransDest ? CellClass::Coord2Cell(pTransDest->GetCoords()).Y : -1,
-							pTransportFoot->GetMapCoords().X, pTransportFoot->GetMapCoords().Y, pTransportFoot->Passengers.NumPassengers);
+							pTransportFoot->GetMapCoords().X, pTransportFoot->GetMapCoords().Y, pTransportFoot->Passengers.NumPassengers,
+							it->second.EnterOrders, it->second.WalkOrders, it->second.QueueFrame >= 0 ? nowFrame - it->second.QueueFrame : -1,
+							ObjectZone(pPassenger, MovementZone::Normal), ObjectZone(pTransportFoot, MovementZone::Normal),
+							pTransportFoot->GetHeight(), pPassenger->ContainsLink(pTransportFoot) ? 1 : 0);
 					}
 				}
 
@@ -11475,6 +11493,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
+			// A transport that holds cargo keeps loading on the shore it stands on: fetching more from
+			// another shore takes it across water, where a loaded transport counts as departed and
+			// lands with whatever it has.
+			if (numPass >= 1 && onSafePickupShore)
+			{
+				desiredPickupZone = transZone;
+				desiredPickupAnchor = transCoords;
+			}
+
 			const bool notAtPickupShore = (pTransCell && pTransCell->LandType == LandType::Water)
 				|| (desiredPickupZone >= 0 && transZone != desiredPickupZone)
 				|| (!isSafeFriendlyPickupIsland(transZone));
@@ -11758,11 +11785,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				pSingleActiveBoarder = pNearest;
 				OrderFootToEnter(pNearest, pTrans);
+				GetMacroState(pHouse).FerryReserved[pNearest->UniqueID].EnterOrders++;
 			}
 
 			// The others walk up and wait within 4 cells.
 			for (auto const pQueued : ferryQueue)
 			{
+				auto& queuedReservation = GetMacroState(pHouse).FerryReserved[pQueued->UniqueID];
+				queuedReservation.QueueFrame = Unsorted::CurrentFrame;
+
 				if (pQueued == pSingleActiveBoarder || pQueued->CurrentMission == Mission::Enter
 					|| pQueued->QueuedMission == Mission::Enter || pQueued->GetMapCoords().DistanceFrom(transCoords) <= 4.0)
 				{
@@ -11770,6 +11801,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				IssueMoveOrder(pQueued, pTrans, 3.0);
+				queuedReservation.WalkOrders++;
 			}
 		}
 	}
