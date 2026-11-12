@@ -1,4 +1,4 @@
-// NeuralAI.Counters.inl: Counter composition (Expert 2): which buildable types beat the enemy army seen so far.
+// NeuralAI.Counters.inl: Counter composition: which buildable types beat the enemy army seen so far and what attacks the base now.
 // Part of NeuralAI.cpp (included in order; one translation unit).
 
 namespace
@@ -9,6 +9,8 @@ namespace
 		int ArmorIndex { 0 };
 		EnemyForceCategory Category { EnemyForceCategory::Vehicle };
 		int Value { 0 };
+		// It attacked our buildings lately (its value already weighs more).
+		bool AttackingNow { false };
 	};
 
 	// The seen enemy army as counter targets (fog-fair: built from the sightings memory only).
@@ -22,7 +24,17 @@ namespace
 		int ArtillerySpeed { 0 };
 		int VehicleShare { 0 };
 		int ArtilleryShare { 0 };
+		// Something attacked our buildings within CounterThreatNowFrames.
+		bool UnderAttack { false };
 	};
+
+	// What hit our buildings within CounterThreatNowFrames counts CounterThreatNowWeight times in
+	// the view: the answer to the threat at the door comes before the answer to an army only seen.
+	// Experts other than the counter strategist take CounterShareOtherExperts percent of the shift
+	// in peace and all of it under attack.
+	constexpr int CounterThreatNowFrames = 1800;
+	constexpr int CounterThreatNowWeight = 3;
+	constexpr int CounterShareOtherExperts = 50;
 
 	// Production queues compared separately: a counter is chosen among what one factory can build.
 	enum class NeuralCounterQueue : int
@@ -87,6 +99,54 @@ namespace
 			else if (sighting.Category == EnemyForceCategory::Vehicle)
 			{
 				vehicleValue += weighted;
+			}
+		}
+
+		// The attackers of our buildings: their armor and kind weigh more, and one never sighted
+		// (it shot from the fog, or the sighting faded) enters the view as a quarter of it.
+		for (auto const& rec : GetMacroState(pHouse).AttackedBuildingsLIFO)
+		{
+			if (!rec.AttackerType || rec.Threat == NeuralThreatCategory::None
+				|| Unsorted::CurrentFrame - rec.AttackFrame > CounterThreatNowFrames || Unsorted::CurrentFrame < rec.AttackFrame)
+			{
+				continue;
+			}
+
+			view.UnderAttack = true;
+			const int armorIndex = static_cast<int>(rec.AttackerType->Armor);
+			const bool byAir = rec.Threat == NeuralThreatCategory::Air;
+			const bool byInfantry = rec.Threat == NeuralThreatCategory::Infantry;
+			bool found = false;
+
+			for (auto& target : view.Targets)
+			{
+				const bool sameKind = byAir ? target.Category == EnemyForceCategory::Air
+					: byInfantry ? target.Category == EnemyForceCategory::Infantry
+					: (target.Category != EnemyForceCategory::Air && target.Category != EnemyForceCategory::Infantry);
+
+				if (target.ArmorIndex != armorIndex || !sameKind)
+					continue;
+
+				found = true;
+
+				if (!target.AttackingNow)
+				{
+					target.AttackingNow = true;
+					view.TotalValue += target.Value * (CounterThreatNowWeight - 1);
+					target.Value *= CounterThreatNowWeight;
+				}
+			}
+
+			if (!found)
+			{
+				const int value = std::max(rec.AttackerType->Cost, view.TotalValue / 4);
+				const EnemyForceCategory category = byAir ? EnemyForceCategory::Air
+					: byInfantry ? EnemyForceCategory::Infantry : EnemyForceCategory::Vehicle;
+				view.Targets.push_back({ armorIndex, category, value, true });
+				view.TotalValue += value;
+
+				if (category == EnemyForceCategory::Vehicle)
+					vehicleValue += value;
 			}
 		}
 
@@ -269,7 +329,9 @@ namespace
 		return fit;
 	}
 
-	// Expert 2 (every 300 frames while active): scores every buildable combat type of each queue
+	// Every 300 frames, for every expert (countering the threat is not one expert's business; the
+	// counter strategist, Expert 2, takes all of the shift, the others CounterShareOtherExperts
+	// percent in peace and all of it under attack): scores every buildable combat type of each queue
 	// against the enemy army seen so far. A type gets +12 points per fit point above the mean of its
 	// queue (defenses +8), so the best counter of a factory leads and a type that cannot hurt what
 	// the enemy fields falls behind; scaled by the opponent model confidence, so a few early
@@ -279,10 +341,7 @@ namespace
 	// progressive tier: types above it are neither scored nor worth unlocking yet.
 	void UpdateCounterComposition(HouseClass* pHouse)
 	{
-		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
-
-		// Expert 8 uses the same view for its aircraft, Expert 7 for the tower type that beats what we saw.
-		if (!pExt || (pExt->NeuralAI_ActiveExpert != 2 && pExt->NeuralAI_ActiveExpert != 7 && pExt->NeuralAI_ActiveExpert != 8))
+		if (!pHouse || !HouseExt::Fetch(pHouse))
 			return;
 
 		auto& macro = GetMacroState(pHouse);
@@ -295,14 +354,12 @@ namespace
 		macro.CounterBonus.clear();
 		macro.CounterUnlockBonus.clear();
 
-		const int confidence = macro.OpponentProfile.Confidence();
-
-		if (confidence <= 0)
-			return;
-
 		const NeuralCounterView view = BuildCounterView(pHouse);
+		macro.CounterUnderAttack = view.UnderAttack;
+		// What attacks the base is certain, however little of the enemy army was seen.
+		const int confidence = view.UnderAttack ? 100 : macro.OpponentProfile.Confidence();
 
-		if (view.TotalValue <= 0)
+		if (confidence <= 0 || view.TotalValue <= 0)
 			return;
 
 		struct Candidate
@@ -404,8 +461,9 @@ namespace
 		}
 	}
 
-	// Production score shift of a type from the counter composition; 0 unless Expert 2 is active
-	// (Expert 8 uses it for its aircraft only, Expert 7 for defenses only).
+	// Production score shift of a type from the counter composition. All of it for Expert 2, for the
+	// defenses of Expert 7, for the aircraft of Expert 8 and for everyone while the base is under
+	// attack; CounterShareOtherExperts percent otherwise.
 	int CounterBonusFor(HouseClass* pHouse, const TechnoTypeClass* pType)
 	{
 		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
@@ -413,24 +471,18 @@ namespace
 		if (!pExt || !pType)
 			return 0;
 
-		const int expert = pExt->NeuralAI_ActiveExpert;
+		auto const& macro = GetMacroState(pHouse);
+		auto const it = macro.CounterBonus.find(pType);
 
-		if (expert == 7)
-		{
-			auto const pBldType = abstract_cast<const BuildingTypeClass*>(pType);
-
-			if (!pBldType || !pBldType->IsBaseDefense)
-				return 0;
-		}
-		else if (expert != 2 && (expert != 8 || pType->WhatAmI() != AbstractType::AircraftType))
-		{
+		if (it == macro.CounterBonus.end())
 			return 0;
-		}
 
-		auto const& bonus = GetMacroState(pHouse).CounterBonus;
-		auto const it = bonus.find(pType);
+		const int expert = pExt->NeuralAI_ActiveExpert;
+		auto const pBldType = abstract_cast<const BuildingTypeClass*>(pType);
+		const bool ownField = expert == 2 || (expert == 7 && pBldType && pBldType->IsBaseDefense)
+			|| (expert == 8 && pType->WhatAmI() == AbstractType::AircraftType);
 
-		return it != bonus.end() ? it->second : 0;
+		return ownField || macro.CounterUnderAttack ? it->second : it->second * CounterShareOtherExperts / 100;
 	}
 
 	// Extra tech priority of a missing building that unlocks a better counter; 0 unless Expert 2 is active.

@@ -328,6 +328,27 @@ namespace
 			BetrayalsCommitted.fill(0);
 		}
 
+		// A defeated house holds no coalition: nothing updates it any more, so its target would stand
+		// for the rest of the match and count among the coalitions on.
+		for (auto const pGone : HouseClass::Array)
+		{
+			if (!pGone || !pGone->Defeated || pGone->ArrayIndex < 0 || pGone->ArrayIndex >= 8)
+				continue;
+
+			auto& gone = MacroStates[pGone->ArrayIndex].Coalition;
+
+			if (gone.Target < 0)
+				continue;
+
+			gone.Target = -1;
+			gone.Reason = 0;
+			gone.TargetChoice = 0;
+			gone.SinceFrame = -1;
+			gone.UntilFrame = -1;
+			gone.TruceSinceFrame.fill(-1);
+			gone.Fronts.clear();
+		}
+
 		{
 			uint32_t targets = 0;
 
