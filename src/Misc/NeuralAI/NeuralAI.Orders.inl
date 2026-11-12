@@ -368,7 +368,8 @@ namespace
 
 			if (pEnemyBld && pEnemyBld->IsAlive && !pEnemyBld->InLimbo && pEnemyBld->Owner && pFoot->Owner
 				&& pEnemyBld->Owner != pFoot->Owner && !pFoot->Owner->IsAlliedWith(pEnemyBld->Owner)
-				&& longestGroundRange >= 8 * Unsorted::LeptonsPerCell)
+				&& longestGroundRange >= 8 * Unsorted::LeptonsPerCell
+				&& !IsOutOfNavalReach(pFoot, pEnemyBld->GetMapCoords(), longestGroundRange))
 			{
 				if (pFoot->Target != pEnemyBld)
 				{

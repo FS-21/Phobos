@@ -278,6 +278,27 @@ namespace
 		return nullptr;
 	}
 
+	// A ship (water-only movement) cannot shell a target farther from the nearest water of its own
+	// sea than its weapon reaches. An attack order on such a target leaves it standing: it can
+	// neither get closer nor fire, the stuck watchdog drops the order and its owner logic gives it
+	// again (destroyers sent at buildings 9 to 21 cells inland).
+	bool IsOutOfNavalReach(FootClass* pFoot, const CellStruct& target, int rangeLeptons)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || (pType->MovementZone != MovementZone::Water && pType->MovementZone != MovementZone::WaterBeach))
+			return false;
+
+		const int ownZone = ObjectZone(pFoot, pType->MovementZone);
+
+		if (ownZone < 0 || MapClass::Instance.GetMovementZoneType(target, pType->MovementZone, false) == ownZone)
+			return false;
+
+		auto const pShore = NearestReachableNavalCell(pFoot, target);
+
+		return !pShore || pShore->MapCoords.DistanceFrom(target) * Unsorted::LeptonsPerCell > rangeLeptons;
+	}
+
 	// A flyer (jumpjet, aircraft) only finishes a move once it can settle on its cell: several sent
 	// to the same cell kept hovering there in Mission::Move and got the order again and again. When
 	// another unit of ours already has that cell as destination or stands on it, the flyer gets the

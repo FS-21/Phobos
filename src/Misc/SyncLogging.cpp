@@ -6,6 +6,7 @@
 #include <Utilities/Debug.h>
 #include <Utilities/GeneralUtils.h>
 #include <Utilities/AresHelper.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 int SyncLogger::AnimCreations_HighestX = 0;
 int SyncLogger::AnimCreations_HighestY = 0;
@@ -381,6 +382,21 @@ DEFINE_HOOK(0x64CD11, ExecuteDoList_WriteDesyncLog, 0x8)
 	else
 	{
 		_snprintf_s(logFilename, _TRUNCATE, "SYNC%01d.TXT", HouseClass::CurrentPlayer->ArrayIndex);
+		SyncLogger::WriteSyncLog(logFilename);
+	}
+
+	return 0;
+}
+
+// The hook above runs after the out of sync dialog is closed, and a headless training game has
+// nobody to close it: there the log is written when the mismatch is found, to a file of its own
+// because the engine's sync log is created right after this point.
+DEFINE_HOOK(0x64CCB3, ExecuteDoList_WriteDesyncLogHeadless, 0x7)
+{
+	if (NeuralAI::HeadlessMode)
+	{
+		char logFilename[0x40];
+		_snprintf_s(logFilename, _TRUNCATE, "SYNCP%01d.TXT", HouseClass::CurrentPlayer->ArrayIndex);
 		SyncLogger::WriteSyncLog(logFilename);
 	}
 
