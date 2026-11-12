@@ -2,6 +2,8 @@
 
 #include <Helpers/Macro.h>
 #include <EventClass.h>
+#include <TechnoClass.h>
+#include <WarheadTypeClass.h>
 #include <Ext/AnimType/Body.h>
 #include <Utilities/Debug.h>
 #include <Utilities/GeneralUtils.h>
@@ -22,6 +24,7 @@ SyncLogEventBuffer<TargetChangeSyncLogEvent, TargetChanges_Size> SyncLogger::Tar
 SyncLogEventBuffer<TargetChangeSyncLogEvent, DestinationChanges_Size> SyncLogger::DestinationChanges;
 SyncLogEventBuffer<MissionOverrideSyncLogEvent, MissionOverrides_Size> SyncLogger::MissionOverrides;
 SyncLogEventBuffer<AnimCreationSyncLogEvent, AnimCreations_Size> SyncLogger::AnimCreations;
+SyncLogEventBuffer<DamageSyncLogEvent, DamageEvents_Size> SyncLogger::DamageEvents;
 
 void __forceinline MakeCallerRelative(unsigned int& caller)
 {
@@ -112,6 +115,38 @@ void SyncLogger::AddAnimCreationSyncLogEvent(const CoordStruct& coords, unsigned
 	}
 }
 
+void SyncLogger::AddDamageSyncLogEvent(TechnoClass* pTarget, int damage, WarheadTypeClass* pWarhead, TechnoClass* pAttacker, unsigned int callerAddress)
+{
+	if (!pTarget)
+		return;
+
+	MakeCallerRelative(callerAddress);
+	auto const pType = pTarget->GetTechnoType();
+
+	SyncLogger::DamageEvents.Add(DamageSyncLogEvent(pTarget->WhatAmI(), pTarget->UniqueID, pType ? pType->GetArrayIndex() : -1,
+		pTarget->Health, damage, pWarhead ? pWarhead->GetArrayIndex() : -1, pAttacker ? pAttacker->WhatAmI() : AbstractType::None,
+		pAttacker ? pAttacker->UniqueID : 0, pTarget->DamageParticleSystem != nullptr, callerAddress, Unsorted::CurrentFrame));
+}
+
+void SyncLogger::WriteDamageEvents(FILE* const pLogFile, int frameDigits)
+{
+	fprintf(pLogFile, "Damage events:\n");
+
+	for (size_t i = 0; i < SyncLogger::DamageEvents.Size(); i++)
+	{
+		auto const& damageEvent = SyncLogger::DamageEvents.Get();
+
+		if (!damageEvent.Initialized)
+			continue;
+
+		fprintf(pLogFile, "#%05d: RTTI: %02d | ID: %08d | Type: %d | Health: %d | Damage: %d | Warhead: %d | AttackerRTTI: %02d | AttackerID: %08d | Smoke: %d | Caller: %08x | Frame: %*d\n",
+			i, damageEvent.Type, damageEvent.ID, damageEvent.TypeIndex, damageEvent.Health, damageEvent.Damage, damageEvent.Warhead,
+			damageEvent.AttackerType, damageEvent.AttackerID, damageEvent.HasDamageSmoke ? 1 : 0, damageEvent.Caller, frameDigits, damageEvent.Frame);
+	}
+
+	fprintf(pLogFile, "\n");
+}
+
 void SyncLogger::WriteSyncLog(const char* logFilename)
 {
 	auto const pLogFile = fopen(logFilename, "at");
@@ -129,6 +164,7 @@ void SyncLogger::WriteSyncLog(const char* logFilename)
 		WriteTargetChanges(pLogFile, frameDigits);
 		WriteDestinationChanges(pLogFile, frameDigits);
 		WriteAnimCreations(pLogFile, frameDigits);
+		WriteDamageEvents(pLogFile, frameDigits);
 		WriteTeams(pLogFile);
 
 		fclose(pLogFile);

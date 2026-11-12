@@ -14,6 +14,7 @@
 #include <Utilities/AresHelper.h>
 #include <Utilities/GeneralUtils.h>
 #include <Misc/NeuralAI/NeuralAI.h>
+#include <Misc/SyncLogging.h>
 
 namespace ReceiveDamageTemp
 {
@@ -25,6 +26,9 @@ DEFINE_HOOK(0x701900, TechnoClass_ReceiveDamage_Shield, 0x6)
 {
 	GET(TechnoClass*, pThis, ECX);
 	LEA_STACK(args_ReceiveDamage*, args, 0x4);
+	GET_STACK(const unsigned int, callerAddress, 0x0);
+
+	SyncLogger::AddDamageSyncLogEvent(pThis, *args->Damage, args->WH, args->Attacker, callerAddress);
 
 	const auto pWHExt = WarheadTypeExt::Fetch(args->WH);
 	const auto pAttacker = args->Attacker;
