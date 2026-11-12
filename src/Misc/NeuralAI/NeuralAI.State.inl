@@ -1126,6 +1126,9 @@ namespace
 		int HitFrame { -100000 };
 		// Why the cargo was let go at the last decision on the pickup shore (FerrySail flags).
 		int SailReason { 0 };
+		// Passengers aboard at the last count and the frame that count last changed.
+		int LastPassCount { 0 };
+		int LastBoardFrame { -1 };
 	};
 
 	// Reasons a transport is let go from its pickup shore (NeuralFerryTripRecord::SailReason).
@@ -1136,6 +1139,8 @@ namespace
 	constexpr int FerrySailUnderFire = 16;
 	constexpr int FerrySailInTransit = 32;
 	constexpr int FerrySailNothingMoreToLoad = 64;
+	constexpr int FerrySailLoadStalled = 128;
+	constexpr int FerryLoadStallFrames = 5400;
 
 	// How long a combat cargo waits on its shore for more: under half the room, and under three
 	// quarters of it. A transport counts as under fire this long after a hit.
