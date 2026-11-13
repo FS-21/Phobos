@@ -794,6 +794,13 @@ namespace
 		// a new island ConYard to fortify, and a forward repair station toward the front.
 		CellStruct IslandHoldCell { CellStruct::Empty };
 		int IslandHoldUntilFrame { -1 };
+		// What that yard still lacks, as the plan counts it: a defense that hits the ground, one
+		// that shoots up.
+		bool IslandHoldNeedsGround { false };
+		bool IslandHoldNeedsAntiAir { false };
+		// Placement found no cell that counts for that yard: until this frame its defenses are
+		// chosen and placed like any other.
+		int IslandHoldNoRoomUntilFrame { -1 };
 		CellStruct ForwardRepairCell { CellStruct::Empty };
 		int ForwardRepairUntilFrame { -1 };
 		// Ally site plans (Ally Backup, Ally Forward Outpost): the next building we want next to an
@@ -1084,6 +1091,9 @@ namespace
 			this->LastAirDropAbortFrame = -100000;
 			this->IslandHoldCell = CellStruct::Empty;
 			this->IslandHoldUntilFrame = -1;
+			this->IslandHoldNeedsGround = false;
+			this->IslandHoldNeedsAntiAir = false;
+			this->IslandHoldNoRoomUntilFrame = -1;
 			this->ForwardRepairCell = CellStruct::Empty;
 			this->ForwardRepairUntilFrame = -1;
 			this->AllySiteBuildType = -1;
