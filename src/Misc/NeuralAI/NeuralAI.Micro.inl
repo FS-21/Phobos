@@ -768,7 +768,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return true;
 		}
 
-		if (!CanHouseFerryTypeAcrossWater(pHouse, pFootType))
+		// A transport is called only for a crossing one of ours (or one we can build) can make: the
+		// landing on the ground the unit wants, from where it stands.
+		CellClass* const pTargetLanding = FindSafeIslandLandingCell(pHouse, targetCoords, targetZone, false);
+
+		if (!CanHouseFerryTypeAcrossWater(pHouse, pFootType, &footCoords, pTargetLanding ? &pTargetLanding->MapCoords : nullptr))
 			return false;
 
 		// Safety net: a unit that has asked for a crossing for 3600 frames without ever boarding
@@ -823,7 +827,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		RecordPassengerIslandGoal(pFoot->UniqueID, targetCoords);
 		const int passSize = std::max(1, static_cast<int>(pFootType->Size));
-		if (CellClass* pTargetLanding = FindSafeIslandLandingCell(pHouse, targetCoords, targetZone, false))
+		if (pTargetLanding)
 			pendingCrossIslandOrders.push_back({ pFoot, footZone, pTargetLanding, targetZone, passSize });
 
 		// Do NOT order multiple units into Mission::Enter here! The centralized
@@ -3597,16 +3601,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// longer the goal and the next MCVs take the fields at home again.
 			const bool islandExpansionDue = conYardsInMcvZone >= 1 && pIslandResourceGoalCell != nullptr
 				&& mcvZone != resourceIslandZone;
+			// It crosses only for a field across the water: with no such goal an MCV that boarded a
+			// transport stayed inside it for good (two hovercraft held four MCVs for 25000 frames on a
+			// land map, match #8875, while their house had 100000 credits and one yard).
 			const bool mustColonizeOtherIsland = (canFerryThisMCV && mcvZone >= 0
 				&& (!hasFreeLandFieldInMcvZone || islandExpansionDue || mcvIslandHasNoRoom)
 				&& (currentIslandAlreadyDeveloped || alreadyHasConYardOnThisIsland || mcvIslandHasNoRoom) && !isForeignTechMCV
-				&& ((pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone)
-					|| alreadyHasConYardOnThisIsland));
+				&& pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone);
+			// The yard the bank governor wants for the building queue unfolds at home on any map and
+			// next to the yards already there: it is wanted for its speed, not for new ground.
+			const bool bankWantsYardHere = GetMacroState(pHouse).BankWantedYards > pHouse->NumConYards && !isForeignTechMCV
+				&& !isSecondaryIsland;
 			const bool wantsMultiConYardSpeed = (pHouse->NumConYards >= 1 && !mustColonizeOtherIsland
-				&& !alreadyHasConYardOnThisIsland && !isArchipelagoOrNavalMap
-				&& ((scores[30] > 650 && scores[35] <= 60 && scores[81] <= 90)
-					|| (!canFerryThisMCV && !hasUncolonizedOreOnHomeIsland)
-					|| GetMacroState(pHouse).BankWantedYards > pHouse->NumConYards));
+				&& (bankWantsYardHere
+					|| (!alreadyHasConYardOnThisIsland && !isArchipelagoOrNavalMap
+						&& ((scores[30] > 650 && scores[35] <= 60 && scores[81] <= 90)
+							|| (!canFerryThisMCV && !hasUncolonizedOreOnHomeIsland)))));
 			// Below the 14 cells the expansion destinations keep from our hubs: an MCV that reached a
 			// field 14..15 cells from a power plant never deployed and wandered from field to field.
 			const int requiredAnchorDist = landedOnNewIsland ? 0 : (wantsMultiConYardSpeed ? 8 : 12);
@@ -11175,6 +11185,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (isAlreadyBoardingAnotherTransport(ord.Passenger))
 					continue;
 
+				// Only a crossing this transport can make itself.
+				if (!ord.TargetLandingCell
+					|| !CanTransportTypeLink(pTrans->Type, ord.Passenger->GetMapCoords(), ord.TargetLandingCell->MapCoords))
+				{
+					continue;
+				}
+
 				const int osz = std::max(1, ord.PassengerSize);
 				if (osz <= static_cast<int>(pTrans->Type->SizeLimit) && osz <= freeCap)
 					return true;
@@ -11375,6 +11392,42 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Prevent AttackMove.Follow=true (e.g. on GDI APC/APCW) from hijacking transports into escorting warships!
 		pTrans->ClearMegaMissionData();
+
+		// Loaded and ready on its pickup shore with no landmass to go to: after FerryNoGoalUnloadFrames
+		// the cargo is set down where the transport stands, instead of riding inside it for good.
+		{
+			auto& noGoalSince = GetMacroState(pHouse).FerryNoGoalSince;
+
+			if (isReadyToSailEffective && !pActiveIslandGoal && numPass >= 1 && !tripDeparted && onSafePickupShore)
+			{
+				auto const itSince = noGoalSince.find(pTrans->UniqueID);
+
+				if (itSince == noGoalSince.end() || itSince->second > Unsorted::CurrentFrame)
+				{
+					noGoalSince[pTrans->UniqueID] = Unsorted::CurrentFrame;
+				}
+				else if (Unsorted::CurrentFrame - itSince->second >= FerryNoGoalUnloadFrames && pCurTransCell
+					&& pCurTransCell->LandType != LandType::Water && !pCurTransCell->GetBuilding())
+				{
+					if (pTrans->CurrentMission != Mission::Unload)
+					{
+						CountDecision(NeuralDecision::FerryCargoReturned);
+						Debug::Log("[NeuralAI] House %d ferry: %s %u sets its %d passengers down at (%d,%d), nowhere to go for %d frames, frame %d.\n",
+							pHouse->ArrayIndex, pTrans->Type->ID, pTrans->UniqueID, numPass, transCoords.X, transCoords.Y,
+							Unsorted::CurrentFrame - itSince->second, Unsorted::CurrentFrame);
+						pTrans->SetDestination(nullptr, true);
+						pTrans->ClearNavigationList();
+						pTrans->QueueMission(Mission::Unload, true);
+					}
+
+					continue;
+				}
+			}
+			else
+			{
+				noGoalSince.erase(pTrans->UniqueID);
+			}
+		}
 
 		// The cargo's objective vanished while at sea and no other landmass is a
 		// valid destination: bring the cargo back to its loading island and drop
@@ -12196,6 +12249,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					const int osz = std::max(1, ord.PassengerSize);
 					if (osz > static_cast<int>(pTrans->Type->SizeLimit) || osz > roomToReserve)
 						continue;
+
+					// Only a crossing this transport can make itself (a hovercraft does not load for
+					// ground behind a cliff).
+					if (!ord.TargetLandingCell
+						|| !CanTransportTypeLink(pTrans->Type, ord.Passenger->GetMapCoords(), ord.TargetLandingCell->MapCoords))
+					{
+						continue;
+					}
 
 					const double d = ord.Passenger->GetMapCoords().DistanceFrom(transCoords);
 					if (d < bestBoarderDist)

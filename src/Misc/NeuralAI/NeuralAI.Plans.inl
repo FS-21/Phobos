@@ -1439,6 +1439,33 @@ namespace
 		return state;
 	}
 
+	// Island Hold: a defense counts for the island yard within this many cells of it, on its
+	// landmass; the yard wants this many that hit the ground.
+	constexpr double IslandHoldDefenseRadius = 12.0;
+	constexpr int IslandHoldGroundDefenses = 3;
+	// Frames the plan lets go of its defenses after placement found no cell for one next to the yard.
+	constexpr int IslandHoldNoRoomFrames = 900;
+
+	// This defense type is one the yard of the Island Hold plan still lacks. Building production
+	// and placement both ask here, so what gets chosen for the yard is what gets placed next to it
+	// and what the plan counts.
+	bool IslandHoldWants(HouseClass* pHouse, BuildingTypeClass* pType)
+	{
+		if (!pHouse || !pType || !pType->IsBaseDefense || IsTunnelNetworkBuilding(pType))
+			return false;
+
+		auto const& macro = GetMacroState(pHouse);
+
+		if (macro.IslandHoldUntilFrame <= Unsorted::CurrentFrame || macro.IslandHoldCell == CellStruct::Empty
+			|| Unsorted::CurrentFrame < macro.IslandHoldNoRoomUntilFrame)
+		{
+			return false;
+		}
+
+		return (macro.IslandHoldNeedsGround && GroundRangeOf(pType) > 0)
+			|| (macro.IslandHoldNeedsAntiAir && GetCombatValueOfType(pType, true) > 0);
+	}
+
 	void UpdateStrategicPlans(HouseClass* pHouse, const std::array<int16_t, NeuralAI::OutputVectorSize>& scores)
 	{
 		if (!pHouse || pHouse->Defeated)
@@ -4002,9 +4029,10 @@ namespace
 
 		// ---------------------------------------------------------------- Plan 8: Island Hold
 		// A ConYard of ours on another landmass (colonized by ferry or airlift) is fortified first:
-		// IslandHoldCell gives its defenses production and placement priority, and our idle units
-		// already on that island guard it, until it has 3 ground defenses (+1 anti-air when enemy
-		// air has been seen).
+		// the defenses it still lacks (IslandHoldNeedsGround, IslandHoldNeedsAntiAir) are the next
+		// buildings the house makes and they are placed next to it (IslandHoldWants), and our idle
+		// units already on that island guard it, until it has 3 ground defenses (+1 anti-air when
+		// enemy air has been seen).
 		{
 			auto& plan = planOf(NeuralPlanId::IslandHold);
 			const bool enemyAirSeen = foe.Share(EnemyForceCategory::Air) >= 15 || macro.AirThreatValue > 0;
@@ -4024,7 +4052,7 @@ namespace
 
 					const CellStruct bc = pB->GetMapCoords();
 
-					if (bc.DistanceFrom(yc) > 12.0 || zoneOf(bc) != yz)
+					if (bc.DistanceFrom(yc) > IslandHoldDefenseRadius || zoneOf(bc) != yz)
 						continue;
 
 					if (GetCombatValueOfType(pB->Type, true) > 0)
@@ -4039,6 +4067,17 @@ namespace
 			{
 				macro.IslandHoldCell = CellStruct::Empty;
 				macro.IslandHoldUntilFrame = -1;
+				macro.IslandHoldNeedsGround = false;
+				macro.IslandHoldNeedsAntiAir = false;
+				macro.IslandHoldNoRoomUntilFrame = -1;
+			};
+
+			auto holdYard = [&](BuildingClass* pYard, int deadline, int ground, int antiAir)
+			{
+				macro.IslandHoldCell = pYard->GetMapCoords();
+				macro.IslandHoldUntilFrame = deadline;
+				macro.IslandHoldNeedsGround = ground < IslandHoldGroundDefenses;
+				macro.IslandHoldNeedsAntiAir = enemyAirSeen && antiAir < 1;
 			};
 
 			if (plan.Active)
@@ -4055,7 +4094,7 @@ namespace
 					clearHold();
 					finishPlan(NeuralPlanId::IslandHold, false, false);
 				}
-				else if (ground >= 3 && (!enemyAirSeen || antiAir >= 1))
+				else if (ground >= IslandHoldGroundDefenses && (!enemyAirSeen || antiAir >= 1))
 				{
 					clearHold();
 					finishPlan(NeuralPlanId::IslandHold, true, false);
@@ -4072,8 +4111,7 @@ namespace
 				{
 					const CellStruct yc = pYard->GetMapCoords();
 					const int yz = zoneOf(yc);
-					macro.IslandHoldCell = yc;
-					macro.IslandHoldUntilFrame = plan.Deadline;
+					holdYard(pYard, plan.Deadline, ground, antiAir);
 
 					// Idle armed units already on that island stand guard next to the yard.
 					std::vector<FootClass*> islanders;
@@ -4118,7 +4156,7 @@ namespace
 					int antiAir = 0;
 					countYardDefenses(pCY, ground, antiAir);
 
-					if (ground < 3 || (enemyAirSeen && antiAir < 1))
+					if (ground < IslandHoldGroundDefenses || (enemyAirSeen && antiAir < 1))
 					{
 						pTarget = pCY;
 						targetGround = ground;
@@ -4128,15 +4166,16 @@ namespace
 				}
 
 				const int utility = pTarget
-					? (350 + ((enemyAirSeen && targetAA == 0) ? 120 : 0) + (3 - std::min(3, targetGround)) * 40)
+					? (350 + ((enemyAirSeen && targetAA == 0) ? 120 : 0)
+						+ (IslandHoldGroundDefenses - std::min(IslandHoldGroundDefenses, targetGround)) * 40)
 					: -1000;
 
 				if (pTarget && shouldTryStart(NeuralPlanId::IslandHold, utility))
 				{
 					startPlan(NeuralPlanId::IslandHold, std::vector<FootClass*> {}, pTarget->GetMapCoords(), CellStruct::Empty,
 						pTarget->UniqueID, 5400);
-					macro.IslandHoldCell = pTarget->GetMapCoords();
-					macro.IslandHoldUntilFrame = planOf(NeuralPlanId::IslandHold).Deadline;
+					macro.IslandHoldNoRoomUntilFrame = -1;
+					holdYard(pTarget, planOf(NeuralPlanId::IslandHold).Deadline, targetGround, targetAA);
 				}
 			}
 		}
