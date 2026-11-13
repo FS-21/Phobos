@@ -60,6 +60,13 @@ int TechnoExt::PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, A
 		return weaponIndexTwo;
 	const bool skipPrimaryPicking = pFirstExt->SkipWeaponPicking;
 	const bool firstAllowedAE = skipPrimaryPicking || pFirstExt->HasRequiredAttachedEffects(pTargetTechno, pThis);
+	auto const pType = pThis->GetTechnoType();
+	const bool usesAmmo = pType->Ammo > 0;
+	const bool firstHasAmmo = !usesAmmo || pThis->Ammo >= pFirstExt->Ammo;
+	const bool secondHasAmmo = !usesAmmo || pThis->Ammo >= pSecondExt->Ammo;
+
+	if (!secondHasAmmo && firstHasAmmo)
+		return weaponIndexOne;
 
 	if (!allowFallback
 		&& (!allowAAFallback || !secondIsAA)
@@ -67,6 +74,12 @@ int TechnoExt::PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, A
 		&& !TechnoExt::CanFireNoAmmoWeapon(pThis, 1))
 	{
 		return weaponIndexOne;
+	}
+
+	if (!firstHasAmmo && secondHasAmmo)
+	{
+		if (!pTarget || TechnoExt::MultiWeaponCanFire(pThis, pTarget, pWeaponTwo))
+			return weaponIndexTwo;
 	}
 
 	if (!skipPrimaryPicking)
@@ -91,8 +104,6 @@ int TechnoExt::PickWeaponIndex(TechnoClass* pThis, TechnoClass* pTargetTechno, A
 	// Handle special case with NavalTargeting / LandTargeting.
 	if (!pTargetTechno && pTargetCell)
 	{
-		auto const pType = pThis->GetTechnoType();
-
 		if (pType->NavalTargeting == NavalTargetingType::Naval_Primary
 			|| pType->LandTargeting == LandTargetingType::Land_Secondary)
 		{
@@ -425,6 +436,9 @@ bool TechnoExt::MultiWeaponCanFire(TechnoClass* const pThis, AbstractClass* cons
 	}
 
 	const auto pWeaponExt = WeaponTypeExt::Fetch(pWeaponType);
+
+	if (pThis->GetTechnoType()->Ammo > 0 && pThis->Ammo < pWeaponExt->Ammo)
+		return false;
 
 	if (!pWeaponExt->SkipWeaponPicking)
 	{

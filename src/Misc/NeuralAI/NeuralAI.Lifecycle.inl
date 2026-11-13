@@ -915,7 +915,7 @@ void NeuralAI::OnScenarioStart()
 			}
 		}
 
-		pExt->NeuralAI_Archetype = bestArch;
+		pExt->NeuralAI_Archetype = FocusedArchetype(bestArch);
 
 		std::array<int, 5> openingTrained {};
 
