@@ -1916,6 +1916,17 @@ namespace
 				lesson.Frame = Unsorted::CurrentFrame;
 			}
 
+			// A group beaten on its way (it never arrived and has less than PlanEnRouteLossPercent of
+			// its value left) leaves the same lesson for every building of that enemy house (raid gate).
+			if (!success && !plan.Arrived && plan.TargetOwner >= 0 && plan.TargetOwner < 32 && plan.InitialValue > 1
+				&& memberValue(plan) * 100 < plan.InitialValue * PlanEnRouteLossPercent)
+			{
+				auto& houseLesson = macro.PlanHouseLessons[plan.TargetOwner];
+				const bool freshLesson = houseLesson.Frame > 0 && Unsorted::CurrentFrame - houseLesson.Frame <= PlanLessonFrames;
+				houseLesson.Strength = freshLesson ? std::max(houseLesson.Strength, plan.InitialValue) : plan.InitialValue;
+				houseLesson.Frame = Unsorted::CurrentFrame;
+			}
+
 			CountPlanOutcome(houseIdx, id, success ? NeuralPlanOutcome::Succeeded : NeuralPlanOutcome::Failed);
 
 			if (!success && Unsorted::CurrentFrame >= plan.Deadline)
@@ -1980,11 +1991,121 @@ namespace
 			return open;
 		};
 
+		// Raid gate. Every plan that sends a ground group at a distant enemy target is weighed here,
+		// whatever way it picked its group (Factory Decapitation picked nine units with no check at
+		// all and started 300 times in 16 matches, 6% of them well). The ground units of the group
+		// must be worth PlanStrikeAdvantagePercent of what is known on their way in (the defenses and
+		// the units seen in the last PlanStrikeGuardFrames within PlanStrikeGuardCells of the target
+		// or of the last PlanStrikeApproachCells of the straight way from home), and
+		// PlanLessonAdvantagePercent of the last raid group this enemy house beat on its way in the
+		// last PlanLessonFrames: what waits behind the fog shows only by what it did to the last
+		// group, so each beaten raid asks for half as much again (user: the bigger group wins). A
+		// group of aircraft alone is not weighed.
+		auto raidMayStart = [&](NeuralPlanId id, std::vector<FootClass*> const& group, const CellStruct& target, int targetOwner) -> bool
+		{
+			constexpr NeuralPlanId gated[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout, NeuralPlanId::Feint,
+				NeuralPlanId::TimingRush, NeuralPlanId::ExpansionDenial, NeuralPlanId::SuperweaponRace, NeuralPlanId::HarvesterAmbush,
+				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
+				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut };
+
+			if (std::find(std::begin(gated), std::end(gated), id) == std::end(gated) || target == CellStruct::Empty)
+				return true;
+
+			int groundValue = 0;
+
+			for (auto const pFoot : group)
+			{
+				if (pFoot && pFoot->WhatAmI() != AbstractType::Aircraft && !pFoot->IsInAir() && !pFoot->GetTechnoType()->Naval)
+					groundValue += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+			}
+
+			if (groundValue <= 0)
+				return true;
+
+			std::vector<CellStruct> points { target };
+			const double length = homeCell.DistanceFrom(target);
+
+			if (length > 1.0)
+			{
+				for (double done = PlanStrikeApproachStepCells; done <= std::min(length, PlanStrikeApproachCells); done += PlanStrikeApproachStepCells)
+				{
+					points.push_back(CellStruct { static_cast<short>(target.X + (homeCell.X - target.X) * done / length),
+						static_cast<short>(target.Y + (homeCell.Y - target.Y) * done / length) });
+				}
+			}
+
+			auto const onWay = [&points](const CellStruct& cell)
+			{
+				return std::any_of(points.begin(), points.end(),
+					[&cell](const CellStruct& point) { return point.DistanceFrom(cell) <= PlanStrikeGuardCells; });
+			};
+
+			int strength = 0;
+
+			for (auto const& [uid, sighting] : macro.EnemySightings)
+			{
+				if (Unsorted::CurrentFrame - sighting.LastSeenFrame <= PlanStrikeGuardFrames && onWay(sighting.LastCoords))
+					strength += sighting.Value;
+			}
+
+			for (auto const pBld : GetKnownEnemyBuildingCache(pHouse).Buildings)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->IsBaseDefense && pBld->Owner
+					&& !pHouse->IsAlliedWith(pBld->Owner) && onWay(pBld->GetMapCoords()))
+				{
+					strength += GetCombatValueOfType(pBld->Type, false);
+				}
+			}
+
+			const bool outgunned = groundValue * 100 < strength * PlanStrikeAdvantagePercent;
+			bool taught = false;
+
+			if (targetOwner >= 0 && targetOwner < 32)
+			{
+				auto const& lesson = macro.PlanHouseLessons[targetOwner];
+				taught = lesson.Frame > 0 && Unsorted::CurrentFrame - lesson.Frame <= PlanLessonFrames
+					&& groundValue * 100 < lesson.Strength * PlanLessonAdvantagePercent;
+			}
+
+			if (!outgunned && !taught)
+				return true;
+
+			// TEMP diagnostic: the raids the gate holds back (20 per match).
+			static int gateLogSerial = -1;
+			static int gateLogCount = 0;
+
+			if (gateLogSerial != NeuralMatchSerial)
+			{
+				gateLogSerial = NeuralMatchSerial;
+				gateLogCount = 0;
+			}
+
+			if (gateLogCount++ < 20)
+			{
+				Debug::Log("[NeuralAI] House %d plan %s not started: ground group worth %d against %d known on its way to (%d,%d), lesson of house %d %s, frame %d.\n",
+					houseIdx, NeuralPlanNames[static_cast<size_t>(id)], groundValue, strength, target.X, target.Y, targetOwner,
+					taught ? "asks for more" : "allows it", Unsorted::CurrentFrame);
+			}
+
+			return false;
+		};
+
 		auto startPlan = [&](NeuralPlanId id, std::vector<FootClass*> const& group, const CellStruct& target,
 			const CellStruct& staging, DWORD targetID, int durationFrames)
 		{
+			auto const pTargetBuilding = targetID != 0 ? FindBuildingByID(targetID) : nullptr;
+			const int targetOwner = (pTargetBuilding && pTargetBuilding->Owner) ? pTargetBuilding->Owner->ArrayIndex : -1;
+
+			// Held back by the raid gate: the plan is weighed again after PlanGateRetryFrames.
+			if (!raidMayStart(id, group, target, targetOwner))
+			{
+				macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
+				return;
+			}
+
 			auto& plan = macro.Plans[static_cast<size_t>(id)];
 			plan = NeuralPlanInstance {};
+			plan.TargetOwner = targetOwner;
 			plan.Active = true;
 			plan.StartFrame = Unsorted::CurrentFrame;
 			plan.Deadline = Unsorted::CurrentFrame + durationFrames;
@@ -8032,7 +8153,7 @@ namespace
 				std::vector<FootClass*> ground = collectIdleGround(false);
 				sortFastest(ground);
 				group.insert(group.end(), ground.begin(), ground.end());
-				group.resize(std::min<size_t>(group.size(), factories.size() * 3));
+				group.resize(std::min(group.size(), std::max(factories.size() * 3, group.size() / PlanStrikeIdleShare)));
 
 				const int utility = (factories.size() >= 2 && group.size() >= factories.size() * 2) ? 310 : -1000;
 
