@@ -1310,6 +1310,8 @@ namespace
 	constexpr int GroundRouteSearchesPerTick = 2;
 	// A route leg that would end on a bridge deck runs this many route cells past its far end.
 	constexpr size_t RouteLegPastBridgeCells = 4;
+	// A ground target off the unit's zone stands for the nearest cell of the zone this near to it.
+	constexpr int RouteGoalSnapCells = 4;
 	// A search that finds its target walled in by buildings keeps up to RouteWallsKept of those it ran
 	// into and logs the RouteWallsLogged nearest to the target, RouteWallLogsPerMatch times per match.
 	constexpr size_t RouteWallsKept = 256;
