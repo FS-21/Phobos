@@ -77,6 +77,8 @@ namespace
 
 	void CheckCellGhosts()
 	{
+		const NeuralSlowStep slowStep { "CheckCellGhosts" };
+
 		static int serial = -1;
 		static int lastFrame = -1;
 		static int logged = 0;
@@ -466,6 +468,8 @@ namespace
 	//   around: half of the units whose way leads past it, then all of them (JamRerouteHop).
 	void UpdateJamBreaker(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
 	{
+		const NeuralSlowStep slowStep { "UpdateJamBreaker" };
+
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 
@@ -928,6 +932,8 @@ namespace
 	// harvest; 90+ frames on its cell). Up to 12 per pass.
 	void UpdateJamMouths(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateJamMouths" };
+
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 
@@ -1446,6 +1452,8 @@ namespace
 	// chrono miner loop-teleport, and slave miners have their own routing.
 	void UpdateIdleHarvesters(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateIdleHarvesters" };
+
 		if (!pHouse)
 			return;
 

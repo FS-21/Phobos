@@ -407,6 +407,8 @@ namespace
 	// the start of the match is charted the first time it stands).
 	void UpdatePassageMouths()
 	{
+		const NeuralSlowStep slowStep { "UpdatePassageMouths" };
+
 		int charted = 0;
 
 		for (auto const& span : BridgeSpans)
@@ -659,6 +661,8 @@ namespace
 	// Runs before the features so the brain sees the opportunities it is choosing between.
 	void UpdateBridgePlanner(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateBridgePlanner" };
+
 		auto& state = GetBridgeState(pHouse);
 		state.SeaLaneSpan = -1;
 		state.SeaLaneFleetZone = -1;

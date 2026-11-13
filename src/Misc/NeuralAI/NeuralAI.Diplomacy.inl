@@ -310,6 +310,8 @@ namespace
 	// against whom; what each one knows of the map stays its own.
 	void UpdateTacitCoalition(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateTacitCoalition" };
+
 		if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 8)
 			return;
 

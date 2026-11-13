@@ -1228,6 +1228,8 @@ namespace
 	CellClass* FindSafeIslandLandingCellUncached(
 		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre)
 	{
+		const NeuralSlowStep slowStep { "FindSafeIslandLandingCellUncached" };
+
 		bool islandHasEnemyPresence = false;
 		for (auto const pEB : BuildingClass::Array)
 		{

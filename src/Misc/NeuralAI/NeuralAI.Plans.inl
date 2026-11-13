@@ -894,6 +894,8 @@ namespace
 	//   ore or a known enemy building (destroying it opens that way). 2 units, one cliff at a time.
 	void UpdateMapObstacles(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateMapObstacles" };
+
 		if (!pHouse || !IsAITickWindow(450, 15))
 			return;
 
