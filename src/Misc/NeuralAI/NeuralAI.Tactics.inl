@@ -3576,6 +3576,59 @@ namespace
 
 } // namespace
 
+namespace
+{
+	// Path search backoff. A failed search of the engine's path finder costs about 6 ms (five tries
+	// of 1.2 ms) and a unit that cannot get through asks again every few frames: a match had a
+	// million failures, half of its wall time. A unit of a Neural AI house whose searches to one
+	// place fail PathBackoffFails times in a row (a gap of PathBackoffForgetFrames without a failure
+	// starts the count again) skips its searches to that place for PathBackoffFirstFrames, doubled
+	// with each further failure up to PathBackoffMaxFrames. A new goal PathBackoffGoalCells or more
+	// away is searched at once.
+	constexpr int PathBackoffFails = 3;
+	constexpr int PathBackoffFirstFrames = 15;
+	constexpr int PathBackoffMaxFrames = 240;
+	constexpr int PathBackoffForgetFrames = 60;
+	constexpr double PathBackoffGoalCells = 3.0;
+
+	struct NeuralPathBackoff
+	{
+		int Fails { 0 };
+		int LastFailFrame { -100000 };
+		int SkipUntil { -100000 };
+		CellStruct Goal { CellStruct::Empty };
+	};
+
+	std::unordered_map<DWORD, NeuralPathBackoff> PathBackoffs;
+	int PathBackoffSerial = -1;
+	int PathSearchesSkipped = 0;
+
+	void ResetPathBackoffsForMatch()
+	{
+		if (PathBackoffSerial == NeuralMatchSerial)
+			return;
+
+		PathBackoffSerial = NeuralMatchSerial;
+		PathBackoffs.clear();
+		PathSearchesSkipped = 0;
+	}
+}
+
+bool NeuralAI::ShouldSkipPathSearch(const FootClass* pFoot, const CellStruct* pGoal)
+{
+	if (!pFoot || !pGoal || PathBackoffSerial != NeuralMatchSerial)
+		return false;
+
+	auto const it = PathBackoffs.find(pFoot->UniqueID);
+
+	if (it == PathBackoffs.end() || Unsorted::CurrentFrame >= it->second.SkipUntil || it->second.Goal.DistanceFrom(*pGoal) >= PathBackoffGoalCells)
+		return false;
+
+	++PathSearchesSkipped;
+
+	return true;
+}
+
 // TEMP diagnostic: who the engine's path finder fails for. One failure costs about 1.2 ms of wall
 // time (frame cost sample of 2026-11-13) and a match can have a million. Counted per match by unit
 // type, role (slave, gatherer, plan member, free), mission, mega mission and how far the goal is
@@ -3598,6 +3651,41 @@ void NeuralAI::OnPathFailure(FootClass* pFoot, const CellStruct& from, const Cel
 
 	if (!pFoot)
 		return;
+
+	// The engine reports up to five failures per search: one count per unit and frame.
+	ResetPathBackoffsForMatch();
+
+	if (pFoot->Owner && NeuralAI::IsEnabledForHouse(pFoot->Owner))
+	{
+		const int now = Unsorted::CurrentFrame;
+
+		if (PathBackoffs.size() > 4096)
+		{
+			std::erase_if(PathBackoffs, [now](const auto& entry)
+				{ return now - std::max(entry.second.LastFailFrame, entry.second.SkipUntil) > PathBackoffForgetFrames * 10; });
+		}
+
+		auto& backoff = PathBackoffs[pFoot->UniqueID];
+
+		if (backoff.LastFailFrame != now)
+		{
+			if (now - std::max(backoff.LastFailFrame, backoff.SkipUntil) > PathBackoffForgetFrames
+				|| backoff.Goal.DistanceFrom(to) >= PathBackoffGoalCells)
+			{
+				backoff.Fails = 0;
+			}
+
+			backoff.Fails++;
+			backoff.LastFailFrame = now;
+			backoff.Goal = to;
+
+			if (backoff.Fails >= PathBackoffFails)
+			{
+				backoff.SkipUntil = now + std::min(PathBackoffMaxFrames,
+					PathBackoffFirstFrames << std::min(backoff.Fails - PathBackoffFails, 5));
+			}
+		}
+	}
 
 	auto const pType = pFoot->GetTechnoType();
 	auto const pUnit = abstract_cast<UnitClass*>(pFoot);
@@ -3635,6 +3723,6 @@ void NeuralAI::OnPathFailure(FootClass* pFoot, const CellStruct& from, const Cel
 	for (size_t i = 0; i < top.size() && i < 16; ++i)
 		text += (i ? "; " : "") + top[i].second + " x" + std::to_string(top[i].first);
 
-	Debug::Log("[NeuralAI] Path failures DIAG frame %d: %d so far in %d kinds; %s.\n", Unsorted::CurrentFrame, total,
-		static_cast<int>(kinds.size()), text.c_str());
+	Debug::Log("[NeuralAI] Path failures DIAG frame %d: %d so far in %d kinds, %d searches skipped; %s.\n", Unsorted::CurrentFrame,
+		total, static_cast<int>(kinds.size()), PathSearchesSkipped, text.c_str());
 }
