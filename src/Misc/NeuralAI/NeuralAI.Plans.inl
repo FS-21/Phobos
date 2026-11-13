@@ -1735,9 +1735,37 @@ namespace
 			return pAir->CurrentMission == Mission::Attack && !pAir->IsInAir();
 		};
 
-		auto finishPlan = [&](NeuralPlanId id, bool success, bool sendHome)
+		auto finishPlan = [&](NeuralPlanId id, bool success, bool sendHome, int rule = __builtin_LINE())
 		{
 			auto& plan = macro.Plans[static_cast<size_t>(id)];
+
+			// TEMP diagnostic: how every plan ends. The rule is the source line of the call that ended
+			// it, so the match logs tell which condition fails each plan (a deadline with the group
+			// still far, a group that lost its strength on the way, a target that was never reached).
+			{
+				int alive = 0;
+				int nearest = -1;
+
+				for (const DWORD uid : plan.Members)
+				{
+					auto const it = ownFoots.find(uid);
+
+					if (it == ownFoots.end())
+						continue;
+
+					alive++;
+					const int distance = static_cast<int>(it->second->GetMapCoords().DistanceFrom(plan.TargetCell));
+
+					if (nearest < 0 || distance < nearest)
+						nearest = distance;
+				}
+
+				Debug::Log("[NeuralAI] House %d plan %s ended %s at rule %d after %d of %d frames: members %d of %d, value %d of %d, "
+					"arrived %d, nearest member %d cells from the target (%d,%d).\n", houseIdx, NeuralPlanNames[static_cast<size_t>(id)],
+					success ? "well" : "badly", rule, Unsorted::CurrentFrame - plan.StartFrame, plan.Deadline - plan.StartFrame, alive,
+					static_cast<int>(plan.Members.size()), memberValue(plan), plan.InitialValue, plan.Arrived ? 1 : 0, nearest,
+					plan.TargetCell.X, plan.TargetCell.Y);
+			}
 
 			if (sendHome)
 			{
@@ -1810,7 +1838,18 @@ namespace
 			// offensive bank pushes harassment or assaults (OffensiveBankPlanUtility).
 			const int advantage = contextUtility > 0 ? MainAssaultAdvantageUtility(houseIdx, id) + OffensiveBankPlanUtility(pHouse, id) : 0;
 
-			const bool open = SlotGate(static_cast<int>(scores[slot]) + contextUtility + (contextUtility > 0 ? boost : 0) + advantage, 300, slot);
+			bool open = SlotGate(static_cast<int>(scores[slot]) + contextUtility + (contextUtility > 0 ? boost : 0) + advantage, 300, slot);
+
+			// Training focus: the plans the trainer asked to watch start whenever they have a target
+			// and a group; the others wait, except the ones that defend the base, so the watched
+			// plans find free units.
+			if (const auto& focus = TrainingFocus(); focus.AnyPlan)
+			{
+				if (focus.Plans[i])
+					open = contextUtility > 0;
+				else if (id != NeuralPlanId::BaseThreatIntercept && id != NeuralPlanId::Survival && id != NeuralPlanId::DelayingAction)
+					open = false;
+			}
 
 			if (open && contextUtility > 0)
 				gateOpenedUnstarted[i] = true;
