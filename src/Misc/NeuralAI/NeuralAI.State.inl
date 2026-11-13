@@ -1466,6 +1466,10 @@ namespace
 	// from home (a point every PlanStrikeApproachStepCells). A raid dies at the edge of the enemy
 	// base: with the target's own guard alone, groups of 7 lost a third of their value 30 to 60
 	// cells short of it (251 of 387 Factory Decapitation plans in the focus batch of 2026-11-13).
+	// Airborne Front: a soldier with the Enter order this near its transport, without a radio link
+	// to it and standing still this long, is given the order again.
+	constexpr int BoardingRestartFrames = 150;
+	constexpr int BoardingRestartCells = 4;
 	constexpr double PlanStrikeApproachCells = 40.0;
 	constexpr double PlanStrikeApproachStepCells = 8.0;
 	constexpr int PlanStrikeGuardFrames = 900;

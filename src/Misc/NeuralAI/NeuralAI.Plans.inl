@@ -4361,6 +4361,27 @@ namespace
 						}
 					}
 
+					// The soldier nearest to the transport that holds the Enter order within
+					// BoardingRestartCells of it, with no radio link to it, and has not moved for
+					// BoardingRestartFrames starts over: its order is dropped here and given again below.
+					// It stood there until the plan gave up after 1500 frames (a third of the Airborne
+					// Front plans of the focus batch of 2026-11-13). AuxPeak keeps the last restart.
+					if (pNearest && pNearest->CurrentMission == Mission::Enter && !pNearest->ContainsLink(pTransport)
+						&& nearestDist <= BoardingRestartCells * Unsorted::LeptonsPerCell && IsFootHeldStill(pHouse, pNearest, BoardingRestartFrames)
+						&& Unsorted::CurrentFrame - std::max(plan.AuxPeak, plan.StartFrame) >= BoardingRestartFrames)
+					{
+						plan.AuxPeak = Unsorted::CurrentFrame;
+						pNearest->SetArchiveTarget(nullptr);
+						pNearest->SetDestination(nullptr, true);
+						pNearest->ForceMission(Mission::Guard);
+						Debug::Log("[NeuralAI] House %d AirborneFront: boarding of %s %u started over, %d leptons from %s, frame %d.\n",
+							pHouse->ArrayIndex, pNearest->GetTechnoType()->ID, pNearest->UniqueID, nearestDist, pTransport->GetTechnoType()->ID,
+							Unsorted::CurrentFrame);
+
+						if (pBoarding == pNearest)
+							pBoarding = nullptr;
+					}
+
 					for (const DWORD uid : infantry)
 					{
 						auto const pInf = findOwnFoot(uid);
