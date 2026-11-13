@@ -911,6 +911,30 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			? std::max(plantLossBuffer, std::min(550, 220 + poweredDefAndSWCount * 45))
 			: std::max(150, plantLossBuffer);
 
+		// A building switched off asks for more power only while the real surplus is short of the
+		// cushion. One that stays off with power to spare (an EMP, a saboteur) is not cured by more
+		// plants: a Yuri house kept picking a bio reactor over its scored pick with 12000 of
+		// surplus, built 89 of them and walled in the mouth of its own bridge (match #8920).
+		if (hasUnpoweredBuildings && realPowerSurplus >= requiredPowerCushion)
+		{
+			hasUnpoweredBuildings = false;
+
+			// TEMP diagnostic: which building stays off with power to spare.
+			if (IsAITickWindow(1800, 0))
+			{
+				for (auto const pOffBld : pHouse->Buildings)
+				{
+					if (pOffBld && pOffBld->IsAlive && !pOffBld->InLimbo && pOffBld->Type && pOffBld->Type->TogglePower && !pOffBld->StuffEnabled)
+					{
+						Debug::Log("[NeuralAI] House %d power DIAG: %s at (%d,%d) is off with a surplus of %d (cushion %d): deactivated %d, under EMP %d, frame %d.\n",
+							pHouse->ArrayIndex, pOffBld->Type->ID, pOffBld->GetMapCoords().X, pOffBld->GetMapCoords().Y, realPowerSurplus,
+							requiredPowerCushion, pOffBld->Deactivated ? 1 : 0, pOffBld->IsUnderEMP() ? 1 : 0, Unsorted::CurrentFrame);
+						break;
+					}
+				}
+			}
+		}
+
 		// Competitive MultipleFactory Arms Race:
 		// Measure strongest enemy's factory counts and scale our factory limits by
 		// both economy (ownedRefineries) AND enemy production capacity!
