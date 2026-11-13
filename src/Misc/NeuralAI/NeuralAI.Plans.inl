@@ -3878,7 +3878,7 @@ namespace
 			{
 				group = collectIdleGround(false);
 				sortFastest(group);
-				group.resize(std::min(group.size(), maxGround));
+				group.resize(std::min(group.size(), std::max(maxGround, group.size() / PlanStrikeIdleShare)));
 
 				// A ground strike needs the strength to beat what is known to guard the target: a
 				// group that cannot is not sent.
@@ -5185,7 +5185,7 @@ namespace
 					if (group.empty() && zoneOf(tc) == homeZone)
 					{
 						group = collectIdleGround(false);
-						group.resize(std::min<size_t>(group.size(), 12));
+						group.resize(std::min(group.size(), std::max<size_t>(12, group.size() / PlanStrikeIdleShare)));
 
 						// The superweapon stands deep in the base: the ground group goes only with the
 						// strength to beat what is known to guard it.
@@ -8014,7 +8014,7 @@ namespace
 				if (pFactory)
 				{
 					group = collectIdleGround(false);
-					group.resize(std::min<size_t>(group.size(), 6));
+					group.resize(std::min(group.size(), std::max<size_t>(6, group.size() / PlanStrikeIdleShare)));
 
 					// The post is given up when the enemy seen there outweighs the group by half: a group
 					// that would give it up on arrival does not set out.
