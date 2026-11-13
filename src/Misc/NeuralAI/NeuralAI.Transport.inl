@@ -117,10 +117,41 @@ namespace
 		return !pUnit->Transporter;
 	}
 
-	bool CanHouseFerryTypeAcrossWater(HouseClass* pHouse, const TechnoTypeClass* pFootType)
+	// Can a transport of this type carry something between these two cells? One that flies or
+	// burrows goes anywhere. One that rides land and water needs both ends within the ground and
+	// water it covers itself (one zone of its own movement), so a hovercraft is not asked to get
+	// past a cliff that only a flyer or a carryall crosses. Ships keep their own shore logic.
+	bool CanTransportTypeLink(const TechnoTypeClass* pTransType, const CellStruct& from, const CellStruct& to)
+	{
+		if (!pTransType)
+			return false;
+
+		const MovementZone zone = pTransType->MovementZone;
+
+		if (zone != MovementZone::Amphibious && zone != MovementZone::AmphibiousCrusher && zone != MovementZone::AmphibiousDestroyer)
+			return true;
+
+		if (pTransType->JumpJet || pTransType->ConsideredAircraft)
+			return true;
+
+		const int fromZone = MapClass::Instance.GetMovementZoneType(from, zone, false);
+		const int toZone = MapClass::Instance.GetMovementZoneType(to, zone, false);
+
+		return fromZone >= 0 && fromZone == toZone;
+	}
+
+	// With both cells given, only transports that can make that very crossing count
+	// (CanTransportTypeLink): the unit's cell and the landing on the ground it wants to reach.
+	bool CanHouseFerryTypeAcrossWater(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct* pFrom = nullptr,
+		const CellStruct* pTo = nullptr)
 	{
 		if (!pHouse || !pFootType)
 			return false;
+
+		auto const links = [pFrom, pTo](const TechnoTypeClass* pTransType) -> bool
+		{
+			return !pFrom || !pTo || CanTransportTypeLink(pTransType, *pFrom, *pTo);
+		};
 
 		if (pFootType->MovementZone == MovementZone::Amphibious
 			|| pFootType->MovementZone == MovementZone::AmphibiousDestroyer
@@ -152,7 +183,7 @@ namespace
 
 			auto const pUT = pU->Type;
 			if (IsAmphibiousOrAirTransport(pUT) && static_cast<int>(pUT->SizeLimit) >= passSize
-				&& pUT->Passengers >= passSize)
+				&& pUT->Passengers >= passSize && links(pUT))
 			{
 				return true;
 			}
@@ -184,7 +215,7 @@ namespace
 				continue;
 
 			const bool fitsTrans = IsAmphibiousOrAirTransport(pUT) && static_cast<int>(pUT->SizeLimit) >= passSize
-				&& pUT->Passengers >= passSize;
+				&& pUT->Passengers >= passSize && links(pUT);
 			const bool fitsCarry
 				= TechnoTypeExt::Fetch(pUT) && CanCarryallTypeLift(pUT, TechnoTypeExt::Fetch(pUT)->Carryall);
 			if (!fitsTrans && !fitsCarry)

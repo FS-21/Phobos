@@ -1395,6 +1395,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		bool bestFillsAirDeficit = false;
 		int bestAirDefenseIdx = -1;
 		int bestAirDefenseScore = -32000;
+		// Best defense the Island Hold yard still lacks (IslandHoldWants).
+		int bestIslandHoldIdx = -1;
+		int bestIslandHoldScore = -32000;
 
 		// A raid short of guns with no defense that shoots up buildable yet: the buildings those
 		// defenses still miss come ahead of routine picks.
@@ -1564,27 +1567,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			: -1;
 
 		// Island Hold plan (UpdateStrategicPlans): a fresh island ConYard is fortified before its
-		// economy exists, with anti-air too once enemy air has been seen.
+		// economy exists, with anti-air too once enemy air has been seen. The plan says what the
+		// yard still lacks; while placement finds no cell next to it the plan asks for nothing.
 		auto const& holdMacro = GetMacroState(pHouse);
-		const bool islandHoldActive
-			= holdMacro.IslandHoldUntilFrame > Unsorted::CurrentFrame && holdMacro.IslandHoldCell != CellStruct::Empty;
-		bool islandHoldNeedsAA = false;
-
-		if (islandHoldActive
-			&& (holdMacro.OpponentProfile.Share(EnemyForceCategory::Air) >= 15 || holdMacro.AirThreatValue > 0))
-		{
-			islandHoldNeedsAA = true;
-
-			for (auto const pOwnB : pHouse->Buildings)
-			{
-				if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->Type && pOwnB->Type->IsBaseDefense
-					&& GetCombatValueOfType(pOwnB->Type, true) > 0 && pOwnB->GetMapCoords().DistanceFrom(holdMacro.IslandHoldCell) <= 12.0)
-				{
-					islandHoldNeedsAA = false;
-					break;
-				}
-			}
-		}
+		const bool islandHoldNeedsGround = holdMacro.IslandHoldNeedsGround
+			&& holdMacro.IslandHoldUntilFrame > Unsorted::CurrentFrame && holdMacro.IslandHoldCell != CellStruct::Empty
+			&& Unsorted::CurrentFrame >= holdMacro.IslandHoldNoRoomUntilFrame;
 
 		for (int yi = 0; yi < pHouse->ConYards.Count; ++yi)
 		{
@@ -1739,10 +1727,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					}
 				}
 			}
-
-			if (islandHoldActive && defsNearCY < 3 && cyc.DistanceFrom(holdMacro.IslandHoldCell) <= 2.0)
-				forwardConYardNeedsDefense = true;
 		}
+
+		if (islandHoldNeedsGround)
+			forwardConYardNeedsDefense = true;
 
 		const bool reachedNewOreField
 			= (conYardWithNoRefineryInZone
@@ -2699,6 +2687,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// A raid short of guns: this defense shoots up, so the caps and penalties that keep a
 				// quiet base from piling up towers do not hold it back.
 				const bool fillsAirDeficit = isAntiAir && airRaidShortOfDefenses;
+				// One the Island Hold yard still lacks: the house's caps and budget count the towers
+				// of its other bases, which do nothing for that yard, so only being broke holds it back.
+				const bool fillsIslandHold = IslandHoldWants(pHouse, pBld);
 
 				const bool canBuildEmergencyDefense = (ownedRefineries >= 1 && ownedBarracks >= 1
 					&& (wasRecentlyAttacked || frontlineThreatActive || undefendedRemoteAssetsCount > 0 || underAirAttack));
@@ -2739,7 +2730,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					}
 				}
 
-				if (isPureAA && totalAADefenses >= maxAADefenses && !islandHoldNeedsAA)
+				if (isPureAA && totalAADefenses >= maxAADefenses && !fillsIslandHold)
 				{
 					noteAirDefense(pBld, 2, 0);
 
@@ -2752,7 +2743,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					? std::max(maxGroundDefenses + 3, totalGroundDefenses + std::max(1, frontlineDefenseDeficit))
 					: maxGroundDefenses;
 
-				if (!isPureAA && !fillsAirDeficit && totalGroundDefenses >= effectiveMaxGroundDefenses)
+				if (!isPureAA && !fillsAirDeficit && !fillsIslandHold && totalGroundDefenses >= effectiveMaxGroundDefenses)
 				{
 					if (isAntiAir)
 						noteAirDefense(pBld, 3, 0);
@@ -2773,7 +2764,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// Defense budget (NeuralAI.Defense.inl): none while broke, none beyond the value our army
 				// and economy justify, fewer when our towers die without paying back or seen enemy
 				// artillery outranges this one. A tower already in construction is finished. A raid
-				// short of guns is only held back while broke.
+				// short of guns and the Island Hold yard are only held back while broke.
 				int defenseBudgetShift = 0;
 
 				if (!isBldInProgress)
@@ -2781,7 +2772,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					bool budgetBlocked = false;
 					defenseBudgetShift = DefenseBudgetShift(pHouse, pBld, isPureAA, totalGroundDefenses, totalAADefenses, budgetBlocked);
 
-					if (budgetBlocked && (!fillsAirDeficit || GetMacroState(pHouse).BrokeHoldActive))
+					if (budgetBlocked && ((!fillsAirDeficit && !fillsIslandHold) || GetMacroState(pHouse).BrokeHoldActive))
 					{
 						if (isAntiAir)
 							noteAirDefense(pBld, 5, 0);
@@ -2789,7 +2780,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						continue;
 					}
 
-					if (fillsAirDeficit)
+					if (fillsAirDeficit || fillsIslandHold)
 						defenseBudgetShift = std::max(defenseBudgetShift, 0);
 				}
 
@@ -2802,8 +2793,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				score = (isPureAA ? scores[6] : std::max(static_cast<int>(scores[5]), 320)) + tierQualityBonus
 					+ CounterBonusFor(pHouse, pBld) + defenseBudgetShift;
 
-				if (islandHoldActive && (isPureAA ? islandHoldNeedsAA : !isUnarmedBunker))
-					score += 450;
+				constexpr int islandHoldDefenseBonus = 450;
+
+				if (fillsIslandHold)
+					score += islandHoldDefenseBonus;
 
 				if (isPureAA)
 				{
@@ -2913,6 +2906,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					bestAirDefenseScore = score;
 					bestAirDefenseIdx = pBld->ArrayIndex;
+				}
+
+				if (fillsIslandHold && score > bestIslandHoldScore)
+				{
+					bestIslandHoldScore = score;
+					bestIslandHoldIdx = pBld->ArrayIndex;
 				}
 
 				if (isAntiAir)
@@ -3039,6 +3038,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			if (IsAITickWindow(450, evalDelay))
 				CountDecision(NeuralDecision::BankFactoryPick, pHouse->ArrayIndex);
+		}
+
+		// Island Hold: the defense its yard still lacks comes before the other picks, the bank
+		// governor's factories included: the plan has 5400 frames for up to four buildings, the house
+		// makes one at a time and its score alone rarely wins (match #8871: the yard waited 10800
+		// frames for one anti-air defense while 23 of the 24 picks sampled were ground towers and
+		// factories). Never before restoring income, a building already under construction or a gun
+		// an air raid still needs.
+		if (bestIslandHoldIdx >= 0 && bestBldIdx != bestIslandHoldIdx && hasActiveBuildingIncome && !bestFillsAirDeficit
+			&& inProgressBldIdx < 0 && inProgressDefIdx < 0)
+		{
+			bestBldIdx = bestIslandHoldIdx;
+			bestBldScore = std::max(bestBldScore, bestIslandHoldScore);
 		}
 
 		// Ally site plans (Ally Backup, Ally Forward Outpost) ask for one building next to an ally's

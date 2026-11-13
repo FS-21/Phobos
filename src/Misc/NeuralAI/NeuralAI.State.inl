@@ -772,6 +772,9 @@ namespace
 		// The cell a carryall chose to set its cargo down on when the one below it at the drop zone
 		// did not take it, by carryall UniqueID (key access only).
 		std::unordered_map<DWORD, CellStruct> CarryallDropCells {};
+		// Since when a loaded transport on its pickup shore has had no landmass to go to, by
+		// transport UniqueID (key access only).
+		std::unordered_map<DWORD, int> FerryNoGoalSince {};
 		// Transports the loader left parked with something to load or cargo aboard, and when:
 		// nobody else gives them orders meanwhile (IsFerryParkedToLoad). TraceParkedFerries (TEMP
 		// diagnostic) names whoever moved one all the same.
@@ -797,6 +800,13 @@ namespace
 		// a new island ConYard to fortify, and a forward repair station toward the front.
 		CellStruct IslandHoldCell { CellStruct::Empty };
 		int IslandHoldUntilFrame { -1 };
+		// What that yard still lacks, as the plan counts it: a defense that hits the ground, one
+		// that shoots up.
+		bool IslandHoldNeedsGround { false };
+		bool IslandHoldNeedsAntiAir { false };
+		// Placement found no cell that counts for that yard: until this frame its defenses are
+		// chosen and placed like any other.
+		int IslandHoldNoRoomUntilFrame { -1 };
 		CellStruct ForwardRepairCell { CellStruct::Empty };
 		int ForwardRepairUntilFrame { -1 };
 		// Ally site plans (Ally Backup, Ally Forward Outpost): the next building we want next to an
@@ -1079,6 +1089,7 @@ namespace
 			this->FerryBoardTurns.clear();
 			this->FerryLandings.clear();
 			this->CarryallDropCells.clear();
+			this->FerryNoGoalSince.clear();
 			this->ParkedFerries.clear();
 			this->ProductionBanUntil.clear();
 			this->ProductionPickIdx = { -1, -1, -1 };
@@ -1088,6 +1099,9 @@ namespace
 			this->LastAirDropAbortFrame = -100000;
 			this->IslandHoldCell = CellStruct::Empty;
 			this->IslandHoldUntilFrame = -1;
+			this->IslandHoldNeedsGround = false;
+			this->IslandHoldNeedsAntiAir = false;
+			this->IslandHoldNoRoomUntilFrame = -1;
 			this->ForwardRepairCell = CellStruct::Empty;
 			this->ForwardRepairUntilFrame = -1;
 			this->AllySiteBuildType = -1;
@@ -1309,6 +1323,9 @@ namespace
 	// A carryall within CarryallDropZoneCells of its drop cell sets the cargo down; when the cell
 	// below does not take it, on the nearest one that does within CarryallDropSearchCells.
 	constexpr double CarryallDropZoneCells = 2.5;
+	// A loaded transport that has had nowhere to go for this long, still on its pickup shore, sets
+	// its cargo down again.
+	constexpr int FerryNoGoalUnloadFrames = 900;
 	constexpr int CarryallDropSearchCells = 6;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
