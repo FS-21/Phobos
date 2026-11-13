@@ -5,7 +5,9 @@ namespace
 {
 	// Evaluates buildability strictly under Human Player rules:
 	// - Requires valid human TechLevel (0..10), excluding TechLevel=-1 AI script
-	// hacks/limbo dummies and TechLevel=11 disabled types
+	// hacks/limbo dummies and TechLevel=11 disabled types. What a captured secret lab
+	// grants the house is outside those levels on purpose: for it the level is not
+	// looked at and the other prerequisites decide (HouseExt::PrerequisitesMet)
 	// - Excludes legacy *_AI hack clones and TEST_BUILDING
 	// - Temporarily sets IsHumanPlayer=true and AIBuildThis=true during
 	// HouseClass::CanBuild so Ares/YRpp enforce real human Prerequisites,
@@ -16,7 +18,7 @@ namespace
 		if (!pHouse || !pType)
 			return false;
 
-		if (pType->TechLevel < 0 || pType->TechLevel > 10 || pType->TechLevel > pHouse->TechLevel)
+		if (!pHouse->HasFromSecretLab(pType) && (pType->TechLevel < 0 || pType->TechLevel > 10 || pType->TechLevel > pHouse->TechLevel))
 			return false;
 
 		const char* id = pType->ID;
