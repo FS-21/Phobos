@@ -467,9 +467,26 @@ namespace
 	// whole waves stood in their own base. Legs along a route with the real step rule get out.
 	// With avoidResources the route keeps off resource cells (past the first cells around the unit,
 	// so one standing in a field can leave it) and is given for any target more than hop + 2 away.
+	// Why the last GroundRouteHop call gave no leg (diagnostics of units that stay held).
+	enum class NeuralRouteAnswer : int
+	{
+		Given = 0,
+		Excluded, // flyer, jumpjet, teleporter, burrower
+		Near, // the target is within the leg plus its margin
+		NoZone, // the unit stands on no zone of its own
+		GoalOffZone, // no cell of its zone at or around the target
+		Budget, // the house used its searches of this tick and has no route kept
+		NoRoute, // the search found none
+		ShortLeg, // the leg would end next to the unit
+		Count
+	};
+
+	NeuralRouteAnswer LastGroundRouteAnswer = NeuralRouteAnswer::Given;
+
 	CellClass* GroundRouteHop(FootClass* pFoot, const CellStruct& target, int hop, bool avoidResources = false)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+		LastGroundRouteAnswer = NeuralRouteAnswer::Excluded;
 
 		if (!pType || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly
 			|| pType->MovementZone == MovementZone::Subterrannean || pFoot->IsInAir())
@@ -485,21 +502,27 @@ namespace
 		const CellStruct from = pFoot->GetMapCoords();
 		CellStruct goal = target;
 
+		LastGroundRouteAnswer = NeuralRouteAnswer::Near;
+
 		if (from.DistanceFrom(goal) <= hop + (avoidResources ? 2.0 : 10.0))
 			return nullptr;
 
 		const MovementZone mz = pType->MovementZone;
 		const int zone = ObjectZone(pFoot, mz);
+		LastGroundRouteAnswer = NeuralRouteAnswer::NoZone;
 
 		if (zone <= 1)
 			return nullptr;
 
-		// A ship sent at a land cell goes for the nearest water of its zone within 8 cells.
-		if (naval && MapClass::Instance.GetMovementZoneType(goal, mz, false) != zone)
+		// A target off the unit's zone (a ship sent at a land cell, a cell next to a building that is
+		// water or cliff) stands for the nearest cell of the zone around it: within 8 cells for a
+		// ship, RouteGoalSnapCells for the rest.
+		if (MapClass::Instance.GetMovementZoneType(goal, mz, false) != zone)
 		{
 			bool found = false;
+			const int reach = naval ? 8 : RouteGoalSnapCells;
 
-			for (int r = 1; r <= 8 && !found; ++r)
+			for (int r = 1; r <= reach && !found; ++r)
 			{
 				for (int dy = -r; dy <= r && !found; ++dy)
 				{
@@ -519,6 +542,8 @@ namespace
 				}
 			}
 		}
+
+		LastGroundRouteAnswer = NeuralRouteAnswer::GoalOffZone;
 
 		if (MapClass::Instance.GetMovementZoneType(goal, mz, false) != zone)
 			return nullptr;
@@ -581,6 +606,8 @@ namespace
 
 			if (owner >= 0 && owner < 32 && searches[owner]++ >= GroundRouteSearchesPerTick)
 			{
+				LastGroundRouteAnswer = NeuralRouteAnswer::Budget;
+
 				if (it == routes.end() || it->second.MatchSerial != NeuralMatchSerial)
 					return nullptr;
 
@@ -922,6 +949,7 @@ namespace
 		// even where its zone map links cells no unit can step between (Polar Knot: a 25-cell
 		// straight leg around a plateau edge still failed).
 		auto const& cells = it->second.Cells;
+		LastGroundRouteAnswer = NeuralRouteAnswer::NoRoute;
 
 		if (cells.empty())
 			return nullptr;
@@ -954,8 +982,12 @@ namespace
 			next = std::min(cells.size() - 1, next + RouteLegPastBridgeCells);
 		}
 
+		LastGroundRouteAnswer = NeuralRouteAnswer::ShortLeg;
+
 		if (from.DistanceFrom(cells[next]) < 3.0)
 			return nullptr;
+
+		LastGroundRouteAnswer = NeuralRouteAnswer::Given;
 
 		return MapClass::Instance.TryGetCellAt(cells[next]);
 	}
