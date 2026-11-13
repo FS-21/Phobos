@@ -468,6 +468,84 @@ namespace
 		return true;
 	}
 
+	// TEMP diagnostic: what the route legs answer to the units that stay held on their cell with an
+	// attack-move to give, per house every HeldRouteLogFrames, and a few of those units in detail
+	// (those that got no leg, and those held again within 1200 frames of a leg).
+	constexpr int HeldRouteLogFrames = 1800;
+	constexpr int HeldRouteSamplesPerMatch = 30;
+
+	void NoteHeldRouteAnswer(FootClass* pFoot, const CellStruct& goal, CellClass* pLeg, bool afterLeg)
+	{
+		constexpr size_t AnswerCount = static_cast<size_t>(NeuralRouteAnswer::Count);
+		static constexpr const char* AnswerNames[AnswerCount] = { "given", "excluded", "near", "no zone", "goal off zone", "budget",
+			"no route", "short leg" };
+		static int serial = -1;
+		static std::array<std::array<int, AnswerCount + 1>, 32> answers {};
+		static std::array<int, 32> logFrame {};
+		static int samples = 0;
+
+		if (serial != NeuralMatchSerial)
+		{
+			serial = NeuralMatchSerial;
+			samples = 0;
+			logFrame.fill(0);
+
+			for (auto& tally : answers)
+				tally.fill(0);
+		}
+
+		const int house = pFoot->Owner ? pFoot->Owner->ArrayIndex : -1;
+		auto const pType = pFoot->GetTechnoType();
+
+		if (house < 0 || house >= 32 || !pType)
+			return;
+
+		auto& tally = answers[house];
+		const size_t answer = std::min(static_cast<size_t>(LastGroundRouteAnswer), AnswerCount - 1);
+		tally[answer]++;
+
+		if (afterLeg)
+			tally[AnswerCount]++;
+
+		const int now = Unsorted::CurrentFrame;
+		const CellStruct here = pFoot->GetMapCoords();
+
+		if ((afterLeg || !pLeg) && samples < HeldRouteSamplesPerMatch)
+		{
+			++samples;
+			int crowd = 0;
+
+			for (auto const pTechno : TechnoClass::Array)
+			{
+				if (pTechno && pTechno != pFoot && pTechno->IsAlive && !pTechno->InLimbo && pTechno->WhatAmI() != AbstractType::Building
+					&& pTechno->GetMapCoords().DistanceFrom(here) <= 2.5)
+				{
+					++crowd;
+				}
+			}
+
+			auto const pGoalCell = MapClass::Instance.TryGetCellAt(goal);
+			const MovementZone mz = pType->MovementZone;
+			Debug::Log("[NeuralAI] Held unit DIAG house %d frame %d: %s %u at (%d,%d) mz %d zone %d, goal (%d,%d) %d cells away zone %d land %d, "
+				"answer %s, leg (%d,%d) free of units %d, held after a leg %d, mission %d mega %d, %d units within 2 cells.\n",
+				house, now, pType->ID, pFoot->UniqueID, here.X, here.Y, static_cast<int>(mz), ObjectZone(pFoot, mz), goal.X, goal.Y,
+				static_cast<int>(here.DistanceFrom(goal)), MapClass::Instance.GetMovementZoneType(goal, mz, false),
+				pGoalCell ? static_cast<int>(pGoalCell->LandType) : -1, AnswerNames[answer],
+				pLeg ? pLeg->MapCoords.X : -1, pLeg ? pLeg->MapCoords.Y : -1,
+				pLeg ? (pLeg->IsClearToMove(pType->SpeedType, false, false, -1, mz, -1, false) ? 1 : 0) : -1, afterLeg ? 1 : 0,
+				static_cast<int>(pFoot->CurrentMission), static_cast<int>(pFoot->MegaMission), crowd);
+		}
+
+		if (now - logFrame[house] >= HeldRouteLogFrames || now < logFrame[house])
+		{
+			logFrame[house] = now;
+			Debug::Log("[NeuralAI] House %d held units and route legs: given %d, excluded %d, near %d, no zone %d, goal off zone %d, budget %d, "
+				"no route %d, short leg %d; held again after a leg %d, frame %d.\n",
+				house, tally[0], tally[1], tally[2], tally[3], tally[4], tally[5], tally[6], tally[7], tally[AnswerCount], now);
+			tally.fill(0);
+		}
+	}
+
 	void OrderFootToAttackMove(FootClass* pFoot, AbstractClass* pDest)
 	{
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
@@ -544,29 +622,44 @@ namespace
 			const CellStruct dc = pDestCell->MapCoords;
 			CellClass* pBestAdj = nullptr;
 			int bestDist = 999999;
-			for (int r = 1; r <= 4 && !pBestAdj; ++r)
+			// A cell the unit can stand on first (its own zone, clear for it): the engine finds no path
+			// to water or a cliff next to the building. Any free cell otherwise (a target on another
+			// landmass, for the units that cross water).
+			auto const pAdjType = pFoot->GetTechnoType();
+			const int adjZone = pAdjType ? ObjectZone(pFoot, pAdjType->MovementZone) : -1;
+
+			for (int pass = (adjZone > 1 ? 0 : 1); pass < 2 && !pBestAdj; ++pass)
 			{
-				for (int dy = -r; dy <= r; ++dy)
+				for (int r = 1; r <= 4 && !pBestAdj; ++r)
 				{
-					for (int dx = -r; dx <= r; ++dx)
+					for (int dy = -r; dy <= r; ++dy)
 					{
-						if (std::abs(dx) != r && std::abs(dy) != r)
-							continue;
-
-						const CellStruct cc { static_cast<short>(dc.X + dx), static_cast<short>(dc.Y + dy) };
-						if (auto const pC = MapClass::Instance.TryGetCellAt(cc))
+						for (int dx = -r; dx <= r; ++dx)
 						{
-							if (pC->GetBuilding() != nullptr)
+							if (std::abs(dx) != r && std::abs(dy) != r)
 								continue;
 
-							if (pC->LandType == LandType::Rock || pC->LandType == LandType::Wall)
-								continue;
-
-							const int d = std::abs(cc.X - fc.X) + std::abs(cc.Y - fc.Y);
-							if (d < bestDist)
+							const CellStruct cc { static_cast<short>(dc.X + dx), static_cast<short>(dc.Y + dy) };
+							if (auto const pC = MapClass::Instance.TryGetCellAt(cc))
 							{
-								bestDist = d;
-								pBestAdj = pC;
+								if (pC->GetBuilding() != nullptr)
+									continue;
+
+								if (pC->LandType == LandType::Rock || pC->LandType == LandType::Wall)
+									continue;
+
+								if (pass == 0 && (MapClass::Instance.GetMovementZoneType(cc, pAdjType->MovementZone, false) != adjZone
+									|| !pC->IsClearToMove(pAdjType->SpeedType, true, true, -1, pAdjType->MovementZone, -1, false)))
+								{
+									continue;
+								}
+
+								const int d = std::abs(cc.X - fc.X) + std::abs(cc.Y - fc.Y);
+								if (d < bestDist)
+								{
+									bestDist = d;
+									pBestAdj = pC;
+								}
 							}
 						}
 					}
@@ -616,8 +709,9 @@ namespace
 
 					auto const itHop = hoppingSince.find(pFoot->UniqueID);
 					const bool hopping = itHop != hoppingSince.end() && nowFrame >= itHop->second && nowFrame - itHop->second <= 1200;
+					const bool held = pFoot->Owner && IsFootHeldStill(pFoot->Owner, pFoot, 300);
 
-					if (!hopping && !(pFoot->Owner && IsFootHeldStill(pFoot->Owner, pFoot, 300)))
+					if (!hopping && !held)
 						return nullptr;
 
 					// A route is only given past its leg plus 10 cells, so a goal nearer than that takes
@@ -625,6 +719,9 @@ namespace
 					const double goalDist = pFoot->GetMapCoords().DistanceFrom(pDestCell->MapCoords);
 					const int hopSteps = goalDist > 35.0 ? 25 : (goalDist > 22.0 ? 12 : 6);
 					auto const pHopCell = GroundRouteHop(pFoot, pDestCell->MapCoords, hopSteps);
+
+					if (held)
+						NoteHeldRouteAnswer(pFoot, pDestCell->MapCoords, pHopCell, hopping);
 
 					if (pHopCell)
 						hoppingSince[pFoot->UniqueID] = nowFrame;
