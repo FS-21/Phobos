@@ -12,7 +12,9 @@ namespace
 	//   (its destructors leave it the vtable of a base class) or freed memory;
 	// - a live mobile unit linked from a cell it does not stand on, or linked while in limbo: the
 	//   state a unit has to be in for its death to leave its cell pointing at it.
-	constexpr int CellGhostCheckFrames = 30;
+	// One check walks every cell of the map (about 10 ms): every 30 frames it was 4% of the AI tick
+	// cost and found nothing in two days, so it runs rarely while the crash is set aside.
+	constexpr int CellGhostCheckFrames = 900;
 	constexpr int CellGhostLogsPerMatch = 12;
 	constexpr int CellGhostChainSteps = 64;
 	constexpr int CellGhostTypeSlots = 4;
