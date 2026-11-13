@@ -3,6 +3,172 @@
 
 namespace
 {
+	// TEMP diagnostic: destroyed technos still linked from a cell. Seven of the eleven crashes of
+	// 2026-11-11..13 are the engine walking the objects of a cell (TechnoClass::Evaluate_Cell picking
+	// a target, Can_Enter_Cell finding a path) and calling into one that was already destroyed. The
+	// object lists of every cell are checked every CellGhostCheckFrames: an object with the vtable of
+	// a techno that is not in the techno array is logged with what can still be read of it, so the
+	// match log tells which kind of unit is left behind and when.
+	constexpr int CellGhostCheckFrames = 300;
+	constexpr int CellGhostLogsPerMatch = 12;
+	constexpr int CellGhostChainSteps = 64;
+
+	struct NeuralCellGhostInfo
+	{
+		uintptr_t VTable;
+		ObjectClass* Next;
+		void* Type;
+		void* Owner;
+		DWORD UniqueID;
+		int Health;
+		int Mission;
+		int CellX;
+		int CellY;
+		bool IsAlive;
+		bool InLimbo;
+		bool OnBridge;
+	};
+
+	// Reads an object that may be freed memory. Plain data only in here: structured exception
+	// handling does not mix with objects that have destructors.
+	bool ReadCellGhost(ObjectClass* pObject, NeuralCellGhostInfo* pInfo)
+	{
+		__try
+		{
+			pInfo->VTable = *reinterpret_cast<uintptr_t*>(pObject);
+			pInfo->Next = pObject->NextObject;
+
+			if (pInfo->VTable != UnitClass::AbsVTable && pInfo->VTable != InfantryClass::AbsVTable
+				&& pInfo->VTable != AircraftClass::AbsVTable && pInfo->VTable != BuildingClass::AbsVTable)
+			{
+				return true;
+			}
+
+			auto const pTechno = static_cast<TechnoClass*>(pObject);
+			pInfo->UniqueID = pObject->UniqueID;
+			pInfo->Health = pObject->Health;
+			pInfo->IsAlive = pObject->IsAlive;
+			pInfo->InLimbo = pObject->InLimbo;
+			pInfo->OnBridge = pObject->OnBridge;
+			pInfo->CellX = pObject->Location.X / Unsorted::LeptonsPerCell;
+			pInfo->CellY = pObject->Location.Y / Unsorted::LeptonsPerCell;
+			pInfo->Owner = pTechno->Owner;
+			pInfo->Mission = static_cast<int>(pTechno->CurrentMission);
+
+			if (pInfo->VTable == UnitClass::AbsVTable)
+				pInfo->Type = static_cast<UnitClass*>(pObject)->Type;
+			else if (pInfo->VTable == InfantryClass::AbsVTable)
+				pInfo->Type = static_cast<InfantryClass*>(pObject)->Type;
+			else if (pInfo->VTable == AircraftClass::AbsVTable)
+				pInfo->Type = static_cast<AircraftClass*>(pObject)->Type;
+			else
+				pInfo->Type = static_cast<BuildingClass*>(pObject)->Type;
+
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
+
+	void CheckCellGhosts()
+	{
+		static int serial = -1;
+		static int lastFrame = -1;
+		static int logged = 0;
+		const int now = Unsorted::CurrentFrame;
+
+		if (serial != NeuralMatchSerial)
+		{
+			serial = NeuralMatchSerial;
+			lastFrame = -1;
+			logged = 0;
+		}
+
+		if (logged >= CellGhostLogsPerMatch || (lastFrame >= 0 && now >= lastFrame && now - lastFrame < CellGhostCheckFrames))
+			return;
+
+		lastFrame = now;
+		std::unordered_set<const void*> live;
+		live.reserve(static_cast<size_t>(TechnoClass::Array.Count) * 2);
+
+		for (auto const pTechno : TechnoClass::Array)
+			live.insert(pTechno);
+
+		// Read-only tables of the game image: the vtable of any real object lies there.
+		constexpr uintptr_t ImageDataStart = 0x7E0000;
+		constexpr uintptr_t ImageDataEnd = 0x840000;
+
+		for (int i = 0; i < MapClass::Instance.Cells.Capacity && logged < CellGhostLogsPerMatch; ++i)
+		{
+			auto const pCell = MapClass::Instance.Cells.Items[i];
+
+			if (!pCell)
+				continue;
+
+			for (int list = 0; list < 2; ++list)
+			{
+				ObjectClass* pObject = list == 0 ? pCell->FirstObject : pCell->AltObject;
+
+				for (int step = 0; pObject && step < CellGhostChainSteps; ++step)
+				{
+					if (live.contains(pObject))
+					{
+						pObject = pObject->NextObject;
+						continue;
+					}
+
+					NeuralCellGhostInfo info {};
+					const bool readable = ReadCellGhost(pObject, &info);
+					const bool techno = readable && (info.VTable == UnitClass::AbsVTable || info.VTable == InfantryClass::AbsVTable
+						|| info.VTable == AircraftClass::AbsVTable || info.VTable == BuildingClass::AbsVTable);
+
+					// Terrain objects and the like: not technos, their chain goes on.
+					if (readable && !techno && info.VTable >= ImageDataStart && info.VTable < ImageDataEnd)
+					{
+						pObject = info.Next;
+						continue;
+					}
+
+					++logged;
+					const char* typeID = "?";
+					int owner = -1;
+
+					if (techno)
+					{
+						for (auto const pType : TechnoTypeClass::Array)
+						{
+							if (pType == info.Type)
+							{
+								typeID = pType->ID;
+								break;
+							}
+						}
+
+						for (auto const pOwner : HouseClass::Array)
+						{
+							if (pOwner == info.Owner)
+							{
+								owner = pOwner->ArrayIndex;
+								break;
+							}
+						}
+					}
+
+					Debug::Log("[NeuralAI] Cell ghost DIAG frame %d: cell (%d,%d) %s list, link %d, holds %p (%s, vtable %08X) that is not in the techno array: "
+						"type %s, house %d, id %u, alive %d, limbo %d, on bridge %d, health %d, mission %d, its own cell (%d,%d).\n",
+						now, pCell->MapCoords.X, pCell->MapCoords.Y, list == 0 ? "ground" : "bridge", step, pObject,
+						!readable ? "unreadable memory" : (techno ? "a destroyed techno" : "reused memory"), static_cast<unsigned>(info.VTable),
+						typeID, owner, info.UniqueID, info.IsAlive ? 1 : 0, info.InLimbo ? 1 : 0, info.OnBridge ? 1 : 0, info.Health, info.Mission,
+						info.CellX, info.CellY);
+
+					break;
+				}
+			}
+		}
+	}
+
 	// Air danger memory: every AI tick, our flying units in the air are remembered; one that
 	// vanished since the last tick (not alive any more, not just loaded or landed) away from our
 	// base was shot down, so its last cell is an anti-air danger spot for 8100 frames. Air lanes
@@ -1030,6 +1196,7 @@ namespace
 		UpdateJamBreaker(pHouse, stuckOrders);
 		UpdateJamMouths(pHouse);
 		UpdateHoveringFlyers(pHouse);
+		CheckCellGhosts();
 
 		// Aircraft on Mission::Attack that neither move nor fire: when the engine finds no fire
 		// location for the target it goes back to "return to base" and, still armed and targeting,
