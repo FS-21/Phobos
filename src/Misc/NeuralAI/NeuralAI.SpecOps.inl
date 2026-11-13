@@ -542,6 +542,15 @@ namespace
 					state.CaptureCount++;
 					Debug::Log("[NeuralAI] House %d SpecOps: captured %s at (%d,%d), frame %d (captures %d).\n",
 						pHouse->ArrayIndex, pBld->Type->ID, cell.X, cell.Y, now, state.CaptureCount);
+
+					// TEMP diagnostic: what a captured secret lab unlocks and whether the house may build it.
+					if (pBld->Type->SecretLab)
+					{
+						auto const pBoon = pBld->SecretProduction;
+						Debug::Log("[NeuralAI] House %d SecretLab DIAG: %s unlocks %s, prerequisites met %d, its tech level %d, ours %d, frame %d.\n",
+							pHouse->ArrayIndex, pBld->Type->ID, pBoon ? pBoon->ID : "nothing",
+							(pBoon && HouseExt::PrerequisitesMet(pHouse, pBoon)) ? 1 : 0, pBoon ? pBoon->TechLevel : 0, pHouse->TechLevel, now);
+					}
 				}
 
 				pTech->OwnerIndex = ownerIndex;
