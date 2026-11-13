@@ -998,13 +998,36 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// The answer of the scan below, kept MapScanKeepFrames per house.
+		struct IslandScan
+		{
+			int Serial { -1 };
+			int Frame { -100000 };
+			int Buildings { -1 };
+			CellStruct Home { CellStruct::Empty };
+			int HomeZone { -1 };
+			bool Congested { false };
+			bool HomeOre { false };
+			CellStruct Goal { CellStruct::Empty };
+			int GoalZone { -1 };
+		};
+
+		static std::array<IslandScan, 32> islandScans;
+		IslandScan* const pIslandScan = (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32) ? &islandScans[pHouse->ArrayIndex] : nullptr;
+		const bool islandScanKept = pIslandScan && pIslandScan->Serial == NeuralMatchSerial
+			&& Unsorted::CurrentFrame >= pIslandScan->Frame && Unsorted::CurrentFrame - pIslandScan->Frame < MapScanKeepFrames
+			&& pIslandScan->Buildings == pHouse->Buildings.Count && pIslandScan->Home == homeCoords
+			&& pIslandScan->HomeZone == homeGroundZone && pIslandScan->Congested == homeIslandCongested;
+		// A kept answer skips the scan (no cell is within a negative reach).
+		const int islandScanReach = islandScanKept ? -1 : 216;
+
 		int bestResScore = -999999;
 		CellClass* pFallbackIslandLandCell = nullptr;
 		int fallbackIslandLandZone = -1;
 		int bestLandScore = -999999;
-		for (int dy = -216; dy <= 216; dy += 4)
+		for (int dy = -islandScanReach; dy <= islandScanReach; dy += 4)
 		{
-			for (int dx = -216; dx <= 216; dx += 4)
+			for (int dx = -islandScanReach; dx <= islandScanReach; dx += 4)
 			{
 				const CellStruct cand { static_cast<short>(homeCoords.X + dx), static_cast<short>(homeCoords.Y + dy) };
 				auto const pCell = MapClass::Instance.TryGetCellAt(cand);
@@ -1156,6 +1179,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			pIslandResourceGoalCell = pFallbackIslandLandCell;
 			resourceIslandZone = fallbackIslandLandZone;
+		}
+
+		if (islandScanKept)
+		{
+			hasUncolonizedOreOnHomeIsland = pIslandScan->HomeOre;
+			resourceIslandZone = pIslandScan->GoalZone;
+			pIslandResourceGoalCell = pIslandScan->Goal != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(pIslandScan->Goal) : nullptr;
+		}
+		else if (pIslandScan)
+		{
+			*pIslandScan = IslandScan { NeuralMatchSerial, Unsorted::CurrentFrame, pHouse->Buildings.Count, homeCoords, homeGroundZone,
+				homeIslandCongested, hasUncolonizedOreOnHomeIsland,
+				pIslandResourceGoalCell ? pIslandResourceGoalCell->MapCoords : CellStruct::Empty, resourceIslandZone };
 		}
 
 		if (pIslandResourceGoalCell)

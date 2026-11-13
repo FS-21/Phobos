@@ -1377,6 +1377,11 @@ namespace
 	// (something passing may only be in the way), and the island stays given up for NoRoomIslandFrames.
 	constexpr int DeployerNoSiteFrames = 450;
 	constexpr int NoRoomIslandFrames = 9000;
+	// The scans for a free island (micro setup) and for the nearest free ore field (building pass)
+	// walk thousands of cells and, for each, every building of the house: 19% and 10% of the AI tick
+	// when run every tick (tick cost diagnostic, 2026-11-13). Their answers hold this long per house,
+	// less when the house gains or loses a building or its home changes.
+	constexpr int MapScanKeepFrames = 90;
 	// A unit that resource cells hurt goes around a field when the straight way to its goal (the
 	// first ResourceLineCells of it) would cost it this share of its health, in legs of
 	// ResourceDetourHopSteps along a route that keeps off those cells.

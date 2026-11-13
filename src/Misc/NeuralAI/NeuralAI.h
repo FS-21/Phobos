@@ -131,6 +131,7 @@ public:
 	static void OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller);
 	static void OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, TechnoClass* pDock, int money);
 	static void OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed);
+	static void OnPathFailure(FootClass* pFoot, const CellStruct& from, const CellStruct& to);
 	static void OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller);
 
 	static int UpdateExpertAI(HouseClass* pHouse);
