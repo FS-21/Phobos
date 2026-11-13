@@ -143,6 +143,24 @@ DEFINE_HOOK(0x42CC48, AStarClass_FindPath_Failure_NeuralAI, 0x5)
 	return 0;
 }
 
+// A unit of a Neural AI house whose last path searches to the same place all failed waits before
+// it asks the path finder again (NeuralAI::ShouldSkipPathSearch): the search answers "no path" at
+// once, through the exit the function takes for a unit without a move list.
+DEFINE_HOOK(0x4CBBA0, FootClass_FindPath_Backoff_NeuralAI, 0x6)
+{
+	enum { NoPath = 0x4CBBF5 };
+
+	GET(FootClass*, pThis, ECX);
+	GET_STACK(CellStruct*, pGoal, 0x4);
+
+	if (!NeuralAI::ShouldSkipPathSearch(pThis, pGoal))
+		return 0;
+
+	R->EAX(0);
+
+	return NoPath;
+}
+
 // Scenario victory & defeat hooks
 DEFINE_HOOK(0x6856A5, Do_Win_NeuralAI, 0x7)
 {
