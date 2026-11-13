@@ -878,6 +878,16 @@ namespace
 		int LastMouthClearFrame { -1 };
 		int LastJamDiagFrame { -1 };
 		bool JamMapLogged { false };
+		// The narrow passage where the last block of ours stood, since when blocks keep being found
+		// there and when the last one was; and the way around it (JamRerouteHop): the spot avoided,
+		// until when, whether every unit takes it or half of them, and the last frame no way was found.
+		CellStruct JamSpot { CellStruct::Empty };
+		int JamSpotSince { -1 };
+		int JamSpotSeenFrame { -1 };
+		CellStruct JamRerouteSpot { CellStruct::Empty };
+		int JamRerouteUntil { -1 };
+		bool JamRerouteAll { false };
+		int JamRerouteNoWayFrame { -100000 };
 		int FailedApproachDecayFrame { 0 };
 		std::vector<NeuralGroundLossTrack> GroundLossTracks {};
 		int HomeThreatPeak { 0 };
@@ -1151,6 +1161,13 @@ namespace
 			this->LastMouthClearFrame = -1;
 			this->LastJamDiagFrame = -1;
 			this->JamMapLogged = false;
+			this->JamSpot = CellStruct::Empty;
+			this->JamSpotSince = -1;
+			this->JamSpotSeenFrame = -1;
+			this->JamRerouteSpot = CellStruct::Empty;
+			this->JamRerouteUntil = -1;
+			this->JamRerouteAll = false;
+			this->JamRerouteNoWayFrame = -100000;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
 			this->HomeThreatPeak = 0;
@@ -1369,6 +1386,24 @@ namespace
 	constexpr int ResourceDetourMaxNodes = 12000;
 	// Cell by cell route searches (GroundRouteHop) a house may start in one AI tick.
 	constexpr int GroundRouteSearchesPerTick = 2;
+	// A narrow passage that stays blocked (user: first try to clear the funnel, and after a minute
+	// with the problem spread the units over other crossings). The jam breaker works on a block
+	// first. When blocks of ours are still found within JamSpotCells of the same spot
+	// JamRerouteFrames later (a gap of more than JamSpotGapFrames starts the count again), half of
+	// the units whose way leads past the spot (by id) take a land route that keeps off the narrow
+	// cells within JamAvoidCells of it, in legs of JamRerouteHopSteps, and all of them from
+	// JamRerouteAllFrames on. The way around is kept JamRerouteHoldFrames after each such block, so
+	// units already on it do not turn back, and is not looked for again for JamRerouteRetryFrames
+	// when there is none. Only units within JamRerouteReachCells of the spot are sent around.
+	constexpr int JamRerouteFrames = 900;
+	constexpr int JamRerouteAllFrames = 1800;
+	constexpr int JamRerouteHoldFrames = 2700;
+	constexpr int JamRerouteRetryFrames = 900;
+	constexpr int JamSpotGapFrames = 900;
+	constexpr int JamRerouteHopSteps = 20;
+	constexpr double JamSpotCells = 8.0;
+	constexpr double JamAvoidCells = 10.0;
+	constexpr double JamRerouteReachCells = 60.0;
 	// A route leg that would end on a bridge deck runs this many route cells past its far end.
 	constexpr size_t RouteLegPastBridgeCells = 4;
 	// A ground target off the unit's zone stands for the nearest cell of the zone this near to it.

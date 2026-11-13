@@ -451,6 +451,8 @@ namespace
 	// A held unit whose order ends within this many cells of its block's centre wants to stand in it.
 	constexpr double JamInsideCells = 6.0;
 
+	CellClass* JamRerouteHop(FootClass* pFoot, const CellStruct& goal);
+
 	// Jam breaker: our units held 450+ frames with an order pending, 8+ within 4 cells of each other in
 	// open ground or 5+ in a narrow passage (bridge, tunnel tube, a corridor with fewer than 25 free
 	// cells in 7x7), are a block (a rally point in a gap, two-way traffic at a choke). Looked for every
@@ -459,7 +461,9 @@ namespace
 	//   preferably not toward where the held units want to go (up to 16);
 	// - held units outside a plan whose move ends inside the block leave it the same way;
 	// - in a narrow passage with traffic both ways, the smaller side backs off (orders dropped, 8..14
-	//   cells away on its own side; the AI gives it a new job) so the other side gets through.
+	//   cells away on its own side; the AI gives it a new job) so the other side gets through;
+	// - a narrow passage where blocks are still found JamRerouteFrames after the first one is gone
+	//   around: half of the units whose way leads past it, then all of them (JamRerouteHop).
 	void UpdateJamBreaker(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
 	{
 		auto& macro = GetMacroState(pHouse);
@@ -534,6 +538,36 @@ namespace
 		const double wantLen = std::sqrt(wantX * wantX + wantY * wantY);
 		const double avgX = wantLen > 0.0 ? wantX / wantLen : 0.0;
 		const double avgY = wantLen > 0.0 ? wantY / wantLen : 0.0;
+
+		// The same narrow passage blocked again: since when, and from JamRerouteFrames on the way
+		// around it opens (half of the units, then all of them) and stays open JamRerouteHoldFrames.
+		if (narrow)
+		{
+			if (macro.JamSpot == CellStruct::Empty || macro.JamSpot.DistanceFrom(center) > JamSpotCells || now < macro.JamSpotSeenFrame
+				|| now - macro.JamSpotSeenFrame > JamSpotGapFrames)
+			{
+				macro.JamSpot = center;
+				macro.JamSpotSince = now;
+			}
+
+			macro.JamSpotSeenFrame = now;
+			const int blockedFor = now - macro.JamSpotSince;
+
+			if (blockedFor >= JamRerouteFrames)
+			{
+				const bool all = blockedFor >= JamRerouteAllFrames;
+
+				if (now >= macro.JamRerouteUntil || macro.JamRerouteSpot != macro.JamSpot || all != macro.JamRerouteAll)
+				{
+					Debug::Log("[NeuralAI] Frame %d | House #%d passage at (%d,%d) blocked for %d frames: %s of the units take another way\n",
+						now, pHouse->ArrayIndex, macro.JamSpot.X, macro.JamSpot.Y, blockedFor, all ? "all" : "half");
+				}
+
+				macro.JamRerouteSpot = macro.JamSpot;
+				macro.JamRerouteUntil = now + JamRerouteHoldFrames;
+				macro.JamRerouteAll = all;
+			}
+		}
 
 		std::vector<FootClass*> idle;
 		std::vector<CellStruct> occupied;
@@ -646,6 +680,33 @@ namespace
 			}
 		}
 
+		// The passage stayed blocked: held units of the block take the way around it at once
+		// (JamRerouteHop says which ones); the others get it with their next order.
+		int rerouted = 0;
+
+		if (now < macro.JamRerouteUntil)
+		{
+			for (auto const& [pHeld, want] : block)
+			{
+				FootClass* const pFoot = pHeld ? pHeld->Foot : nullptr;
+
+				if (rerouted >= 12 || !pFoot || !pFoot->IsAlive || pFoot->InLimbo || left.contains(pFoot))
+					continue;
+
+				if (auto const pHop = JamRerouteHop(pFoot, pHeld->Dest))
+				{
+					pFoot->ClearMegaMissionData();
+					pFoot->SetTarget(nullptr);
+
+					if (IssueMoveOrder(pFoot, pHop, 1.5))
+					{
+						++rerouted;
+						left.insert(pFoot);
+					}
+				}
+			}
+		}
+
 		// Two-way traffic in a narrow passage: the smaller side backs off.
 		int yielded = 0;
 
@@ -734,7 +795,7 @@ namespace
 				now, pHouse->ArrayIndex, center.X, center.Y, detoured);
 		}
 
-		if (moved > 0 || gaveUp > 0 || yielded > 0 || detoured > 0)
+		if (moved > 0 || gaveUp > 0 || yielded > 0 || detoured > 0 || rerouted > 0)
 		{
 			macro.LastJamBreakFrame = now;
 
@@ -744,9 +805,12 @@ namespace
 			if (yielded > 0)
 				CountDecision(NeuralDecision::JamYielded, pHouse->ArrayIndex);
 
+			if (rerouted > 0)
+				CountDecision(NeuralDecision::GroundRouteHop, pHouse->ArrayIndex);
+
 			Debug::Log("[NeuralAI] Frame %d | House #%d jam at (%d,%d)%s: %d held units, %d idle moved out (of %d idle), %d backed off, "
-				"%d gave up a spot inside it\n", now, pHouse->ArrayIndex, center.X, center.Y, narrow ? " in a narrow passage" : "", n, moved,
-				static_cast<int>(idle.size()), yielded, gaveUp);
+				"%d gave up a spot inside it, %d sent around\n", now, pHouse->ArrayIndex, center.X, center.Y,
+				narrow ? " in a narrow passage" : "", n, moved, static_cast<int>(idle.size()), yielded, gaveUp, rerouted);
 		}
 
 		// What the block is made of (diagnostics, at most once per 900 frames): held units by mission,

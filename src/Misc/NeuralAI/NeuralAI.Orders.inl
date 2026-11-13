@@ -369,6 +369,55 @@ namespace
 		return GroundRouteHop(pFoot, goal, ResourceDetourHopSteps, true);
 	}
 
+	// The next leg of the way around a narrow passage that stayed blocked (JamRerouteFrames), for a
+	// ground unit whose way leads past the spot: within JamRerouteReachCells of it, the goal beyond
+	// it and not at the passage itself. A unit standing in the passage goes on through it. nullptr
+	// when the passage is not blocked, this unit is of the half that keeps to it, or no way goes
+	// around it.
+	CellClass* JamRerouteHop(FootClass* pFoot, const CellStruct& goal)
+	{
+		auto const pHouse = pFoot ? pFoot->Owner : nullptr;
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pHouse || !pType || pFoot->IsInAir() || pType->Naval || pType->MovementZone == MovementZone::Water
+			|| pType->MovementZone == MovementZone::WaterBeach)
+		{
+			return nullptr;
+		}
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now >= macro.JamRerouteUntil || macro.JamRerouteSpot == CellStruct::Empty
+			|| (now >= macro.JamRerouteNoWayFrame && now - macro.JamRerouteNoWayFrame < JamRerouteRetryFrames)
+			|| (!macro.JamRerouteAll && (pFoot->UniqueID & 1) != 0))
+		{
+			return nullptr;
+		}
+
+		const CellStruct spot = macro.JamRerouteSpot;
+		const CellStruct here = pFoot->GetMapCoords();
+		const double toSpot = here.DistanceFrom(spot);
+		const double toGoal = here.DistanceFrom(goal);
+
+		if (toSpot > JamRerouteReachCells || toSpot >= toGoal || spot.DistanceFrom(goal) >= toGoal || spot.DistanceFrom(goal) <= JamAvoidCells
+			|| (toSpot <= JamAvoidCells && IsNarrowPassage(here)))
+		{
+			return nullptr;
+		}
+
+		auto const pHop = GroundRouteHop(pFoot, goal, JamRerouteHopSteps, false, &spot);
+
+		if (!pHop && LastGroundRouteAnswer == NeuralRouteAnswer::NoRoute)
+		{
+			macro.JamRerouteNoWayFrame = now;
+			Debug::Log("[NeuralAI] Frame %d | House #%d no way around the blocked passage at (%d,%d) for %s from (%d,%d) to (%d,%d)\n",
+				now, pHouse->ArrayIndex, spot.X, spot.Y, pType->ID, here.X, here.Y, goal.X, goal.Y);
+		}
+
+		return pHop;
+	}
+
 	// A wounded unit that resource cells heal stops on one near its way before it goes on with its
 	// order. True while it stays there (or walks to it): the order is not given.
 	bool HoldsToHealOnResources(FootClass* pFoot, const CellStruct& goal)
@@ -736,8 +785,10 @@ namespace
 			auto const pHopType = pFoot->GetTechnoType();
 			const bool ship = pHopType && (pHopType->Naval || pHopType->MovementZone == MovementZone::Water
 				|| pHopType->MovementZone == MovementZone::WaterBeach);
-			// A unit that resource cells hurt goes around a field that lies across its way.
-			CellClass* const pDetourHop = ResourceDetourHop(pFoot, pDestCell->MapCoords);
+			// A unit whose way leads through a passage that stayed blocked goes around it; one that
+			// resource cells hurt goes around a field that lies across its way.
+			CellClass* const pJamHop = JamRerouteHop(pFoot, pDestCell->MapCoords);
+			CellClass* const pDetourHop = pJamHop ? pJamHop : ResourceDetourHop(pFoot, pDestCell->MapCoords);
 			CellClass* pGroundHop = pDetourHop ? pDetourHop : (ship ? stepRouteHop() : nullptr);
 			CellClass* const pSeaHop = pGroundHop ? nullptr : NavalRouteHop(pFoot, pDestCell->MapCoords, 25);
 
@@ -757,10 +808,17 @@ namespace
 				const CellStruct here = pFoot->GetMapCoords();
 
 				// A leg around a field is short and need not be nearer to the goal: it is kept while it is
-				// off the resource cells and still ahead.
+				// off the resource cells and still ahead. So is a leg around a blocked passage, while it
+				// is another cell than the goal and within a leg's length.
 				if (auto const pOldHop = abstract_cast<CellClass*>(pFoot->MegaDestination);
 					pOldHop && pFoot->MegaMission == Mission::AttackMove
-					&& (pDetourHop
+					&& (pJamHop
+						? (here.DistanceFrom(pOldHop->MapCoords) > 6.0
+							&& here.DistanceFrom(pOldHop->MapCoords) <= JamRerouteHopSteps + 6.0
+							&& pOldHop->MapCoords.DistanceFrom(goal) > 3.0
+							&& !(pOldHop->MapCoords.DistanceFrom(GetMacroState(pFoot->Owner).JamRerouteSpot) <= JamAvoidCells
+								&& IsNarrowPassage(pOldHop->MapCoords)))
+						: pDetourHop
 						? (here.DistanceFrom(pOldHop->MapCoords) > 3.0
 							&& here.DistanceFrom(pOldHop->MapCoords) <= ResourceDetourHopSteps + 4.0
 							&& pOldHop->GetContainedTiberiumIndex() < 0)
@@ -773,7 +831,7 @@ namespace
 
 				pDestCell = pGroundHop;
 				pResolvedDest = pGroundHop;
-				CountDecision(pDetourHop ? NeuralDecision::ResourceDetour : NeuralDecision::GroundRouteHop,
+				CountDecision((pDetourHop && !pJamHop) ? NeuralDecision::ResourceDetour : NeuralDecision::GroundRouteHop,
 					pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
 			}
 		}

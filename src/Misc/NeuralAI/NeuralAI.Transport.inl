@@ -514,7 +514,13 @@ namespace
 
 	NeuralRouteAnswer LastGroundRouteAnswer = NeuralRouteAnswer::Given;
 
-	CellClass* GroundRouteHop(FootClass* pFoot, const CellStruct& target, int hop, bool avoidResources = false)
+	bool IsNarrowPassage(const CellStruct& center);
+
+	// With pAvoidPassage the route keeps off the narrow cells (IsNarrowPassage) within JamAvoidCells
+	// of that spot, past the first cells around the unit, and is given for any target more than
+	// hop + 2 away: the way around a passage that stays blocked.
+	CellClass* GroundRouteHop(FootClass* pFoot, const CellStruct& target, int hop, bool avoidResources = false,
+		const CellStruct* pAvoidPassage = nullptr)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 		LastGroundRouteAnswer = NeuralRouteAnswer::Excluded;
@@ -535,7 +541,7 @@ namespace
 
 		LastGroundRouteAnswer = NeuralRouteAnswer::Near;
 
-		if (from.DistanceFrom(goal) <= hop + (avoidResources ? 2.0 : 10.0))
+		if (from.DistanceFrom(goal) <= hop + ((avoidResources || pAvoidPassage) ? 2.0 : 10.0))
 			return nullptr;
 
 		const MovementZone mz = pType->MovementZone;
@@ -601,12 +607,20 @@ namespace
 		// Units around one start share a route: a wider square for the way around a field, whose legs
 		// are short and start from the route cell nearest to each unit.
 		const int startGrid = avoidResources ? 8 : 4;
-		const uint64_t routeKey =(static_cast<uint64_t>(static_cast<uint16_t>(zone)) << 48)
+		uint64_t routeKey = (static_cast<uint64_t>(static_cast<uint16_t>(zone)) << 48)
 			| (static_cast<uint64_t>(static_cast<uint8_t>(mz)) << 40)
 			| (static_cast<uint64_t>(static_cast<uint16_t>(from.X / startGrid)) << 30)
 			| (static_cast<uint64_t>(static_cast<uint16_t>(from.Y / startGrid)) << 20)
 			| (static_cast<uint64_t>(static_cast<uint16_t>(goal.X / 4)) << 10) | static_cast<uint64_t>(static_cast<uint16_t>(goal.Y / 4))
 			| (avoidResources ? (1ull << 63) : 0ull);
+
+		// A way around a passage is a route of its own, per spot avoided.
+		if (pAvoidPassage)
+		{
+			routeKey ^= (1ull << 62);
+			routeKey ^= ((static_cast<uint64_t>(static_cast<uint16_t>(pAvoidPassage->X)) << 16) | static_cast<uint16_t>(pAvoidPassage->Y))
+				* 0x9E3779B97F4A7C15ull;
+		}
 
 		if (routes.size() > 256)
 		{
@@ -692,14 +706,23 @@ namespace
 					auto const pCell = MapClass::Instance.CoordinatesLegal(n.Cell) ? MapClass::Instance.TryGetCellAt(n.Cell) : nullptr;
 					bool clear = false;
 
+					// Off the passage to go around: any cell far from the spot, next to the unit or not narrow.
+					auto const offPassage = [&]()
+					{
+						return !pAvoidPassage || n.Cell.DistanceFrom(*pAvoidPassage) > JamAvoidCells || n.Cell.DistanceFrom(from) <= 2.5
+							|| !IsNarrowPassage(n.Cell);
+					};
+
 					if (pCell && n.Deck)
 					{
-						clear = !naval && pCell->ContainsBridge() && MapClass::Instance.GetMovementZoneType(n.Cell, mz, true) == zone;
+						clear = !naval && pCell->ContainsBridge() && MapClass::Instance.GetMovementZoneType(n.Cell, mz, true) == zone
+							&& offPassage();
 					}
 					else if (pCell && MapClass::Instance.GetMovementZoneType(n.Cell, mz, false) == zone)
 					{
 						clear = pCell->IsClearToMove(pType->SpeedType, true, true, -1, mz, -1, false)
-							&& (!avoidResources || pCell->GetContainedTiberiumIndex() < 0 || n.Cell.DistanceFrom(from) <= 2.5);
+							&& (!avoidResources || pCell->GetContainedTiberiumIndex() < 0 || n.Cell.DistanceFrom(from) <= 2.5)
+							&& offPassage();
 
 						if (!clear && walls.size() < RouteWallsKept)
 						{
@@ -822,7 +845,7 @@ namespace
 				std::reverse(route.Cells.begin(), route.Cells.end());
 				std::reverse(route.OnDeck.begin(), route.OnDeck.end());
 			}
-			else if (!avoidResources && queue.size() < maxNodes)
+			else if (!avoidResources && !pAvoidPassage && queue.size() < maxNodes)
 			{
 				// The whole ground the unit can walk was searched and the target, in its zone, is not on
 				// it: buildings close the way (the zone map does not know them). Logged a few times per
