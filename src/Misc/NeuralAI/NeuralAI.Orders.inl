@@ -417,6 +417,24 @@ namespace
 				"%d cells from the passage, searched %d\n", now, pHouse->ArrayIndex, spot.X, spot.Y, pType->ID, here.X, here.Y, goal.X,
 				goal.Y, static_cast<int>(toSpot), LastGroundRouteSearched);
 		}
+		else if (pHop)
+		{
+			// TEMP diagnostic: the first legs around a blocked passage of each match.
+			static int legLogSerial = -1;
+			static int legLogCount = 0;
+
+			if (legLogSerial != NeuralMatchSerial)
+			{
+				legLogSerial = NeuralMatchSerial;
+				legLogCount = 0;
+			}
+
+			if (legLogCount++ < 20)
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d way around the blocked passage at (%d,%d): %s from (%d,%d) to (%d,%d) goes by (%d,%d)\n",
+					now, pHouse->ArrayIndex, spot.X, spot.Y, pType->ID, here.X, here.Y, goal.X, goal.Y, pHop->MapCoords.X, pHop->MapCoords.Y);
+			}
+		}
 
 		return pHop;
 	}
