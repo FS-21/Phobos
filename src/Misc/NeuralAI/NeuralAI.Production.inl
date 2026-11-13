@@ -5342,6 +5342,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (!isAirInProgress && !IsUnitTierAllowed(pHouse, pAir))
 				continue;
 
+			// A type that needs a dock is started only while one is free. A finished aircraft with no
+			// dock cannot leave the airfield: the engine abandons it when the factory's retry timer
+			// runs out and the queue starts the same type again, so the production shows an aircraft
+			// that never comes (user; 459 Banshee productions abandoned for 107 fielded in 25 matches).
+			if (!isAirInProgress && (pAir->AirportBound || pAir->Dock.Count > 0) && ownedDockingAircraft >= pHouse->AirportDocks)
+				continue;
+
 			// An air force shot down as fast as it is built gets no more combat aircraft until the
 			// losses fade (NeuralAI.AirForce.inl); transports and carryalls are not affected.
 			if (!isAirInProgress && airForceShotDown && IsAirForceCraft(pAir))
@@ -5421,6 +5428,36 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Ares replaces HouseClass::AI_Aircraft the same way (0x4FF210 jumps past the
 	// UpdateAircraftProduction hook), so the airfields get the choice here too.
 	pHouse->ProducingAircraftTypeIndex = bestAirIdx;
+
+	// TEMP diagnostic: productions that are finished and still in their factory (no dock, no cell to
+	// place or leave to, a build limit). The engine abandons them when the factory's retry timer
+	// runs out ("Computer is abandoning production of ...", 10 to 30 per 10000 frames of a match).
+	if (IsAITickWindow(900, 0))
+	{
+		int dockingAircraft = 0;
+
+		for (auto const pOwnAir : AircraftClass::Array)
+		{
+			if (pOwnAir && pOwnAir->Owner == pHouse && !pOwnAir->InLimbo && pOwnAir->IsAlive && pOwnAir->Type
+				&& !pOwnAir->SpawnOwner && (pOwnAir->Type->AirportBound || pOwnAir->Type->Dock.Count > 0))
+			{
+				dockingAircraft++;
+			}
+		}
+
+		for (auto const pFactory : FactoryClass::Array)
+		{
+			if (!pFactory || pFactory->Owner != pHouse || !pFactory->Object || !pFactory->IsDone())
+				continue;
+
+			auto const pDoneType = pFactory->Object->GetTechnoType();
+
+			Debug::Log("[NeuralAI] House %d production DIAG: %s is finished and still in its factory (kind %d, on hold %d, suspended %d), "
+				"docks %d with %d aircraft that need one, frame %d.\n", pHouse->ArrayIndex, pDoneType ? pDoneType->ID : "?",
+				static_cast<int>(pFactory->Object->WhatAmI()), pFactory->OnHold ? 1 : 0, pFactory->IsSuspended ? 1 : 0,
+				pHouse->AirportDocks, dockingAircraft, Unsorted::CurrentFrame);
+		}
+	}
 
 	// Bank telemetry: which queues stay empty while the bank is rich.
 	// 0 when one of our factories is building an object of that kind, 1 when none is although a
