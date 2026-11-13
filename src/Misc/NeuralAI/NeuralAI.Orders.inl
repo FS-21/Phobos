@@ -411,8 +411,11 @@ namespace
 		if (!pHop && LastGroundRouteAnswer == NeuralRouteAnswer::NoRoute)
 		{
 			macro.JamRerouteNoWayFrame = now;
-			Debug::Log("[NeuralAI] Frame %d | House #%d no way around the blocked passage at (%d,%d) for %s from (%d,%d) to (%d,%d)\n",
-				now, pHouse->ArrayIndex, spot.X, spot.Y, pType->ID, here.X, here.Y, goal.X, goal.Y);
+			// TEMP diagnostic: the places searched tell a unit shut in by the ring (a few) from ground
+			// with no other way out (all of it).
+			Debug::Log("[NeuralAI] Frame %d | House #%d no way around the blocked passage at (%d,%d) for %s from (%d,%d) to (%d,%d), "
+				"%d cells from the passage, searched %d\n", now, pHouse->ArrayIndex, spot.X, spot.Y, pType->ID, here.X, here.Y, goal.X,
+				goal.Y, static_cast<int>(toSpot), LastGroundRouteSearched);
 		}
 
 		return pHop;
