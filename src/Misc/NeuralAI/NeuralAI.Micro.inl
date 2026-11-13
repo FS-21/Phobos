@@ -768,7 +768,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return true;
 		}
 
-		if (!CanHouseFerryTypeAcrossWater(pHouse, pFootType))
+		// A transport is called only for a crossing one of ours (or one we can build) can make: the
+		// landing on the ground the unit wants, from where it stands.
+		CellClass* const pTargetLanding = FindSafeIslandLandingCell(pHouse, targetCoords, targetZone, false);
+
+		if (!CanHouseFerryTypeAcrossWater(pHouse, pFootType, &footCoords, pTargetLanding ? &pTargetLanding->MapCoords : nullptr))
 			return false;
 
 		// Safety net: a unit that has asked for a crossing for 3600 frames without ever boarding
@@ -823,7 +827,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		RecordPassengerIslandGoal(pFoot->UniqueID, targetCoords);
 		const int passSize = std::max(1, static_cast<int>(pFootType->Size));
-		if (CellClass* pTargetLanding = FindSafeIslandLandingCell(pHouse, targetCoords, targetZone, false))
+		if (pTargetLanding)
 			pendingCrossIslandOrders.push_back({ pFoot, footZone, pTargetLanding, targetZone, passSize });
 
 		// Do NOT order multiple units into Mission::Enter here! The centralized
@@ -11181,6 +11185,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (isAlreadyBoardingAnotherTransport(ord.Passenger))
 					continue;
 
+				// Only a crossing this transport can make itself.
+				if (!ord.TargetLandingCell
+					|| !CanTransportTypeLink(pTrans->Type, ord.Passenger->GetMapCoords(), ord.TargetLandingCell->MapCoords))
+				{
+					continue;
+				}
+
 				const int osz = std::max(1, ord.PassengerSize);
 				if (osz <= static_cast<int>(pTrans->Type->SizeLimit) && osz <= freeCap)
 					return true;
@@ -12238,6 +12249,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					const int osz = std::max(1, ord.PassengerSize);
 					if (osz > static_cast<int>(pTrans->Type->SizeLimit) || osz > roomToReserve)
 						continue;
+
+					// Only a crossing this transport can make itself (a hovercraft does not load for
+					// ground behind a cliff).
+					if (!ord.TargetLandingCell
+						|| !CanTransportTypeLink(pTrans->Type, ord.Passenger->GetMapCoords(), ord.TargetLandingCell->MapCoords))
+					{
+						continue;
+					}
 
 					const double d = ord.Passenger->GetMapCoords().DistanceFrom(transCoords);
 					if (d < bestBoarderDist)
