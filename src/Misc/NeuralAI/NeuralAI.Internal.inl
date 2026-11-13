@@ -1979,6 +1979,16 @@ namespace
 		if (!pTransportType || pTransportType->Passengers <= 0)
 			return false;
 
+		// A carryall that does not mix troops and cargo lets nobody in while it slings a vehicle or
+		// is on a job for one (the engine refuses the entry): it is no transport until it is done.
+		if (pTransport->WhatAmI() == AbstractType::Unit)
+		{
+			auto const pCarryState = UnitExt::Fetch(const_cast<UnitClass*>(static_cast<const UnitClass*>(pTransport)));
+
+			if (pCarryState && pCarryState->CarryallBlocksPassengers())
+				return false;
+		}
+
 		const int passengerSize = std::max(1, static_cast<int>(pPassengerType->Size));
 		if (passengerSize > static_cast<int>(pTransportType->SizeLimit))
 			return false;

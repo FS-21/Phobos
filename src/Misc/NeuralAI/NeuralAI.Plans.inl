@@ -4451,6 +4451,15 @@ namespace
 						continue;
 					}
 
+					// A carryall slinging a vehicle (or on its way to one) takes no soldiers.
+					if (auto const pCarryUnit = abstract_cast<UnitClass*>(pFoot))
+					{
+						auto const pCarryState = UnitExt::Fetch(pCarryUnit);
+
+						if (pCarryState && (pCarryState->CarryallCargo || pCarryState->CarryallState != JumpjetCarryallState::Idle))
+							continue;
+					}
+
 					if (auto const ban = macro.RaidTransportBanUntil.find(uid);
 						ban != macro.RaidTransportBanUntil.end() && Unsorted::CurrentFrame < ban->second)
 					{

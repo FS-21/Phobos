@@ -30,8 +30,8 @@ namespace
 	constexpr int UrbanCaptureOrderFrames = 600;
 	constexpr int UrbanBenchFrames = 2700;
 
-	// An occupiable building (civilian building or battle bunker) this house has seen, as it looked
-	// the last time it was in sight.
+	// An occupiable building (civilian building or battle bunker) this house knows (from the map or
+	// seen), as it looked the last time it was in sight.
 	struct NeuralKnownUrbanBuilding
 	{
 		DWORD ID { 0 };
@@ -84,6 +84,8 @@ namespace
 		int LastScanFrame { -100000 };
 		// Sorted by ID (binary search, deterministic order).
 		std::vector<NeuralKnownUrbanBuilding> Buildings {};
+		// The civilian buildings the map starts with were taken into the memory.
+		bool MapBuildingsKnown { false };
 		// The live building of each entry of Buildings (same index, null once gone), valid in
 		// LiveFrame only.
 		std::vector<BuildingClass*> Live {};
@@ -353,6 +355,12 @@ namespace
 		const int now = Unsorted::CurrentFrame;
 		std::vector<DWORD> inSightIDs;
 
+		// The civilian buildings a map starts with are map knowledge (MapKnowledgeFrames): where
+		// they stand is known from the first frames, as the map has them. Who went in since, or
+		// whether they still stand, is learned only by seeing them.
+		const bool mapKnowledge = !state.MapBuildingsKnown && now <= MapKnowledgeFrames;
+		state.MapBuildingsKnown = true;
+
 		for (auto const pBld : BuildingClass::Array)
 		{
 			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type || !pBld->Type->CanBeOccupied
@@ -363,11 +371,13 @@ namespace
 
 			const CellStruct cell = pBld->GetMapCoords();
 			const bool ownOrAllied = pBld->Owner && (pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner));
+			const bool inSight = ownOrAllied || IsCellInSightOfAI(pHouse, cell);
 
-			if (!ownOrAllied && !IsCellInSightOfAI(pHouse, cell))
+			if (!inSight && !(mapKnowledge && pBld->Owner && pBld->Owner->IsNeutral()))
 				continue;
 
-			inSightIDs.push_back(pBld->UniqueID);
+			if (inSight)
+				inSightIDs.push_back(pBld->UniqueID);
 			NeuralKnownUrbanBuilding* pKnown = FindKnownUrbanBuilding(state, pBld->UniqueID);
 
 			if (!pKnown)
