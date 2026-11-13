@@ -754,6 +754,9 @@ void NeuralAI::OnScenarioStart()
 	}
 
 	TickCosts.fill(NeuralTickCost {});
+	SlowSteps.clear();
+	SlowStepLogs = 0;
+	SlowTickLogs = 0;
 
 	for (auto& sections : SectionTotalMs)
 		sections.fill(0.0);

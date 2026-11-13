@@ -356,6 +356,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const unsigned int ownHouseBit = (parentCountryIdx >= 0 && parentCountryIdx < 32) ? (1u << parentCountryIdx) : 0u;
 
 	NeuralPhaseClock productionClock { pHouse->ArrayIndex, NeuralSection::ProdBuildings };
+	NeuralSegmentClock prodSegments { "pb: start" };
 
 	// Building Target Selection
 	if (NeuralAI::IsCampaignRestricted(pHouse))
@@ -386,6 +387,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		int bestBldScore = -32000;
 		int bestPowerPlantIdx = -1;
 		int bestPowerPlantScore = -32000;
+
+		prodSegments.Mark("pb: count structures");
 
 		// Count current owned macro & defense structures so the AI builds a
 		// balanced macro base (Power -> Refinery -> Barracks -> War Factory -> 2nd
@@ -618,6 +621,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				GetMacroState(pHouse).LastFactoryCapSaleFrame = Unsorted::CurrentFrame;
 			RaiseEmergencyMoneyForRefinery(pHouse, ownedRefineries, ownedHarvestersCount, money);
 		}
+
+		prodSegments.Mark("pb: wall unblocking");
 
 		// Expert 1 Selective Wall Unblocking & Demolition:
 		// - If an obstructing wall belongs to the AI house, sell that specific wall cell/segment.
@@ -875,6 +880,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		prodSegments.Mark("pb: power and factory caps");
+
 		// Periodic Dynamic Primary Factory Switching (from AdvAI)
 		if (Unsorted::CurrentFrame > pExt->LastPrimaryFactoryCheckFrame + 60 + houseStagger)
 		{
@@ -1110,6 +1117,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const int maxAirpads = std::max(
 			dockDemandAirpadCap, (hasTechCenter && maxEnemyAirpads >= 2) ? std::clamp(maxEnemyAirpads + 1, 2, 5) : 2);
 
+		prodSegments.Mark("pb: threat analysis");
+
 		// Threat & Defense Moderation Analysis:
 		// Prune stale attack records and check if our base was recently attacked
 		PruneAttackedBuildingsLIFO(pHouse);
@@ -1253,6 +1262,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		prodSegments.Mark("pb: frontline scan");
+
 		// Continuous Frontline Proximity, Base-Crawl Siege & Resource-Choke Defense Deficit Scan:
 		// Check if any owned building is close to enemy structures (<= 26 cells) or enemy ground units
 		// (<= 18 cells) or contesting an Ore/Gem zone where we have fewer than 3..4 local ground defenses!
@@ -1389,6 +1400,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const int maxGroundDefenses = std::clamp(baseGroundDefCap, 4, (hasTechCenter || money > 3000 || effectiveFrontlineThreat) ? 20 : 14);
 
+		prodSegments.Mark("pb: anti-air needs");
+
 		// Defenses that shoot up the base wants, measured as the Advanced AI does: points of
 		// AntiAirValue (a typical defense gives airDefenseTypicalValue). A base with a factory keeps
 		// a standing amount that grows with its economy before any enemy aircraft shows up:
@@ -1501,6 +1514,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				airDiagName = pType->ID;
 			}
 		};
+
+		prodSegments.Mark("pb: expansion state");
 
 		// AdvAI & StarCraft Resource Expansion State Machine:
 		// Measure minimum Chebyshev distance from our closest
@@ -1817,6 +1832,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			GetMacroState(pHouse).RefinerySaveTarget = refineryCost;
 		}
 
+		prodSegments.Mark("pb: beachheads");
+
 		// A beachhead is any group of our buildings we can build around (no ConYard needed there) on
 		// another landmass where a known enemy building stands: one without a war factory or a
 		// barracks of ours within 18 cells gets them first, as a forward ConYard does (placement
@@ -1987,6 +2004,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			bankOffensiveCrawl = enemyOnYardLand;
 		}
+
+		prodSegments.Mark("pb: rush defense");
 
 		// AdvAI Start-Rush Emergency Defense Interception:
 		// If we are rushed early (CurrentFrame <= with at least 1 Refinery + 1 Barracks
@@ -2256,6 +2275,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 			}
 		}
+
+		prodSegments.Mark("pb: scoring");
 
 		// Naval matches (HouseNeedsNaval: starts not linked by land, free ore only across water, enemy
 		// warships seen): the sea decides where we can expand, so the first shipyard comes before the
@@ -3062,6 +3083,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const int scoredBldIdx = bestBldIdx;
 
+		prodSegments.Mark("pb: final picks");
+
 		// A raid with nothing of ours that shoots up: the best such defense comes before any other
 		// pick, except restoring income and a building the yard is already working on.
 		if (airRaidShortOfDefenses && totalAntiAirDefenses == 0 && bestAirDefenseIdx >= 0 && bestBldIdx != bestAirDefenseIdx
@@ -3199,6 +3222,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	productionClock.Mark(NeuralSection::ProdUnits);
+	prodSegments.Mark("after prod.buildings");
 
 	// Unit & Naval Target Selection
 	int bestUnitIdx = -1;

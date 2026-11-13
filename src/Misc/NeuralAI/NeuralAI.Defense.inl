@@ -76,6 +76,8 @@ namespace
 	// half when the budget is spent, scaled by the payback below 100%, none when broke.
 	void RefreshDefenseBudget(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "RefreshDefenseBudget" };
+
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 

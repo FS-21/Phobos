@@ -12,7 +12,9 @@ namespace
 	//   (its destructors leave it the vtable of a base class) or freed memory;
 	// - a live mobile unit linked from a cell it does not stand on, or linked while in limbo: the
 	//   state a unit has to be in for its death to leave its cell pointing at it.
-	constexpr int CellGhostCheckFrames = 30;
+	// One check walks every cell of the map (about 10 ms): every 30 frames it was 4% of the AI tick
+	// cost and found nothing in two days, so it runs rarely while the crash is set aside.
+	constexpr int CellGhostCheckFrames = 900;
 	constexpr int CellGhostLogsPerMatch = 12;
 	constexpr int CellGhostChainSteps = 64;
 	constexpr int CellGhostTypeSlots = 4;
@@ -77,6 +79,8 @@ namespace
 
 	void CheckCellGhosts()
 	{
+		const NeuralSlowStep slowStep { "CheckCellGhosts" };
+
 		static int serial = -1;
 		static int lastFrame = -1;
 		static int logged = 0;
@@ -466,6 +470,8 @@ namespace
 	//   around: half of the units whose way leads past it, then all of them (JamRerouteHop).
 	void UpdateJamBreaker(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
 	{
+		const NeuralSlowStep slowStep { "UpdateJamBreaker" };
+
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 
@@ -928,6 +934,8 @@ namespace
 	// harvest; 90+ frames on its cell). Up to 12 per pass.
 	void UpdateJamMouths(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateJamMouths" };
+
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 
@@ -1188,6 +1196,8 @@ namespace
 	// Aircraft stuck on an attack they never fly are released as well (see below).
 	void UpdateStuckUnits(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateStuckUnits" };
+
 		if (!pHouse)
 			return;
 
@@ -1446,6 +1456,8 @@ namespace
 	// chrono miner loop-teleport, and slave miners have their own routing.
 	void UpdateIdleHarvesters(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateIdleHarvesters" };
+
 		if (!pHouse)
 			return;
 
@@ -1602,6 +1614,8 @@ namespace
 	// trainer credits slots 38 / 81 with how well forward stones survive.
 	void UpdateOffensiveStones(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateOffensiveStones" };
+
 		if (!pHouse)
 			return;
 

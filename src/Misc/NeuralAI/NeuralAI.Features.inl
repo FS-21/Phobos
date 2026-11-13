@@ -3,6 +3,8 @@
 
 void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t, InputVectorSize>& features)
 {
+	const NeuralSlowStep slowStep { "ExtractFogFilteredFeatures" };
+
 	features.fill(0);
 
 	auto const pExt = HouseExt::Fetch(pHouse);
