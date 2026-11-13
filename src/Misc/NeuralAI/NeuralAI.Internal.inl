@@ -303,6 +303,48 @@ namespace
 		}
 	};
 
+	// TEMP diagnostic: the stretches of one long function between Mark calls, each booked as a slow
+	// step under its name.
+	struct NeuralSegmentClock
+	{
+		const char* Current;
+		LARGE_INTEGER Start {};
+
+		explicit NeuralSegmentClock(const char* first) : Current { first }
+		{
+			QueryPerformanceCounter(&this->Start);
+		}
+
+		~NeuralSegmentClock()
+		{
+			this->Close();
+		}
+
+		void Mark(const char* next)
+		{
+			this->Close();
+			this->Current = next;
+			QueryPerformanceCounter(&this->Start);
+		}
+
+		void Close() const
+		{
+			LARGE_INTEGER end {};
+			LARGE_INTEGER frequency {};
+			QueryPerformanceCounter(&end);
+			QueryPerformanceFrequency(&frequency);
+
+			if (frequency.QuadPart <= 0)
+				return;
+
+			const double ms = static_cast<double>(end.QuadPart - this->Start.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
+			auto& cost = SlowSteps[this->Current];
+			cost.Runs++;
+			cost.TotalMs += ms;
+			cost.MaxMs = std::max(cost.MaxMs, ms);
+		}
+	};
+
 	// Territory telemetry (reward only: the match score and the trainer read it, no decision does,
 	// so it may look through the fog). Every 900 frames, per house: the 8x8 map blocks holding one
 	// of its structures (walls and insignificant structures excluded), the ore fields (12x12 blocks

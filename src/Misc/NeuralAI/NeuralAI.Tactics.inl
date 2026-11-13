@@ -1196,6 +1196,8 @@ namespace
 	// Aircraft stuck on an attack they never fly are released as well (see below).
 	void UpdateStuckUnits(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateStuckUnits" };
+
 		if (!pHouse)
 			return;
 
@@ -1612,6 +1614,8 @@ namespace
 	// trainer credits slots 38 / 81 with how well forward stones survive.
 	void UpdateOffensiveStones(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateOffensiveStones" };
+
 		if (!pHouse)
 			return;
 

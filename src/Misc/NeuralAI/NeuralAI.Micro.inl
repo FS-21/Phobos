@@ -166,6 +166,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 {
 	// Phase stopwatch (telemetry only): which part of the micro is heavy.
 	NeuralPhaseClock microClock { pHouse ? pHouse->ArrayIndex : -1, NeuralSection::MicroSetup };
+	NeuralSegmentClock microSegments { "ms: start" };
 
 	auto const FindDeployableFoundationNearCellUncached
 		= [](HouseClass* pH, BuildingTypeClass* pBldType, const CellStruct& originCell, int requiredZone,
@@ -512,6 +513,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	const int homeGroundZone = (homeCoords != CellStruct::Empty)
 		? MapClass::Instance.GetMovementZoneType(homeCoords, MovementZone::Normal, false)
 		: -1;
+
+	microSegments.Mark("ms: dispatcher");
 
 	// Universal Cross-Island Reachability & Transport Dispatcher:
 	// Any ground-only unit or infantry whose action target is on a disconnected
@@ -866,6 +869,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return false;
 	};
 
+	microSegments.Mark("ms: idle transports");
+
 	// Find any idle Amphibious/Hover Transport owned by this house that still has
 	// passenger room
 	FootClass* pLoadingTransport = nullptr;
@@ -911,6 +916,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Multi-Player Opportunism (Expert 3 Routing Slot 43): Balance focusing
 	// high-threat aggressor vs finishing off the most vulnerable enemy house
 	const int focusBias = static_cast<int>(scores[43]);
+
+	microSegments.Mark("ms: island discovery");
 
 	// Discover uncolonized island Resource (Ore/Gems), buildable Island Land
 	// (when home island is full), and Strategic Neutral Tech Building targets
@@ -1160,6 +1167,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		microSegments.Mark("ms: orphan refinery");
+
 		// Orphaned Island Refinery Recovery: If any island has an owned Refinery
 		// with 0 Harvesters in its movement zone, either switch that island's War
 		// Factory to PrimaryFactory (if one exists on that island) OR ferry a spare
@@ -1251,6 +1260,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 		}
+
+		microSegments.Mark("ms: enemy island beachheads");
 
 		// Enemy Island Offensive Beachhead & Reconquest Discovery: Once all neutral
 		// islands in the archipelago are colonized (!pIslandResourceGoalCell),
@@ -1400,6 +1411,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (pHouse->WhoLastHurtMe == pOther->ArrayIndex)
 			priority += 250;
 
+		microSegments.Mark("ms: targets");
+
 		// Finish a weak enemy: judged by the structures of it we know of (its real building count
 		// would see through the fog).
 		if (focusBias > 40)
@@ -1441,6 +1454,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		pHouse->EnemyHouseIndex = bestEnemyIdx;
 
 	microClock.Mark(NeuralSection::MicroSensors);
+	microSegments.Mark("after micro.setup");
 
 	// Tactical Squad Micro: Retreat damaged expensive/Elite/Parasited vehicles to
 	// Service Depot, Chrono-Miner Warp escape, Beacons & Allied Base Rescue!
