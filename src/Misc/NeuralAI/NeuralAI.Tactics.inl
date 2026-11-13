@@ -1392,13 +1392,15 @@ namespace
 		// straight back to picking a location, so the aircraft sits on its pad for the rest of the
 		// match, never reloading and never free for other work. Released (target cleared, idle
 		// mode: back to the pad and reload) after 450 frames on the ground without moving or a
-		// shot, or 1800 frames in the air without a shot. Plan members are left to their plan.
+		// shot, or 1800 frames in the air without a shot. Plan members too: their plan sends them
+		// again once they rest armed (ReadyPlanAircraft); left alone they stayed on Attack on
+		// their pad until the plan ran out of time.
 		std::unordered_map<DWORD, NeuralAirStallTrack> nextAir;
 
 		for (auto const pAir : AircraftClass::Array)
 		{
 			if (!pAir || pAir->Owner != pHouse || !pAir->IsAlive || pAir->InLimbo || !pAir->Type || pAir->Type->Spawned
-				|| pAir->CurrentMission != Mission::Attack || !pAir->Target || macro.PlanMembers.contains(pAir->UniqueID))
+				|| pAir->CurrentMission != Mission::Attack || !pAir->Target)
 			{
 				continue;
 			}
