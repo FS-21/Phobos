@@ -3,46 +3,54 @@
 
 namespace
 {
-	// TEMP diagnostic: destroyed technos still linked from a cell. Seven of the eleven crashes of
+	// TEMP diagnostic: technos wrongly linked from a cell. Seven of the eleven crashes of
 	// 2026-11-11..13 are the engine walking the objects of a cell (TechnoClass::Evaluate_Cell picking
 	// a target, Can_Enter_Cell finding a path) and calling into one that was already destroyed. The
-	// object lists of every cell are checked every CellGhostCheckFrames: an object with the vtable of
-	// a techno that is not in the techno array is logged with what can still be read of it, so the
-	// match log tells which kind of unit is left behind and when.
-	constexpr int CellGhostCheckFrames = 300;
+	// object lists of every cell are checked every CellGhostCheckFrames for two things, logged with
+	// what can be read of the object so the match log tells which kind of unit it is and when:
+	// - an object that is not a live techno and has no vtable of a map object: a destroyed techno
+	//   (its destructors leave it the vtable of a base class) or freed memory;
+	// - a live mobile unit linked from a cell it does not stand on, or linked while in limbo: the
+	//   state a unit has to be in for its death to leave its cell pointing at it.
+	constexpr int CellGhostCheckFrames = 30;
 	constexpr int CellGhostLogsPerMatch = 12;
 	constexpr int CellGhostChainSteps = 64;
+	constexpr int CellGhostTypeSlots = 4;
+
+	// Vtables of the base classes of a techno (abstract, object, mission, radio, techno, foot).
+	constexpr uintptr_t TechnoBaseVTables[] = { 0x7E1F50, 0x7EF060, 0x7EDCC0, 0x7F0508, 0x7F4960, 0x7E8C94 };
+
+	// Read-only tables of the game image: the vtable of any real object lies there.
+	constexpr uintptr_t ImageDataStart = 0x7E0000;
+	constexpr uintptr_t ImageDataEnd = 0x840000;
 
 	struct NeuralCellGhostInfo
 	{
 		uintptr_t VTable;
 		ObjectClass* Next;
-		void* Type;
+		void* Types[CellGhostTypeSlots];
 		void* Owner;
 		DWORD UniqueID;
 		int Health;
 		int Mission;
 		int CellX;
 		int CellY;
+		bool HeadRead;
 		bool IsAlive;
 		bool InLimbo;
 		bool OnBridge;
 	};
 
 	// Reads an object that may be freed memory. Plain data only in here: structured exception
-	// handling does not mix with objects that have destructors.
+	// handling does not mix with objects that have destructors. The type is read at the place each
+	// kind of techno keeps it, the caller tells which one is a real type.
 	bool ReadCellGhost(ObjectClass* pObject, NeuralCellGhostInfo* pInfo)
 	{
 		__try
 		{
 			pInfo->VTable = *reinterpret_cast<uintptr_t*>(pObject);
 			pInfo->Next = pObject->NextObject;
-
-			if (pInfo->VTable != UnitClass::AbsVTable && pInfo->VTable != InfantryClass::AbsVTable
-				&& pInfo->VTable != AircraftClass::AbsVTable && pInfo->VTable != BuildingClass::AbsVTable)
-			{
-				return true;
-			}
+			pInfo->HeadRead = true;
 
 			auto const pTechno = static_cast<TechnoClass*>(pObject);
 			pInfo->UniqueID = pObject->UniqueID;
@@ -54,21 +62,16 @@ namespace
 			pInfo->CellY = pObject->Location.Y / Unsorted::LeptonsPerCell;
 			pInfo->Owner = pTechno->Owner;
 			pInfo->Mission = static_cast<int>(pTechno->CurrentMission);
-
-			if (pInfo->VTable == UnitClass::AbsVTable)
-				pInfo->Type = static_cast<UnitClass*>(pObject)->Type;
-			else if (pInfo->VTable == InfantryClass::AbsVTable)
-				pInfo->Type = static_cast<InfantryClass*>(pObject)->Type;
-			else if (pInfo->VTable == AircraftClass::AbsVTable)
-				pInfo->Type = static_cast<AircraftClass*>(pObject)->Type;
-			else
-				pInfo->Type = static_cast<BuildingClass*>(pObject)->Type;
+			pInfo->Types[0] = static_cast<UnitClass*>(pObject)->Type;
+			pInfo->Types[1] = static_cast<InfantryClass*>(pObject)->Type;
+			pInfo->Types[2] = static_cast<AircraftClass*>(pObject)->Type;
+			pInfo->Types[3] = static_cast<BuildingClass*>(pObject)->Type;
 
 			return true;
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
-			return false;
+			return pInfo->HeadRead;
 		}
 	}
 
@@ -77,6 +80,7 @@ namespace
 		static int serial = -1;
 		static int lastFrame = -1;
 		static int logged = 0;
+		static std::unordered_set<DWORD> reported;
 		const int now = Unsorted::CurrentFrame;
 
 		if (serial != NeuralMatchSerial)
@@ -84,6 +88,7 @@ namespace
 			serial = NeuralMatchSerial;
 			lastFrame = -1;
 			logged = 0;
+			reported.clear();
 		}
 
 		if (logged >= CellGhostLogsPerMatch || (lastFrame >= 0 && now >= lastFrame && now - lastFrame < CellGhostCheckFrames))
@@ -96,10 +101,6 @@ namespace
 		for (auto const pTechno : TechnoClass::Array)
 			live.insert(pTechno);
 
-		// Read-only tables of the game image: the vtable of any real object lies there.
-		constexpr uintptr_t ImageDataStart = 0x7E0000;
-		constexpr uintptr_t ImageDataEnd = 0x840000;
-
 		for (int i = 0; i < MapClass::Instance.Cells.Capacity && logged < CellGhostLogsPerMatch; ++i)
 		{
 			auto const pCell = MapClass::Instance.Cells.Items[i];
@@ -110,11 +111,38 @@ namespace
 			for (int list = 0; list < 2; ++list)
 			{
 				ObjectClass* pObject = list == 0 ? pCell->FirstObject : pCell->AltObject;
+				const char* listName = list == 0 ? "ground" : "bridge";
 
 				for (int step = 0; pObject && step < CellGhostChainSteps; ++step)
 				{
 					if (live.contains(pObject))
 					{
+						auto const pTechno = static_cast<TechnoClass*>(pObject);
+
+						if (pTechno->WhatAmI() != AbstractType::Building && !reported.contains(pTechno->UniqueID))
+						{
+							const CellStruct own = CellClass::Coord2Cell(pTechno->Location);
+							const bool elsewhere = own != pCell->MapCoords;
+
+							if (elsewhere || pTechno->InLimbo || !pTechno->IsAlive)
+							{
+								reported.insert(pTechno->UniqueID);
+								++logged;
+								auto const pCarrier = pTechno->Transporter;
+								auto const pExt = TechnoExt::Fetch(pTechno);
+
+								Debug::Log("[NeuralAI] Cell link DIAG frame %d: cell (%d,%d) %s list, link %d, holds the live %s of house %d, id %u, %s: "
+									"its own cell (%d,%d), height %d, alive %d, limbo %d, on map %d, on bridge %d, mission %d, transporter %s, on carryall %d, attached %d.\n",
+									now, pCell->MapCoords.X, pCell->MapCoords.Y, listName, step, pTechno->GetTechnoType()->ID,
+									pTechno->Owner ? pTechno->Owner->ArrayIndex : -1, pTechno->UniqueID,
+									pTechno->InLimbo ? "that is in limbo" : (elsewhere ? "that stands on another cell" : "that is not alive"),
+									own.X, own.Y, pTechno->GetHeight(), pTechno->IsAlive ? 1 : 0, pTechno->InLimbo ? 1 : 0, pTechno->IsOnMap ? 1 : 0,
+									pTechno->OnBridge ? 1 : 0, static_cast<int>(pTechno->CurrentMission),
+									pCarrier && live.contains(pCarrier) ? pCarrier->GetTechnoType()->ID : (pCarrier ? "?" : "-"),
+									pTechno->IsOnCarryall ? 1 : 0, pExt && pExt->ParentAttachment ? 1 : 0);
+							}
+						}
+
 						pObject = pObject->NextObject;
 						continue;
 					}
@@ -123,9 +151,13 @@ namespace
 					const bool readable = ReadCellGhost(pObject, &info);
 					const bool techno = readable && (info.VTable == UnitClass::AbsVTable || info.VTable == InfantryClass::AbsVTable
 						|| info.VTable == AircraftClass::AbsVTable || info.VTable == BuildingClass::AbsVTable);
+					bool destructed = false;
+
+					for (const uintptr_t vtable : TechnoBaseVTables)
+						destructed = destructed || (readable && info.VTable == vtable);
 
 					// Terrain objects and the like: not technos, their chain goes on.
-					if (readable && !techno && info.VTable >= ImageDataStart && info.VTable < ImageDataEnd)
+					if (readable && !techno && !destructed && info.VTable >= ImageDataStart && info.VTable < ImageDataEnd)
 					{
 						pObject = info.Next;
 						continue;
@@ -134,34 +166,33 @@ namespace
 					++logged;
 					const char* typeID = "?";
 					int owner = -1;
+					constexpr AbstractType slotKinds[CellGhostTypeSlots] = { AbstractType::UnitType, AbstractType::InfantryType,
+						AbstractType::AircraftType, AbstractType::BuildingType };
 
-					if (techno)
+					for (auto const pType : TechnoTypeClass::Array)
 					{
-						for (auto const pType : TechnoTypeClass::Array)
+						for (int slot = 0; slot < CellGhostTypeSlots; ++slot)
 						{
-							if (pType == info.Type)
-							{
+							if (pType == info.Types[slot] && pType->WhatAmI() == slotKinds[slot])
 								typeID = pType->ID;
-								break;
-							}
 						}
+					}
 
-						for (auto const pOwner : HouseClass::Array)
+					for (auto const pOwner : HouseClass::Array)
+					{
+						if (pOwner == info.Owner)
 						{
-							if (pOwner == info.Owner)
-							{
-								owner = pOwner->ArrayIndex;
-								break;
-							}
+							owner = pOwner->ArrayIndex;
+							break;
 						}
 					}
 
 					Debug::Log("[NeuralAI] Cell ghost DIAG frame %d: cell (%d,%d) %s list, link %d, holds %p (%s, vtable %08X) that is not in the techno array: "
 						"type %s, house %d, id %u, alive %d, limbo %d, on bridge %d, health %d, mission %d, its own cell (%d,%d).\n",
-						now, pCell->MapCoords.X, pCell->MapCoords.Y, list == 0 ? "ground" : "bridge", step, pObject,
-						!readable ? "unreadable memory" : (techno ? "a destroyed techno" : "reused memory"), static_cast<unsigned>(info.VTable),
-						typeID, owner, info.UniqueID, info.IsAlive ? 1 : 0, info.InLimbo ? 1 : 0, info.OnBridge ? 1 : 0, info.Health, info.Mission,
-						info.CellX, info.CellY);
+						now, pCell->MapCoords.X, pCell->MapCoords.Y, listName, step, pObject,
+						!readable ? "unreadable memory" : (techno ? "a techno" : (destructed ? "a destroyed techno" : "reused memory")),
+						static_cast<unsigned>(info.VTable), typeID, owner, info.UniqueID, info.IsAlive ? 1 : 0, info.InLimbo ? 1 : 0,
+						info.OnBridge ? 1 : 0, info.Health, info.Mission, info.CellX, info.CellY);
 
 					break;
 				}
