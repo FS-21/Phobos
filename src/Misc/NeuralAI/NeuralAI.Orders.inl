@@ -1261,6 +1261,26 @@ namespace
 			landingEnemyUnits.push_back(pUnitScan->GetMapCoords());
 		}
 
+		// Soldiers count like vehicles, and so does what was seen there a moment ago: a cargo set
+		// down next to infantry, or next to units that had just left our sight, is dead in seconds
+		// (user, match #8916: a transport disk kept unloading into the defenders).
+		for (auto const pInfScan : InfantryClass::Array)
+		{
+			if (!pInfScan || pInfScan->InLimbo || !pInfScan->IsAlive || !pInfScan->Owner || pInfScan->Owner == pHouse
+				|| pHouse->IsAlliedWith(pInfScan->Owner) || pInfScan->Owner->IsNeutral() || !IsCellVisibleToAI(pHouse, pInfScan->GetCell()))
+			{
+				continue;
+			}
+
+			landingEnemyUnits.push_back(pInfScan->GetMapCoords());
+		}
+
+		for (auto const& [seenID, sighting] : GetMacroState(pHouse).EnemySightings)
+		{
+			if (sighting.LastCoords != CellStruct::Empty && Unsorted::CurrentFrame - sighting.LastSeenFrame <= FerryLandingSightingFrames)
+				landingEnemyUnits.push_back(sighting.LastCoords);
+		}
+
 		CellClass* pBestLanding = nullptr;
 		int bestScore = -999999;
 		// The whole island: 96 cells around the reference when the island is known (big islands
