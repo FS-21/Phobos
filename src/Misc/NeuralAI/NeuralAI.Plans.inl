@@ -3197,6 +3197,105 @@ namespace
 
 		auto planOf = [&](NeuralPlanId id) -> NeuralPlanInstance& { return macro.Plans[static_cast<size_t>(id)]; };
 
+		// Enemy strength known around a cell: the defenses we know within the radius and the units
+		// seen there not longer ago than maxAge.
+		auto knownEnemyStrengthNear = [&](const CellStruct& cell, double radius, int maxAge) -> int
+		{
+			int strength = seenEnemyValueNear(cell, radius, maxAge);
+
+			for (auto const pBld : knownEnemyBuildingList)
+			{
+				if (isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense && pBld->GetMapCoords().DistanceFrom(cell) <= radius)
+					strength += GetCombatValueOfType(pBld->Type, false);
+			}
+
+			return strength;
+		};
+
+		auto groupValueOf = [](const std::vector<FootClass*>& group) -> int
+		{
+			int value = 0;
+
+			for (auto const pFoot : group)
+				value += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+
+			return value;
+		};
+
+		// ---------------------------------------------------------------- Outgunned raids turn back
+		// Raids and strikes that send a ground group at a distant target. A group that, still far
+		// from its goal, has more enemy strength around it than it has itself (units seen near it,
+		// known defenses that reach it) goes home instead of walking on until it is dead, and its
+		// plan waits before it tries again. In the focus matches of 2026-11-13 the groups of Feint,
+		// Superweapon Race and Tech Tree Cut lost three of every four members 30 to 50 cells short
+		// of the target, and Feint arrived 4 times in 100.
+		{
+			constexpr NeuralPlanId raidPlans[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout, NeuralPlanId::Feint,
+				NeuralPlanId::TimingRush, NeuralPlanId::ExpansionDenial, NeuralPlanId::SuperweaponRace, NeuralPlanId::HarvesterAmbush,
+				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
+				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut };
+
+			for (const NeuralPlanId id : raidPlans)
+			{
+				auto const& plan = planOf(id);
+
+				if (!plan.Active || plan.TargetCell == CellStruct::Empty)
+					continue;
+
+				int sumX = 0;
+				int sumY = 0;
+				int alive = 0;
+				int strength = 0;
+
+				for (const DWORD uid : plan.Members)
+				{
+					auto const pFoot = findOwnFoot(uid);
+
+					if (!pFoot || pFoot->WhatAmI() == AbstractType::Aircraft || pFoot->GetTechnoType()->Naval || pFoot->IsInAir())
+						continue;
+
+					const CellStruct cell = pFoot->GetMapCoords();
+					sumX += cell.X;
+					sumY += cell.Y;
+					alive++;
+					strength += static_cast<int>(GetCombatValueOfType(pFoot->GetTechnoType(), false) * pFoot->GetHealthPercentage());
+				}
+
+				if (alive == 0)
+					continue;
+
+				const CellStruct centre { static_cast<short>(sumX / alive), static_cast<short>(sumY / alive) };
+				double toGoal = centre.DistanceFrom(plan.TargetCell);
+
+				if (plan.StagingCell != CellStruct::Empty)
+					toGoal = std::min(toGoal, centre.DistanceFrom(plan.StagingCell));
+
+				if (toGoal <= PlanOutgunnedCommittedCells)
+					continue;
+
+				int enemy = seenEnemyValueNear(centre, PlanOutgunnedSightCells, PlanOutgunnedSightFrames);
+
+				for (auto const pBld : knownEnemyBuildingList)
+				{
+					if (!isKnownEnemyBuilding(pBld) || !pBld->Type->IsBaseDefense)
+						continue;
+
+					const int range = GroundRangeOf(pBld->Type);
+
+					if (range > 0 && pBld->GetMapCoords().DistanceFrom(centre) * Unsorted::LeptonsPerCell <= range + 2 * Unsorted::LeptonsPerCell)
+						enemy += GetCombatValueOfType(pBld->Type, false);
+				}
+
+				if (enemy * 100 <= strength * PlanOutgunnedRatioPercent)
+					continue;
+
+				Debug::Log("[NeuralAI] House %d plan %s outgunned %d cells from its goal: enemy %d against %d around (%d,%d).\n", houseIdx,
+					NeuralPlanNames[static_cast<size_t>(id)], static_cast<int>(toGoal), enemy, strength, centre.X, centre.Y);
+				abortPlan(id, NeuralDecision::PlanAbortEnemyGrew, strength);
+				macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanOutgunnedRetryFrames;
+			}
+		}
+
 		// ---------------------------------------------------------------- Plan 41: Base Threat Intercept
 		// Visible enemy ground units with orders against our or an ally's base are met on the way by
 		// an idle group sized to beat them, before they get there. A unit is a base threat when its
@@ -3718,8 +3817,13 @@ namespace
 				sortFastest(group);
 				group.resize(std::min(group.size(), maxGround));
 
-				if (group.size() < minGround)
+				// A ground strike needs the strength to beat what is known to guard the target: a
+				// group that cannot is not sent.
+				if (group.size() < minGround || groupValueOf(group) * 100
+					< knownEnemyStrengthNear(pTarget->GetMapCoords(), PlanStrikeGuardCells, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
+				{
 					group.clear();
+				}
 			}
 
 			return group;
@@ -3922,6 +4026,9 @@ namespace
 				}
 				else if (Unsorted::CurrentFrame >= plan.Deadline)
 				{
+					// TEMP diagnostic: what the island yard had when its time ran out.
+					Debug::Log("[NeuralAI] House %d IslandHold DIAG: out of time at (%d,%d) with %d ground defenses and %d anti-air, enemy air seen %d, credits %d.\n",
+						houseIdx, pYard->GetMapCoords().X, pYard->GetMapCoords().Y, ground, antiAir, enemyAirSeen ? 1 : 0, pHouse->Available_Money());
 					clearHold();
 					finishPlan(NeuralPlanId::IslandHold, false, false);
 				}
@@ -4154,6 +4261,22 @@ namespace
 							pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID, pTransport->GetMapCoords().X,
 							pTransport->GetMapCoords().Y, (pTransportCell && pTransportCell->LandType == LandType::Water) ? " on water" : "",
 							pNearest ? nearestDist / Unsorted::LeptonsPerCell : -1, pNearest ? static_cast<int>(pNearest->CurrentMission) : -1);
+
+						// TEMP diagnostic: the state of both when a soldier stood next to the transport with
+						// its Enter order and never got in.
+						if (pNearest)
+						{
+							Debug::Log("[NeuralAI] House %d AirborneFront boarding DIAG: transport mission %d, in air %d, height %d, moving %d, passengers %d of %d, "
+								"size limit %d, links soldier %d; soldier %s size %d, %d leptons away, height %d, links transport %d, destination is transport %d, "
+								"queued mission %d.\n", pHouse->ArrayIndex, static_cast<int>(pTransport->CurrentMission), pTransport->IsInAir() ? 1 : 0,
+								pTransport->GetHeight(), (pTransport->Locomotor && pTransport->Locomotor->Is_Moving()) ? 1 : 0,
+								pTransport->Passengers.NumPassengers, pTransport->GetTechnoType()->Passengers,
+								static_cast<int>(pTransport->GetTechnoType()->SizeLimit), pTransport->ContainsLink(pNearest) ? 1 : 0,
+								pNearest->GetTechnoType()->ID, static_cast<int>(pNearest->GetTechnoType()->Size), nearestDist, pNearest->GetHeight(),
+								pNearest->ContainsLink(pTransport) ? 1 : 0, pNearest->Destination == pTransport ? 1 : 0,
+								static_cast<int>(pNearest->QueuedMission));
+						}
+
 						macro.RaidTransportBanUntil[pTransport->UniqueID] = Unsorted::CurrentFrame + 9000;
 						logEnd("nobody boarded");
 						finishPlan(NeuralPlanId::AirborneFront, false, true);
@@ -4967,8 +5090,13 @@ namespace
 						group = collectIdleGround(false);
 						group.resize(std::min<size_t>(group.size(), 12));
 
-						if (group.size() < 4)
+						// The superweapon stands deep in the base: the ground group goes only with the
+						// strength to beat what is known to guard it.
+						if (group.size() < 4 || groupValueOf(group) * 100
+							< knownEnemyStrengthNear(tc, PlanStrikeGuardCells, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
+						{
 							group.clear();
+						}
 					}
 				}
 
@@ -7791,7 +7919,9 @@ namespace
 					group = collectIdleGround(false);
 					group.resize(std::min<size_t>(group.size(), 6));
 
-					if (group.size() < 4)
+					// The post is given up when the enemy seen there outweighs the group by half: a group
+					// that would give it up on arrival does not set out.
+					if (group.size() < 4 || seenEnemyValueNear(pPost->MapCoords, 9.0, 150) * 10 > groupValueOf(group) * 15)
 						group.clear();
 				}
 
