@@ -297,6 +297,19 @@ DEFINE_HOOK(0x450292, BuildingClass_Update_Factory_NeuralDesignated, 0x6)
 	if (pThis != pDesignated)
 		return Skip;
 
+	// One object per queue: the designated factory changes while an object is still being built
+	// (an air base stops being it as soon as its docks are taken, the wanted aircraft may need no
+	// dock), and the new one would start a second object next to the first. It waits until the
+	// factory that holds the production of the queue is done.
+	for (auto const pOther : pOwner->Buildings)
+	{
+		if (pOther && pOther != pThis && pOther->Factory && pOther->Factory->Object && pOther->IsAlive && !pOther->InLimbo
+			&& pOther->Type->Factory == kind && pOther->Type->Naval == naval)
+		{
+			return Skip;
+		}
+	}
+
 	const int now = Unsorted::CurrentFrame;
 
 	if (now < pQueue->LastAsk)
