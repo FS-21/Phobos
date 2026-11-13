@@ -1119,7 +1119,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& Unsorted::CurrentFrame - GetMacroState(pHouse).AirDockWantedFrame <= AirDockWantedFrames;
 		const int maxAirpads = std::max({ dockDemandAirpadCap,
 			(hasTechCenter && maxEnemyAirpads >= 2) ? std::clamp(maxEnemyAirpads + 1, 2, 5) : 2,
-			airDockWanted ? std::min(ownedAirpads + 1, AirDockWantedAirpads) : 0 });
+			airDockWanted ? ownedAirpads + 1 : 0 });
 
 		prodSegments.Mark("pb: threat analysis");
 
