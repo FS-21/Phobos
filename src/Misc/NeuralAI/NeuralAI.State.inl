@@ -889,7 +889,7 @@ namespace
 		bool JamRerouteAll { false };
 		int JamRerouteNoWayFrame { -100000 };
 		// Last frame the aircraft pick wanted a type that needs a dock and every dock was taken: the
-		// building pass answers with another airfield (AirDockWantedFrames, AirDockWantedAirpads).
+		// building pass answers with another airfield (AirDockWantedFrames).
 		int AirDockWantedFrame { -100000 };
 		int FailedApproachDecayFrame { 0 };
 		std::vector<NeuralGroundLossTrack> GroundLossTracks {};
@@ -1388,10 +1388,10 @@ namespace
 	constexpr int MapScanKeepFrames = 90;
 	// An aircraft the house wants and cannot start for lack of a free dock asks for another airfield
 	// (user: the expert in charge should build more structures with docks instead of starting an
-	// aircraft that cannot leave). The wish holds AirDockWantedFrames after the pick last made it
-	// and raises the airfield cap by one at a time, up to AirDockWantedAirpads airfields.
+	// aircraft that cannot leave; airfields have no fixed cap, they follow the demand). The wish
+	// holds AirDockWantedFrames after the pick last made it and allows one airfield more than the
+	// house has, so the next one is asked for only when the new docks are taken too.
 	constexpr int AirDockWantedFrames = 450;
-	constexpr int AirDockWantedAirpads = 4;
 	// A unit that resource cells hurt goes around a field when the straight way to its goal (the
 	// first ResourceLineCells of it) would cost it this share of its health, in legs of
 	// ResourceDetourHopSteps along a route that keeps off those cells.
@@ -1461,6 +1461,17 @@ namespace
 	// groups of 4 to 7 bled out before their targets in the focus batches of 2026-11-13.
 	constexpr size_t PlanStrikeIdleShare = 2;
 	constexpr double PlanStrikeGuardCells = 12.0;
+	// A ground group is weighed against what it meets on its way in, not only at the target: what
+	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way
+	// from home (a point every PlanStrikeApproachStepCells). A raid dies at the edge of the enemy
+	// base: with the target's own guard alone, groups of 7 lost a third of their value 30 to 60
+	// cells short of it (251 of 387 Factory Decapitation plans in the focus batch of 2026-11-13).
+	// Airborne Front: a soldier with the Enter order this near its transport, without a radio link
+	// to it and standing still this long, is given the order again.
+	constexpr int BoardingRestartFrames = 150;
+	constexpr int BoardingRestartCells = 4;
+	constexpr double PlanStrikeApproachCells = 40.0;
+	constexpr double PlanStrikeApproachStepCells = 8.0;
 	constexpr int PlanStrikeGuardFrames = 900;
 	// A unit that resource cells heal, wounded below ResourceHealBelow, stops on one within
 	// ResourceHealSearchCells until it is back at ResourceHealUntil, for ResourceHealMaxFrames at

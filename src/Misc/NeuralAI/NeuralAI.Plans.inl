@@ -1831,6 +1831,53 @@ namespace
 					Unsorted::CurrentFrame - plan.StartFrame, plan.Deadline - plan.StartFrame, alive,
 					static_cast<int>(plan.Members.size()), memberValue(plan), plan.InitialValue, plan.Arrived ? 1 : 0, nearest,
 					plan.TargetCell.X, plan.TargetCell.Y, lostDead, lostOffMap, lostTraced > 0 ? lostDistance / lostTraced : -1, lostTraced);
+
+				// TEMP diagnostic: a group that ends badly almost whole never got there. Where it stands
+				// and what its members are doing (63 Factory Decapitation, 62 Superweapon Race and 37
+				// Tech Tree Cut plans ran out of time with nine tenths of their value, 58 to 95 cells
+				// from the target, in the focus batch of 2026-11-13).
+				if (!success && alive > 0 && memberValue(plan) * 100 >= plan.InitialValue * 80)
+				{
+					int sumX = 0;
+					int sumY = 0;
+					int onMap = 0;
+					int held = 0;
+					std::map<int, int> missions;
+
+					for (const DWORD uid : plan.Members)
+					{
+						auto const it = ownFoots.find(uid);
+
+						if (it == ownFoots.end())
+							continue;
+
+						const CellStruct cell = it->second->GetMapCoords();
+						sumX += cell.X;
+						sumY += cell.Y;
+						onMap++;
+						missions[static_cast<int>(it->second->CurrentMission)]++;
+
+						if (IsFootHeldStill(pHouse, it->second, 300))
+							held++;
+					}
+
+					if (onMap > 0)
+					{
+						const CellStruct centre { static_cast<short>(sumX / onMap), static_cast<short>(sumY / onMap) };
+						std::string missionText;
+
+						for (auto const& [mission, count] : missions)
+							missionText += "m" + std::to_string(mission) + "x" + std::to_string(count) + " ";
+
+						Debug::Log("[NeuralAI] House %d plan %s intact DIAG at rule %d: %d members around (%d,%d), %d cells from home and %d from "
+							"the target, %d held still 300 frames, staging (%d,%d), zones home %d group %d target %d, missions %s\n",
+							houseIdx, NeuralPlanNames[static_cast<size_t>(id)], rule, onMap, centre.X, centre.Y,
+							static_cast<int>(centre.DistanceFrom(homeCell)), static_cast<int>(centre.DistanceFrom(plan.TargetCell)), held,
+							plan.StagingCell.X, plan.StagingCell.Y, homeZone,
+							MapClass::Instance.GetMovementZoneType(centre, MovementZone::Normal, false),
+							MapClass::Instance.GetMovementZoneType(plan.TargetCell, MovementZone::Normal, false), missionText.c_str());
+					}
+				}
 			}
 
 			if (sendHome)
@@ -2483,6 +2530,46 @@ namespace
 			}
 		}
 
+		// Enemy strength a ground group meets on its straight way from `from` to a target: the known
+		// defenses and the units seen not longer ago than maxAge within PlanStrikeGuardCells of the
+		// target or of the last PlanStrikeApproachCells of the way, each counted once.
+		auto knownEnemyStrengthOnWay = [&](const CellStruct& from, const CellStruct& to, int maxAge) -> int
+		{
+			std::vector<CellStruct> points { to };
+			const double length = from.DistanceFrom(to);
+
+			if (from != CellStruct::Empty && length > 1.0)
+			{
+				for (double done = PlanStrikeApproachStepCells; done <= std::min(length, PlanStrikeApproachCells); done += PlanStrikeApproachStepCells)
+				{
+					points.push_back(CellStruct { static_cast<short>(to.X + (from.X - to.X) * done / length),
+						static_cast<short>(to.Y + (from.Y - to.Y) * done / length) });
+				}
+			}
+
+			auto const onWay = [&points](const CellStruct& cell)
+			{
+				return std::any_of(points.begin(), points.end(),
+					[&cell](const CellStruct& point) { return point.DistanceFrom(cell) <= PlanStrikeGuardCells; });
+			};
+
+			int strength = 0;
+
+			for (auto const& [uid, sighting] : macro.EnemySightings)
+			{
+				if (Unsorted::CurrentFrame - sighting.LastSeenFrame <= maxAge && onWay(sighting.LastCoords))
+					strength += sighting.Value;
+			}
+
+			for (auto const pBld : knownEnemyBuildingList)
+			{
+				if (isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense && onWay(pBld->GetMapCoords()))
+					strength += GetCombatValueOfType(pBld->Type, false);
+			}
+
+			return strength;
+		};
+
 		// ---------------------------------------------------------------- Plan 5: Feint
 		// While our army gathers, a cheap decoy group attacks a known enemy building far from
 		// the main approach to pull defenders away. Success = enemy forces seen gathering at
@@ -2611,6 +2698,11 @@ namespace
 							continue;
 
 						const CellStruct bc = pBld->GetMapCoords();
+
+						// A decoy has to get there: one whose way in is held by more than the decoy group is
+						// worth is no decoy (it arrived once in a hundred starts and drew nobody).
+						if (knownEnemyStrengthOnWay(homeCell, bc, PlanStrikeGuardFrames) > decoyValue)
+							continue;
 
 						if (MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pBld->OnBridge) != homeZone
 							|| bc.DistanceFrom(mc) < 15.0)
@@ -3266,21 +3358,6 @@ namespace
 
 		auto planOf = [&](NeuralPlanId id) -> NeuralPlanInstance& { return macro.Plans[static_cast<size_t>(id)]; };
 
-		// Enemy strength known around a cell: the defenses we know within the radius and the units
-		// seen there not longer ago than maxAge.
-		auto knownEnemyStrengthNear = [&](const CellStruct& cell, double radius, int maxAge) -> int
-		{
-			int strength = seenEnemyValueNear(cell, radius, maxAge);
-
-			for (auto const pBld : knownEnemyBuildingList)
-			{
-				if (isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense && pBld->GetMapCoords().DistanceFrom(cell) <= radius)
-					strength += GetCombatValueOfType(pBld->Type, false);
-			}
-
-			return strength;
-		};
-
 		// ---------------------------------------------------------------- Outgunned raids turn back
 		// Raids and strikes that send a ground group at a distant target. A group that, still far
 		// from its goal, has more enemy strength around it than it has itself (units seen near it,
@@ -3885,7 +3962,7 @@ namespace
 				// A ground strike needs the strength to beat what is known to guard the target: a
 				// group that cannot is not sent.
 				if (group.size() < minGround || !targetLessonAllows(pTarget->UniqueID, groupValueOf(group)) || groupValueOf(group) * 100
-					< knownEnemyStrengthNear(pTarget->GetMapCoords(), PlanStrikeGuardCells, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
+					< knownEnemyStrengthOnWay(homeCell, pTarget->GetMapCoords(), PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
 				{
 					group.clear();
 				}
@@ -4282,6 +4359,27 @@ namespace
 							if (enteringThis && (!pBoarding || pInf->ContainsLink(pTransport)))
 								pBoarding = pInf;
 						}
+					}
+
+					// The soldier nearest to the transport that holds the Enter order within
+					// BoardingRestartCells of it, with no radio link to it, and has not moved for
+					// BoardingRestartFrames starts over: its order is dropped here and given again below.
+					// It stood there until the plan gave up after 1500 frames (a third of the Airborne
+					// Front plans of the focus batch of 2026-11-13). AuxPeak keeps the last restart.
+					if (pNearest && pNearest->CurrentMission == Mission::Enter && !pNearest->ContainsLink(pTransport)
+						&& nearestDist <= BoardingRestartCells * Unsorted::LeptonsPerCell && IsFootHeldStill(pHouse, pNearest, BoardingRestartFrames)
+						&& Unsorted::CurrentFrame - std::max(plan.AuxPeak, plan.StartFrame) >= BoardingRestartFrames)
+					{
+						plan.AuxPeak = Unsorted::CurrentFrame;
+						pNearest->SetArchiveTarget(nullptr);
+						pNearest->SetDestination(nullptr, true);
+						pNearest->ForceMission(Mission::Guard);
+						Debug::Log("[NeuralAI] House %d AirborneFront: boarding of %s %u started over, %d leptons from %s, frame %d.\n",
+							pHouse->ArrayIndex, pNearest->GetTechnoType()->ID, pNearest->UniqueID, nearestDist, pTransport->GetTechnoType()->ID,
+							Unsorted::CurrentFrame);
+
+						if (pBoarding == pNearest)
+							pBoarding = nullptr;
 					}
 
 					for (const DWORD uid : infantry)
@@ -5192,7 +5290,7 @@ namespace
 						// The superweapon stands deep in the base: the ground group goes only with the
 						// strength to beat what is known to guard it.
 						if (group.size() < 4 || !targetLessonAllows(pTarget->UniqueID, groupValueOf(group)) || groupValueOf(group) * 100
-							< knownEnemyStrengthNear(tc, PlanStrikeGuardCells, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
+							< knownEnemyStrengthOnWay(homeCell, tc, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
 						{
 							group.clear();
 						}
