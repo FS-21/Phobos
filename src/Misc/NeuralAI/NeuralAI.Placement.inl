@@ -1735,9 +1735,22 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// Route heat spot this ground tower is anchored to cover (Empty: none).
 	CellStruct routeDefenseSpot = CellStruct::Empty;
 
+	// Island Hold (UpdateStrategicPlans): a defense the island yard still lacks goes next to it, on
+	// a cell the plan counts (its radius, its landmass), whatever else asks for a tower. An attack
+	// remembered somewhere else does not take it: a house is hardly ever without one, and the towers
+	// built during the plan end at the main base (match #8875: five towers in 5400 frames, none at
+	// the yard; match #8864: towers 32 and 36 cells from it). A building an ally site plan ordered
+	// keeps its site.
+	const bool holdingIsland = isCombatDefense && IslandHoldWants(pHouse, pBuildingType)
+		&& (macroState.AllySiteUntilFrame <= Unsorted::CurrentFrame || macroState.AllySiteBuildType != pBuildingType->ArrayIndex);
+	const CellStruct islandHoldYardCell = holdingIsland ? macroState.IslandHoldCell : CellStruct::Empty;
+	const int islandHoldZone = holdingIsland
+		? MapClass::Instance.GetMovementZoneType(islandHoldYardCell, MovementZone::Normal, false)
+		: -1;
+
 	// Strategic plan anchors (UpdateStrategicPlans): defenses of a new island ConYard go next to
 	// it (Island Hold), a second repair station next to our structure closest to the front
-	// (Forward Repair). A defense needed where we are being attacked keeps priority.
+	// (Forward Repair). Elsewhere a defense needed where we are being attacked keeps priority.
 	{
 		auto const& planMacro = GetMacroState(pHouse);
 
@@ -1752,10 +1765,21 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			? BestRouteDefenseSpot(pHouse, routeReachCells)
 			: nullptr;
 
-		if (isCombatDefense && directionalAttackedBld == CellStruct::Empty
-			&& planMacro.IslandHoldUntilFrame > Unsorted::CurrentFrame && planMacro.IslandHoldCell != CellStruct::Empty)
+		if (holdingIsland)
 		{
-			center = planMacro.IslandHoldCell;
+			center = islandHoldYardCell;
+			targetExpansionZone = -1;
+			creepFrontGoal = CellStruct::Empty;
+
+			// Only an attack on the island itself or an asset there steers where the tower faces.
+			if (directionalAttackedBld != CellStruct::Empty && directionalAttackedBld.DistanceFrom(center) > IslandHoldDefenseRadius)
+			{
+				directionalAttackedBld = CellStruct::Empty;
+				directionalAttacker = CellStruct::Empty;
+			}
+
+			if (undefendedKeyAssetCell != CellStruct::Empty && undefendedKeyAssetCell.DistanceFrom(center) > IslandHoldDefenseRadius)
+				undefendedKeyAssetCell = CellStruct::Empty;
 		}
 		else if ((pRouteSpot || mainAttackSector >= 0) && directionalAttackedBld == CellStruct::Empty
 			&& center.DistanceFrom(GetHouseHomeCell(pHouse)) <= 24.0) // Forward turret creep keeps its own anchor.
@@ -1865,7 +1889,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// cover, chosen above) wins; with none the ally spot is still reinforced.
 	const bool ownHotSpot = directionalAttackedBld != CellStruct::Empty || undefendedKeyAssetCell != CellStruct::Empty
 		|| (allySiteMacro.FrontlineThreatNeedsDefenses > 0 && Unsorted::CurrentFrame <= allySiteMacro.FrontlineThreatActiveFrames);
-	const bool defendingAlly = !placingAtAllySite && pBuildingType->IsBaseDefense && GroundRangeOf(pBuildingType) > 0
+	const bool defendingAlly = !placingAtAllySite && !holdingIsland && pBuildingType->IsBaseDefense && GroundRangeOf(pBuildingType) > 0
 		&& GameModeOptionsClass::Instance.BuildOffAlly && allySiteMacro.AllyDefenseUntilFrame > Unsorted::CurrentFrame
 		&& allySiteMacro.AllyDefenseCell != CellStruct::Empty
 		&& (!ownHotSpot || VisibleEnemyThreatNear(pHouse, allySiteMacro.AllyDefenseCell, 10) > 0);
@@ -2569,6 +2593,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 				if (!MapClass::Instance.CoordinatesLegal(candidate))
 					continue;
+
+				// Island Hold: only cells the plan counts for its yard.
+				if (holdingIsland && (candidate.DistanceFrom(islandHoldYardCell) > IslandHoldDefenseRadius
+					|| MapClass::Instance.GetMovementZoneType(candidate, MovementZone::Normal, false) != islandHoldZone))
+				{
+					continue;
+				}
 
 				// Naval structures only on useful water (no enclosed ponds).
 				if (isNavalBld && !IsUsefulWaterCell(candidate))
@@ -3839,6 +3870,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 	}
 
 	// Step 2: Normal Spatial Tetris placement search
+	const bool wantedByIslandHold = IslandHoldWants(pHouse, pBuildingType);
 	CellStruct bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
 
 	// A building an ally site plan wanted found no room there: it goes home (the failure code below
@@ -3858,6 +3890,32 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		else if (wantedAtSite)
 		{
 			CountDecision(NeuralDecision::AllySiteBuilding, pHouse->ArrayIndex);
+		}
+	}
+
+	// A defense the Island Hold yard lacks found no cell the plan counts: it goes where any other
+	// tower would (the failure code below may sell buildings to clear space) and the plan asks for
+	// nothing until IslandHoldNoRoomUntilFrame, so the house does not keep making towers for a yard
+	// that cannot take them.
+	if (wantedByIslandHold)
+	{
+		auto& holdSt = GetMacroState(pHouse);
+
+		if (bestCell == CellStruct::Empty)
+		{
+			holdSt.IslandHoldNoRoomUntilFrame = Unsorted::CurrentFrame + IslandHoldNoRoomFrames;
+			// TEMP diagnostic: the island yard has no cell for this defense.
+			Debug::Log("[NeuralAI] House %d IslandHold DIAG: no room for %s next to the yard at (%d,%d), frame %d.\n",
+				pHouse->ArrayIndex, pBuildingType->ID, holdSt.IslandHoldCell.X, holdSt.IslandHoldCell.Y, Unsorted::CurrentFrame);
+			bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
+		}
+		else
+		{
+			// TEMP diagnostic: where a defense chosen for the island yard ends.
+			Debug::Log("[NeuralAI] House %d IslandHold DIAG: %s placed at (%d,%d), %d cells from the yard at (%d,%d), frame %d.\n",
+				pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y,
+				static_cast<int>(bestCell.DistanceFrom(holdSt.IslandHoldCell)), holdSt.IslandHoldCell.X, holdSt.IslandHoldCell.Y,
+				Unsorted::CurrentFrame);
 		}
 	}
 
@@ -3892,6 +3950,13 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		auto& st = GetMacroState(pHouse);
 		st.ConsecutivePlacementFailures = 0;
 		st.BuildingPlacementCooldownUntilFrame.erase(pBuildingType->ArrayIndex);
+
+		// Island Hold: the pick stored while this building was under construction is not the
+		// yard's (its defense never displaces a building in progress), and the yard would start it
+		// before the next evaluation. It waits for that evaluation, which counts what the island
+		// yard lacks with this building in place.
+		if (st.IslandHoldUntilFrame > Unsorted::CurrentFrame)
+			pExt->NeuralAI_NextBuildingTarget = -1;
 
 		if (pBuildingType->Refinery)
 		{
