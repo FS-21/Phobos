@@ -100,6 +100,48 @@ namespace
 		return (static_cast<int>(cell.Y) << 9) + cell.X;
 	}
 
+	// Passage mouths: open ground within PassageMouthSteps steps (8 directions, over open ground
+	// only) of the land at either end of a charted bridge, or of a tunnel tube's entry or exit cell.
+	// Buildings stay off it and idle units are moved out of it, so the traffic of a base never has
+	// to squeeze past them to reach the passage (match #8920: a house walled in the mouth of its own
+	// bridge and held 15 to 27 units there for the rest of the match). Map state only, the same for
+	// every house.
+	constexpr int PassageMouthSteps = 5;
+	constexpr int PassageGridSide = 512;
+	std::vector<uint8_t> PassageMouthGrid;
+	int PassageMouthSpans = -1; // charted bridges the grid was drawn for
+
+	// Ground a vehicle can stand on once whatever is on it moves away: not water, and either under
+	// a building (buildable ground) or clear for a tracked vehicle.
+	bool IsOpenGroundCell(CellClass* pCell)
+	{
+		return pCell && pCell->LandType != LandType::Water
+			&& (pCell->GetBuilding() || pCell->IsClearToMove(SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false));
+	}
+
+	bool IsPassageMouthCell(const CellStruct& cell)
+	{
+		return !PassageMouthGrid.empty() && cell.X >= 0 && cell.Y >= 0 && cell.X < PassageGridSide && cell.Y < PassageGridSide
+			&& PassageMouthGrid[BridgeCellIndex(cell)] != 0;
+	}
+
+	bool IsFootprintOnPassageMouth(const CellStruct& topLeft, int width, int height)
+	{
+		if (PassageMouthGrid.empty())
+			return false;
+
+		for (int fy = 0; fy < height; ++fy)
+		{
+			for (int fx = 0; fx < width; ++fx)
+			{
+				if (IsPassageMouthCell(CellStruct { static_cast<short>(topLeft.X + fx), static_cast<short>(topLeft.Y + fy) }))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
 	int CellDistanceSq(const CellStruct& a, const CellStruct& b)
 	{
 		const int dx = a.X - b.X;
@@ -361,6 +403,88 @@ namespace
 			static_cast<int>(span.BankA.size()), static_cast<int>(span.BankB.size()));
 	}
 
+	// Draws the passage mouths again when the number of charted bridges changed (a bridge broken at
+	// the start of the match is charted the first time it stands).
+	void UpdatePassageMouths()
+	{
+		int charted = 0;
+
+		for (auto const& span : BridgeSpans)
+		{
+			if (span.Charted && !span.Duplicate)
+				++charted;
+		}
+
+		if (charted == PassageMouthSpans)
+			return;
+
+		PassageMouthSpans = charted;
+		PassageMouthGrid.assign(PassageGridSide * PassageGridSide, 0);
+		std::vector<CellStruct> frontier;
+
+		auto const reach = [&frontier](const CellStruct& cell)
+		{
+			if (cell.X < 0 || cell.Y < 0 || cell.X >= PassageGridSide || cell.Y >= PassageGridSide)
+				return;
+
+			uint8_t& mark = PassageMouthGrid[BridgeCellIndex(cell)];
+
+			if (mark != 0)
+				return;
+
+			auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+			if (!IsOpenGroundCell(pCell) || GetBridgeDeck(pCell) != NeuralBridgeDeck::None)
+				return;
+
+			mark = 1;
+			frontier.push_back(cell);
+		};
+
+		for (auto const& span : BridgeSpans)
+		{
+			if (!span.Charted || span.Duplicate)
+				continue;
+
+			for (auto const& cell : span.BankA)
+				reach(cell);
+
+			for (auto const& cell : span.BankB)
+				reach(cell);
+		}
+
+		for (auto const pTube : TubeClass::Array)
+		{
+			if (pTube)
+			{
+				reach(pTube->EnterCell);
+				reach(pTube->ExitCell);
+			}
+		}
+
+		int cells = static_cast<int>(frontier.size());
+
+		for (int step = 0; step < PassageMouthSteps && !frontier.empty(); ++step)
+		{
+			std::vector<CellStruct> reached;
+			reached.swap(frontier);
+
+			for (auto const& cell : reached)
+			{
+				for (int dy = -1; dy <= 1; ++dy)
+				{
+					for (int dx = -1; dx <= 1; ++dx)
+						reach(CellStruct { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) });
+				}
+			}
+
+			cells += static_cast<int>(frontier.size());
+		}
+
+		Debug::Log("[NeuralAI] Passage mouths drawn for %d bridges and %d tunnel tubes: %d cells kept clear.\n", charted,
+			TubeClass::Array.Count, cells);
+	}
+
 	// Map catalog shared by every house (map state only, so deterministic). A bridge broken at
 	// the start of the match is charted the first time it stands.
 	void UpdateBridgeCatalog()
@@ -418,10 +542,14 @@ namespace
 				span.ChangeFrame = -1;
 			}
 		}
+
+		UpdatePassageMouths();
 	}
 
 	void ResetBridgePlanner()
 	{
+		PassageMouthGrid.clear();
+		PassageMouthSpans = -1;
 		BridgeSpans.clear();
 		BridgeDeckOwner.clear();
 		BridgeCatalogFrame = -1;

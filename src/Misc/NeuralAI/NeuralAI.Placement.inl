@@ -302,6 +302,60 @@ namespace
 
 		return mem;
 	}
+
+	// A land passage needs LandPassageLaneCells clear cells beside a building on one of every two
+	// opposite sides.
+	constexpr int LandPassageLaneCells = 2;
+
+	// A land building that closes a passage: one whose footprint stands on a passage mouth (bridge
+	// end, tunnel tube), or one bigger than a cell with closed ground (water, cliff, map edge; other
+	// buildings do not count, a base keeps its one-cell streets) within LandPassageLaneCells on both
+	// opposite sides of its footprint, so what passes there is left a lane of one cell or none.
+	// Placement skips such cells while it has any other and takes them last when it has not.
+	bool ClosesLandPassage(BuildingTypeClass* pType, const CellStruct& topLeft)
+	{
+		if (!pType || pType->Naval)
+			return false;
+
+		const int w = pType->GetFoundationWidth();
+		const int h = pType->GetFoundationHeight(false);
+
+		if (IsFootprintOnPassageMouth(topLeft, w, h))
+			return true;
+
+		if (w * h <= 1)
+			return false;
+
+		// A side is closed when less than three quarters of the strip beside it is open ground.
+		auto const sideClosed = [](int x0, int y0, int x1, int y1)
+		{
+			int open = 0;
+			int total = 0;
+
+			for (int y = y0; y <= y1; ++y)
+			{
+				for (int x = x0; x <= x1; ++x)
+				{
+					const CellStruct c { static_cast<short>(x), static_cast<short>(y) };
+					++total;
+
+					if (MapClass::Instance.CoordinatesLegal(c) && IsOpenGroundCell(MapClass::Instance.TryGetCellAt(c)))
+						++open;
+				}
+			}
+
+			return open * 4 < total * 3;
+		};
+
+		const int x0 = topLeft.X;
+		const int y0 = topLeft.Y;
+		const int x1 = topLeft.X + w - 1;
+		const int y1 = topLeft.Y + h - 1;
+		const int lane = LandPassageLaneCells;
+
+		return (sideClosed(x0 - lane, y0, x0 - 1, y1) && sideClosed(x1 + 1, y0, x1 + lane, y1))
+			|| (sideClosed(x0, y0 - lane, x1, y0 - 1) && sideClosed(x0, y1 + 1, x1, y1 + lane));
+	}
 }
 
 bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClass* pType, CellStruct candidateCell)
@@ -309,6 +363,9 @@ bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClas
 	const int candW = pType->GetFoundationWidth();
 	const int candH = pType->GetFoundationHeight(false);
 	const bool isCandDefense = pType->IsBaseDefense;
+
+	if (ClosesLandPassage(pType, candidateCell))
+		return false;
 
 	for (auto const& fp : GetBuildingFootprints())
 	{
@@ -2874,6 +2931,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					= (!isNavalBld && targetExpansionZone >= 0 && candZone == targetExpansionZone) ? 650 : 0;
 				int spatialScore = (enableBaseCrawl ? (-radius * 5) : (-radius * 10)) - (hasOneCellMargin ? 0 : 4000)
 					+ expansionZoneBonus;
+
+				// With no cell left but tight ones, one that closes a passage is the last to be taken.
+				if (!hasOneCellMargin && ClosesLandPassage(pBuildingType, candidate))
+					spatialScore -= 6000;
 
 				if (hasAllySiteReservation && candidate == allySiteMacro.AllySiteReservedCell)
 					spatialScore += 100000;

@@ -727,6 +727,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		int targetZone = MapClass::Instance.GetMovementZoneType(
 			targetCoords, MovementZone::Normal, pTargetObject && pTargetObject->OnBridge);
 
+		// A cell of a standing bridge is on the deck's ground, not on the water or the chasm under
+		// it: units asked for a transport to cells of the bridge next to them and waited at its
+		// mouth (match #8920).
+		if (targetZone <= 1 && !(pTargetObject && pTargetObject->OnBridge))
+		{
+			auto const pTargetCell = MapClass::Instance.TryGetCellAt(targetCoords);
+
+			if (pTargetCell && (pTargetCell->ContainsBridge() || pTargetCell->ContainsBridgeEx()))
+				targetZone = MapClass::Instance.GetMovementZoneType(targetCoords, MovementZone::Normal, true);
+		}
+
 		// A building answers for the ground around it (its own cells may carry another zone).
 		if (footZone >= 0 && targetZone != footZone && IsBuildingEnterableFromZone(abstract_cast<BuildingClass*>(pTarget), footZone))
 			targetZone = footZone;
