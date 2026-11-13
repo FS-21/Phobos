@@ -352,6 +352,8 @@ namespace
 	// Fog-fair: a building in the fog keeps the occupants and health it had when last seen.
 	void UpdateUrbanMemory(HouseClass* pHouse, NeuralUrbanState& state)
 	{
+		const NeuralSlowStep slowStep { "UpdateUrbanMemory" };
+
 		const int now = Unsorted::CurrentFrame;
 		std::vector<DWORD> inSightIDs;
 

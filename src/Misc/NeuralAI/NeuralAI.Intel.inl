@@ -813,6 +813,8 @@ namespace
 	// closest & zone-connected to the frontline target
 	void UpdatePrimaryFactories(HouseClass* pHouse, CellStruct targetCoords)
 	{
+		const NeuralSlowStep slowStep { "UpdatePrimaryFactories" };
+
 		if (!pHouse || targetCoords == CellStruct::Empty)
 			return;
 

@@ -1197,37 +1197,54 @@ namespace
 	CellClass* FindSafeIslandLandingCellUncached(
 		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre);
 
-	// One search per house, island reference, zone and ore preference per frame (user's profile:
-	// FindSafeIslandLandingCell was the AI's costliest function, called once per soldier of a wave
-	// ordered across water with the very same arguments, thousands of cells each).
+	// One search per house, zone, ore preference and square of LandingCacheGridCells around the
+	// island reference, kept LandingCacheFrames. The search walks thousands of cells; with a cache
+	// of one frame keyed by the exact cell it ran for every enemy building and every unit that
+	// asked from its own cell, 3.5 times per AI tick, and took 23% of the whole tick (tick cost
+	// diagnostic, 2026-11-13).
+	constexpr int LandingCacheGridCells = 8;
+	constexpr int LandingCacheFrames = 45;
+
 	CellClass* FindSafeIslandLandingCell(
 		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre)
 	{
-		static int cacheFrame = -1;
-		static std::unordered_map<uint64_t, CellStruct> cache;
-
-		if (cacheFrame != Unsorted::CurrentFrame)
+		struct LandingAnswer
 		{
-			cacheFrame = Unsorted::CurrentFrame;
+			CellStruct Cell;
+			int Frame;
+		};
+
+		static int cacheSerial = -1;
+		static std::unordered_map<uint64_t, LandingAnswer> cache;
+		const int now = Unsorted::CurrentFrame;
+
+		if (cacheSerial != NeuralMatchSerial)
+		{
+			cacheSerial = NeuralMatchSerial;
 			cache.clear();
 		}
 
+		if (cache.size() > 1024)
+			std::erase_if(cache, [now](const auto& entry) { return now < entry.second.Frame || now - entry.second.Frame >= LandingCacheFrames; });
+
 		const uint64_t key = (static_cast<uint64_t>(static_cast<uint8_t>(pHouse ? pHouse->ArrayIndex : 255)) << 56)
 			| (static_cast<uint64_t>(static_cast<uint16_t>(targetIslandZone)) << 40)
-			| (static_cast<uint64_t>(static_cast<uint16_t>(islandRefCell.X)) << 24)
-			| (static_cast<uint64_t>(static_cast<uint16_t>(islandRefCell.Y)) << 8) | (preferOre ? 1u : 0u);
+			| (static_cast<uint64_t>(static_cast<uint16_t>(islandRefCell.X / LandingCacheGridCells)) << 24)
+			| (static_cast<uint64_t>(static_cast<uint16_t>(islandRefCell.Y / LandingCacheGridCells)) << 8) | (preferOre ? 1u : 0u);
 
-		if (auto const it = cache.find(key); it != cache.end())
-			return it->second == CellStruct::Empty ? nullptr : MapClass::Instance.TryGetCellAt(it->second);
+		if (auto const it = cache.find(key); it != cache.end() && now >= it->second.Frame && now - it->second.Frame < LandingCacheFrames)
+			return it->second.Cell == CellStruct::Empty ? nullptr : MapClass::Instance.TryGetCellAt(it->second.Cell);
 
 		CellClass* const pResult = FindSafeIslandLandingCellUncached(pHouse, islandRefCell, targetIslandZone, preferOre);
-		cache.emplace(key, pResult ? pResult->MapCoords : CellStruct::Empty);
+		cache.insert_or_assign(key, LandingAnswer { pResult ? pResult->MapCoords : CellStruct::Empty, now });
 		return pResult;
 	}
 
 	CellClass* FindSafeIslandLandingCellUncached(
 		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre)
 	{
+		const NeuralSlowStep slowStep { "FindSafeIslandLandingCellUncached" };
+
 		bool islandHasEnemyPresence = false;
 		for (auto const pEB : BuildingClass::Array)
 		{

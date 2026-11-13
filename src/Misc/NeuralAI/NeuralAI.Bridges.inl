@@ -119,6 +119,33 @@ namespace
 			&& (pCell->GetBuilding() || pCell->IsClearToMove(SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false));
 	}
 
+	// The same per cell, remembered OpenGroundCacheFrames (0 not asked yet, 1 open, 2 closed): the
+	// ground does not change, and building placement asks it for every candidate cell.
+	constexpr int OpenGroundCacheFrames = 4500;
+	std::vector<uint8_t> OpenGroundGrid;
+	int OpenGroundFrame = -1;
+
+	bool IsOpenGroundAt(const CellStruct& cell)
+	{
+		if (cell.X < 0 || cell.Y < 0 || cell.X >= PassageGridSide || cell.Y >= PassageGridSide)
+			return false;
+
+		const int now = Unsorted::CurrentFrame;
+
+		if (OpenGroundGrid.empty() || now < OpenGroundFrame || now - OpenGroundFrame >= OpenGroundCacheFrames)
+		{
+			OpenGroundGrid.assign(PassageGridSide * PassageGridSide, 0);
+			OpenGroundFrame = now;
+		}
+
+		uint8_t& known = OpenGroundGrid[(static_cast<int>(cell.Y) << 9) + cell.X];
+
+		if (known == 0)
+			known = (MapClass::Instance.CoordinatesLegal(cell) && IsOpenGroundCell(MapClass::Instance.TryGetCellAt(cell))) ? 1 : 2;
+
+		return known == 1;
+	}
+
 	bool IsPassageMouthCell(const CellStruct& cell)
 	{
 		return !PassageMouthGrid.empty() && cell.X >= 0 && cell.Y >= 0 && cell.X < PassageGridSide && cell.Y < PassageGridSide
@@ -407,6 +434,8 @@ namespace
 	// the start of the match is charted the first time it stands).
 	void UpdatePassageMouths()
 	{
+		const NeuralSlowStep slowStep { "UpdatePassageMouths" };
+
 		int charted = 0;
 
 		for (auto const& span : BridgeSpans)
@@ -548,6 +577,8 @@ namespace
 
 	void ResetBridgePlanner()
 	{
+		OpenGroundGrid.clear();
+		OpenGroundFrame = -1;
 		PassageMouthGrid.clear();
 		PassageMouthSpans = -1;
 		BridgeSpans.clear();
@@ -659,6 +690,8 @@ namespace
 	// Runs before the features so the brain sees the opportunities it is choosing between.
 	void UpdateBridgePlanner(HouseClass* pHouse)
 	{
+		const NeuralSlowStep slowStep { "UpdateBridgePlanner" };
+
 		auto& state = GetBridgeState(pHouse);
 		state.SeaLaneSpan = -1;
 		state.SeaLaneFleetZone = -1;
