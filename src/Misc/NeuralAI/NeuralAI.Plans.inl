@@ -216,6 +216,8 @@ namespace
 		KnownEnemyBuildingCaches[std::clamp(pHouse ? pHouse->ArrayIndex : 0, 0, 31)].Frame = -1;
 	}
 
+	bool MoveTransportToLoadingCell(HouseClass* pHouse, UnitClass* pTransport, const CellStruct& from, int landZone, bool passengersWaiting);
+
 	int CountKnownEnemyDefensesNear(HouseClass* pHouse, const CellStruct& cell, double radius, bool antiAirOnly)
 	{
 		int count = 0;
@@ -4271,9 +4273,22 @@ namespace
 
 					if (pNearest && pTransport->CurrentMission != Mission::Unload)
 					{
+						// A hover-attack flyer with a target stays in the air to shoot at it and never lands
+						// for its soldiers: while it loads it has none.
+						if (pTransport->Target && pTransport->IsInAir())
+							pTransport->SetTarget(nullptr);
+
+						auto const pCarrier = abstract_cast<UnitClass*>(pTransport);
+						const int soldierZone = MapClass::Instance.GetMovementZoneType(pNearest->GetMapCoords(), MovementZone::Normal, pNearest->OnBridge);
+
 						if (nearestDist > 4 * Unsorted::LeptonsPerCell)
 						{
 							IssueMoveOrder(pTransport, pNearest->GetCell(), 2.0);
+						}
+						else if (pCarrier && MoveTransportToLoadingCell(pHouse, pCarrier, pCarrier->GetMapCoords(), soldierZone, true))
+						{
+							// On its way to a cell the soldiers can step onto: a flyer that hung over them
+							// (the cells below taken) lands next to them instead, the ferry loader's way.
 						}
 						else if (pTransport->CurrentMission == Mission::Move)
 						{
