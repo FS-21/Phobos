@@ -130,6 +130,19 @@ DEFINE_HOOK(0x6879ED, ScenarioClass_Start_NeuralAI, 0x5)
 	return 0;
 }
 
+// The engine's path finder gave up on a way for a unit (the "Regular findpath failure" line of the
+// debug log, written just after this point).
+DEFINE_HOOK(0x42CC48, AStarClass_FindPath_Failure_NeuralAI, 0x5)
+{
+	GET(FootClass*, pFoot, ESI);
+	GET_STACK(CellStruct, to, STACK_OFFSET(0x30, -0x20));
+	GET_STACK(CellStruct, from, STACK_OFFSET(0x30, -0x1C));
+
+	NeuralAI::OnPathFailure(pFoot, from, to);
+
+	return 0;
+}
+
 // Scenario victory & defeat hooks
 DEFINE_HOOK(0x6856A5, Do_Win_NeuralAI, 0x7)
 {

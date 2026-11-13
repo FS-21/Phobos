@@ -1552,12 +1552,33 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					{ return std::max(std::abs(cell.X - rc.X), std::abs(cell.Y - rc.Y)) <= 8; });
 		};
 
+		// The answer of the scan below, kept MapScanKeepFrames per house.
+		struct OreScan
+		{
+			int Serial { -1 };
+			int Frame { -100000 };
+			int Buildings { -1 };
+			size_t Origins { 0 };
+			CellStruct FirstOrigin { CellStruct::Empty };
+			CellStruct Cell { CellStruct::Empty };
+			int Distance { 9999 };
+		};
+
+		static std::array<OreScan, 32> oreScans;
+		OreScan* const pOreScan = (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32) ? &oreScans[pHouse->ArrayIndex] : nullptr;
+		const CellStruct firstScanOrigin = scanOrigins.empty() ? CellStruct::Empty : scanOrigins[0];
+		const bool oreScanKept = pOreScan && pOreScan->Serial == NeuralMatchSerial
+			&& Unsorted::CurrentFrame >= pOreScan->Frame && Unsorted::CurrentFrame - pOreScan->Frame < MapScanKeepFrames
+			&& pOreScan->Buildings == pHouse->Buildings.Count && pOreScan->Origins == scanOrigins.size()
+			&& pOreScan->FirstOrigin == firstScanOrigin;
+
 		for (const CellStruct& scanOrigin : scanOrigins)
 		{
 			if (scanOrigin == CellStruct::Empty)
 				continue;
 
-			const int scanRad = (&scanOrigin == &scanOrigins[0]) ? 78 : 42;
+			// A kept answer skips the scan (no cell is within a negative radius).
+			const int scanRad = oreScanKept ? -1 : ((&scanOrigin == &scanOrigins[0]) ? 78 : 42);
 			for (int dy = -scanRad; dy <= scanRad; dy += 3)
 			{
 				for (int dx = -scanRad; dx <= scanRad; dx += 3)
@@ -1612,6 +1633,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					}
 				}
 			}
+		}
+
+		if (oreScanKept)
+		{
+			nearestUncolonizedOreCell = pOreScan->Cell;
+			minAnchorDistToUncolonizedOre = pOreScan->Distance;
+		}
+		else if (pOreScan)
+		{
+			*pOreScan = OreScan { NeuralMatchSerial, Unsorted::CurrentFrame, pHouse->Buildings.Count, scanOrigins.size(), firstScanOrigin,
+				nearestUncolonizedOreCell, minAnchorDistToUncolonizedOre };
 		}
 
 		bool conYardWithNoRefineryInZone = false;

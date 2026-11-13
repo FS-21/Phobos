@@ -3575,3 +3575,66 @@ namespace
 	}
 
 } // namespace
+
+// TEMP diagnostic: who the engine's path finder fails for. One failure costs about 1.2 ms of wall
+// time (frame cost sample of 2026-11-13) and a match can have a million. Counted per match by unit
+// type, role (slave, gatherer, plan member, free), mission, mega mission and how far the goal is
+// (near up to 12 cells, mid up to 40, far), and logged every PathFailureLogFrames.
+void NeuralAI::OnPathFailure(FootClass* pFoot, const CellStruct& from, const CellStruct& to)
+{
+	constexpr int PathFailureLogFrames = 18000;
+	static int serial = -1;
+	static int total = 0;
+	static int logBucket = 0;
+	static std::map<std::string, int> kinds;
+
+	if (serial != NeuralMatchSerial)
+	{
+		serial = NeuralMatchSerial;
+		total = 0;
+		logBucket = 0;
+		kinds.clear();
+	}
+
+	if (!pFoot)
+		return;
+
+	auto const pType = pFoot->GetTechnoType();
+	auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+	const int owner = pFoot->Owner ? pFoot->Owner->ArrayIndex : -1;
+	const int distance = static_cast<int>(from.DistanceFrom(to));
+	const char* role = "free";
+
+	if (pFoot->SlaveOwner)
+		role = "slave";
+	else if ((pType && pType->ResourceGatherer) || (pUnit && pUnit->Type && pUnit->Type->Harvester))
+		role = "gatherer";
+	else if (owner >= 0 && owner < 32 && MacroStates[owner].PlanMembers.contains(pFoot->UniqueID))
+		role = "plan";
+
+	char key[112];
+	std::snprintf(key, sizeof(key), "%s %s m%d mega%d %s", pType ? pType->ID : "?", role, static_cast<int>(pFoot->CurrentMission),
+		static_cast<int>(pFoot->MegaMission), distance <= 12 ? "near" : (distance <= 40 ? "mid" : "far"));
+	kinds[key]++;
+	total++;
+
+	const int bucket = Unsorted::CurrentFrame / PathFailureLogFrames;
+
+	if (bucket <= logBucket)
+		return;
+
+	logBucket = bucket;
+	std::vector<std::pair<int, std::string>> top;
+
+	for (auto const& [name, count] : kinds)
+		top.emplace_back(count, name);
+
+	std::sort(top.begin(), top.end(), [](auto const& a, auto const& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
+	std::string text;
+
+	for (size_t i = 0; i < top.size() && i < 16; ++i)
+		text += (i ? "; " : "") + top[i].second + " x" + std::to_string(top[i].first);
+
+	Debug::Log("[NeuralAI] Path failures DIAG frame %d: %d so far in %d kinds; %s.\n", Unsorted::CurrentFrame, total,
+		static_cast<int>(kinds.size()), text.c_str());
+}

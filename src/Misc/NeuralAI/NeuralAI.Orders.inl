@@ -1203,7 +1203,8 @@ namespace
 	// asked from its own cell, 3.5 times per AI tick, and took 23% of the whole tick (tick cost
 	// diagnostic, 2026-11-13).
 	constexpr int LandingCacheGridCells = 8;
-	constexpr int LandingCacheFrames = 45;
+	// 150 frames: with 45 the search still ran about once per AI tick, 11% of it.
+	constexpr int LandingCacheFrames = 150;
 
 	CellClass* FindSafeIslandLandingCell(
 		HouseClass* pHouse, const CellStruct& islandRefCell, int targetIslandZone, bool preferOre)
