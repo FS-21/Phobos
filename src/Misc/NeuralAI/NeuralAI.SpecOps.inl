@@ -5,9 +5,11 @@
 
 namespace
 {
-	// The capturable buildings of the map are taken as known only this early in the match: later
-	// their owners are no longer the ones the map starts with.
-	constexpr int SpecOpsMapKnowledgeFrames = 900;
+	// What the map starts with (its capturable buildings, the civilian buildings soldiers can
+	// occupy) is known to every house the way its ore fields are: players see the map before the
+	// match. It is taken as known only this early, while it still is as the map has it; what became
+	// of each building later is learned by seeing it.
+	constexpr int MapKnowledgeFrames = 900;
 
 	// A capturable building this house knows (from the map or seen), as it looked the last time it
 	// was in sight.
@@ -466,7 +468,7 @@ namespace
 		// The capturable buildings a map starts with are map knowledge, like its ore fields: a house
 		// knows where they stand from the first frames, neutral as the map has them. What became of
 		// each one since (captured, destroyed) it learns only by seeing it.
-		const bool mapKnowledge = !state.MapTechsKnown && now <= SpecOpsMapKnowledgeFrames;
+		const bool mapKnowledge = !state.MapTechsKnown && now <= MapKnowledgeFrames;
 		state.MapTechsKnown = true;
 
 		// Insignificant is no filter here: many maps' oil derricks are Insignificant tech buildings.
