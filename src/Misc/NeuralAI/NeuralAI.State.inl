@@ -1220,6 +1220,13 @@ namespace
 	// How long a combat cargo waits on its shore for more: under half the room, and under three
 	// quarters of it. A transport counts as under fire this long after a hit.
 	constexpr int FerryHalfLoadWaitFrames = 5400;
+	// A combat transport ready to cross waits this long for the other transports within
+	// FerryConvoyCells on its shore that are loading or have cargo waiting for them, so the
+	// landing comes as one wave.
+	constexpr int FerryConvoyWaitFrames = 1800;
+	constexpr int FerryConvoyCells = 30;
+	// Enemies seen near a landing this recently count against it even when out of sight now.
+	constexpr int FerryLandingSightingFrames = 900;
 	constexpr int FerryMostLoadWaitFrames = 2700;
 	constexpr int FerryUnderFireFrames = 300;
 
