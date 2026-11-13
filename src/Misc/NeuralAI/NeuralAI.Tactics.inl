@@ -380,9 +380,11 @@ namespace
 
 	// Free ground for a unit moved out of the way: a cell of its zone on the rings minRing..maxRing
 	// (step 2) around `center`, not a bridge or tube cell, scored by the units already near it, cells
-	// already handed out and, when (prefX, prefY) is set, going that way (cost up to 200).
+	// already handed out and, when (prefX, prefY) is set, going that way (cost up to 200). With
+	// offMouths, never a passage mouth cell either (a unit moved out of the way does not park in the
+	// next mouth).
 	CellClass* FindClearingCell(FootClass* pFoot, const CellStruct& center, int minRing, int maxRing, double prefX, double prefY,
-		const std::vector<CellStruct>& occupied, const std::vector<CellStruct>& taken)
+		const std::vector<CellStruct>& occupied, const std::vector<CellStruct>& taken, bool offMouths = false)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
@@ -410,6 +412,7 @@ namespace
 					auto const pCell = MapClass::Instance.TryGetCellAt(c);
 
 					if (!pCell || pCell->GetBuilding() || (pCell->LandType == LandType::Water) != naval || IsBridgeOrTubeCell(pCell)
+						|| (offMouths && IsPassageMouthCell(c))
 						|| MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
 						|| !pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false))
 					{
@@ -445,12 +448,16 @@ namespace
 		return pBest;
 	}
 
+	// A held unit whose order ends within this many cells of its block's centre wants to stand in it.
+	constexpr double JamInsideCells = 6.0;
+
 	// Jam breaker: our units held 450+ frames with an order pending, 8+ within 4 cells of each other in
 	// open ground or 5+ in a narrow passage (bridge, tunnel tube, a corridor with fewer than 25 free
 	// cells in 7x7), are a block (a rally point in a gap, two-way traffic at a choke). Looked for every
 	// 60 frames, cleared at most once per 300:
 	// - our idle ground units within 6 cells of it are moved out to free ground 8..14 cells away,
 	//   preferably not toward where the held units want to go (up to 16);
+	// - held units outside a plan whose move ends inside the block leave it the same way;
 	// - in a narrow passage with traffic both ways, the smaller side backs off (orders dropped, 8..14
 	//   cells away on its own side; the AI gives it a new job) so the other side gets through.
 	void UpdateJamBreaker(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
@@ -530,6 +537,8 @@ namespace
 
 		std::vector<FootClass*> idle;
 		std::vector<CellStruct> occupied;
+		// Our units within 6 cells that are not idle, by what keeps them there (diagnostics).
+		std::map<std::string, int> around;
 
 		auto const consider = [&](FootClass* pFoot)
 		{
@@ -543,9 +552,32 @@ namespace
 
 			occupied.push_back(here);
 
+			if (here.DistanceFrom(center) > 6.0 || pFoot->Owner != pHouse)
+				return;
+
 			// Never a slave of a slave miner: it works in a crowd around its miner by design.
-			if (here.DistanceFrom(center) <= 6.0 && !pFoot->SlaveOwner && IsIdleBlocker(pHouse, pFoot))
+			if (pFoot->SlaveOwner)
+			{
+				around["slave"]++;
+			}
+			else if (IsIdleBlocker(pHouse, pFoot))
+			{
 				idle.push_back(pFoot);
+			}
+			else
+			{
+				auto const pAroundType = pFoot->GetTechnoType();
+				auto const pAroundUnit = abstract_cast<UnitClass*>(pFoot);
+
+				if (macro.PlanMembers.contains(pFoot->UniqueID))
+					around["plan"]++;
+				else if ((pAroundType && pAroundType->ResourceGatherer) || (pAroundUnit && pAroundUnit->Type && pAroundUnit->Type->Harvester))
+					around["gatherer"]++;
+				else if (pFoot->Target)
+					around["target"]++;
+				else
+					around["m" + std::to_string(static_cast<int>(pFoot->CurrentMission))]++;
+			}
 		};
 
 		for (auto const pUnit : UnitClass::Array)
@@ -557,17 +589,60 @@ namespace
 		std::vector<CellStruct> taken;
 		int moved = 0;
 
+		// Free ground 8..14 cells away, off the passage mouths when there is any.
+		auto const findWayOut = [&](FootClass* pFoot)
+		{
+			auto pCell = FindClearingCell(pFoot, center, 8, 14, avgX, avgY, occupied, taken, true);
+
+			return pCell ? pCell : FindClearingCell(pFoot, center, 8, 14, avgX, avgY, occupied, taken);
+		};
+
 		for (auto const pFoot : idle)
 		{
 			if (moved >= 16)
 				break;
 
-			if (auto const pCell = FindClearingCell(pFoot, center, 8, 14, avgX, avgY, occupied, taken))
+			if (auto const pCell = findWayOut(pFoot))
 			{
 				taken.push_back(pCell->MapCoords);
 
 				if (IssueMoveOrder(pFoot, pCell, 0.0))
 					++moved;
+			}
+		}
+
+		// A held unit whose move ends inside the block itself is not passing through: it wants to
+		// stand where the crowd is (a post, a rally spot, a cell another job handed out there). Outside
+		// a plan it gives the spot up and leaves like the idle ones; its owner logic gives it new work.
+		int gaveUp = 0;
+		std::unordered_set<FootClass*> left;
+
+		for (auto const& [pHeld, want] : block)
+		{
+			FootClass* const pFoot = pHeld ? pHeld->Foot : nullptr;
+
+			if (moved + gaveUp >= 16)
+				break;
+
+			if (!pFoot || !pFoot->IsAlive || pFoot->InLimbo || pFoot->SlaveOwner || pHeld->Dest.DistanceFrom(center) > JamInsideCells
+				|| (pFoot->CurrentMission != Mission::Move && pFoot->CurrentMission != Mission::AttackMove)
+				|| macro.PlanMembers.contains(pFoot->UniqueID))
+			{
+				continue;
+			}
+
+			if (auto const pCell = findWayOut(pFoot))
+			{
+				taken.push_back(pCell->MapCoords);
+				pFoot->ClearMegaMissionData();
+				pFoot->SetTarget(nullptr);
+				pFoot->SetDestination(nullptr, true);
+
+				if (IssueMoveOrder(pFoot, pCell, 0.0))
+				{
+					++gaveUp;
+					left.insert(pFoot);
+				}
 			}
 		}
 
@@ -597,7 +672,7 @@ namespace
 
 				for (auto const& [pFoot, want] : yielders)
 				{
-					if (yielded >= 12 || !pFoot || !pFoot->IsAlive || pFoot->InLimbo)
+					if (yielded >= 12 || !pFoot || !pFoot->IsAlive || pFoot->InLimbo || left.contains(pFoot))
 						continue;
 
 					// On a long bridge the 8..14 ring is all deck or water: the side that backs off then
@@ -659,19 +734,19 @@ namespace
 				now, pHouse->ArrayIndex, center.X, center.Y, detoured);
 		}
 
-		if (moved > 0 || yielded > 0 || detoured > 0)
+		if (moved > 0 || gaveUp > 0 || yielded > 0 || detoured > 0)
 		{
 			macro.LastJamBreakFrame = now;
 
-			if (moved > 0)
+			if (moved > 0 || gaveUp > 0)
 				CountDecision(NeuralDecision::JamCleared, pHouse->ArrayIndex);
 
 			if (yielded > 0)
 				CountDecision(NeuralDecision::JamYielded, pHouse->ArrayIndex);
 
-			Debug::Log("[NeuralAI] Frame %d | House #%d jam at (%d,%d)%s: %d held units, %d idle moved out (of %d idle), %d backed off\n",
-				now, pHouse->ArrayIndex, center.X, center.Y, narrow ? " in a narrow passage" : "", n, moved,
-				static_cast<int>(idle.size()), yielded);
+			Debug::Log("[NeuralAI] Frame %d | House #%d jam at (%d,%d)%s: %d held units, %d idle moved out (of %d idle), %d backed off, "
+				"%d gave up a spot inside it\n", now, pHouse->ArrayIndex, center.X, center.Y, narrow ? " in a narrow passage" : "", n, moved,
+				static_cast<int>(idle.size()), yielded, gaveUp);
 		}
 
 		// What the block is made of (diagnostics, at most once per 900 frames): held units by mission,
@@ -715,6 +790,11 @@ namespace
 
 			for (auto const& [typeId, count] : byType)
 				text += typeId + "x" + std::to_string(count) + " ";
+
+			text += "| around ";
+
+			for (auto const& [reason, count] : around)
+				text += reason + "x" + std::to_string(count) + " ";
 
 			Debug::Log("[NeuralAI] Frame %d | House #%d jam detail at (%d,%d): %s\n", now, pHouse->ArrayIndex, center.X, center.Y, text.c_str());
 
@@ -777,10 +857,11 @@ namespace
 	}
 
 	// Bridge and tunnel mouths kept clear: every 300 frames, our idle ground units (IsIdleBlocker)
-	// standing on a bridge deck or within 2 cells of one, within 2 cells of a tunnel tube's entry or exit
-	// cell, or within 3 cells of a tunnel building of ours or an ally (Ares Tunnel=), are moved 4..8
-	// cells away (not onto a bridge or tube) when one of our units within 6 cells waits there with an
-	// order (move, attack-move, enter, harvest; 90+ frames on its cell). Up to 12 per pass.
+	// standing on a passage mouth (IsPassageMouthCell), on a bridge deck or within 2 cells of one,
+	// within 2 cells of a tunnel tube's entry or exit cell, or within 3 cells of a tunnel building of
+	// ours or an ally (Ares Tunnel=), are moved 4..12 cells away (not onto a bridge, a tube or another
+	// mouth) when one of our units within 6 cells waits there with an order (move, attack-move, enter,
+	// harvest; 90+ frames on its cell). Up to 12 per pass.
 	void UpdateJamMouths(HouseClass* pHouse)
 	{
 		auto& macro = GetMacroState(pHouse);
@@ -848,6 +929,9 @@ namespace
 
 		auto const atMouth = [&](const CellStruct& here) -> bool
 		{
+			if (IsPassageMouthCell(here))
+				return true;
+
 			for (auto const& [cell, reach] : mouths)
 			{
 				if (here.DistanceFrom(cell) <= reach)
@@ -902,7 +986,7 @@ namespace
 				}
 			}
 
-			if (auto const pCell = FindClearingCell(pFoot, here, 4, 8, 0.0, 0.0, occupied, taken))
+			if (auto const pCell = FindClearingCell(pFoot, here, 4, 12, 0.0, 0.0, occupied, taken, true))
 			{
 				if (atMouth(pCell->MapCoords))
 					return;

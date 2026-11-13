@@ -2314,6 +2314,9 @@ namespace
 			return 0;
 
 		int drain = pHouse->PowerDrain;
+		// As in the AdvAI fork: a blackout or an EMP switches buildings off whatever the surplus is,
+		// so a building off for one of those is no sign of a shortage.
+		const bool blackout = pHouse->PowerBlackoutTimer.HasTimeLeft();
 
 		for (auto const pBld : pHouse->Buildings)
 		{
@@ -2326,7 +2329,8 @@ namespace
 			{
 				drain += pOT->PowerDrain;
 
-				outHasUnpoweredBuildings = true;
+				if (!blackout && !pBld->IsUnderEMP())
+					outHasUnpoweredBuildings = true;
 			}
 
 			if (pOT->PowerBonus > pOT->PowerDrain && !pOT->IsBaseDefense)

@@ -232,6 +232,19 @@ namespace
 	// A call to arms (another house already stands against the target) adds this to the situation
 	// of the house that weighs joining: a pact that exists is worth more than one to be started.
 	constexpr int PactCallBonus = 25;
+	// A pact has no fixed length (user: a pact lives while it pays, not for a turn of a few
+	// minutes). While it lasts the house weighs it again and leaves it for one of two reasons:
+	// - another house became the danger: its army at our base, or hitting us on purpose within
+	//   PactThreatFrames, while the target does neither, for PactRethinkUpdates updates in a row
+	//   (never in the first PactRethinkMinFrames of the pact);
+	// - nothing is done about the target: for PactIdleFrames we sent no wave at it, saw nobody
+	//   fight it and it lost none of the structures we know.
+	constexpr int PactRethinkMinFrames = 1800;
+	constexpr int PactThreatFrames = 450;
+	constexpr int PactRethinkUpdates = 6;
+	constexpr int PactIdleFrames = 9000;
+	// No new coalition against a house for this long after one against it ended.
+	constexpr int PactTargetCooldownFrames = 4500;
 	// Betrayal: aimed damage from a partner in force (an assault, not a stray shot) within a window.
 	constexpr int BetrayalDamage = 1500;
 	constexpr int BetrayalWindowFrames = 450;
@@ -251,7 +264,7 @@ namespace
 		Betrayal = 0,
 		Weakened = 1,
 		TargetGone = 2,
-		Timeout = 3,
+		Rethought = 3,
 		Team = 4,
 		Count = 5
 	};
@@ -278,12 +291,18 @@ namespace
 	{
 		// The house we lean against (-1 none), the trigger (1 elimination, 2 runaway leader,
 		// 3 stalemate, 4 traitor), how the target was chosen (0 by the trigger, 1 grudge, 2 most
-		// fragile, 3 poorest, 4 traitor), since and until when.
+		// fragile, 3 poorest, 4 traitor) and since when.
 		int Target { -1 };
 		int Reason { 0 };
 		int TargetChoice { 0 };
 		int SinceFrame { -1 };
-		int UntilFrame { -1 };
+		// Weighing the pact again: updates in a row with another house as the danger, and the last
+		// frame something was done about the target with our waves at it and its known structures
+		// as they were then.
+		int RethinkUpdates { 0 };
+		int ProgressFrame { -1 };
+		int ProgressWaves { 0 };
+		int ProgressBuildings { 0 };
 		// Peak seen strength and known structures of the target while the coalition lasts.
 		int TargetPeakStrength { 0 };
 		int TargetPeakBuildings { 0 };
