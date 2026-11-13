@@ -724,11 +724,40 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return false;
 
 		const CellStruct footCoords = pFoot->GetMapCoords();
-		const int footZone = MapClass::Instance.GetMovementZoneType(footCoords, MovementZone::Normal, pFoot->OnBridge);
+		int footZone = MapClass::Instance.GetMovementZoneType(footCoords, MovementZone::Normal, pFoot->OnBridge);
+
+		// A unit on a cell of no ground zone (one the zone map calls impassable for a vehicle) stands
+		// for the ground next to it. It was taken for a unit on another island and asked for a
+		// transport that never came: 257 of the 453 transport waits that ran out in 40 matches, on
+		// maps without water too.
+		for (int r = 1; r <= 2 && footZone <= 1; ++r)
+		{
+			for (int dy = -r; dy <= r && footZone <= 1; ++dy)
+			{
+				for (int dx = -r; dx <= r && footZone <= 1; ++dx)
+				{
+					if (std::abs(dx) != r && std::abs(dy) != r)
+						continue;
+
+					const CellStruct beside { static_cast<short>(footCoords.X + dx), static_cast<short>(footCoords.Y + dy) };
+					const int nearZone = MapClass::Instance.GetMovementZoneType(beside, MovementZone::Normal, false);
+
+					if (nearZone > 1)
+						footZone = nearZone;
+				}
+			}
+		}
+
 		const CellStruct targetCoords = CellClass::Coord2Cell(pTarget->GetCoords());
 		auto const pTargetObject = abstract_cast<ObjectClass*>(pTarget);
 		int targetZone = MapClass::Instance.GetMovementZoneType(
 			targetCoords, MovementZone::Normal, pTargetObject && pTargetObject->OnBridge);
+
+		// Its own way: the unit walks when its own movement zone joins both cells (user: a transport
+		// only for what the unit cannot reach itself).
+		const int ownFootZone = MapClass::Instance.GetMovementZoneType(footCoords, pFootType->MovementZone, pFoot->OnBridge);
+		const bool walksThere = ownFootZone > 1 && ownFootZone == MapClass::Instance.GetMovementZoneType(
+			targetCoords, pFootType->MovementZone, pTargetObject && pTargetObject->OnBridge);
 
 		// A cell of a standing bridge is on the deck's ground, not on the water or the chasm under
 		// it: units asked for a transport to cells of the bridge next to them and waited at its
@@ -753,7 +782,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				canShootFromHere = true;
 		}
 
-		if (footZone < 0 || targetZone < 0 || footZone == targetZone || CanFootCrossWaterDirectly(pFoot)
+		if (footZone < 0 || targetZone < 0 || footZone == targetZone || walksThere || CanFootCrossWaterDirectly(pFoot)
 			|| canShootFromHere)
 		{
 			GetMacroState(pHouse).FerryWaitSince.erase(pFoot->UniqueID);
