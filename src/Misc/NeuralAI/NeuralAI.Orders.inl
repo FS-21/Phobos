@@ -231,6 +231,26 @@ namespace
 		return pFoot->LastMapCoords == pFoot->GetMapCoords();
 	}
 
+	// May the boarder ask this transport to load now? Only with the transport at rest and the cells
+	// the engine has on record for both in one zone (GetFerryDoorZones); a record left behind by a
+	// unit that stopped is brought up to date first. Asked before that, the transport sets out for
+	// the boarder instead of taking it in.
+	bool OpenBoardingDoor(FootClass* pTransport, FootClass* pBoarder)
+	{
+		if (pTransport->Locomotor->Is_Moving())
+			return false;
+
+		if (GetFerryDoorZones(pTransport, pBoarder).Match())
+			return true;
+
+		RegisterStoppedFootCell(pTransport);
+
+		if (!GetFerryDoorZones(pTransport, pBoarder).Match())
+			RegisterStoppedFootCell(pBoarder);
+
+		return GetFerryDoorZones(pTransport, pBoarder).Match();
+	}
+
 	// TEMP diagnostic: a transport the loader left parked to load (Guard or landing, no destination)
 	// that is found with other orders after a part of the AI tick: that part, or the engine between
 	// two ticks, moved it. Logged once per departure from the parking; the loader parks it again.

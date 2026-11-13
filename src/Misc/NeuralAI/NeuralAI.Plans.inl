@@ -4549,7 +4549,14 @@ namespace
 						if (!pInf || pInf == pBoarding)
 							continue;
 
-						if (!pBoarding && pInf == pNearest)
+						// The nearest soldier asks to load once it is within BoardingRestartCells and the
+						// door is open (OpenBoardingDoor: the transport at rest, the cells on record for
+						// both in one zone). Asked earlier, the transport set out for the soldier instead of
+						// taking it in and neither got anywhere (127 plans ended with nobody aboard in 46
+						// matches, 145 boarding restarts did not help). Until then it walks up and waits
+						// like the others.
+						if (!pBoarding && pInf == pNearest && nearestDist <= BoardingRestartCells * Unsorted::LeptonsPerCell
+							&& OpenBoardingDoor(pTransport, pInf))
 						{
 							OrderFootToEnter(pInf, pTransport);
 							pBoarding = pInf;
