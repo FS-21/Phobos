@@ -10563,13 +10563,71 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							// Badly damaged, or the drop zone got covered by anti-air: bring the cargo home.
 							pDropCell = ResolveAirDropCell(pHouse, pTrans, pDropCell);
 
-							if (pTrans->GetMapCoords().DistanceFrom(pDropCell->MapCoords) <= 2.5
-								&& pCarryExt->CarryallCanDropAt(pTrans->GetCell()))
+							// The cell the cargo is set down on: the one below when it takes it, else the
+							// nearest one around the drop cell that does (a building, another unit or a
+							// cliff below kept a carryall hanging over its drop zone with a harvester for
+							// 65000 frames, match #8867). The choice is kept while it stays good.
+							auto& dropCells = GetMacroState(pHouse).CarryallDropCells;
+							auto const itChosen = dropCells.find(pTrans->UniqueID);
+							CellClass* pChosen = itChosen != dropCells.end() ? MapClass::Instance.TryGetCellAt(itChosen->second) : nullptr;
+
+							if (pChosen && (!pCarryExt->CarryallCanDropAt(pChosen)
+								|| pChosen->MapCoords.DistanceFrom(pDropCell->MapCoords) > CarryallDropSearchCells + CarryallDropZoneCells))
+							{
+								dropCells.erase(pTrans->UniqueID);
+								pChosen = nullptr;
+							}
+
+							const bool inDropZone = pTrans->GetMapCoords().DistanceFrom(pDropCell->MapCoords) <= CarryallDropZoneCells;
+							const bool overChosen = pChosen && pTrans->GetMapCoords() == pChosen->MapCoords;
+
+							if ((inDropZone || overChosen) && pCarryExt->CarryallCanDropAt(pTrans->GetCell()))
 							{
 								if (pTrans->CurrentMission != Mission::Unload)
 									CountDecision(NeuralDecision::AirliftDrop, pHouse->ArrayIndex);
 
+								dropCells.erase(pTrans->UniqueID);
 								pTrans->QueueMission(Mission::Unload, true);
+							}
+							else if (pChosen)
+							{
+								if (pTrans->Destination != pChosen || pTrans->CurrentMission != Mission::Move)
+								{
+									pTrans->SetDestination(pChosen, true);
+									pTrans->QueueMission(Mission::Move, true);
+								}
+							}
+							else if (inDropZone)
+							{
+								CellClass* pBest = nullptr;
+								double bestDist = 999999.0;
+								const CellStruct centre = pDropCell->MapCoords;
+
+								for (int dy = -CarryallDropSearchCells; dy <= CarryallDropSearchCells; ++dy)
+								{
+									for (int dx = -CarryallDropSearchCells; dx <= CarryallDropSearchCells; ++dx)
+									{
+										const CellStruct cell { static_cast<short>(centre.X + dx), static_cast<short>(centre.Y + dy) };
+										auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+										const double dist = cell.DistanceFrom(centre);
+
+										if (pCell && dist < bestDist && pCarryExt->CarryallCanDropAt(pCell))
+										{
+											bestDist = dist;
+											pBest = pCell;
+										}
+									}
+								}
+
+								if (pBest)
+								{
+									dropCells[pTrans->UniqueID] = pBest->MapCoords;
+									pTrans->SetDestination(pBest, true);
+									pTrans->QueueMission(Mission::Move, true);
+									Debug::Log("[NeuralAI] House %d airlift: %s %u cannot set %s down at (%d,%d), goes to (%d,%d), frame %d.\n",
+										pHouse->ArrayIndex, pTrans->Type->ID, pTrans->UniqueID, pCarriedUnit->Type->ID, pTrans->GetMapCoords().X,
+										pTrans->GetMapCoords().Y, pBest->MapCoords.X, pBest->MapCoords.Y, Unsorted::CurrentFrame);
+								}
 							}
 							else if (pTrans->CurrentMission == Mission::Guard
 								|| pTrans->CurrentMission == Mission::Area_Guard || (IsAITickWindow(90, 25)))

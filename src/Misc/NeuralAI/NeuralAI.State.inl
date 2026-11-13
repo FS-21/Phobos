@@ -769,6 +769,9 @@ namespace
 			int Tries { 0 };
 		};
 		std::unordered_map<DWORD, FerryLanding> FerryLandings {};
+		// The cell a carryall chose to set its cargo down on when the one below it at the drop zone
+		// did not take it, by carryall UniqueID (key access only).
+		std::unordered_map<DWORD, CellStruct> CarryallDropCells {};
 		// Transports the loader left parked with something to load or cargo aboard, and when:
 		// nobody else gives them orders meanwhile (IsFerryParkedToLoad). TraceParkedFerries (TEMP
 		// diagnostic) names whoever moved one all the same.
@@ -1075,6 +1078,7 @@ namespace
 			this->FerryReserved.clear();
 			this->FerryBoardTurns.clear();
 			this->FerryLandings.clear();
+			this->CarryallDropCells.clear();
 			this->ParkedFerries.clear();
 			this->ProductionBanUntil.clear();
 			this->ProductionPickIdx = { -1, -1, -1 };
@@ -1302,6 +1306,10 @@ namespace
 	constexpr int FerryLandingFrames = 300;
 	constexpr int FerryLandingMaxRing = 5;
 	constexpr double FerryLandingDriftCells = 1.5;
+	// A carryall within CarryallDropZoneCells of its drop cell sets the cargo down; when the cell
+	// below does not take it, on the nearest one that does within CarryallDropSearchCells.
+	constexpr double CarryallDropZoneCells = 2.5;
+	constexpr int CarryallDropSearchCells = 6;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
 	constexpr int FerryParkedFrames = 300;
