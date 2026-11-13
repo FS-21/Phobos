@@ -1099,6 +1099,100 @@ namespace
 			PlanStats[houseIndex][static_cast<size_t>(plan)][static_cast<size_t>(outcome)]++;
 	}
 
+	// Training focus (trainer matches only): the trainer may force an expert in charge, an
+	// archetype and plans that start whenever they have a target and a group, so a weak strategy
+	// is played many times in a row and its failures can be read. It comes as environment
+	// variables (PHOBOS_FOCUS_EXPERT, PHOBOS_FOCUS_ARCHETYPE, PHOBOS_FOCUS_PLANS: plan names
+	// separated by commas), the same for every client of a match. Real games never read them.
+	struct NeuralTrainingFocus
+	{
+		bool Loaded { false };
+		int Expert { -1 };
+		int Archetype { -1 };
+		bool AnyPlan { false };
+		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> Plans {};
+	};
+
+	NeuralTrainingFocus TrainingFocusState;
+
+	// The focused expert leads all but one of every FocusExpertWindows windows of 900 frames.
+	constexpr int FocusExpertWindows = 4;
+
+	const NeuralTrainingFocus& TrainingFocus()
+	{
+		auto& focus = TrainingFocusState;
+
+		if (focus.Loaded)
+			return focus;
+
+		focus.Loaded = true;
+
+		if (!NeuralAI::TrainingMode)
+			return focus;
+
+		char text[512] {};
+
+		if (GetEnvironmentVariableA("PHOBOS_FOCUS_EXPERT", text, sizeof(text)) > 0)
+		{
+			const int expert = std::atoi(text);
+
+			if (expert >= 0 && expert < NeuralAI::NumSpecialists)
+				focus.Expert = expert;
+		}
+
+		if (GetEnvironmentVariableA("PHOBOS_FOCUS_ARCHETYPE", text, sizeof(text)) > 0)
+		{
+			const int archetype = std::atoi(text);
+
+			if (archetype >= 0 && archetype < NeuralAI::NumArchetypes)
+				focus.Archetype = archetype;
+		}
+
+		std::string plans;
+
+		if (GetEnvironmentVariableA("PHOBOS_FOCUS_PLANS", text, sizeof(text)) > 0)
+		{
+			plans = text;
+			size_t start = 0;
+
+			while (start <= plans.size())
+			{
+				const size_t comma = plans.find(',', start);
+				const std::string name = plans.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+
+				for (size_t i = 0; i < std::size(NeuralPlanNames); ++i)
+				{
+					if (_stricmp(name.c_str(), NeuralPlanNames[i]) == 0)
+					{
+						focus.Plans[i] = true;
+						focus.AnyPlan = true;
+					}
+				}
+
+				if (comma == std::string::npos)
+					break;
+
+				start = comma + 1;
+			}
+		}
+
+		if (focus.Expert >= 0 || focus.Archetype >= 0 || focus.AnyPlan)
+		{
+			Debug::Log("[NeuralAI] Training focus: expert %d, archetype %d, plans [%s].\n", focus.Expert, focus.Archetype,
+				focus.AnyPlan ? plans.c_str() : "");
+		}
+
+		return focus;
+	}
+
+	// The archetype a house takes: the focused one in a focus match, else the chosen one.
+	int FocusedArchetype(int chosen)
+	{
+		const int focused = TrainingFocus().Archetype;
+
+		return focused >= 0 ? focused : chosen;
+	}
+
 	void CountDecision(NeuralDecision decision, int houseIndex = -1)
 	{
 		const int idx = (houseIndex >= 0) ? houseIndex : CurrentAIHouseIndex;

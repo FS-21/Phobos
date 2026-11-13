@@ -285,6 +285,11 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		const uint32_t window = static_cast<uint32_t>(Unsorted::CurrentFrame / 900);
 		const uint32_t mix = (window * 2654435761u) ^ (static_cast<uint32_t>(pHouse->ArrayIndex + 1) * 40503u);
 		activeExpert = pool[mix % static_cast<uint32_t>(poolSize)];
+
+		// Training focus: the expert the trainer asked to watch leads most windows, unless it
+		// has no work here (vetoed).
+		if (const int focused = TrainingFocus().Expert; focused >= 0 && !vetoed[focused] && window % FocusExpertWindows != 0)
+			activeExpert = focused;
 	}
 
 	// Easy difficulty disables Spec-Ops Trickster and advanced tactical kiting
@@ -417,7 +422,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 					}
 				}
 
-				pExt->NeuralAI_Archetype = bestAltArch;
+				pExt->NeuralAI_Archetype = FocusedArchetype(bestAltArch);
 			}
 		}
 	}
@@ -446,7 +451,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			}
 		}
 
-		pExt->NeuralAI_Archetype = bestPivotArch;
+		pExt->NeuralAI_Archetype = FocusedArchetype(bestPivotArch);
 	}
 
 	// Controlled Deterministic Exploration: Inject a small synchronized variation
