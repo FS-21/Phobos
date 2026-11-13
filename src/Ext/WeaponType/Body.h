@@ -146,6 +146,8 @@ public:
 	Nullable<int> Wave_EndWidth;
 	Nullable<int> Wave_CapLength;
 	Nullable<int> Wave_EndZAdjust;
+	// Ares 0.C
+	Valueable<int> Ammo;
 
 	WeaponTypeExt(WeaponTypeClass* OwnerObject) : AbstractTypeExt(OwnerObject)
 		, DiskLaser_Radius { DiskLaserClass::Radius }
@@ -263,6 +265,7 @@ public:
 		, Wave_EndWidth {}
 		, Wave_CapLength {}
 		, Wave_EndZAdjust {}
+		, Ammo { 1 }
 	{ }
 
 	bool CanOnlyTargetTheseTechnos(TechnoTypeClass* pType) const;

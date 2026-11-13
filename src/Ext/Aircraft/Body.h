@@ -14,11 +14,13 @@ public:
 	int Strafe_BombsDroppedThisRound;
 	CellClass* Strafe_TargetCell;
 	int CurrentAircraftWeaponIndex;
+	float CurrentRoll;
 
 	explicit AircraftExt(AircraftClass* const OwnerObject) : FootExt(OwnerObject)
 		, Strafe_BombsDroppedThisRound { 0 }
 		, Strafe_TargetCell { nullptr }
 		, CurrentAircraftWeaponIndex {}
+		, CurrentRoll { 0.0f }
 	{ }
 
 	AircraftClass* OwnerObject() const
@@ -33,10 +35,20 @@ public:
 	}
 
 	static void FireWeapon(AircraftClass* pThis, AbstractClass* pTarget);
+	static bool CanSelfReload(AircraftClass const* pThis);
+	static bool ShouldWaitForReload(AircraftClass const* pThis);
+	static int GetSelectedWeaponAmmoCost(AircraftClass* pThis, bool isStrafeLocked = false);
+	static bool CanFireWithCurrentAmmo(AircraftClass* pThis, bool isStrafeLocked = false);
+	static bool CanUseAnyWeaponWithCurrentAmmo(AircraftClass const* pThis);
+	static bool CanContinueAttack(AircraftClass* pThis, bool isStrafeLocked = false);
+	static void ConsumeAmmo(AircraftClass* pThis, int amount = -1);
 	static bool PlaceReinforcementAircraft(AircraftClass* pThis, CoordStruct edgeCoords);
 	static CellStruct PickEdgeCellForPlane(AircraftTypeClass* pPlaneType, CellStruct destCell, Edge edge, bool isOnRetreat = false);
 	static DirType GetLandingDir(AircraftClass* pThis, BuildingClass* pDock = nullptr, bool isProduction = false);
 	static AircraftTypeClass* GetAircraftTypeExtra(AircraftClass* pAircraft);
+
+	void UpdateRoll();
+	void UpdateReload();
 
 	class ExtContainer final : public Container<AircraftExt>
 	{
