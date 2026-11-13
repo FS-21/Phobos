@@ -11304,13 +11304,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pTrip->ReadyFrame < 0)
 				pTrip->ReadyFrame = Unsorted::CurrentFrame;
 
-			if (Unsorted::CurrentFrame - pTrip->ReadyFrame < 600)
+			if (Unsorted::CurrentFrame - pTrip->ReadyFrame < FerryConvoyWaitFrames)
 			{
 				for (auto const pSister : UnitClass::Array)
 				{
 					if (!pSister || pSister == pTrans || pSister->Owner != pHouse || !pSister->IsAlive || pSister->InLimbo
-						|| !pSister->Type || !IsAmphibiousOrAirTransport(pSister->Type) || pSister->Passengers.NumPassengers <= 0
-						|| pSister->DistanceFrom(pTrans) > 20 * Unsorted::LeptonsPerCell
+						|| !pSister->Type || !IsAmphibiousOrAirTransport(pSister->Type)
+						|| pSister->DistanceFrom(pTrans) > FerryConvoyCells * Unsorted::LeptonsPerCell
 						|| ObjectZone(pSister, MovementZone::Normal) != transZone)
 					{
 						continue;
@@ -11318,12 +11318,38 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 					auto const pSisterTrip = FindFerryTrip(pSister->UniqueID);
 
-					// Still loading: not departed and not ready yet.
-					if (pSisterTrip && !pSisterTrip->Departed && pSisterTrip->ReadyFrame < 0)
+					if (pSisterTrip && pSisterTrip->Departed)
+						continue;
+
+					// Still loading: cargo aboard and not ready yet.
+					if (pSister->Passengers.NumPassengers > 0)
 					{
-						convoyHold = true;
-						break;
+						if (pSisterTrip && pSisterTrip->ReadyFrame < 0)
+						{
+							convoyHold = true;
+							break;
+						}
+
+						continue;
 					}
+
+					// Empty with cargo on this shore waiting for a crossing it can make: it loads next.
+					// One transport at a time left a few soldiers on the far side over and over while the
+					// rest of the army waited its turn.
+					for (auto const& ord : pendingCrossIslandOrders)
+					{
+						if (ord.Passenger && ord.Passenger->IsAlive && !ord.Passenger->InLimbo && ord.PickupZone == transZone
+							&& ord.TargetLandingCell && std::max(1, ord.PassengerSize) <= static_cast<int>(pSister->Type->SizeLimit)
+							&& CanPassengerFitInTransport(pSister, ord.Passenger->GetTechnoType())
+							&& CanTransportTypeLink(pSister->Type, ord.Passenger->GetMapCoords(), ord.TargetLandingCell->MapCoords))
+						{
+							convoyHold = true;
+							break;
+						}
+					}
+
+					if (convoyHold)
+						break;
 				}
 			}
 		}
