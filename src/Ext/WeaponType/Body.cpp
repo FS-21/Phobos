@@ -243,6 +243,7 @@ void WeaponTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->Abductor_ChangeOwner_ResetDriverKilled.Read(exINI, pSection, "Abductor.ChangeOwner.ResetDriverKilled");
 	this->Abductor_ChangeOwner_IgnoreDriverKilled.Read(exINI, pSection, "Abductor.ChangeOwner.IgnoreDriverKilled");
 	this->CanTarget_DriverKilled.Read(exINI, pSection, "CanTarget.DriverKilled");
+	this->Ammo.Read(exINI, pSection, "Ammo");
 
 	this->IsClassicSonic.Read(exINI, pSection, "IsClassicSonic");
 	if (this->IsClassicSonic)
@@ -394,6 +395,7 @@ void WeaponTypeExt::Serialize(T& Stm)
 		.Process(this->Wave_EndWidth)
 		.Process(this->Wave_CapLength)
 		.Process(this->Wave_EndZAdjust)
+		.Process(this->Ammo)
 		;
 };
 
