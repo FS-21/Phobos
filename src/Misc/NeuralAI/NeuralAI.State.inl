@@ -888,6 +888,9 @@ namespace
 		int JamRerouteUntil { -1 };
 		bool JamRerouteAll { false };
 		int JamRerouteNoWayFrame { -100000 };
+		// Last frame the aircraft pick wanted a type that needs a dock and every dock was taken: the
+		// building pass answers with another airfield (AirDockWantedFrames, AirDockWantedAirpads).
+		int AirDockWantedFrame { -100000 };
 		int FailedApproachDecayFrame { 0 };
 		std::vector<NeuralGroundLossTrack> GroundLossTracks {};
 		int HomeThreatPeak { 0 };
@@ -1168,6 +1171,7 @@ namespace
 			this->JamRerouteUntil = -1;
 			this->JamRerouteAll = false;
 			this->JamRerouteNoWayFrame = -100000;
+			this->AirDockWantedFrame = -100000;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
 			this->HomeThreatPeak = 0;
@@ -1382,6 +1386,12 @@ namespace
 	// when run every tick (tick cost diagnostic, 2026-11-13). Their answers hold this long per house,
 	// less when the house gains or loses a building or its home changes.
 	constexpr int MapScanKeepFrames = 90;
+	// An aircraft the house wants and cannot start for lack of a free dock asks for another airfield
+	// (user: the expert in charge should build more structures with docks instead of starting an
+	// aircraft that cannot leave). The wish holds AirDockWantedFrames after the pick last made it
+	// and raises the airfield cap by one at a time, up to AirDockWantedAirpads airfields.
+	constexpr int AirDockWantedFrames = 450;
+	constexpr int AirDockWantedAirpads = 4;
 	// A unit that resource cells hurt goes around a field when the straight way to its goal (the
 	// first ResourceLineCells of it) would cost it this share of its health, in legs of
 	// ResourceDetourHopSteps along a route that keeps off those cells.
