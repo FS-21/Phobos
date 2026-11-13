@@ -498,6 +498,86 @@ namespace
 			CreditRecentGone[idx] = gone;
 		}
 	}
+
+	// Kind of a thing in production, as the dashboard reads it in the "prod" list of a house.
+	enum class NeuralProductionKind : int
+	{
+		Building = 0,
+		Infantry = 1,
+		Vehicle = 2,
+		Aircraft = 3,
+		Ship = 4
+	};
+
+	// A factory counts its progress in this many steps (FactoryClass::Production).
+	constexpr int ProductionSteps = 54;
+	// Most things in production listed per house: a house has one factory per queue.
+	constexpr int ProductionTelemetryMaxEntries = 10;
+	// Room one entry needs: brackets, quotes, a type id, the kind and the percent.
+	constexpr size_t ProductionTelemetryEntryRoom = 40;
+
+	// What a house is producing now, for the dashboard: [type id, kind, percent done] for each
+	// factory that holds an object. Reads the factories only, so it changes nothing in the match.
+	void FormatProductionTelemetry(const HouseClass* pHouse, char* pBuffer, size_t size)
+	{
+		if (!pBuffer || size == 0)
+			return;
+
+		pBuffer[0] = '\0';
+
+		if (!pHouse)
+			return;
+
+		size_t length = 0;
+		int entries = 0;
+
+		for (auto const pFactory : FactoryClass::Array)
+		{
+			if (entries >= ProductionTelemetryMaxEntries || length + ProductionTelemetryEntryRoom >= size)
+				break;
+
+			if (!pFactory || pFactory->Owner != pHouse || !pFactory->Object)
+				continue;
+
+			auto const pType = pFactory->Object->GetTechnoType();
+
+			if (!pType)
+				continue;
+
+			NeuralProductionKind kind = NeuralProductionKind::Vehicle;
+
+			switch (pFactory->Object->WhatAmI())
+			{
+			case AbstractType::Building:
+				kind = NeuralProductionKind::Building;
+				break;
+			case AbstractType::Infantry:
+				kind = NeuralProductionKind::Infantry;
+				break;
+			case AbstractType::Aircraft:
+				kind = NeuralProductionKind::Aircraft;
+				break;
+			default:
+				if (pType->Naval)
+					kind = NeuralProductionKind::Ship;
+
+				break;
+			}
+
+			const int percent = std::clamp(pFactory->Production.Value * 100 / ProductionSteps, 0, 100);
+			const int written = std::snprintf(pBuffer + length, size - length, "%s[\"%s\",%d,%d]", entries ? "," : "", pType->ID,
+				static_cast<int>(kind), percent);
+
+			if (written <= 0 || static_cast<size_t>(written) >= size - length)
+			{
+				pBuffer[length] = '\0';
+				break;
+			}
+
+			length += static_cast<size_t>(written);
+			entries++;
+		}
+	}
 }
 
 void NeuralAI::OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller)
@@ -1239,6 +1319,10 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					defMacro.DefenseEfficiencyPct, defMacro.DefensePressure);
 			}
 
+			// In production now: [type id, kind, percent done] per busy factory (FormatProductionTelemetry).
+			char productionText[ProductionTelemetryMaxEntries * ProductionTelemetryEntryRoom] = "";
+			FormatProductionTelemetry(pOwner, productionText, sizeof(productionText));
+
 			lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
 				"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"opening\": %d, "
 				"\"expert\": %d, \"credits\": %d, \"killedUnits\": %d, "
@@ -1247,14 +1331,14 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"%u, \"conYards\": %d, \"harvesters\": %d, \"refineries\": %d, "
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
-				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"airThreat\": %d, "
+				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"prod\": [%s], \"airThreat\": %d, "
 				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"defense\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"team\": %s, \"econ\": [%s], \"bank\": [%s], \"army\": [%s], \"coalition\": [%s], \"truces\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
 				pOwner ? pOwner->CountResourceDestinations : 0, pOwner ? pOwner->NumWarFactories : 0,
 				pOwner ? pOwner->NumBarracks : 0, defenses, terr.Territory, terr.TerritoryAvg(), terr.OreFields,
-				terr.OreFieldsAvg(), terr.BuildingValue, bldText.c_str(), compositionText.c_str(),
+				terr.OreFieldsAvg(), terr.BuildingValue, bldText.c_str(), compositionText.c_str(), productionText,
 				pOwner ? GetMacroState(pOwner).AirThreatValue : 0, pOwner ? GetMacroState(pOwner).OwnAACapacity : 0,
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
