@@ -1745,26 +1745,61 @@ namespace
 			{
 				int alive = 0;
 				int nearest = -1;
+				int lostDead = 0;
+				int lostOffMap = 0;
+				int lostTraced = 0;
+				int lostDistance = 0;
 
 				for (const DWORD uid : plan.Members)
 				{
-					auto const it = ownFoots.find(uid);
+					if (auto const it = ownFoots.find(uid); it != ownFoots.end())
+					{
+						alive++;
+						const int distance = static_cast<int>(it->second->GetMapCoords().DistanceFrom(plan.TargetCell));
 
-					if (it == ownFoots.end())
+						if (nearest < 0 || distance < nearest)
+							nearest = distance;
+
 						continue;
+					}
 
-					alive++;
-					const int distance = static_cast<int>(it->second->GetMapCoords().DistanceFrom(plan.TargetCell));
+					if (ownSiegeBuildings.contains(uid))
+					{
+						alive++;
+						continue;
+					}
 
-					if (nearest < 0 || distance < nearest)
-						nearest = distance;
+					// A missing member is dead, or alive off the map (loaded into a transport, inside a
+					// building): the plan lost it either way, but the second is our own doing.
+					bool offMap = false;
+
+					for (auto const pTech : TechnoClass::Array)
+					{
+						if (pTech && pTech->UniqueID == uid)
+						{
+							offMap = pTech->IsAlive && pTech->InLimbo && pTech->Owner == pHouse;
+							break;
+						}
+					}
+
+					if (offMap)
+						lostOffMap++;
+					else
+						lostDead++;
+
+					if (auto const itTrace = macro.PlanMemberTraces.find(uid); itTrace != macro.PlanMemberTraces.end())
+					{
+						lostTraced++;
+						lostDistance += static_cast<int>(itTrace->second.Cell.DistanceFrom(plan.TargetCell));
+					}
 				}
 
 				Debug::Log("[NeuralAI] House %d plan %s ended %s at rule %d after %d of %d frames: members %d of %d, value %d of %d, "
-					"arrived %d, nearest member %d cells from the target (%d,%d).\n", houseIdx, NeuralPlanNames[static_cast<size_t>(id)],
-					success ? "well" : "badly", rule, Unsorted::CurrentFrame - plan.StartFrame, plan.Deadline - plan.StartFrame, alive,
+					"arrived %d, nearest member %d cells from the target (%d,%d), lost %d dead and %d off the map, last seen %d cells from the target (%d traced).\n",
+					houseIdx, NeuralPlanNames[static_cast<size_t>(id)], success ? "well" : "badly", rule,
+					Unsorted::CurrentFrame - plan.StartFrame, plan.Deadline - plan.StartFrame, alive,
 					static_cast<int>(plan.Members.size()), memberValue(plan), plan.InitialValue, plan.Arrived ? 1 : 0, nearest,
-					plan.TargetCell.X, plan.TargetCell.Y);
+					plan.TargetCell.X, plan.TargetCell.Y, lostDead, lostOffMap, lostTraced > 0 ? lostDistance / lostTraced : -1, lostTraced);
 			}
 
 			if (sendHome)
