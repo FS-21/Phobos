@@ -18,7 +18,7 @@ namespace
 	constexpr const char* NeuralCoalitionDeclineNames[] = { "none", "roll", "secondStrongest", "alone", "stronger", "strongest" };
 	constexpr const char* NeuralCoalitionReasonNames[] = { "none", "elimination", "leader", "stalemate", "traitor", "call" };
 	constexpr const char* NeuralCoalitionChoiceNames[] = { "trigger", "grudge", "fragile", "poorest", "traitor" };
-	constexpr const char* NeuralPactEndNames[] = { "betrayal", "weakened", "target gone", "timeout", "team" };
+	constexpr const char* NeuralPactEndNames[] = { "betrayal", "weakened", "target gone", "rethought", "team" };
 
 	// A house of a preset team: allied with another player house (the spawner sets the setup's teams
 	// in Allies; every house is also allied with the neutral house). The Neural AI never makes an
@@ -244,7 +244,7 @@ namespace
 		coal.PactEnds[static_cast<size_t>(why)]++;
 
 		if (coal.Target >= 0 && coal.Target < 8)
-			coal.CooldownUntil[coal.Target] = now + 9000;
+			coal.CooldownUntil[coal.Target] = now + PactTargetCooldownFrames;
 
 		// Partners that did not betray us are spared for a while.
 		for (int p = 0; p < 8; ++p)
@@ -257,7 +257,8 @@ namespace
 		coal.Reason = 0;
 		coal.TargetChoice = 0;
 		coal.SinceFrame = -1;
-		coal.UntilFrame = -1;
+		coal.RethinkUpdates = 0;
+		coal.ProgressFrame = -1;
 		coal.TargetPeakStrength = 0;
 		coal.TargetPeakBuildings = 0;
 		coal.RevokedMask = 0;
@@ -292,8 +293,10 @@ namespace
 	//   first 150 frames of a truce ignore damage between the partners (attacks already launched).
 	//   Then aimed damage in force from a partner is a betrayal (pact over, lasting grudge, traitor),
 	//   smaller or splash damage is collateral (the truce ends above a limit). The coalition ends when
-	//   the target is weakened (seen strength 45% of its peak, or known structures 55%), gone, after
-	//   9000 frames or on betrayal; ex-partners are spared 1800 frames, the target 9000.
+	//   the target is weakened (seen strength 45% of its peak, or known structures 55%), gone, on
+	//   betrayal, or when the house thinks again (another house became the danger, or nothing was done
+	//   about the target for PactIdleFrames); it has no fixed length. Ex-partners are spared 1800
+	//   frames, the target PactTargetCooldownFrames.
 	// - Without a coalition: two other houses at war are left alone until it ends, then the one it
 	//   left weakest is hit; a dying house is reached before its aggressor; while we lead by far we
 	//   keep a low profile (no far attacks on houses that leave us alone, expansion and defense first).
@@ -350,7 +353,8 @@ namespace
 			gone.Reason = 0;
 			gone.TargetChoice = 0;
 			gone.SinceFrame = -1;
-			gone.UntilFrame = -1;
+			gone.RethinkUpdates = 0;
+			gone.ProgressFrame = -1;
 			gone.TruceSinceFrame.fill(-1);
 			gone.Fronts.clear();
 		}
@@ -931,9 +935,58 @@ namespace
 				return;
 			}
 
-			if (now >= coal.UntilFrame)
+			// The pact is weighed again. Another house is the danger now: the strongest one outside
+			// the pact with its army at our base or hitting us on purpose, while the target does
+			// neither.
+			int danger = -1;
+
+			if (now - coal.SinceFrame >= PactRethinkMinFrames && coal.FightSeen[self][t] < 150 && now - coal.HurtByFrame[t] > 1800)
 			{
-				EndTacitCoalition(pHouse, NeuralPactEnd::Timeout, strength[t]);
+				for (int x = 0; x < 8; ++x)
+				{
+					if (x == self || x == t || !alive[x] || team[x] || IsTacitTrucePartner(pHouse, x)
+						|| (coal.FightSeen[self][x] < 150 && now - coal.HurtByFrame[x] > PactThreatFrames))
+					{
+						continue;
+					}
+
+					if (danger < 0 || strength[x] > strength[danger])
+						danger = x;
+				}
+			}
+
+			coal.RethinkUpdates = danger >= 0 ? coal.RethinkUpdates + 1 : 0;
+
+			if (coal.RethinkUpdates >= PactRethinkUpdates)
+			{
+				Debug::Log("[NeuralAI] House %d Coalition: thinks again, house %d is the danger now (strength %d, at our base %d, "
+					"last hit us %d frames ago).\n", self, danger, strength[danger], coal.FightSeen[self][danger],
+					now - coal.HurtByFrame[danger]);
+				EndTacitCoalition(pHouse, NeuralPactEnd::Rethought, strength[t]);
+				return;
+			}
+
+			// Something done about the target: a wave of ours at it, anybody seen fighting it, a
+			// known structure of it gone.
+			bool progress = coal.ProgressFrame < 0 || coal.TargetWaves != coal.ProgressWaves || knownBuildings[t] < coal.ProgressBuildings;
+
+			for (int p = 0; p < 8 && !progress; ++p)
+				progress = partnerSeen[p];
+
+			if (progress)
+			{
+				coal.ProgressFrame = now;
+				coal.ProgressWaves = coal.TargetWaves;
+			}
+
+			if (progress || knownBuildings[t] > coal.ProgressBuildings)
+				coal.ProgressBuildings = knownBuildings[t];
+
+			if (now - coal.ProgressFrame >= PactIdleFrames)
+			{
+				Debug::Log("[NeuralAI] House %d Coalition: thinks again, nothing done about house %d for %d frames.\n", self, t,
+					now - coal.ProgressFrame);
+				EndTacitCoalition(pHouse, NeuralPactEnd::Rethought, strength[t]);
 				return;
 			}
 
@@ -1361,7 +1414,10 @@ namespace
 		coal.Reason = triggerReason;
 		coal.TargetChoice = triggerChoice;
 		coal.SinceFrame = now;
-		coal.UntilFrame = now + 9000;
+		coal.RethinkUpdates = 0;
+		coal.ProgressFrame = now;
+		coal.ProgressWaves = coal.TargetWaves;
+		coal.ProgressBuildings = knownBuildings[triggerTarget];
 		coal.TargetPeakStrength = strength[triggerTarget];
 		coal.TargetPeakBuildings = knownBuildings[triggerTarget];
 		coal.RevokedMask = 0;
