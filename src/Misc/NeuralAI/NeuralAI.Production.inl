@@ -1364,20 +1364,41 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const int maxGroundDefenses = std::clamp(baseGroundDefCap, 4, (hasTechCenter || money > 3000 || effectiveFrontlineThreat) ? 20 : 14);
 
 		// Defenses that shoot up the base wants, measured as the Advanced AI does: points of
-		// AntiAirValue (a typical defense gives airDefenseTypicalValue). Once the enemy air power is
-		// worth a gun, a standing amount that grows with the economy plus that air power; while a
-		// raid lasts, a margin on top. Of that total, the enemy air power plus the margin is what the
-		// raid itself asks for: only that part goes ahead of other picks, the rest is built at leisure.
+		// AntiAirValue (a typical defense gives airDefenseTypicalValue). A base with a factory keeps
+		// a standing amount that grows with its economy before any enemy aircraft shows up:
+		// aircraft are fragile but strike hard and fast, and guns started after the first raid come
+		// too late. The enemy air bases we know of announce that air power and count ahead of it.
+		// Once the enemy air power is worth a gun the standing amount is larger and that power is
+		// added; while a raid lasts, a margin on top. Of that total, the enemy air power plus the
+		// margin is what the raid itself asks for: only that part goes ahead of other picks, the
+		// rest is built at leisure.
 		constexpr int airDefenseUrgentValue = 20;
+		constexpr int airDefenseStandingValue = 25;
 		constexpr int airDefenseBaseValue = 40;
 		constexpr int airDefenseValuePerRefinery = 10;
+		constexpr int airDefenseValuePerEnemyAirBase = 20;
+		constexpr int airDefenseEnemyAirBaseCap = 60;
 		constexpr int airDefenseRaidValue = 60;
 		constexpr int maxWantedAirDefenses = 8;
 		const bool airRaid = underAirAttack || activeThreatCat == NeuralThreatCategory::Air;
 		const int raidAirValue = airRaid ? enemyAirValue + airDefenseRaidValue : 0;
-		const int wantedAirValue = (airRaid || enemyAirValue >= airDefenseUrgentValue)
-			? airDefenseBaseValue + ownedRefineries * airDefenseValuePerRefinery + enemyAirValue + (airRaid ? airDefenseRaidValue : 0)
-			: 0;
+		const bool enemyAirKnown = airRaid || enemyAirValue >= airDefenseUrgentValue;
+		int knownEnemyAirBases = 0;
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			if (info.Building->Type->Factory == AbstractType::AircraftType)
+				knownEnemyAirBases++;
+		}
+
+		const int announcedAirValue = std::min(knownEnemyAirBases * airDefenseValuePerEnemyAirBase, airDefenseEnemyAirBaseCap);
+		const bool keepsStandingAirDefense = ownedWarFactories >= 1 || ownedTechStructures >= 1 || announcedAirValue > 0;
+		const int wantedAirValue = enemyAirKnown
+			? airDefenseBaseValue + ownedRefineries * airDefenseValuePerRefinery + std::max(enemyAirValue, announcedAirValue)
+				+ (airRaid ? airDefenseRaidValue : 0)
+			: (keepsStandingAirDefense
+				? airDefenseStandingValue + ownedRefineries * airDefenseValuePerRefinery + announcedAirValue
+				: 0);
 		auto const airDefensesMissingFor = [&](int value) -> int
 		{
 			return std::min((std::max(0, value - ownedAntiAirValue) + airDefenseTypicalValue - 1) / airDefenseTypicalValue,
@@ -2852,10 +2873,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// guns each one comes before the towers that cannot shoot up.
 				constexpr int airDefenseFirstBonus = 900;
 				constexpr int airDefenseDeficitBonus = 600;
+				constexpr int airDefenseStandingBonus = 350;
 				constexpr int groundDefenseRaidPenalty = 1500;
 
 				if (isAntiAir && totalAntiAirDefenses == 0 && (airRaid || enemyAirValue >= airDefenseUrgentValue))
 					score += airDefenseFirstBonus;
+
+				// The standing amount and what known enemy air bases announce: wanted, with no raid to
+				// make it urgent.
+				if (isAntiAir && airDefenseDeficit > 0 && !fillsAirDeficit)
+					score += airDefenseStandingBonus;
 
 				if (fillsAirDeficit)
 					score += airDefenseDeficitBonus;
