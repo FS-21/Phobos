@@ -109,6 +109,13 @@ namespace
 		int Frame { 0 };
 	};
 
+	// What a failed plan teaches about its target: a group of this value was not enough there.
+	struct NeuralPlanTargetLesson
+	{
+		int Strength { 0 };
+		int Frame { 0 };
+	};
+
 	// A group of capital units of one domain (ground, air, sea): UpdateCapitalGroups.
 	struct NeuralCapitalGroup
 	{
@@ -713,6 +720,8 @@ namespace
 		std::unordered_map<DWORD, std::pair<CellStruct, int>> StealthSightings;
 		// Plan members by UniqueID (UpdateStrategicPlans); dropped 600 frames after the last sight.
 		std::unordered_map<DWORD, NeuralPlanMemberTrace> PlanMemberTraces;
+		// Targets by UniqueID where a plan's group failed (finishPlan); key access only.
+		std::unordered_map<DWORD, NeuralPlanTargetLesson> PlanTargetLessons;
 		// Capital groups by domain (0 ground, 1 air, 2 sea) and the capital units they hold back from
 		// waves and lone strikes (UpdateCapitalGroups).
 		std::array<NeuralCapitalGroup, 3> CapitalGroups {};
@@ -1056,6 +1065,7 @@ namespace
 			this->EconomyHoldPauseUntil = -1;
 			this->StealthSightings.clear();
 			this->PlanMemberTraces.clear();
+			this->PlanTargetLessons.clear();
 			this->CapitalGroups = {};
 			this->CapitalHeld.clear();
 			this->BankWantedYards = 0;
@@ -1333,6 +1343,13 @@ namespace
 	constexpr int PlanOutgunnedSightFrames = 150;
 	constexpr int PlanOutgunnedRatioPercent = 150;
 	constexpr int PlanOutgunnedRetryFrames = 5400;
+	// A raid's ground group also turns back when, before it is committed, the members it has left
+	// are worth less than this share of the group that set out: the way there is defended.
+	constexpr int PlanEnRouteLossPercent = 70;
+	// For PlanLessonFrames after a group failed against a target, only a group worth
+	// PlanLessonAdvantagePercent of that one is sent at it again.
+	constexpr int PlanLessonFrames = 9000;
+	constexpr int PlanLessonAdvantagePercent = 150;
 	// A ground strike on a building needs this share of the strength known to guard it (defenses
 	// within PlanStrikeGuardCells, units seen there in the last PlanStrikeGuardFrames).
 	constexpr int PlanStrikeAdvantagePercent = 120;

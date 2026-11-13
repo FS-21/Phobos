@@ -216,6 +216,8 @@ namespace
 		KnownEnemyBuildingCaches[std::clamp(pHouse ? pHouse->ArrayIndex : 0, 0, 31)].Frame = -1;
 	}
 
+	bool MoveTransportToLoadingCell(HouseClass* pHouse, UnitClass* pTransport, const CellStruct& from, int landZone, bool passengersWaiting);
+
 	int CountKnownEnemyDefensesNear(HouseClass* pHouse, const CellStruct& cell, double radius, bool antiAirOnly)
 	{
 		int count = 0;
@@ -1828,6 +1830,16 @@ namespace
 				}
 			}
 
+			// A group that failed against a target leaves a lesson: that much was not enough there
+			// (targetLessonAllows).
+			if (!success && plan.TargetID != 0 && !plan.Members.empty() && plan.InitialValue > 1)
+			{
+				auto& lesson = macro.PlanTargetLessons[plan.TargetID];
+				const bool fresh = lesson.Frame > 0 && Unsorted::CurrentFrame - lesson.Frame <= PlanLessonFrames;
+				lesson.Strength = fresh ? std::max(lesson.Strength, plan.InitialValue) : plan.InitialValue;
+				lesson.Frame = Unsorted::CurrentFrame;
+			}
+
 			CountPlanOutcome(houseIdx, id, success ? NeuralPlanOutcome::Succeeded : NeuralPlanOutcome::Failed);
 
 			if (!success && Unsorted::CurrentFrame >= plan.Deadline)
@@ -1925,6 +1937,26 @@ namespace
 			plan.InitialStrength = std::max(1, strength);
 			CountPlanOutcome(houseIdx, id, NeuralPlanOutcome::Started);
 			gateOpenedUnstarted[static_cast<size_t>(id)] = false;
+		};
+
+		auto groupValueOf = [](const std::vector<FootClass*>& group) -> int
+		{
+			int value = 0;
+
+			for (auto const pFoot : group)
+				value += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+
+			return value;
+		};
+
+		// May a group of this value go for the target? Not while the lesson of a failed group stands
+		// and this one is not clearly stronger.
+		auto targetLessonAllows = [&](DWORD targetID, int groupValue) -> bool
+		{
+			auto const it = macro.PlanTargetLessons.find(targetID);
+
+			return it == macro.PlanTargetLessons.end() || Unsorted::CurrentFrame - it->second.Frame > PlanLessonFrames
+				|| groupValue * 100 >= it->second.Strength * PlanLessonAdvantagePercent;
 		};
 
 		// ---------------------------------------------------------------- Plan 1: Eco Raid
@@ -2522,6 +2554,14 @@ namespace
 					}
 				}
 
+				// The decoy group is the four cheapest idle units: a building where such a group already
+				// failed is no decoy target while that lesson stands.
+				std::vector<FootClass*> decoyGroup = idleArmy;
+				std::stable_sort(decoyGroup.begin(), decoyGroup.end(), [](FootClass* a, FootClass* b)
+					{ return a->GetTechnoType()->Cost < b->GetTechnoType()->Cost; });
+				decoyGroup.resize(std::min<size_t>(decoyGroup.size(), 4));
+				const int decoyValue = groupValueOf(decoyGroup);
+
 				// Decoy target: a known building on the far side of the enemy base, away from
 				// the main approach (angle > ~70 degrees around the enemy centroid).
 				BuildingClass* pDecoy = nullptr;
@@ -2538,7 +2578,7 @@ namespace
 
 					for (auto const pBld : knownEnemyBuildingList)
 					{
-						if (!isKnownEnemyBuilding(pBld) || pBld == pMain)
+						if (!isKnownEnemyBuilding(pBld) || pBld == pMain || !targetLessonAllows(pBld->UniqueID, decoyValue))
 							continue;
 
 						const CellStruct bc = pBld->GetMapCoords();
@@ -3212,16 +3252,6 @@ namespace
 			return strength;
 		};
 
-		auto groupValueOf = [](const std::vector<FootClass*>& group) -> int
-		{
-			int value = 0;
-
-			for (auto const pFoot : group)
-				value += GetCombatValueOfType(pFoot->GetTechnoType(), false);
-
-			return value;
-		};
-
 		// ---------------------------------------------------------------- Outgunned raids turn back
 		// Raids and strikes that send a ground group at a distant target. A group that, still far
 		// from its goal, has more enemy strength around it than it has itself (units seen near it,
@@ -3286,12 +3316,18 @@ namespace
 						enemy += GetCombatValueOfType(pBld->Type, false);
 				}
 
-				if (enemy * 100 <= strength * PlanOutgunnedRatioPercent)
+				// Losses before arriving tell the same when the shooters are out of the group's sight
+				// (long guns, aircraft, defenses it does not know yet).
+				const bool outgunned = enemy * 100 > strength * PlanOutgunnedRatioPercent;
+				const bool bleeding = memberValue(plan) * 100 < plan.InitialValue * PlanEnRouteLossPercent;
+
+				if (!outgunned && !bleeding)
 					continue;
 
-				Debug::Log("[NeuralAI] House %d plan %s outgunned %d cells from its goal: enemy %d against %d around (%d,%d).\n", houseIdx,
-					NeuralPlanNames[static_cast<size_t>(id)], static_cast<int>(toGoal), enemy, strength, centre.X, centre.Y);
-				abortPlan(id, NeuralDecision::PlanAbortEnemyGrew, strength);
+				Debug::Log("[NeuralAI] House %d plan %s %s %d cells from its goal: enemy %d against %d around (%d,%d).\n", houseIdx,
+					NeuralPlanNames[static_cast<size_t>(id)], outgunned ? "outgunned" : "losing members", static_cast<int>(toGoal), enemy,
+					strength, centre.X, centre.Y);
+				abortPlan(id, outgunned ? NeuralDecision::PlanAbortEnemyGrew : NeuralDecision::PlanAbortValueLost, strength);
 				macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanOutgunnedRetryFrames;
 			}
 		}
@@ -3805,7 +3841,7 @@ namespace
 
 				group.resize(std::min<size_t>(group.size(), 6));
 
-				if (group.size() >= 2)
+				if (group.size() >= 2 && targetLessonAllows(pTarget->UniqueID, groupValueOf(group)))
 					return group;
 			}
 
@@ -3819,7 +3855,7 @@ namespace
 
 				// A ground strike needs the strength to beat what is known to guard the target: a
 				// group that cannot is not sent.
-				if (group.size() < minGround || groupValueOf(group) * 100
+				if (group.size() < minGround || !targetLessonAllows(pTarget->UniqueID, groupValueOf(group)) || groupValueOf(group) * 100
 					< knownEnemyStrengthNear(pTarget->GetMapCoords(), PlanStrikeGuardCells, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
 				{
 					group.clear();
@@ -4237,9 +4273,22 @@ namespace
 
 					if (pNearest && pTransport->CurrentMission != Mission::Unload)
 					{
+						// A hover-attack flyer with a target stays in the air to shoot at it and never lands
+						// for its soldiers: while it loads it has none.
+						if (pTransport->Target && pTransport->IsInAir())
+							pTransport->SetTarget(nullptr);
+
+						auto const pCarrier = abstract_cast<UnitClass*>(pTransport);
+						const int soldierZone = MapClass::Instance.GetMovementZoneType(pNearest->GetMapCoords(), MovementZone::Normal, pNearest->OnBridge);
+
 						if (nearestDist > 4 * Unsorted::LeptonsPerCell)
 						{
 							IssueMoveOrder(pTransport, pNearest->GetCell(), 2.0);
+						}
+						else if (pCarrier && MoveTransportToLoadingCell(pHouse, pCarrier, pCarrier->GetMapCoords(), soldierZone, true))
+						{
+							// On its way to a cell the soldiers can step onto: a flyer that hung over them
+							// (the cells below taken) lands next to them instead, the ferry loader's way.
 						}
 						else if (pTransport->CurrentMission == Mission::Move)
 						{
@@ -5081,7 +5130,7 @@ namespace
 
 						std::sort(group.begin(), group.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
 
-						if (group.size() < 2)
+						if (group.size() < 2 || !targetLessonAllows(pTarget->UniqueID, groupValueOf(group)))
 							group.clear();
 					}
 
@@ -5092,7 +5141,7 @@ namespace
 
 						// The superweapon stands deep in the base: the ground group goes only with the
 						// strength to beat what is known to guard it.
-						if (group.size() < 4 || groupValueOf(group) * 100
+						if (group.size() < 4 || !targetLessonAllows(pTarget->UniqueID, groupValueOf(group)) || groupValueOf(group) * 100
 							< knownEnemyStrengthNear(tc, PlanStrikeGuardCells, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
 						{
 							group.clear();
