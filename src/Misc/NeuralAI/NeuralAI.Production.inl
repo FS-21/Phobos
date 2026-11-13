@@ -1114,8 +1114,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& (scores[32] > 160 || scores[33] > 160 || pExt->NeuralAI_ActiveExpert == 8
 				|| pExt->NeuralAI_Archetype == 6));
 		const int dockDemandAirpadCap = expert8NeedsMoreAirpadDocks ? std::clamp((ownedDockingAircraft / 4) + 2, 2, 6) : 2;
-		const int maxAirpads = std::max(
-			dockDemandAirpadCap, (hasTechCenter && maxEnemyAirpads >= 2) ? std::clamp(maxEnemyAirpads + 1, 2, 5) : 2);
+		// The aircraft pick wanted a type that needs a dock and had none free: one more airfield.
+		const bool airDockWanted = airDocksFull && ownedAirpads >= 1
+			&& Unsorted::CurrentFrame - GetMacroState(pHouse).AirDockWantedFrame <= AirDockWantedFrames;
+		const int maxAirpads = std::max({ dockDemandAirpadCap,
+			(hasTechCenter && maxEnemyAirpads >= 2) ? std::clamp(maxEnemyAirpads + 1, 2, 5) : 2,
+			airDockWanted ? std::min(ownedAirpads + 1, AirDockWantedAirpads) : 0 });
 
 		prodSegments.Mark("pb: threat analysis");
 
@@ -2713,7 +2717,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					score = scores[8] - owned * 750 + (expert8NeedsMoreAirpadDocks ? 850 : 0);
+					score = scores[8] - owned * 750 + ((expert8NeedsMoreAirpadDocks || airDockWanted) ? 850 : 0);
 
 					if (ownedAirpads < maxEnemyAirpads && hasTechCenter && money >= 2000)
 						score += 350;
@@ -5310,6 +5314,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Aircraft Target Selection
 	int bestAirIdx = -1;
 	int bestAirScore = -32000;
+	int bestDockWaitScore = -32000;
 
 	if (pHouse->NumAirpads > 0)
 	{
@@ -5346,8 +5351,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// dock cannot leave the airfield: the engine abandons it when the factory's retry timer
 			// runs out and the queue starts the same type again, so the production shows an aircraft
 			// that never comes (user; 459 Banshee productions abandoned for 107 fielded in 25 matches).
-			if (!isAirInProgress && (pAir->AirportBound || pAir->Dock.Count > 0) && ownedDockingAircraft >= pHouse->AirportDocks)
-				continue;
+			const bool waitsForDock = !isAirInProgress && (pAir->AirportBound || pAir->Dock.Count > 0)
+				&& ownedDockingAircraft >= pHouse->AirportDocks;
 
 			// An air force shot down as fast as it is built gets no more combat aircraft until the
 			// losses fade (NeuralAI.AirForce.inl); transports and carryalls are not affected.
@@ -5406,6 +5411,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0) + CounterBonusFor(pHouse, pAir)
 				+ AirForceProductionBonus(pHouse, pAir) + bankStrikeBonus;
 
+			// Not started, but wanted: the best of these asks for another airfield below.
+			if (waitsForDock)
+			{
+				bestDockWaitScore = std::max(bestDockWaitScore, score);
+				continue;
+			}
+
 			if (score > bestAirScore)
 			{
 				bestAirScore = score;
@@ -5413,6 +5425,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestAirIdx = pAir->ArrayIndex;
 			}
 		}
+
+		// The aircraft the house would build next if it had a dock for it: the building pass of the
+		// next ticks raises its airfield cap (AirDockWantedFrame).
+		if (bestDockWaitScore > bestAirScore && bestDockWaitScore > 0)
+			GetMacroState(pHouse).AirDockWantedFrame = Unsorted::CurrentFrame;
 	}
 
 	if (!hasActiveUnitIncome
