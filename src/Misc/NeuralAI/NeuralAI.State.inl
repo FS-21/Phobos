@@ -1402,7 +1402,9 @@ namespace
 	constexpr int JamSpotGapFrames = 900;
 	constexpr int JamRerouteHopSteps = 20;
 	constexpr double JamSpotCells = 8.0;
-	constexpr double JamAvoidCells = 10.0;
+	// Enough to cut the passage where the block stands; a wider ring also closed the other ways out
+	// of a base next to it (no way around in 16 of 16 searches with 10).
+	constexpr double JamAvoidCells = 6.0;
 	constexpr double JamRerouteReachCells = 60.0;
 	// A route leg that would end on a bridge deck runs this many route cells past its far end.
 	constexpr size_t RouteLegPastBridgeCells = 4;
