@@ -155,6 +155,8 @@ namespace
 		// Combat value of the group at the start weighted by health (early abort checks), and the
 		// last frame the target was in current sight (Hunt Key Units).
 		int InitialStrength { 0 };
+		// The house that owns the target building (-1 none), for the lesson a beaten raid leaves.
+		int TargetOwner { -1 };
 		int TargetSeenFrame { 0 };
 		// Per member: a frame (Pickets: until when a sentry holds back, when it last saw something).
 		std::vector<int> MemberFrames {};
@@ -741,6 +743,9 @@ namespace
 		std::unordered_map<DWORD, NeuralPlanMemberTrace> PlanMemberTraces;
 		// Targets by UniqueID where a plan's group failed (finishPlan); key access only.
 		std::unordered_map<DWORD, NeuralPlanTargetLesson> PlanTargetLessons;
+		// The same per enemy house: the value of the last raid group that was beaten on its way to
+		// one of its buildings (raid gate of startPlan).
+		std::array<NeuralPlanTargetLesson, 32> PlanHouseLessons {};
 		// Capital groups by domain (0 ground, 1 air, 2 sea) and the capital units they hold back from
 		// waves and lone strikes (UpdateCapitalGroups).
 		std::array<NeuralCapitalGroup, 3> CapitalGroups {};
@@ -1111,6 +1116,7 @@ namespace
 			this->StealthSightings.clear();
 			this->PlanMemberTraces.clear();
 			this->PlanTargetLessons.clear();
+			this->PlanHouseLessons.fill(NeuralPlanTargetLesson {});
 			this->CapitalGroups = {};
 			this->CapitalHeld.clear();
 			this->BankWantedYards = 0;
@@ -1452,6 +1458,8 @@ namespace
 	// For PlanLessonFrames after a group failed against a target, only a group worth
 	// PlanLessonAdvantagePercent of that one is sent at it again.
 	constexpr int PlanLessonFrames = 9000;
+	// A raid the gate of startPlan held back is weighed again after this long.
+	constexpr int PlanGateRetryFrames = 900;
 	constexpr int PlanLessonAdvantagePercent = 150;
 	// A ground strike on a building needs this share of the strength known to guard it (defenses
 	// within PlanStrikeGuardCells, units seen there in the last PlanStrikeGuardFrames).
