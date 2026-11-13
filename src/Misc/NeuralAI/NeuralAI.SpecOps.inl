@@ -5,7 +5,12 @@
 
 namespace
 {
-	// A capturable building this house has seen, as it looked the last time it was in sight.
+	// The capturable buildings of the map are taken as known only this early in the match: later
+	// their owners are no longer the ones the map starts with.
+	constexpr int SpecOpsMapKnowledgeFrames = 900;
+
+	// A capturable building this house knows (from the map or seen), as it looked the last time it
+	// was in sight.
 	struct NeuralKnownTech
 	{
 		DWORD ID { 0 };
@@ -83,6 +88,8 @@ namespace
 		int LastScanFrame { -100000 };
 		// Sorted by ID (binary search, deterministic order).
 		std::vector<NeuralKnownTech> Techs {};
+		// The capturable buildings the map starts with were taken into the memory.
+		bool MapTechsKnown { false };
 		std::vector<NeuralSpecOpsCapture> Captures {};
 		std::vector<NeuralSpecOpsSpy> Spies {};
 		// Opportunity summary of the last scan.
@@ -456,6 +463,12 @@ namespace
 		const int now = Unsorted::CurrentFrame;
 		std::vector<DWORD> inSightIDs;
 
+		// The capturable buildings a map starts with are map knowledge, like its ore fields: a house
+		// knows where they stand from the first frames, neutral as the map has them. What became of
+		// each one since (captured, destroyed) it learns only by seeing it.
+		const bool mapKnowledge = !state.MapTechsKnown && now <= SpecOpsMapKnowledgeFrames;
+		state.MapTechsKnown = true;
+
 		// Insignificant is no filter here: many maps' oil derricks are Insignificant tech buildings.
 		for (auto const pBld : BuildingClass::Array)
 		{
@@ -467,10 +480,13 @@ namespace
 
 			const CellStruct cell = pBld->GetMapCoords();
 
-			if (pBld->Owner != pHouse && !IsCellInSightOfAI(pHouse, cell))
+			const bool inSight = pBld->Owner == pHouse || IsCellInSightOfAI(pHouse, cell);
+
+			if (!inSight && !(mapKnowledge && pBld->Owner->IsNeutral()))
 				continue;
 
-			inSightIDs.push_back(pBld->UniqueID);
+			if (inSight)
+				inSightIDs.push_back(pBld->UniqueID);
 			const int ownerIndex = pBld->Owner->IsNeutral() ? -1 : pBld->Owner->ArrayIndex;
 			NeuralKnownTech* pTech = FindKnownTech(state, pBld->UniqueID);
 
