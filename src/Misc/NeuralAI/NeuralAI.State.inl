@@ -1324,6 +1324,20 @@ namespace
 	// plus this many cells, and not while it has stood held for LongRangeHeldFrames.
 	constexpr int LongRangeDirectAttackCells = 12;
 	constexpr int LongRangeHeldFrames = 300;
+	// A raid's ground group turns back when, further than PlanOutgunnedCommittedCells from its goal,
+	// the enemy strength around it (units seen within PlanOutgunnedSightCells in the last
+	// PlanOutgunnedSightFrames, known defenses that reach it) is over PlanOutgunnedRatioPercent of
+	// its own; the plan then waits PlanOutgunnedRetryFrames before it tries again.
+	constexpr double PlanOutgunnedCommittedCells = 10.0;
+	constexpr double PlanOutgunnedSightCells = 9.0;
+	constexpr int PlanOutgunnedSightFrames = 150;
+	constexpr int PlanOutgunnedRatioPercent = 150;
+	constexpr int PlanOutgunnedRetryFrames = 5400;
+	// A ground strike on a building needs this share of the strength known to guard it (defenses
+	// within PlanStrikeGuardCells, units seen there in the last PlanStrikeGuardFrames).
+	constexpr int PlanStrikeAdvantagePercent = 120;
+	constexpr double PlanStrikeGuardCells = 12.0;
+	constexpr int PlanStrikeGuardFrames = 900;
 	// A unit that resource cells heal, wounded below ResourceHealBelow, stops on one within
 	// ResourceHealSearchCells until it is back at ResourceHealUntil, for ResourceHealMaxFrames at
 	// most, and then not again for ResourceHealCooldownFrames.
