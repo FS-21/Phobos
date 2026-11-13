@@ -1385,6 +1385,10 @@ namespace
 	// A ground strike on a building needs this share of the strength known to guard it (defenses
 	// within PlanStrikeGuardCells, units seen there in the last PlanStrikeGuardFrames).
 	constexpr int PlanStrikeAdvantagePercent = 120;
+	// A ground strike takes one in PlanStrikeIdleShare of the idle ground army when that is more
+	// than the plan's own group size: the more numerous attack wins more often than not (user), and
+	// groups of 4 to 7 bled out before their targets in the focus batches of 2026-11-13.
+	constexpr size_t PlanStrikeIdleShare = 2;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	constexpr int PlanStrikeGuardFrames = 900;
 	// A unit that resource cells heal, wounded below ResourceHealBelow, stops on one within
