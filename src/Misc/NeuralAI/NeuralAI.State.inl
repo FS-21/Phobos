@@ -1461,6 +1461,13 @@ namespace
 	// groups of 4 to 7 bled out before their targets in the focus batches of 2026-11-13.
 	constexpr size_t PlanStrikeIdleShare = 2;
 	constexpr double PlanStrikeGuardCells = 12.0;
+	// A ground group is weighed against what it meets on its way in, not only at the target: what
+	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way
+	// from home (a point every PlanStrikeApproachStepCells). A raid dies at the edge of the enemy
+	// base: with the target's own guard alone, groups of 7 lost a third of their value 30 to 60
+	// cells short of it (251 of 387 Factory Decapitation plans in the focus batch of 2026-11-13).
+	constexpr double PlanStrikeApproachCells = 40.0;
+	constexpr double PlanStrikeApproachStepCells = 8.0;
 	constexpr int PlanStrikeGuardFrames = 900;
 	// A unit that resource cells heal, wounded below ResourceHealBelow, stops on one within
 	// ResourceHealSearchCells until it is back at ResourceHealUntil, for ResourceHealMaxFrames at
