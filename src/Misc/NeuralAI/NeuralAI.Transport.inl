@@ -513,6 +513,8 @@ namespace
 	};
 
 	NeuralRouteAnswer LastGroundRouteAnswer = NeuralRouteAnswer::Given;
+	// Places the last GroundRouteHop call searched, -1 when it searched none (a route kept, or no search).
+	int LastGroundRouteSearched = -1;
 
 	bool IsNarrowPassage(const CellStruct& center);
 
@@ -524,6 +526,7 @@ namespace
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 		LastGroundRouteAnswer = NeuralRouteAnswer::Excluded;
+		LastGroundRouteSearched = -1;
 
 		if (!pType || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly
 			|| pType->MovementZone == MovementZone::Subterrannean || pFoot->IsInAir())
@@ -830,6 +833,7 @@ namespace
 			}
 
 			GroundRoute route { NeuralMatchSerial, now, {}, {} };
+			LastGroundRouteSearched = static_cast<int>(queue.size());
 
 			if (found)
 			{
