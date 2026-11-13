@@ -488,6 +488,40 @@ namespace
 		}
 	}
 
+	// May a plan aircraft be given a strike order now? Only one that rests (Guard, Area Guard,
+	// Sleep). An aircraft back on its pad keeps the target of its last strike, and with a target
+	// the engine neither reloads it nor sends it again: it slept there until its plan ran out of
+	// time (59 Superweapon Race and 45 Tech Tree Cut plans of the focus batch of 2026-11-13 ended
+	// with every aircraft on Sleep, 100 cells and more from the target). Empty, it drops the target
+	// so it reloads, and is not ready; armed, it drops it so the new order is a new one.
+	bool ReadyPlanAircraft(AircraftClass* pAir)
+	{
+		if (!pAir || (pAir->CurrentMission != Mission::Guard && pAir->CurrentMission != Mission::Area_Guard
+			&& pAir->CurrentMission != Mission::Sleep))
+		{
+			return false;
+		}
+
+		if (pAir->Ammo == 0 && pAir->Type->Ammo >= 0)
+		{
+			if (pAir->Target)
+			{
+				pAir->SetTarget(nullptr);
+				pAir->SetDestination(nullptr, true);
+
+				if (!pAir->IsInAir())
+					pAir->EnterIdleMode(false, true);
+			}
+
+			return false;
+		}
+
+		if (pAir->Target)
+			pAir->SetTarget(nullptr);
+
+		return true;
+	}
+
 	BuildingClass* FindBuildingByID(DWORD uid)
 	{
 		for (auto const pBld : BuildingClass::Array)
@@ -2538,7 +2572,16 @@ namespace
 			{
 				auto const it = ownFoots.find(uid);
 
-				if (it != ownFoots.end() && it->second->Target != pTarget && !IsOnRepairTrip(pHouse, uid))
+				if (it == ownFoots.end() || IsOnRepairTrip(pHouse, uid))
+					continue;
+
+				// A resting aircraft is sent only when it is armed (ReadyPlanAircraft); anything else
+				// when its target is another one.
+				auto const pAir = abstract_cast<AircraftClass*>(it->second);
+				const bool resting = pAir && (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Area_Guard
+					|| pAir->CurrentMission == Mission::Sleep);
+
+				if (resting ? ReadyPlanAircraft(pAir) : it->second->Target != pTarget)
 				{
 					it->second->SetTarget(pTarget);
 					it->second->QueueMission(Mission::Attack, true);
@@ -3070,9 +3113,7 @@ namespace
 						auto const pAir = abstract_cast<AircraftClass*>(it->second);
 
 						// Re-arm and strike again while the target stands (aircraft return to pads by themselves).
-						if (pAir && pAir->Target != pTarget && (pAir->Ammo != 0 || pAir->Type->Ammo < 0)
-							&& (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Sleep
-								|| pAir->CurrentMission == Mission::Area_Guard))
+						if (ReadyPlanAircraft(pAir))
 						{
 							pAir->SetTarget(pTarget);
 							pAir->QueueMission(Mission::Attack, true);
@@ -4016,9 +4057,7 @@ namespace
 
 				if (auto const pAir = abstract_cast<AircraftClass*>(pFoot))
 				{
-					if (pAir->Target != pTarget && (pAir->Ammo != 0 || pAir->Type->Ammo < 0)
-						&& (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Sleep
-							|| pAir->CurrentMission == Mission::Area_Guard))
+					if (ReadyPlanAircraft(pAir))
 					{
 						pAir->SetTarget(pTarget);
 						pAir->QueueMission(Mission::Attack, true);
@@ -5318,9 +5357,7 @@ namespace
 						if (auto const pAir = abstract_cast<AircraftClass*>(pFoot))
 						{
 							// Re-arm and strike again while the target stands.
-							if (pAir->Target != pTarget && (pAir->Ammo != 0 || pAir->Type->Ammo < 0)
-								&& (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Sleep
-									|| pAir->CurrentMission == Mission::Area_Guard))
+							if (ReadyPlanAircraft(pAir))
 							{
 								pAir->SetTarget(pTarget);
 								pAir->QueueMission(Mission::Attack, true);
