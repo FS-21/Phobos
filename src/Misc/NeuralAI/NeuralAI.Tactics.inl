@@ -3755,6 +3755,35 @@ namespace
 	int PathBackoffSerial = -1;
 	int PathSearchesSkipped = 0;
 
+	// Places the engine's path finder does not reach. The zone map can hold a place for one land
+	// with ours while no path leads there (an outpost shut behind its own buildings), and a house
+	// that keeps it as the target of its waves sends its army at it for the rest of the match: its
+	// units set out, fail to path, fall back to Area Guard and get the order again (user's match
+	// #9553, Mount Yamantau: 1650 waves launched at one outpost in 35000 frames and 56000 path
+	// failures to its cells). The failures of a house's units that stand PathDeadGoalFarCells or
+	// more from their goal are counted per square of PathDeadGoalGridCells; PathDeadGoalFails of
+	// them within PathDeadGoalWindowFrames mark the square for PathDeadGoalFrames, and the wave
+	// target picker passes over a building in or next to a marked square while it has another.
+	constexpr int PathDeadGoalGridCells = 8;
+	constexpr double PathDeadGoalFarCells = 12.0;
+	constexpr int PathDeadGoalFails = 60;
+	constexpr int PathDeadGoalWindowFrames = 900;
+	constexpr int PathDeadGoalFrames = 2700;
+
+	struct NeuralPathDeadGoal
+	{
+		int Fails { 0 };
+		int WindowStart { 0 };
+		int DeadUntil { -1 };
+	};
+
+	std::unordered_map<int, NeuralPathDeadGoal> PathDeadGoals;
+
+	int PathDeadGoalKey(int houseIndex, const CellStruct& cell)
+	{
+		return (houseIndex << 20) | ((cell.X / PathDeadGoalGridCells) << 10) | (cell.Y / PathDeadGoalGridCells);
+	}
+
 	void ResetPathBackoffsForMatch()
 	{
 		if (PathBackoffSerial == NeuralMatchSerial)
@@ -3762,7 +3791,59 @@ namespace
 
 		PathBackoffSerial = NeuralMatchSerial;
 		PathBackoffs.clear();
+		PathDeadGoals.clear();
 		PathSearchesSkipped = 0;
+	}
+
+	void NotePathDeadGoal(int houseIndex, const CellStruct& from, const CellStruct& to)
+	{
+		if (houseIndex < 0 || from.DistanceFrom(to) < PathDeadGoalFarCells)
+			return;
+
+		const int now = Unsorted::CurrentFrame;
+		auto& goal = PathDeadGoals[PathDeadGoalKey(houseIndex, to)];
+
+		if (now - goal.WindowStart > PathDeadGoalWindowFrames)
+		{
+			goal.WindowStart = now;
+			goal.Fails = 0;
+		}
+
+		if (++goal.Fails < PathDeadGoalFails)
+			return;
+
+		if (now >= goal.DeadUntil)
+		{
+			Debug::Log("[NeuralAI] House %d path dead goal: %d searches from afar failed to the square of (%d,%d) in %d frames, frame %d.\n",
+				houseIndex, goal.Fails, to.X, to.Y, now - goal.WindowStart, now);
+		}
+
+		goal.DeadUntil = now + PathDeadGoalFrames;
+	}
+
+	// Is this cell in or next to a square the house's units do not find a path to?
+	bool IsPathDeadGoal(const HouseClass* pHouse, const CellStruct& cell)
+	{
+		if (!pHouse || PathDeadGoals.empty() || PathBackoffSerial != NeuralMatchSerial)
+			return false;
+
+		for (int dy = -PathDeadGoalGridCells; dy <= PathDeadGoalGridCells; dy += PathDeadGoalGridCells)
+		{
+			for (int dx = -PathDeadGoalGridCells; dx <= PathDeadGoalGridCells; dx += PathDeadGoalGridCells)
+			{
+				const CellStruct beside { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
+
+				if (beside.X < 0 || beside.Y < 0)
+					continue;
+
+				auto const it = PathDeadGoals.find(PathDeadGoalKey(pHouse->ArrayIndex, beside));
+
+				if (it != PathDeadGoals.end() && Unsorted::CurrentFrame < it->second.DeadUntil)
+					return true;
+			}
+		}
+
+		return false;
 	}
 }
 
@@ -3830,6 +3911,7 @@ void NeuralAI::OnPathFailure(FootClass* pFoot, const CellStruct& from, const Cel
 			backoff.Fails++;
 			backoff.LastFailFrame = now;
 			backoff.Goal = to;
+			NotePathDeadGoal(pFoot->Owner->ArrayIndex, from, to);
 
 			if (backoff.Fails >= PathBackoffFails)
 			{
