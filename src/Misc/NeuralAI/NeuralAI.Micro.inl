@@ -1587,6 +1587,53 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	TechnoClass* pHiddenOrStealthEnemy = nullptr;
 	UnitClass* pEnemySubOrShip = nullptr;
 
+	// Enemy ships on cells we see (any of them once the fight has stalled or their owner has no
+	// building left): what each ship of ours that fights at sea chooses from.
+	std::vector<UnitClass*> seenEnemyShips;
+
+	// The enemy ship one of ours goes for: the nearest of seenEnemyShips in its own sea (the lower
+	// UniqueID among equals). With mustFire, only one it can fire at now: in sight (not cloaked, or
+	// on a cell our sensors cover) and with a weapon the engine lets it use on it, range apart.
+	// One target for the whole fleet, an enemy submarine by preference, sent the submarines of
+	// every house at each other's, where they stood on Attack with no target (match #9872,
+	// Mayflower).
+	auto const nearestEnemyShipFor = [&](UnitClass* pShip, bool mustFire) -> UnitClass*
+	{
+		const MovementZone movementZone = pShip->Type->MovementZone;
+		const int ownSea = ObjectZone(pShip, movementZone);
+		UnitClass* pBest = nullptr;
+		int bestDist = INT_MAX;
+
+		for (auto const pEnemy : seenEnemyShips)
+		{
+			auto const pCell = pEnemy->GetCell();
+
+			if (!pCell || MapClass::Instance.GetMovementZoneType(pEnemy->GetMapCoords(), movementZone, false) != ownSea)
+				continue;
+
+			const int dist = pShip->DistanceFrom(pEnemy);
+
+			if (dist > bestDist || (dist == bestDist && pBest && pEnemy->UniqueID > pBest->UniqueID))
+				continue;
+
+			if (mustFire)
+			{
+				if (pEnemy->CloakState != CloakState::Uncloaked && !pCell->Sensors_InclHouse(static_cast<unsigned int>(pHouse->ArrayIndex)))
+					continue;
+
+				const FireError error = pShip->GetFireError(pEnemy, pShip->SelectWeapon(pEnemy), true);
+
+				if (error == FireError::ILLEGAL || error == FireError::CANT || error == FireError::NONE)
+					continue;
+			}
+
+			bestDist = dist;
+			pBest = pEnemy;
+		}
+
+		return pBest;
+	};
+
 	const bool combatStalledForHunt
 		= (Unsorted::CurrentFrame > 5400 && (Unsorted::CurrentFrame - NeuralAI::LastCombatFrame) >= 3600);
 
@@ -1737,6 +1784,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						detectedEnemyInfiltrators[detectedInfiltratorCount++] = pCheckU;
 				}
 
+				if (pCheckU->Type->Naval)
+					seenEnemyShips.push_back(pCheckU);
+
 				if (pCheckU->Type->Naval
 					&& (!pEnemySubOrShip || pCheckU->Type->Cloakable || pCheckU->CloakState != CloakState::Uncloaked))
 				{
@@ -1770,6 +1820,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else if (combatStalledForHunt || pCheckU->Owner->OwnedBuildings == 0)
 			{
+				if (pCheckU->Type->Naval)
+					seenEnemyShips.push_back(pCheckU);
+
 				if (pCheckU->Type->Naval
 					&& (!pEnemySubOrShip || pCheckU->Type->Cloakable || pCheckU->CloakState != CloakState::Uncloaked))
 				{
@@ -5959,13 +6012,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 			// Against a submarine only ships that hit under water (NavalTargeting) or carry sonar go.
-			else if (isUnitIdle && pEnemySubOrShip
-				&& (pType->Sensors || pType->NavalTargeting == NavalTargetingType::Underwater_Secondary
+			// Each goes for the enemy ship nearest to it.
+			else if (auto const pNearShip = isUnitIdle ? nearestEnemyShipFor(pUnit, false) : nullptr;
+				pNearShip && (pType->Sensors || pType->NavalTargeting == NavalTargetingType::Underwater_Secondary
 					|| pType->NavalTargeting == NavalTargetingType::Underwater_Only
 					|| pType->NavalTargeting == NavalTargetingType::Organic_Secondary
-					|| (!pEnemySubOrShip->Type->Cloakable && pPrimaryWpn && pPrimaryWpn->Damage > 0)))
+					|| (!pNearShip->Type->Cloakable && pPrimaryWpn && pPrimaryWpn->Damage > 0)))
 			{
-				if (auto const pSubCell = pEnemySubOrShip->GetCell())
+				if (auto const pSubCell = pNearShip->GetCell())
 				{
 					if (pType->Sensors || IsCellVisibleToAI(pHouse, pSubCell))
 					{
@@ -9677,6 +9731,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return pBestEU;
 		};
 
+		// TEMP diagnostic: what the idle ships that fight only at sea got this tick.
+		int seaHunters = 0;
+		int seaHuntersSent = 0;
+		int seaHuntersOffAttack = 0;
+
 		for (auto const pBeachU : idleCombatUnits)
 		{
 			if (!pBeachU || !pBeachU->Type || IsAmphibiousOrAirTransport(pBeachU->Type))
@@ -9720,12 +9779,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (!pLandSiegeWpn)
 				{
-					// Anti-naval / anti-sub warship (Torpedo Sub, Dolphin, Squid): hunt
-					// enemy ships or Naval Yards!
-					if (pEnemySubOrShip)
+					// A ship that fights only at sea (torpedo submarine, dolphin, squid) goes for the
+					// enemy ship nearest to it that it can fire at now. With none, one left on Attack
+					// with no target goes back on guard, where the engine gives it what comes near.
+					auto const pShipTarget = nearestEnemyShipFor(pBeachU, true);
+					seaHunters++;
+
+					if (pShipTarget && pBeachU->Target != pShipTarget)
 					{
-						pBeachU->SetTarget(pEnemySubOrShip);
+						pBeachU->SetTarget(pShipTarget);
 						pBeachU->QueueMission(Mission::Attack, true);
+						seaHuntersSent++;
+					}
+					else if (!pShipTarget && !pBeachU->Target && pBeachU->CurrentMission == Mission::Attack)
+					{
+						pBeachU->QueueMission(Mission::Guard, true);
+						seaHuntersOffAttack++;
 					}
 
 					continue;
@@ -9840,6 +9909,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 			}
+		}
+
+		if (seaHunters > 0 && IsAITickWindow(900, 15))
+		{
+			Debug::Log("[NeuralAI] House %d sea hunters DIAG frame %d: %d idle ships that fight only at sea, %d sent at an enemy ship, %d taken "
+				"off an Attack with no target, %d enemy ships seen.\n", pHouse->ArrayIndex, Unsorted::CurrentFrame, seaHunters,
+				seaHuntersSent, seaHuntersOffAttack, static_cast<int>(seenEnemyShips.size()));
 		}
 
 		for (auto const pBeachI : idleCombatInf)
