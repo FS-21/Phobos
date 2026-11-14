@@ -8194,7 +8194,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| pUnit->Type->MovementZone == MovementZone::Fly
 			|| pUnit->Type->MovementZone == MovementZone::Subterrannean || pUnit->Type->JumpJet
 			|| pUnit->Type->Teleporter);
-		ClearStaleEnterOrUnreachableCrossIslandMission(pUnit, canCrossWaterDirectly);
+
+		// The units of a strategic plan take their orders from it.
+		if (!IsPlanMember(pHouse, pUnit->UniqueID))
+			ClearStaleEnterOrUnreachableCrossIslandMission(pUnit, canCrossWaterDirectly);
 
 		if (IsImmobileUnitTypeOnLand(pUnit->Type))
 		{
@@ -8274,7 +8277,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool canInfCrossWater = (pInf->Type->MovementZone == MovementZone::Amphibious
 			|| pInf->Type->MovementZone == MovementZone::AmphibiousDestroyer
 			|| pInf->Type->MovementZone == MovementZone::Fly || pInf->Type->JumpJet || pInf->Type->Teleporter);
-		ClearStaleEnterOrUnreachableCrossIslandMission(pInf, canInfCrossWater);
+
+		// The soldiers of a strategic plan take their orders from it: this test drops the Enter
+		// order of a soldier whose transport stands on a cell of another zone and the walk of one
+		// bound for a transport afloat, and the plan (Airborne Front boarding) gives them again at
+		// every AI tick.
+		if (!IsPlanMember(pHouse, pInf->UniqueID))
+			ClearStaleEnterOrUnreachableCrossIslandMission(pInf, canInfCrossWater);
 
 		// Waiting for (or walking to) the transport that reserved it.
 		if (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter || pInf->HasAnyLink()

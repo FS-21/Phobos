@@ -1259,7 +1259,14 @@ namespace
 				}
 			}
 
-			if (pFoot->Destination != nullptr && pFoot->Target == nullptr)
+			// Walking to one of our transports is no order into the water, wherever the transport
+			// floats: its loader takes it from there.
+			auto const pDestTechno = abstract_cast<TechnoClass*>(pFoot->Destination);
+			const bool boundForTransport = pDestTechno && pDestTechno->Owner && pFoot->Owner
+				&& (pDestTechno->Owner == pFoot->Owner || pFoot->Owner->IsAlliedWith(pDestTechno->Owner))
+				&& pDestTechno->GetTechnoType()->Passengers > 0;
+
+			if (pFoot->Destination != nullptr && pFoot->Target == nullptr && !boundForTransport)
 			{
 				const CellStruct dc = CellClass::Coord2Cell(pFoot->Destination->GetCoords());
 				const int dz = MapClass::Instance.GetMovementZoneType(dc, MovementZone::Normal, false);
