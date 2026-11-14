@@ -157,6 +157,8 @@ namespace
 		int InitialStrength { 0 };
 		// The house that owns the target building (-1 none), for the lesson a beaten raid leaves.
 		int TargetOwner { -1 };
+		// Airborne Front: its transport has parked by its soldiers to take them in.
+		bool BoardingParked { false };
 		int TargetSeenFrame { 0 };
 		// Per member: a frame (Pickets: until when a sentry holds back, when it last saw something).
 		std::vector<int> MemberFrames {};
@@ -1478,6 +1480,9 @@ namespace
 	// to it and standing still this long, is given the order again.
 	constexpr int BoardingRestartFrames = 150;
 	constexpr int BoardingRestartCells = 4;
+	// A parked Airborne Front transport sets out for its soldiers again only when the nearest one
+	// is this far.
+	constexpr int BoardingParkedReachCells = 12;
 	// An air group goes for a building only when this many sorties of its full load add up to the
 	// building's health: Air Strike sent two aircraft at buildings they could not bring down in
 	// its 2700 frames, and 128 of 163 plans ran out of time (focus batch of 2026-11-14).

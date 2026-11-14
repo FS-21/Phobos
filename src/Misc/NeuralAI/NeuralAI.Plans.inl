@@ -4618,8 +4618,16 @@ namespace
 						auto const pCarrier = abstract_cast<UnitClass*>(pTransport);
 						const int soldierZone = MapClass::Instance.GetMovementZoneType(pNearest->GetMapCoords(), MovementZone::Normal, pNearest->OnBridge);
 
-						if (nearestDist > 4 * Unsorted::LeptonsPerCell)
+						// Once it has parked by its soldiers it stays: it sets out again only when the nearest
+						// one is BoardingParkedReachCells away. Leaving at 4 cells, it followed every soldier
+						// the door routine scattered off the cells next to it, and a transport that moves
+						// takes nobody in (half of the plans ended with the soldiers waiting within 4 cells
+						// of a transport on Guard that was still moving).
+						const int reachCells = plan.BoardingParked ? BoardingParkedReachCells : BoardingRestartCells;
+
+						if (nearestDist > reachCells * Unsorted::LeptonsPerCell)
 						{
+							plan.BoardingParked = false;
 							IssueMoveOrder(pTransport, pNearest->GetCell(), 2.0);
 						}
 						else if (pCarrier && MoveTransportToLoadingCell(pHouse, pCarrier, pCarrier->GetMapCoords(), soldierZone, true))
@@ -4627,11 +4635,16 @@ namespace
 							// On its way to a cell the soldiers can step onto: a flyer that hung over them
 							// (the cells below taken) lands next to them instead, the ferry loader's way.
 						}
-						else if (pTransport->CurrentMission == Mission::Move)
+						else
 						{
 							// Close enough: a moving transport takes nobody in, so it stops and waits.
-							pTransport->SetDestination(nullptr, true);
-							pTransport->ForceMission(Mission::Guard);
+							plan.BoardingParked = true;
+
+							if (pTransport->CurrentMission == Mission::Move || pTransport->Destination)
+							{
+								pTransport->SetDestination(nullptr, true);
+								pTransport->ForceMission(Mission::Guard);
+							}
 						}
 					}
 
