@@ -5360,6 +5360,12 @@ namespace
 					else
 					{
 						IssueMoveOrder(pTransport, flies ? GetSafeAirHop(pHouse, pTransport, pDrop) : pDrop, 2.0);
+
+						// TEMP trace: which part of the AI tick takes this order from a transport that
+						// does not fly (one was found at every tick with a fresh move to a cell two
+						// cells from itself, 70 from its drop cell).
+						if (!flies)
+							WatchMove(pTransport);
 					}
 				}
 				else
