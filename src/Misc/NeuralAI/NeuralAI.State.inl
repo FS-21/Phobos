@@ -1498,6 +1498,9 @@ namespace
 	// from within AirborneMusterCells of the soldier nearest to the transport. Teams of one or two
 	// did nothing once dropped, and soldiers spread over the base kept the transport waiting.
 	constexpr int AirborneTeamMin = 4;
+	// Airborne Front: a plan that ends with soldiers aboard gets this long to take them home and
+	// let them out.
+	constexpr int AirborneStandDownFrames = 1800;
 	constexpr double AirborneMusterCells = 20.0;
 	// A parked Airborne Front transport sets out for its soldiers again only when the nearest one
 	// is this far.

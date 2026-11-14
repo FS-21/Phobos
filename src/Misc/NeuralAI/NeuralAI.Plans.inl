@@ -4526,8 +4526,8 @@ namespace
 		// amphibious or burrowing transport vehicle) drops a team on a known valuable building of
 		// that base, away from where the army is aimed and on the side of it where the least is
 		// known to stand. Members[0] = transport, the rest = the team.
-		// AuxBaseline = phase: 0 boarding, 1 on the way, 2 dropped. Progress = targets taken after
-		// the first one fell before the drop.
+		// AuxBaseline = phase: 0 boarding, 1 on the way, 2 dropped, 3 standing down. Progress =
+		// targets taken after the first one fell before the drop.
 		{
 			auto& plan = planOf(NeuralPlanId::AirborneFront);
 
@@ -4721,11 +4721,11 @@ namespace
 				const std::vector<DWORD> infantry(plan.Members.empty() ? plan.Members.end() : plan.Members.begin() + 1, plan.Members.end());
 				auto const pTransportUnit = abstract_cast<UnitClass*>(pTransport);
 				const bool underground = pTransportUnit && IsUndergroundTransportType(pTransportUnit->Type);
-				constexpr const char* PhaseNames[] = { "boarding", "on the way", "dropped" };
+				constexpr const char* PhaseNames[] = { "boarding", "on the way", "dropped", "standing down" };
 				auto logEnd = [&](const char* reason)
 				{
 					Debug::Log("[NeuralAI] House %d AirborneFront: ends while %s (%s), frame %d.\n", pHouse->ArrayIndex,
-						PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], reason, Unsorted::CurrentFrame);
+						PhaseNames[std::clamp(plan.AuxBaseline, 0, 3)], reason, Unsorted::CurrentFrame);
 
 					int soldiersAlive = 0;
 
@@ -4744,7 +4744,7 @@ namespace
 						"its soldiers; left with %d aboard after %d frames, main attack on %d; dropped after %d frames more, %d cells from "
 						"the target with %d enemy value near; ends %d frames after the drop, %d soldiers on the map, target at %d, transport "
 						"at %d and %d cells from the target, %d targets taken.\n", pHouse->ArrayIndex, reason,
-						PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], pTransportType ? pTransportType->ID : "none", kind, trace.Team, trace.Raiders,
+						PhaseNames[std::clamp(plan.AuxBaseline, 0, 3)], pTransportType ? pTransportType->ID : "none", kind, trace.Team, trace.Raiders,
 						trace.Workers, trace.Target, trace.TargetHealth, trace.FrontGap, trace.EnemyStart, trace.Defenses, trace.MeetCells,
 						trace.Aboard, trace.BoardedFrame >= 0 ? trace.BoardedFrame - plan.StartFrame : -1, trace.FrontAtLeave,
 						(trace.DroppedFrame >= 0 && trace.BoardedFrame >= 0) ? trace.DroppedFrame - trace.BoardedFrame : -1, trace.DropCells,
@@ -4754,7 +4754,41 @@ namespace
 						pTransport ? static_cast<int>(pTransport->GetMapCoords().DistanceFrom(plan.TargetCell)) : -1, plan.Progress + 1);
 				};
 
-				if (!pTarget)
+				// Ends badly a plan whose team may still be aboard: the transport takes those inside
+				// home and lets them out (phase 3) before the plan lets go of it. Left to itself it
+				// kept them inside.
+				auto standDown = [&](const char* reason)
+				{
+					logEnd(reason);
+
+					if (pTransport && pTransport->Passengers.NumPassengers > 0)
+					{
+						plan.AuxBaseline = 3;
+						plan.Deadline = Unsorted::CurrentFrame + AirborneStandDownFrames;
+					}
+					else
+					{
+						finishPlan(NeuralPlanId::AirborneFront, false, true);
+					}
+				};
+
+				if (plan.AuxBaseline == 3)
+				{
+					int homeDist = INT_MAX;
+					auto const pHome = pTransport ? FindCarrierHomeCell(pHouse, pTransport, &homeDist) : nullptr;
+
+					if (!pTransport || pTransport->Passengers.NumPassengers == 0 || Unsorted::CurrentFrame >= plan.Deadline)
+					{
+						Debug::Log("[NeuralAI] House %d AirborneFront: stood down with %d still aboard, frame %d.\n", pHouse->ArrayIndex,
+							pTransport ? pTransport->Passengers.NumPassengers : -1, Unsorted::CurrentFrame);
+						finishPlan(NeuralPlanId::AirborneFront, false, true);
+					}
+					else if (pHome && homeDist > 8 * Unsorted::LeptonsPerCell)
+						IssueMoveOrder(pTransport, underground ? pHome : GetSafeAirHop(pHouse, pTransport, pHome), 4.0);
+					else if (pTransport->CurrentMission != Mission::Unload)
+						pTransport->QueueMission(Mission::Unload, true);
+				}
+				else if (!pTarget)
 				{
 					// Before the drop the team takes another building instead of going home: behind a
 					// main attack the army often brings the target down first. The next one is chosen
@@ -4782,19 +4816,22 @@ namespace
 						plan.TargetOwner = next.Target->Owner ? next.Target->Owner->ArrayIndex : -1;
 						plan.Deadline = std::max(plan.Deadline, Unsorted::CurrentFrame + AirborneRetargetFrames);
 						Debug::Log("[NeuralAI] House %d AirborneFront: target gone while %s, the team takes %s at (%d,%d), frame %d.\n",
-							pHouse->ArrayIndex, PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], next.Target->Type->ID, plan.TargetCell.X,
+							pHouse->ArrayIndex, PhaseNames[std::clamp(plan.AuxBaseline, 0, 3)], next.Target->Type->ID, plan.TargetCell.X,
 							plan.TargetCell.Y, Unsorted::CurrentFrame);
+					}
+					else if (plan.AuxBaseline >= 2)
+					{
+						logEnd("target gone");
+						finishPlan(NeuralPlanId::AirborneFront, true, true);
 					}
 					else
 					{
-						logEnd("target gone");
-						finishPlan(NeuralPlanId::AirborneFront, plan.AuxBaseline >= 2, true);
+						standDown("target gone");
 					}
 				}
 				else if (Unsorted::CurrentFrame >= plan.Deadline || !pDrop)
 				{
-					logEnd("out of time");
-					finishPlan(NeuralPlanId::AirborneFront, false, true);
+					standDown("out of time");
 				}
 				else if (plan.AuxBaseline < 2 && !pTransport)
 				{
@@ -4981,7 +5018,11 @@ namespace
 					const bool nobodyCame = parkedFrames >= 0 ? parkedFrames >= BoardingWaitFrames
 						: Unsorted::CurrentFrame - plan.StartFrame >= BoardingApproachFrames;
 
-					if (aboard > 0 && (waiting == 0 || parkedFrames >= BoardingPartialLoadFrames))
+					// It leaves with all of them, or after BoardingPartialLoadFrames with a team of the
+					// size it needs to start (one left with 2 of its 11 soldiers).
+					const int enough = std::min(AirborneTeamMin, pTransport->GetTechnoType()->Passengers);
+
+					if (aboard > 0 && (waiting == 0 || (parkedFrames >= BoardingPartialLoadFrames && aboard >= enough)))
 					{
 						// It leaves. Those still outside go back to the army: as members they were sent
 						// on foot to the target once the others had been dropped.
@@ -5006,7 +5047,7 @@ namespace
 						trace.BoardedFrame = Unsorted::CurrentFrame;
 						trace.FrontAtLeave = findFront().Cell != CellStruct::Empty ? 1 : 0;
 					}
-					else if (aboard == 0 && nobodyCame)
+					else if (nobodyCame)
 					{
 						// Not this transport again for a while: the same failure would repeat.
 						auto const pTransportCell = pTransport->GetCell();
@@ -5033,8 +5074,7 @@ namespace
 						}
 
 						macro.RaidTransportBanUntil[pTransport->UniqueID] = Unsorted::CurrentFrame + 9000;
-						logEnd("nobody boarded");
-						finishPlan(NeuralPlanId::AirborneFront, false, true);
+						standDown(aboard > 0 ? "too few boarded" : "nobody boarded");
 					}
 				}
 				else if (plan.AuxBaseline == 1)
@@ -5069,8 +5109,7 @@ namespace
 						// Badly hit far from the drop it turns back; near it, it goes on: its soldiers
 						// are worth more on the ground there than aboard on the way home (4 of 15 plans
 						// ended here with the team aboard).
-						logEnd("transport badly hit");
-						finishPlan(NeuralPlanId::AirborneFront, false, true);
+						standDown("transport badly hit");
 					}
 					else
 					{
