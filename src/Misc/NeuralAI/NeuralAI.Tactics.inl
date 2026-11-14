@@ -1405,6 +1405,60 @@ namespace
 
 		macro.StuckTracks = std::move(next);
 
+		// TEMP diagnostic: how many ships of this house are away from its yards, to tell a fleet at
+		// sea from one that never left; the ships tied to one land type are counted apart.
+		{
+			static int censusSerial = -1;
+			static int censusFrame[64] {};
+			const int houseIndex = pHouse->ArrayIndex;
+
+			if (censusSerial != NeuralMatchSerial)
+			{
+				censusSerial = NeuralMatchSerial;
+				std::fill(std::begin(censusFrame), std::end(censusFrame), 0);
+			}
+
+			if (houseIndex >= 0 && houseIndex < 64 && now - censusFrame[houseIndex] >= 900)
+			{
+				censusFrame[houseIndex] = now;
+				int ships = 0;
+				int shipsAway = 0;
+				int tied = 0;
+				int tiedAway = 0;
+
+				for (auto const pShip : UnitClass::Array)
+				{
+					if (!pShip || pShip->Owner != pHouse || !pShip->IsAlive || pShip->InLimbo || !pShip->Type || !pShip->Type->Naval)
+						continue;
+
+					const CellStruct shipCell = pShip->GetMapCoords();
+					bool away = true;
+
+					for (auto const pYard : pHouse->Buildings)
+					{
+						if (pYard && pYard->IsAlive && !pYard->InLimbo && pYard->Type->Naval
+							&& pYard->Type->Factory == AbstractType::UnitType && pYard->GetMapCoords().DistanceFrom(shipCell) <= 8.0)
+						{
+							away = false;
+							break;
+						}
+					}
+
+					const bool tiedToLand = pShip->Type->MovementRestrictedTo != LandType::None;
+					ships++;
+					shipsAway += away ? 1 : 0;
+					tied += tiedToLand ? 1 : 0;
+					tiedAway += (tiedToLand && away) ? 1 : 0;
+				}
+
+				if (ships > 0)
+				{
+					Debug::Log("[NeuralAI] Naval census DIAG house %d frame %d: %d ships, %d more than 8 cells from every yard of ours; "
+						"tied to one land type %d, %d of them away.\n", houseIndex, now, ships, shipsAway, tied, tiedAway);
+				}
+			}
+		}
+
 		// Where every ground unit of ours stands and since when (firing restarts it): IsFootHeldStill.
 		{
 			std::unordered_map<DWORD, NeuralStuckTrack> progress;

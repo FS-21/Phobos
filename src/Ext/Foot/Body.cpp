@@ -991,7 +991,7 @@ bool FootExt::CannotMove(FootClass* pThis, bool checkSpeedMultiplier)
 		if (movementRestrictedTo == LandType::None)
 			return false;
 
-		if (!pThis->OnBridge && (landType == LandType::Water || landType == LandType::Beach))
+		if (pThis->OnBridge && (landType == LandType::Water || landType == LandType::Beach))
 			landType = LandType::Road;
 
 		if (movementRestrictedTo != landType)
