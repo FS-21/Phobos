@@ -1494,6 +1494,12 @@ namespace
 	// What pauses a queue is its units going unused: that many vehicles, soldiers or ships idle at
 	// every AI tick of ArmyIdleWindowFrames.
 	enum class ArmyKind : size_t { Vehicles = 0, Infantry = 1, Ships = 2 };
+	// With this much in hand a house takes a free island field whatever the ore of its own land.
+	constexpr int IslandExpansionRichCredits = 30000;
+	// Base ceilings: ground towers an outpost or a front may add over the base cap, per ConYard,
+	// and the power surplus over the cushion a crawl stone may still be a plant.
+	constexpr int OutpostDefenseRoomPerYard = 6;
+	constexpr int CrawlPowerSurplus = 700;
 	constexpr int ArmyIdleWindowFrames = 2700;
 	constexpr std::array<int, 3> ArmyIdleBrake { 30, 40, 12 };
 	constexpr double PlanStrikeGuardCells = 12.0;

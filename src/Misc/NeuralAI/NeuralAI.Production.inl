@@ -2454,9 +2454,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// Hard anti-spam cap: never queue more Power Plants when surplus is
 				// already well above our damaged-plant safety cushion (relaxed by +350
 				// when stepping-stone crawling to a distant Ore patch)!
+				// A stone of the offensive crawl may be a plant while the surplus is within
+				// CrawlPowerSurplus of the cushion; past it the crawl takes other buildings. With 2000
+				// over the cushion a rich house picked a power plant 59 times in 86000 frames with
+				// 1150 to spare (match #9885).
 				const int maxAllowedSurplus = requiredPowerCushion
-					+ ((needsSteppingStoneCrawlToOre && pBld->BaseNormal && money >= 1400) ? 700 : 350)
-					+ ((bankOffensiveCrawl && pBld->BaseNormal) ? 2000 : 0);
+					+ (((needsSteppingStoneCrawlToOre && money >= 1400) || bankOffensiveCrawl) && pBld->BaseNormal ? CrawlPowerSurplus : 350);
 				if (!pHouse->HasLowPower() && !hasUnpoweredBuildings && realPowerSurplus >= maxAllowedSurplus)
 					continue;
 
@@ -2842,10 +2845,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 				}
 
+				// An outpost or front that needs a tower raises the cap by what it needs, up to
+				// OutpostDefenseRoomPerYard per ConYard. The cap used to be "what we have plus one" for
+				// as long as one asset counted as undefended, which is no cap at all: a house whose
+				// towers went elsewhere kept that flag and stood with 98 ground defenses (match #9885).
 				const bool needsOutpostPointDefense = !isPureAA && !isUnarmedBunker
 					&& (undefendedRemoteAssetsCount > 0 || forwardConYardNeedsDefense || frontlineDefenseDeficit > 0);
+				const int outpostDefenseRoom = std::min(OutpostDefenseRoomPerYard * std::max(1, pHouse->NumConYards),
+					3 + undefendedRemoteAssetsCount * 2 + std::max(1, frontlineDefenseDeficit) + (forwardConYardNeedsDefense ? 3 : 0));
 				const int effectiveMaxGroundDefenses = needsOutpostPointDefense
-					? std::max(maxGroundDefenses + 3, totalGroundDefenses + std::max(1, frontlineDefenseDeficit))
+					? maxGroundDefenses + outpostDefenseRoom
 					: maxGroundDefenses;
 
 				if (!isPureAA && !fillsAirDeficit && !fillsIslandHold && totalGroundDefenses >= effectiveMaxGroundDefenses)

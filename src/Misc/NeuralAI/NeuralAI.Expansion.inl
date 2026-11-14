@@ -633,8 +633,13 @@ namespace
 		// houses of the Heisenberg repro held 14000-18000 and had no credits left by frame 9000), so
 		// its expansion is planned from the start, while the starting credits pay the MCV's
 		// prerequisites, the MCV and its ride.
+		// A house with IslandExpansionRichCredits in hand takes the free island too, whatever its own
+		// ore: the money is there and the field is income and ground of its own (match #9885: a house
+		// with 60000 to 190000 credits and its ore growing from 54000 to 108000 stayed on its three
+		// landmasses for three hours).
+		const bool rich = pHouse->Available_Money() >= IslandExpansionRichCredits;
 		const bool runningOut = pIslandField
-			&& (homeOre < 25000 || (macro.IslandOreRunway >= 0 && macro.IslandOreRunway < 18000));
+			&& (homeOre < 25000 || (macro.IslandOreRunway >= 0 && macro.IslandOreRunway < 18000) || rich);
 		macro.IslandExpansionUrgent = runningOut;
 		macro.IslandExpansionField = pIslandField ? pIslandField->Cell : CellStruct::Empty;
 
@@ -643,7 +648,7 @@ namespace
 			macro.IslandExpansionLogFrame = now;
 			Debug::Log("[NeuralAI] House %d IslandExpansion: %s, home ore %d in %d fields (drain %d per 900 frames, runway %d frames), "
 				"%d landmasses held, free field across water at (%d,%d) zone %d, %d credits, frame %d.\n",
-				pHouse->ArrayIndex, runningOut ? "urgent" : "not urgent", homeOre, homeFields, macro.IslandOreDrain, macro.IslandOreRunway,
+				pHouse->ArrayIndex, runningOut ? (rich ? "urgent (rich)" : "urgent") : "not urgent", homeOre, homeFields, macro.IslandOreDrain, macro.IslandOreRunway,
 				static_cast<int>(hubZones.size()), macro.IslandExpansionField.X, macro.IslandExpansionField.Y, islandFieldZone,
 				pHouse->Available_Money(), now);
 		}

@@ -12597,7 +12597,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			// The others walk up and wait FerryWaitCells away.
+			// The others walk up and wait FerryWaitCells away. One that stands next to the parked
+			// transport goes aboard at once (TakeAboardNow), as the Airborne Front teams do: through
+			// the single radio link a load of twelve took longer than the wait for a full load, and
+			// transports sailed with one or two aboard while their reserved passengers walked up
+			// and back (match #9885: 52 of 93 trips with 2 aboard, 22 with 1; reservations expired
+			// with 77 walk orders and no Enter).
 			for (auto const pQueued : ferryQueue)
 			{
 				auto& queuedReservation = GetMacroState(pHouse).FerryReserved[pQueued->UniqueID];
@@ -12605,6 +12610,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (pQueued == pSingleActiveBoarder || pQueued->CurrentMission == Mission::Enter || pQueued->QueuedMission == Mission::Enter)
 					continue;
+
+				if (!pQueued->HasAnyLink() && TakeAboardNow(pTrans, pQueued))
+				{
+					GetMacroState(pHouse).FerryReserved.erase(pQueued->UniqueID);
+					ferryReservedFoot.erase(pQueued->UniqueID);
+					CountDecision(NeuralDecision::FerryTakenAboard, pHouse->ArrayIndex);
+					continue;
+				}
 
 				if (HoldFerryWaiter(pQueued, pTrans))
 					continue;
