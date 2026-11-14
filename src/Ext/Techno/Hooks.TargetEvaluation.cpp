@@ -593,13 +593,16 @@ public:
 
 		if (const auto pTechno = abstract_cast<TechnoClass*>(pObj))
 		{
-			const auto pExt = TechnoExt::Fetch(pTechno);
+			// A target without its extension is one the game already destroyed and still hands out
+			// (the object list of a cell can keep a dead unit): it has no shield to weigh.
+			const auto pExt = TechnoExt::TryFetch(pTechno);
 
-			if (const auto pShieldData = pExt->Shield.get())
+			if (const auto pShieldData = pExt ? pExt->Shield.get() : nullptr)
 			{
 				if (pShieldData->IsActive())
 				{
-					const auto pWeapon = pThis->GetWeapon(nWeaponIndex)->WeaponType;
+					const auto pWeaponStruct = pThis->GetWeapon(nWeaponIndex);
+					const auto pWeapon = pWeaponStruct ? pWeaponStruct->WeaponType : nullptr;
 					const auto pFoot = abstract_cast<FootClass*, true>(pTechno);
 
 					if (pWeapon && (!pShieldData->CanBePenetrated(pWeapon->Warhead) || (pFoot && pFoot->ParasiteEatingMe)))
