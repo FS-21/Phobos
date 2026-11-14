@@ -13222,15 +13222,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Aircraft with unlimited ammo (Ammo=-1) have no load to spend and are always ready.
-		const bool hasAirLoad = pAir->Ammo > 0 || (pAir->Type->Ammo < 0 && !pAir->Type->Spawned);
+		// Aircraft with unlimited ammo (Ammo=-1) have no load to spend and are always ready. One
+		// with no weapon has no load at all: a carryall was sent to attack harvesters and sat on
+		// Attack until the stall watchdog released it, again and again.
+		const bool hitsGround = AircraftHitsGround(pAir->Type);
+		const bool hasAirLoad = (hitsGround || AircraftHitsAir(pAir->Type))
+			&& (pAir->Ammo > 0 || (pAir->Type->Ammo < 0 && !pAir->Type->Spawned));
 		const bool isAirForceCraft = IsAirForceCraft(pAir->Type);
 
 		if (hasAirLoad && isAirIdle)
 		{
 			TechnoClass* pInterceptTarget = nullptr;
 
-			if (airDiveAtMindController)
+			if (airDiveAtMindController && hitsGround)
 			{
 				pAir->SetTarget(pEnemyMindController);
 
@@ -13253,7 +13257,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pAir->QueueMission(Mission::Attack, true);
 				CountDecision(NeuralDecision::AirHarass, pHouse->ArrayIndex);
 			}
-			else if (airDiveAtHarvester && SlotGate(scores[56], 200, 56))
+			else if (airDiveAtHarvester && hitsGround && SlotGate(scores[56], 200, 56))
 			{
 				pAir->SetTarget(pVisibleEnemyHarvester);
 
