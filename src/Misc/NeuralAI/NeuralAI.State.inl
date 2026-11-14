@@ -1495,13 +1495,15 @@ namespace
 	constexpr double BoardingLandingNearCells = 3.0;
 	constexpr int BoardingLandingFrames = 150;
 	// Airborne Front: the team is this many strong, or fills a smaller transport, and is drawn
-	// from within AirborneMusterCells of the soldier nearest to the transport. Teams of one or two
-	// did nothing once dropped, and soldiers spread over the base kept the transport waiting.
+	// from within AirborneMusterCells of the soldier nearest to the transport, which is within
+	// AirborneSurfaceMeetCells of that soldier unless it flies. Teams of one or two did nothing
+	// once dropped, and soldiers spread over the base kept the transport waiting.
 	constexpr int AirborneTeamMin = 4;
 	// Airborne Front: a plan that ends with soldiers aboard gets this long to take them home and
 	// let them out.
 	constexpr int AirborneStandDownFrames = 1800;
 	constexpr double AirborneMusterCells = 20.0;
+	constexpr double AirborneSurfaceMeetCells = 40.0;
 	// A parked Airborne Front transport sets out for its soldiers again only when the nearest one
 	// is this far.
 	constexpr int BoardingParkedReachCells = 12;

@@ -4721,6 +4721,12 @@ namespace
 				const std::vector<DWORD> infantry(plan.Members.empty() ? plan.Members.end() : plan.Members.begin() + 1, plan.Members.end());
 				auto const pTransportUnit = abstract_cast<UnitClass*>(pTransport);
 				const bool underground = pTransportUnit && IsUndergroundTransportType(pTransportUnit->Type);
+
+				// Only a transport that flies takes the safe air lane: its waypoints lie where the
+				// anti-air is not, reachable or not by land or sea, and an APC sent along them made 12
+				// cells in 3000 frames (30 in the 900 after its plan ended).
+				const bool flies = pTransport && (pTransport->WhatAmI() == AbstractType::Aircraft || pTransport->GetTechnoType()->JumpJet
+					|| pTransport->GetTechnoType()->MovementZone == MovementZone::Fly);
 				constexpr const char* PhaseNames[] = { "boarding", "on the way", "dropped", "standing down" };
 				auto logEnd = [&](const char* reason)
 				{
@@ -4784,7 +4790,7 @@ namespace
 						finishPlan(NeuralPlanId::AirborneFront, false, true);
 					}
 					else if (pHome && homeDist > 8 * Unsorted::LeptonsPerCell)
-						IssueMoveOrder(pTransport, underground ? pHome : GetSafeAirHop(pHouse, pTransport, pHome), 4.0);
+						IssueMoveOrder(pTransport, flies ? GetSafeAirHop(pHouse, pTransport, pHome) : pHome, 4.0);
 					else if (pTransport->CurrentMission != Mission::Unload)
 						pTransport->QueueMission(Mission::Unload, true);
 				}
@@ -5093,7 +5099,7 @@ namespace
 						Debug::Log("[NeuralAI] House %d AirborneFront: team dropped at (%d,%d) by %s, frame %d.\n", pHouse->ArrayIndex,
 							plan.StagingCell.X, plan.StagingCell.Y, pTransport->GetTechnoType()->ID, Unsorted::CurrentFrame);
 
-						if (!underground)
+						if (flies)
 							GetSafeReturnState(pHouse).Flights.push_back(pTransport->UniqueID);
 					}
 					else if (toDrop <= 3.0)
@@ -5113,8 +5119,7 @@ namespace
 					}
 					else
 					{
-						// Flyers take the safe air lane; a burrowing transport goes straight under.
-						IssueMoveOrder(pTransport, underground ? pDrop : GetSafeAirHop(pHouse, pTransport, pDrop), 2.0);
+						IssueMoveOrder(pTransport, flies ? GetSafeAirHop(pHouse, pTransport, pDrop) : pDrop, 2.0);
 					}
 				}
 				else
@@ -5155,7 +5160,7 @@ namespace
 					if (pTransport)
 					{
 						if (auto const pHome = FindCarrierHomeCell(pHouse, pTransport))
-							IssueMoveOrder(pTransport, underground ? pHome : GetSafeAirHop(pHouse, pTransport, pHome), 4.0);
+							IssueMoveOrder(pTransport, flies ? GetSafeAirHop(pHouse, pTransport, pHome) : pHome, 4.0);
 					}
 
 					// Captured (engineers) or the whole team gone.
@@ -5292,6 +5297,15 @@ namespace
 
 					if (dist < anchorDist || (dist == anchorDist && pFoot->UniqueID < pAnchor->UniqueID))
 						pAnchor = pFoot;
+				}
+
+				// A transport that does not fly meets them only from within AirborneSurfaceMeetCells
+				// (one came from 120 cells away and was lost on the way to its soldiers).
+				if (pAnchor && !pTransport->GetTechnoType()->JumpJet && pTransport->GetTechnoType()->MovementZone != MovementZone::Fly
+					&& pTransport->WhatAmI() != AbstractType::Aircraft
+					&& pTransport->GetMapCoords().DistanceFrom(pAnchor->GetMapCoords()) > AirborneSurfaceMeetCells)
+				{
+					pAnchor = nullptr;
 				}
 
 				auto farFromAnchor = [&](FootClass* pFoot)
