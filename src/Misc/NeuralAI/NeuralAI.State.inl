@@ -161,7 +161,8 @@ namespace
 		bool BoardingParked { false };
 		// Airborne Front: the frame its transport first parked by its soldiers (-1 not yet).
 		int BoardingParkedFrame { -1 };
-		// Preemptive Strike: where the enemy force was gathering when the plan started.
+		// Preemptive Strike: where the enemy force was gathering when the plan started. Airborne
+		// Front: the cell its flying transport was last sent to land on.
 		CellStruct AnchorCell { 0, 0 };
 		int TargetSeenFrame { 0 };
 		// Per member: a frame (Pickets: until when a sentry holds back, when it last saw something).
@@ -1487,6 +1488,17 @@ namespace
 	// cells next to it).
 	constexpr int BoardingMeetCells = 4;
 	constexpr int BoardingReachLeptons = 384;
+	// Airborne Front, a flying transport: the cell it lands on is looked for up to this many
+	// cells from the nearest soldier; within BoardingLandingNearCells of that cell it gets
+	// BoardingLandingFrames to touch down before it is sent to another.
+	constexpr int BoardingLandingRingCells = 7;
+	constexpr double BoardingLandingNearCells = 3.0;
+	constexpr int BoardingLandingFrames = 150;
+	// Airborne Front: the team is this many strong, or fills a smaller transport, and is drawn
+	// from within AirborneMusterCells of the soldier nearest to the transport. Teams of one or two
+	// did nothing once dropped, and soldiers spread over the base kept the transport waiting.
+	constexpr int AirborneTeamMin = 4;
+	constexpr double AirborneMusterCells = 20.0;
 	// A parked Airborne Front transport sets out for its soldiers again only when the nearest one
 	// is this far.
 	constexpr int BoardingParkedReachCells = 12;

@@ -4809,9 +4809,18 @@ namespace
 					// Asking to load over the radio, one soldier at a time through the transport's single
 					// link, left the team outside in a quarter to a half of the plans, whatever was done
 					// to the order (2026-11-13 and 14). Aboard they are in limbo, hence not found.
+					// A jumpjet transport comes down only onto a free cell at the end of a move: over a
+					// cell one of our soldiers stands on it climbs again and tries the next one, for as
+					// long as they stand under it (JumpjetLocomotionClass, descent: 5 of 8 plans ended
+					// with a SHAD or a HIND hanging over its team). It is sent to a free cell two cells
+					// from every soldier (AnchorCell; AuxPeak = when), and they keep off that cell until
+					// it is down.
 					int waiting = 0;
 					FootClass* pNearest = nullptr;
 					int nearestDist = INT_MAX;
+					const bool flyer = pTransportUnit && (pTransportUnit->Type->JumpJet || pTransportUnit->Type->MovementZone == MovementZone::Fly);
+					const bool aloft = IsFerryAloft(pTransport);
+					auto const pLanding = (flyer && plan.AnchorCell != CellStruct { 0, 0 }) ? MapClass::Instance.TryGetCellAt(plan.AnchorCell) : nullptr;
 
 					for (const DWORD uid : infantry)
 					{
@@ -4835,25 +4844,103 @@ namespace
 							pNearest = pInf;
 						}
 
-						IssueMoveOrder(pInf, pTransport, 1.0);
+						if (!aloft)
+							IssueMoveOrder(pInf, pTransport, 1.0);
+						else if (pLanding && pInf->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingMeetCells)
+							IssueMoveOrder(pInf, pLanding, 2.0);
+						else if (pInf->CurrentMission == Mission::Move)
+						{
+							pInf->SetDestination(nullptr, true);
+							pInf->ClearNavigationList();
+							pInf->ForceMission(Mission::Guard);
+						}
 					}
 
 					if (pNearest && pTransport->CurrentMission != Mission::Unload)
 					{
 						// A hover-attack flyer with a target stays in the air to shoot at it and never lands
 						// for its soldiers: while it loads it has none.
-						if (pTransport->Target && pTransport->IsInAir())
+						if (pTransport->Target)
 							pTransport->SetTarget(nullptr);
 
 						auto const pCarrier = abstract_cast<UnitClass*>(pTransport);
 						const int soldierZone = MapClass::Instance.GetMovementZoneType(pNearest->GetMapCoords(), MovementZone::Normal, pNearest->OnBridge);
+
+						// The nearest free land cell of the soldiers' zone around the nearest of them, two
+						// cells or more from each (ring search, fixed order), other than the one tried last.
+						auto pickLandingCell = [&](const CellStruct& center, const CellStruct& tried) -> CellClass*
+						{
+							for (int ring = 2; ring <= BoardingLandingRingCells; ++ring)
+							{
+								for (int dy = -ring; dy <= ring; ++dy)
+								{
+									for (int dx = -ring; dx <= ring; ++dx)
+									{
+										if (std::max(std::abs(dx), std::abs(dy)) != ring)
+											continue;
+
+										const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+										auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+										if (!pCell || c == tried || pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach
+											|| pCell->GetBuilding() || pCell->FirstObject
+											|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != soldierZone
+											|| !pCell->IsClearToMove(SpeedType::Track, false, false, -1, MovementZone::Normal, -1, false))
+										{
+											continue;
+										}
+
+										const bool clear = std::none_of(infantry.begin(), infantry.end(), [&](DWORD uid)
+											{
+												auto const pFoot = findOwnFoot(uid);
+
+												return pFoot && pFoot->GetMapCoords().DistanceFrom(c) < 2.0;
+											});
+
+										if (clear)
+											return pCell;
+									}
+								}
+							}
+
+							return nullptr;
+						};
 
 						// Once it has parked by its soldiers it stays: it sets out again only when the nearest
 						// one is BoardingParkedReachCells away. A transport that follows every soldier takes
 						// nobody in: only one at rest does.
 						const int reachCells = plan.BoardingParked ? BoardingParkedReachCells : BoardingMeetCells;
 
-						if (nearestDist > reachCells * Unsorted::LeptonsPerCell)
+						if (flyer)
+						{
+							if (!aloft && nearestDist <= BoardingParkedReachCells * Unsorted::LeptonsPerCell)
+							{
+								// Down within a short walk of its soldiers: it stays and they come.
+								plan.BoardingParked = true;
+
+								if (plan.BoardingParkedFrame < 0)
+									plan.BoardingParkedFrame = Unsorted::CurrentFrame;
+							}
+							else if (pLanding && aloft && pTransport->Destination
+								&& pTransport->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingLandingNearCells)
+							{
+								// On its way to the cell: the time it gets to come down runs from its arrival.
+								plan.AuxPeak = Unsorted::CurrentFrame;
+							}
+							else if (pLanding && Unsorted::CurrentFrame - plan.AuxPeak < BoardingLandingFrames)
+							{
+								// Just sent, or coming down on the cell.
+							}
+							else if (auto const pCell = pickLandingCell(pNearest->GetMapCoords(), plan.AnchorCell))
+							{
+								plan.AnchorCell = pCell->MapCoords;
+								plan.AuxPeak = Unsorted::CurrentFrame;
+								plan.BoardingParked = false;
+								pTransport->SetDestination(pCell, true);
+								pTransport->QueueMission(Mission::Move, true);
+							}
+						}
+						else if (nearestDist > reachCells * Unsorted::LeptonsPerCell)
 						{
 							plan.BoardingParked = false;
 							IssueMoveOrder(pTransport, pNearest->GetCell(), 2.0);
@@ -5156,6 +5243,27 @@ namespace
 					}
 				}
 
+				// The team musters around the soldier nearest to the transport.
+				FootClass* pAnchor = nullptr;
+
+				for (auto const pFoot : soldiers)
+				{
+					const int dist = pTransport->DistanceFrom(pFoot);
+					const int anchorDist = pAnchor ? pTransport->DistanceFrom(pAnchor) : INT_MAX;
+
+					if (dist < anchorDist || (dist == anchorDist && pFoot->UniqueID < pAnchor->UniqueID))
+						pAnchor = pFoot;
+				}
+
+				auto farFromAnchor = [&](FootClass* pFoot)
+				{
+					return !pAnchor || pFoot->GetMapCoords().DistanceFrom(pAnchor->GetMapCoords()) > AirborneMusterCells;
+				};
+
+				std::erase_if(specialists, farFromAnchor);
+				std::erase_if(soldiers, farFromAnchor);
+				std::erase_if(vehicles, farFromAnchor);
+
 				auto byID = [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; };
 				std::sort(specialists.begin(), specialists.end(), byID);
 				std::sort(vehicles.begin(), vehicles.end(), byID);
@@ -5270,8 +5378,9 @@ namespace
 					}
 				}
 
-				// The team: a raider, a specialist with a job there, or three soldiers.
-				const bool teamReady = wayOpen && (raiders > 0 || workersAboard > 0 || infantry.size() >= 3);
+				// The team: AirborneTeamMin strong, or as many as a smaller transport holds.
+				const bool teamReady = wayOpen && goal.Target
+					&& static_cast<int>(infantry.size()) >= std::min(AirborneTeamMin, pTransport->GetTechnoType()->Passengers);
 				const int utility = (goal.Target && teamReady) ? (320 + goal.Score / 6 + raiders * 150 + workersAboard * 120) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::AirborneFront, utility))
