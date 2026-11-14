@@ -1431,6 +1431,27 @@ namespace
 				track.AmmoSinceFrame = now;
 			}
 
+			// An aircraft sent to attack from its dock is put back to sleep by the dock one frame
+			// later, with its target (trace of 2026-11-14: mission Sleep 14 frames old at every tick,
+			// target kept, linked), so it never takes off and gets the same order every tick. With
+			// a load to drop it leaves the dock's radio link as soon as it is on Attack.
+			if (!pAir->IsInAir() && pAir->Ammo != 0)
+			{
+				if (auto const pHolder = abstract_cast<BuildingClass*>(pAir->GetNthLink(0)))
+				{
+					pAir->SendCommand(RadioCommand::NotifyUnlink, pHolder);
+
+					// TEMP diagnostic: how often it happens.
+					static int dockCutLines = 0;
+
+					if (dockCutLines++ < 40)
+					{
+						Debug::Log("[NeuralAI] House %d air dock link cut DIAG frame %d: %s %u ammo %d/%d from %s.\n", pHouse->ArrayIndex, now,
+							pAir->Type->ID, pAir->UniqueID, pAir->Ammo, pAir->Type->Ammo, pHolder->Type->ID);
+					}
+				}
+			}
+
 			// TEMP trace: what an aircraft that sits on Attack is doing, tick by tick, between its
 			// 150th and 450th frame on the ground (it is found at mission status 0, which the engine
 			// leaves on its first pass, so either the mission does not run or it starts over).
