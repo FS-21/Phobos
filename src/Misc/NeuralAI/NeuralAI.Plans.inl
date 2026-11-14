@@ -5132,7 +5132,15 @@ namespace
 
 						if (flyer)
 						{
-							if (!aloft && nearestDist <= BoardingParkedReachCells * Unsorted::LeptonsPerCell)
+							// Parked means down with no move left to make. One on the ground with a destination
+							// (a move from before the plan, or ours to its landing cell) is not: put to sleep
+							// with it, a HIND was refused as a transport on the move and the engine took the
+							// move up again; and taking the destination from a jumpjet sends it to a cell
+							// near (Stop_Moving). It finishes the move, or gets a landing cell below.
+							const bool onTheMove = pTransport->Destination || pTransport->CurrentMission == Mission::Move
+								|| pTransport->QueuedMission == Mission::Move;
+
+							if (!aloft && !onTheMove && nearestDist <= BoardingParkedReachCells * Unsorted::LeptonsPerCell)
 							{
 								// Down within a short walk of its soldiers: it stays and they come. It
 								// sleeps meanwhile: on Guard a transport with a gun takes off for whatever
