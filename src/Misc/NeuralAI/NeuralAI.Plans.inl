@@ -4526,8 +4526,8 @@ namespace
 		}
 
 		// ---------------------------------------------------------------- Plan 9: Airborne Front
-		// While our ground army attacks an enemy base, a transport (passenger aircraft, or a flying,
-		// amphibious or burrowing transport vehicle) drops a team on a known valuable building of
+		// While our ground army attacks an enemy base, a transport (passenger aircraft, or a flying
+		// or burrowing transport vehicle) drops a team on a known valuable building of
 		// that base, away from where the army is aimed and on the side of it where the least is
 		// known to stand. Members[0] = transport, the rest = the team.
 		// AuxBaseline = phase: 0 boarding, 1 on the way, 2 dropped, 3 standing down. Progress =
@@ -4642,15 +4642,8 @@ namespace
 			// land of its zone; the one with the fewest defenses and the least enemy value known within
 			// AirborneDropGuardCells, and among equals the one farthest from the main attack. The cell
 			// on the way home, taken before, was the side of the base that faces our army.
-			auto pickDropCell = [&](const CellStruct& bc, const CellStruct& frontCell, FootClass* pCarrier) -> CellClass*
+			auto pickDropCell = [&](const CellStruct& bc, const CellStruct& frontCell) -> CellClass*
 			{
-				// A transport that goes by land or sea reaches a cell only in its own zone, by its
-				// own movement rules; one that flies or burrows reaches any.
-				auto const pCarrierType = pCarrier->GetTechnoType();
-				auto const pCarrierUnit = abstract_cast<UnitClass*>(pCarrier);
-				const bool anywhere = pCarrier->WhatAmI() == AbstractType::Aircraft || pCarrierType->JumpJet
-					|| pCarrierType->MovementZone == MovementZone::Fly || (pCarrierUnit && IsUndergroundTransportType(pCarrierUnit->Type));
-				const int carrierZone = ObjectZone(pCarrier, pCarrierType->MovementZone);
 
 				constexpr int ringX[] = { 1, 1, 0, -1, -1, -1, 0, 1 };
 				constexpr int ringY[] = { 0, 1, 1, 1, 0, -1, -1, -1 };
@@ -4665,11 +4658,8 @@ namespace
 					const CellStruct point { static_cast<short>(bc.X + ringX[i] * reach), static_cast<short>(bc.Y + ringY[i] * reach) };
 					auto const pCell = landCellInZone(point, zone, 2);
 
-					if (!pCell || pCell->GetBuilding()
-						|| (!anywhere && MapClass::Instance.GetMovementZoneType(pCell->MapCoords, pCarrierType->MovementZone, false) != carrierZone))
-					{
+					if (!pCell || pCell->GetBuilding())
 						continue;
-					}
 
 					const int risk = CountKnownEnemyDefensesNear(pHouse, pCell->MapCoords, AirborneDropGuardCells, false) * 1000
 						+ seenEnemyValueNear(pCell->MapCoords, AirborneDropGuardCells, PlanStrikeGuardFrames);
@@ -4698,7 +4688,7 @@ namespace
 			// our specialists have a job inside a building type; a team already on its way (from)
 			// prefers the nearer building.
 			auto pickGoal = [&](const AirborneFrontLine& front, const std::vector<FootClass*>& team, auto const& workersFor,
-				const CellStruct& from, FootClass* pCarrier) -> AirborneGoal
+				const CellStruct& from) -> AirborneGoal
 			{
 				AirborneGoal goal {};
 				const int teamValue = feetValue(team);
@@ -4776,7 +4766,7 @@ namespace
 
 					if (score > goal.Score)
 					{
-						if (auto const pCell = pickDropCell(bc, front.Cell, pCarrier))
+						if (auto const pCell = pickDropCell(bc, front.Cell))
 							goal = AirborneGoal { pBld, pCell, score };
 					}
 				}
@@ -4902,6 +4892,9 @@ namespace
 							plan.AuxPeak != 0 ? Unsorted::CurrentFrame - plan.AuxPeak : -1, pTransport->Passengers.NumPassengers);
 					}
 
+					if (pTransport)
+						UnwatchSleeper(pTransport->UniqueID);
+
 					if (pTransport && pTransport->CurrentMission == Mission::Sleep)
 						pTransport->ForceMission(Mission::Guard);
 
@@ -4967,7 +4960,7 @@ namespace
 								team.push_back(pFoot);
 						}
 
-						next = pickGoal(front, team, [](BuildingTypeClass*) { return 0; }, pTransport->GetMapCoords(), pTransport);
+						next = pickGoal(front, team, [](BuildingTypeClass*) { return 0; }, pTransport->GetMapCoords());
 					}
 
 					if (next.Target)
@@ -5151,6 +5144,8 @@ namespace
 
 								if (pTransport->CurrentMission != Mission::Sleep)
 									pTransport->ForceMission(Mission::Sleep);
+
+								WatchSleeper(pTransport);
 							}
 							else if (inbound && pTransport->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingLandingNearCells)
 							{
@@ -5166,6 +5161,7 @@ namespace
 								plan.AnchorCell = pCell->MapCoords;
 								plan.AuxPeak = Unsorted::CurrentFrame;
 								plan.BoardingParked = false;
+								UnwatchSleeper(pTransport->UniqueID);
 
 								if (pTransport->CurrentMission == Mission::Sleep)
 									pTransport->ForceMission(Mission::Guard);
@@ -5250,6 +5246,8 @@ namespace
 
 								return true;
 							});
+
+						UnwatchSleeper(pTransport->UniqueID);
 
 						if (pTransport->CurrentMission == Mission::Sleep)
 							pTransport->ForceMission(Mission::Guard);
@@ -5370,12 +5368,6 @@ namespace
 					else
 					{
 						IssueMoveOrder(pTransport, flies ? GetSafeAirHop(pHouse, pTransport, pDrop) : pDrop, 2.0);
-
-						// TEMP trace: which part of the AI tick takes this order from a transport that
-						// does not fly (one was found at every tick with a fresh move to a cell two
-						// cells from itself, 70 from its drop cell).
-						if (!flies)
-							WatchMove(pTransport);
 					}
 				}
 				else
@@ -5476,9 +5468,11 @@ namespace
 					}
 					else if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
 					{
-						// Flying transport vehicles (HIND, transport disk), amphibious APCs and hovercraft
-						// (around by sea, on the same safe lane), or burrowing ones (they travel unseen under the
-						// defenses, so a commando team needs no lane).
+						// Flying transport vehicles (HIND, transport disk), which take the safe air lane, or
+						// burrowing ones, which travel unseen under the defenses. Not the ones that go by
+						// land or sea (hovercraft, amphibious carriers): they drive their team through
+						// whatever stands on the way, and 4 of some 33 such plans went well against 10 of
+						// 14 by air or underground, with every transport lost on the way one of theirs.
 						const bool flying = pUnit->Type && IsAmphibiousOrAirTransport(pUnit->Type)
 							&& (pUnit->Type->JumpJet || pUnit->Type->ConsideredAircraft || pUnit->Type->MovementZone == MovementZone::Fly);
 						const bool burrows = IsUndergroundTransportType(pUnit->Type);
@@ -5489,7 +5483,7 @@ namespace
 						// One that holds a radio link is already taking somebody in (an MCV on its way to an
 						// island, a unit the ferry loader sent).
 						auto const pFerryTrip = FindFerryTrip(uid);
-						isCandidate = pUnit->Type && (flying || burrows || IsAmphibiousGroundTransportType(pUnit->Type))
+						isCandidate = pUnit->Type && (flying || burrows)
 							&& pUnit->Type->Passengers >= (burrows ? 1 : 3) && isFreeForPlan(pUnit)
 							&& !(pFerryTrip && pFerryTrip->Departed) && !pUnit->GetNthLink(0);
 					}
@@ -5645,7 +5639,7 @@ namespace
 				};
 
 				const AirborneGoal goal = pTransport
-					? pickGoal(front, seatTeam(nullptr), specialistsFor, CellStruct::Empty, pTransport) : AirborneGoal {};
+					? pickGoal(front, seatTeam(nullptr), specialistsFor, CellStruct::Empty) : AirborneGoal {};
 				std::vector<FootClass*> infantry;
 				int raiders = 0;
 				int workersAboard = 0;
@@ -5665,30 +5659,8 @@ namespace
 					}
 				}
 
-				// A transport that goes by land or sea drives its team through whatever stands on its
-				// way, so the team and it must be worth what is known there, as for any raid (48 of 182
-				// plans lost their transport or had it badly hit on the way, nearly all of them
-				// hovercraft and carriers on the surface). A flyer takes the safe air lane and a
-				// burrower goes under.
-				bool wayOpen = true;
-
-				if (goal.Target)
-				{
-					auto const pCarrierType = pTransport->GetTechnoType();
-					auto const pCarrierUnit = abstract_cast<UnitClass*>(pTransport);
-					const bool surfaceTrip = !pCarrierType->JumpJet && pCarrierType->MovementZone != MovementZone::Fly
-						&& pTransport->WhatAmI() != AbstractType::Aircraft && !(pCarrierUnit && IsUndergroundTransportType(pCarrierUnit->Type));
-
-					if (surfaceTrip)
-					{
-						wayOpen = (GetCombatValueOfType(pCarrierType, false) + feetValue(infantry)) * 100
-							>= knownEnemyStrengthOnWay(pTransport->GetMapCoords(), goal.Target->GetMapCoords(), PlanStrikeGuardFrames)
-								* PlanStrikeAdvantagePercent;
-					}
-				}
-
 				// The team: AirborneTeamMin strong, or as many as a smaller transport holds.
-				const bool teamReady = wayOpen && goal.Target
+				const bool teamReady = goal.Target
 					&& static_cast<int>(infantry.size()) >= std::min(AirborneTeamMin, pTransport->GetTechnoType()->Passengers);
 				const int utility = (goal.Target && teamReady) ? (320 + goal.Score / 6 + raiders * 150 + workersAboard * 120) : -1000;
 
