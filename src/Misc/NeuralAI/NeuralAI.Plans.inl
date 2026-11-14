@@ -31,7 +31,7 @@ namespace
 		{
 			auto const pWS = pType->GetWeapon(i);
 
-			if (pWS && WeaponHitsGround(pWS->WeaponType))
+			if (pWS && LandTargetingAllows(pType, i) && WeaponHitsGround(pWS->WeaponType))
 				range = std::max(range, pWS->WeaponType->Range);
 		}
 
@@ -7585,7 +7585,7 @@ namespace
 
 					if (pWeapon->Spawner)
 						launches = true;
-					else if (WeaponHitsGround(pWeapon))
+					else if (LandTargetingAllows(pType, i) && WeaponHitsGround(pWeapon))
 						gun = std::max(gun, pWeapon->Range);
 				}
 

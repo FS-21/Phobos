@@ -9774,9 +9774,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (pBeachU->Type->Naval && !canBeachUCrossWater)
 			{
-				const bool wpn0HitsLand = pWpn0 && (pWpn0->Damage > 0 || pWpn0->Spawner)
+				const bool wpn0HitsLand = pWpn0 && (pWpn0->Damage > 0 || pWpn0->Spawner) && LandTargetingAllows(pBeachU->Type, 0)
 					&& (!pWpn0->Projectile || pWpn0->Projectile->AG || pWpn0->Spawner || isCarrierSpawner);
-				const bool wpn1HitsLand = pWpn1 && (pWpn1->Damage > 0 || pWpn1->Spawner)
+				const bool wpn1HitsLand = pWpn1 && (pWpn1->Damage > 0 || pWpn1->Spawner) && LandTargetingAllows(pBeachU->Type, 1)
 					&& (!pWpn1->Projectile || pWpn1->Projectile->AG || pWpn1->Spawner);
 				const WeaponTypeClass* pLandSiegeWpn = nullptr;
 				if (wpn0HitsLand && wpn1HitsLand)
@@ -9813,6 +9813,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				for (auto const pGun : { pWpn0, pWpn1 })
 				{
 					if (pGun && !pGun->Spawner && pGun->Damage > 0 && (!pGun->Projectile || pGun->Projectile->AG)
+						&& LandTargetingAllows(pBeachU->Type, pGun == pWpn0 ? 0 : 1)
 						&& (!pLandGun || pGun->Range > pLandGun->Range))
 					{
 						pLandGun = pGun;
@@ -9942,7 +9943,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						continue;
 
 					armed = true;
-					hitsLand = hitsLand || pWeapon->Spawner || !pWeapon->Projectile || pWeapon->Projectile->AG;
+					hitsLand = hitsLand || pWeapon->Spawner
+						|| (LandTargetingAllows(pShip->Type, i) && (!pWeapon->Projectile || pWeapon->Projectile->AG));
 				}
 
 				if (armed && !hitsLand)
