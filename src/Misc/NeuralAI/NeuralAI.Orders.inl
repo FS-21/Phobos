@@ -292,17 +292,11 @@ namespace
 			return false;
 		}
 
-		// The transport at rest: on the ground, off a Move or Unload mission, with no destination,
-		// its locomotor still or its cell kept for BoardingSettleFrames (a hovercraft on Guard can
-		// report movement for as long as it floats).
+		// The transport at rest: on the ground, off a Move or Unload mission, with no destination.
+		// What its locomotor says is not asked: a hovercraft reports movement for as long as it
+		// floats, and three LCRF stood 1500 frames with their soldiers next to them.
 		if (IsFerryAloft(pTransport) || pTransport->Destination || pTransport->CurrentMission == Mission::Move
 			|| pTransport->QueuedMission == Mission::Move || pTransport->CurrentMission == Mission::Unload)
-		{
-			return false;
-		}
-
-		if (pTransport->Locomotor->Is_Moving()
-			&& !(pTransport->Owner && IsFootHeldStill(pTransport->Owner, pTransport, BoardingSettleFrames)))
 		{
 			return false;
 		}
