@@ -1445,14 +1445,17 @@ namespace
 				const int traceWeapon = pTraceTarget ? pAir->SelectWeapon(pTraceTarget) : 0;
 				Debug::Log("[NeuralAI] House %d air trace DIAG frame %d: %s %u on the ground %d frames, status %d, queued %d, destination %s (%d,%d), "
 					"moving %d, height %d, ammo %d/%d reload %d, range %d, locked %d, flags %d %d, returning %d, dock %s mission %d power %d, "
-					"emp %d, target %s.\n", pHouse->ArrayIndex, now, pAir->Type->ID, pAir->UniqueID, now - track.SinceFrame, pAir->MissionStatus,
+					"emp %d, target %s, mission age %d, timer left %d, team %d, suspended %d.\n", pHouse->ArrayIndex, now, pAir->Type->ID,
+					pAir->UniqueID, now - track.SinceFrame, pAir->MissionStatus,
 					static_cast<int>(pAir->QueuedMission), pAir->Destination ? (pGoing ? "cell" : "object") : "none",
 					pGoing ? pGoing->MapCoords.X : -1, pGoing ? pGoing->MapCoords.Y : -1,
 					(pAir->Locomotor && pAir->Locomotor->Is_Moving()) ? 1 : 0, pAir->GetHeight(), pAir->Ammo, pAir->Type->Ammo,
 					pAir->ReloadTimer.GetTimeLeft(), pAir->GetWeaponRange(traceWeapon), pAir->IsLocked ? 1 : 0, pAir->unknown_bool_6D0 ? 1 : 0,
 					pAir->unknown_bool_6D1 ? 1 : 0, pAir->IsReturningFromAttackRun ? 1 : 0, pDock ? pDock->Type->ID : "none",
 					pDock ? static_cast<int>(pDock->CurrentMission) : -1, pDock ? (pDock->IsPowerOnline() ? 1 : 0) : -1,
-					pAir->IsUnderEMP() ? 1 : 0, pTraceTarget ? pTraceTarget->GetTechnoType()->ID : "none");
+					pAir->IsUnderEMP() ? 1 : 0, pTraceTarget ? pTraceTarget->GetTechnoType()->ID : "none",
+					now - pAir->CurrentMissionStartTime, pAir->UpdateTimer.GetTimeLeft(), pAir->Team ? 1 : 0,
+					static_cast<int>(pAir->SuspendedMission));
 			}
 
 			const bool parked = !pAir->IsInAir() && now - track.SinceFrame >= 450 && now - track.AmmoSinceFrame >= 450;
