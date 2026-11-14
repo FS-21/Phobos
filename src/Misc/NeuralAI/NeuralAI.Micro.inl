@@ -10407,10 +10407,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return MoveTransportToLoadingCell(pHouse, pTransport, from, landZone, passengersWaiting);
 	};
 
-	// A passenger a transport may reserve: it needs one to cross water and no transport gave up on it lately.
+	// A passenger a transport may reserve: it needs one to cross water, no transport gave up on it
+	// lately and no plan has it.
 	auto const canRideFerry = [&](const FootClass* pFoot) -> bool
 	{
-		return !CanFootCrossWaterDirectly(pFoot) && !IsFerryBlocked(pHouse, pFoot->UniqueID);
+		return !CanFootCrossWaterDirectly(pFoot) && !IsFerryBlocked(pHouse, pFoot->UniqueID) && !IsPlanMember(pHouse, pFoot->UniqueID);
 	};
 
 	bool deployerTransportAssigned = false;
