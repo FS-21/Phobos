@@ -12767,6 +12767,31 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		// TEMP trace: an aircraft the stall watchdog has followed on Attack for 150 frames, as this
+		// tick finds it before any new order (its attack is 0 frames old at every watchdog sample,
+		// so between two ticks it drops back to rest: in which mission, with or without its target).
+		{
+			static int airRestLines = 0;
+			auto const& stallTracks = GetMacroState(pHouse).AirStallTracks;
+
+			if (auto const itStall = stallTracks.find(pAir->UniqueID);
+				itStall != stallTracks.end() && Unsorted::CurrentFrame - itStall->second.SinceFrame >= 150 && !pAir->IsInAir()
+				&& airRestLines < 90)
+			{
+				airRestLines++;
+				auto const pRestTarget = abstract_cast<TechnoClass*>(pAir->Target);
+				auto const pRestGoing = abstract_cast<CellClass*>(pAir->Destination);
+				Debug::Log("[NeuralAI] House %d air rest DIAG frame %d: %s %u mission %d status %d age %d, queued %d, target %s, destination %s "
+					"(%d,%d), ammo %d/%d, returning %d, linked %d, timer left %d.\n", pHouse->ArrayIndex, Unsorted::CurrentFrame, pAir->Type->ID,
+					pAir->UniqueID, static_cast<int>(pAir->CurrentMission), pAir->MissionStatus,
+					Unsorted::CurrentFrame - pAir->CurrentMissionStartTime, static_cast<int>(pAir->QueuedMission),
+					pAir->Target ? (pRestTarget ? pRestTarget->GetTechnoType()->ID : "other") : "none",
+					pAir->Destination ? (pRestGoing ? "cell" : "object") : "none", pRestGoing ? pRestGoing->MapCoords.X : -1,
+					pRestGoing ? pRestGoing->MapCoords.Y : -1, pAir->Ammo, pAir->Type->Ammo, pAir->IsReturningFromAttackRun ? 1 : 0,
+					pAir->GetNthLink(0) ? 1 : 0, pAir->UpdateTimer.GetTimeLeft());
+			}
+		}
+
 		// An aircraft with no weapon keeps no target: on Guard the engine puts any aircraft that
 		// has one on Attack (AircraftClass::Mission_Guard, 0x41A822), where a carryall found no
 		// firing cell and sat between "pick a cell" and "return" for good.
