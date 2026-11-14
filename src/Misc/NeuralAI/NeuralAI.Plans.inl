@@ -2705,6 +2705,21 @@ namespace
 			}
 		}
 
+		// Can this air group destroy the building while its plan lasts? PlanAirStrikeSorties sorties
+		// of every aircraft's full load must add up to the building's health.
+		auto airGroupCanDestroy = [](const std::vector<FootClass*>& group, BuildingClass* pTarget) -> bool
+		{
+			int damage = 0;
+
+			for (auto const pFoot : group)
+			{
+				if (auto const pAir = abstract_cast<AircraftClass*>(pFoot))
+					damage += AirSortieDamageVs(pAir, pTarget);
+			}
+
+			return damage * PlanAirStrikeSorties >= pTarget->Health;
+		};
+
 		// Enemy strength a ground group meets on its straight way from `from` to a target: the known
 		// defenses and the units seen not longer ago than maxAge within PlanStrikeGuardCells of the
 		// target or of the last PlanStrikeApproachCells of the way, each counted once.
@@ -3180,16 +3195,21 @@ namespace
 						if (aaNear > std::max<int>(1, static_cast<int>(strikers.size()) / 2) || targetScore <= bestTargetScore)
 							continue;
 
-						// At least two of the strikers must damage it (some bombs do nothing to structures).
-						int able = 0;
+						// At least two of the strikers must damage it (some bombs do nothing to structures),
+						// and the wing that would fly (the first six of them by id) must be able to destroy it.
+						std::vector<FootClass*> wing;
 
 						for (auto const pStriker : strikers)
 						{
 							if (AirSortieDamageVs(static_cast<AircraftClass*>(pStriker), pBld) > 0)
-								++able;
+								wing.push_back(pStriker);
 						}
 
-						if (able >= 2)
+						const size_t able = wing.size();
+						std::sort(wing.begin(), wing.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
+						wing.resize(std::min<size_t>(wing.size(), 6));
+
+						if (able >= 2 && airGroupCanDestroy(wing, pBld))
 						{
 							bestTargetScore = targetScore;
 							pBestTarget = pBld;
@@ -4118,7 +4138,7 @@ namespace
 
 				group.resize(std::min<size_t>(group.size(), 6));
 
-				if (group.size() >= 2 && targetLessonAllows(pTarget->UniqueID, groupValueOf(group)))
+				if (group.size() >= 2 && targetLessonAllows(pTarget->UniqueID, groupValueOf(group)) && airGroupCanDestroy(group, pTarget))
 					return group;
 			}
 

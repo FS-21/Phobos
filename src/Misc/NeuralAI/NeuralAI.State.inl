@@ -1478,6 +1478,10 @@ namespace
 	// to it and standing still this long, is given the order again.
 	constexpr int BoardingRestartFrames = 150;
 	constexpr int BoardingRestartCells = 4;
+	// An air group goes for a building only when this many sorties of its full load add up to the
+	// building's health: Air Strike sent two aircraft at buildings they could not bring down in
+	// its 2700 frames, and 128 of 163 plans ran out of time (focus batch of 2026-11-14).
+	constexpr int PlanAirStrikeSorties = 2;
 	constexpr double PlanStrikeApproachCells = 40.0;
 	constexpr double PlanStrikeApproachStepCells = 8.0;
 	constexpr int PlanStrikeGuardFrames = 900;
