@@ -1178,7 +1178,14 @@ namespace
 			return true;
 		}
 
-		if (!canCrossWaterDirectly && fz >= 0
+		// A ship sails where these land tests see water and another zone: they stopped every ship on
+		// its way to a water cell at every AI tick (the wave loop passes "cannot cross water" for
+		// the Water movement zone), so fleets crawled a cell every 50 frames or never left their
+		// yard (Naval Strike: 48 of 93 plans out of time 50 to 200 cells from the target).
+		const bool sails = pFootType->Naval || pFootType->MovementZone == MovementZone::Water
+			|| pFootType->MovementZone == MovementZone::WaterBeach;
+
+		if (!canCrossWaterDirectly && !sails && fz >= 0
 			&& (pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::AttackMove
 				|| pFoot->MegaMission == Mission::AttackMove || pFoot->CurrentMission == Mission::Hunt
 				|| pFoot->CurrentMission == Mission::Attack))
