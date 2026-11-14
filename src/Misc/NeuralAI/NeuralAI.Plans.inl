@@ -5101,7 +5101,35 @@ namespace
 					teamVolley += volleyOf(pFoot, pTarget);
 
 				const bool strikeSquad = infantry.size() >= 4 && teamVolley >= 200;
-				const bool teamReady = raiders > 0 || workersAboard > 0 || strikeSquad || (mainAttack && infantry.size() >= 3);
+
+				// A transport that goes by land or sea drives its team through whatever stands on its
+				// way, so the team and it must be worth what is known there, as for any raid (48 of 182
+				// plans lost their transport or had it badly hit on the way, nearly all of them
+				// hovercraft and carriers on the surface). A flyer takes the safe air lane and a
+				// burrower goes under.
+				bool wayOpen = true;
+
+				if (pTarget && pTransport)
+				{
+					auto const pCarrierType = pTransport->GetTechnoType();
+					auto const pCarrierUnit = abstract_cast<UnitClass*>(pTransport);
+					const bool surfaceTrip = !pCarrierType->JumpJet && pCarrierType->MovementZone != MovementZone::Fly
+						&& pTransport->WhatAmI() != AbstractType::Aircraft && !(pCarrierUnit && IsUndergroundTransportType(pCarrierUnit->Type));
+
+					if (surfaceTrip)
+					{
+						int teamValue = GetCombatValueOfType(pCarrierType, false);
+
+						for (auto const pFoot : infantry)
+							teamValue += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+
+						wayOpen = teamValue * 100 >= knownEnemyStrengthOnWay(pTransport->GetMapCoords(), pTarget->GetMapCoords(),
+							PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent;
+					}
+				}
+
+				const bool teamReady = wayOpen
+					&& (raiders > 0 || workersAboard > 0 || strikeSquad || (mainAttack && infantry.size() >= 3));
 				const int utility = (pTarget && teamReady) ? (320 + bestScore / 6 + raiders * 150 + workersAboard * 120) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::AirborneFront, utility))
@@ -6957,25 +6985,38 @@ namespace
 		{
 			auto& plan = planOf(NeuralPlanId::NavalStrikeGroup);
 
-			auto isLongRangeShip = [](FootClass* pFoot) -> bool
+			// How far a ship reaches land: its longest gun that hits the ground, whatever else it
+			// launches; only a ship with no such gun counts on its aircraft or missiles (18 cells). A
+			// destroyer counted as a carrier for its anti-submarine plane was sent to a firing cell
+			// 17 cells from the building and lost its target there again and again (17 of 22
+			// destroyers at their firing cell had none, 2026-11-14).
+			auto landReachOf = [](UnitTypeClass* pType) -> int
 			{
-				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
-
-				if (!pUnit || !pUnit->Type || !pUnit->Type->Naval)
-					return false;
-
-				if (pUnit->Type->Spawns || GroundRangeOf(pUnit->Type) >= 10 * Unsorted::LeptonsPerCell)
-					return true;
+				int gun = 0;
+				bool launches = pType->Spawns != nullptr;
 
 				for (int i = 0; i < 2; ++i)
 				{
-					auto const pWS = pUnit->Type->GetWeapon(i);
+					auto const pWS = pType->GetWeapon(i);
+					auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
 
-					if (pWS && pWS->WeaponType && pWS->WeaponType->Spawner)
-						return true;
+					if (!pWeapon)
+						continue;
+
+					if (pWeapon->Spawner)
+						launches = true;
+					else if (WeaponHitsGround(pWeapon))
+						gun = std::max(gun, pWeapon->Range);
 				}
 
-				return false;
+				return gun > 0 ? gun : (launches ? 18 * Unsorted::LeptonsPerCell : 0);
+			};
+
+			auto isLongRangeShip = [&landReachOf](FootClass* pFoot) -> bool
+			{
+				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+				return pUnit && pUnit->Type && pUnit->Type->Naval && landReachOf(pUnit->Type) >= 10 * Unsorted::LeptonsPerCell;
 			};
 
 			CellClass* pNavalYard = nullptr;
@@ -7110,7 +7151,9 @@ namespace
 					if (isLongRangeShip(pUnit))
 					{
 						siegeShips.push_back(pUnit);
-						fleetRange = std::max(fleetRange, std::max(GroundRangeOf(pUnit->Type), pUnit->Type->Spawns ? 18 * Unsorted::LeptonsPerCell : 0));
+						// The firing cell is within the shortest reach of the shelling ships, so all of them fire.
+						const int reach = landReachOf(pUnit->Type);
+						fleetRange = fleetRange == 0 ? reach : std::min(fleetRange, reach);
 
 						// Minimum range of its ground weapons (e.g. a missile sub's launcher): the firing
 						// spot keeps outside the largest one of the fleet.
