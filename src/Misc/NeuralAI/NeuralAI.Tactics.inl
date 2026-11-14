@@ -1436,6 +1436,28 @@ namespace
 
 			if (parked || idleFlight)
 			{
+				// TEMP diagnostic: what the stalled aircraft was sent at. Plan aircraft end their plans
+				// on their pads, armed and with the target set (50 of 58 Air Strike plans, 2026-11-14).
+				static int airStallLines = 0;
+
+				if (airStallLines < 60)
+				{
+					airStallLines++;
+					auto const pStallTarget = abstract_cast<TechnoClass*>(pAir->Target);
+					const int weapon = pStallTarget ? pAir->SelectWeapon(pStallTarget) : -1;
+					const CellStruct targetCell = pStallTarget ? pStallTarget->GetMapCoords() : CellStruct::Empty;
+					Debug::Log("[NeuralAI] House %d air stall DIAG frame %d: %s %s, ammo %d/%d, status %d, locked %d, flag %d, docked %d, plan "
+						"member %d, target %s of house %d at (%d,%d) %d cells away, weapon %d fire error %d, cloak %d, hp %d.\n",
+						pHouse->ArrayIndex, now, pAir->Type->ID, parked ? "parked" : "flying", pAir->Ammo, pAir->Type->Ammo, pAir->MissionStatus,
+						pAir->IsLocked ? 1 : 0, pAir->IsCarryallNotLanding ? 1 : 0, pAir->GetNthLink(0) ? 1 : 0,
+						macro.PlanMembers.count(pAir->UniqueID) ? 1 : 0, pStallTarget ? pStallTarget->GetTechnoType()->ID : "none",
+						(pStallTarget && pStallTarget->Owner) ? pStallTarget->Owner->ArrayIndex : -1, targetCell.X, targetCell.Y,
+						static_cast<int>(targetCell.DistanceFrom(here)), weapon,
+						pStallTarget ? static_cast<int>(pAir->GetFireError(pStallTarget, weapon, true)) : -1,
+						pStallTarget ? static_cast<int>(pStallTarget->CloakState) : -1,
+						pStallTarget ? static_cast<int>(pStallTarget->GetHealthPercentage() * 100) : -1);
+				}
+
 				pAir->SetTarget(nullptr);
 				pAir->SetDestination(nullptr, true);
 				pAir->EnterIdleMode(false, true);

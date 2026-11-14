@@ -36,6 +36,11 @@ namespace
 	// near, one ring farther each time. True while it is on its way to such a cell.
 	bool MoveTransportToLoadingCell(HouseClass* pHouse, UnitClass* pTransport, const CellStruct& from, int landZone, bool passengersWaiting)
 	{
+		// A jumpjet does not touch down on a beach: over one it flies on to a random cell next to
+		// it and tries again (JumpjetLocomotionClass, descending state at 0x54C550, water and beach
+		// alike), so a flying transport called to soldiers on the shore hung over them for good.
+		const bool flyer = pTransport->Type->JumpJet || pTransport->Type->MovementZone == MovementZone::Fly;
+
 		auto const nearestLoadingCell = [&](int minRing, int maxRing) -> CellClass*
 		{
 			CellClass* pBest = nullptr;
@@ -51,7 +56,7 @@ namespace
 					const CellStruct c { static_cast<short>(from.X + dx), static_cast<short>(from.Y + dy) };
 					auto const pC = MapClass::Instance.TryGetCellAt(c);
 
-					if (!pC || pC->LandType == LandType::Water || pC->GetBuilding()
+					if (!pC || pC->LandType == LandType::Water || (flyer && pC->LandType == LandType::Beach) || pC->GetBuilding()
 						|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != landZone
 						|| !pC->IsClearToMove(pTransport->Type->SpeedType, false, false, -1, pTransport->Type->MovementZone, -1, false))
 					{
@@ -81,10 +86,12 @@ namespace
 		};
 
 		constexpr int doorSearchCells = 4;
+		auto const pFromCell = MapClass::Instance.TryGetCellAt(from);
+		const bool overBeach = flyer && pFromCell && pFromCell->LandType == LandType::Beach;
 
-		if (MapClass::Instance.GetMovementZoneType(from, MovementZone::Normal, false) != landZone)
+		if (overBeach || MapClass::Instance.GetMovementZoneType(from, MovementZone::Normal, false) != landZone)
 		{
-			auto const pDoorCell = nearestLoadingCell(0, doorSearchCells);
+			auto const pDoorCell = nearestLoadingCell(0, overBeach ? FerryBeachSearchCells : doorSearchCells);
 
 			if (!pDoorCell)
 				return false;
