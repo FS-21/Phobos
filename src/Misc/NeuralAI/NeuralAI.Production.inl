@@ -4416,21 +4416,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const int ownedUnitWithConv = CountOwnedUnitWithConversions(pHouse, pUnit);
 		if (!isEconomyUnit && !isMCV && !isKeyStructureDeployer && !isAmphibTransport)
 		{
-			// A bank beyond the reserve (UpdateBankGovernor) buys a bigger army: the queues would
-			// otherwise stop at the caps while the money piles up.
-			const int bankArmyRoom = GetMacroState(pHouse).BankSurplus > 0 ? 1 : 0;
-			const int maxPerCombatType = pUnit->Naval ? 10 + 2 * bankArmyRoom : 18 + 6 * bankArmyRoom;
-			if (ownedUnitWithConv >= maxPerCombatType)
-				continue;
-
-			// An offensive bank against an enemy across the water keeps a bigger siege fleet.
-			const int maxNavalFleet = (features[21] > 0)
-				? ((HasOffensiveBank(pHouse) && GetMacroState(pHouse).EnemyAcrossWater) ? 30 : 20)
-				: 12;
-			if (pUnit->Naval && ownedNavalOrAmphibCombatUnits >= maxNavalFleet)
-				continue;
-
-			if (!pUnit->Naval && ownedGroundCombatUnits >= 50 + 20 * bankArmyRoom)
+			// No ceiling by number, in all or of one type: a kind is built for as long as its units
+			// are put to work, and waits while those it has go unused (IsArmyKindUnused).
+			if (IsArmyKindUnused(pHouse, pUnit->Naval ? ArmyKind::Ships : ArmyKind::Vehicles))
 				continue;
 		}
 
@@ -5143,11 +5131,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	const bool islandInfantryQueueFull
 		= (features[21] > 0 && waitingBattalionSizeOnIslands > ownedTransportTotalCapacity + 12);
-	const int dynamicMaxInfantry = (money >= 4000 && congestedBaseInfantry < 20 && !islandInfantryQueueFull)
-		? (GetMacroState(pHouse).BankSurplus > 0 ? 100 : 85)
-		: ((money >= 2500 && congestedBaseInfantry < 18 && !islandInfantryQueueFull) ? 62 : 45);
-	const bool baseInfantrySaturated = (pHouse->OwnedInfantry - garrisonedInfantry >= dynamicMaxInfantry)
-		|| (congestedBaseInfantry >= 24);
+	// No ceiling by number: the barracks wait while soldiers go unused (IsArmyKindUnused), crowd
+	// the base, or wait on the islands for more transports than we own.
+	constexpr int IslandQueueInfantry = 45;
+	const bool baseInfantrySaturated = IsArmyKindUnused(pHouse, ArmyKind::Infantry) || congestedBaseInfantry >= 24
+		|| (islandInfantryQueueFull && pHouse->OwnedInfantry - garrisonedInfantry >= IslandQueueInfantry);
 
 	// Only pause secondary queues to ration finite credits when all income
 	// sources are lost (!hasActiveUnitIncome) or when the base is saturated
@@ -5588,13 +5576,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			Unsorted::CurrentFrame, pHouse->ArrayIndex, (pHouse->Type && pHouse->Type->ID[0]) ? pHouse->Type->ID : "AI",
 			pExt->NeuralAI_ActiveExpert, pExt->NeuralAI_Archetype, money, bldName, unitName, navalName, infName, airName);
 
-		// Bank governor state (UpdateBankGovernor): army caps, factory counts and what the queues
-		// can spend against the income and the surplus to spend (credits per 1000 frames).
+		// Bank governor state (UpdateBankGovernor): the army, what of it went unused (vehicles,
+		// soldiers, ships; IsArmyKindUnused), factory counts and what the queues can spend against
+		// the income and the surplus to spend (credits per 1000 frames).
 		auto const& govMacro = GetMacroState(pHouse);
-		Debug::Log("[NeuralAI] Bank | House #%d | Spent=%d | Gnd=%d Nav=%d Inf=%d/%d Air=%d Blds=%d | cy=%d wf=%d rax=%d air=%d "
+		Debug::Log("[NeuralAI] Bank | House #%d | Spent=%d | Gnd=%d Nav=%d Inf=%d Unused=%d/%d/%d Air=%d Blds=%d | cy=%d wf=%d rax=%d air=%d "
 				"ship=%d | governor=%d income=%d capacity=%d needed=%d surplus=%d wants=%d/%d/%d/%d yards=%d\n",
 			pHouse->ArrayIndex, pHouse->CreditsSpent, ownedGroundCombatUnits, ownedNavalOrAmphibCombatUnits, pHouse->OwnedInfantry,
-			dynamicMaxInfantry, pHouse->OwnedAircraft, pHouse->Buildings.Count, pHouse->NumConYards, pHouse->NumWarFactories,
+			govMacro.ArmyUnused[0], govMacro.ArmyUnused[1], govMacro.ArmyUnused[2],
+			pHouse->OwnedAircraft, pHouse->Buildings.Count, pHouse->NumConYards, pHouse->NumWarFactories,
 			pHouse->NumBarracks, pHouse->NumAirpads, pHouse->NumShipyards, govMacro.BankGovernorActive ? 1 : 0,
 			govMacro.BankIncomeRate, govMacro.BankSpendCapacity, govMacro.BankSpendNeeded, govMacro.BankSurplus,
 			govMacro.BankWantedFactories[0], govMacro.BankWantedFactories[1], govMacro.BankWantedFactories[2],

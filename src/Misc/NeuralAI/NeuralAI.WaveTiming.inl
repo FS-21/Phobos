@@ -362,6 +362,55 @@ namespace
 		state.Holding = false;
 	}
 
+	// Army nobody uses. The Micro reports the size of its idle pools at every AI tick; the smallest
+	// of each kind over a window of ArmyIdleWindowFrames is what stood idle the whole time, since a
+	// unit that a wave, a plan or a transport took left the pool. Production reads the last
+	// finished window (IsArmyKindUnused).
+	void NoteIdleArmy(HouseClass* pHouse, int idleVehicles, int idleInfantry, int idleShips)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		const std::array<int, 3> idle { idleVehicles, idleInfantry, idleShips };
+
+		if (macro.ArmyIdleWindowStart < 0 || now < macro.ArmyIdleWindowStart)
+		{
+			macro.ArmyIdleWindowStart = now;
+			macro.ArmyIdleFloor = idle;
+			return;
+		}
+
+		for (size_t i = 0; i < idle.size(); ++i)
+			macro.ArmyIdleFloor[i] = std::min(macro.ArmyIdleFloor[i], idle[i]);
+
+		if (now - macro.ArmyIdleWindowStart < ArmyIdleWindowFrames)
+			return;
+
+		const std::array<int, 3> before = macro.ArmyUnused;
+		macro.ArmyUnused = macro.ArmyIdleFloor;
+		macro.ArmyIdleFloor = idle;
+		macro.ArmyIdleWindowStart = now;
+
+		// TEMP diagnostic: a queue pausing or starting again for want of use.
+		for (size_t i = 0; i < idle.size(); ++i)
+		{
+			if ((before[i] >= ArmyIdleBrake[i]) != (macro.ArmyUnused[i] >= ArmyIdleBrake[i]))
+			{
+				Debug::Log("[NeuralAI] House %d army DIAG: unused vehicles %d, soldiers %d, ships %d over %d frames (pause at %d, %d, %d), frame %d.\n",
+					pHouse->ArrayIndex, macro.ArmyUnused[0], macro.ArmyUnused[1], macro.ArmyUnused[2], ArmyIdleWindowFrames,
+					ArmyIdleBrake[0], ArmyIdleBrake[1], ArmyIdleBrake[2], now);
+
+				break;
+			}
+		}
+	}
+
+	bool IsArmyKindUnused(HouseClass* pHouse, ArmyKind kind)
+	{
+		const size_t i = static_cast<size_t>(kind);
+
+		return GetMacroState(pHouse).ArmyUnused[i] >= ArmyIdleBrake[i];
+	}
+
 	// Offensive bank (HasOffensiveBank): against an enemy across the water the harassment from range
 	// (naval shelling, artillery on the economy, air strikes and corridors, rotating raids, siege
 	// batteries) gets +350 when its context is there; on shared land the main assaults get +200.

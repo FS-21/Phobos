@@ -987,6 +987,47 @@ namespace
 		}
 	}
 
+	// A unit that needs no transport over water or cliffs: amphibious, hovering, flying, burrowing,
+	// teleporting, or a ship.
+	bool CrossesWaterAlone(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		return pType->MovementZone == MovementZone::Amphibious || pType->MovementZone == MovementZone::AmphibiousDestroyer
+			|| pType->MovementZone == MovementZone::AmphibiousCrusher || pType->MovementZone == MovementZone::Fly
+			|| pType->MovementZone == MovementZone::Subterrannean || pType->MovementZone == MovementZone::Water
+			|| pType->SpeedType == SpeedType::Hover || pType->SpeedType == SpeedType::Winged || pType->JumpJet || pType->Teleporter
+			|| pType->Naval;
+	}
+
+	// Does the unit get to this cell by itself? Yes when it crosses water alone, when the cell is on
+	// its ground by a vehicle's movement rules or by its own (IsSameGroundForFoot), or when the
+	// building that stands there can be reached from its ground. A unit on a cell of no ground zone
+	// (a factory exit, a bridge ramp) is not told apart, so it counts as able.
+	bool FootReachesAlone(const FootClass* pFoot, const CellStruct& cell, const BuildingClass* pBuilding = nullptr)
+	{
+		if (!pFoot || CrossesWaterAlone(pFoot->GetTechnoType()))
+			return true;
+
+		const int footZone = ObjectZone(pFoot, MovementZone::Normal);
+
+		if (footZone <= 1)
+			return true;
+
+		int cellZone = MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, false);
+
+		if (cellZone <= 1)
+		{
+			auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+			if (pCell && (pCell->ContainsBridge() || pCell->ContainsBridgeEx()))
+				cellZone = MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, true);
+		}
+
+		return cellZone == footZone || IsSameGroundForFoot(pFoot, cell) || IsBuildingEnterableFromZone(pBuilding, footZone);
+	}
+
 	void OrderFootToAttackMove(FootClass* pFoot, AbstractClass* pDest)
 	{
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
