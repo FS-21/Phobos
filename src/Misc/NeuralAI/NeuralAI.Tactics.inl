@@ -1446,6 +1446,33 @@ namespace
 					auto const pStallTarget = abstract_cast<TechnoClass*>(pAir->Target);
 					const int weapon = pStallTarget ? pAir->SelectWeapon(pStallTarget) : -1;
 					const CellStruct targetCell = pStallTarget ? pStallTarget->GetMapCoords() : CellStruct::Empty;
+
+					// The engine takes a firing cell only where the local player has no fog
+					// (AircraftClass::Good_Fire_Location, 0x419986): how many cells around the target
+					// qualify, and who the local player is.
+					int clearCells = 0;
+					int cellsAround = 0;
+
+					for (int dy = -6; dy <= 6 && pStallTarget; ++dy)
+					{
+						for (int dx = -6; dx <= 6; ++dx)
+						{
+							auto const pAround = MapClass::Instance.TryGetCellAt(
+								CellStruct { static_cast<short>(targetCell.X + dx), static_cast<short>(targetCell.Y + dy) });
+
+							if (!pAround)
+								continue;
+
+							cellsAround++;
+
+							if ((pAround->AltFlags & AltCellFlags::NoFog) != static_cast<AltCellFlags>(0))
+								clearCells++;
+						}
+					}
+
+					Debug::Log("[NeuralAI] House %d air stall fog DIAG: %d of %d cells around the target without fog, local player %d, observer %d.\n",
+						pHouse->ArrayIndex, clearCells, cellsAround, HouseClass::CurrentPlayer ? HouseClass::CurrentPlayer->ArrayIndex : -1,
+						HouseClass::Observer ? HouseClass::Observer->ArrayIndex : -1);
 					Debug::Log("[NeuralAI] House %d air stall DIAG frame %d: %s %s, ammo %d/%d, status %d, locked %d, flag %d, docked %d, plan "
 						"member %d, target %s of house %d at (%d,%d) %d cells away, weapon %d fire error %d, cloak %d, hp %d.\n",
 						pHouse->ArrayIndex, now, pAir->Type->ID, parked ? "parked" : "flying", pAir->Ammo, pAir->Type->Ammo, pAir->MissionStatus,
