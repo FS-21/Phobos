@@ -1496,6 +1496,9 @@ namespace
 	constexpr int BoardingPartialLoadFrames = 900;
 	constexpr int BoardingWaitFrames = 1500;
 	constexpr int BoardingApproachFrames = 2700;
+	// What a wave target costs while the path finder does not reach it: more than any bonus of the
+	// target score adds up to, so it is taken only when there is no other.
+	constexpr int WavePathDeadGoalPenalty = 5000;
 	// Airborne Front, when its target falls before the drop: how far from it the next one may lie,
 	// how many times the team takes another, and the time it gets for each.
 	constexpr double AirborneRetargetCells = 30.0;

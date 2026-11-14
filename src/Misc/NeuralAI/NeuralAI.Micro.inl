@@ -7959,6 +7959,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pEnemyBld->Type->Naval && pCell->LandType != LandType::Water)
 			bldCandScore += 180;
 
+		// A place our units find no path to comes after every other target (IsPathDeadGoal).
+		if (IsPathDeadGoal(pHouse, ebc))
+			bldCandScore -= WavePathDeadGoalPenalty;
+
 		if (pEnemyBld->Type->IsBaseDefense && depthIntoEnemyBase <= 8)
 		{
 			bldCandScore += 135; // Clear outer base defenses blocking our approach!
