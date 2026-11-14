@@ -4578,6 +4578,17 @@ namespace
 							pBoarding = nullptr;
 					}
 
+					// The boarder that stands linked to the transport, next to it, and does not get in: it
+					// stopped short of the centre of its cell, so the engine never ran the step that takes
+					// it aboard (InfantryClass::Per_Cell_Process at the end of a move). Run it once it has
+					// stood there BoardingSettleFrames (7 of 33 plans with nobody aboard, 2026-11-14).
+					if (pBoarding && pBoarding->ContainsLink(pTransport) && pBoarding->LastMapCoords != pBoarding->GetMapCoords()
+						&& !pBoarding->Locomotor->Is_Moving() && pTransport->DistanceFrom(pBoarding) <= 2 * Unsorted::LeptonsPerCell
+						&& IsFootHeldStill(pHouse, pBoarding, BoardingSettleFrames))
+					{
+						pBoarding->UpdatePosition(PCPType::End);
+					}
+
 					for (const DWORD uid : infantry)
 					{
 						auto const pInf = findOwnFoot(uid);
