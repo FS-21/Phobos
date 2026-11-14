@@ -10351,6 +10351,31 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	};
 
 	// Where a transport stands to load: see MoveTransportToLoadingCell.
+	// Airborne Front boards through the same routine. Its transport is a plan member, which the
+	// ferry loader leaves alone, so nothing kept its single radio link free, the cells at its door
+	// clear or its boarder to one turn: about half of its plans ended with nobody aboard (focus
+	// batches of 2026-11-13 and 14), whatever the plan did about the order itself.
+	{
+		auto const& airborne = GetMacroState(pHouse).Plans[static_cast<size_t>(NeuralPlanId::AirborneFront)];
+
+		if (airborne.Active && airborne.AuxBaseline == 0 && !airborne.Members.empty())
+		{
+			FootClass* pCarrier = nullptr;
+
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (pUnit && pUnit->UniqueID == airborne.Members[0] && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo)
+				{
+					pCarrier = pUnit;
+					break;
+				}
+			}
+
+			if (pCarrier)
+				enforceSingleActiveBoarderOn(pCarrier, -1);
+		}
+	}
+
 	auto const moveToLoadingCell = [&](UnitClass* pTransport, const CellStruct& from, int landZone, bool passengersWaiting) -> bool
 	{
 		return MoveTransportToLoadingCell(pHouse, pTransport, from, landZone, passengersWaiting);
