@@ -206,6 +206,18 @@ namespace
 			MapClass::Instance.GetMovementZoneType(pBoarder->LastMapCoords, movementZone, false) };
 	}
 
+	// An aircraft on the ground, linked to a dock that has power, with less than its full load:
+	// its dock is reloading it.
+	bool IsAircraftReloadingOnDock(AircraftClass* pAir)
+	{
+		if (!pAir || pAir->Type->Ammo <= 0 || pAir->Ammo >= pAir->Type->Ammo || pAir->IsInAir())
+			return false;
+
+		auto const pDock = abstract_cast<BuildingClass*>(pAir->GetNthLink(0));
+
+		return pDock && pDock->IsPowerOnline();
+	}
+
 	// A transport that flies and is off the ground.
 	bool IsFerryAloft(const FootClass* pTransport)
 	{
