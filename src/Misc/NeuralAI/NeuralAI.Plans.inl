@@ -4642,8 +4642,16 @@ namespace
 			// land of its zone; the one with the fewest defenses and the least enemy value known within
 			// AirborneDropGuardCells, and among equals the one farthest from the main attack. The cell
 			// on the way home, taken before, was the side of the base that faces our army.
-			auto pickDropCell = [&](const CellStruct& bc, const CellStruct& frontCell) -> CellClass*
+			auto pickDropCell = [&](const CellStruct& bc, const CellStruct& frontCell, FootClass* pCarrier) -> CellClass*
 			{
+				// A transport that goes by land or sea reaches a cell only in its own zone, by its
+				// own movement rules; one that flies or burrows reaches any.
+				auto const pCarrierType = pCarrier->GetTechnoType();
+				auto const pCarrierUnit = abstract_cast<UnitClass*>(pCarrier);
+				const bool anywhere = pCarrier->WhatAmI() == AbstractType::Aircraft || pCarrierType->JumpJet
+					|| pCarrierType->MovementZone == MovementZone::Fly || (pCarrierUnit && IsUndergroundTransportType(pCarrierUnit->Type));
+				const int carrierZone = ObjectZone(pCarrier, pCarrierType->MovementZone);
+
 				constexpr int ringX[] = { 1, 1, 0, -1, -1, -1, 0, 1 };
 				constexpr int ringY[] = { 0, 1, 1, 1, 0, -1, -1, -1 };
 				const int zone = zoneOf(bc);
@@ -4657,8 +4665,11 @@ namespace
 					const CellStruct point { static_cast<short>(bc.X + ringX[i] * reach), static_cast<short>(bc.Y + ringY[i] * reach) };
 					auto const pCell = landCellInZone(point, zone, 2);
 
-					if (!pCell || pCell->GetBuilding())
+					if (!pCell || pCell->GetBuilding()
+						|| (!anywhere && MapClass::Instance.GetMovementZoneType(pCell->MapCoords, pCarrierType->MovementZone, false) != carrierZone))
+					{
 						continue;
+					}
 
 					const int risk = CountKnownEnemyDefensesNear(pHouse, pCell->MapCoords, AirborneDropGuardCells, false) * 1000
 						+ seenEnemyValueNear(pCell->MapCoords, AirborneDropGuardCells, PlanStrikeGuardFrames);
@@ -4681,22 +4692,72 @@ namespace
 			// and AirborneFrontReachCells at most (farther, the attack keeps nobody busy there: 14 of
 			// the 25 transports that left for such a target were shot down or badly hit on the way,
 			// 4 of 22 nearer),
-			// with one anti-air defense and one mobile anti-air unit known near it at most, and with
-			// the team worth PlanStrikeAdvantagePercent of the strength known around it, as for a raid. workersFor tells how many of
+			// with one anti-air defense and one mobile anti-air unit known near it at most, with the
+			// team worth PlanStrikeAdvantagePercent of the strength known around it, as for a raid,
+			// and within what the team can destroy or one of its specialists can enter. workersFor tells how many of
 			// our specialists have a job inside a building type; a team already on its way (from)
 			// prefers the nearer building.
-			auto pickGoal = [&](const AirborneFrontLine& front, int teamValue, auto const& workersFor, const CellStruct& from) -> AirborneGoal
+			auto pickGoal = [&](const AirborneFrontLine& front, const std::vector<FootClass*>& team, auto const& workersFor,
+				const CellStruct& from, FootClass* pCarrier) -> AirborneGoal
 			{
 				AirborneGoal goal {};
+				const int teamValue = feetValue(team);
+
+				// What the team does to a building in the time it gets on the ground: every member
+				// fires its best ground weapon against the building's armor at its rate of fire
+				// for a part of that time (1 in AirborneAssaultShare: it also walks and is shot
+				// at). One that brings the building down by itself (C4, a bomber, a unit that
+				// blows up) counts for all of it.
+				auto assaultDamage = [&team](BuildingClass* pBld) -> int
+				{
+					int damage = 0;
+
+					for (auto const pFoot : team)
+					{
+						auto const pInf = abstract_cast<InfantryClass*>(pFoot);
+						auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+						if ((pInf && (IsCommandoInfantryType(pInf->Type) || pInf->Type->Ivan || IsSuicideInfantryType(pInf->Type)))
+							|| (pUnit && IsVehicleRaiderType(pUnit->Type)))
+						{
+							return pBld->Health;
+						}
+
+						int best = 0;
+
+						for (int i = 0; i < 2; ++i)
+						{
+							auto const pSlot = pFoot->GetTechnoType()->GetWeapon(i);
+							auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+							if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead)
+								continue;
+
+							const double verses = GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBld, pBld->Type);
+							best = std::max(best, static_cast<int>(pWeapon->Damage * std::max(1, pWeapon->Burst) * verses
+								* AirborneAssaultFrames / std::max(1, pWeapon->ROF)));
+						}
+
+						damage += best / AirborneAssaultShare;
+					}
+
+					return damage;
+				};
 
 				for (auto const pBld : knownEnemyBuildingList)
 				{
 					if (!isKnownEnemyBuilding(pBld) || pBld->Owner->ArrayIndex != front.Owner)
 						continue;
 
-					const int worth = valuableBuildingWorth(pBld->Type) + workersFor(pBld->Type) * 150;
+					const int workers = workersFor(pBld->Type);
+					const int worth = valuableBuildingWorth(pBld->Type) + workers * 150;
 					const CellStruct bc = pBld->GetMapCoords();
 					const double gap = front.Cell == CellStruct::Empty ? AirborneFrontReachCells : bc.DistanceFrom(front.Cell);
+
+					// A building nobody of the team goes into is one the team can bring down: 4 of 27
+					// teams stood by theirs for 2700 frames, two of them without a scratch on it.
+					if (workers == 0 && assaultDamage(pBld) < pBld->Health)
+						continue;
 
 					if (worth <= 0 || gap < AirborneFrontGapCells || gap > AirborneFrontReachCells
 						|| CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > 1
@@ -4715,7 +4776,7 @@ namespace
 
 					if (score > goal.Score)
 					{
-						if (auto const pCell = pickDropCell(bc, front.Cell))
+						if (auto const pCell = pickDropCell(bc, front.Cell, pCarrier))
 							goal = AirborneGoal { pBld, pCell, score };
 					}
 				}
@@ -4822,6 +4883,25 @@ namespace
 				{
 					logEnd(reason);
 
+					// TEMP diagnostic: what the transport of a trip that ends badly was doing.
+					if (plan.AuxBaseline == 1 && pTransport && pDrop)
+					{
+						auto const pGoing = abstract_cast<CellClass*>(pTransport->Destination);
+						auto const pAt = pTransport->GetCell();
+						const MovementZone movementZone = pTransport->GetTechnoType()->MovementZone;
+						Debug::Log("[NeuralAI] House %d AirborneFront trip DIAG: %s at (%d,%d) %d cells from its drop cell (%d,%d), mission %d %d frames "
+							"old, queued %d, destination %s (%d,%d), target %d, height %d, moving %d, land type %d, zones by its movement own %d drop "
+							"%d, told to unload %d frames ago, %d aboard.\n", pHouse->ArrayIndex, pTransport->GetTechnoType()->ID,
+							pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y,
+							static_cast<int>(pTransport->GetMapCoords().DistanceFrom(pDrop->MapCoords)), pDrop->MapCoords.X, pDrop->MapCoords.Y,
+							static_cast<int>(pTransport->CurrentMission), Unsorted::CurrentFrame - pTransport->CurrentMissionStartTime,
+							static_cast<int>(pTransport->QueuedMission), pGoing ? "cell" : (pTransport->Destination ? "object" : "none"),
+							pGoing ? pGoing->MapCoords.X : -1, pGoing ? pGoing->MapCoords.Y : -1, pTransport->Target ? 1 : 0,
+							pTransport->GetHeight(), pTransport->Locomotor->Is_Moving() ? 1 : 0, pAt ? static_cast<int>(pAt->LandType) : -1,
+							ObjectZone(pTransport, movementZone), MapClass::Instance.GetMovementZoneType(pDrop->MapCoords, movementZone, false),
+							plan.AuxPeak != 0 ? Unsorted::CurrentFrame - plan.AuxPeak : -1, pTransport->Passengers.NumPassengers);
+					}
+
 					if (pTransport && pTransport->CurrentMission == Mission::Sleep)
 						pTransport->ForceMission(Mission::Guard);
 
@@ -4849,6 +4929,10 @@ namespace
 					}
 					else if (pHome && homeDist > 8 * Unsorted::LeptonsPerCell)
 						IssueMoveOrder(pTransport, flies ? GetSafeAirHop(pHouse, pTransport, pHome) : pHome, 4.0);
+					else if (!aloft && PutAshoreNow(pTransport) > 0)
+					{
+						// Out: the next tick finds it empty, or with those that had no cell to stand on.
+					}
 					else if (pTransport->CurrentMission != Mission::Unload)
 						pTransport->QueueMission(Mission::Unload, true);
 				}
@@ -4868,7 +4952,22 @@ namespace
 						if (front.Cell == CellStruct::Empty)
 							front.Owner = plan.TargetOwner;
 
-						next = pickGoal(front, plan.InitialValue, [](BuildingTypeClass*) { return 0; }, pTransport->GetMapCoords());
+						// The team is aboard (in limbo) by now, or still on the map while it boards.
+						std::vector<FootClass*> team;
+
+						for (auto pAboard = pTransport->Passengers.GetFirstPassenger(); pAboard;
+							pAboard = abstract_cast<FootClass*>(pAboard->NextObject))
+						{
+							team.push_back(pAboard);
+						}
+
+						for (const DWORD uid : infantry)
+						{
+							if (auto const pFoot = findOwnFoot(uid))
+								team.push_back(pFoot);
+						}
+
+						next = pickGoal(front, team, [](BuildingTypeClass*) { return 0; }, pTransport->GetMapCoords(), pTransport);
 					}
 
 					if (next.Target)
@@ -5215,11 +5314,33 @@ namespace
 					}
 					else if (toDrop <= 3.0)
 					{
-						// At the drop cell it unloads. Still loaded AirborneDropRetryFrames later (over a
-						// cell it cannot come down on: 3 of 15 plans ended that way), it is sent to
-						// unload on the nearest free cell instead. AuxPeak = when it was told to unload.
-						// Made to land first and unload after, 7 of 13 transports were shot down.
-						if (plan.AuxPeak != 0 && Unsorted::CurrentFrame - plan.AuxPeak >= AirborneDropRetryFrames)
+						// At the drop cell. On the ground its team gets out at once (PutAshoreNow): the
+						// unload mission waits for the locomotor to report no movement, which a
+						// hovercraft does not while it floats (3 of 27 plans ran out of time with one
+						// 4 to 6 cells from the target and the team aboard). In the air it is told to
+						// unload, which brings it down, and has no target meanwhile: one with a gun
+						// (HoverAttack) stays up to shoot (3 more of those 27). Still loaded
+						// AirborneDropRetryFrames later, it is sent to the nearest free cell instead.
+						// AuxPeak = when it was told to unload. Made to land first and unload after,
+						// 7 of 13 transports were shot down.
+						if (pTransport->Target)
+							pTransport->SetTarget(nullptr);
+
+						// While passengers keep getting out the wait starts again: the other cell is
+						// for a transport that lets nobody out, not for one that takes its time (it
+						// was sent away in the middle of unloading; from 8 of 15 plans well to 4 of 21).
+						const int aboardNow = pTransport->Passengers.NumPassengers;
+
+						if (plan.AuxPeak != 0 && aboardNow < plan.UnloadAboard)
+							plan.AuxPeak = Unsorted::CurrentFrame;
+
+						plan.UnloadAboard = aboardNow;
+
+						if (!aloft && PutAshoreNow(pTransport) > 0)
+						{
+							// Out: the next tick finds it empty.
+						}
+						else if (plan.AuxPeak != 0 && Unsorted::CurrentFrame - plan.AuxPeak >= AirborneDropRetryFrames)
 						{
 							plan.AuxPeak = Unsorted::CurrentFrame;
 
@@ -5249,6 +5370,12 @@ namespace
 					else
 					{
 						IssueMoveOrder(pTransport, flies ? GetSafeAirHop(pHouse, pTransport, pDrop) : pDrop, 2.0);
+
+						// TEMP trace: which part of the AI tick takes this order from a transport that
+						// does not fly (one was found at every tick with a fresh move to a cell two
+						// cells from itself, 70 from its drop cell).
+						if (!flies)
+							WatchMove(pTransport);
 					}
 				}
 				else
@@ -5518,7 +5645,7 @@ namespace
 				};
 
 				const AirborneGoal goal = pTransport
-					? pickGoal(front, feetValue(seatTeam(nullptr)), specialistsFor, CellStruct::Empty) : AirborneGoal {};
+					? pickGoal(front, seatTeam(nullptr), specialistsFor, CellStruct::Empty, pTransport) : AirborneGoal {};
 				std::vector<FootClass*> infantry;
 				int raiders = 0;
 				int workersAboard = 0;
