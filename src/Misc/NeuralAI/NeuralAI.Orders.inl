@@ -264,11 +264,92 @@ namespace
 		return GetFerryDoorZones(pTransport, pBoarder).Match();
 	}
 
+	// TEMP trace: units a plan has just sent somewhere (Naval Strike ships far from their firing
+	// cell), checked after every part of the AI tick: the part after which one is no longer on
+	// its way is the one that stopped it. The ships are found on a Guard mission 0 frames old
+	// with no destination at every tick, before their plan sends them again.
+	struct NeuralWatchedMove
+	{
+		int House { -1 };
+		CellStruct Destination { CellStruct::Empty };
+		int Frame { 0 };
+	};
+
+	std::unordered_map<DWORD, NeuralWatchedMove> WatchedMoves;
+	int WatchedMoveSerial = -1;
+	int WatchedMoveLines = 0;
+
+	void WatchMove(FootClass* pFoot)
+	{
+		if (WatchedMoveSerial != NeuralMatchSerial)
+		{
+			WatchedMoveSerial = NeuralMatchSerial;
+			WatchedMoves.clear();
+			WatchedMoveLines = 0;
+		}
+
+		auto const pGoing = abstract_cast<CellClass*>(pFoot->Destination);
+
+		if (!pGoing || !pFoot->Owner || WatchedMoveLines >= 120 || (WatchedMoves.size() >= 8 && !WatchedMoves.contains(pFoot->UniqueID)))
+			return;
+
+		WatchedMoves[pFoot->UniqueID] = NeuralWatchedMove { pFoot->Owner->ArrayIndex, pGoing->MapCoords, Unsorted::CurrentFrame };
+	}
+
+	void TraceWatchedMoves(int houseIndex, const char* part)
+	{
+		if (WatchedMoves.empty() || WatchedMoveSerial != NeuralMatchSerial)
+			return;
+
+		for (auto it = WatchedMoves.begin(); it != WatchedMoves.end();)
+		{
+			if (it->second.House != houseIndex)
+			{
+				++it;
+				continue;
+			}
+
+			UnitClass* pWatched = nullptr;
+
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (pUnit && pUnit->UniqueID == it->first && pUnit->IsAlive && !pUnit->InLimbo)
+				{
+					pWatched = pUnit;
+					break;
+				}
+			}
+
+			auto const pGoing = pWatched ? abstract_cast<CellClass*>(pWatched->Destination) : nullptr;
+
+			if (pWatched && pWatched->CurrentMission == Mission::Move && pGoing && pGoing->MapCoords == it->second.Destination)
+			{
+				++it;
+				continue;
+			}
+
+			if (pWatched && WatchedMoveLines++ < 120)
+			{
+				Debug::Log("[NeuralAI] House %d watched move DIAG frame %d: %s %u sent to (%d,%d) %d frames ago is off its way after \"%s\": "
+					"mission %d %d frames old, queued %d, destination %s (%d,%d), target %d.\n", houseIndex, Unsorted::CurrentFrame,
+					pWatched->Type->ID, pWatched->UniqueID, it->second.Destination.X, it->second.Destination.Y,
+					Unsorted::CurrentFrame - it->second.Frame, part, static_cast<int>(pWatched->CurrentMission),
+					Unsorted::CurrentFrame - pWatched->CurrentMissionStartTime, static_cast<int>(pWatched->QueuedMission),
+					pWatched->Destination ? (pGoing ? "cell" : "object") : "none", pGoing ? pGoing->MapCoords.X : -1,
+					pGoing ? pGoing->MapCoords.Y : -1, pWatched->Target ? 1 : 0);
+			}
+
+			it = WatchedMoves.erase(it);
+		}
+	}
+
 	// TEMP diagnostic: a transport the loader left parked to load (Guard or landing, no destination)
 	// that is found with other orders after a part of the AI tick: that part, or the engine between
 	// two ticks, moved it. Logged once per departure from the parking; the loader parks it again.
 	void TraceParkedFerries(int houseIndex, const char* part)
 	{
+		TraceWatchedMoves(houseIndex, part);
+
 		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
 
 		if (!pHouse)

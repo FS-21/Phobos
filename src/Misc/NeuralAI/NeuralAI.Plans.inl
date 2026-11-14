@@ -7072,6 +7072,9 @@ namespace
 							// Escorts screen around the firing position (they engage on their own).
 							const bool issued = IssueMoveOrder(pShip, pFiring, siege ? 2.0 : 4.0);
 
+							if (distToFiring >= 25.0)
+								WatchMove(pShip);
+
 							if (traceOrder)
 							{
 								navalOrderLines++;
