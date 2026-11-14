@@ -4652,6 +4652,14 @@ namespace
 								pTransport->SetDestination(nullptr, true);
 								pTransport->ForceMission(Mission::Guard);
 							}
+							else if (!IsFerryAloft(pTransport) && pTransport->Locomotor->Is_Moving()
+								&& IsFootHeldStill(pHouse, pTransport, BoardingSettleFrames))
+							{
+								// On Guard with no destination, on the same cell for BoardingSettleFrames, and its
+								// locomotor still says it moves: the door stays shut for a moving transport (23 of
+								// 81 plans with nobody aboard, 2026-11-14), so the locomotor is told to stop.
+								pTransport->Locomotor->Stop_Moving();
+							}
 						}
 					}
 
@@ -6457,6 +6465,7 @@ namespace
 						else if (plan.Arrived && Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitLureWaitFrames)
 						{
 							finishPlan(NeuralPlanId::BaitAmbush, false, true);
+							macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::BaitAmbush)] = Unsorted::CurrentFrame + BaitRetryFrames;
 						}
 					}
 				}
@@ -6483,7 +6492,10 @@ namespace
 					if (enemyAtAmbush >= 40)
 						plan.AuxBaseline = 2;
 					else if (Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitChaseWaitFrames)
+					{
 						finishPlan(NeuralPlanId::BaitAmbush, false, true); // Nobody took the bait.
+						macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::BaitAmbush)] = Unsorted::CurrentFrame + BaitRetryFrames;
+					}
 				}
 				else
 				{
