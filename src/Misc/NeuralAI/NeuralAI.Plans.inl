@@ -4508,8 +4508,57 @@ namespace
 
 				if (!pTarget)
 				{
-					logEnd("target gone");
-					finishPlan(NeuralPlanId::AirborneFront, plan.AuxBaseline >= 2, true);
+					// Before the drop the team takes the nearest building worth the trip instead of going
+					// home: behind a main attack the army often brings the target down first (5 of 17
+					// plans, 2026-11-14). The next one lies within AirborneRetargetCells of the old one,
+					// under the same limit on defenses, AirborneRetargets times at most. Progress counts
+					// them.
+					BuildingClass* pNext = nullptr;
+					CellClass* pNextDrop = nullptr;
+					double nextDist = 0.0;
+
+					if (plan.AuxBaseline < 2 && plan.Progress < AirborneRetargets && pTransport)
+					{
+						for (auto const pBld : knownEnemyBuildingList)
+						{
+							if (!isKnownEnemyBuilding(pBld) || valuableBuildingWorth(pBld->Type) <= 0)
+								continue;
+
+							const CellStruct bc = pBld->GetMapCoords();
+							const double dist = bc.DistanceFrom(plan.TargetCell);
+
+							if (dist > AirborneRetargetCells || (pNext && dist >= nextDist)
+								|| CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > 1 || CountVisibleEnemyMobileAANear(pHouse, bc, 9.0) > 1)
+							{
+								continue;
+							}
+
+							if (auto const pCell = landCellInZone(pointAlong(bc, homeCell, 4.0, 0.0), zoneOf(bc), 5))
+							{
+								pNext = pBld;
+								pNextDrop = pCell;
+								nextDist = dist;
+							}
+						}
+					}
+
+					if (pNext)
+					{
+						plan.Progress++;
+						plan.TargetID = pNext->UniqueID;
+						plan.TargetCell = pNext->GetMapCoords();
+						plan.StagingCell = pNextDrop->MapCoords;
+						plan.TargetOwner = pNext->Owner ? pNext->Owner->ArrayIndex : -1;
+						plan.Deadline = std::max(plan.Deadline, Unsorted::CurrentFrame + AirborneRetargetFrames);
+						Debug::Log("[NeuralAI] House %d AirborneFront: target gone while %s, the team takes %s at (%d,%d) %d cells from it, "
+							"frame %d.\n", pHouse->ArrayIndex, PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], pNext->Type->ID,
+							plan.TargetCell.X, plan.TargetCell.Y, static_cast<int>(nextDist), Unsorted::CurrentFrame);
+					}
+					else
+					{
+						logEnd("target gone");
+						finishPlan(NeuralPlanId::AirborneFront, plan.AuxBaseline >= 2, true);
+					}
 				}
 				else if (Unsorted::CurrentFrame >= plan.Deadline || !pDrop)
 				{
