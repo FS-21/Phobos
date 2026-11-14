@@ -1482,10 +1482,11 @@ namespace
 	// from home (a point every PlanStrikeApproachStepCells). A raid dies at the edge of the enemy
 	// base: with the target's own guard alone, groups of 7 lost a third of their value 30 to 60
 	// cells short of it (251 of 387 Factory Decapitation plans in the focus batch of 2026-11-13).
-	// Airborne Front: a soldier with the Enter order this near its transport, without a radio link
-	// to it and standing still this long, is given the order again.
-	constexpr int BoardingRestartFrames = 150;
-	constexpr int BoardingRestartCells = 4;
+	// Airborne Front: its transport comes this near the nearest of its soldiers before it parks,
+	// and a soldier this near a parked transport on each axis goes aboard (a cell and a half: the
+	// cells next to it).
+	constexpr int BoardingMeetCells = 4;
+	constexpr int BoardingReachLeptons = 384;
 	// A parked Airborne Front transport sets out for its soldiers again only when the nearest one
 	// is this far.
 	constexpr int BoardingParkedReachCells = 12;
@@ -1499,11 +1500,21 @@ namespace
 	// What a wave target costs while the path finder does not reach it: more than any bonus of the
 	// target score adds up to, so it is taken only when there is no other.
 	constexpr int WavePathDeadGoalPenalty = 5000;
-	// Airborne Front, when its target falls before the drop: how far from it the next one may lie,
-	// how many times the team takes another, and the time it gets for each.
-	constexpr double AirborneRetargetCells = 30.0;
+	// Airborne Front, when its target falls before the drop: how many times the team takes another
+	// and the time it gets for each.
 	constexpr int AirborneRetargets = 2;
 	constexpr int AirborneRetargetFrames = 1800;
+	// Airborne Front: the time the trip gets from the moment the transport leaves and the time the
+	// team gets on the ground; a transport badly hit goes on when it is this near its drop cell;
+	// the target stands at least AirborneFrontGapCells from where the main attack is aimed; the
+	// drop cell is looked for AirborneDropRingCells from the target, and what is known within
+	// AirborneDropGuardCells of each candidate decides between them.
+	constexpr int AirborneTripFrames = 2700;
+	constexpr int AirborneAssaultFrames = 2700;
+	constexpr double AirbornePressOnCells = 15.0;
+	constexpr double AirborneFrontGapCells = 10.0;
+	constexpr double AirborneDropRingCells = 5.0;
+	constexpr double AirborneDropGuardCells = 7.0;
 	// A parked transport on the same cell this long whose locomotor still reports movement is
 	// told to stop.
 	constexpr int BoardingSettleFrames = 90;

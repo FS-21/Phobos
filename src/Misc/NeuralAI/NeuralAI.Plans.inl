@@ -1998,19 +1998,22 @@ namespace
 		// Plans whose learned gate opened this tick and that have not started yet (telemetry NoGroup).
 		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> gateOpenedUnstarted {};
 
+		// Shelved plans start only in a training focus match that asks for them: Airborne Front
+		// went well in none of 34 plans behind a main attack and is being redesigned (user,
+		// 2026-11-14), so ordinary matches do not spend units or learning on it meanwhile.
+		auto planShelved = [](NeuralPlanId id) -> bool
+		{
+			constexpr NeuralPlanId shelved[] = { NeuralPlanId::AirborneFront };
+
+			return std::find(std::begin(shelved), std::end(shelved), id) != std::end(shelved)
+				&& !TrainingFocus().Plans[static_cast<size_t>(id)];
+		};
+
 		auto shouldTryStart = [&](NeuralPlanId id, int contextUtility) -> bool
 		{
 			const size_t i = static_cast<size_t>(id);
 
-			if (macro.Plans[i].Active || Unsorted::CurrentFrame < macro.PlanNextAttemptFrame[i])
-				return false;
-
-			// Shelved plans start only in a training focus match that asks for them: Airborne Front
-			// went well in none of 34 plans behind a main attack and is being redesigned (user,
-			// 2026-11-14), so ordinary matches do not spend units or learning on it meanwhile.
-			constexpr NeuralPlanId shelved[] = { NeuralPlanId::AirborneFront };
-
-			if (std::find(std::begin(shelved), std::end(shelved), id) != std::end(shelved) && !TrainingFocus().Plans[i])
+			if (macro.Plans[i].Active || Unsorted::CurrentFrame < macro.PlanNextAttemptFrame[i] || planShelved(id))
 				return false;
 
 			// 300..600 frames between attempts, varying per match and per plan (point 30).
@@ -4519,10 +4522,12 @@ namespace
 		}
 
 		// ---------------------------------------------------------------- Plan 9: Airborne Front
-		// While our ground army is attacking, an air transport (passenger aircraft or flying
-		// transport vehicle) drops infantry on a known valuable building away from the fighting,
-		// flying the safe air lane. Members[0] = transport, the rest = infantry.
-		// AuxBaseline = phase: 0 boarding, 1 flying, 2 dropped.
+		// While our ground army attacks an enemy base, a transport (passenger aircraft, or a flying,
+		// amphibious or burrowing transport vehicle) drops a team on a known valuable building of
+		// that base, away from where the army is aimed and on the side of it where the least is
+		// known to stand. Members[0] = transport, the rest = the team.
+		// AuxBaseline = phase: 0 boarding, 1 on the way, 2 dropped. Progress = targets taken after
+		// the first one fell before the drop.
 		{
 			auto& plan = planOf(NeuralPlanId::AirborneFront);
 
@@ -4538,6 +4543,8 @@ namespace
 				int EnemyStart { 0 };
 				int Defenses { 0 };
 				int MeetCells { 0 };
+				int FrontGap { -1 };
+				int FrontAtLeave { -1 };
 				int Aboard { -1 };
 				int BoardedFrame { -1 };
 				int DroppedFrame { -1 };
@@ -4547,6 +4554,164 @@ namespace
 
 			static std::array<AirborneTrace, 32> airborneTraces {};
 			auto& trace = airborneTraces[static_cast<size_t>(houseIdx) & 31];
+
+			struct AirborneFrontLine
+			{
+				CellStruct Cell { CellStruct::Empty };
+				int Owner { -1 };
+			};
+
+			struct AirborneGoal
+			{
+				BuildingClass* Target { nullptr };
+				CellClass* Drop { nullptr };
+				int Score { INT_MIN };
+			};
+
+			// Where the main attack is aimed and at whom: the target of the attack plan under way, or
+			// the middle of our armed ground units engaged near the known enemy base; the owner is
+			// the plan's, or that of the known building nearest to that point. No cell: no main attack.
+			auto findFront = [&]() -> AirborneFrontLine
+			{
+				AirborneFrontLine front {};
+				constexpr NeuralPlanId mainAttacks[] = { NeuralPlanId::TimingRush, NeuralPlanId::Pincer, NeuralPlanId::BaseTrade,
+					NeuralPlanId::AllyJointAttack, NeuralPlanId::ThreeFrontAssault, NeuralPlanId::FactoryDecapitation };
+
+				for (const NeuralPlanId id : mainAttacks)
+				{
+					auto const& attack = planOf(id);
+
+					if (attack.Active && attack.TargetCell != CellStruct::Empty)
+					{
+						front.Cell = attack.TargetCell;
+						front.Owner = attack.TargetOwner;
+						break;
+					}
+				}
+
+				if (front.Cell == CellStruct::Empty && knownEnemyHomeBuildings > 0)
+				{
+					int engaged = 0;
+					int sumX = 0;
+					int sumY = 0;
+
+					for (auto const& [uid, pFoot] : ownFoots)
+					{
+						if (isArmedGroundFoot(pFoot) && (pFoot->Target != nullptr || pFoot->MegaMission == Mission::AttackMove)
+							&& pFoot->GetMapCoords().DistanceFrom(knownEnemyCentroid) <= 18.0)
+						{
+							engaged++;
+							sumX += pFoot->GetMapCoords().X;
+							sumY += pFoot->GetMapCoords().Y;
+						}
+					}
+
+					if (engaged >= 6)
+						front.Cell = CellStruct { static_cast<short>(sumX / engaged), static_cast<short>(sumY / engaged) };
+				}
+
+				if (front.Cell != CellStruct::Empty && front.Owner < 0)
+				{
+					double nearest = 0.0;
+
+					for (auto const pBld : knownEnemyBuildingList)
+					{
+						if (!isKnownEnemyBuilding(pBld))
+							continue;
+
+						const double dist = pBld->GetMapCoords().DistanceFrom(front.Cell);
+
+						if (front.Owner < 0 || dist < nearest)
+						{
+							front.Owner = pBld->Owner->ArrayIndex;
+							nearest = dist;
+						}
+					}
+				}
+
+				return front;
+			};
+
+			// The drop cell: one of eight around the target, AirborneDropRingCells from it, on free
+			// land of its zone; the one with the fewest defenses and the least enemy value known within
+			// AirborneDropGuardCells, and among equals the one farthest from the main attack. The cell
+			// on the way home, taken before, was the side of the base that faces our army.
+			auto pickDropCell = [&](const CellStruct& bc, const CellStruct& frontCell) -> CellClass*
+			{
+				constexpr int ringX[] = { 1, 1, 0, -1, -1, -1, 0, 1 };
+				constexpr int ringY[] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+				const int zone = zoneOf(bc);
+				CellClass* pBest = nullptr;
+				int bestRisk = 0;
+				double bestGap = 0.0;
+
+				for (size_t i = 0; i < std::size(ringX); ++i)
+				{
+					const double reach = (ringX[i] != 0 && ringY[i] != 0) ? AirborneDropRingCells * 0.7 : AirborneDropRingCells;
+					const CellStruct point { static_cast<short>(bc.X + ringX[i] * reach), static_cast<short>(bc.Y + ringY[i] * reach) };
+					auto const pCell = landCellInZone(point, zone, 2);
+
+					if (!pCell || pCell->GetBuilding())
+						continue;
+
+					const int risk = CountKnownEnemyDefensesNear(pHouse, pCell->MapCoords, AirborneDropGuardCells, false) * 1000
+						+ seenEnemyValueNear(pCell->MapCoords, AirborneDropGuardCells, PlanStrikeGuardFrames);
+					const double gap = frontCell == CellStruct::Empty ? 0.0 : pCell->MapCoords.DistanceFrom(frontCell);
+
+					if (!pBest || risk < bestRisk || (risk == bestRisk && gap > bestGap))
+					{
+						pBest = pCell;
+						bestRisk = risk;
+						bestGap = gap;
+					}
+				}
+
+				return pBest;
+			};
+
+			// The building for a drop: known, worth the trip, of the house the main attack is on (a
+			// third house has its whole garrison at home), at least AirborneFrontGapCells from where
+			// that attack is aimed (nearer, the army brought it down before the drop: 9 of 34 plans),
+			// with one anti-air defense and one mobile anti-air unit known near it at most, and with
+			// no more strength known around it than the team is worth. workersFor tells how many of
+			// our specialists have a job inside a building type; a team already on its way (from)
+			// prefers the nearer building.
+			auto pickGoal = [&](const AirborneFrontLine& front, int teamValue, auto const& workersFor, const CellStruct& from) -> AirborneGoal
+			{
+				AirborneGoal goal {};
+
+				for (auto const pBld : knownEnemyBuildingList)
+				{
+					if (!isKnownEnemyBuilding(pBld) || pBld->Owner->ArrayIndex != front.Owner)
+						continue;
+
+					const int worth = valuableBuildingWorth(pBld->Type) + workersFor(pBld->Type) * 150;
+					const CellStruct bc = pBld->GetMapCoords();
+					const double gap = front.Cell == CellStruct::Empty ? 40.0 : bc.DistanceFrom(front.Cell);
+
+					if (worth <= 0 || gap < AirborneFrontGapCells || CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > 1
+						|| CountVisibleEnemyMobileAANear(pHouse, bc, 9.0) > 1)
+					{
+						continue;
+					}
+
+					const int guard = knownEnemyStrengthOnWay(CellStruct::Empty, bc, PlanStrikeGuardFrames);
+
+					if (guard > teamValue)
+						continue;
+
+					const int score = worth + static_cast<int>(std::min(gap, 40.0)) * 4 - guard / 20
+						- (from == CellStruct::Empty ? 0 : static_cast<int>(bc.DistanceFrom(from)) * 3);
+
+					if (score > goal.Score)
+					{
+						if (auto const pCell = pickDropCell(bc, front.Cell))
+							goal = AirborneGoal { pBld, pCell, score };
+					}
+				}
+
+				return goal;
+			};
 
 			if (plan.Active)
 			{
@@ -4575,65 +4740,50 @@ namespace
 						: ((pTransportType->JumpJet || pTransportType->MovementZone == MovementZone::Fly
 							|| pTransport->WhatAmI() == AbstractType::Aircraft) ? "flies" : "surface"));
 					Debug::Log("[NeuralAI] House %d AirborneFront summary DIAG: %s while %s by %s (%s), team %d (%d raiders, %d specialists) for %s "
-						"at %d health, %d enemy value and %d defenses known near it, transport %d cells from its soldiers; left with %d aboard "
-						"after %d frames; dropped after %d frames more, %d cells from the target with %d enemy value near; ends %d frames after "
-						"the drop, %d soldiers on the map, target at %d, transport at %d, %d targets taken.\n", pHouse->ArrayIndex, reason,
+						"at %d health %d cells from the main attack, %d enemy value and %d defenses known near it, transport %d cells from "
+						"its soldiers; left with %d aboard after %d frames, main attack on %d; dropped after %d frames more, %d cells from "
+						"the target with %d enemy value near; ends %d frames after the drop, %d soldiers on the map, target at %d, transport "
+						"at %d and %d cells from the target, %d targets taken.\n", pHouse->ArrayIndex, reason,
 						PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], pTransportType ? pTransportType->ID : "none", kind, trace.Team, trace.Raiders,
-						trace.Workers, trace.Target, trace.TargetHealth, trace.EnemyStart, trace.Defenses, trace.MeetCells, trace.Aboard,
-						trace.BoardedFrame >= 0 ? trace.BoardedFrame - plan.StartFrame : -1,
+						trace.Workers, trace.Target, trace.TargetHealth, trace.FrontGap, trace.EnemyStart, trace.Defenses, trace.MeetCells,
+						trace.Aboard, trace.BoardedFrame >= 0 ? trace.BoardedFrame - plan.StartFrame : -1, trace.FrontAtLeave,
 						(trace.DroppedFrame >= 0 && trace.BoardedFrame >= 0) ? trace.DroppedFrame - trace.BoardedFrame : -1, trace.DropCells,
 						trace.EnemyDrop, trace.DroppedFrame >= 0 ? Unsorted::CurrentFrame - trace.DroppedFrame : -1, soldiersAlive,
 						pTarget ? static_cast<int>(pTarget->GetHealthPercentage() * 100) : -1,
-						pTransport ? static_cast<int>(pTransport->GetHealthPercentage() * 100) : -1, plan.Progress + 1);
+						pTransport ? static_cast<int>(pTransport->GetHealthPercentage() * 100) : -1,
+						pTransport ? static_cast<int>(pTransport->GetMapCoords().DistanceFrom(plan.TargetCell)) : -1, plan.Progress + 1);
 				};
 
 				if (!pTarget)
 				{
-					// Before the drop the team takes the nearest building worth the trip instead of going
-					// home: behind a main attack the army often brings the target down first (5 of 17
-					// plans, 2026-11-14). The next one lies within AirborneRetargetCells of the old one,
-					// under the same limit on defenses, AirborneRetargets times at most. Progress counts
-					// them.
-					BuildingClass* pNext = nullptr;
-					CellClass* pNextDrop = nullptr;
-					double nextDist = 0.0;
+					// Before the drop the team takes another building instead of going home: behind a
+					// main attack the army often brings the target down first. The next one is chosen
+					// as the first was, the nearer to the transport the better, AirborneRetargets times
+					// at most. Progress counts them. With the main attack over, the house of the old
+					// target stands for the one under attack.
+					AirborneGoal next {};
 
 					if (plan.AuxBaseline < 2 && plan.Progress < AirborneRetargets && pTransport)
 					{
-						for (auto const pBld : knownEnemyBuildingList)
-						{
-							if (!isKnownEnemyBuilding(pBld) || valuableBuildingWorth(pBld->Type) <= 0)
-								continue;
+						AirborneFrontLine front = findFront();
 
-							const CellStruct bc = pBld->GetMapCoords();
-							const double dist = bc.DistanceFrom(plan.TargetCell);
+						if (front.Cell == CellStruct::Empty)
+							front.Owner = plan.TargetOwner;
 
-							if (dist > AirborneRetargetCells || (pNext && dist >= nextDist)
-								|| CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > 1 || CountVisibleEnemyMobileAANear(pHouse, bc, 9.0) > 1)
-							{
-								continue;
-							}
-
-							if (auto const pCell = landCellInZone(pointAlong(bc, homeCell, 4.0, 0.0), zoneOf(bc), 5))
-							{
-								pNext = pBld;
-								pNextDrop = pCell;
-								nextDist = dist;
-							}
-						}
+						next = pickGoal(front, plan.InitialValue, [](BuildingTypeClass*) { return 0; }, pTransport->GetMapCoords());
 					}
 
-					if (pNext)
+					if (next.Target)
 					{
 						plan.Progress++;
-						plan.TargetID = pNext->UniqueID;
-						plan.TargetCell = pNext->GetMapCoords();
-						plan.StagingCell = pNextDrop->MapCoords;
-						plan.TargetOwner = pNext->Owner ? pNext->Owner->ArrayIndex : -1;
+						plan.TargetID = next.Target->UniqueID;
+						plan.TargetCell = next.Target->GetMapCoords();
+						plan.StagingCell = next.Drop->MapCoords;
+						plan.TargetOwner = next.Target->Owner ? next.Target->Owner->ArrayIndex : -1;
 						plan.Deadline = std::max(plan.Deadline, Unsorted::CurrentFrame + AirborneRetargetFrames);
-						Debug::Log("[NeuralAI] House %d AirborneFront: target gone while %s, the team takes %s at (%d,%d) %d cells from it, "
-							"frame %d.\n", pHouse->ArrayIndex, PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], pNext->Type->ID,
-							plan.TargetCell.X, plan.TargetCell.Y, static_cast<int>(nextDist), Unsorted::CurrentFrame);
+						Debug::Log("[NeuralAI] House %d AirborneFront: target gone while %s, the team takes %s at (%d,%d), frame %d.\n",
+							pHouse->ArrayIndex, PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], next.Target->Type->ID, plan.TargetCell.X,
+							plan.TargetCell.Y, Unsorted::CurrentFrame);
 					}
 					else
 					{
@@ -4654,108 +4804,38 @@ namespace
 				}
 				else if (plan.AuxBaseline == 0)
 				{
-					// Boarding: the infantry walk in (they are in limbo, hence not found, once aboard).
-					// The transport comes to meet the nearest one (UniqueID on ties): a hovercraft left
-					// at sea or a flyer parked across the base is out of the soldiers' reach otherwise.
-					// One boards at a time (a transport has a single radio link for loading: all of them
-					// ordered to Enter at once stole it from each other and jammed at the door, Heisenberg:
-					// 10-15 "nobody boarded" per match with soldiers 0-2 cells away in Enter); the others
-					// walk up and wait FerryWaitCells away for their turn.
+					// Boarding: the transport comes to meet its soldiers and parks, they walk up to it,
+					// and each one that stands next to it at rest goes aboard at once (TakeAboardNow).
+					// Asking to load over the radio, one soldier at a time through the transport's single
+					// link, left the team outside in a quarter to a half of the plans, whatever was done
+					// to the order (2026-11-13 and 14). Aboard they are in limbo, hence not found.
 					int waiting = 0;
 					FootClass* pNearest = nullptr;
 					int nearestDist = INT_MAX;
-					FootClass* pBoarding = nullptr;
-
-					for (const DWORD uid : infantry)
-					{
-						if (auto const pInf = findOwnFoot(uid))
-						{
-							waiting++;
-							const int dist = pTransport->DistanceFrom(pInf);
-
-							if (dist < nearestDist || (dist == nearestDist && pInf->UniqueID < pNearest->UniqueID))
-							{
-								nearestDist = dist;
-								pNearest = pInf;
-							}
-
-							const bool enteringThis = (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter)
-								&& (pInf->ContainsLink(pTransport) || pInf->Destination == pTransport || pInf->ArchiveTarget == pTransport);
-
-							if (enteringThis && (!pBoarding || pInf->ContainsLink(pTransport)))
-								pBoarding = pInf;
-						}
-					}
-
-					// The soldier nearest to the transport that holds the Enter order within
-					// BoardingRestartCells of it, with no radio link to it, and has not moved for
-					// BoardingRestartFrames starts over: its order is dropped here and given again below.
-					// It stood there until the plan gave up after 1500 frames (a third of the Airborne
-					// Front plans of the focus batch of 2026-11-13). AuxPeak keeps the last restart.
-					if (pNearest && pNearest->CurrentMission == Mission::Enter && !pNearest->ContainsLink(pTransport)
-						&& nearestDist <= BoardingRestartCells * Unsorted::LeptonsPerCell && IsFootHeldStill(pHouse, pNearest, BoardingRestartFrames)
-						&& Unsorted::CurrentFrame - std::max(plan.AuxPeak, plan.StartFrame) >= BoardingRestartFrames)
-					{
-						plan.AuxPeak = Unsorted::CurrentFrame;
-						pNearest->SetArchiveTarget(nullptr);
-						pNearest->SetDestination(nullptr, true);
-						pNearest->ForceMission(Mission::Guard);
-						Debug::Log("[NeuralAI] House %d AirborneFront: boarding of %s %u started over, %d leptons from %s, frame %d.\n",
-							pHouse->ArrayIndex, pNearest->GetTechnoType()->ID, pNearest->UniqueID, nearestDist, pTransport->GetTechnoType()->ID,
-							Unsorted::CurrentFrame);
-
-						if (pBoarding == pNearest)
-							pBoarding = nullptr;
-					}
-
-					// The boarder that stands linked to the transport, next to it, and does not get in: it
-					// stopped short of the centre of its cell, so the engine never ran the step that takes
-					// it aboard (InfantryClass::Per_Cell_Process at the end of a move). Run it once it has
-					// stood there BoardingSettleFrames (7 of 33 plans with nobody aboard, 2026-11-14).
-					if (pBoarding)
-						WatchBoarder(pBoarding, pTransport);
-
-					if (pBoarding && pBoarding->ContainsLink(pTransport) && pBoarding->LastMapCoords != pBoarding->GetMapCoords()
-						&& !pBoarding->Locomotor->Is_Moving() && pTransport->DistanceFrom(pBoarding) <= 2 * Unsorted::LeptonsPerCell
-						&& IsFootHeldStill(pHouse, pBoarding, BoardingSettleFrames))
-					{
-						pBoarding->UpdatePosition(PCPType::End);
-					}
 
 					for (const DWORD uid : infantry)
 					{
 						auto const pInf = findOwnFoot(uid);
 
-						if (!pInf || pInf == pBoarding)
+						if (!pInf)
 							continue;
 
-						// The nearest soldier asks to load once it is within BoardingRestartCells and the
-						// door is open (OpenBoardingDoor: the transport at rest, the cells on record for
-						// both in one zone). Asked earlier, the transport set out for the soldier instead of
-						// taking it in and neither got anywhere (127 plans ended with nobody aboard in 46
-						// matches, 145 boarding restarts did not help). Until then it walks up and waits
-						// like the others.
-						if (!pBoarding && pInf == pNearest && nearestDist <= BoardingRestartCells * Unsorted::LeptonsPerCell
-							&& OpenBoardingDoor(pTransport, pInf))
+						if (TakeAboardNow(pTransport, pInf))
 						{
-							OrderFootToEnter(pInf, pTransport);
-							WatchBoarder(pInf, pTransport);
-							pBoarding = pInf;
+							ownFoots.erase(uid);
 							continue;
 						}
 
-						if (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter)
-						{
-							if (pInf->ContainsLink(pTransport))
-								pInf->SendCommand(RadioCommand::NotifyUnlink, pTransport);
+						waiting++;
+						const int dist = pTransport->DistanceFrom(pInf);
 
-							pInf->SetArchiveTarget(nullptr);
-							pInf->SetDestination(nullptr, true);
-							pInf->ForceMission(Mission::Guard);
+						if (dist < nearestDist || (dist == nearestDist && pInf->UniqueID < pNearest->UniqueID))
+						{
+							nearestDist = dist;
+							pNearest = pInf;
 						}
 
-						if (!HoldFerryWaiter(pInf, pTransport))
-							IssueMoveOrder(pInf, pTransport, 3.0);
+						IssueMoveOrder(pInf, pTransport, 1.0);
 					}
 
 					if (pNearest && pTransport->CurrentMission != Mission::Unload)
@@ -4769,11 +4849,9 @@ namespace
 						const int soldierZone = MapClass::Instance.GetMovementZoneType(pNearest->GetMapCoords(), MovementZone::Normal, pNearest->OnBridge);
 
 						// Once it has parked by its soldiers it stays: it sets out again only when the nearest
-						// one is BoardingParkedReachCells away. Leaving at 4 cells, it followed every soldier
-						// the door routine scattered off the cells next to it, and a transport that moves
-						// takes nobody in (half of the plans ended with the soldiers waiting within 4 cells
-						// of a transport on Guard that was still moving).
-						const int reachCells = plan.BoardingParked ? BoardingParkedReachCells : BoardingRestartCells;
+						// one is BoardingParkedReachCells away. A transport that follows every soldier takes
+						// nobody in: only one at rest does.
+						const int reachCells = plan.BoardingParked ? BoardingParkedReachCells : BoardingMeetCells;
 
 						if (nearestDist > reachCells * Unsorted::LeptonsPerCell)
 						{
@@ -4782,12 +4860,11 @@ namespace
 						}
 						else if (pCarrier && MoveTransportToLoadingCell(pHouse, pCarrier, pCarrier->GetMapCoords(), soldierZone, true))
 						{
-							// On its way to a cell the soldiers can step onto: a flyer that hung over them
-							// (the cells below taken) lands next to them instead, the ferry loader's way.
+							// On its way to a cell the soldiers can step next to: a flyer that hung over them
+							// (the cells below taken) lands beside them instead, the ferry loader's way.
 						}
 						else
 						{
-							// Close enough: a moving transport takes nobody in, so it stops and waits.
 							plan.BoardingParked = true;
 
 							if (plan.BoardingParkedFrame < 0)
@@ -4802,8 +4879,7 @@ namespace
 								&& IsFootHeldStill(pHouse, pTransport, BoardingSettleFrames))
 							{
 								// On Guard with no destination, on the same cell for BoardingSettleFrames, and its
-								// locomotor still says it moves: the door stays shut for a moving transport (23 of
-								// 81 plans with nobody aboard, 2026-11-14), so the locomotor is told to stop.
+								// locomotor still says it moves: it is told to stop.
 								pTransport->Locomotor->Stop_Moving();
 							}
 						}
@@ -4820,9 +4896,28 @@ namespace
 
 					if (aboard > 0 && (waiting == 0 || parkedFrames >= BoardingPartialLoadFrames))
 					{
+						// It leaves. Those still outside go back to the army: as members they were sent
+						// on foot to the target once the others had been dropped.
+						const DWORD transportID = pTransport->UniqueID;
+
+						std::erase_if(plan.Members, [&](DWORD uid)
+							{
+								if (uid == transportID || !findOwnFoot(uid))
+									return false;
+
+								auto const pLeft = findOwnFoot(uid);
+								pLeft->SetDestination(nullptr, true);
+								pLeft->ForceMission(Mission::Guard);
+								macro.PlanMembers.erase(uid);
+
+								return true;
+							});
+
 						plan.AuxBaseline = 1;
+						plan.Deadline = Unsorted::CurrentFrame + AirborneTripFrames;
 						trace.Aboard = aboard;
 						trace.BoardedFrame = Unsorted::CurrentFrame;
+						trace.FrontAtLeave = findFront().Cell != CellStruct::Empty ? 1 : 0;
 					}
 					else if (aboard == 0 && nobodyCame)
 					{
@@ -4833,31 +4928,21 @@ namespace
 							pTransport->GetMapCoords().Y, (pTransportCell && pTransportCell->LandType == LandType::Water) ? " on water" : "",
 							pNearest ? nearestDist / Unsorted::LeptonsPerCell : -1, pNearest ? static_cast<int>(pNearest->CurrentMission) : -1);
 
-						// TEMP diagnostic: the state of both when a soldier stood next to the transport with
-						// its Enter order and never got in.
+						// TEMP diagnostic: what kept the nearest soldier out of a transport it had this long
+						// to reach.
 						if (pNearest)
 						{
-							Debug::Log("[NeuralAI] House %d AirborneFront boarding DIAG: transport mission %d, in air %d, height %d, moving %d, passengers %d of %d, "
-								"size limit %d, links soldier %d; soldier %s size %d, %d leptons away, height %d, links transport %d, destination is transport %d, "
-								"queued mission %d.\n", pHouse->ArrayIndex, static_cast<int>(pTransport->CurrentMission), pTransport->IsInAir() ? 1 : 0,
-								pTransport->GetHeight(), (pTransport->Locomotor && pTransport->Locomotor->Is_Moving()) ? 1 : 0,
-								pTransport->Passengers.NumPassengers, pTransport->GetTechnoType()->Passengers,
-								static_cast<int>(pTransport->GetTechnoType()->SizeLimit), pTransport->ContainsLink(pNearest) ? 1 : 0,
-								pNearest->GetTechnoType()->ID, static_cast<int>(pNearest->GetTechnoType()->Size), nearestDist, pNearest->GetHeight(),
-								pNearest->ContainsLink(pTransport) ? 1 : 0, pNearest->Destination == pTransport ? 1 : 0,
-								static_cast<int>(pNearest->QueuedMission));
-
-							const FerryDoorZones door = GetFerryDoorZones(pTransport, pNearest);
-							Debug::Log("[NeuralAI] House %d AirborneFront door DIAG: zones %d and %d for movement zone %d, transport at (%d,%d) on record "
-								"(%d,%d) with destination %d, soldier at (%d,%d) on record (%d,%d), plain zones %d and %d, land types %d and %d.\n",
-								pHouse->ArrayIndex, door.Transport, door.Boarder, static_cast<int>(pNearest->GetTechnoType()->MovementZone),
-								pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y, pTransport->LastMapCoords.X, pTransport->LastMapCoords.Y,
-								pTransport->Destination ? 1 : 0, pNearest->GetMapCoords().X, pNearest->GetMapCoords().Y, pNearest->LastMapCoords.X,
-								pNearest->LastMapCoords.Y,
-								MapClass::Instance.GetMovementZoneType(pTransport->GetMapCoords(), MovementZone::Normal, false),
-								MapClass::Instance.GetMovementZoneType(pNearest->GetMapCoords(), MovementZone::Normal, false),
-								pTransportCell ? static_cast<int>(pTransportCell->LandType) : -1,
-								pNearest->GetCell() ? static_cast<int>(pNearest->GetCell()->LandType) : -1);
+							Debug::Log("[NeuralAI] House %d AirborneFront boarding DIAG: transport mission %d queued %d, height %d, moving %d, destination %d, "
+								"parked %d frames, land type %d, on bridge %d, passengers %d of %d, size limit %d; soldier %s size %d, %d leptons away "
+								"(%d,%d,%d), mission %d, moving %d, fits %d.\n", pHouse->ArrayIndex, static_cast<int>(pTransport->CurrentMission),
+								static_cast<int>(pTransport->QueuedMission), pTransport->GetHeight(), pTransport->Locomotor->Is_Moving() ? 1 : 0,
+								pTransport->Destination ? 1 : 0, parkedFrames, pTransportCell ? static_cast<int>(pTransportCell->LandType) : -1,
+								pTransport->OnBridge ? 1 : 0, pTransport->Passengers.NumPassengers, pTransport->GetTechnoType()->Passengers,
+								static_cast<int>(pTransport->GetTechnoType()->SizeLimit), pNearest->GetTechnoType()->ID,
+								static_cast<int>(pNearest->GetTechnoType()->Size), nearestDist, pNearest->Location.X - pTransport->Location.X,
+								pNearest->Location.Y - pTransport->Location.Y, pNearest->Location.Z - pTransport->Location.Z,
+								static_cast<int>(pNearest->CurrentMission), pNearest->Locomotor->Is_Moving() ? 1 : 0,
+								CanPassengerFitInTransport(pTransport, pNearest->GetTechnoType()) ? 1 : 0);
 						}
 
 						macro.RaidTransportBanUntil[pTransport->UniqueID] = Unsorted::CurrentFrame + 9000;
@@ -4867,11 +4952,14 @@ namespace
 				}
 				else if (plan.AuxBaseline == 1)
 				{
+					const double toDrop = pTransport->GetMapCoords().DistanceFrom(pDrop->MapCoords);
+
 					if (pTransport->Passengers.NumPassengers == 0)
 					{
 						plan.AuxBaseline = 2;
 						plan.Arrived = true;
 						plan.ArrivedFrame = Unsorted::CurrentFrame;
+						plan.Deadline = Unsorted::CurrentFrame + AirborneAssaultFrames;
 						trace.DroppedFrame = Unsorted::CurrentFrame;
 						trace.DropCells = static_cast<int>(pTransport->GetMapCoords().DistanceFrom(plan.TargetCell));
 						trace.EnemyDrop = seenEnemyValueNear(plan.TargetCell, 9.0, 900);
@@ -4881,7 +4969,7 @@ namespace
 						if (!underground)
 							GetSafeReturnState(pHouse).Flights.push_back(pTransport->UniqueID);
 					}
-					else if (pTransport->GetMapCoords().DistanceFrom(pDrop->MapCoords) <= 3.0)
+					else if (toDrop <= 3.0)
 					{
 						if (pTransport->CurrentMission != Mission::Unload)
 						{
@@ -4889,8 +4977,11 @@ namespace
 							pTransport->QueueMission(Mission::Unload, true);
 						}
 					}
-					else if (pTransport->GetHealthPercentage() < 0.35)
+					else if (pTransport->GetHealthPercentage() < 0.35 && toDrop > AirbornePressOnCells)
 					{
+						// Badly hit far from the drop it turns back; near it, it goes on: its soldiers
+						// are worth more on the ground there than aboard on the way home (4 of 15 plans
+						// ended here with the team aboard).
 						logEnd("transport badly hit");
 						finishPlan(NeuralPlanId::AirborneFront, false, true);
 					}
@@ -4956,35 +5047,19 @@ namespace
 					}
 				}
 			}
-			else if (planReady(NeuralPlanId::AirborneFront))
+			else if (!planShelved(NeuralPlanId::AirborneFront) && planReady(NeuralPlanId::AirborneFront))
 			{
-				// The second front only makes sense while a main attack keeps the enemy busy.
-				bool mainAttack = planOf(NeuralPlanId::TimingRush).Active || planOf(NeuralPlanId::Pincer).Active
-					|| planOf(NeuralPlanId::BaseTrade).Active || planOf(NeuralPlanId::AllyJointAttack).Active
-					|| planOf(NeuralPlanId::ThreeFrontAssault).Active || planOf(NeuralPlanId::FactoryDecapitation).Active;
-
-				if (!mainAttack && knownEnemyHomeBuildings > 0)
-				{
-					int engaged = 0;
-
-					for (auto const& [uid, pFoot] : ownFoots)
-					{
-						if (isArmedGroundFoot(pFoot) && (pFoot->Target != nullptr || pFoot->MegaMission == Mission::AttackMove)
-							&& pFoot->GetMapCoords().DistanceFrom(knownEnemyCentroid) <= 18.0)
-						{
-							engaged++;
-						}
-					}
-
-					mainAttack = engaged >= 6;
-				}
-
+				// Only behind a main attack. Dropped with no attack to hide behind (a lone raider or
+				// specialist, a strike squad), the team met the whole garrison: 4 of 149 such raids
+				// went well, whatever the size of the team (2026-11-14; user: limit it to a main
+				// attack in progress).
+				const AirborneFrontLine front = findFront();
 				FootClass* pTransport = nullptr;
 
 				for (auto const& [uid, pFoot] : ownFoots)
 				{
-					if (macro.PlanMembers.contains(uid) || pFoot->Passengers.NumPassengers != 0 || pFoot->GetHealthPercentage() < 0.6
-						|| (pTransport && pTransport->UniqueID < uid))
+					if (front.Cell == CellStruct::Empty || macro.PlanMembers.contains(uid) || pFoot->Passengers.NumPassengers != 0
+						|| pFoot->GetHealthPercentage() < 0.6 || (pTransport && pTransport->UniqueID < uid))
 					{
 						continue;
 					}
@@ -5019,16 +5094,16 @@ namespace
 						// defenses, so a commando team needs no lane).
 						const bool flying = pUnit->Type && IsAmphibiousOrAirTransport(pUnit->Type)
 							&& (pUnit->Type->JumpJet || pUnit->Type->ConsideredAircraft || pUnit->Type->MovementZone == MovementZone::Fly);
-						const bool underground = IsUndergroundTransportType(pUnit->Type);
+						const bool burrows = IsUndergroundTransportType(pUnit->Type);
 
 						// An empty transport waiting on a pickup shore keeps a ferry record that has not left
 						// (Departed=no) for as long as some ferry demand exists, even on a land map; only a
 						// trip under way holds it. The ferry loop skips plan members.
 						// One that holds a radio link is already taking somebody in (an MCV on its way to an
-						// island, a unit the ferry loader sent): it has that single link for nobody else.
+						// island, a unit the ferry loader sent).
 						auto const pFerryTrip = FindFerryTrip(uid);
-						isCandidate = pUnit->Type && (flying || underground || IsAmphibiousGroundTransportType(pUnit->Type))
-							&& pUnit->Type->Passengers >= (underground ? 1 : 3) && isFreeForPlan(pUnit)
+						isCandidate = pUnit->Type && (flying || burrows || IsAmphibiousGroundTransportType(pUnit->Type))
+							&& pUnit->Type->Passengers >= (burrows ? 1 : 3) && isFreeForPlan(pUnit)
 							&& !(pFerryTrip && pFerryTrip->Departed) && !pUnit->GetNthLink(0);
 					}
 
@@ -5040,23 +5115,57 @@ namespace
 				// infiltrate); vehicle thieves only fill seats and hunt vehicles once down.
 				const int transportZone = pTransport ? ObjectZone(pTransport, MovementZone::Normal) : -1;
 				std::vector<FootClass*> specialists;
+				std::vector<FootClass*> soldiers;
+				std::vector<FootClass*> vehicles;
+
+				auto isRaider = [](FootClass* pFoot)
+				{
+					if (auto const pInf = abstract_cast<InfantryClass*>(pFoot))
+						return IsRaiderInfantryType(pInf->Type);
+
+					auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+					return pUnit && IsVehicleRaiderType(pUnit->Type);
+				};
 
 				for (auto const& [uid, pFoot] : ownFoots)
 				{
-					auto const pInf = abstract_cast<InfantryClass*>(pFoot);
-
-					if (!pTransport || !pInf || ObjectZone(pFoot, MovementZone::Normal) != transportZone)
+					if (!pTransport || pFoot == pTransport || ObjectZone(pFoot, MovementZone::Normal) != transportZone)
 						continue;
 
-					if (IsSpecialistInfantryType(pInf->Type) && !macro.PlanMembers.contains(uid)
-						&& !(pInf->Type->Engineer && IsSpecOpsEngineerBusy(pHouse, uid)) && pFoot->GetHealthPercentage() >= 0.6
-						&& (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard))
+					auto const pInf = abstract_cast<InfantryClass*>(pFoot);
+					auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+					if (pInf && IsSpecialistInfantryType(pInf->Type))
 					{
-						specialists.push_back(pFoot);
+						if (!macro.PlanMembers.contains(uid) && !(pInf->Type->Engineer && IsSpecOpsEngineerBusy(pHouse, uid))
+							&& pFoot->GetHealthPercentage() >= 0.6
+							&& (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard))
+						{
+							specialists.push_back(pFoot);
+						}
+					}
+					else if (!isFreeForPlan(pFoot))
+						continue;
+					else if (pInf && isArmedGroundFoot(pFoot))
+						soldiers.push_back(pFoot);
+					else if (pUnit && IsVehicleRaiderType(pUnit->Type)
+						&& pUnit->GetTechnoType()->Size <= pTransport->GetTechnoType()->SizeLimit)
+					{
+						vehicles.push_back(pFoot);
 					}
 				}
 
-				std::sort(specialists.begin(), specialists.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
+				auto byID = [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; };
+				std::sort(specialists.begin(), specialists.end(), byID);
+				std::sort(vehicles.begin(), vehicles.end(), byID);
+				std::sort(soldiers.begin(), soldiers.end(), [&](FootClass* a, FootClass* b)
+					{
+						const bool ra = isRaider(a);
+						const bool rb = isRaider(b);
+
+						return ra != rb ? ra : a->UniqueID < b->UniqueID;
+					});
 
 				if (specialists.size() > 3)
 					specialists.resize(3);
@@ -5075,92 +5184,12 @@ namespace
 					return count;
 				};
 
-				BuildingClass* pTarget = nullptr;
-				CellClass* pDrop = nullptr;
-				int bestScore = INT_MIN;
-
-				// Only behind a main attack. Dropped with no attack to hide behind (a lone raider or
-				// specialist, a strike squad), the team met the whole garrison: 4 of 149 such raids
-				// went well, whatever the size of the team (2026-11-14; user: limit it to a main
-				// attack in progress).
-				if (mainAttack && pTransport)
+				// The team for a building (none: no specialist has a job). Boarding order: raiders
+				// (soldiers, then demolition vehicles that fit), the specialists with a job there, the
+				// other soldiers by UniqueID, then vehicle thieves; seats are counted by passenger
+				// Size, each passenger within the transport's SizeLimit.
+				auto seatTeam = [&](BuildingTypeClass* pBldType) -> std::vector<FootClass*>
 				{
-					constexpr int defensesAllowed = 1;
-
-					for (auto const pBld : knownEnemyBuildingList)
-					{
-						if (!isKnownEnemyBuilding(pBld))
-							continue;
-
-						const int workers = specialistsFor(pBld->Type);
-						const int worth = valuableBuildingWorth(pBld->Type) + workers * 150;
-						const CellStruct bc = pBld->GetMapCoords();
-
-						if (worth <= 0 || CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > defensesAllowed
-							|| CountVisibleEnemyMobileAANear(pHouse, bc, 9.0) > defensesAllowed)
-						{
-							continue;
-						}
-
-						// Deep targets away from where the main army fights.
-						const int score = worth + static_cast<int>(bc.DistanceFrom(knownEnemyCentroid == CellStruct::Empty ? homeCell : knownEnemyCentroid)) * 3
-							- CountKnownEnemyDefensesNear(pHouse, bc, 9.0, false) * 60;
-
-						if (score > bestScore)
-						{
-							if (auto const pCell = landCellInZone(pointAlong(bc, homeCell, 4.0, 0.0), zoneOf(bc), 5))
-							{
-								bestScore = score;
-								pTarget = pBld;
-								pDrop = pCell;
-							}
-						}
-					}
-				}
-
-				// Boarding order: raiders (soldiers, then demolition vehicles that fit), the specialists
-				// with a job there, the other soldiers by UniqueID, then vehicle thieves; seats are
-				// counted by passenger Size, each passenger within the transport's SizeLimit.
-				std::vector<FootClass*> infantry;
-				int raiders = 0;
-				int workersAboard = 0;
-
-				if (pTarget)
-				{
-					auto isRaider = [](FootClass* pFoot)
-					{
-						if (auto const pInf = abstract_cast<InfantryClass*>(pFoot))
-							return IsRaiderInfantryType(pInf->Type);
-
-						auto const pUnit = abstract_cast<UnitClass*>(pFoot);
-						return pUnit && IsVehicleRaiderType(pUnit->Type);
-					};
-
-					auto const pTransportType = pTransport->GetTechnoType();
-					std::vector<FootClass*> soldiers;
-					std::vector<FootClass*> vehicles;
-
-					for (auto const& [uid, pFoot] : ownFoots)
-					{
-						if (!isFreeForPlan(pFoot) || ObjectZone(pFoot, MovementZone::Normal) != transportZone)
-							continue;
-
-						if (abstract_cast<InfantryClass*>(pFoot) && isArmedGroundFoot(pFoot))
-							soldiers.push_back(pFoot);
-						else if (auto const pUnit = abstract_cast<UnitClass*>(pFoot); pUnit && pFoot != pTransport
-							&& IsVehicleRaiderType(pUnit->Type) && pUnit->GetTechnoType()->Size <= pTransportType->SizeLimit)
-							vehicles.push_back(pFoot);
-					}
-
-					std::sort(soldiers.begin(), soldiers.end(), [&](FootClass* a, FootClass* b)
-					{
-						const bool ra = isRaider(a);
-						const bool rb = isRaider(b);
-						return ra != rb ? ra : a->UniqueID < b->UniqueID;
-					});
-
-					std::sort(vehicles.begin(), vehicles.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
-
 					std::vector<FootClass*> order;
 					auto const firstOther = std::find_if(soldiers.begin(), soldiers.end(), [&](FootClass* pFoot) { return !isRaider(pFoot); });
 					order.assign(soldiers.begin(), firstOther);
@@ -5168,7 +5197,7 @@ namespace
 
 					for (auto const pFoot : specialists)
 					{
-						if (SpecialistWorksBuilding(static_cast<InfantryClass*>(pFoot)->Type, pTarget->Type))
+						if (pBldType && SpecialistWorksBuilding(static_cast<InfantryClass*>(pFoot)->Type, pBldType))
 							order.push_back(pFoot);
 					}
 
@@ -5180,8 +5209,9 @@ namespace
 							order.push_back(pFoot);
 					}
 
-					const int capacity = std::max(0, pTransportType->Passengers);
+					const int capacity = pTransport ? std::max(0, pTransport->GetTechnoType()->Passengers) : 0;
 					int usedSeats = 0;
+					std::vector<FootClass*> team;
 
 					for (auto const pFoot : order)
 					{
@@ -5191,13 +5221,29 @@ namespace
 							continue;
 
 						usedSeats += size;
-						infantry.push_back(pFoot);
+						team.push_back(pFoot);
+					}
 
+					return team;
+				};
+
+				const AirborneGoal goal = pTransport
+					? pickGoal(front, feetValue(seatTeam(nullptr)), specialistsFor, CellStruct::Empty) : AirborneGoal {};
+				std::vector<FootClass*> infantry;
+				int raiders = 0;
+				int workersAboard = 0;
+
+				if (goal.Target)
+				{
+					infantry = seatTeam(goal.Target->Type);
+
+					for (auto const pFoot : infantry)
+					{
 						auto const pInf = abstract_cast<InfantryClass*>(pFoot);
 
 						if (isRaider(pFoot))
 							raiders++;
-						else if (pInf && SpecialistWorksBuilding(pInf->Type, pTarget->Type))
+						else if (pInf && SpecialistWorksBuilding(pInf->Type, goal.Target->Type))
 							workersAboard++;
 					}
 				}
@@ -5209,7 +5255,7 @@ namespace
 				// burrower goes under.
 				bool wayOpen = true;
 
-				if (pTarget && pTransport)
+				if (goal.Target)
 				{
 					auto const pCarrierType = pTransport->GetTechnoType();
 					auto const pCarrierUnit = abstract_cast<UnitClass*>(pTransport);
@@ -5218,42 +5264,46 @@ namespace
 
 					if (surfaceTrip)
 					{
-						int teamValue = GetCombatValueOfType(pCarrierType, false);
-
-						for (auto const pFoot : infantry)
-							teamValue += GetCombatValueOfType(pFoot->GetTechnoType(), false);
-
-						wayOpen = teamValue * 100 >= knownEnemyStrengthOnWay(pTransport->GetMapCoords(), pTarget->GetMapCoords(),
-							PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent;
+						wayOpen = (GetCombatValueOfType(pCarrierType, false) + feetValue(infantry)) * 100
+							>= knownEnemyStrengthOnWay(pTransport->GetMapCoords(), goal.Target->GetMapCoords(), PlanStrikeGuardFrames)
+								* PlanStrikeAdvantagePercent;
 					}
 				}
 
 				// The team: a raider, a specialist with a job there, or three soldiers.
 				const bool teamReady = wayOpen && (raiders > 0 || workersAboard > 0 || infantry.size() >= 3);
-				const int utility = (pTarget && teamReady) ? (320 + bestScore / 6 + raiders * 150 + workersAboard * 120) : -1000;
+				const int utility = (goal.Target && teamReady) ? (320 + goal.Score / 6 + raiders * 150 + workersAboard * 120) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::AirborneFront, utility))
 				{
 					std::vector<FootClass*> group { pTransport };
 					group.insert(group.end(), infantry.begin(), infantry.end());
-					startPlan(NeuralPlanId::AirborneFront, group, pTarget->GetMapCoords(), pDrop->MapCoords, pTarget->UniqueID, 4500);
-					ClearFerryTrip(pTransport->UniqueID);
-					planOf(NeuralPlanId::AirborneFront).AuxBaseline = 0;
-					trace = AirborneTrace {};
-					trace.Team = static_cast<int>(infantry.size());
-					trace.Raiders = raiders;
-					trace.Workers = workersAboard;
-					trace.Target = pTarget->Type->ID;
-					trace.TargetHealth = static_cast<int>(pTarget->GetHealthPercentage() * 100);
-					trace.EnemyStart = seenEnemyValueNear(pTarget->GetMapCoords(), 9.0, 900);
-					trace.Defenses = CountKnownEnemyDefensesNear(pHouse, pTarget->GetMapCoords(), 9.0, false);
+					startPlan(NeuralPlanId::AirborneFront, group, goal.Target->GetMapCoords(), goal.Drop->MapCoords, goal.Target->UniqueID, 4500);
 
-					for (auto const pFoot : infantry)
-						trace.MeetCells = std::max(trace.MeetCells, static_cast<int>(pFoot->GetMapCoords().DistanceFrom(pTransport->GetMapCoords())));
-					Debug::Log("[NeuralAI] House %d AirborneFront: %s %u carries %d soldiers (%d raiders, %d specialists) to %s of house %d at (%d,%d), frame %d.\n",
-						pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID, static_cast<int>(infantry.size()),
-						raiders, workersAboard, pTarget->Type->ID, pTarget->Owner ? pTarget->Owner->ArrayIndex : -1, pDrop->MapCoords.X,
-						pDrop->MapCoords.Y, Unsorted::CurrentFrame);
+					// The raid gate may have held it back.
+					if (plan.Active)
+					{
+						ClearFerryTrip(pTransport->UniqueID);
+						plan.AuxBaseline = 0;
+						trace = AirborneTrace {};
+						trace.Team = static_cast<int>(infantry.size());
+						trace.Raiders = raiders;
+						trace.Workers = workersAboard;
+						trace.Target = goal.Target->Type->ID;
+						trace.TargetHealth = static_cast<int>(goal.Target->GetHealthPercentage() * 100);
+						trace.EnemyStart = seenEnemyValueNear(goal.Target->GetMapCoords(), 9.0, 900);
+						trace.Defenses = CountKnownEnemyDefensesNear(pHouse, goal.Target->GetMapCoords(), 9.0, false);
+						trace.FrontGap = static_cast<int>(goal.Target->GetMapCoords().DistanceFrom(front.Cell));
+
+						for (auto const pFoot : infantry)
+							trace.MeetCells = std::max(trace.MeetCells, static_cast<int>(pFoot->GetMapCoords().DistanceFrom(pTransport->GetMapCoords())));
+
+						Debug::Log("[NeuralAI] House %d AirborneFront: %s %u carries %d soldiers (%d raiders, %d specialists) to %s of house %d, "
+							"dropped at (%d,%d), frame %d.\n", pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
+							static_cast<int>(infantry.size()), raiders, workersAboard, goal.Target->Type->ID,
+							goal.Target->Owner ? goal.Target->Owner->ArrayIndex : -1, goal.Drop->MapCoords.X, goal.Drop->MapCoords.Y,
+							Unsorted::CurrentFrame);
+					}
 				}
 			}
 		}
