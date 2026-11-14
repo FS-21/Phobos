@@ -4835,10 +4835,12 @@ namespace
 						// An empty transport waiting on a pickup shore keeps a ferry record that has not left
 						// (Departed=no) for as long as some ferry demand exists, even on a land map; only a
 						// trip under way holds it. The ferry loop skips plan members.
+						// One that holds a radio link is already taking somebody in (an MCV on its way to an
+						// island, a unit the ferry loader sent): it has that single link for nobody else.
 						auto const pFerryTrip = FindFerryTrip(uid);
 						isCandidate = pUnit->Type && (flying || underground || IsAmphibiousGroundTransportType(pUnit->Type))
 							&& pUnit->Type->Passengers >= (underground ? 1 : 3) && isFreeForPlan(pUnit)
-							&& !(pFerryTrip && pFerryTrip->Departed);
+							&& !(pFerryTrip && pFerryTrip->Departed) && !pUnit->GetNthLink(0);
 					}
 
 					if (isCandidate)

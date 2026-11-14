@@ -3576,8 +3576,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 					for (auto const pT : UnitClass::Array)
 					{
+						// Never a transport a strategic plan is using (Airborne Front boards its own): a unit
+						// asking it for a ride took its single radio link and kept the plan's soldiers out.
 						if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type
-							|| !IsAmphibiousOrAirTransport(pT->Type))
+							|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID))
 						{
 							continue;
 						}
@@ -3784,8 +3786,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						int bestTransDist = 999999;
 						for (auto const pT : UnitClass::Array)
 						{
+							// Never a transport a strategic plan is using (Airborne Front boards its own): a unit
+							// asking it for a ride took its single radio link and kept the plan's soldiers out.
 							if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type
-								|| !IsAmphibiousOrAirTransport(pT->Type))
+								|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID))
 							{
 								continue;
 							}
@@ -4481,8 +4485,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								int bestTransDist = 999999;
 								for (auto const pT : UnitClass::Array)
 								{
+									// Never a transport a strategic plan is using (Airborne Front boards its own): a unit
+									// asking it for a ride took its single radio link and kept the plan's soldiers out.
 									if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type
-										|| !IsAmphibiousOrAirTransport(pT->Type))
+										|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID))
 									{
 										continue;
 									}
