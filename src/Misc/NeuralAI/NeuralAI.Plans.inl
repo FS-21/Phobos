@@ -4692,23 +4692,72 @@ namespace
 			// and AirborneFrontReachCells at most (farther, the attack keeps nobody busy there: 14 of
 			// the 25 transports that left for such a target were shot down or badly hit on the way,
 			// 4 of 22 nearer),
-			// with one anti-air defense and one mobile anti-air unit known near it at most, and with
-			// the team worth PlanStrikeAdvantagePercent of the strength known around it, as for a raid. workersFor tells how many of
+			// with one anti-air defense and one mobile anti-air unit known near it at most, with the
+			// team worth PlanStrikeAdvantagePercent of the strength known around it, as for a raid,
+			// and within what the team can destroy or one of its specialists can enter. workersFor tells how many of
 			// our specialists have a job inside a building type; a team already on its way (from)
 			// prefers the nearer building.
-			auto pickGoal = [&](const AirborneFrontLine& front, int teamValue, auto const& workersFor, const CellStruct& from,
-				FootClass* pCarrier) -> AirborneGoal
+			auto pickGoal = [&](const AirborneFrontLine& front, const std::vector<FootClass*>& team, auto const& workersFor,
+				const CellStruct& from, FootClass* pCarrier) -> AirborneGoal
 			{
 				AirborneGoal goal {};
+				const int teamValue = feetValue(team);
+
+				// What the team does to a building in the time it gets on the ground: every member
+				// fires its best ground weapon against the building's armor at its rate of fire
+				// for a part of that time (1 in AirborneAssaultShare: it also walks and is shot
+				// at). One that brings the building down by itself (C4, a bomber, a unit that
+				// blows up) counts for all of it.
+				auto assaultDamage = [&team](BuildingClass* pBld) -> int
+				{
+					int damage = 0;
+
+					for (auto const pFoot : team)
+					{
+						auto const pInf = abstract_cast<InfantryClass*>(pFoot);
+						auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+						if ((pInf && (IsCommandoInfantryType(pInf->Type) || pInf->Type->Ivan || IsSuicideInfantryType(pInf->Type)))
+							|| (pUnit && IsVehicleRaiderType(pUnit->Type)))
+						{
+							return pBld->Health;
+						}
+
+						int best = 0;
+
+						for (int i = 0; i < 2; ++i)
+						{
+							auto const pSlot = pFoot->GetTechnoType()->GetWeapon(i);
+							auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+							if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead)
+								continue;
+
+							const double verses = GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBld, pBld->Type);
+							best = std::max(best, static_cast<int>(pWeapon->Damage * std::max(1, pWeapon->Burst) * verses
+								* AirborneAssaultFrames / std::max(1, pWeapon->ROF)));
+						}
+
+						damage += best / AirborneAssaultShare;
+					}
+
+					return damage;
+				};
 
 				for (auto const pBld : knownEnemyBuildingList)
 				{
 					if (!isKnownEnemyBuilding(pBld) || pBld->Owner->ArrayIndex != front.Owner)
 						continue;
 
-					const int worth = valuableBuildingWorth(pBld->Type) + workersFor(pBld->Type) * 150;
+					const int workers = workersFor(pBld->Type);
+					const int worth = valuableBuildingWorth(pBld->Type) + workers * 150;
 					const CellStruct bc = pBld->GetMapCoords();
 					const double gap = front.Cell == CellStruct::Empty ? AirborneFrontReachCells : bc.DistanceFrom(front.Cell);
+
+					// A building nobody of the team goes into is one the team can bring down: 4 of 27
+					// teams stood by theirs for 2700 frames, two of them without a scratch on it.
+					if (workers == 0 && assaultDamage(pBld) < pBld->Health)
+						continue;
 
 					if (worth <= 0 || gap < AirborneFrontGapCells || gap > AirborneFrontReachCells
 						|| CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > 1
@@ -4903,7 +4952,22 @@ namespace
 						if (front.Cell == CellStruct::Empty)
 							front.Owner = plan.TargetOwner;
 
-						next = pickGoal(front, plan.InitialValue, [](BuildingTypeClass*) { return 0; }, pTransport->GetMapCoords(), pTransport);
+						// The team is aboard (in limbo) by now, or still on the map while it boards.
+						std::vector<FootClass*> team;
+
+						for (auto pAboard = pTransport->Passengers.GetFirstPassenger(); pAboard;
+							pAboard = abstract_cast<FootClass*>(pAboard->NextObject))
+						{
+							team.push_back(pAboard);
+						}
+
+						for (const DWORD uid : infantry)
+						{
+							if (auto const pFoot = findOwnFoot(uid))
+								team.push_back(pFoot);
+						}
+
+						next = pickGoal(front, team, [](BuildingTypeClass*) { return 0; }, pTransport->GetMapCoords(), pTransport);
 					}
 
 					if (next.Target)
@@ -5565,7 +5629,7 @@ namespace
 				};
 
 				const AirborneGoal goal = pTransport
-					? pickGoal(front, feetValue(seatTeam(nullptr)), specialistsFor, CellStruct::Empty, pTransport) : AirborneGoal {};
+					? pickGoal(front, seatTeam(nullptr), specialistsFor, CellStruct::Empty, pTransport) : AirborneGoal {};
 				std::vector<FootClass*> infantry;
 				int raiders = 0;
 				int workersAboard = 0;
