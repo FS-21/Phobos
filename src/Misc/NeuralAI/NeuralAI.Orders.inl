@@ -251,10 +251,16 @@ namespace
 	// the boarder walked onto the cell under it and waited there on Enter without getting in.
 	bool OpenBoardingDoor(FootClass* pTransport, FootClass* pBoarder)
 	{
-		if (pTransport->Locomotor->Is_Moving())
+		// At rest: its locomotor says so, or it has no destination and has kept its cell for
+		// BoardingSettleFrames (a hovercraft on Guard can report movement for as long as it floats).
+		const bool settled = !pTransport->Destination && pTransport->Owner
+			&& IsFootHeldStill(pTransport->Owner, pTransport, BoardingSettleFrames);
+
+		if (pTransport->Locomotor->Is_Moving() && !settled)
 			return false;
 
-		RegisterStoppedFootCell(pTransport);
+		if (pTransport->LastMapCoords != pTransport->GetMapCoords() && !pTransport->Destination && !IsFerryAloft(pTransport))
+			pTransport->UpdatePosition(PCPType::End);
 
 		if (GetFerryDoorZones(pTransport, pBoarder).Match())
 			return true;
