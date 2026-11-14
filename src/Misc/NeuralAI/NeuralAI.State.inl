@@ -1506,6 +1506,8 @@ namespace
 	constexpr int AirborneStandDownFrames = 1800;
 	constexpr double AirborneMusterCells = 20.0;
 	constexpr double AirborneSurfaceMeetCells = 40.0;
+	// Airborne Front: its team is taken from soldiers this near a building of ours.
+	constexpr double AirborneHomeCells = 15.0;
 	// A parked Airborne Front transport sets out for its soldiers again only when the nearest one
 	// is this far.
 	constexpr int BoardingParkedReachCells = 12;
