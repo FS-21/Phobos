@@ -4582,6 +4582,9 @@ namespace
 					// stopped short of the centre of its cell, so the engine never ran the step that takes
 					// it aboard (InfantryClass::Per_Cell_Process at the end of a move). Run it once it has
 					// stood there BoardingSettleFrames (7 of 33 plans with nobody aboard, 2026-11-14).
+					if (pBoarding)
+						WatchBoarder(pBoarding, pTransport);
+
 					if (pBoarding && pBoarding->ContainsLink(pTransport) && pBoarding->LastMapCoords != pBoarding->GetMapCoords()
 						&& !pBoarding->Locomotor->Is_Moving() && pTransport->DistanceFrom(pBoarding) <= 2 * Unsorted::LeptonsPerCell
 						&& IsFootHeldStill(pHouse, pBoarding, BoardingSettleFrames))
@@ -4606,6 +4609,7 @@ namespace
 							&& OpenBoardingDoor(pTransport, pInf))
 						{
 							OrderFootToEnter(pInf, pTransport);
+							WatchBoarder(pInf, pTransport);
 							pBoarding = pInf;
 							continue;
 						}
