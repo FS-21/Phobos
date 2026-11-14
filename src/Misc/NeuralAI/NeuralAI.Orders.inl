@@ -521,12 +521,91 @@ namespace
 		}
 	}
 
+	// TEMP trace: a flying transport a plan has parked by its team and put to sleep (Airborne
+	// Front), checked after every part of the AI tick: the part after which it is no longer asleep
+	// on the ground is the one that woke it. Two SHAD were found in the air again, on a move,
+	// 1500 frames after they had parked.
+	struct NeuralWatchedSleeper
+	{
+		int House { -1 };
+		int Frame { 0 };
+	};
+
+	std::unordered_map<DWORD, NeuralWatchedSleeper> WatchedSleepers;
+	int WatchedSleeperSerial = -1;
+	int WatchedSleeperLines = 0;
+
+	void WatchSleeper(FootClass* pFoot)
+	{
+		if (WatchedSleeperSerial != NeuralMatchSerial)
+		{
+			WatchedSleeperSerial = NeuralMatchSerial;
+			WatchedSleepers.clear();
+			WatchedSleeperLines = 0;
+		}
+
+		if (pFoot->Owner && WatchedSleeperLines < 60 && WatchedSleepers.size() < 8 && !WatchedSleepers.contains(pFoot->UniqueID))
+			WatchedSleepers[pFoot->UniqueID] = NeuralWatchedSleeper { pFoot->Owner->ArrayIndex, Unsorted::CurrentFrame };
+	}
+
+	void UnwatchSleeper(DWORD uid)
+	{
+		WatchedSleepers.erase(uid);
+	}
+
+	void TraceWatchedSleepers(int houseIndex, const char* part)
+	{
+		if (WatchedSleepers.empty() || WatchedSleeperSerial != NeuralMatchSerial)
+			return;
+
+		for (auto it = WatchedSleepers.begin(); it != WatchedSleepers.end();)
+		{
+			if (it->second.House != houseIndex)
+			{
+				++it;
+				continue;
+			}
+
+			UnitClass* pWatched = nullptr;
+
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (pUnit && pUnit->UniqueID == it->first && pUnit->IsAlive && !pUnit->InLimbo)
+				{
+					pWatched = pUnit;
+					break;
+				}
+			}
+
+			if (pWatched && pWatched->CurrentMission == Mission::Sleep && !pWatched->Destination && pWatched->GetHeight() <= 0)
+			{
+				++it;
+				continue;
+			}
+
+			if (pWatched && WatchedSleeperLines++ < 60)
+			{
+				auto const pGoing = abstract_cast<CellClass*>(pWatched->Destination);
+				Debug::Log("[NeuralAI] House %d watched sleeper DIAG frame %d: %s %u at (%d,%d), parked %d frames ago, is awake after \"%s\": "
+					"mission %d %d frames old, queued %d, destination %s (%d,%d), target %d, height %d, %d aboard.\n", houseIndex,
+					Unsorted::CurrentFrame, pWatched->Type->ID, pWatched->UniqueID, pWatched->GetMapCoords().X, pWatched->GetMapCoords().Y,
+					Unsorted::CurrentFrame - it->second.Frame, part, static_cast<int>(pWatched->CurrentMission),
+					Unsorted::CurrentFrame - pWatched->CurrentMissionStartTime, static_cast<int>(pWatched->QueuedMission),
+					pWatched->Destination ? (pGoing ? "cell" : "object") : "none", pGoing ? pGoing->MapCoords.X : -1,
+					pGoing ? pGoing->MapCoords.Y : -1, pWatched->Target ? 1 : 0, pWatched->GetHeight(), pWatched->Passengers.NumPassengers);
+			}
+
+			it = WatchedSleepers.erase(it);
+		}
+	}
+
 	// TEMP diagnostic: a transport the loader left parked to load (Guard or landing, no destination)
 	// that is found with other orders after a part of the AI tick: that part, or the engine between
 	// two ticks, moved it. Logged once per departure from the parking; the loader parks it again.
 	void TraceParkedFerries(int houseIndex, const char* part)
 	{
 		TraceWatchedMoves(houseIndex, part);
+		TraceWatchedSleepers(houseIndex, part);
 
 		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
 
