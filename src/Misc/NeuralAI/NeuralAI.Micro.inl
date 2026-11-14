@@ -8294,6 +8294,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		// Left on Attack with nothing to attack (the engine dropped a target the unit could not fire
+		// at, a submerged submarine for one) it does nothing, and it counts as busy below, so no
+		// rule gave it another order: the submarines sent at an enemy one stayed where they lost
+		// it for the rest of the match. It goes back on guard and is idle from the next tick.
+		if (pUnit->CurrentMission == Mission::Attack && !pUnit->Target && !pUnit->IsFiring
+			&& Unsorted::CurrentFrame - pUnit->CurrentMissionStartTime >= AttackWithNoTargetFrames)
+		{
+			pUnit->QueueMission(Mission::Guard, true);
+		}
+
 		if (IsFootActivelyAttackingOrMovingToEnemy(pUnit))
 		{
 			++notIdleBusy;
@@ -9734,7 +9744,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// TEMP diagnostic: what the idle ships that fight only at sea got this tick.
 		int seaHunters = 0;
 		int seaHuntersSent = 0;
-		int seaHuntersOffAttack = 0;
 
 		for (auto const pBeachU : idleCombatUnits)
 		{
@@ -9780,8 +9789,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!pLandSiegeWpn)
 				{
 					// A ship that fights only at sea (torpedo submarine, dolphin, squid) goes for the
-					// enemy ship nearest to it that it can fire at now. With none, one left on Attack
-					// with no target goes back on guard, where the engine gives it what comes near.
+					// enemy ship nearest to it that it can fire at now; with none it stays on guard,
+					// where the engine gives it what comes near.
 					auto const pShipTarget = nearestEnemyShipFor(pBeachU, true);
 					seaHunters++;
 
@@ -9790,11 +9799,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						pBeachU->SetTarget(pShipTarget);
 						pBeachU->QueueMission(Mission::Attack, true);
 						seaHuntersSent++;
-					}
-					else if (!pShipTarget && !pBeachU->Target && pBeachU->CurrentMission == Mission::Attack)
-					{
-						pBeachU->QueueMission(Mission::Guard, true);
-						seaHuntersOffAttack++;
 					}
 
 					continue;
@@ -9911,11 +9915,74 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (seaHunters > 0 && IsAITickWindow(900, 15))
+		// TEMP diagnostic: where the ships that fight only at sea stand and what they are on, every
+		// 900 frames: how many, on Attack with and without a target, on guard, on the move, and the
+		// most of them within 4 cells of one of them (the submarines of match #9872 stood packed).
+		if (IsAITickWindow(900, 15))
 		{
-			Debug::Log("[NeuralAI] House %d sea hunters DIAG frame %d: %d idle ships that fight only at sea, %d sent at an enemy ship, %d taken "
-				"off an Attack with no target, %d enemy ships seen.\n", pHouse->ArrayIndex, Unsorted::CurrentFrame, seaHunters,
-				seaHuntersSent, seaHuntersOffAttack, static_cast<int>(seenEnemyShips.size()));
+			std::vector<UnitClass*> seaOnly;
+
+			for (auto const pShip : UnitClass::Array)
+			{
+				if (!pShip || pShip->Owner != pHouse || !pShip->IsAlive || pShip->InLimbo || !pShip->Type || !pShip->Type->Naval
+					|| IsAmphibiousOrAirTransport(pShip->Type) || pShip->Type->Spawns)
+				{
+					continue;
+				}
+
+				bool armed = false;
+				bool hitsLand = false;
+
+				for (int i = 0; i < 2; ++i)
+				{
+					auto const pSlot = pShip->Type->GetWeapon(i);
+					auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+					if (!pWeapon || (pWeapon->Damage <= 0 && !pWeapon->Spawner))
+						continue;
+
+					armed = true;
+					hitsLand = hitsLand || pWeapon->Spawner || !pWeapon->Projectile || pWeapon->Projectile->AG;
+				}
+
+				if (armed && !hitsLand)
+					seaOnly.push_back(pShip);
+			}
+
+			if (!seaOnly.empty())
+			{
+				int attacking = 0;
+				int attackNoTarget = 0;
+				int onGuard = 0;
+				int onTheMove = 0;
+				int packed = 0;
+
+				for (auto const pShip : seaOnly)
+				{
+					if (pShip->CurrentMission == Mission::Attack)
+						(pShip->Target ? attacking : attackNoTarget)++;
+					else if (pShip->CurrentMission == Mission::Guard || pShip->CurrentMission == Mission::Area_Guard)
+						onGuard++;
+					else
+						onTheMove++;
+
+					int beside = 0;
+
+					for (auto const pOther : seaOnly)
+					{
+						if (pOther->GetMapCoords().DistanceFrom(pShip->GetMapCoords()) <= 4.0)
+							beside++;
+					}
+
+					packed = std::max(packed, beside);
+				}
+
+				Debug::Log("[NeuralAI] House %d sea hunters DIAG frame %d: %d ships that fight only at sea: %d on Attack with a target, %d on "
+					"Attack with none, %d on guard, %d on the move; most within 4 cells of one %d; idle this tick %d, sent at an enemy "
+					"ship %d, enemy ships seen %d.\n", pHouse->ArrayIndex, Unsorted::CurrentFrame, static_cast<int>(seaOnly.size()),
+					attacking, attackNoTarget, onGuard, onTheMove, packed, seaHunters, seaHuntersSent,
+					static_cast<int>(seenEnemyShips.size()));
+			}
 		}
 
 		for (auto const pBeachI : idleCombatInf)
