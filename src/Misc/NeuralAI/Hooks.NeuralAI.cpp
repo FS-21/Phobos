@@ -668,6 +668,23 @@ DEFINE_HOOK(0x41A882, AircraftClass_MissionGuard_SkipJuicyTarget_NeuralAI, 0x6)
 	return 0;
 }
 
+// HouseClass::GenerateAIBuildList writes the base plan of the legacy AI from a list of building
+// types and placeholders (-1 to -4). A null type in that list passes for a pointer (0x505DAA) and
+// is read at 0x505E41: the game closed there in matches #7980, #9407 and #9497, each after a
+// construction yard unfolded in the middle of the match. The null entry is passed over; the rest
+// of the plan is written as the engine does (UnitClass::Try_To_Deploy reads its first node).
+DEFINE_HOOK(0x505E41, HouseClass_GenerateAIBuildList_NullType_NeuralAI, 0x6)
+{
+	enum
+	{
+		NextEntry = 0x505EAD
+	};
+
+	GET(BuildingTypeClass* const, pType, EDI);
+
+	return pType ? 0 : NextEntry;
+}
+
 // Track directional building attacks for NeuralAI reactive defense placement and threat moderation
 DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_TrackThreat_NeuralAI, 0x8)
 {
