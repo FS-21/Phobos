@@ -1848,6 +1848,17 @@ namespace
 		return false;
 	}
 
+	// May the type fire the weapon of this slot at the ground, by its LandTargeting? Land_Not_OK
+	// bars both slots, Land_Secondary bars the primary. A projectile that hits the ground does not
+	// settle it: the torpedo of the rules has AG=yes, so torpedo submarines counted as ships that
+	// shell the coast and were sent at buildings they cannot fire at, where they stood packed on
+	// an Attack mission with no target (match #9872, Mayflower).
+	bool LandTargetingAllows(const TechnoTypeClass* pType, int slot)
+	{
+		return pType && pType->LandTargeting != LandTargetingType::Land_Not_OK
+			&& !(pType->LandTargeting == LandTargetingType::Land_Secondary && slot == 0);
+	}
+
 	// A warhead that hits an area hard enough to matter (CellSpread 1 cell or more, 50 damage).
 	bool IsAreaWeapon(const WeaponTypeClass* pWeapon)
 	{
