@@ -4952,6 +4952,16 @@ namespace
 						return pBest;
 					};
 
+					// A parked transport found on the move again is stopped before its soldiers are looked
+					// at. An LCRF came to every tick with a destination, so the soldier next to it was
+					// refused, and ended every tick parked again by the lines below: nobody aboard in
+					// 1500 frames. One that flies sleeps instead (see below).
+					if (plan.BoardingParked && !flyer && (pTransport->Destination || pTransport->CurrentMission == Mission::Move))
+					{
+						pTransport->SetDestination(nullptr, true);
+						pTransport->ForceMission(Mission::Guard);
+					}
+
 					for (const DWORD uid : infantry)
 					{
 						auto const pInf = findOwnFoot(uid);
