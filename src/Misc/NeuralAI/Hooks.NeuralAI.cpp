@@ -668,28 +668,6 @@ DEFINE_HOOK(0x41A882, AircraftClass_MissionGuard_SkipJuicyTarget_NeuralAI, 0x6)
 	return 0;
 }
 
-// The dock that reloads or repairs an aircraft asks it whether it is ready
-// (AircraftClass::Receive_Message, case 29). With a target the aircraft always answers no, so the
-// dock keeps it asleep: an aircraft given a strike while its dock was servicing it slept on its pad
-// with the target set for good, and its strike order was given again every AI tick (50 of 58 Air
-// Strike plans ended with every aircraft docked, armed and asleep, 2026-11-14). Phobos lets the
-// ammo decide for the target of a team (AircraftClass_ReceiveCommand_QueryPreparedness); the Neural
-// AI gives targets without teams, so for its houses the ammo decides too.
-DEFINE_HOOK(0x41915D, AircraftClass_ReceiveCommand_QueryPreparedness_NeuralAI, 0x8)
-{
-	enum
-	{
-		CheckAmmo = 0x419169
-	};
-
-	GET(AircraftClass* const, pThis, ESI);
-
-	if (pThis->CurrentMission == Mission::Sleep && NeuralAI::IsEnabledForHouse(pThis->Owner))
-		return CheckAmmo;
-
-	return 0;
-}
-
 // Track directional building attacks for NeuralAI reactive defense placement and threat moderation
 DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_TrackThreat_NeuralAI, 0x8)
 {

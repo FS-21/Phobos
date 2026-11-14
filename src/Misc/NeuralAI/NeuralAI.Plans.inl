@@ -492,8 +492,9 @@ namespace
 	// Sleep). An aircraft back on its pad keeps the target of its last strike, and with a target
 	// the engine neither reloads it nor sends it again: it slept there until its plan ran out of
 	// time (59 Superweapon Race and 45 Tech Tree Cut plans of the focus batch of 2026-11-13 ended
-	// with every aircraft on Sleep, 100 cells and more from the target). Empty, it drops the target
-	// so it reloads, and is not ready; armed, it drops it so the new order is a new one.
+	// with every aircraft on Sleep, 100 cells and more from the target). Empty, or on its dock
+	// with less than its full load, it drops the target so it reloads, and is not ready; armed,
+	// it drops it so the new order is a new one.
 	bool ReadyPlanAircraft(AircraftClass* pAir)
 	{
 		if (!pAir || (pAir->CurrentMission != Mission::Guard && pAir->CurrentMission != Mission::Area_Guard
@@ -502,7 +503,7 @@ namespace
 			return false;
 		}
 
-		if (pAir->Ammo == 0 && pAir->Type->Ammo >= 0)
+		if ((pAir->Ammo == 0 && pAir->Type->Ammo >= 0) || IsAircraftReloadingOnDock(pAir))
 		{
 			if (pAir->Target)
 			{
