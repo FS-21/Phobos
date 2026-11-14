@@ -4989,9 +4989,10 @@ namespace
 				{
 					standDown("out of time");
 				}
-				else if (plan.AuxBaseline < 2 && !pTransport)
+				else if (plan.AuxBaseline < 2 && (!pTransport || pTransport->Health <= 0 || pTransport->IsCrashing || pTransport->IsSinking))
 				{
-					// Shot down (or lost) before the drop.
+					// Shot down (or lost) before the drop. One still on the map while it goes down has
+					// no passengers left either, and was taken for one that had let its team out.
 					logEnd("transport lost");
 					finishPlan(NeuralPlanId::AirborneFront, false, false);
 				}
