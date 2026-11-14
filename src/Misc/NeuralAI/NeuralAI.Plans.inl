@@ -4673,7 +4673,7 @@ namespace
 			// third house has its whole garrison at home), at least AirborneFrontGapCells from where
 			// that attack is aimed (nearer, the army brought it down before the drop: 9 of 34 plans),
 			// with one anti-air defense and one mobile anti-air unit known near it at most, and with
-			// no more strength known around it than the team is worth. workersFor tells how many of
+			// the team worth PlanStrikeAdvantagePercent of the strength known around it, as for a raid. workersFor tells how many of
 			// our specialists have a job inside a building type; a team already on its way (from)
 			// prefers the nearer building.
 			auto pickGoal = [&](const AirborneFrontLine& front, int teamValue, auto const& workersFor, const CellStruct& from) -> AirborneGoal
@@ -4697,7 +4697,7 @@ namespace
 
 					const int guard = knownEnemyStrengthOnWay(CellStruct::Empty, bc, PlanStrikeGuardFrames);
 
-					if (guard > teamValue)
+					if (guard * PlanStrikeAdvantagePercent > teamValue * 100)
 						continue;
 
 					const int score = worth + static_cast<int>(std::min(gap, 40.0)) * 4 - guard / 20
@@ -5084,8 +5084,10 @@ namespace
 						: Unsorted::CurrentFrame - plan.StartFrame >= BoardingApproachFrames;
 
 					// It leaves with all of them, or after BoardingPartialLoadFrames with a team of the
-					// size it needs to start (one left with 2 of its 11 soldiers).
-					const int enough = std::min(AirborneTeamMin, pTransport->GetTechnoType()->Passengers);
+					// size it needs to start and half of its own at least (one left with 2 of its 11
+					// soldiers; one with 7 of 12 lost them all at the drop).
+					const int enough = std::max(std::min(AirborneTeamMin, pTransport->GetTechnoType()->Passengers),
+						(static_cast<int>(infantry.size()) + 1) / 2);
 
 					if (aboard > 0 && (waiting == 0 || (parkedFrames >= BoardingPartialLoadFrames && aboard >= enough)))
 					{
