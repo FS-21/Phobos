@@ -159,6 +159,10 @@ namespace
 		int TargetOwner { -1 };
 		// Airborne Front: its transport has parked by its soldiers to take them in.
 		bool BoardingParked { false };
+		// Airborne Front: the frame its transport first parked by its soldiers (-1 not yet).
+		int BoardingParkedFrame { -1 };
+		// Preemptive Strike: where the enemy force was gathering when the plan started.
+		CellStruct AnchorCell { 0, 0 };
 		int TargetSeenFrame { 0 };
 		// Per member: a frame (Pickets: until when a sentry holds back, when it last saw something).
 		std::vector<int> MemberFrames {};
@@ -1374,6 +1378,8 @@ namespace
 	// ring of cells farther each time up to FerryLandingMaxRing.
 	constexpr int FerryLandingFrames = 300;
 	constexpr int FerryLandingMaxRing = 5;
+	// How far a flying transport over a beach looks for a cell it can touch down on.
+	constexpr int FerryBeachSearchCells = 8;
 	constexpr double FerryLandingDriftCells = 1.5;
 	// A carryall within CarryallDropZoneCells of its drop cell sets the cargo down; when the cell
 	// below does not take it, on the nearest one that does within CarryallDropSearchCells.
@@ -1483,6 +1489,21 @@ namespace
 	// A parked Airborne Front transport sets out for its soldiers again only when the nearest one
 	// is this far.
 	constexpr int BoardingParkedReachCells = 12;
+	// Airborne Front, counted from the moment its transport parked by its soldiers: it leaves with
+	// a part of them after BoardingPartialLoadFrames, and gives up with nobody aboard after
+	// BoardingWaitFrames. A transport that has not parked BoardingApproachFrames into the plan is
+	// given up too.
+	constexpr int BoardingPartialLoadFrames = 900;
+	constexpr int BoardingWaitFrames = 1500;
+	constexpr int BoardingApproachFrames = 2700;
+	// Preemptive Strike goes for a gathering enemy force this near the group that would go (about
+	// 750 frames of march), and follows it this far from where it was gathering.
+	constexpr double PreemptiveReachCells = 45.0;
+	constexpr double PreemptiveLeashCells = 15.0;
+	// Bait Ambush: how long the bait shows itself at the enemy's door before the plan gives up, and
+	// how long the ambush waits for a chaser once the bait is back behind it.
+	constexpr int BaitLureWaitFrames = 450;
+	constexpr int BaitChaseWaitFrames = 450;
 	// An air group goes for a building only when this many sorties of its full load add up to the
 	// building's health: Air Strike sent two aircraft at buildings they could not bring down in
 	// its 2700 frames, and 128 of 163 plans ran out of time (focus batch of 2026-11-14).

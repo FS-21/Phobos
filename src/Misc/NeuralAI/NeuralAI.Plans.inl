@@ -3557,12 +3557,16 @@ namespace
 		// known defenses that reach it) goes home instead of walking on until it is dead, and its
 		// plan waits before it tries again. In the focus matches of 2026-11-13 the groups of Feint,
 		// Superweapon Race and Tech Tree Cut lost three of every four members 30 to 50 cells short
-		// of the target, and Feint arrived 4 times in 100.
+		// of the target, and Feint arrived 4 times in 100. The siege batteries turn back the same
+		// way: Rolling Siege and Siege Battery marched on until a third of the battery was left, 30
+		// to 57 cells short of the defense they were after (76 of 96 and 280 of 471 plans,
+		// 2026-11-14).
 		{
 			constexpr NeuralPlanId raidPlans[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout, NeuralPlanId::Feint,
 				NeuralPlanId::TimingRush, NeuralPlanId::ExpansionDenial, NeuralPlanId::SuperweaponRace, NeuralPlanId::HarvesterAmbush,
 				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
-				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut };
+				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut,
+				NeuralPlanId::RollingSiege, NeuralPlanId::SiegeBattery };
 
 			for (const NeuralPlanId id : raidPlans)
 			{
@@ -4640,6 +4644,9 @@ namespace
 							// Close enough: a moving transport takes nobody in, so it stops and waits.
 							plan.BoardingParked = true;
 
+							if (plan.BoardingParkedFrame < 0)
+								plan.BoardingParkedFrame = Unsorted::CurrentFrame;
+
 							if (pTransport->CurrentMission == Mission::Move || pTransport->Destination)
 							{
 								pTransport->SetDestination(nullptr, true);
@@ -4650,9 +4657,16 @@ namespace
 
 					const int aboard = pTransport->Passengers.NumPassengers;
 
-					if (aboard > 0 && (waiting == 0 || Unsorted::CurrentFrame - plan.StartFrame >= 900))
+					// The waits run from the moment the transport first parked by its soldiers: counted from
+					// the start of the plan they ran out while a transport that came from far was still
+					// landing. One that has not parked in BoardingApproachFrames is given up as well.
+					const int parkedFrames = plan.BoardingParkedFrame >= 0 ? Unsorted::CurrentFrame - plan.BoardingParkedFrame : -1;
+					const bool nobodyCame = parkedFrames >= 0 ? parkedFrames >= BoardingWaitFrames
+						: Unsorted::CurrentFrame - plan.StartFrame >= BoardingApproachFrames;
+
+					if (aboard > 0 && (waiting == 0 || parkedFrames >= BoardingPartialLoadFrames))
 						plan.AuxBaseline = 1;
-					else if (aboard == 0 && Unsorted::CurrentFrame - plan.StartFrame >= 1500)
+					else if (aboard == 0 && nobodyCame)
 					{
 						// Not this transport again for a while: the same failure would repeat.
 						auto const pTransportCell = pTransport->GetCell();
@@ -6282,12 +6296,33 @@ namespace
 			{
 				const CellStruct current = seenEnemyCentroidNear(plan.TargetCell, 10.0, 150);
 
-				if (current != CellStruct::Empty)
+				// The plan follows the force PreemptiveLeashCells from where it gathered and no
+				// farther: a force that has set out is no longer a gathering, and the group that
+				// followed it ended across the map (37 of 102 plans ran out of time 27 to 107 cells
+				// from a target that kept moving, 50 more were beaten on the way, 2026-11-14).
+				const bool forceLeft = current != CellStruct::Empty && plan.AnchorCell != CellStruct::Empty
+					&& current.DistanceFrom(plan.AnchorCell) > PreemptiveLeashCells;
+
+				if (current != CellStruct::Empty && !forceLeft)
 					plan.TargetCell = current;
 
-				const CellStruct ourCenter = groupCentroid(plan.Members);
+				// Arrived with half of the group at the force: the centre of a group strung out
+				// along its way stays behind while its head is already fighting.
+				int membersAlive = 0;
+				int membersThere = 0;
 
-				if (!plan.Arrived && ourCenter != CellStruct::Empty && ourCenter.DistanceFrom(plan.TargetCell) <= 8.0)
+				for (const DWORD uid : plan.Members)
+				{
+					if (auto const pMember = findOwnFoot(uid))
+					{
+						membersAlive++;
+
+						if (pMember->GetMapCoords().DistanceFrom(plan.TargetCell) <= 8.0)
+							membersThere++;
+					}
+				}
+
+				if (!plan.Arrived && membersThere > 0 && membersThere * 2 >= membersAlive)
 				{
 					plan.Arrived = true;
 					plan.ArrivedFrame = Unsorted::CurrentFrame;
@@ -6295,6 +6330,8 @@ namespace
 
 				if (memberValue(plan) * 100 < plan.InitialValue * 40 || Unsorted::CurrentFrame >= plan.Deadline)
 					finishPlan(NeuralPlanId::PreemptiveStrike, false, true);
+				else if (forceLeft && !plan.Arrived)
+					finishPlan(NeuralPlanId::PreemptiveStrike, false, true); // It left before the group got there.
 				else if (plan.Arrived && seenEnemyValueNear(plan.TargetCell, 10.0, 150) * 10 <= plan.AuxBaseline * 4)
 					finishPlan(NeuralPlanId::PreemptiveStrike, true, true);
 				else
@@ -6336,7 +6373,22 @@ namespace
 						group = collectIdleGround(false);
 						group.resize(std::min<size_t>(group.size(), 12));
 
-						if (group.size() < 5 || feetValue(group) * 100 < bestValue * 125)
+						// Only a force the group reaches while it is still gathering.
+						int sumX = 0;
+						int sumY = 0;
+
+						for (auto const pFoot : group)
+						{
+							const CellStruct cell = pFoot->GetMapCoords();
+							sumX += cell.X;
+							sumY += cell.Y;
+						}
+
+						const int count = static_cast<int>(group.size());
+						const bool inReach = count > 0 && CellStruct { static_cast<short>(sumX / count), static_cast<short>(sumY / count) }
+							.DistanceFrom(clusterCenter) <= PreemptiveReachCells;
+
+						if (group.size() < 5 || !inReach || feetValue(group) * 100 < bestValue * 125)
 							group.clear();
 					}
 				}
@@ -6347,6 +6399,7 @@ namespace
 				{
 					startPlan(NeuralPlanId::PreemptiveStrike, group, clusterCenter, CellStruct::Empty, 0, 2400);
 					planOf(NeuralPlanId::PreemptiveStrike).AuxBaseline = bestValue;
+					planOf(NeuralPlanId::PreemptiveStrike).AnchorCell = clusterCenter;
 				}
 			}
 		}
@@ -6392,21 +6445,44 @@ namespace
 					else if (auto const pLure = landCellInZone(pointAlong(plan.TargetCell, homeCell, 8.0, 0.0), homeZone, 4))
 					{
 						IssueMoveOrder(pBait, pLure, 2.0);
+
+						// Shown at the enemy's door for BaitLureWaitFrames and nobody came out: the
+						// ambushers go back to work. The bait stood there until the plan's deadline
+						// while eight units waited for it (32 of 125 plans, 2026-11-14).
+						if (!plan.Arrived && pBait->GetMapCoords().DistanceFrom(pLure->MapCoords) <= 4.0)
+						{
+							plan.Arrived = true;
+							plan.ArrivedFrame = Unsorted::CurrentFrame;
+						}
+						else if (plan.Arrived && Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitLureWaitFrames)
+						{
+							finishPlan(NeuralPlanId::BaitAmbush, false, true);
+						}
 					}
 				}
 				else if (plan.AuxBaseline == 1)
 				{
 					moveGroup(ambushers, pAmbush, 3.0);
+					bool baitBack = true;
 
 					if (pBait)
 					{
 						if (auto const pBehind = landCellInZone(pointAlong(plan.StagingCell, homeCell, 4.0, 0.0), homeZone, 3))
+						{
 							IssueMoveOrder(pBait, pBehind, 2.0);
+							baitBack = pBait->GetMapCoords().DistanceFrom(pBehind->MapCoords) <= 5.0;
+						}
 					}
+
+					// Whoever chases the bait is on its heels: the wait for them starts when the bait
+					// is back behind the ambush, and lasts BaitChaseWaitFrames (it was 1500 frames
+					// from the moment it turned, and 70 of 125 plans spent them on nobody).
+					if (!baitBack)
+						plan.ArrivedFrame = Unsorted::CurrentFrame;
 
 					if (enemyAtAmbush >= 40)
 						plan.AuxBaseline = 2;
-					else if (Unsorted::CurrentFrame - plan.ArrivedFrame >= 1500)
+					else if (Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitChaseWaitFrames)
 						finishPlan(NeuralPlanId::BaitAmbush, false, true); // Nobody took the bait.
 				}
 				else
@@ -6915,12 +6991,40 @@ namespace
 				}
 				else
 				{
+					// TEMP diagnostic: 48 of 93 plans ran out of time with four fifths of the fleet, the
+					// ships on Guard 50 to 200 cells from the target (2026-11-14). What each ship is
+					// doing every 1500 frames of its plan. AuxPeak = reports written.
+					static int navalDiagLines = 0;
+					const bool navalDiag = Unsorted::CurrentFrame - plan.StartFrame >= 1500 * (plan.AuxPeak + 1) && navalDiagLines < 60;
+
+					if (navalDiag)
+						plan.AuxPeak++;
+
 					for (const DWORD uid : plan.Members)
 					{
 						auto const pShip = findOwnFoot(uid);
 
 						if (!pShip)
 							continue;
+
+						if (navalDiag)
+						{
+							auto const pShipType = pShip->GetTechnoType();
+							const CellStruct at = pShip->GetMapCoords();
+							auto const pGoing = abstract_cast<CellClass*>(pShip->Destination);
+							auto const pReach = NearestReachableNavalCell(pShip, plan.StagingCell);
+							navalDiagLines++;
+							Debug::Log("[NeuralAI] House %d navalStrike ship DIAG frame %d (plan frame %d): %s zone type %d at (%d,%d) zone %d, firing "
+								"cell (%d,%d) zone %d at %d cells, mission %d, target %d (the plan's %d), destination (%d,%d), reachable cell (%d,%d), "
+								"hp %d, range %d.\n", houseIdx, Unsorted::CurrentFrame, Unsorted::CurrentFrame - plan.StartFrame, pShipType->ID,
+								static_cast<int>(pShipType->MovementZone), at.X, at.Y, ObjectZone(pShip, pShipType->MovementZone),
+								plan.StagingCell.X, plan.StagingCell.Y,
+								MapClass::Instance.GetMovementZoneType(plan.StagingCell, pShipType->MovementZone, false),
+								static_cast<int>(at.DistanceFrom(plan.StagingCell)), static_cast<int>(pShip->CurrentMission),
+								pShip->Target ? 1 : 0, pShip->Target == pTarget ? 1 : 0, pGoing ? pGoing->MapCoords.X : -1,
+								pGoing ? pGoing->MapCoords.Y : -1, pReach ? pReach->MapCoords.X : -1, pReach ? pReach->MapCoords.Y : -1,
+								static_cast<int>(pShip->GetHealthPercentage() * 100), GroundRangeOf(pShipType) / Unsorted::LeptonsPerCell);
+						}
 
 						if (pShip->GetHealthPercentage() < 0.4)
 						{
