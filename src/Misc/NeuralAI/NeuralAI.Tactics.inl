@@ -1326,6 +1326,59 @@ namespace
 							static_cast<int>(here.DistanceFrom(destCell)), footZone, destZone, unreachable ? 1 : 0, stalledAttackMove ? 1 : 0,
 							static_cast<int>(pFoot->CurrentMission), static_cast<int>(pFoot->MegaMission),
 							MapClass::Instance.TryGetCellAt(destCell) ? static_cast<int>(MapClass::Instance.TryGetCellAt(destCell)->LandType) : -1);
+
+						// Is it boxed in? Cells around it that it may enter, what stands on the others,
+						// and what the engine holds for its path.
+						int freeNext = 0;
+						int waterNext = 0;
+						int freeNear = 0;
+						int shipsNear = 0;
+						const char* buildingNear = "none";
+
+						for (int dy = -3; dy <= 3; ++dy)
+						{
+							for (int dx = -3; dx <= 3; ++dx)
+							{
+								if (dx == 0 && dy == 0)
+									continue;
+
+								auto const pAround = MapClass::Instance.TryGetCellAt(
+									CellStruct { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) });
+
+								if (!pAround)
+									continue;
+
+								const bool next = std::abs(dx) <= 1 && std::abs(dy) <= 1;
+								const bool clear = pAround->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false);
+
+								if (clear)
+									freeNear++;
+
+								if (next && clear)
+									freeNext++;
+
+								if (next && pAround->LandType == LandType::Water)
+									waterNext++;
+
+								if (auto const pBldAround = pAround->GetBuilding())
+									buildingNear = pBldAround->Type->ID;
+
+								for (ObjectClass* pObj = pAround->FirstObject; pObj; pObj = pObj->NextObject)
+								{
+									if (abstract_cast<UnitClass*>(pObj))
+										shipsNear++;
+								}
+							}
+						}
+
+						auto const pShipLink = abstract_cast<TechnoClass*>(pFoot->GetNthLink(0));
+						Debug::Log("[NeuralAI] Naval box DIAG house %d: %s %u may enter %d of the 8 cells next to it (%d water) and %d of 48 within 3, "
+							"%d units within 3, building %s, link %s, mission %d frames old, moving %d, first path step %d, path delay %d, "
+							"blockage delay %d, emp %d, cloak %d.\n", pHouse->ArrayIndex, pType->ID, pFoot->UniqueID, freeNext, waterNext, freeNear,
+							shipsNear, buildingNear, pShipLink ? pShipLink->GetTechnoType()->ID : "none", now - pFoot->CurrentMissionStartTime,
+							(pFoot->Locomotor && pFoot->Locomotor->Is_Moving()) ? 1 : 0, pFoot->PathDirections[0],
+							pFoot->PathDelayTimer.GetTimeLeft(), pFoot->BlockagePathTimer.GetTimeLeft(), pFoot->IsUnderEMP() ? 1 : 0,
+							static_cast<int>(pFoot->CloakState));
 					}
 				}
 
