@@ -668,26 +668,6 @@ DEFINE_HOOK(0x41A882, AircraftClass_MissionGuard_SkipJuicyTarget_NeuralAI, 0x6)
 	return 0;
 }
 
-// HouseClass::GenerateAIBuildList writes the base plan of the legacy AI. Called again in the
-// middle of a match (auto base building switched on, a house taken over by the AI) it read a null
-// building type at 0x505E41 and the game closed (matches #7980, #9407 and #9497). The Neural AI
-// places its own buildings and reads that plan only under a campaign restriction, so past the
-// start of the match its houses skip it.
-DEFINE_HOOK(0x5054B0, HouseClass_GenerateAIBuildList_Skip_NeuralAI, 0x6)
-{
-	enum
-	{
-		SkipBuildList = 0x505F72
-	};
-
-	GET(HouseClass* const, pThis, ECX);
-
-	if (Unsorted::CurrentFrame > 0 && NeuralAI::IsEnabledForHouse(pThis) && !NeuralAI::IsCampaignRestricted(pThis))
-		return SkipBuildList;
-
-	return 0;
-}
-
 // Track directional building attacks for NeuralAI reactive defense placement and threat moderation
 DEFINE_HOOK(0x44242A, BuildingClass_ReceiveDamage_TrackThreat_NeuralAI, 0x8)
 {
