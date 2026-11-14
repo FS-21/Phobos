@@ -12767,6 +12767,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		// An aircraft with no weapon keeps no target: on Guard the engine puts any aircraft that
+		// has one on Attack (AircraftClass::Mission_Guard, 0x41A822), where a carryall found no
+		// firing cell and sat between "pick a cell" and "return" for good.
+		if (pAir->Target && abstract_cast<TechnoClass*>(pAir->Target) && !AircraftHitsGround(pAir->Type) && !AircraftHitsAir(pAir->Type)
+			&& (pAir->CurrentMission == Mission::Attack || pAir->CurrentMission == Mission::Guard
+				|| pAir->CurrentMission == Mission::Area_Guard))
+		{
+			const bool wasAttacking = pAir->CurrentMission == Mission::Attack;
+			pAir->SetTarget(nullptr);
+
+			if (wasAttacking)
+				pAir->EnterIdleMode(false, true);
+		}
+
 		// A hovering aircraft that reached the end of a move stays in Mission::Move with its
 		// destination under it: treat it as idle so it can be given new work.
 		const bool isAirIdle = (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Area_Guard
