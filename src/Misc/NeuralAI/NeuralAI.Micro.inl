@@ -13265,7 +13265,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// with no weapon has no load at all: a carryall was sent to attack harvesters and sat on
 		// Attack until the stall watchdog released it, again and again.
 		const bool hitsGround = AircraftHitsGround(pAir->Type);
-		const bool hasAirLoad = (hitsGround || AircraftHitsAir(pAir->Type))
+		// On its dock it waits for the full load: sent out at once it flew every sortie with what
+		// it had left (one missile of four), and with a target the dock does not reload it, so the
+		// target of its last strike is dropped while it reloads.
+		const bool reloadingOnDock = IsAircraftReloadingOnDock(pAir);
+
+		if (reloadingOnDock && isAirIdle && pAir->Target)
+			pAir->SetTarget(nullptr);
+
+		const bool hasAirLoad = (hitsGround || AircraftHitsAir(pAir->Type)) && !reloadingOnDock
 			&& (pAir->Ammo > 0 || (pAir->Type->Ammo < 0 && !pAir->Type->Spawned));
 		const bool isAirForceCraft = IsAirForceCraft(pAir->Type);
 
