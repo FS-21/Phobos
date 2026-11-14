@@ -4887,12 +4887,21 @@ namespace
 							pNearest = pInf;
 						}
 
-						if (!aloft)
-							IssueMoveOrder(pInf, pTransport, 1.0);
-						else if (pLanding && pInf->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingMeetCells)
+						// They walk to the cell the transport stands on, not to the transport: a move onto
+						// a transport is an order to enter it, and the transport answers that one by
+						// setting out for the soldier (two HIND down by their team took off again and
+						// were still flying 1500 frames later).
+						const bool entering = pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter;
+
+						if (!aloft && !entering)
+							IssueMoveOrder(pInf, pTransport->GetCell(), 1.5);
+						else if (aloft && !entering && pLanding && pInf->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingMeetCells)
 							IssueMoveOrder(pInf, pLanding, 2.0);
-						else if (pInf->CurrentMission == Mission::Move)
+						else if (entering || pInf->CurrentMission == Mission::Move)
 						{
+							if (pInf->ContainsLink(pTransport))
+								pInf->SendCommand(RadioCommand::NotifyUnlink, pTransport);
+
 							pInf->SetDestination(nullptr, true);
 							pInf->ClearNavigationList();
 							pInf->ForceMission(Mission::Guard);
@@ -4954,6 +4963,13 @@ namespace
 						// nobody in: only one at rest does.
 						const int reachCells = plan.BoardingParked ? BoardingParkedReachCells : BoardingMeetCells;
 
+						// The cell it flies to is the one it was sent to or one next to it (the locomotor
+						// moves the goal to a free spot near). Any other destination is not ours: one on
+						// Area Guard flew back to its old post and was waited for until the plan gave up.
+						auto const pGoing = abstract_cast<CellClass*>(pTransport->Destination);
+						const bool inbound = pLanding && aloft && pGoing
+							&& pGoing->MapCoords.DistanceFrom(plan.AnchorCell) <= BoardingLandingNearCells;
+
 						if (flyer)
 						{
 							if (!aloft && nearestDist <= BoardingParkedReachCells * Unsorted::LeptonsPerCell)
@@ -4964,8 +4980,7 @@ namespace
 								if (plan.BoardingParkedFrame < 0)
 									plan.BoardingParkedFrame = Unsorted::CurrentFrame;
 							}
-							else if (pLanding && aloft && pTransport->Destination
-								&& pTransport->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingLandingNearCells)
+							else if (inbound && pTransport->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingLandingNearCells)
 							{
 								// On its way to the cell: the time it gets to come down runs from its arrival.
 								plan.AuxPeak = Unsorted::CurrentFrame;
@@ -4979,6 +4994,7 @@ namespace
 								plan.AnchorCell = pCell->MapCoords;
 								plan.AuxPeak = Unsorted::CurrentFrame;
 								plan.BoardingParked = false;
+								pTransport->SetArchiveTarget(nullptr);
 								pTransport->SetDestination(pCell, true);
 								pTransport->QueueMission(Mission::Move, true);
 							}
