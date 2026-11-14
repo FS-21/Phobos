@@ -32,6 +32,7 @@
 #include <UnitTypeClass.h>
 #include <Ext/AircraftType/Body.h>
 #include <Ext/BuildingType/Body.h>
+#include <Ext/Foot/Body.h>
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
 #include <Ext/SWType/Body.h>

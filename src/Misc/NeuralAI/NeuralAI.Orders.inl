@@ -278,6 +278,85 @@ namespace
 		return GetFerryDoorZones(pTransport, pBoarder).Match();
 	}
 
+	// Takes aboard, at once, a passenger that stands within BoardingReachLeptons of a transport at
+	// rest on the ground: the steps the engine runs at the end of an Enter move (0x51A21B for
+	// infantry, 0x73A6D1 for vehicles), in the order the fast enter action of Hooks.Transport.cpp
+	// runs them. The request to load over the radio left the soldiers of a quarter to a half of
+	// the Airborne Front plans outside a transport they stood next to. True when it went in.
+	bool TakeAboardNow(FootClass* pTransport, FootClass* pPassenger)
+	{
+		if (std::abs(pPassenger->Location.X - pTransport->Location.X) >= BoardingReachLeptons
+			|| std::abs(pPassenger->Location.Y - pTransport->Location.Y) >= BoardingReachLeptons
+			|| std::abs(pPassenger->Location.Z - pTransport->Location.Z) >= Unsorted::CellHeight)
+		{
+			return false;
+		}
+
+		// The transport at rest: on the ground, off a Move or Unload mission, with no destination,
+		// its locomotor still or its cell kept for BoardingSettleFrames (a hovercraft on Guard can
+		// report movement for as long as it floats).
+		if (IsFerryAloft(pTransport) || pTransport->Destination || pTransport->CurrentMission == Mission::Move
+			|| pTransport->QueuedMission == Mission::Move || pTransport->CurrentMission == Mission::Unload)
+		{
+			return false;
+		}
+
+		if (pTransport->Locomotor->Is_Moving()
+			&& !(pTransport->Owner && IsFootHeldStill(pTransport->Owner, pTransport, BoardingSettleFrames)))
+		{
+			return false;
+		}
+
+		// What the engine refuses when a passenger asks to enter (0x73758A).
+		auto const pPassengerInfantry = abstract_cast<InfantryClass*>(pPassenger);
+		auto const pControl = pPassenger->CaptureManager;
+
+		if (pTransport->IsBeingWarpedOut() || pTransport->OnBridge || pPassenger->Deactivated || pPassenger->IsUnderEMP()
+			|| pPassenger->IsMindControlled() || pPassenger->ParasiteEatingMe || (pControl && pControl->IsControllingSomething())
+			|| (pPassengerInfantry && pPassengerInfantry->IsDeployed()))
+		{
+			return false;
+		}
+
+		auto const pTransportType = pTransport->GetTechnoType();
+		auto const pTransportCell = pTransport->GetCell();
+
+		if (pTransportCell && pTransportCell->LandType == LandType::Water
+			&& !TechnoTypeExt::Fetch(pTransportType)->AmphibiousEnter.Get(RulesExt::Global()->AmphibiousEnter))
+		{
+			return false;
+		}
+
+		if (!CanPassengerFitInTransport(pTransport, pPassenger->GetTechnoType()))
+			return false;
+
+		pPassenger->SetTarget(nullptr);
+		pPassenger->SetArchiveTarget(nullptr);
+		pPassenger->MissionAccumulateTime = 0;
+		pPassenger->GattlingValue = 0;
+		pPassenger->CurrentGattlingStage = 0;
+		pPassenger->Limbo();
+		pPassenger->OnBridge = false;
+		pPassenger->NextObject = nullptr;
+		pPassenger->SetDestination(nullptr, true);
+		pPassenger->QueueUpToEnter = nullptr;
+		pPassenger->FrozenStill = true;
+		pPassenger->SetSpeedPercentage(0.0);
+		pPassenger->Transporter = pTransport;
+		pTransport->AddPassenger(pPassenger);
+
+		if (pTransportType->OpenTopped)
+			pTransport->EnteredOpenTopped(pPassenger);
+
+		if (pPassenger->GetTechnoType()->OpenTopped)
+			pPassenger->SetTargetForPassengers(nullptr);
+
+		pPassenger->Undiscover();
+		FootExt::Fetch(pPassenger)->ResetLocomotor = true;
+
+		return true;
+	}
+
 	// TEMP trace: units a plan has just sent somewhere (Naval Strike ships far from their firing
 	// cell), checked after every part of the AI tick: the part after which one is no longer on
 	// its way is the one that stopped it. The ships are found on a Guard mission 0 frames old
@@ -357,114 +436,12 @@ namespace
 		}
 	}
 
-	// TEMP trace: the soldier a plan has sent into its transport (Airborne Front), checked after
-	// every part of the AI tick: the part after which it is no longer on Enter, or has lost the
-	// radio link it had, is the one that took the order from it. Aboard, it is dropped silently.
-	struct NeuralWatchedBoarder
-	{
-		int House { -1 };
-		DWORD Transport { 0 };
-		int Frame { 0 };
-		bool Linked { false };
-	};
-
-	std::unordered_map<DWORD, NeuralWatchedBoarder> WatchedBoarders;
-	int WatchedBoarderSerial = -1;
-	int WatchedBoarderLines = 0;
-
-	void WatchBoarder(FootClass* pFoot, FootClass* pTransport)
-	{
-		if (WatchedBoarderSerial != NeuralMatchSerial)
-		{
-			WatchedBoarderSerial = NeuralMatchSerial;
-			WatchedBoarders.clear();
-			WatchedBoarderLines = 0;
-		}
-
-		if (!pFoot->Owner || WatchedBoarderLines >= 120)
-			return;
-
-		auto const it = WatchedBoarders.find(pFoot->UniqueID);
-		const bool linked = pFoot->ContainsLink(pTransport);
-
-		if (it != WatchedBoarders.end())
-		{
-			it->second.Linked = it->second.Linked || linked;
-			return;
-		}
-
-		if (WatchedBoarders.size() < 8)
-		{
-			WatchedBoarders[pFoot->UniqueID]
-				= NeuralWatchedBoarder { pFoot->Owner->ArrayIndex, pTransport->UniqueID, Unsorted::CurrentFrame, linked };
-		}
-	}
-
-	void TraceWatchedBoarders(int houseIndex, const char* part)
-	{
-		if (WatchedBoarders.empty() || WatchedBoarderSerial != NeuralMatchSerial)
-			return;
-
-		for (auto it = WatchedBoarders.begin(); it != WatchedBoarders.end();)
-		{
-			if (it->second.House != houseIndex)
-			{
-				++it;
-				continue;
-			}
-
-			FootClass* pWatched = nullptr;
-			FootClass* pCarrier = nullptr;
-
-			for (auto const pTechno : TechnoClass::Array)
-			{
-				if (!pTechno || !pTechno->IsAlive || pTechno->InLimbo)
-					continue;
-
-				if (pTechno->UniqueID == it->first)
-					pWatched = abstract_cast<FootClass*>(pTechno);
-				else if (pTechno->UniqueID == it->second.Transport)
-					pCarrier = abstract_cast<FootClass*>(pTechno);
-			}
-
-			if (!pWatched || !pCarrier)
-			{
-				it = WatchedBoarders.erase(it);
-				continue;
-			}
-
-			const bool entering = pWatched->CurrentMission == Mission::Enter || pWatched->QueuedMission == Mission::Enter;
-			const bool linked = pWatched->ContainsLink(pCarrier);
-
-			if (entering && (linked || !it->second.Linked))
-			{
-				it->second.Linked = it->second.Linked || linked;
-				++it;
-				continue;
-			}
-
-			if (WatchedBoarderLines++ < 120)
-			{
-				Debug::Log("[NeuralAI] House %d watched boarder DIAG frame %d: %s %u sent into %s %d frames ago lost its %s after \"%s\": "
-					"mission %d %d frames old, queued %d, linked %d, destination is the transport %d, %d leptons away, transport mission %d "
-					"linked to it %d.\n", houseIndex, Unsorted::CurrentFrame, pWatched->GetTechnoType()->ID, pWatched->UniqueID,
-					pCarrier->GetTechnoType()->ID, Unsorted::CurrentFrame - it->second.Frame, entering ? "radio link" : "Enter order", part,
-					static_cast<int>(pWatched->CurrentMission), Unsorted::CurrentFrame - pWatched->CurrentMissionStartTime,
-					static_cast<int>(pWatched->QueuedMission), linked ? 1 : 0, pWatched->Destination == pCarrier ? 1 : 0,
-					pCarrier->DistanceFrom(pWatched), static_cast<int>(pCarrier->CurrentMission), pCarrier->ContainsLink(pWatched) ? 1 : 0);
-			}
-
-			it = WatchedBoarders.erase(it);
-		}
-	}
-
 	// TEMP diagnostic: a transport the loader left parked to load (Guard or landing, no destination)
 	// that is found with other orders after a part of the AI tick: that part, or the engine between
 	// two ticks, moved it. Logged once per departure from the parking; the loader parks it again.
 	void TraceParkedFerries(int houseIndex, const char* part)
 	{
 		TraceWatchedMoves(houseIndex, part);
-		TraceWatchedBoarders(houseIndex, part);
 
 		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
 
