@@ -7060,8 +7060,31 @@ namespace
 						}
 						else if (pShip->Target == nullptr)
 						{
+							// TEMP trace: a ship far from the firing cell, as this tick finds it and as the move
+							// order leaves it (they are found on Guard with no destination at every report).
+							static int navalOrderLines = 0;
+							const bool traceOrder = distToFiring >= 25.0 && navalOrderLines < 120 && pShip->UniqueID % 3 == 0;
+							const int missionBefore = static_cast<int>(pShip->CurrentMission);
+							const int ageBefore = Unsorted::CurrentFrame - pShip->CurrentMissionStartTime;
+							auto const pGoingBefore = abstract_cast<CellClass*>(pShip->Destination);
+							const CellStruct goingBefore = pGoingBefore ? pGoingBefore->MapCoords : CellStruct::Empty;
+
 							// Escorts screen around the firing position (they engage on their own).
-							IssueMoveOrder(pShip, pFiring, siege ? 2.0 : 4.0);
+							const bool issued = IssueMoveOrder(pShip, pFiring, siege ? 2.0 : 4.0);
+
+							if (traceOrder)
+							{
+								navalOrderLines++;
+								auto const pGoingAfter = abstract_cast<CellClass*>(pShip->Destination);
+								Debug::Log("[NeuralAI] House %d navalStrike order DIAG frame %d: %s %u at (%d,%d) %d cells from the firing cell, found on mission "
+									"%d %d frames old with destination (%d,%d), moving %d; order issued %d, now mission %d queued %d destination (%d,%d), "
+									"submerged %d, held still %d.\n", houseIdx, Unsorted::CurrentFrame, pShip->GetTechnoType()->ID, pShip->UniqueID,
+									pShip->GetMapCoords().X, pShip->GetMapCoords().Y, static_cast<int>(distToFiring), missionBefore, ageBefore, goingBefore.X,
+									goingBefore.Y, (pShip->Locomotor && pShip->Locomotor->Is_Moving()) ? 1 : 0, issued ? 1 : 0,
+									static_cast<int>(pShip->CurrentMission), static_cast<int>(pShip->QueuedMission),
+									pGoingAfter ? pGoingAfter->MapCoords.X : -1, pGoingAfter ? pGoingAfter->MapCoords.Y : -1,
+									pShip->CloakState != CloakState::Uncloaked ? 1 : 0, IsFootHeldStill(pHouse, pShip, 300) ? 1 : 0);
+							}
 						}
 					}
 				}
