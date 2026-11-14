@@ -4677,7 +4677,10 @@ namespace
 
 			// The building for a drop: known, worth the trip, of the house the main attack is on (a
 			// third house has its whole garrison at home), at least AirborneFrontGapCells from where
-			// that attack is aimed (nearer, the army brought it down before the drop: 9 of 34 plans),
+			// that attack is aimed (nearer, the army brought it down before the drop: 9 of 34 plans)
+			// and AirborneFrontReachCells at most (farther, the attack keeps nobody busy there: 14 of
+			// the 25 transports that left for such a target were shot down or badly hit on the way,
+			// 4 of 22 nearer),
 			// with one anti-air defense and one mobile anti-air unit known near it at most, and with
 			// the team worth PlanStrikeAdvantagePercent of the strength known around it, as for a raid. workersFor tells how many of
 			// our specialists have a job inside a building type; a team already on its way (from)
@@ -4693,9 +4696,10 @@ namespace
 
 					const int worth = valuableBuildingWorth(pBld->Type) + workersFor(pBld->Type) * 150;
 					const CellStruct bc = pBld->GetMapCoords();
-					const double gap = front.Cell == CellStruct::Empty ? 40.0 : bc.DistanceFrom(front.Cell);
+					const double gap = front.Cell == CellStruct::Empty ? AirborneFrontReachCells : bc.DistanceFrom(front.Cell);
 
-					if (worth <= 0 || gap < AirborneFrontGapCells || CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > 1
+					if (worth <= 0 || gap < AirborneFrontGapCells || gap > AirborneFrontReachCells
+						|| CountKnownEnemyDefensesNear(pHouse, bc, 9.0, true) > 1
 						|| CountVisibleEnemyMobileAANear(pHouse, bc, 9.0) > 1)
 					{
 						continue;
@@ -4706,7 +4710,7 @@ namespace
 					if (guard * PlanStrikeAdvantagePercent > teamValue * 100)
 						continue;
 
-					const int score = worth + static_cast<int>(std::min(gap, 40.0)) * 4 - guard / 20
+					const int score = worth + static_cast<int>(gap) * 4 - guard / 20
 						- (from == CellStruct::Empty ? 0 : static_cast<int>(bc.DistanceFrom(from)) * 3);
 
 					if (score > goal.Score)

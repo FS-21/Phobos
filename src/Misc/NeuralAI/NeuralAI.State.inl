@@ -1524,14 +1524,15 @@ namespace
 	// Airborne Front: the time the trip gets from the moment the transport leaves and the time the
 	// team gets on the ground; a transport badly hit goes on when it is this near its drop cell,
 	// and one still loaded AirborneDropRetryFrames after it was told to unload tries another cell;
-	// the target stands at least AirborneFrontGapCells from where the main attack is aimed; the
-	// drop cell is looked for AirborneDropRingCells from the target, and what is known within
-	// AirborneDropGuardCells of each candidate decides between them.
+	// the target stands between AirborneFrontGapCells and AirborneFrontReachCells from where the
+	// main attack is aimed; the drop cell is looked for AirborneDropRingCells from the target,
+	// and what is known within AirborneDropGuardCells of each candidate decides between them.
 	constexpr int AirborneTripFrames = 2700;
 	constexpr int AirborneAssaultFrames = 2700;
 	constexpr double AirbornePressOnCells = 15.0;
 	constexpr int AirborneDropRetryFrames = 300;
 	constexpr double AirborneFrontGapCells = 10.0;
+	constexpr double AirborneFrontReachCells = 40.0;
 	constexpr double AirborneDropRingCells = 5.0;
 	constexpr double AirborneDropGuardCells = 7.0;
 	// A parked transport on the same cell this long whose locomotor still reports movement is
