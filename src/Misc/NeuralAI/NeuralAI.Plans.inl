@@ -4818,6 +4818,9 @@ namespace
 				{
 					logEnd(reason);
 
+					if (pTransport && pTransport->CurrentMission == Mission::Sleep)
+						pTransport->ForceMission(Mission::Guard);
+
 					if (pTransport && pTransport->Passengers.NumPassengers > 0)
 					{
 						plan.AuxBaseline = 3;
@@ -4914,9 +4917,9 @@ namespace
 					int nearestDist = INT_MAX;
 
 					// Where a soldier walks to: the cell next to the transport nearest to it that it can
-					// stand on (fixed order among equals). Sent onto the transport's own cell it makes
-					// the transport give way, and one that flies takes off to do so (two SHAD parked by
-					// their team were found in the air again with nobody aboard).
+					// stand on (fixed order among equals; with none it waits). Sent onto the transport's
+					// own cell it makes the transport give way, and one that flies takes off to do so
+					// (two SHAD parked by their team were found in the air again with nobody aboard).
 					auto boardingCellFor = [&](FootClass* pBoarder) -> CellClass*
 					{
 						const CellStruct at = pTransport->GetMapCoords();
@@ -4946,7 +4949,7 @@ namespace
 							}
 						}
 
-						return pBest ? pBest : pTransport->GetCell();
+						return pBest;
 					};
 
 					for (const DWORD uid : infantry)
@@ -4982,8 +4985,8 @@ namespace
 
 						if (!aloft && !entering)
 						{
-							if (!beside)
-								IssueMoveOrder(pInf, boardingCellFor(pInf), 0.5);
+							if (auto const pCell = beside ? nullptr : boardingCellFor(pInf))
+								IssueMoveOrder(pInf, pCell, 0.5);
 						}
 						else if (aloft && !entering && pLanding && pInf->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingMeetCells)
 							IssueMoveOrder(pInf, pLanding, 2.0);
@@ -5024,11 +5027,17 @@ namespace
 						{
 							if (!aloft && nearestDist <= BoardingParkedReachCells * Unsorted::LeptonsPerCell)
 							{
-								// Down within a short walk of its soldiers: it stays and they come.
+								// Down within a short walk of its soldiers: it stays and they come. It
+								// sleeps meanwhile: on Guard a transport with a gun takes off for whatever
+								// comes into its range, and soldiers on their way to it found it in the
+								// air again (6 SHAD and HIND plans with nobody aboard after 1500 frames).
 								plan.BoardingParked = true;
 
 								if (plan.BoardingParkedFrame < 0)
 									plan.BoardingParkedFrame = Unsorted::CurrentFrame;
+
+								if (pTransport->CurrentMission != Mission::Sleep)
+									pTransport->ForceMission(Mission::Sleep);
 							}
 							else if (inbound && pTransport->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingLandingNearCells)
 							{
@@ -5044,6 +5053,10 @@ namespace
 								plan.AnchorCell = pCell->MapCoords;
 								plan.AuxPeak = Unsorted::CurrentFrame;
 								plan.BoardingParked = false;
+
+								if (pTransport->CurrentMission == Mission::Sleep)
+									pTransport->ForceMission(Mission::Guard);
+
 								pTransport->SetArchiveTarget(nullptr);
 								pTransport->SetDestination(pCell, true);
 								pTransport->QueueMission(Mission::Move, true);
@@ -5124,6 +5137,9 @@ namespace
 
 								return true;
 							});
+
+						if (pTransport->CurrentMission == Mission::Sleep)
+							pTransport->ForceMission(Mission::Guard);
 
 						plan.AuxBaseline = 1;
 						plan.Deadline = Unsorted::CurrentFrame + AirborneTripFrames;
