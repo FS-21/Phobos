@@ -1496,6 +1496,11 @@ namespace
 	constexpr int BoardingPartialLoadFrames = 900;
 	constexpr int BoardingWaitFrames = 1500;
 	constexpr int BoardingApproachFrames = 2700;
+	// Airborne Front, when its target falls before the drop: how far from it the next one may lie,
+	// how many times the team takes another, and the time it gets for each.
+	constexpr double AirborneRetargetCells = 30.0;
+	constexpr int AirborneRetargets = 2;
+	constexpr int AirborneRetargetFrames = 1800;
 	// A parked transport on the same cell this long whose locomotor still reports movement is
 	// told to stop.
 	constexpr int BoardingSettleFrames = 90;
