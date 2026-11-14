@@ -1431,6 +1431,30 @@ namespace
 				track.AmmoSinceFrame = now;
 			}
 
+			// TEMP trace: what an aircraft that sits on Attack is doing, tick by tick, between its
+			// 150th and 450th frame on the ground (it is found at mission status 0, which the engine
+			// leaves on its first pass, so either the mission does not run or it starts over).
+			static int airTraceLines = 0;
+
+			if (!pAir->IsInAir() && now - track.SinceFrame >= 150 && airTraceLines < 90)
+			{
+				airTraceLines++;
+				auto const pGoing = abstract_cast<CellClass*>(pAir->Destination);
+				auto const pDock = abstract_cast<BuildingClass*>(pAir->GetNthLink(0));
+				auto const pTraceTarget = abstract_cast<TechnoClass*>(pAir->Target);
+				const int traceWeapon = pTraceTarget ? pAir->SelectWeapon(pTraceTarget) : 0;
+				Debug::Log("[NeuralAI] House %d air trace DIAG frame %d: %s %u on the ground %d frames, status %d, queued %d, destination %s (%d,%d), "
+					"moving %d, height %d, ammo %d/%d reload %d, range %d, locked %d, flags %d %d, returning %d, dock %s mission %d power %d, "
+					"emp %d, target %s.\n", pHouse->ArrayIndex, now, pAir->Type->ID, pAir->UniqueID, now - track.SinceFrame, pAir->MissionStatus,
+					static_cast<int>(pAir->QueuedMission), pAir->Destination ? (pGoing ? "cell" : "object") : "none",
+					pGoing ? pGoing->MapCoords.X : -1, pGoing ? pGoing->MapCoords.Y : -1,
+					(pAir->Locomotor && pAir->Locomotor->Is_Moving()) ? 1 : 0, pAir->GetHeight(), pAir->Ammo, pAir->Type->Ammo,
+					pAir->ReloadTimer.GetTimeLeft(), pAir->GetWeaponRange(traceWeapon), pAir->IsLocked ? 1 : 0, pAir->unknown_bool_6D0 ? 1 : 0,
+					pAir->unknown_bool_6D1 ? 1 : 0, pAir->IsReturningFromAttackRun ? 1 : 0, pDock ? pDock->Type->ID : "none",
+					pDock ? static_cast<int>(pDock->CurrentMission) : -1, pDock ? (pDock->IsPowerOnline() ? 1 : 0) : -1,
+					pAir->IsUnderEMP() ? 1 : 0, pTraceTarget ? pTraceTarget->GetTechnoType()->ID : "none");
+			}
+
 			const bool parked = !pAir->IsInAir() && now - track.SinceFrame >= 450 && now - track.AmmoSinceFrame >= 450;
 			const bool idleFlight = pAir->IsInAir() && now - track.AmmoSinceFrame >= 1800;
 
