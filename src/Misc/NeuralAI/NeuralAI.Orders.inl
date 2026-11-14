@@ -234,19 +234,20 @@ namespace
 	// May the boarder ask this transport to load now? Only with the transport at rest and the cells
 	// the engine has on record for both in one zone (GetFerryDoorZones); a record left behind by a
 	// unit that stopped is brought up to date first. Asked before that, the transport sets out for
-	// the boarder instead of taking it in.
+	// the boarder instead of taking it in. The transport's record is brought up to date even when
+	// the zones already agree: a hover transport stops a cell past the one it has on record, and
+	// the boarder walked onto the cell under it and waited there on Enter without getting in.
 	bool OpenBoardingDoor(FootClass* pTransport, FootClass* pBoarder)
 	{
 		if (pTransport->Locomotor->Is_Moving())
 			return false;
 
+		RegisterStoppedFootCell(pTransport);
+
 		if (GetFerryDoorZones(pTransport, pBoarder).Match())
 			return true;
 
-		RegisterStoppedFootCell(pTransport);
-
-		if (!GetFerryDoorZones(pTransport, pBoarder).Match())
-			RegisterStoppedFootCell(pBoarder);
+		RegisterStoppedFootCell(pBoarder);
 
 		return GetFerryDoorZones(pTransport, pBoarder).Match();
 	}
