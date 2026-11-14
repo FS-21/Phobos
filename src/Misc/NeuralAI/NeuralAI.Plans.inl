@@ -2201,10 +2201,14 @@ namespace
 
 			NoteExpertPlanStart(pHouse, id);
 
+			// A member is no longer a passenger the ferry loader has reserved for one of its
+			// transports: the loader went on sending it into that transport (a GGI of an Airborne
+			// Front team, 36 cells from the team's own).
 			for (auto const pFoot : group)
 			{
 				plan.Members.push_back(pFoot->UniqueID);
 				macro.PlanMembers.insert(pFoot->UniqueID);
+				macro.FerryReserved.erase(pFoot->UniqueID);
 				NoteExpertCommand(pHouse, pFoot, static_cast<int16_t>(id));
 			}
 
