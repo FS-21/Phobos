@@ -1496,6 +1496,9 @@ namespace
 	constexpr int BoardingPartialLoadFrames = 900;
 	constexpr int BoardingWaitFrames = 1500;
 	constexpr int BoardingApproachFrames = 2700;
+	// A parked transport on the same cell this long whose locomotor still reports movement is
+	// told to stop.
+	constexpr int BoardingSettleFrames = 90;
 	// Preemptive Strike goes for a gathering enemy force this near the group that would go (about
 	// 750 frames of march), and follows it this far from where it was gathering.
 	constexpr double PreemptiveReachCells = 45.0;
@@ -1504,6 +1507,9 @@ namespace
 	// how long the ambush waits for a chaser once the bait is back behind it.
 	constexpr int BaitLureWaitFrames = 450;
 	constexpr int BaitChaseWaitFrames = 450;
+	// A bait nobody answered is not tried again for this long: giving up sooner made the plan start
+	// twice as often (272 plans in 18 matches against 127 in 40).
+	constexpr int BaitRetryFrames = 5400;
 	// An air group goes for a building only when this many sorties of its full load add up to the
 	// building's health: Air Strike sent two aircraft at buildings they could not bring down in
 	// its 2700 frames, and 128 of 163 plans ran out of time (focus batch of 2026-11-14).
