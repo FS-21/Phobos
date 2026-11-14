@@ -2149,6 +2149,33 @@ namespace
 				return;
 			}
 
+			// An attack whose target or staging cell the path finder does not reach (IsPathDeadGoal)
+			// waits too: its ground units would set out, fail to path and stand where they are
+			// (27500 path failures in 36000 frames of a test match on Mount Yamantau, nearly all of
+			// plan members). The plans that defend are not held.
+			constexpr NeuralPlanId marching[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout, NeuralPlanId::Feint,
+				NeuralPlanId::TimingRush, NeuralPlanId::ExpansionDenial, NeuralPlanId::SuperweaponRace, NeuralPlanId::HarvesterAmbush,
+				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
+				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut,
+				NeuralPlanId::RollingSiege, NeuralPlanId::SiegeBattery, NeuralPlanId::BaitAmbush, NeuralPlanId::Pincer,
+				NeuralPlanId::ThreeFrontAssault, NeuralPlanId::AllyJointAttack };
+
+			if (std::find(std::begin(marching), std::end(marching), id) != std::end(marching)
+				&& ((target != CellStruct::Empty && IsPathDeadGoal(pHouse, target))
+					|| (staging != CellStruct::Empty && IsPathDeadGoal(pHouse, staging))))
+			{
+				const bool walks = std::any_of(group.begin(), group.end(), [](FootClass* pFoot)
+					{
+						return pFoot && pFoot->WhatAmI() != AbstractType::Aircraft && !pFoot->IsInAir() && !pFoot->GetTechnoType()->Naval;
+					});
+
+				if (walks)
+				{
+					macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
+					return;
+				}
+			}
+
 			auto& plan = macro.Plans[static_cast<size_t>(id)];
 			plan = NeuralPlanInstance {};
 			plan.TargetOwner = targetOwner;
