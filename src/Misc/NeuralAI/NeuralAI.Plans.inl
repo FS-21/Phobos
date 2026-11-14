@@ -4727,6 +4727,51 @@ namespace
 				// cells in 3000 frames (30 in the 900 after its plan ended).
 				const bool flies = pTransport && (pTransport->WhatAmI() == AbstractType::Aircraft || pTransport->GetTechnoType()->JumpJet
 					|| pTransport->GetTechnoType()->MovementZone == MovementZone::Fly);
+				const bool flyer = pTransportUnit && (pTransportUnit->Type->JumpJet || pTransportUnit->Type->MovementZone == MovementZone::Fly);
+				const bool aloft = pTransport && IsFerryAloft(pTransport);
+				auto const pLanding = (flyer && plan.AnchorCell != CellStruct { 0, 0 }) ? MapClass::Instance.TryGetCellAt(plan.AnchorCell) : nullptr;
+
+				// A free land cell of a zone for a flying transport to come down on: the nearest to
+				// `center` from `firstRing` cells out (ring search, fixed order), two cells or more
+				// from every soldier of the team on the map, other than the one tried last.
+				auto pickLandingCell = [&](const CellStruct& center, int zone, int firstRing, const CellStruct& tried) -> CellClass*
+				{
+					for (int ring = firstRing; ring <= BoardingLandingRingCells; ++ring)
+					{
+						for (int dy = -ring; dy <= ring; ++dy)
+						{
+							for (int dx = -ring; dx <= ring; ++dx)
+							{
+								if (std::max(std::abs(dx), std::abs(dy)) != ring)
+									continue;
+
+								const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+								auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+								if (!pCell || c == tried || pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach
+									|| pCell->GetBuilding() || pCell->FirstObject
+									|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != zone
+									|| !pCell->IsClearToMove(SpeedType::Track, false, false, -1, MovementZone::Normal, -1, false))
+								{
+									continue;
+								}
+
+								const bool clear = std::none_of(infantry.begin(), infantry.end(), [&](DWORD uid)
+									{
+										auto const pFoot = findOwnFoot(uid);
+
+										return pFoot && pFoot->GetMapCoords().DistanceFrom(c) < 2.0;
+									});
+
+								if (clear)
+									return pCell;
+							}
+						}
+					}
+
+					return nullptr;
+				};
+
 				constexpr const char* PhaseNames[] = { "boarding", "on the way", "dropped", "standing down" };
 				auto logEnd = [&](const char* reason)
 				{
@@ -4861,9 +4906,6 @@ namespace
 					int waiting = 0;
 					FootClass* pNearest = nullptr;
 					int nearestDist = INT_MAX;
-					const bool flyer = pTransportUnit && (pTransportUnit->Type->JumpJet || pTransportUnit->Type->MovementZone == MovementZone::Fly);
-					const bool aloft = IsFerryAloft(pTransport);
-					auto const pLanding = (flyer && plan.AnchorCell != CellStruct { 0, 0 }) ? MapClass::Instance.TryGetCellAt(plan.AnchorCell) : nullptr;
 
 					// Where a soldier walks to: the cell next to the transport nearest to it that it can
 					// stand on (fixed order among equals). Sent onto the transport's own cell it makes
@@ -4959,46 +5001,6 @@ namespace
 						auto const pCarrier = abstract_cast<UnitClass*>(pTransport);
 						const int soldierZone = MapClass::Instance.GetMovementZoneType(pNearest->GetMapCoords(), MovementZone::Normal, pNearest->OnBridge);
 
-						// The nearest free land cell of the soldiers' zone around the nearest of them, two
-						// cells or more from each (ring search, fixed order), other than the one tried last.
-						auto pickLandingCell = [&](const CellStruct& center, const CellStruct& tried) -> CellClass*
-						{
-							for (int ring = 2; ring <= BoardingLandingRingCells; ++ring)
-							{
-								for (int dy = -ring; dy <= ring; ++dy)
-								{
-									for (int dx = -ring; dx <= ring; ++dx)
-									{
-										if (std::max(std::abs(dx), std::abs(dy)) != ring)
-											continue;
-
-										const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
-										auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
-
-										if (!pCell || c == tried || pCell->LandType == LandType::Water || pCell->LandType == LandType::Beach
-											|| pCell->GetBuilding() || pCell->FirstObject
-											|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != soldierZone
-											|| !pCell->IsClearToMove(SpeedType::Track, false, false, -1, MovementZone::Normal, -1, false))
-										{
-											continue;
-										}
-
-										const bool clear = std::none_of(infantry.begin(), infantry.end(), [&](DWORD uid)
-											{
-												auto const pFoot = findOwnFoot(uid);
-
-												return pFoot && pFoot->GetMapCoords().DistanceFrom(c) < 2.0;
-											});
-
-										if (clear)
-											return pCell;
-									}
-								}
-							}
-
-							return nullptr;
-						};
-
 						// Once it has parked by its soldiers it stays: it sets out again only when the nearest
 						// one is BoardingParkedReachCells away. A transport that follows every soldier takes
 						// nobody in: only one at rest does.
@@ -5030,7 +5032,7 @@ namespace
 							{
 								// Just sent, or coming down on the cell.
 							}
-							else if (auto const pCell = pickLandingCell(pNearest->GetMapCoords(), plan.AnchorCell))
+							else if (auto const pCell = pickLandingCell(pNearest->GetMapCoords(), soldierZone, 2, plan.AnchorCell))
 							{
 								plan.AnchorCell = pCell->MapCoords;
 								plan.AuxPeak = Unsorted::CurrentFrame;
@@ -5106,6 +5108,8 @@ namespace
 
 						plan.AuxBaseline = 1;
 						plan.Deadline = Unsorted::CurrentFrame + AirborneTripFrames;
+						plan.AnchorCell = CellStruct { 0, 0 };
+						plan.AuxPeak = 0;
 						trace.Aboard = aboard;
 						trace.BoardedFrame = Unsorted::CurrentFrame;
 						trace.FrontAtLeave = findFront().Cell != CellStruct::Empty ? 1 : 0;
@@ -5161,11 +5165,35 @@ namespace
 					}
 					else if (toDrop <= 3.0)
 					{
-						if (pTransport->CurrentMission != Mission::Unload)
+						// At the drop cell. A transport that flies comes down first, on the drop cell or
+						// the free cell nearest to it, the way it did for its team: told to unload in the
+						// air over a cell it could not land on, it hung there with the team aboard until
+						// the plan ran out (3 of 15 plans). One that does not fly drives onto the cell.
+						auto const pGoing = abstract_cast<CellClass*>(pTransport->Destination);
+						const bool inbound = pLanding && pGoing && pGoing->MapCoords.DistanceFrom(plan.AnchorCell) <= BoardingLandingNearCells;
+
+						if (flyer && aloft)
 						{
-							pTransport->SetDestination(pDrop, true);
-							pTransport->QueueMission(Mission::Unload, true);
+							if (inbound && pTransport->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingLandingNearCells)
+								plan.AuxPeak = Unsorted::CurrentFrame;
+							else if (pLanding && Unsorted::CurrentFrame - plan.AuxPeak < BoardingLandingFrames)
+							{
+								// Coming down.
+							}
+							else if (auto const pCell = pickLandingCell(pDrop->MapCoords, zoneOf(pDrop->MapCoords), 0, plan.AnchorCell))
+							{
+								plan.AnchorCell = pCell->MapCoords;
+								plan.StagingCell = pCell->MapCoords;
+								plan.AuxPeak = Unsorted::CurrentFrame;
+								pTransport->SetArchiveTarget(nullptr);
+								pTransport->SetDestination(pCell, true);
+								pTransport->QueueMission(Mission::Move, true);
+							}
 						}
+						else if (!flyer && toDrop > 1.5 && !IsFootHeldStill(pHouse, pTransport, BoardingSettleFrames))
+							IssueMoveOrder(pTransport, pDrop, 0.5);
+						else if (pTransport->CurrentMission != Mission::Unload)
+							pTransport->QueueMission(Mission::Unload, true);
 					}
 					else if (pTransport->GetHealthPercentage() < 0.35 && toDrop > AirbornePressOnCells)
 					{
@@ -5176,6 +5204,11 @@ namespace
 					}
 					else
 					{
+						// A landing cell already chosen and left behind: the time to come down on it
+						// runs from the next arrival.
+						if (pLanding)
+							plan.AuxPeak = Unsorted::CurrentFrame;
+
 						IssueMoveOrder(pTransport, flies ? GetSafeAirHop(pHouse, pTransport, pDrop) : pDrop, 2.0);
 					}
 				}
