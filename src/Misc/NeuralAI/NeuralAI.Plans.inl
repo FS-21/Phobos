@@ -4549,6 +4549,8 @@ namespace
 				int MeetCells { 0 };
 				int FrontGap { -1 };
 				int FrontAtLeave { -1 };
+				int Taken { 0 };
+				bool OutLogged { false };
 				int Aboard { -1 };
 				int BoardedFrame { -1 };
 				int DroppedFrame { -1 };
@@ -4957,6 +4959,7 @@ namespace
 						if (TakeAboardNow(pTransport, pInf))
 						{
 							ownFoots.erase(uid);
+							trace.Taken++;
 							continue;
 						}
 
@@ -5080,6 +5083,16 @@ namespace
 
 					const int aboard = pTransport->Passengers.NumPassengers;
 
+					// TEMP diagnostic: soldiers taken aboard that are out again while the plan still boards.
+					if (aboard < trace.Taken && !trace.OutLogged)
+					{
+						trace.OutLogged = true;
+						Debug::Log("[NeuralAI] House %d AirborneFront out again DIAG: %d taken aboard and %d inside %s %u, mission %d %d frames old, "
+							"height %d, frame %d.\n", pHouse->ArrayIndex, trace.Taken, aboard, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
+							static_cast<int>(pTransport->CurrentMission), Unsorted::CurrentFrame - pTransport->CurrentMissionStartTime,
+							pTransport->GetHeight(), Unsorted::CurrentFrame);
+					}
+
 					// The waits run from the moment the transport first parked by its soldiers: counted from
 					// the start of the plan they ran out while a transport that came from far was still
 					// landing. One that has not parked in BoardingApproachFrames is given up as well.
@@ -5135,7 +5148,7 @@ namespace
 						{
 							Debug::Log("[NeuralAI] House %d AirborneFront boarding DIAG: transport mission %d queued %d, height %d, moving %d, destination %d, "
 								"parked %d frames, land type %d, on bridge %d, passengers %d of %d, size limit %d; soldier %s size %d, %d leptons away "
-								"(%d,%d,%d), mission %d, moving %d, fits %d.\n", pHouse->ArrayIndex, static_cast<int>(pTransport->CurrentMission),
+								"(%d,%d,%d), mission %d, moving %d, fits %d, %d taken aboard, refusal: %s.\n", pHouse->ArrayIndex, static_cast<int>(pTransport->CurrentMission),
 								static_cast<int>(pTransport->QueuedMission), pTransport->GetHeight(), pTransport->Locomotor->Is_Moving() ? 1 : 0,
 								pTransport->Destination ? 1 : 0, parkedFrames, pTransportCell ? static_cast<int>(pTransportCell->LandType) : -1,
 								pTransport->OnBridge ? 1 : 0, pTransport->Passengers.NumPassengers, pTransport->GetTechnoType()->Passengers,
@@ -5143,7 +5156,8 @@ namespace
 								static_cast<int>(pNearest->GetTechnoType()->Size), nearestDist, pNearest->Location.X - pTransport->Location.X,
 								pNearest->Location.Y - pTransport->Location.Y, pNearest->Location.Z - pTransport->Location.Z,
 								static_cast<int>(pNearest->CurrentMission), pNearest->Locomotor->Is_Moving() ? 1 : 0,
-								CanPassengerFitInTransport(pTransport, pNearest->GetTechnoType()) ? 1 : 0);
+								CanPassengerFitInTransport(pTransport, pNearest->GetTechnoType()) ? 1 : 0, trace.Taken,
+								BoardingRefusal(pTransport, pNearest) ? BoardingRefusal(pTransport, pNearest) : "none");
 						}
 
 						macro.RaidTransportBanUntil[pTransport->UniqueID] = Unsorted::CurrentFrame + 9000;
@@ -5171,35 +5185,29 @@ namespace
 					}
 					else if (toDrop <= 3.0)
 					{
-						// At the drop cell. A transport that flies comes down first, on the drop cell or
-						// the free cell nearest to it, the way it did for its team: told to unload in the
-						// air over a cell it could not land on, it hung there with the team aboard until
-						// the plan ran out (3 of 15 plans). One that does not fly drives onto the cell.
-						auto const pGoing = abstract_cast<CellClass*>(pTransport->Destination);
-						const bool inbound = pLanding && pGoing && pGoing->MapCoords.DistanceFrom(plan.AnchorCell) <= BoardingLandingNearCells;
-
-						if (flyer && aloft)
+						// At the drop cell it unloads. Still loaded AirborneDropRetryFrames later (over a
+						// cell it cannot come down on: 3 of 15 plans ended that way), it is sent to
+						// unload on the nearest free cell instead. AuxPeak = when it was told to unload.
+						// Made to land first and unload after, 7 of 13 transports were shot down.
+						if (plan.AuxPeak != 0 && Unsorted::CurrentFrame - plan.AuxPeak >= AirborneDropRetryFrames)
 						{
-							if (inbound && pTransport->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingLandingNearCells)
-								plan.AuxPeak = Unsorted::CurrentFrame;
-							else if (pLanding && Unsorted::CurrentFrame - plan.AuxPeak < BoardingLandingFrames)
+							plan.AuxPeak = Unsorted::CurrentFrame;
+
+							if (auto const pCell = pickLandingCell(pDrop->MapCoords, zoneOf(pDrop->MapCoords), 1, plan.StagingCell))
 							{
-								// Coming down.
-							}
-							else if (auto const pCell = pickLandingCell(pDrop->MapCoords, zoneOf(pDrop->MapCoords), 0, plan.AnchorCell))
-							{
-								plan.AnchorCell = pCell->MapCoords;
 								plan.StagingCell = pCell->MapCoords;
-								plan.AuxPeak = Unsorted::CurrentFrame;
-								pTransport->SetArchiveTarget(nullptr);
 								pTransport->SetDestination(pCell, true);
-								pTransport->QueueMission(Mission::Move, true);
+								pTransport->QueueMission(Mission::Unload, true);
 							}
 						}
-						else if (!flyer && toDrop > 1.5 && !IsFootHeldStill(pHouse, pTransport, BoardingSettleFrames))
-							IssueMoveOrder(pTransport, pDrop, 0.5);
 						else if (pTransport->CurrentMission != Mission::Unload)
+						{
+							if (plan.AuxPeak == 0)
+								plan.AuxPeak = Unsorted::CurrentFrame;
+
+							pTransport->SetDestination(pDrop, true);
 							pTransport->QueueMission(Mission::Unload, true);
+						}
 					}
 					else if (pTransport->GetHealthPercentage() < 0.35 && toDrop > AirbornePressOnCells)
 					{
@@ -5210,11 +5218,6 @@ namespace
 					}
 					else
 					{
-						// A landing cell already chosen and left behind: the time to come down on it
-						// runs from the next arrival.
-						if (pLanding)
-							plan.AuxPeak = Unsorted::CurrentFrame;
-
 						IssueMoveOrder(pTransport, flies ? GetSafeAirHop(pHouse, pTransport, pDrop) : pDrop, 2.0);
 					}
 				}

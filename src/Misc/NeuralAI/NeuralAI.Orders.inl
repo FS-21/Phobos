@@ -278,51 +278,64 @@ namespace
 		return GetFerryDoorZones(pTransport, pBoarder).Match();
 	}
 
-	// Takes aboard, at once, a passenger that stands within BoardingReachLeptons of a transport at
-	// rest on the ground: the steps the engine runs at the end of an Enter move (0x51A21B for
-	// infantry, 0x73A6D1 for vehicles), in the order the fast enter action of Hooks.Transport.cpp
-	// runs them. The request to load over the radio left the soldiers of a quarter to a half of
-	// the Airborne Front plans outside a transport they stood next to. True when it went in.
-	bool TakeAboardNow(FootClass* pTransport, FootClass* pPassenger)
+	// Why a passenger cannot go aboard a transport right now (nullptr: it can): it stands within
+	// BoardingReachLeptons of it, the transport is at rest on the ground, and nothing the engine
+	// refuses when a passenger asks to enter (0x73758A) holds.
+	const char* BoardingRefusal(FootClass* pTransport, FootClass* pPassenger)
 	{
 		if (std::abs(pPassenger->Location.X - pTransport->Location.X) >= BoardingReachLeptons
 			|| std::abs(pPassenger->Location.Y - pTransport->Location.Y) >= BoardingReachLeptons
 			|| std::abs(pPassenger->Location.Z - pTransport->Location.Z) >= Unsorted::CellHeight)
 		{
-			return false;
+			return "out of reach";
 		}
 
 		// The transport at rest: on the ground, off a Move or Unload mission, with no destination.
 		// What its locomotor says is not asked: a hovercraft reports movement for as long as it
 		// floats, and three LCRF stood 1500 frames with their soldiers next to them.
-		if (IsFerryAloft(pTransport) || pTransport->Destination || pTransport->CurrentMission == Mission::Move
-			|| pTransport->QueuedMission == Mission::Move || pTransport->CurrentMission == Mission::Unload)
-		{
-			return false;
-		}
+		if (IsFerryAloft(pTransport))
+			return "transport in the air";
 
-		// What the engine refuses when a passenger asks to enter (0x73758A).
+		if (pTransport->Destination || pTransport->CurrentMission == Mission::Move || pTransport->QueuedMission == Mission::Move)
+			return "transport on the move";
+
+		if (pTransport->CurrentMission == Mission::Unload)
+			return "transport unloading";
+
+		if (pTransport->IsBeingWarpedOut() || pTransport->OnBridge)
+			return "transport warped or on a bridge";
+
 		auto const pPassengerInfantry = abstract_cast<InfantryClass*>(pPassenger);
 		auto const pControl = pPassenger->CaptureManager;
 
-		if (pTransport->IsBeingWarpedOut() || pTransport->OnBridge || pPassenger->Deactivated || pPassenger->IsUnderEMP()
-			|| pPassenger->IsMindControlled() || pPassenger->ParasiteEatingMe || (pControl && pControl->IsControllingSomething())
-			|| (pPassengerInfantry && pPassengerInfantry->IsDeployed()))
+		if (pPassenger->Deactivated || pPassenger->IsUnderEMP() || pPassenger->IsMindControlled() || pPassenger->ParasiteEatingMe
+			|| (pControl && pControl->IsControllingSomething()) || (pPassengerInfantry && pPassengerInfantry->IsDeployed()))
 		{
-			return false;
+			return "passenger not free to enter";
 		}
 
-		auto const pTransportType = pTransport->GetTechnoType();
 		auto const pTransportCell = pTransport->GetCell();
 
 		if (pTransportCell && pTransportCell->LandType == LandType::Water
-			&& !TechnoTypeExt::Fetch(pTransportType)->AmphibiousEnter.Get(RulesExt::Global()->AmphibiousEnter))
+			&& !TechnoTypeExt::Fetch(pTransport->GetTechnoType())->AmphibiousEnter.Get(RulesExt::Global()->AmphibiousEnter))
 		{
-			return false;
+			return "transport on water";
 		}
 
-		if (!CanPassengerFitInTransport(pTransport, pPassenger->GetTechnoType()))
+		return CanPassengerFitInTransport(pTransport, pPassenger->GetTechnoType()) ? nullptr : "no room";
+	}
+
+	// Takes aboard, at once, a passenger with no BoardingRefusal: the steps the engine runs at the
+	// end of an Enter move (0x51A21B for infantry, 0x73A6D1 for vehicles), in the order the fast
+	// enter action of Hooks.Transport.cpp runs them. The request to load over the radio left the
+	// soldiers of a quarter to a half of the Airborne Front plans outside a transport they stood
+	// next to. True when it went in.
+	bool TakeAboardNow(FootClass* pTransport, FootClass* pPassenger)
+	{
+		if (BoardingRefusal(pTransport, pPassenger))
 			return false;
+
+		auto const pTransportType = pTransport->GetTechnoType();
 
 		pPassenger->SetTarget(nullptr);
 		pPassenger->SetArchiveTarget(nullptr);
