@@ -251,6 +251,14 @@ namespace
 	// the boarder walked onto the cell under it and waited there on Enter without getting in.
 	bool OpenBoardingDoor(FootClass* pTransport, FootClass* pBoarder)
 	{
+		// Off the ground it takes nobody, and a boarder sent under it stands on the cell it has to
+		// land on (40 of 91 boarders that lost their Enter order within a tick were bound for a
+		// disc in the air). On a Move mission, moving or with a destination, the engine answers no
+		// to the request to load (UnitClass::Receive_Message, RequestLoading, 0x7377D8), and the
+		// boarder drops its link and its order.
+		if (IsFerryAloft(pTransport) || pTransport->CurrentMission == Mission::Move || pTransport->QueuedMission == Mission::Move)
+			return false;
+
 		// At rest: its locomotor says so, or it has no destination and has kept its cell for
 		// BoardingSettleFrames (a hovercraft on Guard can report movement for as long as it floats).
 		const bool settled = !pTransport->Destination && pTransport->Owner
