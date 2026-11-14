@@ -5538,7 +5538,27 @@ namespace
 					}
 				}
 
-				// The team musters around the soldier nearest to the transport.
+				// The team is taken from our bases, within AirborneHomeCells of a building of ours:
+				// soldiers out at the front are in the fight the drop is meant to help, and a team
+				// picked there, 56 cells from its transport, was gone before the transport came.
+				auto awayFromHome = [&](FootClass* pFoot)
+				{
+					const CellStruct at = pFoot->GetMapCoords();
+
+					for (auto const pBld : pHouse->Buildings)
+					{
+						if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->GetMapCoords().DistanceFrom(at) <= AirborneHomeCells)
+							return false;
+					}
+
+					return true;
+				};
+
+				std::erase_if(specialists, awayFromHome);
+				std::erase_if(soldiers, awayFromHome);
+				std::erase_if(vehicles, awayFromHome);
+
+				// It musters around the soldier nearest to the transport.
 				FootClass* pAnchor = nullptr;
 
 				for (auto const pFoot : soldiers)
