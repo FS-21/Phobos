@@ -257,6 +257,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		UpdateRepairTrips(pHouse);
 		TraceParkedFerries(pHouse->ArrayIndex, "army ledger and repair trips");
 		NeuralAI::ExecuteTacticalAndSpecOpsMicro(pHouse, scores);
+		TraceParkedFerries(pHouse->ArrayIndex, "tactical micro");
 	}
 
 	// Strategic plans run after the tactical micro so they keep the last word on their units.
