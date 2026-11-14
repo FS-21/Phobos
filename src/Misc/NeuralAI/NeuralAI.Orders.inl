@@ -364,6 +364,84 @@ namespace
 		return true;
 	}
 
+	// Lets the passengers of a transport on the ground out onto the cells next to it, at once: the
+	// steps of the engine's unload, which detaches each passenger and puts it on a cell next to
+	// the transport that it can enter (UnitClass::Mission_Unload). The mission itself first waits
+	// for the locomotor to report no movement, and a hovercraft reports movement for as long as
+	// it floats. Returns how many got out; one with no cell to stand on stays aboard with those
+	// behind it.
+	int PutAshoreNow(FootClass* pTransport)
+	{
+		if (IsFerryAloft(pTransport) || pTransport->OnBridge)
+			return 0;
+
+		const CellStruct at = pTransport->GetMapCoords();
+		int out = 0;
+
+		while (auto const pPassenger = pTransport->Passengers.GetFirstPassenger())
+		{
+			CellClass* pSpot = nullptr;
+			CoordStruct where = CoordStruct::Empty;
+
+			for (int direction = 0; direction < 8 && !pSpot; ++direction)
+			{
+				const CellStruct offset = Unsorted::AdjacentCell[direction];
+				const CellStruct c { static_cast<short>(at.X + offset.X), static_cast<short>(at.Y + offset.Y) };
+				auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+				if (!pCell || pCell->ContainsBridge())
+					continue;
+
+				const Move occupied = pPassenger->IsCellOccupied(pCell, FacingType::None, -1, nullptr, true);
+
+				if (occupied != Move::OK && occupied != Move::MovingBlock)
+					continue;
+
+				CoordStruct coords = pCell->GetCoordsWithBridge();
+
+				if (pPassenger->WhatAmI() == AbstractType::Infantry)
+				{
+					coords = pCell->FindInfantrySubposition(coords, false, false, false);
+
+					if (coords == CoordStruct::Empty)
+						continue;
+
+					coords.Z = pCell->GetCoordsWithBridge().Z;
+				}
+
+				pSpot = pCell;
+				where = coords;
+			}
+
+			if (!pSpot)
+				break;
+
+			pTransport->RemoveFirstPassenger();
+			pPassenger->OnBridge = false;
+			++Unsorted::ScenarioInit;
+			const bool placed = pPassenger->Unlimbo(where, static_cast<DirType>(0));
+			--Unsorted::ScenarioInit;
+
+			if (!placed)
+			{
+				pTransport->EnterAsPassenger(pPassenger);
+				break;
+			}
+
+			if (pTransport->GetTechnoType()->OpenTopped)
+				pTransport->ExitedOpenTopped(pPassenger);
+
+			pPassenger->Transporter = nullptr;
+			pPassenger->LastMapCoords = pSpot->MapCoords;
+			pPassenger->ShouldEnterOccupiable = false;
+			pPassenger->ShouldGarrisonStructure = false;
+			pPassenger->QueueMission(Mission::Guard, false);
+			out++;
+		}
+
+		return out;
+	}
+
 	// TEMP trace: units a plan has just sent somewhere (Naval Strike ships far from their firing
 	// cell), checked after every part of the AI tick: the part after which one is no longer on
 	// its way is the one that stopped it. The ships are found on a Guard mission 0 frames old
