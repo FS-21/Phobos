@@ -4865,6 +4865,42 @@ namespace
 					const bool aloft = IsFerryAloft(pTransport);
 					auto const pLanding = (flyer && plan.AnchorCell != CellStruct { 0, 0 }) ? MapClass::Instance.TryGetCellAt(plan.AnchorCell) : nullptr;
 
+					// Where a soldier walks to: the cell next to the transport nearest to it that it can
+					// stand on (fixed order among equals). Sent onto the transport's own cell it makes
+					// the transport give way, and one that flies takes off to do so (two SHAD parked by
+					// their team were found in the air again with nobody aboard).
+					auto boardingCellFor = [&](FootClass* pBoarder) -> CellClass*
+					{
+						const CellStruct at = pTransport->GetMapCoords();
+						const SpeedType speed = pBoarder->GetTechnoType()->SpeedType;
+						const MovementZone zone = pBoarder->GetTechnoType()->MovementZone;
+						CellClass* pBest = nullptr;
+						int bestDist = INT_MAX;
+
+						for (int dy = -1; dy <= 1; ++dy)
+						{
+							for (int dx = -1; dx <= 1; ++dx)
+							{
+								const CellStruct c { static_cast<short>(at.X + dx), static_cast<short>(at.Y + dy) };
+								auto const pCell = (dx != 0 || dy != 0) && MapClass::Instance.CoordinatesLegal(c)
+									? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+								if (!pCell || pCell->GetBuilding() || !pCell->IsClearToMove(speed, true, false, -1, zone, -1, false))
+									continue;
+
+								const int dist = pBoarder->DistanceFrom(pCell);
+
+								if (dist < bestDist)
+								{
+									bestDist = dist;
+									pBest = pCell;
+								}
+							}
+						}
+
+						return pBest ? pBest : pTransport->GetCell();
+					};
+
 					for (const DWORD uid : infantry)
 					{
 						auto const pInf = findOwnFoot(uid);
@@ -4892,9 +4928,14 @@ namespace
 						// setting out for the soldier (two HIND down by their team took off again and
 						// were still flying 1500 frames later).
 						const bool entering = pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter;
+						const bool beside = std::abs(pInf->Location.X - pTransport->Location.X) < BoardingReachLeptons
+							&& std::abs(pInf->Location.Y - pTransport->Location.Y) < BoardingReachLeptons;
 
 						if (!aloft && !entering)
-							IssueMoveOrder(pInf, pTransport->GetCell(), 1.5);
+						{
+							if (!beside)
+								IssueMoveOrder(pInf, boardingCellFor(pInf), 0.5);
+						}
 						else if (aloft && !entering && pLanding && pInf->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingMeetCells)
 							IssueMoveOrder(pInf, pLanding, 2.0);
 						else if (entering || pInf->CurrentMission == Mission::Move)
