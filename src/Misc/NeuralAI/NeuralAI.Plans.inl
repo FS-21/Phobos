@@ -1877,6 +1877,7 @@ namespace
 					int onMap = 0;
 					int held = 0;
 					std::map<int, int> missions;
+					std::string aircraftText;
 
 					for (const DWORD uid : plan.Members)
 					{
@@ -1891,6 +1892,15 @@ namespace
 						onMap++;
 						missions[static_cast<int>(it->second->CurrentMission)]++;
 
+						if (auto const pAirMember = abstract_cast<AircraftClass*>(it->second))
+						{
+							char air[96];
+							std::snprintf(air, sizeof(air), " %s ammo %d/%d target %d air %d docked %d hp %d", pAirMember->Type->ID, pAirMember->Ammo,
+								pAirMember->Type->Ammo, pAirMember->Target ? 1 : 0, pAirMember->IsInAir() ? 1 : 0,
+								pAirMember->GetNthLink(0) ? 1 : 0, static_cast<int>(pAirMember->GetHealthPercentage() * 100));
+							aircraftText += air;
+						}
+
 						if (IsFootHeldStill(pHouse, it->second, 300))
 							held++;
 					}
@@ -1904,12 +1914,13 @@ namespace
 							missionText += "m" + std::to_string(mission) + "x" + std::to_string(count) + " ";
 
 						Debug::Log("[NeuralAI] House %d plan %s intact DIAG at rule %d: %d members around (%d,%d), %d cells from home and %d from "
-							"the target, %d held still 300 frames, staging (%d,%d), zones home %d group %d target %d, missions %s\n",
+							"the target, %d held still 300 frames, staging (%d,%d), zones home %d group %d target %d, missions %s| aircraft:%s\n",
 							houseIdx, NeuralPlanNames[static_cast<size_t>(id)], rule, onMap, centre.X, centre.Y,
 							static_cast<int>(centre.DistanceFrom(homeCell)), static_cast<int>(centre.DistanceFrom(plan.TargetCell)), held,
 							plan.StagingCell.X, plan.StagingCell.Y, homeZone,
 							MapClass::Instance.GetMovementZoneType(centre, MovementZone::Normal, false),
-							MapClass::Instance.GetMovementZoneType(plan.TargetCell, MovementZone::Normal, false), missionText.c_str());
+							MapClass::Instance.GetMovementZoneType(plan.TargetCell, MovementZone::Normal, false), missionText.c_str(),
+							aircraftText.empty() ? " none" : aircraftText.c_str());
 					}
 				}
 			}
@@ -4630,6 +4641,18 @@ namespace
 								pNearest->GetTechnoType()->ID, static_cast<int>(pNearest->GetTechnoType()->Size), nearestDist, pNearest->GetHeight(),
 								pNearest->ContainsLink(pTransport) ? 1 : 0, pNearest->Destination == pTransport ? 1 : 0,
 								static_cast<int>(pNearest->QueuedMission));
+
+							const FerryDoorZones door = GetFerryDoorZones(pTransport, pNearest);
+							Debug::Log("[NeuralAI] House %d AirborneFront door DIAG: zones %d and %d for movement zone %d, transport at (%d,%d) on record "
+								"(%d,%d) with destination %d, soldier at (%d,%d) on record (%d,%d), plain zones %d and %d, land types %d and %d.\n",
+								pHouse->ArrayIndex, door.Transport, door.Boarder, static_cast<int>(pNearest->GetTechnoType()->MovementZone),
+								pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y, pTransport->LastMapCoords.X, pTransport->LastMapCoords.Y,
+								pTransport->Destination ? 1 : 0, pNearest->GetMapCoords().X, pNearest->GetMapCoords().Y, pNearest->LastMapCoords.X,
+								pNearest->LastMapCoords.Y,
+								MapClass::Instance.GetMovementZoneType(pTransport->GetMapCoords(), MovementZone::Normal, false),
+								MapClass::Instance.GetMovementZoneType(pNearest->GetMapCoords(), MovementZone::Normal, false),
+								pTransportCell ? static_cast<int>(pTransportCell->LandType) : -1,
+								pNearest->GetCell() ? static_cast<int>(pNearest->GetCell()->LandType) : -1);
 						}
 
 						macro.RaidTransportBanUntil[pTransport->UniqueID] = Unsorted::CurrentFrame + 9000;
