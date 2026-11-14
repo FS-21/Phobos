@@ -4898,59 +4898,19 @@ namespace
 						pTransport = pFoot;
 				}
 
-				// Raiders (C4 commandos and other elite soldiers) or specialists (engineers, spies)
-				// dropped behind the lines need no main attack to hide behind, but then only
-				// go for a building with no known defense around it. A specialist rides along only to
-				// a building it can work (capture, infiltrate); vehicle thieves only fill seats
-				// and hunt vehicles once down.
+				// A specialist (engineer, spy) rides along only to a building it can work (capture,
+				// infiltrate); vehicle thieves only fill seats and hunt vehicles once down.
 				const int transportZone = pTransport ? ObjectZone(pTransport, MovementZone::Normal) : -1;
-				bool freeRaider = false;
 				std::vector<FootClass*> specialists;
-
-				// Volley damage of one soldier (primary weapon, burst included, against the building's
-				// armor when one is given): a squad of 4 or more worth 200 a volley (shock troopers,
-				// flamethrowers) wrecks a building before anyone answers.
-				auto volleyOf = [](FootClass* pFoot, BuildingClass* pBuilding)
-				{
-					auto const pType = pFoot->GetTechnoType();
-					auto const pSlot = pType ? pType->GetWeapon(0) : nullptr;
-					auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
-
-					if (!pWeapon || !pWeapon->Warhead)
-						return 0;
-
-					const double verses = pBuilding ? GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBuilding, pBuilding->Type) : 1.0;
-
-					return static_cast<int>(std::max(0, pWeapon->Damage) * std::max(1, pWeapon->Burst) * verses);
-				};
-
-				int freeSquad = 0;
-				int freeSquadVolley = 0;
 
 				for (auto const& [uid, pFoot] : ownFoots)
 				{
 					auto const pInf = abstract_cast<InfantryClass*>(pFoot);
 
-					if (!pTransport || ObjectZone(pFoot, MovementZone::Normal) != transportZone)
+					if (!pTransport || !pInf || ObjectZone(pFoot, MovementZone::Normal) != transportZone)
 						continue;
 
-					// A demolition vehicle that fits the transport is a raider too.
-					if (auto const pUnit = abstract_cast<UnitClass*>(pFoot); pUnit && pFoot != pTransport && IsVehicleRaiderType(pUnit->Type)
-						&& pUnit->GetTechnoType()->Size <= pTransport->GetTechnoType()->SizeLimit && isFreeForPlan(pFoot))
-					{
-						freeRaider = true;
-					}
-
-					if (!pInf)
-						continue;
-
-					if (isArmedGroundFoot(pFoot) && isFreeForPlan(pFoot) && !IsSpecialistInfantryType(pInf->Type))
-					{
-						freeRaider |= IsRaiderInfantryType(pInf->Type);
-						freeSquad++;
-						freeSquadVolley += volleyOf(pFoot, nullptr);
-					}
-					else if (IsSpecialistInfantryType(pInf->Type) && !macro.PlanMembers.contains(uid)
+					if (IsSpecialistInfantryType(pInf->Type) && !macro.PlanMembers.contains(uid)
 						&& !(pInf->Type->Engineer && IsSpecOpsEngineerBusy(pHouse, uid)) && pFoot->GetHealthPercentage() >= 0.6
 						&& (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard))
 					{
@@ -4977,16 +4937,17 @@ namespace
 					return count;
 				};
 
-				const size_t seats = pTransport ? static_cast<size_t>(std::max(0, pTransport->GetTechnoType()->Passengers)) : 0;
-				const bool freeStrikeSquad = seats >= 4 && freeSquad >= 4 && freeSquadVolley >= 200;
-
 				BuildingClass* pTarget = nullptr;
 				CellClass* pDrop = nullptr;
 				int bestScore = INT_MIN;
 
-				if ((mainAttack || freeRaider || freeStrikeSquad || !specialists.empty()) && pTransport)
+				// Only behind a main attack. Dropped with no attack to hide behind (a lone raider or
+				// specialist, a strike squad), the team met the whole garrison: 4 of 149 such raids
+				// went well, whatever the size of the team (2026-11-14; user: limit it to a main
+				// attack in progress).
+				if (mainAttack && pTransport)
 				{
-					const int defensesAllowed = mainAttack ? 1 : 0;
+					constexpr int defensesAllowed = 1;
 
 					for (auto const pBld : knownEnemyBuildingList)
 					{
@@ -4994,11 +4955,6 @@ namespace
 							continue;
 
 						const int workers = specialistsFor(pBld->Type);
-
-						// Without a main attack only raiders, a strike squad or a specialist job justify the trip.
-						if (!mainAttack && !freeRaider && !freeStrikeSquad && workers == 0)
-							continue;
-
 						const int worth = valuableBuildingWorth(pBld->Type) + workers * 150;
 						const CellStruct bc = pBld->GetMapCoords();
 
@@ -5108,15 +5064,6 @@ namespace
 					}
 				}
 
-				// A raid without a main attack must carry a raider, a specialist with a job there (one is
-				// a team by itself) or a strike squad of 4+ soldiers worth 200 a volley.
-				int teamVolley = 0;
-
-				for (auto const pFoot : infantry)
-					teamVolley += volleyOf(pFoot, pTarget);
-
-				const bool strikeSquad = infantry.size() >= 4 && teamVolley >= 200;
-
 				// A transport that goes by land or sea drives its team through whatever stands on its
 				// way, so the team and it must be worth what is known there, as for any raid (48 of 182
 				// plans lost their transport or had it badly hit on the way, nearly all of them
@@ -5143,8 +5090,8 @@ namespace
 					}
 				}
 
-				const bool teamReady = wayOpen
-					&& (raiders > 0 || workersAboard > 0 || strikeSquad || (mainAttack && infantry.size() >= 3));
+				// The team: a raider, a specialist with a job there, or three soldiers.
+				const bool teamReady = wayOpen && (raiders > 0 || workersAboard > 0 || infantry.size() >= 3);
 				const int utility = (pTarget && teamReady) ? (320 + bestScore / 6 + raiders * 150 + workersAboard * 120) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::AirborneFront, utility))
@@ -5154,10 +5101,10 @@ namespace
 					startPlan(NeuralPlanId::AirborneFront, group, pTarget->GetMapCoords(), pDrop->MapCoords, pTarget->UniqueID, 4500);
 					ClearFerryTrip(pTransport->UniqueID);
 					planOf(NeuralPlanId::AirborneFront).AuxBaseline = 0;
-					Debug::Log("[NeuralAI] House %d AirborneFront: %s %u carries %d soldiers (%d raiders, %d specialists) to %s of house %d at (%d,%d)%s, frame %d.\n",
+					Debug::Log("[NeuralAI] House %d AirborneFront: %s %u carries %d soldiers (%d raiders, %d specialists) to %s of house %d at (%d,%d), frame %d.\n",
 						pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID, static_cast<int>(infantry.size()),
 						raiders, workersAboard, pTarget->Type->ID, pTarget->Owner ? pTarget->Owner->ArrayIndex : -1, pDrop->MapCoords.X,
-						pDrop->MapCoords.Y, mainAttack ? "" : " (stealth raid)", Unsorted::CurrentFrame);
+						pDrop->MapCoords.Y, Unsorted::CurrentFrame);
 				}
 			}
 		}
