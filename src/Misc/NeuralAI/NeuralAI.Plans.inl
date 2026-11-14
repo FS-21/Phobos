@@ -2005,6 +2005,14 @@ namespace
 			if (macro.Plans[i].Active || Unsorted::CurrentFrame < macro.PlanNextAttemptFrame[i])
 				return false;
 
+			// Shelved plans start only in a training focus match that asks for them: Airborne Front
+			// went well in none of 34 plans behind a main attack and is being redesigned (user,
+			// 2026-11-14), so ordinary matches do not spend units or learning on it meanwhile.
+			constexpr NeuralPlanId shelved[] = { NeuralPlanId::AirborneFront };
+
+			if (std::find(std::begin(shelved), std::end(shelved), id) != std::end(shelved) && !TrainingFocus().Plans[i])
+				return false;
+
 			// 300..600 frames between attempts, varying per match and per plan (point 30).
 			macro.PlanNextAttemptFrame[i] = Unsorted::CurrentFrame + 300 + StyleJitter(houseIdx, static_cast<int>(i), 450, 301);
 
@@ -4518,6 +4526,28 @@ namespace
 		{
 			auto& plan = planOf(NeuralPlanId::AirborneFront);
 
+			// TEMP trace for the redesign of this plan: what each one had at its start, when it left
+			// with how many aboard, where it dropped them and what stood there, and how it ended.
+			struct AirborneTrace
+			{
+				int Team { 0 };
+				int Raiders { 0 };
+				int Workers { 0 };
+				const char* Target { "" };
+				int TargetHealth { 0 };
+				int EnemyStart { 0 };
+				int Defenses { 0 };
+				int MeetCells { 0 };
+				int Aboard { -1 };
+				int BoardedFrame { -1 };
+				int DroppedFrame { -1 };
+				int DropCells { -1 };
+				int EnemyDrop { -1 };
+			};
+
+			static std::array<AirborneTrace, 32> airborneTraces {};
+			auto& trace = airborneTraces[static_cast<size_t>(houseIdx) & 31];
+
 			if (plan.Active)
 			{
 				FootClass* const pTransport = plan.Members.empty() ? nullptr : findOwnFoot(plan.Members[0]);
@@ -4531,6 +4561,30 @@ namespace
 				{
 					Debug::Log("[NeuralAI] House %d AirborneFront: ends while %s (%s), frame %d.\n", pHouse->ArrayIndex,
 						PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], reason, Unsorted::CurrentFrame);
+
+					int soldiersAlive = 0;
+
+					for (const DWORD uid : infantry)
+					{
+						if (findOwnFoot(uid))
+							soldiersAlive++;
+					}
+
+					auto const pTransportType = pTransport ? pTransport->GetTechnoType() : nullptr;
+					const char* kind = !pTransportType ? "lost" : (underground ? "burrows"
+						: ((pTransportType->JumpJet || pTransportType->MovementZone == MovementZone::Fly
+							|| pTransport->WhatAmI() == AbstractType::Aircraft) ? "flies" : "surface"));
+					Debug::Log("[NeuralAI] House %d AirborneFront summary DIAG: %s while %s by %s (%s), team %d (%d raiders, %d specialists) for %s "
+						"at %d health, %d enemy value and %d defenses known near it, transport %d cells from its soldiers; left with %d aboard "
+						"after %d frames; dropped after %d frames more, %d cells from the target with %d enemy value near; ends %d frames after "
+						"the drop, %d soldiers on the map, target at %d, transport at %d, %d targets taken.\n", pHouse->ArrayIndex, reason,
+						PhaseNames[std::clamp(plan.AuxBaseline, 0, 2)], pTransportType ? pTransportType->ID : "none", kind, trace.Team, trace.Raiders,
+						trace.Workers, trace.Target, trace.TargetHealth, trace.EnemyStart, trace.Defenses, trace.MeetCells, trace.Aboard,
+						trace.BoardedFrame >= 0 ? trace.BoardedFrame - plan.StartFrame : -1,
+						(trace.DroppedFrame >= 0 && trace.BoardedFrame >= 0) ? trace.DroppedFrame - trace.BoardedFrame : -1, trace.DropCells,
+						trace.EnemyDrop, trace.DroppedFrame >= 0 ? Unsorted::CurrentFrame - trace.DroppedFrame : -1, soldiersAlive,
+						pTarget ? static_cast<int>(pTarget->GetHealthPercentage() * 100) : -1,
+						pTransport ? static_cast<int>(pTransport->GetHealthPercentage() * 100) : -1, plan.Progress + 1);
 				};
 
 				if (!pTarget)
@@ -4765,7 +4819,11 @@ namespace
 						: Unsorted::CurrentFrame - plan.StartFrame >= BoardingApproachFrames;
 
 					if (aboard > 0 && (waiting == 0 || parkedFrames >= BoardingPartialLoadFrames))
+					{
 						plan.AuxBaseline = 1;
+						trace.Aboard = aboard;
+						trace.BoardedFrame = Unsorted::CurrentFrame;
+					}
 					else if (aboard == 0 && nobodyCame)
 					{
 						// Not this transport again for a while: the same failure would repeat.
@@ -4814,6 +4872,9 @@ namespace
 						plan.AuxBaseline = 2;
 						plan.Arrived = true;
 						plan.ArrivedFrame = Unsorted::CurrentFrame;
+						trace.DroppedFrame = Unsorted::CurrentFrame;
+						trace.DropCells = static_cast<int>(pTransport->GetMapCoords().DistanceFrom(plan.TargetCell));
+						trace.EnemyDrop = seenEnemyValueNear(plan.TargetCell, 9.0, 900);
 						Debug::Log("[NeuralAI] House %d AirborneFront: team dropped at (%d,%d) by %s, frame %d.\n", pHouse->ArrayIndex,
 							plan.StagingCell.X, plan.StagingCell.Y, pTransport->GetTechnoType()->ID, Unsorted::CurrentFrame);
 
@@ -4885,6 +4946,7 @@ namespace
 					{
 						Debug::Log("[NeuralAI] House %d AirborneFront: %s at (%d,%d) captured, frame %d.\n", pHouse->ArrayIndex,
 							pTarget->Type->ID, plan.TargetCell.X, plan.TargetCell.Y, Unsorted::CurrentFrame);
+						logEnd("captured");
 						finishPlan(NeuralPlanId::AirborneFront, true, false);
 					}
 					else if (alive == 0)
@@ -5177,6 +5239,17 @@ namespace
 					startPlan(NeuralPlanId::AirborneFront, group, pTarget->GetMapCoords(), pDrop->MapCoords, pTarget->UniqueID, 4500);
 					ClearFerryTrip(pTransport->UniqueID);
 					planOf(NeuralPlanId::AirborneFront).AuxBaseline = 0;
+					trace = AirborneTrace {};
+					trace.Team = static_cast<int>(infantry.size());
+					trace.Raiders = raiders;
+					trace.Workers = workersAboard;
+					trace.Target = pTarget->Type->ID;
+					trace.TargetHealth = static_cast<int>(pTarget->GetHealthPercentage() * 100);
+					trace.EnemyStart = seenEnemyValueNear(pTarget->GetMapCoords(), 9.0, 900);
+					trace.Defenses = CountKnownEnemyDefensesNear(pHouse, pTarget->GetMapCoords(), 9.0, false);
+
+					for (auto const pFoot : infantry)
+						trace.MeetCells = std::max(trace.MeetCells, static_cast<int>(pFoot->GetMapCoords().DistanceFrom(pTransport->GetMapCoords())));
 					Debug::Log("[NeuralAI] House %d AirborneFront: %s %u carries %d soldiers (%d raiders, %d specialists) to %s of house %d at (%d,%d), frame %d.\n",
 						pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID, static_cast<int>(infantry.size()),
 						raiders, workersAboard, pTarget->Type->ID, pTarget->Owner ? pTarget->Owner->ArrayIndex : -1, pDrop->MapCoords.X,
