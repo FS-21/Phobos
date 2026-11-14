@@ -161,6 +161,8 @@ namespace
 		bool BoardingParked { false };
 		// Airborne Front: the frame its transport first parked by its soldiers (-1 not yet).
 		int BoardingParkedFrame { -1 };
+		// Airborne Front: how many were aboard at the last tick of its unloading.
+		int UnloadAboard { 0 };
 		// Preemptive Strike: where the enemy force was gathering when the plan started. Airborne
 		// Front: the cell its flying transport was last sent to land on.
 		CellStruct AnchorCell { 0, 0 };
@@ -1523,7 +1525,7 @@ namespace
 	constexpr int AirborneRetargetFrames = 1800;
 	// Airborne Front: the time the trip gets from the moment the transport leaves and the time the
 	// team gets on the ground, of which it is reckoned to fire 1 part in AirborneAssaultShare; a transport badly hit goes on when it is this near its drop cell,
-	// and one still loaded AirborneDropRetryFrames after it was told to unload tries another cell;
+	// and one that has let nobody out for AirborneDropRetryFrames tries another cell;
 	// the target stands between AirborneFrontGapCells and AirborneFrontReachCells from where the
 	// main attack is aimed; the drop cell is looked for AirborneDropRingCells from the target,
 	// and what is known within AirborneDropGuardCells of each candidate decides between them.
@@ -1531,7 +1533,7 @@ namespace
 	constexpr int AirborneAssaultFrames = 2700;
 	constexpr int AirborneAssaultShare = 2;
 	constexpr double AirbornePressOnCells = 15.0;
-	constexpr int AirborneDropRetryFrames = 300;
+	constexpr int AirborneDropRetryFrames = 450;
 	constexpr double AirborneFrontGapCells = 10.0;
 	constexpr double AirborneFrontReachCells = 40.0;
 	constexpr double AirborneDropRingCells = 5.0;

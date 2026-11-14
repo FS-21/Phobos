@@ -5326,6 +5326,16 @@ namespace
 						if (pTransport->Target)
 							pTransport->SetTarget(nullptr);
 
+						// While passengers keep getting out the wait starts again: the other cell is
+						// for a transport that lets nobody out, not for one that takes its time (it
+						// was sent away in the middle of unloading; from 8 of 15 plans well to 4 of 21).
+						const int aboardNow = pTransport->Passengers.NumPassengers;
+
+						if (plan.AuxPeak != 0 && aboardNow < plan.UnloadAboard)
+							plan.AuxPeak = Unsorted::CurrentFrame;
+
+						plan.UnloadAboard = aboardNow;
+
 						if (!aloft && PutAshoreNow(pTransport) > 0)
 						{
 							// Out: the next tick finds it empty.
