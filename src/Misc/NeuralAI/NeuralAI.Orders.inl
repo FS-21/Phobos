@@ -1063,7 +1063,8 @@ namespace
 				auto const pWS = pFootType->GetWeapon(i);
 				auto const pW = pWS ? pWS->WeaponType : nullptr;
 
-				if (pW && (pW->Spawner || (pW->Damage > 0 && (!pW->Projectile || pW->Projectile->AG))))
+				if (pW && (pW->Spawner
+					|| (pW->Damage > 0 && LandTargetingAllows(pFootType, i) && (!pW->Projectile || pW->Projectile->AG))))
 					longestGroundRange = std::max(longestGroundRange, pW->Range);
 			}
 

@@ -1529,6 +1529,8 @@ namespace
 	constexpr int AirborneStandDownFrames = 1800;
 	constexpr double AirborneMusterCells = 20.0;
 	constexpr double AirborneSurfaceMeetCells = 40.0;
+	// A unit this long on an Attack mission with no target is put back on guard.
+	constexpr int AttackWithNoTargetFrames = 45;
 	// Airborne Front: its team is taken from soldiers this near a building of ours.
 	constexpr double AirborneHomeCells = 15.0;
 	// A parked Airborne Front transport sets out for its soldiers again only when the nearest one

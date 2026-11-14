@@ -4501,9 +4501,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const auto pWpn1 = pUnit->GetWeapon(1) ? pUnit->GetWeapon(1)->WeaponType : nullptr;
 				const bool isUnitCarrierSpawner
 					= (pUnit->Spawns != nullptr) || (pWpn && pWpn->Spawner) || (pWpn1 && pWpn1->Spawner);
-				const bool wpn0HitsLand = pWpn && (pWpn->Damage > 5 || pWpn->Spawner)
+				const bool wpn0HitsLand = pWpn && (pWpn->Damage > 5 || pWpn->Spawner) && LandTargetingAllows(pUnit, 0)
 					&& (!pWpn->Projectile || pWpn->Projectile->AG || pWpn->Spawner || isUnitCarrierSpawner);
-				const bool wpn1HitsLand = pWpn1 && (pWpn1->Damage > 5 || pWpn1->Spawner)
+				const bool wpn1HitsLand = pWpn1 && (pWpn1->Damage > 5 || pWpn1->Spawner) && LandTargetingAllows(pUnit, 1)
 					&& (!pWpn1->Projectile || pWpn1->Projectile->AG || pWpn1->Spawner);
 				const int maxLandSiegeRange = std::max(
 					wpn0HitsLand ? (isUnitCarrierSpawner ? std::max(pWpn->Range, 18 * 256) : pWpn->Range) : 0,
