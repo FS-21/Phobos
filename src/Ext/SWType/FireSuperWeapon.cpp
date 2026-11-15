@@ -5,6 +5,7 @@
 #include <Ext/WeaponType/Body.h>
 #include <Ext/Scenario/Body.h>
 #include <Utilities/Helpers.Alex.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 #include <unordered_set>
 
@@ -15,6 +16,8 @@ void SWTypeExt::FireSuperWeaponExt(SuperClass* pSW, const CellStruct& cell)
 	const auto pHouse = pSW->Owner;
 	const auto pType = pSW->Type;
 	auto const pTypeExt = SWTypeExt::Fetch(pType);
+
+	NeuralAI::OnSuperWeaponLaunched(pSW, cell);
 
 	if (pTypeExt->LimboDelivery_Types.size() > 0)
 		pTypeExt->ApplyLimboDelivery(pHouse);
