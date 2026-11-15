@@ -347,6 +347,8 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed inconsistent damage scaling for negative `PowerPlantEnhancer.Factor` values.
 - Fixed the issue where the AI-triggered reachability check incorrectly rejects reachable transport teams that are summarized as having `MovementZone` of `Amphibious`, `AmphibiousCrusher`, `AmphibiousDestroyer`, or `Fly`.
 - Fixed the issue where AI triggers also perform reachability checks on teams that only execute guard, wait, or auxiliary script actions.
+- Fixed the game freezing in path finding when a high bridge reaches the map edge: the bridge flags were left on the cell the game uses for every cell outside the map, and the search for the ends of a bridge could then walk outside the map forever.
+- Fixed ground units sent to a cell held by a building with no free cell around it taking a cell outside the map as their new destination.
 
 ## Fixes / interactions with other extensions
 

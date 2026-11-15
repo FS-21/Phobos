@@ -166,6 +166,7 @@ This page lists all the individual contributions to the project by their author.
   - Fix Tiberium types not supporting overrides in map and game mode INIs
   - Tiberium veins overlay palette fix
   - Fix desyncs caused by non-vehicle parasites reading `Parasite.AllowWaterExit` from invalid memory
+  - Fix the path finding freeze at high bridges reaching the map edge
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
