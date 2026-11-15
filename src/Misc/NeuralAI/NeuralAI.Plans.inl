@@ -3074,10 +3074,21 @@ namespace
 
 				if (idleArmy.size() >= FeintIdleMin)
 				{
+					// Not a building our units are already firing at, nor a unit folded into a building:
+					// either is gone before the decoy gets there (32 of 80 feints ended with their
+					// target gone, 2026-11-15).
+					std::unordered_set<const AbstractClass*> underOurFire;
+
+					for (auto const& [uid, pOwn] : ownFoots)
+					{
+						if (pOwn->Target)
+							underOurFire.insert(pOwn->Target);
+					}
+
 					for (auto const pBld : knownEnemyBuildingList)
 					{
 						if (!isKnownEnemyBuilding(pBld) || pBld->Owner->ArrayIndex != frontOwner || pBld->Type->CanBeOccupied
-							|| pBld->Type->Insignificant)
+							|| pBld->Type->Insignificant || pBld->Type->UndeploysInto || underOurFire.contains(pBld))
 						{
 							continue;
 						}
@@ -7898,10 +7909,21 @@ namespace
 				// shell the ambush, and its owner need not send anyone).
 				if (idle.size() >= BaitIdleMin)
 				{
+					// Not a building our units are already firing at, nor a unit folded into a building:
+					// the lure was gone before the ambush stood in place in 107 of 314 plans (the
+					// building nearest to our home is the one our waves go for, 2026-11-15).
+					std::unordered_set<const AbstractClass*> underOurFire;
+
+					for (auto const& [uid, pOwn] : ownFoots)
+					{
+						if (pOwn->Target)
+							underOurFire.insert(pOwn->Target);
+					}
+
 					for (auto const pBld : knownEnemyBuildingList)
 					{
 						if (!isKnownEnemyBuilding(pBld) || ObjectZone(pBld, MovementZone::Normal) != homeZone || pBld->Type->CanBeOccupied
-							|| pBld->Type->Insignificant)
+							|| pBld->Type->Insignificant || pBld->Type->UndeploysInto || underOurFire.contains(pBld))
 						{
 							continue;
 						}
