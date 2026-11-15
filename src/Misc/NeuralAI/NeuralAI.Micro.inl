@@ -2666,7 +2666,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& Unsorted::CurrentFrame - urban.RepairWantedFrame <= UrbanRepairWantedFrames;
 		};
 		const bool urbanRepairCandidate = pEBld->Type->CanBeOccupied && pEBld->Type->Repairable
-			&& (pEBld->Owner == pHouse || IsCellInSightOfAI(pHouse, pEBld->GetMapCoords()));
+			&& (pEBld->Owner == pHouse || IsCellKnownToAI(pHouse, pEBld->GetMapCoords()));
 		const bool urbanWorthAnEngineer = urbanRepairCandidate
 			&& (urbanHeldByFriend
 				? pEBld->GetHealthPercentage() < UrbanRepairHeldBelow
@@ -2703,9 +2703,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pEBld->GetCell() || !IsCellVisibleToAI(pHouse, pEBld->GetCell()))
 			continue;
 
-		// Occupants are only known while the building is in sight now.
+		// Occupants are only read while this house knows the building's cell (IsCellKnownToAI).
 		const bool enemyGarrisonInSight = pEBld->Type->CanBeOccupied && pEBld->Occupants.Count > 0
-			&& IsCellInSightOfAI(pHouse, pEBld->GetMapCoords());
+			&& IsCellKnownToAI(pHouse, pEBld->GetMapCoords());
 
 		if (enemyGarrisonInSight)
 		{
@@ -6915,7 +6915,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool victimColors = pVictim && DisguiseSpyFor(pHouse, pInf, pVictim);
 
 			if (!victimColors && pSampleEnemyInfantry && (pVictim || SlotGate(scores[61], 60, 61))
-				&& !SpyDisguiseHouse(pInf) && IsCellInSightOfAI(pHouse, pSampleEnemyInfantry->GetMapCoords()))
+				&& !SpyDisguiseHouse(pInf) && IsCellKnownToAI(pHouse, pSampleEnemyInfantry->GetMapCoords()))
 			{
 				CopySoldierDisguise(pHouse, pInf, pSampleEnemyInfantry);
 			}
@@ -12852,7 +12852,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 
 			// A lone harassing aircraft takes no anti-air risk at all (AirStrikeRiskAt: known sites,
-			// anti-air in current sight, places our aircraft were shot down; computed once per
+			// anti-air units we know of, places our aircraft were shot down; computed once per
 			// contact), so bombers do not dive again and again into the same covered army.
 			if (contactAirRisk[i] < 0)
 				contactAirRisk[i] = AirStrikeRiskAt(pHouse, contact.Coords);
@@ -12897,8 +12897,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	if (airForceInCharge)
 		UpdateAirWings(pHouse);
 
-	// Interceptors: enemy air in current sight that threatens the base (the early warning flanks), and
-	// with Expert 8 in charge any enemy flyer in sight within 30 cells away from known anti-air
+	// Interceptors: enemy air we know of that threatens the base (the early warning flanks), and
+	// with Expert 8 in charge any enemy flyer we know of within 30 cells away from known anti-air
 	// defenses. Strikes already sent at a flyer count against it, so interceptors spread.
 	auto pickAirInterceptTarget = [&](AircraftClass* pAircraft) -> TechnoClass*
 	{
@@ -12906,7 +12906,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			? pickAirFlankFor(pAircraft, true, (airForceInCharge ? 40 : 28) * Unsorted::LeptonsPerCell)
 			: -1;
 
-		if (flankIdx >= 0 && IsCellInSightOfAI(pHouse, baseAirFlanks[flankIdx].Target->GetMapCoords()))
+		if (flankIdx >= 0 && IsCellKnownToAI(pHouse, baseAirFlanks[flankIdx].Target->GetMapCoords()))
 		{
 			baseAirFlanks[flankIdx].AssignedInterceptors++;
 
@@ -12935,7 +12935,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const& contact : enemyContacts)
 		{
-			if (!contact.Airborne || ac.DistanceFrom(contact.Coords) > 30.0 || !IsCellInSightOfAI(pHouse, contact.Coords)
+			if (!contact.Airborne || ac.DistanceFrom(contact.Coords) > 30.0 || !IsCellKnownToAI(pHouse, contact.Coords)
 				|| CountKnownEnemyDefensesNear(pHouse, contact.Coords, 9.0, true) > 0)
 			{
 				continue;
@@ -15818,7 +15818,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						if (pEnemyU && pEnemyU->IsAlive && !pEnemyU->InLimbo && pEnemyU->Type && pEnemyU->Owner && pEnemyU->Owner != pHouse
 							&& !pHouse->IsAlliedWith(pEnemyU->Owner) && !pEnemyU->Owner->IsNeutral()
-							&& IsCellInSightOfAI(pHouse, pEnemyU->GetMapCoords()))
+							&& IsCellKnownToAI(pHouse, pEnemyU->GetMapCoords()))
 						{
 							// An EMP weapon is a defense first: enemy units closing on our base count double.
 							const bool threat = swAim.IsEMP && homeCoords != CellStruct::Empty

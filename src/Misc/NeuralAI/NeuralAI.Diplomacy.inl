@@ -46,7 +46,7 @@ namespace
 	}
 
 	// A cell on or next to a truce partner: one of its known structures within 6 cells, or one of its
-	// units in our current sight within 3. Superweapons skip such cells while the truce lasts.
+	// units we know of within 3. Superweapons skip such cells while the truce lasts.
 	bool IsCellNearTrucePartner(HouseClass* pHouse, const CellStruct& cell)
 	{
 		if (!pHouse || CoalitionTargetOf(pHouse) < 0)
@@ -65,7 +65,7 @@ namespace
 		{
 			if (pTechno && pTechno->IsAlive && !pTechno->InLimbo && pTechno->Owner && pTechno->WhatAmI() != AbstractType::Building
 				&& IsTacitTrucePartner(pHouse, pTechno->Owner->ArrayIndex) && CellDistance(pTechno->GetMapCoords(), cell) <= 3
-				&& IsCellInSightOfAI(pHouse, pTechno->GetMapCoords()))
+				&& IsCellKnownToAI(pHouse, pTechno->GetMapCoords()))
 			{
 				return true;
 			}
@@ -274,7 +274,7 @@ namespace
 	// Expert 3 diplomacy, every 450 frames (150 while a coalition is on), for every Neural AI house
 	// outside a preset team, whichever expert leads. Each house reads only its own memory (fog-fair):
 	// seen army value in the last 2700 frames (EnemySightings) plus its known structures, which house
-	// it saw fighting which (armed units in current sight next to a house's known structures), the
+	// it saw fighting which (armed units it knew of next to a house's known structures), the
 	// harvesters and refineries it saw, the damage it took (damage hook) and the public defeat flag.
 	// - Triggers: a defeat and the house our memory blames for it (among the strong); a runaway
 	//   leader (seen strength 1.7x every other house's, ours counted at two thirds, 1.3x all of ours,
@@ -519,10 +519,10 @@ namespace
 				strength[i] = std::max(strength[i], strength[self]);
 		}
 
-		// Fighting seen: armed units in current sight next to (the 3x3 blocks around them) another
+		// Fighting seen: armed units we know of next to (the 3x3 blocks around them) another
 		// house's known structures, away from their own. Also: which houses hit the same third house
-		// (inferred partners), which aim at which in force (a betrayal we witness), the harvesters in
-		// sight, and while a coalition is on the houses seen fighting its target (at its base, at their
+		// (inferred partners), which aim at which in force (a betrayal we witness), the harvesters we
+		// know of, and while a coalition is on the houses seen fighting its target (at its base, at their
 		// own base against it, or aiming at it) and their spots at the target's base (fronts).
 		const int decay = coal.Target >= 0 ? 95 : 85;
 
@@ -559,7 +559,7 @@ namespace
 
 			const CellStruct c = pTechno->GetMapCoords();
 
-			if (!IsCellInSightOfAI(pHouse, c))
+			if (!IsCellKnownToAI(pHouse, c))
 				continue;
 
 			auto const pType = pTechno->GetTechnoType();
@@ -632,7 +632,7 @@ namespace
 			coal.HarvestersSeen[i] = std::max(coal.HarvestersSeen[i] * 9 / 10, harvestersNow[i]);
 
 		// Witnessed betrayals: a house we earlier saw hitting a third house side by side with another
-		// now aims at that other house's units or buildings in force, in our sight.
+		// now aims at that other house's units or buildings in force, where we know it.
 		for (int a = 0; a < 8; ++a)
 		{
 			for (int b = 0; b < 8; ++b)

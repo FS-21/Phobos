@@ -861,7 +861,7 @@ namespace
 		{
 			if (pUnit && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner && pUnit->Owner != pHouse
 				&& !pHouse->IsAlliedWith(pUnit->Owner) && !pUnit->Owner->IsNeutral() && pUnit->Type && pUnit->Type->Sensors
-				&& pUnit->Type->SensorsSight > 0 && IsCellInSightOfAI(pHouse, pUnit->GetMapCoords()))
+				&& pUnit->Type->SensorsSight > 0 && IsCellKnownToAI(pHouse, pUnit->GetMapCoords()))
 			{
 				sonars.push_back({ pUnit->GetMapCoords(), pUnit->Type->SensorsSight + 1 });
 			}
@@ -3963,7 +3963,7 @@ namespace
 		// an idle group sized to beat them, before they get there. A unit is a base threat when its
 		// target is one of those buildings or harvesters, when its move or attack-move destination
 		// lies next to one of those buildings, or when its course over the last sightings leads into
-		// them. Only units in our current sight count. The group comes from free units near the
+		// them. Only units we know of count. The group comes from free units near the
 		// threat (never plan members or units marching in a wave), leaves a home reserve when the
 		// fight is away from our own buildings, and stops at known enemy defenses or once the threat
 		// is gone. TargetID = lead threat, StagingCell = the building it was after, AuxBaseline =
@@ -4015,7 +4015,7 @@ namespace
 			if (plan.Active)
 			{
 				auto const pLead = findTechnoByID(plan.TargetID);
-				const bool leadSeen = pLead && IsCellInSightOfAI(pHouse, pLead->GetMapCoords());
+				const bool leadSeen = pLead && IsCellKnownToAI(pHouse, pLead->GetMapCoords());
 				const CellStruct center = leadSeen ? pLead->GetMapCoords() : seenEnemyCentroidNear(plan.TargetCell, 10.0, 150);
 				const CellStruct ourCenter = groupCentroid(plan.Members);
 
@@ -4143,7 +4143,7 @@ namespace
 
 					const CellStruct cell = pFoot->GetMapCoords();
 
-					if (!IsCellInSightOfAI(pHouse, cell) || ObjectZone(pFoot, MovementZone::Normal) != homeZone)
+					if (!IsCellKnownToAI(pHouse, cell) || ObjectZone(pFoot, MovementZone::Normal) != homeZone)
 						continue;
 
 					// Unarmed engineers and spies walking into our buildings are threats too.
@@ -8480,14 +8480,14 @@ namespace
 				int bestScore = INT_MIN;
 				const int rangeCells = std::clamp(fleetRange / Unsorted::LeptonsPerCell, 6, 26);
 
-				// Enemy ships in our sight now: the firing spot stays out of their reach too.
+				// Enemy ships we know of: the firing spot stays out of their reach too.
 				std::vector<std::pair<CellStruct, int>> enemyShips;
 
 				for (auto const pEnemy : UnitClass::Array)
 				{
 					if (pEnemy && pEnemy->IsAlive && !pEnemy->InLimbo && pEnemy->Type && pEnemy->Type->Naval && pEnemy->Owner
 						&& pEnemy->Owner != pHouse && !pHouse->IsAlliedWith(pEnemy->Owner) && !pEnemy->Owner->IsNeutral()
-						&& IsCellInSightOfAI(pHouse, pEnemy->GetMapCoords()))
+						&& IsCellKnownToAI(pHouse, pEnemy->GetMapCoords()))
 					{
 						const int reach = GroundRangeOf(pEnemy->Type) / Unsorted::LeptonsPerCell;
 
@@ -8858,9 +8858,9 @@ namespace
 			{
 				auto const pTarget = findTechnoByID(plan.TargetID);
 				const int strength = groupStrength(plan.Members);
-				// Tracked in current sight only: explored cells would show it through the fog.
+				// Tracked while its cell is known (IsCellKnownToAI), as the match's vision rule shows it.
 				const bool targetSeen = pTarget && pTarget->CloakState == CloakState::Uncloaked
-					&& IsCellInSightOfAI(pHouse, pTarget->GetMapCoords());
+					&& IsCellKnownToAI(pHouse, pTarget->GetMapCoords());
 
 				if (targetSeen)
 				{
@@ -8913,7 +8913,7 @@ namespace
 				{
 					if (!pTech || !pTech->IsAlive || pTech->InLimbo || !pTech->Owner || pTech->Owner == pHouse
 						|| pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral() || pTech->CloakState != CloakState::Uncloaked
-						|| !IsCellInSightOfAI(pHouse, pTech->GetMapCoords()))
+						|| !IsCellKnownToAI(pHouse, pTech->GetMapCoords()))
 					{
 						continue;
 					}
