@@ -1626,6 +1626,12 @@ namespace
 	constexpr size_t HoldTowersMinMembers = 3;
 	constexpr int HoldTowersRepelledPercent = 30;
 	constexpr int HoldTowersKeptPercent = 50;
+	// A hold starts only when the army and our ground defenses within HoldTowersDefenseCells of the
+	// rally are worth HoldTowersStandPercent of the force: below that the towers do not save the
+	// army, it died about 525 frames in (focus batch of 12 matches, 2026-11-15: 4 of 22 such holds
+	// went well, 51 of 74 from there on).
+	constexpr double HoldTowersDefenseCells = 10.0;
+	constexpr int HoldTowersStandPercent = 100;
 	// Combo Watch Strike: a sentry spotted a force when a ground enemy of it within
 	// ComboWatchSightCells of the sentry was seen in the last ComboWatchSightFrames; the follow-up
 	// it leads into has ComboWatchStartFrames to start. It started on any sighting before, whether
@@ -1694,6 +1700,24 @@ namespace
 	constexpr double PlanStrikeApproachCells = 40.0;
 	constexpr double PlanStrikeApproachStepCells = 8.0;
 	constexpr int PlanStrikeGuardFrames = 900;
+	// Rolling Siege: the battery goes with RollingSiegeMinEscorts..RollingSiegeMaxEscorts armed
+	// ground escorts (one in PlanStrikeIdleShare of the idle ones when that is more than three),
+	// plus RollingSiegeAntiAirEscorts mobile anti-air, and moves on to a defense at most
+	// RollingSiegeChainCells from the last one. The escort was at most three and could be none:
+	// 13 of 40 plans went with five members or fewer, three of them guns (archive of 2026-11-14
+	// night).
+	constexpr size_t RollingSiegeMinEscorts = 2;
+	constexpr size_t RollingSiegeMaxEscorts = 8;
+	constexpr size_t RollingSiegeAntiAirEscorts = 2;
+	constexpr double RollingSiegeChainCells = 20.0;
+	// Rolling Siege firing spots around a defense, as fractions of the stand-off distance toward
+	// home and to its side: straight toward home first, then 30 and 60 degrees to either side.
+	constexpr std::pair<double, double> RollingSiegeStageDirections[] = { { 1.0, 0.0 }, { 0.866, 0.5 }, { 0.866, -0.5 },
+		{ 0.5, 0.866 }, { 0.5, -0.866 } };
+	// Superweapon Race: the ground group has this many units at least and takes at most this many,
+	// or one in PlanStrikeIdleShare of the idle ground army when that is more.
+	constexpr size_t SuperweaponRaceMinGround = 4;
+	constexpr size_t SuperweaponRaceMaxGround = 12;
 	// A unit that resource cells heal, wounded below ResourceHealBelow, stops on one within
 	// ResourceHealSearchCells until it is back at ResourceHealUntil, for ResourceHealMaxFrames at
 	// most, and then not again for ResourceHealCooldownFrames.
