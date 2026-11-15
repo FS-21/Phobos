@@ -84,6 +84,14 @@ namespace
 	// The trainer created the JSON mapping before starting the game (it reads it). Otherwise
 	// (developer repro runs) the snapshot also goes to AI\train_telemetry_<slot>.json.
 	bool TelemetryJsonShmFromTrainer = false;
+
+	// What the trainer's map view of this slot asks for, written by the trainer: 0 nothing, 1 the
+	// maximized view is open, 2 + house index while it shows what that house knows.
+	constexpr uint32_t TelemetryViewShmCapacity = 16;
+
+	HANDLE TelemetryViewShmHandle = NULL;
+
+	const volatile uint32_t* TelemetryViewRequest = nullptr;
 } // namespace
 
 AIBackpackFile NeuralAI::Backpack = {};

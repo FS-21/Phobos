@@ -73,6 +73,10 @@ namespace
 		bool AntiAir { false };
 		int OwnerIndex { -1 };
 		const TechnoTypeClass* Type { nullptr };
+		// Where it has stood since when (it moved no more than EnemyStandCells from there): a force
+		// gathering stands, one on its way does not (Preemptive Strike).
+		CellStruct StandCoords { CellStruct::Empty };
+		int StandSinceFrame { 0 };
 	};
 
 	struct NeuralOpponentProfile
@@ -169,6 +173,10 @@ namespace
 		int TargetSeenFrame { 0 };
 		// Per member: a frame (Pickets: until when a sentry holds back, when it last saw something).
 		std::vector<int> MemberFrames {};
+		// Combat value of the enemy units its members destroyed (NeuralAI::OnTechnoDestroyed).
+		int KillValue { 0 };
+		// Bait Ambush: the bait's health in percent when it set out to fire at the building.
+		int LureHealth { 0 };
 	};
 
 	struct NeuralStuckTrack
@@ -926,6 +934,10 @@ namespace
 		std::vector<NeuralDelayedRetreat> DelayedRetreats {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoost {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoostUntilFrame {};
+		// The frame each plan last ended and whether it ended well: a combo chain is judged by the
+		// plan it led into.
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanEndFrame {};
+		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> PlanEndedWell {};
 		std::map<int, int> SuperReadySinceFrame {};
 
 		// Mobile factories (NeuralAI.MobileFactory.inl): the trip of each packed factory deployer (by
@@ -1208,6 +1220,8 @@ namespace
 			this->DelayedRetreats.clear();
 			this->PlanBoost.fill(0);
 			this->PlanBoostUntilFrame.fill(0);
+			this->PlanEndFrame.fill(0);
+			this->PlanEndedWell.fill(false);
 			this->SuperReadySinceFrame.clear();
 			this->MobileFactoryGoals.clear();
 			this->MobileFactoryStands.clear();
@@ -1572,13 +1586,107 @@ namespace
 	// 750 frames of march), and follows it this far from where it was gathering.
 	constexpr double PreemptiveReachCells = 45.0;
 	constexpr double PreemptiveLeashCells = 15.0;
-	// Bait Ambush: how long the bait shows itself at the enemy's door before the plan gives up, and
-	// how long the ambush waits for a chaser once the bait is back behind it.
+	// A gathering force: ground units seen within PreemptiveClusterCells of each other, at least
+	// PreemptiveMinValue of them standing (no more than EnemyStandCells from where they were) for
+	// PreemptiveGatherFrames. Any force seen in the last 150 frames was taken before, and 10 of 18
+	// plans went for one already on its way: it was 15 cells from its start point before the
+	// group got there, 600 frames into the plan at the median (2026-11-15).
+	constexpr double EnemyStandCells = 4.0;
+	constexpr int PreemptiveGatherFrames = 300;
+	constexpr double PreemptiveClusterCells = 8.0;
+	constexpr int PreemptiveMinValue = 140;
+	// The group: the free units nearest to the force, each within PreemptiveReachCells of it. They
+	// meet PreemptiveStageCells short of the force (out of reach of a force spread over
+	// PreemptiveClusterCells) and strike together once two thirds of them are within
+	// PreemptiveStageNearCells of that spot, PreemptiveStageWaitFrames into the plan, or once the
+	// fight has begun. The first twelve free units of the whole base, with only their centre within
+	// reach, came one by one: 6 of 18 plans lost a third of their value with the centre of the group
+	// 27 to 52 cells short and the head 4 to 19 cells from the force.
+	constexpr size_t PreemptiveMinMembers = 5;
+	constexpr size_t PreemptiveMaxMembers = 12;
+	constexpr double PreemptiveStageCells = 16.0;
+	constexpr double PreemptiveStageNearCells = 5.0;
+	constexpr int PreemptiveStageWaitFrames = 600;
+	// A force this near our nearest member is in the fight: the whole group strikes, and it is
+	// fought wherever it goes from there (it came at us).
+	constexpr double PreemptiveEngageCells = 8.0;
+	// Hold Under Towers: a ground enemy force of at least HoldTowersMinEnemyValue within
+	// HoldTowersEnemyCells of home, over HoldTowersOddsPercent of our free army within
+	// HoldTowersArmyCells, and an army of at least HoldTowersMinMembers: 19 of the 27 holds whose
+	// whole group died were of one or two units (3 of 24 such holds went well, 8 of 29 from three
+	// on, 2026-11-15). The attack is over when the ground enemy near home fell to
+	// HoldTowersRepelledPercent of its peak (killed or gone: no enemy at all within 30 cells never
+	// happens in a match of six or eight houses, so intact groups ran out of time); at the
+	// deadline the hold went well if the group kept HoldTowersKeptPercent of its value and the
+	// enemy near home is no longer that much stronger than it.
+	constexpr double HoldTowersEnemyCells = 30.0;
+	constexpr double HoldTowersArmyCells = 40.0;
+	constexpr int HoldTowersMinEnemyValue = 120;
+	constexpr int HoldTowersOddsPercent = 130;
+	constexpr size_t HoldTowersMinMembers = 3;
+	constexpr int HoldTowersRepelledPercent = 30;
+	constexpr int HoldTowersKeptPercent = 50;
+	// Combo Watch Strike: a sentry spotted a force when a ground enemy of it within
+	// ComboWatchSightCells of the sentry was seen in the last ComboWatchSightFrames; the follow-up
+	// it leads into has ComboWatchStartFrames to start. It started on any sighting before, whether
+	// or not a follow-up had a force to act on, and 60 of 63 ran out of time.
+	constexpr double ComboWatchSightCells = 9.0;
+	constexpr int ComboWatchSightFrames = 30;
+	constexpr int ComboWatchStartFrames = 900;
+	// Bait Ambush: how long the bait fires at the building with no answer before the plan gives up,
+	// and how long the ambush waits for a chaser once the bait is back behind it.
 	constexpr int BaitLureWaitFrames = 450;
 	constexpr int BaitChaseWaitFrames = 450;
 	// A bait nobody answered is not tried again for this long: giving up sooner made the plan start
 	// twice as often (272 plans in 18 matches against 127 in 40).
 	constexpr int BaitRetryFrames = 5400;
+	// A Neural AI house sends its intercept group at whoever fires at one of its buildings and follows
+	// it until it is 8 cells farther from the building than when the intercept began. The bait begins
+	// to fire from its weapon range (4 to 6 cells), so the answer comes out 12 to 14 cells and the
+	// ambush waits BaitAmbushCells from the building on the way home; the ambush of the old design
+	// stood 23 cells or more away and no chaser ever reached it. Neither the building nor the ambush
+	// has a known defense within BaitTowerClearCells, and the building is BaitLureMinCells from home.
+	constexpr double BaitAmbushCells = 12.0;
+	constexpr double BaitTowerClearCells = 9.0;
+	constexpr double BaitLureMinCells = 35.0;
+	constexpr size_t BaitIdleMin = 7;
+	constexpr size_t BaitAmbushSize = 8;
+	constexpr int BaitPlanFrames = 4500;
+	// The bait sets out once half the ambush stands within BaitInPlaceCells of its cell, or after
+	// BaitSetFrames, and has BaitApproachFrames to come within range of the building.
+	constexpr double BaitInPlaceCells = 5.0;
+	constexpr int BaitSetFrames = 1800;
+	constexpr int BaitApproachFrames = 900;
+	// The bait runs back once it lost BaitHurtPercent of its health while luring or enemy value of
+	// BaitThreatValue is seen within BaitThreatCells of it; the ambush springs on that much seen within
+	// BaitAmbushSightCells of its cell and fights what is seen within BaitFightCells.
+	constexpr int BaitHurtPercent = 15;
+	constexpr int BaitThreatValue = 40;
+	constexpr double BaitThreatCells = 8.0;
+	constexpr double BaitAmbushSightCells = 9.0;
+	constexpr double BaitFightCells = 12.0;
+	// A bait ambush went well when its members destroyed enemy units worth this much and no less than
+	// the value it lost: the old test (60 enemy value seen near the ambush) counted any wave passing by.
+	constexpr int BaitKillValue = 60;
+	// Feint: a decoy of FeintDecoySize fast units fires at a building of the house our main attack is
+	// going for, FeintGapCells to FeintReachCells from where that attack is aimed and with no known
+	// defense within FeintTowerClearCells. A wave counts as our main attack for FeintWaveFrames after
+	// it was sent out.
+	constexpr double FeintGapCells = 25.0;
+	constexpr double FeintReachCells = 60.0;
+	constexpr double FeintTowerClearCells = 8.0;
+	constexpr int FeintWaveFrames = 600;
+	constexpr size_t FeintDecoySize = 3;
+	constexpr size_t FeintIdleMin = 6;
+	constexpr int FeintPlanFrames = 3600;
+	// It went well once enemy value of FeintDrawPercent of the decoy's own is seen within FeintDrawCells
+	// of the decoy while it is within FeintNearCells of its target. It ends badly with less than
+	// FeintLossPercent of its value left, or FeintAnswerWaitFrames after it arrived with no answer.
+	constexpr double FeintNearCells = 20.0;
+	constexpr double FeintDrawCells = 10.0;
+	constexpr int FeintDrawPercent = 100;
+	constexpr int FeintLossPercent = 50;
+	constexpr int FeintAnswerWaitFrames = 900;
 	// An air group goes for a building only when this many sorties of its full load add up to the
 	// building's health: Air Strike sent two aircraft at buildings they could not bring down in
 	// its 2700 frames, and 128 of 163 plans ran out of time (focus batch of 2026-11-14).

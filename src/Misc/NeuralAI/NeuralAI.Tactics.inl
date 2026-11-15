@@ -2606,7 +2606,13 @@ namespace
 		macro.BankSpendNeeded = static_cast<int>(std::min<int64_t>(needed, INT_MAX));
 		macro.BankSurplus = static_cast<int>(std::clamp<int64_t>(surplus, 0, INT_MAX));
 
-		if (surplus <= 0 || needed <= capacity)
+		// The income alone can outrun the queues: a house below the reserve with more coming in than
+		// its busy queues spend still gets the factories that keep up with it (income over capacity
+		// in 11% of the samples after frame 6000, in 119 of 126 houses, with median credits 8530
+		// and one war factory: nothing was added before the bank passed 15000 plus the income).
+		// Not before the house has its first war factory and barracks: the opening income outruns
+		// a ConYard and one barracks, and the copy would come before the war factory.
+		if (needed <= capacity || (surplus <= 0 && (pHouse->NumWarFactories <= 0 || pHouse->NumBarracks <= 0)))
 			return;
 
 		auto wanted = counts;
@@ -2642,7 +2648,7 @@ namespace
 		for (int q = 0; q < static_cast<int>(BankQueue::Count); ++q)
 			factoryDeficit += wanted[q] - counts[q];
 
-		if (factoryDeficit >= 3 && pHouse->NumConYards < (surplus >= 100000 ? 6 : 4))
+		if (surplus > 0 && factoryDeficit >= 3 && pHouse->NumConYards < (surplus >= 100000 ? 6 : 4))
 			macro.BankWantedYards = pHouse->NumConYards + 1;
 	}
 
