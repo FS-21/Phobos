@@ -10903,6 +10903,44 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			auto const itReserved = ferryReservedSizeOf.find(pFleet->UniqueID);
 			const int held = pFleet->Passengers.GetTotalSize() + (itReserved != ferryReservedSizeOf.end() ? itReserved->second : 0);
 			fleets[fleetZone].push_back({ pFleet, held, pFleet->Type->Passengers });
+
+			// The whole battalion is ferry demand for the production selector, its passengers aboard and
+			// reserved too: with only the units still free on land counted, two full transports and 23
+			// units waiting read as "two transports are enough" and no third one was built.
+			auto& demandMacro = GetMacroState(pHouse);
+
+			for (FootClass* pPass = pFleet->Passengers.GetFirstPassenger(); pPass != nullptr; pPass = abstract_cast<FootClass*>(pPass->NextObject))
+			{
+				const int passSize = std::clamp(static_cast<int>(pPass->GetTechnoType()->Size), 1, 15);
+				demandMacro.FerryDemandSizeBySize[passSize] += passSize;
+			}
+
+			for (auto const& [passengerID, reservation] : demandMacro.FerryReserved)
+			{
+				auto const itFoot = ferryReservedFoot.find(passengerID);
+
+				if (reservation.Transport == pFleet->UniqueID && itFoot != ferryReservedFoot.end())
+				{
+					const int reservedSize = std::clamp(static_cast<int>(itFoot->second->GetTechnoType()->Size), 1, 15);
+					demandMacro.FerryDemandSizeBySize[reservedSize] += reservedSize;
+				}
+			}
+		}
+
+		// The room of a transport our factories are building: a battalion bigger than the transports
+		// parked on its shore waits for it as well (user: call the transports the group needs, or have
+		// them built when none is free).
+		int productionRoom = 0;
+
+		for (const bool naval : { false, true })
+		{
+			if (auto const pFactory = pHouse->GetPrimaryFactory(AbstractType::UnitType, naval, BuildCat::DontCare))
+			{
+				auto const pBuilt = pFactory->Object ? pFactory->Object->GetTechnoType() : nullptr;
+
+				if (pBuilt && IsAmphibiousOrAirTransport(pBuilt) && pBuilt->Passengers > 0)
+					productionRoom += pBuilt->Passengers;
+			}
 		}
 
 		// Empty transports on their way to a pickup zone (on the water or elsewhere, heading for a cell
@@ -10989,6 +11027,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 
 			ferryBattalionLeft[fleetZone] = load - heldTotal;
+			int fleetRoom = 0;
+
+			for (auto const& member : fleet)
+				fleetRoom += member.Room;
+
+			if (productionRoom > 0 && load > fleetRoom)
+				ferryComingRoom[fleetZone] += productionRoom;
 
 			const CellStruct centre = boardable > 0
 				? CellStruct { static_cast<short>(sumX / boardable), static_cast<short>(sumY / boardable) }

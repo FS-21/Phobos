@@ -3465,9 +3465,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				// An empty transport parked without orders is unused shuttle capacity (an empty one left
 				// on Unload with nothing to unload too: transport helicopters sat like that by the dozen).
+				// One parked to load is not: its passengers are walking up, and counted as idle it kept the
+				// factory from building the transports a battalion needed.
 				const bool isParkedEmpty = pOwnedU->Passengers.NumPassengers == 0 && pOwnedU->Destination == nullptr
 					&& (pOwnedU->CurrentMission == Mission::Guard || pOwnedU->CurrentMission == Mission::Area_Guard
-						|| pOwnedU->CurrentMission == Mission::Sleep || pOwnedU->CurrentMission == Mission::Unload);
+						|| pOwnedU->CurrentMission == Mission::Sleep || pOwnedU->CurrentMission == Mission::Unload)
+					&& !IsFerryParkedToLoad(pHouse, pOwnedU->UniqueID);
 
 				if (unitCarryall)
 				{
