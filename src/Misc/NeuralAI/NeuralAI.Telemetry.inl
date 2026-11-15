@@ -759,11 +759,13 @@ namespace
 				continue;
 
 			const uint8_t bit = static_cast<uint8_t>(1u << i);
+			auto const& gapRuns = GetEnemyGapRuns(TelemetrySightViewers[i]);
 
-			ForEachCellUnderEnemyGap(TelemetrySightViewers[i], [bit](size_t idx)
+			for (size_t run = 0; run + 1 < gapRuns.size(); run += 2)
 			{
-				TelemetryGapMasks[idx] |= bit;
-			});
+				for (size_t idx = gapRuns[run]; idx <= gapRuns[run + 1]; ++idx)
+					TelemetryGapMasks[idx] |= bit;
+			}
 		}
 	}
 
