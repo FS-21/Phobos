@@ -919,6 +919,12 @@ namespace
 		int JamRerouteNoWayFrame { -100000 };
 		// Last frame one of our buildings was sold because it held a blocked passage shut (JamSealSellFrames).
 		int LastJamSealSellFrame { -100000 };
+		// Emergency lanes (UpdateEmergencyLanes): the last check, the last log line, and since that
+		// line the idle units that stepped aside and the units with an order they made way for.
+		int LastEmergencyLaneFrame { -1 };
+		int EmergencyLaneLogFrame { -1 };
+		int EmergencyLaneMoved { 0 };
+		int EmergencyLaneServed { 0 };
 		// Last frame the aircraft pick wanted a type that needs a dock and every dock was taken: the
 		// building pass answers with another airfield (AirDockWantedFrames).
 		int AirDockWantedFrame { -100000 };
@@ -1211,6 +1217,10 @@ namespace
 			this->JamRerouteAll = false;
 			this->JamRerouteNoWayFrame = -100000;
 			this->LastJamSealSellFrame = -100000;
+			this->LastEmergencyLaneFrame = -1;
+			this->EmergencyLaneLogFrame = -1;
+			this->EmergencyLaneMoved = 0;
+			this->EmergencyLaneServed = 0;
 			this->AirDockWantedFrame = -100000;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
@@ -1467,7 +1477,8 @@ namespace
 	constexpr double JamRerouteReachCells = 60.0;
 	// A building cuts the ground where it stands when two ways out of the box LandWayCheckCells
 	// around its footprint meet inside the box without it and no longer meet with it. Placement
-	// skips such cells like those that close a passage (match #9724, Frosty Zigzag: towers and a war
+	// skips such cells like those that close a passage, and counts a way only where two units pass
+	// side by side, so a road keeps traffic both ways (match #9724, Frosty Zigzag: towers and a war
 	// factory on the edge of a base closed the only way between two plateaus cell by cell, and an
 	// army of 265 units stood in front of it for 30000 frames).
 	constexpr int LandWayCheckCells = 3;
@@ -1478,6 +1489,18 @@ namespace
 	// footprint cuts the ground there is sold, at most once per JamSealSellFrames.
 	constexpr double JamSealSearchCells = 10.0;
 	constexpr int JamSealSellFrames = 1800;
+	// Emergency lane (user: when an ambulance comes up a jammed road the cars ease aside as far as
+	// they can and open a corridor for it). Every EmergencyLaneCheckFrames, each ground unit of ours
+	// with an order that has stood EmergencyLaneWaitFrames on its cell looks EmergencyLaneCells ahead
+	// on its path (the straight way to its destination when it holds none); our idle units on those
+	// cells step 1..EmergencyLaneSideCells cells aside, across its way rather than along it and off
+	// every lane, up to EmergencyLaneMovesPerCheck per check. Logged every EmergencyLaneLogFrames.
+	constexpr int EmergencyLaneCheckFrames = 60;
+	constexpr int EmergencyLaneWaitFrames = 45;
+	constexpr int EmergencyLaneCells = 5;
+	constexpr int EmergencyLaneSideCells = 3;
+	constexpr int EmergencyLaneMovesPerCheck = 16;
+	constexpr int EmergencyLaneLogFrames = 1800;
 	// A route leg that would end on a bridge deck runs this many route cells past its far end.
 	constexpr size_t RouteLegPastBridgeCells = 4;
 	// A ground target off the unit's zone stands for the nearest cell of the zone this near to it.
