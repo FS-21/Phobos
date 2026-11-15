@@ -2610,7 +2610,9 @@ namespace
 		// its busy queues spend still gets the factories that keep up with it (income over capacity
 		// in 11% of the samples after frame 6000, in 119 of 126 houses, with median credits 8530
 		// and one war factory: nothing was added before the bank passed 15000 plus the income).
-		if (needed <= capacity)
+		// Not before the house has its first war factory and barracks: the opening income outruns
+		// a ConYard and one barracks, and the copy would come before the war factory.
+		if (needed <= capacity || (surplus <= 0 && (pHouse->NumWarFactories <= 0 || pHouse->NumBarracks <= 0)))
 			return;
 
 		auto wanted = counts;
