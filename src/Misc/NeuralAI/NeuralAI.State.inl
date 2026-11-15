@@ -1367,6 +1367,9 @@ namespace
 	// How long the departure signal of a combat transport makes its sister transports on the same
 	// shore sail with it (joint departure).
 	constexpr int FerryConvoyGoFrames = 120;
+	// Longest wait of a loaded combat transport for the empty transports on their way to load the rest
+	// of its battalion (it counts from the frame the transport had nothing more to load).
+	constexpr int FerryBattalionWaitFrames = 3600;
 	// Enemies seen near a landing this recently count against it even when out of sight now.
 	constexpr int FerryLandingSightingFrames = 900;
 	// How often the ferry island commitment logs how many times it kept a loaded transport on course.
