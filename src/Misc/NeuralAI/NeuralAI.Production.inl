@@ -1463,6 +1463,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// Best defense the Island Hold yard still lacks (IslandHoldWants).
 		int bestIslandHoldIdx = -1;
 		int bestIslandHoldScore = -32000;
+		// The second repair station the Forward Repair plan asks for.
+		int bestForwardRepairIdx = -1;
+		int bestForwardRepairScore = -32000;
 
 		// A raid short of guns with no defense that shoots up buildable yet: the buildings those
 		// defenses still miss come ahead of routine picks.
@@ -2748,6 +2751,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 
 				score = scores[9] + (wantsForwardRepair ? 500 : 0);
+
+				if (wantsForwardRepair && score > bestForwardRepairScore)
+				{
+					bestForwardRepairScore = score;
+					bestForwardRepairIdx = pBld->ArrayIndex;
+				}
 			}
 			else if (pBld->SuperWeapon != -1)
 			{
@@ -3182,6 +3191,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			if (IsAITickWindow(450, evalDelay))
 				CountDecision(NeuralDecision::BankFactoryPick, pHouse->ArrayIndex);
+		}
+
+		// Forward Repair: the second repair station comes before the other picks, the bank governor's
+		// factories included, under the same terms as Island Hold below (which wins when both ask).
+		// The plan has 5400 frames for one building and its score alone never won: in the archive of
+		// 2026-11-14 night 38 of 47 plans ran out of time with no repair station among the picks
+		// sampled in their window, 24 of them never below 20000 credits.
+		if (bestForwardRepairIdx >= 0 && bestBldIdx != bestForwardRepairIdx && hasActiveBuildingIncome && !bestFillsAirDeficit
+			&& inProgressBldIdx < 0 && inProgressDefIdx < 0)
+		{
+			bestBldIdx = bestForwardRepairIdx;
+			bestBldScore = std::max(bestBldScore, bestForwardRepairScore);
 		}
 
 		// Island Hold: the defense its yard still lacks comes before the other picks, the bank
