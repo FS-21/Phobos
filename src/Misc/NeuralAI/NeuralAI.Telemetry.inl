@@ -675,20 +675,16 @@ void NeuralAI::OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, Techn
 
 namespace
 {
-	// NeuralAI.Scouting.inl (included later).
-	bool IsFogOfWarMatch();
-
 	// What each house of the snapshot knows, for the trainer's map view: per vision map cell, bit N
-	// is set when the Nth snapshot house has the cell in sight now. Built with the AI's vision rule
-	// into buffers of the telemetry, so the AI's cached vision map (one house and frame at a time)
-	// and the explored maps stay exactly as the AI left them.
+	// is set when the Nth snapshot house has the cell in sight now (sight masks) or when a working
+	// gap generator of its enemies covers it (gap masks). Built with the AI's vision rule into
+	// buffers of the telemetry, so the AI's cached vision map (one house and frame at a time) and
+	// the explored maps stay exactly as the AI left them.
 	std::vector<uint8_t> TelemetrySightMasks;
+	std::vector<uint8_t> TelemetryGapMasks;
 	std::array<HouseClass*, 8> TelemetrySightViewers {};
 	// House index bit of each snapshot house, so the masks reach the trainer as house indices.
 	std::array<uint32_t, 8> TelemetrySightHouseBits {};
-	// Without fog of war a house sees whatever stands on ground it has explored (only the shroud
-	// hides the map); with fog only what is in sight now.
-	bool TelemetryFogOfWar = false;
 
 	// Side of the sight grid of the house the map view shows, in radar pixels.
 	constexpr int TelemetrySightGridSide = 128;
@@ -703,8 +699,8 @@ namespace
 
 	void BuildTelemetrySight(const AITrainerSharedTelemetry& snap)
 	{
-		TelemetryFogOfWar = IsFogOfWarMatch();
 		TelemetrySightMasks.assign(static_cast<size_t>(VisionMapSide) * VisionMapSide, 0);
+		TelemetryGapMasks.assign(static_cast<size_t>(VisionMapSide) * VisionMapSide, 0);
 		TelemetrySightViewers.fill(nullptr);
 		TelemetrySightHouseBits.fill(0u);
 
@@ -756,6 +752,34 @@ namespace
 				TelemetrySightMasks[idx] |= bits;
 			});
 		}
+
+		for (size_t i = 0; i < TelemetrySightViewers.size(); ++i)
+		{
+			if (!TelemetrySightViewers[i])
+				continue;
+
+			const uint8_t bit = static_cast<uint8_t>(1u << i);
+
+			ForEachCellUnderEnemyGap(TelemetrySightViewers[i], [bit](size_t idx)
+			{
+				TelemetryGapMasks[idx] |= bit;
+			});
+		}
+	}
+
+	// Whether the Nth snapshot house knows what stands on a vision map cell, by IsKnownByVisionRule:
+	// its sight now, its AI's explored map and the gaps of its enemies.
+	bool IsCellKnownInTelemetry(size_t viewer, size_t cellIdx)
+	{
+		auto const pViewer = TelemetrySightViewers[viewer];
+
+		if (!pViewer || cellIdx >= TelemetrySightMasks.size())
+			return false;
+
+		const uint8_t bit = static_cast<uint8_t>(1u << viewer);
+
+		return IsKnownByVisionRule((TelemetrySightMasks[cellIdx] & bit) != 0, IsCellExploredByAI(pViewer->ArrayIndex, cellIdx),
+			(TelemetryGapMasks[cellIdx] & bit) != 0);
 	}
 
 	// Snapshot house bits that have this cell in sight now (BuildTelemetrySight).
@@ -767,22 +791,20 @@ namespace
 		return TelemetrySightMasks[static_cast<size_t>(cell.Y) * VisionMapSide + cell.X];
 	}
 
-	// House index bits of the snapshot houses that see what stands on this cell: in sight now, or
-	// explored by their AI when the match has no fog of war.
+	// House index bits of the snapshot houses that know what stands on this cell (IsCellKnownToAI's
+	// rule: in sight now, or explored and out of the enemy gaps when the match has no fog of war).
 	uint32_t TelemetrySeenBy(const CellStruct& cell)
 	{
-		const uint8_t bits = TelemetrySightBitsAt(cell);
-		const bool onMap = cell.X >= 0 && cell.X < VisionMapSide && cell.Y >= 0 && cell.Y < VisionMapSide;
-		const size_t cellIdx = onMap ? static_cast<size_t>(cell.Y) * VisionMapSide + cell.X : 0;
+		if (cell.X < 0 || cell.X >= VisionMapSide || cell.Y < 0 || cell.Y >= VisionMapSide)
+			return 0;
+
+		const size_t cellIdx = static_cast<size_t>(cell.Y) * VisionMapSide + cell.X;
 		uint32_t houses = 0;
 
 		for (size_t i = 0; i < TelemetrySightHouseBits.size(); ++i)
 		{
-			if ((bits & (1u << i))
-				|| (onMap && !TelemetryFogOfWar && TelemetrySightViewers[i] && IsCellExploredByAI(TelemetrySightViewers[i]->ArrayIndex, cellIdx)))
-			{
+			if (IsCellKnownInTelemetry(i, cellIdx))
 				houses |= TelemetrySightHouseBits[i];
-			}
 		}
 
 		return houses;
@@ -1967,13 +1989,13 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		if (viewPosition >= 0)
 		{
 			// Sight grid of the house the map view shows, one bit per radar pixel (rows top to bottom,
-			// the high bit of each byte first) for the cell under the centre of the pixel: what it sees
-			// (in sight now, or explored when the match has no fog of war), and explored by its AI.
+			// the high bit of each byte first) for the cell under the centre of the pixel: what it knows
+			// stands there (IsCellKnownInTelemetry), and the ground it has explored and no enemy gap
+			// shrouds again (the rest is the shroud).
 			constexpr size_t gridBytes = static_cast<size_t>(TelemetrySightGridSide) * TelemetrySightGridSide / 8;
 			std::vector<uint8_t> sightGrid(gridBytes, 0);
 			std::vector<uint8_t> exploredGrid(gridBytes, 0);
-			auto const& explored = HouseExploredMaps[std::clamp(viewHouse, 0, 7)];
-			const bool hasExplored = explored.size() == static_cast<size_t>(VisionMapSide) * VisionMapSide;
+			const size_t viewer = static_cast<size_t>(viewPosition);
 			const uint8_t viewBit = static_cast<uint8_t>(1u << viewPosition);
 
 			for (int py = 0; py < TelemetrySightGridSide; ++py)
@@ -2007,18 +2029,18 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					const uint8_t mask = static_cast<uint8_t>(0x80u >> (bit & 7));
 
 					const bool inSight = (TelemetrySightMasks[cellIdx] & viewBit) != 0;
-					const bool wasExplored = hasExplored && explored[cellIdx];
+					const bool underGap = (TelemetryGapMasks[cellIdx] & viewBit) != 0;
 
-					if (inSight || (wasExplored && !TelemetryFogOfWar))
+					if (IsCellKnownInTelemetry(viewer, cellIdx))
 						sightGrid[bit >> 3] |= mask;
 
-					if (inSight || wasExplored)
+					if (inSight || (!underGap && IsCellExploredByAI(viewHouse, cellIdx)))
 						exploredGrid[bit >> 3] |= mask;
 				}
 			}
 
 			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), ",\n  \"viewAs\": {\"house\": %d, \"side\": %d, \"fog\": %s, \"sight\": \"", viewHouse,
-				TelemetrySightGridSide, TelemetryFogOfWar ? "true" : "false");
+				TelemetrySightGridSide, IsFogOfWarMatch() ? "true" : "false");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));

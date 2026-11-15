@@ -186,8 +186,8 @@ namespace
 		if (!pType || pType->Naval)
 			return;
 
-		// What a player sees right now, never the explored but unwatched map.
-		if (!pHouse->SpySatActive && !IsCellInSightOfAI(pHouse, coords))
+		// What a player sees: in sight now or, without fog of war, on explored ground out of enemy gaps.
+		if (!pHouse->SpySatActive && !IsCellKnownToAI(pHouse, coords))
 			return;
 
 		const int now = Unsorted::CurrentFrame;

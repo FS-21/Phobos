@@ -104,11 +104,6 @@ namespace
 		return state;
 	}
 
-	bool IsFogOfWarMatch()
-	{
-		return GameModeOptionsClass::Instance.FogOfWar || (ScenarioClass::Instance && ScenarioClass::Instance->SpecialFlags.FogOfWar);
-	}
-
 	size_t ScoutBlockIndex(const CellStruct& cell)
 	{
 		const int bx = std::clamp(static_cast<int>(cell.X) / ScoutBlockSize, 0, ScoutBlockSide - 1);
@@ -543,14 +538,15 @@ namespace
 		if (mainSector >= 0)
 			addRoute(AttackSectorDX[mainSector] * 28, AttackSectorDY[mainSector] * 28);
 
-		// Where enemy armies were last seen (out of sight for 300+ frames, away from our base): the
-		// biggest three groups (value within 10 cells of the strongest unit, at least 100).
+		// Where enemy armies were last seen (unseen for 300+ frames, on ground we no longer know, away
+		// from our base): the biggest three groups (value within 10 cells of the strongest unit, at
+		// least 100).
 		std::vector<const NeuralScoutSighting*> armies;
 
 		for (auto const& sighting : sightings)
 		{
 			if (!sighting.Air && sighting.Age >= 300 && sighting.Age <= EnemySightingMemoryFrames
-				&& (home == CellStruct::Empty || sighting.Cell.DistanceFrom(home) > 24.0) && !IsCellInSightOfAI(pHouse, sighting.Cell))
+				&& (home == CellStruct::Empty || sighting.Cell.DistanceFrom(home) > 24.0) && !IsCellKnownToAI(pHouse, sighting.Cell))
 			{
 				armies.push_back(&sighting);
 			}
