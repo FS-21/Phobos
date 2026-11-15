@@ -458,14 +458,14 @@ namespace
 		return pEngineerType && CanHouseFerryTypeAcrossWater(pHouse, pEngineerType);
 	}
 
-	// Refresh the tech memory from what is in sight now and log captures. Fog-fair: a tech in the
-	// fog keeps the owner it had when last seen.
+	// Refresh the tech memory from what this house knows now and log captures. A tech out of its
+	// knowledge (shroud, enemy gap, fog) keeps the owner it had when last seen.
 	void UpdateSpecOpsTechMemory(HouseClass* pHouse, NeuralSpecOpsState& state)
 	{
 		const NeuralSlowStep slowStep { "UpdateSpecOpsTechMemory" };
 
 		const int now = Unsorted::CurrentFrame;
-		std::vector<DWORD> inSightIDs;
+		std::vector<DWORD> knownNowIDs;
 
 		// The capturable buildings a map starts with are map knowledge, like its ore fields: a house
 		// knows where they stand from the first frames, neutral as the map has them. What became of
@@ -484,13 +484,13 @@ namespace
 
 			const CellStruct cell = pBld->GetMapCoords();
 
-			const bool inSight = pBld->Owner == pHouse || IsCellInSightOfAI(pHouse, cell);
+			const bool knownNow = pBld->Owner == pHouse || IsCellKnownToAI(pHouse, cell);
 
-			if (!inSight && !(mapKnowledge && pBld->Owner->IsNeutral()))
+			if (!knownNow && !(mapKnowledge && pBld->Owner->IsNeutral()))
 				continue;
 
-			if (inSight)
-				inSightIDs.push_back(pBld->UniqueID);
+			if (knownNow)
+				knownNowIDs.push_back(pBld->UniqueID);
 			const int ownerIndex = pBld->Owner->IsNeutral() ? -1 : pBld->Owner->ArrayIndex;
 			NeuralKnownTech* pTech = FindKnownTech(state, pBld->UniqueID);
 
@@ -561,12 +561,12 @@ namespace
 			pTech->SeenFrame = now;
 		}
 
-		// A remembered tech whose cell is in sight but that is gone was destroyed.
-		std::sort(inSightIDs.begin(), inSightIDs.end());
+		// A remembered tech whose cell is known but that is gone was destroyed.
+		std::sort(knownNowIDs.begin(), knownNowIDs.end());
 		state.Techs.erase(std::remove_if(state.Techs.begin(), state.Techs.end(),
 			[&](const NeuralKnownTech& tech)
 			{
-				return IsCellInSightOfAI(pHouse, tech.Cell) && !std::binary_search(inSightIDs.begin(), inSightIDs.end(), tech.ID);
+				return IsCellKnownToAI(pHouse, tech.Cell) && !std::binary_search(knownNowIDs.begin(), knownNowIDs.end(), tech.ID);
 			}), state.Techs.end());
 	}
 
@@ -623,8 +623,8 @@ namespace
 		return pAs && pVictim && (pAs == pVictim || pVictim->IsAlliedWith(pAs));
 	}
 
-	// A soldier of the victim's side (the victim or an ally of it, never ours) in our sight right
-	// now, nearest to the spy first (UniqueID on ties): a player can only copy a soldier in sight.
+	// A soldier of the victim's side (the victim or an ally of it, never ours) that we know of,
+	// nearest to the spy first (UniqueID on ties): a player can only copy a soldier shown on the map.
 	InfantryClass* FindSpyDisguiseSource(HouseClass* pHouse, InfantryClass* pSpy, HouseClass* pVictim)
 	{
 		InfantryClass* pBest = nullptr;
@@ -639,7 +639,7 @@ namespace
 			}
 
 			if ((pInf->Owner != pVictim && !pVictim->IsAlliedWith(pInf->Owner)) || pHouse->IsAlliedWith(pInf->Owner)
-				|| pInf->Owner->IsNeutral() || !IsCellInSightOfAI(pHouse, pInf->GetMapCoords()))
+				|| pInf->Owner->IsNeutral() || !IsCellKnownToAI(pHouse, pInf->GetMapCoords()))
 			{
 				continue;
 			}
@@ -730,7 +730,7 @@ namespace
 		return true;
 	}
 
-	// Puts on the victim's colors as soon as one of its soldiers is in sight. True when the spy
+	// Puts on the victim's colors as soon as one of its soldiers is known. True when the spy
 	// fools the victim now or is copying one of its soldiers.
 	bool DisguiseSpyFor(HouseClass* pHouse, InfantryClass* pSpy, HouseClass* pVictim)
 	{
@@ -810,7 +810,7 @@ namespace
 		return false;
 	}
 
-	// An enemy that sees through disguises: known building, or unit / soldier in current sight.
+	// An enemy that sees through disguises: known building, or unit / soldier we know of.
 	struct NeuralDisguiseDetector
 	{
 		CellStruct Cell;
@@ -829,7 +829,7 @@ namespace
 
 	// The disguise detectors a house knows of this frame: known enemy buildings (their power is not
 	// always visible, so all count) in the order of the known building cache, then enemy units and
-	// soldiers in current sight in FootClass array order.
+	// soldiers we know of in FootClass array order.
 	const std::vector<NeuralDisguiseDetector>& GetKnownDisguiseDetectors(HouseClass* pHouse)
 	{
 		auto& cache = DisguiseDetectorCaches[std::clamp(pHouse ? pHouse->ArrayIndex : 0, 0, 31)];
@@ -859,7 +859,7 @@ namespace
 			auto const pType = pFoot->GetTechnoType();
 			const int reach = DisguiseDetectionReach(pType);
 
-			if (reach > 0 && IsCellInSightOfAI(pHouse, pFoot->GetMapCoords()))
+			if (reach > 0 && IsCellKnownToAI(pHouse, pFoot->GetMapCoords()))
 				cache.Detectors.push_back({ pFoot->GetMapCoords(), reach, false, IsMindControlDetector(pType) });
 		}
 
@@ -881,7 +881,7 @@ namespace
 	}
 
 	// A disguise is no use in this cell: a known detector building, or an enemy unit or soldier
-	// in sight that sees through disguises (DetectDisguise=, dogs), covers it.
+	// we know of that sees through disguises (DetectDisguise=, dogs), covers it.
 	bool IsCellWatchedByDisguiseDetector(HouseClass* pHouse, const CellStruct& cell, int marginCells)
 	{
 		for (auto const& detector : GetKnownDisguiseDetectors(pHouse))

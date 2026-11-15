@@ -246,7 +246,7 @@ namespace
 	// enemy comes, techs and refineries near it. Zero when it is deep in enemy fire, about to fall
 	// or out of our reach: beyond 28 cells of our structures only where our own army already
 	// stands (the front, up to 72 cells; a lone soldier walking to the middle of the map holds
-	// nothing). Fog-fair: enemy buildings from the known cache, enemy units in current sight only.
+	// nothing). Fog-fair: enemy buildings from the known cache, enemy units we know of only.
 	int RateUrbanBuilding(HouseClass* pHouse, NeuralKnownUrbanBuilding& known, const CellStruct& home,
 		int mainAttackSector, const CellStruct& nearestEnemyCell, bool asIfRepaired = false)
 	{
@@ -348,14 +348,15 @@ namespace
 		return worth;
 	}
 
-	// Refresh the memory of occupiable buildings from what is in sight now (every 150 frames).
-	// Fog-fair: a building in the fog keeps the occupants and health it had when last seen.
+	// Refresh the memory of occupiable buildings from what this house knows now (every 150 frames).
+	// A building out of its knowledge (shroud, enemy gap, fog) keeps the occupants and health it had
+	// when last seen.
 	void UpdateUrbanMemory(HouseClass* pHouse, NeuralUrbanState& state)
 	{
 		const NeuralSlowStep slowStep { "UpdateUrbanMemory" };
 
 		const int now = Unsorted::CurrentFrame;
-		std::vector<DWORD> inSightIDs;
+		std::vector<DWORD> knownNowIDs;
 
 		// The civilian buildings a map starts with are map knowledge (MapKnowledgeFrames): where
 		// they stand is known from the first frames, as the map has them. Who went in since, or
@@ -373,13 +374,13 @@ namespace
 
 			const CellStruct cell = pBld->GetMapCoords();
 			const bool ownOrAllied = pBld->Owner && (pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner));
-			const bool inSight = ownOrAllied || IsCellInSightOfAI(pHouse, cell);
+			const bool knownNow = ownOrAllied || IsCellKnownToAI(pHouse, cell);
 
-			if (!inSight && !(mapKnowledge && pBld->Owner && pBld->Owner->IsNeutral()))
+			if (!knownNow && !(mapKnowledge && pBld->Owner && pBld->Owner->IsNeutral()))
 				continue;
 
-			if (inSight)
-				inSightIDs.push_back(pBld->UniqueID);
+			if (knownNow)
+				knownNowIDs.push_back(pBld->UniqueID);
 			NeuralKnownUrbanBuilding* pKnown = FindKnownUrbanBuilding(state, pBld->UniqueID);
 
 			if (!pKnown)
@@ -401,16 +402,16 @@ namespace
 			pKnown->SeenFrame = now;
 		}
 
-		// A remembered building whose cell is in sight but that is gone was destroyed.
-		std::sort(inSightIDs.begin(), inSightIDs.end());
+		// A remembered building whose cell is known but that is gone was destroyed.
+		std::sort(knownNowIDs.begin(), knownNowIDs.end());
 		state.Buildings.erase(std::remove_if(state.Buildings.begin(), state.Buildings.end(),
 			[&](const NeuralKnownUrbanBuilding& known)
 			{
-				return IsCellInSightOfAI(pHouse, known.Cell) && !std::binary_search(inSightIDs.begin(), inSightIDs.end(), known.ID);
+				return IsCellKnownToAI(pHouse, known.Cell) && !std::binary_search(knownNowIDs.begin(), knownNowIDs.end(), known.ID);
 			}), state.Buildings.end());
 	}
 
-	// Is an enemy that kills occupants (Assaulter, PenetratesGarrison weapon) in sight within its
+	// Is an enemy that kills occupants (Assaulter, PenetratesGarrison weapon) known within its
 	// reach (+ 2 cells) of this building?
 	bool IsGarrisonThreatenedByClearer(HouseClass* pHouse, BuildingClass* pBld)
 	{
@@ -420,7 +421,7 @@ namespace
 		ForEachTechnoNear(cell, 10, [&](TechnoClass* pTech) -> bool
 		{
 			if (!pTech->Owner || pTech->Owner == pHouse || pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral()
-				|| pTech->WhatAmI() == AbstractType::Building || !IsCellInSightOfAI(pHouse, pTech->GetMapCoords()))
+				|| pTech->WhatAmI() == AbstractType::Building || !IsCellKnownToAI(pHouse, pTech->GetMapCoords()))
 			{
 				return true;
 			}
@@ -692,7 +693,7 @@ namespace
 			}
 		}
 
-		// Enemy supply lines, fog-fair: enemy harvesters in current sight mark the buildings within 7
+		// Enemy supply lines, fog-fair: enemy harvesters we know of mark the buildings within 7
 		// cells of them.
 		for (auto const pUnit : UnitClass::Array)
 		{
@@ -705,7 +706,7 @@ namespace
 
 			const CellStruct harvCell = pUnit->GetMapCoords();
 
-			if (!IsCellInSightOfAI(pHouse, harvCell))
+			if (!IsCellKnownToAI(pHouse, harvCell))
 				continue;
 
 			for (auto& known : state.Buildings)
@@ -1031,9 +1032,9 @@ namespace
 			if (!pBld || !pBld->CanBeOccupiedBy(pInf))
 				continue;
 
-			// Live occupants for our own buildings and those in sight, the remembered ones for the rest.
+			// Live occupants for our own buildings and the known ones, the remembered ones for the rest.
 			const bool own = pBld->Owner == pHouse;
-			const bool seenNow = own || IsCellInSightOfAI(pHouse, known.Cell);
+			const bool seenNow = own || IsCellKnownToAI(pHouse, known.Cell);
 			const int inside = seenNow ? pBld->Occupants.Count : known.Occupants;
 			auto const pFirstInside = (seenNow && pBld->Occupants.Count > 0) ? pBld->Occupants.GetItem(0) : nullptr;
 
