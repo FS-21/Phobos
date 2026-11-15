@@ -1336,6 +1336,21 @@ namespace
 			}
 		}
 
+		// A cell another unit of ours already holds or heads to (a wave's shore cell, its target, a route
+		// leg): the nearest free one instead, so the wave does not queue for one cell. A unit already
+		// heading to that shared cell takes its own one now (the hysteresis below would keep it).
+		CellClass* pSharedCell = nullptr;
+
+		if (pResolvedDest->WhatAmI() == AbstractType::Cell)
+		{
+			auto const pAsked = static_cast<CellClass*>(pResolvedDest);
+			pDestCell = SpreadDestination(pFoot, pAsked);
+			pResolvedDest = pDestCell;
+
+			if (pDestCell != pAsked)
+				pSharedCell = pAsked;
+		}
+
 		// Hysteresis: a unit already attack-moving to (almost) the same place keeps its order.
 		// Re-issuing it resets the target, re-paths and restarts the locomotor (ships slow down
 		// and their wake animation restarts), so recomputed cells within 3 cells are ignored.
@@ -1349,7 +1364,8 @@ namespace
 			const AbstractClass* pNewMegaTarget = (pResolvedDest->WhatAmI() == AbstractType::Cell) ? nullptr : pResolvedDest;
 
 			const bool sameOrder = pFoot->MegaMission == Mission::AttackMove && pOldMegaCell && pNewMegaCell
-				&& pFoot->MegaTarget == pNewMegaTarget && pOldMegaCell->MapCoords.DistanceFrom(pNewMegaCell->MapCoords) <= 3.0;
+				&& pFoot->MegaTarget == pNewMegaTarget && pOldMegaCell->MapCoords.DistanceFrom(pNewMegaCell->MapCoords) <= 3.0
+				&& pOldMegaCell != pSharedCell;
 
 			if (stillAttackMoving && sameOrder)
 			{

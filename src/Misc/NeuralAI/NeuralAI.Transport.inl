@@ -330,22 +330,46 @@ namespace
 		return !pShore || pShore->MapCoords.DistanceFrom(target) * Unsorted::LeptonsPerCell > rangeLeptons;
 	}
 
-	// A flyer (jumpjet, aircraft) only finishes a move once it can settle on its cell: several sent
-	// to the same cell kept hovering there in Mission::Move and got the order again and again. When
-	// another unit of ours already has that cell as destination or stands on it, the flyer gets the
-	// nearest cell within 5 that is free of both (ring by ring, fixed order, so a flyer keeps the cell
-	// it already has).
-	CellClass* SpreadFlyerDestination(FootClass* pFoot, CellClass* pCell)
+	bool IsBridgeOrTubeCell(const CellClass* pCell);
+
+	// Units of ours sent to one cell queue for it: the engine only looks for a nearby cell for a unit
+	// farther than CloseEnough from it, and every unit finds the same one, so the rest wait in a row
+	// (ships sent to the water cell nearest an inland target, held in a narrow channel for 100000
+	// frames). A flyer only finishes a move once it can settle on its cell: several sent to one cell
+	// kept hovering there in Mission::Move and got the order again and again. When another unit of
+	// ours holds the cell or heads to it, a vehicle, ship or flyer gets the nearest cell within
+	// DestinationSpreadCells that none holds or heads to and nothing stands on (ring by ring, fixed
+	// order, so a unit keeps the cell it already has); off the air in the cell's zone, at most
+	// DestinationSpreadLevels levels from it and off bridges and tubes. Infantry share cells, and
+	// gatherers and units that deploy into a building want their exact cell: they keep it.
+	CellClass* SpreadDestination(FootClass* pFoot, CellClass* pCell)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
-		if (!pType || !pCell || !pFoot->Owner
-			|| !(pType->JumpJet || pType->MovementZone == MovementZone::Fly || pFoot->WhatAmI() == AbstractType::Aircraft))
-		{
+		if (!pType || !pCell || !pFoot->Owner)
 			return pCell;
-		}
+
+		const bool flyer = pType->JumpJet || pType->MovementZone == MovementZone::Fly || pFoot->WhatAmI() == AbstractType::Aircraft;
+		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+		if (!flyer && (!pUnit || !pUnit->Type || pType->ResourceGatherer || pUnit->Type->Harvester || pUnit->Type->DeploysInto))
+			return pCell;
+
+		const CellStruct target = pCell->MapCoords;
+		const int zone = flyer ? -1 : MapClass::Instance.GetMovementZoneType(target, pType->MovementZone, false);
+
+		if (!flyer && zone < 0)
+			return pCell;
 
 		std::vector<CellStruct> claimed;
+
+		auto const isNear = [&](const CellStruct& c)
+		{
+			const double dx = c.X - target.X;
+			const double dy = c.Y - target.Y;
+
+			return dx * dx + dy * dy <= DestinationClaimCells * DestinationClaimCells;
+		};
 
 		auto const claim = [&](FootClass* pOther)
 		{
@@ -353,28 +377,25 @@ namespace
 				return;
 
 			if (auto const pOtherDest = abstract_cast<CellClass*>(pOther->Destination))
-				claimed.push_back(pOtherDest->MapCoords);
-			else
+			{
+				if (isNear(pOtherDest->MapCoords))
+					claimed.push_back(pOtherDest->MapCoords);
+			}
+			else if (isNear(pOther->GetMapCoords()))
+			{
 				claimed.push_back(pOther->GetMapCoords());
+			}
 		};
 
-		const CellStruct target = pCell->MapCoords;
+		for (auto const pOtherUnit : UnitClass::Array)
+			claim(pOtherUnit);
 
-		for (auto const pUnit : UnitClass::Array)
+		if (flyer)
 		{
-			if (pUnit && pUnit->GetMapCoords().DistanceFrom(target) <= 8.0)
-				claim(pUnit);
-		}
-
-		for (auto const pInf : InfantryClass::Array)
-		{
-			if (pInf && pInf->GetMapCoords().DistanceFrom(target) <= 8.0)
+			for (auto const pInf : InfantryClass::Array)
 				claim(pInf);
-		}
 
-		for (auto const pAir : AircraftClass::Array)
-		{
-			if (pAir && pAir->GetMapCoords().DistanceFrom(target) <= 8.0)
+			for (auto const pAir : AircraftClass::Array)
 				claim(pAir);
 		}
 
@@ -386,7 +407,7 @@ namespace
 		if (!isClaimed(target))
 			return pCell;
 
-		for (int r = 1; r <= 5; ++r)
+		for (int r = 1; r <= DestinationSpreadCells; ++r)
 		{
 			for (int dy = -r; dy <= r; ++dy)
 			{
@@ -402,6 +423,26 @@ namespace
 						|| !pCand->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false))
 					{
 						continue;
+					}
+
+					if (!flyer && (MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
+						|| std::abs(pCand->Level - pCell->Level) > DestinationSpreadLevels || IsBridgeOrTubeCell(pCand)))
+					{
+						continue;
+					}
+
+					auto& macro = GetMacroState(pFoot->Owner);
+					const int now = Unsorted::CurrentFrame;
+					++macro.DestinationSpreadCount;
+
+					if (macro.DestinationSpreadLogFrame < 0 || now < macro.DestinationSpreadLogFrame
+						|| now - macro.DestinationSpreadLogFrame >= DestinationSpreadLogFrames)
+					{
+						Debug::Log("[NeuralAI] Frame %d | House #%d spread %d orders to free cells next to a destination another unit "
+							"of ours holds or heads to (since frame %d), last %s (%d,%d) -> (%d,%d)\n", now, pFoot->Owner->ArrayIndex,
+							macro.DestinationSpreadCount, std::max(0, macro.DestinationSpreadLogFrame), pType->ID, target.X, target.Y, c.X, c.Y);
+						macro.DestinationSpreadLogFrame = now;
+						macro.DestinationSpreadCount = 0;
 					}
 
 					return pCand;
@@ -1059,17 +1100,23 @@ namespace
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
 			return false;
 
+		// A unit already heading to a cell another unit of ours holds or heads to takes its own free
+		// cell now: the hysteresis below would keep it on the shared one.
+		CellClass* pSharedCell = nullptr;
+
 		if (auto const pDestAsCell = abstract_cast<CellClass*>(pDest))
 		{
-			if (auto const pReach = NearestReachableNavalCell(pFoot, pDestAsCell->MapCoords))
-				pDest = pReach;
-			else
-				pDest = SpreadFlyerDestination(pFoot, pDestAsCell);
+			auto const pReach = NearestReachableNavalCell(pFoot, pDestAsCell->MapCoords);
+			auto const pAsked = pReach ? pReach : pDestAsCell;
+			pDest = SpreadDestination(pFoot, pAsked);
+
+			if (pDest != pAsked)
+				pSharedCell = pAsked;
 		}
 
 		const bool isMoving = pFoot->CurrentMission == Mission::Move || pFoot->QueuedMission == Mission::Move;
 
-		if (isMoving && pFoot->Destination)
+		if (isMoving && pFoot->Destination && (!pSharedCell || pFoot->Destination != pSharedCell))
 		{
 			if (pFoot->Destination == pDest)
 			{
