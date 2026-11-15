@@ -218,6 +218,39 @@ namespace
 		return pDock && pDock->IsPowerOnline();
 	}
 
+	// An attack order the aircraft keeps all the way to its target. With the extended aircraft
+	// missions an aircraft that has a guard point (ArchiveTarget, set by the air patrol) drops its
+	// target as soon as it is 1.1 times its guard range from that point and flies back to it
+	// (AircraftClass_Update_UnlandableDamage), so an aircraft taken off a patrol by a plan or a
+	// strike never got farther than about 40 cells from its patrol stop: a Blackout of three Chaos
+	// Bombers circled 39 cells from home and 171 from the power plant until its 3600 frames ran out,
+	// an Air Strike stopped 41 cells from its target (matches #9571, #9608). The guard point goes;
+	// the air patrol gives a new one once the aircraft is idle again.
+	void OrderAircraftAttack(AircraftClass* pAir, AbstractClass* pTarget)
+	{
+		if (!pAir || !pTarget)
+			return;
+
+		if (pAir->ArchiveTarget && AircraftTypeExt::Fetch(pAir->Type)->ExtendedAircraftMissions.Get(RulesExt::Global()->ExtendedAircraftMissions))
+			pAir->SetArchiveTarget(nullptr);
+
+		pAir->SetTarget(pTarget);
+		pAir->QueueMission(Mission::Attack, true);
+	}
+
+	// The same for any plan member: aircraft through OrderAircraftAttack, the rest as before.
+	void OrderFootAttack(FootClass* pFoot, AbstractClass* pTarget)
+	{
+		if (auto const pAir = abstract_cast<AircraftClass*>(pFoot))
+		{
+			OrderAircraftAttack(pAir, pTarget);
+			return;
+		}
+
+		pFoot->SetTarget(pTarget);
+		pFoot->QueueMission(Mission::Attack, true);
+	}
+
 	// A transport that flies and is off the ground.
 	bool IsFerryAloft(const FootClass* pTransport)
 	{

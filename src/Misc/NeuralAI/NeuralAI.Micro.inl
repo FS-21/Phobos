@@ -13510,15 +13510,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (airDiveAtMindController && hitsGround)
 			{
-				pAir->SetTarget(pEnemyMindController);
-
-				pAir->QueueMission(Mission::Attack, true);
+				OrderAircraftAttack(pAir, pEnemyMindController);
 			}
 			else if (isAirForceCraft && pAir->GetHealthPercentage() >= 0.4 && AircraftHitsAir(pAir->Type)
 				&& (pInterceptTarget = pickAirInterceptTarget(pAir)) != nullptr)
 			{
-				pAir->SetTarget(pInterceptTarget);
-				pAir->QueueMission(Mission::Attack, true);
+				OrderAircraftAttack(pAir, pInterceptTarget);
 				CountDecision(NeuralDecision::AirInterceptSortie, pHouse->ArrayIndex);
 			}
 			else if (airForceInCharge && isAirForceCraft && ContinueAirStrike(pHouse, pAir))
@@ -13527,15 +13524,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else if (TechnoClass* const pPrey = (airHarassAllowed && !pAir->Type->Spawned) ? pickAirHarassTarget(pAir) : nullptr)
 			{
-				pAir->SetTarget(pPrey);
-				pAir->QueueMission(Mission::Attack, true);
+				OrderAircraftAttack(pAir, pPrey);
 				CountDecision(NeuralDecision::AirHarass, pHouse->ArrayIndex);
 			}
 			else if (airDiveAtHarvester && hitsGround && SlotGate(scores[56], 200, 56))
 			{
-				pAir->SetTarget(pVisibleEnemyHarvester);
-
-				pAir->QueueMission(Mission::Attack, true);
+				OrderAircraftAttack(pAir, pVisibleEnemyHarvester);
 			}
 			else if (!airForceInCharge && isAirForceCraft && AircraftHitsGround(pAir->Type)
 				&& pAir->GetHealthPercentage() >= AirSoloStrikeMinHealth && getSoloStrikeTarget()
