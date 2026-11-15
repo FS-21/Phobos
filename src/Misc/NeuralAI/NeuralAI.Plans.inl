@@ -4436,6 +4436,68 @@ namespace
 			}
 		};
 
+		// A plan's ground column keeps together on its way to `goal`: a member more than
+		// PlanMarchBandCells nearer the goal than the column's rear stops and waits (it still fights
+		// what comes at it), until the rear is within PlanMarchCommittedCells of the goal. The rear is
+		// the member a quarter of the way from the back, so one late or stuck unit holds nobody.
+		// Fast escorts used to run ahead alone: in the focus batch of 2026-11-15 Rolling Siege lost
+		// its escorts 8 to 17 cells from the defense while the battery was 40 to 70 cells behind, and
+		// the group turned back with a third of its value gone (27 of 34 plans).
+		// Returns the members that take the plan's own orders this tick (aircraft included).
+		auto columnMovingOn = [&](const std::vector<DWORD>& uids, const CellStruct& goal) -> std::vector<DWORD>
+		{
+			std::vector<std::pair<double, FootClass*>> column;
+
+			for (const DWORD uid : uids)
+			{
+				auto const pFoot = findOwnFoot(uid);
+
+				if (pFoot && pFoot->WhatAmI() != AbstractType::Aircraft && !pFoot->GetTechnoType()->Naval && !pFoot->IsInAir())
+					column.emplace_back(pFoot->GetMapCoords().DistanceFrom(goal), pFoot);
+			}
+
+			if (column.size() < 2)
+				return uids;
+
+			// Nearest the goal first (ties by id).
+			std::sort(column.begin(), column.end(), [](auto const& a, auto const& b)
+				{
+					return a.first < b.first || (a.first == b.first && a.second->UniqueID < b.second->UniqueID);
+				});
+
+			const double rear = column[column.size() - 1 - column.size() / 4].first;
+
+			if (rear <= PlanMarchCommittedCells)
+				return uids;
+
+			std::vector<DWORD> held;
+
+			for (auto const& [d, pFoot] : column)
+			{
+				if (d >= rear - PlanMarchBandCells)
+					break;
+
+				held.push_back(pFoot->UniqueID);
+
+				if (pFoot->Target == nullptr && (pFoot->Destination || pFoot->MegaDestination))
+				{
+					pFoot->SetDestination(nullptr, true);
+					pFoot->ClearMegaMissionData();
+					pFoot->QueueMission(Mission::Guard, false);
+				}
+			}
+
+			std::vector<DWORD> movingOn;
+
+			for (const DWORD uid : uids)
+			{
+				if (std::find(held.begin(), held.end(), uid) == held.end())
+					movingOn.push_back(uid);
+			}
+
+			return movingOn;
+		};
+
 		auto knownAARiskAt = [&](const CellStruct& cell) -> int
 		{
 			return CountKnownEnemyDefensesNear(pHouse, cell, 10.0, true) + CountVisibleEnemyMobileAANear(pHouse, cell, 10.0);
@@ -6617,7 +6679,10 @@ namespace
 		// An enemy superweapon with a public countdown (ShowTimer=yes, shown to every player)
 		// is about to fire and we know its building: strike it before the timer runs out, by
 		// air when the target is lightly covered and the wing can bring it down, else with a ground
-		// group (pickStrikeGroup, as the other strikes at a building).
+		// group (pickStrikeGroup, as the other strikes at a building) that marches as one column
+		// (columnMovingOn): its members were lost 58 cells from the target at the median while the
+		// group's centre was still 85 cells from it when it turned back (21 of 24 plans, focus batch
+		// of 2026-11-15).
 		{
 			auto& plan = planOf(NeuralPlanId::SuperweaponRace);
 
@@ -6630,7 +6695,7 @@ namespace
 				else if (memberValue(plan) * 100 < plan.InitialValue * 40 || Unsorted::CurrentFrame >= plan.Deadline)
 					finishPlan(NeuralPlanId::SuperweaponRace, false, true);
 				else
-					strikeWithMembers(plan.Members, pTarget);
+					strikeWithMembers(columnMovingOn(plan.Members, plan.TargetCell), pTarget);
 			}
 			else if (planReady(NeuralPlanId::SuperweaponRace))
 			{
@@ -9354,7 +9419,10 @@ namespace
 			// cells inside the enemy base and shelled it from wherever its own reach ended, often
 			// under the guns of the outer ring: 30 of 40 plans lost a third of their value 10 to 25
 			// cells from the defense and turned back, 2 ended well (archive of 2026-11-14 night).
-			auto pickNextDefense = [&](const CellStruct& from, double maxCells, int artilleryRange) -> std::pair<BuildingClass*, CellClass*>
+			// A defense a group of this value failed against lately is left out (targetLessonAllows,
+			// as for the other raids): the same one was taken three times in a row with the same
+			// group and the same losses (match #9493).
+			auto pickNextDefense = [&](const CellStruct& from, double maxCells, int artilleryRange, int value) -> std::pair<BuildingClass*, CellClass*>
 			{
 				std::vector<std::pair<double, BuildingClass*>> candidates;
 
@@ -9367,8 +9435,11 @@ namespace
 					const CellStruct bc = pBld->GetMapCoords();
 					const double d = bc.DistanceFrom(from);
 
-					if (defenseRange > 0 && artilleryRange >= defenseRange + 2 * Unsorted::LeptonsPerCell && d <= maxCells && zoneOf(bc) == homeZone)
+					if (defenseRange > 0 && artilleryRange >= defenseRange + 2 * Unsorted::LeptonsPerCell && d <= maxCells && zoneOf(bc) == homeZone
+						&& targetLessonAllows(pBld->UniqueID, value))
+					{
 						candidates.emplace_back(d, pBld);
+					}
 				}
 
 				// Nearest first (ties by id), so the reach of the other defenses is weighed only until a
@@ -9431,7 +9502,7 @@ namespace
 
 				if (!pDefense && artilleryRange > 0)
 				{
-					auto const [pNext, pNextStage] = pickNextDefense(plan.TargetCell, RollingSiegeChainCells, artilleryRange);
+					auto const [pNext, pNextStage] = pickNextDefense(plan.TargetCell, RollingSiegeChainCells, artilleryRange, memberValue(plan));
 
 					if (pNext)
 					{
@@ -9457,7 +9528,8 @@ namespace
 				}
 				else
 				{
-					for (const DWORD uid : plan.Members)
+					// The escorts and the guns march as one column to the spot (columnMovingOn).
+					for (const DWORD uid : columnMovingOn(plan.Members, plan.StagingCell))
 					{
 						if (handleSiegeDeployMember(uid, pDefense, pStage))
 							continue;
@@ -9530,10 +9602,11 @@ namespace
 				// The first defense is the one nearest home with a safe firing spot: the outer ring of
 				// the enemy base, on our side.
 				std::pair<BuildingClass*, CellClass*> first { nullptr, nullptr };
+				artillery.resize(std::min<size_t>(artillery.size(), 6));
 
 				if (artillery.size() >= 3 && groundEscorts >= RollingSiegeMinEscorts)
 				{
-					first = pickNextDefense(homeCell, 1e9, artilleryRange);
+					first = pickNextDefense(homeCell, 1e9, artilleryRange, groupValueOf(artillery) + groupValueOf(escorts));
 
 					// No defense with a safe spot: the search waits like a held-back raid.
 					if (!first.first)
@@ -9544,7 +9617,6 @@ namespace
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::RollingSiege, utility))
 				{
-					artillery.resize(std::min<size_t>(artillery.size(), 6));
 					artillery.insert(artillery.end(), escorts.begin(), escorts.end());
 					startPlan(NeuralPlanId::RollingSiege, artillery, first.first->GetMapCoords(), first.second->MapCoords,
 						first.first->UniqueID, 9000);
