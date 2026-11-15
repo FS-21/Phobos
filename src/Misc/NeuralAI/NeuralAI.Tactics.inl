@@ -457,6 +457,65 @@ namespace
 
 	CellClass* JamRerouteHop(FootClass* pFoot, const CellStruct& goal);
 
+	// A block in a narrow passage that one of our buildings may hold shut. Only when the ground route
+	// of one of its units to where it wants to go is gone too (GroundRouteHop: buildings close the
+	// way, other units do not), so a passage that is merely crowded keeps its buildings. The cheapest
+	// of our buildings within JamSealSearchCells of the block, on the side its units want to go,
+	// whose footprint cuts the ground there (FootprintCutsLandWay) is sold; factories and refineries
+	// only when nothing cheaper holds it. True when one was sold.
+	bool SellJamSeal(HouseClass* pHouse, FootClass* pProbe, const CellStruct& probeDest, const CellStruct& center, double wantX,
+		double wantY, int blockedFor)
+	{
+		GroundRouteHop(pProbe, probeDest, 4);
+
+		if (LastGroundRouteAnswer != NeuralRouteAnswer::NoRoute)
+			return false;
+
+		BuildingClass* pBest = nullptr;
+		int bestScore = INT_MAX;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			auto const pType = pBld ? pBld->Type : nullptr;
+
+			if (!pType || !pBld->IsAlive || pBld->InLimbo || pType->ConstructionYard || pType->Unsellable || pType->Naval || pType->Gate
+				|| pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling
+				|| pBld->CurrentMission == Mission::Construction)
+			{
+				continue;
+			}
+
+			const CellStruct topLeft = pBld->GetMapCoords();
+			const int width = pType->GetFoundationWidth();
+			const int height = pType->GetFoundationHeight(false);
+			const double offX = topLeft.X + (width - 1) / 2.0 - center.X;
+			const double offY = topLeft.Y + (height - 1) / 2.0 - center.Y;
+
+			if (std::sqrt(offX * offX + offY * offY) > JamSealSearchCells || offX * wantX + offY * wantY < 0.0)
+				continue;
+
+			const bool key = pType->Factory != AbstractType::None || pType->Refinery || pType->ResourceDestination;
+			const int score = pType->Cost + (key ? 5000 : 0);
+
+			if (score >= bestScore || !FootprintCutsLandWay(topLeft, width, height))
+				continue;
+
+			bestScore = score;
+			pBest = pBld;
+		}
+
+		if (!pBest)
+			return false;
+
+		const CellStruct at = pBest->GetMapCoords();
+		Debug::Log("[NeuralAI] Frame %d | House #%d sells %s at (%d,%d): it holds the passage at (%d,%d) shut, blocked for %d frames "
+			"with no ground route past it\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, pBest->Type->ID, at.X, at.Y, center.X, center.Y,
+			blockedFor);
+		pBest->Sell(1);
+
+		return true;
+	}
+
 	// Jam breaker: our units held 450+ frames with an order pending, 8+ within 4 cells of each other in
 	// open ground or 5+ in a narrow passage (bridge, tunnel tube, a corridor with fewer than 25 free
 	// cells in 7x7), are a block (a rally point in a gap, two-way traffic at a choke). Looked for every
@@ -572,6 +631,24 @@ namespace
 				macro.JamRerouteSpot = macro.JamSpot;
 				macro.JamRerouteUntil = now + JamRerouteHoldFrames;
 				macro.JamRerouteAll = all;
+			}
+
+			// Blocked for long with no way around it: one of our buildings may hold it shut.
+			if (blockedFor >= JamRerouteAllFrames && now >= macro.JamRerouteNoWayFrame && now - macro.JamRerouteNoWayFrame <= JamRerouteRetryFrames
+				&& (now < macro.LastJamSealSellFrame || now - macro.LastJamSealSellFrame >= JamSealSellFrames))
+			{
+				for (auto const& [pHeld, want] : block)
+				{
+					FootClass* const pProbe = pHeld ? pHeld->Foot : nullptr;
+
+					if (!pProbe || !pProbe->IsAlive || pProbe->InLimbo || pProbe->IsInAir() || pHeld->Dest.DistanceFrom(center) <= JamAvoidCells)
+						continue;
+
+					if (SellJamSeal(pHouse, pProbe, pHeld->Dest, center, avgX, avgY, blockedFor))
+						macro.LastJamSealSellFrame = now;
+
+					break;
+				}
 			}
 		}
 

@@ -169,6 +169,151 @@ namespace
 		return false;
 	}
 
+	// Does a building on this footprint cut the ground around it? The box LandWayCheckCells around
+	// the footprint is walked twice: with the footprint open (its open ground) and with it closed.
+	// Other buildings, closed ground and steps no unit climbs (more than one level, or one level
+	// with no slope on the lower cell) close the way in both walks. It cuts the ground when two open
+	// cells on the edge of the box meet in the first walk and not in the second: what passes there
+	// would have to find a way around beyond the box. Works for a planned building (its cells free
+	// now) and for a standing one (its cells under it are open ground).
+	bool FootprintCutsLandWay(const CellStruct& topLeft, int width, int height)
+	{
+		const int margin = LandWayCheckCells;
+		const int boxW = width + 2 * margin;
+		const int boxH = height + 2 * margin;
+
+		if (width <= 0 || height <= 0 || boxW > LandWayBoxMaxCells || boxH > LandWayBoxMaxCells)
+			return false;
+
+		constexpr int BoxCells = LandWayBoxMaxCells * LandWayBoxMaxCells;
+		// 0 closed, 1 open, 2 open ground of the footprint.
+		std::array<uint8_t, BoxCells> ground {};
+		std::array<char, BoxCells> level {};
+		std::array<bool, BoxCells> slope {};
+
+		for (int j = 0; j < boxH; ++j)
+		{
+			for (int i = 0; i < boxW; ++i)
+			{
+				const int idx = j * boxW + i;
+				const CellStruct cell { static_cast<short>(topLeft.X - margin + i), static_cast<short>(topLeft.Y - margin + j) };
+				auto const pCell = MapClass::Instance.CoordinatesLegal(cell) ? MapClass::Instance.TryGetCellAt(cell) : nullptr;
+				const bool inFootprint = i >= margin && i < margin + width && j >= margin && j < margin + height;
+
+				if (!pCell || !IsOpenGroundAt(cell) || (!inFootprint && pCell->GetBuilding()))
+					continue;
+
+				ground[idx] = inFootprint ? 2 : 1;
+				level[idx] = pCell->Level;
+				slope[idx] = pCell->SlopeIndex != 0;
+			}
+		}
+
+		// Can a unit step between two cells of the box (both walkable in this walk)?
+		auto const canStep = [&](int a, int b)
+		{
+			const int diff = std::abs(level[a] - level[b]);
+
+			return diff == 0 || (diff == 1 && slope[level[a] < level[b] ? a : b]);
+		};
+
+		constexpr int DirX[8] = { 1, 0, -1, 0, 1, -1, -1, 1 };
+		constexpr int DirY[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
+		std::array<int16_t, BoxCells> before {};
+		std::array<int16_t, BoxCells> after {};
+		std::array<int16_t, BoxCells> queue {};
+
+		// Labels every walkable cell with its piece of ground; -1 for the others.
+		auto const label = [&](std::array<int16_t, BoxCells>& labels, bool footprintOpen)
+		{
+			auto const walkable = [&](int idx) { return ground[idx] == 1 || (footprintOpen && ground[idx] == 2); };
+			labels.fill(-1);
+			int16_t pieces = 0;
+
+			for (int start = 0; start < boxW * boxH; ++start)
+			{
+				if (labels[start] >= 0 || !walkable(start))
+					continue;
+
+				int head = 0;
+				int tail = 0;
+				queue[tail++] = static_cast<int16_t>(start);
+				labels[start] = pieces;
+
+				while (head < tail)
+				{
+					const int idx = queue[head++];
+					const int x = idx % boxW;
+					const int y = idx / boxW;
+
+					for (int d = 0; d < 8; ++d)
+					{
+						const int nx = x + DirX[d];
+						const int ny = y + DirY[d];
+
+						if (nx < 0 || ny < 0 || nx >= boxW || ny >= boxH)
+							continue;
+
+						const int next = ny * boxW + nx;
+
+						if (labels[next] >= 0 || !walkable(next) || !canStep(idx, next))
+							continue;
+
+						// A diagonal step needs both side cells open and level with its ends.
+						if (d >= 4)
+						{
+							const int sideA = y * boxW + nx;
+							const int sideB = ny * boxW + x;
+
+							if (!walkable(sideA) || !walkable(sideB) || !canStep(idx, sideA) || !canStep(sideA, next)
+								|| !canStep(idx, sideB) || !canStep(sideB, next))
+							{
+								continue;
+							}
+						}
+
+						labels[next] = pieces;
+						queue[tail++] = static_cast<int16_t>(next);
+					}
+				}
+
+				++pieces;
+			}
+
+			return pieces;
+		};
+
+		const int piecesBefore = label(before, true);
+		label(after, false);
+
+		// The piece each piece of the open walk fell into on the edge of the box, in the closed walk.
+		std::array<int16_t, BoxCells> edgePiece {};
+		std::fill(edgePiece.begin(), edgePiece.begin() + piecesBefore, static_cast<int16_t>(-1));
+
+		for (int j = 0; j < boxH; ++j)
+		{
+			for (int i = 0; i < boxW; ++i)
+			{
+				if (i != 0 && j != 0 && i != boxW - 1 && j != boxH - 1)
+					continue;
+
+				const int idx = j * boxW + i;
+
+				if (ground[idx] != 1)
+					continue;
+
+				int16_t& seen = edgePiece[before[idx]];
+
+				if (seen < 0)
+					seen = after[idx];
+				else if (seen != after[idx])
+					return true;
+			}
+		}
+
+		return false;
+	}
+
 	int CellDistanceSq(const CellStruct& a, const CellStruct& b)
 	{
 		const int dx = a.X - b.X;

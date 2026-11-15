@@ -917,6 +917,8 @@ namespace
 		int JamRerouteUntil { -1 };
 		bool JamRerouteAll { false };
 		int JamRerouteNoWayFrame { -100000 };
+		// Last frame one of our buildings was sold because it held a blocked passage shut (JamSealSellFrames).
+		int LastJamSealSellFrame { -100000 };
 		// Last frame the aircraft pick wanted a type that needs a dock and every dock was taken: the
 		// building pass answers with another airfield (AirDockWantedFrames).
 		int AirDockWantedFrame { -100000 };
@@ -1208,6 +1210,7 @@ namespace
 			this->JamRerouteUntil = -1;
 			this->JamRerouteAll = false;
 			this->JamRerouteNoWayFrame = -100000;
+			this->LastJamSealSellFrame = -100000;
 			this->AirDockWantedFrame = -100000;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
@@ -1462,6 +1465,19 @@ namespace
 	// of a base next to it (no way around in 16 of 16 searches with 10).
 	constexpr double JamAvoidCells = 6.0;
 	constexpr double JamRerouteReachCells = 60.0;
+	// A building cuts the ground where it stands when two ways out of the box LandWayCheckCells
+	// around its footprint meet inside the box without it and no longer meet with it. Placement
+	// skips such cells like those that close a passage (match #9724, Frosty Zigzag: towers and a war
+	// factory on the edge of a base closed the only way between two plateaus cell by cell, and an
+	// army of 265 units stood in front of it for 30000 frames).
+	constexpr int LandWayCheckCells = 3;
+	// A box wider or deeper than this is not checked (no foundation is that big).
+	constexpr int LandWayBoxMaxCells = 24;
+	// A narrow passage blocked for JamRerouteAllFrames with no way around it: the cheapest of our
+	// buildings within JamSealSearchCells of the block, on the side the units want to go, whose
+	// footprint cuts the ground there is sold, at most once per JamSealSellFrames.
+	constexpr double JamSealSearchCells = 10.0;
+	constexpr int JamSealSellFrames = 1800;
 	// A route leg that would end on a bridge deck runs this many route cells past its far end.
 	constexpr size_t RouteLegPastBridgeCells = 4;
 	// A ground target off the unit's zone stands for the nearest cell of the zone this near to it.
