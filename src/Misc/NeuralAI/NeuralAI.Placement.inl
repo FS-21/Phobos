@@ -422,6 +422,11 @@ bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClas
 		}
 	}
 
+	// Last, as it walks the ground around the footprint: never where the building cuts it (a gate
+	// lets our units through).
+	if (!pType->Naval && !pType->Gate && FootprintCutsLandWay(candidateCell, candW, candH))
+		return false;
+
 	return true;
 }
 
@@ -2933,9 +2938,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				int spatialScore = (enableBaseCrawl ? (-radius * 5) : (-radius * 10)) - (hasOneCellMargin ? 0 : 4000)
 					+ expansionZoneBonus;
 
-				// With no cell left but tight ones, one that closes a passage is the last to be taken.
-				if (!hasOneCellMargin && ClosesLandPassage(pBuildingType, candidate))
+				// With no cell left but tight ones, one that closes a passage or cuts the ground is the
+				// last to be taken.
+				if (!hasOneCellMargin && (ClosesLandPassage(pBuildingType, candidate)
+					|| (!isNavalBld && !pBuildingType->Gate && FootprintCutsLandWay(candidate, w, h))))
+				{
 					spatialScore -= 6000;
+				}
 
 				if (hasAllySiteReservation && candidate == allySiteMacro.AllySiteReservedCell)
 					spatialScore += 100000;
