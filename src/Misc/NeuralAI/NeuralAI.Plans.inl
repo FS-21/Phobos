@@ -2195,17 +2195,53 @@ namespace
 				NeuralPlanId::RollingSiege, NeuralPlanId::SiegeBattery, NeuralPlanId::BaitAmbush, NeuralPlanId::Pincer,
 				NeuralPlanId::ThreeFrontAssault, NeuralPlanId::AllyJointAttack };
 
-			if (std::find(std::begin(marching), std::end(marching), id) != std::end(marching)
-				&& ((target != CellStruct::Empty && IsPathDeadGoal(pHouse, target))
-					|| (staging != CellStruct::Empty && IsPathDeadGoal(pHouse, staging))))
+			const bool marches = std::find(std::begin(marching), std::end(marching), id) != std::end(marching);
+			auto const walks = [](FootClass* pFoot)
 			{
-				const bool walks = std::any_of(group.begin(), group.end(), [](FootClass* pFoot)
-					{
-						return pFoot && pFoot->WhatAmI() != AbstractType::Aircraft && !pFoot->IsInAir() && !pFoot->GetTechnoType()->Naval;
-					});
+				return pFoot && pFoot->WhatAmI() != AbstractType::Aircraft && !pFoot->IsInAir() && !pFoot->GetTechnoType()->Naval;
+			};
 
-				if (walks)
+			if (marches
+				&& ((target != CellStruct::Empty && IsPathDeadGoal(pHouse, target))
+					|| (staging != CellStruct::Empty && IsPathDeadGoal(pHouse, staging)))
+				&& std::any_of(group.begin(), group.end(), walks))
+			{
+				macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
+				return;
+			}
+
+			// Nor does such a plan start for a target or a staging cell on ground one of its walking
+			// members does not get to by itself (FootReachesAlone): another island, a plateau. The
+			// transports take idle units, never plan members, so the group stood at home until the
+			// plan ran out (14 of 15 Factory Decapitation plans of a house in match #9885, every
+			// member alive, 50 to 110 cells from a target across the water).
+			if (marches)
+			{
+				auto const strands = [&](const CellStruct& cell, const BuildingClass* pBuilding)
 				{
+					return cell != CellStruct::Empty && std::any_of(group.begin(), group.end(), [&](FootClass* pFoot)
+						{ return walks(pFoot) && !FootReachesAlone(pFoot, cell, pBuilding); });
+				};
+
+				if (strands(target, pTargetBuilding) || strands(staging, nullptr))
+				{
+					// TEMP diagnostic: the plans held for a goal across the water (20 per match).
+					static int strandLogSerial = -1;
+					static int strandLogCount = 0;
+
+					if (strandLogSerial != NeuralMatchSerial)
+					{
+						strandLogSerial = NeuralMatchSerial;
+						strandLogCount = 0;
+					}
+
+					if (strandLogCount++ < 20)
+					{
+						Debug::Log("[NeuralAI] House %d plan %s not started: target (%d,%d) or staging (%d,%d) is on ground its %d members do not all reach, frame %d.\n",
+							houseIdx, NeuralPlanNames[static_cast<size_t>(id)], target.X, target.Y, staging.X, staging.Y,
+							static_cast<int>(group.size()), Unsorted::CurrentFrame);
+					}
+
 					macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
 					return;
 				}
@@ -9269,12 +9305,31 @@ namespace
 						return da != db ? da < db : a->UniqueID < b->UniqueID;
 					});
 
+				// The ground units (taken from the home landmass) go only for factories on that ground.
+				// With fewer than two of those the aircraft fly alone at the nearest ones.
+				std::vector<BuildingClass*> onOurGround;
+
+				for (auto const pFactory : factories)
+				{
+					if (zoneOf(pFactory->GetMapCoords()) == homeZone || IsBuildingEnterableFromZone(pFactory, homeZone))
+						onOurGround.push_back(pFactory);
+				}
+
+				const bool byLand = onOurGround.size() >= 2;
+
+				if (byLand)
+					factories = onOurGround;
+
 				factories.resize(std::min<size_t>(factories.size(), 3));
 
 				std::vector<FootClass*> group = collectAirStrikers();
-				std::vector<FootClass*> ground = collectIdleGround(false);
-				sortFastest(ground);
-				group.insert(group.end(), ground.begin(), ground.end());
+
+				if (byLand)
+				{
+					std::vector<FootClass*> ground = collectIdleGround(false);
+					sortFastest(ground);
+					group.insert(group.end(), ground.begin(), ground.end());
+				}
 				group.resize(std::min(group.size(), std::max(factories.size() * 3, group.size() / PlanStrikeIdleShare)));
 
 				const int utility = (factories.size() >= 2 && group.size() >= factories.size() * 2) ? 310 : -1000;
