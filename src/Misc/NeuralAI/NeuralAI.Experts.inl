@@ -400,8 +400,11 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 			// If this Archetype has a negative win/loss record in the Backpack for
 			// this faction, pivot to the highest-scoring alternative Archetype
-			// (weighted by Slots 48..52 & 86..88)
-			if (memEntry.ArchetypeScoreDelta[curArch] < -18 && (IsAITickWindow(900, 30)))
+			// (weighted by Slots 48..52 & 86..88). Not in training matches: the start
+			// choice already weighs the memory, and a match that changes its archetype
+			// writes its result to the last one (Soviet and Nod houses drawn as
+			// archetype 3 left it at frame 0, on the entry of one expert).
+			if (!NeuralAI::TrainingMode && memEntry.ArchetypeScoreDelta[curArch] < -18 && (IsAITickWindow(900, 30)))
 			{
 				int bestAltArch = (curArch + 1) % NeuralAI::NumArchetypes;
 				int bestAltScore = -999999;
@@ -430,7 +433,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// Mid-Match Adaptive Strategy Pivot: If our current strategy is stalled (e.g.
 	// high frame count, low army vs strong enemy), pivot to the strongest
 	// alternative Archetype (weighted by Slots 48..52) to surprise the opponent!
-	if (Unsorted::CurrentFrame > 5400 && (IsAITickPeriod(2700)) && pHouse->OwnedUnits < 4
+	// Real games only: in training the loss of a house already beaten would be
+	// written to the archetype it pivoted to (Allied houses that pivoted to
+	// archetype 3 lost 3 of 3), which teaches the memory nothing about either.
+	if (!NeuralAI::TrainingMode && Unsorted::CurrentFrame > 5400 && (IsAITickPeriod(2700)) && pHouse->OwnedUnits < 4
 		&& features[65] > 20)
 	{
 		int bestPivotArch = (pExt->NeuralAI_Archetype + 1) % NeuralAI::NumArchetypes;
