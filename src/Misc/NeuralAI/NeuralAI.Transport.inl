@@ -330,6 +330,151 @@ namespace
 		return !pShore || pShore->MapCoords.DistanceFrom(target) * Unsorted::LeptonsPerCell > rangeLeptons;
 	}
 
+	// A unit that moves only on water (a ship; not an amphibious unit, a hover or a flyer).
+	bool IsWaterBound(const TechnoTypeClass* pType)
+	{
+		return pType && (pType->MovementZone == MovementZone::Water || pType->MovementZone == MovementZone::WaterBeach);
+	}
+
+	// The nearest cell of one water zone (a ship's sea) to a cell: its distance in cells and its height
+	// level. Cells is NavalShoreSearchCells + 1 when none lies within NavalShoreSearchCells. Zones do not
+	// change during a match, so each answer is kept (all of them dropped when the frame goes back).
+	struct NavalShore
+	{
+		float Cells { 0.0f };
+		int Level { 0 };
+	};
+
+	NavalShore NearestNavalShore(const CellStruct& cell, MovementZone movementZone, int zone)
+	{
+		static std::unordered_map<unsigned long long, NavalShore> cache;
+		static int cacheFrame = -1;
+		const int now = Unsorted::CurrentFrame;
+
+		if (now < cacheFrame || cache.size() > 65536)
+			cache.clear();
+
+		cacheFrame = now;
+		const unsigned long long key = (static_cast<unsigned long long>(static_cast<unsigned char>(movementZone)) << 52)
+			| (static_cast<unsigned long long>(static_cast<unsigned int>(zone)) << 20)
+			| (static_cast<unsigned long long>(static_cast<unsigned short>(cell.X) & 0x3FFu) << 10)
+			| static_cast<unsigned long long>(static_cast<unsigned short>(cell.Y) & 0x3FFu);
+
+		if (auto const it = cache.find(key); it != cache.end())
+			return it->second;
+
+		NavalShore shore { static_cast<float>(NavalShoreSearchCells + 1), 0 };
+
+		for (int r = 0; r <= NavalShoreSearchCells && r < shore.Cells; ++r)
+		{
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::max(std::abs(dx), std::abs(dy)) != r)
+						continue;
+
+					const CellStruct c { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
+					auto const pShoreCell = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pShoreCell || MapClass::Instance.GetMovementZoneType(c, movementZone, false) != zone)
+						continue;
+
+					const float d = static_cast<float>(std::sqrt(static_cast<double>(dx * dx + dy * dy)));
+
+					if (d < shore.Cells)
+					{
+						shore.Cells = d;
+						shore.Level = pShoreCell->Level;
+					}
+				}
+			}
+		}
+
+		cache.emplace(key, shore);
+
+		return shore;
+	}
+
+	// The reach of a weapon against a building as the engine measures it (TechnoTypeClass::In_Range,
+	// from the shooter's center to the building's): a third of a cell short of its Range and, for a
+	// shot that does not arc, a quarter cell more per cell of the footprint's width and height.
+	int WeaponReachAgainst(const WeaponTypeClass* pWeapon, const BuildingTypeClass* pBldType)
+	{
+		if (!pWeapon)
+			return 0;
+
+		int reach = pWeapon->Range - Unsorted::LeptonsPerCell / 3;
+
+		if (pBldType && !(pWeapon->Projectile && pWeapon->Projectile->Arcing))
+			reach += (pBldType->GetFoundationWidth() + pBldType->GetFoundationHeight(false)) * (Unsorted::LeptonsPerCell / 4);
+
+		return reach;
+	}
+
+	// How far a unit hits land from where it stands, in leptons: its longest gun that hits land
+	// (WeaponReachAgainst the building when one is given), NavalSpawnerReachCells when its only land
+	// weapon is its aircraft, 0 when nothing of it hits land.
+	int NavalLandReach(const TechnoTypeClass* pType, const BuildingTypeClass* pBldType)
+	{
+		int reach = 0;
+		bool spawner = false;
+
+		for (int i = 0; pType && i < 2; ++i)
+		{
+			auto const pWeapon = pType->GetWeapon(static_cast<size_t>(i), false).WeaponType;
+
+			if (!pWeapon || !LandTargetingAllows(pType, i))
+				continue;
+
+			if (pWeapon->Spawner)
+				spawner = true;
+			else if (pWeapon->Damage > 0 && (!pWeapon->Projectile || pWeapon->Projectile->AG))
+				reach = std::max(reach, WeaponReachAgainst(pWeapon, pBldType));
+		}
+
+		if (reach <= 0 && spawner)
+			reach = NavalSpawnerReachCells * Unsorted::LeptonsPerCell;
+
+		return reach;
+	}
+
+	// Does a shot of reachLeptons from the nearest water of one sea get to a land cell? Height counts:
+	// the engine measures a straight shot in three dimensions, so a building on a cliff is farther.
+	bool IsNavalShoreWithin(const CellStruct& target, MovementZone movementZone, int zone, int reachLeptons)
+	{
+		const NavalShore shore = NearestNavalShore(target, movementZone, zone);
+
+		if (shore.Cells > NavalShoreSearchCells)
+			return false;
+
+		auto const pTargetCell = MapClass::Instance.TryGetCellAt(target);
+		const double flat = shore.Cells * Unsorted::LeptonsPerCell;
+		const double rise = pTargetCell ? std::max(0, pTargetCell->Level - shore.Level) * Unsorted::LevelHeight : 0.0;
+
+		return std::sqrt(flat * flat + rise * rise) + NavalReachMarginLeptons <= reachLeptons;
+	}
+
+	// Does a water-bound unit hit a land cell from its own sea (NavalLandReach, against the building that
+	// stands there when one is given)? A cell of its own sea counts as reached, and so does any cell for a
+	// unit on no known zone (a dock cell): nothing is known against it.
+	bool NavalReaches(const FootClass* pFoot, const CellStruct& target, const BuildingClass* pBuilding)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType)
+			return false;
+
+		const int zone = ObjectZone(pFoot, pType->MovementZone);
+
+		if (zone < 0 || MapClass::Instance.GetMovementZoneType(target, pType->MovementZone, false) == zone)
+			return true;
+
+		const int reach = NavalLandReach(pType, pBuilding ? pBuilding->Type : nullptr);
+
+		return reach > 0 && IsNavalShoreWithin(target, pType->MovementZone, zone, reach);
+	}
+
 	bool IsBridgeOrTubeCell(const CellClass* pCell);
 
 	// Units of ours sent to one cell queue for it: the engine only looks for a nearby cell for a unit
