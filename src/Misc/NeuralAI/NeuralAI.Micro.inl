@@ -15617,8 +15617,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// E) Reconnaissance Superweapons (Psychic Reveal / Spy Plane): where the revealed area
 				// teaches the most (PickRevealTarget), else they wait. A rectangle counts as the disc
 				// of its mean half side, a spy plane's look as 10 cells; a reveal of the whole map
-				// goes anywhere.
-				if (swType == SuperWeaponType::PsychicReveal || swType == SuperWeaponType::SpyPlane)
+				// goes anywhere. A SpyPlane type that sends an air strike (SpyPlane.Mission=Attack)
+				// is aimed as an offensive one below.
+				if (swType == SuperWeaponType::PsychicReveal
+					|| (swType == SuperWeaponType::SpyPlane && GetSWTargeting(pSuper->Type).SpyPlaneLooks))
 				{
 					int height = -1;
 					const double range = swType == SuperWeaponType::PsychicReveal ? GetPsychicRevealRange(pSuper->Type, height) : 10.0;
