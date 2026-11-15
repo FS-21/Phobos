@@ -2000,6 +2000,8 @@ namespace
 			if (!success && Unsorted::CurrentFrame >= plan.Deadline)
 				CountPlanOutcome(houseIdx, id, NeuralPlanOutcome::TimedOut);
 
+			macro.PlanEndFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame;
+			macro.PlanEndedWell[static_cast<size_t>(id)] = success;
 			plan = NeuralPlanInstance {};
 			macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + (success ? 1800 : 2700);
 		};
@@ -4466,34 +4468,320 @@ namespace
 			}
 		}
 
+		// ---------------------------------------------------------------- Watch and strike cases
+		// What Preemptive Strike (Plan 19) and Hold Under Towers (Plan 12) would act on this tick, so
+		// Combo Watch Strike (Plan 38) starts only for a force one of them answers. Ground sightings
+		// only: both answer forces on foot or on wheels, and aircraft and ships neither come under the
+		// towers nor can be chased by a ground group.
+		auto isGroundSighting = [](const EnemyUnitSighting& sighting)
+		{
+			return sighting.Category != EnemyForceCategory::Air && sighting.Category != EnemyForceCategory::Naval;
+		};
+
+		auto seenGroundEnemyValueNear = [&](const CellStruct& cell, double radius, int maxAge) -> int
+		{
+			int value = 0;
+
+			for (auto const& [uid, sighting] : macro.EnemySightings)
+			{
+				if (isGroundSighting(sighting) && Unsorted::CurrentFrame - sighting.LastSeenFrame <= maxAge
+					&& sighting.LastCoords.DistanceFrom(cell) <= radius)
+				{
+					value += sighting.Value;
+				}
+			}
+
+			return value;
+		};
+
+		auto seenGroundEnemyCentroidNear = [&](const CellStruct& cell, double radius, int maxAge) -> CellStruct
+		{
+			long long sumX = 0;
+			long long sumY = 0;
+			long long weight = 0;
+
+			for (auto const& [uid, sighting] : macro.EnemySightings)
+			{
+				if (isGroundSighting(sighting) && Unsorted::CurrentFrame - sighting.LastSeenFrame <= maxAge
+					&& sighting.LastCoords.DistanceFrom(cell) <= radius)
+				{
+					const int w = std::max(1, sighting.Value);
+					sumX += static_cast<long long>(sighting.LastCoords.X) * w;
+					sumY += static_cast<long long>(sighting.LastCoords.Y) * w;
+					weight += w;
+				}
+			}
+
+			return weight > 0 ? CellStruct { static_cast<short>(sumX / weight), static_cast<short>(sumY / weight) } : CellStruct::Empty;
+		};
+
+		// Value of the ground units seen near a cell that have stood where they are for
+		// PreemptiveGatherFrames.
+		auto standingGroundEnemyValueNear = [&](const CellStruct& cell, double radius) -> int
+		{
+			int value = 0;
+
+			for (auto const& [uid, sighting] : macro.EnemySightings)
+			{
+				if (isGroundSighting(sighting) && Unsorted::CurrentFrame - sighting.LastSeenFrame <= 150
+					&& Unsorted::CurrentFrame - sighting.StandSinceFrame >= PreemptiveGatherFrames
+					&& sighting.LastCoords.DistanceFrom(cell) <= radius)
+				{
+					value += sighting.Value;
+				}
+			}
+
+			return value;
+		};
+
+		struct PreemptiveCase
+		{
+			CellStruct Center { CellStruct::Empty };
+			int Value { 0 };
+			int Standing { 0 };
+			std::vector<FootClass*> Group {};
+		};
+
+		// A ground force gathering outside its defenses, on our landmass and not at our base, and the
+		// free units nearest to it that are worth more and close enough to strike it before it moves.
+		auto findPreemptiveCase = [&]() -> PreemptiveCase
+		{
+			PreemptiveCase result;
+			CellStruct bestSeed = CellStruct::Empty;
+			int bestStanding = 0;
+
+			for (auto const& [uid, seed] : macro.EnemySightings)
+			{
+				if (!isGroundSighting(seed) || Unsorted::CurrentFrame - seed.LastSeenFrame > 150 || seed.NearOurBase || seed.Value < 20
+					|| Unsorted::CurrentFrame - seed.StandSinceFrame < PreemptiveGatherFrames)
+				{
+					continue;
+				}
+
+				const int standing = standingGroundEnemyValueNear(seed.LastCoords, PreemptiveClusterCells);
+
+				// Ties broken by position so the pick does not depend on the map's iteration order.
+				if (standing > bestStanding
+					|| (standing == bestStanding && standing > 0
+						&& (seed.LastCoords.X < bestSeed.X || (seed.LastCoords.X == bestSeed.X && seed.LastCoords.Y < bestSeed.Y))))
+				{
+					bestStanding = standing;
+					bestSeed = seed.LastCoords;
+				}
+			}
+
+			if (bestStanding < PreemptiveMinValue)
+				return result;
+
+			const CellStruct center = seenGroundEnemyCentroidNear(bestSeed, PreemptiveClusterCells, 150);
+
+			if (center == CellStruct::Empty || zoneOf(center) != homeZone || CountKnownEnemyDefensesNear(pHouse, center, 10.0, false) > 0
+				|| center.DistanceFrom(homeCell) <= 22.0)
+			{
+				return result;
+			}
+
+			// The whole force the group would meet there, standing or not.
+			const int value = seenGroundEnemyValueNear(center, PreemptiveClusterCells, 150);
+			std::vector<std::pair<double, FootClass*>> inReach;
+
+			for (auto const pFoot : collectIdleGround(false))
+			{
+				const double distance = pFoot->GetMapCoords().DistanceFrom(center);
+
+				if (distance <= PreemptiveReachCells)
+					inReach.emplace_back(distance, pFoot);
+			}
+
+			std::sort(inReach.begin(), inReach.end(), [](auto const& a, auto const& b)
+				{
+					return a.first != b.first ? a.first < b.first : a.second->UniqueID < b.second->UniqueID;
+				});
+
+			std::vector<FootClass*> group;
+
+			for (auto const& [distance, pFoot] : inReach)
+			{
+				if (group.size() >= PreemptiveMaxMembers)
+					break;
+
+				group.push_back(pFoot);
+			}
+
+			if (group.size() < PreemptiveMinMembers || feetValue(group) * 100 < value * 125)
+				return result;
+
+			result.Center = center;
+			result.Value = value;
+			result.Standing = bestStanding;
+			result.Group = std::move(group);
+
+			return result;
+		};
+
+		struct HoldTowersCase
+		{
+			int EnemyNear { 0 };
+			std::vector<FootClass*> Army {};
+			CellClass* Rally { nullptr };
+			bool RallyOnRoute { false };
+		};
+
+		// A ground force clearly stronger than our free army is near home, and that army is worth
+		// keeping out of the open: it would hold just behind the hottest approach our towers cover
+		// (route heat), else at the middle of our home defenses.
+		auto findHoldTowersCase = [&]() -> HoldTowersCase
+		{
+			HoldTowersCase result;
+
+			if (ownHomeDefenses < 2)
+				return result;
+
+			const int enemyNear = seenGroundEnemyValueNear(homeCell, HoldTowersEnemyCells, 150);
+
+			if (enemyNear < HoldTowersMinEnemyValue)
+				return result;
+
+			std::vector<FootClass*> army;
+
+			for (auto const& [uid, pFoot] : ownFoots)
+			{
+				if (isArmedGroundFoot(pFoot) && !macro.PlanMembers.contains(uid) && ObjectZone(pFoot, MovementZone::Normal) == homeZone
+					&& pFoot->GetMapCoords().DistanceFrom(homeCell) <= HoldTowersArmyCells)
+				{
+					army.push_back(pFoot);
+				}
+			}
+
+			if (army.size() < HoldTowersMinMembers || enemyNear * 100 <= feetValue(army) * HoldTowersOddsPercent)
+				return result;
+
+			std::sort(army.begin(), army.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
+			CellClass* pRally = nullptr;
+
+			if (auto const pHoldSpot = BestRouteHoldSpot(pHouse, homeCell, 26))
+				pRally = landCellInZone(pointAlong(pHoldSpot->Cell, homeCell, 4.0, 0.0), homeZone, 4);
+
+			result.RallyOnRoute = pRally != nullptr;
+
+			if (!pRally)
+				pRally = landCellInZone(ownDefenseCentroid, homeZone, 4);
+
+			if (!pRally)
+				return HoldTowersCase {};
+
+			result.EnemyNear = enemyNear;
+			result.Army = std::move(army);
+			result.Rally = pRally;
+
+			return result;
+		};
+
 		// ---------------------------------------------------------------- Plan 38: Combo Watch Strike
-		// Chain (point 56): our sentries spot an enemy force -> preemptive strike, or fall back
-		// under the towers if it is too strong; the counterattack window follows on its own.
+		// Chain (point 56): a sentry of ours spots an enemy force that Preemptive Strike or Hold Under
+		// Towers would answer right now, and that follow-up is pushed (cooldown skipped, utility
+		// raised). The chain is judged by the plan it led into: well when that plan ends well, badly
+		// when it ends badly or does not start within ComboWatchStartFrames. AuxBaseline: the
+		// follow-ups pushed (1 strike, 2 hold); Progress: the one that started (1, 2); ArrivedFrame:
+		// its start frame.
 		{
 			auto& plan = planOf(NeuralPlanId::ComboWatchStrike);
-			auto const& pickets = planOf(NeuralPlanId::Pickets);
+			auto& pickets = planOf(NeuralPlanId::Pickets);
+			constexpr NeuralPlanId followUps[] = { NeuralPlanId::PreemptiveStrike, NeuralPlanId::HoldUnderTowers };
+
+			auto pushFollowUps = [&](int which)
+			{
+				if (which & 1)
+					boostPlan(NeuralPlanId::PreemptiveStrike, 350);
+
+				if (which & 2)
+					boostPlan(NeuralPlanId::HoldUnderTowers, 250);
+			};
+
+			// A live sentry has a ground enemy of the force (within `radius` of `center`) in sight.
+			auto sentrySees = [&](const CellStruct& center, double radius) -> bool
+			{
+				for (const DWORD uid : pickets.Members)
+				{
+					auto const pSentry = findOwnFoot(uid);
+
+					if (!pSentry)
+						continue;
+
+					const CellStruct sentryCell = pSentry->GetMapCoords();
+
+					for (auto const& [enemyID, sighting] : macro.EnemySightings)
+					{
+						if (isGroundSighting(sighting) && Unsorted::CurrentFrame - sighting.LastSeenFrame <= ComboWatchSightFrames
+							&& sighting.LastCoords.DistanceFrom(sentryCell) <= ComboWatchSightCells
+							&& sighting.LastCoords.DistanceFrom(center) <= radius)
+						{
+							return true;
+						}
+					}
+				}
+
+				return false;
+			};
 
 			if (plan.Active)
 			{
-				if (planOf(NeuralPlanId::PreemptiveStrike).Active || planOf(NeuralPlanId::HoldUnderTowers).Active)
-					finishPlan(NeuralPlanId::ComboWatchStrike, true, false);
-				else if (Unsorted::CurrentFrame >= plan.Deadline)
-					finishPlan(NeuralPlanId::ComboWatchStrike, false, false);
+				for (size_t i = 0; plan.Progress == 0 && i < std::size(followUps); ++i)
+				{
+					auto const& followUp = planOf(followUps[i]);
+
+					if ((plan.AuxBaseline & (1 << i)) && followUp.Active)
+					{
+						plan.Progress = static_cast<int>(i) + 1;
+						plan.ArrivedFrame = followUp.StartFrame;
+					}
+				}
+
+				if (plan.Progress == 0)
+				{
+					if (Unsorted::CurrentFrame >= plan.Deadline)
+						finishPlan(NeuralPlanId::ComboWatchStrike, false, false);
+					else
+						pushFollowUps(plan.AuxBaseline);
+				}
 				else
 				{
-					boostPlan(NeuralPlanId::PreemptiveStrike, 350);
-					boostPlan(NeuralPlanId::HoldUnderTowers, 250);
+					const size_t f = static_cast<size_t>(followUps[plan.Progress - 1]);
+					auto const& followUp = macro.Plans[f];
+
+					if (followUp.Active && followUp.StartFrame == plan.ArrivedFrame)
+						plan.Deadline = std::max(plan.Deadline, followUp.Deadline + ComboWatchStartFrames);
+					else
+						finishPlan(NeuralPlanId::ComboWatchStrike, macro.PlanEndFrame[f] >= plan.ArrivedFrame && macro.PlanEndedWell[f], false);
 				}
 			}
 			else if (planReady(NeuralPlanId::ComboWatchStrike) && pickets.Active && pickets.AuxPeak > pickets.AuxBaseline)
 			{
-				planOf(NeuralPlanId::Pickets).AuxBaseline = pickets.AuxPeak;
+				// Something new was seen by a sentry: is it a force a follow-up would act on?
+				pickets.AuxBaseline = pickets.AuxPeak;
+				int which = 0;
 
-				if (shouldTryStart(NeuralPlanId::ComboWatchStrike, 320))
+				if (!planOf(NeuralPlanId::PreemptiveStrike).Active)
 				{
-					startPlan(NeuralPlanId::ComboWatchStrike, std::vector<FootClass*> {}, homeCell, CellStruct::Empty, 0, 900);
-					boostPlan(NeuralPlanId::PreemptiveStrike, 350);
-					boostPlan(NeuralPlanId::HoldUnderTowers, 250);
+					auto const strike = findPreemptiveCase();
+
+					if (!strike.Group.empty() && sentrySees(strike.Center, PreemptiveClusterCells))
+						which |= 1;
+				}
+
+				if (!planOf(NeuralPlanId::HoldUnderTowers).Active)
+				{
+					auto const hold = findHoldTowersCase();
+
+					if (!hold.Army.empty() && sentrySees(homeCell, HoldTowersEnemyCells))
+						which |= 2;
+				}
+
+				if (which != 0 && shouldTryStart(NeuralPlanId::ComboWatchStrike, 320))
+				{
+					startPlan(NeuralPlanId::ComboWatchStrike, std::vector<FootClass*> {}, homeCell, CellStruct::Empty, 0, ComboWatchStartFrames);
+					planOf(NeuralPlanId::ComboWatchStrike).AuxBaseline = which;
+					pushFollowUps(which);
 				}
 			}
 		}
@@ -6077,9 +6365,12 @@ namespace
 		}
 
 		// ---------------------------------------------------------------- Plan 12: Hold Under Towers
-		// A clearly stronger enemy force approaches: our ground army falls back under our base
-		// defenses (AuxBaseline 0), lets the enemy bleed there, then counterattacks the survivors
-		// (AuxBaseline 1) once the seen enemy value dropped to 60% of its peak or below ours.
+		// A clearly stronger ground force approaches (findHoldTowersCase): our ground army falls back
+		// under our base defenses (AuxBaseline 0), lets the enemy bleed there, then counterattacks the
+		// survivors (AuxBaseline 1) once the seen enemy value dropped to 60% of its peak or below
+		// ours. It went well when that force is down to HoldTowersRepelledPercent of its peak, killed
+		// or gone, and the group kept HoldTowersKeptPercent of its value. AuxPeak = the peak of the
+		// ground enemy value near home; Arrived = a counterattack fell back under the towers.
 		{
 			auto& plan = planOf(NeuralPlanId::HoldUnderTowers);
 
@@ -6088,90 +6379,112 @@ namespace
 				auto const pRally = MapClass::Instance.TryGetCellAt(plan.StagingCell);
 				// Same radius as the start check, so a force 27..30 cells out that started the plan is
 				// not read as one that never came.
-				const int enemyNear = seenEnemyValueNear(homeCell, 30.0, 150);
+				const int enemyNear = seenGroundEnemyValueNear(homeCell, HoldTowersEnemyCells, 150);
 				const int ourValue = memberValue(plan);
 				const int strength = groupStrength(plan.Members);
 				plan.AuxPeak = std::max(plan.AuxPeak, enemyNear);
+				const bool repelled = enemyNear * 100 <= plan.AuxPeak * HoldTowersRepelledPercent;
+				const bool kept = ourValue * 100 >= plan.InitialValue * HoldTowersKeptPercent;
 
 				// The enemy is still at our towers when the time is up and the group holds: hold on
 				// (once, 1800 frames) instead of releasing the army in the middle of the defense.
-				if (pRally && Unsorted::CurrentFrame >= plan.Deadline && plan.Progress == 0 && enemyNear > 0
+				if (pRally && Unsorted::CurrentFrame >= plan.Deadline && plan.Progress == 0 && !repelled
 					&& strength * 100 >= plan.InitialStrength * 40)
 				{
 					plan.Progress = 1;
 					plan.Deadline += 1800;
 				}
 
-				if (!pRally || Unsorted::CurrentFrame >= plan.Deadline)
+				if (ourValue <= 0)
 				{
-					finishPlan(NeuralPlanId::HoldUnderTowers, ourValue * 100 >= plan.InitialValue * 30 && enemyNear == 0, false);
+					// The whole group fell: it ended there, not at the deadline (27 of 53 holds ran out of
+					// time with nobody left, 2026-11-15).
+					finishPlan(NeuralPlanId::HoldUnderTowers, false, false);
+				}
+				else if (!pRally || Unsorted::CurrentFrame >= plan.Deadline)
+				{
+					// The base held with the army: the attack is over, or what stays of it is no longer
+					// that much stronger than the group.
+					finishPlan(NeuralPlanId::HoldUnderTowers, kept && (repelled || enemyNear * 100 <= strength * HoldTowersOddsPercent), false);
+				}
+				else if (repelled)
+				{
+					finishPlan(NeuralPlanId::HoldUnderTowers, kept, false);
 				}
 				else if (plan.AuxBaseline == 0)
 				{
 					moveGroup(plan.Members, pRally, 5.0);
 
-					if (enemyNear == 0 && Unsorted::CurrentFrame - plan.StartFrame >= 900)
-						finishPlan(NeuralPlanId::HoldUnderTowers, false, false); // They never came.
-					else if (plan.AuxPeak > 0 && (enemyNear * 10 <= plan.AuxPeak * 6 || strength * 10 >= enemyNear * 12))
+					// After a counterattack that fell back, only a group stronger than what is left
+					// goes out again.
+					if ((!plan.Arrived && enemyNear * 10 <= plan.AuxPeak * 6) || strength * 10 >= enemyNear * 12)
 						plan.AuxBaseline = 1;
 				}
 				else
 				{
-					const CellStruct enemyCenter = seenEnemyCentroidNear(homeCell, 30.0, 150);
+					const CellStruct enemyCenter = seenGroundEnemyCentroidNear(homeCell, HoldTowersEnemyCells, 150);
 
 					// The counterattack meets more than it can take: back under the towers.
-					if (enemyCenter != CellStruct::Empty && seenEnemyValueNear(enemyCenter, 10.0, 150) * 10 > strength * 12)
+					if (enemyCenter != CellStruct::Empty && seenGroundEnemyValueNear(enemyCenter, 10.0, 150) * 10 > strength * 12)
 					{
 						plan.AuxBaseline = 0;
-						plan.AuxPeak = enemyNear;
+						plan.Arrived = true;
 						moveGroup(plan.Members, pRally, 5.0);
 					}
-					else if (enemyCenter == CellStruct::Empty)
+					else if (enemyCenter != CellStruct::Empty)
 					{
-						finishPlan(NeuralPlanId::HoldUnderTowers, true, false);
-					}
-					else
 						attackMoveGroup(plan.Members, MapClass::Instance.TryGetCellAt(enemyCenter));
+					}
 				}
 			}
-			else if (planReady(NeuralPlanId::HoldUnderTowers) && ownHomeDefenses >= 2)
+			else if (planReady(NeuralPlanId::HoldUnderTowers))
 			{
-				const int enemyNear = seenEnemyValueNear(homeCell, 30.0, 150);
-				std::vector<FootClass*> army;
+				auto const hold = findHoldTowersCase();
 
-				for (auto const& [uid, pFoot] : ownFoots)
+				if (!hold.Army.empty() && shouldTryStart(NeuralPlanId::HoldUnderTowers, 380))
 				{
-					if (isArmedGroundFoot(pFoot) && !macro.PlanMembers.contains(uid) && ObjectZone(pFoot, MovementZone::Normal) == homeZone
-						&& pFoot->GetMapCoords().DistanceFrom(homeCell) <= 40.0)
-					{
-						army.push_back(pFoot);
-					}
-				}
+					startPlan(NeuralPlanId::HoldUnderTowers, hold.Army, homeCell, hold.Rally->MapCoords, 0, 3600);
+					auto& started = planOf(NeuralPlanId::HoldUnderTowers);
+					started.AuxBaseline = 0;
+					started.AuxPeak = hold.EnemyNear;
 
-				std::sort(army.begin(), army.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
-				const int ourValue = feetValue(army);
-
-				// Hold just behind the hottest approach our towers cover (route heat), else at the
-				// middle of our home defenses.
-				CellClass* pRally = nullptr;
-
-				if (auto const pHoldSpot = BestRouteHoldSpot(pHouse, homeCell, 26))
-					pRally = landCellInZone(pointAlong(pHoldSpot->Cell, homeCell, 4.0, 0.0), homeZone, 4);
-
-				const bool rallyOnRoute = pRally != nullptr;
-
-				if (!pRally)
-					pRally = landCellInZone(ownDefenseCentroid, homeZone, 4);
-
-				const int utility = (pRally && !army.empty() && enemyNear >= 120 && enemyNear * 10 > ourValue * 13) ? 380 : -1000;
-
-				if (utility > 0 && shouldTryStart(NeuralPlanId::HoldUnderTowers, utility))
-				{
-					startPlan(NeuralPlanId::HoldUnderTowers, army, homeCell, pRally->MapCoords, 0, 3600);
-					planOf(NeuralPlanId::HoldUnderTowers).AuxBaseline = 0;
-
-					if (rallyOnRoute)
+					if (hold.RallyOnRoute)
 						CountDecision(NeuralDecision::RouteAmbushSpot, pHouse->ArrayIndex);
+
+					// TEMP diagnostic: what starts a hold (20 per match): the ground force near home and
+					// how much of it stands still, what else is near (aircraft, ships), our army and the
+					// defenses at the rally.
+					static int holdLogSerial = -1;
+					static int holdLogCount = 0;
+
+					if (holdLogSerial != NeuralMatchSerial)
+					{
+						holdLogSerial = NeuralMatchSerial;
+						holdLogCount = 0;
+					}
+
+					if (holdLogCount++ < 20)
+					{
+						int defenses = 0;
+						int defenseValue = 0;
+
+						for (auto const pBld : pHouse->Buildings)
+						{
+							if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->IsBaseDefense
+								&& pBld->GetMapCoords().DistanceFrom(hold.Rally->MapCoords) <= 10.0)
+							{
+								defenses++;
+								defenseValue += GetCombatValueOfType(pBld->Type, false);
+							}
+						}
+
+						Debug::Log("[NeuralAI] House %d holdUnderTowers start DIAG: ground enemy %d (standing %d) within %d cells of home, air or naval %d; "
+							"army %d worth %d; %d defenses worth %d within 10 cells of the rally, rally %d cells from home (route %d), frame %d.\n",
+							houseIdx, hold.EnemyNear, standingGroundEnemyValueNear(homeCell, HoldTowersEnemyCells), static_cast<int>(HoldTowersEnemyCells),
+							seenEnemyValueNear(homeCell, HoldTowersEnemyCells, 150) - hold.EnemyNear, static_cast<int>(hold.Army.size()),
+							feetValue(hold.Army), defenses, defenseValue, static_cast<int>(hold.Rally->MapCoords.DistanceFrom(homeCell)),
+							hold.RallyOnRoute ? 1 : 0, Unsorted::CurrentFrame);
+					}
 				}
 			}
 		}
@@ -7058,21 +7371,35 @@ namespace
 		}
 
 		// ---------------------------------------------------------------- Plan 19: Preemptive Strike
-		// An enemy force is seen gathering outside its defenses (and not yet at our base): hit it
-		// with a stronger idle group before it is complete. AuxBaseline = its value at the start.
+		// An enemy force is seen gathering outside its defenses, standing and not yet at our base
+		// (findPreemptiveCase): the free units nearest to it meet PreemptiveStageCells short of it
+		// (StagingCell) and strike it together (Progress 1) before it is complete. AuxBaseline = its
+		// value at the start, AnchorCell = where it was gathering.
 		{
 			auto& plan = planOf(NeuralPlanId::PreemptiveStrike);
 
 			if (plan.Active)
 			{
-				const CellStruct current = seenEnemyCentroidNear(plan.TargetCell, 10.0, 150);
+				const CellStruct current = seenGroundEnemyCentroidNear(plan.TargetCell, 10.0, 150);
+				double nearestToForce = 1.0e9;
+
+				if (current != CellStruct::Empty)
+				{
+					for (const DWORD uid : plan.Members)
+					{
+						if (auto const pMember = findOwnFoot(uid))
+							nearestToForce = std::min(nearestToForce, pMember->GetMapCoords().DistanceFrom(current));
+					}
+				}
 
 				// The plan follows the force PreemptiveLeashCells from where it gathered and no
-				// farther: a force that has set out is no longer a gathering, and the group that
-				// followed it ended across the map (37 of 102 plans ran out of time 27 to 107 cells
-				// from a target that kept moving, 50 more were beaten on the way, 2026-11-14).
+				// farther, unless it came at the group: a force that has set out elsewhere is no longer
+				// a gathering, and the group that followed it ended across the map (37 of 102 plans ran
+				// out of time 27 to 107 cells from a target that kept moving, 50 more were beaten on
+				// the way, 2026-11-14).
+				const bool engaged = nearestToForce <= PreemptiveEngageCells;
 				const bool forceLeft = current != CellStruct::Empty && plan.AnchorCell != CellStruct::Empty
-					&& current.DistanceFrom(plan.AnchorCell) > PreemptiveLeashCells;
+					&& current.DistanceFrom(plan.AnchorCell) > PreemptiveLeashCells && !engaged;
 
 				if (current != CellStruct::Empty && !forceLeft)
 					plan.TargetCell = current;
@@ -7081,15 +7408,20 @@ namespace
 				// along its way stays behind while its head is already fighting.
 				int membersAlive = 0;
 				int membersThere = 0;
+				int membersStaged = 0;
 
 				for (const DWORD uid : plan.Members)
 				{
 					if (auto const pMember = findOwnFoot(uid))
 					{
 						membersAlive++;
+						const CellStruct cell = pMember->GetMapCoords();
 
-						if (pMember->GetMapCoords().DistanceFrom(plan.TargetCell) <= 8.0)
+						if (cell.DistanceFrom(plan.TargetCell) <= 8.0)
 							membersThere++;
+
+						if (plan.StagingCell != CellStruct::Empty && cell.DistanceFrom(plan.StagingCell) <= PreemptiveStageNearCells)
+							membersStaged++;
 					}
 				}
 
@@ -7099,78 +7431,99 @@ namespace
 					plan.ArrivedFrame = Unsorted::CurrentFrame;
 				}
 
+				// Strike together: once two thirds of the group met at the staging spot, after
+				// PreemptiveStageWaitFrames, or at once when the fight has begun.
+				if (plan.Progress == 0 && (plan.StagingCell == CellStruct::Empty || membersStaged * 3 >= membersAlive * 2
+					|| Unsorted::CurrentFrame - plan.StartFrame >= PreemptiveStageWaitFrames || engaged))
+				{
+					plan.Progress = 1;
+				}
+
 				if (memberValue(plan) * 100 < plan.InitialValue * 40 || Unsorted::CurrentFrame >= plan.Deadline)
 					finishPlan(NeuralPlanId::PreemptiveStrike, false, true);
 				else if (forceLeft && !plan.Arrived)
 					finishPlan(NeuralPlanId::PreemptiveStrike, false, true); // It left before the group got there.
-				else if (plan.Arrived && seenEnemyValueNear(plan.TargetCell, 10.0, 150) * 10 <= plan.AuxBaseline * 4)
+				else if (plan.Arrived && seenGroundEnemyValueNear(plan.TargetCell, 10.0, 150) * 10 <= plan.AuxBaseline * 4)
 					finishPlan(NeuralPlanId::PreemptiveStrike, true, true);
+				else if (plan.Progress == 0)
+				{
+					auto const pStage = MapClass::Instance.TryGetCellAt(plan.StagingCell);
+
+					for (const DWORD uid : plan.Members)
+					{
+						auto const pFoot = findOrderableFoot(uid);
+
+						// A member already in a fight finishes it there.
+						if (!pFoot || !pStage || pFoot->Target)
+							continue;
+
+						// A member taken from a marching wave still has the wave's attack-move: it would walk
+						// on past the meeting spot and miss the strike order (attackMoveGroup leaves units on
+						// an attack-move alone).
+						if (pFoot->MegaMission == Mission::AttackMove)
+							pFoot->ClearMegaMissionData();
+
+						IssueMoveOrder(pFoot, pStage, 3.0);
+					}
+				}
 				else
+				{
 					attackMoveGroup(plan.Members, MapClass::Instance.TryGetCellAt(plan.TargetCell));
+				}
 			}
 			else if (planReady(NeuralPlanId::PreemptiveStrike))
 			{
-				CellStruct bestCenter = CellStruct::Empty;
-				int bestValue = 0;
-
-				for (auto const& [uid, seed] : macro.EnemySightings)
-				{
-					if (Unsorted::CurrentFrame - seed.LastSeenFrame > 150 || seed.NearOurBase || seed.Value < 20)
-						continue;
-
-					const int value = seenEnemyValueNear(seed.LastCoords, 8.0, 150);
-
-					// Ties broken by position so the pick does not depend on the map's iteration order.
-					if (value > bestValue
-						|| (value == bestValue && value > 0
-							&& (seed.LastCoords.X < bestCenter.X || (seed.LastCoords.X == bestCenter.X && seed.LastCoords.Y < bestCenter.Y))))
-					{
-						bestValue = value;
-						bestCenter = seed.LastCoords;
-					}
-				}
-
-				CellStruct clusterCenter = CellStruct::Empty;
-				std::vector<FootClass*> group;
-
-				if (bestValue >= 140)
-				{
-					clusterCenter = seenEnemyCentroidNear(bestCenter, 8.0, 150);
-
-					if (clusterCenter != CellStruct::Empty && zoneOf(clusterCenter) == homeZone
-						&& CountKnownEnemyDefensesNear(pHouse, clusterCenter, 10.0, false) == 0
-						&& clusterCenter.DistanceFrom(homeCell) > 22.0)
-					{
-						group = collectIdleGround(false);
-						group.resize(std::min<size_t>(group.size(), 12));
-
-						// Only a force the group reaches while it is still gathering.
-						int sumX = 0;
-						int sumY = 0;
-
-						for (auto const pFoot : group)
-						{
-							const CellStruct cell = pFoot->GetMapCoords();
-							sumX += cell.X;
-							sumY += cell.Y;
-						}
-
-						const int count = static_cast<int>(group.size());
-						const bool inReach = count > 0 && CellStruct { static_cast<short>(sumX / count), static_cast<short>(sumY / count) }
-							.DistanceFrom(clusterCenter) <= PreemptiveReachCells;
-
-						if (group.size() < 5 || !inReach || feetValue(group) * 100 < bestValue * 125)
-							group.clear();
-					}
-				}
-
-				const int utility = !group.empty() ? 320 : -1000;
+				auto const strike = findPreemptiveCase();
+				const int utility = !strike.Group.empty() ? 320 : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::PreemptiveStrike, utility))
 				{
-					startPlan(NeuralPlanId::PreemptiveStrike, group, clusterCenter, CellStruct::Empty, 0, 2400);
-					planOf(NeuralPlanId::PreemptiveStrike).AuxBaseline = bestValue;
-					planOf(NeuralPlanId::PreemptiveStrike).AnchorCell = clusterCenter;
+					// The meeting spot: PreemptiveStageCells short of the force, on the side the group
+					// comes from.
+					int sumX = 0;
+					int sumY = 0;
+					int farthest = 0;
+
+					for (auto const pFoot : strike.Group)
+					{
+						const CellStruct cell = pFoot->GetMapCoords();
+						sumX += cell.X;
+						sumY += cell.Y;
+						farthest = std::max(farthest, static_cast<int>(cell.DistanceFrom(strike.Center)));
+					}
+
+					const int count = static_cast<int>(strike.Group.size());
+					const CellStruct groupCenter { static_cast<short>(sumX / count), static_cast<short>(sumY / count) };
+					auto const pStage = landCellInZone(pointAlong(strike.Center, groupCenter, PreemptiveStageCells, 0.0), homeZone, 3);
+
+					startPlan(NeuralPlanId::PreemptiveStrike, strike.Group, strike.Center, pStage ? pStage->MapCoords : CellStruct::Empty, 0, 2400);
+					auto& started = planOf(NeuralPlanId::PreemptiveStrike);
+
+					if (started.Active)
+					{
+						started.AuxBaseline = strike.Value;
+						started.AnchorCell = strike.Center;
+
+						// TEMP diagnostic: what a strike goes for (20 per match).
+						static int strikeLogSerial = -1;
+						static int strikeLogCount = 0;
+
+						if (strikeLogSerial != NeuralMatchSerial)
+						{
+							strikeLogSerial = NeuralMatchSerial;
+							strikeLogCount = 0;
+						}
+
+						if (strikeLogCount++ < 20)
+						{
+							Debug::Log("[NeuralAI] House %d preemptiveStrike start DIAG: force %d (standing %d) at (%d,%d), %d cells from home; "
+								"group %d worth %d, centre %d cells from it, farthest %d; staging %d cells from it, frame %d.\n",
+								houseIdx, strike.Value, strike.Standing, strike.Center.X, strike.Center.Y,
+								static_cast<int>(strike.Center.DistanceFrom(homeCell)), count, feetValue(strike.Group),
+								static_cast<int>(groupCenter.DistanceFrom(strike.Center)), farthest,
+								pStage ? static_cast<int>(pStage->MapCoords.DistanceFrom(strike.Center)) : -1, Unsorted::CurrentFrame);
+						}
+					}
 				}
 			}
 		}
