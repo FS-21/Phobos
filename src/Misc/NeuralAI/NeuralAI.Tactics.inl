@@ -842,6 +842,86 @@ namespace
 			}
 		}
 
+		// Two-way traffic with an allied house in a narrow passage (user, match #10077, Army of the
+		// Potomac: an ally's soldiers going east to garrison a building and our tanks going west held
+		// each other on a bridge for minutes, each house making only its own units give way). Allied
+		// units within JamAlliedFlowCells heading against the block are the other side: when they
+		// outnumber it (on a tie the house with the higher index), the block backs off like the smaller
+		// side of our own two-way traffic. The ally's AI takes the mirror decision for its units.
+		int alliedYielded = 0;
+
+		if (narrow && wantLen >= 0.3 * n)
+		{
+			int alliedAgainst = 0;
+			int lowestAlliedIndex = INT_MAX;
+
+			auto const countAllied = [&](FootClass* pOther)
+			{
+				if (!pOther || !pOther->IsAlive || pOther->InLimbo || pOther->IsInAir() || !pOther->Owner || pOther->Owner == pHouse
+					|| !pHouse->IsAlliedWith(pOther->Owner))
+				{
+					return;
+				}
+
+				const CellStruct otherCell = pOther->GetMapCoords();
+				AbstractClass* const pOtherDest = pOther->Destination ? pOther->Destination : pOther->MegaDestination;
+
+				if (!pOtherDest || otherCell.DistanceFrom(center) > JamAlliedFlowCells)
+					return;
+
+				const CellStruct otherGoal = CellClass::Coord2Cell(pOtherDest->GetCoords());
+				const double len = std::max(1.0, otherCell.DistanceFrom(otherGoal));
+
+				if (((otherGoal.X - otherCell.X) * avgX + (otherGoal.Y - otherCell.Y) * avgY) / len < -0.3)
+				{
+					++alliedAgainst;
+					lowestAlliedIndex = std::min(lowestAlliedIndex, pOther->Owner->ArrayIndex);
+				}
+			};
+
+			for (auto const pUnit : UnitClass::Array)
+				countAllied(pUnit);
+
+			for (auto const pInf : InfantryClass::Array)
+				countAllied(pInf);
+
+			if (alliedAgainst > n || (alliedAgainst == n && alliedAgainst > 0 && pHouse->ArrayIndex > lowestAlliedIndex))
+			{
+				for (auto const& [pHeld, want] : block)
+				{
+					FootClass* const pFoot = pHeld ? pHeld->Foot : nullptr;
+
+					if (yielded + alliedYielded >= 12 || !pFoot || !pFoot->IsAlive || pFoot->InLimbo || left.contains(pFoot))
+						continue;
+
+					auto pCell = FindClearingCell(pFoot, center, 8, 14, want.first, want.second, occupied, taken);
+
+					if (!pCell)
+						pCell = FindClearingCell(pFoot, center, 16, 26, want.first, want.second, occupied, taken);
+
+					if (pCell)
+					{
+						taken.push_back(pCell->MapCoords);
+						pFoot->ClearMegaMissionData();
+						pFoot->SetTarget(nullptr);
+						pFoot->SetDestination(nullptr, true);
+
+						if (IssueMoveOrder(pFoot, pCell, 0.0))
+						{
+							++alliedYielded;
+							left.insert(pFoot);
+						}
+					}
+				}
+
+				if (alliedYielded > 0)
+				{
+					Debug::Log("[NeuralAI] Frame %d | House #%d jam at (%d,%d): %d of %d held units back off for %d allied units coming the other way\n",
+						now, pHouse->ArrayIndex, center.X, center.Y, alliedYielded, n, alliedAgainst);
+				}
+			}
+		}
+
 		// Ships in the block take a leg of a real water route (GroundRouteHop: cell by cell, buildings
 		// block) to their destination: match #7061, Fludded Recources, 15 ships held for minutes in a
 		// channel our own naval yard closed, with open sea all around the island.
@@ -879,14 +959,14 @@ namespace
 				now, pHouse->ArrayIndex, center.X, center.Y, detoured);
 		}
 
-		if (moved > 0 || gaveUp > 0 || yielded > 0 || detoured > 0 || rerouted > 0)
+		if (moved > 0 || gaveUp > 0 || yielded > 0 || detoured > 0 || rerouted > 0 || alliedYielded > 0)
 		{
 			macro.LastJamBreakFrame = now;
 
 			if (moved > 0 || gaveUp > 0)
 				CountDecision(NeuralDecision::JamCleared, pHouse->ArrayIndex);
 
-			if (yielded > 0)
+			if (yielded > 0 || alliedYielded > 0)
 				CountDecision(NeuralDecision::JamYielded, pHouse->ArrayIndex);
 
 			if (rerouted > 0)
