@@ -178,14 +178,17 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// Common-sense vetoes: an expert that cannot do its job here is never chosen, whatever the
 	// learned bias says. Airforce with no air work (no armed aircraft, no target or enemy air it
-	// could answer, unless archetype 6 can still build its air force); Urban with no building to
-	// occupy, no garrison and no allied coalition; Economy with no trouble to fix; Expansion with
-	// no free field it knows and can take; Special Operations with nothing to capture, spy or bridge.
+	// could answer); Urban with no building to occupy, no garrison and no allied coalition; Economy
+	// with no trouble to fix; Expansion with no free field it knows and can take; Special
+	// Operations with nothing to capture, spy or bridge. Their own archetypes are no exception: the
+	// airfields, strike craft, garrisons and spies of archetypes 6, 7 and 1 come from the archetype
+	// priors whoever is in charge, and an expert with no work only held control (Expert 4 ran 18%
+	// of the ticks of archetype 1 houses, 6 to 7% of the others).
 	std::array<bool, 10> vetoed {};
 	vetoed[0] = economyMacro.EconomyTrouble == 0;
-	vetoed[4] = specOpsOpportunity == 0 && pExt->NeuralAI_Archetype != 1;
-	vetoed[8] = airForceOpportunity == 0 && (pExt->NeuralAI_Archetype != 6 || !HouseCanEverFieldAircraft(pHouse));
-	vetoed[9] = urbanOpportunity == 0 && pExt->NeuralAI_Archetype != 7;
+	vetoed[4] = specOpsOpportunity == 0;
+	vetoed[8] = airForceOpportunity == 0;
+	vetoed[9] = urbanOpportunity == 0;
 	vetoed[6] = economyMacro.ExpansionOpportunity == 0;
 
 	const int curArch = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);

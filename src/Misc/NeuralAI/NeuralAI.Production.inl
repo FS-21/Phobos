@@ -2302,11 +2302,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (ownedWarFactories == 0)
 		{
+			// A war factory whose placement just failed (in its cooldown) holds nothing back: the
+			// towers and refineries that wait for it would wait for a factory that cannot stand.
+			auto const& placementCooldowns = GetMacroState(pHouse).BuildingPlacementCooldownUntilFrame;
+
 			for (auto const pFactoryType : BuildingTypeClass::Array)
 			{
 				if (pFactoryType && pFactoryType->Factory == AbstractType::UnitType && !pFactoryType->Naval
 					&& !pFactoryType->UndeploysInto && CanBuildUnderHumanRules(pHouse, pFactoryType))
 				{
+					auto const cooldown = placementCooldowns.find(pFactoryType->ArrayIndex);
+
+					if (cooldown != placementCooldowns.end() && Unsorted::CurrentFrame < cooldown->second)
+						continue;
+
 					groundWarFactoryBuildableNow = true;
 					break;
 				}
