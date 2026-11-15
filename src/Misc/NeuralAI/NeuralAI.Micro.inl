@@ -5,6 +5,7 @@ namespace
 {
 	// Defined in NeuralAI.Scouting.inl.
 	bool IsActiveScout(HouseClass* pHouse, DWORD uid);
+	CellStruct PickRevealTarget(HouseClass* pHouse, int radius);
 }
 
 // InfantryClass::Scatter runs the locomotor right away (0x51D478), so a scattered unit can leave its
@@ -15719,13 +15720,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 
-				// E) Reconnaissance Superweapons (Psychic Reveal / Spy Plane): Uncover
-				// shrouded enemy base candidates!
-				if (swType == SuperWeaponType::PsychicReveal || swType == SuperWeaponType::SpyPlane)
+				// E) Reconnaissance Superweapons (Psychic Reveal / Spy Plane): where the revealed area
+				// teaches the most (PickRevealTarget), else they wait. A rectangle counts as the disc
+				// of its mean half side, a spy plane's look as 10 cells; a reveal of the whole map
+				// goes anywhere. A SpyPlane type that sends an air strike (SpyPlane.Mission=Attack)
+				// is aimed as an offensive one below.
+				if (swType == SuperWeaponType::PsychicReveal
+					|| (swType == SuperWeaponType::SpyPlane && GetSWTargeting(pSuper->Type).SpyPlaneLooks))
 				{
-					const CellStruct reconCell = pFallbackEnemyCell
+					int height = -1;
+					const double range = swType == SuperWeaponType::PsychicReveal ? GetPsychicRevealRange(pSuper->Type, height) : 10.0;
+					const CellStruct anyCell = pFallbackEnemyCell
 						? pFallbackEnemyCell->MapCoords
-						: (pVisibleEnemyBld ? pVisibleEnemyBld->GetMapCoords() : CellStruct::Empty);
+						: (pVisibleEnemyBld ? pVisibleEnemyBld->GetMapCoords() : homeCoords);
+					const CellStruct reconCell = range < 0.0
+						? anyCell
+						: PickRevealTarget(pHouse, static_cast<int>(height > 0 ? (range + height) / 4.0 : range));
+
 					if (reconCell != CellStruct::Empty)
 					{
 						pSuper->Launch(reconCell, false);

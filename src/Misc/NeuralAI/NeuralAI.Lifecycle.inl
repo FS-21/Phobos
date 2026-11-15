@@ -1271,11 +1271,10 @@ void NeuralAI::OnSuperWeaponLaunched(SuperClass* pSuper, const CellStruct& cell)
 	if (!pCell)
 		return;
 
-	auto const& aim = GetSWTargeting(pSuper->Type);
-	const bool rangeSet = aim.RangeWidthOrRadius >= 0.0f || aim.RangeHeight >= 0;
-	const double range = rangeSet ? aim.RangeWidthOrRadius : std::min(RulesClass::Instance->PsychicRevealRadius, 10);
+	int height = -1;
+	const double range = GetPsychicRevealRange(pSuper->Type, height);
 
-	MarkAreaReveal(pSuper->Owner, pCell->GetCoordsWithBridge(), range, rangeSet ? aim.RangeHeight : -1, true);
+	MarkAreaReveal(pSuper->Owner, pCell->GetCoordsWithBridge(), range, height, true);
 }
 
 void NeuralAI::OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed)
