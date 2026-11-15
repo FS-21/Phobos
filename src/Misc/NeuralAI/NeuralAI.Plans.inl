@@ -2852,9 +2852,10 @@ namespace
 		};
 
 		// Enemy strength a ground group meets on its straight way from `from` to a target: the known
-		// defenses and the units seen not longer ago than maxAge within PlanStrikeGuardCells of the
-		// target or of the last PlanStrikeApproachCells of the way, each counted once.
-		auto knownEnemyStrengthOnWay = [&](const CellStruct& from, const CellStruct& to, int maxAge) -> int
+		// defenses (unless withDefenses is false) and the units seen not longer ago than maxAge within
+		// PlanStrikeGuardCells of the target or of the last PlanStrikeApproachCells of the way, each
+		// counted once.
+		auto knownEnemyStrengthOnWay = [&](const CellStruct& from, const CellStruct& to, int maxAge, bool withDefenses = true) -> int
 		{
 			std::vector<CellStruct> points { to };
 			const double length = from.DistanceFrom(to);
@@ -2884,7 +2885,7 @@ namespace
 
 			for (auto const pBld : knownEnemyBuildingList)
 			{
-				if (isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense && onWay(pBld->GetMapCoords()))
+				if (withDefenses && isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense && onWay(pBld->GetMapCoords()))
 					strength += GetCombatValueOfType(pBld->Type, false);
 			}
 
@@ -9462,6 +9463,26 @@ namespace
 				}
 				else
 				{
+					// The escorts wait behind the guns, out of the shelled defense's reach + 1.5 cells
+					// and out of every other known one's, and an escort that comes into one (chasing
+					// what came out of the base, or parked at the edge) drops its target and goes back
+					// there. They stood around the spot itself, which is only 2.5 cells out of the
+					// defense's reach, and were left to their own targets: in the focus batch of
+					// 2026-11-15 141 of 342 escorts lost died within the reach of the defense being
+					// shelled, 76 of them at its edge (within a cell) and 65 deeper in, 121 with enemy
+					// units seen near.
+					const int defenseReach = GroundRangeOf(pDefense->Type);
+					auto inEscortDanger = [&](const CellStruct& cell)
+					{
+						return pDefense->GetMapCoords().DistanceFrom(cell) * Unsorted::LeptonsPerCell
+							<= defenseReach + RollingSiegeEscortMarginCells * Unsorted::LeptonsPerCell || inKnownDefenseReach(cell, pDefense);
+					};
+
+					auto pEscortPost = landCellInZone(pointAlong(plan.StagingCell, homeCell, RollingSiegeEscortBackCells, 0.0), homeZone, 2);
+
+					if (!pEscortPost || inEscortDanger(pEscortPost->MapCoords))
+						pEscortPost = pStage;
+
 					// The escorts and the guns march as one column to the spot (columnMovingOn).
 					for (const DWORD uid : columnMovingOn(plan.Members, plan.StagingCell))
 					{
@@ -9488,13 +9509,24 @@ namespace
 								pFoot->QueueMission(Mission::Attack, true);
 							}
 						}
-						else if (pFoot->Target == nullptr || (isArtillery && !inPlace))
+						else if (isArtillery)
 						{
-							// Escorts and AA stay with the battery, which moves on as one.
-							if (isArtillery && !outOfReach && pFoot->Target)
+							if (!outOfReach && pFoot->Target)
 								pFoot->SetTarget(nullptr);
 
-							IssueMoveOrder(pFoot, pStage, isArtillery ? (outOfReach ? 2.0 : 0.5) : 4.0);
+							IssueMoveOrder(pFoot, pStage, outOfReach ? 2.0 : 0.5);
+						}
+						else if (inEscortDanger(pFoot->GetMapCoords()))
+						{
+							if (pFoot->Target)
+								pFoot->SetTarget(nullptr);
+
+							IssueMoveOrder(pFoot, pEscortPost);
+						}
+						else if (pFoot->Target == nullptr)
+						{
+							// Escorts and AA stay with the battery, which moves on as one.
+							IssueMoveOrder(pFoot, pEscortPost, RollingSiegeEscortSpreadCells);
 						}
 					}
 				}
@@ -9540,9 +9572,22 @@ namespace
 
 				if (artillery.size() >= 3 && groundEscorts >= RollingSiegeMinEscorts)
 				{
-					first = pickNextDefense(homeCell, 1e9, artilleryRange, groupValueOf(artillery) + groupValueOf(escorts));
+					const int batteryValue = groupValueOf(artillery) + groupValueOf(escorts);
+					first = pickNextDefense(homeCell, 1e9, artilleryRange, batteryValue);
 
-					// No defense with a safe spot: the search waits like a held-back raid.
+					// The battery outranges the defenses, not the units that guard the way in: it goes
+					// only when it is worth PlanStrikeAdvantagePercent of the enemy units seen near its
+					// spot and on the last stretch of its way, the defenses left out (as the other
+					// strikes weigh their way in). In the focus batch of 2026-11-15 222 of the 530
+					// members lost died on the way, with a median 78% of it done and 182 of them with
+					// enemy units seen near, and the watchdog turned 198 of 347 plans back.
+					if (first.first && batteryValue * 100
+						< knownEnemyStrengthOnWay(homeCell, first.second->MapCoords, PlanStrikeGuardFrames, false) * PlanStrikeAdvantagePercent)
+					{
+						first = { nullptr, nullptr };
+					}
+
+					// No defense with a safe spot and a way in: the search waits like a held-back raid.
 					if (!first.first)
 						macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::RollingSiege)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
 				}
