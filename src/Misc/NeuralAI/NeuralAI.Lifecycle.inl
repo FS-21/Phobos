@@ -1244,6 +1244,13 @@ void NeuralAI::OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled)
 //   the match, unless we hit back a third as hard in that window (a skirmish of units clashing at
 //   the shared target); anything less (splash, stray hits while both fire at the target) is collateral, and
 //   the truce ends without blame once it passes CollateralDamageLimit within CollateralWindowFrames.
+// The engine shrouds the whole map again for pHouse, or for every house with nullptr (see
+// NeuralMapShroudState).
+void NeuralAI::OnMapReshroud(HouseClass* pHouse)
+{
+	MarkMapReshroud(pHouse);
+}
+
 void NeuralAI::OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed)
 {
 	if (!pVictim || !pAttacker || pVictim == pAttacker || damage <= 0)
