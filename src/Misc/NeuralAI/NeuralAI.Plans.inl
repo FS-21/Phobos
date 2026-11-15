@@ -2022,17 +2022,42 @@ namespace
 		// Plans whose learned gate opened this tick and that have not started yet (telemetry NoGroup).
 		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> gateOpenedUnstarted {};
 
+		// Bait Ambush and Feint play against human players only (user, 2026-11-15): they need an
+		// enemy that chases a lone attacker or pulls its defenders to it, which a human does and
+		// the Neural AI hardly ever does (its intercept answered 19 of 666 baits and 4 of 80
+		// decoys), so against an AI they went well in 7% and 6% of the plans.
+		bool humanEnemy = false;
+
+		for (auto const pOther : HouseClass::Array)
+		{
+			if (pOther && pOther != pHouse && pOther->IsControlledByHuman() && !pOther->IsNeutral() && !pOther->IsObserver()
+				&& !pOther->IsInitiallyObserver() && !pOther->Defeated && !pHouse->IsAlliedWith(pOther))
+			{
+				humanEnemy = true;
+				break;
+			}
+		}
+
+		// Whether a deception plan may aim at a building of this house: a human's, or anyone's in
+		// a training focus match that asks for the plan (to measure it against the Neural AI).
+		auto deceptionTargets = [](NeuralPlanId id, const HouseClass* pOwner) -> bool
+		{
+			return TrainingFocus().Plans[static_cast<size_t>(id)] || (pOwner && pOwner->IsControlledByHuman());
+		};
+
 		// Shelved plans start only in a training focus match that asks for them: Airborne Front
 		// went well in none of 34 plans behind a main attack and is being redesigned (user,
 		// 2026-11-14), so ordinary matches do not spend units or learning on it meanwhile. Bait
-		// Ambush (12% of 678) and Feint (3% of 122) were built on enemies that chase a lone unit
-		// or pull their defenders for nothing, and are being redesigned too (user, 2026-11-15).
-		auto planShelved = [](NeuralPlanId id) -> bool
+		// Ambush and Feint are shelved too unless a human enemy is in the match.
+		auto planShelved = [humanEnemy](NeuralPlanId id) -> bool
 		{
-			constexpr NeuralPlanId shelved[] = { NeuralPlanId::AirborneFront, NeuralPlanId::BaitAmbush, NeuralPlanId::Feint };
+			if (TrainingFocus().Plans[static_cast<size_t>(id)])
+				return false;
 
-			return std::find(std::begin(shelved), std::end(shelved), id) != std::end(shelved)
-				&& !TrainingFocus().Plans[static_cast<size_t>(id)];
+			if (id == NeuralPlanId::BaitAmbush || id == NeuralPlanId::Feint)
+				return !humanEnemy;
+
+			return id == NeuralPlanId::AirborneFront;
 		};
 
 		auto shouldTryStart = [&](NeuralPlanId id, int contextUtility) -> bool
@@ -2668,9 +2693,10 @@ namespace
 		};
 
 		// Enemy strength a ground group meets on its straight way from `from` to a target: the known
-		// defenses and the units seen not longer ago than maxAge within PlanStrikeGuardCells of the
-		// target or of the last PlanStrikeApproachCells of the way, each counted once.
-		auto knownEnemyStrengthOnWay = [&](const CellStruct& from, const CellStruct& to, int maxAge) -> int
+		// defenses (unless withDefenses is false) and the units seen not longer ago than maxAge within
+		// PlanStrikeGuardCells of the target or of the last PlanStrikeApproachCells of the way, each
+		// counted once.
+		auto knownEnemyStrengthOnWay = [&](const CellStruct& from, const CellStruct& to, int maxAge, bool withDefenses = true) -> int
 		{
 			std::vector<CellStruct> points { to };
 			const double length = from.DistanceFrom(to);
@@ -2700,7 +2726,7 @@ namespace
 
 			for (auto const pBld : knownEnemyBuildingList)
 			{
-				if (isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense && onWay(pBld->GetMapCoords()))
+				if (withDefenses && isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense && onWay(pBld->GetMapCoords()))
 					strength += GetCombatValueOfType(pBld->Type, false);
 			}
 
@@ -2895,6 +2921,13 @@ namespace
 				}
 
 				std::vector<FootClass*> idleArmy;
+
+				// Only a human is drawn away from the main attack (deceptionTargets).
+				if (frontOwner >= 0 && frontOwner < HouseClass::Array.Count
+					&& !deceptionTargets(NeuralPlanId::Feint, HouseClass::Array.GetItem(frontOwner)))
+				{
+					frontOwner = -1;
+				}
 
 				if (frontOwner >= 0)
 				{
@@ -4463,7 +4496,6 @@ namespace
 		{
 			CellStruct Center { CellStruct::Empty };
 			int Value { 0 };
-			int Standing { 0 };
 			std::vector<FootClass*> Group {};
 		};
 
@@ -4538,7 +4570,6 @@ namespace
 
 			result.Center = center;
 			result.Value = value;
-			result.Standing = bestStanding;
 			result.Group = std::move(group);
 
 			return result;
@@ -6396,41 +6427,6 @@ namespace
 
 					if (hold.RallyOnRoute)
 						CountDecision(NeuralDecision::RouteAmbushSpot, pHouse->ArrayIndex);
-
-					// TEMP diagnostic: what starts a hold (20 per match): the ground force near home and
-					// how much of it stands still, what else is near (aircraft, ships), our army and the
-					// defenses at the rally.
-					static int holdLogSerial = -1;
-					static int holdLogCount = 0;
-
-					if (holdLogSerial != NeuralMatchSerial)
-					{
-						holdLogSerial = NeuralMatchSerial;
-						holdLogCount = 0;
-					}
-
-					if (holdLogCount++ < 20)
-					{
-						int defenses = 0;
-						int defenseValue = 0;
-
-						for (auto const pBld : pHouse->Buildings)
-						{
-							if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->IsBaseDefense
-								&& pBld->GetMapCoords().DistanceFrom(hold.Rally->MapCoords) <= 10.0)
-							{
-								defenses++;
-								defenseValue += GetCombatValueOfType(pBld->Type, false);
-							}
-						}
-
-						Debug::Log("[NeuralAI] House %d holdUnderTowers start DIAG: ground enemy %d (standing %d) within %d cells of home, air or naval %d; "
-							"army %d worth %d; %d defenses worth %d within 10 cells of the rally, rally %d cells from home (route %d), frame %d.\n",
-							houseIdx, hold.EnemyNear, standingGroundEnemyValueNear(homeCell, HoldTowersEnemyCells), static_cast<int>(HoldTowersEnemyCells),
-							seenEnemyValueNear(homeCell, HoldTowersEnemyCells, 150) - hold.EnemyNear, static_cast<int>(hold.Army.size()),
-							feetValue(hold.Army), defenses, defenseValue, static_cast<int>(hold.Rally->MapCoords.DistanceFrom(homeCell)),
-							hold.RallyOnRoute ? 1 : 0, Unsorted::CurrentFrame);
-					}
 				}
 			}
 		}
@@ -7360,14 +7356,12 @@ namespace
 					// comes from.
 					int sumX = 0;
 					int sumY = 0;
-					int farthest = 0;
 
 					for (auto const pFoot : strike.Group)
 					{
 						const CellStruct cell = pFoot->GetMapCoords();
 						sumX += cell.X;
 						sumY += cell.Y;
-						farthest = std::max(farthest, static_cast<int>(cell.DistanceFrom(strike.Center)));
 					}
 
 					const int count = static_cast<int>(strike.Group.size());
@@ -7381,26 +7375,6 @@ namespace
 					{
 						started.AuxBaseline = strike.Value;
 						started.AnchorCell = strike.Center;
-
-						// TEMP diagnostic: what a strike goes for (20 per match).
-						static int strikeLogSerial = -1;
-						static int strikeLogCount = 0;
-
-						if (strikeLogSerial != NeuralMatchSerial)
-						{
-							strikeLogSerial = NeuralMatchSerial;
-							strikeLogCount = 0;
-						}
-
-						if (strikeLogCount++ < 20)
-						{
-							Debug::Log("[NeuralAI] House %d preemptiveStrike start DIAG: force %d (standing %d) at (%d,%d), %d cells from home; "
-								"group %d worth %d, centre %d cells from it, farthest %d; staging %d cells from it, frame %d.\n",
-								houseIdx, strike.Value, strike.Standing, strike.Center.X, strike.Center.Y,
-								static_cast<int>(strike.Center.DistanceFrom(homeCell)), count, feetValue(strike.Group),
-								static_cast<int>(groupCenter.DistanceFrom(strike.Center)), farthest,
-								pStage ? static_cast<int>(pStage->MapCoords.DistanceFrom(strike.Center)) : -1, Unsorted::CurrentFrame);
-						}
 					}
 				}
 			}
@@ -7648,7 +7622,8 @@ namespace
 					for (auto const pBld : knownEnemyBuildingList)
 					{
 						if (!isKnownEnemyBuilding(pBld) || ObjectZone(pBld, MovementZone::Normal) != homeZone || pBld->Type->CanBeOccupied
-							|| pBld->Type->Insignificant || pBld->Type->UndeploysInto || underOurFire.contains(pBld))
+							|| pBld->Type->Insignificant || pBld->Type->UndeploysInto || underOurFire.contains(pBld)
+							|| !deceptionTargets(NeuralPlanId::BaitAmbush, pBld->Owner))
 						{
 							continue;
 						}
@@ -9321,6 +9296,26 @@ namespace
 				}
 				else
 				{
+					// The escorts wait behind the guns, out of the shelled defense's reach + 1.5 cells
+					// and out of every other known one's, and an escort that comes into one (chasing
+					// what came out of the base, or parked at the edge) drops its target and goes back
+					// there. They stood around the spot itself, which is only 2.5 cells out of the
+					// defense's reach, and were left to their own targets: in the focus batch of
+					// 2026-11-15 141 of 342 escorts lost died within the reach of the defense being
+					// shelled, 76 of them at its edge (within a cell) and 65 deeper in, 121 with enemy
+					// units seen near.
+					const int defenseReach = GroundRangeOf(pDefense->Type);
+					auto inEscortDanger = [&](const CellStruct& cell)
+					{
+						return pDefense->GetMapCoords().DistanceFrom(cell) * Unsorted::LeptonsPerCell
+							<= defenseReach + RollingSiegeEscortMarginCells * Unsorted::LeptonsPerCell || inKnownDefenseReach(cell, pDefense);
+					};
+
+					auto pEscortPost = landCellInZone(pointAlong(plan.StagingCell, homeCell, RollingSiegeEscortBackCells, 0.0), homeZone, 2);
+
+					if (!pEscortPost || inEscortDanger(pEscortPost->MapCoords))
+						pEscortPost = pStage;
+
 					// The escorts and the guns march as one column to the spot (columnMovingOn).
 					for (const DWORD uid : columnMovingOn(plan.Members, plan.StagingCell))
 					{
@@ -9347,13 +9342,24 @@ namespace
 								pFoot->QueueMission(Mission::Attack, true);
 							}
 						}
-						else if (pFoot->Target == nullptr || (isArtillery && !inPlace))
+						else if (isArtillery)
 						{
-							// Escorts and AA stay with the battery, which moves on as one.
-							if (isArtillery && !outOfReach && pFoot->Target)
+							if (!outOfReach && pFoot->Target)
 								pFoot->SetTarget(nullptr);
 
-							IssueMoveOrder(pFoot, pStage, isArtillery ? (outOfReach ? 2.0 : 0.5) : 4.0);
+							IssueMoveOrder(pFoot, pStage, outOfReach ? 2.0 : 0.5);
+						}
+						else if (inEscortDanger(pFoot->GetMapCoords()))
+						{
+							if (pFoot->Target)
+								pFoot->SetTarget(nullptr);
+
+							IssueMoveOrder(pFoot, pEscortPost);
+						}
+						else if (pFoot->Target == nullptr)
+						{
+							// Escorts and AA stay with the battery, which moves on as one.
+							IssueMoveOrder(pFoot, pEscortPost, RollingSiegeEscortSpreadCells);
 						}
 					}
 				}
@@ -9399,9 +9405,22 @@ namespace
 
 				if (artillery.size() >= 3 && groundEscorts >= RollingSiegeMinEscorts)
 				{
-					first = pickNextDefense(homeCell, 1e9, artilleryRange, groupValueOf(artillery) + groupValueOf(escorts));
+					const int batteryValue = groupValueOf(artillery) + groupValueOf(escorts);
+					first = pickNextDefense(homeCell, 1e9, artilleryRange, batteryValue);
 
-					// No defense with a safe spot: the search waits like a held-back raid.
+					// The battery outranges the defenses, not the units that guard the way in: it goes
+					// only when it is worth PlanStrikeAdvantagePercent of the enemy units seen near its
+					// spot and on the last stretch of its way, the defenses left out (as the other
+					// strikes weigh their way in). In the focus batch of 2026-11-15 222 of the 530
+					// members lost died on the way, with a median 78% of it done and 182 of them with
+					// enemy units seen near, and the watchdog turned 198 of 347 plans back.
+					if (first.first && batteryValue * 100
+						< knownEnemyStrengthOnWay(homeCell, first.second->MapCoords, PlanStrikeGuardFrames, false) * PlanStrikeAdvantagePercent)
+					{
+						first = { nullptr, nullptr };
+					}
+
+					// No defense with a safe spot and a way in: the search waits like a held-back raid.
 					if (!first.first)
 						macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::RollingSiege)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
 				}
@@ -9458,6 +9477,20 @@ namespace
 				{
 					const int defenseRange = GroundRangeOf(pDefense->Type);
 
+					// As Rolling Siege's escorts: they wait behind the guns, out of the defense's reach
+					// + RollingSiegeEscortMarginCells and of every other known one's, and one that gets
+					// into one drops its target and goes back.
+					auto inEscortDanger = [&](const CellStruct& cell)
+					{
+						return pDefense->GetMapCoords().DistanceFrom(cell) * Unsorted::LeptonsPerCell
+							<= defenseRange + RollingSiegeEscortMarginCells * Unsorted::LeptonsPerCell || inKnownDefenseReach(cell, pDefense);
+					};
+
+					auto pEscortPost = landCellInZone(pointAlong(plan.StagingCell, homeCell, RollingSiegeEscortBackCells, 0.0), homeZone, 2);
+
+					if (!pEscortPost || inEscortDanger(pEscortPost->MapCoords))
+						pEscortPost = pStage;
+
 					for (const DWORD uid : columnMovingOn(plan.Members, plan.StagingCell))
 					{
 						if (handleSiegeDeployMember(uid, pDefense, pStage))
@@ -9479,12 +9512,23 @@ namespace
 							if (pFoot->Target != pDefense)
 								OrderFootAttack(pFoot, pDefense);
 						}
-						else if (pFoot->Target == nullptr || (isGun && !inPlace))
+						else if (isGun)
 						{
-							if (isGun && !outOfReach && pFoot->Target)
+							if (!outOfReach && pFoot->Target)
 								pFoot->SetTarget(nullptr);
 
-							IssueMoveOrder(pFoot, pStage, isGun ? (outOfReach ? 2.0 : 0.5) : 4.0);
+							IssueMoveOrder(pFoot, pStage, outOfReach ? 2.0 : 0.5);
+						}
+						else if (inEscortDanger(pFoot->GetMapCoords()))
+						{
+							if (pFoot->Target)
+								pFoot->SetTarget(nullptr);
+
+							IssueMoveOrder(pFoot, pEscortPost);
+						}
+						else if (pFoot->Target == nullptr)
+						{
+							IssueMoveOrder(pFoot, pEscortPost, RollingSiegeEscortSpreadCells);
 						}
 					}
 				}
@@ -9539,8 +9583,10 @@ namespace
 					const size_t guns = group.size();
 					group.insert(group.end(), escorts.begin(), escorts.end());
 
-					// Not into a fight the raid watchdog would turn it back from at once: the units seen
-					// around the group as it sets out, or around its spot, against what it brings.
+					// Not into a fight the raid watchdog would turn it back from at once (the units seen
+					// around the group as it sets out outgun it), nor past more than it can take on the
+					// last stretch of its way in (the enemy units seen there, the defenses left out, as
+					// Rolling Siege weighs its way).
 					int strength = 0;
 					int sumX = 0;
 					int sumY = 0;
@@ -9554,10 +9600,11 @@ namespace
 
 					const CellStruct from { static_cast<short>(sumX / std::max<int>(1, static_cast<int>(group.size()))),
 						static_cast<short>(sumY / std::max<int>(1, static_cast<int>(group.size()))) };
-					const int threat = std::max(seenEnemyValueNear(from, PlanOutgunnedSightCells, PlanOutgunnedSightFrames),
-						seenEnemyValueNear(pStage->MapCoords, PlanStrikeGuardCells, PlanStrikeGuardFrames));
+					const int aroundGroup = seenEnemyValueNear(from, PlanOutgunnedSightCells, PlanOutgunnedSightFrames);
+					const int onWay = knownEnemyStrengthOnWay(from, pStage->MapCoords, PlanStrikeGuardFrames, false);
 
-					if (guns >= 2 && threat * 100 > strength * PlanOutgunnedRatioPercent)
+					if (guns >= 2 && (aroundGroup * 100 > strength * PlanOutgunnedRatioPercent
+						|| groupValueOf(group) * 100 < onWay * PlanStrikeAdvantagePercent))
 					{
 						// TEMP diagnostic: the batteries held back by the units around them (20 per match).
 						static int siegeHoldSerial = -1;
@@ -9571,8 +9618,9 @@ namespace
 
 						if (siegeHoldCount++ < 20)
 						{
-							Debug::Log("[NeuralAI] House %d plan siegeBattery not started: enemy %d seen around the group at (%d,%d) or its spot (%d,%d) against %d, frame %d.\n",
-								houseIdx, threat, from.X, from.Y, pStage->MapCoords.X, pStage->MapCoords.Y, strength, Unsorted::CurrentFrame);
+							Debug::Log("[NeuralAI] House %d plan siegeBattery not started: enemy %d seen around the group at (%d,%d) against %d, %d on its way to (%d,%d) against %d, frame %d.\n",
+								houseIdx, aroundGroup, from.X, from.Y, strength, onWay, pStage->MapCoords.X, pStage->MapCoords.Y,
+								groupValueOf(group), Unsorted::CurrentFrame);
 						}
 
 						macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::SiegeBattery)] = Unsorted::CurrentFrame + PlanGateRetryFrames;

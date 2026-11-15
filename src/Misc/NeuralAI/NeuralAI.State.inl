@@ -1716,6 +1716,12 @@ namespace
 	// home and to its side: straight toward home first, then 30 and 60 degrees to either side.
 	constexpr std::pair<double, double> RollingSiegeStageDirections[] = { { 1.0, 0.0 }, { 0.866, 0.5 }, { 0.866, -0.5 },
 		{ 0.5, 0.866 }, { 0.5, -0.866 } };
+	// Rolling Siege escorts wait RollingSiegeEscortBackCells behind the firing spot (toward home),
+	// within RollingSiegeEscortSpreadCells of that post, and one that comes within the reach of the
+	// shelled defense + RollingSiegeEscortMarginCells goes back to it.
+	constexpr double RollingSiegeEscortBackCells = 3.0;
+	constexpr double RollingSiegeEscortSpreadCells = 3.0;
+	constexpr double RollingSiegeEscortMarginCells = 1.5;
 	// Siege Battery: at most this many guns, and ground escorts as Rolling Siege's (one in
 	// PlanStrikeIdleShare of the idle ones, at least three when there are) up to this many. It went
 	// with three escorts at most: 80 of 117 failed plans lost their strength (2026-11-15).

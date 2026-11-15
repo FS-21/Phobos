@@ -8034,8 +8034,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		anyEnemyBuildingExists = true;
 
 		// Fallback wave targets only among buildings this house knows about.
-		const bool isKnownBuilding = pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pCell)
-			|| IsEnemyBuildingKnown(pHouse, pEnemyBld);
+		const bool isKnownBuilding = IsCellVisibleToAI(pHouse, pCell) || IsEnemyBuildingKnown(pHouse, pEnemyBld);
 
 		if (isKnownBuilding && bldCandScore > bestFallbackEnemyScore)
 		{
@@ -8044,7 +8043,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		const int ownerIdx = std::clamp(pOwner->ArrayIndex, 0, 7);
-		const bool visible = pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pCell)
+		const bool visible = IsCellVisibleToAI(pHouse, pCell)
 			|| IsEnemyBuildingKnown(pHouse, pEnemyBld)
 			|| ((pExt->NeuralAI_InfiltratedEnemyMask & (1 << ownerIdx)) != 0);
 
@@ -9947,7 +9946,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					if (CanFootDamageBuildings(pBeachU) && pBeachU->DistanceFrom(pSameIslBld) <= maxWpnRangeLeptons + 384
 						&& pSameIslBld->GetCell()
-						&& (pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pSameIslBld->GetCell())))
+						&& IsCellVisibleToAI(pHouse, pSameIslBld->GetCell()))
 					{
 						pBeachU->ClearMegaMissionData();
 						pBeachU->SetTarget(pSameIslBld);
@@ -10075,7 +10074,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					const auto pInfW0 = pBeachI->Type->GetWeapon(0) ? pBeachI->Type->GetWeapon(0)->WeaponType : nullptr;
 					const int infWpnRange = pInfW0 ? static_cast<int>(pInfW0->Range) : 1024;
 					if (pBeachI->DistanceFrom(pSameIslBld) <= infWpnRange + 384 && pSameIslBld->GetCell()
-						&& (pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pSameIslBld->GetCell())))
+						&& IsCellVisibleToAI(pHouse, pSameIslBld->GetCell()))
 					{
 						pBeachI->ClearMegaMissionData();
 						pBeachI->SetTarget(pSameIslBld);
