@@ -7278,7 +7278,7 @@ namespace
 				}
 
 				// Strike together: once two thirds of the group met at the staging spot, after
-				// PreemptiveStageWaitFrames, or at once when the force comes at the group.
+				// PreemptiveStageWaitFrames, or at once when the fight has begun.
 				if (plan.Progress == 0 && (plan.StagingCell == CellStruct::Empty || membersStaged * 3 >= membersAlive * 2
 					|| Unsorted::CurrentFrame - plan.StartFrame >= PreemptiveStageWaitFrames || engaged))
 				{

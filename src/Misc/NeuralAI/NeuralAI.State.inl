@@ -1569,18 +1569,20 @@ namespace
 	constexpr double PreemptiveClusterCells = 8.0;
 	constexpr int PreemptiveMinValue = 140;
 	// The group: the free units nearest to the force, each within PreemptiveReachCells of it. They
-	// meet PreemptiveStageCells short of the force and strike together once two thirds of them are
-	// within PreemptiveStageNearCells of that spot, PreemptiveStageWaitFrames into the plan, or
-	// when the force comes to them. The first twelve free units of the whole base, with only their
-	// centre within reach, came one by one: 6 of 18 plans lost a third of their value with the
-	// centre of the group 27 to 52 cells short and the head 4 to 19 cells from the force.
+	// meet PreemptiveStageCells short of the force (out of reach of a force spread over
+	// PreemptiveClusterCells) and strike together once two thirds of them are within
+	// PreemptiveStageNearCells of that spot, PreemptiveStageWaitFrames into the plan, or once the
+	// fight has begun. The first twelve free units of the whole base, with only their centre within
+	// reach, came one by one: 6 of 18 plans lost a third of their value with the centre of the group
+	// 27 to 52 cells short and the head 4 to 19 cells from the force.
 	constexpr size_t PreemptiveMinMembers = 5;
 	constexpr size_t PreemptiveMaxMembers = 12;
-	constexpr double PreemptiveStageCells = 10.0;
-	constexpr double PreemptiveStageNearCells = 6.0;
+	constexpr double PreemptiveStageCells = 16.0;
+	constexpr double PreemptiveStageNearCells = 5.0;
 	constexpr int PreemptiveStageWaitFrames = 600;
-	// A force this near our nearest member is fought wherever it goes from there: it came at us.
-	constexpr double PreemptiveEngageCells = 10.0;
+	// A force this near our nearest member is in the fight: the whole group strikes, and it is
+	// fought wherever it goes from there (it came at us).
+	constexpr double PreemptiveEngageCells = 8.0;
 	// Hold Under Towers: a ground enemy force of at least HoldTowersMinEnemyValue within
 	// HoldTowersEnemyCells of home, over HoldTowersOddsPercent of our free army within
 	// HoldTowersArmyCells, and an army of at least HoldTowersMinMembers: 19 of the 27 holds whose
