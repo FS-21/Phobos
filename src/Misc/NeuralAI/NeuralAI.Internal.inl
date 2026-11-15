@@ -1718,7 +1718,10 @@ namespace
 	}
 
 	// Sight radius in cells of one object in the vision rule (it lends its sight to its owner
-	// and the owner's allies), 0 for an object off the map that sees nothing.
+	// and the owner's allies), 0 for an object off the map that sees nothing. A spy plane on its
+	// run (AircraftClass::Mission_Spyplane_Approach 0x4155F0 and _Overfly 0x4157C0) looks while its
+	// target is within its first weapon's Range, with that weapon's Damage as the radius
+	// (TechnoClass::Look 0x70AF50 takes it over Sight): SPYP has Sight=0 and a camera weapon.
 	int GetAISightRadius(const TechnoClass* pTechno)
 	{
 		if (!pTechno || pTechno->InLimbo || !pTechno->IsAlive || !pTechno->Owner)
@@ -1726,7 +1729,21 @@ namespace
 
 		auto const pType = pTechno->GetTechnoType();
 
-		return pType ? std::clamp(static_cast<int>(pType->Sight), 1, 24) : 0;
+		if (!pType)
+			return 0;
+
+		if ((pTechno->CurrentMission == Mission::SpyplaneApproach || pTechno->CurrentMission == Mission::SpyplaneOverfly)
+			&& pTechno->Target && pTechno->WhatAmI() == AbstractType::Aircraft)
+		{
+			// TechnoClass::GetWeapon is not const-qualified in YRpp.
+			auto const pWS = const_cast<TechnoClass*>(pTechno)->GetWeapon(0);
+			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+			if (pWeapon && pWeapon->Damage > 0 && pTechno->DistanceFrom(pTechno->Target) <= pWeapon->Range)
+				return std::clamp(pWeapon->Damage, 1, 24);
+		}
+
+		return std::clamp(static_cast<int>(pType->Sight), 1, 24);
 	}
 
 	// Whether an object's sight reaches pHouse: its own and its allies' objects, and the units of a
@@ -2590,6 +2607,9 @@ namespace
 		// width of a rectangle RangeHeight cells high; both -1 when not set.
 		float RangeWidthOrRadius { -1.0f };
 		int RangeHeight { -1 };
+		// For an Ares SpyPlane type: its planes fly a spy plane run (SpyPlane.Mission not set, Ares
+		// default SpyplaneApproach, or a Spyplane mission), not an air strike (e.g. Attack).
+		bool SpyPlaneLooks { true };
 	};
 
 	const NeuralSWTargeting& GetSWTargeting(const SuperWeaponTypeClass* pSWType)
@@ -2672,6 +2692,10 @@ namespace
 			char typeName[64] {};
 			pINI->ReadString(pSWType->ID, "Type", "", typeName, sizeof(typeName));
 			it->second.IsEMPulse = _stricmp(typeName, "EMPulse") == 0;
+
+			char spyMission[64] {};
+			pINI->ReadString(pSWType->ID, "SpyPlane.Mission", "", spyMission, sizeof(spyMission));
+			it->second.SpyPlaneLooks = !spyMission[0] || _strnicmp(spyMission, "Spyplane", 8) == 0;
 
 			char warhead[64] {};
 			pINI->ReadString(pSWType->ID, "SW.Warhead", "", warhead, sizeof(warhead));
