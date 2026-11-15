@@ -10821,13 +10821,32 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			bloody.erase(bloody.begin(), bloody.begin() + static_cast<std::ptrdiff_t>(bloody.size() - 16));
 	}
 
-	// Size of the passengers each transport has reserved and that are still out, by transport.
+	// Cargo with its own crossing rules: an engineer, a harvester, a base deployer. Its transport sails
+	// as soon as it is aboard, so it never shares a transport with the combat load.
+	auto const isOwnRulesCargo = [](FootClass* pFoot) -> bool
+	{
+		auto const pCargoUnit = abstract_cast<UnitClass*>(pFoot);
+		auto const pCargoInf = abstract_cast<InfantryClass*>(pFoot);
+
+		return (pCargoUnit && pCargoUnit->Type && (pCargoUnit->Type->Harvester || pCargoUnit->Type->Weeder
+				|| (pCargoUnit->Type->DeploysInto && !IsDeployableSiegeUnitType(pCargoUnit->Type))))
+			|| (pCargoInf && pCargoInf->Type && pCargoInf->Type->Engineer);
+	};
+
+	// Size of the passengers each transport has reserved and that are still out, by transport, and
+	// the transports with cargo of its own rules among them.
 	std::unordered_map<DWORD, int> ferryReservedSizeOf;
+	std::unordered_set<DWORD> ferryOwnRulesReserved;
 
 	for (auto const& [passengerID, reservation] : GetMacroState(pHouse).FerryReserved)
 	{
 		if (auto const itFoot = ferryReservedFoot.find(passengerID); itFoot != ferryReservedFoot.end())
+		{
 			ferryReservedSizeOf[reservation.Transport] += std::max(1, static_cast<int>(itFoot->second->GetTechnoType()->Size));
+
+			if (isOwnRulesCargo(itFoot->second))
+				ferryOwnRulesReserved.insert(reservation.Transport);
+		}
 	}
 
 	// Fleet split (after the distribution mode of the Phobos click actions, pull request #1993: the
@@ -10864,17 +10883,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pFleetCell || pFleetCell->LandType == LandType::Water || (pFleetTrip && pFleetTrip->Departed))
 				continue;
 
-			bool ownRules = false;
+			bool ownRules = ferryOwnRulesReserved.contains(pFleet->UniqueID);
 
 			for (FootClass* pPass = pFleet->Passengers.GetFirstPassenger(); pPass != nullptr && !ownRules;
 				pPass = abstract_cast<FootClass*>(pPass->NextObject))
 			{
-				auto const pPassUnit = abstract_cast<UnitClass*>(pPass);
-				auto const pPassInf = abstract_cast<InfantryClass*>(pPass);
-
-				ownRules = (pPassUnit && pPassUnit->Type && (pPassUnit->Type->Harvester || pPassUnit->Type->Weeder
-						|| (pPassUnit->Type->DeploysInto && !IsDeployableSiegeUnitType(pPassUnit->Type))))
-					|| (pPassInf && pPassInf->Type && pPassInf->Type->Engineer);
+				ownRules = isOwnRulesCargo(pPass);
 			}
 
 			const int fleetZone = ObjectZone(pFleet, MovementZone::Normal);
@@ -10907,7 +10921,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				if (!pFoot || !pFoot->IsAlive || pFoot->InLimbo || size > sizeLimit || counted.contains(pFoot->UniqueID)
 					|| pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter
-					|| IsFerryReserved(pHouse, pFoot->UniqueID) || !canRideFerry(pFoot))
+					|| IsFerryReserved(pHouse, pFoot->UniqueID) || !canRideFerry(pFoot) || isOwnRulesCargo(pFoot))
 				{
 					return;
 				}
@@ -11801,6 +11815,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 
 				if (isAlreadyBoardingAnotherTransport(ord.Passenger))
+					continue;
+
+				// Cargo of its own rules and a combat load never share a transport.
+				const bool ownRulesAboard = carryingMCV || carryingStolenForeignMCV || carryingHarvester || carryingEngineer;
+
+				if (numPass > 0 && isOwnRulesCargo(ord.Passenger) != ownRulesAboard)
 					continue;
 
 				// Only a crossing this transport can make itself.
@@ -12924,15 +12944,38 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& std::find(ferryQueue.begin(), ferryQueue.end(), pSingleActiveBoarder) != ferryQueue.end();
 			const int activeBoarderSize
 				= (pSingleActiveBoarder && !activeBoarderQueued) ? std::max(1, static_cast<int>(pSingleActiveBoarder->GetTechnoType()->Size)) : 0;
-			int roomToReserve = freeCapNow - queuedSize - activeBoarderSize;
+			const int roomToReserve = freeCapNow - queuedSize - activeBoarderSize;
 
-			// Its share of the fleet split, no more: the rest of the load goes to its sister transports.
-			if (auto const itQuota = ferryFleetQuota.find(pTrans->UniqueID); itQuota != ferryFleetQuota.end())
-				roomToReserve = std::min(roomToReserve, itQuota->second - totalPassSize - queuedSize - activeBoarderSize);
+			// Cargo of its own rules (engineer, harvester, base deployer) and the combat load never share
+			// a transport: with the fleet split an engineer reserved in every share sailed at once with
+			// the one or two tanks already aboard (half of all departures, 149 combat units carried off to
+			// tech buildings in 12 matches). The combat load takes the transport's share of the fleet
+			// split, no more: the rest goes to its sister transports.
+			bool carriesOwnRules = carryingMCV || carryingStolenForeignMCV || carryingHarvester || carryingEngineer;
+			bool carriesCombat = numPass > 0 && !carriesOwnRules;
 
-			for (int reserveGuard = 0; reserveGuard < 16 && roomToReserve > 0; ++reserveGuard)
+			std::vector<FootClass*> comingAboard = ferryQueue;
+
+			if (pSingleActiveBoarder && !activeBoarderQueued)
+				comingAboard.push_back(pSingleActiveBoarder);
+
+			for (auto const pComing : comingAboard)
 			{
-				// Pick the SINGLE best/closest available passenger on this island that fits into roomToReserve:
+				if (isOwnRulesCargo(pComing))
+					carriesOwnRules = true;
+				else
+					carriesCombat = true;
+			}
+
+			int combatRoom = carriesOwnRules ? 0 : roomToReserve;
+			int ownRulesRoom = carriesCombat ? 0 : roomToReserve;
+
+			if (auto const itQuota = ferryFleetQuota.find(pTrans->UniqueID); itQuota != ferryFleetQuota.end())
+				combatRoom = std::min(combatRoom, itQuota->second - totalPassSize - queuedSize - activeBoarderSize);
+
+			for (int reserveGuard = 0; reserveGuard < 16 && (combatRoom > 0 || ownRulesRoom > 0); ++reserveGuard)
+			{
+				// Pick the SINGLE best/closest available passenger on this island that fits into its room:
 				// Priority 1: pendingCrossIslandOrders on transZone
 				// Largest first, then nearest (as the distribution mode deals them out): a big vehicle gets
 				// its seat before small units fill the room it needs.
@@ -12959,7 +13002,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 
 					const int osz = std::max(1, ord.PassengerSize);
-					if (osz > static_cast<int>(pTrans->Type->SizeLimit) || osz > roomToReserve)
+					if (osz > static_cast<int>(pTrans->Type->SizeLimit) || osz > (isOwnRulesCargo(ord.Passenger) ? ownRulesRoom : combatRoom))
 						continue;
 
 					// Only a crossing this transport can make itself (a hovercraft does not load for
@@ -12996,7 +13039,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							continue;
 
 						const int vehSize = std::max(1, static_cast<int>(pV->Type->TechnoTypeClass::Size));
-						if (vehSize > static_cast<int>(pTrans->Type->SizeLimit) || vehSize > roomToReserve)
+						if (vehSize > static_cast<int>(pTrans->Type->SizeLimit) || vehSize > combatRoom || isOwnRulesCargo(pV))
 							continue;
 
 						const int uz
@@ -13030,7 +13073,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							continue;
 
 						const int infSize = std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size));
-						if (infSize > static_cast<int>(pTrans->Type->SizeLimit) || infSize > roomToReserve)
+						if (infSize > static_cast<int>(pTrans->Type->SizeLimit) || infSize > combatRoom || isOwnRulesCargo(pI))
 							continue;
 
 						const int iz
@@ -13066,7 +13109,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				ferryMacroState.FerryWaitSince.erase(pNextBoarder->UniqueID);
 				ferryReservedFoot[pNextBoarder->UniqueID] = pNextBoarder;
 				ferryQueue.push_back(pNextBoarder);
-				roomToReserve -= std::max(1, static_cast<int>(pNextBoarder->GetTechnoType()->Size));
+				const int boarderSize = std::max(1, static_cast<int>(pNextBoarder->GetTechnoType()->Size));
+
+				if (isOwnRulesCargo(pNextBoarder))
+				{
+					ownRulesRoom -= boarderSize;
+					combatRoom = 0;
+				}
+				else
+				{
+					combatRoom -= boarderSize;
+					ownRulesRoom = 0;
+				}
 				CountDecision(NeuralDecision::FerryReserved, pHouse->ArrayIndex);
 			}
 
