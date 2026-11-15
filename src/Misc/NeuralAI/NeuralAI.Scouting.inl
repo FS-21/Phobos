@@ -151,9 +151,11 @@ namespace
 		}
 	}
 
-	// What a look at center would teach us, 0..100: ground never explored counts fully, explored
-	// ground by the time since it was last in sight. Without fog of war the engine shows explored
-	// ground live (and the AI's known buildings and sightings use it), so there it counts a fifth.
+	// What a look at center would teach us, 0..100: ground never explored (or shrouded again by an
+	// enemy gap) counts fully, explored ground with fog of war by the time since it was last in sight.
+	// Without fog of war the engine shows explored ground live (and the AI's known buildings and
+	// sightings use it), so a look there teaches nothing: with the map revealed ("Reveal map", a Spy
+	// Satellite) only enemy gaps are left to scout.
 	int ScoutInfoGain(HouseClass* pHouse, const NeuralScoutState& state, const CellStruct& center, int radius, bool fog)
 	{
 		const int now = Unsorted::CurrentFrame;
@@ -181,9 +183,11 @@ namespace
 					continue;
 				}
 
+				if (!fog)
+					continue;
+
 				const int seen = state.BlockSeenFrame[ScoutBlockIndex(cell)];
-				const int stale = std::min(100, (seen < 0 ? now : now - seen) * 100 / ScoutStaleFrames);
-				total += fog ? stale : stale / 5;
+				total += std::min(100, (seen < 0 ? now : now - seen) * 100 / ScoutStaleFrames);
 			}
 		}
 
