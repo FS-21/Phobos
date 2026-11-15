@@ -470,6 +470,7 @@ namespace
 		macro.IslandExpansionField = CellStruct::Empty;
 
 		std::vector<int> hubZones;
+		std::vector<CellStruct> hubCells;
 		CellStruct home = CellStruct::Empty;
 
 		for (auto const pBld : pHouse->Buildings)
@@ -480,6 +481,7 @@ namespace
 				continue;
 			}
 
+			hubCells.push_back(pBld->GetMapCoords());
 			const int zone = MapClass::Instance.GetMovementZoneType(pBld->GetMapCoords(), MovementZone::Normal, pBld->OnBridge);
 
 			if (zone >= 0)
@@ -504,6 +506,13 @@ namespace
 		auto const isHubZone = [&hubZones](int zone)
 		{
 			return std::binary_search(hubZones.begin(), hubZones.end(), zone);
+		};
+
+		// An outpost refinery or yard of ours within 14 cells makes a field held land.
+		auto const nearOwnHub = [&hubCells](const CellStruct& cell)
+		{
+			return std::any_of(hubCells.begin(), hubCells.end(), [&cell](const CellStruct& hub)
+				{ return std::max(std::abs(hub.X - cell.X), std::abs(hub.Y - cell.Y)) <= 14; });
 		};
 
 		// Known enemy structures: a field within 12 cells of one is theirs, neither ours to mine nor free.
@@ -555,6 +564,13 @@ namespace
 
 			if (!isHubZone(fieldZone))
 			{
+				// A field whose cell is on no ground (zone 1: a shore, a cliff foot) is no landmass to
+				// settle, and one next to a hub of ours is held land. Either one, being the nearest,
+				// used to be the only candidate and left the house with no field to go for (match
+				// #9885: "free field across water at (0,0) zone 1" from frame 107000 to the end).
+				if (fieldZone <= 1 || nearOwnHub(field.Cell))
+					continue;
+
 				const int dist = std::max(std::abs(field.Cell.X - home.X), std::abs(field.Cell.Y - home.Y));
 				const int metric = dist - (field.SpawnerTree ? 10 : 0) - std::min(4, field.OreCells / 10);
 
@@ -612,28 +628,18 @@ namespace
 			? static_cast<int>(std::min<int64_t>(INT_MAX, static_cast<int64_t>(homeOre) * 900 / macro.IslandOreDrain))
 			: -1;
 
-		// The island field must be free of our own hubs (an outpost refinery there makes it held land).
-		if (pIslandField)
-		{
-			for (auto const pBld : pHouse->Buildings)
-			{
-				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type
-					&& (pBld->Type->Refinery || pBld->Type->ResourceDestination || pBld->Type->ConstructionYard)
-					&& std::max(std::abs(pBld->GetMapCoords().X - pIslandField->Cell.X), std::abs(pBld->GetMapCoords().Y - pIslandField->Cell.Y)) <= 14)
-				{
-					pIslandField = nullptr;
-					break;
-				}
-			}
-		}
-
 		// Urgent while the ore of our land lasts less than 20 minutes at the pace it is drained, or
 		// holds less than 25000 credits: such a small island is spent long before its ore runs out (the
 		// houses of the Heisenberg repro held 14000-18000 and had no credits left by frame 9000), so
 		// its expansion is planned from the start, while the starting credits pay the MCV's
 		// prerequisites, the MCV and its ride.
+		// A house with IslandExpansionRichCredits in hand takes the free island too, whatever its own
+		// ore: the money is there and the field is income and ground of its own (match #9885: a house
+		// with 60000 to 190000 credits and its ore growing from 54000 to 108000 stayed on its three
+		// landmasses for three hours).
+		const bool rich = pHouse->Available_Money() >= IslandExpansionRichCredits;
 		const bool runningOut = pIslandField
-			&& (homeOre < 25000 || (macro.IslandOreRunway >= 0 && macro.IslandOreRunway < 18000));
+			&& (homeOre < 25000 || (macro.IslandOreRunway >= 0 && macro.IslandOreRunway < 18000) || rich);
 		macro.IslandExpansionUrgent = runningOut;
 		macro.IslandExpansionField = pIslandField ? pIslandField->Cell : CellStruct::Empty;
 
@@ -642,7 +648,7 @@ namespace
 			macro.IslandExpansionLogFrame = now;
 			Debug::Log("[NeuralAI] House %d IslandExpansion: %s, home ore %d in %d fields (drain %d per 900 frames, runway %d frames), "
 				"%d landmasses held, free field across water at (%d,%d) zone %d, %d credits, frame %d.\n",
-				pHouse->ArrayIndex, runningOut ? "urgent" : "not urgent", homeOre, homeFields, macro.IslandOreDrain, macro.IslandOreRunway,
+				pHouse->ArrayIndex, runningOut ? (rich ? "urgent (rich)" : "urgent") : "not urgent", homeOre, homeFields, macro.IslandOreDrain, macro.IslandOreRunway,
 				static_cast<int>(hubZones.size()), macro.IslandExpansionField.X, macro.IslandExpansionField.Y, islandFieldZone,
 				pHouse->Available_Money(), now);
 		}

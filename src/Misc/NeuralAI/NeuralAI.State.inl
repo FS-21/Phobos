@@ -683,6 +683,13 @@ namespace
 		int BankSpendNeeded { 0 };
 		// Credits held beyond the reserve at the last sample (0 when none): army caps grow with it.
 		int BankSurplus { 0 };
+		// Army nobody uses (NoteIdleArmy), by ArmyKind: the fewest of each kind that stood in the idle
+		// pool at any AI tick of the last ArmyIdleWindowFrames, the running minimum of the window in
+		// progress and its first frame. A kind is built without a ceiling while its units are put to
+		// work, and pauses while that many of them go unused.
+		std::array<int, 3> ArmyUnused {};
+		std::array<int, 3> ArmyIdleFloor { INT_MAX, INT_MAX, INT_MAX };
+		int ArmyIdleWindowStart { -1 };
 		std::array<int, 4> BankWantedFactories {};
 		// AI ticks since the last governor sample at which each queue (BankQueue order) had a
 		// factory of its kind, and those at which one of them was producing.
@@ -1095,6 +1102,9 @@ namespace
 			this->BankQueueTicks.fill(0);
 			this->BankQueueBusyTicks.fill(0);
 			this->EnemyAcrossWater = false;
+			this->ArmyUnused.fill(0);
+			this->ArmyIdleFloor.fill(INT_MAX);
+			this->ArmyIdleWindowStart = -1;
 			this->NoRoomIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
 			this->ResourceHealSince.clear();
@@ -1479,6 +1489,19 @@ namespace
 	// than the plan's own group size: the more numerous attack wins more often than not (user), and
 	// groups of 4 to 7 bled out before their targets in the focus batches of 2026-11-13.
 	constexpr size_t PlanStrikeIdleShare = 2;
+	// The army has no ceiling by number (user: the bigger group wins, and a rich house that stopped
+	// at 100 soldiers and 70 vehicles put 1.5 million credits into 227 buildings, match #9885).
+	// What pauses a queue is its units going unused: that many vehicles, soldiers or ships idle at
+	// every AI tick of ArmyIdleWindowFrames.
+	enum class ArmyKind : size_t { Vehicles = 0, Infantry = 1, Ships = 2 };
+	// With this much in hand a house takes a free island field whatever the ore of its own land.
+	constexpr int IslandExpansionRichCredits = 30000;
+	// Base ceilings: ground towers an outpost or a front may add over the base cap, per ConYard,
+	// and the power surplus over the cushion a crawl stone may still be a plant.
+	constexpr int OutpostDefenseRoomPerYard = 6;
+	constexpr int CrawlPowerSurplus = 700;
+	constexpr int ArmyIdleWindowFrames = 2700;
+	constexpr std::array<int, 3> ArmyIdleBrake { 30, 40, 12 };
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way
