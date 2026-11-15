@@ -1722,6 +1722,11 @@ namespace
 	constexpr double RollingSiegeEscortBackCells = 3.0;
 	constexpr double RollingSiegeEscortSpreadCells = 3.0;
 	constexpr double RollingSiegeEscortMarginCells = 1.5;
+	// Siege Battery: at most this many guns, and ground escorts as Rolling Siege's (one in
+	// PlanStrikeIdleShare of the idle ones, at least three when there are) up to this many. It went
+	// with three escorts at most: 80 of 117 failed plans lost their strength (2026-11-15).
+	constexpr size_t SiegeBatteryMaxGuns = 6;
+	constexpr size_t SiegeBatteryMaxEscorts = 6;
 	// Superweapon Race: the ground group has this many units at least and takes at most this many,
 	// or one in PlanStrikeIdleShare of the idle ground army when that is more.
 	constexpr size_t SuperweaponRaceMinGround = 4;
