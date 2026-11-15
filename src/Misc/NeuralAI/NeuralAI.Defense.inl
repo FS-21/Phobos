@@ -519,6 +519,26 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 
 	auto const pVictimOwner = pVictim->Owner;
 
+	// Plan kills: the combat value of enemy units destroyed by a member of an active plan (Bait
+	// Ambush is scored by what its members killed, not by what they saw).
+	if (pKiller && pKiller->Owner && pVictimOwner && pKiller->Owner != pVictimOwner && pVictim->WhatAmI() != AbstractType::Building
+		&& !pVictimOwner->IsNeutral() && !pKiller->Owner->IsAlliedWith(pVictimOwner) && NeuralAI::IsEnabledForHouse(pKiller->Owner))
+	{
+		auto& killerMacro = GetMacroState(pKiller->Owner);
+
+		if (killerMacro.PlanMembers.find(pKiller->UniqueID) != killerMacro.PlanMembers.end())
+		{
+			for (auto& plan : killerMacro.Plans)
+			{
+				if (plan.Active && std::find(plan.Members.begin(), plan.Members.end(), pKiller->UniqueID) != plan.Members.end())
+				{
+					plan.KillValue += GetCombatValueOfType(pVictim->GetTechnoType(), false);
+					break;
+				}
+			}
+		}
+	}
+
 	if (pKiller && pKiller->WhatAmI() == AbstractType::Building && pKiller->Owner && pKiller->Owner != pVictimOwner
 		&& (!pVictimOwner || !pKiller->Owner->IsAlliedWith(pVictimOwner)) && NeuralAI::IsEnabledForHouse(pKiller->Owner))
 	{
