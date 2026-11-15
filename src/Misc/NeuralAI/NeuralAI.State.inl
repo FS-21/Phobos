@@ -944,6 +944,14 @@ namespace
 		int FerryLandingRepickLogFrame { -1 };
 		// Last log line of the ferry fleet split (diagnostics, at most every FerryIslandKeptLogFrames).
 		int FerryFleetLogFrame { -1 };
+		// Joint departure signal by pickup zone: the frame, the cell and the transport that sailed.
+		struct FerryConvoySignal
+		{
+			int Frame { -1 };
+			CellStruct Cell { CellStruct::Empty };
+			DWORD Leader { 0 };
+		};
+		std::map<int, FerryConvoySignal> FerryConvoyGo {};
 		// Last frame the aircraft pick wanted a type that needs a dock and every dock was taken: the
 		// building pass answers with another airfield (AirDockWantedFrames).
 		int AirDockWantedFrame { -100000 };
@@ -1250,6 +1258,7 @@ namespace
 			this->FerryLandingRepicks = 0;
 			this->FerryLandingRepickLogFrame = -1;
 			this->FerryFleetLogFrame = -1;
+			this->FerryConvoyGo.clear();
 			this->AirDockWantedFrame = -100000;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
@@ -1342,6 +1351,7 @@ namespace
 	constexpr int FerrySailInTransit = 32;
 	constexpr int FerrySailNothingMoreToLoad = 64;
 	constexpr int FerrySailLoadStalled = 128;
+	constexpr int FerrySailConvoy = 256;
 	constexpr int FerryLoadStallFrames = 5400;
 
 	// How long a combat cargo waits on its shore for more: under half the room, and under three
@@ -1354,6 +1364,9 @@ namespace
 	constexpr int FerryConvoyCells = 30;
 	// Ready combat transports needed before the odd-numbered ones strike the secondary island.
 	constexpr int FerrySplitFrontTransports = 4;
+	// How long the departure signal of a combat transport makes its sister transports on the same
+	// shore sail with it (joint departure).
+	constexpr int FerryConvoyGoFrames = 120;
 	// Enemies seen near a landing this recently count against it even when out of sight now.
 	constexpr int FerryLandingSightingFrames = 900;
 	// How often the ferry island commitment logs how many times it kept a loaded transport on course.
