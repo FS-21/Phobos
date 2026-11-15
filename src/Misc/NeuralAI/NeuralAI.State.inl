@@ -934,6 +934,14 @@ namespace
 		// unit of ours holds or heads to since the last log line, and the frame of that line.
 		int DestinationSpreadCount { 0 };
 		int DestinationSpreadLogFrame { -1 };
+		// Ferry island commitment: ticks a loaded transport kept the island it sailed for while the
+		// goals pointed elsewhere, since the last log line, and the frame of that line.
+		int FerryIslandKept { 0 };
+		int FerryIslandKeptLogFrame { -1 };
+		// Landings of loaded transports that moved more than FerryLandingRepickCells before the
+		// landing commitment since the last log line, and the frame of that line (diagnostics).
+		int FerryLandingRepicks { 0 };
+		int FerryLandingRepickLogFrame { -1 };
 		// Last frame the aircraft pick wanted a type that needs a dock and every dock was taken: the
 		// building pass answers with another airfield (AirDockWantedFrames).
 		int AirDockWantedFrame { -100000 };
@@ -1235,6 +1243,10 @@ namespace
 			this->EmergencyLaneServed = 0;
 			this->DestinationSpreadCount = 0;
 			this->DestinationSpreadLogFrame = -1;
+			this->FerryIslandKept = 0;
+			this->FerryIslandKeptLogFrame = -1;
+			this->FerryLandingRepicks = 0;
+			this->FerryLandingRepickLogFrame = -1;
 			this->AirDockWantedFrame = -100000;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
@@ -1299,6 +1311,12 @@ namespace
 		// (user: transports turned away 10-15 cells from the shore when his troops came near, the
 		// landing being re-picked every tick with enemy units in sight weighing -2400).
 		CellStruct CommittedLanding { CellStruct::Empty };
+		// The island a loaded transport sailed for (its zone and goal cell): kept while it is still a
+		// goal of ours or still holds the enemy, cleared once the cargo is off (see the ferry loop).
+		int CommittedZone { -1 };
+		CellStruct CommittedGoal { CellStruct::Empty };
+		// The landing picked at the last tick before the commitment (diagnostics: landing re-picks).
+		CellStruct LastLanding { CellStruct::Empty };
 		// First frame a combat cargo sat loaded but short of three quarters of the room on its
 		// pickup shore.
 		int UnderfilledSince { -1 };
@@ -1333,6 +1351,9 @@ namespace
 	constexpr int FerryConvoyCells = 30;
 	// Enemies seen near a landing this recently count against it even when out of sight now.
 	constexpr int FerryLandingSightingFrames = 900;
+	// How often the ferry island commitment logs how many times it kept a loaded transport on course.
+	constexpr int FerryIslandKeptLogFrames = 1800;
+	constexpr double FerryLandingRepickCells = 8.0;
 	constexpr int FerryMostLoadWaitFrames = 2700;
 	constexpr int FerryUnderFireFrames = 300;
 

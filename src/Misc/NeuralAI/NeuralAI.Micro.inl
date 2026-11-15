@@ -11476,6 +11476,86 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return false;
 		};
 
+		// Island commitment: a loaded transport that has left its shore keeps the island it sailed for
+		// while that island is still one of our goals or, for a combat or engineer cargo, still holds
+		// the enemy. The goals are scored again every tick (defenses coming into sight move the best
+		// enemy island, the odd transports take the secondary island only while two or more are
+		// ready) and the landing commitment went with the island: transports turned away at the
+		// enemy's coast, came back and sailed to and fro before going elsewhere (user, island match
+		// on Fluddle, hover transports at his shore).
+		if (pTrip && numPass == 0)
+		{
+			pTrip->CommittedZone = -1;
+			pTrip->CommittedGoal = CellStruct::Empty;
+			pTrip->LastLanding = CellStruct::Empty;
+		}
+		else if (pTrip && tripDeparted)
+		{
+			const int keptZone = pTrip->CommittedZone;
+			CellClass* pKeptGoal = nullptr;
+
+			// The island's goal cell when it is still one of our goals, else the cell it sailed for.
+			const std::pair<CellClass*, int> goalsNow[] = {
+				{ pCustomPassengerGoal, customPassengerZone },
+				{ pIslandGoalCell, targetIslandZone },
+				{ pSecondaryIslandGoalCell, secondaryIslandZone },
+				{ pIslandResourceGoalCell, resourceIslandZone },
+				{ pIslandTechGoalCell, techIslandZone }
+			};
+
+			for (auto const& [pGoalCell, goalZone] : goalsNow)
+			{
+				if (pGoalCell && keptZone >= 0 && goalZone == keptZone)
+				{
+					pKeptGoal = pGoalCell;
+					break;
+				}
+			}
+
+			if (!pKeptGoal && keptZone >= 0 && pTrip->CommittedGoal != CellStruct::Empty && !carryingMCV && !carryingHarvester
+				&& hasEnemyPresenceInIslandZone(keptZone))
+			{
+				pKeptGoal = MapClass::Instance.TryGetCellAt(pTrip->CommittedGoal);
+			}
+
+			if (pKeptGoal && isValidFerryGoalZone(keptZone))
+			{
+				if (activeIslandZone != keptZone)
+				{
+					auto& macro = GetMacroState(pHouse);
+					const int now = Unsorted::CurrentFrame;
+					++macro.FerryIslandKept;
+
+					if (macro.FerryIslandKeptLogFrame < 0 || now < macro.FerryIslandKeptLogFrame
+						|| now - macro.FerryIslandKeptLogFrame >= FerryIslandKeptLogFrames)
+					{
+						Debug::Log("[NeuralAI] Frame %d | House #%d ferry island commitment: %d ticks a loaded transport kept the island "
+							"it sailed for while the goals moved (since frame %d), last %s %u on zone %d over zone %d at (%d,%d)\n",
+							now, pHouse->ArrayIndex, macro.FerryIslandKept, std::max(0, macro.FerryIslandKeptLogFrame), pTrans->Type->ID,
+							pTrans->UniqueID, keptZone, activeIslandZone, transCoords.X, transCoords.Y);
+						macro.FerryIslandKeptLogFrame = now;
+						macro.FerryIslandKept = 0;
+					}
+				}
+
+				pActiveIslandGoal = pKeptGoal;
+				activeIslandZone = keptZone;
+				pTrip->CommittedGoal = pKeptGoal->MapCoords;
+			}
+			else if (pActiveIslandGoal && isValidFerryGoalZone(activeIslandZone))
+			{
+				if (keptZone >= 0 && keptZone != activeIslandZone)
+				{
+					Debug::Log("[NeuralAI] Frame %d | House #%d ferry: %s %u with %d passengers leaves zone %d (no goal or enemy of "
+						"ours there now) for zone %d at (%d,%d)\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, pTrans->Type->ID,
+						pTrans->UniqueID, numPass, keptZone, activeIslandZone, transCoords.X, transCoords.Y);
+				}
+
+				pTrip->CommittedZone = activeIslandZone;
+				pTrip->CommittedGoal = pActiveIslandGoal->MapCoords;
+			}
+		}
+
 		auto isSafeFriendlyPickupIsland = [&](int checkZone) -> bool
 		{
 			if (checkZone < 0)
@@ -11877,6 +11957,32 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				else
 				{
 					pTrip->CommittedLanding = CellStruct::Empty;
+
+					// Diagnostics: a landing that jumps before the commitment (the transport turns).
+					if (pSafeLanding && numPass >= 1)
+					{
+						auto& macro = GetMacroState(pHouse);
+						const int now = Unsorted::CurrentFrame;
+
+						if (pTrip->LastLanding != CellStruct::Empty && pTrip->LastLanding.DistanceFrom(pSafeLanding->MapCoords) > FerryLandingRepickCells)
+						{
+							++macro.FerryLandingRepicks;
+
+							if (macro.FerryLandingRepickLogFrame < 0 || now < macro.FerryLandingRepickLogFrame
+								|| now - macro.FerryLandingRepickLogFrame >= FerryIslandKeptLogFrames)
+							{
+								Debug::Log("[NeuralAI] Frame %d | House #%d ferry landing re-picks: %d by loaded transports before their "
+									"landing commitment (since frame %d), last %s %u at (%d,%d) from (%d,%d) to (%d,%d)\n", now,
+									pHouse->ArrayIndex, macro.FerryLandingRepicks, std::max(0, macro.FerryLandingRepickLogFrame),
+									pTrans->Type->ID, pTrans->UniqueID, transCoords.X, transCoords.Y, pTrip->LastLanding.X,
+									pTrip->LastLanding.Y, pSafeLanding->MapCoords.X, pSafeLanding->MapCoords.Y);
+								macro.FerryLandingRepickLogFrame = now;
+								macro.FerryLandingRepicks = 0;
+							}
+						}
+
+						pTrip->LastLanding = pSafeLanding->MapCoords;
+					}
 
 					if (pSafeLanding && transCoords.DistanceFrom(pSafeLanding->MapCoords) <= 14.0)
 						pTrip->CommittedLanding = pSafeLanding->MapCoords;
