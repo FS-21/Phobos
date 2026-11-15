@@ -4506,8 +4506,9 @@ namespace
 		};
 
 		// Strike group for a building target: >= 2 idle aircraft when its AA risk allows, else
-		// minGround..maxGround idle ground units when it is on our landmass.
-		auto pickStrikeGroup = [&](BuildingClass* pTarget, size_t minGround, size_t maxGround) -> std::vector<FootClass*>
+		// minGround..maxGround idle ground units when it is on our landmass (with hurtersOnly, only
+		// the ones whose weapons do damage to that building, HurtsBuilding).
+		auto pickStrikeGroup = [&](BuildingClass* pTarget, size_t minGround, size_t maxGround, bool hurtersOnly = false) -> std::vector<FootClass*>
 		{
 			std::vector<FootClass*> group;
 
@@ -4538,6 +4539,10 @@ namespace
 			if (ObjectZone(pTarget, MovementZone::Normal) == homeZone)
 			{
 				group = collectIdleGround(false);
+
+				if (hurtersOnly)
+					std::erase_if(group, [pTarget](FootClass* pFoot) { return !HurtsBuilding(pFoot->GetTechnoType(), pTarget); });
+
 				sortFastest(group);
 				group.resize(std::min(group.size(), std::max(maxGround, group.size() / PlanStrikeIdleShare)));
 
@@ -6759,8 +6764,10 @@ namespace
 				// archive of 2026-11-14 night both wings of two were shot down at the target, the
 				// superweapon standing); Air Strike went from 14% to 42% well with that test. The
 				// superweapon stands deep in the base: the ground group goes only with the strength to
-				// beat what is known on its way in.
-				std::vector<FootClass*> group = pickStrikeGroup(pTarget, SuperweaponRaceMinGround, SuperweaponRaceMaxGround);
+				// beat what is known on its way in, and only units that hurt the building go: the fastest
+				// idle units took dogs, terror drones and mind controllers that cannot scratch it along
+				// (18 of the 87 members lost in the focus batch of 2026-11-15).
+				std::vector<FootClass*> group = pickStrikeGroup(pTarget, SuperweaponRaceMinGround, SuperweaponRaceMaxGround, true);
 				const int utility = (pTarget && !group.empty()) ? (400 + (5400 - bestLeft) / 20) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::SuperweaponRace, utility))
