@@ -175,8 +175,10 @@ namespace
 	// with no slope on the lower cell) close the way in both walks. It cuts the ground when two open
 	// cells on the edge of the box meet in the first walk and not in the second: what passes there
 	// would have to find a way around beyond the box. Works for a planned building (its cells free
-	// now) and for a standing one (its cells under it are open ground).
-	bool FootprintCutsLandWay(const CellStruct& topLeft, int width, int height)
+	// now) and for a standing one (its cells under it are open ground). With twoWay a way only counts
+	// through cells of a walkable 2x2 square, where two units pass side by side: the building must
+	// not leave what passes there a lane of one cell (user: roads with traffic both ways).
+	bool FootprintCutsLandWay(const CellStruct& topLeft, int width, int height, bool twoWay)
 	{
 		const int margin = LandWayCheckCells;
 		const int boxW = width + 2 * margin;
@@ -223,10 +225,33 @@ namespace
 		std::array<int16_t, BoxCells> after {};
 		std::array<int16_t, BoxCells> queue {};
 
-		// Labels every walkable cell with its piece of ground; -1 for the others.
+		// Labels every cell a unit passes with its piece of ground; -1 for the others.
 		auto const label = [&](std::array<int16_t, BoxCells>& labels, bool footprintOpen)
 		{
-			auto const walkable = [&](int idx) { return ground[idx] == 1 || (footprintOpen && ground[idx] == 2); };
+			auto const open = [&](int idx) { return ground[idx] == 1 || (footprintOpen && ground[idx] == 2); };
+			std::array<bool, BoxCells> passes {};
+
+			for (int idx = 0; idx < boxW * boxH; ++idx)
+				passes[idx] = !twoWay && open(idx);
+
+			if (twoWay)
+			{
+				for (int j = 0; j + 1 < boxH; ++j)
+				{
+					for (int i = 0; i + 1 < boxW; ++i)
+					{
+						const int a = j * boxW + i;
+						const int b = a + 1;
+						const int c = a + boxW;
+						const int d = c + 1;
+
+						if (open(a) && open(b) && open(c) && open(d) && canStep(a, b) && canStep(a, c) && canStep(b, d) && canStep(c, d))
+							passes[a] = passes[b] = passes[c] = passes[d] = true;
+					}
+				}
+			}
+
+			auto const walkable = [&](int idx) { return passes[idx]; };
 			labels.fill(-1);
 			int16_t pieces = 0;
 
@@ -299,7 +324,9 @@ namespace
 
 				const int idx = j * boxW + i;
 
-				if (ground[idx] != 1)
+				// The edge stays out of reach of the footprint and of its 2x2 squares: a cell that passes
+				// in the open walk passes in the closed one too.
+				if (ground[idx] != 1 || before[idx] < 0 || after[idx] < 0)
 					continue;
 
 				int16_t& seen = edgePiece[before[idx]];
