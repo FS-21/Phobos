@@ -3749,6 +3749,130 @@ namespace
 
 		auto planOf = [&](NeuralPlanId id) -> NeuralPlanInstance& { return macro.Plans[static_cast<size_t>(id)]; };
 
+		// TEMP diagnostic: where and among what the members of Rolling Siege and Superweapon Race die.
+		// Both lost a third of their group before arriving (30 of 40 and 8 of 17 plans in the archive
+		// of 2026-11-14 night), mostly with no enemy seen near the group's centre. One line per lost
+		// member (the watchdog below may end the plan the tick the member is missed), and one per
+		// Rolling Siege target; 60 lines per match.
+		static int siegeDiagSerial = -1;
+		static int siegeDiagCount = 0;
+		static std::unordered_set<DWORD> siegeDiagLogged;
+
+		if (siegeDiagSerial != NeuralMatchSerial)
+		{
+			siegeDiagSerial = NeuralMatchSerial;
+			siegeDiagCount = 0;
+			siegeDiagLogged.clear();
+		}
+
+		auto logSiegeTarget = [&](const NeuralPlanInstance& plan, BuildingClass* pDefense)
+		{
+			if (siegeDiagCount >= 60)
+				return;
+
+			siegeDiagCount++;
+			int artillery = 0;
+
+			for (const DWORD uid : plan.Members)
+			{
+				if (auto const pFoot = findOwnFoot(uid); pFoot && SiegeRangeOf(pFoot->GetTechnoType()) >= 8 * Unsorted::LeptonsPerCell)
+					artillery++;
+			}
+
+			Debug::Log("[NeuralAI] House %d plan rollingSiege target DIAG: %s range %d at (%d,%d), spot (%d,%d) %d cells from it and %d from home, "
+				"%d artillery and %d others, progress %d, frame %d of %d.\n", houseIdx, pDefense->Type->ID,
+				GroundRangeOf(pDefense->Type) / Unsorted::LeptonsPerCell, plan.TargetCell.X, plan.TargetCell.Y, plan.StagingCell.X,
+				plan.StagingCell.Y, static_cast<int>(plan.StagingCell.DistanceFrom(plan.TargetCell)),
+				static_cast<int>(plan.StagingCell.DistanceFrom(homeCell)), artillery, static_cast<int>(plan.Members.size()) - artillery,
+				plan.Progress, Unsorted::CurrentFrame - plan.StartFrame, plan.Deadline - plan.StartFrame);
+		};
+
+		for (const NeuralPlanId lostId : { NeuralPlanId::RollingSiege, NeuralPlanId::SuperweaponRace })
+		{
+			auto const& plan = planOf(lostId);
+
+			if (!plan.Active)
+				continue;
+
+			for (const DWORD uid : plan.Members)
+			{
+				if (siegeDiagCount >= 60)
+					break;
+
+				if (findOwnFoot(uid) || ownSiegeBuildings.contains(uid) || siegeDiagLogged.contains(uid))
+					continue;
+
+				auto const itTrace = macro.PlanMemberTraces.find(uid);
+
+				if (itTrace == macro.PlanMemberTraces.end() || !itTrace->second.Type)
+					continue;
+
+				siegeDiagLogged.insert(uid);
+				siegeDiagCount++;
+				auto const pType = const_cast<TechnoTypeClass*>(itTrace->second.Type);
+				const CellStruct cell = itTrace->second.Cell;
+				const char* role = pType->WhatAmI() == AbstractType::AircraftType ? "air"
+					: (SiegeRangeOf(pType) >= 8 * Unsorted::LeptonsPerCell ? "artillery" : "escort");
+				bool offMap = false;
+
+				for (auto const pTech : TechnoClass::Array)
+				{
+					if (pTech && pTech->UniqueID == uid)
+					{
+						offMap = pTech->IsAlive && pTech->InLimbo && pTech->Owner == pHouse;
+						break;
+					}
+				}
+				int reaching = 0;
+				std::string defenses;
+
+				for (auto const pBld : knownEnemyBuildingList)
+				{
+					if (!isKnownEnemyBuilding(pBld) || !pBld->Type->IsBaseDefense)
+						continue;
+
+					const int range = GroundRangeOf(pBld->Type);
+					const double d = pBld->GetMapCoords().DistanceFrom(cell);
+
+					if (range > 0 && d * Unsorted::LeptonsPerCell <= range + Unsorted::LeptonsPerCell)
+					{
+						if (reaching++ < 3)
+							defenses += std::string(" ") + pBld->Type->ID + "@" + std::to_string(static_cast<int>(d));
+					}
+				}
+
+				int seenValue = 0;
+				std::map<std::string, int> seenTypes;
+
+				for (auto const& [enemyID, sighting] : macro.EnemySightings)
+				{
+					if (Unsorted::CurrentFrame - sighting.LastSeenFrame <= 300 && sighting.LastCoords.DistanceFrom(cell) <= 10.0)
+					{
+						seenValue += sighting.Value;
+
+						if (sighting.Type)
+							seenTypes[sighting.Type->ID]++;
+					}
+				}
+
+				std::string seen;
+
+				for (auto const& [typeID, count] : seenTypes)
+				{
+					if (seen.size() < 60)
+						seen += " " + typeID + "x" + std::to_string(count);
+				}
+
+				Debug::Log("[NeuralAI] House %d plan %s member lost DIAG: %s (%s, %s) at (%d,%d) seen %d frames ago, %d cells from the target, "
+					"%d from the spot, %d from home, frame %d of %d; known defenses reaching it %d:%s; enemy seen within 10 cells %d:%s\n",
+					houseIdx, NeuralPlanNames[static_cast<size_t>(lostId)], pType->ID, role, offMap ? "off map" : "dead", cell.X, cell.Y,
+					Unsorted::CurrentFrame - itTrace->second.Frame, static_cast<int>(cell.DistanceFrom(plan.TargetCell)),
+					plan.StagingCell != CellStruct::Empty ? static_cast<int>(cell.DistanceFrom(plan.StagingCell)) : -1,
+					static_cast<int>(cell.DistanceFrom(homeCell)), Unsorted::CurrentFrame - plan.StartFrame, plan.Deadline - plan.StartFrame,
+					reaching, defenses.empty() ? " none" : defenses.c_str(), seenValue, seen.empty() ? " none" : seen.c_str());
+			}
+		}
+
 		// ---------------------------------------------------------------- Outgunned raids turn back
 		// Raids and strikes that send a ground group at a distant target. A group that, still far
 		// from its goal, has more enemy strength around it than it has itself (units seen near it,
@@ -6492,7 +6616,8 @@ namespace
 		// ---------------------------------------------------------------- Plan 13: Superweapon Race
 		// An enemy superweapon with a public countdown (ShowTimer=yes, shown to every player)
 		// is about to fire and we know its building: strike it before the timer runs out, by
-		// air when the target is lightly covered, else with a ground group.
+		// air when the target is lightly covered and the wing can bring it down, else with a ground
+		// group (pickStrikeGroup, as the other strikes at a building).
 		{
 			auto& plan = planOf(NeuralPlanId::SuperweaponRace);
 
@@ -6501,45 +6626,11 @@ namespace
 				auto const pTarget = FindBuildingByID(plan.TargetID);
 
 				if (!pTarget)
-				{
 					finishPlan(NeuralPlanId::SuperweaponRace, true, true);
-				}
 				else if (memberValue(plan) * 100 < plan.InitialValue * 40 || Unsorted::CurrentFrame >= plan.Deadline)
-				{
 					finishPlan(NeuralPlanId::SuperweaponRace, false, true);
-				}
 				else
-				{
-					for (const DWORD uid : plan.Members)
-					{
-						auto const pFoot = findOwnFoot(uid);
-
-						if (!pFoot)
-							continue;
-
-						if (auto const pAir = abstract_cast<AircraftClass*>(pFoot))
-						{
-							// Re-arm and strike again while the target stands.
-							if (ReadyPlanAircraft(pAir))
-							{
-								pAir->SetTarget(pTarget);
-								pAir->QueueMission(Mission::Attack, true);
-							}
-						}
-						else if (pFoot->GetMapCoords().DistanceFrom(pTarget->GetMapCoords()) <= 9.0)
-						{
-							if (pFoot->Target != pTarget && pFoot->Target == nullptr)
-							{
-								pFoot->SetTarget(pTarget);
-								pFoot->QueueMission(Mission::Attack, true);
-							}
-						}
-						else if (pFoot->Target == nullptr && pFoot->MegaMission != Mission::AttackMove)
-						{
-							OrderFootToAttackMove(pFoot, pTarget->GetCell());
-						}
-					}
-				}
+					strikeWithMembers(plan.Members, pTarget);
 			}
 			else if (planReady(NeuralPlanId::SuperweaponRace))
 			{
@@ -6579,45 +6670,13 @@ namespace
 					}
 				}
 
-				std::vector<FootClass*> group;
-
-				if (pTarget)
-				{
-					const CellStruct tc = pTarget->GetMapCoords();
-
-					if (CountKnownEnemyDefensesNear(pHouse, tc, 10.0, true) + CountVisibleEnemyMobileAANear(pHouse, tc, 10.0) <= 2)
-					{
-						for (auto const& [uid, pFoot] : ownFoots)
-						{
-							auto const pAir = abstract_cast<AircraftClass*>(pFoot);
-
-							if (isFreeAirStriker(pAir))
-							{
-								group.push_back(pAir);
-							}
-						}
-
-						std::sort(group.begin(), group.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
-
-						if (group.size() < 2 || !targetLessonAllows(pTarget->UniqueID, groupValueOf(group)))
-							group.clear();
-					}
-
-					if (group.empty() && zoneOf(tc) == homeZone)
-					{
-						group = collectIdleGround(false);
-						group.resize(std::min(group.size(), std::max<size_t>(12, group.size() / PlanStrikeIdleShare)));
-
-						// The superweapon stands deep in the base: the ground group goes only with the
-						// strength to beat what is known to guard it.
-						if (group.size() < 4 || !targetLessonAllows(pTarget->UniqueID, groupValueOf(group)) || groupValueOf(group) * 100
-							< knownEnemyStrengthOnWay(homeCell, tc, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
-						{
-							group.clear();
-						}
-					}
-				}
-
+				// The air wing must be able to bring the building down in its sorties: two aircraft were
+				// sent at whatever they could reach, and the superweapon buildings outlast them (in the
+				// archive of 2026-11-14 night both wings of two were shot down at the target, the
+				// superweapon standing); Air Strike went from 14% to 42% well with that test. The
+				// superweapon stands deep in the base: the ground group goes only with the strength to
+				// beat what is known on its way in.
+				std::vector<FootClass*> group = pickStrikeGroup(pTarget, SuperweaponRaceMinGround, SuperweaponRaceMaxGround);
 				const int utility = (pTarget && !group.empty()) ? (400 + (5400 - bestLeft) / 20) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::SuperweaponRace, utility))
@@ -6635,15 +6694,7 @@ namespace
 
 					startPlan(NeuralPlanId::SuperweaponRace, group, pTarget->GetMapCoords(), CellStruct::Empty, pTarget->UniqueID,
 						std::max(std::max(0, bestLeft), travelFrames) + 1800);
-
-					for (auto const pFoot : group)
-					{
-						if (pFoot->WhatAmI() == AbstractType::Aircraft)
-						{
-							pFoot->SetTarget(pTarget);
-							pFoot->QueueMission(Mission::Attack, true);
-						}
-					}
+					strikeWithMembers(planOf(NeuralPlanId::SuperweaponRace).Members, pTarget);
 				}
 			}
 		}
@@ -7904,8 +7955,9 @@ namespace
 
 		// ---------------------------------------------------------------- Plan 22: Forward Repair
 		// Our only repair station is far from the front: ask for a second one near our most
-		// forward structures (ForwardRepairCell, read by the building selector and placement), so
-		// damaged units repair close to the fight instead of driving home.
+		// forward structures (ForwardRepairCell, read by the building selector, which puts it ahead
+		// of its routine picks, and by placement), so damaged units repair close to the fight
+		// instead of driving home.
 		{
 			auto& plan = planOf(NeuralPlanId::ForwardRepair);
 			int repairStations = 0;
@@ -9289,16 +9341,22 @@ namespace
 
 		// ---------------------------------------------------------------- Plan 31: Rolling Siege
 		// Against a fortified base: artillery escorted by mobile anti-air and a few tanks takes
-		// the known defenses out one by one, always from outside their reach, moving on to the
-		// next defense nearest to the last one (within 20 cells) until none is left.
+		// the known defenses out one by one, always from outside the reach of every known one,
+		// starting with the one nearest home and moving on to the next defense nearest to the last
+		// one (within RollingSiegeChainCells) until none is left.
 		{
 			auto& plan = planOf(NeuralPlanId::RollingSiege);
 
-			auto pickNextDefense = [&](const CellStruct& from, int artilleryRange) -> std::pair<BuildingClass*, CellClass*>
+			// The next defense to shell: a known enemy ground defense on our landmass that the
+			// battery outranges by 2 cells, nearest to `from` within maxCells, with a firing spot at
+			// its reach + 2 cells on our side that no other known defense reaches (and the defense
+			// itself not within a cell of it). The first plan took the defense nearest a point 12
+			// cells inside the enemy base and shelled it from wherever its own reach ended, often
+			// under the guns of the outer ring: 30 of 40 plans lost a third of their value 10 to 25
+			// cells from the defense and turned back, 2 ended well (archive of 2026-11-14 night).
+			auto pickNextDefense = [&](const CellStruct& from, double maxCells, int artilleryRange) -> std::pair<BuildingClass*, CellClass*>
 			{
-				BuildingClass* pBest = nullptr;
-				CellClass* pBestStage = nullptr;
-				double bestDist = 1e9;
+				std::vector<std::pair<double, BuildingClass*>> candidates;
 
 				for (auto const pBld : knownEnemyBuildingList)
 				{
@@ -9309,24 +9367,36 @@ namespace
 					const CellStruct bc = pBld->GetMapCoords();
 					const double d = bc.DistanceFrom(from);
 
-					if (defenseRange <= 0 || artilleryRange < defenseRange + 2 * Unsorted::LeptonsPerCell || zoneOf(bc) != homeZone
-						|| d >= bestDist || d > 20.0)
-					{
-						continue;
-					}
+					if (defenseRange > 0 && artilleryRange >= defenseRange + 2 * Unsorted::LeptonsPerCell && d <= maxCells && zoneOf(bc) == homeZone)
+						candidates.emplace_back(d, pBld);
+				}
 
+				// Nearest first (ties by id), so the reach of the other defenses is weighed only until a
+				// spot is found.
+				std::sort(candidates.begin(), candidates.end(), [](auto const& a, auto const& b)
+					{
+						return a.first < b.first || (a.first == b.first && a.second->UniqueID < b.second->UniqueID);
+					});
+
+				for (auto const& [d, pBld] : candidates)
+				{
+					const int defenseRange = GroundRangeOf(pBld->Type);
+					const CellStruct bc = pBld->GetMapCoords();
 					const double standOff = (defenseRange + 2 * Unsorted::LeptonsPerCell) / static_cast<double>(Unsorted::LeptonsPerCell) + 0.5;
-					auto const pStage = landCellInZone(pointAlong(bc, homeCell, standOff, 0.0), homeZone, 2);
 
-					if (pStage)
+					for (auto const& [towardHome, aside] : RollingSiegeStageDirections)
 					{
-						bestDist = d;
-						pBest = pBld;
-						pBestStage = pStage;
+						auto const pStage = landCellInZone(pointAlong(bc, homeCell, standOff * towardHome, standOff * aside), homeZone, 2);
+
+						if (pStage && pStage->MapCoords.DistanceFrom(bc) * Unsorted::LeptonsPerCell > defenseRange + Unsorted::LeptonsPerCell
+							&& !inKnownDefenseReach(pStage->MapCoords, pBld))
+						{
+							return { pBld, pStage };
+						}
 					}
 				}
 
-				return { pBest, pBestStage };
+				return { nullptr, nullptr };
 			};
 
 			auto groupArtilleryRange = [&](const std::vector<DWORD>& uids) -> int
@@ -9361,7 +9431,7 @@ namespace
 
 				if (!pDefense && artilleryRange > 0)
 				{
-					auto const [pNext, pNextStage] = pickNextDefense(plan.TargetCell, artilleryRange);
+					auto const [pNext, pNextStage] = pickNextDefense(plan.TargetCell, RollingSiegeChainCells, artilleryRange);
 
 					if (pNext)
 					{
@@ -9369,6 +9439,7 @@ namespace
 						plan.TargetCell = pNext->GetMapCoords();
 						plan.StagingCell = pNextStage->MapCoords;
 						pDefense = pNext;
+						logSiegeTarget(plan, pNext);
 					}
 				}
 
@@ -9396,8 +9467,12 @@ namespace
 						if (!pFoot)
 							continue;
 
+						// A gun stopped near its spot but inside the defense's reach (the spot is
+						// 2.5 cells out of it, and a crowded spot leaves units up to 3 cells off) is
+						// sent back to the spot before it fires.
 						const bool isArtillery = SiegeRangeOf(pFoot->GetTechnoType()) >= 8 * Unsorted::LeptonsPerCell;
-						const bool inPlace = pFoot->GetMapCoords().DistanceFrom(plan.StagingCell) <= 3.0;
+						const bool outOfReach = pFoot->DistanceFrom(pDefense) > GroundRangeOf(pDefense->Type) + Unsorted::LeptonsPerCell / 2;
+						const bool inPlace = outOfReach && pFoot->GetMapCoords().DistanceFrom(plan.StagingCell) <= 3.0;
 
 						if (isArtillery && inPlace)
 						{
@@ -9410,7 +9485,10 @@ namespace
 						else if (pFoot->Target == nullptr || (isArtillery && !inPlace))
 						{
 							// Escorts and AA stay with the battery, which moves on as one.
-							IssueMoveOrder(pFoot, pStage, isArtillery ? 2.0 : 4.0);
+							if (isArtillery && !outOfReach && pFoot->Target)
+								pFoot->SetTarget(nullptr);
+
+							IssueMoveOrder(pFoot, pStage, isArtillery ? (outOfReach ? 2.0 : 0.5) : 4.0);
 						}
 					}
 				}
@@ -9430,29 +9508,37 @@ namespace
 						artillery.push_back(pFoot);
 						artilleryRange = std::min(artilleryRange, range);
 					}
-					else if (escorts.size() < 3)
+					else
 					{
 						escorts.push_back(pFoot);
 					}
 				}
 
+				// Numbers decide the fights the battery meets on its way and at its spot.
+				escorts.resize(std::min(escorts.size(), std::clamp<size_t>(escorts.size() / PlanStrikeIdleShare, 3, RollingSiegeMaxEscorts)));
+				const size_t groundEscorts = escorts.size();
+
 				for (auto const pAA : collectIdleGround(true))
 				{
-					if (escorts.size() < 5 && std::find(escorts.begin(), escorts.end(), pAA) == escorts.end()
+					if (escorts.size() < groundEscorts + RollingSiegeAntiAirEscorts && std::find(escorts.begin(), escorts.end(), pAA) == escorts.end()
 						&& std::find(artillery.begin(), artillery.end(), pAA) == artillery.end())
 					{
 						escorts.push_back(pAA);
 					}
 				}
 
+				// The first defense is the one nearest home with a safe firing spot: the outer ring of
+				// the enemy base, on our side.
 				std::pair<BuildingClass*, CellClass*> first { nullptr, nullptr };
 
-				if (artillery.size() >= 3)
-					first = pickNextDefense(homeCell, artilleryRange);
+				if (artillery.size() >= 3 && groundEscorts >= RollingSiegeMinEscorts)
+				{
+					first = pickNextDefense(homeCell, 1e9, artilleryRange);
 
-				// The first defense may be far from home: search from our side of the enemy base.
-				if (!first.first && artillery.size() >= 3 && knownEnemyCentroid != CellStruct::Empty)
-					first = pickNextDefense(pointAlong(knownEnemyCentroid, homeCell, 12.0, 0.0), artilleryRange);
+					// No defense with a safe spot: the search waits like a held-back raid.
+					if (!first.first)
+						macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::RollingSiege)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
+				}
 
 				const int utility = first.first ? (300 + std::min(150, foe.KnownDefenses * 20)) : -1000;
 
@@ -9462,6 +9548,9 @@ namespace
 					artillery.insert(artillery.end(), escorts.begin(), escorts.end());
 					startPlan(NeuralPlanId::RollingSiege, artillery, first.first->GetMapCoords(), first.second->MapCoords,
 						first.first->UniqueID, 9000);
+
+					if (planOf(NeuralPlanId::RollingSiege).Active)
+						logSiegeTarget(planOf(NeuralPlanId::RollingSiege), first.first);
 				}
 			}
 		}
