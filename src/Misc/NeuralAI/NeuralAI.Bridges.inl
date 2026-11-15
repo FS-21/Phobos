@@ -725,12 +725,12 @@ namespace
 			if (span.Duplicate)
 				continue;
 
-			bool seen = IsCellInSightOfAI(pHouse, span.HutCell);
+			bool seen = IsCellKnownToAI(pHouse, span.HutCell);
 
 			if (!seen && span.Charted)
 			{
-				seen = IsCellInSightOfAI(pHouse, span.Center) || IsCellInSightOfAI(pHouse, span.Deck.front())
-					|| IsCellInSightOfAI(pHouse, span.Deck.back());
+				seen = IsCellKnownToAI(pHouse, span.Center) || IsCellKnownToAI(pHouse, span.Deck.front())
+					|| IsCellKnownToAI(pHouse, span.Deck.back());
 			}
 
 			if (seen)
@@ -773,7 +773,7 @@ namespace
 			if (!pSlot || !pSlot->WeaponType)
 				return;
 
-			if (!own && (pHouse->IsAlliedWith(pFoot->Owner) || pFoot->Owner->IsNeutral() || !IsCellInSightOfAI(pHouse, cell)))
+			if (!own && (pHouse->IsAlliedWith(pFoot->Owner) || pFoot->Owner->IsNeutral() || !IsCellKnownToAI(pHouse, cell)))
 				return;
 
 			const bool naval = pType->Naval || pType->SpeedType == SpeedType::Float;
@@ -1144,14 +1144,14 @@ namespace
 		auto const& span = BridgeSpans[order.Span];
 		order.FleetZone = state.SeaLaneSpan >= 0 ? state.SeaLaneFleetZone : -1;
 
-		// The deck cell nearest to the middle that this house can see (it cannot aim into the fog).
+		// The deck cell nearest to the middle that this house knows (it cannot aim into the shroud or the fog).
 		int bestDist = INT_MAX;
 
 		for (auto const& cell : span.Deck)
 		{
 			const int dist = CellDistanceSq(cell, span.Center);
 
-			if (dist < bestDist && IsCellInSightOfAI(pHouse, cell))
+			if (dist < bestDist && IsCellKnownToAI(pHouse, cell))
 			{
 				bestDist = dist;
 				order.Cell = cell;

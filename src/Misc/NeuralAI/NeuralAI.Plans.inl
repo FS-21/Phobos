@@ -861,7 +861,7 @@ namespace
 		{
 			if (pUnit && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner && pUnit->Owner != pHouse
 				&& !pHouse->IsAlliedWith(pUnit->Owner) && !pUnit->Owner->IsNeutral() && pUnit->Type && pUnit->Type->Sensors
-				&& pUnit->Type->SensorsSight > 0 && IsCellInSightOfAI(pHouse, pUnit->GetMapCoords()))
+				&& pUnit->Type->SensorsSight > 0 && IsCellKnownToAI(pHouse, pUnit->GetMapCoords()))
 			{
 				sonars.push_back({ pUnit->GetMapCoords(), pUnit->Type->SensorsSight + 1 });
 			}
@@ -2083,10 +2083,11 @@ namespace
 		// PlanLessonAdvantagePercent of the last raid group this enemy house beat on its way in the
 		// last PlanLessonFrames: what waits behind the fog shows only by what it did to the last
 		// group, so each beaten raid asks for half as much again (user: the bigger group wins). A
-		// group of aircraft alone is not weighed.
+		// group of aircraft alone is not weighed. Feint weighs its way in itself: its decoy is small
+		// on purpose and need not win, and the lesson held back 24 of 26 decoys (2026-11-15).
 		auto raidMayStart = [&](NeuralPlanId id, std::vector<FootClass*> const& group, const CellStruct& target, int targetOwner) -> bool
 		{
-			constexpr NeuralPlanId gated[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout, NeuralPlanId::Feint,
+			constexpr NeuralPlanId gated[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout,
 				NeuralPlanId::TimingRush, NeuralPlanId::ExpansionDenial, NeuralPlanId::SuperweaponRace, NeuralPlanId::HarvesterAmbush,
 				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
 				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut };
@@ -3065,7 +3066,8 @@ namespace
 
 				// Decoy target: the building of that house nearest to our home, far enough from the
 				// main attack to pull its defenders away from it, with no known defense near (the decoy
-				// would only die there) and a way in held by no more than the decoy is worth.
+				// would only die there) and a decoy worth PlanStrikeAdvantagePercent of what is known on
+				// its way in (the raid gate does not weigh Feint).
 				BuildingClass* pDecoy = nullptr;
 				std::vector<FootClass*> decoyGroup;
 				double bestTrip = 1e9;
@@ -3102,7 +3104,7 @@ namespace
 						const int value = groupValueOf(group);
 
 						if (group.size() < FeintDecoySize || !targetLessonAllows(pBld->UniqueID, value)
-							|| knownEnemyStrengthOnWay(homeCell, bc, PlanStrikeGuardFrames) > value)
+							|| value * 100 < knownEnemyStrengthOnWay(homeCell, bc, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
 						{
 							continue;
 						}
@@ -3963,7 +3965,7 @@ namespace
 		// an idle group sized to beat them, before they get there. A unit is a base threat when its
 		// target is one of those buildings or harvesters, when its move or attack-move destination
 		// lies next to one of those buildings, or when its course over the last sightings leads into
-		// them. Only units in our current sight count. The group comes from free units near the
+		// them. Only units we know of count. The group comes from free units near the
 		// threat (never plan members or units marching in a wave), leaves a home reserve when the
 		// fight is away from our own buildings, and stops at known enemy defenses or once the threat
 		// is gone. TargetID = lead threat, StagingCell = the building it was after, AuxBaseline =
@@ -4015,7 +4017,7 @@ namespace
 			if (plan.Active)
 			{
 				auto const pLead = findTechnoByID(plan.TargetID);
-				const bool leadSeen = pLead && IsCellInSightOfAI(pHouse, pLead->GetMapCoords());
+				const bool leadSeen = pLead && IsCellKnownToAI(pHouse, pLead->GetMapCoords());
 				const CellStruct center = leadSeen ? pLead->GetMapCoords() : seenEnemyCentroidNear(plan.TargetCell, 10.0, 150);
 				const CellStruct ourCenter = groupCentroid(plan.Members);
 
@@ -4143,7 +4145,7 @@ namespace
 
 					const CellStruct cell = pFoot->GetMapCoords();
 
-					if (!IsCellInSightOfAI(pHouse, cell) || ObjectZone(pFoot, MovementZone::Normal) != homeZone)
+					if (!IsCellKnownToAI(pHouse, cell) || ObjectZone(pFoot, MovementZone::Normal) != homeZone)
 						continue;
 
 					// Unarmed engineers and spies walking into our buildings are threats too.
@@ -7754,7 +7756,10 @@ namespace
 				}
 				else if (plan.AuxBaseline == 0)
 				{
-					// The ambush takes its place first, the bait with it.
+					// The ambush takes its place first. The bait, the fastest of the group, keeps to the
+					// middle of the ambushers on the way: sent to the ambush cell at once, it got there
+					// alone and died in 24 of 65 plans (focus batch of 2026-11-15, lures 60 to 350 cells
+					// from home).
 					moveGroup(ambushers, pAmbush, 3.0);
 					int inPlace = 0;
 					int ambushAlive = 0;
@@ -7783,7 +7788,9 @@ namespace
 					}
 					else
 					{
-						IssueMoveOrder(pBait, pAmbush, 3.0);
+						const CellStruct middle = groupCentroid(ambushers);
+						auto const pWith = middle != CellStruct::Empty ? landCellInZone(middle, homeZone, 3) : nullptr;
+						IssueMoveOrder(pBait, pWith ? pWith : pAmbush, 3.0);
 					}
 				}
 				else if (plan.AuxBaseline == 1)
@@ -8540,14 +8547,14 @@ namespace
 				int bestScore = INT_MIN;
 				const int rangeCells = std::clamp(fleetRange / Unsorted::LeptonsPerCell, 6, 26);
 
-				// Enemy ships in our sight now: the firing spot stays out of their reach too.
+				// Enemy ships we know of: the firing spot stays out of their reach too.
 				std::vector<std::pair<CellStruct, int>> enemyShips;
 
 				for (auto const pEnemy : UnitClass::Array)
 				{
 					if (pEnemy && pEnemy->IsAlive && !pEnemy->InLimbo && pEnemy->Type && pEnemy->Type->Naval && pEnemy->Owner
 						&& pEnemy->Owner != pHouse && !pHouse->IsAlliedWith(pEnemy->Owner) && !pEnemy->Owner->IsNeutral()
-						&& IsCellInSightOfAI(pHouse, pEnemy->GetMapCoords()))
+						&& IsCellKnownToAI(pHouse, pEnemy->GetMapCoords()))
 					{
 						const int reach = GroundRangeOf(pEnemy->Type) / Unsorted::LeptonsPerCell;
 
@@ -8918,9 +8925,9 @@ namespace
 			{
 				auto const pTarget = findTechnoByID(plan.TargetID);
 				const int strength = groupStrength(plan.Members);
-				// Tracked in current sight only: explored cells would show it through the fog.
+				// Tracked while its cell is known (IsCellKnownToAI), as the match's vision rule shows it.
 				const bool targetSeen = pTarget && pTarget->CloakState == CloakState::Uncloaked
-					&& IsCellInSightOfAI(pHouse, pTarget->GetMapCoords());
+					&& IsCellKnownToAI(pHouse, pTarget->GetMapCoords());
 
 				if (targetSeen)
 				{
@@ -8973,7 +8980,7 @@ namespace
 				{
 					if (!pTech || !pTech->IsAlive || pTech->InLimbo || !pTech->Owner || pTech->Owner == pHouse
 						|| pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral() || pTech->CloakState != CloakState::Uncloaked
-						|| !IsCellInSightOfAI(pHouse, pTech->GetMapCoords()))
+						|| !IsCellKnownToAI(pHouse, pTech->GetMapCoords()))
 					{
 						continue;
 					}

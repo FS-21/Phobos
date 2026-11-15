@@ -1,8 +1,8 @@
 // NeuralAI.AirForce.inl: Expert 8 (Airforce & Sky Dominance).
 // The air work there is for a house (selector prior), strike wings on known targets away from
 // known anti-air with safe lanes and rearm cycles, interceptors against enemy air in sight and
-// patrol stops over the front. Everything is fog-fair: known enemy buildings, enemy units in
-// current sight, and the places where our own aircraft were shot down.
+// patrol stops over the front. Everything is fog-fair: known enemy buildings, enemy units on
+// ground this house knows (IsCellKnownToAI), and the places where our own aircraft were shot down.
 // Part of NeuralAI.cpp (included in order; one translation unit).
 
 namespace
@@ -33,7 +33,7 @@ namespace
 		bool CanProduceStriker { false };
 		bool CanProduceInterceptor { false };
 		bool CanBuildAirfield { false };
-		// Centroid of our ground units fighting enemies in sight (Empty when there is no fight).
+		// Centroid of our ground units fighting enemies we know of (Empty when there is no fight).
 		CellStruct FrontCell { CellStruct::Empty };
 		// Aircraft UniqueID -> the strike it flies for a wing. Key access only.
 		std::unordered_map<DWORD, NeuralAirStrikeOrder> Orders {};
@@ -126,7 +126,7 @@ namespace
 	}
 
 	// Anti-air risk for aircraft over a cell: known enemy anti-air defenses within 9 cells count 2
-	// each, enemy anti-air units in current sight within 8 cells 1 each, and the spots where our
+	// each, enemy anti-air units we know of within 8 cells 1 each, and the spots where our
 	// aircraft were shot down in the last 5400 frames within 6 cells 1 each (2 at most).
 	int AirStrikeRiskAt(HouseClass* pHouse, const CellStruct& cell)
 	{
@@ -136,7 +136,7 @@ namespace
 		{
 			if (!pTech->IsAlive || pTech->InLimbo || !pTech->Owner || pTech->Owner == pHouse || pHouse->IsAlliedWith(pTech->Owner)
 				|| pTech->Owner->IsNeutral() || pTech->WhatAmI() == AbstractType::Building
-				|| !IsCellInSightOfAI(pHouse, pTech->GetMapCoords()))
+				|| !IsCellKnownToAI(pHouse, pTech->GetMapCoords()))
 			{
 				return true;
 			}
@@ -245,7 +245,7 @@ namespace
 		return pBest;
 	}
 
-	// Centroid of our armed ground units that are fighting an enemy in current sight; needs 3 of them.
+	// Centroid of our armed ground units that are fighting an enemy we know of; needs 3 of them.
 	CellStruct FindAirSupportFront(HouseClass* pHouse)
 	{
 		int sumX = 0;
@@ -260,7 +260,7 @@ namespace
 			auto const pTarget = abstract_cast<TechnoClass*>(pFoot->Target);
 
 			if (!pTarget || !pTarget->Owner || pTarget->Owner == pHouse || pHouse->IsAlliedWith(pTarget->Owner)
-				|| pTarget->Owner->IsNeutral() || !IsCellInSightOfAI(pHouse, pTarget->GetMapCoords()))
+				|| pTarget->Owner->IsNeutral() || !IsCellKnownToAI(pHouse, pTarget->GetMapCoords()))
 			{
 				return;
 			}

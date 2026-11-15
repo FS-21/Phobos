@@ -1651,16 +1651,28 @@ namespace
 	// Per-house vision map built from the sight of the AI and its allies. Replaces
 	// CellClass::IsShrouded, which reflects the local player's shroud and would
 	// desync multiplayer and leak the human's exploration to the AI.
+	//
+	// The match's vision rule. Without fog of war (training matches) the map only has the shroud:
+	// a cell once explored stays revealed with whatever stands on it (units moving there, new
+	// buildings) until a working gap generator of an enemy covers it again; under the gap only the
+	// cells in sight now show, and once the gap goes they stay shrouded until looked at again. With
+	// fog of war only what is in sight now is seen.
 	constexpr int VisionMapSide = 512;
 
+	// Explored map of the house of the last rebuild (cells under an enemy gap only while in sight).
 	std::vector<uint8_t> VisionMap;
-	// Cells in sight of the AI and its allies right now (the explored map only ever grows).
+	// Cells in sight of the AI and its allies right now.
 	std::vector<uint8_t> CurrentSightMap;
 	std::array<std::vector<uint8_t>, 8> HouseExploredMaps;
 	int LastExploredResetFrame = -1;
 
 	int VisionMapFrame = -1;
 	int VisionMapOwner = -1;
+
+	bool IsFogOfWarMatch()
+	{
+		return GameModeOptionsClass::Instance.FogOfWar || (ScenarioClass::Instance && ScenarioClass::Instance->SpecialFlags.FogOfWar);
+	}
 
 	// Sight radius in cells of one object in the vision rule (it lends its sight to its owner
 	// and the owner's allies), 0 for an object off the map that sees nothing.
@@ -1674,21 +1686,19 @@ namespace
 		return pType ? std::clamp(static_cast<int>(pType->Sight), 1, 24) : 0;
 	}
 
-	// Calls func(index) for every vision map cell within radius cells of coords (dx * dx + dy * dy
-	// at most radius * radius), row by row.
+	// Calls func(index) for every vision map cell up to reach cells from coords on each axis with
+	// dx * dx + dy * dy at most radiusSq (at least reach * reach), row by row.
 	template <typename Func>
-	void ForEachCellInAISight(const CellStruct& coords, int radius, Func&& func)
+	void ForEachCellWithin(const CellStruct& coords, int reach, int radiusSq, Func&& func)
 	{
-		const int radiusSq = radius * radius;
-
-		for (int dy = -radius; dy <= radius; ++dy)
+		for (int dy = -reach; dy <= reach; ++dy)
 		{
 			const int y = coords.Y + dy;
 
 			if (y < 0 || y >= VisionMapSide)
 				continue;
 
-			int span = radius;
+			int span = reach;
 
 			while (span * span + dy * dy > radiusSq)
 				--span;
@@ -1699,6 +1709,62 @@ namespace
 
 			for (int x = firstX; x <= lastX; ++x)
 				func(row + x);
+		}
+	}
+
+	// Calls func(index) for every vision map cell within radius cells of coords (dx * dx + dy * dy
+	// at most radius * radius), row by row.
+	template <typename Func>
+	void ForEachCellInAISight(const CellStruct& coords, int radius, Func&& func)
+	{
+		ForEachCellWithin(coords, radius, radius * radius, std::forward<Func>(func));
+	}
+
+	// Shroud radius in cells of a gap generator working now, 0 otherwise. The engine keeps the gap
+	// only while the building is powered, and a deployed (super charged) one uses the larger radius.
+	int GetActiveGapRadius(const BuildingClass* pBld)
+	{
+		if (!pBld || !pBld->Type || !pBld->Type->GapGenerator || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner
+			|| !pBld->IsPowerOnline())
+		{
+			return 0;
+		}
+
+		auto const pType = pBld->Type;
+		auto const pExt = BuildingTypeExt::Fetch(pType);
+
+		if (pBld->GapSuperCharged)
+		{
+			const int superRadius = (pExt && pExt->SuperGapRadiusInCells != 0)
+				? pExt->SuperGapRadiusInCells.Get()
+				: pType->SuperGapRadiusInCells;
+
+			if (superRadius > 0)
+				return superRadius;
+		}
+
+		return (pExt && pExt->GapRadiusInCells != 0) ? pExt->GapRadiusInCells.Get() : pType->GapRadiusInCells;
+	}
+
+	// Calls func(index) for every vision map cell that a working gap generator shrouds again for
+	// pHouse: one of a house that is not pHouse and not allied with it, as the engine covers the
+	// cells with dx * dx + dy * dy below (radius + 1) squared around the building's location, moved
+	// one cell north for every two height levels.
+	template <typename Func>
+	void ForEachCellUnderEnemyGap(HouseClass* pHouse, Func&& func)
+	{
+		for (auto const pBld : BuildingClass::Array)
+		{
+			const int radius = GetActiveGapRadius(pBld);
+
+			if (radius <= 0 || pBld->Owner == pHouse || pBld->Owner->IsAlliedWith(pHouse))
+				continue;
+
+			const int lift = pBld->Location.Z / Unsorted::CellHeight;
+			const CellStruct center { static_cast<short>(pBld->Location.X / Unsorted::LeptonsPerCell - lift),
+				static_cast<short>(pBld->Location.Y / Unsorted::LeptonsPerCell - lift) };
+
+			ForEachCellWithin(center, radius, radius * radius + 2 * radius, func);
 		}
 	}
 
@@ -1728,6 +1794,13 @@ namespace
 
 		CurrentSightMap.assign(totalCells, 0);
 
+		// Under an enemy gap the explored cells are shrouded again; the sight below reveals the ones
+		// in sight now.
+		ForEachCellUnderEnemyGap(pHouse, [&explored](size_t idx)
+		{
+			explored[idx] = 0;
+		});
+
 		for (auto const pTechno : TechnoClass::Array)
 		{
 			if (!pTechno || !pTechno->Owner || (pTechno->Owner != pHouse && !pHouse->IsAlliedWith(pTechno->Owner)))
@@ -1748,6 +1821,8 @@ namespace
 		VisionMap = explored;
 	}
 
+	// Whether the sight of pHouse or its allies covers a cell right now: for the questions that need
+	// our own eyes there (a scout that arrived), not for what the house knows (IsCellKnownToAI).
 	bool IsCellInSightOfAI(HouseClass* pHouse, const CellStruct& coords)
 	{
 		if (!pHouse)
@@ -1762,6 +1837,8 @@ namespace
 		return CurrentSightMap[static_cast<size_t>(coords.Y) * VisionMapSide + coords.X] != 0;
 	}
 
+	// Whether pHouse has a cell explored: revealed by its or its allies' sight at some time and not
+	// shrouded again by an enemy gap generator since.
 	bool IsCellVisibleToAI(HouseClass* pHouse, CellClass* pCell)
 	{
 		if (!pHouse || !pCell)
@@ -1776,6 +1853,32 @@ namespace
 			return false;
 
 		return VisionMap[static_cast<size_t>(coords.Y) * VisionMapSide + coords.X] != 0;
+	}
+
+	// The vision rule for one cell: what stands on it is known while it is in sight now and, without
+	// fog of war, while it stays explored and no working enemy gap generator covers it.
+	bool IsKnownByVisionRule(bool inSightNow, bool explored, bool underEnemyGap)
+	{
+		return inSightNow || (explored && !underEnemyGap && !IsFogOfWarMatch());
+	}
+
+	// Whether pHouse knows what stands on a cell now (enemy units, new buildings, garrisons, a
+	// destroyed bridge), by the match's vision rule. RebuildVisionMap already keeps the cells under
+	// an enemy gap explored only while in sight.
+	bool IsCellKnownToAI(HouseClass* pHouse, const CellStruct& coords)
+	{
+		if (!pHouse)
+			return false;
+
+		if (VisionMapFrame != Unsorted::CurrentFrame || VisionMapOwner != pHouse->ArrayIndex)
+			RebuildVisionMap(pHouse);
+
+		if (coords.X < 0 || coords.X >= VisionMapSide || coords.Y < 0 || coords.Y >= VisionMapSide)
+			return false;
+
+		const size_t idx = static_cast<size_t>(coords.Y) * VisionMapSide + coords.X;
+
+		return IsKnownByVisionRule(CurrentSightMap[idx] != 0, VisionMap[idx] != 0, false);
 	}
 
 	// A spy: it enters enemy buildings for the spy effects (Agent=). The engine also sets Infiltrate

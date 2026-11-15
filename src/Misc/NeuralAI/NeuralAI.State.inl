@@ -1639,9 +1639,10 @@ namespace
 	constexpr double ComboWatchSightCells = 9.0;
 	constexpr int ComboWatchSightFrames = 30;
 	constexpr int ComboWatchStartFrames = 900;
-	// Bait Ambush: how long the bait fires at the building with no answer before the plan gives up,
-	// and how long the ambush waits for a chaser once the bait is back behind it.
-	constexpr int BaitLureWaitFrames = 450;
+	// Bait Ambush: how long the bait fires at the building with no answer before the plan gives up
+	// (the intercept set out 300 to 400 frames into the fire, after a wait of 450 had given up on
+	// 9 of 65), and how long the ambush waits for a chaser once the bait is back behind it.
+	constexpr int BaitLureWaitFrames = 900;
 	constexpr int BaitChaseWaitFrames = 450;
 	// A bait nobody answered is not tried again for this long: giving up sooner made the plan start
 	// twice as often (272 plans in 18 matches against 127 in 40).
@@ -1659,7 +1660,8 @@ namespace
 	constexpr size_t BaitAmbushSize = 8;
 	constexpr int BaitPlanFrames = 4500;
 	// The bait sets out once half the ambush stands within BaitInPlaceCells of its cell, or after
-	// BaitSetFrames, and has BaitApproachFrames to come within range of the building.
+	// BaitSetFrames (baits sent then went well as often as the others: 4 of 21 against 2 of 13), and
+	// has BaitApproachFrames to come within range of the building.
 	constexpr double BaitInPlaceCells = 5.0;
 	constexpr int BaitSetFrames = 1800;
 	constexpr int BaitApproachFrames = 900;
