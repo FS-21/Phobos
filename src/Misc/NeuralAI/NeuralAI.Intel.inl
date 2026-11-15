@@ -411,6 +411,12 @@ namespace
 
 		sighting.NearOurBase = sighting.NearOurBase || nearOurBase;
 		sighting.LastCoords = coords;
+
+		if (sighting.StandCoords == CellStruct::Empty || coords.DistanceFrom(sighting.StandCoords) > EnemyStandCells)
+		{
+			sighting.StandCoords = coords;
+			sighting.StandSinceFrame = Unsorted::CurrentFrame;
+		}
 	}
 
 	// Ages the sightings and rebuilds the enemy force profile: value by category,

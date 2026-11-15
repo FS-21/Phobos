@@ -364,6 +364,39 @@ namespace
 		return true;
 	}
 
+	// Where a passenger walks to be taken aboard (TakeAboardNow): the cell next to the transport
+	// nearest to it that it can stand on, fixed order among equals; nullptr when none is free. Sent
+	// onto the transport itself it asks to enter, and the transport sets out for it instead.
+	CellClass* BoardingCellNextTo(FootClass* pTransport, FootClass* pBoarder)
+	{
+		const CellStruct at = pTransport->GetMapCoords();
+		auto const pType = pBoarder->GetTechnoType();
+		CellClass* pBest = nullptr;
+		int bestDist = INT_MAX;
+
+		for (int dy = -1; dy <= 1; ++dy)
+		{
+			for (int dx = -1; dx <= 1; ++dx)
+			{
+				const CellStruct c { static_cast<short>(at.X + dx), static_cast<short>(at.Y + dy) };
+				auto const pCell = (dx != 0 || dy != 0) && MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+				if (!pCell || pCell->GetBuilding() || !pCell->IsClearToMove(pType->SpeedType, true, false, -1, pType->MovementZone, -1, false))
+					continue;
+
+				const int dist = pBoarder->DistanceFrom(pCell);
+
+				if (dist < bestDist)
+				{
+					bestDist = dist;
+					pBest = pCell;
+				}
+			}
+		}
+
+		return pBest;
+	}
+
 	// Lets the passengers of a transport on the ground out onto the cells next to it, at once: the
 	// steps of the engine's unload, which detaches each passenger and puts it on a cell next to
 	// the transport that it can enter (UnitClass::Mission_Unload). The mission itself first waits

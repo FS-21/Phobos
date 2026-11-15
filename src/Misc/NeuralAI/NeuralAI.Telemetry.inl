@@ -673,6 +673,137 @@ void NeuralAI::OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, Techn
 		pending[authors[1]->OriginPhase][authors[1]->Origin] += money - first;
 }
 
+namespace
+{
+	// What each house of the snapshot knows, for the trainer's map view: per vision map cell, bit N
+	// is set when the Nth snapshot house has the cell in sight now. Built with the AI's vision rule
+	// into buffers of the telemetry, so the AI's cached vision map (one house and frame at a time)
+	// and the explored maps stay exactly as the AI left them.
+	std::vector<uint8_t> TelemetrySightMasks;
+	std::array<HouseClass*, 8> TelemetrySightViewers {};
+	// House index bit of each snapshot house, so the masks reach the trainer as house indices.
+	std::array<uint32_t, 8> TelemetrySightHouseBits {};
+
+	// Side of the sight grid of the house the map view shows, in radar pixels.
+	constexpr int TelemetrySightGridSide = 128;
+
+	void BuildTelemetrySight(const AITrainerSharedTelemetry& snap)
+	{
+		TelemetrySightMasks.assign(static_cast<size_t>(VisionMapSide) * VisionMapSide, 0);
+		TelemetrySightViewers.fill(nullptr);
+		TelemetrySightHouseBits.fill(0u);
+
+		for (uint32_t i = 0; i < snap.NumHouses && i < TelemetrySightViewers.size(); ++i)
+		{
+			const int idx = snap.Houses[i].ArrayIndex;
+
+			if (idx < 0 || idx >= HouseClass::Array.Count || idx >= 32)
+				continue;
+
+			TelemetrySightViewers[i] = HouseClass::Array.GetItem(idx);
+			TelemetrySightHouseBits[i] = 1u << idx;
+		}
+
+		// The snapshot houses an owner's objects lend their sight to (the owner and its allies),
+		// worked out once per owner.
+		std::vector<int> viewersByOwner(static_cast<size_t>(HouseClass::Array.Count), -1);
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			const int radius = GetAISightRadius(pTechno);
+			const int ownerIdx = radius > 0 ? pTechno->Owner->ArrayIndex : -1;
+
+			if (ownerIdx < 0 || ownerIdx >= static_cast<int>(viewersByOwner.size()))
+				continue;
+
+			int& viewers = viewersByOwner[ownerIdx];
+
+			if (viewers < 0)
+			{
+				viewers = 0;
+
+				for (size_t i = 0; i < TelemetrySightViewers.size(); ++i)
+				{
+					auto const pViewer = TelemetrySightViewers[i];
+
+					if (pViewer && (pViewer == pTechno->Owner || pViewer->IsAlliedWith(pTechno->Owner)))
+						viewers |= 1 << i;
+				}
+			}
+
+			if (viewers == 0)
+				continue;
+
+			const uint8_t bits = static_cast<uint8_t>(viewers);
+
+			ForEachCellInAISight(pTechno->GetMapCoords(), radius, [bits](size_t idx)
+			{
+				TelemetrySightMasks[idx] |= bits;
+			});
+		}
+	}
+
+	// Snapshot house bits that have this cell in sight now (BuildTelemetrySight).
+	uint8_t TelemetrySightBitsAt(const CellStruct& cell)
+	{
+		if (TelemetrySightMasks.empty() || cell.X < 0 || cell.X >= VisionMapSide || cell.Y < 0 || cell.Y >= VisionMapSide)
+			return 0;
+
+		return TelemetrySightMasks[static_cast<size_t>(cell.Y) * VisionMapSide + cell.X];
+	}
+
+	// House index bits of the snapshot houses that have this cell in sight now.
+	uint32_t TelemetrySeenBy(const CellStruct& cell)
+	{
+		const uint8_t bits = TelemetrySightBitsAt(cell);
+		uint32_t houses = 0;
+
+		for (size_t i = 0; i < TelemetrySightHouseBits.size(); ++i)
+		{
+			if (bits & (1u << i))
+				houses |= TelemetrySightHouseBits[i];
+		}
+
+		return houses;
+	}
+
+	// House index bits of the snapshot houses that remember this enemy building (the buildings
+	// their known building cache keeps, in sight or not).
+	uint32_t TelemetryKnownBy(const BuildingClass* pBld)
+	{
+		uint32_t houses = 0;
+
+		if (!pBld->Owner || pBld->Owner->IsNeutral())
+			return houses;
+
+		for (size_t i = 0; i < TelemetrySightViewers.size(); ++i)
+		{
+			auto const pViewer = TelemetrySightViewers[i];
+
+			if (pViewer && pViewer != pBld->Owner && !pViewer->IsAlliedWith(pBld->Owner) && IsEnemyBuildingKnown(pViewer, pBld))
+				houses |= TelemetrySightHouseBits[i];
+		}
+
+		return houses;
+	}
+
+	void AppendBase64(std::string& out, const uint8_t* pData, size_t size)
+	{
+		static constexpr char Alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+		for (size_t i = 0; i < size; i += 3)
+		{
+			const uint32_t chunk = (static_cast<uint32_t>(pData[i]) << 16) | (i + 1 < size ? static_cast<uint32_t>(pData[i + 1]) << 8 : 0u)
+				| (i + 2 < size ? static_cast<uint32_t>(pData[i + 2]) : 0u);
+
+			out.push_back(Alphabet[(chunk >> 18) & 63]);
+			out.push_back(Alphabet[(chunk >> 12) & 63]);
+			out.push_back(i + 1 < size ? Alphabet[(chunk >> 6) & 63] : '=');
+			out.push_back(i + 2 < size ? Alphabet[chunk & 63] : '=');
+		}
+	}
+} // namespace
+
 void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool stalemate)
 {
 	AITrainerSharedTelemetry localSnap = {};
@@ -893,6 +1024,11 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 	if (matchEnded || (Unsorted::CurrentFrame % 60 == 0))
 	{
+		LARGE_INTEGER tempCostStart {};
+		LARGE_INTEGER tempCostFreq {};
+		QueryPerformanceCounter(&tempCostStart);
+		QueryPerformanceFrequency(&tempCostFreq);
+
 		SampleExpertGains();
 		SampleExpertCredit();
 
@@ -1646,6 +1782,34 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				static_cast<int>(ownCell.Y), garrison, bunkered, insideClean);
 		};
 
+		// While the map view of this slot is open, every radar point also says which houses have it
+		// in sight now and, for a building, which enemy houses remember it (house index bits). With
+		// a house chosen in the view, the sight grid of that house follows the radar.
+		const uint32_t viewRequest = TelemetryViewRequest ? TelemetryViewRequest[0] : 0u;
+		const bool withVision = viewRequest != 0u;
+		const int viewHouse = viewRequest >= 2u ? static_cast<int>(viewRequest - 2u) : -1;
+
+		LARGE_INTEGER tempSightStart {};
+		LARGE_INTEGER tempSightEnd {};
+		QueryPerformanceCounter(&tempSightStart);
+
+		if (withVision)
+			BuildTelemetrySight(*dst);
+
+		QueryPerformanceCounter(&tempSightEnd);
+
+		char visionBuf[32];
+
+		auto visionDetail = [&](const CellStruct& cell, const BuildingClass* pBld) -> const char*
+		{
+			if (!withVision)
+				return "";
+
+			std::snprintf(visionBuf, sizeof(visionBuf), ",%u,%u", TelemetrySeenBy(cell), pBld ? TelemetryKnownBy(pBld) : 0u);
+
+			return visionBuf;
+		};
+
 		char detailBuf[336];
 		bool firstPt = true;
 		int ptCount = 0;
@@ -1693,8 +1857,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(pBld->Type->Name, nameClean, sizeof(nameClean));
 
 			objectDetail(pBld, detailBuf, sizeof(detailBuf));
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
-				rx, ry, pBld->Owner->ArrayIndex, ptKind, idClean, nameClean, detailBuf);
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"%s%s]", firstPt ? "" : ",",
+				rx, ry, pBld->Owner->ArrayIndex, ptKind, idClean, nameClean, detailBuf, visionDetail(c, pBld));
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -1727,8 +1891,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(pUnit->Type ? pUnit->Type->Name : "", nameClean, sizeof(nameClean));
 
 			objectDetail(pUnit, detailBuf, sizeof(detailBuf));
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
-				rx, ry, pUnit->Owner->ArrayIndex, idClean, nameClean, detailBuf);
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"%s%s]", firstPt ? "" : ",",
+				rx, ry, pUnit->Owner->ArrayIndex, idClean, nameClean, detailBuf, visionDetail(c, nullptr));
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -1769,8 +1933,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(pInf->Type ? pInf->Type->Name : "", nameClean, sizeof(nameClean));
 
 			objectDetail(pInf, detailBuf, sizeof(detailBuf));
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"%s]", firstPt ? "" : ",",
-				rx, ry, pInf->Owner->ArrayIndex, pointKind, idClean, nameClean, detailBuf);
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"%s%s]", firstPt ? "" : ",",
+				rx, ry, pInf->Owner->ArrayIndex, pointKind, idClean, nameClean, detailBuf, visionDetail(c, nullptr));
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
@@ -1780,7 +1944,103 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			ptCount++;
 		}
 
-		jsonBuf.append("]\n}\n");
+		jsonBuf.append("]");
+
+		int viewPosition = -1;
+
+		for (uint32_t i = 0; withVision && viewHouse >= 0 && i < dst->NumHouses && i < TelemetrySightViewers.size(); ++i)
+		{
+			if (dst->Houses[i].ArrayIndex == viewHouse && TelemetrySightViewers[i])
+				viewPosition = static_cast<int>(i);
+		}
+
+		if (viewPosition >= 0)
+		{
+			// Sight grid of the house the map view shows, one bit per radar pixel (rows top to bottom,
+			// the high bit of each byte first) for the cell under the centre of the pixel: in sight
+			// now, and explored by its AI.
+			constexpr size_t gridBytes = static_cast<size_t>(TelemetrySightGridSide) * TelemetrySightGridSide / 8;
+			std::vector<uint8_t> sightGrid(gridBytes, 0);
+			std::vector<uint8_t> exploredGrid(gridBytes, 0);
+			auto const& explored = HouseExploredMaps[std::clamp(viewHouse, 0, 7)];
+			const bool hasExplored = explored.size() == static_cast<size_t>(VisionMapSide) * VisionMapSide;
+			const uint8_t viewBit = static_cast<uint8_t>(1u << viewPosition);
+
+			for (int py = 0; py < TelemetrySightGridSide; ++py)
+			{
+				for (int px = 0; px < TelemetrySightGridSide; ++px)
+				{
+					// The cell under the radar pixel: projectToRadar the other way round.
+					const float rx = static_cast<float>(px) + 0.5f;
+					const float ry = static_cast<float>(py) + 0.5f;
+					int cellX = 0;
+					int cellY = 0;
+
+					if (hasIsoBounds)
+					{
+						const float diff = ((rx - 3.0f) * 2.0f * localW) / 121.0f + 2.0f * localX;
+						const float sum = ((ry - 3.0f) * 2.0f * localH) / 121.0f + 2.0f * localY;
+						cellX = static_cast<int>(std::lround((diff + sum + 2.0f) * 0.5f));
+						cellY = static_cast<int>(std::lround((sum - diff + 2.0f * mapW) * 0.5f));
+					}
+					else
+					{
+						cellX = static_cast<int>(std::lround(minMapX + ((rx - 6.0f) * spanX) / 115.0f));
+						cellY = static_cast<int>(std::lround(minMapY + ((ry - 6.0f) * spanY) / 115.0f));
+					}
+
+					if (cellX < 0 || cellX >= VisionMapSide || cellY < 0 || cellY >= VisionMapSide)
+						continue;
+
+					const size_t cellIdx = static_cast<size_t>(cellY) * VisionMapSide + cellX;
+					const size_t bit = static_cast<size_t>(py) * TelemetrySightGridSide + px;
+					const uint8_t mask = static_cast<uint8_t>(0x80u >> (bit & 7));
+
+					if (TelemetrySightMasks[cellIdx] & viewBit)
+						sightGrid[bit >> 3] |= mask;
+
+					if (hasExplored && explored[cellIdx])
+						exploredGrid[bit >> 3] |= mask;
+				}
+			}
+
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), ",\n  \"viewAs\": {\"house\": %d, \"side\": %d, \"sight\": \"", viewHouse,
+				TelemetrySightGridSide);
+
+			if (lineLen > 0)
+				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
+
+			AppendBase64(jsonBuf, sightGrid.data(), sightGrid.size());
+			jsonBuf.append("\", \"explored\": \"");
+			AppendBase64(jsonBuf, exploredGrid.data(), exploredGrid.size());
+			jsonBuf.append("\"}");
+		}
+
+		jsonBuf.append("\n}\n");
+
+		// TEMP: cost of the snapshot with and without the map view's vision data.
+		{
+			LARGE_INTEGER tempCostEnd {};
+			QueryPerformanceCounter(&tempCostEnd);
+			static int tempCostSnapshots = 0;
+			static double tempCostSum[2] = { 0.0, 0.0 };
+			static double tempSightSum = 0.0;
+			static int tempCostCount[2] = { 0, 0 };
+			const double freq = static_cast<double>(std::max<LONGLONG>(1, tempCostFreq.QuadPart));
+			tempCostSum[withVision ? 1 : 0] += 1000.0 * static_cast<double>(tempCostEnd.QuadPart - tempCostStart.QuadPart) / freq;
+			tempCostCount[withVision ? 1 : 0]++;
+			tempSightSum += 1000.0 * static_cast<double>(tempSightEnd.QuadPart - tempSightStart.QuadPart) / freq;
+
+			if (++tempCostSnapshots % 10 == 0)
+			{
+				Debug::Log("[NeuralAI] TEMP telemetry cost DIAG frame %d: snapshot %.3f ms plain (%d), %.3f ms with vision (%d), sight build %.3f ms, view %u, json %u bytes.\n",
+					Unsorted::CurrentFrame, tempCostCount[0] ? tempCostSum[0] / tempCostCount[0] : 0.0, tempCostCount[0],
+					tempCostCount[1] ? tempCostSum[1] / tempCostCount[1] : 0.0, tempCostCount[1],
+					tempCostCount[1] ? tempSightSum / tempCostCount[1] : 0.0, viewRequest, static_cast<unsigned>(jsonBuf.size()));
+				tempCostSum[0] = tempCostSum[1] = tempSightSum = 0.0;
+				tempCostCount[0] = tempCostCount[1] = 0;
+			}
+		}
 
 		if (TelemetryJsonView)
 		{
