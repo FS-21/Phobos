@@ -942,6 +942,8 @@ namespace
 		// landing commitment since the last log line, and the frame of that line (diagnostics).
 		int FerryLandingRepicks { 0 };
 		int FerryLandingRepickLogFrame { -1 };
+		// Last log line of the ferry fleet split (diagnostics, at most every FerryIslandKeptLogFrames).
+		int FerryFleetLogFrame { -1 };
 		// Last frame the aircraft pick wanted a type that needs a dock and every dock was taken: the
 		// building pass answers with another airfield (AirDockWantedFrames).
 		int AirDockWantedFrame { -100000 };
@@ -1247,6 +1249,7 @@ namespace
 			this->FerryIslandKeptLogFrame = -1;
 			this->FerryLandingRepicks = 0;
 			this->FerryLandingRepickLogFrame = -1;
+			this->FerryFleetLogFrame = -1;
 			this->AirDockWantedFrame = -100000;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
@@ -1349,6 +1352,8 @@ namespace
 	// landing comes as one wave.
 	constexpr int FerryConvoyWaitFrames = 1800;
 	constexpr int FerryConvoyCells = 30;
+	// Ready combat transports needed before the odd-numbered ones strike the secondary island.
+	constexpr int FerrySplitFrontTransports = 4;
 	// Enemies seen near a landing this recently count against it even when out of sight now.
 	constexpr int FerryLandingSightingFrames = 900;
 	// How often the ferry island commitment logs how many times it kept a loaded transport on course.
