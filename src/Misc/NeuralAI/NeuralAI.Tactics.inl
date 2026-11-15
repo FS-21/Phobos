@@ -386,9 +386,9 @@ namespace
 	// (step 2) around `center`, not a bridge or tube cell, scored by the units already near it, cells
 	// already handed out and, when (prefX, prefY) is set, going that way (cost up to 200). With
 	// offMouths, never a passage mouth cell either (a unit moved out of the way does not park in the
-	// next mouth).
+	// next mouth), and with offNarrow never a narrow passage (IsNarrowPassage).
 	CellClass* FindClearingCell(FootClass* pFoot, const CellStruct& center, int minRing, int maxRing, double prefX, double prefY,
-		const std::vector<CellStruct>& occupied, const std::vector<CellStruct>& taken, bool offMouths = false)
+		const std::vector<CellStruct>& occupied, const std::vector<CellStruct>& taken, bool offMouths = false, bool offNarrow = false)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
@@ -418,7 +418,8 @@ namespace
 					if (!pCell || pCell->GetBuilding() || (pCell->LandType == LandType::Water) != naval || IsBridgeOrTubeCell(pCell)
 						|| (offMouths && IsPassageMouthCell(c))
 						|| MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
-						|| !pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false))
+						|| !pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false)
+						|| (offNarrow && IsNarrowPassage(c)))
 					{
 						continue;
 					}
@@ -497,7 +498,7 @@ namespace
 			const bool key = pType->Factory != AbstractType::None || pType->Refinery || pType->ResourceDestination;
 			const int score = pType->Cost + (key ? 5000 : 0);
 
-			if (score >= bestScore || !FootprintCutsLandWay(topLeft, width, height))
+			if (score >= bestScore || !FootprintCutsLandWay(topLeft, width, height, false))
 				continue;
 
 			bestScore = score;
@@ -1003,12 +1004,14 @@ namespace
 		}
 	}
 
-	// Bridge and tunnel mouths kept clear: every 300 frames, our idle ground units (IsIdleBlocker)
-	// standing on a passage mouth (IsPassageMouthCell), on a bridge deck or within 2 cells of one,
-	// within 2 cells of a tunnel tube's entry or exit cell, or within 3 cells of a tunnel building of
-	// ours or an ally (Ares Tunnel=), are moved 4..12 cells away (not onto a bridge, a tube or another
-	// mouth) when one of our units within 6 cells waits there with an order (move, attack-move, enter,
-	// harvest; 90+ frames on its cell). Up to 12 per pass.
+	// Bridge and tunnel mouths and narrow passages kept clear: every 300 frames, our idle ground units
+	// (IsIdleBlocker) standing on a passage mouth (IsPassageMouthCell), on a bridge deck or within 2
+	// cells of one, within 2 cells of a tunnel tube's entry or exit cell, within 3 cells of a tunnel
+	// building of ours or an ally (Ares Tunnel=), or in a narrow passage (IsNarrowPassage: a road
+	// between buildings, cliffs or water, user: idle units must not stand in the way near the roads)
+	// are moved 4..12 cells away (not onto a bridge, a tube, a mouth or another narrow passage) when
+	// one of our units within 6 cells waits there with an order (move, attack-move, enter, harvest;
+	// 90+ frames on its cell). Up to 12 per pass.
 	void UpdateJamMouths(HouseClass* pHouse)
 	{
 		const NeuralSlowStep slowStep { "UpdateJamMouths" };
@@ -1123,7 +1126,7 @@ namespace
 				}
 			}
 
-			if (!trafficNear || !atMouth(here))
+			if (!trafficNear || (!atMouth(here) && !IsNarrowPassage(here)))
 				return;
 
 			if (occupied.empty())
@@ -1135,7 +1138,7 @@ namespace
 				}
 			}
 
-			if (auto const pCell = FindClearingCell(pFoot, here, 4, 12, 0.0, 0.0, occupied, taken, true))
+			if (auto const pCell = FindClearingCell(pFoot, here, 4, 12, 0.0, 0.0, occupied, taken, true, true))
 			{
 				if (atMouth(pCell->MapCoords))
 					return;
@@ -1156,7 +1159,229 @@ namespace
 		if (moved > 0)
 		{
 			CountDecision(NeuralDecision::MouthCleared, pHouse->ArrayIndex);
-			Debug::Log("[NeuralAI] Frame %d | House #%d cleared %d idle units from bridge/tunnel mouths\n", now, pHouse->ArrayIndex, moved);
+			Debug::Log("[NeuralAI] Frame %d | House #%d cleared %d idle units from bridge/tunnel mouths and narrow passages\n", now,
+				pHouse->ArrayIndex, moved);
+		}
+	}
+
+	// Where an idle unit standing in an emergency lane steps aside: a free cell of its ground (water
+	// for a ship) 1..EmergencyLaneSideCells away, on no lane, not a bridge, tube or passage mouth.
+	// Across the way (dirX, dirY) beats along it, nearer beats farther, and open ground, cells no
+	// unit stands on and cells not handed out yet are preferred.
+	CellClass* FindLaneSideCell(FootClass* pFoot, const CellStruct& here, double dirX, double dirY,
+		const std::unordered_set<int>& laneCells, const std::vector<CellStruct>& taken)
+	{
+		auto const pType = pFoot->GetTechnoType();
+
+		if (!pType)
+			return nullptr;
+
+		const int zone = ObjectZone(pFoot, pType->MovementZone);
+		const bool naval = pType->Naval || pType->MovementZone == MovementZone::Water || pType->MovementZone == MovementZone::WaterBeach;
+		CellClass* pBest = nullptr;
+		int bestScore = INT_MAX;
+
+		for (int r = 1; r <= EmergencyLaneSideCells; ++r)
+		{
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::max(std::abs(dx), std::abs(dy)) != r)
+						continue;
+
+					const CellStruct c { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) };
+					auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+					if (!pCell || laneCells.contains(BridgeCellIndex(c)) || pCell->GetBuilding() || (pCell->LandType == LandType::Water) != naval
+						|| IsBridgeOrTubeCell(pCell) || IsPassageMouthCell(c)
+						|| MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
+						|| !pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false))
+					{
+						continue;
+					}
+
+					const double along = std::abs(dx * dirX + dy * dirY) / std::sqrt(static_cast<double>(dx * dx + dy * dy));
+					int score = static_cast<int>(along * 100.0) + r * 20;
+
+					if (pCell->GetContent())
+						score += 60;
+
+					if (std::find(taken.begin(), taken.end(), c) != taken.end())
+						score += 200;
+
+					if (IsNarrowPassage(c))
+						score += 40;
+
+					if (score < bestScore)
+					{
+						bestScore = score;
+						pBest = pCell;
+					}
+				}
+			}
+		}
+
+		return pBest;
+	}
+
+	// Emergency lanes (EmergencyLaneCheckFrames): our idle units standing on the next cells of a unit
+	// of ours that waits with an order step aside, across its way, so it gets through.
+	void UpdateEmergencyLanes(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.LastEmergencyLaneFrame >= 0 && now >= macro.LastEmergencyLaneFrame && now - macro.LastEmergencyLaneFrame < EmergencyLaneCheckFrames)
+			return;
+
+		macro.LastEmergencyLaneFrame = now;
+		const NeuralSlowStep slowStep { "UpdateEmergencyLanes" };
+
+		struct NeuralLane
+		{
+			std::vector<CellStruct> Cells;
+			double DirX;
+			double DirY;
+		};
+
+		std::vector<NeuralLane> lanes;
+		std::unordered_set<int> laneCells;
+
+		auto const collectLane = [&](FootClass* pFoot)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir() || pFoot->Transporter)
+				return;
+
+			const bool ordered = pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::AttackMove
+				|| pFoot->MegaMission == Mission::AttackMove || pFoot->CurrentMission == Mission::Enter
+				|| pFoot->CurrentMission == Mission::Harvest || pFoot->CurrentMission == Mission::Return;
+			AbstractClass* const pGoal = pFoot->Destination ? pFoot->Destination : pFoot->MegaDestination;
+
+			if (!ordered || !pGoal)
+				return;
+
+			auto const it = macro.FootProgress.find(pFoot->UniqueID);
+
+			if (it == macro.FootProgress.end() || now < it->second.SinceFrame || now - it->second.SinceFrame < EmergencyLaneWaitFrames)
+				return;
+
+			const CellStruct here = pFoot->GetMapCoords();
+			NeuralLane lane { {}, 0.0, 0.0 };
+			CellStruct cell = here;
+
+			// Its path, the way the engine walks it.
+			for (int step = 0; step < EmergencyLaneCells; ++step)
+			{
+				const int dir = pFoot->PathDirections[step];
+
+				if (dir < 0 || dir > 7)
+					break;
+
+				cell = cell + Unsorted::AdjacentCell[dir];
+				lane.Cells.push_back(cell);
+			}
+
+			// No path held: the straight way to its destination.
+			if (lane.Cells.empty())
+			{
+				const CellStruct goal = CellClass::Coord2Cell(pGoal->GetCoords());
+				const int dx = goal.X - here.X;
+				const int dy = goal.Y - here.Y;
+				const int span = std::max(std::abs(dx), std::abs(dy));
+
+				for (int i = 1; i <= std::min(span, EmergencyLaneCells); ++i)
+					lane.Cells.push_back(CellStruct { static_cast<short>(here.X + dx * i / span), static_cast<short>(here.Y + dy * i / span) });
+			}
+
+			if (lane.Cells.empty())
+				return;
+
+			const double vx = lane.Cells.back().X - here.X;
+			const double vy = lane.Cells.back().Y - here.Y;
+			const double len = std::sqrt(vx * vx + vy * vy);
+
+			if (len < 0.5)
+				return;
+
+			lane.DirX = vx / len;
+			lane.DirY = vy / len;
+
+			for (auto const& c : lane.Cells)
+				laneCells.insert(BridgeCellIndex(c));
+
+			lanes.push_back(std::move(lane));
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			collectLane(pUnit);
+
+		for (auto const pInf : InfantryClass::Array)
+			collectLane(pInf);
+
+		if (lanes.empty())
+			return;
+
+		std::vector<CellStruct> taken;
+		std::unordered_set<FootClass*> stepped;
+		int moved = 0;
+		int served = 0;
+
+		for (auto const& lane : lanes)
+		{
+			if (moved >= EmergencyLaneMovesPerCheck)
+				break;
+
+			bool helped = false;
+
+			for (auto const& c : lane.Cells)
+			{
+				auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+				if (!pCell || pCell->GetBuilding())
+					break;
+
+				for (auto pObj = pCell->GetContent(); pObj && moved < EmergencyLaneMovesPerCheck; pObj = pObj->NextObject)
+				{
+					auto const pBlocker = abstract_cast<FootClass*>(pObj);
+
+					if (!pBlocker || stepped.contains(pBlocker) || !IsIdleBlocker(pHouse, pBlocker))
+						continue;
+
+					if (auto const pSide = FindLaneSideCell(pBlocker, c, lane.DirX, lane.DirY, laneCells, taken))
+					{
+						taken.push_back(pSide->MapCoords);
+						stepped.insert(pBlocker);
+
+						if (IssueMoveOrder(pBlocker, pSide, 0.0))
+						{
+							++moved;
+							helped = true;
+						}
+					}
+				}
+			}
+
+			if (helped)
+				++served;
+		}
+
+		if (moved > 0)
+		{
+			CountDecision(NeuralDecision::JamCleared, pHouse->ArrayIndex);
+			macro.EmergencyLaneMoved += moved;
+			macro.EmergencyLaneServed += served;
+		}
+
+		if (macro.EmergencyLaneMoved > 0 && (macro.EmergencyLaneLogFrame < 0 || now < macro.EmergencyLaneLogFrame
+			|| now - macro.EmergencyLaneLogFrame >= EmergencyLaneLogFrames))
+		{
+			Debug::Log("[NeuralAI] Frame %d | House #%d emergency lanes: %d idle units stepped aside for %d units waiting with an order "
+				"(since frame %d)\n", now, pHouse->ArrayIndex, macro.EmergencyLaneMoved, macro.EmergencyLaneServed,
+				std::max(0, macro.EmergencyLaneLogFrame));
+			macro.EmergencyLaneLogFrame = now;
+			macro.EmergencyLaneMoved = 0;
+			macro.EmergencyLaneServed = 0;
 		}
 	}
 
@@ -1568,6 +1793,7 @@ namespace
 
 		UpdateJamBreaker(pHouse, stuckOrders);
 		UpdateJamMouths(pHouse);
+		UpdateEmergencyLanes(pHouse);
 		UpdateHoveringFlyers(pHouse);
 		CheckCellGhosts();
 
