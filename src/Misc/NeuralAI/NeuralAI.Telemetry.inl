@@ -1024,11 +1024,6 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 	if (matchEnded || (Unsorted::CurrentFrame % 60 == 0))
 	{
-		LARGE_INTEGER tempCostStart {};
-		LARGE_INTEGER tempCostFreq {};
-		QueryPerformanceCounter(&tempCostStart);
-		QueryPerformanceFrequency(&tempCostFreq);
-
 		SampleExpertGains();
 		SampleExpertCredit();
 
@@ -1789,14 +1784,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		const bool withVision = viewRequest != 0u;
 		const int viewHouse = viewRequest >= 2u ? static_cast<int>(viewRequest - 2u) : -1;
 
-		LARGE_INTEGER tempSightStart {};
-		LARGE_INTEGER tempSightEnd {};
-		QueryPerformanceCounter(&tempSightStart);
-
 		if (withVision)
 			BuildTelemetrySight(*dst);
-
-		QueryPerformanceCounter(&tempSightEnd);
 
 		char visionBuf[32];
 
@@ -2017,30 +2006,6 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		}
 
 		jsonBuf.append("\n}\n");
-
-		// TEMP: cost of the snapshot with and without the map view's vision data.
-		{
-			LARGE_INTEGER tempCostEnd {};
-			QueryPerformanceCounter(&tempCostEnd);
-			static int tempCostSnapshots = 0;
-			static double tempCostSum[2] = { 0.0, 0.0 };
-			static double tempSightSum = 0.0;
-			static int tempCostCount[2] = { 0, 0 };
-			const double freq = static_cast<double>(std::max<LONGLONG>(1, tempCostFreq.QuadPart));
-			tempCostSum[withVision ? 1 : 0] += 1000.0 * static_cast<double>(tempCostEnd.QuadPart - tempCostStart.QuadPart) / freq;
-			tempCostCount[withVision ? 1 : 0]++;
-			tempSightSum += 1000.0 * static_cast<double>(tempSightEnd.QuadPart - tempSightStart.QuadPart) / freq;
-
-			if (++tempCostSnapshots % 10 == 0)
-			{
-				Debug::Log("[NeuralAI] TEMP telemetry cost DIAG frame %d: snapshot %.3f ms plain (%d), %.3f ms with vision (%d), sight build %.3f ms, view %u, json %u bytes.\n",
-					Unsorted::CurrentFrame, tempCostCount[0] ? tempCostSum[0] / tempCostCount[0] : 0.0, tempCostCount[0],
-					tempCostCount[1] ? tempCostSum[1] / tempCostCount[1] : 0.0, tempCostCount[1],
-					tempCostCount[1] ? tempSightSum / tempCostCount[1] : 0.0, viewRequest, static_cast<unsigned>(jsonBuf.size()));
-				tempCostSum[0] = tempCostSum[1] = tempSightSum = 0.0;
-				tempCostCount[0] = tempCostCount[1] = 0;
-			}
-		}
 
 		if (TelemetryJsonView)
 		{
