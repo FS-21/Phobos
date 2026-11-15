@@ -11485,8 +11485,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			if (!pKeptGoal && keptZone >= 0 && pTrip->CommittedGoal != CellStruct::Empty && !carryingMCV && !carryingHarvester
-				&& hasEnemyPresenceInIslandZone(keptZone))
+			// At its landing (committed, or within FerryArrivalKeepCells of the last one picked) the
+			// transport finishes the trip whatever the goals say: an island often stopped being a goal
+			// the moment our transport reached it and became one again once it sailed off (20 of 34
+			// islands given up with a known distance were within 5 cells of the landing, 8 matches).
+			const bool arriving = pTrip->CommittedLanding != CellStruct::Empty
+				|| (pTrip->LastLanding != CellStruct::Empty && transCoords.DistanceFrom(pTrip->LastLanding) <= FerryArrivalKeepCells);
+
+			if (!pKeptGoal && keptZone >= 0 && pTrip->CommittedGoal != CellStruct::Empty
+				&& (arriving || (!carryingMCV && !carryingHarvester && hasEnemyPresenceInIslandZone(keptZone))))
 			{
 				pKeptGoal = MapClass::Instance.TryGetCellAt(pTrip->CommittedGoal);
 			}
