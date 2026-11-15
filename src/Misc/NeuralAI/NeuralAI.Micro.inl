@@ -8669,6 +8669,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pEO == pHouse || pHouse->IsAlliedWith(pEO) || pEO->IsNeutral() || pEO->IsObserver() || pEO->Defeated)
 				continue;
 
+			// Only what this house has seen: the island to land on and the second wave target were
+			// picked among every enemy building on the map.
+			if (!IsEnemyBuildingKnown(pHouse, pEB))
+				continue;
+
 			auto const pECell = pEB->GetCell();
 			if (!pECell || pECell->LandType == LandType::Water)
 				continue;
@@ -8825,12 +8830,50 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// What stands idle at this tick, for the production brake (NoteIdleArmy): the pools as the
+	// waves, the plans and the transports find them.
+	{
+		int idleVehicles = 0;
+		int idleShips = 0;
+
+		for (auto const pU : idleCombatUnits)
+		{
+			auto const pWeapon = pU->Type->GetWeapon(0);
+
+			if (IsAmphibiousOrAirTransport(pU->Type) || !pWeapon || !pWeapon->WeaponType)
+				continue;
+
+			if (pU->Type->Naval)
+				++idleShips;
+			else
+				++idleVehicles;
+		}
+
+		NoteIdleArmy(pHouse, idleVehicles, static_cast<int>(idleCombatInf.size()), idleShips);
+	}
+
 	// Strength gate on top of the unit count: the main wave (and the same-landmass push below)
 	// waits until our idle army clearly outweighs what this house knows of the enemy at the
 	// target, or a window opens (see EvaluateWaveLaunch). The endgame remnant hunt never waits.
 	// The unit count a team wave asks for (waveUnitsNeeded) may be below our own minimum.
-	const bool waveCountReady = idleCombatUnits.size() >= waveUnitsNeeded
-		|| idleCombatUnits.size() + idleCombatInf.size() >= waveUnitsNeeded + 4 || idleCombatInf.size() >= waveUnitsNeeded + 3;
+	// Only what gets to the target by itself makes the count (FootReachesAlone): with the army on
+	// another island the wave was three or five flying units at a time, launched because the
+	// vehicles that stayed behind made the number (394 waves of about 5 in 20000 frames, match #9885).
+	size_t waveAbleUnits = idleCombatUnits.size();
+	size_t waveAbleInf = idleCombatInf.size();
+
+	if (pWaveTargetCell && !endgameRemnantHunt)
+	{
+		const CellStruct waveGoal = pWaveTargetCell->MapCoords;
+		auto const pGoalBld = pWaveTargetCell->GetBuilding();
+		waveAbleUnits = static_cast<size_t>(std::count_if(idleCombatUnits.begin(), idleCombatUnits.end(),
+			[&](UnitClass* pU) { return FootReachesAlone(pU, waveGoal, pGoalBld); }));
+		waveAbleInf = static_cast<size_t>(std::count_if(idleCombatInf.begin(), idleCombatInf.end(),
+			[&](InfantryClass* pI) { return FootReachesAlone(pI, waveGoal, pGoalBld); }));
+	}
+
+	const bool waveCountReady = waveAbleUnits >= waveUnitsNeeded
+		|| waveAbleUnits + waveAbleInf >= waveUnitsNeeded + 4 || waveAbleInf >= waveUnitsNeeded + 3;
 
 	// Wave gate inputs, every 900 frames per house: why a house with an army never reaches the wave.
 	if (IsAITickWindow(900, 0))
@@ -8887,8 +8930,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Timing) Splits forces into parallel Squadron Alpha (pWaveTargetCell) and
 	// Squadron Bravo (pSecondaryWaveTargetCell)
 	if (pWaveTargetCell && !teamOrder.Hold
-		&& (endgameRemnantHunt || ((idleCombatUnits.size() >= waveUnitsNeeded
-			|| (idleCombatUnits.size() + idleCombatInf.size() >= waveUnitsNeeded + 4)) && waveStrengthReady)))
+		&& (endgameRemnantHunt || ((waveAbleUnits >= waveUnitsNeeded
+			|| (waveAbleUnits + waveAbleInf >= waveUnitsNeeded + 4)) && waveStrengthReady)))
 	{
 		const int waveTargetZone
 			= MapClass::Instance.GetMovementZoneType(pWaveTargetCell->MapCoords, MovementZone::Normal, false);
@@ -12701,7 +12744,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			// The others walk up and wait FerryWaitCells away.
+			// The others walk up and wait FerryWaitCells away. One that stands next to the parked
+			// transport goes aboard at once (TakeAboardNow), as the Airborne Front teams do: through
+			// the single radio link a load of twelve took longer than the wait for a full load, and
+			// transports sailed with one or two aboard while their reserved passengers walked up
+			// and back (match #9885: 52 of 93 trips with 2 aboard, 22 with 1; reservations expired
+			// with 77 walk orders and no Enter).
 			for (auto const pQueued : ferryQueue)
 			{
 				auto& queuedReservation = GetMacroState(pHouse).FerryReserved[pQueued->UniqueID];
@@ -12709,6 +12757,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (pQueued == pSingleActiveBoarder || pQueued->CurrentMission == Mission::Enter || pQueued->QueuedMission == Mission::Enter)
 					continue;
+
+				if (!pQueued->HasAnyLink() && TakeAboardNow(pTrans, pQueued))
+				{
+					GetMacroState(pHouse).FerryReserved.erase(pQueued->UniqueID);
+					ferryReservedFoot.erase(pQueued->UniqueID);
+					CountDecision(NeuralDecision::FerryTakenAboard, pHouse->ArrayIndex);
+					continue;
+				}
 
 				if (HoldFerryWaiter(pQueued, pTrans))
 					continue;
