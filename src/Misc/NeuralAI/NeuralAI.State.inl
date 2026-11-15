@@ -1354,6 +1354,8 @@ namespace
 	// How often the ferry island commitment logs how many times it kept a loaded transport on course.
 	constexpr int FerryIslandKeptLogFrames = 1800;
 	constexpr double FerryLandingRepickCells = 8.0;
+	// A loaded transport this close to its landing keeps its island whatever the goals say.
+	constexpr double FerryArrivalKeepCells = 20.0;
 	constexpr int FerryMostLoadWaitFrames = 2700;
 	constexpr int FerryUnderFireFrames = 300;
 
