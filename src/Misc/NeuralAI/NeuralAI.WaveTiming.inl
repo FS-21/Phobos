@@ -67,7 +67,7 @@ namespace
 
 	// Every AI tick after the opponent model: rebuilds the strength of each enemy house from what
 	// this house knows (known buildings, remembered sightings), records the sighted enemy units
-	// we watched die (seen at the last update, gone now, last cell still in our sight), and
+	// we watched die (seen at the last update, gone now, last cell still known to us), and
 	// compares our army with the strongest known enemy. Fog-fair; only order-free sums.
 	void UpdateEnemyStrength(HouseClass* pHouse)
 	{
@@ -134,7 +134,7 @@ namespace
 			}
 
 			if (!alive.contains(uid) && sighting.LastSeenFrame >= previousUpdate
-				&& IsCellInSightOfAI(pHouse, sighting.LastCoords))
+				&& IsCellKnownToAI(pHouse, sighting.LastCoords))
 			{
 				state.SeenDead.insert(uid);
 				state.Losses.push_back({ now, sighting.OwnerIndex, sighting.Value });

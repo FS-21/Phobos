@@ -78,8 +78,8 @@ namespace
 		return false;
 	}
 
-	// Combat value of the armed enemy units in our sight right now within radius (fog-fair: a unit
-	// standing in fog over ground explored earlier is not seen).
+	// Combat value of the armed enemy units this house knows of within radius (IsCellKnownToAI: in
+	// sight now, or on explored ground out of enemy gaps when the match has no fog of war).
 	int VisibleEnemyThreatNear(HouseClass* pHouse, const CellStruct& cell, int radius)
 	{
 		int threat = 0;
@@ -87,7 +87,7 @@ namespace
 		ForEachTechnoNear(cell, radius, [&](TechnoClass* pTech) -> bool
 		{
 			if (!pTech->Owner || pTech->Owner == pHouse || pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral()
-				|| pTech->WhatAmI() == AbstractType::Building || !IsCellInSightOfAI(pHouse, pTech->GetMapCoords()))
+				|| pTech->WhatAmI() == AbstractType::Building || !IsCellKnownToAI(pHouse, pTech->GetMapCoords()))
 			{
 				return true;
 			}
