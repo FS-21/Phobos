@@ -552,14 +552,9 @@ namespace
 		auto const pHop = GetSafeAirHop(pHouse, pAir, pTargetCell);
 
 		if (!pHop || pHop == pTargetCell)
-		{
-			pAir->SetTarget(pTarget);
-			pAir->QueueMission(Mission::Attack, true);
-		}
+			OrderAircraftAttack(pAir, pTarget);
 		else
-		{
 			IssueMoveOrder(pAir, pHop, 3.0);
-		}
 
 		return true;
 	}
@@ -576,14 +571,9 @@ namespace
 		auto const pHop = GetSafeAirHop(pHouse, pAir, pTargetCell);
 
 		if (!pHop || pHop == pTargetCell)
-		{
-			pAir->SetTarget(pTarget);
-			pAir->QueueMission(Mission::Attack, true);
-		}
+			OrderAircraftAttack(pAir, pTarget);
 		else
-		{
 			IssueMoveOrder(pAir, pHop, 3.0);
-		}
 	}
 
 	// Strike wings (Expert 8 in charge): idle strike aircraft with a full load and at least half
