@@ -73,6 +73,10 @@ namespace
 		bool AntiAir { false };
 		int OwnerIndex { -1 };
 		const TechnoTypeClass* Type { nullptr };
+		// Where it has stood since when (it moved no more than EnemyStandCells from there): a force
+		// gathering stands, one on its way does not (Preemptive Strike).
+		CellStruct StandCoords { CellStruct::Empty };
+		int StandSinceFrame { 0 };
 	};
 
 	struct NeuralOpponentProfile
@@ -930,6 +934,10 @@ namespace
 		std::vector<NeuralDelayedRetreat> DelayedRetreats {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoost {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanBoostUntilFrame {};
+		// The frame each plan last ended and whether it ended well: a combo chain is judged by the
+		// plan it led into.
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanEndFrame {};
+		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> PlanEndedWell {};
 		std::map<int, int> SuperReadySinceFrame {};
 
 		// Mobile factories (NeuralAI.MobileFactory.inl): the trip of each packed factory deployer (by
@@ -1212,6 +1220,8 @@ namespace
 			this->DelayedRetreats.clear();
 			this->PlanBoost.fill(0);
 			this->PlanBoostUntilFrame.fill(0);
+			this->PlanEndFrame.fill(0);
+			this->PlanEndedWell.fill(false);
 			this->SuperReadySinceFrame.clear();
 			this->MobileFactoryGoals.clear();
 			this->MobileFactoryStands.clear();
@@ -1576,6 +1586,53 @@ namespace
 	// 750 frames of march), and follows it this far from where it was gathering.
 	constexpr double PreemptiveReachCells = 45.0;
 	constexpr double PreemptiveLeashCells = 15.0;
+	// A gathering force: ground units seen within PreemptiveClusterCells of each other, at least
+	// PreemptiveMinValue of them standing (no more than EnemyStandCells from where they were) for
+	// PreemptiveGatherFrames. Any force seen in the last 150 frames was taken before, and 10 of 18
+	// plans went for one already on its way: it was 15 cells from its start point before the
+	// group got there, 600 frames into the plan at the median (2026-11-15).
+	constexpr double EnemyStandCells = 4.0;
+	constexpr int PreemptiveGatherFrames = 300;
+	constexpr double PreemptiveClusterCells = 8.0;
+	constexpr int PreemptiveMinValue = 140;
+	// The group: the free units nearest to the force, each within PreemptiveReachCells of it. They
+	// meet PreemptiveStageCells short of the force (out of reach of a force spread over
+	// PreemptiveClusterCells) and strike together once two thirds of them are within
+	// PreemptiveStageNearCells of that spot, PreemptiveStageWaitFrames into the plan, or once the
+	// fight has begun. The first twelve free units of the whole base, with only their centre within
+	// reach, came one by one: 6 of 18 plans lost a third of their value with the centre of the group
+	// 27 to 52 cells short and the head 4 to 19 cells from the force.
+	constexpr size_t PreemptiveMinMembers = 5;
+	constexpr size_t PreemptiveMaxMembers = 12;
+	constexpr double PreemptiveStageCells = 16.0;
+	constexpr double PreemptiveStageNearCells = 5.0;
+	constexpr int PreemptiveStageWaitFrames = 600;
+	// A force this near our nearest member is in the fight: the whole group strikes, and it is
+	// fought wherever it goes from there (it came at us).
+	constexpr double PreemptiveEngageCells = 8.0;
+	// Hold Under Towers: a ground enemy force of at least HoldTowersMinEnemyValue within
+	// HoldTowersEnemyCells of home, over HoldTowersOddsPercent of our free army within
+	// HoldTowersArmyCells, and an army of at least HoldTowersMinMembers: 19 of the 27 holds whose
+	// whole group died were of one or two units (3 of 24 such holds went well, 8 of 29 from three
+	// on, 2026-11-15). The attack is over when the ground enemy near home fell to
+	// HoldTowersRepelledPercent of its peak (killed or gone: no enemy at all within 30 cells never
+	// happens in a match of six or eight houses, so intact groups ran out of time); at the
+	// deadline the hold went well if the group kept HoldTowersKeptPercent of its value and the
+	// enemy near home is no longer that much stronger than it.
+	constexpr double HoldTowersEnemyCells = 30.0;
+	constexpr double HoldTowersArmyCells = 40.0;
+	constexpr int HoldTowersMinEnemyValue = 120;
+	constexpr int HoldTowersOddsPercent = 130;
+	constexpr size_t HoldTowersMinMembers = 3;
+	constexpr int HoldTowersRepelledPercent = 30;
+	constexpr int HoldTowersKeptPercent = 50;
+	// Combo Watch Strike: a sentry spotted a force when a ground enemy of it within
+	// ComboWatchSightCells of the sentry was seen in the last ComboWatchSightFrames; the follow-up
+	// it leads into has ComboWatchStartFrames to start. It started on any sighting before, whether
+	// or not a follow-up had a force to act on, and 60 of 63 ran out of time.
+	constexpr double ComboWatchSightCells = 9.0;
+	constexpr int ComboWatchSightFrames = 30;
+	constexpr int ComboWatchStartFrames = 900;
 	// Bait Ambush: how long the bait fires at the building with no answer before the plan gives up,
 	// and how long the ambush waits for a chaser once the bait is back behind it.
 	constexpr int BaitLureWaitFrames = 450;
