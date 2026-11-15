@@ -187,7 +187,7 @@ namespace
 			return;
 
 		// What a player sees: in sight now or, without fog of war, on explored ground out of enemy gaps.
-		if (!pHouse->SpySatActive && !IsCellKnownToAI(pHouse, coords))
+		if (!IsCellKnownToAI(pHouse, coords))
 			return;
 
 		const int now = Unsorted::CurrentFrame;
