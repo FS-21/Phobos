@@ -3193,6 +3193,40 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				CountDecision(NeuralDecision::BankFactoryPick, pHouse->ArrayIndex);
 		}
 
+		// TEMP diagnostic: what keeps the Forward Repair station from the pick while the plan runs
+		// (9 of 19 plans still ran out of time, 7 of them in one 8-player match with 37000 to 175000
+		// credits and no repair station sampled among the picks).
+		if (GetMacroState(pHouse).ForwardRepairUntilFrame > Unsorted::CurrentFrame && IsAITickWindow(450, evalDelay))
+		{
+			char stations[256] = "";
+			size_t used = 0;
+			auto const& cooldowns = GetMacroState(pHouse).BuildingPlacementCooldownUntilFrame;
+
+			for (auto const pType : BuildingTypeClass::Array)
+			{
+				if (!pType || !pType->UnitRepair || pType->Naval || used >= sizeof(stations) - 64)
+					continue;
+
+				const int ownedNow = BuildingTypeExt::CountOwnedNowWithDeployOrUpgrade(pType, pHouse);
+				const bool buildable = CanBuildUnderHumanRules(pHouse, pType);
+
+				if (ownedNow == 0 && !buildable)
+					continue;
+
+				auto const cd = cooldowns.find(pType->ArrayIndex);
+				const int cooldownLeft = cd != cooldowns.end() ? std::max(0, cd->second - Unsorted::CurrentFrame) : 0;
+				used += std::snprintf(stations + used, sizeof(stations) - used, " %s owned %d buildable %d cooldown %d;", pType->ID, ownedNow,
+					buildable ? 1 : 0, cooldownLeft);
+			}
+
+			auto const pBest = bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx) : nullptr;
+			auto const pCandidate = bestForwardRepairIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestForwardRepairIdx) : nullptr;
+			Debug::Log("[NeuralAI] House %d forwardRepair pick DIAG: candidate %s score %d, best %s score %d, income %d, air deficit %d, "
+				"in progress %d/%d, money %d, low power %d, stations%s\n", pHouse->ArrayIndex, pCandidate ? pCandidate->ID : "none",
+				bestForwardRepairScore, pBest ? pBest->ID : "none", bestBldScore, hasActiveBuildingIncome ? 1 : 0, bestFillsAirDeficit ? 1 : 0,
+				inProgressBldIdx, inProgressDefIdx, money, pHouse->HasLowPower() ? 1 : 0, used ? stations : " none");
+		}
+
 		// Forward Repair: the second repair station comes before the other picks, the bank governor's
 		// factories included, under the same terms as Island Hold below (which wins when both ask).
 		// The plan has 5400 frames for one building and its score alone never won: in the archive of
