@@ -404,11 +404,47 @@ namespace
 		}
 	}
 
+	// Idle warships with nothing in reach (no coastal building their gun hits from their sea, no enemy
+	// ship in it), reported at every AI tick by the coastal bombardment: the fewest over a window of
+	// ArmyIdleWindowFrames is what had nothing to do the whole time (IsArmyKindUnused).
+	void NoteShipsWithoutTarget(HouseClass* pHouse, int ships)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.ShipsWithoutTargetWindowStart < 0 || now < macro.ShipsWithoutTargetWindowStart)
+		{
+			macro.ShipsWithoutTargetWindowStart = now;
+			macro.ShipsWithoutTargetFloor = ships;
+
+			return;
+		}
+
+		macro.ShipsWithoutTargetFloor = std::min(macro.ShipsWithoutTargetFloor, ships);
+
+		if (now - macro.ShipsWithoutTargetWindowStart < ArmyIdleWindowFrames)
+			return;
+
+		const int before = macro.ShipsWithoutTarget;
+		macro.ShipsWithoutTarget = macro.ShipsWithoutTargetFloor;
+		macro.ShipsWithoutTargetFloor = ships;
+		macro.ShipsWithoutTargetWindowStart = now;
+
+		if ((before >= ShipsWithoutTargetBrake) != (macro.ShipsWithoutTarget >= ShipsWithoutTargetBrake))
+		{
+			Debug::Log("[NeuralAI] Frame %d | House #%d warships %s: %d idle with nothing in reach over %d frames (pause at %d)\n",
+				now, pHouse->ArrayIndex, macro.ShipsWithoutTarget >= ShipsWithoutTargetBrake ? "paused" : "resumed",
+				macro.ShipsWithoutTarget, ArmyIdleWindowFrames, ShipsWithoutTargetBrake);
+		}
+	}
+
 	bool IsArmyKindUnused(HouseClass* pHouse, ArmyKind kind)
 	{
 		const size_t i = static_cast<size_t>(kind);
+		auto const& macro = GetMacroState(pHouse);
 
-		return GetMacroState(pHouse).ArmyUnused[i] >= ArmyIdleBrake[i];
+		return macro.ArmyUnused[i] >= ArmyIdleBrake[i]
+			|| (kind == ArmyKind::Ships && macro.ShipsWithoutTarget >= ShipsWithoutTargetBrake);
 	}
 
 	// Offensive bank (HasOffensiveBank): against an enemy across the water the harassment from range

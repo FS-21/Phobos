@@ -1070,9 +1070,14 @@ namespace
 	// Does the unit get to this cell by itself? Yes when it crosses water alone, when the cell is on
 	// its ground by a vehicle's movement rules or by its own (IsSameGroundForFoot), or when the
 	// building that stands there can be reached from its ground. A unit on a cell of no ground zone
-	// (a factory exit, a bridge ramp) is not told apart, so it counts as able.
+	// (a factory exit, a bridge ramp) is not told apart, so it counts as able. A ship gets to a land
+	// target only as far as it hits it from its own sea (NavalReaches): every ship counted for an
+	// inland wave target, so the wave went out short of the units that could get there (match #9846).
 	bool FootReachesAlone(const FootClass* pFoot, const CellStruct& cell, const BuildingClass* pBuilding = nullptr)
 	{
+		if (pFoot && IsWaterBound(pFoot->GetTechnoType()))
+			return NavalReaches(pFoot, cell, pBuilding);
+
 		if (!pFoot || CrossesWaterAlone(pFoot->GetTechnoType()))
 			return true;
 
