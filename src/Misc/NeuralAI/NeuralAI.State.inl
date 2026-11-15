@@ -1626,6 +1626,12 @@ namespace
 	constexpr size_t HoldTowersMinMembers = 3;
 	constexpr int HoldTowersRepelledPercent = 30;
 	constexpr int HoldTowersKeptPercent = 50;
+	// A hold starts only when the army and our ground defenses within HoldTowersDefenseCells of the
+	// rally are worth HoldTowersStandPercent of the force: below that the towers do not save the
+	// army, it died about 525 frames in (focus batch of 12 matches, 2026-11-15: 4 of 22 such holds
+	// went well, 51 of 74 from there on).
+	constexpr double HoldTowersDefenseCells = 10.0;
+	constexpr int HoldTowersStandPercent = 100;
 	// Combo Watch Strike: a sentry spotted a force when a ground enemy of it within
 	// ComboWatchSightCells of the sentry was seen in the last ComboWatchSightFrames; the follow-up
 	// it leads into has ComboWatchStartFrames to start. It started on any sighting before, whether
