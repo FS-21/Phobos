@@ -38,6 +38,28 @@ namespace
 		return range;
 	}
 
+	// One of the ground weapons of this type does damage to that building's armor: a dog or a gun
+	// that only hits infantry makes no house answer for its building (Bait Ambush, Feint).
+	bool HurtsBuilding(TechnoTypeClass* pType, BuildingClass* pBld)
+	{
+		if (!pType || !pBld || !pBld->Type)
+			return false;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWS = pType->GetWeapon(i);
+			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+			if (pWeapon && pWeapon->Warhead && LandTargetingAllows(pType, i) && WeaponHitsGround(pWeapon)
+				&& GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBld, pBld->Type) > 0.0)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	// A structure a siege unit unfolded into: armed against the ground, packs up again
 	// (UndeploysInto), not a ConYard, refinery, slave miner or base extender. Nod artillery,
 	// Juggernaut, Tick Tank in C&C Reloaded; nothing is matched by name.
@@ -2000,10 +2022,12 @@ namespace
 
 		// Shelved plans start only in a training focus match that asks for them: Airborne Front
 		// went well in none of 34 plans behind a main attack and is being redesigned (user,
-		// 2026-11-14), so ordinary matches do not spend units or learning on it meanwhile.
+		// 2026-11-14), so ordinary matches do not spend units or learning on it meanwhile. Bait
+		// Ambush (12% of 678) and Feint (3% of 122) were built on enemies that chase a lone unit
+		// or pull their defenders for nothing, and are being redesigned too (user, 2026-11-15).
 		auto planShelved = [](NeuralPlanId id) -> bool
 		{
-			constexpr NeuralPlanId shelved[] = { NeuralPlanId::AirborneFront };
+			constexpr NeuralPlanId shelved[] = { NeuralPlanId::AirborneFront, NeuralPlanId::BaitAmbush, NeuralPlanId::Feint };
 
 			return std::find(std::begin(shelved), std::end(shelved), id) != std::end(shelved)
 				&& !TrainingFocus().Plans[static_cast<size_t>(id)];
@@ -2804,160 +2828,250 @@ namespace
 		};
 
 		// ---------------------------------------------------------------- Plan 5: Feint
-		// While our army gathers, a cheap decoy group attacks a known enemy building far from
-		// the main approach to pull defenders away. Success = enemy forces seen gathering at
-		// the decoy target after it arrives.
+		// While our main attack is on its way to an enemy house, a small fast decoy fires at a building
+		// of that house far from where the attack is aimed, so the house sends its defenders there
+		// instead. A Neural AI house answers whoever fires at its buildings with one intercept group at
+		// a time, worth 1.3x the attacker (Base Threat Intercept), and the decoy pulls back once that
+		// answer is around it. The old feint had no attack behind it and sent the four cheapest units
+		// to the far side of the enemy base: they arrived 4 times in 100 (2026-11-13), and nothing used
+		// the defenders they drew. Success = enemy value of the decoy's own seen coming around it near
+		// its target. AnchorCell = where the main attack was aimed, AuxBaseline = enemy value around the
+		// decoy when it first came within FeintNearCells of its target (-1 before), AuxPeak = the most
+		// seen around it above that.
 		{
 			auto& plan = macro.Plans[static_cast<size_t>(NeuralPlanId::Feint)];
 
-			auto enemyValueNear = [&](const CellStruct& cell) -> int
+			auto enemyValueNear = [&](const CellStruct& cell, double radius) -> int
 			{
 				int value = 0;
 
 				for (auto const& [uid, sighting] : macro.EnemySightings)
 				{
-					if (Unsorted::CurrentFrame - sighting.LastSeenFrame <= 150 && sighting.LastCoords.DistanceFrom(cell) <= 10.0)
+					if (Unsorted::CurrentFrame - sighting.LastSeenFrame <= 150 && sighting.LastCoords.DistanceFrom(cell) <= radius)
 						value += sighting.Value;
 				}
 
 				return value;
 			};
 
+			// TEMP diagnostic (feint summary DIAG): frames into the plan when the target's owner first
+			// sent its intercept at one of the decoys (-1 never), per house.
+			static std::array<int, 32> feintAnswered {};
+
+			auto endFeint = [&](bool success, const char* why, int rule = __builtin_LINE())
+			{
+				// TEMP diagnostic: one line per feint.
+				std::string types;
+
+				for (const DWORD uid : plan.Members)
+				{
+					if (auto const it = ownFoots.find(uid); it != ownFoots.end())
+						types += std::string(it->second->GetTechnoType()->ID) + " ";
+				}
+
+				auto const pTarget = FindBuildingByID(plan.TargetID);
+				Debug::Log("[NeuralAI] House %d feint summary DIAG: %s after %d frames (%s), decoy %s| value %d of %d, target %s at (%d,%d) "
+					"of house %d, %d cells from home and %d from the main attack at (%d,%d), arrived %d, drew %d over %d, answered %d.\n",
+					houseIdx, success ? "well" : "badly", Unsorted::CurrentFrame - plan.StartFrame, why, types.c_str(), memberValue(plan),
+					plan.InitialValue, pTarget ? pTarget->Type->ID : "gone", plan.TargetCell.X, plan.TargetCell.Y, plan.TargetOwner,
+					static_cast<int>(plan.TargetCell.DistanceFrom(homeCell)), static_cast<int>(plan.TargetCell.DistanceFrom(plan.AnchorCell)),
+					plan.AnchorCell.X, plan.AnchorCell.Y, plan.Arrived ? plan.ArrivedFrame - plan.StartFrame : -1, plan.AuxPeak,
+					std::max(0, plan.AuxBaseline), feintAnswered[houseIdx & 31]);
+				finishPlan(NeuralPlanId::Feint, success, true, rule);
+			};
+
 			if (plan.Active)
 			{
+				auto const pTarget = FindBuildingByID(plan.TargetID);
+				const bool targetStands = pTarget && pTarget->IsAlive && !pTarget->InLimbo;
 				const int value = memberValue(plan);
-				auto const pDecoyCell = MapClass::Instance.TryGetCellAt(plan.TargetCell);
+				int sumX = 0;
+				int sumY = 0;
+				int alive = 0;
 
-				if (plan.Arrived)
-					plan.AuxPeak = std::max(plan.AuxPeak, enemyValueNear(plan.TargetCell));
-
-				const bool drewDefenders = plan.Arrived && plan.AuxPeak >= plan.AuxBaseline + 60;
-
-				if (drewDefenders)
+				for (const DWORD uid : plan.Members)
 				{
-					finishPlan(NeuralPlanId::Feint, true, true);
-				}
-				else if (!pDecoyCell || value * 100 < plan.InitialValue * 25 || Unsorted::CurrentFrame >= plan.Deadline
-					|| (plan.Arrived && Unsorted::CurrentFrame - plan.ArrivedFrame >= 900))
-				{
-					finishPlan(NeuralPlanId::Feint, false, true);
-				}
-				else
-				{
-					int sumX = 0;
-					int sumY = 0;
-					int alive = 0;
-
-					for (const DWORD uid : plan.Members)
+					if (auto const it = ownFoots.find(uid); it != ownFoots.end())
 					{
-						auto const it = ownFoots.find(uid);
-
-						if (it == ownFoots.end())
-							continue;
-
 						const CellStruct fc = it->second->GetMapCoords();
 						sumX += fc.X;
 						sumY += fc.Y;
 						alive++;
-
-						if (it->second->Target == nullptr && it->second->MegaMission != Mission::AttackMove)
-							OrderFootToAttackMove(it->second, pDecoyCell);
 					}
+				}
 
-					if (alive > 0 && !plan.Arrived
-						&& CellStruct { static_cast<short>(sumX / alive), static_cast<short>(sumY / alive) }.DistanceFrom(plan.TargetCell) <= 8.0)
+				const CellStruct centre = alive > 0
+					? CellStruct { static_cast<short>(sumX / alive), static_cast<short>(sumY / alive) }
+					: CellStruct::Empty;
+
+				// What stands around the building already is no answer: only what comes after the decoy
+				// is near counts.
+				if (centre != CellStruct::Empty && centre.DistanceFrom(plan.TargetCell) <= FeintNearCells)
+				{
+					const int around = enemyValueNear(centre, FeintDrawCells);
+
+					if (plan.AuxBaseline < 0)
+						plan.AuxBaseline = around;
+
+					plan.AuxPeak = std::max(plan.AuxPeak, around - plan.AuxBaseline);
+				}
+
+				if (!plan.Arrived && centre != CellStruct::Empty && centre.DistanceFrom(plan.TargetCell) <= 8.0)
+				{
+					plan.Arrived = true;
+					plan.ArrivedFrame = Unsorted::CurrentFrame;
+				}
+
+				// TEMP diagnostic: whether the target's owner sent its intercept at the decoy.
+				if (feintAnswered[houseIdx & 31] < 0 && plan.TargetOwner >= 0 && plan.TargetOwner < HouseClass::Array.Count)
+				{
+					auto const pOwner = HouseClass::Array.GetItem(plan.TargetOwner);
+
+					if (pOwner && NeuralAI::IsEnabledForHouse(pOwner))
 					{
-						plan.Arrived = true;
-						plan.ArrivedFrame = Unsorted::CurrentFrame;
-						plan.AuxBaseline = enemyValueNear(plan.TargetCell);
-						plan.AuxPeak = plan.AuxBaseline;
+						auto const& intercept = GetMacroState(pOwner).Plans[static_cast<size_t>(NeuralPlanId::BaseThreatIntercept)];
+
+						if (intercept.Active && std::find(plan.Members.begin(), plan.Members.end(), intercept.TargetID) != plan.Members.end())
+							feintAnswered[houseIdx & 31] = Unsorted::CurrentFrame - plan.StartFrame;
+					}
+				}
+
+				if (plan.AuxPeak > 0 && plan.AuxPeak * 100 >= plan.InitialValue * FeintDrawPercent)
+				{
+					endFeint(true, "drew the defenders");
+				}
+				else if (!targetStands)
+				{
+					endFeint(false, "target gone");
+				}
+				else if (alive == 0 || value * 100 < plan.InitialValue * FeintLossPercent)
+				{
+					endFeint(false, "decoy beaten");
+				}
+				else if (Unsorted::CurrentFrame >= plan.Deadline)
+				{
+					endFeint(false, "out of time");
+				}
+				else if (plan.Arrived && Unsorted::CurrentFrame - plan.ArrivedFrame >= FeintAnswerWaitFrames)
+				{
+					endFeint(false, "nobody answered");
+				}
+				else
+				{
+					// The decoy fires at the building: a unit that only walks near it is no threat to
+					// any house.
+					for (const DWORD uid : plan.Members)
+					{
+						auto const it = ownFoots.find(uid);
+
+						if (it != ownFoots.end() && it->second->Target != pTarget)
+						{
+							it->second->SetTarget(pTarget);
+							it->second->QueueMission(Mission::Attack, true);
+						}
 					}
 				}
 			}
-			else
+			else if (!planShelved(NeuralPlanId::Feint)
+				&& Unsorted::CurrentFrame >= macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::Feint)])
 			{
-				std::vector<FootClass*> idleArmy = collectIdleGround(false);
-				BuildingClass* pMain = nullptr;
-				double mainDist = 1e9;
-				int sumX = 0;
-				int sumY = 0;
-				int known = 0;
+				// Where our main attack is aimed and at whom: a main attack plan on its way, or a wave
+				// sent out within FeintWaveFrames (its owner is that of the known building nearest to it).
+				constexpr NeuralPlanId mainAttacks[] = { NeuralPlanId::TimingRush, NeuralPlanId::Pincer, NeuralPlanId::BaseTrade,
+					NeuralPlanId::AllyJointAttack, NeuralPlanId::ThreeFrontAssault, NeuralPlanId::FactoryDecapitation };
+				CellStruct front = CellStruct::Empty;
+				int frontOwner = -1;
 
-				for (auto const pBld : knownEnemyBuildingList)
+				for (const NeuralPlanId id : mainAttacks)
 				{
-					if (!isKnownEnemyBuilding(pBld)
-						|| ObjectZone(pBld, MovementZone::Normal) != homeZone)
-					{
-						continue;
-					}
+					auto const& attack = macro.Plans[static_cast<size_t>(id)];
 
-					const CellStruct bc = pBld->GetMapCoords();
-					sumX += bc.X;
-					sumY += bc.Y;
-					known++;
-
-					if (bc.DistanceFrom(homeCell) < mainDist)
+					if (attack.Active && !attack.Arrived && attack.TargetCell != CellStruct::Empty)
 					{
-						mainDist = bc.DistanceFrom(homeCell);
-						pMain = pBld;
+						front = attack.TargetCell;
+						frontOwner = attack.TargetOwner;
+						break;
 					}
 				}
 
-				// The decoy group is the four cheapest idle units: a building where such a group already
-				// failed is no decoy target while that lesson stands.
-				std::vector<FootClass*> decoyGroup = idleArmy;
-				std::stable_sort(decoyGroup.begin(), decoyGroup.end(), [](FootClass* a, FootClass* b)
-					{ return a->GetTechnoType()->Cost < b->GetTechnoType()->Cost; });
-				decoyGroup.resize(std::min<size_t>(decoyGroup.size(), 4));
-				const int decoyValue = groupValueOf(decoyGroup);
-
-				// Decoy target: a known building on the far side of the enemy base, away from
-				// the main approach (angle > ~70 degrees around the enemy centroid).
-				BuildingClass* pDecoy = nullptr;
-
-				if (pMain && known >= 4 && idleArmy.size() >= 8)
+				if (front == CellStruct::Empty && macro.LastWaveTargetCell != CellStruct::Empty
+					&& Unsorted::CurrentFrame - macro.LastWaveDispatchFrame <= FeintWaveFrames)
 				{
-					const double cx = sumX / static_cast<double>(known);
-					const double cy = sumY / static_cast<double>(known);
-					const CellStruct mc = pMain->GetMapCoords();
-					const double mx = mc.X - cx;
-					const double my = mc.Y - cy;
-					const double mLen = std::max(1.0, std::sqrt(mx * mx + my * my));
-					double bestDecoyScore = -1e9;
+					front = macro.LastWaveTargetCell;
+				}
+
+				if (front != CellStruct::Empty && frontOwner < 0)
+				{
+					double nearest = 1e9;
 
 					for (auto const pBld : knownEnemyBuildingList)
 					{
-						if (!isKnownEnemyBuilding(pBld) || pBld == pMain || !targetLessonAllows(pBld->UniqueID, decoyValue))
+						if (isKnownEnemyBuilding(pBld) && pBld->GetMapCoords().DistanceFrom(front) < nearest)
+						{
+							nearest = pBld->GetMapCoords().DistanceFrom(front);
+							frontOwner = pBld->Owner->ArrayIndex;
+						}
+					}
+				}
+
+				std::vector<FootClass*> idleArmy;
+
+				if (frontOwner >= 0)
+				{
+					// Fastest first, so the decoy is there before the main attack; never an elite unit.
+					idleArmy = collectIdleGround(false);
+					std::erase_if(idleArmy, [](FootClass* pFoot) { return pFoot->Veterancy.IsElite(); });
+					std::stable_sort(idleArmy.begin(), idleArmy.end(), [](FootClass* a, FootClass* b)
+						{ return a->GetTechnoType()->Speed > b->GetTechnoType()->Speed; });
+				}
+
+				// Decoy target: the building of that house nearest to our home, far enough from the
+				// main attack to pull its defenders away from it, with no known defense near (the decoy
+				// would only die there) and a way in held by no more than the decoy is worth.
+				BuildingClass* pDecoy = nullptr;
+				std::vector<FootClass*> decoyGroup;
+				double bestTrip = 1e9;
+
+				if (idleArmy.size() >= FeintIdleMin)
+				{
+					for (auto const pBld : knownEnemyBuildingList)
+					{
+						if (!isKnownEnemyBuilding(pBld) || pBld->Owner->ArrayIndex != frontOwner || pBld->Type->CanBeOccupied
+							|| pBld->Type->Insignificant)
+						{
 							continue;
+						}
 
 						const CellStruct bc = pBld->GetMapCoords();
+						const double gap = bc.DistanceFrom(front);
+						const double trip = bc.DistanceFrom(homeCell);
 
-						// A decoy has to get there: one whose way in is held by more than the decoy group is
-						// worth is no decoy (it arrived once in a hundred starts and drew nobody).
-						if (knownEnemyStrengthOnWay(homeCell, bc, PlanStrikeGuardFrames) > decoyValue)
-							continue;
-
-						if (MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pBld->OnBridge) != homeZone
-							|| bc.DistanceFrom(mc) < 15.0)
+						if (gap < FeintGapCells || gap > FeintReachCells || trip >= bestTrip
+							|| MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pBld->OnBridge) != homeZone
+							|| CountKnownEnemyDefensesNear(pHouse, bc, FeintTowerClearCells, false) > 0)
 						{
 							continue;
 						}
 
-						const double bx = bc.X - cx;
-						const double by = bc.Y - cy;
-						const double bLen = std::max(1.0, std::sqrt(bx * bx + by * by));
-						const double cosAngle = (mx * bx + my * by) / (mLen * bLen);
+						std::vector<FootClass*> group;
 
-						if (cosAngle > 0.35)
-							continue;
-
-						const double decoyScore = -cosAngle * 100.0 - CountKnownEnemyDefensesNear(pHouse, bc, 8.0, false) * 40.0;
-
-						if (decoyScore > bestDecoyScore)
+						for (auto const pFoot : idleArmy)
 						{
-							bestDecoyScore = decoyScore;
-							pDecoy = pBld;
+							if (group.size() < FeintDecoySize && HurtsBuilding(pFoot->GetTechnoType(), pBld))
+								group.push_back(pFoot);
 						}
+
+						const int value = groupValueOf(group);
+
+						if (group.size() < FeintDecoySize || !targetLessonAllows(pBld->UniqueID, value)
+							|| knownEnemyStrengthOnWay(homeCell, bc, PlanStrikeGuardFrames) > value)
+						{
+							continue;
+						}
+
+						bestTrip = trip;
+						pDecoy = pBld;
+						decoyGroup = std::move(group);
 					}
 				}
 
@@ -2965,11 +3079,14 @@ namespace
 
 				if (pDecoy && shouldTryStart(NeuralPlanId::Feint, utility))
 				{
-					// The cheapest units make the decoy; the main army stays for the real wave.
-					std::stable_sort(idleArmy.begin(), idleArmy.end(), [](FootClass* a, FootClass* b)
-						{ return a->GetTechnoType()->Cost < b->GetTechnoType()->Cost; });
-					idleArmy.resize(std::min<size_t>(idleArmy.size(), 4));
-					startPlan(NeuralPlanId::Feint, idleArmy, pDecoy->GetMapCoords(), CellStruct::Empty, pDecoy->UniqueID, 3600);
+					startPlan(NeuralPlanId::Feint, decoyGroup, pDecoy->GetMapCoords(), CellStruct::Empty, pDecoy->UniqueID, FeintPlanFrames);
+
+					if (plan.Active)
+					{
+						plan.AnchorCell = front;
+						plan.AuxBaseline = -1;
+						feintAnswered[houseIdx & 31] = -1;
+					}
 				}
 			}
 		}
@@ -3603,9 +3720,10 @@ namespace
 		// of the target, and Feint arrived 4 times in 100. The siege batteries turn back the same
 		// way: Rolling Siege and Siege Battery marched on until a third of the battery was left, 30
 		// to 57 cells short of the defense they were after (76 of 96 and 280 of 471 plans,
-		// 2026-11-14).
+		// 2026-11-14). Feint is not in the list: the enemy coming at its decoy is what it is after,
+		// and it pulls back on its own.
 		{
-			constexpr NeuralPlanId raidPlans[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout, NeuralPlanId::Feint,
+			constexpr NeuralPlanId raidPlans[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout,
 				NeuralPlanId::TimingRush, NeuralPlanId::ExpansionDenial, NeuralPlanId::SuperweaponRace, NeuralPlanId::HarvesterAmbush,
 				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
 				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut,
@@ -7022,63 +7140,171 @@ namespace
 		}
 
 		// ---------------------------------------------------------------- Plan 20: Bait Ambush
-		// The fastest unit (Members[0]) provokes the enemy near its base and runs back through an
-		// ambush point where the rest of the group waits on guard. AuxBaseline = phase (0 lure,
-		// 1 run back, 2 sprung), AuxPeak = peak enemy value seen at the ambush point.
+		// The ambush group waits on guard BaitAmbushCells from a known enemy building on the way home,
+		// out of reach of the defenses known there; the fastest unit (Members[0]) fires at the building
+		// and runs back through the ambush once it is hit or enemies come near it. A Neural AI house
+		// answers whoever fires at its buildings with an intercept group worth 1.3x the attacker that
+		// follows it until it is 8 cells farther from the building than when the intercept began, so
+		// the answer runs into an ambush at 12 cells, never into one 23 cells or more away. The old bait
+		// walked to a cell 8 cells short of the building without firing, which no house takes for a
+		// threat: 25 of 36 plans drew no intercept at all and 1 went well (40 matches, 2026-11-15).
+		// Success = enemy units worth BaitKillValue destroyed by the members, no less than the value
+		// the plan lost. AuxBaseline = phase (0 set up, 1 lure, 2 run back, 3 sprung), AuxPeak = peak
+		// enemy value seen at the ambush, ArrivedFrame = start of the current wait, Arrived = the bait
+		// came within range of the building.
 		{
 			auto& plan = planOf(NeuralPlanId::BaitAmbush);
+
+			// TEMP diagnostic (baitAmbush summary DIAG): per house, frames into the plan when the lure
+			// began, when the bait turned and why, when it was back, when the ambush sprang, and when the
+			// target's owner first sent its intercept at the bait (-1 not yet).
+			struct BaitTrace
+			{
+				int Lure { -1 };
+				int Turn { -1 };
+				int Back { -1 };
+				int Sprung { -1 };
+				int Answered { -1 };
+				int AnswerCells { -1 };
+				const char* TurnWhy { "" };
+			};
+
+			static std::array<BaitTrace, 32> baitTraces {};
+			auto& trace = baitTraces[houseIdx & 31];
+
+			auto endBait = [&](bool success, const char* why, int rule = __builtin_LINE())
+			{
+				// TEMP diagnostic: one line per bait ambush.
+				FootClass* const pBaitNow = plan.Members.empty() ? nullptr : findOwnFoot(plan.Members[0]);
+				auto const pLureNow = FindBuildingByID(plan.TargetID);
+				Debug::Log("[NeuralAI] House %d baitAmbush summary DIAG: %s after %d frames (%s), phase %d, bait %s, lure %s at (%d,%d) of house %d, "
+					"%d cells from home, ambush (%d,%d) %d cells from it, lure %d turn %d (%s) back %d sprung %d, answered %d at %d cells, "
+					"peak at ambush %d, killed %d, value %d of %d.\n",
+					houseIdx, success ? "well" : "badly", Unsorted::CurrentFrame - plan.StartFrame, why, plan.AuxBaseline,
+					pBaitNow ? pBaitNow->GetTechnoType()->ID : "dead", pLureNow ? pLureNow->Type->ID : "gone", plan.TargetCell.X, plan.TargetCell.Y,
+					plan.TargetOwner, static_cast<int>(plan.TargetCell.DistanceFrom(homeCell)), plan.StagingCell.X, plan.StagingCell.Y,
+					static_cast<int>(plan.StagingCell.DistanceFrom(plan.TargetCell)), trace.Lure, trace.Turn, trace.TurnWhy, trace.Back,
+					trace.Sprung, trace.Answered, trace.AnswerCells, plan.AuxPeak, plan.KillValue, memberValue(plan), plan.InitialValue);
+				finishPlan(NeuralPlanId::BaitAmbush, success, true, rule);
+			};
+
+			auto ambushPaid = [&]()
+			{
+				return plan.KillValue >= BaitKillValue && plan.KillValue >= plan.InitialValue - memberValue(plan);
+			};
 
 			if (plan.Active)
 			{
 				FootClass* const pBait = plan.Members.empty() ? nullptr : findOwnFoot(plan.Members[0]);
 				const std::vector<DWORD> ambushers(plan.Members.empty() ? plan.Members.end() : plan.Members.begin() + 1, plan.Members.end());
 				auto const pAmbush = MapClass::Instance.TryGetCellAt(plan.StagingCell);
-				const int enemyAtAmbush = seenEnemyValueNear(plan.StagingCell, 9.0, 150);
+				auto const pLure = FindBuildingByID(plan.TargetID);
+				const bool lureStands = pLure && pLure->IsAlive && !pLure->InLimbo;
+				const int enemyAtAmbush = seenEnemyValueNear(plan.StagingCell, BaitAmbushSightCells, 150);
 				const int ambushValue = groupValue(ambushers);
 				plan.AuxPeak = std::max(plan.AuxPeak, enemyAtAmbush);
 
+				// TEMP diagnostic: whether the target's owner sent its intercept at the bait, and how far
+				// from the building the bait was then.
+				if (trace.Answered < 0 && pBait && plan.TargetOwner >= 0 && plan.TargetOwner < HouseClass::Array.Count)
+				{
+					auto const pOwner = HouseClass::Array.GetItem(plan.TargetOwner);
+
+					if (pOwner && NeuralAI::IsEnabledForHouse(pOwner))
+					{
+						auto const& intercept = GetMacroState(pOwner).Plans[static_cast<size_t>(NeuralPlanId::BaseThreatIntercept)];
+
+						if (intercept.Active && intercept.TargetID == pBait->UniqueID)
+						{
+							trace.Answered = Unsorted::CurrentFrame - plan.StartFrame;
+							trace.AnswerCells = static_cast<int>(pBait->GetMapCoords().DistanceFrom(plan.TargetCell));
+						}
+					}
+				}
+
 				if (!pAmbush || ambushValue * 100 < plan.InitialValue * 35)
 				{
-					finishPlan(NeuralPlanId::BaitAmbush, false, true);
+					endBait(false, "ambush beaten");
 				}
 				else if (Unsorted::CurrentFrame >= plan.Deadline)
 				{
-					finishPlan(NeuralPlanId::BaitAmbush, plan.AuxPeak >= 60 && ambushValue * 100 >= plan.InitialValue * 50, true);
+					endBait(ambushPaid(), "out of time");
 				}
 				else if (plan.AuxBaseline == 0)
 				{
+					// The ambush takes its place first, the bait with it.
 					moveGroup(ambushers, pAmbush, 3.0);
+					int inPlace = 0;
+					int ambushAlive = 0;
 
-					if (!pBait)
+					for (const DWORD uid : ambushers)
+					{
+						if (auto const pFoot = findOwnFoot(uid))
+						{
+							ambushAlive++;
+
+							if (pFoot->GetMapCoords().DistanceFrom(plan.StagingCell) <= BaitInPlaceCells)
+								inPlace++;
+						}
+					}
+
+					if (!pBait || !lureStands)
+					{
+						endBait(false, pBait ? "lure building gone" : "bait lost");
+					}
+					else if (inPlace * 2 >= ambushAlive || Unsorted::CurrentFrame - plan.StartFrame >= BaitSetFrames)
 					{
 						plan.AuxBaseline = 1;
 						plan.ArrivedFrame = Unsorted::CurrentFrame;
+						plan.LureHealth = static_cast<int>(pBait->GetHealthPercentage() * 100);
+						trace.Lure = Unsorted::CurrentFrame - plan.StartFrame;
 					}
-					else if (seenEnemyValueNear(pBait->GetMapCoords(), 8.0, 60) >= 40 || pBait->GetHealthPercentage() < 0.7)
+					else
 					{
-						plan.AuxBaseline = 1;
-						plan.ArrivedFrame = Unsorted::CurrentFrame;
+						IssueMoveOrder(pBait, pAmbush, 3.0);
 					}
-					else if (auto const pLure = landCellInZone(pointAlong(plan.TargetCell, homeCell, 8.0, 0.0), homeZone, 4))
-					{
-						IssueMoveOrder(pBait, pLure, 2.0);
+				}
+				else if (plan.AuxBaseline == 1)
+				{
+					moveGroup(ambushers, pAmbush, 3.0);
+					const bool hurt = !pBait || static_cast<int>(pBait->GetHealthPercentage() * 100) <= plan.LureHealth - BaitHurtPercent;
+					const bool answered = pBait && seenEnemyValueNear(pBait->GetMapCoords(), BaitThreatCells, 60) >= BaitThreatValue;
 
-						// Shown at the enemy's door for BaitLureWaitFrames and nobody came out: the
-						// ambushers go back to work. The bait stood there until the plan's deadline
-						// while eight units waited for it (32 of 125 plans, 2026-11-14).
-						if (!plan.Arrived && pBait->GetMapCoords().DistanceFrom(pLure->MapCoords) <= 4.0)
+					if (hurt || answered || !lureStands)
+					{
+						plan.AuxBaseline = 2;
+						plan.ArrivedFrame = Unsorted::CurrentFrame;
+						trace.Turn = Unsorted::CurrentFrame - plan.StartFrame;
+						trace.TurnWhy = !pBait ? "bait lost" : hurt ? "hit" : answered ? "enemy near" : "building gone";
+					}
+					else
+					{
+						// Fire at the building: only a unit with orders against a building is a threat the
+						// house answers.
+						if (pBait->Target != pLure)
+						{
+							pBait->SetTarget(pLure);
+							pBait->QueueMission(Mission::Attack, true);
+						}
+
+						const bool inRange = pBait->GetMapCoords().DistanceFrom(plan.TargetCell) * Unsorted::LeptonsPerCell
+							<= GroundRangeOf(pBait->GetTechnoType()) + 2 * Unsorted::LeptonsPerCell;
+
+						if (!plan.Arrived && inRange)
 						{
 							plan.Arrived = true;
 							plan.ArrivedFrame = Unsorted::CurrentFrame;
 						}
-						else if (plan.Arrived && Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitLureWaitFrames)
+						else if (plan.Arrived ? Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitLureWaitFrames
+							: Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitApproachFrames)
 						{
-							finishPlan(NeuralPlanId::BaitAmbush, false, true);
+							// It fired and nobody came out, or it never got within range.
+							endBait(false, plan.Arrived ? "nobody answered the fire" : "bait never in range");
 							macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::BaitAmbush)] = Unsorted::CurrentFrame + BaitRetryFrames;
 						}
 					}
 				}
-				else if (plan.AuxBaseline == 1)
+				else if (plan.AuxBaseline == 2)
 				{
 					moveGroup(ambushers, pAmbush, 3.0);
 					bool baitBack = true;
@@ -7087,89 +7313,117 @@ namespace
 					{
 						if (auto const pBehind = landCellInZone(pointAlong(plan.StagingCell, homeCell, 4.0, 0.0), homeZone, 3))
 						{
+							if (pBait->Target)
+								pBait->SetTarget(nullptr);
+
 							IssueMoveOrder(pBait, pBehind, 2.0);
 							baitBack = pBait->GetMapCoords().DistanceFrom(pBehind->MapCoords) <= 5.0;
 						}
 					}
 
-					// Whoever chases the bait is on its heels: the wait for them starts when the bait
-					// is back behind the ambush, and lasts BaitChaseWaitFrames (it was 1500 frames
-					// from the moment it turned, and 70 of 125 plans spent them on nobody).
+					// Whoever chases the bait is on its heels: the wait for them starts when the bait is
+					// back behind the ambush and lasts BaitChaseWaitFrames.
 					if (!baitBack)
 						plan.ArrivedFrame = Unsorted::CurrentFrame;
+					else if (trace.Back < 0)
+						trace.Back = Unsorted::CurrentFrame - plan.StartFrame;
 
-					if (enemyAtAmbush >= 40)
-						plan.AuxBaseline = 2;
+					if (enemyAtAmbush >= BaitThreatValue)
+					{
+						plan.AuxBaseline = 3;
+						trace.Sprung = Unsorted::CurrentFrame - plan.StartFrame;
+					}
 					else if (Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitChaseWaitFrames)
 					{
-						finishPlan(NeuralPlanId::BaitAmbush, false, true); // Nobody took the bait.
+						endBait(ambushPaid(), "nobody followed the bait");
 						macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::BaitAmbush)] = Unsorted::CurrentFrame + BaitRetryFrames;
 					}
 				}
 				else
 				{
-					const CellStruct enemyCenter = seenEnemyCentroidNear(plan.StagingCell, 12.0, 150);
+					// Sprung: everyone fights what came, as far as BaitFightCells from the ambush.
+					const CellStruct enemyCenter = seenEnemyCentroidNear(plan.StagingCell, BaitFightCells, 150);
 
 					if (enemyCenter == CellStruct::Empty)
-						finishPlan(NeuralPlanId::BaitAmbush, plan.AuxPeak >= 60, true);
+						endBait(ambushPaid(), "fight over");
 					else
 						attackMoveGroup(plan.Members, MapClass::Instance.TryGetCellAt(enemyCenter));
 				}
 			}
-			else if (planReady(NeuralPlanId::BaitAmbush) && knownEnemyHomeBuildings > 0)
+			else if (!planShelved(NeuralPlanId::BaitAmbush) && planReady(NeuralPlanId::BaitAmbush) && knownEnemyHomeBuildings > 0)
 			{
 				std::vector<FootClass*> idle = collectIdleGround(false);
 				BuildingClass* pLureTarget = nullptr;
+				CellClass* pAmbush = nullptr;
 				double bestDist = 1e9;
 
-				for (auto const pBld : knownEnemyBuildingList)
+				// The lure: the known enemy building nearest to our home, BaitLureMinCells away or more,
+				// with no known defense near it or near its ambush cell (a tower would kill the bait and
+				// shell the ambush, and its owner need not send anyone).
+				if (idle.size() >= BaitIdleMin)
 				{
-					if (!isKnownEnemyBuilding(pBld) || ObjectZone(pBld, MovementZone::Normal) != homeZone)
-						continue;
-
-					const double d = pBld->GetMapCoords().DistanceFrom(homeCell);
-
-					if (d < bestDist)
+					for (auto const pBld : knownEnemyBuildingList)
 					{
+						if (!isKnownEnemyBuilding(pBld) || ObjectZone(pBld, MovementZone::Normal) != homeZone || pBld->Type->CanBeOccupied
+							|| pBld->Type->Insignificant)
+						{
+							continue;
+						}
+
+						const CellStruct bc = pBld->GetMapCoords();
+						const double d = bc.DistanceFrom(homeCell);
+
+						if (d < BaitLureMinCells || d >= bestDist || CountKnownEnemyDefensesNear(pHouse, bc, BaitTowerClearCells, false) > 0)
+							continue;
+
+						auto const pCell = landCellInZone(pointAlong(bc, homeCell, BaitAmbushCells, 0.0), homeZone, 4);
+
+						if (!pCell || CountKnownEnemyDefensesNear(pHouse, pCell->MapCoords, BaitTowerClearCells, false) > 0)
+							continue;
+
 						bestDist = d;
 						pLureTarget = pBld;
+						pAmbush = pCell;
 					}
 				}
 
-				CellClass* pAmbush = nullptr;
+				// The bait: the fastest unit that is not elite and can hurt that building.
+				FootClass* pBaitFoot = nullptr;
+				std::vector<FootClass*> ambushGroup;
 
-				if (pLureTarget && idle.size() >= 7 && bestDist >= 35.0)
+				if (pLureTarget)
 				{
-					pAmbush = landCellInZone(pointAlong(homeCell, pLureTarget->GetMapCoords(), bestDist * 0.35, 0.0), homeZone, 4);
+					std::vector<FootClass*> fastest = idle;
+					sortFastest(fastest);
+					auto const baitIt = std::find_if(fastest.begin(), fastest.end(), [pLureTarget](FootClass* pFoot)
+						{ return !pFoot->Veterancy.IsElite() && HurtsBuilding(pFoot->GetTechnoType(), pLureTarget); });
 
-					if (pAmbush)
+					if (baitIt != fastest.end())
+						pBaitFoot = *baitIt;
+
+					for (auto const pFoot : idle)
 					{
-						for (auto const pBld : knownEnemyBuildingList)
-						{
-							if (isKnownEnemyBuilding(pBld) && pBld->GetMapCoords().DistanceFrom(pAmbush->MapCoords) < 15.0)
-							{
-								pAmbush = nullptr;
-								break;
-							}
-						}
+						if (pFoot != pBaitFoot && ambushGroup.size() < BaitAmbushSize)
+							ambushGroup.push_back(pFoot);
 					}
 				}
 
-				const int utility = pAmbush ? 270 : -1000;
+				// The ambush has to get to its cell: what is known on its way and around it.
+				const bool strongEnough = pBaitFoot && ambushGroup.size() + 1 >= BaitIdleMin
+					&& groupValueOf(ambushGroup) * 100 >= knownEnemyStrengthOnWay(homeCell, pAmbush->MapCoords, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent;
+				const int utility = strongEnough ? 270 : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::BaitAmbush, utility))
 				{
-					sortFastest(idle);
-					// Never risk an elite unit as the bait (point 38).
-					auto const baitIt = std::find_if(idle.begin(), idle.end(), [](FootClass* f) { return !f->Veterancy.IsElite(); });
-					std::rotate(idle.begin(), baitIt != idle.end() ? baitIt : idle.begin(), (baitIt != idle.end() ? baitIt : idle.begin()) + 1);
-					std::vector<FootClass*> group { idle.front() };
-					std::vector<FootClass*> rest(idle.begin() + 1, idle.end());
-					std::sort(rest.begin(), rest.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
-					rest.resize(std::min<size_t>(rest.size(), 8));
-					group.insert(group.end(), rest.begin(), rest.end());
-					startPlan(NeuralPlanId::BaitAmbush, group, pLureTarget->GetMapCoords(), pAmbush->MapCoords, pLureTarget->UniqueID, 3600);
-					planOf(NeuralPlanId::BaitAmbush).AuxBaseline = 0;
+					std::vector<FootClass*> group { pBaitFoot };
+					group.insert(group.end(), ambushGroup.begin(), ambushGroup.end());
+					startPlan(NeuralPlanId::BaitAmbush, group, pLureTarget->GetMapCoords(), pAmbush->MapCoords, pLureTarget->UniqueID, BaitPlanFrames);
+
+					if (planOf(NeuralPlanId::BaitAmbush).Active)
+					{
+						planOf(NeuralPlanId::BaitAmbush).AuxBaseline = 0;
+						trace = BaitTrace {};
+					}
 				}
 			}
 		}

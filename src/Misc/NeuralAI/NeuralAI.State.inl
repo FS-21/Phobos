@@ -169,6 +169,10 @@ namespace
 		int TargetSeenFrame { 0 };
 		// Per member: a frame (Pickets: until when a sentry holds back, when it last saw something).
 		std::vector<int> MemberFrames {};
+		// Combat value of the enemy units its members destroyed (NeuralAI::OnTechnoDestroyed).
+		int KillValue { 0 };
+		// Bait Ambush: the bait's health in percent when it set out to fire at the building.
+		int LureHealth { 0 };
 	};
 
 	struct NeuralStuckTrack
@@ -1549,13 +1553,60 @@ namespace
 	// 750 frames of march), and follows it this far from where it was gathering.
 	constexpr double PreemptiveReachCells = 45.0;
 	constexpr double PreemptiveLeashCells = 15.0;
-	// Bait Ambush: how long the bait shows itself at the enemy's door before the plan gives up, and
-	// how long the ambush waits for a chaser once the bait is back behind it.
+	// Bait Ambush: how long the bait fires at the building with no answer before the plan gives up,
+	// and how long the ambush waits for a chaser once the bait is back behind it.
 	constexpr int BaitLureWaitFrames = 450;
 	constexpr int BaitChaseWaitFrames = 450;
 	// A bait nobody answered is not tried again for this long: giving up sooner made the plan start
 	// twice as often (272 plans in 18 matches against 127 in 40).
 	constexpr int BaitRetryFrames = 5400;
+	// A Neural AI house sends its intercept group at whoever fires at one of its buildings and follows
+	// it until it is 8 cells farther from the building than when the intercept began. The bait begins
+	// to fire from its weapon range (4 to 6 cells), so the answer comes out 12 to 14 cells and the
+	// ambush waits BaitAmbushCells from the building on the way home; the ambush of the old design
+	// stood 23 cells or more away and no chaser ever reached it. Neither the building nor the ambush
+	// has a known defense within BaitTowerClearCells, and the building is BaitLureMinCells from home.
+	constexpr double BaitAmbushCells = 12.0;
+	constexpr double BaitTowerClearCells = 9.0;
+	constexpr double BaitLureMinCells = 35.0;
+	constexpr size_t BaitIdleMin = 7;
+	constexpr size_t BaitAmbushSize = 8;
+	constexpr int BaitPlanFrames = 4500;
+	// The bait sets out once half the ambush stands within BaitInPlaceCells of its cell, or after
+	// BaitSetFrames, and has BaitApproachFrames to come within range of the building.
+	constexpr double BaitInPlaceCells = 5.0;
+	constexpr int BaitSetFrames = 1800;
+	constexpr int BaitApproachFrames = 900;
+	// The bait runs back once it lost BaitHurtPercent of its health while luring or enemy value of
+	// BaitThreatValue is seen within BaitThreatCells of it; the ambush springs on that much seen within
+	// BaitAmbushSightCells of its cell and fights what is seen within BaitFightCells.
+	constexpr int BaitHurtPercent = 15;
+	constexpr int BaitThreatValue = 40;
+	constexpr double BaitThreatCells = 8.0;
+	constexpr double BaitAmbushSightCells = 9.0;
+	constexpr double BaitFightCells = 12.0;
+	// A bait ambush went well when its members destroyed enemy units worth this much and no less than
+	// the value it lost: the old test (60 enemy value seen near the ambush) counted any wave passing by.
+	constexpr int BaitKillValue = 60;
+	// Feint: a decoy of FeintDecoySize fast units fires at a building of the house our main attack is
+	// going for, FeintGapCells to FeintReachCells from where that attack is aimed and with no known
+	// defense within FeintTowerClearCells. A wave counts as our main attack for FeintWaveFrames after
+	// it was sent out.
+	constexpr double FeintGapCells = 25.0;
+	constexpr double FeintReachCells = 60.0;
+	constexpr double FeintTowerClearCells = 8.0;
+	constexpr int FeintWaveFrames = 600;
+	constexpr size_t FeintDecoySize = 3;
+	constexpr size_t FeintIdleMin = 6;
+	constexpr int FeintPlanFrames = 3600;
+	// It went well once enemy value of FeintDrawPercent of the decoy's own is seen within FeintDrawCells
+	// of the decoy while it is within FeintNearCells of its target. It ends badly with less than
+	// FeintLossPercent of its value left, or FeintAnswerWaitFrames after it arrived with no answer.
+	constexpr double FeintNearCells = 20.0;
+	constexpr double FeintDrawCells = 10.0;
+	constexpr int FeintDrawPercent = 100;
+	constexpr int FeintLossPercent = 50;
+	constexpr int FeintAnswerWaitFrames = 900;
 	// An air group goes for a building only when this many sorties of its full load add up to the
 	// building's health: Air Strike sent two aircraft at buildings they could not bring down in
 	// its 2700 frames, and 128 of 163 plans ran out of time (focus batch of 2026-11-14).
