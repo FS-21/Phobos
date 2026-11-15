@@ -4118,6 +4118,18 @@ namespace
 	int PathBackoffSerial = -1;
 	int PathSearchesSkipped = 0;
 
+	// Failed path searches of our infantry from a cell that holds a building (FreeSoldiersShutInBuildings):
+	// the cell, the frames with a failure there in a row (none more than ShutInFailGapFrames apart),
+	// and the last of them.
+	struct NeuralBuildingPathFails
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Frames { 0 };
+		int LastFrame { -100000 };
+	};
+
+	std::unordered_map<DWORD, NeuralBuildingPathFails> BuildingPathFails;
+
 	// Places the engine's path finder does not reach. The zone map can hold a place for one land
 	// with ours while no path leads there (an outpost shut behind its own buildings), and a house
 	// that keeps it as the target of its waves sends its army at it for the rest of the match: its
@@ -4155,7 +4167,56 @@ namespace
 		PathBackoffSerial = NeuralMatchSerial;
 		PathBackoffs.clear();
 		PathDeadGoals.clear();
+		BuildingPathFails.clear();
 		PathSearchesSkipped = 0;
+	}
+
+	// The frames in a row on which a path search of this unit from this cell (one holding a building)
+	// failed, 0 when none failed there in the last ShutInFailGapFrames.
+	int BuildingPathFailFrames(const FootClass* pFoot, const CellStruct& cell)
+	{
+		if (!pFoot || PathBackoffSerial != NeuralMatchSerial)
+			return 0;
+
+		auto const it = BuildingPathFails.find(pFoot->UniqueID);
+
+		if (it == BuildingPathFails.end() || it->second.Cell != cell || Unsorted::CurrentFrame - it->second.LastFrame > ShutInFailGapFrames)
+			return 0;
+
+		return it->second.Frames;
+	}
+
+	void NoteBuildingPathFail(const FootClass* pFoot, const CellStruct& from)
+	{
+		if (pFoot->WhatAmI() != AbstractType::Infantry || from != pFoot->GetMapCoords())
+			return;
+
+		auto const pCell = MapClass::Instance.TryGetCellAt(from);
+
+		if (!pCell || !pCell->GetBuilding())
+			return;
+
+		const int now = Unsorted::CurrentFrame;
+
+		if (BuildingPathFails.size() > 1024)
+		{
+			std::erase_if(BuildingPathFails, [now](const auto& entry)
+				{ return now - entry.second.LastFrame > ShutInFailGapFrames; });
+		}
+
+		auto& fails = BuildingPathFails[pFoot->UniqueID];
+
+		if (fails.Cell != from || now - fails.LastFrame > ShutInFailGapFrames)
+		{
+			fails.Cell = from;
+			fails.Frames = 1;
+			fails.LastFrame = now;
+		}
+		else if (fails.LastFrame != now)
+		{
+			fails.Frames++;
+			fails.LastFrame = now;
+		}
 	}
 
 	void NotePathDeadGoal(int houseIndex, const CellStruct& from, const CellStruct& to)
@@ -4254,6 +4315,7 @@ void NeuralAI::OnPathFailure(FootClass* pFoot, const CellStruct& from, const Cel
 	if (pFoot->Owner && NeuralAI::IsEnabledForHouse(pFoot->Owner))
 	{
 		const int now = Unsorted::CurrentFrame;
+		NoteBuildingPathFail(pFoot, from);
 
 		if (PathBackoffs.size() > 4096)
 		{

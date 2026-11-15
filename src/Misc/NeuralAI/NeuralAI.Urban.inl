@@ -141,10 +141,9 @@ namespace
 		// asked for it: the one an engineer may repair.
 		DWORD RepairWantedID { 0 };
 		int RepairWantedFrame { -100000 };
-		// Soldiers shut in a building (FreeSoldiersShutInBuildings): the last check, the soldiers that
-		// could step nowhere at it (sorted by ID), and how many were put down outside this match.
+		// Soldiers shut in a building (FreeSoldiersShutInBuildings): the last check, and how many were
+		// put down outside this match.
 		int LastShutInCheckFrame { -1 };
-		std::vector<DWORD> ShutIn {};
 		int ShutInFreed { 0 };
 	};
 
@@ -1390,7 +1389,7 @@ namespace
 			const CellStruct c { static_cast<short>(here.X + offset.X), static_cast<short>(here.Y + offset.Y) };
 			auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
 
-			if (pCell && pInf->IsCellOccupied(pCell, static_cast<FacingType>(direction), -1, nullptr, true) != Move::No)
+			if (pCell && pInf->IsCellOccupied(pCell, static_cast<FacingType>(direction), -1, nullptr, true) == Move::OK)
 				return false;
 		}
 
@@ -1452,9 +1451,12 @@ namespace
 	// may step nowhere, and the engine scatters it every frame: a path search to the next free cell
 	// around the building, every one failing (match #9862, Sahara Mirage: 128000 failed searches in
 	// 42000 frames from the centre of a building our soldiers were sent into; #9873, Ore Pit: a soldier
-	// on Attack Move at the centre of a building of ours with a mate inside). Our infantry on a cell of
-	// a building that can step nowhere is noted every ShutInCheckFrames; one noted at two checks in a
-	// row is put down on the free cell around the building nearest to it, on Guard.
+	// on Attack Move at the centre of a building of ours with a mate inside). Every ShutInCheckFrames,
+	// our infantry on a cell of a building whose path searches from it failed on ShutInFailFrames
+	// frames in a row, and that may step on none of the cells around it, is put down on the free cell
+	// around the building nearest to it, on Guard. Only the failures tell such a soldier apart from
+	// the many that stand on building cells on purpose (slaves unloading at their refinery, soldiers
+	// stepping out of their barracks, engineers walking in).
 	void FreeSoldiersShutInBuildings(HouseClass* pHouse)
 	{
 		if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
@@ -1467,7 +1469,6 @@ namespace
 			return;
 
 		state.LastShutInCheckFrame = now;
-		std::vector<DWORD> shutIn;
 		std::vector<InfantryClass*> toFree;
 
 		for (auto const pInf : InfantryClass::Array)
@@ -1481,17 +1482,9 @@ namespace
 			auto const pCell = pInf->GetCell();
 			auto const pBld = pCell ? pCell->GetBuilding() : nullptr;
 
-			if (!pBld || !pBld->Type || !IsShutInBuilding(pInf))
-				continue;
-
-			shutIn.push_back(pInf->UniqueID);
-
-			if (std::binary_search(state.ShutIn.begin(), state.ShutIn.end(), pInf->UniqueID))
+			if (pBld && pBld->Type && BuildingPathFailFrames(pInf, pInf->GetMapCoords()) >= ShutInFailFrames && IsShutInBuilding(pInf))
 				toFree.push_back(pInf);
 		}
-
-		std::sort(shutIn.begin(), shutIn.end());
-		state.ShutIn = std::move(shutIn);
 
 		for (auto const pInf : toFree)
 		{
@@ -1533,13 +1526,13 @@ namespace
 
 				const CellStruct here = pInf->GetMapCoords();
 				const CellStruct bldCell = pBld->GetMapCoords();
-				Debug::Log("[NeuralAI] House %d freed %s %u shut in %s at (%d,%d) (owner %d, %d/%d inside, health %d%%): at (%d,%d), mission %d mega %d, "
-					"destination %s, target %s, garrison order %s, plan %d; put down at (%d,%d), frame %d.\n",
+				Debug::Log("[NeuralAI] House %d freed %s %u shut in %s at (%d,%d) (owner %d, %d/%d inside, health %d%%): at (%d,%d), path searches "
+					"failed on %d frames, mission %d mega %d, destination %s, target %s, garrison order %s, plan %d; put down at (%d,%d), frame %d.\n",
 					pHouse->ArrayIndex, pInf->Type->ID, pInf->UniqueID, pBld->Type->ID, bldCell.X, bldCell.Y,
 					pBld->Owner ? pBld->Owner->ArrayIndex : -1, pBld->Occupants.Count, pBld->Type->MaxNumberOccupants,
-					static_cast<int>(pBld->GetHealthPercentage() * 100.0), here.X, here.Y, static_cast<int>(pInf->CurrentMission),
-					static_cast<int>(pInf->MegaMission), destination, target, order, IsPlanMember(pHouse, pInf->UniqueID) ? 1 : 0,
-					pOut->MapCoords.X, pOut->MapCoords.Y, now);
+					static_cast<int>(pBld->GetHealthPercentage() * 100.0), here.X, here.Y, BuildingPathFailFrames(pInf, here),
+					static_cast<int>(pInf->CurrentMission), static_cast<int>(pInf->MegaMission), destination, target, order,
+					IsPlanMember(pHouse, pInf->UniqueID) ? 1 : 0, pOut->MapCoords.X, pOut->MapCoords.Y, now);
 			}
 
 			const CoordStruct was = pInf->Location;

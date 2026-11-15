@@ -1536,9 +1536,12 @@ namespace
 	constexpr int EmergencyLaneSideCells = 3;
 	constexpr int EmergencyLaneMovesPerCheck = 16;
 	constexpr int EmergencyLaneLogFrames = 1800;
-	// Soldiers shut in a building (FreeSoldiersShutInBuildings): checked every ShutInCheckFrames, and
-	// at most ShutInLogsPerMatch of them logged one by one.
+	// Soldiers shut in a building (FreeSoldiersShutInBuildings): checked every ShutInCheckFrames; one
+	// whose path searches from its building cell failed on ShutInFailFrames frames in a row (none more
+	// than ShutInFailGapFrames apart) is freed. At most ShutInLogsPerMatch of them logged one by one.
 	constexpr int ShutInCheckFrames = 30;
+	constexpr int ShutInFailFrames = 3;
+	constexpr int ShutInFailGapFrames = 150;
 	constexpr int ShutInLogsPerMatch = 40;
 	// Shared destination (user: units sent to one cell that is taken should each look for the nearest
 	// free cell). Ships of one house sent to the water cell nearest an inland target queued for it in
