@@ -2083,10 +2083,11 @@ namespace
 		// PlanLessonAdvantagePercent of the last raid group this enemy house beat on its way in the
 		// last PlanLessonFrames: what waits behind the fog shows only by what it did to the last
 		// group, so each beaten raid asks for half as much again (user: the bigger group wins). A
-		// group of aircraft alone is not weighed.
+		// group of aircraft alone is not weighed. Feint weighs its way in itself: its decoy is small
+		// on purpose and need not win, and the lesson held back 24 of 26 decoys (2026-11-15).
 		auto raidMayStart = [&](NeuralPlanId id, std::vector<FootClass*> const& group, const CellStruct& target, int targetOwner) -> bool
 		{
-			constexpr NeuralPlanId gated[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout, NeuralPlanId::Feint,
+			constexpr NeuralPlanId gated[] = { NeuralPlanId::EcoRaid, NeuralPlanId::Blackout,
 				NeuralPlanId::TimingRush, NeuralPlanId::ExpansionDenial, NeuralPlanId::SuperweaponRace, NeuralPlanId::HarvesterAmbush,
 				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
 				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut };
@@ -3065,7 +3066,8 @@ namespace
 
 				// Decoy target: the building of that house nearest to our home, far enough from the
 				// main attack to pull its defenders away from it, with no known defense near (the decoy
-				// would only die there) and a way in held by no more than the decoy is worth.
+				// would only die there) and a decoy worth PlanStrikeAdvantagePercent of what is known on
+				// its way in (the raid gate does not weigh Feint).
 				BuildingClass* pDecoy = nullptr;
 				std::vector<FootClass*> decoyGroup;
 				double bestTrip = 1e9;
@@ -3102,7 +3104,7 @@ namespace
 						const int value = groupValueOf(group);
 
 						if (group.size() < FeintDecoySize || !targetLessonAllows(pBld->UniqueID, value)
-							|| knownEnemyStrengthOnWay(homeCell, bc, PlanStrikeGuardFrames) > value)
+							|| value * 100 < knownEnemyStrengthOnWay(homeCell, bc, PlanStrikeGuardFrames) * PlanStrikeAdvantagePercent)
 						{
 							continue;
 						}
@@ -7689,7 +7691,10 @@ namespace
 				}
 				else if (plan.AuxBaseline == 0)
 				{
-					// The ambush takes its place first, the bait with it.
+					// The ambush takes its place first. The bait, the fastest of the group, keeps to the
+					// middle of the ambushers on the way: sent to the ambush cell at once, it got there
+					// alone and died in 24 of 65 plans (focus batch of 2026-11-15, lures 60 to 350 cells
+					// from home).
 					moveGroup(ambushers, pAmbush, 3.0);
 					int inPlace = 0;
 					int ambushAlive = 0;
@@ -7718,7 +7723,9 @@ namespace
 					}
 					else
 					{
-						IssueMoveOrder(pBait, pAmbush, 3.0);
+						const CellStruct middle = groupCentroid(ambushers);
+						auto const pWith = middle != CellStruct::Empty ? landCellInZone(middle, homeZone, 3) : nullptr;
+						IssueMoveOrder(pBait, pWith ? pWith : pAmbush, 3.0);
 					}
 				}
 				else if (plan.AuxBaseline == 1)
