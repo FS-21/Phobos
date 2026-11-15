@@ -10821,6 +10821,178 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			bloody.erase(bloody.begin(), bloody.begin() + static_cast<std::ptrdiff_t>(bloody.size() - 16));
 	}
 
+	// Size of the passengers each transport has reserved and that are still out, by transport.
+	std::unordered_map<DWORD, int> ferryReservedSizeOf;
+
+	for (auto const& [passengerID, reservation] : GetMacroState(pHouse).FerryReserved)
+	{
+		if (auto const itFoot = ferryReservedFoot.find(passengerID); itFoot != ferryReservedFoot.end())
+			ferryReservedSizeOf[reservation.Transport] += std::max(1, static_cast<int>(itFoot->second->GetTechnoType()->Size));
+	}
+
+	// Fleet split (after the distribution mode of the Phobos click actions, pull request #1993: the
+	// selected units are dealt out over every transport in reach, largest first, one round at a
+	// time). On each pickup shore the whole load (the passengers aboard and reserved, and every unit
+	// there that could still board) is shared out evenly over as few parked transports as can hold
+	// it, those already carrying or waiting for passengers first, then the nearest to the units.
+	// They load side by side, one boarder each at a time, and are ready together: one transport used
+	// to take every unit in reach and sail alone while the next waited for new units (342 of 501
+	// departures sailed alone, 40 matches). A transport outside the split reserves nobody; one with
+	// a base deployer, a harvester or an engineer aboard keeps its own rules.
+	std::unordered_map<DWORD, int> ferryFleetQuota;
+	{
+		struct FleetTransport
+		{
+			UnitClass* Transport;
+			int Held;
+			int Room;
+		};
+
+		std::map<int, std::vector<FleetTransport>> fleets;
+
+		for (auto const pFleet : UnitClass::Array)
+		{
+			if (!pFleet || pFleet->Owner != pHouse || pFleet->InLimbo || !pFleet->IsAlive || !pFleet->Type
+				|| !IsAmphibiousOrAirTransport(pFleet->Type) || pFleet->Type->Passengers <= 0 || IsPlanMember(pHouse, pFleet->UniqueID))
+			{
+				continue;
+			}
+
+			auto const pFleetCell = pFleet->GetCell();
+			auto const pFleetTrip = FindFerryTrip(pFleet->UniqueID);
+
+			if (!pFleetCell || pFleetCell->LandType == LandType::Water || (pFleetTrip && pFleetTrip->Departed))
+				continue;
+
+			bool ownRules = false;
+
+			for (FootClass* pPass = pFleet->Passengers.GetFirstPassenger(); pPass != nullptr && !ownRules;
+				pPass = abstract_cast<FootClass*>(pPass->NextObject))
+			{
+				auto const pPassUnit = abstract_cast<UnitClass*>(pPass);
+				auto const pPassInf = abstract_cast<InfantryClass*>(pPass);
+
+				ownRules = (pPassUnit && pPassUnit->Type && (pPassUnit->Type->Harvester || pPassUnit->Type->Weeder
+						|| (pPassUnit->Type->DeploysInto && !IsDeployableSiegeUnitType(pPassUnit->Type))))
+					|| (pPassInf && pPassInf->Type && pPassInf->Type->Engineer);
+			}
+
+			const int fleetZone = ObjectZone(pFleet, MovementZone::Normal);
+
+			if (ownRules || fleetZone < 0)
+				continue;
+
+			auto const itReserved = ferryReservedSizeOf.find(pFleet->UniqueID);
+			const int held = pFleet->Passengers.GetTotalSize() + (itReserved != ferryReservedSizeOf.end() ? itReserved->second : 0);
+			fleets[fleetZone].push_back({ pFleet, held, pFleet->Type->Passengers });
+		}
+
+		for (auto& [fleetZone, fleet] : fleets)
+		{
+			int sizeLimit = 0;
+			int load = 0;
+
+			for (auto const& member : fleet)
+			{
+				sizeLimit = std::max(sizeLimit, static_cast<int>(member.Transport->Type->SizeLimit));
+				load += member.Held;
+			}
+
+			std::unordered_set<DWORD> counted;
+			int sumX = 0;
+			int sumY = 0;
+			int boardable = 0;
+
+			auto const addBoardable = [&](FootClass* pFoot, int size)
+			{
+				if (!pFoot || !pFoot->IsAlive || pFoot->InLimbo || size > sizeLimit || counted.contains(pFoot->UniqueID)
+					|| pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter
+					|| IsFerryReserved(pHouse, pFoot->UniqueID) || !canRideFerry(pFoot))
+				{
+					return;
+				}
+
+				const int footZone = ObjectZone(pFoot, MovementZone::Normal);
+
+				if (footZone != fleetZone || IsFootActivelyAttackingOrMovingToEnemy(pFoot) || IsFootNearEnemyFrontline(pFoot, footZone))
+					return;
+
+				counted.insert(pFoot->UniqueID);
+				load += size;
+				sumX += pFoot->GetMapCoords().X;
+				sumY += pFoot->GetMapCoords().Y;
+				++boardable;
+			};
+
+			for (auto const& ord : pendingCrossIslandOrders)
+			{
+				if (ord.PickupZone == fleetZone)
+					addBoardable(ord.Passenger, std::max(1, ord.PassengerSize));
+			}
+
+			for (auto const pV : idleCombatUnits)
+			{
+				if (pV && pV->Type && !IsAmphibiousOrAirTransport(pV->Type) && !(pV->CaptureManager && pV->CaptureManager->NumControlNodes() > 0))
+					addBoardable(pV, std::max(1, static_cast<int>(pV->Type->TechnoTypeClass::Size)));
+			}
+
+			for (auto const pI : idleCombatInf)
+			{
+				if (pI && pI->Type)
+					addBoardable(pI, std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size)));
+			}
+
+			if (load <= 0)
+				continue;
+
+			const CellStruct centre = boardable > 0
+				? CellStruct { static_cast<short>(sumX / boardable), static_cast<short>(sumY / boardable) }
+				: fleet.front().Transport->GetMapCoords();
+
+			std::sort(fleet.begin(), fleet.end(), [&centre](const FleetTransport& a, const FleetTransport& b)
+				{
+					if ((a.Held > 0) != (b.Held > 0))
+						return a.Held > 0;
+
+					const double distA = a.Transport->GetMapCoords().DistanceFrom(centre);
+					const double distB = b.Transport->GetMapCoords().DistanceFrom(centre);
+
+					if (distA != distB)
+						return distA < distB;
+
+					return a.Transport->UniqueID < b.Transport->UniqueID;
+				});
+
+			size_t chosen = 0;
+			int room = 0;
+
+			while (chosen < fleet.size() && room < load)
+			{
+				room += fleet[chosen].Room;
+				++chosen;
+			}
+
+			const int share = (load + static_cast<int>(chosen) - 1) / static_cast<int>(chosen);
+
+			for (size_t i = 0; i < fleet.size(); ++i)
+			{
+				auto const& member = fleet[i];
+				ferryFleetQuota[member.Transport->UniqueID] = i < chosen ? std::min(member.Room, std::max(share, member.Held)) : member.Held;
+			}
+
+			auto& fleetMacro = GetMacroState(pHouse);
+			const int now = Unsorted::CurrentFrame;
+
+			if (chosen >= 2 && (fleetMacro.FerryFleetLogFrame < 0 || now < fleetMacro.FerryFleetLogFrame
+				|| now - fleetMacro.FerryFleetLogFrame >= FerryIslandKeptLogFrames))
+			{
+				fleetMacro.FerryFleetLogFrame = now;
+				Debug::Log("[NeuralAI] Frame %d | House #%d ferry fleet split on zone %d: load %d over %d of %d transports, share %d each\n",
+					now, pHouse->ArrayIndex, fleetZone, load, static_cast<int>(chosen), static_cast<int>(fleet.size()), share);
+			}
+		}
+	}
+
 	for (auto const pTrans : UnitClass::Array)
 	{
 		// Transports flying a strategic plan (e.g. the airborne second front) belong to that plan.
@@ -11364,11 +11536,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		CellClass* pActiveIslandGoal = pCustomPassengerGoal ? pCustomPassengerGoal : pIslandGoalCell;
 		int activeIslandZone = pCustomPassengerGoal ? customPassengerZone : targetIslandZone;
-		// Parallel Amphibious Task Groups: when multiple combat transports are
-		// ready and a secondary enemy island/flank exists, assign odd-numbered
-		// transports to strike the secondary objective in parallel!
+		// Parallel amphibious task groups: with FerrySplitFrontTransports combat transports ready and a
+		// secondary enemy island, the odd-numbered ones strike it. Fewer stay one convoy: two
+		// transports split over two islands landed a handful of units on each (the larger group wins).
 		if (!pCustomPassengerGoal && !carryingMCV && !carryingHarvester && !carryingEngineer && pSecondaryIslandGoalCell
-			&& secondaryIslandZone >= 0 && readyCombatConvoyTransports >= 2 && (pTrans->UniqueID % 2 == 1))
+			&& secondaryIslandZone >= 0 && readyCombatConvoyTransports >= FerrySplitFrontTransports && (pTrans->UniqueID % 2 == 1))
 		{
 			pActiveIslandGoal = pSecondaryIslandGoalCell;
 			activeIslandZone = secondaryIslandZone;
@@ -11698,8 +11870,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Reserved passengers still walking to it keep it loading (they are out of the idle pools).
 		int ferryQueuedSize = 0;
 		const bool hasFerryQueue = onSafePickupShore && !ferryQueueOf(pTrans, transZone, ferryQueuedSize).empty();
+		// With its share of the fleet split aboard or on the way, the units left on the island are
+		// for its sister transports.
+		auto const itFleetShare = ferryFleetQuota.find(pTrans->UniqueID);
+		const bool fleetShareTaken = itFleetShare != ferryFleetQuota.end() && totalPassSize + ferryQueuedSize >= itFleetShare->second;
 		const bool canFitMoreOnPickupIsland = onSafePickupShore
-			&& (pSingleActiveBoarder != nullptr || hasFerryQueue || hasMoreBoardableUnitsOnIsland(transZone, 0));
+			&& (pSingleActiveBoarder != nullptr || hasFerryQueue || (!fleetShareTaken && hasMoreBoardableUnitsOnIsland(transZone, 0)));
 
 		if (numPass == 0 && onSafePickupShore && pSingleActiveBoarder == nullptr
 			&& (pTrans->CurrentMission == Mission::Guard || pTrans->CurrentMission == Mission::Area_Guard)
@@ -11779,6 +11955,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						continue;
 					}
 
+					// Its passengers of the fleet split still walk up to it: it is loading.
+					if (ferryReservedSizeOf.contains(pSister->UniqueID))
+					{
+						convoyHold = true;
+						break;
+					}
+
 					// Empty with cargo on this shore waiting for a crossing it can make: it loads next.
 					// One transport at a time left a few soldiers on the far side over and over while the
 					// rest of the army waited its turn.
@@ -11806,9 +11989,32 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// transport under fire still leave at once.
 		bool underfilledHold = false;
 		const int transRoom = pTrans->Type->Passengers;
+		// The convoy's cargo counts as one load: with the fleet split each transport carries a part
+		// of what its sister transports on this shore carry with it.
+		int convoyCargo = totalPassSize + ferryQueuedSize;
+
+		if (numPass >= 1 && onSafePickupShore && convoyCargo * 4 < transRoom * 3)
+		{
+			for (auto const pSister : UnitClass::Array)
+			{
+				if (!pSister || pSister == pTrans || pSister->Owner != pHouse || !pSister->IsAlive || pSister->InLimbo
+					|| !pSister->Type || !IsAmphibiousOrAirTransport(pSister->Type)
+					|| pSister->DistanceFrom(pTrans) > FerryConvoyCells * Unsorted::LeptonsPerCell
+					|| ObjectZone(pSister, MovementZone::Normal) != transZone)
+				{
+					continue;
+				}
+
+				if (auto const pSisterTrip = FindFerryTrip(pSister->UniqueID); pSisterTrip && pSisterTrip->Departed)
+					continue;
+
+				auto const itSisterReserved = ferryReservedSizeOf.find(pSister->UniqueID);
+				convoyCargo += pSister->Passengers.GetTotalSize() + (itSisterReserved != ferryReservedSizeOf.end() ? itSisterReserved->second : 0);
+			}
+		}
 
 		if (pTrip && numPass >= 1 && onSafePickupShore && !carryingMCV && !carryingStolenForeignMCV && !carryingHarvester
-			&& !carryingEngineer && !emergencyDepartUnderFire && totalPassSize * 4 < transRoom * 3)
+			&& !carryingEngineer && !emergencyDepartUnderFire && convoyCargo * 4 < transRoom * 3)
 		{
 			if (pTrip->UnderfilledSince < 0 || Unsorted::CurrentFrame < pTrip->UnderfilledSince)
 				pTrip->UnderfilledSince = Unsorted::CurrentFrame;
@@ -12716,16 +12922,24 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			std::vector<FootClass*> ferryQueue = ferryQueueOf(pTrans, transZone, queuedSize);
 			const bool activeBoarderQueued = pSingleActiveBoarder
 				&& std::find(ferryQueue.begin(), ferryQueue.end(), pSingleActiveBoarder) != ferryQueue.end();
-			int roomToReserve = freeCapNow - queuedSize
-				- ((pSingleActiveBoarder && !activeBoarderQueued) ? std::max(1, static_cast<int>(pSingleActiveBoarder->GetTechnoType()->Size)) : 0);
+			const int activeBoarderSize
+				= (pSingleActiveBoarder && !activeBoarderQueued) ? std::max(1, static_cast<int>(pSingleActiveBoarder->GetTechnoType()->Size)) : 0;
+			int roomToReserve = freeCapNow - queuedSize - activeBoarderSize;
+
+			// Its share of the fleet split, no more: the rest of the load goes to its sister transports.
+			if (auto const itQuota = ferryFleetQuota.find(pTrans->UniqueID); itQuota != ferryFleetQuota.end())
+				roomToReserve = std::min(roomToReserve, itQuota->second - totalPassSize - queuedSize - activeBoarderSize);
 
 			for (int reserveGuard = 0; reserveGuard < 16 && roomToReserve > 0; ++reserveGuard)
 			{
 				// Pick the SINGLE best/closest available passenger on this island that fits into roomToReserve:
 				// Priority 1: pendingCrossIslandOrders on transZone
+				// Largest first, then nearest (as the distribution mode deals them out): a big vehicle gets
+				// its seat before small units fill the room it needs.
 				FootClass* pNextBoarder = nullptr;
 				bool nextBoarderHasOwnGoal = false;
 				double bestBoarderDist = 999999.0;
+				int bestBoarderSize = 0;
 
 				for (auto const& ord : pendingCrossIslandOrders)
 				{
@@ -12757,9 +12971,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 
 					const double d = ord.Passenger->GetMapCoords().DistanceFrom(transCoords);
-					if (d < bestBoarderDist)
+					if (osz > bestBoarderSize || (osz == bestBoarderSize && d < bestBoarderDist))
 					{
 						bestBoarderDist = d;
+						bestBoarderSize = osz;
 						pNextBoarder = ord.Passenger;
 						nextBoarderHasOwnGoal = true;
 					}
@@ -12793,9 +13008,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							continue;
 
 						const double d = pV->GetMapCoords().DistanceFrom(transCoords);
-						if (d < bestBoarderDist)
+						if (vehSize > bestBoarderSize || (vehSize == bestBoarderSize && d < bestBoarderDist))
 						{
 							bestBoarderDist = d;
+							bestBoarderSize = vehSize;
 							pNextBoarder = pV;
 						}
 					}
