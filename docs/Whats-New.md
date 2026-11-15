@@ -2167,6 +2167,7 @@ PreserveCSFWhitespace=false          ; boolean
 - Fixed tint effects on `Cumulative=true` AttachEffects not stacking. This behaviour can be disabled by setting `Tint.Cumulative=false` (by Starkku)
 - Fixed a bug where units that have `MinDebris` and `MaxDebris` defined but `DebrisTypes` undefined would unconditionally spawn `MetallicDebris` once when they die (by dh381)
 - Veinhole monster and veins logic fixes and ramp support (by FS-21)
+- Fixed the game freezing in path finding when a high bridge reaches the map edge, and ground units sent to a building with no free cell around it heading for a cell outside the map instead (by FS-21)
 
 #### Fixes / interactions with other extensions:
 - Allowed `SW.ShowCameo` and `SW.ManualFire` to work independently of `SW.AutoFire` (by Noble_Fish)

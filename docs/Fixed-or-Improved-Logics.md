@@ -347,6 +347,8 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed amphibious infantry without `MovementZone=AmphibiousDestroyer` (e.g. `MovementZone=Amphibious` or `SpeedType=Amphibious`) or playing `Guard`/`Down`/`Up` sequences in water using land animations instead of water sequences.
 - Fixed the bug that infantry weapons with both `LimboLaunch=yes` and ammunition logic could not set ReloadTimer properly.
 - Fixed a bug where units that have `MinDebris` and `MaxDebris` defined but `DebrisTypes` undefined would unconditionally spawn `MetallicDebris` once when they die.
+- Fixed the game freezing in path finding when a high bridge reaches the map edge: the bridge flags were left on the cell the game uses for every cell outside the map, and the search for the ends of a bridge could then walk outside the map forever.
+- Fixed ground units sent to a cell held by a building with no free cell around it taking a cell outside the map as their new destination.
 
 ## Fixes / interactions with other extensions
 
