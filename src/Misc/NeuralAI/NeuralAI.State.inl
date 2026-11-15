@@ -1731,6 +1731,11 @@ namespace
 	// or one in PlanStrikeIdleShare of the idle ground army when that is more.
 	constexpr size_t SuperweaponRaceMinGround = 4;
 	constexpr size_t SuperweaponRaceMaxGround = 12;
+	// Blackout: the ground group has this many units that hurt the plant at least and takes at most
+	// this many, or one in PlanStrikeIdleShare of the idle ground army when that is more. It took
+	// the five fastest idle units: 1 of 14 plans ended well (2026-11-15).
+	constexpr size_t BlackoutMinGround = 4;
+	constexpr size_t BlackoutMaxGround = 8;
 	// A plan's ground column keeps together on its way (Superweapon Race, Rolling Siege): a member
 	// more than PlanMarchBandCells nearer the goal than the column's rear waits for it, until the
 	// rear is within PlanMarchCommittedCells of the goal.
