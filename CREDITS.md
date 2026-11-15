@@ -212,6 +212,7 @@ This page lists all the individual contributions to the project by their author.
   - Fix `Refinery.UseStorage` and `Storage.TiberiumIndex` on Slave Miners
   - Veinhole monster and veins logic fixes and ramp support
   - Building production progress bar
+  - Fix the path finding freeze at high bridges reaching the map edge
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

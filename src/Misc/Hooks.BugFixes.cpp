@@ -818,6 +818,67 @@ DEFINE_HOOK(0x4834E5, CellClass_IsClearToMove_BridgeEdges, 0x5)
 	return 0;
 }
 
+// High bridge decks are marked through MapClass::operator[], which hands out the shared working cell
+// (MapClass::InvalidCell) for any cell outside the map. A bridge that reaches the map edge thus left
+// its bridge flags on that cell, and from then on every cell outside the map read as a bridge deck.
+DEFINE_HOOK_AGAIN(0x47E888, CellClass_MarkBridge_KeepInvalidCellClear, 0x7) // wooden bridges
+DEFINE_HOOK(0x47E458, CellClass_MarkBridge_KeepInvalidCellClear, 0x7) // concrete bridges
+{
+	constexpr CellFlags bridgeMarks = CellFlags::BridgeOwner | CellFlags::BridgeHead | CellFlags::Unknown_200
+		| CellFlags::BridgeBody | CellFlags::BridgeDir | CellFlags::PixelFX | CellFlags::DrawDarkenIfInAir;
+
+	MapClass::InvalidCell.Flags &= ~bridgeMarks;
+
+	return 0;
+}
+
+// Read in place of the flags of a bridge walker that left the map, so the walk sees no deck there.
+static const CellFlags OffMapWalkerFlags = CellFlags::Empty;
+
+// The search for both ends of a high bridge walks two cells away from the start in opposite directions
+// while they stand on a deck. Cells outside the map are all the one working cell, so two walkers that
+// both left the map kept moving that cell back and forth between each other and the game froze.
+// A walker that leaves the map stops there: no deck continues outside the map.
+DEFINE_HOOK(0x583675, MapClass_FindBridgeEnds_StopOffMapForward, 0x8)
+{
+	enum { NextWalker = 0x5836AE };
+
+	GET(CellClass*, pCell, EAX);
+
+	if (pCell != &MapClass::InvalidCell)
+		return 0;
+
+	R->EBP(&OffMapWalkerFlags);
+
+	return NextWalker;
+}
+
+DEFINE_HOOK(0x5836C1, MapClass_FindBridgeEnds_StopOffMapBackward, 0x8)
+{
+	enum { CheckForwardWalker = 0x583705 };
+
+	GET(CellClass*, pCell, EAX);
+
+	if (pCell != &MapClass::InvalidCell)
+		return 0;
+
+	R->EBX(&OffMapWalkerFlags);
+
+	return CheckForwardWalker;
+}
+
+// A ground unit sent to a cell held by a building it cannot enter is redirected to a free cell nearby.
+// When none is found the search returns the invalid cell (0,0), which the game took as the new
+// destination: the unit then tried to reach a cell outside the map. Keep the original destination.
+DEFINE_HOOK(0x4D3DDD, FootClass_BasicPath_NoNearbyLocation, 0x5)
+{
+	enum { KeepDestination = 0x4D3E0A };
+
+	GET(const CellStruct*, pNearby, EAX);
+
+	return *pNearby == CellStruct::Empty ? KeepDestination : 0;
+}
+
 // Fix DeployToFire not working properly for WaterBound DeploysInto buildings and not recalculating position on land if can't deploy.
 DEFINE_HOOK(0x4D580B, FootClass_ApproachTarget_DeployToFire, 0x6)
 {
