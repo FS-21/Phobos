@@ -1720,6 +1720,11 @@ namespace
 	// or one in PlanStrikeIdleShare of the idle ground army when that is more.
 	constexpr size_t SuperweaponRaceMinGround = 4;
 	constexpr size_t SuperweaponRaceMaxGround = 12;
+	// A plan's ground column keeps together on its way (Superweapon Race, Rolling Siege): a member
+	// more than PlanMarchBandCells nearer the goal than the column's rear waits for it, until the
+	// rear is within PlanMarchCommittedCells of the goal.
+	constexpr double PlanMarchBandCells = 6.0;
+	constexpr double PlanMarchCommittedCells = 14.0;
 	// A unit that resource cells heal, wounded below ResourceHealBelow, stops on one within
 	// ResourceHealSearchCells until it is back at ResourceHealUntil, for ResourceHealMaxFrames at
 	// most, and then not again for ResourceHealCooldownFrames.
