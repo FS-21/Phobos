@@ -273,6 +273,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	UpdateStuckUnits(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "stuck units watchdog");
 
+	// Soldiers shut in a building they no longer walk into are put down outside it.
+	FreeSoldiersShutInBuildings(pHouse);
+
 	// Empty harvesters waiting where the ore ran out go to the nearest free field.
 	UpdateIdleHarvesters(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "idle harvesters");

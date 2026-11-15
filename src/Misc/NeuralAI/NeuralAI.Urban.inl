@@ -141,6 +141,11 @@ namespace
 		// asked for it: the one an engineer may repair.
 		DWORD RepairWantedID { 0 };
 		int RepairWantedFrame { -100000 };
+		// Soldiers shut in a building (FreeSoldiersShutInBuildings): the last check, the soldiers that
+		// could step nowhere at it (sorted by ID), and how many were put down outside this match.
+		int LastShutInCheckFrame { -1 };
+		std::vector<DWORD> ShutIn {};
+		int ShutInFreed { 0 };
 	};
 
 	std::array<NeuralUrbanState, 32> UrbanStates {};
@@ -845,12 +850,12 @@ namespace
 			state.LastReportFrame = now;
 			Debug::Log("[NeuralAI] House %d Urban: %d garrisons, %d occupants (peak %d/%d), known %d (worthy %d), worth %d, enemy garrisons %d, "
 				"allies %d, opportunity %d, orders %d, evacuations %d, clears %d; occupiers %d, tries %d (over share %d, no building %d, squads %d, too few %d), "
-				"seats %d (free %d), frame %d.\n",
+				"seats %d (free %d), freed from buildings %d, frame %d.\n",
 				pHouse->ArrayIndex, state.OwnGarrisons, state.OwnOccupants, state.PeakGarrisons, state.PeakOccupants,
 				static_cast<int>(state.Buildings.size()), state.WorthyBuildings, state.GarrisonWorth, state.ThreatGarrisons, state.Allies,
 				state.Opportunity, state.GarrisonOrders, state.Evacuations, state.ClearOrders, state.OwnOccupierInfantry,
 				state.TriesSinceReport, state.OverCapSinceReport, state.NoBuildingSinceReport, state.SquadsSinceReport,
-				state.SmallSquadSinceReport, state.WorthySeats, state.WorthyFreeSeats, now);
+				state.SmallSquadSinceReport, state.WorthySeats, state.WorthyFreeSeats, state.ShutInFreed, now);
 			state.TriesSinceReport = 0;
 			state.SquadsSinceReport = 0;
 			state.SmallSquadSinceReport = 0;
@@ -1371,6 +1376,187 @@ namespace
 			Debug::Log("[NeuralAI] House %d Urban: clear %s at (%d,%d) with %s %u, %d inside, frame %d.\n",
 				pHouse->ArrayIndex, pTarget->Type->ID, pTarget->GetMapCoords().X, pTarget->GetMapCoords().Y,
 				pClearer->GetTechnoType()->ID, pClearer->UniqueID, pTarget->Occupants.Count, Unsorted::CurrentFrame);
+		}
+	}
+
+	// Can this soldier step on none of the cells around it?
+	bool IsShutInBuilding(InfantryClass* pInf)
+	{
+		const CellStruct here = pInf->GetMapCoords();
+
+		for (int direction = 0; direction < 8; ++direction)
+		{
+			const CellStruct offset = Unsorted::AdjacentCell[direction];
+			const CellStruct c { static_cast<short>(here.X + offset.X), static_cast<short>(here.Y + offset.Y) };
+			auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+			if (pCell && pInf->IsCellOccupied(pCell, static_cast<FacingType>(direction), -1, nullptr, true) != Move::No)
+				return false;
+		}
+
+		return true;
+	}
+
+	// The free cell around the foundation of a building (one cell out, else two) nearest to a soldier
+	// standing in it, and the spot on that cell where the soldier fits.
+	CellClass* FindCellOutsideBuilding(InfantryClass* pInf, BuildingClass* pBld, CoordStruct& where)
+	{
+		const CellStruct origin = pBld->GetMapCoords();
+		const int width = pBld->Type->GetFoundationWidth();
+		const int height = pBld->Type->GetFoundationHeight(false);
+		const CellStruct here = pInf->GetMapCoords();
+		CellClass* pBest = nullptr;
+		double bestDist = 1e9;
+
+		for (int ring = 1; ring <= 2 && !pBest; ++ring)
+		{
+			for (int dy = -ring; dy < height + ring; ++dy)
+			{
+				for (int dx = -ring; dx < width + ring; ++dx)
+				{
+					if (dx != -ring && dx != width + ring - 1 && dy != -ring && dy != height + ring - 1)
+						continue;
+
+					const CellStruct c { static_cast<short>(origin.X + dx), static_cast<short>(origin.Y + dy) };
+					auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+					const double dist = here.DistanceFrom(c);
+
+					if (!pCell || dist >= bestDist || pCell->GetBuilding() || pCell->ContainsBridge())
+						continue;
+
+					const Move move = pInf->IsCellOccupied(pCell, FacingType::None, -1, nullptr, true);
+
+					if (move != Move::OK && move != Move::MovingBlock)
+						continue;
+
+					CoordStruct spot = pCell->FindInfantrySubposition(pCell->GetCoordsWithBridge(), false, false, false);
+
+					if (spot == CoordStruct::Empty)
+						continue;
+
+					spot.Z = pCell->GetCoordsWithBridge().Z;
+					bestDist = dist;
+					pBest = pCell;
+					where = spot;
+				}
+			}
+		}
+
+		return pBest;
+	}
+
+	// Soldiers shut in a building. The engine lets infantry walk the cells of a building only on its
+	// way into it (Enter, Capture or Sabotage with that building as its destination or target). One
+	// whose order changes on the way in, or that the building turns away when it gets there (full, in
+	// red health, held by another house, a mind-controlled soldier), stands on a cell next to which it
+	// may step nowhere, and the engine scatters it every frame: a path search to the next free cell
+	// around the building, every one failing (match #9862, Sahara Mirage: 128000 failed searches in
+	// 42000 frames from the centre of a building our soldiers were sent into; #9873, Ore Pit: a soldier
+	// on Attack Move at the centre of a building of ours with a mate inside). Our infantry on a cell of
+	// a building that can step nowhere is noted every ShutInCheckFrames; one noted at two checks in a
+	// row is put down on the free cell around the building nearest to it, on Guard.
+	void FreeSoldiersShutInBuildings(HouseClass* pHouse)
+	{
+		if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return;
+
+		auto& state = GetUrbanState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (state.LastShutInCheckFrame >= 0 && now >= state.LastShutInCheckFrame && now - state.LastShutInCheckFrame < ShutInCheckFrames)
+			return;
+
+		state.LastShutInCheckFrame = now;
+		std::vector<DWORD> shutIn;
+		std::vector<InfantryClass*> toFree;
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || pInf->InLimbo || !pInf->Type || pInf->IsInAir() || pInf->OnBridge
+				|| pInf->Transporter)
+			{
+				continue;
+			}
+
+			auto const pCell = pInf->GetCell();
+			auto const pBld = pCell ? pCell->GetBuilding() : nullptr;
+
+			if (!pBld || !pBld->Type || !IsShutInBuilding(pInf))
+				continue;
+
+			shutIn.push_back(pInf->UniqueID);
+
+			if (std::binary_search(state.ShutIn.begin(), state.ShutIn.end(), pInf->UniqueID))
+				toFree.push_back(pInf);
+		}
+
+		std::sort(shutIn.begin(), shutIn.end());
+		state.ShutIn = std::move(shutIn);
+
+		for (auto const pInf : toFree)
+		{
+			auto const pBld = pInf->GetCell()->GetBuilding();
+			CoordStruct where = CoordStruct::Empty;
+			auto const pOut = FindCellOutsideBuilding(pInf, pBld, where);
+
+			if (!pOut)
+				continue;
+
+			if (state.ShutInFreed < ShutInLogsPerMatch)
+			{
+				auto const describe = [pBld](AbstractClass* pWhat, char* text, size_t size)
+				{
+					if (!pWhat)
+						std::snprintf(text, size, "none");
+					else if (pWhat == pBld)
+						std::snprintf(text, size, "this building");
+					else if (auto const pDestCell = abstract_cast<CellClass*>(pWhat))
+						std::snprintf(text, size, "cell (%d,%d)", pDestCell->MapCoords.X, pDestCell->MapCoords.Y);
+					else
+						std::snprintf(text, size, "%s", abstract_cast<BuildingClass*>(pWhat) ? "another building" : "a unit");
+				};
+
+				char destination[32];
+				char target[32];
+				char order[48] = "none";
+				describe(pInf->Destination, destination, sizeof(destination));
+				describe(pInf->Target, target, sizeof(target));
+
+				auto const itOrder = std::lower_bound(state.Orders.begin(), state.Orders.end(), pInf->UniqueID,
+					[](const NeuralUrbanOrder& entry, DWORD key) { return entry.InfantryID < key; });
+
+				if (itOrder != state.Orders.end() && itOrder->InfantryID == pInf->UniqueID)
+				{
+					std::snprintf(order, sizeof(order), "%s %d frames ago", itOrder->BuildingID == pBld->UniqueID ? "into it" : "elsewhere",
+						now - itOrder->Frame);
+				}
+
+				const CellStruct here = pInf->GetMapCoords();
+				const CellStruct bldCell = pBld->GetMapCoords();
+				Debug::Log("[NeuralAI] House %d freed %s %u shut in %s at (%d,%d) (owner %d, %d/%d inside, health %d%%): at (%d,%d), mission %d mega %d, "
+					"destination %s, target %s, garrison order %s, plan %d; put down at (%d,%d), frame %d.\n",
+					pHouse->ArrayIndex, pInf->Type->ID, pInf->UniqueID, pBld->Type->ID, bldCell.X, bldCell.Y,
+					pBld->Owner ? pBld->Owner->ArrayIndex : -1, pBld->Occupants.Count, pBld->Type->MaxNumberOccupants,
+					static_cast<int>(pBld->GetHealthPercentage() * 100.0), here.X, here.Y, static_cast<int>(pInf->CurrentMission),
+					static_cast<int>(pInf->MegaMission), destination, target, order, IsPlanMember(pHouse, pInf->UniqueID) ? 1 : 0,
+					pOut->MapCoords.X, pOut->MapCoords.Y, now);
+			}
+
+			const CoordStruct was = pInf->Location;
+			const DirType facing = pInf->PrimaryFacing.Current().GetDir();
+			pInf->ClearMegaMissionData();
+			pInf->SetTarget(nullptr);
+			pInf->SetDestination(nullptr, true);
+			pInf->Limbo();
+			++Unsorted::ScenarioInit;
+			const bool placed = pInf->Unlimbo(where, facing) || pInf->Unlimbo(was, facing);
+			--Unsorted::ScenarioInit;
+
+			if (!placed)
+				continue;
+
+			pInf->QueueMission(Mission::Guard, false);
+			state.ShutInFreed++;
 		}
 	}
 }

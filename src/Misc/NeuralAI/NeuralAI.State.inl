@@ -1507,6 +1507,10 @@ namespace
 	constexpr int EmergencyLaneSideCells = 3;
 	constexpr int EmergencyLaneMovesPerCheck = 16;
 	constexpr int EmergencyLaneLogFrames = 1800;
+	// Soldiers shut in a building (FreeSoldiersShutInBuildings): checked every ShutInCheckFrames, and
+	// at most ShutInLogsPerMatch of them logged one by one.
+	constexpr int ShutInCheckFrames = 30;
+	constexpr int ShutInLogsPerMatch = 40;
 	// Shared destination (user: units sent to one cell that is taken should each look for the nearest
 	// free cell). Ships of one house sent to the water cell nearest an inland target queued for it in
 	// a narrow channel (matches #9771 and #9832, 100000 frames), 29 vehicles to one cell (#9820), and
