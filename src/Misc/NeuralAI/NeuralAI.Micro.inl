@@ -10859,6 +10859,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// departures sailed alone, 40 matches). A transport outside the split reserves nobody; one with
 	// a base deployer, a harvester or an engineer aboard keeps its own rules.
 	std::unordered_map<DWORD, int> ferryFleetQuota;
+	// By pickup zone: the size of the battalion still on land (boardable, nobody aboard or reserved
+	// yet), and the room of our empty transports on their way to that zone.
+	std::map<int, int> ferryBattalionLeft;
+	std::map<int, int> ferryComingRoom;
 	{
 		struct FleetTransport
 		{
@@ -10901,6 +10905,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			fleets[fleetZone].push_back({ pFleet, held, pFleet->Type->Passengers });
 		}
 
+		// Empty transports on their way to a pickup zone (on the water or elsewhere, heading for a cell
+		// of that zone): the battalion waits for them.
+		for (auto const pComing : UnitClass::Array)
+		{
+			if (!pComing || pComing->Owner != pHouse || pComing->InLimbo || !pComing->IsAlive || !pComing->Type
+				|| !IsAmphibiousOrAirTransport(pComing->Type) || pComing->Type->Passengers <= 0 || pComing->Passengers.NumPassengers > 0
+				|| IsPlanMember(pHouse, pComing->UniqueID))
+			{
+				continue;
+			}
+
+			auto const pComingDest = abstract_cast<CellClass*>(pComing->Destination);
+			auto const pComingCell = pComing->GetCell();
+
+			if (!pComingDest || !pComingCell)
+				continue;
+
+			const int destZone = MapClass::Instance.GetMovementZoneType(pComingDest->MapCoords, MovementZone::Normal, false);
+
+			if (destZone >= 0 && (pComingCell->LandType == LandType::Water || ObjectZone(pComing, MovementZone::Normal) != destZone))
+				ferryComingRoom[destZone] += pComing->Type->Passengers;
+		}
+
 		for (auto& [fleetZone, fleet] : fleets)
 		{
 			int sizeLimit = 0;
@@ -10911,6 +10938,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				sizeLimit = std::max(sizeLimit, static_cast<int>(member.Transport->Type->SizeLimit));
 				load += member.Held;
 			}
+
+			const int heldTotal = load;
 
 			std::unordered_set<DWORD> counted;
 			int sumX = 0;
@@ -10959,6 +10988,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (load <= 0)
 				continue;
 
+			ferryBattalionLeft[fleetZone] = load - heldTotal;
+
 			const CellStruct centre = boardable > 0
 				? CellStruct { static_cast<short>(sumX / boardable), static_cast<short>(sumY / boardable) }
 				: fleet.front().Transport->GetMapCoords();
@@ -11001,8 +11032,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				|| now - fleetMacro.FerryFleetLogFrame >= FerryIslandKeptLogFrames))
 			{
 				fleetMacro.FerryFleetLogFrame = now;
-				Debug::Log("[NeuralAI] Frame %d | House #%d ferry fleet split on zone %d: load %d over %d of %d transports, share %d each\n",
-					now, pHouse->ArrayIndex, fleetZone, load, static_cast<int>(chosen), static_cast<int>(fleet.size()), share);
+				auto const itComing = ferryComingRoom.find(fleetZone);
+				Debug::Log("[NeuralAI] Frame %d | House #%d ferry fleet split on zone %d: load %d over %d of %d transports, share %d each, "
+					"%d still on land, room %d on its way\n", now, pHouse->ArrayIndex, fleetZone, load, static_cast<int>(chosen),
+					static_cast<int>(fleet.size()), share, load - heldTotal, itComing != ferryComingRoom.end() ? itComing->second : 0);
 			}
 		}
 	}
@@ -12000,6 +12033,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					if (convoyHold)
 						break;
 				}
+			}
+
+			// The whole battalion (user: call the transports the group needs, or build them, load it all,
+			// then gather and sail together): units of the split still on land while empty transports of
+			// ours are on their way to this zone keep it waiting, up to FerryBattalionWaitFrames. When the
+			// last one is loaded, the joint departure takes them all at once.
+			if (!convoyHold && Unsorted::CurrentFrame - pTrip->ReadyFrame < FerryBattalionWaitFrames)
+			{
+				auto const itLeft = ferryBattalionLeft.find(transZone);
+				auto const itComing = ferryComingRoom.find(transZone);
+
+				convoyHold = itLeft != ferryBattalionLeft.end() && itLeft->second > 0 && itComing != ferryComingRoom.end()
+					&& itComing->second > 0;
 			}
 		}
 
