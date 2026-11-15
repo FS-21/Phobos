@@ -7689,7 +7689,10 @@ namespace
 				}
 				else if (plan.AuxBaseline == 0)
 				{
-					// The ambush takes its place first, the bait with it.
+					// The ambush takes its place first. The bait, the fastest of the group, keeps to the
+					// middle of the ambushers on the way: sent to the ambush cell at once, it got there
+					// alone and died in 24 of 65 plans (focus batch of 2026-11-15, lures 60 to 350 cells
+					// from home).
 					moveGroup(ambushers, pAmbush, 3.0);
 					int inPlace = 0;
 					int ambushAlive = 0;
@@ -7718,7 +7721,9 @@ namespace
 					}
 					else
 					{
-						IssueMoveOrder(pBait, pAmbush, 3.0);
+						const CellStruct middle = groupCentroid(ambushers);
+						auto const pWith = middle != CellStruct::Empty ? landCellInZone(middle, homeZone, 3) : nullptr;
+						IssueMoveOrder(pBait, pWith ? pWith : pAmbush, 3.0);
 					}
 				}
 				else if (plan.AuxBaseline == 1)
