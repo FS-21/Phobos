@@ -4670,6 +4670,22 @@ namespace
 			if (!pRally)
 				return HoldTowersCase {};
 
+			// Only a fight the towers turn: the army and our defenses that shoot at the ground near
+			// the rally together worth HoldTowersStandPercent of the force.
+			int towers = 0;
+
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->IsBaseDefense
+					&& pBld->GetMapCoords().DistanceFrom(pRally->MapCoords) <= HoldTowersDefenseCells)
+				{
+					towers += GetCombatValueOfType(pBld->Type, false);
+				}
+			}
+
+			if ((feetValue(army) + towers) * 100 < enemyNear * HoldTowersStandPercent)
+				return HoldTowersCase {};
+
 			result.EnemyNear = enemyNear;
 			result.Army = std::move(army);
 			result.Rally = pRally;
