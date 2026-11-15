@@ -2022,17 +2022,42 @@ namespace
 		// Plans whose learned gate opened this tick and that have not started yet (telemetry NoGroup).
 		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> gateOpenedUnstarted {};
 
+		// Bait Ambush and Feint play against human players only (user, 2026-11-15): they need an
+		// enemy that chases a lone attacker or pulls its defenders to it, which a human does and
+		// the Neural AI hardly ever does (its intercept answered 19 of 666 baits and 4 of 80
+		// decoys), so against an AI they went well in 7% and 6% of the plans.
+		bool humanEnemy = false;
+
+		for (auto const pOther : HouseClass::Array)
+		{
+			if (pOther && pOther != pHouse && pOther->IsControlledByHuman() && !pOther->IsNeutral() && !pOther->IsObserver()
+				&& !pOther->IsInitiallyObserver() && !pOther->Defeated && !pHouse->IsAlliedWith(pOther))
+			{
+				humanEnemy = true;
+				break;
+			}
+		}
+
+		// Whether a deception plan may aim at a building of this house: a human's, or anyone's in
+		// a training focus match that asks for the plan (to measure it against the Neural AI).
+		auto deceptionTargets = [](NeuralPlanId id, const HouseClass* pOwner) -> bool
+		{
+			return TrainingFocus().Plans[static_cast<size_t>(id)] || (pOwner && pOwner->IsControlledByHuman());
+		};
+
 		// Shelved plans start only in a training focus match that asks for them: Airborne Front
 		// went well in none of 34 plans behind a main attack and is being redesigned (user,
 		// 2026-11-14), so ordinary matches do not spend units or learning on it meanwhile. Bait
-		// Ambush (12% of 678) and Feint (3% of 122) were built on enemies that chase a lone unit
-		// or pull their defenders for nothing, and are being redesigned too (user, 2026-11-15).
-		auto planShelved = [](NeuralPlanId id) -> bool
+		// Ambush and Feint are shelved too unless a human enemy is in the match.
+		auto planShelved = [humanEnemy](NeuralPlanId id) -> bool
 		{
-			constexpr NeuralPlanId shelved[] = { NeuralPlanId::AirborneFront, NeuralPlanId::BaitAmbush, NeuralPlanId::Feint };
+			if (TrainingFocus().Plans[static_cast<size_t>(id)])
+				return false;
 
-			return std::find(std::begin(shelved), std::end(shelved), id) != std::end(shelved)
-				&& !TrainingFocus().Plans[static_cast<size_t>(id)];
+			if (id == NeuralPlanId::BaitAmbush || id == NeuralPlanId::Feint)
+				return !humanEnemy;
+
+			return id == NeuralPlanId::AirborneFront;
 		};
 
 		auto shouldTryStart = [&](NeuralPlanId id, int contextUtility) -> bool
@@ -3055,6 +3080,13 @@ namespace
 				}
 
 				std::vector<FootClass*> idleArmy;
+
+				// Only a human is drawn away from the main attack (deceptionTargets).
+				if (frontOwner >= 0 && frontOwner < HouseClass::Array.Count
+					&& !deceptionTargets(NeuralPlanId::Feint, HouseClass::Array.GetItem(frontOwner)))
+				{
+					frontOwner = -1;
+				}
 
 				if (frontOwner >= 0)
 				{
@@ -7816,7 +7848,8 @@ namespace
 					for (auto const pBld : knownEnemyBuildingList)
 					{
 						if (!isKnownEnemyBuilding(pBld) || ObjectZone(pBld, MovementZone::Normal) != homeZone || pBld->Type->CanBeOccupied
-							|| pBld->Type->Insignificant || pBld->Type->UndeploysInto || underOurFire.contains(pBld))
+							|| pBld->Type->Insignificant || pBld->Type->UndeploysInto || underOurFire.contains(pBld)
+							|| !deceptionTargets(NeuralPlanId::BaitAmbush, pBld->Owner))
 						{
 							continue;
 						}
