@@ -915,31 +915,59 @@ void NeuralAI::OnScenarioStart()
 				pExt->NeuralAI_PolicySlot = (activeAIHouses - 1) % 2;
 		}
 
-		// Select Strategic Archetype (0..4) weighted by evolved OutputBias[48..52]
-		// + learned faction memory + stochastic exploration
+		// Strategic archetype: the learned bias (slots 48..52, 86..88), what the faction memory says
+		// of the archetype per match it played and, in training matches, a bonus for archetypes this
+		// side has seldom tried. The memory used to count as a sum: a win adds 12 and a loss takes 6,
+		// so the sum of an archetype grows with every match it plays at more than a third of wins,
+		// and the first archetype a side played stayed its only one (each side had one archetype
+		// with 130 to 270 visits and +500 to +1100, archetypes 0 and 2 were never drawn in 40
+		// matches). A per-match mean compares archetypes whatever their number of matches; one with
+		// few matches is pulled toward the side's mean.
 		int bestArch = ScenarioClass::Instance->Random.RandomRanged(0, NeuralAI::NumArchetypes - 1);
 
 		if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded)
 		{
 			const AIBackpackFile& policy = NeuralAI::PolicyFor(pHouse);
 
+			std::array<int, NeuralAI::NumArchetypes> deltaSum {};
+			std::array<int, NeuralAI::NumArchetypes> matchesPlayed {};
+			int sideDeltaSum = 0;
+			int sideMatches = 0;
+
+			for (int a = 0; a < NeuralAI::NumArchetypes; ++a)
+			{
+				// The result of a match goes into the entry of the expert that ran most, and every
+				// expert above a twentieth of the choices counts a visit: the most visited entry is
+				// about the number of matches this archetype played for this side.
+				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+				{
+					auto const& entry = policy.Entries[(pHouse->SideIndex * 80 + a * 10 + e) % 512];
+
+					if (entry.VisitCount > 0)
+					{
+						deltaSum[a] += entry.ArchetypeScoreDelta[a];
+						matchesPlayed[a] = std::max(matchesPlayed[a], static_cast<int>(std::min(entry.VisitCount, 100000u)));
+					}
+				}
+
+				sideDeltaSum += deltaSum[a];
+				sideMatches += matchesPlayed[a];
+			}
+
+			const int sideMeanX100 = sideMatches > 0 ? sideDeltaSum * 100 / sideMatches : 0;
 			int bestArchScore = -999999;
 
 			for (int a = 0; a < NeuralAI::NumArchetypes; ++a)
 			{
-				int memBonus = 0;
-				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
-				{
-					const uint32_t eIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + a * 10 + e) % 512);
-					if (policy.Entries[eIdx].VisitCount > 0)
-						memBonus += static_cast<int>(policy.Entries[eIdx].ArchetypeScoreDelta[a]) * 3;
-				}
-
-				memBonus = std::clamp(memBonus, -1200, 1200);
-
+				const int meanX100 = (deltaSum[a] * 100 + sideMeanX100 * ArchetypeMemoryPrior)
+					/ (matchesPlayed[a] + ArchetypeMemoryPrior);
+				const int memBonus = std::clamp(meanX100 * ArchetypeMemoryWeight / 100, -ArchetypeMemoryCap, ArchetypeMemoryCap);
+				const int tryBonus = NeuralAI::TrainingMode
+					? static_cast<int>(ArchetypeTryBonus / std::sqrt(1.0 + static_cast<double>(matchesPlayed[a])))
+					: 0;
 				const int exploreJitter = ScenarioClass::Instance->Random.RandomRanged(-90, 90);
 				const int archBiasSlot = (a < 5) ? (48 + a) : (86 + (a - 5));
-				const int aScore = static_cast<int>(policy.OutputBias[archBiasSlot]) + memBonus + exploreJitter;
+				const int aScore = static_cast<int>(policy.OutputBias[archBiasSlot]) + memBonus + tryBonus + exploreJitter;
 
 				if (aScore > bestArchScore)
 				{

@@ -8447,7 +8447,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// In RA2/YR, larger battalions are exponentially more devastating against
 	// fortified AI/human bases. Scale minimum battalion size up when the enemy
 	// has base defenses or when our industrial capacity is mature!
-	const int baseWave = (arch == 3 || arch == 5) ? 4 : ((arch == 2 || arch == 4 || arch == 7) ? 8 : 6);
+	// Only the guerrilla raider (5) goes out with small groups: a rush wins by arriving early in
+	// numbers, and Blitzkrieg (3) houses sent out waves of 4 and lost 18 of 26 decided matches.
+	const int baseWave = (arch == 5) ? 4 : ((arch == 2 || arch == 4 || arch == 7) ? 8 : 6);
 	const int defenseMassBonus = std::clamp(totalEnemyBaseDefenses / 2, 0, 4) + ((pHouse->OwnedUnits >= 18) ? 2 : 0);
 	const bool highMoneyMultiFactoryStream = (pHouse->Available_Money() >= 4000
 		&& (pHouse->NumWarFactories >= 2 || pHouse->NumBarracks >= 2 || pHouse->NumAirpads >= 2));

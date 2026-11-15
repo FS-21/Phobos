@@ -1274,6 +1274,16 @@ namespace
 	// The focused expert leads all but one of every FocusExpertWindows windows of 900 frames.
 	constexpr int FocusExpertWindows = 4;
 
+	// Archetype choice at match start (Lifecycle): the faction memory counts by its mean result per
+	// match (win +12..+16, loss -6, stalemate +-3) times ArchetypeMemoryWeight, at most
+	// ArchetypeMemoryCap either way; an archetype with few matches is pulled toward the side's mean
+	// as if it had played ArchetypeMemoryPrior matches there. In training matches an archetype gets
+	// ArchetypeTryBonus / sqrt(1 + its matches for this side), so every one keeps being tried.
+	constexpr int ArchetypeMemoryPrior = 4;
+	constexpr int ArchetypeMemoryWeight = 40;
+	constexpr int ArchetypeMemoryCap = 600;
+	constexpr double ArchetypeTryBonus = 600.0;
+
 	const NeuralTrainingFocus& TrainingFocus()
 	{
 		auto& focus = TrainingFocusState;

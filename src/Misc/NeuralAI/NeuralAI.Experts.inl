@@ -178,14 +178,17 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// Common-sense vetoes: an expert that cannot do its job here is never chosen, whatever the
 	// learned bias says. Airforce with no air work (no armed aircraft, no target or enemy air it
-	// could answer, unless archetype 6 can still build its air force); Urban with no building to
-	// occupy, no garrison and no allied coalition; Economy with no trouble to fix; Expansion with
-	// no free field it knows and can take; Special Operations with nothing to capture, spy or bridge.
+	// could answer); Urban with no building to occupy, no garrison and no allied coalition; Economy
+	// with no trouble to fix; Expansion with no free field it knows and can take; Special
+	// Operations with nothing to capture, spy or bridge. Their own archetypes are no exception: the
+	// airfields, strike craft, garrisons and spies of archetypes 6, 7 and 1 come from the archetype
+	// priors whoever is in charge, and an expert with no work only held control (Expert 4 ran 18%
+	// of the ticks of archetype 1 houses, 6 to 7% of the others).
 	std::array<bool, 10> vetoed {};
 	vetoed[0] = economyMacro.EconomyTrouble == 0;
-	vetoed[4] = specOpsOpportunity == 0 && pExt->NeuralAI_Archetype != 1;
-	vetoed[8] = airForceOpportunity == 0 && (pExt->NeuralAI_Archetype != 6 || !HouseCanEverFieldAircraft(pHouse));
-	vetoed[9] = urbanOpportunity == 0 && pExt->NeuralAI_Archetype != 7;
+	vetoed[4] = specOpsOpportunity == 0;
+	vetoed[8] = airForceOpportunity == 0;
+	vetoed[9] = urbanOpportunity == 0;
 	vetoed[6] = economyMacro.ExpansionOpportunity == 0;
 
 	const int curArch = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);
@@ -400,8 +403,11 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 			// If this Archetype has a negative win/loss record in the Backpack for
 			// this faction, pivot to the highest-scoring alternative Archetype
-			// (weighted by Slots 48..52 & 86..88)
-			if (memEntry.ArchetypeScoreDelta[curArch] < -18 && (IsAITickWindow(900, 30)))
+			// (weighted by Slots 48..52 & 86..88). Not in training matches: the start
+			// choice already weighs the memory, and a match that changes its archetype
+			// writes its result to the last one (Soviet and Nod houses drawn as
+			// archetype 3 left it at frame 0, on the entry of one expert).
+			if (!NeuralAI::TrainingMode && memEntry.ArchetypeScoreDelta[curArch] < -18 && (IsAITickWindow(900, 30)))
 			{
 				int bestAltArch = (curArch + 1) % NeuralAI::NumArchetypes;
 				int bestAltScore = -999999;
@@ -430,7 +436,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// Mid-Match Adaptive Strategy Pivot: If our current strategy is stalled (e.g.
 	// high frame count, low army vs strong enemy), pivot to the strongest
 	// alternative Archetype (weighted by Slots 48..52) to surprise the opponent!
-	if (Unsorted::CurrentFrame > 5400 && (IsAITickPeriod(2700)) && pHouse->OwnedUnits < 4
+	// Real games only: in training the loss of a house already beaten would be
+	// written to the archetype it pivoted to (Allied houses that pivoted to
+	// archetype 3 lost 3 of 3), which teaches the memory nothing about either.
+	if (!NeuralAI::TrainingMode && Unsorted::CurrentFrame > 5400 && (IsAITickPeriod(2700)) && pHouse->OwnedUnits < 4
 		&& features[65] > 20)
 	{
 		int bestPivotArch = (pExt->NeuralAI_Archetype + 1) % NeuralAI::NumArchetypes;
