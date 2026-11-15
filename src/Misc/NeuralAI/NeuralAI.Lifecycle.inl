@@ -48,6 +48,20 @@ void NeuralAI::Shutdown()
 		TelemetryJsonShmHandle = NULL;
 	}
 
+	if (TelemetryViewRequest)
+	{
+		UnmapViewOfFile(const_cast<uint32_t*>(TelemetryViewRequest));
+
+		TelemetryViewRequest = nullptr;
+	}
+
+	if (TelemetryViewShmHandle)
+	{
+		CloseHandle(TelemetryViewShmHandle);
+
+		TelemetryViewShmHandle = NULL;
+	}
+
 	if (NeuralAI::TelemetryView)
 	{
 		UnmapViewOfFile(NeuralAI::TelemetryView);
@@ -689,6 +703,24 @@ void NeuralAI::InitTelemetrySharedMemory()
 
 			if (TelemetryJsonView)
 				std::memset(TelemetryJsonView, 0, 16);
+		}
+	}
+
+	if (!TelemetryViewRequest)
+	{
+		char viewShmName[128];
+
+		std::snprintf(viewShmName, sizeof(viewShmName), "Local\\PhobosAITrainerViewShm_%d", NeuralAI::TrainSlotIndex);
+
+		// Opens the trainer's block when it already holds one for this slot, so a view chosen
+		// before the match started is kept.
+		TelemetryViewShmHandle
+			= CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, TelemetryViewShmCapacity, viewShmName);
+
+		if (TelemetryViewShmHandle)
+		{
+			TelemetryViewRequest = static_cast<const volatile uint32_t*>(
+				MapViewOfFile(TelemetryViewShmHandle, FILE_MAP_READ, 0, 0, TelemetryViewShmCapacity));
 		}
 	}
 
