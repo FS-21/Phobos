@@ -3024,7 +3024,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// first shipyard of a naval match) buildable, a tower waits unless the base is under
 				// attack or an air raid or an island hold asks for it. A tower near an enemy building
 				// ever seen scored 5000 to 6000 and the first war factory about 3500, so houses with
-				// 6000 credits and more stood without one until frame 20000 (18 of 126 houses).
+				// 6000 credits and more stood without one until frame 20000 (14 of 126 houses).
 				constexpr int towerBeforeFirstFactoryPenalty = 3000;
 
 				if (firstFactoryPending && ownedRefineries >= 1 && !wasRecentlyAttacked && !fillsAirDeficit
