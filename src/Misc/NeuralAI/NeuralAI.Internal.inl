@@ -1652,6 +1652,46 @@ namespace
 	int VisionMapFrame = -1;
 	int VisionMapOwner = -1;
 
+	// Sight radius in cells of one object in the vision rule (it lends its sight to its owner
+	// and the owner's allies), 0 for an object off the map that sees nothing.
+	int GetAISightRadius(const TechnoClass* pTechno)
+	{
+		if (!pTechno || pTechno->InLimbo || !pTechno->IsAlive || !pTechno->Owner)
+			return 0;
+
+		auto const pType = pTechno->GetTechnoType();
+
+		return pType ? std::clamp(static_cast<int>(pType->Sight), 1, 24) : 0;
+	}
+
+	// Calls func(index) for every vision map cell within radius cells of coords (dx * dx + dy * dy
+	// at most radius * radius), row by row.
+	template <typename Func>
+	void ForEachCellInAISight(const CellStruct& coords, int radius, Func&& func)
+	{
+		const int radiusSq = radius * radius;
+
+		for (int dy = -radius; dy <= radius; ++dy)
+		{
+			const int y = coords.Y + dy;
+
+			if (y < 0 || y >= VisionMapSide)
+				continue;
+
+			int span = radius;
+
+			while (span * span + dy * dy > radiusSq)
+				--span;
+
+			const int firstX = std::max(0, coords.X - span);
+			const int lastX = std::min(VisionMapSide - 1, coords.X + span);
+			const size_t row = static_cast<size_t>(y) * VisionMapSide;
+
+			for (int x = firstX; x <= lastX; ++x)
+				func(row + x);
+		}
+	}
+
 	void RebuildVisionMap(HouseClass* pHouse)
 	{
 		const size_t totalCells = static_cast<size_t>(VisionMapSide) * VisionMapSide;
@@ -1680,39 +1720,19 @@ namespace
 
 		for (auto const pTechno : TechnoClass::Array)
 		{
-			if (!pTechno || pTechno->InLimbo || !pTechno->IsAlive || !pTechno->Owner)
+			if (!pTechno || !pTechno->Owner || (pTechno->Owner != pHouse && !pHouse->IsAlliedWith(pTechno->Owner)))
 				continue;
 
-			if (pTechno->Owner != pHouse && !pHouse->IsAlliedWith(pTechno->Owner))
+			const int radius = GetAISightRadius(pTechno);
+
+			if (radius <= 0)
 				continue;
 
-			auto const pType = pTechno->GetTechnoType();
-
-			if (!pType)
-				continue;
-
-			const CellStruct coords = pTechno->GetMapCoords();
-			const int radius = std::clamp(static_cast<int>(pType->Sight), 1, 24);
-
-			for (int dy = -radius; dy <= radius; ++dy)
+			ForEachCellInAISight(pTechno->GetMapCoords(), radius, [&](size_t idx)
 			{
-				const int y = coords.Y + dy;
-
-				if (y < 0 || y >= VisionMapSide)
-					continue;
-
-				for (int dx = -radius; dx <= radius; ++dx)
-				{
-					const int x = coords.X + dx;
-
-					if (x < 0 || x >= VisionMapSide || dx * dx + dy * dy > radius * radius)
-						continue;
-
-					const size_t idx = static_cast<size_t>(y) * VisionMapSide + x;
-					explored[idx] = 1;
-					CurrentSightMap[idx] = 1;
-				}
-			}
+				explored[idx] = 1;
+				CurrentSightMap[idx] = 1;
+			});
 		}
 
 		VisionMap = explored;
