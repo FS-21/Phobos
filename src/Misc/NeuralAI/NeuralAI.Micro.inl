@@ -12065,9 +12065,31 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		const bool nothingMoreToLoad = numPass >= 1 && onSafePickupShore && (!canFitMoreOnPickupIsland || loadStalled) && !convoyHold
 			&& !underfilledHold;
+		// Joint departure: a combat transport that sails from its pickup shore gives the signal, and the
+		// transports with combat cargo aboard within FerryConvoyCells of it on that shore sail with it
+		// for FerryConvoyGoFrames, so the battalion crosses and lands as one. The fleet split loaded
+		// them side by side, yet they sailed minutes apart (22% of combat departures within 600 frames
+		// of another, 60% within 3600, 15 matches). The units still walking up wait for the next one.
+		const bool combatCargoAboard = numPass >= 1 && !carryingMCV && !carryingStolenForeignMCV && !carryingHarvester && !carryingEngineer;
+		auto& convoyGoSignals = GetMacroState(pHouse).FerryConvoyGo;
+		bool convoyGo = false;
+
+		if (combatCargoAboard && onSafePickupShore && !tripDeparted && transZone >= 0)
+		{
+			if (auto const itGo = convoyGoSignals.find(transZone); itGo != convoyGoSignals.end()
+				&& Unsorted::CurrentFrame >= itGo->second.Frame && Unsorted::CurrentFrame - itGo->second.Frame <= FerryConvoyGoFrames
+				&& itGo->second.Leader != pTrans->UniqueID && transCoords.DistanceFrom(itGo->second.Cell) <= FerryConvoyCells)
+			{
+				convoyGo = true;
+			}
+		}
+
 		const bool isReadyToSailEffective = carryingMCV || carryingStolenForeignMCV || carryingHarvester
 			|| (carryingEngineer && pIslandTechGoalCell != nullptr)
-			|| emergencyDepartUnderFire || hasCargoInTransitOrUnloading || nothingMoreToLoad;
+			|| emergencyDepartUnderFire || hasCargoInTransitOrUnloading || nothingMoreToLoad || convoyGo;
+
+		if (combatCargoAboard && onSafePickupShore && !tripDeparted && transZone >= 0 && isReadyToSailEffective && !convoyGo)
+			convoyGoSignals[transZone] = { Unsorted::CurrentFrame, transCoords, pTrans->UniqueID };
 
 		if (pTrip && !tripDeparted)
 		{
@@ -12080,7 +12102,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				| (emergencyDepartUnderFire ? FerrySailUnderFire : 0)
 				| (hasCargoInTransitOrUnloading ? FerrySailInTransit : 0)
 				| (nothingMoreToLoad ? FerrySailNothingMoreToLoad : 0)
-				| (nothingMoreToLoad && loadStalled ? FerrySailLoadStalled : 0);
+				| (nothingMoreToLoad && loadStalled ? FerrySailLoadStalled : 0)
+				| (convoyGo ? FerrySailConvoy : 0);
 		}
 
 		// Sailing: the passengers still walking up are free again (repro: a hovercraft that left with
