@@ -4634,7 +4634,6 @@ namespace
 		{
 			CellStruct Center { CellStruct::Empty };
 			int Value { 0 };
-			int Standing { 0 };
 			std::vector<FootClass*> Group {};
 		};
 
@@ -4709,7 +4708,6 @@ namespace
 
 			result.Center = center;
 			result.Value = value;
-			result.Standing = bestStanding;
 			result.Group = std::move(group);
 
 			return result;
@@ -6563,41 +6561,6 @@ namespace
 
 					if (hold.RallyOnRoute)
 						CountDecision(NeuralDecision::RouteAmbushSpot, pHouse->ArrayIndex);
-
-					// TEMP diagnostic: what starts a hold (20 per match): the ground force near home and
-					// how much of it stands still, what else is near (aircraft, ships), our army and the
-					// defenses at the rally.
-					static int holdLogSerial = -1;
-					static int holdLogCount = 0;
-
-					if (holdLogSerial != NeuralMatchSerial)
-					{
-						holdLogSerial = NeuralMatchSerial;
-						holdLogCount = 0;
-					}
-
-					if (holdLogCount++ < 20)
-					{
-						int defenses = 0;
-						int defenseValue = 0;
-
-						for (auto const pBld : pHouse->Buildings)
-						{
-							if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->IsBaseDefense
-								&& pBld->GetMapCoords().DistanceFrom(hold.Rally->MapCoords) <= 10.0)
-							{
-								defenses++;
-								defenseValue += GetCombatValueOfType(pBld->Type, false);
-							}
-						}
-
-						Debug::Log("[NeuralAI] House %d holdUnderTowers start DIAG: ground enemy %d (standing %d) within %d cells of home, air or naval %d; "
-							"army %d worth %d; %d defenses worth %d within 10 cells of the rally, rally %d cells from home (route %d), frame %d.\n",
-							houseIdx, hold.EnemyNear, standingGroundEnemyValueNear(homeCell, HoldTowersEnemyCells), static_cast<int>(HoldTowersEnemyCells),
-							seenEnemyValueNear(homeCell, HoldTowersEnemyCells, 150) - hold.EnemyNear, static_cast<int>(hold.Army.size()),
-							feetValue(hold.Army), defenses, defenseValue, static_cast<int>(hold.Rally->MapCoords.DistanceFrom(homeCell)),
-							hold.RallyOnRoute ? 1 : 0, Unsorted::CurrentFrame);
-					}
 				}
 			}
 		}
@@ -7527,14 +7490,12 @@ namespace
 					// comes from.
 					int sumX = 0;
 					int sumY = 0;
-					int farthest = 0;
 
 					for (auto const pFoot : strike.Group)
 					{
 						const CellStruct cell = pFoot->GetMapCoords();
 						sumX += cell.X;
 						sumY += cell.Y;
-						farthest = std::max(farthest, static_cast<int>(cell.DistanceFrom(strike.Center)));
 					}
 
 					const int count = static_cast<int>(strike.Group.size());
@@ -7548,26 +7509,6 @@ namespace
 					{
 						started.AuxBaseline = strike.Value;
 						started.AnchorCell = strike.Center;
-
-						// TEMP diagnostic: what a strike goes for (20 per match).
-						static int strikeLogSerial = -1;
-						static int strikeLogCount = 0;
-
-						if (strikeLogSerial != NeuralMatchSerial)
-						{
-							strikeLogSerial = NeuralMatchSerial;
-							strikeLogCount = 0;
-						}
-
-						if (strikeLogCount++ < 20)
-						{
-							Debug::Log("[NeuralAI] House %d preemptiveStrike start DIAG: force %d (standing %d) at (%d,%d), %d cells from home; "
-								"group %d worth %d, centre %d cells from it, farthest %d; staging %d cells from it, frame %d.\n",
-								houseIdx, strike.Value, strike.Standing, strike.Center.X, strike.Center.Y,
-								static_cast<int>(strike.Center.DistanceFrom(homeCell)), count, feetValue(strike.Group),
-								static_cast<int>(groupCenter.DistanceFrom(strike.Center)), farthest,
-								pStage ? static_cast<int>(pStage->MapCoords.DistanceFrom(strike.Center)) : -1, Unsorted::CurrentFrame);
-						}
 					}
 				}
 			}
