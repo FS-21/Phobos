@@ -925,6 +925,10 @@ namespace
 		int EmergencyLaneLogFrame { -1 };
 		int EmergencyLaneMoved { 0 };
 		int EmergencyLaneServed { 0 };
+		// Shared destinations (SpreadDestination): orders moved to a free cell next to a cell another
+		// unit of ours holds or heads to since the last log line, and the frame of that line.
+		int DestinationSpreadCount { 0 };
+		int DestinationSpreadLogFrame { -1 };
 		// Last frame the aircraft pick wanted a type that needs a dock and every dock was taken: the
 		// building pass answers with another airfield (AirDockWantedFrames).
 		int AirDockWantedFrame { -100000 };
@@ -1221,6 +1225,8 @@ namespace
 			this->EmergencyLaneLogFrame = -1;
 			this->EmergencyLaneMoved = 0;
 			this->EmergencyLaneServed = 0;
+			this->DestinationSpreadCount = 0;
+			this->DestinationSpreadLogFrame = -1;
 			this->AirDockWantedFrame = -100000;
 			this->FailedApproachDecayFrame = 0;
 			this->GroundLossTracks.clear();
@@ -1501,6 +1507,18 @@ namespace
 	constexpr int EmergencyLaneSideCells = 3;
 	constexpr int EmergencyLaneMovesPerCheck = 16;
 	constexpr int EmergencyLaneLogFrames = 1800;
+	// Shared destination (user: units sent to one cell that is taken should each look for the nearest
+	// free cell). Ships of one house sent to the water cell nearest an inland target queued for it in
+	// a narrow channel (matches #9771 and #9832, 100000 frames), 29 vehicles to one cell (#9820), and
+	// about 50 ships in two packs off the shore of an inland target (#9846). A vehicle, ship or flyer
+	// whose destination another unit of ours holds or heads to takes the nearest free cell within
+	// DestinationSpreadCells of it: in its zone and, off the air, at most DestinationSpreadLevels
+	// height levels from it (never under a cliff). Our units count when their destination, or their
+	// cell while they have none, lies within DestinationClaimCells. Logged every DestinationSpreadLogFrames.
+	constexpr int DestinationSpreadCells = 5;
+	constexpr int DestinationSpreadLevels = 1;
+	constexpr double DestinationClaimCells = 8.0;
+	constexpr int DestinationSpreadLogFrames = 1800;
 	// A route leg that would end on a bridge deck runs this many route cells past its far end.
 	constexpr size_t RouteLegPastBridgeCells = 4;
 	// A ground target off the unit's zone stands for the nearest cell of the zone this near to it.
