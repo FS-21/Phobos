@@ -1675,8 +1675,10 @@ namespace
 	// which sets HouseClass::MapIsClear (+0x241) of that house on every client, and shrouds it again
 	// with the MapClass::Reset_Shroud functions (losing the Spy Satellite, a darkness crate, a spy in
 	// its radar, a reshroud trigger action or team mission), which clear the flag of the house they
-	// are given; without a house (the reshroud trigger that "Eternal darkness" fires every minute)
-	// they shroud the map of every house and clear no flag. HouseClass::SpySatActive (+0x577A) only
+	// are given; without a house they shroud the map of every house and clear no flag. The reshroud
+	// trigger "Eternal darkness" fires every minute belongs to no house and gives the action the
+	// house HouseClass::As_Pointer finds for it (house 0 in the training logs): only that house is
+	// shrouded again, on every client. HouseClass::SpySatActive (+0x577A) only
 	// says a Spy Satellite works. A reveal is MapIsClear turning on; the reshrouds come from hooks at
 	// the start of the three functions (NeuralAI::OnMapReshroud), all called by the match logic on
 	// every client.
