@@ -2703,6 +2703,18 @@ namespace
 		return it->second;
 	}
 
+	// The area an Ares PsychicReveal superweapon reveals: SW.Range (a radius, height 0, or the width of a
+	// rectangle height cells high; below 0 the whole map), else the rules' PsychicRevealRadius up to 10
+	// cells (height -1).
+	double GetPsychicRevealRange(const SuperWeaponTypeClass* pSWType, int& height)
+	{
+		auto const& aim = GetSWTargeting(pSWType);
+		const bool rangeSet = aim.RangeWidthOrRadius >= 0.0f || aim.RangeHeight >= 0;
+		height = rangeSet ? aim.RangeHeight : -1;
+
+		return rangeSet ? aim.RangeWidthOrRadius : std::min(RulesClass::Instance->PsychicRevealRadius, 10);
+	}
+
 	// Modes that aim at the enemy: the generic "fire at a visible enemy building" branch fits them.
 	bool IsOffensiveSWTargetingMode(const std::string& mode)
 	{
