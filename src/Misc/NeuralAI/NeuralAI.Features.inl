@@ -377,7 +377,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 		const int ownerIdx = std::clamp(pOwner->ArrayIndex, 0, 7);
 		const bool spyInfiltrated = (pExt->NeuralAI_InfiltratedEnemyMask & (1 << ownerIdx)) != 0;
 
-		const bool cellVisibleToAI = pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pCell) || spyInfiltrated;
+		const bool cellVisibleToAI = IsCellVisibleToAI(pHouse, pCell) || spyInfiltrated;
 
 		if (!cellVisibleToAI)
 		{
@@ -405,8 +405,7 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 		if (IsAirborneThreatTechno(pTechno))
 			RecordAirThreatSighting(pHouse, pTechno);
-		else if (pTechno->WhatAmI() == AbstractType::Building
-			&& (pHouse->SpySatActive || IsCellVisibleToAI(pHouse, pCell)))
+		else if (pTechno->WhatAmI() == AbstractType::Building && IsCellVisibleToAI(pHouse, pCell))
 		{
 			// Only real sight: "WhoLastHurtMe" visibility must not leak a whole base.
 			GetMacroState(pHouse).SeenEnemyBuildings.insert(pTechno->UniqueID);

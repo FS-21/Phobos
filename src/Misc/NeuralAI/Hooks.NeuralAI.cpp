@@ -130,6 +130,37 @@ DEFINE_HOOK(0x6879ED, ScenarioClass_Start_NeuralAI, 0x5)
 	return 0;
 }
 
+// The three map-wide reshrouds of the engine, at their start (mov eax, [esp + 4]; push reg), before
+// the local player checks: losing the Spy Satellite, a darkness crate or a spy in the radar
+// (MapClass::Reset_Shroud), the reshroud team mission and the reshroud trigger action. The Neural AI
+// vision rule clears the explored map of that house, or of every house when there is none.
+DEFINE_HOOK(0x577AB0, MapClass_ResetShroud_NeuralAI, 0x5)
+{
+	GET_STACK(HouseClass* const, pHouse, 0x4);
+
+	NeuralAI::OnMapReshroud(pHouse);
+
+	return 0;
+}
+
+DEFINE_HOOK(0x577BB0, MapClass_ResetShroudForTMission_NeuralAI, 0x5)
+{
+	GET_STACK(HouseClass* const, pHouse, 0x4);
+
+	NeuralAI::OnMapReshroud(pHouse);
+
+	return 0;
+}
+
+DEFINE_HOOK(0x577C90, MapClass_ResetShroudForTAction_NeuralAI, 0x5)
+{
+	GET_STACK(HouseClass* const, pHouse, 0x4);
+
+	NeuralAI::OnMapReshroud(pHouse);
+
+	return 0;
+}
+
 // The engine's path finder gave up on a way for a unit (the "Regular findpath failure" line of the
 // debug log, written just after this point).
 DEFINE_HOOK(0x42CC48, AStarClass_FindPath_Failure_NeuralAI, 0x5)

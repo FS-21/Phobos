@@ -1669,6 +1669,45 @@ namespace
 	int VisionMapFrame = -1;
 	int VisionMapOwner = -1;
 
+	// Map-wide reveals and reshrouds of one house, by ArrayIndex. The engine reveals the whole map
+	// for a house with MapClass::Clear_Shroud (0x577D90: a working Spy Satellite, a reveal crate, a
+	// warhead with Reveal=-1 such as the one the "Reveal map" game option fires for every player),
+	// which sets HouseClass::MapIsClear (+0x241) of that house on every client, and shrouds it again
+	// with the MapClass::Reset_Shroud functions (losing the Spy Satellite, a darkness crate, a spy in
+	// its radar, a reshroud trigger action or team mission), which clear the flag of the house they
+	// are given; without a house (the reshroud trigger that "Eternal darkness" fires every minute)
+	// they shroud the map of every house and clear no flag. HouseClass::SpySatActive (+0x577A) only
+	// says a Spy Satellite works. A reveal is MapIsClear turning on; the reshrouds come from hooks at
+	// the start of the three functions (NeuralAI::OnMapReshroud), all called by the match logic on
+	// every client.
+	struct NeuralMapShroudState
+	{
+		bool Revealed { false };
+		bool ReshroudPending { false };
+	};
+
+	std::array<NeuralMapShroudState, 32> MapShroudStates {};
+
+	void MarkMapReshroud(HouseClass* pHouse)
+	{
+		const int only = pHouse ? std::clamp(pHouse->ArrayIndex, 0, 31) : -1;
+
+		for (int i = 0; i < static_cast<int>(MapShroudStates.size()); ++i)
+		{
+			if (only >= 0 && i != only)
+				continue;
+
+			MapShroudStates[i].ReshroudPending = true;
+
+			// The engine cleared MapIsClear: turning on again is a new reveal.
+			if (only >= 0)
+				MapShroudStates[i].Revealed = false;
+		}
+
+		VisionMapFrame = -1;
+		Debug::Log("[NeuralAI] Map reshroud for house %d at frame %d.\n", only, Unsorted::CurrentFrame);
+	}
+
 	bool IsFogOfWarMatch()
 	{
 		return GameModeOptionsClass::Instance.FogOfWar || (ScenarioClass::Instance && ScenarioClass::Instance->SpecialFlags.FogOfWar);
@@ -1854,6 +1893,7 @@ namespace
 			for (auto& m : HouseExploredMaps)
 				m.assign(totalCells, 0);
 
+			MapShroudStates.fill(NeuralMapShroudState {});
 			LastExploredResetFrame = Unsorted::CurrentFrame;
 		}
 		else
@@ -1872,8 +1912,26 @@ namespace
 
 		CurrentSightMap.assign(totalCells, 0);
 
-		// Under an enemy gap the explored cells are shrouded again; the sight below reveals the ones
-		// in sight now.
+		// The map-wide reshrouds and reveals since the last rebuild: a reshroud leaves only what is in
+		// sight now (marked below), a reveal the whole map.
+		auto& shroudState = MapShroudStates[std::clamp(pHouse->ArrayIndex, 0, 31)];
+
+		if (shroudState.ReshroudPending)
+		{
+			std::memset(explored.data(), 0, explored.size());
+			shroudState.ReshroudPending = false;
+		}
+
+		if (pHouse->MapIsClear && !shroudState.Revealed)
+		{
+			std::memset(explored.data(), 1, explored.size());
+			Debug::Log("[NeuralAI] Map revealed for house %d at frame %d.\n", pHouse->ArrayIndex, Unsorted::CurrentFrame);
+		}
+
+		shroudState.Revealed = pHouse->MapIsClear;
+
+		// Under an enemy gap the explored cells are shrouded again (the engine makes every gap again
+		// right after a reveal); the sight below reveals the ones in sight now.
 		auto const& gapRuns = GetEnemyGapRuns(pHouse);
 
 		for (size_t i = 0; i + 1 < gapRuns.size(); i += 2)
