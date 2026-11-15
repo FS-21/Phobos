@@ -1686,10 +1686,11 @@ namespace
 		return pType ? std::clamp(static_cast<int>(pType->Sight), 1, 24) : 0;
 	}
 
-	// Calls func(index) for every vision map cell up to reach cells from coords on each axis with
-	// dx * dx + dy * dy at most radiusSq (at least reach * reach), row by row.
+	// Calls func(first, last) with the first and last vision map index of each row run of the cells
+	// up to reach cells from coords on each axis with dx * dx + dy * dy at most radiusSq (at least
+	// reach * reach), row by row.
 	template <typename Func>
-	void ForEachCellWithin(const CellStruct& coords, int reach, int radiusSq, Func&& func)
+	void ForEachRowSpanWithin(const CellStruct& coords, int reach, int radiusSq, Func&& func)
 	{
 		for (int dy = -reach; dy <= reach; ++dy)
 		{
@@ -1698,17 +1699,25 @@ namespace
 			if (y < 0 || y >= VisionMapSide)
 				continue;
 
-			int span = reach;
+			// Exact integer square root of radiusSq - dy * dy (gaps reach 127 cells).
+			const int restSq = radiusSq - dy * dy;
+			int span = std::min(reach, static_cast<int>(std::sqrt(static_cast<double>(restSq))));
 
-			while (span * span + dy * dy > radiusSq)
+			while (span * span > restSq)
 				--span;
+
+			while (span < reach && (span + 1) * (span + 1) <= restSq)
+				++span;
 
 			const int firstX = std::max(0, coords.X - span);
 			const int lastX = std::min(VisionMapSide - 1, coords.X + span);
+
+			if (firstX > lastX)
+				continue;
+
 			const size_t row = static_cast<size_t>(y) * VisionMapSide;
 
-			for (int x = firstX; x <= lastX; ++x)
-				func(row + x);
+			func(row + firstX, row + lastX);
 		}
 	}
 
@@ -1717,7 +1726,11 @@ namespace
 	template <typename Func>
 	void ForEachCellInAISight(const CellStruct& coords, int radius, Func&& func)
 	{
-		ForEachCellWithin(coords, radius, radius * radius, std::forward<Func>(func));
+		ForEachRowSpanWithin(coords, radius, radius * radius, [&func](size_t first, size_t last)
+		{
+			for (size_t idx = first; idx <= last; ++idx)
+				func(idx);
+		});
 	}
 
 	// Shroud radius in cells of a gap generator working now, 0 otherwise. The engine keeps the gap
@@ -1746,13 +1759,28 @@ namespace
 		return (pExt && pExt->GapRadiusInCells != 0) ? pExt->GapRadiusInCells.Get() : pType->GapRadiusInCells;
 	}
 
-	// Calls func(index) for every vision map cell that a working gap generator shrouds again for
-	// pHouse: one of a house that is not pHouse and not allied with it, as the engine covers the
-	// cells with dx * dx + dy * dy below (radius + 1) squared around the building's location, moved
-	// one cell north for every two height levels.
-	template <typename Func>
-	void ForEachCellUnderEnemyGap(HouseClass* pHouse, Func&& func)
+	// The cells the working gap generators of the enemies of one house (houses that are not it and
+	// not allied with it) shroud again for it, as vision map index runs merged per row. The
+	// "MapVisibility - ShroudRegrows" game option makes most base buildings gaps of 127 cells, so
+	// the runs are only worked out again when the list of those gaps changes.
+	struct NeuralEnemyGapCover
 	{
+		// Centre X, centre Y and radius of each gap, in BuildingClass::Array order.
+		std::vector<int> Gaps {};
+		// First and last vision map index of each run.
+		std::vector<size_t> Runs {};
+	};
+
+	std::array<NeuralEnemyGapCover, 32> EnemyGapCovers {};
+	std::vector<int> EnemyGapScratchList;
+	std::vector<uint8_t> EnemyGapScratchMap;
+
+	const std::vector<size_t>& GetEnemyGapRuns(HouseClass* pHouse)
+	{
+		auto& cover = EnemyGapCovers[std::clamp(pHouse->ArrayIndex, 0, 31)];
+		auto& gaps = EnemyGapScratchList;
+		gaps.clear();
+
 		for (auto const pBld : BuildingClass::Array)
 		{
 			const int radius = GetActiveGapRadius(pBld);
@@ -1760,12 +1788,62 @@ namespace
 			if (radius <= 0 || pBld->Owner == pHouse || pBld->Owner->IsAlliedWith(pHouse))
 				continue;
 
+			// The engine covers the cells with dx * dx + dy * dy below (radius + 1) squared around the
+			// building's location, moved one cell north for every two height levels.
 			const int lift = pBld->Location.Z / Unsorted::CellHeight;
-			const CellStruct center { static_cast<short>(pBld->Location.X / Unsorted::LeptonsPerCell - lift),
-				static_cast<short>(pBld->Location.Y / Unsorted::LeptonsPerCell - lift) };
-
-			ForEachCellWithin(center, radius, radius * radius + 2 * radius, func);
+			gaps.push_back(pBld->Location.X / Unsorted::LeptonsPerCell - lift);
+			gaps.push_back(pBld->Location.Y / Unsorted::LeptonsPerCell - lift);
+			gaps.push_back(radius);
 		}
+
+		if (gaps == cover.Gaps)
+			return cover.Runs;
+
+		cover.Gaps = gaps;
+		cover.Runs.clear();
+
+		if (gaps.empty())
+			return cover.Runs;
+
+		auto& covered = EnemyGapScratchMap;
+		covered.assign(static_cast<size_t>(VisionMapSide) * VisionMapSide, 0);
+		int firstRow = VisionMapSide;
+		int lastRow = -1;
+
+		for (size_t i = 0; i + 2 < gaps.size(); i += 3)
+		{
+			const int radius = gaps[i + 2];
+			const CellStruct center { static_cast<short>(gaps[i]), static_cast<short>(gaps[i + 1]) };
+
+			firstRow = std::min(firstRow, std::max(0, gaps[i + 1] - radius));
+			lastRow = std::max(lastRow, std::min(VisionMapSide - 1, gaps[i + 1] + radius));
+
+			ForEachRowSpanWithin(center, radius, radius * radius + 2 * radius, [&covered](size_t first, size_t last)
+			{
+				std::memset(covered.data() + first, 1, last - first + 1);
+			});
+		}
+
+		for (int y = firstRow; y <= lastRow; ++y)
+		{
+			const size_t row = static_cast<size_t>(y) * VisionMapSide;
+
+			for (int x = 0; x < VisionMapSide; ++x)
+			{
+				if (!covered[row + x])
+					continue;
+
+				const int first = x;
+
+				while (x + 1 < VisionMapSide && covered[row + x + 1])
+					++x;
+
+				cover.Runs.push_back(row + first);
+				cover.Runs.push_back(row + x);
+			}
+		}
+
+		return cover.Runs;
 	}
 
 	void RebuildVisionMap(HouseClass* pHouse)
@@ -1796,10 +1874,10 @@ namespace
 
 		// Under an enemy gap the explored cells are shrouded again; the sight below reveals the ones
 		// in sight now.
-		ForEachCellUnderEnemyGap(pHouse, [&explored](size_t idx)
-		{
-			explored[idx] = 0;
-		});
+		auto const& gapRuns = GetEnemyGapRuns(pHouse);
+
+		for (size_t i = 0; i + 1 < gapRuns.size(); i += 2)
+			std::memset(explored.data() + gapRuns[i], 0, gapRuns[i + 1] - gapRuns[i] + 1);
 
 		for (auto const pTechno : TechnoClass::Array)
 		{
