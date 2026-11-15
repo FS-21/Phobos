@@ -8188,6 +8188,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	int notIdleBusy = 0;
 	int notIdlePlan = 0;
 	int notIdleMission = 0;
+	// The missions those other units are on, ships apart from vehicles (wave gate log): about 47 of
+	// them in match #9846, most of the house's ships, with nothing said of what they were doing.
+	std::map<int, int> notIdleMissionShips;
+	std::map<int, int> notIdleMissionVehicles;
 	// More reasons (wave gate log): low health, immobile deployed vehicle, entering / linked, and for
 	// infantry busy, mission and plan.
 	int notIdleHealth = 0;
@@ -8322,6 +8326,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		else
 		{
 			++notIdleMission;
+			++(IsWaterBound(pUnit->Type) ? notIdleMissionShips : notIdleMissionVehicles)[static_cast<int>(pUnit->CurrentMission)];
 		}
 	}
 
@@ -8878,13 +8883,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Wave gate inputs, every 900 frames per house: why a house with an army never reaches the wave.
 	if (IsAITickWindow(900, 0))
 	{
-		Debug::Log("[NeuralAI] Frame %d | House #%d wave gate: idle units %d inf %d needed %d, not idle busy %d plan %d mission %d "
-			"health %d immobile %d linked %d, inf busy %d plan %d mission %d linked %d, target %s (%d,%d) hold %d remnant %d\n",
-			Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(idleCombatUnits.size()), static_cast<int>(idleCombatInf.size()),
-			static_cast<int>(waveUnitsNeeded), notIdleBusy, notIdlePlan, notIdleMission, notIdleHealth, notIdleImmobile, notIdleLinked,
-			notIdleInfBusy, notIdleInfPlan, notIdleInfMission, notIdleInfLinked, pWaveTargetCell ? "yes" : "none",
-			pWaveTargetCell ? pWaveTargetCell->MapCoords.X : -1, pWaveTargetCell ? pWaveTargetCell->MapCoords.Y : -1,
-			teamOrder.Hold ? 1 : 0, endgameRemnantHunt ? 1 : 0);
+		auto const missions = [](const std::map<int, int>& byMission)
+		{
+			std::string text;
+
+			for (auto const& [mission, count] : byMission)
+				text += " m" + std::to_string(mission) + "x" + std::to_string(count);
+
+			return text.empty() ? std::string(" none") : text;
+		};
+
+		Debug::Log("[NeuralAI] Frame %d | House #%d wave gate: idle units %d (%d reach the target) inf %d (%d) needed %d, not idle busy %d "
+			"plan %d mission %d health %d immobile %d linked %d, inf busy %d plan %d mission %d linked %d, target %s (%d,%d) hold %d "
+			"remnant %d | mission ships%s, vehicles%s\n",
+			Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(idleCombatUnits.size()), static_cast<int>(waveAbleUnits),
+			static_cast<int>(idleCombatInf.size()), static_cast<int>(waveAbleInf), static_cast<int>(waveUnitsNeeded), notIdleBusy,
+			notIdlePlan, notIdleMission, notIdleHealth, notIdleImmobile, notIdleLinked, notIdleInfBusy, notIdleInfPlan, notIdleInfMission,
+			notIdleInfLinked, pWaveTargetCell ? "yes" : "none", pWaveTargetCell ? pWaveTargetCell->MapCoords.X : -1,
+			pWaveTargetCell ? pWaveTargetCell->MapCoords.Y : -1, teamOrder.Hold ? 1 : 0, endgameRemnantHunt ? 1 : 0,
+			missions(notIdleMissionShips).c_str(), missions(notIdleMissionVehicles).c_str());
 	}
 	NeuralWaveCheck waveCheck {};
 	waveCheck.Launch = true;
@@ -9591,8 +9608,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return (pickSecondaryGroup && pSecondBld) ? pSecondBld : pBestBld;
 		};
 
+		// A building counts only when water of the ship's own sea lies within the reach of its land gun
+		// against it (otherReach for a ship without one): coarse probes for any water within 6 cells sent
+		// guns of 5 cells at buildings they never hit, the ships parked at the nearest water for good
+		// (match #9846).
 		auto findCoastalNavalBombardmentTarget
-			= [pHouse](const CellStruct& shipCoords, int maxStandOffCells, unsigned int shipUniqueID) -> BuildingClass*
+			= [pHouse](UnitClass* pShip, const WeaponTypeClass* pLandGun, int otherReach) -> BuildingClass*
 		{
 			struct NavalCand
 			{
@@ -9601,7 +9622,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			};
 			NavalCand topCands[4]
 				= { { nullptr, -999999 }, { nullptr, -999999 }, { nullptr, -999999 }, { nullptr, -999999 } };
-			const int waterCheckRadius = std::clamp(maxStandOffCells, 6, 26);
+			const CellStruct shipCoords = pShip->GetMapCoords();
+			const MovementZone shipMZ = pShip->Type->MovementZone;
+			const int shipZone = ObjectZone(pShip, shipMZ);
+
+			if (shipZone < 0)
+				return nullptr;
 
 			for (auto const pEB : BuildingClass::Array)
 			{
@@ -9621,33 +9647,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (ebc.X <= 1 && ebc.Y <= 1)
 					continue;
 
-				bool reachableFromWater = pEB->Type->Naval;
-				if (!reachableFromWater)
-				{
-					for (int r = 3; r <= waterCheckRadius && !reachableFromWater; r += 3)
-					{
-						const CellStruct probes[8] = { { static_cast<short>(ebc.X + r), ebc.Y },
-							{ static_cast<short>(ebc.X - r), ebc.Y }, { ebc.X, static_cast<short>(ebc.Y + r) },
-							{ ebc.X, static_cast<short>(ebc.Y - r) },
-							{ static_cast<short>(ebc.X + (r * 3) / 4), static_cast<short>(ebc.Y + (r * 3) / 4) },
-							{ static_cast<short>(ebc.X - (r * 3) / 4), static_cast<short>(ebc.Y + (r * 3) / 4) },
-							{ static_cast<short>(ebc.X + (r * 3) / 4), static_cast<short>(ebc.Y - (r * 3) / 4) },
-							{ static_cast<short>(ebc.X - (r * 3) / 4), static_cast<short>(ebc.Y - (r * 3) / 4) } };
-						for (const auto& pr : probes)
-						{
-							if (auto const pWC = MapClass::Instance.TryGetCellAt(pr))
-							{
-								if (pWC->LandType == LandType::Water)
-								{
-									reachableFromWater = true;
-									break;
-								}
-							}
-						}
-					}
-				}
+				const int reach = pLandGun ? WeaponReachAgainst(pLandGun, pEB->Type) : otherReach;
 
-				if (!reachableFromWater)
+				if (!IsNavalShoreWithin(ebc, shipMZ, shipZone, reach))
 					continue;
 
 				const int distCells = std::abs(ebc.X - shipCoords.X) + std::abs(ebc.Y - shipCoords.Y);
@@ -9688,12 +9690,41 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (validCount == 0)
 				return nullptr;
 
-			return topCands[shipUniqueID % static_cast<unsigned int>(validCount)].Bld;
+			return topCands[pShip->UniqueID % static_cast<unsigned int>(validCount)].Bld;
 		};
 
+		// A cell of the ship's own sea from which its shot of reachLeptons gets to the building (height
+		// counts, as for IsNavalShoreWithin): first on the line from the building toward the ship, shifted
+		// sideways by the ship's id so a group spreads, as far out as the reach allows; else the one
+		// nearest the ship; nullptr when there is none.
 		auto findOffshoreFiringWaterCell
-			= [](UnitClass* pShip, const CellStruct& targetCoords, int desiredRangeCells) -> CellClass*
+			= [](UnitClass* pShip, BuildingClass* pTarget, int reachLeptons) -> CellClass*
 		{
+			const MovementZone shipMZ = pShip->Type->MovementZone;
+			const int shipZone = ObjectZone(pShip, shipMZ);
+
+			if (shipZone < 0)
+				return nullptr;
+
+			const CellStruct targetCoords = pTarget->GetMapCoords();
+			auto const pTargetCell = pTarget->GetCell();
+			const int targetLevel = pTargetCell ? pTargetCell->Level : 0;
+			const int maxR = std::clamp((reachLeptons - NavalReachMarginLeptons) / Unsorted::LeptonsPerCell, 1, NavalShoreSearchCells);
+
+			auto const firesFrom = [&](const CellStruct& c, CellClass* pWC)
+			{
+				if (!pWC || MapClass::Instance.GetMovementZoneType(c, shipMZ, false) != shipZone
+					|| !pWC->IsClearToMove(pShip->Type->SpeedType, true, true, -1, shipMZ, -1, false))
+				{
+					return false;
+				}
+
+				const double flat = c.DistanceFrom(targetCoords) * Unsorted::LeptonsPerCell;
+				const double rise = std::max(0, targetLevel - pWC->Level) * Unsorted::LevelHeight;
+
+				return std::sqrt(flat * flat + rise * rise) + NavalReachMarginLeptons <= reachLeptons;
+			};
+
 			const CellStruct sc = pShip->GetMapCoords();
 			const int dx = sc.X - targetCoords.X;
 			const int dy = sc.Y - targetCoords.Y;
@@ -9701,47 +9732,33 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const int lat = (static_cast<int>(pShip->UniqueID % 5) - 2) * 2;
 			const int perpX = (-dy * lat) / dist;
 			const int perpY = (dx * lat) / dist;
-			const int maxR = std::clamp(desiredRangeCells, 5, 22);
-			for (int r = std::max(4, maxR - 3); r <= maxR; ++r)
+
+			for (int r = maxR; r >= std::max(1, maxR - 3); --r)
 			{
 				const CellStruct probe { static_cast<short>(targetCoords.X + (dx * r) / dist + perpX),
 					static_cast<short>(targetCoords.Y + (dy * r) / dist + perpY) };
-				if (auto const pWC = MapClass::Instance.TryGetCellAt(probe))
-				{
-					if (pWC->LandType == LandType::Water
-						&& pWC->IsClearToMove(
-							pShip->Type->SpeedType, true, true, -1, pShip->Type->MovementZone, -1, false))
-					{
-						return pWC;
-					}
-				}
+
+				if (auto const pWC = MapClass::Instance.TryGetCellAt(probe); pWC && firesFrom(probe, pWC))
+					return pWC;
 			}
 
 			CellClass* pBestWater = nullptr;
-			int bestWaterDist = 999999;
-			for (int wy = -maxR; wy <= maxR; wy += 2)
+			int bestWaterDist = INT_MAX;
+
+			for (int wy = -maxR; wy <= maxR; ++wy)
 			{
-				for (int wx = -maxR; wx <= maxR; wx += 2)
+				for (int wx = -maxR; wx <= maxR; ++wx)
 				{
-					const int dTarget = std::max(std::abs(wx), std::abs(wy));
-					if (dTarget < 3 || dTarget > maxR)
+					const CellStruct wc { static_cast<short>(targetCoords.X + wx), static_cast<short>(targetCoords.Y + wy) };
+					const int dShip = std::abs(wc.X - sc.X) + std::abs(wc.Y - sc.Y);
+
+					if (dShip >= bestWaterDist)
 						continue;
 
-					const CellStruct wc { static_cast<short>(targetCoords.X + wx),
-						static_cast<short>(targetCoords.Y + wy) };
-					if (auto const pWC = MapClass::Instance.TryGetCellAt(wc))
+					if (auto const pWC = MapClass::Instance.TryGetCellAt(wc); pWC && firesFrom(wc, pWC))
 					{
-						if (pWC->LandType == LandType::Water
-							&& pWC->IsClearToMove(
-								pShip->Type->SpeedType, true, true, -1, pShip->Type->MovementZone, -1, false))
-						{
-							const int dShip = std::abs(wc.X - sc.X) + std::abs(wc.Y - sc.Y);
-							if (dShip < bestWaterDist)
-							{
-								bestWaterDist = dShip;
-								pBestWater = pWC;
-							}
-						}
+						bestWaterDist = dShip;
+						pBestWater = pWC;
 					}
 				}
 			}
@@ -9789,6 +9806,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// TEMP diagnostic: what the idle ships that fight only at sea got this tick.
 		int seaHunters = 0;
 		int seaHuntersSent = 0;
+		// Idle warships with nothing in reach this tick: no coastal building their gun hits from their sea
+		// and no enemy ship seen in it (NoteShipsWithoutTarget, the shipyard's brake).
+		int shipsWithoutTarget = 0;
 
 		for (auto const pBeachU : idleCombatUnits)
 		{
@@ -9839,6 +9859,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					auto const pShipTarget = nearestEnemyShipFor(pBeachU, true);
 					seaHunters++;
 
+					if (!pShipTarget && !nearestEnemyShipFor(pBeachU, false))
+						++shipsWithoutTarget;
+
 					if (pShipTarget && pBeachU->Target != pShipTarget)
 					{
 						pBeachU->SetTarget(pShipTarget);
@@ -9865,11 +9888,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 
-				const int siegeRangeLeptons = pLandGun ? pLandGun->Range
-					: std::max(pLandSiegeWpn->Range, isCarrierSpawner ? (18 * 256) : 1536);
-				const int siegeRangeCells = std::clamp(siegeRangeLeptons / 256, 6, 26);
-				if (BuildingClass* pNavalTargetBld
-					= findCoastalNavalBombardmentTarget(uc, siegeRangeCells, pBeachU->UniqueID))
+				const int otherReach = std::max(static_cast<int>(pLandSiegeWpn->Range),
+					isCarrierSpawner ? (NavalSpawnerReachCells * Unsorted::LeptonsPerCell) : 1536);
+
+				bool hasTarget = false;
+
+				if (BuildingClass* pNavalTargetBld = findCoastalNavalBombardmentTarget(pBeachU, pLandGun, otherReach))
 				{
 					// The engine's own reach test: the attack order only when it can fire from here.
 					if (pBeachU->IsCloseEnoughToAttack(pNavalTargetBld))
@@ -9877,17 +9901,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						pBeachU->ClearMegaMissionData();
 						pBeachU->SetTarget(pNavalTargetBld);
 						pBeachU->QueueMission(Mission::Attack, true);
+						hasTarget = true;
 					}
-					else if (CellClass* pOffshoreFireCell = findOffshoreFiringWaterCell(
-								pBeachU, pNavalTargetBld->GetMapCoords(), std::max(5, siegeRangeCells - 2)))
+					else if (CellClass* pOffshoreFireCell = findOffshoreFiringWaterCell(pBeachU, pNavalTargetBld,
+								pLandGun ? WeaponReachAgainst(pLandGun, pNavalTargetBld->Type) : otherReach))
 					{
 						OrderFootToAttackMove(pBeachU, pOffshoreFireCell);
-					}
-					else if (auto const pNCell = pNavalTargetBld->GetCell())
-					{
-						OrderFootToAttackMove(pBeachU, pNCell);
+						hasTarget = true;
 					}
 				}
+
+				if (!hasTarget && !nearestEnemyShipFor(pBeachU, false))
+					++shipsWithoutTarget;
 
 				continue;
 			}
@@ -10031,6 +10056,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					static_cast<int>(seenEnemyShips.size()));
 			}
 		}
+
+		NoteShipsWithoutTarget(pHouse, shipsWithoutTarget);
 
 		for (auto const pBeachI : idleCombatInf)
 		{

@@ -698,6 +698,11 @@ namespace
 		std::array<int, 3> ArmyUnused {};
 		std::array<int, 3> ArmyIdleFloor { INT_MAX, INT_MAX, INT_MAX };
 		int ArmyIdleWindowStart { -1 };
+		// Idle warships with nothing in reach (NoteShipsWithoutTarget): the fewest at any AI tick of the
+		// last ArmyIdleWindowFrames, the running minimum of the window in progress and its first frame.
+		int ShipsWithoutTarget { 0 };
+		int ShipsWithoutTargetFloor { INT_MAX };
+		int ShipsWithoutTargetWindowStart { -1 };
 		std::array<int, 4> BankWantedFactories {};
 		// AI ticks since the last governor sample at which each queue (BankQueue order) had a
 		// factory of its kind, and those at which one of them was producing.
@@ -1137,6 +1142,9 @@ namespace
 			this->ArmyUnused.fill(0);
 			this->ArmyIdleFloor.fill(INT_MAX);
 			this->ArmyIdleWindowStart = -1;
+			this->ShipsWithoutTarget = 0;
+			this->ShipsWithoutTargetFloor = INT_MAX;
+			this->ShipsWithoutTargetWindowStart = -1;
 			this->NoRoomIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
 			this->ResourceHealSince.clear();
@@ -1530,6 +1538,10 @@ namespace
 	constexpr int EmergencyLaneSideCells = 3;
 	constexpr int EmergencyLaneMovesPerCheck = 16;
 	constexpr int EmergencyLaneLogFrames = 1800;
+	// Soldiers shut in a building (FreeSoldiersShutInBuildings): checked every ShutInCheckFrames, and
+	// at most ShutInLogsPerMatch of them logged one by one.
+	constexpr int ShutInCheckFrames = 30;
+	constexpr int ShutInLogsPerMatch = 40;
 	// Shared destination (user: units sent to one cell that is taken should each look for the nearest
 	// free cell). Ships of one house sent to the water cell nearest an inland target queued for it in
 	// a narrow channel (matches #9771 and #9832, 100000 frames), 29 vehicles to one cell (#9820), and
@@ -1542,6 +1554,17 @@ namespace
 	constexpr int DestinationSpreadLevels = 1;
 	constexpr double DestinationClaimCells = 8.0;
 	constexpr int DestinationSpreadLogFrames = 1800;
+	// Naval reach (user: ships that sit idle because nothing they shoot at is in reach). A water-bound
+	// unit counts a land target as in reach only when water of its own sea lies within its weapon's
+	// reach of it, measured as the engine does against a building (TechnoTypeClass::In_Range). Match
+	// #9846: Sea Scorpions (ground gun 5.25 cells) sent at buildings with water 6 cells away and counted
+	// for an inland wave target; about 50 sat idle off the enemy island while the house built more.
+	// NavalShoreSearchCells: how far the nearest water of a sea is searched. NavalReachMarginLeptons:
+	// what a ship that stops off its cell's center may lose. NavalSpawnerReachCells: the reach of a ship
+	// whose only land weapon is its aircraft.
+	constexpr int NavalShoreSearchCells = 26;
+	constexpr int NavalReachMarginLeptons = 64;
+	constexpr int NavalSpawnerReachCells = 18;
 	// A route leg that would end on a bridge deck runs this many route cells past its far end.
 	constexpr size_t RouteLegPastBridgeCells = 4;
 	// A ground target off the unit's zone stands for the nearest cell of the zone this near to it.
@@ -1596,6 +1619,10 @@ namespace
 	constexpr int CrawlPowerSurplus = 700;
 	constexpr int ArmyIdleWindowFrames = 2700;
 	constexpr std::array<int, 3> ArmyIdleBrake { 30, 40, 12 };
+	// Warships pause sooner when the idle ones have nothing to shoot: that many with no coastal
+	// building in reach and no enemy ship in their sea at every AI tick of ArmyIdleWindowFrames
+	// (match #9846: a house kept building ships while about 50 sat with no target in reach).
+	constexpr int ShipsWithoutTargetBrake = 6;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way
