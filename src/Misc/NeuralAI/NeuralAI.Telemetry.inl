@@ -715,8 +715,9 @@ namespace
 			TelemetrySightHouseBits[i] = 1u << idx;
 		}
 
-		// The snapshot houses an owner's objects lend their sight to (the owner and its allies),
-		// worked out once per owner.
+		// The snapshot houses an owner's objects lend their sight to, by LendsSightTo, worked out once
+		// per owner: the owner and its allies get all of them (low byte), the houses that spied its
+		// radar its units, infantry and aircraft (second byte).
 		std::vector<int> viewersByOwner(static_cast<size_t>(HouseClass::Array.Count), -1);
 
 		for (auto const pTechno : TechnoClass::Array)
@@ -737,15 +738,21 @@ namespace
 				{
 					auto const pViewer = TelemetrySightViewers[i];
 
-					if (pViewer && (pViewer == pTechno->Owner || pViewer->IsAlliedWith(pTechno->Owner)))
+					if (!pViewer)
+						continue;
+
+					if (pViewer == pTechno->Owner || pViewer->IsAlliedWith(pTechno->Owner))
 						viewers |= 1 << i;
+					else if (pTechno->Owner->RadarVisibleTo.Contains(pViewer->ArrayIndex))
+						viewers |= 1 << (i + 8);
 				}
 			}
 
-			if (viewers == 0)
-				continue;
+			const bool mobile = (pTechno->AbstractFlags & AbstractFlags::Foot) != AbstractFlags::None;
+			const uint8_t bits = static_cast<uint8_t>(viewers | (mobile ? viewers >> 8 : 0));
 
-			const uint8_t bits = static_cast<uint8_t>(viewers);
+			if (bits == 0)
+				continue;
 
 			ForEachCellInAISight(pTechno->GetMapCoords(), radius, [bits](size_t idx)
 			{

@@ -10,6 +10,7 @@
 #include <Utilities/Helpers.Alex.h>
 #include <Utilities/AresFunctions.h>
 #include <Ext/CaptureManager/Body.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 #pragma region CreateGap Calls
 
@@ -87,6 +88,8 @@ void WarheadTypeExt::Detonate(TechnoClass* pOwner, HouseClass* pHouse, BulletExt
 
 		if (reveal > 0)
 		{
+			NeuralAI::OnRevealWarhead(pHouse, coords, reveal);
+
 			const auto pCurrent = HouseClass::CurrentPlayer;
 
 			if ((pHouse->IsControlledByCurrentPlayer() || pHouse->IsAlliedWith(pCurrent)) && !pCurrent->Defeated && !pCurrent->Visionary)

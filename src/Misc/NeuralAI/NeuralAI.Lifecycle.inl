@@ -1251,6 +1251,33 @@ void NeuralAI::OnMapReshroud(HouseClass* pHouse)
 	MarkMapReshroud(pHouse);
 }
 
+// A warhead with Reveal above 0 reveals the cells with dx * dx + dy * dy below (radius + 1) squared
+// for its house and allies.
+void NeuralAI::OnRevealWarhead(HouseClass* pHouse, const CoordStruct& coords, int radius)
+{
+	if (radius > 0)
+		MarkAreaReveal(pHouse, coords, radius + 1.0, 0, false);
+}
+
+// An Ares PsychicReveal superweapon reveals its area when it is charged (IsReady): SW.Range (a radius, or the
+// width of a rectangle and its height), else the rules' PsychicRevealRadius up to 10 cells.
+void NeuralAI::OnSuperWeaponLaunched(SuperClass* pSuper, const CellStruct& cell)
+{
+	if (!pSuper || !pSuper->Type || !pSuper->Owner || pSuper->Type->Type != SuperWeaponType::PsychicReveal || !pSuper->IsReady)
+		return;
+
+	auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+	if (!pCell)
+		return;
+
+	auto const& aim = GetSWTargeting(pSuper->Type);
+	const bool rangeSet = aim.RangeWidthOrRadius >= 0.0f || aim.RangeHeight >= 0;
+	const double range = rangeSet ? aim.RangeWidthOrRadius : std::min(RulesClass::Instance->PsychicRevealRadius, 10);
+
+	MarkAreaReveal(pSuper->Owner, pCell->GetCoordsWithBridge(), range, rangeSet ? aim.RangeHeight : -1, true);
+}
+
 void NeuralAI::OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed)
 {
 	if (!pVictim || !pAttacker || pVictim == pAttacker || damage <= 0)

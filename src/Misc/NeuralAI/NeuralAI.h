@@ -11,6 +11,7 @@ class BuildingClass;
 class BuildingTypeClass;
 class TechnoClass;
 class TechnoTypeClass;
+class SuperClass;
 
 #pragma pack(push, 1)
 
@@ -132,6 +133,8 @@ public:
 	static void OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, TechnoClass* pDock, int money);
 	static void OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed);
 	static void OnMapReshroud(HouseClass* pHouse);
+	static void OnRevealWarhead(HouseClass* pHouse, const CoordStruct& coords, int radius);
+	static void OnSuperWeaponLaunched(SuperClass* pSuper, const CellStruct& cell);
 	static void OnPathFailure(FootClass* pFoot, const CellStruct& from, const CellStruct& to);
 	static bool ShouldSkipPathSearch(const FootClass* pFoot, const CellStruct* pGoal);
 	static void OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller);

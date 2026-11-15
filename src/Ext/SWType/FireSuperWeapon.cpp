@@ -9,6 +9,7 @@
 #include <Misc/Hooks.DropshipLoadout.h>
 #include <Ext/Techno/Body.h>
 #include <Ext/UnitType/Body.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 
 #include <TeamClass.h>
 #include <TeamTypeClass.h>
@@ -29,6 +30,8 @@ void SWTypeExt::FireSuperWeaponExt(SuperClass* pSW, const CellStruct& cell)
 	const auto pHouse = pSW->Owner;
 	const auto pType = pSW->Type;
 	auto const pTypeExt = SWTypeExt::Fetch(pType);
+
+	NeuralAI::OnSuperWeaponLaunched(pSW, cell);
 
 	if (pTypeExt->LimboDelivery_Types.size() > 0)
 		pTypeExt->ApplyLimboDelivery(pHouse);
