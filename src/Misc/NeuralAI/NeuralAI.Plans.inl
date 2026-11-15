@@ -2537,146 +2537,6 @@ namespace
 			return result;
 		};
 
-		auto commandGroupAttack = [&](NeuralPlanInstance& plan, AbstractClass* pTarget)
-		{
-			auto const pTargetCell = MapClass::Instance.TryGetCellAt(CellClass::Coord2Cell(pTarget->GetCoords()));
-
-			for (const DWORD uid : plan.Members)
-			{
-				auto const it = ownFoots.find(uid);
-
-				if (it == ownFoots.end() || IsOnRepairTrip(pHouse, uid))
-					continue;
-
-				// A ground member more than 9 cells off fights its way there (attack-move) and takes
-				// the target from there: on a straight attack order it answered nothing that shot at
-				// it on the way (as Expansion Denial's groups, which lost their strength with no enemy
-				// seen around them).
-				auto const pAir = abstract_cast<AircraftClass*>(it->second);
-
-				if (!pAir && pTargetCell && !it->second->IsInAir()
-					&& it->second->GetMapCoords().DistanceFrom(pTargetCell->MapCoords) > 9.0)
-				{
-					if ((it->second->Target == nullptr || it->second->Target == pTarget) && it->second->MegaMission != Mission::AttackMove)
-						OrderFootToAttackMove(it->second, pTargetCell);
-
-					continue;
-				}
-
-				// A resting aircraft is sent only when it is armed (ReadyPlanAircraft); anything else
-				// when its target is another one.
-				const bool resting = pAir && (pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Area_Guard
-					|| pAir->CurrentMission == Mission::Sleep);
-
-				if (resting ? ReadyPlanAircraft(pAir) : it->second->Target != pTarget)
-					OrderFootAttack(it->second, pTarget);
-			}
-		};
-
-		// ---------------------------------------------------------------- Plan 4: Blackout
-		// The enemy relies on powered defenses: take out a known power plant (by air when
-		// possible, else with a fast ground group if it is undefended) and open a window in
-		// which our main wave launches earlier, while those defenses are offline.
-		{
-			auto& plan = macro.Plans[static_cast<size_t>(NeuralPlanId::Blackout)];
-
-			if (plan.Active)
-			{
-				auto const pPlant = FindBuildingByID(plan.TargetID);
-				const int value = memberValue(plan);
-
-				if (!pPlant)
-				{
-					macro.BlackoutUntilFrame = Unsorted::CurrentFrame + 1200;
-					finishPlan(NeuralPlanId::Blackout, true, true);
-				}
-				else if (value * 100 < plan.InitialValue * 40 || Unsorted::CurrentFrame >= plan.Deadline)
-				{
-					finishPlan(NeuralPlanId::Blackout, false, true);
-				}
-				else
-				{
-					commandGroupAttack(plan, pPlant);
-				}
-			}
-			else
-			{
-				int poweredDefenses = 0;
-
-				for (auto const pBld : knownEnemyBuildingList)
-				{
-					if (isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense && pBld->Type->Powered)
-						poweredDefenses++;
-				}
-
-				BuildingClass* pBestPlant = nullptr;
-				int bestPlantScore = INT_MIN;
-
-				if (poweredDefenses >= 2)
-				{
-					for (auto const pBld : knownEnemyBuildingList)
-					{
-						if (!isKnownEnemyBuilding(pBld) || pBld->Type->PowerBonus <= 0 || pBld->Type->SuperWeapon != -1)
-							continue;
-
-						const CellStruct pc = pBld->GetMapCoords();
-						const int plantScore = pBld->Type->PowerBonus - CountKnownEnemyDefensesNear(pHouse, pc, 10.0, true) * 150
-							- CountKnownEnemyDefensesNear(pHouse, pc, 9.0, false) * 80;
-
-						if (plantScore > bestPlantScore)
-						{
-							bestPlantScore = plantScore;
-							pBestPlant = pBld;
-						}
-					}
-				}
-
-				const int utility = pBestPlant ? (220 + std::clamp(poweredDefenses * 60, 0, 400)) : -1000;
-
-				if (pBestPlant && shouldTryStart(NeuralPlanId::Blackout, utility))
-				{
-					std::vector<FootClass*> group;
-
-					// Only aircraft whose load hurts the plant (a gas bomb does nothing to most structures).
-					for (auto const& [uid, pFoot] : ownFoots)
-					{
-						auto const pAir = abstract_cast<AircraftClass*>(pFoot);
-
-						if (isFreeAirStriker(pAir) && AirSortieDamageVs(pAir, pBestPlant) > 0)
-							group.push_back(pAir);
-					}
-
-					std::sort(group.begin(), group.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
-
-					const CellStruct plantCell = pBestPlant->GetMapCoords();
-					const bool groundReachable = MapClass::Instance.GetMovementZoneType(plantCell, MovementZone::Normal, pBestPlant->OnBridge) == homeZone
-						&& CountKnownEnemyDefensesNear(pHouse, plantCell, 9.0, false) == 0;
-
-					if (group.size() < 2 && groundReachable)
-					{
-						group = collectIdleGround(false);
-						std::stable_sort(group.begin(), group.end(), [](FootClass* a, FootClass* b)
-							{ return a->GetTechnoType()->Speed > b->GetTechnoType()->Speed; });
-
-						if (group.size() > 5)
-							group.resize(5);
-
-						if (group.size() < 3)
-							group.clear();
-					}
-
-					if (group.size() >= 2)
-					{
-						if (group.size() > 6)
-							group.resize(6);
-
-						startPlan(NeuralPlanId::Blackout, group, plantCell, CellStruct::Empty, pBestPlant->UniqueID, 3600);
-						commandGroupAttack(macro.Plans[static_cast<size_t>(NeuralPlanId::Blackout)], pBestPlant);
-					}
-				}
-			}
-		}
-
 		// Can this air group destroy the building while its plan lasts? PlanAirStrikeSorties sorties
 		// of every aircraft's full load must add up to the building's health.
 		auto airGroupCanDestroy = [](const std::vector<FootClass*>& group, BuildingClass* pTarget) -> bool
@@ -4389,6 +4249,95 @@ namespace
 			}
 
 			macro.DelayedRetreats = std::move(still);
+		}
+
+		// ---------------------------------------------------------------- Plan 4: Blackout
+		// The enemy relies on powered defenses: take out a known power plant and open a window in
+		// which our main wave launches earlier, while those defenses are offline. The group is the
+		// one the other strikes at a building take (pickStrikeGroup): aircraft whose load hurts the
+		// plant, when its AA risk allows and their sorties can bring it down; else, for a plant no
+		// known defense covers, the idle ground units that hurt it, BlackoutMinGround at least and
+		// one in PlanStrikeIdleShare of the idle army when that is more than BlackoutMaxGround, with
+		// the strength to beat what is known on their way in. They march as one column that fights
+		// its way there and attacks the plant from 9 cells (columnMovingOn, strikeWithMembers). It
+		// took the five fastest idle units on their own straight attack order, and any two aircraft:
+		// 1 of 14 plans ended well in 40 training matches of 2026-11-15, 8 of the 13 others lost their
+		// strength 60 to 170 cells from the plant with no enemy seen around them. The block runs
+		// after the strike helpers it uses.
+		{
+			auto& plan = planOf(NeuralPlanId::Blackout);
+
+			if (plan.Active)
+			{
+				auto const pPlant = FindBuildingByID(plan.TargetID);
+
+				if (!pPlant)
+				{
+					macro.BlackoutUntilFrame = Unsorted::CurrentFrame + 1200;
+					finishPlan(NeuralPlanId::Blackout, true, true);
+				}
+				else if (memberValue(plan) * 100 < plan.InitialValue * 40 || Unsorted::CurrentFrame >= plan.Deadline)
+				{
+					finishPlan(NeuralPlanId::Blackout, false, true);
+				}
+				else
+				{
+					strikeWithMembers(columnMovingOn(plan.Members, plan.TargetCell), pPlant);
+				}
+			}
+			else
+			{
+				int poweredDefenses = 0;
+
+				for (auto const pBld : knownEnemyBuildingList)
+				{
+					if (isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense && pBld->Type->Powered)
+						poweredDefenses++;
+				}
+
+				BuildingClass* pBestPlant = nullptr;
+				int bestPlantScore = INT_MIN;
+
+				if (poweredDefenses >= 2)
+				{
+					for (auto const pBld : knownEnemyBuildingList)
+					{
+						if (!isKnownEnemyBuilding(pBld) || pBld->Type->PowerBonus <= 0 || pBld->Type->SuperWeapon != -1)
+							continue;
+
+						const CellStruct pc = pBld->GetMapCoords();
+						const int plantScore = pBld->Type->PowerBonus - CountKnownEnemyDefensesNear(pHouse, pc, 10.0, true) * 150
+							- CountKnownEnemyDefensesNear(pHouse, pc, 9.0, false) * 80;
+
+						if (plantScore > bestPlantScore)
+						{
+							bestPlantScore = plantScore;
+							pBestPlant = pBld;
+						}
+					}
+				}
+
+				const int utility = pBestPlant ? (220 + std::clamp(poweredDefenses * 60, 0, 400)) : -1000;
+
+				if (pBestPlant && shouldTryStart(NeuralPlanId::Blackout, utility))
+				{
+					const CellStruct plantCell = pBestPlant->GetMapCoords();
+					std::vector<FootClass*> group = pickStrikeGroup(pBestPlant, BlackoutMinGround, BlackoutMaxGround, true);
+
+					// A ground group goes only at a plant no known defense covers.
+					if (!group.empty() && group.front()->WhatAmI() != AbstractType::Aircraft
+						&& CountKnownEnemyDefensesNear(pHouse, plantCell, 9.0, false) > 0)
+					{
+						group.clear();
+					}
+
+					if (!group.empty())
+					{
+						startPlan(NeuralPlanId::Blackout, group, plantCell, CellStruct::Empty, pBestPlant->UniqueID, 3600);
+						strikeWithMembers(planOf(NeuralPlanId::Blackout).Members, pBestPlant);
+					}
+				}
+			}
 		}
 
 		// ---------------------------------------------------------------- Plan 37: Combo Blackout Push
