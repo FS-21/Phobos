@@ -1686,6 +1686,8 @@ namespace
 	{
 		bool Revealed { false };
 		bool ReshroudPending { false };
+		// The enemy houses whose radar a spy of this house entered, as last logged.
+		uint32_t SpiedRadars { 0 };
 	};
 
 	std::array<NeuralMapShroudState, 32> MapShroudStates {};
@@ -1725,6 +1727,30 @@ namespace
 		auto const pType = pTechno->GetTechnoType();
 
 		return pType ? std::clamp(static_cast<int>(pType->Sight), 1, 24) : 0;
+	}
+
+	// Whether an object's sight reaches pHouse: its own and its allies' objects, and the units of a
+	// house whose radar a spy of pHouse entered. Ares SpyEffect.RevealRadar puts the spy's house in
+	// the victim's RadarVisibleTo, and every reveal of the victim's objects then reaches it too. Of
+	// the victim only units, infantry and aircraft count: they reveal again as they move, while a
+	// building revealed once, when it was placed, mostly before the spy went in.
+	bool LendsSightTo(const TechnoClass* pTechno, HouseClass* pHouse)
+	{
+		auto const pOwner = pTechno->Owner;
+
+		if (pOwner == pHouse || pHouse->IsAlliedWith(pOwner))
+			return true;
+
+		return (pTechno->AbstractFlags & AbstractFlags::Foot) != AbstractFlags::None && pOwner->RadarVisibleTo.Contains(pHouse->ArrayIndex);
+	}
+
+	// The cell a reveal or a gap is centred on: the engine moves the centre one cell north for every
+	// two height levels of the coords.
+	CellStruct GetRevealCenterCell(const CoordStruct& coords)
+	{
+		const int lift = coords.Z / Unsorted::CellHeight;
+
+		return { static_cast<short>(coords.X / Unsorted::LeptonsPerCell - lift), static_cast<short>(coords.Y / Unsorted::LeptonsPerCell - lift) };
 	}
 
 	// Calls func(first, last) with the first and last vision map index of each row run of the cells
@@ -1830,10 +1856,10 @@ namespace
 				continue;
 
 			// The engine covers the cells with dx * dx + dy * dy below (radius + 1) squared around the
-			// building's location, moved one cell north for every two height levels.
-			const int lift = pBld->Location.Z / Unsorted::CellHeight;
-			gaps.push_back(pBld->Location.X / Unsorted::LeptonsPerCell - lift);
-			gaps.push_back(pBld->Location.Y / Unsorted::LeptonsPerCell - lift);
+			// building's location.
+			const CellStruct center = GetRevealCenterCell(pBld->Location);
+			gaps.push_back(center.X);
+			gaps.push_back(center.Y);
 			gaps.push_back(radius);
 		}
 
@@ -1887,26 +1913,112 @@ namespace
 		return cover.Runs;
 	}
 
-	void RebuildVisionMap(HouseClass* pHouse)
+	// The explored map of a house, emptied for a new match (the frame count starts again).
+	std::vector<uint8_t>& GetHouseExploredMap(HouseClass* pHouse)
 	{
 		const size_t totalCells = static_cast<size_t>(VisionMapSide) * VisionMapSide;
+
 		if (LastExploredResetFrame < 0 || Unsorted::CurrentFrame < LastExploredResetFrame || Unsorted::CurrentFrame <= 15)
 		{
 			for (auto& m : HouseExploredMaps)
 				m.assign(totalCells, 0);
 
 			MapShroudStates.fill(NeuralMapShroudState {});
-			LastExploredResetFrame = Unsorted::CurrentFrame;
-		}
-		else
-		{
-			LastExploredResetFrame = Unsorted::CurrentFrame;
 		}
 
-		const int hIdx = std::clamp(pHouse->ArrayIndex, 0, 7);
-		auto& explored = HouseExploredMaps[hIdx];
+		LastExploredResetFrame = Unsorted::CurrentFrame;
+
+		auto& explored = HouseExploredMaps[std::clamp(pHouse->ArrayIndex, 0, 7)];
+
 		if (explored.size() != totalCells)
 			explored.assign(totalCells, 0);
+
+		return explored;
+	}
+
+	// A map-wide reshroud since the last rebuild leaves only what is in sight now (marked by the
+	// rebuild).
+	void ApplyPendingReshroud(HouseClass* pHouse, std::vector<uint8_t>& explored)
+	{
+		auto& shroudState = MapShroudStates[std::clamp(pHouse->ArrayIndex, 0, 31)];
+
+		if (!shroudState.ReshroudPending)
+			return;
+
+		std::memset(explored.data(), 0, explored.size());
+		shroudState.ReshroudPending = false;
+	}
+
+	// An area reveal of pRevealer: the cells closer than range to the centre of coords, or, with a
+	// height, the rectangle of range by height cells around it (both ends included, as Ares walks
+	// it), or the whole map when range is below 0. It reaches pRevealer and the houses it is allied
+	// with and, for a superweapon reveal, the houses that spied its radar (the engine's reveal
+	// checks), and is marked in their explored maps now, on every client. Enemy gaps cover it again
+	// at the next rebuild, as the engine makes them again right after the reveal.
+	void MarkAreaReveal(HouseClass* pRevealer, const CoordStruct& coords, double range, int height, bool toRadarSpies)
+	{
+		const CellStruct center = GetRevealCenterCell(coords);
+		const int width = static_cast<int>(range);
+		const bool wholeMap = range < 0.0;
+		const bool rectangle = !wholeMap && height > 0;
+
+		if (!pRevealer || range == 0.0 || (rectangle && width <= 0))
+			return;
+
+		const int firstX = center.X - width / 2;
+		const int firstY = center.Y - height / 2;
+		// A cell closer than range: dx * dx + dy * dy below range * range.
+		const int reach = static_cast<int>(std::ceil(range)) - 1;
+		const int radiusSq = static_cast<int>(std::ceil(range * range)) - 1;
+		uint32_t reached = 0;
+
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (pHouse != pRevealer && !pRevealer->IsAlliedWith(pHouse)
+				&& !(toRadarSpies && pRevealer->RadarVisibleTo.Contains(pHouse->ArrayIndex)))
+			{
+				continue;
+			}
+
+			auto& explored = GetHouseExploredMap(pHouse);
+			ApplyPendingReshroud(pHouse, explored);
+
+			if (wholeMap)
+			{
+				std::memset(explored.data(), 1, explored.size());
+			}
+			else if (rectangle)
+			{
+				for (int y = std::max(0, firstY); y <= std::min(VisionMapSide - 1, firstY + height); ++y)
+				{
+					const int fromX = std::max(0, firstX);
+					const int toX = std::min(VisionMapSide - 1, firstX + width);
+
+					if (fromX <= toX)
+						std::memset(explored.data() + static_cast<size_t>(y) * VisionMapSide + fromX, 1, toX - fromX + 1);
+				}
+			}
+			else
+			{
+				ForEachRowSpanWithin(center, reach, radiusSq, [&explored](size_t first, size_t last)
+				{
+					std::memset(explored.data() + first, 1, last - first + 1);
+				});
+			}
+
+			if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+				reached |= 1u << pHouse->ArrayIndex;
+		}
+
+		VisionMapFrame = -1;
+		Debug::Log("[NeuralAI] Area reveal of house %d at (%d,%d), range %.1f, height %d, for houses 0x%X at frame %d.\n",
+			pRevealer->ArrayIndex, center.X, center.Y, range, height, reached, Unsorted::CurrentFrame);
+	}
+
+	void RebuildVisionMap(HouseClass* pHouse)
+	{
+		const size_t totalCells = static_cast<size_t>(VisionMapSide) * VisionMapSide;
+		auto& explored = GetHouseExploredMap(pHouse);
 
 		VisionMapFrame = Unsorted::CurrentFrame;
 
@@ -1917,12 +2029,7 @@ namespace
 		// The map-wide reshrouds and reveals since the last rebuild: a reshroud leaves only what is in
 		// sight now (marked below), a reveal the whole map.
 		auto& shroudState = MapShroudStates[std::clamp(pHouse->ArrayIndex, 0, 31)];
-
-		if (shroudState.ReshroudPending)
-		{
-			std::memset(explored.data(), 0, explored.size());
-			shroudState.ReshroudPending = false;
-		}
+		ApplyPendingReshroud(pHouse, explored);
 
 		if (pHouse->MapIsClear && !shroudState.Revealed)
 		{
@@ -1931,6 +2038,24 @@ namespace
 		}
 
 		shroudState.Revealed = pHouse->MapIsClear;
+
+		uint32_t spiedRadars = 0;
+
+		for (auto const pOther : HouseClass::Array)
+		{
+			if (pOther != pHouse && pOther->ArrayIndex >= 0 && pOther->ArrayIndex < 32 && !pHouse->IsAlliedWith(pOther)
+				&& pOther->RadarVisibleTo.Contains(pHouse->ArrayIndex))
+			{
+				spiedRadars |= 1u << pOther->ArrayIndex;
+			}
+		}
+
+		if (spiedRadars != shroudState.SpiedRadars)
+		{
+			shroudState.SpiedRadars = spiedRadars;
+			Debug::Log("[NeuralAI] House %d gets the sight of the units of houses 0x%X (spied radars) at frame %d.\n",
+				pHouse->ArrayIndex, spiedRadars, Unsorted::CurrentFrame);
+		}
 
 		// Under an enemy gap the explored cells are shrouded again (the engine makes every gap again
 		// right after a reveal); the sight below reveals the ones in sight now.
@@ -1941,7 +2066,7 @@ namespace
 
 		for (auto const pTechno : TechnoClass::Array)
 		{
-			if (!pTechno || !pTechno->Owner || (pTechno->Owner != pHouse && !pHouse->IsAlliedWith(pTechno->Owner)))
+			if (!pTechno || !pTechno->Owner || !LendsSightTo(pTechno, pHouse))
 				continue;
 
 			const int radius = GetAISightRadius(pTechno);
@@ -2461,6 +2586,10 @@ namespace
 		// Its warhead (SW.Warhead) paralyses (EMEffect): aimed at threats near our base, followed up.
 		bool IsEMP { false };
 		std::vector<std::string> Cannons {};
+		// SW.Range as Ares reads it for the area of a superweapon: a radius (RangeHeight 0) or the
+		// width of a rectangle RangeHeight cells high; both -1 when not set.
+		float RangeWidthOrRadius { -1.0f };
+		int RangeHeight { -1 };
 	};
 
 	const NeuralSWTargeting& GetSWTargeting(const SuperWeaponTypeClass* pSWType)
@@ -2521,6 +2650,24 @@ namespace
 			it->second.Range = pINI->ReadDouble(pSWType->ID, "SW.Range", pINI->ReadDouble(pSWType->ID, "Range", 0.0));
 			it->second.RangeMin = pINI->ReadDouble(pSWType->ID, "SW.RangeMinimum", -1.0);
 			it->second.RangeMax = pINI->ReadDouble(pSWType->ID, "SW.RangeMaximum", -1.0);
+
+			char rangeText[64] {};
+
+			if (pINI->ReadString(pSWType->ID, "SW.Range", "", rangeText, sizeof(rangeText)) > 0)
+			{
+				char* context = nullptr;
+				char* pPart = strtok_s(rangeText, ",", &context);
+
+				if (pPart && *pPart)
+				{
+					it->second.RangeWidthOrRadius = static_cast<float>(std::atof(pPart));
+					it->second.RangeHeight = 0;
+					pPart = strtok_s(nullptr, ",", &context);
+
+					if (pPart && *pPart)
+						it->second.RangeHeight = std::atoi(pPart);
+				}
+			}
 
 			char typeName[64] {};
 			pINI->ReadString(pSWType->ID, "Type", "", typeName, sizeof(typeName));
