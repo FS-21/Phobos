@@ -1559,6 +1559,9 @@ namespace
 	constexpr int EmergencyLaneSideCells = 3;
 	constexpr int EmergencyLaneMovesPerCheck = 16;
 	constexpr int EmergencyLaneLogFrames = 1800;
+	// Allied units this close to a block in a narrow passage, heading against it, are the other side
+	// of two-way traffic (UpdateJamBreaker).
+	constexpr double JamAlliedFlowCells = 10.0;
 	// Soldiers shut in a building (FreeSoldiersShutInBuildings): checked every ShutInCheckFrames; one
 	// whose path searches from its building cell failed on ShutInFailFrames frames in a row (none more
 	// than ShutInFailGapFrames apart) is freed. At most ShutInLogsPerMatch of them logged one by one.
