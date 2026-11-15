@@ -4695,11 +4695,14 @@ namespace
 
 		// ---------------------------------------------------------------- Plan 38: Combo Watch Strike
 		// Chain (point 56): a sentry of ours spots an enemy force that Preemptive Strike or Hold Under
-		// Towers would answer right now, and that follow-up is pushed (cooldown skipped, utility
-		// raised). The chain is judged by the plan it led into: well when that plan ends well, badly
-		// when it ends badly or does not start within ComboWatchStartFrames. AuxBaseline: the
-		// follow-ups pushed (1 strike, 2 hold); Progress: the one that started (1, 2); ArrivedFrame:
-		// its start frame.
+		// Towers would answer right now, and that follow-up is pushed once (cooldown skipped, utility
+		// raised for the 900 frames of the boost). Pushed again every tick, a strike the raid gate
+		// held was weighed again almost every tick of the window (frames 28830, 28875, 28950 of a
+		// focus match) instead of after PlanGateRetryFrames.
+		// The chain is judged by the plan it led into: well when that plan ends well, badly when it
+		// ends badly or does not start within ComboWatchStartFrames. AuxBaseline: the follow-ups
+		// pushed (1 strike, 2 hold); Progress: the one that started (1, 2); ArrivedFrame: its start
+		// frame.
 		{
 			auto& plan = planOf(NeuralPlanId::ComboWatchStrike);
 			auto& pickets = planOf(NeuralPlanId::Pickets);
@@ -4757,8 +4760,6 @@ namespace
 				{
 					if (Unsorted::CurrentFrame >= plan.Deadline)
 						finishPlan(NeuralPlanId::ComboWatchStrike, false, false);
-					else
-						pushFollowUps(plan.AuxBaseline);
 				}
 				else
 				{
