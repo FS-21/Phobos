@@ -1699,10 +1699,15 @@ namespace
 			if (y < 0 || y >= VisionMapSide)
 				continue;
 
-			int span = reach;
+			// Exact integer square root of radiusSq - dy * dy (gaps reach 127 cells).
+			const int restSq = radiusSq - dy * dy;
+			int span = std::min(reach, static_cast<int>(std::sqrt(static_cast<double>(restSq))));
 
-			while (span * span + dy * dy > radiusSq)
+			while (span * span > restSq)
 				--span;
+
+			while (span < reach && (span + 1) * (span + 1) <= restSq)
+				++span;
 
 			const int firstX = std::max(0, coords.X - span);
 			const int lastX = std::min(VisionMapSide - 1, coords.X + span);
