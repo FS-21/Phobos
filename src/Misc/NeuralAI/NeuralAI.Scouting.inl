@@ -87,6 +87,10 @@ namespace
 		std::unordered_map<DWORD, int> ExpansionBornFrame {};
 		std::unordered_set<DWORD> ExpansionKnown {};
 		int ExpansionCheckFrame { -1 };
+		// Area reveal superweapons (PickRevealTarget): the frame before which a waiting one is not
+		// weighed again, and whether the wait was logged since the last reveal.
+		int RevealCheckFrame { -1 };
+		bool RevealHeld { false };
 	};
 
 	std::array<NeuralScoutState, 32> ScoutStates {};
@@ -151,12 +155,24 @@ namespace
 		}
 	}
 
+	// Whether a cell lies in the enemy gap runs of GetEnemyGapRuns (first and last cell index of each
+	// run, ascending).
+	bool IsInGapRuns(const std::vector<size_t>& runs, const CellStruct& cell)
+	{
+		const size_t idx = static_cast<size_t>(cell.Y) * VisionMapSide + cell.X;
+		const size_t pos = static_cast<size_t>(std::upper_bound(runs.begin(), runs.end(), idx) - runs.begin());
+
+		return (pos & 1) != 0 || (pos > 0 && runs[pos - 1] == idx);
+	}
+
 	// What a look at center would teach us, 0..100: ground never explored (or shrouded again by an
 	// enemy gap) counts fully, explored ground with fog of war by the time since it was last in sight.
 	// Without fog of war the engine shows explored ground live (and the AI's known buildings and
 	// sightings use it), so a look there teaches nothing: with the map revealed ("Reveal map", a Spy
-	// Satellite) only enemy gaps are left to scout.
-	int ScoutInfoGain(HouseClass* pHouse, const NeuralScoutState& state, const CellStruct& center, int radius, bool fog)
+	// Satellite) only enemy gaps are left to scout. With pGapRuns (an area reveal, which the engine
+	// shrouds again at once under an enemy gap) the cells under an enemy gap teach nothing.
+	int ScoutInfoGain(HouseClass* pHouse, const NeuralScoutState& state, const CellStruct& center, int radius, bool fog,
+		const std::vector<size_t>* pGapRuns = nullptr)
 	{
 		const int now = Unsorted::CurrentFrame;
 		int total = 0;
@@ -176,6 +192,9 @@ namespace
 					continue;
 
 				samples++;
+
+				if (pGapRuns && IsInGapRuns(*pGapRuns, cell))
+					continue;
 
 				if (!IsCellVisibleToAI(pHouse, pCell))
 				{
@@ -378,19 +397,33 @@ namespace
 	// Every place worth a look, valued as kind weight x information gain there; targets inside known
 	// defense reach are pulled back out of it, targets other scouts head to or looked at lately are
 	// left out (also those given up on lately or twice), places where a scout died lately count a quarter. Also counts the free ore fields and
-	// how many of them were never explored.
+	// how many of them were never explored. With revealRadius above 0 the places are valued for an area
+	// reveal of that radius instead: the place itself, by what the disc would teach (the cells under an
+	// enemy gap left out), whatever scouts do or met there.
 	void CollectScoutCandidates(HouseClass* pHouse, const NeuralScoutState& state, const CellStruct& home, bool fog,
 		const std::vector<NeuralScoutSighting>& sightings, std::vector<NeuralScoutCandidate>& out, int& freeFields,
-		int& unexploredFields)
+		int& unexploredFields, int revealRadius = 0)
 	{
 		auto const& macro = GetMacroState(pHouse);
 		auto const& known = GetKnownEnemyBuildingCache(pHouse).Entries;
 		const int now = Unsorted::CurrentFrame;
+		const bool reveal = revealRadius > 0;
+		const std::vector<size_t> gapRuns = reveal ? GetEnemyGapRuns(pHouse) : std::vector<size_t> {};
 
 		auto add = [&](NeuralScoutKind kind, const CellStruct& cell, int weight)
 		{
 			if (cell == CellStruct::Empty || !MapClass::Instance.CoordinatesLegal(cell))
 				return;
+
+			if (reveal)
+			{
+				const int gain = ScoutInfoGain(pHouse, state, cell, revealRadius, fog, &gapRuns);
+
+				if (gain >= 20)
+					out.push_back({ cell, kind, gain, weight * gain });
+
+				return;
+			}
 
 			const CellStruct look = ScoutStandoffCell(pHouse, cell, home);
 
@@ -582,6 +615,56 @@ namespace
 			groups++;
 			add(NeuralScoutKind::EnemyArmy, armies[i]->Cell, std::clamp(30 + value / 5, 30, 85));
 		}
+	}
+
+	// Where an area reveal of this radius teaches the most: the places scouts weigh (unchecked starts,
+	// free ore fields, the known enemy bases and the ground around them, the approaches to our base,
+	// the armies last seen), valued as kind weight x what the disc would teach, from 1500 as for a
+	// scout trip. Empty when no place is worth it: the superweapon waits and is weighed again 150
+	// frames later.
+	CellStruct PickRevealTarget(HouseClass* pHouse, int radius)
+	{
+		auto& state = GetScoutState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now < state.RevealCheckFrame)
+			return CellStruct::Empty;
+
+		std::vector<NeuralScoutSighting> sightings;
+		CollectScoutSightings(pHouse, sightings);
+		std::vector<NeuralScoutCandidate> candidates;
+		int freeFields = 0;
+		int unexploredFields = 0;
+		CollectScoutCandidates(pHouse, state, GetHouseHomeCell(pHouse), IsFogOfWarMatch(), sightings, candidates, freeFields,
+			unexploredFields, std::max(1, radius));
+
+		const NeuralScoutCandidate* pBest = nullptr;
+
+		for (auto const& candidate : candidates)
+		{
+			if (!pBest || candidate.Value > pBest->Value)
+				pBest = &candidate;
+		}
+
+		if (!pBest || pBest->Value < 1500)
+		{
+			state.RevealCheckFrame = now + 150;
+
+			if (!state.RevealHeld)
+			{
+				state.RevealHeld = true;
+				Debug::Log("[NeuralAI] House %d Reveal: nothing worth a reveal of radius %d (best value %d), the superweapon waits, frame %d.\n",
+					pHouse->ArrayIndex, radius, pBest ? pBest->Value : 0, now);
+			}
+
+			return CellStruct::Empty;
+		}
+
+		state.RevealHeld = false;
+		Debug::Log("[NeuralAI] House %d Reveal: %s (%d,%d), gain %d, value %d, frame %d.\n", pHouse->ArrayIndex,
+			NeuralScoutKindNames[static_cast<size_t>(pBest->Kind)], pBest->Cell.X, pBest->Cell.Y, pBest->Gain, pBest->Value, now);
+
+		return pBest->Cell;
 	}
 
 	bool IsScoutTripUnit(const NeuralScoutState& state, DWORD uid)
