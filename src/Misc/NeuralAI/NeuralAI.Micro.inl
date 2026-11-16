@@ -732,6 +732,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pFoot || !pTarget)
 			return false;
 
+		// A unit of a transport operation is on its way already: the operation carries it and gives it
+		// back to its client on the target's ground.
+		if (IsHeldByTransportOp(pFoot))
+			return true;
+
 		auto const pFootType = pFoot->GetTechnoType();
 		if (!pFootType)
 			return false;
@@ -11148,9 +11153,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const pFootAdj : adjacentFoots)
 		{
-			// Reserved passengers wait their turn FerryWaitCells away, not at the door.
+			// Reserved passengers wait their turn FerryWaitCells away, not at the door. The units of a
+			// transport operation wait by their own transports and move on its orders alone.
 			if (pFootAdj->Owner != pHouse || !pFootAdj->IsAlive || pFootAdj->InLimbo
-				|| pFootAdj == pTransport || pFootAdj == pChosenBoarder)
+				|| pFootAdj == pTransport || pFootAdj == pChosenBoarder || IsInTransportOp(pHouse, pFootAdj->UniqueID))
 			{
 				continue;
 			}
@@ -12005,7 +12011,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							if (pTrans->CurrentMission == Mission::Guard || pTrans->CurrentMission == Mission::Area_Guard
 								|| IsAITickWindow(90, 25))
 							{
-								AdvanceRoutedPickup(pHouse, pTrans, pPendingCargo, true);
+								AdvanceRoutedPickup(pHouse, pTrans, pPendingCargo);
 							}
 
 							continue;
@@ -12024,7 +12030,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							{
 								if (pOrdU->IsAlive && !pOrdU->InLimbo && pCarryExt->CarryallCanLift(pOrdU))
 								{
-									AdvanceRoutedPickup(pHouse, pTrans, pOrdU, true);
+									AdvanceRoutedPickup(pHouse, pTrans, pOrdU);
 									CountDecision(NeuralDecision::AirliftJob, pHouse->ArrayIndex);
 									pickedCarryallTarget = true;
 									break;
@@ -12041,8 +12047,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							if (pickedCarryallTarget)
 								break;
 
+							// A unit of a transport operation waits for the operation's own transports.
 							if (!pU || pU->Owner != pHouse || pU->InLimbo || !pU->IsAlive || !pU->Type
-								|| !pCarryExt->CarryallCanLift(pU))
+								|| !pCarryExt->CarryallCanLift(pU) || IsInTransportOp(pHouse, pU->UniqueID))
 							{
 								continue;
 							}
@@ -12073,7 +12080,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							if (isCriticallyDamagedTank || isLosingExpensiveUnit || isLoadedStrikeAPC || strandedHarvester
 								|| (isIslandJob && !islandLiftsPaused))
 							{
-								AdvanceRoutedPickup(pHouse, pTrans, pU, true);
+								AdvanceRoutedPickup(pHouse, pTrans, pU);
 								CountDecision(NeuralDecision::AirliftJob, pHouse->ArrayIndex);
 
 								if (isCriticallyDamagedTank)
@@ -13231,7 +13238,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								{
 									if (pFootAdj->Owner == pHouse && pFootAdj->IsAlive && !pFootAdj->InLimbo
 										&& pFootAdj->CurrentMission != Mission::Move
-										&& pFootAdj->CurrentMission != Mission::Attack)
+										&& pFootAdj->CurrentMission != Mission::Attack
+										&& !IsInTransportOp(pHouse, pFootAdj->UniqueID))
 									{
 										if (auto const pUAdj = abstract_cast<UnitClass*>(pFootAdj))
 										{
@@ -14729,7 +14737,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (CanCarryallLiftUnit(pAir, pPendingCargo))
 				{
 					if (isAirIdle || IsAITickWindow(90, 25))
-						AdvanceRoutedPickup(pHouse, pAir, pPendingCargo, false);
+						AdvanceRoutedPickup(pHouse, pAir, pPendingCargo);
 
 					continue;
 				}
@@ -14747,8 +14755,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			for (auto const pU : UnitClass::Array)
 			{
+				// A unit of a transport operation waits for the operation's own transports.
 				if (!pU || pU->Owner != pHouse || pU->InLimbo || !pU->IsAlive || !pU->Type
-					|| !CanCarryallLiftUnit(pAir, pU))
+					|| !CanCarryallLiftUnit(pAir, pU) || IsInTransportOp(pHouse, pU->UniqueID))
 				{
 					continue;
 				}
@@ -14772,7 +14781,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (isCriticallyDamagedTank || isLosingExpensiveUnit || isLoadedStrikeAPC || strandedHarvester
 					|| (isIslandJob && !islandLiftsPaused))
 				{
-					AdvanceRoutedPickup(pHouse, pAir, pU, false);
+					AdvanceRoutedPickup(pHouse, pAir, pU);
 					CountDecision(NeuralDecision::AirliftJob, pHouse->ArrayIndex);
 
 					if (isCriticallyDamagedTank)

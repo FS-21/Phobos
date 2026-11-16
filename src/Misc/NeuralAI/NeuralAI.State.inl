@@ -491,23 +491,42 @@ namespace
 		CellStruct OrderCell { CellStruct::Empty };
 	};
 
-	// A transport an operation holds: its leg and the frame the leg began, the cell it sets its load
-	// down on, the detour of its safe lane, the cell a flying one comes down on to load (with when
-	// it was sent there and how many cells it has tried), the progress watchdog, and the cell the
-	// operation last sent it to.
+	// A transport an operation holds: its type, its leg and the frame the leg began, the cell it sets
+	// its load down on, the cell a flying one comes down on to load (with when it was sent there and
+	// how many cells it has tried), the progress watchdog, and the cell the operation last sent it to.
+	// Route: the waypoints of its safe route still ahead (PlanOpRoute), planned at RouteFrame with
+	// RouteHealth left, at a danger of RouteDanger against StraightDanger for the straight lane. Last*:
+	// where it stood, its health and its load at the last tick (the loss log, the set-downs the engine
+	// makes).
 	struct NeuralOpTransport
 	{
 		DWORD UniqueID { 0 };
+		const TechnoTypeClass* Type { nullptr };
 		NeuralOpLeg Leg { NeuralOpLeg::ToStaging };
 		int LegFrame { 0 };
 		CellStruct Landing { CellStruct::Empty };
-		CellStruct Waypoint { CellStruct::Empty };
 		CellStruct ParkCell { CellStruct::Empty };
 		int ParkFrame { -1 };
 		int Tries { 0 };
 		CellStruct ProgressCell { CellStruct::Empty };
 		int ProgressFrame { -1 };
 		CellStruct OrderCell { CellStruct::Empty };
+		std::vector<CellStruct> Route;
+		int RouteFrame { -1 };
+		int RouteHealth { 0 };
+		int RouteDanger { 0 };
+		int StraightDanger { 0 };
+		CellStruct LastCell { CellStruct::Empty };
+		int LastHealth { 0 };
+		int LastLoaded { 0 };
+	};
+
+	// Where a transport of an operation was lost (NeuralHouseMacroState::OpLossSpots).
+	struct NeuralOpLossSpot
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Frame { 0 };
+		bool Airborne { false };
 	};
 
 	struct NeuralTransportOperation
@@ -522,6 +541,10 @@ namespace
 		// Where the members wait for their seat: behind the staging beach, off the cells the
 		// transports come to.
 		CellStruct Gather { CellStruct::Empty };
+		// The landing the load sailing now was given, chosen with its route (ChooseOpTripLanding), and
+		// the frame: the transports that sail in that tick land around it together.
+		CellStruct TripLanding { CellStruct::Empty };
+		int TripLandingFrame { -1 };
 		int CreatedFrame { 0 };
 		// First frame a transport stood parked on the staging beach for the current load (-1: none).
 		int BoardingSince { -1 };
@@ -539,6 +562,11 @@ namespace
 		int TransportsLost { 0 };
 		int Interferences { 0 };
 		int InterferenceLogFrame { -1 };
+		// Routes planned again during crossings, how many of them changed the route, and loads that
+		// landed somewhere else than the operation's first landing (ChooseOpTripLanding).
+		int Replans { 0 };
+		int RouteChanges { 0 };
+		int LandingMoves { 0 };
 		bool Over { false };
 		const char* EndReason { "" };
 		std::vector<NeuralOpMember> Members;
@@ -1058,6 +1086,9 @@ namespace
 		int OpWaitingFrame { -1 };
 		int TransportOpLogFrame { -1 };
 		std::vector<NeuralOpUnitWatch> OpWatch;
+		// Where transports of the operations were lost, with the frame and whether they flew: the
+		// routes of the next crossings keep away from there (PlanOpRoute).
+		std::vector<NeuralOpLossSpot> OpLossSpots;
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1425,6 +1456,7 @@ namespace
 			this->OpWaitingFrame = -1;
 			this->TransportOpLogFrame = -1;
 			this->OpWatch.clear();
+			this->OpLossSpots.clear();
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
@@ -1757,6 +1789,53 @@ namespace
 	constexpr int OpMaxFailedTrips = 2;
 	constexpr int OpLogFrames = 1800;
 	constexpr int OpInterferenceLogFrames = 900;
+	// Safe routes of the transport operations (PlanOpRoute) over a grid of OpRouteBlockCells-cell
+	// blocks: a block costs OpRouteBaseCost per cell crossed plus its danger, the sum over every
+	// threat that can hit the transport of the cells the block lies inside the threat's reach times
+	// its weight. Threats (user: the defenses, and the enemy units too wherever possible): a known
+	// enemy defense (weapon range + OpRouteDefenseMarginCells, OpRouteDefenseWeight), any other known
+	// enemy building (OpRouteBaseCells, weight 1), an enemy unit in sight (range +
+	// OpRouteUnitMarginCells, OpRouteUnitWeight), one out of sight seen within OpRouteSightingFrames
+	// (range + OpRouteSightingMarginCells, OpRouteSightingWeight fading with age), and a place where
+	// we lost such a transport within OpRouteLossFrames (OpRouteLossCells, OpRouteLossWeight). Reach
+	// is at most OpRouteMaxReachCells. A crossing is planned again every OpRouteReplanFrames and when
+	// its transport loses OpRouteHitHealth of its strength (OpRouteHitReplanFrames apart at least),
+	// and takes the new route when it costs OpRouteKeepPercent or less of what is left of the old one.
+	// A waypoint counts as reached within OpRouteReachCells; OpRouteMaxWaypoints at most, each the
+	// farthest block of the searched path, up to OpRouteSmoothBlocks ahead, a straight line reaches
+	// at no more danger.
+	// The landing of a load (ChooseOpTripLanding) is the best of OpLandingCandidates cells of the
+	// target's land, OpLandingSpacingCells apart and up to OpLandingCandidateCells from the landing
+	// first chosen for the operation: route cost, plus the danger of its block times
+	// OpLandingDangerFactor (a flying transport comes down there: times OpLandingFlyerDangerFactor
+	// against anti-air), plus each cell of walk it adds to the target at the cost of a safe cell.
+	constexpr int OpRouteBlockCells = 3;
+	constexpr int OpRouteBaseCost = 8;
+	constexpr int OpRouteDefenseWeight = 6;
+	constexpr int OpRouteDefenseMarginCells = 2;
+	constexpr int OpRouteBaseCells = 5;
+	constexpr int OpRouteUnitWeight = 3;
+	constexpr int OpRouteUnitMarginCells = 3;
+	constexpr int OpRouteSightingWeight = 2;
+	constexpr int OpRouteSightingMarginCells = 4;
+	constexpr int OpRouteSightingFrames = 1800;
+	constexpr int OpRouteLossWeight = 4;
+	constexpr int OpRouteLossCells = 6;
+	constexpr int OpRouteLossFrames = 9000;
+	constexpr int OpRouteMaxReachCells = 20;
+	constexpr int OpRouteReplanFrames = 450;
+	constexpr double OpRouteHitHealth = 0.1;
+	constexpr int OpRouteHitReplanFrames = 60;
+	constexpr int OpRouteKeepPercent = 85;
+	constexpr double OpRouteReachCells = 3.5;
+	constexpr int OpRouteMaxWaypoints = 12;
+	constexpr size_t OpRouteSmoothBlocks = 40;
+	constexpr int OpLandingCandidates = 12;
+	constexpr int OpLandingCandidateCells = 30;
+	constexpr int OpLandingSpacingCells = 6;
+	constexpr int OpLandingDangerFactor = 3;
+	constexpr int OpLandingFlyerDangerFactor = 8;
+	constexpr int OpLossSpotsKept = 24;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its
@@ -2418,6 +2497,18 @@ namespace
 	bool IsInTransportOp(const HouseClass* pHouse, DWORD uid)
 	{
 		return GetMacroState(pHouse).TransportOpOf.contains(uid);
+	}
+
+	// True while UpdateTransportOperations gives its orders. The order helpers (IssueMoveOrder,
+	// OrderFootToAttackMove, OrderFootToEnter, DispatchFootToTargetOrTransport) turn the units of the
+	// operations down for every other part of the AI tick: an order the operation then finds on one
+	// of them is logged and overridden, and the trace of 46 matches (2026-11-16) found 357 such
+	// orders from nine parts that only had to leave them out.
+	bool TransportOpOrdersOpen = false;
+
+	bool IsHeldByTransportOp(const FootClass* pFoot)
+	{
+		return !TransportOpOrdersOpen && pFoot && pFoot->Owner && IsInTransportOp(pFoot->Owner, pFoot->UniqueID);
 	}
 
 	// A unit that gave up waiting for a crossing or lost its boarding turn: no transport takes it for a while.

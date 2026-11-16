@@ -124,7 +124,9 @@ namespace
 
 			auto const pFoot = abstract_cast<FootClass*>(pTechno);
 
-			if (!pFoot)
+			// A unit of a transport operation takes its orders from the operation alone: its lane keeps
+			// clear of every base it knows, and its client gives it its next order once it is across.
+			if (!pFoot || IsInTransportOp(pHouse, pFoot->UniqueID))
 				continue;
 
 			auto const pAimed = abstract_cast<TechnoClass*>(pFoot->Target);
