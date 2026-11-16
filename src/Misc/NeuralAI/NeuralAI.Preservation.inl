@@ -251,7 +251,9 @@ namespace
 	}
 
 	// Our nearest unit that can heal pPatient within maxCells on its landmass, preferring one that
-	// heals nobody else right now. Never a unit on a repair trip itself or below half health.
+	// heals nobody else right now. Never a unit on a repair trip itself or below half health, nor one
+	// a transport operation holds (medics and IFV of operations were sent off to heal 39 times in 7
+	// matches, 2026-11-16).
 	FootClass* FindFieldRepairer(HouseClass* pHouse, FootClass* pPatient, double maxCells)
 	{
 		auto const pType = pPatient->GetTechnoType();
@@ -265,7 +267,8 @@ namespace
 
 			if (!pHealer || pHealer == pPatient || pHealer->Owner != pHouse || !pHealer->IsAlive || pHealer->InLimbo
 				|| pHealer->WhatAmI() == AbstractType::Aircraft || pHealer->GetHealthPercentage() < 0.5
-				|| IsOnRepairTrip(pHouse, pHealer->UniqueID) || !HealingWeaponFor(pHealer, pPatient))
+				|| IsOnRepairTrip(pHouse, pHealer->UniqueID) || IsInTransportOp(pHouse, pHealer->UniqueID)
+				|| !HealingWeaponFor(pHealer, pPatient))
 			{
 				continue;
 			}
