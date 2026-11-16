@@ -464,7 +464,18 @@ namespace
 		Plan,
 		Team,
 		Economy,
-		Strike
+		Strike,
+		Shuttle
+	};
+
+	// What a harvester of a shuttle operation does between its rides (UpdateHarvesterShuttles): it
+	// waits for one or rides (None), mines the field across water (Harvesting), or unloads at a
+	// refinery at home (Unloading).
+	enum class NeuralShuttleWork : uint8_t
+	{
+		None,
+		Harvesting,
+		Unloading
 	};
 
 	// What a transport of an operation is doing: on its way to the staging beach (or, a carryall, to
@@ -480,7 +491,8 @@ namespace
 
 	// A unit an operation carries: its passenger size, the address its client gave it, the transport
 	// it is to board (0: none yet), whether it is aboard, and the cell the operation last sent it to
-	// (another order found on it counts as an interference).
+	// (another order found on it counts as an interference). A harvester of a shuttle: its work, when
+	// it began, and the largest load seen on it with the frame it grew last.
 	struct NeuralOpMember
 	{
 		DWORD UniqueID { 0 };
@@ -489,6 +501,10 @@ namespace
 		DWORD Transport { 0 };
 		bool Aboard { false };
 		CellStruct OrderCell { CellStruct::Empty };
+		NeuralShuttleWork Work { NeuralShuttleWork::None };
+		int WorkFrame { -1 };
+		float LoadSeen { 0.0f };
+		int LoadFrame { -1 };
 	};
 
 	// A transport an operation holds: its type, its leg and the frame the leg began, the cell it sets
@@ -497,7 +513,7 @@ namespace
 	// Route: the waypoints of its safe route still ahead (PlanOpRoute), planned at RouteFrame with
 	// RouteHealth left, at a danger of RouteDanger against StraightDanger for the straight lane. Last*:
 	// where it stood, its health and its load at the last tick (the loss log, the set-downs the engine
-	// makes).
+	// makes). Carried: it sailed with a load of the operation (a shuttle keeps it as its driver).
 	struct NeuralOpTransport
 	{
 		DWORD UniqueID { 0 };
@@ -525,6 +541,7 @@ namespace
 		CellStruct Berth { CellStruct::Empty };
 		CellStruct BerthWait { CellStruct::Empty };
 		int LandingDanger { 0 };
+		bool Carried { false };
 	};
 
 	// Where a transport of an operation was lost (NeuralHouseMacroState::OpLossSpots).
@@ -584,6 +601,17 @@ namespace
 		// many times.
 		int LandingSwitchFrame { -1 };
 		int LandingSwitches { 0 };
+		// A harvester shuttle (UpdateHarvesterShuttles): the field across water and its land, the
+		// refinery at home and its land, whether the loads go home now, the frame the last turn about
+		// began, the rounds brought home and the credits of ore they held.
+		CellStruct Field { CellStruct::Empty };
+		int FieldZone { -1 };
+		CellStruct Home { CellStruct::Empty };
+		int HomeZone { -1 };
+		bool Homeward { false };
+		int PhaseFrame { -1 };
+		int Rounds { 0 };
+		int ShuttleCredits { 0 };
 		bool Over { false };
 		const char* EndReason { "" };
 		std::vector<NeuralOpMember> Members;
@@ -1116,6 +1144,14 @@ namespace
 		// the factories build follows it.
 		std::array<int, 2> OpKindDanger {};
 		int OpKindDangerFrame { -1 };
+		// Harvester shuttle (UpdateHarvesterShuttles): the last check, no new shuttle before this
+		// frame, the last frame a check found no ride, and the totals of the match (credits of ore
+		// brought home, transports lost).
+		int ShuttleCheckFrame { -1 };
+		int ShuttleRetryUntil { -1 };
+		int ShuttleNoRideLogFrame { -1 };
+		int ShuttleCreditsTotal { 0 };
+		int ShuttleTransportsLost { 0 };
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1489,6 +1525,11 @@ namespace
 			this->OpLossSpots.clear();
 			this->OpKindDanger.fill(0);
 			this->OpKindDangerFrame = -1;
+			this->ShuttleCheckFrame = -1;
+			this->ShuttleRetryUntil = -1;
+			this->ShuttleNoRideLogFrame = -1;
+			this->ShuttleCreditsTotal = 0;
+			this->ShuttleTransportsLost = 0;
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
@@ -1909,6 +1950,25 @@ namespace
 	constexpr int OpBerthRingCells = 14;
 	constexpr double OpBerthSpacingCells = 4.0;
 	constexpr int OpBerthWaitCells = 3;
+	// Harvester shuttle (user: a harvester with no ore on its land rides an idle transport to a field
+	// across water with no refinery of ours, the transport waits nearby like a driver, brings it back
+	// full and the loop starts again). Checked every ShuttleCheckFrames once the ore of the lands we
+	// hold is under ShuttleHomeOre credits (UpdateIslandOreOutlook); up to ShuttleMaxHarvesters per
+	// shuttle, one shuttle per house. A harvester on the field comes back full, when its load has not
+	// grown for ShuttleIdleFrames, or ShuttleHarvestCapFrames after the landing; at home it boards
+	// again once empty, or ShuttleUnloadCapFrames after the landing. A shuttle that lost
+	// ShuttleMaxLostTransports transports ends, and no other starts for ShuttleRetryFrames.
+	// The archives before it (2026-11-16, 79 logs): 9 houses in 5 of the 23 matches with a free field
+	// across water spent 14000 to 46000 frames with their ore gone, harvesters and transports at hand,
+	// often with single-digit credits.
+	constexpr int ShuttleCheckFrames = 450;
+	constexpr int ShuttleHomeOre = 10000;
+	constexpr int ShuttleMaxHarvesters = 4;
+	constexpr int ShuttleIdleFrames = 900;
+	constexpr int ShuttleHarvestCapFrames = 4500;
+	constexpr int ShuttleUnloadCapFrames = 4500;
+	constexpr int ShuttleMaxLostTransports = 2;
+	constexpr int ShuttleRetryFrames = 9000;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its

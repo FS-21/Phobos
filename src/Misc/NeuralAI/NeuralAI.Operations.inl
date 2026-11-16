@@ -61,6 +61,8 @@ namespace
 			return "economy";
 		case NeuralOpClient::Strike:
 			return "strike";
+		case NeuralOpClient::Shuttle:
+			return "shuttle";
 		default:
 			return "?";
 		}
@@ -1378,10 +1380,25 @@ namespace
 				pFoot->ForceMission(Mission::Guard);
 		};
 
+		const bool shuttle = op.Client == NeuralOpClient::Shuttle;
+
 		// Ends the operation: the members still waiting go back to their client (after a failure they
 		// may not ask again for OpRetryFrames), the transports are let go.
 		auto const endOp = [&](const char* reason, bool failed)
 		{
+			if (shuttle)
+			{
+				macro.ShuttleCreditsTotal += op.ShuttleCredits;
+				macro.ShuttleTransportsLost += op.TransportsLost;
+
+				if (failed || op.Lost > 0 || op.TransportsLost >= ShuttleMaxLostTransports)
+					macro.ShuttleRetryUntil = now + ShuttleRetryFrames;
+
+				Debug::Log("[NeuralAI] House %d shuttle op %d ends: %s after %d frames; %d rounds home with %d credits of ore, %d transports "
+					"lost (house totals %d credits, %d transports lost), frame %d.\n", houseIndex, op.Id, reason, now - op.CreatedFrame, op.Rounds,
+					op.ShuttleCredits, op.TransportsLost, macro.ShuttleCreditsTotal, macro.ShuttleTransportsLost, now);
+			}
+
 			int aboard = 0;
 
 			for (auto const& member : op.Members)
@@ -1401,7 +1418,9 @@ namespace
 				wake(pFoot);
 				pFoot->SetArchiveTarget(pFoot->GetCell());
 				pFoot->SetDestination(nullptr, true);
-				pFoot->QueueMission(Mission::Guard, false);
+
+				// A shuttle's harvester goes on with its work: it mines, or unloads its load.
+				pFoot->QueueMission(shuttle ? Mission::Harvest : Mission::Guard, false);
 
 				if (failed)
 					macro.TransportOpRetryUntil[member.UniqueID] = now + OpRetryFrames;
@@ -1574,6 +1593,56 @@ namespace
 			}
 		}
 
+		// A shuttle whose field got a refinery of ours is done: its harvesters unload there.
+		if (shuttle)
+		{
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && (pBld->Type->Refinery || pBld->Type->ResourceDestination)
+					&& ObjectZone(pBld, MovementZone::Normal) == op.FieldZone)
+				{
+					endOp("a refinery of ours on the field", false);
+					return;
+				}
+			}
+		}
+
+		// Sends a harvester of a shuttle to its work: on the field it mines the nearest ore of that land,
+		// at home it unloads at the nearest refinery (a full harvester told to harvest docks first).
+		auto const startShuttleWork = [&](NeuralOpMember& member, FootClass* pFoot, NeuralShuttleWork work)
+		{
+			member.Work = work;
+			member.WorkFrame = now;
+			member.LoadSeen = pFoot->Tiberium.GetTotalAmount();
+			member.LoadFrame = now;
+			member.OrderCell = CellStruct::Empty;
+			member.Transport = 0;
+			op.Landed++;
+			wake(pFoot);
+			pFoot->SetArchiveTarget(pFoot->GetCell());
+			CellClass* pOre = nullptr;
+
+			if (work == NeuralShuttleWork::Harvesting)
+			{
+				pOre = FindFreeOreFieldCell(pHouse, pFoot->GetMapCoords(), op.FieldZone, 0, true);
+
+				if (!pOre)
+					pOre = MapClass::Instance.TryGetCellAt(op.Field);
+			}
+			else
+			{
+				const int credits = pFoot->Tiberium.GetTotalValue();
+				op.ShuttleCredits += credits;
+				op.Rounds++;
+				Debug::Log("[NeuralAI] House %d shuttle op %d: %s %u home at (%d,%d) with %d credits of ore (round %d, %d credits in all), frame %d.\n",
+					houseIndex, op.Id, pFoot->GetTechnoType()->ID, member.UniqueID, pFoot->GetMapCoords().X, pFoot->GetMapCoords().Y, credits,
+					op.Rounds, op.ShuttleCredits, now);
+			}
+
+			pFoot->SetDestination(pOre, true);
+			pFoot->QueueMission(Mission::Harvest, false);
+		};
+
 		// 2. Members: the lost go, those aboard are counted, those on the land of their address (or that
 		// can walk there now) go back to their client, the others wait on their land.
 		int waitingSize = 0;
@@ -1598,6 +1667,71 @@ namespace
 					return false;
 				}
 
+				// A harvester of a shuttle at work is left to it until its load is in (on the field) or out
+				// (at home); it waits for no ride meanwhile. Done once the loads go the other way, it waits
+				// for its ride like any member: full, its load no longer growing or its time up on the field;
+				// empty and out of the refinery, or its time up at home.
+				if (member.Work != NeuralShuttleWork::None)
+				{
+					const bool harvesting = member.Work == NeuralShuttleWork::Harvesting;
+					const bool docked = !harvesting && pFoot->InLimbo && !pFoot->Transporter;
+
+					if (!docked && (pFoot->InLimbo || OpFootGroundZone(pFoot) != (harvesting ? op.FieldZone : op.HomeZone)))
+					{
+						Debug::Log("[NeuralAI] House %d shuttle op %d lets %s %u go: %s, frame %d.\n", houseIndex, op.Id,
+							pFoot->GetTechnoType()->ID, member.UniqueID, pFoot->InLimbo ? "in limbo" : "off the land of its work", now);
+						op.Released++;
+						macro.TransportOpOf.erase(member.UniqueID);
+						return true;
+					}
+
+					const float load = pFoot->Tiberium.GetTotalAmount();
+
+					if (load > member.LoadSeen + 0.01f)
+					{
+						member.LoadSeen = load;
+						member.LoadFrame = now;
+					}
+
+					const int workFrames = now - member.WorkFrame;
+					bool done = false;
+
+					if (harvesting)
+					{
+						const float storage = static_cast<float>(std::max(1, pFoot->GetTechnoType()->Storage));
+						done = op.Homeward && (load >= storage - 0.5f || now - member.LoadFrame >= ShuttleIdleFrames
+							|| workFrames >= ShuttleHarvestCapFrames || workFrames < 0);
+					}
+					else
+					{
+						const bool atRefinery = docked || pFoot->CurrentMission == Mission::Enter || pFoot->CurrentMission == Mission::Unload
+							|| pFoot->HasAnyLink();
+						done = !op.Homeward && !docked && ((load < 0.5f && !atRefinery) || workFrames >= ShuttleUnloadCapFrames || workFrames < 0);
+
+						// Still loaded and doing something else: it is told to unload again.
+						if (!done && load >= 0.5f && !atRefinery && pFoot->CurrentMission != Mission::Harvest)
+						{
+							wake(pFoot);
+							pFoot->SetDestination(nullptr, true);
+							pFoot->QueueMission(Mission::Harvest, false);
+						}
+					}
+
+					if (!done)
+						return false;
+
+					// It stops its work (its harvest mission is no interference): the operation's orders follow.
+					member.Work = NeuralShuttleWork::None;
+					member.Target = harvesting ? op.Home : op.Field;
+					member.OrderCell = CellStruct::Empty;
+
+					if (!pFoot->InLimbo)
+					{
+						pFoot->SetDestination(nullptr, true);
+						pFoot->ForceMission(Mission::Guard);
+					}
+				}
+
 				if (pFoot->InLimbo)
 				{
 					// In another transport, a building, a factory: no longer the operation's to carry.
@@ -1614,6 +1748,13 @@ namespace
 				const bool wasAboard = member.Aboard;
 				member.Aboard = false;
 				const int zone = OpFootGroundZone(pFoot);
+
+				// A harvester of a shuttle set down on the field mines it, one set down at home unloads.
+				if (shuttle && zone == op.TargetZone)
+				{
+					startShuttleWork(member, pFoot, op.TargetZone == op.FieldZone ? NeuralShuttleWork::Harvesting : NeuralShuttleWork::Unloading);
+					return false;
+				}
 
 				if (zone == op.TargetZone || IsSameGroundForFoot(pFoot, member.Target))
 				{
@@ -1646,7 +1787,11 @@ namespace
 					member.Transport = 0;
 
 				waitingSize += member.Size;
-				macro.OpWaitingSizeBySize[std::clamp(member.Size, 1, 15)] += member.Size;
+
+				// A shuttle rides only on idle transports: its harvesters ask the factories for none.
+				if (!shuttle)
+					macro.OpWaitingSizeBySize[std::clamp(member.Size, 1, 15)] += member.Size;
+
 				return false;
 			});
 
@@ -1656,18 +1801,130 @@ namespace
 			return;
 		}
 
+		// A shuttle turns about once every harvester is at work on the other side: the loads go the
+		// other way, from a staging cell next to the harvesters (FindBoardingCell: out of the reach of
+		// the known enemy defenses), where its transports wait for them like drivers. Before the loads
+		// go out again the shuttle checks it is still wanted: the home ore still short, ore left on the
+		// field and no losses past ShuttleMaxLostTransports.
+		if (shuttle)
+		{
+			const NeuralShuttleWork turnOn = op.Homeward ? NeuralShuttleWork::Unloading : NeuralShuttleWork::Harvesting;
+			const bool turnAbout = std::all_of(op.Members.begin(), op.Members.end(),
+				[turnOn](const NeuralOpMember& member) { return member.Work == turnOn; });
+
+			if (turnAbout)
+			{
+				if (op.Homeward)
+				{
+					const char* reason = nullptr;
+					CellClass* const pOre = FindFreeOreFieldCell(pHouse, op.Field, op.FieldZone, 0, true);
+
+					// The island's MCV (or an engineer) waiting for a ride has the transports first.
+					const bool economyWaits = std::any_of(macro.TransportOps.begin(), macro.TransportOps.end(),
+						[](const NeuralTransportOperation& other)
+						{
+							return !other.Over && other.Client == NeuralOpClient::Economy && other.Transports.empty()
+								&& std::any_of(other.Members.begin(), other.Members.end(), [](const NeuralOpMember& member) { return !member.Aboard; });
+						});
+
+					if (op.TransportsLost >= ShuttleMaxLostTransports)
+						reason = "too many transports lost";
+					else if (economyWaits)
+						reason = "an economy operation waits for a transport";
+					else if (macro.IslandHomeOre >= 2 * ShuttleHomeOre)
+						reason = "ore at home again";
+					else if (!pOre)
+						reason = "no free ore left on the field's land";
+
+					if (reason)
+					{
+						endOp(reason, false);
+						return;
+					}
+
+					op.Field = pOre->MapCoords;
+				}
+				else
+				{
+					bool homeRefinery = false;
+
+					for (auto const pBld : pHouse->Buildings)
+					{
+						if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && (pBld->Type->Refinery || pBld->Type->ResourceDestination)
+							&& ObjectZone(pBld, MovementZone::Normal) == op.HomeZone)
+						{
+							homeRefinery = true;
+							break;
+						}
+					}
+
+					if (!homeRefinery)
+					{
+						endOp("no refinery of ours at home", false);
+						return;
+					}
+				}
+
+				op.Homeward = !op.Homeward;
+				op.PhaseFrame = now;
+				std::swap(op.OriginZone, op.TargetZone);
+				op.Target = op.Homeward ? op.Home : op.Field;
+				op.Landing = CellStruct::Empty;
+				op.Staging = CellStruct::Empty;
+				op.Gather = CellStruct::Empty;
+				op.TripLanding = CellStruct::Empty;
+				op.TripLandingFrame = -1;
+				op.BoardingSince = -1;
+				op.DangerWaitSince = -1;
+				op.DangerCheckFrame = -1;
+
+				for (auto& member : op.Members)
+				{
+					member.Target = op.Target;
+					member.Transport = 0;
+				}
+
+				for (auto& transport : op.Transports)
+				{
+					transport.Leg = NeuralOpLeg::ToStaging;
+					transport.LegFrame = now;
+					transport.ParkCell = CellStruct::Empty;
+					transport.ParkFrame = -1;
+					transport.Tries = 0;
+					transport.Route.clear();
+					transport.RouteFrame = -1;
+					transport.Berth = CellStruct::Empty;
+					transport.BerthWait = CellStruct::Empty;
+				}
+
+				Debug::Log("[NeuralAI] House %d shuttle op %d turns about: %d harvesters %s, the loads go from zone %d to (%d,%d) zone %d, "
+					"%d transports wait for them, frame %d.\n", houseIndex, op.Id, static_cast<int>(op.Members.size()),
+					op.Homeward ? "mine the field" : "unload at home", op.OriginZone, op.Target.X, op.Target.Y, op.TargetZone,
+					static_cast<int>(op.Transports.size()), now);
+			}
+		}
+
 		// The cells of the members waiting on the map (flying transports come down clear of them).
 		std::vector<CellStruct> memberCells;
 
 		for (auto const& member : op.Members)
 		{
-			if (!member.Aboard)
-				memberCells.push_back(find(member.UniqueID)->GetMapCoords());
+			auto const pFoot = find(member.UniqueID);
+
+			if (!member.Aboard && !pFoot->InLimbo)
+				memberCells.push_back(pFoot->GetMapCoords());
 		}
 
+		// A shuttle's harvesters at work on the side the loads leave from: they sail together once done
+		// (those at work on the other side wait there for the loads to turn about).
+		const NeuralShuttleWork originWork = op.Homeward ? NeuralShuttleWork::Harvesting : NeuralShuttleWork::Unloading;
+		const bool shuttleAtWork = shuttle && std::any_of(op.Members.begin(), op.Members.end(),
+			[originWork](const NeuralOpMember& member) { return member.Work == originWork; });
+
+		// A shuttle's loads bound for the field land by its ore.
 		if (op.Landing == CellStruct::Empty)
 		{
-			auto const pLanding = FindSafeIslandLandingCell(pHouse, op.Target, op.TargetZone, false);
+			auto const pLanding = FindSafeIslandLandingCell(pHouse, op.Target, op.TargetZone, shuttle && !op.Homeward);
 			op.Landing = pLanding ? pLanding->MapCoords : op.Target;
 		}
 
@@ -1784,7 +2041,7 @@ namespace
 
 		for (auto& member : op.Members)
 		{
-			if (member.Aboard)
+			if (member.Aboard || member.Work != NeuralShuttleWork::None)
 				continue;
 
 			if (member.Transport)
@@ -1911,8 +2168,9 @@ namespace
 			for (auto const pAir : AircraftClass::Array)
 				consider(pAir);
 
-			// None of ours makes this crossing: the production builds one that does, or what it lacks.
-			if (candidates.empty() && op.Transports.empty())
+			// None of ours makes this crossing: the production builds one that does, or what it lacks (a
+			// shuttle rides only on idle transports).
+			if (candidates.empty() && op.Transports.empty() && !shuttle)
 			{
 				int largest = 1;
 
@@ -1984,7 +2242,7 @@ namespace
 		// once next to it at rest), walking up to a cell next to it, or waiting at the gathering spot.
 		for (auto& member : op.Members)
 		{
-			if (member.Aboard)
+			if (member.Aboard || member.Work != NeuralShuttleWork::None)
 				continue;
 
 			auto const pFoot = find(member.UniqueID);
@@ -2086,8 +2344,9 @@ namespace
 			if (transport.Leg != NeuralOpLeg::Parked)
 				continue;
 
-			// A transport still parked after the last load sailed starts the wait of the next one.
-			if (op.BoardingSince < 0)
+			// A transport still parked after the last load sailed starts the wait of the next one (a
+			// shuttle's, once its harvesters are done with their work).
+			if (op.BoardingSince < 0 && !shuttleAtWork)
 				op.BoardingSince = now;
 
 			if (find(transport.UniqueID)->Passengers.NumPassengers > 0)
@@ -2194,6 +2453,7 @@ namespace
 			transport.Tries = 0;
 			transport.ParkFrame = -1;
 			transport.ParkCell = CellStruct::Empty;
+			transport.Carried = true;
 
 			if (op.TripLandingFrame != now)
 			{
@@ -2228,7 +2488,7 @@ namespace
 		};
 
 		const bool capReached = op.BoardingSince >= 0 && (now - op.BoardingSince >= OpBoardingCapFrames || now < op.BoardingSince);
-		bool sailNow = anyLoadedParked && (allAboard || capReached);
+		bool sailNow = anyLoadedParked && (allAboard || capReached) && !shuttleAtWork;
 
 		// Too dangerous even along the safest route (user: the load waits on its beach, with a cap): it
 		// waits for the danger to pass (moving enemies go, sightings fade), planned again every
@@ -2349,9 +2609,13 @@ namespace
 		std::vector<DWORD> released;
 
 		// Its load is off: back to the staging beach for the members still waiting (user: they go back
-		// for more), else it is let go.
+		// for more), else it is let go. A shuttle's stays where it set its load down until the loads
+		// turn about, then waits next to its harvesters.
 		auto const afterUnload = [&](NeuralOpTransport& transport)
 		{
+			if (shuttle && waitingSize == 0)
+				return;
+
 			if (waitingSize > 0)
 			{
 				transport.Leg = NeuralOpLeg::ToStaging;
@@ -2524,6 +2788,15 @@ namespace
 
 					auto const pVehicle = abstract_cast<UnitClass*>(pCargo);
 
+					// A shuttle's carryall with no harvester to lift yet waits by the staging cell.
+					if (!pVehicle && shuttle && transport.Carried)
+					{
+						if (op.Staging != CellStruct::Empty && pTransport->GetMapCoords().DistanceFrom(op.Staging) > OpParkCells)
+							followRoute(transport, pTransport, carrier, op.Staging, 2.0);
+
+						break;
+					}
+
 					if (!pVehicle)
 					{
 						released.push_back(transport.UniqueID);
@@ -2537,11 +2810,16 @@ namespace
 					break;
 				}
 
-				if (loaded == 0 && !hasSeated(transport.UniqueID) && waitingSize == 0)
+				// A shuttle keeps the transports that carried its harvesters: their drivers.
+				if (loaded == 0 && !hasSeated(transport.UniqueID) && waitingSize == 0 && !(shuttle && transport.Carried))
 				{
 					released.push_back(transport.UniqueID);
 					break;
 				}
+
+				// No staging cell yet (a shuttle's harvesters all inside a refinery): it waits where it is.
+				if (op.Staging == CellStruct::Empty)
+					break;
 
 				// Its own berth around the staging cell, picked once (the staging cell itself when there is
 				// none: its passengers then wait at the gathering spot).
@@ -2575,7 +2853,7 @@ namespace
 					pTransport->ForceMission(Mission::Sleep);
 					transport.OrderCell = CellStruct::Empty;
 
-					if (op.BoardingSince < 0)
+					if (op.BoardingSince < 0 && !shuttleAtWork)
 						op.BoardingSince = now;
 				};
 
@@ -2651,8 +2929,8 @@ namespace
 					break;
 				}
 
-				// Empty with nobody bound for it: let go.
-				if (loaded == 0 && !hasSeated(transport.UniqueID))
+				// Empty with nobody bound for it: let go (a shuttle's driver waits for its harvesters).
+				if (loaded == 0 && !hasSeated(transport.UniqueID) && !(shuttle && transport.Carried))
 				{
 					released.push_back(transport.UniqueID);
 					break;
@@ -2888,13 +3166,219 @@ namespace
 			op.Staging.Y, op.Landing.X, op.Landing.Y, op.Interferences, now - op.CreatedFrame, now);
 	}
 
+	// The harvester shuttle client (user): once the ore of the lands we hold is nearly gone
+	// (UpdateIslandOreOutlook) and a free field lies across water, on a land with no refinery of ours
+	// and no construction yard of ours to place one, idle harvesters ride the idle transports there,
+	// mine it and are brought back full, round after round (a bridge too while the island's MCV is on
+	// its way: the shuttle ends once a refinery of ours stands on the field). Never chrono miners, which
+	// warp back to their refinery on their own, nor miners that deploy (the slave miners): those are
+	// handled apart. One shuttle per house, checked every ShuttleCheckFrames.
+	void UpdateHarvesterShuttles(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.ShuttleCheckFrame >= 0 && now - macro.ShuttleCheckFrame < ShuttleCheckFrames && now >= macro.ShuttleCheckFrame)
+			return;
+
+		macro.ShuttleCheckFrame = now;
+
+		if (macro.ShuttleRetryUntil >= 0 && now < macro.ShuttleRetryUntil && macro.ShuttleRetryUntil - now <= ShuttleRetryFrames)
+			return;
+
+		if (macro.IslandOutlookFrame < 0 || macro.IslandExpansionField == CellStruct::Empty || macro.IslandHomeOre >= ShuttleHomeOre)
+			return;
+
+		if (std::any_of(macro.TransportOps.begin(), macro.TransportOps.end(),
+			[](const NeuralTransportOperation& op) { return !op.Over && op.Client == NeuralOpClient::Shuttle; }))
+		{
+			return;
+		}
+
+		const CellStruct field = macro.IslandExpansionField;
+		const int fieldZone = MapClass::Instance.GetMovementZoneType(field, MovementZone::Normal, false);
+
+		if (!IsGroundZone(fieldZone))
+			return;
+
+		// Our refineries and their lands. A refinery or construction yard of ours on the field's land
+		// leaves it to the base there.
+		std::vector<std::pair<int, CellStruct>> refineries;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type)
+				continue;
+
+			const bool refinery = pBld->Type->Refinery || pBld->Type->ResourceDestination;
+
+			if (!refinery && !pBld->Type->ConstructionYard)
+				continue;
+
+			const int zone = ObjectZone(pBld, MovementZone::Normal);
+
+			if (zone == fieldZone)
+				return;
+
+			if (refinery)
+				refineries.emplace_back(zone, pBld->GetMapCoords());
+		}
+
+		// Idle harvesters of ours on a land with a refinery of ours: empty, out of the refinery and
+		// doing nothing, or looking in vain for ore. The land of the first one found is the shuttle's home.
+		std::vector<UnitClass*> harvesters;
+		int homeZone = -1;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || pUnit->Health <= 0 || !pUnit->Type)
+				continue;
+
+			auto const pType = pUnit->Type;
+
+			if (!pType->Harvester || pType->Weeder || pType->Teleporter || pType->DeploysInto || CrossesWaterAlone(pType)
+				|| pUnit->Transporter || IsInTransportOp(pHouse, pUnit->UniqueID) || IsPlanMember(pHouse, pUnit->UniqueID)
+				|| pUnit->IsMindControlled() || pUnit->Deactivated || pUnit->IsUnderEMP() || pUnit->GetHealthPercentage() < OpTransportMinHealth)
+			{
+				continue;
+			}
+
+			const Mission mission = pUnit->CurrentMission;
+			const bool idle = mission == Mission::Guard || mission == Mission::Area_Guard || mission == Mission::Sleep
+				|| mission == Mission::None || (mission == Mission::Harvest && !pUnit->Locomotor->Is_Moving());
+
+			if (!idle || pUnit->HasAnyLink() || pUnit->Tiberium.GetTotalAmount() >= 0.5f)
+				continue;
+
+			const int zone = OpFootGroundZone(pUnit);
+
+			if (zone < 0 || (homeZone >= 0 && zone != homeZone)
+				|| std::none_of(refineries.begin(), refineries.end(), [zone](const std::pair<int, CellStruct>& refinery) { return refinery.first == zone; }))
+			{
+				continue;
+			}
+
+			homeZone = zone;
+			harvesters.push_back(pUnit);
+		}
+
+		if (harvesters.empty())
+			return;
+
+		auto const pLanding = FindSafeIslandLandingCell(pHouse, field, fieldZone, true);
+
+		if (!pLanding)
+			return;
+
+		// The rides: idle transports of ours that take a harvester and make the crossing from its land
+		// to the field (a carryall slings one, a passenger transport takes as many as fit).
+		auto const pSample = harvesters.front();
+		const CellStruct sampleCell = pSample->GetMapCoords();
+		const int size = std::max(1, static_cast<int>(pSample->GetTechnoType()->Size));
+		int rides = 0;
+		int seats = 0;
+
+		auto const considerRide = [&](FootClass* pFoot)
+		{
+			if (!pFoot || pFoot->Owner != pHouse)
+				return;
+
+			const OpCarrier carrier = GetOpCarrier(pFoot);
+
+			if (!IsTransportFreeForOp(pHouse, pFoot, carrier) || !OpCarrierTakes(pFoot, carrier, pSample))
+				return;
+
+			auto const pType = pFoot->GetTechnoType();
+
+			if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), sampleCell) || !CanTransportTypeLink(pType, sampleCell, pLanding->MapCoords))
+				return;
+
+			rides++;
+			seats += carrier == OpCarrier::Carryall ? 1 : pType->Passengers / size;
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			considerRide(pUnit);
+
+		for (auto const pAir : AircraftClass::Array)
+			considerRide(pAir);
+
+		if (seats <= 0)
+		{
+			if (macro.ShuttleNoRideLogFrame < 0 || now - macro.ShuttleNoRideLogFrame >= 4500 || now < macro.ShuttleNoRideLogFrame)
+			{
+				macro.ShuttleNoRideLogFrame = now;
+				Debug::Log("[NeuralAI] House %d shuttle: %d idle harvesters on zone %d, no idle transport takes one to the field at (%d,%d) "
+					"zone %d (home ore %d), frame %d.\n", pHouse->ArrayIndex, static_cast<int>(harvesters.size()), homeZone, field.X, field.Y,
+					fieldZone, macro.IslandHomeOre, now);
+			}
+
+			return;
+		}
+
+		// The harvesters nearest to the field go (fixed order among equals); the loads come home to the
+		// refinery of their land nearest to the first of them.
+		std::stable_sort(harvesters.begin(), harvesters.end(),
+			[&field](UnitClass* a, UnitClass* b) { return a->GetMapCoords().DistanceFrom(field) < b->GetMapCoords().DistanceFrom(field); });
+
+		CellStruct home = CellStruct::Empty;
+
+		for (auto const& [zone, cell] : refineries)
+		{
+			if (zone == homeZone && (home == CellStruct::Empty
+				|| cell.DistanceFrom(harvesters.front()->GetMapCoords()) < home.DistanceFrom(harvesters.front()->GetMapCoords())))
+			{
+				home = cell;
+			}
+		}
+
+		const int count = std::min({ seats, ShuttleMaxHarvesters, static_cast<int>(harvesters.size()) });
+		int opId = 0;
+		int taken = 0;
+
+		for (int i = 0; i < count; ++i)
+		{
+			if (!RequestTransportOperation(pHouse, NeuralOpClient::Shuttle, harvesters[i], field))
+				continue;
+
+			auto const itOp = macro.TransportOpOf.find(harvesters[i]->UniqueID);
+			auto const pOp = itOp != macro.TransportOpOf.end() ? FindTransportOp(pHouse, itOp->second) : nullptr;
+
+			if (!pOp)
+				continue;
+
+			taken++;
+			opId = pOp->Id;
+
+			if (pOp->FieldZone < 0)
+			{
+				pOp->Field = pOp->Target;
+				pOp->FieldZone = pOp->TargetZone;
+				pOp->Home = home;
+				pOp->HomeZone = pOp->OriginZone;
+				pOp->PhaseFrame = now;
+			}
+		}
+
+		if (taken > 0)
+		{
+			Debug::Log("[NeuralAI] House %d shuttle op %d opened: %d of %d idle harvesters of zone %d, %d idle transports with %d seats, to the "
+				"field at (%d,%d) zone %d, home refinery (%d,%d); home ore %d, %d credits, frame %d.\n", pHouse->ArrayIndex, opId, taken,
+				static_cast<int>(harvesters.size()), homeZone, rides, seats, field.X, field.Y, fieldZone, home.X, home.Y, macro.IslandHomeOre,
+				pHouse->Available_Money(), now);
+		}
+	}
+
 	// Runs the house's transport operations once per AI tick, after every other part of the tick
 	// has given its orders (the operations have the last word) and before production reads what the
-	// waiting members ask for (OpWaitingSizeBySize).
+	// waiting members ask for (OpWaitingSizeBySize). The harvester shuttle client books its rides first.
 	void UpdateTransportOperations(HouseClass* pHouse)
 	{
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
+
+		if (TransportOpsEnabled)
+			UpdateHarvesterShuttles(pHouse);
 
 		macro.OpWaitingSizeBySize.fill(0);
 		macro.OpWaitingFrame = now;
