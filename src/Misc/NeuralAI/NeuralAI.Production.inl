@@ -3399,6 +3399,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedIdleEmptyTransByLimit[16] = { 0 };
 	int ownedNavalOrAmphibCombatUnits = 0;
 	int ownedGroundCombatUnits = 0;
+	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
+	// (the rest of ownedGroundCombatUnits is their front line).
+	int ownedArtilleryVehicles = 0;
 	int ownedLandStrikeTransports = 0;
 	int idleLandStrikeTransports = 0;
 	// Unit carryalls (transport helicopters with Carryall=yes): owned, and empty ones doing nothing.
@@ -3459,9 +3462,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 							|| pOwnedType->MovementZone == MovementZone::AmphibiousCrusher)
 						&& pOwnedType->TechLevel > 10);
 				if (isNavalOrConvertedShip)
+				{
 					ownedNavalOrAmphibCombatUnits++;
+				}
 				else if (pOwnedWpn != nullptr)
+				{
 					ownedGroundCombatUnits++;
+
+					if (pOwnedWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell)
+						ownedArtilleryVehicles++;
+				}
 			}
 
 			if (pOwnedType->DeploysInto && pOwnedType->DeploysInto->ConstructionYard)
@@ -3561,6 +3571,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 	}
+
+	// The front line artillery needs: our other armed ground vehicles. Unfolded siege guns stand as
+	// buildings and are artillery all the same.
+	const int ownedFrontLineVehicles = std::max(0, ownedGroundCombatUnits - ownedArtilleryVehicles);
+
+	for (auto const pOwnBld : pHouse->Buildings)
+	{
+		if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && IsDeployedSiegeBuildingType(pOwnBld->Type)
+			&& GroundRangeOf(pOwnBld->Type) >= ArtilleryRangeCells * Unsorted::LeptonsPerCell)
+		{
+			ownedArtilleryVehicles++;
+		}
+	}
+
+	const int artilleryAllowance = ArtilleryFreeVehicles + ownedFrontLineVehicles / ArtilleryFrontLinePerGun;
 
 	// Aircraft passenger transports (not carryalls) shuttle like amphibious transports, so
 	// they count toward the owned ferry capacity: no extra ship is built for the same demand.
@@ -4698,7 +4723,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		else
 		{
 			const bool isAA = pWpn && pWpn->Projectile && pWpn->Projectile->AA;
-			const bool isArtillery = pWpn && pWpn->Range >= (8 * 256);
+			const bool isArtillery = pWpn && pWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell;
+
+			// Artillery past what our front line can cover loses ground for every gun over it, with no
+			// cap: the main battle tanks come next (ArtilleryFreeVehicles).
+			if (isArtillery && !isEconomyUnit && !isMCV && !isKeyStructureDeployer && pUnit->Passengers == 0
+				&& ownedArtilleryVehicles >= artilleryAllowance)
+			{
+				score -= (ownedArtilleryVehicles - artilleryAllowance + 1) * ArtilleryOverFrontPenalty;
+			}
 
 			if (isMCV)
 			{

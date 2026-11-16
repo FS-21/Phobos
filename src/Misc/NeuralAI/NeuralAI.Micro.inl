@@ -8912,7 +8912,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	}
 
 	// What stands idle at this tick, for the production brake (NoteIdleArmy): the pools as the
-	// waves, the plans and the transports find them.
+	// waves, the plans and the transports find them, and the units jammed at home with somewhere to
+	// go (HeldAtHomeFrames): whatever wave or plan holds them, they are of no use there, and every
+	// new one only grows the jam.
 	{
 		int idleVehicles = 0;
 		int idleShips = 0;
@@ -8930,7 +8932,75 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				++idleVehicles;
 		}
 
-		NoteIdleArmy(pHouse, idleVehicles, static_cast<int>(idleCombatInf.size()), idleShips);
+		const std::unordered_set<const FootClass*> inIdlePools(idleCombatUnits.begin(), idleCombatUnits.end());
+		const std::unordered_set<const FootClass*> idleSoldiers(idleCombatInf.begin(), idleCombatInf.end());
+		int heldVehicles = 0;
+		int heldSoldiers = 0;
+
+		auto const isHeldAtHome = [&](const FootClass* pFoot)
+		{
+			if (homeCoords == CellStruct::Empty || pFoot->IsInAir())
+				return false;
+
+			AbstractClass* const pDest = pFoot->Destination ? pFoot->Destination : pFoot->MegaDestination;
+			const CellStruct here = pFoot->GetMapCoords();
+
+			return pDest && CellClass::Coord2Cell(pDest->GetCoords()).DistanceFrom(here) > 1.5
+				&& here.DistanceFrom(homeCoords) <= HeldAtHomeCells && IsFootHeldStill(pHouse, pFoot, HeldAtHomeFrames);
+		};
+
+		for (auto const pU : UnitClass::Array)
+		{
+			if (!pU || pU->Owner != pHouse || pU->InLimbo || !pU->IsAlive || !pU->Type || pU->Type->Naval
+				|| pU->Type->Harvester || pU->Type->ResourceGatherer || IsAmphibiousOrAirTransport(pU->Type)
+				|| (pU->Type->DeploysInto && pU->Type->DeploysInto->ConstructionYard) || inIdlePools.contains(pU))
+			{
+				continue;
+			}
+
+			auto const pWeapon = pU->Type->GetWeapon(0);
+
+			if (pWeapon && pWeapon->WeaponType && isHeldAtHome(pU))
+				++heldVehicles;
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || !pInf->Type || pInf->Type->Engineer
+				|| IsSpyInfantryType(pInf->Type) || pInf->SlaveOwner || idleSoldiers.contains(pInf))
+			{
+				continue;
+			}
+
+			auto const pWeapon = pInf->Type->GetWeapon(0);
+
+			if (pWeapon && pWeapon->WeaponType && isHeldAtHome(pInf))
+				++heldSoldiers;
+		}
+
+		// TEMP diagnostic: units jammed at home, every 1800 frames per house while there are 10 or more.
+		{
+			static int heldSerial = -1;
+			static int heldLogFrame[64] {};
+			const int houseIndex = pHouse->ArrayIndex;
+			const int now = Unsorted::CurrentFrame;
+
+			if (heldSerial != NeuralMatchSerial)
+			{
+				heldSerial = NeuralMatchSerial;
+				std::fill(std::begin(heldLogFrame), std::end(heldLogFrame), -1800);
+			}
+
+			if (houseIndex >= 0 && houseIndex < 64 && heldVehicles + heldSoldiers >= 10 && now - heldLogFrame[houseIndex] >= 1800)
+			{
+				heldLogFrame[houseIndex] = now;
+				Debug::Log("[NeuralAI] House %d held at home DIAG: %d vehicles and %d soldiers with somewhere to go stood %d+ frames "
+					"within %d cells of (%d,%d); idle %d and %d, frame %d.\n", houseIndex, heldVehicles, heldSoldiers, HeldAtHomeFrames,
+					static_cast<int>(HeldAtHomeCells), homeCoords.X, homeCoords.Y, idleVehicles, static_cast<int>(idleCombatInf.size()), now);
+			}
+		}
+
+		NoteIdleArmy(pHouse, idleVehicles + heldVehicles, static_cast<int>(idleCombatInf.size()) + heldSoldiers, idleShips);
 	}
 
 	// Strength gate on top of the unit count: the main wave (and the same-landmass push below)
