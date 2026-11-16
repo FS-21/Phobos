@@ -961,6 +961,11 @@ namespace
 		int JamRerouteNoWayFrame { -100000 };
 		// Last frame one of our buildings was sold because it held a blocked passage shut (JamSealSellFrames).
 		int LastJamSealSellFrame { -100000 };
+		// Closed-in war factories (SellFactoryRoadBlock): first frame of the current stretch with
+		// FactoryRoadSellHeldVehicles vehicles jammed at home (-1 none), last check and last sale.
+		int HeldAtHomeSince { -1 };
+		int LastFactoryRoadCheckFrame { -100000 };
+		int LastFactoryRoadSellFrame { -100000 };
 		// Emergency lanes (UpdateEmergencyLanes): the last check, the last log line, and since that
 		// line the idle units that stepped aside and the units with an order they made way for.
 		int LastEmergencyLaneFrame { -1 };
@@ -1301,6 +1306,9 @@ namespace
 			this->JamRerouteAll = false;
 			this->JamRerouteNoWayFrame = -100000;
 			this->LastJamSealSellFrame = -100000;
+			this->HeldAtHomeSince = -1;
+			this->LastFactoryRoadCheckFrame = -100000;
+			this->LastFactoryRoadSellFrame = -100000;
 			this->LastEmergencyLaneFrame = -1;
 			this->EmergencyLaneLogFrame = -1;
 			this->EmergencyLaneMoved = 0;
@@ -1854,6 +1862,12 @@ namespace
 	// frame 101565, the same 43 west at frame 101655, in one-cell streets).
 	constexpr int WaveGoalKeepFrames = 2700;
 	constexpr double WaveGoalKeepCells = 12.0;
+	// The house itself leans to the target of its last dispatch for WaveTargetKeepFrames: enemy
+	// buildings within WaveGoalKeepCells of it score WaveTargetKeepBonus more, above the focus
+	// enemy (300) and below the coalition target (700). 189 of 20504 launches of 48 houses went
+	// more than 12 cells from the launch before within 900 frames, up to 26 per house.
+	constexpr int WaveTargetKeepFrames = 900;
+	constexpr int WaveTargetKeepBonus = 400;
 	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit
 	// lane to a cell more than FactoryRoadClearCells from every building of ours, found within
 	// FactoryRoadWalkCells cells. Buildings stand at most one cell apart (Adjacent), so a base is
@@ -1866,6 +1880,20 @@ namespace
 	// What a cell that closes such a road loses in the pass that takes tight cells (one that
 	// touches another building loses 4000 there).
 	constexpr int FactoryRoadClosedPenalty = 6000;
+	// A war factory with no road out is this much farther (squared cells) from the front when the
+	// primary one is picked: every vehicle leaves by the primary factory, so one with a road comes
+	// first however far it stands.
+	constexpr double ClosedInFactoryDistanceSq = 1.0e12;
+	// The cure when every war factory is closed in (SellFactoryRoadBlock, user: sell what closes
+	// the road unless it is a critical structure): with FactoryRoadSellHeldVehicles vehicles
+	// jammed at home for FactoryRoadSellHeldFrames (the stretch ends when fewer than half are),
+	// looked at every FactoryRoadSellCheckFrames, one sale per FactoryRoadSellFrames, trying the
+	// FactoryRoadSellTests cheapest spare buildings on the factories' pockets.
+	constexpr int FactoryRoadSellHeldVehicles = 10;
+	constexpr int FactoryRoadSellHeldFrames = 1800;
+	constexpr int FactoryRoadSellCheckFrames = 300;
+	constexpr int FactoryRoadSellFrames = 1800;
+	constexpr size_t FactoryRoadSellTests = 24;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way

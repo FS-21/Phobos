@@ -142,6 +142,9 @@ namespace
 		return best;
 	}
 
+	// Defined in NeuralAI.Placement.inl.
+	void SellFactoryRoadBlock(HouseClass* pHouse);
+
 	int CountOwnedUnitWithConversions(HouseClass* pHouse, const UnitTypeClass* pUnit)
 	{
 		if (!pHouse || !pUnit)
@@ -282,6 +285,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// Deployed slave miners with no ore in reach pack up for a field that has some.
 	UpdateStrandedSlaveMiners(pHouse);
+
+	// Every war factory closed in by the base and vehicles jammed at home: a spare building that
+	// closes a road is sold.
+	SellFactoryRoadBlock(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "stranded slave miners");
 
 	// Forward crawl stones placed / lost (trainer credit for the offensive crawl).
