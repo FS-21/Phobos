@@ -1762,6 +1762,12 @@ namespace
 	// frame 101565, the same 43 west at frame 101655, in one-cell streets).
 	constexpr int WaveGoalKeepFrames = 2700;
 	constexpr double WaveGoalKeepCells = 12.0;
+	// The house itself leans to the target of its last dispatch for WaveTargetKeepFrames: enemy
+	// buildings within WaveGoalKeepCells of it score WaveTargetKeepBonus more, above the focus
+	// enemy (300) and below the coalition target (700). 189 of 20504 launches of 48 houses went
+	// more than 12 cells from the launch before within 900 frames, up to 26 per house.
+	constexpr int WaveTargetKeepFrames = 900;
+	constexpr int WaveTargetKeepBonus = 400;
 	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit
 	// lane to a cell more than FactoryRoadClearCells from every building of ours, found within
 	// FactoryRoadWalkCells cells. Buildings stand at most one cell apart (Adjacent), so a base is

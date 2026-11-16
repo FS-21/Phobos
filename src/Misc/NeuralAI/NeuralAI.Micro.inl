@@ -8091,6 +8091,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (IsPathDeadGoal(pHouse, ebc))
 			bldCandScore -= WavePathDeadGoalPenalty;
 
+		// The wave under way keeps its target: what stands where the last dispatch went, while that
+		// dispatch is fresh, comes before a target of about the same worth elsewhere.
+		{
+			auto const& lastWave = GetMacroState(pHouse);
+
+			if (lastWave.LastWaveTargetCell != CellStruct::Empty
+				&& Unsorted::CurrentFrame - lastWave.LastWaveDispatchFrame <= WaveTargetKeepFrames
+				&& ebc.DistanceFrom(lastWave.LastWaveTargetCell) <= WaveGoalKeepCells)
+			{
+				bldCandScore += WaveTargetKeepBonus;
+			}
+		}
+
 		if (pEnemyBld->Type->IsBaseDefense && depthIntoEnemyBase <= 8)
 		{
 			bldCandScore += 135; // Clear outer base defenses blocking our approach!
