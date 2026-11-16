@@ -2986,7 +2986,10 @@ namespace
 
 		auto scanType = [&](TechnoTypeClass* pType)
 		{
-			if (!pType || pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel
+			// What a captured secret lab grants is outside the tech levels on purpose (as in
+			// CanBuildUnderHumanRules): its missing prerequisites count like those of any other type,
+			// so the house builds toward a boon it holds and cannot make yet.
+			if (!pType || (!pHouse->HasFromSecretLab(pType) && (pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel))
 				|| !(HouseExt::IsAvailableToHouse(pHouse, pType) || (pType->OwnerFlags & foreignYardOwners))
 				|| CanBuildUnderHumanRules(pHouse, pType))
 			{
@@ -3047,9 +3050,10 @@ namespace
 		for (auto const pType : AircraftTypeClass::Array)
 			scanType(pType);
 
+		// A building a secret lab grants is no sidebar building by its tech level, and counts all the same.
 		for (auto const pType : BuildingTypeClass::Array)
 		{
-			if (IsPlayerFacingBuilding(pType))
+			if (IsPlayerFacingBuilding(pType) || (pType && pHouse->HasFromSecretLab(pType)))
 				scanType(pType);
 		}
 
