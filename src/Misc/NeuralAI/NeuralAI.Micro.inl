@@ -11975,6 +11975,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					return true;
 			}
 
+			// Idle units ride only to this transport's own destination (as the loader picks them).
+			if (!pActiveIslandGoal)
+				return false;
+
 			for (auto const pV : idleCombatUnits)
 			{
 				if (!pV || pV->InLimbo || !pV->IsAlive || IsAmphibiousOrAirTransport(pV->Type))
@@ -13135,11 +13139,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pSingleActiveBoarder != nullptr || hasFerryQueue || numPass >= 1)
 				GetMacroState(pHouse).ParkedFerries[pTrans->UniqueID] = { pTrans, Unsorted::CurrentFrame };
 
-			if (!pActiveIslandGoal && !enemyOnDisconnectedIsland && pIslandResourceGoalCell == nullptr
-				&& pIslandTechGoalCell == nullptr && pendingCrossIslandOrders.empty())
-			{
+			// Nobody boards a transport with nowhere to go: the crossing orders bring their own goal, the
+			// rest rides only to this transport's destination. An enemy somewhere across the water with no
+			// goal this transport can sail for loaded idle units that were set down again after
+			// FerryNoGoalUnloadFrames, over and over (one soldier 15 times in one match).
+			if (!pActiveIslandGoal && pendingCrossIslandOrders.empty())
 				continue;
-			}
 
 			// Loading by what fits (user: divide the work, there are limits): the transport reserves
 			// passengers up to its free room by size (same priorities as before: crossing orders,
@@ -13241,8 +13246,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 
-				// Priority 2: Closest available combat vehicle on transZone that fits
-				if (!pNextBoarder)
+				// Priority 2: Closest available combat vehicle on transZone that fits. Idle units ride only
+				// to this transport's own destination.
+				if (!pNextBoarder && pActiveIslandGoal)
 				{
 					for (auto const pV : idleCombatUnits)
 					{
@@ -13279,7 +13285,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				// Priority 3: Closest available combat infantry on transZone that fits
-				if (!pNextBoarder && static_cast<int>(pTrans->Type->SizeLimit) >= 1)
+				if (!pNextBoarder && pActiveIslandGoal && static_cast<int>(pTrans->Type->SizeLimit) >= 1)
 				{
 					for (auto const pI : idleCombatInf)
 					{
