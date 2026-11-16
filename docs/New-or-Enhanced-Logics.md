@@ -876,6 +876,7 @@ When using `Convert` or `(Un)DeploysInto` to change TechnoType, shield interacti
   - `UIName` specifies the CSF string label used for display in the Map Generator options.
   - `Root` specifies the base filename root used for control and mix files (defaults to up to 8 uppercase characters of the theater name).
   - `IsoRoot` specifies the isometric tileset root name (defaults to `ISO` + up to 5 uppercase characters of the theater name).
+  - `IsoExpansionRoot` specifies the root name of the isometric tileset expansion mix `<IsoExpansionRoot>MD.MIX` (defaults to `IsoRoot`; `ISOTEM` for `TEMPERATE` and `ISOSNO` for `SNOW`, as in the original game).
   - `Suffix` specifies the 3-letter file extension for tiles, art filenames, and unit palettes (defaults to the first 3 uppercase characters of the theater name).
   - `MMSuffix` specifies the 3-letter marble madness tile extension (defaults to `MM` + first letter of the suffix).
   - `ImageLetter` specifies the 1-letter theater code used for theater-specific object types (defaults to the first character of the theater name).
@@ -907,6 +908,7 @@ When using `Convert` or `(Un)DeploysInto` to change TechnoType, shield interacti
 UIName=Name:CUSTOMTHEATER                      ; CSF label
 Root=CUSTOMTH                                  ; string (up to 8 characters)
 IsoRoot=ISOCUS                                 ; string (up to 8 characters)
+IsoExpansionRoot=ISOCUS                        ; string (up to 8 characters)
 Suffix=CUS                                     ; string (3 characters)
 MMSuffix=MMC                                   ; string (3 characters)
 ImageLetter=C                                  ; character
