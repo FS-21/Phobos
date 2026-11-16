@@ -453,6 +453,98 @@ namespace
 		int StalemateUpdates { 0 };
 	};
 
+	// Transport operations (user: a removal company apart from the client that booked the move,
+	// NeuralAI.Operations.inl). A client asks to take units to an address on another landmass; the
+	// operation gathers them on a beach of their land, brings the transports it needs (idle ones
+	// first, the shortfall from the factories), loads them, crosses, sets them down on the land of
+	// the address, hands them back to their mission and fetches the ones left behind.
+	enum class NeuralOpClient : uint8_t
+	{
+		Wave,
+		Plan,
+		Team,
+		Economy,
+		Strike
+	};
+
+	// What a transport of an operation is doing: on its way to the staging beach (or, a carryall, to
+	// the vehicle it lifts), parked there while its passengers board, crossing loaded, or taking back
+	// to the staging beach a load it could not set down.
+	enum class NeuralOpLeg : uint8_t
+	{
+		ToStaging,
+		Parked,
+		Crossing,
+		Returning
+	};
+
+	// A unit an operation carries: its passenger size, the address its client gave it, the transport
+	// it is to board (0: none yet), whether it is aboard, and the cell the operation last sent it to
+	// (another order found on it counts as an interference).
+	struct NeuralOpMember
+	{
+		DWORD UniqueID { 0 };
+		int Size { 1 };
+		CellStruct Target { CellStruct::Empty };
+		DWORD Transport { 0 };
+		bool Aboard { false };
+		CellStruct OrderCell { CellStruct::Empty };
+	};
+
+	// A transport an operation holds: its leg and the frame the leg began, the cell it sets its load
+	// down on, the detour of its safe lane, the cell a flying one comes down on to load (with when
+	// it was sent there and how many cells it has tried), the progress watchdog, and the cell the
+	// operation last sent it to.
+	struct NeuralOpTransport
+	{
+		DWORD UniqueID { 0 };
+		NeuralOpLeg Leg { NeuralOpLeg::ToStaging };
+		int LegFrame { 0 };
+		CellStruct Landing { CellStruct::Empty };
+		CellStruct Waypoint { CellStruct::Empty };
+		CellStruct ParkCell { CellStruct::Empty };
+		int ParkFrame { -1 };
+		int Tries { 0 };
+		CellStruct ProgressCell { CellStruct::Empty };
+		int ProgressFrame { -1 };
+		CellStruct OrderCell { CellStruct::Empty };
+	};
+
+	struct NeuralTransportOperation
+	{
+		int Id { 0 };
+		NeuralOpClient Client { NeuralOpClient::Wave };
+		int OriginZone { -1 };
+		int TargetZone { -1 };
+		CellStruct Target { CellStruct::Empty };
+		CellStruct Staging { CellStruct::Empty };
+		CellStruct Landing { CellStruct::Empty };
+		// Where the members wait for their seat: behind the staging beach, off the cells the
+		// transports come to.
+		CellStruct Gather { CellStruct::Empty };
+		int CreatedFrame { 0 };
+		// First frame a transport stood parked on the staging beach for the current load (-1: none).
+		int BoardingSince { -1 };
+		// Last frame a member went aboard.
+		int LastBoardFrame { -1 };
+		// Last frame the operation had at least one transport (no transport for long: given back).
+		int LastTransportFrame { 0 };
+		int Trips { 0 };
+		int FailedTrips { 0 };
+		int Landed { 0 };
+		int Lost { 0 };
+		int Released { 0 };
+		int Joined { 0 };
+		int TransportsTaken { 0 };
+		int TransportsLost { 0 };
+		int Interferences { 0 };
+		int InterferenceLogFrame { -1 };
+		bool Over { false };
+		const char* EndReason { "" };
+		std::vector<NeuralOpMember> Members;
+		std::vector<NeuralOpTransport> Transports;
+	};
+
 	struct NeuralHouseMacroState
 	{
 		CellStruct PendingClearanceCell { CellStruct::Empty };
@@ -937,6 +1029,18 @@ namespace
 		int WaveEscortRetryFrame { -1 };
 		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it.
 		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
+		// Transport operations of the house (NeuralAI.Operations.inl): the operations, the next id,
+		// the operation that holds each member or transport by UniqueID, units an operation gave back
+		// and that may not ask again before a frame, the size of the members still waiting on their
+		// land by passenger size (the transport production reads it as demand) with its frame, and
+		// the frame of the last status line.
+		std::vector<NeuralTransportOperation> TransportOps;
+		int NextTransportOpId { 1 };
+		std::unordered_map<DWORD, int> TransportOpOf;
+		std::unordered_map<DWORD, int> TransportOpRetryUntil;
+		std::array<int, 16> OpWaitingSizeBySize {};
+		int OpWaitingFrame { -1 };
+		int TransportOpLogFrame { -1 };
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1290,6 +1394,13 @@ namespace
 			this->WaveEscortWaitSince = -1;
 			this->WaveEscortRetryFrame = -1;
 			this->WaveGoals.clear();
+			this->TransportOps.clear();
+			this->NextTransportOpId = 1;
+			this->TransportOpOf.clear();
+			this->TransportOpRetryUntil.clear();
+			this->OpWaitingSizeBySize.fill(0);
+			this->OpWaitingFrame = -1;
+			this->TransportOpLogFrame = -1;
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
@@ -1565,6 +1676,41 @@ namespace
 	constexpr int FerryStuckCargoFrames = 9000;
 	// How long that set-down keeps the transport unloading before the loader has it again.
 	constexpr int FerrySetDownFrames = 900;
+	// Transport operations (NeuralAI.Operations.inl). TransportOpsEnabled switches them on: the
+	// waves hand the units that cannot walk to their goal to an operation, and the old ferry no
+	// longer loads idle units of its own accord.
+	// - OpBoardingCapFrames: how long a load waits for the whole battalion once a transport stands
+	//   on the staging beach before the loaded transports sail (user: all loaded, with a time cap).
+	// - OpNoTransportFrames: an operation that has had no transport for this long gives its units
+	//   back; those may not ask again for OpRetryFrames.
+	// - OpStuckFrames: a transport that has not moved OpStuckCells in this long tries another cell.
+	// - OpCrossCapFrames: a crossing that lasts longer turns back with its cargo.
+	// - OpUnloadCells: how close to its landing a transport sets its cargo down; OpParkCells: how
+	//   close to the staging cell it parks; OpGatherCells: where the members wait around it.
+	// - OpTransportMinHealth: a transport below it is not taken; OpDyingTransportHealth: one below it
+	//   on land sets its load down at once (the old emergency unload, Slot 70).
+	// - OpUnloadRetryFrames: a transport still loaded this long at its landing tries the engine's
+	//   unload, then another cell (OpMaxLandingTries cells, then the nearest land it stands by).
+	// - OpLandingSpreadCells: the landings of one load lie this far apart at least.
+	// - OpMaxFailedTrips: loads taken back to the staging beach before the operation gives up.
+	constexpr bool TransportOpsEnabled = true;
+	constexpr int OpBoardingCapFrames = 3600;
+	constexpr int OpNoTransportFrames = 9000;
+	constexpr int OpRetryFrames = 3600;
+	constexpr int OpStuckFrames = 900;
+	constexpr double OpStuckCells = 2.0;
+	constexpr int OpCrossCapFrames = 9000;
+	constexpr double OpUnloadCells = 2.5;
+	constexpr double OpParkCells = 4.0;
+	constexpr double OpGatherCells = 5.0;
+	constexpr double OpTransportMinHealth = 0.5;
+	constexpr double OpDyingTransportHealth = 0.24;
+	constexpr int OpUnloadRetryFrames = 450;
+	constexpr int OpMaxLandingTries = 4;
+	constexpr int OpLandingSpreadCells = 3;
+	constexpr int OpMaxFailedTrips = 2;
+	constexpr int OpLogFrames = 1800;
+	constexpr int OpInterferenceLogFrames = 900;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its
@@ -2161,6 +2307,13 @@ namespace
 
 		return it != parked.end() && Unsorted::CurrentFrame - it->second.Frame <= FerryParkedFrames
 			&& Unsorted::CurrentFrame >= it->second.Frame;
+	}
+
+	// A unit or transport working for a transport operation (NeuralAI.Operations.inl): it takes its
+	// orders from the operation alone until the operation lets it go.
+	bool IsInTransportOp(const HouseClass* pHouse, DWORD uid)
+	{
+		return GetMacroState(pHouse).TransportOpOf.contains(uid);
 	}
 
 	// A unit that gave up waiting for a crossing or lost its boarding turn: no transport takes it for a while.

@@ -359,6 +359,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// TEMP diagnostic: siege units that start to unfold, who ordered it and what they aim at.
 	LogSiegeDeploys(pHouse);
+
+	// Transport operations last: they have the final word over their units and transports.
+	UpdateTransportOperations(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
