@@ -144,8 +144,10 @@ namespace
 	// (CanTransportTypeLink): the unit's cell and the landing on the ground it wants to reach.
 	// With no foot type, any cargo that rides inside a transport (size 1, not slung by a carryall):
 	// whether the house can put anything at all on that ground.
+	// buildableNow: only transports it owns or can build now count, not those of its side that it
+	// may build once it has the prerequisites (an operation waits for a transport that comes now).
 	bool CanHouseFerryTypeAcrossWater(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct* pFrom = nullptr,
-		const CellStruct* pTo = nullptr)
+		const CellStruct* pTo = nullptr, bool buildableNow = false)
 	{
 		if (!pHouse)
 			return false;
@@ -227,7 +229,7 @@ namespace
 			if (hasFactoryNow && HouseExt::PrerequisitesMet(pHouse, pUT))
 				return true;
 
-			if (ownHouseBit != 0u && pUT->InOwners(ownHouseBit) && (hasFactoryNow || pHouse->NumConYards > 0))
+			if (!buildableNow && ownHouseBit != 0u && pUT->InOwners(ownHouseBit) && (hasFactoryNow || pHouse->NumConYards > 0))
 				return true;
 		}
 
