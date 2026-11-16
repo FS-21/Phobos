@@ -974,16 +974,14 @@ namespace
 		return true;
 	}
 
-	// The landing a load sails for (user: the landing chosen together with the route): the
-	// operation's landing or another cell of the target's land up to OpLandingCandidateCells from it
-	// (OpLandingCandidates at most, OpLandingSpacingCells apart, the nearest to the target first), the
-	// one PlanOpRoute finds cheapest for the first transport that sails. A ground transport lands by
-	// the shore on a cell it can stand on, a flying one on a free cell off the beach. danger: that of
-	// the route to it (0 when none could be planned).
-	CellStruct ChooseOpTripLanding(HouseClass* pHouse, NeuralTransportOperation& op, FootClass* pTransport, OpCarrier carrier, int& danger)
+	// The landings a load may sail for: first, the operation's landing, and other cells of the target's
+	// land up to OpLandingCandidateCells from it (OpLandingCandidates in all, OpLandingSpacingCells
+	// apart, the nearest to the target first), each with the walk it adds to the target against the
+	// operation's landing. A ground transport lands by the shore on a cell it can stand on, a flying one
+	// on a free cell off the beach.
+	void CollectOpLandingCandidates(const NeuralTransportOperation& op, FootClass* pTransport, OpCarrier carrier, const CellStruct& first,
+		std::vector<CellStruct>& candidates, std::vector<int>& extraWalk)
 	{
-		danger = 0;
-
 		auto const pType = pTransport->GetTechnoType();
 		const bool flies = carrier != OpCarrier::Surface;
 		const int transportZone = flies ? -1
@@ -1039,7 +1037,10 @@ namespace
 		}
 
 		std::stable_sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-		std::vector<CellStruct> candidates { op.Landing };
+		candidates.assign(1, first);
+
+		if (first != op.Landing)
+			candidates.push_back(op.Landing);
 
 		for (auto const& [distance, c] : found)
 		{
@@ -1054,11 +1055,24 @@ namespace
 		}
 
 		const double firstWalk = op.Landing.DistanceFrom(op.Target);
-		std::vector<int> extraWalk;
+		extraWalk.clear();
 
 		for (auto const& c : candidates)
 			extraWalk.push_back(std::max(0, static_cast<int>(c.DistanceFrom(op.Target) - firstWalk)));
+	}
 
+	// The landing a load sails for (user: the landing chosen together with the route): the
+	// operation's landing or another of its candidates (CollectOpLandingCandidates), the one PlanOpRoute
+	// finds cheapest for the first transport that sails. danger: that of the route to it (0 when none
+	// could be planned).
+	CellStruct ChooseOpTripLanding(HouseClass* pHouse, NeuralTransportOperation& op, FootClass* pTransport, OpCarrier carrier, int& danger)
+	{
+		danger = 0;
+		auto const pType = pTransport->GetTechnoType();
+		std::vector<CellStruct> candidates;
+		std::vector<int> extraWalk;
+		CollectOpLandingCandidates(op, pTransport, carrier, op.Landing, candidates, extraWalk);
+		const double firstWalk = op.Landing.DistanceFrom(op.Target);
 		OpRoutePlan plan;
 
 		if (!PlanOpRoute(pHouse, pTransport, carrier, candidates, extraWalk, plan))
@@ -1077,6 +1091,111 @@ namespace
 		}
 
 		return plan.Landing;
+	}
+
+	// The danger at a landing for a load set down there: on the ground, and for a flying transport, which
+	// comes down there, in the air too.
+	int OpLandingDanger(HouseClass* pHouse, const CellStruct& landing, OpCarrier carrier)
+	{
+		auto const& ground = GetOpDangerMap(pHouse, false);
+		int danger = ground.Danger[static_cast<size_t>(ground.IndexOf(landing))];
+
+		if (carrier != OpCarrier::Surface)
+		{
+			auto const& air = GetOpDangerMap(pHouse, true);
+			danger += air.Danger[static_cast<size_t>(air.IndexOf(landing))];
+		}
+
+		return danger;
+	}
+
+	// The berth of a transport of an operation (OpBerthRingCells): the nearest cell around the staging
+	// cell, OpBerthSpacingCells or more from the berths of the operation's other transports, that it
+	// can stand on by the land of the members (a flyer: a free cell of that land off the beach). wait:
+	// where its passengers wait for it, OpBerthWaitCells farther out from the staging cell on their land
+	// (the berth itself when that is no such land). Empty when there is none.
+	CellStruct PickOpBerth(const NeuralTransportOperation& op, FootClass* pTransport, OpCarrier carrier, CellStruct& wait)
+	{
+		auto const pType = pTransport->GetTechnoType();
+		const bool flies = carrier != OpCarrier::Surface;
+		const int transportZone = flies ? -1
+			: MapClass::Instance.GetMovementZoneType(pTransport->GetMapCoords(), pType->MovementZone, pTransport->OnBridge);
+		std::vector<CellStruct> taken;
+		wait = CellStruct::Empty;
+
+		for (auto const& other : op.Transports)
+		{
+			if (other.UniqueID != pTransport->UniqueID && other.Berth != CellStruct::Empty)
+				taken.push_back(other.Berth);
+		}
+
+		auto const originLand = [&op](const CellStruct& c)
+		{
+			auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+			return pCell && pCell->LandType != LandType::Water && !pCell->GetBuilding()
+				&& MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) == op.OriginZone;
+		};
+
+		for (int ring = 0; ring <= OpBerthRingCells; ++ring)
+		{
+			for (int dy = -ring; dy <= ring; ++dy)
+			{
+				for (int dx = -ring; dx <= ring; ++dx)
+				{
+					if (std::max(std::abs(dx), std::abs(dy)) != ring)
+						continue;
+
+					const CellStruct c { static_cast<short>(op.Staging.X + dx), static_cast<short>(op.Staging.Y + dy) };
+					auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+					if (!pCell || pCell->GetBuilding()
+						|| std::any_of(taken.begin(), taken.end(), [&c](const CellStruct& at) { return at.DistanceFrom(c) < OpBerthSpacingCells; }))
+					{
+						continue;
+					}
+
+					if (flies)
+					{
+						if (!originLand(c) || pCell->LandType == LandType::Beach
+							|| !pCell->IsClearToMove(SpeedType::Track, false, false, -1, MovementZone::Normal, -1, false))
+						{
+							continue;
+						}
+					}
+					else
+					{
+						if (MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != transportZone
+							|| !pCell->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false))
+						{
+							continue;
+						}
+
+						bool byLand = false;
+
+						for (int sy = -1; sy <= 1 && !byLand; ++sy)
+						{
+							for (int sx = -1; sx <= 1 && !byLand; ++sx)
+								byLand = originLand(CellStruct { static_cast<short>(c.X + sx), static_cast<short>(c.Y + sy) });
+						}
+
+						if (!byLand)
+							continue;
+					}
+
+					const double length = ring > 0 ? std::sqrt(static_cast<double>(dx * dx + dy * dy)) : 1.0;
+					const double outX = ring > 0 ? dx / length : 1.0;
+					const double outY = ring > 0 ? dy / length : 0.0;
+					const CellStruct out { static_cast<short>(c.X + std::lround(outX * OpBerthWaitCells)),
+						static_cast<short>(c.Y + std::lround(outY * OpBerthWaitCells)) };
+					wait = originLand(out) ? out : c;
+
+					return c;
+				}
+			}
+		}
+
+		return CellStruct::Empty;
 	}
 
 	NeuralTransportOperation* FindTransportOp(HouseClass* pHouse, int id)
@@ -1291,10 +1410,10 @@ namespace
 
 			Debug::Log("[NeuralAI] House %d transport op %d (%s) ends: %s after %d frames; %d landed, %d lost, %d released, %d given back "
 				"(%d still aboard), %d joined, %d trips (%d failed), %d transports taken (%d lost), %d interferences, %d route changes of %d "
-				"replans, %d loads landed elsewhere, %d loads held for danger, frame %d.\n", houseIndex, op.Id, OpClientName(op.Client), reason,
-				now - op.CreatedFrame, op.Landed, op.Lost, op.Released, static_cast<int>(op.Members.size()) - aboard, aboard, op.Joined,
-				op.Trips, op.FailedTrips, op.TransportsTaken, op.TransportsLost, op.Interferences, op.RouteChanges, op.Replans, op.LandingMoves,
-				op.DangerHolds, now);
+				"replans, %d loads landed elsewhere, %d loads held for danger, %d landings changed under way, frame %d.\n", houseIndex, op.Id,
+				OpClientName(op.Client), reason, now - op.CreatedFrame, op.Landed, op.Lost, op.Released, static_cast<int>(op.Members.size()) - aboard,
+				aboard, op.Joined, op.Trips, op.FailedTrips, op.TransportsTaken, op.TransportsLost, op.Interferences, op.RouteChanges, op.Replans,
+				op.LandingMoves, op.DangerHolds, op.LandingSwitches, now);
 
 			op.Members.clear();
 			op.Transports.clear();
@@ -1393,14 +1512,28 @@ namespace
 					const CellStruct goal = transport.Leg == NeuralOpLeg::Crossing ? transport.Landing : op.Staging;
 					const int strength = transport.Type ? std::max(1, transport.Type->Strength) : 1;
 
+					// Taken from us (mind control, a capture) or destroyed: one taken still stands, under another
+					// house (a transport counted lost came back later in another operation, match #10484).
+					char fate[48] = "destroyed";
+
+					for (auto const pFoot : FootClass::Array)
+					{
+						if (pFoot && pFoot->UniqueID == transport.UniqueID && pFoot->IsAlive && pFoot->Health > 0 && pFoot->Owner
+							&& pFoot->Owner != pHouse)
+						{
+							std::snprintf(fate, sizeof(fate), "taken by house %d", pFoot->Owner->ArrayIndex);
+							break;
+						}
+					}
+
 					Debug::Log("[NeuralAI] House %d transport op %d: %s %u lost %s at (%d,%d), %d cells from (%d,%d), %d frames into the leg, "
 						"%d aboard, health %d%% at the last tick, %d waypoints left (danger %d planned, %d straight), nearest threat %s %s %d cells "
-						"off (reach %d), frame %d.\n", houseIndex, op.Id, transport.Type ? transport.Type->ID : "?", transport.UniqueID,
+						"off (reach %d), %s, frame %d.\n", houseIndex, op.Id, transport.Type ? transport.Type->ID : "?", transport.UniqueID,
 						OpLegName(transport.Leg), transport.LastCell.X, transport.LastCell.Y, static_cast<int>(transport.LastCell.DistanceFrom(goal)),
 						goal.X, goal.Y, now - transport.LegFrame, aboard, transport.LastHealth * 100 / strength,
 						static_cast<int>(transport.Route.size()), transport.RouteDanger, transport.StraightDanger,
 						pThreat ? OpThreatKindName(pThreat->Kind) : "none", (pThreat && pThreat->Type) ? pThreat->Type->ID : "-",
-						static_cast<int>(threatCells), pThreat ? pThreat->Reach : 0, now);
+						static_cast<int>(threatCells), pThreat ? pThreat->Reach : 0, fate, now);
 
 					macro.OpLossSpots.push_back({ transport.LastCell, now, airborne });
 
@@ -1887,8 +2020,41 @@ namespace
 				continue;
 			}
 
-			if (pGatherCell && pFoot->GetMapCoords().DistanceFrom(op.Gather) > OpGatherCells)
+			// Bound for a transport still on its way: it waits by that transport's berth, in the small group
+			// of its own load, off the transport's way in.
+			if (pRecord && pRecord->BerthWait != CellStruct::Empty && carrier != OpCarrier::Carryall)
+			{
+				if (pFoot->GetMapCoords().DistanceFrom(pRecord->BerthWait) > OpGatherCells)
+					orderTo(pFoot, member.OrderCell, MapClass::Instance.TryGetCellAt(pRecord->BerthWait), OpGatherCells - 1.0);
+
+				continue;
+			}
+
+			// Without a seat: it waits out of the berths' way, OpBerthRingCells + OpBerthWaitCells from the
+			// staging cell on the side it comes from (each on its own side, not all on one cell), until a
+			// transport has a seat for it; with no land there, at the gathering spot.
+			const CellStruct at = pFoot->GetMapCoords();
+			const double fromStaging = at.DistanceFrom(op.Staging);
+			constexpr double HoldCells = OpBerthRingCells + OpBerthWaitCells;
+
+			if (fromStaging >= HoldCells - 2.0 && fromStaging <= 2.0 * HoldCells)
+				continue;
+
+			const double towardX = fromStaging >= 1.0 ? (at.X - op.Staging.X) / fromStaging : 1.0;
+			const double towardY = fromStaging >= 1.0 ? (at.Y - op.Staging.Y) / fromStaging : 0.0;
+			const CellStruct hold { static_cast<short>(op.Staging.X + std::lround(towardX * HoldCells)),
+				static_cast<short>(op.Staging.Y + std::lround(towardY * HoldCells)) };
+			auto const pHold = MapClass::Instance.CoordinatesLegal(hold) ? MapClass::Instance.TryGetCellAt(hold) : nullptr;
+
+			if (pHold && pHold->LandType != LandType::Water && !pHold->GetBuilding()
+				&& MapClass::Instance.GetMovementZoneType(hold, MovementZone::Normal, false) == op.OriginZone)
+			{
+				orderTo(pFoot, member.OrderCell, pHold, OpGatherCells - 1.0);
+			}
+			else if (pGatherCell && pFoot->GetMapCoords().DistanceFrom(op.Gather) > OpGatherCells)
+			{
 				orderTo(pFoot, member.OrderCell, pGatherCell, OpGatherCells - 1.0);
+			}
 		}
 
 		// 6. The load sails when every member bound for a transport of the beach is aboard, or
@@ -1961,17 +2127,21 @@ namespace
 			return changed;
 		};
 
-		// Follows the transport's safe route to goal (planRoute), planned again every OpRouteReplanFrames
-		// and when it loses OpRouteHitHealth of its strength (OpRouteHitReplanFrames apart at least): its
-		// waypoints in turn, then goal itself.
+		// Follows the transport's safe route to goal (planRoute), planned again every OpRouteReplanFrames,
+		// every OpRouteDangerReplanFrames while it is inside the reach of a threat (user: the threats that
+		// move, a warship seen a moment ago turning up on the route), and when it loses OpRouteHitHealth of
+		// its strength (OpRouteHitReplanFrames apart at least): its waypoints in turn, then goal itself.
 		auto const followRoute = [&](NeuralOpTransport& transport, FootClass* pTransport, OpCarrier carrier, const CellStruct& goal,
 			double keepWithin)
 		{
+			auto const& map = GetOpDangerMap(pHouse, carrier != OpCarrier::Surface);
+			const bool inDanger = map.Danger[static_cast<size_t>(map.IndexOf(pTransport->GetMapCoords()))] > 0;
+			const int replanFrames = inDanger ? OpRouteDangerReplanFrames : OpRouteReplanFrames;
 			const int strength = std::max(1, pTransport->GetTechnoType()->Strength);
 			const int sincePlan = now - transport.RouteFrame;
 			const bool hit = transport.RouteFrame >= 0 && transport.RouteHealth - pTransport->Health >= static_cast<int>(OpRouteHitHealth * strength);
 
-			if (transport.RouteFrame < 0 || sincePlan < 0 || sincePlan >= OpRouteReplanFrames || (hit && sincePlan >= OpRouteHitReplanFrames))
+			if (transport.RouteFrame < 0 || sincePlan < 0 || sincePlan >= replanFrames || (hit && sincePlan >= OpRouteHitReplanFrames))
 			{
 				op.Replans++;
 
@@ -2015,6 +2185,7 @@ namespace
 
 			auto const pLanding = PickOpLandingCell(op, pTransport, carrier, op.TripLanding, CellStruct::Empty);
 			transport.Landing = pLanding ? pLanding->MapCoords : op.TripLanding;
+			transport.LandingDanger = OpLandingDanger(pHouse, transport.Landing, carrier);
 			planRoute(transport, pTransport, carrier, transport.Landing, true);
 			transport.ProgressCell = pTransport->GetMapCoords();
 			transport.ProgressFrame = now;
@@ -2354,13 +2525,27 @@ namespace
 					break;
 				}
 
-				const double toStaging = pTransport->GetMapCoords().DistanceFrom(op.Staging);
+				// Its own berth around the staging cell, picked once (the staging cell itself when there is
+				// none: its passengers then wait at the gathering spot).
+				if (transport.Berth == CellStruct::Empty)
+				{
+					transport.Berth = PickOpBerth(op, pTransport, carrier, transport.BerthWait);
+
+					if (transport.Berth == CellStruct::Empty)
+					{
+						transport.Berth = op.Staging;
+						transport.BerthWait = CellStruct::Empty;
+					}
+				}
+
+				auto const pBerthCell = MapClass::Instance.TryGetCellAt(transport.Berth);
+				const double toStaging = pTransport->GetMapCoords().DistanceFrom(transport.Berth);
 
 				// On its way along a safe route too: in the first matches of the routes 4 of the 7 hovercraft
 				// lost died empty on their way back to the staging cell, by warships seen a moment before.
 				if (toStaging > OpParkCells)
 				{
-					followRoute(transport, pTransport, carrier, op.Staging, 2.0);
+					followRoute(transport, pTransport, carrier, transport.Berth, 2.0);
 					break;
 				}
 
@@ -2393,7 +2578,7 @@ namespace
 					{
 						const int ring = hanging ? std::min(transport.Tries + 2, FerryLandingMaxRing) : 1;
 
-						if (auto const pCell = PickOpFlyerCell(op.Staging, op.OriginZone, ring, transport.ParkCell, memberCells))
+						if (auto const pCell = PickOpFlyerCell(transport.Berth, op.OriginZone, ring, transport.ParkCell, memberCells))
 						{
 							if (hanging)
 								transport.Tries++;
@@ -2431,14 +2616,16 @@ namespace
 				if (onLand && TransportLandZone(pTransport->GetMapCoords(), pTransport->OnBridge) == op.OriginZone)
 					park();
 				else
-					orderTo(pTransport, transport.OrderCell, pStagingCell, 0.5);
+					orderTo(pTransport, transport.OrderCell, pBerthCell, 0.5);
 
 				break;
 			}
 			case NeuralOpLeg::Parked:
 			{
 				// Took off or was pushed away: it parks anew.
-				if ((carrier == OpCarrier::Flyer && aloft) || pTransport->GetMapCoords().DistanceFrom(op.Staging) > OpParkCells + 6.0)
+				const CellStruct berth = transport.Berth != CellStruct::Empty ? transport.Berth : op.Staging;
+
+				if ((carrier == OpCarrier::Flyer && aloft) || pTransport->GetMapCoords().DistanceFrom(berth) > OpParkCells + 6.0)
 				{
 					transport.Leg = NeuralOpLeg::ToStaging;
 					transport.LegFrame = now;
@@ -2542,6 +2729,58 @@ namespace
 						transport.Landing = pNext->MapCoords;
 						transport.Route.clear();
 						transport.RouteFrame = -1;
+					}
+				}
+
+				// Enemies gathered at its landing since it sailed (user: the threats that move): the load takes
+				// another landing when one costs OpLandingSwitchPercent or less of it, once per
+				// OpLandingSwitchFrames for the operation, and the transports of the load bound for the old
+				// one go along.
+				if (toLanding >= OpLandingSwitchMinCells
+					&& (op.LandingSwitchFrame < 0 || now - op.LandingSwitchFrame >= OpLandingSwitchFrames || now < op.LandingSwitchFrame))
+				{
+					const int landingDanger = OpLandingDanger(pHouse, transport.Landing, carrier);
+
+					if (landingDanger - transport.LandingDanger >= OpLandingSwitchDanger)
+					{
+						op.LandingSwitchFrame = now;
+						std::vector<CellStruct> candidates;
+						std::vector<int> extraWalk;
+						CollectOpLandingCandidates(op, pTransport, carrier, transport.Landing, candidates, extraWalk);
+						OpRoutePlan plan;
+
+						if (PlanOpRoute(pHouse, pTransport, carrier, candidates, extraWalk, plan) && plan.Landing != transport.Landing
+							&& (plan.Totals.front() == INT_MAX
+								|| static_cast<long long>(plan.Total) * 100 <= static_cast<long long>(plan.Totals.front()) * OpLandingSwitchPercent))
+						{
+							const CellStruct old = transport.Landing;
+							int moved = 0;
+							op.TripLanding = plan.Landing;
+							op.LandingSwitches++;
+
+							for (auto& other : op.Transports)
+							{
+								auto const pOther = find(other.UniqueID);
+
+								if (other.Leg != NeuralOpLeg::Crossing || !pOther || other.Landing.DistanceFrom(old) > 2.0 * OpLandingSpacingCells)
+									continue;
+
+								const OpCarrier otherCarrier = GetOpCarrier(pOther);
+								auto const pCell = PickOpLandingCell(op, pOther, otherCarrier, plan.Landing, CellStruct::Empty);
+								other.Landing = pCell ? pCell->MapCoords : plan.Landing;
+								other.LandingDanger = OpLandingDanger(pHouse, other.Landing, otherCarrier);
+								other.Route.clear();
+								other.RouteFrame = -1;
+								other.ParkFrame = -1;
+								other.Tries = 0;
+								moved++;
+							}
+
+							Debug::Log("[NeuralAI] House %d transport op %d: enemies gathered at the landing (%d,%d) (danger %d, %d when it sailed): %d "
+								"transports of the load land at (%d,%d) instead, cost %d against %s, frame %d.\n", houseIndex, op.Id, old.X, old.Y,
+								landingDanger, transport.LandingDanger, moved, plan.Landing.X, plan.Landing.Y, plan.Total,
+								plan.Totals.front() == INT_MAX ? "no way" : std::to_string(plan.Totals.front()).c_str(), now);
+						}
 					}
 				}
 
