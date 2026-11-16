@@ -251,6 +251,57 @@ namespace
 		return false;
 	}
 
+	// A crossing our units wait for and no transport the house owns makes: the passenger transport
+	// types of its side that would make it (CanTransportTypeLink, a seat for the unit) and that it
+	// owns none of are noted for the production. It builds the buildings they still lack and then one
+	// of them (user: "make the AI build the tech center when it needs it"). Kept CrossingNeedFrames
+	// after the last wait.
+	void NoteCrossingNeed(HouseClass* pHouse, const CellStruct& from, const CellStruct& to, int passSize)
+	{
+		if (!pHouse || !pHouse->Type || from == CellStruct::Empty || to == CellStruct::Empty)
+			return;
+
+		const int typeIndex = pHouse->Type->ArrayIndex;
+
+		if (typeIndex < 0 || typeIndex >= 32)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.CrossingNeedFrame < 0 || now < macro.CrossingNeedFrame || now - macro.CrossingNeedFrame > CrossingNeedFrames)
+			macro.CrossingNeedTypes.clear();
+
+		macro.CrossingNeedFrame = now;
+		const unsigned int ownHouseBit = 1u << typeIndex;
+		passSize = std::max(1, passSize);
+
+		auto const note = [&](const TechnoTypeClass* pType)
+		{
+			if (pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel || !pType->InOwners(ownHouseBit)
+				|| pType->Passengers < passSize || static_cast<int>(pType->SizeLimit) < passSize
+				|| std::find(macro.CrossingNeedTypes.begin(), macro.CrossingNeedTypes.end(), pType) != macro.CrossingNeedTypes.end()
+				|| pHouse->CountOwnedNow(pType) > 0 || !CanTransportTypeLink(pType, from, to))
+			{
+				return;
+			}
+
+			macro.CrossingNeedTypes.push_back(pType);
+		};
+
+		for (auto const pType : UnitTypeClass::Array)
+		{
+			if (pType && IsAmphibiousOrAirTransport(pType) && !pType->Gunner)
+				note(pType);
+		}
+
+		for (auto const pType : AircraftTypeClass::Array)
+		{
+			if (pType && !pType->Carryall && pType->Passengers > 0)
+				note(pType);
+		}
+	}
+
 	// Can the house put anything on the ground of `to` from `from` with a transport it owns or can
 	// build? Ground that fails is no island to colonize or ferry to: it is not reached at all.
 	bool CanHouseReachGroundByTransport(HouseClass* pHouse, const CellStruct& from, const CellStruct& to)

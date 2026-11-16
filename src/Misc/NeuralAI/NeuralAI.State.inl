@@ -925,6 +925,11 @@ namespace
 		int IslandMcvLogFrame { -100000 };
 		// The buildings of our MCV's Prerequisite list we still lack while that expansion is urgent.
 		std::vector<int> IslandMcvPrerequisites {};
+		// The transport types a crossing our units wait for needs (NoteCrossingNeed): of our side, able
+		// to make it, none of them owned. The production builds the buildings they lack, then one of them.
+		std::vector<const TechnoTypeClass*> CrossingNeedTypes {};
+		int CrossingNeedFrame { -1 };
+		int CrossingNeedLogFrame { -100000 };
 		// The other economic investments the production wants and cannot pay yet (0 when none): a
 		// harvester while we have fewer than refineries, a refinery for a newly reached field.
 		int HarvesterSaveTarget { 0 };
@@ -1405,6 +1410,9 @@ namespace
 			this->LastIslandSaleFrame = -100000;
 			this->IslandMcvLogFrame = -100000;
 			this->IslandMcvPrerequisites.clear();
+			this->CrossingNeedTypes.clear();
+			this->CrossingNeedFrame = -1;
+			this->CrossingNeedLogFrame = -100000;
 			this->HarvesterSaveTarget = 0;
 			this->RefinerySaveTarget = 0;
 			this->EconomyHoldSince = -1;
@@ -1805,6 +1813,12 @@ namespace
 	constexpr double BoardingLandingWeight = 0.05;
 	constexpr int BoardingCacheFrames = 150;
 	constexpr int BoardingCacheGridCells = 4;
+	// A crossing no transport of the house makes (NoteCrossingNeed) stays wanted this long after the
+	// last unit waited for it. The buildings the transport that would make it lacks, and then that
+	// transport, get these bonuses in the production.
+	constexpr int CrossingNeedFrames = 1800;
+	constexpr int CrossingPrerequisiteBonus = 1200;
+	constexpr int CrossingTransportBonus = 1100;
 	constexpr double OpTransportMinHealth = 0.5;
 	constexpr double OpDyingTransportHealth = 0.24;
 	constexpr int OpUnloadRetryFrames = 450;
