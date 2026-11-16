@@ -233,6 +233,50 @@ namespace
 		return cache;
 	}
 
+	// Enemy air presence a wave must expect: aircraft of anyone seen lately (the air threat
+	// memory), or a known airfield of the house it goes for (of any enemy house with owner -1).
+	bool EnemyAirPresenceKnown(HouseClass* pHouse, int owner)
+	{
+		if (GetMacroState(pHouse).AirThreatValue > 0)
+			return true;
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			if (info.Building->Type->Factory == AbstractType::AircraftType
+				&& (owner < 0 || info.Building->Owner->ArrayIndex == owner))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	// Whether the house can build now something for the ground army that shoots at aircraft: a
+	// vehicle with a war factory of ours, or a soldier with a barracks.
+	bool CanBuildAntiAirEscort(HouseClass* pHouse)
+	{
+		if (pHouse->NumWarFactories > 0)
+		{
+			for (auto const pType : UnitTypeClass::Array)
+			{
+				if (pType && !pType->Naval && ShootsAtAircraft(pType) && CanBuildUnderHumanRules(pHouse, pType))
+					return true;
+			}
+		}
+
+		if (pHouse->NumBarracks > 0)
+		{
+			for (auto const pType : InfantryTypeClass::Array)
+			{
+				if (pType && ShootsAtAircraft(pType) && CanBuildUnderHumanRules(pHouse, pType))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
 	void InvalidateKnownEnemyBuildings(HouseClass* pHouse)
 	{
 		KnownEnemyBuildingCaches[std::clamp(pHouse ? pHouse->ArrayIndex : 0, 0, 31)].Frame = -1;

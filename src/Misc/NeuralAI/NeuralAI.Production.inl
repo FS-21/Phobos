@@ -3525,6 +3525,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
 	// (the rest of ownedGroundCombatUnits is their front line).
 	int ownedArtilleryVehicles = 0;
+	// Armed ground vehicles that shoot at aircraft (ShootsAtAircraft): the escort of the tank mass.
+	int ownedAntiAirVehicles = 0;
 	int ownedLandStrikeTransports = 0;
 	int idleLandStrikeTransports = 0;
 	// Unit carryalls (transport helicopters with Carryall=yes): owned, and empty ones doing nothing.
@@ -3594,6 +3596,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 					if (pOwnedWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell)
 						ownedArtilleryVehicles++;
+
+					if (ShootsAtAircraft(pOwnedType))
+						ownedAntiAirVehicles++;
 				}
 			}
 
@@ -3713,6 +3718,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const int artilleryAllowance = tankMass
 		? ownedFrontLineVehicles / TankMassFrontLinePerGun
 		: ArtilleryFreeVehicles + ownedFrontLineVehicles / ArtilleryFrontLinePerGun;
+	// The anti-air escort the tank mass wants with its front line (TankMassVehiclesPerEscort).
+	const int wantedAntiAirEscorts = (tankMass && ownedFrontLineVehicles >= TankMassEscortFromVehicles)
+		? std::max(1, ownedFrontLineVehicles / TankMassVehiclesPerEscort)
+		: 0;
 
 	// Aircraft passenger transports (not carryalls) shuttle like amphibious transports, so
 	// they count toward the owned ferry capacity: no extra ship is built for the same demand.
@@ -4995,6 +5004,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (isAA)
 			{
 				score += scores[26];
+
+				// The escort of the tank mass comes before any aircraft shows up.
+				if (ownedAntiAirVehicles < wantedAntiAirEscorts)
+					score += TankMassEscortBonus;
 			}
 			else if (isArtillery)
 			{
@@ -5921,11 +5934,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			govMacro.BankWantedFactories[3], govMacro.BankWantedYards);
 
 		// Army mix: the front line vehicles against the guns they allow (artilleryAllowance), the
-		// refineries, and for the tank mass the unit count its next wave waits for with the waves
-		// in a row that took no building.
-		Debug::Log("[NeuralAI] Mix | House #%d | Arch=%d | front=%d guns=%d allowed=%d | refineries=%d | wave=%d lesson=%d\n",
+		// vehicles that shoot at aircraft against the escort the tank mass wants, the refineries,
+		// and for the tank mass the unit count its next wave waits for with the waves in a row
+		// that took no building.
+		Debug::Log("[NeuralAI] Mix | House #%d | Arch=%d | front=%d guns=%d allowed=%d aa=%d wanted=%d | refineries=%d | wave=%d "
+				"lesson=%d\n",
 			pHouse->ArrayIndex, pExt->NeuralAI_Archetype, ownedFrontLineVehicles, ownedArtilleryVehicles, artilleryAllowance,
-			pHouse->CountResourceDestinations, tankMass ? TankMassWaveUnits(pHouse) : 0, govMacro.WaveLessonSteps);
+			ownedAntiAirVehicles, wantedAntiAirEscorts, pHouse->CountResourceDestinations, tankMass ? TankMassWaveUnits(pHouse) : 0,
+			govMacro.WaveLessonSteps);
 
 		// TEMP diagnostic, stalled production (match #7132: Yuri with 230000-290000 credits spent
 		// almost nothing for 40 minutes, 17 units, never finished the last enemy): with 20000+ credits

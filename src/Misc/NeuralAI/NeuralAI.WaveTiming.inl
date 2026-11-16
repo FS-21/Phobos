@@ -318,6 +318,24 @@ namespace
 		return check;
 	}
 
+	// Whether a unit of this type shoots at aircraft: one of its two weapons has an anti-air
+	// projectile.
+	bool ShootsAtAircraft(TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWeapon = pType->GetWeapon(i) ? pType->GetWeapon(i)->WeaponType : nullptr;
+
+			if (pWeapon && pWeapon->Projectile && pWeapon->Projectile->AA)
+				return true;
+		}
+
+		return false;
+	}
+
 	// Known enemy buildings within WaveVerdictCells of a cell.
 	int CountKnownEnemyBuildingsNear(HouseClass* pHouse, const CellStruct& cell)
 	{

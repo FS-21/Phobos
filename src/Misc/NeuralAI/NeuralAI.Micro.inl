@@ -8028,18 +8028,36 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// (TankMassMissionBonus). Clear Our Ground: what the enemy built next to our ground goes before
 	// the far targets, a defense, a siege gun or a factory before the rest. Reprisal: the buildings
 	// of the house that hurt us most lately go before those of the others. Our ground is what lies
-	// around our construction yards, refineries and factories.
+	// around our construction yards, refineries and factories, each with the land it stands on.
+	struct TankMassSite
+	{
+		CellStruct Cell;
+		int Zone;
+	};
+
 	const bool tankMassTargets = pExt->NeuralAI_Archetype == TankMassArchetype;
-	std::vector<CellStruct> tankMassSites;
+	std::vector<TankMassSite> tankMassSites;
 	int reprisalHouse = -1;
 	const int reprisalBonus = TankMassMissionBonus(TankMassReprisalBonus,
 		scores[NeuralPlanSlots[static_cast<size_t>(NeuralPlanId::Reprisal)]]);
 	const int ourGroundBonus = TankMassMissionBonus(TankMassNearBuildingBonus,
 		scores[NeuralPlanSlots[static_cast<size_t>(NeuralPlanId::ClearOurGround)]]);
-	auto const nearOurGround = [&tankMassSites](const CellStruct& cell)
+	// The ring of Clear Our Ground: TankMassDangerCells, and with no known enemy building inside
+	// it reaches out to the nearest one (TankMassDangerStepCells, TankMassDangerMaxCells). While an
+	// enemy building stands on the land of one of our sites the missions count only on such land.
+	double ourGroundCells = TankMassDangerCells;
+	bool enemyOnOurLand = false;
+	auto const onOurLand = [&tankMassSites](int zone)
 	{
-		return std::any_of(tankMassSites.begin(), tankMassSites.end(),
-			[&cell](const CellStruct& site) { return site.DistanceFrom(cell) <= TankMassDangerCells; });
+		return std::any_of(tankMassSites.begin(), tankMassSites.end(), [zone](const TankMassSite& site) { return site.Zone == zone; });
+	};
+	auto const missionLand = [&enemyOnOurLand, &onOurLand](int zone) { return !enemyOnOurLand || onOurLand(zone); };
+	auto const nearOurGround = [&tankMassSites, &ourGroundCells, &enemyOnOurLand](const CellStruct& cell, int zone)
+	{
+		return std::any_of(tankMassSites.begin(), tankMassSites.end(), [&](const TankMassSite& site)
+			{
+				return (!enemyOnOurLand || site.Zone == zone) && site.Cell.DistanceFrom(cell) <= ourGroundCells;
+			});
 	};
 
 	if (tankMassTargets)
@@ -8049,7 +8067,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->Type
 				&& (pOwnBld->Type->ConstructionYard || pOwnBld->Type->Refinery || pOwnBld->Type->Factory != AbstractType::None))
 			{
-				tankMassSites.push_back(pOwnBld->GetMapCoords());
+				const CellStruct siteCell = pOwnBld->GetMapCoords();
+				tankMassSites.push_back({ siteCell, MapClass::Instance.GetMovementZoneType(siteCell, MovementZone::Normal, pOwnBld->OnBridge) });
 			}
 		}
 
@@ -8063,6 +8082,41 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				worstGrudge = grudges.Grudge[i];
 				reprisalHouse = i;
 			}
+		}
+
+		// The nearest known enemy building sets the ring. Truce partners are no targets.
+		double nearestOnOurLand = TankMassDangerMaxCells + 1.0;
+		double nearestAnywhere = TankMassDangerMaxCells + 1.0;
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			if (info.Building->Type->Insignificant
+				|| (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, info.Building->Owner->ArrayIndex)))
+			{
+				continue;
+			}
+
+			const int zone = MapClass::Instance.GetMovementZoneType(info.Coords, MovementZone::Normal, info.Building->OnBridge);
+
+			for (auto const& site : tankMassSites)
+			{
+				const double distance = site.Cell.DistanceFrom(info.Coords);
+				nearestAnywhere = std::min(nearestAnywhere, distance);
+
+				if (site.Zone == zone)
+				{
+					enemyOnOurLand = true;
+					nearestOnOurLand = std::min(nearestOnOurLand, distance);
+				}
+			}
+		}
+
+		const double nearestToOurGround = enemyOnOurLand ? nearestOnOurLand : nearestAnywhere;
+
+		if (nearestToOurGround > TankMassDangerCells && nearestToOurGround <= TankMassDangerMaxCells)
+		{
+			ourGroundCells = TankMassDangerCells
+				+ std::ceil((nearestToOurGround - TankMassDangerCells) / TankMassDangerStepCells) * TankMassDangerStepCells;
 		}
 	}
 
@@ -8125,10 +8179,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (tankMassTargets)
 		{
-			if (pOwner->ArrayIndex == reprisalHouse)
+			if (pOwner->ArrayIndex == reprisalHouse && missionLand(ebz))
 				bldCandScore += reprisalBonus;
 
-			if (ourGroundBonus > 0 && nearOurGround(ebc))
+			if (ourGroundBonus > 0 && nearOurGround(ebc, ebz))
 			{
 				const bool dangerous = pEnemyBld->Type->IsBaseDefense || pEnemyBld->Type->Factory != AbstractType::None
 					|| IsDeployedSiegeBuildingType(pEnemyBld->Type);
@@ -9147,7 +9201,55 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		NoteWaveDecision(pHouse, waveCheck, false, 0);
 	}
 
-	const bool waveStrengthReady = waveCheck.Launch;
+	// The tank mass takes anti-air along as a strong preference, not a rule: with enemy air
+	// presence known, a wave with nothing that shoots at aircraft waits for it while the house
+	// can build one, at most TankMassEscortWaitFrames; otherwise it goes as it is.
+	bool waveAwaitsEscort = false;
+
+	if (tankMassWaves && pWaveTargetCell && !endgameRemnantHunt && waveCountReady && waveCheck.Launch)
+	{
+		auto const pEscortGoal = pWaveTargetCell->GetBuilding();
+		const bool escorted = std::any_of(idleCombatUnits.begin(), idleCombatUnits.end(),
+				[](UnitClass* pU) { return ShootsAtAircraft(pU->Type); })
+			|| std::any_of(idleCombatInf.begin(), idleCombatInf.end(), [](InfantryClass* pI) { return ShootsAtAircraft(pI->Type); });
+		const bool escortWanted = !escorted
+			&& EnemyAirPresenceKnown(pHouse, (pEscortGoal && pEscortGoal->Owner) ? pEscortGoal->Owner->ArrayIndex : -1);
+		const int frame = Unsorted::CurrentFrame;
+
+		if (!escortWanted)
+		{
+			waveMacro.WaveEscortWaitSince = -1;
+		}
+		else if (waveMacro.WaveEscortWaitSince >= 0)
+		{
+			// Waited long enough: it goes without, and does not wait again for a while.
+			if (frame - waveMacro.WaveEscortWaitSince >= TankMassEscortWaitFrames)
+			{
+				waveMacro.WaveEscortWaitSince = -1;
+				waveMacro.WaveEscortRetryFrame = frame + TankMassEscortRetryFrames;
+				Debug::Log("[NeuralAI] Frame %d | House #%d wave goes without anti-air escort: none came in time\n", frame,
+					pHouse->ArrayIndex);
+			}
+		}
+		else if (frame >= waveMacro.WaveEscortRetryFrame)
+		{
+			if (CanBuildAntiAirEscort(pHouse))
+			{
+				waveMacro.WaveEscortWaitSince = frame;
+				Debug::Log("[NeuralAI] Frame %d | House #%d wave waits for its anti-air escort\n", frame, pHouse->ArrayIndex);
+			}
+			else
+			{
+				waveMacro.WaveEscortRetryFrame = frame + TankMassEscortRetryFrames;
+				Debug::Log("[NeuralAI] Frame %d | House #%d wave goes without anti-air escort: none can be built\n", frame,
+					pHouse->ArrayIndex);
+			}
+		}
+
+		waveAwaitsEscort = escortWanted && waveMacro.WaveEscortWaitSince >= 0;
+	}
+
+	const bool waveStrengthReady = waveCheck.Launch && !waveAwaitsEscort;
 
 	// Coordinated Multi-Squadron Offensive Strike Wave (Slot 37: Rush vs Mass
 	// Timing) Splits forces into parallel Squadron Alpha (pWaveTargetCell) and
@@ -9750,9 +9852,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// this wave is the one its target stands for, our ground before the reprisal.
 				if (tankMassWaves && !endgameRemnantHunt)
 				{
-					const int mission = (pWaveBld && ourGroundBonus > 0 && nearOurGround(pWaveTargetCell->MapCoords))
+					const int goalZone = MapClass::Instance.GetMovementZoneType(pWaveTargetCell->MapCoords, MovementZone::Normal,
+						pWaveBld && pWaveBld->OnBridge);
+					const int mission = (pWaveBld && ourGroundBonus > 0 && nearOurGround(pWaveTargetCell->MapCoords, goalZone))
 						? static_cast<int>(NeuralPlanId::ClearOurGround)
-						: ((waveOwner >= 0 && waveOwner == reprisalHouse && reprisalBonus > 0) ? static_cast<int>(NeuralPlanId::Reprisal) : -1);
+						: ((waveOwner >= 0 && waveOwner == reprisalHouse && reprisalBonus > 0 && missionLand(goalZone))
+							? static_cast<int>(NeuralPlanId::Reprisal)
+							: -1);
 					NoteWaveForVerdict(pHouse, pWaveTargetCell->MapCoords, mission);
 				}
 

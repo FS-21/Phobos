@@ -931,6 +931,10 @@ namespace
 		int WaveVerdictMission { -1 };
 		int WaveLessonSteps { 0 };
 		int WaveLessonFrame { -100000 };
+		// First frame a wave of the tank mass waited for its anti-air escort (-1 when none waits),
+		// and no new wait before this frame.
+		int WaveEscortWaitSince { -1 };
+		int WaveEscortRetryFrame { -1 };
 		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it.
 		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
 		std::array<int, 8> FailedApproachWeight {};
@@ -1278,6 +1282,8 @@ namespace
 			this->WaveVerdictMission = -1;
 			this->WaveLessonSteps = 0;
 			this->WaveLessonFrame = -100000;
+			this->WaveEscortWaitSince = -1;
+			this->WaveEscortRetryFrame = -1;
 			this->WaveGoals.clear();
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
@@ -1812,9 +1818,28 @@ namespace
 	// is met whatever its orders (Base Threat Intercept), artillery first. An enemy building
 	// within TankMassDangerCells of ours is a wave target before the far ones, more so a defense
 	// or a factory; and the buildings of the house that hurt us most in the last
-	// TankMassReprisalFrames come before those of the others.
+	// TankMassReprisalFrames come before those of the others. That ring grows as it is cleared:
+	// with no known enemy building inside it reaches out to the nearest one in steps of
+	// TankMassDangerStepCells, up to TankMassDangerMaxCells. While an enemy building stands on the
+	// land of one of our sites, both missions count only for the buildings on such land (the mass
+	// is not drawn to another island); with none there, for all of them.
 	constexpr double TankMassInfluenceCells = 16.0;
 	constexpr double TankMassDangerCells = 26.0;
+	constexpr double TankMassDangerStepCells = 10.0;
+	constexpr double TankMassDangerMaxCells = 76.0;
+	// The mass takes anti-air along, as a strong preference and not a rule (user): from
+	// TankMassEscortFromVehicles front line vehicles on it wants one vehicle that shoots at
+	// aircraft per TankMassVehiclesPerEscort, and the pick of an anti-air vehicle gains
+	// TankMassEscortBonus while they are missing. With enemy air presence known (aircraft seen
+	// lately, or an airfield of the house the wave goes for) a wave with nothing that shoots at
+	// aircraft waits for it while the house can build one, at most TankMassEscortWaitFrames, and
+	// then not again for TankMassEscortRetryFrames. With no air presence known, or nothing to
+	// build, it goes as it is.
+	constexpr int TankMassEscortFromVehicles = 4;
+	constexpr int TankMassVehiclesPerEscort = 5;
+	constexpr int TankMassEscortBonus = 1200;
+	constexpr int TankMassEscortWaitFrames = 1800;
+	constexpr int TankMassEscortRetryFrames = 2700;
 	constexpr int TankMassNearBuildingBonus = 350;
 	constexpr int TankMassDangerBuildingBonus = 300;
 	constexpr int TankMassReprisalFrames = 2700;
