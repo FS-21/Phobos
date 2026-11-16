@@ -416,6 +416,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// Their worth in AntiAirValue points, the measure the Advanced AI uses; one that declares none counts as a typical one.
 		constexpr int airDefenseTypicalValue = 20;
 		int ownedAntiAirValue = 0;
+		// The worth of our ground defenses in AntiInfantryValue + AntiArmorValue points.
+		int ownedGroundDefenseValue = 0;
 		int ownedBattleBunkers = 0;
 		int emptyOwnedBattleBunkers = 0;
 		int ownedTankBunkers = 0;
@@ -524,6 +526,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				else if (!isUnarmedBunker || pOwnBld->Occupants.Count > 0 || pOwnBld->BunkerLinkedItem != nullptr)
 				{
 					totalGroundDefenses++;
+					const int groundValue = pOT->AntiInfantryValue + pOT->AntiArmorValue;
+					ownedGroundDefenseValue += groundValue > 0 ? groundValue : GroundDefenseTypicalValue;
 				}
 			}
 			else if (pOT->SpySat || pOT->OrePurifier
@@ -1431,14 +1435,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// added; while a raid lasts, a margin on top. Of that total, the enemy air power plus the
 		// margin is what the raid itself asks for: only that part goes ahead of other picks, the
 		// rest is built at leisure.
+		// The base and the most by difficulty (user, as the Advanced AI); no cap by number of guns.
+		const int defenseDifficulty = std::clamp(houseDifficulty, 0, 2);
 		constexpr int airDefenseUrgentValue = 20;
 		constexpr int airDefenseStandingValue = 25;
-		constexpr int airDefenseBaseValue = 40;
+		const int airDefenseBaseValue = AntiAirBaseValue[defenseDifficulty];
 		constexpr int airDefenseValuePerRefinery = 10;
 		constexpr int airDefenseValuePerEnemyAirBase = 20;
 		constexpr int airDefenseEnemyAirBaseCap = 60;
 		constexpr int airDefenseRaidValue = 60;
-		constexpr int maxWantedAirDefenses = 8;
+		const int maxWantedAirDefenses = DefenseMaxValue[defenseDifficulty] / airDefenseTypicalValue;
 		const bool airRaid = underAirAttack || activeThreatCat == NeuralThreatCategory::Air;
 		const int raidAirValue = airRaid ? enemyAirValue + airDefenseRaidValue : 0;
 		const bool enemyAirKnown = airRaid || enemyAirValue >= airDefenseUrgentValue;
@@ -1452,12 +1458,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const int announcedAirValue = std::min(knownEnemyAirBases * airDefenseValuePerEnemyAirBase, airDefenseEnemyAirBaseCap);
 		const bool keepsStandingAirDefense = ownedWarFactories >= 1 || ownedTechStructures >= 1 || announcedAirValue > 0;
-		const int wantedAirValue = enemyAirKnown
+		const int wantedAirValue = std::min(DefenseMaxValue[defenseDifficulty], enemyAirKnown
 			? airDefenseBaseValue + ownedRefineries * airDefenseValuePerRefinery + std::max(enemyAirValue, announcedAirValue)
 				+ (airRaid ? airDefenseRaidValue : 0)
 			: (keepsStandingAirDefense
 				? airDefenseStandingValue + ownedRefineries * airDefenseValuePerRefinery + announcedAirValue
-				: 0);
+				: 0));
 		auto const airDefensesMissingFor = [&](int value) -> int
 		{
 			return std::min((std::max(0, value - ownedAntiAirValue) + airDefenseTypicalValue - 1) / airDefenseTypicalValue,
@@ -1472,6 +1478,103 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool airRaidShortOfDefenses = raidDefenseDeficit > 0;
 		// With no ground attack on top, a raid short of guns leaves the towers that cannot shoot up for later.
 		const bool airRaidOnly = airRaidShortOfDefenses && !underVehicleAttack && !underInfantryAttack && !effectiveFrontlineThreat;
+
+		// Ground defense level in points (user, as the Advanced AI): base by difficulty, per refinery,
+		// per functional structure, with an expansion pending; half again after a ground attack and
+		// more while attacks last; at most DefenseMaxValue. And the key assets each tower or gun
+		// covers within CoverageDefenseCells: ToProtect structures, superweapons, captured tech and
+		// cash buildings, refineries, yards and factories away from home, and the stones of the
+		// offensive crawl; anti-air too while the enemy has aircraft or air bases (sneak raids). The
+		// coverage comes on top of the level and of the defense budget, two towers per asset at most
+		// past the level: a coverage that was never met stood 98 towers in one base (match #9885).
+		int functionalStructures = 0;
+		std::vector<CellStruct> coverageAssets;
+		std::vector<CellStruct> groundDefenseCells;
+		std::vector<CellStruct> antiAirDefenseCells;
+
+		{
+			auto const& stones = GetMacroState(pHouse).OffensiveStones;
+
+			for (auto const pOwnBld : pHouse->Buildings)
+			{
+				if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->InvisibleInGame)
+					continue;
+
+				auto const pOT = pOwnBld->Type;
+				const CellStruct bc = pOwnBld->GetMapCoords();
+
+				if (pOT->IsBaseDefense)
+				{
+					if (IsTunnelNetworkBuilding(pOT))
+						continue;
+
+					const auto pW0 = pOT->GetWeapon(0) ? pOT->GetWeapon(0)->WeaponType : nullptr;
+					const auto pW1 = pOT->GetWeapon(1) ? pOT->GetWeapon(1)->WeaponType : nullptr;
+					const bool shootsUp = (pW0 && pW0->Projectile && pW0->Projectile->AA) || (pW1 && pW1->Projectile && pW1->Projectile->AA);
+					const bool pureAA = pW0 && pW0->Projectile && pW0->Projectile->AA && !pW0->Projectile->AG;
+					const bool armed = (pW0 && pW0->Damage > 0) || pOwnBld->Occupants.Count > 0 || pOwnBld->BunkerLinkedItem != nullptr;
+
+					if (shootsUp)
+						antiAirDefenseCells.push_back(bc);
+
+					if (!pureAA && armed)
+						groundDefenseCells.push_back(bc);
+
+					continue;
+				}
+
+				if (pOT->Wall)
+					continue;
+
+				if (pOT->PowerBonus <= pOT->PowerDrain)
+					functionalStructures++;
+
+				const bool awayFromHome = homeRefCenter != CellStruct::Empty
+					&& std::max(std::abs(bc.X - homeRefCenter.X), std::abs(bc.Y - homeRefCenter.Y)) > 16;
+				const bool keyAsset = pOT->ToProtect || pOT->SuperWeapon != -1 || pOT->ProduceCashAmount > 0
+					|| pOT->ProduceCashStartup > 0 || (pOT->Capturable && pOT->NeedsEngineer)
+					|| (awayFromHome && (pOT->Refinery || pOT->ResourceGatherer || pOT->ConstructionYard || pOT->Factory != AbstractType::None))
+					|| std::find(stones.begin(), stones.end(), pOwnBld->UniqueID) != stones.end();
+
+				if (keyAsset)
+					coverageAssets.push_back(bc);
+			}
+		}
+
+		auto const coveredBy = [](const CellStruct& asset, const std::vector<CellStruct>& defenses)
+		{
+			return std::any_of(defenses.begin(), defenses.end(), [&asset](const CellStruct& dc)
+				{ return std::max(std::abs(asset.X - dc.X), std::abs(asset.Y - dc.Y)) <= CoverageDefenseCells; });
+		};
+
+		const bool enemyHasAircraft = enemyAirValue > 0 || knownEnemyAirBases > 0;
+		int groundCoverageDeficit = 0;
+		int antiAirCoverageDeficit = 0;
+
+		for (auto const& asset : coverageAssets)
+		{
+			if (!coveredBy(asset, groundDefenseCells))
+				groundCoverageDeficit++;
+
+			if (enemyHasAircraft && !coveredBy(asset, antiAirDefenseCells))
+				antiAirCoverageDeficit++;
+		}
+
+		int optimalGroundDefenseValue = DefenseBaseValue[defenseDifficulty] + ownedRefineries * DefenseValuePerRefinery
+			+ functionalStructures * DefenseValuePerStructure + (GetMacroState(pHouse).UncolonizedOreFields > 0 ? DefenseValueExpansionPending : 0);
+
+		if (underVehicleAttack || underInfantryAttack)
+			optimalGroundDefenseValue = optimalGroundDefenseValue * 3 / 2;
+
+		if (wasRecentlyAttacked)
+			optimalGroundDefenseValue += DefenseValueRecentAttack;
+
+		optimalGroundDefenseValue = std::min(optimalGroundDefenseValue, DefenseMaxValue[defenseDifficulty]);
+		const int coverageAssetCount = static_cast<int>(coverageAssets.size());
+		const bool groundCoverageWanted = groundCoverageDeficit > 0
+			&& totalGroundDefenses < optimalGroundDefenseValue / GroundDefenseTypicalValue + 2 * coverageAssetCount;
+		const bool antiAirCoverageWanted = antiAirCoverageDeficit > 0
+			&& totalAntiAirDefenses < wantedAirValue / airDefenseTypicalValue + 2 * coverageAssetCount;
 		bool bestFillsAirDeficit = false;
 		int bestAirDefenseIdx = -1;
 		int bestAirDefenseScore = -32000;
@@ -2897,7 +3000,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					}
 				}
 
-				if (isPureAA && totalAADefenses >= maxAADefenses && !fillsIslandHold)
+				// Guns that only shoot up: up to the anti-air level in points, and past it while a key
+				// asset lacks anti-air cover.
+				if (isPureAA && ownedAntiAirValue >= wantedAirValue && !antiAirCoverageWanted && !fillsIslandHold)
 				{
 					noteAirDefense(pBld, 2, 0);
 
@@ -2916,13 +3021,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					? maxGroundDefenses + outpostDefenseRoom
 					: maxGroundDefenses;
 
-				if (!isPureAA && !fillsAirDeficit && !fillsIslandHold && totalGroundDefenses >= effectiveMaxGroundDefenses)
+				// Ground towers: up to the ground level in points, past it while a key asset lacks a tower
+				// within reach, or for an outpost or front within the room above.
+				const bool frontlineRoomLeft = needsOutpostPointDefense && totalGroundDefenses < effectiveMaxGroundDefenses;
+
+				if (!isPureAA && !fillsAirDeficit && !fillsIslandHold && ownedGroundDefenseValue >= optimalGroundDefenseValue
+					&& !groundCoverageWanted && !frontlineRoomLeft)
 				{
 					if (isAntiAir)
 						noteAirDefense(pBld, 3, 0);
 
 					continue;
 				}
+
+				const bool fillsCoverage = (!isPureAA && groundCoverageWanted) || (isAntiAir && antiAirCoverageWanted);
 
 				// Do not queue powered defenses when power cushion is already tight
 				if ((pBld->Powered || pBld->PowerDrain >= 50)
@@ -2945,7 +3057,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					bool budgetBlocked = false;
 					defenseBudgetShift = DefenseBudgetShift(pHouse, pBld, isPureAA, totalGroundDefenses, totalAADefenses, budgetBlocked);
 
-					if (budgetBlocked && ((!fillsAirDeficit && !fillsIslandHold) || GetMacroState(pHouse).BrokeHoldActive))
+					// The cover of a key asset is no extra spending: the budget does not hold it back.
+					if (budgetBlocked && ((!fillsAirDeficit && !fillsIslandHold && !fillsCoverage) || GetMacroState(pHouse).BrokeHoldActive))
 					{
 						if (isAntiAir)
 							noteAirDefense(pBld, 5, 0);
@@ -2953,7 +3066,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						continue;
 					}
 
-					if (fillsAirDeficit || fillsIslandHold)
+					if (fillsAirDeficit || fillsIslandHold || fillsCoverage)
 						defenseBudgetShift = std::max(defenseBudgetShift, 0);
 				}
 
@@ -3040,6 +3153,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += airDefenseDeficitBonus;
 				else if (airRaidOnly && !isAntiAir && !isBldInProgress)
 					score -= groundDefenseRaidPenalty;
+
+				// A key asset without cover (placement puts the defense next to it).
+				if (fillsCoverage)
+					score += CoverageDefenseBonus;
 
 				if (wasRecentlyAttacked || effectiveFrontlineThreat || (airRaid && isAntiAir))
 				{
