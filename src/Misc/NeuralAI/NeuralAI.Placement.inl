@@ -102,6 +102,320 @@ namespace
 		return true;
 	}
 
+	// ---- Roads out of the war factories ----
+
+	// A war factory of ours, its exit lane and its road out: Open when the walk from the lane got
+	// beyond the base, with the cells it went through (index (Y << 9) + X, the last one first
+	// reached beyond the base).
+	struct NeuralFactoryRoad
+	{
+		ArchitectRect Lane {};
+		bool Open { false };
+		std::vector<int> Cells {};
+	};
+
+	// Marks of the road walk by cell: the serial of the walk that found it two-way ground, or its
+	// negative for one that found it is not.
+	std::vector<int> RoadWalkMark;
+	int RoadWalkSerial = 0;
+	int RoadWalkFrame = -1;
+	int RoadWalksThisFrame = 0;
+	// The base of the house the roads were last asked for: 1 on every cell within
+	// FactoryRoadClearCells of one of its buildings.
+	std::vector<uint8_t> RoadBaseMask;
+
+	bool IsWarFactoryType(const BuildingTypeClass* pType)
+	{
+		return pType && !pType->Naval && !pType->ConstructionYard && (pType->WeaponsFactory || pType->Factory == AbstractType::UnitType);
+	}
+
+	// Does two-way ground lead from an exit lane to open ground beyond the base? Two-way ground is
+	// the cells of walkable 2x2 squares (open ground, no building, steps a vehicle climbs), where
+	// two vehicles pass side by side; a one-cell street between buildings is no part of it. Beyond
+	// the base is a cell more than FactoryRoadClearCells from every building of the house
+	// (RoadBaseMask) and from `pBuilt`, a footprint taken as built. A walk that has not got there
+	// in FactoryRoadWalkCells cells counts as closed in. `pCells` receives the cells of the walk.
+	bool WalkFactoryRoad(const ArchitectRect& lane, const ArchitectRect* pBuilt, std::vector<int>* pCells)
+	{
+		if (RoadWalkMark.empty())
+			RoadWalkMark.assign(PassageGridSide * PassageGridSide, 0);
+
+		if (RoadWalkSerial >= INT_MAX - 1)
+		{
+			std::fill(RoadWalkMark.begin(), RoadWalkMark.end(), 0);
+			RoadWalkSerial = 0;
+		}
+
+		const int serial = ++RoadWalkSerial;
+
+		auto const cellAt = [](int x, int y)
+		{
+			return MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(x), static_cast<short>(y) });
+		};
+
+		auto const open = [&](int x, int y)
+		{
+			if (x < 0 || y < 0 || x >= PassageGridSide || y >= PassageGridSide || (pBuilt && pBuilt->Overlaps(x, y, 1, 1))
+				|| !IsOpenGroundAt(CellStruct { static_cast<short>(x), static_cast<short>(y) }))
+			{
+				return false;
+			}
+
+			auto const pCell = cellAt(x, y);
+
+			return pCell && !pCell->GetBuilding();
+		};
+
+		// A step between two open cells next to each other: level ground, or one level over a slope.
+		auto const steps = [&](int ax, int ay, int bx, int by)
+		{
+			auto const pA = cellAt(ax, ay);
+			auto const pB = cellAt(bx, by);
+			const int diff = std::abs(pA->Level - pB->Level);
+
+			return diff == 0 || (diff == 1 && (pA->Level < pB->Level ? pA : pB)->SlopeIndex != 0);
+		};
+
+		auto const square = [&](int x, int y)
+		{
+			return open(x, y) && open(x + 1, y) && open(x, y + 1) && open(x + 1, y + 1) && steps(x, y, x + 1, y)
+				&& steps(x, y, x, y + 1) && steps(x + 1, y, x + 1, y + 1) && steps(x, y + 1, x + 1, y + 1);
+		};
+
+		auto const beyondBase = [&](int x, int y)
+		{
+			const int clear = FactoryRoadClearCells;
+
+			return !RoadBaseMask.empty() && RoadBaseMask[(y << 9) + x] == 0
+				&& !(pBuilt && pBuilt->Overlaps(x - clear, y - clear, 2 * clear + 1, 2 * clear + 1));
+		};
+
+		std::vector<int> queue;
+		queue.reserve(FactoryRoadWalkCells + 16);
+		bool reached = false;
+
+		// Takes a cell into the walk when it is two-way ground not seen yet.
+		auto const take = [&](int x, int y)
+		{
+			if (reached || x < 1 || y < 1 || x >= PassageGridSide - 1 || y >= PassageGridSide - 1)
+				return;
+
+			int& mark = RoadWalkMark[(y << 9) + x];
+
+			if (mark == serial || mark == -serial)
+				return;
+
+			if (!(square(x - 1, y - 1) || square(x, y - 1) || square(x - 1, y) || square(x, y)))
+			{
+				mark = -serial;
+
+				return;
+			}
+
+			mark = serial;
+			queue.push_back((y << 9) + x);
+			reached = beyondBase(x, y);
+		};
+
+		for (int y = lane.Y0; y <= lane.Y1; ++y)
+		{
+			for (int x = lane.X0; x <= lane.X1; ++x)
+				take(x, y);
+		}
+
+		constexpr int StepX[4] = { 1, 0, -1, 0 };
+		constexpr int StepY[4] = { 0, 1, 0, -1 };
+
+		for (size_t head = 0; head < queue.size() && !reached && static_cast<int>(queue.size()) < FactoryRoadWalkCells; ++head)
+		{
+			const int x = queue[head] & (PassageGridSide - 1);
+			const int y = queue[head] >> 9;
+
+			for (int d = 0; d < 4; ++d)
+			{
+				const int nx = x + StepX[d];
+				const int ny = y + StepY[d];
+
+				// A neighbour refused for its step may still come another way.
+				if (nx < 1 || ny < 1 || nx >= PassageGridSide - 1 || ny >= PassageGridSide - 1 || !open(nx, ny) || !steps(x, y, nx, ny))
+					continue;
+
+				take(nx, ny);
+			}
+		}
+
+		if (pCells)
+			*pCells = std::move(queue);
+
+		return reached;
+	}
+
+	// The war factories of a house with their roads, kept FactoryRoadCacheFrames while the
+	// buildings on the map stay the same.
+	constexpr int FactoryRoadCacheFrames = 300;
+
+	struct NeuralFactoryRoadCache
+	{
+		int Frame { -1 };
+		int Buildings { -1 };
+		int Serial { -1 };
+		std::vector<NeuralFactoryRoad> Roads {};
+	};
+
+	std::array<NeuralFactoryRoadCache, 32> FactoryRoadCaches {};
+	// Whose base RoadBaseMask holds, and of which state of the map.
+	int RoadBaseMaskHouse = -1;
+	int RoadBaseMaskFrame = -1;
+	int RoadBaseMaskBuildings = -1;
+	int RoadBaseMaskSerial = -1;
+
+	// Marks the base of the house on RoadBaseMask (the walks of this house read it).
+	void MarkRoadBase(HouseClass* pHouse)
+	{
+		const int now = Unsorted::CurrentFrame;
+
+		if (RoadBaseMaskHouse == pHouse->ArrayIndex && RoadBaseMaskSerial == NeuralMatchSerial
+			&& RoadBaseMaskBuildings == BuildingClass::Array.Count && now >= RoadBaseMaskFrame
+			&& now - RoadBaseMaskFrame < FactoryRoadCacheFrames)
+		{
+			return;
+		}
+
+		RoadBaseMaskHouse = pHouse->ArrayIndex;
+		RoadBaseMaskSerial = NeuralMatchSerial;
+		RoadBaseMaskBuildings = BuildingClass::Array.Count;
+		RoadBaseMaskFrame = now;
+		RoadBaseMask.assign(PassageGridSide * PassageGridSide, 0);
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (!pOwnBld || !pOwnBld->IsAlive || pOwnBld->InLimbo || !pOwnBld->Type || pOwnBld->Type->InvisibleInGame)
+				continue;
+
+			const CellStruct at = pOwnBld->GetMapCoords();
+			const int x0 = std::max(0, at.X - FactoryRoadClearCells);
+			const int y0 = std::max(0, at.Y - FactoryRoadClearCells);
+			const int x1 = std::min(PassageGridSide - 1, at.X + pOwnBld->Type->GetFoundationWidth() - 1 + FactoryRoadClearCells);
+			const int y1 = std::min(PassageGridSide - 1, at.Y + pOwnBld->Type->GetFoundationHeight(false) - 1 + FactoryRoadClearCells);
+
+			for (int y = y0; y <= y1; ++y)
+				std::fill(RoadBaseMask.begin() + ((y << 9) + x0), RoadBaseMask.begin() + ((y << 9) + x1 + 1), static_cast<uint8_t>(1));
+		}
+	}
+
+	const std::vector<NeuralFactoryRoad>& GetFactoryRoads(HouseClass* pHouse)
+	{
+		auto& cache = FactoryRoadCaches[std::clamp(pHouse->ArrayIndex, 0, 31)];
+		const int now = Unsorted::CurrentFrame;
+
+		MarkRoadBase(pHouse);
+
+		if (cache.Serial == NeuralMatchSerial && cache.Buildings == BuildingClass::Array.Count && now >= cache.Frame
+			&& now - cache.Frame < FactoryRoadCacheFrames)
+		{
+			return cache.Roads;
+		}
+
+		cache.Serial = NeuralMatchSerial;
+		cache.Buildings = BuildingClass::Array.Count;
+		cache.Frame = now;
+		cache.Roads.clear();
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			NeuralFactoryRoad road {};
+
+			if (!pOwnBld || !pOwnBld->IsAlive || pOwnBld->InLimbo || !IsWarFactoryType(pOwnBld->Type)
+				|| !GetFactoryExitLane(pOwnBld->Type, pOwnBld->GetMapCoords(), road.Lane))
+			{
+				continue;
+			}
+
+			road.Open = WalkFactoryRoad(road.Lane, nullptr, &road.Cells);
+			cache.Roads.push_back(std::move(road));
+		}
+
+		// TEMP diagnostic: war factories with a road out, every 3600 frames per house with two or more.
+		{
+			static int roadsLogSerial = -1;
+			static int roadsLogFrame[32] {};
+			const int houseIndex = std::clamp(pHouse->ArrayIndex, 0, 31);
+
+			if (roadsLogSerial != NeuralMatchSerial)
+			{
+				roadsLogSerial = NeuralMatchSerial;
+				std::fill(std::begin(roadsLogFrame), std::end(roadsLogFrame), -3600);
+			}
+
+			if (cache.Roads.size() >= 2 && now - roadsLogFrame[houseIndex] >= 3600)
+			{
+				roadsLogFrame[houseIndex] = now;
+				const auto open = std::count_if(cache.Roads.begin(), cache.Roads.end(), [](auto const& road) { return road.Open; });
+				Debug::Log("[NeuralAI] House %d factory roads DIAG: %d of %d war factories have a two-way road out of the base, frame %d.\n",
+					pHouse->ArrayIndex, static_cast<int>(open), static_cast<int>(cache.Roads.size()), now);
+			}
+		}
+
+		return cache.Roads;
+	}
+
+	// Would a building of this type on this cell take the road out of a war factory of ours that
+	// has one, or be a war factory with none? It walks the ground only for a footprint that
+	// touches a road or stands near its end, at most FactoryRoadWalksPerFrame times per frame;
+	// past that it answers no.
+	bool ClosesFactoryRoad(HouseClass* pHouse, const BuildingTypeClass* pType, const CellStruct& topLeft)
+	{
+		if (!pHouse || !pType || pType->Naval || pType->Gate)
+			return false;
+
+		if (RoadWalkFrame != Unsorted::CurrentFrame)
+		{
+			RoadWalkFrame = Unsorted::CurrentFrame;
+			RoadWalksThisFrame = 0;
+		}
+
+		const int w = pType->GetFoundationWidth();
+		const int h = pType->GetFoundationHeight(false);
+		const ArchitectRect built { topLeft.X, topLeft.Y, static_cast<short>(topLeft.X + w - 1), static_cast<short>(topLeft.Y + h - 1) };
+		const int clear = FactoryRoadClearCells;
+
+		for (auto const& road : GetFactoryRoads(pHouse))
+		{
+			if (!road.Open || road.Cells.empty())
+				continue;
+
+			// A footprint on the road or next to it changes its 2x2 squares; one near its end makes
+			// that end part of the base.
+			const int endX = road.Cells.back() & (PassageGridSide - 1);
+			const int endY = road.Cells.back() >> 9;
+			const bool touches = built.Overlaps(endX - clear, endY - clear, 2 * clear + 1, 2 * clear + 1)
+				|| std::any_of(road.Cells.begin(), road.Cells.end(), [&](const int idx)
+					{ return built.Overlaps((idx & (PassageGridSide - 1)) - 1, (idx >> 9) - 1, 3, 3); });
+
+			if (!touches)
+				continue;
+
+			if (RoadWalksThisFrame >= FactoryRoadWalksPerFrame)
+				return false;
+
+			++RoadWalksThisFrame;
+
+			if (!WalkFactoryRoad(road.Lane, &built, nullptr))
+				return true;
+		}
+
+		ArchitectRect ownLane {};
+
+		if (IsWarFactoryType(pType) && GetFactoryExitLane(pType, topLeft, ownLane) && RoadWalksThisFrame < FactoryRoadWalksPerFrame)
+		{
+			++RoadWalksThisFrame;
+
+			return !WalkFactoryRoad(ownLane, &built, nullptr);
+		}
+
+		return false;
+	}
+
 	// The launch ring of the ring-limited superweapons (SW.RangeMaximum > 0, e.g. an EMP cannon) a
 	// building type fires: listed in their EMPulse.Cannons, else EMPulseCannon=yes for an EMPulse type,
 	// else granting the superweapon itself. The largest maximum (cells) and its minimum; 0 when none.
@@ -3623,6 +3937,32 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 					if (architectRebuildCell != CellStruct::Empty && candidate == architectRebuildCell)
 						spatialScore += 4000;
+				}
+
+				// A war factory keeps its road out, and a new one needs its own (ClosesFactoryRoad): such a
+				// cell is passed over, and taken last when the tight pass has no other. Asked only of a
+				// cell about to become the best one, since the answer walks the ground.
+				if (spatialScore > bestSpatialScore && !isNavalBld && ClosesFactoryRoad(pHouse, pBuildingType, candidate))
+				{
+					// TEMP diagnostic: the first cells of each match refused for it.
+					static int roadLogSerial = -1;
+					static int roadLogCount = 0;
+
+					if (roadLogSerial != NeuralMatchSerial)
+					{
+						roadLogSerial = NeuralMatchSerial;
+						roadLogCount = 0;
+					}
+
+					if (roadLogCount < 40)
+					{
+						++roadLogCount;
+						Debug::Log("[NeuralAI] House %d factory road DIAG: %s at (%d,%d) would close the road out of a war factory, %s, frame %d.\n",
+							pHouse->ArrayIndex, pBuildingType->ID, candidate.X, candidate.Y, relaxMarginPass == 0 ? "passed over" : "kept for last",
+							Unsorted::CurrentFrame);
+					}
+
+					spatialScore = relaxMarginPass == 0 ? bestSpatialScore : spatialScore - FactoryRoadClosedPenalty;
 				}
 
 				if (spatialScore > bestSpatialScore)
