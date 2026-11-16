@@ -519,6 +519,12 @@ namespace
 		CellStruct LastCell { CellStruct::Empty };
 		int LastHealth { 0 };
 		int LastLoaded { 0 };
+		// Its berth around the staging cell, where it parks to load, and where its passengers wait for it
+		// (PickOpBerth); the danger at its landing when it sailed (a landing that grows much more
+		// dangerous during the crossing is changed).
+		CellStruct Berth { CellStruct::Empty };
+		CellStruct BerthWait { CellStruct::Empty };
+		int LandingDanger { 0 };
 	};
 
 	// Where a transport of an operation was lost (NeuralHouseMacroState::OpLossSpots).
@@ -574,6 +580,10 @@ namespace
 		int DangerCheckFrame { -1 };
 		int TripDanger { 0 };
 		int DangerHolds { 0 };
+		// The last time the landing of loads under way was changed for enemies gathered at it, and how
+		// many times.
+		int LandingSwitchFrame { -1 };
+		int LandingSwitches { 0 };
 		bool Over { false };
 		const char* EndReason { "" };
 		std::vector<NeuralOpMember> Members;
@@ -915,6 +925,11 @@ namespace
 		int IslandMcvLogFrame { -100000 };
 		// The buildings of our MCV's Prerequisite list we still lack while that expansion is urgent.
 		std::vector<int> IslandMcvPrerequisites {};
+		// The transport types a crossing our units wait for needs (NoteCrossingNeed): of our side, able
+		// to make it, none of them owned. The production builds the buildings they lack, then one of them.
+		std::vector<const TechnoTypeClass*> CrossingNeedTypes {};
+		int CrossingNeedFrame { -1 };
+		int CrossingNeedLogFrame { -100000 };
 		// The other economic investments the production wants and cannot pay yet (0 when none): a
 		// harvester while we have fewer than refineries, a refinery for a newly reached field.
 		int HarvesterSaveTarget { 0 };
@@ -1395,6 +1410,9 @@ namespace
 			this->LastIslandSaleFrame = -100000;
 			this->IslandMcvLogFrame = -100000;
 			this->IslandMcvPrerequisites.clear();
+			this->CrossingNeedTypes.clear();
+			this->CrossingNeedFrame = -1;
+			this->CrossingNeedLogFrame = -100000;
 			this->HarvesterSaveTarget = 0;
 			this->RefinerySaveTarget = 0;
 			this->EconomyHoldSince = -1;
@@ -1795,6 +1813,12 @@ namespace
 	constexpr double BoardingLandingWeight = 0.05;
 	constexpr int BoardingCacheFrames = 150;
 	constexpr int BoardingCacheGridCells = 4;
+	// A crossing no transport of the house makes (NoteCrossingNeed) stays wanted this long after the
+	// last unit waited for it. The buildings the transport that would make it lacks, and then that
+	// transport, get these bonuses in the production.
+	constexpr int CrossingNeedFrames = 1800;
+	constexpr int CrossingPrerequisiteBonus = 1200;
+	constexpr int CrossingTransportBonus = 1100;
 	constexpr double OpTransportMinHealth = 0.5;
 	constexpr double OpDyingTransportHealth = 0.24;
 	constexpr int OpUnloadRetryFrames = 450;
@@ -1868,6 +1892,23 @@ namespace
 	constexpr int OpSailDangerLimit = 90;
 	constexpr int OpDangerCheckFrames = 150;
 	constexpr int OpDangerWaitFrames = 1800;
+	// Against the threats that move (user): a transport inside the reach of a threat plans its route
+	// again every OpRouteDangerReplanFrames instead of OpRouteReplanFrames. A crossing whose landing
+	// grew OpLandingSwitchDanger more dangerous since it sailed (enemies gathered at it), still
+	// OpLandingSwitchMinCells or more from it, takes another landing for its load when that one costs
+	// OpLandingSwitchPercent or less, once per OpLandingSwitchFrames for an operation.
+	constexpr int OpRouteDangerReplanFrames = 90;
+	constexpr int OpLandingSwitchDanger = 40;
+	constexpr int OpLandingSwitchPercent = 75;
+	constexpr int OpLandingSwitchFrames = 450;
+	constexpr double OpLandingSwitchMinCells = 6.0;
+	// Berths (user: forty transports and 185 units bound for one staging cell jammed into one mass the
+	// transports could not get through, match #10477): each transport parks to load at its own cell
+	// around the staging cell, within OpBerthRingCells of it and OpBerthSpacingCells from the others,
+	// and its passengers wait for it OpBerthWaitCells farther out, in the small group of its own load.
+	constexpr int OpBerthRingCells = 14;
+	constexpr double OpBerthSpacingCells = 4.0;
+	constexpr int OpBerthWaitCells = 3;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its

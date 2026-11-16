@@ -2436,6 +2436,80 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				mcvPrerequisites = std::move(missing);
 		}
 
+		// A crossing our units wait for that only a transport we cannot build yet makes (NoteCrossingNeed):
+		// the buildings that transport still lacks get a bonus, those of the one that lacks the fewest.
+		// A missing building we cannot build yet brings its own missing ones (a tech center that needs a
+		// radar first).
+		std::vector<int> crossingPrerequisites;
+		const char* crossingNeedName = nullptr;
+
+		if (auto& crossingMacro = GetMacroState(pHouse); crossingMacro.CrossingNeedFrame >= 0
+			&& Unsorted::CurrentFrame >= crossingMacro.CrossingNeedFrame
+			&& Unsorted::CurrentFrame - crossingMacro.CrossingNeedFrame <= CrossingNeedFrames && !crossingMacro.CrossingNeedTypes.empty())
+		{
+			bool crossingBuildable = false;
+			size_t fewestMissing = SIZE_MAX;
+
+			for (auto const pNeedType : crossingMacro.CrossingNeedTypes)
+			{
+				auto const pType = const_cast<TechnoTypeClass*>(pNeedType);
+
+				if (CanBuildUnderHumanRules(pHouse, pType))
+				{
+					crossingBuildable = true;
+					break;
+				}
+
+				std::vector<int> missing = MissingTypePrerequisites(pHouse, pType);
+				const size_t direct = missing.size();
+
+				for (size_t i = 0; i < direct; ++i)
+				{
+					auto const pMissing = missing[i] >= 0 && missing[i] < BuildingTypeClass::Array.Count
+						? BuildingTypeClass::Array.GetItem(missing[i]) : nullptr;
+
+					if (pMissing && !CanBuildUnderHumanRules(pHouse, pMissing))
+					{
+						const std::vector<int> deeper = MissingTypePrerequisites(pHouse, pMissing);
+						missing.insert(missing.end(), deeper.begin(), deeper.end());
+					}
+				}
+
+				if (!missing.empty() && missing.size() < fewestMissing)
+				{
+					fewestMissing = missing.size();
+					crossingPrerequisites = std::move(missing);
+					crossingNeedName = pType->ID;
+				}
+			}
+
+			if (crossingBuildable)
+			{
+				crossingPrerequisites.clear();
+				crossingNeedName = nullptr;
+			}
+
+			// TEMP diagnostic: what a crossing waits for and which buildings it asks for.
+			if (crossingNeedName && Unsorted::CurrentFrame - crossingMacro.CrossingNeedLogFrame >= CrossingNeedFrames)
+			{
+				crossingMacro.CrossingNeedLogFrame = Unsorted::CurrentFrame;
+				std::string names;
+
+				for (const int idx : crossingPrerequisites)
+				{
+					if (idx >= 0 && idx < BuildingTypeClass::Array.Count)
+					{
+						names += names.empty() ? "" : ",";
+						names += BuildingTypeClass::Array.GetItem(idx)->ID;
+					}
+				}
+
+				Debug::Log("[NeuralAI] House %d crossing need DIAG: a crossing waits for %s (%d types noted); asks for %s; frame %d.\n",
+					pHouse->ArrayIndex, crossingNeedName, static_cast<int>(crossingMacro.CrossingNeedTypes.size()), names.c_str(),
+					Unsorted::CurrentFrame);
+			}
+		}
+
 		// The island expansion's saving hold lets these buildings through (UpdateEconomyCrisis).
 		{
 			auto& islandPrereqs = GetMacroState(pHouse).IslandMcvPrerequisites;
@@ -3361,6 +3435,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (GetMacroState(pHouse).IslandExpansionUrgent)
 					score = std::max(score, 5000);
+			}
+
+			if (!crossingPrerequisites.empty() && pHouse->CountOwnedNow(pBld) == 0
+				&& std::find(crossingPrerequisites.begin(), crossingPrerequisites.end(), pBld->ArrayIndex) != crossingPrerequisites.end())
+			{
+				score += CrossingPrerequisiteBonus;
 			}
 
 			constexpr int airDefensePrerequisiteBonus = 1500;
@@ -4374,6 +4454,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		return (flies || amphibious) ? 350 : -1000;
 	};
 
+	// A transport that makes a crossing our units wait for and no transport of ours makes
+	// (NoteCrossingNeed): one of it is built.
+	auto crossingNeedBonus = [&](const TechnoTypeClass* pCandidate) -> int
+	{
+		auto const& macro = GetMacroState(pHouse);
+
+		if (macro.CrossingNeedFrame < 0 || Unsorted::CurrentFrame < macro.CrossingNeedFrame
+			|| Unsorted::CurrentFrame - macro.CrossingNeedFrame > CrossingNeedFrames
+			|| std::find(macro.CrossingNeedTypes.begin(), macro.CrossingNeedTypes.end(), pCandidate) == macro.CrossingNeedTypes.end()
+			|| pHouse->CountOwnedNow(pCandidate) > 0)
+		{
+			return -1000;
+		}
+
+		return std::max(static_cast<int>(scores[28]), 0) + CrossingTransportBonus;
+	};
+
 	// Ferry transport demand-driven scoring shared by the Shipyard and War Factory.
 	// Transports are reusable shuttles: one stays ready on island maps, and more are
 	// only built (up to 3) while the real waiting cargo exceeds one trip of the fleet.
@@ -4913,7 +5010,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// A transport the demand rules reject is not a candidate at all: otherwise the
 				// queue keeps building it whenever nothing else scores higher (e.g. no buildable
 				// warship), producing whole fleets of unneeded transports.
-				const int ferryDelta = std::max(scoreFerryTransport(pUnit), raidTransportBonus(pUnit));
+				const int ferryDelta = std::max({ scoreFerryTransport(pUnit), raidTransportBonus(pUnit), crossingNeedBonus(pUnit) });
 
 				if (ferryDelta <= -900)
 					continue;
@@ -5108,7 +5205,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					const int ferryDelta = std::max(scoreFerryTransport(pUnit), raidTransportBonus(pUnit));
+					const int ferryDelta = std::max({ scoreFerryTransport(pUnit), raidTransportBonus(pUnit), crossingNeedBonus(pUnit) });
 
 					if (ferryDelta <= -900)
 						continue; // Not needed: never built just because nothing else scores higher.
@@ -5839,7 +5936,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				// Passenger aircraft shuttle across water like amphibious transports, under
 				// the same ferry demand (aircraft and ground transports counted together).
-				const int ferryDelta = std::max(scoreFerryTransport(pAir), raidTransportBonus(pAir));
+				const int ferryDelta = std::max({ scoreFerryTransport(pAir), raidTransportBonus(pAir), crossingNeedBonus(pAir) });
 
 				if (ferryDelta <= -900 && !isAirInProgress)
 					continue;
