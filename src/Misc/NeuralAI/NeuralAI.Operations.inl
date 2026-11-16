@@ -1677,7 +1677,7 @@ namespace
 				if (op.Homeward)
 				{
 					const char* reason = nullptr;
-					CellClass* pOre = nullptr;
+					CellClass* const pOre = FindFreeOreFieldCell(pHouse, op.Field, op.FieldZone, 0, true);
 
 					// The island's MCV (or an engineer) waiting for a ride has the transports first.
 					const bool economyWaits = std::any_of(macro.TransportOps.begin(), macro.TransportOps.end(),
@@ -1693,7 +1693,7 @@ namespace
 						reason = "an economy operation waits for a transport";
 					else if (macro.IslandHomeOre >= 2 * ShuttleHomeOre)
 						reason = "ore at home again";
-					else if (!(pOre = FindFreeOreFieldCell(pHouse, op.Field, op.FieldZone, 0, true)))
+					else if (!pOre)
 						reason = "no free ore left on the field's land";
 
 					if (reason)
