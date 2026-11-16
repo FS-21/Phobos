@@ -1583,11 +1583,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			optimalGroundDefenseValue += DefenseValueRecentAttack;
 
 		optimalGroundDefenseValue = std::min(optimalGroundDefenseValue, DefenseMaxValue[defenseDifficulty]);
+		// One tower or gun per asset at most past the level: with two, a house kept building towers
+		// next to assets already covered while another went without (54 ground towers, match #10523).
 		const int coverageAssetCount = static_cast<int>(coverageAssets.size());
 		const bool groundCoverageWanted = groundCoverageDeficit > 0
-			&& totalGroundDefenses < optimalGroundDefenseValue / GroundDefenseTypicalValue + 2 * coverageAssetCount;
+			&& totalGroundDefenses < optimalGroundDefenseValue / GroundDefenseTypicalValue + coverageAssetCount;
 		const bool antiAirCoverageWanted = antiAirCoverageDeficit > 0
-			&& totalAntiAirDefenses < wantedAirValue / airDefenseTypicalValue + 2 * coverageAssetCount;
+			&& totalAntiAirDefenses < wantedAirValue / airDefenseTypicalValue + coverageAssetCount;
 		bool bestFillsAirDeficit = false;
 		int bestAirDefenseIdx = -1;
 		int bestAirDefenseScore = -32000;
@@ -3047,7 +3049,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 				}
 
-				const bool fillsCoverage = (!isPureAA && groundCoverageWanted) || (isAntiAir && antiAirCoverageWanted);
+				// Cover the house can pay for now: a broke house (180 credits) kept picking towers for it.
+				const bool fillsCoverage = ((!isPureAA && groundCoverageWanted) || (isAntiAir && antiAirCoverageWanted))
+					&& money >= pBld->GetActualCost(pHouse);
 
 				// Do not queue powered defenses when power cushion is already tight
 				if ((pBld->Powered || pBld->PowerDrain >= 50)
@@ -3898,12 +3902,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		? std::max(2, money >= 50000 ? trueRefineries + 1 : 2 * trueRefineries + 1 + ecoBiasMod)
 		: 4;
 
-	// Mobile refineries (user, after the Advanced AI's mobile refinery target): a house mining with
-	// deployed miners, each one refinery and harvesters in one, wants one per free field of its land
-	// with ore to spare (ForEachMinerOreField) besides the ones mining now, up to MaxMobileMiners. A
-	// miner on its way counts against a free field. A fixed 4 kept a Yuri house at four miners with
-	// 68 free fields on its land (match #10437). Miners are no expansion: nothing is built around them.
+	// Mobile refineries: a house mining with deployed miners, each one refinery and harvesters in
+	// one, matches its main enemy (user): as many miners as refineries we know that enemy has,
+	// MinMobileMiners at least, never more than the ones mining now plus the free fields of its land
+	// with ore to spare (ForEachMinerOreField), MaxMobileMiners at most. A miner on its way counts
+	// against a free field. One per free field made Yuri the richest house by far (a deployed miner
+	// earned 7500 per 4500 frames against 5600 for a refinery with its harvesters, 11 matches); a
+	// fixed 4 had kept it poor with 68 free fields on its land (match #10437). Miners are no
+	// expansion: nothing is built around them.
 	int minerTarget = 0;
+	int minerParity = MinMobileMiners;
 
 	if (deployedGatherers > 0 || ownedMinerUnits > 0 || trueRefineries == 0)
 	{
@@ -3914,7 +3922,33 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			? MapClass::Instance.GetMovementZoneType(minerHome, MovementZone::Normal, false)
 			: -1;
 		const int freeMinerFields = CountMinerOreFields(pHouse, IsGroundZone(minerHomeZone) ? minerHomeZone : -1, MaxMobileMiners);
-		minerTarget = std::clamp(productiveMiners + freeMinerFields, 1, MaxMobileMiners);
+
+		// Refineries and deployed miners we know of, by owner: the main enemy's, or the most any
+		// enemy has when we know none of the main enemy's.
+		std::map<int, int> knownRefineriesByOwner;
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			auto const pKnownBld = info.Building;
+
+			if (pKnownBld && pKnownBld->Type && pKnownBld->Owner && (pKnownBld->Type->Refinery || pKnownBld->Type->ResourceGatherer))
+				knownRefineriesByOwner[pKnownBld->Owner->ArrayIndex]++;
+		}
+
+		int enemyRefineries = 0;
+
+		if (auto const itMain = knownRefineriesByOwner.find(pHouse->EnemyHouseIndex); itMain != knownRefineriesByOwner.end())
+		{
+			enemyRefineries = itMain->second;
+		}
+		else
+		{
+			for (auto const& [owner, count] : knownRefineriesByOwner)
+				enemyRefineries = std::max(enemyRefineries, count);
+		}
+
+		minerParity = std::min(std::max(MinMobileMiners, enemyRefineries), MaxMobileMiners);
+		minerTarget = std::clamp(std::min(minerParity, productiveMiners + freeMinerFields), 1, MaxMobileMiners);
 	}
 
 	// Fewer harvesters than refineries (a refinery nobody feeds): the cheapest buildable harvester
@@ -4629,7 +4663,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// around it, user): on land minerTarget alone sets their number; across water it is income
 		// from another island, with MaxMobileMiners at most.
 		const bool allowExpansionRefineryDeployer = isDeployableRefineryOrMiner && money < 50000
-			&& (isMobileMiner ? features[21] > 0 && productiveMiners + ownedMinerUnits < MaxMobileMiners : (features[21] > 0 || scores[30] >= 500))
+			&& (isMobileMiner ? features[21] > 0 && productiveMiners + ownedMinerUnits < minerParity : (features[21] > 0 || scores[30] >= 500))
 			&& (trueRefineries < 10 && ownedEconomyUnits < 18)
 			&& !ownsUndeployedKeyStructure && (features[21] == 0 || CanHouseFerryTypeAcrossWater(pHouse, pUnit));
 

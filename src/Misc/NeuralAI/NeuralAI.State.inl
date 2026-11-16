@@ -1579,8 +1579,10 @@ namespace
 	constexpr int MinerLogFrames = 1800;
 	// Ore cells of a held 12x12 ore block for each refinery past the first it takes (3 at most).
 	constexpr int RefineryOreCellsPerExtra = 24;
-	// Most mobile refineries (slave miners) a house mining with them wants, as the Advanced AI.
+	// Most mobile refineries (slave miners) a house mining with them wants, as the Advanced AI, and
+	// the least it wants with free fields (a classic base holds 4 refineries at home).
 	constexpr int MaxMobileMiners = 15;
+	constexpr int MinMobileMiners = 4;
 	// Docks an AI house keeps free for its aircraft, by difficulty (user): another airfield while
 	// fewer stand free.
 	constexpr int MinFreeAirDocksEasy = 4;
