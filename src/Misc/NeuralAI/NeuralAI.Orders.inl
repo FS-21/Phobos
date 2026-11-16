@@ -2389,8 +2389,13 @@ namespace
 			return pCell;
 		};
 
+		// Why cells were turned down in the last pass: no footing, inside the base, covered by a defense,
+		// a transport cannot stand there, no transport sails from there to the landing, no room.
+		int rejected[6] {};
+
 		auto const search = [&](int minClearance, int minRoom, int& clearanceOut) -> CellClass*
 		{
+			std::fill(std::begin(rejected), std::end(rejected), 0);
 			CellClass* pBest = nullptr;
 			double bestScore = 1e9;
 
@@ -2407,12 +2412,18 @@ namespace
 						auto const pCell = footing(c);
 
 						if (!pCell)
+						{
+							++rejected[0];
 							continue;
+						}
 
 						const int clearance = clearanceOf(c);
 
 						if (clearance < minClearance)
+						{
+							++rejected[1];
 							continue;
+						}
 
 						const double dist = c.DistanceFrom(around);
 
@@ -2431,7 +2442,10 @@ namespace
 						}
 
 						if (covered)
+						{
+							++rejected[2];
 							continue;
+						}
 
 						bool standsAll = true;
 
@@ -2445,7 +2459,10 @@ namespace
 						}
 
 						if (!standsAll)
+						{
+							++rejected[3];
 							continue;
+						}
 
 						bool sails = anyFlyer || surface.empty() || landing == CellStruct::Empty;
 
@@ -2453,7 +2470,10 @@ namespace
 							sails = CanTransportTypeLink(surface[i], c, landing);
 
 						if (!sails)
+						{
+							++rejected[4];
 							continue;
+						}
 
 						int room = 0;
 
@@ -2467,7 +2487,10 @@ namespace
 						}
 
 						if (room < minRoom)
+						{
+							++rejected[5];
 							continue;
+						}
 
 						double score = dist;
 
@@ -2513,6 +2536,16 @@ namespace
 
 		if (!pResult)
 			pResult = search(BoardingBaseClearRelaxedCells, BoardingRoomRelaxedCells, clearance);
+
+		// TEMP diagnostic: why no cell near the units would do.
+		if (!pResult)
+		{
+			Debug::Log("[NeuralAI] House %d boarding cell DIAG: none within %d cells of (%d,%d) zone %d for the landing (%d,%d); turned down: "
+				"%d no footing, %d inside the base, %d under a defense, %d no standing for a transport (%d surface types%s), %d no crossing "
+				"to the landing, %d no room; frame %d.\n", pHouse->ArrayIndex, BoardingSearchCells, around.X, around.Y, zone, landing.X,
+				landing.Y, rejected[0], rejected[1], rejected[2], rejected[3], static_cast<int>(surface.size()), anyFlyer ? ", flyers" : "",
+				rejected[4], rejected[5], Unsorted::CurrentFrame);
+		}
 
 		if (pClearance)
 			*pClearance = clearance;
