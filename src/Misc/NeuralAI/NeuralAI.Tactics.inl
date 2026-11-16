@@ -364,6 +364,11 @@ namespace
 			return false;
 		}
 
+		// A unit of a transport operation waits for its seat on purpose, and the operation places it:
+		// moved off as a blocker, it was called back at the next tick (150 such moves in 8 matches).
+		if (IsInTransportOp(pHouse, pFoot->UniqueID))
+			return false;
+
 		auto const pType = pFoot->GetTechnoType();
 		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
 
