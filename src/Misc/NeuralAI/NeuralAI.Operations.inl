@@ -349,11 +349,12 @@ namespace
 		if (!pType || CrossesWaterAlone(pType) || GetOpCarrier(pFoot) != OpCarrier::None || pFoot->Transporter)
 			return false;
 
+		// The unit's own movement may join the two cells where a vehicle's does not (a soldier on stairs).
 		const int footZone = OpFootGroundZone(pFoot);
 		CellStruct ground = target;
 		const int targetZone = OpTargetGroundZone(target, footZone, ground);
 
-		if (!IsGroundZone(footZone) || !IsGroundZone(targetZone) || footZone == targetZone || FootReachesAlone(pFoot, target))
+		if (!IsGroundZone(footZone) || !IsGroundZone(targetZone) || footZone == targetZone || IsSameGroundForFoot(pFoot, target))
 			return false;
 
 		auto const pLanding = FindSafeIslandLandingCell(pHouse, ground, targetZone, false);
@@ -372,8 +373,6 @@ namespace
 				break;
 			}
 		}
-
-		const bool joined = pOp != nullptr;
 
 		if (!pOp)
 		{
@@ -399,7 +398,7 @@ namespace
 		NeuralOpMember member {};
 		member.UniqueID = uid;
 		member.Size = std::max(1, static_cast<int>(pType->Size));
-		member.Target = joined ? target : ground;
+		member.Target = ground;
 		pOp->Members.push_back(member);
 		macro.TransportOpOf[uid] = pOp->Id;
 
@@ -431,7 +430,7 @@ namespace
 		pFoot->QueueMission(Mission::Guard, false);
 	}
 
-	void UpdateTransportOperation(HouseClass* pHouse, NeuralTransportOperation& op, const std::unordered_map<DWORD, FootClass*>& foots,
+	void UpdateTransportOperation(HouseClass* pHouse, NeuralTransportOperation& op, std::unordered_map<DWORD, FootClass*>& foots,
 		bool logNow)
 	{
 		auto& macro = GetMacroState(pHouse);
@@ -521,7 +520,7 @@ namespace
 
 			if (pFoot->MegaMission == Mission::AttackMove)
 				what = "attack-move";
-			else if (mission == Mission::Hunt || mission == Mission::Area_Guard || mission == Mission::Patrol || mission == Mission::Sabotage
+			else if (mission == Mission::Hunt || mission == Mission::Patrol || mission == Mission::Sabotage
 				|| mission == Mission::Harvest || mission == Mission::Retreat || (mission == Mission::Enter && transport)
 				|| (mission == Mission::Capture && GetOpCarrier(pFoot) != OpCarrier::Carryall))
 			{
@@ -577,6 +576,10 @@ namespace
 
 				macro.TransportOpOf.erase(transport.UniqueID);
 				op.TransportsLost++;
+
+				// Lost on its way across: the next landings keep away from where it went down.
+				if (transport.Leg == NeuralOpLeg::Crossing && transport.ProgressCell != CellStruct::Empty)
+					macro.BloodyBeaches.emplace_back(transport.ProgressCell, now);
 
 				for (auto& member : op.Members)
 				{
@@ -636,11 +639,13 @@ namespace
 					return true;
 				}
 
+				// On the land of its address, or its own movement takes it there now. FootReachesAlone is not
+				// asked: it lets a unit on a shore cell (no ground zone) pass for one that gets anywhere.
 				const bool wasAboard = member.Aboard;
 				member.Aboard = false;
 				const int zone = OpFootGroundZone(pFoot);
 
-				if (zone == op.TargetZone || FootReachesAlone(pFoot, member.Target))
+				if (zone == op.TargetZone || IsSameGroundForFoot(pFoot, member.Target))
 				{
 					if (zone == op.TargetZone)
 						op.Landed++;
@@ -898,6 +903,7 @@ namespace
 				op.Transports.push_back(transport);
 				op.TransportsTaken++;
 				macro.TransportOpOf[candidate.Foot->UniqueID] = op.Id;
+				foots[candidate.Foot->UniqueID] = candidate.Foot;
 
 				// An old trip record of the ferry loader is stale on an empty transport.
 				ClearFerryTrip(candidate.Foot->UniqueID);
@@ -991,7 +997,14 @@ namespace
 
 		for (auto const& transport : op.Transports)
 		{
-			if (transport.Leg == NeuralOpLeg::Parked && find(transport.UniqueID)->Passengers.NumPassengers > 0)
+			if (transport.Leg != NeuralOpLeg::Parked)
+				continue;
+
+			// A transport still parked after the last load sailed starts the wait of the next one.
+			if (op.BoardingSince < 0)
+				op.BoardingSince = now;
+
+			if (find(transport.UniqueID)->Passengers.NumPassengers > 0)
 				anyLoadedParked = true;
 		}
 

@@ -1846,7 +1846,9 @@ namespace
 
 		auto isFreeForPlan = [&](FootClass* pFoot) -> bool
 		{
-			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID) || IsOnRepairTrip(pHouse, pFoot->UniqueID))
+			// A unit or transport of a transport operation is the operation's until it hands it back.
+			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID) || IsOnRepairTrip(pHouse, pFoot->UniqueID)
+				|| IsInTransportOp(pHouse, pFoot->UniqueID))
 				return false;
 
 			// A slave obeys its slave master only: it goes back to work whatever a plan orders, and
