@@ -9395,6 +9395,63 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// A unit an earlier wave sent somewhere else keeps going there while it is still far from it
+		// and the enemy still has a building there (WaveGoalKeepFrames): this wave takes the units
+		// that are free, that arrived, or whose goal is gone. The target is picked anew at every tick,
+		// and units held in a jam were turned round by every wave that went another way.
+		int keptWaveGoals = 0;
+		std::vector<std::pair<CellStruct, bool>> waveGoalStands;
+
+		auto const keptWaveGoal = [&](const FootClass* pFoot, const CellClass* pNewGoal, int& zone) -> CellClass*
+		{
+			const int nowFrame = Unsorted::CurrentFrame;
+			auto const it = waveMacro.WaveGoals.find(pFoot->UniqueID);
+
+			if (endgameRemnantHunt || it == waveMacro.WaveGoals.end() || nowFrame < it->second.Frame
+				|| nowFrame - it->second.Frame > WaveGoalKeepFrames)
+			{
+				return nullptr;
+			}
+
+			const CellStruct kept = it->second.Cell;
+
+			if (kept.DistanceFrom(pNewGoal->MapCoords) <= WaveGoalKeepCells
+				|| pFoot->GetMapCoords().DistanceFrom(kept) <= WaveGoalKeepCells)
+			{
+				return nullptr;
+			}
+
+			auto stands = std::find_if(waveGoalStands.begin(), waveGoalStands.end(),
+				[&kept](auto const& entry) { return entry.first == kept; });
+
+			if (stands == waveGoalStands.end())
+			{
+				bool enemyThere = false;
+
+				for (auto const& known : GetKnownEnemyBuildingCache(pHouse).Entries)
+				{
+					if (known.Coords.DistanceFrom(kept) > WaveGoalKeepCells
+						|| (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, known.Building->Owner->ArrayIndex)))
+					{
+						continue;
+					}
+
+					enemyThere = true;
+					break;
+				}
+
+				waveGoalStands.push_back({ kept, enemyThere });
+				stands = waveGoalStands.end() - 1;
+			}
+
+			if (!stands->second)
+				return nullptr;
+
+			zone = it->second.Zone;
+
+			return MapClass::Instance.TryGetCellAt(kept);
+		};
+
 		size_t dispatchedVeh = 0;
 		for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
 		{
@@ -9447,12 +9504,28 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				goalZone = secWaveZone;
 			}
 
+			// Still on its way to where an earlier wave sent it: it keeps that goal.
+			bool keepsEarlierGoal = false;
+
+			if (pUnitWaveGoal == pWaveTargetCell || pUnitWaveGoal == pSecondaryWaveTargetCell)
+			{
+				if (CellClass* const pKept = keptWaveGoal(pU, pUnitWaveGoal, goalZone))
+				{
+					pUnitWaveGoal = pKept;
+					keepsEarlierGoal = true;
+					++keptWaveGoals;
+				}
+			}
+
 			const bool goalInWater = (pUnitWaveGoal->LandType == LandType::Water);
 			if (!canCrossWaterDirectly && (goalInWater || goalZone < 0 || uz < 0 || uz != goalZone))
 			{
 				continue; // Keep ground-only vehicles in Guard state on their island so
 						// they board Amphibious/Air Transports!
 			}
+
+			if (!keepsEarlierGoal && (pUnitWaveGoal == pWaveTargetCell || pUnitWaveGoal == pSecondaryWaveTargetCell))
+				waveMacro.WaveGoals[pU->UniqueID] = { pUnitWaveGoal->MapCoords, goalZone, Unsorted::CurrentFrame };
 
 			if (pU->Type->JumpJet && pU->Type->Strength >= 1000 && pU->DistanceFrom(pUnitWaveGoal) > 7680)
 			{
@@ -9559,6 +9632,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pInfWaveGoal = pSecondaryWaveTargetCell;
 			}
 
+			// Still on its way to where an earlier wave sent it: it keeps that goal.
+			bool infKeepsEarlierGoal = false;
+			int infGoalZone = (pInfWaveGoal == pSecondaryWaveTargetCell) ? secWaveZone : waveTargetZone;
+
+			if (pInfWaveGoal == pWaveTargetCell || pInfWaveGoal == pSecondaryWaveTargetCell)
+			{
+				if (CellClass* const pKept = keptWaveGoal(pI, pInfWaveGoal, infGoalZone))
+				{
+					pInfWaveGoal = pKept;
+					infKeepsEarlierGoal = true;
+					++keptWaveGoals;
+				}
+			}
+
 			// Reachability on foot uses the soldier's own movement zone, since infantry walks where
 			// vehicles cannot. Ground infantry that cannot walk there stays to board transports.
 			const bool infGoalInWater = (pInfWaveGoal->LandType == LandType::Water);
@@ -9567,6 +9654,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (!canInfCrossWater && (infGoalInWater || footZone < 0 || footZone != goalFootZone))
 				continue;
+
+			if (!infKeepsEarlierGoal && (pInfWaveGoal == pWaveTargetCell || pInfWaveGoal == pSecondaryWaveTargetCell))
+				waveMacro.WaveGoals[pI->UniqueID] = { pInfWaveGoal->MapCoords, infGoalZone, Unsorted::CurrentFrame };
 
 			const int infWpnRange = (pI->Type->GetWeapon(0) && pI->Type->GetWeapon(0)->WeaponType)
 				? pI->Type->GetWeapon(0)->WeaponType->Range
@@ -9633,6 +9723,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				Unsorted::CurrentFrame, pHouse->ArrayIndex,
 				(pHouse->Type && pHouse->Type->ID[0]) ? pHouse->Type->ID : "AI", dispatchedVeh, dispatchedInf,
 				pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y);
+
+			// TEMP diagnostic: units of this dispatch that kept the goal of an earlier wave.
+			if (keptWaveGoals > 0)
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d): %d units keep their way to an earlier target\n",
+					Unsorted::CurrentFrame, pHouse->ArrayIndex, pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, keptWaveGoals);
+			}
+		}
+
+		// Goals past their time go (units that died or went on to other work).
+		if (waveMacro.WaveGoals.size() > 256)
+		{
+			std::erase_if(waveMacro.WaveGoals, [](auto const& entry)
+				{ return Unsorted::CurrentFrame - entry.second.Frame > WaveGoalKeepFrames; });
 		}
 	}
 
