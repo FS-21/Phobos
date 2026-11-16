@@ -1706,7 +1706,7 @@ namespace
 					{
 						const bool atRefinery = docked || pFoot->CurrentMission == Mission::Enter || pFoot->CurrentMission == Mission::Unload
 							|| pFoot->HasAnyLink();
-						done = !op.Homeward && ((load < 0.5f && !atRefinery) || workFrames >= ShuttleUnloadCapFrames || workFrames < 0);
+						done = !op.Homeward && !docked && ((load < 0.5f && !atRefinery) || workFrames >= ShuttleUnloadCapFrames || workFrames < 0);
 
 						// Still loaded and doing something else: it is told to unload again.
 						if (!done && load >= 0.5f && !atRefinery && pFoot->CurrentMission != Mission::Harvest)
@@ -1720,9 +1720,16 @@ namespace
 					if (!done)
 						return false;
 
+					// It stops its work (its harvest mission is no interference): the operation's orders follow.
 					member.Work = NeuralShuttleWork::None;
 					member.Target = harvesting ? op.Home : op.Field;
 					member.OrderCell = CellStruct::Empty;
+
+					if (!pFoot->InLimbo)
+					{
+						pFoot->SetDestination(nullptr, true);
+						pFoot->ForceMission(Mission::Guard);
+					}
 				}
 
 				if (pFoot->InLimbo)
