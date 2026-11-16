@@ -1981,22 +1981,29 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 		// Find the first priority asset or power cluster that lacks a nearby
 		// defense (or has < 2 ground defenses when we already have >= 3 total defenses)
+		// An asset with no defense at all comes before a second one next to an asset already
+		// covered: production asks for cover while any asset has none (a house stood 54 ground
+		// towers as placement kept doubling the first assets, match #10523).
 		const int minDefsPerKeyAsset = (!isPureAA && ownMatchingDefCells.size() >= 3) ? 2 : 1;
-		for (const CellStruct& ac : priorityAssetCells)
+
+		for (int wantedDefs = 1; wantedDefs <= minDefsPerKeyAsset && undefendedKeyAssetCell == CellStruct::Empty; ++wantedDefs)
 		{
-			int localDefsNearAsset = 0;
-
-			for (const CellStruct& dc : ownMatchingDefCells)
+			for (const CellStruct& ac : priorityAssetCells)
 			{
-				if (std::max(std::abs(ac.X - dc.X), std::abs(ac.Y - dc.Y)) <= 10)
-					localDefsNearAsset++;
-			}
+				int localDefsNearAsset = 0;
 
-			if (localDefsNearAsset < minDefsPerKeyAsset)
-			{
-				undefendedKeyAssetCell = ac;
+				for (const CellStruct& dc : ownMatchingDefCells)
+				{
+					if (std::max(std::abs(ac.X - dc.X), std::abs(ac.Y - dc.Y)) <= 10)
+						localDefsNearAsset++;
+				}
 
-				break;
+				if (localDefsNearAsset < wantedDefs)
+				{
+					undefendedKeyAssetCell = ac;
+
+					break;
+				}
 			}
 		}
 
