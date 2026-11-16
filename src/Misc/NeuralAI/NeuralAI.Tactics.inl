@@ -4247,10 +4247,11 @@ namespace
 				{
 					for (auto const pHarv : harvesters)
 					{
-						// Chrono miners loop-teleport on a destination, slave miners deploy where they stop.
+						// Chrono miners loop-teleport on a destination, slave miners deploy where they stop. A
+						// harvester of a transport operation (a shuttle's) takes orders from it alone.
 						if (pHarv->DistanceFrom(pCrowded) <= 6 * 256 && !pHarv->InLimbo && pHarv->CurrentMission != Mission::Enter
 							&& pHarv->CurrentMission != Mission::Unload && pHarv->Type->Harvester && !pHarv->Type->Teleporter
-							&& !pHarv->Type->DeploysInto)
+							&& !pHarv->Type->DeploysInto && !IsInTransportOp(pHouse, pHarv->UniqueID))
 						{
 							macro.LastHarvesterBalanceFrame = now;
 							pHarv->SetDestination(pOre, true);
