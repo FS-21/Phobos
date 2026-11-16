@@ -2020,6 +2020,14 @@ namespace
 	// filling the map). The verdict comes once no unit of ours is left there WaveVerdictQuietFrames
 	// after the last dispatch, or after WaveVerdictFrames.
 	constexpr int TankMassBaseWave = 10;
+	// Building time, not money, is what the tank mass lacks (40 matches from #10431: one war factory
+	// until frame 27000 with 14000 credits unspent at frame 18000, a tank every 1000 frames, 24 new
+	// buildings between frames 9000 and 27000, mostly defenses and power). Of every four building
+	// windows the factories the bank governor wants take TankMassBankWindows, TankMassBankWindowsThreat
+	// under threat, and the war factory counts TankMassBankFactoryLead more wanted than it is.
+	constexpr int TankMassBankWindows = 3;
+	constexpr int TankMassBankWindowsThreat = 2;
+	constexpr int TankMassBankFactoryLead = 2;
 	// Each step doubles the count (user): 10, 20, then the most.
 	constexpr int TankMassWaveCap = 32;
 	constexpr int WaveLessonPercent = 200;

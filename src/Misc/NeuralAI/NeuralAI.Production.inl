@@ -2583,7 +2583,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						? BankFactoryDeficit(pHouse, BankQueue::Infantry, pHouse->NumBarracks) > 0
 						: BankFactoryDeficit(pHouse, BankQueue::Vehicle, pHouse->NumWarFactories) > 0);
 
-				if (!outpostNeedsCopy && !bankNeedsCopy)
+				// The war factories of the tank mass do not wait for the tech either.
+				const bool tankMassNeedsCopy = pBld->Factory == AbstractType::UnitType && owned < tankMassWarFactories;
+
+				if (!outpostNeedsCopy && !bankNeedsCopy && !tankMassNeedsCopy)
 					continue;
 			}
 
@@ -2843,8 +2846,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						score += 420;
 				}
 
+				// The tank mass builds the war factory before the other factories the governor wants.
 				if (bankWarFactories > 0)
-					rememberBankFactory(pBld, score, bankWarFactories);
+				{
+					rememberBankFactory(pBld, score,
+						bankWarFactories + (pExt->NeuralAI_Archetype == TankMassArchetype ? TankMassBankFactoryLead : 0));
+				}
 			}
 			else if (pBld->Factory == AbstractType::UnitType && pBld->Naval)
 			{
@@ -3400,8 +3407,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// restoring income.
 		const bool bankUnderThreat = wasRecentlyAttacked || effectiveFrontlineThreat;
 		const int bankSurplus = bankMacro.BankSurplus;
-		const int bankWindowShare = bankUnderThreat ? (bankSurplus >= 100000 ? 2 : (bankSurplus >= 30000 ? 1 : 0))
+		// The tank mass answers a threat with tanks, and tanks come from war factories: it keeps
+		// TankMassBankWindowsThreat windows under threat and TankMassBankWindows otherwise.
+		const int usualBankWindowShare = bankUnderThreat ? (bankSurplus >= 100000 ? 2 : (bankSurplus >= 30000 ? 1 : 0))
 			: (bankSurplus >= 100000 ? 4 : (bankSurplus >= 50000 ? 3 : 2));
+		const int bankWindowShare = pExt->NeuralAI_Archetype == TankMassArchetype
+			? std::max(usualBankWindowShare, bankUnderThreat ? TankMassBankWindowsThreat : TankMassBankWindows)
+			: usualBankWindowShare;
 		const bool bankFactoryWindow = (bankWindow % 4) < bankWindowShare;
 
 		// A gun the raid still needs keeps its window.
