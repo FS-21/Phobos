@@ -1570,6 +1570,170 @@ namespace
 		macro.HoverTracks = std::move(next);
 	}
 
+	// TEMP diagnostic: the biggest group of our held units (each within 2 cells of another) once it
+	// has 12 or more, at most once per 900 frames per house: how far it runs, how many stand in a
+	// narrow passage, how near their goals are, their missions, plans and the source of their last
+	// wave or plan order (user, match #10286, Blistering Heatstroke: 40+ units of one house held in
+	// one line by an enemy outpost, the followed one 3 cells from its goal).
+	bool IsOnRepairTrip(const HouseClass* pHouse, DWORD uid);
+
+	void LogHeldColumn(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
+	{
+		static int serial = -1;
+		static int lastFrame[64] {};
+		const int houseIndex = pHouse->ArrayIndex;
+		const int now = Unsorted::CurrentFrame;
+
+		if (serial != NeuralMatchSerial)
+		{
+			serial = NeuralMatchSerial;
+			std::fill(std::begin(lastFrame), std::end(lastFrame), -1);
+		}
+
+		if (held.size() < 12 || houseIndex < 0 || houseIndex >= 64 || (lastFrame[houseIndex] >= 0 && now - lastFrame[houseIndex] < 900))
+			return;
+
+		std::vector<int> group(held.size(), -1);
+		size_t bestGroup = 0;
+		size_t bestSize = 0;
+
+		for (size_t i = 0; i < held.size(); ++i)
+		{
+			if (group[i] >= 0)
+				continue;
+
+			std::vector<size_t> open { i };
+			group[i] = static_cast<int>(i);
+			size_t size = 0;
+
+			while (!open.empty())
+			{
+				const size_t k = open.back();
+				open.pop_back();
+				++size;
+
+				for (size_t j = 0; j < held.size(); ++j)
+				{
+					if (group[j] < 0 && std::abs(held[j].Cell.X - held[k].Cell.X) <= 2 && std::abs(held[j].Cell.Y - held[k].Cell.Y) <= 2)
+					{
+						group[j] = static_cast<int>(i);
+						open.push_back(j);
+					}
+				}
+			}
+
+			if (size > bestSize)
+			{
+				bestSize = size;
+				bestGroup = i;
+			}
+		}
+
+		if (bestSize < 12)
+			return;
+
+		lastFrame[houseIndex] = now;
+		auto const& macro = GetMacroState(pHouse);
+		auto const& tags = CreditTags[std::clamp(houseIndex, 0, 31)];
+		short minX = SHRT_MAX, maxX = SHRT_MIN, minY = SHRT_MAX, maxY = SHRT_MIN;
+		int narrow = 0, goalNear = 0, goalMid = 0, goalFar = 0, inPlan = 0, onRepair = 0, longest = 0;
+		std::map<std::string, int> missions, sources, types;
+		std::map<std::pair<short, short>, int> dests;
+
+		for (size_t i = 0; i < held.size(); ++i)
+		{
+			if (group[i] != static_cast<int>(bestGroup))
+				continue;
+
+			auto const& h = held[i];
+			FootClass* const pFoot = h.Foot;
+			minX = std::min(minX, h.Cell.X);
+			maxX = std::max(maxX, h.Cell.X);
+			minY = std::min(minY, h.Cell.Y);
+			maxY = std::max(maxY, h.Cell.Y);
+			narrow += IsNarrowPassage(h.Cell) ? 1 : 0;
+			const double goal = h.Cell.DistanceFrom(h.Dest);
+			(goal <= 4.0 ? goalNear : (goal <= 12.0 ? goalMid : goalFar))++;
+			dests[{ h.Dest.X, h.Dest.Y }]++;
+
+			if (auto const it = macro.FootProgress.find(pFoot->UniqueID); it != macro.FootProgress.end() && now >= it->second.SinceFrame)
+				longest = std::max(longest, now - it->second.SinceFrame);
+
+			const bool member = macro.PlanMembers.contains(pFoot->UniqueID);
+			inPlan += member ? 1 : 0;
+			onRepair += IsOnRepairTrip(pHouse, pFoot->UniqueID) ? 1 : 0;
+			missions["m" + std::to_string(static_cast<int>(pFoot->CurrentMission)) + "/" + std::to_string(static_cast<int>(pFoot->MegaMission))]++;
+
+			if (auto const pType = pFoot->GetTechnoType())
+				types[pType->ID]++;
+
+			auto const it = tags.find(pFoot->UniqueID);
+			const int source = it != tags.end() ? it->second.CommandSource : -1;
+			std::string sourceName = source == CreditSourceWave ? "wave" : (source >= 0 ? "plan" + std::to_string(source) : "none");
+
+			if (it != tags.end() && source >= 0)
+				sourceName += now - it->second.CommandFrame < 1800 ? "<1800" : ">1800";
+
+			sources[sourceName]++;
+		}
+
+		// Nearest building of a house we are at war with, to the group's centre.
+		const CellStruct centre { static_cast<short>((minX + maxX) / 2), static_cast<short>((minY + maxY) / 2) };
+		double enemyDist = 999.0;
+		CellStruct enemyAt = CellStruct::Empty;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Owner || pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner)
+				|| pBld->Owner->IsNeutral())
+			{
+				continue;
+			}
+
+			const double d = pBld->GetMapCoords().DistanceFrom(centre);
+
+			if (d < enemyDist)
+			{
+				enemyDist = d;
+				enemyAt = pBld->GetMapCoords();
+			}
+		}
+
+		std::string text;
+
+		for (auto const& [key, count] : missions)
+			text += key + "x" + std::to_string(count) + " ";
+
+		text += "| sources ";
+
+		for (auto const& [key, count] : sources)
+			text += key + "x" + std::to_string(count) + " ";
+
+		std::vector<std::pair<int, std::pair<short, short>>> topDests;
+
+		for (auto const& [cell, count] : dests)
+			topDests.push_back({ count, cell });
+
+		std::sort(topDests.begin(), topDests.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
+		text += "| dest ";
+
+		for (size_t i = 0; i < topDests.size() && i < 5; ++i)
+		{
+			text += "(" + std::to_string(topDests[i].second.first) + "," + std::to_string(topDests[i].second.second) + ")x"
+				+ std::to_string(topDests[i].first) + " ";
+		}
+
+		text += "| types ";
+
+		for (auto const& [key, count] : types)
+			text += key + "x" + std::to_string(count) + " ";
+
+		Debug::Log("[NeuralAI] held column DIAG house %d frame %d: %d held in x %d..%d y %d..%d (%d in a narrow passage), goal within 4 cells %d, "
+			"5-12 %d, farther %d, in a plan %d, on a repair trip %d, longest held %d frames, nearest enemy building (%d,%d) %.0f cells | %s\n",
+			houseIndex, now, static_cast<int>(bestSize), minX, maxX, minY, maxY, narrow, goalNear, goalMid, goalFar, inPlan, onRepair, longest,
+			enemyAt.X, enemyAt.Y, enemyDist, text.c_str());
+	}
+
 	// Stuck order watchdog: a ground unit with a move or attack-move destination that has not
 	// left its cell is released (orders cleared, back to Guard) so the AI gives it a new job:
 	// after 450 frames when the destination is in another movement zone (unreachable: e.g. the
@@ -1876,6 +2040,7 @@ namespace
 			macro.FootProgress = std::move(progress);
 		}
 
+		LogHeldColumn(pHouse, stuckOrders);
 		UpdateJamBreaker(pHouse, stuckOrders);
 		UpdateJamMouths(pHouse);
 		UpdateEmergencyLanes(pHouse);
