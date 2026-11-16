@@ -142,6 +142,77 @@ namespace
 		return best;
 	}
 
+	// Can the house ever meet one of the type's prerequisite lists? Every entry it lacks has to be a
+	// building of its side and tech level, or a generic group with one such building. A list that asks
+	// for a building nobody builds (TechLevel=-1: the mod's hack that keeps a type for AI scripts only)
+	// is never met.
+	bool CanEverMeetPrerequisites(HouseClass* pHouse, TechnoTypeClass* pType)
+	{
+		auto const pExt = pType ? TechnoTypeExt::Fetch(pType) : nullptr;
+
+		if (!pHouse || !pExt)
+			return false;
+
+		const int typeIndex = pHouse->Type ? pHouse->Type->ArrayIndex : -1;
+		const unsigned int ownHouseBit = (typeIndex >= 0 && typeIndex < 32) ? (1u << typeIndex) : 0u;
+		auto const& generics = RulesExt::Global()->GenericPrerequisites;
+
+		auto const buildable = [&](int idx)
+		{
+			auto const pBld = idx >= 0 && idx < BuildingTypeClass::Array.Count ? BuildingTypeClass::Array.GetItem(idx) : nullptr;
+
+			return pBld && pBld->TechLevel >= 0 && pBld->TechLevel <= pHouse->TechLevel
+				&& (ownHouseBit == 0u || pBld->InOwners(ownHouseBit));
+		};
+
+		auto const met = [&](auto const& list)
+		{
+			for (const int idx : list)
+			{
+				if (HouseExt::HasPrerequisite(pHouse, idx))
+					continue;
+
+				if (idx >= 0)
+				{
+					if (!buildable(idx))
+						return false;
+
+					continue;
+				}
+
+				bool any = false;
+
+				if (-idx < generics.Count)
+				{
+					for (const int member : generics.GetItem(-idx))
+					{
+						if (buildable(member))
+						{
+							any = true;
+							break;
+						}
+					}
+				}
+
+				if (!any)
+					return false;
+			}
+
+			return true;
+		};
+
+		if (!pExt->Prerequisite.empty() ? met(pExt->Prerequisite) : met(pType->Prerequisite))
+			return true;
+
+		for (auto const& list : pExt->Prerequisite_ListVector)
+		{
+			if (met(list))
+				return true;
+		}
+
+		return false;
+	}
+
 	// Defined in NeuralAI.Placement.inl.
 	void SellFactoryRoadBlock(HouseClass* pHouse);
 
@@ -2459,6 +2530,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					crossingBuildable = true;
 					break;
 				}
+
+				if (!CanEverMeetPrerequisites(pHouse, pType))
+					continue;
 
 				std::vector<int> missing = MissingTypePrerequisites(pHouse, pType);
 				const size_t direct = missing.size();
