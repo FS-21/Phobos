@@ -1601,6 +1601,11 @@ namespace
 			if (pFoot->SlaveOwner)
 				return;
 
+			// A unit of a transport operation waits on purpose by its beach, and the operation looks after
+			// its moves (182 orders of this watchdog found on them in 13 matches).
+			if (IsInTransportOp(pHouse, pFoot->UniqueID))
+				return;
+
 			auto const pType = pFoot->GetTechnoType();
 
 			// Ships included: an unreachable naval order (land cell) is dropped like any other.

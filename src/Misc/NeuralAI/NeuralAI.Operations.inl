@@ -344,10 +344,14 @@ namespace
 				return false;
 		}
 
+		// A plan's member stays with its plan (plans start only when every member walks there).
 		auto const pType = pFoot->GetTechnoType();
 
-		if (!pType || CrossesWaterAlone(pType) || GetOpCarrier(pFoot) != OpCarrier::None || pFoot->Transporter)
+		if (!pType || CrossesWaterAlone(pType) || GetOpCarrier(pFoot) != OpCarrier::None || pFoot->Transporter
+			|| IsPlanMember(pHouse, uid))
+		{
 			return false;
+		}
 
 		// The unit's own movement may join the two cells where a vehicle's does not (a soldier on stairs).
 		const int footZone = OpFootGroundZone(pFoot);

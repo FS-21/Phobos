@@ -700,8 +700,9 @@ namespace
 
 		auto isFree = [&](FootClass* pFoot) -> bool
 		{
+			// A unit of a transport operation is no scout until the operation hands it back.
 			return pFoot && pFoot->Owner == pHouse && pFoot->IsAlive && !pFoot->InLimbo && !macro.PlanMembers.contains(pFoot->UniqueID)
-				&& !IsScoutTripUnit(state, pFoot->UniqueID)
+				&& !IsInTransportOp(pHouse, pFoot->UniqueID) && !IsScoutTripUnit(state, pFoot->UniqueID)
 				&& std::none_of(state.Benched.begin(), state.Benched.end(),
 					[pFoot](const std::pair<DWORD, int>& bench) { return bench.first == pFoot->UniqueID; });
 		};
