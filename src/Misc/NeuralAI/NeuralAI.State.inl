@@ -1547,6 +1547,21 @@ namespace
 	constexpr int MindControlVehiclesPer = 4;
 	// Frames between the harvest income log lines of a house (harvesters against deployed miners).
 	constexpr int IncomeLogFrames = 4500;
+	// Defenses measured in points as the Advanced AI does, by AI difficulty (Hard, Normal, Easy):
+	// the ground level a base wants (base, per refinery, per functional structure, with an
+	// expansion pending), the anti-air base, and the most either reaches. A defense that declares
+	// no value counts as a typical one. Coverage of the key assets (CoverageDefenseCells) comes on
+	// top, two towers per asset at most past the level.
+	constexpr int DefenseBaseValue[3] = { 70, 45, 25 };
+	constexpr int AntiAirBaseValue[3] = { 40, 25, 15 };
+	constexpr int DefenseMaxValue[3] = { 220, 150, 90 };
+	constexpr int DefenseValuePerRefinery = 10;
+	constexpr int DefenseValuePerStructure = 5;
+	constexpr int DefenseValueExpansionPending = 25;
+	constexpr int DefenseValueRecentAttack = 30;
+	constexpr int GroundDefenseTypicalValue = 20;
+	constexpr int CoverageDefenseCells = 10;
+	constexpr int CoverageDefenseBonus = 500;
 	constexpr int CarryallDropSearchCells = 6;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
