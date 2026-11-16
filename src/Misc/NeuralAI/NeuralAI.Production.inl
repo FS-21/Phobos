@@ -3011,8 +3011,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (minimumFirst && owned >= 1 && !islandYardNeedsShipyard)
 					continue;
 
-				if (!(HouseNeedsNaval(pHouse) || islandYardNeedsShipyard) || CachedTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
+				// A crossing that waits for a transport this shipyard builds (crossingPrerequisites) is reason
+				// enough: a Yuri house with 31000 credits never built the yard its hovercraft needs.
+				const bool crossingNeedsYard = owned == 0
+					&& std::find(crossingPrerequisites.begin(), crossingPrerequisites.end(), pBld->ArrayIndex) != crossingPrerequisites.end();
+
+				if (!(HouseNeedsNaval(pHouse) || islandYardNeedsShipyard || crossingNeedsYard)
+					|| CachedTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
+				{
 					continue;
+				}
 
 				score = scores[7] - owned * 950;
 
