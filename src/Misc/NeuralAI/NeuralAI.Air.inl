@@ -51,10 +51,13 @@ namespace
 	}
 
 	// Pickup leg of an empty carryall: while the safe air lane still needs a detour it flies
-	// the detour hop; once the lane is direct (or within 12 cells) it gets the real pickup order
-	// (aircraft carryall: Capture; Phobos unit carryall: move onto the cargo). Returns true when
-	// the real pickup order was given.
-	bool AdvanceRoutedPickup(HouseClass* pHouse, FootClass* pCarrier, UnitClass* pCargo, bool isUnitCarryall)
+	// the detour hop; once the lane is direct (or within 12 cells) it gets the real pickup order, a
+	// move onto the cargo. The engine's carryall aircraft lifts a vehicle on its move mission sent to
+	// the vehicle itself, as the player's tote order does (AircraftClass::Do_MISSION_MOVE_Carryall:
+	// it radios the vehicle to hold still, comes down over it and takes it aboard); told to capture
+	// its cargo it sat on its pad (14 of 14 carryalls of the transport operations, 2026-11-16). The
+	// Phobos unit carryall lifts the same way. Returns true when the real pickup order was given.
+	bool AdvanceRoutedPickup(HouseClass* pHouse, FootClass* pCarrier, UnitClass* pCargo)
 	{
 		if (!pHouse || !pCarrier || !pCargo)
 			return false;
@@ -65,17 +68,9 @@ namespace
 		if (!pHop || pHop == pCargoCell)
 		{
 			AirPickups.erase(pCarrier->UniqueID);
-
-			if (isUnitCarryall)
-			{
-				pCarrier->SetDestination(pCargo, true);
-				pCarrier->QueueMission(Mission::Move, true);
-			}
-			else
-			{
-				pCarrier->SetTarget(pCargo);
-				pCarrier->QueueMission(Mission::Capture, true);
-			}
+			pCarrier->SetTarget(nullptr);
+			pCarrier->SetDestination(pCargo, true);
+			pCarrier->QueueMission(Mission::Move, true);
 
 			return true;
 		}

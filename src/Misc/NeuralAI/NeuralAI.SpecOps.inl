@@ -1197,7 +1197,9 @@ namespace
 				if (pTarget && now - capture.StartFrame > captureTimeout)
 					FailSpecOpsCapture(state, capture.TargetID, 1800);
 
-				if (pEngineer->Destination == pTarget || pEngineer->CurrentMission == Mission::Enter)
+				// An engineer a transport operation carries waits for the operation to give it back.
+				if ((pEngineer->Destination == pTarget || pEngineer->CurrentMission == Mission::Enter)
+					&& !IsInTransportOp(pHouse, pEngineer->UniqueID))
 				{
 					pEngineer->SetDestination(nullptr, true);
 					pEngineer->QueueMission(Mission::Guard, true);
@@ -2085,7 +2087,8 @@ namespace
 			seen.insert(id);
 			auto it = strikes.find(id);
 
-			if (IsPlanMember(pHouse, id))
+			// A plan's member and a unit of a transport operation take their orders from them alone.
+			if (IsPlanMember(pHouse, id) || IsInTransportOp(pHouse, id))
 			{
 				if (it != strikes.end())
 					strikes.erase(it);

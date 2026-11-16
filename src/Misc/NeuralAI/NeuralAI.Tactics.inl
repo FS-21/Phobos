@@ -1489,8 +1489,10 @@ namespace
 
 		for (auto const pUnit : UnitClass::Array)
 		{
+			// A flying transport of a transport operation hangs over its cell on purpose (it waits to come
+			// down, or for its passengers); the operation has its own watchdogs.
 			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type
-				|| !(pUnit->Type->JumpJet || pUnit->Type->MovementZone == MovementZone::Fly))
+				|| !(pUnit->Type->JumpJet || pUnit->Type->MovementZone == MovementZone::Fly) || IsInTransportOp(pHouse, pUnit->UniqueID))
 			{
 				continue;
 			}
@@ -2065,7 +2067,7 @@ namespace
 		for (auto const pAir : AircraftClass::Array)
 		{
 			if (!pAir || pAir->Owner != pHouse || !pAir->IsAlive || pAir->InLimbo || !pAir->Type || pAir->Type->Spawned
-				|| pAir->CurrentMission != Mission::Attack || !pAir->Target)
+				|| pAir->CurrentMission != Mission::Attack || !pAir->Target || IsInTransportOp(pHouse, pAir->UniqueID))
 			{
 				continue;
 			}

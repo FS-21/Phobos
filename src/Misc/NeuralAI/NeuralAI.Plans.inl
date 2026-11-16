@@ -497,7 +497,7 @@ namespace
 			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type
 				|| !IsAirborneThreatTechno(pUnit) || GroundRangeOf(pUnit->Type) <= 0 || pUnit->Target != nullptr
 				|| macro.PlanMembers.contains(pUnit->UniqueID) || macro.CapitalHeld.contains(pUnit->UniqueID)
-				|| pUnit->GetHealthPercentage() < 0.25)
+				|| IsInTransportOp(pHouse, pUnit->UniqueID) || pUnit->GetHealthPercentage() < 0.25)
 			{
 				continue;
 			}

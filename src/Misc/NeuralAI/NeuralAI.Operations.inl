@@ -206,9 +206,10 @@ namespace
 			return false;
 		}
 
+		// A carryall on its way to a vehicle (a move sent to it) is lifting it.
 		if (carrier == OpCarrier::Carryall)
 		{
-			return pFoot->CurrentMission != Mission::Capture && pFoot->CurrentMission != Mission::Unload
+			return pFoot->CurrentMission != Mission::Unload && !abstract_cast<UnitClass*>(pFoot->Destination)
 				&& !FindPendingPickupCargo(pHouse, pFoot);
 		}
 
@@ -305,6 +306,772 @@ namespace
 		}
 
 		return nullptr;
+	}
+
+	// A transport that flies: a jumpjet or flying transport, a carryall aircraft.
+	bool OpTypeFlies(const TechnoTypeClass* pType)
+	{
+		return pType && (pType->WhatAmI() == AbstractType::AircraftType || pType->JumpJet || pType->MovementZone == MovementZone::Fly);
+	}
+
+	// What can hit a transport of an operation on its way (PlanOpRoute), as the loss log names it: a
+	// known enemy defense, any other known enemy building, an enemy unit in sight or one seen lately,
+	// a place where we lost such a transport. Its reach in cells and its weight per cell inside it.
+	enum class OpThreatKind : uint8_t
+	{
+		Defense,
+		Building,
+		Unit,
+		Sighting,
+		Loss
+	};
+
+	struct OpThreat
+	{
+		CellStruct Cell;
+		int Reach;
+		int Weight;
+		OpThreatKind Kind;
+		const TechnoTypeClass* Type;
+	};
+
+	const char* OpThreatKindName(OpThreatKind kind)
+	{
+		switch (kind)
+		{
+		case OpThreatKind::Defense:
+			return "defense";
+		case OpThreatKind::Building:
+			return "building";
+		case OpThreatKind::Unit:
+			return "unit in sight";
+		case OpThreatKind::Sighting:
+			return "unit seen lately";
+		case OpThreatKind::Loss:
+			return "loss spot";
+		default:
+			return "?";
+		}
+	}
+
+	// How far in cells the weapons of a type hit a transport in the air or on the ground (0: none of
+	// them hits it), OpRouteMaxReachCells at most.
+	int OpThreatReach(const TechnoTypeClass* pType, bool airborne)
+	{
+		int reach = 0;
+
+		for (size_t i = 0; i < 2; ++i)
+		{
+			auto const pWeapon = pType->GetWeapon(i, false).WeaponType;
+
+			if (!pWeapon || pWeapon->Damage <= 0)
+				continue;
+
+			auto const pProjectile = pWeapon->Projectile;
+
+			if (pProjectile ? (airborne ? !pProjectile->AA : !pProjectile->AG) : airborne)
+				continue;
+
+			reach = std::max(reach, pWeapon->Range / Unsorted::LeptonsPerCell);
+		}
+
+		return std::min(reach, OpRouteMaxReachCells);
+	}
+
+	// Every threat a crossing in the air or on the ground keeps away from, as the house knows them.
+	void CollectOpThreats(HouseClass* pHouse, bool airborne, std::vector<OpThreat>& threats)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		threats.clear();
+
+		auto const isEnemy = [pHouse](HouseClass* pOwner)
+		{
+			return pOwner && pOwner != pHouse && !pHouse->IsAlliedWith(pOwner) && !pOwner->IsNeutral() && !pOwner->IsObserver()
+				&& !pOwner->Defeated;
+		};
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type || pBld->Type->Insignificant || pBld->Type->InvisibleInGame
+				|| !isEnemy(pBld->Owner) || !IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				continue;
+			}
+
+			const int reach = OpThreatReach(pBld->Type, airborne);
+
+			if (reach > 0)
+				threats.push_back({ pBld->GetMapCoords(), reach + OpRouteDefenseMarginCells, OpRouteDefenseWeight, OpThreatKind::Defense, pBld->Type });
+			else
+				threats.push_back({ pBld->GetMapCoords(), OpRouteBaseCells, 1, OpThreatKind::Building, pBld->Type });
+		}
+
+		// Enemy units in sight. Aircraft count against flying transports only: where one is now says
+		// little about where it strikes a ship. A cloaked unit is not seen.
+		std::unordered_set<DWORD> inSight;
+		std::unordered_set<DWORD> alive;
+
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || pTechno->InLimbo || !pTechno->IsAlive || pTechno->WhatAmI() == AbstractType::Building || !isEnemy(pTechno->Owner))
+				continue;
+
+			alive.insert(pTechno->UniqueID);
+			auto const pCell = pTechno->GetCell();
+
+			if ((!airborne && pTechno->WhatAmI() == AbstractType::Aircraft) || !pCell || pTechno->CloakState == CloakState::Cloaked
+				|| !IsCellVisibleToAI(pHouse, pCell))
+			{
+				continue;
+			}
+
+			inSight.insert(pTechno->UniqueID);
+			auto const pType = pTechno->GetTechnoType();
+			const int reach = pType ? OpThreatReach(pType, airborne) : 0;
+
+			if (reach > 0)
+				threats.push_back({ pCell->MapCoords, reach + OpRouteUnitMarginCells, OpRouteUnitWeight, OpThreatKind::Unit, pType });
+		}
+
+		// Those out of sight, where they were last seen, fading with the time since (the order of the
+		// sightings does not matter: the danger is a sum).
+		for (auto const& [uid, sighting] : macro.EnemySightings)
+		{
+			const int age = now - sighting.LastSeenFrame;
+
+			if (!sighting.Type || sighting.LastCoords == CellStruct::Empty || age < 0 || age > OpRouteSightingFrames
+				|| inSight.contains(uid) || !alive.contains(uid) || (!airborne && sighting.Category == EnemyForceCategory::Air))
+			{
+				continue;
+			}
+
+			const int reach = OpThreatReach(sighting.Type, airborne);
+
+			if (reach > 0)
+			{
+				const int weight = std::max(1, OpRouteSightingWeight * (OpRouteSightingFrames - age) / OpRouteSightingFrames);
+				threats.push_back({ sighting.LastCoords, reach + OpRouteSightingMarginCells, weight, OpThreatKind::Sighting, sighting.Type });
+			}
+		}
+
+		// Where we lost transports of this kind; for flying ones also where our flyers were shot down
+		// (UpdateAirLossMemory), for the others the beaches where loaded ferries went down.
+		for (auto const& spot : macro.OpLossSpots)
+		{
+			const int age = now - spot.Frame;
+
+			if (spot.Airborne == airborne && age >= 0 && age < OpRouteLossFrames)
+				threats.push_back({ spot.Cell, OpRouteLossCells, OpRouteLossWeight, OpThreatKind::Loss, nullptr });
+		}
+
+		if (airborne)
+		{
+			for (auto const& [spot, frame] : macro.AirDangerSpots)
+			{
+				const int age = now - frame;
+
+				if (age >= 0 && age < 8100)
+					threats.push_back({ spot, 7, 3 - age / 2700, OpThreatKind::Loss, nullptr });
+			}
+		}
+		else
+		{
+			for (auto const& [cell, frame] : macro.BloodyBeaches)
+			{
+				const int age = now - frame;
+
+				if (age >= 0 && age < OpRouteLossFrames)
+					threats.push_back({ cell, OpRouteLossCells, OpRouteLossWeight / 2, OpThreatKind::Loss, nullptr });
+			}
+		}
+	}
+
+	// The danger of every block of the map (OpRouteBlockCells cells a side) for a crossing in the air
+	// or on the ground, and the threats it was built from.
+	struct OpDangerMap
+	{
+		int Left { 0 };
+		int Top { 0 };
+		int Width { 1 };
+		int Height { 1 };
+		std::vector<int> Danger;
+		std::vector<OpThreat> Threats;
+
+		int IndexOf(const CellStruct& cell) const
+		{
+			const int bx = std::clamp((cell.X - this->Left) / OpRouteBlockCells, 0, this->Width - 1);
+			const int by = std::clamp((cell.Y - this->Top) / OpRouteBlockCells, 0, this->Height - 1);
+
+			return by * this->Width + bx;
+		}
+
+		CellStruct CenterOf(int index) const
+		{
+			return { static_cast<short>(this->Left + (index % this->Width) * OpRouteBlockCells + OpRouteBlockCells / 2),
+				static_cast<short>(this->Top + (index / this->Width) * OpRouteBlockCells + OpRouteBlockCells / 2) };
+		}
+	};
+
+	// Built once per frame, house and kind of crossing.
+	const OpDangerMap& GetOpDangerMap(HouseClass* pHouse, bool airborne)
+	{
+		static std::array<OpDangerMap, 2> maps;
+		static std::array<int, 2> builtFrame { -1, -1 };
+		static std::array<int, 2> builtHouse { -1, -1 };
+		static std::array<int, 2> builtSerial { -1, -1 };
+		const size_t kind = airborne ? 1 : 0;
+		auto& map = maps[kind];
+
+		if (builtFrame[kind] == Unsorted::CurrentFrame && builtHouse[kind] == pHouse->ArrayIndex && builtSerial[kind] == NeuralMatchSerial)
+			return map;
+
+		builtFrame[kind] = Unsorted::CurrentFrame;
+		builtHouse[kind] = pHouse->ArrayIndex;
+		builtSerial[kind] = NeuralMatchSerial;
+
+		LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
+
+		if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
+			bounds = LTRBStruct { 0, 0, 511, 511 };
+
+		map.Left = std::max(0, bounds.Left);
+		map.Top = std::max(0, bounds.Top);
+		map.Width = std::max(1, (bounds.Right - map.Left) / OpRouteBlockCells + 1);
+		map.Height = std::max(1, (bounds.Bottom - map.Top) / OpRouteBlockCells + 1);
+		map.Danger.assign(static_cast<size_t>(map.Width * map.Height), 0);
+		CollectOpThreats(pHouse, airborne, map.Threats);
+
+		for (auto const& threat : map.Threats)
+		{
+			const int span = threat.Reach / OpRouteBlockCells + 1;
+			const int cx = (threat.Cell.X - map.Left) / OpRouteBlockCells;
+			const int cy = (threat.Cell.Y - map.Top) / OpRouteBlockCells;
+
+			for (int by = std::max(0, cy - span); by <= std::min(map.Height - 1, cy + span); ++by)
+			{
+				for (int bx = std::max(0, cx - span); bx <= std::min(map.Width - 1, cx + span); ++bx)
+				{
+					const int index = by * map.Width + bx;
+					const int distance = static_cast<int>(map.CenterOf(index).DistanceFrom(threat.Cell));
+
+					if (distance < threat.Reach)
+						map.Danger[static_cast<size_t>(index)] += (threat.Reach - distance) * threat.Weight;
+				}
+			}
+		}
+
+		return map;
+	}
+
+	// The threat nearest to a cell among those whose reach covers it, else the nearest of all (the
+	// loss log); nullptr with none.
+	const OpThreat* NearestOpThreat(const OpDangerMap& map, const CellStruct& cell, double& distance)
+	{
+		const OpThreat* pNearest = nullptr;
+		bool covers = false;
+		distance = 0.0;
+
+		for (auto const& threat : map.Threats)
+		{
+			const double d = threat.Cell.DistanceFrom(cell);
+			const bool inReach = d < threat.Reach;
+
+			if (!pNearest || (inReach && !covers) || (inReach == covers && d < distance))
+			{
+				pNearest = &threat;
+				covers = inReach;
+				distance = d;
+			}
+		}
+
+		return pNearest;
+	}
+
+	// Walks the straight line between two blocks of the map, block by block (the first one left out):
+	// visit(previous, block, stepX, stepY) for each step; false when visit says so.
+	template <typename Visit>
+	bool WalkOpLine(const OpDangerMap& map, int from, int to, Visit&& visit)
+	{
+		int x = from % map.Width;
+		int y = from / map.Width;
+		const int tx = to % map.Width;
+		const int ty = to / map.Width;
+		const int dx = std::abs(tx - x);
+		const int dy = std::abs(ty - y);
+		const int sx = x < tx ? 1 : -1;
+		const int sy = y < ty ? 1 : -1;
+		int error = dx - dy;
+
+		while (x != tx || y != ty)
+		{
+			const int previous = y * map.Width + x;
+			const int doubled = 2 * error;
+			int stepX = 0;
+			int stepY = 0;
+
+			if (doubled > -dy)
+			{
+				error -= dy;
+				x += sx;
+				stepX = sx;
+			}
+
+			if (doubled < dx)
+			{
+				error += dx;
+				y += sy;
+				stepY = sy;
+			}
+
+			if (!visit(previous, y * map.Width + x, stepX, stepY))
+				return false;
+		}
+
+		return true;
+	}
+
+	// The cost (and danger) of going straight from one cell to another over the danger map: a step
+	// across a block costs 10 (14 diagonally) times OpRouteBaseCost plus the block's danger.
+	int OpLineCost(const OpDangerMap& map, const CellStruct& from, const CellStruct& to, int& danger)
+	{
+		int cost = 0;
+		danger = 0;
+
+		WalkOpLine(map, map.IndexOf(from), map.IndexOf(to), [&](int, int block, int stepX, int stepY)
+			{
+				cost += (stepX && stepY ? 14 : 10) * (OpRouteBaseCost + map.Danger[static_cast<size_t>(block)]);
+				danger += map.Danger[static_cast<size_t>(block)];
+
+				return true;
+			});
+
+		return cost;
+	}
+
+	// The cost of a route still ahead: from the cell through the waypoints to the landing, straight
+	// between them.
+	int OpRouteCost(const OpDangerMap& map, const CellStruct& from, const std::vector<CellStruct>& waypoints, const CellStruct& landing)
+	{
+		int cost = 0;
+		int danger = 0;
+		CellStruct at = from;
+
+		for (auto const& waypoint : waypoints)
+		{
+			cost += OpLineCost(map, at, waypoint, danger);
+			at = waypoint;
+		}
+
+		return cost + OpLineCost(map, at, landing, danger);
+	}
+
+	// The way a transport of an operation takes to one of its landings (PlanOpRoute): the landing, the
+	// waypoints before it, the danger of the blocks it crosses, the cost of the way, that cost with the
+	// landing's own share (its danger, the walk it adds), and that total for every landing asked about
+	// (INT_MAX: out of reach).
+	struct OpRoutePlan
+	{
+		CellStruct Landing { CellStruct::Empty };
+		std::vector<CellStruct> Waypoints;
+		int Danger { 0 };
+		int Cost { 0 };
+		int Total { 0 };
+		std::vector<int> Totals;
+	};
+
+	// The safest way for a transport of an operation from where it stands to one of the landings (user:
+	// a new route of safe waypoints so that more of them survive, keeping away from the defenses and
+	// from the enemy units wherever possible): the cheapest over the danger map of its kind, each
+	// landing adding its own danger (that of the ground too for the passengers of a flying transport)
+	// and extraWalk cells of walk for the members. A ground transport keeps to the cells of its own
+	// movement zone, a flying one goes anywhere. A carryall and a burrowing transport go straight: the
+	// engine's carryall sets its vehicle down at the end of every move (AircraftClass::
+	// Do_MISSION_MOVE_Carryall), and a burrower crosses under the ground. False when no landing can be
+	// reached.
+	bool PlanOpRoute(HouseClass* pHouse, FootClass* pTransport, OpCarrier carrier, const std::vector<CellStruct>& landings,
+		const std::vector<int>& extraWalk, OpRoutePlan& plan)
+	{
+		plan = OpRoutePlan {};
+
+		if (landings.empty() || landings.size() != extraWalk.size())
+			return false;
+
+		auto const pType = pTransport->GetTechnoType();
+		const bool airborne = carrier != OpCarrier::Surface;
+		auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
+		const bool underground = pUnitType && IsUndergroundTransportType(pUnitType);
+		auto const& map = GetOpDangerMap(pHouse, airborne);
+		auto const pGroundMap = airborne ? &GetOpDangerMap(pHouse, false) : nullptr;
+		const CellStruct from = pTransport->GetMapCoords();
+		const int walkCell = 10 * OpRouteBaseCost / OpRouteBlockCells;
+		const int landingFactor = airborne ? OpLandingFlyerDangerFactor : OpLandingDangerFactor;
+		plan.Totals.assign(landings.size(), INT_MAX);
+
+		auto const landingShare = [&](size_t i)
+		{
+			int share = 10 * map.Danger[static_cast<size_t>(map.IndexOf(landings[i]))] * landingFactor + std::max(0, extraWalk[i]) * walkCell;
+
+			if (pGroundMap)
+				share += 10 * pGroundMap->Danger[static_cast<size_t>(pGroundMap->IndexOf(landings[i]))] * OpLandingDangerFactor;
+
+			return share;
+		};
+
+		auto const take = [&](size_t i, int cost, int danger)
+		{
+			const int total = cost + landingShare(i);
+			plan.Totals[i] = total;
+
+			if (plan.Landing == CellStruct::Empty || total < plan.Total)
+			{
+				plan.Landing = landings[i];
+				plan.Cost = cost;
+				plan.Danger = danger;
+				plan.Total = total;
+			}
+		};
+
+		if (carrier == OpCarrier::Carryall || underground)
+		{
+			for (size_t i = 0; i < landings.size(); ++i)
+			{
+				// Under the ground a burrower meets no danger on its way.
+				int danger = 0;
+				const int cost = underground ? static_cast<int>(from.DistanceFrom(landings[i])) * walkCell : OpLineCost(map, from, landings[i], danger);
+				take(i, cost, underground ? 0 : danger);
+			}
+
+			return true;
+		}
+
+		const MovementZone movementZone = pType->MovementZone;
+		const int zone = airborne ? -1 : MapClass::Instance.GetMovementZoneType(from, movementZone, pTransport->OnBridge);
+		const size_t blocks = static_cast<size_t>(map.Width * map.Height);
+		constexpr int Last = OpRouteBlockCells - 1;
+
+		// Which cells of a block the transport can be on (bit 3 * row + column), worked out when first
+		// asked for (-1: not yet).
+		std::vector<int> cellsOf(blocks, -1);
+
+		auto const cellOf = [&map](int block, int column, int row) -> CellStruct
+		{
+			return { static_cast<short>(map.Left + (block % map.Width) * OpRouteBlockCells + column),
+				static_cast<short>(map.Top + (block / map.Width) * OpRouteBlockCells + row) };
+		};
+
+		auto const bit = [](int column, int row) { return 1 << (row * OpRouteBlockCells + column); };
+
+		auto const maskOf = [&](int block) -> int
+		{
+			int& mask = cellsOf[static_cast<size_t>(block)];
+
+			if (mask >= 0)
+				return mask;
+
+			mask = 0;
+
+			for (int row = 0; row < OpRouteBlockCells; ++row)
+			{
+				for (int column = 0; column < OpRouteBlockCells; ++column)
+				{
+					const CellStruct c = cellOf(block, column, row);
+
+					if (MapClass::Instance.CoordinatesLegal(c) && (airborne || MapClass::Instance.GetMovementZoneType(c, movementZone, false) == zone))
+						mask |= bit(column, row);
+				}
+			}
+
+			return mask;
+		};
+
+		// Two neighbouring blocks join when a usable cell of one touches a usable cell of the other.
+		auto const joined = [&](int a, int b, int stepX, int stepY) -> bool
+		{
+			const int maskA = maskOf(a);
+			const int maskB = maskOf(b);
+
+			if (!maskA || !maskB)
+				return false;
+
+			if (stepX && stepY)
+			{
+				const int column = stepX > 0 ? Last : 0;
+				const int row = stepY > 0 ? Last : 0;
+
+				return (maskA & bit(column, row)) && (maskB & bit(Last - column, Last - row));
+			}
+
+			for (int k = 0; k < OpRouteBlockCells; ++k)
+			{
+				for (int j = std::max(0, k - 1); j <= std::min(Last, k + 1); ++j)
+				{
+					const bool touches = stepX
+						? (maskA & bit(stepX > 0 ? Last : 0, k)) && (maskB & bit(stepX > 0 ? 0 : Last, j))
+						: (maskA & bit(k, stepY > 0 ? Last : 0)) && (maskB & bit(j, stepY > 0 ? 0 : Last));
+
+					if (touches)
+						return true;
+				}
+			}
+
+			return false;
+		};
+
+		// Dijkstra over the blocks from the transport's own, until every landing's block is settled.
+		std::vector<int> cost(blocks, INT_MAX);
+		std::vector<int> came(blocks, -1);
+		std::vector<uint8_t> goal(blocks, 0);
+		int goals = 0;
+
+		for (auto const& landing : landings)
+		{
+			auto& isGoal = goal[static_cast<size_t>(map.IndexOf(landing))];
+
+			if (!isGoal)
+			{
+				isGoal = 1;
+				goals++;
+			}
+		}
+
+		using OpenBlock = std::pair<int, int>;
+		std::vector<OpenBlock> open;
+		auto const later = [](const OpenBlock& a, const OpenBlock& b) { return a > b; };
+		const int start = map.IndexOf(from);
+		cost[static_cast<size_t>(start)] = 0;
+		open.push_back({ 0, start });
+
+		while (!open.empty() && goals > 0)
+		{
+			std::pop_heap(open.begin(), open.end(), later);
+			const OpenBlock top = open.back();
+			open.pop_back();
+			const int block = top.second;
+
+			if (top.first > cost[static_cast<size_t>(block)])
+				continue;
+
+			if (goal[static_cast<size_t>(block)] == 1)
+			{
+				goal[static_cast<size_t>(block)] = 2;
+				goals--;
+			}
+
+			const int bx = block % map.Width;
+			const int by = block / map.Width;
+
+			for (int stepY = -1; stepY <= 1; ++stepY)
+			{
+				for (int stepX = -1; stepX <= 1; ++stepX)
+				{
+					const int nx = bx + stepX;
+					const int ny = by + stepY;
+
+					if ((!stepX && !stepY) || nx < 0 || ny < 0 || nx >= map.Width || ny >= map.Height)
+						continue;
+
+					const int next = ny * map.Width + nx;
+
+					if (!joined(block, next, stepX, stepY))
+						continue;
+
+					const int reached = top.first + (stepX && stepY ? 14 : 10) * (OpRouteBaseCost + map.Danger[static_cast<size_t>(next)]);
+
+					if (reached < cost[static_cast<size_t>(next)])
+					{
+						cost[static_cast<size_t>(next)] = reached;
+						came[static_cast<size_t>(next)] = block;
+						open.push_back({ reached, next });
+						std::push_heap(open.begin(), open.end(), later);
+					}
+				}
+			}
+		}
+
+		for (size_t i = 0; i < landings.size(); ++i)
+		{
+			const int reached = cost[static_cast<size_t>(map.IndexOf(landings[i]))];
+
+			if (reached != INT_MAX)
+				take(i, reached, 0);
+		}
+
+		if (plan.Landing == CellStruct::Empty)
+			return false;
+
+		// The path back from the landing's block, and the danger it takes up to each of its blocks.
+		std::vector<int> path;
+
+		for (int block = map.IndexOf(plan.Landing); block >= 0; block = came[static_cast<size_t>(block)])
+			path.push_back(block);
+
+		std::reverse(path.begin(), path.end());
+		std::vector<int> dangerTo(path.size(), 0);
+
+		for (size_t i = 1; i < path.size(); ++i)
+			dangerTo[i] = dangerTo[i - 1] + map.Danger[static_cast<size_t>(path[i])];
+
+		plan.Danger = dangerTo.back();
+
+		// A cell of a block the transport can be on, the middle one first.
+		auto const pointOf = [&](int block) -> CellStruct
+		{
+			const int mask = maskOf(block);
+			constexpr int Middle = OpRouteBlockCells / 2;
+
+			if (mask & bit(Middle, Middle))
+				return cellOf(block, Middle, Middle);
+
+			for (int row = 0; row < OpRouteBlockCells; ++row)
+			{
+				for (int column = 0; column < OpRouteBlockCells; ++column)
+				{
+					if (mask & bit(column, row))
+						return cellOf(block, column, row);
+				}
+			}
+
+			return map.CenterOf(block);
+		};
+
+		// The waypoints: from each one on, the farthest block of the path a straight line reaches over
+		// usable blocks at no more danger than the path takes there.
+		size_t anchor = 0;
+
+		while (anchor + 1 < path.size())
+		{
+			size_t next = anchor + 1;
+
+			for (size_t j = std::min(path.size() - 1, anchor + OpRouteSmoothBlocks); j > anchor + 1; --j)
+			{
+				int lineDanger = 0;
+				const bool clear = WalkOpLine(map, path[anchor], path[j], [&](int previous, int block, int stepX, int stepY)
+					{
+						lineDanger += map.Danger[static_cast<size_t>(block)];
+
+						return joined(previous, block, stepX, stepY);
+					});
+
+				if (clear && lineDanger <= dangerTo[j] - dangerTo[anchor])
+				{
+					next = j;
+					break;
+				}
+			}
+
+			anchor = next;
+
+			if (anchor + 1 < path.size())
+			{
+				const CellStruct waypoint = pointOf(path[anchor]);
+
+				if (waypoint.DistanceFrom(from) > OpRouteReachCells && static_cast<int>(plan.Waypoints.size()) < OpRouteMaxWaypoints)
+					plan.Waypoints.push_back(waypoint);
+			}
+		}
+
+		return true;
+	}
+
+	// The landing a load sails for (user: the landing chosen together with the route): the
+	// operation's landing or another cell of the target's land up to OpLandingCandidateCells from it
+	// (OpLandingCandidates at most, OpLandingSpacingCells apart, the nearest to the target first), the
+	// one PlanOpRoute finds cheapest for the first transport that sails. A ground transport lands by
+	// the shore on a cell it can stand on, a flying one on a free cell off the beach.
+	CellStruct ChooseOpTripLanding(HouseClass* pHouse, NeuralTransportOperation& op, FootClass* pTransport, OpCarrier carrier)
+	{
+		auto const pType = pTransport->GetTechnoType();
+		const bool flies = carrier != OpCarrier::Surface;
+		const int transportZone = flies ? -1
+			: MapClass::Instance.GetMovementZoneType(pTransport->GetMapCoords(), pType->MovementZone, pTransport->OnBridge);
+		std::vector<std::pair<double, CellStruct>> found;
+
+		for (int dy = -OpLandingCandidateCells; dy <= OpLandingCandidateCells; dy += 2)
+		{
+			for (int dx = -OpLandingCandidateCells; dx <= OpLandingCandidateCells; dx += 2)
+			{
+				const CellStruct c { static_cast<short>(op.Landing.X + dx), static_cast<short>(op.Landing.Y + dy) };
+				auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+				if (!pCell || pCell->LandType == LandType::Water || pCell->GetBuilding()
+					|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != op.TargetZone)
+				{
+					continue;
+				}
+
+				if (flies)
+				{
+					if (pCell->LandType == LandType::Beach || pCell->FirstObject
+						|| !pCell->IsClearToMove(SpeedType::Track, false, false, -1, MovementZone::Normal, -1, false))
+					{
+						continue;
+					}
+				}
+				else
+				{
+					if (MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != transportZone
+						|| !pCell->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false))
+					{
+						continue;
+					}
+
+					bool shore = false;
+
+					for (int sy = -2; sy <= 2 && !shore; ++sy)
+					{
+						for (int sx = -2; sx <= 2 && !shore; ++sx)
+						{
+							auto const pNear = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(c.X + sx), static_cast<short>(c.Y + sy) });
+							shore = pNear && pNear->LandType == LandType::Water;
+						}
+					}
+
+					if (!shore)
+						continue;
+				}
+
+				found.push_back({ c.DistanceFrom(op.Target), c });
+			}
+		}
+
+		std::stable_sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+		std::vector<CellStruct> candidates { op.Landing };
+
+		for (auto const& [distance, c] : found)
+		{
+			if (static_cast<int>(candidates.size()) >= OpLandingCandidates)
+				break;
+
+			const bool apart = std::none_of(candidates.begin(), candidates.end(),
+				[&c](const CellStruct& kept) { return kept.DistanceFrom(c) < OpLandingSpacingCells; });
+
+			if (apart)
+				candidates.push_back(c);
+		}
+
+		const double firstWalk = op.Landing.DistanceFrom(op.Target);
+		std::vector<int> extraWalk;
+
+		for (auto const& c : candidates)
+			extraWalk.push_back(std::max(0, static_cast<int>(c.DistanceFrom(op.Target) - firstWalk)));
+
+		OpRoutePlan plan;
+
+		if (!PlanOpRoute(pHouse, pTransport, carrier, candidates, extraWalk, plan))
+			return op.Landing;
+
+		if (plan.Landing != op.Landing)
+		{
+			op.LandingMoves++;
+			Debug::Log("[NeuralAI] House %d transport op %d: the load of %s %u lands at (%d,%d) instead of (%d,%d), cost %d against %s, "
+				"%d cells more walk, %d candidates, frame %d.\n", pHouse->ArrayIndex, op.Id, pType->ID, pTransport->UniqueID, plan.Landing.X,
+				plan.Landing.Y, op.Landing.X, op.Landing.Y, plan.Total, plan.Totals.front() == INT_MAX ? "no way"
+					: std::to_string(plan.Totals.front()).c_str(), std::max(0, static_cast<int>(plan.Landing.DistanceFrom(op.Target) - firstWalk)),
+				static_cast<int>(candidates.size()), Unsorted::CurrentFrame);
+		}
+
+		return plan.Landing;
 	}
 
 	NeuralTransportOperation* FindTransportOp(HouseClass* pHouse, int id)
@@ -405,6 +1172,10 @@ namespace
 		member.Target = ground;
 		pOp->Members.push_back(member);
 		macro.TransportOpOf[uid] = pOp->Id;
+
+		// A seat the old ferry loader held for it goes: that transport would call it to its door.
+		macro.FerryReserved.erase(uid);
+		macro.FerryWaitSince.erase(uid);
 
 		// Its mission waits: no target and no way of its own (the order its client gave before is
 		// dropped), until the operation hands it back.
@@ -512,10 +1283,10 @@ namespace
 			}
 
 			Debug::Log("[NeuralAI] House %d transport op %d (%s) ends: %s after %d frames; %d landed, %d lost, %d released, %d given back "
-				"(%d still aboard), %d joined, %d trips (%d failed), %d transports taken (%d lost), %d interferences, frame %d.\n",
-				houseIndex, op.Id, OpClientName(op.Client), reason, now - op.CreatedFrame, op.Landed, op.Lost, op.Released,
-				static_cast<int>(op.Members.size()) - aboard, aboard, op.Joined, op.Trips, op.FailedTrips, op.TransportsTaken,
-				op.TransportsLost, op.Interferences, now);
+				"(%d still aboard), %d joined, %d trips (%d failed), %d transports taken (%d lost), %d interferences, %d route changes of %d "
+				"replans, %d loads landed elsewhere, frame %d.\n", houseIndex, op.Id, OpClientName(op.Client), reason, now - op.CreatedFrame,
+				op.Landed, op.Lost, op.Released, static_cast<int>(op.Members.size()) - aboard, aboard, op.Joined, op.Trips, op.FailedTrips,
+				op.TransportsTaken, op.TransportsLost, op.Interferences, op.RouteChanges, op.Replans, op.LandingMoves, now);
 
 			op.Members.clear();
 			op.Transports.clear();
@@ -525,8 +1296,9 @@ namespace
 
 		// An order the operation did not give, found on one of its units: counted, logged at most once
 		// per OpInterferenceLogFrames (who interferes is to be found and fixed), and overridden by the
-		// operation's own order below (user: last word and log).
-		auto const checkInterference = [&](FootClass* pFoot, const CellStruct& orderCell, bool transport)
+		// operation's own order below (user: last word and log). pOwnObject: an object the operation
+		// sent it to (the vehicle a carryall lifts).
+		auto const checkInterference = [&](FootClass* pFoot, const CellStruct& orderCell, bool transport, AbstractClass* pOwnObject)
 		{
 			const Mission mission = pFoot->CurrentMission;
 			auto const pGoing = abstract_cast<CellClass*>(pFoot->Destination);
@@ -536,11 +1308,11 @@ namespace
 				what = "attack-move";
 			else if (mission == Mission::Hunt || mission == Mission::Patrol || mission == Mission::Sabotage
 				|| mission == Mission::Harvest || mission == Mission::Retreat || (mission == Mission::Enter && transport)
-				|| (mission == Mission::Capture && GetOpCarrier(pFoot) != OpCarrier::Carryall))
+				|| mission == Mission::Capture)
 			{
 				what = "mission";
 			}
-			else if (pFoot->Destination && !pGoing)
+			else if (pFoot->Destination && !pGoing && pFoot->Destination != pOwnObject)
 				what = "object destination";
 			else if (pGoing && orderCell != CellStruct::Empty && pGoing->MapCoords.DistanceFrom(orderCell) > 4.0
 				&& mission != Mission::Unload)
@@ -587,6 +1359,8 @@ namespace
 		};
 
 		// 1. Transports destroyed or taken from us leave; the members bound for one wait for another.
+		// A loss is logged with where and how it happened (the routes are measured by it), and the next
+		// routes keep away from where it went down, the next landings too when it went down crossing.
 		std::erase_if(op.Transports, [&](const NeuralOpTransport& transport)
 			{
 				if (find(transport.UniqueID))
@@ -595,9 +1369,39 @@ namespace
 				macro.TransportOpOf.erase(transport.UniqueID);
 				op.TransportsLost++;
 
-				// Lost on its way across: the next landings keep away from where it went down.
-				if (transport.Leg == NeuralOpLeg::Crossing && transport.ProgressCell != CellStruct::Empty)
-					macro.BloodyBeaches.emplace_back(transport.ProgressCell, now);
+				if (transport.LastCell != CellStruct::Empty)
+				{
+					int aboard = 0;
+
+					for (auto const& member : op.Members)
+					{
+						if (member.Transport == transport.UniqueID && member.Aboard)
+							aboard++;
+					}
+
+					const bool airborne = OpTypeFlies(transport.Type);
+					double threatCells = 0.0;
+					auto const pThreat = NearestOpThreat(GetOpDangerMap(pHouse, airborne), transport.LastCell, threatCells);
+					const CellStruct goal = transport.Leg == NeuralOpLeg::Crossing ? transport.Landing : op.Staging;
+					const int strength = transport.Type ? std::max(1, transport.Type->Strength) : 1;
+
+					Debug::Log("[NeuralAI] House %d transport op %d: %s %u lost %s at (%d,%d), %d cells from (%d,%d), %d frames into the leg, "
+						"%d aboard, health %d%% at the last tick, %d waypoints left (danger %d planned, %d straight), nearest threat %s %s %d cells "
+						"off (reach %d), frame %d.\n", houseIndex, op.Id, transport.Type ? transport.Type->ID : "?", transport.UniqueID,
+						OpLegName(transport.Leg), transport.LastCell.X, transport.LastCell.Y, static_cast<int>(transport.LastCell.DistanceFrom(goal)),
+						goal.X, goal.Y, now - transport.LegFrame, aboard, transport.LastHealth * 100 / strength,
+						static_cast<int>(transport.Route.size()), transport.RouteDanger, transport.StraightDanger,
+						pThreat ? OpThreatKindName(pThreat->Kind) : "none", (pThreat && pThreat->Type) ? pThreat->Type->ID : "-",
+						static_cast<int>(threatCells), pThreat ? pThreat->Reach : 0, now);
+
+					macro.OpLossSpots.push_back({ transport.LastCell, now, airborne });
+
+					if (macro.OpLossSpots.size() > static_cast<size_t>(OpLossSpotsKept))
+						macro.OpLossSpots.erase(macro.OpLossSpots.begin());
+
+					if (transport.Leg == NeuralOpLeg::Crossing)
+						macro.BloodyBeaches.emplace_back(transport.LastCell, now);
+				}
 
 				for (auto& member : op.Members)
 				{
@@ -995,7 +1799,7 @@ namespace
 				continue;
 
 			auto const pFoot = find(member.UniqueID);
-			checkInterference(pFoot, member.OrderCell, false);
+			checkInterference(pFoot, member.OrderCell, false, nullptr);
 			auto const pRecord = member.Transport ? recordOf(member.Transport) : nullptr;
 			auto const pTransport = pRecord ? find(pRecord->UniqueID) : nullptr;
 			const OpCarrier carrier = pTransport ? GetOpCarrier(pTransport) : OpCarrier::None;
@@ -1082,6 +1886,46 @@ namespace
 			}
 		}
 
+		// Plans the transport's way to goal (PlanOpRoute). A fresh plan always replaces the route; a plan
+		// made again during the trip does so only when it costs OpRouteKeepPercent or less of what is
+		// left of the old one over today's danger (a route that swings to and fro reaches nowhere).
+		// True when the route changed.
+		auto const planRoute = [&](NeuralOpTransport& transport, FootClass* pTransport, OpCarrier carrier, const CellStruct& goal, bool fresh) -> bool
+		{
+			transport.RouteFrame = now;
+			transport.RouteHealth = pTransport->Health;
+			const std::vector<CellStruct> goals { goal };
+			const std::vector<int> noWalk { 0 };
+			OpRoutePlan plan;
+
+			if (!PlanOpRoute(pHouse, pTransport, carrier, goals, noWalk, plan))
+			{
+				if (fresh)
+					transport.Route.clear();
+
+				return false;
+			}
+
+			auto const& map = GetOpDangerMap(pHouse, carrier != OpCarrier::Surface);
+			const CellStruct from = pTransport->GetMapCoords();
+
+			if (!fresh && static_cast<long long>(plan.Cost) * 100
+				> static_cast<long long>(OpRouteCost(map, from, transport.Route, goal)) * OpRouteKeepPercent)
+			{
+				return false;
+			}
+
+			const bool changed = plan.Waypoints != transport.Route;
+			transport.Route = plan.Waypoints;
+			transport.RouteDanger = plan.Danger;
+			OpLineCost(map, from, goal, transport.StraightDanger);
+
+			return changed;
+		};
+
+		// The load sails: the landing of the whole load is chosen with the route by its first transport
+		// that sails this tick (ChooseOpTripLanding), and each transport sets down on its own cell around
+		// it along its own route.
 		auto const depart = [&](NeuralOpTransport& transport, FootClass* pTransport, OpCarrier carrier)
 		{
 			transport.Leg = NeuralOpLeg::Crossing;
@@ -1089,20 +1933,36 @@ namespace
 			transport.Tries = 0;
 			transport.ParkFrame = -1;
 			transport.ParkCell = CellStruct::Empty;
-			auto const pLanding = PickOpLandingCell(op, pTransport, carrier, op.Landing, CellStruct::Empty);
-			transport.Landing = pLanding ? pLanding->MapCoords : op.Landing;
-			transport.Waypoint = carrier == OpCarrier::Surface
-				? FindSafeFerryWaypoint(pHouse, pTransport->GetMapCoords(), transport.Landing, pTransport->GetTechnoType())
-				: CellStruct::Empty;
+
+			if (op.TripLandingFrame != now)
+			{
+				op.TripLanding = ChooseOpTripLanding(pHouse, op, pTransport, carrier);
+				op.TripLandingFrame = now;
+			}
+
+			auto const pLanding = PickOpLandingCell(op, pTransport, carrier, op.TripLanding, CellStruct::Empty);
+			transport.Landing = pLanding ? pLanding->MapCoords : op.TripLanding;
+			planRoute(transport, pTransport, carrier, transport.Landing, true);
 			transport.ProgressCell = pTransport->GetMapCoords();
 			transport.ProgressFrame = now;
 			wake(pTransport);
 
+			char way[96] = "";
+
+			if (!transport.Route.empty())
+			{
+				std::snprintf(way, sizeof(way), " by a route of %d waypoints (danger %d against %d straight)",
+					static_cast<int>(transport.Route.size()), transport.RouteDanger, transport.StraightDanger);
+			}
+			else if (transport.StraightDanger > 0)
+			{
+				std::snprintf(way, sizeof(way), " straight in (danger %d)", transport.StraightDanger);
+			}
+
 			Debug::Log("[NeuralAI] House %d transport op %d: %s %u sails from (%d,%d) with %d aboard (size %d/%d) for (%d,%d)%s, frame %d.\n",
 				houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, pTransport->GetMapCoords().X,
 				pTransport->GetMapCoords().Y, pTransport->Passengers.NumPassengers, pTransport->Passengers.GetTotalSize(),
-				pTransport->GetTechnoType()->Passengers, transport.Landing.X, transport.Landing.Y,
-				transport.Waypoint != CellStruct::Empty ? " by a detour" : "", now);
+				pTransport->GetTechnoType()->Passengers, transport.Landing.X, transport.Landing.Y, way, now);
 		};
 
 		const bool capReached = op.BoardingSince >= 0 && (now - op.BoardingSince >= OpBoardingCapFrames || now < op.BoardingSince);
@@ -1184,7 +2044,8 @@ namespace
 				transport.ParkCell = CellStruct::Empty;
 				transport.ParkFrame = -1;
 				transport.Tries = 0;
-				transport.Waypoint = CellStruct::Empty;
+				transport.Route.clear();
+				transport.RouteFrame = -1;
 			}
 			else
 			{
@@ -1192,17 +2053,32 @@ namespace
 			}
 		};
 
+		// Sets the load down at once on the ground below (PutAshoreNow); the load counted for the
+		// set-downs the engine makes follows.
+		auto const putAshore = [&](NeuralOpTransport& transport, FootClass* pTransport) -> int
+		{
+			const int out = PutAshoreNow(pTransport);
+			transport.LastLoaded = pTransport->Passengers.NumPassengers;
+
+			return out;
+		};
+
 		// Sets the load down at the landing: on the ground at once (PutAshoreNow; the unload mission
 		// waits for a hovercraft to report no movement, which it does not while it floats); flying, it is
-		// told to unload, which brings it down. Still loaded OpUnloadRetryFrames later, it tries another
-		// cell.
+		// told to unload, which brings it down; a carryall is sent to the cell, where the engine sets its
+		// vehicle down at the end of the move (told to unload, an aircraft that is no dropship flies off
+		// to the map's reinforcement waypoint, AircraftClass::Do_MISSION_UNLOAD). Still loaded
+		// OpUnloadRetryFrames later, it tries another cell.
 		auto const unloadAt = [&](NeuralOpTransport& transport, FootClass* pTransport, OpCarrier carrier, bool aloft)
 		{
 			const int aboardBefore = pTransport->Passengers.NumPassengers;
+			// How it sets down where it stands, and how it goes on to another cell.
+			const Mission setDown = carrier == OpCarrier::Carryall ? Mission::Move : Mission::Unload;
+			const Mission moveOn = carrier == OpCarrier::Flyer ? Mission::Unload : Mission::Move;
 
 			if (!aloft && carrier != OpCarrier::Carryall)
 			{
-				const int out = PutAshoreNow(pTransport);
+				const int out = putAshore(transport, pTransport);
 
 				if (out > 0)
 				{
@@ -1235,18 +2111,18 @@ namespace
 					transport.Landing = pNext->MapCoords;
 					wake(pTransport);
 					pTransport->SetDestination(pNext, true);
-					pTransport->QueueMission(carrier == OpCarrier::Surface ? Mission::Move : Mission::Unload, true);
+					pTransport->QueueMission(moveOn, true);
 					transport.OrderCell = pNext->MapCoords;
 				}
 
 				return;
 			}
 
-			if (pTransport->CurrentMission != Mission::Unload && pLandingCell)
+			if (pTransport->CurrentMission != setDown && pLandingCell)
 			{
 				wake(pTransport);
 				pTransport->SetDestination(pLandingCell, true);
-				pTransport->QueueMission(Mission::Unload, true);
+				pTransport->QueueMission(setDown, true);
 				transport.OrderCell = transport.Landing;
 			}
 		};
@@ -1263,11 +2139,41 @@ namespace
 			const bool onTheMove = pTransport->Destination || pTransport->CurrentMission == Mission::Move
 				|| pTransport->QueuedMission == Mission::Move;
 
-			if (transport.Leg != NeuralOpLeg::Parked)
-				checkInterference(pTransport, transport.OrderCell, true);
+			// The vehicle a carryall goes to lift (the operation sends it to the vehicle itself).
+			FootClass* pCargo = nullptr;
 
-			// No weapons: its job is carrying (user). A carryall's target is the vehicle it lifts.
-			if (carrier != OpCarrier::Carryall && pTransport->Target)
+			if (carrier == OpCarrier::Carryall)
+			{
+				for (auto const& member : op.Members)
+				{
+					if (member.Transport == transport.UniqueID && !member.Aboard)
+					{
+						pCargo = find(member.UniqueID);
+						break;
+					}
+				}
+			}
+
+			// Part of its load set down by the engine since the last tick: a flying transport's unload
+			// mission, a carryall at the end of its move.
+			if ((transport.Leg == NeuralOpLeg::Crossing || transport.Leg == NeuralOpLeg::Returning) && loaded < transport.LastLoaded)
+			{
+				Debug::Log("[NeuralAI] House %d transport op %d: %s %u sets %d of %d down at (%d,%d), %d frames after sailing, by the engine, "
+					"frame %d.\n", houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, transport.LastLoaded - loaded,
+					transport.LastLoaded, pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y, now - transport.LegFrame, now);
+			}
+
+			transport.Type = pTransport->GetTechnoType();
+			transport.LastCell = pTransport->GetMapCoords();
+			transport.LastHealth = pTransport->Health;
+			transport.LastLoaded = loaded;
+
+			if (transport.Leg != NeuralOpLeg::Parked)
+				checkInterference(pTransport, transport.OrderCell, true, pCargo);
+
+			// No weapons: its job is carrying (user). A carryall has no target either: it lifts its vehicle
+			// on a move sent to it.
+			if (pTransport->Target)
 				pTransport->SetTarget(nullptr);
 
 			// Badly hit on land: it lets its load out at once (the members on their own land wait for
@@ -1276,7 +2182,7 @@ namespace
 			// match #10391).
 			if (carrier != OpCarrier::Carryall && !aloft && onLand && pTransport->GetHealthPercentage() < OpDyingTransportHealth)
 			{
-				const int out = loaded > 0 ? PutAshoreNow(pTransport) : 0;
+				const int out = loaded > 0 ? putAshore(transport, pTransport) : 0;
 
 				if (pTransport->Passengers.NumPassengers == 0)
 				{
@@ -1301,18 +2207,7 @@ namespace
 						break;
 					}
 
-					NeuralOpMember* pCargo = nullptr;
-
-					for (auto& member : op.Members)
-					{
-						if (member.Transport == transport.UniqueID && !member.Aboard)
-						{
-							pCargo = &member;
-							break;
-						}
-					}
-
-					auto const pVehicle = pCargo ? abstract_cast<UnitClass*>(find(pCargo->UniqueID)) : nullptr;
+					auto const pVehicle = abstract_cast<UnitClass*>(pCargo);
 
 					if (!pVehicle)
 					{
@@ -1320,8 +2215,8 @@ namespace
 						break;
 					}
 
-					if (pTransport->CurrentMission != Mission::Capture || pTransport->Target != pVehicle)
-						AdvanceRoutedPickup(pHouse, pTransport, pVehicle, false);
+					if (pTransport->Destination != pVehicle || pTransport->CurrentMission != Mission::Move)
+						AdvanceRoutedPickup(pHouse, pTransport, pVehicle);
 
 					transport.OrderCell = CellStruct::Empty;
 					break;
@@ -1435,7 +2330,7 @@ namespace
 				// or drives at whatever comes into range).
 				if (onTheMove)
 				{
-					checkInterference(pTransport, transport.OrderCell, true);
+					checkInterference(pTransport, transport.OrderCell, true, nullptr);
 					pTransport->SetDestination(nullptr, true);
 				}
 
@@ -1455,38 +2350,32 @@ namespace
 					break;
 				}
 
-				auto const pLandingCell = MapClass::Instance.TryGetCellAt(transport.Landing);
 				const double toLanding = pTransport->GetMapCoords().DistanceFrom(transport.Landing);
 				const double unloadCells = carrier == OpCarrier::Carryall ? 3.0 : OpUnloadCells;
 
 				if (toLanding <= unloadCells && (onLand || aloft))
 				{
-					if (carrier == OpCarrier::Carryall)
-					{
-						if (pTransport->CurrentMission != Mission::Unload && pLandingCell)
-						{
-							pTransport->SetDestination(pLandingCell, true);
-							pTransport->QueueMission(Mission::Unload, true);
-							transport.OrderCell = transport.Landing;
-						}
-					}
-					else
-					{
-						unloadAt(transport, pTransport, carrier, aloft);
-					}
-
+					unloadAt(transport, pTransport, carrier, aloft);
 					break;
 				}
+
+				// Turned back: home along a route planned anew.
+				auto const turnBack = [&]()
+				{
+					transport.Leg = NeuralOpLeg::Returning;
+					transport.LegFrame = now;
+					transport.ParkFrame = -1;
+					transport.Route.clear();
+					transport.RouteFrame = -1;
+					op.FailedTrips++;
+				};
 
 				if (now - transport.LegFrame >= OpCrossCapFrames || now < transport.LegFrame)
 				{
 					Debug::Log("[NeuralAI] House %d transport op %d: %s %u still crossing after %d frames, %d cells from (%d,%d): takes its "
 						"load back, frame %d.\n", houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
 						now - transport.LegFrame, static_cast<int>(toLanding), transport.Landing.X, transport.Landing.Y, now);
-					transport.Leg = NeuralOpLeg::Returning;
-					transport.LegFrame = now;
-					transport.ParkFrame = -1;
-					op.FailedTrips++;
+					turnBack();
 					break;
 				}
 
@@ -1504,7 +2393,7 @@ namespace
 
 					if (transport.Tries > OpMaxLandingTries)
 					{
-						if (!aloft && onLand && carrier != OpCarrier::Carryall && PutAshoreNow(pTransport) > 0)
+						if (!aloft && onLand && carrier != OpCarrier::Carryall && putAshore(transport, pTransport) > 0)
 						{
 							Debug::Log("[NeuralAI] House %d transport op %d: %s %u stuck, sets its load down at (%d,%d), frame %d.\n",
 								houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, pTransport->GetMapCoords().X,
@@ -1512,43 +2401,59 @@ namespace
 						}
 						else
 						{
-							transport.Leg = NeuralOpLeg::Returning;
-							transport.LegFrame = now;
-							transport.ParkFrame = -1;
-							op.FailedTrips++;
+							turnBack();
 						}
 
 						break;
 					}
 
-					if (auto const pNext = PickOpLandingCell(op, pTransport, carrier, op.Landing, transport.Landing))
+					if (auto const pNext = PickOpLandingCell(op, pTransport, carrier, transport.Landing, transport.Landing))
 					{
 						Debug::Log("[NeuralAI] House %d transport op %d: %s %u stuck at (%d,%d) on its way to (%d,%d), tries (%d,%d), frame %d.\n",
 							houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, pTransport->GetMapCoords().X,
 							pTransport->GetMapCoords().Y, transport.Landing.X, transport.Landing.Y, pNext->MapCoords.X, pNext->MapCoords.Y, now);
 						transport.Landing = pNext->MapCoords;
-						transport.Waypoint = CellStruct::Empty;
+						transport.Route.clear();
+						transport.RouteFrame = -1;
 					}
 				}
 
-				// Along the safe lane: the detour first, then straight in; a flyer hops around the anti-air.
-				if (transport.Waypoint != CellStruct::Empty && pTransport->GetMapCoords().DistanceFrom(transport.Waypoint) <= 4.0)
-					transport.Waypoint = CellStruct::Empty;
+				// Along the safe route (PlanOpRoute), planned again every OpRouteReplanFrames and when it is
+				// hit: its waypoints in turn, then the landing. A carryall keeps its move unless the cell moves
+				// farther than the engine's own choice of where to come down near it.
+				const int strength = std::max(1, pTransport->GetTechnoType()->Strength);
+				const int sincePlan = now - transport.RouteFrame;
+				const bool hit = transport.RouteFrame >= 0 && transport.RouteHealth - pTransport->Health >= static_cast<int>(OpRouteHitHealth * strength);
 
-				auto const pLanding = MapClass::Instance.TryGetCellAt(transport.Landing);
-				CellClass* pGoal = pLanding;
+				if (transport.RouteFrame < 0 || sincePlan < 0 || sincePlan >= OpRouteReplanFrames || (hit && sincePlan >= OpRouteHitReplanFrames))
+				{
+					op.Replans++;
 
-				if (carrier != OpCarrier::Surface)
-					pGoal = GetSafeAirHop(pHouse, pTransport, pLanding);
-				else if (transport.Waypoint != CellStruct::Empty)
-					pGoal = MapClass::Instance.TryGetCellAt(transport.Waypoint);
+					if (planRoute(transport, pTransport, carrier, transport.Landing, transport.RouteFrame < 0))
+					{
+						op.RouteChanges++;
 
-				orderTo(pTransport, transport.OrderCell, pGoal, 1.0);
+						if (hit)
+						{
+							Debug::Log("[NeuralAI] House %d transport op %d: %s %u hit at (%d,%d), health %d%%, takes another route of %d waypoints "
+								"(danger %d against %d straight), frame %d.\n", houseIndex, op.Id, pTransport->GetTechnoType()->ID,
+								pTransport->UniqueID, pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y, pTransport->Health * 100 / strength,
+								static_cast<int>(transport.Route.size()), transport.RouteDanger, transport.StraightDanger, now);
+						}
+					}
+				}
+
+				while (!transport.Route.empty() && pTransport->GetMapCoords().DistanceFrom(transport.Route.front()) <= OpRouteReachCells)
+					transport.Route.erase(transport.Route.begin());
+
+				auto const pGoal = MapClass::Instance.TryGetCellAt(transport.Route.empty() ? transport.Landing : transport.Route.front());
+				orderTo(pTransport, transport.OrderCell, pGoal, carrier == OpCarrier::Carryall ? 4.0 : 1.0);
 				break;
 			}
 			case NeuralOpLeg::Returning:
 			{
-				// A load it could not set down goes back to the staging beach and gets out there.
+				// A load it could not set down goes back to the staging beach along a safe route too, and
+				// gets out there.
 				if (loaded == 0)
 				{
 					afterUnload(transport);
@@ -1557,22 +2462,30 @@ namespace
 
 				if (pTransport->GetMapCoords().DistanceFrom(op.Staging) <= OpParkCells && (onLand || aloft))
 				{
-					if (!aloft && carrier != OpCarrier::Carryall && PutAshoreNow(pTransport) > 0)
+					if (!aloft && carrier != OpCarrier::Carryall && putAshore(transport, pTransport) > 0)
 						break;
 
-					if (pTransport->CurrentMission != Mission::Unload && pStagingCell)
+					const Mission setDown = carrier == OpCarrier::Carryall ? Mission::Move : Mission::Unload;
+
+					if (pTransport->CurrentMission != setDown && pStagingCell)
 					{
 						wake(pTransport);
 						pTransport->SetDestination(pStagingCell, true);
-						pTransport->QueueMission(Mission::Unload, true);
+						pTransport->QueueMission(setDown, true);
 						transport.OrderCell = op.Staging;
 					}
 
 					break;
 				}
 
-				auto const pGoal = carrier == OpCarrier::Surface ? pStagingCell : GetSafeAirHop(pHouse, pTransport, pStagingCell);
-				orderTo(pTransport, transport.OrderCell, pGoal, 1.0);
+				if (transport.RouteFrame < 0 || now < transport.RouteFrame || now - transport.RouteFrame >= OpRouteReplanFrames)
+					planRoute(transport, pTransport, carrier, op.Staging, transport.RouteFrame < 0);
+
+				while (!transport.Route.empty() && pTransport->GetMapCoords().DistanceFrom(transport.Route.front()) <= OpRouteReachCells)
+					transport.Route.erase(transport.Route.begin());
+
+				auto const pGoal = transport.Route.empty() ? pStagingCell : MapClass::Instance.TryGetCellAt(transport.Route.front());
+				orderTo(pTransport, transport.OrderCell, pGoal, carrier == OpCarrier::Carryall ? 4.0 : 1.0);
 				break;
 			}
 			default:
@@ -1635,12 +2548,28 @@ namespace
 
 		macro.OpWaitingSizeBySize.fill(0);
 		macro.OpWaitingFrame = now;
+		std::erase_if(macro.OpLossSpots, [now](const NeuralOpLossSpot& spot) { return now < spot.Frame || now - spot.Frame >= OpRouteLossFrames; });
 
 		if (macro.TransportOps.empty())
 		{
 			macro.OpWatch.clear();
 			return;
 		}
+
+		// The operations' own orders pass the order helpers, which turn their units down for the rest of
+		// the AI tick (IsHeldByTransportOp).
+		struct OpOrdersOpen
+		{
+			OpOrdersOpen()
+			{
+				TransportOpOrdersOpen = true;
+			}
+
+			~OpOrdersOpen()
+			{
+				TransportOpOrdersOpen = false;
+			}
+		} const ordersOpen;
 
 		// The units the operations hold, by UniqueID, those aboard a transport too (looked up by key
 		// only: the operations act in their own fixed order).
