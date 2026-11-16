@@ -142,6 +142,7 @@ int NeuralAI::CurrentMeasuredFPS = 0;
 #include "NeuralAI.AirPatrol.inl"
 #include "NeuralAI.Urban.inl"
 #include "NeuralAI.Defense.inl"
+#include "NeuralAI.Operations.inl"
 #include "NeuralAI.Micro.inl"
 #include "NeuralAI.Scouting.inl"
 #include "NeuralAI.Production.inl"
