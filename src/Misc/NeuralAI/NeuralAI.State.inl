@@ -519,6 +519,12 @@ namespace
 		CellStruct LastCell { CellStruct::Empty };
 		int LastHealth { 0 };
 		int LastLoaded { 0 };
+		// Its berth around the staging cell, where it parks to load, and where its passengers wait for it
+		// (PickOpBerth); the danger at its landing when it sailed (a landing that grows much more
+		// dangerous during the crossing is changed).
+		CellStruct Berth { CellStruct::Empty };
+		CellStruct BerthWait { CellStruct::Empty };
+		int LandingDanger { 0 };
 	};
 
 	// Where a transport of an operation was lost (NeuralHouseMacroState::OpLossSpots).
@@ -574,6 +580,10 @@ namespace
 		int DangerCheckFrame { -1 };
 		int TripDanger { 0 };
 		int DangerHolds { 0 };
+		// The last time the landing of loads under way was changed for enemies gathered at it, and how
+		// many times.
+		int LandingSwitchFrame { -1 };
+		int LandingSwitches { 0 };
 		bool Over { false };
 		const char* EndReason { "" };
 		std::vector<NeuralOpMember> Members;
@@ -1882,6 +1892,23 @@ namespace
 	constexpr int OpSailDangerLimit = 90;
 	constexpr int OpDangerCheckFrames = 150;
 	constexpr int OpDangerWaitFrames = 1800;
+	// Against the threats that move (user): a transport inside the reach of a threat plans its route
+	// again every OpRouteDangerReplanFrames instead of OpRouteReplanFrames. A crossing whose landing
+	// grew OpLandingSwitchDanger more dangerous since it sailed (enemies gathered at it), still
+	// OpLandingSwitchMinCells or more from it, takes another landing for its load when that one costs
+	// OpLandingSwitchPercent or less, once per OpLandingSwitchFrames for an operation.
+	constexpr int OpRouteDangerReplanFrames = 90;
+	constexpr int OpLandingSwitchDanger = 40;
+	constexpr int OpLandingSwitchPercent = 75;
+	constexpr int OpLandingSwitchFrames = 450;
+	constexpr double OpLandingSwitchMinCells = 6.0;
+	// Berths (user: forty transports and 185 units bound for one staging cell jammed into one mass the
+	// transports could not get through, match #10477): each transport parks to load at its own cell
+	// around the staging cell, within OpBerthRingCells of it and OpBerthSpacingCells from the others,
+	// and its passengers wait for it OpBerthWaitCells farther out, in the small group of its own load.
+	constexpr int OpBerthRingCells = 14;
+	constexpr double OpBerthSpacingCells = 4.0;
+	constexpr int OpBerthWaitCells = 3;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its
