@@ -10808,8 +10808,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	{
 		for (auto const pOwnU : UnitClass::Array)
 		{
+			// One a transport operation carries is the operation's.
 			if (!pOwnU || pOwnU->Owner != pHouse || pOwnU->InLimbo || !pOwnU->IsAlive || !pOwnU->Type
-				|| !pOwnU->Type->DeploysInto)
+				|| !pOwnU->Type->DeploysInto || IsInTransportOp(pHouse, pOwnU->UniqueID))
 			{
 				continue;
 			}
@@ -10872,8 +10873,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	{
 		for (auto const pOwnInf : InfantryClass::Array)
 		{
+			// One a transport operation carries is the operation's (the old loader sent engineers of
+			// operations to its own transports: 33 Enter orders found on them in one match).
 			if (!pOwnInf || pOwnInf->Owner != pHouse || pOwnInf->InLimbo || !pOwnInf->IsAlive || !pOwnInf->Type
-				|| !pOwnInf->Type->Engineer)
+				|| !pOwnInf->Type->Engineer || IsInTransportOp(pHouse, pOwnInf->UniqueID))
 			{
 				continue;
 			}

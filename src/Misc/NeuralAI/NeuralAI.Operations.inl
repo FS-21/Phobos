@@ -402,8 +402,14 @@ namespace
 		pOp->Members.push_back(member);
 		macro.TransportOpOf[uid] = pOp->Id;
 
-		// Its mission waits: no target, no way of its own, until the operation hands it back.
+		// Its mission waits: no target and no way of its own (the order its client gave before is
+		// dropped), until the operation hands it back.
+		if (pFoot->MegaMission == Mission::AttackMove)
+			pFoot->ClearMegaMissionData();
+
 		pFoot->SetTarget(nullptr);
+		pFoot->SetDestination(nullptr, true);
+		pFoot->ForceMission(Mission::Guard);
 
 		return true;
 	}
@@ -415,6 +421,9 @@ namespace
 	{
 		if (pFoot->CurrentMission == Mission::Sleep)
 			pFoot->ForceMission(Mission::Guard);
+
+		// Its post is where it stands now, not the gathering spot on the land it left.
+		pFoot->SetArchiveTarget(pFoot->GetCell());
 
 		if (op.Client == NeuralOpClient::Wave)
 		{
@@ -482,6 +491,7 @@ namespace
 				}
 
 				wake(pFoot);
+				pFoot->SetArchiveTarget(pFoot->GetCell());
 				pFoot->SetDestination(nullptr, true);
 				pFoot->QueueMission(Mission::Guard, false);
 
@@ -558,12 +568,16 @@ namespace
 			pFoot->ForceMission(Mission::Guard);
 		};
 
+		// The cell it is sent to is its post too: at the end of a move the engine puts a unit of the AI
+		// on Area Guard, which walks it back to its old post (match #10380: 64 such moves of the 8
+		// members of one wave while they waited by their beach).
 		auto const orderTo = [&](FootClass* pFoot, CellStruct& orderCell, CellClass* pCell, double keepWithin)
 		{
 			if (!pCell)
 				return;
 
 			wake(pFoot);
+			pFoot->SetArchiveTarget(pCell);
 			IssueMoveOrder(pFoot, pCell, keepWithin);
 			orderCell = pCell->MapCoords;
 		};
