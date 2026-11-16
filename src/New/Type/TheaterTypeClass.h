@@ -25,6 +25,7 @@ public:
 	Valueable<CSFText> UIName;
 	PhobosFixedString<10> Root;
 	PhobosFixedString<10> IsoRoot;
+	PhobosFixedString<10> IsoExpansionRoot;
 	PhobosFixedString<4> Suffix;
 	PhobosFixedString<4> MMSuffix;
 	char ImageLetter;
@@ -46,6 +47,7 @@ public:
 		, UIName { }
 		, Root { }
 		, IsoRoot { }
+		, IsoExpansionRoot { }
 		, Suffix { }
 		, MMSuffix { }
 		, ImageLetter { '\0' }
