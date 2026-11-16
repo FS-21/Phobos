@@ -1224,14 +1224,22 @@ namespace
 			if (carrier != OpCarrier::Carryall && pTransport->Target)
 				pTransport->SetTarget(nullptr);
 
-			// Badly hit on land with a load: it lets them out at once (the members on their own land wait
-			// for another seat, those on the land of their address are delivered).
-			if (carrier != OpCarrier::Carryall && loaded > 0 && !aloft && onLand && pTransport->GetHealthPercentage() < OpDyingTransportHealth
-				&& PutAshoreNow(pTransport) > 0)
+			// Badly hit on land: it lets its load out at once (the members on their own land wait for
+			// another seat, those on the land of their address are delivered) and leaves the operation.
+			// Kept, it took its load aboard again at every tick and set it down again (33 times in a row,
+			// match #10391).
+			if (carrier != OpCarrier::Carryall && !aloft && onLand && pTransport->GetHealthPercentage() < OpDyingTransportHealth)
 			{
-				Debug::Log("[NeuralAI] House %d transport op %d: %s %u badly hit, sets its load down at (%d,%d), frame %d.\n", houseIndex,
-					op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y, now);
-				continue;
+				const int out = loaded > 0 ? PutAshoreNow(pTransport) : 0;
+
+				if (pTransport->Passengers.NumPassengers == 0)
+				{
+					Debug::Log("[NeuralAI] House %d transport op %d: %s %u badly hit, sets %d down at (%d,%d) and leaves, frame %d.\n",
+						houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, out, pTransport->GetMapCoords().X,
+						pTransport->GetMapCoords().Y, now);
+					released.push_back(transport.UniqueID);
+					continue;
+				}
 			}
 
 			switch (transport.Leg)
@@ -1583,7 +1591,10 @@ namespace
 		macro.OpWaitingFrame = now;
 
 		if (macro.TransportOps.empty())
+		{
+			macro.OpWatch.clear();
 			return;
+		}
 
 		// The units the operations hold, by UniqueID, those aboard a transport too (looked up by key
 		// only: the operations act in their own fixed order).
@@ -1616,6 +1627,28 @@ namespace
 		}
 
 		std::erase_if(macro.TransportOps, [](const NeuralTransportOperation& op) { return op.Over; });
+
+		// TEMP trace: the units as the operations leave them, for TraceTransportOpUnits (16 at most).
+		macro.OpWatch.clear();
+
+		for (auto const& op : macro.TransportOps)
+		{
+			for (auto const& member : op.Members)
+			{
+				auto const it = foots.find(member.UniqueID);
+
+				if (!member.Aboard && it != foots.end() && !it->second->InLimbo && macro.OpWatch.size() < 16)
+					macro.OpWatch.push_back({ member.UniqueID, it->second, it->second->CurrentMission, it->second->MegaMission, it->second->Destination });
+			}
+
+			for (auto const& transport : op.Transports)
+			{
+				auto const it = foots.find(transport.UniqueID);
+
+				if (it != foots.end() && macro.OpWatch.size() < 16)
+					macro.OpWatch.push_back({ transport.UniqueID, it->second, it->second->CurrentMission, it->second->MegaMission, it->second->Destination });
+			}
+		}
 
 		// Retry marks past their time go.
 		if (macro.TransportOpRetryUntil.size() > 256)
