@@ -359,6 +359,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// TEMP diagnostic: siege units that start to unfold, who ordered it and what they aim at.
 	LogSiegeDeploys(pHouse);
+
+	// Transport operations last: they have the final word over their units and transports.
+	UpdateTransportOperations(pHouse);
 	}
 
 	// Production: from here to the end of the tick.
@@ -3705,7 +3708,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const bool isParkedEmpty = pOwnedU->Passengers.NumPassengers == 0 && pOwnedU->Destination == nullptr
 					&& (pOwnedU->CurrentMission == Mission::Guard || pOwnedU->CurrentMission == Mission::Area_Guard
 						|| pOwnedU->CurrentMission == Mission::Sleep || pOwnedU->CurrentMission == Mission::Unload)
-					&& !IsFerryParkedToLoad(pHouse, pOwnedU->UniqueID);
+					&& !IsFerryParkedToLoad(pHouse, pOwnedU->UniqueID) && !IsInTransportOp(pHouse, pOwnedU->UniqueID);
 
 				if (unitCarryall)
 				{
@@ -3798,10 +3801,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			continue;
 		}
 
+		// A carryall of a transport operation parked by its vehicle is at work, not idle.
 		auto const pAirType = pOwnAir->Type;
 		const bool isAirIdle = pOwnAir->Passengers.NumPassengers == 0
 			&& (pOwnAir->CurrentMission == Mission::Guard || pOwnAir->CurrentMission == Mission::Area_Guard
-				|| pOwnAir->CurrentMission == Mission::Sleep);
+				|| pOwnAir->CurrentMission == Mission::Sleep)
+			&& !IsInTransportOp(pHouse, pOwnAir->UniqueID);
 
 		if (pAirType->Carryall)
 		{

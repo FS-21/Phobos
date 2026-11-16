@@ -880,6 +880,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return true;
 		}
 
+		// The transport operations manager takes it across (user: a removal company apart from the
+		// client); the unit's client gives it its order again once it stands on the target's ground.
+		if (TransportOpsEnabled)
+			return RequestTransportOperation(pHouse, NeuralOpClient::Economy, pFoot, targetGround);
+
 		// A transport is called only for a crossing one of ours (or one we can build) can make: the
 		// landing on the ground the unit wants, from where it stands.
 		CellClass* const pTargetLanding = FindSafeIslandLandingCell(pHouse, targetGround, targetZone, false);
@@ -995,7 +1000,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 
 		if (IsAmphibiousOrAirTransport(pU->Type) && pU->Passengers.NumPassengers < pU->Type->Passengers
-			&& !IsTransportUnderRepair(pU)
+			&& !IsTransportUnderRepair(pU) && !IsInTransportOp(pHouse, pU->UniqueID)
 			&& !(pU->Passengers.NumPassengers == 0 && pU->GetHealthPercentage() < 0.5))
 		{
 			if (!pLoadingTransport || static_cast<int>(pU->Type->SizeLimit) > loadingTransSizeLimit)
@@ -3286,6 +3291,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// A transport parked to load takes its orders from the transport loader.
 		if (IsFerryParkedToLoad(pHouse, pUnit->UniqueID))
+			continue;
+
+		// A unit or transport of a transport operation takes its orders from the operation alone.
+		if (IsInTransportOp(pHouse, pUnit->UniqueID))
 			continue;
 
 		if (pUnit->HasAnyLink())
@@ -6359,8 +6368,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 
-				if (!pOTVeh->Type->OpenTopped || HasNoManualEnter(pOTVeh->Type) || HasNoManualUnload(pOTVeh->Type))
+				// A transport working for a transport operation is filled by the operation alone.
+				if (!pOTVeh->Type->OpenTopped || HasNoManualEnter(pOTVeh->Type) || HasNoManualUnload(pOTVeh->Type)
+					|| IsInTransportOp(pHouse, pOTVeh->UniqueID))
+				{
 					continue;
+				}
 
 				if (unitPassSize > static_cast<int>(pOTVeh->Type->SizeLimit))
 					continue;
@@ -6522,6 +6535,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// A terrorist sneaking in takes its orders from UpdateSneakStrikes.
 		if (IsSneakStrikeActive(pHouse, pInf->UniqueID))
+			continue;
+
+		// A soldier of a transport operation takes its orders from the operation alone.
+		if (IsInTransportOp(pHouse, pInf->UniqueID))
 			continue;
 
 		// Evade radiation puddles (Desolator / Nuke fallout) immediately if not
@@ -7784,6 +7801,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				if (IsFerryLoading(pHouse, pCombVeh->UniqueID) || IsFerryParkedToLoad(pHouse, pCombVeh->UniqueID)
+					|| IsInTransportOp(pHouse, pCombVeh->UniqueID)
 					|| (pCombVeh->Passengers.NumPassengers > 0 && FindFerryTrip(pCombVeh->UniqueID)))
 				{
 					continue;
@@ -8538,6 +8556,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (GetMacroState(pHouse).CapitalHeld.contains(pUnit->UniqueID))
 			continue;
 
+		// Units and transports of a transport operation are on their way already.
+		if (IsInTransportOp(pHouse, pUnit->UniqueID))
+		{
+			++notIdlePlan;
+			continue;
+		}
+
 		// A damaged unit sits out the waves while it repairs (on a trip, bound for or standing on a
 		// station, a trip ordered lately) or near home, where it guards the base. Out in the field
 		// with no repair it can take (the station too far for the trip to pay, none at all) it fights
@@ -8650,6 +8675,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// 110 cells away, pulled back by its master, standing still between the two orders).
 		if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type) || pInf->SlaveOwner)
 			continue;
+
+		// Soldiers of a transport operation are on their way already.
+		if (IsInTransportOp(pHouse, pInf->UniqueID))
+		{
+			++notIdleInfPlan;
+			continue;
+		}
 
 		if (IsHealerInfantryType(pInf->Type) && healersForWave >= 2)
 			continue;
@@ -8854,7 +8886,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 
 			if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter
-				|| (pUnit->CaptureManager && pUnit->CaptureManager->NumControlNodes() > 0))
+				|| (pUnit->CaptureManager && pUnit->CaptureManager->NumControlNodes() > 0) || IsInTransportOp(pHouse, pUnit->UniqueID))
 			{
 				continue;
 			}
@@ -9306,10 +9338,34 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	{
 		const CellStruct waveGoal = pWaveTargetCell->MapCoords;
 		auto const pGoalBld = pWaveTargetCell->GetBuilding();
+
+		// A unit that does not get there alone counts when a transport operation can take it: a
+		// transport of ours, or one we can build, carries its type (the request checks the very
+		// crossing). Without this the wave never left an island and nobody asked for a transport.
+		std::unordered_map<const TechnoTypeClass*, bool> ferriedTypes;
+
+		auto const reachesWaveGoal = [&](FootClass* pFoot)
+		{
+			if (FootReachesAlone(pFoot, waveGoal, pGoalBld))
+				return true;
+
+			auto const pType = pFoot->GetTechnoType();
+
+			if (!TransportOpsEnabled || IsWaterBound(pType))
+				return false;
+
+			auto const [itType, inserted] = ferriedTypes.try_emplace(pType, false);
+
+			if (inserted)
+				itType->second = CanHouseFerryTypeAcrossWater(pHouse, pType);
+
+			return itType->second;
+		};
+
 		waveAbleUnits = static_cast<size_t>(std::count_if(idleCombatUnits.begin(), idleCombatUnits.end(),
-			[&](UnitClass* pU) { return FootReachesAlone(pU, waveGoal, pGoalBld); }));
+			[&](UnitClass* pU) { return reachesWaveGoal(pU); }));
 		waveAbleInf = static_cast<size_t>(std::count_if(idleCombatInf.begin(), idleCombatInf.end(),
-			[&](InfantryClass* pI) { return FootReachesAlone(pI, waveGoal, pGoalBld); }));
+			[&](InfantryClass* pI) { return reachesWaveGoal(pI); }));
 	}
 
 	const bool waveCountReady = waveAbleUnits >= waveUnitsNeeded
@@ -9791,6 +9847,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		};
 
 		size_t dispatchedVeh = 0;
+		// Units of this wave handed to the transport operations manager.
+		size_t handedVeh = 0;
+		size_t handedInf = 0;
 		for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
 		{
 			auto const pU = idleCombatUnits[i];
@@ -9855,11 +9914,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
+			// A unit that cannot drive there asks the transport operations manager to take it across
+			// (user: its mission waits meanwhile); with no operation it waits on its island.
 			const bool goalInWater = (pUnitWaveGoal->LandType == LandType::Water);
 			if (!canCrossWaterDirectly && (goalInWater || goalZone < 0 || uz < 0 || uz != goalZone))
 			{
-				continue; // Keep ground-only vehicles in Guard state on their island so
-						// they board Amphibious/Air Transports!
+				if (RequestTransportOperation(pHouse, NeuralOpClient::Wave, pU, pUnitWaveGoal->MapCoords))
+					++handedVeh;
+
+				continue;
 			}
 
 			if (!keepsEarlierGoal && (pUnitWaveGoal == pWaveTargetCell || pUnitWaveGoal == pSecondaryWaveTargetCell))
@@ -9985,13 +10048,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			// Reachability on foot uses the soldier's own movement zone, since infantry walks where
-			// vehicles cannot. Ground infantry that cannot walk there stays to board transports.
+			// vehicles cannot. Ground infantry that cannot walk there asks the transport operations
+			// manager to take it across; with no operation it waits on its island.
 			const bool infGoalInWater = (pInfWaveGoal->LandType == LandType::Water);
 			const int footZone = ObjectZone(pI, pI->Type->MovementZone);
 			const int goalFootZone = MapClass::Instance.GetMovementZoneType(pInfWaveGoal->MapCoords, pI->Type->MovementZone, false);
 
 			if (!canInfCrossWater && (infGoalInWater || footZone < 0 || footZone != goalFootZone))
+			{
+				if (RequestTransportOperation(pHouse, NeuralOpClient::Wave, pI, pInfWaveGoal->MapCoords))
+					++handedInf;
+
 				continue;
+			}
 
 			if (!infKeepsEarlierGoal && (pInfWaveGoal == pWaveTargetCell || pInfWaveGoal == pSecondaryWaveTargetCell))
 				waveMacro.WaveGoals[pI->UniqueID] = { pInfWaveGoal->MapCoords, infGoalZone, Unsorted::CurrentFrame };
@@ -10015,7 +10084,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			dispatchedInf++;
 		}
 
-		if (dispatchedVeh > 0 || dispatchedInf > 0)
+		// The units handed to the transport operations go with the wave: they reach it later.
+		if (dispatchedVeh > 0 || dispatchedInf > 0 || handedVeh > 0 || handedInf > 0)
 		{
 			// A new wave starts after 900 quiet frames or on a different target (wave memory).
 			if (Unsorted::CurrentFrame - waveMacro.LastWaveDispatchFrame > 900 || waveMacro.LastWaveTargetCell == CellStruct::Empty
@@ -10041,7 +10111,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;
 
 				if (!endgameRemnantHunt)
-					NoteWaveDecision(pHouse, waveCheck, true, static_cast<int>(dispatchedVeh + dispatchedInf));
+					NoteWaveDecision(pHouse, waveCheck, true, static_cast<int>(dispatchedVeh + dispatchedInf + handedVeh + handedInf));
 
 				// Coalition telemetry: whose building this new wave goes for.
 				auto& waveCoal = waveMacro.Coalition;
@@ -10070,13 +10140,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			waveMacro.LastWaveDispatchFrame = Unsorted::CurrentFrame;
 			waveMacro.LastWaveTargetCell = pWaveTargetCell->MapCoords;
-			NoteTeamWaveDispatched(pHouse, teamOrder, dispatchedVeh, dispatchedInf);
+			NoteTeamWaveDispatched(pHouse, teamOrder, dispatchedVeh + handedVeh, dispatchedInf + handedInf);
 
 			Debug::Log("[NeuralAI] Frame %d | House #%d (%s) launched Offensive Wave "
 					"(%zu Vehicles + %zu Infantry) -> Target Cell (%d,%d)\n",
 				Unsorted::CurrentFrame, pHouse->ArrayIndex,
 				(pHouse->Type && pHouse->Type->ID[0]) ? pHouse->Type->ID : "AI", dispatchedVeh, dispatchedInf,
 				pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y);
+
+			if (handedVeh > 0 || handedInf > 0)
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d): %zu vehicles and %zu infantry handed to transport operations\n",
+					Unsorted::CurrentFrame, pHouse->ArrayIndex, pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, handedVeh, handedInf);
+			}
 
 			// TEMP diagnostic: units of this dispatch that kept the goal of an earlier wave.
 			if (keptWaveGoals > 0)
@@ -10870,6 +10946,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		addFerryDemand(pHomeExpansionDeployer);
 		addFerryDemand(pHomeIslandEngineer);
+
+		// The members of the transport operations still waiting on their land (published by
+		// UpdateTransportOperations at the end of the last tick).
+		if (macro.OpWaitingFrame >= 0 && Unsorted::CurrentFrame - macro.OpWaitingFrame <= 600 && Unsorted::CurrentFrame >= macro.OpWaitingFrame)
+		{
+			for (int size = 1; size <= 15; ++size)
+				macro.FerryDemandSizeBySize[size] += macro.OpWaitingSizeBySize[size];
+		}
 	}
 
 	// Any real reason to ferry this tick: waiting cargo, or an island resource/tech goal.
@@ -11480,7 +11564,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		for (auto const pFleet : UnitClass::Array)
 		{
 			if (!pFleet || pFleet->Owner != pHouse || pFleet->InLimbo || !pFleet->IsAlive || !pFleet->Type
-				|| !IsAmphibiousOrAirTransport(pFleet->Type) || pFleet->Type->Passengers <= 0 || IsPlanMember(pHouse, pFleet->UniqueID))
+				|| !IsAmphibiousOrAirTransport(pFleet->Type) || pFleet->Type->Passengers <= 0 || IsPlanMember(pHouse, pFleet->UniqueID)
+				|| IsInTransportOp(pHouse, pFleet->UniqueID))
 			{
 				continue;
 			}
@@ -11691,9 +11776,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	for (auto const pTrans : UnitClass::Array)
 	{
-		// Transports flying a strategic plan (e.g. the airborne second front) belong to that plan.
+		// Transports flying a strategic plan (e.g. the airborne second front) belong to that plan, those of
+		// a transport operation to the operation.
 		if (!pTrans || pTrans->Owner != pHouse || pTrans->InLimbo || !pTrans->IsAlive || !pTrans->Type
-			|| IsPlanMember(pHouse, pTrans->UniqueID))
+			|| IsPlanMember(pHouse, pTrans->UniqueID) || IsInTransportOp(pHouse, pTrans->UniqueID))
 		{
 			continue;
 		}
@@ -12532,8 +12618,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					return true;
 			}
 
-			// Idle units ride only to this transport's own destination (as the loader picks them).
-			if (!pActiveIslandGoal)
+			// Idle units ride only to this transport's own destination (as the loader picks them), and with
+			// the transport operations on, not at all.
+			if (!pActiveIslandGoal || TransportOpsEnabled)
 				return false;
 
 			for (auto const pV : idleCombatUnits)
@@ -13804,8 +13891,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				// Priority 2: Closest available combat vehicle on transZone that fits. Idle units ride only
-				// to this transport's own destination.
-				if (!pNextBoarder && pActiveIslandGoal)
+				// to this transport's own destination. With the transport operations on, an idle unit rides
+				// only when its client asks for it (user: a soldier boarding with no mission of its own).
+				if (!pNextBoarder && pActiveIslandGoal && !TransportOpsEnabled)
 				{
 					for (auto const pV : idleCombatUnits)
 					{
@@ -13842,7 +13930,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				// Priority 3: Closest available combat infantry on transZone that fits
-				if (!pNextBoarder && pActiveIslandGoal && static_cast<int>(pTrans->Type->SizeLimit) >= 1)
+				if (!pNextBoarder && pActiveIslandGoal && !TransportOpsEnabled && static_cast<int>(pTrans->Type->SizeLimit) >= 1)
 				{
 					for (auto const pI : idleCombatInf)
 					{
@@ -14179,9 +14267,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	for (auto const pAir : AircraftClass::Array)
 	{
-		// Aircraft flying a strategic plan (air strike, airborne second front...) belong to that plan.
+		// Aircraft flying a strategic plan (air strike, airborne second front...) belong to that plan, the
+		// carryalls of a transport operation to the operation.
 		if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type
-			|| IsPlanMember(pHouse, pAir->UniqueID))
+			|| IsPlanMember(pHouse, pAir->UniqueID) || IsInTransportOp(pHouse, pAir->UniqueID))
 		{
 			continue;
 		}
@@ -14296,7 +14385,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			std::vector<FootClass*> airQueue = airParked ? ferryQueueOf(pAir, airZone, airQueuedSize) : std::vector<FootClass*> {};
 			bool moreUnitsFitAir = (pSingleAirBoarder != nullptr) || !airQueue.empty();
 			if (!moreUnitsFitAir && !pAir->IsInAir() && pAir->GetHeight() == 0 && freeAirCap > 0
-				&& numAirPass < pAir->Type->Passengers)
+				&& numAirPass < pAir->Type->Passengers && !TransportOpsEnabled)
 			{
 				for (auto const pV : idleCombatUnits)
 				{
@@ -14423,7 +14512,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 
-					if (!pNextAirPass)
+					// Idle units ride only when their client asks for it (transport operations).
+					if (!pNextAirPass && !TransportOpsEnabled)
 					{
 						for (auto const pV : idleCombatUnits)
 						{
@@ -14448,7 +14538,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 					}
 
-					if (!pNextAirPass && static_cast<int>(pAir->Type->SizeLimit) >= 1)
+					if (!pNextAirPass && !TransportOpsEnabled && static_cast<int>(pAir->Type->SizeLimit) >= 1)
 					{
 						for (auto const pI : idleCombatInf)
 						{
