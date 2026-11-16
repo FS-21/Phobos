@@ -1575,6 +1575,8 @@ namespace
 	// narrow passage, how near their goals are, their missions, plans and the source of their last
 	// wave or plan order (user, match #10286, Blistering Heatstroke: 40+ units of one house held in
 	// one line by an enemy outpost, the followed one 3 cells from its goal).
+	bool IsOnRepairTrip(const HouseClass* pHouse, DWORD uid);
+
 	void LogHeldColumn(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
 	{
 		static int serial = -1;
@@ -1634,7 +1636,7 @@ namespace
 		auto const& macro = GetMacroState(pHouse);
 		auto const& tags = CreditTags[std::clamp(houseIndex, 0, 31)];
 		short minX = SHRT_MAX, maxX = SHRT_MIN, minY = SHRT_MAX, maxY = SHRT_MIN;
-		int narrow = 0, goalNear = 0, goalMid = 0, goalFar = 0, inPlan = 0, longest = 0;
+		int narrow = 0, goalNear = 0, goalMid = 0, goalFar = 0, inPlan = 0, onRepair = 0, longest = 0;
 		std::map<std::string, int> missions, sources, types;
 		std::map<std::pair<short, short>, int> dests;
 
@@ -1659,6 +1661,7 @@ namespace
 
 			const bool member = macro.PlanMembers.contains(pFoot->UniqueID);
 			inPlan += member ? 1 : 0;
+			onRepair += IsOnRepairTrip(pHouse, pFoot->UniqueID) ? 1 : 0;
 			missions["m" + std::to_string(static_cast<int>(pFoot->CurrentMission)) + "/" + std::to_string(static_cast<int>(pFoot->MegaMission))]++;
 
 			if (auto const pType = pFoot->GetTechnoType())
@@ -1726,9 +1729,9 @@ namespace
 			text += key + "x" + std::to_string(count) + " ";
 
 		Debug::Log("[NeuralAI] held column DIAG house %d frame %d: %d held in x %d..%d y %d..%d (%d in a narrow passage), goal within 4 cells %d, "
-			"5-12 %d, farther %d, in a plan %d, longest held %d frames, nearest enemy building (%d,%d) %.0f cells | %s\n", houseIndex, now,
-			static_cast<int>(bestSize), minX, maxX, minY, maxY, narrow, goalNear, goalMid, goalFar, inPlan, longest, enemyAt.X, enemyAt.Y,
-			enemyDist, text.c_str());
+			"5-12 %d, farther %d, in a plan %d, on a repair trip %d, longest held %d frames, nearest enemy building (%d,%d) %.0f cells | %s\n",
+			houseIndex, now, static_cast<int>(bestSize), minX, maxX, minY, maxY, narrow, goalNear, goalMid, goalFar, inPlan, onRepair, longest,
+			enemyAt.X, enemyAt.Y, enemyDist, text.c_str());
 	}
 
 	// Stuck order watchdog: a ground unit with a move or attack-move destination that has not

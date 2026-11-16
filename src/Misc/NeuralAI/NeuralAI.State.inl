@@ -1934,6 +1934,13 @@ namespace
 	// base exit and the unused floor read 15, 8 and 4).
 	constexpr int HeldAtHomeFrames = 600;
 	constexpr double HeldAtHomeCells = 20.0;
+	// A repair station serves one unit at a time; the others wait on cells next to it. It takes at
+	// most RepairStationQueueUnits repair trips at once (docked, on their way or waiting): the house
+	// cap alone (a third of the army) let 30 and more units queue for one depot, in one line that
+	// shut the way past it (user, match #10286, Blistering Heatstroke: 40+ Flak Tracks held in a
+	// passage by the house's forward base, the followed one at 43% health on Move 3 cells from its
+	// goal).
+	constexpr int RepairStationQueueUnits = 4;
 	// Artillery (main gun reaching ArtilleryRangeCells against the ground) needs a front line: the
 	// first ArtilleryFreeVehicles are free, then one more for every ArtilleryFrontLinePerGun armed
 	// ground vehicles of other kinds; each one over that costs ArtilleryOverFrontPenalty. The type

@@ -167,6 +167,19 @@ namespace
 		return static_cast<int>(GetRepairState(pHouse).Trips.size());
 	}
 
+	// Repair trips of the house bound for one station (docked, on their way or waiting next to it),
+	// but the one of excludeID.
+	int CountStationTrips(const HouseClass* pHouse, DWORD stationID, DWORD excludeID)
+	{
+		auto const& trips = GetRepairState(pHouse).Trips;
+
+		return static_cast<int>(std::count_if(trips.begin(), trips.end(), [stationID, excludeID](const NeuralRepairTrip& trip)
+			{
+				return trip.SourceID == stationID && trip.UID != excludeID
+					&& (trip.Kind == NeuralRepairKind::Depot || trip.Kind == NeuralRepairKind::Hospital);
+			}));
+	}
+
 	// A unit back from a trip rests 900 frames before the next one (no shuttling between the
 	// station and the front at the health threshold).
 	bool IsRepairTripAllowed(const HouseClass* pHouse, DWORD uid)
@@ -501,6 +514,24 @@ namespace
 						state.FailedStations.emplace_back(pFoot->GetTechnoType(), trip.Kind);
 					}
 
+					// A unit still waiting for the station leaves its cell next to it (the engine turns the
+					// Enter order on a busy station into a move there): it stayed in the queue on Move,
+					// in the way of the others, after its trip ended.
+					if (auto const pStation = abstract_cast<BuildingClass*>(pSource); pStation && !pFoot->ContainsLink(pStation))
+					{
+						auto const pWaitCell = abstract_cast<CellClass*>(pFoot->Destination);
+						const bool waiting = pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter
+							|| pFoot->Destination == pStation
+							|| (pFoot->CurrentMission == Mission::Move && pWaitCell && pWaitCell->MapCoords.DistanceFrom(pStation->GetMapCoords()) <= 4.0);
+
+						if (waiting)
+						{
+							pFoot->ClearMegaMissionData();
+							pFoot->SetDestination(nullptr, true);
+							pFoot->QueueMission(Mission::Guard, false);
+						}
+					}
+
 					CountDecision(NeuralDecision::RepairAbandoned, houseIdx);
 					rested.emplace_back(trip.UID, now + 900);
 
@@ -619,6 +650,74 @@ namespace
 			else
 				state.Rested.insert(it, entry);
 		}
+
+		// TEMP diagnostic: station trips per station once one has 3 or more or a station was full,
+		// at most every 1800 frames per house: how many, how many still on their way or waiting,
+		// how many of those stood 450+ frames on one cell, and the trips cap of the house.
+		static int diagSerial = -1;
+		static int diagFrame[32] {};
+
+		if (diagSerial != NeuralMatchSerial)
+		{
+			diagSerial = NeuralMatchSerial;
+			std::fill(std::begin(diagFrame), std::end(diagFrame), -1);
+		}
+
+		const int diagHouse = std::clamp(houseIdx, 0, 31);
+
+		if (diagFrame[diagHouse] >= 0 && now - diagFrame[diagHouse] < 1800)
+			return;
+
+		std::map<DWORD, std::array<int, 3>> perStation;
+		int most = 0;
+
+		for (auto const& trip : state.Trips)
+		{
+			if (trip.Kind == NeuralRepairKind::Depot || trip.Kind == NeuralRepairKind::Hospital)
+				most = std::max(most, ++perStation[trip.SourceID][0]);
+		}
+
+		if (most < 3 && RepairStationFullSkips[diagHouse] == 0)
+			return;
+
+		diagFrame[diagHouse] = now;
+		auto const& progress = GetMacroState(pHouse).FootProgress;
+
+		for (auto const& trip : state.Trips)
+		{
+			if (trip.Kind != NeuralRepairKind::Depot && trip.Kind != NeuralRepairKind::Hospital)
+				continue;
+
+			auto const pFoot = abstract_cast<FootClass*>(findTechno(trip.UID));
+
+			if (!pFoot || pFoot->InLimbo)
+				continue;
+
+			auto const pStation = abstract_cast<BuildingClass*>(findTechno(trip.SourceID));
+
+			if (pStation && pFoot->ContainsLink(pStation))
+				continue;
+
+			auto& counts = perStation[trip.SourceID];
+			counts[1]++;
+			auto const it = progress.find(trip.UID);
+
+			if (it != progress.end() && now >= it->second.SinceFrame && now - it->second.SinceFrame >= 450)
+				counts[2]++;
+		}
+		std::string text;
+
+		for (auto const& [id, counts] : perStation)
+		{
+			auto const pStation = abstract_cast<BuildingClass*>(findTechno(id));
+			const CellStruct at = pStation ? pStation->GetMapCoords() : CellStruct::Empty;
+			text += std::string(pStation ? pStation->Type->ID : "gone") + " (" + std::to_string(at.X) + "," + std::to_string(at.Y) + ") "
+				+ std::to_string(counts[0]) + " trips, " + std::to_string(counts[1]) + " not docked, " + std::to_string(counts[2]) + " held; ";
+		}
+
+		Debug::Log("[NeuralAI] House %d repair queue DIAG frame %d: %d trips in all; %sfull stations passed over %d.\n", houseIdx, now,
+			static_cast<int>(state.Trips.size()), text.c_str(), RepairStationFullSkips[diagHouse]);
+		RepairStationFullSkips[diagHouse] = 0;
 	}
 
 	void FormatArmyTelemetry(const HouseClass* pHouse, char* pBuffer, size_t size)
