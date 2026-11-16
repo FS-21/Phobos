@@ -1016,6 +1016,63 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// (when home island is full), and Strategic Neutral Tech Building targets
 	CellClass* pIslandResourceGoalCell = nullptr;
 	int resourceIslandZone = -1;
+	// Harvesters are carried only to where they can unload (user, match #10266: the transport
+	// helicopters of a house set seven of its harvesters down on an island with no ore and no
+	// refinery, the nearest free land for an expansion, where they stood until they were
+	// destroyed). The island goal takes harvesters only with a refinery of ours on that land. A
+	// harvester on a land with no refinery and no construction yard of ours is stranded: a
+	// carryall brings it back to the nearest refinery.
+	std::vector<int> ownRefineryZones;
+	std::vector<int> ownYardZones;
+
+	for (auto const pOwnBld : pHouse->Buildings)
+	{
+		if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type)
+			continue;
+
+		if (pOwnBld->Type->Refinery || pOwnBld->Type->ResourceDestination)
+			ownRefineryZones.push_back(ObjectZone(pOwnBld, MovementZone::Normal));
+		else if (pOwnBld->Type->ConstructionYard)
+			ownYardZones.push_back(ObjectZone(pOwnBld, MovementZone::Normal));
+	}
+
+	auto const zoneHasOwnRefinery = [&ownRefineryZones](int zone)
+	{
+		return std::find(ownRefineryZones.begin(), ownRefineryZones.end(), zone) != ownRefineryZones.end();
+	};
+	auto const islandGoalTakesHarvesters = [&]()
+	{
+		return pIslandResourceGoalCell && resourceIslandZone >= 0 && zoneHasOwnRefinery(resourceIslandZone);
+	};
+	auto const isStrandedHarvester = [&](UnitClass* pU, int zone)
+	{
+		return (pU->Type->Harvester || pU->Type->Weeder) && zone >= 0 && !ownRefineryZones.empty() && !zoneHasOwnRefinery(zone)
+			&& std::find(ownYardZones.begin(), ownYardZones.end(), zone) == ownYardZones.end();
+	};
+	auto const nearestOwnRefineryCell = [pHouse](const CellStruct& from) -> CellClass*
+	{
+		CellClass* pBest = nullptr;
+		double bestDist = 999999.0;
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type
+				|| (!pOwnBld->Type->Refinery && !pOwnBld->Type->ResourceDestination))
+			{
+				continue;
+			}
+
+			const double dist = pOwnBld->GetMapCoords().DistanceFrom(from);
+
+			if (dist < bestDist)
+			{
+				bestDist = dist;
+				pBest = pOwnBld->GetCell();
+			}
+		}
+
+		return pBest;
+	};
 	CellClass* pIslandTechGoalCell = nullptr;
 	int techIslandZone = -1;
 	int conYardsOnHomeIsland = 0;
@@ -11632,15 +11689,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							{
 								pDropCell = pCarriedRepair->GetCell();
 							}
-							else if ((pCarriedUnit->Type->DeploysInto != nullptr || pCarriedUnit->Type->Harvester
-										|| pCarriedUnit->Type->Weeder)
-								&& pIslandResourceGoalCell)
+							else if (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)
+							{
+								// Where it can unload: the island goal with a refinery of ours, else the nearest refinery.
+								pDropCell = islandGoalTakesHarvesters() ? pIslandResourceGoalCell : nearestOwnRefineryCell(pTrans->GetMapCoords());
+							}
+							else if (pCarriedUnit->Type->DeploysInto != nullptr && pIslandResourceGoalCell)
 							{
 								pDropCell = pIslandResourceGoalCell;
 							}
 						}
 
-						if (!pDropCell)
+						if (!pDropCell && !(pCarriedUnit->Type && (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)))
 						{
 							pDropCell = pIslandGoalCell
 								? pIslandGoalCell
@@ -11793,8 +11853,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								&& (pU == pHomeExpansionDeployer || pHouse->NumConYards >= 1
 									|| pHouse->CountOwnedNow(pU->Type) >= 2 || pHouse->OwnedBuildings >= 6));
 							const bool isIslandHarvester
-								= ((pU->Type->Harvester || pU->Type->Weeder) && pIslandResourceGoalCell
-									&& uZone == homeGroundZone && pHouse->CountOwnedNow(pU->Type) >= 2);
+								= ((pU->Type->Harvester || pU->Type->Weeder) && islandGoalTakesHarvesters()
+									&& uZone == homeGroundZone && uZone != resourceIslandZone && pHouse->CountOwnedNow(pU->Type) >= 2);
+							const bool strandedHarvester = isStrandedHarvester(pU, uZone);
 							const bool isIslandCombatVehicle = (pIslandGoalCell != nullptr && uZone == homeGroundZone
 								&& !IsAmphibiousOrAirTransport(pU->Type) && !pU->Type->Harvester && !pU->Type->Weeder
 								&& pU->Type->DeploysInto == nullptr
@@ -11804,7 +11865,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const bool isLosingExpensiveUnit = evacuationAllowed && !isCriticallyDamagedTank
 								&& pU->Type->Cost >= 1000 && pU->GetHealthPercentage() < 0.70 && IsFootOutmatched(pHouse, pU, 7.0);
 							const bool isIslandJob = isIslandExpansionMCV || isIslandHarvester || isIslandCombatVehicle;
-							if (isCriticallyDamagedTank || isLosingExpensiveUnit || isLoadedStrikeAPC
+							if (isCriticallyDamagedTank || isLosingExpensiveUnit || isLoadedStrikeAPC || strandedHarvester
 								|| (isIslandJob && !islandLiftsPaused))
 							{
 								AdvanceRoutedPickup(pHouse, pTrans, pU, true);
@@ -12096,7 +12157,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			activeIslandZone = secondaryIslandZone;
 		}
 
-		if (!pCustomPassengerGoal && (carryingMCV || carryingHarvester) && pIslandResourceGoalCell)
+		if (!pCustomPassengerGoal && (carryingMCV || (carryingHarvester && islandGoalTakesHarvesters())) && pIslandResourceGoalCell)
 		{
 			pActiveIslandGoal = pIslandResourceGoalCell;
 			activeIslandZone = resourceIslandZone;
@@ -14178,7 +14239,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				CellClass* pAirGoal = pAirCustomPassGoal ? pAirCustomPassGoal : pIslandGoalCell;
 				int airGoalZone = pAirCustomPassGoal ? airCustomPassZone : targetIslandZone;
-				if ((airCarryingMCV || airCarryingHarvester) && pIslandResourceGoalCell)
+				if ((airCarryingMCV || (airCarryingHarvester && islandGoalTakesHarvesters())) && pIslandResourceGoalCell)
 				{
 					pAirGoal = pIslandResourceGoalCell;
 					airGoalZone = resourceIslandZone;
@@ -14384,15 +14445,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					pDropCell = pCarriedRepair->GetCell();
 				}
-				else if ((pCarriedUnit->Type->DeploysInto != nullptr || pCarriedUnit->Type->Harvester
-							|| pCarriedUnit->Type->Weeder)
-					&& pIslandResourceGoalCell)
+				else if (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)
+				{
+					// Where it can unload: the island goal with a refinery of ours, else the nearest refinery.
+					pDropCell = islandGoalTakesHarvesters() ? pIslandResourceGoalCell : nearestOwnRefineryCell(pAir->GetMapCoords());
+				}
+				else if (pCarriedUnit->Type->DeploysInto != nullptr && pIslandResourceGoalCell)
 				{
 					pDropCell = pIslandResourceGoalCell;
 				}
 			}
 
-			if (!pDropCell)
+			if (!pDropCell && !(pCarriedUnit->Type && (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)))
 			{
 				pDropCell = pIslandGoalCell
 					? pIslandGoalCell
@@ -14465,13 +14529,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const bool isIslandExpansionMCV = (pU->Type->DeploysInto != nullptr && pIslandResourceGoalCell
 					&& uZone >= 0 && uZone != resourceIslandZone
 					&& (pHouse->NumConYards >= 1 || pHouse->CountOwnedNow(pU->Type) >= 2));
-				const bool isIslandHarvester = ((pU->Type->Harvester || pU->Type->Weeder) && pIslandResourceGoalCell
-					&& uZone == homeGroundZone && pHouse->CountOwnedNow(pU->Type) >= 2);
+				const bool isIslandHarvester = ((pU->Type->Harvester || pU->Type->Weeder) && islandGoalTakesHarvesters()
+					&& uZone == homeGroundZone && uZone != resourceIslandZone && pHouse->CountOwnedNow(pU->Type) >= 2);
+				const bool strandedHarvester = isStrandedHarvester(pU, uZone);
 				// Combat evacuation: an expensive unit losing its fight is pulled out early.
 				const bool isLosingExpensiveUnit = evacuationAllowed && !isCriticallyDamagedTank && pU->Type->Cost >= 1000
 					&& pU->GetHealthPercentage() < 0.70 && IsFootOutmatched(pHouse, pU, 7.0);
 				const bool isIslandJob = isIslandExpansionMCV || isIslandHarvester;
-				if (isCriticallyDamagedTank || isLosingExpensiveUnit || isLoadedStrikeAPC || (isIslandJob && !islandLiftsPaused))
+				if (isCriticallyDamagedTank || isLosingExpensiveUnit || isLoadedStrikeAPC || strandedHarvester
+					|| (isIslandJob && !islandLiftsPaused))
 				{
 					AdvanceRoutedPickup(pHouse, pAir, pU, false);
 					CountDecision(NeuralDecision::AirliftJob, pHouse->ArrayIndex);
