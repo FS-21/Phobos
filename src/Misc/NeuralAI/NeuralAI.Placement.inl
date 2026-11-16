@@ -2577,6 +2577,25 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	if (isCombatDefense)
 		CollectEnemyDefenseReach(pHouse, enemyDefenseReach);
 
+	// A long-range gun with a dead zone (IsDeadZoneTower) wants one of our point-blank ground
+	// towers within its dead zone and DeadZoneCoverMarginCells more: that one fires at what gets
+	// next to the gun.
+	const bool isDeadZoneTower = isCombatDefense && IsDeadZoneTower(pBuildingType);
+	const int deadZoneCoverCells = GroundDeadZoneOf(pBuildingType) / Unsorted::LeptonsPerCell + DeadZoneCoverMarginCells;
+	std::vector<CellStruct> pointBlankTowerCells;
+
+	if (isDeadZoneTower)
+	{
+		for (auto const pOwnB : pHouse->Buildings)
+		{
+			if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->Type && pOwnB->Type->IsBaseDefense
+				&& GroundRangeOf(pOwnB->Type) > 0 && GroundDeadZoneOf(pOwnB->Type) < Unsorted::LeptonsPerCell)
+			{
+				pointBlankTowerCells.push_back(pOwnB->GetMapCoords());
+			}
+		}
+	}
+
 	// Base spread against superweapons (point 43): while an enemy owns a superweapon with a
 	// public countdown (ShowTimer=yes, visible to every player), our expensive non-defense
 	// structures keep at least 6 cells apart so one strike cannot take several of them.
@@ -3777,6 +3796,15 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					// Route heat: cover the approaches the enemy really takes, above all the chosen spot.
 					if (isGroundDefense && ownTowerRangeCells > 0)
 						spatialScore += RouteDefenseCellShift(pHouse, candidate, ownTowerRangeCells, routeDefenseSpot);
+
+					// A gun with a dead zone goes where a point-blank tower of ours covers it.
+					if (isDeadZoneTower)
+					{
+						const bool covered = std::any_of(pointBlankTowerCells.begin(), pointBlankTowerCells.end(), [&](const CellStruct& tc)
+							{ return std::max(std::abs(candidate.X - tc.X), std::abs(candidate.Y - tc.Y)) <= deadZoneCoverCells; });
+
+						spatialScore += covered ? DeadZoneCoveredBonus : -DeadZoneAlonePenalty;
+					}
 				}
 				else if (isSupportRadiusBld)
 				{
@@ -4504,6 +4532,43 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		auto& st = GetMacroState(pHouse);
 		st.ConsecutivePlacementFailures = 0;
 		st.BuildingPlacementCooldownUntilFrame.erase(pBuildingType->ArrayIndex);
+
+		// TEMP diagnostic: where a long-range gun with a dead zone goes, and whether a point-blank
+		// ground tower of ours covers it there (once per cell).
+		static int gunLogSerial = -1;
+		static CellStruct gunLogCell[32] {};
+		const int gunLogHouse = std::clamp(pHouse->ArrayIndex, 0, 31);
+
+		if (gunLogSerial != NeuralMatchSerial)
+		{
+			gunLogSerial = NeuralMatchSerial;
+			std::fill(std::begin(gunLogCell), std::end(gunLogCell), CellStruct::Empty);
+		}
+
+		if (IsDeadZoneTower(pBuildingType) && gunLogCell[gunLogHouse] != bestCell)
+		{
+			gunLogCell[gunLogHouse] = bestCell;
+			const int coverCells = GroundDeadZoneOf(pBuildingType) / Unsorted::LeptonsPerCell + DeadZoneCoverMarginCells;
+			int groundTowers = 0;
+			bool covered = false;
+
+			for (auto const pOwnB : pHouse->Buildings)
+			{
+				if (!pOwnB || !pOwnB->IsAlive || pOwnB->InLimbo || !pOwnB->Type || !pOwnB->Type->IsBaseDefense
+					|| GroundRangeOf(pOwnB->Type) <= 0 || GroundDeadZoneOf(pOwnB->Type) >= Unsorted::LeptonsPerCell)
+				{
+					continue;
+				}
+
+				++groundTowers;
+				const CellStruct tc = pOwnB->GetMapCoords();
+				covered = covered || std::max(std::abs(bestCell.X - tc.X), std::abs(bestCell.Y - tc.Y)) <= coverCells;
+			}
+
+			Debug::Log("[NeuralAI] House %d long-range tower DIAG: %s goes to (%d,%d), point-blank tower within %d cells %d, "
+				"point-blank ground towers owned %d, frame %d.\n", pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y,
+				coverCells, covered ? 1 : 0, groundTowers, Unsorted::CurrentFrame);
+		}
 
 		// Island Hold: the pick stored while this building was under construction is not the
 		// yard's (its defense never displaces a building in progress), and the yard would start it
