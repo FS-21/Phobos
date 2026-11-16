@@ -1131,7 +1131,9 @@ namespace
 		auto const pLanding = FindSafeIslandLandingCell(pHouse, ground, targetZone, false);
 		const CellStruct footCoords = pFoot->GetMapCoords();
 
-		if (!pLanding || !CanHouseFerryTypeAcrossWater(pHouse, pType, &footCoords, &pLanding->MapCoords))
+		// A transport that comes now: one the house could build only after more prerequisites left the
+		// engineers waiting OpNoTransportFrames for a crossing nothing it had could make.
+		if (!pLanding || !CanHouseFerryTypeAcrossWater(pHouse, pType, &footCoords, &pLanding->MapCoords, true))
 			return false;
 
 		NeuralTransportOperation* pOp = nullptr;
@@ -1558,6 +1560,16 @@ namespace
 			{
 				rule = "coast fallback";
 				pStaging = FindSafeIslandLandingCell(pHouse, centre, op.OriginZone, false);
+
+				// A coast no transport of the house sails from to the landing: the members walked up to a
+				// hundred cells to it and waited OpNoTransportFrames there. They stay with their client.
+				if (pStaging && !CanBoardingCarriersLink(pHouse, pStaging->MapCoords, op.Landing))
+				{
+					Debug::Log("[NeuralAI] House %d transport op %d: no transport of the house crosses from zone %d near (%d,%d) to the "
+						"landing (%d,%d), frame %d.\n", houseIndex, op.Id, op.OriginZone, centre.X, centre.Y, op.Landing.X, op.Landing.Y, now);
+					endOp("no crossing", true);
+					return;
+				}
 			}
 
 			op.Staging = pStaging ? pStaging->MapCoords : centre;

@@ -2201,27 +2201,45 @@ namespace
 	}
 
 	// The transport types that may come to load units of the house: the one given, else those it
-	// owns, else those it can build. Flying ones come down anywhere; the others have to stand on
-	// the cell.
+	// owns, else those it can build (surface: the cell must suit them all). crossing: every type that
+	// may make the crossing, owned or buildable now (the operation opens on any of them). Flying ones
+	// come down anywhere; the others have to stand on the cell.
 	void CollectBoardingCarrierTypes(HouseClass* pHouse, const TechnoTypeClass* pCarrierType,
-		std::vector<const TechnoTypeClass*>& surface, bool& anyFlyer)
+		std::vector<const TechnoTypeClass*>& surface, std::vector<const TechnoTypeClass*>& crossing, bool& anyFlyer)
 	{
 		anyFlyer = false;
+		bool ownsAny = false;
 
-		auto const add = [&](const TechnoTypeClass* pType)
+		auto const flies = [](const TechnoTypeClass* pType)
 		{
-			const bool flies = pType->WhatAmI() == AbstractType::AircraftType || pType->JumpJet || pType->ConsideredAircraft
+			return pType->WhatAmI() == AbstractType::AircraftType || pType->JumpJet || pType->ConsideredAircraft
 				|| pType->MovementZone == MovementZone::Fly;
+		};
 
-			if (flies)
+		auto const add = [&](const TechnoTypeClass* pType, bool owned)
+		{
+			if (flies(pType))
+			{
 				anyFlyer = true;
-			else if (std::find(surface.begin(), surface.end(), pType) == surface.end())
-				surface.push_back(pType);
+				ownsAny = ownsAny || owned;
+				return;
+			}
+
+			if (std::find(crossing.begin(), crossing.end(), pType) == crossing.end())
+				crossing.push_back(pType);
+
+			if (owned)
+			{
+				ownsAny = true;
+
+				if (std::find(surface.begin(), surface.end(), pType) == surface.end())
+					surface.push_back(pType);
+			}
 		};
 
 		if (pCarrierType)
 		{
-			add(pCarrierType);
+			add(pCarrierType, true);
 			return;
 		}
 
@@ -2230,7 +2248,7 @@ namespace
 			if (pUnit && pUnit->Owner == pHouse && !pUnit->InLimbo && pUnit->IsAlive && pUnit->Type
 				&& IsAmphibiousOrAirTransport(pUnit->Type) && !pUnit->Type->Gunner)
 			{
-				add(pUnit->Type);
+				add(pUnit->Type, true);
 			}
 		}
 
@@ -2239,19 +2257,16 @@ namespace
 			if (pAir && pAir->Owner == pHouse && !pAir->InLimbo && pAir->IsAlive && pAir->Type
 				&& (pAir->Type->Carryall || pAir->Type->Passengers > 0))
 			{
-				add(pAir->Type);
+				add(pAir->Type, true);
 			}
 		}
-
-		if (!surface.empty() || anyFlyer)
-			return;
 
 		for (auto const pType : UnitTypeClass::Array)
 		{
 			if (pType && pType->TechLevel >= 0 && pType->TechLevel <= pHouse->TechLevel && IsAmphibiousOrAirTransport(pType)
 				&& !pType->Gunner && HouseExt::PrerequisitesMet(pHouse, pType))
 			{
-				add(pType);
+				add(pType, false);
 			}
 		}
 
@@ -2260,9 +2275,33 @@ namespace
 			if (pType && pType->TechLevel >= 0 && pType->TechLevel <= pHouse->TechLevel
 				&& (pType->Carryall || pType->Passengers > 0) && HouseExt::PrerequisitesMet(pHouse, pType))
 			{
-				add(pType);
+				add(pType, false);
 			}
 		}
+
+		// Nothing owned: whatever comes is built, so the cell must suit what can be built.
+		if (!ownsAny)
+			surface = crossing;
+	}
+
+	// Can a transport the house owns or can build now carry its units from `from` to `landing`?
+	bool CanBoardingCarriersLink(HouseClass* pHouse, const CellStruct& from, const CellStruct& landing)
+	{
+		std::vector<const TechnoTypeClass*> surface;
+		std::vector<const TechnoTypeClass*> crossing;
+		bool anyFlyer = false;
+		CollectBoardingCarrierTypes(pHouse, nullptr, surface, crossing, anyFlyer);
+
+		if (anyFlyer || landing == CellStruct::Empty)
+			return true;
+
+		for (auto const pType : crossing)
+		{
+			if (CanTransportTypeLink(pType, from, landing))
+				return true;
+		}
+
+		return false;
 	}
 
 	// Where units of a land board a transport (user: "the outskirts of the base are fine, but not
@@ -2280,8 +2319,9 @@ namespace
 			return nullptr;
 
 		std::vector<const TechnoTypeClass*> surface;
+		std::vector<const TechnoTypeClass*> crossing;
 		bool anyFlyer = false;
-		CollectBoardingCarrierTypes(pHouse, pCarrierType, surface, anyFlyer);
+		CollectBoardingCarrierTypes(pHouse, pCarrierType, surface, crossing, anyFlyer);
 
 		const int reach = BoardingSearchCells + 12;
 		auto const inReach = [&around, reach](const CellStruct& at)
@@ -2465,10 +2505,10 @@ namespace
 							continue;
 						}
 
-						bool sails = anyFlyer || surface.empty() || landing == CellStruct::Empty;
+						bool sails = anyFlyer || crossing.empty() || landing == CellStruct::Empty;
 
-						for (size_t i = 0; !sails && i < surface.size(); ++i)
-							sails = CanTransportTypeLink(surface[i], c, landing);
+						for (size_t i = 0; !sails && i < crossing.size(); ++i)
+							sails = CanTransportTypeLink(crossing[i], c, landing);
 
 						if (!sails)
 						{
@@ -2542,9 +2582,9 @@ namespace
 		if (!pResult)
 		{
 			Debug::Log("[NeuralAI] House %d boarding cell DIAG: none within %d cells of (%d,%d) zone %d for the landing (%d,%d); turned down: "
-				"%d no footing, %d inside the base, %d under a defense, %d no standing for a transport (%d surface types%s), %d no crossing "
+				"%d no footing, %d inside the base, %d under a defense, %d no standing for a transport (%d surface types, %d crossing%s), %d no crossing "
 				"to the landing, %d no room; frame %d.\n", pHouse->ArrayIndex, BoardingSearchCells, around.X, around.Y, zone, landing.X,
-				landing.Y, rejected[0], rejected[1], rejected[2], rejected[3], static_cast<int>(surface.size()), anyFlyer ? ", flyers" : "",
+				landing.Y, rejected[0], rejected[1], rejected[2], rejected[3], static_cast<int>(surface.size()), static_cast<int>(crossing.size()), anyFlyer ? ", flyers" : "",
 				rejected[4], rejected[5], Unsorted::CurrentFrame);
 		}
 
