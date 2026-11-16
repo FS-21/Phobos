@@ -633,9 +633,14 @@ void NeuralAI::OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller)
 
 void NeuralAI::OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, TechnoClass* pDock, int money)
 {
-	// Every client sees the same unloads: the dry economy check reads this in matches too.
+	// Every client sees the same unloads: the dry economy check reads this in matches too. An unload
+	// at a refinery has its dock; slaves bring theirs to the miner with none.
 	if (pHouse && money > 0 && pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
-		GetMacroState(pHouse).LastHarvestIncomeFrame = Unsorted::CurrentFrame;
+	{
+		auto& incomeMacro = GetMacroState(pHouse);
+		incomeMacro.LastHarvestIncomeFrame = Unsorted::CurrentFrame;
+		(pDock ? incomeMacro.HarvesterIncome : incomeMacro.MinerIncome) += money;
+	}
 
 	if (!NeuralAI::HeadlessMode || !pHouse || money <= 0 || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
 		return;

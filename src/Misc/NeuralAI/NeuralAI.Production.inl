@@ -1101,8 +1101,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			? std::clamp(std::max(ecoBarracksCap, maxEnemyBarracks), 2, 4) + bankSteps / 2 + frontFactoryRoom / 2
 			: std::clamp(ecoBarracksCap, 1, 2);
 
-		const int maxShipyards
-			= (hasTechCenter && maxEnemyShipyards >= 2) ? std::clamp(maxEnemyShipyards + 1, 2, 4) : 2;
+		// Shipyards (user): on an island map (starting bases not linked by land, or enemy buildings
+		// on another landmass) no cap of their own, only the category cap by difficulty: placement
+		// spreads them over the conquered islands (an island without one first), not all the eggs in
+		// one basket. Elsewhere, with water to use against the enemy, Easy 1, Normal 2, Hard 3.
+		const bool islandNavalWar = (MapInfo.Computed && !MapInfo.LandLinked) || features[21] >= 75;
+		const int houseDifficulty = static_cast<int>(pHouse->GetAIDifficultyIndex());
+		const int maxShipyards = islandNavalWar
+			? GetFactoryCategoryCap(pHouse, 2)
+			: (houseDifficulty >= 2 ? 1 : (houseDifficulty == 1 ? 2 : 3));
 
 		// Aircraft that need a dock, the ones in production included (they hold one already).
 		int ownedDockingAircraft = 0;
@@ -1115,19 +1122,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
-		// Another airfield only when every dock is taken: an airfield is a hangar, not a faster factory.
+		// Airfields follow the docks (user): another one while fewer docks than MinFreeAirDocks for
+		// the difficulty stand free (Easy 4, Normal 6, Hard 8), with no cap; an airfield is a hangar,
+		// not a faster factory.
 		const bool airDocksFull = ownedDockingAircraft >= pHouse->AirportDocks;
+		const int freeAirDocks = pHouse->AirportDocks - ownedDockingAircraft;
+		const int wantedFreeAirDocks = houseDifficulty >= 2 ? MinFreeAirDocksEasy : (houseDifficulty == 1 ? MinFreeAirDocksNormal : MinFreeAirDocksHard);
+		const bool airDocksShort = freeAirDocks < wantedFreeAirDocks;
 
 		const bool expert8NeedsMoreAirpadDocks = (ownedAirpads >= 1 && ownedDockingAircraft >= pHouse->AirportDocks
 			&& (scores[32] > 160 || scores[33] > 160 || pExt->NeuralAI_ActiveExpert == 8
 				|| pExt->NeuralAI_Archetype == 6));
-		const int dockDemandAirpadCap = expert8NeedsMoreAirpadDocks ? std::clamp((ownedDockingAircraft / 4) + 2, 2, 6) : 2;
 		// The aircraft pick wanted a type that needs a dock and had none free: one more airfield.
 		const bool airDockWanted = airDocksFull && ownedAirpads >= 1
 			&& Unsorted::CurrentFrame - GetMacroState(pHouse).AirDockWantedFrame <= AirDockWantedFrames;
-		const int maxAirpads = std::max({ dockDemandAirpadCap,
-			(hasTechCenter && maxEnemyAirpads >= 2) ? std::clamp(maxEnemyAirpads + 1, 2, 5) : 2,
-			airDockWanted ? ownedAirpads + 1 : 0 });
 
 		prodSegments.Mark("pb: threat analysis");
 
@@ -1846,18 +1854,33 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				|| (nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre <= 9))
 			&& ownedRefineries >= 1;
 
-		// Permanent refinery cap: a home cap, raised to 3 per ConYard while a new
-		// field waits for its refinery. Past it a refinery is only built as a Harvester Recovery
-		// refinery (replaced in place or sold once its FreeUnit spawns), never kept: a permanent
-		// one past the cap raised the harvester target (2 per refinery), which asked for another
-		// recovery refinery, and the chain filled the map with refineries far from any field.
-		const int homeRefineryCap = (reachedNewOreField || pHouse->NumConYards >= 2 || features[21] > 0
-										|| (hasTechCenter && money < 3000))
-			? std::max(6, pHouse->NumConYards + 4)
-			: 4;
-		const bool permanentRefineryCapReached = reachedNewOreField
-			? ownedRefineries >= std::max(homeRefineryCap, pHouse->NumConYards * 3)
-			: ownedRefineries >= homeRefineryCap;
+		// Little room first goes to the minimum of everything (user): while a placement just failed
+		// and the core base still lacks a refinery, a barracks, a war factory, a tech center or power,
+		// the copies that follow demand with no cap (refineries, silos, shipyards, airfields) wait.
+		const bool minimumFirst = GetMacroState(pHouse).ConsecutivePlacementFailures >= 1
+			&& (ownedRefineries == 0 || ownedBarracks == 0 || ownedWarFactories == 0 || !hasTechCenter || pHouse->HasLowPower());
+
+		// Permanent refineries follow the fields we hold (user): each held ore block with ore takes
+		// one, two from RefineryOreCellsPerExtra ore cells and three from twice that (the Advanced AI
+		// allows up to 3 by the ore around), and a newly reached field one more; a fixed home cap of 4
+		// to 6 kept a house from taking every field it reached. Past it a refinery is only built as a
+		// Harvester Recovery refinery (replaced in place or sold once its FreeUnit spawns), never
+		// kept: a permanent one past the cap raised the harvester target (2 per refinery), which asked
+		// for another recovery refinery, and the chain filled the map with refineries far from any
+		// field (31 on Majestic Canyon).
+		int fieldRefineryRoom = 0;
+		{
+			auto const heldBlocks = GetHeldOreBlocks(pHouse);
+
+			for (auto const& field : GetOreFields())
+			{
+				if (field.OreCells > 0 && std::binary_search(heldBlocks.begin(), heldBlocks.end(), field.BlockKey))
+					fieldRefineryRoom += std::min(1 + field.OreCells / RefineryOreCellsPerExtra, 3);
+			}
+		}
+
+		const int fieldRefineryCap = std::max(1, fieldRefineryRoom) + (reachedNewOreField ? 1 : 0);
+		const bool permanentRefineryCapReached = ownedRefineries >= fieldRefineryCap;
 
 		// A newly reached field without its refinery (cap not reached): the cheapest buildable
 		// refinery is an economic investment the economy hold saves for (UpdateEconomyCrisis).
@@ -2555,6 +2578,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (permanentRefineryCapReached && !isHarvRecoveryCandidate)
 					continue;
 
+				if (minimumFirst && owned >= 1 && !reachedNewOreField && !isHarvRecoveryCandidate)
+					continue;
+
 				score = scores[1] - owned * 480;
 
 				if (owned == 0)
@@ -2698,7 +2724,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				const int bankShipyards = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Naval, pHouse->NumShipyards) : 0;
 
-				if (owned >= maxShipyards + (islandYardNeedsShipyard ? 1 : 0) && bankShipyards == 0)
+				if (owned >= maxShipyards + (islandYardNeedsShipyard ? 1 : 0) && (bankShipyards == 0 || !islandNavalWar))
+					continue;
+
+				if (minimumFirst && owned >= 1 && !islandYardNeedsShipyard)
 					continue;
 
 				if (!(HouseNeedsNaval(pHouse) || islandYardNeedsShipyard) || CachedTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
@@ -2723,14 +2752,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (pBld->Factory == AbstractType::AircraftType)
 			{
 				// Airfields stay apart from the other factories (no bank governor, no category cap):
-				// another one only when every dock is taken, or the first of a new type (a captured
-				// tree), which opens other aircraft.
+				// another one only while the free docks are short of the difficulty minimum, or the
+				// first of a new type (a captured tree), which opens other aircraft.
 				const bool newAirfieldType = owned == 0 && pHouse->NumAirpads >= 1;
 
-				if (pHouse->NumAirpads >= 1 && !airDocksFull && !newAirfieldType)
+				if (pHouse->NumAirpads >= 1 && !airDocksShort && !newAirfieldType)
 					continue;
 
-				if (owned >= maxAirpads)
+				// With little room only a full set of docks asks for another airfield.
+				if (minimumFirst && owned >= 1 && !newAirfieldType && !airDocksFull)
 					continue;
 
 				if (owned == 0 && pHouse->NumAirpads >= 1 && pHouse->NumAirpads < 4 && SlotGate(scores[82], 60, 82))
@@ -2740,7 +2770,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					score = scores[8] - owned * 750 + ((expert8NeedsMoreAirpadDocks || airDockWanted) ? 850 : 0);
+					score = scores[8] - owned * 750 + ((expert8NeedsMoreAirpadDocks || airDockWanted || airDocksShort) ? 850 : 0);
 
 					if (ownedAirpads < maxEnemyAirpads && hasTechCenter && money >= 2000)
 						score += 350;
@@ -2781,11 +2811,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (pBld->Storage > 0 && !isRefineryOrSlaveMiner)
 			{
 				// Silos only while storage really limits our income (refineries with
-				// Refinery.UseStorage nearly full), at most 2. Without that a silo is money thrown away.
-				if (owned >= 2 || !GetMacroState(pHouse).StorageNearlyFull)
+				// Refinery.UseStorage nearly full), as many as that lasts (user, as the Advanced AI): each
+				// one lowers the share of storage in use. Without that a silo is money thrown away.
+				if (!GetMacroState(pHouse).StorageNearlyFull || (minimumFirst && owned >= 1))
 					continue;
 
-				score = scores[11] - owned * 900;
+				score = scores[11] - std::min(owned, 6) * 150;
 			}
 			else if (IsTunnelNetworkBuilding(pBld))
 			{
@@ -3665,6 +3696,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedEconomyUnits = 0;
 	int ownedCashProduces = 0;
 	int deployedGatherers = 0;
+	int productiveMiners = 0;
 	int ownedMinerUnits = 0;
 	auto const& minerOreSamples = GetMacroState(pHouse).MinerOreSamples;
 
@@ -3686,7 +3718,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			auto const itSamples = minerOreSamples.find(pOwnBldType->UniqueID);
 
 			if (itSamples == minerOreSamples.end() || itSamples->second >= MinerProductiveOreSamples)
+			{
 				ownedEconomyUnits++;
+				productiveMiners++;
+			}
 		}
 		else if (pOwnBldType->Type->Refinery)
 		{
@@ -3713,16 +3748,31 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	const int ecoBiasMod = std::clamp(static_cast<int>(scores[39]) / 220, -1, 2);
-	// About 2 harvesters per refinery, at most 18; one per refinery with a bank of 50000+ credits
-	// (income is not what limits that house: more harvesters only crowd the refineries).
-	// A house living on deployed miners (each one refinery and harvesters in one, no refinery of the
-	// usual kind) gets the refinery cap of the other houses: 4 at home, 6 or ConYards + 4 with free
-	// ore fields on its land, islands or a second ConYard. A fixed 4 kept a Yuri house at four miners
-	// with 68 free fields on its land (match #10437).
-	const bool minerHouseExpands = pHouse->NumConYards >= 2 || features[21] > 0 || GetMacroState(pHouse).UncolonizedOreFields > 0;
+	// About 2 harvesters per refinery, as many as the refineries ask for (they follow the fields we
+	// hold, user); one per refinery with a bank of 50000+ credits (income is not what limits that
+	// house: more harvesters only crowd the refineries).
 	const int economyUnitCap = (trueRefineries > 0)
-		? std::clamp((money >= 50000 ? trueRefineries + 1 : 2 * trueRefineries + 1 + ecoBiasMod), 2, 18)
-		: ((deployedGatherers > 0 || ownedMinerUnits > 0) && minerHouseExpands ? std::max(6, pHouse->NumConYards + 4) : 4);
+		? std::max(2, money >= 50000 ? trueRefineries + 1 : 2 * trueRefineries + 1 + ecoBiasMod)
+		: 4;
+
+	// Mobile refineries (user, after the Advanced AI's mobile refinery target): a house mining with
+	// deployed miners, each one refinery and harvesters in one, wants one per free field of its land
+	// with ore to spare (ForEachMinerOreField) besides the ones mining now, up to MaxMobileMiners. A
+	// miner on its way counts against a free field. A fixed 4 kept a Yuri house at four miners with
+	// 68 free fields on its land (match #10437). Miners are no expansion: nothing is built around them.
+	int minerTarget = 0;
+
+	if (deployedGatherers > 0 || ownedMinerUnits > 0 || trueRefineries == 0)
+	{
+		const CellStruct minerHome = (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(0))
+			? pHouse->ConYards.GetItem(0)->GetMapCoords()
+			: pHouse->BaseSpawnCell;
+		const int minerHomeZone = minerHome != CellStruct::Empty
+			? MapClass::Instance.GetMovementZoneType(minerHome, MovementZone::Normal, false)
+			: -1;
+		const int freeMinerFields = CountMinerOreFields(pHouse, IsGroundZone(minerHomeZone) ? minerHomeZone : -1, MaxMobileMiners);
+		minerTarget = std::clamp(productiveMiners + freeMinerFields, 1, MaxMobileMiners);
+	}
 
 	// Fewer harvesters than refineries (a refinery nobody feeds): the cheapest buildable harvester
 	// is an economic investment the economy hold saves for (UpdateEconomyCrisis).
@@ -4180,10 +4230,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (pCandidate->WhatAmI() == AbstractType::UnitType && !pCandidate->Naval
 				&& IsAmphibiousOrAirTransport(pCandidate))
 			{
-				// Land strike APC: one per load of the riders that would really board it.
+				// Land strike APC: one per load of the riders that would really board it, no fixed cap
+				// (user: the transport operations manager is to handle them, but for stealth and commando
+				// missions).
 				const int riders = ownedStrikeInfantry
 					+ ((pCandidate->MovementZone == MovementZone::Subterrannean) ? idleCombatInfantry : 0);
-				const int wantedLand = std::clamp((riders + candPassCap - 1) / candPassCap, 0, 2);
+				const int wantedLand = std::max(0, (riders + candPassCap - 1) / candPassCap);
 
 				if (ownedLandStrikeTransports < wantedLand && idleLandStrikeTransports == 0)
 					return std::max(static_cast<int>(scores[28]), 0) + 350;
@@ -4427,10 +4479,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isDeployableRefineryOrMiner = (pUnit->DeploysInto
 			&& (pUnit->DeploysInto->Refinery || pUnit->DeploysInto->ResourceGatherer
 				|| pUnit->DeploysInto->ResourceDestination));
+		// A slave miner (deploys into a building that gathers by itself): a mobile refinery.
+		const bool isMobileMiner = isDeployableRefineryOrMiner && pUnit->DeploysInto->ResourceGatherer;
 		// Not with 50000+ credits in the bank: income is not what limits that house, and the miners
-		// would keep the vehicle queue from the army.
+		// would keep the vehicle queue from the army. A mobile miner is no expansion (nothing is built
+		// around it, user): on land minerTarget alone sets their number; across water it is income
+		// from another island, with MaxMobileMiners at most.
 		const bool allowExpansionRefineryDeployer = isDeployableRefineryOrMiner && money < 50000
-			&& (features[21] > 0 || scores[30] >= 500) && (trueRefineries < 10 && ownedEconomyUnits < 18)
+			&& (isMobileMiner ? features[21] > 0 && productiveMiners + ownedMinerUnits < MaxMobileMiners : (features[21] > 0 || scores[30] >= 500))
+			&& (trueRefineries < 10 && ownedEconomyUnits < 18)
 			&& !ownsUndeployedKeyStructure && (features[21] == 0 || CanHouseFerryTypeAcrossWater(pHouse, pUnit));
 
 		bool hasRefineryZoneWithZeroHarvesters = false;
@@ -4449,27 +4506,27 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		const bool isEconomyUnit = pUnit->Harvester || pUnit->ResourceGatherer || isDeployableRefineryOrMiner;
-		if (isEconomyUnit && ownedEconomyUnits >= economyUnitCap && !allowExpansionRefineryDeployer
+		if (isEconomyUnit && !isMobileMiner && ownedEconomyUnits >= economyUnitCap && !allowExpansionRefineryDeployer
 			&& !hasRefineryZoneWithZeroHarvesters && !hasUnderharvestedIslandWithWarFactory)
 		{
 			continue;
 		}
 
-		// Miners without ore take no place of the cap: a ceiling on every miner of ours keeps a house
-		// whose miners find no field from building them without end.
-		if (isDeployableRefineryOrMiner && pUnit->DeploysInto->ResourceGatherer && !isUnitInProgress
-			&& deployedGatherers + ownedMinerUnits >= 2 * economyUnitCap)
+		// Mobile miners follow the free fields (minerTarget): the ones mining (a miner without ore
+		// takes no place) and the ones on their way.
+		if (isMobileMiner && !isUnitInProgress && !allowExpansionRefineryDeployer
+			&& productiveMiners + ownedMinerUnits >= minerTarget)
 		{
 			continue;
 		}
 
-		// The zone exceptions never pass 2 harvesters per refinery + 2 (24 at most): a harvester
-		// built for an island or an empty refinery zone may not stay there (a chrono miner teleports
-		// to any refinery and mines where the ore is), the zone keeps looking empty and every pick
-		// built another one (match #6439, No Rest for the Wicked: 200 Chrono Miners jammed on two
-		// bridges, 6 refineries).
+		// The zone exceptions never pass 2 harvesters per refinery + 2: a harvester built for an
+		// island or an empty refinery zone may not stay there (a chrono miner teleports to any
+		// refinery and mines where the ore is), the zone keeps looking empty and every pick built
+		// another one (match #6439, No Rest for the Wicked: 200 Chrono Miners jammed on two bridges,
+		// 6 refineries).
 		if (isEconomyUnit && !isDeployableRefineryOrMiner && !isUnitInProgress
-			&& ownedEconomyUnits >= std::max(economyUnitCap, std::min(24, 2 * trueRefineries + 2)))
+			&& ownedEconomyUnits >= std::max(economyUnitCap, 2 * trueRefineries + 2))
 			continue;
 
 		// Dry economy (UpdateEconomyCrisis): our gatherers bring nothing in, another one would not either.
@@ -4483,11 +4540,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					&& pConvDeployType->GetWeapon(0)->WeaponType->Damage > 0));
 		if (isConvertToOpenToppedOrCombat && pConvDeployType->OpenTopped && pConvDeployType->Passengers > 0)
 		{
+			// A vehicle that deploys into a bunker soldiers fire from (a support vehicle for harassment
+			// and holding ground, user): as many as our soldiers can fill, by the room of the deployed
+			// form, never a fixed number.
 			const int ownedConvTotal = pHouse->CountOwnedNow(pUnit)
 				+ (abstract_cast<UnitTypeClass*>(pConvDeployType)
 						? pHouse->CountOwnedNow(abstract_cast<UnitTypeClass*>(pConvDeployType))
 						: 0);
-			if (ownedConvTotal >= 2 || pHouse->OwnedInfantry < 3 || canSafelySaveForMCV || savingForIslandTransport)
+			const int bunkerRoom = std::max(1, static_cast<int>(pConvDeployType->Passengers));
+
+			if (ownedConvTotal >= pHouse->OwnedInfantry / bunkerRoom || canSafelySaveForMCV || savingForIslandTransport)
 				continue;
 		}
 
@@ -4507,15 +4569,28 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
-		const bool isEmpOrMindControlSupport = (pWpn != nullptr && pUnit->Spawns == nullptr && !pWpn->Spawner
-			&& ((pWpn->Warhead != nullptr
-					&& (pWpn->Warhead->MindControl || (pWpn->Warhead->EMEffect && pWpn->Damage <= 15)))
-				|| pWpn->Damage <= 5));
-		if (isEmpOrMindControlSupport)
+		const bool isMindControlVehicle = pWpn != nullptr && pUnit->Spawns == nullptr && !pWpn->Spawner
+			&& pWpn->Warhead != nullptr && pWpn->Warhead->MindControl;
+		const bool isEmpSupport = !isMindControlVehicle && pWpn != nullptr && pUnit->Spawns == nullptr && !pWpn->Spawner
+			&& ((pWpn->Warhead != nullptr && pWpn->Warhead->EMEffect && pWpn->Damage <= 15) || pWpn->Damage <= 5);
+		const int ownVehiclesAndShips = pHouse->OwnedUnits + pHouse->OwnedNavy;
+
+		if (isMindControlVehicle)
 		{
-			// Cap Mind-Control vehicles (Mastermind MIND), non-damaging EMP/Scrambler
-			// support vehicles/ships (Mobile EMP CMOBILEMP, CABAL Gorgon ROBOTGORGON2) at 2 owned!
-			if (CountOwnedUnitWithConversions(pHouse, pUnit) >= 2 || (pHouse->OwnedUnits + pHouse->OwnedNavy) < 6
+			// Mind-control vehicles from 3 vehicles of ours on (user: they should be common), one per
+			// MindControlVehiclesPer of them, 2 at least.
+			const int mindControlCap = std::max(2, ownVehiclesAndShips / MindControlVehiclesPer);
+
+			if (CountOwnedUnitWithConversions(pHouse, pUnit) >= mindControlCap || ownVehiclesAndShips < 3
+				|| canSafelySaveForMCV || savingForIslandTransport)
+			{
+				continue;
+			}
+		}
+		else if (isEmpSupport)
+		{
+			// Non-damaging EMP and scrambler support vehicles and ships: 2 at most, from 6 of ours on.
+			if (CountOwnedUnitWithConversions(pHouse, pUnit) >= 2 || ownVehiclesAndShips < 6
 				|| canSafelySaveForMCV || savingForIslandTransport)
 			{
 				continue;
