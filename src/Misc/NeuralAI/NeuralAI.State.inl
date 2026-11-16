@@ -912,6 +912,17 @@ namespace
 		CellStruct LastWaveTargetCell { CellStruct::Empty };
 		int LastWaveDispatchFrame { -100000 };
 		int WaveStartFrame { -100000 };
+		// Wave lesson (UpdateWaveVerdict): the wave under way waits for its verdict, with its target,
+		// the known enemy buildings that stood near it when the wave left, whether a unit of ours
+		// got there and the plan id of the mission it left for (-1 for none); and the waves in a
+		// row that took no building, with the frame of the last one.
+		bool WaveVerdictPending { false };
+		bool WaveVerdictArrived { false };
+		CellStruct WaveVerdictCell { CellStruct::Empty };
+		int WaveVerdictBuildings { 0 };
+		int WaveVerdictMission { -1 };
+		int WaveLessonSteps { 0 };
+		int WaveLessonFrame { -100000 };
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1250,6 +1261,13 @@ namespace
 			this->LastWaveTargetCell = CellStruct::Empty;
 			this->LastWaveDispatchFrame = -100000;
 			this->WaveStartFrame = -100000;
+			this->WaveVerdictPending = false;
+			this->WaveVerdictArrived = false;
+			this->WaveVerdictCell = CellStruct::Empty;
+			this->WaveVerdictBuildings = 0;
+			this->WaveVerdictMission = -1;
+			this->WaveLessonSteps = 0;
+			this->WaveLessonFrame = -100000;
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
@@ -1729,6 +1747,55 @@ namespace
 	constexpr int ArtilleryFreeVehicles = 4;
 	constexpr int ArtilleryFrontLinePerGun = 2;
 	constexpr int ArtilleryOverFrontPenalty = 300;
+	// Archetype 0 is the plain basic strategy (user, 2026-11-16): an early economy, several war
+	// factories, a mass of main battle tanks with some support and large joint attacks. Every other
+	// archetype and every expert is a specialist, and archetype 0 had no prior of its own.
+	constexpr int TankMassArchetype = 0;
+	// Economy first: it asks for TankMassRefineries refineries without waiting for a bank.
+	constexpr int TankMassRefineries = 3;
+	constexpr int TankMassRefineryPrior = 500;
+	// War factories ahead of the bank, up to TankMassWarFactories: the second with one refinery
+	// less than TankMassRefineries, each one after it with a refinery more. The prior comes on top
+	// of what the factories owned take off the next one.
+	constexpr int TankMassWarFactories = 3;
+	constexpr int TankMassFactoryPrior = 700;
+	// The tanks: the prior of the main battle tank slot, the share of the type penalty they keep
+	// (a mass is many of one type) and the front line vehicles a gun needs, with none free.
+	constexpr int TankMassTankPrior = 900;
+	constexpr int TankMassTypePenaltyPercent = 50;
+	constexpr int TankMassFrontLinePerGun = 4;
+	// Main battle tanks run artillery down: their slot gains up to this much with the share of
+	// artillery in the enemy army seen, for every archetype.
+	constexpr int TankCounterArtilleryBonus = 500;
+	// Waves: the unit count they start from and the most they wait for. A wave that took no known
+	// enemy building within WaveVerdictCells of its target asks the next one for
+	// WaveLessonPercent of its count, up to the most, for WaveLessonFrames; one that took a building
+	// ends the lesson (user: grow the group after each wave until it works, without filling the map).
+	// The verdict comes once no unit of ours is left there WaveVerdictQuietFrames after the last
+	// dispatch, or after WaveVerdictFrames.
+	constexpr int TankMassBaseWave = 10;
+	constexpr int TankMassWaveCap = 24;
+	constexpr int WaveLessonPercent = 150;
+	constexpr int WaveLessonMaxSteps = 3;
+	constexpr int WaveLessonFrames = 9000;
+	constexpr double WaveVerdictCells = 14.0;
+	constexpr int WaveVerdictQuietFrames = 900;
+	constexpr int WaveVerdictFrames = 5400;
+	// Missions of the mass (user): its area of influence is the ground within
+	// TankMassInfluenceCells of our buildings and our allies'. An armed enemy unit standing there
+	// is met whatever its orders (Base Threat Intercept), artillery first. An enemy building
+	// within TankMassDangerCells of ours is a wave target before the far ones, more so a defense
+	// or a factory; and the buildings of the house that hurt us most in the last
+	// TankMassReprisalFrames come before those of the others.
+	constexpr double TankMassInfluenceCells = 16.0;
+	constexpr double TankMassDangerCells = 26.0;
+	constexpr int TankMassNearBuildingBonus = 350;
+	constexpr int TankMassDangerBuildingBonus = 300;
+	constexpr int TankMassReprisalFrames = 2700;
+	constexpr int TankMassReprisalBonus = 450;
+	// Plan priorities of the mass: the plans that send the army together gain this much on their
+	// trained preference, the ones that split it into small groups or need specialists lose it.
+	constexpr int TankMassPlanBonus = 400;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way
@@ -2114,6 +2181,53 @@ namespace
 		}
 
 		return bias;
+	}
+
+	// Weight of a mission of the tank mass on the target of its main wave: its base, moved by half
+	// of the trained preference of its slot, from nothing to twice the base.
+	int TankMassMissionBonus(int base, int slotScore)
+	{
+		return std::clamp(base + slotScore / 2, 0, base * 2);
+	}
+
+	// Plan priorities of an archetype: points added to the trained preference of a plan at its
+	// gate (shouldTryStart). The trained preference is one per plan for the whole policy, so
+	// without this every archetype runs the same plans with the same priorities. Only the tank
+	// mass has its own so far: the plans that send the army together and the ones that defend its
+	// ground come first, the ones that split it into small groups or need specialists last. They
+	// are shifts, not vetoes: a plan the situation asks for loudly still starts.
+	int ArchetypePlanOffset(int archetype, NeuralPlanId id)
+	{
+		if (archetype != TankMassArchetype)
+			return 0;
+
+		switch (id)
+		{
+		case NeuralPlanId::TimingRush:
+		case NeuralPlanId::Pincer:
+		case NeuralPlanId::ThreeFrontAssault:
+		case NeuralPlanId::AllyJointAttack:
+		case NeuralPlanId::ForwardRepair:
+		case NeuralPlanId::PreemptiveStrike:
+		case NeuralPlanId::BaseThreatIntercept:
+		case NeuralPlanId::HuntKeyUnits:
+		case NeuralPlanId::ComboBlackoutPush:
+			return TankMassPlanBonus;
+		case NeuralPlanId::EcoRaid:
+		case NeuralPlanId::HarvesterAmbush:
+		case NeuralPlanId::RotatingRaids:
+		case NeuralPlanId::SiegeBattery:
+		case NeuralPlanId::ArtilleryEcoSiege:
+		case NeuralPlanId::RollingSiege:
+		case NeuralPlanId::SilentInfiltration:
+		case NeuralPlanId::EngineerAssault:
+		case NeuralPlanId::Sabotage:
+		case NeuralPlanId::AirCorridor:
+		case NeuralPlanId::HeavyAirPush:
+			return -TankMassPlanBonus;
+		default:
+			return 0;
+		}
 	}
 
 	// Match style (point 28/29): at scenario start every Neural AI house draws, from the synced

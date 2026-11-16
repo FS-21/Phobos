@@ -8024,6 +8024,48 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			minSameZoneEnemyBldDist = distHome;
 	}
 
+	// Missions of the tank mass, each weighed by the trained preference of its slot
+	// (TankMassMissionBonus). Clear Our Ground: what the enemy built next to our ground goes before
+	// the far targets, a defense, a siege gun or a factory before the rest. Reprisal: the buildings
+	// of the house that hurt us most lately go before those of the others. Our ground is what lies
+	// around our construction yards, refineries and factories.
+	const bool tankMassTargets = pExt->NeuralAI_Archetype == TankMassArchetype;
+	std::vector<CellStruct> tankMassSites;
+	int reprisalHouse = -1;
+	const int reprisalBonus = TankMassMissionBonus(TankMassReprisalBonus,
+		scores[NeuralPlanSlots[static_cast<size_t>(NeuralPlanId::Reprisal)]]);
+	const int ourGroundBonus = TankMassMissionBonus(TankMassNearBuildingBonus,
+		scores[NeuralPlanSlots[static_cast<size_t>(NeuralPlanId::ClearOurGround)]]);
+	auto const nearOurGround = [&tankMassSites](const CellStruct& cell)
+	{
+		return std::any_of(tankMassSites.begin(), tankMassSites.end(),
+			[&cell](const CellStruct& site) { return site.DistanceFrom(cell) <= TankMassDangerCells; });
+	};
+
+	if (tankMassTargets)
+	{
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->Type
+				&& (pOwnBld->Type->ConstructionYard || pOwnBld->Type->Refinery || pOwnBld->Type->Factory != AbstractType::None))
+			{
+				tankMassSites.push_back(pOwnBld->GetMapCoords());
+			}
+		}
+
+		auto const& grudges = GetMacroState(pHouse).Coalition;
+		int worstGrudge = 0;
+
+		for (int i = 0; i < 8; ++i)
+		{
+			if (Unsorted::CurrentFrame - grudges.HurtByFrame[i] <= TankMassReprisalFrames && grudges.Grudge[i] > worstGrudge)
+			{
+				worstGrudge = grudges.Grudge[i];
+				reprisalHouse = i;
+			}
+		}
+	}
+
 	for (auto const pEnemyBld : BuildingClass::Array)
 	{
 		if (!pEnemyBld || pEnemyBld->InLimbo || !pEnemyBld->IsAlive || !pEnemyBld->Owner || !pEnemyBld->Type
@@ -8080,6 +8122,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			bldCandScore += IsCoalitionFrontNear(pHouse, ebc, 10) ? 350 : 700;
 
 		bldCandScore += DiplomacyTargetBias(pHouse, pOwner->ArrayIndex, true);
+
+		if (tankMassTargets)
+		{
+			if (pOwner->ArrayIndex == reprisalHouse)
+				bldCandScore += reprisalBonus;
+
+			if (ourGroundBonus > 0 && nearOurGround(ebc))
+			{
+				const bool dangerous = pEnemyBld->Type->IsBaseDefense || pEnemyBld->Type->Factory != AbstractType::None
+					|| IsDeployedSiegeBuildingType(pEnemyBld->Type);
+				bldCandScore += ourGroundBonus + (dangerous ? TankMassDangerBuildingBonus : 0);
+			}
+		}
 
 		if (homeGroundZone >= 0 && ebz == homeGroundZone)
 			bldCandScore += 350;
@@ -8527,7 +8582,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// has base defenses or when our industrial capacity is mature!
 	// Only the guerrilla raider (5) goes out with small groups: a rush wins by arriving early in
 	// numbers, and Blitzkrieg (3) houses sent out waves of 4 and lost 18 of 26 decided matches.
-	const int baseWave = (arch == 5) ? 4 : ((arch == 2 || arch == 4 || arch == 7) ? 8 : 6);
+	// The tank mass goes out in large waves that grow after each one that took no building
+	// (TankMassWaveUnits).
+	const bool tankMassWaves = arch == TankMassArchetype;
+	UpdateWaveVerdict(pHouse, false);
+	const int baseWave = tankMassWaves ? TankMassWaveUnits(pHouse)
+		: ((arch == 5) ? 4 : ((arch == 2 || arch == 4 || arch == 7) ? 8 : 6));
 	const int defenseMassBonus = std::clamp(totalEnemyBaseDefenses / 2, 0, 4) + ((pHouse->OwnedUnits >= 18) ? 2 : 0);
 	const bool highMoneyMultiFactoryStream = (pHouse->Available_Money() >= 4000
 		&& (pHouse->NumWarFactories >= 2 || pHouse->NumBarracks >= 2 || pHouse->NumAirpads >= 2));
@@ -8547,7 +8607,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			baseWave + defenseMassBonus - streamWaveDiscount - (rushWaveBias / 160)
 				- (waveMacro.BlackoutUntilFrame > Unsorted::CurrentFrame ? 3 : 0) - tacticalWaveDiscount
 				+ StyleJitter(pHouse->ArrayIndex, 1000, 2700, 3) - 1, // +-1 unit: waves are not clockwork
-			(highMoneyMultiFactoryStream || tacticalWaveDiscount > 0) ? 2 : 3, 14));
+			(highMoneyMultiFactoryStream || tacticalWaveDiscount > 0) ? 2 : 3, tankMassWaves ? TankMassWaveCap : 14));
 	const int blindPushFrame = (rushWaveBias > 100 || highMoneyMultiFactoryStream) ? 1350 : 3200;
 
 	// Multi-Purpose Map Unit Recall ("utilizarlas para diferentes propósitos por
@@ -9593,13 +9653,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (Unsorted::CurrentFrame - waveMacro.LastWaveDispatchFrame > 900 || waveMacro.LastWaveTargetCell == CellStruct::Empty
 				|| waveMacro.LastWaveTargetCell.DistanceFrom(pWaveTargetCell->MapCoords) > 12.0)
 			{
+				auto const pWaveBld = pWaveTargetCell->GetBuilding();
+				const int waveOwner = (pWaveBld && pWaveBld->Owner) ? pWaveBld->Owner->ArrayIndex : -1;
+
+				// The verdict of the wave before reads its start frame: it comes first. The mission of
+				// this wave is the one its target stands for, our ground before the reprisal.
+				if (tankMassWaves && !endgameRemnantHunt)
+				{
+					const int mission = (pWaveBld && ourGroundBonus > 0 && nearOurGround(pWaveTargetCell->MapCoords))
+						? static_cast<int>(NeuralPlanId::ClearOurGround)
+						: ((waveOwner >= 0 && waveOwner == reprisalHouse && reprisalBonus > 0) ? static_cast<int>(NeuralPlanId::Reprisal) : -1);
+					NoteWaveForVerdict(pHouse, pWaveTargetCell->MapCoords, mission);
+				}
+
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;
 
 				if (!endgameRemnantHunt)
 					NoteWaveDecision(pHouse, waveCheck, true, static_cast<int>(dispatchedVeh + dispatchedInf));
+
 				// Coalition telemetry: whose building this new wave goes for.
-				auto const pWaveBld = pWaveTargetCell->GetBuilding();
-				const int waveOwner = (pWaveBld && pWaveBld->Owner) ? pWaveBld->Owner->ArrayIndex : -1;
 				auto& waveCoal = waveMacro.Coalition;
 
 				if (waveOwner >= 0 && waveOwner == waveCoal.DyingTarget && Unsorted::CurrentFrame < waveCoal.DyingUntil)
