@@ -318,6 +318,156 @@ namespace
 		return check;
 	}
 
+	// Whether a unit of this type shoots at aircraft: one of its two weapons has an anti-air
+	// projectile.
+	bool ShootsAtAircraft(TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWeapon = pType->GetWeapon(i) ? pType->GetWeapon(i)->WeaponType : nullptr;
+
+			if (pWeapon && pWeapon->Projectile && pWeapon->Projectile->AA)
+				return true;
+		}
+
+		return false;
+	}
+
+	// Known enemy buildings within WaveVerdictCells of a cell.
+	int CountKnownEnemyBuildingsNear(HouseClass* pHouse, const CellStruct& cell)
+	{
+		int count = 0;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (pBld && !pBld->InLimbo && pBld->IsAlive && pBld->Type && pBld->Owner && pBld->Owner != pHouse
+				&& !pHouse->IsAlliedWith(pBld->Owner) && !pBld->Owner->IsNeutral() && !pBld->Type->Insignificant
+				&& IsEnemyBuildingKnown(pHouse, pBld) && pBld->GetMapCoords().DistanceFrom(cell) <= WaveVerdictCells)
+			{
+				count++;
+			}
+		}
+
+		return count;
+	}
+
+	// Unit count a wave of the tank mass waits for: TankMassBaseWave, WaveLessonPercent of it for
+	// each wave in a row that took no building, up to TankMassWaveCap.
+	int TankMassWaveUnits(HouseClass* pHouse)
+	{
+		auto const& macro = GetMacroState(pHouse);
+		int units = TankMassBaseWave;
+
+		if (Unsorted::CurrentFrame - macro.WaveLessonFrame <= WaveLessonFrames)
+		{
+			for (int step = 0; step < macro.WaveLessonSteps && units < TankMassWaveCap; ++step)
+				units = units * WaveLessonPercent / 100;
+		}
+
+		return std::min(units, TankMassWaveCap);
+	}
+
+	// Verdict of the wave under way, for the lesson of the next one. It took a building when fewer
+	// known enemy buildings stand near its target than when it left. The verdict comes once a unit
+	// of ours got there and none is left WaveVerdictQuietFrames after the last dispatch, after
+	// WaveVerdictFrames, or at once when the next wave starts (now).
+	void UpdateWaveVerdict(HouseClass* pHouse, bool now)
+	{
+		auto& macro = GetMacroState(pHouse);
+
+		if (!macro.WaveVerdictPending)
+			return;
+
+		const int frame = Unsorted::CurrentFrame;
+		bool over = now || frame - macro.WaveStartFrame >= WaveVerdictFrames;
+
+		if (!over)
+		{
+			if (!IsAITickWindow(150, 0))
+				return;
+
+			bool there = false;
+
+			for (auto const pTech : TechnoClass::Array)
+			{
+				if (pTech && pTech->Owner == pHouse && pTech->GetMapCoords().DistanceFrom(macro.WaveVerdictCell) <= WaveVerdictCells
+					&& OwnGroundFighterValue(pTech) > 0)
+				{
+					there = true;
+					break;
+				}
+			}
+
+			if (there)
+				macro.WaveVerdictArrived = true;
+
+			over = !there && macro.WaveVerdictArrived && frame - macro.LastWaveDispatchFrame >= WaveVerdictQuietFrames;
+		}
+
+		if (!over)
+			return;
+
+		const int standing = CountKnownEnemyBuildingsNear(pHouse, macro.WaveVerdictCell);
+		const bool tookBuilding = standing < macro.WaveVerdictBuildings;
+		const int stepsBefore = macro.WaveLessonSteps;
+
+		if (tookBuilding)
+		{
+			macro.WaveLessonSteps = 0;
+		}
+		else
+		{
+			if (frame - macro.WaveLessonFrame > WaveLessonFrames)
+				macro.WaveLessonSteps = 0;
+
+			macro.WaveLessonSteps = std::min(macro.WaveLessonSteps + 1, WaveLessonMaxSteps);
+			macro.WaveLessonFrame = frame;
+		}
+
+		// The verdict is the result of the mission the wave left for (Reprisal, Clear Our Ground).
+		const bool onMission = macro.WaveVerdictMission >= 0 && macro.WaveVerdictMission < static_cast<int>(NeuralPlanId::Count);
+
+		if (onMission)
+		{
+			CountPlanOutcome(pHouse->ArrayIndex, static_cast<NeuralPlanId>(macro.WaveVerdictMission),
+				tookBuilding ? NeuralPlanOutcome::Succeeded : NeuralPlanOutcome::Failed);
+		}
+
+		Debug::Log("[NeuralAI] Frame %d | House #%d wave verdict at (%d,%d): %s, %d of %d known buildings stand, %s, mission %s, "
+			"lesson steps %d -> %d, next wave waits for %d units\n",
+			frame, pHouse->ArrayIndex, macro.WaveVerdictCell.X, macro.WaveVerdictCell.Y, tookBuilding ? "took a building" : "took none",
+			standing, macro.WaveVerdictBuildings, macro.WaveVerdictArrived ? "arrived" : "never arrived",
+			onMission ? NeuralPlanNames[macro.WaveVerdictMission] : "none", stepsBefore, macro.WaveLessonSteps, TankMassWaveUnits(pHouse));
+		macro.WaveVerdictPending = false;
+		macro.WaveVerdictMission = -1;
+	}
+
+	// A new wave of the tank mass leaves for a target with known enemy buildings: it waits for its
+	// verdict. The wave before it gets its own first. mission: the plan id of the mission the
+	// target stands for (Reprisal, Clear Our Ground), -1 for none; the wave counts as its start.
+	void NoteWaveForVerdict(HouseClass* pHouse, const CellStruct& target, int mission)
+	{
+		UpdateWaveVerdict(pHouse, true);
+
+		auto& macro = GetMacroState(pHouse);
+		const int buildings = CountKnownEnemyBuildingsNear(pHouse, target);
+
+		if (buildings <= 0)
+			return;
+
+		macro.WaveVerdictPending = true;
+		macro.WaveVerdictArrived = false;
+		macro.WaveVerdictCell = target;
+		macro.WaveVerdictBuildings = buildings;
+		macro.WaveVerdictMission = mission;
+
+		if (mission >= 0 && mission < static_cast<int>(NeuralPlanId::Count))
+			CountPlanOutcome(pHouse->ArrayIndex, static_cast<NeuralPlanId>(mission), NeuralPlanOutcome::Started);
+	}
+
 	// Count a hold (once per hold, plus every held tick) or a new wave launch for the telemetry;
 	// a passed check ends the current hold.
 	void NoteWaveDecision(HouseClass* pHouse, const NeuralWaveCheck& check, bool newWave, int units)
