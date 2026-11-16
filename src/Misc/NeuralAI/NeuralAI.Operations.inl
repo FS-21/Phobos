@@ -1138,8 +1138,15 @@ namespace
 
 		// A transport that comes now: one the house could build only after more prerequisites left the
 		// engineers waiting OpNoTransportFrames for a crossing nothing it had could make.
-		if (!pLanding || !CanHouseFerryTypeAcrossWater(pHouse, pType, &footCoords, &pLanding->MapCoords, true))
+		if (!pLanding)
 			return false;
+
+		if (!CanHouseFerryTypeAcrossWater(pHouse, pType, &footCoords, &pLanding->MapCoords, true))
+		{
+			// The production builds what the transport that would make it lacks.
+			NoteCrossingNeed(pHouse, footCoords, pLanding->MapCoords, std::max(1, static_cast<int>(pType->Size)));
+			return false;
+		}
 
 		NeuralTransportOperation* pOp = nullptr;
 
@@ -1770,6 +1777,17 @@ namespace
 
 			for (auto const pAir : AircraftClass::Array)
 				consider(pAir);
+
+			// None of ours makes this crossing: the production builds one that does, or what it lacks.
+			if (candidates.empty() && op.Transports.empty())
+			{
+				int largest = 1;
+
+				for (auto const pMember : unseated)
+					largest = std::max(largest, pMember->Size);
+
+				NoteCrossingNeed(pHouse, op.Staging, op.Landing, largest);
+			}
 
 			std::stable_sort(candidates.begin(), candidates.end(),
 				[](const OpCandidate& a, const OpCandidate& b) { return a.Score < b.Score; });
