@@ -1779,6 +1779,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		std::vector<CellStruct> powerPlantCells;
 
 		std::vector<CellStruct> priorityAssetCells;
+		auto const& offensiveStones = GetMacroState(pHouse).OffensiveStones;
 
 		for (auto const pOwnBld : pHouse->Buildings)
 		{
@@ -1815,8 +1816,9 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						// & Expansion Refineries!
 			}
 			else if (pOT->ConstructionYard || pOT->Factory == AbstractType::UnitType || pOT->SuperWeapon != -1
-				|| pOT->Refinery)
+				|| pOT->Refinery || std::find(offensiveStones.begin(), offensiveStones.end(), pOwnBld->UniqueID) != offensiveStones.end())
 			{
+				// A stone of the offensive crawl is a key asset too (user): the front it holds.
 				priorityAssetCells.push_back(bc);
 			}
 		}
