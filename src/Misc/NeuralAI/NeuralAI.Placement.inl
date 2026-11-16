@@ -109,6 +109,7 @@ namespace
 	// reached beyond the base).
 	struct NeuralFactoryRoad
 	{
+		const BuildingClass* Factory { nullptr };
 		ArchitectRect Lane {};
 		bool Open { false };
 		std::vector<int> Cells {};
@@ -308,8 +309,6 @@ namespace
 		auto& cache = FactoryRoadCaches[std::clamp(pHouse->ArrayIndex, 0, 31)];
 		const int now = Unsorted::CurrentFrame;
 
-		MarkRoadBase(pHouse);
-
 		if (cache.Serial == NeuralMatchSerial && cache.Buildings == BuildingClass::Array.Count && now >= cache.Frame
 			&& now - cache.Frame < FactoryRoadCacheFrames)
 		{
@@ -320,6 +319,7 @@ namespace
 		cache.Buildings = BuildingClass::Array.Count;
 		cache.Frame = now;
 		cache.Roads.clear();
+		MarkRoadBase(pHouse);
 
 		for (auto const pOwnBld : pHouse->Buildings)
 		{
@@ -331,6 +331,7 @@ namespace
 				continue;
 			}
 
+			road.Factory = pOwnBld;
 			road.Open = WalkFactoryRoad(road.Lane, nullptr, &road.Cells);
 			cache.Roads.push_back(std::move(road));
 		}
@@ -378,8 +379,12 @@ namespace
 		const int h = pType->GetFoundationHeight(false);
 		const ArchitectRect built { topLeft.X, topLeft.Y, static_cast<short>(topLeft.X + w - 1), static_cast<short>(topLeft.Y + h - 1) };
 		const int clear = FactoryRoadClearCells;
+		auto const& roads = GetFactoryRoads(pHouse);
 
-		for (auto const& road : GetFactoryRoads(pHouse))
+		// The walks below read the base of this house.
+		MarkRoadBase(pHouse);
+
+		for (auto const& road : roads)
 		{
 			if (!road.Open || road.Cells.empty())
 				continue;
@@ -414,6 +419,22 @@ namespace
 		}
 
 		return false;
+	}
+
+	// Does this war factory of the house keep a two-way road out of the base? One the roads do not
+	// list yet (just built) counts as having it.
+	bool HasFactoryRoadOut(HouseClass* pHouse, const BuildingClass* pFactory)
+	{
+		if (!pHouse || !pFactory)
+			return true;
+
+		for (auto const& road : GetFactoryRoads(pHouse))
+		{
+			if (road.Factory == pFactory)
+				return road.Open;
+		}
+
+		return true;
 	}
 
 	// The launch ring of the ring-limited superweapons (SW.RangeMaximum > 0, e.g. an EMP cannon) a

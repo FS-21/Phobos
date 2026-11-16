@@ -1780,6 +1780,10 @@ namespace
 	// What a cell that closes such a road loses in the pass that takes tight cells (one that
 	// touches another building loses 4000 there).
 	constexpr int FactoryRoadClosedPenalty = 6000;
+	// A war factory with no road out is this much farther (squared cells) from the front when the
+	// primary one is picked: every vehicle leaves by the primary factory, so one with a road comes
+	// first however far it stands.
+	constexpr double ClosedInFactoryDistanceSq = 1.0e12;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way
