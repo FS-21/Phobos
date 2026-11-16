@@ -142,10 +142,12 @@ namespace
 
 	// With both cells given, only transports that can make that very crossing count
 	// (CanTransportTypeLink): the unit's cell and the landing on the ground it wants to reach.
+	// With no foot type, any cargo that rides inside a transport (size 1, not slung by a carryall):
+	// whether the house can put anything at all on that ground.
 	bool CanHouseFerryTypeAcrossWater(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct* pFrom = nullptr,
 		const CellStruct* pTo = nullptr)
 	{
-		if (!pHouse || !pFootType)
+		if (!pHouse)
 			return false;
 
 		auto const links = [pFrom, pTo](const TechnoTypeClass* pTransType) -> bool
@@ -153,19 +155,19 @@ namespace
 			return !pFrom || !pTo || CanTransportTypeLink(pTransType, *pFrom, *pTo);
 		};
 
-		if (pFootType->MovementZone == MovementZone::Amphibious
+		if (pFootType && (pFootType->MovementZone == MovementZone::Amphibious
 			|| pFootType->MovementZone == MovementZone::AmphibiousDestroyer
 			|| pFootType->MovementZone == MovementZone::AmphibiousCrusher
 			|| pFootType->MovementZone == MovementZone::Fly || pFootType->MovementZone == MovementZone::Subterrannean
 			|| pFootType->MovementZone == MovementZone::Water || pFootType->SpeedType == SpeedType::Hover
 			|| pFootType->SpeedType == SpeedType::Winged || pFootType->JumpJet || pFootType->Teleporter
-			|| pFootType->Naval)
+			|| pFootType->Naval))
 		{
 			return true;
 		}
 
-		const int passSize = std::max(1, static_cast<int>(pFootType->Size));
-		auto const pAsUnitType = abstract_cast<const UnitTypeClass*>(pFootType);
+		const int passSize = pFootType ? std::max(1, static_cast<int>(pFootType->Size)) : 1;
+		auto const pAsUnitType = pFootType ? abstract_cast<const UnitTypeClass*>(pFootType) : nullptr;
 		const bool isLiftableVehicle
 			= (pAsUnitType != nullptr && !pAsUnitType->Organic && !pAsUnitType->Naval && !pAsUnitType->NonVehicle
 				&& (!TechnoTypeExt::Fetch(pFootType) || TechnoTypeExt::Fetch(pFootType)->Carryall_Allowed.Get()));
@@ -245,6 +247,13 @@ namespace
 		}
 
 		return false;
+	}
+
+	// Can the house put anything on the ground of `to` from `from` with a transport it owns or can
+	// build? Ground that fails is no island to colonize or ferry to: it is not reached at all.
+	bool CanHouseReachGroundByTransport(HouseClass* pHouse, const CellStruct& from, const CellStruct& to)
+	{
+		return CanHouseFerryTypeAcrossWater(pHouse, nullptr, &from, &to);
 	}
 
 	// Issues a Move only when it actually changes the order. Every new destination makes
