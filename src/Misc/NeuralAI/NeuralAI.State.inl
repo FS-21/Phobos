@@ -964,6 +964,10 @@ namespace
 		// Closed-in war factories (SellFactoryRoadBlock): first frame of the current stretch with
 		// FactoryRoadSellHeldVehicles vehicles jammed at home (-1 none), last check and last sale.
 		int HeldAtHomeSince { -1 };
+		// Power a long-range gun tower held back by power alone asks for (its drain plus the
+		// margin), and the frame it asked.
+		int DefensePowerWanted { 0 };
+		int DefensePowerWantedFrame { -100000 };
 		int LastFactoryRoadCheckFrame { -100000 };
 		int LastFactoryRoadSellFrame { -100000 };
 		// Emergency lanes (UpdateEmergencyLanes): the last check, the last log line, and since that
@@ -1307,6 +1311,8 @@ namespace
 			this->JamRerouteNoWayFrame = -100000;
 			this->LastJamSealSellFrame = -100000;
 			this->HeldAtHomeSince = -1;
+			this->DefensePowerWanted = 0;
+			this->DefensePowerWantedFrame = -100000;
 			this->LastFactoryRoadCheckFrame = -100000;
 			this->LastFactoryRoadSellFrame = -100000;
 			this->LastEmergencyLaneFrame = -1;
@@ -1896,6 +1902,28 @@ namespace
 	constexpr int FactoryRoadSellCheckFrames = 300;
 	constexpr int FactoryRoadSellFrames = 1800;
 	constexpr size_t FactoryRoadSellTests = 24;
+	// Long-range gun towers with a dead zone (IsDeadZoneTower; user: a very advanced defense with
+	// a long reach, to be taken into account). The tier bonus of a tower stops at 950, so nothing
+	// told a gun of 15 cells from one of 7:
+	// - its reach scores LongRangeTowerBonusPerCell per cell over ArtilleryRangeCells, up to
+	//   LongRangeTowerBonusMax, and CounterBatteryBonusPerShare per point of seen artillery share
+	//   (up to CounterBatteryBonusMax) when that artillery does not out-reach it;
+	// - it is no first line: short of the core ground towers it loses DeadZoneTowerEarlyPenalty;
+	// - held back by power alone, it asks for a plant for DefensePowerWantedFrames (its drain
+	//   plus the margin a powered defense needs counts as the power cushion);
+	// - placement gives DeadZoneCoveredBonus to a cell with a point-blank ground tower of ours
+	//   within its dead zone plus DeadZoneCoverMarginCells, and takes DeadZoneAlonePenalty off
+	//   one with none.
+	constexpr int LongRangeTowerBonusPerCell = 40;
+	constexpr int LongRangeTowerBonusMax = 300;
+	constexpr int CounterBatteryBonusPerShare = 8;
+	constexpr int CounterBatteryBonusMax = 400;
+	constexpr int DeadZoneTowerEarlyPenalty = 1500;
+	constexpr int DefensePowerWantedFrames = 300;
+	constexpr int PoweredDefenseSurplusMargin = 75;
+	constexpr int DeadZoneCoverMarginCells = 3;
+	constexpr int DeadZoneCoveredBonus = 350;
+	constexpr int DeadZoneAlonePenalty = 450;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way
