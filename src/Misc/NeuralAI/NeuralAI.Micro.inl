@@ -9363,6 +9363,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		NoteIdleArmy(pHouse, idleVehicles + heldVehicles, static_cast<int>(idleCombatInf.size()) + heldSoldiers, idleShips);
 
+		// How many may join grows with the wave lesson, like the wave (user): none while the waves
+		// take buildings, HeldJoinsWaveUnits after one that took none, twice that after each more.
+		// Vehicles first.
+		const int lessonSteps = WaveLessonStepsNow(pHouse);
+		const size_t heldJoinMost = lessonSteps > 0 ? static_cast<size_t>(HeldJoinsWaveUnits) << (lessonSteps - 1) : 0u;
+
+		if (heldJoinVehicles.size() > heldJoinMost)
+			heldJoinVehicles.resize(heldJoinMost);
+
+		if (heldJoinSoldiers.size() > heldJoinMost - heldJoinVehicles.size())
+			heldJoinSoldiers.resize(heldJoinMost - heldJoinVehicles.size());
+
 		// From here on they are idle army like the rest: they make the count of the next wave and
 		// leave with it.
 		if (!heldJoinVehicles.empty() || !heldJoinSoldiers.empty())
