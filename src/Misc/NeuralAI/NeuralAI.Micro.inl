@@ -8200,6 +8200,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (IsPathDeadGoal(pHouse, ebc))
 			bldCandScore -= WavePathDeadGoalPenalty;
 
+		// The wave under way keeps its target: what stands where the last dispatch went, while that
+		// dispatch is fresh, comes before a target of about the same worth elsewhere.
+		{
+			auto const& lastWave = GetMacroState(pHouse);
+
+			if (lastWave.LastWaveTargetCell != CellStruct::Empty
+				&& Unsorted::CurrentFrame - lastWave.LastWaveDispatchFrame <= WaveTargetKeepFrames
+				&& ebc.DistanceFrom(lastWave.LastWaveTargetCell) <= WaveGoalKeepCells)
+			{
+				bldCandScore += WaveTargetKeepBonus;
+			}
+		}
+
 		if (pEnemyBld->Type->IsBaseDefense && depthIntoEnemyBase <= 8)
 		{
 			bldCandScore += 135; // Clear outer base defenses blocking our approach!
@@ -9114,6 +9127,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// Since when enough vehicles stand jammed at home for the cure of closed-in war factories
+		// (SellFactoryRoadBlock); the stretch ends when fewer than half of that many do.
+		{
+			auto& heldMacro = GetMacroState(pHouse);
+
+			if (heldVehicles < FactoryRoadSellHeldVehicles / 2)
+			{
+				heldMacro.HeldAtHomeSince = -1;
+			}
+			else if (heldVehicles >= FactoryRoadSellHeldVehicles
+				&& (heldMacro.HeldAtHomeSince < 0 || heldMacro.HeldAtHomeSince > Unsorted::CurrentFrame))
+			{
+				heldMacro.HeldAtHomeSince = Unsorted::CurrentFrame;
+			}
+		}
+
 		NoteIdleArmy(pHouse, idleVehicles + heldVehicles, static_cast<int>(idleCombatInf.size()) + heldSoldiers, idleShips);
 	}
 
@@ -9602,7 +9631,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					break;
 				}
 
-				waveGoalStands.push_back({ kept, enemyThere });
+				// A goal our units find no path to is given up at once.
+				waveGoalStands.push_back({ kept, enemyThere && !IsPathDeadGoal(pHouse, kept) });
 				stands = waveGoalStands.end() - 1;
 			}
 
