@@ -185,6 +185,14 @@ namespace
 		int SinceFrame { 0 };
 	};
 
+	// Where a wave sent a unit, the ground zone of that cell and when (KeptWaveGoal).
+	struct NeuralWaveGoal
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Zone { -1 };
+		int Frame { 0 };
+	};
+
 	// Aircraft attack watchdog (UpdateStuckUnits): where an aircraft on Mission::Attack stands and
 	// since when, and its ammo and since when it last changed (a shot fired or a reload).
 	struct NeuralAirStallTrack
@@ -923,6 +931,8 @@ namespace
 		int WaveVerdictMission { -1 };
 		int WaveLessonSteps { 0 };
 		int WaveLessonFrame { -100000 };
+		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it.
+		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1268,6 +1278,7 @@ namespace
 			this->WaveVerdictMission = -1;
 			this->WaveLessonSteps = 0;
 			this->WaveLessonFrame = -100000;
+			this->WaveGoals.clear();
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
@@ -1811,6 +1822,25 @@ namespace
 	// Plan priorities of the mass: the plans that send the army together gain this much on their
 	// trained preference, the ones that split it into small groups or need specialists lose it.
 	constexpr int TankMassPlanBonus = 400;
+	// A unit a wave sent out keeps that goal for WaveGoalKeepFrames while it is still more than
+	// WaveGoalKeepCells from it and a known enemy building stands within that distance of it. The
+	// wave target is picked anew at every tick; a wave to the other side of the map turned units
+	// held in a jam round, and the next one turned them back (match #10472: 43 vehicles east at
+	// frame 101565, the same 43 west at frame 101655, in one-cell streets).
+	constexpr int WaveGoalKeepFrames = 2700;
+	constexpr double WaveGoalKeepCells = 12.0;
+	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit
+	// lane to a cell more than FactoryRoadClearCells from every building of ours, found within
+	// FactoryRoadWalkCells cells. Buildings stand at most one cell apart (Adjacent), so a base is
+	// a grid of one-cell streets, and a factory closed in by it puts every vehicle it builds into
+	// them (match #10472: 11 war factories, 26 to 58 units held at the base exit for 43000
+	// frames). At most FactoryRoadWalksPerFrame walks per frame.
+	constexpr int FactoryRoadClearCells = 4;
+	constexpr int FactoryRoadWalkCells = 400;
+	constexpr int FactoryRoadWalksPerFrame = 48;
+	// What a cell that closes such a road loses in the pass that takes tight cells (one that
+	// touches another building loses 4000 there).
+	constexpr int FactoryRoadClosedPenalty = 6000;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way
