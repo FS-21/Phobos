@@ -1027,6 +1027,8 @@ namespace
 		// and no new wait before this frame.
 		int WaveEscortWaitSince { -1 };
 		int WaveEscortRetryFrame { -1 };
+		// Last frame scouts were sent to look for the remnants of an enemy (RemnantSearchScouts).
+		int RemnantSearchFrame { -100000 };
 		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it.
 		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
 		// Transport operations of the house (NeuralAI.Operations.inl): the operations, the next id,
@@ -1068,6 +1070,10 @@ namespace
 		// Closed-in war factories (SellFactoryRoadBlock): first frame of the current stretch with
 		// FactoryRoadSellHeldVehicles vehicles jammed at home (-1 none), last check and last sale.
 		int HeldAtHomeSince { -1 };
+		// Power a long-range gun tower held back by power alone asks for (its drain plus the
+		// margin), and the frame it asked.
+		int DefensePowerWanted { 0 };
+		int DefensePowerWantedFrame { -100000 };
 		int LastFactoryRoadCheckFrame { -100000 };
 		int LastFactoryRoadSellFrame { -100000 };
 		// Emergency lanes (UpdateEmergencyLanes): the last check, the last log line, and since that
@@ -1393,6 +1399,7 @@ namespace
 			this->WaveLessonFrame = -100000;
 			this->WaveEscortWaitSince = -1;
 			this->WaveEscortRetryFrame = -1;
+			this->RemnantSearchFrame = -100000;
 			this->WaveGoals.clear();
 			this->TransportOps.clear();
 			this->NextTransportOpId = 1;
@@ -1418,6 +1425,8 @@ namespace
 			this->JamRerouteNoWayFrame = -100000;
 			this->LastJamSealSellFrame = -100000;
 			this->HeldAtHomeSince = -1;
+			this->DefensePowerWanted = 0;
+			this->DefensePowerWantedFrame = -100000;
 			this->LastFactoryRoadCheckFrame = -100000;
 			this->LastFactoryRoadSellFrame = -100000;
 			this->LastEmergencyLaneFrame = -1;
@@ -1957,15 +1966,38 @@ namespace
 	constexpr int TankCounterArtilleryBonus = 500;
 	// Waves: the unit count they start from and the most they wait for. A wave that took no known
 	// enemy building within WaveVerdictCells of its target asks the next one for
-	// WaveLessonPercent of its count, up to the most, for WaveLessonFrames; one that took a building
-	// ends the lesson (user: grow the group after each wave until it works, without filling the map).
-	// The verdict comes once no unit of ours is left there WaveVerdictQuietFrames after the last
-	// dispatch, or after WaveVerdictFrames.
+	// WaveLessonPercent of its count, up to the most and to WaveLessonMaxSteps steps; one that took
+	// a building ends the lesson (user: grow the group after each wave until it works, without
+	// filling the map). The verdict comes once no unit of ours is left there WaveVerdictQuietFrames
+	// after the last dispatch, or after WaveVerdictFrames.
 	constexpr int TankMassBaseWave = 10;
 	constexpr int TankMassWaveCap = 24;
 	constexpr int WaveLessonPercent = 150;
 	constexpr int WaveLessonMaxSteps = 3;
-	constexpr int WaveLessonFrames = 9000;
+	// The lesson fades a step every WaveLessonStepFrames without a new failure: a house that lost
+	// its army to three waves was asked for 24 units for 9000 frames with 4 vehicles left, and
+	// sent nothing more (match #10262).
+	constexpr int WaveLessonStepFrames = 3000;
+	// The army of the tank mass comes once its economy stands: with TankMassRefineries refineries
+	// and TankMassGatherersPerRefinery gatherers for each, more gatherers and mobile miners wait
+	// while its front line is under TankMassBaseWave vehicles (match #10262: a house built 14
+	// slave miners and no tank in its first 18000 frames, with two war factories).
+	constexpr int TankMassGatherersPerRefinery = 2;
+	// Remnant search (user): a house that knows no enemy building while the enemy still has some
+	// sends up to RemnantSearchScouts idle units, the fastest first, each to a different place of
+	// a grid of RemnantSearchStepCells whose surroundings (RemnantSearchRadius) it knows least
+	// (information gain of RemnantSearchMinGain or more), every RemnantSearchEveryFrames (match
+	// #10274: 160 vehicles and 95 soldiers stood idle for 12000 frames while six buildings they
+	// had never seen kept the match going).
+	constexpr size_t RemnantSearchScouts = 12;
+	constexpr int RemnantSearchStepCells = 14;
+	constexpr int RemnantSearchRadius = 7;
+	constexpr int RemnantSearchMinGain = 60;
+	constexpr int RemnantSearchEveryFrames = 450;
+	// A wounded soldier (under WoundedIdleHealth) left idle more than WoundedIdleHomeCells from
+	// home walks back to it (user).
+	constexpr double WoundedIdleHealth = 0.55;
+	constexpr double WoundedIdleHomeCells = 25.0;
 	constexpr double WaveVerdictCells = 14.0;
 	constexpr int WaveVerdictQuietFrames = 900;
 	constexpr int WaveVerdictFrames = 5400;
@@ -2042,6 +2074,28 @@ namespace
 	constexpr int FactoryRoadSellCheckFrames = 300;
 	constexpr int FactoryRoadSellFrames = 1800;
 	constexpr size_t FactoryRoadSellTests = 24;
+	// Long-range gun towers with a dead zone (IsDeadZoneTower; user: a very advanced defense with
+	// a long reach, to be taken into account). The tier bonus of a tower stops at 950, so nothing
+	// told a gun of 15 cells from one of 7:
+	// - its reach scores LongRangeTowerBonusPerCell per cell over ArtilleryRangeCells, up to
+	//   LongRangeTowerBonusMax, and CounterBatteryBonusPerShare per point of seen artillery share
+	//   (up to CounterBatteryBonusMax) when that artillery does not out-reach it;
+	// - it is no first line: short of the core ground towers it loses DeadZoneTowerEarlyPenalty;
+	// - held back by power alone, it asks for a plant for DefensePowerWantedFrames (its drain
+	//   plus the margin a powered defense needs counts as the power cushion);
+	// - placement gives DeadZoneCoveredBonus to a cell with a point-blank ground tower of ours
+	//   within its dead zone plus DeadZoneCoverMarginCells, and takes DeadZoneAlonePenalty off
+	//   one with none.
+	constexpr int LongRangeTowerBonusPerCell = 40;
+	constexpr int LongRangeTowerBonusMax = 300;
+	constexpr int CounterBatteryBonusPerShare = 8;
+	constexpr int CounterBatteryBonusMax = 400;
+	constexpr int DeadZoneTowerEarlyPenalty = 1500;
+	constexpr int DefensePowerWantedFrames = 300;
+	constexpr int PoweredDefenseSurplusMargin = 75;
+	constexpr int DeadZoneCoverMarginCells = 3;
+	constexpr int DeadZoneCoveredBonus = 350;
+	constexpr int DeadZoneAlonePenalty = 450;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way

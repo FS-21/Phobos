@@ -2621,7 +2621,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// CrawlPowerSurplus of the cushion; past it the crawl takes other buildings. With 2000
 				// over the cushion a rich house picked a power plant 59 times in 86000 frames with
 				// 1150 to spare (match #9885).
-				const int maxAllowedSurplus = requiredPowerCushion
+				// A long-range gun tower waiting for power alone (DefensePowerWanted) raises the cushion
+				// to what it needs, so a plant comes for it.
+				const int defensePowerWanted = (Unsorted::CurrentFrame - GetMacroState(pHouse).DefensePowerWantedFrame <= DefensePowerWantedFrames)
+					? GetMacroState(pHouse).DefensePowerWanted : 0;
+				const int plantPowerCushion = std::max(requiredPowerCushion, defensePowerWanted);
+				const int maxAllowedSurplus = plantPowerCushion
 					+ (((needsSteppingStoneCrawlToOre && money >= 1400) || bankOffensiveCrawl) && pBld->BaseNormal ? CrawlPowerSurplus : 350);
 				if (!pHouse->HasLowPower() && !hasUnpoweredBuildings && realPowerSurplus >= maxAllowedSurplus)
 					continue;
@@ -2669,7 +2674,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += 1400;
 				}
-				else if (realPowerSurplus < requiredPowerCushion)
+				else if (realPowerSurplus < plantPowerCushion)
 				{
 					score += 450 + ((needsSteppingStoneCrawlToOre && pBld->BaseNormal) ? 450 : 0);
 				}
@@ -2971,6 +2976,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bool isPureAA = false;
 				bool isUnarmedBunker = false;
 				GetDefenseCapabilities(pBld, isAntiInf, isAntiArmor, isAntiAir, isPureAA, isUnarmedBunker);
+				// A long-range gun with a dead zone (a Grand Cannon), see LongRangeTowerBonusPerCell.
+				const bool isDeadZoneTower = IsDeadZoneTower(pBld);
 
 				// A raid short of guns: this defense shoots up, so the caps and penalties that keep a
 				// quiet base from piling up towers do not hold it back.
@@ -3058,10 +3065,27 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				// Do not queue powered defenses when power cushion is already tight
 				if ((pBld->Powered || pBld->PowerDrain >= 50)
-					&& (pHouse->HasLowPower() || realPowerSurplus - pBld->PowerDrain < 75))
+					&& (pHouse->HasLowPower() || realPowerSurplus - pBld->PowerDrain < PoweredDefenseSurplusMargin))
 				{
 					if (isAntiAir)
 						noteAirDefense(pBld, 4, realPowerSurplus);
+
+					// A long-range gun held back by power alone asks for a plant: the power branch reads
+					// it at the next ticks (DefensePowerWantedFrames).
+					if (isDeadZoneTower)
+					{
+						auto& gunMacro = GetMacroState(pHouse);
+
+						// TEMP diagnostic: the first request of each stretch.
+						if (Unsorted::CurrentFrame - gunMacro.DefensePowerWantedFrame > DefensePowerWantedFrames)
+						{
+							Debug::Log("[NeuralAI] House %d long-range tower DIAG: %s waits for power alone, surplus %d of %d wanted, frame %d.\n",
+								pHouse->ArrayIndex, pBld->ID, realPowerSurplus, pBld->PowerDrain + PoweredDefenseSurplusMargin, Unsorted::CurrentFrame);
+						}
+
+						gunMacro.DefensePowerWanted = pBld->PowerDrain + PoweredDefenseSurplusMargin;
+						gunMacro.DefensePowerWantedFrame = Unsorted::CurrentFrame;
+					}
 
 					continue;
 				}
@@ -3099,6 +3123,25 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				score = (isPureAA ? scores[6] : std::max(static_cast<int>(scores[5]), 320)) + tierQualityBonus
 					+ CounterBonusFor(pHouse, pBld) + defenseBudgetShift;
 
+				// Core ground towers a base wants before anything else in defense.
+				const int desiredCoreGroundDefs = std::clamp(2 + ownedRefineries + (features[65] >= 18 ? 2 : 0), 3, 8);
+
+				// A long-range gun with a dead zone: its reach counts past the tier cap, most against
+				// seen artillery that does not out-reach it, and it is no first line: short of the core
+				// ground towers, which fire at what gets next to it, it comes after them.
+				if (isDeadZoneTower)
+				{
+					auto const& gunMacro = GetMacroState(pHouse);
+					const int reachCells = GroundRangeOf(pBld) / Unsorted::LeptonsPerCell;
+					score += std::min(LongRangeTowerBonusMax, (reachCells - ArtilleryRangeCells) * LongRangeTowerBonusPerCell);
+
+					if (gunMacro.SeenArtilleryShare >= 15 && reachCells >= gunMacro.SeenArtilleryRangeCells)
+						score += std::min(CounterBatteryBonusMax, gunMacro.SeenArtilleryShare * CounterBatteryBonusPerShare);
+
+					if (!isBldInProgress && totalGroundDefenses < desiredCoreGroundDefs)
+						score -= DeadZoneTowerEarlyPenalty;
+				}
+
 				constexpr int islandHoldDefenseBonus = 450;
 
 				if (fillsIslandHold)
@@ -3130,7 +3173,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				// Proactive Heavy-Armor Shielding: build anti-armor / high-tier defenses BEFORE
 				// the enemy's tank column arrives at an undefended base!
-				const int desiredCoreGroundDefs = std::clamp(2 + ownedRefineries + (features[65] >= 18 ? 2 : 0), 3, 8);
 				if (!isPureAA && !isUnarmedBunker && totalGroundDefenses < desiredCoreGroundDefs)
 				{
 					score += (desiredCoreGroundDefs - totalGroundDefenses) * 240
@@ -3587,6 +3629,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	for (auto const pOwnedU : UnitClass::Array)
 	{
+		// An MCV aboard one of our transports is still ours and still undeployed: out of sight in the
+		// hold it let the next one be built, five MCVs for one yard (match #10267).
+		if (pOwnedU && pOwnedU->Owner == pHouse && pOwnedU->InLimbo && pOwnedU->IsAlive && pOwnedU->Type
+			&& pOwnedU->Transporter && pOwnedU->Transporter->Owner == pHouse
+			&& pOwnedU->Type->DeploysInto && pOwnedU->Type->DeploysInto->ConstructionYard)
+		{
+			ownsUndeployedMCV = true;
+		}
+
 		if (pOwnedU && pOwnedU->Owner == pHouse && !pOwnedU->InLimbo && pOwnedU->IsAlive && pOwnedU->Type)
 		{
 			auto const pOwnedType = pOwnedU->Type;
@@ -4688,6 +4739,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isEconomyUnit = pUnit->Harvester || pUnit->ResourceGatherer || isDeployableRefineryOrMiner;
 		if (isEconomyUnit && !isMobileMiner && ownedEconomyUnits >= economyUnitCap && !allowExpansionRefineryDeployer
 			&& !hasRefineryZoneWithZeroHarvesters && !hasUnderharvestedIslandWithWarFactory)
+		{
+			continue;
+		}
+
+		// The army of the tank mass comes once its economy stands (TankMassRefineries). A house with
+		// no income left, or with a refinery that has no harvester, is not held.
+		if (tankMass && isEconomyUnit && !isUnitInProgress && hasActiveUnitIncome && !hasRefineryZoneWithZeroHarvesters
+			&& ownedFrontLineVehicles < TankMassBaseWave && pHouse->CountResourceDestinations >= TankMassRefineries
+			&& (isMobileMiner || isDeployableRefineryOrMiner || ownedEconomyUnits >= TankMassGatherersPerRefinery * TankMassRefineries))
 		{
 			continue;
 		}
@@ -5985,7 +6045,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				"lesson=%d\n",
 			pHouse->ArrayIndex, pExt->NeuralAI_Archetype, ownedFrontLineVehicles, ownedArtilleryVehicles, artilleryAllowance,
 			ownedAntiAirVehicles, wantedAntiAirEscorts, pHouse->CountResourceDestinations, tankMass ? TankMassWaveUnits(pHouse) : 0,
-			govMacro.WaveLessonSteps);
+			WaveLessonStepsNow(pHouse));
 
 		// TEMP diagnostic, stalled production (match #7132: Yuri with 230000-290000 credits spent
 		// almost nothing for 40 minutes, 17 units, never finished the last enemy): with 20000+ credits

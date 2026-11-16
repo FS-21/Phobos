@@ -723,9 +723,10 @@ namespace
 			}
 		}
 
+		// A slave with a miner belongs to it; a freed one is a cheap soldier like any other.
 		for (auto const pInf : InfantryClass::Array)
 		{
-			if (pInf && isIdleGround(pInf, pInf->Type) && !pInf->Type->Engineer && !pInf->Type->Slaved && !IsSpyInfantryType(pInf->Type)
+			if (pInf && isIdleGround(pInf, pInf->Type) && !pInf->Type->Engineer && !pInf->SlaveOwner && !IsSpyInfantryType(pInf->Type)
 				&& !IsHealerInfantryType(pInf->Type))
 				ground.push_back(MakeScoutUnit(pInf, false));
 		}
@@ -975,6 +976,52 @@ namespace
 	// is free. One scout per house, two in FFA or with a big idle army, three while the
 	// information is very stale (no enemy building known after 4500 frames, or 60% of the free ore
 	// fields never explored after 9000 frames). At most one new scout every 240 frames.
+	// Places to look for what is left of an enemy: land cells of a grid whose surroundings teach the
+	// most, the best first (nearer to home among equals), at most this many.
+	std::vector<CellStruct> FindRemnantSearchCells(HouseClass* pHouse, size_t most)
+	{
+		auto const& state = GetScoutState(pHouse);
+		const bool fog = IsFogOfWarMatch();
+		const CellStruct home = GetHouseHomeCell(pHouse);
+		std::vector<std::pair<int, CellStruct>> found;
+
+		for (int y = RemnantSearchStepCells / 2; y < 512; y += RemnantSearchStepCells)
+		{
+			for (int x = RemnantSearchStepCells / 2; x < 512; x += RemnantSearchStepCells)
+			{
+				const CellStruct cell { static_cast<short>(x), static_cast<short>(y) };
+
+				if (!MapClass::Instance.CoordinatesLegal(cell))
+					continue;
+
+				auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+				if (!pCell || pCell->LandType == LandType::Water)
+					continue;
+
+				const int gain = ScoutInfoGain(pHouse, state, cell, RemnantSearchRadius, fog);
+
+				if (gain >= RemnantSearchMinGain)
+					found.push_back({ gain * 4 - static_cast<int>(cell.DistanceFrom(home)), cell });
+			}
+		}
+
+		std::sort(found.begin(), found.end(), [](const std::pair<int, CellStruct>& a, const std::pair<int, CellStruct>& b)
+			{
+				if (a.first != b.first)
+					return a.first > b.first;
+
+				return a.second.X != b.second.X ? a.second.X < b.second.X : a.second.Y < b.second.Y;
+			});
+
+		std::vector<CellStruct> cells;
+
+		for (size_t i = 0; i < found.size() && i < most; ++i)
+			cells.push_back(found[i].second);
+
+		return cells;
+	}
+
 	void UpdatePurposefulScouting(HouseClass* pHouse)
 	{
 		if (!pHouse || !ScenarioClass::Instance)
