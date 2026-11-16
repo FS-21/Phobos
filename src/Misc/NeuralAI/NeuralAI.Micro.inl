@@ -7652,13 +7652,24 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (isIdle && !IsSpyInfantryType(pInf->Type) && (IsAITickWindow(90, apcBoardWindow)))
+		// Units and transports working on a crossing belong to the ferry until it ends: a soldier
+		// reserved for a ferry or waiting for one is no gunner to hand out, and a transport the ferry
+		// loads or holds is filled by the ferry alone. An IFV or an OpenTopped vehicle that is no
+		// ferry right now still takes idle gunners.
+		if (isIdle && !IsSpyInfantryType(pInf->Type) && (IsAITickWindow(90, apcBoardWindow))
+			&& !IsFerryReserved(pHouse, pInf->UniqueID) && !GetMacroState(pHouse).FerryWaitSince.contains(pInf->UniqueID))
 		{
 			bool boardedCombatVehicle = false;
 			for (auto const pCombVeh : UnitClass::Array)
 			{
 				if (!pCombVeh || pCombVeh->Owner != pHouse || pCombVeh->InLimbo || !pCombVeh->IsAlive
 					|| !pCombVeh->Type)
+				{
+					continue;
+				}
+
+				if (IsFerryLoading(pHouse, pCombVeh->UniqueID) || IsFerryParkedToLoad(pHouse, pCombVeh->UniqueID)
+					|| (pCombVeh->Passengers.NumPassengers > 0 && FindFerryTrip(pCombVeh->UniqueID)))
 				{
 					continue;
 				}
