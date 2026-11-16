@@ -11843,6 +11843,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				if (auto const pCarryExt = UnitExt::Fetch(pTrans))
 				{
+					if (!pCarryExt->CarryallCargo)
+						GetMacroState(pHouse).CarryallDropSince.erase(pTrans->UniqueID);
+
 					if (pCarryExt->CarryallCargo && pCarryExt->CarryallCargo->IsAlive)
 					{
 						auto const pCarriedUnit = pCarryExt->CarryallCargo;
@@ -11895,27 +11898,37 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							// The cell the cargo is set down on: the one below when it takes it, else the
 							// nearest one around the drop cell that does (a building, another unit or a
 							// cliff below kept a carryall hanging over its drop zone with a harvester for
-							// 65000 frames, match #8867). The choice is kept while it stays good.
+							// 65000 frames, match #8867). The choice is kept while it stays good. While it
+							// flies to that cell any cell below that takes the cargo will do (a carryall
+							// circles its cell without stopping over it), and the search reaches one ring
+							// farther every CarryallDropStuckFrames it has gone without setting it down.
 							auto& dropCells = GetMacroState(pHouse).CarryallDropCells;
+							auto& dropSince = GetMacroState(pHouse).CarryallDropSince;
 							auto const itChosen = dropCells.find(pTrans->UniqueID);
+							auto const itSince = dropSince.find(pTrans->UniqueID);
 							CellClass* pChosen = itChosen != dropCells.end() ? MapClass::Instance.TryGetCellAt(itChosen->second) : nullptr;
+							const int stuckFrames = itSince != dropSince.end() ? Unsorted::CurrentFrame - itSince->second : 0;
+							const int dropSearchCells = CarryallDropSearchCells
+								+ CarryallDropRingCells * std::min(CarryallDropMaxRings, stuckFrames / CarryallDropStuckFrames);
 
 							if (pChosen && (!pCarryExt->CarryallCanDropAt(pChosen)
-								|| pChosen->MapCoords.DistanceFrom(pDropCell->MapCoords) > CarryallDropSearchCells + CarryallDropZoneCells))
+								|| pChosen->MapCoords.DistanceFrom(pDropCell->MapCoords) > dropSearchCells + CarryallDropZoneCells))
 							{
 								dropCells.erase(pTrans->UniqueID);
 								pChosen = nullptr;
 							}
 
-							const bool inDropZone = pTrans->GetMapCoords().DistanceFrom(pDropCell->MapCoords) <= CarryallDropZoneCells;
-							const bool overChosen = pChosen && pTrans->GetMapCoords() == pChosen->MapCoords;
+							const double cellsFromDrop = pTrans->GetMapCoords().DistanceFrom(pDropCell->MapCoords);
+							const bool inDropZone = cellsFromDrop <= CarryallDropZoneCells;
+							const bool nearChosen = pChosen && cellsFromDrop <= dropSearchCells + CarryallDropZoneCells;
 
-							if ((inDropZone || overChosen) && pCarryExt->CarryallCanDropAt(pTrans->GetCell()))
+							if ((inDropZone || nearChosen) && pCarryExt->CarryallCanDropAt(pTrans->GetCell()))
 							{
 								if (pTrans->CurrentMission != Mission::Unload)
 									CountDecision(NeuralDecision::AirliftDrop, pHouse->ArrayIndex);
 
 								dropCells.erase(pTrans->UniqueID);
+								dropSince.erase(pTrans->UniqueID);
 								pTrans->QueueMission(Mission::Unload, true);
 							}
 							else if (pChosen)
@@ -11932,9 +11945,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								double bestDist = 999999.0;
 								const CellStruct centre = pDropCell->MapCoords;
 
-								for (int dy = -CarryallDropSearchCells; dy <= CarryallDropSearchCells; ++dy)
+								dropSince.try_emplace(pTrans->UniqueID, Unsorted::CurrentFrame);
+
+								for (int dy = -dropSearchCells; dy <= dropSearchCells; ++dy)
 								{
-									for (int dx = -CarryallDropSearchCells; dx <= CarryallDropSearchCells; ++dx)
+									for (int dx = -dropSearchCells; dx <= dropSearchCells; ++dx)
 									{
 										const CellStruct cell { static_cast<short>(centre.X + dx), static_cast<short>(centre.Y + dy) };
 										auto const pCell = MapClass::Instance.TryGetCellAt(cell);

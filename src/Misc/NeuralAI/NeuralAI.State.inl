@@ -937,6 +937,9 @@ namespace
 		// The cell a carryall chose to set its cargo down on when the one below it at the drop zone
 		// did not take it, by carryall UniqueID (key access only).
 		std::unordered_map<DWORD, CellStruct> CarryallDropCells {};
+		// Since when a carryall has looked for such a cell without setting its cargo down, by
+		// carryall UniqueID (key access only).
+		std::unordered_map<DWORD, int> CarryallDropSince {};
 		// Since when a loaded transport on its pickup shore has had no landmass to go to, by
 		// transport UniqueID (key access only).
 		std::unordered_map<DWORD, int> FerryNoGoalSince {};
@@ -1355,6 +1358,7 @@ namespace
 			this->FerryBoardTurns.clear();
 			this->FerryLandings.clear();
 			this->CarryallDropCells.clear();
+			this->CarryallDropSince.clear();
 			this->FerryNoGoalSince.clear();
 			this->ParkedFerries.clear();
 			this->ProductionBanUntil.clear();
@@ -1763,6 +1767,11 @@ namespace
 	constexpr int CoverageDefenseCells = 10;
 	constexpr int CoverageDefenseBonus = 500;
 	constexpr int CarryallDropSearchCells = 6;
+	// The search reaches CarryallDropRingCells farther for every CarryallDropStuckFrames the carryall
+	// has gone without setting its cargo down, up to CarryallDropMaxRings times.
+	constexpr int CarryallDropStuckFrames = 450;
+	constexpr int CarryallDropRingCells = 4;
+	constexpr int CarryallDropMaxRings = 3;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
 	constexpr int FerryParkedFrames = 300;
@@ -1971,9 +1980,10 @@ namespace
 	// filling the map). The verdict comes once no unit of ours is left there WaveVerdictQuietFrames
 	// after the last dispatch, or after WaveVerdictFrames.
 	constexpr int TankMassBaseWave = 10;
-	constexpr int TankMassWaveCap = 24;
-	constexpr int WaveLessonPercent = 150;
-	constexpr int WaveLessonMaxSteps = 3;
+	// Each step doubles the count (user): 10, 20, then the most.
+	constexpr int TankMassWaveCap = 32;
+	constexpr int WaveLessonPercent = 200;
+	constexpr int WaveLessonMaxSteps = 2;
 	// The lesson fades a step every WaveLessonStepFrames without a new failure: a house that lost
 	// its army to three waves was asked for 24 units for 9000 frames with 4 vehicles left, and
 	// sent nothing more (match #10262).
