@@ -354,18 +354,24 @@ namespace
 		return count;
 	}
 
+	// Waves in a row that took no building, as the lesson stands now: a step fades every
+	// WaveLessonStepFrames since the last one.
+	int WaveLessonStepsNow(HouseClass* pHouse)
+	{
+		auto const& macro = GetMacroState(pHouse);
+		const int age = Unsorted::CurrentFrame - macro.WaveLessonFrame;
+
+		return age < 0 ? 0 : std::max(0, macro.WaveLessonSteps - age / WaveLessonStepFrames);
+	}
+
 	// Unit count a wave of the tank mass waits for: TankMassBaseWave, WaveLessonPercent of it for
 	// each wave in a row that took no building, up to TankMassWaveCap.
 	int TankMassWaveUnits(HouseClass* pHouse)
 	{
-		auto const& macro = GetMacroState(pHouse);
 		int units = TankMassBaseWave;
 
-		if (Unsorted::CurrentFrame - macro.WaveLessonFrame <= WaveLessonFrames)
-		{
-			for (int step = 0; step < macro.WaveLessonSteps && units < TankMassWaveCap; ++step)
-				units = units * WaveLessonPercent / 100;
-		}
+		for (int step = 0; step < WaveLessonStepsNow(pHouse) && units < TankMassWaveCap; ++step)
+			units = units * WaveLessonPercent / 100;
 
 		return std::min(units, TankMassWaveCap);
 	}
@@ -412,7 +418,7 @@ namespace
 
 		const int standing = CountKnownEnemyBuildingsNear(pHouse, macro.WaveVerdictCell);
 		const bool tookBuilding = standing < macro.WaveVerdictBuildings;
-		const int stepsBefore = macro.WaveLessonSteps;
+		const int stepsBefore = WaveLessonStepsNow(pHouse);
 
 		if (tookBuilding)
 		{
@@ -420,10 +426,7 @@ namespace
 		}
 		else
 		{
-			if (frame - macro.WaveLessonFrame > WaveLessonFrames)
-				macro.WaveLessonSteps = 0;
-
-			macro.WaveLessonSteps = std::min(macro.WaveLessonSteps + 1, WaveLessonMaxSteps);
+			macro.WaveLessonSteps = std::min(WaveLessonStepsNow(pHouse) + 1, WaveLessonMaxSteps);
 			macro.WaveLessonFrame = frame;
 		}
 

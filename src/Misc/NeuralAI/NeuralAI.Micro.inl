@@ -12,6 +12,11 @@ namespace
 // cell and be relinked into another cell's object list inside the call. Walking FirstObject/NextObject
 // while scattering then follows the moved unit into the other list and can revisit units forever (the
 // game frame froze on "(4) The Honeymoon"). Copy the cell's foot units first and act on the copy.
+namespace
+{
+	std::vector<CellStruct> FindRemnantSearchCells(HouseClass* pHouse, size_t most);
+}
+
 static void CollectCellFoots(CellClass* pCell, std::vector<FootClass*>& foots)
 {
 	if (!pCell)
@@ -6645,6 +6650,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		// A wounded soldier left idle far from home walks back to it (WoundedIdleHomeCells).
+		if (pInf->GetHealthPercentage() < WoundedIdleHealth && pInf->Target == nullptr && homeCoords != CellStruct::Empty
+			&& (pInf->CurrentMission == Mission::Guard || pInf->CurrentMission == Mission::Area_Guard)
+			&& pInf->GetMapCoords().DistanceFrom(homeCoords) > WoundedIdleHomeCells
+			&& ObjectZone(pInf, MovementZone::Normal) == homeGroundZone && !IsPlanMember(pHouse, pInf->UniqueID)
+			&& IsAITickWindow(450, 0))
+		{
+			IssueMoveOrder(pInf, MapClass::Instance.TryGetCellAt(homeCoords), 6.0);
+		}
+
 		// Wounded valuable or veteran infantry (< 55% HP) retreats to a hospital, a medic or the
 		// house self-heal (tryRepairRetreat).
 		if (!pInf->Type->Engineer && (pInf->Type->Cost >= 300 || pInf->Veterancy.IsElite() || pInf->Veterancy.IsVeteran()
@@ -8694,6 +8709,40 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				bestW = zc.weight;
 				primaryArmyZone = zc.zone;
 			}
+		}
+	}
+
+	// Remnant search: no enemy building known and nowhere to send a wave, yet the enemy still has
+	// buildings. Idle units go and look, the fastest first, each to a different place
+	// (RemnantSearchScouts), and leave the idle pools.
+	if (!pVisibleEnemyBld && !pFallbackEnemyCell && anyEnemyBuildingExists
+		&& Unsorted::CurrentFrame - GetMacroState(pHouse).RemnantSearchFrame >= RemnantSearchEveryFrames)
+	{
+		GetMacroState(pHouse).RemnantSearchFrame = Unsorted::CurrentFrame;
+		std::vector<FootClass*> searchers(idleCombatUnits.begin(), idleCombatUnits.end());
+		searchers.insert(searchers.end(), idleCombatInf.begin(), idleCombatInf.end());
+		std::stable_sort(searchers.begin(), searchers.end(), [](FootClass* a, FootClass* b)
+			{
+				return a->GetTechnoType()->Speed > b->GetTechnoType()->Speed;
+			});
+
+		const std::vector<CellStruct> places = FindRemnantSearchCells(pHouse, std::min(RemnantSearchScouts, searchers.size()));
+
+		for (size_t i = 0; i < places.size(); ++i)
+		{
+			auto const pSearcher = searchers[i];
+
+			if (auto const pPlace = MapClass::Instance.TryGetCellAt(places[i]))
+				OrderFootToAttackMove(pSearcher, pPlace);
+
+			std::erase(idleCombatUnits, pSearcher);
+			std::erase(idleCombatInf, pSearcher);
+		}
+
+		if (!places.empty())
+		{
+			Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: %d scouts sent, first to (%d,%d)\n", Unsorted::CurrentFrame,
+				pHouse->ArrayIndex, static_cast<int>(places.size()), places.front().X, places.front().Y);
 		}
 	}
 

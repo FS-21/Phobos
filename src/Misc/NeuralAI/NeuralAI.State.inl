@@ -935,6 +935,8 @@ namespace
 		// and no new wait before this frame.
 		int WaveEscortWaitSince { -1 };
 		int WaveEscortRetryFrame { -1 };
+		// Last frame scouts were sent to look for the remnants of an enemy (RemnantSearchScouts).
+		int RemnantSearchFrame { -100000 };
 		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it.
 		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
 		std::array<int, 8> FailedApproachWeight {};
@@ -1289,6 +1291,7 @@ namespace
 			this->WaveLessonFrame = -100000;
 			this->WaveEscortWaitSince = -1;
 			this->WaveEscortRetryFrame = -1;
+			this->RemnantSearchFrame = -100000;
 			this->WaveGoals.clear();
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
@@ -1811,15 +1814,38 @@ namespace
 	constexpr int TankCounterArtilleryBonus = 500;
 	// Waves: the unit count they start from and the most they wait for. A wave that took no known
 	// enemy building within WaveVerdictCells of its target asks the next one for
-	// WaveLessonPercent of its count, up to the most, for WaveLessonFrames; one that took a building
-	// ends the lesson (user: grow the group after each wave until it works, without filling the map).
-	// The verdict comes once no unit of ours is left there WaveVerdictQuietFrames after the last
-	// dispatch, or after WaveVerdictFrames.
+	// WaveLessonPercent of its count, up to the most and to WaveLessonMaxSteps steps; one that took
+	// a building ends the lesson (user: grow the group after each wave until it works, without
+	// filling the map). The verdict comes once no unit of ours is left there WaveVerdictQuietFrames
+	// after the last dispatch, or after WaveVerdictFrames.
 	constexpr int TankMassBaseWave = 10;
 	constexpr int TankMassWaveCap = 24;
 	constexpr int WaveLessonPercent = 150;
 	constexpr int WaveLessonMaxSteps = 3;
-	constexpr int WaveLessonFrames = 9000;
+	// The lesson fades a step every WaveLessonStepFrames without a new failure: a house that lost
+	// its army to three waves was asked for 24 units for 9000 frames with 4 vehicles left, and
+	// sent nothing more (match #10262).
+	constexpr int WaveLessonStepFrames = 3000;
+	// The army of the tank mass comes once its economy stands: with TankMassRefineries refineries
+	// and TankMassGatherersPerRefinery gatherers for each, more gatherers and mobile miners wait
+	// while its front line is under TankMassBaseWave vehicles (match #10262: a house built 14
+	// slave miners and no tank in its first 18000 frames, with two war factories).
+	constexpr int TankMassGatherersPerRefinery = 2;
+	// Remnant search (user): a house that knows no enemy building while the enemy still has some
+	// sends up to RemnantSearchScouts idle units, the fastest first, each to a different place of
+	// a grid of RemnantSearchStepCells whose surroundings (RemnantSearchRadius) it knows least
+	// (information gain of RemnantSearchMinGain or more), every RemnantSearchEveryFrames (match
+	// #10274: 160 vehicles and 95 soldiers stood idle for 12000 frames while six buildings they
+	// had never seen kept the match going).
+	constexpr size_t RemnantSearchScouts = 12;
+	constexpr int RemnantSearchStepCells = 14;
+	constexpr int RemnantSearchRadius = 7;
+	constexpr int RemnantSearchMinGain = 60;
+	constexpr int RemnantSearchEveryFrames = 450;
+	// A wounded soldier (under WoundedIdleHealth) left idle more than WoundedIdleHomeCells from
+	// home walks back to it (user).
+	constexpr double WoundedIdleHealth = 0.55;
+	constexpr double WoundedIdleHomeCells = 25.0;
 	constexpr double WaveVerdictCells = 14.0;
 	constexpr int WaveVerdictQuietFrames = 900;
 	constexpr int WaveVerdictFrames = 5400;
