@@ -9497,7 +9497,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		waveAwaitsEscort = escortWanted && waveMacro.WaveEscortWaitSince >= 0;
 	}
 
-	const bool waveStrengthReady = waveCheck.Launch && !waveAwaitsEscort;
+	// A base full of idle fighting vehicles of the tank mass, whatever their types, goes out as a
+	// wave without waiting for the strength gate or the escort (user: use them, and the base is
+	// free of them).
+	const bool massOverflow = tankMassWaves && waveAbleUnits >= static_cast<size_t>(TankMassOverflowVehicles);
+	const bool waveStrengthReady = (waveCheck.Launch && !waveAwaitsEscort) || massOverflow;
 
 	// Coordinated Multi-Squadron Offensive Strike Wave (Slot 37: Rush vs Mass
 	// Timing) Splits forces into parallel Squadron Alpha (pWaveTargetCell) and
