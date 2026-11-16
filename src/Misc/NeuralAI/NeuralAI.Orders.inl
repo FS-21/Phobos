@@ -3,10 +3,16 @@
 
 namespace
 {
+	int CountStationTrips(const HouseClass* pHouse, DWORD stationID, DWORD excludeID);
+
+	// TEMP diagnostic: stations passed over for being full, per house (repair queue DIAG).
+	std::array<int, 32> RepairStationFullSkips {};
+
 	// Picks the repair station (UnitRepair=yes) this unit should use: only stations it can
 	// actually reach (naval units at naval stations, ground units at land stations,
 	// amphibious/hover units at either), balancing load by adding the current queue (our
-	// units already entering or docked there) to the distance. No more single-depot queues.
+	// units already entering or docked there, or on a repair trip to it) to the distance. A
+	// station with RepairStationQueueUnits trips is full: none when every one is.
 	BuildingClass* FindBestRepairStation(HouseClass* pHouse, FootClass* pFoot, bool airlifted = false)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
@@ -72,6 +78,16 @@ namespace
 				{
 					queue++;
 				}
+			}
+
+			// A unit waiting at a busy station is on a move to a cell next to it, which the count above
+			// misses; our repair trips to it count them.
+			queue = std::max(queue, CountStationTrips(pHouse, pBld->UniqueID, pFoot->UniqueID));
+
+			if (queue >= RepairStationQueueUnits)
+			{
+				RepairStationFullSkips[std::clamp(pHouse->ArrayIndex, 0, 31)]++;
+				continue;
 			}
 
 			const double cost = fc.DistanceFrom(bc) + queue * 8.0;
