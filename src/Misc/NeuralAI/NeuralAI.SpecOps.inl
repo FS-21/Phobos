@@ -200,6 +200,45 @@ namespace
 		return false;
 	}
 
+	// The ground a building stands on: the zone of its cell, or, when that cell is on no ground (the
+	// cells of a building may carry another zone), the first ground zone around its foundation. -1
+	// with no ground around it.
+	int BuildingGroundZone(const BuildingClass* pBld)
+	{
+		if (!pBld || !pBld->Type)
+			return -1;
+
+		const CellStruct cell = pBld->GetMapCoords();
+		const int ownZone = MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, pBld->OnBridge);
+
+		if (IsGroundZone(ownZone))
+			return ownZone;
+
+		const int width = pBld->Type->GetFoundationWidth();
+		const int height = pBld->Type->GetFoundationHeight(false);
+
+		for (int dy = -1; dy <= height; ++dy)
+		{
+			for (int dx = -1; dx <= width; ++dx)
+			{
+				if (dx >= 0 && dx < width && dy >= 0 && dy < height)
+					continue;
+
+				const CellStruct around { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
+
+				if (!MapClass::Instance.CoordinatesLegal(around))
+					continue;
+
+				const int zone = MapClass::Instance.GetMovementZoneType(around, MovementZone::Normal, false);
+
+				if (IsGroundZone(zone))
+					return zone;
+			}
+		}
+
+		return -1;
+	}
+
 	// The wall overlay standing on this cell, or nullptr.
 	OverlayTypeClass* GetWallOverlayAt(const CellStruct& cell)
 	{

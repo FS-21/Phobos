@@ -738,11 +738,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// for the ground next to it. It was taken for a unit on another island and asked for a
 		// transport that never came: 257 of the 453 transport waits that ran out in 40 matches, on
 		// maps without water too.
-		for (int r = 1; r <= 2 && footZone <= 1; ++r)
+		for (int r = 1; r <= 2 && !IsGroundZone(footZone); ++r)
 		{
-			for (int dy = -r; dy <= r && footZone <= 1; ++dy)
+			for (int dy = -r; dy <= r && !IsGroundZone(footZone); ++dy)
 			{
-				for (int dx = -r; dx <= r && footZone <= 1; ++dx)
+				for (int dx = -r; dx <= r && !IsGroundZone(footZone); ++dx)
 				{
 					if (std::abs(dx) != r && std::abs(dy) != r)
 						continue;
@@ -750,11 +750,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					const CellStruct beside { static_cast<short>(footCoords.X + dx), static_cast<short>(footCoords.Y + dy) };
 					const int nearZone = MapClass::Instance.GetMovementZoneType(beside, MovementZone::Normal, false);
 
-					if (nearZone > 1)
+					if (IsGroundZone(nearZone))
 						footZone = nearZone;
 				}
 			}
 		}
+
+		if (footZone == NoZoneId)
+			footZone = -1;
 
 		const CellStruct targetCoords = CellClass::Coord2Cell(pTarget->GetCoords());
 		auto const pTargetObject = abstract_cast<ObjectClass*>(pTarget);
@@ -764,7 +767,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Its own way: the unit walks when its own movement zone joins both cells (user: a transport
 		// only for what the unit cannot reach itself).
 		const int ownFootZone = MapClass::Instance.GetMovementZoneType(footCoords, pFootType->MovementZone, pFoot->OnBridge);
-		const bool walksThere = ownFootZone > 1 && ownFootZone == MapClass::Instance.GetMovementZoneType(
+		const bool walksThere = IsGroundZone(ownFootZone) && ownFootZone == MapClass::Instance.GetMovementZoneType(
 			targetCoords, pFootType->MovementZone, pTargetObject && pTargetObject->OnBridge);
 
 		// A cell of a standing bridge is on the deck's ground, not on the water or the chasm under
@@ -781,6 +784,59 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// A building answers for the ground around it (its own cells may carry another zone).
 		if (footZone >= 0 && targetZone != footZone && IsBuildingEnterableFromZone(abstract_cast<BuildingClass*>(pTarget), footZone))
 			targetZone = footZone;
+
+		// A target on no ground (a ship off the shore, a unit at a cliff foot, a cell with no zone) is
+		// reached from the ground next to it: ours when it touches it (the unit walks up and fires from
+		// the shore), else the nearest other one. With no ground around it no transport can land the
+		// unit by it. Units asked for a transport to such targets and waited on the beach until they
+		// gave up: 43 of 219 ferry wait timeouts in 41 matches were for zone 1, 11 for no zone.
+		CellStruct targetGround = targetCoords;
+
+		if (!IsGroundZone(targetZone))
+		{
+			int nearestZone = -1;
+			bool touchesFootGround = false;
+
+			for (int r = 1; r <= FerryTargetGroundCells && !touchesFootGround; ++r)
+			{
+				for (int dy = -r; dy <= r && !touchesFootGround; ++dy)
+				{
+					for (int dx = -r; dx <= r; ++dx)
+					{
+						if (std::abs(dx) != r && std::abs(dy) != r)
+							continue;
+
+						const CellStruct beside { static_cast<short>(targetCoords.X + dx), static_cast<short>(targetCoords.Y + dy) };
+						const int nearZone = MapClass::Instance.GetMovementZoneType(beside, MovementZone::Normal, false);
+
+						if (!IsGroundZone(nearZone))
+							continue;
+
+						if (nearZone == footZone)
+						{
+							touchesFootGround = true;
+							break;
+						}
+
+						if (nearestZone < 0)
+						{
+							nearestZone = nearZone;
+							targetGround = beside;
+						}
+					}
+				}
+			}
+
+			if (touchesFootGround)
+			{
+				targetZone = footZone;
+				targetGround = targetCoords;
+			}
+			else
+			{
+				targetZone = nearestZone;
+			}
+		}
 
 		bool canShootFromHere = false;
 		if (useSetTarget || desiredMission == Mission::Attack)
@@ -821,7 +877,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// A transport is called only for a crossing one of ours (or one we can build) can make: the
 		// landing on the ground the unit wants, from where it stands.
-		CellClass* const pTargetLanding = FindSafeIslandLandingCell(pHouse, targetCoords, targetZone, false);
+		CellClass* const pTargetLanding = FindSafeIslandLandingCell(pHouse, targetGround, targetZone, false);
 
 		if (!CanHouseFerryTypeAcrossWater(pHouse, pFootType, &footCoords, pTargetLanding ? &pTargetLanding->MapCoords : nullptr))
 			return false;
@@ -876,7 +932,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		RecordPassengerIslandGoal(pFoot->UniqueID, targetCoords);
+		RecordPassengerIslandGoal(pFoot->UniqueID, targetGround);
 		const int passSize = std::max(1, static_cast<int>(pFootType->Size));
 		if (pTargetLanding)
 			pendingCrossIslandOrders.push_back({ pFoot, footZone, pTargetLanding, targetZone, passSize });
@@ -1072,7 +1128,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 
 				const int cz = MapClass::Instance.GetMovementZoneType(cand, MovementZone::Normal, false);
-				if (cz < 0)
+
+				// A goal on no ground is no island: the transports loaded for one found no beach there
+				// and kept their cargo for the rest of the match.
+				if (!IsGroundZone(cz))
 					continue;
 
 				const int tibVal = pCell->GetContainedTiberiumValue();
@@ -8641,8 +8700,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	int targetIslandZone = -1;
 	if (pIslandGoalCell)
 	{
-		targetIslandZone
-			= MapClass::Instance.GetMovementZoneType(pIslandGoalCell->MapCoords, MovementZone::Normal, false);
+		auto const pGoalBld = pIslandGoalCell->GetBuilding();
+		targetIslandZone = pGoalBld ? BuildingGroundZone(pGoalBld)
+			: MapClass::Instance.GetMovementZoneType(pIslandGoalCell->MapCoords, MovementZone::Normal, false);
 	}
 
 	CellClass* pSecondaryWaveTargetCell = nullptr;
@@ -8683,7 +8743,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pECell || pECell->LandType == LandType::Water)
 				continue;
 
-			const int ebz = MapClass::Instance.GetMovementZoneType(pECell->MapCoords, MovementZone::Normal, false);
+			// The ground the building stands on: its own cell may read as no ground, and a base taken for
+			// an island of zone 1 is a goal no transport finds a beach for.
+			const int ebz = BuildingGroundZone(pEB);
+
 			if (ebz < 0)
 				continue;
 
@@ -8709,8 +8772,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (pCheckEB->Owner == pHouse || pHouse->IsAlliedWith(pCheckEB->Owner) || !IsEnemyBuildingKnown(pHouse, pCheckEB) || pCheckEB->Owner->IsNeutral())
 					continue;
 
-				if (ObjectZone(pCheckEB, MovementZone::Normal)
-					== ebz)
+				if (BuildingGroundZone(pCheckEB) == ebz)
 				{
 					enemyBldsInZone++;
 					if (pCheckEB->Type->IsBaseDefense)
@@ -11581,7 +11643,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		auto isValidFerryGoalZone = [ferryOriginZone](int zone) -> bool
 		{
-			return zone >= 0 && zone != ferryOriginZone;
+			return IsGroundZone(zone) && zone != ferryOriginZone;
 		};
 
 		bool carryingEngineer = false;
@@ -11599,8 +11661,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					const int pgz = MapClass::Instance.GetMovementZoneType(passGoalCoords, MovementZone::Normal, false);
 					if (pgz >= 0 && !isValidFerryGoalZone(pgz))
 					{
-						// Stale goal on the loading island: it must never pull the
-						// transport back or make it unload where the cargo boarded.
+						// Stale goal on the loading island, or a goal on no ground: it must never
+						// pull the transport back or make it unload where the cargo boarded.
 						ClearPassengerIslandGoal(pPass->UniqueID);
 					}
 					else if (pgz >= 0)
@@ -12239,6 +12301,48 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				noGoalSince.erase(pTrans->UniqueID);
 			}
+		}
+
+		// Whatever else keeps a cargo on its shore: a transport loaded with the same passengers on its
+		// pickup shore for FerryStuckCargoFrames, past every wait of the loader, sets them down so they
+		// fight again and the transport is free. 91 transports sat loaded 9000 frames or more (up to
+		// 114000), no one boarding and nothing pending, in 55 of 111 houses with a ferry fleet (41
+		// matches); the transport production counted them as fleet and built no other.
+		if (pTrip && numPass >= 1 && !tripDeparted)
+		{
+			const int now = Unsorted::CurrentFrame;
+			const bool settingDown = pTrip->SetDownFrame >= 0 && now >= pTrip->SetDownFrame
+				&& now - pTrip->SetDownFrame < FerrySetDownFrames;
+			const bool stuck = !settingDown && onSafePickupShore && pTrip->LastBoardFrame >= 0 && now >= pTrip->LastBoardFrame
+				&& now - pTrip->LastBoardFrame >= FerryStuckCargoFrames;
+
+			if ((settingDown || stuck) && pCurTransCell && pCurTransCell->LandType != LandType::Water && !pCurTransCell->GetBuilding())
+			{
+				if (stuck)
+				{
+					pTrip->SetDownFrame = now;
+					CountDecision(NeuralDecision::FerryCargoReturned);
+					Debug::Log("[NeuralAI] House %d ferry: %s %u sets its %d passengers down at (%d,%d), loaded on its shore for %d frames "
+						"(ready %d, goal %d at (%d,%d) zone %d, underfilled hold %d, convoy hold %d, can fit more %d), frame %d.\n",
+						pHouse->ArrayIndex, pTrans->Type->ID, pTrans->UniqueID, numPass, transCoords.X, transCoords.Y,
+						now - pTrip->LastBoardFrame, isReadyToSailEffective ? 1 : 0, pActiveIslandGoal ? 1 : 0,
+						pActiveIslandGoal ? pActiveIslandGoal->MapCoords.X : -1, pActiveIslandGoal ? pActiveIslandGoal->MapCoords.Y : -1,
+						activeIslandZone, underfilledHold ? 1 : 0, convoyHold ? 1 : 0, canFitMoreOnPickupIsland ? 1 : 0, now);
+				}
+
+				if (pTrans->CurrentMission != Mission::Unload)
+				{
+					pTrans->SetDestination(nullptr, true);
+					pTrans->ClearNavigationList();
+					pTrans->QueueMission(Mission::Unload, true);
+				}
+
+				continue;
+			}
+		}
+		else if (pTrip && numPass == 0)
+		{
+			pTrip->SetDownFrame = -1;
 		}
 
 		// The cargo's objective vanished while at sea and no other landmass is a
