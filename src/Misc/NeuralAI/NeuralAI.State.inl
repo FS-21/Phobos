@@ -946,6 +946,11 @@ namespace
 		int JamRerouteNoWayFrame { -100000 };
 		// Last frame one of our buildings was sold because it held a blocked passage shut (JamSealSellFrames).
 		int LastJamSealSellFrame { -100000 };
+		// Closed-in war factories (SellFactoryRoadBlock): first frame of the current stretch with
+		// FactoryRoadSellHeldVehicles vehicles jammed at home (-1 none), last check and last sale.
+		int HeldAtHomeSince { -1 };
+		int LastFactoryRoadCheckFrame { -100000 };
+		int LastFactoryRoadSellFrame { -100000 };
 		// Emergency lanes (UpdateEmergencyLanes): the last check, the last log line, and since that
 		// line the idle units that stepped aside and the units with an order they made way for.
 		int LastEmergencyLaneFrame { -1 };
@@ -1277,6 +1282,9 @@ namespace
 			this->JamRerouteAll = false;
 			this->JamRerouteNoWayFrame = -100000;
 			this->LastJamSealSellFrame = -100000;
+			this->HeldAtHomeSince = -1;
+			this->LastFactoryRoadCheckFrame = -100000;
+			this->LastFactoryRoadSellFrame = -100000;
 			this->LastEmergencyLaneFrame = -1;
 			this->EmergencyLaneLogFrame = -1;
 			this->EmergencyLaneMoved = 0;
@@ -1784,6 +1792,16 @@ namespace
 	// primary one is picked: every vehicle leaves by the primary factory, so one with a road comes
 	// first however far it stands.
 	constexpr double ClosedInFactoryDistanceSq = 1.0e12;
+	// The cure when every war factory is closed in (SellFactoryRoadBlock, user: sell what closes
+	// the road unless it is a critical structure): with FactoryRoadSellHeldVehicles vehicles
+	// jammed at home for FactoryRoadSellHeldFrames (the stretch ends when fewer than half are),
+	// looked at every FactoryRoadSellCheckFrames, one sale per FactoryRoadSellFrames, trying the
+	// FactoryRoadSellTests cheapest spare buildings on the factories' pockets.
+	constexpr int FactoryRoadSellHeldVehicles = 10;
+	constexpr int FactoryRoadSellHeldFrames = 1800;
+	constexpr int FactoryRoadSellCheckFrames = 300;
+	constexpr int FactoryRoadSellFrames = 1800;
+	constexpr size_t FactoryRoadSellTests = 24;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way

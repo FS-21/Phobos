@@ -9013,6 +9013,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// Since when enough vehicles stand jammed at home for the cure of closed-in war factories
+		// (SellFactoryRoadBlock); the stretch ends when fewer than half of that many do.
+		{
+			auto& heldMacro = GetMacroState(pHouse);
+
+			if (heldVehicles < FactoryRoadSellHeldVehicles / 2)
+			{
+				heldMacro.HeldAtHomeSince = -1;
+			}
+			else if (heldVehicles >= FactoryRoadSellHeldVehicles
+				&& (heldMacro.HeldAtHomeSince < 0 || heldMacro.HeldAtHomeSince > Unsorted::CurrentFrame))
+			{
+				heldMacro.HeldAtHomeSince = Unsorted::CurrentFrame;
+			}
+		}
+
 		NoteIdleArmy(pHouse, idleVehicles + heldVehicles, static_cast<int>(idleCombatInf.size()) + heldSoldiers, idleShips);
 	}
 

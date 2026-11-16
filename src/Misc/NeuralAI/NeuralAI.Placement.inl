@@ -135,8 +135,10 @@ namespace
 	// two vehicles pass side by side; a one-cell street between buildings is no part of it. Beyond
 	// the base is a cell more than FactoryRoadClearCells from every building of the house
 	// (RoadBaseMask) and from `pBuilt`, a footprint taken as built. A walk that has not got there
-	// in FactoryRoadWalkCells cells counts as closed in. `pCells` receives the cells of the walk.
-	bool WalkFactoryRoad(const ArchitectRect& lane, const ArchitectRect* pBuilt, std::vector<int>* pCells)
+	// in FactoryRoadWalkCells cells counts as closed in. `pCells` receives the cells of the walk;
+	// `pGone` is a standing building taken as sold.
+	bool WalkFactoryRoad(const ArchitectRect& lane, const ArchitectRect* pBuilt, std::vector<int>* pCells,
+		const BuildingClass* pGone = nullptr)
 	{
 		if (RoadWalkMark.empty())
 			RoadWalkMark.assign(PassageGridSide * PassageGridSide, 0);
@@ -164,7 +166,12 @@ namespace
 
 			auto const pCell = cellAt(x, y);
 
-			return pCell && !pCell->GetBuilding();
+			if (!pCell)
+				return false;
+
+			auto const pStanding = pCell->GetBuilding();
+
+			return !pStanding || pStanding == pGone;
 		};
 
 		// A step between two open cells next to each other: level ground, or one level over a slope.
@@ -435,6 +442,119 @@ namespace
 		}
 
 		return true;
+	}
+
+	// A building the house can do without for a road: a tower, an empty silo, or one of a type it
+	// owns twice (a power plant only when its loss leaves the power covered). Never what it builds, earns,
+	// researches or fires with (ConYard, factories, refineries and miners, radar, spy satellite,
+	// superweapons, repair depot), nor one with soldiers or a tank inside, a tunnel or a gate.
+	bool IsSpareBuildingForRoad(HouseClass* pHouse, BuildingClass* pBld)
+	{
+		auto const pType = pBld ? pBld->Type : nullptr;
+
+		if (!pType || !pBld->IsAlive || pBld->InLimbo || pType->Unsellable || pType->ConstructionYard || pType->Naval || pType->Gate
+			|| pType->InvisibleInGame || pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling
+			|| pBld->CurrentMission == Mission::Construction)
+		{
+			return false;
+		}
+
+		if (pType->Factory != AbstractType::None || pType->Refinery || pType->ResourceGatherer || pType->ResourceDestination
+			|| pType->Radar || pType->SpySat || pType->HasSuperWeapon() || pType->UnitRepair || pType->UndeploysInto
+			|| IsTunnelNetworkBuilding(pType) || pBld->Occupants.Count > 0 || pBld->BunkerLinkedItem != nullptr)
+		{
+			return false;
+		}
+
+		// A silo only while the house stores nothing.
+		if (pType->IsBaseDefense || (pType->Storage > 0 && pHouse->OwnedTiberium.GetTotalAmount() <= 0))
+			return true;
+
+		if (pHouse->CountOwnedNow(pType) < 2)
+			return false;
+
+		return pType->PowerBonus <= pType->PowerDrain || pHouse->PowerOutput - pType->PowerBonus >= pHouse->PowerDrain;
+	}
+
+	// The cure for a base that closed in every war factory it has (the tight pass of placement, a
+	// captured or allied base, buildings older than the road rule): while vehicles stand jammed at
+	// home (HeldAtHomeSince), the cheapest spare building (IsSpareBuildingForRoad) whose sale alone
+	// opens the road of one of them is sold, at most one per FactoryRoadSellFrames. With one
+	// factory on a road nothing is sold: it is the primary one and every vehicle leaves by it.
+	void SellFactoryRoadBlock(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.HeldAtHomeSince < 0 || now - macro.HeldAtHomeSince < FactoryRoadSellHeldFrames
+			|| (now >= macro.LastFactoryRoadCheckFrame && now - macro.LastFactoryRoadCheckFrame < FactoryRoadSellCheckFrames)
+			|| (now >= macro.LastFactoryRoadSellFrame && now - macro.LastFactoryRoadSellFrame < FactoryRoadSellFrames))
+		{
+			return;
+		}
+
+		macro.LastFactoryRoadCheckFrame = now;
+		auto const& roads = GetFactoryRoads(pHouse);
+
+		if (roads.empty() || std::any_of(roads.begin(), roads.end(), [](auto const& road) { return road.Open; }))
+			return;
+
+		// The walks below read the base of this house.
+		MarkRoadBase(pHouse);
+
+		// Spare buildings on the pocket of a closed-in factory or next to it, cheapest first.
+		struct Candidate
+		{
+			BuildingClass* Building;
+			const NeuralFactoryRoad* Road;
+		};
+
+		std::vector<Candidate> candidates;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!IsSpareBuildingForRoad(pHouse, pBld))
+				continue;
+
+			const CellStruct at = pBld->GetMapCoords();
+			const ArchitectRect around { static_cast<short>(at.X - 1), static_cast<short>(at.Y - 1),
+				static_cast<short>(at.X + pBld->Type->GetFoundationWidth()), static_cast<short>(at.Y + pBld->Type->GetFoundationHeight(false)) };
+
+			for (auto const& road : roads)
+			{
+				const bool onPocket = around.Overlaps(road.Lane.X0, road.Lane.Y0, road.Lane.X1 - road.Lane.X0 + 1, road.Lane.Y1 - road.Lane.Y0 + 1)
+					|| std::any_of(road.Cells.begin(), road.Cells.end(), [&](const int idx)
+						{ return around.Overlaps(idx & (PassageGridSide - 1), idx >> 9, 1, 1); });
+
+				if (onPocket)
+					candidates.push_back({ pBld, &road });
+			}
+		}
+
+		std::stable_sort(candidates.begin(), candidates.end(), [](auto const& a, auto const& b)
+			{ return a.Building->Type->Cost < b.Building->Type->Cost; });
+
+		for (size_t i = 0; i < candidates.size() && i < FactoryRoadSellTests; ++i)
+		{
+			auto const& [pBld, pRoad] = candidates[i];
+
+			if (!WalkFactoryRoad(pRoad->Lane, nullptr, nullptr, pBld))
+				continue;
+
+			const CellStruct at = pBld->GetMapCoords();
+			Debug::Log("[NeuralAI] Frame %d | House #%d sells %s at (%d,%d): it closes in a war factory, none of %d has a road out and "
+				"vehicles have stood jammed at home for %d frames\n", now, pHouse->ArrayIndex, pBld->Type->ID, at.X, at.Y,
+				static_cast<int>(roads.size()), now - macro.HeldAtHomeSince);
+			macro.LastFactoryRoadSellFrame = now;
+			pBld->Sell(1);
+
+			return;
+		}
+
+		// TEMP diagnostic: closed in, jammed, and no single spare building opens a road.
+		Debug::Log("[NeuralAI] House %d factory road DIAG: %d war factories closed in, vehicles jammed at home for %d frames, "
+			"none of %d spare buildings on their pockets opens a road by itself, frame %d.\n", pHouse->ArrayIndex,
+			static_cast<int>(roads.size()), now - macro.HeldAtHomeSince, static_cast<int>(candidates.size()), now);
 	}
 
 	// The launch ring of the ring-limited superweapons (SW.RangeMaximum > 0, e.g. an EMP cannon) a
