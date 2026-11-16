@@ -4731,6 +4731,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			continue;
 		}
 
+		// The army of the tank mass comes once its economy stands (TankMassRefineries). A house with
+		// no income left, or with a refinery that has no harvester, is not held.
+		if (tankMass && isEconomyUnit && !isUnitInProgress && hasActiveUnitIncome && !hasRefineryZoneWithZeroHarvesters
+			&& ownedFrontLineVehicles < TankMassBaseWave && pHouse->CountResourceDestinations >= TankMassRefineries
+			&& (isMobileMiner || isDeployableRefineryOrMiner || ownedEconomyUnits >= TankMassGatherersPerRefinery * TankMassRefineries))
+		{
+			continue;
+		}
+
 		// Mobile miners follow the free fields (minerTarget): the ones mining (a miner without ore
 		// takes no place) and the ones on their way.
 		if (isMobileMiner && !isUnitInProgress && !allowExpansionRefineryDeployer
@@ -6024,7 +6033,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				"lesson=%d\n",
 			pHouse->ArrayIndex, pExt->NeuralAI_Archetype, ownedFrontLineVehicles, ownedArtilleryVehicles, artilleryAllowance,
 			ownedAntiAirVehicles, wantedAntiAirEscorts, pHouse->CountResourceDestinations, tankMass ? TankMassWaveUnits(pHouse) : 0,
-			govMacro.WaveLessonSteps);
+			WaveLessonStepsNow(pHouse));
 
 		// TEMP diagnostic, stalled production (match #7132: Yuri with 230000-290000 credits spent
 		// almost nothing for 40 minutes, 17 units, never finished the last enemy): with 20000+ credits
