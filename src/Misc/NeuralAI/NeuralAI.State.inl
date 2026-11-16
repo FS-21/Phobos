@@ -540,6 +540,11 @@ namespace
 		std::unordered_map<DWORD, int> StrandedMinerSince {};
 		int MinerRelocations { 0 };
 		int MinerLogFrame { -1 };
+		// Harvest income since the last income log line: unloads at a refinery, and what slaves bring
+		// to their deployed miner (compares the two economies).
+		int HarvesterIncome { 0 };
+		int MinerIncome { 0 };
+		int IncomeLogFrame { -1 };
 		// Offensive base crawl bookkeeping (UpdateOffensiveStones): cells chosen for a stone toward
 		// the enemy and not yet confirmed placed, then the placed stones by UniqueID, so how many
 		// forward stones survive is counted (crawlStoneForward / crawlStoneLost) for the trainer.
@@ -1066,6 +1071,9 @@ namespace
 			this->StrandedMinerSince.clear();
 			this->MinerRelocations = 0;
 			this->MinerLogFrame = -1;
+			this->HarvesterIncome = 0;
+			this->MinerIncome = 0;
+			this->IncomeLogFrame = -1;
 			this->OffensiveStoneCells.clear();
 			this->OffensiveStones.clear();
 			this->LastFactoryCapSaleFrame = -100000;
@@ -1526,6 +1534,19 @@ namespace
 	constexpr int MinerFieldClearCells = 10;
 	constexpr int MinerFieldMaxCells = 72;
 	constexpr int MinerLogFrames = 1800;
+	// Ore cells of a held 12x12 ore block for each refinery past the first it takes (3 at most).
+	constexpr int RefineryOreCellsPerExtra = 24;
+	// Most mobile refineries (slave miners) a house mining with them wants, as the Advanced AI.
+	constexpr int MaxMobileMiners = 15;
+	// Docks an AI house keeps free for its aircraft, by difficulty (user): another airfield while
+	// fewer stand free.
+	constexpr int MinFreeAirDocksEasy = 4;
+	constexpr int MinFreeAirDocksNormal = 6;
+	constexpr int MinFreeAirDocksHard = 8;
+	// Vehicles and ships of ours per mind-control vehicle (2 at least).
+	constexpr int MindControlVehiclesPer = 4;
+	// Frames between the harvest income log lines of a house (harvesters against deployed miners).
+	constexpr int IncomeLogFrames = 4500;
 	constexpr int CarryallDropSearchCells = 6;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
