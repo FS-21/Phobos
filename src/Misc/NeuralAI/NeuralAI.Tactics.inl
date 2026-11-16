@@ -2200,17 +2200,19 @@ namespace
 
 	int BuildingGroundZone(const BuildingClass* pBld);
 
-	// The ore field a slave miner of ours should mine next: the nearest to `from` on its land (when
-	// zone >= 0), within maxDist cells, holding MinerFieldMinOreCells or more, with no mining site
-	// (a deployed miner or a refinery of ours, of an ally or a known enemy one) within
-	// MinerFieldClearCells and no known enemy structure within 12. The miner ignoreUid is left out
-	// of the mining sites. Nullptr when none qualifies.
-	CellClass* FindMinerOreField(HouseClass* pHouse, const CellStruct& from, int zone, DWORD ignoreUid, int maxDist)
+	// Calls visit(field, distance to `from`) for every ore field a slave miner of ours may take: on
+	// its land (when zone >= 0), holding MinerFieldMinOreCells or more, with no mining site (a
+	// deployed miner or a refinery of ours, of an ally or a known enemy one) and no cell of
+	// `reserved` (fields other miners were just sent to) within MinerFieldClearCells, and no known
+	// enemy structure within 12. The miner ignoreUid is left out of the mining sites.
+	template <typename Visit>
+	void ForEachMinerOreField(HouseClass* pHouse, const CellStruct& from, int zone, DWORD ignoreUid,
+		const std::vector<CellStruct>& reserved, Visit&& visit)
 	{
-		if (!pHouse || from == CellStruct::Empty)
-			return nullptr;
+		if (!pHouse)
+			return;
 
-		std::vector<CellStruct> miningSites;
+		std::vector<CellStruct> miningSites(reserved);
 		std::vector<CellStruct> enemyStructures;
 
 		for (auto const pBld : BuildingClass::Array)
@@ -2233,17 +2235,9 @@ namespace
 			return std::max(std::abs(a.X - b.X), std::abs(a.Y - b.Y));
 		};
 
-		CellClass* pBest = nullptr;
-		int bestDist = maxDist + 1;
-
 		for (auto const& field : GetOreFields())
 		{
 			if (field.OreCells < MinerFieldMinOreCells)
-				continue;
-
-			const int dist = chebyshev(field.Cell, from);
-
-			if (dist >= bestDist)
 				continue;
 
 			if (zone >= 0 && MapClass::Instance.GetMovementZoneType(field.Cell, MovementZone::Normal, false) != zone)
@@ -2271,12 +2265,47 @@ namespace
 
 			if (auto const pCell = MapClass::Instance.TryGetCellAt(field.Cell))
 			{
+				if (!visit(pCell, from != CellStruct::Empty ? chebyshev(field.Cell, from) : 0))
+					return;
+			}
+		}
+	}
+
+	// The nearest field ForEachMinerOreField allows within maxDist cells of `from`, or nullptr.
+	CellClass* FindMinerOreField(HouseClass* pHouse, const CellStruct& from, int zone, DWORD ignoreUid, int maxDist,
+		const std::vector<CellStruct>& reserved = {})
+	{
+		if (from == CellStruct::Empty)
+			return nullptr;
+
+		CellClass* pBest = nullptr;
+		int bestDist = maxDist + 1;
+
+		ForEachMinerOreField(pHouse, from, zone, ignoreUid, reserved, [&](CellClass* pCell, int dist)
+		{
+			if (dist < bestDist)
+			{
 				bestDist = dist;
 				pBest = pCell;
 			}
-		}
+
+			return true;
+		});
 
 		return pBest;
+	}
+
+	// How many fields ForEachMinerOreField allows on that land, counted up to `limit`.
+	int CountMinerOreFields(HouseClass* pHouse, int zone, int limit)
+	{
+		int count = 0;
+
+		ForEachMinerOreField(pHouse, CellStruct::Empty, zone, 0, {}, [&](CellClass*, int)
+		{
+			return ++count < limit;
+		});
+
+		return count;
 	}
 
 	// Deployed slave miners with no ore left in their slaves' reach. The engine packs one up by
@@ -2300,6 +2329,8 @@ namespace
 		const int reach = RulesClass::Instance ? std::clamp(RulesClass::Instance->SlaveMinerSlaveScan / Unsorted::LeptonsPerCell, 4, 32) : 14;
 		std::unordered_map<DWORD, int> samples;
 		std::unordered_map<DWORD, int> strandedSince;
+		// Fields chosen in this pass: three miners packed up together went for the same field.
+		std::vector<CellStruct> reservedFields;
 		int deployed = 0;
 		int productive = 0;
 		int stranded = 0;
@@ -2349,7 +2380,7 @@ namespace
 				continue;
 			}
 
-			auto const pField = FindMinerOreField(pHouse, bc, BuildingGroundZone(pBld), pBld->UniqueID, MinerFieldMaxCells);
+			auto const pField = FindMinerOreField(pHouse, bc, BuildingGroundZone(pBld), pBld->UniqueID, MinerFieldMaxCells, reservedFields);
 
 			// No field in reach: looked for again after MinerStrandedFrames.
 			if (!pField)
@@ -2364,6 +2395,7 @@ namespace
 			pBld->unknown_bool_4F8 = true;
 			pBld->SetArchiveTarget(pField);
 			pBld->QueueMission(Mission::Selling, false);
+			reservedFields.push_back(pField->MapCoords);
 			macro.MinerRelocations++;
 			strandedSince.erase(pBld->UniqueID);
 		}
@@ -2386,6 +2418,47 @@ namespace
 				macro.MinerRelocations, std::max(0, macro.MinerLogFrame), now);
 			macro.MinerLogFrame = now;
 			macro.MinerRelocations = 0;
+		}
+
+		// Harvest income of refinery harvesters against deployed miners, to weigh one economy against
+		// the other (user: mobile refineries must not leave a house behind).
+		if (macro.IncomeLogFrame < 0 || now < macro.IncomeLogFrame)
+		{
+			macro.IncomeLogFrame = now;
+		}
+		else if (now - macro.IncomeLogFrame >= IncomeLogFrames)
+		{
+			if (macro.HarvesterIncome > 0 || macro.MinerIncome > 0)
+			{
+				int harvesters = 0;
+				int refineries = 0;
+
+				for (auto const pOwnUnit : UnitClass::Array)
+				{
+					if (pOwnUnit && pOwnUnit->Owner == pHouse && pOwnUnit->IsAlive && pOwnUnit->Type && pOwnUnit->Type->Harvester
+						&& !pOwnUnit->Type->DeploysInto)
+					{
+						harvesters++;
+					}
+				}
+
+				for (auto const pOwnBld : pHouse->Buildings)
+				{
+					if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->Type && pOwnBld->Type->Refinery
+						&& !pOwnBld->Type->ResourceGatherer)
+					{
+						refineries++;
+					}
+				}
+
+				Debug::Log("[NeuralAI] House %d harvest income over %d frames: %d from %d harvesters at %d refineries, %d from %d "
+					"deployed miners, frame %d.\n", pHouse->ArrayIndex, now - macro.IncomeLogFrame, macro.HarvesterIncome, harvesters,
+					refineries, macro.MinerIncome, deployed, now);
+			}
+
+			macro.IncomeLogFrame = now;
+			macro.HarvesterIncome = 0;
+			macro.MinerIncome = 0;
 		}
 	}
 
