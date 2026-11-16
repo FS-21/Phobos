@@ -684,10 +684,72 @@ namespace
 	// TEMP diagnostic: a transport the loader left parked to load (Guard or landing, no destination)
 	// that is found with other orders after a part of the AI tick: that part, or the engine between
 	// two ticks, moved it. Logged once per departure from the parking; the loader parks it again.
+	// TEMP trace: the units of the transport operations whose order changed after the operations
+	// gave theirs (at the end of the last tick), checked after every part of the AI tick: the part
+	// named is the one that changed it. What the engine changes between ticks (a move that ends,
+	// a target found) only brings the record up to date. One line per change, 80 per match.
+	void TraceTransportOpUnits(int houseIndex, const char* part)
+	{
+		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
+
+		if (!pHouse)
+			return;
+
+		auto& watch = GetMacroState(pHouse).OpWatch;
+
+		if (watch.empty())
+			return;
+
+		static int opTraceSerial = -1;
+		static int opTraceLines = 0;
+
+		if (opTraceSerial != NeuralMatchSerial)
+		{
+			opTraceSerial = NeuralMatchSerial;
+			opTraceLines = 0;
+		}
+
+		const bool betweenTicks = std::strncmp(part, "the engine", 10) == 0;
+
+		std::erase_if(watch, [&](NeuralOpUnitWatch& entry)
+			{
+				FootClass* const pFoot = entry.Foot;
+
+				if (FootClass::Array.FindItemIndex(pFoot) < 0 || pFoot->UniqueID != entry.UniqueID || !pFoot->IsAlive)
+					return true;
+
+				if (pFoot->CurrentMission == entry.Current && pFoot->MegaMission == entry.Mega && pFoot->Destination == entry.Destination)
+					return false;
+
+				if (betweenTicks)
+				{
+					entry.Current = pFoot->CurrentMission;
+					entry.Mega = pFoot->MegaMission;
+					entry.Destination = pFoot->Destination;
+					return false;
+				}
+
+				if (opTraceLines++ < 80)
+				{
+					auto const pDestCell = abstract_cast<CellClass*>(pFoot->Destination);
+					auto const pDestObject = abstract_cast<ObjectClass*>(pFoot->Destination);
+					Debug::Log("[NeuralAI] House %d transport op unit DIAG frame %d: %s %u changed by %s: mission %d -> %d, mega %d -> %d, "
+						"destination %s (%d,%d).\n", houseIndex, Unsorted::CurrentFrame, pFoot->GetTechnoType()->ID, pFoot->UniqueID, part,
+						static_cast<int>(entry.Current), static_cast<int>(pFoot->CurrentMission), static_cast<int>(entry.Mega),
+						static_cast<int>(pFoot->MegaMission),
+						pDestCell ? "cell" : (pDestObject && pDestObject->GetType() ? pDestObject->GetType()->ID : (pFoot->Destination ? "object" : "none")),
+						pDestCell ? pDestCell->MapCoords.X : -1, pDestCell ? pDestCell->MapCoords.Y : -1);
+				}
+
+				return true;
+			});
+	}
+
 	void TraceParkedFerries(int houseIndex, const char* part)
 	{
 		TraceWatchedMoves(houseIndex, part);
 		TraceWatchedSleepers(houseIndex, part);
+		TraceTransportOpUnits(houseIndex, part);
 
 		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
 

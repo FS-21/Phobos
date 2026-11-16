@@ -545,6 +545,17 @@ namespace
 		std::vector<NeuralOpTransport> Transports;
 	};
 
+	// TEMP trace: a unit of a transport operation as the operation left it at the end of the last
+	// tick; TraceTransportOpUnits names the part of the AI tick that changes its order.
+	struct NeuralOpUnitWatch
+	{
+		DWORD UniqueID { 0 };
+		FootClass* Foot { nullptr };
+		Mission Current { Mission::None };
+		Mission Mega { Mission::None };
+		AbstractClass* Destination { nullptr };
+	};
+
 	struct NeuralHouseMacroState
 	{
 		CellStruct PendingClearanceCell { CellStruct::Empty };
@@ -1043,6 +1054,7 @@ namespace
 		std::array<int, 16> OpWaitingSizeBySize {};
 		int OpWaitingFrame { -1 };
 		int TransportOpLogFrame { -1 };
+		std::vector<NeuralOpUnitWatch> OpWatch;
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1408,6 +1420,7 @@ namespace
 			this->OpWaitingSizeBySize.fill(0);
 			this->OpWaitingFrame = -1;
 			this->TransportOpLogFrame = -1;
+			this->OpWatch.clear();
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
