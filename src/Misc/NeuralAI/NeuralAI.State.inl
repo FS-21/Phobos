@@ -2107,6 +2107,8 @@ namespace
 	constexpr int TankMassBankWindows = 3;
 	constexpr int TankMassBankWindowsThreat = 2;
 	constexpr int TankMassBankFactoryLead = 2;
+	// This many idle fighting vehicles able to join a wave go out whatever the strength gate says.
+	constexpr int TankMassOverflowVehicles = 24;
 	// Each step doubles the count (user): 10, 20, then the most.
 	constexpr int TankMassWaveCap = 32;
 	constexpr int WaveLessonPercent = 200;
