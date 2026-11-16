@@ -3626,6 +3626,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	for (auto const pOwnedU : UnitClass::Array)
 	{
+		// An MCV aboard one of our transports is still ours and still undeployed: out of sight in the
+		// hold it let the next one be built, five MCVs for one yard (match #10267).
+		if (pOwnedU && pOwnedU->Owner == pHouse && pOwnedU->InLimbo && pOwnedU->IsAlive && pOwnedU->Type
+			&& pOwnedU->Transporter && pOwnedU->Transporter->Owner == pHouse
+			&& pOwnedU->Type->DeploysInto && pOwnedU->Type->DeploysInto->ConstructionYard)
+		{
+			ownsUndeployedMCV = true;
+		}
+
 		if (pOwnedU && pOwnedU->Owner == pHouse && !pOwnedU->InLimbo && pOwnedU->IsAlive && pOwnedU->Type)
 		{
 			auto const pOwnedType = pOwnedU->Type;

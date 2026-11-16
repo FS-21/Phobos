@@ -1,6 +1,11 @@
 // NeuralAI.Features.inl: Fog-filtered feature extraction.
 // Part of NeuralAI.cpp (included in order; one translation unit).
 
+namespace
+{
+	bool CanHouseReachGroundByTransport(HouseClass* pHouse, const CellStruct& from, const CellStruct& to);
+}
+
 void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t, InputVectorSize>& features)
 {
 	const NeuralSlowStep slowStep { "ExtractFogFilteredFeatures" };
@@ -702,6 +707,30 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 			pOwnB->Type->ConstructionYard });
 	}
 
+	// Ground of another zone counts as expansion ground only when a transport we own or can build
+	// lands something there from our base (a hovercraft does not climb a plateau): on a land map with
+	// a cut-off plateau its ore made every expansion MCV wait for a ferry that never got there
+	// (match #10267). One answer per zone; zones with a hub of ours are reached already.
+	std::vector<std::pair<int, bool>> scanZoneReach;
+
+	auto const isScanZoneReached = [&](int zone, const CellStruct& cell) -> bool
+	{
+		if (!IsGroundZone(zone) || zone == homeGroundZone || baseCenter == CellStruct::Empty)
+			return true;
+
+		for (auto const& [knownZone, reached] : scanZoneReach)
+		{
+			if (knownZone == zone)
+				return reached;
+		}
+
+		const bool reached = std::any_of(ownScanHubs.begin(), ownScanHubs.end(), [zone](const ScanHub& hub) { return hub.Zone == zone; })
+			|| CanHouseReachGroundByTransport(pHouse, baseCenter, cell);
+		scanZoneReach.emplace_back(zone, reached);
+
+		return reached;
+	};
+
 	if (baseCenter != CellStruct::Empty)
 	{
 		for (int dy = -144; dy <= 144; dy += (std::abs(dy) <= 48 ? 3 : (std::abs(dy) <= 96 ? 6 : 8)))
@@ -731,6 +760,10 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 					continue;
 
 				const int cellZone = MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false);
+
+				if (!isScanZoneReached(cellZone, tc))
+					continue;
+
 				int minSameZoneYardDist = 9999;
 				bool hasConYardInZone = false;
 

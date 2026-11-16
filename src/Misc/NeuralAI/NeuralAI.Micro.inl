@@ -1176,6 +1176,30 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// A kept answer skips the scan (no cell is within a negative reach).
 		const int islandScanReach = islandScanKept ? -1 : 216;
 
+		// One reach answer per zone (CanHouseReachGroundByTransport), with a TEMP log line per zone
+		// left out so the plateaus it skips show up in the match logs.
+		std::vector<std::pair<int, bool>> islandZoneReach;
+
+		auto const isIslandZoneReached = [&](int zone, const CellStruct& cell) -> bool
+		{
+			for (auto const& [knownZone, reached] : islandZoneReach)
+			{
+				if (knownZone == zone)
+					return reached;
+			}
+
+			const bool reached = CanHouseReachGroundByTransport(pHouse, homeCoords, cell);
+			islandZoneReach.emplace_back(zone, reached);
+
+			if (!reached && IsAITickWindow(4500, 0))
+			{
+				Debug::Log("[NeuralAI] House %d island scan: zone %d at (%d,%d) left out, no transport of ours lands there from (%d,%d), frame %d.\n",
+					pHouse->ArrayIndex, zone, cell.X, cell.Y, homeCoords.X, homeCoords.Y, Unsorted::CurrentFrame);
+			}
+
+			return reached;
+		};
+
 		int bestResScore = -999999;
 		CellClass* pFallbackIslandLandCell = nullptr;
 		int fallbackIslandLandZone = -1;
@@ -1194,6 +1218,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// A goal on no ground is no island: the transports loaded for one found no beach there
 				// and kept their cargo for the rest of the match.
 				if (!IsGroundZone(cz))
+					continue;
+
+				// Ground no transport of ours lands on from home is no island to colonize: on a land map
+				// a plateau's ore sent every expansion MCV into a hovercraft that never got there.
+				if (cz != homeGroundZone && !isIslandZoneReached(cz, cand))
 					continue;
 
 				const int tibVal = pCell->GetContainedTiberiumValue();
@@ -3880,8 +3909,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& mcvZone != resourceIslandZone;
 			// It crosses only for a field across the water: with no such goal an MCV that boarded a
 			// transport stayed inside it for good (two hovercraft held four MCVs for 25000 frames on a
-			// land map, match #8875, while their house had 100000 credits and one yard).
-			const bool mustColonizeOtherIsland = (canFerryThisMCV && mcvZone >= 0
+			// land map, match #8875, while their house had 100000 credits and one yard). And only with a
+			// transport that makes that very crossing from where the MCV stands: hovercraft took four
+			// MCVs for a plateau they could not climb (match #10267, one landmass).
+			const bool canFerryThisMcvToIsland = pIslandResourceGoalCell != nullptr
+				&& CanHouseFerryTypeAcrossWater(pHouse, pType, &mcvCell, &pIslandResourceGoalCell->MapCoords);
+			const bool mustColonizeOtherIsland = (canFerryThisMcvToIsland && mcvZone >= 0
 				&& (!hasFreeLandFieldInMcvZone || islandExpansionDue || mcvIslandHasNoRoom)
 				&& (currentIslandAlreadyDeveloped || alreadyHasConYardOnThisIsland || mcvIslandHasNoRoom) && !isForeignTechMCV
 				&& pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone);
@@ -3981,7 +4014,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 							if (static_cast<int>(pType->TechnoTypeClass::Size) > static_cast<int>(pT->Type->SizeLimit)
 								|| (pT->Passengers.GetTotalSize() + static_cast<int>(pType->TechnoTypeClass::Size))
-									> pT->Type->Passengers)
+									> pT->Type->Passengers
+								|| !CanTransportTypeLink(pT->Type, mcvCell, pIslandResourceGoalCell->MapCoords))
 							{
 								continue;
 							}
@@ -4337,10 +4371,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					IssueMoveOrder(pUnit, pExpansionDest, 3.0);
 					NoteTeamExpansionSite(pHouse, pExpansionDest->MapCoords);
 				}
-				else if (!enemyNearMCV && !alreadyHasConYardOnThisIsland && !twinMcvNearby)
+				else if (!enemyNearMCV && !twinMcvNearby)
 				{
+					// No field to take and no crossing to make (mustColonizeOtherIsland is false): the MCV
+					// unfolds here, a yard more for the building queue, even with a yard on this landmass
+					// already. Kept packed it stood idle in its base for the rest of the match (#10267).
 					if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
 					{
+						// TEMP diagnostic: an MCV with nowhere to go unfolds at home.
+						Debug::Log("[NeuralAI] House %d MCV %s %u unfolds at (%d,%d): no free field and no crossing, %d yards on its zone %d, frame %d.\n",
+							pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, mcvCell.X, mcvCell.Y, conYardsInMcvZone, mcvZone, Unsorted::CurrentFrame);
 						OrderDeployerUnpack(pUnit);
 					}
 					else
@@ -12129,8 +12169,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				pTrip->LastHealth = pTrans->Health;
 
+				// Off its shore means on water or on other ground: a hovercraft that drove over a cell of
+				// no ground (zone 1) inside its own base counted as departed and was never set down again.
 				if (!pTrip->Departed && pTrip->LoadZone >= 0
-					&& (tripOnWater || (transZone >= 0 && transZone != pTrip->LoadZone)))
+					&& (tripOnWater || (IsGroundZone(transZone) && transZone != pTrip->LoadZone)))
 				{
 					pTrip->Departed = true;
 					CountDecision(NeuralDecision::FerryDeparted);
@@ -12152,6 +12194,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return IsGroundZone(zone) && zone != ferryOriginZone;
 		};
 
+		// A goal is one only on ground this very transport lands on from where it is
+		// (CanTransportTypeLink): hovercraft "ready" for a plateau they could not climb kept their
+		// MCVs in the hold for the rest of the match (#10267). With no goal it reaches, the parked
+		// loader takes nobody and the no-goal set-down frees the cargo.
+		auto isReachableFerryGoal = [&](const CellClass* pGoal, int zone) -> bool
+		{
+			return pGoal && isValidFerryGoalZone(zone) && CanTransportTypeLink(pTrans->Type, transCoords, pGoal->MapCoords);
+		};
+
 		bool carryingEngineer = false;
 		bool carryingHarvester = false;
 		CellClass* pCustomPassengerGoal = nullptr;
@@ -12171,7 +12222,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						// pull the transport back or make it unload where the cargo boarded.
 						ClearPassengerIslandGoal(pPass->UniqueID);
 					}
-					else if (pgz >= 0)
+					else if (pgz >= 0 && CanTransportTypeLink(pTrans->Type, transCoords, passGoalCoords))
 					{
 						if (CellClass* pSafePassLanding = FindSafeIslandLandingCell(pHouse, passGoalCoords, pgz, false))
 						{
@@ -12230,9 +12281,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// A goal on the origin island is no destination at all: fall back to the
-		// next objective located on another landmass, or to none.
-		if (pActiveIslandGoal && !isValidFerryGoalZone(activeIslandZone))
+		// A goal on the origin island, or on ground this transport does not reach, is no destination
+		// at all: fall back to the next objective it lands on, or to none.
+		if (pActiveIslandGoal && !isReachableFerryGoal(pActiveIslandGoal, activeIslandZone))
 		{
 			pActiveIslandGoal = nullptr;
 			activeIslandZone = -1;
@@ -12246,7 +12297,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			for (auto const& [pGoalCell, goalZone] : fallbackGoals)
 			{
-				if (pGoalCell && isValidFerryGoalZone(goalZone))
+				if (isReachableFerryGoal(pGoalCell, goalZone))
 				{
 					pActiveIslandGoal = pGoalCell;
 					activeIslandZone = goalZone;
@@ -12357,7 +12408,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pKeptGoal = MapClass::Instance.TryGetCellAt(pTrip->CommittedGoal);
 			}
 
-			if (pKeptGoal && isValidFerryGoalZone(keptZone))
+			if (isReachableFerryGoal(pKeptGoal, keptZone))
 			{
 				if (activeIslandZone != keptZone)
 				{
@@ -12381,7 +12432,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				activeIslandZone = keptZone;
 				pTrip->CommittedGoal = pKeptGoal->MapCoords;
 			}
-			else if (pActiveIslandGoal && isValidFerryGoalZone(activeIslandZone))
+			else if (isReachableFerryGoal(pActiveIslandGoal, activeIslandZone))
 			{
 				if (keptZone >= 0 && keptZone != activeIslandZone)
 				{
