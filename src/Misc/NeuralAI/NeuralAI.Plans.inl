@@ -38,6 +38,35 @@ namespace
 		return range;
 	}
 
+	// Dead zone of a type in leptons: the smallest minimum range among its weapons that hit the
+	// ground, 0 when one of them fires point-blank (or it has none).
+	int GroundDeadZoneOf(TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return 0;
+
+		int deadZone = INT_MAX;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWS = pType->GetWeapon(i);
+
+			if (pWS && LandTargetingAllows(pType, i) && WeaponHitsGround(pWS->WeaponType))
+				deadZone = std::min(deadZone, pWS->WeaponType->MinimumRange);
+		}
+
+		return deadZone == INT_MAX ? 0 : deadZone;
+	}
+
+	// A long-range gun tower with a dead zone (a Grand Cannon): a defense that reaches
+	// ArtilleryRangeCells or more on the ground and cannot fire at what stands within a cell of it.
+	// It out-reaches most artillery and is helpless next to an enemy, so it is no first line.
+	bool IsDeadZoneTower(BuildingTypeClass* pType)
+	{
+		return pType && pType->IsBaseDefense && GroundRangeOf(pType) >= ArtilleryRangeCells * Unsorted::LeptonsPerCell
+			&& GroundDeadZoneOf(pType) >= Unsorted::LeptonsPerCell;
+	}
+
 	// One of the ground weapons of this type does damage to that building's armor: a dog or a gun
 	// that only hits infantry makes no house answer for its building (Bait Ambush, Feint).
 	bool HurtsBuilding(TechnoTypeClass* pType, BuildingClass* pBld)
