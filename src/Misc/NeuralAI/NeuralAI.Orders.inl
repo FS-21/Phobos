@@ -123,7 +123,7 @@ namespace
 	void OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget)
 	{
 		if (!pFoot || !pEnterTarget || pFoot->InLimbo || !pFoot->IsAlive || pEnterTarget->InLimbo
-			|| !pEnterTarget->IsAlive)
+			|| !pEnterTarget->IsAlive || IsHeldByTransportOp(pFoot))
 		{
 			return;
 		}
@@ -1182,8 +1182,9 @@ namespace
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
 			return;
 
-		// A transport parked to load stays where its passengers go.
-		if (pFoot->Owner && IsFerryParkedToLoad(pFoot->Owner, pFoot->UniqueID))
+		// A transport parked to load stays where its passengers go; a unit of a transport operation
+		// takes its orders from the operation alone.
+		if ((pFoot->Owner && IsFerryParkedToLoad(pFoot->Owner, pFoot->UniqueID)) || IsHeldByTransportOp(pFoot))
 			return;
 
 		AbstractClass* pResolvedDest = pDest;

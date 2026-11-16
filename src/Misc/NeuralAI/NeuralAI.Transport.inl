@@ -1251,7 +1251,8 @@ namespace
 
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5)
 	{
-		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
+		// A unit of a transport operation takes its orders from the operation alone.
+		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive || IsHeldByTransportOp(pFoot))
 			return false;
 
 		// A unit already heading to a cell another unit of ours holds or heads to takes its own free
