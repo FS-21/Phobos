@@ -1167,7 +1167,7 @@ namespace
 		SiegeBattery,
 		AirStrike,
 		Blackout,
-		Feint,
+		Reprisal,
 		TimingRush,
 		HeavyAirPush,
 		IslandHold,
@@ -1182,7 +1182,7 @@ namespace
 		KeyPointHold,
 		Survival,
 		PreemptiveStrike,
-		BaitAmbush,
+		ClearOurGround,
 		AllyJointAttack,
 		ForwardRepair,
 		NavalStrikeGroup,
@@ -1204,23 +1204,30 @@ namespace
 		AllyBackup,
 		AllyForwardOutpost,
 		BaseThreatIntercept,
+		Feint,
+		BaitAmbush,
 		Count
 	};
 
-	constexpr const char* NeuralPlanNames[] = { "ecoRaid", "siegeBattery", "airStrike", "blackout", "feint", "timingRush",
+	constexpr const char* NeuralPlanNames[] = { "ecoRaid", "siegeBattery", "airStrike", "blackout", "reprisal", "timingRush",
 		"heavyAirPush", "islandHold", "airborneFront", "expansionDenial", "baseTrade", "holdUnderTowers", "swRace", "pincer",
-		"harvesterAmbush", "pickets", "keyPointHold", "survival", "preemptiveStrike", "baitAmbush", "allyJointAttack",
+		"harvesterAmbush", "pickets", "keyPointHold", "survival", "preemptiveStrike", "clearGround", "allyJointAttack",
 		"forwardRepair", "navalStrike", "engineerAssault", "sabotage", "huntKeyUnits", "rotatingRaids", "airCorridor",
 		"silentInfiltration", "artilleryEcoSiege", "rollingSiege", "delayingAction", "threeFront", "factoryDecapitation",
-		"cutReinforcements", "techTreeCut", "comboBlackoutPush", "comboWatchStrike", "allyBackup", "allyForwardOutpost", "baseThreatIntercept" };
+		"cutReinforcements", "techTreeCut", "comboBlackoutPush", "comboWatchStrike", "allyBackup", "allyForwardOutpost", "baseThreatIntercept",
+		"feint", "baitAmbush" };
 
 	// Trained preference of each plan: free reserve output slots 89.. (see the trainer's
 	// OUTPUT_SLOT_NAMES), learned by ES like any other slot. The ally site plans share the slot of
 	// the plan closest to them: Ally Backup with Survival (106), Ally Forward Outpost with Ally Joint
 	// Attack (109). Base Threat Intercept shares Preemptive Strike's slot (107): both hit an enemy
-	// force with a stronger idle group before it reaches us.
+	// force with a stronger idle group before it reaches us. Feint and Bait Ambush, which only
+	// start against a human, share those of Pincer (102) and Hold Under Towers (100). Their own
+	// slots went to the missions of the tank mass, which have no plan instance: Reprisal (93) and
+	// Clear Our Ground (108) weigh the target of its main wave (TankMassMissionBonus) and count
+	// the waves sent for them as their starts, with the wave verdict as their result.
 	constexpr int NeuralPlanSlots[] = { 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
-		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 106, 109, 107 };
+		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 106, 109, 107, 102, 100 };
 
 	static_assert(std::size(NeuralPlanNames) == static_cast<size_t>(NeuralPlanId::Count));
 	static_assert(std::size(NeuralPlanSlots) == static_cast<size_t>(NeuralPlanId::Count));
@@ -1265,6 +1272,10 @@ namespace
 		bool Loaded { false };
 		int Expert { -1 };
 		int Archetype { -1 };
+		// Half focus (PHOBOS_FOCUS_ARCHETYPE_HALF): only the houses of one policy slot take the
+		// focused archetype and the others choose theirs, so it is measured against the rest.
+		bool ArchetypeHalf { false };
+		int ArchetypeSlot { 0 };
 		bool AnyPlan { false };
 		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> Plans {};
 	};
@@ -1314,6 +1325,9 @@ namespace
 				focus.Archetype = archetype;
 		}
 
+		if (GetEnvironmentVariableA("PHOBOS_FOCUS_ARCHETYPE_HALF", text, sizeof(text)) > 0)
+			focus.ArchetypeHalf = text[0] == '1' || text[0] == 't';
+
 		std::string plans;
 
 		if (GetEnvironmentVariableA("PHOBOS_FOCUS_PLANS", text, sizeof(text)) > 0)
@@ -1344,19 +1358,37 @@ namespace
 
 		if (focus.Expert >= 0 || focus.Archetype >= 0 || focus.AnyPlan)
 		{
-			Debug::Log("[NeuralAI] Training focus: expert %d, archetype %d, plans [%s].\n", focus.Expert, focus.Archetype,
-				focus.AnyPlan ? plans.c_str() : "");
+			Debug::Log("[NeuralAI] Training focus: expert %d, archetype %d, plans [%s]%s.\n", focus.Expert, focus.Archetype,
+				focus.AnyPlan ? plans.c_str() : "", focus.ArchetypeHalf ? ", archetype for one policy slot only" : "");
 		}
 
 		return focus;
 	}
 
-	// The archetype a house takes: the focused one in a focus match, else the chosen one.
-	int FocusedArchetype(int chosen)
+	// Half focus: the policy slot whose houses take the focused archetype this match, drawn from the
+	// scenario's random numbers (the same draw on every client of the match).
+	void DrawFocusArchetypeSlot()
 	{
-		const int focused = TrainingFocus().Archetype;
+		TrainingFocus();
+		auto& focus = TrainingFocusState;
 
-		return focused >= 0 ? focused : chosen;
+		if (focus.Archetype < 0 || !focus.ArchetypeHalf)
+			return;
+
+		focus.ArchetypeSlot = ScenarioClass::Instance->Random.RandomRanged(0, 1);
+		Debug::Log("[NeuralAI] Training focus: archetype %d goes to the houses of policy slot %d.\n", focus.Archetype, focus.ArchetypeSlot);
+	}
+
+	// The archetype a house takes: the focused one in a focus match (in a half focus match only
+	// for the houses of the drawn policy slot), else the chosen one.
+	int FocusedArchetype(int chosen, int policySlot)
+	{
+		auto const& focus = TrainingFocus();
+
+		if (focus.Archetype < 0 || (focus.ArchetypeHalf && policySlot != focus.ArchetypeSlot))
+			return chosen;
+
+		return focus.Archetype;
 	}
 
 	void CountDecision(NeuralDecision decision, int houseIndex = -1)

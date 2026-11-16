@@ -428,7 +428,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 					}
 				}
 
-				pExt->NeuralAI_Archetype = FocusedArchetype(bestAltArch);
+				pExt->NeuralAI_Archetype = FocusedArchetype(bestAltArch, pExt->NeuralAI_PolicySlot);
 			}
 		}
 	}
@@ -460,7 +460,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			}
 		}
 
-		pExt->NeuralAI_Archetype = FocusedArchetype(bestPivotArch);
+		pExt->NeuralAI_Archetype = FocusedArchetype(bestPivotArch, pExt->NeuralAI_PolicySlot);
 	}
 
 	// Controlled Deterministic Exploration: Inject a small synchronized variation
@@ -511,6 +511,10 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 						: ((pHouse->CountResourceDestinations < 3 && pHouse->Available_Money() > 2200) ? 650
 																										: -150))));
 
+	// The tank mass lives on its economy: its refineries come without waiting for a bank.
+	if (arch == TankMassArchetype && pHouse->CountResourceDestinations >= 1 && pHouse->CountResourceDestinations < TankMassRefineries)
+		outScores[1] = ClampInt16(outScores[1] + TankMassRefineryPrior);
+
 	// Base crawl reached a free ore field (a building anchor within 12 cells of it, seen by the
 	// placement scan in the last 1800 frames): a refinery there claims it (AdvAI's
 	// ShouldBuildRefinery after a crawl step lands next to Tiberium).
@@ -530,6 +534,14 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		+ ((pHouse->NumWarFactories == 0)
 				? 1950
 				: ((pHouse->Available_Money() > 3200 && pHouse->NumWarFactories < 2) ? 850 : -100)));
+
+	// The tank mass builds its war factories ahead of the bank (TankMassWarFactories). The building
+	// pick takes 620 off per factory owned: the prior pays that back.
+	if (arch == TankMassArchetype && pHouse->NumWarFactories >= 1 && pHouse->NumWarFactories < TankMassWarFactories
+		&& pHouse->CountResourceDestinations >= TankMassRefineries - 2 + pHouse->NumWarFactories)
+	{
+		outScores[3] = ClampInt16(outScores[3] + TankMassFactoryPrior + 620 * pHouse->NumWarFactories);
+	}
 
 	outScores[4] = ClampInt16(outScores[4] + ((pHouse->NumWarFactories > 0) ? ((arch == 4) ? 1450 : 1150) : 100));
 
@@ -698,6 +710,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	}
 
 	outScores[24] = ClampInt16(outScores[24] + 800 + ((arch == 3 || arch == 4) ? 320 : 0)
+		+ ((arch == TankMassArchetype) ? TankMassTankPrior : 0)
 		- std::clamp(static_cast<int>(outScores[39]) / 2, -450, 350));
 
 	outScores[25] = ClampInt16(outScores[25] + ((features[64] > 20) ? 700 : 300));
@@ -709,7 +722,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// Armor columns -> anti-tank infantry and main battle tanks.
 	outScores[17] = ClampInt16(outScores[17] + counterBonus(foeVehicles, 700));
 	outScores[24] = ClampInt16(outScores[24] + counterBonus(foeVehicles, 500));
-	// Long-range siege -> fast raiders and air strikes; static defenses only feed it.
+	// Long-range siege -> main battle tanks that run it down, fast raiders and air strikes; static
+	// defenses only feed it.
+	outScores[24] = ClampInt16(outScores[24] + counterBonus(foeArtillery, TankCounterArtilleryBonus));
 	outScores[32] = ClampInt16(outScores[32] + counterBonus(foeArtillery, 650));
 	outScores[14] = ClampInt16(outScores[14] - counterBonus(foeArtillery, 450));
 	// Navy -> naval commitment, warships and shipyard.
@@ -1044,7 +1059,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		outScores[83] = ClampInt16(outScores[83] + 340);
 	}
 
-	// Slots 89..126 are the strategic plan preferences (NeuralPlanSlots, learned by ES only);
-	// slot 127 is a FREE RESERVE SLOT kept at 0 until assigned
+	// Slots 89..126 are the strategic plan preferences (NeuralPlanSlots, learned by ES only) and
+	// slot 127 is the hysteresis of the expert selector: no output is free. The ones to take for a
+	// new use are 93 (Feint) and 108 (Bait Ambush): those plans never start in training matches,
+	// so their outputs learn nothing. 97 stays with Airborne Front, shelved for a redesign.
 }
 

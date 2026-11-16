@@ -233,6 +233,50 @@ namespace
 		return cache;
 	}
 
+	// Enemy air presence a wave must expect: aircraft of anyone seen lately (the air threat
+	// memory), or a known airfield of the house it goes for (of any enemy house with owner -1).
+	bool EnemyAirPresenceKnown(HouseClass* pHouse, int owner)
+	{
+		if (GetMacroState(pHouse).AirThreatValue > 0)
+			return true;
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			if (info.Building->Type->Factory == AbstractType::AircraftType
+				&& (owner < 0 || info.Building->Owner->ArrayIndex == owner))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	// Whether the house can build now something for the ground army that shoots at aircraft: a
+	// vehicle with a war factory of ours, or a soldier with a barracks.
+	bool CanBuildAntiAirEscort(HouseClass* pHouse)
+	{
+		if (pHouse->NumWarFactories > 0)
+		{
+			for (auto const pType : UnitTypeClass::Array)
+			{
+				if (pType && !pType->Naval && ShootsAtAircraft(pType) && CanBuildUnderHumanRules(pHouse, pType))
+					return true;
+			}
+		}
+
+		if (pHouse->NumBarracks > 0)
+		{
+			for (auto const pType : InfantryTypeClass::Array)
+			{
+				if (pType && ShootsAtAircraft(pType) && CanBuildUnderHumanRules(pHouse, pType))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
 	void InvalidateKnownEnemyBuildings(HouseClass* pHouse)
 	{
 		KnownEnemyBuildingCaches[std::clamp(pHouse ? pHouse->ArrayIndex : 0, 0, 31)].Frame = -1;
@@ -2079,8 +2123,11 @@ namespace
 			// Main assaults also weigh our army advantage (see MainAssaultAdvantageUtility), and an
 			// offensive bank pushes harassment or assaults (OffensiveBankPlanUtility).
 			const int advantage = contextUtility > 0 ? MainAssaultAdvantageUtility(houseIdx, id) + OffensiveBankPlanUtility(pHouse, id) : 0;
+			// The plan priorities of this house's archetype (ArchetypePlanOffset).
+			const int archetypeOffset = contextUtility > 0 ? ArchetypePlanOffset(HouseExt::Fetch(pHouse)->NeuralAI_Archetype, id) : 0;
 
-			bool open = SlotGate(static_cast<int>(scores[slot]) + contextUtility + (contextUtility > 0 ? boost : 0) + advantage, 300, slot);
+			bool open = SlotGate(static_cast<int>(scores[slot]) + contextUtility + (contextUtility > 0 ? boost : 0) + advantage
+				+ archetypeOffset, 300, slot);
 
 			// Training focus: the plans the trainer asked to watch start whenever they have a target
 			// and a group; the others wait, except the ones that defend the base, so the watched
@@ -3735,9 +3782,12 @@ namespace
 					double GoalDistance;
 					bool OwnGoal;
 					const char* Reason;
+					// What the threats are sorted by: the distance to the goal, less for the ones met first.
+					double Rank;
 				};
 
 				std::vector<BaseThreat> threats;
+				const bool tankMass = HouseExt::Fetch(pHouse)->NeuralAI_Archetype == TankMassArchetype;
 
 				// Visible enemy ground units with a target, destination or course into a protected building.
 				for (auto const pTech : TechnoClass::Array)
@@ -3844,9 +3894,24 @@ namespace
 						}
 					}
 
+					// The tank mass keeps its area of influence clear: an armed enemy unit standing within
+					// TankMassInfluenceCells of a protected building is met whatever its orders (a gun
+					// that outranges our towers, a unit camping on our ore).
+					if (goal == CellStruct::Empty && armed && tankMass && sites[here].first.DistanceFrom(cell) <= TankMassInfluenceCells)
+					{
+						goal = sites[here].first;
+						ownGoal = sites[here].second;
+						reason = "area";
+					}
+
 					// Far from the building it is after, it is not a base threat yet (it may never come).
+					// The mass goes for artillery first: a gun ranks as half as far from its goal as it is.
 					if (goal != CellStruct::Empty && cell.DistanceFrom(goal) <= 35.0)
-						threats.push_back({ pFoot, cell, goal, value, cell.DistanceFrom(goal), ownGoal, reason });
+					{
+						const double goalDistance = cell.DistanceFrom(goal);
+						const bool gunFirst = tankMass && GroundRangeOf(pType) >= ArtilleryRangeCells * Unsorted::LeptonsPerCell;
+						threats.push_back({ pFoot, cell, goal, value, goalDistance, ownGoal, reason, gunFirst ? goalDistance / 2.0 : goalDistance });
+					}
 				}
 
 				if (!threats.empty())
@@ -3856,7 +3921,7 @@ namespace
 					// The most urgent first: closest to the building it is after, ties by UniqueID.
 					std::sort(threats.begin(), threats.end(), [](const BaseThreat& a, const BaseThreat& b)
 						{
-							return a.GoalDistance != b.GoalDistance ? a.GoalDistance < b.GoalDistance : a.Techno->UniqueID < b.Techno->UniqueID;
+							return a.Rank != b.Rank ? a.Rank < b.Rank : a.Techno->UniqueID < b.Techno->UniqueID;
 						});
 
 					const std::vector<FootClass*> idle = collectIdleGround(false);

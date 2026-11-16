@@ -846,12 +846,14 @@ void NeuralAI::OnScenarioStart()
 
 	NeuralAI::FramesSinceLastFPSCheck = 0;
 
-	static const wchar_t* const ArchetypeNamesW[8] = { L"Balanced Grandmaster", L"SpecOps & Infiltration",
+	static const wchar_t* const ArchetypeNamesW[8] = { L"Tank Mass & Joint Assault", L"SpecOps & Infiltration",
 		L"Tech & Fortress Turtle", L"Blitzkrieg Rush", L"TechBoom & Heavy Armor", L"Harasser & Guerrilla Raider",
 		L"Air & Naval Dominator", L"Siege, Urban & Coalition" };
 
 	int activeAIHouses = 0;
 	HouseClass* pFirstAI = nullptr;
+
+	DrawFocusArchetypeSlot();
 
 	for (auto const pHouse : HouseClass::Array)
 	{
@@ -978,7 +980,7 @@ void NeuralAI::OnScenarioStart()
 			}
 		}
 
-		pExt->NeuralAI_Archetype = FocusedArchetype(bestArch);
+		pExt->NeuralAI_Archetype = FocusedArchetype(bestArch, pExt->NeuralAI_PolicySlot);
 
 		std::array<int, 5> openingTrained {};
 

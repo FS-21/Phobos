@@ -1102,9 +1102,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// to 8), so the hot zones keep receiving factories after the home base has its share.
 		const int frontFactoryRoom = std::min(8, static_cast<int>(bankMacro.OffensiveStones.size()) / 2);
 
-		const int maxWarFactories = (hasTechCenter || money >= 2400)
+		// The tank mass may build its war factories ahead of the bank: the second with one refinery
+		// less than TankMassRefineries, each one after it with a refinery more.
+		const int tankMassWarFactories = pExt->NeuralAI_Archetype == TankMassArchetype
+			? std::clamp(ownedRefineries - TankMassRefineries + 3, 1, TankMassWarFactories)
+			: 0;
+
+		const int maxWarFactories = std::max(tankMassWarFactories, (hasTechCenter || money >= 2400)
 			? std::clamp(std::max(ecoWarFactoryCap, maxEnemyWarFactories + 1), 2, 7) + bankSteps + frontFactoryRoom
-			: std::clamp(ecoWarFactoryCap, 1, 3);
+			: std::clamp(ecoWarFactoryCap, 1, 3));
 
 		const int ecoBarracksCap = (ownedRefineries >= 4) ? 2 : 1;
 
@@ -3526,6 +3532,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
 	// (the rest of ownedGroundCombatUnits is their front line).
 	int ownedArtilleryVehicles = 0;
+	// Armed ground vehicles that shoot at aircraft (ShootsAtAircraft): the escort of the tank mass.
+	int ownedAntiAirVehicles = 0;
 	int ownedLandStrikeTransports = 0;
 	int idleLandStrikeTransports = 0;
 	// Unit carryalls (transport helicopters with Carryall=yes): owned, and empty ones doing nothing.
@@ -3595,6 +3603,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 					if (pOwnedWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell)
 						ownedArtilleryVehicles++;
+
+					if (ShootsAtAircraft(pOwnedType))
+						ownedAntiAirVehicles++;
 				}
 			}
 
@@ -3709,7 +3720,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
-	const int artilleryAllowance = ArtilleryFreeVehicles + ownedFrontLineVehicles / ArtilleryFrontLinePerGun;
+	// The tank mass builds its front line first: no free gun, and one per TankMassFrontLinePerGun.
+	const bool tankMass = pExt->NeuralAI_Archetype == TankMassArchetype;
+	const int artilleryAllowance = tankMass
+		? ownedFrontLineVehicles / TankMassFrontLinePerGun
+		: ArtilleryFreeVehicles + ownedFrontLineVehicles / ArtilleryFrontLinePerGun;
+	// The anti-air escort the tank mass wants with its front line (TankMassVehiclesPerEscort).
+	const int wantedAntiAirEscorts = (tankMass && ownedFrontLineVehicles >= TankMassEscortFromVehicles)
+		? std::max(1, ownedFrontLineVehicles / TankMassVehiclesPerEscort)
+		: 0;
 
 	// Aircraft passenger transports (not carryalls) shuttle like amphibious transports, so
 	// they count toward the owned ferry capacity: no extra ship is built for the same demand.
@@ -4992,6 +5011,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (isAA)
 			{
 				score += scores[26];
+
+				// The escort of the tank mass comes before any aircraft shows up.
+				if (ownedAntiAirVehicles < wantedAntiAirEscorts)
+					score += TankMassEscortBonus;
 			}
 			else if (isArtillery)
 			{
@@ -5004,6 +5027,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else
 			{
 				score += scores[24];
+
+				// A mass is many tanks of one type: the tank mass keeps only a share of the type penalty.
+				if (tankMass)
+					score += std::min(1200, ownedUnitWithConv * 55) * (100 - TankMassTypePenaltyPercent) / 100;
 			}
 
 			if (features[77] > 0 && pUnit->ImmuneToPsionics && !isEconomyUnit && !isMCV)
@@ -5912,6 +5939,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			govMacro.BankIncomeRate, govMacro.BankSpendCapacity, govMacro.BankSpendNeeded, govMacro.BankSurplus,
 			govMacro.BankWantedFactories[0], govMacro.BankWantedFactories[1], govMacro.BankWantedFactories[2],
 			govMacro.BankWantedFactories[3], govMacro.BankWantedYards);
+
+		// Army mix: the front line vehicles against the guns they allow (artilleryAllowance), the
+		// vehicles that shoot at aircraft against the escort the tank mass wants, the refineries,
+		// and for the tank mass the unit count its next wave waits for with the waves in a row
+		// that took no building.
+		Debug::Log("[NeuralAI] Mix | House #%d | Arch=%d | front=%d guns=%d allowed=%d aa=%d wanted=%d | refineries=%d | wave=%d "
+				"lesson=%d\n",
+			pHouse->ArrayIndex, pExt->NeuralAI_Archetype, ownedFrontLineVehicles, ownedArtilleryVehicles, artilleryAllowance,
+			ownedAntiAirVehicles, wantedAntiAirEscorts, pHouse->CountResourceDestinations, tankMass ? TankMassWaveUnits(pHouse) : 0,
+			govMacro.WaveLessonSteps);
 
 		// TEMP diagnostic, stalled production (match #7132: Yuri with 230000-290000 credits spent
 		// almost nothing for 40 minutes, 17 units, never finished the last enemy): with 20000+ credits
