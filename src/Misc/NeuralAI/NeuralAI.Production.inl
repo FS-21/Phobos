@@ -280,6 +280,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	UpdateIdleHarvesters(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "idle harvesters");
 
+	// Deployed slave miners with no ore in reach pack up for a field that has some.
+	UpdateStrandedSlaveMiners(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "stranded slave miners");
+
 	// Forward crawl stones placed / lost (trainer credit for the offensive crawl).
 	UpdateOffensiveStones(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "offensive stones");
@@ -3636,6 +3640,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedEconomyUnits = 0;
 	int ownedCashProduces = 0;
 	int deployedGatherers = 0;
+	int ownedMinerUnits = 0;
+	auto const& minerOreSamples = GetMacroState(pHouse).MinerOreSamples;
+
 	for (auto const pOwnBldType : pHouse->Buildings)
 	{
 		if (!pOwnBldType || pOwnBldType->InLimbo || !pOwnBldType->IsAlive || !pOwnBldType->Type)
@@ -3647,7 +3654,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (pOwnBldType->Type->ResourceGatherer)
 		{
 			deployedGatherers++;
-			ownedEconomyUnits++;
+
+			// A deployed miner with no ore left in its slaves' reach earns nothing and takes no place
+			// of the cap: a new miner goes to a field that has ore (UpdateStrandedSlaveMiners packs
+			// the old one up as well).
+			auto const itSamples = minerOreSamples.find(pOwnBldType->UniqueID);
+
+			if (itSamples == minerOreSamples.end() || itSamples->second >= MinerProductiveOreSamples)
+				ownedEconomyUnits++;
 		}
 		else if (pOwnBldType->Type->Refinery)
 		{
@@ -3668,14 +3682,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			ownedEconomyUnits++;
 		}
+
+		if (pEcoType->DeploysInto && pEcoType->DeploysInto->ResourceGatherer)
+			ownedMinerUnits++;
 	}
 
 	const int ecoBiasMod = std::clamp(static_cast<int>(scores[39]) / 220, -1, 2);
 	// About 2 harvesters per refinery, at most 18; one per refinery with a bank of 50000+ credits
 	// (income is not what limits that house: more harvesters only crowd the refineries).
+	// A house living on deployed miners (each one refinery and harvesters in one, no refinery of the
+	// usual kind) gets the refinery cap of the other houses: 4 at home, 6 or ConYards + 4 with free
+	// ore fields on its land, islands or a second ConYard. A fixed 4 kept a Yuri house at four miners
+	// with 68 free fields on its land (match #10437).
+	const bool minerHouseExpands = pHouse->NumConYards >= 2 || features[21] > 0 || GetMacroState(pHouse).UncolonizedOreFields > 0;
 	const int economyUnitCap = (trueRefineries > 0)
 		? std::clamp((money >= 50000 ? trueRefineries + 1 : 2 * trueRefineries + 1 + ecoBiasMod), 2, 18)
-		: 4;
+		: ((deployedGatherers > 0 || ownedMinerUnits > 0) && minerHouseExpands ? std::max(6, pHouse->NumConYards + 4) : 4);
 
 	// Fewer harvesters than refineries (a refinery nobody feeds): the cheapest buildable harvester
 	// is an economic investment the economy hold saves for (UpdateEconomyCrisis).
@@ -4404,6 +4426,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isEconomyUnit = pUnit->Harvester || pUnit->ResourceGatherer || isDeployableRefineryOrMiner;
 		if (isEconomyUnit && ownedEconomyUnits >= economyUnitCap && !allowExpansionRefineryDeployer
 			&& !hasRefineryZoneWithZeroHarvesters && !hasUnderharvestedIslandWithWarFactory)
+		{
+			continue;
+		}
+
+		// Miners without ore take no place of the cap: a ceiling on every miner of ours keeps a house
+		// whose miners find no field from building them without end.
+		if (isDeployableRefineryOrMiner && pUnit->DeploysInto->ResourceGatherer && !isUnitInProgress
+			&& deployedGatherers + ownedMinerUnits >= 2 * economyUnitCap)
 		{
 			continue;
 		}

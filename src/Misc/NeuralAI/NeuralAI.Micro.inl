@@ -3342,10 +3342,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 
 				const CellStruct uc = pUnit->GetMapCoords();
-				CellClass* pNearestOre = nullptr;
+				// The nearest field with ore to spare that nobody mines yet, else the nearest ore cell: a
+				// miner packed up from a spent field went back to its last ore cells and deployed there again.
+				CellClass* pNearestOre = FindMinerOreField(pHouse, uc, IsGroundZone(unitZoneForEco) ? unitZoneForEco : -1, 0, MinerFieldMaxCells);
+				const bool fieldFound = pNearestOre != nullptr;
 				int nearestOreDist = INT_MAX;
 
-				for (int dy = -48; dy <= 48; dy += 2)
+				for (int dy = -48; dy <= 48 && !fieldFound; dy += 2)
 				{
 					for (int dx = -48; dx <= 48; dx += 2)
 					{

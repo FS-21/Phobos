@@ -2198,6 +2198,197 @@ namespace
 		macro.IdleHarvesterTracks = std::move(next);
 	}
 
+	int BuildingGroundZone(const BuildingClass* pBld);
+
+	// The ore field a slave miner of ours should mine next: the nearest to `from` on its land (when
+	// zone >= 0), within maxDist cells, holding MinerFieldMinOreCells or more, with no mining site
+	// (a deployed miner or a refinery of ours, of an ally or a known enemy one) within
+	// MinerFieldClearCells and no known enemy structure within 12. The miner ignoreUid is left out
+	// of the mining sites. Nullptr when none qualifies.
+	CellClass* FindMinerOreField(HouseClass* pHouse, const CellStruct& from, int zone, DWORD ignoreUid, int maxDist)
+	{
+		if (!pHouse || from == CellStruct::Empty)
+			return nullptr;
+
+		std::vector<CellStruct> miningSites;
+		std::vector<CellStruct> enemyStructures;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner || pBld->UniqueID == ignoreUid)
+				continue;
+
+			const bool own = pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner);
+			const bool knownEnemy = !own && !pBld->Owner->IsNeutral() && IsEnemyBuildingKnown(pHouse, pBld);
+
+			if ((pBld->Type->ResourceGatherer || pBld->Type->Refinery) && (own || knownEnemy))
+				miningSites.push_back(pBld->GetMapCoords());
+
+			if (knownEnemy)
+				enemyStructures.push_back(pBld->GetMapCoords());
+		}
+
+		auto chebyshev = [](const CellStruct& a, const CellStruct& b)
+		{
+			return std::max(std::abs(a.X - b.X), std::abs(a.Y - b.Y));
+		};
+
+		CellClass* pBest = nullptr;
+		int bestDist = maxDist + 1;
+
+		for (auto const& field : GetOreFields())
+		{
+			if (field.OreCells < MinerFieldMinOreCells)
+				continue;
+
+			const int dist = chebyshev(field.Cell, from);
+
+			if (dist >= bestDist)
+				continue;
+
+			if (zone >= 0 && MapClass::Instance.GetMovementZoneType(field.Cell, MovementZone::Normal, false) != zone)
+				continue;
+
+			bool blocked = false;
+
+			for (auto const& site : miningSites)
+			{
+				if (chebyshev(site, field.Cell) <= MinerFieldClearCells)
+				{
+					blocked = true;
+					break;
+				}
+			}
+
+			for (size_t e = 0; !blocked && e < enemyStructures.size(); ++e)
+			{
+				if (chebyshev(enemyStructures[e], field.Cell) <= 12)
+					blocked = true;
+			}
+
+			if (blocked || IsOreFieldTakenByTeam(pHouse, field))
+				continue;
+
+			if (auto const pCell = MapClass::Instance.TryGetCellAt(field.Cell))
+			{
+				bestDist = dist;
+				pBest = pCell;
+			}
+		}
+
+		return pBest;
+	}
+
+	// Deployed slave miners with no ore left in their slaves' reach. The engine packs one up by
+	// itself only for ore within SlaveMinerLongScan of it; past that it stays deployed for good and
+	// earns nothing, as a player would never leave it (match #10437: a Yuri house went from 6902 to
+	// 425 ore per 900 frames with 295000 ore left in 68 fields of its land, its miners still deployed).
+	// Every 150 frames: the ore samples of each miner (read by the economy unit cap, where a miner
+	// without ore takes no place), and a miner without ore for MinerStrandedFrames packs up for the
+	// field FindMinerOreField picks, as the engine does it (SlaveManagerClass::Owner_AI, state 5:
+	// archive target, then Selling). The undeployed miner then goes to that field
+	// (ExecuteTacticalAndSpecOpsMicro gives an idle one its field) and deploys there.
+	void UpdateStrandedSlaveMiners(HouseClass* pHouse)
+	{
+		const NeuralSlowStep slowStep { "UpdateStrandedSlaveMiners" };
+
+		if (!pHouse || !IsAITickWindow(150, 0))
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		const int reach = RulesClass::Instance ? std::clamp(RulesClass::Instance->SlaveMinerSlaveScan / Unsorted::LeptonsPerCell, 4, 32) : 14;
+		std::unordered_map<DWORD, int> samples;
+		std::unordered_map<DWORD, int> strandedSince;
+		int deployed = 0;
+		int productive = 0;
+		int stranded = 0;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->ResourceGatherer
+				|| !pBld->Type->UndeploysInto)
+			{
+				continue;
+			}
+
+			deployed++;
+			const CellStruct bc = pBld->GetMapCoords();
+			int oreSamples = 0;
+
+			for (int dy = -reach; dy <= reach; dy += 2)
+			{
+				for (int dx = -reach; dx <= reach; dx += 2)
+				{
+					auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(bc.X + dx), static_cast<short>(bc.Y + dy) });
+
+					if (pCell && pCell->GetContainedTiberiumValue() > 0)
+						oreSamples++;
+				}
+			}
+
+			samples[pBld->UniqueID] = oreSamples;
+
+			if (oreSamples >= MinerProductiveOreSamples)
+			{
+				productive++;
+				continue;
+			}
+
+			stranded++;
+			int since = now;
+
+			if (auto const it = macro.StrandedMinerSince.find(pBld->UniqueID); it != macro.StrandedMinerSince.end() && it->second <= now)
+				since = it->second;
+
+			strandedSince[pBld->UniqueID] = since;
+
+			if (now - since < MinerStrandedFrames || pBld->CurrentMission == Mission::Construction
+				|| pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
+			{
+				continue;
+			}
+
+			auto const pField = FindMinerOreField(pHouse, bc, BuildingGroundZone(pBld), pBld->UniqueID, MinerFieldMaxCells);
+
+			// No field in reach: looked for again after MinerStrandedFrames.
+			if (!pField)
+			{
+				strandedSince[pBld->UniqueID] = now;
+				continue;
+			}
+
+			Debug::Log("[NeuralAI] House %d slave miner %s %u at (%d,%d): %d ore samples within %d cells for %d frames, packs up for "
+				"the field at (%d,%d), frame %d.\n", pHouse->ArrayIndex, pBld->Type->ID, pBld->UniqueID, bc.X, bc.Y, oreSamples, reach,
+				now - since, pField->MapCoords.X, pField->MapCoords.Y, now);
+			pBld->unknown_bool_4F8 = true;
+			pBld->SetArchiveTarget(pField);
+			pBld->QueueMission(Mission::Selling, false);
+			macro.MinerRelocations++;
+			strandedSince.erase(pBld->UniqueID);
+		}
+
+		macro.MinerOreSamples = std::move(samples);
+		macro.StrandedMinerSince = std::move(strandedSince);
+
+		if (deployed > 0 && (macro.MinerLogFrame < 0 || now < macro.MinerLogFrame || now - macro.MinerLogFrame >= MinerLogFrames))
+		{
+			int slaves = 0;
+
+			for (auto const pSlave : InfantryClass::Array)
+			{
+				if (pSlave && pSlave->IsAlive && !pSlave->InLimbo && pSlave->SlaveOwner && pSlave->SlaveOwner->Owner == pHouse)
+					slaves++;
+			}
+
+			Debug::Log("[NeuralAI] House %d slave miners: %d deployed, %d with ore in reach, %d without, %d slaves at work, "
+				"%d packed up since frame %d, frame %d.\n", pHouse->ArrayIndex, deployed, productive, stranded, slaves,
+				macro.MinerRelocations, std::max(0, macro.MinerLogFrame), now);
+			macro.MinerLogFrame = now;
+			macro.MinerRelocations = 0;
+		}
+	}
+
 	// Offensive crawl bookkeeping: confirm the cells chosen for stones toward the enemy once a
 	// structure of ours stands there, then count the confirmed stones that are destroyed. The
 	// trainer credits slots 38 / 81 with how well forward stones survive.
