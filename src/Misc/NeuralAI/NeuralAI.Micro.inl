@@ -13511,9 +13511,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				engineerTransportAssigned = true;
 				const int engZone = ObjectZone(pHomeIslandEngineer, MovementZone::Normal);
-				CellClass* pEngPickupBeach
-					= FindSafeIslandLandingCell(pHouse, pHomeIslandEngineer->GetMapCoords(), engZone, false);
-				const bool onEngLand = (transZone == engZone && pTransCell && pTransCell->LandType != LandType::Water);
+				// The transport comes to the engineer, on the outskirts of the base or expansion it is at,
+				// rather than the engineer walking to a far coast.
+				const CellStruct engCoords = pHomeIslandEngineer->GetMapCoords();
+				CellClass* pEngPickupBeach = FindBoardingCell(pHouse, engCoords, engZone, pIslandTechGoalCell->MapCoords, pTrans->Type);
+
+				if (!pEngPickupBeach)
+					pEngPickupBeach = FindSafeIslandLandingCell(pHouse, engCoords, engZone, false);
+
+				const bool onEngLand = transZone == engZone && pTransCell && pTransCell->LandType != LandType::Water
+					&& (!pEngPickupBeach || transCoords.DistanceFrom(pEngPickupBeach->MapCoords) <= OpGatherCells + 3.0
+						|| transCoords.DistanceFrom(engCoords) <= OpGatherCells + 3.0);
 				if (!onEngLand && pEngPickupBeach)
 				{
 					if (pSingleActiveBoarder == nullptr

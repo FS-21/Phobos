@@ -1725,6 +1725,26 @@ namespace
 	constexpr double OpUnloadCells = 2.5;
 	constexpr double OpParkCells = 4.0;
 	constexpr double OpGatherCells = 5.0;
+	// Where units board a transport (FindBoardingCell): the nearest cell to them on the outskirts
+	// of the base or expansion they stand at, BoardingBaseClearCells or more from every building of
+	// ours (not inside the base), with BoardingRoomCells of the 24 cells around it free for them to
+	// wait on, within BoardingSearchCells; with none, a second pass asks for the relaxed values.
+	// An enemy in sight (or seen a moment ago) within BoardingEnemyCells counts as
+	// BoardingEnemyPenaltyCells more cells of walk, a beach where our loaded transports died within
+	// BoardingBloodyCells as BoardingBloodyPenaltyCells; each cell of distance to the landing counts
+	// BoardingLandingWeight, so among cells about as near the side facing the crossing wins.
+	constexpr int BoardingBaseClearCells = 3;
+	constexpr int BoardingBaseClearRelaxedCells = 2;
+	constexpr int BoardingRoomCells = 16;
+	constexpr int BoardingRoomRelaxedCells = 10;
+	constexpr int BoardingSearchCells = 48;
+	constexpr int BoardingEnemyCells = 8;
+	constexpr double BoardingEnemyPenaltyCells = 12.0;
+	constexpr double BoardingBloodyCells = 10.0;
+	constexpr double BoardingBloodyPenaltyCells = 20.0;
+	constexpr double BoardingLandingWeight = 0.05;
+	constexpr int BoardingCacheFrames = 150;
+	constexpr int BoardingCacheGridCells = 4;
 	constexpr double OpTransportMinHealth = 0.5;
 	constexpr double OpDyingTransportHealth = 0.24;
 	constexpr int OpUnloadRetryFrames = 450;
