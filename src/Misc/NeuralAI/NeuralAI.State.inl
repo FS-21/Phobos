@@ -567,6 +567,13 @@ namespace
 		int Replans { 0 };
 		int RouteChanges { 0 };
 		int LandingMoves { 0 };
+		// A load held on its beach because even its safest route was too dangerous (OpSailDangerLimit):
+		// since when (-1: not held), when its route was last planned for the check, that route's danger,
+		// and how many times a load was held.
+		int DangerWaitSince { -1 };
+		int DangerCheckFrame { -1 };
+		int TripDanger { 0 };
+		int DangerHolds { 0 };
 		bool Over { false };
 		const char* EndReason { "" };
 		std::vector<NeuralOpMember> Members;
@@ -1089,6 +1096,11 @@ namespace
 		// Where transports of the operations were lost, with the frame and whether they flew: the
 		// routes of the next crossings keep away from there (PlanOpRoute).
 		std::vector<NeuralOpLossSpot> OpLossSpots;
+		// The danger of the crossings waiting for transports, on the ground (0) and in the air (1), and
+		// when it was measured (UpdateTransportOperations): which transports the operations take and
+		// the factories build follows it.
+		std::array<int, 2> OpKindDanger {};
+		int OpKindDangerFrame { -1 };
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1457,6 +1469,8 @@ namespace
 			this->TransportOpLogFrame = -1;
 			this->OpWatch.clear();
 			this->OpLossSpots.clear();
+			this->OpKindDanger.fill(0);
+			this->OpKindDangerFrame = -1;
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
@@ -1836,6 +1850,24 @@ namespace
 	constexpr int OpLandingDangerFactor = 3;
 	constexpr int OpLandingFlyerDangerFactor = 8;
 	constexpr int OpLossSpotsKept = 24;
+	// The kind of transport by danger (user): every OpKindDangerFrames the operations measure the
+	// danger of the crossings waiting for transports, straight from the staging cell to the landing,
+	// on the ground and in the air (a burrowing transport meets none). An idle transport counts that
+	// danger as one cell farther per OpKindDangerPerCell when the operations take transports, and the
+	// factories score a transport type OpKindDangerPenalty lower per unit of it, OpKindDangerMaxPenalty
+	// at most.
+	constexpr int OpKindDangerFrames = 150;
+	constexpr int OpKindDangerPerCell = 2;
+	constexpr int OpKindDangerPenalty = 3;
+	constexpr int OpKindDangerMaxPenalty = 1000;
+	// Waiting on the beach (user: when even the safest route is too dangerous, with a cap): a load whose
+	// route has a danger above OpSailDangerLimit waits for it to pass (moving enemies go, sightings
+	// fade), planned again every OpDangerCheckFrames, OpDangerWaitFrames at most; then it sails. The
+	// first measures of the routes: 3 of the 9 loads that sailed along a route of danger 90 or more
+	// were lost, 4 of the 130 along one of none (2026-11-16).
+	constexpr int OpSailDangerLimit = 90;
+	constexpr int OpDangerCheckFrames = 150;
+	constexpr int OpDangerWaitFrames = 1800;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its

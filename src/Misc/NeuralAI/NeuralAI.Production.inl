@@ -4449,9 +4449,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			: (neededForDemand > 0 ? neededForDemand : (isIslandMap ? 1 : 0));
 		const bool needsHeavyMcvTransport = candSizeLimit >= 6 && ownedHeavyIslandTransports == 0
 			&& !compatibleHeavyInProgress && (isIslandMap || scores[30] >= 450 || islandOreRunningOut);
+		// The kind of transport by the danger of the crossings waiting for one (user): a ship scores lower
+		// under a sea of warships, a flyer under heavy anti-air, a burrower never.
+		const int crossingPenalty = OpCrossingDangerPenalty(pHouse, pCandidate);
 
 		if (needsHeavyMcvTransport)
-			return scores[28] + 2200;
+			return scores[28] + 2200 - crossingPenalty;
 
 		// Cannot carry what is actually waiting (e.g. light APC vs. heavy tanks).
 		if (fittingDemandSize == 0 && unfitDemandSize > 0)
@@ -4493,10 +4496,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			return -1500;
 
 		if (ownedForLimit == 0)
-			return std::max(static_cast<int>(scores[28]), 0) + (fittingDemandSize > 0 ? 1100 : 600);
+			return std::max(static_cast<int>(scores[28]), 0) + (fittingDemandSize > 0 ? 1100 : 600) - crossingPenalty;
 
 		if (fittingDemandSize > ownedCapForLimit)
-			return std::max(static_cast<int>(scores[28]), 0) + 900;
+			return std::max(static_cast<int>(scores[28]), 0) + 900 - crossingPenalty;
 
 		return -900;
 	};
