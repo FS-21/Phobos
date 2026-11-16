@@ -9426,7 +9426,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (stands == waveGoalStands.end())
 			{
-				// A goal our units find no path to is dropped at once (IsPathDeadGoal).
 				bool enemyThere = false;
 
 				for (auto const& known : GetKnownEnemyBuildingCache(pHouse).Entries)
@@ -9441,6 +9440,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					break;
 				}
 
+				// A goal our units find no path to is given up at once.
 				waveGoalStands.push_back({ kept, enemyThere && !IsPathDeadGoal(pHouse, kept) });
 				stands = waveGoalStands.end() - 1;
 			}
