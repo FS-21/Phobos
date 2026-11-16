@@ -1727,6 +1727,23 @@ namespace
 	// building in reach and no enemy ship in their sea at every AI tick of ArmyIdleWindowFrames
 	// (match #9846: a house kept building ships while about 50 sat with no target in reach).
 	constexpr int ShipsWithoutTargetBrake = 6;
+	// Units jammed in their own base count as unused too: a ground unit with somewhere to go that has
+	// stood HeldAtHomeFrames on one cell, not firing, within HeldAtHomeCells of home. A wave or a
+	// plan takes them again every few hundred frames, so the idle pools alone never showed them
+	// (match #10472, Hammer and Sickle: 114 to 181 vehicles while 26 to 58 stood jammed at the
+	// base exit and the unused floor read 15, 8 and 4).
+	constexpr int HeldAtHomeFrames = 600;
+	constexpr double HeldAtHomeCells = 20.0;
+	// Artillery (main gun reaching ArtilleryRangeCells against the ground) needs a front line: the
+	// first ArtilleryFreeVehicles are free, then one more for every ArtilleryFrontLinePerGun armed
+	// ground vehicles of other kinds; each one over that costs ArtilleryOverFrontPenalty. The type
+	// penalty alone stops at 1200 points, and the artillery slot can stand 2000 and more over the
+	// main battle tanks (archetypes 4 and 7, known defenses): 178 V3 and no Rhino in match #10472,
+	// one artillery type in 75 to 96% of the vehicle picks of 9 houses in 60 matches.
+	constexpr int ArtilleryRangeCells = 8;
+	constexpr int ArtilleryFreeVehicles = 4;
+	constexpr int ArtilleryFrontLinePerGun = 2;
+	constexpr int ArtilleryOverFrontPenalty = 300;
 	constexpr double PlanStrikeGuardCells = 12.0;
 	// A ground group is weighed against what it meets on its way in, not only at the target: what
 	// is known within PlanStrikeGuardCells of the last PlanStrikeApproachCells of the straight way
