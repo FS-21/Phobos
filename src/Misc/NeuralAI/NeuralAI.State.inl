@@ -1340,7 +1340,20 @@ namespace
 		// Passengers aboard at the last count and the frame that count last changed.
 		int LastPassCount { 0 };
 		int LastBoardFrame { -1 };
+		// Frame the stuck cargo watchdog had the cargo set down on its pickup shore (FerryStuckCargoFrames).
+		int SetDownFrame { -1 };
 	};
+
+	// The zone map's value for a cell with no zone at all (outside the zoned map), read as 65535.
+	constexpr int NoZoneId = 0xFFFF;
+
+	// A zone units stand on and set out from. Zones 0 and 1 are no ground for a vehicle (water, a
+	// shore, a cliff foot) and NoZoneId is no zone: an ore field, a goal or a target there is no
+	// island to ferry to, and transports loaded for one never found a beach and kept their cargo.
+	bool IsGroundZone(int zone)
+	{
+		return zone > 1 && zone != NoZoneId;
+	}
 
 	// Reasons a transport is let go from its pickup shore (NeuralFerryTripRecord::SailReason).
 	constexpr int FerrySailBaseDeployer = 1;
@@ -1485,6 +1498,13 @@ namespace
 	// A loaded transport that has had nowhere to go for this long, still on its pickup shore, sets
 	// its cargo down again.
 	constexpr int FerryNoGoalUnloadFrames = 900;
+	// A loaded transport still on its pickup shore whose passengers have not changed for this long
+	// sets them down too: it is past every wait of the loader (convoy, battalion, short load).
+	constexpr int FerryStuckCargoFrames = 9000;
+	// How long that set-down keeps the transport unloading before the loader has it again.
+	constexpr int FerrySetDownFrames = 900;
+	// How far around a target on no ground the ground it stands next to is looked for.
+	constexpr int FerryTargetGroundCells = 3;
 	constexpr int CarryallDropSearchCells = 6;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
