@@ -545,6 +545,17 @@ namespace
 		std::vector<NeuralOpTransport> Transports;
 	};
 
+	// TEMP trace: a unit of a transport operation as the operation left it at the end of the last
+	// tick; TraceTransportOpUnits names the part of the AI tick that changes its order.
+	struct NeuralOpUnitWatch
+	{
+		DWORD UniqueID { 0 };
+		FootClass* Foot { nullptr };
+		Mission Current { Mission::None };
+		Mission Mega { Mission::None };
+		AbstractClass* Destination { nullptr };
+	};
+
 	struct NeuralHouseMacroState
 	{
 		CellStruct PendingClearanceCell { CellStruct::Empty };
@@ -1046,6 +1057,7 @@ namespace
 		std::array<int, 16> OpWaitingSizeBySize {};
 		int OpWaitingFrame { -1 };
 		int TransportOpLogFrame { -1 };
+		std::vector<NeuralOpUnitWatch> OpWatch;
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1412,6 +1424,7 @@ namespace
 			this->OpWaitingSizeBySize.fill(0);
 			this->OpWaitingFrame = -1;
 			this->TransportOpLogFrame = -1;
+			this->OpWatch.clear();
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
@@ -1716,6 +1729,26 @@ namespace
 	constexpr double OpUnloadCells = 2.5;
 	constexpr double OpParkCells = 4.0;
 	constexpr double OpGatherCells = 5.0;
+	// Where units board a transport (FindBoardingCell): the nearest cell to them on the outskirts
+	// of the base or expansion they stand at, BoardingBaseClearCells or more from every building of
+	// ours (not inside the base), with BoardingRoomCells of the 24 cells around it free for them to
+	// wait on, within BoardingSearchCells; with none, a second pass asks for the relaxed values.
+	// An enemy in sight (or seen a moment ago) within BoardingEnemyCells counts as
+	// BoardingEnemyPenaltyCells more cells of walk, a beach where our loaded transports died within
+	// BoardingBloodyCells as BoardingBloodyPenaltyCells; each cell of distance to the landing counts
+	// BoardingLandingWeight, so among cells about as near the side facing the crossing wins.
+	constexpr int BoardingBaseClearCells = 3;
+	constexpr int BoardingBaseClearRelaxedCells = 2;
+	constexpr int BoardingRoomCells = 16;
+	constexpr int BoardingRoomRelaxedCells = 10;
+	constexpr int BoardingSearchCells = 48;
+	constexpr int BoardingEnemyCells = 8;
+	constexpr double BoardingEnemyPenaltyCells = 12.0;
+	constexpr double BoardingBloodyCells = 10.0;
+	constexpr double BoardingBloodyPenaltyCells = 20.0;
+	constexpr double BoardingLandingWeight = 0.05;
+	constexpr int BoardingCacheFrames = 150;
+	constexpr int BoardingCacheGridCells = 4;
 	constexpr double OpTransportMinHealth = 0.5;
 	constexpr double OpDyingTransportHealth = 0.24;
 	constexpr int OpUnloadRetryFrames = 450;
@@ -1943,6 +1976,13 @@ namespace
 	// base exit and the unused floor read 15, 8 and 4).
 	constexpr int HeldAtHomeFrames = 600;
 	constexpr double HeldAtHomeCells = 20.0;
+	// A repair station serves one unit at a time; the others wait on cells next to it. It takes at
+	// most RepairStationQueueUnits repair trips at once (docked, on their way or waiting): the house
+	// cap alone (a third of the army) let 30 and more units queue for one depot, in one line that
+	// shut the way past it (user, match #10286, Blistering Heatstroke: 40+ Flak Tracks held in a
+	// passage by the house's forward base, the followed one at 43% health on Move 3 cells from its
+	// goal).
+	constexpr int RepairStationQueueUnits = 4;
 	// Artillery (main gun reaching ArtilleryRangeCells against the ground) needs a front line: the
 	// first ArtilleryFreeVehicles are free, then one more for every ArtilleryFrontLinePerGun armed
 	// ground vehicles of other kinds; each one over that costs ArtilleryOverFrontPenalty. The type

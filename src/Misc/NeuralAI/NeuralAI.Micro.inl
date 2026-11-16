@@ -1613,11 +1613,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const int rawDist = std::abs(bc.X - homeCoords.X) + std::abs(bc.Y - homeCoords.Y);
 			const bool isCashDerrick = (pCivBld->Type->ProduceCashAmount > 0 || pCivBld->Type->ProduceCashStartup > 0);
 			const int d = isCashDerrick ? (rawDist / 2) : rawDist;
+			// Only a tech on ground some transport of ours lands on from home: engineers boarded
+			// hovercraft for one they could not reach and were set down every 1000 frames.
 			if (d < bestTechDist)
 			{
-				bestTechDist = d;
-				techIslandZone = bz;
-				pIslandTechGoalCell = FindSafeIslandLandingCell(pHouse, bc, bz, false);
+				CellClass* pTechLanding = FindSafeIslandLandingCell(pHouse, bc, bz, false);
+
+				if (pTechLanding && CanHouseReachGroundByTransport(pHouse, homeCoords, pTechLanding->MapCoords))
+				{
+					bestTechDist = d;
+					techIslandZone = bz;
+					pIslandTechGoalCell = pTechLanding;
+				}
 			}
 		}
 	}
@@ -3643,7 +3650,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			const int mcvZone = MapClass::Instance.GetMovementZoneType(mcvCell, MovementZone::Normal, pUnit->OnBridge);
+			// The ground the MCV stands on. A cell of no ground under it (zone 1: a shore, a cliff foot)
+			// is not another island: read the land around it, or no zone. Taken as an island, it made
+			// MCVs in their own base give that "island" up for lack of room (match #10365).
+			const int mcvCellZone = MapClass::Instance.GetMovementZoneType(mcvCell, MovementZone::Normal, pUnit->OnBridge);
+			const int mcvLandZone = IsGroundZone(mcvCellZone) ? mcvCellZone : TransportLandZone(mcvCell, pUnit->OnBridge);
+			const int mcvZone = IsGroundZone(mcvLandZone) ? mcvLandZone : -1;
 			int minAnchorDist = 9999;
 			int conYardsInMcvZone = 0;
 			int hubsAndFactoriesInMcvZone = 0;
@@ -3802,7 +3814,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						// Never a transport a strategic plan is using (Airborne Front boards its own): a unit
 						// asking it for a ride took its single radio link and kept the plan's soldiers out.
 						if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type
-							|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID))
+							|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID) || IsInTransportOp(pHouse, pT->UniqueID))
 						{
 							continue;
 						}
@@ -4016,7 +4028,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							// Never a transport a strategic plan is using (Airborne Front boards its own): a unit
 							// asking it for a ride took its single radio link and kept the plan's soldiers out.
 							if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type
-								|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID))
+								|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID) || IsInTransportOp(pHouse, pT->UniqueID))
 							{
 								continue;
 							}
@@ -4722,7 +4734,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 									// Never a transport a strategic plan is using (Airborne Front boards its own): a unit
 									// asking it for a ride took its single radio link and kept the plan's soldiers out.
 									if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type
-										|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID))
+										|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID) || IsInTransportOp(pHouse, pT->UniqueID))
 									{
 										continue;
 									}
@@ -13454,7 +13466,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					<= static_cast<int>(pTrans->Type->SizeLimit)
 				&& (totalPassSize + static_cast<int>(pHomeExpansionDeployer->Type->TechnoTypeClass::Size))
 					<= pTrans->Type->Passengers
-				&& (numPass == 0 || transZone == deployerZone));
+				&& (numPass == 0 || transZone == deployerZone)
+				// Only with an island to take it to that this transport lands on: with none the
+				// deployer was boarded, set down for having nowhere to go, and boarded again.
+				&& pIslandResourceGoalCell != nullptr
+				&& CanTransportTypeLink(pTrans->Type, pHomeExpansionDeployer->GetMapCoords(), pIslandResourceGoalCell->MapCoords));
 			const int reservedSizeForDeployer
 				= canCarryHomeDeployer ? static_cast<int>(pHomeExpansionDeployer->Type->TechnoTypeClass::Size) : 0;
 
@@ -13503,15 +13519,24 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// transport on its island, it was sent from one to the next and held them all.
 			else if (pHomeIslandEngineer != nullptr && !carryingEngineer && !engineerTransportAssigned
 				&& CanPassengerFitInTransport(pTrans, pHomeIslandEngineer->Type)
+				&& CanTransportTypeLink(pTrans->Type, pHomeIslandEngineer->GetMapCoords(), pIslandTechGoalCell->MapCoords)
 				&& !((pHomeIslandEngineer->CurrentMission == Mission::Enter || pHomeIslandEngineer->QueuedMission == Mission::Enter)
 					&& !pHomeIslandEngineer->ContainsLink(pTrans) && pHomeIslandEngineer->ArchiveTarget != pTrans
 					&& pHomeIslandEngineer->Destination != pTrans))
 			{
 				engineerTransportAssigned = true;
 				const int engZone = ObjectZone(pHomeIslandEngineer, MovementZone::Normal);
-				CellClass* pEngPickupBeach
-					= FindSafeIslandLandingCell(pHouse, pHomeIslandEngineer->GetMapCoords(), engZone, false);
-				const bool onEngLand = (transZone == engZone && pTransCell && pTransCell->LandType != LandType::Water);
+				// The transport comes to the engineer, on the outskirts of the base or expansion it is at,
+				// rather than the engineer walking to a far coast.
+				const CellStruct engCoords = pHomeIslandEngineer->GetMapCoords();
+				CellClass* pEngPickupBeach = FindBoardingCell(pHouse, engCoords, engZone, pIslandTechGoalCell->MapCoords, pTrans->Type);
+
+				if (!pEngPickupBeach)
+					pEngPickupBeach = FindSafeIslandLandingCell(pHouse, engCoords, engZone, false);
+
+				const bool onEngLand = transZone == engZone && pTransCell && pTransCell->LandType != LandType::Water
+					&& (!pEngPickupBeach || transCoords.DistanceFrom(pEngPickupBeach->MapCoords) <= OpGatherCells + 3.0
+						|| transCoords.DistanceFrom(engCoords) <= OpGatherCells + 3.0);
 				if (!onEngLand && pEngPickupBeach)
 				{
 					if (pSingleActiveBoarder == nullptr

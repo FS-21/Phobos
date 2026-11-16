@@ -688,8 +688,10 @@ namespace
 
 		for (auto const pUnit : UnitClass::Array)
 		{
+			// A capital unit a transport operation carries joins a group once it is handed back.
 			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && IsCapitalUnitType(pUnit->Type)
-				&& !macro.PlanMembers.contains(pUnit->UniqueID) && !IsOnRepairTrip(pHouse, pUnit->UniqueID))
+				&& !macro.PlanMembers.contains(pUnit->UniqueID) && !IsOnRepairTrip(pHouse, pUnit->UniqueID)
+				&& !IsInTransportOp(pHouse, pUnit->UniqueID))
 			{
 				pool[static_cast<size_t>(CapitalDomainOf(pUnit->Type))].push_back(pUnit);
 			}
@@ -1617,12 +1619,14 @@ namespace
 
 		const int homeZone = MapClass::Instance.GetMovementZoneType(homeCell, MovementZone::Normal, false);
 
-		// Resolve our own units by UniqueID once per tick.
+		// Resolve our own units by UniqueID once per tick. The units and transports of the transport
+		// operations are left out: no plan gives them orders (257 orders of the plans found on them in
+		// 13 matches), and none is a plan member (a plan recruits no unit of an operation).
 		std::unordered_map<DWORD, FootClass*> ownFoots;
 
 		for (auto const pTech : TechnoClass::Array)
 		{
-			if (pTech && pTech->Owner == pHouse && pTech->IsAlive && !pTech->InLimbo)
+			if (pTech && pTech->Owner == pHouse && pTech->IsAlive && !pTech->InLimbo && !IsInTransportOp(pHouse, pTech->UniqueID))
 			{
 				if (auto const pFoot = abstract_cast<FootClass*>(pTech))
 					ownFoots[pFoot->UniqueID] = pFoot;

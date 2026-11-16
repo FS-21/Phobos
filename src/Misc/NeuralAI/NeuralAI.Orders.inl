@@ -3,10 +3,16 @@
 
 namespace
 {
+	int CountStationTrips(const HouseClass* pHouse, DWORD stationID, DWORD excludeID);
+
+	// TEMP diagnostic: stations passed over for being full, per house (repair queue DIAG).
+	std::array<int, 32> RepairStationFullSkips {};
+
 	// Picks the repair station (UnitRepair=yes) this unit should use: only stations it can
 	// actually reach (naval units at naval stations, ground units at land stations,
 	// amphibious/hover units at either), balancing load by adding the current queue (our
-	// units already entering or docked there) to the distance. No more single-depot queues.
+	// units already entering or docked there, or on a repair trip to it) to the distance. A
+	// station with RepairStationQueueUnits trips is full: none when every one is.
 	BuildingClass* FindBestRepairStation(HouseClass* pHouse, FootClass* pFoot, bool airlifted = false)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
@@ -72,6 +78,16 @@ namespace
 				{
 					queue++;
 				}
+			}
+
+			// A unit waiting at a busy station is on a move to a cell next to it, which the count above
+			// misses; our repair trips to it count them.
+			queue = std::max(queue, CountStationTrips(pHouse, pBld->UniqueID, pFoot->UniqueID));
+
+			if (queue >= RepairStationQueueUnits)
+			{
+				RepairStationFullSkips[std::clamp(pHouse->ArrayIndex, 0, 31)]++;
+				continue;
 			}
 
 			const double cost = fc.DistanceFrom(bc) + queue * 8.0;
@@ -668,10 +684,72 @@ namespace
 	// TEMP diagnostic: a transport the loader left parked to load (Guard or landing, no destination)
 	// that is found with other orders after a part of the AI tick: that part, or the engine between
 	// two ticks, moved it. Logged once per departure from the parking; the loader parks it again.
+	// TEMP trace: the units of the transport operations whose order changed after the operations
+	// gave theirs (at the end of the last tick), checked after every part of the AI tick: the part
+	// named is the one that changed it. What the engine changes between ticks (a move that ends,
+	// a target found) only brings the record up to date. One line per change, 80 per match.
+	void TraceTransportOpUnits(int houseIndex, const char* part)
+	{
+		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
+
+		if (!pHouse)
+			return;
+
+		auto& watch = GetMacroState(pHouse).OpWatch;
+
+		if (watch.empty())
+			return;
+
+		static int opTraceSerial = -1;
+		static int opTraceLines = 0;
+
+		if (opTraceSerial != NeuralMatchSerial)
+		{
+			opTraceSerial = NeuralMatchSerial;
+			opTraceLines = 0;
+		}
+
+		const bool betweenTicks = std::strncmp(part, "the engine", 10) == 0;
+
+		std::erase_if(watch, [&](NeuralOpUnitWatch& entry)
+			{
+				FootClass* const pFoot = entry.Foot;
+
+				if (FootClass::Array.FindItemIndex(pFoot) < 0 || pFoot->UniqueID != entry.UniqueID || !pFoot->IsAlive)
+					return true;
+
+				if (pFoot->CurrentMission == entry.Current && pFoot->MegaMission == entry.Mega && pFoot->Destination == entry.Destination)
+					return false;
+
+				if (betweenTicks)
+				{
+					entry.Current = pFoot->CurrentMission;
+					entry.Mega = pFoot->MegaMission;
+					entry.Destination = pFoot->Destination;
+					return false;
+				}
+
+				if (opTraceLines++ < 80)
+				{
+					auto const pDestCell = abstract_cast<CellClass*>(pFoot->Destination);
+					auto const pDestObject = abstract_cast<ObjectClass*>(pFoot->Destination);
+					Debug::Log("[NeuralAI] House %d transport op unit DIAG frame %d: %s %u changed by %s: mission %d -> %d, mega %d -> %d, "
+						"destination %s (%d,%d).\n", houseIndex, Unsorted::CurrentFrame, pFoot->GetTechnoType()->ID, pFoot->UniqueID, part,
+						static_cast<int>(entry.Current), static_cast<int>(pFoot->CurrentMission), static_cast<int>(entry.Mega),
+						static_cast<int>(pFoot->MegaMission),
+						pDestCell ? "cell" : (pDestObject && pDestObject->GetType() ? pDestObject->GetType()->ID : (pFoot->Destination ? "object" : "none")),
+						pDestCell ? pDestCell->MapCoords.X : -1, pDestCell ? pDestCell->MapCoords.Y : -1);
+				}
+
+				return true;
+			});
+	}
+
 	void TraceParkedFerries(int houseIndex, const char* part)
 	{
 		TraceWatchedMoves(houseIndex, part);
 		TraceWatchedSleepers(houseIndex, part);
+		TraceTransportOpUnits(houseIndex, part);
 
 		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
 
@@ -2119,6 +2197,407 @@ namespace
 		}
 
 		return pBestLanding ? pBestLanding : MapClass::Instance.TryGetCellAt(islandRefCell);
+	}
+
+	// The transport types that may come to load units of the house: the one given, else those it
+	// owns, else those it can build. Flying ones come down anywhere; the others have to stand on
+	// the cell.
+	void CollectBoardingCarrierTypes(HouseClass* pHouse, const TechnoTypeClass* pCarrierType,
+		std::vector<const TechnoTypeClass*>& surface, bool& anyFlyer)
+	{
+		anyFlyer = false;
+
+		auto const add = [&](const TechnoTypeClass* pType)
+		{
+			const bool flies = pType->WhatAmI() == AbstractType::AircraftType || pType->JumpJet || pType->ConsideredAircraft
+				|| pType->MovementZone == MovementZone::Fly;
+
+			if (flies)
+				anyFlyer = true;
+			else if (std::find(surface.begin(), surface.end(), pType) == surface.end())
+				surface.push_back(pType);
+		};
+
+		if (pCarrierType)
+		{
+			add(pCarrierType);
+			return;
+		}
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && !pUnit->InLimbo && pUnit->IsAlive && pUnit->Type
+				&& IsAmphibiousOrAirTransport(pUnit->Type) && !pUnit->Type->Gunner)
+			{
+				add(pUnit->Type);
+			}
+		}
+
+		for (auto const pAir : AircraftClass::Array)
+		{
+			if (pAir && pAir->Owner == pHouse && !pAir->InLimbo && pAir->IsAlive && pAir->Type
+				&& (pAir->Type->Carryall || pAir->Type->Passengers > 0))
+			{
+				add(pAir->Type);
+			}
+		}
+
+		if (!surface.empty() || anyFlyer)
+			return;
+
+		for (auto const pType : UnitTypeClass::Array)
+		{
+			if (pType && pType->TechLevel >= 0 && pType->TechLevel <= pHouse->TechLevel && IsAmphibiousOrAirTransport(pType)
+				&& !pType->Gunner && HouseExt::PrerequisitesMet(pHouse, pType))
+			{
+				add(pType);
+			}
+		}
+
+		for (auto const pType : AircraftTypeClass::Array)
+		{
+			if (pType && pType->TechLevel >= 0 && pType->TechLevel <= pHouse->TechLevel
+				&& (pType->Carryall || pType->Passengers > 0) && HouseExt::PrerequisitesMet(pHouse, pType))
+			{
+				add(pType);
+			}
+		}
+	}
+
+	// Where units of a land board a transport (user: "the outskirts of the base are fine, but not
+	// that far unless it is one of its expansions"): the nearest cell to them, on that land, out of
+	// the base or expansion they stand at (BoardingBaseClearCells from every building of ours), with
+	// room around it for them to wait on, that every surface transport type that may come can stand
+	// on and one of them (or a flying one) can sail from to the landing, out of the reach of known
+	// enemy defenses. Enemies in sight and beaches where our transports died count as more walk.
+	// Null when no such cell lies within BoardingSearchCells. pClearance, when given, receives the
+	// distance from the cell to our nearest building.
+	CellClass* FindBoardingCellUncached(HouseClass* pHouse, const CellStruct& around, int zone, const CellStruct& landing,
+		const TechnoTypeClass* pCarrierType, int* pClearance)
+	{
+		if (!pHouse || around == CellStruct::Empty || !IsGroundZone(zone))
+			return nullptr;
+
+		std::vector<const TechnoTypeClass*> surface;
+		bool anyFlyer = false;
+		CollectBoardingCarrierTypes(pHouse, pCarrierType, surface, anyFlyer);
+
+		const int reach = BoardingSearchCells + 12;
+		auto const inReach = [&around, reach](const CellStruct& at)
+		{
+			return std::abs(at.X - around.X) <= reach && std::abs(at.Y - around.Y) <= reach;
+		};
+
+		// Our buildings as foundation rectangles; known enemy defenses with their reach.
+		struct Rect { int X0; int Y0; int X1; int Y1; };
+		struct Defense { CellStruct Cell; int Reach; };
+		std::vector<Rect> ownBuildings;
+		std::vector<Defense> defenses;
+		std::vector<CellStruct> enemies;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || !pBld->Type || pBld->Type->InvisibleInGame)
+				continue;
+
+			const CellStruct at = pBld->GetMapCoords();
+
+			if (!inReach(at))
+				continue;
+
+			if (pBld->Owner == pHouse)
+			{
+				if (!pBld->Type->Wall && !pBld->Type->Insignificant)
+				{
+					ownBuildings.push_back({ at.X, at.Y, at.X + std::max(1, static_cast<int>(pBld->Type->GetFoundationWidth())) - 1,
+						at.Y + std::max(1, static_cast<int>(pBld->Type->GetFoundationHeight(false))) - 1 });
+				}
+
+				continue;
+			}
+
+			if (!pBld->Type->IsBaseDefense || pHouse->IsAlliedWith(pBld->Owner) || pBld->Owner->IsNeutral()
+				|| !IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				continue;
+			}
+
+			int rangeCells = 0;
+
+			for (int w = 0; w < 2; ++w)
+			{
+				if (auto const pWeaponStruct = pBld->GetWeapon(w); pWeaponStruct && pWeaponStruct->WeaponType)
+					rangeCells = std::max(rangeCells, pWeaponStruct->WeaponType->Range / Unsorted::LeptonsPerCell);
+			}
+
+			if (rangeCells > 0)
+				defenses.push_back({ at, rangeCells + 2 });
+		}
+
+		auto const addEnemy = [&](TechnoClass* pTechno)
+		{
+			if (pTechno && !pTechno->InLimbo && pTechno->IsAlive && pTechno->Owner && pTechno->Owner != pHouse
+				&& !pHouse->IsAlliedWith(pTechno->Owner) && !pTechno->Owner->IsNeutral() && inReach(pTechno->GetMapCoords())
+				&& IsCellVisibleToAI(pHouse, pTechno->GetCell()))
+			{
+				enemies.push_back(pTechno->GetMapCoords());
+			}
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			addEnemy(pUnit);
+
+		for (auto const pInf : InfantryClass::Array)
+			addEnemy(pInf);
+
+		auto const& macro = GetMacroState(pHouse);
+
+		for (auto const& [seenID, sighting] : macro.EnemySightings)
+		{
+			if (sighting.LastCoords != CellStruct::Empty && Unsorted::CurrentFrame - sighting.LastSeenFrame <= FerryLandingSightingFrames
+				&& inReach(sighting.LastCoords))
+			{
+				enemies.push_back(sighting.LastCoords);
+			}
+		}
+
+		auto const clearanceOf = [&ownBuildings](const CellStruct& c)
+		{
+			int best = 9999;
+
+			for (auto const& rect : ownBuildings)
+			{
+				const int dx = std::max({ 0, rect.X0 - c.X, c.X - rect.X1 });
+				const int dy = std::max({ 0, rect.Y0 - c.Y, c.Y - rect.Y1 });
+				best = std::min(best, std::max(dx, dy));
+			}
+
+			return best;
+		};
+
+		auto const footing = [zone](const CellStruct& c) -> CellClass*
+		{
+			auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+			if (!pCell || pCell->LandType == LandType::Water || pCell->LandType == LandType::Rock || pCell->GetBuilding()
+				|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != zone
+				|| !pCell->IsClearToMove(SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false))
+			{
+				return nullptr;
+			}
+
+			return pCell;
+		};
+
+		// Why cells were turned down in the last pass: no footing, inside the base, covered by a defense,
+		// a transport cannot stand there, no transport sails from there to the landing, no room.
+		int rejected[6] {};
+
+		auto const search = [&](int minClearance, int minRoom, int& clearanceOut) -> CellClass*
+		{
+			std::fill(std::begin(rejected), std::end(rejected), 0);
+			CellClass* pBest = nullptr;
+			double bestScore = 1e9;
+
+			for (int ring = 0; ring <= BoardingSearchCells && ring <= bestScore; ++ring)
+			{
+				for (int dy = -ring; dy <= ring; ++dy)
+				{
+					for (int dx = -ring; dx <= ring; ++dx)
+					{
+						if (std::max(std::abs(dx), std::abs(dy)) != ring)
+							continue;
+
+						const CellStruct c { static_cast<short>(around.X + dx), static_cast<short>(around.Y + dy) };
+						auto const pCell = footing(c);
+
+						if (!pCell)
+						{
+							++rejected[0];
+							continue;
+						}
+
+						const int clearance = clearanceOf(c);
+
+						if (clearance < minClearance)
+						{
+							++rejected[1];
+							continue;
+						}
+
+						const double dist = c.DistanceFrom(around);
+
+						if (dist >= bestScore)
+							continue;
+
+						bool covered = false;
+
+						for (auto const& defense : defenses)
+						{
+							if (std::max(std::abs(c.X - defense.Cell.X), std::abs(c.Y - defense.Cell.Y)) <= defense.Reach)
+							{
+								covered = true;
+								break;
+							}
+						}
+
+						if (covered)
+						{
+							++rejected[2];
+							continue;
+						}
+
+						bool standsAll = true;
+
+						for (auto const pType : surface)
+						{
+							if (!pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false))
+							{
+								standsAll = false;
+								break;
+							}
+						}
+
+						if (!standsAll)
+						{
+							++rejected[3];
+							continue;
+						}
+
+						bool sails = anyFlyer || surface.empty() || landing == CellStruct::Empty;
+
+						for (size_t i = 0; !sails && i < surface.size(); ++i)
+							sails = CanTransportTypeLink(surface[i], c, landing);
+
+						if (!sails)
+						{
+							++rejected[4];
+							continue;
+						}
+
+						int room = 0;
+
+						for (int ry = -2; ry <= 2; ++ry)
+						{
+							for (int rx = -2; rx <= 2; ++rx)
+							{
+								if ((rx != 0 || ry != 0) && footing({ static_cast<short>(c.X + rx), static_cast<short>(c.Y + ry) }))
+									++room;
+							}
+						}
+
+						if (room < minRoom)
+						{
+							++rejected[5];
+							continue;
+						}
+
+						double score = dist;
+
+						for (auto const& enemy : enemies)
+						{
+							if (std::max(std::abs(c.X - enemy.X), std::abs(c.Y - enemy.Y)) <= BoardingEnemyCells)
+							{
+								score += BoardingEnemyPenaltyCells;
+								break;
+							}
+						}
+
+						for (auto const& [bloodyCell, bloodyFrame] : macro.BloodyBeaches)
+						{
+							if (c.DistanceFrom(bloodyCell) <= BoardingBloodyCells)
+							{
+								score += BoardingBloodyPenaltyCells;
+								break;
+							}
+						}
+
+						if (landing != CellStruct::Empty)
+							score += c.DistanceFrom(landing) * BoardingLandingWeight;
+
+						if (pCell->FirstObject)
+							score += 1.0;
+
+						if (score < bestScore)
+						{
+							bestScore = score;
+							pBest = pCell;
+							clearanceOut = clearance;
+						}
+					}
+				}
+			}
+
+			return pBest;
+		};
+
+		int clearance = 9999;
+		CellClass* pResult = search(BoardingBaseClearCells, BoardingRoomCells, clearance);
+
+		if (!pResult)
+			pResult = search(BoardingBaseClearRelaxedCells, BoardingRoomRelaxedCells, clearance);
+
+		// TEMP diagnostic: why no cell near the units would do.
+		if (!pResult)
+		{
+			Debug::Log("[NeuralAI] House %d boarding cell DIAG: none within %d cells of (%d,%d) zone %d for the landing (%d,%d); turned down: "
+				"%d no footing, %d inside the base, %d under a defense, %d no standing for a transport (%d surface types%s), %d no crossing "
+				"to the landing, %d no room; frame %d.\n", pHouse->ArrayIndex, BoardingSearchCells, around.X, around.Y, zone, landing.X,
+				landing.Y, rejected[0], rejected[1], rejected[2], rejected[3], static_cast<int>(surface.size()), anyFlyer ? ", flyers" : "",
+				rejected[4], rejected[5], Unsorted::CurrentFrame);
+		}
+
+		if (pClearance)
+			*pClearance = clearance;
+
+		return pResult;
+	}
+
+	// One search per house, zone, carrier type, square of BoardingCacheGridCells around the units
+	// and square of LandingCacheGridCells around the landing, kept BoardingCacheFrames.
+	CellClass* FindBoardingCell(HouseClass* pHouse, const CellStruct& around, int zone, const CellStruct& landing,
+		const TechnoTypeClass* pCarrierType, int* pClearance = nullptr)
+	{
+		struct BoardingAnswer
+		{
+			CellStruct Cell;
+			int Clearance;
+			int Frame;
+		};
+
+		using BoardingKey = std::tuple<int, int, int, int, int, int, const TechnoTypeClass*>;
+		static int cacheSerial = -1;
+		static std::map<BoardingKey, BoardingAnswer> cache;
+		const int now = Unsorted::CurrentFrame;
+
+		if (cacheSerial != NeuralMatchSerial)
+		{
+			cacheSerial = NeuralMatchSerial;
+			cache.clear();
+		}
+
+		if (cache.size() > 512)
+			std::erase_if(cache, [now](const auto& entry) { return now < entry.second.Frame || now - entry.second.Frame >= BoardingCacheFrames; });
+
+		const BoardingKey key { pHouse ? pHouse->ArrayIndex : -1, zone, around.X / BoardingCacheGridCells, around.Y / BoardingCacheGridCells,
+			landing.X / LandingCacheGridCells, landing.Y / LandingCacheGridCells, pCarrierType };
+
+		if (auto const it = cache.find(key); it != cache.end() && now >= it->second.Frame && now - it->second.Frame < BoardingCacheFrames)
+		{
+			if (pClearance)
+				*pClearance = it->second.Clearance;
+
+			return it->second.Cell == CellStruct::Empty ? nullptr : MapClass::Instance.TryGetCellAt(it->second.Cell);
+		}
+
+		int clearance = 9999;
+		CellClass* const pResult = FindBoardingCellUncached(pHouse, around, zone, landing, pCarrierType, &clearance);
+		cache.insert_or_assign(key, BoardingAnswer { pResult ? pResult->MapCoords : CellStruct::Empty, clearance, now });
+
+		if (pClearance)
+			*pClearance = clearance;
+
+		return pResult;
 	}
 
 	// Safe ferry routing: when the straight sea lane from a transport to its landing

@@ -36,6 +36,9 @@ void TheaterTypeClass::AutoInferProperties()
 	if (!this->IsoRoot)
 		this->IsoRoot = ("ISO" + upperName.substr(0, 5)).c_str();
 
+	if (!this->IsoExpansionRoot)
+		this->IsoExpansionRoot = this->IsoRoot.data();
+
 	if (!this->Suffix)
 		this->Suffix = upperName.substr(0, 3).c_str();
 
@@ -77,6 +80,7 @@ void TheaterTypeClass::LoadFromINI(CCINIClass* pINI)
 
 	this->Root.Read(pINI, pSection, "Root");
 	this->IsoRoot.Read(pINI, pSection, "IsoRoot");
+	this->IsoExpansionRoot.Read(pINI, pSection, "IsoExpansionRoot");
 	this->Suffix.Read(pINI, pSection, "Suffix");
 	this->MMSuffix.Read(pINI, pSection, "MMSuffix");
 
@@ -127,6 +131,7 @@ void TheaterTypeClass::Init()
 		const char* UIName;
 		const char* Root;
 		const char* IsoRoot;
+		const char* IsoExpansionRoot;
 		const char* Suffix;
 		const char* MMSuffix;
 		char ImageLetter;
@@ -144,12 +149,12 @@ void TheaterTypeClass::Init()
 	};
 
 	static const VanillaDef vanillaList[] = {
-		{ "TEMPERATE", "Name:Temperate", "TEMPERAT", "ISOTEMP", "TEM", "MMT", 'T', false, false, true,  true,  true,  1.0f, 1.6f, "TEMPERATMD.INI", "ISOTEM.PAL", "TEMPERAT.PAL", "UNITTEM.PAL" },
-		{ "SNOW",      "Name:Snow",      "SNOW",     "ISOSNOW", "SNO", "MMS", 'A', true,  true,  true,  true,  true,  0.8f, 1.1f, "SNOWMD.INI",     "ISOSNO.PAL", "SNOW.PAL",     "UNITSNO.PAL" },
-		{ "URBAN",     "Name:Urban",     "URBAN",    "ISOURB",  "URB", "MMU", 'U', false, false, true,  false, false, 1.0f, 1.0f, "URBANMD.INI",    "ISOURB.PAL", "URBAN.PAL",    "UNITURB.PAL" },
-		{ "DESERT",    "Name:Desert",    "DESERT",   "ISODES",  "DES", "MMD", 'D', false, false, true,  true,  false, 1.0f, 1.0f, "DESERTMD.INI",   "ISODES.PAL", "DESERT.PAL",   "UNITDES.PAL" },
-		{ "NEWURBAN",  "Name:New Urban", "URBANN",   "ISOUBN",  "UBN", "MMT", 'N', false, false, true,  false, false, 1.0f, 1.0f, "URBANNMD.INI",   "ISOUBN.PAL", "URBANN.PAL",   "UNITUBN.PAL" },
-		{ "LUNAR",     "Name:Lunar",     "LUNAR",    "ISOLUN",  "LUN", "MML", 'L', false, false, true,  false, false, 1.0f, 1.0f, "LUNARMD.INI",    "ISOLUN.PAL", "LUNAR.PAL",    "UNITLUN.PAL" }
+		{ "TEMPERATE", "Name:Temperate", "TEMPERAT", "ISOTEMP", "ISOTEM", "TEM", "MMT", 'T', false, false, true,  true,  true,  1.0f, 1.6f, "TEMPERATMD.INI", "ISOTEM.PAL", "TEMPERAT.PAL", "UNITTEM.PAL" },
+		{ "SNOW",      "Name:Snow",      "SNOW",     "ISOSNOW", "ISOSNO", "SNO", "MMS", 'A', true,  true,  true,  true,  true,  0.8f, 1.1f, "SNOWMD.INI",     "ISOSNO.PAL", "SNOW.PAL",     "UNITSNO.PAL" },
+		{ "URBAN",     "Name:Urban",     "URBAN",    "ISOURB",  "ISOURB", "URB", "MMU", 'U', false, false, true,  false, false, 1.0f, 1.0f, "URBANMD.INI",    "ISOURB.PAL", "URBAN.PAL",    "UNITURB.PAL" },
+		{ "DESERT",    "Name:Desert",    "DESERT",   "ISODES",  "ISODES", "DES", "MMD", 'D', false, false, true,  true,  false, 1.0f, 1.0f, "DESERTMD.INI",   "ISODES.PAL", "DESERT.PAL",   "UNITDES.PAL" },
+		{ "NEWURBAN",  "Name:New Urban", "URBANN",   "ISOUBN",  "ISOUBN", "UBN", "MMT", 'N', false, false, true,  false, false, 1.0f, 1.0f, "URBANNMD.INI",   "ISOUBN.PAL", "URBANN.PAL",   "UNITUBN.PAL" },
+		{ "LUNAR",     "Name:Lunar",     "LUNAR",    "ISOLUN",  "ISOLUN", "LUN", "MML", 'L', false, false, true,  false, false, 1.0f, 1.0f, "LUNARMD.INI",    "ISOLUN.PAL", "LUNAR.PAL",    "UNITLUN.PAL" }
 	};
 
 	for (const auto& def : vanillaList)
@@ -158,6 +163,7 @@ void TheaterTypeClass::Init()
 		pItem->UIName = CSFText(def.UIName);
 		pItem->Root = def.Root;
 		pItem->IsoRoot = def.IsoRoot;
+		pItem->IsoExpansionRoot = def.IsoExpansionRoot;
 		pItem->Suffix = def.Suffix;
 		pItem->MMSuffix = def.MMSuffix;
 		pItem->ImageLetter = def.ImageLetter;
@@ -363,8 +369,8 @@ void TheaterTypeClass::LoadCurrentMixes(const TheaterTypeClass* pTheater)
 		_snprintf_s(buffer, sizeof(buffer), "%s.MIX", pTheater->Suffix.data());
 		tryLoadMix(buffer);
 
-		// Isometric expansion mix: <IsoRoot>MD.MIX
-		_snprintf_s(buffer, sizeof(buffer), "%sMD.MIX", pTheater->IsoRoot.data());
+		// Isometric expansion mix: <IsoExpansionRoot>MD.MIX
+		_snprintf_s(buffer, sizeof(buffer), "%sMD.MIX", pTheater->IsoExpansionRoot.data());
 		tryLoadMix(buffer);
 
 		// Control expansion mix: <Root>MD.MIX

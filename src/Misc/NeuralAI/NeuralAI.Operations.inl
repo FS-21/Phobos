@@ -344,10 +344,14 @@ namespace
 				return false;
 		}
 
+		// A plan's member stays with its plan (plans start only when every member walks there).
 		auto const pType = pFoot->GetTechnoType();
 
-		if (!pType || CrossesWaterAlone(pType) || GetOpCarrier(pFoot) != OpCarrier::None || pFoot->Transporter)
+		if (!pType || CrossesWaterAlone(pType) || GetOpCarrier(pFoot) != OpCarrier::None || pFoot->Transporter
+			|| IsPlanMember(pHouse, uid))
+		{
 			return false;
+		}
 
 		// The unit's own movement may join the two cells where a vehicle's does not (a soldier on stairs).
 		const int footZone = OpFootGroundZone(pFoot);
@@ -709,9 +713,16 @@ namespace
 				memberCells.push_back(find(member.UniqueID)->GetMapCoords());
 		}
 
-		// 3. The staging beach: the coast of the origin land near the waiting members that no known enemy
-		// covers, and behind it, up to 5 cells towards them, the spot where they wait, off the beach the
-		// transports come to.
+		if (op.Landing == CellStruct::Empty)
+		{
+			auto const pLanding = FindSafeIslandLandingCell(pHouse, op.Target, op.TargetZone, false);
+			op.Landing = pLanding ? pLanding->MapCoords : op.Target;
+		}
+
+		// 3. The staging cell: where the members stand, on the outskirts of the base or expansion they
+		// are at (FindBoardingCell), not a coast far off: the transports come to them. Only with no such
+		// cell, the coast of their land that no known enemy covers. The members wait next to it, up to
+		// 3 cells back towards them, off the cells the transports come to.
 		if (op.Staging == CellStruct::Empty && !memberCells.empty())
 		{
 			int sumX = 0;
@@ -724,31 +735,66 @@ namespace
 			}
 
 			const int count = static_cast<int>(memberCells.size());
-			const CellStruct centre { static_cast<short>(sumX / count), static_cast<short>(sumY / count) };
-			auto const pStaging = FindSafeIslandLandingCell(pHouse, centre, op.OriginZone, false);
+			const CellStruct mean { static_cast<short>(sumX / count), static_cast<short>(sumY / count) };
+			// The member nearest to their mean: members spread over a base and an expansion board at one
+			// of the two, not halfway.
+			CellStruct centre = memberCells.front();
+
+			for (auto const& at : memberCells)
+			{
+				if (at.DistanceFrom(mean) < centre.DistanceFrom(mean))
+					centre = at;
+			}
+
+			int clearance = 9999;
+			const char* rule = "outskirts";
+			CellClass* pStaging = FindBoardingCell(pHouse, centre, op.OriginZone, op.Landing, nullptr, &clearance);
+
+			if (!pStaging)
+			{
+				rule = "coast fallback";
+				pStaging = FindSafeIslandLandingCell(pHouse, centre, op.OriginZone, false);
+			}
+
 			op.Staging = pStaging ? pStaging->MapCoords : centre;
 			op.Gather = op.Staging;
 			const double span = op.Staging.DistanceFrom(centre);
 
-			for (int step = std::min(5, static_cast<int>(span)); step >= 1; --step)
+			for (int step = std::min(3, static_cast<int>(span)); step >= 1; --step)
 			{
 				const CellStruct spot { static_cast<short>(op.Staging.X + (centre.X - op.Staging.X) * step / std::max(1.0, span)),
 					static_cast<short>(op.Staging.Y + (centre.Y - op.Staging.Y) * step / std::max(1.0, span)) };
 				auto const pSpot = MapClass::Instance.TryGetCellAt(spot);
+				bool besideBuilding = false;
 
-				if (pSpot && pSpot->LandType != LandType::Water && !pSpot->GetBuilding()
+				for (int dy = -1; dy <= 1 && !besideBuilding; ++dy)
+				{
+					for (int dx = -1; dx <= 1 && !besideBuilding; ++dx)
+					{
+						const CellStruct next { static_cast<short>(spot.X + dx), static_cast<short>(spot.Y + dy) };
+						auto const pNext = MapClass::Instance.TryGetCellAt(next);
+						besideBuilding = pNext && pNext->GetBuilding();
+					}
+				}
+
+				if (pSpot && pSpot->LandType != LandType::Water && !besideBuilding
 					&& MapClass::Instance.GetMovementZoneType(spot, MovementZone::Normal, false) == op.OriginZone)
 				{
 					op.Gather = spot;
 					break;
 				}
 			}
-		}
 
-		if (op.Landing == CellStruct::Empty)
-		{
-			auto const pLanding = FindSafeIslandLandingCell(pHouse, op.Target, op.TargetZone, false);
-			op.Landing = pLanding ? pLanding->MapCoords : op.Target;
+			// TEMP diagnostic: how far the members walk to board, and how far from our buildings.
+			double farthest = 0.0;
+
+			for (auto const& at : memberCells)
+				farthest = std::max(farthest, at.DistanceFrom(op.Staging));
+
+			Debug::Log("[NeuralAI] House %d transport op %d staging DIAG: (%d,%d) by %s, %d cells from the members at (%d,%d) (%d waiting, "
+				"farthest %d), nearest building %d, gathering at (%d,%d), landing (%d,%d), frame %d.\n",
+				houseIndex, op.Id, op.Staging.X, op.Staging.Y, rule, static_cast<int>(op.Staging.DistanceFrom(centre)), centre.X, centre.Y,
+				count, static_cast<int>(farthest), clearance, op.Gather.X, op.Gather.Y, op.Landing.X, op.Landing.Y, now);
 		}
 
 		auto const pStagingCell = MapClass::Instance.TryGetCellAt(op.Staging);
@@ -1224,14 +1270,22 @@ namespace
 			if (carrier != OpCarrier::Carryall && pTransport->Target)
 				pTransport->SetTarget(nullptr);
 
-			// Badly hit on land with a load: it lets them out at once (the members on their own land wait
-			// for another seat, those on the land of their address are delivered).
-			if (carrier != OpCarrier::Carryall && loaded > 0 && !aloft && onLand && pTransport->GetHealthPercentage() < OpDyingTransportHealth
-				&& PutAshoreNow(pTransport) > 0)
+			// Badly hit on land: it lets its load out at once (the members on their own land wait for
+			// another seat, those on the land of their address are delivered) and leaves the operation.
+			// Kept, it took its load aboard again at every tick and set it down again (33 times in a row,
+			// match #10391).
+			if (carrier != OpCarrier::Carryall && !aloft && onLand && pTransport->GetHealthPercentage() < OpDyingTransportHealth)
 			{
-				Debug::Log("[NeuralAI] House %d transport op %d: %s %u badly hit, sets its load down at (%d,%d), frame %d.\n", houseIndex,
-					op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y, now);
-				continue;
+				const int out = loaded > 0 ? PutAshoreNow(pTransport) : 0;
+
+				if (pTransport->Passengers.NumPassengers == 0)
+				{
+					Debug::Log("[NeuralAI] House %d transport op %d: %s %u badly hit, sets %d down at (%d,%d) and leaves, frame %d.\n",
+						houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, out, pTransport->GetMapCoords().X,
+						pTransport->GetMapCoords().Y, now);
+					released.push_back(transport.UniqueID);
+					continue;
+				}
 			}
 
 			switch (transport.Leg)
@@ -1583,7 +1637,10 @@ namespace
 		macro.OpWaitingFrame = now;
 
 		if (macro.TransportOps.empty())
+		{
+			macro.OpWatch.clear();
 			return;
+		}
 
 		// The units the operations hold, by UniqueID, those aboard a transport too (looked up by key
 		// only: the operations act in their own fixed order).
@@ -1616,6 +1673,28 @@ namespace
 		}
 
 		std::erase_if(macro.TransportOps, [](const NeuralTransportOperation& op) { return op.Over; });
+
+		// TEMP trace: the units as the operations leave them, for TraceTransportOpUnits (16 at most).
+		macro.OpWatch.clear();
+
+		for (auto const& op : macro.TransportOps)
+		{
+			for (auto const& member : op.Members)
+			{
+				auto const it = foots.find(member.UniqueID);
+
+				if (!member.Aboard && it != foots.end() && !it->second->InLimbo && macro.OpWatch.size() < 16)
+					macro.OpWatch.push_back({ member.UniqueID, it->second, it->second->CurrentMission, it->second->MegaMission, it->second->Destination });
+			}
+
+			for (auto const& transport : op.Transports)
+			{
+				auto const it = foots.find(transport.UniqueID);
+
+				if (it != foots.end() && macro.OpWatch.size() < 16)
+					macro.OpWatch.push_back({ transport.UniqueID, it->second, it->second->CurrentMission, it->second->MegaMission, it->second->Destination });
+			}
+		}
 
 		// Retry marks past their time go.
 		if (macro.TransportOpRetryUntil.size() > 256)
