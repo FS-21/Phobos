@@ -9258,6 +9258,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const std::unordered_set<const FootClass*> idleSoldiers(idleCombatInf.begin(), idleCombatInf.end());
 		int heldVehicles = 0;
 		int heldSoldiers = 0;
+		// Tank mass: those of them with no other job join the idle army below, and the next wave
+		// takes them along.
+		std::vector<UnitClass*> heldJoinVehicles;
+		std::vector<InfantryClass*> heldJoinSoldiers;
+
+		auto const heldJoinsWave = [&](FootClass* pFoot)
+		{
+			return tankMassWaves && !IsPlanMember(pHouse, pFoot->UniqueID) && !IsInTransportOp(pHouse, pFoot->UniqueID)
+				&& !IsFerryReserved(pHouse, pFoot->UniqueID) && pFoot->CurrentMission != Mission::Enter
+				&& pFoot->QueuedMission != Mission::Enter && pFoot->CurrentMission != Mission::Unload && !pFoot->HasAnyLink()
+				&& !pFoot->BunkerLinkedItem && !pFoot->Deactivated && !pFoot->IsUnderEMP()
+				&& pFoot->GetHealthPercentage() >= HeldJoinsWaveHealth;
+		};
 
 		auto const isHeldAtHome = [&](const FootClass* pFoot)
 		{
@@ -9283,7 +9296,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			auto const pWeapon = pU->Type->GetWeapon(0);
 
 			if (pWeapon && pWeapon->WeaponType && isHeldAtHome(pU))
+			{
 				++heldVehicles;
+
+				if (!IsImmobileUnitTypeOnLand(pU->Type) && heldJoinsWave(pU))
+					heldJoinVehicles.push_back(pU);
+			}
 		}
 
 		for (auto const pInf : InfantryClass::Array)
@@ -9297,7 +9315,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			auto const pWeapon = pInf->Type->GetWeapon(0);
 
 			if (pWeapon && pWeapon->WeaponType && isHeldAtHome(pInf))
+			{
 				++heldSoldiers;
+
+				if (heldJoinsWave(pInf))
+					heldJoinSoldiers.push_back(pInf);
+			}
 		}
 
 		// TEMP diagnostic: units jammed at home, every 1800 frames per house while there are 10 or more.
@@ -9339,6 +9362,33 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		NoteIdleArmy(pHouse, idleVehicles + heldVehicles, static_cast<int>(idleCombatInf.size()) + heldSoldiers, idleShips);
+
+		// How many may join grows with the wave lesson, like the wave (user): none while the waves
+		// take buildings, HeldJoinsWaveUnits after one that took none, twice that after each more.
+		// Vehicles first.
+		const int lessonSteps = WaveLessonStepsNow(pHouse);
+		const size_t heldJoinMost = lessonSteps > 0 ? static_cast<size_t>(HeldJoinsWaveUnits) << (lessonSteps - 1) : 0u;
+
+		if (heldJoinVehicles.size() > heldJoinMost)
+			heldJoinVehicles.resize(heldJoinMost);
+
+		if (heldJoinSoldiers.size() > heldJoinMost - heldJoinVehicles.size())
+			heldJoinSoldiers.resize(heldJoinMost - heldJoinVehicles.size());
+
+		// From here on they are idle army like the rest: they make the count of the next wave and
+		// leave with it.
+		if (!heldJoinVehicles.empty() || !heldJoinSoldiers.empty())
+		{
+			idleCombatUnits.insert(idleCombatUnits.end(), heldJoinVehicles.begin(), heldJoinVehicles.end());
+			idleCombatInf.insert(idleCombatInf.end(), heldJoinSoldiers.begin(), heldJoinSoldiers.end());
+
+			if (IsAITickWindow(900, 0))
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d held at home join the idle army: %d vehicles and %d soldiers\n",
+					Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(heldJoinVehicles.size()),
+					static_cast<int>(heldJoinSoldiers.size()));
+			}
+		}
 	}
 
 	// Strength gate on top of the unit count: the main wave (and the same-landmass push below)

@@ -2242,6 +2242,13 @@ namespace
 	constexpr int TankMassBankFactoryLead = 2;
 	// This many idle fighting vehicles able to join a wave go out whatever the strength gate says.
 	constexpr int TankMassOverflowVehicles = 24;
+	// A fighting unit of the tank mass held at home (HeldAtHomeFrames) joins the idle army its next
+	// wave is made of from this health (user: the wave takes the idle offensive units along, which
+	// also clears the base).
+	constexpr double HeldJoinsWaveHealth = 0.5;
+	// How many of them may join after the first wave in a row that took no building; twice as many
+	// after each one more (none before).
+	constexpr int HeldJoinsWaveUnits = 8;
 	// Each step doubles the count (user): 10, 20, then the most.
 	constexpr int TankMassWaveCap = 32;
 	constexpr int WaveLessonPercent = 200;
