@@ -3277,21 +3277,39 @@ namespace
 		const int size = std::max(1, static_cast<int>(pSample->GetTechnoType()->Size));
 		int rides = 0;
 		int seats = 0;
+		// TEMP diagnostic: why the transports of ours that carry a harvester are no ride (in a transport
+		// operation, in another job or unsound, no crossing from the harvesters' land to the field).
+		int inOperation = 0;
+		int otherwiseBusy = 0;
+		int noCrossing = 0;
 
 		auto const considerRide = [&](FootClass* pFoot)
 		{
-			if (!pFoot || pFoot->Owner != pHouse)
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo)
 				return;
 
 			const OpCarrier carrier = GetOpCarrier(pFoot);
 
-			if (!IsTransportFreeForOp(pHouse, pFoot, carrier) || !OpCarrierTakes(pFoot, carrier, pSample))
+			if (carrier == OpCarrier::None || !OpCarrierTakes(pFoot, carrier, pSample))
 				return;
+
+			if (!IsTransportFreeForOp(pHouse, pFoot, carrier))
+			{
+				if (IsInTransportOp(pHouse, pFoot->UniqueID))
+					inOperation++;
+				else
+					otherwiseBusy++;
+
+				return;
+			}
 
 			auto const pType = pFoot->GetTechnoType();
 
 			if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), sampleCell) || !CanTransportTypeLink(pType, sampleCell, pLanding->MapCoords))
+			{
+				noCrossing++;
 				return;
+			}
 
 			rides++;
 			seats += carrier == OpCarrier::Carryall ? 1 : pType->Passengers / size;
@@ -3309,8 +3327,9 @@ namespace
 			{
 				macro.ShuttleNoRideLogFrame = now;
 				Debug::Log("[NeuralAI] House %d shuttle: %d idle harvesters on zone %d, no idle transport takes one to the field at (%d,%d) "
-					"zone %d (home ore %d), frame %d.\n", pHouse->ArrayIndex, static_cast<int>(harvesters.size()), homeZone, field.X, field.Y,
-					fieldZone, macro.IslandHomeOre, now);
+					"zone %d (home ore %d); transports that carry one: %d in transport operations, %d busy otherwise or unsound, %d with "
+					"no crossing there; %d credits, frame %d.\n", pHouse->ArrayIndex, static_cast<int>(harvesters.size()), homeZone, field.X,
+					field.Y, fieldZone, macro.IslandHomeOre, inOperation, otherwiseBusy, noCrossing, pHouse->Available_Money(), now);
 			}
 
 			return;
