@@ -559,7 +559,9 @@ namespace
 
 			const int fieldZone = MapClass::Instance.GetMovementZoneType(field.Cell, MovementZone::Normal, false);
 
-			if (fieldZone < 0)
+			// A field on a cell with no zone lies on no landmass at all (matches #10314 and #10325: the
+			// free field across water was at zone 65535 from the first frame).
+			if (fieldZone < 0 || fieldZone == NoZoneId)
 				continue;
 
 			if (!isHubZone(fieldZone))
