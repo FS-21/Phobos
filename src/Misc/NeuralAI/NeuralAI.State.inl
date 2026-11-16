@@ -533,6 +533,13 @@ namespace
 		int UncolonizedOreFields { 0 };
 		// Idle harvester dispatcher (UpdateIdleHarvesters), same keyed shape as StuckTracks.
 		std::unordered_map<DWORD, NeuralStuckTrack> IdleHarvesterTracks {};
+		// Deployed slave miners (UpdateStrandedSlaveMiners): ore samples in their slaves' reach (read
+		// by the economy unit cap), the frame each one ran out of ore in reach, and the moves ordered
+		// since the last log line.
+		std::unordered_map<DWORD, int> MinerOreSamples {};
+		std::unordered_map<DWORD, int> StrandedMinerSince {};
+		int MinerRelocations { 0 };
+		int MinerLogFrame { -1 };
 		// Offensive base crawl bookkeeping (UpdateOffensiveStones): cells chosen for a stone toward
 		// the enemy and not yet confirmed placed, then the placed stones by UniqueID, so how many
 		// forward stones survive is counted (crawlStoneForward / crawlStoneLost) for the trainer.
@@ -1055,6 +1062,10 @@ namespace
 			this->AirStallTracks.clear();
 			this->UncolonizedOreFields = 0;
 			this->IdleHarvesterTracks.clear();
+			this->MinerOreSamples.clear();
+			this->StrandedMinerSince.clear();
+			this->MinerRelocations = 0;
+			this->MinerLogFrame = -1;
 			this->OffensiveStoneCells.clear();
 			this->OffensiveStones.clear();
 			this->LastFactoryCapSaleFrame = -100000;
@@ -1505,6 +1516,16 @@ namespace
 	constexpr int FerrySetDownFrames = 900;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
+	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its
+	// slaves' reach is productive; one with fewer for MinerStrandedFrames packs up for the nearest
+	// field holding MinerFieldMinOreCells or more, with no mining site within MinerFieldClearCells,
+	// up to MinerFieldMaxCells away. MinerLogFrames between the log lines of a house.
+	constexpr int MinerProductiveOreSamples = 4;
+	constexpr int MinerStrandedFrames = 900;
+	constexpr int MinerFieldMinOreCells = 10;
+	constexpr int MinerFieldClearCells = 10;
+	constexpr int MinerFieldMaxCells = 72;
+	constexpr int MinerLogFrames = 1800;
 	constexpr int CarryallDropSearchCells = 6;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
