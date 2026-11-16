@@ -709,9 +709,16 @@ namespace
 				memberCells.push_back(find(member.UniqueID)->GetMapCoords());
 		}
 
-		// 3. The staging beach: the coast of the origin land near the waiting members that no known enemy
-		// covers, and behind it, up to 5 cells towards them, the spot where they wait, off the beach the
-		// transports come to.
+		if (op.Landing == CellStruct::Empty)
+		{
+			auto const pLanding = FindSafeIslandLandingCell(pHouse, op.Target, op.TargetZone, false);
+			op.Landing = pLanding ? pLanding->MapCoords : op.Target;
+		}
+
+		// 3. The staging cell: where the members stand, on the outskirts of the base or expansion they
+		// are at (FindBoardingCell), not a coast far off: the transports come to them. Only with no such
+		// cell, the coast of their land that no known enemy covers. The members wait next to it, up to
+		// 3 cells back towards them, off the cells the transports come to.
 		if (op.Staging == CellStruct::Empty && !memberCells.empty())
 		{
 			int sumX = 0;
@@ -724,31 +731,66 @@ namespace
 			}
 
 			const int count = static_cast<int>(memberCells.size());
-			const CellStruct centre { static_cast<short>(sumX / count), static_cast<short>(sumY / count) };
-			auto const pStaging = FindSafeIslandLandingCell(pHouse, centre, op.OriginZone, false);
+			const CellStruct mean { static_cast<short>(sumX / count), static_cast<short>(sumY / count) };
+			// The member nearest to their mean: members spread over a base and an expansion board at one
+			// of the two, not halfway.
+			CellStruct centre = memberCells.front();
+
+			for (auto const& at : memberCells)
+			{
+				if (at.DistanceFrom(mean) < centre.DistanceFrom(mean))
+					centre = at;
+			}
+
+			int clearance = 9999;
+			const char* rule = "outskirts";
+			CellClass* pStaging = FindBoardingCell(pHouse, centre, op.OriginZone, op.Landing, nullptr, &clearance);
+
+			if (!pStaging)
+			{
+				rule = "coast fallback";
+				pStaging = FindSafeIslandLandingCell(pHouse, centre, op.OriginZone, false);
+			}
+
 			op.Staging = pStaging ? pStaging->MapCoords : centre;
 			op.Gather = op.Staging;
 			const double span = op.Staging.DistanceFrom(centre);
 
-			for (int step = std::min(5, static_cast<int>(span)); step >= 1; --step)
+			for (int step = std::min(3, static_cast<int>(span)); step >= 1; --step)
 			{
 				const CellStruct spot { static_cast<short>(op.Staging.X + (centre.X - op.Staging.X) * step / std::max(1.0, span)),
 					static_cast<short>(op.Staging.Y + (centre.Y - op.Staging.Y) * step / std::max(1.0, span)) };
 				auto const pSpot = MapClass::Instance.TryGetCellAt(spot);
+				bool besideBuilding = false;
 
-				if (pSpot && pSpot->LandType != LandType::Water && !pSpot->GetBuilding()
+				for (int dy = -1; dy <= 1 && !besideBuilding; ++dy)
+				{
+					for (int dx = -1; dx <= 1 && !besideBuilding; ++dx)
+					{
+						const CellStruct next { static_cast<short>(spot.X + dx), static_cast<short>(spot.Y + dy) };
+						auto const pNext = MapClass::Instance.TryGetCellAt(next);
+						besideBuilding = pNext && pNext->GetBuilding();
+					}
+				}
+
+				if (pSpot && pSpot->LandType != LandType::Water && !besideBuilding
 					&& MapClass::Instance.GetMovementZoneType(spot, MovementZone::Normal, false) == op.OriginZone)
 				{
 					op.Gather = spot;
 					break;
 				}
 			}
-		}
 
-		if (op.Landing == CellStruct::Empty)
-		{
-			auto const pLanding = FindSafeIslandLandingCell(pHouse, op.Target, op.TargetZone, false);
-			op.Landing = pLanding ? pLanding->MapCoords : op.Target;
+			// TEMP diagnostic: how far the members walk to board, and how far from our buildings.
+			double farthest = 0.0;
+
+			for (auto const& at : memberCells)
+				farthest = std::max(farthest, at.DistanceFrom(op.Staging));
+
+			Debug::Log("[NeuralAI] House %d transport op %d staging DIAG: (%d,%d) by %s, %d cells from the members at (%d,%d) (%d waiting, "
+				"farthest %d), nearest building %d, gathering at (%d,%d), landing (%d,%d), frame %d.\n",
+				houseIndex, op.Id, op.Staging.X, op.Staging.Y, rule, static_cast<int>(op.Staging.DistanceFrom(centre)), centre.X, centre.Y,
+				count, static_cast<int>(farthest), clearance, op.Gather.X, op.Gather.Y, op.Landing.X, op.Landing.Y, now);
 		}
 
 		auto const pStagingCell = MapClass::Instance.TryGetCellAt(op.Staging);
