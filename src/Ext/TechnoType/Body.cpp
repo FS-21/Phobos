@@ -1640,6 +1640,9 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->RequiredHouses = pINI->ReadHouseTypesList(pSection, "RequiredHouses", this->RequiredHouses);
 	this->ForbiddenHouses = pINI->ReadHouseTypesList(pSection, "ForbiddenHouses", this->ForbiddenHouses);
 
+	// Ares BuiltAt: the factory types that may build this one (empty: any factory of its kind).
+	this->BuiltAt.Read(exINI, pSection, "BuiltAt");
+
 	// Prerequisite.RequiredTheaters contains a list of theater names
 	if (pINI->ReadString(pSection, "Prerequisite.RequiredTheaters", "", Phobos::readBuffer) > 0)
 	{
@@ -2300,6 +2303,7 @@ void TechnoTypeExt::Serialize(T& Stm)
 		.Process(this->Secret_ForbiddenHouses)
 		.Process(this->RequiredHouses)
 		.Process(this->ForbiddenHouses)
+		.Process(this->BuiltAt)
 
 		.Process(this->BuildLimitGroup_Types)
 		.Process(this->BuildLimitGroup_Nums)

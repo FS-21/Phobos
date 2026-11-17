@@ -1090,11 +1090,23 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 		char lineBuf[16384]; // one house line carries decisions, plans and gate counts
 
+		// The meaning version of the slots that changed (NeuralSlotMeanings).
+		std::string slotMeanings;
+
+		for (auto const& [slot, version] : NeuralSlotMeanings)
+		{
+			if (!slotMeanings.empty())
+				slotMeanings += ", ";
+
+			slotMeanings += "\"" + std::to_string(slot) + "\": " + std::to_string(version);
+		}
+
 		int lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
 			"{\n  \"slot\": %u,\n  \"pid\": %u,\n  \"frame\": %u,\n  \"fps\": "
 			"%u,\n  \"finished\": %s,\n  \"winnerHouse\": %d,\n  \"stalemate\": "
 			"%s,\n  \"elo\": %d,\n  \"gamesPlayed\": %u,\n  "
 			"\"rulesSignature\": \"%016llX\",\n  \"baseSignature\": \"%016llX\",\n  "
+			"\"slotMeanings\": {%s},\n  "
 			"\"mapInfo\": {\"cells\": %d, \"waterPct\": %d, \"landLinked\": %s, \"known\": %s},\n "
 			" \"contextRouting\": {\"challenger\": %s, \"opponent\": %s, \"phaseFrames\": [%d, %d]},\n "
 			" \"mapGeom\": {\"mapRect\": [%d, %d], \"visibleRect\": [%d, %d, %d, %d], \"iso\": %s, \"bounds\": [%d, %d, %d, %d]},\n "
@@ -1102,7 +1114,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			dst->SlotIndex, dst->ProcessId, dst->CurrentFrame, dst->FramesPerSecond, matchEnded ? "true" : "false",
 			dst->WinnerHouseIndex, stalemate ? "true" : "false", NeuralAI::Backpack.EstimatedELO,
 			NeuralAI::Backpack.GamesPlayed, static_cast<unsigned long long>(NeuralAI::CurrentRulesSignature),
-			static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature), MapInfo.Cells, MapInfo.WaterPct,
+			static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature), slotMeanings.c_str(), MapInfo.Cells, MapInfo.WaterPct,
 			MapInfo.LandLinked ? "true" : "false", MapInfo.Computed ? "true" : "false", ContextRouting.Loaded ? "true" : "false",
 			OpponentContextRouting.Loaded ? "true" : "false", RoutingMidPhaseFrame, RoutingLatePhaseFrame, mapW,
 			static_cast<int>(MapClass::Instance.MapRect.Height), localX, localY, localW, localH, hasIsoBounds ? "true" : "false",
@@ -1452,7 +1464,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					"\"betrayalsCommitted\": %d, \"betrayalsWitnessed\": %d, \"distrustRefusals\": %d, \"plansCancelled\": %d, "
 					"\"unitsRecalled\": %d, \"unitsRedirected\": %d, \"partnerTargetsCleared\": %d, \"graceDamageIgnored\": %d, "
 					"\"swCancelled\": %d, \"lowProfileFrames\": %d, \"duelHoldFrames\": %d, \"postDuelStrikes\": %d, "
-					"\"dyingRushes\": %d, \"dyingWaves\": %d, \"stalemateUpdates\": %d",
+					"\"dyingRushes\": %d, \"dyingWaves\": %d, \"stalemateUpdates\": %d, \"leaderFrames\": %d, \"leaderCoalitionFrames\": %d, \"poorTargetFrames\": %d",
 					coal.Reason, coal.TargetChoice, coal.JoinsByReason[1], coal.JoinsByReason[2], coal.JoinsByReason[3],
 					coal.JoinsByReason[4], coal.JoinsByChoice[1], coal.JoinsByChoice[2], coal.JoinsByChoice[3], coal.JoinsByChoice[4],
 					coal.DeclinedStrongest, coal.PactEnds[0], coal.PactEnds[1], coal.PactEnds[2], coal.PactEnds[3], coal.PactEnds[4],
@@ -1460,7 +1472,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? BetrayalsCommitted[h.ArrayIndex] : 0, coal.BetrayalsWitnessed,
 					coal.DistrustRefusals, coal.PlansCancelled, coal.UnitsRecalled, coal.UnitsRedirected, coal.PartnerTargetsCleared,
 					coal.GraceDamageIgnored, coal.SuperweaponsCancelled, coal.LowProfileFrames, coal.DuelHoldFrames,
-					coal.PostDuelStrikes, coal.DyingRushes, coal.DyingWaves, coal.StalemateUpdates);
+					coal.PostDuelStrikes, coal.DyingRushes, coal.DyingWaves, coal.StalemateUpdates, coal.LeaderFrames,
+					coal.LeaderCoalitionFrames, coal.PoorTargetFrames);
 			}
 
 			// Bank: [end credits, peak, average, spent, army value, AI ticks, rich ticks, governor

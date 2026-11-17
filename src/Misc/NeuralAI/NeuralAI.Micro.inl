@@ -1021,10 +1021,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	// Multi-Player Opportunism (Expert 3 Routing Slot 43): Balance focusing
-	// high-threat aggressor vs finishing off the most vulnerable enemy house
-	const int focusBias = static_cast<int>(scores[43]);
-
 	microSegments.Mark("ms: island discovery");
 
 	// Discover uncolonized island Resource (Ore/Gems), buildable Island Land
@@ -1636,6 +1632,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	int bestEnemyIdx = -1;
 	int bestEnemyPriority = -999999;
+	int runnerUpIdx = -1;
+	int runnerUpPriority = -999999;
+	// What made up the priority of the chosen house (main enemy log): threat seen, hurt us last,
+	// weak enough to finish, Expert 3 opportunism, diplomacy, team front.
+	std::array<int, 6> bestParts {};
 
 	for (auto const pOther : HouseClass::Array)
 	{
@@ -1646,47 +1647,70 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		const int idx = std::clamp(pOther->ArrayIndex, 0, 7);
-		int priority = pExt->NeuralAI_EstimatedEnemyThreat[idx] * GetMacroState(pHouse).FfaThreatScale[idx] / 100;
+		std::array<int, 6> parts {};
+		parts[0] = pExt->NeuralAI_EstimatedEnemyThreat[idx] * GetMacroState(pHouse).FfaThreatScale[idx] / 100;
 
 		if (pHouse->WhoLastHurtMe == pOther->ArrayIndex)
-			priority += 250;
+			parts[1] = 250;
 
 		microSegments.Mark("ms: targets");
 
-		// Finish a weak enemy: judged by the structures of it we know of (its real building count
-		// would see through the fog).
-		if (focusBias > 40)
-		{
-			int knownStructures = 0;
-
-			for (auto const pEnemyBld : pOther->Buildings)
-			{
-				if (pEnemyBld && pEnemyBld->IsAlive && !pEnemyBld->InLimbo && IsEnemyBuildingKnown(pHouse, pEnemyBld)
-					&& ++knownStructures > 4)
-				{
-					break;
-				}
-			}
-
-			if (knownStructures > 0 && knownStructures <= 4)
-				priority += std::clamp(focusBias / 2, 40, 260);
-		}
-
 		// Expert 3 (UpdateFfaTargets): busy, at our door, weakest, nearest.
-		priority += GetMacroState(pHouse).FfaEnemyBonus[idx];
+		parts[3] = GetMacroState(pHouse).FfaEnemyBonus[idx];
 
 		// Expert 3 diplomacy (NeuralAI.Diplomacy.inl): the coalition target, never a truce partner, an
-		// ex-partner not for a while, two houses at war left to it, the dying house first.
-		priority += DiplomacyTargetBias(pHouse, pOther->ArrayIndex, false);
+		// ex-partner not for a while, two houses at war left to it, the dying house first, the poorest.
+		parts[4] = DiplomacyTargetBias(pHouse, pOther->ArrayIndex, false);
 
 		// Team blackboard: the enemy this house covers for its team (its front).
-		priority += TeamFrontBonus(pHouse, pOther->ArrayIndex);
+		parts[5] = TeamFrontBonus(pHouse, pOther->ArrayIndex);
+
+		const int priority = parts[0] + parts[1] + parts[2] + parts[3] + parts[4] + parts[5];
 
 		if (priority > bestEnemyPriority)
 		{
+			runnerUpPriority = bestEnemyPriority;
+			runnerUpIdx = bestEnemyIdx;
 			bestEnemyPriority = priority;
-
 			bestEnemyIdx = pOther->ArrayIndex;
+			bestParts = parts;
+		}
+		else if (priority > runnerUpPriority)
+		{
+			runnerUpPriority = priority;
+			runnerUpIdx = pOther->ArrayIndex;
+		}
+	}
+
+	// Which motive weighs most in the choice whenever the main enemy changes, so the motives can be
+	// measured (the first MainEnemyLogLimit changes of each house in a match).
+	if (bestEnemyIdx >= 0 && bestEnemyIdx != pHouse->EnemyHouseIndex)
+	{
+		static int mainEnemyLogSerial = -1;
+		static std::array<int, 32> mainEnemyLogCount {};
+
+		if (mainEnemyLogSerial != NeuralMatchSerial)
+		{
+			mainEnemyLogSerial = NeuralMatchSerial;
+			mainEnemyLogCount.fill(0);
+		}
+
+		if (mainEnemyLogCount[std::clamp(pHouse->ArrayIndex, 0, 31)]++ < MainEnemyLogLimit)
+		{
+			constexpr const char* partNames[] = { "threat", "hurt us", "weak", "ffa", "diplomacy", "team" };
+			size_t top = 0;
+
+			for (size_t i = 1; i < bestParts.size(); ++i)
+			{
+				if (bestParts[i] > bestParts[top])
+					top = i;
+			}
+
+			const char* motive = top == 4 ? DiplomacyTargetMotive(pHouse, bestEnemyIdx) : partNames[top];
+			Debug::Log("[NeuralAI] House %d main enemy: house %d by %s (threat %d, hurt us %d, weak %d, ffa %d, diplomacy %d, team %d), "
+				"was house %d, runner-up house %d at %d against %d, frame %d.\n", pHouse->ArrayIndex, bestEnemyIdx, motive, bestParts[0],
+				bestParts[1], bestParts[2], bestParts[3], bestParts[4], bestParts[5], pHouse->EnemyHouseIndex, runnerUpIdx,
+				runnerUpPriority, bestEnemyPriority, Unsorted::CurrentFrame);
 		}
 	}
 
