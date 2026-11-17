@@ -213,7 +213,7 @@ namespace
 			if (!plan.Active)
 				continue;
 
-			const bool againstPartner = ownedByPartner(plan.TargetID) || nearPartnerBase(plan.TargetCell)
+			const bool againstPartner = ownedByPartner(plan.TargetID) || nearPartnerBase(plan.TargetCell) || plan.ForceOwner == partner
 				|| std::any_of(plan.Targets.begin(), plan.Targets.end(), ownedByPartner);
 
 			if (!againstPartner)

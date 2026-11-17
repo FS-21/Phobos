@@ -177,6 +177,9 @@ namespace
 		int KillValue { 0 };
 		// Bait Ambush: the bait's health in percent when it set out to fire at the building.
 		int LureHealth { 0 };
+		// Counter Squad: the enemy house and force category (EnemyForceCategory) it goes after.
+		int ForceOwner { -1 };
+		int ForceCategory { -1 };
 	};
 
 	struct NeuralStuckTrack
@@ -2539,6 +2542,48 @@ namespace
 	// A force this near our nearest member is in the fight: the whole group strikes, and it is
 	// fought wherever it goes from there (it came at us).
 	constexpr double PreemptiveEngageCells = 8.0;
+	// Counter Squad: an enemy house has CounterSquadForceUnits or more units of one force category
+	// (infantry, vehicles, artillery, ships, aircraft) seen within CounterSquadClusterCells of each
+	// other in the last CounterSquadSeenFrames. Our free units that counter that category go at the
+	// largest such force together: their fit against it (CounterFitOf) is at least CounterSquadFitMin
+	// and CounterSquadFitEdge points above the value-weighted mean fit of our whole army. The squad
+	// counts each member's value times its health and fit; best counters first, it takes members
+	// until it is worth CounterSquadEnoughPercent of what stands there (every unit seen within
+	// CounterSquadClusterCells of the force and the known defenses there) or has
+	// CounterSquadMaxMembers, and starts with CounterSquadMinMembers or more worth
+	// CounterSquadAdvantagePercent of it (by plain value no less than the outgunned turn-back of the
+	// raids asks for). A force no squad can take on yields to the next largest one.
+	constexpr int CounterSquadForceUnits = 9;
+	constexpr double CounterSquadClusterCells = 10.0;
+	constexpr int CounterSquadSeenFrames = 450;
+	constexpr int CounterSquadFitMin = 80;
+	constexpr int CounterSquadFitEdge = 25;
+	constexpr size_t CounterSquadMinMembers = 4;
+	constexpr size_t CounterSquadMaxMembers = 20;
+	constexpr int CounterSquadAdvantagePercent = 110;
+	constexpr int CounterSquadEnoughPercent = 200;
+	// A land squad meets CounterSquadStageCells short of the force and strikes together once two
+	// thirds of it are within CounterSquadStageNearCells of that spot, CounterSquadStageWaitFrames
+	// into the plan, or once the force is within CounterSquadEngageCells of a member; ships strike at
+	// once. The squad follows the force (its category seen in the last CounterSquadTrackFrames within
+	// CounterSquadClusterCells of where it was) and is sent again when it moved CounterSquadReaimCells
+	// from where the members were sent. It went well when the force fell to CounterSquadBrokenPercent
+	// of its value at the start with half of the squad at it, or when the members destroyed enemy
+	// units worth CounterSquadKillPercent of it; badly when the force was not seen for
+	// CounterSquadLostFrames, the squad fell to CounterSquadKeptPercent of its value or its time ran
+	// out. With no force or no squad it looks again after CounterSquadRetryFrames.
+	constexpr double CounterSquadStageCells = 14.0;
+	constexpr double CounterSquadStageNearCells = 5.0;
+	constexpr int CounterSquadStageWaitFrames = 600;
+	constexpr double CounterSquadEngageCells = 8.0;
+	constexpr int CounterSquadTrackFrames = 300;
+	constexpr double CounterSquadReaimCells = 6.0;
+	constexpr int CounterSquadBrokenPercent = 35;
+	constexpr int CounterSquadKillPercent = 60;
+	constexpr int CounterSquadLostFrames = 900;
+	constexpr int CounterSquadKeptPercent = 40;
+	constexpr int CounterSquadDurationFrames = 3000;
+	constexpr int CounterSquadRetryFrames = 300;
 	// Hold Under Towers: a ground enemy force of at least HoldTowersMinEnemyValue within
 	// HoldTowersEnemyCells of home, over HoldTowersOddsPercent of our free army within
 	// HoldTowersArmyCells, and an army of at least HoldTowersMinMembers: 19 of the 27 holds whose

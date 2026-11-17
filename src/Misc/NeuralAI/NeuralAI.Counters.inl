@@ -333,6 +333,46 @@ namespace
 		return fit;
 	}
 
+	// One enemy force as counter targets (Counter Squad): the units of one house and one force
+	// category seen within radius of a cell no longer than maxAge ago, by value, with the mean
+	// speed of its artillery (fast units hunt it down) and no range term (a squad goes at the force,
+	// it does not stand off from it).
+	NeuralCounterView BuildForceCounterView(HouseClass* pHouse, int owner, EnemyForceCategory category, const CellStruct& center,
+		double radius, int maxAge)
+	{
+		NeuralCounterView view {};
+		long long speedSum = 0;
+
+		for (auto const& [uid, sighting] : GetMacroState(pHouse).EnemySightings)
+		{
+			if (!sighting.Type || sighting.OwnerIndex != owner || sighting.Category != category || sighting.Value <= 0
+				|| Unsorted::CurrentFrame - sighting.LastSeenFrame > maxAge || sighting.LastCoords.DistanceFrom(center) > radius)
+			{
+				continue;
+			}
+
+			const int armorIndex = static_cast<int>(sighting.Type->Armor);
+			auto const it = std::find_if(view.Targets.begin(), view.Targets.end(),
+				[armorIndex](const NeuralCounterTarget& target) { return target.ArmorIndex == armorIndex; });
+
+			if (it != view.Targets.end())
+				it->Value += sighting.Value;
+			else
+				view.Targets.push_back({ armorIndex, category, sighting.Value });
+
+			view.TotalValue += sighting.Value;
+			speedSum += static_cast<long long>(sighting.Type->Speed) * sighting.Value;
+		}
+
+		if (view.TotalValue > 0 && category == EnemyForceCategory::Artillery)
+		{
+			view.ArtilleryShare = 100;
+			view.ArtillerySpeed = static_cast<int>(speedSum / view.TotalValue);
+		}
+
+		return view;
+	}
+
 	// Every 300 frames, for every expert (countering the threat is not one expert's business; the
 	// counter strategist, Expert 2, takes all of the shift, the others CounterShareOtherExperts
 	// percent in peace and all of it under attack): scores every buildable combat type of each queue
