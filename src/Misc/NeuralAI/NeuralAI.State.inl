@@ -145,6 +145,8 @@ namespace
 		int AuxPeak { 0 };
 		// Several targets at once (Factory Decapitation) or per-group sizes (Three-Front Assault).
 		std::vector<DWORD> Targets {};
+		// Cells of the members (Naval Strike Group: a firing cell for each shelling ship, apart).
+		std::vector<CellStruct> Cells {};
 		// Sub-targets destroyed so far (chain plans: Rolling Siege), so a plan that did real
 		// damage before its deadline is not scored as a plain failure.
 		int Progress { 0 };
@@ -806,6 +808,8 @@ namespace
 		int LastHarvestIncomeFrame { -1 };
 		bool DryEconomyActive { false };
 		int LastDrySaleFrame { -100000 };
+		// Last recovery sale of a surplus factory (EconomyRecoverySaleFrames).
+		int LastRecoverySaleFrame { -100000 };
 		int LastHarvesterBalanceFrame { -100000 };
 		// Expert 0 work (UpdateEconomyCrisis, every 150 frames): the selector prior from the economy
 		// trouble there is now, and what it is made of. Own state and current sight only.
@@ -1138,6 +1142,10 @@ namespace
 		int RemnantSearchFrame { -100000 };
 		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it.
 		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
+		// The idle army by type as the last tick counted it, and when: the group the next wave is
+		// made of, for the target scoring (WaveGroupDamage*).
+		std::vector<std::pair<const TechnoTypeClass*, int>> WaveGroupTypes;
+		int WaveGroupFrame { -100000 };
 		// Transport operations of the house (NeuralAI.Operations.inl): the operations, the next id,
 		// the operation that holds each member or transport by UniqueID, units an operation gave back
 		// and that may not ask again before a frame, the size of the members still waiting on their
@@ -1375,6 +1383,7 @@ namespace
 			this->LastHarvestIncomeFrame = -1;
 			this->DryEconomyActive = false;
 			this->LastDrySaleFrame = -100000;
+			this->LastRecoverySaleFrame = -100000;
 			this->LastHarvesterBalanceFrame = -100000;
 			this->EconomyTrouble = 0;
 			this->LowPowerSinceFrame = -1;
@@ -1536,6 +1545,8 @@ namespace
 			this->WaveEscortRetryFrame = -1;
 			this->RemnantSearchFrame = -100000;
 			this->WaveGoals.clear();
+			this->WaveGroupTypes.clear();
+			this->WaveGroupFrame = -100000;
 			this->TransportOps.clear();
 			this->NextTransportOpId = 1;
 			this->TransportOpOf.clear();
@@ -2090,6 +2101,16 @@ namespace
 	constexpr int MinerFieldClearCells = 10;
 	constexpr int MinerFieldMaxCells = 72;
 	constexpr int MinerLogFrames = 1800;
+	// Recovery sale (user: in extreme poverty a house with too many factories may sell one to pay
+	// for the recovery of its economy): while a house saves for the harvester or the refinery that
+	// restores its income, is short of its price and nothing comes in (nothing gathers, or it lost
+	// a third of its refineries or harvesters and no unload paid for
+	// EconomyRecoverySaleQuietFrames), one factory of the category with the most copies is sold
+	// every EconomyRecoverySaleFrames, down to EconomyRecoveryKeepFactories a category. Never a
+	// shipyard, the newest factory, the last of a type or the only one by a construction yard.
+	constexpr int EconomyRecoverySaleFrames = 300;
+	constexpr int EconomyRecoverySaleQuietFrames = 1800;
+	constexpr int EconomyRecoveryKeepFactories = 1;
 	// Ore cells of a held 12x12 ore block for each refinery past the first it takes (3 at most).
 	constexpr int RefineryOreCellsPerExtra = 24;
 	// Most mobile refineries (slave miners) a house mining with them wants, as the Advanced AI, and
@@ -2286,6 +2307,27 @@ namespace
 	constexpr int CrawlPowerSurplus = 700;
 	constexpr int ArmyIdleWindowFrames = 2700;
 	constexpr std::array<int, 3> ArmyIdleBrake { 30, 40, 12 };
+	// Naval Strike Group (user: ships are of more use wearing the enemy down, and taking the place of
+	// the damaged ones, than idle by the dozen; a few may stay by the base to defend it). The whole free
+	// long-range fleet goes, NavalStrikeMaxShips at most, and NavalStrikeMaxEscorts escorts.
+	// - A reserve stays by our naval yard: NavalHomeReservePercent of the fleet, NavalHomeReserveMin at
+	//   least, the ships nearest to the yard. A fleet of NavalHomeReserveMin + 2 ships or fewer keeps
+	//   none.
+	// - Each shelling ship gets its own firing cell, NavalFiringSpacingCells from the others.
+	// - A ship that leaves for repairs is replaced from the free fleet, one per AI tick.
+	// It took 6 ships and 4 escorts to one cell: 108 Boomers of a house stood idle while 6 of them
+	// jammed at their firing cell (2026-11-17).
+	constexpr int NavalStrikeMaxShips = 40;
+	constexpr int NavalStrikeMaxEscorts = 8;
+	constexpr int NavalHomeReservePercent = 20;
+	constexpr int NavalHomeReserveMin = 2;
+	constexpr double NavalFiringSpacingCells = 3.0;
+	// The shelling ships split into squads of NavalSquadShips, each against its own target,
+	// NavalMaxTargets at most, NavalTargetSpacingCells apart (user: a bombardment spread over several
+	// targets is chaos for the victim, who stops only some of the attacks).
+	constexpr size_t NavalSquadShips = 6;
+	constexpr size_t NavalMaxTargets = 6;
+	constexpr double NavalTargetSpacingCells = 8.0;
 	// Warships pause sooner when the idle ones have nothing to shoot: that many with no coastal
 	// building in reach and no enemy ship in their sea at every AI tick of ArmyIdleWindowFrames
 	// (match #9846: a house kept building ships while about 50 sat with no target in reach).
@@ -2452,6 +2494,27 @@ namespace
 	// buildings within WaveGoalKeepCells of it score WaveTargetKeepBonus more, above the focus
 	// enemy (300) and below the coalition target (700). 189 of 20504 launches of 48 houses went
 	// more than 12 cells from the launch before within 900 frames, up to 26 per house.
+	// A wave goes first for what its group brings down fast and last for what it barely scratches
+	// (user): the damage the idle army does to a building type in 900 frames (damage, burst, verses
+	// its armor, rate of fire of the better weapon of each type) as a percent of its strength. At
+	// WaveGroupDamageEvenPercent it changes nothing; from WaveGroupDamageFastPercent on the target
+	// gains WaveGroupDamageMost, at WaveGroupDamageSlowPercent or under it loses as much, in
+	// proportion between. Less than the bonus of the target a wave keeps, so the target does not
+	// change with every unit that joins. The army counted is that of the last tick, no older than
+	// WaveGroupFreshFrames.
+	// Where the enemy aircraft rearm (user): a known airfield or helipad gains, as a wave target and
+	// as an air strike target, a share of the value of that enemy's aircraft seen lately
+	// (EnemyAirValueByOwner): AirBaseWavePercent of it up to AirBaseWaveMost on the score of a
+	// wave target, AirBaseStrikePercent up to AirBaseStrikeMost on the worth of an air strike.
+	constexpr int AirBaseWavePercent = 50;
+	constexpr int AirBaseWaveMost = 250;
+	constexpr int AirBaseStrikePercent = 30;
+	constexpr int AirBaseStrikeMost = 150;
+	constexpr int WaveGroupDamageEvenPercent = 100;
+	constexpr int WaveGroupDamageFastPercent = 400;
+	constexpr int WaveGroupDamageSlowPercent = 25;
+	constexpr int WaveGroupDamageMost = 200;
+	constexpr int WaveGroupFreshFrames = 60;
 	constexpr int WaveTargetKeepFrames = 900;
 	constexpr int WaveTargetKeepBonus = 400;
 	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit

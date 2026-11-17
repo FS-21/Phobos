@@ -815,6 +815,37 @@ namespace
 		return GetMacroState(pHouse).AirThreatValue / 8;
 	}
 
+	// Value of the aircraft of each enemy this house has seen within EnemySightingMemoryFrames.
+	std::array<int, 8> EnemyAirValueByOwner(HouseClass* pHouse)
+	{
+		std::array<int, 8> values {};
+
+		for (auto const& [uid, sighting] : GetMacroState(pHouse).EnemySightings)
+		{
+			const int age = Unsorted::CurrentFrame - sighting.LastSeenFrame;
+
+			if (sighting.Category == EnemyForceCategory::Air && sighting.OwnerIndex >= 0 && sighting.OwnerIndex < 8 && age >= 0
+				&& age <= EnemySightingMemoryFrames)
+			{
+				values[static_cast<size_t>(sighting.OwnerIndex)] += sighting.Value;
+			}
+		}
+
+		return values;
+	}
+
+	// What an airfield or a helipad gains as a target: `percent` of the value of its owner's
+	// aircraft seen, `most` at most.
+	int AirBaseTargetBonus(const std::array<int, 8>& airValues, const BuildingClass* pBld, int percent, int most)
+	{
+		if (!pBld || !pBld->Type || !pBld->Owner || (pBld->Type->Factory != AbstractType::AircraftType && !pBld->Type->Helipad))
+			return 0;
+
+		const int owner = pBld->Owner->ArrayIndex;
+
+		return owner >= 0 && owner < 8 ? std::min(most, airValues[static_cast<size_t>(owner)] * percent / 100) : 0;
+	}
+
 	// Defined in NeuralAI.Placement.inl: does this war factory keep a two-way road out of the base?
 	bool HasFactoryRoadOut(HouseClass* pHouse, const BuildingClass* pFactory);
 

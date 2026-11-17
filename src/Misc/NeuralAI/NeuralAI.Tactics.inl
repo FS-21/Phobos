@@ -4023,6 +4023,24 @@ namespace
 			holdForEconomy = false;
 		}
 
+		// Recovery sale (user): saving for the harvester or the refinery that restores the income,
+		// short of its price and with nothing coming in, a surplus factory is sold (see
+		// EconomyRecoverySaleFrames). The dry economy and the island expansion have their own sales.
+		{
+			const bool savesForIncome = holdForHarvester
+				|| (holdForEconomy && !islandHold && (macro.HarvesterSaveTarget > 0 || macro.RefinerySaveTarget > 0));
+			const int recoveryTarget = holdForHarvester ? cheapestHarvester : economyTarget;
+			const bool nothingComesIn = noIncome || (macro.EconomyRecoveryActive
+				&& (lastHarvest < 0 ? now > 9000 : now - lastHarvest > EconomyRecoverySaleQuietFrames));
+
+			if (savesForIncome && nothingComesIn && !macro.DryEconomyActive && pHouse->Available_Money() < recoveryTarget
+				&& (now - macro.LastRecoverySaleFrame >= EconomyRecoverySaleFrames || now < macro.LastRecoverySaleFrame)
+				&& SellSurplusFactory(pHouse, GetNewestOffensiveStoneCell(pHouse), EconomyRecoveryKeepFactories, true))
+			{
+				macro.LastRecoverySaleFrame = now;
+			}
+		}
+
 		const bool holdForExpansion = holdForEconomy;
 		const bool holdProduction = holdForHarvester || holdForEconomy;
 
