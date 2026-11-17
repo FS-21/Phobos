@@ -1676,6 +1676,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// The building a crossing asks for (crossingPrerequisites).
 		int bestCrossingIdx = -1;
 		int bestCrossingScore = -32000;
+		// The barracks an urgent capture site asks for (UpdateCaptureBarracks).
+		int bestCaptureBarracksIdx = -1;
+		int bestCaptureBarracksScore = -32000;
 
 		// A raid short of guns with no defense that shoots up buildable yet: the buildings those
 		// defenses still miss come ahead of routine picks.
@@ -2160,6 +2163,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 			}
 		}
+
+		// Capture barracks (UpdateCaptureBarracks): a tech our engineers would take stands on a land with
+		// buildings of ours and no barracks of ours; its barracks is wanted like an outpost's.
+		const bool captureSiteNeedsBarracks = IsCaptureSiteWaiting(pHouse);
+		const bool captureSiteUrgent = captureSiteNeedsBarracks && IsCaptureSiteUrgent(pHouse);
 
 		// Outposts that may get a factory past the difficulty cap (SellFactoriesOverDifficultyCap
 		// then sells another of its type): a forward or island ConYard without one, or the front of
@@ -2707,7 +2715,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				category >= 0 && factoryCategoryCounts[category] >= factoryCategoryCaps[category])
 			{
 				const bool outpostNeedsIt = (category == 0)
-					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
+					? (forwardConYardNeedsBarracks || frontNeedsBarracks || captureSiteNeedsBarracks)
 					: (category == 1 ? (forwardConYardNeedsWarFactory || frontNeedsWarFactory) : islandYardNeedsShipyard);
 				const bool newFactoryType = owned == 0;
 				const bool saleCooldownOver = Unsorted::CurrentFrame - GetMacroState(pHouse).LastFactoryCapSaleFrame >= 4500;
@@ -2727,7 +2735,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (isGroundFactoryOrBarracks && owned >= 1 && GetMacroState(pHouse).HasBuildableTechUnlock)
 			{
 				const bool outpostNeedsCopy = (pBld->Factory == AbstractType::InfantryType)
-					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
+					? (forwardConYardNeedsBarracks || frontNeedsBarracks || captureSiteNeedsBarracks)
 					: (forwardConYardNeedsWarFactory || frontNeedsWarFactory);
 				const bool bankNeedsCopy = bankGovernorBuilds
 					&& ((pBld->Factory == AbstractType::InfantryType)
@@ -2916,7 +2924,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					: ((needsSteppingStoneCrawlToOre && pBld->BaseNormal) ? std::max(maxBarracks + 1, 4) : maxBarracks);
 				const int bankBarracks = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Infantry, pHouse->NumBarracks) : 0;
 
-				if (owned >= effectiveMaxBarracks && bankBarracks == 0)
+				// A capture site asks for one barracks past any count (placement takes it to the site).
+				if (owned >= effectiveMaxBarracks && bankBarracks == 0 && !captureSiteNeedsBarracks)
 					continue;
 
 				// Slot 82 (Cross-Faction Tech Tree): If we already own our native
@@ -2934,6 +2943,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					// do not penalize by home-island Barracks count!
 					score = std::max(static_cast<int>(scores[2]), 300) + 1450 + (beachheadNeedsFactories ? 1500 : 0);
 				}
+				else if (captureSiteNeedsBarracks)
+				{
+					// A capture site lacks its barracks: the home barracks count does not lower it either.
+					score = std::max(static_cast<int>(scores[2]), 300) + CaptureBarracksBonus;
+				}
 				else
 				{
 					score = scores[2] - owned * (bankSteps > 0 ? 420 : 820) + (bankSteps > 0 ? 250 + 120 * std::min(6, bankSteps) : 0);
@@ -2946,6 +2960,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						score += 780; // Forward Barracks stepping-stone toward uncolonized
 									// Ore / Frontline!
 					}
+				}
+
+				if (captureSiteUrgent && score > bestCaptureBarracksScore)
+				{
+					bestCaptureBarracksScore = score;
+					bestCaptureBarracksIdx = pBld->ArrayIndex;
 				}
 
 				if (bankBarracks > 0)
@@ -3620,6 +3640,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestCrossingIdx;
 			bestBldScore = std::max(bestBldScore, bestCrossingScore);
+		}
+
+		// An urgent capture site (UpdateCaptureBarracks: our engineers failed on the way to its tech, or
+		// the crossing to it is dangerous): its barracks comes before the other picks, the bank governor's
+		// factories included, under the terms of Island Hold below (which wins when both ask).
+		if (bestCaptureBarracksIdx >= 0 && bestBldIdx != bestCaptureBarracksIdx && hasActiveBuildingIncome && !bestFillsAirDeficit
+			&& inProgressBldIdx < 0 && inProgressDefIdx < 0)
+		{
+			bestBldIdx = bestCaptureBarracksIdx;
+			bestBldScore = std::max(bestBldScore, bestCaptureBarracksScore);
 		}
 
 		// Island Hold: the defense its yard still lacks comes before the other picks, the bank
