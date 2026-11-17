@@ -102,6 +102,12 @@ struct AITrainerSharedTelemetry
 
 #pragma pack(pop)
 
+// The factory a Neural AI house builds a queue at (src/Ext/Building/Hooks.Production.cpp).
+namespace NeuralFactoryQueue
+{
+	BuildingClass* FindDesignated(HouseClass* pOwner, AbstractType kind, bool naval);
+}
+
 class NeuralAI
 {
 public:
