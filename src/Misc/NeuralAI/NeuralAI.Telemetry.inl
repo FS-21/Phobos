@@ -1452,7 +1452,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					"\"betrayalsCommitted\": %d, \"betrayalsWitnessed\": %d, \"distrustRefusals\": %d, \"plansCancelled\": %d, "
 					"\"unitsRecalled\": %d, \"unitsRedirected\": %d, \"partnerTargetsCleared\": %d, \"graceDamageIgnored\": %d, "
 					"\"swCancelled\": %d, \"lowProfileFrames\": %d, \"duelHoldFrames\": %d, \"postDuelStrikes\": %d, "
-					"\"dyingRushes\": %d, \"dyingWaves\": %d, \"stalemateUpdates\": %d",
+					"\"dyingRushes\": %d, \"dyingWaves\": %d, \"stalemateUpdates\": %d, \"leaderFrames\": %d, \"leaderCoalitionFrames\": %d, \"poorTargetFrames\": %d",
 					coal.Reason, coal.TargetChoice, coal.JoinsByReason[1], coal.JoinsByReason[2], coal.JoinsByReason[3],
 					coal.JoinsByReason[4], coal.JoinsByChoice[1], coal.JoinsByChoice[2], coal.JoinsByChoice[3], coal.JoinsByChoice[4],
 					coal.DeclinedStrongest, coal.PactEnds[0], coal.PactEnds[1], coal.PactEnds[2], coal.PactEnds[3], coal.PactEnds[4],
@@ -1460,7 +1460,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? BetrayalsCommitted[h.ArrayIndex] : 0, coal.BetrayalsWitnessed,
 					coal.DistrustRefusals, coal.PlansCancelled, coal.UnitsRecalled, coal.UnitsRedirected, coal.PartnerTargetsCleared,
 					coal.GraceDamageIgnored, coal.SuperweaponsCancelled, coal.LowProfileFrames, coal.DuelHoldFrames,
-					coal.PostDuelStrikes, coal.DyingRushes, coal.DyingWaves, coal.StalemateUpdates);
+					coal.PostDuelStrikes, coal.DyingRushes, coal.DyingWaves, coal.StalemateUpdates, coal.LeaderFrames,
+					coal.LeaderCoalitionFrames, coal.PoorTargetFrames);
 			}
 
 			// Bank: [end credits, peak, average, spent, army value, AI ticks, rich ticks, governor
