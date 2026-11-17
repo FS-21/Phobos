@@ -2667,6 +2667,12 @@ namespace
 	constexpr size_t CounterSquadMaxMembers = 20;
 	constexpr int CounterSquadAdvantagePercent = 110;
 	constexpr int CounterSquadEnoughPercent = 200;
+	// Unless the force is within CounterSquadHomeCells of home or CounterSquadOwnBuildingCells of one
+	// of our buildings, CounterSquadHomeKeepPercent of the value of the free units within
+	// CounterSquadHomeCells of home stays there (the base threat intercept keeps the same reserve).
+	constexpr double CounterSquadHomeCells = 18.0;
+	constexpr double CounterSquadOwnBuildingCells = 12.0;
+	constexpr int CounterSquadHomeKeepPercent = 33;
 	// A land squad meets CounterSquadStageCells short of the force and strikes together once two
 	// thirds of it are within CounterSquadStageNearCells of that spot, CounterSquadStageWaitFrames
 	// into the plan, or once the force is within CounterSquadEngageCells of a member; ships strike at

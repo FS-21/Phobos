@@ -7803,14 +7803,47 @@ namespace
 								: a.Distance != b.Distance ? a.Distance < b.Distance : a.Foot->UniqueID < b.Foot->UniqueID;
 						});
 
+					// Unless the force is at our own buildings, CounterSquadHomeKeepPercent of the free value
+					// at home stays there, as with the base threat intercept.
+					bool atOwnBuildings = center.DistanceFrom(homeCell) <= CounterSquadHomeCells;
+
+					for (auto const pBld : pHouse->Buildings)
+					{
+						if (atOwnBuildings)
+							break;
+
+						if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->GetMapCoords().DistanceFrom(center) <= CounterSquadOwnBuildingCells)
+							atOwnBuildings = true;
+					}
+
+					int homeValue = 0;
+
+					for (auto const pFoot : pool)
+					{
+						if (pFoot->GetMapCoords().DistanceFrom(homeCell) <= CounterSquadHomeCells)
+							homeValue += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+					}
+
+					const int maxFromHome = atOwnBuildings ? INT_MAX : homeValue * (100 - CounterSquadHomeKeepPercent) / 100;
 					std::vector<FootClass*> squad;
 					int weighted = 0;
 					int plain = 0;
+					int fromHome = 0;
 
 					for (auto const& counter : counters)
 					{
 						if (squad.size() >= CounterSquadMaxMembers || weighted * 100 >= enemyThere * CounterSquadEnoughPercent)
 							break;
+
+						if (counter.Foot->GetMapCoords().DistanceFrom(homeCell) <= CounterSquadHomeCells)
+						{
+							const int homeShare = GetCombatValueOfType(counter.Foot->GetTechnoType(), false);
+
+							if (fromHome + homeShare > maxFromHome)
+								continue;
+
+							fromHome += homeShare;
+						}
 
 						const int value = static_cast<int>(GetCombatValueOfType(counter.Foot->GetTechnoType(), false)
 							* counter.Foot->GetHealthPercentage());
