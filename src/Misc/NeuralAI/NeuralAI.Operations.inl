@@ -1687,10 +1687,14 @@ namespace
 					return true;
 				}
 
+				// Aboard, its progress starts anew once it is set down: a load set down on its own land by a
+				// stuck transport had all 8 members let go 15 frames later, on where they stood before they
+				// boarded 8400 frames earlier.
 				if (auto const itAboard = aboardOf.find(member.UniqueID); itAboard != aboardOf.end())
 				{
 					member.Aboard = true;
 					member.Transport = itAboard->second;
+					member.ProgressCell = CellStruct::Empty;
 					aboardCount++;
 					return false;
 				}
@@ -1841,13 +1845,13 @@ namespace
 				else
 				{
 					// Any other member that gets no OpMemberStuckCells nearer to the cell the operation sent it to in
-					// OpMemberStuckFrames, while still farther from it than OpGatherCells (shut in, its way blocked,
-					// the engine's Area Guard walking it elsewhere), is let go and may ask again after OpRetryFrames:
-					// the operation would wait for it until it gave up.
+					// OpMemberStuckFrames, while still farther from it than OpMemberStuckFarCells (shut in, its way
+					// blocked, the engine's Area Guard walking it elsewhere), is let go and may ask again after
+					// OpRetryFrames: the operation would wait for it until it gave up.
 					const CellStruct at = pFoot->GetMapCoords();
 					const double toOrder = member.OrderCell != CellStruct::Empty ? at.DistanceFrom(member.OrderCell) : 0.0;
 
-					if (toOrder <= OpGatherCells || member.ProgressCell == CellStruct::Empty
+					if (toOrder <= OpMemberStuckFarCells || member.ProgressCell == CellStruct::Empty
 						|| toOrder + OpMemberStuckCells <= member.ProgressCell.DistanceFrom(member.OrderCell))
 					{
 						member.ProgressCell = at;
