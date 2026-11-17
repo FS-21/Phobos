@@ -357,10 +357,12 @@ namespace
 	}
 
 	// How far in cells the weapons of a type hit a transport in the air or on the ground (0: none of
-	// them hits it), OpRouteMaxReachCells at most.
-	int OpThreatReach(const TechnoTypeClass* pType, bool airborne)
+	// them hits it), OpRouteMaxReachCells at most. takes: one of those weapons takes the transport
+	// (mind control).
+	int OpThreatReach(const TechnoTypeClass* pType, bool airborne, bool& takes)
 	{
 		int reach = 0;
+		takes = false;
 
 		for (size_t i = 0; i < 2; ++i)
 		{
@@ -375,6 +377,9 @@ namespace
 				continue;
 
 			reach = std::max(reach, pWeapon->Range / Unsorted::LeptonsPerCell);
+
+			if (pWeapon->Warhead && pWeapon->Warhead->MindControl)
+				takes = true;
 		}
 
 		return std::min(reach, OpRouteMaxReachCells);
@@ -401,10 +406,14 @@ namespace
 				continue;
 			}
 
-			const int reach = OpThreatReach(pBld->Type, airborne);
+			bool takes = false;
+			const int reach = OpThreatReach(pBld->Type, airborne, takes);
 
 			if (reach > 0)
-				threats.push_back({ pBld->GetMapCoords(), reach + OpRouteDefenseMarginCells, OpRouteDefenseWeight, OpThreatKind::Defense, pBld->Type });
+			{
+				threats.push_back({ pBld->GetMapCoords(), reach + OpRouteDefenseMarginCells, OpRouteDefenseWeight * (takes ? OpRouteTakeFactor : 1),
+					OpThreatKind::Defense, pBld->Type });
+			}
 			else
 				threats.push_back({ pBld->GetMapCoords(), OpRouteBaseCells, 1, OpThreatKind::Building, pBld->Type });
 		}
@@ -430,10 +439,14 @@ namespace
 
 			inSight.insert(pTechno->UniqueID);
 			auto const pType = pTechno->GetTechnoType();
-			const int reach = pType ? OpThreatReach(pType, airborne) : 0;
+			bool takes = false;
+			const int reach = pType ? OpThreatReach(pType, airborne, takes) : 0;
 
 			if (reach > 0)
-				threats.push_back({ pCell->MapCoords, reach + OpRouteUnitMarginCells, OpRouteUnitWeight, OpThreatKind::Unit, pType });
+			{
+				threats.push_back({ pCell->MapCoords, reach + OpRouteUnitMarginCells, OpRouteUnitWeight * (takes ? OpRouteTakeFactor : 1),
+					OpThreatKind::Unit, pType });
+			}
 		}
 
 		// Those out of sight, where they were last seen, fading with the time since (the order of the
@@ -448,11 +461,13 @@ namespace
 				continue;
 			}
 
-			const int reach = OpThreatReach(sighting.Type, airborne);
+			bool takes = false;
+			const int reach = OpThreatReach(sighting.Type, airborne, takes);
 
 			if (reach > 0)
 			{
-				const int weight = std::max(1, OpRouteSightingWeight * (OpRouteSightingFrames - age) / OpRouteSightingFrames);
+				const int weight = std::max(1, OpRouteSightingWeight * (OpRouteSightingFrames - age) / OpRouteSightingFrames)
+					* (takes ? OpRouteTakeFactor : 1);
 				threats.push_back({ sighting.LastCoords, reach + OpRouteSightingMarginCells, weight, OpThreatKind::Sighting, sighting.Type });
 			}
 		}
@@ -690,9 +705,10 @@ namespace
 	// movement zone, a flying one goes anywhere. A carryall and a burrowing transport go straight: the
 	// engine's carryall sets its vehicle down at the end of every move (AircraftClass::
 	// Do_MISSION_MOVE_Carryall), and a burrower crosses under the ground. False when no landing can be
-	// reached.
+	// reached. pFrom: where the way starts when not where the transport stands (the vehicle a carryall
+	// is to lift).
 	bool PlanOpRoute(HouseClass* pHouse, FootClass* pTransport, OpCarrier carrier, const std::vector<CellStruct>& landings,
-		const std::vector<int>& extraWalk, OpRoutePlan& plan)
+		const std::vector<int>& extraWalk, OpRoutePlan& plan, const CellStruct* pFrom = nullptr)
 	{
 		plan = OpRoutePlan {};
 
@@ -705,7 +721,7 @@ namespace
 		const bool underground = pUnitType && IsUndergroundTransportType(pUnitType);
 		auto const& map = GetOpDangerMap(pHouse, airborne);
 		auto const pGroundMap = airborne ? &GetOpDangerMap(pHouse, false) : nullptr;
-		const CellStruct from = pTransport->GetMapCoords();
+		const CellStruct from = pFrom ? *pFrom : pTransport->GetMapCoords();
 		const int walkCell = 10 * OpRouteBaseCost / OpRouteBlockCells;
 		const int landingFactor = airborne ? OpLandingFlyerDangerFactor : OpLandingDangerFactor;
 		plan.Totals.assign(landings.size(), INT_MAX);
@@ -1093,6 +1109,18 @@ namespace
 		}
 
 		return plan.Landing;
+	}
+
+	// The danger of the straight way a carryall flies with its vehicle, from the vehicle to the
+	// cheapest of the operation's landing candidates (0 when there is none).
+	int OpCarryallWayDanger(HouseClass* pHouse, const NeuralTransportOperation& op, FootClass* pCarryall, const CellStruct& vehicleCell)
+	{
+		std::vector<CellStruct> candidates;
+		std::vector<int> extraWalk;
+		CollectOpLandingCandidates(op, pCarryall, OpCarrier::Carryall, op.Landing, candidates, extraWalk);
+		OpRoutePlan plan;
+
+		return PlanOpRoute(pHouse, pCarryall, OpCarrier::Carryall, candidates, extraWalk, plan, &vehicleCell) ? plan.Danger : 0;
 	}
 
 	// The danger at a landing for a load set down there: on the ground, and for a flying transport, which
@@ -1786,6 +1814,60 @@ namespace
 				if (wasAboard)
 					member.Transport = 0;
 
+				// A shuttle's harvester that gets no nearer to the transport waiting for it (shut in, its way
+				// blocked) is let go: the transport would wait for it until the operation gave up.
+				if (shuttle)
+				{
+					const CellStruct at = pFoot->GetMapCoords();
+
+					if (op.BoardingSince < 0 || member.ProgressCell == CellStruct::Empty || at.DistanceFrom(member.ProgressCell) >= 2.0)
+					{
+						member.ProgressCell = at;
+						member.ProgressFrame = now;
+					}
+					else if (now - member.ProgressFrame >= ShuttleStuckFrames || now < member.ProgressFrame)
+					{
+						Debug::Log("[NeuralAI] House %d shuttle op %d lets %s %u go: no nearer to its ride at (%d,%d) in %d frames, frame %d.\n",
+							houseIndex, op.Id, pFoot->GetTechnoType()->ID, member.UniqueID, at.X, at.Y, now - member.ProgressFrame, now);
+						macro.ShuttleSkipUntil[member.UniqueID] = now + ShuttleStuckRetryFrames;
+						op.Released++;
+						macro.TransportOpOf.erase(member.UniqueID);
+						wake(pFoot);
+						pFoot->SetDestination(nullptr, true);
+						pFoot->QueueMission(Mission::Harvest, false);
+						return true;
+					}
+				}
+				else
+				{
+					// Any other member that gets no OpMemberStuckCells nearer to the cell the operation sent it to in
+					// OpMemberStuckFrames, while still farther from it than OpGatherCells (shut in, its way blocked,
+					// the engine's Area Guard walking it elsewhere), is let go and may ask again after OpRetryFrames:
+					// the operation would wait for it until it gave up.
+					const CellStruct at = pFoot->GetMapCoords();
+					const double toOrder = member.OrderCell != CellStruct::Empty ? at.DistanceFrom(member.OrderCell) : 0.0;
+
+					if (toOrder <= OpGatherCells || member.ProgressCell == CellStruct::Empty
+						|| toOrder + OpMemberStuckCells <= member.ProgressCell.DistanceFrom(member.OrderCell))
+					{
+						member.ProgressCell = at;
+						member.ProgressFrame = now;
+					}
+					else if (now - member.ProgressFrame >= OpMemberStuckFrames || now < member.ProgressFrame)
+					{
+						Debug::Log("[NeuralAI] House %d transport op %d lets %s %u go: no nearer to (%d,%d) in %d frames, at (%d,%d) %d cells from it, "
+							"frame %d.\n", houseIndex, op.Id, pFoot->GetTechnoType()->ID, member.UniqueID, member.OrderCell.X, member.OrderCell.Y,
+							now - member.ProgressFrame, at.X, at.Y, static_cast<int>(toOrder), now);
+						macro.TransportOpRetryUntil[member.UniqueID] = now + OpRetryFrames;
+						op.Released++;
+						macro.TransportOpOf.erase(member.UniqueID);
+						wake(pFoot);
+						pFoot->SetDestination(nullptr, true);
+						pFoot->QueueMission(Mission::Guard, false);
+						return true;
+					}
+				}
+
 				waitingSize += member.Size;
 
 				// A shuttle rides only on idle transports: its harvesters ask the factories for none.
@@ -2313,8 +2395,13 @@ namespace
 			const double fromStaging = at.DistanceFrom(op.Staging);
 			constexpr double HoldCells = OpBerthRingCells + OpBerthWaitCells;
 
+			// Waiting where it should: it is not stuck short of the cell it was last sent to.
 			if (fromStaging >= HoldCells - 2.0 && fromStaging <= 2.0 * HoldCells)
+			{
+				member.ProgressCell = at;
+				member.ProgressFrame = now;
 				continue;
+			}
 
 			const double towardX = fromStaging >= 1.0 ? (at.X - op.Staging.X) / fromStaging : 1.0;
 			const double towardY = fromStaging >= 1.0 ? (at.Y - op.Staging.Y) / fromStaging : 0.0;
@@ -2782,6 +2869,15 @@ namespace
 					// It fetches its vehicle where it waits; once the vehicle hangs under it, it goes.
 					if (loaded > 0)
 					{
+						if (transport.HoldSince >= 0)
+						{
+							Debug::Log("[NeuralAI] House %d transport op %d: %s %u lifts its vehicle after waiting %d frames, its straight way still has a "
+								"danger of %d, frame %d.\n", houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
+								now - transport.HoldSince, transport.HoldDanger, now);
+						}
+
+						transport.HoldSince = -1;
+						transport.HoldCheckFrame = -1;
 						depart(transport, pTransport, carrier);
 						break;
 					}
@@ -2801,6 +2897,46 @@ namespace
 					{
 						released.push_back(transport.UniqueID);
 						break;
+					}
+
+					// Its straight way from the vehicle is too dangerous (it follows no waypoints, and it never parks
+					// with a load to wait on the beach): the vehicle stays on the ground and the carryall waits by
+					// the staging cell until the danger passes, OpDangerWaitFrames at most, measured again every
+					// OpDangerCheckFrames.
+					if (transport.HoldCheckFrame < 0 || now - transport.HoldCheckFrame >= OpDangerCheckFrames || now < transport.HoldCheckFrame)
+					{
+						transport.HoldCheckFrame = now;
+						transport.HoldDanger = OpCarryallWayDanger(pHouse, op, pTransport, pVehicle->GetMapCoords());
+					}
+
+					if (transport.HoldDanger > OpSailDangerLimit)
+					{
+						if (transport.HoldSince < 0 || now < transport.HoldSince)
+						{
+							transport.HoldSince = now;
+							op.DangerHolds++;
+							Debug::Log("[NeuralAI] House %d transport op %d: %s %u leaves %s %u on the ground and waits, its straight way has a danger "
+								"of %d (limit %d), frame %d.\n", houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
+								pVehicle->GetTechnoType()->ID, pVehicle->UniqueID, transport.HoldDanger, OpSailDangerLimit, now);
+						}
+
+						if (now - transport.HoldSince < OpDangerWaitFrames)
+						{
+							if (pTransport->Destination == pVehicle)
+								pTransport->SetDestination(nullptr, true);
+
+							if (op.Staging != CellStruct::Empty && pTransport->GetMapCoords().DistanceFrom(op.Staging) > OpParkCells)
+								followRoute(transport, pTransport, carrier, op.Staging, 2.0);
+
+							break;
+						}
+					}
+					else if (transport.HoldSince >= 0)
+					{
+						Debug::Log("[NeuralAI] House %d transport op %d: the danger passed after %d frames (straight way danger %d), %s %u goes for its "
+							"vehicle, frame %d.\n", houseIndex, op.Id, now - transport.HoldSince, transport.HoldDanger, pTransport->GetTechnoType()->ID,
+							pTransport->UniqueID, now);
+						transport.HoldSince = -1;
 					}
 
 					if (pTransport->Destination != pVehicle || pTransport->CurrentMission != Mission::Move)
@@ -3183,6 +3319,9 @@ namespace
 
 		macro.ShuttleCheckFrame = now;
 
+		if (macro.ShuttleSkipUntil.size() > 64)
+			std::erase_if(macro.ShuttleSkipUntil, [now](const auto& entry) { return now >= entry.second; });
+
 		if (macro.ShuttleRetryUntil >= 0 && now < macro.ShuttleRetryUntil && macro.ShuttleRetryUntil - now <= ShuttleRetryFrames)
 			return;
 
@@ -3243,6 +3382,13 @@ namespace
 				continue;
 			}
 
+			// One that could not get to its ride lately stays.
+			if (auto const itSkip = macro.ShuttleSkipUntil.find(pUnit->UniqueID); itSkip != macro.ShuttleSkipUntil.end()
+				&& now < itSkip->second && itSkip->second - now <= ShuttleStuckRetryFrames)
+			{
+				continue;
+			}
+
 			const Mission mission = pUnit->CurrentMission;
 			const bool idle = mission == Mission::Guard || mission == Mission::Area_Guard || mission == Mission::Sleep
 				|| mission == Mission::None || (mission == Mission::Harvest && !pUnit->Locomotor->Is_Moving());
@@ -3277,21 +3423,39 @@ namespace
 		const int size = std::max(1, static_cast<int>(pSample->GetTechnoType()->Size));
 		int rides = 0;
 		int seats = 0;
+		// TEMP diagnostic: why the transports of ours that carry a harvester are no ride (in a transport
+		// operation, in another job or unsound, no crossing from the harvesters' land to the field).
+		int inOperation = 0;
+		int otherwiseBusy = 0;
+		int noCrossing = 0;
 
 		auto const considerRide = [&](FootClass* pFoot)
 		{
-			if (!pFoot || pFoot->Owner != pHouse)
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo)
 				return;
 
 			const OpCarrier carrier = GetOpCarrier(pFoot);
 
-			if (!IsTransportFreeForOp(pHouse, pFoot, carrier) || !OpCarrierTakes(pFoot, carrier, pSample))
+			if (carrier == OpCarrier::None || !OpCarrierTakes(pFoot, carrier, pSample))
 				return;
+
+			if (!IsTransportFreeForOp(pHouse, pFoot, carrier))
+			{
+				if (IsInTransportOp(pHouse, pFoot->UniqueID))
+					inOperation++;
+				else
+					otherwiseBusy++;
+
+				return;
+			}
 
 			auto const pType = pFoot->GetTechnoType();
 
 			if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), sampleCell) || !CanTransportTypeLink(pType, sampleCell, pLanding->MapCoords))
+			{
+				noCrossing++;
 				return;
+			}
 
 			rides++;
 			seats += carrier == OpCarrier::Carryall ? 1 : pType->Passengers / size;
@@ -3309,8 +3473,9 @@ namespace
 			{
 				macro.ShuttleNoRideLogFrame = now;
 				Debug::Log("[NeuralAI] House %d shuttle: %d idle harvesters on zone %d, no idle transport takes one to the field at (%d,%d) "
-					"zone %d (home ore %d), frame %d.\n", pHouse->ArrayIndex, static_cast<int>(harvesters.size()), homeZone, field.X, field.Y,
-					fieldZone, macro.IslandHomeOre, now);
+					"zone %d (home ore %d); transports that carry one: %d in transport operations, %d busy otherwise or unsound, %d with "
+					"no crossing there; %d credits, frame %d.\n", pHouse->ArrayIndex, static_cast<int>(harvesters.size()), homeZone, field.X,
+					field.Y, fieldZone, macro.IslandHomeOre, inOperation, otherwiseBusy, noCrossing, pHouse->Available_Money(), now);
 			}
 
 			return;

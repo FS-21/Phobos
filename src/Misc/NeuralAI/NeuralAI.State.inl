@@ -492,7 +492,9 @@ namespace
 	// A unit an operation carries: its passenger size, the address its client gave it, the transport
 	// it is to board (0: none yet), whether it is aboard, and the cell the operation last sent it to
 	// (another order found on it counts as an interference). A harvester of a shuttle: its work, when
-	// it began, and the largest load seen on it with the frame it grew last.
+	// it began, and the largest load seen on it with the frame it grew last. Progress*: where it stood
+	// since when (a shuttle's harvester while a transport waits for it, any other member while it is
+	// farther from the cell it was sent to than OpGatherCells).
 	struct NeuralOpMember
 	{
 		DWORD UniqueID { 0 };
@@ -505,6 +507,8 @@ namespace
 		int WorkFrame { -1 };
 		float LoadSeen { 0.0f };
 		int LoadFrame { -1 };
+		CellStruct ProgressCell { CellStruct::Empty };
+		int ProgressFrame { -1 };
 	};
 
 	// A transport an operation holds: its type, its leg and the frame the leg began, the cell it sets
@@ -542,6 +546,12 @@ namespace
 		CellStruct BerthWait { CellStruct::Empty };
 		int LandingDanger { 0 };
 		bool Carried { false };
+		// A carryall that leaves its vehicle on the ground because the straight way is too dangerous
+		// (OpSailDangerLimit): since when (-1: not waiting), when that way was last measured, and its
+		// danger.
+		int HoldSince { -1 };
+		int HoldCheckFrame { -1 };
+		int HoldDanger { 0 };
 	};
 
 	// Where a transport of an operation was lost (NeuralHouseMacroState::OpLossSpots).
@@ -1115,6 +1125,10 @@ namespace
 		int WaveVerdictMission { -1 };
 		int WaveLessonSteps { 0 };
 		int WaveLessonFrame { -100000 };
+		// Waves in a row that took no building, whatever the time between them.
+		int WaveFailuresInARow { 0 };
+		// TEMP diagnostic: units held at home that a wave ordered out, by unique id, with the frame.
+		std::unordered_map<DWORD, int> HeldJoinersOut;
 		// First frame a wave of the tank mass waited for its anti-air escort (-1 when none waits),
 		// and no new wait before this frame.
 		int WaveEscortWaitSince { -1 };
@@ -1152,6 +1166,8 @@ namespace
 		int ShuttleNoRideLogFrame { -1 };
 		int ShuttleCreditsTotal { 0 };
 		int ShuttleTransportsLost { 0 };
+		// Harvesters that could not get to their ride (UniqueID -> no shuttle takes them before that frame).
+		std::unordered_map<DWORD, int> ShuttleSkipUntil;
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1510,6 +1526,8 @@ namespace
 			this->WaveVerdictMission = -1;
 			this->WaveLessonSteps = 0;
 			this->WaveLessonFrame = -100000;
+			this->WaveFailuresInARow = 0;
+			this->HeldJoinersOut.clear();
 			this->WaveEscortWaitSince = -1;
 			this->WaveEscortRetryFrame = -1;
 			this->RemnantSearchFrame = -100000;
@@ -1530,6 +1548,7 @@ namespace
 			this->ShuttleNoRideLogFrame = -1;
 			this->ShuttleCreditsTotal = 0;
 			this->ShuttleTransportsLost = 0;
+			this->ShuttleSkipUntil.clear();
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
@@ -1932,9 +1951,24 @@ namespace
 	// fade), planned again every OpDangerCheckFrames, OpDangerWaitFrames at most; then it sails. The
 	// first measures of the routes: 3 of the 9 loads that sailed along a route of danger 90 or more
 	// were lost, 4 of the 130 along one of none (2026-11-16).
+	// A carryall waits too, before it lifts its vehicle: it flies straight (the engine sets the vehicle
+	// down at the end of every move), and it never parks with a load. While the carryalls skipped the
+	// wait, they lost 9 of 21 crossing straight into dangers of 369 to 2559 (2026-11-17).
 	constexpr int OpSailDangerLimit = 90;
 	constexpr int OpDangerCheckFrames = 150;
 	constexpr int OpDangerWaitFrames = 1800;
+	// A threat whose weapon takes the transport (mind control) weighs OpRouteTakeFactor times as
+	// much: a transport taken goes over to the enemy with its whole load. 26 of the 28 transports
+	// taken in 47 matches were SAPC landing in the reach of Yuri's Psychic Towers, Yuri and
+	// Masterminds (2026-11-17).
+	constexpr int OpRouteTakeFactor = 3;
+	// A member that gets no OpMemberStuckCells nearer to the cell the operation sent it to in
+	// OpMemberStuckFrames, while farther from it than OpGatherCells, is let go. It may ask again
+	// after OpRetryFrames. One engineer stood 17 cells from its berth wait cell for most of an
+	// operation that stayed open 65000 frames, with 5098 interferences (match #10708, Moonlit
+	// Waters of Esvia).
+	constexpr int OpMemberStuckFrames = 1800;
+	constexpr double OpMemberStuckCells = 2.0;
 	// Against the threats that move (user): a transport inside the reach of a threat plans its route
 	// again every OpRouteDangerReplanFrames instead of OpRouteReplanFrames. A crossing whose landing
 	// grew OpLandingSwitchDanger more dangerous since it sailed (enemies gathered at it), still
@@ -1959,7 +1993,11 @@ namespace
 	// shuttle, one shuttle per house. A harvester on the field comes back full, when its load has not
 	// grown for ShuttleIdleFrames, or ShuttleHarvestCapFrames after the landing; at home it boards
 	// again once empty, or ShuttleUnloadCapFrames after the landing. A shuttle that lost
-	// ShuttleMaxLostTransports transports ends, and no other starts for ShuttleRetryFrames.
+	// ShuttleMaxLostTransports transports ends, and no other starts for ShuttleRetryFrames. A harvester
+	// that gets no 2 cells nearer to its ride in ShuttleStuckFrames while a transport waits for it is let
+	// go and not taken again for ShuttleStuckRetryFrames: the engine turns an AI harvester whose move
+	// ends or fails back to harvesting, and one shut in near its refinery kept the only transport of its
+	// house waiting 8000 frames twice in a row (match #10559, The Honeymoon).
 	// The archives before it (2026-11-16, 79 logs): 9 houses in 5 of the 23 matches with a free field
 	// across water spent 14000 to 46000 frames with their ore gone, harvesters and transports at hand,
 	// often with single-digit credits.
@@ -1971,6 +2009,8 @@ namespace
 	constexpr int ShuttleUnloadCapFrames = 4500;
 	constexpr int ShuttleMaxLostTransports = 2;
 	constexpr int ShuttleRetryFrames = 9000;
+	constexpr int ShuttleStuckFrames = 1800;
+	constexpr int ShuttleStuckRetryFrames = 27000;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its
@@ -2249,8 +2289,14 @@ namespace
 	// also clears the base).
 	constexpr double HeldJoinsWaveHealth = 0.5;
 	// How many of them may join after the first wave in a row that took no building; twice as many
-	// after each one more (none before).
+	// after each one more, up to HeldJoinsWaveMaxSteps of them (none before). These failures do not
+	// fade with time like the wave lesson: joiners never make a wave wait, and the lesson stood at
+	// 0 in 92% of the readings of the tank mass (40 matches to #10732), so nearly none joined.
 	constexpr int HeldJoinsWaveUnits = 8;
+	constexpr int HeldJoinsWaveMaxSteps = 3;
+	// TEMP diagnostic: this long after a wave ordered them out, the log says how many of the units
+	// held at home that joined it left the base.
+	constexpr int HeldJoinerCheckFrames = 900;
 	// Each step doubles the count (user): 10, 20, then the most.
 	constexpr int TankMassWaveCap = 32;
 	constexpr int WaveLessonPercent = 200;
