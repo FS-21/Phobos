@@ -2625,6 +2625,81 @@ namespace
 				NoteExpertCommand(pHouse, pFoot, static_cast<int16_t>(id));
 			}
 
+			// Tank escort (PlanTankEscorts): a marching group with walking members and no main battle
+			// tank, of a house that is no tank mass, takes the nearest free ones.
+			auto const isTankFoot = [](FootClass* pFoot)
+			{
+				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+				return pUnit && IsMainBattleTankType(pUnit->Type);
+			};
+
+			if (marches && HouseExt::Fetch(pHouse)->NeuralAI_Archetype != TankMassArchetype
+				&& std::any_of(group.begin(), group.end(), walks) && std::none_of(group.begin(), group.end(), isTankFoot))
+			{
+				int sumX = 0;
+				int sumY = 0;
+				int walkers = 0;
+				int walkZone = -1;
+
+				for (auto const pFoot : group)
+				{
+					if (!walks(pFoot))
+						continue;
+
+					const CellStruct at = pFoot->GetMapCoords();
+					sumX += at.X;
+					sumY += at.Y;
+					walkers++;
+					walkZone = walkZone < 0 ? ObjectZone(pFoot, MovementZone::Normal) : walkZone;
+				}
+
+				const CellStruct center { static_cast<short>(sumX / walkers), static_cast<short>(sumY / walkers) };
+				std::vector<std::pair<double, FootClass*>> tanks;
+
+				for (auto const& [uid, pFoot] : ownFoots)
+				{
+					if (!isTankFoot(pFoot) || !isFreeForPlan(pFoot) || pFoot->GetHealthPercentage() < 0.5
+						|| ObjectZone(pFoot, MovementZone::Normal) != walkZone)
+					{
+						continue;
+					}
+
+					const double distance = pFoot->GetMapCoords().DistanceFrom(center);
+
+					if (distance <= PlanTankEscortCells)
+						tanks.push_back({ distance, pFoot });
+				}
+
+				std::sort(tanks.begin(), tanks.end(), [](const auto& a, const auto& b)
+					{ return a.first < b.first || (a.first == b.first && a.second->UniqueID < b.second->UniqueID); });
+
+				for (size_t i = 0; i < tanks.size() && i < PlanTankEscorts; ++i)
+				{
+					auto const pTank = tanks[i].second;
+					plan.Members.push_back(pTank->UniqueID);
+					macro.PlanMembers.insert(pTank->UniqueID);
+					macro.FerryReserved.erase(pTank->UniqueID);
+					NoteExpertCommand(pHouse, pTank, static_cast<int16_t>(id));
+				}
+
+				// TEMP diagnostic: the tank escorts of the plans (30 per match).
+				static int escortLogSerial = -1;
+				static int escortLogCount = 0;
+
+				if (escortLogSerial != NeuralMatchSerial)
+				{
+					escortLogSerial = NeuralMatchSerial;
+					escortLogCount = 0;
+				}
+
+				if (escortLogCount++ < 30)
+				{
+					Debug::Log("[NeuralAI] House %d plan %s: %d main battle tanks escort its %d members (%d free within %d cells), frame %d.\n",
+						houseIdx, NeuralPlanNames[static_cast<size_t>(id)], static_cast<int>(std::min(tanks.size(), PlanTankEscorts)),
+						static_cast<int>(group.size()), static_cast<int>(tanks.size()), static_cast<int>(PlanTankEscortCells), Unsorted::CurrentFrame);
+				}
+			}
+
 			plan.InitialValue = std::max(1, memberValue(plan));
 			plan.TargetSeenFrame = Unsorted::CurrentFrame;
 			int strength = 0;
@@ -4202,7 +4277,20 @@ namespace
 							return a.Rank != b.Rank ? a.Rank < b.Rank : a.Techno->UniqueID < b.Techno->UniqueID;
 						});
 
-					const std::vector<FootClass*> idle = collectIdleGround(false);
+					// The tank guard (UpdateTankGuard) meets the base threats too: it is held from the other
+					// plans and the waves only.
+					std::vector<FootClass*> idle = collectIdleGround(false);
+
+					for (auto const& [uid, pFoot] : ownFoots)
+					{
+						if (macro.TankGuard.contains(uid) && !macro.PlanMembers.contains(uid) && !IsOnRepairTrip(pHouse, uid)
+							&& ObjectZone(pFoot, MovementZone::Normal) == homeZone)
+						{
+							idle.push_back(pFoot);
+						}
+					}
+
+					std::sort(idle.begin(), idle.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
 					const size_t leads = std::min<size_t>(threats.size(), 4);
 
 					for (size_t li = 0; li < leads; ++li)
@@ -10372,6 +10460,9 @@ namespace
 				}
 
 				// Numbers decide the fights the battery meets on its way and at its spot.
+				// Main battle tanks first (PlanTankEscorts).
+				std::stable_partition(escorts.begin(), escorts.end(), [](FootClass* pFoot)
+					{ auto const pUnit = abstract_cast<UnitClass*>(pFoot); return pUnit && IsMainBattleTankType(pUnit->Type); });
 				escorts.resize(std::min(escorts.size(), std::clamp<size_t>(escorts.size() / PlanStrikeIdleShare, 3, RollingSiegeMaxEscorts)));
 				const size_t groundEscorts = escorts.size();
 
@@ -10540,6 +10631,9 @@ namespace
 					}
 				}
 
+				// Main battle tanks first (PlanTankEscorts).
+				std::stable_partition(escorts.begin(), escorts.end(), [](FootClass* pFoot)
+					{ auto const pUnit = abstract_cast<UnitClass*>(pFoot); return pUnit && IsMainBattleTankType(pUnit->Type); });
 				escorts.resize(std::min(escorts.size(), std::clamp<size_t>(escorts.size() / PlanStrikeIdleShare, 3, SiegeBatteryMaxEscorts)));
 
 				// The reach two guns at least have: the defense must be one they outrange.

@@ -2509,6 +2509,12 @@ namespace
 	// or a deployed siege gun) within TankGuardSiegeCells of a site; with none, each one patrols the
 	// sites in turn, TankGuardPostFrames at each. While the base is under attack they are free for its
 	// defense.
+	// Tank escorts (user: the spare main battle tanks escort the other groups when the house is no
+	// tank mass): a marching plan whose walking group holds no main battle tank takes up to
+	// PlanTankEscorts free ones (never of the guard) within PlanTankEscortCells of the group, the
+	// nearest first; and the plans that pick escorts take main battle tanks before other units.
+	constexpr size_t PlanTankEscorts = 2;
+	constexpr double PlanTankEscortCells = 30.0;
 	constexpr int TankGuardShare = 2;
 	constexpr int TankGuardMin = 2;
 	constexpr int TankGuardMost = 6;
