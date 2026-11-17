@@ -2094,6 +2094,22 @@ namespace
 			return pAir->CurrentMission == Mission::Attack && !pAir->IsInAir();
 		};
 
+		// Rotating Raids lesson against an enemy house: the doubling steps left after the fading.
+		auto raidLessonSteps = [&](int owner) -> int
+		{
+			if (owner < 0 || owner >= 32)
+				return 0;
+
+			const int faded = (Unsorted::CurrentFrame - macro.RaidLessonFrame[owner]) / RaidLessonStepFrames;
+			return std::clamp(macro.RaidLessonSteps[owner] - std::max(0, faded), 0, RaidLessonMaxSteps);
+		};
+
+		// Units a Rotating Raids group against that house sets out with: RaidBaseGroup doubled per step.
+		auto rotatingRaidsSize = [&](int owner) -> size_t
+		{
+			return static_cast<size_t>(std::min(RaidMostGroup, RaidBaseGroup << raidLessonSteps(owner)));
+		};
+
 		auto finishPlan = [&](NeuralPlanId id, bool success, bool sendHome, int rule = __builtin_LINE())
 		{
 			auto& plan = macro.Plans[static_cast<size_t>(id)];
@@ -2264,6 +2280,26 @@ namespace
 				const bool freshLesson = houseLesson.Frame > 0 && Unsorted::CurrentFrame - houseLesson.Frame <= PlanLessonFrames;
 				houseLesson.Strength = freshLesson ? std::max(houseLesson.Strength, plan.InitialValue) : plan.InitialValue;
 				houseLesson.Frame = Unsorted::CurrentFrame;
+			}
+
+			// A Rotating Raids group the house beat (it lost value and destroyed no more than that) asks
+			// the next one against it for twice as many units; one that destroyed more ends the lesson.
+			if (id == NeuralPlanId::RotatingRaids && plan.TargetOwner >= 0 && plan.TargetOwner < 32 && plan.TargetOwner != houseIdx)
+			{
+				const int raidLost = std::max(0, plan.InitialValue - memberValue(plan));
+				const int owner = plan.TargetOwner;
+
+				if (plan.KillValue > raidLost)
+				{
+					macro.RaidLessonSteps[owner] = 0;
+				}
+				else if (!success && raidLost > 0)
+				{
+					macro.RaidLessonSteps[owner] = std::min(RaidLessonMaxSteps, raidLessonSteps(owner) + 1);
+					macro.RaidLessonFrame[owner] = Unsorted::CurrentFrame;
+					Debug::Log("[NeuralAI] House %d plan rotatingRaids beaten by house %d (destroyed %d, lost %d): the next one sets out with %d units, frame %d.\n",
+						houseIdx, owner, plan.KillValue, raidLost, static_cast<int>(rotatingRaidsSize(owner)), Unsorted::CurrentFrame);
+				}
 			}
 
 			// What the plan did against the house it went for weighs its next starts this match
@@ -3910,61 +3946,103 @@ namespace
 				if (!plan.Active || plan.TargetCell == CellStruct::Empty)
 					continue;
 
-				int sumX = 0;
-				int sumY = 0;
+				// The groups of the plan and the goal of each. Rotating Raids sends its first AuxBaseline
+				// members at the target and the rest at the staging cell: each group is judged where it
+				// is (the centre of both lay between them, far from either goal and from the enemy, and
+				// 208 of its 266 turn backs of 2026-11-17 saw no enemy at all).
+				const bool twoGroups = id == NeuralPlanId::RotatingRaids && plan.StagingCell != CellStruct::Empty;
+				const size_t split = twoGroups ? std::min<size_t>(plan.Members.size(), static_cast<size_t>(std::max(0, plan.AuxBaseline)))
+					: plan.Members.size();
+				bool anyCommitted = false;
+				bool outgunned = false;
 				int alive = 0;
-				int strength = 0;
+				int worstEnemy = -1;
+				int worstUnits = 0;
+				int worstStrength = 0;
+				double worstToGoal = 0.0;
+				CellStruct worstCentre = CellStruct::Empty;
 
-				for (const DWORD uid : plan.Members)
+				for (int leg = 0; leg < (twoGroups ? 2 : 1); ++leg)
 				{
-					auto const pFoot = findOwnFoot(uid);
+					int sumX = 0;
+					int sumY = 0;
+					int legAlive = 0;
+					int strength = 0;
 
-					if (!pFoot || pFoot->WhatAmI() == AbstractType::Aircraft || pFoot->GetTechnoType()->Naval || pFoot->IsInAir())
+					for (size_t i = leg == 0 ? 0 : split; i < (leg == 0 ? split : plan.Members.size()); ++i)
+					{
+						auto const pFoot = findOwnFoot(plan.Members[i]);
+
+						if (!pFoot || pFoot->WhatAmI() == AbstractType::Aircraft || pFoot->GetTechnoType()->Naval || pFoot->IsInAir())
+							continue;
+
+						const CellStruct cell = pFoot->GetMapCoords();
+						sumX += cell.X;
+						sumY += cell.Y;
+						legAlive++;
+						strength += static_cast<int>(GetCombatValueOfType(pFoot->GetTechnoType(), false) * pFoot->GetHealthPercentage());
+					}
+
+					if (legAlive == 0)
 						continue;
 
-					const CellStruct cell = pFoot->GetMapCoords();
-					sumX += cell.X;
-					sumY += cell.Y;
-					alive++;
-					strength += static_cast<int>(GetCombatValueOfType(pFoot->GetTechnoType(), false) * pFoot->GetHealthPercentage());
-				}
+					alive += legAlive;
+					const CellStruct centre { static_cast<short>(sumX / legAlive), static_cast<short>(sumY / legAlive) };
+					double toGoal = centre.DistanceFrom(twoGroups && leg == 1 ? plan.StagingCell : plan.TargetCell);
 
-				if (alive == 0)
-					continue;
+					if (!twoGroups && plan.StagingCell != CellStruct::Empty)
+						toGoal = std::min(toGoal, centre.DistanceFrom(plan.StagingCell));
 
-				const CellStruct centre { static_cast<short>(sumX / alive), static_cast<short>(sumY / alive) };
-				double toGoal = centre.DistanceFrom(plan.TargetCell);
-
-				if (plan.StagingCell != CellStruct::Empty)
-					toGoal = std::min(toGoal, centre.DistanceFrom(plan.StagingCell));
-
-				if (toGoal <= PlanOutgunnedCommittedCells)
-					continue;
-
-				int enemy = seenEnemyValueNear(centre, PlanOutgunnedSightCells, PlanOutgunnedSightFrames);
-
-				for (auto const pBld : knownEnemyBuildingList)
-				{
-					if (!isKnownEnemyBuilding(pBld) || !pBld->Type->IsBaseDefense)
+					if (toGoal <= PlanOutgunnedCommittedCells)
+					{
+						anyCommitted = true;
 						continue;
+					}
 
-					const int range = GroundRangeOf(pBld->Type);
+					const int units = seenEnemyValueNear(centre, PlanOutgunnedSightCells, PlanOutgunnedSightFrames);
+					int enemy = units;
 
-					if (range > 0 && pBld->GetMapCoords().DistanceFrom(centre) * Unsorted::LeptonsPerCell <= range + 2 * Unsorted::LeptonsPerCell)
-						enemy += GetCombatValueOfType(pBld->Type, false);
+					for (auto const pBld : knownEnemyBuildingList)
+					{
+						if (!isKnownEnemyBuilding(pBld) || !pBld->Type->IsBaseDefense)
+							continue;
+
+						const int range = GroundRangeOf(pBld->Type);
+
+						if (range > 0 && pBld->GetMapCoords().DistanceFrom(centre) * Unsorted::LeptonsPerCell <= range + 2 * Unsorted::LeptonsPerCell)
+							enemy += GetCombatValueOfType(pBld->Type, false);
+					}
+
+					outgunned = outgunned || enemy * 100 > strength * PlanOutgunnedRatioPercent;
+
+					// The group worst off (enemy against strength) speaks for the plan.
+					if (worstEnemy < 0 || static_cast<long long>(enemy) * std::max(1, worstStrength)
+						> static_cast<long long>(worstEnemy) * std::max(1, strength))
+					{
+						worstEnemy = enemy;
+						worstUnits = units;
+						worstStrength = strength;
+						worstToGoal = toGoal;
+						worstCentre = centre;
+					}
 				}
+
+				if (alive == 0 || worstEnemy < 0)
+					continue;
 
 				// Losses before arriving tell the same when the shooters are out of the group's sight
-				// (long guns, aircraft, defenses it does not know yet).
-				const bool outgunned = enemy * 100 > strength * PlanOutgunnedRatioPercent;
-				const bool bleeding = memberValue(plan) * 100 < plan.InitialValue * PlanEnRouteLossPercent;
+				// (long guns, aircraft, defenses it does not know yet). Not once a group of Rotating
+				// Raids is at its goal or has been: what it loses there is the raid.
+				const bool bleeding = !(twoGroups && (anyCommitted || plan.Arrived))
+					&& memberValue(plan) * 100 < plan.InitialValue * PlanEnRouteLossPercent;
 
 				if (!outgunned && !bleeding)
 					continue;
 
-				Debug::Log("[NeuralAI] House %d plan %s %s %d cells from its goal: enemy %d against %d around (%d,%d).\n", houseIdx,
-					NeuralPlanNames[static_cast<size_t>(id)], outgunned ? "outgunned" : "losing members", static_cast<int>(toGoal), enemy,
-					strength, centre.X, centre.Y);
+				const int strength = worstStrength;
+				Debug::Log("[NeuralAI] House %d plan %s %s %d cells from its goal: enemy %d against %d around (%d,%d) (units %d, defenses %d).\n", houseIdx,
+					NeuralPlanNames[static_cast<size_t>(id)], outgunned ? "outgunned" : "losing members", static_cast<int>(worstToGoal), worstEnemy,
+					strength, worstCentre.X, worstCentre.Y, worstUnits, worstEnemy - worstUnits);
 				abortPlan(id, outgunned ? NeuralDecision::PlanAbortEnemyGrew : NeuralDecision::PlanAbortValueLost, strength);
 				macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanOutgunnedRetryFrames;
 			}
@@ -9930,20 +10008,43 @@ namespace
 					const bool aFallen = !pA || !pA->GetBuilding();
 					const bool bFallen = !pB || !pB->GetBuilding();
 
-					if (Unsorted::CurrentFrame >= plan.AuxPeak || aFallen || bFallen)
+					// The switch clock starts once a group reached its target (AuxPeak -1 until then): the
+					// old one ran from the start, and the groups were sent elsewhere before they got
+					// anywhere (no raid of 2026-11-17 arrived).
+					if (plan.AuxPeak < 0)
+					{
+						const CellStruct centreA = groupCentroid(groupA);
+						const CellStruct centreB = groupCentroid(groupB);
+
+						if ((centreA != CellStruct::Empty && centreA.DistanceFrom(plan.TargetCell) <= RaidArrivedCells)
+							|| (centreB != CellStruct::Empty && centreB.DistanceFrom(plan.StagingCell) <= RaidArrivedCells))
+						{
+							plan.AuxPeak = Unsorted::CurrentFrame + RaidSwitchFrames;
+
+							if (!plan.Arrived)
+							{
+								plan.Arrived = true;
+								plan.ArrivedFrame = Unsorted::CurrentFrame;
+							}
+						}
+					}
+
+					if ((plan.AuxPeak >= 0 && Unsorted::CurrentFrame >= plan.AuxPeak) || aFallen || bFallen)
 					{
 						auto const pNewA = pickRaidTarget(plan.TargetCell, plan.StagingCell);
 						auto const pNewB = pNewA ? pickRaidTarget(pNewA->GetMapCoords(), plan.TargetCell) : nullptr;
 
 						if (!pNewA)
 						{
-							finishPlan(NeuralPlanId::RotatingRaids, true, true);
+							// No target left: it went well only if it destroyed more than it lost (66 of
+							// these ends counted as well, none had arrived, most destroyed nothing).
+							finishPlan(NeuralPlanId::RotatingRaids, plan.KillValue > std::max(0, plan.InitialValue - value), true);
 						}
 						else
 						{
 							plan.TargetCell = pNewA->GetMapCoords();
 							plan.StagingCell = pNewB ? pNewB->GetMapCoords() : pNewA->GetMapCoords();
-							plan.AuxPeak = Unsorted::CurrentFrame + 900;
+							plan.AuxPeak = -1;
 
 							for (const DWORD uid : plan.Members)
 							{
@@ -9965,15 +10066,22 @@ namespace
 				std::vector<FootClass*> group = collectIdleGround(false);
 				auto const pTargetA = pickRaidTarget(CellStruct::Empty, CellStruct::Empty);
 				auto const pTargetB = pTargetA ? pickRaidTarget(pTargetA->GetMapCoords(), CellStruct::Empty) : nullptr;
-				const int utility = (pTargetA && pTargetB && group.size() >= 8) ? 280 : -1000;
+				const int targetOwner = (pTargetA && pTargetA->Owner) ? pTargetA->Owner->ArrayIndex : -1;
+				const size_t raidSize = rotatingRaidsSize(targetOwner);
+				const int utility = (pTargetA && pTargetB && group.size() >= raidSize) ? 280 : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::RotatingRaids, utility))
 				{
 					sortFastest(group);
-					group.resize(6);
+					group.resize(raidSize);
 					startPlan(NeuralPlanId::RotatingRaids, group, pTargetA->GetMapCoords(), pTargetB->GetMapCoords(), 0, 5400);
-					planOf(NeuralPlanId::RotatingRaids).AuxBaseline = 3;
-					planOf(NeuralPlanId::RotatingRaids).AuxPeak = Unsorted::CurrentFrame + 900;
+
+					if (auto& raid = planOf(NeuralPlanId::RotatingRaids); raid.Active)
+					{
+						raid.AuxBaseline = static_cast<int>(raidSize / 2);
+						raid.AuxPeak = -1;
+						raid.TargetOwner = targetOwner;
+					}
 				}
 			}
 		}
