@@ -4135,7 +4135,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// With a front line of TankMassBaseWave the mass may be of any kind (user: many offensive units
 	// of other types are a mass too, mixed with the tanks) and it gets the guns of any house.
 	const bool tankMass = pExt->NeuralAI_Archetype == TankMassArchetype;
-	const int artilleryAllowance = (tankMass && ownedFrontLineVehicles < TankMassBaseWave)
+	const int artilleryAllowance = tankMass
 		? ownedFrontLineVehicles / TankMassFrontLinePerGun
 		: ArtilleryFreeVehicles + ownedFrontLineVehicles / ArtilleryFrontLinePerGun;
 	// The anti-air escort the tank mass wants with its front line (TankMassVehiclesPerEscort).
@@ -5349,7 +5349,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (isArtillery && !isEconomyUnit && !isMCV && !isKeyStructureDeployer && pUnit->Passengers == 0
 				&& ownedArtilleryVehicles >= artilleryAllowance)
 			{
-				score -= (ownedArtilleryVehicles - artilleryAllowance + 1) * ArtilleryOverFrontPenalty;
+				score -= (ownedArtilleryVehicles - artilleryAllowance + 1) * ArtilleryOverFrontPenalty
+					* (tankMass ? TankMassArtilleryPenaltyPercent : 100) / 100;
 			}
 
 			if (isMCV)
@@ -5501,6 +5502,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (!isMainTank && (pUnit->Category != Category::Invalid || pUnit->Strength < 300))
 			{
 				score += scores[25];
+
+				// The other front line vehicles of the mass keep a larger share of the type penalty.
+				if (tankMass)
+					score += std::min(1200, ownedUnitWithConv * 55) * (100 - TankMassOtherTypePenaltyPercent) / 100;
 			}
 			else
 			{
