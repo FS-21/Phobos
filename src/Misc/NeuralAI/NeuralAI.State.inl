@@ -2495,10 +2495,16 @@ namespace
 	constexpr int TankMassWarFactories = 3;
 	constexpr int TankMassFactoryPrior = 700;
 	// The tanks: the prior of the main battle tank slot, the share of the type penalty they keep
-	// (a mass is many of one type) and the front line vehicles a gun needs, with none free.
+	// (a mass is many of one type), and the share the other front line vehicles keep (user: very
+	// little for the tanks; for the others a group of 6 or 7 of one type can happen without being
+	// the rule, the mass is mostly tanks and some mixed in). Artillery has its place in the other
+	// archetypes: here a gun needs TankMassFrontLinePerGun front line vehicles at any size, with
+	// none free, and each gun over that costs TankMassArtilleryPenaltyPercent of the usual penalty.
 	constexpr int TankMassTankPrior = 900;
-	constexpr int TankMassTypePenaltyPercent = 50;
+	constexpr int TankMassTypePenaltyPercent = 20;
+	constexpr int TankMassOtherTypePenaltyPercent = 50;
 	constexpr int TankMassFrontLinePerGun = 4;
+	constexpr int TankMassArtilleryPenaltyPercent = 200;
 	// Main battle tanks run artillery down: their slot gains up to this much with the share of
 	// artillery in the enemy army seen, for every archetype.
 	constexpr int TankCounterArtilleryBonus = 500;
