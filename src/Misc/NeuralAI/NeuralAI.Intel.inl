@@ -85,7 +85,7 @@ namespace
 
 	// A main battle tank: a ground vehicle the rules call an armored fighting vehicle (Category=AFV)
 	// whose first weapon fights head on: it hits the ground, is no suicide (MainTankMinRangeCells),
-	// parasite or mind control, and does not wither against heavy armor (MainTankHeavyVersus); a
+	// parasite, mind control or berserk gas, and does not wither against heavy armor (MainTankHeavyVersus); a
 	// weapon whose damage comes another way (Damage up to MainTankSpecialDamage: sonic waves, webs,
 	// dummy weapons) counts as fit, and so does any gun of an open-topped one with passengers: they
 	// fire from it (the Battle Fortress). Its passengers, its range or an anti-air projectile do not
@@ -100,6 +100,7 @@ namespace
 		auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
 
 		if (!pWeapon || !pWeapon->Warhead || pWeapon->Suicide || pWeapon->Warhead->Parasite || pWeapon->Warhead->MindControl
+			|| pWeapon->Warhead->Psychedelic
 			|| (pWeapon->Projectile && !pWeapon->Projectile->AG)
 			|| pWeapon->Range <= static_cast<int>(MainTankMinRangeCells * Unsorted::LeptonsPerCell))
 		{
