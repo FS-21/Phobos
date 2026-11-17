@@ -496,6 +496,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	UpdateCapitalGroups(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "capital groups");
 
+	// Part of the main battle tanks guards our sites and hunts the enemy siege near them.
+	UpdateTankGuard(pHouse);
+
 	// Submarines keep out of known enemy sonar.
 	UpdateSubmarineStealth(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "submarine stealth");
@@ -3889,6 +3892,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Unit & Naval Target Selection
 	int bestUnitIdx = -1;
 	int bestUnitScore = -32000;
+	// The tank floor (TankFloor*): the best scored main battle tank, and whether the best pick restores
+	// the income.
+	int bestTankIdx = -1;
+	int bestTankScore = -32000;
+	bool bestUnitRestoresIncome = false;
 	// TEMP diagnostic: the ground vehicle candidates of this pick with the parts of their score (base
 	// of cost and health, type penalty, counters, the class slot with its extras, the rest), logged
 	// every 1800 frames per house: why main battle tanks lose the pick.
@@ -3959,6 +3967,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedIdleEmptyTransByLimit[16] = { 0 };
 	int ownedNavalOrAmphibCombatUnits = 0;
 	int ownedGroundCombatUnits = 0;
+	// Main battle tanks alive (IsMainBattleTankType), for the tank floor (TankFloor*).
+	int ownedMainTanks = 0;
 	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
 	// (the rest of ownedGroundCombatUnits is their front line).
 	int ownedArtilleryVehicles = 0;
@@ -4040,7 +4050,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					ownedGroundCombatUnits++;
 
-					if (pOwnedWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell && !IsMainBattleTankType(pOwnedType))
+					if (IsMainBattleTankType(pOwnedType))
+						ownedMainTanks++;
+					else if (pOwnedWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell)
 						ownedArtilleryVehicles++;
 
 					if (ShootsAtAircraft(pOwnedType))
@@ -5618,6 +5630,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestUnitScore = score;
 
 				bestUnitIdx = pUnit->ArrayIndex;
+				bestUnitRestoresIncome = isEconomyUnit || isMCV || isIncomeRecoveryUnit;
+			}
+
+			if (isMainTank && score > bestTankScore)
+			{
+				bestTankScore = score;
+				bestTankIdx = pUnit->ArrayIndex;
 			}
 
 			if (tankBunkersToFill > 0 && pUnit->Bunkerable && !isEconomyUnit && !isMCV && !isKeyStructureDeployer
@@ -5660,6 +5679,31 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		Debug::Log("[NeuralAI] Frame %d | House #%d unit pick DIAG arch %d slots tank %d light %d aa %d guns %d transport %d:%s\n",
 			Unsorted::CurrentFrame, pHouse->ArrayIndex, pExt->NeuralAI_Archetype, static_cast<int>(scores[24]), static_cast<int>(scores[25]),
 			static_cast<int>(scores[26]), static_cast<int>(scores[27]), static_cast<int>(scores[28]), text.c_str());
+	}
+
+	// The tank floor: below it the best main battle tank goes ahead of the pick (TankFloor*).
+	{
+		const int tankFloor = std::min(TankFloorMost, std::max(TankFloorMin
+			+ std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost), ownedGroundCombatUnits / TankFloorShare));
+		const bool belowFloor = ownedMainTanks < tankFloor;
+		const bool floorTakes = belowFloor && bestTankIdx >= 0 && bestUnitIdx != bestTankIdx && hasActiveUnitIncome
+			&& !bestUnitRestoresIncome && !GetMacroState(pHouse).CounterUnderAttack;
+
+		// TEMP diagnostic: the floor, the tanks alive and what the floor did, with the vehicle pick line.
+		if (logUnitPicks)
+		{
+			Debug::Log("[NeuralAI] Frame %d | House #%d tank floor %d, main battle tanks %d of %d armed ground vehicles, best tank %s %d, "
+				"pick %s %d%s\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, tankFloor, ownedMainTanks, ownedGroundCombatUnits,
+				bestTankIdx >= 0 ? UnitTypeClass::Array.GetItem(bestTankIdx)->ID : "none", bestTankScore,
+				bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx)->ID : "none", bestUnitScore,
+				floorTakes ? ", the tank goes first" : (belowFloor ? ", kept (income, urgency or threat)" : ""));
+		}
+
+		if (floorTakes)
+		{
+			bestUnitIdx = bestTankIdx;
+			bestUnitScore = bestTankScore;
+		}
 	}
 
 	// A tank for an empty tank bunker goes ahead of the scored pick while the house has income and

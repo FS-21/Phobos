@@ -656,6 +656,198 @@ namespace
 		return (pType->JumpJet || pType->MovementZone == MovementZone::Fly || pType->ConsideredAircraft) ? 1 : 0;
 	}
 
+	// Defined in NeuralAI.Scouting.inl: a unit on a scouting trip of this house.
+	bool IsActiveScout(HouseClass* pHouse, DWORD uid);
+
+	// Tank guard (TankGuard*): part of the main battle tanks guards our sites and hunts the enemy
+	// siege near them instead of leaving with the waves.
+	void UpdateTankGuard(HouseClass* pHouse)
+	{
+		if (!pHouse || !IsAITickWindow(TankGuardCheckFrames, 45))
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		const std::unordered_set<DWORD> before = macro.TankGuard;
+		macro.TankGuard.clear();
+
+		// While the base is under attack the guard is free for its defense.
+		if (pHouse->LATime > 0 && now - pHouse->LATime < TankGuardBaseAttackFrames)
+			return;
+
+		// Our sites: construction yards, refineries, factories, one per TankGuardPostCells.
+		std::vector<CellStruct> sites;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type
+				|| (!pBld->Type->ConstructionYard && !pBld->Type->Refinery && pBld->Type->Factory == AbstractType::None))
+			{
+				continue;
+			}
+
+			const CellStruct at = pBld->GetMapCoords();
+
+			if (std::none_of(sites.begin(), sites.end(), [&at](const CellStruct& site) { return site.DistanceFrom(at) <= TankGuardPostCells * 2; }))
+				sites.push_back(at);
+		}
+
+		if (sites.empty())
+			return;
+
+		auto const nearestSite = [&sites](const CellStruct& cell, size_t* pIndex = nullptr)
+		{
+			double best = 1e9;
+
+			for (size_t i = 0; i < sites.size(); ++i)
+			{
+				const double distance = sites[i].DistanceFrom(cell);
+
+				if (distance < best)
+				{
+					best = distance;
+
+					if (pIndex)
+						*pIndex = i;
+				}
+			}
+
+			return best;
+		};
+
+		// The main battle tanks free for the guard, those that guarded already first, then the nearest
+		// to a site.
+		std::vector<std::pair<double, UnitClass*>> candidates;
+		int mainTanks = 0;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type || !IsMainBattleTankType(pUnit->Type))
+				continue;
+
+			++mainTanks;
+			const DWORD uid = pUnit->UniqueID;
+
+			if (macro.PlanMembers.contains(uid) || macro.CapitalHeld.contains(uid) || IsInTransportOp(pHouse, uid) || IsOnRepairTrip(pHouse, uid)
+				|| IsActiveScout(pHouse, uid) || pUnit->GetHealthPercentage() < 0.4)
+			{
+				continue;
+			}
+
+			const double distance = nearestSite(pUnit->GetMapCoords());
+
+			if (distance <= TankGuardSiteCells)
+				candidates.push_back({ before.contains(uid) ? -1.0 : distance, pUnit });
+		}
+
+		const int wanted = std::min({ TankGuardMost, std::max(std::min(TankGuardMin, mainTanks), mainTanks / TankGuardShare),
+			static_cast<int>(candidates.size()) });
+
+		if (wanted <= 0)
+		{
+			macro.TankGuardPosts.clear();
+			return;
+		}
+
+		std::stable_sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b)
+			{ return a.first < b.first || (a.first == b.first && a.second->UniqueID < b.second->UniqueID); });
+		candidates.resize(static_cast<size_t>(wanted));
+
+		for (auto const& [distance, pUnit] : candidates)
+			macro.TankGuard.insert(pUnit->UniqueID);
+
+		std::erase_if(macro.TankGuardPosts, [&macro](const auto& entry) { return !macro.TankGuard.contains(entry.first); });
+
+		// A known enemy siege unit near one of our sites, the nearest to a site first.
+		TechnoClass* pSiege = nullptr;
+		double siegeDistance = TankGuardSiegeCells;
+
+		for (auto const pTech : TechnoClass::Array)
+		{
+			if (!pTech || !pTech->IsAlive || pTech->InLimbo || !pTech->Owner || pTech->Owner == pHouse || pHouse->IsAlliedWith(pTech->Owner)
+				|| pTech->Owner->IsNeutral() || pTech->CloakState == CloakState::Cloaked || pTech->IsInAir())
+			{
+				continue;
+			}
+
+			bool siege = false;
+
+			if (auto const pBld = abstract_cast<BuildingClass*>(pTech))
+			{
+				siege = IsDeployedSiegeBuildingType(pBld->Type);
+			}
+			else if (auto const pEnemyUnit = abstract_cast<UnitClass*>(pTech))
+			{
+				siege = !pEnemyUnit->Type->Naval && !IsMainBattleTankType(pEnemyUnit->Type)
+					&& GroundRangeOf(pEnemyUnit->Type) >= ArtilleryRangeCells * Unsorted::LeptonsPerCell;
+			}
+
+			if (!siege || !IsCellKnownToAI(pHouse, pTech->GetMapCoords()))
+				continue;
+
+			const double distance = nearestSite(pTech->GetMapCoords());
+
+			if (distance <= siegeDistance)
+			{
+				siegeDistance = distance;
+				pSiege = pTech;
+			}
+		}
+
+		int hunting = 0;
+		int moved = 0;
+
+		for (auto const& [distance, pUnit] : candidates)
+		{
+			if (pSiege)
+			{
+				if (pUnit->Target != pSiege)
+				{
+					OrderFootAttack(pUnit, pSiege);
+					++moved;
+				}
+
+				++hunting;
+				continue;
+			}
+
+			// Fighting already: it goes on.
+			if (pUnit->Target || pUnit->IsFiring)
+				continue;
+
+			auto& [post, since] = macro.TankGuardPosts.try_emplace(pUnit->UniqueID,
+				std::pair<int, int> { static_cast<int>(pUnit->UniqueID % sites.size()), now }).first->second;
+
+			if (now - since >= TankGuardPostFrames || now < since || post >= static_cast<int>(sites.size()))
+			{
+				post = (post + 1) % static_cast<int>(sites.size());
+				since = now;
+			}
+
+			const CellStruct postCell = sites[static_cast<size_t>(post)];
+			const bool idle = pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard
+				|| pUnit->CurrentMission == Mission::Sleep;
+
+			if (idle && pUnit->GetMapCoords().DistanceFrom(postCell) > TankGuardPostCells)
+			{
+				if (auto const pCell = MapClass::Instance.TryGetCellAt(postCell))
+				{
+					OrderFootToAttackMove(pUnit, pCell);
+					++moved;
+				}
+			}
+		}
+
+		// TEMP diagnostic: the guard every 1800 frames per house.
+		if (now - macro.TankGuardLogFrame >= 1800 || now < macro.TankGuardLogFrame)
+		{
+			macro.TankGuardLogFrame = now;
+			Debug::Log("[NeuralAI] Frame %d | House #%d tank guard: %d of %d main battle tanks, %d sites, %s, %d orders\n", now,
+				pHouse->ArrayIndex, static_cast<int>(candidates.size()), mainTanks, static_cast<int>(sites.size()),
+				pSiege ? (std::string("hunting ") + pSiege->GetTechnoType()->ID).c_str() : "patrolling", moved);
+		}
+	}
+
 	// Capital groups: capital units are held back from waves and lone strikes until their domain
 	// has 3 (2 with an offensive bank) at the rally point (our first ConYard, else base center),
 	// then go together at one target: the best known enemy building their domain can reach (air:
@@ -1852,7 +2044,7 @@ namespace
 		{
 			// A unit or transport of a transport operation is the operation's until it hands it back.
 			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID) || IsOnRepairTrip(pHouse, pFoot->UniqueID)
-				|| IsInTransportOp(pHouse, pFoot->UniqueID))
+				|| IsInTransportOp(pHouse, pFoot->UniqueID) || macro.TankGuard.contains(pFoot->UniqueID))
 				return false;
 
 			// A slave obeys its slave master only: it goes back to work whatever a plan orders, and

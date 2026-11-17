@@ -1048,6 +1048,10 @@ namespace
 		// waves and lone strikes (UpdateCapitalGroups).
 		std::array<NeuralCapitalGroup, 3> CapitalGroups {};
 		std::unordered_set<DWORD> CapitalHeld {};
+		// The tank guard (UpdateTankGuard): its tanks, and for each the site it guards and since when.
+		std::unordered_set<DWORD> TankGuard {};
+		std::unordered_map<DWORD, std::pair<int, int>> TankGuardPosts {};
+		int TankGuardLogFrame { -100000 };
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
@@ -1571,6 +1575,9 @@ namespace
 			this->PlanHouseLessons.fill(NeuralPlanTargetLesson {});
 			this->CapitalGroups = {};
 			this->CapitalHeld.clear();
+			this->TankGuard.clear();
+			this->TankGuardPosts.clear();
+			this->TankGuardLogFrame = -100000;
 			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
 			this->FerryWaitSince.clear();
@@ -2477,6 +2484,36 @@ namespace
 	// (a suicide truck does not) and, with more Damage than MainTankSpecialDamage, does at least
 	// MainTankHeavyVersus of it to heavy armor (a Gattling Tank does 5%, a flame tank 25%).
 	constexpr double MainTankMinRangeCells = 1.0;
+	// The floor of main battle tanks (user: no house may be left without line tanks, if only to guard
+	// and patrol; this is Red Alert and the tanks are the base, whatever the archetype). A house keeps
+	// TankFloorMin of them alive, one more for each refinery past TankFloorRefineries (TankFloorEconomyMost
+	// more at most), and at least one in TankFloorShare of its armed ground vehicles, TankFloorMost at
+	// most. Below it the best scored main battle tank it can build goes ahead of the war factory's
+	// pick, except when that pick restores the income (a harvester, a miner, an MCV), with no income
+	// at all, or while the base is under attack (the answer to the threat first).
+	constexpr int TankFloorMin = 4;
+	constexpr int TankFloorRefineries = 2;
+	constexpr int TankFloorEconomyMost = 4;
+	constexpr int TankFloorShare = 3;
+	constexpr int TankFloorMost = 16;
+	// Tank guard (user: the floor's tanks guard the base or patrol for siege units near our bases and
+	// expansions; they do not stand still and the waves do not always take them). Half of the main
+	// battle tanks (TankGuardShare), TankGuardMin at least while there are that many and
+	// TankGuardMost at most, are held back from the waves and the plans, the ones nearest to our
+	// sites first (construction yards, refineries, factories). Every TankGuardCheckFrames they go at a
+	// known enemy siege unit (a ground gun of ArtilleryRangeCells or more that is no main battle tank,
+	// or a deployed siege gun) within TankGuardSiegeCells of a site; with none, each one patrols the
+	// sites in turn, TankGuardPostFrames at each. While the base is under attack they are free for its
+	// defense.
+	constexpr int TankGuardShare = 2;
+	constexpr int TankGuardMin = 2;
+	constexpr int TankGuardMost = 6;
+	constexpr int TankGuardCheckFrames = 90;
+	constexpr double TankGuardSiegeCells = 24.0;
+	constexpr int TankGuardPostFrames = 1800;
+	constexpr double TankGuardSiteCells = 40.0;
+	constexpr double TankGuardPostCells = 6.0;
+	constexpr int TankGuardBaseAttackFrames = 1350;
 	constexpr int MainTankSpecialDamage = 5;
 	constexpr double MainTankHeavyVersus = 0.3;
 	constexpr int ArtilleryFreeVehicles = 4;
