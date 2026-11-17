@@ -165,19 +165,20 @@ namespace
 		return count;
 	}
 
-	// Sells one factory of a category above the difficulty cap (an outpost factory, or the first of
-	// a new factory type a captured tree opened, was placed past it). Never the newest one, never
-	// the last of its type (our own faction's factory stays, and so does the new one), never one
-	// whose sale would leave a ConYard (18 cells) or the newest forward stone of the offensive crawl
-	// (15 cells) without a factory of that category. The type with the most copies goes first,
-	// outside the main base before inside. Nothing qualifies: the extra factory stays.
+	// Sells one factory of a category that has more than `keep` of them. Never the newest one,
+	// never the last of its type (our own faction's factory stays, and so does the new one), never
+	// one whose sale would leave a ConYard (18 cells) or the newest forward stone of the offensive
+	// crawl (15 cells) without a factory of that category. The type with the most copies goes
+	// first, outside the main base before inside. Nothing qualifies: the extra factory stays.
+	// For the recovery of the economy (`recovery`) the category with the most factories goes first
+	// and no shipyard is sold: on an island map it is the only way off the island.
 	// True when one was sold.
-	bool SellFactoriesOverDifficultyCap(HouseClass* pHouse, const CellStruct& frontStoneCell)
+	bool SellSurplusFactory(HouseClass* pHouse, const CellStruct& frontStoneCell, int keep, bool recovery)
 	{
 		if (!pHouse)
 			return false;
 
-		const int cap = GetFactoryCategorySellCap(pHouse);
+		const int cap = keep;
 
 		const CellStruct mainBase = (pHouse->BaseSpawnCell != CellStruct::Empty)
 			? pHouse->BaseSpawnCell
@@ -221,11 +222,19 @@ namespace
 		if (frontStoneCell != CellStruct::Empty)
 			anchors.emplace_back(frontStoneCell, 15);
 
-		for (int category = 0; category < 3; ++category)
+		std::array<int, 3> order { 0, 1, 2 };
+
+		if (recovery)
+		{
+			std::stable_sort(order.begin(), order.end(),
+				[&byCategory](int a, int b) { return byCategory[a].size() > byCategory[b].size(); });
+		}
+
+		for (const int category : order)
 		{
 			auto const& blds = byCategory[category];
 
-			if (static_cast<int>(blds.size()) <= cap || underConstruction[category])
+			if (static_cast<int>(blds.size()) <= cap || underConstruction[category] || (recovery && category == 2))
 				continue;
 
 			BuildingClass* pNewest = blds.front();
@@ -288,8 +297,10 @@ namespace
 
 			if (pBest)
 			{
-				Debug::Log("[NeuralAI] House %d over the factory cap (%d per category): selling %s at (%d,%d).\n",
-					pHouse->ArrayIndex, cap, pBest->Type->ID, pBest->GetMapCoords().X, pBest->GetMapCoords().Y);
+				Debug::Log("[NeuralAI] House %d %s (%d of %d kept per category): selling %s at (%d,%d), frame %d.\n",
+					pHouse->ArrayIndex, recovery ? "sells a surplus factory for the recovery of its economy" : "over the factory cap",
+					static_cast<int>(blds.size()), cap, pBest->Type->ID, pBest->GetMapCoords().X, pBest->GetMapCoords().Y,
+					Unsorted::CurrentFrame);
 
 				pBest->Sell(1);
 				return true; // one per check
@@ -297,6 +308,13 @@ namespace
 		}
 
 		return false;
+	}
+
+	// Sells one factory of a category above the difficulty cap (an outpost factory, or the first of
+	// a new factory type a captured tree opened, was placed past it).
+	bool SellFactoriesOverDifficultyCap(HouseClass* pHouse, const CellStruct& frontStoneCell)
+	{
+		return pHouse && SellSurplusFactory(pHouse, frontStoneCell, GetFactoryCategorySellCap(pHouse), false);
 	}
 
 	// Emergency cash recovery (AdvAI_Raise_Money): ONLY when the AI has 0
