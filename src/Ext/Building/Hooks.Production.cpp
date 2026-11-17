@@ -282,6 +282,53 @@ namespace NeuralFactoryQueue
 // the queue and be refused its object by the rule below, and nothing would be built. An owner
 // kept from before the choice changed is dropped the same way the engine drops it: a production
 // of the wanted type is started and abandoned at once.
+// TEMP diagnostic: who suspends a production of a Neural AI house. BuildingClass::Factory_AI
+// abandons every suspended factory once its retry timer is out (0x4502D1), and 1252 of 1255 such
+// abandons in 31 matches of 2026-11-17 were productions half done with the factory and the house
+// powered. The caller is the return address: 0x4FA9A5 player pause, 0x4FE06C and 0x50A696 abandon
+// all, 0x50924D no powered factory (HouseClass::Update_Factories), an address in Phobos.dll our own
+// code (the broke hold in NeuralAI.Tactics.inl, BuildingExt::UpdateFactoryQueues).
+DEFINE_HOOK(0x4C9E60, FactoryClass_Suspend_NeuralDiag, 0x5)
+{
+	GET(FactoryClass*, pThis, ECX);
+	GET_STACK(DWORD, caller, 0x0);
+	GET_STACK(bool, manual, 0x4);
+
+	auto const pOwner = pThis ? pThis->Owner : nullptr;
+
+	if (!pOwner || pThis->IsSuspended || !pThis->Object || !NeuralAI::IsEnabledForHouse(pOwner))
+		return 0;
+
+	static int logFrame = 0;
+	static int logCount = 0;
+
+	if (Unsorted::CurrentFrame < logFrame)
+		logCount = 0;
+
+	logFrame = Unsorted::CurrentFrame;
+
+	if (logCount++ >= 150)
+		return 0;
+
+	const char* where = "none";
+
+	for (auto const pBld : pOwner->Buildings)
+	{
+		if (pBld && pBld->Factory == pThis)
+		{
+			where = pBld->Type->ID;
+			break;
+		}
+	}
+
+	auto const pType = pThis->Object->GetTechnoType();
+	Debug::Log("[NeuralAI] House %d production DIAG: %s in %s suspended by 0x%08X (manual %d, done %d, rate %d, power %d of %d, money %d), frame %d.\n",
+		pOwner->ArrayIndex, pType ? pType->ID : "?", where, caller, manual ? 1 : 0, pThis->IsDone() ? 1 : 0, pThis->Production.Rate,
+		pOwner->PowerOutput, pOwner->PowerDrain, pOwner->Available_Money(), Unsorted::CurrentFrame);
+
+	return 0;
+}
+
 DEFINE_HOOK(0x450292, BuildingClass_Update_Factory_NeuralDesignated, 0x6)
 {
 	enum { Skip = 0x4503CA };
