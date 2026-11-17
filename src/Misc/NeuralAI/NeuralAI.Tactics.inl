@@ -4868,6 +4868,27 @@ namespace
 
 		return false;
 	}
+
+	// Is a square the house's units find no path to within this many cells of a cell?
+	bool IsPathDeadGoalWithin(const HouseClass* pHouse, const CellStruct& cell, double cells)
+	{
+		if (!pHouse || PathDeadGoals.empty() || PathBackoffSerial != NeuralMatchSerial)
+			return false;
+
+		for (auto const& [key, goal] : PathDeadGoals)
+		{
+			if ((key >> 20) != pHouse->ArrayIndex || Unsorted::CurrentFrame >= goal.DeadUntil)
+				continue;
+
+			const CellStruct centre { static_cast<short>(((key >> 10) & 0x3FF) * PathDeadGoalGridCells + PathDeadGoalGridCells / 2),
+				static_cast<short>((key & 0x3FF) * PathDeadGoalGridCells + PathDeadGoalGridCells / 2) };
+
+			if (centre.DistanceFrom(cell) <= cells)
+				return true;
+		}
+
+		return false;
+	}
 }
 
 bool NeuralAI::ShouldSkipPathSearch(const FootClass* pFoot, const CellStruct* pGoal)
@@ -4889,6 +4910,39 @@ bool NeuralAI::ShouldSkipPathSearch(const FootClass* pFoot, const CellStruct* pG
 // time (frame cost sample of 2026-11-13) and a match can have a million. Counted per match by unit
 // type, role (slave, gatherer, plan member, free), mission, mega mission and how far the goal is
 // (near up to 12 cells, mid up to 40, far), and logged every PathFailureLogFrames.
+// The search over the zones found no way for a unit of a Neural AI house: one count per unit and
+// frame for the path dead goal memory, as for the cell search (user's match #10790: 9420 of these
+// and 74 of the others while the waves of a house kept leaving for a base behind a fallen bridge).
+void NeuralAI::OnHierarchicalPathFailure(FootClass* pFoot, const CellStruct& from, const CellStruct& to)
+{
+	static int serial = -1;
+	static std::unordered_map<DWORD, int> lastFrames;
+
+	if (!pFoot || !pFoot->Owner || !NeuralAI::IsEnabledForHouse(pFoot->Owner))
+		return;
+
+	ResetPathBackoffsForMatch();
+
+	if (serial != NeuralMatchSerial)
+	{
+		serial = NeuralMatchSerial;
+		lastFrames.clear();
+	}
+
+	const int now = Unsorted::CurrentFrame;
+
+	if (lastFrames.size() > 4096)
+		std::erase_if(lastFrames, [now](const auto& entry) { return entry.second != now; });
+
+	auto& last = lastFrames[pFoot->UniqueID];
+
+	if (last == now)
+		return;
+
+	last = now;
+	NotePathDeadGoal(pFoot->Owner->ArrayIndex, from, to);
+}
+
 void NeuralAI::OnPathFailure(FootClass* pFoot, const CellStruct& from, const CellStruct& to)
 {
 	constexpr int PathFailureLogFrames = 18000;
