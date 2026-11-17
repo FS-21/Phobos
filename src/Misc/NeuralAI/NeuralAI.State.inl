@@ -1855,9 +1855,11 @@ namespace
 	constexpr int BoardingCacheFrames = 150;
 	constexpr int BoardingCacheGridCells = 4;
 	// A crossing no transport of the house makes (NoteCrossingNeed) stays wanted this long after the
-	// last unit waited for it. The buildings the transport that would make it lacks, and then that
-	// transport, get these bonuses in the production.
-	constexpr int CrossingNeedFrames = 1800;
+	// last unit waited for it, as long as a failed operation waits to ask again (OpRetryFrames). The
+	// buildings the transport that would make it lacks, and then that transport, get these bonuses in
+	// the production.
+	constexpr int CrossingNeedFrames = 3600;
+	constexpr int CrossingNeedLogFrames = 1800;
 	constexpr int CrossingPrerequisiteBonus = 1200;
 	constexpr int CrossingTransportBonus = 1100;
 	constexpr double OpTransportMinHealth = 0.5;
