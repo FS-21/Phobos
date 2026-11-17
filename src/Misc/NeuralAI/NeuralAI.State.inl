@@ -844,6 +844,8 @@ namespace
 		int LastHarvestIncomeFrame { -1 };
 		bool DryEconomyActive { false };
 		int LastDrySaleFrame { -100000 };
+		// Last recovery sale of a surplus factory (EconomyRecoverySaleFrames).
+		int LastRecoverySaleFrame { -100000 };
 		int LastHarvesterBalanceFrame { -100000 };
 		// Expert 0 work (UpdateEconomyCrisis, every 150 frames): the selector prior from the economy
 		// trouble there is now, and what it is made of. Own state and current sight only.
@@ -1176,6 +1178,10 @@ namespace
 		int RemnantSearchFrame { -100000 };
 		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it.
 		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
+		// The idle army by type as the last tick counted it, and when: the group the next wave is
+		// made of, for the target scoring (WaveGroupDamage*).
+		std::vector<std::pair<const TechnoTypeClass*, int>> WaveGroupTypes;
+		int WaveGroupFrame { -100000 };
 		// Transport operations of the house (NeuralAI.Operations.inl): the operations, the next id,
 		// the operation that holds each member or transport by UniqueID, units an operation gave back
 		// and that may not ask again before a frame, the size of the members still waiting on their
@@ -1202,6 +1208,9 @@ namespace
 		// brought home, transports lost).
 		int ShuttleCheckFrame { -1 };
 		int ShuttleRetryUntil { -1 };
+		// Back door (UpdateBackdoor): the last check, and no new one before this frame.
+		int BackdoorCheckFrame { -1 };
+		int BackdoorRetryUntil { -1 };
 		int ShuttleNoRideLogFrame { -1 };
 		int ShuttleCreditsTotal { 0 };
 		int ShuttleTransportsLost { 0 };
@@ -1410,6 +1419,7 @@ namespace
 			this->LastHarvestIncomeFrame = -1;
 			this->DryEconomyActive = false;
 			this->LastDrySaleFrame = -100000;
+			this->LastRecoverySaleFrame = -100000;
 			this->LastHarvesterBalanceFrame = -100000;
 			this->EconomyTrouble = 0;
 			this->LowPowerSinceFrame = -1;
@@ -1571,6 +1581,8 @@ namespace
 			this->WaveEscortRetryFrame = -1;
 			this->RemnantSearchFrame = -100000;
 			this->WaveGoals.clear();
+			this->WaveGroupTypes.clear();
+			this->WaveGroupFrame = -100000;
 			this->TransportOps.clear();
 			this->NextTransportOpId = 1;
 			this->TransportOpOf.clear();
@@ -1584,6 +1596,8 @@ namespace
 			this->OpKindDangerFrame = -1;
 			this->ShuttleCheckFrame = -1;
 			this->ShuttleRetryUntil = -1;
+			this->BackdoorCheckFrame = -1;
+			this->BackdoorRetryUntil = -1;
 			this->ShuttleNoRideLogFrame = -1;
 			this->ShuttleCreditsTotal = 0;
 			this->ShuttleTransportsLost = 0;
@@ -2059,6 +2073,31 @@ namespace
 	constexpr int ShuttleRetryFrames = 9000;
 	constexpr int ShuttleStuckFrames = 1800;
 	constexpr int ShuttleStuckRetryFrames = 27000;
+	// Back door (user, an idea of the old aimd.ini, whose transported attack on the farthest factory had
+	// the largest reward of the file). Checked every BackdoorCheckFrames:
+	// - The house's latest wave (WaveTargetKeepFrames old at most) hits an enemy base on the house's own
+	//   ground, with BackdoorMinDefenses or more known defenses within BackdoorFrontCells of its target.
+	// - BackdoorTeam idle armed ground units of the house (BackdoorMinTeam at least, within BackdoorHomeCells
+	//   of its base) ride a transport operation (client Strike) around that base.
+	// - They land within BackdoorLandingCells of a known valuable building of the same house,
+	//   BackdoorMinGapCells or more from the wave's target, with a landing danger below
+	//   OpSailDangerLimit, and attack it. The building farthest from the wave's target with the fewest
+	//   defenses around it is taken.
+	// - A member is delivered once a transport sets it down within BackdoorDeliverCells of the landing.
+	//   The landings of the load stay within BackdoorLandingCandidateCells of the first.
+	// - One back door at a time per house, BackdoorRetryFrames after the last started.
+	constexpr int BackdoorCheckFrames = 900;
+	constexpr int BackdoorMinDefenses = 3;
+	constexpr double BackdoorFrontCells = 12.0;
+	constexpr int BackdoorTeam = 8;
+	constexpr int BackdoorMinTeam = 4;
+	constexpr double BackdoorHomeCells = 30.0;
+	constexpr int BackdoorLandingCells = 8;
+	constexpr double BackdoorMinGapCells = 20.0;
+	constexpr double BackdoorGuardCells = 9.0;
+	constexpr double BackdoorDeliverCells = 12.0;
+	constexpr int BackdoorLandingCandidateCells = 8;
+	constexpr int BackdoorRetryFrames = 5400;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its
@@ -2071,6 +2110,16 @@ namespace
 	constexpr int MinerFieldClearCells = 10;
 	constexpr int MinerFieldMaxCells = 72;
 	constexpr int MinerLogFrames = 1800;
+	// Recovery sale (user: in extreme poverty a house with too many factories may sell one to pay
+	// for the recovery of its economy): while a house saves for the harvester or the refinery that
+	// restores its income, is short of its price and nothing comes in (nothing gathers, or it lost
+	// a third of its refineries or harvesters and no unload paid for
+	// EconomyRecoverySaleQuietFrames), one factory of the category with the most copies is sold
+	// every EconomyRecoverySaleFrames, down to EconomyRecoveryKeepFactories a category. Never a
+	// shipyard, the newest factory, the last of a type or the only one by a construction yard.
+	constexpr int EconomyRecoverySaleFrames = 300;
+	constexpr int EconomyRecoverySaleQuietFrames = 1800;
+	constexpr int EconomyRecoveryKeepFactories = 1;
 	// Ore cells of a held 12x12 ore block for each refinery past the first it takes (3 at most).
 	constexpr int RefineryOreCellsPerExtra = 24;
 	// Most mobile refineries (slave miners) a house mining with them wants, as the Advanced AI, and
@@ -2433,6 +2482,27 @@ namespace
 	// buildings within WaveGoalKeepCells of it score WaveTargetKeepBonus more, above the focus
 	// enemy (300) and below the coalition target (700). 189 of 20504 launches of 48 houses went
 	// more than 12 cells from the launch before within 900 frames, up to 26 per house.
+	// A wave goes first for what its group brings down fast and last for what it barely scratches
+	// (user): the damage the idle army does to a building type in 900 frames (damage, burst, verses
+	// its armor, rate of fire of the better weapon of each type) as a percent of its strength. At
+	// WaveGroupDamageEvenPercent it changes nothing; from WaveGroupDamageFastPercent on the target
+	// gains WaveGroupDamageMost, at WaveGroupDamageSlowPercent or under it loses as much, in
+	// proportion between. Less than the bonus of the target a wave keeps, so the target does not
+	// change with every unit that joins. The army counted is that of the last tick, no older than
+	// WaveGroupFreshFrames.
+	// Where the enemy aircraft rearm (user): a known airfield or helipad gains, as a wave target and
+	// as an air strike target, a share of the value of that enemy's aircraft seen lately
+	// (EnemyAirValueByOwner): AirBaseWavePercent of it up to AirBaseWaveMost on the score of a
+	// wave target, AirBaseStrikePercent up to AirBaseStrikeMost on the worth of an air strike.
+	constexpr int AirBaseWavePercent = 50;
+	constexpr int AirBaseWaveMost = 250;
+	constexpr int AirBaseStrikePercent = 30;
+	constexpr int AirBaseStrikeMost = 150;
+	constexpr int WaveGroupDamageEvenPercent = 100;
+	constexpr int WaveGroupDamageFastPercent = 400;
+	constexpr int WaveGroupDamageSlowPercent = 25;
+	constexpr int WaveGroupDamageMost = 200;
+	constexpr int WaveGroupFreshFrames = 60;
 	constexpr int WaveTargetKeepFrames = 900;
 	constexpr int WaveTargetKeepBonus = 400;
 	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit
