@@ -3756,12 +3756,46 @@ namespace
 
 		macro.BackdoorCheckFrame = now;
 
+		// TEMP diagnostic: where the checks stop (no back door in 16 matches of its first builds), summed
+		// per house and logged every 9000 frames.
+		enum BackdoorStop { Waiting, NoFront, OtherGround, FewDefenses, NoVictim, NoTarget, SmallTeam, Started, StopCount };
+		static std::array<std::array<int, StopCount>, 8> stops {};
+		static std::array<int, 8> stopsLogFrame {};
+		static int stopsMatch = -1;
+
+		if (stopsMatch != NeuralMatchSerial)
+		{
+			stopsMatch = NeuralMatchSerial;
+			stops = {};
+			stopsLogFrame.fill(0);
+		}
+
+		auto& houseStops = stops[static_cast<size_t>(pHouse->ArrayIndex) & 7];
+		auto const stop = [&](BackdoorStop why)
+		{
+			houseStops[why]++;
+			auto& logFrame = stopsLogFrame[static_cast<size_t>(pHouse->ArrayIndex) & 7];
+
+			if (now - logFrame >= 9000 || now < logFrame)
+			{
+				logFrame = now;
+				Debug::Log("[NeuralAI] House %d back door DIAG: checks stopped at waiting %d, no front %d, front on other ground %d, few defenses %d, "
+					"no victim %d, no target with a safe landing %d, small team %d, started %d, frame %d.\n", pHouse->ArrayIndex,
+					houseStops[Waiting], houseStops[NoFront], houseStops[OtherGround], houseStops[FewDefenses], houseStops[NoVictim],
+					houseStops[NoTarget], houseStops[SmallTeam], houseStops[Started], now);
+			}
+		};
+
 		if (macro.BackdoorRetryUntil >= 0 && now < macro.BackdoorRetryUntil && macro.BackdoorRetryUntil - now <= BackdoorRetryFrames)
+		{
+			stop(Waiting);
 			return;
+		}
 
 		if (std::any_of(macro.TransportOps.begin(), macro.TransportOps.end(),
 			[](const NeuralTransportOperation& op) { return !op.Over && op.Client == NeuralOpClient::Strike; }))
 		{
+			stop(Waiting);
 			return;
 		}
 
@@ -3770,17 +3804,26 @@ namespace
 		const CellStruct home = pHouse->GetBaseCenter();
 
 		if (front == CellStruct::Empty || home == CellStruct::Empty || now - macro.LastWaveDispatchFrame > WaveTargetKeepFrames)
+		{
+			stop(NoFront);
 			return;
+		}
 
 		const int homeZone = MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false);
 
 		if (!IsGroundZone(homeZone) || MapClass::Instance.GetMovementZoneType(front, MovementZone::Normal, false) != homeZone)
+		{
+			stop(OtherGround);
 			return;
+		}
 
 		const int frontDefenses = CountKnownEnemyDefensesNear(pHouse, front, BackdoorFrontCells, false);
 
 		if (frontDefenses < BackdoorMinDefenses)
+		{
+			stop(FewDefenses);
 			return;
+		}
 
 		auto const isEnemy = [pHouse](HouseClass* pOwner)
 		{
@@ -3807,7 +3850,10 @@ namespace
 		}
 
 		if (!pVictim)
+		{
+			stop(NoVictim);
 			return;
+		}
 
 		// The landing by a building: a free land cell of its ground on the shore, the one with the least
 		// danger for a load set down there.
@@ -3902,7 +3948,10 @@ namespace
 		}
 
 		if (!pTarget)
+		{
+			stop(NoTarget);
 			return;
+		}
 
 		// The team: idle armed ground units of the house at home, the nearest to its base first.
 		std::vector<std::pair<double, FootClass*>> idle;
@@ -3951,7 +4000,10 @@ namespace
 		}
 
 		if (static_cast<int>(idle.size()) < BackdoorMinTeam)
+		{
+			stop(SmallTeam);
 			return;
+		}
 
 		std::stable_sort(idle.begin(), idle.end(), [](const auto& a, const auto& b)
 			{
@@ -3970,8 +4022,12 @@ namespace
 		}
 
 		if (taken == 0)
+		{
+			stop(SmallTeam);
 			return;
+		}
 
+		stop(Started);
 		macro.BackdoorRetryUntil = now + BackdoorRetryFrames;
 		Debug::Log("[NeuralAI] House %d back door: %d units to %s at (%d,%d) of house %d, landing (%d,%d) danger %d, %d cells from the wave's "
 			"target (%d,%d) with %d defenses, frame %d.\n", pHouse->ArrayIndex, taken, pTarget->Type->ID, pTarget->GetMapCoords().X,
