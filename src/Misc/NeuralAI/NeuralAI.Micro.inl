@@ -8816,9 +8816,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	const bool allEnemyBldsGone = !anyEnemyBuildingExists;
 
+	// Remnant phase: no enemy building known and no start left to check. The remnant search and the
+	// hunt of the remnants in the air run in it, whatever enemy unit the waves go after meanwhile
+	// (match #11110: 180 vehicle waves chased a flying unit for 4500 frames while one turret no unit
+	// of ours had seen kept the match going).
+	const bool remnantPhase = !pVisibleEnemyBld && !pFallbackEnemyCell;
+
+	// A ground wave sent to the cell of an enemy in the air cannot hit it: those are left to the hunt
+	// of the remnants in the air below.
 	if (!pVisibleEnemyBld && !pFallbackEnemyCell)
 	{
-		if (pHiddenOrStealthEnemy && pHiddenOrStealthEnemy->GetCell())
+		if (pHiddenOrStealthEnemy && pHiddenOrStealthEnemy->GetCell() && !pHiddenOrStealthEnemy->IsInAir())
 		{
 			pFallbackEnemyCell = pHiddenOrStealthEnemy->GetCell();
 		}
@@ -8831,7 +8839,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			for (auto const pRemT : TechnoClass::Array)
 			{
 				if (!pRemT || pRemT->InLimbo || !pRemT->IsAlive || !pRemT->Owner
-					|| pRemT->WhatAmI() == AbstractType::Building)
+					|| pRemT->WhatAmI() == AbstractType::Building || pRemT->IsInAir())
 				{
 					continue;
 				}
@@ -8864,10 +8872,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	if (allEnemyBldsGone && pEnemySubOrShip)
 		GetMacroState(pHouse).NavalRemnantUntil = Unsorted::CurrentFrame + 900;
 
-	// Remnants in the air (aircraft, jumpjets) once the enemy has no building left: a ground wave
-	// sent to their cell cannot hit them, so the 12 nearest units with an anti-air weapon attack
-	// each one directly. Every 150 frames.
-	if (endgameRemnantHunt && allEnemyBldsGone && IsAITickWindow(150, 15))
+	// Remnants in the air (aircraft, jumpjets) in the remnant phase, also while an enemy building no
+	// unit of ours has seen is left: a ground wave sent to their cell cannot hit them, so the 12
+	// nearest units with an anti-air weapon attack each one directly. Every 150 frames.
+	if (remnantPhase && IsAITickWindow(150, 15))
 	{
 		auto const hitsAir = [](TechnoTypeClass* pType)
 		{
@@ -9210,10 +9218,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	// Remnant search: no enemy building known and nowhere to send a wave, yet the enemy still has
-	// buildings. Idle units go and look, the fastest first, each to a different place
-	// (RemnantSearchScouts), and leave the idle pools.
-	if (!pVisibleEnemyBld && !pFallbackEnemyCell && anyEnemyBuildingExists
+	// Remnant search: the remnant phase while the enemy still has buildings, whatever enemy unit the
+	// waves go after meanwhile. Idle units go and look, the fastest first, each to a different place
+	// (RemnantSearchScouts, one in RemnantSearchArmyShare of a big idle army), and leave the idle
+	// pools.
+	if (remnantPhase && anyEnemyBuildingExists
 		&& Unsorted::CurrentFrame - GetMacroState(pHouse).RemnantSearchFrame >= RemnantSearchEveryFrames)
 	{
 		GetMacroState(pHouse).RemnantSearchFrame = Unsorted::CurrentFrame;
@@ -9224,7 +9233,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				return a->GetTechnoType()->Speed > b->GetTechnoType()->Speed;
 			});
 
-		const std::vector<CellStruct> places = FindRemnantSearchCells(pHouse, std::min(RemnantSearchScouts, searchers.size()));
+		const size_t searcherCount = std::min(searchers.size(),
+			std::clamp(searchers.size() / RemnantSearchArmyShare, RemnantSearchScouts, RemnantSearchMostScouts));
+		const std::vector<CellStruct> places = FindRemnantSearchCells(pHouse, searcherCount);
 
 		for (size_t i = 0; i < places.size(); ++i)
 		{

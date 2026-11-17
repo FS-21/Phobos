@@ -2609,6 +2609,36 @@ namespace
 	constexpr int RemnantSearchRadius = 7;
 	constexpr int RemnantSearchMinGain = 60;
 	constexpr int RemnantSearchEveryFrames = 450;
+	// A big idle army searches with more units: one in RemnantSearchArmyShare of the idle ones, at
+	// most RemnantSearchMostScouts (user, match #11110: 180 idle vehicles searched 3 at a time).
+	constexpr size_t RemnantSearchArmyShare = 6;
+	constexpr size_t RemnantSearchMostScouts = 32;
+	// A place the searchers went to lately is left to the next ones for RemnantSearchSpreadFrames;
+	// one they went to RemnantSearchMostSends times within RemnantSearchMemoryFrames is out of their
+	// reach (match #11110: the same corner 25 times in 22000 frames, never reached).
+	constexpr int RemnantSearchSpreadFrames = 1800;
+	constexpr int RemnantSearchMostSends = 3;
+	constexpr int RemnantSearchMemoryFrames = 27000;
+	// Sweep (user): while no enemy object is in our sight, one more scout every ScoutSweepEveryFrames
+	// (half a minute) may leave, up to ScoutSweepMostTrips scouts out, and the places of a grid of
+	// ScoutSweepStepCells over the playable ground are scout targets too (weight ScoutSweepWeight):
+	// the ground never looked at gets visited, not only the starts, ore fields and known bases.
+	constexpr int ScoutSweepEveryFrames = 450;
+	constexpr int ScoutSweepStepCells = 14;
+	constexpr int ScoutSweepWeight = 50;
+	constexpr size_t ScoutSweepMostTrips = 4;
+	// Sensor lookouts (user): a mobile sensor array (a vehicle that unfolds into a building with
+	// SensorArray and SensorsSight of SensorLookoutMinSight or more) goes where enemy stealth units
+	// were seen in the last SensorLookoutSightingFrames or, with no enemy in sight, to the place its
+	// sensors would cover the most ground no sensor of ours covers, and unfolds there. Unfolded, it
+	// packs up for a better place after SensorLookoutDwellFrames with no enemy in sight. Production
+	// allows one of them apart from the other unarmed support vehicles while stealth units were seen
+	// lately or the house searches for remnants.
+	constexpr int SensorLookoutMinSight = 10;
+	constexpr int SensorLookoutSightingFrames = 5400;
+	constexpr int SensorLookoutDwellFrames = 5400;
+	constexpr int SensorLookoutMinMoveCells = 20;
+	constexpr int SensorLookoutLateFrames = 4500;
 	// A wounded soldier (under WoundedIdleHealth) left idle more than WoundedIdleHomeCells from
 	// home walks back to it (user).
 	constexpr double WoundedIdleHealth = 0.55;

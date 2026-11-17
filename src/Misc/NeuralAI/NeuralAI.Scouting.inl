@@ -13,10 +13,11 @@ namespace
 		Field,
 		Route,
 		EnemyBase,
-		EnemyArmy
+		EnemyArmy,
+		Sweep
 	};
 
-	constexpr const char* NeuralScoutKindNames[] = { "start", "field", "route", "enemyBase", "enemyArmy" };
+	constexpr const char* NeuralScoutKindNames[] = { "start", "field", "route", "enemyBase", "enemyArmy", "sweep" };
 
 	struct NeuralScoutTrip
 	{
@@ -51,6 +52,14 @@ namespace
 		bool Air { false };
 		bool Flies { false };
 		int Cost { 0 };
+	};
+
+	// A mobile sensor array on its way to a lookout (SensorLookoutMinSight).
+	struct NeuralSensorTrip
+	{
+		DWORD ID { 0 };
+		CellStruct Target { CellStruct::Empty };
+		int Frame { 0 };
 	};
 
 	// Last frame each 8x8 block of cells was in our current sight (-1: never).
@@ -91,6 +100,17 @@ namespace
 		// weighed again, and whether the wait was logged since the last reveal.
 		int RevealCheckFrame { -1 };
 		bool RevealHeld { false };
+		// Places remnant searchers were sent to (cell, frame), kept RemnantSearchMemoryFrames.
+		std::vector<std::pair<CellStruct, int>> RemnantSent {};
+		// Last frame a sweep scout could leave (ScoutSweepEveryFrames).
+		int LastSweepFrame { -100000 };
+		// Whether an enemy object was in our sight at the last update.
+		bool EnemyInSight { true };
+		// Mobile sensor arrays on their way to a lookout, the last frame lookouts were weighed, and
+		// our unfolded sensor arrays with the frame each was first seen standing (UniqueID order).
+		std::vector<NeuralSensorTrip> SensorTrips {};
+		int SensorCheckFrame { -100000 };
+		std::vector<std::pair<DWORD, int>> SensorStands {};
 	};
 
 	std::array<NeuralScoutState, 32> ScoutStates {};
@@ -165,12 +185,27 @@ namespace
 		return (pos & 1) != 0 || (pos > 0 && runs[pos - 1] == idx);
 	}
 
+	// Ground a look can teach about: on the map and inside its playable area, the cell's height
+	// counted. The engine never shows the margins, so they stay unexplored for good (match #11110:
+	// the searchers went to a corner of the top margin for 22000 frames).
+	bool IsScoutableCell(const CellStruct& cell)
+	{
+		return MapClass::Instance.CoordinatesLegal(cell) && MapClass::Instance.IsWithinUsableArea(cell, true);
+	}
+
+	// A mobile sensor array: a vehicle that unfolds into a building whose sensors reach far.
+	bool IsSensorLookoutType(const UnitTypeClass* pType)
+	{
+		return pType && pType->DeploysInto && pType->DeploysInto->SensorArray && pType->DeploysInto->SensorsSight >= SensorLookoutMinSight;
+	}
+
 	// What a look at center would teach us, 0..100: ground never explored (or shrouded again by an
 	// enemy gap) counts fully, explored ground with fog of war by the time since it was last in sight.
 	// Without fog of war the engine shows explored ground live (and the AI's known buildings and
 	// sightings use it), so a look there teaches nothing: with the map revealed ("Reveal map", a Spy
 	// Satellite) only enemy gaps are left to scout. With pGapRuns (an area reveal, which the engine
-	// shrouds again at once under an enemy gap) the cells under an enemy gap teach nothing.
+	// shrouds again at once under an enemy gap) the cells under an enemy gap teach nothing. Cells
+	// outside the playable area (IsScoutableCell) are left out.
 	int ScoutInfoGain(HouseClass* pHouse, const NeuralScoutState& state, const CellStruct& center, int radius, bool fog,
 		const std::vector<size_t>* pGapRuns = nullptr)
 	{
@@ -186,7 +221,7 @@ namespace
 					continue;
 
 				const CellStruct cell { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
-				auto const pCell = MapClass::Instance.CoordinatesLegal(cell) ? MapClass::Instance.TryGetCellAt(cell) : nullptr;
+				auto const pCell = IsScoutableCell(cell) ? MapClass::Instance.TryGetCellAt(cell) : nullptr;
 
 				if (!pCell)
 					continue;
@@ -361,7 +396,7 @@ namespace
 	void CountScoutKind(NeuralScoutKind kind, int houseIndex)
 	{
 		static constexpr NeuralDecision KindDecisions[] = { NeuralDecision::ScoutStart, NeuralDecision::FieldScoutSent,
-			NeuralDecision::ScoutRoute, NeuralDecision::ScoutBase, NeuralDecision::ScoutArmy };
+			NeuralDecision::ScoutRoute, NeuralDecision::ScoutBase, NeuralDecision::ScoutArmy, NeuralDecision::ScoutSweep };
 
 		CountDecision(KindDecisions[static_cast<size_t>(kind)], houseIndex);
 	}
@@ -399,10 +434,11 @@ namespace
 	// left out (also those given up on lately or twice), places where a scout died lately count a quarter. Also counts the free ore fields and
 	// how many of them were never explored. With revealRadius above 0 the places are valued for an area
 	// reveal of that radius instead: the place itself, by what the disc would teach (the cells under an
-	// enemy gap left out), whatever scouts do or met there.
+	// enemy gap left out), whatever scouts do or met there. With sweep the places of a grid over the
+	// playable land are weighed too (ScoutSweepWeight). Only playable ground is a target.
 	void CollectScoutCandidates(HouseClass* pHouse, const NeuralScoutState& state, const CellStruct& home, bool fog,
 		const std::vector<NeuralScoutSighting>& sightings, std::vector<NeuralScoutCandidate>& out, int& freeFields,
-		int& unexploredFields, int revealRadius = 0)
+		int& unexploredFields, int revealRadius = 0, bool sweep = false)
 	{
 		auto const& macro = GetMacroState(pHouse);
 		auto const& known = GetKnownEnemyBuildingCache(pHouse).Entries;
@@ -412,7 +448,7 @@ namespace
 
 		auto add = [&](NeuralScoutKind kind, const CellStruct& cell, int weight)
 		{
-			if (cell == CellStruct::Empty || !MapClass::Instance.CoordinatesLegal(cell))
+			if (cell == CellStruct::Empty || !IsScoutableCell(cell))
 				return;
 
 			if (reveal)
@@ -427,7 +463,7 @@ namespace
 
 			const CellStruct look = ScoutStandoffCell(pHouse, cell, home);
 
-			if (look == CellStruct::Empty)
+			if (look == CellStruct::Empty || !IsScoutableCell(look))
 				return;
 
 			for (auto const& trip : state.Trips)
@@ -614,6 +650,26 @@ namespace
 
 			groups++;
 			add(NeuralScoutKind::EnemyArmy, armies[i]->Cell, std::clamp(30 + value / 5, 30, 85));
+		}
+
+		// Sweep: the land of a grid over the playable area, what is never looked at otherwise.
+		if (sweep)
+		{
+			for (int y = ScoutSweepStepCells / 2; y < VisionMapSide; y += ScoutSweepStepCells)
+			{
+				for (int x = ScoutSweepStepCells / 2; x < VisionMapSide; x += ScoutSweepStepCells)
+				{
+					const CellStruct cell { static_cast<short>(x), static_cast<short>(y) };
+
+					if (!IsScoutableCell(cell))
+						continue;
+
+					auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+					if (pCell && pCell->LandType != LandType::Water)
+						add(NeuralScoutKind::Sweep, cell, ScoutSweepWeight);
+				}
+			}
 		}
 	}
 
@@ -1000,23 +1056,47 @@ namespace
 	// arrived: next leg up to 3, then home), then sends a new scout to the best target when a slot
 	// is free. One scout per house, two in FFA or with a big idle army, three while the
 	// information is very stale (no enemy building known after 4500 frames, or 60% of the free ore
-	// fields never explored after 9000 frames). At most one new scout every 240 frames.
-	// Places to look for what is left of an enemy: land cells of a grid whose surroundings teach the
-	// most, the best first (nearer to home among equals), at most this many.
+	// fields never explored after 9000 frames). At most one new scout every 240 frames. While no
+	// enemy object is in sight, one more every ScoutSweepEveryFrames up to ScoutSweepMostTrips, the
+	// grid of sweep places weighed too, and the sensor lookouts move (UpdateSensorLookouts).
+	// Places to look for what is left of an enemy: playable land cells of a grid whose surroundings
+	// teach the most, the best first (nearer to home among equals), at most this many. A place
+	// searchers went to in the last RemnantSearchSpreadFrames is left to the next ones, and one they
+	// went to RemnantSearchMostSends times within RemnantSearchMemoryFrames is out of their reach.
+	// The places returned are noted as sent to.
 	std::vector<CellStruct> FindRemnantSearchCells(HouseClass* pHouse, size_t most)
 	{
-		auto const& state = GetScoutState(pHouse);
+		auto& state = GetScoutState(pHouse);
+		const int now = Unsorted::CurrentFrame;
 		const bool fog = IsFogOfWarMatch();
 		const CellStruct home = GetHouseHomeCell(pHouse);
 		std::vector<std::pair<int, CellStruct>> found;
 
-		for (int y = RemnantSearchStepCells / 2; y < 512; y += RemnantSearchStepCells)
+		std::erase_if(state.RemnantSent, [now](const std::pair<CellStruct, int>& sent) { return now - sent.second > RemnantSearchMemoryFrames; });
+
+		auto leftAlone = [&state, now](const CellStruct& cell)
 		{
-			for (int x = RemnantSearchStepCells / 2; x < 512; x += RemnantSearchStepCells)
+			int sends = 0;
+
+			for (auto const& [spot, frame] : state.RemnantSent)
+			{
+				if (spot.DistanceFrom(cell) > RemnantSearchStepCells / 2)
+					continue;
+
+				if (now - frame < RemnantSearchSpreadFrames || ++sends >= RemnantSearchMostSends)
+					return true;
+			}
+
+			return false;
+		};
+
+		for (int y = RemnantSearchStepCells / 2; y < VisionMapSide; y += RemnantSearchStepCells)
+		{
+			for (int x = RemnantSearchStepCells / 2; x < VisionMapSide; x += RemnantSearchStepCells)
 			{
 				const CellStruct cell { static_cast<short>(x), static_cast<short>(y) };
 
-				if (!MapClass::Instance.CoordinatesLegal(cell))
+				if (!IsScoutableCell(cell) || leftAlone(cell))
 					continue;
 
 				auto const pCell = MapClass::Instance.TryGetCellAt(cell);
@@ -1042,9 +1122,284 @@ namespace
 		std::vector<CellStruct> cells;
 
 		for (size_t i = 0; i < found.size() && i < most; ++i)
+		{
 			cells.push_back(found[i].second);
+			state.RemnantSent.emplace_back(found[i].second, now);
+		}
 
 		return cells;
+	}
+
+	// Where a sensor array of this sensor radius, unfolded in the given movement zone, covers the most
+	// playable ground no sensor of ours covers: places of a ScoutSweepStepCells grid in that zone, out
+	// of known enemy defense reach and away from the lookouts in taken, by the uncovered samples
+	// (every 5 cells) less a cell per 2 of the way from `from`. Empty when none covers 8 samples.
+	CellStruct FindSensorLookout(HouseClass* pHouse, const CellStruct& from, int zone, int radius, const std::vector<CellStruct>& taken)
+	{
+		const unsigned int houseIdx = static_cast<unsigned int>(pHouse->ArrayIndex);
+		CellStruct best = CellStruct::Empty;
+		int bestScore = 0;
+
+		for (int y = ScoutSweepStepCells / 2; y < VisionMapSide; y += ScoutSweepStepCells)
+		{
+			for (int x = ScoutSweepStepCells / 2; x < VisionMapSide; x += ScoutSweepStepCells)
+			{
+				const CellStruct cell { static_cast<short>(x), static_cast<short>(y) };
+
+				if (!IsScoutableCell(cell))
+					continue;
+
+				auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+				if (!pCell || pCell->LandType == LandType::Water
+					|| MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, false) != zone
+					|| IsCellInKnownEnemyDefenseReach(pHouse, cell, 2)
+					|| std::any_of(taken.begin(), taken.end(), [&cell, radius](const CellStruct& spot) { return spot.DistanceFrom(cell) < radius; }))
+				{
+					continue;
+				}
+
+				int uncovered = 0;
+
+				for (int dy = -radius; dy <= radius; dy += 5)
+				{
+					for (int dx = -radius; dx <= radius; dx += 5)
+					{
+						if (dx * dx + dy * dy > radius * radius)
+							continue;
+
+						const CellStruct sample { static_cast<short>(x + dx), static_cast<short>(y + dy) };
+						auto const pSample = IsScoutableCell(sample) ? MapClass::Instance.TryGetCellAt(sample) : nullptr;
+
+						if (pSample && !pSample->Sensors_InclHouse(houseIdx))
+							uncovered++;
+					}
+				}
+
+				const int score = uncovered * 20 - static_cast<int>(from.DistanceFrom(cell)) / 2;
+
+				if (uncovered >= 8 && score > bestScore)
+				{
+					bestScore = score;
+					best = cell;
+				}
+			}
+		}
+
+		return best;
+	}
+
+	// Sensor lookouts (SensorLookoutMinSight), every scouting update: a mobile sensor array on its way
+	// unfolds once there (or stopped within 8 cells), is sent on again when stopped short and given up
+	// after SensorLookoutLateFrames. Every ScoutSweepEveryFrames an idle one goes where enemy stealth
+	// units were seen lately and no sensor of ours covers, else (no enemy in sight) to the best
+	// lookout; an unfolded one packs up for such a place SensorLookoutMinMoveCells or more away after
+	// SensorLookoutDwellFrames with no enemy in sight, or after ScoutSweepEveryFrames x 2 for a
+	// stealth sighting no sensor of ours covers.
+	void UpdateSensorLookouts(HouseClass* pHouse, NeuralScoutState& state, bool enemyInSight)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		const int houseIdx = pHouse->ArrayIndex;
+		std::vector<NeuralSensorTrip> keep;
+
+		for (auto const& trip : state.SensorTrips)
+		{
+			auto const pUnit = abstract_cast<UnitClass*>(FindOwnScoutFoot(pHouse, trip.ID));
+
+			if (!pUnit || pUnit->InLimbo || !IsSensorLookoutType(pUnit->Type))
+				continue;
+
+			const double dist = pUnit->GetMapCoords().DistanceFrom(trip.Target);
+			const bool moving = pUnit->CurrentMission == Mission::Move || pUnit->QueuedMission == Mission::Move;
+
+			if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload)
+			{
+				macro.PlanMembers.insert(trip.ID);
+				keep.push_back(trip);
+				continue;
+			}
+
+			const bool there = dist <= 3.0 || (!moving && dist <= 8.0);
+
+			if (there && UnitExt::CanDeployIntoBuilding(pUnit))
+			{
+				// UnitClass::TryToDeploy gives up while the unit has a destination.
+				NeuralDeployOrderFrame[pUnit->UniqueID] = now;
+				pUnit->SetDestination(nullptr, true);
+				pUnit->ClearNavigationList();
+				pUnit->SetTarget(nullptr);
+				pUnit->QueueMission(Mission::Unload, true);
+				Debug::Log("[NeuralAI] House %d Sensor: %s unfolds at (%d,%d), frame %d.\n", houseIdx, pUnit->Type->ID,
+					pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y, now);
+			}
+			else if (now - trip.Frame > SensorLookoutLateFrames)
+			{
+				Debug::Log("[NeuralAI] House %d Sensor: %s gave up on (%d,%d), %d cells short, frame %d.\n", houseIdx, pUnit->Type->ID,
+					trip.Target.X, trip.Target.Y, static_cast<int>(dist), now);
+				continue;
+			}
+			else if (there)
+			{
+				// No room to unfold here: it steps aside and tries again.
+				if (!moving)
+					pUnit->Scatter(CoordStruct::Empty, true, false);
+			}
+			else if (!moving)
+			{
+				if (auto const pCell = MapClass::Instance.TryGetCellAt(trip.Target))
+					OrderScoutMove(pUnit, pCell, false);
+			}
+
+			macro.PlanMembers.insert(trip.ID);
+			keep.push_back(trip);
+		}
+
+		state.SensorTrips = std::move(keep);
+
+		if (now - state.SensorCheckFrame < ScoutSweepEveryFrames)
+			return;
+
+		state.SensorCheckFrame = now;
+
+		// The newest stealth sighting of the last SensorLookoutSightingFrames no sensor of ours covers
+		// (the frame, then the lowest UniqueID: the map's own order is never read).
+		CellStruct stealthCell = CellStruct::Empty;
+		int stealthFrame = -1;
+		DWORD stealthID = 0;
+
+		for (auto const& [uid, seen] : macro.StealthSightings)
+		{
+			if (now - seen.second > SensorLookoutSightingFrames || seen.first == CellStruct::Empty)
+				continue;
+
+			auto const pCell = MapClass::Instance.TryGetCellAt(seen.first);
+
+			if (!pCell || pCell->Sensors_InclHouse(static_cast<unsigned int>(houseIdx)))
+				continue;
+
+			if (seen.second > stealthFrame || (seen.second == stealthFrame && uid < stealthID))
+			{
+				stealthCell = seen.first;
+				stealthFrame = seen.second;
+				stealthID = uid;
+			}
+		}
+
+		if (enemyInSight && stealthCell == CellStruct::Empty)
+			return;
+
+		const CellStruct home = GetHouseHomeCell(pHouse);
+		std::vector<CellStruct> taken;
+
+		for (auto const& trip : state.SensorTrips)
+			taken.push_back(trip.Target);
+
+		// Where a sensor array at `from` in `zone` goes next: the stealth sighting (out of known defense
+		// reach), else with no enemy in sight the best lookout.
+		auto nextLookout = [&](const CellStruct& from, int zone, int radius, bool& forStealth) -> CellStruct
+		{
+			forStealth = false;
+
+			if (stealthCell != CellStruct::Empty
+				&& std::none_of(taken.begin(), taken.end(), [&stealthCell, radius](const CellStruct& spot) { return spot.DistanceFrom(stealthCell) < radius; }))
+			{
+				const CellStruct look = ScoutStandoffCell(pHouse, stealthCell, home == CellStruct::Empty ? from : home);
+
+				if (look != CellStruct::Empty)
+				{
+					if (auto const pLand = ScoutLandCellInZone(look, zone, 6))
+					{
+						forStealth = true;
+						return pLand->MapCoords;
+					}
+				}
+			}
+
+			return enemyInSight ? CellStruct::Empty : FindSensorLookout(pHouse, from, zone, radius, taken);
+		};
+
+		// Unfolded ones: the frame each was first seen standing.
+		std::vector<std::pair<DWORD, int>> stands;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->UndeploysInto
+				|| !IsSensorLookoutType(pBld->Type->UndeploysInto))
+			{
+				continue;
+			}
+
+			auto const it = std::find_if(state.SensorStands.begin(), state.SensorStands.end(),
+				[pBld](const std::pair<DWORD, int>& stand) { return stand.first == pBld->UniqueID; });
+			const int since = it != state.SensorStands.end() ? it->second : now;
+			stands.emplace_back(pBld->UniqueID, since);
+
+			if (pBld->CurrentMission == Mission::Construction || pBld->CurrentMission == Mission::Selling
+				|| pBld->QueuedMission == Mission::Selling || macro.PlanMembers.contains(pBld->UniqueID))
+			{
+				continue;
+			}
+
+			const CellStruct here = pBld->GetMapCoords();
+			const int zone = MapClass::Instance.GetMovementZoneType(here, MovementZone::Normal, pBld->OnBridge);
+			const int radius = std::max(1, static_cast<int>(pBld->Type->SensorsSight));
+			bool forStealth = false;
+			const CellStruct next = nextLookout(here, zone, radius, forStealth);
+
+			if (next == CellStruct::Empty || next.DistanceFrom(here) < SensorLookoutMinMoveCells
+				|| now - since < (forStealth ? 2 * ScoutSweepEveryFrames : SensorLookoutDwellFrames))
+			{
+				continue;
+			}
+
+			if (auto const pNext = MapClass::Instance.TryGetCellAt(next))
+			{
+				pBld->SetArchiveTarget(pNext);
+				pBld->Sell(1);
+				taken.push_back(next);
+				Debug::Log("[NeuralAI] House %d Sensor: %s packs up at (%d,%d) for %s (%d,%d) after %d frames, frame %d.\n", houseIdx,
+					pBld->Type->ID, here.X, here.Y, forStealth ? "a stealth sighting" : "a lookout", next.X, next.Y, now - since, now);
+			}
+		}
+
+		std::sort(stands.begin(), stands.end());
+		state.SensorStands = std::move(stands);
+
+		// Idle mobile ones go to the next lookout.
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !IsSensorLookoutType(pUnit->Type)
+				|| pUnit->IsDeploying || macro.PlanMembers.contains(pUnit->UniqueID) || IsInTransportOp(pHouse, pUnit->UniqueID)
+				|| IsScoutTripUnit(state, pUnit->UniqueID) || pUnit->GetHealthPercentage() < 0.5
+				|| (pUnit->CurrentMission != Mission::Guard && pUnit->CurrentMission != Mission::Area_Guard
+					&& pUnit->CurrentMission != Mission::Sleep))
+			{
+				continue;
+			}
+
+			const int zone = ObjectZone(pUnit, MovementZone::Normal);
+
+			if (zone < 0)
+				continue;
+
+			const CellStruct from = pUnit->GetMapCoords();
+			const int radius = std::max(1, static_cast<int>(pUnit->Type->DeploysInto->SensorsSight));
+			bool forStealth = false;
+			const CellStruct next = nextLookout(from, zone, radius, forStealth);
+			auto const pNext = next != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(next) : nullptr;
+
+			if (!pNext)
+				continue;
+
+			OrderScoutMove(pUnit, pNext, false);
+			state.SensorTrips.push_back({ pUnit->UniqueID, next, now });
+			macro.PlanMembers.insert(pUnit->UniqueID);
+			taken.push_back(next);
+			CountDecision(NeuralDecision::SensorLookout, houseIdx);
+			Debug::Log("[NeuralAI] House %d Sensor: %s to %s (%d,%d), %d cells, frame %d.\n", houseIdx, pUnit->Type->ID,
+				forStealth ? "a stealth sighting" : "a lookout", next.X, next.Y, static_cast<int>(from.DistanceFrom(next)), now);
+		}
 	}
 
 	void UpdatePurposefulScouting(HouseClass* pHouse)
@@ -1060,6 +1415,9 @@ namespace
 		// (they run before this), so it is refilled on every call, also between updates.
 		for (auto const& trip : state.Trips)
 			macro.PlanMembers.insert(trip.ScoutID);
+
+		for (auto const& trip : state.SensorTrips)
+			macro.PlanMembers.insert(trip.ID);
 
 		if (now - state.LastUpdateFrame < ScoutUpdateFrames && now >= state.LastUpdateFrame)
 			return;
@@ -1172,9 +1530,34 @@ namespace
 		CountScoutFoundBuildings(pHouse, state, scoutSpots);
 		UpdateEnemyExpansionTelemetry(pHouse, state, scoutSpots);
 
-		const bool launchWindow = now >= 450 && now - state.LastLaunchFrame >= ScoutLaunchCooldownFrames;
+		// Whether any enemy object stands in our sight now (a cloaked one does not count).
+		bool enemyInSight = false;
 
-		if (nextLegs.empty() && (!launchWindow || state.Trips.size() >= 3))
+		for (auto const pTechno : TechnoClass::Array)
+		{
+			if (!pTechno || pTechno->InLimbo || !pTechno->IsAlive || !pTechno->Owner || pTechno->Owner == pHouse
+				|| pHouse->IsAlliedWith(pTechno->Owner) || pTechno->Owner->IsNeutral() || pTechno->Owner->IsObserver()
+				|| pTechno->CloakState == CloakState::Cloaked)
+			{
+				continue;
+			}
+
+			if (IsCellInSightOfAI(pHouse, pTechno->GetMapCoords()))
+			{
+				enemyInSight = true;
+				break;
+			}
+		}
+
+		state.EnemyInSight = enemyInSight;
+		UpdateSensorLookouts(pHouse, state, enemyInSight);
+
+		const bool launchWindow = now >= 450 && now - state.LastLaunchFrame >= ScoutLaunchCooldownFrames;
+		// Sweep: with no enemy in sight one more scout every ScoutSweepEveryFrames, the grid of places
+		// weighed too.
+		const bool sweep = launchWindow && !enemyInSight && now - state.LastSweepFrame >= ScoutSweepEveryFrames;
+
+		if (nextLegs.empty() && (!launchWindow || state.Trips.size() >= (sweep ? ScoutSweepMostTrips : 3)))
 			return;
 
 		std::vector<NeuralScoutSighting> sightings;
@@ -1192,7 +1575,7 @@ namespace
 		std::vector<NeuralScoutCandidate> candidates;
 		int freeFields = 0;
 		int unexploredFields = 0;
-		CollectScoutCandidates(pHouse, state, home, fog, sightings, candidates, freeFields, unexploredFields);
+		CollectScoutCandidates(pHouse, state, home, fog, sightings, candidates, freeFields, unexploredFields, 0, sweep);
 
 		// Targets worth a trip: kind weight x gain of at least 1500 (a route with 28% to learn).
 		std::erase_if(candidates, [](const NeuralScoutCandidate& candidate) { return candidate.Value < 1500; });
@@ -1238,7 +1621,11 @@ namespace
 
 		const bool veryStale = (GetKnownEnemyBuildingCache(pHouse).Entries.empty() && now > 4500)
 			|| (freeFields >= 4 && unexploredFields * 10 >= freeFields * 6 && now > 9000);
-		const size_t limit = veryStale ? 3 : ((enemies >= 2 || ground.size() >= 8) ? 2 : 1);
+		const size_t usualLimit = veryStale ? 3 : ((enemies >= 2 || ground.size() >= 8) ? 2 : 1);
+		const size_t limit = sweep ? std::max(usualLimit, std::min(ScoutSweepMostTrips, state.Trips.size() + 1)) : usualLimit;
+
+		if (sweep)
+			state.LastSweepFrame = now;
 
 		if (launchWindow && state.Trips.size() < limit && !candidates.empty())
 		{

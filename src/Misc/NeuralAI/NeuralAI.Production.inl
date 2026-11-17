@@ -3958,6 +3958,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedAmphibTransports = 0;
 	int ownedHeavyIslandTransports = 0;
 	int ownedUnarmedSupportVehicles = 0;
+	// Mobile sensor arrays, folded or not (SensorLookoutMinSight).
+	int ownedSensorLookouts = 0;
 	int ownedTransportTotalCapacity = 0;
 	int waitingBattalionSizeOnIslands = 0;
 	int maxWaitingUnitSizeOnIslands = 0;
@@ -4129,6 +4131,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				ownedUnarmedSupportVehicles++;
 			}
 
+			if (IsSensorLookoutType(pOwnedType))
+				ownedSensorLookouts++;
+
 			// Airlift jobs the carryalls really have (same rules as the carryall dispatcher):
 			// critically damaged expensive vehicles to rescue and loaded strike APCs to drop.
 			auto const pOwnedTypeExt = TechnoTypeExt::Fetch(pOwnedType);
@@ -4285,6 +4290,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& !IsTrueBaseStructureTarget(pOwnB->Type))
 		{
 			ownedUnarmedSupportVehicles++;
+
+			if (IsSensorLookoutType(pOwnB->Type->UndeploysInto))
+				ownedSensorLookouts++;
 		}
 	}
 
@@ -5222,12 +5230,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& !(TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall));
 		if (isUnarmedSupportVehicle)
 		{
+			// A mobile sensor array has a cap of its own (one) while enemy stealth units were seen in the
+			// last SensorLookoutSightingFrames or the house searched for remnants lately (user: it
+			// finds the stealth units hiding in the area it covers).
+			const bool sensorWanted = IsSensorLookoutType(pUnit)
+				&& (Unsorted::CurrentFrame - GetMacroState(pHouse).RemnantSearchFrame < 2 * RemnantSearchEveryFrames
+					|| std::any_of(GetMacroState(pHouse).StealthSightings.begin(), GetMacroState(pHouse).StealthSightings.end(),
+						[](const auto& seen) { return Unsorted::CurrentFrame - seen.second.second <= SensorLookoutSightingFrames; }));
+
 			// Hard cap unarmed support/detector/jammer vehicles (Mobile Radar Jammer
 			// MRJ_SOV/MRJ_ALL, Mobile Stealth Generator SGEN/GGEN, Mobile Sensor
 			// Array LPST/NLPST, Limpet Drone) at 1 across the house so they are never
 			// spammed!
-			if (ownedUnarmedSupportVehicles >= 1 || pHouse->OwnedUnits < 8 || canSafelySaveForMCV
-				|| savingForIslandTransport)
+			if ((sensorWanted ? ownedSensorLookouts >= 1 : ownedUnarmedSupportVehicles >= 1) || pHouse->OwnedUnits < 8
+				|| canSafelySaveForMCV || savingForIslandTransport)
 			{
 				continue;
 			}
