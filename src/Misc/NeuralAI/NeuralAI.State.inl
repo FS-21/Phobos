@@ -1118,6 +1118,8 @@ namespace
 		int WaveVerdictMission { -1 };
 		int WaveLessonSteps { 0 };
 		int WaveLessonFrame { -100000 };
+		// Waves in a row that took no building, whatever the time between them.
+		int WaveFailuresInARow { 0 };
 		// First frame a wave of the tank mass waited for its anti-air escort (-1 when none waits),
 		// and no new wait before this frame.
 		int WaveEscortWaitSince { -1 };
@@ -1515,6 +1517,7 @@ namespace
 			this->WaveVerdictMission = -1;
 			this->WaveLessonSteps = 0;
 			this->WaveLessonFrame = -100000;
+			this->WaveFailuresInARow = 0;
 			this->WaveEscortWaitSince = -1;
 			this->WaveEscortRetryFrame = -1;
 			this->RemnantSearchFrame = -100000;
@@ -2259,8 +2262,11 @@ namespace
 	// also clears the base).
 	constexpr double HeldJoinsWaveHealth = 0.5;
 	// How many of them may join after the first wave in a row that took no building; twice as many
-	// after each one more (none before).
+	// after each one more, up to HeldJoinsWaveMaxSteps of them (none before). These failures do not
+	// fade with time like the wave lesson: joiners never make a wave wait, and the lesson stood at
+	// 0 in 92% of the readings of the tank mass (40 matches to #10732), so nearly none joined.
 	constexpr int HeldJoinsWaveUnits = 8;
+	constexpr int HeldJoinsWaveMaxSteps = 3;
 	// Each step doubles the count (user): 10, 20, then the most.
 	constexpr int TankMassWaveCap = 32;
 	constexpr int WaveLessonPercent = 200;
