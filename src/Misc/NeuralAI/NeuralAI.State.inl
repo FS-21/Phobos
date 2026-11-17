@@ -1170,6 +1170,9 @@ namespace
 		// brought home, transports lost).
 		int ShuttleCheckFrame { -1 };
 		int ShuttleRetryUntil { -1 };
+		// Back door (UpdateBackdoor): the last check, and no new one before this frame.
+		int BackdoorCheckFrame { -1 };
+		int BackdoorRetryUntil { -1 };
 		int ShuttleNoRideLogFrame { -1 };
 		int ShuttleCreditsTotal { 0 };
 		int ShuttleTransportsLost { 0 };
@@ -1555,6 +1558,8 @@ namespace
 			this->OpKindDangerFrame = -1;
 			this->ShuttleCheckFrame = -1;
 			this->ShuttleRetryUntil = -1;
+			this->BackdoorCheckFrame = -1;
+			this->BackdoorRetryUntil = -1;
 			this->ShuttleNoRideLogFrame = -1;
 			this->ShuttleCreditsTotal = 0;
 			this->ShuttleTransportsLost = 0;
@@ -2030,6 +2035,31 @@ namespace
 	constexpr int ShuttleRetryFrames = 9000;
 	constexpr int ShuttleStuckFrames = 1800;
 	constexpr int ShuttleStuckRetryFrames = 27000;
+	// Back door (user, an idea of the old aimd.ini, whose transported attack on the farthest factory had
+	// the largest reward of the file). Checked every BackdoorCheckFrames:
+	// - The house's latest wave (WaveTargetKeepFrames old at most) hits an enemy base on the house's own
+	//   ground, with BackdoorMinDefenses or more known defenses within BackdoorFrontCells of its target.
+	// - BackdoorTeam idle armed ground units of the house (BackdoorMinTeam at least, within BackdoorHomeCells
+	//   of its base) ride a transport operation (client Strike) around that base.
+	// - They land within BackdoorLandingCells of a known valuable building of the same house,
+	//   BackdoorMinGapCells or more from the wave's target, with a landing danger below
+	//   OpSailDangerLimit, and attack it. The building farthest from the wave's target with the fewest
+	//   defenses around it is taken.
+	// - A member is delivered once a transport sets it down within BackdoorDeliverCells of the landing.
+	//   The landings of the load stay within BackdoorLandingCandidateCells of the first.
+	// - One back door at a time per house, BackdoorRetryFrames after the last started.
+	constexpr int BackdoorCheckFrames = 900;
+	constexpr int BackdoorMinDefenses = 3;
+	constexpr double BackdoorFrontCells = 12.0;
+	constexpr int BackdoorTeam = 8;
+	constexpr int BackdoorMinTeam = 4;
+	constexpr double BackdoorHomeCells = 30.0;
+	constexpr int BackdoorLandingCells = 8;
+	constexpr double BackdoorMinGapCells = 20.0;
+	constexpr double BackdoorGuardCells = 9.0;
+	constexpr double BackdoorDeliverCells = 12.0;
+	constexpr int BackdoorLandingCandidateCells = 8;
+	constexpr int BackdoorRetryFrames = 5400;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its
