@@ -1908,7 +1908,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 					&& !pBld->Type->Refinery);
 			// ptKind: 0 = unit, 1 = structure, 2 = defense structure (IsBaseDefense=yes), 3 = deployed
 			// vehicle structure (drawn as a unit, listed as a structure: a deployed Slave Miner is a
-			// YAREFN building, not a unit; user), -1 = slave bound to its miner.
+			// YAREFN building, not a unit; user), -1 = slave bound to its miner, 4 = aircraft or a vehicle
+			// that flies (drawn as a ring; user).
 			const int ptKind = isDeployedVehicleBld ? 3 : (pBld->Type->IsBaseDefense ? 2 : 1);
 
 			char idClean[32];
@@ -1950,9 +1951,50 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			sanitizeJsonStr(pUnit->Type ? pUnit->Type->ID : "", idClean, sizeof(idClean));
 			sanitizeJsonStr(pUnit->Type ? pUnit->Type->Name : "", nameClean, sizeof(nameClean));
 
+			// Kind 4: a vehicle that flies (jumpjet, balloon, a flying locomotor, or in the air now), drawn
+			// as a ring to tell it from the ground units (user).
+			auto const pUnitType = pUnit->Type;
+			const bool flies = pUnitType && (pUnitType->JumpJet || pUnitType->BalloonHover || pUnitType->ConsideredAircraft
+				|| pUnitType->MovementZone == MovementZone::Fly || pUnit->IsInAir());
+
 			objectDetail(pUnit, detailBuf, sizeof(detailBuf));
-			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,0,\"%s\",\"%s\"%s%s]", firstPt ? "" : ",",
-				rx, ry, pUnit->Owner->ArrayIndex, idClean, nameClean, detailBuf, visionDetail(c, nullptr));
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"%s%s]", firstPt ? "" : ",",
+				rx, ry, pUnit->Owner->ArrayIndex, flies ? 4 : 0, idClean, nameClean, detailBuf, visionDetail(c, nullptr));
+
+			if (lineLen > 0)
+				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
+
+			firstPt = false;
+
+			ptCount++;
+		}
+
+		// Aircraft, kind 4 as the vehicles that fly.
+		for (auto const pAircraft : AircraftClass::Array)
+		{
+			if (!pAircraft || pAircraft->InLimbo || !pAircraft->IsAlive || !pAircraft->Owner || pAircraft->Owner->IsNeutral()
+				|| pAircraft->Owner->IsObserver())
+			{
+				continue;
+			}
+
+			if (ptCount >= 1700 || jsonBuf.size() > 225000)
+				break;
+
+			const CellStruct c = pAircraft->GetMapCoords();
+			float rx = 0.0f;
+			float ry = 0.0f;
+
+			projectToRadar(c, rx, ry);
+
+			char idClean[32];
+			char nameClean[64];
+			sanitizeJsonStr(pAircraft->Type ? pAircraft->Type->ID : "", idClean, sizeof(idClean));
+			sanitizeJsonStr(pAircraft->Type ? pAircraft->Type->Name : "", nameClean, sizeof(nameClean));
+
+			objectDetail(pAircraft, detailBuf, sizeof(detailBuf));
+			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,4,\"%s\",\"%s\"%s%s]", firstPt ? "" : ",",
+				rx, ry, pAircraft->Owner->ArrayIndex, idClean, nameClean, detailBuf, visionDetail(c, nullptr));
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
