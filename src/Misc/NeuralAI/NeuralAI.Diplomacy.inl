@@ -392,6 +392,8 @@ namespace
 
 			coal.LowProfile = false;
 			coal.DuelA = coal.DuelB = coal.PostDuelTarget = coal.DyingTarget = -1;
+			coal.ProductionLeader = -1;
+			coal.PoorTarget = -1;
 			return;
 		}
 
@@ -422,6 +424,7 @@ namespace
 		std::array<int, 8> knownBuildings {};
 		std::array<int, 8> knownDefenses {};
 		std::array<int, 8> knownRefineries {};
+		std::array<int, 8> knownFactories {};
 		std::array<int, 8> sumX {};
 		std::array<int, 8> sumY {};
 
@@ -457,6 +460,10 @@ namespace
 
 			if (pBld->Type->Refinery || pBld->Type->ResourceDestination)
 				knownRefineries[owner]++;
+
+			// Factories of units: barracks, war factories, airfields and shipyards (not the yard).
+			if (pBld->Type->Factory != AbstractType::None && pBld->Type->Factory != AbstractType::BuildingType)
+				knownFactories[owner]++;
 		}
 
 		for (int i = 0; i < 8; ++i)
@@ -483,6 +490,7 @@ namespace
 		}
 
 		int ownArmy = 0;
+		int ownHarvesters = 0;
 
 		for (auto const pTechno : TechnoClass::Array)
 		{
@@ -495,7 +503,13 @@ namespace
 			auto const pType = pTechno->GetTechnoType();
 			auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
 
-			if (!pType || (pUnitType && (pUnitType->Harvester || pUnitType->ResourceGatherer)))
+			if (pUnitType && (pUnitType->Harvester || pUnitType->ResourceGatherer))
+			{
+				ownHarvesters++;
+				continue;
+			}
+
+			if (!pType)
 				continue;
 
 			auto const pW0 = pType->GetWeapon(0);
@@ -632,6 +646,156 @@ namespace
 
 		for (int i = 0; i < 8; ++i)
 			coal.HarvestersSeen[i] = std::max(coal.HarvestersSeen[i] * 9 / 10, harvestersNow[i]);
+
+		// Free-for-all houses by what we know of them (NeuralAI.State.inl, LeaderLeadPercent): the runaway
+		// leader, measured only, and the poor target, which DiplomacyTargetBias favours. Ours at two
+		// thirds; a house we know too little of is not judged.
+		{
+			bool anyTeam = false;
+			int livingEnemies = 0;
+			std::array<int, 8> income {};
+			std::array<int, 8> production {};
+			std::array<bool, 8> judged {};
+
+			for (int i = 0; i < 8; ++i)
+			{
+				anyTeam = anyTeam || (present[i] && team[i]);
+
+				if (!alive[i] || (i != self && knownBuildings[i] < PoorMinKnownBuildings))
+					continue;
+
+				judged[i] = true;
+
+				if (i != self)
+					livingEnemies++;
+
+				income[i] = 3 * knownRefineries[i] + (i == self ? ownHarvesters : coal.HarvestersSeen[i]);
+				coal.IncomePeak[i] = std::max(coal.IncomePeak[i], income[i]);
+				production[i] = LeaderFactoryWeight * knownFactories[i] + LeaderIncomeWeight * income[i] + (i == self ? ownArmy : armySeen[i]);
+			}
+
+			production[self] = production[self] * 2 / 3;
+			const bool ffa = !anyTeam && livingEnemies >= 2;
+			int leader = -1;
+
+			for (int i = 0; i < 8; ++i)
+			{
+				if (judged[i] && production[i] > 0 && (leader < 0 || production[i] > production[leader]))
+					leader = i;
+			}
+
+			int next = 0;
+
+			for (int i = 0; i < 8; ++i)
+			{
+				if (i != leader && judged[i])
+					next = std::max(next, production[i]);
+			}
+
+			const int lead = leader >= 0 && next > 0 ? production[leader] * 100 / next : 0;
+
+			if (!ffa || leader < 0 || leader == self || next <= 0 || lead < LeaderLeadPercent || IsTacitTrucePartner(pHouse, leader))
+				leader = -1;
+
+			// Coalitions of any house against it: the call to arms is the one thing houses share.
+			int againstLeader = 0;
+
+			for (int i = 0; i < 8 && leader >= 0; ++i)
+			{
+				if (MacroStates[i].Coalition.Target == leader)
+					againstLeader++;
+			}
+
+			if (leader != coal.ProductionLeader)
+			{
+				if (leader >= 0)
+				{
+					Debug::Log("[NeuralAI] House %d FFA leader: house %d runs away, %d%% of the next house (%d: %d factories, income %d, army %d; "
+						"next %d, ours %d), coalitions against it %d (ours %s), measured only, frame %d.\n", self, leader, lead,
+						production[leader], knownFactories[leader], income[leader], armySeen[leader], next, production[self], againstLeader,
+						coal.Target == leader ? "yes" : "no", now);
+				}
+				else
+				{
+					Debug::Log("[NeuralAI] House %d FFA leader: none now (was house %d), frame %d.\n", self, coal.ProductionLeader, now);
+				}
+			}
+
+			coal.ProductionLeader = leader;
+			coal.ProductionLeadPercent = leader >= 0 ? lead : 0;
+
+			if (leader >= 0)
+			{
+				coal.LeaderFrames += elapsed;
+
+				if (againstLeader > 0)
+					coal.LeaderCoalitionFrames += elapsed;
+			}
+
+			// The poor target: the enemy that lost its economy (lowest share of its peak), else the
+			// clearly poorest one.
+			int poor = -1;
+			bool lost = false;
+
+			if (ffa)
+			{
+				int lostBest = -1;
+				int poorest = -1;
+				int enemyIncome = 0;
+				int enemies = 0;
+
+				for (int i = 0; i < 8; ++i)
+				{
+					if (i == self || !judged[i] || IsTacitTrucePartner(pHouse, i))
+						continue;
+
+					enemyIncome += income[i];
+					enemies++;
+
+					if (coal.IncomePeak[i] >= PoorLostMinPeak && income[i] * 100 <= coal.IncomePeak[i] * PoorLostPercent
+						&& (lostBest < 0 || income[i] * coal.IncomePeak[lostBest] < income[lostBest] * coal.IncomePeak[i]))
+					{
+						lostBest = i;
+					}
+
+					if (poorest < 0 || income[i] < income[poorest])
+						poorest = i;
+				}
+
+				if (lostBest >= 0)
+				{
+					poor = lostBest;
+					lost = true;
+				}
+				else if (poorest >= 0 && enemies >= 2)
+				{
+					// The mean income of the other enemies we judge.
+					const int othersMean = (enemyIncome - income[poorest]) / (enemies - 1);
+
+					if (othersMean > 0 && income[poorest] * 100 <= othersMean * PoorShareOfMeanPercent)
+						poor = poorest;
+				}
+			}
+
+			if (poor != coal.PoorTarget || lost != coal.PoorTargetLost)
+			{
+				if (poor >= 0)
+				{
+					Debug::Log("[NeuralAI] House %d FFA poor target: house %d, %s (income %d, peak %d), bias %d, frame %d.\n", self, poor,
+						lost ? "lost its economy" : "poorest", income[poor], coal.IncomePeak[poor], PoorTargetBias, now);
+				}
+				else
+				{
+					Debug::Log("[NeuralAI] House %d FFA poor target: none now (was house %d), frame %d.\n", self, coal.PoorTarget, now);
+				}
+			}
+
+			coal.PoorTarget = poor;
+			coal.PoorTargetLost = lost;
+
+			if (poor >= 0)
+				coal.PoorTargetFrames += elapsed;
+		}
 
 		// Witnessed betrayals: a house we earlier saw hitting a third house side by side with another
 		// now aims at that other house's units or buildings in force, where we know it.
