@@ -87,9 +87,10 @@ namespace
 	// whose first weapon fights head on: it hits the ground, is no suicide (MainTankMinRangeCells),
 	// parasite or mind control, and does not wither against heavy armor (MainTankHeavyVersus); a
 	// weapon whose damage comes another way (Damage up to MainTankSpecialDamage: sonic waves, webs,
-	// dummy weapons) counts as fit. Its passengers, its range or an anti-air projectile do not make it
-	// a transport, artillery or anti-air (user: the Overlord, the Avatars, the Centurion, the sonic
-	// tanks are tanks; the Gattling Tank is not).
+	// dummy weapons) counts as fit, and so does any gun of an open-topped one with passengers: they
+	// fire from it (the Battle Fortress). Its passengers, its range or an anti-air projectile do not
+	// make it a transport, artillery or anti-air (user: the Overlord, the Avatars, the Centurion, the
+	// sonic tanks are tanks; the Gattling Tank is not).
 	bool IsMainBattleTankType(TechnoTypeClass* pType)
 	{
 		if (!pType || pType->WhatAmI() != AbstractType::UnitType || pType->Naval || pType->Category != Category::AFV)
@@ -105,7 +106,7 @@ namespace
 			return false;
 		}
 
-		return pWeapon->Damage <= MainTankSpecialDamage
+		return pWeapon->Damage <= MainTankSpecialDamage || (pType->OpenTopped && pType->Passengers > 0)
 			|| GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, Armor::Heavy) >= MainTankHeavyVersus;
 	}
 
