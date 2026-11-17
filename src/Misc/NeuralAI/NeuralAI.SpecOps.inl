@@ -130,6 +130,8 @@ namespace
 		// Results this match (logs and tests).
 		int CaptureCount { 0 };
 		int InfiltrationCount { 0 };
+		// Captures of each engineer by its weapon, which outlives them: UniqueID -> count (key access only).
+		std::unordered_map<DWORD, int> WeaponCaptures {};
 		// Frames of the last spies killed on their way (oldest first, 4 at most).
 		std::vector<int> SpyLossFrames {};
 		// Spy UniqueID -> its last disguise kit shot (key access only).
@@ -629,6 +631,20 @@ namespace
 					state.CaptureCount++;
 					Debug::Log("[NeuralAI] House %d SpecOps: captured %s at (%d,%d), frame %d (captures %d).\n",
 						pHouse->ArrayIndex, pBld->Type->ID, cell.X, cell.Y, now, state.CaptureCount);
+
+					// An engineer by its weapon outlives its capture: it lets go of the building, now ours, so
+					// that it is idle for the next capture (a soldier keeps a target it may no longer fire at).
+					for (auto const pInf : InfantryClass::Array)
+					{
+						if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || pInf->Target != pBld || !CapturesByWeapon(pInf->Type))
+							continue;
+
+						const int taken = ++state.WeaponCaptures[pInf->UniqueID];
+						pInf->SetTarget(nullptr);
+						pInf->QueueMission(Mission::Guard, true);
+						Debug::Log("[NeuralAI] House %d SpecOps: %s %u took %s at (%d,%d) by its weapon, its capture %d, frame %d.\n",
+							pHouse->ArrayIndex, pInf->Type->ID, pInf->UniqueID, pBld->Type->ID, cell.X, cell.Y, taken, now);
+					}
 
 					// A capture on the land of a barracks built for its techs (UpdateCaptureBarracks), standing
 					// or lost since.
