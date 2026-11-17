@@ -1052,13 +1052,26 @@ namespace
 			int Frame { -1 };
 		};
 		std::unordered_map<DWORD, ParkedFerry> ParkedFerries {};
-		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
-		// factories idle for thousands of frames, the AI picking the same type every tick): the pick
-		// of a queue that stays empty 900 frames with money and factories is banned 5400 frames.
-		// Key: queue (1 vehicles, 2 infantry) * 100000 + type index -> frame the ban ends.
+		// Picks that never come out of their factory (WatchUndeliveredPick): the type is banned for a
+		// while and the queue picks the next best one. Key: queue (1 vehicles, 2 infantry, 3 ships,
+		// 4 aircraft) * 100000 + type index -> frame the ban ends.
 		std::map<int, int> ProductionBanUntil {};
 		std::array<int, 3> ProductionPickIdx { -1, -1, -1 };
 		std::array<int, 3> ProductionPickSince { 0, 0, 0 };
+		// Since when each type has been the pick of its queue (a pick left for less than
+		// PickStreakGapFrames keeps its streak) and for how many of those frames the house could pay
+		// for it; same key as ProductionBanUntil.
+		struct PickStreak
+		{
+			int Since { -1 };
+			int LastSeen { -1 };
+			int PaidFrames { 0 };
+		};
+		std::map<int, PickStreak> PickStreaks {};
+		// The last frame an object of each type came out of one of our factories, and how many times
+		// each type was banned this match; same key.
+		std::map<int, int> LastDeliveredFrame {};
+		std::map<int, int> ProductionBanCount {};
 		int FreeFieldAnchorDist { 9999 };
 		int FreeFieldFrame { -100000 };
 		// Last airlift that turned back (damaged carrier or a defended drop zone).
@@ -1490,6 +1503,9 @@ namespace
 			this->ProductionBanUntil.clear();
 			this->ProductionPickIdx = { -1, -1, -1 };
 			this->ProductionPickSince = { 0, 0, 0 };
+			this->PickStreaks.clear();
+			this->LastDeliveredFrame.clear();
+			this->ProductionBanCount.clear();
 			this->FreeFieldAnchorDist = 9999;
 			this->FreeFieldFrame = -100000;
 			this->LastAirDropAbortFrame = -100000;
@@ -2740,7 +2756,27 @@ namespace
 		return it != blocked.end() && Unsorted::CurrentFrame < it->second;
 	}
 
-	// A vehicle (queue 1) or infantry (queue 2) type the engine did not start for 900 frames.
+	// Production queues of a type, as ProductionBanUntil keys them: 1 vehicles, 2 infantry, 3 ships,
+	// 4 aircraft, 0 for anything else.
+	int ProductionQueueOf(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return 0;
+
+		switch (pType->WhatAmI())
+		{
+		case AbstractType::UnitType:
+			return static_cast<const UnitTypeClass*>(pType)->Naval ? 3 : 1;
+		case AbstractType::InfantryType:
+			return 2;
+		case AbstractType::AircraftType:
+			return 4;
+		default:
+			return 0;
+		}
+	}
+
+	// A type banned by WatchUndeliveredPick (queue as in ProductionQueueOf).
 	bool IsProductionBanned(const HouseClass* pHouse, int queue, int typeIndex)
 	{
 		auto const& bans = GetMacroState(pHouse).ProductionBanUntil;

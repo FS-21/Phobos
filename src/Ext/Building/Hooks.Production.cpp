@@ -207,39 +207,6 @@ namespace NeuralFactoryQueue
 		}
 	}
 
-	BuildingClass* FindDesignated(HouseClass* pOwner, AbstractType kind, bool naval)
-	{
-		// Only an aircraft that must land on a dock needs an air base with a free one.
-		const int aircraftIndex = pOwner->ProducingAircraftTypeIndex;
-		auto const pAircraftType = aircraftIndex >= 0 ? AircraftTypeClass::Array.GetItem(aircraftIndex) : nullptr;
-		const bool needsFreeDock = !pAircraftType || pAircraftType->AirportBound;
-		BuildingClass* pFallback = nullptr;
-
-		for (auto const pBld : pOwner->Buildings)
-		{
-			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Factory != kind || pBld->Type->Naval != naval
-				|| pBld->IsUnderEMP() || pBld->Deactivated || pBld->CurrentMission == Mission::Selling
-				|| pBld->QueuedMission == Mission::Selling || pBld->CurrentMission == Mission::Construction)
-			{
-				continue;
-			}
-
-			if (kind == AbstractType::AircraftType && needsFreeDock && !BuildingExt::HasFreeDocks(pBld))
-				continue;
-
-			if (pBld->IsPrimaryFactory)
-				return pBld;
-
-			if (!pFallback)
-				pFallback = pBld;
-		}
-
-		if (pFallback)
-			pFallback->IsPrimaryFactory = true;
-
-		return pFallback;
-	}
-
 	// The type the house wants next from this queue.
 	TechnoTypeClass* NextType(HouseClass* pOwner, AbstractType kind, bool naval)
 	{
@@ -262,6 +229,49 @@ namespace NeuralFactoryQueue
 		default:
 			return nullptr;
 		}
+	}
+
+	BuildingClass* FindDesignated(HouseClass* pOwner, AbstractType kind, bool naval)
+	{
+		// Only an aircraft that must land on a dock needs an air base with a free one.
+		const int aircraftIndex = pOwner->ProducingAircraftTypeIndex;
+		auto const pAircraftType = aircraftIndex >= 0 ? AircraftTypeClass::Array.GetItem(aircraftIndex) : nullptr;
+		const bool needsFreeDock = !pAircraftType || pAircraftType->AirportBound;
+		// The wanted type's BuiltAt (Ares) names the factory types that may build it: while it is the
+		// pick only those take the queue, the primary first, and none of them is made primary for it
+		// (a Nod house whose primary war factory was not in the Venom's BuiltAt asked for it there for
+		// the whole match and was refused every time).
+		auto const pWanted = NextType(pOwner, kind, naval);
+		auto const pWantedExt = pWanted ? TechnoTypeExt::Fetch(pWanted) : nullptr;
+		auto const pBuiltAt = (pWantedExt && !pWantedExt->BuiltAt.empty()) ? &pWantedExt->BuiltAt : nullptr;
+		BuildingClass* pFallback = nullptr;
+
+		for (auto const pBld : pOwner->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Factory != kind || pBld->Type->Naval != naval
+				|| pBld->IsUnderEMP() || pBld->Deactivated || pBld->CurrentMission == Mission::Selling
+				|| pBld->QueuedMission == Mission::Selling || pBld->CurrentMission == Mission::Construction)
+			{
+				continue;
+			}
+
+			if (kind == AbstractType::AircraftType && needsFreeDock && !BuildingExt::HasFreeDocks(pBld))
+				continue;
+
+			if (pBuiltAt && !pBuiltAt->Contains(pBld->Type))
+				continue;
+
+			if (pBld->IsPrimaryFactory)
+				return pBld;
+
+			if (!pFallback)
+				pFallback = pBld;
+		}
+
+		if (pFallback && !pBuiltAt)
+			pFallback->IsPrimaryFactory = true;
+
+		return pFallback;
 	}
 }
 
