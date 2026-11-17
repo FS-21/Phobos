@@ -2176,6 +2176,8 @@ namespace
 	//   barracks placed for a site that does not stand within CaptureBarracksNoRoomFrames is forgotten.
 	// - An engineer in training comes out of the barracks of ours on the land of the best tech it can
 	//   take that no engineer of ours stands on or goes for (UpdatePrimaryFactories).
+	// - An engineer is any soldier that captures (IsCaptureInfantryType): Engineer=yes, or a weapon whose
+	//   warhead captures like one (FakeEngineer.CanCaptureBuildings), which is sent with an attack order.
 	// Match #10769 (Crystal Whiplash): house 1 held a yard on an island where house 2 had taken two oil
 	// derricks; its engineers for them crossed from the main base by transport, and three of the four
 	// transport operations ended with the engineer dead 60 to 390 frames after they opened.
