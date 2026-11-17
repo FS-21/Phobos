@@ -4012,7 +4012,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					ownedGroundCombatUnits++;
 
-					if (pOwnedWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell)
+					if (pOwnedWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell && !IsMainBattleTankType(pOwnedType))
 						ownedArtilleryVehicles++;
 
 					if (ShootsAtAircraft(pOwnedType))
@@ -5047,6 +5047,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const auto pWpnStruct = pUnit->GetWeapon(0);
 		const auto pWpn = pWpnStruct ? pWpnStruct->WeaponType : nullptr;
+		// A main battle tank stays one whatever its passengers, range, projectile or damage figure say.
+		const bool isMainTank = IsMainBattleTankType(pUnit);
 
 		const bool isKeyStructureDeployer = (pUnit->DeploysInto != nullptr
 			&& IsTrueBaseStructureTarget(pUnit->DeploysInto) && !isMCV && !pUnit->Harvester && !pUnit->ResourceGatherer
@@ -5188,7 +5190,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool isMindControlVehicle = pWpn != nullptr && pUnit->Spawns == nullptr && !pWpn->Spawner
 			&& pWpn->Warhead != nullptr && pWpn->Warhead->MindControl;
-		const bool isEmpSupport = !isMindControlVehicle && pWpn != nullptr && pUnit->Spawns == nullptr && !pWpn->Spawner
+		const bool isEmpSupport = !isMindControlVehicle && !isMainTank && pWpn != nullptr && pUnit->Spawns == nullptr && !pWpn->Spawner
 			&& ((pWpn->Warhead != nullptr && pWpn->Warhead->EMEffect && pWpn->Damage <= 15) || pWpn->Damage <= 5);
 		const int ownVehiclesAndShips = pHouse->OwnedUnits + pHouse->OwnedNavy;
 
@@ -5339,8 +5341,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 		else
 		{
-			const bool isAA = pWpn && pWpn->Projectile && pWpn->Projectile->AA;
-			const bool isArtillery = pWpn && pWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell;
+			const bool isAA = !isMainTank && pWpn && pWpn->Projectile && pWpn->Projectile->AA;
+			const bool isArtillery = !isMainTank && pWpn && pWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell;
 
 			// Artillery past what our front line can cover loses ground for every gun over it, with no
 			// cap: the main battle tanks come next (ArtilleryFreeVehicles).
@@ -5456,7 +5458,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 													: (allowExpansionRefineryDeployer ? scores[30] : 0))));
 				}
 			}
-			else if (pUnit->Passengers > 0 || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall))
+			else if ((pUnit->Passengers > 0 && !isMainTank) || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall))
 			{
 				const bool isAirOrCarryallVehicle
 					= isAmphibTransport || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall);
@@ -5494,7 +5496,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				score += scores[27];
 			}
-			else if (pUnit->Strength < 300)
+			// The rest: a main battle tank, or a light vehicle. Rules with no Category on their units
+			// fall back on the health.
+			else if (!isMainTank && (pUnit->Category != Category::Invalid || pUnit->Strength < 300))
 			{
 				score += scores[25];
 			}

@@ -83,6 +83,32 @@ namespace
 		return pWeapon->Damage * std::max(1, pWeapon->Burst) * 60 / std::max(1, pWeapon->ROF);
 	}
 
+	// A main battle tank: a ground vehicle the rules call an armored fighting vehicle (Category=AFV)
+	// whose first weapon fights head on: it hits the ground, is no suicide (MainTankMinRangeCells),
+	// parasite or mind control, and does not wither against heavy armor (MainTankHeavyVersus); a
+	// weapon whose damage comes another way (Damage up to MainTankSpecialDamage: sonic waves, webs,
+	// dummy weapons) counts as fit. Its passengers, its range or an anti-air projectile do not make it
+	// a transport, artillery or anti-air (user: the Overlord, the Avatars, the Centurion, the sonic
+	// tanks are tanks; the Gattling Tank is not).
+	bool IsMainBattleTankType(TechnoTypeClass* pType)
+	{
+		if (!pType || pType->WhatAmI() != AbstractType::UnitType || pType->Naval || pType->Category != Category::AFV)
+			return false;
+
+		auto const pWS = pType->GetWeapon(0);
+		auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+		if (!pWeapon || !pWeapon->Warhead || pWeapon->Suicide || pWeapon->Warhead->Parasite || pWeapon->Warhead->MindControl
+			|| (pWeapon->Projectile && !pWeapon->Projectile->AG)
+			|| pWeapon->Range <= static_cast<int>(MainTankMinRangeCells * Unsorted::LeptonsPerCell))
+		{
+			return false;
+		}
+
+		return pWeapon->Damage <= MainTankSpecialDamage
+			|| GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, Armor::Heavy) >= MainTankHeavyVersus;
+	}
+
 	// Threat of a unit type weighted by cost, durability and firepower, so one
 	// Kirov Airship weighs far more than a scout plane.
 	int GetCombatValueOfType(const TechnoTypeClass* pType, bool requireAntiAir)
