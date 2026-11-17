@@ -2613,9 +2613,92 @@ namespace
 						"frame %d.\n", houseIndex, op.Id, op.TripDanger, OpSailDangerLimit, now);
 				}
 
+				// Still above OpAbortDangerLimit at the end of the wait, along the safest route to the cheapest
+				// landing of the target's land: a die says whether the load sails (user: 50% it goes on the
+				// adventure, 50% it aborts, and troops and transports stay idle for others to take). Not while
+				// another load of the operation is crossing: its transports must bring it over.
+				const bool crossing = std::any_of(op.Transports.begin(), op.Transports.end(),
+					[](const NeuralOpTransport& transport) { return transport.Leg == NeuralOpLeg::Crossing; });
+
 				if (now - op.DangerWaitSince < OpDangerWaitFrames)
 				{
 					sailNow = false;
+				}
+				else if (op.TripDanger > OpAbortDangerLimit && !crossing && ScenarioClass::Instance->Random.RandomRanged(0, 99) < OpAbortPercent)
+				{
+					// Unloading to load again is time lost (user): another operation of the same client from the
+					// same land, bound for other ground and with members waiting for a seat, takes the loaded
+					// transports with their loads. With none, the loads are set down.
+					NeuralTransportOperation* pOther = nullptr;
+
+					for (auto& other : macro.TransportOps)
+					{
+						if (&other == &op || other.Over || other.Client != op.Client || other.OriginZone != op.OriginZone
+							|| other.TargetZone == op.TargetZone)
+						{
+							continue;
+						}
+
+						if (std::any_of(other.Members.begin(), other.Members.end(),
+							[](const NeuralOpMember& member) { return !member.Aboard && !member.Transport; }))
+						{
+							pOther = &other;
+							break;
+						}
+					}
+
+					std::vector<DWORD> handed;
+					int handedMembers = 0;
+					int out = 0;
+
+					for (auto const& transport : op.Transports)
+					{
+						auto const pTransport = find(transport.UniqueID);
+
+						if (transport.Leg != NeuralOpLeg::Parked || pTransport->Passengers.NumPassengers <= 0)
+							continue;
+
+						if (!pOther)
+						{
+							out += PutAshoreNow(pTransport);
+							continue;
+						}
+
+						NeuralOpTransport record {};
+						record.UniqueID = transport.UniqueID;
+						record.Type = transport.Type;
+						record.LegFrame = now;
+						pOther->Transports.push_back(record);
+						pOther->TransportsTaken++;
+						macro.TransportOpOf[transport.UniqueID] = pOther->Id;
+						handed.push_back(transport.UniqueID);
+
+						for (auto const& member : op.Members)
+						{
+							if (!member.Aboard || member.Transport != transport.UniqueID)
+								continue;
+
+							NeuralOpMember moved = member;
+							moved.Target = pOther->Target;
+							moved.OrderCell = CellStruct::Empty;
+							moved.ProgressCell = CellStruct::Empty;
+							pOther->Members.push_back(moved);
+							pOther->Joined++;
+							macro.TransportOpOf[member.UniqueID] = pOther->Id;
+							handedMembers++;
+						}
+					}
+
+					auto const wasHanded = [&handed](DWORD uid) { return std::find(handed.begin(), handed.end(), uid) != handed.end(); };
+					std::erase_if(op.Members, [&wasHanded](const NeuralOpMember& member) { return member.Aboard && wasHanded(member.Transport); });
+					std::erase_if(op.Transports, [&wasHanded](const NeuralOpTransport& transport) { return wasHanded(transport.UniqueID); });
+
+					Debug::Log("[NeuralAI] House %d transport op %d: the load aborts after waiting %d frames, its route still has a danger of %d "
+						"(abort above %d, the die said no): %d transports with %d aboard go to op %d, %d set down, frame %d.\n", houseIndex, op.Id,
+						now - op.DangerWaitSince, op.TripDanger, OpAbortDangerLimit, static_cast<int>(handed.size()), handedMembers,
+						pOther ? pOther->Id : -1, out, now);
+					endOp("too dangerous", true);
+					return;
 				}
 				else
 				{
@@ -2882,6 +2965,7 @@ namespace
 
 						transport.HoldSince = -1;
 						transport.HoldCheckFrame = -1;
+						transport.HoldRolled = false;
 						depart(transport, pTransport, carrier);
 						break;
 					}
@@ -2933,6 +3017,36 @@ namespace
 								followRoute(transport, pTransport, carrier, op.Staging, 2.0);
 
 							break;
+						}
+
+						// Still above OpAbortDangerLimit at the end of the wait: a die, thrown once, says whether it
+						// lifts (user: 50% it goes on the adventure, 50% it aborts, and the vehicle and the carryall
+						// stay idle for others to take; the vehicle may not ask for a crossing for OpRetryFrames).
+						if (!transport.HoldRolled && transport.HoldDanger > OpAbortDangerLimit)
+						{
+							transport.HoldRolled = true;
+
+							if (ScenarioClass::Instance->Random.RandomRanged(0, 99) < OpAbortPercent)
+							{
+								Debug::Log("[NeuralAI] House %d transport op %d: %s %u aborts after waiting %d frames, its straight way still has a danger "
+									"of %d (abort above %d, the die said no); %s %u and the carryall are let go, frame %d.\n", houseIndex, op.Id,
+									pTransport->GetTechnoType()->ID, pTransport->UniqueID, now - transport.HoldSince, transport.HoldDanger, OpAbortDangerLimit,
+									pVehicle->GetTechnoType()->ID, pVehicle->UniqueID, now);
+								const DWORD vehicleId = pVehicle->UniqueID;
+								std::erase_if(op.Members, [vehicleId](const NeuralOpMember& member) { return member.UniqueID == vehicleId; });
+								macro.TransportOpOf.erase(vehicleId);
+								macro.TransportOpRetryUntil[vehicleId] = now + OpRetryFrames;
+								op.Released++;
+								wake(pVehicle);
+								pVehicle->SetDestination(nullptr, true);
+								pVehicle->QueueMission(Mission::Guard, false);
+
+								if (pTransport->Destination == pVehicle)
+									pTransport->SetDestination(nullptr, true);
+
+								released.push_back(transport.UniqueID);
+								break;
+							}
 						}
 					}
 					else if (transport.HoldSince >= 0)
