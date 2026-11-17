@@ -1021,10 +1021,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	// Multi-Player Opportunism (Expert 3 Routing Slot 43): Balance focusing
-	// high-threat aggressor vs finishing off the most vulnerable enemy house
-	const int focusBias = static_cast<int>(scores[43]);
-
 	microSegments.Mark("ms: island discovery");
 
 	// Discover uncolonized island Resource (Ore/Gems), buildable Island Land
@@ -1652,25 +1648,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			priority += 250;
 
 		microSegments.Mark("ms: targets");
-
-		// Finish a weak enemy: judged by the structures of it we know of (its real building count
-		// would see through the fog).
-		if (focusBias > 40)
-		{
-			int knownStructures = 0;
-
-			for (auto const pEnemyBld : pOther->Buildings)
-			{
-				if (pEnemyBld && pEnemyBld->IsAlive && !pEnemyBld->InLimbo && IsEnemyBuildingKnown(pHouse, pEnemyBld)
-					&& ++knownStructures > 4)
-				{
-					break;
-				}
-			}
-
-			if (knownStructures > 0 && knownStructures <= 4)
-				priority += std::clamp(focusBias / 2, 40, 260);
-		}
 
 		// Expert 3 (UpdateFfaTargets): busy, at our door, weakest, nearest.
 		priority += GetMacroState(pHouse).FfaEnemyBonus[idx];
