@@ -2360,6 +2360,18 @@ namespace
 	constexpr int TankMassDangerBuildingBonus = 300;
 	constexpr int TankMassReprisalFrames = 2700;
 	constexpr int TankMassReprisalBonus = 450;
+	// The mass goes in where the way is least defended (user): the danger of the straight way from
+	// home to a target, on the ground danger map of the crossings (GetOpDangerMap: the weapons of
+	// the known enemy defenses and units that hit the ground), comes off its score, a point per
+	// TankMassWayDangerPerPoint of danger and TankMassWayDangerMost at most, so it settles targets
+	// of about the same worth and overrules no mission. And a known power plant whose loss leaves
+	// its owner short of power, by the buildings of his we know, gains TankMassPowerCutBonus when
+	// he has TankMassPowerCutDefenses known defenses that need power (user: without power the
+	// base opens).
+	constexpr int TankMassWayDangerPerPoint = 2;
+	constexpr int TankMassWayDangerMost = 450;
+	constexpr int TankMassPowerCutBonus = 300;
+	constexpr int TankMassPowerCutDefenses = 2;
 	// Plan priorities of the mass: the plans that send the army together gain this much on their
 	// trained preference, the ones that split it into small groups or need specialists lose it.
 	constexpr int TankMassPlanBonus = 400;

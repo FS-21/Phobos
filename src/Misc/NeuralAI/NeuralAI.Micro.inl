@@ -8128,6 +8128,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	int bestFallbackEnemyScore = -999999;
 	bool anyEnemyBuildingExists = false;
 	const int coalitionTarget = CoalitionTargetOf(pHouse);
+	// TEMP diagnostic of the tank mass target: the danger of the way to the pick, the least and the
+	// most among the targets it knows, and whether the pick is a power plant that cuts the power.
+	int pickWayDanger = -1;
+	int leastWayDanger = -1;
+	int mostWayDanger = -1;
+	bool pickCutsPower = false;
 
 	// First pass: find the closest enemy structure distance on our landmass
 	// (outer perimeter reference) and count enemy base defenses so we peel the
@@ -8189,6 +8195,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		scores[NeuralPlanSlots[static_cast<size_t>(NeuralPlanId::Reprisal)]]);
 	const int ourGroundBonus = TankMassMissionBonus(TankMassNearBuildingBonus,
 		scores[NeuralPlanSlots[static_cast<size_t>(NeuralPlanId::ClearOurGround)]]);
+	// What the tank mass knows of the power of each enemy: output and drain of his known buildings,
+	// and his known defenses that need power.
+	std::array<int, 8> knownPowerOutput {};
+	std::array<int, 8> knownPowerDrain {};
+	std::array<int, 8> knownPoweredDefenses {};
+	auto const pWayDangerMap = (tankMassTargets && homeCoords != CellStruct::Empty) ? &GetOpDangerMap(pHouse, false) : nullptr;
 	// The ring of Clear Our Ground: TankMassDangerCells, and with no known enemy building inside
 	// it reaches out to the nearest one (TankMassDangerStepCells, TankMassDangerMaxCells). While an
 	// enemy building stands on the land of one of our sites the missions count only on such land.
@@ -8237,6 +8249,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
 		{
+			if (const int owner = info.Building->Owner->ArrayIndex; owner >= 0 && owner < 8)
+			{
+				auto const pKnownType = info.Building->Type;
+				knownPowerOutput[owner] += pKnownType->PowerBonus;
+				knownPowerDrain[owner] += pKnownType->PowerDrain;
+
+				if (pKnownType->IsBaseDefense && (pKnownType->PowerDrain > 0 || pKnownType->Powered))
+					knownPoweredDefenses[owner]++;
+			}
+
 			if (info.Building->Type->Insignificant
 				|| (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, info.Building->Owner->ArrayIndex)))
 			{
@@ -8323,9 +8345,26 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			bldCandScore += IsCoalitionFrontNear(pHouse, ebc, 10) ? 350 : 700;
 
 		bldCandScore += DiplomacyTargetBias(pHouse, pOwner->ArrayIndex, true);
+		int candWayDanger = 0;
+		bool candCutsPower = false;
 
 		if (tankMassTargets)
 		{
+			// The least defended way in, and the power plant that leaves the defenses without power.
+			if (pWayDangerMap)
+			{
+				OpLineCost(*pWayDangerMap, homeCoords, ebc, candWayDanger);
+				bldCandScore -= std::min(TankMassWayDangerMost, candWayDanger / TankMassWayDangerPerPoint);
+			}
+
+			if (const int owner = pOwner->ArrayIndex; pEnemyBld->Type->PowerBonus > 0 && owner >= 0 && owner < 8
+				&& knownPoweredDefenses[owner] >= TankMassPowerCutDefenses && IsEnemyBuildingKnown(pHouse, pEnemyBld)
+				&& knownPowerOutput[owner] - pEnemyBld->Type->PowerBonus < knownPowerDrain[owner])
+			{
+				candCutsPower = true;
+				bldCandScore += TankMassPowerCutBonus;
+			}
+
 			if (pOwner->ArrayIndex == reprisalHouse && missionLand(ebz))
 				bldCandScore += reprisalBonus;
 
@@ -8390,10 +8429,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| IsEnemyBuildingKnown(pHouse, pEnemyBld)
 			|| ((pExt->NeuralAI_InfiltratedEnemyMask & (1 << ownerIdx)) != 0);
 
+		if (visible && pWayDangerMap)
+		{
+			leastWayDanger = leastWayDanger < 0 ? candWayDanger : std::min(leastWayDanger, candWayDanger);
+			mostWayDanger = std::max(mostWayDanger, candWayDanger);
+		}
+
 		if (visible && bldCandScore > bestVisEnemyBldScore)
 		{
 			bestVisEnemyBldScore = bldCandScore;
 			pVisibleEnemyBld = pEnemyBld;
+			pickWayDanger = candWayDanger;
+			pickCutsPower = candCutsPower;
 		}
 	}
 
@@ -10304,6 +10351,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							? static_cast<int>(NeuralPlanId::Reprisal)
 							: -1);
 					NoteWaveForVerdict(pHouse, pWaveTargetCell->MapCoords, mission);
+
+					// TEMP diagnostic: how defended the way to this target is among those it knows.
+					if (pVisibleEnemyBld && pVisibleEnemyBld->GetCell() == pWaveTargetCell)
+					{
+						Debug::Log("[NeuralAI] Frame %d | House #%d wave target %s at (%d,%d): way danger %d (known targets from %d to %d), "
+							"cuts the power %d\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, pVisibleEnemyBld->Type->ID,
+							pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, pickWayDanger, leastWayDanger, mostWayDanger,
+							pickCutsPower ? 1 : 0);
+					}
 				}
 
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;
