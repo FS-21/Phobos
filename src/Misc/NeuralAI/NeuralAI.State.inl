@@ -2295,6 +2295,12 @@ namespace
 	constexpr int NavalHomeReservePercent = 20;
 	constexpr int NavalHomeReserveMin = 2;
 	constexpr double NavalFiringSpacingCells = 3.0;
+	// The shelling ships split into squads of NavalSquadShips, each against its own target,
+	// NavalMaxTargets at most, NavalTargetSpacingCells apart (user: a bombardment spread over several
+	// targets is chaos for the victim, who stops only some of the attacks).
+	constexpr size_t NavalSquadShips = 6;
+	constexpr size_t NavalMaxTargets = 6;
+	constexpr double NavalTargetSpacingCells = 8.0;
 	// Warships pause sooner when the idle ones have nothing to shoot: that many with no coastal
 	// building in reach and no enemy ship in their sea at every AI tick of ArmyIdleWindowFrames
 	// (match #9846: a house kept building ships while about 50 sat with no target in reach).
