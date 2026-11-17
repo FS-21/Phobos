@@ -1786,6 +1786,31 @@ namespace
 				if (wasAboard)
 					member.Transport = 0;
 
+				// A shuttle's harvester that gets no nearer to the transport waiting for it (shut in, its way
+				// blocked) is let go: the transport would wait for it until the operation gave up.
+				if (shuttle)
+				{
+					const CellStruct at = pFoot->GetMapCoords();
+
+					if (op.BoardingSince < 0 || member.ProgressCell == CellStruct::Empty || at.DistanceFrom(member.ProgressCell) >= 2.0)
+					{
+						member.ProgressCell = at;
+						member.ProgressFrame = now;
+					}
+					else if (now - member.ProgressFrame >= ShuttleStuckFrames || now < member.ProgressFrame)
+					{
+						Debug::Log("[NeuralAI] House %d shuttle op %d lets %s %u go: no nearer to its ride at (%d,%d) in %d frames, frame %d.\n",
+							houseIndex, op.Id, pFoot->GetTechnoType()->ID, member.UniqueID, at.X, at.Y, now - member.ProgressFrame, now);
+						macro.ShuttleSkipUntil[member.UniqueID] = now + ShuttleStuckRetryFrames;
+						op.Released++;
+						macro.TransportOpOf.erase(member.UniqueID);
+						wake(pFoot);
+						pFoot->SetDestination(nullptr, true);
+						pFoot->QueueMission(Mission::Harvest, false);
+						return true;
+					}
+				}
+
 				waitingSize += member.Size;
 
 				// A shuttle rides only on idle transports: its harvesters ask the factories for none.
@@ -3183,6 +3208,9 @@ namespace
 
 		macro.ShuttleCheckFrame = now;
 
+		if (macro.ShuttleSkipUntil.size() > 64)
+			std::erase_if(macro.ShuttleSkipUntil, [now](const auto& entry) { return now >= entry.second; });
+
 		if (macro.ShuttleRetryUntil >= 0 && now < macro.ShuttleRetryUntil && macro.ShuttleRetryUntil - now <= ShuttleRetryFrames)
 			return;
 
@@ -3239,6 +3267,13 @@ namespace
 			if (!pType->Harvester || pType->Weeder || pType->Teleporter || pType->DeploysInto || CrossesWaterAlone(pType)
 				|| pUnit->Transporter || IsInTransportOp(pHouse, pUnit->UniqueID) || IsPlanMember(pHouse, pUnit->UniqueID)
 				|| pUnit->IsMindControlled() || pUnit->Deactivated || pUnit->IsUnderEMP() || pUnit->GetHealthPercentage() < OpTransportMinHealth)
+			{
+				continue;
+			}
+
+			// One that could not get to its ride lately stays.
+			if (auto const itSkip = macro.ShuttleSkipUntil.find(pUnit->UniqueID); itSkip != macro.ShuttleSkipUntil.end()
+				&& now < itSkip->second && itSkip->second - now <= ShuttleStuckRetryFrames)
 			{
 				continue;
 			}
