@@ -3862,7 +3862,7 @@ namespace
 		const CellStruct front = macro.LastWaveTargetCell;
 		const CellStruct home = pHouse->GetBaseCenter();
 
-		if (front == CellStruct::Empty || home == CellStruct::Empty || now - macro.LastWaveDispatchFrame > WaveTargetKeepFrames)
+		if (front == CellStruct::Empty || home == CellStruct::Empty || now - macro.LastWaveDispatchFrame > BackdoorFrontFrames)
 		{
 			stop(NoFront);
 			return;
