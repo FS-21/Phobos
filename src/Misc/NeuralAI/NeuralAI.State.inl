@@ -547,11 +547,12 @@ namespace
 		int LandingDanger { 0 };
 		bool Carried { false };
 		// A carryall that leaves its vehicle on the ground because the straight way is too dangerous
-		// (OpSailDangerLimit): since when (-1: not waiting), when that way was last measured, and its
-		// danger.
+		// (OpSailDangerLimit): since when (-1: not waiting), when that way was last measured, its
+		// danger, and whether the die of the end of the wait was thrown (OpAbortDangerLimit).
 		int HoldSince { -1 };
 		int HoldCheckFrame { -1 };
 		int HoldDanger { 0 };
+		bool HoldRolled { false };
 	};
 
 	// Where a transport of an operation was lost (NeuralHouseMacroState::OpLossSpots).
@@ -1957,6 +1958,14 @@ namespace
 	constexpr int OpSailDangerLimit = 90;
 	constexpr int OpDangerCheckFrames = 150;
 	constexpr int OpDangerWaitFrames = 1800;
+	// At the end of the wait, a load or a carryall whose safest way to the cheapest landing of the
+	// target's land is still above OpAbortDangerLimit throws a die: with OpAbortPercent it aborts, and
+	// its troops and transports stay idle for others to take (user). A load aboard first goes with its
+	// transports to another operation of the same client from the same land that waits for seats,
+	// rather than unload to load again. The carryalls that waited and then lifted at danger 384 to 618
+	// lost 5 of 6 (2026-11-17).
+	constexpr int OpAbortDangerLimit = 3 * OpSailDangerLimit;
+	constexpr int OpAbortPercent = 50;
 	// A threat whose weapon takes the transport (mind control) weighs OpRouteTakeFactor times as
 	// much: a transport taken goes over to the enemy with its whole load. 26 of the 28 transports
 	// taken in 47 matches were SAPC landing in the reach of Yuri's Psychic Towers, Yuri and
