@@ -492,8 +492,9 @@ namespace
 	// A unit an operation carries: its passenger size, the address its client gave it, the transport
 	// it is to board (0: none yet), whether it is aboard, and the cell the operation last sent it to
 	// (another order found on it counts as an interference). A harvester of a shuttle: its work, when
-	// it began, the largest load seen on it with the frame it grew last, and where it stood since when
-	// while a transport waited for it.
+	// it began, and the largest load seen on it with the frame it grew last. Progress*: where it stood
+	// since when (a shuttle's harvester while a transport waits for it, any other member while it is
+	// farther from the cell it was sent to than OpGatherCells).
 	struct NeuralOpMember
 	{
 		DWORD UniqueID { 0 };
@@ -545,6 +546,12 @@ namespace
 		CellStruct BerthWait { CellStruct::Empty };
 		int LandingDanger { 0 };
 		bool Carried { false };
+		// A carryall that leaves its vehicle on the ground because the straight way is too dangerous
+		// (OpSailDangerLimit): since when (-1: not waiting), when that way was last measured, and its
+		// danger.
+		int HoldSince { -1 };
+		int HoldCheckFrame { -1 };
+		int HoldDanger { 0 };
 	};
 
 	// Where a transport of an operation was lost (NeuralHouseMacroState::OpLossSpots).
@@ -1942,9 +1949,24 @@ namespace
 	// fade), planned again every OpDangerCheckFrames, OpDangerWaitFrames at most; then it sails. The
 	// first measures of the routes: 3 of the 9 loads that sailed along a route of danger 90 or more
 	// were lost, 4 of the 130 along one of none (2026-11-16).
+	// A carryall waits too, before it lifts its vehicle: it flies straight (the engine sets the vehicle
+	// down at the end of every move), and it never parks with a load. While the carryalls skipped the
+	// wait, they lost 9 of 21 crossing straight into dangers of 369 to 2559 (2026-11-17).
 	constexpr int OpSailDangerLimit = 90;
 	constexpr int OpDangerCheckFrames = 150;
 	constexpr int OpDangerWaitFrames = 1800;
+	// A threat whose weapon takes the transport (mind control) weighs OpRouteTakeFactor times as
+	// much: a transport taken goes over to the enemy with its whole load. 26 of the 28 transports
+	// taken in 47 matches were SAPC landing in the reach of Yuri's Psychic Towers, Yuri and
+	// Masterminds (2026-11-17).
+	constexpr int OpRouteTakeFactor = 3;
+	// A member that gets no OpMemberStuckCells nearer to the cell the operation sent it to in
+	// OpMemberStuckFrames, while farther from it than OpGatherCells, is let go. It may ask again
+	// after OpRetryFrames. One engineer stood 17 cells from its berth wait cell for most of an
+	// operation that stayed open 65000 frames, with 5098 interferences (match #10708, Moonlit
+	// Waters of Esvia).
+	constexpr int OpMemberStuckFrames = 1800;
+	constexpr double OpMemberStuckCells = 2.0;
 	// Against the threats that move (user): a transport inside the reach of a threat plans its route
 	// again every OpRouteDangerReplanFrames instead of OpRouteReplanFrames. A crossing whose landing
 	// grew OpLandingSwitchDanger more dangerous since it sailed (enemies gathered at it), still
