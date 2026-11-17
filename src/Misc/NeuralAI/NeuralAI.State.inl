@@ -2472,6 +2472,13 @@ namespace
 	// main battle tanks (archetypes 4 and 7, known defenses): 178 V3 and no Rhino in match #10472,
 	// one artillery type in 75 to 96% of the vehicle picks of 9 houses in 60 matches.
 	constexpr int ArtilleryRangeCells = 8;
+	// A main battle tank (IsMainBattleTankType; user: what the mod calls a tank, as a rule of its own
+	// rules and never a list of names): its first weapon reaches farther than MainTankMinRangeCells
+	// (a suicide truck does not) and, with more Damage than MainTankSpecialDamage, does at least
+	// MainTankHeavyVersus of it to heavy armor (a Gattling Tank does 5%, a flame tank 25%).
+	constexpr double MainTankMinRangeCells = 1.0;
+	constexpr int MainTankSpecialDamage = 5;
+	constexpr double MainTankHeavyVersus = 0.3;
 	constexpr int ArtilleryFreeVehicles = 4;
 	constexpr int ArtilleryFrontLinePerGun = 2;
 	constexpr int ArtilleryOverFrontPenalty = 300;
