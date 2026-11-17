@@ -9233,6 +9233,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// TEMP diagnostic: the units held at home at this tick, and those of them that joined the idle
+	// army of the tank mass.
+	int heldAtHomeNow = 0;
+	std::unordered_set<const FootClass*> heldJoiners;
+
 	// What stands idle at this tick, for the production brake (NoteIdleArmy): the pools as the
 	// waves, the plans and the transports find them, and the units jammed at home with somewhere to
 	// go (HeldAtHomeFrames): whatever wave or plan holds them, they are of no use there, and every
@@ -9409,6 +9414,46 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		NoteIdleArmy(pHouse, idleVehicles + heldVehicles, static_cast<int>(idleCombatInf.size()) + heldSoldiers, idleShips);
+		heldAtHomeNow = heldVehicles + heldSoldiers;
+		heldJoiners.insert(heldJoinVehicles.begin(), heldJoinVehicles.end());
+		heldJoiners.insert(heldJoinSoldiers.begin(), heldJoinSoldiers.end());
+
+		// TEMP diagnostic: whether the units held at home that a wave ordered out left the base.
+		if (auto& joinersOut = GetMacroState(pHouse).HeldJoinersOut; !joinersOut.empty() && IsAITickWindow(300, 0))
+		{
+			const int now = Unsorted::CurrentFrame;
+			int left = 0;
+			int stayed = 0;
+
+			auto const check = [&](const FootClass* pFoot)
+			{
+				if (!pFoot || pFoot->Owner != pHouse || pFoot->InLimbo || !pFoot->IsAlive)
+					return;
+
+				auto const it = joinersOut.find(pFoot->UniqueID);
+
+				if (it == joinersOut.end() || now - it->second < HeldJoinerCheckFrames)
+					return;
+
+				++(pFoot->GetMapCoords().DistanceFrom(homeCoords) > HeldAtHomeCells ? left : stayed);
+				joinersOut.erase(it);
+			};
+
+			for (auto const pU : UnitClass::Array)
+				check(pU);
+
+			for (auto const pInf : InfantryClass::Array)
+				check(pInf);
+
+			// Those left over are dead or inside something.
+			const size_t gone = std::erase_if(joinersOut, [now](auto const& entry) { return now - entry.second >= HeldJoinerCheckFrames; });
+
+			if (left > 0 || stayed > 0 || gone > 0)
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d held at home that a wave ordered out %d frames ago: %d left the base, "
+					"%d still there, %d gone\n", now, pHouse->ArrayIndex, HeldJoinerCheckFrames, left, stayed, static_cast<int>(gone));
+			}
+		}
 
 		// From here on they are idle army like the rest: they make the count of the next wave and
 		// leave with it.
@@ -9956,6 +10001,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Units of this wave handed to the transport operations manager.
 		size_t handedVeh = 0;
 		size_t handedInf = 0;
+		// TEMP diagnostic: the units held at home among those this wave orders out.
+		int joinersOrdered = 0;
+
+		auto const noteJoinerOrdered = [&](const FootClass* pFoot)
+		{
+			if (heldJoiners.contains(pFoot))
+			{
+				++joinersOrdered;
+				waveMacro.HeldJoinersOut[pFoot->UniqueID] = Unsorted::CurrentFrame;
+			}
+		};
 		for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
 		{
 			auto const pU = idleCombatUnits[i];
@@ -10042,6 +10098,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					IssueMoveOrder(pU, pFlankCell, 6.0);
 					NoteExpertCommand(pHouse, pU, CreditSourceWave);
+					noteJoinerOrdered(pU);
 					dispatchedVeh++;
 					continue;
 				}
@@ -10098,6 +10155,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			NoteExpertCommand(pHouse, pU, CreditSourceWave);
+			noteJoinerOrdered(pU);
 			dispatchedVeh++;
 		}
 
@@ -10187,6 +10245,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			NoteExpertCommand(pHouse, pI, CreditSourceWave);
+			noteJoinerOrdered(pI);
 			dispatchedInf++;
 		}
 
@@ -10258,6 +10317,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d): %zu vehicles and %zu infantry handed to transport operations\n",
 					Unsorted::CurrentFrame, pHouse->ArrayIndex, pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, handedVeh, handedInf);
+			}
+
+			// TEMP diagnostic: the units held at home when this dispatch left, and those that joined it.
+			if (tankMassWaves && (heldAtHomeNow > 0 || !heldJoiners.empty()))
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d): %d held at home, %d of them joined, %d ordered out\n",
+					Unsorted::CurrentFrame, pHouse->ArrayIndex, pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, heldAtHomeNow,
+					static_cast<int>(heldJoiners.size()), joinersOrdered);
 			}
 
 			// TEMP diagnostic: units of this dispatch that kept the goal of an earlier wave.
