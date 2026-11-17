@@ -1310,6 +1310,8 @@ void TechnoTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	// Airstrike tint color
 	this->TintColorAirstrike = GeneralUtils::GetColorFromColorAdd(this->LaserTargetColor.Get(RulesClass::Instance->LaserTargetColor));
 
+	// Ares BuiltAt: the factory types that may build this one (empty: any factory of its kind).
+	this->BuiltAt.Read(exINI, pSection, "BuiltAt");
 	// Art tags
 	const auto pArtINI = &CCINIClass::INI_Art;
 	INI_EX exArtINI(pArtINI);
@@ -1821,6 +1823,7 @@ void TechnoTypeExt::Serialize(T& Stm)
 
 		.Process(this->RecountBurst)
 
+		.Process(this->BuiltAt)
 		.Process(this->BuildLimitGroup_Types)
 		.Process(this->BuildLimitGroup_Nums)
 		.Process(this->BuildLimitGroup_Factor)

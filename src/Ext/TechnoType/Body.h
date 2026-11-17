@@ -329,6 +329,7 @@ public:
 
 	Nullable<bool> RecountBurst;
 
+	ValueableVector<BuildingTypeClass*> BuiltAt;
 	ValueableVector<TechnoTypeClass*> BuildLimitGroup_Types;
 	ValueableVector<int> BuildLimitGroup_Nums;
 	Valueable<int> BuildLimitGroup_Factor;
@@ -778,6 +779,7 @@ public:
 
 		, RecountBurst {}
 
+		, BuiltAt {}
 		, BuildLimitGroup_Types {}
 		, BuildLimitGroup_Nums {}
 		, BuildLimitGroup_Factor { 1 }
