@@ -104,59 +104,7 @@ namespace
 		const AbstractType kind = queue == 2 ? AbstractType::InfantryType : (queue == 4 ? AbstractType::AircraftType : AbstractType::UnitType);
 
 		if (pEngineFactory && pEngineFactory == NeuralFactoryQueue::FindDesignated(pHouse, kind, queue == 3))
-		{
-			// TEMP diagnostic: a pick held 5400 frames that never came out although the engine would
-			// build it at our designated factory (match #10890: a Nod house picked its MCV in 168 of
-			// 224 status lines with 18 war factories and up to 560000 credits, and never had a second
-			// ConYard). Every factory of the queue, at most once per type every 2700 frames.
-			static int diagSerial = -1;
-			static int diagLines = 0;
-			static std::map<int, int> diagFrames;
-
-			if (diagSerial != NeuralMatchSerial)
-			{
-				diagSerial = NeuralMatchSerial;
-				diagLines = 0;
-				diagFrames.clear();
-			}
-
-			int& lastDiag = diagFrames[pHouse->ArrayIndex * 1000000 + key];
-
-			if (diagLines < 40 && (lastDiag == 0 || now - lastDiag >= 2700))
-			{
-				lastDiag = now;
-				diagLines++;
-				std::string factoryStates;
-				int listed = 0;
-
-				for (auto const pBld : pHouse->Buildings)
-				{
-					if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Factory != kind || pBld->Type->Naval != (queue == 3)
-						|| listed++ >= 8)
-					{
-						continue;
-					}
-
-					auto const pFac = pBld->Factory;
-					auto const pObj = pFac ? pFac->Object : nullptr;
-					char entry[224];
-					_snprintf_s(entry, _TRUNCATE, " %s%s[mission %d power %d emp %d off %d timer %d obj %s done %d susp %d hold %d manual %d step %d rate %d]",
-						pBld->Type->ID, pBld->IsPrimaryFactory ? "*" : "", static_cast<int>(pBld->CurrentMission), pBld->HasPower ? 1 : 0,
-						pBld->IsUnderEMP() ? 1 : 0, pBld->Deactivated ? 1 : 0, pBld->FactoryRetryTimer.GetTimeLeft(),
-						pObj ? pObj->GetTechnoType()->ID : "none", (pFac && pFac->IsDone()) ? 1 : 0, (pFac && pFac->IsSuspended) ? 1 : 0,
-						(pFac && pFac->OnHold) ? 1 : 0, (pFac && pFac->IsManual) ? 1 : 0, pFac ? pFac->Production.Value : -1,
-						pFac ? pFac->Production.Rate : -1);
-					factoryStates += entry;
-				}
-
-				Debug::Log("[NeuralAI] House %d production DIAG: %s picked since frame %d and never out, engine factory %s, credits %d, "
-					"engine indices unit %d inf %d air %d, factories:%s, frame %d.\n", pHouse->ArrayIndex, pType->ID, streak.Since,
-					pEngineFactory->Type->ID, pHouse->Available_Money(), pHouse->ProducingUnitTypeIndex, pHouse->ProducingInfantryTypeIndex,
-					pHouse->ProducingAircraftTypeIndex, factoryStates.c_str(), now);
-			}
-
 			return;
-		}
 
 		const int bans = macro.ProductionBanCount[key]++;
 		char reason[96];
