@@ -2490,7 +2490,10 @@ namespace
 	// more at most), and at least one in TankFloorShare of its armed ground vehicles, TankFloorMost at
 	// most. Below it the best scored main battle tank it can build goes ahead of the war factory's
 	// pick, except when that pick restores the income (a harvester, a miner, an MCV), with no income
-	// at all, or while the base is under attack (the answer to the threat first).
+	// at all, or while the base is under attack (the answer to the threat first); and the tanks it
+	// asks for are built even while the vehicles we have go unused (IsArmyKindUnused): they guard
+	// and patrol (22 matches of stamp 03383eb89: in half of the checks below the floor no tank was a
+	// candidate at all, the idle army brake had left every vehicle out).
 	constexpr int TankFloorMin = 4;
 	constexpr int TankFloorRefineries = 2;
 	constexpr int TankFloorEconomyMost = 4;

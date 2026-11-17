@@ -5029,6 +5029,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		&& pHouse->NumConYards >= 1 && features[21] == 0;
 	int bankYardMcvIdx = -1;
 
+	// The tank floor (TankFloor*): how many main battle tanks this house keeps alive.
+	const int tankFloor = std::min(TankFloorMost, std::max(TankFloorMin
+		+ std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost), ownedGroundCombatUnits / TankFloorShare));
+	const bool belowTankFloor = ownedMainTanks < tankFloor;
+
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
 		if (!pUnit || !CanBuildUnderHumanRules(pHouse, pUnit))
@@ -5271,7 +5276,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			// No ceiling by number, in all or of one type: a kind is built for as long as its units
 			// are put to work, and waits while those it has go unused (IsArmyKindUnused).
-			if (IsArmyKindUnused(pHouse, pUnit->Naval ? ArmyKind::Ships : ArmyKind::Vehicles))
+			if (IsArmyKindUnused(pHouse, pUnit->Naval ? ArmyKind::Ships : ArmyKind::Vehicles) && !(isMainTank && belowTankFloor))
 				continue;
 		}
 
@@ -5683,11 +5688,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// The tank floor: below it the best main battle tank goes ahead of the pick (TankFloor*).
 	{
-		const int tankFloor = std::min(TankFloorMost, std::max(TankFloorMin
-			+ std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost), ownedGroundCombatUnits / TankFloorShare));
-		const bool belowFloor = ownedMainTanks < tankFloor;
+		const bool belowFloor = belowTankFloor;
+		const bool underAttack = GetMacroState(pHouse).CounterUnderAttack;
 		const bool floorTakes = belowFloor && bestTankIdx >= 0 && bestUnitIdx != bestTankIdx && hasActiveUnitIncome
-			&& !bestUnitRestoresIncome && !GetMacroState(pHouse).CounterUnderAttack;
+			&& !bestUnitRestoresIncome && !underAttack;
+		const char* floorWhy = !belowFloor ? "" : (floorTakes ? ", the tank goes first"
+			: (bestTankIdx < 0 ? ", kept: no tank to build" : (bestUnitIdx == bestTankIdx ? ", the pick is a tank"
+				: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income" : ", kept: under attack")))));
 
 		// TEMP diagnostic: the floor, the tanks alive and what the floor did, with the vehicle pick line.
 		if (logUnitPicks)
@@ -5696,8 +5703,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			Debug::Log("[NeuralAI] Frame %d | House #%d tank floor %d, main battle tanks %d of %d armed ground vehicles, best tank %s %d, "
 				"pick %s %d%s\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, tankFloor, ownedMainTanks, ownedGroundCombatUnits,
 				bestTankIdx >= 0 ? UnitTypeClass::Array.GetItem(bestTankIdx)->ID : "none", bestTankScore,
-				bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx)->ID : "none", bestUnitScore,
-				floorTakes ? ", the tank goes first" : (belowFloor ? ", kept (income, urgency or threat)" : ""));
+				bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx)->ID : "none", bestUnitScore, floorWhy);
 		}
 
 		if (floorTakes)
