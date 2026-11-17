@@ -2492,8 +2492,9 @@ namespace
 	// pick, except when that pick restores the income (a harvester, a miner, an MCV), with no income
 	// at all, or while the base is under attack (the answer to the threat first); and the tanks it
 	// asks for are built even while the vehicles we have go unused (IsArmyKindUnused): they guard
-	// and patrol (22 matches of stamp 03383eb89: in half of the checks below the floor no tank was a
-	// candidate at all, the idle army brake had left every vehicle out).
+	// and patrol. Measured on 22 matches of stamp 03383eb89: below the floor the houses held 1.5 to 4
+	// tanks of 4 to 7; most checks with no tank to build were houses with no war factory yet (860
+	// before frame 9000, 268 later), the idle army brake stopped the vehicles 4 times.
 	constexpr int TankFloorMin = 4;
 	constexpr int TankFloorRefineries = 2;
 	constexpr int TankFloorEconomyMost = 4;
