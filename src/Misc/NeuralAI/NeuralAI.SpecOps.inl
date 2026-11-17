@@ -503,6 +503,26 @@ namespace
 		return pTech && pTech->OwnerIndex < 0;
 	}
 
+	// Has this house seen the tech, the last time it was in sight, neutral or in the hands of a house it
+	// is not allied with? Those are the techs Expert 4 goes for (PickSpecOpsCaptureTarget).
+	bool IsKnownCapturableTech(HouseClass* pHouse, const BuildingClass* pBld)
+	{
+		if (!pHouse || !pBld)
+			return false;
+
+		auto const pTech = FindKnownTech(GetSpecOpsState(pHouse), pBld->UniqueID);
+
+		if (!pTech || pTech->OwnerIndex == pHouse->ArrayIndex || pTech->OwnerIndex >= HouseClass::Array.Count)
+			return false;
+
+		if (pTech->OwnerIndex < 0)
+			return true;
+
+		auto const pOwner = HouseClass::Array.GetItem(pTech->OwnerIndex);
+
+		return pOwner && !pHouse->IsAlliedWith(pOwner);
+	}
+
 	// Coalition (NeuralAI.Urban.inl): an allied engineer walks into it or an allied Neural AI
 	// has picked it, so we leave it to them.
 	bool IsTechClaimedByAlly(HouseClass* pHouse, DWORD buildingID);
@@ -1630,7 +1650,10 @@ namespace
 					pHouse->ArrayIndex, capture.EngineerID, capture.TargetCell.X, capture.TargetCell.Y, now);
 				done = true;
 			}
-			else if (!pTarget || !IsKnownNeutralTech(pHouse, pTarget) || now - capture.StartFrame > captureTimeout)
+			// A tech an enemy took stays the target (the picker takes those too): closing on it each tick
+			// stopped the engineer at once and the picker sent it again, every 15 to 30 frames (match
+			// #10769, Crystal Whiplash).
+			else if (!pTarget || !IsKnownCapturableTech(pHouse, pTarget) || now - capture.StartFrame > captureTimeout)
 			{
 				if (pTarget && now - capture.StartFrame > captureTimeout)
 					FailSpecOpsCapture(state, capture.TargetID, 1800);
