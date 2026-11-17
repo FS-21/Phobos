@@ -1786,6 +1786,31 @@ namespace
 				if (wasAboard)
 					member.Transport = 0;
 
+				// A shuttle's harvester that gets no nearer to the transport waiting for it (shut in, its way
+				// blocked) is let go: the transport would wait for it until the operation gave up.
+				if (shuttle)
+				{
+					const CellStruct at = pFoot->GetMapCoords();
+
+					if (op.BoardingSince < 0 || member.ProgressCell == CellStruct::Empty || at.DistanceFrom(member.ProgressCell) >= 2.0)
+					{
+						member.ProgressCell = at;
+						member.ProgressFrame = now;
+					}
+					else if (now - member.ProgressFrame >= ShuttleStuckFrames || now < member.ProgressFrame)
+					{
+						Debug::Log("[NeuralAI] House %d shuttle op %d lets %s %u go: no nearer to its ride at (%d,%d) in %d frames, frame %d.\n",
+							houseIndex, op.Id, pFoot->GetTechnoType()->ID, member.UniqueID, at.X, at.Y, now - member.ProgressFrame, now);
+						macro.ShuttleSkipUntil[member.UniqueID] = now + ShuttleStuckRetryFrames;
+						op.Released++;
+						macro.TransportOpOf.erase(member.UniqueID);
+						wake(pFoot);
+						pFoot->SetDestination(nullptr, true);
+						pFoot->QueueMission(Mission::Harvest, false);
+						return true;
+					}
+				}
+
 				waitingSize += member.Size;
 
 				// A shuttle rides only on idle transports: its harvesters ask the factories for none.
@@ -3183,6 +3208,9 @@ namespace
 
 		macro.ShuttleCheckFrame = now;
 
+		if (macro.ShuttleSkipUntil.size() > 64)
+			std::erase_if(macro.ShuttleSkipUntil, [now](const auto& entry) { return now >= entry.second; });
+
 		if (macro.ShuttleRetryUntil >= 0 && now < macro.ShuttleRetryUntil && macro.ShuttleRetryUntil - now <= ShuttleRetryFrames)
 			return;
 
@@ -3243,6 +3271,13 @@ namespace
 				continue;
 			}
 
+			// One that could not get to its ride lately stays.
+			if (auto const itSkip = macro.ShuttleSkipUntil.find(pUnit->UniqueID); itSkip != macro.ShuttleSkipUntil.end()
+				&& now < itSkip->second && itSkip->second - now <= ShuttleStuckRetryFrames)
+			{
+				continue;
+			}
+
 			const Mission mission = pUnit->CurrentMission;
 			const bool idle = mission == Mission::Guard || mission == Mission::Area_Guard || mission == Mission::Sleep
 				|| mission == Mission::None || (mission == Mission::Harvest && !pUnit->Locomotor->Is_Moving());
@@ -3277,21 +3312,39 @@ namespace
 		const int size = std::max(1, static_cast<int>(pSample->GetTechnoType()->Size));
 		int rides = 0;
 		int seats = 0;
+		// TEMP diagnostic: why the transports of ours that carry a harvester are no ride (in a transport
+		// operation, in another job or unsound, no crossing from the harvesters' land to the field).
+		int inOperation = 0;
+		int otherwiseBusy = 0;
+		int noCrossing = 0;
 
 		auto const considerRide = [&](FootClass* pFoot)
 		{
-			if (!pFoot || pFoot->Owner != pHouse)
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo)
 				return;
 
 			const OpCarrier carrier = GetOpCarrier(pFoot);
 
-			if (!IsTransportFreeForOp(pHouse, pFoot, carrier) || !OpCarrierTakes(pFoot, carrier, pSample))
+			if (carrier == OpCarrier::None || !OpCarrierTakes(pFoot, carrier, pSample))
 				return;
+
+			if (!IsTransportFreeForOp(pHouse, pFoot, carrier))
+			{
+				if (IsInTransportOp(pHouse, pFoot->UniqueID))
+					inOperation++;
+				else
+					otherwiseBusy++;
+
+				return;
+			}
 
 			auto const pType = pFoot->GetTechnoType();
 
 			if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), sampleCell) || !CanTransportTypeLink(pType, sampleCell, pLanding->MapCoords))
+			{
+				noCrossing++;
 				return;
+			}
 
 			rides++;
 			seats += carrier == OpCarrier::Carryall ? 1 : pType->Passengers / size;
@@ -3309,8 +3362,9 @@ namespace
 			{
 				macro.ShuttleNoRideLogFrame = now;
 				Debug::Log("[NeuralAI] House %d shuttle: %d idle harvesters on zone %d, no idle transport takes one to the field at (%d,%d) "
-					"zone %d (home ore %d), frame %d.\n", pHouse->ArrayIndex, static_cast<int>(harvesters.size()), homeZone, field.X, field.Y,
-					fieldZone, macro.IslandHomeOre, now);
+					"zone %d (home ore %d); transports that carry one: %d in transport operations, %d busy otherwise or unsound, %d with "
+					"no crossing there; %d credits, frame %d.\n", pHouse->ArrayIndex, static_cast<int>(harvesters.size()), homeZone, field.X,
+					field.Y, fieldZone, macro.IslandHomeOre, inOperation, otherwiseBusy, noCrossing, pHouse->Available_Money(), now);
 			}
 
 			return;
