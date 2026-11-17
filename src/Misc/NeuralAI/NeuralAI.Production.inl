@@ -3905,7 +3905,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	};
 
 	std::vector<UnitPickDiag> unitPickDiags;
-	const bool logUnitPicks = IsAITickWindow(1800, pHouse->ArrayIndex * 15);
+	// At most UnitPickDiagLines lines per match.
+	constexpr int UnitPickDiagLines = 240;
+	static int unitPickDiagSerial = -1;
+	static int unitPickDiagCount = 0;
+
+	if (unitPickDiagSerial != NeuralMatchSerial)
+	{
+		unitPickDiagSerial = NeuralMatchSerial;
+		unitPickDiagCount = 0;
+	}
+
+	const bool logUnitPicks = unitPickDiagCount < UnitPickDiagLines && IsAITickWindow(1800, pHouse->ArrayIndex * 15);
 	// Tank bunkers of ours standing empty beyond the free tanks that fit them: a tank is built for
 	// each on purpose (user: the original AI built units for its bunkers), the best one that fits.
 	int bestBunkerTankIdx = -1;
@@ -5624,6 +5635,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// threat first, income, sensors, island logistics and the like).
 	if (logUnitPicks && !unitPickDiags.empty())
 	{
+		++unitPickDiagCount;
 		std::stable_sort(unitPickDiags.begin(), unitPickDiags.end(), [](const UnitPickDiag& a, const UnitPickDiag& b) { return a.Total > b.Total; });
 		std::string text;
 		bool tankShown = false;
