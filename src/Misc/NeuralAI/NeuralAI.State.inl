@@ -2192,6 +2192,10 @@ namespace
 	constexpr int CaptureBarracksNoRoomFrames = 5400;
 	constexpr int CaptureBarracksNoRoomSteps = 4;
 	constexpr int CaptureBarracksLogLines = 60;
+	// Engineer work by warhead (FakeEngineerAbilities): a unit whose warhead disarms bombs answers a bomb
+	// on a building or unit of ours or of an ally within this many cells, as far as an engineer goes for
+	// one.
+	constexpr int FakeEngineerBombCells = 14;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its
