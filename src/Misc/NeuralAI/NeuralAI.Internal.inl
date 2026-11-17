@@ -2223,9 +2223,67 @@ namespace
 
 	// A specialist that works a building or a vehicle instead of fighting: engineer, spy (which
 	// also robs refineries and silos), vehicle thief.
+	// A soldier that captures buildings: an engineer, or one with a weapon (normal or elite) whose
+	// warhead captures like an engineer (FakeEngineer.CanCaptureBuildings); that one captures with an
+	// attack order from its weapon's range instead of walking in. Read from the rules once per type and
+	// match.
+	bool IsCaptureInfantryType(const InfantryTypeClass* pType)
+	{
+		if (!pType || pType->ArrayIndex < 0)
+			return false;
+
+		if (pType->Engineer)
+			return true;
+
+		static int cacheSerial = -1;
+		static std::vector<signed char> cache;
+
+		if (cacheSerial != NeuralMatchSerial)
+		{
+			cacheSerial = NeuralMatchSerial;
+			cache.assign(static_cast<size_t>(InfantryTypeClass::Array.Count), -1);
+		}
+
+		const size_t index = static_cast<size_t>(pType->ArrayIndex);
+
+		if (index >= cache.size())
+			cache.resize(index + 1, -1);
+
+		if (cache[index] < 0)
+		{
+			bool captures = false;
+			const int weapons = std::clamp(std::max(2, pType->WeaponCount), 0, TechnoTypeClass::MaxWeapons);
+
+			for (int i = 0; i < weapons && !captures; ++i)
+			{
+				for (const bool elite : { false, true })
+				{
+					auto const pWeapon = pType->GetWeapon(static_cast<size_t>(i), elite).WeaponType;
+					auto const pWHExt = (pWeapon && pWeapon->Warhead) ? WarheadTypeExt::TryFetch(pWeapon->Warhead) : nullptr;
+
+					if (pWHExt && pWHExt->FakeEngineer_CanCaptureBuildings)
+					{
+						captures = true;
+						break;
+					}
+				}
+			}
+
+			cache[index] = captures ? 1 : 0;
+		}
+
+		return cache[index] > 0;
+	}
+
+	// An engineer by its weapon only (IsCaptureInfantryType without Engineer=yes).
+	bool CapturesByWeapon(const InfantryTypeClass* pType)
+	{
+		return pType && !pType->Engineer && IsCaptureInfantryType(pType);
+	}
+
 	bool IsSpecialistInfantryType(const InfantryTypeClass* pType)
 	{
-		return pType && (pType->Engineer || IsSpyInfantryType(pType) || pType->VehicleThief);
+		return pType && (IsCaptureInfantryType(pType) || IsSpyInfantryType(pType) || pType->VehicleThief);
 	}
 
 	// A soldier that only heals or repairs (every weapon it has does negative damage): a medic or a

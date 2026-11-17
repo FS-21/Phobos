@@ -5484,7 +5484,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (!pOwnInf || pOwnInf->Owner != pHouse || pOwnInf->InLimbo || !pOwnInf->IsAlive || !pOwnInf->Type)
 			continue;
 
-		if (pOwnInf->Type->Engineer)
+		if (IsCaptureInfantryType(pOwnInf->Type))
 			ownedEngineers++;
 		else if (IsSpyInfantryType(pOwnInf->Type))
 			ownedInfiltrators++;
@@ -5631,7 +5631,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (!isInfInProgress && IsHealerInfantryType(pInf) && ownedHealerInfantry * 5 >= std::max(1, ownedFighterInfantry))
 			continue;
 
-		const bool isIncomeRecoveryEng = (pInf->Engineer && neutralCashDerrickCount > ownedEngineers);
+		const bool isIncomeRecoveryEng = (IsCaptureInfantryType(pInf) && neutralCashDerrickCount > ownedEngineers);
 		if (!hasActiveUnitIncome && !isInfInProgress && !isIncomeRecoveryEng && pInf->GetActualCost(pHouse) > money)
 			continue;
 
@@ -5647,7 +5647,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const auto pWpn = pWpnStruct ? pWpnStruct->WeaponType : nullptr;
 		const bool isAA = pWpn && pWpn->Projectile && pWpn->Projectile->AA;
 
-		if (pInf->Engineer)
+		if (IsCaptureInfantryType(pInf))
 		{
 			const int maxActiveEngineers = (neutralCapturableCount >= 2) ? std::min(4, neutralCapturableCount) : 3;
 			if (ownedEngineers >= maxActiveEngineers)
@@ -5690,7 +5690,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			score += scores[16];
 		}
 
-		if (needsCheapInfForBioReactor && !pInf->Engineer && !IsSpyInfantryType(pInf) && !pInf->Doggie && pInf->Cost <= 220)
+		if (needsCheapInfForBioReactor && !IsCaptureInfantryType(pInf) && !IsSpyInfantryType(pInf) && !pInf->Doggie && pInf->Cost <= 220)
 		{
 			score += 520;
 		}
@@ -5720,14 +5720,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pOwnB && !pOwnB->InLimbo && pOwnB->IsAlive && pOwnB->Type && pOwnB->Type->IsBaseDefense
 				&& pOwnB->Type->CanBeOccupied
 				&& pOwnB->Occupants.Count < std::clamp(pOwnB->Type->MaxNumberOccupants, 1, 10) && pInf->Occupier
-				&& !pInf->Engineer && !IsSpyInfantryType(pInf))
+				&& !IsCaptureInfantryType(pInf) && !IsSpyInfantryType(pInf))
 			{
 				score += 650;
 				break;
 			}
 		}
 
-		if (features[77] > 0 && !pInf->Engineer && !IsSpyInfantryType(pInf)
+		if (features[77] > 0 && !IsCaptureInfantryType(pInf) && !IsSpyInfantryType(pInf)
 			&& (pInf->ImmuneToPsionics || (pWpn && pWpn->Range >= (6 * 256))))
 		{
 			score += 380; // Counter enemy MindControl with Snipers/Virus/Cyborgs/Dogs!
@@ -5736,7 +5736,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (features[72] > 0 && (pInf->Sensors || pInf->DetectDisguise || pInf->Doggie))
 			score += 420;
 
-		if (SlotGate(scores[82], 60, 82) && ownHouseBit != 0u && !pInf->InOwners(ownHouseBit) && !pInf->Engineer)
+		if (SlotGate(scores[82], 60, 82) && ownHouseBit != 0u && !pInf->InOwners(ownHouseBit) && !IsCaptureInfantryType(pInf))
 			score += 220 + std::clamp(static_cast<int>(scores[82]) / 3, 0, 200);
 
 		const bool infCanSelfCrossWater = (pInf->MovementZone == MovementZone::Amphibious
@@ -5745,7 +5745,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			|| pInf->SpeedType == SpeedType::Hover || pInf->SpeedType == SpeedType::Winged || pInf->JumpJet
 			|| pInf->Teleporter);
 
-		if (features[21] > 0 && !pInf->Engineer)
+		if (features[21] > 0 && !IsCaptureInfantryType(pInf))
 		{
 			if (waitingBattalionSizeOnIslands > ownedTransportTotalCapacity + 8)
 			{
@@ -5763,7 +5763,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		score += CounterBonusFor(pHouse, pInf);
 
 		// Under attack captures and infiltrations wait for the answer to the threat.
-		if (GetMacroState(pHouse).CounterUnderAttack && (pInf->Engineer || IsSpyInfantryType(pInf)))
+		if (GetMacroState(pHouse).CounterUnderAttack && (IsCaptureInfantryType(pInf) || IsSpyInfantryType(pInf)))
 			score -= ThreatFirstPenalty;
 
 		if (score > bestInfScore)
@@ -5790,7 +5790,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	{
 		auto const pScoredPick = bestInfIdx >= 0 ? InfantryTypeClass::Array.GetItem(bestInfIdx) : nullptr;
 
-		if (!pScoredPick || !pScoredPick->Engineer || ownedEngineers >= 1)
+		if (!pScoredPick || !IsCaptureInfantryType(pScoredPick) || ownedEngineers >= 1)
 		{
 			bestInfIdx = bestGarrisonIdx;
 			CountDecision(NeuralDecision::GarrisonTraining, pHouse->ArrayIndex);
@@ -5843,7 +5843,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				&& features[65] < 35)
 		|| baseInfantrySaturated)
 	{
-		if (bestInfIdx < 0 || !InfantryTypeClass::Array.GetItem(bestInfIdx)->Engineer
+		if (bestInfIdx < 0 || !IsCaptureInfantryType(InfantryTypeClass::Array.GetItem(bestInfIdx))
 			|| ownedEngineers >= std::max(1, neutralCashDerrickCount))
 		{
 			bestInfIdx = -1; // Zero-Income Emergency: ration remaining finite credits to

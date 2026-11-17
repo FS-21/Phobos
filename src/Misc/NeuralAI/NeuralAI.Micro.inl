@@ -6908,15 +6908,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// buildings/tanks, repair destroyed bridges, or capture Neutral Tech
 		// Buildings (Oil Derricks, Tech Outposts, Airports) and damaged enemy
 		// buildings (respecting Multi-Engineer)
-		if (pInf->Type->Engineer && isIdle && !inPlan)
+		// An engineer by its weapon (FakeEngineer.CanCaptureBuildings, IsCaptureInfantryType) only
+		// captures, with an attack order instead of walking in.
+		if (IsCaptureInfantryType(pInf->Type) && isIdle && !inPlan)
 		{
+			const bool capturesByWeapon = CapturesByWeapon(pInf->Type);
+			auto const dispatchCapture = [&](FootClass* pFoot, AbstractClass* pTarget, Mission mission, bool useSetTarget) -> bool
+			{
+				return (capturesByWeapon && mission == Mission::Enter)
+					? DispatchFootToTargetOrTransport(pFoot, pTarget, Mission::Attack, true)
+					: DispatchFootToTargetOrTransport(pFoot, pTarget, mission, useSetTarget);
+			};
+
 			// Disarm any attached Crazy Ivan Bomb on our own OR allied high-value
 			// buildings!
 			bool disarmedBomb = false;
 
 			for (auto const pAllyBld : BuildingClass::Array)
 			{
-				if (pAllyBld && !pAllyBld->InLimbo && pAllyBld->IsAlive && pAllyBld->Owner
+				if (!capturesByWeapon && pAllyBld && !pAllyBld->InLimbo && pAllyBld->IsAlive && pAllyBld->Owner
 					&& pHouse->IsAlliedWith(pAllyBld->Owner) && pAllyBld->AttachedBomb != nullptr
 					&& pInf->DistanceFrom(pAllyBld) <= 3584)
 				{
@@ -6931,7 +6941,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (disarmedBomb)
 				continue;
 
-			if (pTargetBridgeHut)
+			if (pTargetBridgeHut && !capturesByWeapon)
 			{
 				NoteBridgeWorker(pHouse, targetBridgeSpan, pInf,
 					DispatchFootToTargetOrTransport(pInf, pTargetBridgeHut, Mission::Enter, false));
@@ -6946,7 +6956,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// infantry hold an unbreakable urban stronghold!
 			// No distance limit (was 16 cells): reachable ground is what counts. Once repaired the
 			// building is worth holding again (RateUrbanBuilding needs 45% health) and is re-garrisoned.
-			if (pDamagedUrbanToRepair && pInf->Destination == pDamagedUrbanToRepair)
+			if (pDamagedUrbanToRepair && !capturesByWeapon && pInf->Destination == pDamagedUrbanToRepair)
 			{
 				pDamagedUrbanToRepair = nullptr;
 				continue;
@@ -6984,7 +6994,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const char* const preRepairDest = !pInf->Destination ? "none"
 				: (pInf->Destination == pDamagedUrbanToRepair ? "building" : "other");
 
-			if (pDamagedUrbanToRepair && IsBuildingEnterableFromZone(pDamagedUrbanToRepair, ObjectZone(pInf, MovementZone::Normal))
+			if (pDamagedUrbanToRepair && !capturesByWeapon && IsBuildingEnterableFromZone(pDamagedUrbanToRepair, ObjectZone(pInf, MovementZone::Normal))
 				&& repairOrder(pInf, pDamagedUrbanToRepair))
 			{
 				static int urbanRepairLogSerial = -1;
@@ -7016,8 +7026,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			// Expert 4 (Special Operations): the best known safe neutral tech, with an escort first
 			// when enemies were seen near it. Captures already under way finish under any expert.
-			if (RunSpecOpsEngineer(pHouse, pInf, pHoarderExt && pHoarderExt->NeuralAI_ActiveExpert == 4,
-				DispatchFootToTargetOrTransport))
+			if (RunSpecOpsEngineer(pHouse, pInf, pHoarderExt && pHoarderExt->NeuralAI_ActiveExpert == 4, dispatchCapture))
 			{
 				continue;
 			}
@@ -7072,8 +7081,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					for (auto const pOtherInf : InfantryClass::Array)
 					{
 						if (pOtherInf && pOtherInf != pInf && pOtherInf->Owner == pHouse && !pOtherInf->InLimbo
-							&& pOtherInf->IsAlive && pOtherInf->Type && pOtherInf->Type->Engineer
-							&& pOtherInf->Destination == pBld)
+							&& pOtherInf->IsAlive && pOtherInf->Type && IsCaptureInfantryType(pOtherInf->Type)
+							&& (pOtherInf->Destination == pBld || pOtherInf->Target == pBld))
 						{
 							alreadyTargetedByOtherEng = true;
 							break;
@@ -7106,7 +7115,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (pBestCapBld)
 			{
-				DispatchFootToTargetOrTransport(pInf, pBestCapBld, Mission::Enter, false);
+				dispatchCapture(pInf, pBestCapBld, Mission::Enter, false);
 			}
 
 			continue;
