@@ -2303,7 +2303,7 @@ namespace
 				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
 				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut,
 				NeuralPlanId::RollingSiege, NeuralPlanId::SiegeBattery, NeuralPlanId::BaitAmbush, NeuralPlanId::Pincer,
-				NeuralPlanId::ThreeFrontAssault, NeuralPlanId::AllyJointAttack };
+				NeuralPlanId::ThreeFrontAssault, NeuralPlanId::AllyJointAttack, NeuralPlanId::CounterSquad };
 
 			const bool marches = std::find(std::begin(marching), std::end(marching), id) != std::end(marching);
 			auto const walks = [](FootClass* pFoot)
@@ -3585,7 +3585,7 @@ namespace
 				NeuralPlanId::TimingRush, NeuralPlanId::ExpansionDenial, NeuralPlanId::SuperweaponRace, NeuralPlanId::HarvesterAmbush,
 				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
 				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut,
-				NeuralPlanId::RollingSiege, NeuralPlanId::SiegeBattery };
+				NeuralPlanId::RollingSiege, NeuralPlanId::SiegeBattery, NeuralPlanId::CounterSquad };
 
 			for (const NeuralPlanId id : raidPlans)
 			{
@@ -7426,6 +7426,494 @@ namespace
 						started.AnchorCell = strike.Center;
 					}
 				}
+			}
+		}
+
+		// ---------------------------------------------------------------- Plan 44: Counter Squad
+		// An enemy house gathers CounterSquadForceUnits or more units of one force category: our free
+		// units that counter that category go at the largest such force we know of together, instead
+		// of being spread through the waves (Counters only shifts what we build). A fixed rule with no
+		// learned gate. A land squad meets short of the force (StagingCell) and strikes together
+		// (Progress 1); ships strike at once. AuxBaseline = value of the force at the start, AnchorCell =
+		// where it was then, ForceOwner and ForceCategory = whose force and of what.
+		{
+			auto& plan = planOf(NeuralPlanId::CounterSquad);
+			static constexpr const char* forceNames[] = { "infantry", "vehicles", "artillery", "ships", "aircraft" };
+			const int now = Unsorted::CurrentFrame;
+
+			auto forceName = [](int category) -> const char*
+			{
+				return category >= 0 && category < static_cast<int>(std::size(forceNames)) ? forceNames[category] : "units";
+			};
+
+			// The units of one house and force category seen within radius of a cell no longer than
+			// maxAge ago: their value and value-weighted centroid.
+			auto forceNear = [&](int owner, int category, const CellStruct& cell, double radius, int maxAge, CellStruct* pCentroid) -> int
+			{
+				long long sumX = 0;
+				long long sumY = 0;
+				int value = 0;
+
+				for (auto const& [uid, sighting] : macro.EnemySightings)
+				{
+					if (sighting.OwnerIndex != owner || static_cast<int>(sighting.Category) != category
+						|| now - sighting.LastSeenFrame > maxAge || sighting.LastCoords.DistanceFrom(cell) > radius)
+					{
+						continue;
+					}
+
+					const int w = std::max(1, sighting.Value);
+					sumX += static_cast<long long>(sighting.LastCoords.X) * w;
+					sumY += static_cast<long long>(sighting.LastCoords.Y) * w;
+					value += w;
+				}
+
+				if (pCentroid)
+				{
+					*pCentroid = value > 0 ? CellStruct { static_cast<short>(sumX / value), static_cast<short>(sumY / value) }
+						: CellStruct::Empty;
+				}
+
+				return value;
+			};
+
+			auto endSquad = [&](bool success, const char* why, int rule = __builtin_LINE())
+			{
+				Debug::Log("[NeuralAI] House %d plan counterSquad ended %s (%s): %s of house %d worth %d of %d left near (%d,%d), "
+					"kills %d, squad %d of %d, frame %d.\n", houseIdx, success ? "well" : "badly", why, forceName(plan.ForceCategory),
+					plan.ForceOwner, forceNear(plan.ForceOwner, plan.ForceCategory, plan.TargetCell, CounterSquadClusterCells,
+						CounterSquadTrackFrames, nullptr), plan.AuxBaseline, plan.TargetCell.X, plan.TargetCell.Y, plan.KillValue,
+					memberValue(plan), plan.InitialValue, now);
+				finishPlan(NeuralPlanId::CounterSquad, success, !success, rule);
+			};
+
+			if (plan.Active)
+			{
+				CellStruct current = CellStruct::Empty;
+				forceNear(plan.ForceOwner, plan.ForceCategory, plan.TargetCell, CounterSquadClusterCells, CounterSquadTrackFrames, &current);
+
+				if (current != CellStruct::Empty)
+				{
+					plan.TargetCell = current;
+					plan.TargetSeenFrame = now;
+				}
+
+				int membersAlive = 0;
+				int membersThere = 0;
+				int membersStaged = 0;
+				double nearestToForce = 1.0e9;
+
+				for (const DWORD uid : plan.Members)
+				{
+					if (auto const pMember = findOwnFoot(uid))
+					{
+						membersAlive++;
+						const CellStruct cell = pMember->GetMapCoords();
+						const double distance = cell.DistanceFrom(plan.TargetCell);
+						nearestToForce = std::min(nearestToForce, distance);
+
+						if (distance <= CounterSquadEngageCells)
+							membersThere++;
+
+						if (plan.StagingCell != CellStruct::Empty && cell.DistanceFrom(plan.StagingCell) <= CounterSquadStageNearCells)
+							membersStaged++;
+					}
+				}
+
+				const bool engaged = current != CellStruct::Empty && nearestToForce <= CounterSquadEngageCells;
+
+				if (!plan.Arrived && membersThere > 0 && membersThere * 2 >= membersAlive)
+				{
+					plan.Arrived = true;
+					plan.ArrivedFrame = now;
+				}
+
+				if (plan.Progress == 0 && (plan.StagingCell == CellStruct::Empty || membersStaged * 3 >= membersAlive * 2
+					|| now - plan.StartFrame >= CounterSquadStageWaitFrames || engaged))
+				{
+					plan.Progress = 1;
+				}
+
+				const int forceLeft = forceNear(plan.ForceOwner, plan.ForceCategory, plan.TargetCell, CounterSquadClusterCells,
+					CounterSquadTrackFrames, nullptr);
+
+				if (plan.KillValue * 100 >= plan.AuxBaseline * CounterSquadKillPercent)
+				{
+					endSquad(true, "kills");
+				}
+				else if (plan.Arrived && forceLeft * 100 <= plan.AuxBaseline * CounterSquadBrokenPercent)
+				{
+					endSquad(true, "force broken");
+				}
+				else if (memberValue(plan) * 100 < plan.InitialValue * CounterSquadKeptPercent)
+				{
+					endSquad(false, "squad lost");
+				}
+				else if (now - plan.TargetSeenFrame >= CounterSquadLostFrames)
+				{
+					endSquad(false, "force lost from sight");
+				}
+				else if (now >= plan.Deadline)
+				{
+					endSquad(false, "time");
+				}
+				else if (plan.Progress == 0)
+				{
+					auto const pStage = MapClass::Instance.TryGetCellAt(plan.StagingCell);
+
+					for (const DWORD uid : plan.Members)
+					{
+						auto const pFoot = findOrderableFoot(uid);
+
+						// A member already in a fight finishes it there.
+						if (!pFoot || !pStage || pFoot->Target)
+							continue;
+
+						// A member taken from a marching wave still has the wave's attack-move, which would take
+						// it past the meeting spot.
+						if (pFoot->MegaMission == Mission::AttackMove)
+							pFoot->ClearMegaMissionData();
+
+						IssueMoveOrder(pFoot, pStage, 3.0);
+					}
+				}
+				else if (auto const pForceCell = MapClass::Instance.TryGetCellAt(plan.TargetCell))
+				{
+					for (const DWORD uid : plan.Members)
+					{
+						auto const pFoot = findOrderableFoot(uid);
+
+						if (!pFoot || pFoot->Target)
+							continue;
+
+						// Sent again only when the force moved away from where the member is going.
+						if (pFoot->MegaMission == Mission::AttackMove)
+						{
+							auto const pGoal = abstract_cast<CellClass*>(pFoot->MegaDestination);
+
+							if (pGoal && pGoal->MapCoords.DistanceFrom(plan.TargetCell) <= CounterSquadReaimCells)
+								continue;
+
+							pFoot->ClearMegaMissionData();
+						}
+
+						OrderFootToAttackMove(pFoot, pForceCell);
+					}
+				}
+			}
+			else if (planReady(NeuralPlanId::CounterSquad))
+			{
+				macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::CounterSquad)] = now + CounterSquadRetryFrames;
+
+				auto enemyOwner = [&](int owner) -> bool
+				{
+					if (owner < 0 || owner >= HouseClass::Array.Count || owner == houseIdx || IsTacitTrucePartner(pHouse, owner))
+						return false;
+
+					auto const pOwner = HouseClass::Array.GetItem(owner);
+
+					return pOwner && !pOwner->Defeated && !pOwner->IsNeutral() && !pHouse->IsAlliedWith(pOwner);
+				};
+
+				// The fresh sightings in UniqueID order, so every pick below is the same on every client.
+				std::vector<std::pair<DWORD, const EnemyUnitSighting*>> fresh;
+
+				for (auto const& [uid, sighting] : macro.EnemySightings)
+				{
+					if (sighting.Type && sighting.Value > 0 && now - sighting.LastSeenFrame <= CounterSquadSeenFrames
+						&& enemyOwner(sighting.OwnerIndex))
+					{
+						fresh.emplace_back(uid, &sighting);
+					}
+				}
+
+				std::sort(fresh.begin(), fresh.end(), [](auto const& a, auto const& b) { return a.first < b.first; });
+
+				struct ForceSeed
+				{
+					DWORD ID;
+					int Owner;
+					int Category;
+					int Units;
+					int Value;
+					CellStruct Cell;
+				};
+
+				// Every gathering of one house and category around a seed sighting, largest first; a seed
+				// within CounterSquadClusterCells of a larger gathering of the same house and category is
+				// that gathering.
+				std::vector<ForceSeed> seeds;
+
+				for (auto const& [seedID, pSeed] : fresh)
+				{
+					int units = 0;
+					int value = 0;
+
+					for (auto const& [otherID, pOther] : fresh)
+					{
+						if (pOther->OwnerIndex == pSeed->OwnerIndex && pOther->Category == pSeed->Category
+							&& pOther->LastCoords.DistanceFrom(pSeed->LastCoords) <= CounterSquadClusterCells)
+						{
+							units++;
+							value += pOther->Value;
+						}
+					}
+
+					if (units >= CounterSquadForceUnits)
+						seeds.push_back({ seedID, pSeed->OwnerIndex, static_cast<int>(pSeed->Category), units, value, pSeed->LastCoords });
+				}
+
+				std::sort(seeds.begin(), seeds.end(), [](const ForceSeed& a, const ForceSeed& b)
+					{
+						return a.Units != b.Units ? a.Units > b.Units : a.Value != b.Value ? a.Value > b.Value : a.ID < b.ID;
+					});
+
+				std::vector<ForceSeed> forces;
+
+				for (auto const& seed : seeds)
+				{
+					const bool known = std::any_of(forces.begin(), forces.end(), [&seed](const ForceSeed& force)
+						{
+							return force.Owner == seed.Owner && force.Category == seed.Category
+								&& force.Cell.DistanceFrom(seed.Cell) <= CounterSquadClusterCells;
+						});
+
+					if (!known)
+						forces.push_back(seed);
+				}
+
+				if (!forces.empty())
+					CountPlanOutcome(houseIdx, NeuralPlanId::CounterSquad, NeuralPlanOutcome::Eligible);
+
+				// TEMP diagnostic: the forces no squad could take on (20 per match).
+				static int noSquadLogSerial = -1;
+				static int noSquadLogCount = 0;
+
+				if (noSquadLogSerial != NeuralMatchSerial)
+				{
+					noSquadLogSerial = NeuralMatchSerial;
+					noSquadLogCount = 0;
+				}
+
+				bool started = false;
+
+				for (auto const& force : forces)
+				{
+					CellStruct center = CellStruct::Empty;
+					forceNear(force.Owner, force.Category, force.Cell, CounterSquadClusterCells, CounterSquadSeenFrames, &center);
+					auto const pCenterCell = center != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(center) : nullptr;
+
+					if (!pCenterCell)
+						continue;
+
+					// Land squads go at a force on our landmass, ships at a force on the water of their sea.
+					const bool atSea = pCenterCell->LandType == LandType::Water;
+
+					if (!atSea && zoneOf(center) != homeZone)
+						continue;
+
+					int enemyThere = seenEnemyValueNear(center, CounterSquadClusterCells, CounterSquadSeenFrames);
+
+					for (auto const pBld : knownEnemyBuildingList)
+					{
+						if (isKnownEnemyBuilding(pBld) && pBld->Type->IsBaseDefense
+							&& pBld->GetMapCoords().DistanceFrom(center) <= CounterSquadClusterCells)
+						{
+							enemyThere += GetCombatValueOfType(pBld->Type, false);
+						}
+					}
+
+					const NeuralCounterView view = BuildForceCounterView(pHouse, force.Owner, static_cast<EnemyForceCategory>(force.Category),
+						center, CounterSquadClusterCells, CounterSquadSeenFrames);
+
+					if (view.TotalValue <= 0)
+						continue;
+
+					std::unordered_map<const TechnoTypeClass*, int> fitOf;
+
+					auto fitFor = [&](TechnoTypeClass* pType) -> int
+					{
+						if (auto const it = fitOf.find(pType); it != fitOf.end())
+							return it->second;
+
+						const int fit = CounterQueueOf(pType) >= 0 ? CounterFitOf(pType, view) : 0;
+						fitOf[pType] = fit;
+						return fit;
+					};
+
+					// Our whole army against this force, value-weighted: a counter is clearly better than that.
+					long long armyFitSum = 0;
+					long long armyValue = 0;
+
+					for (auto const& [uid, pFoot] : ownFoots)
+					{
+						auto const pType = pFoot->GetTechnoType();
+
+						if (!pType || CounterQueueOf(pType) < 0)
+							continue;
+
+						const int value = GetCombatValueOfType(pType, false);
+						armyFitSum += static_cast<long long>(fitFor(pType)) * value;
+						armyValue += value;
+					}
+
+					const int armyFit = armyValue > 0 ? static_cast<int>(armyFitSum / armyValue) : 0;
+					const int fitNeeded = std::max(CounterSquadFitMin, armyFit + CounterSquadFitEdge);
+					std::vector<FootClass*> pool;
+
+					if (atSea)
+					{
+						for (auto const& [uid, pFoot] : ownFoots)
+						{
+							auto const pType = pFoot->GetTechnoType();
+
+							if (pType && pType->Naval && pFoot->WhatAmI() != AbstractType::Aircraft && !IsAmphibiousOrAirTransport(pType)
+								&& isFreeForPlan(pFoot)
+								&& ObjectZone(pFoot, pType->MovementZone) == MapClass::Instance.GetMovementZoneType(center, pType->MovementZone, false))
+							{
+								pool.push_back(pFoot);
+							}
+						}
+					}
+					else
+					{
+						pool = collectIdleGround(force.Category == static_cast<int>(EnemyForceCategory::Air));
+					}
+
+					struct Counter
+					{
+						FootClass* Foot;
+						int Fit;
+						int Distance;
+					};
+
+					std::vector<Counter> counters;
+
+					for (auto const pFoot : pool)
+					{
+						const int fit = fitFor(pFoot->GetTechnoType());
+
+						if (fit >= fitNeeded)
+							counters.push_back({ pFoot, fit, static_cast<int>(pFoot->GetMapCoords().DistanceFrom(center)) });
+					}
+
+					std::sort(counters.begin(), counters.end(), [](const Counter& a, const Counter& b)
+						{
+							return a.Fit != b.Fit ? a.Fit > b.Fit
+								: a.Distance != b.Distance ? a.Distance < b.Distance : a.Foot->UniqueID < b.Foot->UniqueID;
+						});
+
+					// Unless the force is at our own buildings, CounterSquadHomeKeepPercent of the free value
+					// at home stays there, as with the base threat intercept.
+					bool atOwnBuildings = center.DistanceFrom(homeCell) <= CounterSquadHomeCells;
+
+					for (auto const pBld : pHouse->Buildings)
+					{
+						if (atOwnBuildings)
+							break;
+
+						if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->GetMapCoords().DistanceFrom(center) <= CounterSquadOwnBuildingCells)
+							atOwnBuildings = true;
+					}
+
+					int homeValue = 0;
+
+					for (auto const pFoot : pool)
+					{
+						if (pFoot->GetMapCoords().DistanceFrom(homeCell) <= CounterSquadHomeCells)
+							homeValue += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+					}
+
+					const int maxFromHome = atOwnBuildings ? INT_MAX : homeValue * (100 - CounterSquadHomeKeepPercent) / 100;
+					std::vector<FootClass*> squad;
+					int weighted = 0;
+					int plain = 0;
+					int fromHome = 0;
+
+					for (auto const& counter : counters)
+					{
+						if (squad.size() >= CounterSquadMaxMembers || weighted * 100 >= enemyThere * CounterSquadEnoughPercent)
+							break;
+
+						if (counter.Foot->GetMapCoords().DistanceFrom(homeCell) <= CounterSquadHomeCells)
+						{
+							const int homeShare = GetCombatValueOfType(counter.Foot->GetTechnoType(), false);
+
+							if (fromHome + homeShare > maxFromHome)
+								continue;
+
+							fromHome += homeShare;
+						}
+
+						const int value = static_cast<int>(GetCombatValueOfType(counter.Foot->GetTechnoType(), false)
+							* counter.Foot->GetHealthPercentage());
+						squad.push_back(counter.Foot);
+						weighted += value * counter.Fit / 100;
+						plain += value;
+					}
+
+					if (squad.size() < CounterSquadMinMembers || weighted * 100 < enemyThere * CounterSquadAdvantagePercent
+						|| plain * PlanOutgunnedRatioPercent < enemyThere * 100)
+					{
+						if (noSquadLogCount++ < 20)
+						{
+							Debug::Log("[NeuralAI] House %d plan counterSquad no squad for %d %s of house %d at (%d,%d) worth %d, %d there: "
+								"%d counters of %d free (fit %d+, army %d) worth %d by fit and %d plain, frame %d.\n", houseIdx, force.Units,
+								forceName(force.Category), force.Owner, center.X, center.Y, view.TotalValue, enemyThere,
+								static_cast<int>(squad.size()), static_cast<int>(pool.size()), fitNeeded, armyFit, weighted, plain, now);
+						}
+
+						continue;
+					}
+
+					// The meeting spot of a land squad: CounterSquadStageCells short of the force, on the side
+					// the squad comes from, unless the squad is about that near already.
+					CellStruct staging = CellStruct::Empty;
+
+					if (!atSea)
+					{
+						int sumX = 0;
+						int sumY = 0;
+
+						for (auto const pFoot : squad)
+						{
+							const CellStruct cell = pFoot->GetMapCoords();
+							sumX += cell.X;
+							sumY += cell.Y;
+						}
+
+						const int count = static_cast<int>(squad.size());
+						const CellStruct squadCenter { static_cast<short>(sumX / count), static_cast<short>(sumY / count) };
+
+						if (squadCenter.DistanceFrom(center) > CounterSquadStageCells + CounterSquadStageNearCells)
+						{
+							if (auto const pStage = landCellInZone(pointAlong(center, squadCenter, CounterSquadStageCells, 0.0), homeZone, 3))
+								staging = pStage->MapCoords;
+						}
+					}
+
+					startPlan(NeuralPlanId::CounterSquad, squad, center, staging, 0, CounterSquadDurationFrames);
+
+					if (plan.Active)
+					{
+						plan.AuxBaseline = std::max(1, view.TotalValue);
+						plan.AnchorCell = center;
+						plan.ForceOwner = force.Owner;
+						plan.ForceCategory = force.Category;
+						started = true;
+						Debug::Log("[NeuralAI] House %d plan counterSquad started: %d %s of house %d at (%d,%d) worth %d, %d there; "
+							"%d counters worth %d by fit and %d plain (fit %d+, army %d), %s, staging (%d,%d), frame %d.\n", houseIdx,
+							force.Units, forceName(force.Category), force.Owner, center.X, center.Y, view.TotalValue, enemyThere,
+							static_cast<int>(squad.size()), weighted, plain, fitNeeded, armyFit, atSea ? "ships" : "land", staging.X,
+							staging.Y, now);
+					}
+
+					// Started, or held by the start checks (they set the next attempt).
+					break;
+				}
+
+				if (!started && !forces.empty() && !plan.Active)
+					CountPlanOutcome(houseIdx, NeuralPlanId::CounterSquad, NeuralPlanOutcome::NoGroup);
 			}
 		}
 
