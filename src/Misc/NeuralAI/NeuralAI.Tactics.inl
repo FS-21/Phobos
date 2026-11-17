@@ -4099,10 +4099,16 @@ namespace
 			const DWORD objectId = pObject->UniqueID;
 			auto const held = std::find(macro.BrokeHeldObjects.begin(), macro.BrokeHeldObjects.end(), objectId);
 
+			// Without a hold every production paused with the manual flag goes on: only the hold pauses
+			// them so, and the engine resumes none of them (Update_Factories skips IsManual, Factory_AI
+			// leaves them to us). Unsuspend(true) would pause it again at once like a player's click
+			// (0x4C9EA0); the engine starts the computer's productions with false (0x4503C5). Also one
+			// held before the list was lost (2026-11-17: the designated factory kept a half built
+			// vehicle the whole match, the pick behind it never came out and the credits piled up).
 			if (!holdProduction)
 			{
-				if (held != macro.BrokeHeldObjects.end() && pFactory->IsSuspended)
-					pFactory->Unsuspend(true);
+				if (pFactory->IsSuspended && pFactory->IsManual && !pFactory->IsDone())
+					pFactory->Unsuspend(false);
 
 				continue;
 			}
