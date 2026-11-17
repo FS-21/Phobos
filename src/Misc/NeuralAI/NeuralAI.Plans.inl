@@ -2662,7 +2662,7 @@ namespace
 			}
 
 			// Tank escort (PlanTankEscorts): a marching group with walking members and no main battle
-			// tank, of a house that is no tank mass, takes the nearest free ones.
+			// tank, of a house that is no tank mass, takes the nearest free ones on its land.
 			auto const isTankFoot = [](FootClass* pFoot)
 			{
 				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
@@ -2700,10 +2700,7 @@ namespace
 						continue;
 					}
 
-					const double distance = pFoot->GetMapCoords().DistanceFrom(center);
-
-					if (distance <= PlanTankEscortCells)
-						tanks.push_back({ distance, pFoot });
+					tanks.push_back({ pFoot->GetMapCoords().DistanceFrom(center), pFoot });
 				}
 
 				std::sort(tanks.begin(), tanks.end(), [](const auto& a, const auto& b)
@@ -2730,9 +2727,10 @@ namespace
 
 				if (escortLogCount++ < 30)
 				{
-					Debug::Log("[NeuralAI] House %d plan %s: %d main battle tanks escort its %d members (%d free within %d cells), frame %d.\n",
-						houseIdx, NeuralPlanNames[static_cast<size_t>(id)], static_cast<int>(std::min(tanks.size(), PlanTankEscorts)),
-						static_cast<int>(group.size()), static_cast<int>(tanks.size()), static_cast<int>(PlanTankEscortCells), Unsorted::CurrentFrame);
+					const size_t taken = std::min(tanks.size(), PlanTankEscorts);
+					Debug::Log("[NeuralAI] House %d plan %s: %d main battle tanks escort its %d members (%d free on its land, the farthest taken %d cells away), frame %d.\n",
+						houseIdx, NeuralPlanNames[static_cast<size_t>(id)], static_cast<int>(taken), static_cast<int>(group.size()),
+						static_cast<int>(tanks.size()), taken ? static_cast<int>(tanks[taken - 1].first) : 0, Unsorted::CurrentFrame);
 				}
 			}
 

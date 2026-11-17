@@ -2530,10 +2530,11 @@ namespace
 	// defense.
 	// Tank escorts (user: the spare main battle tanks escort the other groups when the house is no
 	// tank mass): a marching plan whose walking group holds no main battle tank takes up to
-	// PlanTankEscorts free ones (never of the guard) within PlanTankEscortCells of the group, the
-	// nearest first; and the plans that pick escorts take main battle tanks before other units.
+	// PlanTankEscorts free ones (never of the guard) anywhere on the land of the group, the nearest
+	// first, a tank marching in a wave too (user: with 30 cells at most only 9 of 245 plan starts of
+	// stamp a8694a191 found one, the free tanks were away with the waves); and the plans that pick
+	// escorts take main battle tanks before other units.
 	constexpr size_t PlanTankEscorts = 2;
-	constexpr double PlanTankEscortCells = 30.0;
 	constexpr int TankGuardShare = 2;
 	constexpr int TankGuardMin = 2;
 	constexpr int TankGuardMost = 6;
