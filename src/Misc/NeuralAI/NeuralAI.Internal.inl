@@ -2224,58 +2224,79 @@ namespace
 		return pType && pType->C4 && !pType->Engineer && !IsSpyInfantryType(pType);
 	}
 
-	// A specialist that works a building or a vehicle instead of fighting: engineer, spy (which
-	// also robs refineries and silos), vehicle thief.
-	// A soldier that captures buildings: an engineer, or one with a weapon (normal or elite) whose
-	// warhead captures like an engineer (FakeEngineer.CanCaptureBuildings); that one captures with an
-	// attack order from its weapon's range instead of walking in. Read from the rules once per type and
-	// match.
-	bool IsCaptureInfantryType(const InfantryTypeClass* pType)
-	{
-		if (!pType || pType->ArrayIndex < 0)
-			return false;
+	// What the weapons of a type do like an engineer, from their warheads: capture a building
+	// (FakeEngineer.CanCaptureBuildings), repair or destroy a bridge from its hut (CanRepairBridges,
+	// CanDestroyBridges) and disarm an attached bomb (BombDisarm), without losing the firer. Any type:
+	// infantry, vehicle, aircraft. Every weapon slot it has, normal and elite (the one ForceWeapon.Capture
+	// picks included). Read from the rules once per type and match.
+	constexpr int FakeEngineerCaptures = 1;
+	constexpr int FakeEngineerRepairsBridges = 2;
+	constexpr int FakeEngineerDestroysBridges = 4;
+	constexpr int FakeEngineerDisarmsBombs = 8;
 
-		if (pType->Engineer)
-			return true;
+	int FakeEngineerAbilities(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return 0;
 
 		static int cacheSerial = -1;
-		static std::vector<signed char> cache;
+		// Key access only.
+		static std::unordered_map<const TechnoTypeClass*, int> cache;
 
 		if (cacheSerial != NeuralMatchSerial)
 		{
 			cacheSerial = NeuralMatchSerial;
-			cache.assign(static_cast<size_t>(InfantryTypeClass::Array.Count), -1);
+			cache.clear();
 		}
 
-		const size_t index = static_cast<size_t>(pType->ArrayIndex);
+		if (auto const it = cache.find(pType); it != cache.end())
+			return it->second;
 
-		if (index >= cache.size())
-			cache.resize(index + 1, -1);
+		int abilities = 0;
+		const int weapons = std::clamp(std::max(2, pType->WeaponCount), 0, TechnoTypeClass::MaxWeapons);
 
-		if (cache[index] < 0)
+		for (int i = 0; i < weapons; ++i)
 		{
-			bool captures = false;
-			const int weapons = std::clamp(std::max(2, pType->WeaponCount), 0, TechnoTypeClass::MaxWeapons);
-
-			for (int i = 0; i < weapons && !captures; ++i)
+			for (const bool elite : { false, true })
 			{
-				for (const bool elite : { false, true })
-				{
-					auto const pWeapon = pType->GetWeapon(static_cast<size_t>(i), elite).WeaponType;
-					auto const pWHExt = (pWeapon && pWeapon->Warhead) ? WarheadTypeExt::TryFetch(pWeapon->Warhead) : nullptr;
+				auto const pWeapon = pType->GetWeapon(static_cast<size_t>(i), elite).WeaponType;
+				auto const pWHExt = (pWeapon && pWeapon->Warhead) ? WarheadTypeExt::TryFetch(pWeapon->Warhead) : nullptr;
 
-					if (pWHExt && pWHExt->FakeEngineer_CanCaptureBuildings)
-					{
-						captures = true;
-						break;
-					}
-				}
+				if (!pWHExt)
+					continue;
+
+				abilities |= (pWHExt->FakeEngineer_CanCaptureBuildings ? FakeEngineerCaptures : 0)
+					| (pWHExt->FakeEngineer_CanRepairBridges ? FakeEngineerRepairsBridges : 0)
+					| (pWHExt->FakeEngineer_CanDestroyBridges ? FakeEngineerDestroysBridges : 0)
+					| (pWHExt->FakeEngineer_BombDisarm ? FakeEngineerDisarmsBombs : 0);
 			}
-
-			cache[index] = captures ? 1 : 0;
 		}
 
-		return cache[index] > 0;
+		cache.emplace(pType, abilities);
+
+		return abilities;
+	}
+
+	// May this unit capture that building by its weapon? What the warhead captures (Capturable or
+	// NeedsEngineer, owned by an enemy or neutral), as feature/EngineerLogicsOnWarheads applies it.
+	bool CanCaptureByWeapon(const TechnoClass* pTechno, const BuildingClass* pBld)
+	{
+		if (!pTechno || !pTechno->Owner || !pBld || !pBld->IsAlive || !pBld->Type || !pBld->Owner || pBld->Owner == pTechno->Owner
+			|| !(FakeEngineerAbilities(pTechno->GetTechnoType()) & FakeEngineerCaptures))
+		{
+			return false;
+		}
+
+		return (pBld->Type->Capturable || pBld->Type->NeedsEngineer)
+			&& (pBld->Owner->IsNeutral() || !pTechno->Owner->IsAlliedWith(pBld->Owner));
+	}
+
+	// A soldier that captures buildings: an engineer, or one whose weapon captures like an engineer
+	// (FakeEngineerAbilities); that one captures with an attack order from its weapon's range instead of
+	// walking in.
+	bool IsCaptureInfantryType(const InfantryTypeClass* pType)
+	{
+		return pType && (pType->Engineer || (FakeEngineerAbilities(pType) & FakeEngineerCaptures) != 0);
 	}
 
 	// An engineer by its weapon only (IsCaptureInfantryType without Engineer=yes).
@@ -2284,6 +2305,8 @@ namespace
 		return pType && !pType->Engineer && IsCaptureInfantryType(pType);
 	}
 
+	// A specialist that works a building or a vehicle instead of fighting: engineer (by its weapon
+	// too), spy (which also robs refineries and silos), vehicle thief.
 	bool IsSpecialistInfantryType(const InfantryTypeClass* pType)
 	{
 		return pType && (IsCaptureInfantryType(pType) || IsSpyInfantryType(pType) || pType->VehicleThief);

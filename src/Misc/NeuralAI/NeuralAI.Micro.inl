@@ -6577,6 +6577,140 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// Engineer work by warhead (FakeEngineerAbilities) for any unit, which survives it: a unit whose
+	// warhead disarms bombs shoots the bomb off a building or unit of ours or of an ally within
+	// FakeEngineerBombCells (engineers with Engineer=yes walk in, below), and an idle vehicle or aircraft
+	// whose warhead captures takes the nearest tech it can as an idle engineer does (soldiers that capture
+	// by their weapon are engineers, below).
+	{
+		auto const isFreeWorker = [&](FootClass* pFoot)
+		{
+			return pFoot && pFoot->Owner == pHouse && pFoot->IsAlive && !pFoot->InLimbo
+				&& (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard)
+				&& !IsFootActivelyAttackingOrMovingToEnemy(pFoot) && !IsPlanMember(pHouse, pFoot->UniqueID);
+		};
+
+		for (auto const pBombed : TechnoClass::Array)
+		{
+			if (!pBombed || !pBombed->IsAlive || pBombed->InLimbo || !pBombed->AttachedBomb || !pBombed->Owner
+				|| !pHouse->IsAlliedWith(pBombed->Owner))
+			{
+				continue;
+			}
+
+			FootClass* pDisarmer = nullptr;
+			int nearest = FakeEngineerBombCells * Unsorted::LeptonsPerCell;
+			bool taken = false;
+
+			for (auto const pFoot : FootClass::Array)
+			{
+				if (pFoot && pFoot->Owner == pHouse && pFoot->Target == pBombed)
+				{
+					taken = true;
+					break;
+				}
+
+				auto const pInfType = pFoot ? abstract_cast<InfantryTypeClass*>(pFoot->GetTechnoType()) : nullptr;
+
+				if (pFoot == pBombed || !isFreeWorker(pFoot) || (pInfType && pInfType->Engineer)
+					|| !(FakeEngineerAbilities(pFoot->GetTechnoType()) & FakeEngineerDisarmsBombs)
+					|| !TechnoExt::CanBeAffectedByFakeEngineer(pFoot, pBombed, false, false, true))
+				{
+					continue;
+				}
+
+				const int distance = pFoot->DistanceFrom(pBombed);
+
+				if (distance < nearest)
+				{
+					nearest = distance;
+					pDisarmer = pFoot;
+				}
+			}
+
+			if (!taken && pDisarmer)
+				DispatchFootToTargetOrTransport(pDisarmer, pBombed, Mission::Attack, true);
+		}
+
+		auto const pWorkExt = HouseExt::Fetch(pHouse);
+		const int workExpert = pWorkExt ? pWorkExt->NeuralAI_ActiveExpert : -1;
+		std::vector<const AbstractClass*> capturesUnderWay;
+		bool capturersFound = false;
+
+		for (auto const pFoot : FootClass::Array)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->WhatAmI() == AbstractType::Infantry
+				|| !(FakeEngineerAbilities(pFoot->GetTechnoType()) & FakeEngineerCaptures))
+			{
+				continue;
+			}
+
+			capturersFound = true;
+			break;
+		}
+
+		if (capturersFound)
+		{
+			for (auto const pFoot : FootClass::Array)
+			{
+				if (pFoot && pFoot->Owner == pHouse && pFoot->IsAlive)
+				{
+					if (pFoot->Target)
+						capturesUnderWay.push_back(pFoot->Target);
+
+					if (pFoot->Destination)
+						capturesUnderWay.push_back(pFoot->Destination);
+				}
+			}
+		}
+
+		for (auto const pFoot : FootClass::Array)
+		{
+			if (!capturersFound)
+				break;
+
+			if (!isFreeWorker(pFoot) || pFoot->WhatAmI() == AbstractType::Infantry
+				|| !(FakeEngineerAbilities(pFoot->GetTechnoType()) & FakeEngineerCaptures))
+			{
+				continue;
+			}
+
+			BuildingClass* pBestTech = nullptr;
+			int bestDistance = INT_MAX;
+
+			for (auto const pBld : BuildingClass::Array)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Owner || !CanCaptureByWeapon(pFoot, pBld)
+					|| std::find(capturesUnderWay.begin(), capturesUnderWay.end(), static_cast<const AbstractClass*>(pBld)) != capturesUnderWay.end())
+				{
+					continue;
+				}
+
+				// A neutral tech as for any engineer; one an enemy took for Expert 4, and for the resource
+				// hoarder when it pays (as the routing of engineers in training, UpdateCaptureBarracks).
+				const bool available = pBld->Owner->IsNeutral()
+					? IsSpecOpsTechAvailable(pHouse, pBld, pFoot->UniqueID)
+					: (IsKnownCapturableTech(pHouse, pBld) && !IsSpecOpsCaptureTarget(pHouse, pBld->UniqueID, 0)
+						&& !IsCellInKnownEnemyDefenseReach(pHouse, pBld->GetMapCoords(), 2)
+						&& (workExpert == 4 || (workExpert == 6 && (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0))));
+
+				if (!available)
+					continue;
+
+				const int distance = pFoot->DistanceFrom(pBld);
+
+				if (distance < bestDistance)
+				{
+					bestDistance = distance;
+					pBestTech = pBld;
+				}
+			}
+
+			if (pBestTech && DispatchFootToTargetOrTransport(pFoot, pBestTech, Mission::Attack, true))
+				capturesUnderWay.push_back(pBestTech);
+		}
+	}
+
 	BuildingClass* pBioReactor = nullptr;
 	BuildingClass* pOverpowerCoil = nullptr;
 
@@ -6993,8 +7127,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// buildings/tanks, repair destroyed bridges, or capture Neutral Tech
 		// Buildings (Oil Derricks, Tech Outposts, Airports) and damaged enemy
 		// buildings (respecting Multi-Engineer)
-		// An engineer by its weapon (FakeEngineer.CanCaptureBuildings, IsCaptureInfantryType) only
-		// captures, with an attack order instead of walking in.
+		// An engineer by its weapon (FakeEngineer.CanCaptureBuildings, IsCaptureInfantryType) captures
+		// here, with an attack order instead of walking in; its bombs and bridges are the general work by
+		// warhead above.
 		if (IsCaptureInfantryType(pInf->Type) && isIdle && !inPlan)
 		{
 			const bool capturesByWeapon = CapturesByWeapon(pInf->Type);
