@@ -310,6 +310,14 @@ namespace
 	constexpr int PoorTargetBias = 250;
 	// Main enemy log: the first changes of each house in a match.
 	constexpr int MainEnemyLogLimit = 60;
+	// The main enemy is held for MainEnemyHoldFrames once chosen. Before that another house takes
+	// over only with a priority MainEnemySwitchMargin above it, or when it is urgent: it hit us
+	// within MainEnemyUrgentFrames, its units were seen within MainEnemyBaseCells of home in the last
+	// 150 frames, or it is dying (weak enough to finish, or the dying house of the diplomacy).
+	constexpr int MainEnemyHoldFrames = 2250;
+	constexpr int MainEnemySwitchMargin = 300;
+	constexpr int MainEnemyUrgentFrames = 450;
+	constexpr double MainEnemyBaseCells = 18.0;
 
 	// Why a coalition ended (telemetry and log), and why a truce with one partner ended.
 	enum class NeuralPactEnd : int
@@ -449,6 +457,11 @@ namespace
 		int LeaderFrames { 0 };
 		int LeaderCoalitionFrames { 0 };
 		int PoorTargetFrames { 0 };
+		// Main enemy hold (Micro): since when the main enemy is the one it is, and telemetry of its
+		// changes and of the ticks a held choice kept it.
+		int MainEnemySinceFrame { -100000 };
+		int MainEnemyChanges { 0 };
+		int MainEnemyHeld { 0 };
 		int LastUpdateFrame { -100000 };
 		int LastFullFrame { -100000 };
 		// Telemetry: frames in coalition, joins, declines (all, as second strongest, as strongest),
