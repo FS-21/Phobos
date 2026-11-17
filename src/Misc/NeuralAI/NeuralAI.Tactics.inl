@@ -4080,6 +4080,15 @@ namespace
 			}
 		}
 
+		// The queue the item we save for is built in (a harvester or an MCV: the war factory, a
+		// refinery: the ConYard). What stands in it is cancelled (refunded) so the item can start; the
+		// other productions wait on hold. A production held in that queue blocked it for good once the
+		// engine stopped abandoning held productions (2026-11-17: bases stuck at a ConYard and one
+		// power plant, the refinery picked for the whole match).
+		const AbstractType awaitedQueue = holdForHarvester
+			? (harvesterBuildable ? AbstractType::UnitType : AbstractType::BuildingType)
+			: (macro.RefinerySaveTarget > 0 && macro.HarvesterSaveTarget <= 0 ? AbstractType::BuildingType : AbstractType::UnitType);
+
 		for (auto const pFactory : FactoryClass::Array)
 		{
 			if (!pFactory || pFactory->Owner != pHouse || !pFactory->Object)
@@ -4095,6 +4104,16 @@ namespace
 				if (held != macro.BrokeHeldObjects.end() && pFactory->IsSuspended)
 					pFactory->Unsuspend(true);
 
+				continue;
+			}
+
+			// One held before in the queue we now save for gives it up too.
+			if (pType && held != macro.BrokeHeldObjects.end() && pFactory->IsSuspended && pType->WhatAmI() == awaitedQueue
+				&& !(abstract_cast<UnitTypeClass*>(pType) && static_cast<UnitTypeClass*>(pType)->Naval))
+			{
+				Debug::Log("[NeuralAI] House %d hold: cancelling %s, held in the queue of what we save for.\n", pHouse->ArrayIndex, pType->ID);
+				macro.BrokeHeldObjects.erase(held);
+				pFactory->AbandonProduction();
 				continue;
 			}
 
@@ -4126,9 +4145,10 @@ namespace
 			if (restoresIncome)
 				continue;
 
-			if (pUnitType && !pUnitType->Naval && holdForHarvester)
+			if (pType->WhatAmI() == awaitedQueue && !(pUnitType && pUnitType->Naval))
 			{
-				Debug::Log("[NeuralAI] House %d broke: cancelling %s for a harvester.\n", pHouse->ArrayIndex, pType->ID);
+				Debug::Log("[NeuralAI] House %d %s: cancelling %s, it holds the queue of what we save for.\n", pHouse->ArrayIndex,
+					holdForHarvester ? "broke" : "economy hold", pType->ID);
 				pFactory->AbandonProduction();
 			}
 			else
