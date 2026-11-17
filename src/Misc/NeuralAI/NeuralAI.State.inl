@@ -494,7 +494,7 @@ namespace
 	// (another order found on it counts as an interference). A harvester of a shuttle: its work, when
 	// it began, and the largest load seen on it with the frame it grew last. Progress*: where it stood
 	// since when (a shuttle's harvester while a transport waits for it, any other member while it is
-	// farther from the cell it was sent to than OpGatherCells).
+	// farther from the cell it was sent to than OpMemberStuckFarCells). Cleared while it is aboard.
 	struct NeuralOpMember
 	{
 		DWORD UniqueID { 0 };
@@ -1963,12 +1963,13 @@ namespace
 	// Masterminds (2026-11-17).
 	constexpr int OpRouteTakeFactor = 3;
 	// A member that gets no OpMemberStuckCells nearer to the cell the operation sent it to in
-	// OpMemberStuckFrames, while farther from it than OpGatherCells, is let go. It may ask again
-	// after OpRetryFrames. One engineer stood 17 cells from its berth wait cell for most of an
+	// OpMemberStuckFrames, while farther from it than OpMemberStuckFarCells, is let go. It may ask
+	// again after OpRetryFrames. One engineer stood 17 cells from its berth wait cell for most of an
 	// operation that stayed open 65000 frames, with 5098 interferences (match #10708, Moonlit
-	// Waters of Esvia).
+	// Waters of Esvia). Closer than OpMemberStuckFarCells it may only be queued behind a large wave.
 	constexpr int OpMemberStuckFrames = 1800;
 	constexpr double OpMemberStuckCells = 2.0;
+	constexpr double OpMemberStuckFarCells = 12.0;
 	// Against the threats that move (user): a transport inside the reach of a threat plans its route
 	// again every OpRouteDangerReplanFrames instead of OpRouteReplanFrames. A crossing whose landing
 	// grew OpLandingSwitchDanger more dangerous since it sailed (enemies gathered at it), still
