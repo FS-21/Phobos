@@ -145,6 +145,8 @@ namespace
 		int AuxPeak { 0 };
 		// Several targets at once (Factory Decapitation) or per-group sizes (Three-Front Assault).
 		std::vector<DWORD> Targets {};
+		// Cells of the members (Naval Strike Group: a firing cell for each shelling ship, apart).
+		std::vector<CellStruct> Cells {};
 		// Sub-targets destroyed so far (chain plans: Rolling Siege), so a plan that did real
 		// damage before its deadline is not scored as a plain failure.
 		int Progress { 0 };
@@ -2259,6 +2261,21 @@ namespace
 	constexpr int CrawlPowerSurplus = 700;
 	constexpr int ArmyIdleWindowFrames = 2700;
 	constexpr std::array<int, 3> ArmyIdleBrake { 30, 40, 12 };
+	// Naval Strike Group (user: ships are of more use wearing the enemy down, and taking the place of
+	// the damaged ones, than idle by the dozen; a few may stay by the base to defend it). The whole free
+	// long-range fleet goes, NavalStrikeMaxShips at most, and NavalStrikeMaxEscorts escorts.
+	// - A reserve stays by our naval yard: NavalHomeReservePercent of the fleet, NavalHomeReserveMin at
+	//   least, the ships nearest to the yard. A fleet of NavalHomeReserveMin + 2 ships or fewer keeps
+	//   none.
+	// - Each shelling ship gets its own firing cell, NavalFiringSpacingCells from the others.
+	// - A ship that leaves for repairs is replaced from the free fleet, one per AI tick.
+	// It took 6 ships and 4 escorts to one cell: 108 Boomers of a house stood idle while 6 of them
+	// jammed at their firing cell (2026-11-17).
+	constexpr int NavalStrikeMaxShips = 40;
+	constexpr int NavalStrikeMaxEscorts = 8;
+	constexpr int NavalHomeReservePercent = 20;
+	constexpr int NavalHomeReserveMin = 2;
+	constexpr double NavalFiringSpacingCells = 3.0;
 	// Warships pause sooner when the idle ones have nothing to shoot: that many with no coastal
 	// building in reach and no enemy ship in their sea at every AI tick of ArmyIdleWindowFrames
 	// (match #9846: a house kept building ships while about 50 sat with no target in reach).

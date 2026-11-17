@@ -8137,9 +8137,11 @@ namespace
 
 		// ---------------------------------------------------------------- Plan 23: Naval Strike Group
 		// Our long-range ships (ground weapon >= 10 cells, or carriers / missile launchers) shell
-		// a known building reachable from the sea, from a water cell outside the reach of the
-		// other known defenses, with the remaining warships screening them. Coastal defenses are
-		// taken out first. Damaged ships (< 40%) head back to our naval yard.
+		// a known building reachable from the sea, from water cells outside the reach of the
+		// other known defenses, with warships screening them. Coastal defenses are taken out first.
+		// The whole free fleet goes but for a reserve by our naval yard, each shelling ship to its
+		// own firing cell (NavalStrikeMaxShips and the other Naval* constants). Damaged ships
+		// (< 40%) head back to our naval yard, and free healthy ones take their place.
 		{
 			auto& plan = planOf(NeuralPlanId::NavalStrikeGroup);
 
@@ -8212,12 +8214,23 @@ namespace
 					if (navalDiag)
 						plan.AuxPeak++;
 
+					// Each shelling ship goes to its own firing cell (plan.Cells, in the order of the members).
+					size_t shellingIndex = 0;
+					int healthyShelling = 0;
+
 					for (const DWORD uid : plan.Members)
 					{
 						auto const pShip = findOwnFoot(uid);
 
 						if (!pShip)
 							continue;
+
+						const bool shells = isLongRangeShip(pShip);
+						const CellStruct ownCell = (shells && !plan.Cells.empty()) ? plan.Cells[shellingIndex++ % plan.Cells.size()] : plan.StagingCell;
+						auto const pOwnCell = ownCell == plan.StagingCell ? pFiring : MapClass::Instance.TryGetCellAt(ownCell);
+
+						if (shells && pShip->GetHealthPercentage() >= 0.4)
+							healthyShelling++;
 
 						if (navalDiag)
 						{
@@ -8246,8 +8259,8 @@ namespace
 							continue;
 						}
 
-						const bool siege = isLongRangeShip(pShip);
-						const double distToFiring = pShip->GetMapCoords().DistanceFrom(plan.StagingCell);
+						const bool siege = shells;
+						const double distToFiring = pShip->GetMapCoords().DistanceFrom(ownCell);
 
 						if (siege && distToFiring <= 4.0)
 						{
@@ -8268,8 +8281,8 @@ namespace
 							auto const pGoingBefore = abstract_cast<CellClass*>(pShip->Destination);
 							const CellStruct goingBefore = pGoingBefore ? pGoingBefore->MapCoords : CellStruct::Empty;
 
-							// Escorts screen around the firing position (they engage on their own).
-							const bool issued = IssueMoveOrder(pShip, pFiring, siege ? 2.0 : 4.0);
+							// Escorts screen around the first firing position (they engage on their own).
+							const bool issued = IssueMoveOrder(pShip, pOwnCell ? pOwnCell : pFiring, siege ? 2.0 : 4.0);
 
 							if (distToFiring >= 25.0)
 								WatchMove(pShip);
@@ -8287,6 +8300,47 @@ namespace
 									pGoingAfter ? pGoingAfter->MapCoords.X : -1, pGoingAfter ? pGoingAfter->MapCoords.Y : -1,
 									pShip->CloakState != CloakState::Uncloaked ? 1 : 0, IsFootHeldStill(pHouse, pShip, 300) ? 1 : 0);
 							}
+						}
+					}
+
+					// Relief (user): while fewer healthy ships shell than the plan took, a free healthy one of
+					// the same sea joins, one per AI tick, the farthest from our naval yard. The free ships nearest
+					// to the yard stay there as its reserve.
+					if (healthyShelling < plan.AuxBaseline && pFiring)
+					{
+						std::vector<FootClass*> fresh;
+						const int seaZone = MapClass::Instance.GetMovementZoneType(plan.StagingCell, MovementZone::Water, false);
+
+						for (auto const& [uid, pFoot] : ownFoots)
+						{
+							auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+							if (pUnit && pUnit->Type && pUnit->Type->Naval && isLongRangeShip(pUnit) && isFreeForPlan(pUnit)
+								&& !IsAmphibiousOrAirTransport(pUnit->Type) && pUnit->GetHealthPercentage() >= 0.9
+								&& ObjectZone(pUnit, MovementZone::Water) == seaZone)
+							{
+								fresh.push_back(pUnit);
+							}
+						}
+
+						const int reserve = (pNavalYard && static_cast<int>(fresh.size()) > NavalHomeReserveMin + 2)
+							? std::max(NavalHomeReserveMin, static_cast<int>(fresh.size()) * NavalHomeReservePercent / 100)
+							: 0;
+
+						if (static_cast<int>(fresh.size()) > reserve)
+						{
+							const CellStruct yard = pNavalYard ? pNavalYard->MapCoords : plan.StagingCell;
+							std::sort(fresh.begin(), fresh.end(), [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; });
+							std::stable_sort(fresh.begin(), fresh.end(), [&yard](FootClass* a, FootClass* b)
+								{
+									return a->GetMapCoords().DistanceFrom(yard) > b->GetMapCoords().DistanceFrom(yard);
+								});
+							auto const pJoin = fresh.front();
+							plan.Members.push_back(pJoin->UniqueID);
+							macro.PlanMembers.insert(pJoin->UniqueID);
+							macro.FerryReserved.erase(pJoin->UniqueID);
+							Debug::Log("[NeuralAI] House %d navalStrike: %s %u relieves a damaged ship (%d of %d shelling healthy), frame %d.\n",
+								houseIdx, pJoin->GetTechnoType()->ID, pJoin->UniqueID, healthyShelling, plan.AuxBaseline, Unsorted::CurrentFrame);
 						}
 					}
 				}
@@ -8332,6 +8386,30 @@ namespace
 				auto byID = [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; };
 				std::sort(siegeShips.begin(), siegeShips.end(), byID);
 				std::sort(escorts.begin(), escorts.end(), byID);
+
+				// A reserve stays by our naval yard to defend it: the ships nearest to the yard,
+				// NavalHomeReservePercent of the fleet and NavalHomeReserveMin at least, none for a small one.
+				auto const keepReserve = [&](std::vector<FootClass*>& ships) -> int
+				{
+					const int count = static_cast<int>(ships.size());
+
+					if (!pNavalYard || count <= NavalHomeReserveMin + 2)
+						return 0;
+
+					const int reserve = std::max(NavalHomeReserveMin, count * NavalHomeReservePercent / 100);
+					const CellStruct yard = pNavalYard->MapCoords;
+					std::stable_sort(ships.begin(), ships.end(), [&yard](FootClass* a, FootClass* b)
+						{
+							return a->GetMapCoords().DistanceFrom(yard) < b->GetMapCoords().DistanceFrom(yard);
+						});
+					ships.erase(ships.begin(), ships.begin() + reserve);
+					std::sort(ships.begin(), ships.end(), byID);
+
+					return reserve;
+				};
+
+				const int reserveShips = keepReserve(siegeShips);
+				keepReserve(escorts);
 
 				if (!siegeShips.empty())
 					fleetZone = ObjectZone(siegeShips.front(), MovementZone::Water);
@@ -8413,9 +8491,50 @@ namespace
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::NavalStrikeGroup, utility))
 				{
-					std::vector<FootClass*> group(siegeShips.begin(), siegeShips.begin() + std::min<size_t>(siegeShips.size(), 6));
-					group.insert(group.end(), escorts.begin(), escorts.begin() + std::min<size_t>(escorts.size(), 4));
+					const size_t shelling = std::min<size_t>(siegeShips.size(), NavalStrikeMaxShips);
+					std::vector<FootClass*> group(siegeShips.begin(), siegeShips.begin() + shelling);
+					group.insert(group.end(), escorts.begin(), escorts.begin() + std::min<size_t>(escorts.size(), NavalStrikeMaxEscorts));
 					startPlan(NeuralPlanId::NavalStrikeGroup, group, pTarget->GetMapCoords(), firing, pTarget->UniqueID, 5400);
+					auto& started = planOf(NeuralPlanId::NavalStrikeGroup);
+
+					// A firing cell of its own for each shelling ship, NavalFiringSpacingCells from the others,
+					// on the same terms as the first: a whole fleet sent to one cell jams in front of it.
+					if (started.Active && started.TargetID == pTarget->UniqueID)
+					{
+						started.AuxBaseline = static_cast<int>(shelling);
+						started.Cells.push_back(firing);
+						const CellStruct bc = pTarget->GetMapCoords();
+						const int minRangeCells = std::max(4, fleetMinRange / Unsorted::LeptonsPerCell + 1);
+
+						for (int r = rangeCells - 1; r >= minRangeCells && started.Cells.size() < shelling; --r)
+						{
+							for (int k = 0; k < 16 && started.Cells.size() < shelling; ++k)
+							{
+								constexpr int DirX[16] = { 10, 9, 7, 4, 0, -4, -7, -9, -10, -9, -7, -4, 0, 4, 7, 9 };
+								constexpr int DirY[16] = { 0, 4, 7, 9, 10, 9, 7, 4, 0, -4, -7, -9, -10, -9, -7, -4 };
+								const CellStruct c { static_cast<short>(bc.X + DirX[k] * r / 10), static_cast<short>(bc.Y + DirY[k] * r / 10) };
+								auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+								if (!pCell || pCell->LandType != LandType::Water
+									|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Water, false) != fleetZone
+									|| inKnownDefenseReach(c, pTarget) || inEnemyShipReach(c))
+								{
+									continue;
+								}
+
+								if (std::none_of(started.Cells.begin(), started.Cells.end(),
+									[&c](const CellStruct& taken) { return taken.DistanceFrom(c) < NavalFiringSpacingCells; }))
+								{
+									started.Cells.push_back(c);
+								}
+							}
+						}
+
+						Debug::Log("[NeuralAI] House %d navalStrike: %d shelling ships and %d escorts to %s at (%d,%d), %d firing cells, %d ships "
+							"left in reserve by the yard, frame %d.\n", houseIdx, static_cast<int>(shelling),
+							static_cast<int>(group.size() - shelling), pTarget->Type->ID, bc.X, bc.Y, static_cast<int>(started.Cells.size()),
+							reserveShips, Unsorted::CurrentFrame);
+					}
 				}
 			}
 		}
