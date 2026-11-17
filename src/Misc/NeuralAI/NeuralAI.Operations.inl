@@ -3742,6 +3742,65 @@ namespace
 		}
 	}
 
+	// Does the house own a transport its operations can use (a ship, a flyer or a carryall)?
+	bool HouseOwnsOpTransport(HouseClass* pHouse)
+	{
+		for (auto const pFoot : FootClass::Array)
+		{
+			if (pFoot && pFoot->Owner == pHouse && pFoot->IsAlive && !pFoot->InLimbo && GetOpCarrier(pFoot) != OpCarrier::None)
+				return true;
+		}
+
+		return false;
+	}
+
+	// The landing by a cell: a free land cell of its ground on the shore within BackdoorLandingCells,
+	// the one with the least danger for a load set down there.
+	CellStruct FindShoreLandingBy(HouseClass* pHouse, const CellStruct& bc, int zone, int& danger)
+	{
+		CellStruct best = CellStruct::Empty;
+		danger = INT_MAX;
+
+		for (int dy = -BackdoorLandingCells; dy <= BackdoorLandingCells; dy += 2)
+		{
+			for (int dx = -BackdoorLandingCells; dx <= BackdoorLandingCells; dx += 2)
+			{
+				const CellStruct c { static_cast<short>(bc.X + dx), static_cast<short>(bc.Y + dy) };
+				auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+				if (!pCell || pCell->LandType == LandType::Water || pCell->GetBuilding()
+					|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != zone)
+				{
+					continue;
+				}
+
+				bool shore = false;
+
+				for (int sy = -2; sy <= 2 && !shore; ++sy)
+				{
+					for (int sx = -2; sx <= 2 && !shore; ++sx)
+					{
+						auto const pNear = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(c.X + sx), static_cast<short>(c.Y + sy) });
+						shore = pNear && pNear->LandType == LandType::Water;
+					}
+				}
+
+				if (!shore)
+					continue;
+
+				const int here = OpLandingDanger(pHouse, c, OpCarrier::Surface);
+
+				if (here < danger)
+				{
+					danger = here;
+					best = c;
+				}
+			}
+		}
+
+		return best;
+	}
+
 	// Back door (user, an idea of the old aimd.ini): while a wave of the house hits an enemy base on the
 	// house's own ground through defenses, a small team of idle units at home rides a transport operation
 	// around that base and lands by a valuable building on its far side, which it attacks (constants
@@ -3859,47 +3918,7 @@ namespace
 		// danger for a load set down there.
 		auto const findLanding = [&](const CellStruct& bc, int zone, int& danger) -> CellStruct
 		{
-			CellStruct best = CellStruct::Empty;
-			danger = INT_MAX;
-
-			for (int dy = -BackdoorLandingCells; dy <= BackdoorLandingCells; dy += 2)
-			{
-				for (int dx = -BackdoorLandingCells; dx <= BackdoorLandingCells; dx += 2)
-				{
-					const CellStruct c { static_cast<short>(bc.X + dx), static_cast<short>(bc.Y + dy) };
-					auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
-
-					if (!pCell || pCell->LandType == LandType::Water || pCell->GetBuilding()
-						|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != zone)
-					{
-						continue;
-					}
-
-					bool shore = false;
-
-					for (int sy = -2; sy <= 2 && !shore; ++sy)
-					{
-						for (int sx = -2; sx <= 2 && !shore; ++sx)
-						{
-							auto const pNear = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(c.X + sx), static_cast<short>(c.Y + sy) });
-							shore = pNear && pNear->LandType == LandType::Water;
-						}
-					}
-
-					if (!shore)
-						continue;
-
-					const int here = OpLandingDanger(pHouse, c, OpCarrier::Surface);
-
-					if (here < danger)
-					{
-						danger = here;
-						best = c;
-					}
-				}
-			}
-
-			return best;
+			return FindShoreLandingBy(pHouse, bc, zone, danger);
 		};
 
 		// The building: known, of that house, worth a strike (a factory, a construction yard, a power plant,

@@ -174,6 +174,20 @@ DEFINE_HOOK(0x42CC48, AStarClass_FindPath_Failure_NeuralAI, 0x5)
 	return 0;
 }
 
+// The same for the search over the zones that comes first (the "Hierarchical findpath failure"
+// line, written just after this point): with no way between the zones the cell search is not tried,
+// so this is the only word of a goal that a fallen bridge cut off.
+DEFINE_HOOK(0x42CB61, AStarClass_FindPath_HierarchicalFailure_NeuralAI, 0x5)
+{
+	GET(FootClass*, pFoot, ESI);
+	GET_STACK(CellStruct, to, STACK_OFFSET(0x30, -0x20));
+	GET_STACK(CellStruct, from, STACK_OFFSET(0x30, -0x1C));
+
+	NeuralAI::OnHierarchicalPathFailure(pFoot, from, to);
+
+	return 0;
+}
+
 // A unit of a Neural AI house whose last path searches to the same place all failed waits before
 // it asks the path finder again (NeuralAI::ShouldSkipPathSearch): the search answers "no path" at
 // once, through the exit the function takes for a unit without a move list.
