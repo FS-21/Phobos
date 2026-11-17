@@ -179,6 +179,9 @@ namespace
 		int KillValue { 0 };
 		// Bait Ambush: the bait's health in percent when it set out to fire at the building.
 		int LureHealth { 0 };
+		// Counter Squad: the enemy house and force category (EnemyForceCategory) it goes after.
+		int ForceOwner { -1 };
+		int ForceCategory { -1 };
 	};
 
 	struct NeuralStuckTrack
@@ -286,6 +289,27 @@ namespace
 	// Stalemate: not before this frame (about 30 minutes of game time), no defeat for this long.
 	constexpr int StalemateMinFrame = 27000;
 	constexpr int StalemateNoDefeatFrames = 18000;
+	// Free-for-all houses by what we know of them, with no preset team in the match and two or more
+	// living enemies. Income: 3 per known refinery and 1 per harvester seen at once. Production:
+	// LeaderFactoryWeight per known factory of units, LeaderIncomeWeight per point of income and the
+	// value of the army seen (ours at two thirds, as the others see only part of it). A runaway leader
+	// is an enemy that produces LeaderLeadPercent of the next house (measured only: it weighs nothing
+	// yet, to see first how often the coalition against a leader answers it). A house is judged once
+	// we know PoorMinKnownBuildings of its structures. The poor target is the poorest enemy when its
+	// income is at most PoorShareOfMeanPercent of the mean of the other enemies, or an enemy whose
+	// income fell to PoorLostPercent of the most we knew of it, at least PoorLostMinPeak: it cannot
+	// replace what it loses and falls sooner. It gets PoorTargetBias in the main enemy choice and in
+	// the waves, on top of the preference for finishing the weakest, which stays the usual choice.
+	constexpr int LeaderFactoryWeight = 100;
+	constexpr int LeaderIncomeWeight = 30;
+	constexpr int LeaderLeadPercent = 150;
+	constexpr int PoorMinKnownBuildings = 3;
+	constexpr int PoorShareOfMeanPercent = 60;
+	constexpr int PoorLostPercent = 40;
+	constexpr int PoorLostMinPeak = 6;
+	constexpr int PoorTargetBias = 250;
+	// Main enemy log: the first changes of each house in a match.
+	constexpr int MainEnemyLogLimit = 60;
 
 	// Why a coalition ended (telemetry and log), and why a truce with one partner ended.
 	enum class NeuralPactEnd : int
@@ -411,6 +435,20 @@ namespace
 		// We are clearly the strongest: do not provoke a coalition; the nearest known base stays fair game.
 		bool LowProfile { false };
 		int LowProfileNearest { -1 };
+		// Free-for-all leader and poor target (UpdateTacitCoalition), by what we know of the houses.
+		// The leader is an enemy that produces LeaderLeadPercent of the next house (-1 none) and its
+		// lead in percent: measured only, it weighs nothing in the choice yet. The poor target is the
+		// clearly poorest enemy or one that lost its economy (DiplomacyTargetBias), and whether it lost
+		// it; IncomePeak the most income we ever knew of each house. Telemetry: frames with a runaway
+		// enemy leader, of those with a coalition of any house against it, and with a poor target.
+		int ProductionLeader { -1 };
+		int ProductionLeadPercent { 0 };
+		int PoorTarget { -1 };
+		bool PoorTargetLost { false };
+		std::array<int, 8> IncomePeak {};
+		int LeaderFrames { 0 };
+		int LeaderCoalitionFrames { 0 };
+		int PoorTargetFrames { 0 };
 		int LastUpdateFrame { -100000 };
 		int LastFullFrame { -100000 };
 		// Telemetry: frames in coalition, joins, declines (all, as second strongest, as strongest),
@@ -2632,6 +2670,54 @@ namespace
 	// A force this near our nearest member is in the fight: the whole group strikes, and it is
 	// fought wherever it goes from there (it came at us).
 	constexpr double PreemptiveEngageCells = 8.0;
+	// Counter Squad: an enemy house has CounterSquadForceUnits or more units of one force category
+	// (infantry, vehicles, artillery, ships, aircraft) seen within CounterSquadClusterCells of each
+	// other in the last CounterSquadSeenFrames. Our free units that counter that category go at the
+	// largest such force together: their fit against it (CounterFitOf) is at least CounterSquadFitMin
+	// and CounterSquadFitEdge points above the value-weighted mean fit of our whole army. The squad
+	// counts each member's value times its health and fit; best counters first, it takes members
+	// until it is worth CounterSquadEnoughPercent of what stands there (every unit seen within
+	// CounterSquadClusterCells of the force and the known defenses there) or has
+	// CounterSquadMaxMembers, and starts with CounterSquadMinMembers or more worth
+	// CounterSquadAdvantagePercent of it (by plain value no less than the outgunned turn-back of the
+	// raids asks for). A force no squad can take on yields to the next largest one.
+	constexpr int CounterSquadForceUnits = 9;
+	constexpr double CounterSquadClusterCells = 10.0;
+	constexpr int CounterSquadSeenFrames = 450;
+	constexpr int CounterSquadFitMin = 80;
+	constexpr int CounterSquadFitEdge = 25;
+	constexpr size_t CounterSquadMinMembers = 4;
+	constexpr size_t CounterSquadMaxMembers = 20;
+	constexpr int CounterSquadAdvantagePercent = 110;
+	constexpr int CounterSquadEnoughPercent = 200;
+	// Unless the force is within CounterSquadHomeCells of home or CounterSquadOwnBuildingCells of one
+	// of our buildings, CounterSquadHomeKeepPercent of the value of the free units within
+	// CounterSquadHomeCells of home stays there (the base threat intercept keeps the same reserve).
+	constexpr double CounterSquadHomeCells = 18.0;
+	constexpr double CounterSquadOwnBuildingCells = 12.0;
+	constexpr int CounterSquadHomeKeepPercent = 33;
+	// A land squad meets CounterSquadStageCells short of the force and strikes together once two
+	// thirds of it are within CounterSquadStageNearCells of that spot, CounterSquadStageWaitFrames
+	// into the plan, or once the force is within CounterSquadEngageCells of a member; ships strike at
+	// once. The squad follows the force (its category seen in the last CounterSquadTrackFrames within
+	// CounterSquadClusterCells of where it was) and is sent again when it moved CounterSquadReaimCells
+	// from where the members were sent. It went well when the force fell to CounterSquadBrokenPercent
+	// of its value at the start with half of the squad at it, or when the members destroyed enemy
+	// units worth CounterSquadKillPercent of it; badly when the force was not seen for
+	// CounterSquadLostFrames, the squad fell to CounterSquadKeptPercent of its value or its time ran
+	// out. With no force or no squad it looks again after CounterSquadRetryFrames.
+	constexpr double CounterSquadStageCells = 14.0;
+	constexpr double CounterSquadStageNearCells = 5.0;
+	constexpr int CounterSquadStageWaitFrames = 600;
+	constexpr double CounterSquadEngageCells = 8.0;
+	constexpr int CounterSquadTrackFrames = 300;
+	constexpr double CounterSquadReaimCells = 6.0;
+	constexpr int CounterSquadBrokenPercent = 35;
+	constexpr int CounterSquadKillPercent = 60;
+	constexpr int CounterSquadLostFrames = 900;
+	constexpr int CounterSquadKeptPercent = 40;
+	constexpr int CounterSquadDurationFrames = 3000;
+	constexpr int CounterSquadRetryFrames = 300;
 	// Hold Under Towers: a ground enemy force of at least HoldTowersMinEnemyValue within
 	// HoldTowersEnemyCells of home, over HoldTowersOddsPercent of our free army within
 	// HoldTowersArmyCells, and an army of at least HoldTowersMinMembers: 19 of the 27 holds whose
@@ -2906,8 +2992,9 @@ namespace
 	// Expert 3 diplomacy bias for picking a house to fight (main enemy, or a wave's building with
 	// wave set): coalition target first (the wave bonus with its fronts is added by the caller),
 	// truce partners never, an ex-partner not for a while, two houses at war left alone until it is
-	// over and then the one it left weakest, a dying house before its aggressor gets there; while we
-	// lead by far, no far adventures against houses that leave us alone.
+	// over and then the one it left weakest, a dying house before its aggressor gets there, the
+	// poorest enemy or one that lost its economy (it falls sooner); while we lead by far, no far
+	// adventures against houses that leave us alone.
 	int DiplomacyTargetBias(HouseClass* pHouse, int idx, bool wave)
 	{
 		if (!pHouse || idx < 0 || idx >= 8)
@@ -2935,6 +3022,9 @@ namespace
 		if (idx == coal.DyingTarget && now < coal.DyingUntil)
 			bias += wave ? 800 : 600;
 
+		if (idx == coal.PoorTarget)
+			bias += PoorTargetBias;
+
 		if (wave && coal.LowProfile && idx != coal.LowProfileNearest && idx != coal.Target
 			&& now - coal.HurtByFrame[idx] > 5400)
 		{
@@ -2942,6 +3032,30 @@ namespace
 		}
 
 		return bias;
+	}
+
+	// The diplomacy motive that weighs most for a house in DiplomacyTargetBias (main enemy log).
+	const char* DiplomacyTargetMotive(HouseClass* pHouse, int idx)
+	{
+		if (!pHouse || idx < 0 || idx >= 8)
+			return "diplomacy";
+
+		auto const& coal = GetMacroState(pHouse).Coalition;
+		const int now = Unsorted::CurrentFrame;
+
+		if (idx == coal.Target)
+			return "coalition";
+
+		if (idx == coal.DyingTarget && now < coal.DyingUntil)
+			return "dying";
+
+		if (idx == coal.PostDuelTarget && now < coal.PostDuelUntil)
+			return "after a duel";
+
+		if (idx == coal.PoorTarget)
+			return coal.PoorTargetLost ? "lost economy" : "poorest";
+
+		return "diplomacy";
 	}
 
 	// Weight of a mission of the tank mass on the target of its main wave: its base, moved by half
