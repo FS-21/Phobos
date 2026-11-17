@@ -1005,10 +1005,12 @@ namespace
 		const int transportZone = flies ? -1
 			: MapClass::Instance.GetMovementZoneType(pTransport->GetMapCoords(), pType->MovementZone, pTransport->OnBridge);
 		std::vector<std::pair<double, CellStruct>> found;
+		// A back door lands by the building it is for, not anywhere around it.
+		const int radius = op.Client == NeuralOpClient::Strike ? BackdoorLandingCandidateCells : OpLandingCandidateCells;
 
-		for (int dy = -OpLandingCandidateCells; dy <= OpLandingCandidateCells; dy += 2)
+		for (int dy = -radius; dy <= radius; dy += 2)
 		{
-			for (int dx = -OpLandingCandidateCells; dx <= OpLandingCandidateCells; dx += 2)
+			for (int dx = -radius; dx <= radius; dx += 2)
 			{
 				const CellStruct c { static_cast<short>(op.Landing.X + dx), static_cast<short>(op.Landing.Y + dy) };
 				auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
@@ -1352,6 +1354,86 @@ namespace
 		return true;
 	}
 
+	// A back door (UpdateBackdoor) asks to take a unit to a landing of its choice by the building target
+	// on the far side of an enemy base, on the unit's own ground or another: an operation of the Strike
+	// client to that landing (a new one, or the one going there). False when the unit cannot be taken.
+	bool RequestStrikeTransport(HouseClass* pHouse, FootClass* pFoot, const CellStruct& landing, const CellStruct& target)
+	{
+		if (!TransportOpsEnabled || !pHouse || !pFoot || pFoot->InLimbo || !pFoot->IsAlive || landing == CellStruct::Empty
+			|| target == CellStruct::Empty)
+		{
+			return false;
+		}
+
+		auto& macro = GetMacroState(pHouse);
+		const DWORD uid = pFoot->UniqueID;
+		auto const pType = pFoot->GetTechnoType();
+
+		if (macro.TransportOpOf.contains(uid) || !pType || CrossesWaterAlone(pType) || GetOpCarrier(pFoot) != OpCarrier::None
+			|| pFoot->Transporter || IsPlanMember(pHouse, uid))
+		{
+			return false;
+		}
+
+		const int footZone = OpFootGroundZone(pFoot);
+		const int landingZone = MapClass::Instance.GetMovementZoneType(landing, MovementZone::Normal, false);
+
+		if (!IsGroundZone(footZone) || !IsGroundZone(landingZone))
+			return false;
+
+		const int now = Unsorted::CurrentFrame;
+		NeuralTransportOperation* pOp = nullptr;
+
+		for (auto& op : macro.TransportOps)
+		{
+			if (!op.Over && op.Client == NeuralOpClient::Strike && op.OriginZone == footZone && op.Landing == landing)
+			{
+				pOp = &op;
+				break;
+			}
+		}
+
+		if (!pOp)
+		{
+			auto& op = macro.TransportOps.emplace_back();
+			op.Id = macro.NextTransportOpId++;
+			op.Client = NeuralOpClient::Strike;
+			op.OriginZone = footZone;
+			op.TargetZone = landingZone;
+			op.Target = target;
+			op.Landing = landing;
+			op.CreatedFrame = now;
+			op.LastTransportFrame = now;
+			pOp = &op;
+
+			Debug::Log("[NeuralAI] House %d transport op %d opened for a strike: %s %u at (%d,%d) zone %d -> landing (%d,%d) zone %d by "
+				"(%d,%d), frame %d.\n", pHouse->ArrayIndex, op.Id, pType->ID, uid, pFoot->GetMapCoords().X, pFoot->GetMapCoords().Y, footZone,
+				landing.X, landing.Y, landingZone, target.X, target.Y, now);
+		}
+		else
+		{
+			pOp->Joined++;
+		}
+
+		NeuralOpMember member {};
+		member.UniqueID = uid;
+		member.Size = std::max(1, static_cast<int>(pType->Size));
+		member.Target = target;
+		pOp->Members.push_back(member);
+		macro.TransportOpOf[uid] = pOp->Id;
+		macro.FerryReserved.erase(uid);
+		macro.FerryWaitSince.erase(uid);
+
+		if (pFoot->MegaMission == Mission::AttackMove)
+			pFoot->ClearMegaMissionData();
+
+		pFoot->SetTarget(nullptr);
+		pFoot->SetDestination(nullptr, true);
+		pFoot->ForceMission(Mission::Guard);
+
+		return true;
+	}
+
 	// Gives a member back to its client: a wave's unit goes on to its address over its own ground now
 	// (an attack-move, its goal kept as the wave's), the others wait where they stand for their
 	// client's next order.
@@ -1363,7 +1445,9 @@ namespace
 		// Its post is where it stands now, not the gathering spot on the land it left.
 		pFoot->SetArchiveTarget(pFoot->GetCell());
 
-		if (op.Client == NeuralOpClient::Wave)
+		// A back door's member attacks the building it was carried to; kept as a wave goal, the wave
+		// dispatch does not send it elsewhere.
+		if (op.Client == NeuralOpClient::Wave || op.Client == NeuralOpClient::Strike)
 		{
 			if (auto const pCell = MapClass::Instance.TryGetCellAt(member.Target))
 			{
@@ -1788,7 +1872,13 @@ namespace
 					return false;
 				}
 
-				if (zone == op.TargetZone || IsSameGroundForFoot(pFoot, member.Target))
+				// A back door's member stands on that ground from the start: it is delivered once a transport sets
+				// it down by the landing, on the far side of the base under attack.
+				const bool delivered = op.Client == NeuralOpClient::Strike
+					? wasAboard && pFoot->GetMapCoords().DistanceFrom(op.Landing) <= BackdoorDeliverCells
+					: zone == op.TargetZone || IsSameGroundForFoot(pFoot, member.Target);
+
+				if (delivered)
 				{
 					if (zone == op.TargetZone)
 						op.Landed++;
@@ -3652,6 +3742,243 @@ namespace
 		}
 	}
 
+	// Back door (user, an idea of the old aimd.ini): while a wave of the house hits an enemy base on the
+	// house's own ground through defenses, a small team of idle units at home rides a transport operation
+	// around that base and lands by a valuable building on its far side, which it attacks (constants
+	// Backdoor*). The transports keep to the safe routes and wait, or abort, on danger like any load.
+	void UpdateBackdoor(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.BackdoorCheckFrame >= 0 && now - macro.BackdoorCheckFrame < BackdoorCheckFrames && now >= macro.BackdoorCheckFrame)
+			return;
+
+		macro.BackdoorCheckFrame = now;
+
+		if (macro.BackdoorRetryUntil >= 0 && now < macro.BackdoorRetryUntil && macro.BackdoorRetryUntil - now <= BackdoorRetryFrames)
+			return;
+
+		if (std::any_of(macro.TransportOps.begin(), macro.TransportOps.end(),
+			[](const NeuralTransportOperation& op) { return !op.Over && op.Client == NeuralOpClient::Strike; }))
+		{
+			return;
+		}
+
+		// The front: the target of the house's latest wave, on the house's own ground, with defenses.
+		const CellStruct front = macro.LastWaveTargetCell;
+		const CellStruct home = pHouse->GetBaseCenter();
+
+		if (front == CellStruct::Empty || home == CellStruct::Empty || now - macro.LastWaveDispatchFrame > WaveTargetKeepFrames)
+			return;
+
+		const int homeZone = MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false);
+
+		if (!IsGroundZone(homeZone) || MapClass::Instance.GetMovementZoneType(front, MovementZone::Normal, false) != homeZone)
+			return;
+
+		const int frontDefenses = CountKnownEnemyDefensesNear(pHouse, front, BackdoorFrontCells, false);
+
+		if (frontDefenses < BackdoorMinDefenses)
+			return;
+
+		auto const isEnemy = [pHouse](HouseClass* pOwner)
+		{
+			return pOwner && pOwner != pHouse && !pHouse->IsAlliedWith(pOwner) && !pOwner->IsNeutral() && !pOwner->IsObserver()
+				&& !pOwner->Defeated;
+		};
+
+		// Whose base the wave hits: the owner of the known enemy building nearest to its target.
+		HouseClass* pVictim = nullptr;
+		double nearest = 0.0;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type || !isEnemy(pBld->Owner) || !IsEnemyBuildingKnown(pHouse, pBld))
+				continue;
+
+			const double distance = pBld->GetMapCoords().DistanceFrom(front);
+
+			if (!pVictim || distance < nearest)
+			{
+				pVictim = pBld->Owner;
+				nearest = distance;
+			}
+		}
+
+		if (!pVictim)
+			return;
+
+		// The landing by a building: a free land cell of its ground on the shore, the one with the least
+		// danger for a load set down there.
+		auto const findLanding = [&](const CellStruct& bc, int zone, int& danger) -> CellStruct
+		{
+			CellStruct best = CellStruct::Empty;
+			danger = INT_MAX;
+
+			for (int dy = -BackdoorLandingCells; dy <= BackdoorLandingCells; dy += 2)
+			{
+				for (int dx = -BackdoorLandingCells; dx <= BackdoorLandingCells; dx += 2)
+				{
+					const CellStruct c { static_cast<short>(bc.X + dx), static_cast<short>(bc.Y + dy) };
+					auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+					if (!pCell || pCell->LandType == LandType::Water || pCell->GetBuilding()
+						|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != zone)
+					{
+						continue;
+					}
+
+					bool shore = false;
+
+					for (int sy = -2; sy <= 2 && !shore; ++sy)
+					{
+						for (int sx = -2; sx <= 2 && !shore; ++sx)
+						{
+							auto const pNear = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(c.X + sx), static_cast<short>(c.Y + sy) });
+							shore = pNear && pNear->LandType == LandType::Water;
+						}
+					}
+
+					if (!shore)
+						continue;
+
+					const int here = OpLandingDanger(pHouse, c, OpCarrier::Surface);
+
+					if (here < danger)
+					{
+						danger = here;
+						best = c;
+					}
+				}
+			}
+
+			return best;
+		};
+
+		// The building: known, of that house, worth a strike (a factory, a construction yard, a power plant,
+		// a refinery, a superweapon), far enough from the wave's target, with a safe landing by it.
+		BuildingClass* pTarget = nullptr;
+		CellStruct landing = CellStruct::Empty;
+		int landingDanger = 0;
+		int bestScore = INT_MIN;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type || pBld->Owner != pVictim || !IsEnemyBuildingKnown(pHouse, pBld))
+				continue;
+
+			auto const pType = pBld->Type;
+
+			if (pType->Factory == AbstractType::None && !pType->ConstructionYard && pType->PowerBonus <= 0 && !pType->Refinery
+				&& pType->SuperWeapon == -1)
+			{
+				continue;
+			}
+
+			const CellStruct bc = pBld->GetMapCoords();
+			const double gap = bc.DistanceFrom(front);
+			const int zone = MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pBld->OnBridge);
+
+			if (gap < BackdoorMinGapCells || !IsGroundZone(zone))
+				continue;
+
+			const int guards = CountKnownEnemyDefensesNear(pHouse, bc, BackdoorGuardCells, false);
+			const int score = static_cast<int>(gap) * 10 - guards * 100;
+
+			if (score <= bestScore)
+				continue;
+
+			int danger = 0;
+			const CellStruct here = findLanding(bc, zone, danger);
+
+			if (here == CellStruct::Empty || danger > OpSailDangerLimit)
+				continue;
+
+			pTarget = pBld;
+			landing = here;
+			landingDanger = danger;
+			bestScore = score;
+		}
+
+		if (!pTarget)
+			return;
+
+		// The team: idle armed ground units of the house at home, the nearest to its base first.
+		std::vector<std::pair<double, FootClass*>> idle;
+
+		for (auto const pFoot : FootClass::Array)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || pFoot->InLimbo || !pFoot->IsAlive || pFoot->Transporter)
+				continue;
+
+			const AbstractType kind = pFoot->WhatAmI();
+
+			if (kind != AbstractType::Unit && kind != AbstractType::Infantry)
+				continue;
+
+			auto const pType = pFoot->GetTechnoType();
+			auto const pWeapon = pType ? pType->GetWeapon(0, false).WeaponType : nullptr;
+
+			if (!pWeapon || pWeapon->Damage <= 0 || CrossesWaterAlone(pType) || GetOpCarrier(pFoot) != OpCarrier::None)
+				continue;
+
+			if (auto const pUnitType = abstract_cast<UnitTypeClass*>(pType))
+			{
+				if (pUnitType->Harvester || pUnitType->DeploysInto)
+					continue;
+			}
+
+			if (auto const pInfType = abstract_cast<InfantryTypeClass*>(pType))
+			{
+				if (pInfType->Engineer)
+					continue;
+			}
+
+			const Mission mission = pFoot->CurrentMission;
+
+			if ((mission != Mission::Guard && mission != Mission::Area_Guard && mission != Mission::Sleep) || pFoot->Target
+				|| pFoot->Destination || IsPlanMember(pHouse, pFoot->UniqueID) || IsInTransportOp(pHouse, pFoot->UniqueID))
+			{
+				continue;
+			}
+
+			const CellStruct at = pFoot->GetMapCoords();
+			const double fromHome = at.DistanceFrom(home);
+
+			if (fromHome <= BackdoorHomeCells && OpFootGroundZone(pFoot) == homeZone)
+				idle.push_back({ fromHome, pFoot });
+		}
+
+		if (static_cast<int>(idle.size()) < BackdoorMinTeam)
+			return;
+
+		std::stable_sort(idle.begin(), idle.end(), [](const auto& a, const auto& b)
+			{
+				return a.first < b.first || (a.first == b.first && a.second->UniqueID < b.second->UniqueID);
+			});
+
+		int taken = 0;
+
+		for (auto const& [distance, pFoot] : idle)
+		{
+			if (taken >= BackdoorTeam)
+				break;
+
+			if (RequestStrikeTransport(pHouse, pFoot, landing, pTarget->GetMapCoords()))
+				taken++;
+		}
+
+		if (taken == 0)
+			return;
+
+		macro.BackdoorRetryUntil = now + BackdoorRetryFrames;
+		Debug::Log("[NeuralAI] House %d back door: %d units to %s at (%d,%d) of house %d, landing (%d,%d) danger %d, %d cells from the wave's "
+			"target (%d,%d) with %d defenses, frame %d.\n", pHouse->ArrayIndex, taken, pTarget->Type->ID, pTarget->GetMapCoords().X,
+			pTarget->GetMapCoords().Y, pVictim->ArrayIndex, landing.X, landing.Y, landingDanger,
+			static_cast<int>(pTarget->GetMapCoords().DistanceFrom(front)), front.X, front.Y, frontDefenses, now);
+	}
+
 	// Runs the house's transport operations once per AI tick, after every other part of the tick
 	// has given its orders (the operations have the last word) and before production reads what the
 	// waiting members ask for (OpWaitingSizeBySize). The harvester shuttle client books its rides first.
@@ -3661,7 +3988,10 @@ namespace
 		const int now = Unsorted::CurrentFrame;
 
 		if (TransportOpsEnabled)
+		{
 			UpdateHarvesterShuttles(pHouse);
+			UpdateBackdoor(pHouse);
+		}
 
 		macro.OpWaitingSizeBySize.fill(0);
 		macro.OpWaitingFrame = now;
