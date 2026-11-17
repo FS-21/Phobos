@@ -8143,6 +8143,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// its strength (WaveGroupDamage*); -1 with no army counted lately. Spawners, mind control and
 	// temporal weapons are left out: their damage figure says nothing.
 	std::unordered_map<const BuildingTypeClass*, int> groupDamagePercents;
+	// Where the enemy aircraft rearm counts by the value of the aircraft of his we have seen.
+	const std::array<int, 8> enemyAirValues = EnemyAirValueByOwner(pHouse);
+	int pickAirBaseBonus = 0;
 
 	auto const groupDamagePercent = [&](const BuildingTypeClass* pBldType) -> int
 	{
@@ -8466,6 +8469,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			bldCandScore += 90;
 		}
 
+		const int candAirBaseBonus = AirBaseTargetBonus(enemyAirValues, pEnemyBld, AirBaseWavePercent, AirBaseWaveMost);
+		bldCandScore += candAirBaseBonus;
+
 		// What the group brings down fast comes first, what it barely scratches last.
 		const int candGroupPercent = groupDamagePercent(pEnemyBld->Type);
 
@@ -8515,6 +8521,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pickWayDanger = candWayDanger;
 			pickCutsPower = candCutsPower;
 			pickGroupPercent = candGroupPercent;
+			pickAirBaseBonus = candAirBaseBonus;
 		}
 	}
 
@@ -10462,11 +10469,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				// TEMP diagnostic: what the group does to this target among those it knows.
-				if (pVisibleEnemyBld && pVisibleEnemyBld->GetCell() == pWaveTargetCell && pickGroupPercent >= 0)
+				if (pVisibleEnemyBld && pVisibleEnemyBld->GetCell() == pWaveTargetCell && (pickGroupPercent >= 0 || pickAirBaseBonus > 0))
 				{
 					Debug::Log("[NeuralAI] Frame %d | House #%d wave target %s: group damage %d%% of its strength in 900 frames "
-						"(known targets from %d to %d)\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, pVisibleEnemyBld->Type->ID,
-						pickGroupPercent, leastGroupPercent, mostGroupPercent);
+						"(known targets from %d to %d), air base bonus %d\n", Unsorted::CurrentFrame, pHouse->ArrayIndex,
+						pVisibleEnemyBld->Type->ID, pickGroupPercent, leastGroupPercent, mostGroupPercent, pickAirBaseBonus);
 				}
 
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;
