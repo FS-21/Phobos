@@ -2775,6 +2775,13 @@ namespace
 		return it != blocked.end() && Unsorted::CurrentFrame < it->second;
 	}
 
+	// Meaning version of the output slots whose meaning changed, sent to the trainer in every
+	// telemetry (slotMeanings): a slot whose version grows starts again from zero there, with the
+	// memory of an archetype whose slot it is. Whoever changes what a slot drives bumps its version
+	// here in the same change. 48, 93, 108: archetype 0 became the tank mass and the slots of Feint
+	// and Bait Ambush went to its Reprisal and Clear Our Ground missions (2026-11-16).
+	constexpr std::pair<int, int> NeuralSlotMeanings[] = { { 48, 1 }, { 93, 1 }, { 108, 1 } };
+
 	// Production queues of a type, as ProductionBanUntil keys them: 1 vehicles, 2 infantry, 3 ships,
 	// 4 aircraft, 0 for anything else.
 	int ProductionQueueOf(const TechnoTypeClass* pType)
