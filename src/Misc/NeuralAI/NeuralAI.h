@@ -136,6 +136,7 @@ public:
 	static void OnRevealWarhead(HouseClass* pHouse, const CoordStruct& coords, int radius);
 	static void OnSuperWeaponLaunched(SuperClass* pSuper, const CellStruct& cell);
 	static void OnPathFailure(FootClass* pFoot, const CellStruct& from, const CellStruct& to);
+	static void OnHierarchicalPathFailure(FootClass* pFoot, const CellStruct& from, const CellStruct& to);
 	static bool ShouldSkipPathSearch(const FootClass* pFoot, const CellStruct* pGoal);
 	static void OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller);
 
