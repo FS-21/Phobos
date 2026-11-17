@@ -1688,7 +1688,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		weighed[idx] = true;
 		priorityOf[idx] = priority;
 
-		if (parts[1] > 0 || Unsorted::CurrentFrame - mainCoal.HurtByFrame[idx] <= MainEnemyUrgentFrames)
+		// The engine never clears WhoLastHurtMe, so only a hit of the last MainEnemyUrgentFrames counts.
+		if (Unsorted::CurrentFrame - mainCoal.HurtByFrame[idx] <= MainEnemyUrgentFrames)
 			urgentWhy[idx] = "it hurts us";
 		else if (atOurBase[idx])
 			urgentWhy[idx] = "at our base";
