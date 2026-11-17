@@ -353,6 +353,7 @@ public:
 	std::vector<std::string> Secret_ForbiddenHouses;
 	DWORD RequiredHouses;
 	DWORD ForbiddenHouses;
+	ValueableVector<BuildingTypeClass*> BuiltAt;
 
 	ValueableVector<TechnoTypeClass*> BuildLimitGroup_Types;
 	ValueableVector<int> BuildLimitGroup_Nums;
@@ -904,6 +905,7 @@ public:
 		, Secret_ForbiddenHouses {}
 		, RequiredHouses { 0xFFFFFFFFu }
 		, ForbiddenHouses { 0u }
+		, BuiltAt {}
 
 		, BuildLimitGroup_Types {}
 		, BuildLimitGroup_Nums {}

@@ -1094,13 +1094,26 @@ namespace
 			int Frame { -1 };
 		};
 		std::unordered_map<DWORD, ParkedFerry> ParkedFerries {};
-		// Picks the engine never starts (match #7132 / training: 66000-290000 credits, five war
-		// factories idle for thousands of frames, the AI picking the same type every tick): the pick
-		// of a queue that stays empty 900 frames with money and factories is banned 5400 frames.
-		// Key: queue (1 vehicles, 2 infantry) * 100000 + type index -> frame the ban ends.
+		// Picks that never come out of their factory (WatchUndeliveredPick): the type is banned for a
+		// while and the queue picks the next best one. Key: queue (1 vehicles, 2 infantry, 3 ships,
+		// 4 aircraft) * 100000 + type index -> frame the ban ends.
 		std::map<int, int> ProductionBanUntil {};
 		std::array<int, 3> ProductionPickIdx { -1, -1, -1 };
 		std::array<int, 3> ProductionPickSince { 0, 0, 0 };
+		// Since when each type has been the pick of its queue (a pick left for less than
+		// PickStreakGapFrames keeps its streak) and for how many of those frames the house could pay
+		// for it; same key as ProductionBanUntil.
+		struct PickStreak
+		{
+			int Since { -1 };
+			int LastSeen { -1 };
+			int PaidFrames { 0 };
+		};
+		std::map<int, PickStreak> PickStreaks {};
+		// The last frame an object of each type came out of one of our factories, and how many times
+		// each type was banned this match; same key.
+		std::map<int, int> LastDeliveredFrame {};
+		std::map<int, int> ProductionBanCount {};
 		int FreeFieldAnchorDist { 9999 };
 		int FreeFieldFrame { -100000 };
 		// Last airlift that turned back (damaged carrier or a defended drop zone).
@@ -1300,6 +1313,10 @@ namespace
 		// plan it led into.
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanEndFrame {};
 		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> PlanEndedWell {};
+		// What each plan did this match against each enemy house, as a weight in percent of its
+		// utility (100 at the start, see PlanEnemyWeightMin), and the house each plan last went for.
+		std::array<std::array<int, 32>, static_cast<size_t>(NeuralPlanId::Count)> PlanEnemyWeight {};
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanLastEnemy {};
 		std::map<int, int> SuperReadySinceFrame {};
 
 		// Mobile factories (NeuralAI.MobileFactory.inl): the trip of each packed factory deployer (by
@@ -1540,6 +1557,9 @@ namespace
 			this->ProductionBanUntil.clear();
 			this->ProductionPickIdx = { -1, -1, -1 };
 			this->ProductionPickSince = { 0, 0, 0 };
+			this->PickStreaks.clear();
+			this->LastDeliveredFrame.clear();
+			this->ProductionBanCount.clear();
 			this->FreeFieldAnchorDist = 9999;
 			this->FreeFieldFrame = -100000;
 			this->LastAirDropAbortFrame = -100000;
@@ -1651,6 +1671,11 @@ namespace
 			this->PlanBoostUntilFrame.fill(0);
 			this->PlanEndFrame.fill(0);
 			this->PlanEndedWell.fill(false);
+
+			for (auto& weights : this->PlanEnemyWeight)
+				weights.fill(100);
+
+			this->PlanLastEnemy.fill(-1);
 			this->SuperReadySinceFrame.clear();
 			this->MobileFactoryGoals.clear();
 			this->MobileFactoryStands.clear();
@@ -2325,6 +2350,16 @@ namespace
 	// A raid the gate of startPlan held back is weighed again after this long.
 	constexpr int PlanGateRetryFrames = 900;
 	constexpr int PlanLessonAdvantagePercent = 150;
+	// In-match weight of a plan against an enemy house (PlanEnemyWeight, in percent of the plan's
+	// utility, from 100): a plan that destroyed more than it lost against that house gains
+	// PlanEnemyWeightUpStep, PlanEnemyWeightFallStep when its target fell too; one that failed or
+	// lost more than it destroyed loses PlanEnemyWeightDownStep. A plan that destroyed and lost
+	// nothing (sentries that saw nobody) stays as it was.
+	constexpr int PlanEnemyWeightMin = 50;
+	constexpr int PlanEnemyWeightMax = 200;
+	constexpr int PlanEnemyWeightUpStep = 15;
+	constexpr int PlanEnemyWeightFallStep = 25;
+	constexpr int PlanEnemyWeightDownStep = 20;
 	// A ground strike on a building needs this share of the strength known to guard it (defenses
 	// within PlanStrikeGuardCells, units seen there in the last PlanStrikeGuardFrames).
 	constexpr int PlanStrikeAdvantagePercent = 120;
@@ -2946,7 +2981,34 @@ namespace
 		return it != blocked.end() && Unsorted::CurrentFrame < it->second;
 	}
 
-	// A vehicle (queue 1) or infantry (queue 2) type the engine did not start for 900 frames.
+	// Meaning version of the output slots whose meaning changed, sent to the trainer in every
+	// telemetry (slotMeanings): a slot whose version grows starts again from zero there, with the
+	// memory of an archetype whose slot it is. Whoever changes what a slot drives bumps its version
+	// here in the same change. 48, 93, 108: archetype 0 became the tank mass and the slots of Feint
+	// and Bait Ambush went to its Reprisal and Clear Our Ground missions (2026-11-16).
+	constexpr std::pair<int, int> NeuralSlotMeanings[] = { { 48, 1 }, { 93, 1 }, { 108, 1 } };
+
+	// Production queues of a type, as ProductionBanUntil keys them: 1 vehicles, 2 infantry, 3 ships,
+	// 4 aircraft, 0 for anything else.
+	int ProductionQueueOf(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return 0;
+
+		switch (pType->WhatAmI())
+		{
+		case AbstractType::UnitType:
+			return static_cast<const UnitTypeClass*>(pType)->Naval ? 3 : 1;
+		case AbstractType::InfantryType:
+			return 2;
+		case AbstractType::AircraftType:
+			return 4;
+		default:
+			return 0;
+		}
+	}
+
+	// A type banned by WatchUndeliveredPick (queue as in ProductionQueueOf).
 	bool IsProductionBanned(const HouseClass* pHouse, int queue, int typeIndex)
 	{
 		auto const& bans = GetMacroState(pHouse).ProductionBanUntil;

@@ -2074,6 +2074,51 @@ namespace
 				houseLesson.Frame = Unsorted::CurrentFrame;
 			}
 
+			// What the plan did against the house it went for weighs its next starts this match
+			// (PlanEnemyWeight): judged by the value it destroyed and lost, and whether its target fell.
+			const bool enemyTarget = plan.TargetOwner >= 0 && plan.TargetOwner < 32 && plan.TargetOwner != houseIdx;
+
+			if (const int enemy = enemyTarget ? plan.TargetOwner : pHouse->EnemyHouseIndex; enemy >= 0 && enemy < 32)
+			{
+				bool targetFell = false;
+
+				if (enemyTarget && plan.TargetID != 0)
+				{
+					targetFell = true;
+
+					for (auto const pTech : TechnoClass::Array)
+					{
+						if (pTech && pTech->UniqueID == plan.TargetID)
+						{
+							targetFell = !pTech->IsAlive;
+							break;
+						}
+					}
+				}
+
+				const int lost = std::max(0, plan.InitialValue - memberValue(plan));
+				const int destroyed = plan.KillValue;
+				int& weight = macro.PlanEnemyWeight[static_cast<size_t>(id)][enemy];
+				const int before = weight;
+
+				if (targetFell)
+					weight += PlanEnemyWeightFallStep;
+				else if (success && destroyed > lost)
+					weight += PlanEnemyWeightUpStep;
+				else if (!success || lost > destroyed)
+					weight -= PlanEnemyWeightDownStep;
+
+				weight = std::clamp(weight, PlanEnemyWeightMin, PlanEnemyWeightMax);
+				macro.PlanLastEnemy[static_cast<size_t>(id)] = enemy;
+
+				if (weight != before)
+				{
+					Debug::Log("[NeuralAI] House %d plan %s against house %d: weight %d -> %d (destroyed %d, lost %d, target fell %d), frame %d.\n",
+						houseIdx, NeuralPlanNames[static_cast<size_t>(id)], enemy, before, weight, destroyed, lost, targetFell ? 1 : 0,
+						Unsorted::CurrentFrame);
+				}
+			}
+
 			CountPlanOutcome(houseIdx, id, success ? NeuralPlanOutcome::Succeeded : NeuralPlanOutcome::Failed);
 
 			if (!success && Unsorted::CurrentFrame >= plan.Deadline)
@@ -2160,8 +2205,14 @@ namespace
 			const int advantage = contextUtility > 0 ? MainAssaultAdvantageUtility(houseIdx, id) + OffensiveBankPlanUtility(pHouse, id) : 0;
 			// The plan priorities of this house's archetype (ArchetypePlanOffset).
 			const int archetypeOffset = contextUtility > 0 ? ArchetypePlanOffset(HouseExt::Fetch(pHouse)->NeuralAI_Archetype, id) : 0;
+			// What this plan did this match against the house it last went for (the main enemy
+			// before its first end) scales its utility (PlanEnemyWeight).
+			const int weightEnemy = macro.PlanLastEnemy[i] >= 0 ? macro.PlanLastEnemy[i] : pHouse->EnemyHouseIndex;
+			const int weightedUtility = (contextUtility > 0 && weightEnemy >= 0 && weightEnemy < 32)
+				? contextUtility * macro.PlanEnemyWeight[i][weightEnemy] / 100
+				: contextUtility;
 
-			bool open = SlotGate(static_cast<int>(scores[slot]) + contextUtility + (contextUtility > 0 ? boost : 0) + advantage
+			bool open = SlotGate(static_cast<int>(scores[slot]) + weightedUtility + (contextUtility > 0 ? boost : 0) + advantage
 				+ archetypeOffset, 300, slot);
 
 			// Training focus: the plans the trainer asked to watch start whenever they have a target
