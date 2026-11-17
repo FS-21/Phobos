@@ -207,39 +207,6 @@ namespace NeuralFactoryQueue
 		}
 	}
 
-	BuildingClass* FindDesignated(HouseClass* pOwner, AbstractType kind, bool naval)
-	{
-		// Only an aircraft that must land on a dock needs an air base with a free one.
-		const int aircraftIndex = pOwner->ProducingAircraftTypeIndex;
-		auto const pAircraftType = aircraftIndex >= 0 ? AircraftTypeClass::Array.GetItem(aircraftIndex) : nullptr;
-		const bool needsFreeDock = !pAircraftType || pAircraftType->AirportBound;
-		BuildingClass* pFallback = nullptr;
-
-		for (auto const pBld : pOwner->Buildings)
-		{
-			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Factory != kind || pBld->Type->Naval != naval
-				|| pBld->IsUnderEMP() || pBld->Deactivated || pBld->CurrentMission == Mission::Selling
-				|| pBld->QueuedMission == Mission::Selling || pBld->CurrentMission == Mission::Construction)
-			{
-				continue;
-			}
-
-			if (kind == AbstractType::AircraftType && needsFreeDock && !BuildingExt::HasFreeDocks(pBld))
-				continue;
-
-			if (pBld->IsPrimaryFactory)
-				return pBld;
-
-			if (!pFallback)
-				pFallback = pBld;
-		}
-
-		if (pFallback)
-			pFallback->IsPrimaryFactory = true;
-
-		return pFallback;
-	}
-
 	// The type the house wants next from this queue.
 	TechnoTypeClass* NextType(HouseClass* pOwner, AbstractType kind, bool naval)
 	{
@@ -263,6 +230,49 @@ namespace NeuralFactoryQueue
 			return nullptr;
 		}
 	}
+
+	BuildingClass* FindDesignated(HouseClass* pOwner, AbstractType kind, bool naval)
+	{
+		// Only an aircraft that must land on a dock needs an air base with a free one.
+		const int aircraftIndex = pOwner->ProducingAircraftTypeIndex;
+		auto const pAircraftType = aircraftIndex >= 0 ? AircraftTypeClass::Array.GetItem(aircraftIndex) : nullptr;
+		const bool needsFreeDock = !pAircraftType || pAircraftType->AirportBound;
+		// The wanted type's BuiltAt (Ares) names the factory types that may build it: while it is the
+		// pick only those take the queue, the primary first, and none of them is made primary for it
+		// (a Nod house whose primary war factory was not in the Venom's BuiltAt asked for it there for
+		// the whole match and was refused every time).
+		auto const pWanted = NextType(pOwner, kind, naval);
+		auto const pWantedExt = pWanted ? TechnoTypeExt::Fetch(pWanted) : nullptr;
+		auto const pBuiltAt = (pWantedExt && !pWantedExt->BuiltAt.empty()) ? &pWantedExt->BuiltAt : nullptr;
+		BuildingClass* pFallback = nullptr;
+
+		for (auto const pBld : pOwner->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Factory != kind || pBld->Type->Naval != naval
+				|| pBld->IsUnderEMP() || pBld->Deactivated || pBld->CurrentMission == Mission::Selling
+				|| pBld->QueuedMission == Mission::Selling || pBld->CurrentMission == Mission::Construction)
+			{
+				continue;
+			}
+
+			if (kind == AbstractType::AircraftType && needsFreeDock && !BuildingExt::HasFreeDocks(pBld))
+				continue;
+
+			if (pBuiltAt && !pBuiltAt->Contains(pBld->Type))
+				continue;
+
+			if (pBld->IsPrimaryFactory)
+				return pBld;
+
+			if (!pFallback)
+				pFallback = pBld;
+		}
+
+		if (pFallback && !pBuiltAt)
+			pFallback->IsPrimaryFactory = true;
+
+		return pFallback;
+	}
 }
 
 // Without parallel AI queues one factory per queue builds, and every extension that enforces it
@@ -279,6 +289,32 @@ DEFINE_HOOK(0x450292, BuildingClass_Update_Factory_NeuralDesignated, 0x6)
 	GET(BuildingClass*, pThis, ESI);
 
 	auto const pOwner = pThis->Owner;
+
+	// TEMP diagnostic: a suspended production the engine abandons right after this (0x4502D1). Half
+	// of the Venoms of the CABAL houses ended so (match #10785: 7 abandoned, 7 fielded); the
+	// suspension means no factory had power for it (HouseExt::HasFactory with requirePower).
+	if (auto const pFactory = pThis->Factory; pFactory && pFactory->IsSuspended && pFactory->Object && pOwner
+		&& pThis->FactoryRetryTimer.GetTimeLeft() == 0 && NeuralAI::IsEnabledForHouse(pOwner))
+	{
+		static int logFrame = 0;
+		static int logCount = 0;
+
+		if (Unsorted::CurrentFrame < logFrame)
+			logCount = 0;
+
+		logFrame = Unsorted::CurrentFrame;
+
+		if (logCount++ < 40)
+		{
+			auto const pType = pFactory->Object->GetTechnoType();
+			auto const pAny = pType->FindFactory(true, false, true, pOwner);
+			auto const pPowered = pType->FindFactory(true, true, true, pOwner);
+			Debug::Log("[NeuralAI] House %d production DIAG: %s suspended in %s and abandoned (done %d, factory power %d, deactivated %d, "
+				"house power %d of %d), factory any %s powered %s, frame %d.\n", pOwner->ArrayIndex, pType->ID, pThis->Type->ID,
+				pFactory->IsDone() ? 1 : 0, pThis->HasPower ? 1 : 0, pThis->Deactivated ? 1 : 0, pOwner->PowerOutput, pOwner->PowerDrain,
+				pAny ? pAny->Type->ID : "none", pPowered ? pPowered->Type->ID : "none", Unsorted::CurrentFrame);
+		}
+	}
 
 	if (pThis->Factory || !pOwner || !pOwner->Production || RulesExt::Global()->AllowParallelAIQueues
 		|| !NeuralAI::IsEnabledForHouse(pOwner))

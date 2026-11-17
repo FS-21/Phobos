@@ -84,6 +84,24 @@ namespace
 		bool Charging { false };
 	};
 
+	// A barracks built next to a tech so that engineers walk to it (UpdateCaptureBarracks): its land and
+	// the tech it was built for.
+	struct NeuralCaptureBarracks
+	{
+		DWORD ID { 0 };
+		int Zone { -1 };
+		CellStruct TechCell { CellStruct::Empty };
+	};
+
+	// A land where placement found no cell for a capture barracks: how often, and until when no site
+	// there asks for one.
+	struct NeuralCaptureNoRoom
+	{
+		int Zone { -1 };
+		int Count { 0 };
+		int UntilFrame { -1 };
+	};
+
 	struct NeuralSpecOpsState
 	{
 		int MatchSerial { -1 };
@@ -116,6 +134,30 @@ namespace
 		// (key access only; orders go out in UnitClass / InfantryClass array order).
 		std::unordered_map<DWORD, NeuralSneakStrike> SneakStrikes {};
 		int LastSneakFrame { -1 };
+		// Capture barracks (UpdateCaptureBarracks): the tech the next barracks goes next to, on a land
+		// with buildings of ours and no barracks of ours (ID 0: none), and whether it is urgent.
+		DWORD CaptureSiteTechID { 0 };
+		CellStruct CaptureSiteCell { CellStruct::Empty };
+		int CaptureSiteZone { -1 };
+		bool CaptureSiteUrgent { false };
+		std::vector<NeuralCaptureNoRoom> CaptureNoRoom {};
+		// A barracks was placed for a site on this land (-1: none): the first barracks of ours standing
+		// there is that site's capture barracks.
+		int CapturePlacedZone { -1 };
+		CellStruct CapturePlacedTechCell { CellStruct::Empty };
+		int CapturePlacedFrame { -1 };
+		std::vector<NeuralCaptureBarracks> CaptureBarracks {};
+		// The barracks of ours the next engineer is trained at (Empty: the usual choice), and its tech.
+		CellStruct CaptureEngineerCell { CellStruct::Empty };
+		DWORD CaptureEngineerTechID { 0 };
+		// The last engineer in training logged as trained there.
+		DWORD CaptureRoutedObjectID { 0 };
+		// Results this match (logs): capture barracks standing, engineers trained for the land of
+		// their tech, captures on the land of a capture barracks.
+		int CaptureBarracksBuilt { 0 };
+		int CaptureEngineersRouted { 0 };
+		int CaptureBarracksCaptures { 0 };
+		int CaptureLogLines { 0 };
 	};
 
 	std::array<NeuralSpecOpsState, 32> SpecOpsStates {};
@@ -584,6 +626,25 @@ namespace
 					Debug::Log("[NeuralAI] House %d SpecOps: captured %s at (%d,%d), frame %d (captures %d).\n",
 						pHouse->ArrayIndex, pBld->Type->ID, cell.X, cell.Y, now, state.CaptureCount);
 
+					// A capture on the land of a barracks built for its techs (UpdateCaptureBarracks).
+					for (auto const& entry : state.CaptureBarracks)
+					{
+						auto const pBarracks = FindBuildingByID(entry.ID);
+
+						if (!pBarracks || !pBarracks->IsAlive || pBarracks->Owner != pHouse
+							|| std::find(pTech->Zones.begin(), pTech->Zones.end(), entry.Zone) == pTech->Zones.end())
+						{
+							continue;
+						}
+
+						const CellStruct barracksCell = pBarracks->GetMapCoords();
+						state.CaptureBarracksCaptures++;
+						Debug::Log("[NeuralAI] House %d capture barracks: captured %s at (%d,%d) on land %d, the capture barracks at (%d,%d) %d cells away, "
+							"frame %d (captures there %d).\n", pHouse->ArrayIndex, pBld->Type->ID, cell.X, cell.Y, entry.Zone, barracksCell.X,
+							barracksCell.Y, static_cast<int>(barracksCell.DistanceFrom(cell)), now, state.CaptureBarracksCaptures);
+						break;
+					}
+
 					// TEMP diagnostic: what a captured secret lab unlocks and whether the house may build it.
 					if (pBld->Type->SecretLab)
 					{
@@ -1038,6 +1099,365 @@ namespace
 		}
 	}
 
+	// The ground danger map of the crossings (NeuralAI.Operations.inl).
+	struct OpDangerMap;
+	const OpDangerMap& GetOpDangerMap(HouseClass* pHouse, bool airborne);
+	int OpLineCost(const OpDangerMap& map, const CellStruct& from, const CellStruct& to, int& danger);
+
+	bool CanLogCaptureBarracks(NeuralSpecOpsState& state)
+	{
+		return state.CaptureLogLines++ < CaptureBarracksLogLines;
+	}
+
+	// Capture barracks (CaptureCrossingDangerLimit), on each tech memory scan: the barracks placed for a
+	// site once it stands, the site of the next one, and the barracks of ours the next engineer is
+	// trained at. Fog-fair: the techs as this house last saw them, our own buildings and engineers.
+	void UpdateCaptureBarracks(HouseClass* pHouse, NeuralSpecOpsState& state)
+	{
+		const int now = Unsorted::CurrentFrame;
+		// Our barracks and the buildings we can build next to, each with its land.
+		std::vector<std::pair<CellStruct, int>> barracks;
+		std::vector<std::pair<CellStruct, int>> anchors;
+
+		// A barracks placed for a site that never stood (lost while it went up) is forgotten.
+		if (state.CapturePlacedZone >= 0 && now - state.CapturePlacedFrame > CaptureBarracksNoRoomFrames)
+			state.CapturePlacedZone = -1;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->InvisibleInGame
+				|| pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
+			{
+				continue;
+			}
+
+			const int zone = BuildingGroundZone(pBld);
+
+			if (!IsGroundZone(zone))
+				continue;
+
+			const CellStruct cell = pBld->GetMapCoords();
+
+			if (pBld->Type->Factory == AbstractType::InfantryType && !pBld->Type->Naval)
+			{
+				barracks.emplace_back(cell, zone);
+
+				// The barracks placed for a site stands: it is the capture barracks of that land.
+				if (zone == state.CapturePlacedZone)
+				{
+					state.CaptureBarracks.push_back({ pBld->UniqueID, zone, state.CapturePlacedTechCell });
+					state.CaptureBarracksBuilt++;
+					state.CapturePlacedZone = -1;
+					Debug::Log("[NeuralAI] House %d capture barracks: %s stands at (%d,%d) on land %d, %d cells from the tech at (%d,%d), frame %d "
+						"(capture barracks %d).\n", pHouse->ArrayIndex, pBld->Type->ID, cell.X, cell.Y, zone,
+						static_cast<int>(cell.DistanceFrom(state.CapturePlacedTechCell)), state.CapturePlacedTechCell.X,
+						state.CapturePlacedTechCell.Y, now, state.CaptureBarracksBuilt);
+				}
+			}
+
+			if (pBld->Type->BaseNormal || pBld->Type->ConstructionYard || BuildingTypeExt::IsAIBaseNormal(pBld->Type))
+				anchors.emplace_back(cell, zone);
+		}
+
+		std::erase_if(state.CaptureBarracks, [pHouse](const NeuralCaptureBarracks& entry)
+			{
+				auto const pBarracks = FindBuildingByID(entry.ID);
+
+				return !pBarracks || !pBarracks->IsAlive || pBarracks->Owner != pHouse;
+			});
+
+		// The lands an engineer of ours stands on, and the buildings our engineers are on their way into.
+		std::vector<int> engineerZones;
+		std::vector<const AbstractClass*> engineerGoals;
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || !pInf->Type || !pInf->Type->Engineer)
+				continue;
+
+			if (pInf->Destination)
+				engineerGoals.push_back(pInf->Destination);
+
+			if (pInf->InLimbo)
+				continue;
+
+			const int zone = ObjectZone(pInf, MovementZone::Normal);
+
+			if (IsGroundZone(zone) && std::find(engineerZones.begin(), engineerZones.end(), zone) == engineerZones.end())
+				engineerZones.push_back(zone);
+		}
+
+		// Nearest entry of a list on a land to a cell (INT_MAX: none there).
+		auto const nearestOn = [](const std::vector<std::pair<CellStruct, int>>& list, int zone, const CellStruct& cell, CellStruct* pAt)
+		{
+			int best = INT_MAX;
+
+			for (auto const& [at, atZone] : list)
+			{
+				const int distance = static_cast<int>(at.DistanceFrom(cell));
+
+				if (atZone == zone && distance < best)
+				{
+					best = distance;
+
+					if (pAt)
+						*pAt = at;
+				}
+			}
+
+			return best;
+		};
+
+		auto const pExt = HouseExt::Fetch(pHouse);
+		const int expert = pExt ? pExt->NeuralAI_ActiveExpert : -1;
+		const OpDangerMap* pDangerMap = nullptr;
+
+		const NeuralKnownTech* pSite = nullptr;
+		BuildingClass* pSiteBld = nullptr;
+		int siteZone = -1;
+		int siteScore = 0;
+		bool siteUrgent = false;
+		int siteDanger = 0;
+		int siteWalk = 0;
+
+		const NeuralKnownTech* pGoal = nullptr;
+		CellStruct goalCell = CellStruct::Empty;
+		int goalScore = 0;
+
+		for (auto const& tech : state.Techs)
+		{
+			if (!state.EngineerType || barracks.empty())
+				break;
+
+			if (tech.OwnerIndex == pHouse->ArrayIndex)
+				continue;
+
+			auto const pOwner = (tech.OwnerIndex >= 0 && tech.OwnerIndex < HouseClass::Array.Count)
+				? HouseClass::Array.GetItem(tech.OwnerIndex)
+				: nullptr;
+			const bool enemyHeld = tech.OwnerIndex >= 0;
+
+			if ((enemyHeld && (!pOwner || pHouse->IsAlliedWith(pOwner))) || (!enemyHeld && IsTechClaimedByAlly(pHouse, tech.ID))
+				|| IsCellInKnownEnemyDefenseReach(pHouse, tech.Cell, 2))
+			{
+				continue;
+			}
+
+			auto const pTechBld = FindBuildingByID(tech.ID);
+
+			if (!pTechBld || !pTechBld->IsAlive || pTechBld->InLimbo || !pTechBld->Type)
+				continue;
+
+			const int worth = tech.Value * ((enemyHeld && tech.Cash) ? 2 : 1);
+			int barracksZone = -1;
+			CellStruct barracksCell = CellStruct::Empty;
+			int barracksDist = INT_MAX;
+
+			for (const int zone : tech.Zones)
+			{
+				CellStruct at = CellStruct::Empty;
+				const int distance = IsGroundZone(zone) ? nearestOn(barracks, zone, tech.Cell, &at) : INT_MAX;
+
+				if (distance < barracksDist)
+				{
+					barracksDist = distance;
+					barracksZone = zone;
+					barracksCell = at;
+				}
+			}
+
+			if (barracksZone < 0)
+			{
+				// No barracks of ours on its land: a site where we can build next to our buildings there,
+				// unless that land had no room for one lately.
+				int walk = INT_MAX;
+				int walkZone = -1;
+
+				for (const int zone : tech.Zones)
+				{
+					const bool noRoom = std::any_of(state.CaptureNoRoom.begin(), state.CaptureNoRoom.end(),
+						[zone, now](const NeuralCaptureNoRoom& entry) { return entry.Zone == zone && now < entry.UntilFrame; });
+					const int distance = (IsGroundZone(zone) && !noRoom) ? nearestOn(anchors, zone, tech.Cell, nullptr) : INT_MAX;
+
+					if (distance < walk)
+					{
+						walk = distance;
+						walkZone = zone;
+					}
+				}
+
+				if (walkZone < 0)
+					continue;
+
+				// The straight crossing from our nearest barracks, all of them on other lands.
+				int danger = 0;
+
+				if (tech.Failures == 0)
+				{
+					CellStruct from = barracks.front().first;
+
+					for (auto const& [at, atZone] : barracks)
+					{
+						if (at.DistanceFrom(tech.Cell) < from.DistanceFrom(tech.Cell))
+							from = at;
+					}
+
+					if (!pDangerMap)
+						pDangerMap = &GetOpDangerMap(pHouse, false);
+
+					OpLineCost(*pDangerMap, from, tech.Cell, danger);
+				}
+
+				const bool urgent = tech.Failures > 0 || danger > CaptureCrossingDangerLimit;
+				const int score = worth * 1000 / (walk + 12);
+
+				if (!pSite || (urgent && !siteUrgent) || (urgent == siteUrgent && score > siteScore))
+				{
+					pSite = &tech;
+					pSiteBld = pTechBld;
+					siteZone = walkZone;
+					siteScore = score;
+					siteUrgent = urgent;
+					siteDanger = danger;
+					siteWalk = walk;
+				}
+
+				continue;
+			}
+
+			// A barracks of ours on its land: the next engineer may be trained there for it, when the
+			// engineer can take it (an enemy-held tech only Expert 4 goes for, or the resource hoarder for
+			// its cash), no engineer of ours stands on that land or goes into it, and it is not blocked
+			// by recent failures.
+			const bool takenByUs = std::find(engineerGoals.begin(), engineerGoals.end(), static_cast<const AbstractClass*>(pTechBld))
+				!= engineerGoals.end() || IsSpecOpsCaptureTarget(pHouse, tech.ID, 0);
+			const bool covered = std::any_of(tech.Zones.begin(), tech.Zones.end(), [&engineerZones](int zone)
+				{
+					return IsGroundZone(zone) && std::find(engineerZones.begin(), engineerZones.end(), zone) != engineerZones.end();
+				});
+			const bool takable = !enemyHeld || expert == 4 || (expert == 6 && tech.Cash);
+
+			if (takenByUs || covered || !takable || tech.Walled || now < tech.BlockedUntilFrame)
+				continue;
+
+			const int score = worth * 1000 / (barracksDist + 12);
+
+			if (!pGoal || score > goalScore)
+			{
+				pGoal = &tech;
+				goalCell = barracksCell;
+				goalScore = score;
+			}
+		}
+
+		const DWORD previousSite = state.CaptureSiteTechID;
+		state.CaptureSiteTechID = pSite ? pSite->ID : 0;
+		state.CaptureSiteCell = pSite ? pSite->Cell : CellStruct::Empty;
+		state.CaptureSiteZone = pSite ? siteZone : -1;
+		state.CaptureSiteUrgent = pSite && siteUrgent;
+
+		if (pSite && pSite->ID != previousSite && CanLogCaptureBarracks(state))
+		{
+			Debug::Log("[NeuralAI] House %d capture barracks: site %s at (%d,%d) on land %d (owner %d), %s (failures %d, crossing danger %d), "
+				"our nearest building there %d cells away, frame %d.\n", pHouse->ArrayIndex, pSiteBld->Type->ID, pSite->Cell.X, pSite->Cell.Y,
+				siteZone, pSite->OwnerIndex, siteUrgent ? "urgent" : "not urgent", pSite->Failures, siteDanger, siteWalk, now);
+		}
+
+		state.CaptureEngineerCell = pGoal ? goalCell : CellStruct::Empty;
+		state.CaptureEngineerTechID = pGoal ? pGoal->ID : 0;
+	}
+
+	// A capture site waits for its barracks.
+	bool IsCaptureSiteWaiting(HouseClass* pHouse)
+	{
+		return pHouse && GetSpecOpsState(pHouse).CaptureSiteTechID != 0;
+	}
+
+	// A barracks of this type goes to the capture site now (placement).
+	bool CaptureBarracksWants(HouseClass* pHouse, const BuildingTypeClass* pType)
+	{
+		return pType && pType->Factory == AbstractType::InfantryType && !pType->Naval && IsCaptureSiteWaiting(pHouse);
+	}
+
+	bool IsCaptureSiteUrgent(HouseClass* pHouse)
+	{
+		return GetSpecOpsState(pHouse).CaptureSiteUrgent;
+	}
+
+	// Where placement put a barracks the capture site wanted (Empty: no cell on the site's land, which
+	// then waits CaptureBarracksNoRoomFrames, longer each time up to CaptureBarracksNoRoomSteps times as
+	// long). The site is cleared at once: the next pick asks for no second barracks there, and a barracks
+	// with no room there goes where any other would.
+	void NoteCaptureBarracksPlacement(HouseClass* pHouse, const BuildingTypeClass* pType, const CellStruct& cell)
+	{
+		auto& state = GetSpecOpsState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (cell == CellStruct::Empty)
+		{
+			auto it = std::find_if(state.CaptureNoRoom.begin(), state.CaptureNoRoom.end(),
+				[&state](const NeuralCaptureNoRoom& entry) { return entry.Zone == state.CaptureSiteZone; });
+
+			if (it == state.CaptureNoRoom.end())
+				it = state.CaptureNoRoom.insert(state.CaptureNoRoom.end(), NeuralCaptureNoRoom { state.CaptureSiteZone, 0, -1 });
+
+			it->Count++;
+			it->UntilFrame = now + CaptureBarracksNoRoomFrames * std::min(it->Count, CaptureBarracksNoRoomSteps);
+
+			if (CanLogCaptureBarracks(state))
+			{
+				Debug::Log("[NeuralAI] House %d capture barracks: no room for %s on land %d near the tech at (%d,%d) (time %d), frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, state.CaptureSiteZone, state.CaptureSiteCell.X, state.CaptureSiteCell.Y, it->Count, now);
+			}
+		}
+		else
+		{
+			state.CapturePlacedZone = state.CaptureSiteZone;
+			state.CapturePlacedTechCell = state.CaptureSiteCell;
+			state.CapturePlacedFrame = now;
+			Debug::Log("[NeuralAI] House %d capture barracks: %s placed at (%d,%d), %d cells from the tech at (%d,%d) on land %d, %s, frame %d.\n",
+				pHouse->ArrayIndex, pType->ID, cell.X, cell.Y, static_cast<int>(cell.DistanceFrom(state.CaptureSiteCell)), state.CaptureSiteCell.X,
+				state.CaptureSiteCell.Y, state.CaptureSiteZone, state.CaptureSiteUrgent ? "urgent" : "not urgent", now);
+		}
+
+		state.CaptureSiteTechID = 0;
+		state.CaptureSiteCell = CellStruct::Empty;
+		state.CaptureSiteZone = -1;
+		state.CaptureSiteUrgent = false;
+	}
+
+	// The barracks of ours the engineer in training comes out of (Empty: the usual choice).
+	CellStruct CaptureEngineerGoal(HouseClass* pHouse)
+	{
+		return GetSpecOpsState(pHouse).CaptureEngineerCell;
+	}
+
+	// An engineer in training was given the barracks on its tech's land (logged once per engineer).
+	void NoteCaptureEngineerRouted(HouseClass* pHouse, const TechnoClass* pEngineer, const BuildingClass* pBarracks)
+	{
+		auto& state = GetSpecOpsState(pHouse);
+
+		if (!pEngineer || !pBarracks || pEngineer->UniqueID == state.CaptureRoutedObjectID)
+			return;
+
+		state.CaptureRoutedObjectID = pEngineer->UniqueID;
+		state.CaptureEngineersRouted++;
+		auto const pTechBld = FindBuildingByID(state.CaptureEngineerTechID);
+		const CellStruct barracksCell = pBarracks->GetMapCoords();
+		const bool captureBarracks = std::any_of(state.CaptureBarracks.begin(), state.CaptureBarracks.end(),
+			[pBarracks](const NeuralCaptureBarracks& entry) { return entry.ID == pBarracks->UniqueID; });
+
+		if (CanLogCaptureBarracks(state))
+		{
+			Debug::Log("[NeuralAI] House %d capture barracks: engineer %u trained at %s (%d,%d)%s for %s at (%d,%d), %d cells away, frame %d "
+				"(engineers %d).\n", pHouse->ArrayIndex, pEngineer->UniqueID, pBarracks->Type->ID, barracksCell.X, barracksCell.Y,
+				captureBarracks ? ", a capture barracks," : "", pTechBld && pTechBld->Type ? pTechBld->Type->ID : "?",
+				pTechBld ? pTechBld->GetMapCoords().X : -1, pTechBld ? pTechBld->GetMapCoords().Y : -1,
+				pTechBld ? static_cast<int>(barracksCell.DistanceFrom(pTechBld->GetMapCoords())) : -1, Unsorted::CurrentFrame,
+				state.CaptureEngineersRouted);
+		}
+	}
+
 	bool UpdateSpecOpsBreach(HouseClass* pHouse, NeuralSpecOpsState& state, NeuralSpecOpsCapture& capture, BuildingClass* pTarget, int now);
 	void ReleaseSpecOpsBreachers(HouseClass* pHouse, const NeuralSpecOpsCapture& capture);
 
@@ -1168,6 +1588,8 @@ namespace
 			opportunity += state.BridgeDemolitionTask ? 200 : 0;
 			opportunity += state.Captures.empty() ? 0 : 160;
 			state.Opportunity = std::min(780, opportunity);
+
+			UpdateCaptureBarracks(pHouse, state);
 		}
 
 		// Captures upkeep.
