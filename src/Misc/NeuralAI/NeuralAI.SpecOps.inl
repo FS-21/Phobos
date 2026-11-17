@@ -84,11 +84,13 @@ namespace
 		bool Charging { false };
 	};
 
-	// A barracks built next to a tech so that engineers walk to it (UpdateCaptureBarracks): its land and
-	// the tech it was built for.
+	// A barracks built next to a tech so that engineers walk to it (UpdateCaptureBarracks): where it stood,
+	// its land and the tech it was built for. Kept after its loss: an engineer it trained may still
+	// capture.
 	struct NeuralCaptureBarracks
 	{
 		DWORD ID { 0 };
+		CellStruct Cell { CellStruct::Empty };
 		int Zone { -1 };
 		CellStruct TechCell { CellStruct::Empty };
 	};
@@ -112,8 +114,10 @@ namespace
 		bool MapTechsKnown { false };
 		std::vector<NeuralSpecOpsCapture> Captures {};
 		std::vector<NeuralSpecOpsSpy> Spies {};
-		// Opportunity summary of the last scan.
+		// Opportunity summary of the last scan: the engineer type (Engineer=yes: bridges and captures)
+		// and the type that captures, an engineer or else one that captures by its weapon.
 		InfantryTypeClass* EngineerType { nullptr };
+		InfantryTypeClass* CaptureType { nullptr };
 		bool SpyAvailable { false };
 		int KnownNeutralTechs { 0 };
 		int KnownNeutralCash { 0 };
@@ -626,22 +630,19 @@ namespace
 					Debug::Log("[NeuralAI] House %d SpecOps: captured %s at (%d,%d), frame %d (captures %d).\n",
 						pHouse->ArrayIndex, pBld->Type->ID, cell.X, cell.Y, now, state.CaptureCount);
 
-					// A capture on the land of a barracks built for its techs (UpdateCaptureBarracks).
+					// A capture on the land of a barracks built for its techs (UpdateCaptureBarracks), standing
+					// or lost since.
 					for (auto const& entry : state.CaptureBarracks)
 					{
-						auto const pBarracks = FindBuildingByID(entry.ID);
-
-						if (!pBarracks || !pBarracks->IsAlive || pBarracks->Owner != pHouse
-							|| std::find(pTech->Zones.begin(), pTech->Zones.end(), entry.Zone) == pTech->Zones.end())
-						{
+						if (std::find(pTech->Zones.begin(), pTech->Zones.end(), entry.Zone) == pTech->Zones.end())
 							continue;
-						}
 
-						const CellStruct barracksCell = pBarracks->GetMapCoords();
+						auto const pBarracks = FindBuildingByID(entry.ID);
+						const bool standing = pBarracks && pBarracks->IsAlive && pBarracks->Owner == pHouse;
 						state.CaptureBarracksCaptures++;
-						Debug::Log("[NeuralAI] House %d capture barracks: captured %s at (%d,%d) on land %d, the capture barracks at (%d,%d) %d cells away, "
-							"frame %d (captures there %d).\n", pHouse->ArrayIndex, pBld->Type->ID, cell.X, cell.Y, entry.Zone, barracksCell.X,
-							barracksCell.Y, static_cast<int>(barracksCell.DistanceFrom(cell)), now, state.CaptureBarracksCaptures);
+						Debug::Log("[NeuralAI] House %d capture barracks: captured %s at (%d,%d) on land %d, the capture barracks at (%d,%d)%s %d cells away, "
+							"frame %d (captures there %d).\n", pHouse->ArrayIndex, pBld->Type->ID, cell.X, cell.Y, entry.Zone, entry.Cell.X,
+							entry.Cell.Y, standing ? "" : " (lost)", static_cast<int>(entry.Cell.DistanceFrom(cell)), now, state.CaptureBarracksCaptures);
 						break;
 					}
 
@@ -1145,7 +1146,7 @@ namespace
 				// The barracks placed for a site stands: it is the capture barracks of that land.
 				if (zone == state.CapturePlacedZone)
 				{
-					state.CaptureBarracks.push_back({ pBld->UniqueID, zone, state.CapturePlacedTechCell });
+					state.CaptureBarracks.push_back({ pBld->UniqueID, cell, zone, state.CapturePlacedTechCell });
 					state.CaptureBarracksBuilt++;
 					state.CapturePlacedZone = -1;
 					Debug::Log("[NeuralAI] House %d capture barracks: %s stands at (%d,%d) on land %d, %d cells from the tech at (%d,%d), frame %d "
@@ -1159,20 +1160,13 @@ namespace
 				anchors.emplace_back(cell, zone);
 		}
 
-		std::erase_if(state.CaptureBarracks, [pHouse](const NeuralCaptureBarracks& entry)
-			{
-				auto const pBarracks = FindBuildingByID(entry.ID);
-
-				return !pBarracks || !pBarracks->IsAlive || pBarracks->Owner != pHouse;
-			});
-
 		// The lands an engineer of ours stands on, and the buildings our engineers are on their way into.
 		std::vector<int> engineerZones;
 		std::vector<const AbstractClass*> engineerGoals;
 
 		for (auto const pInf : InfantryClass::Array)
 		{
-			if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || !pInf->Type || !pInf->Type->Engineer)
+			if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || !IsCaptureInfantryType(pInf->Type))
 				continue;
 
 			if (pInf->Destination)
@@ -1226,7 +1220,7 @@ namespace
 
 		for (auto const& tech : state.Techs)
 		{
-			if (!state.EngineerType || barracks.empty())
+			if (!state.CaptureType || barracks.empty())
 				break;
 
 			if (tech.OwnerIndex == pHouse->ArrayIndex)
@@ -1477,11 +1471,13 @@ namespace
 			UpdateSpecOpsTechMemory(pHouse, state);
 
 			state.EngineerType = nullptr;
+			state.CaptureType = nullptr;
 			state.SpyAvailable = false;
+			InfantryTypeClass* pWeaponCaptureType = nullptr;
 
 			for (auto const pType : InfantryTypeClass::Array)
 			{
-				if (!pType || (!pType->Engineer && !IsSpyInfantryType(pType)))
+				if (!pType || (!IsCaptureInfantryType(pType) && !IsSpyInfantryType(pType)))
 					continue;
 
 				const bool usable = pHouse->CountOwnedNow(pType) > 0 || CanBuildUnderHumanRules(pHouse, pType);
@@ -1491,9 +1487,13 @@ namespace
 
 				if (pType->Engineer && !state.EngineerType)
 					state.EngineerType = pType;
+				else if (CapturesByWeapon(pType) && !pWeaponCaptureType)
+					pWeaponCaptureType = pType;
 				else if (IsSpyInfantryType(pType))
 					state.SpyAvailable = true;
 			}
+
+			state.CaptureType = state.EngineerType ? state.EngineerType : pWeaponCaptureType;
 
 			const int homeZone = (home != CellStruct::Empty)
 				? MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false)
@@ -1540,7 +1540,7 @@ namespace
 					}
 				}
 				const bool reachable = wall == NeuralTechWall::Open
-					? CanEngineerReachTech(pHouse, tech, homeZone, state.EngineerType)
+					? CanEngineerReachTech(pHouse, tech, homeZone, state.CaptureType)
 					: wall == NeuralTechWall::Breachable;
 
 				if (now < tech.BlockedUntilFrame || !reachable || IsCellInKnownEnemyDefenseReach(pHouse, tech.Cell, 2))
@@ -1580,7 +1580,7 @@ namespace
 			// with an engineer we own or can train; ops in flight keep it in charge until they end.
 			int opportunity = 0;
 
-			if (state.EngineerType)
+			if (state.CaptureType)
 				opportunity += std::min(560, bestWorth[0] + bestWorth[1] + bestWorth[2]);
 
 			opportunity += std::min(180, state.SpyTargets * 60);
@@ -1735,7 +1735,7 @@ namespace
 	void GetSpecOpsWork(HouseClass* pHouse, int& outTechValue, int& outSpyTargets, bool& outBridgeRepair, bool& outBridgeDemolition)
 	{
 		auto const& state = GetSpecOpsState(pHouse);
-		outTechValue = state.EngineerType ? state.SafeTechValue + state.ContestedTechValue : 0;
+		outTechValue = state.CaptureType ? state.SafeTechValue + state.ContestedTechValue : 0;
 		outSpyTargets = state.SpyTargets;
 		outBridgeRepair = state.BridgeRepairTask;
 		outBridgeDemolition = state.BridgeDemolitionTask;

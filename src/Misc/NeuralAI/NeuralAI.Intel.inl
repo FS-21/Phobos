@@ -1166,13 +1166,13 @@ namespace
 		// An engineer comes out of the barracks of ours on the land of the tech it is trained for
 		// (UpdateCaptureBarracks), so that it walks there instead of crossing the water; without such a
 		// tech, out of the barracks nearest the neutral tech nearest home.
-		const CellStruct captureGoal = (pCurInfType && pCurInfType->Engineer) ? CaptureEngineerGoal(pHouse) : CellStruct::Empty;
+		const CellStruct captureGoal = IsCaptureInfantryType(pCurInfType) ? CaptureEngineerGoal(pHouse) : CellStruct::Empty;
 
 		if (captureGoal != CellStruct::Empty)
 		{
 			infGoal = captureGoal;
 		}
-		else if (pCurInfType && pCurInfType->Engineer && homeCenter != CellStruct::Empty)
+		else if (IsCaptureInfantryType(pCurInfType) && homeCenter != CellStruct::Empty)
 		{
 			CellStruct bestCapCell = CellStruct::Empty;
 			int bestCapScore = 999999;
@@ -1212,7 +1212,7 @@ namespace
 
 				auto const pInTraining = abstract_cast<InfantryClass*>(pBld->Factory->Object);
 
-				if (pInTraining && pInTraining->Type && pInTraining->Type->Engineer)
+				if (pInTraining && IsCaptureInfantryType(pInTraining->Type))
 					NoteCaptureEngineerRouted(pHouse, pInTraining, pBld);
 
 				break;
