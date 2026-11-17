@@ -1673,6 +1673,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// The second repair station the Forward Repair plan asks for.
 		int bestForwardRepairIdx = -1;
 		int bestForwardRepairScore = -32000;
+		// The building a crossing asks for (crossingPrerequisites).
+		int bestCrossingIdx = -1;
+		int bestCrossingScore = -32000;
 
 		// A raid short of guns with no defense that shoots up buildable yet: the buildings those
 		// defenses still miss come ahead of routine picks.
@@ -2564,7 +2567,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			// TEMP diagnostic: what a crossing waits for and which buildings it asks for.
-			if (crossingNeedName && Unsorted::CurrentFrame - crossingMacro.CrossingNeedLogFrame >= CrossingNeedFrames)
+			if (crossingNeedName && Unsorted::CurrentFrame - crossingMacro.CrossingNeedLogFrame >= CrossingNeedLogFrames)
 			{
 				crossingMacro.CrossingNeedLogFrame = Unsorted::CurrentFrame;
 				std::string names;
@@ -3523,6 +3526,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				&& std::find(crossingPrerequisites.begin(), crossingPrerequisites.end(), pBld->ArrayIndex) != crossingPrerequisites.end())
 			{
 				score += CrossingPrerequisiteBonus;
+
+				if (score > bestCrossingScore)
+				{
+					bestCrossingScore = score;
+					bestCrossingIdx = pBld->ArrayIndex;
+				}
 			}
 
 			constexpr int airDefensePrerequisiteBonus = 1500;
@@ -3597,6 +3606,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestForwardRepairIdx;
 			bestBldScore = std::max(bestBldScore, bestForwardRepairScore);
+		}
+
+		// A crossing our units wait for: the building its transport lacks comes before the other picks,
+		// the bank governor's factories included. Its bonus alone lost to the towers: in the archive of
+		// 2026-11-17 the rich houses waited 11000 to 20000 frames for their shipyard (a Yuri house with
+		// 38000 credits built gattling cannons and psychic towers scored 6000 to 9250 against a yard
+		// near 3500). It needs no money saved up (user): like a human's, the build is paid as it goes
+		// and only stops without income. Never before restoring income, a building already under
+		// construction or a gun an air raid still needs.
+		if (bestCrossingIdx >= 0 && bestBldIdx != bestCrossingIdx && hasActiveBuildingIncome && !bestFillsAirDeficit
+			&& inProgressBldIdx < 0 && inProgressDefIdx < 0)
+		{
+			bestBldIdx = bestCrossingIdx;
+			bestBldScore = std::max(bestBldScore, bestCrossingScore);
 		}
 
 		// Island Hold: the defense its yard still lacks comes before the other picks, the bank
