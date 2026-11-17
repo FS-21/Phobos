@@ -8390,12 +8390,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		auto const& ferryMacro = GetMacroState(pHouse);
 		const int tried = Unsorted::CurrentFrame - ferryMacro.PathDeadFerrySince;
-		const bool tryOver = ferryMacro.PathDeadFerryGoal != CellStruct::Empty
-			&& ferryMacro.PathDeadFerryGoal.DistanceFrom(goal) <= PathDeadFerryGoalCells && tried > PathDeadFerryTryFrames
-			&& tried <= PathDeadFerryTryFrames + PathDeadFerryRestFrames;
+		// A goal near the target being ferried is that target: its landing while the try lasts,
+		// none once it is over.
+		const bool sameTarget = ferryMacro.PathDeadFerryGoal != CellStruct::Empty && tried >= 0
+			&& tried <= PathDeadFerryTryFrames + PathDeadFerryRestFrames && ferryMacro.PathDeadFerryGoal.DistanceFrom(goal) <= PathDeadFerryGoalCells;
 		CellStruct landing = CellStruct::Empty;
 
-		if (!tryOver)
+		if (sameTarget && tried <= PathDeadFerryTryFrames && ferryMacro.PathDeadFerryLanding != CellStruct::Empty)
+		{
+			landing = ferryMacro.PathDeadFerryLanding;
+		}
+		else if (!sameTarget)
 		{
 			if (ownsOpTransport < 0)
 				ownsOpTransport = HouseOwnsOpTransport(pHouse) ? 1 : 0;
@@ -10470,6 +10475,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					|| tried > PathDeadFerryTryFrames + PathDeadFerryRestFrames || tried < 0)
 				{
 					waveMacro.PathDeadFerryGoal = goal;
+					waveMacro.PathDeadFerryLanding = landing;
 					waveMacro.PathDeadFerrySince = Unsorted::CurrentFrame;
 					Debug::Log("[NeuralAI] Frame %d | House #%d wave target at (%d,%d) has no path: transports take the wave to the landing "
 						"(%d,%d)\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, goal.X, goal.Y, landing.X, landing.Y);

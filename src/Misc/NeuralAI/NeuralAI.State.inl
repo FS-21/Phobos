@@ -1284,6 +1284,7 @@ namespace
 		// The wave target with no path that transport operations carry the wave to, and since when
 		// (PathDeadFerryTryFrames).
 		CellStruct PathDeadFerryGoal { CellStruct::Empty };
+		CellStruct PathDeadFerryLanding { CellStruct::Empty };
 		int PathDeadFerrySince { -100000 };
 		int LastPocketCheckFrame { -100000 };
 		int LastPocketSellFrame { -100000 };
@@ -1673,6 +1674,7 @@ namespace
 			this->LastFactoryRoadCheckFrame = -100000;
 			this->LastFactoryRoadSellFrame = -100000;
 			this->PathDeadFerryGoal = CellStruct::Empty;
+			this->PathDeadFerryLanding = CellStruct::Empty;
 			this->PathDeadFerrySince = -100000;
 			this->LastPocketCheckFrame = -100000;
 			this->LastPocketSellFrame = -100000;
@@ -2675,11 +2677,15 @@ namespace
 	// operations use and a landing lies by the target, the wave keeps it and hands its units more
 	// than PathDeadFerryNearCells from it to a transport operation to that landing
 	// (RequestStrikeTransport), for PathDeadFerryTryFrames from the first one; then the target is
-	// passed over like any path dead goal for PathDeadFerryRestFrames. A fallen bridge within
-	// BridgeDeadGoalCells of such a place is repaired whatever the zone map says of its banks.
+	// passed over like any path dead goal for PathDeadFerryRestFrames. The goals within
+	// PathDeadFerryGoalCells of the ferried target (the target, the secondary one, a goal a unit
+	// keeps from an earlier wave) are the same target: they share its landing and its try, so the
+	// wave rides one operation (match #10793: 7 operations, one per landing, in 900 frames). A
+	// fallen bridge within BridgeDeadGoalCells of such a place is repaired whatever the zone map
+	// says of its banks.
 	constexpr int PathDeadFerryTryFrames = 5400;
 	constexpr int PathDeadFerryRestFrames = 9000;
-	constexpr double PathDeadFerryGoalCells = 12.0;
+	constexpr double PathDeadFerryGoalCells = 24.0;
 	constexpr double PathDeadFerryNearCells = 24.0;
 	constexpr double BridgeDeadGoalCells = 30.0;
 	constexpr int PocketShutFrames = 1800;
