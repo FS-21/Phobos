@@ -8134,6 +8134,59 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	int leastWayDanger = -1;
 	int mostWayDanger = -1;
 	bool pickCutsPower = false;
+	// TEMP diagnostic: what the group does to the pick, and the least and the most among the
+	// targets it knows (percent of the strength in 900 frames; -1 with no army counted).
+	int pickGroupPercent = -1;
+	int leastGroupPercent = -1;
+	int mostGroupPercent = -1;
+	// What the idle army of the last tick does to each building type in 900 frames, as a percent of
+	// its strength (WaveGroupDamage*); -1 with no army counted lately. Spawners, mind control and
+	// temporal weapons are left out: their damage figure says nothing.
+	std::unordered_map<const BuildingTypeClass*, int> groupDamagePercents;
+
+	auto const groupDamagePercent = [&](const BuildingTypeClass* pBldType) -> int
+	{
+		auto const& groupMacro = GetMacroState(pHouse);
+		const int age = Unsorted::CurrentFrame - groupMacro.WaveGroupFrame;
+
+		if (groupMacro.WaveGroupTypes.empty() || age < 0 || age > WaveGroupFreshFrames)
+			return -1;
+
+		auto const [it, inserted] = groupDamagePercents.try_emplace(pBldType, 0);
+
+		if (inserted)
+		{
+			long long damage = 0;
+
+			for (auto const& [pGroupType, count] : groupMacro.WaveGroupTypes)
+			{
+				int best = 0;
+
+				for (int i = 0; i < 2; ++i)
+				{
+					// TechnoTypeClass::GetWeapon is not const-qualified in YRpp.
+					auto const pWS = const_cast<TechnoTypeClass*>(pGroupType)->GetWeapon(i);
+					auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+					if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead || pWeapon->Spawner || pWeapon->Warhead->MindControl
+						|| pWeapon->Warhead->Temporal)
+					{
+						continue;
+					}
+
+					const int versesPercent = static_cast<int>(GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBldType->Armor) * 100.0);
+					best = std::max(best,
+						pWeapon->Damage * std::max(1, pWeapon->Burst) * std::max(0, versesPercent) / 100 * 900 / std::max(1, pWeapon->ROF));
+				}
+
+				damage += static_cast<long long>(best) * count;
+			}
+
+			it->second = static_cast<int>(std::min<long long>(damage * 100 / std::max(1, pBldType->Strength), 100000));
+		}
+
+		return it->second;
+	};
 
 	// First pass: find the closest enemy structure distance on our landmass
 	// (outer perimeter reference) and count enemy base defenses so we peel the
@@ -8413,6 +8466,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			bldCandScore += 90;
 		}
 
+		// What the group brings down fast comes first, what it barely scratches last.
+		const int candGroupPercent = groupDamagePercent(pEnemyBld->Type);
+
+		if (candGroupPercent >= WaveGroupDamageEvenPercent)
+		{
+			bldCandScore += std::min(WaveGroupDamageMost, (candGroupPercent - WaveGroupDamageEvenPercent) * WaveGroupDamageMost
+				/ (WaveGroupDamageFastPercent - WaveGroupDamageEvenPercent));
+		}
+		else if (candGroupPercent >= 0)
+		{
+			bldCandScore -= std::min(WaveGroupDamageMost, (WaveGroupDamageEvenPercent - candGroupPercent) * WaveGroupDamageMost
+				/ (WaveGroupDamageEvenPercent - WaveGroupDamageSlowPercent));
+		}
+
 		anyEnemyBuildingExists = true;
 
 		// Fallback wave targets only among buildings this house knows about.
@@ -8429,6 +8496,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| IsEnemyBuildingKnown(pHouse, pEnemyBld)
 			|| ((pExt->NeuralAI_InfiltratedEnemyMask & (1 << ownerIdx)) != 0);
 
+		if (visible && candGroupPercent >= 0)
+		{
+			leastGroupPercent = leastGroupPercent < 0 ? candGroupPercent : std::min(leastGroupPercent, candGroupPercent);
+			mostGroupPercent = std::max(mostGroupPercent, candGroupPercent);
+		}
+
 		if (visible && pWayDangerMap)
 		{
 			leastWayDanger = leastWayDanger < 0 ? candWayDanger : std::min(leastWayDanger, candWayDanger);
@@ -8441,6 +8514,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pVisibleEnemyBld = pEnemyBld;
 			pickWayDanger = candWayDanger;
 			pickCutsPower = candCutsPower;
+			pickGroupPercent = candGroupPercent;
 		}
 	}
 
@@ -9502,6 +9576,31 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// The idle army by type, for the target scoring of the next tick (groupDamagePercent).
+		{
+			auto& groupMacro = GetMacroState(pHouse);
+			auto& group = groupMacro.WaveGroupTypes;
+			group.clear();
+
+			auto const count = [&group](const TechnoTypeClass* pType)
+			{
+				auto const it = std::find_if(group.begin(), group.end(), [pType](auto const& entry) { return entry.first == pType; });
+
+				if (it != group.end())
+					it->second++;
+				else
+					group.emplace_back(pType, 1);
+			};
+
+			for (auto const pU : idleCombatUnits)
+				count(pU->Type);
+
+			for (auto const pInf : idleCombatInf)
+				count(pInf->Type);
+
+			groupMacro.WaveGroupFrame = Unsorted::CurrentFrame;
+		}
+
 		// From here on they are idle army like the rest: they make the count of the next wave and
 		// leave with it.
 		if (!heldJoinVehicles.empty() || !heldJoinSoldiers.empty())
@@ -10360,6 +10459,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, pickWayDanger, leastWayDanger, mostWayDanger,
 							pickCutsPower ? 1 : 0);
 					}
+				}
+
+				// TEMP diagnostic: what the group does to this target among those it knows.
+				if (pVisibleEnemyBld && pVisibleEnemyBld->GetCell() == pWaveTargetCell && pickGroupPercent >= 0)
+				{
+					Debug::Log("[NeuralAI] Frame %d | House #%d wave target %s: group damage %d%% of its strength in 900 frames "
+						"(known targets from %d to %d)\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, pVisibleEnemyBld->Type->ID,
+						pickGroupPercent, leastGroupPercent, mostGroupPercent);
 				}
 
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;

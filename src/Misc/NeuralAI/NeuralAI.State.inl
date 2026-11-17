@@ -1138,6 +1138,10 @@ namespace
 		int RemnantSearchFrame { -100000 };
 		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it.
 		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
+		// The idle army by type as the last tick counted it, and when: the group the next wave is
+		// made of, for the target scoring (WaveGroupDamage*).
+		std::vector<std::pair<const TechnoTypeClass*, int>> WaveGroupTypes;
+		int WaveGroupFrame { -100000 };
 		// Transport operations of the house (NeuralAI.Operations.inl): the operations, the next id,
 		// the operation that holds each member or transport by UniqueID, units an operation gave back
 		// and that may not ask again before a frame, the size of the members still waiting on their
@@ -1533,6 +1537,8 @@ namespace
 			this->WaveEscortRetryFrame = -1;
 			this->RemnantSearchFrame = -100000;
 			this->WaveGoals.clear();
+			this->WaveGroupTypes.clear();
+			this->WaveGroupFrame = -100000;
 			this->TransportOps.clear();
 			this->NextTransportOpId = 1;
 			this->TransportOpOf.clear();
@@ -2395,6 +2401,19 @@ namespace
 	// buildings within WaveGoalKeepCells of it score WaveTargetKeepBonus more, above the focus
 	// enemy (300) and below the coalition target (700). 189 of 20504 launches of 48 houses went
 	// more than 12 cells from the launch before within 900 frames, up to 26 per house.
+	// A wave goes first for what its group brings down fast and last for what it barely scratches
+	// (user): the damage the idle army does to a building type in 900 frames (damage, burst, verses
+	// its armor, rate of fire of the better weapon of each type) as a percent of its strength. At
+	// WaveGroupDamageEvenPercent it changes nothing; from WaveGroupDamageFastPercent on the target
+	// gains WaveGroupDamageMost, at WaveGroupDamageSlowPercent or under it loses as much, in
+	// proportion between. Less than the bonus of the target a wave keeps, so the target does not
+	// change with every unit that joins. The army counted is that of the last tick, no older than
+	// WaveGroupFreshFrames.
+	constexpr int WaveGroupDamageEvenPercent = 100;
+	constexpr int WaveGroupDamageFastPercent = 400;
+	constexpr int WaveGroupDamageSlowPercent = 25;
+	constexpr int WaveGroupDamageMost = 200;
+	constexpr int WaveGroupFreshFrames = 60;
 	constexpr int WaveTargetKeepFrames = 900;
 	constexpr int WaveTargetKeepBonus = 400;
 	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit
