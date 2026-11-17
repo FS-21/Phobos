@@ -1215,6 +1215,10 @@ namespace
 		int LastFactoryRoadSellFrame { -100000 };
 		// Units shut in a pocket (SellPocketBlock): last check, last sale, last log line, and the
 		// ground of the building sold, kept free until PocketClearUntil.
+		// The wave target with no path that transport operations carry the wave to, and since when
+		// (PathDeadFerryTryFrames).
+		CellStruct PathDeadFerryGoal { CellStruct::Empty };
+		int PathDeadFerrySince { -100000 };
 		int LastPocketCheckFrame { -100000 };
 		int LastPocketSellFrame { -100000 };
 		int LastPocketLogFrame { -100000 };
@@ -1595,6 +1599,8 @@ namespace
 			this->DefensePowerWantedFrame = -100000;
 			this->LastFactoryRoadCheckFrame = -100000;
 			this->LastFactoryRoadSellFrame = -100000;
+			this->PathDeadFerryGoal = CellStruct::Empty;
+			this->PathDeadFerrySince = -100000;
 			this->LastPocketCheckFrame = -100000;
 			this->LastPocketSellFrame = -100000;
 			this->LastPocketLogFrame = -100000;
@@ -2539,6 +2545,19 @@ namespace
 	// on its edge that the house can spare, or a factory of a type it owns twice, whose sale alone
 	// opens it is sold: looked at every PocketCheckFrames, one sale per PocketSellFrames, trying
 	// the PocketSellTests cheapest. Nothing is built on its ground for PocketClearFrames.
+	// A wave target on our own ground that the path finder does not reach (a fallen bridge; user:
+	// the transports do the hard work until the ground can be used again, and only with no way to
+	// send the units is that target left for other missions). While the house owns a transport its
+	// operations use and a landing lies by the target, the wave keeps it and hands its units more
+	// than PathDeadFerryNearCells from it to a transport operation to that landing
+	// (RequestStrikeTransport), for PathDeadFerryTryFrames from the first one; then the target is
+	// passed over like any path dead goal for PathDeadFerryRestFrames. A fallen bridge within
+	// BridgeDeadGoalCells of such a place is repaired whatever the zone map says of its banks.
+	constexpr int PathDeadFerryTryFrames = 5400;
+	constexpr int PathDeadFerryRestFrames = 9000;
+	constexpr double PathDeadFerryGoalCells = 12.0;
+	constexpr double PathDeadFerryNearCells = 24.0;
+	constexpr double BridgeDeadGoalCells = 30.0;
 	constexpr int PocketShutFrames = 1800;
 	constexpr int PocketShutFails = 30;
 	constexpr int PocketFailGapFrames = 450;

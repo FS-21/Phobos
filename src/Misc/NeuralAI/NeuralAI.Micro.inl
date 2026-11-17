@@ -8143,6 +8143,51 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// its strength (WaveGroupDamage*); -1 with no army counted lately. Spawners, mind control and
 	// temporal weapons are left out: their damage figure says nothing.
 	std::unordered_map<const BuildingTypeClass*, int> groupDamagePercents;
+	// The landing a transport operation takes the wave to by a target the path finder does not
+	// reach (PathDeadFerry*), by square of that target: Empty when the house owns no transport for
+	// it, no safe landing lies by it, or the try for that target is over.
+	std::vector<std::pair<int, CellStruct>> pathDeadLandings;
+	int ownsOpTransport = -1;
+
+	auto const pathDeadFerryLanding = [&](const CellStruct& goal) -> CellStruct
+	{
+		const int square = ((goal.X / 8) << 10) | (goal.Y / 8);
+
+		for (auto const& [key, landing] : pathDeadLandings)
+		{
+			if (key == square)
+				return landing;
+		}
+
+		auto const& ferryMacro = GetMacroState(pHouse);
+		const int tried = Unsorted::CurrentFrame - ferryMacro.PathDeadFerrySince;
+		const bool tryOver = ferryMacro.PathDeadFerryGoal != CellStruct::Empty
+			&& ferryMacro.PathDeadFerryGoal.DistanceFrom(goal) <= PathDeadFerryGoalCells && tried > PathDeadFerryTryFrames
+			&& tried <= PathDeadFerryTryFrames + PathDeadFerryRestFrames;
+		CellStruct landing = CellStruct::Empty;
+
+		if (!tryOver)
+		{
+			if (ownsOpTransport < 0)
+				ownsOpTransport = HouseOwnsOpTransport(pHouse) ? 1 : 0;
+
+			const int zone = MapClass::Instance.GetMovementZoneType(goal, MovementZone::Normal, false);
+
+			if (ownsOpTransport > 0 && IsGroundZone(zone))
+			{
+				int danger = 0;
+				landing = FindShoreLandingBy(pHouse, goal, zone, danger);
+
+				if (danger > OpSailDangerLimit)
+					landing = CellStruct::Empty;
+			}
+		}
+
+		pathDeadLandings.push_back({ square, landing });
+
+		return landing;
+	};
+
 	// Where the enemy aircraft rearm counts by the value of the aircraft of his we have seen.
 	const std::array<int, 8> enemyAirValues = EnemyAirValueByOwner(pHouse);
 	int pickAirBaseBonus = 0;
@@ -8438,8 +8483,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pEnemyBld->Type->Naval && pCell->LandType != LandType::Water)
 			bldCandScore += 180;
 
-		// A place our units find no path to comes after every other target (IsPathDeadGoal).
-		if (IsPathDeadGoal(pHouse, ebc))
+		// A place our units find no path to comes after every other target (IsPathDeadGoal), unless
+		// a transport operation can take the wave to a landing by it (user: the transports first).
+		if (IsPathDeadGoal(pHouse, ebc) && pathDeadFerryLanding(ebc) == CellStruct::Empty)
 			bldCandScore -= WavePathDeadGoalPenalty;
 
 		// The wave under way keeps its target: what stands where the last dispatch went, while that
@@ -10174,6 +10220,36 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Units of this wave handed to the transport operations manager.
 		size_t handedVeh = 0;
 		size_t handedInf = 0;
+		// A unit far from a goal on its own ground that the path finder does not reach rides a
+		// transport operation to the landing by it (PathDeadFerry*). True when the wave dispatch is
+		// done with the unit: handed over, or left where it is with no transport for it.
+		auto const ridesToPathDeadGoal = [&](FootClass* pFoot, const CellStruct& goal, bool& handed)
+		{
+			handed = false;
+
+			if (!IsPathDeadGoal(pHouse, goal) || pFoot->GetMapCoords().DistanceFrom(goal) <= PathDeadFerryNearCells)
+				return false;
+
+			const CellStruct landing = pathDeadFerryLanding(goal);
+
+			if (landing != CellStruct::Empty && RequestStrikeTransport(pHouse, pFoot, landing, goal))
+			{
+				handed = true;
+				const int tried = Unsorted::CurrentFrame - waveMacro.PathDeadFerrySince;
+
+				if (waveMacro.PathDeadFerryGoal == CellStruct::Empty || waveMacro.PathDeadFerryGoal.DistanceFrom(goal) > PathDeadFerryGoalCells
+					|| tried > PathDeadFerryTryFrames + PathDeadFerryRestFrames || tried < 0)
+				{
+					waveMacro.PathDeadFerryGoal = goal;
+					waveMacro.PathDeadFerrySince = Unsorted::CurrentFrame;
+					Debug::Log("[NeuralAI] Frame %d | House #%d wave target at (%d,%d) has no path: transports take the wave to the landing "
+						"(%d,%d)\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, goal.X, goal.Y, landing.X, landing.Y);
+				}
+			}
+
+			return true;
+		};
+
 		// TEMP diagnostic: the units held at home among those this wave orders out, and why the
 		// others get no order: fighting or by the front, waiting for a sister transport, handed to
 		// the transport operations, or on another zone than the goal with no operation for them.
@@ -10278,6 +10354,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					joinerGoalZone = goalZone;
 				}
 
+				continue;
+			}
+
+			if (bool rides = false; !canCrossWaterDirectly && ridesToPathDeadGoal(pU, pUnitWaveGoal->MapCoords, rides))
+			{
+				handedVeh += rides ? 1 : 0;
 				continue;
 			}
 
@@ -10429,6 +10511,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					joinerGoalZone = goalFootZone;
 				}
 
+				continue;
+			}
+
+			if (bool rides = false; !canInfCrossWater && ridesToPathDeadGoal(pI, pInfWaveGoal->MapCoords, rides))
+			{
+				handedInf += rides ? 1 : 0;
 				continue;
 			}
 
