@@ -1044,6 +1044,11 @@ namespace
 		// The same per enemy house: the value of the last raid group that was beaten on its way to
 		// one of its buildings (raid gate of startPlan).
 		std::array<NeuralPlanTargetLesson, 32> PlanHouseLessons {};
+		// Rotating Raids lesson per enemy house (RotatingRaidsSize): the doubling steps the group asks for
+		// after the raids it beat, and the frame of the last beaten raid (a step fades every
+		// RaidLessonStepFrames).
+		std::array<int, 32> RaidLessonSteps {};
+		std::array<int, 32> RaidLessonFrame {};
 		// Capital groups by domain (0 ground, 1 air, 2 sea) and the capital units they hold back from
 		// waves and lone strikes (UpdateCapitalGroups).
 		std::array<NeuralCapitalGroup, 3> CapitalGroups {};
@@ -1573,6 +1578,8 @@ namespace
 			this->PlanMemberTraces.clear();
 			this->PlanTargetLessons.clear();
 			this->PlanHouseLessons.fill(NeuralPlanTargetLesson {});
+			this->RaidLessonSteps.fill(0);
+			this->RaidLessonFrame.fill(-100000);
 			this->CapitalGroups = {};
 			this->CapitalHeld.clear();
 			this->TankGuard.clear();
@@ -2403,6 +2410,18 @@ namespace
 	// A raid the gate of startPlan held back is weighed again after this long.
 	constexpr int PlanGateRetryFrames = 900;
 	constexpr int PlanLessonAdvantagePercent = 150;
+	// Rotating Raids: two groups of half the members each. The group starts at RaidBaseGroup units and
+	// doubles after each raid an enemy house beat (it lost value and destroyed no more than it lost), up
+	// to RaidLessonMaxSteps steps and RaidMostGroup units; a step fades every RaidLessonStepFrames
+	// without a new beaten raid, a raid that destroyed more than it lost ends the lesson (user: grow the
+	// group after each failure as the tank mass does; 2026-11-17 the groups of 3 died on the way).
+	// The targets change RaidSwitchFrames after a group reached its own (or once one falls).
+	constexpr int RaidBaseGroup = 8;
+	constexpr int RaidMostGroup = 24;
+	constexpr int RaidLessonMaxSteps = 2;
+	constexpr int RaidLessonStepFrames = 3000;
+	constexpr int RaidSwitchFrames = 900;
+	constexpr double RaidArrivedCells = 6.0;
 	// In-match weight of a plan against an enemy house (PlanEnemyWeight, in percent of the plan's
 	// utility, from 100): a plan that destroyed more than it lost against that house gains
 	// PlanEnemyWeightUpStep, PlanEnemyWeightFallStep when its target fell too; one that failed or
