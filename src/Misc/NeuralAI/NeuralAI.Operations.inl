@@ -4006,7 +4006,8 @@ namespace
 			const Mission mission = pFoot->CurrentMission;
 
 			if ((mission != Mission::Guard && mission != Mission::Area_Guard && mission != Mission::Sleep) || pFoot->Target
-				|| pFoot->Destination || IsPlanMember(pHouse, pFoot->UniqueID) || IsInTransportOp(pHouse, pFoot->UniqueID))
+				|| pFoot->Destination || IsPlanMember(pHouse, pFoot->UniqueID) || IsInTransportOp(pHouse, pFoot->UniqueID)
+				|| macro.TankGuard.contains(pFoot->UniqueID))
 			{
 				continue;
 			}

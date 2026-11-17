@@ -8977,8 +8977,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Capital units go out in their own groups (UpdateCapitalGroups).
-		if (GetMacroState(pHouse).CapitalHeld.contains(pUnit->UniqueID))
+		// Capital units go out in their own groups (UpdateCapitalGroups), the tank guard stays
+		// (UpdateTankGuard).
+		if (GetMacroState(pHouse).CapitalHeld.contains(pUnit->UniqueID) || GetMacroState(pHouse).TankGuard.contains(pUnit->UniqueID))
 			continue;
 
 		// Units and transports of a transport operation are on their way already.

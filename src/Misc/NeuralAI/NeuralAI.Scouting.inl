@@ -715,10 +715,12 @@ namespace
 					|| pFoot->CurrentMission == Mission::Sleep);
 		};
 
+		// The tank guard (UpdateTankGuard) stays at home unless the house has no other scout.
 		for (auto const pUnit : UnitClass::Array)
 		{
 			if (pUnit && isIdleGround(pUnit, pUnit->Type) && !pUnit->Type->Harvester && !pUnit->Type->ResourceGatherer
-				&& !pUnit->Type->DeploysInto && !IsAmphibiousOrAirTransport(pUnit->Type) && pUnit->Passengers.NumPassengers == 0)
+				&& !pUnit->Type->DeploysInto && !IsAmphibiousOrAirTransport(pUnit->Type) && pUnit->Passengers.NumPassengers == 0
+				&& !macro.TankGuard.contains(pUnit->UniqueID))
 			{
 				ground.push_back(MakeScoutUnit(pUnit, false));
 			}
@@ -761,6 +763,28 @@ namespace
 		{
 			return a.Fitness != b.Fitness ? a.Fitness > b.Fitness : a.Foot->UniqueID < b.Foot->UniqueID;
 		};
+
+		// No other scout: one tank of the guard goes, the fittest (user: a floor tank can scout when the
+		// house built nothing faster), whatever it cost.
+		if (ground.empty() && air.empty())
+		{
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (pUnit && macro.TankGuard.contains(pUnit->UniqueID) && isFree(pUnit) && pUnit->Type->Speed >= 4 && pUnit->Type->Sight >= 4
+					&& pUnit->Target == nullptr && pUnit->GetHealthPercentage() >= 0.6
+					&& (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard
+						|| pUnit->CurrentMission == Mission::Sleep || pUnit->CurrentMission == Mission::Move))
+				{
+					ground.push_back(MakeScoutUnit(pUnit, false));
+				}
+			}
+
+			if (ground.size() > 1)
+			{
+				std::sort(ground.begin(), ground.end(), byFitness);
+				ground.resize(1);
+			}
+		}
 
 		std::sort(ground.begin(), ground.end(), byFitness);
 		std::sort(air.begin(), air.end(), byFitness);
