@@ -1264,6 +1264,14 @@ namespace
 		int DefensePowerWantedFrame { -100000 };
 		int LastFactoryRoadCheckFrame { -100000 };
 		int LastFactoryRoadSellFrame { -100000 };
+		// Units shut in a pocket (SellPocketBlock): last check, last sale, last log line, and the
+		// ground of the building sold, kept free until PocketClearUntil.
+		int LastPocketCheckFrame { -100000 };
+		int LastPocketSellFrame { -100000 };
+		int LastPocketLogFrame { -100000 };
+		CellStruct PocketClearFrom { CellStruct::Empty };
+		CellStruct PocketClearTo { CellStruct::Empty };
+		int PocketClearUntil { -1 };
 		// Emergency lanes (UpdateEmergencyLanes): the last check, the last log line, and since that
 		// line the idle units that stepped aside and the units with an order they made way for.
 		int LastEmergencyLaneFrame { -1 };
@@ -1645,6 +1653,12 @@ namespace
 			this->DefensePowerWantedFrame = -100000;
 			this->LastFactoryRoadCheckFrame = -100000;
 			this->LastFactoryRoadSellFrame = -100000;
+			this->LastPocketCheckFrame = -100000;
+			this->LastPocketSellFrame = -100000;
+			this->LastPocketLogFrame = -100000;
+			this->PocketClearFrom = CellStruct::Empty;
+			this->PocketClearTo = CellStruct::Empty;
+			this->PocketClearUntil = -1;
 			this->LastEmergencyLaneFrame = -1;
 			this->EmergencyLaneLogFrame = -1;
 			this->EmergencyLaneMoved = 0;
@@ -2616,6 +2630,26 @@ namespace
 	constexpr int FactoryRoadSellCheckFrames = 300;
 	constexpr int FactoryRoadSellFrames = 1800;
 	constexpr size_t FactoryRoadSellTests = 24;
+	// Units shut in a pocket (user: sell the building of ours that closes it; the house builds it
+	// again elsewhere): ground units whose path searches from where they stand have failed for
+	// PocketShutFrames, PocketShutFails times or more, none more than PocketFailGapFrames apart, to
+	// more than one place, without leaving the PocketStepCells around their first cell. With
+	// PocketShutUnits of them in one pocket (the ground they reach without crossing a building, a
+	// cliff or water, PocketMaxCells at most: more is open ground), the cheapest building of ours
+	// on its edge that the house can spare, or a factory of a type it owns twice, whose sale alone
+	// opens it is sold: looked at every PocketCheckFrames, one sale per PocketSellFrames, trying
+	// the PocketSellTests cheapest. Nothing is built on its ground for PocketClearFrames.
+	constexpr int PocketShutFrames = 1800;
+	constexpr int PocketShutFails = 30;
+	constexpr int PocketFailGapFrames = 450;
+	constexpr double PocketStepCells = 4.0;
+	constexpr size_t PocketShutUnits = 3;
+	constexpr size_t PocketMaxCells = 200;
+	constexpr int PocketCheckFrames = 300;
+	constexpr int PocketSellFrames = 900;
+	constexpr size_t PocketSellTests = 8;
+	constexpr int PocketClearFrames = 9000;
+	constexpr int PocketLogFrames = 1800;
 	// Long-range gun towers with a dead zone (IsDeadZoneTower; user: a very advanced defense with
 	// a long reach, to be taken into account). The tier bonus of a tower stops at 950, so nothing
 	// told a gun of 15 cells from one of 7:

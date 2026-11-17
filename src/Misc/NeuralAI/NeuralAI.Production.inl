@@ -337,6 +337,7 @@ namespace
 
 	// Defined in NeuralAI.Placement.inl.
 	void SellFactoryRoadBlock(HouseClass* pHouse);
+	void SellPocketBlock(HouseClass* pHouse);
 
 	int CountOwnedUnitWithConversions(HouseClass* pHouse, const UnitTypeClass* pUnit)
 	{
@@ -482,6 +483,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Every war factory closed in by the base and vehicles jammed at home: a spare building that
 	// closes a road is sold.
 	SellFactoryRoadBlock(pHouse);
+
+	// Units shut in a pocket by our own buildings: the one that closes it is sold.
+	SellPocketBlock(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "stranded slave miners");
 
 	// Forward crawl stones placed / lost (trainer credit for the offensive crawl).

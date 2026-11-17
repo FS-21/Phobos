@@ -4677,6 +4677,57 @@ namespace
 
 	std::unordered_map<DWORD, NeuralBuildingPathFails> BuildingPathFails;
 
+	// Failed path searches of a ground unit from where it stands (SellPocketBlock): its first cell
+	// of the stretch, the first and the last frame, how many, the first goal and whether another
+	// goal PocketGoalCells or more from it failed too.
+	constexpr double PocketGoalCells = 8.0;
+
+	struct NeuralPocketFails
+	{
+		CellStruct Cell { CellStruct::Empty };
+		CellStruct Goal { CellStruct::Empty };
+		int FirstFrame { -100000 };
+		int LastFrame { -100000 };
+		int Fails { 0 };
+		bool TwoGoals { false };
+	};
+
+	std::unordered_map<DWORD, NeuralPocketFails> PocketFails;
+
+	void NotePocketFail(const FootClass* pFoot, const CellStruct& from, const CellStruct& to)
+	{
+		if (from != pFoot->GetMapCoords() || pFoot->IsInAir())
+			return;
+
+		const int now = Unsorted::CurrentFrame;
+
+		if (PocketFails.size() > 2048)
+		{
+			std::erase_if(PocketFails, [now](const auto& entry)
+				{ return now - entry.second.LastFrame > PocketFailGapFrames; });
+		}
+
+		auto& fails = PocketFails[pFoot->UniqueID];
+
+		if (now - fails.LastFrame > PocketFailGapFrames || now < fails.LastFrame || fails.Cell.DistanceFrom(from) > PocketStepCells)
+		{
+			fails.Cell = from;
+			fails.Goal = to;
+			fails.FirstFrame = now;
+			fails.LastFrame = now;
+			fails.Fails = 1;
+			fails.TwoGoals = false;
+		}
+		else if (fails.LastFrame != now)
+		{
+			fails.Fails++;
+			fails.LastFrame = now;
+
+			if (fails.Goal.DistanceFrom(to) >= PocketGoalCells)
+				fails.TwoGoals = true;
+		}
+	}
+
 	// Places the engine's path finder does not reach. The zone map can hold a place for one land
 	// with ours while no path leads there (an outpost shut behind its own buildings), and a house
 	// that keeps it as the target of its waves sends its army at it for the rest of the match: its
@@ -4715,6 +4766,7 @@ namespace
 		PathBackoffs.clear();
 		PathDeadGoals.clear();
 		BuildingPathFails.clear();
+		PocketFails.clear();
 		PathSearchesSkipped = 0;
 	}
 
@@ -4863,6 +4915,7 @@ void NeuralAI::OnPathFailure(FootClass* pFoot, const CellStruct& from, const Cel
 	{
 		const int now = Unsorted::CurrentFrame;
 		NoteBuildingPathFail(pFoot, from);
+		NotePocketFail(pFoot, from, to);
 
 		if (PathBackoffs.size() > 4096)
 		{
