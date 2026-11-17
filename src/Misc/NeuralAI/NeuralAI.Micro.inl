@@ -10001,8 +10001,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Units of this wave handed to the transport operations manager.
 		size_t handedVeh = 0;
 		size_t handedInf = 0;
-		// TEMP diagnostic: the units held at home among those this wave orders out.
+		// TEMP diagnostic: the units held at home among those this wave orders out, and why the
+		// others get no order: fighting or by the front, waiting for a sister transport, handed to
+		// the transport operations, or on another zone than the goal with no operation for them.
 		int joinersOrdered = 0;
+		int joinersAtFront = 0;
+		int joinersWaiting = 0;
+		int joinersHanded = 0;
+		int joinersNoWay = 0;
+		int joinerZone = -1;
+		int joinerGoalZone = -1;
 
 		auto const noteJoinerOrdered = [&](const FootClass* pFoot)
 		{
@@ -10019,7 +10027,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// Never abort a unit's current attack target/objective or pull a
 			// frontline unit away from an active enemy front!
 			if (IsFootActivelyAttackingOrMovingToEnemy(pU) || IsFootNearEnemyFrontline(pU, uz))
+			{
+				joinersAtFront += heldJoiners.contains(pU) ? 1 : 0;
 				continue;
+			}
 
 			const bool canCrossWaterDirectly = (pU->Type->MovementZone == MovementZone::Amphibious
 				|| pU->Type->MovementZone == MovementZone::AmphibiousDestroyer
@@ -10031,6 +10042,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// next to us (<= 10 cells)
 			if (isWaitingForSisterTransportUnload(pU, canCrossWaterDirectly))
 			{
+				joinersWaiting += heldJoiners.contains(pU) ? 1 : 0;
 				continue; // Regroup battalion on beachhead while unattacked sister
 						// transport finishes unloading!
 			}
@@ -10081,8 +10093,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool goalInWater = (pUnitWaveGoal->LandType == LandType::Water);
 			if (!canCrossWaterDirectly && (goalInWater || goalZone < 0 || uz < 0 || uz != goalZone))
 			{
-				if (RequestTransportOperation(pHouse, NeuralOpClient::Wave, pU, pUnitWaveGoal->MapCoords))
+				const bool handed = RequestTransportOperation(pHouse, NeuralOpClient::Wave, pU, pUnitWaveGoal->MapCoords);
+
+				if (handed)
 					++handedVeh;
+
+				if (heldJoiners.contains(pU))
+				{
+					++(handed ? joinersHanded : joinersNoWay);
+					joinerZone = uz;
+					joinerGoalZone = goalZone;
+				}
 
 				continue;
 			}
@@ -10167,7 +10188,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			auto const pI = idleCombatInf[i];
 			const int iz = ObjectZone(pI, MovementZone::Normal);
 			if (IsFootActivelyAttackingOrMovingToEnemy(pI) || IsFootNearEnemyFrontline(pI, iz))
+			{
+				joinersAtFront += heldJoiners.contains(pI) ? 1 : 0;
 				continue;
+			}
 
 			const bool canInfCrossWater = (pI->Type->MovementZone == MovementZone::Amphibious
 				|| pI->Type->MovementZone == MovementZone::AmphibiousDestroyer
@@ -10220,8 +10244,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (!canInfCrossWater && (infGoalInWater || footZone < 0 || footZone != goalFootZone))
 			{
-				if (RequestTransportOperation(pHouse, NeuralOpClient::Wave, pI, pInfWaveGoal->MapCoords))
+				const bool handed = RequestTransportOperation(pHouse, NeuralOpClient::Wave, pI, pInfWaveGoal->MapCoords);
+
+				if (handed)
 					++handedInf;
+
+				if (heldJoiners.contains(pI))
+				{
+					++(handed ? joinersHanded : joinersNoWay);
+					joinerZone = footZone;
+					joinerGoalZone = goalFootZone;
+				}
 
 				continue;
 			}
@@ -10320,11 +10353,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			// TEMP diagnostic: the units held at home when this dispatch left, and those that joined it.
-			if (tankMassWaves && (heldAtHomeNow > 0 || !heldJoiners.empty()))
+			if (tankMassWaves && !heldJoiners.empty())
 			{
-				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d): %d held at home, %d of them joined, %d ordered out\n",
+				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d): %d held at home, %d of them joined, %d ordered out, "
+					"%d fighting or by the front, %d wait for a sister transport, %d handed to transport operations, %d with no way "
+					"(zone %d, goal zone %d)\n",
 					Unsorted::CurrentFrame, pHouse->ArrayIndex, pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, heldAtHomeNow,
-					static_cast<int>(heldJoiners.size()), joinersOrdered);
+					static_cast<int>(heldJoiners.size()), joinersOrdered, joinersAtFront, joinersWaiting, joinersHanded, joinersNoWay,
+					joinerZone, joinerGoalZone);
 			}
 
 			// TEMP diagnostic: units of this dispatch that kept the goal of an earlier wave.
