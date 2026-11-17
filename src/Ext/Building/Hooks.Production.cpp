@@ -290,6 +290,32 @@ DEFINE_HOOK(0x450292, BuildingClass_Update_Factory_NeuralDesignated, 0x6)
 
 	auto const pOwner = pThis->Owner;
 
+	// TEMP diagnostic: a suspended production the engine abandons right after this (0x4502D1). Half
+	// of the Venoms of the CABAL houses ended so (match #10785: 7 abandoned, 7 fielded); the
+	// suspension means no factory had power for it (HouseExt::HasFactory with requirePower).
+	if (auto const pFactory = pThis->Factory; pFactory && pFactory->IsSuspended && pFactory->Object && pOwner
+		&& pThis->FactoryRetryTimer.GetTimeLeft() == 0 && NeuralAI::IsEnabledForHouse(pOwner))
+	{
+		static int logFrame = 0;
+		static int logCount = 0;
+
+		if (Unsorted::CurrentFrame < logFrame)
+			logCount = 0;
+
+		logFrame = Unsorted::CurrentFrame;
+
+		if (logCount++ < 40)
+		{
+			auto const pType = pFactory->Object->GetTechnoType();
+			auto const pAny = pType->FindFactory(true, false, true, pOwner);
+			auto const pPowered = pType->FindFactory(true, true, true, pOwner);
+			Debug::Log("[NeuralAI] House %d production DIAG: %s suspended in %s and abandoned (done %d, factory power %d, deactivated %d, "
+				"house power %d of %d), factory any %s powered %s, frame %d.\n", pOwner->ArrayIndex, pType->ID, pThis->Type->ID,
+				pFactory->IsDone() ? 1 : 0, pThis->HasPower ? 1 : 0, pThis->Deactivated ? 1 : 0, pOwner->PowerOutput, pOwner->PowerDrain,
+				pAny ? pAny->Type->ID : "none", pPowered ? pPowered->Type->ID : "none", Unsorted::CurrentFrame);
+		}
+	}
+
 	if (pThis->Factory || !pOwner || !pOwner->Production || RulesExt::Global()->AllowParallelAIQueues
 		|| !NeuralAI::IsEnabledForHouse(pOwner))
 	{
