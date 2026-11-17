@@ -9425,13 +9425,33 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			auto const pWeapon = pU->Type->GetWeapon(0);
 
-			if (IsAmphibiousOrAirTransport(pU->Type) || !pWeapon || !pWeapon->WeaponType)
+			if (IsAmphibiousOrAirTransport(pU->Type) || !pWeapon || !pWeapon->WeaponType || pU->Type->Naval)
 				continue;
 
-			if (pU->Type->Naval)
-				++idleShips;
-			else
-				++idleVehicles;
+			++idleVehicles;
+		}
+
+		// Warships nobody uses: in no plan or transport operation, with no target and on no attack,
+		// whatever their mission. The jam rules and the wave dispatch move idle ships about, so the
+		// floor of the strictly idle ones never reached the brake: 108 Boomers of a house stood idle
+		// while its shipyard went on building them (2026-11-17).
+		for (auto const pU : UnitClass::Array)
+		{
+			if (!pU || pU->Owner != pHouse || !pU->IsAlive || pU->InLimbo || !pU->Type || !pU->Type->Naval
+				|| IsAmphibiousOrAirTransport(pU->Type))
+			{
+				continue;
+			}
+
+			auto const pWeapon = pU->Type->GetWeapon(0);
+
+			if (!pWeapon || !pWeapon->WeaponType || pU->Target || IsFootActivelyAttackingOrMovingToEnemy(pU)
+				|| IsPlanMember(pHouse, pU->UniqueID) || IsInTransportOp(pHouse, pU->UniqueID))
+			{
+				continue;
+			}
+
+			++idleShips;
 		}
 
 		const std::unordered_set<const FootClass*> inIdlePools(idleCombatUnits.begin(), idleCombatUnits.end());
