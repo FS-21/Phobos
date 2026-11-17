@@ -1565,6 +1565,16 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		&& ((pBuildingType->Factory != AbstractType::None) || pBuildingType->WeaponsFactory
 			|| pBuildingType->UnitRepair);
 
+	// Capture barracks (UpdateCaptureBarracks): a barracks while a capture site waits goes on the land of
+	// the site's tech, as near the tech as the ground allows, and never crawls or steps forward. A
+	// building an ally site plan ordered keeps its site.
+	auto const& captureSpecOps = GetSpecOpsState(pHouse);
+	const bool placingCaptureBarracks = CaptureBarracksWants(pHouse, pBuildingType)
+		&& (GetMacroState(pHouse).AllySiteUntilFrame <= Unsorted::CurrentFrame
+			|| GetMacroState(pHouse).AllySiteBuildType != pBuildingType->ArrayIndex);
+	const CellStruct captureSiteCell = placingCaptureBarracks ? captureSpecOps.CaptureSiteCell : CellStruct::Empty;
+	const int captureSiteZone = placingCaptureBarracks ? captureSpecOps.CaptureSiteZone : -1;
+
 	const int supportRadius = GetSupportRadius(pBuildingType);
 
 	const bool isSupportRadiusBld
@@ -1721,7 +1731,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// Forward factories: once the offensive crawl holds a front (forward stones alive), extra War
 	// Factories / Barracks (never the first one) and repair depots go next to it, behind our
 	// towers and off the crawl lane, so reinforcements reach the fight sooner.
-	const bool frontFactory = isFactoryOrBarracks && enemyTargetCell != CellStruct::Empty
+	const bool frontFactory = isFactoryOrBarracks && !placingCaptureBarracks && enemyTargetCell != CellStruct::Empty
 		&& !GetMacroState(pHouse).OffensiveStones.empty()
 		&& ((pBuildingType->Factory == AbstractType::UnitType && pHouse->NumWarFactories >= 1)
 			|| (pBuildingType->Factory == AbstractType::InfantryType && pHouse->NumBarracks >= 1)
@@ -2092,7 +2102,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// from Construction Yard) ALWAYS anchor at our most forward
 	// outpost/base-crawl structure!
 	const bool enableBaseCrawl = isForwardTunnelMouth || isSteppingStoneExpander
-		|| ((isResourceBld || (isFactoryOrBarracks && !anchoredAtMissingFactoryHub))
+		|| ((isResourceBld || (isFactoryOrBarracks && !anchoredAtMissingFactoryHub && !placingCaptureBarracks))
 			&& (crawlBias > -20 || bestOreDist > 10 || pHouse->CountResourceDestinations >= 1))
 		|| (isCombatDefense && !isPureAA && (turretCreepBias > -20 || crawlBias > 0 || totalOwnedDefensesCount >= 1)
 			&& directionalAttackedBld == CellStruct::Empty && !expert7Defense);
@@ -2307,6 +2317,11 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 			if (undefendedKeyAssetCell != CellStruct::Empty && undefendedKeyAssetCell.DistanceFrom(center) > IslandHoldDefenseRadius)
 				undefendedKeyAssetCell = CellStruct::Empty;
+		}
+		else if (placingCaptureBarracks)
+		{
+			center = captureSiteCell;
+			targetExpansionZone = -1;
 		}
 		else if ((pRouteSpot || mainAttackSector >= 0) && directionalAttackedBld == CellStruct::Empty
 			&& center.DistanceFrom(GetHouseHomeCell(pHouse)) <= 24.0) // Forward turret creep keeps its own anchor.
@@ -3147,6 +3162,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					continue;
 				}
 
+				// Capture barracks: only cells of the tech's land.
+				if (placingCaptureBarracks && MapClass::Instance.GetMovementZoneType(candidate, MovementZone::Normal, false) != captureSiteZone)
+					continue;
+
 				// Naval structures only on useful water (no enclosed ponds).
 				if (isNavalBld && !IsUsefulWaterCell(candidate))
 					continue;
@@ -3897,7 +3916,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						}
 					}
 				}
-				else if (isFactoryOrBarracks
+				else if (isFactoryOrBarracks && !placingCaptureBarracks
 					&& (enemyTargetCell != CellStruct::Empty || nearestOreCell != CellStruct::Empty))
 				{
 					// Place War Factories & Barracks forward along the crawl chain
@@ -4115,6 +4134,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 					if (architectRebuildCell != CellStruct::Empty && candidate == architectRebuildCell)
 						spatialScore += 4000;
+				}
+
+				// Capture barracks: the nearer the tech, the shorter the engineer's walk.
+				if (placingCaptureBarracks)
+				{
+					const CellStruct candMid { static_cast<short>(candidate.X + w / 2), static_cast<short>(candidate.Y + h / 2) };
+					spatialScore -= static_cast<int>(candMid.DistanceFrom(captureSiteCell)) * CaptureBarracksPullPerCell;
 				}
 
 				// A war factory keeps its road out, and a new one needs its own (ClosesFactoryRoad): such a
@@ -4460,6 +4486,9 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 
 	// Step 2: Normal Spatial Tetris placement search
 	const bool wantedByIslandHold = IslandHoldWants(pHouse, pBuildingType);
+	const bool wantedByCaptureSite = CaptureBarracksWants(pHouse, pBuildingType)
+		&& (GetMacroState(pHouse).AllySiteUntilFrame <= Unsorted::CurrentFrame
+			|| GetMacroState(pHouse).AllySiteBuildType != pBuildingType->ArrayIndex);
 	CellStruct bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
 
 	// A building an ally site plan wanted found no room there: it goes home (the failure code below
@@ -4506,6 +4535,17 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 				static_cast<int>(bestCell.DistanceFrom(holdSt.IslandHoldCell)), holdSt.IslandHoldCell.X, holdSt.IslandHoldCell.Y,
 				Unsorted::CurrentFrame);
 		}
+	}
+
+	// A barracks a capture site wanted: the site learns where it went. With no cell on the site's land
+	// it goes where any other barracks would, and that land asks for none for a while
+	// (CaptureBarracksNoRoomFrames).
+	if (wantedByCaptureSite)
+	{
+		NoteCaptureBarracksPlacement(pHouse, pBuildingType, bestCell);
+
+		if (bestCell == CellStruct::Empty)
+			bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
 	}
 
 	// Placed next to an ally building: a defense for an ally under attack, or our crawl using ally

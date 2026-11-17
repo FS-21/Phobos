@@ -2100,6 +2100,33 @@ namespace
 	constexpr double BackdoorDeliverCells = 12.0;
 	constexpr int BackdoorLandingCandidateCells = 8;
 	constexpr int BackdoorRetryFrames = 5400;
+	// Capture barracks (user): a house with buildings of its own on a land where a tech it would take
+	// stands (neutral, or one an enemy took: oil derricks, tech buildings) and no barracks of its own
+	// there builds a barracks next to that tech, so its engineer walks a few cells instead of crossing
+	// the water from the main base. Checked with the tech memory every 150 frames
+	// (UpdateCaptureBarracks):
+	// - The site is the best such tech out of known enemy defense reach: an urgent one first (an
+	//   engineer of ours failed on the way to it or next to it, or the straight crossing from our
+	//   nearest barracks has a danger above CaptureCrossingDangerLimit on the ground danger map of the
+	//   crossings), then the most valuable for the walk from our nearest building on its land.
+	// - The barracks of an urgent site comes before the other building picks under the terms of Island
+	//   Hold; any other site adds CaptureBarracksBonus to the barracks score. The difficulty cap lets it
+	//   through as it does an outpost's factory.
+	// - It is placed on the tech's land, CaptureBarracksPullPerCell lower per cell away from the tech.
+	//   With no such cell it is placed like any other barracks and no site on that land asks again for
+	//   CaptureBarracksNoRoomFrames, longer each time, up to CaptureBarracksNoRoomSteps times as long. A
+	//   barracks placed for a site that does not stand within CaptureBarracksNoRoomFrames is forgotten.
+	// - An engineer in training comes out of the barracks of ours on the land of the best tech it can
+	//   take that no engineer of ours stands on or goes for (UpdatePrimaryFactories).
+	// Match #10769 (Crystal Whiplash): house 1 held a yard on an island where house 2 had taken two oil
+	// derricks; its engineers for them crossed from the main base by transport, and three of the four
+	// transport operations ended with the engineer dead 60 to 390 frames after they opened.
+	constexpr int CaptureCrossingDangerLimit = OpSailDangerLimit;
+	constexpr int CaptureBarracksBonus = 1200;
+	constexpr int CaptureBarracksPullPerCell = 120;
+	constexpr int CaptureBarracksNoRoomFrames = 5400;
+	constexpr int CaptureBarracksNoRoomSteps = 4;
+	constexpr int CaptureBarracksLogLines = 60;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its

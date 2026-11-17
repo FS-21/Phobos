@@ -849,6 +849,10 @@ namespace
 	// Defined in NeuralAI.Placement.inl: does this war factory keep a two-way road out of the base?
 	bool HasFactoryRoadOut(HouseClass* pHouse, const BuildingClass* pFactory);
 
+	// Capture barracks (NeuralAI.SpecOps.inl): the barracks of ours an engineer in training comes out of.
+	CellStruct CaptureEngineerGoal(HouseClass* pHouse);
+	void NoteCaptureEngineerRouted(HouseClass* pHouse, const TechnoClass* pEngineer, const BuildingClass* pBarracks);
+
 	// Updates PrimaryFactory for Infantry, Vehicles, and Naval units to the factory
 	// closest & zone-connected to the frontline target. Vehicles leave by the primary war factory:
 	// one closed in by the base (HasFactoryRoadOut) is taken only when none has a road out.
@@ -1159,7 +1163,16 @@ namespace
 			}
 		}
 
-		if (pCurInfType && pCurInfType->Engineer && homeCenter != CellStruct::Empty)
+		// An engineer comes out of the barracks of ours on the land of the tech it is trained for
+		// (UpdateCaptureBarracks), so that it walks there instead of crossing the water; without such a
+		// tech, out of the barracks nearest the neutral tech nearest home.
+		const CellStruct captureGoal = (pCurInfType && pCurInfType->Engineer) ? CaptureEngineerGoal(pHouse) : CellStruct::Empty;
+
+		if (captureGoal != CellStruct::Empty)
+		{
+			infGoal = captureGoal;
+		}
+		else if (pCurInfType && pCurInfType->Engineer && homeCenter != CellStruct::Empty)
 		{
 			CellStruct bestCapCell = CellStruct::Empty;
 			int bestCapScore = 999999;
@@ -1186,6 +1199,25 @@ namespace
 		}
 
 		updateCategory(AbstractType::InfantryType, false, infGoal);
+
+		if (captureGoal != CellStruct::Empty)
+		{
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (!pBld || !pBld->IsAlive || !pBld->Type || pBld->Type->Factory != AbstractType::InfantryType || !pBld->IsPrimaryFactory
+					|| pBld->GetMapCoords() != captureGoal || !pBld->Factory)
+				{
+					continue;
+				}
+
+				auto const pInTraining = abstract_cast<InfantryClass*>(pBld->Factory->Object);
+
+				if (pInTraining && pInTraining->Type && pInTraining->Type->Engineer)
+					NoteCaptureEngineerRouted(pHouse, pInTraining, pBld);
+
+				break;
+			}
+		}
 
 		updateCategory(AbstractType::UnitType, false, vehGoal);
 
