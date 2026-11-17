@@ -1713,16 +1713,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	// The main enemy is held for MainEnemyHoldFrames: before that only a house worth
 	// MainEnemySwitchMargin more, or one that is urgent (it hurts us, it is at our base, it is
-	// dying), takes over.
+	// dying) while the held one is not, takes over: two houses hitting us at once took turns.
 	const char* switchWhy = "free";
 
-	if (const int current = pHouse->EnemyHouseIndex; bestEnemyIdx >= 0 && bestEnemyIdx != current && current >= 0 && current < 8
+	// Our own last choice: the engine's house AI writes EnemyHouseIndex too, between our ticks.
+	if (const int current = mainCoal.MainEnemy; bestEnemyIdx >= 0 && bestEnemyIdx != current && current >= 0 && current < 8
 		&& weighed[current] && Unsorted::CurrentFrame >= mainCoal.MainEnemySinceFrame
 		&& Unsorted::CurrentFrame - mainCoal.MainEnemySinceFrame < MainEnemyHoldFrames)
 	{
 		const int best = std::clamp(bestEnemyIdx, 0, 7);
 
-		if (urgentWhy[best])
+		if (urgentWhy[best] && !urgentWhy[current])
 		{
 			switchWhy = urgentWhy[best];
 		}
@@ -1739,8 +1740,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	// Which motive weighs most in the choice whenever the main enemy changes, so the motives can be
 	// measured (the first MainEnemyLogLimit changes of each house in a match).
-	if (bestEnemyIdx >= 0 && bestEnemyIdx != pHouse->EnemyHouseIndex)
+	if (bestEnemyIdx >= 0 && bestEnemyIdx != mainCoal.MainEnemy)
 	{
+		const int previous = mainCoal.MainEnemy;
+		mainCoal.MainEnemy = bestEnemyIdx;
 		mainCoal.MainEnemySinceFrame = Unsorted::CurrentFrame;
 		mainCoal.MainEnemyChanges++;
 
@@ -1767,7 +1770,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const char* motive = top == 4 ? DiplomacyTargetMotive(pHouse, bestEnemyIdx) : partNames[top];
 			Debug::Log("[NeuralAI] House %d main enemy: house %d by %s (threat %d, hurt us %d, weak %d, ffa %d, diplomacy %d, team %d), "
 				"was house %d (switch: %s), runner-up house %d at %d against %d, frame %d.\n", pHouse->ArrayIndex, bestEnemyIdx, motive,
-				bestParts[0], bestParts[1], bestParts[2], bestParts[3], bestParts[4], bestParts[5], pHouse->EnemyHouseIndex, switchWhy,
+				bestParts[0], bestParts[1], bestParts[2], bestParts[3], bestParts[4], bestParts[5], previous, switchWhy,
 				runnerUpIdx, runnerUpPriority, bestEnemyPriority, Unsorted::CurrentFrame);
 		}
 	}

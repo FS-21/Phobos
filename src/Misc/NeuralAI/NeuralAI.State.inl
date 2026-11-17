@@ -311,9 +311,10 @@ namespace
 	// Main enemy log: the first changes of each house in a match.
 	constexpr int MainEnemyLogLimit = 60;
 	// The main enemy is held for MainEnemyHoldFrames once chosen. Before that another house takes
-	// over only with a priority MainEnemySwitchMargin above it, or when it is urgent: it hit us
-	// within MainEnemyUrgentFrames, its units were seen within MainEnemyBaseCells of home in the last
-	// 150 frames, or it is dying (weak enough to finish, or the dying house of the diplomacy).
+	// over only with a priority MainEnemySwitchMargin above it, or when it is urgent and the held one
+	// is not: it hit us within MainEnemyUrgentFrames, its units were seen within MainEnemyBaseCells of
+	// home in the last 150 frames, or it is dying (weak enough to finish, or the dying house of the
+	// diplomacy).
 	constexpr int MainEnemyHoldFrames = 2250;
 	constexpr int MainEnemySwitchMargin = 300;
 	constexpr int MainEnemyUrgentFrames = 450;
@@ -457,8 +458,9 @@ namespace
 		int LeaderFrames { 0 };
 		int LeaderCoalitionFrames { 0 };
 		int PoorTargetFrames { 0 };
-		// Main enemy hold (Micro): since when the main enemy is the one it is, and telemetry of its
-		// changes and of the ticks a held choice kept it.
+		// Main enemy hold (Micro): our last main enemy choice (the engine also writes EnemyHouseIndex)
+		// and since when, and telemetry of its changes and of the ticks a held choice kept it.
+		int MainEnemy { -1 };
 		int MainEnemySinceFrame { -100000 };
 		int MainEnemyChanges { 0 };
 		int MainEnemyHeld { 0 };
