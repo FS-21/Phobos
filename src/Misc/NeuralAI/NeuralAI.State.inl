@@ -1264,6 +1264,10 @@ namespace
 		// plan it led into.
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanEndFrame {};
 		std::array<bool, static_cast<size_t>(NeuralPlanId::Count)> PlanEndedWell {};
+		// What each plan did this match against each enemy house, as a weight in percent of its
+		// utility (100 at the start, see PlanEnemyWeightMin), and the house each plan last went for.
+		std::array<std::array<int, 32>, static_cast<size_t>(NeuralPlanId::Count)> PlanEnemyWeight {};
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanLastEnemy {};
 		std::map<int, int> SuperReadySinceFrame {};
 
 		// Mobile factories (NeuralAI.MobileFactory.inl): the trip of each packed factory deployer (by
@@ -1613,6 +1617,11 @@ namespace
 			this->PlanBoostUntilFrame.fill(0);
 			this->PlanEndFrame.fill(0);
 			this->PlanEndedWell.fill(false);
+
+			for (auto& weights : this->PlanEnemyWeight)
+				weights.fill(100);
+
+			this->PlanLastEnemy.fill(-1);
 			this->SuperReadySinceFrame.clear();
 			this->MobileFactoryGoals.clear();
 			this->MobileFactoryStands.clear();
@@ -2225,6 +2234,16 @@ namespace
 	// A raid the gate of startPlan held back is weighed again after this long.
 	constexpr int PlanGateRetryFrames = 900;
 	constexpr int PlanLessonAdvantagePercent = 150;
+	// In-match weight of a plan against an enemy house (PlanEnemyWeight, in percent of the plan's
+	// utility, from 100): a plan that destroyed more than it lost against that house gains
+	// PlanEnemyWeightUpStep, PlanEnemyWeightFallStep when its target fell too; one that failed or
+	// lost more than it destroyed loses PlanEnemyWeightDownStep. A plan that destroyed and lost
+	// nothing (sentries that saw nobody) stays as it was.
+	constexpr int PlanEnemyWeightMin = 50;
+	constexpr int PlanEnemyWeightMax = 200;
+	constexpr int PlanEnemyWeightUpStep = 15;
+	constexpr int PlanEnemyWeightFallStep = 25;
+	constexpr int PlanEnemyWeightDownStep = 20;
 	// A ground strike on a building needs this share of the strength known to guard it (defenses
 	// within PlanStrikeGuardCells, units seen there in the last PlanStrikeGuardFrames).
 	constexpr int PlanStrikeAdvantagePercent = 120;
