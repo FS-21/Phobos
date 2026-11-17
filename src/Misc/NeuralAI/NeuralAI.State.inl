@@ -1120,6 +1120,8 @@ namespace
 		int WaveLessonFrame { -100000 };
 		// Waves in a row that took no building, whatever the time between them.
 		int WaveFailuresInARow { 0 };
+		// TEMP diagnostic: units held at home that a wave ordered out, by unique id, with the frame.
+		std::unordered_map<DWORD, int> HeldJoinersOut;
 		// First frame a wave of the tank mass waited for its anti-air escort (-1 when none waits),
 		// and no new wait before this frame.
 		int WaveEscortWaitSince { -1 };
@@ -1518,6 +1520,7 @@ namespace
 			this->WaveLessonSteps = 0;
 			this->WaveLessonFrame = -100000;
 			this->WaveFailuresInARow = 0;
+			this->HeldJoinersOut.clear();
 			this->WaveEscortWaitSince = -1;
 			this->WaveEscortRetryFrame = -1;
 			this->RemnantSearchFrame = -100000;
@@ -2267,6 +2270,9 @@ namespace
 	// 0 in 92% of the readings of the tank mass (40 matches to #10732), so nearly none joined.
 	constexpr int HeldJoinsWaveUnits = 8;
 	constexpr int HeldJoinsWaveMaxSteps = 3;
+	// TEMP diagnostic: this long after a wave ordered them out, the log says how many of the units
+	// held at home that joined it left the base.
+	constexpr int HeldJoinerCheckFrames = 900;
 	// Each step doubles the count (user): 10, 20, then the most.
 	constexpr int TankMassWaveCap = 32;
 	constexpr int WaveLessonPercent = 200;
