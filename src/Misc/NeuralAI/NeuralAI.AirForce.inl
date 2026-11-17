@@ -192,6 +192,7 @@ namespace
 		BuildingClass* pBest = nullptr;
 		int bestScore = 0;
 		int bestRisk = 0;
+		const std::array<int, 8> airValues = EnemyAirValueByOwner(pHouse);
 
 		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
 		{
@@ -207,7 +208,7 @@ namespace
 			}
 
 			auto const pType = info.Building->Type;
-			int worth = AirStrikeWorthOf(pType);
+			int worth = AirStrikeWorthOf(pType) + AirBaseTargetBonus(airValues, info.Building, AirBaseStrikePercent, AirBaseStrikeMost);
 
 			if (front != CellStruct::Empty && info.Coords.DistanceFrom(front) <= 14.0)
 				worth = info.IsDefense ? std::max(worth, 220) : (worth > 0 ? worth + 120 : 0);
@@ -432,13 +433,15 @@ namespace
 			const CellStruct from = fleetCell != CellStruct::Empty ? fleetCell : home;
 			const int tolerance = std::clamp(state.StrikeAircraft - 1, 0, 3);
 			std::array<int, 3> best {};
+			const std::array<int, 8> airValues = EnemyAirValueByOwner(pHouse);
 
 			for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
 			{
 				if (info.IsAA)
 					continue;
 
-				int worth = AirStrikeWorthOf(info.Building->Type);
+				int worth = AirStrikeWorthOf(info.Building->Type)
+					+ AirBaseTargetBonus(airValues, info.Building, AirBaseStrikePercent, AirBaseStrikeMost);
 
 				if (state.FrontCell != CellStruct::Empty && info.Coords.DistanceFrom(state.FrontCell) <= 14.0)
 					worth = info.IsDefense ? std::max(worth, 220) : (worth > 0 ? worth + 120 : 0);
