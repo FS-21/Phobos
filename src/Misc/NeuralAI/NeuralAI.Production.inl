@@ -3889,6 +3889,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Unit & Naval Target Selection
 	int bestUnitIdx = -1;
 	int bestUnitScore = -32000;
+	// TEMP diagnostic: the ground vehicle candidates of this pick with the parts of their score (base
+	// of cost and health, type penalty, counters, the class slot with its extras, the rest), logged
+	// every 1800 frames per house: why main battle tanks lose the pick.
+	struct UnitPickDiag
+	{
+		const UnitTypeClass* Type;
+		char Class;
+		int Base;
+		int TypePenalty;
+		int Counter;
+		int ClassPart;
+		int Rest;
+		int Total;
+	};
+
+	std::vector<UnitPickDiag> unitPickDiags;
+	const bool logUnitPicks = IsAITickWindow(1800, pHouse->ArrayIndex * 15);
 	// Tank bunkers of ours standing empty beyond the free tanks that fit them: a tank is built for
 	// each on purpose (user: the original AI built units for its bunkers), the best one that fits.
 	int bestBunkerTankIdx = -1;
@@ -5258,7 +5275,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		// Counters of the seen enemy army and of what attacks the base lead their factory (combat
 		// types only).
-		score += CounterBonusFor(pHouse, pUnit);
+		const int diagCounter = CounterBonusFor(pHouse, pUnit);
+		score += diagCounter;
 
 		// Under attack the answer to the threat is built first. What the house cannot do without
 		// stays: the MCV when there is no yard, a harvester per refinery, anything while no income is left.
@@ -5346,6 +5364,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			const bool isAA = !isMainTank && pWpn && pWpn->Projectile && pWpn->Projectile->AA;
 			const bool isArtillery = !isMainTank && pWpn && pWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell;
+			const int diagPreClass = score;
 
 			// Artillery past what our front line can cover loses ground for every gun over it, with no
 			// cap: the main battle tanks come next (ArtilleryFreeVehicles).
@@ -5519,6 +5538,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += std::min(1200, ownedUnitWithConv * 55) * (100 - TankMassTypePenaltyPercent) / 100;
 			}
 
+			const int diagPostClass = score;
+
 			if (features[77] > 0 && pUnit->ImmuneToPsionics && !isEconomyUnit && !isMCV)
 				score += 420; // Counter enemy MindControl with ImmuneToPsionics
 
@@ -5570,6 +5591,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				score += 1500;
 			}
 
+			if (logUnitPicks)
+			{
+				const char diagClass = isMCV ? 'M' : (isKeyStructureDeployer ? 'D' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
+					: (((pUnit->Passengers > 0 && !isMainTank) || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall)) ? 'P'
+						: (isUnarmedSupportVehicle ? 'S' : (isAA ? 'A' : (isArtillery ? 'G' : (isMainTank ? 'T' : 'L')))))));
+				const int diagBase = pUnit->Cost / 4 + pUnit->Strength / 3;
+				const int diagPenalty = std::min(1200, ownedUnitWithConv * 55);
+				unitPickDiags.push_back({ pUnit, diagClass, diagBase, diagPenalty, diagCounter, diagPostClass - diagPreClass,
+					score - diagPostClass + (diagPreClass - diagBase + diagPenalty - diagCounter), score });
+			}
+
 			if (score > bestUnitScore)
 			{
 				bestUnitScore = score;
@@ -5584,6 +5616,38 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestBunkerTankIdx = pUnit->ArrayIndex;
 			}
 		}
+	}
+
+	// TEMP diagnostic: the best five candidates, and the best main battle tank when it is not one of
+	// them. Class: T tank, L light, G artillery, A anti-air, P transport, S support, H harvester, D
+	// deployer, M MCV. Rest: what is neither base, type penalty, counters nor class (in progress,
+	// threat first, income, sensors, island logistics and the like).
+	if (logUnitPicks && !unitPickDiags.empty())
+	{
+		std::stable_sort(unitPickDiags.begin(), unitPickDiags.end(), [](const UnitPickDiag& a, const UnitPickDiag& b) { return a.Total > b.Total; });
+		std::string text;
+		bool tankShown = false;
+
+		for (size_t i = 0; i < unitPickDiags.size(); ++i)
+		{
+			auto const& d = unitPickDiags[i];
+
+			if (i >= 5 && (tankShown || d.Class != 'T'))
+				continue;
+
+			tankShown = tankShown || d.Class == 'T';
+			char part[160];
+			std::snprintf(part, sizeof(part), " %s%s %c %d=b%d-p%d+c%d+k%d+r%d;", i >= 5 ? "... " : "", d.Type->ID, d.Class, d.Total, d.Base,
+				d.TypePenalty, d.Counter, d.ClassPart, d.Rest);
+			text += part;
+
+			if (i >= 5)
+				break;
+		}
+
+		Debug::Log("[NeuralAI] Frame %d | House #%d unit pick DIAG arch %d slots tank %d light %d aa %d guns %d transport %d:%s\n",
+			Unsorted::CurrentFrame, pHouse->ArrayIndex, pExt->NeuralAI_Archetype, static_cast<int>(scores[24]), static_cast<int>(scores[25]),
+			static_cast<int>(scores[26]), static_cast<int>(scores[27]), static_cast<int>(scores[28]), text.c_str());
 	}
 
 	// A tank for an empty tank bunker goes ahead of the scored pick while the house has income and
