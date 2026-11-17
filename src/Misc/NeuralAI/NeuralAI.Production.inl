@@ -5188,8 +5188,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		// Mind control, and a weapon that turns the enemy against his own (Psychedelic warhead: the
+		// Chaos Drone kills nothing, user: a few in a battalion help it beat another): support units,
+		// a few per army.
 		const bool isMindControlVehicle = pWpn != nullptr && pUnit->Spawns == nullptr && !pWpn->Spawner
-			&& pWpn->Warhead != nullptr && pWpn->Warhead->MindControl;
+			&& pWpn->Warhead != nullptr && (pWpn->Warhead->MindControl || pWpn->Warhead->Psychedelic);
 		const bool isEmpSupport = !isMindControlVehicle && !isMainTank && pWpn != nullptr && pUnit->Spawns == nullptr && !pWpn->Spawner
 			&& ((pWpn->Warhead != nullptr && pWpn->Warhead->EMEffect && pWpn->Damage <= 15) || pWpn->Damage <= 5);
 		const int ownVehiclesAndShips = pHouse->OwnedUnits + pHouse->OwnedNavy;
