@@ -557,6 +557,221 @@ namespace
 			static_cast<int>(roads.size()), now - macro.HeldAtHomeSince, static_cast<int>(candidates.size()), now);
 	}
 
+	// The cells a unit of this type reaches from a cell without crossing a building, a cliff or
+	// water, PocketMaxCells + 1 at most (more means the place is open). pOpened counts as gone. A
+	// diagonal step needs both cells beside it free: nothing squeezes between two corners.
+	size_t FloodPocket(const CellStruct& from, TechnoTypeClass* pType, const BuildingClass* pOpened, std::vector<CellStruct>& cells)
+	{
+		cells.clear();
+		std::unordered_set<int> seen;
+
+		auto const keyOf = [](const CellStruct& cell) { return (static_cast<int>(cell.Y) << 16) | static_cast<unsigned short>(cell.X); };
+
+		auto const passable = [&](const CellStruct& cell)
+		{
+			auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+			if (!pCell)
+				return false;
+
+			if (auto const pBld = pCell->GetBuilding())
+				return pBld == pOpened && pCell->LandType != LandType::Water;
+
+			return pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false);
+		};
+
+		cells.push_back(from);
+		seen.insert(keyOf(from));
+
+		for (size_t i = 0; i < cells.size() && cells.size() <= PocketMaxCells; ++i)
+		{
+			const CellStruct at = cells[i];
+
+			for (int dy = -1; dy <= 1; ++dy)
+			{
+				for (int dx = -1; dx <= 1; ++dx)
+				{
+					const CellStruct next { static_cast<short>(at.X + dx), static_cast<short>(at.Y + dy) };
+
+					if ((dx == 0 && dy == 0) || seen.contains(keyOf(next)) || !passable(next))
+						continue;
+
+					if (dx != 0 && dy != 0 && (!passable({ static_cast<short>(at.X + dx), at.Y }) || !passable({ at.X, static_cast<short>(at.Y + dy) })))
+						continue;
+
+					seen.insert(keyOf(next));
+					cells.push_back(next);
+				}
+			}
+		}
+
+		return cells.size();
+	}
+
+	// The cure for units shut in a pocket closed by our own buildings (user; soldiers a barracks
+	// let out between cliffs and buildings stood there 14000 frames, match #10776, and the engine
+	// failed 30000 path searches from their cells): see PocketShutFrames.
+	void SellPocketBlock(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (PathBackoffSerial != NeuralMatchSerial || PocketFails.empty()
+			|| (now >= macro.LastPocketCheckFrame && now - macro.LastPocketCheckFrame < PocketCheckFrames)
+			|| (now >= macro.LastPocketSellFrame && now - macro.LastPocketSellFrame < PocketSellFrames))
+		{
+			return;
+		}
+
+		macro.LastPocketCheckFrame = now;
+
+		// Ground units of ours whose path searches keep failing from where they stand.
+		std::vector<FootClass*> shut;
+
+		auto const consider = [&](FootClass* pFoot)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->IsInAir() || pFoot->OnBridge
+				|| pFoot->GetTechnoType()->Naval)
+			{
+				return;
+			}
+
+			auto const it = PocketFails.find(pFoot->UniqueID);
+
+			if (it == PocketFails.end())
+				return;
+
+			auto const& fails = it->second;
+
+			if (fails.TwoGoals && fails.Fails >= PocketShutFails && now >= fails.LastFrame && now - fails.LastFrame <= PocketFailGapFrames
+				&& now - fails.FirstFrame >= PocketShutFrames && fails.Cell.DistanceFrom(pFoot->GetMapCoords()) <= PocketStepCells)
+			{
+				shut.push_back(pFoot);
+			}
+		};
+
+		for (auto const pInf : InfantryClass::Array)
+			consider(pInf);
+
+		for (auto const pUnit : UnitClass::Array)
+			consider(pUnit);
+
+		if (shut.size() < PocketShutUnits)
+			return;
+
+		auto const keyOf = [](const CellStruct& cell) { return (static_cast<int>(cell.Y) << 16) | static_cast<unsigned short>(cell.X); };
+		std::vector<CellStruct> pocket;
+		std::unordered_set<int> pocketCells;
+		FootClass* pSeed = nullptr;
+		size_t inside = 0;
+		std::unordered_set<const FootClass*> tried;
+
+		// The first pocket that holds enough of them.
+		for (auto const pFoot : shut)
+		{
+			if (tried.contains(pFoot))
+				continue;
+
+			if (FloodPocket(pFoot->GetMapCoords(), pFoot->GetTechnoType(), nullptr, pocket) > PocketMaxCells)
+			{
+				tried.insert(pFoot);
+				continue;
+			}
+
+			pocketCells.clear();
+
+			for (auto const& cell : pocket)
+				pocketCells.insert(keyOf(cell));
+
+			inside = 0;
+
+			for (auto const pOther : shut)
+			{
+				if (pocketCells.contains(keyOf(pOther->GetMapCoords())))
+				{
+					tried.insert(pOther);
+					++inside;
+				}
+			}
+
+			if (inside >= PocketShutUnits)
+			{
+				pSeed = pFoot;
+				break;
+			}
+		}
+
+		if (!pSeed)
+			return;
+
+		// Our buildings on the edge of the pocket that the house can do without, cheapest first.
+		std::vector<BuildingClass*> edge;
+		std::vector<BuildingClass*> candidates;
+
+		for (auto const& cell : pocket)
+		{
+			for (int dy = -1; dy <= 1; ++dy)
+			{
+				for (int dx = -1; dx <= 1; ++dx)
+				{
+					auto const pCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) });
+					auto const pBld = pCell ? pCell->GetBuilding() : nullptr;
+
+					if (pBld && pBld->Owner == pHouse && std::find(edge.begin(), edge.end(), pBld) == edge.end())
+						edge.push_back(pBld);
+				}
+			}
+		}
+
+		for (auto const pBld : edge)
+		{
+			auto const pType = pBld->Type;
+			const int category = FactoryCapCategory(pType);
+			const bool spareFactory = (category == 0 || category == 1) && pHouse->CountOwnedNow(pType) >= 2 && !pType->Unsellable
+				&& pBld->IsAlive && !pBld->InLimbo && pBld->CurrentMission != Mission::Selling && pBld->QueuedMission != Mission::Selling
+				&& pBld->CurrentMission != Mission::Construction;
+
+			if (spareFactory || IsSpareBuildingForRoad(pHouse, pBld))
+				candidates.push_back(pBld);
+		}
+
+		std::stable_sort(candidates.begin(), candidates.end(), [](const BuildingClass* a, const BuildingClass* b)
+			{ return a->Type->Cost != b->Type->Cost ? a->Type->Cost < b->Type->Cost : a->UniqueID < b->UniqueID; });
+
+		const CellStruct seedCell = pSeed->GetMapCoords();
+		std::vector<CellStruct> opened;
+
+		for (size_t i = 0; i < candidates.size() && i < PocketSellTests; ++i)
+		{
+			auto const pBld = candidates[i];
+
+			if (FloodPocket(seedCell, pSeed->GetTechnoType(), pBld, opened) <= PocketMaxCells)
+				continue;
+
+			const CellStruct at = pBld->GetMapCoords();
+			Debug::Log("[NeuralAI] Frame %d | House #%d sells %s at (%d,%d): it closes a pocket of %d cells around (%d,%d) where %d units "
+				"of ours are shut in\n", now, pHouse->ArrayIndex, pBld->Type->ID, at.X, at.Y, static_cast<int>(pocket.size()), seedCell.X,
+				seedCell.Y, static_cast<int>(inside));
+			macro.LastPocketSellFrame = now;
+			macro.PocketClearFrom = at;
+			macro.PocketClearTo = { static_cast<short>(at.X + pBld->Type->GetFoundationWidth() - 1),
+				static_cast<short>(at.Y + pBld->Type->GetFoundationHeight(false) - 1) };
+			macro.PocketClearUntil = now + PocketClearFrames;
+			pBld->Sell(1);
+
+			return;
+		}
+
+		// TEMP diagnostic: shut in, and no single building the house can spare opens the pocket.
+		if (now - macro.LastPocketLogFrame >= PocketLogFrames || now < macro.LastPocketLogFrame)
+		{
+			macro.LastPocketLogFrame = now;
+			Debug::Log("[NeuralAI] House %d pocket DIAG: %d units shut in a pocket of %d cells around (%d,%d), %d buildings of ours on "
+				"its edge, %d to spare, none opens it by itself, frame %d.\n", pHouse->ArrayIndex, static_cast<int>(inside),
+				static_cast<int>(pocket.size()), seedCell.X, seedCell.Y, static_cast<int>(edge.size()), static_cast<int>(candidates.size()), now);
+		}
+	}
+
 	// The launch ring of the ring-limited superweapons (SW.RangeMaximum > 0, e.g. an EMP cannon) a
 	// building type fires: listed in their EMPulse.Cannons, else EMPulseCannon=yes for an EMPulse type,
 	// else granting the superweapon itself. The largest maximum (cells) and its minimum; 0 when none.
@@ -2477,6 +2692,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				static_cast<short>(bc.X + pAllyBld->Type->GetFoundationWidth() - 1 + margin),
 				static_cast<short>(bc.Y + pAllyBld->Type->GetFoundationHeight(false) - 1 + margin) });
 		}
+	}
+
+	// The ground of a building sold to open a pocket (SellPocketBlock) stays free for a while.
+	if (auto const& pocketMacro = GetMacroState(pHouse); Unsorted::CurrentFrame < pocketMacro.PocketClearUntil)
+	{
+		allySiteKeepClear.push_back({ pocketMacro.PocketClearFrom.X, pocketMacro.PocketClearFrom.Y, pocketMacro.PocketClearTo.X,
+			pocketMacro.PocketClearTo.Y });
 	}
 
 	const bool hasPendingClearanceForOther =
