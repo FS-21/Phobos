@@ -2135,8 +2135,10 @@ namespace
 	constexpr int ShuttleStuckRetryFrames = 27000;
 	// Back door (user, an idea of the old aimd.ini, whose transported attack on the farthest factory had
 	// the largest reward of the file). Checked every BackdoorCheckFrames:
-	// - The house's latest wave (WaveTargetKeepFrames old at most) hits an enemy base on the house's own
+	// - The house's latest wave (BackdoorFrontFrames old at most) hits an enemy base on the house's own
 	//   ground, with BackdoorMinDefenses or more known defenses within BackdoorFrontCells of its target.
+	//   With 900 frames and 3 defenses no back door started in about 60 matches: no front in most
+	//   checks (a wave takes far longer to reach its target), too few defenses in the rest (2026-11-17).
 	// - BackdoorTeam idle armed ground units of the house (BackdoorMinTeam at least, within BackdoorHomeCells
 	//   of its base) ride a transport operation (client Strike) around that base.
 	// - They land within BackdoorLandingCells of a known valuable building of the same house,
@@ -2147,7 +2149,8 @@ namespace
 	//   The landings of the load stay within BackdoorLandingCandidateCells of the first.
 	// - One back door at a time per house, BackdoorRetryFrames after the last started.
 	constexpr int BackdoorCheckFrames = 900;
-	constexpr int BackdoorMinDefenses = 3;
+	constexpr int BackdoorFrontFrames = 3600;
+	constexpr int BackdoorMinDefenses = 2;
 	constexpr double BackdoorFrontCells = 12.0;
 	constexpr int BackdoorTeam = 8;
 	constexpr int BackdoorMinTeam = 4;
