@@ -492,7 +492,8 @@ namespace
 	// A unit an operation carries: its passenger size, the address its client gave it, the transport
 	// it is to board (0: none yet), whether it is aboard, and the cell the operation last sent it to
 	// (another order found on it counts as an interference). A harvester of a shuttle: its work, when
-	// it began, and the largest load seen on it with the frame it grew last.
+	// it began, the largest load seen on it with the frame it grew last, and where it stood since when
+	// while a transport waited for it.
 	struct NeuralOpMember
 	{
 		DWORD UniqueID { 0 };
@@ -505,6 +506,8 @@ namespace
 		int WorkFrame { -1 };
 		float LoadSeen { 0.0f };
 		int LoadFrame { -1 };
+		CellStruct ProgressCell { CellStruct::Empty };
+		int ProgressFrame { -1 };
 	};
 
 	// A transport an operation holds: its type, its leg and the frame the leg began, the cell it sets
@@ -1152,6 +1155,8 @@ namespace
 		int ShuttleNoRideLogFrame { -1 };
 		int ShuttleCreditsTotal { 0 };
 		int ShuttleTransportsLost { 0 };
+		// Harvesters that could not get to their ride (UniqueID -> no shuttle takes them before that frame).
+		std::unordered_map<DWORD, int> ShuttleSkipUntil;
 		std::array<int, 8> FailedApproachWeight {};
 		// Forward staging hold: first frame of the current hold, and no hold before this frame (a hold
 		// that never gathered the wave in 2700 frames rests 2700).
@@ -1530,6 +1535,7 @@ namespace
 			this->ShuttleNoRideLogFrame = -1;
 			this->ShuttleCreditsTotal = 0;
 			this->ShuttleTransportsLost = 0;
+			this->ShuttleSkipUntil.clear();
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
@@ -1957,7 +1963,11 @@ namespace
 	// shuttle, one shuttle per house. A harvester on the field comes back full, when its load has not
 	// grown for ShuttleIdleFrames, or ShuttleHarvestCapFrames after the landing; at home it boards
 	// again once empty, or ShuttleUnloadCapFrames after the landing. A shuttle that lost
-	// ShuttleMaxLostTransports transports ends, and no other starts for ShuttleRetryFrames.
+	// ShuttleMaxLostTransports transports ends, and no other starts for ShuttleRetryFrames. A harvester
+	// that gets no 2 cells nearer to its ride in ShuttleStuckFrames while a transport waits for it is let
+	// go and not taken again for ShuttleStuckRetryFrames: the engine turns an AI harvester whose move
+	// ends or fails back to harvesting, and one shut in near its refinery kept the only transport of its
+	// house waiting 8000 frames twice in a row (match #10559, The Honeymoon).
 	// The archives before it (2026-11-16, 79 logs): 9 houses in 5 of the 23 matches with a free field
 	// across water spent 14000 to 46000 frames with their ore gone, harvesters and transports at hand,
 	// often with single-digit credits.
@@ -1969,6 +1979,8 @@ namespace
 	constexpr int ShuttleUnloadCapFrames = 4500;
 	constexpr int ShuttleMaxLostTransports = 2;
 	constexpr int ShuttleRetryFrames = 9000;
+	constexpr int ShuttleStuckFrames = 1800;
+	constexpr int ShuttleStuckRetryFrames = 27000;
 	// How far around a target on no ground the ground it stands next to is looked for.
 	constexpr int FerryTargetGroundCells = 3;
 	// Deployed slave miners: a miner with this many ore cells (sampled every 2 cells) within its
