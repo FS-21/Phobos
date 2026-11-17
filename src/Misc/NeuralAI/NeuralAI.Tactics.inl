@@ -4628,7 +4628,10 @@ namespace
 		macro.PressureMode = pHouse->Available_Money() >= 2500 && pHouse->NumWarFactories >= 1 && ownRefineries >= 2
 			&& ownRefineries >= richestEnemyRefineries + 1 && SlotGate(scores[37], 0, 37);
 
-		macro.FocusEnemyIndex = (enemies >= 2 && weakestStrength * 10 <= strongestStrength * 6 && SlotGate(scores[43], -150, 43))
+		// The weakest enemy is focused as the untrained brain does it, with the gate at a neutral score.
+		// It used Expert 3's routing slot (43), which the expert credit drove to -1489: trained houses
+		// focused the weakest enemy in 14% of the checks, untrained ones in about 78% (2026-11-17).
+		macro.FocusEnemyIndex = (enemies >= 2 && weakestStrength * 10 <= strongestStrength * 6 && SlotGate(0, -150, -1))
 			? weakest
 			: -1;
 	}
