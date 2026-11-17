@@ -9262,14 +9262,38 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// takes them along.
 		std::vector<UnitClass*> heldJoinVehicles;
 		std::vector<InfantryClass*> heldJoinSoldiers;
+		// Why the others do not: they wait for a transport, belong to a plan, or something else
+		// (entering, unloading, linked, disabled, hurt).
+		int heldForTransport = 0;
+		int heldInPlan = 0;
+		int heldOtherwise = 0;
 
 		auto const heldJoinsWave = [&](FootClass* pFoot)
 		{
-			return tankMassWaves && !IsPlanMember(pHouse, pFoot->UniqueID) && !IsInTransportOp(pHouse, pFoot->UniqueID)
-				&& !IsFerryReserved(pHouse, pFoot->UniqueID) && pFoot->CurrentMission != Mission::Enter
-				&& pFoot->QueuedMission != Mission::Enter && pFoot->CurrentMission != Mission::Unload && !pFoot->HasAnyLink()
-				&& !pFoot->BunkerLinkedItem && !pFoot->Deactivated && !pFoot->IsUnderEMP()
-				&& pFoot->GetHealthPercentage() >= HeldJoinsWaveHealth;
+			if (!tankMassWaves)
+				return false;
+
+			if (IsInTransportOp(pHouse, pFoot->UniqueID) || IsFerryReserved(pHouse, pFoot->UniqueID))
+			{
+				++heldForTransport;
+				return false;
+			}
+
+			if (IsPlanMember(pHouse, pFoot->UniqueID))
+			{
+				++heldInPlan;
+				return false;
+			}
+
+			if (pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter
+				|| pFoot->CurrentMission == Mission::Unload || pFoot->HasAnyLink() || pFoot->BunkerLinkedItem
+				|| pFoot->Deactivated || pFoot->IsUnderEMP() || pFoot->GetHealthPercentage() < HeldJoinsWaveHealth)
+			{
+				++heldOtherwise;
+				return false;
+			}
+
+			return true;
 		};
 
 		auto const isHeldAtHome = [&](const FootClass* pFoot)
@@ -9299,7 +9323,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				++heldVehicles;
 
-				if (!IsImmobileUnitTypeOnLand(pU->Type) && heldJoinsWave(pU))
+				if (IsImmobileUnitTypeOnLand(pU->Type))
+					heldOtherwise += tankMassWaves ? 1 : 0;
+				else if (heldJoinsWave(pU))
 					heldJoinVehicles.push_back(pU);
 			}
 		}
@@ -9323,6 +9349,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// How many may join grows with the waves in a row that took no building, like the wave
+		// (user): none while the waves take buildings, HeldJoinsWaveUnits after one that took none,
+		// twice that after each more. Vehicles first.
+		const int heldJoinSteps = std::min(GetMacroState(pHouse).WaveFailuresInARow, HeldJoinsWaveMaxSteps);
+		const size_t heldJoinMost = heldJoinSteps > 0 ? static_cast<size_t>(HeldJoinsWaveUnits) << (heldJoinSteps - 1) : 0u;
+		const int heldFree = static_cast<int>(heldJoinVehicles.size() + heldJoinSoldiers.size());
+
+		if (heldJoinVehicles.size() > heldJoinMost)
+			heldJoinVehicles.resize(heldJoinMost);
+
+		if (heldJoinSoldiers.size() > heldJoinMost - heldJoinVehicles.size())
+			heldJoinSoldiers.resize(heldJoinMost - heldJoinVehicles.size());
+
 		// TEMP diagnostic: units jammed at home, every 1800 frames per house while there are 10 or more.
 		{
 			static int heldSerial = -1;
@@ -9342,6 +9381,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				Debug::Log("[NeuralAI] House %d held at home DIAG: %d vehicles and %d soldiers with somewhere to go stood %d+ frames "
 					"within %d cells of (%d,%d); idle %d and %d, frame %d.\n", houseIndex, heldVehicles, heldSoldiers, HeldAtHomeFrames,
 					static_cast<int>(HeldAtHomeCells), homeCoords.X, homeCoords.Y, idleVehicles, static_cast<int>(idleCombatInf.size()), now);
+
+				if (tankMassWaves)
+				{
+					Debug::Log("[NeuralAI] House %d held at home of the tank mass: %d wait for a transport, %d in a plan, %d otherwise "
+						"kept, %d free to join; %d may join after %d failed waves in a row, %d do, frame %d.\n", houseIndex,
+						heldForTransport, heldInPlan, heldOtherwise, heldFree, static_cast<int>(heldJoinMost),
+						GetMacroState(pHouse).WaveFailuresInARow, static_cast<int>(heldJoinVehicles.size() + heldJoinSoldiers.size()), now);
+				}
 			}
 		}
 
@@ -9362,18 +9409,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		NoteIdleArmy(pHouse, idleVehicles + heldVehicles, static_cast<int>(idleCombatInf.size()) + heldSoldiers, idleShips);
-
-		// How many may join grows with the wave lesson, like the wave (user): none while the waves
-		// take buildings, HeldJoinsWaveUnits after one that took none, twice that after each more.
-		// Vehicles first.
-		const int lessonSteps = WaveLessonStepsNow(pHouse);
-		const size_t heldJoinMost = lessonSteps > 0 ? static_cast<size_t>(HeldJoinsWaveUnits) << (lessonSteps - 1) : 0u;
-
-		if (heldJoinVehicles.size() > heldJoinMost)
-			heldJoinVehicles.resize(heldJoinMost);
-
-		if (heldJoinSoldiers.size() > heldJoinMost - heldJoinVehicles.size())
-			heldJoinSoldiers.resize(heldJoinMost - heldJoinVehicles.size());
 
 		// From here on they are idle army like the rest: they make the count of the next wave and
 		// leave with it.

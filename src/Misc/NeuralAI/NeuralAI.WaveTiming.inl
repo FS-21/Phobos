@@ -423,11 +423,13 @@ namespace
 		if (tookBuilding)
 		{
 			macro.WaveLessonSteps = 0;
+			macro.WaveFailuresInARow = 0;
 		}
 		else
 		{
 			macro.WaveLessonSteps = std::min(WaveLessonStepsNow(pHouse) + 1, WaveLessonMaxSteps);
 			macro.WaveLessonFrame = frame;
+			macro.WaveFailuresInARow++;
 		}
 
 		// The verdict is the result of the mission the wave left for (Reprisal, Clear Our Ground).
@@ -440,10 +442,11 @@ namespace
 		}
 
 		Debug::Log("[NeuralAI] Frame %d | House #%d wave verdict at (%d,%d): %s, %d of %d known buildings stand, %s, mission %s, "
-			"lesson steps %d -> %d, next wave waits for %d units\n",
+			"lesson steps %d -> %d, next wave waits for %d units, %d failures in a row\n",
 			frame, pHouse->ArrayIndex, macro.WaveVerdictCell.X, macro.WaveVerdictCell.Y, tookBuilding ? "took a building" : "took none",
 			standing, macro.WaveVerdictBuildings, macro.WaveVerdictArrived ? "arrived" : "never arrived",
-			onMission ? NeuralPlanNames[macro.WaveVerdictMission] : "none", stepsBefore, macro.WaveLessonSteps, TankMassWaveUnits(pHouse));
+			onMission ? NeuralPlanNames[macro.WaveVerdictMission] : "none", stepsBefore, macro.WaveLessonSteps, TankMassWaveUnits(pHouse),
+			macro.WaveFailuresInARow);
 		macro.WaveVerdictPending = false;
 		macro.WaveVerdictMission = -1;
 	}
