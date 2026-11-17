@@ -1637,6 +1637,25 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// What made up the priority of the chosen house (main enemy log): threat seen, hurt us last,
 	// weak enough to finish, Expert 3 opportunism, diplomacy, team front.
 	std::array<int, 6> bestParts {};
+	// Per house this tick: whether it was weighed, its priority, and what makes it urgent enough to
+	// take over a main enemy held for less than MainEnemyHoldFrames.
+	std::array<bool, 8> weighed {};
+	std::array<int, 8> priorityOf {};
+	std::array<const char*, 8> urgentWhy {};
+	auto& mainCoal = GetMacroState(pHouse).Coalition;
+	std::array<bool, 8> atOurBase {};
+
+	if (homeCoords != CellStruct::Empty)
+	{
+		for (auto const& [uid, sighting] : GetMacroState(pHouse).EnemySightings)
+		{
+			if (sighting.OwnerIndex >= 0 && sighting.OwnerIndex < 8 && Unsorted::CurrentFrame - sighting.LastSeenFrame <= 150
+				&& sighting.LastCoords.DistanceFrom(homeCoords) <= MainEnemyBaseCells)
+			{
+				atOurBase[sighting.OwnerIndex] = true;
+			}
+		}
+	}
 
 	for (auto const pOther : HouseClass::Array)
 	{
@@ -1666,6 +1685,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		parts[5] = TeamFrontBonus(pHouse, pOther->ArrayIndex);
 
 		const int priority = parts[0] + parts[1] + parts[2] + parts[3] + parts[4] + parts[5];
+		weighed[idx] = true;
+		priorityOf[idx] = priority;
+
+		if (parts[1] > 0 || Unsorted::CurrentFrame - mainCoal.HurtByFrame[idx] <= MainEnemyUrgentFrames)
+			urgentWhy[idx] = "it hurts us";
+		else if (atOurBase[idx])
+			urgentWhy[idx] = "at our base";
+		else if (parts[2] > 0 || (idx == mainCoal.DyingTarget && Unsorted::CurrentFrame < mainCoal.DyingUntil))
+			urgentWhy[idx] = "dying";
 
 		if (priority > bestEnemyPriority)
 		{
@@ -1682,10 +1710,39 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// The main enemy is held for MainEnemyHoldFrames: before that only a house worth
+	// MainEnemySwitchMargin more, or one that is urgent (it hurts us, it is at our base, it is
+	// dying), takes over.
+	const char* switchWhy = "free";
+
+	if (const int current = pHouse->EnemyHouseIndex; bestEnemyIdx >= 0 && bestEnemyIdx != current && current >= 0 && current < 8
+		&& weighed[current] && Unsorted::CurrentFrame >= mainCoal.MainEnemySinceFrame
+		&& Unsorted::CurrentFrame - mainCoal.MainEnemySinceFrame < MainEnemyHoldFrames)
+	{
+		const int best = std::clamp(bestEnemyIdx, 0, 7);
+
+		if (urgentWhy[best])
+		{
+			switchWhy = urgentWhy[best];
+		}
+		else if (bestEnemyPriority >= priorityOf[current] + MainEnemySwitchMargin)
+		{
+			switchWhy = "clear margin";
+		}
+		else
+		{
+			bestEnemyIdx = current;
+			mainCoal.MainEnemyHeld++;
+		}
+	}
+
 	// Which motive weighs most in the choice whenever the main enemy changes, so the motives can be
 	// measured (the first MainEnemyLogLimit changes of each house in a match).
 	if (bestEnemyIdx >= 0 && bestEnemyIdx != pHouse->EnemyHouseIndex)
 	{
+		mainCoal.MainEnemySinceFrame = Unsorted::CurrentFrame;
+		mainCoal.MainEnemyChanges++;
+
 		static int mainEnemyLogSerial = -1;
 		static std::array<int, 32> mainEnemyLogCount {};
 
@@ -1708,9 +1765,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			const char* motive = top == 4 ? DiplomacyTargetMotive(pHouse, bestEnemyIdx) : partNames[top];
 			Debug::Log("[NeuralAI] House %d main enemy: house %d by %s (threat %d, hurt us %d, weak %d, ffa %d, diplomacy %d, team %d), "
-				"was house %d, runner-up house %d at %d against %d, frame %d.\n", pHouse->ArrayIndex, bestEnemyIdx, motive, bestParts[0],
-				bestParts[1], bestParts[2], bestParts[3], bestParts[4], bestParts[5], pHouse->EnemyHouseIndex, runnerUpIdx,
-				runnerUpPriority, bestEnemyPriority, Unsorted::CurrentFrame);
+				"was house %d (switch: %s), runner-up house %d at %d against %d, frame %d.\n", pHouse->ArrayIndex, bestEnemyIdx, motive,
+				bestParts[0], bestParts[1], bestParts[2], bestParts[3], bestParts[4], bestParts[5], pHouse->EnemyHouseIndex, switchWhy,
+				runnerUpIdx, runnerUpPriority, bestEnemyPriority, Unsorted::CurrentFrame);
 		}
 	}
 
