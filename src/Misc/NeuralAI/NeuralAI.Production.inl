@@ -3,6 +3,115 @@
 
 namespace
 {
+	// Picks that never come out of their factory. A pick the engine would suspend (no factory of
+	// ours may build it while the power is on: HouseClass::Update_Factories suspends it and
+	// BuildingClass::Factory_AI abandons it) is banned at once for EngineRefusedBanFrames. A type
+	// that stays the pick of its queue for UndeliveredPickFrames, with a factory of the kind and the
+	// money for it during UndeliveredPickPaidFrames of them, and never comes out is banned for
+	// UndeliveredPickBanFrames, twice as long each time it is banned again (up to 8 times). A Nod
+	// house whose primary war factory was not in the Venom's BuiltAt picked it all match and was
+	// refused it every time (2026-11-17); a type the engine would build at the designated factory
+	// is never banned, its factory is held up instead.
+	constexpr int EngineRefusedBanFrames = 1800;
+	constexpr int UndeliveredPickFrames = 5400;
+	constexpr int UndeliveredPickPaidFrames = 3600;
+	constexpr int UndeliveredPickBanFrames = 9000;
+	constexpr int UndeliveredPickBanDoublings = 3;
+	// A pick left for less than this keeps its streak (the choice flickers between ticks).
+	constexpr int PickStreakGapFrames = 900;
+
+	void BanProductionPick(HouseClass* pHouse, TechnoTypeClass* pType, int queue, int banFrames, const char* reason)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int index = pType->GetArrayIndex();
+		const int key = queue * 100000 + index;
+		macro.ProductionBanUntil[key] = Unsorted::CurrentFrame + banFrames;
+		macro.PickStreaks.erase(key);
+		CountDecision(NeuralDecision::ProductionPickBanned, pHouse->ArrayIndex);
+		Debug::Log("[NeuralAI] House %d production: %s banned for %d frames, %s, frame %d.\n", pHouse->ArrayIndex, pType->ID,
+			banFrames, reason, Unsorted::CurrentFrame);
+
+		auto const pExt = HouseExt::Fetch(pHouse);
+		auto const dropPick = [index](int& pick)
+		{
+			if (pick == index)
+				pick = -1;
+		};
+
+		switch (queue)
+		{
+		case 1:
+			dropPick(pExt->NeuralAI_NextUnitTarget);
+			dropPick(pHouse->ProducingUnitTypeIndex);
+			break;
+		case 2:
+			dropPick(pExt->NeuralAI_NextInfantryTarget);
+			dropPick(pHouse->ProducingInfantryTypeIndex);
+			break;
+		case 3:
+			dropPick(pExt->NeuralAI_NextNavalTarget);
+			dropPick(pExt->ProducingNavalUnitTypeIndex);
+			break;
+		case 4:
+			dropPick(pExt->NeuralAI_NextAircraftTarget);
+			dropPick(pHouse->ProducingAircraftTypeIndex);
+			break;
+		default:
+			break;
+		}
+	}
+
+	void WatchUndeliveredPick(HouseClass* pHouse, TechnoTypeClass* pType, int factories)
+	{
+		const int queue = ProductionQueueOf(pType);
+
+		if (queue == 0 || factories <= 0 || IsProductionBanned(pHouse, queue, pType->GetArrayIndex()))
+			return;
+
+		auto const pEngineFactory = pType->FindFactory(true, true, true, pHouse);
+
+		if (!pEngineFactory && !pHouse->HasLowPower())
+		{
+			BanProductionPick(pHouse, pType, queue, EngineRefusedBanFrames, "no factory of ours may build it");
+			return;
+		}
+
+		auto& macro = GetMacroState(pHouse);
+		const int key = queue * 100000 + pType->GetArrayIndex();
+		const int now = Unsorted::CurrentFrame;
+		auto& streak = macro.PickStreaks[key];
+
+		if (streak.LastSeen < 0 || now < streak.LastSeen || now - streak.LastSeen > PickStreakGapFrames)
+		{
+			streak = {};
+			streak.Since = now;
+		}
+		else if (pHouse->Available_Money() >= pType->GetActualCost(pHouse))
+		{
+			streak.PaidFrames += now - streak.LastSeen;
+		}
+
+		streak.LastSeen = now;
+
+		if (now - streak.Since < UndeliveredPickFrames || streak.PaidFrames < UndeliveredPickPaidFrames)
+			return;
+
+		if (auto const it = macro.LastDeliveredFrame.find(key); it != macro.LastDeliveredFrame.end() && it->second >= streak.Since)
+			return;
+
+		// The engine would build it at the factory our queue builds at: the type is fine and that
+		// factory is held up (its exit blocked, its queue owned by another one), no ban then.
+		const AbstractType kind = queue == 2 ? AbstractType::InfantryType : (queue == 4 ? AbstractType::AircraftType : AbstractType::UnitType);
+
+		if (pEngineFactory && pEngineFactory == NeuralFactoryQueue::FindDesignated(pHouse, kind, queue == 3))
+			return;
+
+		const int bans = macro.ProductionBanCount[key]++;
+		char reason[96];
+		_snprintf_s(reason, _TRUNCATE, "its pick since frame %d never came out of a factory", streak.Since);
+		BanProductionPick(pHouse, pType, queue, UndeliveredPickBanFrames << std::min(bans, UndeliveredPickBanDoublings), reason);
+	}
+
 	// Evaluates buildability strictly under Human Player rules:
 	// - Requires valid human TechLevel (0..10), excluding TechLevel=-1 AI script
 	// hacks/limbo dummies and TechLevel=11 disabled types. What a captured secret lab
@@ -65,6 +174,19 @@ namespace
 		// PowersUp.Buildings parent upgrade slots.
 		if (!HouseExt::PrerequisitesMet(pHouse, pType))
 			return false;
+
+		// Ares BuiltAt: one of the factory types it names has to stand (the queue is built at one of
+		// them, see BuildingClass_Update_Factory_NeuralDesignated).
+		if (auto const& builtAt = TechnoTypeExt::Fetch(pType)->BuiltAt; !builtAt.empty())
+		{
+			const bool hasFactory = std::any_of(pHouse->Buildings.begin(), pHouse->Buildings.end(), [&builtAt](BuildingClass* pOwnBld)
+				{
+					return pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && builtAt.Contains(pOwnBld->Type);
+				});
+
+			if (!hasFactory)
+				return false;
+		}
 
 		const bool prevHuman = pHouse->IsHumanPlayer;
 		const bool prevAIBuild = pBld ? pBld->AIBuildThis : true;
@@ -1680,6 +1802,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// The building a crossing asks for (crossingPrerequisites).
 		int bestCrossingIdx = -1;
 		int bestCrossingScore = -32000;
+		// The barracks an urgent capture site asks for (UpdateCaptureBarracks).
+		int bestCaptureBarracksIdx = -1;
+		int bestCaptureBarracksScore = -32000;
 
 		// A raid short of guns with no defense that shoots up buildable yet: the buildings those
 		// defenses still miss come ahead of routine picks.
@@ -2164,6 +2289,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 			}
 		}
+
+		// Capture barracks (UpdateCaptureBarracks): a tech our engineers would take stands on a land with
+		// buildings of ours and no barracks of ours; its barracks is wanted like an outpost's.
+		const bool captureSiteNeedsBarracks = IsCaptureSiteWaiting(pHouse);
+		const bool captureSiteUrgent = captureSiteNeedsBarracks && IsCaptureSiteUrgent(pHouse);
 
 		// Outposts that may get a factory past the difficulty cap (SellFactoriesOverDifficultyCap
 		// then sells another of its type): a forward or island ConYard without one, or the front of
@@ -2711,7 +2841,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				category >= 0 && factoryCategoryCounts[category] >= factoryCategoryCaps[category])
 			{
 				const bool outpostNeedsIt = (category == 0)
-					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
+					? (forwardConYardNeedsBarracks || frontNeedsBarracks || captureSiteNeedsBarracks)
 					: (category == 1 ? (forwardConYardNeedsWarFactory || frontNeedsWarFactory) : islandYardNeedsShipyard);
 				const bool newFactoryType = owned == 0;
 				const bool saleCooldownOver = Unsorted::CurrentFrame - GetMacroState(pHouse).LastFactoryCapSaleFrame >= 4500;
@@ -2731,7 +2861,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (isGroundFactoryOrBarracks && owned >= 1 && GetMacroState(pHouse).HasBuildableTechUnlock)
 			{
 				const bool outpostNeedsCopy = (pBld->Factory == AbstractType::InfantryType)
-					? (forwardConYardNeedsBarracks || frontNeedsBarracks)
+					? (forwardConYardNeedsBarracks || frontNeedsBarracks || captureSiteNeedsBarracks)
 					: (forwardConYardNeedsWarFactory || frontNeedsWarFactory);
 				const bool bankNeedsCopy = bankGovernorBuilds
 					&& ((pBld->Factory == AbstractType::InfantryType)
@@ -2920,7 +3050,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					: ((needsSteppingStoneCrawlToOre && pBld->BaseNormal) ? std::max(maxBarracks + 1, 4) : maxBarracks);
 				const int bankBarracks = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Infantry, pHouse->NumBarracks) : 0;
 
-				if (owned >= effectiveMaxBarracks && bankBarracks == 0)
+				// A capture site asks for one barracks past any count (placement takes it to the site).
+				if (owned >= effectiveMaxBarracks && bankBarracks == 0 && !captureSiteNeedsBarracks)
 					continue;
 
 				// Slot 82 (Cross-Faction Tech Tree): If we already own our native
@@ -2938,6 +3069,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					// do not penalize by home-island Barracks count!
 					score = std::max(static_cast<int>(scores[2]), 300) + 1450 + (beachheadNeedsFactories ? 1500 : 0);
 				}
+				else if (captureSiteNeedsBarracks)
+				{
+					// A capture site lacks its barracks: the home barracks count does not lower it either.
+					score = std::max(static_cast<int>(scores[2]), 300) + CaptureBarracksBonus;
+				}
 				else
 				{
 					score = scores[2] - owned * (bankSteps > 0 ? 420 : 820) + (bankSteps > 0 ? 250 + 120 * std::min(6, bankSteps) : 0);
@@ -2950,6 +3086,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						score += 780; // Forward Barracks stepping-stone toward uncolonized
 									// Ore / Frontline!
 					}
+				}
+
+				if (captureSiteUrgent && score > bestCaptureBarracksScore)
+				{
+					bestCaptureBarracksScore = score;
+					bestCaptureBarracksIdx = pBld->ArrayIndex;
 				}
 
 				if (bankBarracks > 0)
@@ -3624,6 +3766,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestCrossingIdx;
 			bestBldScore = std::max(bestBldScore, bestCrossingScore);
+		}
+
+		// An urgent capture site (UpdateCaptureBarracks: our engineers failed on the way to its tech, or
+		// the crossing to it is dangerous): its barracks comes before the other picks, the bank governor's
+		// factories included, under the terms of Island Hold below (which wins when both ask).
+		if (bestCaptureBarracksIdx >= 0 && bestBldIdx != bestCaptureBarracksIdx && hasActiveBuildingIncome && !bestFillsAirDeficit
+			&& inProgressBldIdx < 0 && inProgressDefIdx < 0)
+		{
+			bestBldIdx = bestCaptureBarracksIdx;
+			bestBldScore = std::max(bestBldScore, bestCaptureBarracksScore);
 		}
 
 		// Island Hold: the defense its yard still lacks comes before the other picks, the bank
@@ -4845,8 +4997,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isUnitInProgress
 			= (pUnit->ArrayIndex == inProgressUnitIdx || pUnit->ArrayIndex == inProgressNavalIdx);
 
-		// A pick the engine never started (see WatchProductionPick).
-		if (!isUnitInProgress && !pUnit->Naval && IsProductionBanned(pHouse, 1, pUnit->ArrayIndex))
+		// A pick that never came out of its factory (WatchUndeliveredPick).
+		if (!isUnitInProgress && IsProductionBanned(pHouse, pUnit->Naval ? 3 : 1, pUnit->ArrayIndex))
 			continue;
 
 		if (!isUnitInProgress && !IsUnitTierAllowed(pHouse, pUnit))
@@ -5595,7 +5747,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool isInfInProgress = (pInf->ArrayIndex == inProgressInfIdx);
 
-		// A pick the engine never started (see WatchProductionPick).
+		// A pick that never came out of its factory (WatchUndeliveredPick).
 		if (!isInfInProgress && IsProductionBanned(pHouse, 2, pInf->ArrayIndex))
 			continue;
 
@@ -5970,6 +6122,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			AbstractType::InfantryType, pHouse->NumBarracks);
 	}
 
+	// Picks that never come out of their factory are banned (WatchUndeliveredPick).
+	if (const int unitPick = pExt->NeuralAI_NextUnitTarget; unitPick >= 0 && unitPick < UnitTypeClass::Array.Count)
+		WatchUndeliveredPick(pHouse, UnitTypeClass::Array.GetItem(unitPick), pHouse->NumWarFactories);
+
+	if (const int navalPick = pExt->NeuralAI_NextNavalTarget; navalPick >= 0 && navalPick < UnitTypeClass::Array.Count)
+		WatchUndeliveredPick(pHouse, UnitTypeClass::Array.GetItem(navalPick), pHouse->NumShipyards);
+
+	if (bestInfIdx >= 0 && bestInfIdx < InfantryTypeClass::Array.Count)
+		WatchUndeliveredPick(pHouse, InfantryTypeClass::Array.GetItem(bestInfIdx), pHouse->NumBarracks);
+
 	productionClock.Mark(NeuralSection::ProdAircraft);
 
 	// Aircraft Target Selection
@@ -6004,6 +6166,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				continue;
 
 			const bool isAirInProgress = (pAir->ArrayIndex == inProgressAirIdx);
+
+			// A pick that never came out of its factory (WatchUndeliveredPick).
+			if (!isAirInProgress && IsProductionBanned(pHouse, 4, pAir->ArrayIndex))
+				continue;
 
 			if (!isAirInProgress && !IsUnitTierAllowed(pHouse, pAir))
 				continue;
@@ -6106,6 +6272,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Ares replaces HouseClass::AI_Aircraft the same way (0x4FF210 jumps past the
 	// UpdateAircraftProduction hook), so the airfields get the choice here too.
 	pHouse->ProducingAircraftTypeIndex = bestAirIdx;
+
+	if (bestAirIdx >= 0 && bestAirIdx < AircraftTypeClass::Array.Count)
+		WatchUndeliveredPick(pHouse, AircraftTypeClass::Array.GetItem(bestAirIdx), pHouse->NumAirpads);
 
 	// TEMP diagnostic: productions that are finished and still in their factory (no dock, no cell to
 	// place or leave to, a build limit). The engine abandons them when the factory's retry timer
@@ -6385,6 +6554,10 @@ void NeuralAI::OnTechnoProduced(HouseClass* pHouse, TechnoClass* pTechno)
 
 	if (!pType || pTechno->WhatAmI() == AbstractType::Building)
 		return;
+
+	// What came out of a factory (WatchUndeliveredPick).
+	if (const int queue = ProductionQueueOf(pType); queue != 0)
+		GetMacroState(pHouse).LastDeliveredFrame[queue * 100000 + pType->GetArrayIndex()] = Unsorted::CurrentFrame;
 
 	auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
 	auto const pInfType = abstract_cast<InfantryTypeClass*>(pType);
