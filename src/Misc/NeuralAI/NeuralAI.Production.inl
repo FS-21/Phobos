@@ -3924,7 +3924,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		unitPickDiagCount = 0;
 	}
 
-	const bool logUnitPicks = unitPickDiagCount < UnitPickDiagLines && IsAITickWindow(1800, pHouse->ArrayIndex * 15);
+	const bool logUnitPicks = unitPickDiagCount < UnitPickDiagLines && IsAITickWindow(1800, 0);
 	// Tank bunkers of ours standing empty beyond the free tanks that fit them: a tank is built for
 	// each on purpose (user: the original AI built units for its bunkers), the best one that fits.
 	int bestBunkerTankIdx = -1;
@@ -5692,6 +5692,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// TEMP diagnostic: the floor, the tanks alive and what the floor did, with the vehicle pick line.
 		if (logUnitPicks)
 		{
+			++unitPickDiagCount;
 			Debug::Log("[NeuralAI] Frame %d | House #%d tank floor %d, main battle tanks %d of %d armed ground vehicles, best tank %s %d, "
 				"pick %s %d%s\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, tankFloor, ownedMainTanks, ownedGroundCombatUnits,
 				bestTankIdx >= 0 ? UnitTypeClass::Array.GetItem(bestTankIdx)->ID : "none", bestTankScore,
