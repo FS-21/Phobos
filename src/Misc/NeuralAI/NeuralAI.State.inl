@@ -2439,6 +2439,14 @@ namespace
 	// proportion between. Less than the bonus of the target a wave keeps, so the target does not
 	// change with every unit that joins. The army counted is that of the last tick, no older than
 	// WaveGroupFreshFrames.
+	// Where the enemy aircraft rearm (user): a known airfield or helipad gains, as a wave target and
+	// as an air strike target, a share of the value of that enemy's aircraft seen lately
+	// (EnemyAirValueByOwner): AirBaseWavePercent of it up to AirBaseWaveMost on the score of a
+	// wave target, AirBaseStrikePercent up to AirBaseStrikeMost on the worth of an air strike.
+	constexpr int AirBaseWavePercent = 50;
+	constexpr int AirBaseWaveMost = 250;
+	constexpr int AirBaseStrikePercent = 30;
+	constexpr int AirBaseStrikeMost = 150;
 	constexpr int WaveGroupDamageEvenPercent = 100;
 	constexpr int WaveGroupDamageFastPercent = 400;
 	constexpr int WaveGroupDamageSlowPercent = 25;
