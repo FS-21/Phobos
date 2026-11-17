@@ -747,6 +747,9 @@ namespace
 		UpdatePassageMouths();
 	}
 
+	// Defined in NeuralAI.Tactics.inl: is a square the house's units find no path to this near?
+	bool IsPathDeadGoalWithin(const HouseClass* pHouse, const CellStruct& cell, double cells);
+
 	void ResetBridgePlanner()
 	{
 		OpenGroundGrid.clear();
@@ -1193,11 +1196,17 @@ namespace
 				const int zoneA = FirstZoneOf(span.BankA, MovementZone::Normal);
 				const int zoneB = FirstZoneOf(span.BankB, MovementZone::Normal);
 
-				if (zoneA <= 1 || zoneB <= 1 || zoneA == zoneB || (homeZone != zoneA && homeZone != zoneB))
-					continue;
+				// A fallen bridge by a place our units find no path to is repaired whatever the zone map
+				// says of its banks (user's match #10790: bridge 24 down, both banks of zone 3, and 9420
+				// failed path searches to the base beyond it).
+				if (!IsPathDeadGoalWithin(pHouse, span.Center, BridgeDeadGoalCells))
+				{
+					if (zoneA <= 1 || zoneB <= 1 || zoneA == zoneB || (homeZone != zoneA && homeZone != zoneB))
+						continue;
 
-				if (!hasZone(enemyGroundZones, homeZone == zoneA ? zoneB : zoneA))
-					continue;
+					if (!hasZone(enemyGroundZones, homeZone == zoneA ? zoneB : zoneA))
+						continue;
+				}
 			}
 			else if (MapClass::Instance.GetMovementZoneType(span.HutCell, MovementZone::Normal, false) != homeZone
 				|| enemyGroundZones.empty() || hasZone(enemyGroundZones, homeZone))
