@@ -2343,6 +2343,8 @@ namespace
 	// its search starts at the yard's own field, within RefineryHubOreCells of it.
 	constexpr int RefineryHubCells = 16;
 	constexpr int RefineryHubOreCells = 24;
+	// ... and within this many cells of that field (its centre against the field's best ore cell).
+	constexpr int RefineryHubFieldCells = 8;
 	// The new field refinery slot (past what we own) needs this many ore cells in the 7x7 of the free
 	// ore cell; its refinery counts as landing there within RefineryMissedFieldCells of it
 	// (RefineryMissedYardCells of a yard without one), else that field opens no slot for
