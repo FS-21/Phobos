@@ -522,6 +522,47 @@ namespace
 		return true;
 	}
 
+	// Does a building on this footprint leave a lane of one cell next to it? A cell beside the footprint
+	// (in one of the 4 directions) that units pass, open ground or a bridge or tube cell, whose next
+	// cell the same way is closed (a building, or ground no unit passes): the building and that
+	// obstacle leave one cell between them. FootprintCutsLandWay does not see it at a bridge end: it
+	// takes a high bridge's deck for water, and the gate for a dead end.
+	bool FootprintLeavesOneCellLane(const CellStruct& topLeft, int width, int height)
+	{
+		auto const passes = [](const CellStruct& cell)
+		{
+			auto const pCell = MapClass::Instance.CoordinatesLegal(cell) ? MapClass::Instance.TryGetCellAt(cell) : nullptr;
+
+			return pCell && !pCell->GetBuilding() && (IsBridgeOrTubeCell(pCell) || IsOpenGroundCell(pCell));
+		};
+
+		constexpr int DirX[4] = { 1, -1, 0, 0 };
+		constexpr int DirY[4] = { 0, 0, 1, -1 };
+
+		for (int j = 0; j < height; ++j)
+		{
+			for (int i = 0; i < width; ++i)
+			{
+				for (int d = 0; d < 4; ++d)
+				{
+					const int gapI = i + DirX[d];
+					const int gapJ = j + DirY[d];
+
+					if (gapI >= 0 && gapI < width && gapJ >= 0 && gapJ < height)
+						continue;
+
+					const CellStruct gap { static_cast<short>(topLeft.X + gapI), static_cast<short>(topLeft.Y + gapJ) };
+					const CellStruct beyond { static_cast<short>(gap.X + DirX[d]), static_cast<short>(gap.Y + DirY[d]) };
+
+					if (passes(gap) && !passes(beyond))
+						return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
 	// A neutral building of no worth that leaves a one-cell lane where a block of our units is held
 	// (JamBreachFrames): the nearest to the block's centre among those within JamBreachReachCells of a
 	// held unit is shot down by up to JamBreachShootersMost held units whose weapon hurts it and reaches
@@ -572,7 +613,7 @@ namespace
 				}
 			}
 
-			if (!beside || !FootprintCutsLandWay(topLeft, width, height, true))
+			if (!beside || !FootprintLeavesOneCellLane(topLeft, width, height))
 				continue;
 
 			bestDistance = distance;
@@ -617,7 +658,27 @@ namespace
 			++count;
 		}
 
-		if (count > 0)
+		if (count == 0)
+		{
+			// TEMP diagnostic: a barrier found that none of the held units can shoot (the first ones of each match).
+			static int noShooterSerial = -1;
+			static int noShooterCount = 0;
+
+			if (noShooterSerial != NeuralMatchSerial)
+			{
+				noShooterSerial = NeuralMatchSerial;
+				noShooterCount = 0;
+			}
+
+			if (noShooterCount++ < 20)
+			{
+				const CellStruct at = pBest->GetMapCoords();
+				Debug::Log("[NeuralAI] Frame %d | House #%d finds %s at (%d,%d) leaving a one-cell lane where %d of our units are held at (%d,%d), "
+					"but none of them can shoot it\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, pBest->Type->ID, at.X, at.Y,
+					static_cast<int>(heldUnits.size()), center.X, center.Y);
+			}
+		}
+		else
 		{
 			CountDecision(NeuralDecision::JamBarrierBreach, pHouse->ArrayIndex);
 			const CellStruct at = pBest->GetMapCoords();
