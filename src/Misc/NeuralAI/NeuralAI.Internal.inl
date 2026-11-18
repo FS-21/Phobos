@@ -206,6 +206,8 @@ namespace
 		McvIdleUnfold,
 		McvIdleSite,
 		McvIdleHome,
+		OpHoldMoved,
+		JamBarrierBreach,
 		Count
 	};
 
@@ -234,7 +236,7 @@ namespace
 		"hoverReleased", "groundRouteHop", "medicEscort", "garrisonSquad", "dryEconomySale", "ferryReserved", "productionPickBanned",
 		"ferryDoorRegistered", "ferryStrayLinkCut", "ferryTargetDropped", "ferryDoorCellMove", "ferryLandingRetried", "garrisonTraining",
 		"resourceDetour", "resourceHealStop", "ferryTakenAboard", "scoutSweep", "sensorLookout",
-		"mcvIdleUnfold", "mcvIdleSite", "mcvIdleHome" };
+		"mcvIdleUnfold", "mcvIdleSite", "mcvIdleHome", "opHoldMoved", "jamBarrierBreach" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
