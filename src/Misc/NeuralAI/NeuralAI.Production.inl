@@ -2087,6 +2087,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const bool hasRefNearCY = (refsNearCY >= 1);
 			int oreCellsNearCY = 0;
 			int tiberiumTreesNearCY = 0;
+			std::vector<CellStruct> oreSamplesNearCY;
+			std::vector<CellStruct> treeCellsNearCY;
 			for (int dy = -24; dy <= 24; dy += 3)
 			{
 				for (int dx = -24; dx <= 24; dx += 3)
@@ -2098,12 +2100,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 							continue;
 
 						if (pC->GetContainedTiberiumValue() > 0)
+						{
 							oreCellsNearCY++;
+							oreSamplesNearCY.push_back(tc);
+						}
 
 						if (auto const pTerr = pC->GetTerrain(false))
 						{
 							if (pTerr->Type && pTerr->Type->SpawnsTiberium)
+							{
 								tiberiumTreesNearCY++;
+								treeCellsNearCY.push_back(tc);
+							}
 						}
 					}
 				}
@@ -2112,6 +2120,58 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const bool hasOreNearCY = (oreCellsNearCY > 0 || tiberiumTreesNearCY > 0);
 			const bool wantsSecondIslandRefinery = (refsNearCY == 1 && hasWarFacNearCY
 				&& (tiberiumTreesNearCY >= 1 || oreCellsNearCY >= 8) && money >= 1400);
+
+			// A yard asks for its refinery only for a real field within 24 cells of it (user, 2026-11-18):
+			// RefineryNewFieldOreCells ore cells in a 7x7, or a spawner tree, not within 12 cells of a known
+			// enemy building (as placement judges a field). Any ore sample did: the yard hub refinery stood
+			// on the few cells left there, was recycled as exhausted and the yard asked again (one yard got
+			// 6 refineries in a row on 0 to 7 ore cells, and a pillbox was sold to make room for one).
+			bool hasRealFieldNearCY = false;
+
+			if (hasOreNearCY && (!hasRefNearCY || wantsSecondIslandRefinery))
+			{
+				std::vector<CellStruct> enemyCellsNearCY;
+
+				for (auto const pEB : BuildingClass::Array)
+				{
+					if (pEB && !pEB->InLimbo && pEB->IsAlive && pEB->Owner && pEB->Type && !pEB->Type->Insignificant
+						&& !pEB->Type->InvisibleInGame && pEB->Owner != pHouse && !pHouse->IsAlliedWith(pEB->Owner)
+						&& !pEB->Owner->IsNeutral() && IsEnemyBuildingKnown(pHouse, pEB))
+					{
+						const CellStruct ec = pEB->GetMapCoords();
+
+						if (std::max(std::abs(cyc.X - ec.X), std::abs(cyc.Y - ec.Y)) <= 24 + 12)
+							enemyCellsNearCY.push_back(ec);
+					}
+				}
+
+				auto const awayFromEnemy = [&enemyCellsNearCY](const CellStruct& cell)
+				{
+					return std::none_of(enemyCellsNearCY.begin(), enemyCellsNearCY.end(), [&cell](const CellStruct& ec)
+						{ return std::max(std::abs(cell.X - ec.X), std::abs(cell.Y - ec.Y)) <= 12; });
+				};
+
+				hasRealFieldNearCY = std::any_of(treeCellsNearCY.begin(), treeCellsNearCY.end(), awayFromEnemy);
+
+				for (size_t si = 0; !hasRealFieldNearCY && si < oreSamplesNearCY.size(); ++si)
+				{
+					const CellStruct oc = oreSamplesNearCY[si];
+					int fieldOreCells = 0;
+
+					for (int fy = -3; fy <= 3; ++fy)
+					{
+						for (int fx = -3; fx <= 3; ++fx)
+						{
+							auto const pFieldCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(oc.X + fx), static_cast<short>(oc.Y + fy) });
+
+							if (pFieldCell && pFieldCell->GetContainedTiberiumValue() > 0)
+								fieldOreCells++;
+						}
+					}
+
+					hasRealFieldNearCY = fieldOreCells >= RefineryNewFieldOreCells && awayFromEnemy(oc);
+				}
+			}
 
 			bool enemyNearCY = false;
 			bool enemyOnCYLand = false;
@@ -2133,7 +2193,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 			}
 
-			if ((!hasRefNearCY && hasOreNearCY) || wantsSecondIslandRefinery)
+			if (hasRealFieldNearCY && (!hasRefNearCY || wantsSecondIslandRefinery))
 			{
 				if (!conYardWithNoRefineryInZone)
 					noRefineryYardCell = cyc;

@@ -1741,8 +1741,12 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		nearestOreCell = fallbackOreCell;
 
 	// A remote yard without a refinery (anchoredAtMissingRefineryHub): the refinery serves the yard's
-	// own field, the best ore of its land within RefineryHubOreCells of it (the ore production saw
-	// there), judged as the scan above judges a field; none there and the search is the usual one.
+	// own field, the best real field of its land within RefineryHubOreCells of it (the field production
+	// saw there: RefineryNewFieldOreCells ore cells in the 7x7, not within 12 cells of an enemy base),
+	// and stands within RefineryHubFieldCells of it; none there and the search is the usual one. Any
+	// ore cell did: the refinery stood on the few cells left by the yard and was recycled as exhausted.
+	CellStruct refineryHubOreCell = CellStruct::Empty;
+
 	if (anchoredAtMissingRefineryHub && refineryHubCell != CellStruct::Empty && centerZone >= 0
 		&& MapClass::Instance.GetMovementZoneType(refineryHubCell, MovementZone::Normal, false) == centerZone)
 	{
@@ -1764,12 +1768,18 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 				bool hasSpawnerTree = false;
 				const int fieldCells = measureOreField(tc, hasSpawnerTree);
-				const bool nearEnemyBase = std::any_of(enemyBaseCells.begin(), enemyBaseCells.end(), [&tc](const CellStruct& ebc)
-					{ return std::max(std::abs(tc.X - ebc.X), std::abs(tc.Y - ebc.Y)) <= 12; });
+
+				if (fieldCells < RefineryNewFieldOreCells
+					|| std::any_of(enemyBaseCells.begin(), enemyBaseCells.end(), [&tc](const CellStruct& ebc)
+						{ return std::max(std::abs(tc.X - ebc.X), std::abs(tc.Y - ebc.Y)) <= 12; }))
+				{
+					continue;
+				}
+
 				const bool nearOurRefinery = std::any_of(ownRefineryCells.begin(), ownRefineryCells.end(), [&tc](const CellStruct& rc)
 					{ return std::max(std::abs(tc.X - rc.X), std::abs(tc.Y - rc.Y)) < 14; });
 				const int metric = std::max(std::abs(dx), std::abs(dy)) - fieldCells / 2 - (hasSpawnerTree ? 10 : 0)
-					+ (fieldCells >= 5 ? 0 : 1000) + (nearEnemyBase ? 1000 : 0) + (nearOurRefinery ? 500 : 0);
+					+ (nearOurRefinery ? 500 : 0);
 
 				if (metric < bestHubOreMetric)
 				{
@@ -1780,9 +1790,14 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 
 		if (hubOreCell != CellStruct::Empty)
+		{
 			nearestOreCell = hubOreCell;
+			refineryHubOreCell = hubOreCell;
+		}
 		else
+		{
 			anchoredAtMissingRefineryHub = false;
+		}
 	}
 	else
 	{
@@ -4000,9 +4015,11 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					: (oreTreeCell != CellStruct::Empty ? oreTreeCell : nearestOreCell);
 
 				// The refinery of a remote yard without one stands where that yard counts it: within
-				// RefineryHubCells of it, on its land.
+				// RefineryHubCells of it, on its land, and within RefineryHubFieldCells of its field.
 				if (anchoredAtMissingRefineryHub
 					&& (std::max(std::abs(candidate.X - refineryHubCell.X), std::abs(candidate.Y - refineryHubCell.Y)) > RefineryHubCells
+						|| std::max(std::abs(candidate.X + w / 2 - refineryHubOreCell.X), std::abs(candidate.Y + h / 2 - refineryHubOreCell.Y))
+							> RefineryHubFieldCells
 						|| MapClass::Instance.GetMovementZoneType(candidate, MovementZone::Normal, false) != centerZone))
 				{
 					continue;
