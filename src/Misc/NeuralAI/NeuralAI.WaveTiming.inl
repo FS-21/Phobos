@@ -194,8 +194,9 @@ namespace
 	// losses, weak known defenses near the target, our counterattack or blackout window), at the
 	// cost floor unless outmatched (60%), or at 1.5x the floor regardless. With an offensive bank
 	// (HasOffensiveBank) losses are bought back at once: 100% (75% held, 70% in a window) and the
-	// floor from 45%.
-	NeuralWaveCheck EvaluateWaveLaunch(HouseClass* pHouse, const CellStruct& target, int readyValue, bool tacticalWindow)
+	// floor from 45%. The smallest value and the floor follow the house's learned wave mass
+	// (waveMass, WaveMassPermille); the ratios do not.
+	NeuralWaveCheck EvaluateWaveLaunch(HouseClass* pHouse, const CellStruct& target, int readyValue, bool tacticalWindow, int waveMass)
 	{
 		NeuralWaveCheck check {};
 
@@ -300,8 +301,8 @@ namespace
 		check.EnemyValue = std::max(1, enemyValue);
 		check.Ratio = std::clamp(check.OurValue * 100 / check.EnemyValue, 0, 1000);
 
-		const int minimum = WaveMinimumValue(now);
-		const int floor = WaveCostFloor(now);
+		const int minimum = WaveMinimumValue(now) * waveMass / 1000;
+		const int floor = WaveCostFloor(now) * waveMass / 1000;
 		check.HeldFrames = state.Holding ? now - state.HoldSinceFrame : 0;
 		const bool offensiveBank = HasOffensiveBank(pHouse);
 		const int required = offensiveBank

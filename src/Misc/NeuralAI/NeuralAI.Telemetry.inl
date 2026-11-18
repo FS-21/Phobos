@@ -1532,14 +1532,14 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"expert\": %d, \"credits\": %d, \"killedUnits\": %d, "
 				"\"killedBlds\": %d, \"ownedUnits\": %d, \"ownedBlds\": "
 				"%d, \"score\": %d, \"winner\": %u, \"defeated\": %u, \"policy\": "
-				"%u, \"conYards\": %d, \"harvesters\": %d, \"refineries\": %d, "
+				"%u, \"waveMass\": %d, \"conYards\": %d, \"harvesters\": %d, \"refineries\": %d, "
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"prod\": [%s], \"airThreat\": %d, "
 				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"defense\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"team\": %s, \"econ\": [%s], \"bank\": [%s], \"army\": [%s], \"coalition\": [%s], \"truces\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
-				h.PolicySlot, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
+				h.PolicySlot, pOwner ? WaveMassPermille(PolicyFor(pOwner).OutputBias[37]) : 1000, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
 				pOwner ? pOwner->CountResourceDestinations : 0, pOwner ? pOwner->NumWarFactories : 0,
 				pOwner ? pOwner->NumBarracks : 0, defenses, terr.Territory, terr.TerritoryAvg(), terr.OreFields,
 				terr.OreFieldsAvg(), terr.BuildingValue, bldText.c_str(), compositionText.c_str(), productionText,
