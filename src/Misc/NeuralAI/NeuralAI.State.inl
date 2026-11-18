@@ -828,6 +828,9 @@ namespace
 		// The frame our last refinery was placed (PlaceCompletedBuilding): a newly reached field gets
 		// one refinery past what we own at most every RefineryNewFieldFrames.
 		int LastRefineryPlacedFrame { -100000 };
+		// TEMP diagnostic (expansion refineries, 2026-11-18): the yard hub the last refinery search was
+		// anchored at (FindSpatialTetrisBuildCell, a remote yard without a refinery), Empty for none.
+		CellStruct RefineryHubCell { CellStruct::Empty };
 		// Refineries placed with that widened reach (UniqueIDs): the best spot a rugged map allowed,
 		// so the strict refinery audit of the resource hoarder never sells them (it would only
 		// rebuild them as far away again).
@@ -1488,6 +1491,7 @@ namespace
 			this->LastFactoryCapSaleFrame = -100000;
 			this->RefineryReachFailures = 0;
 			this->LastRefineryPlacedFrame = -100000;
+			this->RefineryHubCell = CellStruct::Empty;
 			this->RelaxedReachRefineries.clear();
 			this->ResourceClaimCell = CellStruct::Empty;
 			this->ResourceClaimTreeCell = CellStruct::Empty;
@@ -2292,6 +2296,11 @@ namespace
 	// A newly reached ore field gets a refinery past what we own (and past the held fields' room) at
 	// most once in this many frames (user, 2026-11-18: capping refineries is a synonym of future defeat).
 	constexpr int RefineryNewFieldFrames = 3000;
+	// A refinery for a remote yard without one stands within this many cells of it, on its land
+	// (production counts a yard's refinery within 18 cells, the footprint corner is not its centre),
+	// its search starts at the yard's own field, within RefineryHubOreCells of it.
+	constexpr int RefineryHubCells = 16;
+	constexpr int RefineryHubOreCells = 24;
 	// Most mobile refineries (slave miners) a house mining with them wants, as the Advanced AI, and
 	// the least it wants with free fields (a classic base holds 4 refineries at home).
 	constexpr int MaxMobileMiners = 15;
