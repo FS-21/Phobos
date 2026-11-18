@@ -248,20 +248,19 @@ namespace
 			&& SiegeRangeOf(pUnit->Type) >= ArtilleryRangeCells * Unsorted::LeptonsPerCell;
 	}
 
-	// Siege screen (SiegeScreen*): the cell a main battle tank of an archetype 7 house, marching with
-	// guns centred on gunsCenter, waits on instead of going on to goal. nullptr: no screen for it (no
-	// gun, no known defense covering its goal or its cell, no cell to wait on): it goes on.
-	CellClass* SiegeScreenHoldCell(HouseClass* pHouse, FootClass* pFoot, const CellStruct& goal, const CellStruct& gunsCenter)
+	// The cell a ground unit waits on out of every known enemy defense's reach + SiegeScreenMarginCells
+	// (siege screen, push gate): the last cell of its straight way to `goal` out of every such reach
+	// or, from inside one, the first cell out of it on the way to `back` (SiegeScreenBackCells at
+	// most); then the first cell within SiegeScreenRingCells of that point on its own ground, out of
+	// every such reach, with no building, bridge, tube, passage mouth or narrow passage, and farther
+	// than SiegeScreenTransportCells from every transport of ours on the ground (user: it must not
+	// hinder the transports). nullptr: neither its cell nor its goal is in such a reach, or no cell.
+	CellClass* DefenseReachWaitCell(HouseClass* pHouse, FootClass* pUnit, const CellStruct& goal, const CellStruct& back)
 	{
-		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
-		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
+		auto const pType = pUnit ? pUnit->GetTechnoType() : nullptr;
 
-		if (!pUnit || !pExt || pExt->NeuralAI_Archetype != SiegeScreenArchetype || !pUnit->Type || pUnit->Type->Naval || pUnit->InLimbo
-			|| !IsMainBattleTankType(pUnit->Type) || gunsCenter == CellStruct::Empty || goal == CellStruct::Empty
-			|| IsInTransportOp(pHouse, pUnit->UniqueID) || IsHeldByTransportOp(pUnit))
-		{
+		if (!pType || goal == CellStruct::Empty || back == CellStruct::Empty)
 			return nullptr;
-		}
 
 		auto const inReach = [pHouse](const CellStruct& cell) { return IsCellInKnownEnemyDefenseReach(pHouse, cell, SiegeScreenMarginCells); };
 		const CellStruct here = pUnit->GetMapCoords();
@@ -271,8 +270,8 @@ namespace
 			return nullptr;
 
 		// The point to wait at: the last cell of the straight way to the goal out of every known reach,
-		// or, from inside one, the first cell out of it on the way back to the guns.
-		const CellStruct to = hereInReach ? gunsCenter : goal;
+		// or, from inside one, the first cell out of it on the way back.
+		const CellStruct to = hereInReach ? back : goal;
 		const int dx = to.X - here.X;
 		const int dy = to.Y - here.Y;
 		const int steps = std::max(std::abs(dx), std::abs(dy));
@@ -313,7 +312,7 @@ namespace
 			}
 		}
 
-		const int zone = MapClass::Instance.GetMovementZoneType(here, pUnit->Type->MovementZone, pUnit->OnBridge);
+		const int zone = MapClass::Instance.GetMovementZoneType(here, pType->MovementZone, pUnit->OnBridge);
 
 		for (int r = 0; r <= SiegeScreenRingCells; ++r)
 		{
@@ -328,7 +327,7 @@ namespace
 					auto const pCell = MapClass::Instance.CoordinatesLegal(cell) ? MapClass::Instance.TryGetCellAt(cell) : nullptr;
 
 					if (!pCell || pCell->GetBuilding() || IsBridgeOrTubeCell(pCell) || IsPassageMouthCell(cell) || IsNarrowPassage(cell)
-						|| MapClass::Instance.GetMovementZoneType(cell, pUnit->Type->MovementZone, false) != zone || inReach(cell)
+						|| MapClass::Instance.GetMovementZoneType(cell, pType->MovementZone, false) != zone || inReach(cell)
 						|| std::any_of(transports.begin(), transports.end(),
 							[&cell](const CellStruct& at) { return at.DistanceFrom(cell) <= SiegeScreenTransportCells; }))
 					{
@@ -341,6 +340,24 @@ namespace
 		}
 
 		return nullptr;
+	}
+
+	// Siege screen (SiegeScreen*): the cell a main battle tank of an archetype 7 house, marching with
+	// guns centred on gunsCenter, waits on instead of going on to goal. nullptr: no screen for it (no
+	// gun, no known defense covering its goal or its cell, no cell to wait on): it goes on.
+	CellClass* SiegeScreenHoldCell(HouseClass* pHouse, FootClass* pFoot, const CellStruct& goal, const CellStruct& gunsCenter)
+	{
+		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
+
+		if (!pUnit || !pExt || pExt->NeuralAI_Archetype != SiegeScreenArchetype || !pUnit->Type || pUnit->Type->Naval || pUnit->InLimbo
+			|| !IsMainBattleTankType(pUnit->Type) || gunsCenter == CellStruct::Empty || goal == CellStruct::Empty
+			|| IsInTransportOp(pHouse, pUnit->UniqueID) || IsHeldByTransportOp(pUnit))
+		{
+			return nullptr;
+		}
+
+		return DefenseReachWaitCell(pHouse, pUnit, goal, gunsCenter);
 	}
 
 	// Gives a main battle tank its siege screen order (SiegeScreenHoldCell). True when the screen holds

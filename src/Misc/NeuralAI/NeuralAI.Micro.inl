@@ -11475,6 +11475,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// and no enemy ship seen in it (NoteShipsWithoutTarget, the shipyard's brake).
 		int shipsWithoutTarget = 0;
 
+		// Push gate (PushGate*): the pushes at a building of this tick, vehicles and soldiers, ordered
+		// after both loops once the company each target gets is known.
+		struct PendingPush
+		{
+			FootClass* Foot;
+			BuildingClass* Target;
+			bool AttackNow;
+		};
+
+		std::vector<PendingPush> pendingPushes;
+
 		for (auto const pBeachU : idleCombatUnits)
 		{
 			if (!pBeachU || !pBeachU->Type || IsAmphibiousOrAirTransport(pBeachU->Type))
@@ -11635,18 +11646,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// already at the enemy perimeter (<= 20 cells)!
 				if (onEnemyIsland || endgameRemnantHunt || distToBld <= 20.0 || (idleCombatUnits.size() >= minWaveUnits && waveStrengthReady))
 				{
-					if (CanFootDamageBuildings(pBeachU) && pBeachU->DistanceFrom(pSameIslBld) <= maxWpnRangeLeptons + 384
-						&& pSameIslBld->GetCell()
-						&& IsCellVisibleToAI(pHouse, pSameIslBld->GetCell()))
-					{
-						pBeachU->ClearMegaMissionData();
-						pBeachU->SetTarget(pSameIslBld);
-						pBeachU->QueueMission(Mission::Attack, true);
-					}
-					else if (auto const pSameIslCell = pSameIslBld->GetCell())
-					{
-						OrderFootToAttackMove(pBeachU, pSameIslCell);
-					}
+					const bool attackNow = CanFootDamageBuildings(pBeachU) && pBeachU->DistanceFrom(pSameIslBld) <= maxWpnRangeLeptons + 384
+						&& pSameIslBld->GetCell() && IsCellVisibleToAI(pHouse, pSameIslBld->GetCell());
+					pendingPushes.push_back({ pBeachU, pSameIslBld, attackNow });
 				}
 			}
 		}
@@ -11766,17 +11768,126 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					const auto pInfW0 = pBeachI->Type->GetWeapon(0) ? pBeachI->Type->GetWeapon(0)->WeaponType : nullptr;
 					const int infWpnRange = pInfW0 ? static_cast<int>(pInfW0->Range) : 1024;
-					if (pBeachI->DistanceFrom(pSameIslBld) <= infWpnRange + 384 && pSameIslBld->GetCell()
-						&& IsCellVisibleToAI(pHouse, pSameIslBld->GetCell()))
+					const bool attackNow = pBeachI->DistanceFrom(pSameIslBld) <= infWpnRange + 384 && pSameIslBld->GetCell()
+						&& IsCellVisibleToAI(pHouse, pSameIslBld->GetCell());
+					pendingPushes.push_back({ pBeachI, pSameIslBld, attackNow });
+				}
+			}
+		}
+
+		// Push gate (PushGate*): a push at a building inside the reach of known enemy defenses goes
+		// only with company enough; without it the unit does not go, and one standing in such a reach
+		// steps out of it towards home to wait for the wave.
+		if (!pendingPushes.empty())
+		{
+			std::unordered_map<BuildingClass*, int> pushesAt;
+			std::unordered_set<DWORD> pushing;
+
+			for (auto const& push : pendingPushes)
+			{
+				pushesAt[push.Target]++;
+				pushing.insert(push.Foot->UniqueID);
+			}
+
+			// The known enemy defenses covering a target, and the company it gets.
+			std::unordered_map<BuildingClass*, std::pair<int, int>> gates;
+
+			auto const gateFor = [&](BuildingClass* pTarget) -> std::pair<int, int>
+			{
+				if (auto const it = gates.find(pTarget); it != gates.end())
+					return it->second;
+
+				const CellStruct at = pTarget->GetMapCoords();
+				int defenses = 0;
+
+				for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+				{
+					const int range = info.IsDefense ? GroundRangeOf(info.Building->Type) : 0;
+
+					if (range > 0 && info.Coords.DistanceFrom(at) * Unsorted::LeptonsPerCell
+						<= range + SiegeScreenMarginCells * Unsorted::LeptonsPerCell)
 					{
-						pBeachI->ClearMegaMissionData();
-						pBeachI->SetTarget(pSameIslBld);
-						pBeachI->QueueMission(Mission::Attack, true);
+						defenses++;
 					}
-					else if (auto const pSameIslCell = pSameIslBld->GetCell())
+				}
+
+				int company = pushesAt[pTarget];
+
+				auto const joins = [&](FootClass* pFoot)
+				{
+					auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+					if (!pType || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pType->Naval || pushing.contains(pFoot->UniqueID))
+						return false;
+
+					auto const pWS = pType->GetWeapon(0);
+
+					if (!pWS || !pWS->WeaponType || pWS->WeaponType->Damage <= 0)
+						return false;
+
+					if (pFoot->Target == pTarget || pFoot->GetMapCoords().DistanceFrom(at) <= PushGateGroupCells)
+						return true;
+
+					auto const pGoing = pFoot->MegaDestination ? pFoot->MegaDestination : pFoot->Destination;
+
+					return pGoing && CellClass::Coord2Cell(pGoing->GetCoords()).DistanceFrom(at) <= PushGateHeadingCells;
+				};
+
+				if (defenses > 0)
+				{
+					for (auto const pOwnUnit : UnitClass::Array)
+						company += joins(pOwnUnit) ? 1 : 0;
+
+					for (auto const pOwnInf : InfantryClass::Array)
+						company += joins(pOwnInf) ? 1 : 0;
+				}
+
+				return gates[pTarget] = { defenses, company };
+			};
+
+			auto& gateMacro = GetMacroState(pHouse);
+
+			for (auto const& push : pendingPushes)
+			{
+				auto const [defenses, company] = gateFor(push.Target);
+				const int needed = std::max(PushGateMinGroup, PushGatePerDefense * defenses);
+
+				if (endgameRemnantHunt || defenses == 0 || company >= needed)
+				{
+					if (push.AttackNow)
 					{
-						OrderFootToAttackMove(pBeachI, pSameIslCell);
+						push.Foot->ClearMegaMissionData();
+						push.Foot->SetTarget(push.Target);
+						push.Foot->QueueMission(Mission::Attack, true);
 					}
+					else if (auto const pTargetCell = push.Target->GetCell())
+					{
+						OrderFootToAttackMove(push.Foot, pTargetCell);
+					}
+
+					continue;
+				}
+
+				CellClass* pWait = nullptr;
+
+				if (IsCellInKnownEnemyDefenseReach(pHouse, push.Foot->GetMapCoords(), SiegeScreenMarginCells))
+				{
+					pWait = DefenseReachWaitCell(pHouse, push.Foot, push.Target->GetMapCoords(), homeCoords);
+
+					if (pWait)
+						IssueMoveOrder(push.Foot, pWait, 1.5);
+				}
+
+				// TEMP diagnostic: the pushes the gate holds (PushGateLogLines per house and match).
+				if (gateMacro.PushGateLogCount < PushGateLogLines)
+				{
+					gateMacro.PushGateLogCount++;
+					Debug::Log("[NeuralAI] Frame %d | House #%d push gate: %s holds from %s at (%d,%d), %d known defenses cover it, %d of %d with it, %d cells away, %s (%d,%d)\n",
+						Unsorted::CurrentFrame, pHouse->ArrayIndex, push.Foot->GetTechnoType()->ID, push.Target->Type->ID,
+						push.Target->GetMapCoords().X, push.Target->GetMapCoords().Y, defenses, company, needed,
+						static_cast<int>(push.Foot->GetMapCoords().DistanceFrom(push.Target->GetMapCoords())),
+						pWait ? "steps out to" : "waits at", pWait ? pWait->MapCoords.X : push.Foot->GetMapCoords().X,
+						pWait ? pWait->MapCoords.Y : push.Foot->GetMapCoords().Y);
 				}
 			}
 		}
