@@ -167,6 +167,8 @@ namespace
 		bool BoardingParked { false };
 		// Airborne Front: the frame its transport first parked by its soldiers (-1 not yet).
 		int BoardingParkedFrame { -1 };
+		// Rotating Raids: the frame its outgunned group began to fall back to the other one (-1 none).
+		int RegroupFrame { -1 };
 		// Airborne Front: how many were aboard at the last tick of its unloading.
 		int UnloadAboard { 0 };
 		// Preemptive Strike: where the enemy force was gathering when the plan started. Airborne
@@ -2434,13 +2436,24 @@ namespace
 	// to RaidLessonMaxSteps steps and RaidMostGroup units; a step fades every RaidLessonStepFrames
 	// without a new beaten raid, a raid that destroyed more than it lost ends the lesson (user: grow the
 	// group after each failure as the tank mass does; 2026-11-17 the groups of 3 died on the way).
+	// The step lasts as long as the other plan lessons (PlanLessonFrames): with 3000 frames it faded
+	// 300 frames after the plan could try again (2700 after a failure), and of 13 lessons of
+	// 2026-11-18 none sent a raid of 16.
 	// The targets change RaidSwitchFrames after a group reached its own (or once one falls).
 	constexpr int RaidBaseGroup = 8;
 	constexpr int RaidMostGroup = 24;
 	constexpr int RaidLessonMaxSteps = 2;
-	constexpr int RaidLessonStepFrames = 3000;
+	constexpr int RaidLessonStepFrames = PlanLessonFrames;
 	constexpr int RaidSwitchFrames = 900;
 	constexpr double RaidArrivedCells = 6.0;
+	// A group of Rotating Raids outgunned on its way, while the other one is not, falls back to the
+	// other one instead of ending the raid (user, 2026-11-18: in 3 of 6 aborts for an outgunned group
+	// the raid had lost nothing, one had destroyed 283 at its target): the other group holds, the
+	// outgunned one moves to it, and they go on as one group to the other one's target once within
+	// RaidRegroupCells of each other or after RaidRegroupFrames. Only an outgunned group that is
+	// alone (the other is gone, or they are one already) ends the raid.
+	constexpr double RaidRegroupCells = 8.0;
+	constexpr int RaidRegroupFrames = 1800;
 	// In-match weight of a plan against an enemy house (PlanEnemyWeight, in percent of the plan's
 	// utility, from 100): a plan that destroyed more than it lost against that house gains
 	// PlanEnemyWeightUpStep, PlanEnemyWeightFallStep when its target fell too; one that failed or

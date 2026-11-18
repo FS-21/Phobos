@@ -3941,7 +3941,7 @@ namespace
 
 			for (const NeuralPlanId id : raidPlans)
 			{
-				auto const& plan = planOf(id);
+				auto& plan = planOf(id);
 
 				if (!plan.Active || plan.TargetCell == CellStruct::Empty)
 					continue;
@@ -3949,8 +3949,10 @@ namespace
 				// The groups of the plan and the goal of each. Rotating Raids sends its first AuxBaseline
 				// members at the target and the rest at the staging cell: each group is judged where it
 				// is (the centre of both lay between them, far from either goal and from the enemy, and
-				// 208 of its 266 turn backs of 2026-11-17 saw no enemy at all).
+				// 208 of its 266 turn backs of 2026-11-17 saw no enemy at all). While its outgunned group
+				// falls back to the other one (group B then), only the other one is judged.
 				const bool twoGroups = id == NeuralPlanId::RotatingRaids && plan.StagingCell != CellStruct::Empty;
+				const bool regrouping = twoGroups && plan.RegroupFrame >= 0;
 				const size_t split = twoGroups ? std::min<size_t>(plan.Members.size(), static_cast<size_t>(std::max(0, plan.AuxBaseline)))
 					: plan.Members.size();
 				bool anyCommitted = false;
@@ -3961,9 +3963,15 @@ namespace
 				int worstStrength = 0;
 				double worstToGoal = 0.0;
 				CellStruct worstCentre = CellStruct::Empty;
+				std::array<bool, 2> groupOutgunned {};
+				std::array<int, 2> groupAlive {};
+				std::array<CellStruct, 2> groupCentre { CellStruct::Empty, CellStruct::Empty };
 
 				for (int leg = 0; leg < (twoGroups ? 2 : 1); ++leg)
 				{
+					if (regrouping && leg == 1)
+						continue;
+
 					int sumX = 0;
 					int sumY = 0;
 					int legAlive = 0;
@@ -3988,6 +3996,8 @@ namespace
 
 					alive += legAlive;
 					const CellStruct centre { static_cast<short>(sumX / legAlive), static_cast<short>(sumY / legAlive) };
+					groupAlive[leg] = legAlive;
+					groupCentre[leg] = centre;
 					double toGoal = centre.DistanceFrom(twoGroups && leg == 1 ? plan.StagingCell : plan.TargetCell);
 
 					if (!twoGroups && plan.StagingCell != CellStruct::Empty)
@@ -4013,7 +4023,8 @@ namespace
 							enemy += GetCombatValueOfType(pBld->Type, false);
 					}
 
-					outgunned = outgunned || enemy * 100 > strength * PlanOutgunnedRatioPercent;
+					groupOutgunned[leg] = enemy * 100 > strength * PlanOutgunnedRatioPercent;
+					outgunned = outgunned || groupOutgunned[leg];
 
 					// The group worst off (enemy against strength) speaks for the plan.
 					if (worstEnemy < 0 || static_cast<long long>(enemy) * std::max(1, worstStrength)
@@ -4038,6 +4049,45 @@ namespace
 
 				if (!outgunned && !bleeding)
 					continue;
+
+				// Rotating Raids: a group outgunned while the other one is not falls back to it instead of
+				// ending the raid (RaidRegroupCells). The members are put in order: the holders first
+				// (group A from now on), then the group that falls back (group B); both share the
+				// holders' goal.
+				if (twoGroups && !regrouping && !bleeding)
+				{
+					const int bad = groupOutgunned[0] ? 0 : 1;
+					const int good = 1 - bad;
+
+					if (groupOutgunned[bad] && !groupOutgunned[good] && groupAlive[good] > 0)
+					{
+						const CellStruct goal = good == 0 ? plan.TargetCell : plan.StagingCell;
+						std::vector<DWORD> members(plan.Members.begin() + (good == 0 ? 0 : split), plan.Members.begin() + (good == 0 ? split : plan.Members.size()));
+						const size_t holders = members.size();
+						members.insert(members.end(), plan.Members.begin() + (bad == 0 ? 0 : split), plan.Members.begin() + (bad == 0 ? split : plan.Members.size()));
+						Debug::Log("[NeuralAI] House %d plan rotatingRaids group %c outgunned %d cells from its goal: enemy %d against %d around (%d,%d) "
+							"(units %d, defenses %d); it falls back to group %c at (%d,%d) to go on to (%d,%d), frame %d.\n", houseIdx, bad == 0 ? 'A' : 'B',
+							static_cast<int>(worstToGoal), worstEnemy, worstStrength, worstCentre.X, worstCentre.Y, worstUnits, worstEnemy - worstUnits,
+							good == 0 ? 'A' : 'B', groupCentre[good].X, groupCentre[good].Y, goal.X, goal.Y, Unsorted::CurrentFrame);
+						// The group that falls back leaves its fight: a move order keeps the target and the
+						// attack-move of a unit.
+						for (size_t i = holders; i < members.size(); ++i)
+						{
+							if (auto const pFoot = findOwnFoot(members[i]))
+							{
+								pFoot->SetTarget(nullptr);
+								pFoot->ClearMegaMissionData();
+							}
+						}
+
+						plan.Members = std::move(members);
+						plan.AuxBaseline = static_cast<int>(holders);
+						plan.TargetCell = goal;
+						plan.StagingCell = goal;
+						plan.RegroupFrame = Unsorted::CurrentFrame;
+						continue;
+					}
+				}
 
 				const int strength = worstStrength;
 				Debug::Log("[NeuralAI] House %d plan %s %s %d cells from its goal: enemy %d against %d around (%d,%d) (units %d, defenses %d).\n", houseIdx,
@@ -10042,8 +10092,10 @@ namespace
 						}
 						else
 						{
+							// Groups that joined (or are joining) after one was outgunned keep one target.
+							const bool oneGroup = plan.RegroupFrame >= 0 || plan.AuxBaseline >= static_cast<int>(plan.Members.size());
 							plan.TargetCell = pNewA->GetMapCoords();
-							plan.StagingCell = pNewB ? pNewB->GetMapCoords() : pNewA->GetMapCoords();
+							plan.StagingCell = (pNewB && !oneGroup) ? pNewB->GetMapCoords() : pNewA->GetMapCoords();
 							plan.AuxPeak = -1;
 
 							// The attack-move to the old target is dropped too: attackMoveGroup leaves a unit
@@ -10062,10 +10114,47 @@ namespace
 						}
 					}
 
+					// The outgunned group falls back to the other one (RaidRegroupCells): the holders (group A)
+					// stop where they are and still fight what comes at them, the other group moves to
+					// them, not attack-moving, so it leaves the fight it was losing. Once together, or after
+					// RaidRegroupFrames, they are one group.
+					if (plan.Active && plan.RegroupFrame >= 0)
+					{
+						const CellStruct centreA = groupCentroid(groupA);
+						const CellStruct centreB = groupCentroid(groupB);
+						const int apart = (centreA != CellStruct::Empty && centreB != CellStruct::Empty) ? static_cast<int>(centreA.DistanceFrom(centreB)) : -1;
+
+						if (apart < 0 || apart <= RaidRegroupCells || Unsorted::CurrentFrame - plan.RegroupFrame >= RaidRegroupFrames)
+						{
+							Debug::Log("[NeuralAI] House %d plan rotatingRaids groups joined after %d frames, %d cells apart: %d members go on to (%d,%d), frame %d.\n",
+								houseIdx, Unsorted::CurrentFrame - plan.RegroupFrame, apart, static_cast<int>(plan.Members.size()), plan.TargetCell.X,
+								plan.TargetCell.Y, Unsorted::CurrentFrame);
+							plan.RegroupFrame = -1;
+							plan.AuxBaseline = static_cast<int>(plan.Members.size());
+							plan.StagingCell = plan.TargetCell;
+						}
+						else
+						{
+							for (const DWORD uid : groupA)
+							{
+								auto const pFoot = findOrderableFoot(uid);
+
+								if (pFoot && pFoot->Target == nullptr && (pFoot->Destination || pFoot->MegaDestination))
+								{
+									pFoot->SetDestination(nullptr, true);
+									pFoot->ClearMegaMissionData();
+									pFoot->QueueMission(Mission::Guard, false);
+								}
+							}
+
+							moveGroup(groupB, MapClass::Instance.TryGetCellAt(centreA), 4.0);
+						}
+					}
+
 					// Each group marches as one column to its own target (columnMovingOn): the fastest
 					// members ran ahead alone, in 4 of 7 ends of 2026-11-18 the dead were last seen 35 to 99
 					// cells nearer the target than their group, which saw no enemy in 9 of 11 turn backs.
-					if (plan.Active)
+					if (plan.Active && plan.RegroupFrame < 0)
 					{
 						attackMoveGroup(columnMovingOn(groupA, plan.TargetCell), MapClass::Instance.TryGetCellAt(plan.TargetCell));
 						attackMoveGroup(columnMovingOn(groupB, plan.StagingCell), MapClass::Instance.TryGetCellAt(plan.StagingCell));
@@ -10091,6 +10180,7 @@ namespace
 					{
 						raid.AuxBaseline = static_cast<int>(raidSize / 2);
 						raid.AuxPeak = -1;
+						raid.RegroupFrame = -1;
 						raid.TargetOwner = targetOwner;
 					}
 				}
