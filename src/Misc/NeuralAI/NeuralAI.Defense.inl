@@ -519,6 +519,87 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 
 	auto const pVictimOwner = pVictim->Owner;
 
+	// TEMP diagnostic (rotatingRaids, 2026-11-18): who kills raid members (a unit, a defense, an
+	// aircraft) and where the member stood against its group and its goal (user: units or defenses
+	// in range?). Log only.
+	if (pVictimOwner && pVictim->WhatAmI() != AbstractType::Building && NeuralAI::IsEnabledForHouse(pVictimOwner))
+	{
+		auto const& raid = GetMacroState(pVictimOwner).Plans[static_cast<size_t>(NeuralPlanId::RotatingRaids)];
+		auto const itMember = raid.Active ? std::find(raid.Members.begin(), raid.Members.end(), pVictim->UniqueID) : raid.Members.end();
+
+		if (raid.Active && itMember != raid.Members.end())
+		{
+			const size_t split = std::min<size_t>(raid.Members.size(), static_cast<size_t>(std::max(0, raid.AuxBaseline)));
+			const size_t index = static_cast<size_t>(itMember - raid.Members.begin());
+			const bool groupB = index >= split;
+			const CellStruct goal = groupB ? raid.StagingCell : raid.TargetCell;
+			const CellStruct victimCell = pVictim->GetMapCoords();
+			int sumX = 0;
+			int sumY = 0;
+			int others = 0;
+
+			for (auto const pTech : TechnoClass::Array)
+			{
+				if (!pTech || pTech == pVictim || !pTech->IsAlive || pTech->InLimbo || pTech->Owner != pVictimOwner)
+					continue;
+
+				auto const itOther = std::find(raid.Members.begin(), raid.Members.end(), pTech->UniqueID);
+
+				if (itOther == raid.Members.end() || (static_cast<size_t>(itOther - raid.Members.begin()) >= split) != groupB)
+					continue;
+
+				const CellStruct cell = pTech->GetMapCoords();
+				sumX += cell.X;
+				sumY += cell.Y;
+				others++;
+			}
+
+			const char* killerKind = "nobody";
+			const char* killerType = "-";
+			int killerHouse = -1;
+			int killerCells = -1;
+			int killerGoalCells = -1;
+
+			if (pKiller)
+			{
+				switch (pKiller->WhatAmI())
+				{
+				case AbstractType::Building:
+					killerKind = static_cast<BuildingClass*>(pKiller)->Type->IsBaseDefense ? "defense" : "building";
+					break;
+				case AbstractType::Aircraft:
+					killerKind = "aircraft";
+					break;
+				case AbstractType::Infantry:
+					killerKind = "infantry";
+					break;
+				default:
+					killerKind = "vehicle";
+					break;
+				}
+
+				killerType = pKiller->GetTechnoType() ? pKiller->GetTechnoType()->ID : "?";
+				killerHouse = pKiller->Owner ? pKiller->Owner->ArrayIndex : -1;
+				killerCells = static_cast<int>(pKiller->GetMapCoords().DistanceFrom(victimCell));
+				killerGoalCells = goal != CellStruct::Empty ? static_cast<int>(pKiller->GetMapCoords().DistanceFrom(goal)) : -1;
+			}
+
+			const CellStruct centre = others > 0
+				? CellStruct { static_cast<short>(sumX / others), static_cast<short>(sumY / others) }
+				: CellStruct::Empty;
+
+			Debug::Log("[NeuralAI] TEMP raid death: house %d member %s of group %c killed by %s %s of house %d %d cells away (%d from the goal); "
+				"member %d cells from its goal, group centre %d from the goal and %d from the member (%d others), %d frames into the plan, "
+				"arrived %d, had a target %d.\n",
+				pVictimOwner->ArrayIndex, pVictim->GetTechnoType() ? pVictim->GetTechnoType()->ID : "?", groupB ? 'B' : 'A', killerKind,
+				killerType, killerHouse, killerCells, killerGoalCells,
+				goal != CellStruct::Empty ? static_cast<int>(victimCell.DistanceFrom(goal)) : -1,
+				centre != CellStruct::Empty && goal != CellStruct::Empty ? static_cast<int>(centre.DistanceFrom(goal)) : -1,
+				centre != CellStruct::Empty ? static_cast<int>(centre.DistanceFrom(victimCell)) : -1, others,
+				Unsorted::CurrentFrame - raid.StartFrame, raid.Arrived ? 1 : 0, pVictim->Target ? 1 : 0);
+		}
+	}
+
 	// Plan kills: the combat value of enemy units destroyed by a member of an active plan (Bait
 	// Ambush is scored by what its members killed, not by what they saw).
 	if (pKiller && pKiller->Owner && pVictimOwner && pKiller->Owner != pVictimOwner && pVictim->WhatAmI() != AbstractType::Building
