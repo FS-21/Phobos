@@ -2277,6 +2277,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			slotMacro.NewFieldSlotCell = slotFieldCell;
 			slotMacro.NewFieldSlotReach = slotFieldReach;
+			slotMacro.NewFieldSlotFrame = Unsorted::CurrentFrame;
 		}
 		const int fieldRefineryCap = newFieldRefinerySlot ? std::max(heldRefineryCap, ownedRefineries) + 1
 			: heldRefineryCap + (reachedNewOreField ? 1 : 0);
