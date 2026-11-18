@@ -684,15 +684,26 @@ namespace
 					enemyCells = distance;
 			}
 
+			// The code that gave its last move, attack-move or dispatch order (NoteOrderCaller), and how
+			// long ago (user, 2026-11-18: what sends the tanks into the enemy bases on a plain move?).
+			char caller[128] = "none";
+			auto const& callers = LastOrderCaller[std::clamp(pOwner->ArrayIndex, 0, 31)];
+
+			if (auto const itCaller = callers.find(uid); itCaller != callers.end() && itCaller->second.File && itCaller->second.Kind)
+			{
+				sprintf_s(caller, "%s from %s:%d %d frames ago", itCaller->second.Kind, itCaller->second.File, itCaller->second.Line,
+					Unsorted::CurrentFrame - itCaller->second.Frame);
+			}
+
 			Debug::Log("[NeuralAI] TEMP tank death: house %d %s %s%s%s killed by %s %s of house %d, %d cells from our nearest site, lived %d frames, frame %d;"
 				" last order %s, mission %s/%s, destination %d cells away (%d from our nearest site), target %d cells away, killer %d cells away,"
-				" nearest enemy building %d cells.\n",
+				" nearest enemy building %d cells, last order given by %s.\n",
 				pOwner->ArrayIndex, pTank->Type->ID, roleNames[role], *planName ? " " : "", planName, killerNames[killer],
 				pKiller && pKiller->GetTechnoType() ? pKiller->GetTechnoType()->ID : "-", pKiller && pKiller->Owner ? pKiller->Owner->ArrayIndex : -1,
 				static_cast<int>(siteCells), lived, Unsorted::CurrentFrame, order, missionName(pTank->CurrentMission), missionName(pTank->MegaMission),
 				pTank->Destination ? static_cast<int>(destCell.DistanceFrom(at)) : -1, pTank->Destination ? static_cast<int>(destSiteCells) : -1,
 				pTank->Target ? static_cast<int>(CellClass::Coord2Cell(pTank->Target->GetCoords()).DistanceFrom(at)) : -1,
-				pKiller ? static_cast<int>(pKiller->GetMapCoords().DistanceFrom(at)) : -1, static_cast<int>(enemyCells));
+				pKiller ? static_cast<int>(pKiller->GetMapCoords().DistanceFrom(at)) : -1, static_cast<int>(enemyCells), caller);
 		}
 	}
 }
@@ -714,6 +725,10 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 		if (pTank->Type && IsMainBattleTankType(pTank->Type))
 			NoteMainTankDeath(pVictimOwner, pTank, pKiller);
 	}
+
+	// TEMP diagnostic (NoteOrderCaller): the record of a dead unit goes with it.
+	if (pVictimOwner && pVictimOwner->ArrayIndex >= 0 && pVictimOwner->ArrayIndex < 32)
+		LastOrderCaller[pVictimOwner->ArrayIndex].erase(pVictim->UniqueID);
 
 	// TEMP diagnostic (rotatingRaids, 2026-11-18): who kills raid members (a unit, a defense, an
 	// aircraft) and where the member stood against its group and its goal (user: units or defenses

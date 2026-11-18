@@ -458,6 +458,7 @@ namespace
 
 						pTrans->SetDestination(pCell, true);
 						pTrans->QueueMission(Mission::Move, true);
+						NoteOrderCaller(pTrans, "move");
 						CountDecision(NeuralDecision::StuckUnloadMoved, pHouse->ArrayIndex);
 
 						return;
@@ -1201,6 +1202,7 @@ namespace
 				{
 					pSub->SetDestination(pSafe, true);
 					pSub->QueueMission(Mission::Move, true);
+					NoteOrderCaller(pSub, "move");
 					CountDecision(NeuralDecision::SubmarineSonarAvoided, pHouse->ArrayIndex);
 				}
 			}
@@ -4758,6 +4760,7 @@ namespace
 						pFoot->ClearMegaMissionData();
 						pFoot->SetDestination(pRearCell, true);
 						pFoot->QueueMission(Mission::Move, false);
+						NoteOrderCaller(pFoot, "move");
 					}
 				}
 				else if (pFoot->Destination || pFoot->MegaDestination)
@@ -6106,6 +6109,7 @@ namespace
 								pTransport->SetArchiveTarget(nullptr);
 								pTransport->SetDestination(pCell, true);
 								pTransport->QueueMission(Mission::Move, true);
+								NoteOrderCaller(pTransport, "move");
 							}
 						}
 						else if (nearestDist > reachCells * Unsorted::LeptonsPerCell)

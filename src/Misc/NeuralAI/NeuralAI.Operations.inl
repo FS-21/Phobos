@@ -3320,6 +3320,7 @@ namespace
 							pTransport->SetArchiveTarget(nullptr);
 							pTransport->SetDestination(pCell, true);
 							pTransport->QueueMission(Mission::Move, true);
+							NoteOrderCaller(pTransport, "move");
 							transport.OrderCell = pCell->MapCoords;
 						}
 					}
@@ -3329,6 +3330,7 @@ namespace
 						{
 							pTransport->SetDestination(pPark, true);
 							pTransport->QueueMission(Mission::Move, true);
+							NoteOrderCaller(pTransport, "move");
 							transport.OrderCell = transport.ParkCell;
 						}
 					}

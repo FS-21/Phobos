@@ -1309,6 +1309,7 @@ namespace
 				pSoldier->SetTarget(nullptr);
 				pSoldier->SetDestination(pApproach, true);
 				pSoldier->QueueMission(Mission::Move, false);
+				NoteOrderCaller(pSoldier, "move");
 				pSoldier->NextMission();
 			}
 			else if (soldierZone >= 0 && IsBuildingEnterableFromZone(pBest, soldierZone, soldierMoveZone))

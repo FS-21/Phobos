@@ -963,6 +963,7 @@ namespace
 		pFoot->SetTarget(nullptr);
 		pFoot->SetDestination(pCell, true);
 		pFoot->ForceMission(Mission::Move);
+		NoteOrderCaller(pFoot, "move");
 		CountDecision(NeuralDecision::MoveOrderIssued, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
 	}
 

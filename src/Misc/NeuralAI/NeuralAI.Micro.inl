@@ -88,6 +88,7 @@ namespace
 			{
 				pTransport->SetDestination(pCell, true);
 				pTransport->QueueMission(Mission::Move, true);
+				NoteOrderCaller(pTransport, "move");
 			}
 		};
 
@@ -734,7 +735,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	};
 
 	auto DispatchFootToTargetOrTransport
-		= [&](FootClass* pFoot, AbstractClass* pTarget, Mission desiredMission, bool useSetTarget = false) -> bool
+		= [&](FootClass* pFoot, AbstractClass* pTarget, Mission desiredMission, bool useSetTarget = false,
+			const char* callerFile = __builtin_FILE(), int callerLine = __builtin_LINE()) -> bool
 	{
 		if (!pFoot || !pTarget)
 			return false;
@@ -873,20 +875,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pFoot->ClearMegaMissionData();
 				pFoot->SetTarget(pTarget);
 				pFoot->QueueMission(desiredMission, true);
+				NoteOrderCaller(pFoot, "dispatchAttack", callerFile, callerLine);
 			}
 			else if (desiredMission == Mission::Enter && abstract_cast<TechnoClass*>(pTarget))
 			{
 				OrderFootToEnter(pFoot, abstract_cast<TechnoClass*>(pTarget));
+				NoteOrderCaller(pFoot, "dispatchEnter", callerFile, callerLine);
 			}
 			else if (desiredMission == Mission::AttackMove)
 			{
-				OrderFootToAttackMove(pFoot, pTarget);
+				OrderFootToAttackMove(pFoot, pTarget, callerFile, callerLine);
 			}
 			else
 			{
 				pFoot->ClearMegaMissionData();
 				pFoot->SetDestination(pTarget, true);
 				pFoot->QueueMission(desiredMission, true);
+				NoteOrderCaller(pFoot, "dispatchMove", callerFile, callerLine);
 			}
 
 			return true;
@@ -969,7 +974,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pFoot->SetTarget(nullptr);
 			if (footCoords.DistanceFrom(pPickupBeach->MapCoords) > 9.0)
 			{
-				IssueMoveOrder(pFoot, pPickupBeach, 4.0);
+				IssueMoveOrder(pFoot, pPickupBeach, 4.0, callerFile, callerLine);
 			}
 			else if (pFoot->CurrentMission != Mission::Guard)
 			{
@@ -3649,6 +3654,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					pUnit->SetDestination(pArchDest, true);
 					pUnit->ForceMission(Mission::Move);
+					NoteOrderCaller(pUnit, "move");
 				}
 			}
 
@@ -4183,6 +4189,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						{
 							pUnit->SetDestination(pClear, true);
 							pUnit->QueueMission(Mission::Move, true);
+							NoteOrderCaller(pUnit, "move");
 						}
 					}
 
@@ -4391,6 +4398,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							{
 								pUnit->SetDestination(pClear, true);
 								pUnit->QueueMission(Mission::Move, true);
+								NoteOrderCaller(pUnit, "move");
 							}
 						}
 					}
@@ -5099,6 +5107,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 									{
 										pUnit->SetDestination(pClear, true);
 										pUnit->QueueMission(Mission::Move, true);
+										NoteOrderCaller(pUnit, "move");
 									}
 								}
 							}
@@ -5188,6 +5197,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							{
 								pUnit->SetDestination(pClear, true);
 								pUnit->QueueMission(Mission::Move, true);
+								NoteOrderCaller(pUnit, "move");
 							}
 						}
 					}
@@ -5219,6 +5229,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						{
 							pUnit->SetDestination(pPerim, true);
 							pUnit->QueueMission(Mission::Move, true);
+							NoteOrderCaller(pUnit, "move");
 							continue;
 						}
 					}
@@ -5241,6 +5252,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						pUnit->SetDestination(pClear, true);
 						pUnit->QueueMission(Mission::Move, true);
+						NoteOrderCaller(pUnit, "move");
 					}
 				}
 
@@ -5518,6 +5530,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					pUnit->SetDestination(pBackCell, true);
 					pUnit->QueueMission(Mission::Move, true);
+					NoteOrderCaller(pUnit, "move");
 
 					continue;
 				}
@@ -5590,6 +5603,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								pUnit->SetDestination(pHC, true);
 
 								pUnit->QueueMission(Mission::Move, true);
+								NoteOrderCaller(pUnit, "move");
 
 								movedHigh = true;
 
@@ -5694,6 +5708,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					pUnit->SetDestination(pBackCell, true);
 					pUnit->QueueMission(Mission::Move, true);
+					NoteOrderCaller(pUnit, "move");
 					continue;
 				}
 			}
@@ -5784,6 +5799,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					pUnit->SetDestination(pKiteCell, true);
 					CountDecision(NeuralDecision::KiteStep);
 					pUnit->QueueMission(Mission::Move, true);
+					NoteOrderCaller(pUnit, "move");
 					continue;
 				}
 			}
@@ -5831,6 +5847,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				pUnit->SetDestination(pNearCrate, true);
 				pUnit->QueueMission(Mission::Move, true);
+				NoteOrderCaller(pUnit, "move");
 				continue;
 			}
 		}
@@ -5996,6 +6013,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						pUnit->SetDestination(pRC, true);
 
 						pUnit->QueueMission(Mission::Move, true);
+						NoteOrderCaller(pUnit, "move");
 
 						continue;
 					}
@@ -6477,6 +6495,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					pUnit->SetDestination(pHC, true);
 
 					pUnit->QueueMission(Mission::Move, true);
+					NoteOrderCaller(pUnit, "move");
 
 					continue;
 				}
@@ -7087,6 +7106,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				pInf->SetDestination(pNearCrate, true);
 				pInf->QueueMission(Mission::Move, true);
+				NoteOrderCaller(pInf, "move");
 				continue;
 			}
 		}
@@ -7279,6 +7299,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pInf->SetTarget(nullptr);
 				pInf->SetDestination(pEscorted, true);
 				pInf->QueueMission(Mission::Move, false);
+				NoteOrderCaller(pInf, "move");
 				CountDecision(NeuralDecision::MedicEscort, pHouse->ArrayIndex);
 			}
 
@@ -12758,6 +12779,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							pTrans->SetDestination(pEnemyCell, true);
 
 							pTrans->QueueMission(Mission::Move, true);
+							NoteOrderCaller(pTrans, "move");
 						}
 					}
 				}
@@ -12866,6 +12888,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								{
 									pTrans->SetDestination(pChosen, true);
 									pTrans->QueueMission(Mission::Move, true);
+									NoteOrderCaller(pTrans, "move");
 								}
 							}
 							else if (inDropZone)
@@ -12897,6 +12920,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 									dropCells[pTrans->UniqueID] = pBest->MapCoords;
 									pTrans->SetDestination(pBest, true);
 									pTrans->QueueMission(Mission::Move, true);
+									NoteOrderCaller(pTrans, "move");
 									Debug::Log("[NeuralAI] House %d airlift: %s %u cannot set %s down at (%d,%d), goes to (%d,%d), frame %d.\n",
 										pHouse->ArrayIndex, pTrans->Type->ID, pTrans->UniqueID, pCarriedUnit->Type->ID, pTrans->GetMapCoords().X,
 										pTrans->GetMapCoords().Y, pBest->MapCoords.X, pBest->MapCoords.Y, Unsorted::CurrentFrame);
@@ -14102,6 +14126,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							{
 								pTrans->SetDestination(pAltBeach, true);
 								pTrans->QueueMission(Mission::Move, true);
+								NoteOrderCaller(pTrans, "move");
 								continue;
 							}
 						}

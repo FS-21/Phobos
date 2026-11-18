@@ -71,6 +71,7 @@ namespace
 			pCarrier->SetTarget(nullptr);
 			pCarrier->SetDestination(pCargo, true);
 			pCarrier->QueueMission(Mission::Move, true);
+			NoteOrderCaller(pCarrier, "move");
 
 			return true;
 		}

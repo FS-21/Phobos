@@ -1494,10 +1494,34 @@ namespace
 	int CreditSerial { 0 };
 	int CreditLastFrame { -1 };
 
+	// TEMP diagnostic (tank census, 2026-11-18; NoteMainTankDeath): the code that gave each unit its
+	// last move, attack-move or dispatch order (user: what sends the tanks into the enemy bases?).
+	struct NeuralOrderCaller
+	{
+		const char* Kind { nullptr };
+		const char* File { nullptr };
+		int Line { 0 };
+		int Frame { 0 };
+	};
+
+	std::array<std::unordered_map<DWORD, NeuralOrderCaller>, 32> LastOrderCaller {};
+
+	void NoteOrderCaller(TechnoClass* pTechno, const char* kind, const char* file = __builtin_FILE(), int line = __builtin_LINE())
+	{
+		if (!NeuralAI::HeadlessMode || !pTechno || !pTechno->Owner || pTechno->Owner->ArrayIndex < 0 || pTechno->Owner->ArrayIndex >= 32)
+			return;
+
+		const char* const slash = file ? std::max(std::strrchr(file, '\\'), std::strrchr(file, '/')) : nullptr;
+		LastOrderCaller[pTechno->Owner->ArrayIndex][pTechno->UniqueID] = { kind, slash ? slash + 1 : file, line, Unsorted::CurrentFrame };
+	}
+
 	void ResetExpertCredit()
 	{
 		for (auto& tags : CreditTags)
 			tags.clear();
+
+		for (auto& callers : LastOrderCaller)
+			callers.clear();
 
 		ExpertCredit = {};
 		ExpertCreditByPhase = {};
