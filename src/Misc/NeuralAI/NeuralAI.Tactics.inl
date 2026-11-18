@@ -522,6 +522,113 @@ namespace
 		return true;
 	}
 
+	// A neutral building of no worth that leaves a one-cell lane where a block of our units is held
+	// (JamBreachFrames): the nearest to the block's centre among those within JamBreachReachCells of a
+	// held unit is shot down by up to JamBreachShootersMost held units whose weapon hurts it and reaches
+	// it, the nearest first. Their orders are dropped; the AI gives them new work once it falls. Returns
+	// how many shoot.
+	int BreachJamBarrier(HouseClass* pHouse, const std::vector<FootClass*>& heldUnits, const CellStruct& center, int blockedFor,
+		std::unordered_set<FootClass*>& left)
+	{
+		if (heldUnits.empty())
+			return 0;
+
+		BuildingClass* pBest = nullptr;
+		double bestDistance = 1.0e9;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			auto const pType = pBld ? pBld->Type : nullptr;
+
+			if (!pType || !pBld->IsAlive || pBld->InLimbo || !pBld->Owner || !pBld->Owner->IsNeutral() || !pType->Insignificant
+				|| pType->Capturable || pType->CanBeOccupied || pType->BridgeRepairHut || !pType->LegalTarget || pType->Immune
+				|| pType->InvisibleInGame)
+			{
+				continue;
+			}
+
+			const CellStruct topLeft = pBld->GetMapCoords();
+			const int width = pType->GetFoundationWidth();
+			const int height = pType->GetFoundationHeight(false);
+			const double offX = topLeft.X + (width - 1) / 2.0 - center.X;
+			const double offY = topLeft.Y + (height - 1) / 2.0 - center.Y;
+			const double distance = std::sqrt(offX * offX + offY * offY);
+
+			if (distance >= bestDistance)
+				continue;
+
+			bool beside = false;
+
+			for (auto const pFoot : heldUnits)
+			{
+				const CellStruct at = pFoot->GetMapCoords();
+				const int gapX = std::max({ topLeft.X - at.X, at.X - (topLeft.X + width - 1), 0 });
+				const int gapY = std::max({ topLeft.Y - at.Y, at.Y - (topLeft.Y + height - 1), 0 });
+
+				if (std::max(gapX, gapY) <= JamBreachReachCells)
+				{
+					beside = true;
+					break;
+				}
+			}
+
+			if (!beside || !FootprintCutsLandWay(topLeft, width, height, true))
+				continue;
+
+			bestDistance = distance;
+			pBest = pBld;
+		}
+
+		if (!pBest)
+			return 0;
+
+		std::vector<std::pair<int, FootClass*>> shooters;
+
+		for (auto const pFoot : heldUnits)
+		{
+			if (left.contains(pFoot) || pFoot->SlaveOwner || !pFoot->IsCloseEnoughToAttack(pBest))
+				continue;
+
+			auto const pSlot = pFoot->GetWeapon(pFoot->SelectWeapon(pBest));
+			auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+			if (!pWeapon || !pWeapon->Warhead || pWeapon->Damage <= 0
+				|| MapClass::GetTotalDamage(pWeapon->Damage, pWeapon->Warhead, pBest->Type->Armor, 0) <= 0)
+			{
+				continue;
+			}
+
+			shooters.push_back({ pFoot->DistanceFrom(pBest), pFoot });
+		}
+
+		std::stable_sort(shooters.begin(), shooters.end(), [](auto const& a, auto const& b) { return a.first < b.first; });
+		int count = 0;
+
+		for (auto const& [distance, pFoot] : shooters)
+		{
+			if (count >= JamBreachShootersMost)
+				break;
+
+			pFoot->ClearMegaMissionData();
+			pFoot->SetDestination(nullptr, true);
+			pFoot->SetTarget(pBest);
+			pFoot->QueueMission(Mission::Attack, true);
+			left.insert(pFoot);
+			++count;
+		}
+
+		if (count > 0)
+		{
+			CountDecision(NeuralDecision::JamBarrierBreach, pHouse->ArrayIndex);
+			const CellStruct at = pBest->GetMapCoords();
+			Debug::Log("[NeuralAI] Frame %d | House #%d shoots %s at (%d,%d) with %d units: it leaves a one-cell lane where %d of our units "
+				"are held at (%d,%d), blocked for %d frames, health %d\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, pBest->Type->ID, at.X,
+				at.Y, count, static_cast<int>(heldUnits.size()), center.X, center.Y, blockedFor, pBest->Health);
+		}
+
+		return count;
+	}
+
 	// Jam breaker: our units held 450+ frames with an order pending, 8+ within 4 cells of each other in
 	// open ground or 5+ in a narrow passage (bridge, tunnel tube, a corridor with fewer than 25 free
 	// cells in 7x7), are a block (a rally point in a gap, two-way traffic at a choke). Looked for every
@@ -531,6 +638,8 @@ namespace
 	// - held units outside a plan whose move ends inside the block leave it the same way;
 	// - in a narrow passage with traffic both ways, the smaller side backs off (orders dropped, 8..14
 	//   cells away on its own side; the AI gives it a new job) so the other side gets through;
+	// - a narrow passage blocked for JamBreachFrames: a neutral building of no worth that leaves a
+	//   one-cell lane there is shot down by held units in range (BreachJamBarrier);
 	// - a narrow passage where blocks are still found JamRerouteFrames after the first one is gone
 	//   around: half of the units whose way leads past it, then all of them (JamRerouteHop).
 	void UpdateJamBreaker(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
@@ -612,6 +721,8 @@ namespace
 
 		// The same narrow passage blocked again: since when, and from JamRerouteFrames on the way
 		// around it opens (half of the units, then all of them) and stays open JamRerouteHoldFrames.
+		int blockedFor = -1;
+
 		if (narrow)
 		{
 			if (macro.JamSpot == CellStruct::Empty || macro.JamSpot.DistanceFrom(center) > JamSpotCells || now < macro.JamSpotSeenFrame
@@ -622,7 +733,7 @@ namespace
 			}
 
 			macro.JamSpotSeenFrame = now;
-			const int blockedFor = now - macro.JamSpotSince;
+			blockedFor = now - macro.JamSpotSince;
 
 			if (blockedFor >= JamRerouteFrames)
 			{
@@ -790,6 +901,23 @@ namespace
 					left.insert(pFoot);
 				}
 			}
+		}
+
+		// The passage stayed blocked for JamBreachFrames: a neutral building that leaves a one-cell lane
+		// there is shot down by held units in range (BreachJamBarrier), before the others are sent around.
+		int breaching = 0;
+
+		if (narrow && blockedFor >= JamBreachFrames)
+		{
+			std::vector<FootClass*> heldUnits;
+
+			for (auto const& [pHeld, want] : block)
+			{
+				if (pHeld && pHeld->Foot && pHeld->Foot->IsAlive && !pHeld->Foot->InLimbo && !pHeld->Foot->IsInAir())
+					heldUnits.push_back(pHeld->Foot);
+			}
+
+			breaching = BreachJamBarrier(pHouse, heldUnits, center, blockedFor, left);
 		}
 
 		// The passage stayed blocked: held units of the block take the way around it at once
@@ -974,7 +1102,7 @@ namespace
 				now, pHouse->ArrayIndex, center.X, center.Y, detoured);
 		}
 
-		if (moved > 0 || gaveUp > 0 || yielded > 0 || detoured > 0 || rerouted > 0 || alliedYielded > 0)
+		if (moved > 0 || gaveUp > 0 || yielded > 0 || detoured > 0 || rerouted > 0 || alliedYielded > 0 || breaching > 0)
 		{
 			macro.LastJamBreakFrame = now;
 

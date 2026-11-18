@@ -635,6 +635,9 @@ namespace
 		// Where the members wait for their seat: behind the staging beach, off the cells the
 		// transports come to.
 		CellStruct Gather { CellStruct::Empty };
+		// Wait cells moved out of the way (FindOpHoldOutOfTheWay): the cell the plain rule gives, then
+		// the one used instead (Empty: none found).
+		std::vector<std::pair<CellStruct, CellStruct>> HoldMoves;
 		// The landing the load sailing now was given, chosen with its route (ChooseOpTripLanding), and
 		// the frame: the transports that sail in that tick land around it together.
 		CellStruct TripLanding { CellStruct::Empty };
@@ -2183,6 +2186,13 @@ namespace
 	constexpr int OpBerthRingCells = 14;
 	constexpr double OpBerthSpacingCells = 4.0;
 	constexpr int OpBerthWaitCells = 3;
+	// A member without a seat never waits on a bridge, a passage mouth or in a narrow passage
+	// (IsOpWaitInTheWay): its wait cell moves to the nearest cell within OpHoldMoveRing that is out of
+	// the way and still in the waiting band. User, 2026-11-18 (Fort Urban Square): the wait cell 17 cells
+	// from the staging beach fell on a junction islet's one-cell gate, the band took in the bridge and
+	// the islet, and the members of one operation held the way of the house's own waves for 27000 frames.
+	constexpr int OpHoldMoveRing = 8;
+	constexpr size_t OpHoldMovesMost = 64;
 	// Harvester shuttle (user: a harvester with no ore on its land rides an idle transport to a field
 	// across water with no refinery of ours, the transport waits nearby like a driver, brings it back
 	// full and the loop starts again). Checked every ShuttleCheckFrames once the ore of the lands we
@@ -2407,6 +2417,15 @@ namespace
 	// footprint cuts the ground there is sold, at most once per JamSealSellFrames.
 	constexpr double JamSealSearchCells = 10.0;
 	constexpr int JamSealSellFrames = 1800;
+	// A narrow passage blocked for JamBreachFrames: a neutral building of no worth (insignificant, not
+	// capturable, not occupiable, not a bridge repair hut, a legal target) within JamBreachReachCells of
+	// a held unit of the block, whose footprint leaves a lane of one cell there (FootprintCutsLandWay with
+	// two-way traffic), is shot down by up to JamBreachShootersMost armed held units in range. User,
+	// 2026-11-18 (Fort Urban Square): pairs of neutral barricades at the bridge ends left one-cell gates,
+	// every jam of the match was at one, a column of 21 to 83 units held up to 13000 frames.
+	constexpr int JamBreachFrames = 900;
+	constexpr int JamBreachReachCells = 2;
+	constexpr int JamBreachShootersMost = 6;
 	// Emergency lane (user: when an ambulance comes up a jammed road the cars ease aside as far as
 	// they can and open a corridor for it). Every EmergencyLaneCheckFrames, each ground unit of ours
 	// with an order that has stood EmergencyLaneWaitFrames on its cell looks EmergencyLaneCells ahead

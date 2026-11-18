@@ -1461,6 +1461,75 @@ namespace
 		pFoot->QueueMission(Mission::Guard, false);
 	}
 
+	// A cell where a member waiting for its seat holds the way of everything else that crosses there: a
+	// bridge or tube cell, a passage mouth or a narrow passage (OpHoldMoveRing).
+	bool IsOpWaitInTheWay(const CellStruct& cell)
+	{
+		auto const pCell = MapClass::Instance.CoordinatesLegal(cell) ? MapClass::Instance.TryGetCellAt(cell) : nullptr;
+
+		return !pCell || IsBridgeOrTubeCell(pCell) || IsPassageMouthCell(cell) || IsNarrowPassage(cell);
+	}
+
+	// The wait cell used instead of `hold` when that one is in the way: the nearest cell to it within
+	// OpHoldMoveRing on the land the members leave from, ground with no building, out of the way and
+	// between bandMin and bandMax cells from the staging cell; kept for the operation (HoldMoves).
+	// Empty when there is none.
+	CellStruct FindOpHoldOutOfTheWay(NeuralTransportOperation& op, const CellStruct& hold, double bandMin, double bandMax, int houseIndex)
+	{
+		for (auto const& [from, to] : op.HoldMoves)
+		{
+			if (from == hold)
+				return to;
+		}
+
+		CellStruct found = CellStruct::Empty;
+
+		for (int r = 1; r <= OpHoldMoveRing && found == CellStruct::Empty; ++r)
+		{
+			double bestDistance = 1.0e9;
+
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::abs(dx) != r && std::abs(dy) != r)
+						continue;
+
+					const CellStruct c { static_cast<short>(hold.X + dx), static_cast<short>(hold.Y + dy) };
+					auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+					if (!pCell || pCell->LandType == LandType::Water || pCell->GetBuilding()
+						|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != op.OriginZone)
+					{
+						continue;
+					}
+
+					const double fromStaging = c.DistanceFrom(op.Staging);
+					const double toHold = c.DistanceFrom(hold);
+
+					if (fromStaging < bandMin || fromStaging > bandMax || toHold >= bestDistance || IsOpWaitInTheWay(c))
+						continue;
+
+					bestDistance = toHold;
+					found = c;
+				}
+			}
+		}
+
+		if (op.HoldMoves.size() >= OpHoldMovesMost)
+			op.HoldMoves.clear();
+
+		op.HoldMoves.push_back({ hold, found });
+		CountDecision(NeuralDecision::OpHoldMoved, houseIndex);
+		// TEMP diagnostic: each wait cell moved out of the way and where to.
+		Debug::Log("[NeuralAI] House %d transport op %d: wait cell (%d,%d) is in the way (bridge %d, mouth %d, narrow %d), moved to (%d,%d), "
+			"staging (%d,%d), frame %d.\n", houseIndex, op.Id, hold.X, hold.Y,
+			IsBridgeOrTubeCell(MapClass::Instance.TryGetCellAt(hold)) ? 1 : 0, IsPassageMouthCell(hold) ? 1 : 0, IsNarrowPassage(hold) ? 1 : 0,
+			found.X, found.Y, op.Staging.X, op.Staging.Y, Unsorted::CurrentFrame);
+
+		return found;
+	}
+
 	void UpdateTransportOperation(HouseClass* pHouse, NeuralTransportOperation& op, std::unordered_map<DWORD, FootClass*>& foots,
 		bool logNow)
 	{
@@ -2153,6 +2222,7 @@ namespace
 
 			op.Staging = pStaging ? pStaging->MapCoords : centre;
 			op.Gather = op.Staging;
+			op.HoldMoves.clear();
 			const double span = op.Staging.DistanceFrom(centre);
 
 			for (int step = std::min(3, static_cast<int>(span)); step >= 1; --step)
@@ -2173,11 +2243,21 @@ namespace
 				}
 
 				if (pSpot && pSpot->LandType != LandType::Water && !besideBuilding
-					&& MapClass::Instance.GetMovementZoneType(spot, MovementZone::Normal, false) == op.OriginZone)
+					&& MapClass::Instance.GetMovementZoneType(spot, MovementZone::Normal, false) == op.OriginZone
+					&& !IsOpWaitInTheWay(spot))
 				{
 					op.Gather = spot;
 					break;
 				}
+			}
+
+			// The gathering spot is a wait cell too: never on a bridge, a passage mouth or in a narrow passage.
+			if (op.Gather == op.Staging && IsOpWaitInTheWay(op.Staging))
+			{
+				const CellStruct moved = FindOpHoldOutOfTheWay(op, op.Staging, 1.0, OpBerthRingCells, houseIndex);
+
+				if (moved != CellStruct::Empty)
+					op.Gather = moved;
 			}
 
 			// TEMP diagnostic: how far the members walk to board, and how far from our buildings.
@@ -2484,13 +2564,17 @@ namespace
 
 			// Without a seat: it waits out of the berths' way, OpBerthRingCells + OpBerthWaitCells from the
 			// staging cell on the side it comes from (each on its own side, not all on one cell), until a
-			// transport has a seat for it; with no land there, at the gathering spot.
+			// transport has a seat for it; with no land there, at the gathering spot. Never on a bridge, a
+			// passage mouth or in a narrow passage (IsOpWaitInTheWay): such a wait cell moves to the nearest
+			// one out of the way in the band (FindOpHoldOutOfTheWay).
 			const CellStruct at = pFoot->GetMapCoords();
 			const double fromStaging = at.DistanceFrom(op.Staging);
 			constexpr double HoldCells = OpBerthRingCells + OpBerthWaitCells;
+			constexpr double HoldBandMin = HoldCells - 2.0;
+			constexpr double HoldBandMax = 2.0 * HoldCells;
 
 			// Waiting where it should: it is not stuck short of the cell it was last sent to.
-			if (fromStaging >= HoldCells - 2.0 && fromStaging <= 2.0 * HoldCells)
+			if (fromStaging >= HoldBandMin && fromStaging <= HoldBandMax && !IsOpWaitInTheWay(at))
 			{
 				member.ProgressCell = at;
 				member.ProgressFrame = now;
@@ -2501,10 +2585,17 @@ namespace
 			const double towardY = fromStaging >= 1.0 ? (at.Y - op.Staging.Y) / fromStaging : 0.0;
 			const CellStruct hold { static_cast<short>(op.Staging.X + std::lround(towardX * HoldCells)),
 				static_cast<short>(op.Staging.Y + std::lround(towardY * HoldCells)) };
-			auto const pHold = MapClass::Instance.CoordinatesLegal(hold) ? MapClass::Instance.TryGetCellAt(hold) : nullptr;
+			auto pHold = MapClass::Instance.CoordinatesLegal(hold) ? MapClass::Instance.TryGetCellAt(hold) : nullptr;
 
 			if (pHold && pHold->LandType != LandType::Water && !pHold->GetBuilding()
-				&& MapClass::Instance.GetMovementZoneType(hold, MovementZone::Normal, false) == op.OriginZone)
+				&& MapClass::Instance.GetMovementZoneType(hold, MovementZone::Normal, false) == op.OriginZone && IsOpWaitInTheWay(hold))
+			{
+				const CellStruct moved = FindOpHoldOutOfTheWay(op, hold, HoldBandMin, HoldBandMax, houseIndex);
+				pHold = moved != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(moved) : nullptr;
+			}
+
+			if (pHold && pHold->LandType != LandType::Water && !pHold->GetBuilding()
+				&& MapClass::Instance.GetMovementZoneType(pHold->MapCoords, MovementZone::Normal, false) == op.OriginZone)
 			{
 				orderTo(pFoot, member.OrderCell, pHold, OpGatherCells - 1.0);
 			}
