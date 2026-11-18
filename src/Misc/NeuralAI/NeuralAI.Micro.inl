@@ -3849,7 +3849,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 					if (watch.OwnOrderUntil >= now)
 					{
-						if (mcvCell.DistanceFrom(watch.Goal) <= 3.0)
+						// Arrived: on the site, or next to it and stopped (matches #11569-#11574: judged 2-3
+						// cells short while still driving, 15-30 frames after the order, a good site
+						// counted as failed).
+						const double goalDist = mcvCell.DistanceFrom(watch.Goal);
+						const bool driving = pUnit->CurrentMission == Mission::Move && pUnit->Destination
+							&& pUnit->DistanceFrom(pUnit->Destination) > 256;
+
+						if (goalDist <= 1.0 || (goalDist <= 3.0 && !driving))
 						{
 							if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
 							{
