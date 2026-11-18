@@ -1106,6 +1106,8 @@ namespace
 		std::unordered_set<DWORD> TankGuardEscorts {};
 		// TEMP diagnostic (siege screen): the wait orders logged this match.
 		int SiegeScreenLogCount { 0 };
+		// TEMP diagnostic (push gate): the held pushes logged this match.
+		int PushGateLogCount { 0 };
 		// TEMP diagnostic (tank census, 2026-11-18; NoteMainTankDeath): main battle tanks out of a
 		// factory, the ones lost by what they did when they died (guard, Base Threat Intercept, another
 		// plan, a wave, scouting, a repair trip or transport op, at home, away), the kind of the killer
@@ -1660,6 +1662,7 @@ namespace
 			this->TankFloorEscortPart = 0;
 			this->TankGuardEscorts.clear();
 			this->SiegeScreenLogCount = 0;
+			this->PushGateLogCount = 0;
 			this->TankCensusBuilt = 0;
 			this->TankCensusLost.fill(0);
 			this->TankCensusKillers.fill(0);
@@ -2732,6 +2735,23 @@ namespace
 	constexpr double SiegeScreenTransportCells = 4.0;
 	constexpr double SiegeScreenArrivedCells = 2.0;
 	constexpr int SiegeScreenLogLines = 40;
+
+	// Push gate (user, 2026-11-18). The Slot 75 push of Micro sends every idle ground unit, vehicle or
+	// soldier, at the best enemy building of its land when it is on an enemy island, within 20 cells of
+	// that building, in the endgame or with the wave ready. Now a push at a building inside the reach
+	// of known enemy defenses (+ SiegeScreenMarginCells) goes only with company: the units of ours
+	// pushing at it this tick, the armed ones within PushGateGroupCells of it, attacking it or heading
+	// to within PushGateHeadingCells of it, PushGateMinGroup at least and PushGatePerDefense for each
+	// such defense. Without it the unit does not go, and one inside such a reach steps out of it
+	// towards home (DefenseReachWaitCell) to wait for the wave. Buildings no known defense covers and
+	// the endgame remnant hunt go as before. In 6 matches of 2026-11-18 79 main battle tanks died with
+	// this push as their last order; 34 of the 59 sent at a building were killed by defenses, half of
+	// them 4 cells or less from an enemy building and 45 cells or more from our sites.
+	constexpr int PushGateMinGroup = 6;
+	constexpr int PushGatePerDefense = 2;
+	constexpr double PushGateGroupCells = 10.0;
+	constexpr double PushGateHeadingCells = 6.0;
+	constexpr int PushGateLogLines = 30;
 	constexpr int TankGuardBaseAttackFrames = 1350;
 	constexpr int MainTankSpecialDamage = 5;
 	constexpr double MainTankHeavyVersus = 0.3;
