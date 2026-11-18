@@ -437,6 +437,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Per-match style, opening and surprise tech switch on top of the trained scores.
 	ApplyMatchStyle(pHouse, scores);
 
+	// The main battle tank is the most versatile unit of the war factory: in no archetype its class
+	// weighs less than the light vehicles (user: their near absence is unnatural; outside the tank mass
+	// slot 24 had the lowest median of the five vehicle classes, 331 to 772 against 1398 to 1994).
+	scores[24] = std::max(scores[24], scores[25]);
+
 	pExt->NeuralAI_LastInferenceFrame = Unsorted::CurrentFrame;
 
 	// Before any air lane is planned this tick: remember where our flyers were shot down.
@@ -5408,6 +5413,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			const bool isAA = !isMainTank && pWpn && pWpn->Projectile && pWpn->Projectile->AA;
 			const bool isArtillery = !isMainTank && pWpn && pWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell;
+			// A transport carries two or more, has no weapon or is a Carryall: an armed vehicle with one seat
+			// (the IFV gunner, the Venom and Avatar passenger hacks) scores by its combat role (user: the
+			// transport class, the heaviest of the war factory, went mostly to VENOM, FV and HTK).
+			const bool isTransportClass = (pUnit->Passengers > 0 && !isMainTank && (pUnit->Passengers >= 2 || pWpn == nullptr))
+				|| (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall);
 			const int diagPreClass = score;
 
 			// Artillery past what our front line can cover loses ground for every gun over it, with no
@@ -5525,7 +5535,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 													: (allowExpansionRefineryDeployer ? scores[30] : 0))));
 				}
 			}
-			else if ((pUnit->Passengers > 0 && !isMainTank) || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall))
+			else if (isTransportClass)
 			{
 				const bool isAirOrCarryallVehicle
 					= isAmphibTransport || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall);
@@ -5638,7 +5648,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (logUnitPicks)
 			{
 				const char diagClass = isMCV ? 'M' : (isKeyStructureDeployer ? 'D' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
-					: (((pUnit->Passengers > 0 && !isMainTank) || (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall)) ? 'P'
+					: (isTransportClass ? 'P'
 						: (isUnarmedSupportVehicle ? 'S' : (isAA ? 'A' : (isArtillery ? 'G' : (isMainTank ? 'T' : 'L')))))));
 				const int diagBase = pUnit->Cost / 4 + pUnit->Strength / 3;
 				const int diagPenalty = std::min(1200, ownedUnitWithConv * 55);
