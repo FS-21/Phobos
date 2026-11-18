@@ -2002,6 +2002,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		bool conYardWithNoRefineryInZone = false;
+		CellStruct noRefineryYardCell = CellStruct::Empty;
 		bool forwardConYardNeedsWarFactory = false;
 		bool forwardConYardNeedsBarracks = false;
 		// That ConYard stands on the land of a known enemy building (a beachhead): its factories come
@@ -2133,7 +2134,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			if ((!hasRefNearCY && hasOreNearCY) || wantsSecondIslandRefinery)
+			{
+				if (!conYardWithNoRefineryInZone)
+					noRefineryYardCell = cyc;
+
 				conYardWithNoRefineryInZone = true;
+			}
 
 			if (enemyNearCY || (spawnHomeZone >= 0 && cyz != spawnHomeZone) || !hasOreNearCY)
 			{
@@ -2216,11 +2222,62 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// counts only fields that already have a refinery, so a house that owns more than that room
 		// (recovery refineries, home fields running dry) had no room left for the new field: on Fluddle
 		// GDI held the defeated CABAL's island with a yard, its factories and 8 defenses and never a
-		// refinery. One refinery past what we own every RefineryNewFieldFrames at most, so one placed
-		// away from the field cannot start a chain.
+		// refinery. One refinery past what we own every RefineryNewFieldFrames at most, and only for a
+		// yard without a refinery or a real field (RefineryNewFieldOreCells in the 7x7 of the free ore
+		// cell, as placement judges a field), never again for one whose refinery went elsewhere
+		// (MissedNewFields, PlaceCompletedBuilding): any lone ore cell counted as a new field, placement
+		// aims at fields only, so the refinery landed away, the cell stayed free and the slot opened
+		// again every 3000 frames (Campy Festival: 5 refineries to 19 with the cap at 3 to 8, 9 of 22
+		// on fewer than 5 ore cells).
 		const int heldRefineryCap = std::max(1, fieldRefineryRoom);
-		const bool newFieldRefinerySlot = reachedNewOreField
-			&& Unsorted::CurrentFrame - GetMacroState(pHouse).LastRefineryPlacedFrame >= RefineryNewFieldFrames;
+		CellStruct slotFieldCell = CellStruct::Empty;
+		int slotFieldReach = 0;
+
+		if (conYardWithNoRefineryInZone && noRefineryYardCell != CellStruct::Empty)
+		{
+			slotFieldCell = noRefineryYardCell;
+			slotFieldReach = RefineryMissedYardCells;
+		}
+		else if (nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre <= 9)
+		{
+			int fieldOreCells = 0;
+
+			for (int fy = -3; fy <= 3; ++fy)
+			{
+				for (int fx = -3; fx <= 3; ++fx)
+				{
+					auto const pFieldCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(nearestUncolonizedOreCell.X + fx),
+						static_cast<short>(nearestUncolonizedOreCell.Y + fy) });
+
+					if (pFieldCell && pFieldCell->GetContainedTiberiumValue() > 0)
+						fieldOreCells++;
+				}
+			}
+
+			if (fieldOreCells >= RefineryNewFieldOreCells)
+			{
+				slotFieldCell = nearestUncolonizedOreCell;
+				slotFieldReach = RefineryMissedFieldCells;
+			}
+		}
+
+		auto& slotMacro = GetMacroState(pHouse);
+		auto& missedFields = slotMacro.MissedNewFields;
+		missedFields.erase(std::remove_if(missedFields.begin(), missedFields.end(), [](const std::pair<CellStruct, int>& missed)
+			{ return Unsorted::CurrentFrame - missed.second >= RefineryMissedFieldFrames || Unsorted::CurrentFrame < missed.second; }),
+			missedFields.end());
+		const bool slotFieldMissed = slotFieldCell != CellStruct::Empty
+			&& std::any_of(missedFields.begin(), missedFields.end(), [&slotFieldCell](const std::pair<CellStruct, int>& missed)
+				{ return std::max(std::abs(missed.first.X - slotFieldCell.X), std::abs(missed.first.Y - slotFieldCell.Y)) <= RefineryMissedSameFieldCells; });
+		const bool newFieldRefinerySlot = reachedNewOreField && slotFieldCell != CellStruct::Empty && !slotFieldMissed
+			&& Unsorted::CurrentFrame - slotMacro.LastRefineryPlacedFrame >= RefineryNewFieldFrames;
+
+		// The field this slot is for: the next refinery placed is judged against it.
+		if (newFieldRefinerySlot)
+		{
+			slotMacro.NewFieldSlotCell = slotFieldCell;
+			slotMacro.NewFieldSlotReach = slotFieldReach;
+		}
 		const int fieldRefineryCap = newFieldRefinerySlot ? std::max(heldRefineryCap, ownedRefineries) + 1
 			: heldRefineryCap + (reachedNewOreField ? 1 : 0);
 		const bool permanentRefineryCapReached = ownedRefineries >= fieldRefineryCap;
@@ -2229,9 +2286,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (IsAITickWindow(4500, 0))
 		{
 			Debug::Log("[NeuralAI] House %d refinery cap DIAG: %d refineries, held field room %d, cap %d (new field %d: yard without refinery %d, "
-				"anchor %d cells from free ore, slot %d), yards %d, frame %d.\n", pHouse->ArrayIndex, ownedRefineries, fieldRefineryRoom,
-				fieldRefineryCap, reachedNewOreField ? 1 : 0, conYardWithNoRefineryInZone ? 1 : 0, minAnchorDistToUncolonizedOre,
-				newFieldRefinerySlot ? 1 : 0, pHouse->ConYards.Count, Unsorted::CurrentFrame);
+				"anchor %d cells from free ore, slot %d, real field %d, missed fields %d), yards %d, frame %d.\n", pHouse->ArrayIndex,
+				ownedRefineries, fieldRefineryRoom, fieldRefineryCap, reachedNewOreField ? 1 : 0, conYardWithNoRefineryInZone ? 1 : 0,
+				minAnchorDistToUncolonizedOre, newFieldRefinerySlot ? 1 : 0, slotFieldCell != CellStruct::Empty ? 1 : 0,
+				static_cast<int>(missedFields.size()), pHouse->ConYards.Count, Unsorted::CurrentFrame);
 		}
 
 		// A newly reached field without its refinery (cap not reached): the cheapest buildable
