@@ -4887,6 +4887,28 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		if (pBuildingType->Refinery && !pBuildingType->ResourceGatherer)
 		{
 			st.LastRefineryPlacedFrame = Unsorted::CurrentFrame;
+
+			// The field the new field slot was opened for: a refinery placed away from it leaves it a
+			// missed field, which opens no slot again for a while (production, MissedNewFields).
+			const CellStruct slotCell = st.NewFieldSlotCell;
+			bool slotMissed = false;
+
+			if (slotCell != CellStruct::Empty)
+			{
+				slotMissed = std::max(std::abs(bestCell.X - slotCell.X), std::abs(bestCell.Y - slotCell.Y)) > st.NewFieldSlotReach;
+
+				if (slotMissed)
+				{
+					if (st.MissedNewFields.size() >= 8)
+						st.MissedNewFields.erase(st.MissedNewFields.begin());
+
+					st.MissedNewFields.emplace_back(slotCell, Unsorted::CurrentFrame);
+				}
+
+				st.NewFieldSlotCell = CellStruct::Empty;
+				st.NewFieldSlotReach = 0;
+			}
+
 			const int cellZone = MapClass::Instance.GetMovementZoneType(bestCell, MovementZone::Normal, false);
 			const int homeZone = pHouse->BaseSpawnCell != CellStruct::Empty
 				? MapClass::Instance.GetMovementZoneType(pHouse->BaseSpawnCell, MovementZone::Normal, false) : -1;
@@ -4925,10 +4947,11 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 			const CellStruct hubCell = st.RefineryHubCell;
 
 			Debug::Log("[NeuralAI] House %d refinery DIAG: %s placed at (%d,%d) zone %d (home zone %d), nearest yard (%d,%d) %d cells away, "
-				"%d ore cells within 8, %d refineries before, for yard hub (%d,%d) %d cells away, frame %d.\n", pHouse->ArrayIndex,
-				pBuildingType->ID, bestCell.X, bestCell.Y, cellZone, homeZone, yardCell.X, yardCell.Y,
+				"%d ore cells within 8, %d refineries before, for yard hub (%d,%d) %d cells away, slot field (%d,%d) missed %d, frame %d.\n",
+				pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y, cellZone, homeZone, yardCell.X, yardCell.Y,
 				yardCell != CellStruct::Empty ? static_cast<int>(yardCell.DistanceFrom(bestCell)) : -1, oreCells, refineries, hubCell.X,
-				hubCell.Y, hubCell != CellStruct::Empty ? static_cast<int>(hubCell.DistanceFrom(bestCell)) : -1, Unsorted::CurrentFrame);
+				hubCell.Y, hubCell != CellStruct::Empty ? static_cast<int>(hubCell.DistanceFrom(bestCell)) : -1, slotCell.X, slotCell.Y,
+				slotMissed ? 1 : 0, Unsorted::CurrentFrame);
 		}
 
 		// TEMP diagnostic: where a long-range gun with a dead zone goes, and whether a point-blank

@@ -834,6 +834,12 @@ namespace
 		// TEMP diagnostic (expansion refineries, 2026-11-18): the yard hub the last refinery search was
 		// anchored at (FindSpatialTetrisBuildCell, a remote yard without a refinery), Empty for none.
 		CellStruct RefineryHubCell { CellStruct::Empty };
+		// The field the last new field refinery slot was opened for (production) and how close the next
+		// refinery placed must stand to it; one placed farther adds it to MissedNewFields (cell, frame),
+		// which open no slot for RefineryMissedFieldFrames.
+		CellStruct NewFieldSlotCell { CellStruct::Empty };
+		int NewFieldSlotReach { 0 };
+		std::vector<std::pair<CellStruct, int>> MissedNewFields {};
 		// Refineries placed with that widened reach (UniqueIDs): the best spot a rugged map allowed,
 		// so the strict refinery audit of the resource hoarder never sells them (it would only
 		// rebuild them as far away again).
@@ -1495,6 +1501,9 @@ namespace
 			this->RefineryReachFailures = 0;
 			this->LastRefineryPlacedFrame = -100000;
 			this->RefineryHubCell = CellStruct::Empty;
+			this->NewFieldSlotCell = CellStruct::Empty;
+			this->NewFieldSlotReach = 0;
+			this->MissedNewFields.clear();
 			this->RelaxedReachRefineries.clear();
 			this->ResourceClaimCell = CellStruct::Empty;
 			this->ResourceClaimTreeCell = CellStruct::Empty;
@@ -2311,6 +2320,15 @@ namespace
 	// its search starts at the yard's own field, within RefineryHubOreCells of it.
 	constexpr int RefineryHubCells = 16;
 	constexpr int RefineryHubOreCells = 24;
+	// The new field refinery slot (past what we own) needs this many ore cells in the 7x7 of the free
+	// ore cell; its refinery counts as landing there within RefineryMissedFieldCells of it
+	// (RefineryMissedYardCells of a yard without one), else that field opens no slot for
+	// RefineryMissedFieldFrames (a missed field is the same within RefineryMissedSameFieldCells).
+	constexpr int RefineryNewFieldOreCells = 5;
+	constexpr int RefineryMissedFieldCells = 14;
+	constexpr int RefineryMissedYardCells = 18;
+	constexpr int RefineryMissedSameFieldCells = 6;
+	constexpr int RefineryMissedFieldFrames = 18000;
 	// Most mobile refineries (slave miners) a house mining with them wants, as the Advanced AI, and
 	// the least it wants with free fields (a classic base holds 4 refineries at home).
 	constexpr int MaxMobileMiners = 15;
