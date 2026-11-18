@@ -3963,6 +3963,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedAmphibTransports = 0;
 	int ownedHeavyIslandTransports = 0;
 	int ownedUnarmedSupportVehicles = 0;
+	// The support the tank floor escorts: unarmed vehicles, folded or not, without the unfolded siege
+	// guns (they count as artillery).
+	int ownedEscortedSupportVehicles = 0;
 	// Mobile sensor arrays, folded or not (SensorLookoutMinSight).
 	int ownedSensorLookouts = 0;
 	int ownedTransportTotalCapacity = 0;
@@ -3981,6 +3984,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedArtilleryVehicles = 0;
 	// Armed ground vehicles that shoot at aircraft (ShootsAtAircraft): the escort of the tank mass.
 	int ownedAntiAirVehicles = 0;
+	// Of them the ones that are neither main battle tanks nor artillery: the tank floor escorts them.
+	int ownedEscortedAntiAirVehicles = 0;
 	int ownedLandStrikeTransports = 0;
 	int idleLandStrikeTransports = 0;
 	// Unit carryalls (transport helicopters with Carryall=yes): owned, and empty ones doing nothing.
@@ -4061,6 +4066,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						ownedMainTanks++;
 					else if (pOwnedWpn->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell)
 						ownedArtilleryVehicles++;
+					else if (ShootsAtAircraft(pOwnedType))
+						ownedEscortedAntiAirVehicles++;
 
 					if (ShootsAtAircraft(pOwnedType))
 						ownedAntiAirVehicles++;
@@ -4134,6 +4141,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				&& pOwnedType->Passengers == 0)
 			{
 				ownedUnarmedSupportVehicles++;
+				ownedEscortedSupportVehicles++;
 			}
 
 			if (IsSensorLookoutType(pOwnedType))
@@ -4295,6 +4303,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& !IsTrueBaseStructureTarget(pOwnB->Type))
 		{
 			ownedUnarmedSupportVehicles++;
+
+			if (!IsDeployedSiegeBuildingType(pOwnB->Type) || GroundRangeOf(pOwnB->Type) < ArtilleryRangeCells * Unsorted::LeptonsPerCell)
+				ownedEscortedSupportVehicles++;
 
 			if (IsSensorLookoutType(pOwnB->Type->UndeploysInto))
 				ownedSensorLookouts++;
@@ -5042,9 +5053,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		&& pHouse->NumConYards >= 1 && features[21] == 0;
 	int bankYardMcvIdx = -1;
 
-	// The tank floor (TankFloor*): how many main battle tanks this house keeps alive.
+	// The tank floor (TankFloor*): how many main battle tanks this house keeps alive, the base defense
+	// and one escort for each artillery (unfolded siege guns too), anti-air and support vehicle.
 	const int tankFloor = std::min(TankFloorMost, std::max(TankFloorMin
-		+ std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost), ownedGroundCombatUnits / TankFloorShare));
+		+ std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost), ownedGroundCombatUnits / TankFloorShare)
+		+ ownedArtilleryVehicles + ownedEscortedAntiAirVehicles + ownedEscortedSupportVehicles);
 	const bool belowTankFloor = ownedMainTanks < tankFloor;
 
 	for (auto const pUnit : UnitTypeClass::Array)
@@ -5715,12 +5728,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// The tank floor: below it the best main battle tank goes ahead of the pick (TankFloor*).
 	{
 		const bool belowFloor = belowTankFloor;
-		const bool underAttack = GetMacroState(pHouse).CounterUnderAttack;
+		// Only an attack from the air alone keeps the scored pick: against a ground attack the tank goes first.
+		const bool airAttackOnly = GetMacroState(pHouse).CounterUnderAttack && !GetMacroState(pHouse).CounterUnderGroundAttack;
 		const bool floorTakes = belowFloor && bestTankIdx >= 0 && bestUnitIdx != bestTankIdx && hasActiveUnitIncome
-			&& !bestUnitRestoresIncome && !underAttack;
+			&& !bestUnitRestoresIncome && !airAttackOnly;
 		const char* floorWhy = !belowFloor ? "" : (floorTakes ? ", the tank goes first"
 			: (bestTankIdx < 0 ? ", kept: no tank to build" : (bestUnitIdx == bestTankIdx ? ", the pick is a tank"
-				: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income" : ", kept: under attack")))));
+				: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income" : ", kept: under air attack")))));
 
 		// TEMP diagnostic: the floor, the tanks alive and what the floor did, with the vehicle pick line.
 		if (logUnitPicks)

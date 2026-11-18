@@ -840,6 +840,7 @@ namespace
 		std::unordered_map<int, int> CounterUnlockBonus {};
 		int CounterFrame { -100000 };
 		bool CounterUnderAttack { false };
+		bool CounterUnderGroundAttack { false };
 		// Progressive unit tier (UpdateUnitTierCap): highest TechLevel of combat units it may build
 		// now, the highest tier of enemy units it has seen, and its peak building count (a house
 		// that lost half its base unlocks one tier more).
@@ -1475,6 +1476,7 @@ namespace
 			this->CounterUnlockBonus.clear();
 			this->CounterFrame = -100000;
 			this->CounterUnderAttack = false;
+			this->CounterUnderGroundAttack = false;
 			this->UnitTierCap = 2;
 			this->SeenEnemyUnitTier = 0;
 			this->PeakOwnedBuildings = 0;
@@ -2538,12 +2540,16 @@ namespace
 	// The floor of main battle tanks (user: no house may be left without line tanks, if only to guard
 	// and patrol; this is Red Alert and the tanks are the base, whatever the archetype). A house keeps
 	// TankFloorMin of them alive, one more for each refinery past TankFloorRefineries (TankFloorEconomyMost
-	// more at most), and at least one in TankFloorShare of its armed ground vehicles, TankFloorMost at
-	// most. Below it the best scored main battle tank it can build goes ahead of the war factory's
-	// pick, except when that pick restores the income (a harvester, a miner, an MCV), with no income
-	// at all, or while the base is under attack (the answer to the threat first); and the tanks it
-	// asks for are built even while the vehicles we have go unused (IsArmyKindUnused): they guard
-	// and patrol. Measured on 22 matches of stamp 03383eb89: below the floor the houses held 1.5 to 4
+	// more at most), and at least one in TankFloorShare of its armed ground vehicles: that is the base
+	// defense. On top of it one more escorts each artillery, anti-air and support vehicle we own, in
+	// every archetype (user, match #11587: a lighter tank class does not mean no tanks, they are good
+	// escorts and even as basic defense they are very good; a house with 0 to 3 tanks under a floor of 4
+	// built artillery). TankFloorMost at most. Below it the best scored main battle tank it can build goes
+	// ahead of the war factory's pick, except when that pick restores the income (a harvester, a miner,
+	// an MCV), with no income at all, or while the base is under attack from the air alone (the answer
+	// to the aircraft first): a main battle tank is the basic answer to a ground attack (13 of 42 floor
+	// checks of that house yielded to the attack, artillery picked with 0 tanks). The tanks it asks for
+	// are built even while the vehicles we have go unused (IsArmyKindUnused): they guard and patrol. Measured on 22 matches of stamp 03383eb89: below the floor the houses held 1.5 to 4
 	// tanks of 4 to 7; most checks with no tank to build were houses with no war factory yet (860
 	// before frame 9000, 268 later), the idle army brake stopped the vehicles 4 times.
 	constexpr int TankFloorMin = 4;
