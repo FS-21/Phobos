@@ -730,6 +730,10 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 	if (pVictimOwner && pVictimOwner->ArrayIndex >= 0 && pVictimOwner->ArrayIndex < 32)
 		LastOrderCaller[pVictimOwner->ArrayIndex].erase(pVictim->UniqueID);
 
+	// Engineer claims (EngineerClaim*): a dead engineer claims nothing.
+	if (pVictimOwner && pVictim->WhatAmI() == AbstractType::Infantry && NeuralAI::IsEnabledForHouse(pVictimOwner))
+		GetMacroState(pVictimOwner).EngineerCaptureTargets.erase(pVictim->UniqueID);
+
 	// Detection need (DetectionNeedOf): a loss of ours to a killer we could not see, cloaked or
 	// disguised, under water, or standing in the dark. Fog-fair: only where we lost it and whether the
 	// killer's cell was in our sight; a land loss to a cloaked killer counts as a stealth sighting at
