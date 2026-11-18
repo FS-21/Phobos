@@ -500,6 +500,10 @@ namespace
 			macro.IslandOreDrain = -1;
 			macro.IslandOreRunway = -1;
 			macro.IslandHubZoneKey = 0;
+			macro.HeldOre = 0;
+			macro.HeldOreDrain = -1;
+			macro.HeldOreRunway = -1;
+			macro.HeldOreKey = 0;
 			return;
 		}
 
@@ -551,6 +555,12 @@ namespace
 		const NeuralOreField* pIslandField = nullptr;
 		int islandFieldZone = -1;
 		int islandFieldMetric = INT_MAX;
+		// The ore of the fields we hold (a refinery or yard of ours within 14 cells): the land outlook
+		// counts the free fields of our landmass too, so on one continent it lasts the whole map; the
+		// held fields are what our harvesters drain now (user, 2026-11-18: foresee the falling income).
+		const std::vector<int> heldBlocks = GetHeldOreBlocks(pHouse);
+		int heldOre = 0;
+		unsigned int heldKey = 2166136261u;
 
 		for (auto const& field : GetOreFields())
 		{
@@ -590,6 +600,7 @@ namespace
 			countedKey = (countedKey ^ static_cast<unsigned int>(field.BlockKey)) * 16777619u;
 			const int bx = left + (field.BlockKey / 4096) * 12;
 			const int by = top + (field.BlockKey % 4096) * 12;
+			int blockOre = 0;
 
 			for (int y = by; y < by + 12; ++y)
 			{
@@ -604,8 +615,16 @@ namespace
 					const int value = pCell->GetContainedTiberiumValue();
 
 					if (value > 0 && isHubZone(MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false)))
-						homeOre += value;
+						blockOre += value;
 				}
+			}
+
+			homeOre += blockOre;
+
+			if (std::binary_search(heldBlocks.begin(), heldBlocks.end(), field.BlockKey))
+			{
+				heldOre += blockOre;
+				heldKey = (heldKey ^ static_cast<unsigned int>(field.BlockKey)) * 16777619u;
 			}
 		}
 
@@ -626,6 +645,20 @@ namespace
 
 		macro.IslandHubZoneKey = zoneKey;
 		macro.IslandHomeOre = homeOre;
+
+		// The held fields' drain from the previous sample of the same held blocks (a refinery placed or
+		// lost changes the set and that sample is skipped), net of what spawner trees grow back.
+		if (macro.HeldOreKey == heldKey && now >= 1800)
+		{
+			const int sample = std::max(0, macro.HeldOre - heldOre);
+			macro.HeldOreDrain = macro.HeldOreDrain < 0 ? sample : (macro.HeldOreDrain + sample) / 2;
+		}
+
+		macro.HeldOreKey = heldKey;
+		macro.HeldOre = heldOre;
+		macro.HeldOreRunway = macro.HeldOreDrain > 0
+			? static_cast<int>(std::min<int64_t>(INT_MAX, static_cast<int64_t>(heldOre) * 900 / macro.HeldOreDrain))
+			: -1;
 		macro.IslandOreRunway = macro.IslandOreDrain > 0
 			? static_cast<int>(std::min<int64_t>(INT_MAX, static_cast<int64_t>(homeOre) * 900 / macro.IslandOreDrain))
 			: -1;
