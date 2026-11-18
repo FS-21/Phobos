@@ -181,9 +181,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	NeuralPhaseClock microClock { pHouse ? pHouse->ArrayIndex : -1, NeuralSection::MicroSetup };
 	NeuralSegmentClock microSegments { "ms: start" };
 
+	// pAvoid: sites tried before (the idle MCV watchdog); a candidate within 6 cells of one is passed over.
 	auto const FindDeployableFoundationNearCellUncached
 		= [](HouseClass* pH, BuildingTypeClass* pBldType, const CellStruct& originCell, int requiredZone,
-			UnitClass* pDeployerUnit) -> CellStruct
+			UnitClass* pDeployerUnit, const std::vector<CellStruct>* pAvoid = nullptr) -> CellStruct
 	{
 		if (!pH || !pBldType || originCell == CellStruct::Empty)
 			return CellStruct::Empty;
@@ -212,6 +213,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						const int cz = MapClass::Instance.GetMovementZoneType(cand, MovementZone::Normal, false);
 						if (cz != requiredZone)
 							continue;
+					}
+
+					if (pAvoid && std::any_of(pAvoid->begin(), pAvoid->end(), [&cand](const CellStruct& avoid)
+						{ return std::max(std::abs(avoid.X - cand.X), std::abs(avoid.Y - cand.Y)) <= 6; }))
+					{
+						continue;
 					}
 
 					if (pDeployerUnit && pDeployerUnit->Type && cand != curUnitCell)
@@ -3746,6 +3753,186 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const int mcvCellZone = MapClass::Instance.GetMovementZoneType(mcvCell, MovementZone::Normal, pUnit->OnBridge);
 			const int mcvLandZone = IsGroundZone(mcvCellZone) ? mcvCellZone : TransportLandZone(mcvCell, pUnit->OnBridge);
 			const int mcvZone = IsGroundZone(mcvLandZone) ? mcvLandZone : -1;
+
+			// Idle MCV watchdog (McvIdleFrames, NeuralAI.State.inl): no other rule notices a packed MCV
+			// of a house with a yard that keeps to one spot. Its site search below checks the zone, not
+			// a path, and keeps its answer, so an MCV the engine finds no path for is sent to the same
+			// site again and again, and an MCV within 3 cells of its goal gets no order at all. The
+			// watchdog unfolds it where it stands if it can; else it leads it along legs of our own route
+			// search to the nearest site not tried yet, and home to a yard of ours after McvIdleMostTries
+			// such sites. While it follows that order the MCV logic below leaves it alone. An MCV that
+			// may be waiting for a ferry to the island goal is left to the island logic and its timers.
+			{
+				auto& idleWatch = GetMacroState(pHouse).McvIdle;
+				const int now = Unsorted::CurrentFrame;
+				const bool mayWaitForFerry = pIslandResourceGoalCell != nullptr && mcvZone >= 0
+					&& MapClass::Instance.GetMovementZoneType(pIslandResourceGoalCell->MapCoords, MovementZone::Normal, false) != mcvZone
+					&& CanHouseFerryTypeAcrossWater(pHouse, pType);
+				const bool unfolding = pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload;
+
+				if (idleWatch.size() > 64)
+					std::erase_if(idleWatch, [now](const auto& entry) { return now - entry.second.SinceFrame > 20000; });
+
+				if (mayWaitForFerry || unfolding)
+				{
+					idleWatch.erase(pUnit->UniqueID);
+				}
+				else
+				{
+					auto& watch = idleWatch[pUnit->UniqueID];
+
+					if (watch.Cell == CellStruct::Empty || mcvCell.DistanceFrom(watch.Cell) > McvIdleDriftCells)
+					{
+						watch.Cell = mcvCell;
+						watch.SinceFrame = now;
+					}
+
+					const int stood = now - watch.SinceFrame;
+					// TEMP diagnostic: each step of the watchdog (60 lines per match).
+					static int mcvWatchLogSerial = -1;
+					static int mcvWatchLogCount = 0;
+
+					if (mcvWatchLogSerial != NeuralMatchSerial)
+					{
+						mcvWatchLogSerial = NeuralMatchSerial;
+						mcvWatchLogCount = 0;
+					}
+
+					auto const logStep = [&](const char* what, const CellStruct& at)
+					{
+						if (mcvWatchLogCount++ >= 60)
+							return;
+
+						char destText[24] = "none";
+
+						if (pUnit->Destination)
+						{
+							const CellStruct destCell = CellClass::Coord2Cell(pUnit->Destination->GetCoords());
+							std::snprintf(destText, sizeof(destText), "(%d,%d)", destCell.X, destCell.Y);
+						}
+
+						Debug::Log("[NeuralAI] House %d MCV watchdog: %s %u %s (%d,%d), from (%d,%d) after %d frames there, mission %d dest %s, "
+							"enemy near %d, %d sites failed, %d yards, frame %d.\n",
+							pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, what, at.X, at.Y, mcvCell.X, mcvCell.Y, stood,
+							static_cast<int>(pUnit->CurrentMission), destText, enemyNearMCV ? 1 : 0, static_cast<int>(watch.FailedSites.size()),
+							pHouse->NumConYards, now);
+					};
+
+					// The next leg toward Goal: false when there is no way there (a direct move for the
+					// last stretch, where the route search gives no leg).
+					auto const followGoal = [&]() -> bool
+					{
+						if (pUnit->CurrentMission == Mission::Move && pUnit->Destination && pUnit->DistanceFrom(pUnit->Destination) > 512)
+							return true;
+
+						CellClass* pLeg = GroundRouteHop(pUnit, watch.Goal, McvIdleLegSteps);
+
+						if (!pLeg)
+						{
+							if (LastGroundRouteAnswer == NeuralRouteAnswer::Budget)
+								return true;
+
+							if (LastGroundRouteAnswer != NeuralRouteAnswer::Near && LastGroundRouteAnswer != NeuralRouteAnswer::ShortLeg)
+								return false;
+
+							pLeg = MapClass::Instance.TryGetCellAt(watch.Goal);
+						}
+
+						if (pLeg)
+							IssueMoveOrder(pUnit, pLeg, 1.0);
+
+						return pLeg != nullptr;
+					};
+
+					bool handled = false;
+					bool retryNow = false;
+
+					if (watch.OwnOrderUntil >= now)
+					{
+						if (mcvCell.DistanceFrom(watch.Goal) <= 3.0)
+						{
+							if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
+							{
+								logStep("unfolds at the site", mcvCell);
+								OrderDeployerUnpack(pUnit);
+								idleWatch.erase(pUnit->UniqueID);
+								continue;
+							}
+
+							logStep("cannot unfold at", watch.Goal);
+							watch.FailedSites.push_back(watch.Goal);
+							watch.OwnOrderUntil = -1;
+							retryNow = true;
+						}
+						else if (followGoal())
+						{
+							handled = true;
+						}
+						else
+						{
+							logStep("finds no way to", watch.Goal);
+							watch.FailedSites.push_back(watch.Goal);
+							watch.OwnOrderUntil = -1;
+							retryNow = true;
+						}
+					}
+					else if (watch.OwnOrderUntil >= 0)
+					{
+						logStep("did not reach", watch.Goal);
+						watch.FailedSites.push_back(watch.Goal);
+						watch.OwnOrderUntil = -1;
+						retryNow = true;
+					}
+
+					if (!handled && (retryNow || stood >= McvIdleFrames))
+					{
+						watch.SinceFrame = now;
+						watch.Cell = mcvCell;
+
+						if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
+						{
+							logStep("unfolds where it stood", mcvCell);
+							CountDecision(NeuralDecision::McvIdleUnfold, pHouse->ArrayIndex);
+							OrderDeployerUnpack(pUnit);
+							idleWatch.erase(pUnit->UniqueID);
+							continue;
+						}
+
+						CellStruct goal = CellStruct::Empty;
+						bool home = false;
+
+						if (static_cast<int>(watch.FailedSites.size()) < McvIdleMostTries)
+						{
+							goal = FindDeployableFoundationNearCellUncached(pHouse, pType->DeploysInto, mcvCell, mcvZone, pUnit,
+								&watch.FailedSites);
+						}
+
+						if (goal == CellStruct::Empty)
+						{
+							goal = FindBestDeployStandCell(pHouse, pType->DeploysInto, pUnit, mcvZone);
+							home = true;
+						}
+
+						if (goal != CellStruct::Empty)
+						{
+							watch.Goal = goal;
+							watch.OwnOrderUntil = now + McvIdleOrderFrames;
+							CountDecision(home ? NeuralDecision::McvIdleHome : NeuralDecision::McvIdleSite, pHouse->ArrayIndex);
+							logStep(home ? "goes home to" : "goes to the site", goal);
+							followGoal();
+							handled = true;
+						}
+						else
+						{
+							logStep("finds no site at all near", mcvCell);
+						}
+					}
+
+					if (handled)
+						continue;
+				}
+			}
+
 			int minAnchorDist = 9999;
 			int conYardsInMcvZone = 0;
 			int hubsAndFactoriesInMcvZone = 0;
