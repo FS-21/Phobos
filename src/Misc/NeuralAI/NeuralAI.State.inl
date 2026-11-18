@@ -2876,10 +2876,12 @@ namespace
 	// from SensorLookoutMinSight (the engine's sensors reveal hidden units, not the shroud); a vehicle
 	// counts the building it unfolds into. While a need is on, a detector scores DetectionScorePerCell per
 	// cell of reach, DetectionScoreMost at most (it was a flat 480 for a vehicle with Sensors or
-	// DetectDisguise while a stealth unit was in sight), and detectors have a cap of their own,
-	// DetectionCap and one more with two construction yards or more, counting only the ones of ours
-	// (vehicles and buildings) that reach as far or farther: a radar jammer of 8 cells no longer keeps a
-	// sensor array of 25 out. A building with SensorArray that is no base defense gets the same score and
+	// DetectDisguise while a stealth unit was in sight), and vehicle detectors have a cap of their own,
+	// DetectionCap and one more with two construction yards or more, counting only the vehicle detectors
+	// of ours that reach as far or farther: a radar jammer of 8 cells no longer keeps a sensor array of
+	// 25 out, and a detector building at home (it never goes with the army) keeps no vehicle out (counted
+	// with the buildings, in 6 matches a Psychic Sensor of 15 cells kept the jammers out: 0.88% of the
+	// NextUnit lines before, 0.09% after). A building with SensorArray that is no base defense gets the same score and
 	// one more past the support cap while a stealth or blind need has a sighting or loss no detector of
 	// ours covers.
 	constexpr int DetectionBlindFrames = 2700;

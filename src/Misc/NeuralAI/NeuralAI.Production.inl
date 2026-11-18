@@ -442,12 +442,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// slot 24 had the lowest median of the five vehicle classes, 331 to 772 against 1398 to 1994).
 	scores[24] = std::max(scores[24], scores[25]);
 
-	// Detection need (Detection*): what this house needs detectors for now, the cap of its detectors,
-	// and the reach of the detectors of ours for that need (vehicles and buildings).
+	// Detection need (Detection*): what this house needs detectors for now, the cap of its mobile
+	// detectors, and the reach of the vehicle detectors of ours for that need. A detector building at home
+	// never goes with the army, so only vehicles fill the vehicles' cap (a Psychic Sensor of 15 cells kept
+	// every radar jammer of 8 out: jammers fell from 0.88% to 0.09% of the NextUnit lines); the buildings
+	// are counted apart for the diagnostic.
 	const int detectionNeed = DetectionNeedOf(pHouse);
 	const int detectionCap = DetectionCap + (pHouse->ConYards.Count >= 2 ? 1 : 0);
 	const bool detectionSpotUncovered = (detectionNeed & DetectionNeedStealth) && DetectionSpotUncovered(pHouse);
 	std::vector<int> ownedDetectorReaches;
+	int ownedDetectorBuildings = 0;
+	int ownedDetectorBuildingReach = 0;
 
 	if (detectionNeed)
 	{
@@ -456,7 +461,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->Type)
 			{
 				if (const int reach = DetectionReachCells(pOwnB->Type, detectionNeed); reach > 0)
-					ownedDetectorReaches.push_back(reach);
+				{
+					ownedDetectorBuildings++;
+					ownedDetectorBuildingReach = std::max(ownedDetectorBuildingReach, reach);
+				}
 			}
 		}
 
@@ -496,12 +504,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					losses[static_cast<size_t>(std::clamp(loss.Kind, 0, 2))]++;
 			}
 
-			Debug::Log("[NeuralAI] Frame %d | House #%d detection: need%s%s%s%s, last enemy seen %d frames ago, stealth sightings %d, hidden losses %d dark %d cloaked %d naval, detectors %d (best reach %d), cap %d, spot uncovered %d\n",
+			Debug::Log("[NeuralAI] Frame %d | House #%d detection: need%s%s%s%s, last enemy seen %d frames ago, stealth sightings %d, hidden losses %d dark %d cloaked %d naval, detectors %d (best reach %d), cap %d, spot uncovered %d, detector buildings %d (best reach %d)\n",
 				now, pHouse->ArrayIndex, detectionNeed ? "" : " none", (detectionNeed & DetectionNeedBlind) ? " blind" : "",
 				(detectionNeed & DetectionNeedStealth) ? " stealth" : "", (detectionNeed & DetectionNeedSub) ? " sub" : "",
 				now - detectMacro.LastEnemySeenFrame, sightings, losses[0], losses[1], losses[2], static_cast<int>(ownedDetectorReaches.size()),
 				ownedDetectorReaches.empty() ? 0 : *std::max_element(ownedDetectorReaches.begin(), ownedDetectorReaches.end()), detectionCap,
-				detectionSpotUncovered ? 1 : 0);
+				detectionSpotUncovered ? 1 : 0, ownedDetectorBuildings, ownedDetectorBuildingReach);
 		}
 	}
 
