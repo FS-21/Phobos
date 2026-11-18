@@ -1310,7 +1310,8 @@ namespace
 		return MapClass::Instance.TryGetCellAt(cells[next]);
 	}
 
-	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5)
+	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5,
+		const char* callerFile = __builtin_FILE(), int callerLine = __builtin_LINE())
 	{
 		// A unit of a transport operation takes its orders from the operation alone.
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive || IsHeldByTransportOp(pFoot))
@@ -1369,6 +1370,7 @@ namespace
 		pFoot->SetDestination(pDest, true);
 		pFoot->QueueMission(Mission::Move, true);
 		CountDecision(NeuralDecision::MoveOrderIssued, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
+		NoteOrderCaller(pFoot, "move", callerFile, callerLine);
 
 		return true;
 	}

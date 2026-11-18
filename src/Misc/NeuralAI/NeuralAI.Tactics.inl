@@ -2501,6 +2501,7 @@ namespace
 			{
 				pUnit->SetDestination(pBestOre, true);
 				pUnit->QueueMission(Mission::Move, true);
+				NoteOrderCaller(pUnit, "move");
 				CountDecision(NeuralDecision::IdleHarvesterSent, pHouse->ArrayIndex);
 				continue; // A new track starts when it is back on Harvest.
 			}
@@ -4213,6 +4214,7 @@ namespace
 					{
 						pDocked->SetDestination(pExitCell, true);
 						pDocked->QueueMission(Mission::Move, false);
+						NoteOrderCaller(pDocked, "move");
 					}
 				}
 			}

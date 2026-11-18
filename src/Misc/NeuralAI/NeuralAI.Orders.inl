@@ -1177,7 +1177,7 @@ namespace
 		return cellZone == footZone || IsSameGroundForFoot(pFoot, cell) || IsBuildingEnterableFromZone(pBuilding, footZone);
 	}
 
-	void OrderFootToAttackMove(FootClass* pFoot, AbstractClass* pDest)
+	void OrderFootToAttackMove(FootClass* pFoot, AbstractClass* pDest, const char* callerFile = __builtin_FILE(), int callerLine = __builtin_LINE())
 	{
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive)
 			return;
@@ -1239,6 +1239,7 @@ namespace
 					pFoot->SetTarget(pEnemyBld);
 					pFoot->QueueMission(Mission::Attack, true);
 					CountDecision(NeuralDecision::MoveOrderIssued, pFoot->Owner->ArrayIndex);
+					NoteOrderCaller(pFoot, "attackBuilding", callerFile, callerLine);
 				}
 				else
 				{
@@ -1509,6 +1510,8 @@ namespace
 		{
 			pFoot->QueueMission(Mission::Move, true);
 		}
+
+		NoteOrderCaller(pFoot, "attackMove", callerFile, callerLine);
 	}
 
 	bool HasActiveBoardingPassenger(TechnoClass* pTrans, int transZone)
