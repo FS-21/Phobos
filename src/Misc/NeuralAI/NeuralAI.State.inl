@@ -1318,6 +1318,10 @@ namespace
 		std::array<int, 16> OpWaitingSizeBySize {};
 		int OpWaitingFrame { -1 };
 		int TransportOpLogFrame { -1 };
+		// Engineer claims (EngineerClaim*): the building each engineer of ours was sent to capture by the
+		// generic capture choice, and when; and the TEMP diagnostic's lines this match.
+		std::unordered_map<DWORD, std::pair<DWORD, int>> EngineerCaptureTargets;
+		int EngineerClaimLogCount { 0 };
 		std::vector<NeuralOpUnitWatch> OpWatch;
 		// Where transports of the operations were lost, with the frame and whether they flew: the
 		// routes of the next crossings keep away from there (PlanOpRoute).
@@ -1763,6 +1767,8 @@ namespace
 			this->WaveGroupTypes.clear();
 			this->WaveGroupFrame = -100000;
 			this->TransportOps.clear();
+			this->EngineerCaptureTargets.clear();
+			this->EngineerClaimLogCount = 0;
 			this->NextTransportOpId = 1;
 			this->TransportOpOf.clear();
 			this->TransportOpRetryUntil.clear();
@@ -2823,6 +2829,23 @@ namespace
 	constexpr int DetectionCap = 1;
 	constexpr size_t DetectionHiddenLosses = 32;
 	constexpr int DetectionLogFrames = 1800;
+	// Engineer claims (user, 2026-11-18: a transport set down more engineers on an island than it had
+	// targets, and some stood at the landing with nothing to do). The generic capture choice kept a
+	// second engineer off a neutral building only when another one had it as destination or target: one
+	// waiting for a transport (its destination the staging beach) or aboard (in limbo) did not count,
+	// and enemy buildings had no such check; in the observer match of stamp d6d85b855 single crossings
+	// carried 7 to 9 engineers (one of house 2, zone 26 to 10, set down 29 units in 10 trips). Now each
+	// engineer sent at a building claims it (EngineerCaptureTargets): the claim holds while the engineer
+	// is in a transport operation, walks to or attacks that building, or for EngineerClaimFrames after
+	// the order, and no other engineer of ours is sent at a claimed building, neutral or enemy. A transport
+	// operation lets an engineer go before it boards when its claimed building is gone, ours or allied,
+	// no longer capturable, or claimed by an engineer ahead of it (walking, aboard, or waiting with a
+	// lower UniqueID). One set down with its claimed building no longer to take walks EngineerLandingStepCells
+	// inland from where it stands, towards its old goal, off the landing.
+	constexpr int EngineerClaimFrames = 900;
+	constexpr int EngineerLandingStepCells = 6;
+	constexpr int EngineerClaimLogLines = 30;
+
 	constexpr int DetectionNeedBlind = 1;
 	constexpr int DetectionNeedStealth = 2;
 	constexpr int DetectionNeedSub = 4;

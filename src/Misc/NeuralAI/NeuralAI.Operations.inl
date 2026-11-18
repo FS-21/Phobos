@@ -1475,6 +1475,44 @@ namespace
 		}
 
 		pFoot->SetDestination(nullptr, true);
+
+		// Engineer claims (EngineerClaim*): an engineer set down with its claimed building no longer to
+		// take walks EngineerLandingStepCells inland, towards its old goal, off the landing (user: they
+		// stood at the landing with nothing to do); its client gives it its next capture from there.
+		if (op.Client == NeuralOpClient::Economy && pFoot->WhatAmI() == AbstractType::Infantry
+			&& EngineerClaimWanted(pHouse, member.UniqueID) == 0)
+		{
+			auto& macro = GetMacroState(pHouse);
+			macro.EngineerCaptureTargets.erase(member.UniqueID);
+			const CellStruct at = pFoot->GetMapCoords();
+			const int dx = member.Target.X - at.X;
+			const int dy = member.Target.Y - at.Y;
+			const int steps = std::max(std::abs(dx), std::abs(dy));
+
+			if (member.Target != CellStruct::Empty && steps >= 2)
+			{
+				const int step = std::min(steps, EngineerLandingStepCells);
+				const CellStruct to { static_cast<short>(at.X + dx * step / steps), static_cast<short>(at.Y + dy * step / steps) };
+				auto const pType = pFoot->GetTechnoType();
+				auto const pCell = MapClass::Instance.CoordinatesLegal(to) ? MapClass::Instance.TryGetCellAt(to) : nullptr;
+
+				if (pCell && pType && !pCell->GetBuilding()
+					&& MapClass::Instance.GetMovementZoneType(to, pType->MovementZone, false)
+						== MapClass::Instance.GetMovementZoneType(at, pType->MovementZone, pFoot->OnBridge)
+					&& IssueMoveOrder(pFoot, pCell, 1.5))
+				{
+					// TEMP diagnostic (engineer claims): the engineers set down with nothing left to take.
+					if (macro.EngineerClaimLogCount++ < EngineerClaimLogLines)
+					{
+						Debug::Log("[NeuralAI] House %d transport op %d: %s %u set down at (%d,%d) with its capture no longer to make, walks off the landing to (%d,%d), frame %d.\n",
+							pHouse->ArrayIndex, op.Id, pType->ID, member.UniqueID, at.X, at.Y, to.X, to.Y, Unsorted::CurrentFrame);
+					}
+
+					return;
+				}
+			}
+		}
+
 		pFoot->QueueMission(Mission::Guard, false);
 	}
 
@@ -2058,6 +2096,23 @@ namespace
 						pFoot->QueueMission(Mission::Guard, false);
 						return true;
 					}
+				}
+
+				// Engineer claims (EngineerClaim*): an engineer whose claimed building is no longer to take
+				// (gone, ours or an ally's, no longer capturable) or that an engineer ahead of it goes for
+				// stays home: let go before it boards.
+				if (op.Client == NeuralOpClient::Economy && pFoot->WhatAmI() == AbstractType::Infantry
+					&& EngineerClaimWanted(pHouse, member.UniqueID) == 0)
+				{
+					Debug::Log("[NeuralAI] House %d transport op %d lets %s %u go: its capture is no longer to make, frame %d.\n", houseIndex,
+						op.Id, pFoot->GetTechnoType()->ID, member.UniqueID, now);
+					macro.EngineerCaptureTargets.erase(member.UniqueID);
+					op.Released++;
+					macro.TransportOpOf.erase(member.UniqueID);
+					wake(pFoot);
+					pFoot->SetDestination(nullptr, true);
+					pFoot->QueueMission(Mission::Guard, false);
+					return true;
 				}
 
 				waitingSize += member.Size;

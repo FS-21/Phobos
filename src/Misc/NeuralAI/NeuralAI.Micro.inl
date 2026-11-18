@@ -7508,19 +7508,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!canCaptureNow)
 					continue;
 
-				// Coordinate multiple Engineers: do not send a 2nd Engineer to a
-				// neutral tech building already targeted by another friendly Engineer!
-				if (isNeutralTech)
+				// Coordinate multiple Engineers: do not send a 2nd Engineer to a building, neutral or enemy,
+				// another engineer of ours already goes for: walking to it, attacking it, or claimed for it
+				// (EngineerCaptureTargets: waiting for a transport, aboard, sent lately).
 				{
-					bool alreadyTargetedByOtherEng = false;
+					bool alreadyTargetedByOtherEng = IsCaptureClaimedByOther(pHouse, pBld, pInf->UniqueID, false);
+
 					for (auto const pOtherInf : InfantryClass::Array)
 					{
+						if (alreadyTargetedByOtherEng)
+							break;
+
 						if (pOtherInf && pOtherInf != pInf && pOtherInf->Owner == pHouse && !pOtherInf->InLimbo
 							&& pOtherInf->IsAlive && pOtherInf->Type && IsCaptureInfantryType(pOtherInf->Type)
 							&& (pOtherInf->Destination == pBld || pOtherInf->Target == pBld))
 						{
 							alreadyTargetedByOtherEng = true;
-							break;
 						}
 					}
 
@@ -7548,9 +7551,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			if (pBestCapBld)
+			if (pBestCapBld && dispatchCapture(pInf, pBestCapBld, Mission::Enter, false))
 			{
-				dispatchCapture(pInf, pBestCapBld, Mission::Enter, false);
+				// Engineer claims (EngineerClaim*): it goes for this building now, a transport or not.
+				auto& claims = GetMacroState(pHouse).EngineerCaptureTargets;
+
+				if (claims.size() > 64)
+				{
+					std::erase_if(claims, [pHouse](const auto& entry)
+						{ return Unsorted::CurrentFrame - entry.second.second > 4 * EngineerClaimFrames && !IsInTransportOp(pHouse, entry.first); });
+				}
+
+				claims[pInf->UniqueID] = { pBestCapBld->UniqueID, Unsorted::CurrentFrame };
 			}
 
 			continue;

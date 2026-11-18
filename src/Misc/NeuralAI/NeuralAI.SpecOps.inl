@@ -538,6 +538,76 @@ namespace
 		return false;
 	}
 
+	// Engineer claims (EngineerClaim*): does an engineer of ours other than engineerUid go for this
+	// building? In a transport operation, walking to it or attacking it, or sent at it within
+	// EngineerClaimFrames. With aheadOnly only the ones ahead of engineerUid count: walking or attacking
+	// ones, ones not in a transport operation, ones aboard, and ones waiting with a lower UniqueID.
+	bool IsCaptureClaimedByOther(HouseClass* pHouse, const BuildingClass* pBld, DWORD engineerUid, bool aheadOnly)
+	{
+		if (!pHouse || !pBld)
+			return false;
+
+		const int now = Unsorted::CurrentFrame;
+
+		for (auto const& [uid, claim] : GetMacroState(pHouse).EngineerCaptureTargets)
+		{
+			if (uid == engineerUid || claim.first != pBld->UniqueID)
+				continue;
+
+			InfantryClass* pEngineer = nullptr;
+
+			for (auto const pInf : InfantryClass::Array)
+			{
+				if (pInf && pInf->UniqueID == uid)
+				{
+					pEngineer = pInf;
+					break;
+				}
+			}
+
+			if (!pEngineer || !pEngineer->IsAlive || pEngineer->Owner != pHouse)
+				continue;
+
+			const bool inOp = IsInTransportOp(pHouse, uid);
+			const bool onIt = !pEngineer->InLimbo && (pEngineer->Destination == pBld || pEngineer->Target == pBld);
+
+			if (!inOp && !onIt && now - claim.second > EngineerClaimFrames)
+				continue;
+
+			if (!aheadOnly || onIt || !inOp || pEngineer->InLimbo || uid < engineerUid)
+				return true;
+		}
+
+		return false;
+	}
+
+	// The claim of an engineer of ours (EngineerCaptureTargets): -1 none; 1 its building still stands,
+	// is capturable, no house's of ours or an ally's, and no engineer ahead of it goes for it; 0 not.
+	int EngineerClaimWanted(HouseClass* pHouse, DWORD engineerUid)
+	{
+		auto const& claims = GetMacroState(pHouse).EngineerCaptureTargets;
+		auto const it = claims.find(engineerUid);
+
+		if (it == claims.end())
+			return -1;
+
+		BuildingClass* pBld = nullptr;
+
+		for (auto const pCandidate : BuildingClass::Array)
+		{
+			if (pCandidate && pCandidate->UniqueID == it->second.first)
+			{
+				pBld = pCandidate;
+				break;
+			}
+		}
+
+		const bool wanted = pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Capturable && pBld->Owner
+			&& pBld->Owner != pHouse && !pHouse->IsAlliedWith(pBld->Owner) && !IsCaptureClaimedByOther(pHouse, pBld, engineerUid, true);
+
+		return wanted ? 1 : 0;
+	}
+
 	// May any engineer of ours walk to this neutral building now? Known as neutral, not walled in
 	// (an engineer alone would wait at the wall), not blocked by recent failures, not taken by an
 	// Expert 4 capture nor claimed by an ally, and out of known enemy defense reach.
