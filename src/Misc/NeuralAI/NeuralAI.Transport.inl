@@ -1281,16 +1281,24 @@ namespace
 		size_t next = std::min(cells.size() - 1, nearest + static_cast<size_t>(std::max(1, hop)));
 
 		// A leg never ends on a bridge or at its mouth, where the units of the wave would stop in each
-		// other's way: it runs on to the ground past the far end.
+		// other's way: it runs on to the ground past the far end, and on past the passage mouth there
+		// (PassageMouthSteps reach further than RouteLegPastBridgeCells). A leg ending in the mouth
+		// before a bridge runs on over it the same way. Match #11562 (Fort Urban Square): legs past
+		// a bridge ended 4 cells beyond its deck, inside its mouth; the units held on that bridge
+		// kept them as their way on and 5 to 32 of them stood there for 10500 frames.
 		auto const& onDeck = it->second.OnDeck;
+		auto const deckAt = [&onDeck](size_t index) { return index < onDeck.size() && onDeck[index]; };
 
-		if (next < onDeck.size() && onDeck[next])
+		if (deckAt(next))
 		{
-			while (next + 1 < cells.size() && onDeck[next])
+			while (next + 1 < cells.size() && deckAt(next))
 				++next;
 
 			next = std::min(cells.size() - 1, next + RouteLegPastBridgeCells);
 		}
+
+		while (next + 1 < cells.size() && (deckAt(next) || IsPassageMouthCell(cells[next])))
+			++next;
 
 		LastGroundRouteAnswer = NeuralRouteAnswer::ShortLeg;
 

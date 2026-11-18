@@ -697,6 +697,17 @@ namespace
 		AbstractClass* Destination { nullptr };
 	};
 
+	// Idle MCV watchdog (Micro): where and since when a packed MCV stands, the sites it was sent to
+	// without unfolding there, and until when it follows the watchdog's own order to Goal.
+	struct NeuralMcvIdle
+	{
+		int SinceFrame { 0 };
+		CellStruct Cell { CellStruct::Empty };
+		std::vector<CellStruct> FailedSites {};
+		int OwnOrderUntil { -1 };
+		CellStruct Goal { CellStruct::Empty };
+	};
+
 	struct NeuralHouseMacroState
 	{
 		CellStruct PendingClearanceCell { CellStruct::Empty };
@@ -982,6 +993,8 @@ namespace
 		std::map<int, int> NoRoomIslandUntil;
 		// Deployers (unit -> frame since) standing on a new island with no site for their building.
 		std::unordered_map<DWORD, int> DeployerNoSiteSince;
+		// Packed MCVs the idle watchdog follows (unit -> NeuralMcvIdle).
+		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
 		// Wounded units (unit -> frame since) that stopped on resource cells that heal them.
 		std::unordered_map<DWORD, int> ResourceHealSince;
 		// The enemy has no building left that counts and still has ships or submarines: until this
@@ -1560,6 +1573,7 @@ namespace
 			this->ShipsWithoutTargetWindowStart = -1;
 			this->NoRoomIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
+			this->McvIdle.clear();
 			this->ResourceHealSince.clear();
 			this->NavalRemnantUntil = -1;
 			this->SubThreatUntil = -1;
@@ -2298,6 +2312,17 @@ namespace
 	// (something passing may only be in the way), and the island stays given up for NoRoomIslandFrames.
 	constexpr int DeployerNoSiteFrames = 450;
 	constexpr int NoRoomIslandFrames = 9000;
+	// Idle MCV watchdog (user, match #11562 Fort Urban Square: two expansion MCVs of houses with a
+	// yard stood packed for thousands of frames, 227 path failures of their type, no fallback ever
+	// reached): an MCV that stays within McvIdleDriftCells of one spot for McvIdleFrames without
+	// unfolding unfolds there if it can, else walks the legs of its own route search to the nearest
+	// site (McvIdleOrderFrames to get there); after McvIdleMostTries sites it did not unfold at it
+	// goes home and unfolds next to a yard of ours.
+	constexpr int McvIdleFrames = 900;
+	constexpr int McvIdleDriftCells = 4;
+	constexpr int McvIdleOrderFrames = 1800;
+	constexpr int McvIdleMostTries = 3;
+	constexpr int McvIdleLegSteps = 24;
 	// The scans for a free island (micro setup) and for the nearest free ore field (building pass)
 	// walk thousands of cells and, for each, every building of the house: 19% and 10% of the AI tick
 	// when run every tick (tick cost diagnostic, 2026-11-13). Their answers hold this long per house,

@@ -720,6 +720,29 @@ namespace
 			return pCell ? pCell : FindClearingCell(pFoot, center, 8, 14, avgX, avgY, occupied, taken);
 		};
 
+		// Where a held unit that backs off goes: off the passage mouths and the narrow passages while
+		// there is such a cell, else off the mouths only, else any free ground; 8..14 cells first,
+		// then past a long bridge's end (16..26; match #7080, 20-25 units held for minutes on a
+		// bridge in two-way traffic, 0-3 backed off per break). Match #11562 (Fort Urban Square):
+		// the side that backed off parked in the mouth at the far end of its bridge, the very cells
+		// the other side had to cross, and the jam held 10500 frames.
+		auto const findBackOff = [&](FootClass* pFoot, double prefX, double prefY) -> CellClass*
+		{
+			for (int strict = 2; strict >= 0; --strict)
+			{
+				const bool offMouths = strict >= 1;
+				const bool offNarrow = strict >= 2;
+
+				if (auto const pCell = FindClearingCell(pFoot, center, 8, 14, prefX, prefY, occupied, taken, offMouths, offNarrow))
+					return pCell;
+
+				if (auto const pCell = FindClearingCell(pFoot, center, 16, 26, prefX, prefY, occupied, taken, offMouths, offNarrow))
+					return pCell;
+			}
+
+			return nullptr;
+		};
+
 		for (auto const pFoot : idle)
 		{
 			if (moved >= 16)
@@ -825,15 +848,7 @@ namespace
 					if (yielded >= 12 || !pFoot || !pFoot->IsAlive || pFoot->InLimbo || left.contains(pFoot))
 						continue;
 
-					// On a long bridge the 8..14 ring is all deck or water: the side that backs off then
-					// goes past the bridge end (16..26 cells; match #7080, 20-25 units held for minutes on
-					// a bridge in two-way traffic, 0-3 backed off per break).
-					auto pCell = FindClearingCell(pFoot, center, 8, 14, want.first, want.second, occupied, taken);
-
-					if (!pCell)
-						pCell = FindClearingCell(pFoot, center, 16, 26, want.first, want.second, occupied, taken);
-
-					if (pCell)
+					if (auto const pCell = findBackOff(pFoot, want.first, want.second))
 					{
 						taken.push_back(pCell->MapCoords);
 						pFoot->ClearMegaMissionData();
@@ -899,12 +914,7 @@ namespace
 					if (yielded + alliedYielded >= 12 || !pFoot || !pFoot->IsAlive || pFoot->InLimbo || left.contains(pFoot))
 						continue;
 
-					auto pCell = FindClearingCell(pFoot, center, 8, 14, want.first, want.second, occupied, taken);
-
-					if (!pCell)
-						pCell = FindClearingCell(pFoot, center, 16, 26, want.first, want.second, occupied, taken);
-
-					if (pCell)
+					if (auto const pCell = findBackOff(pFoot, want.first, want.second))
 					{
 						taken.push_back(pCell->MapCoords);
 						pFoot->ClearMegaMissionData();
