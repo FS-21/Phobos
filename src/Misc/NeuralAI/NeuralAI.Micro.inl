@@ -10731,6 +10731,37 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				waveMacro.HeldJoinersOut[pFoot->UniqueID] = Unsorted::CurrentFrame;
 			}
 		};
+
+		// Siege screen (SiegeScreen*): the centre of the wave's guns on its target's ground (those with a
+		// wave goal or idle for this wave), for the main battle tanks of an archetype 7 house.
+		CellStruct waveGunsCenter = CellStruct::Empty;
+
+		if (HouseExt::Fetch(pHouse)->NeuralAI_Archetype == SiegeScreenArchetype)
+		{
+			int sumX = 0;
+			int sumY = 0;
+			int guns = 0;
+
+			for (auto const pGun : UnitClass::Array)
+			{
+				if (!pGun || pGun->Owner != pHouse || !IsSiegeScreenGun(pGun)
+					|| (waveTargetZone >= 0 && ObjectZone(pGun, MovementZone::Normal) != waveTargetZone)
+					|| (!waveMacro.WaveGoals.contains(pGun->UniqueID)
+						&& std::find(idleCombatUnits.begin(), idleCombatUnits.end(), pGun) == idleCombatUnits.end()))
+				{
+					continue;
+				}
+
+				const CellStruct at = pGun->GetMapCoords();
+				sumX += at.X;
+				sumY += at.Y;
+				guns++;
+			}
+
+			if (guns > 0)
+				waveGunsCenter = CellStruct { static_cast<short>(sumX / guns), static_cast<short>(sumY / guns) };
+		}
+
 		for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
 		{
 			auto const pU = idleCombatUnits[i];
@@ -10872,7 +10903,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const int wpnRange = (pU->Type->GetWeapon(0) && pU->Type->GetWeapon(0)->WeaponType)
 					? pU->Type->GetWeapon(0)->WeaponType->Range
 					: 1280;
-				if (pVisibleEnemyBld && pUnitWaveGoal == pWaveTargetCell && CanFootDamageBuildings(pU)
+
+				if (waveGunsCenter != CellStruct::Empty && HoldSiegeScreen(pHouse, pU, pUnitWaveGoal->MapCoords, waveGunsCenter))
+				{
+					// The siege screen holds it out of the known defenses while the wave's guns work.
+				}
+				else if (pVisibleEnemyBld && pUnitWaveGoal == pWaveTargetCell && CanFootDamageBuildings(pU)
 					&& pU->DistanceFrom(pVisibleEnemyBld) <= std::max(1280, wpnRange + 384))
 				{
 					pU->ClearMegaMissionData();

@@ -1097,6 +1097,15 @@ namespace
 		std::unordered_set<DWORD> TankGuard {};
 		std::unordered_map<DWORD, std::pair<int, int>> TankGuardPosts {};
 		int TankGuardLogFrame { -100000 };
+		// The parts of the tank floor the production check saw last: the base defense (TankFloorMin and
+		// the economy part) and the escorts (one per artillery, anti-air and support vehicle), for the
+		// wide guard (TankGuardWideArchetype); and the guard tanks past the base part, which leave the
+		// guard only as escorts of a plan group with such vehicles.
+		int TankFloorBasePart { 0 };
+		int TankFloorEscortPart { 0 };
+		std::unordered_set<DWORD> TankGuardEscorts {};
+		// TEMP diagnostic (siege screen): the wait orders logged this match.
+		int SiegeScreenLogCount { 0 };
 		// TEMP diagnostic (tank census, 2026-11-18; NoteMainTankDeath): main battle tanks out of a
 		// factory, the ones lost by what they did when they died (guard, Base Threat Intercept, another
 		// plan, a wave, scouting, a repair trip or transport op, at home, away), the kind of the killer
@@ -1647,6 +1656,10 @@ namespace
 			this->TankGuard.clear();
 			this->TankGuardPosts.clear();
 			this->TankGuardLogFrame = -100000;
+			this->TankFloorBasePart = 0;
+			this->TankFloorEscortPart = 0;
+			this->TankGuardEscorts.clear();
+			this->SiegeScreenLogCount = 0;
 			this->TankCensusBuilt = 0;
 			this->TankCensusLost.fill(0);
 			this->TankCensusKillers.fill(0);
@@ -2685,6 +2698,40 @@ namespace
 	constexpr int TankGuardPostFrames = 1800;
 	constexpr double TankGuardSiteCells = 40.0;
 	constexpr double TankGuardPostCells = 6.0;
+	// Wide guard (user, 2026-11-18: in the archetypes that are no tank archetype the tanks are the basic
+	// defense and the escorts). In archetypes 1 (SpecOps), 2 (Turtle), 5 (Harasser), 6 (Air and Naval)
+	// and 7 (Siege) the guard holds the tank floor's base part and its escort part (TankFloorBasePart,
+	// TankFloorEscortPart), up to TankFloorMost, instead of half of the tanks; the tanks past the base
+	// part leave the guard only as escorts of a plan group with artillery, anti-air or support vehicles
+	// (IsTankEscortedVehicle), up to one for each such vehicle and PlanTankEscorts at least. Only the
+	// tanks past the floor go with the waves and the plans. In 40 matches of 2026-11-18 (frames up to
+	// 36000) those archetypes lost 25 to 36% of their tanks away with no role and 13 to 28% in waves;
+	// archetype 6 lost 61% to defenses and 15% near our sites.
+	constexpr bool TankGuardWideArchetype(int archetype)
+	{
+		return archetype == 1 || archetype == 2 || archetype == 5 || archetype == 6 || archetype == 7;
+	}
+
+	// Siege screen (user, 2026-11-18: in archetype 7 the tanks with the artillery stay between the guns
+	// and the enemy at the guns' range, as long as they do not hinder the transports of the units they
+	// guard). A main battle tank of an archetype 7 house marching in a wave or a plan group that holds
+	// a gun (SiegeRangeOf of ArtilleryRangeCells or more, no main battle tank) does not go into the reach
+	// of a known enemy defense (+ SiegeScreenMarginCells): it waits on the last cell of its straight way
+	// out of every such reach, or, from inside one, on the first cell out of it on the way back to the
+	// guns (SiegeScreenBackCells at most), and goes on once no known defense covers its goal or its
+	// group has no gun left. The wait cell is within SiegeScreenRingCells of that point, on its own
+	// ground, with no building, bridge, tube, passage mouth or narrow passage, and farther than
+	// SiegeScreenTransportCells from every transport of ours on the ground; a unit of a transport
+	// operation takes no screen order. It still fights the units that come at it. Rolling Siege keeps
+	// its own escort posts. In 40 matches of 2026-11-18 archetype 7 lost 32% of its tanks away with no
+	// role and 33% in plans (pincer, threeFront), 33% to defenses; its houses owned 3.6 guns on average.
+	constexpr int SiegeScreenArchetype = 7;
+	constexpr int SiegeScreenMarginCells = 2;
+	constexpr int SiegeScreenBackCells = 20;
+	constexpr int SiegeScreenRingCells = 4;
+	constexpr double SiegeScreenTransportCells = 4.0;
+	constexpr double SiegeScreenArrivedCells = 2.0;
+	constexpr int SiegeScreenLogLines = 40;
 	constexpr int TankGuardBaseAttackFrames = 1350;
 	constexpr int MainTankSpecialDamage = 5;
 	constexpr double MainTankHeavyVersus = 0.3;
