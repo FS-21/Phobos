@@ -2171,7 +2171,7 @@ namespace
 
 				Debug::Log("[NeuralAI] House %d plan %s ended %s at rule %d after %d of %d frames: members %d of %d, value %d of %d, "
 					"arrived %d, nearest member %d cells from the target (%d,%d), lost %d dead and %d off the map, last seen %d cells from the target (%d traced).\n",
-					houseIdx, NeuralPlanNames[static_cast<size_t>(id)], success ? "well" : "badly", rule,
+					houseIdx, NeuralPlanNames[static_cast<size_t>(id)], success ? "well" : (plan.Neutral ? "neutral" : "badly"), rule,
 					Unsorted::CurrentFrame - plan.StartFrame, plan.Deadline - plan.StartFrame, alive,
 					static_cast<int>(plan.Members.size()), memberValue(plan), plan.InitialValue, plan.Arrived ? 1 : 0, nearest,
 					plan.TargetCell.X, plan.TargetCell.Y, lostDead, lostOffMap, lostTraced > 0 ? lostDistance / lostTraced : -1, lostTraced);
@@ -2329,7 +2329,11 @@ namespace
 				int& weight = macro.PlanEnemyWeight[static_cast<size_t>(id)][enemy];
 				const int before = weight;
 
-				if (targetFell)
+				if (plan.Neutral)
+				{
+					// No defeat: its targets fell to others while it destroyed and lost nothing.
+				}
+				else if (targetFell)
 					weight += PlanEnemyWeightFallStep;
 				else if (success && destroyed > lost)
 					weight += PlanEnemyWeightUpStep;
@@ -2347,15 +2351,18 @@ namespace
 				}
 			}
 
-			CountPlanOutcome(houseIdx, id, success ? NeuralPlanOutcome::Succeeded : NeuralPlanOutcome::Failed);
+			const bool neutral = plan.Neutral;
 
-			if (!success && Unsorted::CurrentFrame >= plan.Deadline)
+			if (!neutral)
+				CountPlanOutcome(houseIdx, id, success ? NeuralPlanOutcome::Succeeded : NeuralPlanOutcome::Failed);
+
+			if (!success && !neutral && Unsorted::CurrentFrame >= plan.Deadline)
 				CountPlanOutcome(houseIdx, id, NeuralPlanOutcome::TimedOut);
 
 			macro.PlanEndFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame;
 			macro.PlanEndedWell[static_cast<size_t>(id)] = success;
 			plan = NeuralPlanInstance {};
-			macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + (success ? 1800 : 2700);
+			macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + ((success || neutral) ? 1800 : 2700);
 		};
 
 		// Early abort of a plan whose expected outcome turned bad (the seen enemy strength at the
@@ -10001,6 +10008,32 @@ namespace
 		{
 			auto& plan = planOf(NeuralPlanId::RotatingRaids);
 
+			// A building our wave or another active plan of ours goes for (RaidClaimedCells).
+			auto claimedByOurAttack = [&](BuildingClass* pBld, const CellStruct& bc) -> bool
+			{
+				if (macro.LastWaveTargetCell != CellStruct::Empty && Unsorted::CurrentFrame - macro.LastWaveDispatchFrame <= 3600
+					&& bc.DistanceFrom(macro.LastWaveTargetCell) <= RaidClaimedCells)
+				{
+					return true;
+				}
+
+				for (size_t i = 0; i < macro.Plans.size(); ++i)
+				{
+					auto const& other = macro.Plans[i];
+
+					if (!other.Active || i == static_cast<size_t>(NeuralPlanId::RotatingRaids))
+						continue;
+
+					if (other.TargetID == pBld->UniqueID || std::find(other.Targets.begin(), other.Targets.end(), pBld->UniqueID) != other.Targets.end()
+						|| (other.TargetCell != CellStruct::Empty && bc.DistanceFrom(other.TargetCell) <= RaidClaimedCells))
+					{
+						return true;
+					}
+				}
+
+				return false;
+			};
+
 			auto pickRaidTarget = [&](const CellStruct& avoidA, const CellStruct& avoidB) -> BuildingClass*
 			{
 				BuildingClass* pBest = nullptr;
@@ -10014,7 +10047,7 @@ namespace
 					const CellStruct bc = pBld->GetMapCoords();
 
 					if (zoneOf(bc) != homeZone || (avoidA != CellStruct::Empty && bc.DistanceFrom(avoidA) < 15.0)
-						|| (avoidB != CellStruct::Empty && bc.DistanceFrom(avoidB) < 15.0))
+						|| (avoidB != CellStruct::Empty && bc.DistanceFrom(avoidB) < 15.0) || claimedByOurAttack(pBld, bc))
 					{
 						continue;
 					}
@@ -10087,8 +10120,11 @@ namespace
 						if (!pNewA)
 						{
 							// No target left: it went well only if it destroyed more than it lost (66 of
-							// these ends counted as well, none had arrived, most destroyed nothing).
-							finishPlan(NeuralPlanId::RotatingRaids, plan.KillValue > std::max(0, plan.InitialValue - value), true);
+							// these ends counted as well, none had arrived, most destroyed nothing). One
+							// that destroyed and lost nothing saw its targets fall to others: no defeat.
+							const int lostValue = std::max(0, plan.InitialValue - value);
+							plan.Neutral = plan.KillValue == 0 && lostValue == 0;
+							finishPlan(NeuralPlanId::RotatingRaids, plan.KillValue > lostValue, true);
 						}
 						else
 						{
@@ -10161,29 +10197,135 @@ namespace
 					}
 				}
 			}
-			else if (planReady(NeuralPlanId::RotatingRaids) && Unsorted::CurrentFrame >= 6000)
+			else if (Unsorted::CurrentFrame >= 6000 && (macro.RaidRecruitFrame >= 0 || planReady(NeuralPlanId::RotatingRaids)))
 			{
+				// The recruits still with us (RaidRecruits) and the idle ground units, recruits left out
+				// (they count as plan members).
+				std::vector<FootClass*> recruits;
+
+				for (const DWORD uid : macro.RaidRecruits)
+				{
+					if (auto const pFoot = findOwnFoot(uid))
+						recruits.push_back(pFoot);
+				}
+
 				std::vector<FootClass*> group = collectIdleGround(false);
+				sortFastest(group);
 				auto const pTargetA = pickRaidTarget(CellStruct::Empty, CellStruct::Empty);
 				auto const pTargetB = pTargetA ? pickRaidTarget(pTargetA->GetMapCoords(), CellStruct::Empty) : nullptr;
 				const int targetOwner = (pTargetA && pTargetA->Owner) ? pTargetA->Owner->ArrayIndex : -1;
 				const size_t raidSize = rotatingRaidsSize(targetOwner);
-				const int utility = (pTargetA && pTargetB && group.size() >= raidSize) ? 280 : -1000;
+				const bool haveTargets = pTargetA && pTargetB;
+				const bool lesson = raidSize > static_cast<size_t>(RaidBaseGroup);
+				bool setOut = false;
 
-				if (utility > 0 && shouldTryStart(NeuralPlanId::RotatingRaids, utility))
+				auto const stopRecruiting = [&](const char* why)
 				{
-					sortFastest(group);
-					group.resize(raidSize);
-					startPlan(NeuralPlanId::RotatingRaids, group, pTargetA->GetMapCoords(), pTargetB->GetMapCoords(), 0, 5400);
+					if (macro.RaidRecruitFrame >= 0)
+					{
+						Debug::Log("[NeuralAI] House %d plan rotatingRaids stops recruiting (%s) after %d frames with %d of %d, frame %d.\n", houseIdx, why,
+							Unsorted::CurrentFrame - macro.RaidRecruitFrame, static_cast<int>(recruits.size()), static_cast<int>(raidSize), Unsorted::CurrentFrame);
+					}
+
+					macro.RaidRecruits.clear();
+					macro.RaidRecruitFrame = -1;
+					macro.RaidRecruitWanted = 0;
+				};
+
+				auto const recruitFrom = [&](const std::vector<FootClass*>& idle)
+				{
+					for (auto const pFoot : idle)
+					{
+						if (recruits.size() >= raidSize)
+							break;
+
+						recruits.push_back(pFoot);
+					}
+				};
+
+				if (macro.RaidRecruitFrame >= 0)
+				{
+					// Gathering: the new idle units join and the raid sets out once full, or late (or
+					// once the lesson faded) with RaidBaseGroup at least; no targets left ends it.
+					if (!haveTargets)
+					{
+						stopRecruiting("no targets");
+						recruits.clear();
+					}
+					else
+					{
+						recruitFrom(group);
+						setOut = recruits.size() >= raidSize || ((!lesson || Unsorted::CurrentFrame - macro.RaidRecruitFrame >= RaidRecruitFrames)
+							&& recruits.size() >= static_cast<size_t>(RaidBaseGroup));
+
+						if (!setOut && !lesson)
+						{
+							stopRecruiting("the lesson faded");
+							recruits.clear();
+						}
+					}
+				}
+				else
+				{
+					// After a lesson the bigger group is recruited (RaidRecruitFrames), not waited for.
+					const int utility = (haveTargets && (lesson || group.size() >= raidSize)) ? 280 : -1000;
+
+					if (utility > 0 && shouldTryStart(NeuralPlanId::RotatingRaids, utility))
+					{
+						recruits.clear();
+						recruitFrom(group);
+						setOut = recruits.size() >= raidSize;
+
+						if (!setOut)
+						{
+							macro.RaidRecruitFrame = Unsorted::CurrentFrame;
+							Debug::Log("[NeuralAI] House %d plan rotatingRaids recruits %d units against house %d (lesson), %d idle now, frame %d.\n", houseIdx,
+								static_cast<int>(raidSize), targetOwner, static_cast<int>(recruits.size()), Unsorted::CurrentFrame);
+						}
+					}
+				}
+
+				if (setOut)
+				{
+					const int recruitFrames = macro.RaidRecruitFrame >= 0 ? Unsorted::CurrentFrame - macro.RaidRecruitFrame : -1;
+					std::vector<FootClass*> members = recruits;
+					sortFastest(members);
+					members.resize(std::min(members.size(), raidSize));
+					stopRecruiting("set out");
+					startPlan(NeuralPlanId::RotatingRaids, members, pTargetA->GetMapCoords(), pTargetB->GetMapCoords(), 0, 5400);
 
 					if (auto& raid = planOf(NeuralPlanId::RotatingRaids); raid.Active)
 					{
-						raid.AuxBaseline = static_cast<int>(raidSize / 2);
+						raid.AuxBaseline = static_cast<int>(members.size() / 2);
 						raid.AuxPeak = -1;
 						raid.RegroupFrame = -1;
 						raid.TargetOwner = targetOwner;
+
+						if (recruitFrames >= 0)
+						{
+							Debug::Log("[NeuralAI] House %d plan rotatingRaids sets out with %d of %d recruited in %d frames, frame %d.\n", houseIdx,
+								static_cast<int>(members.size()), static_cast<int>(raidSize), recruitFrames, Unsorted::CurrentFrame);
+						}
 					}
 				}
+				else if (macro.RaidRecruitFrame >= 0)
+				{
+					// The recruits are kept out of the waves and the other plans and wait at the rally point.
+					macro.RaidRecruits.clear();
+
+					for (auto const pFoot : recruits)
+					{
+						macro.RaidRecruits.push_back(pFoot->UniqueID);
+						macro.PlanMembers.insert(pFoot->UniqueID);
+					}
+
+					macro.RaidRecruitWanted = static_cast<int>(raidSize - std::min(raidSize, recruits.size()));
+					moveGroup(macro.RaidRecruits, MapClass::Instance.TryGetCellAt(homeCell), 6.0);
+				}
+			}
+			else if (macro.RaidRecruitFrame < 0)
+			{
+				macro.RaidRecruitWanted = 0;
 			}
 		}
 
@@ -11333,5 +11475,8 @@ namespace
 			if (plan.Active)
 				macro.PlanMembers.insert(plan.Members.begin(), plan.Members.end());
 		}
+
+		// The units a Rotating Raids recruits for its next group are kept out the same way.
+		macro.PlanMembers.insert(macro.RaidRecruits.begin(), macro.RaidRecruits.end());
 	}
 } // namespace

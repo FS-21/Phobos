@@ -169,6 +169,9 @@ namespace
 		int BoardingParkedFrame { -1 };
 		// Rotating Raids: the frame its outgunned group began to fall back to the other one (-1 none).
 		int RegroupFrame { -1 };
+		// Rotating Raids: it ends with no target left after others destroyed its targets while it
+		// destroyed and lost nothing: no defeat (its weight stays, no outcome is counted).
+		bool Neutral { false };
 		// Airborne Front: how many were aboard at the last tick of its unloading.
 		int UnloadAboard { 0 };
 		// Preemptive Strike: where the enemy force was gathering when the plan started. Airborne
@@ -1065,6 +1068,12 @@ namespace
 		// RaidLessonStepFrames).
 		std::array<int, 32> RaidLessonSteps {};
 		std::array<int, 32> RaidLessonFrame {};
+		// Units set aside for the next Rotating Raids while it gathers the bigger group a lesson asks
+		// for (kept out of the waves and the other plans like plan members), the frame it began
+		// (-1 not gathering), and how many it still wants (production favours fast vehicles meanwhile).
+		std::vector<DWORD> RaidRecruits {};
+		int RaidRecruitFrame { -1 };
+		int RaidRecruitWanted { 0 };
 		// Capital groups by domain (0 ground, 1 air, 2 sea) and the capital units they hold back from
 		// waves and lone strikes (UpdateCapitalGroups).
 		std::array<NeuralCapitalGroup, 3> CapitalGroups {};
@@ -1610,6 +1619,9 @@ namespace
 			this->PlanHouseLessons.fill(NeuralPlanTargetLesson {});
 			this->RaidLessonSteps.fill(0);
 			this->RaidLessonFrame.fill(-100000);
+			this->RaidRecruits.clear();
+			this->RaidRecruitFrame = -1;
+			this->RaidRecruitWanted = 0;
 			this->CapitalGroups = {};
 			this->CapitalHeld.clear();
 			this->TankGuard.clear();
@@ -2481,6 +2493,20 @@ namespace
 	// alone (the other is gone, or they are one already) ends the raid.
 	constexpr double RaidRegroupCells = 8.0;
 	constexpr int RaidRegroupFrames = 1800;
+	// The bigger group of a lesson is recruited, not waited for (user, 2026-11-18): the raid needed
+	// all of it idle at once and never got it (the houses had a median of 3.5 to 12.5 idle ground
+	// units after a lesson, the waves take them once their own need is met, and of 8 lessons none sent
+	// a raid of 16). Each idle ground unit that shows up is set aside (RaidRecruits) and walks to the
+	// rally point (our first ConYard) until the lesson's size is reached; after RaidRecruitFrames the
+	// raid sets out with what it has, RaidBaseGroup at least. Meanwhile the war factories favour fast
+	// armed vehicles, RaidRecruitSpeedBonus per point of Speed, RaidRecruitMostBonus at most.
+	constexpr int RaidRecruitFrames = 2700;
+	constexpr int RaidRecruitSpeedBonus = 35;
+	constexpr int RaidRecruitMostBonus = 450;
+	// A raid target is no building within RaidClaimedCells of the target of another active plan of the
+	// house or of its wave: those fell to our own attack right after the raid set out, and the raid
+	// ended with no target left (3 of 3 quick ends of 2026-11-18).
+	constexpr double RaidClaimedCells = 6.0;
 	// In-match weight of a plan against an enemy house (PlanEnemyWeight, in percent of the plan's
 	// utility, from 100): a plan that destroyed more than it lost against that house gains
 	// PlanEnemyWeightUpStep, PlanEnemyWeightFallStep when its target fell too; one that failed or
