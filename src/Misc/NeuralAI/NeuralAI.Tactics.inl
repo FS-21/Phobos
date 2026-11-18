@@ -2805,32 +2805,69 @@ namespace
 		}
 		else if (now - macro.IncomeLogFrame >= IncomeLogFrames)
 		{
+			int harvesters = 0;
+			int refineries = 0;
+
+			for (auto const pOwnUnit : UnitClass::Array)
+			{
+				if (pOwnUnit && pOwnUnit->Owner == pHouse && pOwnUnit->IsAlive && pOwnUnit->Type && pOwnUnit->Type->Harvester
+					&& !pOwnUnit->Type->DeploysInto)
+				{
+					harvesters++;
+				}
+			}
+
+			for (auto const pOwnBld : pHouse->Buildings)
+			{
+				if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->Type && pOwnBld->Type->Refinery
+					&& !pOwnBld->Type->ResourceGatherer)
+				{
+					refineries++;
+				}
+			}
+
 			if (macro.HarvesterIncome > 0 || macro.MinerIncome > 0)
 			{
-				int harvesters = 0;
-				int refineries = 0;
-
-				for (auto const pOwnUnit : UnitClass::Array)
-				{
-					if (pOwnUnit && pOwnUnit->Owner == pHouse && pOwnUnit->IsAlive && pOwnUnit->Type && pOwnUnit->Type->Harvester
-						&& !pOwnUnit->Type->DeploysInto)
-					{
-						harvesters++;
-					}
-				}
-
-				for (auto const pOwnBld : pHouse->Buildings)
-				{
-					if (pOwnBld && pOwnBld->IsAlive && !pOwnBld->InLimbo && pOwnBld->Type && pOwnBld->Type->Refinery
-						&& !pOwnBld->Type->ResourceGatherer)
-					{
-						refineries++;
-					}
-				}
-
 				Debug::Log("[NeuralAI] House %d harvest income over %d frames: %d from %d harvesters at %d refineries, %d from %d "
 					"deployed miners, frame %d.\n", pHouse->ArrayIndex, now - macro.IncomeLogFrame, macro.HarvesterIncome, harvesters,
 					refineries, macro.MinerIncome, deployed, now);
+			}
+
+			// Income trend (user, 2026-11-18: foresee the falling resource flow, plan the expansion before
+			// the credits run out): the income per gatherer of this window against the best of the last
+			// IncomeTrendWindows. Under IncomeFallingPermille of it twice in a row, the economy is falling:
+			// in 37 of 50 drops of ordinary matches the house had as many harvesters as at its best, each
+			// one brought 3041 per window against 5593 (they drive farther to thinner ore), and the
+			// fields-running-dry expansion waited until half the refineries had no ore left.
+			const int gatherers = harvesters + deployed;
+
+			if (gatherers >= 2 && now >= IncomeTrendMinFrame)
+			{
+				auto& windows = macro.IncomePerGathererWindows;
+				const int perGatherer = (macro.HarvesterIncome + macro.MinerIncome) / gatherers;
+				const int best = windows.empty() ? 0 : *std::max_element(windows.begin(), windows.end());
+				const bool low = best > 0 && static_cast<int64_t>(perGatherer) * 1000 < static_cast<int64_t>(best) * IncomeFallingPermille;
+				macro.IncomeLowWindows = low ? macro.IncomeLowWindows + 1 : 0;
+				const bool falling = macro.IncomeLowWindows >= 2;
+
+				if (falling != macro.IncomeFalling)
+				{
+					Debug::Log("[NeuralAI] House %d income trend: %s, %d per gatherer against the best %d of the last %d windows, "
+						"%d gatherers at %d refineries, held ore %d lasting %d frames, frame %d.\n", pHouse->ArrayIndex,
+						falling ? "falling" : "recovered", perGatherer, best, static_cast<int>(windows.size()), gatherers, refineries,
+						macro.HeldOre, macro.HeldOreRunway, now);
+				}
+
+				macro.IncomeFalling = falling;
+				windows.push_back(perGatherer);
+
+				if (static_cast<int>(windows.size()) > IncomeTrendWindows)
+					windows.erase(windows.begin());
+			}
+			else if (gatherers < 2)
+			{
+				macro.IncomeLowWindows = 0;
+				macro.IncomeFalling = false;
 			}
 
 			macro.IncomeLogFrame = now;
@@ -4473,6 +4510,10 @@ namespace
 
 			if (macro.StorageNearlyFull)
 				trouble += 350;
+
+			// A falling income (IncomeFalling): Expert 0 takes charge before the credits run out.
+			if (macro.IncomeFalling)
+				trouble += 400;
 
 			macro.EconomyTrouble = std::min(950, trouble);
 		}

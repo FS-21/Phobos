@@ -4852,6 +4852,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		st.IsBuildingRecoveryRefinery = false;
 		st.TargetRecoveryRefineryZone = -1;
 		st.NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 1800;
+		st.LastHarvesterRecoveryFrame = Unsorted::CurrentFrame;
 		return true;
 	};
 
@@ -5233,9 +5234,11 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		if (st.IsBuildingRecoveryRefinery && isStaticRefineryWithFreeHarv)
 		{
 			st.TemporaryRecoveryRefineryPlacedFrame[pBuilding->UniqueID] = Unsorted::CurrentFrame;
+			st.TemporaryRecoveryRefineryGatherers[pBuilding->UniqueID] = CountOwnGatherers(pHouse);
 			st.IsBuildingRecoveryRefinery = false;
 			st.TargetRecoveryRefineryZone = -1;
 			st.NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 1800;
+			st.LastHarvesterRecoveryFrame = Unsorted::CurrentFrame;
 			Debug::Log("[NeuralAI] HarvesterRecovery: House %d placed temporary recovery "
 					"refinery %s at (%d,%d). Will sell once FreeUnit harvester spawns.\n",
 				pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y);

@@ -619,8 +619,13 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// Tactical & Spatial Strategy Output Slots (34..39) driven by Neural MoE +
 	// LoRA + Evolved OutputBias + StarCraft/AdvAI Depleting-Spawn Urgency:
+	// Also a falling income or the ore of our held fields lasting less than HeldOreRunwayFrames (user,
+	// 2026-11-18: foresee it, crawl and expand before the credits run out).
 	const bool localOreDepleting
-		= (features[19] < 28 || (Unsorted::CurrentFrame > 2700 && pHouse->CountResourceDestinations < 3));
+		= (features[19] < 28 || (Unsorted::CurrentFrame > 2700 && pHouse->CountResourceDestinations < 3)
+			|| economyMacro.IncomeFalling
+			|| (Unsorted::CurrentFrame >= IncomeTrendMinFrame && economyMacro.HeldOreRunway >= 0
+				&& economyMacro.HeldOreRunway < HeldOreRunwayFrames));
 	outScores[34]
 		= ClampInt16(outScores[34] + ((activeExpert == 6 || localOreDepleting || features[20] > 12) ? 420 : 90));
 

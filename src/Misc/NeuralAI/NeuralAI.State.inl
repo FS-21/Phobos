@@ -749,6 +749,11 @@ namespace
 		int FrontlineThreatActiveFrames { 0 };
 		int FrontlineThreatNeedsDefenses { 0 };
 		std::map<unsigned int, int> TemporaryRecoveryRefineryPlacedFrame {};
+		// The gatherers we had when each temporary recovery refinery was placed: it is sold once we have
+		// more (its FreeUnit came out). The frame of the last harvester recovery placed (sell-and-replace
+		// or temporary): the second harvester per refinery waits SecondHarvesterRecoveryFrames after it.
+		std::map<unsigned int, int> TemporaryRecoveryRefineryGatherers {};
+		int LastHarvesterRecoveryFrame { -100000 };
 		std::map<int, int> BuildingPlacementCooldownUntilFrame {};
 
 		std::vector<NeuralAttackedBuildingRecord> AttackedBuildingsLIFO {};
@@ -826,6 +831,19 @@ namespace
 		int HarvesterIncome { 0 };
 		int MinerIncome { 0 };
 		int IncomeLogFrame { -1 };
+		// Income trend (the income window of UpdateStrandedSlaveMiners): income per gatherer of the last
+		// IncomeTrendWindows windows, how many in a row fell under IncomeFallingPermille of their best,
+		// and the falling economy flag two of them set (the expansion is planned, no extra harvester).
+		std::vector<int> IncomePerGathererWindows {};
+		int IncomeLowWindows { 0 };
+		bool IncomeFalling { false };
+		// The ore of the fields we hold (GetHeldOreBlocks, UpdateIslandOreOutlook): its value, its drain
+		// per 900 frames, the frames it lasts at that pace (-1 unknown) and the key of the held blocks
+		// it was counted on.
+		int HeldOre { 0 };
+		int HeldOreDrain { -1 };
+		int HeldOreRunway { -1 };
+		unsigned int HeldOreKey { 0 };
 		// Offensive base crawl bookkeeping (UpdateOffensiveStones): cells chosen for a stone toward
 		// the enemy and not yet confirmed placed, then the placed stones by UniqueID, so how many
 		// forward stones survive is counted (crawlStoneForward / crawlStoneLost) for the trainer.
@@ -1500,6 +1518,8 @@ namespace
 			this->FrontlineThreatActiveFrames = 0;
 			this->FrontlineThreatNeedsDefenses = 0;
 			this->TemporaryRecoveryRefineryPlacedFrame.clear();
+			this->TemporaryRecoveryRefineryGatherers.clear();
+			this->LastHarvesterRecoveryFrame = -100000;
 			this->BuildingPlacementCooldownUntilFrame.clear();
 			this->AttackedBuildingsLIFO.clear();
 			this->UnsafePlacementZones.clear();
@@ -1535,6 +1555,13 @@ namespace
 			this->HarvesterIncome = 0;
 			this->MinerIncome = 0;
 			this->IncomeLogFrame = -1;
+			this->IncomePerGathererWindows.clear();
+			this->IncomeLowWindows = 0;
+			this->IncomeFalling = false;
+			this->HeldOre = 0;
+			this->HeldOreDrain = -1;
+			this->HeldOreRunway = -1;
+			this->HeldOreKey = 0;
 			this->OffensiveStoneCells.clear();
 			this->OffensiveStones.clear();
 			this->LastFactoryCapSaleFrame = -100000;
@@ -2047,6 +2074,24 @@ namespace
 		return MacroStates[idx];
 	}
 
+	// Our gatherers out on the map (harvesters and slave miners, not one a factory still holds): the
+	// temporary recovery refinery is sold once there is one more than when it was placed.
+	int CountOwnGatherers(const HouseClass* pHouse)
+	{
+		int count = 0;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Type
+				&& (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer))
+			{
+				count++;
+			}
+		}
+
+		return count;
+	}
+
 	// A passenger reserved by one of our transports loading on a pickup shore: it walks to that
 	// transport and boards it, no other job takes it meanwhile.
 	constexpr int FerryReservationFrames = 1800;
@@ -2407,6 +2452,21 @@ namespace
 	constexpr int MindControlVehiclesPer = 4;
 	// Frames between the harvest income log lines of a house (harvesters against deployed miners).
 	constexpr int IncomeLogFrames = 4500;
+	// Income trend (user, 2026-11-18: foresee the falling resource flow): an income window whose
+	// income per gatherer is under IncomeFallingPermille of the best of the last IncomeTrendWindows
+	// is low, two low ones in a row make the economy falling; not before IncomeTrendMinFrame (the
+	// first harvesters share a fresh field) nor with fewer than 2 gatherers.
+	constexpr int IncomeTrendWindows = 8;
+	constexpr int IncomeFallingPermille = 700;
+	constexpr int IncomeTrendMinFrame = 9000;
+	// The ore of our held fields lasting less than this at the pace it is drained makes the crawl and
+	// expansion slots urgent (localOreDepleting), from IncomeTrendMinFrame.
+	constexpr int HeldOreRunwayFrames = 18000;
+	// The refinery trick for a second harvester per refinery (its FreeUnit, no war factory time): at
+	// most once in this many frames; its temporary refinery is sold once a harvester of ours stands
+	// within 8 cells of it, or after TemporaryRefineryMaxFrames anyway.
+	constexpr int SecondHarvesterRecoveryFrames = 4500;
+	constexpr int TemporaryRefineryMaxFrames = 900;
 	// Defenses measured in points as the Advanced AI does, by AI difficulty (Hard, Normal, Easy):
 	// the ground level a base wants (base, per refinery, per functional structure, with an
 	// expansion pending), the anti-air base, and the most either reaches. A defense that declares

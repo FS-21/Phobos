@@ -860,15 +860,25 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (it == tempMap.end())
 					continue;
 
+				auto& gathererMap = GetMacroState(pHouse).TemporaryRecoveryRefineryGatherers;
+
 				if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
 				{
+					gathererMap.erase(pBld->UniqueID);
 					tempMap.erase(it);
 					break;
 				}
 
+				// Sold once its FreeUnit is out: one gatherer more than when it was placed (user,
+				// 2026-11-18: it was sold 75 frames after its buildup whether the harvester had come out
+				// or not), or after TemporaryRefineryMaxFrames anyway.
+				auto const gathererIt = gathererMap.find(pBld->UniqueID);
+				const bool freeUnitOut = gathererIt == gathererMap.end() || CountOwnGatherers(pHouse) > gathererIt->second;
+
 				if (pBld->CurrentMission != Mission::Construction && pBld->QueuedMission != Mission::Construction
 					&& pBld->BState != static_cast<int>(BStateType::Construction)
-					&& Unsorted::CurrentFrame >= it->second + 75)
+					&& Unsorted::CurrentFrame >= it->second + 75
+					&& (freeUnitOut || Unsorted::CurrentFrame >= it->second + TemporaryRefineryMaxFrames))
 				{
 					for (auto const pUnit : UnitClass::Array)
 					{
@@ -884,11 +894,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					}
 
 					tempMap.erase(it);
+					gathererMap.erase(pBld->UniqueID);
 					GetMacroState(pHouse).NextHarvesterRecoveryFrame = Unsorted::CurrentFrame + 1800;
 					Debug::Log("[NeuralAI] HarvesterRecovery: House %d selling temporary "
-							"recovery refinery %s at (%d,%d) after spawning FreeUnit "
-							"harvester.\n",
-						pHouse->ArrayIndex, pBld->Type->ID, pBld->GetMapCoords().X, pBld->GetMapCoords().Y);
+							"recovery refinery %s at (%d,%d) %s.\n",
+						pHouse->ArrayIndex, pBld->Type->ID, pBld->GetMapCoords().X, pBld->GetMapCoords().Y,
+						freeUnitOut ? "after spawning FreeUnit harvester" : "with no new harvester after the longest wait");
 					pBld->Sell(1);
 					break;
 				}
@@ -2732,17 +2743,34 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
-		// Harvester recovery through a refinery's FreeUnit (sell-and-replace or a temporary one) only
-		// up to one harvester per refinery: the war factory builds the second (economyUnitCap). Aiming
-		// at two kept the ConYard selling and rebuilding refineries all match (30 times in one test
-		// house), so radar, tech center and defenses never got their turn.
+		// Harvester recovery through a refinery's FreeUnit (sell-and-replace or a temporary one) up to
+		// one harvester per refinery; the second only while the war factory is busy with the army and
+		// at most every SecondHarvesterRecoveryFrames (wantsSecondHarvesterViaRefinery), else the war
+		// factory builds it (economyUnitCap). Aiming at two every 1800 frames kept the ConYard selling
+		// and rebuilding refineries all match (30 times in one test house), so radar, tech center and
+		// defenses never got their turn.
 		// Not while broke (UpdateEconomyCrisis): selling a working refinery to rebuild it splits the
 		// last credits between the refinery and the harvester the war factory builds.
+		// The second one (user, 2026-11-18: the FreeUnit takes no war factory time): while the war
+		// factory builds a unit that gathers nothing and the income is not falling (a thinning field
+		// wants no more harvesters).
+		bool warFactoryBuildsArmy = false;
+
+		if (auto const pArmyFactory = pHouse->GetPrimaryFactory(AbstractType::UnitType, false, BuildCat::DontCare))
+		{
+			if (auto const pQueued = abstract_cast<UnitClass*>(pArmyFactory->Object))
+				warFactoryBuildsArmy = pQueued->Type && !pQueued->Type->Harvester && !pQueued->Type->ResourceGatherer;
+		}
+
+		const bool wantsSecondHarvesterViaRefinery = warFactoryBuildsArmy && !GetMacroState(pHouse).IncomeFalling
+			&& ownedHarvestersCount >= staticRefineriesCount && ownedHarvestersCount < 2 * staticRefineriesCount
+			&& Unsorted::CurrentFrame - GetMacroState(pHouse).LastHarvesterRecoveryFrame >= SecondHarvesterRecoveryFrames
+			&& features[19] > 0 && money >= 900;
 		const bool wantsHarvesterRecoveryViaRefinery = (pHouse->ConYards.Count >= 1 && staticRefineriesCount >= 1
 			&& !GetMacroState(pHouse).BrokeHoldActive
 			&& Unsorted::CurrentFrame >= GetMacroState(pHouse).NextHarvesterRecoveryFrame
 			&& GetMacroState(pHouse).TemporaryRecoveryRefineryPlacedFrame.empty()
-			&& (orphanRefineryZoneNeedsReplacement >= 0
+			&& (orphanRefineryZoneNeedsReplacement >= 0 || wantsSecondHarvesterViaRefinery
 				|| (ownedHarvestersCount < staticRefineriesCount
 					&& (ownedHarvestersCount == 0 || ownedWarFactories >= 1) && features[19] > 0
 					&& (money >= 900 || ownedHarvestersCount == 0))));
@@ -4582,8 +4610,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// About 2 harvesters per refinery, as many as the refineries ask for (they follow the fields we
 	// hold, user); one per refinery with a bank of 50000+ credits (income is not what limits that
 	// house: more harvesters only crowd the refineries).
+	// A falling income (IncomeFalling, the harvesters drive farther to thinner ore): none is built past
+	// one per refinery and one more (the ones we have stay); more of them only queue on the thinning
+	// field, the expansion brings the next ones (user, 2026-11-18).
 	const int economyUnitCap = (trueRefineries > 0)
-		? std::max(2, money >= 50000 ? trueRefineries + 1 : 2 * trueRefineries + 1 + ecoBiasMod)
+		? (GetMacroState(pHouse).IncomeFalling
+			? std::max(2, trueRefineries + 1)
+			: std::max(2, money >= 50000 ? trueRefineries + 1 : 2 * trueRefineries + 1 + ecoBiasMod))
 		: 4;
 
 	// Mobile refineries: a house mining with deployed miners, each one refinery and harvesters in
@@ -4786,8 +4819,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
-	const bool fieldsRunningDry = GetMacroState(pHouse).RefineriesChecked > 0
-		&& GetMacroState(pHouse).RefineriesDepleted * 2 >= GetMacroState(pHouse).RefineriesChecked
+	// Half our refineries depleted, or a falling income (IncomeFalling, user 2026-11-18: plan the
+	// expansion before the credits run out, the depleted refineries came long after the income fell),
+	// with a free field to go to: the expansion MCV is planned now.
+	const bool fieldsRunningDry = ((GetMacroState(pHouse).RefineriesChecked > 0
+			&& GetMacroState(pHouse).RefineriesDepleted * 2 >= GetMacroState(pHouse).RefineriesChecked)
+		|| GetMacroState(pHouse).IncomeFalling)
 		&& (hasUncolonizedIslandTarget || GetMacroState(pHouse).UncolonizedOreFields > 0);
 	// Free ore fields on our landmass raise the ConYard cap like the slot 30 score does (one more
 	// per free field up to 3, one more with a big bank): a fixed 3 kept rich houses at home.
