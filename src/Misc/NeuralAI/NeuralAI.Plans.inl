@@ -214,6 +214,175 @@ namespace
 		return range;
 	}
 
+	// A vehicle the tank floor gives an escort to (the production check's ownedArtilleryVehicles,
+	// ownedEscortedAntiAirVehicles and ownedEscortedSupportVehicles): artillery, anti-air, or an
+	// unarmed support vehicle; no main battle tank, gatherer, construction vehicle or transport.
+	bool IsTankEscortedVehicle(FootClass* pFoot)
+	{
+		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+		auto const pType = pUnit ? pUnit->Type : nullptr;
+
+		if (!pType || pType->Naval || pType->Harvester || pType->ResourceGatherer || IsMainBattleTankType(pType)
+			|| (pType->DeploysInto && pType->DeploysInto->ConstructionYard) || IsAmphibiousOrAirTransport(pType)
+			|| (TechnoTypeExt::Fetch(pType) && TechnoTypeExt::Fetch(pType)->Carryall))
+		{
+			return false;
+		}
+
+		auto const pWS = pType->GetWeapon(0);
+		auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+		if (!pWeapon)
+			return pType->Passengers == 0;
+
+		return pWeapon->Range >= ArtilleryRangeCells * Unsorted::LeptonsPerCell || ShootsAtAircraft(pType);
+	}
+
+	// A gun the siege screen stands for (SiegeScreen*): a ground unit that is no main battle tank with
+	// SiegeRangeOf of ArtilleryRangeCells or more, on the map.
+	bool IsSiegeScreenGun(FootClass* pFoot)
+	{
+		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+		return pUnit && pUnit->Type && !pUnit->InLimbo && pUnit->IsAlive && !pUnit->Type->Naval && !IsMainBattleTankType(pUnit->Type)
+			&& SiegeRangeOf(pUnit->Type) >= ArtilleryRangeCells * Unsorted::LeptonsPerCell;
+	}
+
+	// Siege screen (SiegeScreen*): the cell a main battle tank of an archetype 7 house, marching with
+	// guns centred on gunsCenter, waits on instead of going on to goal. nullptr: no screen for it (no
+	// gun, no known defense covering its goal or its cell, no cell to wait on): it goes on.
+	CellClass* SiegeScreenHoldCell(HouseClass* pHouse, FootClass* pFoot, const CellStruct& goal, const CellStruct& gunsCenter)
+	{
+		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+		auto const pExt = pHouse ? HouseExt::Fetch(pHouse) : nullptr;
+
+		if (!pUnit || !pExt || pExt->NeuralAI_Archetype != SiegeScreenArchetype || !pUnit->Type || pUnit->Type->Naval || pUnit->InLimbo
+			|| !IsMainBattleTankType(pUnit->Type) || gunsCenter == CellStruct::Empty || goal == CellStruct::Empty
+			|| IsInTransportOp(pHouse, pUnit->UniqueID) || IsHeldByTransportOp(pUnit))
+		{
+			return nullptr;
+		}
+
+		auto const inReach = [pHouse](const CellStruct& cell) { return IsCellInKnownEnemyDefenseReach(pHouse, cell, SiegeScreenMarginCells); };
+		const CellStruct here = pUnit->GetMapCoords();
+		const bool hereInReach = inReach(here);
+
+		if (!hereInReach && !inReach(goal))
+			return nullptr;
+
+		// The point to wait at: the last cell of the straight way to the goal out of every known reach,
+		// or, from inside one, the first cell out of it on the way back to the guns.
+		const CellStruct to = hereInReach ? gunsCenter : goal;
+		const int dx = to.X - here.X;
+		const int dy = to.Y - here.Y;
+		const int steps = std::max(std::abs(dx), std::abs(dy));
+		CellStruct point = hereInReach ? CellStruct::Empty : here;
+
+		for (int i = 1; i <= steps && (!hereInReach || i <= SiegeScreenBackCells); ++i)
+		{
+			const CellStruct cell { static_cast<short>(here.X + dx * i / steps), static_cast<short>(here.Y + dy * i / steps) };
+
+			if (!hereInReach)
+			{
+				if (inReach(cell))
+					break;
+
+				point = cell;
+			}
+			else if (!inReach(cell))
+			{
+				point = cell;
+				break;
+			}
+		}
+
+		if (point == CellStruct::Empty)
+			return nullptr;
+
+		// The transports of ours on the ground (user: the screen must not hinder the transports of the
+		// units it guards).
+		std::vector<CellStruct> transports;
+
+		for (auto const pOther : UnitClass::Array)
+		{
+			if (pOther && pOther->Owner == pHouse && pOther->IsAlive && !pOther->InLimbo && pOther->Type && !pOther->IsInAir()
+				&& (IsAmphibiousOrAirTransport(pOther->Type) || (TechnoTypeExt::Fetch(pOther->Type) && TechnoTypeExt::Fetch(pOther->Type)->Carryall)
+					|| (pOther->Type->Passengers > 0 && !IsMainBattleTankType(pOther->Type))))
+			{
+				transports.push_back(pOther->GetMapCoords());
+			}
+		}
+
+		const int zone = MapClass::Instance.GetMovementZoneType(here, pUnit->Type->MovementZone, pUnit->OnBridge);
+
+		for (int r = 0; r <= SiegeScreenRingCells; ++r)
+		{
+			for (int ry = -r; ry <= r; ++ry)
+			{
+				for (int rx = -r; rx <= r; ++rx)
+				{
+					if (std::abs(rx) != r && std::abs(ry) != r)
+						continue;
+
+					const CellStruct cell { static_cast<short>(point.X + rx), static_cast<short>(point.Y + ry) };
+					auto const pCell = MapClass::Instance.CoordinatesLegal(cell) ? MapClass::Instance.TryGetCellAt(cell) : nullptr;
+
+					if (!pCell || pCell->GetBuilding() || IsBridgeOrTubeCell(pCell) || IsPassageMouthCell(cell) || IsNarrowPassage(cell)
+						|| MapClass::Instance.GetMovementZoneType(cell, pUnit->Type->MovementZone, false) != zone || inReach(cell)
+						|| std::any_of(transports.begin(), transports.end(),
+							[&cell](const CellStruct& at) { return at.DistanceFrom(cell) <= SiegeScreenTransportCells; }))
+					{
+						continue;
+					}
+
+					return pCell;
+				}
+			}
+		}
+
+		return nullptr;
+	}
+
+	// Gives a main battle tank its siege screen order (SiegeScreenHoldCell). True when the screen holds
+	// it: the group's own order is not for it this time.
+	bool HoldSiegeScreen(HouseClass* pHouse, FootClass* pFoot, const CellStruct& goal, const CellStruct& gunsCenter)
+	{
+		auto const pHold = SiegeScreenHoldCell(pHouse, pFoot, goal, gunsCenter);
+
+		if (!pHold)
+			return false;
+
+		// Fighting a unit that came at it: it goes on with that.
+		if (pFoot->Target && pFoot->Target->WhatAmI() != AbstractType::Building)
+			return true;
+
+		auto& macro = GetMacroState(pHouse);
+		const double away = pFoot->GetMapCoords().DistanceFrom(pHold->MapCoords);
+
+		if (away > SiegeScreenArrivedCells)
+		{
+			OrderFootToAttackMove(pFoot, pHold);
+		}
+		else if (pFoot->Target || pFoot->Destination || pFoot->MegaDestination)
+		{
+			pFoot->SetTarget(nullptr);
+			pFoot->SetDestination(nullptr, true);
+			pFoot->ClearMegaMissionData();
+			pFoot->QueueMission(Mission::Guard, false);
+		}
+
+		// TEMP diagnostic: the siege screen's wait orders (SiegeScreenLogLines per house and match).
+		if (macro.SiegeScreenLogCount < SiegeScreenLogLines)
+		{
+			macro.SiegeScreenLogCount++;
+			Debug::Log("[NeuralAI] Frame %d | House #%d siege screen: %s waits at (%d,%d), %d cells from it, its goal (%d,%d) %d cells away, guns at (%d,%d)\n",
+				Unsorted::CurrentFrame, pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, pHold->MapCoords.X, pHold->MapCoords.Y,
+				static_cast<int>(away), goal.X, goal.Y, static_cast<int>(pFoot->GetMapCoords().DistanceFrom(goal)), gunsCenter.X, gunsCenter.Y);
+		}
+
+		return true;
+	}
+
 	// Per-tick cache of the enemy buildings a house knows (alive, not ours/allied/neutral, seen),
 	// rebuilt once per frame and house (and right after each AI tick's fog scan, see
 	// InvalidateKnownEnemyBuildings), so the many "known defenses near X" queries of the plans,
@@ -671,6 +840,7 @@ namespace
 		const int now = Unsorted::CurrentFrame;
 		const std::unordered_set<DWORD> before = macro.TankGuard;
 		macro.TankGuard.clear();
+		macro.TankGuardEscorts.clear();
 
 		// While the base is under attack the guard is free for its defense.
 		if (pHouse->LATime > 0 && now - pHouse->LATime < TankGuardBaseAttackFrames)
@@ -741,8 +911,12 @@ namespace
 				candidates.push_back({ before.contains(uid) ? -1.0 : distance, pUnit });
 		}
 
-		const int wanted = std::min({ TankGuardMost, std::max(std::min(TankGuardMin, mainTanks), mainTanks / TankGuardShare),
-			static_cast<int>(candidates.size()) });
+		// The wide guard (TankGuardWideArchetype): the floor's base part and escort part.
+		const bool wide = TankGuardWideArchetype(HouseExt::Fetch(pHouse)->NeuralAI_Archetype) && macro.TankFloorBasePart > 0;
+		const int wanted = wide
+			? std::min(std::min(TankFloorMost, macro.TankFloorBasePart + macro.TankFloorEscortPart), static_cast<int>(candidates.size()))
+			: std::min({ TankGuardMost, std::max(std::min(TankGuardMin, mainTanks), mainTanks / TankGuardShare),
+				static_cast<int>(candidates.size()) });
 
 		if (wanted <= 0)
 		{
@@ -754,8 +928,13 @@ namespace
 			{ return a.first < b.first || (a.first == b.first && a.second->UniqueID < b.second->UniqueID); });
 		candidates.resize(static_cast<size_t>(wanted));
 
-		for (auto const& [distance, pUnit] : candidates)
-			macro.TankGuard.insert(pUnit->UniqueID);
+		for (size_t i = 0; i < candidates.size(); ++i)
+		{
+			macro.TankGuard.insert(candidates[i].second->UniqueID);
+
+			if (wide && static_cast<int>(i) >= macro.TankFloorBasePart)
+				macro.TankGuardEscorts.insert(candidates[i].second->UniqueID);
+		}
 
 		std::erase_if(macro.TankGuardPosts, [&macro](const auto& entry) { return !macro.TankGuard.contains(entry.first); });
 
@@ -843,9 +1022,10 @@ namespace
 		if (now - macro.TankGuardLogFrame >= 1800 || now < macro.TankGuardLogFrame)
 		{
 			macro.TankGuardLogFrame = now;
-			Debug::Log("[NeuralAI] Frame %d | House #%d tank guard: %d of %d main battle tanks, %d sites, %s, %d orders\n", now,
+			Debug::Log("[NeuralAI] Frame %d | House #%d tank guard: %d of %d main battle tanks, %d sites, %s, %d orders, %s %d escorts (floor base %d, escorts %d)\n", now,
 				pHouse->ArrayIndex, static_cast<int>(candidates.size()), mainTanks, static_cast<int>(sites.size()),
-				pSiege ? (std::string("hunting ") + pSiege->GetTechnoType()->ID).c_str() : "patrolling", moved);
+				pSiege ? (std::string("hunting ") + pSiege->GetTechnoType()->ID).c_str() : "patrolling", moved, wide ? "wide," : "half,",
+				static_cast<int>(macro.TankGuardEscorts.size()), macro.TankFloorBasePart, macro.TankFloorEscortPart);
 		}
 	}
 
@@ -2701,9 +2881,20 @@ namespace
 				const CellStruct center { static_cast<short>(sumX / walkers), static_cast<short>(sumY / walkers) };
 				std::vector<std::pair<double, FootClass*>> tanks;
 
+				// The wide guard's escort tanks (TankGuardEscorts) go with a group holding vehicles the
+				// floor gives an escort to, up to one for each and PlanTankEscorts at least.
+				const bool wideGuard = TankGuardWideArchetype(HouseExt::Fetch(pHouse)->NeuralAI_Archetype);
+				const size_t escorted = wideGuard
+					? static_cast<size_t>(std::count_if(group.begin(), group.end(), [](FootClass* pFoot) { return IsTankEscortedVehicle(pFoot); }))
+					: 0;
+				const size_t mostEscorts = std::max(PlanTankEscorts, escorted);
+
 				for (auto const& [uid, pFoot] : ownFoots)
 				{
-					if (!isTankFoot(pFoot) || !isFreeForPlan(pFoot) || pFoot->GetHealthPercentage() < 0.5
+					const bool guardEscort = escorted > 0 && macro.TankGuardEscorts.contains(uid) && !macro.PlanMembers.contains(uid)
+						&& !IsOnRepairTrip(pHouse, uid) && !IsInTransportOp(pHouse, uid);
+
+					if (!isTankFoot(pFoot) || !(guardEscort || isFreeForPlan(pFoot)) || pFoot->GetHealthPercentage() < 0.5
 						|| ObjectZone(pFoot, MovementZone::Normal) != walkZone)
 					{
 						continue;
@@ -2715,12 +2906,15 @@ namespace
 				std::sort(tanks.begin(), tanks.end(), [](const auto& a, const auto& b)
 					{ return a.first < b.first || (a.first == b.first && a.second->UniqueID < b.second->UniqueID); });
 
-				for (size_t i = 0; i < tanks.size() && i < PlanTankEscorts; ++i)
+				for (size_t i = 0; i < tanks.size() && i < mostEscorts; ++i)
 				{
 					auto const pTank = tanks[i].second;
 					plan.Members.push_back(pTank->UniqueID);
 					macro.PlanMembers.insert(pTank->UniqueID);
 					macro.FerryReserved.erase(pTank->UniqueID);
+					macro.TankGuard.erase(pTank->UniqueID);
+					macro.TankGuardEscorts.erase(pTank->UniqueID);
+					macro.TankGuardPosts.erase(pTank->UniqueID);
 					NoteExpertCommand(pHouse, pTank, static_cast<int16_t>(id));
 				}
 
@@ -2736,10 +2930,11 @@ namespace
 
 				if (escortLogCount++ < 30)
 				{
-					const size_t taken = std::min(tanks.size(), PlanTankEscorts);
-					Debug::Log("[NeuralAI] House %d plan %s: %d main battle tanks escort its %d members (%d free on its land, the farthest taken %d cells away), frame %d.\n",
+					const size_t taken = std::min(tanks.size(), mostEscorts);
+					Debug::Log("[NeuralAI] House %d plan %s: %d main battle tanks escort its %d members (%d free on its land, the farthest taken %d cells away, %d escorted vehicles), frame %d.\n",
 						houseIdx, NeuralPlanNames[static_cast<size_t>(id)], static_cast<int>(taken), static_cast<int>(group.size()),
-						static_cast<int>(tanks.size()), taken ? static_cast<int>(tanks[taken - 1].first) : 0, Unsorted::CurrentFrame);
+						static_cast<int>(tanks.size()), taken ? static_cast<int>(tanks[taken - 1].first) : 0, static_cast<int>(escorted),
+						Unsorted::CurrentFrame);
 				}
 			}
 
@@ -3639,6 +3834,62 @@ namespace
 			return IsOnRepairTrip(pHouse, uid) ? nullptr : findOwnFoot(uid);
 		};
 
+		// Siege screen (SiegeScreen*): the centre of the guns, on its ground, of the active plan a main
+		// battle tank of an archetype 7 house marches with (unfolded siege guns too). Empty: none.
+		const bool screenHouse = HouseExt::Fetch(pHouse)->NeuralAI_Archetype == SiegeScreenArchetype;
+
+		auto screenGunsCenter = [&](FootClass* pFoot) -> CellStruct
+		{
+			auto const pTank = abstract_cast<UnitClass*>(pFoot);
+
+			if (!screenHouse || !pTank || !pTank->Type || !IsMainBattleTankType(pTank->Type) || !macro.PlanMembers.contains(pTank->UniqueID))
+				return CellStruct::Empty;
+
+			const int zone = ObjectZone(pTank, MovementZone::Normal);
+
+			for (auto const& plan : macro.Plans)
+			{
+				if (!plan.Active || std::find(plan.Members.begin(), plan.Members.end(), pTank->UniqueID) == plan.Members.end())
+					continue;
+
+				int sumX = 0;
+				int sumY = 0;
+				int guns = 0;
+
+				for (const DWORD uid : plan.Members)
+				{
+					CellStruct at = CellStruct::Empty;
+
+					if (auto const pMember = findOwnFoot(uid); pMember && IsSiegeScreenGun(pMember) && ObjectZone(pMember, MovementZone::Normal) == zone)
+						at = pMember->GetMapCoords();
+					else if (auto const itBld = ownSiegeBuildings.find(uid); itBld != ownSiegeBuildings.end() && itBld->second)
+						at = itBld->second->GetMapCoords();
+
+					if (at != CellStruct::Empty)
+					{
+						sumX += at.X;
+						sumY += at.Y;
+						guns++;
+					}
+				}
+
+				return guns > 0 ? CellStruct { static_cast<short>(sumX / guns), static_cast<short>(sumY / guns) } : CellStruct::Empty;
+			}
+
+			return CellStruct::Empty;
+		};
+
+		// True when the siege screen holds this member (HoldSiegeScreen): the group order is not for it.
+		auto siegeScreenHolds = [&](FootClass* pFoot, const CellStruct& goal)
+		{
+			if (!screenHouse)
+				return false;
+
+			const CellStruct guns = screenGunsCenter(pFoot);
+
+			return guns != CellStruct::Empty && HoldSiegeScreen(pHouse, pFoot, goal, guns);
+		};
+
 		auto findTechnoByID = [](DWORD uid) -> TechnoClass*
 		{
 			for (auto const pTech : TechnoClass::Array)
@@ -3712,6 +3963,9 @@ namespace
 			{
 				auto const pFoot = findOrderableFoot(uid);
 
+				if (pFoot && siegeScreenHolds(pFoot, pCell->MapCoords))
+					continue;
+
 				if (pFoot && pFoot->Target == nullptr && pFoot->MegaMission != Mission::AttackMove)
 					OrderFootToAttackMove(pFoot, pCell);
 			}
@@ -3724,7 +3978,7 @@ namespace
 
 			for (const DWORD uid : uids)
 			{
-				if (auto const pFoot = findOrderableFoot(uid))
+				if (auto const pFoot = findOrderableFoot(uid); pFoot && !siegeScreenHolds(pFoot, pCell->MapCoords))
 					IssueMoveOrder(pFoot, pCell, keepWithin);
 			}
 		};
@@ -4597,6 +4851,10 @@ namespace
 				{
 					if (ReadyPlanAircraft(pAir))
 						OrderAircraftAttack(pAir, pTarget);
+				}
+				else if (siegeScreenHolds(pFoot, pTarget->GetMapCoords()))
+				{
+					continue;
 				}
 				else if (pFoot->GetMapCoords().DistanceFrom(pTarget->GetMapCoords()) <= 9.0)
 				{

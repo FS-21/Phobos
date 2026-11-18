@@ -5137,6 +5137,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		+ std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost), ownedGroundCombatUnits / TankFloorShare)
 		+ ownedArtilleryVehicles + ownedEscortedAntiAirVehicles + ownedEscortedSupportVehicles);
 	const bool belowTankFloor = ownedMainTanks < tankFloor;
+	GetMacroState(pHouse).TankFloorBasePart = TankFloorMin + std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost);
+	GetMacroState(pHouse).TankFloorEscortPart = ownedArtilleryVehicles + ownedEscortedAntiAirVehicles + ownedEscortedSupportVehicles;
 
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
