@@ -4147,6 +4147,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int bestTankIdx = -1;
 	int bestTankScore = -32000;
 	bool bestUnitRestoresIncome = false;
+	// The light complement (LightComplement*): the best scored armed light vehicle.
+	int bestLightIdx = -1;
+	int bestLightScore = -32000;
 	// TEMP diagnostic: the ground vehicle candidates of this pick with the parts of their score (base
 	// of cost and health, type penalty, counters, the class slot with its extras, the rest), logged
 	// every 1800 frames per house: why main battle tanks lose the pick.
@@ -4224,6 +4227,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedGroundCombatUnits = 0;
 	// Main battle tanks alive (IsMainBattleTankType), for the tank floor (TankFloor*).
 	int ownedMainTanks = 0;
+	// Light complement (LightComplement*): armed light vehicles of ours.
+	int ownedLightVehicles = 0;
 	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
 	// (the rest of ownedGroundCombatUnits is their front line).
 	int ownedArtilleryVehicles = 0;
@@ -4313,6 +4318,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						ownedArtilleryVehicles++;
 					else if (ShootsAtAircraft(pOwnedType))
 						ownedEscortedAntiAirVehicles++;
+
+					// The same test as the light candidates of the pick (class L).
+					if (!IsMainBattleTankType(pOwnedType) && pOwnedWpn->Range < ArtilleryRangeCells * Unsorted::LeptonsPerCell
+						&& !(pOwnedWpn->Projectile && pOwnedWpn->Projectile->AA) && pOwnedType->Passengers < 2
+						&& !(TechnoTypeExt::Fetch(pOwnedType) && TechnoTypeExt::Fetch(pOwnedType)->Carryall))
+					{
+						ownedLightVehicles++;
+					}
 
 					if (ShootsAtAircraft(pOwnedType))
 						ownedAntiAirVehicles++;
@@ -5960,6 +5973,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestTankIdx = pUnit->ArrayIndex;
 			}
 
+			// An armed light vehicle (the pick line's class L): no main battle tank, artillery, anti-air,
+			// transport, economy unit or deployer.
+			if (pWpn && !isMainTank && !isAA && !isArtillery && !isTransportClass && !isEconomyUnit && !isMCV && !isKeyStructureDeployer
+				&& !pUnit->Harvester && !pUnit->ResourceGatherer && score > bestLightScore)
+			{
+				bestLightScore = score;
+				bestLightIdx = pUnit->ArrayIndex;
+			}
+
 			if (tankBunkersToFill > 0 && pUnit->Bunkerable && !isEconomyUnit && !isMCV && !isKeyStructureDeployer
 				&& score > bestBunkerTankScore)
 			{
@@ -6043,6 +6065,33 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestUnitIdx = bestTankIdx;
 			bestUnitScore = bestTankScore;
+		}
+
+		// The light complement (LightComplement*): one armed light vehicle for each LightComplementPerTanks
+		// main battle tanks; below it, and not below the tank floor, the best light vehicle goes first.
+		const int lightFloor = ownedMainTanks >= LightComplementMinTanks ? ownedMainTanks / LightComplementPerTanks : 0;
+		const bool belowLight = ownedLightVehicles < lightFloor;
+		const bool lightTakes = belowLight && !belowFloor && bestLightIdx >= 0 && bestUnitIdx != bestLightIdx && hasActiveUnitIncome
+			&& !bestUnitRestoresIncome && !airAttackOnly;
+
+		// TEMP diagnostic: the light complement, with the vehicle pick line.
+		if (logUnitPicks && belowLight)
+		{
+			++unitPickDiagCount;
+			Debug::Log("[NeuralAI] Frame %d | House #%d light complement %d, light vehicles %d, main battle tanks %d, best light %s %d, pick %s %d%s\n",
+				Unsorted::CurrentFrame, pHouse->ArrayIndex, lightFloor, ownedLightVehicles, ownedMainTanks,
+				bestLightIdx >= 0 ? UnitTypeClass::Array.GetItem(bestLightIdx)->ID : "none", bestLightScore,
+				bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx)->ID : "none", bestUnitScore,
+				lightTakes ? ", the light vehicle goes first" : (belowFloor ? ", kept: below the tank floor"
+					: (bestLightIdx < 0 ? ", kept: no light vehicle to build" : (bestUnitIdx == bestLightIdx ? ", the pick is a light vehicle"
+						: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income"
+							: ", kept: under air attack"))))));
+		}
+
+		if (lightTakes)
+		{
+			bestUnitIdx = bestLightIdx;
+			bestUnitScore = bestLightScore;
 		}
 	}
 

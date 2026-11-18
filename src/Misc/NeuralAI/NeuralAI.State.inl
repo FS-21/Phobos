@@ -2786,6 +2786,18 @@ namespace
 	constexpr int TankFloorEconomyMost = 4;
 	constexpr int TankFloorShare = 3;
 	constexpr int TankFloorMost = 16;
+	// Light complement (user, 2026-11-18: the light vehicles, the gattling tank, the Wolverine, are strong
+	// complements, some good against infantry or aircraft, and the AI almost never builds them). In 25
+	// matches of 2026-11-18 the light vehicle was the first choice of 0 to 6% of the war factory picks: its
+	// class weight (slot 25) was the lowest of the five (arch 0: 1629 against 1981 tank, 2069 anti-air, 2791
+	// artillery, 3328 transport), a gap the counters (up to 900) do not close. With LightComplementMinTanks
+	// main battle tanks or more, a house keeps one armed light vehicle (no main battle tank, artillery,
+	// anti-air or transport) for each LightComplementPerTanks of them: below that, and not below the tank
+	// floor, the best scored light vehicle goes ahead of the pick (the counters choose which: one good
+	// against what the enemy fields), with the tank floor's exceptions (no income, a pick that restores it,
+	// an attack from the air alone).
+	constexpr int LightComplementMinTanks = 3;
+	constexpr int LightComplementPerTanks = 3;
 	// Tank guard (user: the floor's tanks guard the base or patrol for siege units near our bases and
 	// expansions; they do not stand still and the waves do not always take them). Half of the main
 	// battle tanks (TankGuardShare), TankGuardMin at least while there are that many and
