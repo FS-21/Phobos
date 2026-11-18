@@ -10046,10 +10046,18 @@ namespace
 							plan.StagingCell = pNewB ? pNewB->GetMapCoords() : pNewA->GetMapCoords();
 							plan.AuxPeak = -1;
 
+							// The attack-move to the old target is dropped too: attackMoveGroup leaves a unit
+							// already on an attack-move alone, so the members went on to the old cell and took
+							// the new one only once they got there.
 							for (const DWORD uid : plan.Members)
 							{
 								if (auto const pFoot = findOwnFoot(uid))
+								{
 									pFoot->SetTarget(nullptr);
+
+									if (pFoot->MegaMission == Mission::AttackMove)
+										pFoot->ClearMegaMissionData();
+								}
 							}
 						}
 					}
