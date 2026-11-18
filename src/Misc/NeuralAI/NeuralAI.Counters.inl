@@ -24,8 +24,9 @@ namespace
 		int ArtillerySpeed { 0 };
 		int VehicleShare { 0 };
 		int ArtilleryShare { 0 };
-		// Something attacked our buildings within CounterThreatNowFrames.
+		// Something attacked our buildings within CounterThreatNowFrames, and something not in the air.
 		bool UnderAttack { false };
+		bool UnderGroundAttack { false };
 	};
 
 	// What hit our buildings within CounterThreatNowFrames counts CounterThreatNowWeight times in
@@ -119,6 +120,7 @@ namespace
 			view.UnderAttack = true;
 			const int armorIndex = static_cast<int>(rec.AttackerType->Armor);
 			const bool byAir = rec.Threat == NeuralThreatCategory::Air;
+			view.UnderGroundAttack = view.UnderGroundAttack || !byAir;
 			const bool byInfantry = rec.Threat == NeuralThreatCategory::Infantry;
 			bool found = false;
 
@@ -400,6 +402,7 @@ namespace
 
 		const NeuralCounterView view = BuildCounterView(pHouse);
 		macro.CounterUnderAttack = view.UnderAttack;
+		macro.CounterUnderGroundAttack = view.UnderGroundAttack;
 		// What attacks the base is certain, however little of the enemy army was seen.
 		const int confidence = view.UnderAttack ? 100 : macro.OpponentProfile.Confidence();
 
