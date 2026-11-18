@@ -508,6 +508,124 @@ namespace
 
 		return bestScore > 0;
 	}
+
+	// TEMP diagnostic (tank census, 2026-11-18): a main battle tank of ours died: what it was doing,
+	// what killed it, how far from our sites and after how long (user: why do the houses stay below
+	// the tank floor in mid game?). Log only; the totals go out with the tank floor line.
+	void NoteMainTankDeath(HouseClass* pOwner, UnitClass* pTank, TechnoClass* pKiller)
+	{
+		constexpr double TankCensusHomeCells = 25.0;
+		constexpr int TankCensusDeathLines = 80;
+		static const char* const roleNames[] = { "guard", "intercept", "plan", "wave", "scout", "repair", "home", "away" };
+		static const char* const killerNames[] = { "vehicle", "infantry", "defense", "aircraft", "other" };
+
+		auto& macro = GetMacroState(pOwner);
+		const DWORD uid = pTank->UniqueID;
+		const CellStruct at = pTank->GetMapCoords();
+		double siteCells = -1.0;
+
+		for (auto const pBld : pOwner->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type
+				&& (pBld->Type->ConstructionYard || pBld->Type->Refinery || pBld->Type->Factory != AbstractType::None))
+			{
+				const double distance = pBld->GetMapCoords().DistanceFrom(at);
+
+				if (siteCells < 0.0 || distance < siteCells)
+					siteCells = distance;
+			}
+		}
+
+		const bool home = siteCells >= 0.0 && siteCells <= TankCensusHomeCells;
+		const char* planName = "";
+		size_t role = home ? 6 : 7;
+
+		if (macro.TankGuard.contains(uid))
+		{
+			role = 0;
+		}
+		else if (macro.PlanMembers.contains(uid))
+		{
+			role = 2;
+
+			for (size_t i = 0; i < macro.Plans.size(); ++i)
+			{
+				auto const& plan = macro.Plans[i];
+
+				if (plan.Active && std::find(plan.Members.begin(), plan.Members.end(), uid) != plan.Members.end())
+				{
+					planName = NeuralPlanNames[i];
+					role = i == static_cast<size_t>(NeuralPlanId::BaseThreatIntercept) ? 1 : 2;
+					break;
+				}
+			}
+		}
+		else if (IsActiveScout(pOwner, uid))
+		{
+			role = 4;
+		}
+		else if (IsOnRepairTrip(pOwner, uid) || IsInTransportOp(pOwner, uid))
+		{
+			role = 5;
+		}
+		else if (pTank->MegaMission == Mission::AttackMove)
+		{
+			role = 3;
+		}
+
+		size_t killer = 4;
+
+		if (pKiller)
+		{
+			switch (pKiller->WhatAmI())
+			{
+			case AbstractType::Building:
+				killer = static_cast<BuildingClass*>(pKiller)->Type->IsBaseDefense ? 2 : 4;
+				break;
+			case AbstractType::Aircraft:
+				killer = 3;
+				break;
+			case AbstractType::Infantry:
+				killer = 1;
+				break;
+			case AbstractType::Unit:
+				killer = 0;
+				break;
+			default:
+				break;
+			}
+		}
+
+		macro.TankCensusLost[role]++;
+		macro.TankCensusKillers[killer]++;
+		macro.TankCensusLostAtHome += home ? 1 : 0;
+		int lived = -1;
+
+		if (auto const itBirth = macro.TankCensusBirth.find(uid); itBirth != macro.TankCensusBirth.end())
+		{
+			lived = Unsorted::CurrentFrame - itBirth->second;
+			macro.TankCensusLifeFrames += lived;
+			macro.TankCensusLifeCount++;
+			macro.TankCensusBirth.erase(itBirth);
+		}
+
+		static int deathLogSerial = -1;
+		static int deathLogCount = 0;
+
+		if (deathLogSerial != NeuralMatchSerial)
+		{
+			deathLogSerial = NeuralMatchSerial;
+			deathLogCount = 0;
+		}
+
+		if (deathLogCount++ < TankCensusDeathLines)
+		{
+			Debug::Log("[NeuralAI] TEMP tank death: house %d %s %s%s%s killed by %s %s of house %d, %d cells from our nearest site, lived %d frames, frame %d.\n",
+				pOwner->ArrayIndex, pTank->Type->ID, roleNames[role], *planName ? " " : "", planName, killerNames[killer],
+				pKiller && pKiller->GetTechnoType() ? pKiller->GetTechnoType()->ID : "-", pKiller && pKiller->Owner ? pKiller->Owner->ArrayIndex : -1,
+				static_cast<int>(siteCells), lived, Unsorted::CurrentFrame);
+		}
+	}
 }
 
 // Defense ledger: kills of our towers (by UniqueID) and towers lost, from the engine's destruction
@@ -518,6 +636,15 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 		return;
 
 	auto const pVictimOwner = pVictim->Owner;
+
+	// TEMP diagnostic (tank census): the main battle tanks we lose.
+	if (pVictimOwner && pVictim->WhatAmI() == AbstractType::Unit && NeuralAI::IsEnabledForHouse(pVictimOwner))
+	{
+		auto const pTank = static_cast<UnitClass*>(pVictim);
+
+		if (pTank->Type && IsMainBattleTankType(pTank->Type))
+			NoteMainTankDeath(pVictimOwner, pTank, pKiller);
+	}
 
 	// TEMP diagnostic (rotatingRaids, 2026-11-18): who kills raid members (a unit, a defense, an
 	// aircraft) and where the member stood against its group and its goal (user: units or defenses
