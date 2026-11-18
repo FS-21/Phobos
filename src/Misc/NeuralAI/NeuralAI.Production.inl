@@ -5658,6 +5658,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				score += 1500;
 			}
 
+			// A Rotating Raids recruiting the bigger group of a lesson (RaidRecruitWanted) asks for fast
+			// armed vehicles: the raid takes the fastest idle units first.
+			if (GetMacroState(pHouse).RaidRecruitWanted > 0 && pWpn && !pUnit->Naval && !isEconomyUnit && !isMCV && !isTransportClass
+				&& !isKeyStructureDeployer && !isAA)
+			{
+				score += std::min(RaidRecruitMostBonus, std::max(0, pUnit->Speed) * RaidRecruitSpeedBonus);
+			}
+
 			if (logUnitPicks)
 			{
 				const char diagClass = isMCV ? 'M' : (isKeyStructureDeployer ? 'D' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
