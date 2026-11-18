@@ -199,6 +199,135 @@ namespace
 		return pType && pType->DeploysInto && pType->DeploysInto->SensorArray && pType->DeploysInto->SensorsSight >= SensorLookoutMinSight;
 	}
 
+	// How far a type finds what this need hides, in cells (Detection*; INI flags only). Cloaked,
+	// disguised and submerged enemies (stealth, sub): SensorsSight with Sensors or SensorArray (its
+	// Sight when SensorsSight is 0), DetectDisguiseRange with DetectDisguise, PsychicDetectionRadius.
+	// The dark (blind): the engine's sensors reveal hidden units, not the shroud, so only the Sight from
+	// SensorLookoutMinSight counts. A vehicle counts the building it unfolds into too.
+	int DetectionReachCells(TechnoTypeClass* pType, int need)
+	{
+		if (!pType || !need)
+			return 0;
+
+		auto const pBldType = abstract_cast<BuildingTypeClass*>(pType);
+		int reach = 0;
+
+		if (need & (DetectionNeedStealth | DetectionNeedSub))
+		{
+			if (pType->Sensors || (pBldType && pBldType->SensorArray))
+				reach = std::max(reach, pType->SensorsSight > 0 ? pType->SensorsSight : pType->Sight);
+
+			if (pType->DetectDisguise && (need & DetectionNeedStealth))
+				reach = std::max(reach, std::clamp(pType->DetectDisguiseRange, 1, 64));
+
+			if (pBldType && (need & DetectionNeedStealth))
+				reach = std::max(reach, pBldType->PsychicDetectionRadius);
+		}
+
+		if ((need & DetectionNeedBlind) && pType->Sight >= SensorLookoutMinSight)
+			reach = std::max(reach, pType->Sight);
+
+		if (auto const pUnitType = abstract_cast<UnitTypeClass*>(pType); pUnitType && pUnitType->DeploysInto)
+			reach = std::max(reach, DetectionReachCells(pUnitType->DeploysInto, need));
+
+		return std::clamp(reach, 0, 64);
+	}
+
+	// What this house needs detection for now (DetectionNeed*: blind, stealth, sub; Detection*).
+	int DetectionNeedOf(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return 0;
+
+		auto const& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		int need = 0;
+		bool enemiesAlive = false;
+
+		for (auto const pOther : HouseClass::Array)
+		{
+			if (pOther && pOther != pHouse && !pOther->Defeated && !pOther->IsObserver() && !pOther->IsNeutral() && !pHouse->IsAlliedWith(pOther)
+				&& (pOther->OwnedBuildings > 0 || pOther->OwnedUnits > 0 || pOther->OwnedInfantry > 0))
+			{
+				enemiesAlive = true;
+				break;
+			}
+		}
+
+		if (enemiesAlive && ((now >= DetectionBlindFromFrame && now - macro.LastEnemySeenFrame >= DetectionBlindFrames)
+			|| now - macro.RemnantSearchFrame < 2 * RemnantSearchEveryFrames))
+		{
+			need |= DetectionNeedBlind;
+		}
+
+		if (std::any_of(macro.StealthSightings.begin(), macro.StealthSightings.end(),
+			[now](const auto& seen) { return now - seen.second.second <= SensorLookoutSightingFrames; }))
+		{
+			need |= DetectionNeedStealth;
+		}
+
+		for (auto const& loss : macro.HiddenLosses)
+		{
+			if (now - loss.Frame <= SensorLookoutSightingFrames)
+				need |= loss.Kind == 2 ? DetectionNeedSub : (loss.Kind == 1 ? DetectionNeedStealth : DetectionNeedBlind);
+		}
+
+		if (macro.SubThreatUntil > now || macro.NavalRemnantUntil > now)
+			need |= DetectionNeedSub;
+
+		return need;
+	}
+
+	// Is a recent stealth sighting or hidden loss of this house out of the reach of every detector of
+	// ours (vehicles and buildings)? A sensor building is wanted for it.
+	bool DetectionSpotUncovered(HouseClass* pHouse)
+	{
+		auto const& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		std::vector<CellStruct> spots;
+
+		for (auto const& [uid, seen] : macro.StealthSightings)
+		{
+			if (now - seen.second <= SensorLookoutSightingFrames)
+				spots.push_back(seen.first);
+		}
+
+		for (auto const& loss : macro.HiddenLosses)
+		{
+			if (now - loss.Frame <= SensorLookoutSightingFrames && loss.Kind == 1)
+				spots.push_back(loss.Cell);
+		}
+
+		if (spots.empty())
+			return false;
+
+		std::vector<std::pair<CellStruct, int>> detectors;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type)
+			{
+				if (const int reach = DetectionReachCells(pBld->Type, DetectionNeedStealth); reach > 0)
+					detectors.push_back({ pBld->GetMapCoords(), reach });
+			}
+		}
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Type)
+			{
+				if (const int reach = DetectionReachCells(pUnit->Type, DetectionNeedStealth); reach > 0)
+					detectors.push_back({ pUnit->GetMapCoords(), reach });
+			}
+		}
+
+		return std::any_of(spots.begin(), spots.end(), [&detectors](const CellStruct& spot)
+			{
+				return std::none_of(detectors.begin(), detectors.end(),
+					[&spot](const auto& detector) { return detector.first.DistanceFrom(spot) <= detector.second; });
+			});
+	}
+
 	// What a look at center would teach us, 0..100: ground never explored (or shrouded again by an
 	// enemy gap) counts fully, explored ground with fog of war by the time since it was last in sight.
 	// Without fog of war the engine shows explored ground live (and the AI's known buildings and

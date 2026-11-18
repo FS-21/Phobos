@@ -442,6 +442,69 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// slot 24 had the lowest median of the five vehicle classes, 331 to 772 against 1398 to 1994).
 	scores[24] = std::max(scores[24], scores[25]);
 
+	// Detection need (Detection*): what this house needs detectors for now, the cap of its detectors,
+	// and the reach of the detectors of ours for that need (vehicles and buildings).
+	const int detectionNeed = DetectionNeedOf(pHouse);
+	const int detectionCap = DetectionCap + (pHouse->ConYards.Count >= 2 ? 1 : 0);
+	const bool detectionSpotUncovered = (detectionNeed & DetectionNeedStealth) && DetectionSpotUncovered(pHouse);
+	std::vector<int> ownedDetectorReaches;
+
+	if (detectionNeed)
+	{
+		for (auto const pOwnB : pHouse->Buildings)
+		{
+			if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->Type)
+			{
+				if (const int reach = DetectionReachCells(pOwnB->Type, detectionNeed); reach > 0)
+					ownedDetectorReaches.push_back(reach);
+			}
+		}
+
+		for (auto const pOwnU : UnitClass::Array)
+		{
+			if (pOwnU && pOwnU->Owner == pHouse && pOwnU->IsAlive && !pOwnU->InLimbo && pOwnU->Type && !pOwnU->Type->Naval)
+			{
+				if (const int reach = DetectionReachCells(pOwnU->Type, detectionNeed); reach > 0)
+					ownedDetectorReaches.push_back(reach);
+			}
+		}
+	}
+
+	// The detectors of ours that reach as far as `reach` or farther: they keep a shorter one out.
+	auto const detectorsReaching = [&ownedDetectorReaches](int reach)
+	{
+		return static_cast<int>(std::count_if(ownedDetectorReaches.begin(), ownedDetectorReaches.end(), [reach](int owned) { return owned >= reach; }));
+	};
+
+	// TEMP diagnostic (detection need): every DetectionLogFrames per house.
+	{
+		auto& detectMacro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - detectMacro.DetectionLogFrame >= DetectionLogFrames || now < detectMacro.DetectionLogFrame)
+		{
+			detectMacro.DetectionLogFrame = now;
+			int sightings = 0;
+			std::array<int, 3> losses {};
+
+			for (auto const& [uid, seen] : detectMacro.StealthSightings)
+				sightings += now - seen.second <= SensorLookoutSightingFrames ? 1 : 0;
+
+			for (auto const& loss : detectMacro.HiddenLosses)
+			{
+				if (now - loss.Frame <= SensorLookoutSightingFrames)
+					losses[static_cast<size_t>(std::clamp(loss.Kind, 0, 2))]++;
+			}
+
+			Debug::Log("[NeuralAI] Frame %d | House #%d detection: need%s%s%s%s, last enemy seen %d frames ago, stealth sightings %d, hidden losses %d dark %d cloaked %d naval, detectors %d (best reach %d), cap %d, spot uncovered %d\n",
+				now, pHouse->ArrayIndex, detectionNeed ? "" : " none", (detectionNeed & DetectionNeedBlind) ? " blind" : "",
+				(detectionNeed & DetectionNeedStealth) ? " stealth" : "", (detectionNeed & DetectionNeedSub) ? " sub" : "",
+				now - detectMacro.LastEnemySeenFrame, sightings, losses[0], losses[1], losses[2], static_cast<int>(ownedDetectorReaches.size()),
+				ownedDetectorReaches.empty() ? 0 : *std::max_element(ownedDetectorReaches.begin(), ownedDetectorReaches.end()), detectionCap,
+				detectionSpotUncovered ? 1 : 0);
+		}
+	}
+
 	pExt->NeuralAI_LastInferenceFrame = Unsorted::CurrentFrame;
 
 	// Before any air lane is planned this tick: remember where our flyers were shot down.
@@ -3714,7 +3777,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					}
 				}
 
-				if (features[72] > 0 && pBld->Sensors)
+				if ((features[72] > 0 || (detectionNeed & (DetectionNeedStealth | DetectionNeedSub))) && pBld->Sensors)
 					score += 350;
 
 				// Production before towers: with a refinery standing and the first war factory (or the
@@ -3752,12 +3815,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// Tech & Support buildings (Radar, Battle Lab, Ore Purifier, Industrial Plant,
 				// Cloning Vats, Grinder, Gap/Cloak Generator)
 				const int supportRadius = GetSupportRadius(pBld);
-				const int maxAllowed = (supportRadius > 0 && hasTechCenter && money > 3000) ? 2 : 1;
+				// Detection need: a sensor building (SensorArray, no base defense) for a stealth sighting or
+				// loss no detector of ours covers, one past the support cap, scored by its reach.
+				const int sensorBuildingReach = pBld->SensorArray && detectionSpotUncovered
+					? DetectionReachCells(pBld, DetectionNeedStealth) : 0;
+				const int maxAllowed = ((supportRadius > 0 && hasTechCenter && money > 3000) ? 2 : 1) + (sensorBuildingReach > 0 ? 1 : 0);
 
 				if (owned >= maxAllowed)
 					continue;
 
 				score = scores[4] + 550 + std::min(600, pBld->Cost / 3) - owned * 700;
+
+				if (sensorBuildingReach > 0)
+					score += std::min(DetectionScoreMost, DetectionScorePerCell * sensorBuildingReach);
 
 				const bool isCoreTechUnlock = pBld->SpySat
 					|| (RulesClass::Instance
@@ -5387,6 +5457,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool isUnarmedSupportVehicle = (!pUnit->Naval && pWpn == nullptr && !isMCV && !isKeyStructureDeployer
 			&& !isEconomyUnit && !isConvertToOpenToppedOrCombat && pUnit->Passengers == 0
 			&& !(TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall));
+
+		// Detection need (Detection*): how far this vehicle finds what the house cannot see, and whether
+		// the detectors of ours that reach as far or farther already fill the detectors' own cap.
+		const int detectReach = pUnit->Naval ? 0 : DetectionReachCells(pUnit, detectionNeed);
+		const bool detectorWanted = detectReach > 0 && detectorsReaching(detectReach) < detectionCap;
+
 		if (isUnarmedSupportVehicle)
 		{
 			// A mobile sensor array has a cap of its own (one) while enemy stealth units were seen in the
@@ -5400,8 +5476,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// Hard cap unarmed support/detector/jammer vehicles (Mobile Radar Jammer
 			// MRJ_SOV/MRJ_ALL, Mobile Stealth Generator SGEN/GGEN, Mobile Sensor
 			// Array LPST/NLPST, Limpet Drone) at 1 across the house so they are never
-			// spammed!
-			if ((sensorWanted ? ownedSensorLookouts >= 1 : ownedUnarmedSupportVehicles >= 1) || pHouse->OwnedUnits < 8
+			// spammed! A detector the detection need asks for has the detectors' cap instead
+			// (detectorWanted): a jammer no longer keeps a farther reaching sensor array out.
+			if ((!detectorWanted && (sensorWanted ? ownedSensorLookouts >= 1 : ownedUnarmedSupportVehicles >= 1)) || pHouse->OwnedUnits < 8
 				|| canSafelySaveForMCV || savingForIslandTransport)
 			{
 				continue;
@@ -5554,7 +5631,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 			}
 
-			if (features[72] > 0 && pUnit->Sensors)
+			// Detection need: a sonar or sensor ship scored by its reach while stealth or submerged enemies
+			// hide (no cap: the land detectors are another matter).
+			if ((detectionNeed & (DetectionNeedStealth | DetectionNeedSub)) && pUnit->Sensors)
+				score += std::min(DetectionScoreMost, DetectionScorePerCell * DetectionReachCells(pUnit, detectionNeed & (DetectionNeedStealth | DetectionNeedSub)));
+			else if (features[72] > 0 && pUnit->Sensors)
 				score += 400;
 
 			if (score > bestNavalScore)
@@ -5752,8 +5833,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				score += 420; // Counter enemy MindControl with ImmuneToPsionics
 
 			// vehicles (Drones, Robot Tanks, Automated units)!
-			if (features[72] > 0 && (pUnit->Sensors || pUnit->DetectDisguise) && !isEconomyUnit)
-				score += 480; // Counter enemy Stealth / Disguised units with mobile
+			// Detection need (Detection*): a detector scored by how far it finds what the house cannot
+			// see (it was a flat 480 for Sensors or DetectDisguise while a stealth unit was in sight).
+			if (detectorWanted && !isEconomyUnit)
+				score += std::min(DetectionScoreMost, DetectionScorePerCell * detectReach);
 
 			// Sensor & Detector units!
 			if (SlotGate(scores[82], 60, 82) && ownHouseBit != 0u && !pUnit->InOwners(ownHouseBit) && !isEconomyUnit && !isMCV)
@@ -6203,7 +6286,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			score += 380; // Counter enemy MindControl with Snipers/Virus/Cyborgs/Dogs!
 		}
 
-		if (features[72] > 0 && (pInf->Sensors || pInf->DetectDisguise || pInf->Doggie))
+		if ((features[72] > 0 || (detectionNeed & DetectionNeedStealth)) && (pInf->Sensors || pInf->DetectDisguise || pInf->Doggie))
 			score += 420;
 
 		if (SlotGate(scores[82], 60, 82) && ownHouseBit != 0u && !pInf->InOwners(ownHouseBit) && !IsCaptureInfantryType(pInf))

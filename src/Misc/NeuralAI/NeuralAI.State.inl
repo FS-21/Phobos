@@ -120,6 +120,16 @@ namespace
 		int Frame { 0 };
 	};
 
+	// A unit of ours lost to a killer we could not see (DetectionNeedOf): where, when, and of what kind
+	// (0 the killer stood in the dark, 1 it was cloaked or disguised, 2 a naval one under water or a ship
+	// of ours lost so).
+	struct NeuralHiddenLoss
+	{
+		CellStruct Cell {};
+		int Frame { 0 };
+		int Kind { 0 };
+	};
+
 	// A group of capital units of one domain (ground, air, sea): UpdateCapitalGroups.
 	struct NeuralCapitalGroup
 	{
@@ -1078,6 +1088,11 @@ namespace
 		// Enemy units seen cloaked, cloakable or under water: UniqueID -> (cell, frame), for
 		// superweapons that reveal stealth (SW.AITargeting=Stealth).
 		std::unordered_map<DWORD, std::pair<CellStruct, int>> StealthSightings;
+		// Detection need (Detection*): the frame an enemy was last in sight, our losses to killers we
+		// could not see (DetectionHiddenLosses at most), and the TEMP diagnostic's last line.
+		int LastEnemySeenFrame { 0 };
+		std::vector<NeuralHiddenLoss> HiddenLosses {};
+		int DetectionLogFrame { -100000 };
 		// Plan members by UniqueID (UpdateStrategicPlans); dropped 600 frames after the last sight.
 		std::unordered_map<DWORD, NeuralPlanMemberTrace> PlanMemberTraces;
 		// Targets by UniqueID where a plan's group failed (finishPlan); key access only.
@@ -1657,6 +1672,9 @@ namespace
 			this->EconomyHoldSince = -1;
 			this->EconomyHoldPauseUntil = -1;
 			this->StealthSightings.clear();
+			this->LastEnemySeenFrame = 0;
+			this->HiddenLosses.clear();
+			this->DetectionLogFrame = -100000;
 			this->PlanMemberTraces.clear();
 			this->PlanTargetLessons.clear();
 			this->PlanHouseLessons.fill(NeuralPlanTargetLesson {});
@@ -2777,6 +2795,37 @@ namespace
 	constexpr double PushGateGroupCells = 10.0;
 	constexpr double PushGateHeadingCells = 6.0;
 	constexpr int PushGateLogLines = 30;
+
+	// Detection need (user, 2026-11-18: when the AI stops seeing the enemy, because it has not explored
+	// enough or he is cloaked or under water, it builds the units whose detection reaches far or that
+	// unfold into something that does; mods differ, so only the INI flags count). DetectionNeedOf: blind
+	// while enemies are alive and none was in sight for DetectionBlindFrames from frame
+	// DetectionBlindFromFrame, after a remnant search lately, or after a loss to a killer standing in the
+	// dark; stealth after an enemy stealth unit in sight or a loss to a cloaked or disguised killer within
+	// SensorLookoutSightingFrames; sub with a submarine near home, a naval remnant hunt, or a naval loss
+	// to a killer we could not see. A land loss to a hidden killer also counts as a stealth sighting at
+	// the victim's cell (the sensor lookouts go to cover it). DetectionReachCells: for a stealth or sub
+	// need SensorsSight with Sensors or SensorArray (its Sight when SensorsSight is 0), and for stealth
+	// DetectDisguiseRange with DetectDisguise and PsychicDetectionRadius; for a blind need only the Sight
+	// from SensorLookoutMinSight (the engine's sensors reveal hidden units, not the shroud); a vehicle
+	// counts the building it unfolds into. While a need is on, a detector scores DetectionScorePerCell per
+	// cell of reach, DetectionScoreMost at most (it was a flat 480 for a vehicle with Sensors or
+	// DetectDisguise while a stealth unit was in sight), and detectors have a cap of their own,
+	// DetectionCap and one more with two construction yards or more, counting only the ones of ours
+	// (vehicles and buildings) that reach as far or farther: a radar jammer of 8 cells no longer keeps a
+	// sensor array of 25 out. A building with SensorArray that is no base defense gets the same score and
+	// one more past the support cap while a stealth or blind need has a sighting or loss no detector of
+	// ours covers.
+	constexpr int DetectionBlindFrames = 2700;
+	constexpr int DetectionBlindFromFrame = 9000;
+	constexpr int DetectionScorePerCell = 40;
+	constexpr int DetectionScoreMost = 800;
+	constexpr int DetectionCap = 1;
+	constexpr size_t DetectionHiddenLosses = 32;
+	constexpr int DetectionLogFrames = 1800;
+	constexpr int DetectionNeedBlind = 1;
+	constexpr int DetectionNeedStealth = 2;
+	constexpr int DetectionNeedSub = 4;
 	constexpr int TankGuardBaseAttackFrames = 1350;
 	constexpr int MainTankSpecialDamage = 5;
 	constexpr double MainTankHeavyVersus = 0.3;
