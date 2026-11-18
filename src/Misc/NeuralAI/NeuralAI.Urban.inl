@@ -1287,7 +1287,10 @@ namespace
 							continue;
 						}
 
-						const double d = soldierCell.DistanceFrom(c);
+						// Off a passage mouth while the building has another free side (match #11562: the
+						// side nearest soldiers coming over a bridge was the mouth at its end, and 152
+						// soldiers sent to two bunkers there stood in the way of everything crossing).
+						const double d = soldierCell.DistanceFrom(c) + (IsPassageMouthCell(c) ? 1000.0 : 0.0);
 
 						if (d < approachDist)
 						{
