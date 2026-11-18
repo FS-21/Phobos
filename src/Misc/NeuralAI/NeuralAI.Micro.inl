@@ -9510,13 +9510,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	const bool secondEchelonWindow = sinceWaveStart >= 300 && sinceWaveStart <= 1500;
 	const int tacticalWaveDiscount = (counterattackWindow ? 3 : 0) + (waveMacro.PressureMode ? 2 : 0)
 		+ (secondEchelonWindow ? (baseWave + defenseMassBonus) / 2 : 0);
+	// The learned wave mass scales the count and its cap alike.
+	const int waveMass = WaveMassPermille(rushWaveBias);
+	const int waveUnitCap = (tankMassWaves ? TankMassWaveCap : 14) * waveMass / 1000;
 	const size_t minWaveUnits = endgameRemnantHunt
 		? 1u
 		: static_cast<size_t>(std::clamp(
-			baseWave + defenseMassBonus - streamWaveDiscount - (rushWaveBias / 160)
+			(baseWave + defenseMassBonus - streamWaveDiscount
 				- (waveMacro.BlackoutUntilFrame > Unsorted::CurrentFrame ? 3 : 0) - tacticalWaveDiscount
-				+ StyleJitter(pHouse->ArrayIndex, 1000, 2700, 3) - 1, // +-1 unit: waves are not clockwork
-			(highMoneyMultiFactoryStream || tacticalWaveDiscount > 0) ? 2 : 3, tankMassWaves ? TankMassWaveCap : 14));
+				+ StyleJitter(pHouse->ArrayIndex, 1000, 2700, 3) - 1) * waveMass / 1000, // +-1 unit: waves are not clockwork
+			(highMoneyMultiFactoryStream || tacticalWaveDiscount > 0) ? 2 : 3, waveUnitCap));
 	const int blindPushFrame = (rushWaveBias > 100 || highMoneyMultiFactoryStream) ? 1350 : 3200;
 
 	// Multi-Purpose Map Unit Recall ("utilizarlas para diferentes propósitos por
@@ -10266,7 +10269,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		waveCheck = EvaluateWaveLaunch(pHouse, gateTarget, readyValue,
-			counterattackWindow || waveMacro.BlackoutUntilFrame > Unsorted::CurrentFrame);
+			counterattackWindow || waveMacro.BlackoutUntilFrame > Unsorted::CurrentFrame, waveMass);
 
 		NoteWaveDecision(pHouse, waveCheck, false, 0);
 	}

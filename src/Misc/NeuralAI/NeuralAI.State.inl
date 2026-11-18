@@ -3558,8 +3558,18 @@ namespace
 	// telemetry (slotMeanings): a slot whose version grows starts again from zero there, with the
 	// memory of an archetype whose slot it is. Whoever changes what a slot drives bumps its version
 	// here in the same change. 48, 93, 108: archetype 0 became the tank mass and the slots of Feint
-	// and Bait Ambush went to its Reprisal and Clear Our Ground missions (2026-11-16).
-	constexpr std::pair<int, int> NeuralSlotMeanings[] = { { 48, 1 }, { 93, 1 }, { 108, 1 } };
+	// and Bait Ambush went to its Reprisal and Clear Our Ground missions (2026-11-16). 37: the
+	// Rush/Wave Timing slot sizes the main wave by WaveMassPermille (2026-11-18).
+	constexpr std::pair<int, int> NeuralSlotMeanings[] = { { 37, 1 }, { 48, 1 }, { 93, 1 }, { 108, 1 } };
+
+	// Size of the main wave, per mille of the default, that the learned bias of the Rush/Wave
+	// Timing slot (37, with the correction of the map class) asks for: it scales the unit count
+	// the wave waits for, its cap, the smallest value worth sending and the cost floor. 1000 with
+	// an untrained slot, down to 750 for a rush (+500), up to 1500 for a patient house (-1000).
+	int WaveMassPermille(int rushWaveBias)
+	{
+		return std::clamp(1000 - rushWaveBias / 2, 750, 1500);
+	}
 
 	// Production queues of a type, as ProductionBanUntil keys them: 1 vehicles, 2 infantry, 3 ships,
 	// 4 aircraft, 0 for anything else.
