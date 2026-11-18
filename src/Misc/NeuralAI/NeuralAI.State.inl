@@ -638,6 +638,8 @@ namespace
 		// Wait cells moved out of the way (FindOpHoldOutOfTheWay): the cell the plain rule gives, then
 		// the one used instead (Empty: none found).
 		std::vector<std::pair<CellStruct, CellStruct>> HoldMoves;
+		// Since when no transport of the house can come to the staging cell (-1: one can; OpNoReachFrames).
+		int NoReachSince { -1 };
 		// The landing the load sailing now was given, chosen with its route (ChooseOpTripLanding), and
 		// the frame: the transports that sail in that tick land around it together.
 		CellStruct TripLanding { CellStruct::Empty };
@@ -1318,6 +1320,9 @@ namespace
 		// Back door (UpdateBackdoor): the last check, and no new one before this frame.
 		int BackdoorCheckFrame { -1 };
 		int BackdoorRetryUntil { -1 };
+		// Crossings shut after an operation ended with no transport (OpNoTransportRetryFrames): the
+		// frame they open again, by CrossingBlockKey (client and the two lands).
+		std::unordered_map<long long, int> CrossingBlockedUntil;
 		int ShuttleNoRideLogFrame { -1 };
 		int ShuttleCreditsTotal { 0 };
 		int ShuttleTransportsLost { 0 };
@@ -1754,6 +1759,7 @@ namespace
 			this->ShuttleRetryUntil = -1;
 			this->BackdoorCheckFrame = -1;
 			this->BackdoorRetryUntil = -1;
+			this->CrossingBlockedUntil.clear();
 			this->ShuttleNoRideLogFrame = -1;
 			this->ShuttleCreditsTotal = 0;
 			this->ShuttleTransportsLost = 0;
@@ -2070,6 +2076,14 @@ namespace
 	constexpr int OpBoardingCapFrames = 3600;
 	constexpr int OpNoTransportFrames = 9000;
 	constexpr int OpRetryFrames = 3600;
+	// An operation that no transport takes, for whose staging cell the house has none that seats a
+	// member and comes there, owned or buildable now (CanHouseCarryNow), for OpNoReachFrames ends;
+	// after an operation ends with no transport, its back door or its crossing (client and the two
+	// lands) opens again only OpNoTransportRetryFrames later. User, 2026-11-18: on Fort Urban Square
+	// one back door opened 12 times in a row and held its team 9000 frames each time for a hovercraft
+	// that could not leave the water.
+	constexpr int OpNoReachFrames = 1800;
+	constexpr int OpNoTransportRetryFrames = 18000;
 	constexpr int OpStuckFrames = 900;
 	constexpr double OpStuckCells = 2.0;
 	constexpr int OpCrossCapFrames = 9000;

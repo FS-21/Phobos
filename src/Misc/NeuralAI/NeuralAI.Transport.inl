@@ -251,11 +251,154 @@ namespace
 		return false;
 	}
 
+	// Can a transport of this type come to `at` from where the house builds it? Only one that rides
+	// land and water can be shut out (CanTransportTypeLink): built at a naval yard on water that no
+	// beach joins to the ground of `at`, it never gets there (user, 2026-11-18, Fort Urban Square: the
+	// shores are walls, the hovercraft stayed by its yard all match while 12 back doors waited for
+	// it). With no factory of the house for it yet, nothing tells: true.
+	bool CanTransportTypeComeTo(HouseClass* pHouse, const TechnoTypeClass* pTransType, const CellStruct& at)
+	{
+		if (!pHouse || !pTransType)
+			return false;
+
+		const MovementZone zone = pTransType->MovementZone;
+
+		if ((zone != MovementZone::Amphibious && zone != MovementZone::AmphibiousCrusher && zone != MovementZone::AmphibiousDestroyer)
+			|| pTransType->JumpJet || pTransType->ConsideredAircraft)
+		{
+			return true;
+		}
+
+		const int atZone = MapClass::Instance.GetMovementZoneType(at, zone, false);
+
+		if (atZone < 0)
+			return false;
+
+		bool anyFactory = false;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			auto const pType = pBld ? pBld->Type : nullptr;
+
+			if (!pType || !pBld->IsAlive || pBld->InLimbo || pType->Factory != AbstractType::UnitType || pType->Naval != pTransType->Naval)
+				continue;
+
+			anyFactory = true;
+			const CellStruct topLeft = pBld->GetMapCoords();
+			const int width = pType->GetFoundationWidth();
+			const int height = pType->GetFoundationHeight(false);
+
+			for (int dy = -2; dy < height + 2; ++dy)
+			{
+				for (int dx = -2; dx < width + 2; ++dx)
+				{
+					if (dx >= 0 && dx < width && dy >= 0 && dy < height)
+						continue;
+
+					const CellStruct cell { static_cast<short>(topLeft.X + dx), static_cast<short>(topLeft.Y + dy) };
+
+					if (MapClass::Instance.CoordinatesLegal(cell) && MapClass::Instance.GetMovementZoneType(cell, zone, false) == atZone)
+						return true;
+				}
+			}
+		}
+
+		return !anyFactory;
+	}
+
+	// Can the house carry a unit of this type from `from` to `to` now: a transport it owns, or can build
+	// now, with a seat for it (or a carryall that lifts it), that links the two cells
+	// (CanTransportTypeLink) and comes to `from`, from where it stands or from where the house builds it
+	// (CanTransportTypeComeTo). The back door asks it for each member of its team, and an operation that
+	// no transport takes asks it for its staging cell (OpNoReachFrames).
+	bool CanHouseCarryNow(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct& from, const CellStruct& to)
+	{
+		if (!pHouse || !pFootType)
+			return false;
+
+		const int passSize = std::max(1, static_cast<int>(pFootType->Size));
+		auto const pAsUnitType = abstract_cast<const UnitTypeClass*>(pFootType);
+		auto const pFootExt = TechnoTypeExt::Fetch(pFootType);
+		const bool liftable = pAsUnitType && !pAsUnitType->Organic && !pAsUnitType->Naval && !pAsUnitType->NonVehicle
+			&& (!pFootExt || pFootExt->Carryall_Allowed.Get());
+
+		auto const seats = [passSize](const TechnoTypeClass* pTransType)
+		{
+			return static_cast<int>(pTransType->SizeLimit) >= passSize && pTransType->Passengers >= passSize;
+		};
+
+		auto const unitLifts = [&](const TechnoTypeClass* pCarryType)
+		{
+			auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType);
+
+			return liftable && pCarryExt && pCarryExt->Carryall && CarryallTypeCanLiftType(pCarryType, pFootType);
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
+				continue;
+
+			auto const pUnitType = pUnit->Type;
+
+			if (unitLifts(pUnitType))
+				return true;
+
+			if (IsAmphibiousOrAirTransport(pUnitType) && seats(pUnitType) && CanTransportTypeLink(pUnitType, from, to)
+				&& CanTransportTypeLink(pUnitType, pUnit->GetMapCoords(), from))
+			{
+				return true;
+			}
+		}
+
+		for (auto const pAir : AircraftClass::Array)
+		{
+			if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type)
+				continue;
+
+			auto const pAirType = pAir->Type;
+
+			if (pAirType->Carryall ? (liftable && CarryallTypeCanLiftType(pAirType, pFootType)) : seats(pAirType))
+				return true;
+		}
+
+		for (auto const pUnitType : UnitTypeClass::Array)
+		{
+			if (!pUnitType || pUnitType->TechLevel < 0 || pUnitType->TechLevel > 10 || pUnitType->TechLevel > pHouse->TechLevel)
+				continue;
+
+			const bool carries = unitLifts(pUnitType)
+				|| (IsAmphibiousOrAirTransport(pUnitType) && seats(pUnitType) && CanTransportTypeLink(pUnitType, from, to));
+			const bool hasFactoryNow = pUnitType->Naval ? (pHouse->NumShipyards > 0) : (pHouse->NumWarFactories > 0);
+
+			if (carries && hasFactoryNow && HouseExt::PrerequisitesMet(pHouse, pUnitType) && CanTransportTypeComeTo(pHouse, pUnitType, from))
+				return true;
+		}
+
+		if (pHouse->NumAirpads == 0 && pHouse->NumWarFactories == 0)
+			return false;
+
+		for (auto const pAirType : AircraftTypeClass::Array)
+		{
+			if (!pAirType || pAirType->TechLevel < 0 || pAirType->TechLevel > 10 || pAirType->TechLevel > pHouse->TechLevel)
+				continue;
+
+			if ((pAirType->Carryall ? (liftable && CarryallTypeCanLiftType(pAirType, pFootType)) : seats(pAirType))
+				&& HouseExt::PrerequisitesMet(pHouse, pAirType))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	// A crossing our units wait for and no transport the house owns makes: the passenger transport
 	// types of its side that would make it (CanTransportTypeLink, a seat for the unit) and that it
 	// owns none of are noted for the production. It builds the buildings they still lack and then one
 	// of them (user: "make the AI build the tech center when it needs it"). Kept CrossingNeedFrames
-	// after the last wait.
+	// after the last wait. Never a type that cannot come to `from` from where the house builds it
+	// (CanTransportTypeComeTo): built, it would never take anyone.
 	void NoteCrossingNeed(HouseClass* pHouse, const CellStruct& from, const CellStruct& to, int passSize)
 	{
 		if (!pHouse || !pHouse->Type || from == CellStruct::Empty || to == CellStruct::Empty)
@@ -281,7 +424,7 @@ namespace
 			if (pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel || !pType->InOwners(ownHouseBit)
 				|| pType->Passengers < passSize || static_cast<int>(pType->SizeLimit) < passSize
 				|| std::find(macro.CrossingNeedTypes.begin(), macro.CrossingNeedTypes.end(), pType) != macro.CrossingNeedTypes.end()
-				|| pHouse->CountOwnedNow(pType) > 0 || !CanTransportTypeLink(pType, from, to))
+				|| pHouse->CountOwnedNow(pType) > 0 || !CanTransportTypeLink(pType, from, to) || !CanTransportTypeComeTo(pHouse, pType, from))
 			{
 				return;
 			}
