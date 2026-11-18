@@ -1241,6 +1241,13 @@ namespace
 		return nullptr;
 	}
 
+	// The key of a crossing in CrossingBlockedUntil: the client and the two lands.
+	long long CrossingBlockKey(NeuralOpClient client, int originZone, int targetZone)
+	{
+		return (static_cast<long long>(client) << 42) | (static_cast<long long>(originZone & 0x1FFFFF) << 21)
+			| static_cast<long long>(targetZone & 0x1FFFFF);
+	}
+
 	// A client asks to take a unit to an address on other ground. True when an operation has it
 	// (a new one, or one of the same client between the same two lands that is still under way);
 	// false when it needs none (it walks there or crosses on its own), cannot have one (no ground
@@ -1283,6 +1290,16 @@ namespace
 
 		if (!IsGroundZone(footZone) || !IsGroundZone(targetZone) || footZone == targetZone || IsSameGroundForFoot(pFoot, target))
 			return false;
+
+		// A crossing whose last operation ended with no transport stays shut OpNoTransportRetryFrames.
+		if (auto const itBlock = macro.CrossingBlockedUntil.find(CrossingBlockKey(client, footZone, targetZone));
+			itBlock != macro.CrossingBlockedUntil.end())
+		{
+			if (now < itBlock->second && itBlock->second - now <= OpNoTransportRetryFrames)
+				return false;
+
+			macro.CrossingBlockedUntil.erase(itBlock);
+		}
 
 		auto const pLanding = FindSafeIslandLandingCell(pHouse, ground, targetZone, false);
 		const CellStruct footCoords = pFoot->GetMapCoords();
@@ -1626,6 +1643,18 @@ namespace
 			op.Transports.clear();
 			op.Over = true;
 			op.EndReason = reason;
+		};
+
+		// Ends an operation that got no transport: its back door, or its crossing (client and the two
+		// lands), opens again only OpNoTransportRetryFrames later.
+		auto const endWithNoTransport = [&](const char* reason)
+		{
+			if (op.Client == NeuralOpClient::Strike)
+				macro.BackdoorRetryUntil = now + OpNoTransportRetryFrames;
+			else if (!shuttle)
+				macro.CrossingBlockedUntil[CrossingBlockKey(op.Client, op.OriginZone, op.TargetZone)] = now + OpNoTransportRetryFrames;
+
+			endOp(reason, true);
 		};
 
 		// An order the operation did not give, found on one of its units: counted, logged at most once
@@ -2425,15 +2454,48 @@ namespace
 				consider(pAir);
 
 			// None of ours makes this crossing: the production builds one that does, or what it lacks (a
-			// shuttle rides only on idle transports).
+			// shuttle rides only on idle transports). When the house has no transport, owned or buildable
+			// now, with a seat for a member that comes to the staging cell (CanHouseCarryNow), the operation
+			// ends after OpNoReachFrames instead of waiting OpNoTransportFrames for it.
 			if (candidates.empty() && op.Transports.empty() && !shuttle)
 			{
 				int largest = 1;
+				bool reachable = false;
+				std::vector<const TechnoTypeClass*> asked;
 
 				for (auto const pMember : unseated)
+				{
 					largest = std::max(largest, pMember->Size);
+					auto const pMemberFoot = find(pMember->UniqueID);
+					auto const pMemberType = pMemberFoot ? pMemberFoot->GetTechnoType() : nullptr;
+
+					if (reachable || !pMemberType || std::find(asked.begin(), asked.end(), pMemberType) != asked.end())
+						continue;
+
+					asked.push_back(pMemberType);
+					reachable = CanHouseCarryNow(pHouse, pMemberType, op.Staging, op.Landing);
+				}
 
 				NoteCrossingNeed(pHouse, op.Staging, op.Landing, largest);
+
+				if (reachable)
+				{
+					op.NoReachSince = -1;
+				}
+				else if (op.NoReachSince < 0 || now < op.NoReachSince)
+				{
+					op.NoReachSince = now;
+				}
+				else if (now - op.NoReachSince >= OpNoReachFrames)
+				{
+					CountDecision(NeuralDecision::OpNoTransportReach, houseIndex);
+					endWithNoTransport("no transport can reach");
+					return;
+				}
+			}
+			else
+			{
+				op.NoReachSince = -1;
 			}
 
 			std::stable_sort(candidates.begin(), candidates.end(),
@@ -2490,7 +2552,7 @@ namespace
 		}
 		else if (now - op.LastTransportFrame >= OpNoTransportFrames || now < op.LastTransportFrame)
 		{
-			endOp("no transport came", true);
+			endWithNoTransport("no transport came");
 			return;
 		}
 
@@ -3910,7 +3972,7 @@ namespace
 
 		// TEMP diagnostic: where the checks stop (no back door in 16 matches of its first builds), summed
 		// per house and logged every 9000 frames.
-		enum BackdoorStop { Waiting, NoFront, OtherGround, FewDefenses, NoVictim, NoTarget, SmallTeam, Started, StopCount };
+		enum BackdoorStop { Waiting, NoFront, OtherGround, FewDefenses, NoVictim, NoTarget, SmallTeam, NoCarrier, Started, StopCount };
 		static std::array<std::array<int, StopCount>, 8> stops {};
 		static std::array<int, 8> stopsLogFrame {};
 		static int stopsMatch = -1;
@@ -3932,13 +3994,14 @@ namespace
 			{
 				logFrame = now;
 				Debug::Log("[NeuralAI] House %d back door DIAG: checks stopped at waiting %d, no front %d, front on other ground %d, few defenses %d, "
-					"no victim %d, no target with a safe landing %d, small team %d, started %d, frame %d.\n", pHouse->ArrayIndex,
-					houseStops[Waiting], houseStops[NoFront], houseStops[OtherGround], houseStops[FewDefenses], houseStops[NoVictim],
-					houseStops[NoTarget], houseStops[SmallTeam], houseStops[Started], now);
+					"no victim %d, no target with a safe landing %d, small team %d, no transport for the team %d, started %d, frame %d.\n",
+					pHouse->ArrayIndex, houseStops[Waiting], houseStops[NoFront], houseStops[OtherGround], houseStops[FewDefenses],
+					houseStops[NoVictim], houseStops[NoTarget], houseStops[SmallTeam], houseStops[NoCarrier], houseStops[Started], now);
 			}
 		};
 
-		if (macro.BackdoorRetryUntil >= 0 && now < macro.BackdoorRetryUntil && macro.BackdoorRetryUntil - now <= BackdoorRetryFrames)
+		if (macro.BackdoorRetryUntil >= 0 && now < macro.BackdoorRetryUntil
+			&& macro.BackdoorRetryUntil - now <= std::max(BackdoorRetryFrames, OpNoTransportRetryFrames))
 		{
 			stop(Waiting);
 			return;
@@ -4065,8 +4128,28 @@ namespace
 			return;
 		}
 
-		// The team: idle armed ground units of the house at home, the nearest to its base first.
+		// The team: idle armed ground units of the house at home, the nearest to its base first, each one
+		// with a seat on a transport the house owns or can build now that comes to it and links it to the
+		// landing (CanHouseCarryNow, asked once per type; user, 2026-11-18: 13 of 14 back doors never
+		// sailed, their vehicles waited 9000 frames for air transports that seat infantry only, or for a
+		// hovercraft that could not leave the water).
 		std::vector<std::pair<double, FootClass*>> idle;
+		std::vector<std::pair<const TechnoTypeClass*, bool>> carriable;
+		int noCarrier = 0;
+
+		auto const canCarry = [&](const TechnoTypeClass* pType, const CellStruct& at)
+		{
+			for (auto const& [pKnown, answer] : carriable)
+			{
+				if (pKnown == pType)
+					return answer;
+			}
+
+			const bool answer = CanHouseCarryNow(pHouse, pType, at, landing);
+			carriable.push_back({ pType, answer });
+
+			return answer;
+		};
 
 		for (auto const pFoot : FootClass::Array)
 		{
@@ -4108,13 +4191,30 @@ namespace
 			const CellStruct at = pFoot->GetMapCoords();
 			const double fromHome = at.DistanceFrom(home);
 
-			if (fromHome <= BackdoorHomeCells && OpFootGroundZone(pFoot) == homeZone)
-				idle.push_back({ fromHome, pFoot });
+			if (fromHome > BackdoorHomeCells || OpFootGroundZone(pFoot) != homeZone)
+				continue;
+
+			if (!canCarry(pType, at))
+			{
+				noCarrier++;
+				continue;
+			}
+
+			idle.push_back({ fromHome, pFoot });
 		}
 
 		if (static_cast<int>(idle.size()) < BackdoorMinTeam)
 		{
-			stop(SmallTeam);
+			if (static_cast<int>(idle.size()) + noCarrier >= BackdoorMinTeam)
+			{
+				CountDecision(NeuralDecision::BackdoorNoCarrier, pHouse->ArrayIndex);
+				stop(NoCarrier);
+			}
+			else
+			{
+				stop(SmallTeam);
+			}
+
 			return;
 		}
 
