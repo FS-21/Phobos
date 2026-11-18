@@ -522,17 +522,24 @@ namespace
 		auto& macro = GetMacroState(pOwner);
 		const DWORD uid = pTank->UniqueID;
 		const CellStruct at = pTank->GetMapCoords();
+		const CellStruct destCell = pTank->Destination ? CellClass::Coord2Cell(pTank->Destination->GetCoords()) : at;
 		double siteCells = -1.0;
+		double destSiteCells = -1.0;
 
 		for (auto const pBld : pOwner->Buildings)
 		{
 			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type
 				&& (pBld->Type->ConstructionYard || pBld->Type->Refinery || pBld->Type->Factory != AbstractType::None))
 			{
-				const double distance = pBld->GetMapCoords().DistanceFrom(at);
+				const CellStruct bldCell = pBld->GetMapCoords();
+				const double distance = bldCell.DistanceFrom(at);
+				const double destDistance = bldCell.DistanceFrom(destCell);
 
 				if (siteCells < 0.0 || distance < siteCells)
 					siteCells = distance;
+
+				if (destSiteCells < 0.0 || destDistance < destSiteCells)
+					destSiteCells = destDistance;
 			}
 		}
 
@@ -620,10 +627,72 @@ namespace
 
 		if (deathLogCount++ < TankCensusDeathLines)
 		{
-			Debug::Log("[NeuralAI] TEMP tank death: house %d %s %s%s%s killed by %s %s of house %d, %d cells from our nearest site, lived %d frames, frame %d.\n",
+			// The last plan or wave that sent it and how that plan ended, what the engine had it doing,
+			// how far its destination (and that from our sites) and its target were, how far the killer
+			// stood and the nearest enemy building (user, 2026-11-18: what sends the tanks lost away
+			// from home with no role there?).
+			static const char* const missionNames[] = { "none", "sleep", "attack", "move", "qmove", "retreat", "guard", "sticky",
+				"enter", "capture", "eaten", "harvest", "areaGuard", "return", "stop", "ambush", "hunt", "unload", "sabotage",
+				"construction", "selling", "repair", "rescue", "missile", "harmless", "open", "patrol", "paradropApproach",
+				"paradropOverfly", "wait", "attackMove", "spyplaneApproach", "spyplaneOverfly" };
+
+			auto missionName = [](Mission mission)
+			{
+				const int index = static_cast<int>(mission) + 1;
+				return index >= 0 && index < static_cast<int>(std::size(missionNames)) ? missionNames[index] : "?";
+			};
+
+			auto const& tags = CreditTags[std::clamp(pOwner->ArrayIndex, 0, 31)];
+			auto const itTag = tags.find(uid);
+			const int source = itTag != tags.end() ? itTag->second.CommandSource : -1;
+			const int orderAge = itTag != tags.end() ? Unsorted::CurrentFrame - itTag->second.CommandFrame : -1;
+			char order[128] = "none";
+
+			if (source == CreditSourceWave)
+			{
+				sprintf_s(order, "wave %d frames ago", orderAge);
+			}
+			else if (source >= 0 && source < static_cast<int>(NeuralPlanId::Count))
+			{
+				const size_t id = static_cast<size_t>(source);
+				const int endFrame = macro.PlanEndFrame[id];
+
+				if (endFrame > 0 && endFrame >= itTag->second.CommandFrame)
+				{
+					sprintf_s(order, "%s %d frames ago, it ended %s %d frames ago", NeuralPlanNames[id], orderAge,
+						macro.PlanEndedWell[id] ? "well" : "not well", Unsorted::CurrentFrame - endFrame);
+				}
+				else
+				{
+					sprintf_s(order, "%s %d frames ago, still on", NeuralPlanNames[id], orderAge);
+				}
+			}
+
+			double enemyCells = -1.0;
+
+			for (auto const pBld : BuildingClass::Array)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Owner || pBld->Owner == pOwner || pOwner->IsAlliedWith(pBld->Owner)
+					|| pBld->Owner->IsNeutral())
+				{
+					continue;
+				}
+
+				const double distance = pBld->GetMapCoords().DistanceFrom(at);
+
+				if (enemyCells < 0.0 || distance < enemyCells)
+					enemyCells = distance;
+			}
+
+			Debug::Log("[NeuralAI] TEMP tank death: house %d %s %s%s%s killed by %s %s of house %d, %d cells from our nearest site, lived %d frames, frame %d;"
+				" last order %s, mission %s/%s, destination %d cells away (%d from our nearest site), target %d cells away, killer %d cells away,"
+				" nearest enemy building %d cells.\n",
 				pOwner->ArrayIndex, pTank->Type->ID, roleNames[role], *planName ? " " : "", planName, killerNames[killer],
 				pKiller && pKiller->GetTechnoType() ? pKiller->GetTechnoType()->ID : "-", pKiller && pKiller->Owner ? pKiller->Owner->ArrayIndex : -1,
-				static_cast<int>(siteCells), lived, Unsorted::CurrentFrame);
+				static_cast<int>(siteCells), lived, Unsorted::CurrentFrame, order, missionName(pTank->CurrentMission), missionName(pTank->MegaMission),
+				pTank->Destination ? static_cast<int>(destCell.DistanceFrom(at)) : -1, pTank->Destination ? static_cast<int>(destSiteCells) : -1,
+				pTank->Target ? static_cast<int>(CellClass::Coord2Cell(pTank->Target->GetCoords()).DistanceFrom(at)) : -1,
+				pKiller ? static_cast<int>(pKiller->GetMapCoords().DistanceFrom(at)) : -1, static_cast<int>(enemyCells));
 		}
 	}
 }
