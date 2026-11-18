@@ -5720,6 +5720,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				"pick %s %d%s\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, tankFloor, ownedMainTanks, ownedGroundCombatUnits,
 				bestTankIdx >= 0 ? UnitTypeClass::Array.GetItem(bestTankIdx)->ID : "none", bestTankScore,
 				bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx)->ID : "none", bestUnitScore, floorWhy);
+
+			// TEMP diagnostic (tank census, NoteMainTankDeath): the main battle tanks built and lost so far.
+			auto const& census = GetMacroState(pHouse);
+			auto const& lost = census.TankCensusLost;
+			auto const& by = census.TankCensusKillers;
+			int lostTotal = 0;
+
+			for (const int n : lost)
+				lostTotal += n;
+
+			Debug::Log("[NeuralAI] Frame %d | House #%d tank census: built %d, lost %d (guard %d, intercept %d, plan %d, wave %d, scout %d, "
+				"repair %d, home %d, away %d), by vehicle %d infantry %d defense %d aircraft %d other %d, %d near our sites, "
+				"lived %d frames on average (%d known)\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, census.TankCensusBuilt, lostTotal,
+				lost[0], lost[1], lost[2], lost[3], lost[4], lost[5], lost[6], lost[7], by[0], by[1], by[2], by[3], by[4],
+				census.TankCensusLostAtHome, census.TankCensusLifeCount > 0 ? census.TankCensusLifeFrames / census.TankCensusLifeCount : -1,
+				census.TankCensusLifeCount);
 		}
 
 		if (floorTakes)
@@ -6713,6 +6729,14 @@ void NeuralAI::OnTechnoProduced(HouseClass* pHouse, TechnoClass* pTechno)
 	// What came out of a factory (WatchUndeliveredPick).
 	if (const int queue = ProductionQueueOf(pType); queue != 0)
 		GetMacroState(pHouse).LastDeliveredFrame[queue * 100000 + pType->GetArrayIndex()] = Unsorted::CurrentFrame;
+
+	// TEMP diagnostic (tank census, NoteMainTankDeath): a main battle tank out of a factory.
+	if (auto const pTankType = abstract_cast<UnitTypeClass*>(pType); pTankType && IsMainBattleTankType(pTankType))
+	{
+		auto& macro = GetMacroState(pHouse);
+		macro.TankCensusBuilt++;
+		macro.TankCensusBirth[pTechno->UniqueID] = Unsorted::CurrentFrame;
+	}
 
 	auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
 	auto const pInfType = abstract_cast<InfantryTypeClass*>(pType);

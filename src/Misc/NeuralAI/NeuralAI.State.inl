@@ -1057,6 +1057,18 @@ namespace
 		std::unordered_set<DWORD> TankGuard {};
 		std::unordered_map<DWORD, std::pair<int, int>> TankGuardPosts {};
 		int TankGuardLogFrame { -100000 };
+		// TEMP diagnostic (tank census, 2026-11-18; NoteMainTankDeath): main battle tanks out of a
+		// factory, the ones lost by what they did when they died (guard, Base Threat Intercept, another
+		// plan, a wave, scouting, a repair trip or transport op, at home, away), the kind of the killer
+		// (vehicle, infantry, defense, aircraft, other or none), those lost near our sites and the
+		// frames lived by the ones built in this match.
+		int TankCensusBuilt { 0 };
+		std::array<int, 8> TankCensusLost {};
+		std::array<int, 5> TankCensusKillers {};
+		int TankCensusLostAtHome { 0 };
+		int TankCensusLifeFrames { 0 };
+		int TankCensusLifeCount { 0 };
+		std::unordered_map<DWORD, int> TankCensusBirth {};
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
@@ -1585,6 +1597,13 @@ namespace
 			this->TankGuard.clear();
 			this->TankGuardPosts.clear();
 			this->TankGuardLogFrame = -100000;
+			this->TankCensusBuilt = 0;
+			this->TankCensusLost.fill(0);
+			this->TankCensusKillers.fill(0);
+			this->TankCensusLostAtHome = 0;
+			this->TankCensusLifeFrames = 0;
+			this->TankCensusLifeCount = 0;
+			this->TankCensusBirth.clear();
 			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
 			this->FerryWaitSince.clear();
