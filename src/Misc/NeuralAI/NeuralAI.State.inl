@@ -2462,6 +2462,8 @@ namespace
 	// The ore of our held fields lasting less than this at the pace it is drained makes the crawl and
 	// expansion slots urgent (localOreDepleting), from IncomeTrendMinFrame.
 	constexpr int HeldOreRunwayFrames = 18000;
+	// Bonus of the refinery for a real new field (or a yard without one) while the income falls.
+	constexpr int IncomeFallingRefineryBonus = 3000;
 	// The refinery trick for a second harvester per refinery (its FreeUnit, no war factory time): at
 	// most once in this many frames; its temporary refinery is sold once a harvester of ours stands
 	// within 8 cells of it, or after TemporaryRefineryMaxFrames anyway.

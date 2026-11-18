@@ -2782,6 +2782,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				|| (ownedHarvestersCount < staticRefineriesCount
 					&& (ownedHarvestersCount == 0 || ownedWarFactories >= 1) && features[19] > 0
 					&& (money >= 900 || ownedHarvestersCount == 0))));
+
+		// TEMP diagnostic (income forecast, 2026-11-18): why the second harvester trick fires or not (once
+		// in 8 matches).
+		if (IsAITickWindow(4500, 0) && staticRefineriesCount >= 1)
+		{
+			Debug::Log("[NeuralAI] House %d second harvester DIAG: war factory builds army %d, harvesters %d at %d refineries, "
+				"%d frames since the last recovery, money %d, falling %d, broke %d, next recovery in %d, temporary pending %d, ore %d, "
+				"wants second %d, wants recovery %d, frame %d.\n", pHouse->ArrayIndex, warFactoryBuildsArmy ? 1 : 0, ownedHarvestersCount,
+				staticRefineriesCount, Unsorted::CurrentFrame - GetMacroState(pHouse).LastHarvesterRecoveryFrame, money,
+				GetMacroState(pHouse).IncomeFalling ? 1 : 0, GetMacroState(pHouse).BrokeHoldActive ? 1 : 0,
+				std::max(0, GetMacroState(pHouse).NextHarvesterRecoveryFrame - Unsorted::CurrentFrame),
+				static_cast<int>(GetMacroState(pHouse).TemporaryRecoveryRefineryPlacedFrame.size()), static_cast<int>(features[19]),
+				wantsSecondHarvesterViaRefinery ? 1 : 0, wantsHarvesterRecoveryViaRefinery ? 1 : 0, Unsorted::CurrentFrame);
+		}
 		const bool hasActiveBuildingIncome = (ownedCashBuildings >= 1)
 			|| (((ownedRefineries >= 1 && ownedHarvestersCount >= 1) || ownedSlaveMinerBuildings >= 1)
 				&& (features[19] > 0 || pHouse->OwnedTiberium.GetTotalAmount() > 0));
@@ -3254,6 +3268,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					// penalized by the refineries of the home field (6 of them sank it below
 					// any other building, so expansion ConYards stood on unmined ore).
 					score = std::max(static_cast<int>(scores[1]), 300) + 1950;
+
+					// The income falls (IncomeFalling) and the field is a real one or a yard's: its refinery
+					// comes before the other copies (user, 2026-11-18). A house whose income fell at frame
+					// 31500 with a real field 2 cells from an anchor took a second war factory four times
+					// (3650 to 6372 against 3522) before the refinery.
+					if (GetMacroState(pHouse).IncomeFalling && slotFieldCell != CellStruct::Empty)
+						score += IncomeFallingRefineryBonus;
 				}
 				else if (isHarvRecoveryCandidate
 					&& (orphanRefineryZoneNeedsReplacement >= 0 || ownedHarvestersCount < staticRefineriesCount))
@@ -4930,6 +4951,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		GetMacroState(pHouse).ExpansionSaveTarget = expansionCost;
+	}
+
+	// TEMP diagnostic (income forecast, 2026-11-18): while the income falls, why the expansion MCV is
+	// planned or not (none of 14 falling houses gained a yard within 9000 frames).
+	if (GetMacroState(pHouse).IncomeFalling && IsAITickWindow(4500, 0))
+	{
+		Debug::Log("[NeuralAI] House %d income falling DIAG (expansion): fields running dry %d (depleted %d of %d refineries), free fields %d, "
+			"island target %d, yards %d of %d allowed, undeployed MCV %d, features20 %d, slot30 %d, cross-island %d (heavy transports %d, "
+			"ferry %d), can save %d, save target %d, money %d, frame %d.\n", pHouse->ArrayIndex, fieldsRunningDry ? 1 : 0,
+			GetMacroState(pHouse).RefineriesDepleted, GetMacroState(pHouse).RefineriesChecked, GetMacroState(pHouse).UncolonizedOreFields,
+			hasUncolonizedIslandTarget ? 1 : 0, pHouse->NumConYards, maxAllowedConYards, ownsUndeployedMCV ? 1 : 0,
+			static_cast<int>(features[20]), static_cast<int>(scores[30]), needsCrossIslandMCV ? 1 : 0, ownedHeavyIslandTransports,
+			canFerryAnyMCVAcrossWater ? 1 : 0, canSafelySaveForExpansionMCV ? 1 : 0, GetMacroState(pHouse).ExpansionSaveTarget, money,
+			Unsorted::CurrentFrame);
 	}
 
 	// With each IslandExpansion outlook line, what the island MCV waits for.
