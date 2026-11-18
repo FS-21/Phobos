@@ -2450,8 +2450,8 @@ namespace
 	constexpr int JamSealSellFrames = 1800;
 	// A narrow passage blocked for JamBreachFrames: a neutral building of no worth (insignificant, not
 	// capturable, not occupiable, not a bridge repair hut, a legal target) within JamBreachReachCells of
-	// a held unit of the block, whose footprint leaves a lane of one cell there (FootprintCutsLandWay with
-	// two-way traffic), is shot down by up to JamBreachShootersMost armed held units in range. User,
+	// a held unit of the block, whose footprint leaves a lane of one cell there (FootprintLeavesOneCellLane),
+	// is shot down by up to JamBreachShootersMost armed held units in range. User,
 	// 2026-11-18 (Fort Urban Square): pairs of neutral barricades at the bridge ends left one-cell gates,
 	// every jam of the match was at one, a column of 21 to 83 units held up to 13000 frames.
 	constexpr int JamBreachFrames = 900;
