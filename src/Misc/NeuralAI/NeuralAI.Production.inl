@@ -2211,8 +2211,28 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
-		const int fieldRefineryCap = std::max(1, fieldRefineryRoom) + (reachedNewOreField ? 1 : 0);
+		// A newly reached field always gets its refinery (user, 2026-11-18: expanding like a virus wins
+		// in the long run, capping refineries is a synonym of future defeat). The held fields' room
+		// counts only fields that already have a refinery, so a house that owns more than that room
+		// (recovery refineries, home fields running dry) had no room left for the new field: on Fluddle
+		// GDI held the defeated CABAL's island with a yard, its factories and 8 defenses and never a
+		// refinery. One refinery past what we own every RefineryNewFieldFrames at most, so one placed
+		// away from the field cannot start a chain.
+		const int heldRefineryCap = std::max(1, fieldRefineryRoom);
+		const bool newFieldRefinerySlot = reachedNewOreField
+			&& Unsorted::CurrentFrame - GetMacroState(pHouse).LastRefineryPlacedFrame >= RefineryNewFieldFrames;
+		const int fieldRefineryCap = newFieldRefinerySlot ? std::max(heldRefineryCap, ownedRefineries) + 1
+			: heldRefineryCap + (reachedNewOreField ? 1 : 0);
 		const bool permanentRefineryCapReached = ownedRefineries >= fieldRefineryCap;
+
+		// TEMP diagnostic (expansion refineries, 2026-11-18): the refinery cap of each house.
+		if (IsAITickWindow(4500, 0))
+		{
+			Debug::Log("[NeuralAI] House %d refinery cap DIAG: %d refineries, held field room %d, cap %d (new field %d: yard without refinery %d, "
+				"anchor %d cells from free ore, slot %d), yards %d, frame %d.\n", pHouse->ArrayIndex, ownedRefineries, fieldRefineryRoom,
+				fieldRefineryCap, reachedNewOreField ? 1 : 0, conYardWithNoRefineryInZone ? 1 : 0, minAnchorDistToUncolonizedOre,
+				newFieldRefinerySlot ? 1 : 0, pHouse->ConYards.Count, Unsorted::CurrentFrame);
+		}
 
 		// A newly reached field without its refinery (cap not reached): the cheapest buildable
 		// refinery is an economic investment the economy hold saves for (UpdateEconomyCrisis).

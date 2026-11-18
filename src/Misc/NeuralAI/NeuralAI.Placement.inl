@@ -4802,6 +4802,54 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		st.ConsecutivePlacementFailures = 0;
 		st.BuildingPlacementCooldownUntilFrame.erase(pBuildingType->ArrayIndex);
 
+		// The frame of the last refinery placed (the new field refinery slot, RefineryNewFieldFrames)
+		// and, TEMP diagnostic (expansion refineries, 2026-11-18, user: maybe it does not know where
+		// to put and spread them), where it went: its land against the home spawn's, the nearest yard
+		// of ours, and the ore around it.
+		if (pBuildingType->Refinery && !pBuildingType->ResourceGatherer)
+		{
+			st.LastRefineryPlacedFrame = Unsorted::CurrentFrame;
+			const int cellZone = MapClass::Instance.GetMovementZoneType(bestCell, MovementZone::Normal, false);
+			const int homeZone = pHouse->BaseSpawnCell != CellStruct::Empty
+				? MapClass::Instance.GetMovementZoneType(pHouse->BaseSpawnCell, MovementZone::Normal, false) : -1;
+			CellStruct yardCell = CellStruct::Empty;
+
+			for (auto const pYard : pHouse->ConYards)
+			{
+				if (pYard && pYard->IsAlive && !pYard->InLimbo
+					&& (yardCell == CellStruct::Empty || pYard->GetMapCoords().DistanceFrom(bestCell) < yardCell.DistanceFrom(bestCell)))
+				{
+					yardCell = pYard->GetMapCoords();
+				}
+			}
+
+			int oreCells = 0;
+
+			for (int dy = -8; dy <= 8; ++dy)
+			{
+				for (int dx = -8; dx <= 8; ++dx)
+				{
+					auto const pOreCell = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(bestCell.X + dx), static_cast<short>(bestCell.Y + dy) });
+
+					if (pOreCell && pOreCell->GetContainedTiberiumValue() > 0)
+						oreCells++;
+				}
+			}
+
+			int refineries = 0;
+
+			for (auto const pOwnB : pHouse->Buildings)
+			{
+				if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->Type && pOwnB->Type->Refinery && !pOwnB->Type->ResourceGatherer)
+					refineries++;
+			}
+
+			Debug::Log("[NeuralAI] House %d refinery DIAG: %s placed at (%d,%d) zone %d (home zone %d), nearest yard (%d,%d) %d cells away, "
+				"%d ore cells within 8, %d refineries before, frame %d.\n", pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y,
+				cellZone, homeZone, yardCell.X, yardCell.Y, yardCell != CellStruct::Empty ? static_cast<int>(yardCell.DistanceFrom(bestCell)) : -1,
+				oreCells, refineries, Unsorted::CurrentFrame);
+		}
+
 		// TEMP diagnostic: where a long-range gun with a dead zone goes, and whether a point-blank
 		// ground tower of ours covers it there (once per cell).
 		static int gunLogSerial = -1;
