@@ -405,6 +405,10 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 		pExt->NeuralAI_ScoutedEnemyMask |= (1 << ownerIdx);
 
+		// An enemy in sight (DetectionNeedOf: not blind).
+		if (IsCellVisibleToAI(pHouse, pCell) && pTechno->CloakState != CloakState::Cloaked)
+			GetMacroState(pHouse).LastEnemySeenFrame = Unsorted::CurrentFrame;
+
 		// Aircraft plus JumpJet / Fly vehicles and infantry (Rocketeers, Siege Choppers...).
 		RecordEnemySighting(pHouse, pTechno);
 

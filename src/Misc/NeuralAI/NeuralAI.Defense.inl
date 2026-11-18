@@ -730,6 +730,38 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 	if (pVictimOwner && pVictimOwner->ArrayIndex >= 0 && pVictimOwner->ArrayIndex < 32)
 		LastOrderCaller[pVictimOwner->ArrayIndex].erase(pVictim->UniqueID);
 
+	// Detection need (DetectionNeedOf): a loss of ours to a killer we could not see, cloaked or
+	// disguised, under water, or standing in the dark. Fog-fair: only where we lost it and whether the
+	// killer's cell was in our sight; a land loss to a cloaked killer counts as a stealth sighting at
+	// the victim's cell, for the sensor lookouts to cover.
+	if (pKiller && pVictimOwner && pKiller->Owner && pKiller->Owner != pVictimOwner && !pVictimOwner->IsAlliedWith(pKiller->Owner)
+		&& NeuralAI::IsEnabledForHouse(pVictimOwner))
+	{
+		auto const pKillerType = pKiller->GetTechnoType();
+		auto const pVictimType = pVictim->GetTechnoType();
+		auto const pKillerCell = pKiller->GetCell();
+		const bool cloaked = pKiller->CloakState != CloakState::Uncloaked || pKiller->Disguised;
+
+		if (pKillerType && pVictimType && (cloaked || !pKillerCell || !IsCellVisibleToAI(pVictimOwner, pKillerCell)))
+		{
+			const int now = Unsorted::CurrentFrame;
+			const CellStruct at = pVictim->GetMapCoords();
+			const int kind = (pVictimType->Naval || (pKillerType->Naval && (cloaked || pKillerType->Cloakable))) ? 2
+				: ((cloaked || pKillerType->Cloakable) ? 1 : 0);
+			auto& macro = GetMacroState(pVictimOwner);
+
+			std::erase_if(macro.HiddenLosses, [now](const NeuralHiddenLoss& loss) { return now - loss.Frame > SensorLookoutSightingFrames; });
+
+			if (macro.HiddenLosses.size() >= DetectionHiddenLosses)
+				macro.HiddenLosses.erase(macro.HiddenLosses.begin());
+
+			macro.HiddenLosses.push_back({ at, now, kind });
+
+			if (kind == 1)
+				macro.StealthSightings[pKiller->UniqueID] = { at, now };
+		}
+	}
+
 	// TEMP diagnostic (rotatingRaids, 2026-11-18): who kills raid members (a unit, a defense, an
 	// aircraft) and where the member stood against its group and its goal (user: units or defenses
 	// in range?). Log only.
