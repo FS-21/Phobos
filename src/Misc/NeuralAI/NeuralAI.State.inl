@@ -839,6 +839,11 @@ namespace
 		// which open no slot for RefineryMissedFieldFrames.
 		CellStruct NewFieldSlotCell { CellStruct::Empty };
 		int NewFieldSlotReach { 0 };
+		// The frame production last saw that slot open: placement aims a refinery at its field only
+		// within RefinerySlotAimFrames of it. TEMP diagnostic: whether the last refinery search was
+		// aimed at it.
+		int NewFieldSlotFrame { -100000 };
+		bool RefinerySlotAimed { false };
 		std::vector<std::pair<CellStruct, int>> MissedNewFields {};
 		// Refineries placed with that widened reach (UniqueIDs): the best spot a rugged map allowed,
 		// so the strict refinery audit of the resource hoarder never sells them (it would only
@@ -1514,6 +1519,8 @@ namespace
 			this->RefineryHubCell = CellStruct::Empty;
 			this->NewFieldSlotCell = CellStruct::Empty;
 			this->NewFieldSlotReach = 0;
+			this->NewFieldSlotFrame = -100000;
+			this->RefinerySlotAimed = false;
 			this->MissedNewFields.clear();
 			this->RelaxedReachRefineries.clear();
 			this->ResourceClaimCell = CellStruct::Empty;
@@ -2345,6 +2352,8 @@ namespace
 	constexpr int RefineryMissedYardCells = 18;
 	constexpr int RefineryMissedSameFieldCells = 6;
 	constexpr int RefineryMissedFieldFrames = 18000;
+	// A refinery is aimed at the field of a new field slot production saw open this recently.
+	constexpr int RefinerySlotAimFrames = 1800;
 	// Most mobile refineries (slave miners) a house mining with them wants, as the Advanced AI, and
 	// the least it wants with free fields (a classic base holds 4 refineries at home).
 	constexpr int MaxMobileMiners = 15;

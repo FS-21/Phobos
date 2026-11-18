@@ -1439,6 +1439,57 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		}
 	}
 
+	// The refinery of a new field slot (production, NewFieldSlotCell: a real field 9 cells or less
+	// from a building of ours) is aimed at that field (user, 2026-11-18): the search starts at our
+	// building nearest it on its land, its target ore is the field and only cells within
+	// RefineryMissedFieldCells of it count. Placement used to pick a field of its own and the refinery
+	// stood far away on thin ore (Naval Pass: slot field (42,97), refinery at (116,189) on 1 ore cell).
+	// Not after a yard hub took it (a slot for a yard has the yard's reach), for an ally site, nor
+	// after 2 failed refinery placements in a row (refineryHubAllowed).
+	CellStruct refinerySlotCell = CellStruct::Empty;
+
+	if (refineryHubAllowed && !anchoredAtMissingRefineryHub && allySiteMacro.NewFieldSlotCell != CellStruct::Empty
+		&& allySiteMacro.NewFieldSlotReach == RefineryMissedFieldCells && Unsorted::CurrentFrame >= allySiteMacro.NewFieldSlotFrame
+		&& Unsorted::CurrentFrame - allySiteMacro.NewFieldSlotFrame <= RefinerySlotAimFrames)
+	{
+		const CellStruct slotCell = allySiteMacro.NewFieldSlotCell;
+		const int slotZone = MapClass::Instance.GetMovementZoneType(slotCell, MovementZone::Normal, false);
+		CellStruct slotAnchor = CellStruct::Empty;
+		int slotAnchorDist = INT_MAX;
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Insignificant
+				|| pOwnBld->Type->InvisibleInGame
+				|| (!pOwnBld->Type->BaseNormal && !pOwnBld->Type->ConstructionYard && !BuildingTypeExt::IsAIBaseNormal(pOwnBld->Type)))
+			{
+				continue;
+			}
+
+			const CellStruct bc = pOwnBld->GetMapCoords();
+
+			if (MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pOwnBld->OnBridge) != slotZone)
+				continue;
+
+			const int d = std::max(std::abs(bc.X - slotCell.X), std::abs(bc.Y - slotCell.Y));
+
+			if (d < slotAnchorDist)
+			{
+				slotAnchorDist = d;
+				slotAnchor = bc;
+			}
+		}
+
+		if (slotZone >= 0 && slotAnchor != CellStruct::Empty && slotAnchorDist <= RefineryMissedFieldCells)
+		{
+			center = slotAnchor;
+			refinerySlotCell = slotCell;
+		}
+	}
+
+	if (pBuildingType->Refinery && !pBuildingType->ResourceGatherer)
+		GetMacroState(pHouse).RefinerySlotAimed = refinerySlotCell != CellStruct::Empty;
+
 	if (center == CellStruct::Empty)
 		return CellStruct::Empty;
 
@@ -1740,6 +1791,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	if (pBuildingType->Refinery && !pBuildingType->ResourceGatherer)
 		GetMacroState(pHouse).RefineryHubCell = anchoredAtMissingRefineryHub ? refineryHubCell : CellStruct::Empty;
+
+	// A new field slot's refinery (refinerySlotCell): its target ore is that field.
+	if (refinerySlotCell != CellStruct::Empty)
+		nearestOreCell = refinerySlotCell;
 
 	// Spawner tree of the target field (within 6 cells of its ore cell): a refinery goes next to the
 	// tree, the renewable heart of the field, not at whatever edge the crawl reached first.
@@ -2511,7 +2566,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			// buildings and 4 from its ConYard (allySiteKeepClear). Its refineries never anchor, nor
 			// does a building within 20 cells of a ConYard of ours: when the starts are next to each
 			// other only the ally's expansions are worth crawling from.
-			if (crawlTowardOre && GameModeOptionsClass::Instance.BuildOffAlly && !anchoredAtMissingRefineryHub)
+			if (crawlTowardOre && GameModeOptionsClass::Instance.BuildOffAlly && !anchoredAtMissingRefineryHub
+				&& refinerySlotCell == CellStruct::Empty)
 			{
 				BuildingClass* pAllyAnchor = nullptr;
 				int bestAllyDist = bestAnchorDist - 6;
@@ -3952,6 +4008,15 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					continue;
 				}
 
+				// The refinery of a new field slot stands where that field counts it: within
+				// RefineryMissedFieldCells of it, on its land.
+				if (refinerySlotCell != CellStruct::Empty
+					&& (std::max(std::abs(candidate.X - refinerySlotCell.X), std::abs(candidate.Y - refinerySlotCell.Y)) > RefineryMissedFieldCells
+						|| MapClass::Instance.GetMovementZoneType(candidate, MovementZone::Normal, false) != centerZone))
+				{
+					continue;
+				}
+
 				// A refinery is never a stepping stone: one placed halfway to a far field stands on
 				// bare ground. Past the first one it goes within 10 cells of its field or waits
 				// (cooldown) while power plants and barracks crawl there; each failed placement in a
@@ -4947,11 +5012,11 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 			const CellStruct hubCell = st.RefineryHubCell;
 
 			Debug::Log("[NeuralAI] House %d refinery DIAG: %s placed at (%d,%d) zone %d (home zone %d), nearest yard (%d,%d) %d cells away, "
-				"%d ore cells within 8, %d refineries before, for yard hub (%d,%d) %d cells away, slot field (%d,%d) missed %d, frame %d.\n",
+				"%d ore cells within 8, %d refineries before, for yard hub (%d,%d) %d cells away, slot field (%d,%d) missed %d aimed %d, frame %d.\n",
 				pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y, cellZone, homeZone, yardCell.X, yardCell.Y,
 				yardCell != CellStruct::Empty ? static_cast<int>(yardCell.DistanceFrom(bestCell)) : -1, oreCells, refineries, hubCell.X,
 				hubCell.Y, hubCell != CellStruct::Empty ? static_cast<int>(hubCell.DistanceFrom(bestCell)) : -1, slotCell.X, slotCell.Y,
-				slotMissed ? 1 : 0, Unsorted::CurrentFrame);
+				slotMissed ? 1 : 0, st.RefinerySlotAimed ? 1 : 0, Unsorted::CurrentFrame);
 		}
 
 		// TEMP diagnostic: where a long-range gun with a dead zone goes, and whether a point-blank
