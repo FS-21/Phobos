@@ -2906,7 +2906,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// A missing building we cannot build yet brings its own missing ones (a tech center that needs a
 		// radar first).
 		std::vector<int> crossingPrerequisites;
-		const char* crossingNeedName = nullptr;
 
 		if (auto& crossingMacro = GetMacroState(pHouse); crossingMacro.CrossingNeedFrame >= 0
 			&& Unsorted::CurrentFrame >= crossingMacro.CrossingNeedFrame
@@ -2947,35 +2946,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					fewestMissing = missing.size();
 					crossingPrerequisites = std::move(missing);
-					crossingNeedName = pType->ID;
 				}
 			}
 
 			if (crossingBuildable)
-			{
 				crossingPrerequisites.clear();
-				crossingNeedName = nullptr;
-			}
-
-			// TEMP diagnostic: what a crossing waits for and which buildings it asks for.
-			if (crossingNeedName && Unsorted::CurrentFrame - crossingMacro.CrossingNeedLogFrame >= CrossingNeedLogFrames)
-			{
-				crossingMacro.CrossingNeedLogFrame = Unsorted::CurrentFrame;
-				std::string names;
-
-				for (const int idx : crossingPrerequisites)
-				{
-					if (idx >= 0 && idx < BuildingTypeClass::Array.Count)
-					{
-						names += names.empty() ? "" : ",";
-						names += BuildingTypeClass::Array.GetItem(idx)->ID;
-					}
-				}
-
-				Debug::Log("[NeuralAI] House %d crossing need DIAG: a crossing waits for %s (%d types noted); asks for %s; frame %d.\n",
-					pHouse->ArrayIndex, crossingNeedName, static_cast<int>(crossingMacro.CrossingNeedTypes.size()), names.c_str(),
-					Unsorted::CurrentFrame);
-			}
 		}
 
 		// The island expansion's saving hold lets these buildings through (UpdateEconomyCrisis).
@@ -3651,13 +3626,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (isDeadZoneTower)
 					{
 						auto& gunMacro = GetMacroState(pHouse);
-
-						// TEMP diagnostic: the first request of each stretch.
-						if (Unsorted::CurrentFrame - gunMacro.DefensePowerWantedFrame > DefensePowerWantedFrames)
-						{
-							Debug::Log("[NeuralAI] House %d long-range tower DIAG: %s waits for power alone, surplus %d of %d wanted, frame %d.\n",
-								pHouse->ArrayIndex, pBld->ID, realPowerSurplus, pBld->PowerDrain + PoweredDefenseSurplusMargin, Unsorted::CurrentFrame);
-						}
 
 						gunMacro.DefensePowerWanted = pBld->PowerDrain + PoweredDefenseSurplusMargin;
 						gunMacro.DefensePowerWantedFrame = Unsorted::CurrentFrame;
@@ -6661,38 +6629,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					pHouse->ArrayIndex, pType->ID, pHouse->Available_Money(), factories,
 					static_cast<int>(pHouse->CanBuild(pType, false, false)), pFactoryBld ? pFactoryBld->Type->ID : "none",
 					pHouse->ProducingUnitTypeIndex, pHouse->ProducingInfantryTypeIndex, pHouse->ProducingBuildingTypeIndex, pickNow);
-
-				// TEMP diagnostic: every factory building of the queue (primary flag, mission, power,
-				// retry timer, its factory object and progress).
-				std::string factoryStates;
-				int listed = 0;
-
-				for (auto const pOwnBld : pHouse->Buildings)
-				{
-					if (!pOwnBld || !pOwnBld->IsAlive || pOwnBld->InLimbo || !pOwnBld->Type || pOwnBld->Type->Factory != kind
-						|| pOwnBld->Type->Naval || listed >= 8)
-					{
-						continue;
-					}
-
-					char entry[192];
-					auto const pBldFactory = pOwnBld->Factory;
-					_snprintf_s(entry, _TRUNCATE, " %s%s[mission %d power %d emp %d off %d timer %d factory %s obj %s rate %d step %d susp %d hold %d]",
-						pOwnBld->Type->ID, pOwnBld->IsPrimaryFactory ? "*" : "", static_cast<int>(pOwnBld->CurrentMission),
-						pOwnBld->HasPower ? 1 : 0, pOwnBld->IsUnderEMP() ? 1 : 0, pOwnBld->Deactivated ? 1 : 0,
-						pOwnBld->FactoryRetryTimer.GetTimeLeft(), pBldFactory ? "yes" : "no",
-						(pBldFactory && pBldFactory->Object) ? pBldFactory->Object->GetTechnoType()->ID : "none",
-						pBldFactory ? pBldFactory->Production.Rate : -1, pBldFactory ? pBldFactory->Production.Value : -1,
-						(pBldFactory && pBldFactory->IsSuspended) ? 1 : 0, (pBldFactory && pBldFactory->OnHold) ? 1 : 0);
-					factoryStates += entry;
-					++listed;
-				}
-
-				auto const pFreeFactory = pType->FindFactory(false, true, true, pHouse);
-				auto const pAnyFactory = pType->FindFactory(true, false, false, pHouse);
-				Debug::Log("[NeuralAI] House %d production DIAG: %s factories:%s; production %d, low power %d, free factory %s, any factory %s.\n",
-					pHouse->ArrayIndex, pType->ID, factoryStates.c_str(), pHouse->Production ? 1 : 0, pHouse->HasLowPower() ? 1 : 0,
-					pFreeFactory ? pFreeFactory->Type->ID : "none", pAnyFactory ? pAnyFactory->Type->ID : "none");
 			}
 
 			CountDecision(NeuralDecision::ProductionPickBanned, pHouse->ArrayIndex);
@@ -7023,60 +6959,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			pHouse->ArrayIndex, pExt->NeuralAI_Archetype, ownedFrontLineVehicles, ownedArtilleryVehicles, artilleryAllowance,
 			ownedAntiAirVehicles, wantedAntiAirEscorts, pHouse->CountResourceDestinations, tankMass ? TankMassWaveUnits(pHouse) : 0,
 			WaveLessonStepsNow(pHouse));
-
-		// TEMP diagnostic, stalled production (match #7132: Yuri with 230000-290000 credits spent
-		// almost nothing for 40 minutes, 17 units, never finished the last enemy): with 20000+ credits
-		// and nothing spent for 2700 frames, what each factory holds and the power. Telemetry only.
-		static std::array<int, 32> stallSpent {};
-		static std::array<int, 32> stallSinceFrame {};
-		static std::array<int, 32> stallSerial {};
-		const int stallIdx = std::clamp(pHouse->ArrayIndex, 0, 31);
-		const int nowFrame = Unsorted::CurrentFrame;
-
-		if (stallSerial[stallIdx] != NeuralMatchSerial || pHouse->CreditsSpent != stallSpent[stallIdx] || nowFrame < stallSinceFrame[stallIdx])
-		{
-			stallSerial[stallIdx] = NeuralMatchSerial;
-			stallSpent[stallIdx] = pHouse->CreditsSpent;
-			stallSinceFrame[stallIdx] = nowFrame;
-		}
-		else if (money >= 20000 && nowFrame - stallSinceFrame[stallIdx] >= 2700)
-		{
-			std::string factories;
-			auto const describe = [&](const char* tag, AbstractType kind, bool naval, BuildCat cat)
-			{
-				auto const pFactory = pHouse->GetPrimaryFactory(kind, naval, cat);
-				char part[160];
-
-				if (!pFactory)
-				{
-					std::snprintf(part, sizeof(part), " %s=none", tag);
-				}
-				else
-				{
-					auto const pObject = pFactory->Object;
-					std::snprintf(part, sizeof(part), " %s=%s/%d%%%s%s%s", tag,
-						pObject && pObject->GetTechnoType() ? pObject->GetTechnoType()->ID : "empty",
-						pFactory->GetProgress() * 100 / 54, pFactory->OnHold ? " onhold" : "",
-						pFactory->IsSuspended ? " suspended" : "", pFactory->IsDone() ? " done" : "");
-				}
-
-				factories += part;
-			};
-
-			describe("bld", AbstractType::BuildingType, false, BuildCat::DontCare);
-			describe("def", AbstractType::BuildingType, false, BuildCat::Combat);
-			describe("unit", AbstractType::UnitType, false, BuildCat::DontCare);
-			describe("naval", AbstractType::UnitType, true, BuildCat::DontCare);
-			describe("inf", AbstractType::InfantryType, false, BuildCat::DontCare);
-			describe("air", AbstractType::AircraftType, false, BuildCat::DontCare);
-
-			auto const& stallMacro = GetMacroState(pHouse);
-			Debug::Log("[NeuralAI] Production stall | House #%d | %d frames without spending, %d credits | power %d/%d%s | broke %d dry %d "
-				"| next bld %s unit %s inf %s |%s\n",
-				pHouse->ArrayIndex, nowFrame - stallSinceFrame[stallIdx], money, pHouse->PowerOutput, pHouse->PowerDrain,
-				pHouse->HasLowPower() ? " LOW" : "", stallMacro.BrokeHoldActive ? 1 : 0, stallMacro.DryEconomyActive ? 1 : 0, bldName,
-				unitName, infName, factories.c_str());
-		}
 	}
 
 	return evalDelay;

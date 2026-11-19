@@ -1113,7 +1113,6 @@ namespace
 		// to make it, none of them owned. The production builds the buildings they lack, then one of them.
 		std::vector<const TechnoTypeClass*> CrossingNeedTypes {};
 		int CrossingNeedFrame { -1 };
-		int CrossingNeedLogFrame { -100000 };
 		// The other economic investments the production wants and cannot pay yet (0 when none): a
 		// harvester while we have fewer than refineries, a refinery for a newly reached field.
 		int HarvesterSaveTarget { 0 };
@@ -1356,9 +1355,8 @@ namespace
 		int OpWaitingFrame { -1 };
 		int TransportOpLogFrame { -1 };
 		// Engineer claims (EngineerClaim*): the building each engineer of ours was sent to capture by the
-		// generic capture choice, and when; and the TEMP diagnostic's lines this match.
+		// generic capture choice, and when.
 		std::unordered_map<DWORD, std::pair<DWORD, int>> EngineerCaptureTargets;
-		int EngineerClaimLogCount { 0 };
 		std::vector<NeuralOpUnitWatch> OpWatch;
 		// Where transports of the operations were lost, with the frame and whether they flew: the
 		// routes of the next crossings keep away from there (PlanOpRoute).
@@ -1719,7 +1717,6 @@ namespace
 			this->IslandMcvPrerequisites.clear();
 			this->CrossingNeedTypes.clear();
 			this->CrossingNeedFrame = -1;
-			this->CrossingNeedLogFrame = -100000;
 			this->HarvesterSaveTarget = 0;
 			this->RefinerySaveTarget = 0;
 			this->EconomyHoldSince = -1;
@@ -1817,7 +1814,6 @@ namespace
 			this->WaveGroupFrame = -100000;
 			this->TransportOps.clear();
 			this->EngineerCaptureTargets.clear();
-			this->EngineerClaimLogCount = 0;
 			this->NextTransportOpId = 1;
 			this->TransportOpOf.clear();
 			this->TransportOpRetryUntil.clear();
@@ -2211,7 +2207,6 @@ namespace
 	// buildings the transport that would make it lacks, and then that transport, get these bonuses in
 	// the production.
 	constexpr int CrossingNeedFrames = 3600;
-	constexpr int CrossingNeedLogFrames = 1800;
 	constexpr int CrossingPrerequisiteBonus = 1200;
 	constexpr int CrossingTransportBonus = 1100;
 	constexpr double OpTransportMinHealth = 0.5;
@@ -2996,7 +2991,6 @@ namespace
 	// inland from where it stands, towards its old goal, off the landing.
 	constexpr int EngineerClaimFrames = 900;
 	constexpr int EngineerLandingStepCells = 6;
-	constexpr int EngineerClaimLogLines = 30;
 
 	constexpr int DetectionNeedBlind = 1;
 	constexpr int DetectionNeedStealth = 2;

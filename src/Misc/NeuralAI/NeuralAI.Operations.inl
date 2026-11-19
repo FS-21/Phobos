@@ -1632,13 +1632,6 @@ namespace
 						== MapClass::Instance.GetMovementZoneType(at, pType->MovementZone, pFoot->OnBridge)
 					&& IssueMoveOrder(pFoot, pCell, 1.5))
 				{
-					// TEMP diagnostic (engineer claims): the engineers set down with nothing left to take.
-					if (macro.EngineerClaimLogCount++ < EngineerClaimLogLines)
-					{
-						Debug::Log("[NeuralAI] House %d transport op %d: %s %u set down at (%d,%d) with its capture no longer to make, walks off the landing to (%d,%d), frame %d.\n",
-							pHouse->ArrayIndex, op.Id, pType->ID, member.UniqueID, at.X, at.Y, to.X, to.Y, Unsorted::CurrentFrame);
-					}
-
 					return;
 				}
 			}
@@ -2415,13 +2408,10 @@ namespace
 					centre = at;
 			}
 
-			int clearance = 9999;
-			const char* rule = "outskirts";
-			CellClass* pStaging = FindBoardingCell(pHouse, centre, op.OriginZone, op.Landing, nullptr, &clearance);
+			CellClass* pStaging = FindBoardingCell(pHouse, centre, op.OriginZone, op.Landing, nullptr);
 
 			if (!pStaging)
 			{
-				rule = "coast fallback";
 				pStaging = FindSafeIslandLandingCell(pHouse, centre, op.OriginZone, false);
 
 				// A coast no transport of the house sails from to the landing: the members walked up to a
@@ -2474,17 +2464,6 @@ namespace
 				if (moved != CellStruct::Empty)
 					op.Gather = moved;
 			}
-
-			// TEMP diagnostic: how far the members walk to board, and how far from our buildings.
-			double farthest = 0.0;
-
-			for (auto const& at : memberCells)
-				farthest = std::max(farthest, at.DistanceFrom(op.Staging));
-
-			Debug::Log("[NeuralAI] House %d transport op %d staging DIAG: (%d,%d) by %s, %d cells from the members at (%d,%d) (%d waiting, "
-				"farthest %d), nearest building %d, gathering at (%d,%d), landing (%d,%d), frame %d.\n",
-				houseIndex, op.Id, op.Staging.X, op.Staging.Y, rule, static_cast<int>(op.Staging.DistanceFrom(centre)), centre.X, centre.Y,
-				count, static_cast<int>(farthest), clearance, op.Gather.X, op.Gather.Y, op.Landing.X, op.Landing.Y, now);
 		}
 
 		auto const pStagingCell = MapClass::Instance.TryGetCellAt(op.Staging);
@@ -3176,25 +3155,6 @@ namespace
 		else if (op.BoardingSince >= 0 && now - op.BoardingSince >= 2 * OpBoardingCapFrames && op.LastBoardFrame < op.BoardingSince
 			&& aboardCount == 0)
 		{
-			// TEMP diagnostic: why nobody went aboard a transport parked this long.
-			for (auto const& member : op.Members)
-			{
-				auto const pRecord = member.Transport ? recordOf(member.Transport) : nullptr;
-
-				if (!pRecord || pRecord->Leg != NeuralOpLeg::Parked)
-					continue;
-
-				auto const pFoot = find(member.UniqueID);
-				auto const pTransport = find(pRecord->UniqueID);
-				auto const pRefusal = BoardingRefusal(pTransport, pFoot);
-				Debug::Log("[NeuralAI] House %d transport op %d boarding DIAG: %s %u %d leptons from %s %u (mission %d, height %d, moving %d, "
-					"destination %d), its mission %d, refusal: %s, frame %d.\n", houseIndex, op.Id, pFoot->GetTechnoType()->ID, pFoot->UniqueID,
-					pFoot->DistanceFrom(pTransport), pTransport->GetTechnoType()->ID, pTransport->UniqueID,
-					static_cast<int>(pTransport->CurrentMission), pTransport->GetHeight(), pTransport->Locomotor->Is_Moving() ? 1 : 0,
-					pTransport->Destination ? 1 : 0, static_cast<int>(pFoot->CurrentMission), pRefusal ? pRefusal : "none", now);
-				break;
-			}
-
 			endOp("nobody boarded", true);
 			return;
 		}
@@ -3976,11 +3936,6 @@ namespace
 		const int size = std::max(1, static_cast<int>(pSample->GetTechnoType()->Size));
 		int rides = 0;
 		int seats = 0;
-		// TEMP diagnostic: why the transports of ours that carry a harvester are no ride (in a transport
-		// operation, in another job or unsound, no crossing from the harvesters' land to the field).
-		int inOperation = 0;
-		int otherwiseBusy = 0;
-		int noCrossing = 0;
 
 		auto const considerRide = [&](FootClass* pFoot)
 		{
@@ -3993,22 +3948,12 @@ namespace
 				return;
 
 			if (!IsTransportFreeForOp(pHouse, pFoot, carrier))
-			{
-				if (IsInTransportOp(pHouse, pFoot->UniqueID))
-					inOperation++;
-				else
-					otherwiseBusy++;
-
 				return;
-			}
 
 			auto const pType = pFoot->GetTechnoType();
 
 			if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), sampleCell) || !CanTransportTypeLink(pType, sampleCell, pLanding->MapCoords))
-			{
-				noCrossing++;
 				return;
-			}
 
 			rides++;
 			seats += carrier == OpCarrier::Carryall ? 1 : pType->Passengers / size;
@@ -4026,9 +3971,8 @@ namespace
 			{
 				macro.ShuttleNoRideLogFrame = now;
 				Debug::Log("[NeuralAI] House %d shuttle: %d idle harvesters on zone %d, no idle transport takes one to the field at (%d,%d) "
-					"zone %d (home ore %d); transports that carry one: %d in transport operations, %d busy otherwise or unsound, %d with "
-					"no crossing there; %d credits, frame %d.\n", pHouse->ArrayIndex, static_cast<int>(harvesters.size()), homeZone, field.X,
-					field.Y, fieldZone, macro.IslandHomeOre, inOperation, otherwiseBusy, noCrossing, pHouse->Available_Money(), now);
+					"zone %d (home ore %d); %d credits, frame %d.\n", pHouse->ArrayIndex, static_cast<int>(harvesters.size()), homeZone, field.X,
+					field.Y, fieldZone, macro.IslandHomeOre, pHouse->Available_Money(), now);
 			}
 
 			return;
