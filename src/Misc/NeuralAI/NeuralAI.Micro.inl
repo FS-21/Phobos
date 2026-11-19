@@ -897,6 +897,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return true;
 		}
 
+		// A repairer stays with the vehicles on its own ground (Repairer*): no crossing for it.
+		if (auto const pRepairer = abstract_cast<UnitClass*>(pFoot); pRepairer && IsRepairerUnit(pRepairer))
+			return false;
+
 		// The transport operations manager takes it across (user: a removal company apart from the
 		// client); the unit's client gives it its order again once it stands on the target's ground.
 		if (TransportOpsEnabled)
@@ -5396,6 +5400,155 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		const auto pPrimaryWpn = pType->GetWeapon(0) ? pType->GetWeapon(0)->WeaponType : nullptr;
 
+		// Repairers (Repairer*: a repair vehicle, an IFV with an engineer aboard) go with our vehicles as
+		// the medics go with the soldiers. Repairing first: a damaged own or allied vehicle (or one a
+		// parasite eats) on its ground within RepairerHealCells, whatever it was doing. Else it follows the
+		// nearest own armed vehicle on the move or in a fight on its ground (RepairerEscortMost repairers
+		// per vehicle at most; the one followed now is kept while it still is), keeping within
+		// RepairerEscortKeepCells of it; with nobody out it stays where it is. Every order is direct: no
+		// transport operation for a repair across water (one was opened for a TSREPAIR, 2026-11-19).
+		if (IsRepairerUnit(pUnit))
+		{
+			auto const pRepairTarget = abstract_cast<TechnoClass*>(pUnit->Target);
+
+			if (pRepairTarget && pRepairTarget->IsAlive && !pRepairTarget->InLimbo && pRepairTarget->Owner
+				&& pHouse->IsAlliedWith(pRepairTarget->Owner) && pRepairTarget->GetHealthPercentage() < 1.0)
+			{
+				continue;
+			}
+
+			const int repairerZone = ObjectZone(pUnit, MovementZone::Normal);
+			auto const onRepairerGround = [repairerZone](const ObjectClass* pOther)
+			{
+				return repairerZone < 0 || ObjectZone(pOther, MovementZone::Normal) == repairerZone;
+			};
+			auto& repairerMacro = GetMacroState(pHouse);
+			UnitClass* pDamaged = nullptr;
+			int damagedDist = INT_MAX;
+
+			for (auto const pAllyU : UnitClass::Array)
+			{
+				if (!pAllyU || pAllyU == pUnit || !pAllyU->Owner || !pHouse->IsAlliedWith(pAllyU->Owner) || pAllyU->InLimbo
+					|| !pAllyU->IsAlive || !pAllyU->Type || pAllyU->Type->Organic || pAllyU->IsInAir()
+					|| (pAllyU->ParasiteEatingMe == nullptr && pAllyU->GetHealthPercentage() >= 0.85))
+				{
+					continue;
+				}
+
+				// One a parasite eats from as far as the de-parasiting rule (Slot 64) went: 16 cells.
+				const int dist = pUnit->DistanceFrom(pAllyU);
+				const int reach = pAllyU->ParasiteEatingMe ? 16 * Unsorted::LeptonsPerCell : RepairerHealCells * Unsorted::LeptonsPerCell;
+
+				if (dist <= reach && dist < damagedDist && onRepairerGround(pAllyU) && HealingWeaponFor(pUnit, pAllyU))
+				{
+					damagedDist = dist;
+					pDamaged = pAllyU;
+				}
+			}
+
+			if (pDamaged)
+			{
+				pUnit->ClearMegaMissionData();
+				pUnit->SetTarget(pDamaged);
+				pUnit->QueueMission(Mission::Attack, true);
+				NoteOrderCaller(pUnit, "repair");
+
+				// TEMP diagnostic: the repairers' orders (RepairerLogLines per house and match).
+				if (repairerMacro.RepairerLogCount < RepairerLogLines)
+				{
+					repairerMacro.RepairerLogCount++;
+					Debug::Log("[NeuralAI] Frame %d | House #%d repairer %s %u repairs %s %u at %d%% %d cells away\n", Unsorted::CurrentFrame,
+						pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pDamaged->Type->ID, pDamaged->UniqueID,
+						static_cast<int>(pDamaged->GetHealthPercentage() * 100.0), damagedDist / Unsorted::LeptonsPerCell);
+				}
+
+				continue;
+			}
+
+			auto const isEscortable = [&](UnitClass* pOther) -> bool
+			{
+				if (!pOther || pOther == pUnit || pOther->Owner != pHouse || pOther->InLimbo || !pOther->IsAlive || !pOther->Type
+					|| pOther->Type->Naval || pOther->Type->Harvester || pOther->Type->ResourceGatherer
+					|| !pOther->Type->GetWeapon(0) || !pOther->Type->GetWeapon(0)->WeaponType || IsRepairerUnit(pOther)
+					|| IsInTransportOp(pHouse, pOther->UniqueID) || !onRepairerGround(pOther))
+				{
+					return false;
+				}
+
+				const Mission mission = pOther->GetCurrentMission();
+
+				return mission == Mission::Move || mission == Mission::AttackMove || mission == Mission::Attack || mission == Mission::Hunt;
+			};
+
+			if (isEscortable(abstract_cast<UnitClass*>(pUnit->Destination)))
+				continue;
+
+			// Repairers already following each vehicle, counted once per tick and house.
+			static int repairersFollowingFrame = -1;
+			static int repairersFollowingHouse = -1;
+			static std::unordered_map<DWORD, int> repairersFollowing;
+
+			if (repairersFollowingFrame != Unsorted::CurrentFrame || repairersFollowingHouse != pHouse->ArrayIndex)
+			{
+				repairersFollowingFrame = Unsorted::CurrentFrame;
+				repairersFollowingHouse = pHouse->ArrayIndex;
+				repairersFollowing.clear();
+
+				for (auto const pRepairer : UnitClass::Array)
+				{
+					if (pRepairer && pRepairer->Owner == pHouse && !pRepairer->InLimbo && pRepairer->IsAlive && IsRepairerUnit(pRepairer))
+					{
+						if (auto const pFollowedVehicle = abstract_cast<UnitClass*>(pRepairer->Destination))
+							repairersFollowing[pFollowedVehicle->UniqueID]++;
+					}
+				}
+			}
+
+			UnitClass* pEscorted = nullptr;
+			int escortDist = INT_MAX;
+
+			for (auto const pOwnU : UnitClass::Array)
+			{
+				if (!isEscortable(pOwnU))
+					continue;
+
+				const int dist = pUnit->DistanceFrom(pOwnU);
+
+				if (dist >= escortDist)
+					continue;
+
+				auto const itFollowing = repairersFollowing.find(pOwnU->UniqueID);
+				const int repairersWithIt = (itFollowing != repairersFollowing.end() ? itFollowing->second : 0)
+					- (pUnit->Destination == pOwnU ? 1 : 0);
+
+				if (repairersWithIt >= RepairerEscortMost)
+					continue;
+
+				escortDist = dist;
+				pEscorted = pOwnU;
+			}
+
+			if (pEscorted && escortDist > RepairerEscortKeepCells * Unsorted::LeptonsPerCell && pUnit->Destination != pEscorted)
+			{
+				pUnit->ClearMegaMissionData();
+				pUnit->SetTarget(nullptr);
+				pUnit->SetDestination(pEscorted, true);
+				pUnit->QueueMission(Mission::Move, false);
+				NoteOrderCaller(pUnit, "move");
+				repairersFollowing[pEscorted->UniqueID]++;
+
+				if (repairerMacro.RepairerLogCount < RepairerLogLines)
+				{
+					repairerMacro.RepairerLogCount++;
+					Debug::Log("[NeuralAI] Frame %d | House #%d repairer %s %u follows %s %u (mission %d) %d cells away\n", Unsorted::CurrentFrame,
+						pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pEscorted->Type->ID, pEscorted->UniqueID,
+						static_cast<int>(pEscorted->GetCurrentMission()), escortDist / Unsorted::LeptonsPerCell);
+				}
+			}
+
+			continue;
+		}
+
 		// Slot 82 (Engineer ConYard Heist Cease-Fire): If our tank is firing at an
 		// enemy ConYard that is already in red health (< 35% HP) while our own
 		// Engineer is within 10 cells moving in to capture it, hold fire on the
@@ -6535,30 +6688,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 			}
-		}
-
-		// Field Repair Vehicles (Repair IFV / Mobile Mechanic / Support Drone where
-		// Damage < 0): Heal damaged own OR allied vehicles in the field!
-		if (pPrimaryWpn && pPrimaryWpn->Damage < 0 && isUnitIdle)
-		{
-			for (auto const pAllyU : UnitClass::Array)
-			{
-				if (!pAllyU || pAllyU == pUnit || !pAllyU->Owner || !pHouse->IsAlliedWith(pAllyU->Owner)
-					|| pAllyU->InLimbo || !pAllyU->IsAlive || !pAllyU->Type || pAllyU->Type->Organic)
-				{
-					continue;
-				}
-
-				if ((pAllyU->ParasiteEatingMe != nullptr || pAllyU->GetHealthPercentage() < 0.85)
-					&& pUnit->DistanceFrom(pAllyU) <= 3584)
-				{
-					DispatchFootToTargetOrTransport(pUnit, pAllyU, Mission::Attack, true);
-
-					break;
-				}
-			}
-
-			continue;
 		}
 
 		// Yuri Floating Disc (DrainWeapon=yes): Prioritize draining Enemy
@@ -9206,8 +9335,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
 			continue;
 
+		// Repairers follow the vehicles on their own (Repairer*): no wave or push takes them.
 		if (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
-			|| (pUnit->Type->DeploysInto && pUnit->Type->DeploysInto->ConstructionYard))
+			|| (pUnit->Type->DeploysInto && pUnit->Type->DeploysInto->ConstructionYard) || IsRepairerUnit(pUnit))
 		{
 			continue;
 		}

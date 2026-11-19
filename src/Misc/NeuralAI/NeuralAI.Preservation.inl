@@ -232,13 +232,13 @@ namespace
 	}
 
 	// The weapon of pHealer that heals pPatient (negative damage, a warhead that works on its
-	// armor), or nullptr. Read from the unit, not its type: an IFV's weapon comes from its passenger.
+	// armor), or nullptr. Read from the unit, not its type: an IFV's weapon comes from its passenger
+	// (TechnoExt::GetCurrentWeapon: GetWeapon(0) of an FV with an engineer aboard is its missile).
 	WeaponTypeClass* HealingWeaponFor(TechnoClass* pHealer, TechnoClass* pPatient)
 	{
 		for (int i = 0; i < 2; ++i)
 		{
-			auto const pWS = pHealer->GetWeapon(i);
-			auto const pW = pWS ? pWS->WeaponType : nullptr;
+			auto const pW = TechnoExt::GetCurrentWeapon(pHealer, pHealer->GetTechnoType(), i == 1);
 
 			if (!pW || pW->Damage >= 0 || !pW->Warhead || (pW->Projectile && !pW->Projectile->AG))
 				continue;

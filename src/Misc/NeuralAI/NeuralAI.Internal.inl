@@ -2376,6 +2376,60 @@ namespace
 		return heals;
 	}
 
+	// A vehicle that only repairs now (Repairer*): every weapon it holds does negative damage, a repair
+	// vehicle (TSREPAIR) or an IFV with an engineer aboard (FV). Read from the unit: an IFV's weapon is its
+	// passenger's (TechnoExt::GetCurrentWeapon). NeverUse weapons never fire and do not count.
+	bool IsRepairerUnit(UnitClass* pUnit)
+	{
+		if (!pUnit || !pUnit->Type)
+			return false;
+
+		bool repairs = false;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWeapon = TechnoExt::GetCurrentWeapon(pUnit, pUnit->Type, i == 1);
+
+			if (!pWeapon || pWeapon->NeverUse)
+				continue;
+
+			if (pWeapon->Damage > 0)
+				return false;
+
+			if (pWeapon->Damage < 0)
+				repairs = true;
+		}
+
+		return repairs;
+	}
+
+	// A vehicle type built as a repairer (Repairer*): no IFV (its weapon comes from its passenger), every
+	// weapon of the type does negative damage.
+	bool IsRepairerUnitType(UnitTypeClass* pType)
+	{
+		if (!pType || pType->Gunner)
+			return false;
+
+		bool repairs = false;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWS = pType->GetWeapon(i);
+			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+			if (!pWeapon || pWeapon->NeverUse)
+				continue;
+
+			if (pWeapon->Damage > 0)
+				return false;
+
+			if (pWeapon->Damage < 0)
+				repairs = true;
+		}
+
+		return repairs;
+	}
+
 	// A specialist of this type has a job inside this building (it enters it): engineers capture,
 	// spies infiltrate.
 	bool SpecialistWorksBuilding(const InfantryTypeClass* pType, const BuildingTypeClass* pBldType)

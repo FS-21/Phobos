@@ -3170,7 +3170,7 @@ namespace
 				if (!pType || pFoot->WhatAmI() == AbstractType::Aircraft || pType->Naval || IsAirborneThreatTechno(pFoot)
 					|| (pUnit && (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
 						|| (pUnit->Type->DeploysInto && !(allowSiegeDeployers && IsDeployableSiegeUnitType(pUnit->Type)))
-						|| IsAmphibiousOrAirTransport(pUnit->Type)))
+						|| IsAmphibiousOrAirTransport(pUnit->Type) || IsRepairerUnit(pUnit)))
 					|| !isFreeForPlan(pFoot)
 					|| ObjectZone(pFoot, MovementZone::Normal) != homeZone)
 				{

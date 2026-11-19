@@ -905,7 +905,7 @@ namespace
 		{
 			if (pUnit && isIdleGround(pUnit, pUnit->Type) && !pUnit->Type->Harvester && !pUnit->Type->ResourceGatherer
 				&& !pUnit->Type->DeploysInto && !IsAmphibiousOrAirTransport(pUnit->Type) && pUnit->Passengers.NumPassengers == 0
-				&& !macro.TankGuard.contains(pUnit->UniqueID))
+				&& !macro.TankGuard.contains(pUnit->UniqueID) && !IsRepairerUnit(pUnit))
 			{
 				ground.push_back(MakeScoutUnit(pUnit, false));
 			}

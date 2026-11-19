@@ -4253,6 +4253,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedLightVehicles = 0;
 	DWORD newestTankOrLightUid = 0;
 	bool newestTankOrLightIsLight = false;
+	// Repairers of ours (IsRepairerUnit: an IFV with an engineer too), within ownedGroundCombatUnits.
+	int ownedRepairerVehicles = 0;
 	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
 	// (the rest of ownedGroundCombatUnits is their front line).
 	int ownedArtilleryVehicles = 0;
@@ -4335,6 +4337,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				else if (pOwnedWpn != nullptr)
 				{
 					ownedGroundCombatUnits++;
+
+					if (IsRepairerUnit(pOwnedU))
+						ownedRepairerVehicles++;
 
 					if (IsMainBattleTankType(pOwnedType))
 						ownedMainTanks++;
@@ -5388,6 +5393,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (!isUnitInProgress && !IsUnitTierAllowed(pHouse, pUnit))
 			continue;
+
+		// Repairers are support (Repairer*): one for each RepairerPerVehicles armed ground vehicles of ours.
+		if (!isUnitInProgress && IsRepairerUnitType(pUnit)
+			&& (ownedRepairerVehicles + 1) * RepairerPerVehicles > ownedGroundCombatUnits - ownedRepairerVehicles)
+		{
+			continue;
+		}
 
 		const bool isMCV = (pUnit->DeploysInto && pUnit->DeploysInto->ConstructionYard);
 		if (isMCV)
