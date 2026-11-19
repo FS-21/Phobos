@@ -2794,10 +2794,13 @@ namespace
 	// class weight (slot 25) was the lowest of the five (arch 0: 1629 against 1981 tank, 2069 anti-air, 2791
 	// artillery, 3328 transport), a gap the counters (up to 900) do not close. With LightComplementMinTanks
 	// main battle tanks or more, a house keeps one armed light vehicle (no main battle tank, artillery,
-	// anti-air or transport) for each LightComplementPerTanks of them: below that, and not below the tank
-	// floor, the best scored light vehicle goes ahead of the pick (the counters choose which: one good
-	// against what the enemy fields), with the tank floor's exceptions (no income, a pick that restores it,
-	// an attack from the air alone).
+	// anti-air, transport or repairer) for each LightComplementPerTanks of them: below that the best scored
+	// light vehicle goes ahead of the pick (the counters choose which: one good against what the enemy
+	// fields), with the tank floor's exceptions (no income, a pick that restores it, an attack from the air
+	// alone). Below the tank floor as well the two alternate (user, 2026-11-19): the light vehicle goes
+	// first when the newest of our main battle tanks and light vehicles is a tank. In 8 matches of 97af3a23a
+	// the floor kept the light vehicle out in 136 of 230 checks below it (59%), the light went first in 32.
+	// A repairer (negative damage: TSREPAIR) passed for armed and took the light vehicle's place.
 	constexpr int LightComplementMinTanks = 3;
 	constexpr int LightComplementPerTanks = 3;
 	// Tank guard (user: the floor's tanks guard the base or patrol for siege units near our bases and
