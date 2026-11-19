@@ -360,6 +360,7 @@
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Air.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Preservation.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Bridges.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.WaitCells.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Counters.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Diplomacy.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Defense.inl" />
