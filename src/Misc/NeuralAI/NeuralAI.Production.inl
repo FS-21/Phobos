@@ -4902,6 +4902,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			|| pHouse->OwnedUnits >= 3);
 	const bool needsCrossIslandMCV = islandOreRunningOut
 		|| (features[21] > 0 && !hasFreeHomeLandField && (features[19] == 0 || pHouse->NumConYards >= 1));
+	// An island expansion MCV that unfolded while no ride came (land before islands, Micro) is the
+	// island's MCV: it packs up when a transport is free, so no other one is built for the crossing.
+	const bool islandMcvWaitsAsYard = needsCrossIslandMCV && PruneIslandWaitYards(pHouse) > 0;
 
 	// Island expansion is one more airlift job when a carryall may lift the MCV (or a spare
 	// harvester for the new island's resources): mods can forbid it with Carryall.Allowed=no.
@@ -4924,7 +4927,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& (!needsCrossIslandMCV || ownedHeavyIslandTransports >= 1 || canFerryAnyMCVAcrossWater)
 			&& (features[19] < 24 || pHouse->Buildings.Count >= 14 || wantsArchipelagoExpansion || SlotGate(scores[81], 85, 81)));
 	const bool canSafelySaveForExpansionMCV
-		= (pHouse->NumConYards >= 1 && pHouse->NumConYards < maxAllowedConYards && !ownsUndeployedMCV
+		= (pHouse->NumConYards >= 1 && pHouse->NumConYards < maxAllowedConYards && !ownsUndeployedMCV && !islandMcvWaitsAsYard
 			&& (features[20] > 6 || hasUncolonizedIslandTarget || fieldsRunningDry)
 			&& (scores[30] >= 450 || wantsArchipelagoExpansion || fieldsRunningDry || islandOreRunningOut)
 			&& (!needsCrossIslandMCV || ownedHeavyIslandTransports >= 1 || canFerryAnyMCVAcrossWater)
@@ -5430,7 +5433,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			if (pHouse->NumConYards >= 1 && needsCrossIslandMCV
 				&& (!CanHouseFerryTypeAcrossWater(pHouse, pUnit)
-					|| (!isSelfAmphibOrAirMcv && ownedHeavyIslandTransports == 0 && !ownsCarryallLifting(pUnit))))
+					|| (!isSelfAmphibOrAirMcv && ownedHeavyIslandTransports == 0 && !ownsCarryallLifting(pUnit))
+					|| (islandMcvWaitsAsYard && !bankWantsYard)))
 			{
 				continue;
 			}

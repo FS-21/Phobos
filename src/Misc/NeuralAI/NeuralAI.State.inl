@@ -726,6 +726,18 @@ namespace
 		CellStruct Goal { CellStruct::Empty };
 	};
 
+	// Expansion MCV waiting for a ride to the island goal (Micro): since when it waits with no ride on
+	// the way, the free field of its own landmass it took instead once the wait ran out, and whether
+	// the land rule gave it its order (the idle MCV watchdog follows it from then on).
+	struct NeuralIslandMcvWait
+	{
+		int SinceFrame { -1 };
+		int SeenFrame { -1 };
+		CellStruct LandField { CellStruct::Empty };
+		int LandFrame { -1 };
+		bool Released { false };
+	};
+
 	struct NeuralHouseMacroState
 	{
 		CellStruct PendingClearanceCell { CellStruct::Empty };
@@ -1049,6 +1061,13 @@ namespace
 		std::unordered_map<DWORD, int> DeployerNoSiteSince;
 		// Packed MCVs the idle watchdog follows (unit -> NeuralMcvIdle).
 		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
+		// Expansion MCVs waiting for a ride to the island goal (unit -> NeuralIslandMcvWait).
+		std::unordered_map<DWORD, NeuralIslandMcvWait> IslandMcvWaits;
+		// Yards an island expansion MCV unfolded while no ride came (cell, frame): they pack up for the
+		// island once an idle transport able to make the crossing is ours.
+		std::vector<std::pair<CellStruct, int>> IslandWaitYards;
+		// Frame one of those yards last packed up for the island.
+		int IslandWaitPackFrame { -1 };
 		// Wounded units (unit -> frame since) that stopped on resource cells that heal them.
 		std::unordered_map<DWORD, int> ResourceHealSince;
 		// The enemy has no building left that counts and still has ships or submarines: until this
@@ -1676,6 +1695,9 @@ namespace
 			this->NoRoomIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
 			this->McvIdle.clear();
+			this->IslandMcvWaits.clear();
+			this->IslandWaitYards.clear();
+			this->IslandWaitPackFrame = -1;
 			this->ResourceHealSince.clear();
 			this->NavalRemnantUntil = -1;
 			this->SubThreatUntil = -1;
@@ -2511,6 +2533,23 @@ namespace
 	constexpr int McvIdleOrderFrames = 1800;
 	constexpr int McvIdleMostTries = 3;
 	constexpr int McvIdleLegSteps = 24;
+	// Land before islands (user approved, 2026-11-19): in 4 matches of 724f571ef 44 of 87 expansion
+	// lines of houses whose income fell found the expansion MCV built and packed, waiting for a ride to
+	// an island; 31 of 38 such MCVs of 5 stamps had a free field on their own landmass (match #11376,
+	// house 1: an SMCV from frame 22500 to 135000 with 29 to 43 free fields). An expansion MCV that has
+	// waited IslandMcvWaitFrames with no ride on the way takes the free field of its landmass
+	// (IslandMcvLandFieldFrames to unfold there); with none it unfolds where it waits, a yard more for
+	// the building queue, and that yard packs up for the island once an idle transport able to make the
+	// crossing is ours, standing IslandWaitYardFrames at most as one; after a pack-up no MCV unfolds that
+	// way for IslandWaitRepackFrames.
+	constexpr int IslandMcvWaitFrames = 2700;
+	// A wait not seen for this long starts again.
+	constexpr int IslandMcvWaitGapFrames = 600;
+	constexpr int IslandMcvLandFieldFrames = 4500;
+	constexpr int IslandMcvLandFieldNearCells = 6;
+	constexpr int IslandWaitYardFrames = 45000;
+	constexpr int IslandWaitRepackFrames = 9000;
+	constexpr int IslandWaitFerryCells = 24;
 	// The scans for a free island (micro setup) and for the nearest free ore field (building pass)
 	// walk thousands of cells and, for each, every building of the house: 19% and 10% of the AI tick
 	// when run every tick (tick cost diagnostic, 2026-11-13). Their answers hold this long per house,

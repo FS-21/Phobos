@@ -17,6 +17,116 @@ namespace
 	std::vector<CellStruct> FindRemnantSearchCells(HouseClass* pHouse, size_t most);
 }
 
+// Land before islands (IslandMcvWaitFrames, NeuralAI.State.inl).
+namespace
+{
+	// An island expansion MCV whose ride is under way: it boards a transport, a transport operation
+	// carries it, or a carryall flies to it. A ferry seat reserved for it alone is no ride: the loader
+	// kept seats for MCVs whose transport never came.
+	bool IsIslandMcvRideUnderWay(HouseClass* pHouse, UnitClass* pUnit)
+	{
+		if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter
+			|| IsInTransportOp(pHouse, pUnit->UniqueID))
+		{
+			return true;
+		}
+
+		for (auto const& entry : AirPickups)
+		{
+			const int age = Unsorted::CurrentFrame - entry.second.Frame;
+
+			if (entry.second.CargoID == pUnit->UniqueID && age >= 0 && age <= 2700)
+				return true;
+		}
+
+		for (auto const pAir : AircraftClass::Array)
+		{
+			if (pAir && pAir->Owner == pHouse && pAir->IsAlive && !pAir->InLimbo && pAir->Type && pAir->Type->Carryall
+				&& pAir->Destination == pUnit)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	// The yards island expansion MCVs unfolded while no ride came that still stand (a yard of ours
+	// within 3 cells of the cell, or an entry too new for the yard to be up), IslandWaitYardFrames at
+	// most; the others are dropped.
+	int PruneIslandWaitYards(HouseClass* pHouse)
+	{
+		auto& yards = GetMacroState(pHouse).IslandWaitYards;
+		const int now = Unsorted::CurrentFrame;
+
+		std::erase_if(yards, [pHouse, now](const std::pair<CellStruct, int>& entry)
+		{
+			if (now < entry.second || now - entry.second > IslandWaitYardFrames)
+				return true;
+
+			if (now - entry.second <= 300)
+				return false;
+
+			for (int i = 0; i < pHouse->ConYards.Count; ++i)
+			{
+				auto const pYard = pHouse->ConYards.GetItem(i);
+
+				if (pYard && pYard->IsAlive && !pYard->InLimbo
+					&& std::max(std::abs(pYard->GetMapCoords().X - entry.first.X), std::abs(pYard->GetMapCoords().Y - entry.first.Y)) <= 3)
+				{
+					return false;
+				}
+			}
+
+			return true;
+		});
+
+		return static_cast<int>(yards.size());
+	}
+
+	// The crossing a packed-up yard's MCV would ask the transport operations for (economy client,
+	// DispatchFootToTargetOrTransport) is shut after an operation ended with no transport.
+	bool IsIslandCrossingBlocked(HouseClass* pHouse, int fromZone, int toZone)
+	{
+		if (!TransportOpsEnabled)
+			return false;
+
+		auto const& blocked = GetMacroState(pHouse).CrossingBlockedUntil;
+		auto const it = blocked.find(CrossingBlockKey(NeuralOpClient::Economy, fromZone, toZone));
+		const int now = Unsorted::CurrentFrame;
+
+		return it != blocked.end() && now < it->second && it->second - now <= OpNoTransportRetryFrames;
+	}
+
+	// An empty transport of ours, within IslandWaitFerryCells of the yard and free of other work, that
+	// can carry the yard's MCV from the yard to the island goal (the old ferry loader's filter, and
+	// empty).
+	UnitClass* FindIdleIslandMcvFerry(HouseClass* pHouse, const UnitTypeClass* pMcvType, const CellStruct& yardCell,
+		const CellStruct& goalCell)
+	{
+		for (auto const pT : UnitClass::Array)
+		{
+			if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type || !IsAmphibiousOrAirTransport(pT->Type)
+				|| static_cast<int>(pT->Type->SizeLimit) < static_cast<int>(pMcvType->TechnoTypeClass::Size)
+				|| pT->Type->Passengers < static_cast<int>(pMcvType->TechnoTypeClass::Size) || pT->Passengers.NumPassengers > 0
+				|| IsPlanMember(pHouse, pT->UniqueID) || IsInTransportOp(pHouse, pT->UniqueID) || IsFerryLoading(pHouse, pT->UniqueID))
+			{
+				continue;
+			}
+
+			const CellStruct tc = pT->GetMapCoords();
+
+			if (std::max(std::abs(tc.X - yardCell.X), std::abs(tc.Y - yardCell.Y)) <= IslandWaitFerryCells
+				&& CanTransportTypeLink(pT->Type, yardCell, goalCell))
+			{
+				return pT;
+			}
+		}
+
+		return nullptr;
+	}
+}
+
 static void CollectCellFoots(CellClass* pCell, std::vector<FootClass*>& foots)
 {
 	if (!pCell)
@@ -3771,13 +3881,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// watchdog unfolds it where it stands if it can; else it leads it along legs of our own route
 			// search to the nearest site not tried yet, and home to a yard of ours after McvIdleMostTries
 			// such sites. While it follows that order the MCV logic below leaves it alone. An MCV that
-			// may be waiting for a ferry to the island goal is left to the island logic and its timers.
+			// may be waiting for a ferry to the island goal is left to the island logic and its timers,
+			// until its wait ran out and the land rule gave it its order (IslandMcvWaitFrames, land before
+			// islands below: a free field of its landmass, or a site to unfold at meanwhile).
 			{
 				auto& idleWatch = GetMacroState(pHouse).McvIdle;
 				const int now = Unsorted::CurrentFrame;
+				auto const& islandWaits = GetMacroState(pHouse).IslandMcvWaits;
+				auto const itIslandWait = islandWaits.find(pUnit->UniqueID);
+				const bool islandWaitOver = itIslandWait != islandWaits.end() && itIslandWait->second.Released
+					&& now - itIslandWait->second.SeenFrame <= IslandMcvWaitGapFrames;
 				const bool mayWaitForFerry = pIslandResourceGoalCell != nullptr && mcvZone >= 0
 					&& MapClass::Instance.GetMovementZoneType(pIslandResourceGoalCell->MapCoords, MovementZone::Normal, false) != mcvZone
-					&& CanHouseFerryTypeAcrossWater(pHouse, pType);
+					&& CanHouseFerryTypeAcrossWater(pHouse, pType) && !islandWaitOver;
 				const bool unfolding = pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload;
 
 				if (idleWatch.size() > 64)
@@ -4208,8 +4324,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				|| pHouse->NumShipyards > 0 || pLoadingTransport != nullptr || isSecondaryIsland);
 			// A free ore field on this landmass is the next expansion: the MCV goes there instead of
 			// waiting at a beach for a ferry to another island.
-			const bool hasFreeLandFieldInMcvZone = !isForeignTechMCV && mcvZone >= 0
-				&& FindFreeOreFieldCell(pHouse, mcvCell, mcvZone, 14) != nullptr;
+			CellClass* const pFreeLandFieldInMcvZone = (!isForeignTechMCV && mcvZone >= 0)
+				? FindFreeOreFieldCell(pHouse, mcvCell, mcvZone, 14)
+				: nullptr;
+			const bool hasFreeLandFieldInMcvZone = pFreeLandFieldInMcvZone != nullptr;
 			const bool alreadyHasConYardOnThisIsland = (!isForeignTechMCV && !hasFreeLandFieldInMcvZone
 				&& ((isSecondaryIsland && conYardsInMcvZone >= 1) || (isArchipelagoOrNavalMap && conYardsInMcvZone >= 1)
 					|| conYardsInMcvZone >= 2));
@@ -4230,10 +4348,141 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// MCVs for a plateau they could not climb (match #10267, one landmass).
 			const bool canFerryThisMcvToIsland = pIslandResourceGoalCell != nullptr
 				&& CanHouseFerryTypeAcrossWater(pHouse, pType, &mcvCell, &pIslandResourceGoalCell->MapCoords);
-			const bool mustColonizeOtherIsland = (canFerryThisMcvToIsland && mcvZone >= 0
+			const bool wantsOtherIsland = (canFerryThisMcvToIsland && mcvZone >= 0
 				&& (!hasFreeLandFieldInMcvZone || islandExpansionDue || mcvIslandHasNoRoom)
 				&& (currentIslandAlreadyDeveloped || alreadyHasConYardOnThisIsland || mcvIslandHasNoRoom) && !isForeignTechMCV
 				&& pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone);
+			const bool isSelfAmphibOrAirMcv = (pType->MovementZone == MovementZone::Amphibious
+				|| pType->MovementZone == MovementZone::AmphibiousDestroyer
+				|| pType->MovementZone == MovementZone::AmphibiousCrusher
+				|| pType->MovementZone == MovementZone::Fly || pType->JumpJet);
+			// Land before islands (IslandMcvWaitFrames, NeuralAI.State.inl): the wait for a ride to the
+			// island counts from the first tick the MCV wants the island, whatever seats the ferry loader
+			// reserves for it (those MCVs had a transport able to carry them in most of their lines). Once
+			// it ran out, and the MCV is not boarding, it takes the free field of its own landmass, or with
+			// none unfolds where it waits; its yard packs up for the island when a transport is free.
+			bool islandWaitTakesLand = false;
+			{
+				auto& waitMacro = GetMacroState(pHouse);
+				auto& waits = waitMacro.IslandMcvWaits;
+				const int now = Unsorted::CurrentFrame;
+
+				if (waits.size() > 32)
+					std::erase_if(waits, [now](const auto& entry) { return now < entry.second.SeenFrame || now - entry.second.SeenFrame > 9000; });
+
+				if (wantsOtherIsland && !isSelfAmphibOrAirMcv && !mcvIslandHasNoRoom && pHouse->NumConYards >= 1)
+				{
+					auto& wait = waits[pUnit->UniqueID];
+
+					if (wait.SinceFrame < 0 || now < wait.SeenFrame || now - wait.SeenFrame > IslandMcvWaitGapFrames)
+					{
+						wait.SinceFrame = now;
+						wait.LandField = CellStruct::Empty;
+						wait.LandFrame = -1;
+						wait.Released = false;
+					}
+
+					wait.SeenFrame = now;
+					const int waited = now - wait.SinceFrame;
+					const bool rideUnderWay = IsIslandMcvRideUnderWay(pHouse, pUnit);
+
+					if (waited >= IslandMcvWaitFrames && (!rideUnderWay || waited >= 3 * IslandMcvWaitFrames))
+					{
+						CellClass* pLandField = nullptr;
+
+						if (wait.LandField != CellStruct::Empty)
+						{
+							// The land was taken once: no more waiting for the ferry. Past
+							// IslandMcvLandFieldFrames the expansion logic below picks its own field.
+							islandWaitTakesLand = true;
+
+							if (now - wait.LandFrame <= IslandMcvLandFieldFrames)
+								pLandField = MapClass::Instance.TryGetCellAt(wait.LandField);
+						}
+						else if (pFreeLandFieldInMcvZone)
+						{
+							islandWaitTakesLand = true;
+							pLandField = pFreeLandFieldInMcvZone;
+							// TEMP diagnostic: an island expansion MCV that takes a field of its own landmass.
+							Debug::Log("[NeuralAI] House %d IslandExpansion MCV: %s %u waited %d frames at (%d,%d) for a ride (ride under way %d), "
+								"takes the free land field (%d,%d) %d cells away, frame %d.\n",
+								pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, waited, mcvCell.X, mcvCell.Y, rideUnderWay ? 1 : 0,
+								pLandField->MapCoords.X, pLandField->MapCoords.Y,
+								static_cast<int>(mcvCell.DistanceFrom(pLandField->MapCoords)), now);
+							wait.LandField = pLandField->MapCoords;
+							wait.LandFrame = now;
+						}
+
+						wait.Released = wait.Released || islandWaitTakesLand;
+
+						if (pLandField)
+						{
+							if (mcvCell.DistanceFrom(pLandField->MapCoords) > IslandMcvLandFieldNearCells)
+							{
+								const bool headingThere = isMovingToDest && pUnit->Destination
+									&& CellClass::Coord2Cell(pUnit->Destination->GetCoords()).DistanceFrom(pLandField->MapCoords) <= 3.0;
+
+								if (!headingThere || IsAITickWindow(90, 25))
+								{
+									IssueMoveOrder(pUnit, pLandField, 3.0);
+									NoteTeamExpansionSite(pHouse, pLandField->MapCoords);
+								}
+
+								continue;
+							}
+
+							// Within reach of the field: the expansion logic below unfolds it there.
+						}
+						else if (!islandWaitTakesLand && !enemyNearMCV && (waitMacro.IslandWaitPackFrame < 0 || now < waitMacro.IslandWaitPackFrame
+							|| now - waitMacro.IslandWaitPackFrame >= IslandWaitRepackFrames))
+						{
+							// No free field on its landmass: it unfolds where it waits, a yard more for the
+							// building queue (user, Fluddle), until a transport is free for the crossing.
+							if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
+							{
+								// TEMP diagnostic: an island expansion MCV that unfolds while it waits.
+								Debug::Log("[NeuralAI] House %d IslandExpansion MCV: %s %u waited %d frames at (%d,%d) for a ride (ride under way %d), "
+									"no free land field, unfolds there meanwhile, %d yards, frame %d.\n",
+									pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, waited, mcvCell.X, mcvCell.Y, rideUnderWay ? 1 : 0,
+									pHouse->NumConYards, now);
+
+								if (waitMacro.IslandWaitYards.size() >= 4)
+									waitMacro.IslandWaitYards.erase(waitMacro.IslandWaitYards.begin());
+
+								waitMacro.IslandWaitYards.emplace_back(mcvCell, now);
+								waits.erase(pUnit->UniqueID);
+								OrderDeployerUnpack(pUnit);
+								continue;
+							}
+
+							const CellStruct unfoldCell = FindDeployableFoundationNearCell(pHouse, pType->DeploysInto, mcvCell, mcvZone, pUnit);
+
+							if (unfoldCell != CellStruct::Empty)
+							{
+								wait.Released = true;
+								const bool headingThere = isMovingToDest && pUnit->Destination
+									&& CellClass::Coord2Cell(pUnit->Destination->GetCoords()) == unfoldCell;
+
+								if (!headingThere || IsAITickWindow(45, 15))
+								{
+									if (auto const pUnfoldCell = MapClass::Instance.TryGetCellAt(unfoldCell))
+										IssueMoveOrder(pUnit, pUnfoldCell, 1.0);
+								}
+
+								continue;
+							}
+
+							// No site at all: it keeps waiting for its ride.
+						}
+					}
+				}
+				else
+				{
+					waits.erase(pUnit->UniqueID);
+				}
+			}
+
+			const bool mustColonizeOtherIsland = wantsOtherIsland && !islandWaitTakesLand;
 			// The yard the bank governor wants for the building queue unfolds at home on any map and
 			// next to the yards already there: it is wanted for its speed, not for new ground.
 			const bool bankWantsYardHere = GetMacroState(pHouse).BankWantedYards > pHouse->NumConYards && !isForeignTechMCV
@@ -16712,6 +16961,37 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					UndeployBuildingToVehicle(pOwnBld, pNomadicResourceGoalCell->MapCoords);
 					handledConYardAction = true;
+				}
+				else if (!busyConstructingBld && canFerryNomadNow && pHouse->NumConYards >= 2 && PruneIslandWaitYards(pHouse) > 0
+					&& !IsIslandCrossingBlocked(pHouse, yz, resourceIslandZone)
+					&& (GetMacroState(pHouse).IslandWaitPackFrame < 0 || Unsorted::CurrentFrame < GetMacroState(pHouse).IslandWaitPackFrame
+						|| Unsorted::CurrentFrame - GetMacroState(pHouse).IslandWaitPackFrame >= IslandWaitRepackFrames))
+				{
+					// A yard an island expansion MCV unfolded while no ride came (land before islands,
+					// IslandMcvWaitFrames): it packs up for the island once an idle transport able to make
+					// the crossing is near, the crossing is open to the transport operations and the last
+					// such pack-up of the house is IslandWaitRepackFrames old (its MCV gets a new UniqueID,
+					// so its own wait would start again from zero).
+					auto& waitYards = GetMacroState(pHouse).IslandWaitYards;
+					auto const itWaitYard = std::find_if(waitYards.begin(), waitYards.end(), [yc](const std::pair<CellStruct, int>& entry)
+						{ return std::max(std::abs(entry.first.X - yc.X), std::abs(entry.first.Y - yc.Y)) <= 3; });
+
+					if (itWaitYard != waitYards.end())
+					{
+						if (auto const pFerry = FindIdleIslandMcvFerry(pHouse, pMcvType, yc, pIslandResourceGoalCell->MapCoords))
+						{
+							// TEMP diagnostic: a yard that unfolded while it waited packs up for its ride.
+							Debug::Log("[NeuralAI] House %d IslandExpansion yard at (%d,%d) packs up for the island (%d,%d): %s %u free %d cells away, "
+								"stood %d frames, %d yards, frame %d.\n",
+								pHouse->ArrayIndex, yc.X, yc.Y, pIslandResourceGoalCell->MapCoords.X, pIslandResourceGoalCell->MapCoords.Y,
+								pFerry->Type->ID, pFerry->UniqueID, static_cast<int>(yc.DistanceFrom(pFerry->GetMapCoords())),
+								Unsorted::CurrentFrame - itWaitYard->second, pHouse->NumConYards, Unsorted::CurrentFrame);
+							waitYards.erase(itWaitYard);
+							GetMacroState(pHouse).IslandWaitPackFrame = Unsorted::CurrentFrame;
+							UndeployBuildingToVehicle(pOwnBld, pIslandResourceGoalCell->MapCoords);
+							handledConYardAction = true;
+						}
+					}
 				}
 			}
 
