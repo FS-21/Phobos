@@ -3832,6 +3832,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (isAntiAir)
 					noteAirDefense(pBld, 6, score);
 			}
+			else if (ResearchPaidByProducer(pHouse, pBld) > 0)
+			{
+				// A producer of what our research still to buy costs (battle points in CnCReloaded) is
+				// income for it: scored like a refinery, up to ResearchGeneratorMost.
+				if (owned >= ResearchGeneratorMost)
+					continue;
+
+				score = scores[1] + 1200 - owned * 480;
+			}
 			else
 			{
 				// Tech & Support buildings (Radar, Battle Lab, Ore Purifier, Industrial Plant,

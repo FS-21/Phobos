@@ -3031,6 +3031,50 @@ namespace
 		return false;
 	}
 
+	// A research super weapon the Neural AI fires itself: it delivers or kills limbo buildings or
+	// converts units, and is no AutoFire (the engine fires those), AI-forbidden or tunnel delivery one.
+	bool IsResearchSuperWeapon(SuperWeaponTypeClass* pSWType, HouseClass* pOwner)
+	{
+		auto const pSWExt = pSWType ? SWTypeExt::Fetch(pSWType) : nullptr;
+
+		return pSWExt && (!pSWExt->LimboDelivery_Types.empty() || !pSWExt->LimboKill_IDs.empty() || !pSWExt->Convert_Pairs.empty())
+			&& !pSWType->DisableableFromShell && pSWType->Type != SuperWeaponType::ChronoWarp && pSWExt->SW_AllowAI
+			&& !pSWExt->SW_AutoFire && !IsTunnelDeliverySuperWeapon(pSWType, pOwner);
+	}
+
+	// Research still to buy that a type pays for: for each resource it produces, the research super
+	// weapons of the house that cost that resource.
+	int ResearchPaidByProducer(HouseClass* pHouse, TechnoTypeClass* pType)
+	{
+		auto const pTypeExt = pType ? TechnoTypeExt::Fetch(pType) : nullptr;
+
+		if (!pHouse || !pTypeExt || pTypeExt->ResourceProductions.empty())
+			return 0;
+
+		int count = 0;
+
+		for (auto const& production : pTypeExt->ResourceProductions)
+		{
+			if (production.Amount <= 0 || production.ResourceIndex < 0)
+				continue;
+
+			const size_t resource = static_cast<size_t>(production.ResourceIndex);
+
+			for (auto const pSuper : pHouse->Supers)
+			{
+				if (!pSuper || !pSuper->IsPresent || !IsResearchSuperWeapon(pSuper->Type, pHouse))
+					continue;
+
+				auto const& amounts = SWTypeExt::Fetch(pSuper->Type)->SW_ResourceAmounts;
+
+				if (resource < amounts.size() && amounts[resource] < 0)
+					count++;
+			}
+		}
+
+		return count;
+	}
+
 	// Protects Ore/Tiberium Spawner Trees (SpawnsTiberium) from being crushed or
 	// blocked by AI building placement
 	bool OverlapsTiberiumTreeZone(CellStruct cell, BuildingTypeClass* pType)

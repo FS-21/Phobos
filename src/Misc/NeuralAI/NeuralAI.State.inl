@@ -2496,6 +2496,11 @@ namespace
 	// within 8 cells of it, or after TemporaryRefineryMaxFrames anyway.
 	constexpr int SecondHarvesterRecoveryFrames = 4500;
 	constexpr int TemporaryRefineryMaxFrames = 900;
+	// Research resources (battle points in CnCReloaded): a type that produces what our research still
+	// to buy costs is worth the best unlock in the research choice (the cap of the unlock value), and
+	// as a building it scores like a refinery, up to ResearchGeneratorMost of them.
+	constexpr int ResearchGeneratorUnlockValue = 600;
+	constexpr int ResearchGeneratorMost = 3;
 	// Defenses measured in points as the Advanced AI does, by AI difficulty (Hard, Normal, Easy):
 	// the ground level a base wants (base, per refinery, per functional structure, with an
 	// expansion pending), the anti-air base, and the most either reaches. A defense that declares

@@ -16037,7 +16037,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Unlock value: limbo buildings delivered by a SW can be prerequisites. Count the types
 		// this house could own that list one of them as prerequisite and are not buildable yet
 		// (combat units and factories weigh more), so research that opens new tech is chosen.
-		auto unlockValueOf = [pHouse](const std::vector<BuildingTypeClass*>& delivered) -> int
+		auto unlockValueOf = [pHouse](const std::vector<BuildingTypeClass*>& delivered, bool& opensResearchProducer) -> int
 		{
 			if (delivered.empty())
 				return 0;
@@ -16068,6 +16068,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!needsDelivered || HouseExt::PrerequisitesMet(pHouse, pType))
 					return;
 
+				// A producer of what our research costs pays for the rest of it: the best unlock.
+				if (ResearchPaidByProducer(pHouse, pType) > 0)
+				{
+					opensResearchProducer = true;
+					value += ResearchGeneratorUnlockValue;
+
+					return;
+				}
+
 				auto const pW = pType->GetWeapon(0);
 				const bool isCombat = pW && pW->WeaponType && pW->WeaponType->Damage > 0;
 				auto const pBld = abstract_cast<BuildingTypeClass*>(pType);
@@ -16093,21 +16102,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const pSuper : pHouse->Supers)
 		{
-			// CanFire also asks for the resources the research costs (battle points), as for a human.
-			if (!pSuper || !pSuper->Type || !pSuper->CanFire())
+			if (!pSuper || !pSuper->Type || !pSuper->IsReady || !IsResearchSuperWeapon(pSuper->Type, pHouse))
 				continue;
 
 			auto const pSWExt = SWTypeExt::Fetch(pSuper->Type);
-			const bool isLimboResearchUpgrade = pSWExt
-				&& (!pSWExt->LimboDelivery_Types.empty() || !pSWExt->LimboKill_IDs.empty()
-					|| !pSWExt->Convert_Pairs.empty());
-
-			if (!isLimboResearchUpgrade || pSuper->Type->DisableableFromShell
-				|| pSuper->Type->Type == SuperWeaponType::ChronoWarp || IsTunnelDeliverySuperWeapon(pSuper->Type, pHouse)
-				|| !pSWExt->SW_AllowAI || pSWExt->SW_AutoFire)
-			{
-				continue;
-			}
 
 			// Affordability: keep a reserve so research never starves production.
 			const int cost = pSWExt->Money_Amount < 0 ? -pSWExt->Money_Amount : 0;
@@ -16146,8 +16144,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			value += unlockValueOf(deliveredTypes);
+			bool opensResearchProducer = false;
+			value += unlockValueOf(deliveredTypes, opensResearchProducer);
 			value -= cost / 50;
+
+			// CanFire also asks for the resources the research costs (battle points), as for a human. The
+			// research that opens a producer of those resources is the one saved for while they are short.
+			if (!pSuper->CanFire() && !opensResearchProducer)
+				continue;
 
 			if (value > bestResearchValue)
 			{
@@ -16156,7 +16160,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (pBestResearch)
+		if (pBestResearch && pBestResearch->CanFire())
 		{
 			pBestResearch->Launch(homeCoords, false);
 			pBestResearch->Reset();
