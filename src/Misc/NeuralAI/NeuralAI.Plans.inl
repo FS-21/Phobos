@@ -4,6 +4,7 @@
 namespace
 {
 	int AirSortieDamageVs(AircraftClass* pAir, BuildingClass* pTarget);
+	bool IsWingStrikeType(AircraftTypeClass* pType);
 
 	bool IsPlanMember(HouseClass* pHouse, DWORD uid)
 	{
@@ -3645,11 +3646,14 @@ namespace
 			{
 				std::vector<FootClass*> strikers;
 
+				// The strike aircraft of the wings fly with their wing only (UpdateAirWings, user approved,
+				// 2026-11-19: «Sí, hazlo»): this plan took them from their pads in pairs, 23 times for 46
+				// aircraft in two matches of b0ec09525, 41 of them lost.
 				for (auto const& [uid, pFoot] : ownFoots)
 				{
 					auto const pAir = abstract_cast<AircraftClass*>(pFoot);
 
-					if (isFreeAirStriker(pAir))
+					if (isFreeAirStriker(pAir) && !IsWingStrikeType(pAir->Type))
 						strikers.push_back(pAir);
 				}
 
