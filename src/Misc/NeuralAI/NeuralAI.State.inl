@@ -1171,8 +1171,6 @@ namespace
 		std::unordered_map<DWORD, int> TankCensusBirth {};
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
-		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
-		std::vector<DWORD> FerryingMcvs {};
 		// Until when a unit that lost its boarding turn, or held a transport's radio link without
 		// boarding, counts as blocked from ferries (IsFerryBlocked). Keyed lookups only.
 		std::unordered_map<DWORD, int> FerryBlockedUntil {};
@@ -1724,7 +1722,6 @@ namespace
 			this->TankCensusLifeCount = 0;
 			this->TankCensusBirth.clear();
 			this->BankWantedYards = 0;
-			this->FerryingMcvs.clear();
 			this->FerryBlockedUntil.clear();
 			this->FerryBoardTurns.clear();
 			this->FerryLandings.clear();

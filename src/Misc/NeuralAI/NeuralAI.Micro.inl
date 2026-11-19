@@ -631,65 +631,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	// Universal Cross-Island Reachability & Transport Dispatcher:
 	// Any ground-only unit or infantry whose action target is on a disconnected
-	// landmass (footZone != targetZone) is automatically routed via an
-	// Amphibious, Hover, Air, or Carryall Transport to the target island's
-	// landing beach, and once unloaded on the target island (footZone ==
-	// targetZone), executes its native mission.
-	static struct PassengerIslandGoalEntry
-	{
-		DWORD UniqueID;
-		CellStruct TargetCoords;
-		int Frame;
-	} s_PassengerIslandGoals[64] {};
-
-	auto RecordPassengerIslandGoal = [](DWORD uid, const CellStruct& targetCoords)
-	{
-		int oldestIdx = 0;
-		int oldestFrame = INT_MAX;
-		for (int i = 0; i < 64; ++i)
-		{
-			if (s_PassengerIslandGoals[i].UniqueID == uid || s_PassengerIslandGoals[i].UniqueID == 0)
-			{
-				s_PassengerIslandGoals[i] = { uid, targetCoords, Unsorted::CurrentFrame };
-				return;
-			}
-
-			if (s_PassengerIslandGoals[i].Frame < oldestFrame)
-			{
-				oldestFrame = s_PassengerIslandGoals[i].Frame;
-				oldestIdx = i;
-			}
-		}
-
-		s_PassengerIslandGoals[oldestIdx] = { uid, targetCoords, Unsorted::CurrentFrame };
-	};
-
-	auto LookupPassengerIslandGoal = [](DWORD uid) -> CellStruct
-	{
-		for (int i = 0; i < 64; ++i)
-		{
-			if (s_PassengerIslandGoals[i].UniqueID == uid
-				&& (Unsorted::CurrentFrame - s_PassengerIslandGoals[i].Frame) <= 9000)
-			{
-				return s_PassengerIslandGoals[i].TargetCoords;
-			}
-		}
-
-		return CellStruct::Empty;
-	};
-
-	auto ClearPassengerIslandGoal = [](DWORD uid)
-	{
-		for (int i = 0; i < 64; ++i)
-		{
-			if (s_PassengerIslandGoals[i].UniqueID == uid)
-			{
-				s_PassengerIslandGoals[i] = { 0, CellStruct::Empty, 0 };
-				return;
-			}
-		}
-	};
-
+	// landmass (footZone != targetZone) is handed to a transport operation, which
+	// lands it on the target's ground; there its client gives it its mission again.
 	auto countPendingBoardersOn = [&](TechnoClass* pT, FootClass* pExcludeFoot, int& outCount, int& outSize)
 	{
 		outCount = 0;
@@ -3614,48 +3557,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (packedZone >= 0 && goalZone >= 0 && packedZone != goalZone && CanHouseFerryTypeAcrossWater(pHouse, pType))
 				{
 					DispatchFootToTargetOrTransport(pUnit, pArchDest, Mission::Move, false);
-					auto& ferryingList = GetMacroState(pHouse).FerryingMcvs;
-
-					if (ferryingList.size() >= 16)
-						ferryingList.erase(ferryingList.begin()); // Lost MCVs never leave by themselves.
-
-					ferryingList.push_back(pUnit->UniqueID);
 				}
 				else
 				{
 					pUnit->SetDestination(pArchDest, true);
 					pUnit->ForceMission(Mission::Move);
 					NoteOrderCaller(pUnit, "move");
-				}
-			}
-
-			// A packed-up yard MCV sent across water (FerryingMcvs) keeps asking the transport
-			// controller each tick and skips the "new island without a ConYard" deploy rule, which
-			// would unpack it on the spot. Other island MCVs keep their own boarding logic below.
-			{
-				auto& ferrying = GetMacroState(pHouse).FerryingMcvs;
-				auto const itFerry = std::find(ferrying.begin(), ferrying.end(), pUnit->UniqueID);
-
-				if (itFerry != ferrying.end())
-				{
-					const CellStruct ferryGoal = LookupPassengerIslandGoal(pUnit->UniqueID);
-					const int standZone = ObjectZone(pUnit, MovementZone::Normal);
-
-					if (ferryGoal != CellStruct::Empty && standZone >= 0
-						&& MapClass::Instance.GetMovementZoneType(ferryGoal, MovementZone::Normal, false) != standZone
-						&& CanHouseFerryTypeAcrossWater(pHouse, pType))
-					{
-						if (pUnit->CurrentMission != Mission::Enter && pUnit->QueuedMission != Mission::Enter)
-						{
-							if (auto const pFerryGoalCell = MapClass::Instance.TryGetCellAt(ferryGoal))
-								DispatchFootToTargetOrTransport(pUnit, pFerryGoalCell, Mission::Move, false);
-						}
-
-						continue;
-					}
-
-					// Landed on the goal's landmass, or the goal expired: normal MCV logic again.
-					ferrying.erase(itFerry);
 				}
 			}
 
@@ -8075,7 +7982,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 
 					if (pOtherSpy->Destination == pEnemyBld || pOtherSpy->ArchiveTarget == pEnemyBld
-						|| LookupPassengerIslandGoal(pOtherSpy->UniqueID) == pEnemyBld->GetMapCoords()
 						|| (pOtherSpy->CurrentMission == Mission::Guard && pOtherSpy->DistanceFrom(pEnemyBld) <= 2816))
 					{
 						spyScore -= 500;
@@ -10908,23 +10814,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			CellClass* pUnitWaveGoal = pWaveTargetCell;
 			int goalZone = waveTargetZone;
-			const CellStruct preTransportGoal = LookupPassengerIslandGoal(pU->UniqueID);
-			if (preTransportGoal != CellStruct::Empty)
-			{
-				const int ptz = MapClass::Instance.GetMovementZoneType(preTransportGoal, MovementZone::Normal, false);
-				if (ptz >= 0 && uz == ptz)
-				{
-					if (pU->GetMapCoords().DistanceFrom(preTransportGoal) <= 5.0)
-					{
-						ClearPassengerIslandGoal(pU->UniqueID);
-					}
-					else if (CellClass* pPreCell = MapClass::Instance.TryGetCellAt(preTransportGoal))
-					{
-						pUnitWaveGoal = pPreCell;
-						goalZone = ptz;
-					}
-				}
-			}
 
 			if (pUnitWaveGoal == pWaveTargetCell && pSecondaryWaveTargetCell
 				&& idleCombatUnits.size() >= (minWaveUnits + 2) && (pU->UniqueID % 3 == 0)
@@ -11054,23 +10943,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				|| pI->Type->MovementZone == MovementZone::AmphibiousDestroyer
 				|| pI->Type->MovementZone == MovementZone::Fly || pI->Type->JumpJet || pI->Type->Teleporter);
 			CellClass* pInfWaveGoal = pWaveTargetCell;
-			const CellStruct preTransportInfGoal = LookupPassengerIslandGoal(pI->UniqueID);
-			if (preTransportInfGoal != CellStruct::Empty)
-			{
-				const int ptz
-					= MapClass::Instance.GetMovementZoneType(preTransportInfGoal, MovementZone::Normal, false);
-				if (ptz >= 0 && iz == ptz)
-				{
-					if (pI->GetMapCoords().DistanceFrom(preTransportInfGoal) <= 5.0)
-					{
-						ClearPassengerIslandGoal(pI->UniqueID);
-					}
-					else if (CellClass* pPreCell = MapClass::Instance.TryGetCellAt(preTransportInfGoal))
-					{
-						pInfWaveGoal = pPreCell;
-					}
-				}
-			}
 
 			if (pInfWaveGoal == pWaveTargetCell && pSecondaryWaveTargetCell && idleCombatInf.size() >= 5
 				&& (pI->UniqueID % 3 == 0) && (canInfCrossWater || (secWaveZone >= 0 && iz == secWaveZone)))
@@ -11678,23 +11550,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			}
 
-			// Resume pre-transport initial objective if this unit just landed on its
-			// target island!
-			const CellStruct preGoal = LookupPassengerIslandGoal(pBeachU->UniqueID);
-			if (preGoal != CellStruct::Empty && uz >= 0
-				&& MapClass::Instance.GetMovementZoneType(preGoal, MovementZone::Normal, false) == uz)
-			{
-				if (uc.DistanceFrom(preGoal) <= 5.0)
-				{
-					ClearPassengerIslandGoal(pBeachU->UniqueID);
-				}
-				else if (CellClass* pPreGoalCell = MapClass::Instance.TryGetCellAt(preGoal))
-				{
-					OrderFootToAttackMove(pBeachU, pPreGoalCell);
-					continue;
-				}
-			}
-
 			if (BuildingClass* pSameIslBld
 				= findBestSameLandmassEnemyBld(uc, uz, (pBeachU->UniqueID & 1) != 0, canBeachUCrossWater))
 			{
@@ -11802,21 +11657,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				|| pBeachI->Type->Teleporter);
 			if (isWaitingForSisterTransportUnload(pBeachI, canBeachICrossWater))
 				continue;
-
-			const CellStruct preInfGoal = LookupPassengerIslandGoal(pBeachI->UniqueID);
-			if (preInfGoal != CellStruct::Empty && iz >= 0
-				&& MapClass::Instance.GetMovementZoneType(preInfGoal, MovementZone::Normal, false) == iz)
-			{
-				if (ic.DistanceFrom(preInfGoal) <= 5.0)
-				{
-					ClearPassengerIslandGoal(pBeachI->UniqueID);
-				}
-				else if (CellClass* pPreInfCell = MapClass::Instance.TryGetCellAt(preInfGoal))
-				{
-					OrderFootToAttackMove(pBeachI, pPreInfCell);
-					continue;
-				}
-			}
 
 			if (BuildingClass* pSameIslBld
 				= findBestSameLandmassEnemyBld(ic, iz, (pBeachI->UniqueID & 1) != 0, canBeachICrossWater))
@@ -12802,14 +12642,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						auto const pCarriedUnit = pCarryExt->CarryallCargo;
 						CellClass* pDropCell = nullptr;
-						const CellStruct customCoords = LookupPassengerIslandGoal(pCarriedUnit->UniqueID);
-						if (customCoords != CellStruct::Empty)
-						{
-							const int cz
-								= MapClass::Instance.GetMovementZoneType(customCoords, MovementZone::Normal, false);
-							pDropCell = FindSafeIslandLandingCell(pHouse, customCoords, cz,
-								pCarriedUnit->Type && pCarriedUnit->Type->DeploysInto != nullptr);
-						}
 
 						if (!pDropCell && pCarriedUnit->Type)
 						{
@@ -13251,34 +13083,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		bool carryingEngineer = false;
 		bool carryingHarvester = false;
-		CellClass* pCustomPassengerGoal = nullptr;
-		int customPassengerZone = -1;
 		for (FootClass* pPass = pTrans->Passengers.GetFirstPassenger(); pPass != nullptr;
 			pPass = abstract_cast<FootClass*>(pPass->NextObject))
 		{
-			if (!pCustomPassengerGoal)
-			{
-				const CellStruct passGoalCoords = LookupPassengerIslandGoal(pPass->UniqueID);
-				if (passGoalCoords != CellStruct::Empty)
-				{
-					const int pgz = MapClass::Instance.GetMovementZoneType(passGoalCoords, MovementZone::Normal, false);
-					if (pgz >= 0 && !isValidFerryGoalZone(pgz))
-					{
-						// Stale goal on the loading island, or a goal on no ground: it must never
-						// pull the transport back or make it unload where the cargo boarded.
-						ClearPassengerIslandGoal(pPass->UniqueID);
-					}
-					else if (pgz >= 0 && CanTransportTypeLink(pTrans->Type, transCoords, passGoalCoords))
-					{
-						if (CellClass* pSafePassLanding = FindSafeIslandLandingCell(pHouse, passGoalCoords, pgz, false))
-						{
-							pCustomPassengerGoal = pSafePassLanding;
-							customPassengerZone = pgz;
-						}
-					}
-				}
-			}
-
 			if (auto const pPassInf = abstract_cast<InfantryClass*>(pPass))
 			{
 				if (pPassInf->Type && pPassInf->Type->Engineer)
@@ -13291,19 +13098,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		CellClass* pActiveIslandGoal = pCustomPassengerGoal ? pCustomPassengerGoal : pIslandGoalCell;
-		int activeIslandZone = pCustomPassengerGoal ? customPassengerZone : targetIslandZone;
+		CellClass* pActiveIslandGoal = pIslandGoalCell;
+		int activeIslandZone = targetIslandZone;
 		// Parallel amphibious task groups: with FerrySplitFrontTransports combat transports ready and a
 		// secondary enemy island, the odd-numbered ones strike it. Fewer stay one convoy: two
 		// transports split over two islands landed a handful of units on each (the larger group wins).
-		if (!pCustomPassengerGoal && !carryingMCV && !carryingHarvester && !carryingEngineer && pSecondaryIslandGoalCell
+		if (!carryingMCV && !carryingHarvester && !carryingEngineer && pSecondaryIslandGoalCell
 			&& secondaryIslandZone >= 0 && readyCombatConvoyTransports >= FerrySplitFrontTransports && (pTrans->UniqueID % 2 == 1))
 		{
 			pActiveIslandGoal = pSecondaryIslandGoalCell;
 			activeIslandZone = secondaryIslandZone;
 		}
 
-		if (!pCustomPassengerGoal && (carryingMCV || (carryingHarvester && islandGoalTakesHarvesters())) && pIslandResourceGoalCell)
+		if ((carryingMCV || (carryingHarvester && islandGoalTakesHarvesters())) && pIslandResourceGoalCell)
 		{
 			pActiveIslandGoal = pIslandResourceGoalCell;
 			activeIslandZone = resourceIslandZone;
@@ -13425,7 +13232,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			// The island's goal cell when it is still one of our goals, else the cell it sailed for.
 			const std::pair<CellClass*, int> goalsNow[] = {
-				{ pCustomPassengerGoal, customPassengerZone },
 				{ pIslandGoalCell, targetIslandZone },
 				{ pSecondaryIslandGoalCell, secondaryIslandZone },
 				{ pIslandResourceGoalCell, resourceIslandZone },
@@ -14872,30 +14678,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			bool airCarryingMCV = false;
 			bool airCarryingHarvester = false;
 			bool airCarryingEngineer = false;
-			CellClass* pAirCustomPassGoal = nullptr;
-			int airCustomPassZone = -1;
 			for (FootClass* pPass = pAir->Passengers.GetFirstPassenger(); pPass != nullptr;
 				pPass = abstract_cast<FootClass*>(pPass->NextObject))
 			{
-				if (!pAirCustomPassGoal)
-				{
-					const CellStruct passGoalCoords = LookupPassengerIslandGoal(pPass->UniqueID);
-					if (passGoalCoords != CellStruct::Empty)
-					{
-						const int pgz
-							= MapClass::Instance.GetMovementZoneType(passGoalCoords, MovementZone::Normal, false);
-						if (pgz >= 0)
-						{
-							if (CellClass* pSafePassLanding
-								= FindSafeIslandLandingCell(pHouse, passGoalCoords, pgz, false))
-							{
-								pAirCustomPassGoal = pSafePassLanding;
-								airCustomPassZone = pgz;
-							}
-						}
-					}
-				}
-
 				if (auto const pPassUnit = abstract_cast<UnitClass*>(pPass))
 				{
 					if (pPassUnit->Type && pPassUnit->Type->DeploysInto != nullptr && !IsDeployableSiegeUnitType(pPassUnit->Type))
@@ -14922,8 +14707,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (airReadyToFly)
 			{
-				CellClass* pAirGoal = pAirCustomPassGoal ? pAirCustomPassGoal : pIslandGoalCell;
-				int airGoalZone = pAirCustomPassGoal ? airCustomPassZone : targetIslandZone;
+				CellClass* pAirGoal = pIslandGoalCell;
+				int airGoalZone = targetIslandZone;
 				if ((airCarryingMCV || (airCarryingHarvester && islandGoalTakesHarvesters())) && pIslandResourceGoalCell)
 				{
 					pAirGoal = pIslandResourceGoalCell;
