@@ -1523,7 +1523,12 @@ namespace
 	// SlotGate draws differ between matches instead of repeating frame by frame.
 	std::array<uint32_t, 32> HouseStyleSalt {};
 
-	bool SlotGate(int slotScore, int threshold, int slot)
+	// A held gate (SlotGateHeld) keeps its draw this long: a unit that a gate sends one way keeps that
+	// way instead of turning each AI tick (user, 2026-11-19: units drove halfway, turned back and took
+	// their goal up again). The open share is the same as with a draw per tick.
+	constexpr int SlotGateHoldFrames = 900;
+
+	bool SlotGateDraw(int slotScore, int threshold, int slot, uint32_t period, const uint32_t* pHolder)
 	{
 		constexpr double Softness = 120.0;
 		const double margin = static_cast<double>(slotScore - threshold);
@@ -1537,10 +1542,15 @@ namespace
 
 		const uint32_t salt = (CurrentAIHouseIndex >= 0 && CurrentAIHouseIndex < 32) ? HouseStyleSalt[CurrentAIHouseIndex] : 0u;
 
-		for (const uint32_t v : { static_cast<uint32_t>(Unsorted::CurrentFrame / std::max(1, CurrentAITickFrames)),
-				 static_cast<uint32_t>(CurrentAIHouseIndex + 1), static_cast<uint32_t>(slot), salt })
+		for (const uint32_t v : { period, static_cast<uint32_t>(CurrentAIHouseIndex + 1), static_cast<uint32_t>(slot), salt })
 		{
 			h = (h ^ v) * 16777619u;
+			h ^= h >> 13;
+		}
+
+		if (pHolder)
+		{
+			h = (h ^ *pHolder) * 16777619u;
 			h ^= h >> 13;
 		}
 
@@ -1551,6 +1561,26 @@ namespace
 			GateCounts[CurrentAIHouseIndex][slot][open ? 0 : 1]++;
 
 		return open;
+	}
+
+	// A draw per AI tick: for gates that start something (a plan, a build, a strike), where a draw
+	// per tick only decides how soon.
+	bool SlotGate(int slotScore, int threshold, int slot)
+	{
+		return SlotGateDraw(slotScore, threshold, slot, static_cast<uint32_t>(Unsorted::CurrentFrame / std::max(1, CurrentAITickFrames)),
+			nullptr);
+	}
+
+	// A draw held for SlotGateHoldFrames: for gates that steer what a unit, a building or the house
+	// keeps doing. Each holder (a UniqueID; 0 for the house) draws on its own and its windows start at
+	// its own phase, so the holders of a house do not all switch together.
+	bool SlotGateHeld(int slotScore, int threshold, int slot, DWORD holder = 0)
+	{
+		const uint32_t key = static_cast<uint32_t>(holder);
+		const uint32_t phase = (key * 2654435761u) % static_cast<uint32_t>(SlotGateHoldFrames);
+		const uint32_t window = (static_cast<uint32_t>(std::max(0, Unsorted::CurrentFrame)) + phase) / static_cast<uint32_t>(SlotGateHoldFrames);
+
+		return SlotGateDraw(slotScore, threshold, slot, window, &key);
 	}
 
 	bool IsAITickWindow(int period, int window)

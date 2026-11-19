@@ -2688,7 +2688,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// the dangerous ones first, and together). Never joins a target the others already kill twice
 	// over, and keeps the current target unless the new one is clearly better (Expert 5 switches
 	// sooner). Returns the new target, or nullptr to keep the current one.
-	const bool focusFireOpen = SlotGate(scores[76], 80, 76);
+	const bool focusFireOpen = SlotGateHeld(scores[76], 80, 76);
 	const int focusSwitchPercent = (pExt->NeuralAI_ActiveExpert == 5) ? 115 : 140;
 
 	auto pickFocusTarget = [&](FootClass* pFoot, int maxRange) -> TechnoClass*
@@ -3194,7 +3194,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (pEBld->Type->Capturable && pEBld->Type->ConstructionYard && !pCapturableEnemyConYard)
 			pCapturableEnemyConYard = pEBld;
 
-		if (SlotGate(scores[79], 80, 79)
+		if (SlotGateHeld(scores[79], 80, 79)
 			&& (pEBld->Type->SuperWeapon != -1 || pEBld->Type->PowerBonus > 0
 				|| pEBld->Type->Factory != AbstractType::None || pEBld->Type->ConstructionYard))
 		{
@@ -3208,7 +3208,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				surgicalEnemyBlds[surgicalEnemyBldCount++] = pEBld;
 		}
 
-		if (SlotGate(scores[57], 150, 57))
+		if (SlotGateHeld(scores[57], 150, 57))
 		{
 			int sScore = 0;
 
@@ -3226,7 +3226,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	if (pCapturableEnemyConYard && SlotGate(scores[82], 60, 82))
+	if (pCapturableEnemyConYard && SlotGateHeld(scores[82], 60, 82, pCapturableEnemyConYard->UniqueID))
 	{
 		for (auto const pEng : InfantryClass::Array)
 		{
@@ -3700,7 +3700,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 58 (Anti-SW Scatter): When an enemy Superweapon is ready/imminent,
 		// scatter tightly clumped combat vehicles so a single Nuke/Lightning Storm
 		// doesn't wipe the whole army!
-		if (enemySuperImminent && SlotGate(scores[58], SurvivalMicroVetoScore, 58) && !pType->Harvester && !pType->ResourceGatherer
+		if (enemySuperImminent && SlotGateHeld(scores[58], SurvivalMicroVetoScore, 58, pUnit->UniqueID) && !pType->Harvester && !pType->ResourceGatherer
 			&& pUnit->CurrentMission != Mission::Move && (IsAITickWindow(90, 15)))
 		{
 			const CellStruct uc = pUnit->GetMapCoords();
@@ -3731,7 +3731,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Strictly respect NoManualUnload / NoManualEnter (dummy sub-weapon
 		// passenger hacks in any mod).
 		if (pUnit->Passengers.NumPassengers > 0 && !pType->Naval && !HasNoManualUnload(pType)
-			&& !HasNoManualEnter(pType) && pUnit->GetHealthPercentage() < 0.24 && SlotGate(scores[70], SurvivalMicroVetoScore, 70))
+			&& !HasNoManualEnter(pType) && pUnit->GetHealthPercentage() < 0.24 && SlotGateHeld(scores[70], SurvivalMicroVetoScore, 70, pUnit->UniqueID))
 		{
 			if (auto const pUC = pUnit->GetCell())
 			{
@@ -3748,7 +3748,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// attached Ivan bomb and no Repair Depot is nearby, charge straight into
 		// the nearest enemy so the bomb explodes in the enemy's ranks instead of
 		// ours!
-		if (pUnit->AttachedBomb != nullptr && !pRepairDepot && SlotGate(scores[72], 60, 72))
+		if (pUnit->AttachedBomb != nullptr && !pRepairDepot && SlotGateHeld(scores[72], 60, 72, pUnit->UniqueID))
 		{
 			TechnoClass* pKamikazeTarget = pSurgicalEnemyBld ? static_cast<TechnoClass*>(pSurgicalEnemyBld)
 															: static_cast<TechnoClass*>(pWoundedEnemyVehicle);
@@ -4920,7 +4920,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// hubs, and >= 12 cells from enemy turrets) so the MCV can deploy a
 				// forward Outpost (War Factory, Barracks, Refinery, or
 				// Prism/Obelisk/Grand Cannon turret push)!
-				if (SlotGate(scores[81], 75, 81) && (pHouse->CountResourceDestinations >= 1 || pHouse->OwnedBuildings >= 5))
+				if (SlotGateHeld(scores[81], 75, 81, pUnit->UniqueID) && (pHouse->CountResourceDestinations >= 1 || pHouse->OwnedBuildings >= 5))
 				{
 					BuildingClass* pSameZoneEnemyBld = nullptr;
 					int bestEnemyDist = 99999;
@@ -6052,7 +6052,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Transports are repaired by the ferry controller (only when empty). A damaged valuable
 		// unit retreats when the trip pays (tryRepairRetreat: depot, repairer or self-heal); a trip
 		// under way is not judged again.
-		const bool parasiteToRemove = pUnit->ParasiteEatingMe != nullptr && SlotGate(scores[64], 60, 64);
+		const bool parasiteToRemove = pUnit->ParasiteEatingMe != nullptr && SlotGateHeld(scores[64], 60, 64, pUnit->UniqueID);
 
 		// Worth a repair trip: expensive, veteran, or clearly above what our army fields on average
 		// (an army of cheap units has no 800 credit tanks to save).
@@ -6084,7 +6084,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 65 (Grinder Mind-Control Recycling & Salvage): Send mind-controlled
 		// vehicles we captured (MindControlledBy != nullptr) into our Grinder for
 		// instant cash AND to immediately free our Yuri/Mastermind's control slot!
-		if (pGrinderBld && !pType->Naval && SlotGate(scores[65], 80, 65)
+		if (pGrinderBld && !pType->Naval && SlotGateHeld(scores[65], 80, 65, pUnit->UniqueID)
 			&& (pUnit->MindControlledBy != nullptr
 				|| (!pRepairDepot && pUnit->GetHealthPercentage() < 0.18 && pHouse->Available_Money() < 600)))
 		{
@@ -6098,7 +6098,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Slot 67 (ManualReload Ammo Replenishment): Return to reload dock when
 		// Ammo == 0
-		if (pUnitReloadBld && pType->ManualReload && pType->Ammo > 0 && pUnit->Ammo == 0 && SlotGate(scores[67], 60, 67))
+		if (pUnitReloadBld && pType->ManualReload && pType->Ammo > 0 && pUnit->Ammo == 0 && SlotGateHeld(scores[67], 60, 67, pUnit->UniqueID))
 		{
 			if (pUnit->CurrentMission != Mission::Enter)
 			{
@@ -6111,7 +6111,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 68 (TiberiumHeal Regeneration): Move wounded
 		// CyborgReaper/Fiend/Visceroid units onto nearby Tiberium/Ore to heal for
 		// free!
-		if (pType->TiberiumHeal && pUnit->GetHealthPercentage() < 0.55 && SlotGate(scores[68], 60, 68)
+		if (pType->TiberiumHeal && pUnit->GetHealthPercentage() < 0.55 && SlotGateHeld(scores[68], 60, 68, pUnit->UniqueID)
 			&& pUnit->CurrentMission != Mission::Move)
 		{
 			if (pUnit->MoveToTiberium(10, false))
@@ -6344,7 +6344,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Engineer is within 10 cells moving in to capture it, hold fire on the
 		// ConYard so our Engineer can steal it alive!
 		if (ownEngineerNearEnemyConYard && pCapturableEnemyConYard && pUnit->Target == pCapturableEnemyConYard
-			&& pCapturableEnemyConYard->GetHealthPercentage() < 0.35 && SlotGate(scores[82], 60, 82))
+			&& pCapturableEnemyConYard->GetHealthPercentage() < 0.35 && SlotGateHeld(scores[82], 60, 82, pUnit->UniqueID))
 		{
 			pUnit->SetTarget(nullptr);
 
@@ -6356,7 +6356,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 71 (Chrono Legionnaire Temporal Breaker): Immediately kill any enemy
 		// Chrono Legionnaire erasing our building or tank so it is restored at
 		// 100%!
-		if (pEnemyTemporalAttacker && pPrimaryWpn && pPrimaryWpn->Damage > 0 && SlotGate(scores[71], 60, 71)
+		if (pEnemyTemporalAttacker && pPrimaryWpn && pPrimaryWpn->Damage > 0 && SlotGateHeld(scores[71], 60, 71, pUnit->UniqueID)
 			&& pUnit->DistanceFrom(pEnemyTemporalAttacker) <= 4096)
 		{
 			DispatchFootToTargetOrTransport(pUnit, pEnemyTemporalAttacker, Mission::Attack, true);
@@ -6371,7 +6371,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 74 (Anti-Drain Floating Disc Interceptor & Multi-Flank Mobile AA Defense):
 		// Mobile AA units immediately shoot down any enemy Floating Disc draining our buildings,
 		// and distribute across multiple simultaneous incoming airborne flanks near our base!
-		if (pEnemyDrainer && hasMobileAAWeapon && SlotGate(scores[74], SurvivalMicroVetoScore, 74) && pUnit->DistanceFrom(pEnemyDrainer) <= 4608)
+		if (pEnemyDrainer && hasMobileAAWeapon && SlotGateHeld(scores[74], SurvivalMicroVetoScore, 74, pUnit->UniqueID) && pUnit->DistanceFrom(pEnemyDrainer) <= 4608)
 		{
 			pUnit->SetTarget(pEnemyDrainer);
 
@@ -6413,7 +6413,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// from the nearest visible armed ground enemy, but only behind a healthy ally (> 70% HP,
 		// within 5 cells) that is at least as close to that enemy, so the enemy has to switch
 		// targets. Without such an ally the step would only cost fire.
-		if (pUnit->Target != nullptr && !pType->Naval && pUnit->GetHealthPercentage() < 0.38 && SlotGate(scores[77], SurvivalMicroVetoScore, 77)
+		if (pUnit->Target != nullptr && !pType->Naval && pUnit->GetHealthPercentage() < 0.38 && SlotGateHeld(scores[77], SurvivalMicroVetoScore, 77, pUnit->UniqueID)
 			&& (IsAITickWindow(45, 15)))
 		{
 			const CellStruct uc = pUnit->GetMapCoords();
@@ -6482,7 +6482,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Slot 79 (Surgical Enemy Power, Superweapon & Factory Snipe): When inside
 		// range of a critical enemy structure, prioritize the nearest one over walls/silos!
-		if (surgicalEnemyBldCount > 0 && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Damage > 0 && SlotGate(scores[79], 80, 79))
+		if (surgicalEnemyBldCount > 0 && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Damage > 0 && SlotGateHeld(scores[79], 80, 79, pUnit->UniqueID))
 		{
 			const int maxSnipeDist = std::max(1280, static_cast<int>(pPrimaryWpn->Range) + 384);
 			BuildingClass* pNearestSurgical = nullptr;
@@ -6513,7 +6513,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Slot 80 (Fast Flanker & Jumpjet Counter-Battery vs Enemy Artillery):
 		if (pEnemyArtilleryUnit && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Damage > 0
-			&& (pType->Speed >= 8 || pType->JumpJet) && SlotGate(scores[80], 80, 80)
+			&& (pType->Speed >= 8 || pType->JumpJet) && SlotGateHeld(scores[80], 80, 80, pUnit->UniqueID)
 			&& pUnit->DistanceFrom(pEnemyArtilleryUnit) <= 4608)
 		{
 			DispatchFootToTargetOrTransport(pUnit, pEnemyArtilleryUnit, Mission::Attack, true);
@@ -6523,7 +6523,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Slot 78 (High-Ground Cliff Advantage Positioning): Siege/long-range units
 		// step onto nearby higher-elevation cells (CellClass::Level) when idle!
-		if (isUnitIdle && pPrimaryWpn && pPrimaryWpn->Range >= (7 * 256) && !pType->Naval && SlotGate(scores[78], 90, 78)
+		if (isUnitIdle && pPrimaryWpn && pPrimaryWpn->Range >= (7 * 256) && !pType->Naval && SlotGateHeld(scores[78], 90, 78, pUnit->UniqueID)
 			&& (IsAITickWindow(120, 20)))
 		{
 			if (auto const pCurC = pUnit->GetCell())
@@ -6576,7 +6576,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 58 (Tank Infantry Crushing): Heavy Crusher=yes tanks run over nearby
 		// Crushable=yes enemy infantry (<= 3 cells) instead of wasting slow cannon
 		// shells!
-		if (pType->Crusher && !pType->Naval && SlotGate(scores[58], 100, 58)
+		if (pType->Crusher && !pType->Naval && SlotGateHeld(scores[58], 100, 58, pUnit->UniqueID)
 			&& (isUnitIdle || pUnit->CurrentMission == Mission::Attack) && (IsAITickWindow(45, 15)))
 		{
 			CellClass* pCrushCell = nullptr;
@@ -6905,7 +6905,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool shellingBuildingFromRange = abstract_cast<BuildingClass*>(pUnit->Target)
 			&& pUnit->DistanceFrom(pUnit->Target) >= 6 * Unsorted::LeptonsPerCell;
 
-		if (pPrimaryWpn && pPrimaryWpn->Spawner && !shellingBuildingFromRange && SlotGate(scores[60], 100, 60)
+		if (pPrimaryWpn && pPrimaryWpn->Spawner && !shellingBuildingFromRange && SlotGateHeld(scores[60], 100, 60, pUnit->UniqueID)
 			&& homeCoords != CellStruct::Empty && (IsAITickWindow(45, 15)))
 		{
 			bool enemyClosingOnSpawner = false;
@@ -6972,8 +6972,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (pLeadHeavyTank && pUnit != pLeadHeavyTank && isUnitIdle && !pType->Naval
 			&& (isUnarmedSupportEscort
 				|| (((pPrimaryWpn && pPrimaryWpn->Projectile && pPrimaryWpn->Projectile->AA) || pType->Sensors)
-					&& SlotGate(scores[60], 120, 60))
-				|| (pType->GapGenerator && SlotGate(scores[63], 80, 63)))
+					&& SlotGateHeld(scores[60], 120, 60, pUnit->UniqueID))
+				|| (pType->GapGenerator && SlotGateHeld(scores[63], 80, 63, pUnit->UniqueID)))
 			&& (IsAITickWindow(90, 20)))
 		{
 			const int distToLead = pUnit->DistanceFrom(pLeadHeavyTank);
@@ -6997,7 +6997,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Slot 61 (Mirage Tank Dynamic Disguise & Counter-Disguise Interception):
 		if (pType->CanDisguise && !pType->PermaDisguise && !pUnit->Disguised && pSampleEnemyInfantry
-			&& pUnit->CanDisguiseAs(pSampleEnemyInfantry) && SlotGate(scores[61], 80, 61))
+			&& pUnit->CanDisguiseAs(pSampleEnemyInfantry) && SlotGateHeld(scores[61], 80, 61, pUnit->UniqueID))
 		{
 			pUnit->DisguiseAs(pSampleEnemyInfantry);
 		}
@@ -7020,7 +7020,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			&& (pType->CanDisguise || pType->PermaDisguise || pType->Cloakable) && pPrimaryWpn
 			&& pPrimaryWpn->Damage > 0;
 
-		if (isCamoAmbushTank && SlotGate(scores[83], 60, 83) && homeCoords != CellStruct::Empty)
+		if (isCamoAmbushTank && SlotGateHeld(scores[83], 60, 83, pUnit->UniqueID) && homeCoords != CellStruct::Empty)
 		{
 			const CellStruct uc = pUnit->GetMapCoords();
 			auto const pUC = pUnit->GetCell();
@@ -7298,7 +7298,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (auto const pCurTargetInf = abstract_cast<InfantryClass*>(pUnit->Target))
 		{
 			if (pCurTargetInf->Type && pCurTargetInf->Type->Slaved && pCurTargetInf->SlaveOwner
-				&& pCurTargetInf->SlaveOwner->IsAlive && !pCurTargetInf->SlaveOwner->InLimbo && SlotGate(scores[62], 60, 62))
+				&& pCurTargetInf->SlaveOwner->IsAlive && !pCurTargetInf->SlaveOwner->InLimbo && SlotGateHeld(scores[62], 60, 62, pUnit->UniqueID))
 			{
 				DispatchFootToTargetOrTransport(pUnit, pCurTargetInf->SlaveOwner, Mission::Attack, true);
 
@@ -7306,7 +7306,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (pEnemySlaveMiner && isUnitIdle && !pType->Naval && SlotGate(scores[62], 140, 62)
+		if (pEnemySlaveMiner && isUnitIdle && !pType->Naval && SlotGateHeld(scores[62], 140, 62, pUnit->UniqueID)
 			&& pUnit->DistanceFrom(pEnemySlaveMiner) <= 4096)
 		{
 			DispatchFootToTargetOrTransport(pUnit, pEnemySlaveMiner, Mission::Attack, true);
@@ -7324,7 +7324,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool canCureParasite = pPrimaryWpn
 			&& (pPrimaryWpn->Damage < 0 || (pWH && pWH->Sonic) || (pWHExt && pWHExt->RemoveParasite.Get(false)));
 
-		if (pParasitedOwnUnit && pParasitedOwnUnit != pUnit && isUnitIdle && canCureParasite && SlotGate(scores[64], 60, 64)
+		if (pParasitedOwnUnit && pParasitedOwnUnit != pUnit && isUnitIdle && canCureParasite && SlotGateHeld(scores[64], 60, 64, pUnit->UniqueID)
 			&& pUnit->DistanceFrom(pParasitedOwnUnit) <= 4096)
 		{
 			DispatchFootToTargetOrTransport(pUnit, pParasitedOwnUnit, Mission::Attack, true);
@@ -7336,7 +7336,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Cyberworm): Target expensive enemy tanks/harvesters/warships that do NOT
 		// yet have a parasite!
 		if (pWH && pWH->Parasite && isUnitIdle && pBestParasiteVictim && pUnit->ParasiteImUsing == nullptr
-			&& SlotGate(scores[64], 60, 64) && pType->Naval == pBestParasiteVictim->Type->Naval
+			&& SlotGateHeld(scores[64], 60, 64, pUnit->UniqueID) && pType->Naval == pBestParasiteVictim->Type->Naval
 			&& pUnit->DistanceFrom(pBestParasiteVictim) <= 4608)
 		{
 			DispatchFootToTargetOrTransport(pUnit, pBestParasiteVictim, Mission::Attack, true);
@@ -7345,7 +7345,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		// Slot 66 (EMP Pulse Targeting & EMP-Paralyzed Target Finisher):
-		if (pWH && pWH->EMEffect && isUnitIdle && pEnemyNonEMPedHeavy && SlotGate(scores[66], 80, 66)
+		if (pWH && pWH->EMEffect && isUnitIdle && pEnemyNonEMPedHeavy && SlotGateHeld(scores[66], 80, 66, pUnit->UniqueID)
 			&& pUnit->DistanceFrom(pEnemyNonEMPedHeavy) <= 4096)
 		{
 			DispatchFootToTargetOrTransport(pUnit, pEnemyNonEMPedHeavy, Mission::Attack, true);
@@ -7353,7 +7353,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 		else if (pEnemyEMPedTarget && isUnitIdle && pPrimaryWpn && pPrimaryWpn->Damage > 0 && (!pWH || !pWH->EMEffect)
-			&& SlotGate(scores[66], 100, 66) && pUnit->DistanceFrom(pEnemyEMPedTarget) <= 3584)
+			&& SlotGateHeld(scores[66], 100, 66, pUnit->UniqueID) && pUnit->DistanceFrom(pEnemyEMPedTarget) <= 3584)
 		{
 			DispatchFootToTargetOrTransport(pUnit, pEnemyEMPedTarget, Mission::Attack, true);
 
@@ -7417,7 +7417,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		// Slot 68 (Psychedelic Chaos Gas): Target non-berserk heavy enemy tanks!
-		if (pWH && pWH->Psychedelic && isUnitIdle && pEnemyChaosTarget && SlotGate(scores[68], 80, 68)
+		if (pWH && pWH->Psychedelic && isUnitIdle && pEnemyChaosTarget && SlotGateHeld(scores[68], 80, 68, pUnit->UniqueID)
 			&& pUnit->DistanceFrom(pEnemyChaosTarget) <= 3584)
 		{
 			DispatchFootToTargetOrTransport(pUnit, pEnemyChaosTarget, Mission::Attack, true);
@@ -7427,7 +7427,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Slot 69 (Submarine Cloak Ambush & Anti-Submarine Destroyer Escort). While only enemy ships or
 		// submarines remain (NavalRemnantUntil) the hunt runs whatever the learned gate says.
-		if (pType->Naval && (SlotGate(scores[69], 80, 69) || GetMacroState(pHouse).NavalRemnantUntil > Unsorted::CurrentFrame
+		if (pType->Naval && (SlotGateHeld(scores[69], 80, 69, pUnit->UniqueID) || GetMacroState(pHouse).NavalRemnantUntil > Unsorted::CurrentFrame
 			|| GetMacroState(pHouse).SubThreatUntil > Unsorted::CurrentFrame))
 		{
 			if (pType->Cloakable && pUnit->GetHealthPercentage() < 0.45 && homeCoords != CellStruct::Empty
@@ -7686,7 +7686,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	int targetBridgeSpan = -1;
 	BuildingClass* pTargetBridgeHut = PickBridgeToRepair(pHouse, targetBridgeSpan);
 
-	if (pTargetBridgeHut && !SlotGate(scores[21], 400, 21))
+	if (pTargetBridgeHut && !SlotGateHeld(scores[21], 400, 21, pTargetBridgeHut->UniqueID))
 		pTargetBridgeHut = nullptr;
 
 	// A unit whose warhead repairs a bridge from its hut does it in one hit, no engineer needed.
@@ -7924,7 +7924,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				continue;
 			}
-			else if (pInf->Type->Deployer && pInf->Type->ImmuneToRadiation && SlotGate(scores[63], 80, 63)
+			else if (pInf->Type->Deployer && pInf->Type->ImmuneToRadiation && SlotGateHeld(scores[63], 80, 63, pInf->UniqueID)
 				&& (IsAITickWindow(45, 15)))
 			{
 				int enemiesInRadRange = 0;
@@ -8000,7 +8000,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 57 (Combat Infantry Deploy): Deploy GI / Guardian GI / Desolator
 		// (Deployer=yes) when actively engaging an enemy in combat!
 		if (pInf->Type->Deployer && pInf->Target != nullptr && pInf->CurrentMission == Mission::Attack
-			&& SlotGate(scores[57], 100, 57) && (IsAITickWindow(60, 20)))
+			&& SlotGateHeld(scores[57], 100, 57, pInf->UniqueID) && (IsAITickWindow(60, 20)))
 		{
 			pInf->QueueMission(Mission::Unload, true);
 
@@ -8052,7 +8052,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (pGrinderBld && pInf->MindControlledBy != nullptr && SlotGate(scores[65], 80, 65))
+		if (pGrinderBld && pInf->MindControlledBy != nullptr && SlotGateHeld(scores[65], 80, 65, pInf->UniqueID))
 		{
 			DispatchFootToTargetOrTransport(pInf, pGrinderBld, Mission::Enter, false);
 
@@ -8061,7 +8061,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Slot 68 (TiberiumHeal Infantry Regeneration & Sniper/Poison Specialist
 		// Hunter):
-		if (pInf->Type->TiberiumHeal && pInf->GetHealthPercentage() < 0.55 && SlotGate(scores[68], 60, 68)
+		if (pInf->Type->TiberiumHeal && pInf->GetHealthPercentage() < 0.55 && SlotGateHeld(scores[68], 60, 68, pInf->UniqueID)
 			&& pInf->CurrentMission != Mission::Move)
 		{
 			if (pInf->MoveToTiberium(8, false))
@@ -8069,7 +8069,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		if (pEnemySpecialistInf && isIdle && pInfWpn && pInfWpn->Damage > 0 && !pInf->Type->Engineer
-			&& ((pInfWpn->Warhead && pInfWpn->Warhead->Poison) || pInfWpn->Range >= (6 * 256)) && SlotGate(scores[68], 80, 68)
+			&& ((pInfWpn->Warhead && pInfWpn->Warhead->Poison) || pInfWpn->Range >= (6 * 256)) && SlotGateHeld(scores[68], 80, 68, pInf->UniqueID)
 			&& pInf->DistanceFrom(pEnemySpecialistInf) <= 4096)
 		{
 			DispatchFootToTargetOrTransport(pInf, pEnemySpecialistInf, Mission::Attack, true);
@@ -8396,7 +8396,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				const bool canCaptureNow = isNeutralTech || (pBld->GetHealthPercentage() <= capLevel + 0.05)
 					|| (engCaptureBias > 60 && isHighValueEnemyBld) || (resourceHoarder && isCashTechBld)
-					|| (SlotGate(scores[82], 60, 82) && pBld->Type->ConstructionYard);
+					|| (SlotGateHeld(scores[82], 60, 82, pInf->UniqueID) && pBld->Type->ConstructionYard);
 
 				if (!canCaptureNow)
 					continue;
@@ -8431,7 +8431,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const bool isStrategicTechHub = isCashTechBld || BuildingTypeExt::IsAIBaseNormal(pBld->Type);
 				const int effectiveDist
 					= (!isNeutralTech && (pBld->Type->ConstructionYard || isCashTechBld)
-						  && (SlotGate(scores[82], 60, 82) || (resourceHoarder && isCashTechBld)))
+						  && (SlotGateHeld(scores[82], 60, 82, pInf->UniqueID) || (resourceHoarder && isCashTechBld)))
 					? (dist / 3)
 					: (isNeutralTech ? (isCashTechBld ? (dist / 3) : (isStrategicTechHub ? (dist * 2 / 5) : (dist / 2)))
 									: dist);
@@ -8496,7 +8496,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// least that house on the way).
 			const bool victimColors = pVictim && DisguiseSpyFor(pHouse, pInf, pVictim);
 
-			if (!victimColors && pSampleEnemyInfantry && (pVictim || SlotGate(scores[61], 60, 61))
+			if (!victimColors && pSampleEnemyInfantry && (pVictim || SlotGateHeld(scores[61], 60, 61, pInf->UniqueID))
 				&& !SpyDisguiseHouse(pInf) && IsCellKnownToAI(pHouse, pSampleEnemyInfantry->GetMapCoords()))
 			{
 				CopySoldierDisguise(pHouse, pInf, pSampleEnemyInfantry);
@@ -8508,7 +8508,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (auto const pCurTargetInf = abstract_cast<InfantryClass*>(pInf->Target))
 		{
 			if (pCurTargetInf->Type && pCurTargetInf->Type->Slaved && pCurTargetInf->SlaveOwner
-				&& pCurTargetInf->SlaveOwner->IsAlive && !pCurTargetInf->SlaveOwner->InLimbo && SlotGate(scores[62], 60, 62))
+				&& pCurTargetInf->SlaveOwner->IsAlive && !pCurTargetInf->SlaveOwner->InLimbo && SlotGateHeld(scores[62], 60, 62, pInf->UniqueID))
 			{
 				DispatchFootToTargetOrTransport(pInf, pCurTargetInf->SlaveOwner, Mission::Attack, true);
 
@@ -10126,7 +10126,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		if (!endgameRemnantHunt && (pUnit->Type->CanDisguise || pUnit->Type->PermaDisguise) && SlotGate(scores[83], 60, 83)
+		if (!endgameRemnantHunt && (pUnit->Type->CanDisguise || pUnit->Type->PermaDisguise) && SlotGateHeld(scores[83], 60, 83, pUnit->UniqueID)
 			&& homeCoords != CellStruct::Empty && pUnit->GetMapCoords().DistanceFrom(homeCoords) > 11.0)
 		{
 			continue;
@@ -10644,7 +10644,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Expert 9 & Arch 7 (Allied Coalition Rescue & Joint Attack Wave):
 	// If an allied house's critical building (ConYard, Factory, Superweapon) is
 	// under enemy attack, coordinate our wave to defend our ally!
-	if (pExt->NeuralAI_ActiveExpert == 9 || pExt->NeuralAI_Archetype == 7 || SlotGate(scores[85], 120, 85))
+	if (pExt->NeuralAI_ActiveExpert == 9 || pExt->NeuralAI_Archetype == 7 || SlotGateHeld(scores[85], 120, 85))
 	{
 		for (auto const pAllyB : BuildingClass::Array)
 		{
@@ -14041,7 +14041,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 						const bool islandLiftsPaused
 							= Unsorted::CurrentFrame - GetMacroState(pHouse).LastAirDropAbortFrame < 1800;
-						const bool evacuationAllowed = pRepairDepot && SlotGate(scores[54], -200, 54);
+						const bool evacuationAllowed = pRepairDepot && SlotGateHeld(scores[54], -200, 54, pTrans->UniqueID);
 
 						for (auto const pU : UnitClass::Array)
 						{
@@ -15869,7 +15869,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	}
 
 	std::vector<int> contactAirRisk(enemyContacts.size(), -1);
-	const bool airHarassAllowed = SlotGate(scores[32], -100, 32);
+	const bool airHarassAllowed = SlotGateHeld(scores[32], -100, 32);
 	const bool airForceInCharge = pExt->NeuralAI_ActiveExpert == 8;
 
 	// The harassment of the aircraft that are not of the wings (gas bombers, gunships that do
@@ -16164,7 +16164,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else if (!pAir->IsInAir() && pAir->GetHeight() == 0 && freeAirCap > 0
 				&& (enemyOnDisconnectedIsland || pIslandResourceGoalCell != nullptr
-					|| pIslandTechGoalCell != nullptr || scores[28] > 600 || SlotGate(scores[75], 100, 75)))
+					|| pIslandTechGoalCell != nullptr || scores[28] > 600 || SlotGateHeld(scores[75], 100, 75, pAir->UniqueID)))
 			{
 				// The one boarding is sent in again when it lost its radio link.
 				if (pSingleAirBoarder)
@@ -16259,7 +16259,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			bool pickedAirliftJob = false;
 			const bool islandLiftsPaused = Unsorted::CurrentFrame - GetMacroState(pHouse).LastAirDropAbortFrame < 1800;
-			const bool evacuationAllowed = pRepairDepot && SlotGate(scores[54], -200, 54);
+			const bool evacuationAllowed = pRepairDepot && SlotGateHeld(scores[54], -200, 54, pAir->UniqueID);
 
 			for (auto const pU : UnitClass::Array)
 			{
@@ -16395,7 +16395,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				CountDecision(NeuralDecision::AirHarass, pHouse->ArrayIndex);
 				NoteAirTask(pHouse, pAir, NeuralAirTask::Harass);
 			}
-			else if (airDiveAtHarvester && hitsGround && SlotGate(scores[56], 200, 56))
+			else if (airDiveAtHarvester && hitsGround && SlotGateHeld(scores[56], 200, 56, pAir->UniqueID))
 			{
 				OrderAircraftAttack(pAir, pVisibleEnemyHarvester);
 				NoteAirTask(pHouse, pAir, NeuralAirTask::HarvesterDive);
@@ -16471,7 +16471,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// offline structures back online via GoOnline().
 			if (pOwnBld->Type->TogglePower && (IsAITickWindow(90, 15)))
 			{
-				if (isLowPower && hasPoweredDefense && SlotGate(scores[60], 80, 60) && pOwnBld->StuffEnabled
+				if (isLowPower && hasPoweredDefense && SlotGateHeld(scores[60], 80, 60, pOwnBld->UniqueID) && pOwnBld->StuffEnabled
 					&& !pOwnBld->Type->IsBaseDefense && pOwnBld->Type->PowerDrain >= 100
 					&& (pOwnBld->Type->SuperWeapon != -1 || pOwnBld->Type->Factory == AbstractType::None))
 				{
@@ -16544,7 +16544,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			// Slot 73 (Dynamic Tank Bunker Unload): Eject the bunkered tank if the
 			// Tank Bunker is about to collapse (< 22% HP) or if no enemies are near!
-			if (pOwnBld->Type->Bunker && pOwnBld->BunkerLinkedItem != nullptr && SlotGate(scores[73], 60, 73))
+			if (pOwnBld->Type->Bunker && pOwnBld->BunkerLinkedItem != nullptr && SlotGateHeld(scores[73], 60, 73, pOwnBld->UniqueID))
 			{
 				if (hpPct < 0.22)
 					pOwnBld->UnloadBunker();
@@ -16713,7 +16713,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 			else if (pOwnBld->Type->ConstructionYard && pHouse->NumConYards >= 2
-				&& pOwnBld != pHouse->ConYards.GetItem(0) && SlotGate(scores[82], 60, 82) && homeCoords != CellStruct::Empty
+				&& pOwnBld != pHouse->ConYards.GetItem(0) && SlotGateHeld(scores[82], 60, 82, pOwnBld->UniqueID) && homeCoords != CellStruct::Empty
 				&& pOwnBld->GetMapCoords().DistanceFrom(homeCoords) > 18.0)
 			{
 				const CellStruct yc = pOwnBld->GetMapCoords();
@@ -16959,7 +16959,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				CellClass* pSiegeCreepGoalCell = nullptr;
 				const bool isSecondaryYard = (pHouse->NumConYards >= 2 && pOwnBld != pHouse->ConYards.GetItem(0));
 
-				if (isSecondaryYard && pNomadicResourceGoalCell == nullptr && SlotGate(scores[81], 75, 81))
+				if (isSecondaryYard && pNomadicResourceGoalCell == nullptr && SlotGateHeld(scores[81], 75, 81, pOwnBld->UniqueID))
 				{
 					CellStruct nearestEnemy = CellStruct::Empty;
 					int nearestEnemyDist = INT_MAX;
@@ -17227,7 +17227,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// Slot 59 (Smart Wrench Building Repair): Activate engine wrench repair
 				// on damaged key structures when credits are healthy, and pause repair
 				// if credits drop critically low!
-				else if (hpPct < 0.82 && hpPct >= sellDodgeThresh && SlotGate(scores[59], 80, 59) && currentCredits > 1200
+				else if (hpPct < 0.82 && hpPct >= sellDodgeThresh && SlotGateHeld(scores[59], 80, 59, pOwnBld->UniqueID) && currentCredits > 1200
 					&& !pOwnBld->IsBeingRepaired)
 				{
 					pOwnBld->SetRepairState(1);
