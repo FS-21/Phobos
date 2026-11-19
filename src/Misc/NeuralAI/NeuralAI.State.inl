@@ -2146,6 +2146,10 @@ namespace
 	// that could not leave the water.
 	constexpr int OpNoReachFrames = 1800;
 	constexpr int OpNoTransportRetryFrames = 18000;
+	// A free transport goes first to the operation of the house that has waited longest with none,
+	// once it has waited OpStarvedFrames (user, 2026-11-19: the oldest operation took each transport
+	// that came free or was built, and those on other crossings waited OpNoTransportFrames).
+	constexpr int OpStarvedFrames = 1800;
 	// TEMP diagnostic (LogOpTransportRefusals): how often an operation that no transport takes names
 	// why each transport of ours is turned down, the lines a match and the transports a line.
 	constexpr int OpRefusalLogFrames = 1800;
@@ -2154,6 +2158,8 @@ namespace
 	// TEMP diagnostic: the members that join the operation of another client on their crossing, logged
 	// per match.
 	constexpr int OpSharedCrossingLogLines = 60;
+	// TEMP diagnostic: the transports an operation leaves to one that waits longer, logged per match.
+	constexpr int OpStarvedLogLines = 80;
 	constexpr int OpStuckFrames = 900;
 	constexpr double OpStuckCells = 2.0;
 	constexpr int OpCrossCapFrames = 9000;

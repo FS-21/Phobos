@@ -2632,6 +2632,64 @@ namespace
 				return crossingDanger[kind];
 			};
 
+			// The operations of the house that have waited OpStarvedFrames or more with no transport, and
+			// longer than this one (the earlier its last transport, then the lower its id, the longer):
+			// a transport one of them would take is left to it. This one waits as long only while it has
+			// no transport itself; a shuttle always leaves it. Each of them comes to this candidate
+			// search every tick until it ends (every return before it ends the operation).
+			const int ownWaitSince = !shuttle && op.Transports.empty() && now >= op.LastTransportFrame
+				&& now - op.LastTransportFrame >= OpStarvedFrames ? op.LastTransportFrame : INT_MAX;
+			std::vector<const NeuralTransportOperation*> starved;
+
+			for (auto const& other : macro.TransportOps)
+			{
+				if (&other == &op || other.Over || other.Client == NeuralOpClient::Shuttle || !other.Transports.empty()
+					|| other.Landing == CellStruct::Empty || !MapClass::Instance.TryGetCellAt(other.Staging)
+					|| now < other.LastTransportFrame || now - other.LastTransportFrame < OpStarvedFrames
+					|| other.LastTransportFrame > ownWaitSince || (other.LastTransportFrame == ownWaitSince && other.Id > op.Id))
+				{
+					continue;
+				}
+
+				if (std::any_of(other.Members.begin(), other.Members.end(),
+					[](const NeuralOpMember& member) { return !member.Aboard && member.Work == NeuralShuttleWork::None; }))
+				{
+					starved.push_back(&other);
+				}
+			}
+
+			// The first of them that this transport could take a member of, by the checks of its own
+			// candidate search: the crossing from where it stands and a seat on it, empty.
+			auto const starvedTaker = [&](FootClass* pFoot, OpCarrier carrier) -> const NeuralTransportOperation*
+			{
+				auto const pType = pFoot->GetTechnoType();
+
+				for (auto const pOther : starved)
+				{
+					if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), pOther->Staging)
+						|| !CanTransportTypeLink(pType, pOther->Staging, pOther->Landing))
+					{
+						continue;
+					}
+
+					for (auto const& member : pOther->Members)
+					{
+						if (member.Aboard || member.Work != NeuralShuttleWork::None)
+							continue;
+
+						auto const pMemberFoot = find(member.UniqueID);
+
+						if (pMemberFoot && OpCarrierTakes(pFoot, carrier, pMemberFoot)
+							&& (carrier == OpCarrier::Carryall || CanPassengerFitInTransport(pFoot, pMemberFoot->GetTechnoType(), 0, 0)))
+						{
+							return pOther;
+						}
+					}
+				}
+
+				return nullptr;
+			};
+
 			auto const consider = [&](FootClass* pFoot)
 			{
 				if (!pFoot || pFoot->Owner != pHouse)
@@ -2647,6 +2705,29 @@ namespace
 
 				if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), op.Staging) || !CanTransportTypeLink(pType, op.Staging, op.Landing))
 					return;
+
+				if (auto const pTaker = starvedTaker(pFoot, carrier))
+				{
+					// TEMP diagnostic (rule consolidation, 2026-11-19): the transport left to an operation that waits longer.
+					static int starvedLogSerial = -1;
+					static int starvedLogCount = 0;
+
+					if (starvedLogSerial != NeuralMatchSerial)
+					{
+						starvedLogSerial = NeuralMatchSerial;
+						starvedLogCount = 0;
+					}
+
+					if (starvedLogCount++ < OpStarvedLogLines)
+					{
+						Debug::Log("[NeuralAI] House %d transport op %d (%s, %d transports) leaves %s %u at (%d,%d) to op %d (%s), %d frames "
+							"without a transport, frame %d.\n", houseIndex, op.Id, OpClientName(op.Client), static_cast<int>(op.Transports.size()),
+							pType->ID, pFoot->UniqueID, pFoot->GetMapCoords().X, pFoot->GetMapCoords().Y, pTaker->Id,
+							OpClientName(pTaker->Client), now - pTaker->LastTransportFrame, now);
+					}
+
+					return;
+				}
 
 				const double distance = pFoot->GetMapCoords().DistanceFrom(op.Staging);
 				candidates.push_back({ pFoot, carrier, distance, distance + static_cast<double>(dangerFor(pFoot, carrier)) / OpKindDangerPerCell });
