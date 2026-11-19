@@ -217,6 +217,9 @@ namespace
 		UrbanQuietRelease,
 		FerryDepartedStuck,
 		FerryMcvNowhere,
+		DeployerIdleWatchdog,
+		DeployerSiteFailed,
+		DeployerGoalNoFit,
 		Count
 	};
 
@@ -247,7 +250,7 @@ namespace
 		"resourceDetour", "resourceHealStop", "ferryTakenAboard", "scoutSweep", "sensorLookout",
 		"mcvIdleUnfold", "mcvIdleSite", "mcvIdleHome", "opHoldMoved", "jamBarrierBreach", "opNoTransportReach", "backdoorNoCarrier",
 		"mcvIdleStepOnSite", "mcvUnfoldRetry", "navalStrikeInRange", "navalPlanShipsFreed", "urbanQuietRelease",
-		"ferryDepartedStuck", "ferryMcvNowhere" };
+		"ferryDepartedStuck", "ferryMcvNowhere", "deployerIdleWatchdog", "deployerSiteFailed", "deployerGoalNoFit" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
