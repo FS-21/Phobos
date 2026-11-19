@@ -3536,6 +3536,50 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// field
 		if (pType->DeploysInto && pType->DeploysInto->ConstructionYard)
 		{
+			// A yard unfolding is the engine's: no rule below gives that MCV an order (matches
+			// #11445-#11450: MCVs ordered to unfold were sent elsewhere by them, three times one MCV).
+			// When the engine refuses the deploy it clears the foundation for the next try, so a yard
+			// that was unfolding unfolds again on that spot, McvUnfoldMostTries times within
+			// McvUnfoldRetryFrames, before the rules below may move it.
+			{
+				auto& unfoldMacro = GetMacroState(pHouse);
+				auto& unfolds = unfoldMacro.McvUnfolds;
+				const int now = Unsorted::CurrentFrame;
+				const CellStruct here = pUnit->GetMapCoords();
+
+				if (unfolds.size() > 64)
+					std::erase_if(unfolds, [now](const auto& entry) { return now - entry.second.Frame > McvUnfoldRetryFrames; });
+
+				if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload || pUnit->QueuedMission == Mission::Unload)
+				{
+					auto& unfold = unfolds[pUnit->UniqueID];
+
+					if (unfold.Cell != here)
+					{
+						unfold.Cell = here;
+						unfold.Tries = 0;
+					}
+
+					unfold.Frame = now;
+					unfoldMacro.McvIdle.erase(pUnit->UniqueID);
+					continue;
+				}
+
+				if (auto const itUnfold = unfolds.find(pUnit->UniqueID); itUnfold != unfolds.end())
+				{
+					if (here.DistanceFrom(itUnfold->second.Cell) <= 1.0 && now - itUnfold->second.Frame <= McvUnfoldRetryFrames
+						&& itUnfold->second.Tries < McvUnfoldMostTries && CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
+					{
+						++itUnfold->second.Tries;
+						CountDecision(NeuralDecision::McvUnfoldRetry, pHouse->ArrayIndex);
+						OrderDeployerUnpack(pUnit);
+						continue;
+					}
+
+					unfolds.erase(itUnfold);
+				}
+			}
+
 			// When a ConYard packs up via UndeployBuildingToVehicle, the newly spawned MCV
 			// starts in Mission::Guard with its migration goal stored in ArchiveTarget.
 			// Promote ArchiveTarget to an active Move destination on frame 1 so it never
@@ -3709,11 +3753,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					};
 
 					// The next leg toward Goal: false when there is no way there (a direct move for the
-					// last stretch, where the route search gives no leg).
+					// last stretch, where the route search gives no leg). A move the MCV already makes is
+					// kept only when it heads for Goal or for the leg given last: any other is the order
+					// that left it standing (matches #11445-#11450: MCVs on another rule's move were never
+					// sent to their site, and the site was judged from where they stood).
 					auto const followGoal = [&]() -> bool
 					{
 						if (pUnit->CurrentMission == Mission::Move && pUnit->Destination && pUnit->DistanceFrom(pUnit->Destination) > 512)
-							return true;
+						{
+							const CellStruct dest = CellClass::Coord2Cell(pUnit->Destination->GetCoords());
+
+							if (dest.DistanceFrom(watch.Goal) <= 2.0 || (watch.Leg != CellStruct::Empty && dest.DistanceFrom(watch.Leg) <= 2.0))
+								return true;
+						}
 
 						CellClass* pLeg = GroundRouteHop(pUnit, watch.Goal, McvIdleLegSteps);
 
@@ -3729,9 +3781,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 
 						if (pLeg)
+						{
+							watch.Leg = pLeg->MapCoords;
 							IssueMoveOrder(pUnit, pLeg, 1.0);
+						}
 
 						return pLeg != nullptr;
+					};
+
+					auto const failGoal = [&](const char* what)
+					{
+						logStep(what, watch.Goal);
+						watch.FailedSites.push_back(watch.Goal);
+						watch.OwnOrderUntil = -1;
+						watch.Leg = CellStruct::Empty;
+						watch.NearSince = -1;
 					};
 
 					bool handled = false;
@@ -3739,27 +3803,53 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 					if (watch.OwnOrderUntil >= now)
 					{
-						// Arrived: on the site, or next to it and stopped (matches #11569-#11574: judged 2-3
-						// cells short while still driving, 15-30 frames after the order, a good site
-						// counted as failed).
+						// The deploy check reads the cell the MCV stands on, so only the site cell itself
+						// tells whether the site is good; stopped on the way, the MCV unfolds where the
+						// yard fits. Next to the site and stopped, it is moved straight onto the site cell
+						// (not by the order helper, which keeps a unit within a cell or two of its
+						// destination), and the site fails after McvIdleArriveFrames there.
+						const bool onSite = mcvCell == watch.Goal;
 						const double goalDist = mcvCell.DistanceFrom(watch.Goal);
 						const bool driving = pUnit->CurrentMission == Mission::Move && pUnit->Destination
 							&& pUnit->DistanceFrom(pUnit->Destination) > 256;
 
-						if (goalDist <= 1.0 || (goalDist <= 3.0 && !driving))
+						if ((onSite || !driving) && CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
 						{
-							if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
-							{
-								logStep("unfolds at the site", mcvCell);
-								OrderDeployerUnpack(pUnit);
-								idleWatch.erase(pUnit->UniqueID);
-								continue;
-							}
+							logStep(onSite ? "unfolds at the site" : "unfolds on the way at", mcvCell);
+							OrderDeployerUnpack(pUnit);
+							idleWatch.erase(pUnit->UniqueID);
+							continue;
+						}
 
-							logStep("cannot unfold at", watch.Goal);
-							watch.FailedSites.push_back(watch.Goal);
-							watch.OwnOrderUntil = -1;
+						if (onSite)
+						{
+							failGoal("cannot unfold at");
 							retryNow = true;
+						}
+						else if (goalDist <= McvIdleNearCells && !driving)
+						{
+							if (watch.NearSince < 0)
+								watch.NearSince = now;
+
+							if (now - watch.NearSince >= McvIdleArriveFrames)
+							{
+								failGoal("cannot step onto");
+								retryNow = true;
+							}
+							else
+							{
+								auto const pGoalCell = MapClass::Instance.TryGetCellAt(watch.Goal);
+
+								if (pGoalCell && pUnit->Destination != pGoalCell)
+								{
+									pUnit->SetDestination(pGoalCell, true);
+									pUnit->QueueMission(Mission::Move, true);
+									NoteOrderCaller(pUnit, "move");
+									CountDecision(NeuralDecision::McvIdleStepOnSite, pHouse->ArrayIndex);
+								}
+
+								handled = true;
+							}
 						}
 						else if (followGoal())
 						{
@@ -3767,17 +3857,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 						else
 						{
-							logStep("finds no way to", watch.Goal);
-							watch.FailedSites.push_back(watch.Goal);
-							watch.OwnOrderUntil = -1;
+							failGoal("finds no way to");
 							retryNow = true;
 						}
 					}
 					else if (watch.OwnOrderUntil >= 0)
 					{
-						logStep("did not reach", watch.Goal);
-						watch.FailedSites.push_back(watch.Goal);
-						watch.OwnOrderUntil = -1;
+						failGoal("did not reach");
 						retryNow = true;
 					}
 
@@ -3813,6 +3899,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						if (goal != CellStruct::Empty)
 						{
 							watch.Goal = goal;
+							watch.Leg = CellStruct::Empty;
+							watch.NearSince = -1;
 							watch.OwnOrderUntil = now + McvIdleOrderFrames;
 							CountDecision(home ? NeuralDecision::McvIdleHome : NeuralDecision::McvIdleSite, pHouse->ArrayIndex);
 							logStep(home ? "goes home to" : "goes to the site", goal);
@@ -11294,8 +11382,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// counts, as for IsNavalShoreWithin): first on the line from the building toward the ship, shifted
 		// sideways by the ship's id so a group spreads, as far out as the reach allows; else the one
 		// nearest the ship; nullptr when there is none.
+		// minLeptons: the minimum range of the weapon that fires; the cell keeps one cell more off the
+		// target (match #11450: a missile ship with a minimum range of 8 cells was sent closer, where it
+		// cannot fire).
 		auto findOffshoreFiringWaterCell
-			= [](UnitClass* pShip, BuildingClass* pTarget, int reachLeptons) -> CellClass*
+			= [](UnitClass* pShip, BuildingClass* pTarget, int reachLeptons, int minLeptons) -> CellClass*
 		{
 			const MovementZone shipMZ = pShip->Type->MovementZone;
 			const int shipZone = ObjectZone(pShip, shipMZ);
@@ -11318,8 +11409,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				const double flat = c.DistanceFrom(targetCoords) * Unsorted::LeptonsPerCell;
 				const double rise = std::max(0, targetLevel - pWC->Level) * Unsorted::LevelHeight;
+				const double reach = std::sqrt(flat * flat + rise * rise);
 
-				return std::sqrt(flat * flat + rise * rise) + NavalReachMarginLeptons <= reachLeptons;
+				return reach + NavalReachMarginLeptons <= reachLeptons
+					&& (minLeptons <= 0 || reach >= minLeptons + Unsorted::LeptonsPerCell);
 			};
 
 			const CellStruct sc = pShip->GetMapCoords();
@@ -11512,7 +11605,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						hasTarget = true;
 					}
 					else if (CellClass* pOffshoreFireCell = findOffshoreFiringWaterCell(pBeachU, pNavalTargetBld,
-								pLandGun ? WeaponReachAgainst(pLandGun, pNavalTargetBld->Type) : otherReach))
+								pLandGun ? WeaponReachAgainst(pLandGun, pNavalTargetBld->Type) : otherReach,
+								pLandGun ? pLandGun->MinimumRange : pLandSiegeWpn->MinimumRange))
 					{
 						OrderFootToAttackMove(pBeachU, pOffshoreFireCell);
 						hasTarget = true;
