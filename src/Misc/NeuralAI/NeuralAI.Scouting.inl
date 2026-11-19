@@ -1355,7 +1355,6 @@ namespace
 			if (there && UnitExt::CanDeployIntoBuilding(pUnit))
 			{
 				// UnitClass::TryToDeploy gives up while the unit has a destination.
-				NeuralDeployOrderFrame[pUnit->UniqueID] = now;
 				pUnit->SetDestination(nullptr, true);
 				pUnit->ClearNavigationList();
 				pUnit->SetTarget(nullptr);

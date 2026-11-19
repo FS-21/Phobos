@@ -633,9 +633,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	UpdateUrban(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "urban");
 
-	// TEMP diagnostic: siege units that start to unfold, who ordered it and what they aim at.
-	LogSiegeDeploys(pHouse);
-
 	// Transport operations last: they have the final word over their units and transports.
 	UpdateTransportOperations(pHouse);
 	}
