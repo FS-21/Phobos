@@ -2488,6 +2488,9 @@ namespace
 		int ChangeFrame { -1 };
 		int SeenFrame { -1 };
 		bool Reached { false };
+		// Where it headed at the end of the last AI tick of its house (SnapshotOrderGoals).
+		CellStruct EndGoal { CellStruct::Empty };
+		int EndFrame { -1 };
 	};
 
 	struct NeuralOrderChurnPair
@@ -2557,10 +2560,20 @@ namespace
 			if (entry.Goal != CellStruct::Empty && goal.DistanceFrom(entry.Goal) <= OrderChurnJumpCells)
 				return;
 
-			const char* file = "untracked";
+			// The goal it had at the end of the last AI tick tells who changed it: "engine" (or a hook
+			// outside the AI tick) when it changed after that tick, else the code noted in that tick, else
+			// "unnoted" (an order of that tick given without a note); "untracked" without that end look.
+			const bool endSeen = entry.EndFrame >= 0 && entry.EndFrame >= lastSeen;
+			const bool changedAfterTick = endSeen
+				&& (entry.EndGoal == CellStruct::Empty || goal.DistanceFrom(entry.EndGoal) > OrderChurnJumpCells);
+			const char* file = endSeen ? "unnoted" : "untracked";
 			int line = 0;
 
-			if (auto const itCaller = callers.find(pFoot->UniqueID);
+			if (changedAfterTick)
+			{
+				file = "engine";
+			}
+			else if (auto const itCaller = callers.find(pFoot->UniqueID);
 				itCaller != callers.end() && itCaller->second.File && itCaller->second.Frame >= lastSeen)
 			{
 				file = itCaller->second.File;
@@ -2672,5 +2685,71 @@ namespace
 		churn.Reversals = 0;
 		churn.LogFrame = now;
 	}
+
+	// TEMP diagnostic (order churn): where the units of the house head at the end of its AI tick, so the
+	// next look tells the changes the engine made after the tick from the orders of the tick.
+	void SnapshotOrderGoals(HouseClass* pHouse)
+	{
+		if (!NeuralAI::HeadlessMode || !pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return;
+
+		auto& churn = OrderChurn[pHouse->ArrayIndex];
+
+		if (churn.Serial != NeuralMatchSerial)
+			return;
+
+		const int now = Unsorted::CurrentFrame;
+
+		for (auto& [uid, entry] : churn.Goals)
+		{
+			if (entry.SeenFrame != now)
+				continue;
+
+			entry.EndFrame = now;
+			entry.EndGoal = CellStruct::Empty;
+		}
+
+		auto const note = [&](FootClass* pFoot)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo)
+				return;
+
+			auto const itEntry = churn.Goals.find(pFoot->UniqueID);
+
+			if (itEntry == churn.Goals.end() || itEntry->second.EndFrame != now)
+				return;
+
+			AbstractClass* const pGoalObject = (pFoot->MegaMission == Mission::AttackMove && pFoot->MegaDestination)
+				? pFoot->MegaDestination
+				: pFoot->Destination;
+
+			if (pGoalObject)
+				itEntry->second.EndGoal = CellClass::Coord2Cell(pGoalObject->GetCoords());
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse)
+				note(pUnit);
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->Owner == pHouse)
+				note(pInf);
+		}
+	}
+
+	// Takes the end look of SnapshotOrderGoals when the AI tick of the house is over.
+	struct NeuralOrderChurnTickEnd
+	{
+		explicit NeuralOrderChurnTickEnd(HouseClass* pHouse) : House { pHouse } { }
+		~NeuralOrderChurnTickEnd() { SnapshotOrderGoals(House); }
+
+		NeuralOrderChurnTickEnd(const NeuralOrderChurnTickEnd&) = delete;
+		NeuralOrderChurnTickEnd& operator=(const NeuralOrderChurnTickEnd&) = delete;
+
+		HouseClass* House;
+	};
 
 } // namespace

@@ -3339,6 +3339,7 @@ namespace
 					wake(pTransport);
 					pTransport->SetDestination(pNext, true);
 					pTransport->QueueMission(moveOn, true);
+					NoteOrderCaller(pTransport, "move");
 					transport.OrderCell = pNext->MapCoords;
 				}
 
@@ -3350,6 +3351,7 @@ namespace
 				wake(pTransport);
 				pTransport->SetDestination(pLandingCell, true);
 				pTransport->QueueMission(setDown, true);
+				NoteOrderCaller(pTransport, "move");
 				transport.OrderCell = transport.Landing;
 			}
 		};
@@ -3837,6 +3839,7 @@ namespace
 						wake(pTransport);
 						pTransport->SetDestination(pStagingCell, true);
 						pTransport->QueueMission(setDown, true);
+						NoteOrderCaller(pTransport, "move");
 						transport.OrderCell = op.Staging;
 					}
 
