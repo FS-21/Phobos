@@ -565,9 +565,12 @@ namespace
 	// it began, and the largest load seen on it with the frame it grew last. Progress*: where it stood
 	// since when (a shuttle's harvester while a transport waits for it, any other member while it is
 	// farther from the cell it was sent to than OpMemberStuckFarCells). Cleared while it is aboard.
+	// Client: the one that asked for it, which it goes back to; a wave and the economy share the
+	// operation of a crossing (RequestTransportOperation), so it may differ from the operation's.
 	struct NeuralOpMember
 	{
 		DWORD UniqueID { 0 };
+		NeuralOpClient Client { NeuralOpClient::Wave };
 		int Size { 1 };
 		CellStruct Target { CellStruct::Empty };
 		DWORD Transport { 0 };
@@ -2148,6 +2151,9 @@ namespace
 	constexpr int OpRefusalLogFrames = 1800;
 	constexpr int OpRefusalLogLines = 150;
 	constexpr int OpRefusalLogTransports = 12;
+	// TEMP diagnostic: the members that join the operation of another client on their crossing, logged
+	// per match.
+	constexpr int OpSharedCrossingLogLines = 60;
 	constexpr int OpStuckFrames = 900;
 	constexpr double OpStuckCells = 2.0;
 	constexpr int OpCrossCapFrames = 9000;
