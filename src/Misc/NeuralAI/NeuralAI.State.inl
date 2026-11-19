@@ -1173,25 +1173,9 @@ namespace
 		int BankWantedYards { 0 };
 		// Packed-up yard MCVs sent across water by transport (by UniqueID, in order).
 		std::vector<DWORD> FerryingMcvs {};
-		// Ferry wait safety net (DispatchFootToTargetOrTransport): since when a unit has been asking
-		// for a crossing, and until when it may not ask again after giving up. Keyed lookups only.
-		std::unordered_map<DWORD, int> FerryWaitSince {};
+		// Until when a unit that lost its boarding turn, or held a transport's radio link without
+		// boarding, counts as blocked from ferries (IsFerryBlocked). Keyed lookups only.
 		std::unordered_map<DWORD, int> FerryBlockedUntil {};
-		// Ferry loading (user: divide the work by what fits): passengers reserved by a transport
-		// parked on a pickup shore, up to its free room by size. Passenger UniqueID -> transport
-		// UniqueID and the frame it was reserved. Ordered map: walked in a deterministic order.
-		struct FerryReservation
-		{
-			DWORD Transport { 0 };
-			int Frame { 0 };
-			// TEMP diagnostic: orders it got from its transport.
-			int EnterOrders { 0 };
-			int WalkOrders { 0 };
-			// Last frame the transport handled it in its queue (-1 until then): a transport that stops
-			// loading lets its passengers go after FerryQueueStaleFrames.
-			int QueueFrame { -1 };
-		};
-		std::map<DWORD, FerryReservation> FerryReserved {};
 		// Boarding turn of each loading transport: who holds it and since when it stands next to the
 		// transport without getting aboard. Transport UniqueID -> turn. Keyed lookups only.
 		struct FerryBoardTurn
@@ -1741,9 +1725,7 @@ namespace
 			this->TankCensusBirth.clear();
 			this->BankWantedYards = 0;
 			this->FerryingMcvs.clear();
-			this->FerryWaitSince.clear();
 			this->FerryBlockedUntil.clear();
-			this->FerryReserved.clear();
 			this->FerryBoardTurns.clear();
 			this->FerryLandings.clear();
 			this->CarryallDropCells.clear();
@@ -2097,17 +2079,8 @@ namespace
 		return count;
 	}
 
-	// A passenger reserved by one of our transports loading on a pickup shore: it walks to that
-	// transport and boards it, no other job takes it meanwhile.
-	constexpr int FerryReservationFrames = 1800;
-	// A reservation its transport has not handled for this long is dropped (the transport left, got
-	// another job or the passenger is on other ground).
-	constexpr int FerryQueueStaleFrames = 120;
-	// Reserved passengers wait this far from their transport, so the cells next to it stay free for
-	// the one boarding.
-	constexpr double FerryWaitCells = 4.0;
 	// The one boarding loses its turn after this long within FerryBoardTurnCells of the transport
-	// without getting aboard, and is not reserved again for FerryBoardFailedFrames.
+	// without getting aboard, and counts as blocked from ferries for FerryBoardFailedFrames.
 	constexpr int FerryBoardTurnFrames = 300;
 	constexpr double FerryBoardTurnCells = 6.0;
 	constexpr int FerryBoardFailedFrames = 2700;
@@ -3548,27 +3521,6 @@ namespace
 	constexpr int ResourceHealSearchCells = 8;
 	constexpr int ResourceHealMaxFrames = 900;
 	constexpr int ResourceHealCooldownFrames = 900;
-
-	bool IsFerryReserved(const HouseClass* pHouse, DWORD uid)
-	{
-		auto const& reserved = GetMacroState(pHouse).FerryReserved;
-		auto const it = reserved.find(uid);
-
-		return it != reserved.end() && Unsorted::CurrentFrame - it->second.Frame < FerryReservationFrames
-			&& Unsorted::CurrentFrame >= it->second.Frame;
-	}
-
-	// A transport with passengers reserved is loading and takes no other job meanwhile.
-	bool IsFerryLoading(const HouseClass* pHouse, DWORD transportUid)
-	{
-		for (auto const& entry : GetMacroState(pHouse).FerryReserved)
-		{
-			if (entry.second.Transport == transportUid)
-				return true;
-		}
-
-		return false;
-	}
 
 	// A transport the loader left parked to load lately. The combat micro and the waves took it for
 	// a combat unit (armed or not) and sent it off on attack-moves and strikes while its passengers

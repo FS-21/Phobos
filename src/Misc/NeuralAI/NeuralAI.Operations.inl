@@ -202,7 +202,7 @@ namespace
 
 		const DWORD uid = pFoot->UniqueID;
 
-		if (IsInTransportOp(pHouse, uid) || IsPlanMember(pHouse, uid) || IsFerryLoading(pHouse, uid) || IsFerryParkedToLoad(pHouse, uid)
+		if (IsInTransportOp(pHouse, uid) || IsPlanMember(pHouse, uid) || IsFerryParkedToLoad(pHouse, uid)
 			|| IsOnRepairTrip(pHouse, uid) || IsActiveScout(pHouse, uid) || IsSneakStrikeActive(pHouse, uid))
 		{
 			return false;
@@ -1486,10 +1486,6 @@ namespace
 		pOp->Members.push_back(member);
 		macro.TransportOpOf[uid] = pOp->Id;
 
-		// A seat the old ferry loader held for it goes: that transport would call it to its door.
-		macro.FerryReserved.erase(uid);
-		macro.FerryWaitSince.erase(uid);
-
 		// Its mission waits: no target and no way of its own (the order its client gave before is
 		// dropped), until the operation hands it back.
 		if (pFoot->MegaMission == Mission::AttackMove)
@@ -1569,8 +1565,6 @@ namespace
 		member.Target = target;
 		pOp->Members.push_back(member);
 		macro.TransportOpOf[uid] = pOp->Id;
-		macro.FerryReserved.erase(uid);
-		macro.FerryWaitSince.erase(uid);
 
 		if (pFoot->MegaMission == Mission::AttackMove)
 			pFoot->ClearMegaMissionData();
