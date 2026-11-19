@@ -2930,12 +2930,25 @@ namespace
 	// included), a damaged own or allied vehicle on its ground within RepairerHealCells repaired first
 	// whatever it was doing, else it follows the nearest own armed vehicle on the move or in a fight on its
 	// ground (RepairerEscortMost repairers per vehicle at most), keeping within RepairerEscortKeepCells of
-	// it; no scout, wave, plan or transport operation.
+	// it; no scout, wave, plan or transport operation. Corrections (user, 2026-11-19: «deberia buscar
+	// objetos dañados a reparar en la base y expansiones. además tambien existe el MDISK que es un jumpjet
+	// volador que tambien reparar y la version upgradeada del ingeniero de CABAL»): a weapon repairs by its
+	// effective damage, Damage x Verses (WeaponRepairAbilities: MDISK's DiskHeal and ROBOTENGINEER2's
+	// SuperRepairGun do positive damage through negative Verses), over every weapon slot (MultiWeapon);
+	// a flying repairer reaches any ground; the escort follows only vehicles out in the field (farther than
+	// RepairerBaseCells from every building of ours), and with none out the repairer repairs the nearest
+	// vehicle or building below RepairerDamagedBelow at our bases and expansions (RepairerBaseSearchCells);
+	// an infantry capturer that also repairs (CABAL's Mechanic) repairs them too when it has nothing to
+	// capture, within RepairerMechanicCells.
 	constexpr int RepairerPerVehicles = 6;
 	constexpr int RepairerHealCells = 10;
 	constexpr int RepairerEscortMost = 2;
 	constexpr int RepairerEscortKeepCells = 4;
-	constexpr int RepairerLogLines = 30;
+	constexpr int RepairerLogLines = 40;
+	constexpr double RepairerBaseCells = 15.0;
+	constexpr double RepairerDamagedBelow = 0.85;
+	constexpr double RepairerBaseSearchCells = 200.0;
+	constexpr double RepairerMechanicCells = 30.0;
 
 	// Detection need (user, 2026-11-18: when the AI stops seeing the enemy, because it has not explored
 	// enough or he is cloaked or under water, it builds the units whose detection reaches far or that

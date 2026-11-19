@@ -231,20 +231,32 @@ namespace
 		}
 	}
 
-	// The weapon of pHealer that heals pPatient (negative damage, a warhead that works on its
-	// armor), or nullptr. Read from the unit, not its type: an IFV's weapon comes from its passenger
-	// (TechnoExt::GetCurrentWeapon: GetWeapon(0) of an FV with an engineer aboard is its missile).
+	// The weapon of pHealer that heals pPatient, or nullptr: its effective damage on the patient's armor
+	// (Damage x Verses) is negative, its warhead affects allies, it hits the ground and may fire at it
+	// (TechnoExt::MultiWeaponCanFire: CanTarget, CanTargetHouses). Read from the unit, not its type: an
+	// IFV's weapon comes from its passenger (TechnoExt::GetCurrentWeapon: GetWeapon(0) of an FV with an
+	// engineer aboard is its missile); a MultiWeapon type (CABAL's Mechanic) has WeaponCount of them. The
+	// sign of Damage alone missed the repair weapons with negative Verses (MDISK, ROBOTENGINEER2).
 	WeaponTypeClass* HealingWeaponFor(TechnoClass* pHealer, TechnoClass* pPatient)
 	{
-		for (int i = 0; i < 2; ++i)
-		{
-			auto const pW = TechnoExt::GetCurrentWeapon(pHealer, pHealer->GetTechnoType(), i == 1);
+		auto const pType = pHealer->GetTechnoType();
+		auto const pTypeExt = TechnoTypeExt::Fetch(pType);
+		const bool multiWeapon = pTypeExt && pTypeExt->MultiWeapon.Get() && !pType->IsGattling;
+		const int weapons = multiWeapon ? std::clamp(pType->WeaponCount, 0, TechnoTypeClass::MaxWeapons) : 2;
 
-			if (!pW || pW->Damage >= 0 || !pW->Warhead || (pW->Projectile && !pW->Projectile->AG))
+		for (int i = 0; i < weapons; ++i)
+		{
+			auto const pW = multiWeapon ? TechnoTypeExt::GetWeaponType(pType, i, pHealer->Veterancy.IsElite())
+				: TechnoExt::GetCurrentWeapon(pHealer, pType, i == 1);
+
+			if (!pW || pW->NeverUse || !pW->Warhead || !pW->Warhead->AffectsAllies || (pW->Projectile && !pW->Projectile->AG))
 				continue;
 
-			if (GeneralUtils::GetWarheadVersusArmor(pW->Warhead, pPatient, pPatient->GetTechnoType()) > 0.01)
+			if (pW->Damage * GeneralUtils::GetWarheadVersusArmor(pW->Warhead, pPatient, pPatient->GetTechnoType()) < -0.01
+				&& TechnoExt::MultiWeaponCanFire(pHealer, pPatient, pW))
+			{
 				return pW;
+			}
 		}
 
 		return nullptr;
@@ -290,6 +302,76 @@ namespace
 			{
 				bestCost = cost;
 				pBest = pHealer;
+			}
+		}
+
+		return pBest;
+	}
+
+	// Is this cell at one of our bases or expansions (Repairer*): within RepairerBaseCells of a building
+	// of ours (walls and invisible buildings aside)? The building cells are read once per frame and house.
+	bool IsAtOwnBase(HouseClass* pHouse, const CellStruct& cell)
+	{
+		static int cacheFrame = -1;
+		static int cacheHouse = -1;
+		static std::vector<CellStruct> buildingCells;
+
+		if (cacheFrame != Unsorted::CurrentFrame || cacheHouse != pHouse->ArrayIndex)
+		{
+			cacheFrame = Unsorted::CurrentFrame;
+			cacheHouse = pHouse->ArrayIndex;
+			buildingCells.clear();
+
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && !pBld->Type->Wall && !pBld->Type->InvisibleInGame)
+					buildingCells.push_back(pBld->GetMapCoords());
+			}
+		}
+
+		return std::any_of(buildingCells.begin(), buildingCells.end(),
+			[&cell](const CellStruct& bc) { return bc.DistanceFrom(cell) <= RepairerBaseCells; });
+	}
+
+	// The nearest thing of ours at a base or expansion that pRepairer repairs (Repairer*): a vehicle below
+	// RepairerDamagedBelow of its health at IsAtOwnBase, or a building below it (no wall, none being built
+	// or sold), within maxCells, on its ground (zone < 0: any ground, a flying repairer). nullptr: none.
+	TechnoClass* FindBaseRepairTarget(HouseClass* pHouse, FootClass* pRepairer, int zone, double maxCells)
+	{
+		const CellStruct here = pRepairer->GetMapCoords();
+		TechnoClass* pBest = nullptr;
+		double bestDist = maxCells;
+
+		auto const consider = [&](TechnoClass* pPatient)
+		{
+			const double dist = here.DistanceFrom(pPatient->GetMapCoords());
+
+			if (dist > bestDist || (dist == bestDist && pBest && pPatient->UniqueID >= pBest->UniqueID))
+				return;
+
+			if ((zone >= 0 && ObjectZone(pPatient, MovementZone::Normal) != zone) || !HealingWeaponFor(pRepairer, pPatient))
+				return;
+
+			bestDist = dist;
+			pBest = pPatient;
+		};
+
+		for (auto const pOwnU : UnitClass::Array)
+		{
+			if (pOwnU && pOwnU != pRepairer && pOwnU->Owner == pHouse && pOwnU->IsAlive && !pOwnU->InLimbo && pOwnU->Type
+				&& !pOwnU->IsInAir() && pOwnU->GetHealthPercentage() < RepairerDamagedBelow && IsAtOwnBase(pHouse, pOwnU->GetMapCoords()))
+			{
+				consider(pOwnU);
+			}
+		}
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && !pBld->Type->Wall && !pBld->Type->InvisibleInGame
+				&& pBld->GetHealthPercentage() < RepairerDamagedBelow && pBld->GetCurrentMission() != Mission::Construction
+				&& pBld->GetCurrentMission() != Mission::Selling)
+			{
+				consider(pBld);
 			}
 		}
 

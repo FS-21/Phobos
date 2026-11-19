@@ -4350,7 +4350,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 					// The same test as the light candidates of the pick (class L); a repairer is no fighter.
 					const bool isOwnedLight = !IsMainBattleTankType(pOwnedType) && pOwnedWpn->Range < ArtilleryRangeCells * Unsorted::LeptonsPerCell
-						&& !(pOwnedWpn->Projectile && pOwnedWpn->Projectile->AA) && pOwnedType->Passengers < 2 && pOwnedWpn->Damage >= 0
+						&& !(pOwnedWpn->Projectile && pOwnedWpn->Projectile->AA) && pOwnedType->Passengers < 2 && !IsRepairerUnit(pOwnedU)
 						&& !(TechnoTypeExt::Fetch(pOwnedType) && TechnoTypeExt::Fetch(pOwnedType)->Carryall);
 
 					if (isOwnedLight)
@@ -6013,7 +6013,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				const char diagClass = isMCV ? 'M' : (isKeyStructureDeployer ? 'D' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
 					: (isTransportClass ? 'P'
-						: ((isUnarmedSupportVehicle || (pWpn && pWpn->Damage < 0)) ? 'S'
+						: ((isUnarmedSupportVehicle || IsRepairerUnitType(pUnit)) ? 'S'
 							: (isAA ? 'A' : (isArtillery ? 'G' : (isMainTank ? 'T' : 'L')))))));
 				const int diagBase = pUnit->Cost / 4 + pUnit->Strength / 3;
 				const int diagPenalty = std::min(1200, ownedUnitWithConv * 55);
@@ -6036,8 +6036,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			// An armed light vehicle (the pick line's class L): no main battle tank, artillery, anti-air,
-			// transport, economy unit, deployer or repairer (negative damage).
-			if (pWpn && pWpn->Damage >= 0 && !isMainTank && !isAA && !isArtillery && !isTransportClass && !isEconomyUnit && !isMCV
+			// transport, economy unit, deployer or repairer (IsRepairerUnitType).
+			if (pWpn && !IsRepairerUnitType(pUnit) && !isMainTank && !isAA && !isArtillery && !isTransportClass && !isEconomyUnit && !isMCV
 				&& !isKeyStructureDeployer && !pUnit->Harvester && !pUnit->ResourceGatherer && score > bestLightScore)
 			{
 				bestLightScore = score;

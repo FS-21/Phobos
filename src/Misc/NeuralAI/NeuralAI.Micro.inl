@@ -5649,13 +5649,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		const auto pPrimaryWpn = pType->GetWeapon(0) ? pType->GetWeapon(0)->WeaponType : nullptr;
 
-		// Repairers (Repairer*: a repair vehicle, an IFV with an engineer aboard) go with our vehicles as
-		// the medics go with the soldiers. Repairing first: a damaged own or allied vehicle (or one a
-		// parasite eats) on its ground within RepairerHealCells, whatever it was doing. Else it follows the
-		// nearest own armed vehicle on the move or in a fight on its ground (RepairerEscortMost repairers
-		// per vehicle at most; the one followed now is kept while it still is), keeping within
-		// RepairerEscortKeepCells of it; with nobody out it stays where it is. Every order is direct: no
-		// transport operation for a repair across water (one was opened for a TSREPAIR, 2026-11-19).
+		// Repairers (Repairer*: a repair vehicle, the Repair Disk, an IFV with an engineer aboard) go with
+		// our vehicles as the medics go with the soldiers. Repairing first: a damaged own or allied vehicle
+		// (or one a parasite eats) on its ground within RepairerHealCells, whatever it was doing. Else it
+		// follows the nearest own armed vehicle out in the field (not at IsAtOwnBase) on the move or in a
+		// fight on its ground (RepairerEscortMost repairers per vehicle at most; the one followed now is
+		// kept while it still is), keeping within RepairerEscortKeepCells of it. With nobody out it repairs
+		// the nearest damaged vehicle or building at our bases and expansions (FindBaseRepairTarget; user,
+		// 2026-11-19), else it stays where it is. A flying repairer (MDISK) reaches any ground. Every
+		// order is direct: no transport operation for a repair across water (one was opened for a TSREPAIR).
 		if (IsRepairerUnit(pUnit))
 		{
 			auto const pRepairTarget = abstract_cast<TechnoClass*>(pUnit->Target);
@@ -5666,7 +5668,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			}
 
-			const int repairerZone = ObjectZone(pUnit, MovementZone::Normal);
+			const bool repairerFlies = pType->MovementZone == MovementZone::Fly || pType->JumpJet || pType->BalloonHover;
+			const int repairerZone = repairerFlies ? -1 : ObjectZone(pUnit, MovementZone::Normal);
 			auto const onRepairerGround = [repairerZone](const ObjectClass* pOther)
 			{
 				return repairerZone < 0 || ObjectZone(pOther, MovementZone::Normal) == repairerZone;
@@ -5679,7 +5682,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				if (!pAllyU || pAllyU == pUnit || !pAllyU->Owner || !pHouse->IsAlliedWith(pAllyU->Owner) || pAllyU->InLimbo
 					|| !pAllyU->IsAlive || !pAllyU->Type || pAllyU->Type->Organic || pAllyU->IsInAir()
-					|| (pAllyU->ParasiteEatingMe == nullptr && pAllyU->GetHealthPercentage() >= 0.85))
+					|| (pAllyU->ParasiteEatingMe == nullptr && pAllyU->GetHealthPercentage() >= RepairerDamagedBelow))
 				{
 					continue;
 				}
@@ -5719,7 +5722,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!pOther || pOther == pUnit || pOther->Owner != pHouse || pOther->InLimbo || !pOther->IsAlive || !pOther->Type
 					|| pOther->Type->Naval || pOther->Type->Harvester || pOther->Type->ResourceGatherer
 					|| !pOther->Type->GetWeapon(0) || !pOther->Type->GetWeapon(0)->WeaponType || IsRepairerUnit(pOther)
-					|| IsInTransportOp(pHouse, pOther->UniqueID) || !onRepairerGround(pOther))
+					|| IsInTransportOp(pHouse, pOther->UniqueID) || !onRepairerGround(pOther) || IsAtOwnBase(pHouse, pOther->GetMapCoords()))
 				{
 					return false;
 				}
@@ -5792,6 +5795,27 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					Debug::Log("[NeuralAI] Frame %d | House #%d repairer %s %u follows %s %u (mission %d) %d cells away\n", Unsorted::CurrentFrame,
 						pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pEscorted->Type->ID, pEscorted->UniqueID,
 						static_cast<int>(pEscorted->GetCurrentMission()), escortDist / Unsorted::LeptonsPerCell);
+				}
+			}
+
+			if (pEscorted)
+				continue;
+
+			// Nobody out in the field: the damage at our bases and expansions.
+			if (auto const pAtBase = FindBaseRepairTarget(pHouse, pUnit, repairerZone, RepairerBaseSearchCells))
+			{
+				pUnit->ClearMegaMissionData();
+				pUnit->SetTarget(pAtBase);
+				pUnit->QueueMission(Mission::Attack, true);
+				NoteOrderCaller(pUnit, "repair");
+
+				if (repairerMacro.RepairerLogCount < RepairerLogLines)
+				{
+					repairerMacro.RepairerLogCount++;
+					Debug::Log("[NeuralAI] Frame %d | House #%d repairer %s %u repairs at base %s %u at %d%% %d cells away\n", Unsorted::CurrentFrame,
+						pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pAtBase->GetTechnoType()->ID, pAtBase->UniqueID,
+						static_cast<int>(pAtBase->GetHealthPercentage() * 100.0),
+						static_cast<int>(pUnit->GetMapCoords().DistanceFrom(pAtBase->GetMapCoords())));
 				}
 			}
 
@@ -7941,6 +7965,30 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				claims[pInf->UniqueID] = { pBestCapBld->UniqueID, Unsorted::CurrentFrame };
+			}
+			// Nothing to capture: a capturer that also repairs (CABAL's Mechanic: SuperRepairGun) repairs the
+			// nearest damaged vehicle or building at our bases and expansions (Repairer*).
+			else if ((RepairAbilitiesOf(pInf->Type) & (RepairsVehicles | RepairsBuildings)) != 0)
+			{
+				if (auto const pAtBase = FindBaseRepairTarget(pHouse, pInf, ObjectZone(pInf, MovementZone::Normal), RepairerMechanicCells))
+				{
+					pInf->ClearMegaMissionData();
+					pInf->SetTarget(pAtBase);
+					pInf->QueueMission(Mission::Attack, true);
+					NoteOrderCaller(pInf, "repair");
+
+					// TEMP diagnostic: the repairers' orders (RepairerLogLines per house and match).
+					auto& mechanicMacro = GetMacroState(pHouse);
+
+					if (mechanicMacro.RepairerLogCount < RepairerLogLines)
+					{
+						mechanicMacro.RepairerLogCount++;
+						Debug::Log("[NeuralAI] Frame %d | House #%d repairer %s %u repairs at base %s %u at %d%% %d cells away\n",
+							Unsorted::CurrentFrame, pHouse->ArrayIndex, pInf->Type->ID, pInf->UniqueID, pAtBase->GetTechnoType()->ID,
+							pAtBase->UniqueID, static_cast<int>(pAtBase->GetHealthPercentage() * 100.0),
+							static_cast<int>(pInf->GetMapCoords().DistanceFrom(pAtBase->GetMapCoords())));
+					}
+				}
 			}
 
 			continue;
