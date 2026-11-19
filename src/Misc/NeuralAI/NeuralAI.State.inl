@@ -1148,6 +1148,8 @@ namespace
 		int SiegeScreenLogCount { 0 };
 		// TEMP diagnostic (push gate): the held pushes logged this match.
 		int PushGateLogCount { 0 };
+		// TEMP diagnostic (repairers): the repair and escort orders logged this match.
+		int RepairerLogCount { 0 };
 		// TEMP diagnostic (tank census, 2026-11-18; NoteMainTankDeath): main battle tanks out of a
 		// factory, the ones lost by what they did when they died (guard, Base Threat Intercept, another
 		// plan, a wave, scouting, a repair trip or transport op, at home, away), the kind of the killer
@@ -1724,6 +1726,7 @@ namespace
 			this->TankGuardEscorts.clear();
 			this->SiegeScreenLogCount = 0;
 			this->PushGateLogCount = 0;
+			this->RepairerLogCount = 0;
 			this->TankCensusBuilt = 0;
 			this->TankCensusLost.fill(0);
 			this->TankCensusKillers.fill(0);
@@ -2878,6 +2881,22 @@ namespace
 	constexpr double PushGateGroupCells = 10.0;
 	constexpr double PushGateHeadingCells = 6.0;
 	constexpr int PushGateLogLines = 30;
+
+	// Repairers (user, 2026-11-19: approved «Sí, prepáralo»; an IFV with an engineer aboard does the
+	// same job): a vehicle every weapon of which does negative damage (IsRepairerUnit, read from the unit:
+	// TSREPAIR, an FV with an engineer). Before: no production role (built when it won the score, no cap),
+	// no escort (it repaired a damaged vehicle within 14 cells only when idle), and it went out as a scout,
+	// with the waves and, for a heal across water, on a transport operation. Now like the healer infantry:
+	// one built for each RepairerPerVehicles armed ground vehicles of ours (repairers already out
+	// included), a damaged own or allied vehicle on its ground within RepairerHealCells repaired first
+	// whatever it was doing, else it follows the nearest own armed vehicle on the move or in a fight on its
+	// ground (RepairerEscortMost repairers per vehicle at most), keeping within RepairerEscortKeepCells of
+	// it; no scout, wave, plan or transport operation.
+	constexpr int RepairerPerVehicles = 6;
+	constexpr int RepairerHealCells = 10;
+	constexpr int RepairerEscortMost = 2;
+	constexpr int RepairerEscortKeepCells = 4;
+	constexpr int RepairerLogLines = 30;
 
 	// Detection need (user, 2026-11-18: when the AI stops seeing the enemy, because it has not explored
 	// enough or he is cloaked or under water, it builds the units whose detection reaches far or that
