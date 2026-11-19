@@ -354,6 +354,46 @@ namespace
 			}
 		}
 
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search above.
+		{
+			NeuralWaitAsker asker {};
+			asker.Speed = pType->SpeedType;
+			asker.Movement = pType->MovementZone;
+			asker.Zone = zone;
+			asker.Naval = naval;
+			NeuralWaitSearch search {};
+			search.MinRing = minRing;
+			search.MaxRing = maxRing;
+			search.Step = 2;
+			search.Pick = NeuralWaitPick::LowestScore;
+			auto const pShadow = FindWaitCellNear(center, search, asker,
+				WaitInMap | WaitNoBuilding | WaitSurfaceOfAsker | WaitOffDeck | WaitZone | WaitClearIgnoringUnits
+					| (offMouths ? WaitOffMouth : 0u) | (offNarrow ? WaitOffNarrow : 0u),
+				[](const CellStruct&, const CellClass*) { return false; },
+				[&](const CellStruct& c, const CellClass*, int r, int dx, int dy)
+				{
+					int crowd = 0;
+
+					for (auto const& o : occupied)
+					{
+						if (std::abs(o.X - c.X) <= 2 && std::abs(o.Y - c.Y) <= 2)
+							++crowd;
+					}
+
+					for (auto const& tk : taken)
+					{
+						if (std::abs(tk.X - c.X) <= 1 && std::abs(tk.Y - c.Y) <= 1)
+							crowd += 4;
+					}
+
+					const double dot = (dx * prefX + dy * prefY) / std::max(1.0, std::sqrt(static_cast<double>(dx * dx + dy * dy)));
+					return crowd * 30 + static_cast<int>(std::max(0.0, dot) * 200.0) + r * 5;
+				});
+			static int shadowLogSerial = -1;
+			static int shadowLogCount = 0;
+			NoteWaitCellShadow("FindClearingCell", shadowLogSerial, shadowLogCount, center, pBest, pShadow);
+		}
+
 		return pBest;
 	}
 
@@ -1407,6 +1447,41 @@ namespace
 					}
 				}
 			}
+		}
+
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search above.
+		{
+			NeuralWaitAsker asker {};
+			asker.Speed = pType->SpeedType;
+			asker.Movement = pType->MovementZone;
+			asker.Zone = zone;
+			asker.Naval = naval;
+			NeuralWaitSearch search {};
+			search.MinRing = 1;
+			search.MaxRing = EmergencyLaneSideCells;
+			search.Pick = NeuralWaitPick::LowestScore;
+			auto const pShadow = FindWaitCellNear(here, search, asker,
+				WaitInMap | WaitNoBuilding | WaitSurfaceOfAsker | WaitOffDeck | WaitOffMouth | WaitZone | WaitClearIgnoringUnits,
+				[&laneCells](const CellStruct& c, const CellClass*) { return laneCells.contains(BridgeCellIndex(c)); },
+				[&](const CellStruct& c, const CellClass* pCell, int r, int dx, int dy)
+				{
+					const double along = std::abs(dx * dirX + dy * dirY) / std::sqrt(static_cast<double>(dx * dx + dy * dy));
+					int value = static_cast<int>(along * 100.0) + r * 20;
+
+					if (pCell->GetContent())
+						value += 60;
+
+					if (std::find(taken.begin(), taken.end(), c) != taken.end())
+						value += 200;
+
+					if (IsNarrowPassage(c))
+						value += 40;
+
+					return value;
+				});
+			static int shadowLogSerial = -1;
+			static int shadowLogCount = 0;
+			NoteWaitCellShadow("FindLaneSideCell", shadowLogSerial, shadowLogCount, here, pBest, pShadow);
 		}
 
 		return pBest;

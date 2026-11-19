@@ -101,31 +101,40 @@ namespace
 		return !((rules & WaitOffNarrow) && IsNarrowPassage(cell));
 	}
 
-	// How a search picks its cell. First: the first allowed cell in the order every finder uses.
+	// How a search picks its cell. First: the first allowed cell in the order every finder uses;
+	// LowestScore: every ring, the lowest score, the first one on a tie.
 	enum class NeuralWaitPick : uint8_t
 	{
-		First
+		First,
+		LowestScore
 	};
 
+	// Step: 2 walks rings and cells on a grid of 2 (FindClearingCell).
 	struct NeuralWaitSearch
 	{
 		int MinRing { 0 };
 		int MaxRing { 0 };
+		int Step { 1 };
 		NeuralWaitPick Pick { NeuralWaitPick::First };
 	};
 
-	// Rings MinRing..MaxRing (Chebyshev) around center in the order the finders use: dy from -r to r,
-	// then dx from -r to r, the perimeter of each ring only (ring 0 is the center). reject(c, pCell)
-	// holds the caller's own rules. Null when no cell passes. It only reads.
-	template <typename Reject>
+	// Rings MinRing..MaxRing (Chebyshev, Step apart) around center in the order the finders use: dy
+	// from -r to r, then dx from -r to r, Step apart, the perimeter of each ring only (ring 0 is the
+	// center). reject(c, pCell) holds the caller's own rules; score(c, pCell, r, dx, dy) is read for
+	// LowestScore only. Null when no cell passes. It only reads.
+	template <typename Reject, typename Score>
 	CellClass* FindWaitCellNear(const CellStruct& center, const NeuralWaitSearch& search, const NeuralWaitAsker& asker, uint32_t rules,
-		Reject&& reject)
+		Reject&& reject, Score&& score)
 	{
-		for (int r = std::max(0, search.MinRing); r <= search.MaxRing; ++r)
+		const int step = std::max(1, search.Step);
+		CellClass* pBest = nullptr;
+		int bestScore = INT_MAX;
+
+		for (int r = std::max(0, search.MinRing); r <= search.MaxRing; r += step)
 		{
-			for (int dy = -r; dy <= r; ++dy)
+			for (int dy = -r; dy <= r; dy += step)
 			{
-				for (int dx = -r; dx <= r; ++dx)
+				for (int dx = -r; dx <= r; dx += step)
 				{
 					if (std::abs(dx) != r && std::abs(dy) != r)
 						continue;
@@ -140,12 +149,29 @@ namespace
 					if (reject(c, pCell))
 						continue;
 
-					return pCell;
+					if (search.Pick == NeuralWaitPick::First)
+						return pCell;
+
+					const int value = score(c, pCell, r, dx, dy);
+
+					if (value < bestScore)
+					{
+						bestScore = value;
+						pBest = pCell;
+					}
 				}
 			}
 		}
 
-		return nullptr;
+		return pBest;
+	}
+
+	template <typename Reject>
+	CellClass* FindWaitCellNear(const CellStruct& center, const NeuralWaitSearch& search, const NeuralWaitAsker& asker, uint32_t rules,
+		Reject&& reject)
+	{
+		return FindWaitCellNear(center, search, asker, rules, std::forward<Reject>(reject),
+			[](const CellStruct&, const CellClass*, int, int, int) { return 0; });
 	}
 
 	// TEMP diagnostic (rule consolidation, case 3): a cell a finder chose that FindWaitCellNear does
