@@ -416,6 +416,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	// TEMP diagnostic: parked transports moved since the last tick of this house.
 	TraceParkedFerries(pHouse->ArrayIndex, "the engine or another house between ticks");
+	// TEMP diagnostic: goals changed since the last tick of this house, and by which code.
+	UpdateOrderChurn(pHouse);
 
 	{
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Features };

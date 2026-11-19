@@ -2457,4 +2457,196 @@ namespace
 		return (bestWaypoint != CellStruct::Empty && bestCost * 10 < directCost * 7) ? bestWaypoint : CellStruct::Empty;
 	}
 
+	// TEMP diagnostic (order churn, 2026-11-19; user: units drive halfway to their goal, turn back, then
+	// take it up again, "as if the AI were schizophrenic"). At the start of each AI tick it reads where
+	// every vehicle and soldier of the house heads (its attack-move goal, else its destination; not
+	// harvesters, which the engine drives). A switch is a new goal more than OrderChurnJumpCells from the
+	// old one before the unit reached it; a turn is a switch that points back (more than 90 degrees from
+	// the old way), a flip a turn within OrderChurnFlipFrames of the last change, a reversal a switch
+	// back to (near) the goal before the last one within OrderChurnReverseFrames. Each is booked on the
+	// pair of codes that gave the old and the new goal (NoteOrderCaller; none since the last look is
+	// "untracked": the engine, or an order given without a note). Every OrderChurnLogFrames a line per
+	// house with the totals, and a line for each of its worst pairs.
+	constexpr int OrderChurnLogFrames = 9000;
+	constexpr int OrderChurnFlipFrames = 450;
+	constexpr int OrderChurnReverseFrames = 1800;
+	constexpr double OrderChurnJumpCells = 6.0;
+	constexpr double OrderChurnBackCells = 4.0;
+	constexpr double OrderChurnArriveCells = 3.0;
+	constexpr int OrderChurnTopPairs = 6;
+
+	struct NeuralOrderGoal
+	{
+		CellStruct Goal { CellStruct::Empty };
+		CellStruct PrevGoal { CellStruct::Empty };
+		const char* File { nullptr };
+		int Line { 0 };
+		int ChangeFrame { -1 };
+		int SeenFrame { -1 };
+		bool Reached { false };
+	};
+
+	struct NeuralOrderChurnPair
+	{
+		int Switches { 0 };
+		int Turns { 0 };
+		int Flips { 0 };
+		int Reversals { 0 };
+		const char* TypeId { nullptr };
+		DWORD UniqueID { 0 };
+	};
+
+	struct NeuralOrderChurn
+	{
+		std::unordered_map<DWORD, NeuralOrderGoal> Goals;
+		std::map<std::string, NeuralOrderChurnPair> Pairs;
+		int Switches { 0 };
+		int Turns { 0 };
+		int Flips { 0 };
+		int Reversals { 0 };
+		int LogFrame { 0 };
+		int Serial { -1 };
+	};
+
+	std::array<NeuralOrderChurn, 32> OrderChurn {};
+
+	void UpdateOrderChurn(HouseClass* pHouse)
+	{
+		if (!NeuralAI::HeadlessMode || !pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return;
+
+		auto& churn = OrderChurn[pHouse->ArrayIndex];
+		const int now = Unsorted::CurrentFrame;
+
+		if (churn.Serial != NeuralMatchSerial || now < churn.LogFrame)
+		{
+			churn = {};
+			churn.Serial = NeuralMatchSerial;
+			churn.LogFrame = now;
+		}
+
+		auto const& callers = LastOrderCaller[pHouse->ArrayIndex];
+
+		auto const look = [&](FootClass* pFoot, TechnoTypeClass* pType)
+		{
+			if (!pFoot || !pType || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pType->ResourceGatherer)
+				return;
+
+			const CellStruct here = pFoot->GetMapCoords();
+			auto& entry = churn.Goals[pFoot->UniqueID];
+			const int lastSeen = entry.SeenFrame;
+			entry.SeenFrame = now;
+
+			if (entry.Goal != CellStruct::Empty && here.DistanceFrom(entry.Goal) <= OrderChurnArriveCells)
+				entry.Reached = true;
+
+			AbstractClass* const pGoalObject = (pFoot->MegaMission == Mission::AttackMove && pFoot->MegaDestination)
+				? pFoot->MegaDestination
+				: pFoot->Destination;
+
+			// Arrived or stopped: the old goal stays, Reached tells whether the unit got there.
+			if (!pGoalObject)
+				return;
+
+			const CellStruct goal = CellClass::Coord2Cell(pGoalObject->GetCoords());
+
+			if (entry.Goal != CellStruct::Empty && goal.DistanceFrom(entry.Goal) <= OrderChurnJumpCells)
+				return;
+
+			const char* file = "untracked";
+			int line = 0;
+
+			if (auto const itCaller = callers.find(pFoot->UniqueID);
+				itCaller != callers.end() && itCaller->second.File && itCaller->second.Frame >= lastSeen)
+			{
+				file = itCaller->second.File;
+				line = itCaller->second.Line;
+			}
+
+			if (entry.Goal != CellStruct::Empty && !entry.Reached)
+			{
+				const int oldDx = entry.Goal.X - here.X;
+				const int oldDy = entry.Goal.Y - here.Y;
+				const int newDx = goal.X - here.X;
+				const int newDy = goal.Y - here.Y;
+				const bool turn = oldDx * newDx + oldDy * newDy < 0;
+				const bool flip = turn && entry.ChangeFrame >= 0 && now - entry.ChangeFrame <= OrderChurnFlipFrames;
+				const bool reversal = entry.PrevGoal != CellStruct::Empty && goal.DistanceFrom(entry.PrevGoal) <= OrderChurnBackCells
+					&& entry.ChangeFrame >= 0 && now - entry.ChangeFrame <= OrderChurnReverseFrames;
+
+				char key[128];
+				std::snprintf(key, sizeof(key), "%s:%d > %s:%d", entry.File ? entry.File : "untracked", entry.Line, file, line);
+				auto& pair = churn.Pairs[key];
+				pair.Switches++;
+				pair.Turns += turn ? 1 : 0;
+				pair.Flips += flip ? 1 : 0;
+				pair.Reversals += reversal ? 1 : 0;
+				pair.TypeId = pType->ID;
+				pair.UniqueID = pFoot->UniqueID;
+				churn.Switches++;
+				churn.Turns += turn ? 1 : 0;
+				churn.Flips += flip ? 1 : 0;
+				churn.Reversals += reversal ? 1 : 0;
+			}
+
+			entry.PrevGoal = entry.Goal;
+			entry.Goal = goal;
+			entry.File = file;
+			entry.Line = line;
+			entry.ChangeFrame = now;
+			entry.Reached = here.DistanceFrom(goal) <= OrderChurnArriveCells;
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse)
+				look(pUnit, pUnit->Type);
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->Owner == pHouse)
+				look(pInf, pInf->Type);
+		}
+
+		if (churn.Goals.size() > 2048)
+			std::erase_if(churn.Goals, [now](const auto& entry) { return now - entry.second.SeenFrame > 600; });
+
+		if (now - churn.LogFrame < OrderChurnLogFrames)
+			return;
+
+		Debug::Log("[NeuralAI] House %d order churn (TEMP): %d switches, %d turns, %d flips, %d reversals in %d frames, %d pairs, frame %d.\n",
+			pHouse->ArrayIndex, churn.Switches, churn.Turns, churn.Flips, churn.Reversals, now - churn.LogFrame,
+			static_cast<int>(churn.Pairs.size()), now);
+
+		std::vector<std::pair<const std::string*, const NeuralOrderChurnPair*>> worst;
+		worst.reserve(churn.Pairs.size());
+
+		for (auto const& [key, pair] : churn.Pairs)
+		{
+			if (pair.Turns + pair.Reversals > 0)
+				worst.emplace_back(&key, &pair);
+		}
+
+		std::stable_sort(worst.begin(), worst.end(), [](const auto& a, const auto& b)
+		{
+			return a.second->Turns + a.second->Reversals > b.second->Turns + b.second->Reversals;
+		});
+
+		for (size_t i = 0; i < worst.size() && i < static_cast<size_t>(OrderChurnTopPairs); ++i)
+		{
+			auto const& pair = *worst[i].second;
+			Debug::Log("[NeuralAI] House %d order churn pair (TEMP): %s: %d switches, %d turns, %d flips, %d reversals, last %s %u, frame %d.\n",
+				pHouse->ArrayIndex, worst[i].first->c_str(), pair.Switches, pair.Turns, pair.Flips, pair.Reversals,
+				pair.TypeId ? pair.TypeId : "?", pair.UniqueID, now);
+		}
+
+		churn.Pairs.clear();
+		churn.Switches = 0;
+		churn.Turns = 0;
+		churn.Flips = 0;
+		churn.Reversals = 0;
+		churn.LogFrame = now;
+	}
+
 } // namespace
