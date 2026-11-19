@@ -14620,7 +14620,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				best = std::max(best, pW->Damage * std::max(1, pW->Burst));
 		}
 
-		return best * (pAircraft->Type->Ammo > 0 ? pAircraft->Type->Ammo : 4);
+		return best * AirSortieShots(pAircraft->Type);
 	};
 
 	// Enemy UniqueID -> sortie damage already sent at it this tick. Key access only.
@@ -14746,7 +14746,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				sortie = std::max(sortie, pW->Damage * std::max(1, pW->Burst));
 		}
 
-		sortie *= pAircraft->Type->Ammo > 0 ? pAircraft->Type->Ammo : 4;
+		sortie *= AirSortieShots(pAircraft->Type);
 
 		const CellStruct ac = pAircraft->GetMapCoords();
 		TechnoClass* pBest = nullptr;
