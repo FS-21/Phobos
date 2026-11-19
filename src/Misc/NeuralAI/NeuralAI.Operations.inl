@@ -358,6 +358,22 @@ namespace
 	CellClass* PickOpFlyerCell(const CellStruct& center, int zone, int firstRing, const CellStruct& tried,
 		const std::vector<CellStruct>& keepClear)
 	{
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search below.
+		NeuralWaitAsker asker {};
+		asker.Zone = zone;
+		NeuralWaitSearch search {};
+		search.MinRing = firstRing;
+		search.MaxRing = BoardingLandingRingCells;
+		auto const pShadow = FindWaitCellNear(center, search, asker,
+			WaitLegal | WaitLand | WaitNotBeach | WaitNoBuilding | WaitNoObject | WaitZone | WaitClearOfUnits,
+			[&](const CellStruct& c, const CellClass*)
+			{
+				return c == tried
+					|| std::any_of(keepClear.begin(), keepClear.end(), [&c](const CellStruct& at) { return at.DistanceFrom(c) < 2.0; });
+			});
+		static int shadowLogSerial = -1;
+		static int shadowLogCount = 0;
+
 		for (int ring = firstRing; ring <= BoardingLandingRingCells; ++ring)
 		{
 			for (int dy = -ring; dy <= ring; ++dy)
@@ -382,11 +398,15 @@ namespace
 						[&c](const CellStruct& at) { return at.DistanceFrom(c) < 2.0; });
 
 					if (clear)
+					{
+						NoteWaitCellShadow("PickOpFlyerCell", shadowLogSerial, shadowLogCount, center, pCell, pShadow);
 						return pCell;
+					}
 				}
 			}
 		}
 
+		NoteWaitCellShadow("PickOpFlyerCell", shadowLogSerial, shadowLogCount, center, nullptr, pShadow);
 		return nullptr;
 	}
 
@@ -406,6 +426,24 @@ namespace
 			if (other.UniqueID != pTransport->UniqueID && other.Leg == NeuralOpLeg::Crossing && other.Landing != CellStruct::Empty)
 				taken.push_back(other.Landing);
 		}
+
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search below.
+		NeuralWaitAsker asker {};
+		asker.Speed = pType->SpeedType;
+		asker.Movement = pType->MovementZone;
+		asker.ZoneMovement = static_cast<int>(MovementZone::Normal);
+		asker.Zone = op.TargetZone;
+		NeuralWaitSearch search {};
+		search.MaxRing = 6;
+		auto const pShadow = FindWaitCellNear(around, search, asker,
+			WaitLegal | WaitLand | WaitNoBuilding | WaitZone | (flies ? (WaitNotBeach | WaitNoObject) : WaitClearOfUnits),
+			[&](const CellStruct& c, const CellClass*)
+			{
+				return c == tried
+					|| std::any_of(taken.begin(), taken.end(), [&c](const CellStruct& at) { return at.DistanceFrom(c) < OpLandingSpreadCells; });
+			});
+		static int shadowLogSerial = -1;
+		static int shadowLogCount = 0;
 
 		for (int ring = 0; ring <= 6; ++ring)
 		{
@@ -433,11 +471,15 @@ namespace
 						[&c](const CellStruct& at) { return at.DistanceFrom(c) < OpLandingSpreadCells; });
 
 					if (spread)
+					{
+						NoteWaitCellShadow("PickOpLandingCell", shadowLogSerial, shadowLogCount, around, pCell, pShadow);
 						return pCell;
+					}
 				}
 			}
 		}
 
+		NoteWaitCellShadow("PickOpLandingCell", shadowLogSerial, shadowLogCount, around, nullptr, pShadow);
 		return nullptr;
 	}
 

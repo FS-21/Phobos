@@ -38,10 +38,13 @@ namespace
 	};
 
 	// Who asks: the speed and movement of the unit, its zone, and the level a search keeps to.
+	// ZoneMovement: the movement WaitZone reads the zone with when it is not the unit's own (-1: the
+	// unit's; a transport sets a load down on the land of its members' feet).
 	struct NeuralWaitAsker
 	{
 		SpeedType Speed { SpeedType::Track };
 		MovementZone Movement { MovementZone::Normal };
+		int ZoneMovement { -1 };
 		int Zone { -1 };
 		bool Naval { false };
 		int RefLevel { 0 };
@@ -83,8 +86,11 @@ namespace
 		if ((rules & WaitOffMouth) && IsPassageMouthCell(cell))
 			return false;
 
-		if ((rules & WaitZone) && MapClass::Instance.GetMovementZoneType(cell, asker.Movement, false) != asker.Zone)
+		if ((rules & WaitZone) && MapClass::Instance.GetMovementZoneType(cell,
+			asker.ZoneMovement >= 0 ? static_cast<MovementZone>(asker.ZoneMovement) : asker.Movement, false) != asker.Zone)
+		{
 			return false;
+		}
 
 		if ((rules & WaitLevelNear) && std::abs(pCell->Level - asker.RefLevel) > asker.LevelSpan)
 			return false;
