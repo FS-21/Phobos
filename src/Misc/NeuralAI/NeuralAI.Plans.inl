@@ -2029,6 +2029,9 @@ namespace
 
 	void UpdateStrategicPlans(HouseClass* pHouse, const std::array<int16_t, NeuralAI::OutputVectorSize>& scores)
 	{
+		// Orders of this part lease their units at this priority (order leases).
+		const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Operation };
+
 		if (!pHouse || pHouse->Defeated)
 			return;
 

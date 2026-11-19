@@ -3881,6 +3881,206 @@ namespace
 		return !TransportOpOrdersOpen && pFoot && pFoot->Owner && IsInTransportOp(pFoot->Owner, pFoot->UniqueID);
 	}
 
+	// Order leases (user approved, 2026-11-19, point D: the AI picks the unit, the mission and the goal,
+	// starts it, and does not step in again until it ends). The order churn diagnostic found about 2200
+	// turns a match, units sent back by another rule before they reached their goal (mind-controlled
+	// infantry between the Bio Reactor and the Grinder, about 1000 times a match, plans and the micro
+	// rules taking the same unit in turns). An order noted with NoteOrderCaller leases the unit to the
+	// code that gave it, at the priority of the scope it runs in (NeuralOrderPriorityScope): survival
+	// over plans and operations over routine rules. Until the lease ends the order helpers
+	// (IssueMoveOrder, OrderFootToAttackMove, DispatchFootToTargetOrTransport) turn down an order of
+	// other code with no higher priority. The holder may change its own order (a routine rule by its
+	// line, plans and operations by their file), and an order for (near) the same goal passes. The lease
+	// ends when the unit comes within OrderLeaseArriveCells of its goal, has no goal left, heads
+	// somewhere else (the engine or an order outside the helpers took it), or after OrderLeaseFrames of
+	// its priority.
+	enum class NeuralOrderPriority : int8_t
+	{
+		Routine = 0,
+		Operation = 1,
+		Survival = 2
+	};
+
+	constexpr std::array<int, 3> OrderLeaseFrames { 900, 1800, 450 };
+	constexpr double OrderLeaseArriveCells = 3.0;
+	constexpr double OrderLeaseSameGoalCells = 6.0;
+
+	struct NeuralOrderLease
+	{
+		const char* File { nullptr };
+		int Line { 0 };
+		NeuralOrderPriority Priority { NeuralOrderPriority::Routine };
+		int Until { -1 };
+		CellStruct Goal { CellStruct::Empty };
+	};
+
+	struct NeuralOrderLeases
+	{
+		std::unordered_map<DWORD, NeuralOrderLease> Units;
+		int Serial { -1 };
+	};
+
+	std::array<NeuralOrderLeases, 32> OrderLeases {};
+	NeuralOrderPriority CurrentOrderPriority = NeuralOrderPriority::Routine;
+
+	// The priority of the orders given in this scope (the previous one again at its end).
+	struct NeuralOrderPriorityScope
+	{
+		explicit NeuralOrderPriorityScope(NeuralOrderPriority priority)
+			: Previous { CurrentOrderPriority }
+		{
+			CurrentOrderPriority = priority;
+		}
+
+		~NeuralOrderPriorityScope()
+		{
+			CurrentOrderPriority = Previous;
+		}
+
+		NeuralOrderPriorityScope(const NeuralOrderPriorityScope&) = delete;
+		NeuralOrderPriorityScope& operator=(const NeuralOrderPriorityScope&) = delete;
+
+		NeuralOrderPriority Previous;
+	};
+
+	std::unordered_map<DWORD, NeuralOrderLease>& OrderLeasesOf(int houseIndex)
+	{
+		auto& leases = OrderLeases[std::clamp(houseIndex, 0, 31)];
+
+		if (leases.Serial != NeuralMatchSerial)
+		{
+			leases.Units.clear();
+			leases.Serial = NeuralMatchSerial;
+		}
+
+		return leases.Units;
+	}
+
+	const char* OrderCallerBaseName(const char* file)
+	{
+		const char* const slash = file ? std::max(std::strrchr(file, '\\'), std::strrchr(file, '/')) : nullptr;
+
+		return slash ? slash + 1 : file;
+	}
+
+	// Where a unit heads now: its attack-move goal, else its destination, else its target.
+	CellStruct OrderLeaseGoalOf(const FootClass* pFoot)
+	{
+		AbstractClass* const pGoal = (pFoot->MegaMission == Mission::AttackMove && pFoot->MegaDestination)
+			? pFoot->MegaDestination
+			: (pFoot->Destination ? pFoot->Destination : pFoot->Target);
+
+		return pGoal ? CellClass::Coord2Cell(pGoal->GetCoords()) : CellStruct::Empty;
+	}
+
+	bool IsOrderLeaseOver(const FootClass* pFoot, const NeuralOrderLease& lease)
+	{
+		const int now = Unsorted::CurrentFrame;
+
+		if (now >= lease.Until || lease.Until - now > OrderLeaseFrames[1])
+			return true;
+
+		const CellStruct goal = OrderLeaseGoalOf(pFoot);
+
+		return goal == CellStruct::Empty || goal.DistanceFrom(lease.Goal) > OrderLeaseSameGoalCells
+			|| pFoot->GetMapCoords().DistanceFrom(lease.Goal) <= OrderLeaseArriveCells;
+	}
+
+	// TEMP diagnostic (order leases): orders turned down, by the pair of codes (holder > refused), logged
+	// with the order churn lines (UpdateOrderChurn).
+	struct NeuralLeaseRefusals
+	{
+		std::map<std::string, int> Pairs;
+		int Total { 0 };
+	};
+
+	std::array<NeuralLeaseRefusals, 32> LeaseRefusals {};
+
+	// Whether the code at file:line may give pFoot an order toward goal now.
+	bool MayOrderUnit(const FootClass* pFoot, const CellStruct& goal, const char* file, int line)
+	{
+		if (!pFoot || !pFoot->Owner || pFoot->Owner->ArrayIndex < 0 || pFoot->Owner->ArrayIndex >= 32)
+			return true;
+
+		auto& leases = OrderLeasesOf(pFoot->Owner->ArrayIndex);
+		auto const itLease = leases.find(pFoot->UniqueID);
+
+		if (itLease == leases.end())
+			return true;
+
+		auto const& lease = itLease->second;
+
+		if (IsOrderLeaseOver(pFoot, lease))
+		{
+			leases.erase(itLease);
+			return true;
+		}
+
+		const char* const base = OrderCallerBaseName(file);
+		const bool sameFile = lease.File && base && std::strcmp(lease.File, base) == 0;
+
+		if (CurrentOrderPriority > lease.Priority
+			|| (sameFile && (lease.Priority != NeuralOrderPriority::Routine || lease.Line == line))
+			|| (goal != CellStruct::Empty && goal.DistanceFrom(lease.Goal) <= OrderLeaseSameGoalCells))
+		{
+			return true;
+		}
+
+		CountDecision(NeuralDecision::OrderLeaseRefused, pFoot->Owner->ArrayIndex);
+
+		if (NeuralAI::HeadlessMode)
+		{
+			auto& refusals = LeaseRefusals[pFoot->Owner->ArrayIndex];
+			char key[128];
+			std::snprintf(key, sizeof(key), "%s:%d > %s:%d", lease.File ? lease.File : "?", lease.Line, base ? base : "?", line);
+			refusals.Pairs[key]++;
+			refusals.Total++;
+		}
+
+		return false;
+	}
+
+	// An order was given (NoteOrderCaller): the unit is leased to its code, unless another code holds it
+	// for (near) the same goal with no lower priority.
+	void NoteOrderLease(TechnoClass* pTechno, const char* file, int line)
+	{
+		if (!pTechno || !pTechno->Owner || pTechno->Owner->ArrayIndex < 0 || pTechno->Owner->ArrayIndex >= 32)
+			return;
+
+		const AbstractType kind = pTechno->WhatAmI();
+
+		if (kind != AbstractType::Unit && kind != AbstractType::Infantry && kind != AbstractType::Aircraft)
+			return;
+
+		auto const pFoot = static_cast<FootClass*>(pTechno);
+		const CellStruct goal = OrderLeaseGoalOf(pFoot);
+
+		if (goal == CellStruct::Empty)
+			return;
+
+		auto& leases = OrderLeasesOf(pTechno->Owner->ArrayIndex);
+		const int now = Unsorted::CurrentFrame;
+
+		if (leases.size() > 2048)
+			std::erase_if(leases, [now](const auto& entry) { return now >= entry.second.Until; });
+
+		const char* const base = OrderCallerBaseName(file);
+
+		if (auto const itLease = leases.find(pTechno->UniqueID); itLease != leases.end())
+		{
+			auto const& lease = itLease->second;
+			const bool sameHolder = lease.File && base && std::strcmp(lease.File, base) == 0 && lease.Line == line;
+
+			if (!sameHolder && now < lease.Until && CurrentOrderPriority <= lease.Priority
+				&& goal.DistanceFrom(lease.Goal) <= OrderLeaseSameGoalCells)
+			{
+				return;
+			}
+		}
+
+		leases[pTechno->UniqueID] = { base, line, CurrentOrderPriority, now + OrderLeaseFrames[static_cast<int>(CurrentOrderPriority)], goal };
+	}
+
 	// A ship of ours that waits outside a jammed narrow water passage (UpdateNavalPassageGate): the order helpers
 	// (IssueMoveOrder, OrderFootToAttackMove) leave it where it is until the gate lets it go on. A transport operation
 	// that takes it gives its orders whatever the gate says.

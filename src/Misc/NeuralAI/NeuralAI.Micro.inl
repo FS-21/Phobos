@@ -768,6 +768,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (IsHeldByTransportOp(pFoot))
 			return true;
 
+		// Another code holds the unit for its own goal (order leases).
+		if (!MayOrderUnit(pFoot, CellClass::Coord2Cell(pTarget->GetCoords()), callerFile, callerLine))
+			return false;
+
 		auto const pFootType = pFoot->GetTechnoType();
 		if (!pFootType)
 			return false;
@@ -4521,6 +4525,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 						if (auto const pHomeDest = MapClass::Instance.TryGetCellAt(goalCoords))
 						{
+							const NeuralOrderPriorityScope orderPriority { enemyNearMCV ? NeuralOrderPriority::Survival : NeuralOrderPriority::Routine };
 							IssueMoveOrder(pUnit, pHomeDest, 3.0);
 						}
 					}
@@ -6493,6 +6498,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (pBackCell)
 				{
+					const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Survival };
 					pUnit->SetDestination(pBackCell, true);
 					pUnit->QueueMission(Mission::Move, true);
 					NoteOrderCaller(pUnit, "move");
@@ -8058,6 +8064,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Yuri's control slot!
 		if (pInf->MindControlledBy != nullptr)
 		{
+			// Already on its way into the Bio Reactor: it keeps that way. It fell through to the Grinder
+			// below, and the next tick back to the Bio Reactor (about 1000 turns a match, order churn).
+			if (pBioReactor && pInf->Destination == pBioReactor)
+			{
+				infAlreadyHeadingToBioReactor++;
+
+				if (pBioReactor->Passengers.NumPassengers + infAlreadyHeadingToBioReactor >= pBioReactor->Type->Passengers)
+					pBioReactor = nullptr;
+
+				continue;
+			}
+
 			if (pBioReactor && pInf->Destination != pBioReactor
 				&& (bioReactorNeedsPower || !pGrinderBld
 					|| pInf->DistanceFrom(pBioReactor) <= pInf->DistanceFrom(pGrinderBld) + 1536))

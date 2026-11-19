@@ -225,6 +225,7 @@ namespace
 		NavalSweep,
 		NavalMassStrike,
 		NavalPassageWait,
+		OrderLeaseRefused,
 		Count
 	};
 
@@ -256,7 +257,7 @@ namespace
 		"mcvIdleUnfold", "mcvIdleSite", "mcvIdleHome", "opHoldMoved", "jamBarrierBreach", "opNoTransportReach", "backdoorNoCarrier",
 		"mcvIdleStepOnSite", "mcvUnfoldRetry", "navalStrikeInRange", "navalPlanShipsFreed", "urbanQuietRelease",
 		"ferryDepartedStuck", "ferryMcvNowhere", "deployerIdleWatchdog", "deployerSiteFailed", "deployerGoalNoFit",
-		"navalStuckReleased", "navalPreyAttacks", "navalSweeps", "navalMassStrikes", "navalPassageWaits" };
+		"navalStuckReleased", "navalPreyAttacks", "navalSweeps", "navalMassStrikes", "navalPassageWaits", "orderLeaseRefused" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -1378,8 +1379,14 @@ namespace
 
 	std::array<std::unordered_map<DWORD, NeuralOrderCaller>, 32> LastOrderCaller {};
 
+	void NoteOrderLease(TechnoClass* pTechno, const char* file, int line);
+
+	// Every order noted here also leases the unit to its code (NoteOrderLease, NeuralAI.State.inl), in
+	// every mode; the record of the last caller is kept in training only.
 	void NoteOrderCaller(TechnoClass* pTechno, const char* kind, const char* file = __builtin_FILE(), int line = __builtin_LINE())
 	{
+		NoteOrderLease(pTechno, file, line);
+
 		if (!NeuralAI::HeadlessMode || !pTechno || !pTechno->Owner || pTechno->Owner->ArrayIndex < 0 || pTechno->Owner->ArrayIndex >= 32)
 			return;
 

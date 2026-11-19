@@ -473,6 +473,9 @@ namespace
 	// the last 300 frames; else they stay.
 	void ReturnFromRepair(HouseClass* pHouse, FootClass* pFoot, const NeuralRepairTrip& trip)
 	{
+		// Orders of this part lease their units at this priority (order leases).
+		const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Routine };
+
 		auto& macro = GetMacroState(pHouse);
 
 		if (macro.PlanMembers.contains(pFoot->UniqueID) || trip.ReturnCell == CellStruct::Empty)
@@ -532,6 +535,9 @@ namespace
 	// takes too long. A unit pulled away by another routine is ordered again (at most 4 orders).
 	void UpdateRepairTrips(HouseClass* pHouse)
 	{
+		// Orders of this part lease their units at this priority (order leases).
+		const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Survival };
+
 		auto& state = GetRepairState(pHouse);
 
 		if (state.Trips.empty() && state.Rested.empty())

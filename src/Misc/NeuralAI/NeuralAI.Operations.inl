@@ -2062,14 +2062,15 @@ namespace
 		// The cell it is sent to is its post too: at the end of a move the engine puts a unit of the AI
 		// on Area Guard, which walks it back to its old post (match #10380: 64 such moves of the 8
 		// members of one wave while they waited by their beach).
-		auto const orderTo = [&](FootClass* pFoot, CellStruct& orderCell, CellClass* pCell, double keepWithin)
+		auto const orderTo = [&](FootClass* pFoot, CellStruct& orderCell, CellClass* pCell, double keepWithin,
+			const char* callerFile = __builtin_FILE(), int callerLine = __builtin_LINE())
 		{
 			if (!pCell)
 				return;
 
 			wake(pFoot);
 			pFoot->SetArchiveTarget(pCell);
-			IssueMoveOrder(pFoot, pCell, keepWithin);
+			IssueMoveOrder(pFoot, pCell, keepWithin, callerFile, callerLine);
 			orderCell = pCell->MapCoords;
 		};
 
@@ -4627,6 +4628,9 @@ namespace
 	// waiting members ask for (OpWaitingSizeBySize). The harvester shuttle client books its rides first.
 	void UpdateTransportOperations(HouseClass* pHouse)
 	{
+		// Orders of this part lease their units at this priority (order leases).
+		const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Operation };
+
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 
