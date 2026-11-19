@@ -425,31 +425,6 @@ namespace
 		}
 	}
 
-	// TEMP diagnostic (rule consolidation, case 4): an old answer that CanHouseCarry does not give,
-	// CarryShadowLogLines a match. With none over a desync test and some matches, the old body goes.
-	void CheckCarryShadow(HouseClass* pHouse, const char* name, const CarryQuery& query, bool answer)
-	{
-		if (CanHouseCarry(pHouse, query) == answer)
-			return;
-
-		static int shadowLogSerial = -1;
-		static int shadowLogCount = 0;
-
-		if (shadowLogSerial != NeuralMatchSerial)
-		{
-			shadowLogSerial = NeuralMatchSerial;
-			shadowLogCount = 0;
-		}
-
-		if (shadowLogCount++ < CarryShadowLogLines)
-		{
-			Debug::Log("[NeuralAI] House %d carry shadow: %s says %d and CanHouseCarry %d, cargo %s, from (%d,%d) to (%d,%d), sources %u, "
-				"rules %u, frame %d.\n", pHouse ? pHouse->ArrayIndex : -1, name, answer ? 1 : 0, answer ? 0 : 1,
-				query.Cargo ? query.Cargo->ID : "none", query.From.X, query.From.Y, query.To.X, query.To.Y, query.Sources, query.Rules,
-				Unsorted::CurrentFrame);
-		}
-	}
-
 	// With both cells given, only transports that can make that very crossing count
 	// (CanTransportTypeLink): the unit's cell and the landing on the ground it wants to reach.
 	// With no foot type, any cargo that rides inside a transport (size 1, not slung by a carryall):
@@ -522,37 +497,8 @@ namespace
 			macro.CrossingNeedTypes.clear();
 
 		macro.CrossingNeedFrame = now;
-		const unsigned int ownHouseBit = 1u << typeIndex;
 		passSize = std::max(1, passSize);
-		// TEMP (rule consolidation, case 4): the list as ForEachCarrierType would leave it, checked below.
-		std::vector<const TechnoTypeClass*> shadowTypes = macro.CrossingNeedTypes;
 
-		auto const note = [&](const TechnoTypeClass* pType)
-		{
-			if (pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel || !pType->InOwners(ownHouseBit)
-				|| pType->Passengers < passSize || static_cast<int>(pType->SizeLimit) < passSize
-				|| std::find(macro.CrossingNeedTypes.begin(), macro.CrossingNeedTypes.end(), pType) != macro.CrossingNeedTypes.end()
-				|| pHouse->CountOwnedNow(pType) > 0 || !CanTransportTypeLink(pType, from, to) || !CanTransportTypeComeTo(pHouse, pType, from))
-			{
-				return;
-			}
-
-			macro.CrossingNeedTypes.push_back(pType);
-		};
-
-		for (auto const pType : UnitTypeClass::Array)
-		{
-			if (pType && IsAmphibiousOrAirTransport(pType) && !pType->Gunner)
-				note(pType);
-		}
-
-		for (auto const pType : AircraftTypeClass::Array)
-		{
-			if (pType && !pType->Carryall && pType->Passengers > 0)
-				note(pType);
-		}
-
-		// TEMP diagnostic (rule consolidation, case 4): the types ForEachCarrierType gives against the old loops.
 		CarryQuery query {};
 		query.SeatSize = passSize;
 		query.From = from;
@@ -560,30 +506,11 @@ namespace
 		query.Sources = CarrySide | CarryNotOwned;
 		query.Rules = CarryNoGunner | CarryAirHolds | CarryLink | CarryBuiltComes;
 
-		ForEachCarrierType(pHouse, query, [&shadowTypes](const TechnoTypeClass* pType)
+		ForEachCarrierType(pHouse, query, [&macro](const TechnoTypeClass* pType)
 			{
-				if (std::find(shadowTypes.begin(), shadowTypes.end(), pType) == shadowTypes.end())
-					shadowTypes.push_back(pType);
+				if (std::find(macro.CrossingNeedTypes.begin(), macro.CrossingNeedTypes.end(), pType) == macro.CrossingNeedTypes.end())
+					macro.CrossingNeedTypes.push_back(pType);
 			});
-
-		if (shadowTypes != macro.CrossingNeedTypes)
-		{
-			static int needLogSerial = -1;
-			static int needLogCount = 0;
-
-			if (needLogSerial != NeuralMatchSerial)
-			{
-				needLogSerial = NeuralMatchSerial;
-				needLogCount = 0;
-			}
-
-			if (needLogCount++ < CarryShadowLogLines)
-			{
-				Debug::Log("[NeuralAI] House %d carry shadow: NoteCrossingNeed notes %d types and ForEachCarrierType %d, from (%d,%d) to "
-					"(%d,%d), seat %d, frame %d.\n", pHouse->ArrayIndex, static_cast<int>(macro.CrossingNeedTypes.size()),
-					static_cast<int>(shadowTypes.size()), from.X, from.Y, to.X, to.Y, passSize, now);
-			}
-		}
 	}
 
 	// Can the house put anything on the ground of `to` from `from` with a transport it owns or can

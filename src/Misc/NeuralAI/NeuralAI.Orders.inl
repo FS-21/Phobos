@@ -1916,44 +1916,21 @@ namespace
 			surface = crossing;
 	}
 
-	// Can a transport the house owns or can build now carry its units from `from` to `landing`?
-	// TEMP (rule consolidation, case 4): the answer that decides while CanHouseCarry is checked against
-	// it (CanBoardingCarriersLink below).
-	bool CanBoardingCarriersLinkOld(HouseClass* pHouse, const CellStruct& from, const CellStruct& landing)
-	{
-		std::vector<const TechnoTypeClass*> surface;
-		std::vector<const TechnoTypeClass*> crossing;
-		bool anyFlyer = false;
-		CollectBoardingCarrierTypes(pHouse, nullptr, surface, crossing, anyFlyer);
-
-		if (anyFlyer || landing == CellStruct::Empty)
-			return true;
-
-		for (auto const pType : crossing)
-		{
-			if (CanTransportTypeLink(pType, from, landing))
-				return true;
-		}
-
-		return false;
-	}
-
-	// See CanBoardingCarriersLinkOld, which decides (TEMP: CanHouseCarry is checked against it).
+	// Can a transport the house owns, or whose prerequisites it has, carry its units from `from` to
+	// `landing`: any flying one, or one that makes the crossing (CanHouseCarry; no seat, no gunner
+	// transport, as CollectBoardingCarrierTypes gathers them). True with no landing.
 	bool CanBoardingCarriersLink(HouseClass* pHouse, const CellStruct& from, const CellStruct& landing)
 	{
-		const bool answer = CanBoardingCarriersLinkOld(pHouse, from, landing);
+		if (landing == CellStruct::Empty)
+			return true;
 
-		if (pHouse && landing != CellStruct::Empty)
-		{
-			CarryQuery query {};
-			query.From = from;
-			query.To = landing;
-			query.Sources = CarryOwned | CarryPrereqOnly;
-			query.Rules = CarryNoGunner | CarryNoSeat | CarryAirHolds | CarryAnyFlyerIsYes | CarryLink;
-			CheckCarryShadow(pHouse, "CanBoardingCarriersLink", query, answer);
-		}
+		CarryQuery query {};
+		query.From = from;
+		query.To = landing;
+		query.Sources = CarryOwned | CarryPrereqOnly;
+		query.Rules = CarryNoGunner | CarryNoSeat | CarryAirHolds | CarryAnyFlyerIsYes | CarryLink;
 
-		return answer;
+		return CanHouseCarry(pHouse, query);
 	}
 
 	// Where units of a land board a transport (user: "the outskirts of the base are fine, but not
