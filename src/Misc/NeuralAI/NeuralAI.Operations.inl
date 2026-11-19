@@ -4401,10 +4401,7 @@ namespace
 		std::erase_if(macro.OpLossSpots, [now](const NeuralOpLossSpot& spot) { return now < spot.Frame || now - spot.Frame >= OpRouteLossFrames; });
 
 		if (macro.TransportOps.empty())
-		{
-			macro.OpWatch.clear();
 			return;
-		}
 
 		// The operations' own orders pass the order helpers, which turn their units down for the rest of
 		// the AI tick (IsHeldByTransportOp).
@@ -4475,28 +4472,6 @@ namespace
 					OpLineCost(GetOpDangerMap(pHouse, kind == 1), op.Staging, op.Landing, danger);
 					macro.OpKindDanger[kind] = std::max(macro.OpKindDanger[kind], danger);
 				}
-			}
-		}
-
-		// TEMP trace: the units as the operations leave them, for TraceTransportOpUnits (16 at most).
-		macro.OpWatch.clear();
-
-		for (auto const& op : macro.TransportOps)
-		{
-			for (auto const& member : op.Members)
-			{
-				auto const it = foots.find(member.UniqueID);
-
-				if (!member.Aboard && it != foots.end() && !it->second->InLimbo && macro.OpWatch.size() < 16)
-					macro.OpWatch.push_back({ member.UniqueID, it->second, it->second->CurrentMission, it->second->MegaMission, it->second->Destination });
-			}
-
-			for (auto const& transport : op.Transports)
-			{
-				auto const it = foots.find(transport.UniqueID);
-
-				if (it != foots.end() && macro.OpWatch.size() < 16)
-					macro.OpWatch.push_back({ transport.UniqueID, it->second, it->second->CurrentMission, it->second->MegaMission, it->second->Destination });
 			}
 		}
 

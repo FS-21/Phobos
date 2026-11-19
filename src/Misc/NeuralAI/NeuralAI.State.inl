@@ -704,17 +704,6 @@ namespace
 		std::vector<NeuralOpTransport> Transports;
 	};
 
-	// TEMP trace: a unit of a transport operation as the operation left it at the end of the last
-	// tick; TraceTransportOpUnits names the part of the AI tick that changes its order.
-	struct NeuralOpUnitWatch
-	{
-		DWORD UniqueID { 0 };
-		FootClass* Foot { nullptr };
-		Mission Current { Mission::None };
-		Mission Mega { Mission::None };
-		AbstractClass* Destination { nullptr };
-	};
-
 	// Idle MCV watchdog (Micro): where and since when a packed MCV stands, the sites it was sent to
 	// without unfolding there, and until when it follows the watchdog's own order to Goal.
 	struct NeuralMcvIdle
@@ -1357,7 +1346,6 @@ namespace
 		// Engineer claims (EngineerClaim*): the building each engineer of ours was sent to capture by the
 		// generic capture choice, and when.
 		std::unordered_map<DWORD, std::pair<DWORD, int>> EngineerCaptureTargets;
-		std::vector<NeuralOpUnitWatch> OpWatch;
 		// Where transports of the operations were lost, with the frame and whether they flew: the
 		// routes of the next crossings keep away from there (PlanOpRoute).
 		std::vector<NeuralOpLossSpot> OpLossSpots;
@@ -1820,7 +1808,6 @@ namespace
 			this->OpWaitingSizeBySize.fill(0);
 			this->OpWaitingFrame = -1;
 			this->TransportOpLogFrame = -1;
-			this->OpWatch.clear();
 			this->OpLossSpots.clear();
 			this->OpKindDanger.fill(0);
 			this->OpKindDangerFrame = -1;

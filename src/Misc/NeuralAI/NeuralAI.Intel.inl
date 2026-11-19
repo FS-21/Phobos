@@ -899,8 +899,6 @@ namespace
 
 			BuildingClass* pBestFactory = nullptr;
 			double bestDistanceSq = 1e18;
-			// War factories closed in by the base among the candidates (diagnostics).
-			int closedInFactories = 0;
 
 			for (auto const pBld : pHouse->Buildings)
 			{
@@ -926,10 +924,7 @@ namespace
 
 				// Farther than any war factory with a road out, whatever the distances.
 				if (type == AbstractType::UnitType && !isNaval && !HasFactoryRoadOut(pHouse, pBld))
-				{
 					distSq += ClosedInFactoryDistanceSq;
-					++closedInFactories;
-				}
 
 				if (distSq < bestDistanceSq)
 				{
@@ -962,15 +957,6 @@ namespace
 
 			if (!pBestFactory || pBestFactory->IsPrimaryFactory)
 				return;
-
-			// TEMP diagnostic: a new primary war factory picked with closed-in ones about.
-			if (closedInFactories > 0)
-			{
-				Debug::Log("[NeuralAI] House %d primary war factory DIAG: %s at (%d,%d) %s, %d closed in by the base, frame %d.\n",
-					pHouse->ArrayIndex, pBestFactory->Type->ID, pBestFactory->GetMapCoords().X, pBestFactory->GetMapCoords().Y,
-					bestDistanceSq < ClosedInFactoryDistanceSq ? "has a road out" : "has none, like every other",
-					closedInFactories, Unsorted::CurrentFrame);
-			}
 
 			for (auto const pBld : pHouse->Buildings)
 			{

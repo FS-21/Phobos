@@ -2162,60 +2162,6 @@ namespace
 
 		macro.StuckTracks = std::move(next);
 
-		// TEMP diagnostic: how many ships of this house are away from its yards, to tell a fleet at
-		// sea from one that never left; the ships tied to one land type are counted apart.
-		{
-			static int censusSerial = -1;
-			static int censusFrame[64] {};
-			const int houseIndex = pHouse->ArrayIndex;
-
-			if (censusSerial != NeuralMatchSerial)
-			{
-				censusSerial = NeuralMatchSerial;
-				std::fill(std::begin(censusFrame), std::end(censusFrame), 0);
-			}
-
-			if (houseIndex >= 0 && houseIndex < 64 && now - censusFrame[houseIndex] >= 900)
-			{
-				censusFrame[houseIndex] = now;
-				int ships = 0;
-				int shipsAway = 0;
-				int tied = 0;
-				int tiedAway = 0;
-
-				for (auto const pShip : UnitClass::Array)
-				{
-					if (!pShip || pShip->Owner != pHouse || !pShip->IsAlive || pShip->InLimbo || !pShip->Type || !pShip->Type->Naval)
-						continue;
-
-					const CellStruct shipCell = pShip->GetMapCoords();
-					bool away = true;
-
-					for (auto const pYard : pHouse->Buildings)
-					{
-						if (pYard && pYard->IsAlive && !pYard->InLimbo && pYard->Type->Naval
-							&& pYard->Type->Factory == AbstractType::UnitType && pYard->GetMapCoords().DistanceFrom(shipCell) <= 8.0)
-						{
-							away = false;
-							break;
-						}
-					}
-
-					const bool tiedToLand = pShip->Type->MovementRestrictedTo != LandType::None;
-					ships++;
-					shipsAway += away ? 1 : 0;
-					tied += tiedToLand ? 1 : 0;
-					tiedAway += (tiedToLand && away) ? 1 : 0;
-				}
-
-				if (ships > 0)
-				{
-					Debug::Log("[NeuralAI] Naval census DIAG house %d frame %d: %d ships, %d more than 8 cells from every yard of ours; "
-						"tied to one land type %d, %d of them away.\n", houseIndex, now, ships, shipsAway, tied, tiedAway);
-				}
-			}
-		}
-
 		// Where every ground unit of ours stands and since when (firing restarts it): IsFootHeldStill.
 		{
 			std::unordered_map<DWORD, NeuralStuckTrack> progress;
@@ -2304,45 +2250,7 @@ namespace
 			if (!pAir->IsInAir() && pAir->Ammo != 0)
 			{
 				if (auto const pHolder = abstract_cast<BuildingClass*>(pAir->GetNthLink(0)))
-				{
 					pAir->SendCommand(RadioCommand::NotifyUnlink, pHolder);
-
-					// TEMP diagnostic: how often it happens.
-					static int dockCutLines = 0;
-
-					if (dockCutLines++ < 40)
-					{
-						Debug::Log("[NeuralAI] House %d air dock link cut DIAG frame %d: %s %u ammo %d/%d from %s.\n", pHouse->ArrayIndex, now,
-							pAir->Type->ID, pAir->UniqueID, pAir->Ammo, pAir->Type->Ammo, pHolder->Type->ID);
-					}
-				}
-			}
-
-			// TEMP trace: what an aircraft that sits on Attack is doing, tick by tick, between its
-			// 150th and 450th frame on the ground (it is found at mission status 0, which the engine
-			// leaves on its first pass, so either the mission does not run or it starts over).
-			static int airTraceLines = 0;
-
-			if (!pAir->IsInAir() && now - track.SinceFrame >= 150 && airTraceLines < 90)
-			{
-				airTraceLines++;
-				auto const pGoing = abstract_cast<CellClass*>(pAir->Destination);
-				auto const pDock = abstract_cast<BuildingClass*>(pAir->GetNthLink(0));
-				auto const pTraceTarget = abstract_cast<TechnoClass*>(pAir->Target);
-				const int traceWeapon = pTraceTarget ? pAir->SelectWeapon(pTraceTarget) : 0;
-				Debug::Log("[NeuralAI] House %d air trace DIAG frame %d: %s %u on the ground %d frames, status %d, queued %d, destination %s (%d,%d), "
-					"moving %d, height %d, ammo %d/%d reload %d, range %d, locked %d, flags %d %d, returning %d, dock %s mission %d power %d, "
-					"emp %d, target %s, mission age %d, timer left %d, team %d, suspended %d.\n", pHouse->ArrayIndex, now, pAir->Type->ID,
-					pAir->UniqueID, now - track.SinceFrame, pAir->MissionStatus,
-					static_cast<int>(pAir->QueuedMission), pAir->Destination ? (pGoing ? "cell" : "object") : "none",
-					pGoing ? pGoing->MapCoords.X : -1, pGoing ? pGoing->MapCoords.Y : -1,
-					(pAir->Locomotor && pAir->Locomotor->Is_Moving()) ? 1 : 0, pAir->GetHeight(), pAir->Ammo, pAir->Type->Ammo,
-					pAir->ReloadTimer.GetTimeLeft(), pAir->GetWeaponRange(traceWeapon), pAir->IsLocked ? 1 : 0, pAir->unknown_bool_6D0 ? 1 : 0,
-					pAir->unknown_bool_6D1 ? 1 : 0, pAir->IsReturningFromAttackRun ? 1 : 0, pDock ? pDock->Type->ID : "none",
-					pDock ? static_cast<int>(pDock->CurrentMission) : -1, pDock ? (pDock->IsPowerOnline() ? 1 : 0) : -1,
-					pAir->IsUnderEMP() ? 1 : 0, pTraceTarget ? pTraceTarget->GetTechnoType()->ID : "none",
-					now - pAir->CurrentMissionStartTime, pAir->UpdateTimer.GetTimeLeft(), pAir->Team ? 1 : 0,
-					static_cast<int>(pAir->SuspendedMission));
 			}
 
 			const bool parked = !pAir->IsInAir() && now - track.SinceFrame >= 450 && now - track.AmmoSinceFrame >= 450;
@@ -2350,55 +2258,6 @@ namespace
 
 			if (parked || idleFlight)
 			{
-				// TEMP diagnostic: what the stalled aircraft was sent at. Plan aircraft end their plans
-				// on their pads, armed and with the target set (50 of 58 Air Strike plans, 2026-11-14).
-				static int airStallLines = 0;
-
-				if (airStallLines < 60)
-				{
-					airStallLines++;
-					auto const pStallTarget = abstract_cast<TechnoClass*>(pAir->Target);
-					const int weapon = pStallTarget ? pAir->SelectWeapon(pStallTarget) : -1;
-					const CellStruct targetCell = pStallTarget ? pStallTarget->GetMapCoords() : CellStruct::Empty;
-
-					// The engine takes a firing cell only where the local player has no fog
-					// (AircraftClass::Good_Fire_Location, 0x419986): how many cells around the target
-					// qualify, and who the local player is.
-					int clearCells = 0;
-					int cellsAround = 0;
-
-					for (int dy = -6; dy <= 6 && pStallTarget; ++dy)
-					{
-						for (int dx = -6; dx <= 6; ++dx)
-						{
-							auto const pAround = MapClass::Instance.TryGetCellAt(
-								CellStruct { static_cast<short>(targetCell.X + dx), static_cast<short>(targetCell.Y + dy) });
-
-							if (!pAround)
-								continue;
-
-							cellsAround++;
-
-							if ((pAround->AltFlags & AltCellFlags::NoFog) != static_cast<AltCellFlags>(0))
-								clearCells++;
-						}
-					}
-
-					Debug::Log("[NeuralAI] House %d air stall fog DIAG: %d of %d cells around the target without fog, local player %d, observer %d.\n",
-						pHouse->ArrayIndex, clearCells, cellsAround, HouseClass::CurrentPlayer ? HouseClass::CurrentPlayer->ArrayIndex : -1,
-						HouseClass::Observer ? HouseClass::Observer->ArrayIndex : -1);
-					Debug::Log("[NeuralAI] House %d air stall DIAG frame %d: %s %s, ammo %d/%d, status %d, locked %d, flag %d, docked %d, plan "
-						"member %d, target %s of house %d at (%d,%d) %d cells away, weapon %d fire error %d, cloak %d, hp %d.\n",
-						pHouse->ArrayIndex, now, pAir->Type->ID, parked ? "parked" : "flying", pAir->Ammo, pAir->Type->Ammo, pAir->MissionStatus,
-						pAir->IsLocked ? 1 : 0, pAir->IsCarryallNotLanding ? 1 : 0, pAir->GetNthLink(0) ? 1 : 0,
-						macro.PlanMembers.count(pAir->UniqueID) ? 1 : 0, pStallTarget ? pStallTarget->GetTechnoType()->ID : "none",
-						(pStallTarget && pStallTarget->Owner) ? pStallTarget->Owner->ArrayIndex : -1, targetCell.X, targetCell.Y,
-						static_cast<int>(targetCell.DistanceFrom(here)), weapon,
-						pStallTarget ? static_cast<int>(pAir->GetFireError(pStallTarget, weapon, true)) : -1,
-						pStallTarget ? static_cast<int>(pStallTarget->CloakState) : -1,
-						pStallTarget ? static_cast<int>(pStallTarget->GetHealthPercentage() * 100) : -1);
-				}
-
 				pAir->SetTarget(nullptr);
 				pAir->SetDestination(nullptr, true);
 				pAir->EnterIdleMode(false, true);
@@ -4931,7 +4790,6 @@ namespace
 
 	std::unordered_map<DWORD, NeuralPathBackoff> PathBackoffs;
 	int PathBackoffSerial = -1;
-	int PathSearchesSkipped = 0;
 
 	// Failed path searches of our infantry from a cell that holds a building (FreeSoldiersShutInBuildings):
 	// the cell, the frames with a failure there in a row (none more than ShutInFailGapFrames apart),
@@ -5035,7 +4893,6 @@ namespace
 		PathDeadGoals.clear();
 		BuildingPathFails.clear();
 		PocketFails.clear();
-		PathSearchesSkipped = 0;
 	}
 
 	// The frames in a row on which a path search of this unit from this cell (one holding a building)
@@ -5169,15 +5026,9 @@ bool NeuralAI::ShouldSkipPathSearch(const FootClass* pFoot, const CellStruct* pG
 	if (it == PathBackoffs.end() || Unsorted::CurrentFrame >= it->second.SkipUntil || it->second.Goal.DistanceFrom(*pGoal) >= PathBackoffGoalCells)
 		return false;
 
-	++PathSearchesSkipped;
-
 	return true;
 }
 
-// TEMP diagnostic: who the engine's path finder fails for. One failure costs about 1.2 ms of wall
-// time (frame cost sample of 2026-11-13) and a match can have a million. Counted per match by unit
-// type, role (slave, gatherer, plan member, free), mission, mega mission and how far the goal is
-// (near up to 12 cells, mid up to 40, far), and logged every PathFailureLogFrames.
 // The search over the zones found no way for a unit of a Neural AI house: one count per unit and
 // frame for the path dead goal memory, as for the cell search (user's match #10790: 9420 of these
 // and 74 of the others while the waves of a house kept leaving for a base behind a fallen bridge).
@@ -5213,20 +5064,6 @@ void NeuralAI::OnHierarchicalPathFailure(FootClass* pFoot, const CellStruct& fro
 
 void NeuralAI::OnPathFailure(FootClass* pFoot, const CellStruct& from, const CellStruct& to)
 {
-	constexpr int PathFailureLogFrames = 18000;
-	static int serial = -1;
-	static int total = 0;
-	static int logBucket = 0;
-	static std::map<std::string, int> kinds;
-
-	if (serial != NeuralMatchSerial)
-	{
-		serial = NeuralMatchSerial;
-		total = 0;
-		logBucket = 0;
-		kinds.clear();
-	}
-
 	if (!pFoot)
 		return;
 
@@ -5267,43 +5104,4 @@ void NeuralAI::OnPathFailure(FootClass* pFoot, const CellStruct& from, const Cel
 			}
 		}
 	}
-
-	auto const pType = pFoot->GetTechnoType();
-	auto const pUnit = abstract_cast<UnitClass*>(pFoot);
-	const int owner = pFoot->Owner ? pFoot->Owner->ArrayIndex : -1;
-	const int distance = static_cast<int>(from.DistanceFrom(to));
-	const char* role = "free";
-
-	if (pFoot->SlaveOwner)
-		role = "slave";
-	else if ((pType && pType->ResourceGatherer) || (pUnit && pUnit->Type && pUnit->Type->Harvester))
-		role = "gatherer";
-	else if (owner >= 0 && owner < 32 && MacroStates[owner].PlanMembers.contains(pFoot->UniqueID))
-		role = "plan";
-
-	char key[112];
-	std::snprintf(key, sizeof(key), "%s %s m%d mega%d %s", pType ? pType->ID : "?", role, static_cast<int>(pFoot->CurrentMission),
-		static_cast<int>(pFoot->MegaMission), distance <= 12 ? "near" : (distance <= 40 ? "mid" : "far"));
-	kinds[key]++;
-	total++;
-
-	const int bucket = Unsorted::CurrentFrame / PathFailureLogFrames;
-
-	if (bucket <= logBucket)
-		return;
-
-	logBucket = bucket;
-	std::vector<std::pair<int, std::string>> top;
-
-	for (auto const& [name, count] : kinds)
-		top.emplace_back(count, name);
-
-	std::sort(top.begin(), top.end(), [](auto const& a, auto const& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
-	std::string text;
-
-	for (size_t i = 0; i < top.size() && i < 16; ++i)
-		text += (i ? "; " : "") + top[i].second + " x" + std::to_string(top[i].first);
-
-	Debug::Log("[NeuralAI] Path failures DIAG frame %d: %d so far in %d kinds, %d searches skipped; %s.\n", Unsorted::CurrentFrame,
-		total, static_cast<int>(kinds.size()), PathSearchesSkipped, text.c_str());
 }
