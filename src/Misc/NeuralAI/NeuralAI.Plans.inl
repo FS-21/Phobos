@@ -235,51 +235,20 @@ namespace
 
 		const int zone = MapClass::Instance.GetMovementZoneType(here, pType->MovementZone, pUnit->OnBridge);
 
-		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search below.
 		NeuralWaitAsker asker {};
 		asker.Speed = pType->SpeedType;
 		asker.Movement = pType->MovementZone;
 		asker.Zone = zone;
 		NeuralWaitSearch search {};
 		search.MaxRing = SiegeScreenRingCells;
-		auto const pShadow = FindWaitCellNear(point, search, asker,
+
+		return FindWaitCellNear(point, search, asker,
 			WaitLegal | WaitNoBuilding | WaitOffDeck | WaitOffMouth | WaitZone | WaitOffNarrow,
 			[&](const CellStruct& cell, const CellClass*)
 			{
 				return inReach(cell) || std::any_of(transports.begin(), transports.end(),
 					[&cell](const CellStruct& at) { return at.DistanceFrom(cell) <= SiegeScreenTransportCells; });
 			});
-		static int shadowLogSerial = -1;
-		static int shadowLogCount = 0;
-
-		for (int r = 0; r <= SiegeScreenRingCells; ++r)
-		{
-			for (int ry = -r; ry <= r; ++ry)
-			{
-				for (int rx = -r; rx <= r; ++rx)
-				{
-					if (std::abs(rx) != r && std::abs(ry) != r)
-						continue;
-
-					const CellStruct cell { static_cast<short>(point.X + rx), static_cast<short>(point.Y + ry) };
-					auto const pCell = MapClass::Instance.CoordinatesLegal(cell) ? MapClass::Instance.TryGetCellAt(cell) : nullptr;
-
-					if (!pCell || pCell->GetBuilding() || IsBridgeOrTubeCell(pCell) || IsPassageMouthCell(cell) || IsNarrowPassage(cell)
-						|| MapClass::Instance.GetMovementZoneType(cell, pType->MovementZone, false) != zone || inReach(cell)
-						|| std::any_of(transports.begin(), transports.end(),
-							[&cell](const CellStruct& at) { return at.DistanceFrom(cell) <= SiegeScreenTransportCells; }))
-					{
-						continue;
-					}
-
-					NoteWaitCellShadow("DefenseReachWaitCell", shadowLogSerial, shadowLogCount, point, pCell, pShadow);
-					return pCell;
-				}
-			}
-		}
-
-		NoteWaitCellShadow("DefenseReachWaitCell", shadowLogSerial, shadowLogCount, point, nullptr, pShadow);
-		return nullptr;
 	}
 
 	// Siege screen (SiegeScreen*): the cell a main battle tank of an archetype 7 house, marching with
@@ -3980,44 +3949,14 @@ namespace
 		// Nearest legal land cell of a movement zone around a point (ring search, fixed order).
 		auto landCellInZone = [](const CellStruct& center, int zone, int searchRadius) -> CellClass*
 		{
-			// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search below.
+			// The first legal land cell from the center out, of the zone when one is given (FindWaitCellNear).
 			NeuralWaitAsker asker {};
 			asker.Zone = zone;
 			NeuralWaitSearch search {};
 			search.MaxRing = searchRadius;
-			auto const pShadow = FindWaitCellNear(center, search, asker, WaitLegal | WaitLand | (zone >= 0 ? WaitZone : 0u),
+
+			return FindWaitCellNear(center, search, asker, WaitLegal | WaitLand | (zone >= 0 ? WaitZone : 0u),
 				[](const CellStruct&, const CellClass*) { return false; });
-			static int shadowLogSerial = -1;
-			static int shadowLogCount = 0;
-
-			for (int r = 0; r <= searchRadius; ++r)
-			{
-				for (int dy = -r; dy <= r; ++dy)
-				{
-					for (int dx = -r; dx <= r; ++dx)
-					{
-						if (std::max(std::abs(dx), std::abs(dy)) != r)
-							continue;
-
-						const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
-
-						if (!MapClass::Instance.CoordinatesLegal(c))
-							continue;
-
-						auto const pCell = MapClass::Instance.TryGetCellAt(c);
-
-						if (pCell && pCell->LandType != LandType::Water
-							&& (zone < 0 || MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) == zone))
-						{
-							NoteWaitCellShadow("landCellInZone", shadowLogSerial, shadowLogCount, center, pCell, pShadow);
-							return pCell;
-						}
-					}
-				}
-			}
-
-			NoteWaitCellShadow("landCellInZone", shadowLogSerial, shadowLogCount, center, nullptr, pShadow);
-			return nullptr;
 		};
 
 		// Point at `cells` from `from` toward `to`, shifted `side` cells to the left of that line.

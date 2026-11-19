@@ -252,27 +252,4 @@ namespace
 		return FindWaitCellNear(center, search, asker, rules, std::forward<Reject>(reject),
 			[](const CellStruct&, const CellClass*, int, int, int) { return 0; });
 	}
-
-	// TEMP diagnostic (rule consolidation, case 3): a cell a finder chose that FindWaitCellNear does
-	// not choose, WaitShadowLogLines a match for each finder. With none over a desync test and some
-	// matches, the finder's own search goes.
-	void NoteWaitCellShadow(const char* name, int& serial, int& count, const CellStruct& center, const CellClass* pOld,
-		const CellClass* pNew)
-	{
-		if (pOld == pNew)
-			return;
-
-		if (serial != NeuralMatchSerial)
-		{
-			serial = NeuralMatchSerial;
-			count = 0;
-		}
-
-		if (count++ < WaitShadowLogLines)
-		{
-			Debug::Log("[NeuralAI] wait cell shadow mismatch %s: old (%d,%d) new (%d,%d) center (%d,%d) frame %d.\n", name,
-				pOld ? pOld->MapCoords.X : -1, pOld ? pOld->MapCoords.Y : -1, pNew ? pNew->MapCoords.X : -1,
-				pNew ? pNew->MapCoords.Y : -1, center.X, center.Y, Unsorted::CurrentFrame);
-		}
-	}
 } // namespace

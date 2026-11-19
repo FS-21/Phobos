@@ -158,39 +158,11 @@ namespace
 		// alike), so a flying transport called to soldiers on the shore hung over them for good.
 		const bool flyer = pTransport->Type->JumpJet || pTransport->Type->MovementZone == MovementZone::Fly;
 
+		// The free cell of the land nearest `from`, minRing to maxRing out, the whole square row by row
+		// (FindWaitCellNear, SquareNearest): land of the zone on foot with no building, off the beach for
+		// a flyer, clear by the transport's own movement.
 		auto const nearestLoadingCell = [&](int minRing, int maxRing) -> CellClass*
 		{
-			CellClass* pBest = nullptr;
-			double bestDist = 999999.0;
-
-			for (int dy = -maxRing; dy <= maxRing; ++dy)
-			{
-				for (int dx = -maxRing; dx <= maxRing; ++dx)
-				{
-					if (std::max(std::abs(dx), std::abs(dy)) < minRing)
-						continue;
-
-					const CellStruct c { static_cast<short>(from.X + dx), static_cast<short>(from.Y + dy) };
-					auto const pC = MapClass::Instance.TryGetCellAt(c);
-
-					if (!pC || pC->LandType == LandType::Water || (flyer && pC->LandType == LandType::Beach) || pC->GetBuilding()
-						|| MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != landZone
-						|| !pC->IsClearToMove(pTransport->Type->SpeedType, false, false, -1, pTransport->Type->MovementZone, -1, false))
-					{
-						continue;
-					}
-
-					const double d = c.DistanceFrom(from);
-
-					if (d < bestDist)
-					{
-						bestDist = d;
-						pBest = pC;
-					}
-				}
-			}
-
-			// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search above.
 			NeuralWaitAsker asker {};
 			asker.Speed = pTransport->Type->SpeedType;
 			asker.Movement = pTransport->Type->MovementZone;
@@ -201,14 +173,10 @@ namespace
 			search.MaxRing = maxRing;
 			search.Pick = NeuralWaitPick::SquareNearest;
 			search.MetricTo = from;
-			auto const pShadow = FindWaitCellNear(from, search, asker,
+
+			return FindWaitCellNear(from, search, asker,
 				WaitInMap | WaitLand | WaitNoBuilding | WaitZone | WaitClearOfUnits | (flyer ? WaitNotBeach : 0u),
 				[](const CellStruct&, const CellClass*) { return false; });
-			static int shadowLogSerial = -1;
-			static int shadowLogCount = 0;
-			NoteWaitCellShadow("nearestLoadingCell", shadowLogSerial, shadowLogCount, from, pBest, pShadow);
-
-			return pBest;
 		};
 
 		auto const sendTo = [pTransport](CellClass* pCell)
