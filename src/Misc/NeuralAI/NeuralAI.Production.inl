@@ -2562,6 +2562,31 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& minAnchorDistToUncolonizedOre <= 60 && hasCoreEconomyAndProduction
 			&& (features[19] < 32 || ownedRefineries < 3 || scores[34] > 100 || Unsorted::CurrentFrame > 2100));
 
+		// TEMP diagnostic (crawl DIAG, user approved 2026-11-19: in 20 matches of a31220939 the nearest free
+		// ore stood 10 to 20 cells from every anchor in 18% of the refinery cap lines and 38% of those were
+		// no closer 9000 frames later): every 4500 frames, for a house whose nearest free ore is 10 to 60
+		// cells from an anchor, the gates of the stepping stone crawl, what the yard builds now and the last
+		// building that crawled toward ore (crawl DIAG (placement)).
+		if (IsAITickWindow(4500, 0) && nearestUncolonizedOreCell != CellStruct::Empty && minAnchorDistToUncolonizedOre > 9
+			&& minAnchorDistToUncolonizedOre <= 60)
+		{
+			auto const& crawlMacro = GetMacroState(pHouse);
+			FactoryClass* const pYardFactory = pHouse->GetPrimaryFactory(AbstractType::BuildingType, false, BuildCat::DontCare);
+			TechnoTypeClass* const pBuildingNow = (pYardFactory && pYardFactory->Object) ? pYardFactory->Object->GetTechnoType() : nullptr;
+			BuildingTypeClass* const pLastCrawlType = (crawlMacro.LastCrawlType >= 0 && crawlMacro.LastCrawlType < BuildingTypeClass::Array.Count)
+				? BuildingTypeClass::Array.GetItem(crawlMacro.LastCrawlType)
+				: nullptr;
+			Debug::Log("[NeuralAI] House %d crawl DIAG (production): free ore (%d,%d) %d cells from an anchor, needs stones %d (placement failures %d, "
+				"core economy %d, refineries %d, features19 %d, slot34 %d), money %d (stone bonus from 1400), power %d of %d (surplus %d, cushion %d), "
+				"building %s, last crawl %s %d frames ago from %d to %d cells, frame %d.\n",
+				pHouse->ArrayIndex, nearestUncolonizedOreCell.X, nearestUncolonizedOreCell.Y, minAnchorDistToUncolonizedOre,
+				needsSteppingStoneCrawlToOre ? 1 : 0, crawlMacro.ConsecutivePlacementFailures, hasCoreEconomyAndProduction ? 1 : 0, ownedRefineries,
+				features[19], scores[34], money, pHouse->PowerDrain, pHouse->PowerOutput, realPowerSurplus, requiredPowerCushion,
+				pBuildingNow ? pBuildingNow->ID : "nothing", pLastCrawlType ? pLastCrawlType->ID : "none",
+				crawlMacro.LastCrawlFrame >= 0 ? Unsorted::CurrentFrame - crawlMacro.LastCrawlFrame : -1, crawlMacro.LastCrawlBefore,
+				crawlMacro.LastCrawlAfter, Unsorted::CurrentFrame);
+		}
+
 		// Offensive bank (HasOffensiveBank) with a known enemy base on the land of one of our ConYards
 		// (our own land, or a beachhead on the enemy island): the house keeps building stepping stones,
 		// which the placement sends toward the enemy (offensive crawl), up to 16 forward stones alive.
