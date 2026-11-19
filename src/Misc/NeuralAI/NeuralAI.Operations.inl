@@ -2625,22 +2625,12 @@ namespace
 			{
 				const CellStruct spot { static_cast<short>(op.Staging.X + (centre.X - op.Staging.X) * step / std::max(1.0, span)),
 					static_cast<short>(op.Staging.Y + (centre.Y - op.Staging.Y) * step / std::max(1.0, span)) };
-				auto const pSpot = MapClass::Instance.TryGetCellAt(spot);
-				bool besideBuilding = false;
+				NeuralWaitAsker asker {};
+				asker.Zone = op.OriginZone;
 
-				for (int dy = -1; dy <= 1 && !besideBuilding; ++dy)
-				{
-					for (int dx = -1; dx <= 1 && !besideBuilding; ++dx)
-					{
-						const CellStruct next { static_cast<short>(spot.X + dx), static_cast<short>(spot.Y + dy) };
-						auto const pNext = MapClass::Instance.TryGetCellAt(next);
-						besideBuilding = pNext && pNext->GetBuilding();
-					}
-				}
-
-				if (pSpot && pSpot->LandType != LandType::Water && !besideBuilding
-					&& MapClass::Instance.GetMovementZoneType(spot, MovementZone::Normal, false) == op.OriginZone
-					&& !IsOpWaitInTheWay(spot))
+				// Legal land of the members' zone with no building around it, out of the way (IsOpWaitInTheWay).
+				if (IsWaitCellAllowed(spot, asker,
+					WaitLegal | WaitLand | WaitNotBesideBuilding | WaitZone | WaitOffDeck | WaitOffMouth | WaitOffNarrow))
 				{
 					op.Gather = spot;
 					break;
