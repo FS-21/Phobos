@@ -2980,6 +2980,9 @@ namespace
 	constexpr int RepairerHealCells = 10;
 	constexpr int RepairerEscortMost = 2;
 	constexpr int RepairerEscortKeepCells = 4;
+	// Below one repairer for each RepairerPerVehicles armed ground vehicles (and with that many) the best
+	// repairer goes ahead of the vehicle pick (Production.inl, the repairer complement, user 2026-11-19),
+	// alternating with the tank floor as the light complement does.
 	// The escort follows only a vehicle in a group (user, 2026-11-19): RepairerEscortGroupMin armed ground
 	// vehicles of ours within RepairerEscortGroupCells of it, itself included.
 	constexpr int RepairerEscortGroupMin = 3;

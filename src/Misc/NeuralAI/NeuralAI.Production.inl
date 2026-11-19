@@ -4136,6 +4136,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// The light complement (LightComplement*): the best scored armed light vehicle.
 	int bestLightIdx = -1;
 	int bestLightScore = -32000;
+	// The repairer complement (Repairer*): the best scored repairer type the repairer cap lets through.
+	int bestRepairerIdx = -1;
+	int bestRepairerScore = -32000;
 	// TEMP diagnostic: the ground vehicle candidates of this pick with the parts of their score (base
 	// of cost and health, type penalty, counters, the class slot with its extras, the rest), logged
 	// every 1800 frames per house: why main battle tanks lose the pick.
@@ -4216,8 +4219,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Light complement (LightComplement*): armed light vehicles of ours, and whether the newest of our
 	// main battle tanks and light vehicles is a light one.
 	int ownedLightVehicles = 0;
+	// The newest of our main battle tanks, light vehicles and repairers, and which of them it is.
 	DWORD newestTankOrLightUid = 0;
 	bool newestTankOrLightIsLight = false;
+	bool newestTankOrLightIsRepairer = false;
 	// Repairers of ours (IsRepairerUnit: an IFV with an engineer too), within ownedGroundCombatUnits.
 	int ownedRepairerVehicles = 0;
 	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
@@ -4302,8 +4307,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				else if (pOwnedWpn != nullptr)
 				{
 					ownedGroundCombatUnits++;
+					const bool isOwnedRepairer = IsRepairerUnit(pOwnedU);
 
-					if (IsRepairerUnit(pOwnedU))
+					if (isOwnedRepairer)
 						ownedRepairerVehicles++;
 
 					if (IsMainBattleTankType(pOwnedType))
@@ -4321,11 +4327,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (isOwnedLight)
 						ownedLightVehicles++;
 
-					// Below the tank floor the light complement alternates with it by the newest of them.
-					if ((isOwnedLight || IsMainBattleTankType(pOwnedType)) && pOwnedU->UniqueID > newestTankOrLightUid)
+					// Below the tank floor the light and repairer complements alternate with it by the newest of them.
+					if ((isOwnedLight || isOwnedRepairer || IsMainBattleTankType(pOwnedType)) && pOwnedU->UniqueID > newestTankOrLightUid)
 					{
 						newestTankOrLightUid = pOwnedU->UniqueID;
 						newestTankOrLightIsLight = isOwnedLight;
+						newestTankOrLightIsRepairer = isOwnedRepairer;
 					}
 
 					if (ShootsAtAircraft(pOwnedType))
@@ -6009,6 +6016,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestLightIdx = pUnit->ArrayIndex;
 			}
 
+			// A repairer the cap let through (Repairer*).
+			if (IsRepairerUnitType(pUnit) && score > bestRepairerScore)
+			{
+				bestRepairerScore = score;
+				bestRepairerIdx = pUnit->ArrayIndex;
+			}
+
 			if (tankBunkersToFill > 0 && pUnit->Bunkerable && !isEconomyUnit && !isMCV && !isKeyStructureDeployer
 				&& score > bestBunkerTankScore)
 			{
@@ -6099,7 +6113,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// the newest of our main battle tanks and light vehicles is a tank (the two alternate).
 		const int lightFloor = ownedMainTanks >= LightComplementMinTanks ? ownedMainTanks / LightComplementPerTanks : 0;
 		const bool belowLight = ownedLightVehicles < lightFloor;
-		const bool lightTurn = !belowFloor || !newestTankOrLightIsLight;
+		const bool newestIsTank = newestTankOrLightUid != 0 && !newestTankOrLightIsLight && !newestTankOrLightIsRepairer;
+		const bool lightTurn = !belowFloor || newestIsTank;
 		const bool lightTakes = belowLight && lightTurn && bestLightIdx >= 0 && bestUnitIdx != bestLightIdx && hasActiveUnitIncome
 			&& !bestUnitRestoresIncome && !airAttackOnly;
 
@@ -6122,6 +6137,40 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestUnitIdx = bestLightIdx;
 			bestUnitScore = bestLightScore;
+		}
+
+		// The repairer complement (user, 2026-11-19: approved «Sí, hazlo»; RepairerPerVehicles): with that
+		// many armed ground vehicles of ours or more and fewer than one repairer for each of them, the best
+		// repairer goes first, unless the light complement took this pick; below the tank floor only when the
+		// newest of our main battle tanks, light vehicles and repairers is a tank, and never twice in a row;
+		// the tank floor's exceptions. As support a repairer gets no class weight and lost every pick of 10
+		// matches of 2026-11-19 (13 times a candidate, MDISK 457 to 1252).
+		const int armedNonRepairers = ownedGroundCombatUnits - ownedRepairerVehicles;
+		const bool belowRepairers = armedNonRepairers >= RepairerPerVehicles
+			&& (ownedRepairerVehicles + 1) * RepairerPerVehicles <= armedNonRepairers;
+		const bool repairerTurn = belowFloor ? newestIsTank : !newestTankOrLightIsRepairer;
+		const bool repairerTakes = belowRepairers && !lightTakes && repairerTurn && bestRepairerIdx >= 0 && bestUnitIdx != bestRepairerIdx
+			&& hasActiveUnitIncome && !bestUnitRestoresIncome && !airAttackOnly;
+
+		// TEMP diagnostic: the repairer complement, with the vehicle pick line.
+		if (logUnitPicks && belowRepairers)
+		{
+			++unitPickDiagCount;
+			Debug::Log("[NeuralAI] Frame %d | House #%d repairer complement: repairers %d, armed vehicles %d, best repairer %s %d, pick %s %d%s\n",
+				Unsorted::CurrentFrame, pHouse->ArrayIndex, ownedRepairerVehicles, armedNonRepairers,
+				bestRepairerIdx >= 0 ? UnitTypeClass::Array.GetItem(bestRepairerIdx)->ID : "none", bestRepairerScore,
+				bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx)->ID : "none", bestUnitScore,
+				repairerTakes ? (belowFloor ? ", the repairer goes first, its turn below the tank floor" : ", the repairer goes first")
+					: (lightTakes ? ", kept: the light vehicle's turn" : (!repairerTurn ? ", kept: not its turn"
+					: (bestRepairerIdx < 0 ? ", kept: no repairer to build" : (bestUnitIdx == bestRepairerIdx ? ", the pick is a repairer"
+						: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income"
+							: ", kept: under air attack")))))));
+		}
+
+		if (repairerTakes)
+		{
+			bestUnitIdx = bestRepairerIdx;
+			bestUnitScore = bestRepairerScore;
 		}
 	}
 
