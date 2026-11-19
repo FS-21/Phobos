@@ -721,13 +721,15 @@ namespace
 		int NearSince { -1 };
 	};
 
-	// An MCV whose yard was ordered to unfold (Micro): where and when it last unfolded, and how often
-	// it tried again on that spot after the engine refused the deploy.
+	// An MCV whose yard was ordered to unfold (Micro): where and when it last unfolded, how often it
+	// tried again on that spot after the engine refused the deploy, and since when it unfolds there
+	// (McvUnfoldSkipMostFrames).
 	struct NeuralMcvUnfold
 	{
 		CellStruct Cell { CellStruct::Empty };
 		int Frame { -1 };
 		int Tries { 0 };
+		int Since { -1 };
 	};
 
 	// Expansion MCV waiting for a ride to the island goal (Micro): since when it waits with no ride on
@@ -1977,6 +1979,14 @@ namespace
 		int LastBoardFrame { -1 };
 		// Frame the stuck cargo watchdog had the cargo set down on its pickup shore (FerryStuckCargoFrames).
 		int SetDownFrame { -1 };
+		// Departed and stuck (FerryDepartedStuckFrames): the cell and passengers at the last progress
+		// of a departed loaded transport and its frame, the frame it was told to unload where it
+		// stands, and whether it gave its goal up and takes the cargo back to LoadZone (Homeward).
+		CellStruct StillCoords { CellStruct::Empty };
+		int StillFrame { -1 };
+		int StillPassengers { -1 };
+		int UnloadHereFrame { -1 };
+		bool Homeward { false };
 	};
 
 	// The zone map's value for a cell with no zone at all (outside the zoned map), read as 65535.
@@ -2147,6 +2157,15 @@ namespace
 	constexpr int FerryStuckCargoFrames = 9000;
 	// How long that set-down keeps the transport unloading before the loader has it again.
 	constexpr int FerrySetDownFrames = 900;
+	// A transport that departed with cargo and has not moved more than one cell, nor let a passenger
+	// off, for this long gives its goal up (user approved, 2026-11-19, match #11475: a landing craft
+	// with an MCV stood 50000 frames next to a narrow strip of its goal island): it unloads where it
+	// stands when it touches ground of another zone than its origin, else (and after one such unload
+	// that left it stuck again) it takes the cargo back to its origin landmass. A transport carrying
+	// a yard MCV whose island goal is gone, or given up for lack of room, goes back the same way.
+	// FerryGiveUpLogLines: lines a match of the TEMP diagnostic of both.
+	constexpr int FerryDepartedStuckFrames = FerryStuckCargoFrames;
+	constexpr int FerryGiveUpLogLines = 40;
 	// Transport operations (NeuralAI.Operations.inl). TransportOpsEnabled switches them on: the
 	// waves hand the units that cannot walk to their goal to an operation, and the old ferry no
 	// longer loads idle units of its own accord.
@@ -2580,6 +2599,12 @@ namespace
 	constexpr int McvIdleArriveFrames = 450;
 	constexpr int McvUnfoldRetryFrames = 450;
 	constexpr int McvUnfoldMostTries = 3;
+	// The MCV rules leave an unfolding MCV to the engine for this long at most, counted from the
+	// first frame it unfolded on that spot (user approved, 2026-11-19, match #11476: a yard MCV stood
+	// packed 60000+ frames and no rule nor the idle watchdog ever spoke of it); after that they act
+	// on it again. McvPackedLogLines: lines a match of the packed yard MCV diagnostic.
+	constexpr int McvUnfoldSkipMostFrames = 900;
+	constexpr int McvPackedLogLines = 40;
 	// Armies go out in mass (user approved, 2026-11-19: "sí haz las 4"; match #11465 Dead Six: two
 	// allied houses of 80+ units and 100000+ credits streamed packets of 7 to 17 units for 18000
 	// frames while a third of each army stayed home). Once the army (idle and busy fighters, not

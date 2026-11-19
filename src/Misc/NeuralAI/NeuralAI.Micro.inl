@@ -953,6 +953,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// (when home island is full), and Strategic Neutral Tech Building targets
 	CellClass* pIslandResourceGoalCell = nullptr;
 	int resourceIslandZone = -1;
+	// Where pIslandResourceGoalCell comes from: an island with ore, the bare land fallback (no ore,
+	// while the home island counts as congested) or the beachhead on an enemy island (offensive).
+	enum class IslandGoalKind
+	{
+		None,
+		Ore,
+		BareLand,
+		EnemyBeachhead
+	};
+	IslandGoalKind islandGoalKind = IslandGoalKind::None;
 	// Harvesters are carried only to where they can unload (user, match #10266: the transport
 	// helicopters of a house set seven of its harvesters down on an island with no ore and no
 	// refinery, the nearest free land for an expansion, where they stood until they were
@@ -980,6 +990,47 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	auto const islandGoalTakesHarvesters = [&]()
 	{
 		return pIslandResourceGoalCell && resourceIslandZone >= 0 && zoneHasOwnRefinery(resourceIslandZone);
+	};
+	// An economic crossing only when needed (user approved, 2026-11-19, match #11475: an expansion
+	// MCV next to a yard boarded a landing craft for bare land with no ore while its house had 80 free
+	// fields at home). A yard MCV standing at from (zone fromZone) crosses to an ore island only when
+	// its landmass has no free ore field (FindFreeOreFieldCell, as the MCV logic asks it) or no room
+	// for its yard (noRoomHere), to the bare land fallback never, and to the beachhead on an enemy
+	// island (offensive) whatever the fields at home. Never to an island given up for lack of room
+	// (NoRoomIslandUntil): a transport takes a yard MCV back from there (FerryMcvNowhere).
+	auto const isNoRoomIsland = [pHouse](int zone) -> bool
+	{
+		auto const& noRoom = GetMacroState(pHouse).NoRoomIslandUntil;
+		auto const itNoRoom = noRoom.find(zone);
+
+		return itNoRoom != noRoom.end() && itNoRoom->second > Unsorted::CurrentFrame;
+	};
+	auto const yardMcvMayCrossToIslandGoal = [&](const CellStruct& from, int fromZone, bool noRoomHere) -> bool
+	{
+		if (!pIslandResourceGoalCell || isNoRoomIsland(resourceIslandZone))
+			return false;
+
+		if (islandGoalKind == IslandGoalKind::EnemyBeachhead)
+			return true;
+
+		if (islandGoalKind != IslandGoalKind::Ore)
+			return false;
+
+		return noRoomHere || !IsGroundZone(fromZone) || FindFreeOreFieldCell(pHouse, from, fromZone, 14) == nullptr;
+	};
+	auto const islandGoalKindName = [&]() -> const char*
+	{
+		switch (islandGoalKind)
+		{
+		case IslandGoalKind::Ore:
+			return "ore";
+		case IslandGoalKind::BareLand:
+			return "bare land";
+		case IslandGoalKind::EnemyBeachhead:
+			return "enemy beachhead";
+		default:
+			return "none";
+		}
 	};
 	auto const isStrandedHarvester = [&](UnitClass* pU, int zone)
 	{
@@ -1097,6 +1148,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			bool HomeOre { false };
 			CellStruct Goal { CellStruct::Empty };
 			int GoalZone { -1 };
+			bool GoalBareLand { false };
 		};
 
 		static std::array<IslandScan, 32> islandScans;
@@ -1287,10 +1339,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (!pIslandResourceGoalCell && pFallbackIslandLandCell)
+		if (pIslandResourceGoalCell)
+		{
+			islandGoalKind = IslandGoalKind::Ore;
+		}
+		else if (pFallbackIslandLandCell)
 		{
 			pIslandResourceGoalCell = pFallbackIslandLandCell;
 			resourceIslandZone = fallbackIslandLandZone;
+			islandGoalKind = IslandGoalKind::BareLand;
 		}
 
 		if (islandScanKept)
@@ -1298,12 +1355,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			hasUncolonizedOreOnHomeIsland = pIslandScan->HomeOre;
 			resourceIslandZone = pIslandScan->GoalZone;
 			pIslandResourceGoalCell = pIslandScan->Goal != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(pIslandScan->Goal) : nullptr;
+			islandGoalKind = !pIslandResourceGoalCell ? IslandGoalKind::None
+				: (pIslandScan->GoalBareLand ? IslandGoalKind::BareLand : IslandGoalKind::Ore);
 		}
 		else if (pIslandScan)
 		{
 			*pIslandScan = IslandScan { NeuralMatchSerial, Unsorted::CurrentFrame, pHouse->Buildings.Count, homeCoords, homeGroundZone,
 				homeIslandCongested, hasUncolonizedOreOnHomeIsland,
-				pIslandResourceGoalCell ? pIslandResourceGoalCell->MapCoords : CellStruct::Empty, resourceIslandZone };
+				pIslandResourceGoalCell ? pIslandResourceGoalCell->MapCoords : CellStruct::Empty, resourceIslandZone,
+				islandGoalKind == IslandGoalKind::BareLand };
 		}
 
 		if (pIslandResourceGoalCell)
@@ -1484,6 +1544,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							bestEnemyReconqScore = reconqScore;
 							pIslandResourceGoalCell = pEnemyFlankBeach;
 							resourceIslandZone = ebz;
+							islandGoalKind = IslandGoalKind::EnemyBeachhead;
 						}
 					}
 				}
@@ -3281,6 +3342,60 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	microClock.Mark(NeuralSection::MicroUnits);
 
+	// TEMP diagnostic (match #11476: a yard MCV stood packed 60000+ frames with no watchdog line):
+	// every 4500 frames, each packed yard MCV of the house and what keeps the MCV rules from it
+	// (McvPackedLogLines a match).
+	if (IsAITickWindow(4500, 0))
+	{
+		static int mcvPackedLogSerial = -1;
+		static int mcvPackedLogCount = 0;
+
+		if (mcvPackedLogSerial != NeuralMatchSerial)
+		{
+			mcvPackedLogSerial = NeuralMatchSerial;
+			mcvPackedLogCount = 0;
+		}
+
+		auto& packedMacro = GetMacroState(pHouse);
+
+		for (auto const pMcv : UnitClass::Array)
+		{
+			if (mcvPackedLogCount >= McvPackedLogLines)
+				break;
+
+			if (!pMcv || pMcv->Owner != pHouse || !pMcv->IsAlive || !pMcv->Type || !pMcv->Type->DeploysInto
+				|| !pMcv->Type->DeploysInto->ConstructionYard)
+			{
+				continue;
+			}
+
+			++mcvPackedLogCount;
+			const CellStruct mc = pMcv->GetMapCoords();
+			char watchText[96] = "none";
+
+			if (auto const itWatch = packedMacro.McvIdle.find(pMcv->UniqueID); itWatch != packedMacro.McvIdle.end())
+			{
+				std::snprintf(watchText, sizeof(watchText), "at (%d,%d) since %d, %d sites failed, own order until %d",
+					itWatch->second.Cell.X, itWatch->second.Cell.Y, itWatch->second.SinceFrame,
+					static_cast<int>(itWatch->second.FailedSites.size()), itWatch->second.OwnOrderUntil);
+			}
+
+			auto const itUnfold = packedMacro.McvUnfolds.find(pMcv->UniqueID);
+			auto const itWait = packedMacro.IslandMcvWaits.find(pMcv->UniqueID);
+			Debug::Log("[NeuralAI] House %d packed MCV: %s %u at (%d,%d) zone %d, mission %d queued %d, deploying %d, in limbo %d "
+				"transporter %u, link %d, transport op %d, scout %d, plan %d, unfolding since %d, island wait since %d released %d, "
+				"island goal %s zone %d, idle watch %s, %d yards, frame %d.\n",
+				pHouse->ArrayIndex, pMcv->Type->ID, pMcv->UniqueID, mc.X, mc.Y, ObjectZone(pMcv, MovementZone::Normal),
+				static_cast<int>(pMcv->CurrentMission), static_cast<int>(pMcv->QueuedMission), pMcv->IsDeploying ? 1 : 0,
+				pMcv->InLimbo ? 1 : 0, pMcv->Transporter ? pMcv->Transporter->UniqueID : 0u, pMcv->HasAnyLink() ? 1 : 0,
+				IsInTransportOp(pHouse, pMcv->UniqueID) ? 1 : 0, IsActiveScout(pHouse, pMcv->UniqueID) ? 1 : 0,
+				IsPlanMember(pHouse, pMcv->UniqueID) ? 1 : 0, itUnfold != packedMacro.McvUnfolds.end() ? itUnfold->second.Since : -1,
+				itWait != packedMacro.IslandMcvWaits.end() ? itWait->second.SinceFrame : -1,
+				(itWait != packedMacro.IslandMcvWaits.end() && itWait->second.Released) ? 1 : 0, islandGoalKindName(), resourceIslandZone,
+				watchText, pHouse->NumConYards, Unsorted::CurrentFrame);
+		}
+	}
+
 	for (auto const pUnit : UnitClass::Array)
 	{
 		if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive)
@@ -3527,7 +3642,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// #11445-#11450: MCVs ordered to unfold were sent elsewhere by them, three times one MCV).
 			// When the engine refuses the deploy it clears the foundation for the next try, so a yard
 			// that was unfolding unfolds again on that spot, McvUnfoldMostTries times within
-			// McvUnfoldRetryFrames, before the rules below may move it.
+			// McvUnfoldRetryFrames, before the rules below may move it. The skip lasts
+			// McvUnfoldSkipMostFrames at most from the first frame the MCV unfolded on that spot
+			// (match #11476): past it the rules below and the idle watchdog act on it again.
+			bool unfoldingTooLong = false;
 			{
 				auto& unfoldMacro = GetMacroState(pHouse);
 				auto& unfolds = unfoldMacro.McvUnfolds;
@@ -3545,14 +3663,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						unfold.Cell = here;
 						unfold.Tries = 0;
+						unfold.Since = now;
+					}
+					else if (unfold.Since < 0 || now < unfold.Since || now < unfold.Frame || now - unfold.Frame > McvUnfoldRetryFrames)
+					{
+						unfold.Since = now;
 					}
 
 					unfold.Frame = now;
-					unfoldMacro.McvIdle.erase(pUnit->UniqueID);
-					continue;
-				}
+					unfoldingTooLong = now - unfold.Since > McvUnfoldSkipMostFrames;
 
-				if (auto const itUnfold = unfolds.find(pUnit->UniqueID); itUnfold != unfolds.end())
+					if (!unfoldingTooLong)
+					{
+						unfoldMacro.McvIdle.erase(pUnit->UniqueID);
+						continue;
+					}
+				}
+				else if (auto const itUnfold = unfolds.find(pUnit->UniqueID); itUnfold != unfolds.end())
 				{
 					if (here.DistanceFrom(itUnfold->second.Cell) <= 1.0 && now - itUnfold->second.Frame <= McvUnfoldRetryFrames
 						&& itUnfold->second.Tries < McvUnfoldMostTries && CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
@@ -3676,9 +3803,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// watchdog unfolds it where it stands if it can; else it leads it along legs of our own route
 			// search to the nearest site not tried yet, and home to a yard of ours after McvIdleMostTries
 			// such sites. While it follows that order the MCV logic below leaves it alone. An MCV that
-			// may be waiting for a ferry to the island goal is left to the island logic and its timers,
-			// until its wait ran out and the land rule gave it its order (IslandMcvWaitFrames, land before
-			// islands below: a free field of its landmass, or a site to unfold at meanwhile).
+			// may be waiting for a ferry to the island goal (one that may cross to it,
+			// yardMcvMayCrossToIslandGoal) is left to the island logic and its timers, until its wait ran
+			// out and the land rule gave it its order (IslandMcvWaitFrames, land before islands below: a
+			// free field of its landmass, or a site to unfold at meanwhile).
 			{
 				auto& idleWatch = GetMacroState(pHouse).McvIdle;
 				const int now = Unsorted::CurrentFrame;
@@ -3688,8 +3816,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					&& now - itIslandWait->second.SeenFrame <= IslandMcvWaitGapFrames;
 				const bool mayWaitForFerry = pIslandResourceGoalCell != nullptr && mcvZone >= 0
 					&& MapClass::Instance.GetMovementZoneType(pIslandResourceGoalCell->MapCoords, MovementZone::Normal, false) != mcvZone
-					&& CanHouseFerryTypeAcrossWater(pHouse, pType) && !islandWaitOver;
-				const bool unfolding = pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload;
+					&& CanHouseFerryTypeAcrossWater(pHouse, pType) && !islandWaitOver
+					&& (isForeignTechMCV || yardMcvMayCrossToIslandGoal(mcvCell, mcvZone, isNoRoomIsland(mcvZone)));
+				const bool unfolding = (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload) && !unfoldingTooLong;
 
 				if (idleWatch.size() > 64)
 					std::erase_if(idleWatch, [now](const auto& entry) { return now - entry.second.SinceFrame > 20000; });
@@ -3982,10 +4111,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool noYardTooLong = pHouse->NumConYards == 0 && Unsorted::CurrentFrame - yardMacro.NoYardSinceFrame >= 2700;
 
 			// Keep a nomadic single MCV undeployed while it is actively migrating to a distant
-			// resource expansion or boarding/sailing on a live transport to a resource island
+			// resource expansion or boarding/sailing on a live transport to a resource island (one it
+			// may cross to, yardMcvMayCrossToIslandGoal)
 			const bool isNomadicSingleMCVHop = (pHouse->NumConYards == 0 && !noYardTooLong && hubsAndFactoriesInMcvZone >= 3
 				&& pHouse->NumWarFactories >= 1 && !enemyNearMCV
-				&& ((ownsLiveMcvTransportNow && pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone)
+				&& ((ownsLiveMcvTransportNow && pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone
+						&& yardMcvMayCrossToIslandGoal(mcvCell, mcvZone, isNoRoomIsland(mcvZone)))
 					|| isMovingToDestEarly));
 
 			if (pHouse->NumConYards == 0 && !isNomadicSingleMCVHop)
@@ -4177,7 +4308,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// A landmass with a ConYard sends its expansion MCV to the free island (the uncolonized
 			// one in pIslandResourceGoalCell) even while fields remain on it: a big island always has
 			// one, and the island was never colonized. Once that island holds a ConYard it is no
-			// longer the goal and the next MCVs take the fields at home again.
+			// longer the goal and the next MCVs take the fields at home again. Only for the beachhead
+			// on an enemy island now: an economic crossing waits for no free field at home
+			// (islandCrossingNeeded below).
 			const bool islandExpansionDue = conYardsInMcvZone >= 1 && pIslandResourceGoalCell != nullptr
 				&& mcvZone != resourceIslandZone;
 			// It crosses only for a field across the water: with no such goal an MCV that boarded a
@@ -4187,7 +4320,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// MCVs for a plateau they could not climb (match #10267, one landmass).
 			const bool canFerryThisMcvToIsland = pIslandResourceGoalCell != nullptr
 				&& CanHouseFerryTypeAcrossWater(pHouse, pType, &mcvCell, &pIslandResourceGoalCell->MapCoords);
-			const bool wantsOtherIsland = (canFerryThisMcvToIsland && mcvZone >= 0
+			// An economic crossing only when needed (yardMcvMayCrossToIslandGoal, the same free field
+			// test as above): to an ore island with no free field on this landmass or no room here, never
+			// to bare land, nor to an island given up for lack of room; the beachhead on an enemy island
+			// keeps the island expansion due.
+			const bool islandCrossingNeeded = !isNoRoomIsland(resourceIslandZone)
+				&& (islandGoalKind == IslandGoalKind::EnemyBeachhead
+					|| (islandGoalKind == IslandGoalKind::Ore && (!hasFreeLandFieldInMcvZone || mcvIslandHasNoRoom)));
+			const bool wantsOtherIsland = (canFerryThisMcvToIsland && mcvZone >= 0 && islandCrossingNeeded
 				&& (!hasFreeLandFieldInMcvZone || islandExpansionDue || mcvIslandHasNoRoom)
 				&& (currentIslandAlreadyDeveloped || alreadyHasConYardOnThisIsland || mcvIslandHasNoRoom) && !isForeignTechMCV
 				&& pIslandResourceGoalCell != nullptr && mcvZone != resourceIslandZone);
@@ -4364,7 +4504,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				Debug::Log("[NeuralAI] House %d IslandExpansion MCV: %s %u at (%d,%d) zone %d mission %d, colonize %d (free land field %d, "
 					"goal %s zone %d), enemy near %d, transport able %d, frame %d.\n",
 					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, mcvCell.X, mcvCell.Y, mcvZone, static_cast<int>(pUnit->CurrentMission),
-					mustColonizeOtherIsland ? 1 : 0, hasFreeLandFieldInMcvZone ? 1 : 0, pIslandResourceGoalCell ? "yes" : "none",
+					mustColonizeOtherIsland ? 1 : 0, hasFreeLandFieldInMcvZone ? 1 : 0, islandGoalKindName(),
 					resourceIslandZone, enemyNearMCV ? 1 : 0, ownsLiveMcvTransportNow ? 1 : 0, Unsorted::CurrentFrame);
 			}
 
@@ -11998,7 +12138,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// A deployer on an island given up for lack of room waits there for a transport as well.
 			auto const& noRoomForPickup = GetMacroState(pHouse).NoRoomIslandUntil;
 			const bool strandedWithoutRoom = noRoomForPickup.contains(uz) && noRoomForPickup.at(uz) > Unsorted::CurrentFrame;
-			const bool isExpMCV = (pUT->DeploysInto->ConstructionYard && (conYardsInUz >= 1 || hubsInUz >= 2 || strandedWithoutRoom));
+			// A yard MCV of our own tech is the one to ferry only when it may cross to the island goal
+			// (yardMcvMayCrossToIslandGoal: an economic crossing only when needed); the transport loader
+			// below carries no other yard MCV for it.
+			const bool isForeignTechYardMcv = pUT->DeploysInto->ConstructionYard && pHouse->CountOwnedNow(pUT->DeploysInto) == 0
+				&& pHouse->NumConYards >= 1;
+			const bool isExpMCV = (pUT->DeploysInto->ConstructionYard && (conYardsInUz >= 1 || hubsInUz >= 2 || strandedWithoutRoom)
+				&& (isForeignTechYardMcv || yardMcvMayCrossToIslandGoal(pOwnU->GetMapCoords(), uz, strandedWithoutRoom)));
 			const bool isExpOutpostOrRef = (!pUT->DeploysInto->ConstructionYard && (hubsInUz >= 1 || strandedWithoutRoom)
 				&& (pOwnU == pExtraHomeSlaveMiner
 					|| (!pUT->Harvester && !pUT->ResourceGatherer
@@ -12913,10 +13059,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const bool isLoadedStrikeAPC
 								= (pU->Type->Passengers >= 3 && pU->Passengers.NumPassengers >= 1
 									&& (pWaveTargetCell || pIslandGoalCell || pIslandTechGoalCell));
+							// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal).
 							const bool isIslandExpansionMCV = (pU->Type->DeploysInto != nullptr
 								&& pIslandResourceGoalCell && uZone >= 0 && uZone != resourceIslandZone
 								&& (pU == pHomeExpansionDeployer || pHouse->NumConYards >= 1
-									|| pHouse->CountOwnedNow(pU->Type) >= 2 || pHouse->OwnedBuildings >= 6));
+									|| pHouse->CountOwnedNow(pU->Type) >= 2 || pHouse->OwnedBuildings >= 6)
+								&& (!pU->Type->DeploysInto->ConstructionYard || pU == pHomeExpansionDeployer
+									|| (pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
+									|| yardMcvMayCrossToIslandGoal(pU->GetMapCoords(), uZone, isNoRoomIsland(uZone))));
 							const bool isIslandHarvester
 								= ((pU->Type->Harvester || pU->Type->Weeder) && islandGoalTakesHarvesters()
 									&& uZone == homeGroundZone && uZone != resourceIslandZone && pHouse->CountOwnedNow(pU->Type) >= 2);
@@ -12989,6 +13139,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		bool carryingMCV = false;
+		bool carryingYardMcv = false;
 		bool carryingStolenForeignMCV = false;
 
 		for (FootClass* pPass = pTrans->Passengers.GetFirstPassenger(); pPass != nullptr;
@@ -13001,6 +13152,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (pPassUnit->Type && pPassUnit->Type->DeploysInto != nullptr && !IsDeployableSiegeUnitType(pPassUnit->Type))
 				{
 					carryingMCV = true; // MCV or Red Alert 3-style CABAL Expansion Nanocore!
+					carryingYardMcv = pPassUnit->Type->DeploysInto->ConstructionYard;
 					const unsigned int ownHouseBit
 						= (pHouse->Type && pHouse->Type->ArrayIndex >= 0 && pHouse->Type->ArrayIndex < 32)
 						? (1u << pHouse->Type->ArrayIndex)
@@ -13460,8 +13612,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				static_cast<int>(idleCombatUnits.size()), static_cast<int>(idleCombatInf.size()));
 		}
 
+		// Arrival by touch (TransportTouchesLandZone): the goal island counts as reached when the land
+		// cell under the transport or one next to it is of its zone.
 		const bool hasCargoInTransitOrUnloading = (numPass >= 1) && !onSafePickupShore
-			&& (tripDeparted || (activeIslandZone >= 0 && transZone == activeIslandZone)
+			&& (tripDeparted
+				|| (activeIslandZone >= 0 && (transZone == activeIslandZone || TransportTouchesLandZone(transCoords, activeIslandZone)))
 				|| pTrans->CurrentMission == Mission::Unload
 				|| (transZone >= 0 && !isSafeFriendlyPickupIsland(transZone))
 				|| (pCurTransCell && pCurTransCell->LandType == LandType::Water));
@@ -13711,14 +13866,100 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pTrip->SetDownFrame = -1;
 		}
 
+		// Departed and stuck, or a yard MCV aboard with nowhere to unfold (FerryDepartedStuckFrames,
+		// NeuralAI.State.inl; user approved, 2026-11-19, match #11475: a landing craft with an MCV
+		// stood 50000 frames next to a narrow strip of its goal island, its arriving commitment kept
+		// the goal, so the return of a cargo whose objective vanished never came, and the watchdog near
+		// the landing did nothing after its first step). The trip drops its commitment; the first time
+		// it is stuck it unloads where it stands when it touches ground of another zone than its origin,
+		// else it takes the cargo back to its origin landmass (Homeward, the return below).
+		if (tripDeparted && numPass >= 1)
+		{
+			const int now = Unsorted::CurrentFrame;
+			const bool onLand = pCurTransCell && pCurTransCell->LandType != LandType::Water && !pCurTransCell->GetBuilding();
+
+			if (pTrip->StillCoords == CellStruct::Empty || numPass != pTrip->StillPassengers || now < pTrip->StillFrame
+				|| std::max(std::abs(transCoords.X - pTrip->StillCoords.X), std::abs(transCoords.Y - pTrip->StillCoords.Y)) > 1)
+			{
+				pTrip->StillCoords = transCoords;
+				pTrip->StillFrame = now;
+				pTrip->StillPassengers = numPass;
+			}
+
+			const int stoodFrames = now - pTrip->StillFrame;
+			const bool departedStuck = stoodFrames >= FerryDepartedStuckFrames;
+			const bool goalHasNoRoom = activeIslandZone >= 0 && isNoRoomIsland(activeIslandZone);
+			const bool mcvNowhere = !departedStuck && !pTrip->Homeward && carryingYardMcv && !carryingStolenForeignMCV
+				&& (!pIslandResourceGoalCell || goalHasNoRoom);
+
+			if (departedStuck || mcvNowhere)
+			{
+				const int touchedZone = (departedStuck && onLand && pTrip->UnloadHereFrame < 0)
+					? TransportTouchedGroundZone(transCoords, ferryOriginZone)
+					: -1;
+				const int backZone = (ferryOriginZone >= 0) ? ferryOriginZone : homeGroundZone;
+
+				pTrip->CommittedLanding = CellStruct::Empty;
+				pTrip->CommittedZone = -1;
+				pTrip->CommittedGoal = CellStruct::Empty;
+				pTrip->LastLanding = CellStruct::Empty;
+				pTrip->StillCoords = transCoords;
+				pTrip->StillFrame = now;
+
+				if (touchedZone >= 0)
+					pTrip->UnloadHereFrame = now;
+				else
+					pTrip->Homeward = true;
+
+				CountDecision(departedStuck ? NeuralDecision::FerryDepartedStuck : NeuralDecision::FerryMcvNowhere, pHouse->ArrayIndex);
+
+				// TEMP diagnostic: each give-up (FerryGiveUpLogLines a match).
+				static int giveUpLogSerial = -1;
+				static int giveUpLogCount = 0;
+
+				if (giveUpLogSerial != NeuralMatchSerial)
+				{
+					giveUpLogSerial = NeuralMatchSerial;
+					giveUpLogCount = 0;
+				}
+
+				if (giveUpLogCount < FerryGiveUpLogLines)
+				{
+					++giveUpLogCount;
+					Debug::Log("[NeuralAI] House %d ferry gives up: %s %u at (%d,%d) zone %d cell %s with %d passengers (yard MCV %d), %s "
+						"(still %d frames), goal zone %d (island goal %s zone %d, no room %d), origin zone %d, %s zone %d, frame %d.\n",
+						pHouse->ArrayIndex, pTrans->Type->ID, pTrans->UniqueID, transCoords.X, transCoords.Y, transZone,
+						onLand ? "land" : "water", numPass, carryingYardMcv ? 1 : 0, departedStuck ? "stuck" : "MCV with nowhere to unfold",
+						stoodFrames, activeIslandZone, islandGoalKindName(), resourceIslandZone, goalHasNoRoom ? 1 : 0, ferryOriginZone,
+						touchedZone >= 0 ? "unloads here next to" : "goes back to", touchedZone >= 0 ? touchedZone : backZone, now);
+				}
+			}
+
+			// Told to unload where it stands: it keeps unloading for FerrySetDownFrames.
+			if (onLand && pTrip->UnloadHereFrame >= 0 && now >= pTrip->UnloadHereFrame && now - pTrip->UnloadHereFrame < FerrySetDownFrames)
+			{
+				if (pTrans->CurrentMission != Mission::Unload)
+				{
+					pTrans->SetDestination(nullptr, true);
+					pTrans->ClearNavigationList();
+					pTrans->QueueMission(Mission::Unload, true);
+				}
+
+				continue;
+			}
+		}
+
 		// The cargo's objective vanished while at sea and no other landmass is a
-		// valid destination: bring the cargo back to its loading island and drop
-		// it there instead of drifting loaded forever.
-		if (isReadyToSailEffective && !pActiveIslandGoal && numPass >= 1 && tripDeparted)
+		// valid destination, or the trip gave its goal up (Homeward, above): bring
+		// the cargo back to its loading island and drop it there instead of
+		// drifting loaded forever. Its land counts as reached by touch as well
+		// (TransportTouchesLandZone).
+		if (numPass >= 1 && tripDeparted && ((isReadyToSailEffective && !pActiveIslandGoal) || pTrip->Homeward))
 		{
 			const int returnZone = (ferryOriginZone >= 0) ? ferryOriginZone : homeGroundZone;
 			const bool onReturnIslandLand = pCurTransCell && pCurTransCell->LandType != LandType::Water
-				&& !pCurTransCell->GetBuilding() && returnZone >= 0 && transZone == returnZone;
+				&& !pCurTransCell->GetBuilding() && returnZone >= 0
+				&& (transZone == returnZone || TransportTouchesLandZone(transCoords, returnZone));
 
 			if (onReturnIslandLand)
 			{
@@ -13811,10 +14052,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				auto const pTransCell = pTrans->GetCell();
 				const double distToLanding = transCoords.DistanceFrom(pSafeLanding->MapCoords);
 				// Unload strictly on the destination island: never on the first coast
-				// touched on the way, an intermediate island or the loading island.
+				// touched on the way, an intermediate island or the loading island. The
+				// island counts as reached by touch as well (TransportTouchesLandZone: a
+				// narrow strip reads as no ground in TransportLandZone).
 				bool onTargetIslandLand = pTransCell && pTransCell->LandType != LandType::Water
 					&& !pTransCell->GetBuilding() && isValidFerryGoalZone(activeIslandZone)
-					&& transZone == activeIslandZone;
+					&& (transZone == activeIslandZone || TransportTouchesLandZone(transCoords, activeIslandZone));
 
 				// Progress watchdog near the landing zone (handles blocked beaches, unload
 				// failures and any order the transport silently dropped).
@@ -13876,9 +14119,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								continue;
 							}
 						}
-						else if (pTransCell && pTransCell->LandType != LandType::Water && isValidFerryGoalZone(transZone))
+						else if (pTransCell && pTransCell->LandType != LandType::Water
+							&& (isValidFerryGoalZone(transZone) || TransportTouchedGroundZone(transCoords, ferryOriginZone) >= 0))
 						{
-							// Stage 2+: unload right here; a stuck full transport helps nobody.
+							// Stage 2+: unload right here, also next to ground of another zone than the
+							// origin (a narrow strip); a stuck full transport helps nobody.
 							onTargetIslandLand = true;
 						}
 					}
@@ -14158,7 +14403,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					<= pTrans->Type->Passengers
 				&& (numPass == 0 || transZone == deployerZone)
 				// Only with an island to take it to that this transport lands on: with none the
-				// deployer was boarded, set down for having nowhere to go, and boarded again.
+				// deployer was boarded, set down for having nowhere to go, and boarded again. A yard MCV
+				// of our own tech is the deployer only when it may cross (yardMcvMayCrossToIslandGoal, at
+				// its pick above).
 				&& pIslandResourceGoalCell != nullptr
 				&& CanTransportTypeLink(pTrans->Type, pHomeExpansionDeployer->GetMapCoords(), pIslandResourceGoalCell->MapCoords));
 			const int reservedSizeForDeployer
@@ -14975,9 +15222,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					= (pRepairDepot && pU->Type->Cost >= 1000 && pU->GetHealthPercentage() < 0.40);
 				const bool isLoadedStrikeAPC = (pU->Type->Passengers >= 3 && pU->Passengers.NumPassengers >= 1
 					&& (pWaveTargetCell || pIslandGoalCell || pIslandTechGoalCell));
+				// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal).
 				const bool isIslandExpansionMCV = (pU->Type->DeploysInto != nullptr && pIslandResourceGoalCell
 					&& uZone >= 0 && uZone != resourceIslandZone
-					&& (pHouse->NumConYards >= 1 || pHouse->CountOwnedNow(pU->Type) >= 2));
+					&& (pHouse->NumConYards >= 1 || pHouse->CountOwnedNow(pU->Type) >= 2)
+					&& (!pU->Type->DeploysInto->ConstructionYard || pU == pHomeExpansionDeployer
+						|| (pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
+						|| yardMcvMayCrossToIslandGoal(pU->GetMapCoords(), uZone, isNoRoomIsland(uZone))));
 				const bool isIslandHarvester = ((pU->Type->Harvester || pU->Type->Weeder) && islandGoalTakesHarvesters()
 					&& uZone == homeGroundZone && uZone != resourceIslandZone && pHouse->CountOwnedNow(pU->Type) >= 2);
 				const bool strandedHarvester = isStrandedHarvester(pU, uZone);
@@ -15534,8 +15785,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const bool canBuildAdditionalMCV = (pHouse->NumWarFactories >= 1 && pMcvType->TechLevel >= 0
 					&& pMcvType->TechLevel <= pHouse->TechLevel && yardHouseBit != 0u
 					&& pMcvType->InOwners(yardHouseBit) && HouseExt::PrerequisitesMet(pHouse, pMcvType));
-				const bool canFerryNomadNow
-					= (pIslandResourceGoalCell != nullptr && yz != resourceIslandZone && ownsLiveMcvTransport);
+				// The yard packs up for the island only when its MCV may cross (yardMcvMayCrossToIslandGoal).
+				const bool canFerryNomadNow = (pIslandResourceGoalCell != nullptr && yz != resourceIslandZone && ownsLiveMcvTransport
+					&& yardMcvMayCrossToIslandGoal(yc, yz, isNoRoomIsland(yz)));
 
 				bool hasUnharvestedOreNearThisYard = false;
 				CellClass* pDistantUncolonizedLandOreCell = nullptr;
