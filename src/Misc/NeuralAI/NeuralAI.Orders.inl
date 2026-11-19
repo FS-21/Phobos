@@ -796,9 +796,13 @@ namespace
 			return;
 
 		// A transport parked to load stays where its passengers go; a unit of a transport operation
-		// takes its orders from the operation alone.
-		if ((pFoot->Owner && IsFerryParkedToLoad(pFoot->Owner, pFoot->UniqueID)) || IsHeldByTransportOp(pFoot))
+		// takes its orders from the operation alone; a ship that waits outside a crowded narrow passage
+		// stays where it is.
+		if ((pFoot->Owner && IsFerryParkedToLoad(pFoot->Owner, pFoot->UniqueID)) || IsHeldByTransportOp(pFoot)
+			|| IsWaitingAtNavalPassage(pFoot))
+		{
 			return;
+		}
 
 		AbstractClass* pResolvedDest = pDest;
 		CellClass* pDestCell = (pDest->WhatAmI() == AbstractType::Cell)

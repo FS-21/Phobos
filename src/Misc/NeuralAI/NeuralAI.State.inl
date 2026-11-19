@@ -197,12 +197,24 @@ namespace
 		// Counter Squad: the enemy house and force category (EnemyForceCategory) it goes after.
 		int ForceOwner { -1 };
 		int ForceCategory { -1 };
+		// Naval Strike Group: a mass strike of short-range gun ships (NavalMassStrikeShips), all of which shell.
+		bool MassStrike { false };
 	};
 
 	struct NeuralStuckTrack
 	{
 		CellStruct Cell { CellStruct::Empty };
 		int SinceFrame { 0 };
+	};
+
+	// A ship of ours that waits outside a crowded narrow water passage (UpdateNavalPassageGate): the passage's
+	// centre, where it was bound, whether it was on an attack-move, and since when it waits.
+	struct NeuralPassageWait
+	{
+		CellStruct Passage { CellStruct::Empty };
+		CellStruct Goal { CellStruct::Empty };
+		bool AttackMove { false };
+		int Frame { 0 };
 	};
 
 	// Where a wave sent a unit, the ground zone of that cell and when (KeptWaveGoal).
@@ -1052,6 +1064,13 @@ namespace
 		int ShipsWithoutTarget { 0 };
 		int ShipsWithoutTargetFloor { INT_MAX };
 		int ShipsWithoutTargetWindowStart { -1 };
+		// Naval hunt: the last frame the target pick of an idle warship of ours found something, the naval sweeps
+		// under way (ship -> the place it looks at and the frame it left), the ships that wait outside a crowded
+		// narrow water passage (NeuralPassageWait) and the last frame the passages were checked.
+		int NavalTargetFrame { 0 };
+		std::map<DWORD, std::pair<CellStruct, int>> NavalSweeps {};
+		std::map<DWORD, NeuralPassageWait> NavalPassageWaits {};
+		int NavalPassageCheckFrame { -1 };
 		std::array<int, 4> BankWantedFactories {};
 		// AI ticks since the last governor sample at which each queue (BankQueue order) had a
 		// factory of its kind, and those at which one of them was producing.
@@ -1680,6 +1699,10 @@ namespace
 			this->ShipsWithoutTarget = 0;
 			this->ShipsWithoutTargetFloor = INT_MAX;
 			this->ShipsWithoutTargetWindowStart = -1;
+			this->NavalTargetFrame = 0;
+			this->NavalSweeps.clear();
+			this->NavalPassageWaits.clear();
+			this->NavalPassageCheckFrame = -1;
 			this->NoRoomIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
 			this->McvIdle.clear();
@@ -2828,6 +2851,47 @@ namespace
 	// building in reach and no enemy ship in their sea at every AI tick of ArmyIdleWindowFrames
 	// (match #9846: a house kept building ships while about 50 sat with no target in reach).
 	constexpr int ShipsWithoutTargetBrake = 6;
+	// Naval hunt (user approved, 2026-11-19). Match #11499: 24 of the 31 destroyers of a house stood on
+	// Attack, still and silent, at shore guns out of their reach; loaded enemy transports crossed the sea unopposed; the
+	// house built 77 destroyers and none went to look for the enemy at sea.
+	// A ship held still NavalStuckAttackFrames on Attack at a target no cell of its sea brings within the reach of its
+	// weapons goes back on guard.
+	constexpr int NavalStuckAttackFrames = 150;
+	// The target pick of an idle warship: the target's cost, NavalPreyLoadedBonus for a unit with passengers aboard and
+	// NavalPreyThreatBonus for one that can fire at the ship, less NavalPreyCellWeight per cell between them. Enemy units
+	// on land count within NavalShorePreyCells of the ship.
+	constexpr int NavalPreyLoadedBonus = 1000;
+	constexpr int NavalPreyThreatBonus = 500;
+	constexpr int NavalPreyCellWeight = 2;
+	constexpr int NavalShorePreyCells = 30;
+	// Naval sweep: with no target found by the pick and no shot of a warship of ours for NavalSweepIdleFrames, and at least
+	// NavalSweepMinShips idle warships with nothing in reach, up to NavalSweepShips of them at a time look at the places of
+	// a NavalSweepStepCells grid over their sea, NavalSweepTripFrames at most for each trip, NavalSweepLogLines lines a match.
+	constexpr int NavalSweepIdleFrames = 1800;
+	constexpr size_t NavalSweepMinShips = 4;
+	constexpr size_t NavalSweepShips = 2;
+	constexpr int NavalSweepStepCells = 14;
+	constexpr int NavalSweepTripFrames = 3600;
+	constexpr int NavalSweepLogLines = 20;
+	// Naval mass strike: with fewer than two long-range ships, NavalMassStrikeShips healthy warships of one sea whose guns
+	// hit land at under 10 cells start the Naval Strike Group, all of them shelling one target.
+	constexpr size_t NavalMassStrikeShips = 8;
+	// Fleet staging (slot 69 with no enemy ship seen): the water of the sea nearest to the known enemy building nearest to
+	// our base, pulled back toward the base (NavalStagingBackCells at most) until NavalStagingMarginCells out of known
+	// defense reach. A ship within NavalStagingKeepCells of it stays where it is.
+	constexpr int NavalStagingMarginCells = 3;
+	constexpr int NavalStagingBackCells = 20;
+	constexpr double NavalStagingKeepCells = 8.0;
+	// Narrow water passage: a line across the water of a sea, in one of four directions, NavalPassageWidthCells wide at
+	// most. Once NavalNarrowPassageShips ships of ours on their way are in one, the others bound through it within
+	// NavalPassageApproachCells wait where they are, NavalPassageWaitMostFrames at most. Checked every
+	// NavalPassageCheckFrames, NavalPassageLogLines lines a match.
+	constexpr int NavalPassageWidthCells = 5;
+	constexpr int NavalNarrowPassageShips = 4;
+	constexpr double NavalPassageApproachCells = 8.0;
+	constexpr int NavalPassageWaitMostFrames = 1800;
+	constexpr int NavalPassageCheckFrames = 60;
+	constexpr int NavalPassageLogLines = 20;
 	// Units jammed in their own base count as unused too: a ground unit with somewhere to go that has
 	// stood HeldAtHomeFrames on one cell, not firing, within HeldAtHomeCells of home. A wave or a
 	// plan takes them again every few hundred frames, so the idle pools alone never showed them
@@ -3654,6 +3718,20 @@ namespace
 	bool IsHeldByTransportOp(const FootClass* pFoot)
 	{
 		return !TransportOpOrdersOpen && pFoot && pFoot->Owner && IsInTransportOp(pFoot->Owner, pFoot->UniqueID);
+	}
+
+	// A ship of ours that waits outside a crowded narrow water passage (UpdateNavalPassageGate): the order helpers
+	// (IssueMoveOrder, OrderFootToAttackMove) leave it where it is until the gate lets it go on.
+	bool IsWaitingAtNavalPassage(const FootClass* pFoot)
+	{
+		if (!pFoot || !pFoot->Owner)
+			return false;
+
+		auto const& waits = GetMacroState(pFoot->Owner).NavalPassageWaits;
+		auto const it = waits.find(pFoot->UniqueID);
+		const int now = Unsorted::CurrentFrame;
+
+		return it != waits.end() && now >= it->second.Frame && now - it->second.Frame < NavalPassageWaitMostFrames;
 	}
 
 	// A unit that gave up waiting for a crossing or lost its boarding turn: no transport takes it for a while.
