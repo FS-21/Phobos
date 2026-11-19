@@ -16035,7 +16035,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const pSuper : pHouse->Supers)
 		{
-			if (!pSuper || !pSuper->IsReady || !pSuper->Type)
+			// CanFire also asks for the resources the research costs (battle points), as for a human.
+			if (!pSuper || !pSuper->Type || !pSuper->CanFire())
 				continue;
 
 			auto const pSWExt = SWTypeExt::Fetch(pSuper->Type);
