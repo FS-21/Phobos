@@ -7,14 +7,49 @@
 #include <MapClass.h>
 #include <ScenarioClass.h>
 #include <SessionClass.h>
+#include <SuperClass.h>
 #include <UnitClass.h>
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
+#include <Ext/SWType/Body.h>
 #include <Utilities/Macro.h>
+#include <algorithm>
 #include <cstring>
+#include <vector>
 
 namespace
 {
+	// The engine launches the SW.AutoFire super weapons from the stock super weapon AI, which the
+	// Neural AI skips, so they would never fire for its houses. Let the engine fire those, and only
+	// those: the other ready super weapons are hidden from it for the call.
+	void FireAutoFireSuperWeapons(HouseClass* pHouse)
+	{
+		auto isAutoFireReady = [](SuperClass* pSuper)
+		{
+			return pSuper && pSuper->Type && pSuper->IsReady && SWTypeExt::Fetch(pSuper->Type)->SW_AutoFire
+				&& pSuper->CanFire();
+		};
+
+		if (std::none_of(pHouse->Supers.begin(), pHouse->Supers.end(), isAutoFireReady))
+			return;
+
+		std::vector<SuperClass*> hidden;
+
+		for (auto const pSuper : pHouse->Supers)
+		{
+			if (pSuper && pSuper->IsReady && !isAutoFireReady(pSuper))
+			{
+				pSuper->IsReady = false;
+				hidden.push_back(pSuper);
+			}
+		}
+
+		pHouse->AI_TryFireSW();
+
+		for (auto const pSuper : hidden)
+			pSuper->IsReady = true;
+	}
+
 	using SetFocus_t = HWND(WINAPI*)(HWND);
 
 	using SetForegroundWindow_t = BOOL(WINAPI*)(HWND);
@@ -448,6 +483,8 @@ DEFINE_HOOK(0x4FD77C, HouseClass_ExpertAI_NeuralAI, 0x5)
 				}
 			}
 		}
+
+		FireAutoFireSuperWeapons(pHouse);
 
 		const int delay = NeuralAI::UpdateExpertAI(pHouse);
 

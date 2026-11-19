@@ -1380,7 +1380,10 @@ namespace
 	}
 
 	// A client asks to take a unit to an address on other ground. True when an operation has it
-	// (a new one, or one of the same client between the same two lands that is still under way);
+	// (a new one, or one still under way between the same two lands: of the same client or, for a
+	// wave and the economy, of either, so that two queues never wait for the transports of one
+	// crossing; user, 2026-11-19: the operation of a wave took every transport of its house for
+	// 110000 frames while economy operations on its very crossing waited 9000 frames each);
 	// false when it needs none (it walks there or crosses on its own), cannot have one (no ground
 	// at either end, no transport of ours or that we can build makes that crossing) or gave up on it
 	// lately (OpRetryFrames).
@@ -1449,9 +1452,16 @@ namespace
 
 		NeuralTransportOperation* pOp = nullptr;
 
+		auto const sharesCrossing = [client](NeuralOpClient other)
+		{
+			return other == client
+				|| ((other == NeuralOpClient::Wave || other == NeuralOpClient::Economy)
+					&& (client == NeuralOpClient::Wave || client == NeuralOpClient::Economy));
+		};
+
 		for (auto& op : macro.TransportOps)
 		{
-			if (!op.Over && op.Client == client && op.OriginZone == footZone && op.TargetZone == targetZone)
+			if (!op.Over && sharesCrossing(op.Client) && op.OriginZone == footZone && op.TargetZone == targetZone)
 			{
 				pOp = &op;
 				break;
@@ -1477,10 +1487,33 @@ namespace
 		else
 		{
 			pOp->Joined++;
+
+			// TEMP diagnostic (rule consolidation, 2026-11-19): a member that joins the operation of another
+			// client on its crossing.
+			if (pOp->Client != client)
+			{
+				static int sharedLogSerial = -1;
+				static int sharedLogCount = 0;
+
+				if (sharedLogSerial != NeuralMatchSerial)
+				{
+					sharedLogSerial = NeuralMatchSerial;
+					sharedLogCount = 0;
+				}
+
+				if (sharedLogCount++ < OpSharedCrossingLogLines)
+				{
+					Debug::Log("[NeuralAI] House %d transport op %d (%s) takes a %s member on its crossing: %s %u at (%d,%d) zone %d -> "
+						"(%d,%d) zone %d, %d members, %d transports, frame %d.\n", pHouse->ArrayIndex, pOp->Id, OpClientName(pOp->Client),
+						OpClientName(client), pType->ID, uid, footCoords.X, footCoords.Y, footZone, ground.X, ground.Y, targetZone,
+						static_cast<int>(pOp->Members.size()), static_cast<int>(pOp->Transports.size()), now);
+				}
+			}
 		}
 
 		NeuralOpMember member {};
 		member.UniqueID = uid;
+		member.Client = client;
 		member.Size = std::max(1, static_cast<int>(pType->Size));
 		member.Target = ground;
 		pOp->Members.push_back(member);
@@ -1561,6 +1594,7 @@ namespace
 
 		NeuralOpMember member {};
 		member.UniqueID = uid;
+		member.Client = NeuralOpClient::Strike;
 		member.Size = std::max(1, static_cast<int>(pType->Size));
 		member.Target = target;
 		pOp->Members.push_back(member);
@@ -1576,9 +1610,9 @@ namespace
 		return true;
 	}
 
-	// Gives a member back to its client: a wave's unit goes on to its address over its own ground now
-	// (an attack-move, its goal kept as the wave's), the others wait where they stand for their
-	// client's next order.
+	// Gives a member back to its own client (NeuralOpMember::Client): a wave's unit goes on to its
+	// address over its own ground now (an attack-move, its goal kept as the wave's), the others wait
+	// where they stand for their client's next order.
 	void HandBackOpMember(HouseClass* pHouse, const NeuralTransportOperation& op, const NeuralOpMember& member, FootClass* pFoot)
 	{
 		if (pFoot->CurrentMission == Mission::Sleep)
@@ -1589,7 +1623,7 @@ namespace
 
 		// A back door's member attacks the building it was carried to; kept as a wave goal, the wave
 		// dispatch does not send it elsewhere.
-		if (op.Client == NeuralOpClient::Wave || op.Client == NeuralOpClient::Strike)
+		if (member.Client == NeuralOpClient::Wave || member.Client == NeuralOpClient::Strike)
 		{
 			if (auto const pCell = MapClass::Instance.TryGetCellAt(member.Target))
 			{
@@ -1604,7 +1638,7 @@ namespace
 		// Engineer claims (EngineerClaim*): an engineer set down with its claimed building no longer to
 		// take walks EngineerLandingStepCells inland, towards its old goal, off the landing (user: they
 		// stood at the landing with nothing to do); its client gives it its next capture from there.
-		if (op.Client == NeuralOpClient::Economy && pFoot->WhatAmI() == AbstractType::Infantry
+		if (member.Client == NeuralOpClient::Economy && pFoot->WhatAmI() == AbstractType::Infantry
 			&& EngineerClaimWanted(pHouse, member.UniqueID) == 0)
 		{
 			auto& macro = GetMacroState(pHouse);
@@ -1802,13 +1836,24 @@ namespace
 		};
 
 		// Ends an operation that got no transport: its back door, or its crossing (client and the two
-		// lands), opens again only OpNoTransportRetryFrames later.
+		// lands, for the client of the operation and of each member), opens again only
+		// OpNoTransportRetryFrames later.
 		auto const endWithNoTransport = [&](const char* reason)
 		{
 			if (op.Client == NeuralOpClient::Strike)
+			{
 				macro.BackdoorRetryUntil = now + OpNoTransportRetryFrames;
+			}
 			else if (!shuttle)
+			{
 				macro.CrossingBlockedUntil[CrossingBlockKey(op.Client, op.OriginZone, op.TargetZone)] = now + OpNoTransportRetryFrames;
+
+				for (auto const& member : op.Members)
+				{
+					if (member.Client != op.Client)
+						macro.CrossingBlockedUntil[CrossingBlockKey(member.Client, op.OriginZone, op.TargetZone)] = now + OpNoTransportRetryFrames;
+				}
+			}
 
 			endOp(reason, true);
 		};
@@ -2219,7 +2264,7 @@ namespace
 				// Engineer claims (EngineerClaim*): an engineer whose claimed building is no longer to take
 				// (gone, ours or an ally's, no longer capturable) or that an engineer ahead of it goes for
 				// stays home: let go before it boards.
-				if (op.Client == NeuralOpClient::Economy && pFoot->WhatAmI() == AbstractType::Infantry
+				if (member.Client == NeuralOpClient::Economy && pFoot->WhatAmI() == AbstractType::Infantry
 					&& EngineerClaimWanted(pHouse, member.UniqueID) == 0)
 				{
 					Debug::Log("[NeuralAI] House %d transport op %d lets %s %u go: its capture is no longer to make, frame %d.\n", houseIndex,
@@ -2270,8 +2315,9 @@ namespace
 					const bool economyWaits = std::any_of(macro.TransportOps.begin(), macro.TransportOps.end(),
 						[](const NeuralTransportOperation& other)
 						{
-							return !other.Over && other.Client == NeuralOpClient::Economy && other.Transports.empty()
-								&& std::any_of(other.Members.begin(), other.Members.end(), [](const NeuralOpMember& member) { return !member.Aboard; });
+							return !other.Over && other.Client != NeuralOpClient::Shuttle && other.Transports.empty()
+								&& std::any_of(other.Members.begin(), other.Members.end(),
+									[](const NeuralOpMember& member) { return !member.Aboard && member.Client == NeuralOpClient::Economy; });
 						});
 
 					if (op.TransportsLost >= ShuttleMaxLostTransports)
@@ -2586,6 +2632,64 @@ namespace
 				return crossingDanger[kind];
 			};
 
+			// The operations of the house that have waited OpStarvedFrames or more with no transport, and
+			// longer than this one (the earlier its last transport, then the lower its id, the longer):
+			// a transport one of them would take is left to it. This one waits as long only while it has
+			// no transport itself; a shuttle always leaves it. Each of them comes to this candidate
+			// search every tick until it ends (every return before it ends the operation).
+			const int ownWaitSince = !shuttle && op.Transports.empty() && now >= op.LastTransportFrame
+				&& now - op.LastTransportFrame >= OpStarvedFrames ? op.LastTransportFrame : INT_MAX;
+			std::vector<const NeuralTransportOperation*> starved;
+
+			for (auto const& other : macro.TransportOps)
+			{
+				if (&other == &op || other.Over || other.Client == NeuralOpClient::Shuttle || !other.Transports.empty()
+					|| other.Landing == CellStruct::Empty || !MapClass::Instance.TryGetCellAt(other.Staging)
+					|| now < other.LastTransportFrame || now - other.LastTransportFrame < OpStarvedFrames
+					|| other.LastTransportFrame > ownWaitSince || (other.LastTransportFrame == ownWaitSince && other.Id > op.Id))
+				{
+					continue;
+				}
+
+				if (std::any_of(other.Members.begin(), other.Members.end(),
+					[](const NeuralOpMember& member) { return !member.Aboard && member.Work == NeuralShuttleWork::None; }))
+				{
+					starved.push_back(&other);
+				}
+			}
+
+			// The first of them that this transport could take a member of, by the checks of its own
+			// candidate search: the crossing from where it stands and a seat on it, empty.
+			auto const starvedTaker = [&](FootClass* pFoot, OpCarrier carrier) -> const NeuralTransportOperation*
+			{
+				auto const pType = pFoot->GetTechnoType();
+
+				for (auto const pOther : starved)
+				{
+					if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), pOther->Staging)
+						|| !CanTransportTypeLink(pType, pOther->Staging, pOther->Landing))
+					{
+						continue;
+					}
+
+					for (auto const& member : pOther->Members)
+					{
+						if (member.Aboard || member.Work != NeuralShuttleWork::None)
+							continue;
+
+						auto const pMemberFoot = find(member.UniqueID);
+
+						if (pMemberFoot && OpCarrierTakes(pFoot, carrier, pMemberFoot)
+							&& (carrier == OpCarrier::Carryall || CanPassengerFitInTransport(pFoot, pMemberFoot->GetTechnoType(), 0, 0)))
+						{
+							return pOther;
+						}
+					}
+				}
+
+				return nullptr;
+			};
+
 			auto const consider = [&](FootClass* pFoot)
 			{
 				if (!pFoot || pFoot->Owner != pHouse)
@@ -2601,6 +2705,29 @@ namespace
 
 				if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), op.Staging) || !CanTransportTypeLink(pType, op.Staging, op.Landing))
 					return;
+
+				if (auto const pTaker = starvedTaker(pFoot, carrier))
+				{
+					// TEMP diagnostic (rule consolidation, 2026-11-19): the transport left to an operation that waits longer.
+					static int starvedLogSerial = -1;
+					static int starvedLogCount = 0;
+
+					if (starvedLogSerial != NeuralMatchSerial)
+					{
+						starvedLogSerial = NeuralMatchSerial;
+						starvedLogCount = 0;
+					}
+
+					if (starvedLogCount++ < OpStarvedLogLines)
+					{
+						Debug::Log("[NeuralAI] House %d transport op %d (%s, %d transports) leaves %s %u at (%d,%d) to op %d (%s), %d frames "
+							"without a transport, frame %d.\n", houseIndex, op.Id, OpClientName(op.Client), static_cast<int>(op.Transports.size()),
+							pType->ID, pFoot->UniqueID, pFoot->GetMapCoords().X, pFoot->GetMapCoords().Y, pTaker->Id,
+							OpClientName(pTaker->Client), now - pTaker->LastTransportFrame, now);
+					}
+
+					return;
+				}
 
 				const double distance = pFoot->GetMapCoords().DistanceFrom(op.Staging);
 				candidates.push_back({ pFoot, carrier, distance, distance + static_cast<double>(dangerFor(pFoot, carrier)) / OpKindDangerPerCell });

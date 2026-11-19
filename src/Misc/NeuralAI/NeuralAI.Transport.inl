@@ -145,7 +145,8 @@ namespace
 	// With no foot type, any cargo that rides inside a transport (size 1, not slung by a carryall):
 	// whether the house can put anything at all on that ground.
 	// buildableNow: only transports it owns or can build now count, not those of its side that it
-	// may build once it has the prerequisites (an operation waits for a transport that comes now).
+	// may build once it has the prerequisites (an operation waits for a transport that comes now),
+	// and not the sling of a unit carryall (an operation seats a unit in its bay only, GetOpCarrier).
 	bool CanHouseFerryTypeAcrossWater(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct* pFrom = nullptr,
 		const CellStruct* pTo = nullptr, bool buildableNow = false)
 	{
@@ -192,7 +193,7 @@ namespace
 				return true;
 			}
 
-			if (TechnoTypeExt::Fetch(pUT) && CanCarryallTypeLift(pUT, TechnoTypeExt::Fetch(pUT)->Carryall))
+			if (!buildableNow && TechnoTypeExt::Fetch(pUT) && CanCarryallTypeLift(pUT, TechnoTypeExt::Fetch(pUT)->Carryall))
 				return true;
 		}
 
@@ -221,7 +222,7 @@ namespace
 			const bool fitsTrans = IsAmphibiousOrAirTransport(pUT) && static_cast<int>(pUT->SizeLimit) >= passSize
 				&& pUT->Passengers >= passSize && links(pUT);
 			const bool fitsCarry
-				= TechnoTypeExt::Fetch(pUT) && CanCarryallTypeLift(pUT, TechnoTypeExt::Fetch(pUT)->Carryall);
+				= !buildableNow && TechnoTypeExt::Fetch(pUT) && CanCarryallTypeLift(pUT, TechnoTypeExt::Fetch(pUT)->Carryall);
 			if (!fitsTrans && !fitsCarry)
 				continue;
 
@@ -307,10 +308,12 @@ namespace
 	}
 
 	// Can the house carry a unit of this type from `from` to `to` now: a transport it owns, or can build
-	// now, with a seat for it (or a carryall that lifts it), that links the two cells
+	// now, with a seat for it (or a carryall aircraft that lifts it), that links the two cells
 	// (CanTransportTypeLink) and comes to `from`, from where it stands or from where the house builds it
 	// (CanTransportTypeComeTo). The back door asks it for each member of its team, and an operation that
-	// no transport takes asks it for its staging cell (OpNoReachFrames).
+	// no transport takes asks it for its staging cell (OpNoReachFrames). The sling of a unit carryall
+	// does not count: an operation seats a unit in its bay only (GetOpCarrier), and one that waited for
+	// a vehicle it could not seat held it OpNoTransportFrames.
 	bool CanHouseCarryNow(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct& from, const CellStruct& to)
 	{
 		if (!pHouse || !pFootType)
@@ -327,22 +330,12 @@ namespace
 			return static_cast<int>(pTransType->SizeLimit) >= passSize && pTransType->Passengers >= passSize;
 		};
 
-		auto const unitLifts = [&](const TechnoTypeClass* pCarryType)
-		{
-			auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType);
-
-			return liftable && pCarryExt && pCarryExt->Carryall && CarryallTypeCanLiftType(pCarryType, pFootType);
-		};
-
 		for (auto const pUnit : UnitClass::Array)
 		{
 			if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
 				continue;
 
 			auto const pUnitType = pUnit->Type;
-
-			if (unitLifts(pUnitType))
-				return true;
 
 			if (IsAmphibiousOrAirTransport(pUnitType) && seats(pUnitType) && CanTransportTypeLink(pUnitType, from, to)
 				&& CanTransportTypeLink(pUnitType, pUnit->GetMapCoords(), from))
@@ -367,8 +360,7 @@ namespace
 			if (!pUnitType || pUnitType->TechLevel < 0 || pUnitType->TechLevel > 10 || pUnitType->TechLevel > pHouse->TechLevel)
 				continue;
 
-			const bool carries = unitLifts(pUnitType)
-				|| (IsAmphibiousOrAirTransport(pUnitType) && seats(pUnitType) && CanTransportTypeLink(pUnitType, from, to));
+			const bool carries = IsAmphibiousOrAirTransport(pUnitType) && seats(pUnitType) && CanTransportTypeLink(pUnitType, from, to);
 			const bool hasFactoryNow = pUnitType->Naval ? (pHouse->NumShipyards > 0) : (pHouse->NumWarFactories > 0);
 
 			if (carries && hasFactoryNow && HouseExt::PrerequisitesMet(pHouse, pUnitType) && CanTransportTypeComeTo(pHouse, pUnitType, from))

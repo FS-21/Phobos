@@ -565,9 +565,12 @@ namespace
 	// it began, and the largest load seen on it with the frame it grew last. Progress*: where it stood
 	// since when (a shuttle's harvester while a transport waits for it, any other member while it is
 	// farther from the cell it was sent to than OpMemberStuckFarCells). Cleared while it is aboard.
+	// Client: the one that asked for it, which it goes back to; a wave and the economy share the
+	// operation of a crossing (RequestTransportOperation), so it may differ from the operation's.
 	struct NeuralOpMember
 	{
 		DWORD UniqueID { 0 };
+		NeuralOpClient Client { NeuralOpClient::Wave };
 		int Size { 1 };
 		CellStruct Target { CellStruct::Empty };
 		DWORD Transport { 0 };
@@ -2143,11 +2146,20 @@ namespace
 	// that could not leave the water.
 	constexpr int OpNoReachFrames = 1800;
 	constexpr int OpNoTransportRetryFrames = 18000;
+	// A free transport goes first to the operation of the house that has waited longest with none,
+	// once it has waited OpStarvedFrames (user, 2026-11-19: the oldest operation took each transport
+	// that came free or was built, and those on other crossings waited OpNoTransportFrames).
+	constexpr int OpStarvedFrames = 1800;
 	// TEMP diagnostic (LogOpTransportRefusals): how often an operation that no transport takes names
 	// why each transport of ours is turned down, the lines a match and the transports a line.
 	constexpr int OpRefusalLogFrames = 1800;
 	constexpr int OpRefusalLogLines = 150;
 	constexpr int OpRefusalLogTransports = 12;
+	// TEMP diagnostic: the members that join the operation of another client on their crossing, logged
+	// per match.
+	constexpr int OpSharedCrossingLogLines = 60;
+	// TEMP diagnostic: the transports an operation leaves to one that waits longer, logged per match.
+	constexpr int OpStarvedLogLines = 80;
 	constexpr int OpStuckFrames = 900;
 	constexpr double OpStuckCells = 2.0;
 	constexpr int OpCrossCapFrames = 9000;
@@ -2512,6 +2524,30 @@ namespace
 	constexpr int McvIdleArriveFrames = 450;
 	constexpr int McvUnfoldRetryFrames = 450;
 	constexpr int McvUnfoldMostTries = 3;
+	// Armies go out in mass (user approved, 2026-11-19: "sí haz las 4"; match #11465 Dead Six: two
+	// allied houses of 80+ units and 100000+ credits streamed packets of 7 to 17 units for 18000
+	// frames while a third of each army stayed home). Once the army (idle and busy fighters, not
+	// guards or plans) has WaveArmyMassFrom units, a main wave waits for WaveArmyShareDivisor-th of it
+	// idle, at most WaveArmyShareMost; the second echelon discount holds only while
+	// WaveEchelonEngagedUnits of the waves before stand within WaveEchelonEngagedCells of their goal.
+	constexpr int WaveArmyMassFrom = 18;
+	constexpr int WaveArmyShareDivisor = 3;
+	constexpr int WaveArmyShareMost = 40;
+	constexpr int WaveEchelonEngagedUnits = 3;
+	constexpr double WaveEchelonEngagedCells = 14.0;
+	// A team push lasts at least the walk of its farthest member plus TeamPushMarginFrames; the team
+	// keeps its target for TeamTargetKeepFrames while it stands; a house with TeamWeakHouseBuildings
+	// known buildings or fewer is the team target only when no member picks a stronger one.
+	constexpr int TeamPushMarginFrames = 900;
+	constexpr int TeamTargetKeepFrames = 9000;
+	constexpr int TeamWeakHouseBuildings = 2;
+	// Out of an attack on the base the tank guard keeps at most a TankGuardPeaceShare-th of the main
+	// battle tanks home (TankGuardMin at least). Off urban maps a garrison is taken only with a seen
+	// enemy within UrbanQuietGarrisonCells of the building, and a quiet one empties into the army,
+	// the building closed to us for UrbanQuietReleaseFrames.
+	constexpr int TankGuardPeaceShare = 4;
+	constexpr int UrbanQuietGarrisonCells = 16;
+	constexpr int UrbanQuietReleaseFrames = 2700;
 	// Land before islands (user approved, 2026-11-19): in 4 matches of 724f571ef 44 of 87 expansion
 	// lines of houses whose income fell found the expansion MCV built and packed, waiting for a ride to
 	// an island; 31 of 38 such MCVs of 5 stamps had a free field on their own landmass (match #11376,
@@ -2923,6 +2959,10 @@ namespace
 	constexpr int RepairerHealCells = 10;
 	constexpr int RepairerEscortMost = 2;
 	constexpr int RepairerEscortKeepCells = 4;
+	// The escort follows only a vehicle in a group (user, 2026-11-19): RepairerEscortGroupMin armed ground
+	// vehicles of ours within RepairerEscortGroupCells of it, itself included.
+	constexpr int RepairerEscortGroupMin = 3;
+	constexpr int RepairerEscortGroupCells = 8;
 	constexpr int RepairerLogLines = 40;
 	constexpr double RepairerBaseCells = 15.0;
 	constexpr double RepairerDamagedBelow = 0.85;

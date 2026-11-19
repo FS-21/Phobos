@@ -613,7 +613,23 @@ namespace
 			const bool falling = pBld->GetHealthPercentage() < 0.40 && VisibleEnemyThreatNear(pHouse, pBld->GetMapCoords(), 8) > 0;
 
 			if (!clearerNear && !falling)
+			{
+				// Off urban maps a garrison with no seen enemy near empties into the army (user approved,
+				// 2026-11-19; match #11465: 10 and 25 soldiers of two houses sat in buildings far from
+				// any fight while their armies streamed out in packets). A manned base defense stays.
+				if (state.WorthyBuildings < 6 && !pBld->Type->IsBaseDefense && pBld->CurrentMission != Mission::Unload
+					&& VisibleEnemyThreatNear(pHouse, pBld->GetMapCoords(), UrbanQuietGarrisonCells) <= 0)
+				{
+					pBld->QueueMission(Mission::Unload, false);
+					state.Evacuations++;
+					CountDecision(NeuralDecision::UrbanQuietRelease, pHouse->ArrayIndex);
+
+					if (pKnown)
+						pKnown->BlockedUntilFrame = now + UrbanQuietReleaseFrames;
+				}
+
 				continue;
+			}
 
 			state.GarrisonsInDanger++;
 
@@ -1062,6 +1078,11 @@ namespace
 			const bool partlyOurs = (own && inside > 0) || (pEntering && pEntering->Own > 0);
 
 			if (overCap && !partlyOurs)
+				continue;
+
+			// Off urban maps only a building with a seen enemy near is held (user approved, 2026-11-19):
+			// the soldiers go with the army otherwise.
+			if (!urbanMap && VisibleEnemyThreatNear(pHouse, known.Cell, UrbanQuietGarrisonCells) <= 0)
 				continue;
 
 			if (infZone >= 0 && !IsBuildingEnterableFromZone(pBld, infZone, moveZone))

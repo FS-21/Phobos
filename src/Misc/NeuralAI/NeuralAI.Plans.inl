@@ -848,11 +848,15 @@ namespace
 				candidates.push_back({ before.contains(uid) ? -1.0 : distance, pUnit });
 		}
 
-		// The wide guard (TankGuardWideArchetype): the floor's base part and escort part.
+		// The wide guard (TankGuardWideArchetype): the floor's base part and escort part. Out of an
+		// attack on the base (above) the part that stays home is at most a TankGuardPeaceShare-th of
+		// the main battle tanks (match #11465: 16 of 39 tanks guarded a base nobody attacked).
+		const int peaceGuard = std::max(std::min(TankGuardMin, mainTanks), mainTanks / TankGuardPeaceShare);
 		const bool wide = TankGuardWideArchetype(HouseExt::Fetch(pHouse)->NeuralAI_Archetype) && macro.TankFloorBasePart > 0;
+		const int basePart = std::min(macro.TankFloorBasePart, peaceGuard);
 		const int wanted = wide
-			? std::min(std::min(TankFloorMost, macro.TankFloorBasePart + macro.TankFloorEscortPart), static_cast<int>(candidates.size()))
-			: std::min({ TankGuardMost, std::max(std::min(TankGuardMin, mainTanks), mainTanks / TankGuardShare),
+			? std::min(std::min(TankFloorMost, basePart + macro.TankFloorEscortPart), static_cast<int>(candidates.size()))
+			: std::min({ TankGuardMost, std::max(std::min(TankGuardMin, mainTanks), mainTanks / TankGuardShare), peaceGuard,
 				static_cast<int>(candidates.size()) });
 
 		if (wanted <= 0)
@@ -869,7 +873,7 @@ namespace
 		{
 			macro.TankGuard.insert(candidates[i].second->UniqueID);
 
-			if (wide && static_cast<int>(i) >= macro.TankFloorBasePart)
+			if (wide && static_cast<int>(i) >= basePart)
 				macro.TankGuardEscorts.insert(candidates[i].second->UniqueID);
 		}
 
