@@ -1326,8 +1326,10 @@ namespace
 		int WaveEscortRetryFrame { -1 };
 		// Last frame scouts were sent to look for the remnants of an enemy (RemnantSearchScouts).
 		int RemnantSearchFrame { -100000 };
-		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it.
+		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it (IsOnWaveMarch).
 		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
+		// TEMP diagnostic (wave march): the goals kept past the old WaveGoalKeepFrames logged this match.
+		int WaveMarchLogCount { 0 };
 		// The idle army by type as the last tick counted it, and when: the group the next wave is
 		// made of, for the target scoring (WaveGroupDamage*).
 		std::vector<std::pair<const TechnoTypeClass*, int>> WaveGroupTypes;
@@ -1798,6 +1800,7 @@ namespace
 			this->WaveEscortRetryFrame = -1;
 			this->RemnantSearchFrame = -100000;
 			this->WaveGoals.clear();
+			this->WaveMarchLogCount = 0;
 			this->WaveGroupTypes.clear();
 			this->WaveGroupFrame = -100000;
 			this->TransportOps.clear();
@@ -3219,6 +3222,15 @@ namespace
 	// frame 101565, the same 43 west at frame 101655, in one-cell streets).
 	constexpr int WaveGoalKeepFrames = 2700;
 	constexpr double WaveGoalKeepCells = 12.0;
+	// Since 2026-11-19 (user: a mission in progress is not disturbed until it ends; the main enemy
+	// changing is no reason, a pact is) the goal is kept until the mission ends (IsOnWaveMarch): the unit
+	// arrived within WaveGoalKeepCells, no known building of a house at war with us stands there, no path,
+	// or the unit stood still WaveMarchHeldFrames (a blocked way); WaveMarchMostFrames is only a safety
+	// net. Plans recruit no unit on such a march (isFreeForPlan). WaveGoalKeepFrames stays for the house's
+	// lean to its last target and the TEMP wave march line.
+	constexpr int WaveMarchMostFrames = 18000;
+	constexpr int WaveMarchHeldFrames = 900;
+	constexpr int WaveMarchLogLines = 40;
 	// The house itself leans to the target of its last dispatch for WaveTargetKeepFrames: enemy
 	// buildings within WaveGoalKeepCells of it score WaveTargetKeepBonus more, above the focus
 	// enemy (300) and below the coalition target (700). 189 of 20504 launches of 48 houses went

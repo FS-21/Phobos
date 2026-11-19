@@ -368,6 +368,82 @@ namespace
 		return cache;
 	}
 
+	// A wave march still under way (user, 2026-11-19: «a menos que termine su misión no debería estorbar
+	// una misión en curso»; «el enemigo principal no debería forzar el cambio de misión a medio ataque a
+	// menos que haya aparecido un pacto»): the goal a wave gave this unit (WaveGoals) while the unit is
+	// farther than WaveGoalKeepCells from it, a known building of a house still at war with us stands
+	// within that distance of the goal (no ally, truce partner or defeated house), the goal's path is not
+	// dead and the unit has not stood still WaveMarchHeldFrames (a blocked way). No time limit but the
+	// safety WaveMarchMostFrames: before, the goal went after WaveGoalKeepFrames (2700) and the next wave,
+	// to the new main enemy, turned the unit round (match #11501: the main enemy of house 7 changed 21
+	// times between houses 6, 4 and 2 and its LTNK went back and forth between (255,217) and (175,268)).
+	// Whether a goal stands is read once per goal, frame and house.
+	bool IsOnWaveMarch(HouseClass* pHouse, const FootClass* pFoot, CellStruct* pGoal = nullptr, int* pZone = nullptr)
+	{
+		if (!pHouse || !pFoot)
+			return false;
+
+		auto const& goals = GetMacroState(pHouse).WaveGoals;
+		auto const it = goals.find(pFoot->UniqueID);
+		const int now = Unsorted::CurrentFrame;
+
+		if (it == goals.end() || now < it->second.Frame || now - it->second.Frame > WaveMarchMostFrames)
+			return false;
+
+		const CellStruct goal = it->second.Cell;
+
+		if (goal == CellStruct::Empty || pFoot->GetMapCoords().DistanceFrom(goal) <= WaveGoalKeepCells
+			|| IsFootHeldStill(pHouse, pFoot, WaveMarchHeldFrames))
+		{
+			return false;
+		}
+
+		static int standsFrame = -1;
+		static int standsHouse = -1;
+		static std::vector<std::pair<CellStruct, bool>> stands;
+
+		if (standsFrame != now || standsHouse != pHouse->ArrayIndex)
+		{
+			standsFrame = now;
+			standsHouse = pHouse->ArrayIndex;
+			stands.clear();
+		}
+
+		auto known = std::find_if(stands.begin(), stands.end(), [&goal](auto const& entry) { return entry.first == goal; });
+
+		if (known == stands.end())
+		{
+			bool enemyThere = false;
+
+			for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+			{
+				auto const pOwner = info.Building ? info.Building->Owner : nullptr;
+
+				if (pOwner && !pOwner->Defeated && info.Coords.DistanceFrom(goal) <= WaveGoalKeepCells
+					&& !IsTacitTrucePartner(pHouse, pOwner->ArrayIndex))
+				{
+					enemyThere = true;
+					break;
+				}
+			}
+
+			// A goal our units find no path to is given up at once.
+			stands.push_back({ goal, enemyThere && !IsPathDeadGoal(pHouse, goal) });
+			known = stands.end() - 1;
+		}
+
+		if (!known->second)
+			return false;
+
+		if (pGoal)
+			*pGoal = goal;
+
+		if (pZone)
+			*pZone = it->second.Zone;
+
+		return true;
+	}
+
 	// Enemy air presence a wave must expect: aircraft of anyone seen lately (the air threat
 	// memory), or a known airfield of the house it goes for (of any enemy house with owner -1).
 	bool EnemyAirPresenceKnown(HouseClass* pHouse, int owner)
@@ -2194,10 +2270,13 @@ namespace
 			// Units marching in a generic wave (attack-move, no target yet) are available too: the
 			// waves keep most of the army on the move, and plans needing big groups (Three-Front 15,
 			// Feint 8, Timing Rush 6) recruit from them. Plans keep the last word on their members.
+			// Not one whose wave mission is still under way (IsOnWaveMarch; user, 2026-11-19: a mission
+			// in progress is not disturbed until it ends): a Base Threat Intercept took LTNK of house 7
+			// 26 to 39 cells from home off their march (match #11501).
 			const bool marchingInWave = pFoot->MegaMission == Mission::AttackMove && pFoot->Target == nullptr
 				&& (pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::Guard);
 
-			return idle || marchingInWave;
+			return idle || (marchingInWave && !IsOnWaveMarch(pHouse, pFoot));
 		};
 
 		// Armed strike aircraft a plan may take: idle, or still on the ground with an attack order
