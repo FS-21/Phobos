@@ -743,16 +743,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| pT->Naval);
 	};
 
-	struct PendingCrossIslandOrder
-	{
-		FootClass* Passenger;
-		int PickupZone;
-		CellClass* TargetLandingCell;
-		int TargetZone;
-		int PassengerSize;
-	};
-	std::vector<PendingCrossIslandOrder> pendingCrossIslandOrders;
-
 	auto UnstickCrossIslandFoot = [&](FootClass* pFoot) -> bool
 	{
 		if (!pFoot || CanFootCrossWaterDirectly(pFoot))
@@ -976,94 +966,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// The transport operations manager takes it across (user: a removal company apart from the
 		// client); the unit's client gives it its order again once it stands on the target's ground.
-		if (TransportOpsEnabled)
-			return RequestTransportOperation(pHouse, NeuralOpClient::Economy, pFoot, targetGround);
-
-		// A transport is called only for a crossing one of ours (or one we can build) can make: the
-		// landing on the ground the unit wants, from where it stands.
-		CellClass* const pTargetLanding = FindSafeIslandLandingCell(pHouse, targetGround, targetZone, false);
-
-		if (!CanHouseFerryTypeAcrossWater(pHouse, pFootType, &footCoords, pTargetLanding ? &pTargetLanding->MapCoords : nullptr))
-			return false;
-
-		// Safety net: a unit that has asked for a crossing for 3600 frames without ever boarding
-		// (no transport came, or it could not reach the pickup) is released to other jobs and may
-		// not ask again for 9000 frames, instead of waiting on the beach for the rest of the match.
-		{
-			auto& ferryMacro = GetMacroState(pHouse);
-			const int now = Unsorted::CurrentFrame;
-
-			if (auto const itBlocked = ferryMacro.FerryBlockedUntil.find(pFoot->UniqueID);
-				itBlocked != ferryMacro.FerryBlockedUntil.end() && now < itBlocked->second)
-			{
-				return false;
-			}
-
-			if (pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter)
-			{
-				ferryMacro.FerryWaitSince.erase(pFoot->UniqueID);
-			}
-			else
-			{
-				auto const [itWait, inserted] = ferryMacro.FerryWaitSince.try_emplace(pFoot->UniqueID, now);
-
-				if (!inserted && now - itWait->second >= 3600)
-				{
-					ferryMacro.FerryWaitSince.erase(itWait);
-					ferryMacro.FerryBlockedUntil[pFoot->UniqueID] = now + 9000;
-
-					static int timeoutLogSerial = -1;
-					static int timeoutLogCount = 0;
-
-					if (timeoutLogSerial != NeuralMatchSerial)
-					{
-						timeoutLogSerial = NeuralMatchSerial;
-						timeoutLogCount = 0;
-					}
-
-					if (++timeoutLogCount <= 40)
-					{
-						Debug::Log("[NeuralAI] Ferry wait timeout house %d frame %d: %s %u at (%d,%d) zone %d mission %d -> target (%d,%d) zone %d.\n",
-							pHouse->ArrayIndex, now, pFootType->ID, pFoot->UniqueID, footCoords.X, footCoords.Y, footZone,
-							static_cast<int>(pFoot->CurrentMission), targetCoords.X, targetCoords.Y, targetZone);
-					}
-					ClearPassengerIslandGoal(pFoot->UniqueID);
-					pFoot->SetDestination(nullptr, true);
-					pFoot->QueueMission(Mission::Guard, true);
-					CountDecision(NeuralDecision::FerryWaitTimeout, pHouse->ArrayIndex);
-					return false;
-				}
-			}
-		}
-
-		RecordPassengerIslandGoal(pFoot->UniqueID, targetGround);
-		const int passSize = std::max(1, static_cast<int>(pFootType->Size));
-		if (pTargetLanding)
-			pendingCrossIslandOrders.push_back({ pFoot, footZone, pTargetLanding, targetZone, passSize });
-
-		// Do NOT order multiple units into Mission::Enter here! The centralized
-		// transport controller boards units strictly ONE BY ONE so transports never jam.
-		if (pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter)
-			return true;
-
-		if (auto const pPickupBeach = FindSafeIslandLandingCell(pHouse, footCoords, footZone, false))
-		{
-			pFoot->SetTarget(nullptr);
-			if (footCoords.DistanceFrom(pPickupBeach->MapCoords) > 9.0)
-			{
-				IssueMoveOrder(pFoot, pPickupBeach, 4.0, callerFile, callerLine);
-			}
-			else if (pFoot->CurrentMission != Mission::Guard)
-			{
-				pFoot->SetDestination(nullptr, true);
-				pFoot->ClearNavigationList();
-				pFoot->QueueMission(Mission::Guard, true);
-			}
-
-			return true;
-		}
-
-		return false;
+		return RequestTransportOperation(pHouse, NeuralOpClient::Economy, pFoot, targetGround);
 	};
 
 	microSegments.Mark("ms: idle transports");
@@ -12149,8 +12052,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	}
 
 	// Publish the real ferry demand for the production selector: only the units this
-	// controller would actually board (pending cross-island orders, idle ground units
-	// stranded away from the enemy island, home deployer/engineer). Units already
+	// controller would actually board (idle ground units stranded away from the enemy
+	// island, home deployer/engineer). Units already
 	// fighting, already on the target island or able to cross water are not demand.
 	{
 		auto& macro = GetMacroState(pHouse);
@@ -12178,9 +12081,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const int size = std::clamp(static_cast<int>(pFootType->Size), 1, 15);
 			macro.FerryDemandSizeBySize[size] += size;
 		};
-
-		for (auto const& ord : pendingCrossIslandOrders)
-			addFerryDemand(ord.Passenger);
 
 		if (enemyOnDisconnectedIsland && targetIslandZone >= 0)
 		{
@@ -12956,12 +12856,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				++boardable;
 			};
 
-			for (auto const& ord : pendingCrossIslandOrders)
-			{
-				if (ord.PickupZone == fleetZone)
-					addBoardable(ord.Passenger, std::max(1, ord.PassengerSize));
-			}
-
 			for (auto const pV : idleCombatUnits)
 			{
 				if (pV && pV->Type && !IsAmphibiousOrAirTransport(pV->Type) && !(pV->CaptureManager && pV->CaptureManager->NumControlNodes() > 0))
@@ -13268,19 +13162,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						&& (IsAITickWindow(90, 35)))
 					{
 						bool pickedCarryallTarget = false;
-						for (auto const& ord : pendingCrossIslandOrders)
-						{
-							if (auto const pOrdU = abstract_cast<UnitClass*>(ord.Passenger))
-							{
-								if (pOrdU->IsAlive && !pOrdU->InLimbo && pCarryExt->CarryallCanLift(pOrdU))
-								{
-									AdvanceRoutedPickup(pHouse, pTrans, pOrdU);
-									CountDecision(NeuralDecision::AirliftJob, pHouse->ArrayIndex);
-									pickedCarryallTarget = true;
-									break;
-								}
-							}
-						}
 
 						const bool islandLiftsPaused
 							= Unsorted::CurrentFrame - GetMacroState(pHouse).LastAirDropAbortFrame < 1800;
@@ -13854,96 +13735,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return true;
 		};
 
-		auto hasMoreBoardableUnitsOnIsland = [&](int checkZone, int reservedDeployerCap = 0) -> bool
-		{
-			if (checkZone < 0 || !isSafeFriendlyPickupIsland(checkZone))
-				return false;
-
-			const int maxAllowedCap = std::max(0, pTrans->Type->Passengers - reservedDeployerCap);
-			const int freeCap = maxAllowedCap - totalPassSize;
-			if (freeCap <= 0 || numPass >= pTrans->Type->Passengers)
-				return false;
-
-			auto isAlreadyBoardingAnotherTransport = [&](FootClass* pCand) -> bool
-			{
-				if (!pCand)
-					return false;
-
-				return (pCand->CurrentMission == Mission::Enter || pCand->QueuedMission == Mission::Enter)
-					&& !pCand->ContainsLink(pTrans) && pCand->ArchiveTarget != pTrans && pCand->Destination != pTrans;
-			};
-
-			for (auto const& ord : pendingCrossIslandOrders)
-			{
-				if (!ord.Passenger || ord.Passenger->InLimbo || !ord.Passenger->IsAlive || ord.PickupZone != checkZone)
-					continue;
-
-				if (isAlreadyBoardingAnotherTransport(ord.Passenger))
-					continue;
-
-				// Cargo of its own rules and a combat load never share a transport.
-				const bool ownRulesAboard = carryingMCV || carryingStolenForeignMCV || carryingHarvester || carryingEngineer;
-
-				if (numPass > 0 && isOwnRulesCargo(ord.Passenger) != ownRulesAboard)
-					continue;
-
-				// Only a crossing this transport can make itself.
-				if (!ord.TargetLandingCell
-					|| !CanTransportTypeLink(pTrans->Type, ord.Passenger->GetMapCoords(), ord.TargetLandingCell->MapCoords))
-				{
-					continue;
-				}
-
-				const int osz = std::max(1, ord.PassengerSize);
-				if (osz <= static_cast<int>(pTrans->Type->SizeLimit) && osz <= freeCap)
-					return true;
-			}
-
-			// Idle units ride only to this transport's own destination (as the loader picks them), and with
-			// the transport operations on, not at all.
-			if (!pActiveIslandGoal || TransportOpsEnabled)
-				return false;
-
-			for (auto const pV : idleCombatUnits)
-			{
-				if (!pV || pV->InLimbo || !pV->IsAlive || IsAmphibiousOrAirTransport(pV->Type))
-					continue;
-
-				if (isAlreadyBoardingAnotherTransport(pV) || !canRideFerry(pV))
-					continue;
-
-				if (pV->CaptureManager && pV->CaptureManager->NumControlNodes() > 0)
-					continue;
-
-				const int vz = ObjectZone(pV, MovementZone::Normal);
-				if (vz != checkZone || IsFootActivelyAttackingOrMovingToEnemy(pV) || IsFootNearEnemyFrontline(pV, vz))
-					continue;
-
-				const int vsz = std::max(1, static_cast<int>(pV->Type->TechnoTypeClass::Size));
-				if (vsz <= static_cast<int>(pTrans->Type->SizeLimit) && vsz <= freeCap)
-					return true;
-			}
-
-			for (auto const pI : idleCombatInf)
-			{
-				if (!pI || pI->InLimbo || !pI->IsAlive)
-					continue;
-
-				if (isAlreadyBoardingAnotherTransport(pI) || !canRideFerry(pI))
-					continue;
-
-				const int iz = ObjectZone(pI, MovementZone::Normal);
-				if (iz != checkZone || IsFootActivelyAttackingOrMovingToEnemy(pI) || IsFootNearEnemyFrontline(pI, iz))
-					continue;
-
-				const int isz = std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size));
-				if (isz <= static_cast<int>(pTrans->Type->SizeLimit) && isz <= freeCap)
-					return true;
-			}
-
-			return false;
-		};
-
 		auto const pCurTransCell = pTrans->GetCell();
 		// A loaded transport that already left its loading island is in transit:
 		// brushing a friendly coast on the way never turns it back into a pickup.
@@ -13959,37 +13750,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Reserved passengers still walking to it keep it loading (they are out of the idle pools).
 		int ferryQueuedSize = 0;
 		const bool hasFerryQueue = onSafePickupShore && !ferryQueueOf(pTrans, transZone, ferryQueuedSize).empty();
-		// With its share of the fleet split aboard or on the way, the units left on the island are
-		// for its sister transports.
-		auto const itFleetShare = ferryFleetQuota.find(pTrans->UniqueID);
-		const bool fleetShareTaken = itFleetShare != ferryFleetQuota.end() && totalPassSize + ferryQueuedSize >= itFleetShare->second;
 		const bool canFitMoreOnPickupIsland = onSafePickupShore
-			&& (pSingleActiveBoarder != nullptr || hasFerryQueue || (!fleetShareTaken && hasMoreBoardableUnitsOnIsland(transZone, 0)));
-
-		if (numPass == 0 && onSafePickupShore && pSingleActiveBoarder == nullptr
-			&& (pTrans->CurrentMission == Mission::Guard || pTrans->CurrentMission == Mission::Area_Guard)
-			&& std::any_of(pendingCrossIslandOrders.begin(), pendingCrossIslandOrders.end(),
-				[transZone](const PendingCrossIslandOrder& ord) { return ord.PickupZone == transZone; }))
-		{
-			CountDecision(NeuralDecision::FerryIdleWithDemand, pHouse->ArrayIndex);
-		}
+			&& (pSingleActiveBoarder != nullptr || hasFerryQueue);
 
 		// Ferry diagnostics, every 900 frames: each transport's state against the demand around it.
 		if (IsAITickWindow(900, 0))
 		{
-			int pendingHere = 0;
-			int pendingElsewhere = 0;
-
-			for (auto const& ord : pendingCrossIslandOrders)
-				(ord.PickupZone == transZone ? pendingHere : pendingElsewhere)++;
-
 			Debug::Log("[NeuralAI] Ferry diag house %d frame %d: %s %u at (%d,%d) zone %d cell %s mission %d pass %d/%d departed %d "
-				"pickupShore %d boarder %u canFitMore %d, pending here %d elsewhere %d, idle units %d inf %d\n",
+				"pickupShore %d boarder %u canFitMore %d, idle units %d inf %d\n",
 				pHouse->ArrayIndex, Unsorted::CurrentFrame, pTrans->Type->ID, pTrans->UniqueID, pTrans->GetMapCoords().X,
 				pTrans->GetMapCoords().Y, transZone, (pCurTransCell && pCurTransCell->LandType == LandType::Water) ? "water" : "land",
 				static_cast<int>(pTrans->CurrentMission), numPass, pTrans->Type->Passengers, tripDeparted ? 1 : 0,
 				onSafePickupShore ? 1 : 0, pSingleActiveBoarder ? pSingleActiveBoarder->UniqueID : 0u, canFitMoreOnPickupIsland ? 1 : 0,
-				pendingHere, pendingElsewhere, static_cast<int>(idleCombatUnits.size()), static_cast<int>(idleCombatInf.size()));
+				static_cast<int>(idleCombatUnits.size()), static_cast<int>(idleCombatInf.size()));
 		}
 
 		const bool hasCargoInTransitOrUnloading = (numPass >= 1) && !onSafePickupShore
@@ -14050,24 +13823,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						convoyHold = true;
 						break;
 					}
-
-					// Empty with cargo on this shore waiting for a crossing it can make: it loads next.
-					// One transport at a time left a few soldiers on the far side over and over while the
-					// rest of the army waited its turn.
-					for (auto const& ord : pendingCrossIslandOrders)
-					{
-						if (ord.Passenger && ord.Passenger->IsAlive && !ord.Passenger->InLimbo && ord.PickupZone == transZone
-							&& ord.TargetLandingCell && std::max(1, ord.PassengerSize) <= static_cast<int>(pSister->Type->SizeLimit)
-							&& CanPassengerFitInTransport(pSister, ord.Passenger->GetTechnoType())
-							&& CanTransportTypeLink(pSister->Type, ord.Passenger->GetMapCoords(), ord.TargetLandingCell->MapCoords))
-						{
-							convoyHold = true;
-							break;
-						}
-					}
-
-					if (convoyHold)
-						break;
 				}
 			}
 
@@ -14874,12 +14629,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					clusters.push_back({ cz, weight, d, cc });
 				};
 
-				for (auto const& ord : pendingCrossIslandOrders)
-				{
-					if (ord.Passenger && ord.Passenger->IsAlive && !ord.Passenger->InLimbo)
-						addCandidateToCluster(ord.Passenger, std::max(1, ord.PassengerSize), 45);
-				}
-
 				for (auto const pV : idleCombatUnits)
 				{
 					if (!IsAmphibiousOrAirTransport(pV->Type))
@@ -15079,11 +14828,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pSingleActiveBoarder != nullptr || hasFerryQueue || numPass >= 1)
 				GetMacroState(pHouse).ParkedFerries[pTrans->UniqueID] = { pTrans, Unsorted::CurrentFrame };
 
-			// Nobody boards a transport with nowhere to go: the crossing orders bring their own goal, the
-			// rest rides only to this transport's destination. An enemy somewhere across the water with no
+			// Nobody boards a transport with nowhere to go: an enemy somewhere across the water with no
 			// goal this transport can sail for loaded idle units that were set down again after
 			// FerryNoGoalUnloadFrames, over and over (one soldier 15 times in one match).
-			if (!pActiveIslandGoal && pendingCrossIslandOrders.empty())
+			if (!pActiveIslandGoal)
 				continue;
 
 			// Loading by what fits (user: divide the work, there are limits): the transport reserves
@@ -15138,125 +14886,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			for (int reserveGuard = 0; reserveGuard < 16 && (combatRoom > 0 || ownRulesRoom > 0); ++reserveGuard)
 			{
-				// Pick the SINGLE best/closest available passenger on this island that fits into its room:
-				// Priority 1: pendingCrossIslandOrders on transZone
-				// Largest first, then nearest (as the distribution mode deals them out): a big vehicle gets
-				// its seat before small units fill the room it needs.
 				FootClass* pNextBoarder = nullptr;
 				bool nextBoarderHasOwnGoal = false;
-				double bestBoarderDist = 999999.0;
-				int bestBoarderSize = 0;
-
-				for (auto const& ord : pendingCrossIslandOrders)
-				{
-					if (!ord.Passenger || !ord.Passenger->IsAlive || ord.Passenger->InLimbo || ord.PickupZone != transZone)
-						continue;
-
-					if (ord.Passenger->CurrentMission == Mission::Enter || ord.Passenger->QueuedMission == Mission::Enter
-						|| IsFerryReserved(pHouse, ord.Passenger->UniqueID))
-						continue;
-
-					// Never mix destinations: once cargo is bound for an island, only
-					// pending orders heading to that same island may join it.
-					if (!isValidFerryGoalZone(ord.TargetZone)
-						|| (pCustomPassengerGoal && ord.TargetZone != customPassengerZone))
-					{
-						continue;
-					}
-
-					const int osz = std::max(1, ord.PassengerSize);
-					if (osz > static_cast<int>(pTrans->Type->SizeLimit) || osz > (isOwnRulesCargo(ord.Passenger) ? ownRulesRoom : combatRoom))
-						continue;
-
-					// Only a crossing this transport can make itself (a hovercraft does not load for
-					// ground behind a cliff).
-					if (!ord.TargetLandingCell
-						|| !CanTransportTypeLink(pTrans->Type, ord.Passenger->GetMapCoords(), ord.TargetLandingCell->MapCoords))
-					{
-						continue;
-					}
-
-					const double d = ord.Passenger->GetMapCoords().DistanceFrom(transCoords);
-					if (osz > bestBoarderSize || (osz == bestBoarderSize && d < bestBoarderDist))
-					{
-						bestBoarderDist = d;
-						bestBoarderSize = osz;
-						pNextBoarder = ord.Passenger;
-						nextBoarderHasOwnGoal = true;
-					}
-				}
-
-				// Priority 2: Closest available combat vehicle on transZone that fits. Idle units ride only
-				// to this transport's own destination. With the transport operations on, an idle unit rides
-				// only when its client asks for it (user: a soldier boarding with no mission of its own).
-				if (!pNextBoarder && pActiveIslandGoal && !TransportOpsEnabled)
-				{
-					for (auto const pV : idleCombatUnits)
-					{
-						if (!pV || pV->InLimbo || !pV->IsAlive || !pV->Type || IsAmphibiousOrAirTransport(pV->Type))
-							continue;
-
-						if (pV->CurrentMission == Mission::Enter || pV->QueuedMission == Mission::Enter
-							|| IsFerryReserved(pHouse, pV->UniqueID) || !canRideFerry(pV))
-							continue;
-
-						if (pV->CaptureManager && pV->CaptureManager->NumControlNodes() > 0)
-							continue;
-
-						const int vehSize = std::max(1, static_cast<int>(pV->Type->TechnoTypeClass::Size));
-						if (vehSize > static_cast<int>(pTrans->Type->SizeLimit) || vehSize > combatRoom || isOwnRulesCargo(pV))
-							continue;
-
-						const int uz
-							= ObjectZone(pV, MovementZone::Normal);
-						if (transZone >= 0 && uz != transZone)
-							continue;
-
-						if (IsFootActivelyAttackingOrMovingToEnemy(pV) || IsFootNearEnemyFrontline(pV, uz))
-							continue;
-
-						const double d = pV->GetMapCoords().DistanceFrom(transCoords);
-						if (vehSize > bestBoarderSize || (vehSize == bestBoarderSize && d < bestBoarderDist))
-						{
-							bestBoarderDist = d;
-							bestBoarderSize = vehSize;
-							pNextBoarder = pV;
-						}
-					}
-				}
-
-				// Priority 3: Closest available combat infantry on transZone that fits
-				if (!pNextBoarder && pActiveIslandGoal && !TransportOpsEnabled && static_cast<int>(pTrans->Type->SizeLimit) >= 1)
-				{
-					for (auto const pI : idleCombatInf)
-					{
-						if (!pI || pI->InLimbo || !pI->IsAlive || !pI->Type)
-							continue;
-
-						if (pI->CurrentMission == Mission::Enter || pI->QueuedMission == Mission::Enter
-							|| IsFerryReserved(pHouse, pI->UniqueID) || !canRideFerry(pI))
-							continue;
-
-						const int infSize = std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size));
-						if (infSize > static_cast<int>(pTrans->Type->SizeLimit) || infSize > combatRoom || isOwnRulesCargo(pI))
-							continue;
-
-						const int iz
-							= ObjectZone(pI, MovementZone::Normal);
-						if (transZone >= 0 && iz != transZone)
-							continue;
-
-						if (IsFootActivelyAttackingOrMovingToEnemy(pI) || IsFootNearEnemyFrontline(pI, iz))
-							continue;
-
-						const double d = pI->GetMapCoords().DistanceFrom(transCoords);
-						if (d < bestBoarderDist)
-						{
-							bestBoarderDist = d;
-							pNextBoarder = pI;
-						}
-					}
-				}
 
 				if (!pNextBoarder)
 					break;
@@ -15655,38 +15286,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			int airQueuedSize = 0;
 			std::vector<FootClass*> airQueue = airParked ? ferryQueueOf(pAir, airZone, airQueuedSize) : std::vector<FootClass*> {};
 			bool moreUnitsFitAir = (pSingleAirBoarder != nullptr) || !airQueue.empty();
-			if (!moreUnitsFitAir && !pAir->IsInAir() && pAir->GetHeight() == 0 && freeAirCap > 0
-				&& numAirPass < pAir->Type->Passengers && !TransportOpsEnabled)
-			{
-				for (auto const pV : idleCombatUnits)
-				{
-					if (!pV || pV->InLimbo || !pV->IsAlive || IsAmphibiousOrAirTransport(pV->Type) || !canRideFerry(pV))
-						continue;
-					const int vsz = std::max(1, static_cast<int>(pV->Type->TechnoTypeClass::Size));
-					const int uz = ObjectZone(pV, MovementZone::Normal);
-					if (uz == airZone && vsz <= static_cast<int>(pAir->Type->SizeLimit) && vsz <= freeAirCap)
-					{
-						moreUnitsFitAir = true;
-						break;
-					}
-				}
-
-				if (!moreUnitsFitAir && static_cast<int>(pAir->Type->SizeLimit) >= 1)
-				{
-					for (auto const pI : idleCombatInf)
-					{
-						if (!pI || pI->InLimbo || !pI->IsAlive || !canRideFerry(pI))
-							continue;
-						const int isz = std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size));
-						const int iz = ObjectZone(pI, MovementZone::Normal);
-						if (iz == airZone && isz <= static_cast<int>(pAir->Type->SizeLimit) && isz <= freeAirCap)
-						{
-							moreUnitsFitAir = true;
-							break;
-						}
-					}
-				}
-			}
 
 			const bool airReadyToFly = airCarryingMCV || airCarryingHarvester
 				|| (airCarryingEngineer && pIslandTechGoalCell != nullptr)
@@ -15749,7 +15348,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 			else if (!pAir->IsInAir() && pAir->GetHeight() == 0 && freeAirCap > 0
-				&& (!pendingCrossIslandOrders.empty() || enemyOnDisconnectedIsland || pIslandResourceGoalCell != nullptr
+				&& (enemyOnDisconnectedIsland || pIslandResourceGoalCell != nullptr
 					|| pIslandTechGoalCell != nullptr || scores[28] > 600 || SlotGate(scores[75], 100, 75)))
 			{
 				// Loading by what fits, as the ground ferries (user: any valid transport, flying ones
@@ -15763,77 +15362,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				for (int airReserveGuard = 0; airReserveGuard < 16 && airRoom > 0; ++airReserveGuard)
 				{
 					FootClass* pNextAirPass = nullptr;
-					double bestAirPassDist = 999999.0;
-					for (auto const& ord : pendingCrossIslandOrders)
-					{
-						if (!ord.Passenger || !ord.Passenger->IsAlive || ord.Passenger->InLimbo || ord.PickupZone != airZone)
-							continue;
-						if (ord.Passenger->CurrentMission == Mission::Enter || ord.Passenger->QueuedMission == Mission::Enter
-							|| IsFerryReserved(pHouse, ord.Passenger->UniqueID))
-							continue;
-						const int osz = std::max(1, ord.PassengerSize);
-						if (osz <= static_cast<int>(pAir->Type->SizeLimit) && osz <= airRoom)
-						{
-							const double d = ord.Passenger->GetMapCoords().DistanceFrom(airCoords);
-							if (d < bestAirPassDist)
-							{
-								bestAirPassDist = d;
-								pNextAirPass = ord.Passenger;
-							}
-						}
-					}
-
-					// Idle units ride only when their client asks for it (transport operations).
-					if (!pNextAirPass && !TransportOpsEnabled)
-					{
-						for (auto const pV : idleCombatUnits)
-						{
-							if (!pV || pV->InLimbo || !pV->IsAlive || IsAmphibiousOrAirTransport(pV->Type))
-								continue;
-							if (pV->CurrentMission == Mission::Enter || pV->QueuedMission == Mission::Enter
-								|| IsFerryReserved(pHouse, pV->UniqueID) || !canRideFerry(pV))
-								continue;
-							const int vehSize = std::max(1, static_cast<int>(pV->Type->TechnoTypeClass::Size));
-							const int uz = ObjectZone(pV, MovementZone::Normal);
-							if (IsFootActivelyAttackingOrMovingToEnemy(pV) || IsFootNearEnemyFrontline(pV, uz))
-								continue;
-							if (uz == airZone && vehSize <= static_cast<int>(pAir->Type->SizeLimit) && vehSize <= airRoom)
-							{
-								const double d = pV->GetMapCoords().DistanceFrom(airCoords);
-								if (d < bestAirPassDist)
-								{
-									bestAirPassDist = d;
-									pNextAirPass = pV;
-								}
-							}
-						}
-					}
-
-					if (!pNextAirPass && !TransportOpsEnabled && static_cast<int>(pAir->Type->SizeLimit) >= 1)
-					{
-						for (auto const pI : idleCombatInf)
-						{
-							if (!pI || pI->InLimbo || !pI->IsAlive)
-								continue;
-							if (pI->CurrentMission == Mission::Enter || pI->QueuedMission == Mission::Enter
-								|| IsFerryReserved(pHouse, pI->UniqueID) || !canRideFerry(pI))
-								continue;
-							const int infSize = std::max(1, static_cast<int>(pI->Type->TechnoTypeClass::Size));
-							const int iz = ObjectZone(pI, MovementZone::Normal);
-							if (IsFootActivelyAttackingOrMovingToEnemy(pI) || IsFootNearEnemyFrontline(pI, iz))
-								continue;
-							if (iz == airZone && infSize <= static_cast<int>(pAir->Type->SizeLimit) && infSize <= airRoom)
-							{
-								const double d = pI->GetMapCoords().DistanceFrom(airCoords);
-								if (d < bestAirPassDist)
-								{
-									bestAirPassDist = d;
-									pNextAirPass = pI;
-								}
-							}
-						}
-					}
-
 
 					if (!pNextAirPass)
 						break;
