@@ -117,86 +117,6 @@ namespace
 			&& Unsorted::CurrentFrame - pUnit->CurrentMissionStartTime >= SiegeUnfoldStuckFrames;
 	}
 
-	// Last frame the Neural AI itself ordered a vehicle to unfold, by unit (LogSiegeDeploys).
-	std::unordered_map<DWORD, int> NeuralDeployOrderFrame {};
-
-	// TEMP diagnostic: every siege unit of this house that starts to unfold, with who ordered it
-	// (the Neural AI in the last 90 frames, or the engine / another system) and what it was aiming
-	// at: type, in the air or not, distance and the reach of the deployed gun.
-	void LogSiegeDeploys(HouseClass* pHouse)
-	{
-		static int logSerial = -1;
-		static int logCount = 0;
-		static std::unordered_map<DWORD, int> loggedFrame;
-
-		if (logSerial != NeuralMatchSerial)
-		{
-			logSerial = NeuralMatchSerial;
-			logCount = 0;
-			loggedFrame.clear();
-			NeuralDeployOrderFrame.clear();
-		}
-
-		if (logCount >= 80)
-			return;
-
-		const int now = Unsorted::CurrentFrame;
-
-		for (auto const pUnit : UnitClass::Array)
-		{
-			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type
-				|| !IsDeployableSiegeUnitType(pUnit->Type))
-			{
-				continue;
-			}
-
-			if (pUnit->CurrentMission != Mission::Unload && pUnit->QueuedMission != Mission::Unload && !pUnit->IsDeploying)
-				continue;
-
-			auto const itLogged = loggedFrame.find(pUnit->UniqueID);
-
-			if (itLogged != loggedFrame.end() && now - itLogged->second < 600)
-				continue;
-
-			loggedFrame[pUnit->UniqueID] = now;
-			logCount++;
-
-			auto const itOrder = NeuralDeployOrderFrame.find(pUnit->UniqueID);
-			const bool byNeural = itOrder != NeuralDeployOrderFrame.end() && now - itOrder->second <= 90;
-			auto const pTarget = abstract_cast<TechnoClass*>(pUnit->Target);
-			// The nearest enemy within 12 cells, whatever it is.
-			TechnoClass* pNearest = nullptr;
-			int nearestDist = 12 * Unsorted::LeptonsPerCell;
-
-			for (auto const pTechno : TechnoClass::Array)
-			{
-				if (!pTechno || !pTechno->IsAlive || pTechno->InLimbo || !pTechno->Owner || pTechno->Owner == pHouse
-					|| pHouse->IsAlliedWith(pTechno->Owner) || pTechno->Owner->IsNeutral())
-				{
-					continue;
-				}
-
-				const int dist = pUnit->DistanceFrom(pTechno);
-
-				if (dist < nearestDist)
-				{
-					nearestDist = dist;
-					pNearest = pTechno;
-				}
-			}
-
-			Debug::Log("[NeuralAI] House %d SiegeDeploy DIAG: %s %u at (%d,%d) unfolds, ordered by %s, mission %d queued %d, "
-				"target %s (in air %d, height %d, %d cells), nearest enemy %s (in air %d, %d cells), deployed reach %d cells, frame %d.\n",
-				pHouse->ArrayIndex, pUnit->Type->ID, pUnit->UniqueID, pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y,
-				byNeural ? "neural" : "engine", static_cast<int>(pUnit->CurrentMission), static_cast<int>(pUnit->QueuedMission),
-				pTarget ? pTarget->GetTechnoType()->ID : (pUnit->Target ? "cell" : "none"), pTarget && pTarget->IsInAir() ? 1 : 0,
-				pTarget ? pTarget->GetHeight() : 0, pTarget ? pUnit->DistanceFrom(pTarget) / Unsorted::LeptonsPerCell : -1,
-				pNearest ? pNearest->GetTechnoType()->ID : "none", pNearest && pNearest->IsInAir() ? 1 : 0,
-				pNearest ? nearestDist / Unsorted::LeptonsPerCell : -1,
-				GroundRangeOf(pUnit->Type->DeploysInto) / Unsorted::LeptonsPerCell, now);
-		}
-	}
-
 	// Ground range a siege plan can count on: for a deployable siege unit the longer of its own
 	// gun and the gun of the structure it unfolds into.
 	int SiegeRangeOf(TechnoTypeClass* pType)
@@ -2229,7 +2149,6 @@ namespace
 
 			if (pUnit->CurrentMission != Mission::Unload)
 			{
-				NeuralDeployOrderFrame[pUnit->UniqueID] = Unsorted::CurrentFrame;
 				pUnit->SetDestination(nullptr, true);
 				pUnit->ClearNavigationList();
 				pUnit->SetTarget(nullptr);
@@ -2374,64 +2293,6 @@ namespace
 					Unsorted::CurrentFrame - plan.StartFrame, plan.Deadline - plan.StartFrame, alive,
 					static_cast<int>(plan.Members.size()), memberValue(plan), plan.InitialValue, plan.Arrived ? 1 : 0, nearest,
 					plan.TargetCell.X, plan.TargetCell.Y, lostDead, lostOffMap, lostTraced > 0 ? lostDistance / lostTraced : -1, lostTraced);
-
-				// TEMP diagnostic: a group that ends badly almost whole never got there. Where it stands
-				// and what its members are doing (63 Factory Decapitation, 62 Superweapon Race and 37
-				// Tech Tree Cut plans ran out of time with nine tenths of their value, 58 to 95 cells
-				// from the target, in the focus batch of 2026-11-13).
-				if (!success && alive > 0 && memberValue(plan) * 100 >= plan.InitialValue * 80)
-				{
-					int sumX = 0;
-					int sumY = 0;
-					int onMap = 0;
-					int held = 0;
-					std::map<int, int> missions;
-					std::string aircraftText;
-
-					for (const DWORD uid : plan.Members)
-					{
-						auto const it = ownFoots.find(uid);
-
-						if (it == ownFoots.end())
-							continue;
-
-						const CellStruct cell = it->second->GetMapCoords();
-						sumX += cell.X;
-						sumY += cell.Y;
-						onMap++;
-						missions[static_cast<int>(it->second->CurrentMission)]++;
-
-						if (auto const pAirMember = abstract_cast<AircraftClass*>(it->second))
-						{
-							char air[96];
-							std::snprintf(air, sizeof(air), " %s ammo %d/%d target %d air %d docked %d hp %d", pAirMember->Type->ID, pAirMember->Ammo,
-								pAirMember->Type->Ammo, pAirMember->Target ? 1 : 0, pAirMember->IsInAir() ? 1 : 0,
-								pAirMember->GetNthLink(0) ? 1 : 0, static_cast<int>(pAirMember->GetHealthPercentage() * 100));
-							aircraftText += air;
-						}
-
-						if (IsFootHeldStill(pHouse, it->second, 300))
-							held++;
-					}
-
-					if (onMap > 0)
-					{
-						const CellStruct centre { static_cast<short>(sumX / onMap), static_cast<short>(sumY / onMap) };
-						std::string missionText;
-
-						for (auto const& [mission, count] : missions)
-							missionText += "m" + std::to_string(mission) + "x" + std::to_string(count) + " ";
-
-						Debug::Log("[NeuralAI] House %d plan %s intact DIAG at rule %d: %d members around (%d,%d), %d cells from home and %d from "
-							"the target, %d held still 300 frames, staging (%d,%d), zones home %d group %d target %d, missions %s| aircraft:%s\n",
-							houseIdx, NeuralPlanNames[static_cast<size_t>(id)], rule, onMap, centre.X, centre.Y,
-							static_cast<int>(centre.DistanceFrom(homeCell)), static_cast<int>(centre.DistanceFrom(plan.TargetCell)), held,
-							plan.StagingCell.X, plan.StagingCell.Y, homeZone,
-							MapClass::Instance.GetMovementZoneType(centre, MovementZone::Normal, false),
-							MapClass::Instance.GetMovementZoneType(plan.TargetCell, MovementZone::Normal, false), missionText.c_str(),
-							aircraftText.empty() ? " none" : aircraftText.c_str());
-					}
-				}
 			}
 
 			if (sendHome)
@@ -2746,23 +2607,6 @@ namespace
 			if (!outgunned && !taught)
 				return true;
 
-			// TEMP diagnostic: the raids the gate holds back (20 per match).
-			static int gateLogSerial = -1;
-			static int gateLogCount = 0;
-
-			if (gateLogSerial != NeuralMatchSerial)
-			{
-				gateLogSerial = NeuralMatchSerial;
-				gateLogCount = 0;
-			}
-
-			if (gateLogCount++ < 20)
-			{
-				Debug::Log("[NeuralAI] House %d plan %s not started: ground group worth %d against %d known on its way to (%d,%d), lesson of house %d %s, frame %d.\n",
-					houseIdx, NeuralPlanNames[static_cast<size_t>(id)], groundValue, strength, target.X, target.Y, targetOwner,
-					taught ? "asks for more" : "allows it", Unsorted::CurrentFrame);
-			}
-
 			return false;
 		};
 
@@ -2820,23 +2664,6 @@ namespace
 
 				if (strands(target, pTargetBuilding) || strands(staging, nullptr))
 				{
-					// TEMP diagnostic: the plans held for a goal across the water (20 per match).
-					static int strandLogSerial = -1;
-					static int strandLogCount = 0;
-
-					if (strandLogSerial != NeuralMatchSerial)
-					{
-						strandLogSerial = NeuralMatchSerial;
-						strandLogCount = 0;
-					}
-
-					if (strandLogCount++ < 20)
-					{
-						Debug::Log("[NeuralAI] House %d plan %s not started: target (%d,%d) or staging (%d,%d) is on ground its %d members do not all reach, frame %d.\n",
-							houseIdx, NeuralPlanNames[static_cast<size_t>(id)], target.X, target.Y, staging.X, staging.Y,
-							static_cast<int>(group.size()), Unsorted::CurrentFrame);
-					}
-
 					macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
 					return;
 				}
@@ -3275,29 +3102,8 @@ namespace
 				return value;
 			};
 
-			// TEMP diagnostic (feint summary DIAG): frames into the plan when the target's owner first
-			// sent its intercept at one of the decoys (-1 never), per house.
-			static std::array<int, 32> feintAnswered {};
-
-			auto endFeint = [&](bool success, const char* why, int rule = __builtin_LINE())
+			auto endFeint = [&](bool success, int rule = __builtin_LINE())
 			{
-				// TEMP diagnostic: one line per feint.
-				std::string types;
-
-				for (const DWORD uid : plan.Members)
-				{
-					if (auto const it = ownFoots.find(uid); it != ownFoots.end())
-						types += std::string(it->second->GetTechnoType()->ID) + " ";
-				}
-
-				auto const pTarget = FindBuildingByID(plan.TargetID);
-				Debug::Log("[NeuralAI] House %d feint summary DIAG: %s after %d frames (%s), decoy %s| value %d of %d, target %s at (%d,%d) "
-					"of house %d, %d cells from home and %d from the main attack at (%d,%d), arrived %d, drew %d over %d, answered %d.\n",
-					houseIdx, success ? "well" : "badly", Unsorted::CurrentFrame - plan.StartFrame, why, types.c_str(), memberValue(plan),
-					plan.InitialValue, pTarget ? pTarget->Type->ID : "gone", plan.TargetCell.X, plan.TargetCell.Y, plan.TargetOwner,
-					static_cast<int>(plan.TargetCell.DistanceFrom(homeCell)), static_cast<int>(plan.TargetCell.DistanceFrom(plan.AnchorCell)),
-					plan.AnchorCell.X, plan.AnchorCell.Y, plan.Arrived ? plan.ArrivedFrame - plan.StartFrame : -1, plan.AuxPeak,
-					std::max(0, plan.AuxBaseline), feintAnswered[houseIdx & 31]);
 				finishPlan(NeuralPlanId::Feint, success, true, rule);
 			};
 
@@ -3343,39 +3149,25 @@ namespace
 					plan.ArrivedFrame = Unsorted::CurrentFrame;
 				}
 
-				// TEMP diagnostic: whether the target's owner sent its intercept at the decoy.
-				if (feintAnswered[houseIdx & 31] < 0 && plan.TargetOwner >= 0 && plan.TargetOwner < HouseClass::Array.Count)
-				{
-					auto const pOwner = HouseClass::Array.GetItem(plan.TargetOwner);
-
-					if (pOwner && NeuralAI::IsEnabledForHouse(pOwner))
-					{
-						auto const& intercept = GetMacroState(pOwner).Plans[static_cast<size_t>(NeuralPlanId::BaseThreatIntercept)];
-
-						if (intercept.Active && std::find(plan.Members.begin(), plan.Members.end(), intercept.TargetID) != plan.Members.end())
-							feintAnswered[houseIdx & 31] = Unsorted::CurrentFrame - plan.StartFrame;
-					}
-				}
-
 				if (plan.AuxPeak > 0 && plan.AuxPeak * 100 >= plan.InitialValue * FeintDrawPercent)
 				{
-					endFeint(true, "drew the defenders");
+					endFeint(true);
 				}
 				else if (!targetStands)
 				{
-					endFeint(false, "target gone");
+					endFeint(false);
 				}
 				else if (alive == 0 || value * 100 < plan.InitialValue * FeintLossPercent)
 				{
-					endFeint(false, "decoy beaten");
+					endFeint(false);
 				}
 				else if (Unsorted::CurrentFrame >= plan.Deadline)
 				{
-					endFeint(false, "out of time");
+					endFeint(false);
 				}
 				else if (plan.Arrived && Unsorted::CurrentFrame - plan.ArrivedFrame >= FeintAnswerWaitFrames)
 				{
-					endFeint(false, "nobody answered");
+					endFeint(false);
 				}
 				else
 				{
@@ -3525,7 +3317,6 @@ namespace
 					{
 						plan.AnchorCell = front;
 						plan.AuxBaseline = -1;
-						feintAnswered[houseIdx & 31] = -1;
 					}
 				}
 			}
@@ -5624,9 +5415,6 @@ namespace
 				}
 				else if (Unsorted::CurrentFrame >= plan.Deadline)
 				{
-					// TEMP diagnostic: what the island yard had when its time ran out.
-					Debug::Log("[NeuralAI] House %d IslandHold DIAG: out of time at (%d,%d) with %d ground defenses and %d anti-air, enemy air seen %d, credits %d.\n",
-						houseIdx, pYard->GetMapCoords().X, pYard->GetMapCoords().Y, ground, antiAir, enemyAirSeen ? 1 : 0, pHouse->Available_Money());
 					clearHold();
 					finishPlan(NeuralPlanId::IslandHold, false, false);
 				}
@@ -8676,36 +8464,8 @@ namespace
 		{
 			auto& plan = planOf(NeuralPlanId::BaitAmbush);
 
-			// TEMP diagnostic (baitAmbush summary DIAG): per house, frames into the plan when the lure
-			// began, when the bait turned and why, when it was back, when the ambush sprang, and when the
-			// target's owner first sent its intercept at the bait (-1 not yet).
-			struct BaitTrace
+			auto endBait = [&](bool success, int rule = __builtin_LINE())
 			{
-				int Lure { -1 };
-				int Turn { -1 };
-				int Back { -1 };
-				int Sprung { -1 };
-				int Answered { -1 };
-				int AnswerCells { -1 };
-				const char* TurnWhy { "" };
-			};
-
-			static std::array<BaitTrace, 32> baitTraces {};
-			auto& trace = baitTraces[houseIdx & 31];
-
-			auto endBait = [&](bool success, const char* why, int rule = __builtin_LINE())
-			{
-				// TEMP diagnostic: one line per bait ambush.
-				FootClass* const pBaitNow = plan.Members.empty() ? nullptr : findOwnFoot(plan.Members[0]);
-				auto const pLureNow = FindBuildingByID(plan.TargetID);
-				Debug::Log("[NeuralAI] House %d baitAmbush summary DIAG: %s after %d frames (%s), phase %d, bait %s, lure %s at (%d,%d) of house %d, "
-					"%d cells from home, ambush (%d,%d) %d cells from it, lure %d turn %d (%s) back %d sprung %d, answered %d at %d cells, "
-					"peak at ambush %d, killed %d, value %d of %d.\n",
-					houseIdx, success ? "well" : "badly", Unsorted::CurrentFrame - plan.StartFrame, why, plan.AuxBaseline,
-					pBaitNow ? pBaitNow->GetTechnoType()->ID : "dead", pLureNow ? pLureNow->Type->ID : "gone", plan.TargetCell.X, plan.TargetCell.Y,
-					plan.TargetOwner, static_cast<int>(plan.TargetCell.DistanceFrom(homeCell)), plan.StagingCell.X, plan.StagingCell.Y,
-					static_cast<int>(plan.StagingCell.DistanceFrom(plan.TargetCell)), trace.Lure, trace.Turn, trace.TurnWhy, trace.Back,
-					trace.Sprung, trace.Answered, trace.AnswerCells, plan.AuxPeak, plan.KillValue, memberValue(plan), plan.InitialValue);
 				finishPlan(NeuralPlanId::BaitAmbush, success, true, rule);
 			};
 
@@ -8725,31 +8485,13 @@ namespace
 				const int ambushValue = groupValue(ambushers);
 				plan.AuxPeak = std::max(plan.AuxPeak, enemyAtAmbush);
 
-				// TEMP diagnostic: whether the target's owner sent its intercept at the bait, and how far
-				// from the building the bait was then.
-				if (trace.Answered < 0 && pBait && plan.TargetOwner >= 0 && plan.TargetOwner < HouseClass::Array.Count)
-				{
-					auto const pOwner = HouseClass::Array.GetItem(plan.TargetOwner);
-
-					if (pOwner && NeuralAI::IsEnabledForHouse(pOwner))
-					{
-						auto const& intercept = GetMacroState(pOwner).Plans[static_cast<size_t>(NeuralPlanId::BaseThreatIntercept)];
-
-						if (intercept.Active && intercept.TargetID == pBait->UniqueID)
-						{
-							trace.Answered = Unsorted::CurrentFrame - plan.StartFrame;
-							trace.AnswerCells = static_cast<int>(pBait->GetMapCoords().DistanceFrom(plan.TargetCell));
-						}
-					}
-				}
-
 				if (!pAmbush || ambushValue * 100 < plan.InitialValue * 35)
 				{
-					endBait(false, "ambush beaten");
+					endBait(false);
 				}
 				else if (Unsorted::CurrentFrame >= plan.Deadline)
 				{
-					endBait(ambushPaid(), "out of time");
+					endBait(ambushPaid());
 				}
 				else if (plan.AuxBaseline == 0)
 				{
@@ -8774,14 +8516,13 @@ namespace
 
 					if (!pBait || !lureStands)
 					{
-						endBait(false, pBait ? "lure building gone" : "bait lost");
+						endBait(false);
 					}
 					else if (inPlace * 2 >= ambushAlive || Unsorted::CurrentFrame - plan.StartFrame >= BaitSetFrames)
 					{
 						plan.AuxBaseline = 1;
 						plan.ArrivedFrame = Unsorted::CurrentFrame;
 						plan.LureHealth = static_cast<int>(pBait->GetHealthPercentage() * 100);
-						trace.Lure = Unsorted::CurrentFrame - plan.StartFrame;
 					}
 					else
 					{
@@ -8800,8 +8541,6 @@ namespace
 					{
 						plan.AuxBaseline = 2;
 						plan.ArrivedFrame = Unsorted::CurrentFrame;
-						trace.Turn = Unsorted::CurrentFrame - plan.StartFrame;
-						trace.TurnWhy = !pBait ? "bait lost" : hurt ? "hit" : answered ? "enemy near" : "building gone";
 					}
 					else
 					{
@@ -8825,7 +8564,7 @@ namespace
 							: Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitApproachFrames)
 						{
 							// It fired and nobody came out, or it never got within range.
-							endBait(false, plan.Arrived ? "nobody answered the fire" : "bait never in range");
+							endBait(false);
 							macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::BaitAmbush)] = Unsorted::CurrentFrame + BaitRetryFrames;
 						}
 					}
@@ -8851,17 +8590,14 @@ namespace
 					// back behind the ambush and lasts BaitChaseWaitFrames.
 					if (!baitBack)
 						plan.ArrivedFrame = Unsorted::CurrentFrame;
-					else if (trace.Back < 0)
-						trace.Back = Unsorted::CurrentFrame - plan.StartFrame;
 
 					if (enemyAtAmbush >= BaitThreatValue)
 					{
 						plan.AuxBaseline = 3;
-						trace.Sprung = Unsorted::CurrentFrame - plan.StartFrame;
 					}
 					else if (Unsorted::CurrentFrame - plan.ArrivedFrame >= BaitChaseWaitFrames)
 					{
-						endBait(ambushPaid(), "nobody followed the bait");
+						endBait(ambushPaid());
 						macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::BaitAmbush)] = Unsorted::CurrentFrame + BaitRetryFrames;
 					}
 				}
@@ -8871,7 +8607,7 @@ namespace
 					const CellStruct enemyCenter = seenEnemyCentroidNear(plan.StagingCell, BaitFightCells, 150);
 
 					if (enemyCenter == CellStruct::Empty)
-						endBait(ambushPaid(), "fight over");
+						endBait(ambushPaid());
 					else
 						attackMoveGroup(plan.Members, MapClass::Instance.TryGetCellAt(enemyCenter));
 				}
@@ -8960,7 +8696,6 @@ namespace
 					if (planOf(NeuralPlanId::BaitAmbush).Active)
 					{
 						planOf(NeuralPlanId::BaitAmbush).AuxBaseline = 0;
-						trace = BaitTrace {};
 					}
 				}
 			}
@@ -9452,15 +9187,6 @@ namespace
 				}
 				else
 				{
-					// TEMP diagnostic: 48 of 93 plans ran out of time with four fifths of the fleet, the
-					// ships on Guard 50 to 200 cells from the target (2026-11-14). What each ship is
-					// doing every 1500 frames of its plan. AuxPeak = reports written.
-					static int navalDiagLines = 0;
-					const bool navalDiag = Unsorted::CurrentFrame - plan.StartFrame >= 1500 * (plan.AuxPeak + 1) && navalDiagLines < 60;
-
-					if (navalDiag)
-						plan.AuxPeak++;
-
 					// Each shelling ship goes to its own firing cell (plan.Cells, in the order of the members).
 					size_t shellingIndex = 0;
 					int healthyShelling = 0;
@@ -9508,25 +9234,6 @@ namespace
 						if (shells && pShip->GetHealthPercentage() >= 0.4)
 							healthyShelling++;
 
-						if (navalDiag)
-						{
-							auto const pShipType = pShip->GetTechnoType();
-							const CellStruct at = pShip->GetMapCoords();
-							auto const pGoing = abstract_cast<CellClass*>(pShip->Destination);
-							auto const pReach = NearestReachableNavalCell(pShip, plan.StagingCell);
-							navalDiagLines++;
-							Debug::Log("[NeuralAI] House %d navalStrike ship DIAG frame %d (plan frame %d): %s zone type %d at (%d,%d) zone %d, firing "
-								"cell (%d,%d) zone %d at %d cells, mission %d, target %d (the plan's %d), destination (%d,%d), reachable cell (%d,%d), "
-								"hp %d, range %d.\n", houseIdx, Unsorted::CurrentFrame, Unsorted::CurrentFrame - plan.StartFrame, pShipType->ID,
-								static_cast<int>(pShipType->MovementZone), at.X, at.Y, ObjectZone(pShip, pShipType->MovementZone),
-								plan.StagingCell.X, plan.StagingCell.Y,
-								MapClass::Instance.GetMovementZoneType(plan.StagingCell, pShipType->MovementZone, false),
-								static_cast<int>(at.DistanceFrom(plan.StagingCell)), static_cast<int>(pShip->CurrentMission),
-								pShip->Target ? 1 : 0, pShip->Target == pTarget ? 1 : 0, pGoing ? pGoing->MapCoords.X : -1,
-								pGoing ? pGoing->MapCoords.Y : -1, pReach ? pReach->MapCoords.X : -1, pReach ? pReach->MapCoords.Y : -1,
-								static_cast<int>(pShip->GetHealthPercentage() * 100), GroundRangeOf(pShipType) / Unsorted::LeptonsPerCell);
-						}
-
 						if (pShip->GetHealthPercentage() < 0.4)
 						{
 							if (pNavalYard)
@@ -9548,34 +9255,11 @@ namespace
 						}
 						else if (pShip->Target == nullptr)
 						{
-							// TEMP trace: a ship far from the firing cell, as this tick finds it and as the move
-							// order leaves it (they are found on Guard with no destination at every report).
-							static int navalOrderLines = 0;
-							const bool traceOrder = distToFiring >= 25.0 && navalOrderLines < 120 && pShip->UniqueID % 3 == 0;
-							const int missionBefore = static_cast<int>(pShip->CurrentMission);
-							const int ageBefore = Unsorted::CurrentFrame - pShip->CurrentMissionStartTime;
-							auto const pGoingBefore = abstract_cast<CellClass*>(pShip->Destination);
-							const CellStruct goingBefore = pGoingBefore ? pGoingBefore->MapCoords : CellStruct::Empty;
-
 							// Escorts screen around the first firing position (they engage on their own).
-							const bool issued = IssueMoveOrder(pShip, pOwnCell ? pOwnCell : pFiring, siege ? 2.0 : 4.0);
+							IssueMoveOrder(pShip, pOwnCell ? pOwnCell : pFiring, siege ? 2.0 : 4.0);
 
 							if (distToFiring >= 25.0)
 								WatchMove(pShip);
-
-							if (traceOrder)
-							{
-								navalOrderLines++;
-								auto const pGoingAfter = abstract_cast<CellClass*>(pShip->Destination);
-								Debug::Log("[NeuralAI] House %d navalStrike order DIAG frame %d: %s %u at (%d,%d) %d cells from the firing cell, found on mission "
-									"%d %d frames old with destination (%d,%d), moving %d; order issued %d, now mission %d queued %d destination (%d,%d), "
-									"submerged %d, held still %d.\n", houseIdx, Unsorted::CurrentFrame, pShip->GetTechnoType()->ID, pShip->UniqueID,
-									pShip->GetMapCoords().X, pShip->GetMapCoords().Y, static_cast<int>(distToFiring), missionBefore, ageBefore, goingBefore.X,
-									goingBefore.Y, (pShip->Locomotor && pShip->Locomotor->Is_Moving()) ? 1 : 0, issued ? 1 : 0,
-									static_cast<int>(pShip->CurrentMission), static_cast<int>(pShip->QueuedMission),
-									pGoingAfter ? pGoingAfter->MapCoords.X : -1, pGoingAfter ? pGoingAfter->MapCoords.Y : -1,
-									pShip->CloakState != CloakState::Uncloaked ? 1 : 0, IsFootHeldStill(pHouse, pShip, 300) ? 1 : 0);
-							}
 						}
 					}
 
@@ -11314,23 +10998,6 @@ namespace
 					if (guns >= 2 && (aroundGroup * 100 > strength * PlanOutgunnedRatioPercent
 						|| groupValueOf(group) * 100 < onWay * PlanStrikeAdvantagePercent))
 					{
-						// TEMP diagnostic: the batteries held back by the units around them (20 per match).
-						static int siegeHoldSerial = -1;
-						static int siegeHoldCount = 0;
-
-						if (siegeHoldSerial != NeuralMatchSerial)
-						{
-							siegeHoldSerial = NeuralMatchSerial;
-							siegeHoldCount = 0;
-						}
-
-						if (siegeHoldCount++ < 20)
-						{
-							Debug::Log("[NeuralAI] House %d plan siegeBattery not started: enemy %d seen around the group at (%d,%d) against %d, %d on its way to (%d,%d) against %d, frame %d.\n",
-								houseIdx, aroundGroup, from.X, from.Y, strength, onWay, pStage->MapCoords.X, pStage->MapCoords.Y,
-								groupValueOf(group), Unsorted::CurrentFrame);
-						}
-
 						macro.PlanNextAttemptFrame[static_cast<size_t>(NeuralPlanId::SiegeBattery)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
 					}
 					else if (guns >= 2)

@@ -546,7 +546,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// UnitClass::TryToDeploy (0x7393DA) strictly aborts if this->Destination !=
 		// nullptr!
 		const bool hadDest = (pDeployerUnit->Destination != nullptr);
-		NeuralDeployOrderFrame[pDeployerUnit->UniqueID] = Unsorted::CurrentFrame;
 		pDeployerUnit->SetDestination(nullptr, true);
 		pDeployerUnit->ClearNavigationList();
 		pDeployerUnit->SetTarget(nullptr);
