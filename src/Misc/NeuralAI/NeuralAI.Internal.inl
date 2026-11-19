@@ -2376,58 +2376,99 @@ namespace
 		return heals;
 	}
 
-	// A vehicle that only repairs now (Repairer*): every weapon it holds does negative damage, a repair
-	// vehicle (TSREPAIR) or an IFV with an engineer aboard (FV). Read from the unit: an IFV's weapon is its
-	// passenger's (TechnoExt::GetCurrentWeapon). NeverUse weapons never fire and do not count.
-	bool IsRepairerUnit(UnitClass* pUnit)
+	// What a weapon does to the base armors (Repairer*), by its effective damage, Damage x Verses: it
+	// repairs vehicles (light, medium, heavy) or buildings (wood, steel, concrete) when that is negative
+	// and its warhead affects allies, and it hurts enemies when it is positive for one armor and the
+	// warhead affects enemies. The sign of Damage alone missed the C&C Reloaded repair weapons that do
+	// positive damage through negative Verses: the Repair Disk's DiskHeal (MDISK, 100 with -10% to
+	// -20%) and CABAL's Mechanic's SuperRepairGun (ROBOTENGINEER2, 10 with -100% to -15%). NeverUse
+	// weapons (target scanners) never fire and do nothing.
+	constexpr int RepairsVehicles = 1;
+	constexpr int RepairsBuildings = 2;
+	constexpr int HurtsEnemies = 4;
+
+	int WeaponRepairAbilities(const WeaponTypeClass* pWeapon)
 	{
-		if (!pUnit || !pUnit->Type)
-			return false;
+		if (!pWeapon || pWeapon->NeverUse || !pWeapon->Warhead || pWeapon->Damage == 0)
+			return 0;
 
-		bool repairs = false;
+		auto const pWH = pWeapon->Warhead;
+		auto const pWHExt = WarheadTypeExt::TryFetch(pWH);
+		const bool affectsEnemies = !pWHExt || pWHExt->AffectsEnemies.Get();
+		int abilities = 0;
 
-		for (int i = 0; i < 2; ++i)
+		for (int armor = 0; armor < 11; ++armor)
 		{
-			auto const pWeapon = TechnoExt::GetCurrentWeapon(pUnit, pUnit->Type, i == 1);
+			const double effect = pWeapon->Damage * GeneralUtils::GetWarheadVersusArmor(pWH, static_cast<Armor>(armor));
 
-			if (!pWeapon || pWeapon->NeverUse)
-				continue;
-
-			if (pWeapon->Damage > 0)
-				return false;
-
-			if (pWeapon->Damage < 0)
-				repairs = true;
+			if (effect < 0.0 && pWH->AffectsAllies)
+				abilities |= armor >= 6 && armor <= 8 ? RepairsBuildings : (armor >= 3 && armor <= 5 ? RepairsVehicles : 0);
+			else if (effect > 0.0 && affectsEnemies)
+				abilities |= HurtsEnemies;
 		}
 
-		return repairs;
+		return abilities;
 	}
 
-	// A vehicle type built as a repairer (Repairer*): no IFV (its weapon comes from its passenger), every
-	// weapon of the type does negative damage.
+	// The same for every weapon slot of a type, normal and elite (WeaponCount: MultiWeapon, IFV modes),
+	// once per type and match.
+	int RepairAbilitiesOf(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return 0;
+
+		static int cacheSerial = -1;
+		// Key access only.
+		static std::unordered_map<const TechnoTypeClass*, int> cache;
+
+		if (cacheSerial != NeuralMatchSerial)
+		{
+			cacheSerial = NeuralMatchSerial;
+			cache.clear();
+		}
+
+		if (auto const it = cache.find(pType); it != cache.end())
+			return it->second;
+
+		int abilities = 0;
+		const int weapons = std::clamp(std::max(2, pType->WeaponCount), 0, TechnoTypeClass::MaxWeapons);
+
+		for (int i = 0; i < weapons; ++i)
+		{
+			for (const bool elite : { false, true })
+				abilities |= WeaponRepairAbilities(pType->GetWeapon(static_cast<size_t>(i), elite).WeaponType);
+		}
+
+		cache.emplace(pType, abilities);
+
+		return abilities;
+	}
+
+	// A vehicle type built as a repairer (Repairer*): it repairs and hurts no enemy (TSREPAIR, MDISK);
+	// no IFV, whose weapon comes from its passenger.
 	bool IsRepairerUnitType(UnitTypeClass* pType)
 	{
 		if (!pType || pType->Gunner)
 			return false;
 
-		bool repairs = false;
+		const int abilities = RepairAbilitiesOf(pType);
 
-		for (int i = 0; i < 2; ++i)
-		{
-			auto const pWS = pType->GetWeapon(i);
-			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+		return (abilities & (RepairsVehicles | RepairsBuildings)) != 0 && (abilities & HurtsEnemies) == 0;
+	}
 
-			if (!pWeapon || pWeapon->NeverUse)
-				continue;
+	// A vehicle that only repairs now (Repairer*): a repairer type, or an IFV whose current weapon (its
+	// passenger's, TechnoExt::GetCurrentWeapon) repairs and hurts no enemy (an FV with an engineer).
+	bool IsRepairerUnit(UnitClass* pUnit)
+	{
+		if (!pUnit || !pUnit->Type)
+			return false;
 
-			if (pWeapon->Damage > 0)
-				return false;
+		if (!pUnit->Type->Gunner)
+			return IsRepairerUnitType(pUnit->Type);
 
-			if (pWeapon->Damage < 0)
-				repairs = true;
-		}
+		const int abilities = WeaponRepairAbilities(TechnoExt::GetCurrentWeapon(pUnit, pUnit->Type));
 
-		return repairs;
+		return (abilities & (RepairsVehicles | RepairsBuildings)) != 0 && (abilities & HurtsEnemies) == 0;
 	}
 
 	// A specialist of this type has a job inside this building (it enters it): engineers capture,
