@@ -726,6 +726,18 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 			NoteMainTankDeath(pVictimOwner, pTank, pKiller);
 	}
 
+	// TEMP diagnostic (air wings): the air force aircraft we lose and the enemy buildings our
+	// aircraft destroy.
+	if (pVictimOwner && pVictim->WhatAmI() == AbstractType::Aircraft && NeuralAI::IsEnabledForHouse(pVictimOwner))
+		NoteAirForceDeath(pVictimOwner, static_cast<AircraftClass*>(pVictim), pKiller);
+
+	if (pKiller && pVictimOwner && pKiller->Owner && pKiller->WhatAmI() == AbstractType::Aircraft
+		&& pVictim->WhatAmI() == AbstractType::Building && pKiller->Owner != pVictimOwner && !pKiller->Owner->IsAlliedWith(pVictimOwner)
+		&& NeuralAI::IsEnabledForHouse(pKiller->Owner))
+	{
+		NoteAirForceKill(pKiller->Owner, static_cast<AircraftClass*>(pKiller), static_cast<BuildingClass*>(pVictim));
+	}
+
 	// TEMP diagnostic (NoteOrderCaller): the record of a dead unit goes with it.
 	if (pVictimOwner && pVictimOwner->ArrayIndex >= 0 && pVictimOwner->ArrayIndex < 32)
 		LastOrderCaller[pVictimOwner->ArrayIndex].erase(pVictim->UniqueID);
