@@ -581,6 +581,65 @@ namespace
 		return (ownZone >= 0 && ownCount >= bestCount) ? ownZone : bestZone;
 	}
 
+	// The first ground zone (IsGroundZone) other than notZone of a land cell under a transport or
+	// next to it (its own cell first, then the 8 around in a fixed order; cells with a building do
+	// not count), or -1. On a narrow strip the cells of no ground around outnumber the strip
+	// (TransportLandZone answers zone 1), so a transport beached on the strip it sailed for never saw
+	// its goal (user approved, 2026-11-19, match #11475: a landing craft with an MCV stood there 50000
+	// frames).
+	int TransportTouchedGroundZone(const CellStruct& cell, int notZone)
+	{
+		static constexpr int Offsets[9][2] = { { 0, 0 }, { -1, -1 }, { 0, -1 }, { 1, -1 }, { -1, 0 }, { 1, 0 }, { -1, 1 }, { 0, 1 }, { 1, 1 } };
+
+		for (auto const& offset : Offsets)
+		{
+			const CellStruct c { static_cast<short>(cell.X + offset[0]), static_cast<short>(cell.Y + offset[1]) };
+			auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+			if (!pCell || pCell->LandType == LandType::Water || pCell->GetBuilding())
+				continue;
+
+			const int zone = MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false);
+
+			if (IsGroundZone(zone) && zone != notZone)
+				return zone;
+		}
+
+		return -1;
+	}
+
+	// A building that stands on water: a naval one, or one whose foundation needs water (SpeedType
+	// Float), as the base placement search reads it. Its deployer takes water sites only.
+	bool IsWaterBuildingType(const BuildingTypeClass* pType)
+	{
+		return pType && (pType->Naval || pType->SpeedType == SpeedType::Float);
+	}
+
+	// Does the land cell under a transport, or one of the 8 around it, belong to this ground zone
+	// (see TransportTouchedGroundZone)? Arrival by touch.
+	bool TransportTouchesLandZone(const CellStruct& cell, int zone)
+	{
+		if (!IsGroundZone(zone))
+			return false;
+
+		for (int dy = -1; dy <= 1; ++dy)
+		{
+			for (int dx = -1; dx <= 1; ++dx)
+			{
+				const CellStruct c { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
+				auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
+
+				if (pCell && pCell->LandType != LandType::Water && !pCell->GetBuilding()
+					&& MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) == zone)
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
 	bool AreZonesConnected(CellStruct fromCell, CellStruct toCell, MovementZone movementZone)
 	{
 		if (!MapClass::Instance.CoordinatesLegal(fromCell) || !MapClass::Instance.CoordinatesLegal(toCell))
@@ -886,8 +945,6 @@ namespace
 	// one closed in by the base (HasFactoryRoadOut) is taken only when none has a road out.
 	void UpdatePrimaryFactories(HouseClass* pHouse, CellStruct targetCoords)
 	{
-		const NeuralSlowStep slowStep { "UpdatePrimaryFactories" };
-
 		if (!pHouse || targetCoords == CellStruct::Empty)
 			return;
 

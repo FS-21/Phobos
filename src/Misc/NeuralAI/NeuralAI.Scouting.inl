@@ -863,6 +863,66 @@ namespace
 		return pHouse && IsScoutTripUnit(GetScoutState(pHouse), uid);
 	}
 
+	// Where a warship on a naval sweep looks (user approved, 2026-11-19; the micro's naval sweep): a place of a
+	// NavalSweepStepCells grid over the playable water of its own sea, out of known enemy defense reach (2 cells more),
+	// at least half a step from the ship and a whole step from the places other sweeps look at (taken). A place never
+	// explored by the house first, then the one a look teaches most about (ScoutInfoGain: ground unseen longest), the
+	// nearest to the ship among equals, the first of the grid after that. Empty when no place teaches anything.
+	CellStruct PickNavalSweepCell(HouseClass* pHouse, FootClass* pShip, const std::vector<CellStruct>& taken)
+	{
+		auto const pType = pShip ? pShip->GetTechnoType() : nullptr;
+
+		if (!pHouse || !pType)
+			return CellStruct::Empty;
+
+		const MovementZone movementZone = pType->MovementZone;
+		const int sea = ObjectZone(pShip, movementZone);
+
+		if (sea < 0)
+			return CellStruct::Empty;
+
+		auto const& state = GetScoutState(pHouse);
+		const bool fog = IsFogOfWarMatch();
+		const CellStruct from = pShip->GetMapCoords();
+		CellStruct best = CellStruct::Empty;
+		int bestScore = INT_MIN;
+
+		for (int y = NavalSweepStepCells / 2; y < VisionMapSide; y += NavalSweepStepCells)
+		{
+			for (int x = NavalSweepStepCells / 2; x < VisionMapSide; x += NavalSweepStepCells)
+			{
+				const CellStruct cell { static_cast<short>(x), static_cast<short>(y) };
+
+				if (!IsScoutableCell(cell) || MapClass::Instance.GetMovementZoneType(cell, movementZone, false) != sea
+					|| cell.DistanceFrom(from) < NavalSweepStepCells / 2)
+				{
+					continue;
+				}
+
+				auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+				if (!pCell || std::any_of(taken.begin(), taken.end(), [&cell](const CellStruct& other) { return other.DistanceFrom(cell) < NavalSweepStepCells; }))
+					continue;
+
+				const int gain = ScoutInfoGain(pHouse, state, cell, ScoutLookRadius, fog);
+
+				if (gain < 20)
+					continue;
+
+				const int score = (IsCellVisibleToAI(pHouse, pCell) ? 0 : 1000) + gain * 10 - static_cast<int>(cell.DistanceFrom(from));
+
+				// The defense reach test last, for a place that would be the best one only.
+				if (score > bestScore && !IsCellInKnownEnemyDefenseReach(pHouse, cell, 2))
+				{
+					bestScore = score;
+					best = cell;
+				}
+			}
+		}
+
+		return best;
+	}
+
 	NeuralScoutUnit MakeScoutUnit(FootClass* pFoot, bool air)
 	{
 		auto const pType = pFoot->GetTechnoType();

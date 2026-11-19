@@ -69,8 +69,6 @@ namespace
 	// advantage is the one of SampleExpertGains, in credits.
 	void SampleExpertCredit()
 	{
-		const NeuralSlowStep slowStep { "SampleExpertCredit" };
-
 		if (Unsorted::CurrentFrame == CreditLastFrame)
 			return;
 

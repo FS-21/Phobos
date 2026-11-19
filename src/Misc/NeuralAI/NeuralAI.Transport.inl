@@ -147,8 +147,10 @@ namespace
 	// buildableNow: only transports it owns or can build now count, not those of its side that it
 	// may build once it has the prerequisites (an operation waits for a transport that comes now),
 	// and not the sling of a unit carryall (an operation seats a unit in its bay only, GetOpCarrier).
-	bool CanHouseFerryTypeAcrossWater(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct* pFrom = nullptr,
-		const CellStruct* pTo = nullptr, bool buildableNow = false)
+	// TEMP (rule consolidation, case 4): the answer that decides while CanHouseCarry is checked against
+	// it (CanHouseFerryTypeAcrossWater below).
+	bool CanHouseFerryTypeAcrossWaterOld(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct* pFrom,
+		const CellStruct* pTo, bool buildableNow)
 	{
 		if (!pHouse)
 			return false;
@@ -313,8 +315,12 @@ namespace
 	// (CanTransportTypeComeTo). The back door asks it for each member of its team, and an operation that
 	// no transport takes asks it for its staging cell (OpNoReachFrames). The sling of a unit carryall
 	// does not count: an operation seats a unit in its bay only (GetOpCarrier), and one that waited for
-	// a vehicle it could not seat held it OpNoTransportFrames.
-	bool CanHouseCarryNow(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct& from, const CellStruct& to)
+	// a vehicle it could not seat held it OpNoTransportFrames. An owned transport with cargo that no
+	// operation holds (the old ferry loader's) does not count either (user approved, 2026-11-19, P3:
+	// two operations waited OpNoTransportFrames for the one loaded transport of their house).
+	// TEMP (rule consolidation, case 4): the answer that decides while CanHouseCarry is checked against
+	// it (CanHouseCarryNow below).
+	bool CanHouseCarryNowOld(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct& from, const CellStruct& to)
 	{
 		if (!pHouse || !pFootType)
 			return false;
@@ -332,8 +338,11 @@ namespace
 
 		for (auto const pUnit : UnitClass::Array)
 		{
-			if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
+			if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type
+				|| (pUnit->Passengers.NumPassengers > 0 && !IsInTransportOp(pHouse, pUnit->UniqueID)))
+			{
 				continue;
+			}
 
 			auto const pUnitType = pUnit->Type;
 
@@ -346,8 +355,11 @@ namespace
 
 		for (auto const pAir : AircraftClass::Array)
 		{
-			if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type)
+			if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type
+				|| (pAir->Passengers.NumPassengers > 0 && !IsInTransportOp(pHouse, pAir->UniqueID)))
+			{
 				continue;
+			}
 
 			auto const pAirType = pAir->Type;
 
@@ -383,6 +395,240 @@ namespace
 		}
 
 		return false;
+	}
+
+	// One question for "can the house carry this across" (rule consolidation, case 4): the cargo type
+	// (null: anything of size 1 that rides inside a transport), the two cells (with CarryLink), who may
+	// answer and what a transport must do. Owned units, owned aircraft, unit types, then aircraft types,
+	// each in array order; the first yes answers. It only reads.
+	// Sources: CarryOwned, the house's own (any job, any health); CarryBuildableNow, a type with a
+	// factory of its kind now and its prerequisites met; CarrySide, a unit type of the house's side with
+	// a factory of its kind or a construction yard.
+	// Rules: CarrySlingUnit, a unit carryall that lifts the cargo counts; CarrySlingAir, a carryall
+	// aircraft that lifts it; CarryAirHolds, an aircraft that seats it; CarryLink, a unit hold makes the
+	// crossing (CanTransportTypeLink); CarryOwnedComes, an owned unit hold links where it stands to From;
+	// CarryBuiltComes, a buildable unit type comes to From (CanTransportTypeComeTo); CarryAloneIsYes, a
+	// cargo that crosses water on its own answers yes; CarryTechCap10, TechLevel 10 at most;
+	// CarryOwnedNoStrayCargo, an owned transport with cargo counts only while an operation holds it.
+	enum CarrySource : unsigned
+	{
+		CarryOwned = 1u << 0,
+		CarryBuildableNow = 1u << 1,
+		CarrySide = 1u << 2
+	};
+
+	enum CarryRule : unsigned
+	{
+		CarrySlingUnit = 1u << 0,
+		CarrySlingAir = 1u << 1,
+		CarryAirHolds = 1u << 2,
+		CarryLink = 1u << 3,
+		CarryOwnedComes = 1u << 4,
+		CarryBuiltComes = 1u << 5,
+		CarryAloneIsYes = 1u << 6,
+		CarryTechCap10 = 1u << 7,
+		CarryOwnedNoStrayCargo = 1u << 8
+	};
+
+	struct CarryQuery
+	{
+		const TechnoTypeClass* Cargo { nullptr };
+		CellStruct From { CellStruct::Empty };
+		CellStruct To { CellStruct::Empty };
+		unsigned Sources { 0 };
+		unsigned Rules { 0 };
+	};
+
+	bool CanHouseCarry(HouseClass* pHouse, const CarryQuery& query)
+	{
+		if (!pHouse)
+			return false;
+
+		auto const pCargo = query.Cargo;
+		const unsigned sources = query.Sources;
+		const unsigned rules = query.Rules;
+
+		if ((rules & CarryAloneIsYes) && pCargo && (pCargo->MovementZone == MovementZone::Amphibious
+			|| pCargo->MovementZone == MovementZone::AmphibiousDestroyer || pCargo->MovementZone == MovementZone::AmphibiousCrusher
+			|| pCargo->MovementZone == MovementZone::Fly || pCargo->MovementZone == MovementZone::Subterrannean
+			|| pCargo->MovementZone == MovementZone::Water || pCargo->SpeedType == SpeedType::Hover
+			|| pCargo->SpeedType == SpeedType::Winged || pCargo->JumpJet || pCargo->Teleporter || pCargo->Naval))
+		{
+			return true;
+		}
+
+		const int passSize = pCargo ? std::max(1, static_cast<int>(pCargo->Size)) : 1;
+		auto const pCargoUnit = pCargo ? abstract_cast<const UnitTypeClass*>(pCargo) : nullptr;
+		auto const pCargoExt = pCargo ? TechnoTypeExt::Fetch(pCargo) : nullptr;
+		const bool liftable = pCargoUnit && !pCargoUnit->Organic && !pCargoUnit->Naval && !pCargoUnit->NonVehicle
+			&& (!pCargoExt || pCargoExt->Carryall_Allowed.Get());
+
+		auto const seats = [passSize](const TechnoTypeClass* pType)
+		{
+			return static_cast<int>(pType->SizeLimit) >= passSize && pType->Passengers >= passSize;
+		};
+
+		auto const holds = [&](const TechnoTypeClass* pType)
+		{
+			return IsAmphibiousOrAirTransport(pType) && seats(pType)
+				&& (!(rules & CarryLink) || CanTransportTypeLink(pType, query.From, query.To));
+		};
+
+		auto const unitSlings = [&](const TechnoTypeClass* pType)
+		{
+			auto const pTypeExt = TechnoTypeExt::Fetch(pType);
+
+			return (rules & CarrySlingUnit) && pTypeExt && pTypeExt->Carryall && liftable && CarryallTypeCanLiftType(pType, pCargo);
+		};
+
+		auto const airAnswers = [&](const AircraftTypeClass* pType)
+		{
+			return pType->Carryall ? ((rules & CarrySlingAir) && liftable && CarryallTypeCanLiftType(pType, pCargo))
+				: ((rules & CarryAirHolds) && seats(pType));
+		};
+
+		auto const levelAllowed = [&](const TechnoTypeClass* pType)
+		{
+			return pType->TechLevel >= 0 && (!(rules & CarryTechCap10) || pType->TechLevel <= 10) && pType->TechLevel <= pHouse->TechLevel;
+		};
+
+		auto const strayCargo = [&](const FootClass* pFoot)
+		{
+			return (rules & CarryOwnedNoStrayCargo) && pFoot->Passengers.NumPassengers > 0 && !IsInTransportOp(pHouse, pFoot->UniqueID);
+		};
+
+		if (sources & CarryOwned)
+		{
+			for (auto const pUnit : UnitClass::Array)
+			{
+				if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type || strayCargo(pUnit))
+					continue;
+
+				auto const pType = pUnit->Type;
+
+				if (holds(pType) && (!(rules & CarryOwnedComes) || CanTransportTypeLink(pType, pUnit->GetMapCoords(), query.From)))
+					return true;
+
+				if (unitSlings(pType))
+					return true;
+			}
+
+			for (auto const pAir : AircraftClass::Array)
+			{
+				if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type || strayCargo(pAir))
+					continue;
+
+				if (airAnswers(pAir->Type))
+					return true;
+			}
+		}
+
+		const unsigned int sideBit = (pHouse->Type && pHouse->Type->ArrayIndex >= 0 && pHouse->Type->ArrayIndex < 32)
+			? (1u << pHouse->Type->ArrayIndex) : 0u;
+
+		if (sources & (CarryBuildableNow | CarrySide))
+		{
+			for (auto const pType : UnitTypeClass::Array)
+			{
+				if (!pType || !levelAllowed(pType))
+					continue;
+
+				const bool carries = holds(pType) || unitSlings(pType);
+
+				if (!carries)
+					continue;
+
+				const bool hasFactoryNow = pType->Naval ? (pHouse->NumShipyards > 0) : (pHouse->NumWarFactories > 0);
+
+				if ((sources & CarryBuildableNow) && hasFactoryNow && HouseExt::PrerequisitesMet(pHouse, pType)
+					&& (!(rules & CarryBuiltComes) || CanTransportTypeComeTo(pHouse, pType, query.From)))
+				{
+					return true;
+				}
+
+				if ((sources & CarrySide) && sideBit != 0u && pType->InOwners(sideBit) && (hasFactoryNow || pHouse->NumConYards > 0))
+					return true;
+			}
+		}
+
+		if ((sources & CarryBuildableNow) && (pHouse->NumAirpads > 0 || pHouse->NumWarFactories > 0))
+		{
+			for (auto const pType : AircraftTypeClass::Array)
+			{
+				if (pType && levelAllowed(pType) && airAnswers(pType) && HouseExt::PrerequisitesMet(pHouse, pType))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	// TEMP diagnostic (rule consolidation, case 4): an old answer that CanHouseCarry does not give,
+	// CarryShadowLogLines a match. With none over a desync test and some matches, the old functions
+	// become wrappers of CanHouseCarry.
+	void CheckCarryShadow(HouseClass* pHouse, const char* name, const CarryQuery& query, bool answer)
+	{
+		if (CanHouseCarry(pHouse, query) == answer)
+			return;
+
+		static int shadowLogSerial = -1;
+		static int shadowLogCount = 0;
+
+		if (shadowLogSerial != NeuralMatchSerial)
+		{
+			shadowLogSerial = NeuralMatchSerial;
+			shadowLogCount = 0;
+		}
+
+		if (shadowLogCount++ < CarryShadowLogLines)
+		{
+			Debug::Log("[NeuralAI] House %d carry shadow: %s says %d and CanHouseCarry %d, cargo %s, from (%d,%d) to (%d,%d), sources %u, "
+				"rules %u, frame %d.\n", pHouse ? pHouse->ArrayIndex : -1, name, answer ? 1 : 0, answer ? 0 : 1,
+				query.Cargo ? query.Cargo->ID : "none", query.From.X, query.From.Y, query.To.X, query.To.Y, query.Sources, query.Rules,
+				Unsorted::CurrentFrame);
+		}
+	}
+
+	// See CanHouseFerryTypeAcrossWaterOld, which decides (TEMP: CanHouseCarry is checked against it).
+	bool CanHouseFerryTypeAcrossWater(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct* pFrom = nullptr,
+		const CellStruct* pTo = nullptr, bool buildableNow = false)
+	{
+		const bool answer = CanHouseFerryTypeAcrossWaterOld(pHouse, pFootType, pFrom, pTo, buildableNow);
+
+		if (pHouse)
+		{
+			const bool cells = pFrom && pTo;
+			CarryQuery query {};
+			query.Cargo = pFootType;
+			query.From = cells ? *pFrom : CellStruct::Empty;
+			query.To = cells ? *pTo : CellStruct::Empty;
+			query.Sources = CarryOwned | CarryBuildableNow | (buildableNow ? 0u : CarrySide);
+			query.Rules = CarrySlingAir | CarryAirHolds | CarryTechCap10 | CarryAloneIsYes | (buildableNow ? 0u : CarrySlingUnit)
+				| (cells ? CarryLink : 0u);
+			CheckCarryShadow(pHouse, "CanHouseFerryTypeAcrossWater", query, answer);
+		}
+
+		return answer;
+	}
+
+	// See CanHouseCarryNowOld, which decides (TEMP: CanHouseCarry is checked against it).
+	bool CanHouseCarryNow(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct& from, const CellStruct& to)
+	{
+		const bool answer = CanHouseCarryNowOld(pHouse, pFootType, from, to);
+
+		if (pHouse && pFootType)
+		{
+			CarryQuery query {};
+			query.Cargo = pFootType;
+			query.From = from;
+			query.To = to;
+			query.Sources = CarryOwned | CarryBuildableNow;
+			query.Rules = CarrySlingAir | CarryAirHolds | CarryTechCap10 | CarryLink | CarryOwnedComes | CarryBuiltComes
+				| CarryOwnedNoStrayCargo;
+			CheckCarryShadow(pHouse, "CanHouseCarryNow", query, answer);
+		}
+
+		return answer;
 	}
 
 	// A crossing our units wait for and no transport the house owns makes: the passenger transport
@@ -672,6 +918,43 @@ namespace
 		return reach > 0 && IsNavalShoreWithin(target, pType->MovementZone, zone, reach);
 	}
 
+	// Does a water-bound unit get a target within the reach of the weapon it fires at it from some cell of its own sea?
+	// A target on its sea counts as reached (the unit goes to it), and so does any target for a unit that is not
+	// water-bound or stands on no known zone. Otherwise the weapon the engine picks for the target must be one it may
+	// fire at it, and its reach (WeaponReachAgainst for a building, a third of a cell short of the Range for anything
+	// else, NavalSpawnerReachCells for aircraft) must cover the nearest water of the sea (IsNavalShoreWithin).
+	bool IsNavalTargetInReach(FootClass* pFoot, AbstractClass* pTarget)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || !pTarget || !IsWaterBound(pType))
+			return true;
+
+		const int zone = ObjectZone(pFoot, pType->MovementZone);
+		const CellStruct target = CellClass::Coord2Cell(pTarget->GetCoords());
+
+		if (zone < 0 || MapClass::Instance.GetMovementZoneType(target, pType->MovementZone, false) == zone)
+			return true;
+
+		const int weaponIndex = pFoot->SelectWeapon(pTarget);
+		const FireError error = pFoot->GetFireError(pTarget, weaponIndex, true);
+
+		if (error == FireError::ILLEGAL || error == FireError::CANT || error == FireError::NONE)
+			return false;
+
+		auto const pSlot = pFoot->GetWeapon(weaponIndex);
+		auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+		if (!pWeapon)
+			return false;
+
+		auto const pBuilding = abstract_cast<BuildingClass*>(pTarget);
+		const int reach = pWeapon->Spawner ? NavalSpawnerReachCells * Unsorted::LeptonsPerCell
+			: (pBuilding ? WeaponReachAgainst(pWeapon, pBuilding->Type) : pWeapon->Range - Unsorted::LeptonsPerCell / 3);
+
+		return IsNavalShoreWithin(target, pType->MovementZone, zone, reach);
+	}
+
 	bool IsBridgeOrTubeCell(const CellClass* pCell);
 
 	// Units of ours sent to one cell queue for it: the engine only looks for a nearby cell for a unit
@@ -802,8 +1085,6 @@ namespace
 	// naval order then goes in hops the engine path finder can manage.
 	CellClass* NavalRouteHop(FootClass* pFoot, const CellStruct& target, int hop)
 	{
-		const NeuralSlowStep slowStep { "NavalRouteHop" };
-
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
 		if (!pType || (pType->MovementZone != MovementZone::Water && pType->MovementZone != MovementZone::WaterBeach))
@@ -1046,8 +1327,6 @@ namespace
 
 		if (search)
 		{
-			const NeuralSlowStep slowStep { pAvoidPassage ? "route search around a passage"
-				: (avoidResources ? "route search around resources" : "route search") };
 			constexpr int DirX[8] = { 1, 0, -1, 0, 1, -1, -1, 1 };
 			constexpr int DirY[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
 			// Per cell tables of one search instead of hash maps (a search of 12000 cells took 10 to 30 ms
@@ -1443,8 +1722,9 @@ namespace
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5,
 		const char* callerFile = __builtin_FILE(), int callerLine = __builtin_LINE())
 	{
-		// A unit of a transport operation takes its orders from the operation alone.
-		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive || IsHeldByTransportOp(pFoot))
+		// A unit of a transport operation takes its orders from the operation alone; a ship that waits outside a
+		// crowded narrow passage stays where it is.
+		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive || IsHeldByTransportOp(pFoot) || IsWaitingAtNavalPassage(pFoot))
 			return false;
 
 		// A unit already heading to a cell another unit of ours holds or heads to takes its own free

@@ -197,6 +197,8 @@ namespace
 		// Counter Squad: the enemy house and force category (EnemyForceCategory) it goes after.
 		int ForceOwner { -1 };
 		int ForceCategory { -1 };
+		// Naval Strike Group: a mass strike of short-range gun ships (NavalMassStrikeShips), all of which shell.
+		bool MassStrike { false };
 	};
 
 	struct NeuralStuckTrack
@@ -205,12 +207,34 @@ namespace
 		int SinceFrame { 0 };
 	};
 
+	// A ship of ours that waits outside a crowded narrow water passage (UpdateNavalPassageGate): the passage's
+	// centre, where it was bound, whether it was on an attack-move, and since when it waits.
+	struct NeuralPassageWait
+	{
+		CellStruct Passage { CellStruct::Empty };
+		CellStruct Goal { CellStruct::Empty };
+		bool AttackMove { false };
+		int Frame { 0 };
+	};
+
+	// The last target pick of an idle warship of ours (NavalPreyPickFrames): when, whether it found a target, and the
+	// UniqueID of the enemy unit it went for (0 none).
+	struct NeuralNavalPick
+	{
+		int Frame { 0 };
+		bool HadTarget { false };
+		DWORD PreyID { 0 };
+	};
+
 	// Where a wave sent a unit, the ground zone of that cell and when (KeptWaveGoal).
 	struct NeuralWaveGoal
 	{
 		CellStruct Cell { CellStruct::Empty };
 		int Zone { -1 };
 		int Frame { 0 };
+		// The nearest the unit came to the goal so far (cells, -1 not yet read) and when (IsOnWaveMarch).
+		double BestDistance { -1.0 };
+		int BestFrame { 0 };
 	};
 
 	// Aircraft attack watchdog (UpdateStuckUnits): where an aircraft on Mission::Attack stands and
@@ -721,13 +745,15 @@ namespace
 		int NearSince { -1 };
 	};
 
-	// An MCV whose yard was ordered to unfold (Micro): where and when it last unfolded, and how often
-	// it tried again on that spot after the engine refused the deploy.
+	// An MCV whose yard was ordered to unfold (Micro): where and when it last unfolded, how often it
+	// tried again on that spot after the engine refused the deploy, and since when it unfolds there
+	// (McvUnfoldSkipMostFrames).
 	struct NeuralMcvUnfold
 	{
 		CellStruct Cell { CellStruct::Empty };
 		int Frame { -1 };
 		int Tries { 0 };
+		int Since { -1 };
 	};
 
 	// Expansion MCV waiting for a ride to the island goal (Micro): since when it waits with no ride on
@@ -740,6 +766,29 @@ namespace
 		CellStruct LandField { CellStruct::Empty };
 		int LandFrame { -1 };
 		bool Released { false };
+	};
+
+	// A deployer of a building other than a yard (Micro): the site it keeps (DeployerSiteMostTries) and
+	// when it was picked, the sites it could not deploy at and when (DeployerFailedSiteFrames), the
+	// unpack orders given there and the frame of the last one, since when it stands on or next to the
+	// site; for the idle deployer watchdog the frame it was first and last seen packed, the ground zone
+	// it was last on, the spot it keeps to and since when, and whether the watchdog sent it to the
+	// main base (ToMainBase).
+	struct NeuralDeployerSite
+	{
+		CellStruct Site { CellStruct::Empty };
+		int PickFrame { -1 };
+		std::vector<CellStruct> FailedSites {};
+		std::vector<int> FailedFrames {};
+		int Tries { 0 };
+		int TryFrame { -1 };
+		int NearSince { -1 };
+		int FirstFrame { -1 };
+		int SeenFrame { -1 };
+		int Zone { -1 };
+		CellStruct StillCell { CellStruct::Empty };
+		int StillSince { -1 };
+		bool ToMainBase { false };
 	};
 
 	struct NeuralHouseMacroState
@@ -1066,6 +1115,18 @@ namespace
 		int ShipsWithoutTarget { 0 };
 		int ShipsWithoutTargetFloor { INT_MAX };
 		int ShipsWithoutTargetWindowStart { -1 };
+		// Naval hunt: the last frame the target pick of an idle warship of ours found something, the last pick of each
+		// ship (lookup only), the naval sweeps under way (ship -> the place it looks at and the frame it left), the seas
+		// with no place for a sweep ((movement zone, zone) -> no search before that frame), the ships that wait outside
+		// a jammed narrow water passage (NeuralPassageWait), the ships the gate let go on (ship -> frame) and the last
+		// frame the passages were checked.
+		int NavalTargetFrame { 0 };
+		std::unordered_map<DWORD, NeuralNavalPick> NavalPicks {};
+		std::map<DWORD, std::pair<CellStruct, int>> NavalSweeps {};
+		std::map<std::pair<int, int>, int> NavalSweepRetryUntil {};
+		std::map<DWORD, NeuralPassageWait> NavalPassageWaits {};
+		std::map<DWORD, int> NavalPassageReleased {};
+		int NavalPassageCheckFrame { -1 };
 		std::array<int, 4> BankWantedFactories {};
 		// AI ticks since the last governor sample at which each queue (BankQueue order) had a
 		// factory of its kind, and those at which one of them was producing.
@@ -1077,8 +1138,13 @@ namespace
 		// Islands (movement zone -> frame until) where an expansion deployer found no room for its
 		// building: the island search skips them until then.
 		std::map<int, int> NoRoomIslandUntil;
+		// The same for one building type ((type index, movement zone) -> frame until): a deployer found
+		// no room for it there, or no legal foundation near the island goal before it set out.
+		std::map<std::pair<int, int>, int> NoRoomTypeIslandUntil;
 		// Deployers (unit -> frame since) standing on a new island with no site for their building.
 		std::unordered_map<DWORD, int> DeployerNoSiteSince;
+		// Deployers of buildings other than yards (unit -> NeuralDeployerSite).
+		std::unordered_map<DWORD, NeuralDeployerSite> DeployerSites;
 		// Packed MCVs the idle watchdog follows (unit -> NeuralMcvIdle).
 		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
 		// Packed MCVs that were unfolding (unit -> NeuralMcvUnfold).
@@ -1704,8 +1770,17 @@ namespace
 			this->ShipsWithoutTarget = 0;
 			this->ShipsWithoutTargetFloor = INT_MAX;
 			this->ShipsWithoutTargetWindowStart = -1;
+			this->NavalTargetFrame = 0;
+			this->NavalPicks.clear();
+			this->NavalSweeps.clear();
+			this->NavalSweepRetryUntil.clear();
+			this->NavalPassageWaits.clear();
+			this->NavalPassageReleased.clear();
+			this->NavalPassageCheckFrame = -1;
 			this->NoRoomIslandUntil.clear();
+			this->NoRoomTypeIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
+			this->DeployerSites.clear();
 			this->McvIdle.clear();
 			this->McvUnfolds.clear();
 			this->IslandMcvWaits.clear();
@@ -1977,6 +2052,16 @@ namespace
 		int LastBoardFrame { -1 };
 		// Frame the stuck cargo watchdog had the cargo set down on its pickup shore (FerryStuckCargoFrames).
 		int SetDownFrame { -1 };
+		// Departed and stuck (FerryDepartedStuckFrames): the cell and passengers at the last progress
+		// of a departed loaded transport and its frame, the frame it was told to unload where it
+		// stands, and whether it gave its goal up and takes the cargo back (Homeward) to HomewardZone
+		// (LoadZone, or the main base's when LoadZone holds no yard of ours or has no room).
+		CellStruct StillCoords { CellStruct::Empty };
+		int StillFrame { -1 };
+		int StillPassengers { -1 };
+		int UnloadHereFrame { -1 };
+		bool Homeward { false };
+		int HomewardZone { -1 };
 	};
 
 	// The zone map's value for a cell with no zone at all (outside the zoned map), read as 65535.
@@ -2147,6 +2232,15 @@ namespace
 	constexpr int FerryStuckCargoFrames = 9000;
 	// How long that set-down keeps the transport unloading before the loader has it again.
 	constexpr int FerrySetDownFrames = 900;
+	// A transport that departed with cargo and has not moved more than one cell, nor let a passenger
+	// off, for this long gives its goal up (user approved, 2026-11-19, match #11475: a landing craft
+	// with an MCV stood 50000 frames next to a narrow strip of its goal island): it unloads where it
+	// stands when it touches ground of another zone than its origin, else (and after one such unload
+	// that left it stuck again) it takes the cargo back to its origin landmass. A transport carrying
+	// a yard MCV whose island goal is gone, or given up for lack of room, goes back the same way.
+	// FerryGiveUpLogLines: lines a match of the TEMP diagnostic of both.
+	constexpr int FerryDepartedStuckFrames = FerryStuckCargoFrames;
+	constexpr int FerryGiveUpLogLines = 40;
 	// Transport operations (NeuralAI.Operations.inl). TransportOpsEnabled switches them on: the
 	// waves hand the units that cannot walk to their goal to an operation, and the old ferry no
 	// longer loads idle units of its own accord.
@@ -2190,6 +2284,9 @@ namespace
 	constexpr int OpSharedCrossingLogLines = 60;
 	// TEMP diagnostic: the transports an operation leaves to one that waits longer, logged per match.
 	constexpr int OpStarvedLogLines = 80;
+	// TEMP diagnostic (CheckCarryShadow): the answers of the old carry questions that CanHouseCarry does
+	// not give, logged per match.
+	constexpr int CarryShadowLogLines = 60;
 	constexpr int OpStuckFrames = 900;
 	constexpr double OpStuckCells = 2.0;
 	constexpr int OpCrossCapFrames = 9000;
@@ -2556,6 +2653,24 @@ namespace
 	// (something passing may only be in the way), and the island stays given up for NoRoomIslandFrames.
 	constexpr int DeployerNoSiteFrames = 450;
 	constexpr int NoRoomIslandFrames = 9000;
+	// Deployers of buildings other than yards (user approved, 2026-11-19: "Sí, los cinco"; match #11506:
+	// a deployer of a support building of 4x3 cells wandered between islets, home and ore fields and
+	// never deployed). One of the base deploys at the site of the base placement search it keeps
+	// (NeuralDeployerSite): DeployerSiteMostTries unpack orders on it at most, then the site goes to
+	// its avoid list and the next one is taken; with no site it looks again every
+	// DeployerSiteRetryFrames. Idle deployer watchdog: one packed for DeployerIdleUndeployedFrames, or
+	// within DeployerIdleDriftCells of one spot for DeployerIdleStillFrames, is sent to the nearest
+	// legal foundation of the main base and deploys there (DeployerIdleLogLines TEMP lines a match).
+	constexpr int DeployerSiteMostTries = 3;
+	constexpr int DeployerSiteRetryFrames = 150;
+	// A failed site stays on the avoid list this long (a block there may clear); a building on water
+	// takes up to DeployerWaterSiteTries searches for a water site its deployer reaches.
+	constexpr int DeployerFailedSiteFrames = 5400;
+	constexpr int DeployerWaterSiteTries = 4;
+	constexpr int DeployerIdleUndeployedFrames = 2700;
+	constexpr int DeployerIdleStillFrames = 900;
+	constexpr double DeployerIdleDriftCells = 4.0;
+	constexpr int DeployerIdleLogLines = 40;
 	// Idle MCV watchdog (user, match #11562 Fort Urban Square: two expansion MCVs of houses with a
 	// yard stood packed for thousands of frames, 227 path failures of their type, no fallback ever
 	// reached): an MCV that stays within McvIdleDriftCells of one spot for McvIdleFrames without
@@ -2577,6 +2692,12 @@ namespace
 	constexpr int McvIdleArriveFrames = 450;
 	constexpr int McvUnfoldRetryFrames = 450;
 	constexpr int McvUnfoldMostTries = 3;
+	// The MCV rules leave an unfolding MCV to the engine for this long at most, counted from the
+	// first frame it unfolded on that spot (user approved, 2026-11-19, match #11476: a yard MCV stood
+	// packed 60000+ frames and no rule nor the idle watchdog ever spoke of it); after that they act
+	// on it again. McvPackedLogLines: lines a match of the packed yard MCV diagnostic.
+	constexpr int McvUnfoldSkipMostFrames = 900;
+	constexpr int McvPackedLogLines = 40;
 	// Armies go out in mass (user approved, 2026-11-19: "sí haz las 4"; match #11465 Dead Six: two
 	// allied houses of 80+ units and 100000+ credits streamed packets of 7 to 17 units for 18000
 	// frames while a third of each army stayed home). Once the army (idle and busy fighters, not
@@ -2852,6 +2973,58 @@ namespace
 	// building in reach and no enemy ship in their sea at every AI tick of ArmyIdleWindowFrames
 	// (match #9846: a house kept building ships while about 50 sat with no target in reach).
 	constexpr int ShipsWithoutTargetBrake = 6;
+	// Naval hunt (user approved, 2026-11-19). Match #11499: 24 of the 31 destroyers of a house stood on
+	// Attack, still and silent, at shore guns out of their reach; loaded enemy transports crossed the sea unopposed; the
+	// house built 77 destroyers and none went to look for the enemy at sea.
+	// A ship held still NavalStuckAttackFrames on Attack at a target no cell of its sea brings within the reach of its
+	// weapons goes back on guard, out of the target's reach (NavalStuckRetreatMarginCells more) when the target can fire
+	// at it; NavalStuckLogLines lines a match.
+	constexpr int NavalStuckAttackFrames = 150;
+	constexpr int NavalStuckRetreatMarginCells = 2;
+	constexpr int NavalStuckLogLines = 30;
+	// The target pick of an idle warship: the target's cost, NavalPreyLoadedBonus for a unit with passengers aboard and
+	// NavalPreyThreatBonus for one that can fire at the ship, less NavalPreyCellWeight per cell between them. Enemy units
+	// on land count within NavalShorePreyCells of the ship. A ship picks once per NavalPreyPickFrames at most and keeps
+	// the answer in between; NavalPickLogLines lines of the pick diagnostic a match.
+	constexpr int NavalPreyLoadedBonus = 1000;
+	constexpr int NavalPreyThreatBonus = 500;
+	constexpr int NavalPreyCellWeight = 2;
+	constexpr int NavalShorePreyCells = 30;
+	constexpr int NavalPreyPickFrames = 90;
+	constexpr int NavalPickLogLines = 40;
+	// Naval sweep: with no target found by the pick and no shot of a warship of ours for NavalSweepIdleFrames, and at least
+	// NavalSweepMinShips idle warships with nothing in reach, up to NavalSweepShips of them at a time look at the places of
+	// a NavalSweepStepCells grid over their sea, NavalSweepTripFrames at most for each trip, NavalSweepLogLines lines a match.
+	// A sea with no place worth a look is searched again after NavalSweepRetryFrames.
+	constexpr int NavalSweepIdleFrames = 1800;
+	constexpr size_t NavalSweepMinShips = 4;
+	constexpr size_t NavalSweepShips = 2;
+	constexpr int NavalSweepStepCells = 14;
+	constexpr int NavalSweepTripFrames = 3600;
+	constexpr int NavalSweepLogLines = 20;
+	constexpr int NavalSweepRetryFrames = 900;
+	// Naval mass strike: with fewer than two long-range ships, NavalMassStrikeShips healthy warships of one sea whose guns
+	// hit land at under 10 cells start the Naval Strike Group, all of them shelling one target.
+	constexpr size_t NavalMassStrikeShips = 8;
+	// Fleet staging (slot 69 with no enemy ship seen): the water of the sea nearest to the known enemy building nearest to
+	// our base, pulled back toward the base (NavalStagingBackCells at most) until NavalStagingMarginCells out of known
+	// defense reach. A ship within NavalStagingKeepCells of it stays where it is.
+	constexpr int NavalStagingMarginCells = 3;
+	constexpr int NavalStagingBackCells = 20;
+	constexpr double NavalStagingKeepCells = 8.0;
+	// Narrow water passage: a line across the water of a sea, in one of four directions, NavalPassageWidthCells wide at
+	// most. Once NavalNarrowPassageShips ships of ours on their way stand held in one (still NavalPassageHeldFrames), the
+	// others bound through it within NavalPassageApproachCells wait where they are, NavalPassageWaitMostFrames at most,
+	// and a ship that went on is not held again for NavalPassageCooldownFrames. Checked every NavalPassageCheckFrames,
+	// NavalPassageLogLines lines a match.
+	constexpr int NavalPassageWidthCells = 5;
+	constexpr int NavalNarrowPassageShips = 4;
+	constexpr int NavalPassageHeldFrames = 150;
+	constexpr double NavalPassageApproachCells = 8.0;
+	constexpr int NavalPassageWaitMostFrames = 1800;
+	constexpr int NavalPassageCooldownFrames = 1800;
+	constexpr int NavalPassageCheckFrames = 60;
+	constexpr int NavalPassageLogLines = 20;
 	// Units jammed in their own base count as unused too: a ground unit with somewhere to go that has
 	// stood HeldAtHomeFrames on one cell, not firing, within HeldAtHomeCells of home. A wave or a
 	// plan takes them again every few hundred frames, so the idle pools alone never showed them
@@ -3254,6 +3427,12 @@ namespace
 	// lean to its last target and the TEMP wave march line.
 	constexpr int WaveMarchMostFrames = 18000;
 	constexpr int WaveMarchHeldFrames = 900;
+	// A march also ends when the unit came no WaveMarchProgressCells nearer to its goal in
+	// WaveMarchStallFrames (user approved, 2026-11-19: «Sí, hazlo»): in 9 matches of 534a42c97 a TICKT
+	// went from 57 to 62 cells of its goal in 5400 frames and an FTHROW was 124 cells away after 15930,
+	// moving without getting nearer, which IsFootHeldStill does not catch.
+	constexpr int WaveMarchStallFrames = 4500;
+	constexpr double WaveMarchProgressCells = 5.0;
 	constexpr int WaveMarchLogLines = 40;
 	// The house itself leans to the target of its last dispatch for WaveTargetKeepFrames: enemy
 	// buildings within WaveGoalKeepCells of it score WaveTargetKeepBonus more, above the focus
@@ -3678,6 +3857,34 @@ namespace
 	bool IsHeldByTransportOp(const FootClass* pFoot)
 	{
 		return !TransportOpOrdersOpen && pFoot && pFoot->Owner && IsInTransportOp(pFoot->Owner, pFoot->UniqueID);
+	}
+
+	// A ship of ours that waits outside a jammed narrow water passage (UpdateNavalPassageGate): the order helpers
+	// (IssueMoveOrder, OrderFootToAttackMove) leave it where it is until the gate lets it go on. A transport operation
+	// that takes it gives its orders whatever the gate says.
+	bool IsWaitingAtNavalPassage(const FootClass* pFoot)
+	{
+		if (!pFoot || !pFoot->Owner || IsInTransportOp(pFoot->Owner, pFoot->UniqueID))
+			return false;
+
+		auto const& waits = GetMacroState(pFoot->Owner).NavalPassageWaits;
+		auto const it = waits.find(pFoot->UniqueID);
+		const int now = Unsorted::CurrentFrame;
+
+		return it != waits.end() && now >= it->second.Frame && now - it->second.Frame < NavalPassageWaitMostFrames;
+	}
+
+	// The gate lets a waiting ship go (the jam breaker moves it, or its wait is over): no longer waiting, and not held
+	// again for NavalPassageCooldownFrames.
+	void DropNavalPassageWait(const FootClass* pFoot)
+	{
+		if (!pFoot || !pFoot->Owner)
+			return;
+
+		auto& macro = GetMacroState(pFoot->Owner);
+
+		if (macro.NavalPassageWaits.erase(pFoot->UniqueID) > 0)
+			macro.NavalPassageReleased[pFoot->UniqueID] = Unsorted::CurrentFrame;
 	}
 
 	// A unit that gave up waiting for a crossing or lost its boarding turn: no transport takes it for a while.

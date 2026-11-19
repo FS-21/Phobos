@@ -384,7 +384,7 @@ namespace
 		if (!pHouse || !pFoot)
 			return false;
 
-		auto const& goals = GetMacroState(pHouse).WaveGoals;
+		auto& goals = GetMacroState(pHouse).WaveGoals;
 		auto const it = goals.find(pFoot->UniqueID);
 		const int now = Unsorted::CurrentFrame;
 
@@ -392,9 +392,21 @@ namespace
 			return false;
 
 		const CellStruct goal = it->second.Cell;
+		const double distance = pFoot->GetMapCoords().DistanceFrom(goal);
 
-		if (goal == CellStruct::Empty || pFoot->GetMapCoords().DistanceFrom(goal) <= WaveGoalKeepCells
-			|| IsFootHeldStill(pHouse, pFoot, WaveMarchHeldFrames))
+		if (goal == CellStruct::Empty || distance <= WaveGoalKeepCells || IsFootHeldStill(pHouse, pFoot, WaveMarchHeldFrames))
+			return false;
+
+		// Progress: WaveMarchProgressCells nearer than the best so far renews it; none in
+		// WaveMarchStallFrames ends the march (a way it cannot get through).
+		auto& march = it->second;
+
+		if (march.BestDistance < 0.0 || distance <= march.BestDistance - WaveMarchProgressCells)
+		{
+			march.BestDistance = distance;
+			march.BestFrame = now;
+		}
+		else if (now - march.BestFrame > WaveMarchStallFrames)
 		{
 			return false;
 		}
@@ -1424,8 +1436,6 @@ namespace
 	//   ore or a known enemy building (destroying it opens that way). 2 units, one cliff at a time.
 	void UpdateMapObstacles(HouseClass* pHouse)
 	{
-		const NeuralSlowStep slowStep { "UpdateMapObstacles" };
-
 		if (!pHouse || !IsAITickWindow(450, 15))
 			return;
 
@@ -5639,32 +5649,6 @@ namespace
 		{
 			auto& plan = planOf(NeuralPlanId::AirborneFront);
 
-			// TEMP trace for the redesign of this plan: what each one had at its start, when it left
-			// with how many aboard, where it dropped them and what stood there, and how it ended.
-			struct AirborneTrace
-			{
-				int Team { 0 };
-				int Raiders { 0 };
-				int Workers { 0 };
-				const char* Target { "" };
-				int TargetHealth { 0 };
-				int EnemyStart { 0 };
-				int Defenses { 0 };
-				int MeetCells { 0 };
-				int FrontGap { -1 };
-				int FrontAtLeave { -1 };
-				int Taken { 0 };
-				bool OutLogged { false };
-				int Aboard { -1 };
-				int BoardedFrame { -1 };
-				int DroppedFrame { -1 };
-				int DropCells { -1 };
-				int EnemyDrop { -1 };
-			};
-
-			static std::array<AirborneTrace, 32> airborneTraces {};
-			auto& trace = airborneTraces[static_cast<size_t>(houseIdx) & 31];
-
 			struct AirborneFrontLine
 			{
 				CellStruct Cell { CellStruct::Empty };
@@ -5885,7 +5869,6 @@ namespace
 				auto const pDrop = MapClass::Instance.TryGetCellAt(plan.StagingCell);
 				const std::vector<DWORD> infantry(plan.Members.empty() ? plan.Members.end() : plan.Members.begin() + 1, plan.Members.end());
 				auto const pTransportUnit = abstract_cast<UnitClass*>(pTransport);
-				const bool underground = pTransportUnit && IsUndergroundTransportType(pTransportUnit->Type);
 
 				// Only a transport that flies takes the safe air lane: its waypoints lie where the
 				// anti-air is not, reachable or not by land or sea, and an APC sent along them made 12
@@ -5942,32 +5925,6 @@ namespace
 				{
 					Debug::Log("[NeuralAI] House %d AirborneFront: ends while %s (%s), frame %d.\n", pHouse->ArrayIndex,
 						PhaseNames[std::clamp(plan.AuxBaseline, 0, 3)], reason, Unsorted::CurrentFrame);
-
-					int soldiersAlive = 0;
-
-					for (const DWORD uid : infantry)
-					{
-						if (findOwnFoot(uid))
-							soldiersAlive++;
-					}
-
-					auto const pTransportType = pTransport ? pTransport->GetTechnoType() : nullptr;
-					const char* kind = !pTransportType ? "lost" : (underground ? "burrows"
-						: ((pTransportType->JumpJet || pTransportType->MovementZone == MovementZone::Fly
-							|| pTransport->WhatAmI() == AbstractType::Aircraft) ? "flies" : "surface"));
-					Debug::Log("[NeuralAI] House %d AirborneFront summary DIAG: %s while %s by %s (%s), team %d (%d raiders, %d specialists) for %s "
-						"at %d health %d cells from the main attack, %d enemy value and %d defenses known near it, transport %d cells from "
-						"its soldiers; left with %d aboard after %d frames, main attack on %d; dropped after %d frames more, %d cells from "
-						"the target with %d enemy value near; ends %d frames after the drop, %d soldiers on the map, target at %d, transport "
-						"at %d and %d cells from the target, %d targets taken.\n", pHouse->ArrayIndex, reason,
-						PhaseNames[std::clamp(plan.AuxBaseline, 0, 3)], pTransportType ? pTransportType->ID : "none", kind, trace.Team, trace.Raiders,
-						trace.Workers, trace.Target, trace.TargetHealth, trace.FrontGap, trace.EnemyStart, trace.Defenses, trace.MeetCells,
-						trace.Aboard, trace.BoardedFrame >= 0 ? trace.BoardedFrame - plan.StartFrame : -1, trace.FrontAtLeave,
-						(trace.DroppedFrame >= 0 && trace.BoardedFrame >= 0) ? trace.DroppedFrame - trace.BoardedFrame : -1, trace.DropCells,
-						trace.EnemyDrop, trace.DroppedFrame >= 0 ? Unsorted::CurrentFrame - trace.DroppedFrame : -1, soldiersAlive,
-						pTarget ? static_cast<int>(pTarget->GetHealthPercentage() * 100) : -1,
-						pTransport ? static_cast<int>(pTransport->GetHealthPercentage() * 100) : -1,
-						pTransport ? static_cast<int>(pTransport->GetMapCoords().DistanceFrom(plan.TargetCell)) : -1, plan.Progress + 1);
 				};
 
 				// Ends badly a plan whose team may still be aboard: the transport takes those inside
@@ -5976,25 +5933,6 @@ namespace
 				auto standDown = [&](const char* reason)
 				{
 					logEnd(reason);
-
-					// TEMP diagnostic: what the transport of a trip that ends badly was doing.
-					if (plan.AuxBaseline == 1 && pTransport && pDrop)
-					{
-						auto const pGoing = abstract_cast<CellClass*>(pTransport->Destination);
-						auto const pAt = pTransport->GetCell();
-						const MovementZone movementZone = pTransport->GetTechnoType()->MovementZone;
-						Debug::Log("[NeuralAI] House %d AirborneFront trip DIAG: %s at (%d,%d) %d cells from its drop cell (%d,%d), mission %d %d frames "
-							"old, queued %d, destination %s (%d,%d), target %d, height %d, moving %d, land type %d, zones by its movement own %d drop "
-							"%d, told to unload %d frames ago, %d aboard.\n", pHouse->ArrayIndex, pTransport->GetTechnoType()->ID,
-							pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y,
-							static_cast<int>(pTransport->GetMapCoords().DistanceFrom(pDrop->MapCoords)), pDrop->MapCoords.X, pDrop->MapCoords.Y,
-							static_cast<int>(pTransport->CurrentMission), Unsorted::CurrentFrame - pTransport->CurrentMissionStartTime,
-							static_cast<int>(pTransport->QueuedMission), pGoing ? "cell" : (pTransport->Destination ? "object" : "none"),
-							pGoing ? pGoing->MapCoords.X : -1, pGoing ? pGoing->MapCoords.Y : -1, pTransport->Target ? 1 : 0,
-							pTransport->GetHeight(), pTransport->Locomotor->Is_Moving() ? 1 : 0, pAt ? static_cast<int>(pAt->LandType) : -1,
-							ObjectZone(pTransport, movementZone), MapClass::Instance.GetMovementZoneType(pDrop->MapCoords, movementZone, false),
-							plan.AuxPeak != 0 ? Unsorted::CurrentFrame - plan.AuxPeak : -1, pTransport->Passengers.NumPassengers);
-					}
 
 					if (pTransport && pTransport->CurrentMission == Mission::Sleep)
 						pTransport->ForceMission(Mission::Guard);
@@ -6170,7 +6108,6 @@ namespace
 						if (TakeAboardNow(pTransport, pInf))
 						{
 							ownFoots.erase(uid);
-							trace.Taken++;
 							continue;
 						}
 
@@ -6313,16 +6250,6 @@ namespace
 
 					const int aboard = pTransport->Passengers.NumPassengers;
 
-					// TEMP diagnostic: soldiers taken aboard that are out again while the plan still boards.
-					if (aboard < trace.Taken && !trace.OutLogged)
-					{
-						trace.OutLogged = true;
-						Debug::Log("[NeuralAI] House %d AirborneFront out again DIAG: %d taken aboard and %d inside %s %u, mission %d %d frames old, "
-							"height %d, frame %d.\n", pHouse->ArrayIndex, trace.Taken, aboard, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
-							static_cast<int>(pTransport->CurrentMission), Unsorted::CurrentFrame - pTransport->CurrentMissionStartTime,
-							pTransport->GetHeight(), Unsorted::CurrentFrame);
-					}
-
 					// The waits run from the moment the transport first parked by its soldiers: counted from
 					// the start of the plan they ran out while a transport that came from far was still
 					// landing. One that has not parked in BoardingApproachFrames is given up as well.
@@ -6362,9 +6289,6 @@ namespace
 						plan.Deadline = Unsorted::CurrentFrame + AirborneTripFrames;
 						plan.AnchorCell = CellStruct { 0, 0 };
 						plan.AuxPeak = 0;
-						trace.Aboard = aboard;
-						trace.BoardedFrame = Unsorted::CurrentFrame;
-						trace.FrontAtLeave = findFront().Cell != CellStruct::Empty ? 1 : 0;
 					}
 					else if (nobodyCame)
 					{
@@ -6374,24 +6298,6 @@ namespace
 							pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID, pTransport->GetMapCoords().X,
 							pTransport->GetMapCoords().Y, (pTransportCell && pTransportCell->LandType == LandType::Water) ? " on water" : "",
 							pNearest ? nearestDist / Unsorted::LeptonsPerCell : -1, pNearest ? static_cast<int>(pNearest->CurrentMission) : -1);
-
-						// TEMP diagnostic: what kept the nearest soldier out of a transport it had this long
-						// to reach.
-						if (pNearest)
-						{
-							Debug::Log("[NeuralAI] House %d AirborneFront boarding DIAG: transport mission %d queued %d, height %d, moving %d, destination %d, "
-								"parked %d frames, land type %d, on bridge %d, passengers %d of %d, size limit %d; soldier %s size %d, %d leptons away "
-								"(%d,%d,%d), mission %d, moving %d, fits %d, %d taken aboard, refusal: %s.\n", pHouse->ArrayIndex, static_cast<int>(pTransport->CurrentMission),
-								static_cast<int>(pTransport->QueuedMission), pTransport->GetHeight(), pTransport->Locomotor->Is_Moving() ? 1 : 0,
-								pTransport->Destination ? 1 : 0, parkedFrames, pTransportCell ? static_cast<int>(pTransportCell->LandType) : -1,
-								pTransport->OnBridge ? 1 : 0, pTransport->Passengers.NumPassengers, pTransport->GetTechnoType()->Passengers,
-								static_cast<int>(pTransport->GetTechnoType()->SizeLimit), pNearest->GetTechnoType()->ID,
-								static_cast<int>(pNearest->GetTechnoType()->Size), nearestDist, pNearest->Location.X - pTransport->Location.X,
-								pNearest->Location.Y - pTransport->Location.Y, pNearest->Location.Z - pTransport->Location.Z,
-								static_cast<int>(pNearest->CurrentMission), pNearest->Locomotor->Is_Moving() ? 1 : 0,
-								CanPassengerFitInTransport(pTransport, pNearest->GetTechnoType()) ? 1 : 0, trace.Taken,
-								BoardingRefusal(pTransport, pNearest) ? BoardingRefusal(pTransport, pNearest) : "none");
-						}
 
 						macro.RaidTransportBanUntil[pTransport->UniqueID] = Unsorted::CurrentFrame + 9000;
 						standDown(aboard > 0 ? "too few boarded" : "nobody boarded");
@@ -6407,9 +6313,6 @@ namespace
 						plan.Arrived = true;
 						plan.ArrivedFrame = Unsorted::CurrentFrame;
 						plan.Deadline = Unsorted::CurrentFrame + AirborneAssaultFrames;
-						trace.DroppedFrame = Unsorted::CurrentFrame;
-						trace.DropCells = static_cast<int>(pTransport->GetMapCoords().DistanceFrom(plan.TargetCell));
-						trace.EnemyDrop = seenEnemyValueNear(plan.TargetCell, 9.0, 900);
 						Debug::Log("[NeuralAI] House %d AirborneFront: team dropped at (%d,%d) by %s, frame %d.\n", pHouse->ArrayIndex,
 							plan.StagingCell.X, plan.StagingCell.Y, pTransport->GetTechnoType()->ID, Unsorted::CurrentFrame);
 
@@ -6801,18 +6704,6 @@ namespace
 					{
 						ClearFerryTrip(pTransport->UniqueID);
 						plan.AuxBaseline = 0;
-						trace = AirborneTrace {};
-						trace.Team = static_cast<int>(infantry.size());
-						trace.Raiders = raiders;
-						trace.Workers = workersAboard;
-						trace.Target = goal.Target->Type->ID;
-						trace.TargetHealth = static_cast<int>(goal.Target->GetHealthPercentage() * 100);
-						trace.EnemyStart = seenEnemyValueNear(goal.Target->GetMapCoords(), 9.0, 900);
-						trace.Defenses = CountKnownEnemyDefensesNear(pHouse, goal.Target->GetMapCoords(), 9.0, false);
-						trace.FrontGap = static_cast<int>(goal.Target->GetMapCoords().DistanceFrom(front.Cell));
-
-						for (auto const pFoot : infantry)
-							trace.MeetCells = std::max(trace.MeetCells, static_cast<int>(pFoot->GetMapCoords().DistanceFrom(pTransport->GetMapCoords())));
 
 						Debug::Log("[NeuralAI] House %d AirborneFront: %s %u carries %d soldiers (%d raiders, %d specialists) to %s of house %d, "
 							"dropped at (%d,%d), frame %d.\n", pHouse->ArrayIndex, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
@@ -8318,16 +8209,6 @@ namespace
 				if (!forces.empty())
 					CountPlanOutcome(houseIdx, NeuralPlanId::CounterSquad, NeuralPlanOutcome::Eligible);
 
-				// TEMP diagnostic: the forces no squad could take on (20 per match).
-				static int noSquadLogSerial = -1;
-				static int noSquadLogCount = 0;
-
-				if (noSquadLogSerial != NeuralMatchSerial)
-				{
-					noSquadLogSerial = NeuralMatchSerial;
-					noSquadLogCount = 0;
-				}
-
 				bool started = false;
 
 				for (auto const& force : forces)
@@ -8488,14 +8369,6 @@ namespace
 					if (squad.size() < CounterSquadMinMembers || weighted * 100 < enemyThere * CounterSquadAdvantagePercent
 						|| plain * PlanOutgunnedRatioPercent < enemyThere * 100)
 					{
-						if (noSquadLogCount++ < 20)
-						{
-							Debug::Log("[NeuralAI] House %d plan counterSquad no squad for %d %s of house %d at (%d,%d) worth %d, %d there: "
-								"%d counters of %d free (fit %d+, army %d) worth %d by fit and %d plain, frame %d.\n", houseIdx, force.Units,
-								forceName(force.Category), force.Owner, center.X, center.Y, view.TotalValue, enemyThere,
-								static_cast<int>(squad.size()), static_cast<int>(pool.size()), fitNeeded, armyFit, weighted, plain, now);
-						}
-
 						continue;
 					}
 
@@ -9209,7 +9082,9 @@ namespace
 		// other known defenses, with warships screening them. Coastal defenses are taken out first.
 		// The whole free fleet goes but for a reserve by our naval yard, each shelling ship to its
 		// own firing cell (NavalStrikeMaxShips and the other Naval* constants). Damaged ships
-		// (< 40%) head back to our naval yard, and free healthy ones take their place.
+		// (< 40%) head back to our naval yard, and free healthy ones take their place. With fewer
+		// than two long-range ships, NavalMassStrikeShips short-range gun ships of one sea or more
+		// go as a mass strike, all of them shelling one target.
 		{
 			auto& plan = planOf(NeuralPlanId::NavalStrikeGroup);
 
@@ -9245,6 +9120,20 @@ namespace
 				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
 
 				return pUnit && pUnit->Type && pUnit->Type->Naval && landReachOf(pUnit->Type) >= 10 * Unsorted::LeptonsPerCell;
+			};
+
+			// A ship whose gun (or aircraft) hits land at all. In a mass strike (plan.MassStrike) every one of them
+			// shells, not only the long-range ones.
+			auto isGunShip = [&landReachOf](FootClass* pFoot) -> bool
+			{
+				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+				return pUnit && pUnit->Type && pUnit->Type->Naval && landReachOf(pUnit->Type) > 0;
+			};
+
+			auto shellsIn = [&](FootClass* pFoot) -> bool
+			{
+				return isLongRangeShip(pFoot) || (plan.MassStrike && isGunShip(pFoot));
 			};
 
 			CellClass* pNavalYard = nullptr;
@@ -9303,7 +9192,7 @@ namespace
 						// A shelling ship: its squad's target and its own cell by it (plan.Cells, ship i in squad
 						// i % squads); with its squad's target down, the first one standing, from the cell of the
 						// same rank in that squad.
-						const bool shells = isLongRangeShip(pShip);
+						const bool shells = shellsIn(pShip);
 						CellStruct ownCell = plan.StagingCell;
 						BuildingClass* pShipTarget = pTarget;
 
@@ -9381,7 +9270,7 @@ namespace
 						{
 							auto const pUnit = abstract_cast<UnitClass*>(pFoot);
 
-							if (pUnit && pUnit->Type && pUnit->Type->Naval && isLongRangeShip(pUnit) && isFreeForPlan(pUnit)
+							if (pUnit && pUnit->Type && pUnit->Type->Naval && shellsIn(pUnit) && isFreeForPlan(pUnit)
 								&& !IsAmphibiousOrAirTransport(pUnit->Type) && pUnit->GetHealthPercentage() >= 0.9
 								&& ObjectZone(pUnit, MovementZone::Water) == seaZone)
 							{
@@ -9414,6 +9303,8 @@ namespace
 			{
 				std::vector<FootClass*> siegeShips;
 				std::vector<FootClass*> escorts;
+				// Healthy (40% or more) ships whose guns hit land at under 10 cells (a mass strike's).
+				std::vector<FootClass*> gunShips;
 				int fleetRange = 0;
 				int fleetMinRange = 0;
 				int fleetZone = -1;
@@ -9428,29 +9319,89 @@ namespace
 					if (isLongRangeShip(pUnit))
 					{
 						siegeShips.push_back(pUnit);
-						// The firing cell is within the shortest reach of the shelling ships, so all of them fire.
-						const int reach = landReachOf(pUnit->Type);
-						fleetRange = fleetRange == 0 ? reach : std::min(fleetRange, reach);
-
-						// Minimum range of its ground weapons (e.g. a missile sub's launcher): the firing
-						// spot keeps outside the largest one of the fleet.
-						for (int i = 0; i < 2; ++i)
-						{
-							auto const pWS = pUnit->Type->GetWeapon(i);
-
-							if (pWS && pWS->WeaponType && WeaponHitsGround(pWS->WeaponType))
-								fleetMinRange = std::max(fleetMinRange, pWS->WeaponType->MinimumRange);
-						}
 					}
-					else if (GetCombatValueOfType(pUnit->Type, false) > 0)
+					else
 					{
-						escorts.push_back(pUnit);
+						if (GetCombatValueOfType(pUnit->Type, false) > 0)
+							escorts.push_back(pUnit);
+
+						if (isGunShip(pUnit) && pUnit->GetHealthPercentage() >= 0.4)
+							gunShips.push_back(pUnit);
 					}
 				}
 
 				auto byID = [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; };
 				std::sort(siegeShips.begin(), siegeShips.end(), byID);
 				std::sort(escorts.begin(), escorts.end(), byID);
+				std::sort(gunShips.begin(), gunShips.end(), byID);
+
+				// Mass strike (user approved, 2026-11-19): with fewer than two long-range ships, the gun ships of the sea
+				// that holds the most of them (the lower zone among equals) shell together, with the long-range ship of
+				// that sea, when they are NavalMassStrikeShips or more: 8-cell destroyers never started this plan, and 77
+				// of them sat idle in match #11499.
+				bool massStrike = false;
+
+				if (siegeShips.size() < 2)
+				{
+					std::map<int, size_t> gunShipsBySea;
+
+					for (auto const pShip : gunShips)
+						gunShipsBySea[ObjectZone(pShip, MovementZone::Water)]++;
+
+					int massSea = -1;
+					size_t most = 0;
+
+					for (auto const& [sea, count] : gunShipsBySea)
+					{
+						if (sea >= 0 && count > most)
+						{
+							most = count;
+							massSea = sea;
+						}
+					}
+
+					if (most >= NavalMassStrikeShips)
+					{
+						massStrike = true;
+						auto const otherSea = [massSea](FootClass* pShip) { return ObjectZone(pShip, MovementZone::Water) != massSea; };
+						std::erase_if(gunShips, otherSea);
+						std::erase_if(siegeShips, otherSea);
+						siegeShips.insert(siegeShips.end(), gunShips.begin(), gunShips.end());
+						std::sort(siegeShips.begin(), siegeShips.end(), byID);
+						std::erase_if(escorts, [&gunShips](FootClass* pShip)
+							{ return std::find(gunShips.begin(), gunShips.end(), pShip) != gunShips.end(); });
+					}
+				}
+
+				// A mass strike's firing cells are within the reach most of its ships have (the lower median): the shortest
+				// gun of a mixed fleet pulled them all to the shore. Its ships with a shorter gun close in on their target
+				// under their attack order.
+				std::vector<int> reaches;
+
+				for (auto const pShip : siegeShips)
+				{
+					auto const pShipType = abstract_cast<UnitClass*>(pShip)->Type;
+					// The firing cell is within the shortest reach of the shelling ships, so all of them fire.
+					const int reach = landReachOf(pShipType);
+					fleetRange = fleetRange == 0 ? reach : std::min(fleetRange, reach);
+					reaches.push_back(reach);
+
+					// Minimum range of its ground weapons (e.g. a missile sub's launcher): the firing
+					// spot keeps outside the largest one of the fleet.
+					for (int i = 0; i < 2; ++i)
+					{
+						auto const pWS = pShipType->GetWeapon(i);
+
+						if (pWS && pWS->WeaponType && WeaponHitsGround(pWS->WeaponType))
+							fleetMinRange = std::max(fleetMinRange, pWS->WeaponType->MinimumRange);
+					}
+				}
+
+				if (massStrike && !reaches.empty())
+				{
+					std::sort(reaches.begin(), reaches.end());
+					fleetRange = reaches[(reaches.size() - 1) / 2];
+				}
 
 				// A reserve stays by our naval yard to defend it: the ships nearest to the yard,
 				// NavalHomeReservePercent of the fleet and NavalHomeReserveMin at least, none for a small one.
@@ -9566,7 +9517,8 @@ namespace
 					}
 
 					std::stable_sort(worthy.begin(), worthy.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-					const size_t squads = std::clamp<size_t>((shelling + NavalSquadShips - 1) / NavalSquadShips, 1, NavalMaxTargets);
+					// A mass strike has one target: short guns split over several targets reach none of them in numbers.
+					const size_t squads = massStrike ? 1 : std::clamp<size_t>((shelling + NavalSquadShips - 1) / NavalSquadShips, 1, NavalMaxTargets);
 					std::vector<CellStruct> probe;
 
 					for (auto const& [worth, pBld] : worthy)
@@ -9616,6 +9568,11 @@ namespace
 					{
 						const size_t squads = targets.size();
 						started.AuxBaseline = static_cast<int>(shelling);
+						started.MassStrike = massStrike;
+
+						if (massStrike)
+							CountDecision(NeuralDecision::NavalMassStrike, pHouse->ArrayIndex);
+
 						std::vector<std::vector<CellStruct>> cellsOf(squads);
 						std::vector<CellStruct> taken;
 
@@ -9637,10 +9594,11 @@ namespace
 							started.Cells.push_back(own[(i / squads) % own.size()]);
 						}
 
-						Debug::Log("[NeuralAI] House %d navalStrike: %d shelling ships in %d squads and %d escorts, first target %s at (%d,%d), "
+						Debug::Log("[NeuralAI] House %d navalStrike: %d shelling ships in %d squads and %d escorts%s, first target %s at (%d,%d), "
 							"%d firing cells, %d ships left in reserve by the yard, frame %d.\n", houseIdx, static_cast<int>(shelling),
-							static_cast<int>(squads), static_cast<int>(group.size() - shelling), pTarget->Type->ID, pTarget->GetMapCoords().X,
-							pTarget->GetMapCoords().Y, static_cast<int>(taken.size()), reserveShips, Unsorted::CurrentFrame);
+							static_cast<int>(squads), static_cast<int>(group.size() - shelling), massStrike ? " (mass strike of short guns)" : "",
+							pTarget->Type->ID, pTarget->GetMapCoords().X, pTarget->GetMapCoords().Y, static_cast<int>(taken.size()), reserveShips,
+							Unsorted::CurrentFrame);
 					}
 				}
 			}
