@@ -265,103 +265,6 @@ namespace
 
 	std::array<NeuralTickCost, 32> TickCosts {};
 
-	// TEMP diagnostic of the AI tick cost: time spent per match in the steps that walk the map or
-	// search it cell by cell (keyed by the name literal), a log line for each run of SlowStepLogMs
-	// or more (SlowStepLogsPerMatch at most) and for each tick of SlowTickLogMs or more
-	// (SlowTickLogsPerMatch at most), and every TickCostLogFrames the averages of each house.
-	struct NeuralSlowStepCost
-	{
-		int Runs { 0 };
-		double TotalMs { 0.0 };
-		double MaxMs { 0.0 };
-	};
-
-	constexpr double SlowStepLogMs = 10.0;
-	constexpr int SlowStepLogsPerMatch = 80;
-	constexpr double SlowTickLogMs = 30.0;
-	constexpr int SlowTickLogsPerMatch = 80;
-	constexpr int TickCostLogFrames = 18000;
-	std::map<const char*, NeuralSlowStepCost> SlowSteps;
-	int SlowStepLogs = 0;
-	int SlowTickLogs = 0;
-
-	struct NeuralSlowStep
-	{
-		const char* Name;
-		LARGE_INTEGER Start {};
-
-		explicit NeuralSlowStep(const char* name) : Name { name }
-		{
-			QueryPerformanceCounter(&this->Start);
-		}
-
-		~NeuralSlowStep()
-		{
-			LARGE_INTEGER end {};
-			LARGE_INTEGER frequency {};
-			QueryPerformanceCounter(&end);
-			QueryPerformanceFrequency(&frequency);
-
-			if (frequency.QuadPart <= 0)
-				return;
-
-			const double ms = static_cast<double>(end.QuadPart - this->Start.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
-			auto& cost = SlowSteps[this->Name];
-			cost.Runs++;
-			cost.TotalMs += ms;
-			cost.MaxMs = std::max(cost.MaxMs, ms);
-
-			if (ms >= SlowStepLogMs && SlowStepLogs < SlowStepLogsPerMatch)
-			{
-				++SlowStepLogs;
-				Debug::Log("[NeuralAI] Slow step: %s took %.1f ms for house %d at frame %d, %d objects.\n", this->Name, ms,
-					CurrentAIHouseIndex, Unsorted::CurrentFrame, TechnoClass::Array.Count);
-			}
-		}
-	};
-
-	// TEMP diagnostic: the stretches of one long function between Mark calls, each booked as a slow
-	// step under its name.
-	struct NeuralSegmentClock
-	{
-		const char* Current;
-		LARGE_INTEGER Start {};
-
-		explicit NeuralSegmentClock(const char* first) : Current { first }
-		{
-			QueryPerformanceCounter(&this->Start);
-		}
-
-		~NeuralSegmentClock()
-		{
-			this->Close();
-		}
-
-		void Mark(const char* next)
-		{
-			this->Close();
-			this->Current = next;
-			QueryPerformanceCounter(&this->Start);
-		}
-
-		void Close() const
-		{
-			LARGE_INTEGER end {};
-			LARGE_INTEGER frequency {};
-			QueryPerformanceCounter(&end);
-			QueryPerformanceFrequency(&frequency);
-
-			if (frequency.QuadPart <= 0)
-				return;
-
-			const double ms = static_cast<double>(end.QuadPart - this->Start.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
-			auto& cost = SlowSteps[this->Current];
-			cost.Runs++;
-			cost.TotalMs += ms;
-			cost.MaxMs = std::max(cost.MaxMs, ms);
-		}
-	};
-
 	// Territory telemetry (reward only: the match score and the trainer read it, no decision does,
 	// so it may look through the fog). Every 900 frames, per house: the 8x8 map blocks holding one
 	// of its structures (walls and insignificant structures excluded), the ore fields (12x12 blocks
@@ -453,8 +356,6 @@ namespace
 
 	void ComputeMapInfo()
 	{
-		const NeuralSlowStep slowStep { "ComputeMapInfo" };
-
 		if (MapInfo.Computed || Unsorted::CurrentFrame < 30)
 			return;
 
@@ -513,8 +414,6 @@ namespace
 
 	void SampleTerritory(bool force)
 	{
-		const NeuralSlowStep slowStep { "SampleTerritory" };
-
 		const int now = Unsorted::CurrentFrame;
 
 		if (TerritoryLastFrame == now || (!force && TerritoryLastFrame >= 0 && now - TerritoryLastFrame < 900))
@@ -830,8 +729,6 @@ namespace
 
 	void SampleExpertGains()
 	{
-		const NeuralSlowStep slowStep { "SampleExpertGains" };
-
 		std::array<int64_t, 32> assets {};
 
 		for (auto const pTechno : TechnoClass::Array)
@@ -1125,51 +1022,6 @@ namespace
 
 					if (peaks.size() > 10)
 						peaks.resize(10);
-				}
-			}
-
-			// TEMP diagnostic (see NeuralSlowStep): the slow ticks and the running averages in the log.
-			if (ms >= SlowTickLogMs && SlowTickLogs < SlowTickLogsPerMatch)
-			{
-				++SlowTickLogs;
-				Debug::Log("[NeuralAI] Slow tick: %.1f ms for house %d at frame %d, %d objects: %s.\n", ms, this->HouseIndex,
-					Unsorted::CurrentFrame, TechnoClass::Array.Count, heaviest(TickSectionMs[this->HouseIndex], 1.0, 4, 0.5).c_str());
-			}
-
-			static int costLogSerial = -1;
-			static std::array<int, 32> costLogBucket {};
-			static int stepLogBucket = 0;
-
-			if (costLogSerial != NeuralMatchSerial)
-			{
-				costLogSerial = NeuralMatchSerial;
-				costLogBucket.fill(0);
-				stepLogBucket = 0;
-			}
-
-			const int bucket = Unsorted::CurrentFrame / TickCostLogFrames;
-
-			if (bucket > costLogBucket[this->HouseIndex])
-			{
-				costLogBucket[this->HouseIndex] = bucket;
-				Debug::Log("[NeuralAI] House %d tick cost DIAG frame %d: %.2f ms average over %u ticks, %.1f max; phases: %s.\n",
-					this->HouseIndex, Unsorted::CurrentFrame, cost.TotalMs / cost.Ticks, cost.Ticks, cost.MaxMs,
-					heaviest(SectionTotalMs[this->HouseIndex], 1.0 / cost.Ticks, 12, 0.05).c_str());
-
-				if (bucket > stepLogBucket)
-				{
-					stepLogBucket = bucket;
-					std::string steps;
-
-					for (auto const& [name, step] : SlowSteps)
-					{
-						char item[128];
-						std::snprintf(item, sizeof(item), "%s%s %d runs %.0f ms max %.1f", steps.empty() ? "" : "; ", name, step.Runs,
-							step.TotalMs, step.MaxMs);
-						steps += item;
-					}
-
-					Debug::Log("[NeuralAI] Slow steps DIAG frame %d (all houses): %s.\n", Unsorted::CurrentFrame, steps.c_str());
 				}
 			}
 		}

@@ -639,8 +639,6 @@ namespace
 	// knowledge (shroud, enemy gap, fog) keeps the owner it had when last seen.
 	void UpdateSpecOpsTechMemory(HouseClass* pHouse, NeuralSpecOpsState& state)
 	{
-		const NeuralSlowStep slowStep { "UpdateSpecOpsTechMemory" };
-
 		const int now = Unsorted::CurrentFrame;
 		std::vector<DWORD> knownNowIDs;
 

@@ -111,8 +111,6 @@ namespace
 
 	const std::vector<NeuralOreField>& GetOreFields()
 	{
-		const NeuralSlowStep slowStep { "GetOreFields" };
-
 		LTRBStruct bounds = MapClass::Instance.MapCoordBounds;
 
 		if (bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top)
@@ -300,8 +298,6 @@ namespace
 
 	bool IsUsefulWaterZone(int waterZone)
 	{
-		const NeuralSlowStep slowStep { "IsUsefulWaterZone" };
-
 		if (LargestWaterZoneCells < 0)
 		{
 			LargestWaterZoneCells = 0;
@@ -453,8 +449,6 @@ namespace
 	// enemy buildings we know, walked in a fixed order: every machine computes the same.
 	void UpdateIslandOreOutlook(HouseClass* pHouse)
 	{
-		const NeuralSlowStep slowStep { "UpdateIslandOreOutlook" };
-
 		if (!pHouse)
 			return;
 

@@ -1007,7 +1007,6 @@ bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClas
 	const int candW = pType->GetFoundationWidth();
 	const int candH = pType->GetFoundationHeight(false);
 	const bool isCandDefense = pType->IsBaseDefense;
-	const NeuralSlowStep slowStep { "IsCellClearedOfExitCorridors" };
 
 	if (ClosesLandPassage(pType, candidateCell))
 		return false;

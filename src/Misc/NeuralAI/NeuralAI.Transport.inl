@@ -1048,8 +1048,6 @@ namespace
 	// naval order then goes in hops the engine path finder can manage.
 	CellClass* NavalRouteHop(FootClass* pFoot, const CellStruct& target, int hop)
 	{
-		const NeuralSlowStep slowStep { "NavalRouteHop" };
-
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 
 		if (!pType || (pType->MovementZone != MovementZone::Water && pType->MovementZone != MovementZone::WaterBeach))
@@ -1292,8 +1290,6 @@ namespace
 
 		if (search)
 		{
-			const NeuralSlowStep slowStep { pAvoidPassage ? "route search around a passage"
-				: (avoidResources ? "route search around resources" : "route search") };
 			constexpr int DirX[8] = { 1, 0, -1, 0, 1, -1, -1, 1 };
 			constexpr int DirY[8] = { 0, 1, 0, -1, 1, 1, -1, -1 };
 			// Per cell tables of one search instead of hash maps (a search of 12000 cells took 10 to 30 ms

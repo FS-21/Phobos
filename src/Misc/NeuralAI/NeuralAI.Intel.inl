@@ -886,8 +886,6 @@ namespace
 	// one closed in by the base (HasFactoryRoadOut) is taken only when none has a road out.
 	void UpdatePrimaryFactories(HouseClass* pHouse, CellStruct targetCoords)
 	{
-		const NeuralSlowStep slowStep { "UpdatePrimaryFactories" };
-
 		if (!pHouse || targetCoords == CellStruct::Empty)
 			return;
 

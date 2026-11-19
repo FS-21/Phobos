@@ -273,7 +273,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 {
 	// Phase stopwatch (telemetry only): which part of the micro is heavy.
 	NeuralPhaseClock microClock { pHouse ? pHouse->ArrayIndex : -1, NeuralSection::MicroSetup };
-	NeuralSegmentClock microSegments { "ms: start" };
 
 	// pAvoid: sites tried before (the idle MCV watchdog); a candidate within 6 cells of one is passed over.
 	auto const FindDeployableFoundationNearCellUncached
@@ -627,8 +626,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		? MapClass::Instance.GetMovementZoneType(homeCoords, MovementZone::Normal, false)
 		: -1;
 
-	microSegments.Mark("ms: dispatcher");
-
 	// Universal Cross-Island Reachability & Transport Dispatcher:
 	// Any ground-only unit or infantry whose action target is on a disconnected
 	// landmass (footZone != targetZone) is handed to a transport operation, which
@@ -910,8 +907,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return RequestTransportOperation(pHouse, NeuralOpClient::Economy, pFoot, targetGround);
 	};
 
-	microSegments.Mark("ms: idle transports");
-
 	// Find any idle Amphibious/Hover Transport owned by this house that still has
 	// passenger room
 	FootClass* pLoadingTransport = nullptr;
@@ -953,8 +948,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				break;
 		}
 	}
-
-	microSegments.Mark("ms: island discovery");
 
 	// Discover uncolonized island Resource (Ore/Gems), buildable Island Land
 	// (when home island is full), and Strategic Neutral Tech Building targets
@@ -1322,8 +1315,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		microSegments.Mark("ms: orphan refinery");
-
 		// Orphaned Island Refinery Recovery: If any island has an owned Refinery
 		// with 0 Harvesters in its movement zone, either switch that island's War
 		// Factory to PrimaryFactory (if one exists on that island) OR ferry a spare
@@ -1415,8 +1406,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 		}
-
-		microSegments.Mark("ms: enemy island beachheads");
 
 		// Enemy Island Offensive Beachhead & Reconquest Discovery: Once all neutral
 		// islands in the archipelago are colonized (!pIslandResourceGoalCell),
@@ -1598,8 +1587,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (pHouse->WhoLastHurtMe == pOther->ArrayIndex)
 			parts[1] = 250;
 
-		microSegments.Mark("ms: targets");
-
 		// Expert 3 (UpdateFfaTargets): busy, at our door, weakest, nearest.
 		parts[3] = GetMacroState(pHouse).FfaEnemyBonus[idx];
 
@@ -1705,7 +1692,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		pHouse->EnemyHouseIndex = bestEnemyIdx;
 
 	microClock.Mark(NeuralSection::MicroSensors);
-	microSegments.Mark("after micro.setup");
 
 	// Tactical Squad Micro: Retreat damaged expensive/Elite/Parasited vehicles to
 	// Service Depot, Chrono-Miner Warp escape, Beacons & Allied Base Rescue!
@@ -4794,9 +4780,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					// already. Kept packed it stood idle in its base for the rest of the match (#10267).
 					if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
 					{
-						// TEMP diagnostic: an MCV with nowhere to go unfolds at home.
-						Debug::Log("[NeuralAI] House %d MCV %s %u unfolds at (%d,%d): no free field and no crossing, %d yards on its zone %d, frame %d.\n",
-							pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, mcvCell.X, mcvCell.Y, conYardsInMcvZone, mcvZone, Unsorted::CurrentFrame);
 						OrderDeployerUnpack(pUnit);
 					}
 					else
@@ -12335,24 +12318,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (!pCarryState || (!pCarryState->CarryallCargo && pCarryState->CarryallState == JumpjetCarryallState::Idle))
 			{
-				// TEMP diagnostic: who held the link and what it was doing.
-				static int strayLogSerial = -1;
-				static int strayLogCount = 0;
-
-				if (strayLogSerial != NeuralMatchSerial)
-				{
-					strayLogSerial = NeuralMatchSerial;
-					strayLogCount = 0;
-				}
-
-				if (strayLogCount++ < 30)
-				{
-					Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: %s %u held the radio link of %s %u without boarding, mission %d, %d cells away.\n",
-						pHouse->ArrayIndex, Unsorted::CurrentFrame, pLinked->GetTechnoType()->ID, pLinked->UniqueID,
-						pTransport->GetTechnoType()->ID, pTransport->UniqueID, static_cast<int>(pLinked->CurrentMission),
-						static_cast<int>(pLinked->GetMapCoords().DistanceFrom(trCoords)));
-				}
-
 				pTransport->SendCommand(RadioCommand::NotifyUnlink, pLinked);
 				CountDecision(NeuralDecision::FerryStrayLinkCut, pHouse->ArrayIndex);
 
@@ -12394,39 +12359,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (Unsorted::CurrentFrame - turn.NearSince < FerryBoardTurnFrames)
 			return pChosenBoarder;
-
-		// TEMP diagnostic: who lost the turn and in what state.
-		static int turnLogSerial = -1;
-		static int turnLogCount = 0;
-
-		if (turnLogSerial != NeuralMatchSerial)
-		{
-			turnLogSerial = NeuralMatchSerial;
-			turnLogCount = 0;
-		}
-
-		if (turnLogCount++ < 40)
-		{
-			auto const pLinked = abstract_cast<FootClass*>(pTransport->GetNthLink(0));
-			auto const pBoarderDest = pChosenBoarder->Destination;
-			const FerryDoorZones lostDoor = GetFerryDoorZones(pTransport, pChosenBoarder);
-			Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: %s %u lost its boarding turn on %s %u after %d frames, %d cells away, mission %d queued %d "
-				"mega %d dest %s, boarding link %d, in the air %d, size %d of %d free, transport mission %d pass %d on %s linked to %s %u, "
-				"door zones %d and %d, last cells behind %d and %d, transport height %d moving %d dest %d tether %d and %d.\n",
-				pHouse->ArrayIndex, Unsorted::CurrentFrame, pChosenBoarder->GetTechnoType()->ID, pChosenBoarder->UniqueID,
-				pTransport->GetTechnoType()->ID, pTransport->UniqueID, Unsorted::CurrentFrame - turn.NearSince,
-				static_cast<int>(pChosenBoarder->GetMapCoords().DistanceFrom(trCoords)), static_cast<int>(pChosenBoarder->CurrentMission),
-				static_cast<int>(pChosenBoarder->QueuedMission), static_cast<int>(pChosenBoarder->MegaMission),
-				pBoarderDest == pTransport ? "transport" : (pBoarderDest ? "other" : "none"), pChosenBoarder->ContainsLink(pTransport) ? 1 : 0,
-				pChosenBoarder->IsInAir() ? 1 : 0, static_cast<int>(pChosenBoarder->GetTechnoType()->Size),
-				pTransport->GetTechnoType()->Passengers - pTransport->Passengers.GetTotalSize(), static_cast<int>(pTransport->CurrentMission),
-				pTransport->Passengers.NumPassengers, pTransport->GetCell()->LandType == LandType::Water ? "water" : "land",
-				pLinked ? pLinked->GetTechnoType()->ID : "nobody", pLinked ? pLinked->UniqueID : 0u,
-				lostDoor.Transport, lostDoor.Boarder, pTransport->LastMapCoords != trCoords ? 1 : 0,
-				pChosenBoarder->LastMapCoords != pChosenBoarder->GetMapCoords() ? 1 : 0, pTransport->GetHeight(),
-				pTransport->Locomotor->Is_Moving() ? 1 : 0, pTransport->Destination ? 1 : 0, pTransport->IsTether ? 1 : 0,
-				pChosenBoarder->IsTether ? 1 : 0);
-		}
 
 		if (pChosenBoarder->ContainsLink(pTransport))
 			pChosenBoarder->SendCommand(RadioCommand::NotifyUnlink, pTransport);

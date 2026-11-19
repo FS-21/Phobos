@@ -346,8 +346,6 @@ namespace
 	// real work every RouteHeatRefreshFrames (the bucket map only holds touched buckets).
 	void UpdateRouteHeat(HouseClass* pHouse)
 	{
-		const NeuralSlowStep slowStep { "UpdateRouteHeat" };
-
 		if (!pHouse)
 			return;
 

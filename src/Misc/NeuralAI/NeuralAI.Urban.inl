@@ -357,8 +357,6 @@ namespace
 	// when last seen.
 	void UpdateUrbanMemory(HouseClass* pHouse, NeuralUrbanState& state)
 	{
-		const NeuralSlowStep slowStep { "UpdateUrbanMemory" };
-
 		const int now = Unsorted::CurrentFrame;
 		std::vector<DWORD> knownNowIDs;
 
@@ -1210,31 +1208,6 @@ namespace
 
 			if (itOrder != state.Orders.end() && itOrder->InfantryID == pSoldier->UniqueID)
 			{
-				if (itOrder->BuildingID == pBest->UniqueID)
-				{
-					// TEMP diagnostic: why a soldier sent in is idle again.
-					static int reorderLogSerial = -1;
-					static int reorderLogCount = 0;
-
-					if (reorderLogSerial != NeuralMatchSerial)
-					{
-						reorderLogSerial = NeuralMatchSerial;
-						reorderLogCount = 0;
-					}
-
-					if (reorderLogCount++ < 60)
-					{
-						Debug::Log("[NeuralAI] House %d Urban DIAG: %s %u re-sent to %s owner %d after %d frames, mission %d mega %d dest %s at %d cells (was %d), own %d, inside %d; "
-							"soldier (%d,%d) vehicle zone %d own zone %d bridge %d, building (%d,%d).\n",
-							pHouse->ArrayIndex, pSoldier->GetTechnoType()->ID, pSoldier->UniqueID, pBest->Type->ID, pBest->Owner ? pBest->Owner->ArrayIndex : -1,
-							now - itOrder->Frame, static_cast<int>(pSoldier->CurrentMission), static_cast<int>(pSoldier->MegaMission),
-							pSoldier->Destination ? (pSoldier->Destination == pBest ? "building" : "other") : "none",
-							cellsNow, itOrder->Cells, pBest->Owner == pHouse ? 1 : 0, pBest->Occupants.Count,
-							pSoldier->GetMapCoords().X, pSoldier->GetMapCoords().Y, ObjectZone(pSoldier, MovementZone::Normal),
-							ObjectZone(pSoldier, pSoldier->Type->MovementZone), pSoldier->OnBridge ? 1 : 0, pBestKnown->Cell.X, pBestKnown->Cell.Y);
-					}
-				}
-
 				// A soldier walking there from far is ordered again on the way; only an order that
 				// brought it no nearer counts against it.
 				const bool noNearer = itOrder->BuildingID == pBest->UniqueID && cellsNow > itOrder->Cells - 2;

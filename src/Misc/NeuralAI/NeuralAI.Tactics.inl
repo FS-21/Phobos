@@ -3,207 +3,6 @@
 
 namespace
 {
-	// TEMP diagnostic: technos wrongly linked from a cell. Seven of the eleven crashes of
-	// 2026-11-11..13 are the engine walking the objects of a cell (TechnoClass::Evaluate_Cell picking
-	// a target, Can_Enter_Cell finding a path) and calling into one that was already destroyed. The
-	// object lists of every cell are checked every CellGhostCheckFrames for two things, logged with
-	// what can be read of the object so the match log tells which kind of unit it is and when:
-	// - an object that is not a live techno and has no vtable of a map object: a destroyed techno
-	//   (its destructors leave it the vtable of a base class) or freed memory;
-	// - a live mobile unit linked from a cell it does not stand on, or linked while in limbo: the
-	//   state a unit has to be in for its death to leave its cell pointing at it.
-	// One check walks every cell of the map (about 10 ms): every 30 frames it was 4% of the AI tick
-	// cost and found nothing in two days, so it runs rarely while the crash is set aside.
-	constexpr int CellGhostCheckFrames = 900;
-	constexpr int CellGhostLogsPerMatch = 12;
-	constexpr int CellGhostChainSteps = 64;
-	constexpr int CellGhostTypeSlots = 4;
-
-	// Vtables of the base classes of a techno (abstract, object, mission, radio, techno, foot).
-	constexpr uintptr_t TechnoBaseVTables[] = { 0x7E1F50, 0x7EF060, 0x7EDCC0, 0x7F0508, 0x7F4960, 0x7E8C94 };
-
-	// Read-only tables of the game image: the vtable of any real object lies there.
-	constexpr uintptr_t ImageDataStart = 0x7E0000;
-	constexpr uintptr_t ImageDataEnd = 0x840000;
-
-	struct NeuralCellGhostInfo
-	{
-		uintptr_t VTable;
-		ObjectClass* Next;
-		void* Types[CellGhostTypeSlots];
-		void* Owner;
-		DWORD UniqueID;
-		int Health;
-		int Mission;
-		int CellX;
-		int CellY;
-		bool HeadRead;
-		bool IsAlive;
-		bool InLimbo;
-		bool OnBridge;
-	};
-
-	// Reads an object that may be freed memory. Plain data only in here: structured exception
-	// handling does not mix with objects that have destructors. The type is read at the place each
-	// kind of techno keeps it, the caller tells which one is a real type.
-	bool ReadCellGhost(ObjectClass* pObject, NeuralCellGhostInfo* pInfo)
-	{
-		__try
-		{
-			pInfo->VTable = *reinterpret_cast<uintptr_t*>(pObject);
-			pInfo->Next = pObject->NextObject;
-			pInfo->HeadRead = true;
-
-			auto const pTechno = static_cast<TechnoClass*>(pObject);
-			pInfo->UniqueID = pObject->UniqueID;
-			pInfo->Health = pObject->Health;
-			pInfo->IsAlive = pObject->IsAlive;
-			pInfo->InLimbo = pObject->InLimbo;
-			pInfo->OnBridge = pObject->OnBridge;
-			pInfo->CellX = pObject->Location.X / Unsorted::LeptonsPerCell;
-			pInfo->CellY = pObject->Location.Y / Unsorted::LeptonsPerCell;
-			pInfo->Owner = pTechno->Owner;
-			pInfo->Mission = static_cast<int>(pTechno->CurrentMission);
-			pInfo->Types[0] = static_cast<UnitClass*>(pObject)->Type;
-			pInfo->Types[1] = static_cast<InfantryClass*>(pObject)->Type;
-			pInfo->Types[2] = static_cast<AircraftClass*>(pObject)->Type;
-			pInfo->Types[3] = static_cast<BuildingClass*>(pObject)->Type;
-
-			return true;
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			return pInfo->HeadRead;
-		}
-	}
-
-	void CheckCellGhosts()
-	{
-		const NeuralSlowStep slowStep { "CheckCellGhosts" };
-
-		static int serial = -1;
-		static int lastFrame = -1;
-		static int logged = 0;
-		static std::unordered_set<DWORD> reported;
-		const int now = Unsorted::CurrentFrame;
-
-		if (serial != NeuralMatchSerial)
-		{
-			serial = NeuralMatchSerial;
-			lastFrame = -1;
-			logged = 0;
-			reported.clear();
-		}
-
-		if (logged >= CellGhostLogsPerMatch || (lastFrame >= 0 && now >= lastFrame && now - lastFrame < CellGhostCheckFrames))
-			return;
-
-		lastFrame = now;
-		std::unordered_set<const void*> live;
-		live.reserve(static_cast<size_t>(TechnoClass::Array.Count) * 2);
-
-		for (auto const pTechno : TechnoClass::Array)
-			live.insert(pTechno);
-
-		for (int i = 0; i < MapClass::Instance.Cells.Capacity && logged < CellGhostLogsPerMatch; ++i)
-		{
-			auto const pCell = MapClass::Instance.Cells.Items[i];
-
-			if (!pCell)
-				continue;
-
-			for (int list = 0; list < 2; ++list)
-			{
-				ObjectClass* pObject = list == 0 ? pCell->FirstObject : pCell->AltObject;
-				const char* listName = list == 0 ? "ground" : "bridge";
-
-				for (int step = 0; pObject && step < CellGhostChainSteps; ++step)
-				{
-					if (live.contains(pObject))
-					{
-						auto const pTechno = static_cast<TechnoClass*>(pObject);
-
-						if (pTechno->WhatAmI() != AbstractType::Building && !reported.contains(pTechno->UniqueID))
-						{
-							const CellStruct own = CellClass::Coord2Cell(pTechno->Location);
-							const bool elsewhere = own != pCell->MapCoords;
-
-							if (elsewhere || pTechno->InLimbo || !pTechno->IsAlive)
-							{
-								reported.insert(pTechno->UniqueID);
-								++logged;
-								auto const pCarrier = pTechno->Transporter;
-								auto const pExt = TechnoExt::Fetch(pTechno);
-
-								Debug::Log("[NeuralAI] Cell link DIAG frame %d: cell (%d,%d) %s list, link %d, holds the live %s of house %d, id %u, %s: "
-									"its own cell (%d,%d), height %d, alive %d, limbo %d, on map %d, on bridge %d, mission %d, transporter %s, on carryall %d, attached %d.\n",
-									now, pCell->MapCoords.X, pCell->MapCoords.Y, listName, step, pTechno->GetTechnoType()->ID,
-									pTechno->Owner ? pTechno->Owner->ArrayIndex : -1, pTechno->UniqueID,
-									pTechno->InLimbo ? "that is in limbo" : (elsewhere ? "that stands on another cell" : "that is not alive"),
-									own.X, own.Y, pTechno->GetHeight(), pTechno->IsAlive ? 1 : 0, pTechno->InLimbo ? 1 : 0, pTechno->IsOnMap ? 1 : 0,
-									pTechno->OnBridge ? 1 : 0, static_cast<int>(pTechno->CurrentMission),
-									pCarrier && live.contains(pCarrier) ? pCarrier->GetTechnoType()->ID : (pCarrier ? "?" : "-"),
-									pTechno->IsOnCarryall ? 1 : 0, pExt && pExt->ParentAttachment ? 1 : 0);
-							}
-						}
-
-						pObject = pObject->NextObject;
-						continue;
-					}
-
-					NeuralCellGhostInfo info {};
-					const bool readable = ReadCellGhost(pObject, &info);
-					const bool techno = readable && (info.VTable == UnitClass::AbsVTable || info.VTable == InfantryClass::AbsVTable
-						|| info.VTable == AircraftClass::AbsVTable || info.VTable == BuildingClass::AbsVTable);
-					bool destructed = false;
-
-					for (const uintptr_t vtable : TechnoBaseVTables)
-						destructed = destructed || (readable && info.VTable == vtable);
-
-					// Terrain objects and the like: not technos, their chain goes on.
-					if (readable && !techno && !destructed && info.VTable >= ImageDataStart && info.VTable < ImageDataEnd)
-					{
-						pObject = info.Next;
-						continue;
-					}
-
-					++logged;
-					const char* typeID = "?";
-					int owner = -1;
-					constexpr AbstractType slotKinds[CellGhostTypeSlots] = { AbstractType::UnitType, AbstractType::InfantryType,
-						AbstractType::AircraftType, AbstractType::BuildingType };
-
-					for (auto const pType : TechnoTypeClass::Array)
-					{
-						for (int slot = 0; slot < CellGhostTypeSlots; ++slot)
-						{
-							if (pType == info.Types[slot] && pType->WhatAmI() == slotKinds[slot])
-								typeID = pType->ID;
-						}
-					}
-
-					for (auto const pOwner : HouseClass::Array)
-					{
-						if (pOwner == info.Owner)
-						{
-							owner = pOwner->ArrayIndex;
-							break;
-						}
-					}
-
-					Debug::Log("[NeuralAI] Cell ghost DIAG frame %d: cell (%d,%d) %s list, link %d, holds %p (%s, vtable %08X) that is not in the techno array: "
-						"type %s, house %d, id %u, alive %d, limbo %d, on bridge %d, health %d, mission %d, its own cell (%d,%d).\n",
-						now, pCell->MapCoords.X, pCell->MapCoords.Y, listName, step, pObject,
-						!readable ? "unreadable memory" : (techno ? "a techno" : (destructed ? "a destroyed techno" : "reused memory")),
-						static_cast<unsigned>(info.VTable), typeID, owner, info.UniqueID, info.IsAlive ? 1 : 0, info.InLimbo ? 1 : 0,
-						info.OnBridge ? 1 : 0, info.Health, info.Mission, info.CellX, info.CellY);
-
-					break;
-				}
-			}
-		}
-	}
-
 	// Air danger memory: every AI tick, our flying units in the air are remembered; one that
 	// vanished since the last tick (not alive any more, not just loaded or landed) away from our
 	// base was shot down, so its last cell is an anti-air danger spot for 8100 frames. Air lanes
@@ -705,8 +504,6 @@ namespace
 	//   around: half of the units whose way leads past it, then all of them (JamRerouteHop).
 	void UpdateJamBreaker(HouseClass* pHouse, const std::vector<NeuralHeldOrder>& held)
 	{
-		const NeuralSlowStep slowStep { "UpdateJamBreaker" };
-
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 
@@ -1298,8 +1095,6 @@ namespace
 	// 90+ frames on its cell). Up to 12 per pass.
 	void UpdateJamMouths(HouseClass* pHouse)
 	{
-		const NeuralSlowStep slowStep { "UpdateJamMouths" };
-
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 
@@ -1520,7 +1315,6 @@ namespace
 			return;
 
 		macro.LastEmergencyLaneFrame = now;
-		const NeuralSlowStep slowStep { "UpdateEmergencyLanes" };
 
 		struct NeuralLane
 		{
@@ -1948,8 +1742,6 @@ namespace
 	// Aircraft stuck on an attack they never fly are released as well (see below).
 	void UpdateStuckUnits(HouseClass* pHouse)
 	{
-		const NeuralSlowStep slowStep { "UpdateStuckUnits" };
-
 		if (!pHouse)
 			return;
 
@@ -2063,82 +1855,6 @@ namespace
 
 			if ((unreachable && stuckFrames >= 450) || stuckFrames >= 1800 || (stalledAttackMove && stuckFrames >= 150))
 			{
-				// TEMP diagnostic: a ship that never left its cell, where it was sent and why it is released.
-				if (pType->Naval)
-				{
-					static int shipLogSerial = -1;
-					static int shipLogCount = 0;
-
-					if (shipLogSerial != NeuralMatchSerial)
-					{
-						shipLogSerial = NeuralMatchSerial;
-						shipLogCount = 0;
-					}
-
-					if (shipLogCount++ < 30)
-					{
-						Debug::Log("[NeuralAI] Naval DIAG house %d frame %d: %s %u held at (%d,%d) for %d frames, sent to (%d,%d) %d cells away, "
-							"zones %d and %d, unreachable %d, stalled attack-move %d, mission %d mega %d, destination land type %d.\n",
-							pHouse->ArrayIndex, now, pType->ID, pFoot->UniqueID, here.X, here.Y, stuckFrames, destCell.X, destCell.Y,
-							static_cast<int>(here.DistanceFrom(destCell)), footZone, destZone, unreachable ? 1 : 0, stalledAttackMove ? 1 : 0,
-							static_cast<int>(pFoot->CurrentMission), static_cast<int>(pFoot->MegaMission),
-							MapClass::Instance.TryGetCellAt(destCell) ? static_cast<int>(MapClass::Instance.TryGetCellAt(destCell)->LandType) : -1);
-
-						// Is it boxed in? Cells around it that it may enter, what stands on the others,
-						// and what the engine holds for its path.
-						int freeNext = 0;
-						int waterNext = 0;
-						int freeNear = 0;
-						int shipsNear = 0;
-						const char* buildingNear = "none";
-
-						for (int dy = -3; dy <= 3; ++dy)
-						{
-							for (int dx = -3; dx <= 3; ++dx)
-							{
-								if (dx == 0 && dy == 0)
-									continue;
-
-								auto const pAround = MapClass::Instance.TryGetCellAt(
-									CellStruct { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) });
-
-								if (!pAround)
-									continue;
-
-								const bool next = std::abs(dx) <= 1 && std::abs(dy) <= 1;
-								const bool clear = pAround->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false);
-
-								if (clear)
-									freeNear++;
-
-								if (next && clear)
-									freeNext++;
-
-								if (next && pAround->LandType == LandType::Water)
-									waterNext++;
-
-								if (auto const pBldAround = pAround->GetBuilding())
-									buildingNear = pBldAround->Type->ID;
-
-								for (ObjectClass* pObj = pAround->FirstObject; pObj; pObj = pObj->NextObject)
-								{
-									if (abstract_cast<UnitClass*>(pObj))
-										shipsNear++;
-								}
-							}
-						}
-
-						auto const pShipLink = abstract_cast<TechnoClass*>(pFoot->GetNthLink(0));
-						Debug::Log("[NeuralAI] Naval box DIAG house %d: %s %u may enter %d of the 8 cells next to it (%d water) and %d of 48 within 3, "
-							"%d units within 3, building %s, link %s, mission %d frames old, moving %d, first path step %d, path delay %d, "
-							"blockage delay %d, emp %d, cloak %d.\n", pHouse->ArrayIndex, pType->ID, pFoot->UniqueID, freeNext, waterNext, freeNear,
-							shipsNear, buildingNear, pShipLink ? pShipLink->GetTechnoType()->ID : "none", now - pFoot->CurrentMissionStartTime,
-							(pFoot->Locomotor && pFoot->Locomotor->Is_Moving()) ? 1 : 0, pFoot->PathDirections[0],
-							pFoot->PathDelayTimer.GetTimeLeft(), pFoot->BlockagePathTimer.GetTimeLeft(), pFoot->IsUnderEMP() ? 1 : 0,
-							static_cast<int>(pFoot->CloakState));
-					}
-				}
-
 				pFoot->ClearMegaMissionData();
 				pFoot->SetDestination(nullptr, true);
 				pFoot->QueueMission(Mission::Guard, true);
@@ -2197,7 +1913,6 @@ namespace
 		UpdateJamMouths(pHouse);
 		UpdateEmergencyLanes(pHouse);
 		UpdateHoveringFlyers(pHouse);
-		CheckCellGhosts();
 
 		// Aircraft on Mission::Attack that neither move nor fire: when the engine finds no fire
 		// location for the target it goes back to "return to base" and, still armed and targeting,
@@ -2280,8 +1995,6 @@ namespace
 	// chrono miner loop-teleport, and slave miners have their own routing.
 	void UpdateIdleHarvesters(HouseClass* pHouse)
 	{
-		const NeuralSlowStep slowStep { "UpdateIdleHarvesters" };
-
 		if (!pHouse)
 			return;
 
@@ -2555,8 +2268,6 @@ namespace
 	// (ExecuteTacticalAndSpecOpsMicro gives an idle one its field) and deploys there.
 	void UpdateStrandedSlaveMiners(HouseClass* pHouse)
 	{
-		const NeuralSlowStep slowStep { "UpdateStrandedSlaveMiners" };
-
 		if (!pHouse || !IsAITickWindow(150, 0))
 			return;
 
@@ -2740,8 +2451,6 @@ namespace
 	// trainer credits slots 38 / 81 with how well forward stones survive.
 	void UpdateOffensiveStones(HouseClass* pHouse)
 	{
-		const NeuralSlowStep slowStep { "UpdateOffensiveStones" };
-
 		if (!pHouse)
 			return;
 
