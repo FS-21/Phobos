@@ -265,23 +265,6 @@ namespace
 		sendTo(pLandingCell);
 		CountDecision(NeuralDecision::FerryLandingRetried, pHouse->ArrayIndex);
 
-		// TEMP diagnostic: a flying transport that could not land where it was.
-		static int landingLogSerial = -1;
-		static int landingLogCount = 0;
-
-		if (landingLogSerial != NeuralMatchSerial)
-		{
-			landingLogSerial = NeuralMatchSerial;
-			landingLogCount = 0;
-		}
-
-		if (landingLogCount++ < 30)
-		{
-			Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: %s %u hung over (%d,%d) at height %d mission %d, landing try %d at (%d,%d).\n",
-				pHouse->ArrayIndex, now, pTransport->Type->ID, pTransport->UniqueID, from.X, from.Y, pTransport->GetHeight(),
-				static_cast<int>(pTransport->CurrentMission), landing.Tries, landing.Target.X, landing.Target.Y);
-		}
-
 		return true;
 	}
 }
@@ -806,26 +789,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			// Ground the unit itself can walk is no island crossing.
 			if (IsSameGroundForFoot(pFoot, gc))
-			{
-				// TEMP diagnostic: orders kept by this rule.
-				static int keptLogSerial = -1;
-				static int keptLogCount = 0;
-
-				if (keptLogSerial != NeuralMatchSerial)
-				{
-					keptLogSerial = NeuralMatchSerial;
-					keptLogCount = 0;
-				}
-
-				if (keptLogCount++ < 20)
-				{
-					Debug::Log("[NeuralAI] House %d order kept: %s %u at (%d,%d) vehicle zone %d, goal (%d,%d) vehicle zone %d, same ground on foot, mission %d.\n",
-						pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, pFoot->UniqueID, pFoot->GetMapCoords().X, pFoot->GetMapCoords().Y, fz,
-						gc.X, gc.Y, gz, static_cast<int>(pFoot->CurrentMission));
-				}
-
 				return false;
-			}
 
 			if (pFoot->Target && pFoot->CurrentMission == Mission::Attack && pFoot->GetTechnoType())
 			{
@@ -1308,8 +1272,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// A kept answer skips the scan (no cell is within a negative reach).
 		const int islandScanReach = islandScanKept ? -1 : 216;
 
-		// One reach answer per zone (CanHouseReachGroundByTransport), with a TEMP log line per zone
-		// left out so the plateaus it skips show up in the match logs.
+		// One reach answer per zone (CanHouseReachGroundByTransport).
 		std::vector<std::pair<int, bool>> islandZoneReach;
 
 		auto const isIslandZoneReached = [&](int zone, const CellStruct& cell) -> bool
@@ -1322,12 +1285,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			const bool reached = CanHouseReachGroundByTransport(pHouse, homeCoords, cell);
 			islandZoneReach.emplace_back(zone, reached);
-
-			if (!reached && IsAITickWindow(4500, 0))
-			{
-				Debug::Log("[NeuralAI] House %d island scan: zone %d at (%d,%d) left out, no transport of ours lands there from (%d,%d), frame %d.\n",
-					pHouse->ArrayIndex, zone, cell.X, cell.Y, homeCoords.X, homeCoords.Y, Unsorted::CurrentFrame);
-			}
 
 			return reached;
 		};
@@ -4668,9 +4625,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							mcvNoRoomIslands[mcvZone] = Unsorted::CurrentFrame + NoRoomIslandFrames;
 							noSiteSince.erase(itSince);
 							CountDecision(NeuralDecision::DeployerIslandNoRoom, pHouse->ArrayIndex);
-							// TEMP diagnostic: the island an MCV gave up.
-							Debug::Log("[NeuralAI] House %d IslandExpansion MCV: %s %u found no site for its yard on island zone %d at (%d,%d), island given up, frame %d.\n",
-								pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, mcvZone, mcvCell.X, mcvCell.Y, Unsorted::CurrentFrame);
 						}
 						else
 						{
@@ -5515,10 +5469,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// below pick it up again.
 			else if (IsSiegeUnfoldStuck(pUnit))
 			{
-				// TEMP diagnostic: how long it sat on the order.
-				Debug::Log("[NeuralAI] House %d SiegeDeploy DIAG: %s %u at (%d,%d) freed from a stuck unfold after %d frames, frame %d.\n",
-					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y,
-					Unsorted::CurrentFrame - pUnit->CurrentMissionStartTime, Unsorted::CurrentFrame);
 				pUnit->ForceMission(Mission::Guard);
 
 				continue;
@@ -7824,36 +7774,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				return pEngineer->ClickedMission(Mission::Capture, pBld, pBld->GetCell(), nullptr);
 			};
 
-			// TEMP diagnostic: the engineer's state when the order is given (a repeated order shows
-			// where the previous one ended).
-			const int preRepairMission = static_cast<int>(pInf->CurrentMission);
-			const int preRepairCells = pDamagedUrbanToRepair ? pInf->DistanceFrom(pDamagedUrbanToRepair) / Unsorted::LeptonsPerCell : -1;
-			const char* const preRepairDest = !pInf->Destination ? "none"
-				: (pInf->Destination == pDamagedUrbanToRepair ? "building" : "other");
-
 			if (pDamagedUrbanToRepair && !capturesByWeapon && IsBuildingEnterableFromZone(pDamagedUrbanToRepair, ObjectZone(pInf, MovementZone::Normal))
 				&& repairOrder(pInf, pDamagedUrbanToRepair))
 			{
-				static int urbanRepairLogSerial = -1;
-				static int urbanRepairLogCount = 0;
-
-				if (urbanRepairLogSerial != NeuralMatchSerial)
-				{
-					urbanRepairLogSerial = NeuralMatchSerial;
-					urbanRepairLogCount = 0;
-				}
-
-				if (urbanRepairLogCount++ < 30)
-				{
-					Debug::Log("[NeuralAI] House %d Urban: engineer %u -> repair %s at (%d,%d), %d%% health, owner %d, %d inside, frame %d "
-						"(before: mission %d dest %s %d cells; now mission %d).\n",
-						pHouse->ArrayIndex, pInf->UniqueID, pDamagedUrbanToRepair->Type->ID, pDamagedUrbanToRepair->GetMapCoords().X,
-						pDamagedUrbanToRepair->GetMapCoords().Y, static_cast<int>(pDamagedUrbanToRepair->GetHealthPercentage() * 100.0),
-						pDamagedUrbanToRepair->Owner ? pDamagedUrbanToRepair->Owner->ArrayIndex : -1,
-						pDamagedUrbanToRepair->Occupants.Count, Unsorted::CurrentFrame, preRepairMission, preRepairDest, preRepairCells,
-						static_cast<int>(pInf->CurrentMission));
-				}
-
 				pDamagedUrbanToRepair = nullptr;
 
 				continue;
@@ -9010,17 +8933,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	int bestFallbackEnemyScore = -999999;
 	bool anyEnemyBuildingExists = false;
 	const int coalitionTarget = CoalitionTargetOf(pHouse);
-	// TEMP diagnostic of the tank mass target: the danger of the way to the pick, the least and the
-	// most among the targets it knows, and whether the pick is a power plant that cuts the power.
-	int pickWayDanger = -1;
-	int leastWayDanger = -1;
-	int mostWayDanger = -1;
-	bool pickCutsPower = false;
-	// TEMP diagnostic: what the group does to the pick, and the least and the most among the
-	// targets it knows (percent of the strength in 900 frames; -1 with no army counted).
-	int pickGroupPercent = -1;
-	int leastGroupPercent = -1;
-	int mostGroupPercent = -1;
 	// What the idle army of the last tick does to each building type in 900 frames, as a percent of
 	// its strength (WaveGroupDamage*); -1 with no army counted lately. Spawners, mind control and
 	// temporal weapons are left out: their damage figure says nothing.
@@ -9077,7 +8989,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	// Where the enemy aircraft rearm counts by the value of the aircraft of his we have seen.
 	const std::array<int, 8> enemyAirValues = EnemyAirValueByOwner(pHouse);
-	int pickAirBaseBonus = 0;
 
 	auto const groupDamagePercent = [&](const BuildingTypeClass* pBldType) -> int
 	{
@@ -9334,7 +9245,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		bldCandScore += DiplomacyTargetBias(pHouse, pOwner->ArrayIndex, true);
 		int candWayDanger = 0;
-		bool candCutsPower = false;
 
 		if (tankMassTargets)
 		{
@@ -9349,7 +9259,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& knownPoweredDefenses[owner] >= TankMassPowerCutDefenses && IsEnemyBuildingKnown(pHouse, pEnemyBld)
 				&& knownPowerOutput[owner] - pEnemyBld->Type->PowerBonus < knownPowerDrain[owner])
 			{
-				candCutsPower = true;
 				bldCandScore += TankMassPowerCutBonus;
 			}
 
@@ -9435,26 +9344,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| IsEnemyBuildingKnown(pHouse, pEnemyBld)
 			|| ((pExt->NeuralAI_InfiltratedEnemyMask & (1 << ownerIdx)) != 0);
 
-		if (visible && candGroupPercent >= 0)
-		{
-			leastGroupPercent = leastGroupPercent < 0 ? candGroupPercent : std::min(leastGroupPercent, candGroupPercent);
-			mostGroupPercent = std::max(mostGroupPercent, candGroupPercent);
-		}
-
-		if (visible && pWayDangerMap)
-		{
-			leastWayDanger = leastWayDanger < 0 ? candWayDanger : std::min(leastWayDanger, candWayDanger);
-			mostWayDanger = std::max(mostWayDanger, candWayDanger);
-		}
-
 		if (visible && bldCandScore > bestVisEnemyBldScore)
 		{
 			bestVisEnemyBldScore = bldCandScore;
 			pVisibleEnemyBld = pEnemyBld;
-			pickWayDanger = candWayDanger;
-			pickCutsPower = candCutsPower;
-			pickGroupPercent = candGroupPercent;
-			pickAirBaseBonus = candAirBaseBonus;
 		}
 	}
 
@@ -10310,11 +10203,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	// TEMP diagnostic: the units held at home at this tick, and those of them that joined the idle
-	// army of the tank mass.
-	int heldAtHomeNow = 0;
-	std::unordered_set<const FootClass*> heldJoiners;
-
 	// What stands idle at this tick, for the production brake (NoteIdleArmy): the pools as the
 	// waves, the plans and the transports find them, and the units jammed at home with somewhere to
 	// go (HeldAtHomeFrames): whatever wave or plan holds them, they are of no use there, and every
@@ -10364,11 +10252,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// takes them along.
 		std::vector<UnitClass*> heldJoinVehicles;
 		std::vector<InfantryClass*> heldJoinSoldiers;
-		// Why the others do not: they wait for a transport, belong to a plan, or something else
-		// (entering, unloading, linked, disabled, hurt).
-		int heldForTransport = 0;
-		int heldInPlan = 0;
-		int heldOtherwise = 0;
 
 		auto const heldJoinsWave = [&](FootClass* pFoot)
 		{
@@ -10376,22 +10259,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				return false;
 
 			if (IsInTransportOp(pHouse, pFoot->UniqueID) || IsFerryReserved(pHouse, pFoot->UniqueID))
-			{
-				++heldForTransport;
 				return false;
-			}
 
 			if (IsPlanMember(pHouse, pFoot->UniqueID))
-			{
-				++heldInPlan;
 				return false;
-			}
 
 			if (pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter
 				|| pFoot->CurrentMission == Mission::Unload || pFoot->HasAnyLink() || pFoot->BunkerLinkedItem
 				|| pFoot->Deactivated || pFoot->IsUnderEMP() || pFoot->GetHealthPercentage() < HeldJoinsWaveHealth)
 			{
-				++heldOtherwise;
 				return false;
 			}
 
@@ -10425,9 +10301,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				++heldVehicles;
 
-				if (IsImmobileUnitTypeOnLand(pU->Type))
-					heldOtherwise += tankMassWaves ? 1 : 0;
-				else if (heldJoinsWave(pU))
+				if (!IsImmobileUnitTypeOnLand(pU->Type) && heldJoinsWave(pU))
 					heldJoinVehicles.push_back(pU);
 			}
 		}
@@ -10456,43 +10330,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// twice that after each more. Vehicles first.
 		const int heldJoinSteps = std::min(GetMacroState(pHouse).WaveFailuresInARow, HeldJoinsWaveMaxSteps);
 		const size_t heldJoinMost = heldJoinSteps > 0 ? static_cast<size_t>(HeldJoinsWaveUnits) << (heldJoinSteps - 1) : 0u;
-		const int heldFree = static_cast<int>(heldJoinVehicles.size() + heldJoinSoldiers.size());
 
 		if (heldJoinVehicles.size() > heldJoinMost)
 			heldJoinVehicles.resize(heldJoinMost);
 
 		if (heldJoinSoldiers.size() > heldJoinMost - heldJoinVehicles.size())
 			heldJoinSoldiers.resize(heldJoinMost - heldJoinVehicles.size());
-
-		// TEMP diagnostic: units jammed at home, every 1800 frames per house while there are 10 or more.
-		{
-			static int heldSerial = -1;
-			static int heldLogFrame[64] {};
-			const int houseIndex = pHouse->ArrayIndex;
-			const int now = Unsorted::CurrentFrame;
-
-			if (heldSerial != NeuralMatchSerial)
-			{
-				heldSerial = NeuralMatchSerial;
-				std::fill(std::begin(heldLogFrame), std::end(heldLogFrame), -1800);
-			}
-
-			if (houseIndex >= 0 && houseIndex < 64 && heldVehicles + heldSoldiers >= 10 && now - heldLogFrame[houseIndex] >= 1800)
-			{
-				heldLogFrame[houseIndex] = now;
-				Debug::Log("[NeuralAI] House %d held at home DIAG: %d vehicles and %d soldiers with somewhere to go stood %d+ frames "
-					"within %d cells of (%d,%d); idle %d and %d, frame %d.\n", houseIndex, heldVehicles, heldSoldiers, HeldAtHomeFrames,
-					static_cast<int>(HeldAtHomeCells), homeCoords.X, homeCoords.Y, idleVehicles, static_cast<int>(idleCombatInf.size()), now);
-
-				if (tankMassWaves)
-				{
-					Debug::Log("[NeuralAI] House %d held at home of the tank mass: %d wait for a transport, %d in a plan, %d otherwise "
-						"kept, %d free to join; %d may join after %d failed waves in a row, %d do, frame %d.\n", houseIndex,
-						heldForTransport, heldInPlan, heldOtherwise, heldFree, static_cast<int>(heldJoinMost),
-						GetMacroState(pHouse).WaveFailuresInARow, static_cast<int>(heldJoinVehicles.size() + heldJoinSoldiers.size()), now);
-				}
-			}
-		}
 
 		// Since when enough vehicles stand jammed at home for the cure of closed-in war factories
 		// (SellFactoryRoadBlock); the stretch ends when fewer than half of that many do.
@@ -10511,46 +10354,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		NoteIdleArmy(pHouse, idleVehicles + heldVehicles, static_cast<int>(idleCombatInf.size()) + heldSoldiers, idleShips);
-		heldAtHomeNow = heldVehicles + heldSoldiers;
-		heldJoiners.insert(heldJoinVehicles.begin(), heldJoinVehicles.end());
-		heldJoiners.insert(heldJoinSoldiers.begin(), heldJoinSoldiers.end());
-
-		// TEMP diagnostic: whether the units held at home that a wave ordered out left the base.
-		if (auto& joinersOut = GetMacroState(pHouse).HeldJoinersOut; !joinersOut.empty() && IsAITickWindow(300, 0))
-		{
-			const int now = Unsorted::CurrentFrame;
-			int left = 0;
-			int stayed = 0;
-
-			auto const check = [&](const FootClass* pFoot)
-			{
-				if (!pFoot || pFoot->Owner != pHouse || pFoot->InLimbo || !pFoot->IsAlive)
-					return;
-
-				auto const it = joinersOut.find(pFoot->UniqueID);
-
-				if (it == joinersOut.end() || now - it->second < HeldJoinerCheckFrames)
-					return;
-
-				++(pFoot->GetMapCoords().DistanceFrom(homeCoords) > HeldAtHomeCells ? left : stayed);
-				joinersOut.erase(it);
-			};
-
-			for (auto const pU : UnitClass::Array)
-				check(pU);
-
-			for (auto const pInf : InfantryClass::Array)
-				check(pInf);
-
-			// Those left over are dead or inside something.
-			const size_t gone = std::erase_if(joinersOut, [now](auto const& entry) { return now - entry.second >= HeldJoinerCheckFrames; });
-
-			if (left > 0 || stayed > 0 || gone > 0)
-			{
-				Debug::Log("[NeuralAI] Frame %d | House #%d held at home that a wave ordered out %d frames ago: %d left the base, "
-					"%d still there, %d gone\n", now, pHouse->ArrayIndex, HeldJoinerCheckFrames, left, stayed, static_cast<int>(gone));
-			}
-		}
 
 		// The idle army by type, for the target scoring of the next tick (groupDamagePercent).
 		{
@@ -11065,7 +10868,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// and the enemy still has a building there (WaveGoalKeepFrames): this wave takes the units
 		// that are free, that arrived, or whose goal is gone. The target is picked anew at every tick,
 		// and units held in a jam were turned round by every wave that went another way.
-		int keptWaveGoals = 0;
 		std::vector<std::pair<CellStruct, bool>> waveGoalStands;
 
 		auto const keptWaveGoal = [&](const FootClass* pFoot, const CellClass* pNewGoal, int& zone) -> CellClass*
@@ -11154,26 +10956,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return true;
 		};
 
-		// TEMP diagnostic: the units held at home among those this wave orders out, and why the
-		// others get no order: fighting or by the front, waiting for a sister transport, handed to
-		// the transport operations, or on another zone than the goal with no operation for them.
-		int joinersOrdered = 0;
-		int joinersAtFront = 0;
-		int joinersWaiting = 0;
-		int joinersHanded = 0;
-		int joinersNoWay = 0;
-		int joinerZone = -1;
-		int joinerGoalZone = -1;
-
-		auto const noteJoinerOrdered = [&](const FootClass* pFoot)
-		{
-			if (heldJoiners.contains(pFoot))
-			{
-				++joinersOrdered;
-				waveMacro.HeldJoinersOut[pFoot->UniqueID] = Unsorted::CurrentFrame;
-			}
-		};
-
 		// Siege screen (SiegeScreen*): the centre of the wave's guns on its target's ground (those with a
 		// wave goal or idle for this wave), for the main battle tanks of an archetype 7 house.
 		CellStruct waveGunsCenter = CellStruct::Empty;
@@ -11211,10 +10993,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// Never abort a unit's current attack target/objective or pull a
 			// frontline unit away from an active enemy front!
 			if (IsFootActivelyAttackingOrMovingToEnemy(pU) || IsFootNearEnemyFrontline(pU, uz))
-			{
-				joinersAtFront += heldJoiners.contains(pU) ? 1 : 0;
 				continue;
-			}
 
 			const bool canCrossWaterDirectly = (pU->Type->MovementZone == MovementZone::Amphibious
 				|| pU->Type->MovementZone == MovementZone::AmphibiousDestroyer
@@ -11226,7 +11005,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// next to us (<= 10 cells)
 			if (isWaitingForSisterTransportUnload(pU, canCrossWaterDirectly))
 			{
-				joinersWaiting += heldJoiners.contains(pU) ? 1 : 0;
 				continue; // Regroup battalion on beachhead while unattacked sister
 						// transport finishes unloading!
 			}
@@ -11268,7 +11046,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					pUnitWaveGoal = pKept;
 					keepsEarlierGoal = true;
-					++keptWaveGoals;
 				}
 			}
 
@@ -11281,13 +11058,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (handed)
 					++handedVeh;
-
-				if (heldJoiners.contains(pU))
-				{
-					++(handed ? joinersHanded : joinersNoWay);
-					joinerZone = uz;
-					joinerGoalZone = goalZone;
-				}
 
 				continue;
 			}
@@ -11309,7 +11079,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					IssueMoveOrder(pU, pFlankCell, 6.0);
 					NoteExpertCommand(pHouse, pU, CreditSourceWave);
-					noteJoinerOrdered(pU);
 					dispatchedVeh++;
 					continue;
 				}
@@ -11371,7 +11140,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			NoteExpertCommand(pHouse, pU, CreditSourceWave);
-			noteJoinerOrdered(pU);
 			dispatchedVeh++;
 		}
 
@@ -11383,10 +11151,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			auto const pI = idleCombatInf[i];
 			const int iz = ObjectZone(pI, MovementZone::Normal);
 			if (IsFootActivelyAttackingOrMovingToEnemy(pI) || IsFootNearEnemyFrontline(pI, iz))
-			{
-				joinersAtFront += heldJoiners.contains(pI) ? 1 : 0;
 				continue;
-			}
 
 			const bool canInfCrossWater = (pI->Type->MovementZone == MovementZone::Amphibious
 				|| pI->Type->MovementZone == MovementZone::AmphibiousDestroyer
@@ -11426,7 +11191,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					pInfWaveGoal = pKept;
 					infKeepsEarlierGoal = true;
-					++keptWaveGoals;
 				}
 			}
 
@@ -11443,13 +11207,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (handed)
 					++handedInf;
-
-				if (heldJoiners.contains(pI))
-				{
-					++(handed ? joinersHanded : joinersNoWay);
-					joinerZone = footZone;
-					joinerGoalZone = goalFootZone;
-				}
 
 				continue;
 			}
@@ -11479,7 +11236,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			NoteExpertCommand(pHouse, pI, CreditSourceWave);
-			noteJoinerOrdered(pI);
 			dispatchedInf++;
 		}
 
@@ -11505,23 +11261,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							? static_cast<int>(NeuralPlanId::Reprisal)
 							: -1);
 					NoteWaveForVerdict(pHouse, pWaveTargetCell->MapCoords, mission);
-
-					// TEMP diagnostic: how defended the way to this target is among those it knows.
-					if (pVisibleEnemyBld && pVisibleEnemyBld->GetCell() == pWaveTargetCell)
-					{
-						Debug::Log("[NeuralAI] Frame %d | House #%d wave target %s at (%d,%d): way danger %d (known targets from %d to %d), "
-							"cuts the power %d\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, pVisibleEnemyBld->Type->ID,
-							pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, pickWayDanger, leastWayDanger, mostWayDanger,
-							pickCutsPower ? 1 : 0);
-					}
-				}
-
-				// TEMP diagnostic: what the group does to this target among those it knows.
-				if (pVisibleEnemyBld && pVisibleEnemyBld->GetCell() == pWaveTargetCell && (pickGroupPercent >= 0 || pickAirBaseBonus > 0))
-				{
-					Debug::Log("[NeuralAI] Frame %d | House #%d wave target %s: group damage %d%% of its strength in 900 frames "
-						"(known targets from %d to %d), air base bonus %d\n", Unsorted::CurrentFrame, pHouse->ArrayIndex,
-						pVisibleEnemyBld->Type->ID, pickGroupPercent, leastGroupPercent, mostGroupPercent, pickAirBaseBonus);
 				}
 
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;
@@ -11568,24 +11307,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d): %zu vehicles and %zu infantry handed to transport operations\n",
 					Unsorted::CurrentFrame, pHouse->ArrayIndex, pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, handedVeh, handedInf);
-			}
-
-			// TEMP diagnostic: the units held at home when this dispatch left, and those that joined it.
-			if (tankMassWaves && !heldJoiners.empty())
-			{
-				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d): %d held at home, %d of them joined, %d ordered out, "
-					"%d fighting or by the front, %d wait for a sister transport, %d handed to transport operations, %d with no way "
-					"(zone %d, goal zone %d)\n",
-					Unsorted::CurrentFrame, pHouse->ArrayIndex, pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, heldAtHomeNow,
-					static_cast<int>(heldJoiners.size()), joinersOrdered, joinersAtFront, joinersWaiting, joinersHanded, joinersNoWay,
-					joinerZone, joinerGoalZone);
-			}
-
-			// TEMP diagnostic: units of this dispatch that kept the goal of an earlier wave.
-			if (keptWaveGoals > 0)
-			{
-				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d): %d units keep their way to an earlier target\n",
-					Unsorted::CurrentFrame, pHouse->ArrayIndex, pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y, keptWaveGoals);
 			}
 		}
 
@@ -15849,31 +15570,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| IsPlanMember(pHouse, pAir->UniqueID) || IsInTransportOp(pHouse, pAir->UniqueID))
 		{
 			continue;
-		}
-
-		// TEMP trace: an aircraft the stall watchdog has followed on Attack for 150 frames, as this
-		// tick finds it before any new order (its attack is 0 frames old at every watchdog sample,
-		// so between two ticks it drops back to rest: in which mission, with or without its target).
-		{
-			static int airRestLines = 0;
-			auto const& stallTracks = GetMacroState(pHouse).AirStallTracks;
-
-			if (auto const itStall = stallTracks.find(pAir->UniqueID);
-				itStall != stallTracks.end() && Unsorted::CurrentFrame - itStall->second.SinceFrame >= 150 && !pAir->IsInAir()
-				&& airRestLines < 90)
-			{
-				airRestLines++;
-				auto const pRestTarget = abstract_cast<TechnoClass*>(pAir->Target);
-				auto const pRestGoing = abstract_cast<CellClass*>(pAir->Destination);
-				Debug::Log("[NeuralAI] House %d air rest DIAG frame %d: %s %u mission %d status %d age %d, queued %d, target %s, destination %s "
-					"(%d,%d), ammo %d/%d, returning %d, linked %d, timer left %d.\n", pHouse->ArrayIndex, Unsorted::CurrentFrame, pAir->Type->ID,
-					pAir->UniqueID, static_cast<int>(pAir->CurrentMission), pAir->MissionStatus,
-					Unsorted::CurrentFrame - pAir->CurrentMissionStartTime, static_cast<int>(pAir->QueuedMission),
-					pAir->Target ? (pRestTarget ? pRestTarget->GetTechnoType()->ID : "other") : "none",
-					pAir->Destination ? (pRestGoing ? "cell" : "object") : "none", pRestGoing ? pRestGoing->MapCoords.X : -1,
-					pRestGoing ? pRestGoing->MapCoords.Y : -1, pAir->Ammo, pAir->Type->Ammo, pAir->IsReturningFromAttackRun ? 1 : 0,
-					pAir->GetNthLink(0) ? 1 : 0, pAir->UpdateTimer.GetTimeLeft());
-			}
 		}
 
 		// An aircraft with no weapon keeps no target: on Guard the engine puts any aircraft that
