@@ -315,7 +315,9 @@ namespace
 	// (CanTransportTypeComeTo). The back door asks it for each member of its team, and an operation that
 	// no transport takes asks it for its staging cell (OpNoReachFrames). The sling of a unit carryall
 	// does not count: an operation seats a unit in its bay only (GetOpCarrier), and one that waited for
-	// a vehicle it could not seat held it OpNoTransportFrames.
+	// a vehicle it could not seat held it OpNoTransportFrames. An owned transport with cargo that no
+	// operation holds (the old ferry loader's) does not count either (user approved, 2026-11-19, P3:
+	// two operations waited OpNoTransportFrames for the one loaded transport of their house).
 	// TEMP (rule consolidation, case 4): the answer that decides while CanHouseCarry is checked against
 	// it (CanHouseCarryNow below).
 	bool CanHouseCarryNowOld(HouseClass* pHouse, const TechnoTypeClass* pFootType, const CellStruct& from, const CellStruct& to)
@@ -336,8 +338,11 @@ namespace
 
 		for (auto const pUnit : UnitClass::Array)
 		{
-			if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
+			if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type
+				|| (pUnit->Passengers.NumPassengers > 0 && !IsInTransportOp(pHouse, pUnit->UniqueID)))
+			{
 				continue;
+			}
 
 			auto const pUnitType = pUnit->Type;
 
@@ -350,8 +355,11 @@ namespace
 
 		for (auto const pAir : AircraftClass::Array)
 		{
-			if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type)
+			if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type
+				|| (pAir->Passengers.NumPassengers > 0 && !IsInTransportOp(pHouse, pAir->UniqueID)))
+			{
 				continue;
+			}
 
 			auto const pAirType = pAir->Type;
 
@@ -400,7 +408,8 @@ namespace
 	// aircraft that lifts it; CarryAirHolds, an aircraft that seats it; CarryLink, a unit hold makes the
 	// crossing (CanTransportTypeLink); CarryOwnedComes, an owned unit hold links where it stands to From;
 	// CarryBuiltComes, a buildable unit type comes to From (CanTransportTypeComeTo); CarryAloneIsYes, a
-	// cargo that crosses water on its own answers yes; CarryTechCap10, TechLevel 10 at most.
+	// cargo that crosses water on its own answers yes; CarryTechCap10, TechLevel 10 at most;
+	// CarryOwnedNoStrayCargo, an owned transport with cargo counts only while an operation holds it.
 	enum CarrySource : unsigned
 	{
 		CarryOwned = 1u << 0,
@@ -417,7 +426,8 @@ namespace
 		CarryOwnedComes = 1u << 4,
 		CarryBuiltComes = 1u << 5,
 		CarryAloneIsYes = 1u << 6,
-		CarryTechCap10 = 1u << 7
+		CarryTechCap10 = 1u << 7,
+		CarryOwnedNoStrayCargo = 1u << 8
 	};
 
 	struct CarryQuery
@@ -482,11 +492,16 @@ namespace
 			return pType->TechLevel >= 0 && (!(rules & CarryTechCap10) || pType->TechLevel <= 10) && pType->TechLevel <= pHouse->TechLevel;
 		};
 
+		auto const strayCargo = [&](const FootClass* pFoot)
+		{
+			return (rules & CarryOwnedNoStrayCargo) && pFoot->Passengers.NumPassengers > 0 && !IsInTransportOp(pHouse, pFoot->UniqueID);
+		};
+
 		if (sources & CarryOwned)
 		{
 			for (auto const pUnit : UnitClass::Array)
 			{
-				if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
+				if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type || strayCargo(pUnit))
 					continue;
 
 				auto const pType = pUnit->Type;
@@ -500,7 +515,7 @@ namespace
 
 			for (auto const pAir : AircraftClass::Array)
 			{
-				if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type)
+				if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type || strayCargo(pAir))
 					continue;
 
 				if (airAnswers(pAir->Type))
@@ -608,7 +623,8 @@ namespace
 			query.From = from;
 			query.To = to;
 			query.Sources = CarryOwned | CarryBuildableNow;
-			query.Rules = CarrySlingAir | CarryAirHolds | CarryTechCap10 | CarryLink | CarryOwnedComes | CarryBuiltComes;
+			query.Rules = CarrySlingAir | CarryAirHolds | CarryTechCap10 | CarryLink | CarryOwnedComes | CarryBuiltComes
+				| CarryOwnedNoStrayCargo;
 			CheckCarryShadow(pHouse, "CanHouseCarryNow", query, answer);
 		}
 
