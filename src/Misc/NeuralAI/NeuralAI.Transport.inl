@@ -794,7 +794,7 @@ namespace
 	// kept hovering there in Mission::Move and got the order again and again. When another unit of
 	// ours holds the cell or heads to it, a vehicle, ship or flyer gets the nearest cell within
 	// DestinationSpreadCells that none holds or heads to and nothing stands on (ring by ring, fixed
-	// order, so a unit keeps the cell it already has); off the air in the cell's zone, at most
+	// order, so a unit keeps the cell it already has; FindWaitCellNear); off the air in the cell's zone, at most
 	// DestinationSpreadLevels levels from it and off bridges and tubes. Infantry share cells, and
 	// gatherers and units that deploy into a building want their exact cell: they keep it.
 	CellClass* SpreadDestination(FootClass* pFoot, CellClass* pCell)
@@ -862,8 +862,6 @@ namespace
 		if (!isClaimed(target))
 			return pCell;
 
-		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search
-		// below, which decides.
 		NeuralWaitAsker asker {};
 		asker.Speed = pType->SpeedType;
 		asker.Movement = pType->MovementZone;
@@ -873,58 +871,29 @@ namespace
 		NeuralWaitSearch search {};
 		search.MinRing = 1;
 		search.MaxRing = DestinationSpreadCells;
-		auto const pShadow = FindWaitCellNear(target, search, asker,
+		auto const pCand = FindWaitCellNear(target, search, asker,
 			WaitInMap | WaitNoBuilding | WaitClearOfUnits | (flyer ? 0u : (WaitZone | WaitLevelNear | WaitOffDeck)),
 			[&isClaimed](const CellStruct& c, const CellClass*) { return isClaimed(c); });
-		static int shadowLogSerial = -1;
-		static int shadowLogCount = 0;
 
-		for (int r = 1; r <= DestinationSpreadCells; ++r)
+		if (!pCand)
+			return pCell;
+
+		auto& macro = GetMacroState(pFoot->Owner);
+		const int now = Unsorted::CurrentFrame;
+		++macro.DestinationSpreadCount;
+
+		if (macro.DestinationSpreadLogFrame < 0 || now < macro.DestinationSpreadLogFrame
+			|| now - macro.DestinationSpreadLogFrame >= DestinationSpreadLogFrames)
 		{
-			for (int dy = -r; dy <= r; ++dy)
-			{
-				for (int dx = -r; dx <= r; ++dx)
-				{
-					if (std::abs(dx) != r && std::abs(dy) != r)
-						continue;
-
-					const CellStruct c { static_cast<short>(target.X + dx), static_cast<short>(target.Y + dy) };
-					auto const pCand = MapClass::Instance.TryGetCellAt(c);
-
-					if (!pCand || isClaimed(c) || pCand->GetBuilding()
-						|| !pCand->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false))
-					{
-						continue;
-					}
-
-					if (!flyer && (MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
-						|| std::abs(pCand->Level - pCell->Level) > DestinationSpreadLevels || IsBridgeOrTubeCell(pCand)))
-					{
-						continue;
-					}
-
-					auto& macro = GetMacroState(pFoot->Owner);
-					const int now = Unsorted::CurrentFrame;
-					++macro.DestinationSpreadCount;
-
-					if (macro.DestinationSpreadLogFrame < 0 || now < macro.DestinationSpreadLogFrame
-						|| now - macro.DestinationSpreadLogFrame >= DestinationSpreadLogFrames)
-					{
-						Debug::Log("[NeuralAI] Frame %d | House #%d spread %d orders to free cells next to a destination another unit "
-							"of ours holds or heads to (since frame %d), last %s (%d,%d) -> (%d,%d)\n", now, pFoot->Owner->ArrayIndex,
-							macro.DestinationSpreadCount, std::max(0, macro.DestinationSpreadLogFrame), pType->ID, target.X, target.Y, c.X, c.Y);
-						macro.DestinationSpreadLogFrame = now;
-						macro.DestinationSpreadCount = 0;
-					}
-
-					NoteWaitCellShadow("SpreadDestination", shadowLogSerial, shadowLogCount, target, pCand, pShadow);
-					return pCand;
-				}
-			}
+			Debug::Log("[NeuralAI] Frame %d | House #%d spread %d orders to free cells next to a destination another unit "
+				"of ours holds or heads to (since frame %d), last %s (%d,%d) -> (%d,%d)\n", now, pFoot->Owner->ArrayIndex,
+				macro.DestinationSpreadCount, std::max(0, macro.DestinationSpreadLogFrame), pType->ID, target.X, target.Y,
+				pCand->MapCoords.X, pCand->MapCoords.Y);
+			macro.DestinationSpreadLogFrame = now;
+			macro.DestinationSpreadCount = 0;
 		}
 
-		NoteWaitCellShadow("SpreadDestination", shadowLogSerial, shadowLogCount, target, nullptr, pShadow);
-		return pCell;
+		return pCand;
 	}
 
 	// Coarse sea route for a ship: breadth-first search over the cells of its movement zone on a
