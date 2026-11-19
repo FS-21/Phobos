@@ -2284,6 +2284,9 @@ namespace
 	constexpr int OpSharedCrossingLogLines = 60;
 	// TEMP diagnostic: the transports an operation leaves to one that waits longer, logged per match.
 	constexpr int OpStarvedLogLines = 80;
+	// TEMP diagnostic (CheckCarryShadow, NoteCrossingNeed): the answers of the old carry questions that
+	// CanHouseCarry or ForEachCarrierType do not give, logged per match.
+	constexpr int CarryShadowLogLines = 60;
 	constexpr int OpStuckFrames = 900;
 	constexpr double OpStuckCells = 2.0;
 	constexpr int OpCrossCapFrames = 9000;

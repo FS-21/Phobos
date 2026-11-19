@@ -201,18 +201,25 @@ namespace
 	// each in array order; the first yes answers. It only reads.
 	// Sources: CarryOwned, the house's own (any job, any health); CarryBuildableNow, a type with a
 	// factory of its kind now and its prerequisites met; CarrySide, a unit type of the house's side with
-	// a factory of its kind or a construction yard.
+	// a factory of its kind or a construction yard; CarryPrereqOnly, a type with its prerequisites met,
+	// no factory needed.
 	// Rules: CarrySlingUnit, a unit carryall that lifts the cargo counts; CarrySlingAir, a carryall
 	// aircraft that lifts it; CarryAirHolds, an aircraft that seats it; CarryLink, a unit hold makes the
 	// crossing (CanTransportTypeLink); CarryOwnedComes, an owned unit hold links where it stands to From;
 	// CarryBuiltComes, a buildable unit type comes to From (CanTransportTypeComeTo); CarryAloneIsYes, a
 	// cargo that crosses water on its own answers yes; CarryTechCap10, TechLevel 10 at most;
-	// CarryOwnedNoStrayCargo, an owned transport with cargo counts only while an operation holds it.
+	// CarryOwnedNoStrayCargo, an owned transport with cargo counts only while an operation holds it;
+	// CarryNoGunner, a unit hold with a gunner does not count; CarryNoSeat, no seat test;
+	// CarryAnyFlyerIsYes, a flying hold answers yes before any link, and so does an aircraft that is a
+	// carryall or has passengers.
+	// SeatSize: the seat the cargo needs when there is no cargo type (0: the cargo's size, or 1).
 	enum CarrySource : unsigned
 	{
 		CarryOwned = 1u << 0,
 		CarryBuildableNow = 1u << 1,
-		CarrySide = 1u << 2
+		CarrySide = 1u << 2,
+		CarryPrereqOnly = 1u << 3,
+		CarryNotOwned = 1u << 4
 	};
 
 	enum CarryRule : unsigned
@@ -225,12 +232,16 @@ namespace
 		CarryBuiltComes = 1u << 5,
 		CarryAloneIsYes = 1u << 6,
 		CarryTechCap10 = 1u << 7,
-		CarryOwnedNoStrayCargo = 1u << 8
+		CarryOwnedNoStrayCargo = 1u << 8,
+		CarryNoGunner = 1u << 9,
+		CarryNoSeat = 1u << 10,
+		CarryAnyFlyerIsYes = 1u << 11
 	};
 
 	struct CarryQuery
 	{
 		const TechnoTypeClass* Cargo { nullptr };
+		int SeatSize { 0 };
 		CellStruct From { CellStruct::Empty };
 		CellStruct To { CellStruct::Empty };
 		unsigned Sources { 0 };
@@ -255,21 +266,28 @@ namespace
 			return true;
 		}
 
-		const int passSize = pCargo ? std::max(1, static_cast<int>(pCargo->Size)) : 1;
+		const int passSize = query.SeatSize > 0 ? query.SeatSize : (pCargo ? std::max(1, static_cast<int>(pCargo->Size)) : 1);
 		auto const pCargoUnit = pCargo ? abstract_cast<const UnitTypeClass*>(pCargo) : nullptr;
 		auto const pCargoExt = pCargo ? TechnoTypeExt::Fetch(pCargo) : nullptr;
 		const bool liftable = pCargoUnit && !pCargoUnit->Organic && !pCargoUnit->Naval && !pCargoUnit->NonVehicle
 			&& (!pCargoExt || pCargoExt->Carryall_Allowed.Get());
 
-		auto const seats = [passSize](const TechnoTypeClass* pType)
+		auto const seats = [passSize, rules](const TechnoTypeClass* pType)
 		{
-			return static_cast<int>(pType->SizeLimit) >= passSize && pType->Passengers >= passSize;
+			return (rules & CarryNoSeat) || (static_cast<int>(pType->SizeLimit) >= passSize && pType->Passengers >= passSize);
+		};
+
+		auto const flies = [](const TechnoTypeClass* pType)
+		{
+			return pType->WhatAmI() == AbstractType::AircraftType || pType->JumpJet || pType->ConsideredAircraft
+				|| pType->MovementZone == MovementZone::Fly;
 		};
 
 		auto const holds = [&](const TechnoTypeClass* pType)
 		{
-			return IsAmphibiousOrAirTransport(pType) && seats(pType)
-				&& (!(rules & CarryLink) || CanTransportTypeLink(pType, query.From, query.To));
+			return IsAmphibiousOrAirTransport(pType) && seats(pType) && (!(rules & CarryNoGunner) || !pType->Gunner)
+				&& (((rules & CarryAnyFlyerIsYes) && flies(pType)) || !(rules & CarryLink)
+					|| CanTransportTypeLink(pType, query.From, query.To));
 		};
 
 		auto const unitSlings = [&](const TechnoTypeClass* pType)
@@ -281,6 +299,9 @@ namespace
 
 		auto const airAnswers = [&](const AircraftTypeClass* pType)
 		{
+			if ((rules & CarryAnyFlyerIsYes) && (pType->Carryall || pType->Passengers > 0))
+				return true;
+
 			return pType->Carryall ? ((rules & CarrySlingAir) && liftable && CarryallTypeCanLiftType(pType, pCargo))
 				: ((rules & CarryAirHolds) && seats(pType));
 		};
@@ -324,7 +345,7 @@ namespace
 		const unsigned int sideBit = (pHouse->Type && pHouse->Type->ArrayIndex >= 0 && pHouse->Type->ArrayIndex < 32)
 			? (1u << pHouse->Type->ArrayIndex) : 0u;
 
-		if (sources & (CarryBuildableNow | CarrySide))
+		if (sources & (CarryBuildableNow | CarrySide | CarryPrereqOnly))
 		{
 			for (auto const pType : UnitTypeClass::Array)
 			{
@@ -335,6 +356,9 @@ namespace
 
 				if (!carries)
 					continue;
+
+				if ((sources & CarryPrereqOnly) && HouseExt::PrerequisitesMet(pHouse, pType))
+					return true;
 
 				const bool hasFactoryNow = pType->Naval ? (pHouse->NumShipyards > 0) : (pHouse->NumWarFactories > 0);
 
@@ -349,7 +373,7 @@ namespace
 			}
 		}
 
-		if ((sources & CarryBuildableNow) && (pHouse->NumAirpads > 0 || pHouse->NumWarFactories > 0))
+		if ((sources & CarryPrereqOnly) || ((sources & CarryBuildableNow) && (pHouse->NumAirpads > 0 || pHouse->NumWarFactories > 0)))
 		{
 			for (auto const pType : AircraftTypeClass::Array)
 			{
@@ -359,6 +383,71 @@ namespace
 		}
 
 		return false;
+	}
+
+	// The transport types of the house's side (InOwners) that hold the cargo by the rules of the query
+	// (the seat, CarryNoGunner, CarryLink, CarryBuiltComes, CarryAirHolds for aircraft that are no
+	// carryalls), TechLevel allowed, none of them owned with CarryNotOwned: unit types in array order,
+	// then aircraft types. No factory or base is needed. It only reads.
+	template <typename Fn>
+	void ForEachCarrierType(HouseClass* pHouse, const CarryQuery& query, Fn&& fn)
+	{
+		if (!pHouse || !pHouse->Type || pHouse->Type->ArrayIndex < 0 || pHouse->Type->ArrayIndex >= 32)
+			return;
+
+		const unsigned int sideBit = 1u << pHouse->Type->ArrayIndex;
+		const unsigned rules = query.Rules;
+		const int passSize = query.SeatSize > 0 ? query.SeatSize
+			: (query.Cargo ? std::max(1, static_cast<int>(query.Cargo->Size)) : 1);
+
+		auto const passes = [&](const TechnoTypeClass* pType)
+		{
+			return pType->TechLevel >= 0 && (!(rules & CarryTechCap10) || pType->TechLevel <= 10) && pType->TechLevel <= pHouse->TechLevel
+				&& pType->InOwners(sideBit) && pType->Passengers >= passSize && static_cast<int>(pType->SizeLimit) >= passSize
+				&& (!(query.Sources & CarryNotOwned) || pHouse->CountOwnedNow(pType) == 0)
+				&& (!(rules & CarryLink) || CanTransportTypeLink(pType, query.From, query.To))
+				&& (!(rules & CarryBuiltComes) || CanTransportTypeComeTo(pHouse, pType, query.From));
+		};
+
+		for (auto const pType : UnitTypeClass::Array)
+		{
+			if (pType && IsAmphibiousOrAirTransport(pType) && (!(rules & CarryNoGunner) || !pType->Gunner) && passes(pType))
+				fn(pType);
+		}
+
+		if (!(rules & CarryAirHolds))
+			return;
+
+		for (auto const pType : AircraftTypeClass::Array)
+		{
+			if (pType && !pType->Carryall && pType->Passengers > 0 && passes(pType))
+				fn(pType);
+		}
+	}
+
+	// TEMP diagnostic (rule consolidation, case 4): an old answer that CanHouseCarry does not give,
+	// CarryShadowLogLines a match. With none over a desync test and some matches, the old body goes.
+	void CheckCarryShadow(HouseClass* pHouse, const char* name, const CarryQuery& query, bool answer)
+	{
+		if (CanHouseCarry(pHouse, query) == answer)
+			return;
+
+		static int shadowLogSerial = -1;
+		static int shadowLogCount = 0;
+
+		if (shadowLogSerial != NeuralMatchSerial)
+		{
+			shadowLogSerial = NeuralMatchSerial;
+			shadowLogCount = 0;
+		}
+
+		if (shadowLogCount++ < CarryShadowLogLines)
+		{
+			Debug::Log("[NeuralAI] House %d carry shadow: %s says %d and CanHouseCarry %d, cargo %s, from (%d,%d) to (%d,%d), sources %u, "
+				"rules %u, frame %d.\n", pHouse ? pHouse->ArrayIndex : -1, name, answer ? 1 : 0, answer ? 0 : 1,
+				query.Cargo ? query.Cargo->ID : "none", query.From.X, query.From.Y, query.To.X, query.To.Y, query.Sources, query.Rules,
+				Unsorted::CurrentFrame);
+		}
 	}
 
 	// With both cells given, only transports that can make that very crossing count
@@ -435,6 +524,8 @@ namespace
 		macro.CrossingNeedFrame = now;
 		const unsigned int ownHouseBit = 1u << typeIndex;
 		passSize = std::max(1, passSize);
+		// TEMP (rule consolidation, case 4): the list as ForEachCarrierType would leave it, checked below.
+		std::vector<const TechnoTypeClass*> shadowTypes = macro.CrossingNeedTypes;
 
 		auto const note = [&](const TechnoTypeClass* pType)
 		{
@@ -459,6 +550,39 @@ namespace
 		{
 			if (pType && !pType->Carryall && pType->Passengers > 0)
 				note(pType);
+		}
+
+		// TEMP diagnostic (rule consolidation, case 4): the types ForEachCarrierType gives against the old loops.
+		CarryQuery query {};
+		query.SeatSize = passSize;
+		query.From = from;
+		query.To = to;
+		query.Sources = CarrySide | CarryNotOwned;
+		query.Rules = CarryNoGunner | CarryAirHolds | CarryLink | CarryBuiltComes;
+
+		ForEachCarrierType(pHouse, query, [&shadowTypes](const TechnoTypeClass* pType)
+			{
+				if (std::find(shadowTypes.begin(), shadowTypes.end(), pType) == shadowTypes.end())
+					shadowTypes.push_back(pType);
+			});
+
+		if (shadowTypes != macro.CrossingNeedTypes)
+		{
+			static int needLogSerial = -1;
+			static int needLogCount = 0;
+
+			if (needLogSerial != NeuralMatchSerial)
+			{
+				needLogSerial = NeuralMatchSerial;
+				needLogCount = 0;
+			}
+
+			if (needLogCount++ < CarryShadowLogLines)
+			{
+				Debug::Log("[NeuralAI] House %d carry shadow: NoteCrossingNeed notes %d types and ForEachCarrierType %d, from (%d,%d) to "
+					"(%d,%d), seat %d, frame %d.\n", pHouse->ArrayIndex, static_cast<int>(macro.CrossingNeedTypes.size()),
+					static_cast<int>(shadowTypes.size()), from.X, from.Y, to.X, to.Y, passSize, now);
+			}
 		}
 	}
 
