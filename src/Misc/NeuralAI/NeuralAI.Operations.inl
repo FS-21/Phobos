@@ -220,6 +220,137 @@ namespace
 		return !(pCarryState && pCarryState->CarryallCargo);
 	}
 
+	// TEMP diagnostic (rule consolidation, 2026-11-19): the first check that turns a transport of ours
+	// down for an operation, in the order of IsTransportFreeForOp and then of the crossing its
+	// candidates must make. It changes nothing: the pending pickup of a carryall is looked up, not
+	// pruned (the candidate search already pruned it this tick).
+	const char* DescribeOpTransportRefusal(HouseClass* pHouse, FootClass* pFoot, OpCarrier carrier, const CellStruct& staging,
+		const CellStruct& landing)
+	{
+		if (pFoot->InLimbo)
+			return "in limbo";
+
+		if (!pFoot->IsAlive || pFoot->Health <= 0 || pFoot->IsCrashing || pFoot->IsSinking)
+			return "dying";
+
+		if (pFoot->GetHealthPercentage() < OpTransportMinHealth)
+			return "damaged";
+
+		if (pFoot->Passengers.NumPassengers > 0)
+			return "loaded";
+
+		if (pFoot->IsMindControlled() || pFoot->Deactivated || pFoot->IsUnderEMP())
+			return "disabled";
+
+		if (pFoot->HasAnyLink())
+			return "linked";
+
+		const DWORD uid = pFoot->UniqueID;
+
+		if (IsInTransportOp(pHouse, uid))
+			return "in an operation";
+
+		if (IsPlanMember(pHouse, uid))
+			return "in a plan";
+
+		if (IsFerryParkedToLoad(pHouse, uid))
+			return "parked by the ferry loader";
+
+		if (IsOnRepairTrip(pHouse, uid))
+			return "on a repair trip";
+
+		if (IsActiveScout(pHouse, uid))
+			return "scouting";
+
+		if (IsSneakStrikeActive(pHouse, uid))
+			return "on a sneak strike";
+
+		if (carrier == OpCarrier::Carryall)
+		{
+			if (pFoot->CurrentMission == Mission::Unload || abstract_cast<UnitClass*>(pFoot->Destination) || AirPickups.contains(uid))
+				return "lifting a vehicle";
+		}
+		else
+		{
+			auto const pCarryState = UnitExt::Fetch(static_cast<UnitClass*>(pFoot));
+
+			if (pCarryState && pCarryState->CarryallCargo)
+				return "slinging a vehicle";
+		}
+
+		auto const pType = pFoot->GetTechnoType();
+
+		if (!CanTransportTypeLink(pType, pFoot->GetMapCoords(), staging))
+			return "cannot come to the staging beach";
+
+		if (!CanTransportTypeLink(pType, staging, landing))
+			return "cannot make the crossing";
+
+		return "free";
+	}
+
+	// TEMP diagnostic (rule consolidation, 2026-11-19): an operation that no transport takes names
+	// each transport of ours (OpRefusalLogTransports at most) with the check that turns it down, and
+	// whether CanHouseCarryNow still counts one that comes (then the operation waits
+	// OpNoTransportFrames). OpRefusalLogLines lines a match.
+	void LogOpTransportRefusals(HouseClass* pHouse, const NeuralTransportOperation& op, int unseated, int largest, bool reachable)
+	{
+		static int refusalLogSerial = -1;
+		static int refusalLogCount = 0;
+
+		if (refusalLogSerial != NeuralMatchSerial)
+		{
+			refusalLogSerial = NeuralMatchSerial;
+			refusalLogCount = 0;
+		}
+
+		if (refusalLogCount >= OpRefusalLogLines)
+			return;
+
+		++refusalLogCount;
+		char list[1536] = "";
+		size_t used = 0;
+		int owned = 0;
+		int listed = 0;
+
+		auto const note = [&](FootClass* pFoot)
+		{
+			if (!pFoot || pFoot->Owner != pHouse)
+				return;
+
+			const OpCarrier carrier = GetOpCarrier(pFoot);
+
+			if (carrier == OpCarrier::None)
+				return;
+
+			owned++;
+
+			if (listed >= OpRefusalLogTransports || used + 1 >= sizeof(list))
+				return;
+
+			auto const coords = pFoot->GetMapCoords();
+			const int written = std::snprintf(list + used, sizeof(list) - used, "%s%s %u at (%d,%d) %d%% %s", listed ? "; " : "",
+				pFoot->GetTechnoType()->ID, pFoot->UniqueID, coords.X, coords.Y, static_cast<int>(pFoot->GetHealthPercentage() * 100.0),
+				DescribeOpTransportRefusal(pHouse, pFoot, carrier, op.Staging, op.Landing));
+
+			if (written > 0)
+				used = std::min(sizeof(list) - 1, used + static_cast<size_t>(written));
+
+			listed++;
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			note(pUnit);
+
+		for (auto const pAir : AircraftClass::Array)
+			note(pAir);
+
+		Debug::Log("[NeuralAI] House %d transport op %d takes none of our %d transports, staging (%d,%d), landing (%d,%d), %d unseated, "
+			"largest %d, one counted as coming %d, frame %d: %s.\n",
+			pHouse->ArrayIndex, op.Id, owned, op.Staging.X, op.Staging.Y, op.Landing.X, op.Landing.Y, unseated, largest, reachable ? 1 : 0,
+			Unsorted::CurrentFrame, owned ? list : "none");
+	}
+
 	// A free land cell of a zone for a flying transport to come down on, the nearest to center from
 	// firstRing cells out (fixed order), off the beach (a jumpjet does not touch down on one: over
 	// a beach it flies on to the next cell and tries again), two cells or more from every unit in
@@ -2532,6 +2663,10 @@ namespace
 				}
 
 				NoteCrossingNeed(pHouse, op.Staging, op.Landing, largest);
+
+				// TEMP diagnostic (rule consolidation, 2026-11-19): why each transport of ours is turned down.
+				if (IsAITickWindow(OpRefusalLogFrames, 0))
+					LogOpTransportRefusals(pHouse, op, static_cast<int>(unseated.size()), largest, reachable);
 
 				if (reachable)
 				{

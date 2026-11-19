@@ -2178,6 +2178,11 @@ namespace
 	// that could not leave the water.
 	constexpr int OpNoReachFrames = 1800;
 	constexpr int OpNoTransportRetryFrames = 18000;
+	// TEMP diagnostic (LogOpTransportRefusals): how often an operation that no transport takes names
+	// why each transport of ours is turned down, the lines a match and the transports a line.
+	constexpr int OpRefusalLogFrames = 1800;
+	constexpr int OpRefusalLogLines = 150;
+	constexpr int OpRefusalLogTransports = 12;
 	constexpr int OpStuckFrames = 900;
 	constexpr double OpStuckCells = 2.0;
 	constexpr int OpCrossCapFrames = 9000;
