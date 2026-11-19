@@ -168,31 +168,6 @@ namespace
 			pFoot->NextMission();
 	}
 
-	// A passenger waiting for its turn to board: true when it is within FerryWaitCells of its
-	// transport, where it stops instead of walking on to the door (a crowd on the cells next to
-	// the transport keeps the one boarding out). Farther away it only drops the march it was on
-	// (an attack-move takes its old destination back over the walk to the transport) and the
-	// caller sends it closer.
-	bool HoldFerryWaiter(FootClass* pWaiter, FootClass* pTransport)
-	{
-		if (pWaiter->GetMapCoords().DistanceFrom(pTransport->GetMapCoords()) > FerryWaitCells)
-		{
-			if (pWaiter->MegaMission != Mission::None)
-				pWaiter->ClearMegaMissionData();
-
-			return false;
-		}
-
-		if (pWaiter->CurrentMission == Mission::Move && pWaiter->Destination == pTransport)
-		{
-			pWaiter->SetDestination(nullptr, true);
-			pWaiter->ClearNavigationList();
-			pWaiter->ForceMission(Mission::Guard);
-		}
-
-		return true;
-	}
-
 	// The zones a transport compares when a passenger asks to load (UnitClass::Receive_Message):
 	// those of the last cell each of them occupied, read for the passenger's movement zone. With
 	// different zones it sets out for the passenger instead of taking it in, and the passenger

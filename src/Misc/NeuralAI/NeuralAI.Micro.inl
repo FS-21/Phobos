@@ -109,7 +109,7 @@ namespace
 			if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type || !IsAmphibiousOrAirTransport(pT->Type)
 				|| static_cast<int>(pT->Type->SizeLimit) < static_cast<int>(pMcvType->TechnoTypeClass::Size)
 				|| pT->Type->Passengers < static_cast<int>(pMcvType->TechnoTypeClass::Size) || pT->Passengers.NumPassengers > 0
-				|| IsPlanMember(pHouse, pT->UniqueID) || IsInTransportOp(pHouse, pT->UniqueID) || IsFerryLoading(pHouse, pT->UniqueID))
+				|| IsPlanMember(pHouse, pT->UniqueID) || IsInTransportOp(pHouse, pT->UniqueID))
 			{
 				continue;
 			}
@@ -931,8 +931,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (footZone < 0 || targetZone < 0 || footZone == targetZone || walksThere || CanFootCrossWaterDirectly(pFoot)
 			|| canShootFromHere)
 		{
-			GetMacroState(pHouse).FerryWaitSince.erase(pFoot->UniqueID);
-
 			if (useSetTarget || desiredMission == Mission::Attack)
 			{
 				pFoot->ClearMegaMissionData();
@@ -7300,7 +7298,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool moveOver = pInf->CurrentMission == Mission::Move && pInf->MegaMission != Mission::AttackMove
 			&& (!pInf->Destination || CellClass::Coord2Cell(pInf->Destination->GetCoords()).DistanceFrom(pInf->GetMapCoords()) <= 1.5);
 		const bool isIdle = (pInf->CurrentMission == Mission::Guard || pInf->CurrentMission == Mission::Area_Guard || moveOver)
-			&& !IsFootActivelyAttackingOrMovingToEnemy(pInf) && !IsFerryReserved(pHouse, pInf->UniqueID);
+			&& !IsFootActivelyAttackingOrMovingToEnemy(pInf);
 
 		// Specialists flying a plan (airborne raid) take their orders from it.
 		const bool inPlan = IsSpecialistInfantryType(pInf->Type) && IsPlanMember(pHouse, pInf->UniqueID);
@@ -8508,12 +8506,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		// Units and transports working on a crossing belong to the ferry until it ends: a soldier
-		// reserved for a ferry or waiting for one is no gunner to hand out, and a transport the ferry
-		// loads or holds is filled by the ferry alone. An IFV or an OpenTopped vehicle that is no
-		// ferry right now still takes idle gunners.
-		if (isIdle && !IsSpyInfantryType(pInf->Type) && (IsAITickWindow(90, apcBoardWindow))
-			&& !IsFerryReserved(pHouse, pInf->UniqueID) && !GetMacroState(pHouse).FerryWaitSince.contains(pInf->UniqueID))
+		// Transports working on a crossing belong to the ferry until it ends: one the ferry holds is
+		// filled by the ferry alone. An IFV or an OpenTopped vehicle that is no ferry right now still
+		// takes idle gunners.
+		if (isIdle && !IsSpyInfantryType(pInf->Type) && (IsAITickWindow(90, apcBoardWindow)))
 		{
 			bool boardedCombatVehicle = false;
 			for (auto const pCombVeh : UnitClass::Array)
@@ -8524,7 +8520,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 
-				if (IsFerryLoading(pHouse, pCombVeh->UniqueID) || IsFerryParkedToLoad(pHouse, pCombVeh->UniqueID)
+				if (IsFerryParkedToLoad(pHouse, pCombVeh->UniqueID)
 					|| IsInTransportOp(pHouse, pCombVeh->UniqueID)
 					|| (pCombVeh->Passengers.NumPassengers > 0 && FindFerryTrip(pCombVeh->UniqueID)))
 				{
@@ -9507,7 +9503,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter
-			|| pUnit->BunkerLinkedItem != nullptr || pUnit->HasAnyLink() || IsFerryReserved(pHouse, pUnit->UniqueID))
+			|| pUnit->BunkerLinkedItem != nullptr || pUnit->HasAnyLink())
 		{
 			++notIdleLinked;
 			continue;
@@ -9580,9 +9576,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!IsPlanMember(pHouse, pInf->UniqueID))
 			ClearStaleEnterOrUnreachableCrossIslandMission(pInf, canInfCrossWater);
 
-		// Waiting for (or walking to) the transport that reserved it.
-		if (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter || pInf->HasAnyLink()
-			|| IsFerryReserved(pHouse, pInf->UniqueID))
+		// On its way aboard a transport, or linked to one.
+		if (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter || pInf->HasAnyLink())
 		{
 			++notIdleInfLinked;
 			continue;
@@ -10160,7 +10155,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!tankMassWaves)
 				return false;
 
-			if (IsInTransportOp(pHouse, pFoot->UniqueID) || IsFerryReserved(pHouse, pFoot->UniqueID))
+			if (IsInTransportOp(pHouse, pFoot->UniqueID))
 				return false;
 
 			if (IsPlanMember(pHouse, pFoot->UniqueID))
@@ -12294,8 +12289,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const pFootAdj : adjacentFoots)
 		{
-			// Reserved passengers wait their turn FerryWaitCells away, not at the door. The units of a
-			// transport operation wait by their own transports and move on its orders alone.
+			// The units of a transport operation wait by their own transports and move on its orders alone.
 			if (pFootAdj->Owner != pHouse || !pFootAdj->IsAlive || pFootAdj->InLimbo
 				|| pFootAdj == pTransport || pFootAdj == pChosenBoarder || IsInTransportOp(pHouse, pFootAdj->UniqueID))
 			{
@@ -12359,7 +12353,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// Whatever took it away keeps it: asked to board again it would link, leave and
 				// shut the door once more, so no transport takes it for a while.
 				auto& strayMacro = GetMacroState(pHouse);
-				strayMacro.FerryReserved.erase(pLinked->UniqueID);
 				strayMacro.FerryBlockedUntil[pLinked->UniqueID] = Unsorted::CurrentFrame + FerryBoardFailedFrames;
 			}
 		}
@@ -12436,7 +12429,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		pChosenBoarder->SetDestination(nullptr, true);
 		pChosenBoarder->ClearNavigationList();
 		pChosenBoarder->ForceMission(Mission::Guard);
-		macroTurns.FerryReserved.erase(pChosenBoarder->UniqueID);
 		macroTurns.FerryBlockedUntil[pChosenBoarder->UniqueID] = Unsorted::CurrentFrame + FerryBoardFailedFrames;
 		endTurn();
 
@@ -12474,8 +12466,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return MoveTransportToLoadingCell(pHouse, pTransport, from, landZone, passengersWaiting);
 	};
 
-	// A passenger a transport may reserve: it needs one to cross water, no transport gave up on it
-	// lately and no plan has it.
+	// A unit that may board a ferry: it needs one to cross water, no transport gave up on it lately
+	// and no plan has it.
 	auto const canRideFerry = [&](const FootClass* pFoot) -> bool
 	{
 		return !CanFootCrossWaterDirectly(pFoot) && !IsFerryBlocked(pHouse, pFoot->UniqueID) && !IsPlanMember(pHouse, pFoot->UniqueID);
@@ -12483,163 +12475,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	bool deployerTransportAssigned = false;
 	bool engineerTransportAssigned = false;
-
-	// Ferry reservations: the live passenger of each one for this tick; stale ones go (passenger
-	// dead or already aboard, transport gone, older than FerryReservationFrames). A transport that
-	// leaves its pickup shore drops the rest of its reservations in the loop below.
-	std::unordered_map<DWORD, FootClass*> ferryReservedFoot;
-	{
-		auto& reserved = GetMacroState(pHouse).FerryReserved;
-
-		if (!reserved.empty())
-		{
-			std::unordered_set<DWORD> liveTransports;
-			auto const noteFoot = [&](FootClass* pFoot)
-			{
-				if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive)
-					return;
-
-				if (!pFoot->InLimbo && reserved.contains(pFoot->UniqueID))
-					ferryReservedFoot.emplace(pFoot->UniqueID, pFoot);
-
-				if (!pFoot->InLimbo)
-					liveTransports.insert(pFoot->UniqueID);
-			};
-
-			for (auto const pU : UnitClass::Array)
-				noteFoot(pU);
-
-			for (auto const pI : InfantryClass::Array)
-				noteFoot(pI);
-
-			for (auto const pA : AircraftClass::Array)
-				noteFoot(pA);
-
-			const int nowFrame = Unsorted::CurrentFrame;
-
-			for (auto it = reserved.begin(); it != reserved.end();)
-			{
-				const bool expired = nowFrame - it->second.Frame >= FerryReservationFrames || nowFrame < it->second.Frame;
-				const int lastHandled = it->second.QueueFrame >= 0 ? it->second.QueueFrame : it->second.Frame;
-				const bool unattended = nowFrame - lastHandled >= FerryQueueStaleFrames;
-				const bool stale = !ferryReservedFoot.contains(it->first) || !liveTransports.contains(it->second.Transport) || expired
-					|| unattended;
-
-				// TEMP diagnostic: a passenger reserved for 1800 frames that never got aboard.
-				if (expired && ferryReservedFoot.contains(it->first))
-				{
-					static int expiredLogSerial = -1;
-					static int expiredLogCount = 0;
-
-					if (expiredLogSerial != NeuralMatchSerial)
-					{
-						expiredLogSerial = NeuralMatchSerial;
-						expiredLogCount = 0;
-					}
-
-					FootClass* pTransportFoot = nullptr;
-
-					for (auto const pU : UnitClass::Array)
-					{
-						if (pU && pU->UniqueID == it->second.Transport)
-						{
-							pTransportFoot = pU;
-							break;
-						}
-					}
-
-					auto const pPassenger = ferryReservedFoot[it->first];
-
-					if (pTransportFoot && expiredLogCount++ < 40)
-					{
-						auto const pTransDest = pTransportFoot->Destination;
-						Debug::Log("[NeuralAI] Ferry DIAG house %d frame %d: %s %u reserved by %s %u expired, %d cells away, passenger mission %d dest %s, "
-							"transport mission %d mega %d dest (%d,%d) at (%d,%d) pass %d, enter orders %d, walk orders %d, queue seen %d frames ago, "
-							"zones %d and %d, transport height %d, boarding link %d, passenger queued %d mega %d, transport linked to %s, door zones %d and %d.\n",
-							pHouse->ArrayIndex, nowFrame, pPassenger->GetTechnoType()->ID, pPassenger->UniqueID, pTransportFoot->GetTechnoType()->ID,
-							pTransportFoot->UniqueID, static_cast<int>(pPassenger->GetMapCoords().DistanceFrom(pTransportFoot->GetMapCoords())),
-							static_cast<int>(pPassenger->CurrentMission), pPassenger->Destination == pTransportFoot ? "transport" : (pPassenger->Destination ? "other" : "none"),
-							static_cast<int>(pTransportFoot->CurrentMission), static_cast<int>(pTransportFoot->MegaMission),
-							pTransDest ? CellClass::Coord2Cell(pTransDest->GetCoords()).X : -1, pTransDest ? CellClass::Coord2Cell(pTransDest->GetCoords()).Y : -1,
-							pTransportFoot->GetMapCoords().X, pTransportFoot->GetMapCoords().Y, pTransportFoot->Passengers.NumPassengers,
-							it->second.EnterOrders, it->second.WalkOrders, it->second.QueueFrame >= 0 ? nowFrame - it->second.QueueFrame : -1,
-							ObjectZone(pPassenger, MovementZone::Normal), ObjectZone(pTransportFoot, MovementZone::Normal),
-							pTransportFoot->GetHeight(), pPassenger->ContainsLink(pTransportFoot) ? 1 : 0,
-							static_cast<int>(pPassenger->QueuedMission), static_cast<int>(pPassenger->MegaMission),
-								pTransportFoot->GetNthLink(0) ? pTransportFoot->GetNthLink(0)->GetTechnoType()->ID : "nobody",
-								GetFerryDoorZones(pTransportFoot, pPassenger).Transport, GetFerryDoorZones(pTransportFoot, pPassenger).Boarder);
-					}
-				}
-
-				if (stale)
-				{
-					ferryReservedFoot.erase(it->first);
-					it = reserved.erase(it);
-				}
-				else
-				{
-					++it;
-				}
-			}
-		}
-	}
-
-	// Drop the reservations of one transport (it left its pickup shore or is full).
-	auto const dropFerryReservationsOf = [&](DWORD transportID)
-	{
-		auto& reserved = GetMacroState(pHouse).FerryReserved;
-
-		for (auto it = reserved.begin(); it != reserved.end();)
-		{
-			if (it->second.Transport == transportID)
-			{
-				ferryReservedFoot.erase(it->first);
-				it = reserved.erase(it);
-			}
-			else
-			{
-				++it;
-			}
-		}
-	};
-
-	// This transport's reserved passengers still out and on its island, nearest first.
-	auto const ferryQueueOf = [&](FootClass* pTransport, int pickupZone, int& outQueuedSize) -> std::vector<FootClass*>
-	{
-		std::vector<std::pair<double, FootClass*>> queue;
-		outQueuedSize = 0;
-		const CellStruct trCoords = pTransport->GetMapCoords();
-
-		for (auto const& [passengerID, reservation] : GetMacroState(pHouse).FerryReserved)
-		{
-			if (reservation.Transport != pTransport->UniqueID)
-				continue;
-
-			auto const itFoot = ferryReservedFoot.find(passengerID);
-
-			if (itFoot == ferryReservedFoot.end())
-				continue;
-
-			FootClass* const pPassenger = itFoot->second;
-
-			if (pickupZone >= 0 && ObjectZone(pPassenger, MovementZone::Normal) != pickupZone)
-				continue;
-
-			queue.emplace_back(pPassenger->GetMapCoords().DistanceFrom(trCoords), pPassenger);
-			outQueuedSize += std::max(1, static_cast<int>(pPassenger->GetTechnoType()->Size));
-		}
-
-		std::sort(queue.begin(), queue.end(), [](const auto& a, const auto& b)
-			{ return a.first != b.first ? a.first < b.first : a.second->UniqueID < b.second->UniqueID; });
-
-		std::vector<FootClass*> result;
-		result.reserve(queue.size());
-
-		for (auto const& [dist, pPassenger] : queue)
-			result.push_back(pPassenger);
-
-		return result;
-	};
 
 	// A departed, loaded transport of ours that no longer exists was destroyed on its way:
 	// remember where, so the next landings pick another beach.
@@ -12683,34 +12518,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| (pCargoInf && pCargoInf->Type && pCargoInf->Type->Engineer);
 	};
 
-	// Size of the passengers each transport has reserved and that are still out, by transport, and
-	// the transports with cargo of its own rules among them.
-	std::unordered_map<DWORD, int> ferryReservedSizeOf;
-	std::unordered_set<DWORD> ferryOwnRulesReserved;
-
-	for (auto const& [passengerID, reservation] : GetMacroState(pHouse).FerryReserved)
-	{
-		if (auto const itFoot = ferryReservedFoot.find(passengerID); itFoot != ferryReservedFoot.end())
-		{
-			ferryReservedSizeOf[reservation.Transport] += std::max(1, static_cast<int>(itFoot->second->GetTechnoType()->Size));
-
-			if (isOwnRulesCargo(itFoot->second))
-				ferryOwnRulesReserved.insert(reservation.Transport);
-		}
-	}
-
 	// Fleet split (after the distribution mode of the Phobos click actions, pull request #1993: the
 	// selected units are dealt out over every transport in reach, largest first, one round at a
-	// time). On each pickup shore the whole load (the passengers aboard and reserved, and every unit
-	// there that could still board) is shared out evenly over as few parked transports as can hold
-	// it, those already carrying or waiting for passengers first, then the nearest to the units.
-	// They load side by side, one boarder each at a time, and are ready together: one transport used
-	// to take every unit in reach and sail alone while the next waited for new units (342 of 501
-	// departures sailed alone, 40 matches). A transport outside the split reserves nobody; one with
-	// a base deployer, a harvester or an engineer aboard keeps its own rules.
-	std::unordered_map<DWORD, int> ferryFleetQuota;
-	// By pickup zone: the size of the battalion still on land (boardable, nobody aboard or reserved
-	// yet), and the room of our empty transports on their way to that zone.
+	// time). On each pickup shore the whole load (the passengers aboard and every unit there that
+	// could still board) is weighed against as few parked transports as can hold it, those already
+	// carrying first, then the nearest to the units: what is still on land and the room on its way
+	// hold the loaded transports for one joint departure. A transport with a base deployer, a
+	// harvester or an engineer aboard keeps its own rules.
+	// By pickup zone: the size of the battalion still on land (boardable, nobody aboard yet), and
+	// the room of our empty transports on their way to that zone.
 	std::map<int, int> ferryBattalionLeft;
 	std::map<int, int> ferryComingRoom;
 	{
@@ -12738,7 +12554,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pFleetCell || pFleetCell->LandType == LandType::Water || (pFleetTrip && pFleetTrip->Departed))
 				continue;
 
-			bool ownRules = ferryOwnRulesReserved.contains(pFleet->UniqueID);
+			bool ownRules = false;
 
 			for (FootClass* pPass = pFleet->Passengers.GetFirstPassenger(); pPass != nullptr && !ownRules;
 				pPass = abstract_cast<FootClass*>(pPass->NextObject))
@@ -12751,30 +12567,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (ownRules || fleetZone < 0)
 				continue;
 
-			auto const itReserved = ferryReservedSizeOf.find(pFleet->UniqueID);
-			const int held = pFleet->Passengers.GetTotalSize() + (itReserved != ferryReservedSizeOf.end() ? itReserved->second : 0);
+			const int held = pFleet->Passengers.GetTotalSize();
 			fleets[fleetZone].push_back({ pFleet, held, pFleet->Type->Passengers });
 
-			// The whole battalion is ferry demand for the production selector, its passengers aboard and
-			// reserved too: with only the units still free on land counted, two full transports and 23
-			// units waiting read as "two transports are enough" and no third one was built.
+			// The whole battalion is ferry demand for the production selector, its passengers aboard too:
+			// with only the units still free on land counted, two full transports and 23 units waiting
+			// read as "two transports are enough" and no third one was built.
 			auto& demandMacro = GetMacroState(pHouse);
 
 			for (FootClass* pPass = pFleet->Passengers.GetFirstPassenger(); pPass != nullptr; pPass = abstract_cast<FootClass*>(pPass->NextObject))
 			{
 				const int passSize = std::clamp(static_cast<int>(pPass->GetTechnoType()->Size), 1, 15);
 				demandMacro.FerryDemandSizeBySize[passSize] += passSize;
-			}
-
-			for (auto const& [passengerID, reservation] : demandMacro.FerryReserved)
-			{
-				auto const itFoot = ferryReservedFoot.find(passengerID);
-
-				if (reservation.Transport == pFleet->UniqueID && itFoot != ferryReservedFoot.end())
-				{
-					const int reservedSize = std::clamp(static_cast<int>(itFoot->second->GetTechnoType()->Size), 1, 15);
-					demandMacro.FerryDemandSizeBySize[reservedSize] += reservedSize;
-				}
 			}
 		}
 
@@ -12839,7 +12643,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				if (!pFoot || !pFoot->IsAlive || pFoot->InLimbo || size > sizeLimit || counted.contains(pFoot->UniqueID)
 					|| pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter
-					|| IsFerryReserved(pHouse, pFoot->UniqueID) || !canRideFerry(pFoot) || isOwnRulesCargo(pFoot))
+					|| !canRideFerry(pFoot) || isOwnRulesCargo(pFoot))
 				{
 					return;
 				}
@@ -12908,12 +12712,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			const int share = (load + static_cast<int>(chosen) - 1) / static_cast<int>(chosen);
-
-			for (size_t i = 0; i < fleet.size(); ++i)
-			{
-				auto const& member = fleet[i];
-				ferryFleetQuota[member.Transport->UniqueID] = i < chosen ? std::min(member.Room, std::max(share, member.Held)) : member.Held;
-			}
 
 			auto& fleetMacro = GetMacroState(pHouse);
 			const int now = Unsorted::CurrentFrame;
@@ -13744,14 +13542,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Enforce strict 1-by-1 boarding while parked on a pickup island so units never jam!
 		FootClass* pSingleActiveBoarder = onSafePickupShore ? enforceSingleActiveBoarderOn(pTrans, transZone) : nullptr;
 
-		if (!onSafePickupShore)
-			dropFerryReservationsOf(pTrans->UniqueID);
-
-		// Reserved passengers still walking to it keep it loading (they are out of the idle pools).
-		int ferryQueuedSize = 0;
-		const bool hasFerryQueue = onSafePickupShore && !ferryQueueOf(pTrans, transZone, ferryQueuedSize).empty();
-		const bool canFitMoreOnPickupIsland = onSafePickupShore
-			&& (pSingleActiveBoarder != nullptr || hasFerryQueue);
+		const bool canFitMoreOnPickupIsland = onSafePickupShore && pSingleActiveBoarder != nullptr;
 
 		// Ferry diagnostics, every 900 frames: each transport's state against the demand around it.
 		if (IsAITickWindow(900, 0))
@@ -13816,13 +13607,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 						continue;
 					}
-
-					// Its passengers of the fleet split still walk up to it: it is loading.
-					if (ferryReservedSizeOf.contains(pSister->UniqueID))
-					{
-						convoyHold = true;
-						break;
-					}
 				}
 			}
 
@@ -13848,7 +13632,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const int transRoom = pTrans->Type->Passengers;
 		// The convoy's cargo counts as one load: with the fleet split each transport carries a part
 		// of what its sister transports on this shore carry with it.
-		int convoyCargo = totalPassSize + ferryQueuedSize;
+		int convoyCargo = totalPassSize;
 
 		if (numPass >= 1 && onSafePickupShore && convoyCargo * 4 < transRoom * 3)
 		{
@@ -13865,8 +13649,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (auto const pSisterTrip = FindFerryTrip(pSister->UniqueID); pSisterTrip && pSisterTrip->Departed)
 					continue;
 
-				auto const itSisterReserved = ferryReservedSizeOf.find(pSister->UniqueID);
-				convoyCargo += pSister->Passengers.GetTotalSize() + (itSisterReserved != ferryReservedSizeOf.end() ? itSisterReserved->second : 0);
+				convoyCargo += pSister->Passengers.GetTotalSize();
 			}
 		}
 
@@ -13942,11 +13725,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				| (nothingMoreToLoad && loadStalled ? FerrySailLoadStalled : 0)
 				| (convoyGo ? FerrySailConvoy : 0);
 		}
-
-		// Sailing: the passengers still walking up are free again (repro: a hovercraft that left with
-		// an engineer stayed on the shore for 1800 frames, boxed in by its own reserved passengers).
-		if (isReadyToSailEffective)
-			dropFerryReservationsOf(pTrans->UniqueID);
 
 		// Prevent AttackMove.Follow=true (e.g. on GDI APC/APCW) from hijacking transports into escorting warships!
 		pTrans->ClearMegaMissionData();
@@ -14798,12 +14576,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// 2) Send units strictly ONE BY ONE (only when pSingleActiveBoarder == nullptr)
 			//    so the single radio link (0x0073781E) is never stolen and no jamming occurs!
 			// =========================================================================
-			if (moveToLoadingCell(pTrans, transCoords, transZone, pSingleActiveBoarder != nullptr || hasFerryQueue))
+			if (moveToLoadingCell(pTrans, transCoords, transZone, pSingleActiveBoarder != nullptr))
 				continue;
 
 			// An armed transport with a target stays in the air to shoot (HoverAttack) and nobody can
 			// board it: with passengers to take it drops the target.
-			if (pTrans->Target && (pSingleActiveBoarder != nullptr || hasFerryQueue))
+			if (pTrans->Target && pSingleActiveBoarder != nullptr)
 			{
 				pTrans->SetTarget(nullptr);
 				CountDecision(NeuralDecision::FerryTargetDropped, pHouse->ArrayIndex);
@@ -14825,7 +14603,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			// Parked with something to load or loaded: nobody else orders it about, and whoever
 			// moves it all the same is logged.
-			if (pSingleActiveBoarder != nullptr || hasFerryQueue || numPass >= 1)
+			if (pSingleActiveBoarder != nullptr || numPass >= 1)
 				GetMacroState(pHouse).ParkedFerries[pTrans->UniqueID] = { pTrans, Unsorted::CurrentFrame };
 
 			// Nobody boards a transport with nowhere to go: an enemy somewhere across the water with no
@@ -14834,160 +14612,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pActiveIslandGoal)
 				continue;
 
-			// Loading by what fits (user: divide the work, there are limits): the transport reserves
-			// passengers up to its free room by size (same priorities as before: crossing orders,
-			// vehicles, infantry; never one reserved by another transport), so several transports
-			// load at once without fighting over the same units. One boards at a time (a transport
-			// has a single radio link for RequestLoading); the rest walk up and wait next to it
-			// instead of being picked one by one from all over the island.
+			// With room left, the one boarding is sent in again when it lost its radio link.
 			const int maxAllowedPassSize = std::max(0, pTrans->Type->Passengers - reservedSizeForDeployer);
 			const int freeCapNow = maxAllowedPassSize - totalPassSize;
 
 			if (numPass >= pTrans->Type->Passengers || freeCapNow <= 0)
-			{
-				dropFerryReservationsOf(pTrans->UniqueID);
 				continue;
-			}
-
-			int queuedSize = 0;
-			std::vector<FootClass*> ferryQueue = ferryQueueOf(pTrans, transZone, queuedSize);
-			const bool activeBoarderQueued = pSingleActiveBoarder
-				&& std::find(ferryQueue.begin(), ferryQueue.end(), pSingleActiveBoarder) != ferryQueue.end();
-			const int activeBoarderSize
-				= (pSingleActiveBoarder && !activeBoarderQueued) ? std::max(1, static_cast<int>(pSingleActiveBoarder->GetTechnoType()->Size)) : 0;
-			const int roomToReserve = freeCapNow - queuedSize - activeBoarderSize;
-
-			// Cargo of its own rules (engineer, harvester, base deployer) and the combat load never share
-			// a transport: with the fleet split an engineer reserved in every share sailed at once with
-			// the one or two tanks already aboard (half of all departures, 149 combat units carried off to
-			// tech buildings in 12 matches). The combat load takes the transport's share of the fleet
-			// split, no more: the rest goes to its sister transports.
-			bool carriesOwnRules = carryingMCV || carryingStolenForeignMCV || carryingHarvester || carryingEngineer;
-			bool carriesCombat = numPass > 0 && !carriesOwnRules;
-
-			std::vector<FootClass*> comingAboard = ferryQueue;
-
-			if (pSingleActiveBoarder && !activeBoarderQueued)
-				comingAboard.push_back(pSingleActiveBoarder);
-
-			for (auto const pComing : comingAboard)
-			{
-				if (isOwnRulesCargo(pComing))
-					carriesOwnRules = true;
-				else
-					carriesCombat = true;
-			}
-
-			int combatRoom = carriesOwnRules ? 0 : roomToReserve;
-			int ownRulesRoom = carriesCombat ? 0 : roomToReserve;
-
-			if (auto const itQuota = ferryFleetQuota.find(pTrans->UniqueID); itQuota != ferryFleetQuota.end())
-				combatRoom = std::min(combatRoom, itQuota->second - totalPassSize - queuedSize - activeBoarderSize);
-
-			for (int reserveGuard = 0; reserveGuard < 16 && (combatRoom > 0 || ownRulesRoom > 0); ++reserveGuard)
-			{
-				FootClass* pNextBoarder = nullptr;
-				bool nextBoarderHasOwnGoal = false;
-
-				if (!pNextBoarder)
-					break;
-
-				// Pending cross-island orders keep their own exact objective; other
-				// boarders inherit the transport's destination, never the pickup island.
-				if (!nextBoarderHasOwnGoal && pActiveIslandGoal && isValidFerryGoalZone(activeIslandZone)
-					&& activeIslandZone != transZone)
-				{
-					RecordPassengerIslandGoal(pNextBoarder->UniqueID, pActiveIslandGoal->MapCoords);
-				}
-
-				auto& ferryMacroState = GetMacroState(pHouse);
-				ferryMacroState.FerryReserved[pNextBoarder->UniqueID] = { pTrans->UniqueID, Unsorted::CurrentFrame };
-				ferryMacroState.FerryWaitSince.erase(pNextBoarder->UniqueID);
-				ferryReservedFoot[pNextBoarder->UniqueID] = pNextBoarder;
-				ferryQueue.push_back(pNextBoarder);
-				const int boarderSize = std::max(1, static_cast<int>(pNextBoarder->GetTechnoType()->Size));
-
-				if (isOwnRulesCargo(pNextBoarder))
-				{
-					ownRulesRoom -= boarderSize;
-					combatRoom = 0;
-				}
-				else
-				{
-					combatRoom -= boarderSize;
-					ownRulesRoom = 0;
-				}
-				CountDecision(NeuralDecision::FerryReserved, pHouse->ArrayIndex);
-			}
 
 			if (pSingleActiveBoarder != nullptr)
 			{
 				// Re-issue Enter only if the active boarder somehow lost its radio link
 				if (!pSingleActiveBoarder->ContainsLink(pTrans))
 					OrderFootToEnter(pSingleActiveBoarder, pTrans);
-			}
-			else if (!ferryQueue.empty())
-			{
-				FootClass* pNearest = nullptr;
-				double nearestDist = 999999.0;
-
-				for (auto const pQueued : ferryQueue)
-				{
-					const double d = pQueued->GetMapCoords().DistanceFrom(transCoords);
-
-					if (d < nearestDist)
-					{
-						nearestDist = d;
-						pNearest = pQueued;
-					}
-				}
-
-				if (openFerryDoor(pTrans, pNearest))
-				{
-					pSingleActiveBoarder = pNearest;
-					OrderFootToEnter(pNearest, pTrans);
-					GetMacroState(pHouse).FerryReserved[pNearest->UniqueID].EnterOrders++;
-				}
-			}
-
-			// The others go aboard at once from next to the parked transport (TakeAboardNow), as the
-			// Airborne Front teams do, and walk to a free cell beside it to get there; with none free
-			// they wait FerryWaitCells away for the radio link, one at a time. Through that link alone
-			// a reserved passenger waited its turn 4 cells off until the reservation ran out (match
-			// #9885: 40 reservations expired with dozens of walk orders and no Enter, 33 combat
-			// crossings in 176000 frames with 28 vehicles and 38 soldiers idle at home).
-			for (auto const pQueued : ferryQueue)
-			{
-				auto& queuedReservation = GetMacroState(pHouse).FerryReserved[pQueued->UniqueID];
-				queuedReservation.QueueFrame = Unsorted::CurrentFrame;
-
-				if (pQueued == pSingleActiveBoarder || pQueued->CurrentMission == Mission::Enter || pQueued->QueuedMission == Mission::Enter)
-					continue;
-
-				if (!pQueued->HasAnyLink() && TakeAboardNow(pTrans, pQueued))
-				{
-					GetMacroState(pHouse).FerryReserved.erase(pQueued->UniqueID);
-					ferryReservedFoot.erase(pQueued->UniqueID);
-					CountDecision(NeuralDecision::FerryTakenAboard, pHouse->ArrayIndex);
-					continue;
-				}
-
-				if (!IsFerryAloft(pTrans))
-				{
-					if (auto const pBeside = BoardingCellNextTo(pTrans, pQueued))
-					{
-						if (IssueMoveOrder(pQueued, pBeside, 0.5))
-							queuedReservation.WalkOrders++;
-
-						continue;
-					}
-				}
-
-				if (HoldFerryWaiter(pQueued, pTrans))
-					continue;
-
-				IssueMoveOrder(pQueued, pTrans, 3.0);
-				queuedReservation.WalkOrders++;
 			}
 		}
 	}
@@ -15278,21 +14914,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				? enforceSingleActiveBoarderOn(pAir, airZone)
 				: nullptr;
 			const int freeAirCap = pAir->Type->Passengers - totalAirPassSize;
-			const bool airParked = !pAir->IsInAir() && pAir->GetHeight() == 0;
-
-			if (!airParked)
-				dropFerryReservationsOf(pAir->UniqueID);
-
-			int airQueuedSize = 0;
-			std::vector<FootClass*> airQueue = airParked ? ferryQueueOf(pAir, airZone, airQueuedSize) : std::vector<FootClass*> {};
-			bool moreUnitsFitAir = (pSingleAirBoarder != nullptr) || !airQueue.empty();
+			const bool moreUnitsFitAir = pSingleAirBoarder != nullptr;
 
 			const bool airReadyToFly = airCarryingMCV || airCarryingHarvester
 				|| (airCarryingEngineer && pIslandTechGoalCell != nullptr)
 				|| (numAirPass >= 1 && (pAir->IsInAir() || !moreUnitsFitAir));
-
-			if (airReadyToFly)
-				dropFerryReservationsOf(pAir->UniqueID);
 
 			if (airReadyToFly)
 			{
@@ -15351,66 +14977,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& (enemyOnDisconnectedIsland || pIslandResourceGoalCell != nullptr
 					|| pIslandTechGoalCell != nullptr || scores[28] > 600 || SlotGate(scores[75], 100, 75)))
 			{
-				// Loading by what fits, as the ground ferries (user: any valid transport, flying ones
-				// too): reserve passengers up to the free room by size, one boards at a time (a single
-				// radio link), the others walk up and wait next to it.
-				const bool activeAirBoarderQueued = pSingleAirBoarder
-					&& std::find(airQueue.begin(), airQueue.end(), pSingleAirBoarder) != airQueue.end();
-				int airRoom = freeAirCap - airQueuedSize
-					- ((pSingleAirBoarder && !activeAirBoarderQueued) ? std::max(1, static_cast<int>(pSingleAirBoarder->GetTechnoType()->Size)) : 0);
-
-				for (int airReserveGuard = 0; airReserveGuard < 16 && airRoom > 0; ++airReserveGuard)
-				{
-					FootClass* pNextAirPass = nullptr;
-
-					if (!pNextAirPass)
-						break;
-
-					auto& airMacroState = GetMacroState(pHouse);
-					airMacroState.FerryReserved[pNextAirPass->UniqueID] = { pAir->UniqueID, Unsorted::CurrentFrame };
-					airMacroState.FerryWaitSince.erase(pNextAirPass->UniqueID);
-					ferryReservedFoot[pNextAirPass->UniqueID] = pNextAirPass;
-					airQueue.push_back(pNextAirPass);
-					airRoom -= std::max(1, static_cast<int>(pNextAirPass->GetTechnoType()->Size));
-					CountDecision(NeuralDecision::FerryReserved, pHouse->ArrayIndex);
-				}
-
+				// The one boarding is sent in again when it lost its radio link.
 				if (pSingleAirBoarder)
 				{
 					if (!pSingleAirBoarder->ContainsLink(pAir))
 						OrderFootToEnter(pSingleAirBoarder, pAir);
-				}
-				else if (!airQueue.empty())
-				{
-					FootClass* pNearestAir = nullptr;
-					double nearestAirDist = 999999.0;
-
-					for (auto const pQueued : airQueue)
-					{
-						const double d = pQueued->GetMapCoords().DistanceFrom(airCoords);
-
-						if (d < nearestAirDist)
-						{
-							nearestAirDist = d;
-							pNearestAir = pQueued;
-						}
-					}
-
-					pSingleAirBoarder = pNearestAir;
-					OrderFootToEnter(pNearestAir, pAir);
-				}
-
-				for (auto const pQueued : airQueue)
-				{
-					GetMacroState(pHouse).FerryReserved[pQueued->UniqueID].QueueFrame = Unsorted::CurrentFrame;
-
-					if (pQueued == pSingleAirBoarder || pQueued->CurrentMission == Mission::Enter || pQueued->QueuedMission == Mission::Enter)
-						continue;
-
-					if (HoldFerryWaiter(pQueued, pAir))
-						continue;
-
-					IssueMoveOrder(pQueued, pAir, 3.0);
 				}
 			}
 

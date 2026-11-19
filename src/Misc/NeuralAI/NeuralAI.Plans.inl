@@ -610,8 +610,8 @@ namespace
 			}
 
 			// Armed transports and carryalls (a transport helicopter, a Nighthawk) ferry first: they only
-			// strike while empty (no passengers, nothing slung), with nobody waiting for a ferry (fresh
-			// demand, no passenger reserved) and only targets within 30 cells. A far strike left them
+			// strike while empty (no passengers, nothing slung), with nobody waiting for a ferry (no fresh
+			// demand) and only targets within 30 cells. A far strike left them
 			// targeting it while the transport logic kept them home (Move / Unload), doing neither
 			// (matches #6164, #6176).
 			// Parked empty on Unload counts as idle for them.
@@ -631,7 +631,7 @@ namespace
 						ferryWanted = ferryWanted || demand > 0;
 				}
 
-				if (!empty || ferryWanted || IsFerryLoading(pHouse, pUnit->UniqueID))
+				if (!empty || ferryWanted)
 					continue;
 			}
 
@@ -2683,14 +2683,10 @@ namespace
 
 			NoteExpertPlanStart(pHouse, id);
 
-			// A member is no longer a passenger the ferry loader has reserved for one of its
-			// transports: the loader went on sending it into that transport (a GGI of an Airborne
-			// Front team, 36 cells from the team's own).
 			for (auto const pFoot : group)
 			{
 				plan.Members.push_back(pFoot->UniqueID);
 				macro.PlanMembers.insert(pFoot->UniqueID);
-				macro.FerryReserved.erase(pFoot->UniqueID);
 				NoteExpertCommand(pHouse, pFoot, static_cast<int16_t>(id));
 			}
 
@@ -2755,7 +2751,6 @@ namespace
 					auto const pTank = tanks[i].second;
 					plan.Members.push_back(pTank->UniqueID);
 					macro.PlanMembers.insert(pTank->UniqueID);
-					macro.FerryReserved.erase(pTank->UniqueID);
 					macro.TankGuard.erase(pTank->UniqueID);
 					macro.TankGuardEscorts.erase(pTank->UniqueID);
 					macro.TankGuardPosts.erase(pTank->UniqueID);
@@ -9287,7 +9282,6 @@ namespace
 							auto const pJoin = fresh.front();
 							plan.Members.push_back(pJoin->UniqueID);
 							macro.PlanMembers.insert(pJoin->UniqueID);
-							macro.FerryReserved.erase(pJoin->UniqueID);
 							Debug::Log("[NeuralAI] House %d navalStrike: %s %u relieves a damaged ship (%d of %d shelling healthy), frame %d.\n",
 								houseIdx, pJoin->GetTechnoType()->ID, pJoin->UniqueID, healthyShelling, plan.AuxBaseline, Unsorted::CurrentFrame);
 						}
