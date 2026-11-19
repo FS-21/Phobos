@@ -862,6 +862,23 @@ namespace
 		if (!isClaimed(target))
 			return pCell;
 
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search
+		// below, which decides.
+		NeuralWaitAsker asker {};
+		asker.Speed = pType->SpeedType;
+		asker.Movement = pType->MovementZone;
+		asker.Zone = zone;
+		asker.RefLevel = pCell->Level;
+		asker.LevelSpan = DestinationSpreadLevels;
+		NeuralWaitSearch search {};
+		search.MinRing = 1;
+		search.MaxRing = DestinationSpreadCells;
+		auto const pShadow = FindWaitCellNear(target, search, asker,
+			WaitInMap | WaitNoBuilding | WaitClearOfUnits | (flyer ? 0u : (WaitZone | WaitLevelNear | WaitOffDeck)),
+			[&isClaimed](const CellStruct& c, const CellClass*) { return isClaimed(c); });
+		static int shadowLogSerial = -1;
+		static int shadowLogCount = 0;
+
 		for (int r = 1; r <= DestinationSpreadCells; ++r)
 		{
 			for (int dy = -r; dy <= r; ++dy)
@@ -900,11 +917,13 @@ namespace
 						macro.DestinationSpreadCount = 0;
 					}
 
+					NoteWaitCellShadow("SpreadDestination", shadowLogSerial, shadowLogCount, target, pCand, pShadow);
 					return pCand;
 				}
 			}
 		}
 
+		NoteWaitCellShadow("SpreadDestination", shadowLogSerial, shadowLogCount, target, nullptr, pShadow);
 		return pCell;
 	}
 

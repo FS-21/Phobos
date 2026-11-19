@@ -319,6 +319,42 @@
     <!-- src/ -->
     <ClInclude Include="src\Phobos.COM.h" />
     <ClInclude Include="src\Phobos.CRT.h" />
+<<<<<<< HEAD
+=======
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.h" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Air.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Preservation.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Bridges.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.WaitCells.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Counters.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Diplomacy.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Defense.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Economy.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Expansion.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Experts.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Features.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Intel.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Internal.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Lifecycle.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Micro.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.MobileFactory.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Orders.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Placement.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Plans.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.SpecOps.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.AirForce.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.AirPatrol.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Scouting.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Urban.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Production.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.RouteHeat.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.State.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Team.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Tactics.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Telemetry.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Transport.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.WaveTiming.inl" />
+>>>>>>> 252ca8a83 (Neural AI: one rule set and one ring search for wait cells, checked in the shadow of SpreadDestination (user, 2026-11-19: rule consolidation, step 3, case 3, W-N0, W-N1 and W-N4, «Sí, el caso 3»). About 20 finders choose where units wait, park or gather, each with its own checks, and only 4 kept off decks, mouths and narrow passages together. NeuralAI.WaitCells.inl, after Bridges.inl, holds IsWaitCellAllowed(cell, asker, rules) with the checks they share as flags (WaitInMap, WaitLegal, WaitNoBuilding, WaitSurfaceOfAsker, WaitLand, WaitNotBeach, WaitNotRock, WaitZone, WaitLevelNear, the three IsClearToMove of the finders, WaitNoObject, WaitOffDeck, WaitOffMouth, WaitOffNarrow) and FindWaitCellNear, the ring search every finder makes (Chebyshev rings, dy then dx, the perimeter only; the first allowed cell the caller's reject lets through); both only read. IsOpWaitInTheWay asks IsWaitCellAllowed (legal, off decks, mouths and narrow passages; off the map is in the way, as before). SpreadDestination keeps its own search, which decides, and asks FindWaitCellNear with the same rules (the zone and level of the cell asked for, off decks, not for flyers) and its claimed cells as reject; a TEMP line says where the two differ (WaitShadowLogLines a match). No rule changes)
     <ClInclude Include="src\Phobos.h" />
     <ClInclude Include="src\Phobos.version.h" />
     <!-- src\Blowfish\ -->

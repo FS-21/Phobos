@@ -2284,6 +2284,9 @@ namespace
 	constexpr int OpSharedCrossingLogLines = 60;
 	// TEMP diagnostic: the transports an operation leaves to one that waits longer, logged per match.
 	constexpr int OpStarvedLogLines = 80;
+	// TEMP diagnostic (NoteWaitCellShadow): the wait cells a finder chose that FindWaitCellNear does not
+	// choose, logged per match and finder.
+	constexpr int WaitShadowLogLines = 20;
 	constexpr int OpStuckFrames = 900;
 	constexpr double OpStuckCells = 2.0;
 	constexpr int OpCrossCapFrames = 9000;

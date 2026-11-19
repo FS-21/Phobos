@@ -1669,12 +1669,11 @@ namespace
 	}
 
 	// A cell where a member waiting for its seat holds the way of everything else that crosses there: a
-	// bridge or tube cell, a passage mouth or a narrow passage (OpHoldMoveRing).
+	// bridge or tube cell, a passage mouth or a narrow passage (OpHoldMoveRing). A cell off the map is
+	// in the way too.
 	bool IsOpWaitInTheWay(const CellStruct& cell)
 	{
-		auto const pCell = MapClass::Instance.CoordinatesLegal(cell) ? MapClass::Instance.TryGetCellAt(cell) : nullptr;
-
-		return !pCell || IsBridgeOrTubeCell(pCell) || IsPassageMouthCell(cell) || IsNarrowPassage(cell);
+		return !IsWaitCellAllowed(cell, NeuralWaitAsker {}, WaitLegal | WaitOffDeck | WaitOffMouth | WaitOffNarrow);
 	}
 
 	// The wait cell used instead of `hold` when that one is in the way: the nearest cell to it within
