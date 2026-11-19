@@ -384,7 +384,7 @@ namespace
 		if (!pHouse || !pFoot)
 			return false;
 
-		auto const& goals = GetMacroState(pHouse).WaveGoals;
+		auto& goals = GetMacroState(pHouse).WaveGoals;
 		auto const it = goals.find(pFoot->UniqueID);
 		const int now = Unsorted::CurrentFrame;
 
@@ -392,9 +392,21 @@ namespace
 			return false;
 
 		const CellStruct goal = it->second.Cell;
+		const double distance = pFoot->GetMapCoords().DistanceFrom(goal);
 
-		if (goal == CellStruct::Empty || pFoot->GetMapCoords().DistanceFrom(goal) <= WaveGoalKeepCells
-			|| IsFootHeldStill(pHouse, pFoot, WaveMarchHeldFrames))
+		if (goal == CellStruct::Empty || distance <= WaveGoalKeepCells || IsFootHeldStill(pHouse, pFoot, WaveMarchHeldFrames))
+			return false;
+
+		// Progress: WaveMarchProgressCells nearer than the best so far renews it; none in
+		// WaveMarchStallFrames ends the march (a way it cannot get through).
+		auto& march = it->second;
+
+		if (march.BestDistance < 0.0 || distance <= march.BestDistance - WaveMarchProgressCells)
+		{
+			march.BestDistance = distance;
+			march.BestFrame = now;
+		}
+		else if (now - march.BestFrame > WaveMarchStallFrames)
 		{
 			return false;
 		}

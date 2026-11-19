@@ -211,6 +211,9 @@ namespace
 		CellStruct Cell { CellStruct::Empty };
 		int Zone { -1 };
 		int Frame { 0 };
+		// The nearest the unit came to the goal so far (cells, -1 not yet read) and when (IsOnWaveMarch).
+		double BestDistance { -1.0 };
+		int BestFrame { 0 };
 	};
 
 	// Aircraft attack watchdog (UpdateStuckUnits): where an aircraft on Mission::Attack stands and
@@ -3254,6 +3257,12 @@ namespace
 	// lean to its last target and the TEMP wave march line.
 	constexpr int WaveMarchMostFrames = 18000;
 	constexpr int WaveMarchHeldFrames = 900;
+	// A march also ends when the unit came no WaveMarchProgressCells nearer to its goal in
+	// WaveMarchStallFrames (user approved, 2026-11-19: «Sí, hazlo»): in 9 matches of 534a42c97 a TICKT
+	// went from 57 to 62 cells of its goal in 5400 frames and an FTHROW was 124 cells away after 15930,
+	// moving without getting nearer, which IsFootHeldStill does not catch.
+	constexpr int WaveMarchStallFrames = 4500;
+	constexpr double WaveMarchProgressCells = 5.0;
 	constexpr int WaveMarchLogLines = 40;
 	// The house itself leans to the target of its last dispatch for WaveTargetKeepFrames: enemy
 	// buildings within WaveGoalKeepCells of it score WaveTargetKeepBonus more, above the focus
