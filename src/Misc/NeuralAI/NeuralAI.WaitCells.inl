@@ -11,7 +11,7 @@ namespace
 
 	// The rules a cell must pass for a unit to wait, park or gather on it; each one is a check one of
 	// the finders makes. WaitInMap: the map has the cell; WaitLegal: CoordinatesLegal too;
-	// WaitNoBuilding; WaitSurfaceOfAsker: water for a naval asker, else no water; WaitLand: no water;
+	// WaitNoBuilding; WaitNotBesideBuilding: no building in the 3x3 around it; WaitSurfaceOfAsker: water for a naval asker, else no water; WaitLand: no water;
 	// WaitNotBeach; WaitNotRock; WaitZone: the asker's movement zone; WaitLevelNear: within LevelSpan
 	// levels of RefLevel; WaitClearIgnoringUnits, WaitClearIgnoringInfantry, WaitClearOfUnits: the
 	// three ways the finders ask IsClearToMove; WaitNoObject: nothing stands on it; WaitOffDeck: no
@@ -34,7 +34,8 @@ namespace
 		WaitNoObject = 1u << 12,
 		WaitOffDeck = 1u << 13,
 		WaitOffMouth = 1u << 14,
-		WaitOffNarrow = 1u << 15
+		WaitOffNarrow = 1u << 15,
+		WaitNotBesideBuilding = 1u << 16
 	};
 
 	// Who asks: the speed and movement of the unit, its zone, and the level a search keeps to.
@@ -64,6 +65,20 @@ namespace
 
 		if ((rules & WaitNoBuilding) && pCell->GetBuilding())
 			return false;
+
+		if (rules & WaitNotBesideBuilding)
+		{
+			for (int dy = -1; dy <= 1; ++dy)
+			{
+				for (int dx = -1; dx <= 1; ++dx)
+				{
+					auto const pNext = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) });
+
+					if (pNext && pNext->GetBuilding())
+						return false;
+				}
+			}
+		}
 
 		if ((rules & WaitSurfaceOfAsker) && (pCell->LandType == LandType::Water) != asker.Naval)
 			return false;
