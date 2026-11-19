@@ -2169,8 +2169,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	// Picks the incoming air threat a given anti-air defender should engage. Idle
 	// defenders take any threat in reach; busy ones only drop a ground target for
-	// a heavy threat (Kirov-class) that is still short of interceptors.
-	auto pickAirFlankFor = [&](FootClass* pDefender, bool defenderIdle, int maxDistLeptons) -> int
+	// a heavy threat (Kirov-class) that is still short of interceptors. With inAirOnly, only
+	// threats off the ground (an aircraft interceptor never dives at one parked on its pad).
+	auto pickAirFlankFor = [&](FootClass* pDefender, bool defenderIdle, int maxDistLeptons, bool inAirOnly) -> int
 	{
 		if (!pDefender)
 			return -1;
@@ -2188,7 +2189,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			auto const& flank = baseAirFlanks[ai];
 
-			if (!flank.Target || flank.Target->InLimbo || !flank.Target->IsAlive)
+			if (!flank.Target || flank.Target->InLimbo || !flank.Target->IsAlive || (inAirOnly && !flank.Target->IsInAir()))
 				continue;
 
 			if (!defenderIdle && (flank.ThreatValue < 120 || flank.AssignedInterceptors >= flank.NeededInterceptors))
@@ -5751,7 +5752,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (baseAirFlankCount > 0 && hasMobileAAWeapon && pUnit->GetHealthPercentage() >= 0.35)
 		{
-			const int bestAirIdx = pickAirFlankFor(pUnit, isUnitIdle, 5632);
+			const int bestAirIdx = pickAirFlankFor(pUnit, isUnitIdle, 5632, false);
 
 			if (bestAirIdx >= 0)
 			{
@@ -8638,7 +8639,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Multi-Flank Mobile AA Infantry Interception (Flak Troopers, Guardian GIs):
 		if (baseAirFlankCount > 0 && hasInfAAWeapon && pInf->GetHealthPercentage() >= 0.35)
 		{
-			const int bestInfAirIdx = pickAirFlankFor(pInf, isIdle, 4608);
+			const int bestInfAirIdx = pickAirFlankFor(pInf, isIdle, 4608, false);
 
 			if (bestInfAirIdx >= 0)
 			{
@@ -14636,10 +14637,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	std::vector<int> contactAirRisk(enemyContacts.size(), -1);
 	const bool airHarassAllowed = SlotGate(scores[32], -100, 32);
-
-	// Expert 8 in charge: strike wings form first (NeuralAI.AirForce.inl).
 	const bool airForceInCharge = pExt->NeuralAI_ActiveExpert == 8;
 
+	// The harassment of the aircraft that are not of the wings (gas bombers, gunships that do
+	// nothing to buildings; the strike aircraft wait on their pads for their wing): a ground contact
+	// in sight, never an aircraft (IsAirborneThreatTechno: one parked on its pad too), with no
+	// anti-air risk there or on the way (known anti-air defenses within their real reach).
 	auto pickAirHarassTarget = [&](AircraftClass* pAircraft) -> TechnoClass*
 	{
 		const int sortie = airSortieDamage(pAircraft);
@@ -14707,16 +14710,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return pBest;
 	};
 
-	if (airForceInCharge)
-		UpdateAirWings(pHouse);
+	// Strike wings form first, whichever expert is in charge (NeuralAI.AirForce.inl).
+	UpdateAirWings(pHouse);
 
 	// Interceptors: enemy air we know of that threatens the base (the early warning flanks), and
-	// with Expert 8 in charge any enemy flyer we know of within 30 cells away from known anti-air
-	// defenses. Strikes already sent at a flyer count against it, so interceptors spread.
+	// with Expert 8 in charge any enemy flyer we know of within 30 cells that no known anti-air
+	// defense covers. Only aircraft in the air: one parked on its pad counts as a flyer
+	// (IsAirborneThreatTechno) and drew our Black Eagles one by one into the gattling cannons of the
+	// enemy base in match #11501. Strikes already sent at a flyer count against it, so interceptors
+	// spread.
 	auto pickAirInterceptTarget = [&](AircraftClass* pAircraft) -> TechnoClass*
 	{
 		const int flankIdx = baseAirFlankCount > 0
-			? pickAirFlankFor(pAircraft, true, (airForceInCharge ? 40 : 28) * Unsorted::LeptonsPerCell)
+			? pickAirFlankFor(pAircraft, true, (airForceInCharge ? 40 : 28) * Unsorted::LeptonsPerCell, true)
 			: -1;
 
 		if (flankIdx >= 0 && IsCellKnownToAI(pHouse, baseAirFlanks[flankIdx].Target->GetMapCoords()))
@@ -14748,8 +14754,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const& contact : enemyContacts)
 		{
-			if (!contact.Airborne || ac.DistanceFrom(contact.Coords) > 30.0 || !IsCellKnownToAI(pHouse, contact.Coords)
-				|| CountKnownEnemyDefensesNear(pHouse, contact.Coords, 9.0, true) > 0)
+			if (!contact.Airborne || !contact.Techno->IsInAir() || ac.DistanceFrom(contact.Coords) > 30.0
+				|| !IsCellKnownToAI(pHouse, contact.Coords) || CountKnownAntiAirCovering(pHouse, contact.Coords) > 0)
 			{
 				continue;
 			}
@@ -14776,10 +14782,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return pBest;
 	};
 
-	// A lone aircraft only strikes a building with no anti-air risk at all (known anti-air sites,
-	// anti-air units in sight, places our aircraft were shot down), picked once per tick.
-	// The enemy mind controller and a lone harvester in sight are worth a dive only where no anti-air
-	// covers them.
+	// A lone aircraft (one not of the wings) only strikes a building with no anti-air risk at all
+	// (known anti-air sites, anti-air units in sight, places our aircraft were shot down), picked
+	// once per tick. The enemy mind controller and a lone harvester in sight are worth a dive only
+	// where no anti-air covers them.
 	const bool airDiveAtMindController = pEnemyMindController && AirStrikeRiskAt(pHouse, pEnemyMindController->GetMapCoords()) == 0;
 	const bool airDiveAtHarvester = pVisibleEnemyHarvester && AirStrikeRiskAt(pHouse, pVisibleEnemyHarvester->GetMapCoords()) == 0;
 
@@ -15111,33 +15117,48 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool hasAirLoad = (hitsGround || AircraftHitsAir(pAir->Type)) && !reloadingOnDock
 			&& (pAir->Ammo > 0 || (pAir->Type->Ammo < 0 && !pAir->Type->Spawned));
 		const bool isAirForceCraft = IsAirForceCraft(pAir->Type);
+		const bool isWingCraft = IsWingStrikeType(pAir->Type);
+
+		// Flying home to its pad: along the safe lane, not over the base it has just struck.
+		if (isAirForceCraft && FlyAircraftHomeSafely(pHouse, pAir))
+			continue;
 
 		if (hasAirLoad && isAirIdle)
 		{
 			TechnoClass* pInterceptTarget = nullptr;
 
-			if (airDiveAtMindController && hitsGround)
+			if (airDiveAtMindController && hitsGround && !isWingCraft)
 			{
 				OrderAircraftAttack(pAir, pEnemyMindController);
+				NoteAirTask(pHouse, pAir, NeuralAirTask::MindDive);
+			}
+			else if (isAirForceCraft && ContinueAirStrike(pHouse, pAir))
+			{
+				// Flying its wing strike: a member of a wing on its way out stays with it.
 			}
 			else if (isAirForceCraft && pAir->GetHealthPercentage() >= 0.4 && AircraftHitsAir(pAir->Type)
 				&& (pInterceptTarget = pickAirInterceptTarget(pAir)) != nullptr)
 			{
 				OrderAircraftAttack(pAir, pInterceptTarget);
 				CountDecision(NeuralDecision::AirInterceptSortie, pHouse->ArrayIndex);
+				NoteAirTask(pHouse, pAir, NeuralAirTask::Intercept);
 			}
-			else if (airForceInCharge && isAirForceCraft && ContinueAirStrike(pHouse, pAir))
+			else if (isWingCraft)
 			{
-				// Flying (or rearmed for) its wing strike.
+				// A strike aircraft waits on its pad for its wing (UpdateAirWings): it no longer goes
+				// alone at units, harvesters or buildings, nor on patrol.
+				WaitOnAirPad(pHouse, pAir);
 			}
 			else if (TechnoClass* const pPrey = (airHarassAllowed && !pAir->Type->Spawned) ? pickAirHarassTarget(pAir) : nullptr)
 			{
 				OrderAircraftAttack(pAir, pPrey);
 				CountDecision(NeuralDecision::AirHarass, pHouse->ArrayIndex);
+				NoteAirTask(pHouse, pAir, NeuralAirTask::Harass);
 			}
 			else if (airDiveAtHarvester && hitsGround && SlotGate(scores[56], 200, 56))
 			{
 				OrderAircraftAttack(pAir, pVisibleEnemyHarvester);
+				NoteAirTask(pHouse, pAir, NeuralAirTask::HarvesterDive);
 			}
 			else if (!airForceInCharge && isAirForceCraft && AircraftHitsGround(pAir->Type)
 				&& pAir->GetHealthPercentage() >= AirSoloStrikeMinHealth && getSoloStrikeTarget()
@@ -15145,12 +15166,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				FlySoloAirStrike(pHouse, pAir, pSoloStrikeTarget);
 				CountDecision(NeuralDecision::AirSoloStrike, pHouse->ArrayIndex);
+				NoteAirTask(pHouse, pAir, NeuralAirTask::Solo);
 			}
-			else
+			else if (AssignAirPatrol(pHouse, pAir))
 			{
-				// Nothing to strike (or, with Expert 8 in charge, waiting for its wing): patrol the
-				// route of key points (NeuralAI.AirPatrol.inl).
-				AssignAirPatrol(pHouse, pAir);
+				// Nothing to strike: patrol the route of key points (NeuralAI.AirPatrol.inl).
+				NoteAirTask(pHouse, pAir, NeuralAirTask::Patrol);
 			}
 		}
 	}

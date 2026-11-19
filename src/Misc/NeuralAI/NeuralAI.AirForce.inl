@@ -1,17 +1,49 @@
-// NeuralAI.AirForce.inl: Expert 8 (Airforce & Sky Dominance).
-// The air work there is for a house (selector prior), strike wings on known targets away from
-// known anti-air with safe lanes and rearm cycles, interceptors against enemy air in sight and
-// patrol stops over the front. Everything is fog-fair: known enemy buildings, enemy units on
-// ground this house knows (IsCellKnownToAI), and the places where our own aircraft were shot down.
+// NeuralAI.AirForce.inl: the air force and Expert 8 (Airforce & Sky Dominance).
+// Strike wings under any expert: the strike aircraft wait on their pads until all the ready ones
+// together destroy a known target in one pass, fly there along safe lanes and come home the same
+// way. Expert 8 adds the air work of a house (selector prior), interceptors against enemy air in
+// sight and patrol stops over the front. Everything is fog-fair: known enemy buildings, enemy
+// units on ground this house knows (IsCellKnownToAI), and the places where our own aircraft were
+// shot down.
 // Part of NeuralAI.cpp (included in order; one translation unit).
 
 namespace
 {
+	int AntiAirRangeCells(TechnoTypeClass* pType);
+	int AirStrikeWorthOf(const BuildingTypeClass* pType);
+
 	struct NeuralAirStrikeOrder
 	{
 		DWORD TargetID { 0 };
 		int Frame { 0 };
 		CellStruct TargetCell { CellStruct::Empty };
+		// The aircraft fired at the target (its load is no longer full): the pass is flown, it is on
+		// its way home and joins the next wing once it lands.
+		bool Returning { false };
+	};
+
+	// TEMP diagnostic: what the AI last had each aircraft do, for the loss and kill lines.
+	enum class NeuralAirTask : unsigned char
+	{
+		None,
+		Wing,
+		Intercept,
+		Harass,
+		MindDive,
+		HarvesterDive,
+		Solo,
+		Patrol,
+		Pad,
+		SafeHome
+	};
+
+	constexpr const char* NeuralAirTaskNames[] = { "none", "wing", "intercept", "harass", "mindDive", "harvesterDive", "solo", "patrol",
+		"pad", "safeHome" };
+
+	struct NeuralAirTaskRecord
+	{
+		NeuralAirTask Task { NeuralAirTask::None };
+		int Frame { 0 };
 	};
 
 	struct NeuralAirForceState
@@ -42,14 +74,25 @@ namespace
 		// Aircraft fielded this match, by UniqueID (sorted: the lost count never depends on order).
 		std::map<DWORD, int> Fielded {};
 		int WingsLaunched { 0 };
-		// First frame some strike aircraft were ready while the wing was still incomplete.
-		int WingWaitFrame { -1 };
+		// First frame the ready strike aircraft could destroy a target in one pass while others of
+		// the fleet were still rearming or on their way home.
+		int WingMassFrame { -1 };
+		// TEMP diagnostic: aircraft UniqueID -> its last task (key access only), the last wait line,
+		// and the enemy buildings our aircraft destroyed this match.
+		std::unordered_map<DWORD, NeuralAirTaskRecord> Tasks {};
+		int WingWaitLogFrame { -1 };
+		int BuildingsDestroyed { 0 };
 	};
 
 	std::array<NeuralAirForceState, 32> AirForceStates {};
 
-	// How long a wing keeps flying (and rearming for) the same strike.
+	// How long a wing keeps flying the same strike.
 	constexpr int AirStrikeOrderFrames = 4500;
+	// The ready aircraft that could destroy a target in one pass wait this long for the rest of the
+	// fleet still rearming or flying home.
+	constexpr int AirWingGatherFrames = 900;
+	// A strike aircraft below this strength stays out of the wings (and on its pad).
+	constexpr double AirWingMinHealth = 0.5;
 	// A lone strike is what an aircraft was doing when it is lost within this long of the order.
 	constexpr int AirSoloStrikeLossFrames = 1800;
 	// A lone strike needs this much of the aircraft's strength, like a wing's.
@@ -80,6 +123,70 @@ namespace
 	bool AircraftHitsAir(AircraftTypeClass* pType)
 	{
 		return GetCombatValueOfType(pType, true) > 0;
+	}
+
+	// TEMP diagnostic: notes the task the AI gives an aircraft (the frame only when it changes).
+	void NoteAirTask(HouseClass* pHouse, AircraftClass* pAir, NeuralAirTask task)
+	{
+		auto& record = GetAirForceState(pHouse).Tasks[pAir->UniqueID];
+
+		if (record.Task != task)
+			record = NeuralAirTaskRecord { task, Unsorted::CurrentFrame };
+	}
+
+	// A strike aircraft of the wings: an air force aircraft whose ground weapon hurts (more than 10%)
+	// the armor of at least half of the building types worth an air strike. A gas bomber that does
+	// nothing to buildings is no wing aircraft: it hunts units. From the rules only, kept per type.
+	bool IsWingStrikeType(AircraftTypeClass* pType)
+	{
+		if (!pType || !IsAirForceCraft(pType))
+			return false;
+
+		static int cacheSerial = -1;
+		static std::vector<signed char> cache;
+
+		if (cacheSerial != NeuralMatchSerial)
+		{
+			cacheSerial = NeuralMatchSerial;
+			cache.assign(static_cast<size_t>(AircraftTypeClass::Array.Count), -1);
+		}
+
+		const size_t index = static_cast<size_t>(pType->ArrayIndex);
+
+		if (index >= cache.size())
+			cache.resize(index + 1, -1);
+
+		if (cache[index] >= 0)
+			return cache[index] > 0;
+
+		int worthTypes = 0;
+		int hurtTypes = 0;
+
+		for (auto const pBuildingType : BuildingTypeClass::Array)
+		{
+			if (!pBuildingType || pBuildingType->Strength <= 0 || AirStrikeWorthOf(pBuildingType) <= 0)
+				continue;
+
+			worthTypes++;
+
+			for (int i = 0; i < 2; ++i)
+			{
+				auto const pWS = pType->GetWeapon(i);
+				auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+				if (WeaponHitsGround(pWeapon) && pWeapon->Warhead
+					&& GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBuildingType->Armor) > 0.1)
+				{
+					hurtTypes++;
+					break;
+				}
+			}
+		}
+
+		const bool wing = worthTypes > 0 && hurtTypes * 2 >= worthTypes;
+		cache[index] = wing ? 1 : 0;
+
+		return wing;
 	}
 
 	// Free for a wing: docked or guarding, on a patrol stop with nothing to shoot, or hovering at the
@@ -125,12 +232,27 @@ namespace
 		return pType->Cost >= 1500 ? 160 : 0;
 	}
 
-	// Anti-air risk for aircraft over a cell: known enemy anti-air defenses within 9 cells count 2
+	// Known enemy anti-air defenses that cover a cell: within their anti-air range plus 2 cells, 9 at
+	// least (a gattling cannon reaches aircraft 12 cells away).
+	int CountKnownAntiAirCovering(HouseClass* pHouse, const CellStruct& cell)
+	{
+		int count = 0;
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			if (info.IsAA && info.Coords.DistanceFrom(cell) <= std::max(9, AntiAirRangeCells(info.Building->Type) + 2))
+				count++;
+		}
+
+		return count;
+	}
+
+	// Anti-air risk for aircraft over a cell: known enemy anti-air defenses that cover it count 2
 	// each, enemy anti-air units we know of within 8 cells 1 each, and the spots where our
 	// aircraft were shot down in the last 5400 frames within 6 cells 1 each (2 at most).
 	int AirStrikeRiskAt(HouseClass* pHouse, const CellStruct& cell)
 	{
-		int risk = CountKnownEnemyDefensesNear(pHouse, cell, 9.0, true) * 2;
+		int risk = CountKnownAntiAirCovering(pHouse, cell) * 2;
 
 		ForEachTechnoNear(cell, 8, [&](TechnoClass* pTech) -> bool
 		{
@@ -158,9 +280,6 @@ namespace
 		return risk + std::min(2, danger);
 	}
 
-	// Best known enemy building for a strike of tolerance + 1 aircraft from a cell: worth (more near
-	// our fighting army, where defenses become worth hitting too) lowered by risk and distance. Known
-	// anti-air sites themselves are never picked. Ties keep the first in building array order.
 	// Damage one sortie of this aircraft does to a building (ground weapon, burst, full load,
 	// against the building's armor).
 	int AirSortieDamageVs(AircraftClass* pAir, BuildingClass* pTarget)
@@ -182,9 +301,46 @@ namespace
 		return best * (pAir->Type->Ammo > 0 ? pAir->Type->Ammo : 4);
 	}
 
-	// Targets the sorties already sent at them cover (pCommitted: target UniqueID -> damage, with a
-	// 20% margin) are left for the next wing; with pStriker, only buildings it can damage count
-	// (some bombs do nothing against structures).
+	// Score of a known enemy building as a strike target from a cell: worth (more near our fighting
+	// army, where defenses become worth hitting too) lowered by risk and distance, more for a
+	// damaged one and one of the house we fight. 0 when it is no target: an anti-air site, nothing
+	// worth a strike, or more risk than the tolerance.
+	int AirStrikeTargetScore(HouseClass* pHouse, const KnownEnemyBuildingInfo& info, const CellStruct& from, const CellStruct& front,
+		const std::array<int, 8>& airValues, int tolerance, int& risk)
+	{
+		if (info.IsAA)
+			return 0;
+
+		auto const pType = info.Building->Type;
+		int worth = AirStrikeWorthOf(pType) + AirBaseTargetBonus(airValues, info.Building, AirBaseStrikePercent, AirBaseStrikeMost);
+
+		if (front != CellStruct::Empty && info.Coords.DistanceFrom(front) <= 14.0)
+			worth = info.IsDefense ? std::max(worth, 220) : (worth > 0 ? worth + 120 : 0);
+
+		if (worth <= 0)
+			return 0;
+
+		risk = AirStrikeRiskAt(pHouse, info.Coords);
+
+		if (risk > tolerance)
+			return 0;
+
+		int score = worth * 100 / (100 + risk * 60) - static_cast<int>(from.DistanceFrom(info.Coords)) / 2;
+
+		if (info.Building->Health * 2 < pType->Strength)
+			score += score / 4;
+
+		if (info.Building->Owner->ArrayIndex == pHouse->EnemyHouseIndex)
+			score += 30;
+
+		return std::max(0, score);
+	}
+
+	// Best known enemy building for a strike of tolerance + 1 aircraft from a cell (known anti-air
+	// sites themselves are never picked; ties keep the first in building array order). Targets the
+	// sorties already sent at them cover (pCommitted: target UniqueID -> damage, with a 20% margin)
+	// are left out; with pStriker, only buildings it can damage count (some bombs do nothing
+	// against structures).
 	BuildingClass* PickAirStrikeTarget(HouseClass* pHouse, const CellStruct& from, int tolerance, const CellStruct& front,
 		int* pOutScore = nullptr, int* pOutRisk = nullptr, const std::unordered_map<DWORD, int>* pCommitted = nullptr,
 		AircraftClass* pStriker = nullptr)
@@ -196,9 +352,6 @@ namespace
 
 		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
 		{
-			if (info.IsAA)
-				continue;
-
 			if (pCommitted)
 			{
 				auto const it = pCommitted->find(info.Building->UniqueID);
@@ -207,34 +360,15 @@ namespace
 					continue;
 			}
 
-			auto const pType = info.Building->Type;
-			int worth = AirStrikeWorthOf(pType) + AirBaseTargetBonus(airValues, info.Building, AirBaseStrikePercent, AirBaseStrikeMost);
+			int risk = 0;
+			const int score = AirStrikeTargetScore(pHouse, info, from, front, airValues, tolerance, risk);
 
-			if (front != CellStruct::Empty && info.Coords.DistanceFrom(front) <= 14.0)
-				worth = info.IsDefense ? std::max(worth, 220) : (worth > 0 ? worth + 120 : 0);
-
-			if (worth <= 0 || (pStriker && AirSortieDamageVs(pStriker, info.Building) <= 0))
+			if (score <= bestScore || (pStriker && AirSortieDamageVs(pStriker, info.Building) <= 0))
 				continue;
 
-			const int risk = AirStrikeRiskAt(pHouse, info.Coords);
-
-			if (risk > tolerance)
-				continue;
-
-			int score = worth * 100 / (100 + risk * 60) - static_cast<int>(from.DistanceFrom(info.Coords)) / 2;
-
-			if (info.Building->Health * 2 < pType->Strength)
-				score += score / 4;
-
-			if (info.Building->Owner->ArrayIndex == pHouse->EnemyHouseIndex)
-				score += 30;
-
-			if (score > bestScore)
-			{
-				bestScore = score;
-				bestRisk = risk;
-				pBest = info.Building;
-			}
+			bestScore = score;
+			bestRisk = risk;
+			pBest = info.Building;
 		}
 
 		if (pOutScore)
@@ -244,6 +378,96 @@ namespace
 			*pOutRisk = bestRisk;
 
 		return pBest;
+	}
+
+	struct NeuralAirWingPick
+	{
+		BuildingClass* Target { nullptr };
+		int Score { 0 };
+		int Risk { 0 };
+		// Sortie damage of the aircraft expected to reach the target, and the health left to destroy.
+		int Damage { 0 };
+		int Need { 0 };
+		// TEMP diagnostic: the best target the ready aircraft are still too few for.
+		BuildingClass* ShortTarget { nullptr };
+		int ShortDamage { 0 };
+		int ShortNeed { 0 };
+		int ShortRisk { 0 };
+	};
+
+	// Best known enemy building all the ready aircraft destroy together in one pass. The anti-air
+	// risk is taken as aircraft shot down before they release (one per point, so the risk must stay
+	// below their number): the sorties of the others must still cover the health the wings already
+	// flying leave of it. Ties keep the first in building array order.
+	NeuralAirWingPick PickAirWingTarget(HouseClass* pHouse, const std::vector<AircraftClass*>& ready, const CellStruct& front,
+		const std::unordered_map<DWORD, int>& committed)
+	{
+		NeuralAirWingPick pick;
+
+		if (ready.empty())
+			return pick;
+
+		const CellStruct from = ready.front()->GetMapCoords();
+		const int tolerance = static_cast<int>(ready.size()) - 1;
+		const std::array<int, 8> airValues = EnemyAirValueByOwner(pHouse);
+		int shortScore = 0;
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			int risk = 0;
+			const int score = AirStrikeTargetScore(pHouse, info, from, front, airValues, tolerance, risk);
+
+			if (score <= 0 || (score <= pick.Score && score <= shortScore))
+				continue;
+
+			auto const it = committed.find(info.Building->UniqueID);
+			const int need = info.Building->Health - (it != committed.end() ? it->second : 0);
+
+			if (need <= 0)
+				continue;
+
+			int damage = 0;
+			int strikers = 0;
+
+			for (auto const pAir : ready)
+			{
+				const int sortie = AirSortieDamageVs(pAir, info.Building);
+
+				if (sortie > 0)
+				{
+					damage += sortie;
+					strikers++;
+				}
+			}
+
+			if (strikers <= risk)
+				continue;
+
+			// Average sortie of the aircraft that get through.
+			const int delivered = damage / strikers * (strikers - risk);
+
+			if (delivered >= need)
+			{
+				if (score > pick.Score)
+				{
+					pick.Target = info.Building;
+					pick.Score = score;
+					pick.Risk = risk;
+					pick.Damage = delivered;
+					pick.Need = need;
+				}
+			}
+			else if (score > shortScore)
+			{
+				shortScore = score;
+				pick.ShortTarget = info.Building;
+				pick.ShortDamage = delivered;
+				pick.ShortNeed = need;
+				pick.ShortRisk = risk;
+			}
+		}
+
+		return pick;
 	}
 
 	// Centroid of our armed ground units that are fighting an enemy we know of; needs 3 of them.
@@ -389,6 +613,7 @@ namespace
 
 			state.Orders.erase(it->first);
 			state.SoloStrikes.erase(it->first);
+			state.Tasks.erase(it->first);
 			it = state.Fielded.erase(it);
 		}
 
@@ -515,15 +740,16 @@ namespace
 		return std::max(1, prior * AirForceSurvivalPercent(state) / 100);
 	}
 
-	// Next leg of a wing strike: the safe lane hop, then the attack itself. False (and the order is
-	// dropped) when the target is gone or no longer known, the order is too old, or the target is
-	// now covered by more anti-air than the aircraft still flying for it can take.
+	// Next leg of a wing strike: the safe lane hop, then the attack itself. False once the aircraft
+	// has fired (it flies home and joins the next wing), and false with the order dropped when the
+	// target is gone or no longer known, the order is too old, or the target is now covered by more
+	// anti-air than the aircraft flying for it can take.
 	bool ContinueAirStrike(HouseClass* pHouse, AircraftClass* pAir)
 	{
 		auto& state = GetAirForceState(pHouse);
 		auto const it = state.Orders.find(pAir->UniqueID);
 
-		if (it == state.Orders.end())
+		if (it == state.Orders.end() || it->second.Returning)
 			return false;
 
 		const DWORD targetID = it->second.TargetID;
@@ -562,9 +788,9 @@ namespace
 		return true;
 	}
 
-	// A lone aircraft's strike on a building (any expert in charge): flown along the safe lane like a
-	// wing's, and remembered so that a loss on it marks the target. Lone strikes are most of what the
-	// air force flies (2155 against 27 wing sorties over 19 houses, 72 of 111 aircraft lost).
+	// A lone aircraft's strike on a building, for the aircraft that are not of the wings (the strike
+	// aircraft wait for theirs): flown along the safe lane like a wing's, and remembered so that a
+	// loss on it marks the target.
 	void FlySoloAirStrike(HouseClass* pHouse, AircraftClass* pAir, BuildingClass* pTarget)
 	{
 		GetAirForceState(pHouse).SoloStrikes[pAir->UniqueID]
@@ -579,28 +805,67 @@ namespace
 			IssueMoveOrder(pAir, pHop, 3.0);
 	}
 
-	// Strike wings (Expert 8 in charge): idle strike aircraft with a full load and at least half
-	// their strength wait until up to three of them are ready, then fly together at the best known
-	// target their number can take (one point of anti-air risk per aircraft beyond the first). A
-	// wing only takes the aircraft its target needs (sortie damage >= 120% of its health, never
-	// fewer than the risk asks for); the rest form the next wing. Aircraft keep their strike
-	// through rearm trips until the target falls (ContinueAirStrike).
+	// Strike wings, under any expert in charge (user, 2026-11-19: four Black Eagles take out most
+	// power plants, more take a factory in one pass; in match #11501 one house fielded 14 of them and
+	// lost all 14 one by one). The strike aircraft (IsWingStrikeType) with at least AirWingMinHealth
+	// wait on their pads. Once all the ready ones (full load, idle) together destroy a known target in
+	// one pass (PickAirWingTarget), every one of them that can damage it flies there; with some of the
+	// fleet still rearming or flying home they wait for those up to AirWingGatherFrames first. An
+	// aircraft that has fired flies home and joins the next wing once it lands, so a target that
+	// stands after the pass is struck again by the whole fleet, not by each aircraft as it rearms.
 	void UpdateAirWings(HouseClass* pHouse)
 	{
 		auto& state = RefreshAirForceSummary(pHouse);
+		const int now = Unsorted::CurrentFrame;
 		std::vector<AircraftClass*> ready;
 		int strikeFleet = 0;
 
+		// Sortie damage the wings flying out send at each target (key access only), and the targets
+		// already looked up.
+		std::unordered_map<DWORD, int> committedByTarget;
+		std::unordered_map<DWORD, BuildingClass*> targetsByID;
+
 		for (auto const pAir : AircraftClass::Array)
 		{
-			if (!pAir || pAir->Owner != pHouse || !pAir->IsAlive || pAir->InLimbo || !IsAirForceCraft(pAir->Type)
-				|| !pAir->IsArmed() || !AircraftHitsGround(pAir->Type) || IsPlanMember(pHouse, pAir->UniqueID)
-				|| pAir->GetHealthPercentage() < 0.5)
-			{
+			if (!pAir || pAir->Owner != pHouse || !pAir->IsAlive || pAir->InLimbo || !IsWingStrikeType(pAir->Type) || !pAir->IsArmed())
 				continue;
+
+			const bool member = !IsPlanMember(pHouse, pAir->UniqueID) && !IsInTransportOp(pHouse, pAir->UniqueID)
+				&& pAir->GetHealthPercentage() >= AirWingMinHealth;
+
+			if (auto const it = state.Orders.find(pAir->UniqueID); it != state.Orders.end())
+			{
+				auto& order = it->second;
+
+				if (!order.Returning && pAir->Type->Ammo > 0 && pAir->Ammo < pAir->Type->Ammo)
+					order.Returning = true;
+
+				// Landed after its pass (on its pad, rearming): the strike is over.
+				if ((order.Returning && !pAir->IsInAir()) || now < order.Frame || now - order.Frame > 2 * AirStrikeOrderFrames)
+				{
+					state.Orders.erase(it);
+				}
+				else
+				{
+					if (order.Returning)
+					{
+						strikeFleet += member ? 1 : 0;
+					}
+					else
+					{
+						auto const known = targetsByID.find(order.TargetID);
+						auto const pTarget = known != targetsByID.end() ? known->second : FindBuildingByID(order.TargetID);
+						targetsByID[order.TargetID] = pTarget;
+
+						if (pTarget)
+							committedByTarget[pTarget->UniqueID] += AirSortieDamageVs(pAir, pTarget);
+					}
+
+					continue;
+				}
 			}
 
-			if (state.Orders.contains(pAir->UniqueID))
+			if (!member)
 				continue;
 
 			strikeFleet++;
@@ -609,113 +874,267 @@ namespace
 				ready.push_back(pAir);
 		}
 
-		// The wing waits for its third aircraft (or the whole fleet when smaller) at most 900 frames.
-		const int now = Unsorted::CurrentFrame;
-
 		if (ready.empty())
 		{
-			state.WingWaitFrame = -1;
+			state.WingMassFrame = -1;
 			return;
 		}
 
-		if (static_cast<int>(ready.size()) < std::min(3, strikeFleet))
-		{
-			if (state.WingWaitFrame < 0 || state.WingWaitFrame > now)
-				state.WingWaitFrame = now;
-
-			if (now - state.WingWaitFrame < 900)
-				return;
-		}
-
-		state.WingWaitFrame = -1;
+		// The strike aircraft spend most of their time ready on their pads: the target search (every
+		// known building against every ready aircraft) runs every 45 frames at most.
+		if (!IsAITickWindow(45, 1))
+			return;
 
 		std::sort(ready.begin(), ready.end(), [](AircraftClass* a, AircraftClass* b) { return a->UniqueID < b->UniqueID; });
 
-		// Sortie damage the wings already flying send at each target. Key access only.
-		std::unordered_map<DWORD, int> committedByTarget;
-		std::unordered_map<DWORD, BuildingClass*> targetsByID;
-
-		for (auto const pAir : AircraftClass::Array)
-		{
-			if (!pAir || pAir->Owner != pHouse || !pAir->IsAlive || !IsAirForceCraft(pAir->Type))
-				continue;
-
-			auto const it = state.Orders.find(pAir->UniqueID);
-
-			if (it == state.Orders.end())
-				continue;
-
-			auto const known = targetsByID.find(it->second.TargetID);
-			auto const pTarget = known != targetsByID.end() ? known->second : FindBuildingByID(it->second.TargetID);
-			targetsByID[it->second.TargetID] = pTarget;
-
-			if (pTarget)
-				committedByTarget[pTarget->UniqueID] += AirSortieDamageVs(pAir, pTarget);
-		}
+		const int pending = strikeFleet - static_cast<int>(ready.size());
+		bool waited = false;
 
 		while (!ready.empty())
 		{
-			const int tolerance = std::min(3, static_cast<int>(ready.size()) - 1);
-			int score = 0;
-			int risk = 0;
-			auto const pTarget = PickAirStrikeTarget(pHouse, ready.front()->GetMapCoords(), tolerance, state.FrontCell, &score, &risk,
-				&committedByTarget, ready.front());
+			const NeuralAirWingPick pick = PickAirWingTarget(pHouse, ready, state.FrontCell, committedByTarget);
 
-			// Nothing this aircraft could hit: the next one picks.
-			if (!pTarget)
+			if (!pick.Target)
 			{
-				ready.erase(ready.begin());
-				continue;
+				// TEMP diagnostic: why the ready aircraft wait on their pads, every 1800 frames at most.
+				if (!waited && (state.WingWaitLogFrame < 0 || now < state.WingWaitLogFrame || now - state.WingWaitLogFrame >= 1800))
+				{
+					state.WingWaitLogFrame = now;
+					Debug::Log("[NeuralAI] House %d AirWing waits: %d ready of %d (%d pending), best target %s at risk %d needs %d, they deliver %d,"
+						" frame %d.\n", pHouse->ArrayIndex, static_cast<int>(ready.size()), strikeFleet, pending,
+						pick.ShortTarget ? pick.ShortTarget->Type->ID : "none", pick.ShortRisk, pick.ShortNeed, pick.ShortDamage, now);
+				}
+
+				if (!waited)
+					state.WingMassFrame = -1;
+
+				return;
 			}
 
-			// The wing: ready aircraft in UniqueID order that can damage the target, until their sorties
-			// cover it and they are at least as many as the risk asks for.
-			const int need = pTarget->Health + pTarget->Health / 5;
-			int committed = 0;
+			// Mass enough: the rest of the fleet still rearming or flying home is waited for a while.
+			if (!waited && pending > 0)
+			{
+				if (state.WingMassFrame < 0 || now < state.WingMassFrame)
+					state.WingMassFrame = now;
+
+				if (now - state.WingMassFrame < AirWingGatherFrames)
+					return;
+			}
+
+			waited = true;
+			state.WingMassFrame = -1;
+
 			std::vector<AircraftClass*> wing;
+			auto const pTarget = pick.Target;
 
 			for (auto const pCandidate : ready)
 			{
-				if (committed >= need && static_cast<int>(wing.size()) >= risk + 1)
-					break;
-
-				const int damage = AirSortieDamageVs(pCandidate, pTarget);
-
-				if (damage <= 0)
-					continue;
-
-				committed += damage;
-				wing.push_back(pCandidate);
+				if (AirSortieDamageVs(pCandidate, pTarget) > 0)
+					wing.push_back(pCandidate);
 			}
-
-			// Too few for the risk once the useless aircraft are left out: this target waits.
-			if (static_cast<int>(wing.size()) < risk + 1)
-			{
-				ready.erase(ready.begin());
-				continue;
-			}
-
-			const size_t taken = wing.size();
 
 			const CellStruct targetCell = pTarget->GetMapCoords();
 			state.WingsLaunched++;
 			CountDecision(NeuralDecision::AirWing, pHouse->ArrayIndex);
-			Debug::Log("[NeuralAI] House %d AirWing: %d %s -> %s of house %d at (%d,%d), risk %d, score %d, front %s, frame %d (wings %d).\n",
-				pHouse->ArrayIndex, static_cast<int>(taken), wing.front()->Type->ID, pTarget->Type->ID, pTarget->Owner->ArrayIndex,
-				targetCell.X, targetCell.Y, risk, score, state.FrontCell != CellStruct::Empty ? "yes" : "no", Unsorted::CurrentFrame,
-				state.WingsLaunched);
-
-			committedByTarget[pTarget->UniqueID] += committed;
+			Debug::Log("[NeuralAI] House %d AirWing: %d %s -> %s of house %d at (%d,%d), risk %d, score %d, front %s, frame %d (wings %d);"
+				" %d ready of %d (%d pending), they deliver %d of %d.\n", pHouse->ArrayIndex, static_cast<int>(wing.size()), wing.front()->Type->ID,
+				pTarget->Type->ID, pTarget->Owner->ArrayIndex, targetCell.X, targetCell.Y, pick.Risk, pick.Score,
+				state.FrontCell != CellStruct::Empty ? "yes" : "no", now, state.WingsLaunched, static_cast<int>(ready.size()), strikeFleet, pending,
+				pick.Damage, pick.Need);
 
 			for (auto const pMember : wing)
 			{
-				state.Orders[pMember->UniqueID] = NeuralAirStrikeOrder { pTarget->UniqueID, Unsorted::CurrentFrame, targetCell };
+				committedByTarget[pTarget->UniqueID] += AirSortieDamageVs(pMember, pTarget);
+				state.Orders[pMember->UniqueID] = NeuralAirStrikeOrder { pTarget->UniqueID, now, targetCell };
 				CountDecision(NeuralDecision::AirWingSortie, pHouse->ArrayIndex);
+				NoteAirTask(pHouse, pMember, NeuralAirTask::Wing);
 				ContinueAirStrike(pHouse, pMember);
 			}
 
 			std::erase_if(ready, [&wing](AircraftClass* pAir) { return std::find(wing.begin(), wing.end(), pAir) != wing.end(); });
 		}
+	}
+
+	// The aircraft waits on its pad for its wing: in the air (a strike called off, a patrol) it
+	// drops its guard point and target and the engine flies it to a pad (AircraftClass::EnterIdleMode).
+	void WaitOnAirPad(HouseClass* pHouse, AircraftClass* pAir)
+	{
+		NoteAirTask(pHouse, pAir, NeuralAirTask::Pad);
+
+		if (!pAir->IsInAir() || pAir->CurrentMission == Mission::Enter)
+			return;
+
+		pAir->SetArchiveTarget(nullptr);
+		pAir->SetTarget(nullptr);
+		pAir->SetDestination(nullptr, true);
+		pAir->EnterIdleMode(false, true);
+	}
+
+	// After its pass the engine flies an aircraft straight back to its pad (Mission::Enter), over the
+	// base it has just struck: two Black Eagles that struck together were shot down that way in match
+	// #11501. It flies home along the safe lane instead (GetSafeAirHop), hop by hop; from the last hop
+	// the engine flies it in. A hop counts as reached within 8 cells, so a jet that overshoots it is
+	// not sent back. True when it was sent to a hop.
+	bool FlyAircraftHomeSafely(HouseClass* pHouse, AircraftClass* pAir)
+	{
+		if (pAir->CurrentMission != Mission::Enter || !pAir->IsInAir())
+			return false;
+
+		auto pDock = abstract_cast<BuildingClass*>(pAir->Destination);
+
+		if (!pDock)
+			pDock = abstract_cast<BuildingClass*>(pAir->GetNthLink(0));
+
+		if (!pDock || !pDock->Owner || (pDock->Owner != pHouse && !pHouse->IsAlliedWith(pDock->Owner)))
+			return false;
+
+		const CellStruct from = pAir->GetMapCoords();
+
+		if (auto const itRoute = AirRoutes.find(pAir->UniqueID);
+			itRoute != AirRoutes.end() && itRoute->second.Waypoint != CellStruct::Empty && from.DistanceFrom(itRoute->second.Waypoint) <= 8.0)
+		{
+			itRoute->second.Waypoint = CellStruct::Empty;
+		}
+
+		auto const pDockCell = pDock->GetCell();
+		auto const pHop = GetSafeAirHop(pHouse, pAir, pDockCell);
+
+		if (!pHop || pHop == pDockCell || !IssueMoveOrder(pAir, pHop, 3.0))
+			return false;
+
+		NoteAirTask(pHouse, pAir, NeuralAirTask::SafeHome);
+
+		// TEMP diagnostic: the first safe flights home of a match.
+		static int logSerial = -1;
+		static int logCount = 0;
+
+		if (logSerial != NeuralMatchSerial)
+		{
+			logSerial = NeuralMatchSerial;
+			logCount = 0;
+		}
+
+		if (logCount++ < 60)
+		{
+			Debug::Log("[NeuralAI] TEMP air safe home: house %d %s %u at (%d,%d) -> hop (%d,%d) for its pad at (%d,%d), frame %d.\n",
+				pHouse->ArrayIndex, pAir->Type->ID, pAir->UniqueID, from.X, from.Y, pHop->MapCoords.X, pHop->MapCoords.Y,
+				pDockCell->MapCoords.X, pDockCell->MapCoords.Y, Unsorted::CurrentFrame);
+		}
+
+		return true;
+	}
+
+	// TEMP diagnostic (air wings, 2026-11-19): the task the AI last gave an aircraft and its wing order.
+	void DescribeAirTask(HouseClass* pHouse, AircraftClass* pAir, char* buffer, size_t size)
+	{
+		auto& state = GetAirForceState(pHouse);
+		const char* task = "none";
+		int taskAge = -1;
+
+		if (auto const itTask = state.Tasks.find(pAir->UniqueID); itTask != state.Tasks.end())
+		{
+			task = NeuralAirTaskNames[static_cast<size_t>(itTask->second.Task)];
+			taskAge = Unsorted::CurrentFrame - itTask->second.Frame;
+		}
+
+		const char* wing = "none";
+
+		if (auto const itOrder = state.Orders.find(pAir->UniqueID); itOrder != state.Orders.end())
+			wing = itOrder->second.Returning ? "back" : "out";
+
+		sprintf_s(buffer, size, "task %s %d frames ago, wing %s, plan %d", task, taskAge, wing, IsPlanMember(pHouse, pAir->UniqueID) ? 1 : 0);
+	}
+
+	// TEMP diagnostic: an air force aircraft of a Neural AI house is destroyed.
+	void NoteAirForceDeath(HouseClass* pHouse, AircraftClass* pAir, TechnoClass* pKiller)
+	{
+		if (!pAir->Type || !IsAirForceCraft(pAir->Type))
+			return;
+
+		static int logSerial = -1;
+		static int logCount = 0;
+
+		if (logSerial != NeuralMatchSerial)
+		{
+			logSerial = NeuralMatchSerial;
+			logCount = 0;
+		}
+
+		if (logCount++ >= 200)
+			return;
+
+		static const char* const missionNames[] = { "none", "sleep", "attack", "move", "qmove", "retreat", "guard", "sticky", "enter",
+			"capture", "eaten", "harvest", "areaGuard", "return", "stop", "ambush", "hunt", "unload", "sabotage", "construction", "selling",
+			"repair", "rescue", "missile", "harmless", "open", "patrol", "paradropApproach", "paradropOverfly", "wait", "attackMove",
+			"spyplaneApproach", "spyplaneOverfly" };
+
+		const int missionIndex = static_cast<int>(pAir->CurrentMission) + 1;
+		const char* mission = missionIndex >= 0 && missionIndex < static_cast<int>(std::size(missionNames)) ? missionNames[missionIndex] : "?";
+		const CellStruct at = pAir->GetMapCoords();
+		char task[96];
+		DescribeAirTask(pHouse, pAir, task, sizeof(task));
+
+		const char* targetKind = "-";
+		const char* targetID = "-";
+		int targetCells = -1;
+
+		if (auto const pTarget = abstract_cast<TechnoClass*>(pAir->Target))
+		{
+			auto const pTargetType = pTarget->GetTechnoType();
+			targetID = pTargetType ? pTargetType->ID : "?";
+			targetKind = pTarget->WhatAmI() == AbstractType::Building ? "building"
+				: (pTarget->WhatAmI() == AbstractType::Aircraft ? (pTarget->IsInAir() ? "flyer" : "parked aircraft") : "ground unit");
+			targetCells = static_cast<int>(pTarget->GetMapCoords().DistanceFrom(at));
+		}
+
+		int padCells = -1;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Helipad)
+			{
+				const int cells = static_cast<int>(pBld->GetMapCoords().DistanceFrom(at));
+				padCells = padCells < 0 ? cells : std::min(padCells, cells);
+			}
+		}
+
+		char caller[128] = "none";
+		auto const& callers = LastOrderCaller[std::clamp(pHouse->ArrayIndex, 0, 31)];
+
+		if (auto const itCaller = callers.find(pAir->UniqueID); itCaller != callers.end() && itCaller->second.File && itCaller->second.Kind)
+		{
+			sprintf_s(caller, "%s from %s:%d %d frames ago", itCaller->second.Kind, itCaller->second.File, itCaller->second.Line,
+				Unsorted::CurrentFrame - itCaller->second.Frame);
+		}
+
+		auto const pKillerType = pKiller ? pKiller->GetTechnoType() : nullptr;
+
+		Debug::Log("[NeuralAI] TEMP air death: house %d %s %u %s, mission %s, in air %d, at (%d,%d) %d cells from our nearest pad, target %s %s"
+			" %d cells away, killer %s of house %d %d cells away, last order given by %s, frame %d.\n",
+			pHouse->ArrayIndex, pAir->Type->ID, pAir->UniqueID, task, mission, pAir->IsInAir() ? 1 : 0, at.X, at.Y, padCells, targetKind,
+			targetID, targetCells, pKillerType ? pKillerType->ID : "-", pKiller && pKiller->Owner ? pKiller->Owner->ArrayIndex : -1,
+			pKiller ? static_cast<int>(pKiller->GetMapCoords().DistanceFrom(at)) : -1, caller, Unsorted::CurrentFrame);
+	}
+
+	// TEMP diagnostic: an aircraft of a Neural AI house destroys an enemy building.
+	void NoteAirForceKill(HouseClass* pHouse, AircraftClass* pAir, BuildingClass* pVictim)
+	{
+		if (!pAir->Type || !pVictim->Type || pVictim->Type->Wall || pVictim->Type->Insignificant || pVictim->Type->InvisibleInGame)
+			return;
+
+		auto& state = GetAirForceState(pHouse);
+		state.BuildingsDestroyed++;
+
+		if (state.BuildingsDestroyed > 200)
+			return;
+
+		char task[96];
+		DescribeAirTask(pHouse, pAir, task, sizeof(task));
+		const CellStruct at = pVictim->GetMapCoords();
+
+		Debug::Log("[NeuralAI] TEMP air kill: house %d %s %u destroyed %s of house %d at (%d,%d), %s, frame %d (destroyed %d).\n",
+			pHouse->ArrayIndex, pAir->Type->ID, pAir->UniqueID, pVictim->Type->ID, pVictim->Owner ? pVictim->Owner->ArrayIndex : -1, at.X, at.Y,
+			task, Unsorted::CurrentFrame, state.BuildingsDestroyed);
 	}
 
 	// Production shift of an aircraft type while Expert 8 is in charge: strike craft while there
