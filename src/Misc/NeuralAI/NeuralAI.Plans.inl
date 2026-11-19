@@ -235,6 +235,23 @@ namespace
 
 		const int zone = MapClass::Instance.GetMovementZoneType(here, pType->MovementZone, pUnit->OnBridge);
 
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search below.
+		NeuralWaitAsker asker {};
+		asker.Speed = pType->SpeedType;
+		asker.Movement = pType->MovementZone;
+		asker.Zone = zone;
+		NeuralWaitSearch search {};
+		search.MaxRing = SiegeScreenRingCells;
+		auto const pShadow = FindWaitCellNear(point, search, asker,
+			WaitLegal | WaitNoBuilding | WaitOffDeck | WaitOffMouth | WaitZone | WaitOffNarrow,
+			[&](const CellStruct& cell, const CellClass*)
+			{
+				return inReach(cell) || std::any_of(transports.begin(), transports.end(),
+					[&cell](const CellStruct& at) { return at.DistanceFrom(cell) <= SiegeScreenTransportCells; });
+			});
+		static int shadowLogSerial = -1;
+		static int shadowLogCount = 0;
+
 		for (int r = 0; r <= SiegeScreenRingCells; ++r)
 		{
 			for (int ry = -r; ry <= r; ++ry)
@@ -255,11 +272,13 @@ namespace
 						continue;
 					}
 
+					NoteWaitCellShadow("DefenseReachWaitCell", shadowLogSerial, shadowLogCount, point, pCell, pShadow);
 					return pCell;
 				}
 			}
 		}
 
+		NoteWaitCellShadow("DefenseReachWaitCell", shadowLogSerial, shadowLogCount, point, nullptr, pShadow);
 		return nullptr;
 	}
 
@@ -3958,6 +3977,16 @@ namespace
 		// Nearest legal land cell of a movement zone around a point (ring search, fixed order).
 		auto landCellInZone = [](const CellStruct& center, int zone, int searchRadius) -> CellClass*
 		{
+			// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search below.
+			NeuralWaitAsker asker {};
+			asker.Zone = zone;
+			NeuralWaitSearch search {};
+			search.MaxRing = searchRadius;
+			auto const pShadow = FindWaitCellNear(center, search, asker, WaitLegal | WaitLand | (zone >= 0 ? WaitZone : 0u),
+				[](const CellStruct&, const CellClass*) { return false; });
+			static int shadowLogSerial = -1;
+			static int shadowLogCount = 0;
+
 			for (int r = 0; r <= searchRadius; ++r)
 			{
 				for (int dy = -r; dy <= r; ++dy)
@@ -3977,12 +4006,14 @@ namespace
 						if (pCell && pCell->LandType != LandType::Water
 							&& (zone < 0 || MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) == zone))
 						{
+							NoteWaitCellShadow("landCellInZone", shadowLogSerial, shadowLogCount, center, pCell, pShadow);
 							return pCell;
 						}
 					}
 				}
 			}
 
+			NoteWaitCellShadow("landCellInZone", shadowLogSerial, shadowLogCount, center, nullptr, pShadow);
 			return nullptr;
 		};
 
