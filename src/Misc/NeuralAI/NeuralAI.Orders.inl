@@ -191,11 +191,28 @@ namespace
 			MapClass::Instance.GetMovementZoneType(pBoarder->LastMapCoords, movementZone, false) };
 	}
 
+	// A load larger than this never runs dry.
+	constexpr int AirEndlessLoadShots = 100;
+
+	// A load that never runs dry: no load at all (Ammo=-1), or one so large it never ends (a mod
+	// gives its gunships Ammo=2147483645: a sortie damage of shots x damage overflowed, and such an
+	// aircraft never had its full load again after its first shot).
+	bool HasEndlessAirLoad(const AircraftTypeClass* pType)
+	{
+		return pType->Ammo < 0 || pType->Ammo > AirEndlessLoadShots;
+	}
+
+	// Shots an air sortie counts: the load of an aircraft that rearms, 4 for an endless one.
+	int AirSortieShots(const AircraftTypeClass* pType)
+	{
+		return HasEndlessAirLoad(pType) ? 4 : std::max(1, pType->Ammo);
+	}
+
 	// An aircraft on the ground, linked to a dock that has power, with less than its full load:
 	// its dock is reloading it.
 	bool IsAircraftReloadingOnDock(AircraftClass* pAir)
 	{
-		if (!pAir || pAir->Type->Ammo <= 0 || pAir->Ammo >= pAir->Type->Ammo || pAir->IsInAir())
+		if (!pAir || HasEndlessAirLoad(pAir->Type) || pAir->Ammo >= pAir->Type->Ammo || pAir->IsInAir())
 			return false;
 
 		auto const pDock = abstract_cast<BuildingClass*>(pAir->GetNthLink(0));

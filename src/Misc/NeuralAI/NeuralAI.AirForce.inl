@@ -202,7 +202,7 @@ namespace
 
 	bool HasFullAirLoad(AircraftClass* pAir)
 	{
-		return pAir->Type->Ammo < 0 || pAir->Ammo >= pAir->Type->Ammo;
+		return HasEndlessAirLoad(pAir->Type) ? pAir->Ammo != 0 : pAir->Ammo >= pAir->Type->Ammo;
 	}
 
 	// Worth of a known enemy building as an air strike target, from its rules only.
@@ -298,7 +298,7 @@ namespace
 			best = std::max(best, static_cast<int>(pWeapon->Damage * std::max(1, pWeapon->Burst) * verses));
 		}
 
-		return best * (pAir->Type->Ammo > 0 ? pAir->Type->Ammo : 4);
+		return best * AirSortieShots(pAir->Type);
 	}
 
 	// Score of a known enemy building as a strike target from a cell: worth (more near our fighting
@@ -837,7 +837,7 @@ namespace
 			{
 				auto& order = it->second;
 
-				if (!order.Returning && pAir->Type->Ammo > 0 && pAir->Ammo < pAir->Type->Ammo)
+				if (!order.Returning && !HasEndlessAirLoad(pAir->Type) && pAir->Ammo < pAir->Type->Ammo)
 					order.Returning = true;
 
 				// Landed after its pass (on its pad, rearming): the strike is over.

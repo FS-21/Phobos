@@ -110,7 +110,7 @@ namespace
 		}
 
 		// A new stop only with a full load, so a sortie is never cut short on its way back.
-		if (pAir->Type->Ammo > 0 && pAir->Ammo < pAir->Type->Ammo)
+		if (!HasEndlessAirLoad(pAir->Type) && pAir->Ammo < pAir->Type->Ammo)
 			return false;
 
 		std::vector<CellStruct> points;
