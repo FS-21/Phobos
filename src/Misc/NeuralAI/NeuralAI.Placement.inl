@@ -343,27 +343,6 @@ namespace
 			cache.Roads.push_back(std::move(road));
 		}
 
-		// TEMP diagnostic: war factories with a road out, every 3600 frames per house with two or more.
-		{
-			static int roadsLogSerial = -1;
-			static int roadsLogFrame[32] {};
-			const int houseIndex = std::clamp(pHouse->ArrayIndex, 0, 31);
-
-			if (roadsLogSerial != NeuralMatchSerial)
-			{
-				roadsLogSerial = NeuralMatchSerial;
-				std::fill(std::begin(roadsLogFrame), std::end(roadsLogFrame), -3600);
-			}
-
-			if (cache.Roads.size() >= 2 && now - roadsLogFrame[houseIndex] >= 3600)
-			{
-				roadsLogFrame[houseIndex] = now;
-				const auto open = std::count_if(cache.Roads.begin(), cache.Roads.end(), [](auto const& road) { return road.Open; });
-				Debug::Log("[NeuralAI] House %d factory roads DIAG: %d of %d war factories have a two-way road out of the base, frame %d.\n",
-					pHouse->ArrayIndex, static_cast<int>(open), static_cast<int>(cache.Roads.size()), now);
-			}
-		}
-
 		return cache.Roads;
 	}
 
@@ -550,11 +529,6 @@ namespace
 
 			return;
 		}
-
-		// TEMP diagnostic: closed in, jammed, and no single spare building opens a road.
-		Debug::Log("[NeuralAI] House %d factory road DIAG: %d war factories closed in, vehicles jammed at home for %d frames, "
-			"none of %d spare buildings on their pockets opens a road by itself, frame %d.\n", pHouse->ArrayIndex,
-			static_cast<int>(roads.size()), now - macro.HeldAtHomeSince, static_cast<int>(candidates.size()), now);
 	}
 
 	// The cells a unit of this type reaches from a cell without crossing a building, a cliff or
@@ -4529,27 +4503,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				// cell is passed over, and taken last when the tight pass has no other. Asked only of a
 				// cell about to become the best one, since the answer walks the ground.
 				if (spatialScore > bestSpatialScore && !isNavalBld && ClosesFactoryRoad(pHouse, pBuildingType, candidate))
-				{
-					// TEMP diagnostic: the first cells of each match refused for it.
-					static int roadLogSerial = -1;
-					static int roadLogCount = 0;
-
-					if (roadLogSerial != NeuralMatchSerial)
-					{
-						roadLogSerial = NeuralMatchSerial;
-						roadLogCount = 0;
-					}
-
-					if (roadLogCount < 40)
-					{
-						++roadLogCount;
-						Debug::Log("[NeuralAI] House %d factory road DIAG: %s at (%d,%d) would close the road out of a war factory, %s, frame %d.\n",
-							pHouse->ArrayIndex, pBuildingType->ID, candidate.X, candidate.Y, relaxMarginPass == 0 ? "passed over" : "kept for last",
-							Unsorted::CurrentFrame);
-					}
-
 					spatialScore = relaxMarginPass == 0 ? bestSpatialScore : spatialScore - FactoryRoadClosedPenalty;
-				}
 
 				if (spatialScore > bestSpatialScore)
 				{
@@ -4905,18 +4859,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		if (bestCell == CellStruct::Empty)
 		{
 			holdSt.IslandHoldNoRoomUntilFrame = Unsorted::CurrentFrame + IslandHoldNoRoomFrames;
-			// TEMP diagnostic: the island yard has no cell for this defense.
-			Debug::Log("[NeuralAI] House %d IslandHold DIAG: no room for %s next to the yard at (%d,%d), frame %d.\n",
-				pHouse->ArrayIndex, pBuildingType->ID, holdSt.IslandHoldCell.X, holdSt.IslandHoldCell.Y, Unsorted::CurrentFrame);
 			bestCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pBuildingType);
-		}
-		else
-		{
-			// TEMP diagnostic: where a defense chosen for the island yard ends.
-			Debug::Log("[NeuralAI] House %d IslandHold DIAG: %s placed at (%d,%d), %d cells from the yard at (%d,%d), frame %d.\n",
-				pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y,
-				static_cast<int>(bestCell.DistanceFrom(holdSt.IslandHoldCell)), holdSt.IslandHoldCell.X, holdSt.IslandHoldCell.Y,
-				Unsorted::CurrentFrame);
 		}
 	}
 
@@ -5035,43 +4978,6 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 				yardCell != CellStruct::Empty ? static_cast<int>(yardCell.DistanceFrom(bestCell)) : -1, oreCells, refineries, hubCell.X,
 				hubCell.Y, hubCell != CellStruct::Empty ? static_cast<int>(hubCell.DistanceFrom(bestCell)) : -1, slotCell.X, slotCell.Y,
 				slotMissed ? 1 : 0, st.RefinerySlotAimed ? 1 : 0, Unsorted::CurrentFrame);
-		}
-
-		// TEMP diagnostic: where a long-range gun with a dead zone goes, and whether a point-blank
-		// ground tower of ours covers it there (once per cell).
-		static int gunLogSerial = -1;
-		static CellStruct gunLogCell[32] {};
-		const int gunLogHouse = std::clamp(pHouse->ArrayIndex, 0, 31);
-
-		if (gunLogSerial != NeuralMatchSerial)
-		{
-			gunLogSerial = NeuralMatchSerial;
-			std::fill(std::begin(gunLogCell), std::end(gunLogCell), CellStruct::Empty);
-		}
-
-		if (IsDeadZoneTower(pBuildingType) && gunLogCell[gunLogHouse] != bestCell)
-		{
-			gunLogCell[gunLogHouse] = bestCell;
-			const int coverCells = GroundDeadZoneOf(pBuildingType) / Unsorted::LeptonsPerCell + DeadZoneCoverMarginCells;
-			int groundTowers = 0;
-			bool covered = false;
-
-			for (auto const pOwnB : pHouse->Buildings)
-			{
-				if (!pOwnB || !pOwnB->IsAlive || pOwnB->InLimbo || !pOwnB->Type || !pOwnB->Type->IsBaseDefense
-					|| GroundRangeOf(pOwnB->Type) <= 0 || GroundDeadZoneOf(pOwnB->Type) >= Unsorted::LeptonsPerCell)
-				{
-					continue;
-				}
-
-				++groundTowers;
-				const CellStruct tc = pOwnB->GetMapCoords();
-				covered = covered || std::max(std::abs(bestCell.X - tc.X), std::abs(bestCell.Y - tc.Y)) <= coverCells;
-			}
-
-			Debug::Log("[NeuralAI] House %d long-range tower DIAG: %s goes to (%d,%d), point-blank tower within %d cells %d, "
-				"point-blank ground towers owned %d, frame %d.\n", pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y,
-				coverCells, covered ? 1 : 0, groundTowers, Unsorted::CurrentFrame);
 		}
 
 		// Island Hold: the pick stored while this building was under construction is not the
