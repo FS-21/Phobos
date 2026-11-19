@@ -745,20 +745,23 @@ namespace
 	};
 
 	// A deployer of a building other than a yard (Micro): the site it keeps (DeployerSiteMostTries) and
-	// when it was picked, the sites it could not deploy at, the unpack orders given there and the
-	// frame of the last one, since when it stands next to the site; for the idle deployer watchdog
-	// the frame it was first and last seen packed, the spot it keeps to and since when, and whether
-	// the watchdog sent it to the main base (ToMainBase).
+	// when it was picked, the sites it could not deploy at and when (DeployerFailedSiteFrames), the
+	// unpack orders given there and the frame of the last one, since when it stands on or next to the
+	// site; for the idle deployer watchdog the frame it was first and last seen packed, the ground zone
+	// it was last on, the spot it keeps to and since when, and whether the watchdog sent it to the
+	// main base (ToMainBase).
 	struct NeuralDeployerSite
 	{
 		CellStruct Site { CellStruct::Empty };
 		int PickFrame { -1 };
 		std::vector<CellStruct> FailedSites {};
+		std::vector<int> FailedFrames {};
 		int Tries { 0 };
 		int TryFrame { -1 };
 		int NearSince { -1 };
 		int FirstFrame { -1 };
 		int SeenFrame { -1 };
+		int Zone { -1 };
 		CellStruct StillCell { CellStruct::Empty };
 		int StillSince { -1 };
 		bool ToMainBase { false };
@@ -2008,12 +2011,14 @@ namespace
 		int SetDownFrame { -1 };
 		// Departed and stuck (FerryDepartedStuckFrames): the cell and passengers at the last progress
 		// of a departed loaded transport and its frame, the frame it was told to unload where it
-		// stands, and whether it gave its goal up and takes the cargo back to LoadZone (Homeward).
+		// stands, and whether it gave its goal up and takes the cargo back (Homeward) to HomewardZone
+		// (LoadZone, or the main base's when LoadZone holds no yard of ours or has no room).
 		CellStruct StillCoords { CellStruct::Empty };
 		int StillFrame { -1 };
 		int StillPassengers { -1 };
 		int UnloadHereFrame { -1 };
 		bool Homeward { false };
+		int HomewardZone { -1 };
 	};
 
 	// The zone map's value for a cell with no zone at all (outside the zoned map), read as 65535.
@@ -2615,6 +2620,10 @@ namespace
 	// legal foundation of the main base and deploys there (DeployerIdleLogLines TEMP lines a match).
 	constexpr int DeployerSiteMostTries = 3;
 	constexpr int DeployerSiteRetryFrames = 150;
+	// A failed site stays on the avoid list this long (a block there may clear); a building on water
+	// takes up to DeployerWaterSiteTries searches for a water site its deployer reaches.
+	constexpr int DeployerFailedSiteFrames = 5400;
+	constexpr int DeployerWaterSiteTries = 4;
 	constexpr int DeployerIdleUndeployedFrames = 2700;
 	constexpr int DeployerIdleStillFrames = 900;
 	constexpr double DeployerIdleDriftCells = 4.0;
