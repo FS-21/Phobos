@@ -217,6 +217,15 @@ namespace
 		int Frame { 0 };
 	};
 
+	// The last target pick of an idle warship of ours (NavalPreyPickFrames): when, whether it found a target, and the
+	// UniqueID of the enemy unit it went for (0 none).
+	struct NeuralNavalPick
+	{
+		int Frame { 0 };
+		bool HadTarget { false };
+		DWORD PreyID { 0 };
+	};
+
 	// Where a wave sent a unit, the ground zone of that cell and when (KeptWaveGoal).
 	struct NeuralWaveGoal
 	{
@@ -1064,12 +1073,17 @@ namespace
 		int ShipsWithoutTarget { 0 };
 		int ShipsWithoutTargetFloor { INT_MAX };
 		int ShipsWithoutTargetWindowStart { -1 };
-		// Naval hunt: the last frame the target pick of an idle warship of ours found something, the naval sweeps
-		// under way (ship -> the place it looks at and the frame it left), the ships that wait outside a crowded
-		// narrow water passage (NeuralPassageWait) and the last frame the passages were checked.
+		// Naval hunt: the last frame the target pick of an idle warship of ours found something, the last pick of each
+		// ship (lookup only), the naval sweeps under way (ship -> the place it looks at and the frame it left), the seas
+		// with no place for a sweep ((movement zone, zone) -> no search before that frame), the ships that wait outside
+		// a jammed narrow water passage (NeuralPassageWait), the ships the gate let go on (ship -> frame) and the last
+		// frame the passages were checked.
 		int NavalTargetFrame { 0 };
+		std::unordered_map<DWORD, NeuralNavalPick> NavalPicks {};
 		std::map<DWORD, std::pair<CellStruct, int>> NavalSweeps {};
+		std::map<std::pair<int, int>, int> NavalSweepRetryUntil {};
 		std::map<DWORD, NeuralPassageWait> NavalPassageWaits {};
+		std::map<DWORD, int> NavalPassageReleased {};
 		int NavalPassageCheckFrame { -1 };
 		std::array<int, 4> BankWantedFactories {};
 		// AI ticks since the last governor sample at which each queue (BankQueue order) had a
@@ -1700,8 +1714,11 @@ namespace
 			this->ShipsWithoutTargetFloor = INT_MAX;
 			this->ShipsWithoutTargetWindowStart = -1;
 			this->NavalTargetFrame = 0;
+			this->NavalPicks.clear();
 			this->NavalSweeps.clear();
+			this->NavalSweepRetryUntil.clear();
 			this->NavalPassageWaits.clear();
+			this->NavalPassageReleased.clear();
 			this->NavalPassageCheckFrame = -1;
 			this->NoRoomIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
@@ -2855,24 +2872,32 @@ namespace
 	// Attack, still and silent, at shore guns out of their reach; loaded enemy transports crossed the sea unopposed; the
 	// house built 77 destroyers and none went to look for the enemy at sea.
 	// A ship held still NavalStuckAttackFrames on Attack at a target no cell of its sea brings within the reach of its
-	// weapons goes back on guard.
+	// weapons goes back on guard, out of the target's reach (NavalStuckRetreatMarginCells more) when the target can fire
+	// at it; NavalStuckLogLines lines a match.
 	constexpr int NavalStuckAttackFrames = 150;
+	constexpr int NavalStuckRetreatMarginCells = 2;
+	constexpr int NavalStuckLogLines = 30;
 	// The target pick of an idle warship: the target's cost, NavalPreyLoadedBonus for a unit with passengers aboard and
 	// NavalPreyThreatBonus for one that can fire at the ship, less NavalPreyCellWeight per cell between them. Enemy units
-	// on land count within NavalShorePreyCells of the ship.
+	// on land count within NavalShorePreyCells of the ship. A ship picks once per NavalPreyPickFrames at most and keeps
+	// the answer in between; NavalPickLogLines lines of the pick diagnostic a match.
 	constexpr int NavalPreyLoadedBonus = 1000;
 	constexpr int NavalPreyThreatBonus = 500;
 	constexpr int NavalPreyCellWeight = 2;
 	constexpr int NavalShorePreyCells = 30;
+	constexpr int NavalPreyPickFrames = 90;
+	constexpr int NavalPickLogLines = 40;
 	// Naval sweep: with no target found by the pick and no shot of a warship of ours for NavalSweepIdleFrames, and at least
 	// NavalSweepMinShips idle warships with nothing in reach, up to NavalSweepShips of them at a time look at the places of
 	// a NavalSweepStepCells grid over their sea, NavalSweepTripFrames at most for each trip, NavalSweepLogLines lines a match.
+	// A sea with no place worth a look is searched again after NavalSweepRetryFrames.
 	constexpr int NavalSweepIdleFrames = 1800;
 	constexpr size_t NavalSweepMinShips = 4;
 	constexpr size_t NavalSweepShips = 2;
 	constexpr int NavalSweepStepCells = 14;
 	constexpr int NavalSweepTripFrames = 3600;
 	constexpr int NavalSweepLogLines = 20;
+	constexpr int NavalSweepRetryFrames = 900;
 	// Naval mass strike: with fewer than two long-range ships, NavalMassStrikeShips healthy warships of one sea whose guns
 	// hit land at under 10 cells start the Naval Strike Group, all of them shelling one target.
 	constexpr size_t NavalMassStrikeShips = 8;
@@ -2883,13 +2908,16 @@ namespace
 	constexpr int NavalStagingBackCells = 20;
 	constexpr double NavalStagingKeepCells = 8.0;
 	// Narrow water passage: a line across the water of a sea, in one of four directions, NavalPassageWidthCells wide at
-	// most. Once NavalNarrowPassageShips ships of ours on their way are in one, the others bound through it within
-	// NavalPassageApproachCells wait where they are, NavalPassageWaitMostFrames at most. Checked every
-	// NavalPassageCheckFrames, NavalPassageLogLines lines a match.
+	// most. Once NavalNarrowPassageShips ships of ours on their way stand held in one (still NavalPassageHeldFrames), the
+	// others bound through it within NavalPassageApproachCells wait where they are, NavalPassageWaitMostFrames at most,
+	// and a ship that went on is not held again for NavalPassageCooldownFrames. Checked every NavalPassageCheckFrames,
+	// NavalPassageLogLines lines a match.
 	constexpr int NavalPassageWidthCells = 5;
 	constexpr int NavalNarrowPassageShips = 4;
+	constexpr int NavalPassageHeldFrames = 150;
 	constexpr double NavalPassageApproachCells = 8.0;
 	constexpr int NavalPassageWaitMostFrames = 1800;
+	constexpr int NavalPassageCooldownFrames = 1800;
 	constexpr int NavalPassageCheckFrames = 60;
 	constexpr int NavalPassageLogLines = 20;
 	// Units jammed in their own base count as unused too: a ground unit with somewhere to go that has
@@ -3720,11 +3748,12 @@ namespace
 		return !TransportOpOrdersOpen && pFoot && pFoot->Owner && IsInTransportOp(pFoot->Owner, pFoot->UniqueID);
 	}
 
-	// A ship of ours that waits outside a crowded narrow water passage (UpdateNavalPassageGate): the order helpers
-	// (IssueMoveOrder, OrderFootToAttackMove) leave it where it is until the gate lets it go on.
+	// A ship of ours that waits outside a jammed narrow water passage (UpdateNavalPassageGate): the order helpers
+	// (IssueMoveOrder, OrderFootToAttackMove) leave it where it is until the gate lets it go on. A transport operation
+	// that takes it gives its orders whatever the gate says.
 	bool IsWaitingAtNavalPassage(const FootClass* pFoot)
 	{
-		if (!pFoot || !pFoot->Owner)
+		if (!pFoot || !pFoot->Owner || IsInTransportOp(pFoot->Owner, pFoot->UniqueID))
 			return false;
 
 		auto const& waits = GetMacroState(pFoot->Owner).NavalPassageWaits;
@@ -3732,6 +3761,19 @@ namespace
 		const int now = Unsorted::CurrentFrame;
 
 		return it != waits.end() && now >= it->second.Frame && now - it->second.Frame < NavalPassageWaitMostFrames;
+	}
+
+	// The gate lets a waiting ship go (the jam breaker moves it, or its wait is over): no longer waiting, and not held
+	// again for NavalPassageCooldownFrames.
+	void DropNavalPassageWait(const FootClass* pFoot)
+	{
+		if (!pFoot || !pFoot->Owner)
+			return;
+
+		auto& macro = GetMacroState(pFoot->Owner);
+
+		if (macro.NavalPassageWaits.erase(pFoot->UniqueID) > 0)
+			macro.NavalPassageReleased[pFoot->UniqueID] = Unsorted::CurrentFrame;
 	}
 
 	// A unit that gave up waiting for a crossing or lost its boarding turn: no transport takes it for a while.

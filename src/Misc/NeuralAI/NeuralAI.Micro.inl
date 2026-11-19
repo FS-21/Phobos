@@ -1857,8 +1857,40 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		CellClass* pStaging = nullptr;
+		CellClass* pShore = pNearest ? NearestReachableNavalCell(pShip, pNearest->GetMapCoords()) : nullptr;
 
-		if (auto const pShore = pNearest ? NearestReachableNavalCell(pShip, pNearest->GetMapCoords()) : nullptr)
+		// A building whose cell reads as the sea itself (one that stands on water): the nearest cell of the sea around it
+		// that no building stands on, ring by ring.
+		if (pNearest && !pShore)
+		{
+			const CellStruct bc = pNearest->GetMapCoords();
+
+			for (int r = 1; r <= NavalShoreSearchCells && !pShore; ++r)
+			{
+				int bestDist = INT_MAX;
+
+				for (int dy = -r; dy <= r; ++dy)
+				{
+					for (int dx = -r; dx <= r; ++dx)
+					{
+						if (std::abs(dx) != r && std::abs(dy) != r)
+							continue;
+
+						const CellStruct c { static_cast<short>(bc.X + dx), static_cast<short>(bc.Y + dy) };
+						auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+						if (pCell && !pCell->GetBuilding() && dx * dx + dy * dy < bestDist
+							&& MapClass::Instance.GetMovementZoneType(c, movementZone, false) == sea)
+						{
+							bestDist = dx * dx + dy * dy;
+							pShore = pCell;
+						}
+					}
+				}
+			}
+		}
+
+		if (pShore)
 		{
 			const CellStruct from = pShore->MapCoords;
 			const int dx = homeCoords.X - from.X;
@@ -6897,14 +6929,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 				}
 			}
-			// With no enemy ship to go for, an idle warship (armed, or with sonar) outside a plan or a capital group
-			// attack-moves to the fleet staging cell of its sea (fleetStagingCellFor) unless it is within
+			// With no enemy ship to go for, an idle warship (armed, or with sonar) outside a plan, a capital group or a
+			// naval sweep attack-moves to the fleet staging cell of its sea (fleetStagingCellFor) unless it is within
 			// NavalStagingKeepCells of it already.
 			else if (isUnitIdle
 				&& (pType->Sensors || pType->Spawns || (pPrimaryWpn && pPrimaryWpn->Damage > 0)
 					|| (pType->GetWeapon(1) && pType->GetWeapon(1)->WeaponType && pType->GetWeapon(1)->WeaponType->Damage > 0))
 				&& !IsAmphibiousOrAirTransport(pType) && !IsWaitingAtNavalPassage(pUnit) && !IsPlanMember(pHouse, pUnit->UniqueID)
-				&& !GetMacroState(pHouse).CapitalHeld.contains(pUnit->UniqueID) && (IsAITickWindow(90, 20)))
+				&& !GetMacroState(pHouse).CapitalHeld.contains(pUnit->UniqueID) && !GetMacroState(pHouse).NavalSweeps.contains(pUnit->UniqueID)
+				&& (IsAITickWindow(90, 20)))
 			{
 				if (auto const pStaging = fleetStagingCellFor(pUnit);
 					pStaging && pUnit->GetMapCoords().DistanceFrom(pStaging->MapCoords) > NavalStagingKeepCells)
@@ -9629,8 +9662,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// (IsNavalTargetInReach) does nothing either: the engine answers fire from any range, and 24 of the 31
 		// destroyers of a house stood so against guns on the shore (match #11499), busy for every rule
 		// and never counted by the shipyard brake. Held still NavalStuckAttackFrames (IsFootHeldStill) it drops the
-		// target, goes back on guard and is idle from this tick on; until then it counts for the brake. Plans give
-		// their ships their own targets.
+		// target and its record of standing still (so the next shot at it starts the count again), and goes back on
+		// guard, idle from this tick on; until then it counts for the brake. A target that can fire at it would keep
+		// hitting it there, and every hit put it on the same attack again: it moves out of that target's reach first,
+		// NavalStuckRetreatMarginCells more, away from the target along its sea (else to the fleet staging cell), and is
+		// idle once there. Plans give their ships their own targets.
 		if (IsWaterBound(pUnit->Type) && pUnit->CurrentMission == Mission::Attack && pUnit->Target
 			&& !IsPlanMember(pHouse, pUnit->UniqueID) && !IsNavalTargetInReach(pUnit, pUnit->Target))
 		{
@@ -9640,7 +9676,50 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else if (!IsAmphibiousOrAirTransport(pUnit->Type))
 			{
-				// TEMP diagnostic: a ship let go from an attack out of its reach, 30 lines a match.
+				auto const pStuckTarget = abstract_cast<TechnoClass*>(pUnit->Target);
+				const CellStruct here = pUnit->GetMapCoords();
+				const CellStruct targetCell = CellClass::Coord2Cell(pUnit->Target->GetCoords());
+				CellClass* pRetreat = nullptr;
+
+				if (pStuckTarget && pStuckTarget->IsAlive && !pStuckTarget->InLimbo)
+				{
+					const int weaponIndex = pStuckTarget->SelectWeapon(pUnit);
+					const FireError error = pStuckTarget->GetFireError(pUnit, weaponIndex, true);
+					auto const pSlot = pStuckTarget->GetWeapon(weaponIndex);
+					auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+					if (pWeapon && error != FireError::ILLEGAL && error != FireError::CANT && error != FireError::NONE)
+					{
+						const double safeCells = pWeapon->Range / static_cast<double>(Unsorted::LeptonsPerCell) + NavalStuckRetreatMarginCells;
+						const int sea = ObjectZone(pUnit, pUnit->Type->MovementZone);
+						const double awayLen = std::max(1.0, here.DistanceFrom(targetCell));
+						const double awayX = (here.X - targetCell.X) / awayLen;
+						const double awayY = (here.Y - targetCell.Y) / awayLen;
+						const int steps = static_cast<int>(safeCells) + 2;
+
+						for (int step = 1; step <= steps && !pRetreat && here.DistanceFrom(targetCell) <= safeCells; ++step)
+						{
+							const CellStruct c { static_cast<short>(here.X + static_cast<int>(awayX * step)),
+								static_cast<short>(here.Y + static_cast<int>(awayY * step)) };
+							auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+							if (pCell && c.DistanceFrom(targetCell) > safeCells
+								&& MapClass::Instance.GetMovementZoneType(c, pUnit->Type->MovementZone, false) == sea
+								&& pCell->IsClearToMove(pUnit->Type->SpeedType, true, true, -1, pUnit->Type->MovementZone, -1, false))
+							{
+								pRetreat = pCell;
+							}
+						}
+
+						if (!pRetreat && here.DistanceFrom(targetCell) <= safeCells)
+						{
+							if (auto const pStaging = fleetStagingCellFor(pUnit); pStaging && pStaging->MapCoords.DistanceFrom(targetCell) > safeCells)
+								pRetreat = pStaging;
+						}
+					}
+				}
+
+				// TEMP diagnostic: a ship let go from an attack out of its reach, NavalStuckLogLines lines a match.
 				static int releaseLogSerial = -1;
 				static int releaseLogLines = 0;
 
@@ -9650,21 +9729,27 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					releaseLogLines = 0;
 				}
 
-				if (releaseLogLines++ < 30)
+				if (releaseLogLines++ < NavalStuckLogLines)
 				{
-					auto const pStuckTarget = abstract_cast<TechnoClass*>(pUnit->Target);
-					const CellStruct targetCell = CellClass::Coord2Cell(pUnit->Target->GetCoords());
 					Debug::Log("[NeuralAI] Naval stuck DIAG house %d frame %d: %s %u at (%d,%d) let go from Attack on %s at (%d,%d), %d cells, "
-						"out of reach from its sea.\n", pHouse->ArrayIndex, Unsorted::CurrentFrame, pUnit->Type->ID, pUnit->UniqueID,
-						pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y,
-						(pStuckTarget && pStuckTarget->GetTechnoType()) ? pStuckTarget->GetTechnoType()->ID : "a cell", targetCell.X, targetCell.Y,
-						static_cast<int>(pUnit->GetMapCoords().DistanceFrom(targetCell)));
+						"out of reach from its sea; %s.\n", pHouse->ArrayIndex, Unsorted::CurrentFrame, pUnit->Type->ID, pUnit->UniqueID, here.X,
+						here.Y, (pStuckTarget && pStuckTarget->GetTechnoType()) ? pStuckTarget->GetTechnoType()->ID : "a cell", targetCell.X,
+						targetCell.Y, static_cast<int>(here.DistanceFrom(targetCell)), pRetreat ? "moves out of its reach" : "stays");
 				}
 
 				pUnit->SetTarget(nullptr);
 				pUnit->ClearMegaMissionData();
-				pUnit->QueueMission(Mission::Guard, true);
+				GetMacroState(pHouse).FootProgress.erase(pUnit->UniqueID);
 				CountDecision(NeuralDecision::NavalStuckReleased, pHouse->ArrayIndex);
+
+				if (pRetreat && IssueMoveOrder(pUnit, pRetreat, 0.0))
+				{
+					++shipsOnUnreachableAttack;
+
+					continue;
+				}
+
+				pUnit->QueueMission(Mission::Guard, true);
 				idleCombatUnits.push_back(pUnit);
 				releasedShips.push_back(pUnit);
 
@@ -11910,6 +11995,24 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!pLandSiegeWpn)
 					seaHunters++;
 
+				// The pick weighs every enemy unit in sight: it runs once per NavalPreyPickFrames for a ship, which keeps
+				// the last answer in between (one that found nothing still counts for the brake and for a sweep).
+				auto& navalMacro = GetMacroState(pHouse);
+				auto& lastPick = navalMacro.NavalPicks[pBeachU->UniqueID];
+				const int pickFrame = Unsorted::CurrentFrame;
+
+				if (lastPick.Frame > 0 && pickFrame >= lastPick.Frame && pickFrame - lastPick.Frame < NavalPreyPickFrames)
+				{
+					if (!lastPick.HadTarget && !nearestEnemyShipFor(pBeachU, false))
+					{
+						++shipsWithoutTarget;
+						sweepCandidates.push_back(pBeachU);
+					}
+
+					continue;
+				}
+
+				const DWORD lastPreyID = lastPick.PreyID;
 				int preyScore = INT_MIN;
 				bool preyAfloat = false;
 				TechnoClass* const pPrey = navalPreyFor(pBeachU, preyScore, preyAfloat);
@@ -11958,11 +12061,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					return false;
 				};
 
+				// A unit on the ship's sea is attacked at once and the engine chases it (an attack-move to the cell it
+				// stood on was given again at every tick while it moved); one ashore is attacked once in reach, else
+				// the ship attack-moves to the water nearest to it.
+				DWORD pickedPreyID = 0;
+
 				auto const orderPrey = [&]() -> bool
 				{
 					auto const pPreyCell = pPrey->GetCell();
 
-					if (pBeachU->IsCloseEnoughToAttack(pPrey))
+					if (preyAfloat || pBeachU->IsCloseEnoughToAttack(pPrey))
 					{
 						if (pBeachU->Target != pPrey)
 						{
@@ -11980,11 +12088,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						return false;
 					}
 
-					CountDecision(NeuralDecision::NavalPreyAttack, pHouse->ArrayIndex);
+					if (pPrey->UniqueID != lastPreyID)
+						CountDecision(NeuralDecision::NavalPreyAttack, pHouse->ArrayIndex);
+
 					(preyAfloat ? navalAtAfloat : navalAtAshore)++;
 
 					if (pPrey->Passengers.NumPassengers > 0 && abstract_cast<FootClass*>(pPrey))
 						navalAtLoaded++;
+
+					pickedPreyID = pPrey->UniqueID;
 
 					return true;
 				};
@@ -12002,7 +12114,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!hasTarget && pNavalTargetBld && !buildingFirst)
 					hasTarget = orderBuilding();
 
-				auto& navalMacro = GetMacroState(pHouse);
+				lastPick = { pickFrame, hasTarget, pickedPreyID };
 
 				if (hasTarget)
 				{
@@ -12140,8 +12252,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// warship of ours for NavalSweepIdleFrames, and at least NavalSweepMinShips idle warships with nothing in
 		// reach, up to NavalSweepShips of those (the fastest, the cheapest among equals, the lower UniqueID; half
 		// health at least, none that waits at a passage) attack-move each to its own place of their sea
-		// (PickNavalSweepCell). A trip ends at its place, when the ship takes a target or finds one by its pick,
-		// when the ship is gone, or after NavalSweepTripFrames.
+		// (PickNavalSweepCell). A trip ends within 6 cells of its place, when the ship takes a target or finds one by
+		// its pick, when the ship is gone, or after NavalSweepTripFrames. A far order goes in route legs: a sweeper
+		// idle short of its place (at the end of a leg) gets the order again. A sea with no place worth a look is
+		// searched again only after NavalSweepRetryFrames (with the map revealed every place teaches nothing, and the
+		// search ran for every idle warship at every tick).
 		{
 			auto& sweepMacro = GetMacroState(pHouse);
 			auto& sweeps = sweepMacro.NavalSweeps;
@@ -12152,8 +12267,28 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					auto const pSweeper = FindOwnFootByID(pHouse, entry.first);
 
 					return !pSweeper || now < entry.second.second || now - entry.second.second > NavalSweepTripFrames
-						|| pSweeper->Target || pSweeper->GetMapCoords().DistanceFrom(entry.second.first) <= 3.0;
+						|| pSweeper->Target || pSweeper->GetMapCoords().DistanceFrom(entry.second.first) <= 6.0;
 				});
+
+			for (auto const& [uid, trip] : sweeps)
+			{
+				auto const pSweeper = FindOwnFootByID(pHouse, uid);
+				auto const pPlaceCell = MapClass::Instance.TryGetCellAt(trip.first);
+
+				if (pSweeper && pPlaceCell && (pSweeper->CurrentMission == Mission::Guard || pSweeper->CurrentMission == Mission::Area_Guard)
+					&& !pSweeper->Destination && !IsWaitingAtNavalPassage(pSweeper) && !IsInTransportOp(pHouse, uid) && !IsPlanMember(pHouse, uid))
+				{
+					OrderFootToAttackMove(pSweeper, pPlaceCell);
+				}
+			}
+
+			std::erase_if(sweepMacro.NavalSweepRetryUntil, [now](const auto& entry) { return now >= entry.second || entry.second - now > NavalSweepRetryFrames; });
+
+			if (sweepMacro.NavalPicks.size() > 512)
+			{
+				std::erase_if(sweepMacro.NavalPicks, [now](const auto& entry)
+					{ return now < entry.second.Frame || now - entry.second.Frame >= NavalPreyPickFrames; });
+			}
 
 			std::erase_if(sweepCandidates, [&](UnitClass* pShip)
 				{
@@ -12208,11 +12343,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						if (sweeps.size() >= NavalSweepShips)
 							break;
 
+						const std::pair<int, int> seaKey { static_cast<int>(pShip->Type->MovementZone),
+							ObjectZone(pShip, pShip->Type->MovementZone) };
+
+						if (sweepMacro.NavalSweepRetryUntil.contains(seaKey))
+							continue;
+
 						const CellStruct place = PickNavalSweepCell(pHouse, pShip, taken);
 						auto const pPlaceCell = place != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(place) : nullptr;
 
 						if (!pPlaceCell)
+						{
+							sweepMacro.NavalSweepRetryUntil[seaKey] = now + NavalSweepRetryFrames;
 							continue;
+						}
 
 						OrderFootToAttackMove(pShip, pPlaceCell);
 						sweeps[pShip->UniqueID] = { place, now };
@@ -12231,8 +12375,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			// TEMP diagnostic: what the pick of the idle warships gave this tick, every 900 frames.
-			if (navalPicking > 0 && IsAITickWindow(900, 15))
+			// TEMP diagnostic: what the pick of the idle warships gave this tick, every 900 frames, NavalPickLogLines lines
+			// a match.
+			static int pickLogSerial = -1;
+			static int pickLogLines = 0;
+
+			if (pickLogSerial != NeuralMatchSerial)
+			{
+				pickLogSerial = NeuralMatchSerial;
+				pickLogLines = 0;
+			}
+
+			if (navalPicking > 0 && IsAITickWindow(900, 15) && pickLogLines++ < NavalPickLogLines)
 			{
 				Debug::Log("[NeuralAI] House %d naval pick DIAG frame %d: %d idle warships, %d sent at enemy units afloat (%d loaded), %d at "
 					"units ashore, %d at buildings, %d with nothing in reach; %d let go from an attack out of reach, %d still on one, %d on "

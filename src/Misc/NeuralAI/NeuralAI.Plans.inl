@@ -9496,12 +9496,18 @@ namespace
 					}
 				}
 
+				// A mass strike's firing cells are within the reach most of its ships have (the lower median): the shortest
+				// gun of a mixed fleet pulled them all to the shore. Its ships with a shorter gun close in on their target
+				// under their attack order.
+				std::vector<int> reaches;
+
 				for (auto const pShip : siegeShips)
 				{
 					auto const pShipType = abstract_cast<UnitClass*>(pShip)->Type;
 					// The firing cell is within the shortest reach of the shelling ships, so all of them fire.
 					const int reach = landReachOf(pShipType);
 					fleetRange = fleetRange == 0 ? reach : std::min(fleetRange, reach);
+					reaches.push_back(reach);
 
 					// Minimum range of its ground weapons (e.g. a missile sub's launcher): the firing
 					// spot keeps outside the largest one of the fleet.
@@ -9512,6 +9518,12 @@ namespace
 						if (pWS && pWS->WeaponType && WeaponHitsGround(pWS->WeaponType))
 							fleetMinRange = std::max(fleetMinRange, pWS->WeaponType->MinimumRange);
 					}
+				}
+
+				if (massStrike && !reaches.empty())
+				{
+					std::sort(reaches.begin(), reaches.end());
+					fleetRange = reaches[(reaches.size() - 1) / 2];
 				}
 
 				// A reserve stays by our naval yard to defend it: the ships nearest to the yard,

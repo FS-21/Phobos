@@ -901,11 +901,8 @@ namespace
 
 				auto const pCell = MapClass::Instance.TryGetCellAt(cell);
 
-				if (!pCell || std::any_of(taken.begin(), taken.end(), [&cell](const CellStruct& other) { return other.DistanceFrom(cell) < NavalSweepStepCells; })
-					|| IsCellInKnownEnemyDefenseReach(pHouse, cell, 2))
-				{
+				if (!pCell || std::any_of(taken.begin(), taken.end(), [&cell](const CellStruct& other) { return other.DistanceFrom(cell) < NavalSweepStepCells; }))
 					continue;
-				}
 
 				const int gain = ScoutInfoGain(pHouse, state, cell, ScoutLookRadius, fog);
 
@@ -914,7 +911,8 @@ namespace
 
 				const int score = (IsCellVisibleToAI(pHouse, pCell) ? 0 : 1000) + gain * 10 - static_cast<int>(cell.DistanceFrom(from));
 
-				if (score > bestScore)
+				// The defense reach test last, for a place that would be the best one only.
+				if (score > bestScore && !IsCellInKnownEnemyDefenseReach(pHouse, cell, 2))
 				{
 					bestScore = score;
 					best = cell;
