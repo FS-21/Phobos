@@ -5,9 +5,6 @@ namespace
 {
 	int CountStationTrips(const HouseClass* pHouse, DWORD stationID, DWORD excludeID);
 
-	// TEMP diagnostic: stations passed over for being full, per house (repair queue DIAG).
-	std::array<int, 32> RepairStationFullSkips {};
-
 	// Picks the repair station (UnitRepair=yes) this unit should use: only stations it can
 	// actually reach (naval units at naval stations, ground units at land stations,
 	// amphibious/hover units at either), balancing load by adding the current queue (our
@@ -85,10 +82,7 @@ namespace
 			queue = std::max(queue, CountStationTrips(pHouse, pBld->UniqueID, pFoot->UniqueID));
 
 			if (queue >= RepairStationQueueUnits)
-			{
-				RepairStationFullSkips[std::clamp(pHouse->ArrayIndex, 0, 31)]++;
 				continue;
-			}
 
 			const double cost = fc.DistanceFrom(bc) + queue * 8.0;
 
@@ -524,233 +518,11 @@ namespace
 		return out;
 	}
 
-	// TEMP trace: units a plan has just sent somewhere (Naval Strike ships far from their firing
-	// cell), checked after every part of the AI tick: the part after which one is no longer on
-	// its way is the one that stopped it. The ships are found on a Guard mission 0 frames old
-	// with no destination at every tick, before their plan sends them again.
-	struct NeuralWatchedMove
-	{
-		int House { -1 };
-		CellStruct Destination { CellStruct::Empty };
-		int Frame { 0 };
-	};
-
-	std::unordered_map<DWORD, NeuralWatchedMove> WatchedMoves;
-	int WatchedMoveSerial = -1;
-	int WatchedMoveLines = 0;
-
-	void WatchMove(FootClass* pFoot)
-	{
-		if (WatchedMoveSerial != NeuralMatchSerial)
-		{
-			WatchedMoveSerial = NeuralMatchSerial;
-			WatchedMoves.clear();
-			WatchedMoveLines = 0;
-		}
-
-		auto const pGoing = abstract_cast<CellClass*>(pFoot->Destination);
-
-		if (!pGoing || !pFoot->Owner || WatchedMoveLines >= 120 || (WatchedMoves.size() >= 8 && !WatchedMoves.contains(pFoot->UniqueID)))
-			return;
-
-		WatchedMoves[pFoot->UniqueID] = NeuralWatchedMove { pFoot->Owner->ArrayIndex, pGoing->MapCoords, Unsorted::CurrentFrame };
-	}
-
-	void TraceWatchedMoves(int houseIndex, const char* part)
-	{
-		if (WatchedMoves.empty() || WatchedMoveSerial != NeuralMatchSerial)
-			return;
-
-		for (auto it = WatchedMoves.begin(); it != WatchedMoves.end();)
-		{
-			if (it->second.House != houseIndex)
-			{
-				++it;
-				continue;
-			}
-
-			UnitClass* pWatched = nullptr;
-
-			for (auto const pUnit : UnitClass::Array)
-			{
-				if (pUnit && pUnit->UniqueID == it->first && pUnit->IsAlive && !pUnit->InLimbo)
-				{
-					pWatched = pUnit;
-					break;
-				}
-			}
-
-			auto const pGoing = pWatched ? abstract_cast<CellClass*>(pWatched->Destination) : nullptr;
-
-			if (pWatched && pWatched->CurrentMission == Mission::Move && pGoing && pGoing->MapCoords == it->second.Destination)
-			{
-				++it;
-				continue;
-			}
-
-			if (pWatched && WatchedMoveLines++ < 120)
-			{
-				Debug::Log("[NeuralAI] House %d watched move DIAG frame %d: %s %u sent to (%d,%d) %d frames ago is off its way after \"%s\": "
-					"mission %d %d frames old, queued %d, destination %s (%d,%d), target %d.\n", houseIndex, Unsorted::CurrentFrame,
-					pWatched->Type->ID, pWatched->UniqueID, it->second.Destination.X, it->second.Destination.Y,
-					Unsorted::CurrentFrame - it->second.Frame, part, static_cast<int>(pWatched->CurrentMission),
-					Unsorted::CurrentFrame - pWatched->CurrentMissionStartTime, static_cast<int>(pWatched->QueuedMission),
-					pWatched->Destination ? (pGoing ? "cell" : "object") : "none", pGoing ? pGoing->MapCoords.X : -1,
-					pGoing ? pGoing->MapCoords.Y : -1, pWatched->Target ? 1 : 0);
-			}
-
-			it = WatchedMoves.erase(it);
-		}
-	}
-
-	// TEMP trace: a flying transport a plan has parked by its team and put to sleep (Airborne
-	// Front), checked after every part of the AI tick: the part after which it is no longer asleep
-	// on the ground is the one that woke it. Two SHAD were found in the air again, on a move,
-	// 1500 frames after they had parked.
-	struct NeuralWatchedSleeper
-	{
-		int House { -1 };
-		int Frame { 0 };
-	};
-
-	std::unordered_map<DWORD, NeuralWatchedSleeper> WatchedSleepers;
-	int WatchedSleeperSerial = -1;
-	int WatchedSleeperLines = 0;
-
-	void WatchSleeper(FootClass* pFoot)
-	{
-		if (WatchedSleeperSerial != NeuralMatchSerial)
-		{
-			WatchedSleeperSerial = NeuralMatchSerial;
-			WatchedSleepers.clear();
-			WatchedSleeperLines = 0;
-		}
-
-		if (pFoot->Owner && WatchedSleeperLines < 60 && WatchedSleepers.size() < 8 && !WatchedSleepers.contains(pFoot->UniqueID))
-			WatchedSleepers[pFoot->UniqueID] = NeuralWatchedSleeper { pFoot->Owner->ArrayIndex, Unsorted::CurrentFrame };
-	}
-
-	void UnwatchSleeper(DWORD uid)
-	{
-		WatchedSleepers.erase(uid);
-	}
-
-	void TraceWatchedSleepers(int houseIndex, const char* part)
-	{
-		if (WatchedSleepers.empty() || WatchedSleeperSerial != NeuralMatchSerial)
-			return;
-
-		for (auto it = WatchedSleepers.begin(); it != WatchedSleepers.end();)
-		{
-			if (it->second.House != houseIndex)
-			{
-				++it;
-				continue;
-			}
-
-			UnitClass* pWatched = nullptr;
-
-			for (auto const pUnit : UnitClass::Array)
-			{
-				if (pUnit && pUnit->UniqueID == it->first && pUnit->IsAlive && !pUnit->InLimbo)
-				{
-					pWatched = pUnit;
-					break;
-				}
-			}
-
-			if (pWatched && pWatched->CurrentMission == Mission::Sleep && !pWatched->Destination && pWatched->GetHeight() <= 0)
-			{
-				++it;
-				continue;
-			}
-
-			if (pWatched && WatchedSleeperLines++ < 60)
-			{
-				auto const pGoing = abstract_cast<CellClass*>(pWatched->Destination);
-				Debug::Log("[NeuralAI] House %d watched sleeper DIAG frame %d: %s %u at (%d,%d), parked %d frames ago, is awake after \"%s\": "
-					"mission %d %d frames old, queued %d, destination %s (%d,%d), target %d, height %d, %d aboard.\n", houseIndex,
-					Unsorted::CurrentFrame, pWatched->Type->ID, pWatched->UniqueID, pWatched->GetMapCoords().X, pWatched->GetMapCoords().Y,
-					Unsorted::CurrentFrame - it->second.Frame, part, static_cast<int>(pWatched->CurrentMission),
-					Unsorted::CurrentFrame - pWatched->CurrentMissionStartTime, static_cast<int>(pWatched->QueuedMission),
-					pWatched->Destination ? (pGoing ? "cell" : "object") : "none", pGoing ? pGoing->MapCoords.X : -1,
-					pGoing ? pGoing->MapCoords.Y : -1, pWatched->Target ? 1 : 0, pWatched->GetHeight(), pWatched->Passengers.NumPassengers);
-			}
-
-			it = WatchedSleepers.erase(it);
-		}
-	}
-
 	// TEMP diagnostic: a transport the loader left parked to load (Guard or landing, no destination)
 	// that is found with other orders after a part of the AI tick: that part, or the engine between
 	// two ticks, moved it. Logged once per departure from the parking; the loader parks it again.
-	// TEMP trace: the units of the transport operations whose order changed after the operations
-	// gave theirs (at the end of the last tick), checked after every part of the AI tick: the part
-	// named is the one that changed it. What the engine changes between ticks (a move that ends,
-	// a target found) only brings the record up to date. One line per change, 80 per match.
-	void TraceTransportOpUnits(int houseIndex, const char* part)
-	{
-		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
-
-		if (!pHouse)
-			return;
-
-		auto& watch = GetMacroState(pHouse).OpWatch;
-
-		if (watch.empty())
-			return;
-
-		static int opTraceSerial = -1;
-		static int opTraceLines = 0;
-
-		if (opTraceSerial != NeuralMatchSerial)
-		{
-			opTraceSerial = NeuralMatchSerial;
-			opTraceLines = 0;
-		}
-
-		const bool betweenTicks = std::strncmp(part, "the engine", 10) == 0;
-
-		std::erase_if(watch, [&](NeuralOpUnitWatch& entry)
-			{
-				FootClass* const pFoot = entry.Foot;
-
-				if (FootClass::Array.FindItemIndex(pFoot) < 0 || pFoot->UniqueID != entry.UniqueID || !pFoot->IsAlive)
-					return true;
-
-				if (pFoot->CurrentMission == entry.Current && pFoot->MegaMission == entry.Mega && pFoot->Destination == entry.Destination)
-					return false;
-
-				if (betweenTicks)
-				{
-					entry.Current = pFoot->CurrentMission;
-					entry.Mega = pFoot->MegaMission;
-					entry.Destination = pFoot->Destination;
-					return false;
-				}
-
-				if (opTraceLines++ < 80)
-				{
-					auto const pDestCell = abstract_cast<CellClass*>(pFoot->Destination);
-					auto const pDestObject = abstract_cast<ObjectClass*>(pFoot->Destination);
-					Debug::Log("[NeuralAI] House %d transport op unit DIAG frame %d: %s %u changed by %s: mission %d -> %d, mega %d -> %d, "
-						"destination %s (%d,%d).\n", houseIndex, Unsorted::CurrentFrame, pFoot->GetTechnoType()->ID, pFoot->UniqueID, part,
-						static_cast<int>(entry.Current), static_cast<int>(pFoot->CurrentMission), static_cast<int>(entry.Mega),
-						static_cast<int>(pFoot->MegaMission),
-						pDestCell ? "cell" : (pDestObject && pDestObject->GetType() ? pDestObject->GetType()->ID : (pFoot->Destination ? "object" : "none")),
-						pDestCell ? pDestCell->MapCoords.X : -1, pDestCell ? pDestCell->MapCoords.Y : -1);
-				}
-
-				return true;
-			});
-	}
-
 	void TraceParkedFerries(int houseIndex, const char* part)
 	{
-		TraceWatchedMoves(houseIndex, part);
-		TraceWatchedSleepers(houseIndex, part);
-		TraceTransportOpUnits(houseIndex, part);
-
 		auto const pHouse = houseIndex >= 0 && houseIndex < HouseClass::Array.Count ? HouseClass::Array.GetItem(houseIndex) : nullptr;
 
 		if (!pHouse)
@@ -926,29 +698,8 @@ namespace
 		if (!pHop && LastGroundRouteAnswer == NeuralRouteAnswer::NoRoute)
 		{
 			macro.JamRerouteNoWayFrame = now;
-			// TEMP diagnostic: the places searched tell a unit shut in by the ring (a few) from ground
-			// with no other way out (all of it).
-			Debug::Log("[NeuralAI] Frame %d | House #%d no way around the blocked passage at (%d,%d) for %s from (%d,%d) to (%d,%d), "
-				"%d cells from the passage, searched %d\n", now, pHouse->ArrayIndex, spot.X, spot.Y, pType->ID, here.X, here.Y, goal.X,
-				goal.Y, static_cast<int>(toSpot), LastGroundRouteSearched);
-		}
-		else if (pHop)
-		{
-			// TEMP diagnostic: the first legs around a blocked passage of each match.
-			static int legLogSerial = -1;
-			static int legLogCount = 0;
-
-			if (legLogSerial != NeuralMatchSerial)
-			{
-				legLogSerial = NeuralMatchSerial;
-				legLogCount = 0;
-			}
-
-			if (legLogCount++ < 20)
-			{
-				Debug::Log("[NeuralAI] Frame %d | House #%d way around the blocked passage at (%d,%d): %s from (%d,%d) to (%d,%d) goes by (%d,%d)\n",
-					now, pHouse->ArrayIndex, spot.X, spot.Y, pType->ID, here.X, here.Y, goal.X, goal.Y, pHop->MapCoords.X, pHop->MapCoords.Y);
-			}
+			Debug::Log("[NeuralAI] Frame %d | House #%d no way around the blocked passage at (%d,%d) for %s from (%d,%d) to (%d,%d)\n",
+				now, pHouse->ArrayIndex, spot.X, spot.Y, pType->ID, here.X, here.Y, goal.X, goal.Y);
 		}
 
 		return pHop;
@@ -1051,84 +802,6 @@ namespace
 		}
 
 		return true;
-	}
-
-	// TEMP diagnostic: what the route legs answer to the units that stay held on their cell with an
-	// attack-move to give, per house every HeldRouteLogFrames, and a few of those units in detail
-	// (those that got no leg, and those held again within 1200 frames of a leg).
-	constexpr int HeldRouteLogFrames = 1800;
-	constexpr int HeldRouteSamplesPerMatch = 30;
-
-	void NoteHeldRouteAnswer(FootClass* pFoot, const CellStruct& goal, CellClass* pLeg, bool afterLeg)
-	{
-		constexpr size_t AnswerCount = static_cast<size_t>(NeuralRouteAnswer::Count);
-		static constexpr const char* AnswerNames[AnswerCount] = { "given", "excluded", "near", "no zone", "goal off zone", "budget",
-			"no route", "short leg" };
-		static int serial = -1;
-		static std::array<std::array<int, AnswerCount + 1>, 32> answers {};
-		static std::array<int, 32> logFrame {};
-		static int samples = 0;
-
-		if (serial != NeuralMatchSerial)
-		{
-			serial = NeuralMatchSerial;
-			samples = 0;
-			logFrame.fill(0);
-
-			for (auto& tally : answers)
-				tally.fill(0);
-		}
-
-		const int house = pFoot->Owner ? pFoot->Owner->ArrayIndex : -1;
-		auto const pType = pFoot->GetTechnoType();
-
-		if (house < 0 || house >= 32 || !pType)
-			return;
-
-		auto& tally = answers[house];
-		const size_t answer = std::min(static_cast<size_t>(LastGroundRouteAnswer), AnswerCount - 1);
-		tally[answer]++;
-
-		if (afterLeg)
-			tally[AnswerCount]++;
-
-		const int now = Unsorted::CurrentFrame;
-		const CellStruct here = pFoot->GetMapCoords();
-
-		if ((afterLeg || !pLeg) && samples < HeldRouteSamplesPerMatch)
-		{
-			++samples;
-			int crowd = 0;
-
-			for (auto const pTechno : TechnoClass::Array)
-			{
-				if (pTechno && pTechno != pFoot && pTechno->IsAlive && !pTechno->InLimbo && pTechno->WhatAmI() != AbstractType::Building
-					&& pTechno->GetMapCoords().DistanceFrom(here) <= 2.5)
-				{
-					++crowd;
-				}
-			}
-
-			auto const pGoalCell = MapClass::Instance.TryGetCellAt(goal);
-			const MovementZone mz = pType->MovementZone;
-			Debug::Log("[NeuralAI] Held unit DIAG house %d frame %d: %s %u at (%d,%d) mz %d zone %d, goal (%d,%d) %d cells away zone %d land %d, "
-				"answer %s, leg (%d,%d) free of units %d, held after a leg %d, mission %d mega %d, %d units within 2 cells.\n",
-				house, now, pType->ID, pFoot->UniqueID, here.X, here.Y, static_cast<int>(mz), ObjectZone(pFoot, mz), goal.X, goal.Y,
-				static_cast<int>(here.DistanceFrom(goal)), MapClass::Instance.GetMovementZoneType(goal, mz, false),
-				pGoalCell ? static_cast<int>(pGoalCell->LandType) : -1, AnswerNames[answer],
-				pLeg ? pLeg->MapCoords.X : -1, pLeg ? pLeg->MapCoords.Y : -1,
-				pLeg ? (pLeg->IsClearToMove(pType->SpeedType, false, false, -1, mz, -1, false) ? 1 : 0) : -1, afterLeg ? 1 : 0,
-				static_cast<int>(pFoot->CurrentMission), static_cast<int>(pFoot->MegaMission), crowd);
-		}
-
-		if (now - logFrame[house] >= HeldRouteLogFrames || now < logFrame[house])
-		{
-			logFrame[house] = now;
-			Debug::Log("[NeuralAI] House %d held units and route legs: given %d, excluded %d, near %d, no zone %d, goal off zone %d, budget %d, "
-				"no route %d, short leg %d; held again after a leg %d, frame %d.\n",
-				house, tally[0], tally[1], tally[2], tally[3], tally[4], tally[5], tally[6], tally[7], tally[AnswerCount], now);
-			tally.fill(0);
-		}
 	}
 
 	// A unit that needs no transport over water or cliffs: amphibious, hovering, flying, burrowing,
@@ -1353,9 +1026,6 @@ namespace
 					const double goalDist = pFoot->GetMapCoords().DistanceFrom(pDestCell->MapCoords);
 					const int hopSteps = goalDist > 35.0 ? 25 : (goalDist > 22.0 ? 12 : 6);
 					auto const pHopCell = GroundRouteHop(pFoot, pDestCell->MapCoords, hopSteps);
-
-					if (held)
-						NoteHeldRouteAnswer(pFoot, pDestCell->MapCoords, pHopCell, hopping);
 
 					if (pHopCell)
 						hoppingSince[pFoot->UniqueID] = nowFrame;
@@ -2433,13 +2103,8 @@ namespace
 			return pCell;
 		};
 
-		// Why cells were turned down in the last pass: no footing, inside the base, covered by a defense,
-		// a transport cannot stand there, no transport sails from there to the landing, no room.
-		int rejected[6] {};
-
 		auto const search = [&](int minClearance, int minRoom, int& clearanceOut) -> CellClass*
 		{
-			std::fill(std::begin(rejected), std::end(rejected), 0);
 			CellClass* pBest = nullptr;
 			double bestScore = 1e9;
 
@@ -2456,18 +2121,12 @@ namespace
 						auto const pCell = footing(c);
 
 						if (!pCell)
-						{
-							++rejected[0];
 							continue;
-						}
 
 						const int clearance = clearanceOf(c);
 
 						if (clearance < minClearance)
-						{
-							++rejected[1];
 							continue;
-						}
 
 						const double dist = c.DistanceFrom(around);
 
@@ -2486,10 +2145,7 @@ namespace
 						}
 
 						if (covered)
-						{
-							++rejected[2];
 							continue;
-						}
 
 						bool standsAll = true;
 
@@ -2503,10 +2159,7 @@ namespace
 						}
 
 						if (!standsAll)
-						{
-							++rejected[3];
 							continue;
-						}
 
 						bool sails = anyFlyer || crossing.empty() || landing == CellStruct::Empty;
 
@@ -2514,10 +2167,7 @@ namespace
 							sails = CanTransportTypeLink(crossing[i], c, landing);
 
 						if (!sails)
-						{
-							++rejected[4];
 							continue;
-						}
 
 						int room = 0;
 
@@ -2531,10 +2181,7 @@ namespace
 						}
 
 						if (room < minRoom)
-						{
-							++rejected[5];
 							continue;
-						}
 
 						double score = dist;
 
@@ -2580,16 +2227,6 @@ namespace
 
 		if (!pResult)
 			pResult = search(BoardingBaseClearRelaxedCells, BoardingRoomRelaxedCells, clearance);
-
-		// TEMP diagnostic: why no cell near the units would do.
-		if (!pResult)
-		{
-			Debug::Log("[NeuralAI] House %d boarding cell DIAG: none within %d cells of (%d,%d) zone %d for the landing (%d,%d); turned down: "
-				"%d no footing, %d inside the base, %d under a defense, %d no standing for a transport (%d surface types, %d crossing%s), %d no crossing "
-				"to the landing, %d no room; frame %d.\n", pHouse->ArrayIndex, BoardingSearchCells, around.X, around.Y, zone, landing.X,
-				landing.Y, rejected[0], rejected[1], rejected[2], rejected[3], static_cast<int>(surface.size()), static_cast<int>(crossing.size()), anyFlyer ? ", flyers" : "",
-				rejected[4], rejected[5], Unsorted::CurrentFrame);
-		}
 
 		if (pClearance)
 			*pClearance = clearance;

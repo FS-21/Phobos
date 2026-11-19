@@ -891,7 +891,7 @@ namespace
 	// whole waves stood in their own base. Legs along a route with the real step rule get out.
 	// With avoidResources the route keeps off resource cells (past the first cells around the unit,
 	// so one standing in a field can leave it) and is given for any target more than hop + 2 away.
-	// Why the last GroundRouteHop call gave no leg (diagnostics of units that stay held).
+	// Why the last GroundRouteHop call gave no leg.
 	enum class NeuralRouteAnswer : int
 	{
 		Given = 0,
@@ -902,12 +902,9 @@ namespace
 		Budget, // the house used its searches of this tick and has no route kept
 		NoRoute, // the search found none
 		ShortLeg, // the leg would end next to the unit
-		Count
 	};
 
 	NeuralRouteAnswer LastGroundRouteAnswer = NeuralRouteAnswer::Given;
-	// Places the last GroundRouteHop call searched, -1 when it searched none (a route kept, or no search).
-	int LastGroundRouteSearched = -1;
 
 	bool IsNarrowPassage(const CellStruct& center);
 
@@ -919,7 +916,6 @@ namespace
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 		LastGroundRouteAnswer = NeuralRouteAnswer::Excluded;
-		LastGroundRouteSearched = -1;
 
 		if (!pType || pType->JumpJet || pType->Teleporter || pType->MovementZone == MovementZone::Fly
 			|| pType->MovementZone == MovementZone::Subterrannean || pFoot->IsInAir())
@@ -1228,7 +1224,6 @@ namespace
 			}
 
 			GroundRoute route { NeuralMatchSerial, now, {}, {} };
-			LastGroundRouteSearched = static_cast<int>(queue.size());
 
 			if (found)
 			{

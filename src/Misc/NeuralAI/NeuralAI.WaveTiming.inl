@@ -542,23 +542,9 @@ namespace
 		if (now - macro.ArmyIdleWindowStart < ArmyIdleWindowFrames)
 			return;
 
-		const std::array<int, 3> before = macro.ArmyUnused;
 		macro.ArmyUnused = macro.ArmyIdleFloor;
 		macro.ArmyIdleFloor = idle;
 		macro.ArmyIdleWindowStart = now;
-
-		// TEMP diagnostic: a queue pausing or starting again for want of use.
-		for (size_t i = 0; i < idle.size(); ++i)
-		{
-			if ((before[i] >= ArmyIdleBrake[i]) != (macro.ArmyUnused[i] >= ArmyIdleBrake[i]))
-			{
-				Debug::Log("[NeuralAI] House %d army DIAG: unused vehicles %d, soldiers %d, ships %d over %d frames (pause at %d, %d, %d), frame %d.\n",
-					pHouse->ArrayIndex, macro.ArmyUnused[0], macro.ArmyUnused[1], macro.ArmyUnused[2], ArmyIdleWindowFrames,
-					ArmyIdleBrake[0], ArmyIdleBrake[1], ArmyIdleBrake[2], now);
-
-				break;
-			}
-		}
 	}
 
 	// Idle warships with nothing in reach (no coastal building their gun hits from their sea, no enemy

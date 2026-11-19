@@ -5886,9 +5886,6 @@ namespace
 							plan.AuxPeak != 0 ? Unsorted::CurrentFrame - plan.AuxPeak : -1, pTransport->Passengers.NumPassengers);
 					}
 
-					if (pTransport)
-						UnwatchSleeper(pTransport->UniqueID);
-
 					if (pTransport && pTransport->CurrentMission == Mission::Sleep)
 						pTransport->ForceMission(Mission::Guard);
 
@@ -6147,8 +6144,6 @@ namespace
 
 								if (pTransport->CurrentMission != Mission::Sleep)
 									pTransport->ForceMission(Mission::Sleep);
-
-								WatchSleeper(pTransport);
 							}
 							else if (inbound && pTransport->GetMapCoords().DistanceFrom(plan.AnchorCell) > BoardingLandingNearCells)
 							{
@@ -6164,7 +6159,6 @@ namespace
 								plan.AnchorCell = pCell->MapCoords;
 								plan.AuxPeak = Unsorted::CurrentFrame;
 								plan.BoardingParked = false;
-								UnwatchSleeper(pTransport->UniqueID);
 
 								if (pTransport->CurrentMission == Mission::Sleep)
 									pTransport->ForceMission(Mission::Guard);
@@ -6250,8 +6244,6 @@ namespace
 
 								return true;
 							});
-
-						UnwatchSleeper(pTransport->UniqueID);
 
 						if (pTransport->CurrentMission == Mission::Sleep)
 							pTransport->ForceMission(Mission::Guard);
@@ -9257,9 +9249,6 @@ namespace
 						{
 							// Escorts screen around the first firing position (they engage on their own).
 							IssueMoveOrder(pShip, pOwnCell ? pOwnCell : pFiring, siege ? 2.0 : 4.0);
-
-							if (distToFiring >= 25.0)
-								WatchMove(pShip);
 						}
 					}
 
