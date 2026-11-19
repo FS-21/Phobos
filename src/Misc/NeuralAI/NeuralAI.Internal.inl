@@ -214,6 +214,7 @@ namespace
 		McvUnfoldRetry,
 		NavalStrikeInRange,
 		NavalPlanShipsFreed,
+		UrbanQuietRelease,
 		Count
 	};
 
@@ -243,7 +244,7 @@ namespace
 		"ferryDoorRegistered", "ferryStrayLinkCut", "ferryTargetDropped", "ferryDoorCellMove", "ferryLandingRetried", "garrisonTraining",
 		"resourceDetour", "resourceHealStop", "ferryTakenAboard", "scoutSweep", "sensorLookout",
 		"mcvIdleUnfold", "mcvIdleSite", "mcvIdleHome", "opHoldMoved", "jamBarrierBreach", "opNoTransportReach", "backdoorNoCarrier",
-		"mcvIdleStepOnSite", "mcvUnfoldRetry", "navalStrikeInRange", "navalPlanShipsFreed" };
+		"mcvIdleStepOnSite", "mcvUnfoldRetry", "navalStrikeInRange", "navalPlanShipsFreed", "urbanQuietRelease" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
