@@ -1462,7 +1462,34 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	}
 
 	if (pBuildingType->Refinery && !pBuildingType->ResourceGatherer)
-		GetMacroState(pHouse).RefinerySlotAimed = refinerySlotCell != CellStruct::Empty;
+	{
+		auto& aimMacro = GetMacroState(pHouse);
+		aimMacro.RefinerySlotAimed = refinerySlotCell != CellStruct::Empty;
+		// TEMP diagnostic: why it was not aimed, in the order of the checks above.
+		NeuralSlotAimWhy why = NeuralSlotAimWhy::Aimed;
+
+		if (refinerySlotCell == CellStruct::Empty)
+		{
+			const int seen = Unsorted::CurrentFrame - aimMacro.NewFieldSlotFrame;
+
+			if (aimMacro.NewFieldSlotCell == CellStruct::Empty)
+				why = NeuralSlotAimWhy::NoSlot;
+			else if (placingAtAllySite)
+				why = NeuralSlotAimWhy::AllySite;
+			else if (aimMacro.RefineryReachFailures >= 2)
+				why = NeuralSlotAimWhy::ReachFailures;
+			else if (anchoredAtMissingRefineryHub)
+				why = NeuralSlotAimWhy::YardHub;
+			else if (aimMacro.NewFieldSlotReach != RefineryMissedFieldCells)
+				why = NeuralSlotAimWhy::YardSlot;
+			else if (seen < 0 || seen > RefinerySlotAimFrames)
+				why = NeuralSlotAimWhy::Stale;
+			else
+				why = NeuralSlotAimWhy::NoAnchor;
+		}
+
+		aimMacro.RefinerySlotAimWhy = static_cast<int>(why);
+	}
 
 	if (center == CellStruct::Empty)
 		return CellStruct::Empty;
@@ -4915,13 +4942,18 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 			st.LastRefineryPlacedFrame = Unsorted::CurrentFrame;
 
 			// The field the new field slot was opened for: a refinery placed away from it leaves it a
-			// missed field, which opens no slot again for a while (production, MissedNewFields).
+			// missed field, which opens no slot again for a while (production, MissedNewFields). Only
+			// while that slot is open (seen within RefinerySlotAimFrames): a cell left over from a slot
+			// that closed is no field this refinery was built for.
 			const CellStruct slotCell = st.NewFieldSlotCell;
+			const int slotReach = st.NewFieldSlotReach;
+			const int slotSeen = Unsorted::CurrentFrame - st.NewFieldSlotFrame;
+			const bool slotOpen = slotCell != CellStruct::Empty && slotSeen >= 0 && slotSeen <= RefinerySlotAimFrames;
 			bool slotMissed = false;
 
 			if (slotCell != CellStruct::Empty)
 			{
-				slotMissed = std::max(std::abs(bestCell.X - slotCell.X), std::abs(bestCell.Y - slotCell.Y)) > st.NewFieldSlotReach;
+				slotMissed = slotOpen && std::max(std::abs(bestCell.X - slotCell.X), std::abs(bestCell.Y - slotCell.Y)) > st.NewFieldSlotReach;
 
 				if (slotMissed)
 				{
@@ -4978,6 +5010,18 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 				yardCell != CellStruct::Empty ? static_cast<int>(yardCell.DistanceFrom(bestCell)) : -1, oreCells, refineries, hubCell.X,
 				hubCell.Y, hubCell != CellStruct::Empty ? static_cast<int>(hubCell.DistanceFrom(bestCell)) : -1, slotCell.X, slotCell.Y,
 				slotMissed ? 1 : 0, st.RefinerySlotAimed ? 1 : 0, Unsorted::CurrentFrame);
+
+			// TEMP diagnostic (user approved, 2026-11-19): the slot this refinery was judged against or
+			// not, and why its search was or was not aimed at the slot field.
+			if (slotCell != CellStruct::Empty)
+			{
+				const int why = std::clamp(st.RefinerySlotAimWhy, 0, static_cast<int>(sizeof(NeuralSlotAimWhyNames) / sizeof(NeuralSlotAimWhyNames[0])) - 1);
+				Debug::Log("[NeuralAI] House %d refinery slot DIAG: slot field (%d,%d) reach %d seen %d frames ago, open %d, judged missed %d, "
+					"%d cells from it, aim: %s, reach failures %d, frame %d.\n",
+					pHouse->ArrayIndex, slotCell.X, slotCell.Y, slotReach, slotSeen, slotOpen ? 1 : 0, slotMissed ? 1 : 0,
+					std::max(std::abs(bestCell.X - slotCell.X), std::abs(bestCell.Y - slotCell.Y)), NeuralSlotAimWhyNames[why],
+					st.RefineryReachFailures, Unsorted::CurrentFrame);
+			}
 		}
 
 		// Island Hold: the pick stored while this building was under construction is not the
