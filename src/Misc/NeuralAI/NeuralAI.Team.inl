@@ -61,6 +61,8 @@ namespace
 		int Leader { -1 };
 		DWORD TargetID { 0 };
 		CellStruct TargetCell { CellStruct::Empty };
+		// When the team took its target (kept TeamTargetKeepFrames while it stands).
+		int TargetSetFrame { -100000 };
 		int MusterStartFrame { -1 };
 		int FirstReadyFrame { -1 };
 		int LaunchFrame { -1 };
@@ -597,26 +599,60 @@ namespace
 	// ---------------------------------------------------------------- the joint wave
 
 	// Leader = the Neural member with the biggest idle army that has a target (ties: lower index); its
-	// own pick is the team target.
+	// own pick is the team target. The team keeps its target TeamTargetKeepFrames while it stands, and
+	// a house of TeamWeakHouseBuildings known buildings or fewer is the target only when no member
+	// picks a stronger one (match #11465: two armies spent 17500 frames on a house of one building and
+	// changed targets before they got anywhere, while two houses of 29 and 66 buildings stood).
 	bool PickTeamTarget(HouseClass* pViewer, NeuralTeamBoard& board, int now)
 	{
-		int leader = -1;
-		int bestValue = -1;
-
-		for (int m = 0; m < 32; ++m)
+		if (board.TargetID != 0 && now - board.TargetSetFrame < TeamTargetKeepFrames && board.Leader >= 0)
 		{
-			if (!(board.MemberMask & (1u << m)) || !IsNeuralTeamMember(m) || !IsTeamReportFresh(m, now))
-				continue;
-
-			auto const& report = TeamReports[m];
-
-			if (!ResolveTeamTarget(pViewer, report.CandidateID))
-				continue;
-
-			if (report.IdleValue > bestValue)
+			if (auto const pKept = ResolveTeamTarget(pViewer, board.TargetID))
 			{
-				bestValue = report.IdleValue;
-				leader = m;
+				board.TargetCell = pKept->GetMapCoords();
+				return true;
+			}
+		}
+
+		std::array<int, 32> knownBuildings {};
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Owner && !pBld->Type->Insignificant
+				&& !pBld->Type->InvisibleInGame && pBld->Owner->ArrayIndex >= 0 && pBld->Owner->ArrayIndex < 32
+				&& pBld->Owner != pViewer && !pViewer->IsAlliedWith(pBld->Owner) && IsEnemyBuildingKnown(pViewer, pBld))
+			{
+				knownBuildings[pBld->Owner->ArrayIndex]++;
+			}
+		}
+
+		int leader = -1;
+
+		for (int pass = 0; pass < 2 && leader < 0; ++pass)
+		{
+			int bestValue = -1;
+
+			for (int m = 0; m < 32; ++m)
+			{
+				if (!(board.MemberMask & (1u << m)) || !IsNeuralTeamMember(m) || !IsTeamReportFresh(m, now))
+					continue;
+
+				auto const& report = TeamReports[m];
+				auto const pCandidate = ResolveTeamTarget(pViewer, report.CandidateID);
+
+				if (!pCandidate)
+					continue;
+
+				const int owner = pCandidate->Owner ? pCandidate->Owner->ArrayIndex : -1;
+
+				if (pass == 0 && owner >= 0 && owner < 32 && knownBuildings[owner] <= TeamWeakHouseBuildings)
+					continue;
+
+				if (report.IdleValue > bestValue)
+				{
+					bestValue = report.IdleValue;
+					leader = m;
+				}
 			}
 		}
 
@@ -631,6 +667,7 @@ namespace
 
 		if (changed)
 		{
+			board.TargetSetFrame = now;
 			CountDecision(NeuralDecision::TeamTargetSet, leader);
 			Debug::Log("[NeuralAI] Frame %d | Team %08X | House #%d leads, team target %s at (%d,%d) of house #%d\n", now,
 				board.MemberMask, leader, pTarget->Type ? pTarget->Type->ID : "?", board.TargetCell.X, board.TargetCell.Y,
@@ -699,7 +736,9 @@ namespace
 				board.DepartFrame[m] = now + std::min(TeamMaxStagger, maxTravel - travel[m]);
 		}
 
-		board.PushUntilFrame = now + TeamMaxStagger + TeamPushFrames;
+		// The push lasts at least the walk of the farthest member: a fixed 1800 frames ended it before
+		// armies 125 to 170 cells away got there (match #11465).
+		board.PushUntilFrame = now + TeamMaxStagger + std::max(TeamPushFrames, maxTravel + TeamPushMarginFrames);
 		CountDecision(board.Split ? NeuralDecision::TeamSplitFronts : NeuralDecision::TeamWaveLaunch, board.Leader);
 		Debug::Log("[NeuralAI] Frame %d | Team %08X | %s wave launched by house #%d (mustered %d frames%s) -> (%d,%d)\n", now,
 			board.MemberMask, board.Split ? "Split-front" : "Joint", board.Leader, now - board.MusterStartFrame,

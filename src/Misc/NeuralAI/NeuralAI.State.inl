@@ -2512,6 +2512,30 @@ namespace
 	constexpr int McvIdleArriveFrames = 450;
 	constexpr int McvUnfoldRetryFrames = 450;
 	constexpr int McvUnfoldMostTries = 3;
+	// Armies go out in mass (user approved, 2026-11-19: "sí haz las 4"; match #11465 Dead Six: two
+	// allied houses of 80+ units and 100000+ credits streamed packets of 7 to 17 units for 18000
+	// frames while a third of each army stayed home). Once the army (idle and busy fighters, not
+	// guards or plans) has WaveArmyMassFrom units, a main wave waits for WaveArmyShareDivisor-th of it
+	// idle, at most WaveArmyShareMost; the second echelon discount holds only while
+	// WaveEchelonEngagedUnits of the waves before stand within WaveEchelonEngagedCells of their goal.
+	constexpr int WaveArmyMassFrom = 18;
+	constexpr int WaveArmyShareDivisor = 3;
+	constexpr int WaveArmyShareMost = 40;
+	constexpr int WaveEchelonEngagedUnits = 3;
+	constexpr double WaveEchelonEngagedCells = 14.0;
+	// A team push lasts at least the walk of its farthest member plus TeamPushMarginFrames; the team
+	// keeps its target for TeamTargetKeepFrames while it stands; a house with TeamWeakHouseBuildings
+	// known buildings or fewer is the team target only when no member picks a stronger one.
+	constexpr int TeamPushMarginFrames = 900;
+	constexpr int TeamTargetKeepFrames = 9000;
+	constexpr int TeamWeakHouseBuildings = 2;
+	// Out of an attack on the base the tank guard keeps at most a TankGuardPeaceShare-th of the main
+	// battle tanks home (TankGuardMin at least). Off urban maps a garrison is taken only with a seen
+	// enemy within UrbanQuietGarrisonCells of the building, and a quiet one empties into the army,
+	// the building closed to us for UrbanQuietReleaseFrames.
+	constexpr int TankGuardPeaceShare = 4;
+	constexpr int UrbanQuietGarrisonCells = 16;
+	constexpr int UrbanQuietReleaseFrames = 2700;
 	// Land before islands (user approved, 2026-11-19): in 4 matches of 724f571ef 44 of 87 expansion
 	// lines of houses whose income fell found the expansion MCV built and packed, waiting for a ride to
 	// an island; 31 of 38 such MCVs of 5 stamps had a free field on their own landmass (match #11376,

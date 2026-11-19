@@ -9759,7 +9759,34 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// while the first one is still fighting (point 33).
 	const bool counterattackWindow = waveMacro.CounterattackUntilFrame > Unsorted::CurrentFrame;
 	const int sinceWaveStart = Unsorted::CurrentFrame - waveMacro.WaveStartFrame;
-	const bool secondEchelonWindow = sinceWaveStart >= 300 && sinceWaveStart <= 1500;
+	// The second echelon goes only while the waves before fight at their goal: by time alone it sent
+	// packets of a few units after waves still on their way (match #11465).
+	bool secondEchelonWindow = sinceWaveStart >= 300 && sinceWaveStart <= 1500;
+
+	if (secondEchelonWindow)
+	{
+		int engaged = 0;
+
+		auto const countEngaged = [&](FootClass* pFoot)
+		{
+			if (engaged >= WaveEchelonEngagedUnits || !pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo)
+				return;
+
+			auto const itGoal = waveMacro.WaveGoals.find(pFoot->UniqueID);
+
+			if (itGoal != waveMacro.WaveGoals.end() && pFoot->GetMapCoords().DistanceFrom(itGoal->second.Cell) <= WaveEchelonEngagedCells)
+				++engaged;
+		};
+
+		for (auto const pU : UnitClass::Array)
+			countEngaged(pU);
+
+		for (auto const pI : InfantryClass::Array)
+			countEngaged(pI);
+
+		secondEchelonWindow = engaged >= WaveEchelonEngagedUnits;
+	}
+
 	const int tacticalWaveDiscount = (counterattackWindow ? 3 : 0) + (waveMacro.PressureMode ? 2 : 0)
 		+ (secondEchelonWindow ? (baseWave + defenseMassBonus) / 2 : 0);
 	// The learned wave mass scales the count and its cap alike.
@@ -9925,9 +9952,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	const size_t waveUnitsNeeded = teamOrder.MinWaveUnits > 0
+	// Mass, not a stream (match #11465 Dead Six: a wave of 2 or 3 and a dispatch every tick sent the
+	// armies of two houses of 80+ units out in packets of 7 to 17): once the army is big, a main wave
+	// waits for a share of it idle. The army is the idle fighters and those busy at the enemy, not the
+	// guards, plans or garrisons. The guerrilla raider (5) keeps its small groups.
+	const int waveArmy = static_cast<int>(idleCombatUnits.size() + idleCombatInf.size()) + notIdleBusy + notIdleInfBusy;
+	const size_t armyShareUnits = (endgameRemnantHunt || arch == 5 || waveArmy < WaveArmyMassFrom)
+		? 0u
+		: static_cast<size_t>(std::min(WaveArmyShareMost, waveArmy / WaveArmyShareDivisor));
+	const size_t waveUnitsNeeded = std::max(armyShareUnits, teamOrder.MinWaveUnits > 0
 		? std::min(minWaveUnits, static_cast<size_t>(teamOrder.MinWaveUnits))
-		: minWaveUnits;
+		: minWaveUnits);
 
 	// Expert 3 tacit coalition: this wave goes for the coalition target (approach away from the
 	// spots other houses' armies are hitting).
@@ -10390,13 +10425,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		Debug::Log("[NeuralAI] Frame %d | House #%d wave gate: idle units %d (%d reach the target) inf %d (%d) needed %d, not idle busy %d "
 			"plan %d mission %d health %d immobile %d linked %d, inf busy %d plan %d mission %d linked %d, target %s (%d,%d) hold %d "
-			"remnant %d | mission ships%s, vehicles%s\n",
+			"remnant %d army %d share %d | mission ships%s, vehicles%s\n",
 			Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(idleCombatUnits.size()), static_cast<int>(waveAbleUnits),
 			static_cast<int>(idleCombatInf.size()), static_cast<int>(waveAbleInf), static_cast<int>(waveUnitsNeeded), notIdleBusy,
 			notIdlePlan, notIdleMission, notIdleHealth, notIdleImmobile, notIdleLinked, notIdleInfBusy, notIdleInfPlan, notIdleInfMission,
 			notIdleInfLinked, pWaveTargetCell ? "yes" : "none", pWaveTargetCell ? pWaveTargetCell->MapCoords.X : -1,
 			pWaveTargetCell ? pWaveTargetCell->MapCoords.Y : -1, teamOrder.Hold ? 1 : 0, endgameRemnantHunt ? 1 : 0,
-			missions(notIdleMissionShips).c_str(), missions(notIdleMissionVehicles).c_str());
+			waveArmy, static_cast<int>(armyShareUnits), missions(notIdleMissionShips).c_str(), missions(notIdleMissionVehicles).c_str());
 	}
 	NeuralWaveCheck waveCheck {};
 	waveCheck.Launch = true;
@@ -10429,6 +10464,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			addReadyValue(pI, mz == MovementZone::Amphibious || mz == MovementZone::AmphibiousDestroyer || mz == MovementZone::Fly
 				|| pI->Type->JumpJet || pI->Type->Teleporter);
 		}
+
+		// The waves before on their way to this target count too: each packet was judged alone
+		// against the whole defense (match #11465: "value 159 vs 1035 expected" while 47 units of
+		// the house marched there).
+		auto const addEnRouteValue = [&](FootClass* pFoot)
+		{
+			if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || !IsFootActivelyAttackingOrMovingToEnemy(pFoot))
+				return;
+
+			auto const itGoal = waveMacro.WaveGoals.find(pFoot->UniqueID);
+
+			if (itGoal != waveMacro.WaveGoals.end() && itGoal->second.Cell.DistanceFrom(gateTarget) <= 12.0
+				&& pFoot->GetMapCoords().DistanceFrom(gateTarget) > 14.0)
+			{
+				readyValue += OwnGroundFighterValue(pFoot);
+			}
+		};
+
+		for (auto const pU : UnitClass::Array)
+			addEnRouteValue(pU);
+
+		for (auto const pI : InfantryClass::Array)
+			addEnRouteValue(pI);
 
 		waveCheck = EvaluateWaveLaunch(pHouse, gateTarget, readyValue,
 			counterattackWindow || waveMacro.BlackoutUntilFrame > Unsorted::CurrentFrame, waveMass);
