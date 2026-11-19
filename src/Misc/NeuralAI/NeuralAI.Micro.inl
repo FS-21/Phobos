@@ -11468,6 +11468,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 							const CellStruct rawStage { static_cast<short>(tc.X + (dx * stageDist) / distToTarget),
 								static_cast<short>(tc.Y + (dy * stageDist) / distToTarget) };
+							NeuralWaitAsker stagingAsker {};
+							stagingAsker.Zone = waveTargetZone;
+
 							for (int r = 0; r <= 6 && !pForwardStagingCell; r += 2)
 							{
 								for (int sy = -r; sy <= r && !pForwardStagingCell; sy += 2)
@@ -11478,12 +11481,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 											static_cast<short>(rawStage.Y + sy) };
 										if (auto const pSC = MapClass::Instance.TryGetCellAt(sc))
 										{
-											if (pSC->LandType != LandType::Water
-												&& MapClass::Instance.GetMovementZoneType(
-													sc, MovementZone::Normal, false)
-													== waveTargetZone
-												&& pSC->IsClearToMove(
-													SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false)
+											// Land of the target's zone clear of everything but units (IsWaitCellAllowed), in open ground.
+											if (IsWaitCellAllowed(sc, stagingAsker, WaitLand | WaitZone | WaitClearIgnoringUnits)
 												&& isOpenStagingArea(sc, pass == 0 ? 38 : 30))
 											{
 												bool safeFromLongRangeDef = true;
