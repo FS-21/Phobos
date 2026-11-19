@@ -9070,7 +9070,9 @@ namespace
 		// other known defenses, with warships screening them. Coastal defenses are taken out first.
 		// The whole free fleet goes but for a reserve by our naval yard, each shelling ship to its
 		// own firing cell (NavalStrikeMaxShips and the other Naval* constants). Damaged ships
-		// (< 40%) head back to our naval yard, and free healthy ones take their place.
+		// (< 40%) head back to our naval yard, and free healthy ones take their place. With fewer
+		// than two long-range ships, NavalMassStrikeShips short-range gun ships of one sea or more
+		// go as a mass strike, all of them shelling one target.
 		{
 			auto& plan = planOf(NeuralPlanId::NavalStrikeGroup);
 
@@ -9106,6 +9108,20 @@ namespace
 				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
 
 				return pUnit && pUnit->Type && pUnit->Type->Naval && landReachOf(pUnit->Type) >= 10 * Unsorted::LeptonsPerCell;
+			};
+
+			// A ship whose gun (or aircraft) hits land at all. In a mass strike (plan.MassStrike) every one of them
+			// shells, not only the long-range ones.
+			auto isGunShip = [&landReachOf](FootClass* pFoot) -> bool
+			{
+				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+				return pUnit && pUnit->Type && pUnit->Type->Naval && landReachOf(pUnit->Type) > 0;
+			};
+
+			auto shellsIn = [&](FootClass* pFoot) -> bool
+			{
+				return isLongRangeShip(pFoot) || (plan.MassStrike && isGunShip(pFoot));
 			};
 
 			CellClass* pNavalYard = nullptr;
@@ -9164,7 +9180,7 @@ namespace
 						// A shelling ship: its squad's target and its own cell by it (plan.Cells, ship i in squad
 						// i % squads); with its squad's target down, the first one standing, from the cell of the
 						// same rank in that squad.
-						const bool shells = isLongRangeShip(pShip);
+						const bool shells = shellsIn(pShip);
 						CellStruct ownCell = plan.StagingCell;
 						BuildingClass* pShipTarget = pTarget;
 
@@ -9242,7 +9258,7 @@ namespace
 						{
 							auto const pUnit = abstract_cast<UnitClass*>(pFoot);
 
-							if (pUnit && pUnit->Type && pUnit->Type->Naval && isLongRangeShip(pUnit) && isFreeForPlan(pUnit)
+							if (pUnit && pUnit->Type && pUnit->Type->Naval && shellsIn(pUnit) && isFreeForPlan(pUnit)
 								&& !IsAmphibiousOrAirTransport(pUnit->Type) && pUnit->GetHealthPercentage() >= 0.9
 								&& ObjectZone(pUnit, MovementZone::Water) == seaZone)
 							{
@@ -9275,6 +9291,8 @@ namespace
 			{
 				std::vector<FootClass*> siegeShips;
 				std::vector<FootClass*> escorts;
+				// Healthy (40% or more) ships whose guns hit land at under 10 cells (a mass strike's).
+				std::vector<FootClass*> gunShips;
 				int fleetRange = 0;
 				int fleetMinRange = 0;
 				int fleetZone = -1;
@@ -9289,29 +9307,77 @@ namespace
 					if (isLongRangeShip(pUnit))
 					{
 						siegeShips.push_back(pUnit);
-						// The firing cell is within the shortest reach of the shelling ships, so all of them fire.
-						const int reach = landReachOf(pUnit->Type);
-						fleetRange = fleetRange == 0 ? reach : std::min(fleetRange, reach);
-
-						// Minimum range of its ground weapons (e.g. a missile sub's launcher): the firing
-						// spot keeps outside the largest one of the fleet.
-						for (int i = 0; i < 2; ++i)
-						{
-							auto const pWS = pUnit->Type->GetWeapon(i);
-
-							if (pWS && pWS->WeaponType && WeaponHitsGround(pWS->WeaponType))
-								fleetMinRange = std::max(fleetMinRange, pWS->WeaponType->MinimumRange);
-						}
 					}
-					else if (GetCombatValueOfType(pUnit->Type, false) > 0)
+					else
 					{
-						escorts.push_back(pUnit);
+						if (GetCombatValueOfType(pUnit->Type, false) > 0)
+							escorts.push_back(pUnit);
+
+						if (isGunShip(pUnit) && pUnit->GetHealthPercentage() >= 0.4)
+							gunShips.push_back(pUnit);
 					}
 				}
 
 				auto byID = [](FootClass* a, FootClass* b) { return a->UniqueID < b->UniqueID; };
 				std::sort(siegeShips.begin(), siegeShips.end(), byID);
 				std::sort(escorts.begin(), escorts.end(), byID);
+				std::sort(gunShips.begin(), gunShips.end(), byID);
+
+				// Mass strike (user approved, 2026-11-19): with fewer than two long-range ships, the gun ships of the sea
+				// that holds the most of them (the lower zone among equals) shell together, with the long-range ship of
+				// that sea, when they are NavalMassStrikeShips or more: 8-cell destroyers never started this plan, and 77
+				// of them sat idle in match #11499.
+				bool massStrike = false;
+
+				if (siegeShips.size() < 2)
+				{
+					std::map<int, size_t> gunShipsBySea;
+
+					for (auto const pShip : gunShips)
+						gunShipsBySea[ObjectZone(pShip, MovementZone::Water)]++;
+
+					int massSea = -1;
+					size_t most = 0;
+
+					for (auto const& [sea, count] : gunShipsBySea)
+					{
+						if (sea >= 0 && count > most)
+						{
+							most = count;
+							massSea = sea;
+						}
+					}
+
+					if (most >= NavalMassStrikeShips)
+					{
+						massStrike = true;
+						auto const otherSea = [massSea](FootClass* pShip) { return ObjectZone(pShip, MovementZone::Water) != massSea; };
+						std::erase_if(gunShips, otherSea);
+						std::erase_if(siegeShips, otherSea);
+						siegeShips.insert(siegeShips.end(), gunShips.begin(), gunShips.end());
+						std::sort(siegeShips.begin(), siegeShips.end(), byID);
+						std::erase_if(escorts, [&gunShips](FootClass* pShip)
+							{ return std::find(gunShips.begin(), gunShips.end(), pShip) != gunShips.end(); });
+					}
+				}
+
+				for (auto const pShip : siegeShips)
+				{
+					auto const pShipType = abstract_cast<UnitClass*>(pShip)->Type;
+					// The firing cell is within the shortest reach of the shelling ships, so all of them fire.
+					const int reach = landReachOf(pShipType);
+					fleetRange = fleetRange == 0 ? reach : std::min(fleetRange, reach);
+
+					// Minimum range of its ground weapons (e.g. a missile sub's launcher): the firing
+					// spot keeps outside the largest one of the fleet.
+					for (int i = 0; i < 2; ++i)
+					{
+						auto const pWS = pShipType->GetWeapon(i);
+
+						if (pWS && pWS->WeaponType && WeaponHitsGround(pWS->WeaponType))
+							fleetMinRange = std::max(fleetMinRange, pWS->WeaponType->MinimumRange);
+					}
+				}
 
 				// A reserve stays by our naval yard to defend it: the ships nearest to the yard,
 				// NavalHomeReservePercent of the fleet and NavalHomeReserveMin at least, none for a small one.
@@ -9427,7 +9493,8 @@ namespace
 					}
 
 					std::stable_sort(worthy.begin(), worthy.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-					const size_t squads = std::clamp<size_t>((shelling + NavalSquadShips - 1) / NavalSquadShips, 1, NavalMaxTargets);
+					// A mass strike has one target: short guns split over several targets reach none of them in numbers.
+					const size_t squads = massStrike ? 1 : std::clamp<size_t>((shelling + NavalSquadShips - 1) / NavalSquadShips, 1, NavalMaxTargets);
 					std::vector<CellStruct> probe;
 
 					for (auto const& [worth, pBld] : worthy)
@@ -9477,6 +9544,11 @@ namespace
 					{
 						const size_t squads = targets.size();
 						started.AuxBaseline = static_cast<int>(shelling);
+						started.MassStrike = massStrike;
+
+						if (massStrike)
+							CountDecision(NeuralDecision::NavalMassStrike, pHouse->ArrayIndex);
+
 						std::vector<std::vector<CellStruct>> cellsOf(squads);
 						std::vector<CellStruct> taken;
 
@@ -9498,10 +9570,11 @@ namespace
 							started.Cells.push_back(own[(i / squads) % own.size()]);
 						}
 
-						Debug::Log("[NeuralAI] House %d navalStrike: %d shelling ships in %d squads and %d escorts, first target %s at (%d,%d), "
+						Debug::Log("[NeuralAI] House %d navalStrike: %d shelling ships in %d squads and %d escorts%s, first target %s at (%d,%d), "
 							"%d firing cells, %d ships left in reserve by the yard, frame %d.\n", houseIdx, static_cast<int>(shelling),
-							static_cast<int>(squads), static_cast<int>(group.size() - shelling), pTarget->Type->ID, pTarget->GetMapCoords().X,
-							pTarget->GetMapCoords().Y, static_cast<int>(taken.size()), reserveShips, Unsorted::CurrentFrame);
+							static_cast<int>(squads), static_cast<int>(group.size() - shelling), massStrike ? " (mass strike of short guns)" : "",
+							pTarget->Type->ID, pTarget->GetMapCoords().X, pTarget->GetMapCoords().Y, static_cast<int>(taken.size()), reserveShips,
+							Unsorted::CurrentFrame);
 					}
 				}
 			}

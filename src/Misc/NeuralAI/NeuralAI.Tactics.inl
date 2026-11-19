@@ -153,6 +153,84 @@ namespace
 		return freeCells < 25;
 	}
 
+	// A narrow water passage (user approved, 2026-11-19): a cell of a sea where a line across its water, in one of four
+	// directions, is NavalPassageWidthCells wide at most, with other ground or the map's edge on both sides. IsNarrowPassage
+	// counts free ground, which water is not, so every cell at sea is one for it.
+	bool IsNarrowWaterPassage(const CellStruct& center, MovementZone movementZone, int zone)
+	{
+		constexpr int AxisX[4] = { 1, 0, 1, 1 };
+		constexpr int AxisY[4] = { 0, 1, 1, -1 };
+
+		if (zone < 0 || MapClass::Instance.GetMovementZoneType(center, movementZone, false) != zone)
+			return false;
+
+		for (int axis = 0; axis < 4; ++axis)
+		{
+			int width = 1;
+			bool closed = true;
+
+			for (int side = -1; side <= 1 && closed; side += 2)
+			{
+				bool shore = false;
+
+				for (int step = 1; width <= NavalPassageWidthCells; ++step)
+				{
+					const CellStruct c { static_cast<short>(center.X + side * AxisX[axis] * step),
+						static_cast<short>(center.Y + side * AxisY[axis] * step) };
+
+					if (!MapClass::Instance.CoordinatesLegal(c) || MapClass::Instance.GetMovementZoneType(c, movementZone, false) != zone)
+					{
+						shore = true;
+						break;
+					}
+
+					++width;
+				}
+
+				closed = shore;
+			}
+
+			if (closed && width <= NavalPassageWidthCells)
+				return true;
+		}
+
+		return false;
+	}
+
+	// A hop of the way around a jam as an attack-move (user approved, 2026-11-19): on a plain move the units that were
+	// fighting their way and the ships went past the enemy without firing (23 destroyers held in a channel 4 cells wide,
+	// match #11499). The hop goes as it is (a free cell next to it when another unit of ours holds it), with no route
+	// legs of its own; the unit's owner logic sends it on from there.
+	bool IssueAttackMoveHop(FootClass* pFoot, CellClass* pHop)
+	{
+		if (!pFoot || !pHop || pFoot->InLimbo || !pFoot->IsAlive || IsHeldByTransportOp(pFoot) || IsWaitingAtNavalPassage(pFoot))
+			return false;
+
+		auto const pCell = SpreadDestination(pFoot, pHop);
+		pFoot->SetTarget(nullptr);
+		pFoot->SetArchiveTarget(nullptr);
+		pFoot->MegaMission = Mission::AttackMove;
+		pFoot->MegaDestination = pCell;
+		pFoot->MegaTarget = nullptr;
+		pFoot->HaveAttackMoveTarget = false;
+		pFoot->SetDestination(pCell, true);
+
+		if (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
+			|| pFoot->CurrentMission == Mission::None || pFoot->CurrentMission == Mission::Sleep)
+		{
+			pFoot->ForceMission(Mission::Move);
+		}
+		else
+		{
+			pFoot->QueueMission(Mission::Move, true);
+		}
+
+		CountDecision(NeuralDecision::MoveOrderIssued, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
+		NoteOrderCaller(pFoot, "attackMoveHop");
+
+		return true;
+	}
+
 	// Idle for the jam breaker and the mouth clearing: a ground unit of ours on Guard / Area Guard /
 	// Sleep with no target, not firing, not a gatherer, not deployed, not in a plan.
 	bool IsIdleBlocker(HouseClass* pHouse, FootClass* pFoot)
@@ -793,10 +871,13 @@ namespace
 
 				if (auto const pHop = JamRerouteHop(pFoot, pHeld->Dest))
 				{
+					// A ship, or a unit that was on an attack-move, goes on fighting (IssueAttackMoveHop).
+					const bool attackMove = pFoot->MegaMission == Mission::AttackMove || pFoot->CurrentMission == Mission::AttackMove
+						|| IsWaterBound(pFoot->GetTechnoType());
 					pFoot->ClearMegaMissionData();
 					pFoot->SetTarget(nullptr);
 
-					if (IssueMoveOrder(pFoot, pHop, 1.5))
+					if (attackMove ? IssueAttackMoveHop(pFoot, pHop) : IssueMoveOrder(pFoot, pHop, 1.5))
 					{
 						++rerouted;
 						left.insert(pFoot);
@@ -925,7 +1006,8 @@ namespace
 
 		// Ships in the block take a leg of a real water route (GroundRouteHop: cell by cell, buildings
 		// block) to their destination: match #7061, Fludded Recources, 15 ships held for minutes in a
-		// channel our own naval yard closed, with open sea all around the island.
+		// channel our own naval yard closed, with open sea all around the island. The leg is an
+		// attack-move (IssueAttackMoveHop).
 		int detoured = 0;
 
 		for (auto const& [pHeld, want] : block)
@@ -948,7 +1030,7 @@ namespace
 				pShip->ClearMegaMissionData();
 				pShip->SetTarget(nullptr);
 
-				if (IssueMoveOrder(pShip, pHop, 1.5))
+				if (IssueAttackMoveHop(pShip, pHop))
 					++detoured;
 			}
 		}
@@ -1734,6 +1816,201 @@ namespace
 			enemyAt.X, enemyAt.Y, enemyDist, text.c_str());
 	}
 
+	// Narrow water passage gate (user approved, 2026-11-19): 23 destroyers of a house jammed a channel 4 cells wide, all
+	// sent through it at once (match #11499). Every NavalPassageCheckFrames the ships of ours on their way (a move or an
+	// attack-move whose goal is more than 3 cells off) that stand in a narrow water passage (IsNarrowWaterPassage) are
+	// grouped, within 4 cells of the first one in UnitClass order; a group of NavalNarrowPassageShips or more is a full
+	// passage. A ship of ours on its way, not fighting, within NavalPassageApproachCells of a full passage and outside
+	// it, whose goal lies past it (the passage nearer than the goal and within 3 cells of the straight way there), waits
+	// where it is: its order is kept (NavalPassageWaits) and dropped, and the order helpers leave it alone
+	// (IsWaitingAtNavalPassage). It takes its order up again, the longest waiting first (the lower UniqueID among
+	// equals), while fewer than NavalNarrowPassageShips ships of ours on their way stand within 4 cells of the passage's
+	// centre, or after NavalPassageWaitMostFrames.
+	void UpdateNavalPassageGate(HouseClass* pHouse)
+	{
+		const NeuralSlowStep slowStep { "UpdateNavalPassageGate" };
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.NavalPassageCheckFrame >= 0 && now >= macro.NavalPassageCheckFrame && now - macro.NavalPassageCheckFrame < NavalPassageCheckFrames)
+			return;
+
+		macro.NavalPassageCheckFrame = now;
+
+		struct NeuralShipOnWay
+		{
+			FootClass* Ship;
+			CellStruct Cell;
+			CellStruct Goal;
+			bool Inside;
+		};
+
+		std::vector<NeuralShipOnWay> onWay;
+		std::map<DWORD, FootClass*> ownShips;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type || !IsWaterBound(pUnit->Type))
+				continue;
+
+			ownShips.emplace(pUnit->UniqueID, pUnit);
+
+			if (IsInTransportOp(pHouse, pUnit->UniqueID) || macro.NavalPassageWaits.contains(pUnit->UniqueID))
+				continue;
+
+			const bool attackMove = pUnit->MegaMission == Mission::AttackMove;
+			AbstractClass* const pGoal = (attackMove && pUnit->MegaDestination) ? pUnit->MegaDestination : pUnit->Destination;
+
+			if (!pGoal || (!attackMove && pUnit->CurrentMission != Mission::Move))
+				continue;
+
+			const CellStruct here = pUnit->GetMapCoords();
+			const CellStruct goal = CellClass::Coord2Cell(pGoal->GetCoords());
+
+			if (here.DistanceFrom(goal) <= 3.0)
+				continue;
+
+			onWay.push_back({ pUnit, here, goal,
+				IsNarrowWaterPassage(here, pUnit->Type->MovementZone, ObjectZone(pUnit, pUnit->Type->MovementZone)) });
+		}
+
+		auto const within4 = [](const CellStruct& a, const CellStruct& b)
+		{ return std::abs(a.X - b.X) <= 4 && std::abs(a.Y - b.Y) <= 4; };
+
+		// The full passages: the centre of each group of NavalNarrowPassageShips or more ships on their way in one.
+		std::vector<CellStruct> full;
+		std::vector<bool> grouped(onWay.size(), false);
+
+		for (size_t i = 0; i < onWay.size(); ++i)
+		{
+			if (!onWay[i].Inside || grouped[i])
+				continue;
+
+			int count = 0;
+			int sumX = 0;
+			int sumY = 0;
+
+			for (size_t j = i; j < onWay.size(); ++j)
+			{
+				if (onWay[j].Inside && !grouped[j] && within4(onWay[j].Cell, onWay[i].Cell))
+				{
+					grouped[j] = true;
+					++count;
+					sumX += onWay[j].Cell.X;
+					sumY += onWay[j].Cell.Y;
+				}
+			}
+
+			if (count >= NavalNarrowPassageShips)
+				full.push_back(CellStruct { static_cast<short>(sumX / count), static_cast<short>(sumY / count) });
+		}
+
+		int held = 0;
+
+		for (auto const& ship : onWay)
+		{
+			if (ship.Ship->Target)
+				continue;
+
+			for (auto const& center : full)
+			{
+				const double toCenter = ship.Cell.DistanceFrom(center);
+				const double toGoal = ship.Cell.DistanceFrom(ship.Goal);
+
+				if (within4(ship.Cell, center) || toCenter > NavalPassageApproachCells || toCenter >= toGoal)
+					continue;
+
+				const double wayX = (ship.Goal.X - ship.Cell.X) / toGoal;
+				const double wayY = (ship.Goal.Y - ship.Cell.Y) / toGoal;
+				const double offX = center.X - ship.Cell.X;
+				const double offY = center.Y - ship.Cell.Y;
+
+				if (offX * wayX + offY * wayY <= 0.0 || std::abs(offX * wayY - offY * wayX) > 3.0)
+					continue;
+
+				macro.NavalPassageWaits[ship.Ship->UniqueID] = { center, ship.Goal, ship.Ship->MegaMission == Mission::AttackMove, now };
+				ship.Ship->ClearMegaMissionData();
+				ship.Ship->SetDestination(nullptr, true);
+				ship.Ship->QueueMission(Mission::Guard, true);
+				CountDecision(NeuralDecision::NavalPassageWait, pHouse->ArrayIndex);
+				++held;
+
+				break;
+			}
+		}
+
+		std::vector<std::pair<int, DWORD>> waiting;
+
+		for (auto const& [uid, wait] : macro.NavalPassageWaits)
+			waiting.emplace_back(wait.Frame, uid);
+
+		std::sort(waiting.begin(), waiting.end());
+		std::vector<CellStruct> released;
+		int resumed = 0;
+
+		for (auto const& [frame, uid] : waiting)
+		{
+			auto const itWait = macro.NavalPassageWaits.find(uid);
+
+			if (itWait == macro.NavalPassageWaits.end())
+				continue;
+
+			const NeuralPassageWait wait = itWait->second;
+			auto const itShip = ownShips.find(uid);
+
+			if (itShip == ownShips.end())
+			{
+				macro.NavalPassageWaits.erase(itWait);
+				continue;
+			}
+
+			const bool timeUp = now < wait.Frame || now - wait.Frame >= NavalPassageWaitMostFrames;
+			const int inPassage = static_cast<int>(std::count_if(onWay.begin(), onWay.end(),
+				[&](const NeuralShipOnWay& ship) { return within4(ship.Cell, wait.Passage); }))
+				+ static_cast<int>(std::count_if(released.begin(), released.end(),
+					[&](const CellStruct& passage) { return within4(passage, wait.Passage); }));
+
+			if (!timeUp && inPassage >= NavalNarrowPassageShips)
+				continue;
+
+			macro.NavalPassageWaits.erase(itWait);
+			released.push_back(wait.Passage);
+			++resumed;
+
+			FootClass* const pShip = itShip->second;
+			auto const pGoalCell = MapClass::Instance.TryGetCellAt(wait.Goal);
+
+			// A ship that fights where it waits is left to its fight; its owner logic sends it on afterwards.
+			if (!pGoalCell || pShip->Target)
+				continue;
+
+			if (wait.AttackMove)
+				IssueAttackMoveHop(pShip, pGoalCell);
+			else
+				IssueMoveOrder(pShip, pGoalCell, 1.5);
+		}
+
+		// TEMP diagnostic: what the gate did, NavalPassageLogLines lines a match.
+		static int logSerial = -1;
+		static int logLines = 0;
+
+		if (logSerial != NeuralMatchSerial)
+		{
+			logSerial = NeuralMatchSerial;
+			logLines = 0;
+		}
+
+		if ((held > 0 || resumed > 0) && logLines < NavalPassageLogLines)
+		{
+			++logLines;
+			Debug::Log("[NeuralAI] Frame %d | House #%d naval passage gate DIAG: %d full passages (first at (%d,%d)), %d ships on their way, "
+				"%d held outside, %d went on, %d waiting\n", now, pHouse->ArrayIndex, static_cast<int>(full.size()),
+				full.empty() ? -1 : full.front().X, full.empty() ? -1 : full.front().Y, static_cast<int>(onWay.size()), held, resumed,
+				static_cast<int>(macro.NavalPassageWaits.size()));
+		}
+	}
+
 	// Stuck order watchdog: a ground unit with a move or attack-move destination that has not
 	// left its cell is released (orders cleared, back to Guard) so the AI gives it a new job:
 	// after 450 frames when the destination is in another movement zone (unreachable: e.g. the
@@ -1910,6 +2187,7 @@ namespace
 
 		LogHeldColumn(pHouse, stuckOrders);
 		UpdateJamBreaker(pHouse, stuckOrders);
+		UpdateNavalPassageGate(pHouse);
 		UpdateJamMouths(pHouse);
 		UpdateEmergencyLanes(pHouse);
 		UpdateHoveringFlyers(pHouse);

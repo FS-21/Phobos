@@ -918,6 +918,43 @@ namespace
 		return reach > 0 && IsNavalShoreWithin(target, pType->MovementZone, zone, reach);
 	}
 
+	// Does a water-bound unit get a target within the reach of the weapon it fires at it from some cell of its own sea?
+	// A target on its sea counts as reached (the unit goes to it), and so does any target for a unit that is not
+	// water-bound or stands on no known zone. Otherwise the weapon the engine picks for the target must be one it may
+	// fire at it, and its reach (WeaponReachAgainst for a building, a third of a cell short of the Range for anything
+	// else, NavalSpawnerReachCells for aircraft) must cover the nearest water of the sea (IsNavalShoreWithin).
+	bool IsNavalTargetInReach(FootClass* pFoot, AbstractClass* pTarget)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		if (!pType || !pTarget || !IsWaterBound(pType))
+			return true;
+
+		const int zone = ObjectZone(pFoot, pType->MovementZone);
+		const CellStruct target = CellClass::Coord2Cell(pTarget->GetCoords());
+
+		if (zone < 0 || MapClass::Instance.GetMovementZoneType(target, pType->MovementZone, false) == zone)
+			return true;
+
+		const int weaponIndex = pFoot->SelectWeapon(pTarget);
+		const FireError error = pFoot->GetFireError(pTarget, weaponIndex, true);
+
+		if (error == FireError::ILLEGAL || error == FireError::CANT || error == FireError::NONE)
+			return false;
+
+		auto const pSlot = pFoot->GetWeapon(weaponIndex);
+		auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+
+		if (!pWeapon)
+			return false;
+
+		auto const pBuilding = abstract_cast<BuildingClass*>(pTarget);
+		const int reach = pWeapon->Spawner ? NavalSpawnerReachCells * Unsorted::LeptonsPerCell
+			: (pBuilding ? WeaponReachAgainst(pWeapon, pBuilding->Type) : pWeapon->Range - Unsorted::LeptonsPerCell / 3);
+
+		return IsNavalShoreWithin(target, pType->MovementZone, zone, reach);
+	}
+
 	bool IsBridgeOrTubeCell(const CellClass* pCell);
 
 	// Units of ours sent to one cell queue for it: the engine only looks for a nearby cell for a unit
@@ -1685,8 +1722,9 @@ namespace
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5,
 		const char* callerFile = __builtin_FILE(), int callerLine = __builtin_LINE())
 	{
-		// A unit of a transport operation takes its orders from the operation alone.
-		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive || IsHeldByTransportOp(pFoot))
+		// A unit of a transport operation takes its orders from the operation alone; a ship that waits outside a
+		// crowded narrow passage stays where it is.
+		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive || IsHeldByTransportOp(pFoot) || IsWaitingAtNavalPassage(pFoot))
 			return false;
 
 		// A unit already heading to a cell another unit of ours holds or heads to takes its own free
