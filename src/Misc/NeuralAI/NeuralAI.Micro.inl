@@ -5562,19 +5562,60 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			}
 
+			auto const isArmedGroundVehicle = [pHouse](UnitClass* pVehicle) -> bool
+			{
+				return pVehicle && pVehicle->Owner == pHouse && !pVehicle->InLimbo && pVehicle->IsAlive && pVehicle->Type
+					&& !pVehicle->Type->Naval && !pVehicle->Type->Harvester && !pVehicle->Type->ResourceGatherer
+					&& pVehicle->Type->GetWeapon(0) && pVehicle->Type->GetWeapon(0)->WeaponType && !IsRepairerUnit(pVehicle);
+			};
+
+			// A vehicle in a group (user, 2026-11-19: approved «Sí, hazlo»): RepairerEscortGroupMin armed
+			// ground vehicles of ours within RepairerEscortGroupCells of it, itself included, counted once
+			// per vehicle, tick and house. A lone raider is no army: 20 of 35 follows of 2026-11-19 went after
+			// TSBGGY buggies, 13 of them after one buggy on Attack.
+			static int groupSizesFrame = -1;
+			static int groupSizesHouse = -1;
+			static std::unordered_map<DWORD, int> groupSizes;
+
+			if (groupSizesFrame != Unsorted::CurrentFrame || groupSizesHouse != pHouse->ArrayIndex)
+			{
+				groupSizesFrame = Unsorted::CurrentFrame;
+				groupSizesHouse = pHouse->ArrayIndex;
+				groupSizes.clear();
+			}
+
+			auto const inGroup = [&](UnitClass* pVehicle) -> bool
+			{
+				auto it = groupSizes.find(pVehicle->UniqueID);
+
+				if (it == groupSizes.end())
+				{
+					int size = 0;
+
+					for (auto const pOther : UnitClass::Array)
+					{
+						if (isArmedGroundVehicle(pOther) && pOther->DistanceFrom(pVehicle) <= RepairerEscortGroupCells * Unsorted::LeptonsPerCell)
+							size++;
+					}
+
+					it = groupSizes.emplace(pVehicle->UniqueID, size).first;
+				}
+
+				return it->second >= RepairerEscortGroupMin;
+			};
+
 			auto const isEscortable = [&](UnitClass* pOther) -> bool
 			{
-				if (!pOther || pOther == pUnit || pOther->Owner != pHouse || pOther->InLimbo || !pOther->IsAlive || !pOther->Type
-					|| pOther->Type->Naval || pOther->Type->Harvester || pOther->Type->ResourceGatherer
-					|| !pOther->Type->GetWeapon(0) || !pOther->Type->GetWeapon(0)->WeaponType || IsRepairerUnit(pOther)
-					|| IsInTransportOp(pHouse, pOther->UniqueID) || !onRepairerGround(pOther) || IsAtOwnBase(pHouse, pOther->GetMapCoords()))
+				if (pOther == pUnit || !isArmedGroundVehicle(pOther) || IsInTransportOp(pHouse, pOther->UniqueID)
+					|| !onRepairerGround(pOther) || IsAtOwnBase(pHouse, pOther->GetMapCoords()))
 				{
 					return false;
 				}
 
 				const Mission mission = pOther->GetCurrentMission();
 
-				return mission == Mission::Move || mission == Mission::AttackMove || mission == Mission::Attack || mission == Mission::Hunt;
+				return (mission == Mission::Move || mission == Mission::AttackMove || mission == Mission::Attack || mission == Mission::Hunt)
+					&& inGroup(pOther);
 			};
 
 			if (isEscortable(abstract_cast<UnitClass*>(pUnit->Destination)))
@@ -5637,9 +5678,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (repairerMacro.RepairerLogCount < RepairerLogLines)
 				{
 					repairerMacro.RepairerLogCount++;
-					Debug::Log("[NeuralAI] Frame %d | House #%d repairer %s %u follows %s %u (mission %d) %d cells away\n", Unsorted::CurrentFrame,
-						pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pEscorted->Type->ID, pEscorted->UniqueID,
-						static_cast<int>(pEscorted->GetCurrentMission()), escortDist / Unsorted::LeptonsPerCell);
+					Debug::Log("[NeuralAI] Frame %d | House #%d repairer %s %u follows %s %u (mission %d, %d vehicles in its group) %d cells away\n",
+						Unsorted::CurrentFrame, pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pEscorted->Type->ID, pEscorted->UniqueID,
+						static_cast<int>(pEscorted->GetCurrentMission()), groupSizes[pEscorted->UniqueID], escortDist / Unsorted::LeptonsPerCell);
 				}
 			}
 

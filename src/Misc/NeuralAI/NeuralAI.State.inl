@@ -2923,6 +2923,10 @@ namespace
 	constexpr int RepairerHealCells = 10;
 	constexpr int RepairerEscortMost = 2;
 	constexpr int RepairerEscortKeepCells = 4;
+	// The escort follows only a vehicle in a group (user, 2026-11-19): RepairerEscortGroupMin armed ground
+	// vehicles of ours within RepairerEscortGroupCells of it, itself included.
+	constexpr int RepairerEscortGroupMin = 3;
+	constexpr int RepairerEscortGroupCells = 8;
 	constexpr int RepairerLogLines = 40;
 	constexpr double RepairerBaseCells = 15.0;
 	constexpr double RepairerDamagedBelow = 0.85;
