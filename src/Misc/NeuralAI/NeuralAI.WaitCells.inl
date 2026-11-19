@@ -109,12 +109,15 @@ namespace
 
 	// How a search picks its cell. First: the first allowed cell in the order every finder uses;
 	// LowestScore: every ring, the lowest score, the first one on a tie; RingNearest: the ring of the
-	// first allowed cell, the one nearest MetricTo in it, the first one on a tie.
+	// first allowed cell, the one nearest MetricTo in it, the first one on a tie; SquareNearest: the
+	// whole square of side 2 MaxRing + 1, row by row (dy, then dx), cells MinRing or more out, the one
+	// nearest MetricTo, the first one on a tie (rings would break the ties between rings otherwise).
 	enum class NeuralWaitPick : uint8_t
 	{
 		First,
 		LowestScore,
-		RingNearest
+		RingNearest,
+		SquareNearest
 	};
 
 	// Step: 2 walks rings and cells on a grid of 2 (FindClearingCell).
@@ -138,6 +141,40 @@ namespace
 		const int step = std::max(1, search.Step);
 		CellClass* pBest = nullptr;
 		int bestScore = INT_MAX;
+
+		if (search.Pick == NeuralWaitPick::SquareNearest)
+		{
+			double nearest = 999999.0;
+
+			for (int dy = -search.MaxRing; dy <= search.MaxRing; ++dy)
+			{
+				for (int dx = -search.MaxRing; dx <= search.MaxRing; ++dx)
+				{
+					if (std::max(std::abs(dx), std::abs(dy)) < search.MinRing)
+						continue;
+
+					const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+
+					if (!IsWaitCellAllowed(c, asker, rules))
+						continue;
+
+					auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+					if (reject(c, pCell))
+						continue;
+
+					const double distance = c.DistanceFrom(search.MetricTo);
+
+					if (distance < nearest)
+					{
+						nearest = distance;
+						pBest = pCell;
+					}
+				}
+			}
+
+			return pBest;
+		}
 
 		for (int r = std::max(0, search.MinRing); r <= search.MaxRing; r += step)
 		{

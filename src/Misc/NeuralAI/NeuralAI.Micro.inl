@@ -190,6 +190,24 @@ namespace
 				}
 			}
 
+			// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search above.
+			NeuralWaitAsker asker {};
+			asker.Speed = pTransport->Type->SpeedType;
+			asker.Movement = pTransport->Type->MovementZone;
+			asker.ZoneMovement = static_cast<int>(MovementZone::Normal);
+			asker.Zone = landZone;
+			NeuralWaitSearch search {};
+			search.MinRing = minRing;
+			search.MaxRing = maxRing;
+			search.Pick = NeuralWaitPick::SquareNearest;
+			search.MetricTo = from;
+			auto const pShadow = FindWaitCellNear(from, search, asker,
+				WaitInMap | WaitLand | WaitNoBuilding | WaitZone | WaitClearOfUnits | (flyer ? WaitNotBeach : 0u),
+				[](const CellStruct&, const CellClass*) { return false; });
+			static int shadowLogSerial = -1;
+			static int shadowLogCount = 0;
+			NoteWaitCellShadow("nearestLoadingCell", shadowLogSerial, shadowLogCount, from, pBest, pShadow);
+
 			return pBest;
 		};
 
