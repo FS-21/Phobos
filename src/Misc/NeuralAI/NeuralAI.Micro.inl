@@ -190,6 +190,24 @@ namespace
 				}
 			}
 
+			// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search above.
+			NeuralWaitAsker asker {};
+			asker.Speed = pTransport->Type->SpeedType;
+			asker.Movement = pTransport->Type->MovementZone;
+			asker.ZoneMovement = static_cast<int>(MovementZone::Normal);
+			asker.Zone = landZone;
+			NeuralWaitSearch search {};
+			search.MinRing = minRing;
+			search.MaxRing = maxRing;
+			search.Pick = NeuralWaitPick::SquareNearest;
+			search.MetricTo = from;
+			auto const pShadow = FindWaitCellNear(from, search, asker,
+				WaitInMap | WaitLand | WaitNoBuilding | WaitZone | WaitClearOfUnits | (flyer ? WaitNotBeach : 0u),
+				[](const CellStruct&, const CellClass*) { return false; });
+			static int shadowLogSerial = -1;
+			static int shadowLogCount = 0;
+			NoteWaitCellShadow("nearestLoadingCell", shadowLogSerial, shadowLogCount, from, pBest, pShadow);
+
 			return pBest;
 		};
 
@@ -11454,6 +11472,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 							const CellStruct rawStage { static_cast<short>(tc.X + (dx * stageDist) / distToTarget),
 								static_cast<short>(tc.Y + (dy * stageDist) / distToTarget) };
+							NeuralWaitAsker stagingAsker {};
+							stagingAsker.Zone = waveTargetZone;
+
 							for (int r = 0; r <= 6 && !pForwardStagingCell; r += 2)
 							{
 								for (int sy = -r; sy <= r && !pForwardStagingCell; sy += 2)
@@ -11464,12 +11485,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 											static_cast<short>(rawStage.Y + sy) };
 										if (auto const pSC = MapClass::Instance.TryGetCellAt(sc))
 										{
-											if (pSC->LandType != LandType::Water
-												&& MapClass::Instance.GetMovementZoneType(
-													sc, MovementZone::Normal, false)
-													== waveTargetZone
-												&& pSC->IsClearToMove(
-													SpeedType::Track, true, true, -1, MovementZone::Normal, -1, false)
+											// Land of the target's zone clear of everything but units (IsWaitCellAllowed), in open ground.
+											if (IsWaitCellAllowed(sc, stagingAsker, WaitLand | WaitZone | WaitClearIgnoringUnits)
 												&& isOpenStagingArea(sc, pass == 0 ? 38 : 30))
 											{
 												bool safeFromLongRangeDef = true;

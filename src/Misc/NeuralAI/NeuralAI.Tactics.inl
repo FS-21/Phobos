@@ -290,7 +290,8 @@ namespace
 	// (step 2) around `center`, not a bridge or tube cell, scored by the units already near it, cells
 	// already handed out and, when (prefX, prefY) is set, going that way (cost up to 200). With
 	// offMouths, never a passage mouth cell either (a unit moved out of the way does not park in the
-	// next mouth), and with offNarrow never a narrow passage (IsNarrowPassage).
+	// next mouth), and with offNarrow never a narrow passage (IsNarrowPassage). FindWaitCellNear,
+	// the lowest score, the first one on a tie.
 	CellClass* FindClearingCell(FootClass* pFoot, const CellStruct& center, int minRing, int maxRing, double prefX, double prefY,
 		const std::vector<CellStruct>& occupied, const std::vector<CellStruct>& taken, bool offMouths = false, bool offNarrow = false)
 	{
@@ -304,97 +305,40 @@ namespace
 		// jam of submarines in a strait was never broken, match repro on Fludded Recources).
 		const bool naval = pType->Naval || pType->MovementZone == MovementZone::Water
 			|| pType->MovementZone == MovementZone::WaterBeach;
-		CellClass* pBest = nullptr;
-		int bestScore = INT_MAX;
+		NeuralWaitAsker asker {};
+		asker.Speed = pType->SpeedType;
+		asker.Movement = pType->MovementZone;
+		asker.Zone = zone;
+		asker.Naval = naval;
+		NeuralWaitSearch search {};
+		search.MinRing = minRing;
+		search.MaxRing = maxRing;
+		search.Step = 2;
+		search.Pick = NeuralWaitPick::LowestScore;
 
-		for (int r = minRing; r <= maxRing; r += 2)
-		{
-			for (int dy = -r; dy <= r; dy += 2)
+		return FindWaitCellNear(center, search, asker,
+			WaitInMap | WaitNoBuilding | WaitSurfaceOfAsker | WaitOffDeck | WaitZone | WaitClearIgnoringUnits
+				| (offMouths ? WaitOffMouth : 0u) | (offNarrow ? WaitOffNarrow : 0u),
+			[](const CellStruct&, const CellClass*) { return false; },
+			[&](const CellStruct& c, const CellClass*, int r, int dx, int dy)
 			{
-				for (int dx = -r; dx <= r; dx += 2)
+				int crowd = 0;
+
+				for (auto const& o : occupied)
 				{
-					if (std::abs(dx) != r && std::abs(dy) != r)
-						continue;
-
-					const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
-					auto const pCell = MapClass::Instance.TryGetCellAt(c);
-
-					if (!pCell || pCell->GetBuilding() || (pCell->LandType == LandType::Water) != naval || IsBridgeOrTubeCell(pCell)
-						|| (offMouths && IsPassageMouthCell(c))
-						|| MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
-						|| !pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false)
-						|| (offNarrow && IsNarrowPassage(c)))
-					{
-						continue;
-					}
-
-					int crowd = 0;
-
-					for (auto const& o : occupied)
-					{
-						if (std::abs(o.X - c.X) <= 2 && std::abs(o.Y - c.Y) <= 2)
-							++crowd;
-					}
-
-					for (auto const& tk : taken)
-					{
-						if (std::abs(tk.X - c.X) <= 1 && std::abs(tk.Y - c.Y) <= 1)
-							crowd += 4;
-					}
-
-					const double dot = (dx * prefX + dy * prefY) / std::max(1.0, std::sqrt(static_cast<double>(dx * dx + dy * dy)));
-					const int score = crowd * 30 + static_cast<int>(std::max(0.0, dot) * 200.0) + r * 5;
-
-					if (score < bestScore)
-					{
-						bestScore = score;
-						pBest = pCell;
-					}
+					if (std::abs(o.X - c.X) <= 2 && std::abs(o.Y - c.Y) <= 2)
+						++crowd;
 				}
-			}
-		}
 
-		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search above.
-		{
-			NeuralWaitAsker asker {};
-			asker.Speed = pType->SpeedType;
-			asker.Movement = pType->MovementZone;
-			asker.Zone = zone;
-			asker.Naval = naval;
-			NeuralWaitSearch search {};
-			search.MinRing = minRing;
-			search.MaxRing = maxRing;
-			search.Step = 2;
-			search.Pick = NeuralWaitPick::LowestScore;
-			auto const pShadow = FindWaitCellNear(center, search, asker,
-				WaitInMap | WaitNoBuilding | WaitSurfaceOfAsker | WaitOffDeck | WaitZone | WaitClearIgnoringUnits
-					| (offMouths ? WaitOffMouth : 0u) | (offNarrow ? WaitOffNarrow : 0u),
-				[](const CellStruct&, const CellClass*) { return false; },
-				[&](const CellStruct& c, const CellClass*, int r, int dx, int dy)
+				for (auto const& tk : taken)
 				{
-					int crowd = 0;
+					if (std::abs(tk.X - c.X) <= 1 && std::abs(tk.Y - c.Y) <= 1)
+						crowd += 4;
+				}
 
-					for (auto const& o : occupied)
-					{
-						if (std::abs(o.X - c.X) <= 2 && std::abs(o.Y - c.Y) <= 2)
-							++crowd;
-					}
-
-					for (auto const& tk : taken)
-					{
-						if (std::abs(tk.X - c.X) <= 1 && std::abs(tk.Y - c.Y) <= 1)
-							crowd += 4;
-					}
-
-					const double dot = (dx * prefX + dy * prefY) / std::max(1.0, std::sqrt(static_cast<double>(dx * dx + dy * dy)));
-					return crowd * 30 + static_cast<int>(std::max(0.0, dot) * 200.0) + r * 5;
-				});
-			static int shadowLogSerial = -1;
-			static int shadowLogCount = 0;
-			NoteWaitCellShadow("FindClearingCell", shadowLogSerial, shadowLogCount, center, pBest, pShadow);
-		}
-
-		return pBest;
+				const double dot = (dx * prefX + dy * prefY) / std::max(1.0, std::sqrt(static_cast<double>(dx * dx + dy * dy)));
+				return crowd * 30 + static_cast<int>(std::max(0.0, dot) * 200.0) + r * 5;
+			});
 	}
 
 	// A held unit whose order ends within this many cells of its block's centre wants to stand in it.
@@ -1394,7 +1338,7 @@ namespace
 	// Where an idle unit standing in an emergency lane steps aside: a free cell of its ground (water
 	// for a ship) 1..EmergencyLaneSideCells away, on no lane, not a bridge, tube or passage mouth.
 	// Across the way (dirX, dirY) beats along it, nearer beats farther, and open ground, cells no
-	// unit stands on and cells not handed out yet are preferred.
+	// unit stands on and cells not handed out yet are preferred (FindWaitCellNear, the lowest score).
 	CellClass* FindLaneSideCell(FootClass* pFoot, const CellStruct& here, double dirX, double dirY,
 		const std::unordered_set<int>& laneCells, const std::vector<CellStruct>& taken)
 	{
@@ -1405,86 +1349,35 @@ namespace
 
 		const int zone = ObjectZone(pFoot, pType->MovementZone);
 		const bool naval = pType->Naval || pType->MovementZone == MovementZone::Water || pType->MovementZone == MovementZone::WaterBeach;
-		CellClass* pBest = nullptr;
-		int bestScore = INT_MAX;
+		NeuralWaitAsker asker {};
+		asker.Speed = pType->SpeedType;
+		asker.Movement = pType->MovementZone;
+		asker.Zone = zone;
+		asker.Naval = naval;
+		NeuralWaitSearch search {};
+		search.MinRing = 1;
+		search.MaxRing = EmergencyLaneSideCells;
+		search.Pick = NeuralWaitPick::LowestScore;
 
-		for (int r = 1; r <= EmergencyLaneSideCells; ++r)
-		{
-			for (int dy = -r; dy <= r; ++dy)
+		return FindWaitCellNear(here, search, asker,
+			WaitInMap | WaitNoBuilding | WaitSurfaceOfAsker | WaitOffDeck | WaitOffMouth | WaitZone | WaitClearIgnoringUnits,
+			[&laneCells](const CellStruct& c, const CellClass*) { return laneCells.contains(BridgeCellIndex(c)); },
+			[&](const CellStruct& c, const CellClass* pCell, int r, int dx, int dy)
 			{
-				for (int dx = -r; dx <= r; ++dx)
-				{
-					if (std::max(std::abs(dx), std::abs(dy)) != r)
-						continue;
+				const double along = std::abs(dx * dirX + dy * dirY) / std::sqrt(static_cast<double>(dx * dx + dy * dy));
+				int value = static_cast<int>(along * 100.0) + r * 20;
 
-					const CellStruct c { static_cast<short>(here.X + dx), static_cast<short>(here.Y + dy) };
-					auto const pCell = MapClass::Instance.TryGetCellAt(c);
+				if (pCell->GetContent())
+					value += 60;
 
-					if (!pCell || laneCells.contains(BridgeCellIndex(c)) || pCell->GetBuilding() || (pCell->LandType == LandType::Water) != naval
-						|| IsBridgeOrTubeCell(pCell) || IsPassageMouthCell(c)
-						|| MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != zone
-						|| !pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false))
-					{
-						continue;
-					}
+				if (std::find(taken.begin(), taken.end(), c) != taken.end())
+					value += 200;
 
-					const double along = std::abs(dx * dirX + dy * dirY) / std::sqrt(static_cast<double>(dx * dx + dy * dy));
-					int score = static_cast<int>(along * 100.0) + r * 20;
+				if (IsNarrowPassage(c))
+					value += 40;
 
-					if (pCell->GetContent())
-						score += 60;
-
-					if (std::find(taken.begin(), taken.end(), c) != taken.end())
-						score += 200;
-
-					if (IsNarrowPassage(c))
-						score += 40;
-
-					if (score < bestScore)
-					{
-						bestScore = score;
-						pBest = pCell;
-					}
-				}
-			}
-		}
-
-		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search above.
-		{
-			NeuralWaitAsker asker {};
-			asker.Speed = pType->SpeedType;
-			asker.Movement = pType->MovementZone;
-			asker.Zone = zone;
-			asker.Naval = naval;
-			NeuralWaitSearch search {};
-			search.MinRing = 1;
-			search.MaxRing = EmergencyLaneSideCells;
-			search.Pick = NeuralWaitPick::LowestScore;
-			auto const pShadow = FindWaitCellNear(here, search, asker,
-				WaitInMap | WaitNoBuilding | WaitSurfaceOfAsker | WaitOffDeck | WaitOffMouth | WaitZone | WaitClearIgnoringUnits,
-				[&laneCells](const CellStruct& c, const CellClass*) { return laneCells.contains(BridgeCellIndex(c)); },
-				[&](const CellStruct& c, const CellClass* pCell, int r, int dx, int dy)
-				{
-					const double along = std::abs(dx * dirX + dy * dirY) / std::sqrt(static_cast<double>(dx * dx + dy * dy));
-					int value = static_cast<int>(along * 100.0) + r * 20;
-
-					if (pCell->GetContent())
-						value += 60;
-
-					if (std::find(taken.begin(), taken.end(), c) != taken.end())
-						value += 200;
-
-					if (IsNarrowPassage(c))
-						value += 40;
-
-					return value;
-				});
-			static int shadowLogSerial = -1;
-			static int shadowLogCount = 0;
-			NoteWaitCellShadow("FindLaneSideCell", shadowLogSerial, shadowLogCount, here, pBest, pShadow);
-		}
-
-		return pBest;
+				return value;
+			});
 	}
 
 	// Emergency lanes (EmergencyLaneCheckFrames): our idle units standing on the next cells of a unit

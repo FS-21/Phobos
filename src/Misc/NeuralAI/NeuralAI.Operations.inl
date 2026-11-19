@@ -358,6 +358,22 @@ namespace
 	CellClass* PickOpFlyerCell(const CellStruct& center, int zone, int firstRing, const CellStruct& tried,
 		const std::vector<CellStruct>& keepClear)
 	{
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search below.
+		NeuralWaitAsker asker {};
+		asker.Zone = zone;
+		NeuralWaitSearch search {};
+		search.MinRing = firstRing;
+		search.MaxRing = BoardingLandingRingCells;
+		auto const pShadow = FindWaitCellNear(center, search, asker,
+			WaitLegal | WaitLand | WaitNotBeach | WaitNoBuilding | WaitNoObject | WaitZone | WaitClearOfUnits,
+			[&](const CellStruct& c, const CellClass*)
+			{
+				return c == tried
+					|| std::any_of(keepClear.begin(), keepClear.end(), [&c](const CellStruct& at) { return at.DistanceFrom(c) < 2.0; });
+			});
+		static int shadowLogSerial = -1;
+		static int shadowLogCount = 0;
+
 		for (int ring = firstRing; ring <= BoardingLandingRingCells; ++ring)
 		{
 			for (int dy = -ring; dy <= ring; ++dy)
@@ -382,11 +398,15 @@ namespace
 						[&c](const CellStruct& at) { return at.DistanceFrom(c) < 2.0; });
 
 					if (clear)
+					{
+						NoteWaitCellShadow("PickOpFlyerCell", shadowLogSerial, shadowLogCount, center, pCell, pShadow);
 						return pCell;
+					}
 				}
 			}
 		}
 
+		NoteWaitCellShadow("PickOpFlyerCell", shadowLogSerial, shadowLogCount, center, nullptr, pShadow);
 		return nullptr;
 	}
 
@@ -406,6 +426,24 @@ namespace
 			if (other.UniqueID != pTransport->UniqueID && other.Leg == NeuralOpLeg::Crossing && other.Landing != CellStruct::Empty)
 				taken.push_back(other.Landing);
 		}
+
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search below.
+		NeuralWaitAsker asker {};
+		asker.Speed = pType->SpeedType;
+		asker.Movement = pType->MovementZone;
+		asker.ZoneMovement = static_cast<int>(MovementZone::Normal);
+		asker.Zone = op.TargetZone;
+		NeuralWaitSearch search {};
+		search.MaxRing = 6;
+		auto const pShadow = FindWaitCellNear(around, search, asker,
+			WaitLegal | WaitLand | WaitNoBuilding | WaitZone | (flies ? (WaitNotBeach | WaitNoObject) : WaitClearOfUnits),
+			[&](const CellStruct& c, const CellClass*)
+			{
+				return c == tried
+					|| std::any_of(taken.begin(), taken.end(), [&c](const CellStruct& at) { return at.DistanceFrom(c) < OpLandingSpreadCells; });
+			});
+		static int shadowLogSerial = -1;
+		static int shadowLogCount = 0;
 
 		for (int ring = 0; ring <= 6; ++ring)
 		{
@@ -433,11 +471,15 @@ namespace
 						[&c](const CellStruct& at) { return at.DistanceFrom(c) < OpLandingSpreadCells; });
 
 					if (spread)
+					{
+						NoteWaitCellShadow("PickOpLandingCell", shadowLogSerial, shadowLogCount, around, pCell, pShadow);
 						return pCell;
+					}
 				}
 			}
 		}
 
+		NoteWaitCellShadow("PickOpLandingCell", shadowLogSerial, shadowLogCount, around, nullptr, pShadow);
 		return nullptr;
 	}
 
@@ -2583,22 +2625,12 @@ namespace
 			{
 				const CellStruct spot { static_cast<short>(op.Staging.X + (centre.X - op.Staging.X) * step / std::max(1.0, span)),
 					static_cast<short>(op.Staging.Y + (centre.Y - op.Staging.Y) * step / std::max(1.0, span)) };
-				auto const pSpot = MapClass::Instance.TryGetCellAt(spot);
-				bool besideBuilding = false;
+				NeuralWaitAsker asker {};
+				asker.Zone = op.OriginZone;
 
-				for (int dy = -1; dy <= 1 && !besideBuilding; ++dy)
-				{
-					for (int dx = -1; dx <= 1 && !besideBuilding; ++dx)
-					{
-						const CellStruct next { static_cast<short>(spot.X + dx), static_cast<short>(spot.Y + dy) };
-						auto const pNext = MapClass::Instance.TryGetCellAt(next);
-						besideBuilding = pNext && pNext->GetBuilding();
-					}
-				}
-
-				if (pSpot && pSpot->LandType != LandType::Water && !besideBuilding
-					&& MapClass::Instance.GetMovementZoneType(spot, MovementZone::Normal, false) == op.OriginZone
-					&& !IsOpWaitInTheWay(spot))
+				// Legal land of the members' zone with no building around it, out of the way (IsOpWaitInTheWay).
+				if (IsWaitCellAllowed(spot, asker,
+					WaitLegal | WaitLand | WaitNotBesideBuilding | WaitZone | WaitOffDeck | WaitOffMouth | WaitOffNarrow))
 				{
 					op.Gather = spot;
 					break;

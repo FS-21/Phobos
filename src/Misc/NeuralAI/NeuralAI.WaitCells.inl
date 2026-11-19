@@ -11,7 +11,7 @@ namespace
 
 	// The rules a cell must pass for a unit to wait, park or gather on it; each one is a check one of
 	// the finders makes. WaitInMap: the map has the cell; WaitLegal: CoordinatesLegal too;
-	// WaitNoBuilding; WaitSurfaceOfAsker: water for a naval asker, else no water; WaitLand: no water;
+	// WaitNoBuilding; WaitNotBesideBuilding: no building in the 3x3 around it; WaitSurfaceOfAsker: water for a naval asker, else no water; WaitLand: no water;
 	// WaitNotBeach; WaitNotRock; WaitZone: the asker's movement zone; WaitLevelNear: within LevelSpan
 	// levels of RefLevel; WaitClearIgnoringUnits, WaitClearIgnoringInfantry, WaitClearOfUnits: the
 	// three ways the finders ask IsClearToMove; WaitNoObject: nothing stands on it; WaitOffDeck: no
@@ -34,14 +34,18 @@ namespace
 		WaitNoObject = 1u << 12,
 		WaitOffDeck = 1u << 13,
 		WaitOffMouth = 1u << 14,
-		WaitOffNarrow = 1u << 15
+		WaitOffNarrow = 1u << 15,
+		WaitNotBesideBuilding = 1u << 16
 	};
 
 	// Who asks: the speed and movement of the unit, its zone, and the level a search keeps to.
+	// ZoneMovement: the movement WaitZone reads the zone with when it is not the unit's own (-1: the
+	// unit's; a transport sets a load down on the land of its members' feet).
 	struct NeuralWaitAsker
 	{
 		SpeedType Speed { SpeedType::Track };
 		MovementZone Movement { MovementZone::Normal };
+		int ZoneMovement { -1 };
 		int Zone { -1 };
 		bool Naval { false };
 		int RefLevel { 0 };
@@ -61,6 +65,20 @@ namespace
 
 		if ((rules & WaitNoBuilding) && pCell->GetBuilding())
 			return false;
+
+		if (rules & WaitNotBesideBuilding)
+		{
+			for (int dy = -1; dy <= 1; ++dy)
+			{
+				for (int dx = -1; dx <= 1; ++dx)
+				{
+					auto const pNext = MapClass::Instance.TryGetCellAt(CellStruct { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) });
+
+					if (pNext && pNext->GetBuilding())
+						return false;
+				}
+			}
+		}
 
 		if ((rules & WaitSurfaceOfAsker) && (pCell->LandType == LandType::Water) != asker.Naval)
 			return false;
@@ -83,8 +101,11 @@ namespace
 		if ((rules & WaitOffMouth) && IsPassageMouthCell(cell))
 			return false;
 
-		if ((rules & WaitZone) && MapClass::Instance.GetMovementZoneType(cell, asker.Movement, false) != asker.Zone)
+		if ((rules & WaitZone) && MapClass::Instance.GetMovementZoneType(cell,
+			asker.ZoneMovement >= 0 ? static_cast<MovementZone>(asker.ZoneMovement) : asker.Movement, false) != asker.Zone)
+		{
 			return false;
+		}
 
 		if ((rules & WaitLevelNear) && std::abs(pCell->Level - asker.RefLevel) > asker.LevelSpan)
 			return false;
@@ -103,12 +124,15 @@ namespace
 
 	// How a search picks its cell. First: the first allowed cell in the order every finder uses;
 	// LowestScore: every ring, the lowest score, the first one on a tie; RingNearest: the ring of the
-	// first allowed cell, the one nearest MetricTo in it, the first one on a tie.
+	// first allowed cell, the one nearest MetricTo in it, the first one on a tie; SquareNearest: the
+	// whole square of side 2 MaxRing + 1, row by row (dy, then dx), cells MinRing or more out, the one
+	// nearest MetricTo, the first one on a tie (rings would break the ties between rings otherwise).
 	enum class NeuralWaitPick : uint8_t
 	{
 		First,
 		LowestScore,
-		RingNearest
+		RingNearest,
+		SquareNearest
 	};
 
 	// Step: 2 walks rings and cells on a grid of 2 (FindClearingCell).
@@ -132,6 +156,40 @@ namespace
 		const int step = std::max(1, search.Step);
 		CellClass* pBest = nullptr;
 		int bestScore = INT_MAX;
+
+		if (search.Pick == NeuralWaitPick::SquareNearest)
+		{
+			double nearest = 999999.0;
+
+			for (int dy = -search.MaxRing; dy <= search.MaxRing; ++dy)
+			{
+				for (int dx = -search.MaxRing; dx <= search.MaxRing; ++dx)
+				{
+					if (std::max(std::abs(dx), std::abs(dy)) < search.MinRing)
+						continue;
+
+					const CellStruct c { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+
+					if (!IsWaitCellAllowed(c, asker, rules))
+						continue;
+
+					auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+					if (reject(c, pCell))
+						continue;
+
+					const double distance = c.DistanceFrom(search.MetricTo);
+
+					if (distance < nearest)
+					{
+						nearest = distance;
+						pBest = pCell;
+					}
+				}
+			}
+
+			return pBest;
+		}
 
 		for (int r = std::max(0, search.MinRing); r <= search.MaxRing; r += step)
 		{

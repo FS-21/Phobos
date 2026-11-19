@@ -456,13 +456,12 @@ namespace
 		{
 			const CellStruct c { static_cast<short>(bc.X + dx / len * out - dy / len * side),
 				static_cast<short>(bc.Y + dy / len * out + dx / len * side) };
-			auto const pCell = MapClass::Instance.TryGetCellAt(c);
+			NeuralWaitAsker asker {};
+			asker.Speed = pType->SpeedType;
+			asker.Movement = pType->MovementZone;
 
-			if (pCell && pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false)
-				&& AreZonesConnected(fc, c, pType->MovementZone))
-			{
+			if (IsWaitCellAllowed(c, asker, WaitInMap | WaitClearIgnoringUnits) && AreZonesConnected(fc, c, pType->MovementZone))
 				return c;
-			}
 		}
 
 		return CellStruct::Empty;
