@@ -821,6 +821,10 @@ namespace
 			return;
 		}
 
+		// Another code holds the unit for its own goal (order leases).
+		if (!MayOrderUnit(pFoot, CellClass::Coord2Cell(pDest->GetCoords()), callerFile, callerLine))
+			return;
+
 		AbstractClass* pResolvedDest = pDest;
 		CellClass* pDestCell = (pDest->WhatAmI() == AbstractType::Cell)
 			? static_cast<CellClass*>(pDest)
@@ -2641,6 +2645,26 @@ namespace
 				pair.TypeId ? pair.TypeId : "?", pair.UniqueID, now);
 		}
 
+		// Orders the leases turned down (MayOrderUnit), by holder and refused code.
+		auto& refusals = LeaseRefusals[pHouse->ArrayIndex];
+		std::vector<std::pair<const std::string*, int>> refused;
+		refused.reserve(refusals.Pairs.size());
+
+		for (auto const& [key, count] : refusals.Pairs)
+			refused.emplace_back(&key, count);
+
+		std::stable_sort(refused.begin(), refused.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		Debug::Log("[NeuralAI] House %d order leases (TEMP): %d orders turned down, %d pairs, %d leases held, frame %d.\n",
+			pHouse->ArrayIndex, refusals.Total, static_cast<int>(refusals.Pairs.size()),
+			static_cast<int>(OrderLeasesOf(pHouse->ArrayIndex).size()), now);
+
+		for (size_t i = 0; i < refused.size() && i < static_cast<size_t>(OrderChurnTopPairs); ++i)
+		{
+			Debug::Log("[NeuralAI] House %d order lease refusal (TEMP): %s: %d, frame %d.\n", pHouse->ArrayIndex,
+				refused[i].first->c_str(), refused[i].second, now);
+		}
+
+		refusals = {};
 		churn.Pairs.clear();
 		churn.Switches = 0;
 		churn.Turns = 0;

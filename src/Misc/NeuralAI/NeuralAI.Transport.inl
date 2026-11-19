@@ -1545,6 +1545,10 @@ namespace
 		if (!pFoot || !pDest || pFoot->InLimbo || !pFoot->IsAlive || IsHeldByTransportOp(pFoot) || IsWaitingAtNavalPassage(pFoot))
 			return false;
 
+		// Another code holds the unit for its own goal (order leases).
+		if (!MayOrderUnit(pFoot, CellClass::Coord2Cell(pDest->GetCoords()), callerFile, callerLine))
+			return false;
+
 		// A unit already heading to a cell another unit of ours holds or heads to takes its own free
 		// cell now: the hysteresis below would keep it on the shared one.
 		CellClass* pSharedCell = nullptr;
