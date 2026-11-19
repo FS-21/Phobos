@@ -744,6 +744,26 @@ namespace
 		bool Released { false };
 	};
 
+	// A deployer of a building other than a yard (Micro): the site it keeps (DeployerSiteMostTries) and
+	// when it was picked, the sites it could not deploy at, the unpack orders given there and the
+	// frame of the last one, since when it stands next to the site; for the idle deployer watchdog
+	// the frame it was first and last seen packed, the spot it keeps to and since when, and whether
+	// the watchdog sent it to the main base (ToMainBase).
+	struct NeuralDeployerSite
+	{
+		CellStruct Site { CellStruct::Empty };
+		int PickFrame { -1 };
+		std::vector<CellStruct> FailedSites {};
+		int Tries { 0 };
+		int TryFrame { -1 };
+		int NearSince { -1 };
+		int FirstFrame { -1 };
+		int SeenFrame { -1 };
+		CellStruct StillCell { CellStruct::Empty };
+		int StillSince { -1 };
+		bool ToMainBase { false };
+	};
+
 	struct NeuralHouseMacroState
 	{
 		CellStruct PendingClearanceCell { CellStruct::Empty };
@@ -1065,8 +1085,13 @@ namespace
 		// Islands (movement zone -> frame until) where an expansion deployer found no room for its
 		// building: the island search skips them until then.
 		std::map<int, int> NoRoomIslandUntil;
+		// The same for one building type ((type index, movement zone) -> frame until): a deployer found
+		// no room for it there, or no legal foundation near the island goal before it set out.
+		std::map<std::pair<int, int>, int> NoRoomTypeIslandUntil;
 		// Deployers (unit -> frame since) standing on a new island with no site for their building.
 		std::unordered_map<DWORD, int> DeployerNoSiteSince;
+		// Deployers of buildings other than yards (unit -> NeuralDeployerSite).
+		std::unordered_map<DWORD, NeuralDeployerSite> DeployerSites;
 		// Packed MCVs the idle watchdog follows (unit -> NeuralMcvIdle).
 		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
 		// Packed MCVs that were unfolding (unit -> NeuralMcvUnfold).
@@ -1683,7 +1708,9 @@ namespace
 			this->ShipsWithoutTargetFloor = INT_MAX;
 			this->ShipsWithoutTargetWindowStart = -1;
 			this->NoRoomIslandUntil.clear();
+			this->NoRoomTypeIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
+			this->DeployerSites.clear();
 			this->McvIdle.clear();
 			this->McvUnfolds.clear();
 			this->IslandMcvWaits.clear();
@@ -2551,6 +2578,20 @@ namespace
 	// (something passing may only be in the way), and the island stays given up for NoRoomIslandFrames.
 	constexpr int DeployerNoSiteFrames = 450;
 	constexpr int NoRoomIslandFrames = 9000;
+	// Deployers of buildings other than yards (user approved, 2026-11-19: "Sí, los cinco"; match #11506:
+	// a deployer of a support building of 4x3 cells wandered between islets, home and ore fields and
+	// never deployed). One of the base deploys at the site of the base placement search it keeps
+	// (NeuralDeployerSite): DeployerSiteMostTries unpack orders on it at most, then the site goes to
+	// its avoid list and the next one is taken; with no site it looks again every
+	// DeployerSiteRetryFrames. Idle deployer watchdog: one packed for DeployerIdleUndeployedFrames, or
+	// within DeployerIdleDriftCells of one spot for DeployerIdleStillFrames, is sent to the nearest
+	// legal foundation of the main base and deploys there (DeployerIdleLogLines TEMP lines a match).
+	constexpr int DeployerSiteMostTries = 3;
+	constexpr int DeployerSiteRetryFrames = 150;
+	constexpr int DeployerIdleUndeployedFrames = 2700;
+	constexpr int DeployerIdleStillFrames = 900;
+	constexpr double DeployerIdleDriftCells = 4.0;
+	constexpr int DeployerIdleLogLines = 40;
 	// Idle MCV watchdog (user, match #11562 Fort Urban Square: two expansion MCVs of houses with a
 	// yard stood packed for thousands of frames, 227 path failures of their type, no fallback ever
 	// reached): an MCV that stays within McvIdleDriftCells of one spot for McvIdleFrames without

@@ -1025,6 +1025,55 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		return noRoomHere || !IsGroundZone(fromZone) || FindFreeOreFieldCell(pHouse, from, fromZone, 14) == nullptr;
 	};
+	// A building that counts as a colony on an island (user approved, 2026-11-19: "Sí, los cinco";
+	// match #11506): a yard, a refinery or resource destination, or a factory on land, as the island
+	// scan reads a colony. A support building, a defense, a power plant, a building on water
+	// (IsWaterBuildingType) or one the AI keeps inside its base (AIInnerBase) is no expansion: its
+	// deployer deploys at the base.
+	auto const isColonyBuilding = [](BuildingTypeClass* pBld) -> bool
+	{
+		return pBld && !IsWaterBuildingType(pBld) && !BuildingTypeExt::IsAIInnerBase(pBld)
+			&& (pBld->ConstructionYard || pBld->Refinery || pBld->ResourceGatherer || pBld->ResourceDestination
+				|| pBld->Factory != AbstractType::None);
+	};
+	// No room for this building on that island: the island given up (NoRoomIslandUntil) or the
+	// building type given up there (NoRoomTypeIslandUntil).
+	auto const isNoRoomIslandFor = [&](const BuildingTypeClass* pBld, int zone) -> bool
+	{
+		if (isNoRoomIsland(zone))
+			return true;
+
+		if (!pBld)
+			return false;
+
+		auto const& typeMarks = GetMacroState(pHouse).NoRoomTypeIslandUntil;
+		auto const itMark = typeMarks.find({ pBld->ArrayIndex, zone });
+
+		return itMark != typeMarks.end() && itMark->second > Unsorted::CurrentFrame;
+	};
+	// A deployer is sent to the island goal only when its building fits there: a legal foundation in
+	// the island's zone near the goal (FindDeployableFoundationNearCell). An island it does not fit on
+	// is given up for that building type for NoRoomIslandFrames, not for the others.
+	auto const deployerFitsOnIslandGoal = [&](UnitClass* pDeployer, BuildingTypeClass* pBld) -> bool
+	{
+		if (!pDeployer || !pBld || !pIslandResourceGoalCell || !IsGroundZone(resourceIslandZone)
+			|| isNoRoomIslandFor(pBld, resourceIslandZone))
+		{
+			return false;
+		}
+
+		if (FindDeployableFoundationNearCell(pHouse, pBld, pIslandResourceGoalCell->MapCoords, resourceIslandZone, pDeployer)
+			!= CellStruct::Empty)
+		{
+			return true;
+		}
+
+		GetMacroState(pHouse).NoRoomTypeIslandUntil[{ pBld->ArrayIndex, resourceIslandZone }]
+			= Unsorted::CurrentFrame + NoRoomIslandFrames;
+		CountDecision(NeuralDecision::DeployerGoalNoFit, pHouse->ArrayIndex);
+
+		return false;
+	};
 	auto const islandGoalKindName = [&]() -> const char*
 	{
 		switch (islandGoalKind)
@@ -5153,7 +5202,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (isKeyStructureDeployer)
 			{
 				const CellStruct nanoCell = pUnit->GetMapCoords();
-				const int nanoZone = MapClass::Instance.GetMovementZoneType(nanoCell, MovementZone::Normal, pUnit->OnBridge);
+				// The ground the deployer stands on. On water or on a cell of no ground its own zone holds
+				// no site for a land building, so it reads the zone of the main base (user approved,
+				// 2026-11-19, match #11506: from the water its site searches saw water cells only). A
+				// building on water (IsWaterBuildingType) takes water sites only (siteZone -1: the base
+				// placement search puts it on the water by our base).
+				const bool deploysOnWater = IsWaterBuildingType(pTargetBld);
+				const int nanoCellZone = MapClass::Instance.GetMovementZoneType(nanoCell, MovementZone::Normal, pUnit->OnBridge);
+				auto const pNanoCell = pUnit->GetCell();
+				const bool nanoOnGround = IsGroundZone(nanoCellZone) && pNanoCell && pNanoCell->LandType != LandType::Water;
+				const int nanoZone = (nanoOnGround || !IsGroundZone(homeGroundZone)) ? nanoCellZone : homeGroundZone;
+				const int siteZone = deploysOnWater ? -1 : nanoZone;
 				const bool isNanoMoving = (pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr
 					&& pUnit->DistanceFrom(pUnit->Destination) > 768);
 				const bool nanoReachedOrNoDest
@@ -5201,28 +5260,249 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						ownedBarracks++;
 				}
 
-				const bool isDedicatedMobileOutpost
-					= (pTargetBld->BaseNormal && !pTargetBld->Refinery && pTargetBld->Factory == AbstractType::None
-						&& pTargetBld->PowerBonus <= pTargetBld->PowerDrain && pHouse->Buildings.Count >= 1);
+				// Only a colony building goes colonizing (isColonyBuilding): BaseNormal, which most support
+				// buildings have, made a deployer of a shield generator an outpost that never reached the
+				// base logic below (match #11506). A factory deployer crosses only to an island goal its
+				// building fits on (deployerFitsOnIslandGoal).
+				const bool deploysColony = isColonyBuilding(pTargetBld);
 				const bool canFerryDeployer = CanHouseFerryTypeAcrossWater(pHouse, pType);
-				const bool isCrossIslandFactoryDeployer = (canFerryDeployer && pIslandResourceGoalCell != nullptr
+				const bool isCrossIslandFactoryDeployer = (deploysColony && canFerryDeployer && pIslandResourceGoalCell != nullptr
 					&& nanoZone != resourceIslandZone
 					&& ((pTargetBld->Factory == AbstractType::UnitType && !pTargetBld->Naval && ownedWarFactories >= 1)
-						|| (pTargetBld->Factory == AbstractType::InfantryType && ownedBarracks >= 1)));
+						|| (pTargetBld->Factory == AbstractType::InfantryType && ownedBarracks >= 1))
+					&& deployerFitsOnIslandGoal(pUnit, pTargetBld));
 
-				const bool isExpansionDeployer = isIslandColonizerSlaveMiner || isDedicatedMobileOutpost
-					|| isCrossIslandFactoryDeployer
-					|| ((pTargetBld->Refinery || pTargetBld->ResourceDestination) && ownedRefineries >= 1
+				const bool isExpansionDeployer = isIslandColonizerSlaveMiner || isCrossIslandFactoryDeployer
+					|| (deploysColony && (pTargetBld->Refinery || pTargetBld->ResourceDestination) && ownedRefineries >= 1
 						&& scores[30] > 450);
+
+				auto& siteMacro = GetMacroState(pHouse);
+				const int siteNow = Unsorted::CurrentFrame;
+
+				if (siteMacro.DeployerSites.size() > 64)
+				{
+					std::erase_if(siteMacro.DeployerSites, [siteNow](const auto& entry)
+						{ return siteNow < entry.second.SeenFrame || siteNow - entry.second.SeenFrame > 900; });
+				}
+
+				auto& deploySite = siteMacro.DeployerSites[pUnit->UniqueID];
+
+				// The site of a deployer of the base (DeployerSites, user approved, 2026-11-19, match #11506:
+				// the site search near the deployer ignores Adjacent): the cell of the base placement search
+				// (CachedTetrisBuildCell, as FindBestDeployStandCell reads it: Adjacent and the placement
+				// rules, water by our shore for a building on water), else the main base, avoiding the sites
+				// it failed at. Sent there by the idle watchdog (toMainBase), a land building takes the legal
+				// foundation nearest the main base in its ground zone. A water site is one the deployer
+				// reaches by its own moves.
+				auto const pickBaseDeploySite = [&](bool toMainBase) -> CellStruct
+				{
+					const CellStruct standOffset = (pTargetBld->GetFoundationWidth() > 2 || pTargetBld->GetFoundationHeight(false) > 2)
+						? CellStruct { 1, 1 }
+						: CellStruct { 0, 0 };
+					const CellStruct tetris = (!toMainBase || deploysOnWater) ? CachedTetrisBuildCell(pHouse, pTargetBld) : CellStruct::Empty;
+					const CellStruct origins[2] = { tetris != CellStruct::Empty ? tetris + standOffset : CellStruct::Empty, homeCoords };
+					const int ownMoveZone = ObjectZone(pUnit, pType->MovementZone);
+
+					for (auto const& origin : origins)
+					{
+						if (origin == CellStruct::Empty)
+							continue;
+
+						const int originZone = MapClass::Instance.GetMovementZoneType(origin, MovementZone::Normal, false);
+						const int zone = deploysOnWater ? -1 : ((toMainBase || !IsGroundZone(originZone)) ? homeGroundZone : originZone);
+						const CellStruct cell = FindDeployableFoundationNearCellUncached(pHouse, pTargetBld, origin, zone, pUnit,
+							&deploySite.FailedSites);
+
+						if (cell != CellStruct::Empty
+							&& (!deploysOnWater || MapClass::Instance.GetMovementZoneType(cell, pType->MovementZone, false) == ownMoveZone))
+						{
+							return cell;
+						}
+					}
+
+					return CellStruct::Empty;
+				};
+
+				// It goes to its site and deploys there; the site changes only when the deploy fails on it
+				// (DeployerSiteMostTries unpack orders there, or McvIdleArriveFrames next to it without
+				// getting onto it, as the idle MCV watchdog steps an MCV onto its site): the site goes to
+				// the avoid list and the next one is taken.
+				auto const deployAtBaseSite = [&](bool toMainBase)
+				{
+					if (pUnit->IsDeploying || (pUnit->CurrentMission == Mission::Unload && deploySite.TryFrame >= 0
+						&& siteNow >= deploySite.TryFrame && siteNow - deploySite.TryFrame < McvUnfoldRetryFrames))
+					{
+						return;
+					}
+
+					if (deploySite.Site == CellStruct::Empty && (deploySite.PickFrame < 0 || siteNow < deploySite.PickFrame
+						|| siteNow - deploySite.PickFrame >= DeployerSiteRetryFrames))
+					{
+						deploySite.PickFrame = siteNow;
+						deploySite.Site = pickBaseDeploySite(toMainBase);
+						deploySite.Tries = 0;
+						deploySite.NearSince = -1;
+					}
+
+					if (deploySite.Site == CellStruct::Empty)
+					{
+						// No site at all for now: it deploys where it stands when it can.
+						if (CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
+							OrderDeployerUnpack(pUnit);
+
+						return;
+					}
+
+					const CellStruct site = deploySite.Site;
+					const double siteDist = nanoCell.DistanceFrom(site);
+					const bool driving = pUnit->CurrentMission == Mission::Move && pUnit->Destination
+						&& pUnit->DistanceFrom(pUnit->Destination) > 256;
+
+					auto const failSite = [&]()
+					{
+						deploySite.FailedSites.push_back(site);
+						deploySite.Site = CellStruct::Empty;
+						deploySite.PickFrame = -1;
+						deploySite.Tries = 0;
+						deploySite.NearSince = -1;
+						CountDecision(NeuralDecision::DeployerSiteFailed, pHouse->ArrayIndex);
+					};
+
+					if ((nanoCell == site || (siteDist <= 1.5 && !driving)) && CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
+					{
+						if (deploySite.Tries >= DeployerSiteMostTries)
+						{
+							failSite();
+							return;
+						}
+
+						++deploySite.Tries;
+						deploySite.TryFrame = siteNow;
+						OrderDeployerUnpack(pUnit);
+						return;
+					}
+
+					if (nanoCell == site)
+					{
+						failSite();
+						return;
+					}
+
+					if (siteDist <= McvIdleNearCells && !driving)
+					{
+						if (deploySite.NearSince < 0)
+							deploySite.NearSince = siteNow;
+
+						if (siteNow - deploySite.NearSince >= McvIdleArriveFrames)
+						{
+							failSite();
+							return;
+						}
+
+						if (auto const pSiteCell = MapClass::Instance.TryGetCellAt(site); pSiteCell && pUnit->Destination != pSiteCell)
+						{
+							pUnit->SetDestination(pSiteCell, true);
+							pUnit->QueueMission(Mission::Move, true);
+							NoteOrderCaller(pUnit, "move");
+						}
+
+						return;
+					}
+
+					deploySite.NearSince = -1;
+					const bool headingThere = driving && CellClass::Coord2Cell(pUnit->Destination->GetCoords()).DistanceFrom(site) <= 1.5;
+
+					if (!headingThere || IsAITickWindow(90, 15))
+					{
+						if (auto const pSiteCell = MapClass::Instance.TryGetCellAt(site))
+						{
+							const int siteGround = MapClass::Instance.GetMovementZoneType(site, MovementZone::Normal, false);
+							const bool reachesOnItsOwn = (IsGroundZone(siteGround) && siteGround == nanoCellZone)
+								|| MapClass::Instance.GetMovementZoneType(site, pType->MovementZone, false) == ObjectZone(pUnit, pType->MovementZone);
+
+							if (reachesOnItsOwn)
+								IssueMoveOrder(pUnit, pSiteCell, 0.0);
+							else
+								DispatchFootToTargetOrTransport(pUnit, pSiteCell, Mission::Move, false);
+						}
+					}
+				};
+
+				// Idle deployer watchdog (DeployerIdleUndeployedFrames, NeuralAI.State.inl; user approved,
+				// 2026-11-19, match #11506): a deployer packed for that long, or keeping to one spot for
+				// DeployerIdleStillFrames, goes to the main base and deploys at the legal foundation nearest
+				// it (for a building on water, on the water by the base). A slave miner deploys through its
+				// harvest, one boarding a transport is left to it, and one on its way to an island goal
+				// counts its packed time only.
+				{
+					if (deploySite.SeenFrame < 0 || siteNow < deploySite.SeenFrame || siteNow - deploySite.SeenFrame > 900)
+					{
+						deploySite = NeuralDeployerSite {};
+						deploySite.FirstFrame = siteNow;
+					}
+
+					deploySite.SeenFrame = siteNow;
+					const bool deployerBoarding = pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter;
+					const bool headsForIsland = isExpansionDeployer && canFerryDeployer && pIslandResourceGoalCell != nullptr
+						&& nanoZone != resourceIslandZone;
+
+					if (deploySite.StillCell == CellStruct::Empty || nanoCell.DistanceFrom(deploySite.StillCell) > DeployerIdleDriftCells
+						|| deployerBoarding || headsForIsland || pUnit->IsDeploying)
+					{
+						deploySite.StillCell = nanoCell;
+						deploySite.StillSince = siteNow;
+					}
+
+					const int packedFrames = siteNow - deploySite.FirstFrame;
+					const int stillFrames = siteNow - deploySite.StillSince;
+
+					if (!deploySite.ToMainBase && !isIslandColonizerSlaveMiner && !deployerBoarding
+						&& (packedFrames >= DeployerIdleUndeployedFrames || stillFrames >= DeployerIdleStillFrames))
+					{
+						deploySite.ToMainBase = true;
+						deploySite.Site = CellStruct::Empty;
+						deploySite.PickFrame = -1;
+						deploySite.Tries = 0;
+						deploySite.NearSince = -1;
+						CountDecision(NeuralDecision::DeployerIdleWatchdog, pHouse->ArrayIndex);
+
+						// TEMP diagnostic: each deployer the watchdog sends (DeployerIdleLogLines a match).
+						static int deployerWatchLogSerial = -1;
+						static int deployerWatchLogCount = 0;
+
+						if (deployerWatchLogSerial != NeuralMatchSerial)
+						{
+							deployerWatchLogSerial = NeuralMatchSerial;
+							deployerWatchLogCount = 0;
+						}
+
+						if (deployerWatchLogCount < DeployerIdleLogLines)
+						{
+							++deployerWatchLogCount;
+							Debug::Log("[NeuralAI] House %d deployer watchdog: %s %u (%s, on water %d, colony %d, expansion %d) at (%d,%d) "
+								"zone %d cell zone %d, packed %d frames, still %d frames, mission %d, %d sites failed, goes to the main base "
+								"(%d,%d) zone %d, frame %d.\n",
+								pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pTargetBld->ID, deploysOnWater ? 1 : 0, deploysColony ? 1 : 0,
+								isExpansionDeployer ? 1 : 0, nanoCell.X, nanoCell.Y, nanoZone, nanoCellZone, packedFrames, stillFrames,
+								static_cast<int>(pUnit->CurrentMission), static_cast<int>(deploySite.FailedSites.size()), homeCoords.X,
+								homeCoords.Y, homeGroundZone, siteNow);
+						}
+					}
+
+					if (deploySite.ToMainBase && !isIslandColonizerSlaveMiner)
+					{
+						deployAtBaseSite(true);
+						continue;
+					}
+				}
 
 				if (isExpansionDeployer)
 				{
 					auto& noRoomIslands = GetMacroState(pHouse).NoRoomIslandUntil;
-					const bool nanoIslandHasNoRoom = nanoZone >= 0 && noRoomIslands.contains(nanoZone)
-						&& noRoomIslands.at(nanoZone) > Unsorted::CurrentFrame;
+					const bool nanoIslandHasNoRoom = nanoZone >= 0 && isNoRoomIslandFor(pTargetBld, nanoZone);
 					const bool mustColonizeIslandWithDeployer = (canFerryDeployer && nanoZone >= 0
 						&& (hubsInNanoZone >= 1 || nanoIslandHasNoRoom) && pIslandResourceGoalCell != nullptr
-						&& nanoZone != resourceIslandZone);
+						&& nanoZone != resourceIslandZone && deployerFitsOnIslandGoal(pUnit, pTargetBld));
 					const bool landedOnNewIsland = (homeGroundZone >= 0 && nanoZone >= 0 && nanoZone != homeGroundZone
 						&& hubsInNanoZone == 0 && !nanoIslandHasNoRoom);
 
@@ -5340,7 +5620,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						else
 						{
 							const CellStruct deployCell
-								= FindDeployableFoundationNearCell(pHouse, pTargetBld, nanoCell, nanoZone, pUnit);
+								= FindDeployableFoundationNearCell(pHouse, pTargetBld, nanoCell, siteZone, pUnit);
 							if (deployCell != CellStruct::Empty)
 							{
 								if (nanoReachedOrNoDest || (IsAITickWindow(45, 15)))
@@ -5360,8 +5640,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							else if (landedOnNewIsland)
 							{
 								// No foundation for this building anywhere near on this island: the
-								// island search skips it for 9000 frames and the deployer moves on.
+								// island search skips it for 9000 frames and the deployer moves on. The
+								// mark is kept for this building type as well (NoRoomTypeIslandUntil).
 								noRoomIslands[nanoZone] = Unsorted::CurrentFrame + NoRoomIslandFrames;
+								GetMacroState(pHouse).NoRoomTypeIslandUntil[{ pTargetBld->ArrayIndex, nanoZone }]
+									= Unsorted::CurrentFrame + NoRoomIslandFrames;
 								CountDecision(NeuralDecision::DeployerIslandNoRoom, pHouse->ArrayIndex);
 							}
 						}
@@ -5434,7 +5717,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						}
 						else
 						{
-							const CellStruct deployCell = FindBestDeployStandCell(pHouse, pTargetBld, pUnit, nanoZone);
+							const CellStruct deployCell = FindBestDeployStandCell(pHouse, pTargetBld, pUnit, siteZone);
 							if (auto const pClear = MapClass::Instance.TryGetCellAt(deployCell))
 							{
 								pUnit->SetDestination(pClear, true);
@@ -5460,7 +5743,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 					if (nanoReachedOrNoDest || (IsAITickWindow(45, 15)))
 					{
-						const CellStruct perimStandCell = FindBestDeployStandCell(pHouse, pTargetBld, pUnit, nanoZone);
+						const CellStruct perimStandCell = FindBestDeployStandCell(pHouse, pTargetBld, pUnit, siteZone);
 						if (perimStandCell == nanoCell && CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
 						{
 							OrderDeployerUnpack(pUnit);
@@ -5479,25 +5762,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 
-				// Base Infrastructure Deployer (Power, Barracks, Radar, Tech, Repair
-				// Bay, Shield/Gap Generator, or Refinery/Factory): Unpack immediately
-				// if current cell has a valid foundation & is clear of factory exit
-				// corridors; otherwise search for a free foundation and move there!
-				if (CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
-				{
-					OrderDeployerUnpack(pUnit);
-				}
-				else if (nanoReachedOrNoDest || (IsAITickWindow(45, 15)))
-				{
-					const CellStruct clearStandCell = FindBestDeployStandCell(pHouse, pTargetBld, pUnit, nanoZone);
-					if (auto const pClear = MapClass::Instance.TryGetCellAt(clearStandCell))
-					{
-						pUnit->SetDestination(pClear, true);
-						pUnit->QueueMission(Mission::Move, true);
-						NoteOrderCaller(pUnit, "move");
-					}
-				}
-
+				// Base Infrastructure Deployer (Power, Barracks, Radar, Tech, Repair Bay, Shield/Gap
+				// Generator, a naval yard on the water, or Refinery/Factory): it deploys at the site of the
+				// base placement search it keeps (deployAtBaseSite above).
+				deployAtBaseSite(false);
 				continue;
 			}
 			// A siege unit stuck on an unfold that never happens goes back on guard, where the rules
@@ -12161,11 +12429,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& pHouse->NumConYards >= 1;
 			const bool isExpMCV = (pUT->DeploysInto->ConstructionYard && (conYardsInUz >= 1 || hubsInUz >= 2 || strandedWithoutRoom)
 				&& (isForeignTechYardMcv || yardMcvMayCrossToIslandGoal(pOwnU->GetMapCoords(), uz, strandedWithoutRoom)));
+			// Another deployer only for a colony building (isColonyBuilding) that fits on the island goal
+			// (deployerFitsOnIslandGoal).
 			const bool isExpOutpostOrRef = (!pUT->DeploysInto->ConstructionYard && (hubsInUz >= 1 || strandedWithoutRoom)
 				&& (pOwnU == pExtraHomeSlaveMiner
-					|| (!pUT->Harvester && !pUT->ResourceGatherer
-						&& (pUT->DeploysInto->Refinery || pUT->DeploysInto->ResourceDestination
-							|| pUT->DeploysInto->BaseNormal || pUT->DeploysInto->Factory != AbstractType::None))));
+					|| (!pUT->Harvester && !pUT->ResourceGatherer && isColonyBuilding(pUT->DeploysInto)))
+				&& deployerFitsOnIslandGoal(pOwnU, pUT->DeploysInto));
 			if (isExpMCV || isExpOutpostOrRef)
 			{
 				pHomeExpansionDeployer = pOwnU;
@@ -13126,14 +13395,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const bool isLoadedStrikeAPC
 								= (pU->Type->Passengers >= 3 && pU->Passengers.NumPassengers >= 1
 									&& (pWaveTargetCell || pIslandGoalCell || pIslandTechGoalCell));
-							// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal).
+							// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal),
+							// another deployer only for a colony building that fits there (deployerFitsOnIslandGoal).
 							const bool isIslandExpansionMCV = (pU->Type->DeploysInto != nullptr
 								&& pIslandResourceGoalCell && uZone >= 0 && uZone != resourceIslandZone
 								&& (pU == pHomeExpansionDeployer || pHouse->NumConYards >= 1
 									|| pHouse->CountOwnedNow(pU->Type) >= 2 || pHouse->OwnedBuildings >= 6)
-								&& (!pU->Type->DeploysInto->ConstructionYard || pU == pHomeExpansionDeployer
-									|| (pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
-									|| yardMcvMayCrossToIslandGoal(pU->GetMapCoords(), uZone, isNoRoomIsland(uZone))));
+								&& (pU->Type->DeploysInto->ConstructionYard
+									? (pU == pHomeExpansionDeployer || (pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
+										|| yardMcvMayCrossToIslandGoal(pU->GetMapCoords(), uZone, isNoRoomIsland(uZone)))
+									: (isColonyBuilding(pU->Type->DeploysInto) && deployerFitsOnIslandGoal(pU, pU->Type->DeploysInto))));
 							const bool isIslandHarvester
 								= ((pU->Type->Harvester || pU->Type->Weeder) && islandGoalTakesHarvesters()
 									&& uZone == homeGroundZone && uZone != resourceIslandZone && pHouse->CountOwnedNow(pU->Type) >= 2);
@@ -15284,13 +15555,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					= (pRepairDepot && pU->Type->Cost >= 1000 && pU->GetHealthPercentage() < 0.40);
 				const bool isLoadedStrikeAPC = (pU->Type->Passengers >= 3 && pU->Passengers.NumPassengers >= 1
 					&& (pWaveTargetCell || pIslandGoalCell || pIslandTechGoalCell));
-				// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal).
+				// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal), another
+				// deployer only for a colony building that fits there (deployerFitsOnIslandGoal).
 				const bool isIslandExpansionMCV = (pU->Type->DeploysInto != nullptr && pIslandResourceGoalCell
 					&& uZone >= 0 && uZone != resourceIslandZone
 					&& (pHouse->NumConYards >= 1 || pHouse->CountOwnedNow(pU->Type) >= 2)
-					&& (!pU->Type->DeploysInto->ConstructionYard || pU == pHomeExpansionDeployer
-						|| (pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
-						|| yardMcvMayCrossToIslandGoal(pU->GetMapCoords(), uZone, isNoRoomIsland(uZone))));
+					&& (pU->Type->DeploysInto->ConstructionYard
+						? (pU == pHomeExpansionDeployer || (pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
+							|| yardMcvMayCrossToIslandGoal(pU->GetMapCoords(), uZone, isNoRoomIsland(uZone)))
+						: (isColonyBuilding(pU->Type->DeploysInto) && deployerFitsOnIslandGoal(pU, pU->Type->DeploysInto))));
 				const bool isIslandHarvester = ((pU->Type->Harvester || pU->Type->Weeder) && islandGoalTakesHarvesters()
 					&& uZone == homeGroundZone && uZone != resourceIslandZone && pHouse->CountOwnedNow(pU->Type) >= 2);
 				const bool strandedHarvester = isStrandedHarvester(pU, uZone);

@@ -608,6 +608,13 @@ namespace
 		return -1;
 	}
 
+	// A building that stands on water: a naval one, or one whose foundation needs water (SpeedType
+	// Float), as the base placement search reads it. Its deployer takes water sites only.
+	bool IsWaterBuildingType(const BuildingTypeClass* pType)
+	{
+		return pType && (pType->Naval || pType->SpeedType == SpeedType::Float);
+	}
+
 	// Does the land cell under a transport, or one of the 8 around it, belong to this ground zone
 	// (see TransportTouchedGroundZone)? Arrival by touch.
 	bool TransportTouchesLandZone(const CellStruct& cell, int zone)
