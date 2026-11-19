@@ -1428,6 +1428,7 @@ namespace
 				if (auto const pSafe = nearestHidden(pSub, pDestCell->MapCoords, 8))
 				{
 					pSub->SetDestination(pSafe, true);
+					NoteOrderCaller(pSub, "move");
 					CountDecision(NeuralDecision::SubmarineSonarAvoided, pHouse->ArrayIndex);
 				}
 			}
@@ -6390,6 +6391,7 @@ namespace
 								plan.StagingCell = pCell->MapCoords;
 								pTransport->SetDestination(pCell, true);
 								pTransport->QueueMission(Mission::Unload, true);
+								NoteOrderCaller(pTransport, "unload");
 							}
 						}
 						else if (pTransport->CurrentMission != Mission::Unload)
@@ -6399,6 +6401,7 @@ namespace
 
 							pTransport->SetDestination(pDrop, true);
 							pTransport->QueueMission(Mission::Unload, true);
+							NoteOrderCaller(pTransport, "unload");
 						}
 					}
 					else if (pTransport->GetHealthPercentage() < 0.35 && toDrop > AirbornePressOnCells)

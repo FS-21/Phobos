@@ -1312,6 +1312,7 @@ namespace
 				pSoldier->SetTarget(nullptr);
 				pSoldier->SetDestination(pBest, true);
 				pSoldier->QueueMission(Mission::Capture, false);
+				NoteOrderCaller(pSoldier, "capture");
 				pSoldier->NextMission();
 			}
 			else if (!dispatch(pSoldier, pBest, Mission::Enter, false))
