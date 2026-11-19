@@ -1294,10 +1294,16 @@ namespace
 			return nullptr;
 		};
 
+		// A sub with a job (a plan's member, an attack-move) keeps its destination: a sub that surfaces
+		// to fire gains nothing by hiding, and moving a plan's firing cells to the sonar's edge kept
+		// every naval strike of a house out of range until it timed out (match #11450 Rocky Surf,
+		// 2026-11-19: Boomers held 27 cells off a Mobile Sensor Array, "arrived 0" in every plan).
 		for (auto const pSub : UnitClass::Array)
 		{
 			if (!pSub || pSub->Owner != pHouse || !pSub->IsAlive || pSub->InLimbo || !pSub->Type || !pSub->Type->Naval
-				|| !pSub->Type->Cloakable || pSub->Target != nullptr || pSub->CurrentMission == Mission::Attack)
+				|| !pSub->Type->Cloakable || pSub->Target != nullptr || pSub->CurrentMission == Mission::Attack
+				|| pSub->CurrentMission == Mission::AttackMove || pSub->MegaMission == Mission::AttackMove
+				|| IsPlanMember(pHouse, pSub->UniqueID))
 			{
 				continue;
 			}
@@ -2319,6 +2325,28 @@ namespace
 							IssueMoveOrder(it->second, pHome, 4.0);
 					}
 				}
+			}
+
+			// The plan's ships get no move home (their own logic takes them back), but a ship left on the
+			// plan's move counts as busy for the idle naval logic, which then never gave it work again
+			// (match #11450: Boomers sat on their last move off the enemy coast). Each one on a plain
+			// move with no target stops where it is, free for it.
+			for (const DWORD uid : plan.Members)
+			{
+				auto const it = ownFoots.find(uid);
+
+				if (it == ownFoots.end() || it->second->WhatAmI() == AbstractType::Aircraft)
+					continue;
+
+				auto const pShip = it->second;
+				auto const pShipType = pShip->GetTechnoType();
+
+				if (!pShipType || !pShipType->Naval || pShip->Target != nullptr || pShip->CurrentMission != Mission::Move)
+					continue;
+
+				pShip->SetDestination(nullptr, true);
+				pShip->QueueMission(Mission::Guard, true);
+				CountDecision(NeuralDecision::NavalPlanShipsFreed, houseIdx);
 			}
 
 			// A group that failed against a target leaves a lesson: that much was not enough there
@@ -9231,11 +9259,18 @@ namespace
 
 						const bool siege = shells;
 						const double distToFiring = pShip->GetMapCoords().DistanceFrom(ownCell);
+						// A ship that has its target in reach (the engine's own test: the weapon it would
+						// pick, its range and minimum range) fires from where it is, short of its firing
+						// cell or not (match #11450: Boomers held off their cells never fired).
+						const bool inReach = siege && pShipTarget && distToFiring > 4.0 && pShip->IsCloseEnoughToAttack(pShipTarget);
 
-						if (siege && distToFiring <= 4.0)
+						if (siege && (distToFiring <= 4.0 || inReach))
 						{
 							if (pShip->Target != pShipTarget)
 							{
+								if (inReach)
+									CountDecision(NeuralDecision::NavalStrikeInRange, pHouse->ArrayIndex);
+
 								pShip->SetTarget(pShipTarget);
 								pShip->QueueMission(Mission::Attack, true);
 							}

@@ -713,6 +713,18 @@ namespace
 		std::vector<CellStruct> FailedSites {};
 		int OwnOrderUntil { -1 };
 		CellStruct Goal { CellStruct::Empty };
+		// The last leg the watchdog gave toward Goal, and since when the MCV stands next to Goal.
+		CellStruct Leg { CellStruct::Empty };
+		int NearSince { -1 };
+	};
+
+	// An MCV whose yard was ordered to unfold (Micro): where and when it last unfolded, and how often
+	// it tried again on that spot after the engine refused the deploy.
+	struct NeuralMcvUnfold
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Frame { -1 };
+		int Tries { 0 };
 	};
 
 	// Expansion MCV waiting for a ride to the island goal (Micro): since when it waits with no ride on
@@ -1050,6 +1062,8 @@ namespace
 		std::unordered_map<DWORD, int> DeployerNoSiteSince;
 		// Packed MCVs the idle watchdog follows (unit -> NeuralMcvIdle).
 		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
+		// Packed MCVs that were unfolding (unit -> NeuralMcvUnfold).
+		std::unordered_map<DWORD, NeuralMcvUnfold> McvUnfolds;
 		// Expansion MCVs waiting for a ride to the island goal (unit -> NeuralIslandMcvWait).
 		std::unordered_map<DWORD, NeuralIslandMcvWait> IslandMcvWaits;
 		// Yards an island expansion MCV unfolded while no ride came (cell, frame): they pack up for the
@@ -1661,6 +1675,7 @@ namespace
 			this->NoRoomIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
 			this->McvIdle.clear();
+			this->McvUnfolds.clear();
 			this->IslandMcvWaits.clear();
 			this->IslandWaitYards.clear();
 			this->IslandWaitPackFrame = -1;
@@ -2487,6 +2502,16 @@ namespace
 	constexpr int McvIdleOrderFrames = 1800;
 	constexpr int McvIdleMostTries = 3;
 	constexpr int McvIdleLegSteps = 24;
+	// Matches #11445-#11450 (2026-11-19): every site the watchdog gave up was judged from a cell 1 or 2
+	// short of it, and MCVs ordered to unfold were sent elsewhere by the MCV logic below. An MCV
+	// within McvIdleNearCells of its site is stepped onto the site cell itself, and the site fails
+	// only after McvIdleArriveFrames there. A yard whose unfold the engine refused (it clears the
+	// foundation for the next try) unfolds again on that spot, McvUnfoldMostTries times within
+	// McvUnfoldRetryFrames, before the MCV logic may move it.
+	constexpr double McvIdleNearCells = 3.0;
+	constexpr int McvIdleArriveFrames = 450;
+	constexpr int McvUnfoldRetryFrames = 450;
+	constexpr int McvUnfoldMostTries = 3;
 	// Land before islands (user approved, 2026-11-19): in 4 matches of 724f571ef 44 of 87 expansion
 	// lines of houses whose income fell found the expansion MCV built and packed, waiting for a ride to
 	// an island; 31 of 38 such MCVs of 5 stamps had a free field on their own landmass (match #11376,
