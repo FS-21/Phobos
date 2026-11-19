@@ -102,11 +102,13 @@ namespace
 	}
 
 	// How a search picks its cell. First: the first allowed cell in the order every finder uses;
-	// LowestScore: every ring, the lowest score, the first one on a tie.
+	// LowestScore: every ring, the lowest score, the first one on a tie; RingNearest: the ring of the
+	// first allowed cell, the one nearest MetricTo in it, the first one on a tie.
 	enum class NeuralWaitPick : uint8_t
 	{
 		First,
-		LowestScore
+		LowestScore,
+		RingNearest
 	};
 
 	// Step: 2 walks rings and cells on a grid of 2 (FindClearingCell).
@@ -116,6 +118,7 @@ namespace
 		int MaxRing { 0 };
 		int Step { 1 };
 		NeuralWaitPick Pick { NeuralWaitPick::First };
+		CellStruct MetricTo { CellStruct::Empty };
 	};
 
 	// Rings MinRing..MaxRing (Chebyshev, Step apart) around center in the order the finders use: dy
@@ -132,6 +135,8 @@ namespace
 
 		for (int r = std::max(0, search.MinRing); r <= search.MaxRing; r += step)
 		{
+			double nearest = 1.0e9;
+
 			for (int dy = -r; dy <= r; dy += step)
 			{
 				for (int dx = -r; dx <= r; dx += step)
@@ -152,6 +157,19 @@ namespace
 					if (search.Pick == NeuralWaitPick::First)
 						return pCell;
 
+					if (search.Pick == NeuralWaitPick::RingNearest)
+					{
+						const double distance = c.DistanceFrom(search.MetricTo);
+
+						if (distance < nearest)
+						{
+							nearest = distance;
+							pBest = pCell;
+						}
+
+						continue;
+					}
+
 					const int value = score(c, pCell, r, dx, dy);
 
 					if (value < bestScore)
@@ -161,6 +179,9 @@ namespace
 					}
 				}
 			}
+
+			if (search.Pick == NeuralWaitPick::RingNearest && pBest)
+				return pBest;
 		}
 
 		return pBest;

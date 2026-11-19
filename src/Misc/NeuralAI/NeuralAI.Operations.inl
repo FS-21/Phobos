@@ -1300,6 +1300,37 @@ namespace
 				&& MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) == op.OriginZone;
 		};
 
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search below.
+		NeuralWaitAsker asker {};
+		asker.Speed = flies ? SpeedType::Track : pType->SpeedType;
+		asker.Movement = flies ? MovementZone::Normal : pType->MovementZone;
+		asker.Zone = flies ? op.OriginZone : transportZone;
+		NeuralWaitSearch search {};
+		search.MaxRing = OpBerthRingCells;
+		auto const pShadow = FindWaitCellNear(op.Staging, search, asker,
+			WaitLegal | WaitNoBuilding | WaitZone | WaitClearOfUnits | (flies ? (WaitLand | WaitNotBeach) : 0u),
+			[&](const CellStruct& c, const CellClass*)
+			{
+				if (std::any_of(taken.begin(), taken.end(), [&c](const CellStruct& at) { return at.DistanceFrom(c) < OpBerthSpacingCells; }))
+					return true;
+
+				if (flies)
+					return false;
+
+				for (int sy = -1; sy <= 1; ++sy)
+				{
+					for (int sx = -1; sx <= 1; ++sx)
+					{
+						if (originLand(CellStruct { static_cast<short>(c.X + sx), static_cast<short>(c.Y + sy) }))
+							return false;
+					}
+				}
+
+				return true;
+			});
+		static int shadowLogSerial = -1;
+		static int shadowLogCount = 0;
+
 		for (int ring = 0; ring <= OpBerthRingCells; ++ring)
 		{
 			for (int dy = -ring; dy <= ring; ++dy)
@@ -1352,12 +1383,14 @@ namespace
 					const CellStruct out { static_cast<short>(c.X + std::lround(outX * OpBerthWaitCells)),
 						static_cast<short>(c.Y + std::lround(outY * OpBerthWaitCells)) };
 					wait = originLand(out) ? out : c;
+					NoteWaitCellShadow("PickOpBerth", shadowLogSerial, shadowLogCount, op.Staging, pCell, pShadow);
 
 					return c;
 				}
 			}
 		}
 
+		NoteWaitCellShadow("PickOpBerth", shadowLogSerial, shadowLogCount, op.Staging, nullptr, pShadow);
 		return CellStruct::Empty;
 	}
 
@@ -1720,6 +1753,29 @@ namespace
 					found = c;
 				}
 			}
+		}
+
+		// TEMP (rule consolidation, case 3): the cell FindWaitCellNear gives, checked against the search above.
+		{
+			NeuralWaitAsker asker {};
+			asker.Zone = op.OriginZone;
+			NeuralWaitSearch search {};
+			search.MinRing = 1;
+			search.MaxRing = OpHoldMoveRing;
+			search.Pick = NeuralWaitPick::RingNearest;
+			search.MetricTo = hold;
+			auto const pShadow = FindWaitCellNear(hold, search, asker,
+				WaitLegal | WaitLand | WaitNoBuilding | WaitZone | WaitOffDeck | WaitOffMouth | WaitOffNarrow,
+				[&op, bandMin, bandMax](const CellStruct& c, const CellClass*)
+				{
+					const double fromStaging = c.DistanceFrom(op.Staging);
+
+					return fromStaging < bandMin || fromStaging > bandMax;
+				});
+			static int shadowLogSerial = -1;
+			static int shadowLogCount = 0;
+			NoteWaitCellShadow("FindOpHoldOutOfTheWay", shadowLogSerial, shadowLogCount, hold,
+				found != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(found) : nullptr, pShadow);
 		}
 
 		if (op.HoldMoves.size() >= OpHoldMovesMost)
