@@ -1147,6 +1147,10 @@ namespace
 		std::unordered_map<DWORD, NeuralDeployerSite> DeployerSites;
 		// Packed MCVs the idle watchdog follows (unit -> NeuralMcvIdle).
 		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
+		// Packed MCVs that had an enemy near them at their last look (Micro, the MCV danger rule).
+		std::unordered_set<DWORD> McvInDanger;
+		// Expansion goals packed MCVs turned back from for an enemy near them (goal, frame until).
+		std::vector<std::pair<CellStruct, int>> McvFledSites;
 		// Packed MCVs that were unfolding (unit -> NeuralMcvUnfold).
 		std::unordered_map<DWORD, NeuralMcvUnfold> McvUnfolds;
 		// Expansion MCVs waiting for a ride to the island goal (unit -> NeuralIslandMcvWait).
@@ -1782,6 +1786,8 @@ namespace
 			this->DeployerNoSiteSince.clear();
 			this->DeployerSites.clear();
 			this->McvIdle.clear();
+			this->McvInDanger.clear();
+			this->McvFledSites.clear();
 			this->McvUnfolds.clear();
 			this->IslandMcvWaits.clear();
 			this->IslandWaitYards.clear();
@@ -2698,6 +2704,22 @@ namespace
 	// on it again. McvPackedLogLines: lines a match of the packed yard MCV diagnostic.
 	constexpr int McvUnfoldSkipMostFrames = 900;
 	constexpr int McvPackedLogLines = 40;
+	// The MCV danger rule (user approved, 2026-11-19, match #11862: an expansion MCV drove toward a field 8
+	// cells from an enemy Tesla Coil, turned home 13 cells from it, and picked the same field again once
+	// home, for 13500+ frames). A known enemy building within McvDangerBuildingCells (a base defense
+	// within McvDangerDefenseCells), or a visible armed unit within McvDangerUnitCells, sends a packed MCV
+	// home; an MCV in danger leaves it only McvDangerExitCells farther. An expansion goal keeps
+	// McvSiteDangerMarginCells beyond the reach of those buildings, so the MCV can get there, and keeps
+	// McvFledSiteCells from a goal an MCV turned back from in the last McvFledSiteFrames.
+	// McvFledLogLines: lines a match of the fled site diagnostic.
+	constexpr int McvDangerBuildingCells = 11;
+	constexpr int McvDangerDefenseCells = 13;
+	constexpr int McvDangerUnitCells = 12;
+	constexpr int McvDangerExitCells = 3;
+	constexpr int McvSiteDangerMarginCells = 3;
+	constexpr int McvFledSiteCells = 8;
+	constexpr int McvFledSiteFrames = 9000;
+	constexpr int McvFledLogLines = 30;
 	// Armies go out in mass (user approved, 2026-11-19: "sí haz las 4"; match #11465 Dead Six: two
 	// allied houses of 80+ units and 100000+ credits streamed packets of 7 to 17 units for 18000
 	// frames while a third of each army stayed home). Once the army (idle and busy fighters, not

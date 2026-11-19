@@ -690,4 +690,91 @@ namespace
 	// in sight with no known enemy building around it.
 	constexpr int MaxStartWaypoints = 8;
 
+	// The MCV danger rule (McvDanger*, NeuralAI.State.inl), one for the turn home and for the expansion
+	// goals: the known enemy buildings that turn a packed MCV back, each with its reach.
+	void CollectMcvDangerBuildings(HouseClass* pHouse, std::vector<std::pair<CellStruct, int>>& out)
+	{
+		out.clear();
+
+		for (auto const pEB : BuildingClass::Array)
+		{
+			if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Immune
+				|| pEB->Type->Insignificant || pEB->Type->InvisibleInGame)
+			{
+				continue;
+			}
+
+			if (pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || !IsEnemyBuildingKnown(pHouse, pEB) || pEB->Owner->IsNeutral())
+				continue;
+
+			out.emplace_back(pEB->GetMapCoords(), pEB->Type->IsBaseDefense ? McvDangerDefenseCells : McvDangerBuildingCells);
+		}
+	}
+
+	// A cell within the reach of one of those buildings plus extraCells.
+	bool IsInMcvDanger(const std::vector<std::pair<CellStruct, int>>& dangers, const CellStruct& cell, int extraCells)
+	{
+		return std::any_of(dangers.begin(), dangers.end(), [&](const auto& danger)
+		{
+			return std::max(std::abs(cell.X - danger.first.X), std::abs(cell.Y - danger.first.Y)) <= danger.second + extraCells;
+		});
+	}
+
+	// An expansion goal a packed MCV can reach without turning home: off those reaches by
+	// McvSiteDangerMarginCells, and off the goals MCVs of the house turned back from lately.
+	bool IsMcvSiteSafe(HouseClass* pHouse, const std::vector<std::pair<CellStruct, int>>& dangers, const CellStruct& cell)
+	{
+		if (IsInMcvDanger(dangers, cell, McvSiteDangerMarginCells))
+			return false;
+
+		const int now = Unsorted::CurrentFrame;
+
+		return std::none_of(GetMacroState(pHouse).McvFledSites.begin(), GetMacroState(pHouse).McvFledSites.end(), [&](const auto& fled)
+		{
+			return fled.second > now && std::max(std::abs(cell.X - fled.first.X), std::abs(cell.Y - fled.first.Y)) <= McvFledSiteCells;
+		});
+	}
+
+	// A packed MCV turns home for an enemy near it: the goal it drove to (16+ cells from home) is
+	// kept from the expansion goals of the house for McvFledSiteFrames.
+	void NoteMcvFledSite(HouseClass* pHouse, UnitClass* pMcv, const CellStruct& homeCell)
+	{
+		if (pMcv->CurrentMission != Mission::Move || !pMcv->Destination)
+			return;
+
+		const CellStruct goal = CellClass::Coord2Cell(pMcv->Destination->GetCoords());
+
+		if (homeCell != CellStruct::Empty && goal.DistanceFrom(homeCell) <= 16.0)
+			return;
+
+		auto& fledSites = GetMacroState(pHouse).McvFledSites;
+		const int now = Unsorted::CurrentFrame;
+		std::erase_if(fledSites, [now](const auto& fled) { return fled.second <= now; });
+
+		for (auto const& fled : fledSites)
+		{
+			if (std::max(std::abs(goal.X - fled.first.X), std::abs(goal.Y - fled.first.Y)) <= McvFledSiteCells)
+				return;
+		}
+
+		fledSites.emplace_back(goal, now + McvFledSiteFrames);
+
+		// TEMP diagnostic (MCV danger rule): each goal an MCV turned back from.
+		static int fledLogSerial = -1;
+		static int fledLogCount = 0;
+
+		if (fledLogSerial != NeuralMatchSerial)
+		{
+			fledLogSerial = NeuralMatchSerial;
+			fledLogCount = 0;
+		}
+
+		if (fledLogCount++ < McvFledLogLines)
+		{
+			const CellStruct at = pMcv->GetMapCoords();
+			Debug::Log("[NeuralAI] House %d MCV fled site: %s %u at (%d,%d) turns home from its goal (%d,%d), kept from expansion goals until frame %d.\n",
+				pHouse->ArrayIndex, pMcv->Type->ID, pMcv->UniqueID, at.X, at.Y, goal.X, goal.Y, now + McvFledSiteFrames);
+		}
+	}
+
 } // namespace

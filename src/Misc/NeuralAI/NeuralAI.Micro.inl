@@ -3974,28 +3974,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			const CellStruct mcvCell = pUnit->GetMapCoords();
 			const bool isForeignTechMCV = (pHouse->CountOwnedNow(pType->DeploysInto) == 0 && pHouse->NumConYards >= 1);
-			bool enemyNearMCV = false;
-
-			for (auto const pEB : BuildingClass::Array)
-			{
-				if (!pEB || pEB->InLimbo || !pEB->IsAlive || !pEB->Owner || !pEB->Type || pEB->Type->Immune
-					|| pEB->Type->Insignificant || pEB->Type->InvisibleInGame)
-				{
-					continue;
-				}
-
-				if (pEB->Owner == pHouse || pHouse->IsAlliedWith(pEB->Owner) || !IsEnemyBuildingKnown(pHouse, pEB) || pEB->Owner->IsNeutral())
-					continue;
-
-				const CellStruct ec = pEB->GetMapCoords();
-				const int maxBldThreatDist = pEB->Type->IsBaseDefense ? 13 : 11;
-
-				if (std::max(std::abs(mcvCell.X - ec.X), std::abs(mcvCell.Y - ec.Y)) <= maxBldThreatDist)
-				{
-					enemyNearMCV = true;
-					break;
-				}
-			}
+			// The MCV danger rule (CollectMcvDangerBuildings), the same one its expansion goals keep off. An
+			// MCV in danger at its last look leaves it only McvDangerExitCells farther: at the edge of a reach
+			// it turned home and back each AI tick.
+			auto& mcvInDanger = GetMacroState(pHouse).McvInDanger;
+			const int dangerExitCells = mcvInDanger.contains(pUnit->UniqueID) ? McvDangerExitCells : 0;
+			std::vector<std::pair<CellStruct, int>> mcvDangers;
+			CollectMcvDangerBuildings(pHouse, mcvDangers);
+			bool enemyNearMCV = IsInMcvDanger(mcvDangers, mcvCell, dangerExitCells);
 
 			if (!enemyNearMCV)
 			{
@@ -4029,13 +4015,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 					const CellStruct etc = pET->GetMapCoords();
 
-					if (std::max(std::abs(mcvCell.X - etc.X), std::abs(mcvCell.Y - etc.Y)) <= 12)
+					if (std::max(std::abs(mcvCell.X - etc.X), std::abs(mcvCell.Y - etc.Y)) <= McvDangerUnitCells + dangerExitCells)
 					{
 						enemyNearMCV = true;
 						break;
 					}
 				}
 			}
+
+			if (mcvInDanger.size() > 64)
+				mcvInDanger.clear();
+
+			if (enemyNearMCV)
+				mcvInDanger.insert(pUnit->UniqueID);
+			else
+				mcvInDanger.erase(pUnit->UniqueID);
 
 			// The ground the MCV stands on. A cell of no ground under it (zone 1: a shore, a cliff foot)
 			// is not another island: read the land around it, or no zone. Taken as an island, it made
@@ -4495,6 +4489,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (enemyNearMCV || (isForeignTechMCV && distToHome > 16.0))
 				{
+					// The goal it drove to lies past the danger: the expansion goals keep off it for a while
+					// (it was picked again once the MCV was home, match #11862).
+					if (enemyNearMCV && !isForeignTechMCV)
+						NoteMcvFledSite(pHouse, pUnit, homeCoords);
+
 					if (pUnit->CurrentMission != Mission::Move || (IsAITickWindow(60, 15)))
 					{
 						const CellStruct safeHomeCell
@@ -4978,7 +4977,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								continue;
 							}
 
-							bool nearOwnHubOrEnemyTurret = false;
+							bool nearOwnHubOrEnemyTurret = !IsMcvSiteSafe(pHouse, mcvDangers, candStage);
 							for (auto const pOwnBld : pHouse->Buildings)
 							{
 								if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type
@@ -5061,7 +5060,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							}
 						}
 
-						if (deployableThere)
+						if (deployableThere && IsMcvSiteSafe(pHouse, mcvDangers, claimCell))
 							pExpansionDest = MapClass::Instance.TryGetCellAt(claimCell);
 					}
 				}
@@ -5141,7 +5140,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								}
 							}
 
-							if (fieldCells < 4)
+							if (fieldCells < 4 || !IsMcvSiteSafe(pHouse, mcvDangers, tc))
 								continue;
 
 							bestExpDist = distFromMCV;
@@ -5152,7 +5151,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				// Nothing in the local scan: the nearest free field anywhere on our landmass.
 				if (!pExpansionDest)
+				{
 					pExpansionDest = FindFreeOreFieldCell(pHouse, mcvCell, mcvZone, 14);
+
+					if (pExpansionDest && !IsMcvSiteSafe(pHouse, mcvDangers, pExpansionDest->MapCoords))
+						pExpansionDest = nullptr;
+				}
 
 				if (teamYieldedSite)
 					CountDecision(NeuralDecision::TeamExpansionYield, pHouse->ArrayIndex);
