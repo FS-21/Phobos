@@ -881,15 +881,17 @@ namespace
 		// anchored at (FindSpatialTetrisBuildCell, a remote yard without a refinery), Empty for none.
 		CellStruct RefineryHubCell { CellStruct::Empty };
 		// The field the last new field refinery slot was opened for (production) and how close the next
-		// refinery placed must stand to it; one placed farther adds it to MissedNewFields (cell, frame),
-		// which open no slot for RefineryMissedFieldFrames.
+		// refinery placed must stand to it; one placed farther while the slot is still open (seen within
+		// RefinerySlotAimFrames) adds it to MissedNewFields (cell, frame), which open no slot for
+		// RefineryMissedFieldFrames.
 		CellStruct NewFieldSlotCell { CellStruct::Empty };
 		int NewFieldSlotReach { 0 };
 		// The frame production last saw that slot open: placement aims a refinery at its field only
 		// within RefinerySlotAimFrames of it. TEMP diagnostic: whether the last refinery search was
-		// aimed at it.
+		// aimed at it, and why not (NeuralSlotAimWhy).
 		int NewFieldSlotFrame { -100000 };
 		bool RefinerySlotAimed { false };
+		int RefinerySlotAimWhy { 0 };
 		std::vector<std::pair<CellStruct, int>> MissedNewFields {};
 		// Refineries placed with that widened reach (UniqueIDs): the best spot a rugged map allowed,
 		// so the strict refinery audit of the resource hoarder never sells them (it would only
@@ -1576,6 +1578,7 @@ namespace
 			this->NewFieldSlotReach = 0;
 			this->NewFieldSlotFrame = -100000;
 			this->RefinerySlotAimed = false;
+			this->RefinerySlotAimWhy = 0;
 			this->MissedNewFields.clear();
 			this->RelaxedReachRefineries.clear();
 			this->ResourceClaimCell = CellStruct::Empty;
@@ -2443,8 +2446,26 @@ namespace
 	constexpr int RefineryMissedYardCells = 18;
 	constexpr int RefineryMissedSameFieldCells = 6;
 	constexpr int RefineryMissedFieldFrames = 18000;
-	// A refinery is aimed at the field of a new field slot production saw open this recently.
+	// A refinery is aimed at the field of a new field slot production saw open this recently, and only
+	// then judged against it (user approved, 2026-11-19): in 20 matches of a31220939, 7 of 33 missed
+	// slot fields (12 of 26 on 724f571ef) were judged against a slot already closed, the cell left over
+	// from its last opening (Snowballs Chance house 1: slot closed at frame 67500, the refinery of 71568
+	// judged against it), and each put a field it was never placed for on MissedNewFields.
 	constexpr int RefinerySlotAimFrames = 1800;
+	// TEMP diagnostic: why the last refinery search was or was not aimed at the slot field.
+	enum class NeuralSlotAimWhy : int
+	{
+		NoSlot,
+		Aimed,
+		YardSlot,
+		Stale,
+		YardHub,
+		AllySite,
+		ReachFailures,
+		NoAnchor,
+	};
+	constexpr const char* NeuralSlotAimWhyNames[] = { "no slot", "aimed", "yard slot", "stale", "yard hub", "ally site", "reach failures",
+		"no anchor within reach" };
 	// Most mobile refineries (slave miners) a house mining with them wants, as the Advanced AI, and
 	// the least it wants with free fields (a classic base holds 4 refineries at home).
 	constexpr int MaxMobileMiners = 15;
