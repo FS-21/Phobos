@@ -4248,8 +4248,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedGroundCombatUnits = 0;
 	// Main battle tanks alive (IsMainBattleTankType), for the tank floor (TankFloor*).
 	int ownedMainTanks = 0;
-	// Light complement (LightComplement*): armed light vehicles of ours.
+	// Light complement (LightComplement*): armed light vehicles of ours, and whether the newest of our
+	// main battle tanks and light vehicles is a light one.
 	int ownedLightVehicles = 0;
+	DWORD newestTankOrLightUid = 0;
+	bool newestTankOrLightIsLight = false;
 	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
 	// (the rest of ownedGroundCombatUnits is their front line).
 	int ownedArtilleryVehicles = 0;
@@ -4340,12 +4343,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					else if (ShootsAtAircraft(pOwnedType))
 						ownedEscortedAntiAirVehicles++;
 
-					// The same test as the light candidates of the pick (class L).
-					if (!IsMainBattleTankType(pOwnedType) && pOwnedWpn->Range < ArtilleryRangeCells * Unsorted::LeptonsPerCell
-						&& !(pOwnedWpn->Projectile && pOwnedWpn->Projectile->AA) && pOwnedType->Passengers < 2
-						&& !(TechnoTypeExt::Fetch(pOwnedType) && TechnoTypeExt::Fetch(pOwnedType)->Carryall))
-					{
+					// The same test as the light candidates of the pick (class L); a repairer is no fighter.
+					const bool isOwnedLight = !IsMainBattleTankType(pOwnedType) && pOwnedWpn->Range < ArtilleryRangeCells * Unsorted::LeptonsPerCell
+						&& !(pOwnedWpn->Projectile && pOwnedWpn->Projectile->AA) && pOwnedType->Passengers < 2 && pOwnedWpn->Damage >= 0
+						&& !(TechnoTypeExt::Fetch(pOwnedType) && TechnoTypeExt::Fetch(pOwnedType)->Carryall);
+
+					if (isOwnedLight)
 						ownedLightVehicles++;
+
+					// Below the tank floor the light complement alternates with it by the newest of them.
+					if ((isOwnedLight || IsMainBattleTankType(pOwnedType)) && pOwnedU->UniqueID > newestTankOrLightUid)
+					{
+						newestTankOrLightUid = pOwnedU->UniqueID;
+						newestTankOrLightIsLight = isOwnedLight;
 					}
 
 					if (ShootsAtAircraft(pOwnedType))
@@ -5987,7 +5997,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				const char diagClass = isMCV ? 'M' : (isKeyStructureDeployer ? 'D' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
 					: (isTransportClass ? 'P'
-						: (isUnarmedSupportVehicle ? 'S' : (isAA ? 'A' : (isArtillery ? 'G' : (isMainTank ? 'T' : 'L')))))));
+						: ((isUnarmedSupportVehicle || (pWpn && pWpn->Damage < 0)) ? 'S'
+							: (isAA ? 'A' : (isArtillery ? 'G' : (isMainTank ? 'T' : 'L')))))));
 				const int diagBase = pUnit->Cost / 4 + pUnit->Strength / 3;
 				const int diagPenalty = std::min(1200, ownedUnitWithConv * 55);
 				unitPickDiags.push_back({ pUnit, diagClass, diagBase, diagPenalty, diagCounter, diagPostClass - diagPreClass,
@@ -6009,9 +6020,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			// An armed light vehicle (the pick line's class L): no main battle tank, artillery, anti-air,
-			// transport, economy unit or deployer.
-			if (pWpn && !isMainTank && !isAA && !isArtillery && !isTransportClass && !isEconomyUnit && !isMCV && !isKeyStructureDeployer
-				&& !pUnit->Harvester && !pUnit->ResourceGatherer && score > bestLightScore)
+			// transport, economy unit, deployer or repairer (negative damage).
+			if (pWpn && pWpn->Damage >= 0 && !isMainTank && !isAA && !isArtillery && !isTransportClass && !isEconomyUnit && !isMCV
+				&& !isKeyStructureDeployer && !pUnit->Harvester && !pUnit->ResourceGatherer && score > bestLightScore)
 			{
 				bestLightScore = score;
 				bestLightIdx = pUnit->ArrayIndex;
@@ -6103,10 +6114,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		// The light complement (LightComplement*): one armed light vehicle for each LightComplementPerTanks
-		// main battle tanks; below it, and not below the tank floor, the best light vehicle goes first.
+		// main battle tanks; below it the best light vehicle goes first, below the tank floor as well when
+		// the newest of our main battle tanks and light vehicles is a tank (the two alternate).
 		const int lightFloor = ownedMainTanks >= LightComplementMinTanks ? ownedMainTanks / LightComplementPerTanks : 0;
 		const bool belowLight = ownedLightVehicles < lightFloor;
-		const bool lightTakes = belowLight && !belowFloor && bestLightIdx >= 0 && bestUnitIdx != bestLightIdx && hasActiveUnitIncome
+		const bool lightTurn = !belowFloor || !newestTankOrLightIsLight;
+		const bool lightTakes = belowLight && lightTurn && bestLightIdx >= 0 && bestUnitIdx != bestLightIdx && hasActiveUnitIncome
 			&& !bestUnitRestoresIncome && !airAttackOnly;
 
 		// TEMP diagnostic: the light complement, with the vehicle pick line.
@@ -6117,7 +6130,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				Unsorted::CurrentFrame, pHouse->ArrayIndex, lightFloor, ownedLightVehicles, ownedMainTanks,
 				bestLightIdx >= 0 ? UnitTypeClass::Array.GetItem(bestLightIdx)->ID : "none", bestLightScore,
 				bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx)->ID : "none", bestUnitScore,
-				lightTakes ? ", the light vehicle goes first" : (belowFloor ? ", kept: below the tank floor"
+				lightTakes ? (belowFloor ? ", the light vehicle goes first, its turn below the tank floor" : ", the light vehicle goes first")
+					: (!lightTurn ? ", kept: below the tank floor, the newest was a light vehicle"
 					: (bestLightIdx < 0 ? ", kept: no light vehicle to build" : (bestUnitIdx == bestLightIdx ? ", the pick is a light vehicle"
 						: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income"
 							: ", kept: under air attack"))))));
