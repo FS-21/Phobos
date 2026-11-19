@@ -2627,6 +2627,19 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					crawlFromAllyAnchor = true;
 				}
 			}
+
+			// TEMP diagnostic (crawl DIAG): this search crawls toward free ore; PlaceCompletedBuilding logs
+			// how much closer the building it places stands.
+			if (crawlTowardOre && nearestOreCell != CellStruct::Empty && crawlGoal == nearestOreCell)
+			{
+				auto& crawlMacro = GetMacroState(pHouse);
+				crawlMacro.CrawlSearchType = pBuildingType->ArrayIndex;
+				crawlMacro.CrawlSearchFrame = Unsorted::CurrentFrame;
+				crawlMacro.CrawlGoalCell = crawlGoal;
+				crawlMacro.CrawlAnchorCell = center;
+				crawlMacro.CrawlFromAlly = crawlFromAllyAnchor;
+				crawlMacro.CrawlKind = isSteppingStoneExpander ? 1 : (isResourceBld ? 2 : (isFactoryOrBarracks ? 3 : 0));
+			}
 		}
 	}
 
@@ -5012,7 +5025,8 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 				slotMissed ? 1 : 0, st.RefinerySlotAimed ? 1 : 0, Unsorted::CurrentFrame);
 
 			// TEMP diagnostic (user approved, 2026-11-19): the slot this refinery was judged against or
-			// not, and why its search was or was not aimed at the slot field.
+			// not, and why its search was or was not aimed at the slot field (the crawl DIAG below covers
+			// every building).
 			if (slotCell != CellStruct::Empty)
 			{
 				const int why = std::clamp(st.RefinerySlotAimWhy, 0, static_cast<int>(sizeof(NeuralSlotAimWhyNames) / sizeof(NeuralSlotAimWhyNames[0])) - 1);
@@ -5022,6 +5036,29 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 					std::max(std::abs(bestCell.X - slotCell.X), std::abs(bestCell.Y - slotCell.Y)), NeuralSlotAimWhyNames[why],
 					st.RefineryReachFailures, Unsorted::CurrentFrame);
 			}
+		}
+
+		// TEMP diagnostic (crawl DIAG, user approved 2026-11-19: why the base crawl does not close the
+		// gap to free ore 10 to 20 cells away): a building whose search crawled toward free ore, the
+		// anchor it started from and how much closer to the field it stands.
+		if (st.CrawlSearchType == pBuildingType->ArrayIndex && st.CrawlSearchFrame == Unsorted::CurrentFrame
+			&& st.CrawlGoalCell != CellStruct::Empty)
+		{
+			static constexpr const char* crawlKindNames[] = { "other", "stone", "refinery", "factory" };
+			const CellStruct goal = st.CrawlGoalCell;
+			const int before = st.CrawlAnchorCell != CellStruct::Empty
+				? std::max(std::abs(st.CrawlAnchorCell.X - goal.X), std::abs(st.CrawlAnchorCell.Y - goal.Y))
+				: -1;
+			const int after = std::max(std::abs(bestCell.X - goal.X), std::abs(bestCell.Y - goal.Y));
+			Debug::Log("[NeuralAI] House %d crawl DIAG (placement): %s placed at (%d,%d) as %s toward free ore (%d,%d): from anchor (%d,%d)%s "
+				"%d cells away to %d, frame %d.\n",
+				pHouse->ArrayIndex, pBuildingType->ID, bestCell.X, bestCell.Y, crawlKindNames[std::clamp(st.CrawlKind, 0, 3)], goal.X, goal.Y,
+				st.CrawlAnchorCell.X, st.CrawlAnchorCell.Y, st.CrawlFromAlly ? " of an ally" : "", before, after, Unsorted::CurrentFrame);
+			st.LastCrawlFrame = Unsorted::CurrentFrame;
+			st.LastCrawlType = pBuildingType->ArrayIndex;
+			st.LastCrawlBefore = before;
+			st.LastCrawlAfter = after;
+			st.CrawlSearchType = -1;
 		}
 
 		// Island Hold: the pick stored while this building was under construction is not the

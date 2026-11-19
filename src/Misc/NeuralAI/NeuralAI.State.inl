@@ -892,6 +892,20 @@ namespace
 		int NewFieldSlotFrame { -100000 };
 		bool RefinerySlotAimed { false };
 		int RefinerySlotAimWhy { 0 };
+		// TEMP diagnostic (crawl DIAG, user approved 2026-11-19): the last building search that crawled
+		// toward free ore (type, frame, goal, anchor, ally anchor, kind 0 other, 1 stone, 2 refinery,
+		// 3 factory) and the last such building placed (frame, type, Chebyshev cells to the goal from
+		// its anchor and from where it stands).
+		int CrawlSearchType { -1 };
+		int CrawlSearchFrame { -1 };
+		CellStruct CrawlGoalCell { CellStruct::Empty };
+		CellStruct CrawlAnchorCell { CellStruct::Empty };
+		bool CrawlFromAlly { false };
+		int CrawlKind { 0 };
+		int LastCrawlFrame { -1 };
+		int LastCrawlType { -1 };
+		int LastCrawlBefore { 0 };
+		int LastCrawlAfter { 0 };
 		std::vector<std::pair<CellStruct, int>> MissedNewFields {};
 		// Refineries placed with that widened reach (UniqueIDs): the best spot a rugged map allowed,
 		// so the strict refinery audit of the resource hoarder never sells them (it would only
@@ -1581,6 +1595,16 @@ namespace
 			this->NewFieldSlotFrame = -100000;
 			this->RefinerySlotAimed = false;
 			this->RefinerySlotAimWhy = 0;
+			this->CrawlSearchType = -1;
+			this->CrawlSearchFrame = -1;
+			this->CrawlGoalCell = CellStruct::Empty;
+			this->CrawlAnchorCell = CellStruct::Empty;
+			this->CrawlFromAlly = false;
+			this->CrawlKind = 0;
+			this->LastCrawlFrame = -1;
+			this->LastCrawlType = -1;
+			this->LastCrawlBefore = 0;
+			this->LastCrawlAfter = 0;
 			this->MissedNewFields.clear();
 			this->RelaxedReachRefineries.clear();
 			this->ResourceClaimCell = CellStruct::Empty;
