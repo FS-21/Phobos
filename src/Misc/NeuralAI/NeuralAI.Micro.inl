@@ -10224,6 +10224,70 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// Siege mode (Siege*): the enemies the tank mass besieges while it dominates (a place of theirs
+	// resisted our waves), those places, and the known defenses of those enemies.
+	unsigned int siegeMask = 0u;
+	std::vector<CellStruct> siegePlaces;
+	std::vector<std::pair<CellStruct, int>> siegeDefenses;
+
+	if (tankMassTargets)
+	{
+		auto& siegeMacro = GetMacroState(pHouse);
+		const int siegeNow = Unsorted::CurrentFrame;
+		const int siegeAdvantage = GetWaveTimingState(pHouse).AdvantageRatio;
+		const bool siegeBank = HasOffensiveBank(pHouse);
+
+		if (siegeAdvantage >= SiegeAdvantageRatio || siegeBank)
+		{
+			const NeuralResistedPlace* pLastPlace = nullptr;
+
+			for (auto const& place : siegeMacro.ResistedPlaces)
+			{
+				if (place.Owner < 0 || place.Owner >= 32 || siegeNow - place.Frame > SiegeMemoryFrames || siegeNow < place.Frame
+					|| (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, place.Owner)))
+				{
+					continue;
+				}
+
+				if (!pLastPlace || place.Frame > pLastPlace->Frame)
+					pLastPlace = &place;
+
+				if (place.Failures >= SiegeFailuresAtPlace)
+				{
+					siegeMask |= 1u << place.Owner;
+					siegePlaces.push_back(place.Cell);
+				}
+			}
+
+			if (pLastPlace && siegeMacro.WaveFailuresInARow >= SiegeFailuresInARow && (siegeMask & (1u << pLastPlace->Owner)) == 0u)
+			{
+				siegeMask |= 1u << pLastPlace->Owner;
+				siegePlaces.push_back(pLastPlace->Cell);
+			}
+		}
+
+		if (siegeMask != 0u)
+		{
+			for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+			{
+				if (const int owner = info.Building->Owner->ArrayIndex; info.IsDefense && owner >= 0 && owner < 32 && (siegeMask & (1u << owner)) != 0u)
+					siegeDefenses.emplace_back(info.Coords, GetCombatValueOfType(info.Building->Type, false));
+			}
+		}
+
+		if (siegeMask != siegeMacro.SiegeOwnersMask || (siegeMask != 0u && siegeNow - siegeMacro.SiegeLogFrame >= SiegeLogFrames))
+		{
+			Debug::Log("[NeuralAI] Frame %d | House #%d siege mode: besieged houses mask %u (was %u), %d resisting places, first (%d,%d), "
+				"%d known defenses of theirs, advantage %d, offensive bank %d, waves failed in a row %d\n", siegeNow, pHouse->ArrayIndex,
+				siegeMask, siegeMacro.SiegeOwnersMask, static_cast<int>(siegePlaces.size()), siegePlaces.empty() ? -1 : siegePlaces.front().X,
+				siegePlaces.empty() ? -1 : siegePlaces.front().Y, static_cast<int>(siegeDefenses.size()), siegeAdvantage, siegeBank ? 1 : 0,
+				siegeMacro.WaveFailuresInARow);
+			siegeMacro.SiegeLogFrame = siegeNow;
+		}
+
+		siegeMacro.SiegeOwnersMask = siegeMask;
+	}
+
 	for (auto const pEnemyBld : BuildingClass::Array)
 	{
 		if (!pEnemyBld || pEnemyBld->InLimbo || !pEnemyBld->IsAlive || !pEnemyBld->Owner || !pEnemyBld->Type
@@ -10259,13 +10323,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			: (minAnyEnemyBldDist < 999999 ? minAnyEnemyBldDist : distHome);
 		const int depthIntoEnemyBase = std::max(0, distHome - refMinDist);
 
+		// A besieged enemy (siege mode) is not taken ring by ring: what keeps him going counts, wherever it stands.
+		const int siegeOwnerIdx = pOwner->ArrayIndex;
+		const bool siegeTarget = siegeMask != 0u && siegeOwnerIdx >= 0 && siegeOwnerIdx < 32 && (siegeMask & (1u << siegeOwnerIdx)) != 0u;
+
 		// Perimeter-First Scoring: heavily penalize targets that sit deep behind
 		// the enemy's outer perimeter (> 6 cells deeper than the closest enemy
 		// structure) so our battalions chew through the closest enemy
 		// structures/defenses on the outer ring first instead of driving through
 		// half the enemy base!
-		int bldCandScore = 1000 - (distHome * 8) - (depthIntoEnemyBase > 6 ? (depthIntoEnemyBase - 6) * 18 : 0);
-		if (depthIntoEnemyBase <= 6)
+		int bldCandScore = 1000 - (distHome * 8) - (!siegeTarget && depthIntoEnemyBase > 6 ? (depthIntoEnemyBase - 6) * 18 : 0);
+		if (depthIntoEnemyBase <= 6 && !siegeTarget)
 			bldCandScore += 220; // Outer-perimeter target facing our approach!
 		if (pOwner->ArrayIndex == pHouse->EnemyHouseIndex)
 			bldCandScore += 220;
@@ -10288,7 +10356,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pWayDangerMap)
 			{
 				OpLineCost(*pWayDangerMap, homeCoords, ebc, candWayDanger);
-				bldCandScore -= std::min(TankMassWayDangerMost, candWayDanger / TankMassWayDangerPerPoint);
+				bldCandScore -= std::min(siegeTarget ? SiegeWayDangerMost : TankMassWayDangerMost, candWayDanger / TankMassWayDangerPerPoint);
 			}
 
 			if (const int owner = pOwner->ArrayIndex; pEnemyBld->Type->PowerBonus > 0 && owner >= 0 && owner < 8
@@ -10335,7 +10403,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (pEnemyBld->Type->IsBaseDefense && depthIntoEnemyBase <= 8)
 		{
-			bldCandScore += 135; // Clear outer base defenses blocking our approach!
+			// Clear outer base defenses blocking our approach! Not those of a besieged enemy: they
+			// are what holds our waves off.
+			if (!siegeTarget)
+				bldCandScore += 135;
 		}
 		else if (pEnemyBld->Type->ConstructionYard || pEnemyBld->Type->Factory != AbstractType::None
 			|| pEnemyBld->Type->SuperWeapon != -1)
@@ -10345,6 +10416,33 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		else if (pEnemyBld->Type->Refinery || pEnemyBld->Type->PowerBonus > 0)
 		{
 			bldCandScore += 90;
+		}
+
+		// Siege mode: the defenses that cover a building of a besieged enemy, and the places that
+		// resisted, cost; his refineries, power plants and factories gain.
+		if (siegeTarget)
+		{
+			int siegeDefenseNear = 0;
+
+			for (auto const& [defenseCell, defenseValue] : siegeDefenses)
+			{
+				if (defenseCell.DistanceFrom(ebc) <= SiegeDefenseCells)
+					siegeDefenseNear += defenseValue;
+			}
+
+			bldCandScore -= std::min(SiegeDefenseMost, siegeDefenseNear * 3 / 2 / SiegeDefensePerPoint);
+
+			if (std::any_of(siegePlaces.begin(), siegePlaces.end(), [&ebc](const CellStruct& place) { return place.DistanceFrom(ebc) <= SiegePlaceCells; }))
+				bldCandScore -= SiegePlacePenalty;
+
+			auto const pSiegeType = pEnemyBld->Type;
+
+			if (pSiegeType->Refinery || pSiegeType->ResourceGatherer)
+				bldCandScore += SiegeEconomyBonus;
+			else if (pSiegeType->PowerBonus > pSiegeType->PowerDrain)
+				bldCandScore += SiegePowerBonus;
+			else if (pSiegeType->ConstructionYard || pSiegeType->Factory != AbstractType::None)
+				bldCandScore += SiegeFactoryBonus;
 		}
 
 		const int candAirBaseBonus = AirBaseTargetBonus(enemyAirValues, pEnemyBld, AirBaseWavePercent, AirBaseWaveMost);
@@ -12402,7 +12500,59 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						: ((waveOwner >= 0 && waveOwner == reprisalHouse && reprisalBonus > 0 && missionLand(goalZone))
 							? static_cast<int>(NeuralPlanId::Reprisal)
 							: -1);
-					NoteWaveForVerdict(pHouse, pWaveTargetCell->MapCoords, mission);
+					NoteWaveForVerdict(pHouse, pWaveTargetCell->MapCoords, mission, waveOwner);
+
+					// TEMP diagnostic (P8c, 2026-11-20): whether the target stands on high ground with
+					// ground of our zone CellClass::BridgeLevels or more below it within 8 cells, and how
+					// many of the idle units and soldiers the wave draws from fire a projectile the cliff
+					// blocks going up (SubjectToCliffs: the unit then drives round by the ramps to get a
+					// shot, user). At most 200 lines a match.
+					static int cliffDiagSerial = -1;
+					static int cliffDiagLines = 0;
+
+					if (cliffDiagSerial != NeuralMatchSerial)
+					{
+						cliffDiagSerial = NeuralMatchSerial;
+						cliffDiagLines = 0;
+					}
+
+					if (cliffDiagLines < 200)
+					{
+						++cliffDiagLines;
+						const CellStruct cliffTarget = pWaveTargetCell->MapCoords;
+						const int targetLevel = pWaveTargetCell->Level;
+						int groundBelow = 0;
+
+						for (short dy = -8; dy <= 8; ++dy)
+						{
+							for (short dx = -8; dx <= 8; ++dx)
+							{
+								const CellStruct belowCell { static_cast<short>(cliffTarget.X + dx), static_cast<short>(cliffTarget.Y + dy) };
+								auto const pBelow = MapClass::Instance.TryGetCellAt(belowCell);
+
+								if (pBelow && dx * dx + dy * dy <= 64 && pBelow->Level <= targetLevel - CellClass::BridgeLevels
+									&& MapClass::Instance.GetMovementZoneType(belowCell, MovementZone::Normal, false) == homeGroundZone)
+								{
+									groundBelow++;
+								}
+							}
+						}
+
+						auto const blockedUp = [](TechnoTypeClass* pType)
+						{
+							auto const pWeapon = pType->GetWeapon(0) ? pType->GetWeapon(0)->WeaponType : nullptr;
+							return pWeapon && pWeapon->Projectile && pWeapon->Projectile->SubjectToCliffs;
+						};
+						const int unitsBlocked = static_cast<int>(std::count_if(idleCombatUnits.begin(), idleCombatUnits.end(),
+							[&blockedUp](UnitClass* pU) { return blockedUp(pU->Type); }));
+						const int soldiersBlocked = static_cast<int>(std::count_if(idleCombatInf.begin(), idleCombatInf.end(),
+							[&blockedUp](InfantryClass* pI) { return blockedUp(pI->Type); }));
+
+						Debug::Log("[NeuralAI] Frame %d | House #%d wave cliff DIAG: target (%d,%d) level %d, %d cells of our zone %d+ levels "
+							"below within 8, idle units %d (%d blocked going up), idle soldiers %d (%d blocked)\n", Unsorted::CurrentFrame,
+							pHouse->ArrayIndex, cliffTarget.X, cliffTarget.Y, targetLevel, groundBelow, CellClass::BridgeLevels,
+							static_cast<int>(idleCombatUnits.size()), unitsBlocked, static_cast<int>(idleCombatInf.size()), soldiersBlocked);
+					}
 				}
 
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;

@@ -270,6 +270,16 @@ namespace
 		int BestFrame { 0 };
 	};
 
+	// A place a wave of the tank mass did not take (siege mode, Siege*): its target, the house its
+	// buildings belong to, the waves in a row that took nothing there and the frame of the last.
+	struct NeuralResistedPlace
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Owner { -1 };
+		int Failures { 0 };
+		int Frame { 0 };
+	};
+
 	// Aircraft attack watchdog (UpdateStuckUnits): where an aircraft on Mission::Attack stands and
 	// since when, and its ammo and since when it last changed (a shot fired or a reload).
 	struct NeuralAirLossTrack
@@ -1489,6 +1499,13 @@ namespace
 		int WaveLessonFrame { -100000 };
 		// Waves in a row that took no building, whatever the time between them.
 		int WaveFailuresInARow { 0 };
+		// Siege mode (Siege*): the owner of the buildings near the target of the wave waiting for its
+		// verdict, the places our waves did not take, the enemies besieged now (a bit per house) and
+		// the last frame of the siege line.
+		int WaveVerdictOwner { -1 };
+		std::vector<NeuralResistedPlace> ResistedPlaces {};
+		unsigned int SiegeOwnersMask { 0u };
+		int SiegeLogFrame { -100000 };
 		// First frame a wave of the tank mass waited for its anti-air escort (-1 when none waits),
 		// and no new wait before this frame.
 		int WaveEscortWaitSince { -1 };
@@ -1998,6 +2015,10 @@ namespace
 			this->WaveLessonSteps = 0;
 			this->WaveLessonFrame = -100000;
 			this->WaveFailuresInARow = 0;
+			this->WaveVerdictOwner = -1;
+			this->ResistedPlaces.clear();
+			this->SiegeOwnersMask = 0u;
+			this->SiegeLogFrame = -100000;
 			this->WaveEscortWaitSince = -1;
 			this->WaveEscortRetryFrame = -1;
 			this->RemnantSearchFrame = -100000;
@@ -2654,6 +2675,10 @@ namespace
 	constexpr int EconomyRecoveryKeepFactories = 1;
 	// TEMP diagnostic (economy hold): status lines a house writes a match, one every 900 frames of a hold.
 	constexpr int EconomyHoldLogLinesMost = 120;
+	// An economy hold whose item is in no factory after EconomyHoldStartFrames rests (user approved,
+	// 2026-11-20, P1: the item is the pick of its queue as soon as it is wanted, so one that did not
+	// start is blocked elsewhere).
+	constexpr int EconomyHoldStartFrames = 2700;
 	// Ore cells of a held 12x12 ore block for each refinery past the first it takes (3 at most).
 	constexpr int RefineryOreCellsPerExtra = 24;
 	// A newly reached ore field gets a refinery past what we own (and past the held fields' room) at
@@ -3640,6 +3665,35 @@ namespace
 	constexpr int WaveGroupFreshFrames = 60;
 	constexpr int WaveTargetKeepFrames = 900;
 	constexpr int WaveTargetKeepBonus = 400;
+	// Siege mode of the tank mass (user approved, 2026-11-20, P8: «cuando se resiste un objetivo
+	// porque está atrincherado se le asfixia de distintas maneras»). A place resists when
+	// SiegeFailuresAtPlace waves in a row took nothing within WaveVerdictCells of it, or the waves
+	// failed SiegeFailuresInARow times in a row and it was the last one; it is forgotten
+	// SiegeMemoryFrames after its last failure, or when a wave takes a building there. While our
+	// advantage is SiegeAdvantageRatio or more (or we have an offensive bank), the owner of such a place
+	// is besieged: its buildings lose neither score for lying deep behind its perimeter nor gain for
+	// standing on the outer ring, a defense of the outer ring gains nothing, the known defenses within
+	// SiegeDefenseCells of a building cost a point per SiegeDefensePerPoint of their value x1.5 (at
+	// most SiegeDefenseMost), a building within SiegePlaceCells of a resisting place loses
+	// SiegePlacePenalty, the way danger counts up to SiegeWayDangerMost, and what keeps the owner
+	// going gains: SiegeEconomyBonus for a refinery, SiegePowerBonus for a power plant,
+	// SiegeFactoryBonus for a factory or construction yard. The siege plans of the tank mass lose
+	// their penalty meanwhile (ArchetypePlanOffset). Match #12285: house 2, ahead with 111 units and
+	// 178000 credits, sent wave after wave at the plateau of house 1 nearest to it.
+	constexpr int SiegeFailuresAtPlace = 2;
+	constexpr int SiegeFailuresInARow = 3;
+	constexpr int SiegeMemoryFrames = 9000;
+	constexpr int SiegeAdvantageRatio = 150;
+	constexpr double SiegeDefenseCells = 14.0;
+	constexpr int SiegeDefensePerPoint = 2;
+	constexpr int SiegeDefenseMost = 1500;
+	constexpr double SiegePlaceCells = 12.0;
+	constexpr int SiegePlacePenalty = 800;
+	constexpr int SiegeWayDangerMost = 1500;
+	constexpr int SiegeEconomyBonus = 400;
+	constexpr int SiegePowerBonus = 300;
+	constexpr int SiegeFactoryBonus = 300;
+	constexpr int SiegeLogFrames = 2700;
 	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit
 	// lane to a cell more than FactoryRoadClearCells from every building of ours, found within
 	// FactoryRoadWalkCells cells. Buildings stand at most one cell apart (Adjacent), so a base is
@@ -4516,10 +4570,16 @@ namespace
 	// without this every archetype runs the same plans with the same priorities. Only the tank
 	// mass has its own so far: the plans that send the army together and the ones that defend its
 	// ground come first, the ones that split it into small groups or need specialists last. They
-	// are shifts, not vetoes: a plan the situation asks for loudly still starts.
-	int ArchetypePlanOffset(int archetype, NeuralPlanId id)
+	// are shifts, not vetoes: a plan the situation asks for loudly still starts. While the house
+	// besieges an enemy (siege, SiegeOwnersMask) the siege plans that end well for a house ahead lose
+	// their penalty (2026-11-20, 44 matches, ended well / badly: siege battery 49/9, rolling siege
+	// 21/5, artillery eco siege 6/2); eco raid 3/7, harvester ambush 0/3 and rotating raids 10/12 keep it.
+	int ArchetypePlanOffset(int archetype, NeuralPlanId id, bool siege)
 	{
 		if (archetype != TankMassArchetype)
+			return 0;
+
+		if (siege && (id == NeuralPlanId::SiegeBattery || id == NeuralPlanId::RollingSiege || id == NeuralPlanId::ArtilleryEcoSiege))
 			return 0;
 
 		switch (id)

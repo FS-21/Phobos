@@ -3760,7 +3760,8 @@ namespace
 		return yards;
 	}
 
-	// TEMP diagnostic (economy hold): whether a factory of the house is building what the hold saves for.
+	// Whether a factory of the house is building what the economy hold saves for (1 harvester,
+	// 2 refinery, 3 MCV, 4 broke: a harvester or a refinery).
 	bool EconomyHoldItemInProduction(HouseClass* pHouse, int kind)
 	{
 		for (auto const pFactory : FactoryClass::Array)
@@ -4118,8 +4119,10 @@ namespace
 		// order: a harvester (fewer than refineries), a refinery for a newly reached field, the expansion
 		// MCV when our fields ran dry. Until the credits reach it the other production waits
 		// (suspended, never cancelled), except harvesters, refineries, MCVs, transports, income,
-		// power under low power, and nothing waits while our base is under attack. A hold that
-		// bought nothing for 3600 frames rests 1800 (the investment may be blocked elsewhere).
+		// power under low power, and nothing waits while our base is under attack. The item is the pick
+		// of its queue as soon as it is wanted (the production pick), so it is paid as the credits come
+		// in. A hold whose item is in no factory after EconomyHoldStartFrames, or that bought nothing
+		// for 3600 frames, rests 1800 (the investment may be blocked elsewhere).
 		// Without it the trickle of income went to the army and the investment never came.
 		const bool baseUnderAttack = pHouse->LATime > 0 && now - pHouse->LATime < 1350;
 		const int economyTarget = macro.HarvesterSaveTarget > 0 ? macro.HarvesterSaveTarget
@@ -4157,7 +4160,9 @@ namespace
 		{
 			macro.EconomyHoldSince = now;
 		}
-		else if (now - macro.EconomyHoldSince > (islandHold ? 9000 : 3600))
+		else if (now - macro.EconomyHoldSince > (islandHold ? 9000 : 3600)
+			|| (!islandHold && now - macro.EconomyHoldSince > EconomyHoldStartFrames
+				&& !EconomyHoldItemInProduction(pHouse, macro.HarvesterSaveTarget > 0 ? 1 : (macro.RefinerySaveTarget > 0 ? 2 : 3))))
 		{
 			macro.EconomyHoldPauseUntil = now + 1800;
 			macro.EconomyHoldSince = -1;
