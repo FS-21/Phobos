@@ -4127,10 +4127,28 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				++techMacro.TechFloorLogCount;
 				techMacro.TechFloorLogFrame = techNow;
-				Debug::Log("[NeuralAI] House %d tech floor: %s after %d frames instead of %s (score %d against %d), credits %d, frame %d.\n",
+
+				// What the yards build now, with their progress, and whether the pick before the floor came
+				// from the scored loop or from a later override (power plant, plans, bank governor).
+				std::string yardBuilds;
+
+				for (auto const pFactory : FactoryClass::Array)
+				{
+					if (pFactory && pFactory->Owner == pHouse && pFactory->Object && pFactory->Object->WhatAmI() == AbstractType::Building)
+					{
+						char part[64];
+						std::snprintf(part, sizeof(part), " %s %d/54%s", static_cast<BuildingClass*>(pFactory->Object)->Type->ID,
+							pFactory->GetProgress(), pFactory->IsSuspended ? " held" : "");
+						yardBuilds += part;
+					}
+				}
+
+				Debug::Log("[NeuralAI] House %d tech floor: %s after %d frames instead of %s (score %d against %d, scored %s), yard builds%s, "
+					"credits %d, frame %d.\n",
 					pHouse->ArrayIndex, BuildingTypeClass::Array.GetItem(bestTechStepIdx)->ID, techStepWaited,
 					bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx)->ID : "none", bestTechStepScore, bestBldScore,
-					money, techNow);
+					scoredBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(scoredBldIdx)->ID : "none",
+					yardBuilds.empty() ? " nothing" : yardBuilds.c_str(), money, techNow);
 			}
 
 			bestBldIdx = bestTechStepIdx;
