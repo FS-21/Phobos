@@ -2929,6 +2929,16 @@ namespace
 	// known enemy building within FlyerChainCells. TEMP: FlyerChainLogLines a match.
 	constexpr double FlyerChainCells = 15.0;
 	constexpr int FlyerChainLogLines = 40;
+	// Ground chain strikes (UpdateIdleGroundStrikers): an idle ground unit that stands more than
+	// GroundChainHomeCells from our home cell and from every building of ours attacks the nearest known
+	// enemy building within GroundChainCells it can damage and get to, else the nearest enemy unit in
+	// sight. TEMP: GroundChainLogLines strikes a match, and a summary per house every
+	// GroundChainSummaryFrames.
+	constexpr double GroundChainCells = 15.0;
+	constexpr double GroundChainHomeCells = 25.0;
+	constexpr double GroundChainMinVersus = 0.1;
+	constexpr int GroundChainLogLines = 40;
+	constexpr int GroundChainSummaryFrames = 1800;
 	constexpr int CaptureUnguardedThreatCells = 7;
 	constexpr int ExpansionDenialBaseCells = 15;
 	constexpr int ExpansionDenialDistDivisor = 4;

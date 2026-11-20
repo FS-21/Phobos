@@ -607,6 +607,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	UpdateIdleAirborneStrikers(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "idle airborne strikers");
 
+	// Idle ground units in enemy territory attack the nearest enemy building or unit they can hurt.
+	UpdateIdleGroundStrikers(pHouse);
+	TraceParkedFerries(pHouse->ArrayIndex, "idle ground strikers");
+
 	// Transports that cannot unload where they stand try a free cell nearby.
 	UpdateStuckUnloads(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "stuck unloads");
