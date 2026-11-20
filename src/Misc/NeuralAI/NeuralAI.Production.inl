@@ -4317,6 +4317,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const bool seaControl = seaMacro.SeaControl;
 	const bool seaControlAcross = seaControl && seaMacro.EnemyAcrossWater;
 	seaMacro.SeaControlLongRangeShip = false;
+	// Land control (LandControl*): the opposite, the enemy's remnants are at sea.
+	UpdateLandControl(pHouse);
+	const bool landControl = seaMacro.LandControl;
 
 	// Unit & Naval Target Selection
 	int bestUnitIdx = -1;
@@ -5863,6 +5866,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// are put to work, and waits while those it has go unused (IsArmyKindUnused).
 			if (IsArmyKindUnused(pHouse, pUnit->Naval ? ArmyKind::Ships : ArmyKind::Vehicles) && !(isMainTank && belowTankFloor))
 				continue;
+
+			// The land is ours and the remnants are at sea (LandControl*): armed vehicles that cannot go on
+			// water stop at LandControlVehicles, detectors the detection need asks for apart.
+			const bool goesOnWater = pUnit->MovementZone == MovementZone::Amphibious
+				|| pUnit->MovementZone == MovementZone::AmphibiousDestroyer
+				|| pUnit->MovementZone == MovementZone::AmphibiousCrusher || pUnit->SpeedType == SpeedType::Hover;
+
+			if (landControl && !pUnit->Naval && pWpn && !goesOnWater && !detectorWanted && !isUnitInProgress
+				&& ownedGroundCombatUnits >= LandControlVehicles)
+			{
+				continue;
+			}
 		}
 
 		int score = (pUnit->Cost / 4) + (pUnit->Strength / 3);
@@ -7160,10 +7175,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const int bankStrikeBonus = (HasOffensiveBank(pHouse) && GetMacroState(pHouse).EnemyAcrossWater && GroundRangeOf(pAir) > 0) ? 450 : 0;
 			// With the sea ours, the same aircraft reach the island the warships cannot (SeaControl*).
 			const int seaControlStrikeBonus = (seaControlAcross && !pAir->Carryall && GroundRangeOf(pAir) > 0) ? SeaControlAirStrikeBonus : 0;
+			// With the land ours and the remnants at sea, aircraft reach the ships anywhere (LandControl*).
+			const int landControlStrikeBonus = (landControl && !pAir->Carryall && GroundRangeOf(pAir) > 0) ? LandControlAirBonus : 0;
 
 			const int score = (pAir->Cost / 3) + (pAir->Strength / 2) + slotScore + crossFactionAirBonus + airTransBonus
 				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0) + CounterBonusFor(pHouse, pAir)
-				+ AirForceProductionBonus(pHouse, pAir) + bankStrikeBonus + seaControlStrikeBonus;
+				+ AirForceProductionBonus(pHouse, pAir) + bankStrikeBonus + seaControlStrikeBonus + landControlStrikeBonus;
 
 			// Not started, but wanted: the best of these asks for another airfield below.
 			if (waitsForDock)
