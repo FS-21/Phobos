@@ -2925,6 +2925,10 @@ namespace
 	constexpr int EdgeBlitzKeepPercent = 40;
 	constexpr int EdgeBlitzUtility = 320;
 	constexpr int EdgeBlitzLogLines = 30;
+	// Flyer chain strikes (ChainFlyerStrike): an idle flyer that hits the ground goes for the nearest
+	// known enemy building within FlyerChainCells. TEMP: FlyerChainLogLines a match.
+	constexpr double FlyerChainCells = 15.0;
+	constexpr int FlyerChainLogLines = 40;
 	constexpr int CaptureUnguardedThreatCells = 7;
 	constexpr int ExpansionDenialBaseCells = 15;
 	constexpr int ExpansionDenialDistDivisor = 4;
