@@ -2059,6 +2059,31 @@ namespace
 		int waitingSize = 0;
 		int aboardCount = 0;
 
+		// The waves of the house no longer go to the land of this operation (OpWaveGoneFrames): its wave
+		// members that still wait for a seat go back to the idle army; those aboard are set down as before.
+		bool waveGone = false;
+		int waveGoneReleased = 0;
+
+		if (op.Client == NeuralOpClient::Wave || op.Client == NeuralOpClient::Economy)
+		{
+			if (macro.WaveTargetsFrame >= 0 && now - macro.WaveTargetsFrame <= OpWaveTargetFreshFrames)
+			{
+				auto const goesHere = [&op](const CellStruct& cell)
+				{
+					CellStruct ground = cell;
+
+					return cell != CellStruct::Empty && OpTargetGroundZone(cell, op.TargetZone, ground) == op.TargetZone;
+				};
+
+				if (goesHere(macro.WaveTargetNow) || goesHere(macro.WaveSecondTargetNow))
+					op.WaveGoneSince = -1;
+				else if (op.WaveGoneSince < 0)
+					op.WaveGoneSince = now;
+
+				waveGone = op.WaveGoneSince >= 0 && now - op.WaveGoneSince >= OpWaveGoneFrames;
+			}
+		}
+
 		std::erase_if(op.Members, [&](NeuralOpMember& member)
 			{
 				auto const pFoot = find(member.UniqueID);
@@ -2261,6 +2286,20 @@ namespace
 					}
 				}
 
+				// No wave goes to that land any more: it stays home, with no goal of that wave left to keep.
+				if (waveGone && member.Client == NeuralOpClient::Wave)
+				{
+					waveGoneReleased++;
+					macro.WaveGoals.erase(member.UniqueID);
+					macro.TransportOpRetryUntil[member.UniqueID] = now + OpWaveGoneRetryFrames;
+					op.Released++;
+					macro.TransportOpOf.erase(member.UniqueID);
+					wake(pFoot);
+					pFoot->SetDestination(nullptr, true);
+					pFoot->QueueMission(Mission::Guard, false);
+					return true;
+				}
+
 				// Engineer claims (EngineerClaim*): an engineer whose claimed building is no longer to take
 				// (gone, ours or an ally's, no longer capturable) or that an engineer ahead of it goes for
 				// stays home: let go before it boards.
@@ -2286,6 +2325,13 @@ namespace
 
 				return false;
 			});
+
+		if (waveGoneReleased > 0)
+		{
+			Debug::Log("[NeuralAI] House %d transport op %d (%s) lets %d wave members go: no wave goes to zone %d since frame %d, %d members "
+				"left (%d aboard), frame %d.\n", houseIndex, op.Id, OpClientName(op.Client), waveGoneReleased, op.TargetZone, op.WaveGoneSince,
+				static_cast<int>(op.Members.size()), aboardCount, now);
+		}
 
 		if (op.Members.empty())
 		{

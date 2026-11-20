@@ -11662,6 +11662,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// Where the waves go at this tick: the transport operations let the wave members that wait for a
+	// crossing to another land go (OpWaveGoneFrames).
+	{
+		auto& targetsMacro = GetMacroState(pHouse);
+		targetsMacro.WaveTargetNow = pWaveTargetCell ? pWaveTargetCell->MapCoords : CellStruct::Empty;
+		targetsMacro.WaveSecondTargetNow = pSecondaryWaveTargetCell ? pSecondaryWaveTargetCell->MapCoords : CellStruct::Empty;
+		targetsMacro.WaveTargetsFrame = Unsorted::CurrentFrame;
+	}
+
 	bool hasIdleGroundArmyOnOtherIsland = false;
 	if (targetIslandZone >= 0)
 	{
