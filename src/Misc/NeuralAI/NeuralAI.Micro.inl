@@ -8444,13 +8444,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 
-				// A neutral tech as for any engineer; one an enemy took for Expert 4, and for the resource
-				// hoarder when it pays (as the routing of engineers in training, UpdateCaptureBarracks).
+				// A neutral tech as for any engineer; one an enemy took for Expert 4, for the resource
+				// hoarder when it pays (as the routing of engineers in training, UpdateCaptureBarracks),
+				// and under any expert when nothing guards it (IsEnemyBuildingUnguarded).
 				const bool available = pBld->Owner->IsNeutral()
 					? IsSpecOpsTechAvailable(pHouse, pBld, pFoot->UniqueID)
 					: (IsKnownCapturableTech(pHouse, pBld) && !IsSpecOpsCaptureTarget(pHouse, pBld->UniqueID, 0)
 						&& !IsCellInKnownEnemyDefenseReach(pHouse, pBld->GetMapCoords(), 2)
-						&& (workExpert == 4 || (workExpert == 6 && (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0))));
+						&& (workExpert == 4 || (workExpert == 6 && (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0))
+							|| IsEnemyBuildingUnguarded(pHouse, pBld)));
 
 				if (!available)
 					continue;
@@ -9018,10 +9020,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 
 				const bool isNeutralTech = pBld->Owner->IsNeutral();
+				// A tech we saw neutral and an enemy took since: known where it stands, in sight or not.
+				const bool knownEnemyTech = !isNeutralTech && IsKnownCapturableTech(pHouse, pBld);
 
 				// Fog-fair: neutral techs only once seen as neutral, out of known enemy defense reach
-				// and not taken by an Expert 4 capture; enemy buildings require line of sight.
-				if (isNeutralTech ? !IsSpecOpsTechAvailable(pHouse, pBld, pInf->UniqueID) : !IsCellVisibleToAI(pHouse, pCell))
+				// and not taken by an Expert 4 capture; enemy buildings require line of sight, but for
+				// the techs an enemy took.
+				if (isNeutralTech ? !IsSpecOpsTechAvailable(pHouse, pBld, pInf->UniqueID) : (!knownEnemyTech && !IsCellVisibleToAI(pHouse, pCell)))
+					continue;
+
+				// An enemy building only when nothing guards it (user, 2026-11-20: capture enemy structures
+				// with no defenses nor units). A construction yard the learned slot 82 sends it to stays.
+				const bool yardGate = pBld->Type->ConstructionYard && SlotGateHeld(scores[82], 60, 82, pInf->UniqueID);
+
+				if (!isNeutralTech && !yardGate && !IsEnemyBuildingUnguarded(pHouse, pBld))
 					continue;
 
 				const bool isCashTechBld = (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0);
@@ -9066,8 +9078,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// Strongly prioritize Cash-Producing Oil Derricks (ProduceCashAmount >
 				// and BaseNormal expansion hubs!
 				const bool isStrategicTechHub = isCashTechBld || BuildingTypeExt::IsAIBaseNormal(pBld->Type);
+				// An enemy expansion (IsKnownEnemyExpansion) comes first: taking it corners its owner.
 				const int effectiveDist
-					= (!isNeutralTech && (pBld->Type->ConstructionYard || isCashTechBld)
+					= (!isNeutralTech && IsKnownEnemyExpansion(pHouse, pBld))
+					? (dist / ExpansionDenialDistDivisor)
+					: (!isNeutralTech && (pBld->Type->ConstructionYard || isCashTechBld)
 						  && (SlotGateHeld(scores[82], 60, 82, pInf->UniqueID) || (resourceHoarder && isCashTechBld)))
 					? (dist / 3)
 					: (isNeutralTech ? (isCashTechBld ? (dist / 3) : (isStrategicTechHub ? (dist * 2 / 5) : (dist / 2)))
