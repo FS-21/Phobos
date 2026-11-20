@@ -20,6 +20,47 @@ namespace
 	size_t KeepRemnantSearchers(HouseClass* pHouse, std::vector<UnitClass*>& idleUnits, std::vector<InfantryClass*>& idleInf);
 	void NoteRemnantSearcher(HouseClass* pHouse, const FootClass* pFoot, const CellStruct& place);
 	bool MayLogRemnantNoPlace(HouseClass* pHouse);
+
+	// Whether a cell stands on high ground over the ground of a zone: a cell of that zone
+	// CellClass::BridgeLevels or more below it within CliffScanCells (sampled every 2 cells). The
+	// ground does not change, so the answer is kept for the match, by zone and cell.
+	bool IsHighGroundOverZone(const CellStruct& cell, int level, int zone)
+	{
+		static int cacheSerial = -1;
+		static std::unordered_map<long long, bool> cache;
+
+		if (cacheSerial != NeuralMatchSerial)
+		{
+			cacheSerial = NeuralMatchSerial;
+			cache.clear();
+		}
+
+		if (level < CellClass::BridgeLevels || zone < 0)
+			return false;
+
+		const long long key = (static_cast<long long>(zone) << 32) | (static_cast<long long>(static_cast<unsigned short>(cell.X)) << 16)
+			| static_cast<unsigned short>(cell.Y);
+
+		if (auto const itKnown = cache.find(key); itKnown != cache.end())
+			return itKnown->second;
+
+		bool high = false;
+
+		for (int dy = -CliffScanCells; dy <= CliffScanCells && !high; dy += 2)
+		{
+			for (int dx = -CliffScanCells; dx <= CliffScanCells && !high; dx += 2)
+			{
+				const CellStruct belowCell { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
+				auto const pBelow = dx * dx + dy * dy <= CliffScanCells * CliffScanCells ? MapClass::Instance.TryGetCellAt(belowCell) : nullptr;
+
+				high = pBelow && pBelow->Level <= level - CellClass::BridgeLevels
+					&& MapClass::Instance.GetMovementZoneType(belowCell, MovementZone::Normal, false) == zone;
+			}
+		}
+
+		cache.emplace(key, high);
+		return high;
+	}
 }
 
 // Land before islands (IslandMcvWaitFrames, NeuralAI.State.inl).
@@ -10224,6 +10265,56 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// High ground (Cliff*): the share of our armed ground army whose projectile a cliff stops going
+	// up, and, when it is CliffBlockedSharePercent or more, the cells of the known enemy defenses.
+	int cliffBlockedPercent = 0;
+	std::vector<CellStruct> cliffDefenseCells;
+
+	if (tankMassTargets)
+	{
+		int armedGround = 0;
+		int blockedGoingUp = 0;
+		auto const countCliffShooter = [&armedGround, &blockedGoingUp](FootClass* pFoot)
+		{
+			auto const pType = pFoot->GetTechnoType();
+			auto const pWeapon = pType->GetWeapon(0) ? pType->GetWeapon(0)->WeaponType : nullptr;
+
+			if (!pWeapon || pWeapon->Damage <= 0 || pFoot->IsInAir())
+				return;
+
+			armedGround++;
+
+			if (pWeapon->Projectile && pWeapon->Projectile->SubjectToCliffs)
+				blockedGoingUp++;
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Type && !pUnit->Type->Naval
+				&& !pUnit->Type->Harvester && !pUnit->Type->ResourceGatherer)
+			{
+				countCliffShooter(pUnit);
+			}
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->Owner == pHouse && pInf->IsAlive && !pInf->InLimbo && pInf->Type)
+				countCliffShooter(pInf);
+		}
+
+		cliffBlockedPercent = armedGround > 0 ? blockedGoingUp * 100 / armedGround : 0;
+
+		if (cliffBlockedPercent >= CliffBlockedSharePercent)
+		{
+			for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+			{
+				if (info.IsDefense)
+					cliffDefenseCells.push_back(info.Coords);
+			}
+		}
+	}
+
 	// Siege mode (Siege*): the enemies the tank mass besieges while it dominates (a place of theirs
 	// resisted our waves), those places, and the known defenses of those enemies.
 	unsigned int siegeMask = 0u;
@@ -10357,6 +10448,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				OpLineCost(*pWayDangerMap, homeCoords, ebc, candWayDanger);
 				bldCandScore -= std::min(siegeTarget ? SiegeWayDangerMost : TankMassWayDangerMost, candWayDanger / TankMassWayDangerPerPoint);
+			}
+
+			// High ground with a known defense near it, while most of our army cannot fire up the cliff
+			// (Cliff*): the units would drive round by the ramps into the defenses.
+			if (!cliffDefenseCells.empty()
+				&& std::any_of(cliffDefenseCells.begin(), cliffDefenseCells.end(),
+					[&ebc](const CellStruct& defense) { return defense.DistanceFrom(ebc) <= CliffDefenseCells; })
+				&& IsHighGroundOverZone(ebc, pCell->Level, homeGroundZone))
+			{
+				bldCandScore -= CliffTargetPenalty * cliffBlockedPercent / 100;
 			}
 
 			if (const int owner = pOwner->ArrayIndex; pEnemyBld->Type->PowerBonus > 0 && owner >= 0 && owner < 8
