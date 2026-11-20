@@ -61,6 +61,14 @@ DEFINE_HOOK(0x736480, UnitClass_AI, 0x6)
 {
 	GET(UnitClass*, pThis, ESI);
 
+	// Deploying or undeploying with no deploy animation is over once the unit leaves its Unload mission.
+	// This is game state, so it is not cleared while drawing: a client draws the map only when it renders.
+	if ((pThis->Deploying || pThis->Undeploying) && !pThis->DeployAnim && pThis->CurrentMission != Mission::Unload)
+	{
+		pThis->Deploying = false;
+		pThis->Undeploying = false;
+	}
+
 	auto const pExt = UnitExt::Fetch(pThis);
 	pExt->UpdateKeepTargetOnMove();
 	pExt->DepletedAmmoActions();

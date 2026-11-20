@@ -397,15 +397,9 @@ DEFINE_HOOK(0x73CF46, UnitClass_Draw_It_KeepUnitVisible, 0x6)
 
 	if (pThis->Deploying || pThis->Undeploying)
 	{
+		// Stale flags with no animation are cleared in UnitClass_AI: drawing runs only on clients that render the unit.
 		if (!pThis->DeployAnim)
-		{
-			if (pThis->CurrentMission != Mission::Unload)
-			{
-				pThis->Deploying = false;
-				pThis->Undeploying = false;
-			}
 			return Continue;
-		}
 
 		const auto pTypeExt = UnitTypeExt::Fetch(pThis->Type);
 
