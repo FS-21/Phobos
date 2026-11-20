@@ -10817,7 +10817,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	const bool endgameRemnantHunt
 		= (!pVisibleEnemyBld && pFallbackEnemyCell != nullptr && (allEnemyBldsGone || combatStalledForHunt));
 
-	if (allEnemyBldsGone && pEnemySubOrShip)
+	// The naval remnant hunt also holds while the land is ours and the remnants are at sea, seen or not
+	// lately (LandControl*).
+	if ((allEnemyBldsGone && pEnemySubOrShip) || GetMacroState(pHouse).LandControl)
 		GetMacroState(pHouse).NavalRemnantUntil = Unsorted::CurrentFrame + 900;
 
 	// Remnants in the air (aircraft, jumpjets) in the remnant phase, also while an enemy building no
