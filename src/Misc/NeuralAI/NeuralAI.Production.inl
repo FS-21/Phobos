@@ -6063,8 +6063,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const bool isTechStructure = pTargetBld->Radar || pTargetBld->SpySat || pTargetBld->SuperWeapon != -1
 					|| pTargetBld->SuperWeapon2 != -1
 					|| (BuildingTypeExt::Fetch(pTargetBld) && !BuildingTypeExt::Fetch(pTargetBld)->SuperWeapons.empty());
-				const bool isDedicatedOutpost = !isTechStructure && pTargetBld->BaseNormal && !pTargetBld->Refinery
-					&& pTargetBld->Factory == AbstractType::None && pTargetBld->PowerBonus <= pTargetBld->PowerDrain;
+				// A building the construction yard builds too is not a dedicated outpost: the vehicle is one
+				// more way to get it and it keeps the yard's cap (a shield generator Nanocore was taken for an
+				// outpost and built 5 times, 400 power each, where one enables the shields; user, 2026-11-20).
+				const bool yardBuildsTarget = pTargetBld->TechLevel >= 0 && pTargetBld->TechLevel <= 10;
+				const bool isDedicatedOutpost = !isTechStructure && !yardBuildsTarget && pTargetBld->BaseNormal
+					&& !pTargetBld->Refinery && pTargetBld->Factory == AbstractType::None
+					&& pTargetBld->PowerBonus <= pTargetBld->PowerDrain;
 
 				if (isTechStructure && !pTargetBld->Refinery && pTargetBld->Factory == AbstractType::None
 					&& pTargetBld->PowerBonus <= pTargetBld->PowerDrain)
@@ -6118,7 +6123,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					score += scores[4] - (ownedTargetBld * 900);
+					// Support building (shield or gap generator, sensor, lab...): as many as the
+					// construction yard builds of it, one, or two of a building with a support radius
+					// when money is plenty; a copy past that only drains power.
+					const int supportCap = (GetSupportRadius(pTargetBld) > 0 && money > 3000) ? 2 : 1;
+
+					if (ownedTargetBld >= supportCap)
+						score -= 2000;
+					else
+						score += scores[4] - (ownedTargetBld * 900);
 				}
 
 				// A mobile factory past the reason gate above has a spot waiting for it.
