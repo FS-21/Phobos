@@ -192,6 +192,10 @@ namespace
 		std::vector<int> MemberFrames {};
 		// Combat value of the enemy units its members destroyed (NeuralAI::OnTechnoDestroyed).
 		int KillValue { 0 };
+		// The last frame a member destroyed anything, buildings too (-1 never: PlanCombat*), and the kind
+		// of building its target was when it fell (PlanBuildingKindOf, -1 not fallen: PlanFollowUp*).
+		int LastKillFrame { -1 };
+		int FallenTargetKind { -1 };
 		// Bait Ambush: the bait's health in percent when it set out to fire at the building.
 		int LureHealth { 0 };
 		// Counter Squad: the enemy house and force category (EnemyForceCategory) it goes after.
@@ -779,6 +783,32 @@ namespace
 		const char* TypeId { "" };
 	};
 
+	// Hold the ground (Micro, McvFallback*): the cell out of danger an expansion MCV that met an enemy
+	// unfolds at, and until when it keeps to it; an empty cell when none was found, until it looks again.
+	struct NeuralMcvFallback
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Until { -1 };
+	};
+
+	// A follow-up attack (PlanFollowUp*, UpdateStrategicPlans): the armed ground units of a plan that took
+	// its building target, the house and kind of building they go on against, the building they go for
+	// now and the members already sent to it, until when it lasts, its value at the start and its last kill.
+	struct NeuralFollowUp
+	{
+		std::vector<DWORD> Members {};
+		std::vector<DWORD> Ordered {};
+		int Owner { -1 };
+		int Kind { -1 };
+		int Plan { -1 };
+		DWORD TargetID { 0 };
+		int StartFrame { 0 };
+		int Until { 0 };
+		int InitialValue { 0 };
+		int LastKillFrame { -1 };
+		int Targets { 0 };
+	};
+
 	// An MCV whose yard was ordered to unfold (Micro): where and when it last unfolded, how often it
 	// tried again on that spot after the engine refused the deploy, and since when it unfolds there
 	// (McvUnfoldSkipMostFrames).
@@ -888,6 +918,9 @@ namespace
 		std::array<NeuralPlanInstance, static_cast<size_t>(NeuralPlanId::Count)> Plans {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanNextAttemptFrame {};
 		std::unordered_set<DWORD> PlanMembers {};
+		// Follow-up attacks of plans that took their building target (PlanFollowUp*); their members count
+		// as plan members.
+		std::vector<NeuralFollowUp> FollowUps {};
 		// Airborne raid transports nobody managed to board: UniqueID -> frame they may be used
 		// again (key access only).
 		std::unordered_map<DWORD, int> RaidTransportBanUntil {};
@@ -1177,6 +1210,8 @@ namespace
 		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
 		// Watched MCVs unfolding by another rule's order (unit -> NeuralMcvIdleUnfold, TEMP diagnostic).
 		std::unordered_map<DWORD, NeuralMcvIdleUnfold> McvIdleUnfolds;
+		// Expansion MCVs holding the ground (unit -> NeuralMcvFallback, Micro).
+		std::unordered_map<DWORD, NeuralMcvFallback> McvFallbacks;
 		// Packed MCVs that had an enemy near them at their last look (Micro, the MCV danger rule).
 		std::unordered_set<DWORD> McvInDanger;
 		// Expansion goals packed MCVs turned back from for an enemy near them (goal, frame until).
@@ -1675,6 +1710,7 @@ namespace
 			this->Plans.fill(NeuralPlanInstance {});
 			this->PlanNextAttemptFrame.fill(0);
 			this->PlanMembers.clear();
+			this->FollowUps.clear();
 			this->RaidTransportBanUntil.clear();
 			this->BlackoutUntilFrame = -1;
 			this->BloodyBeaches.clear();
@@ -1831,6 +1867,7 @@ namespace
 			this->DeployerSites.clear();
 			this->McvIdle.clear();
 			this->McvIdleUnfolds.clear();
+			this->McvFallbacks.clear();
 			this->McvInDanger.clear();
 			this->McvFledSites.clear();
 			this->ForeignMcvHome.clear();
@@ -2787,6 +2824,29 @@ namespace
 	// deploy stand, a cell past that edge, and the way home took it in turns.
 	constexpr int ForeignMcvHomeCells = 16;
 	constexpr int ForeignMcvHomeExitCells = 8;
+	// Hold the ground (user approved, 2026-11-20, «haz todas las propuestas que me acabas de hacer», match
+	// #12278: in a contested middle with no enemy building known, expansion MCVs turned home from every
+	// enemy unit passing by, and one stood 900 frames in danger at its home cell next to the front). An
+	// expansion MCV that meets an enemy looks for a cell out of every danger (off the reach of the known
+	// enemy buildings by McvSiteDangerMarginCells, of the visible enemy units by McvDangerUnitCells +
+	// McvFallbackMarginCells) within McvFallbackSearchCells, every other cell, nearest first and those
+	// within McvFallbackOwnCells of a building of ours first (a farther one counts McvFallbackOwnPenalty
+	// tenths of a cell more), tries McvFallbackTries of them for a cell its yard fits on and unfolds there.
+	// It keeps to that cell McvFallbackFrames, or turns home as before for McvFallbackNoneFrames without
+	// one. With only enemy units near, and our defenses that reach it and our armed units within
+	// McvCoverUnitCells at least as strong, it unfolds where it stands. The goal it turns from is kept from
+	// the expansion goals only when the danger is near that goal or the MCV was within McvFledNearGoalCells
+	// of it. McvHoldLogLines: lines a match of the TEMP diagnostic.
+	constexpr int McvFallbackSearchCells = 20;
+	constexpr int McvFallbackMarginCells = 2;
+	constexpr int McvFallbackOwnCells = 8;
+	constexpr int McvFallbackOwnPenalty = 60;
+	constexpr int McvFallbackTries = 4;
+	constexpr int McvFallbackFrames = 1800;
+	constexpr int McvFallbackNoneFrames = 450;
+	constexpr int McvCoverUnitCells = 8;
+	constexpr int McvFledNearGoalCells = 16;
+	constexpr int McvHoldLogLines = 40;
 	// Armies go out in mass (user approved, 2026-11-19: "sí haz las 4"; match #11465 Dead Six: two
 	// allied houses of 80+ units and 100000+ credits streamed packets of 7 to 17 units for 18000
 	// frames while a third of each army stayed home). Once the army (idle and busy fighters, not
@@ -3792,6 +3852,28 @@ namespace
 	constexpr int CounterSquadLostFrames = 900;
 	constexpr int CounterSquadKeptPercent = 40;
 	constexpr int CounterSquadDurationFrames = 3000;
+	// Missions last while they work (user approved, 2026-11-20: «haz todas las propuestas que me acabas de
+	// hacer para la persistencia de misiones», «que se les extienda generosamente la duración de la misión
+	// ofensiva en curso mientras funcione y mate/destruya objetivos»). A plan one of whose members destroyed
+	// anything in the last PlanCombatWindowFrames gets PlanCombatExtendFrames more when its deadline comes, up
+	// to PlanCombatExtendMostTimes the length it started with. A member that fights (its target within its
+	// range and PlanFightLeashCells more) gets no move of its group. A plan that took its building target
+	// hands its armed ground units (PlanFollowUpMinMembers or more) to a follow-up attack instead of sending
+	// them home: the nearest known building of the same kind of that house within PlanFollowUpCells of the
+	// group, else of any kind, one after the other until none is left, the group keeps less than
+	// PlanFollowUpLowPercent of its value, or PlanFollowUpFrames pass (extended the same way while it
+	// destroys, up to PlanFollowUpMostFrames); then it goes home. PlanFollowUpLogLines: lines a match of its
+	// TEMP diagnostic.
+	constexpr int PlanCombatWindowFrames = 1200;
+	constexpr int PlanCombatExtendFrames = 1200;
+	constexpr int PlanCombatExtendMostTimes = 4;
+	constexpr int PlanFightLeashCells = 3;
+	constexpr int PlanFollowUpCells = 24;
+	constexpr size_t PlanFollowUpMinMembers = 2;
+	constexpr int PlanFollowUpLowPercent = 35;
+	constexpr int PlanFollowUpFrames = 2400;
+	constexpr int PlanFollowUpMostFrames = 10800;
+	constexpr int PlanFollowUpLogLines = 40;
 	constexpr int CounterSquadRetryFrames = 300;
 	// Hold Under Towers: a ground enemy force of at least HoldTowersMinEnemyValue within
 	// HoldTowersEnemyCells of home, over HoldTowersOddsPercent of our free army within
@@ -4079,6 +4161,8 @@ namespace
 
 	std::array<NeuralLeaseRefusals, 32> LeaseRefusals {};
 
+	bool IsPlanMember(HouseClass* pHouse, DWORD uid);
+
 	// Whether the code at file:line may give pFoot an order toward goal now. An order to board (boarding:
 	// OrderFootToEnter) passes a lease of its own priority too: it mostly ends the way its own code sent
 	// the unit along (a pickup beach, then the transport there), and held to the line it waited out the
@@ -4087,6 +4171,30 @@ namespace
 	{
 		if (!pFoot || !pFoot->Owner || pFoot->Owner->ArrayIndex < 0 || pFoot->Owner->ArrayIndex >= 32)
 			return true;
+
+		// A unit of a strategic plan or of its follow-up attack takes its orders from the plan alone until the
+		// plan lets it go (missions last until they end, PlanCombat*); an operation or survival order still
+		// takes it.
+		if (CurrentOrderPriority < NeuralOrderPriority::Operation && IsPlanMember(pFoot->Owner, pFoot->UniqueID))
+		{
+			const char* const callerBase = OrderCallerBaseName(file);
+
+			if (!callerBase || std::strcmp(callerBase, "NeuralAI.Plans.inl") != 0)
+			{
+				CountDecision(NeuralDecision::OrderLeaseRefused, pFoot->Owner->ArrayIndex);
+
+				if (NeuralAI::HeadlessMode)
+				{
+					auto& refusals = LeaseRefusals[pFoot->Owner->ArrayIndex];
+					char key[128];
+					std::snprintf(key, sizeof(key), "plan member > %s:%d", callerBase ? callerBase : "?", line);
+					refusals.Pairs[key]++;
+					refusals.Total++;
+				}
+
+				return false;
+			}
+		}
 
 		auto& leases = OrderLeasesOf(pFoot->Owner->ArrayIndex);
 		auto const itLease = leases.find(pFoot->UniqueID);

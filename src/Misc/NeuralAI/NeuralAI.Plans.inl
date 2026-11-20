@@ -16,6 +16,28 @@ namespace
 		return members.find(uid) != members.end();
 	}
 
+	// The kind of a building, for the follow-up attack of a plan that took one (PlanFollowUp*): 0 a defense,
+	// 1 a construction yard, 2 a factory, 3 a refinery or resource building, 4 a power plant, 5 any other.
+	int PlanBuildingKindOf(const BuildingTypeClass* pType)
+	{
+		if (!pType)
+			return -1;
+
+		if (pType->IsBaseDefense)
+			return 0;
+
+		if (pType->ConstructionYard)
+			return 1;
+
+		if (pType->Factory != AbstractType::None)
+			return 2;
+
+		if (pType->Refinery || pType->ResourceDestination || pType->ResourceGatherer)
+			return 3;
+
+		return pType->PowerBonus > 0 ? 4 : 5;
+	}
+
 	bool WeaponHitsGround(const WeaponTypeClass* pWeapon)
 	{
 		return pWeapon && pWeapon->Damage > 0 && (!pWeapon->Projectile || pWeapon->Projectile->AG);
@@ -2178,6 +2200,14 @@ namespace
 				plan.Deadline += 900;
 				CountDecision(NeuralDecision::PlanDeadlineExtended, houseIdx);
 			}
+			// A group that destroyed something lately keeps going (PlanCombat*, NeuralAI.State.inl).
+			else if (Unsorted::CurrentFrame >= plan.Deadline && plan.LastKillFrame >= 0
+				&& Unsorted::CurrentFrame - plan.LastKillFrame <= PlanCombatWindowFrames
+				&& plan.Deadline - plan.StartFrame + PlanCombatExtendFrames <= plan.BaseDuration * PlanCombatExtendMostTimes)
+			{
+				plan.Deadline += PlanCombatExtendFrames;
+				CountDecision(NeuralDecision::PlanDeadlineExtended, houseIdx);
+			}
 		}
 
 		auto memberValue = [&](const NeuralPlanInstance& plan) -> int
@@ -2386,6 +2416,56 @@ namespace
 					plan.TargetCell.X, plan.TargetCell.Y, lostDead, lostOffMap, lostTraced > 0 ? lostDistance / lostTraced : -1, lostTraced);
 			}
 
+			// A plan that took its building target hands its armed ground units to a follow-up attack
+			// (PlanFollowUp*, NeuralAI.State.inl) instead of sending them home.
+			std::vector<DWORD> followUpMembers;
+
+			if (success && sendHome && plan.FallenTargetKind >= 0 && plan.TargetOwner >= 0 && plan.TargetOwner != houseIdx)
+			{
+				int followUpValue = 0;
+
+				for (const DWORD uid : plan.Members)
+				{
+					auto const it = ownFoots.find(uid);
+
+					if (it == ownFoots.end() || IsOnRepairTrip(pHouse, uid))
+						continue;
+
+					auto const pFoot = it->second;
+					auto const pFootType = pFoot->GetTechnoType();
+					const AbstractType footKind = pFoot->WhatAmI();
+
+					if ((footKind != AbstractType::Unit && footKind != AbstractType::Infantry) || !pFootType || pFootType->Naval
+						|| GroundRangeOf(pFootType) <= 0)
+					{
+						continue;
+					}
+
+					if (auto const pInf = abstract_cast<InfantryClass*>(pFoot); pInf && pInf->Type && (pInf->Type->Engineer || pInf->Type->Agent))
+						continue;
+
+					followUpMembers.push_back(uid);
+					followUpValue += GetCombatValueOfType(pFootType, false);
+				}
+
+				if (followUpMembers.size() >= PlanFollowUpMinMembers)
+				{
+					NeuralFollowUp followUp;
+					followUp.Members = followUpMembers;
+					followUp.Owner = plan.TargetOwner;
+					followUp.Kind = plan.FallenTargetKind;
+					followUp.Plan = static_cast<int>(id);
+					followUp.StartFrame = Unsorted::CurrentFrame;
+					followUp.Until = Unsorted::CurrentFrame + PlanFollowUpFrames;
+					followUp.InitialValue = std::max(1, followUpValue);
+					macro.FollowUps.push_back(std::move(followUp));
+				}
+				else
+				{
+					followUpMembers.clear();
+				}
+			}
+
 			if (sendHome)
 			{
 				// Staggered retreat (point 25): every second unit holds 120 frames to cover the others.
@@ -2399,7 +2479,8 @@ namespace
 						auto const it = ownFoots.find(uid);
 
 						if (it == ownFoots.end() || it->second->WhatAmI() == AbstractType::Aircraft
-							|| it->second->GetTechnoType()->Naval)
+							|| it->second->GetTechnoType()->Naval
+							|| std::find(followUpMembers.begin(), followUpMembers.end(), uid) != followUpMembers.end())
 						{
 							continue;
 						}
@@ -3890,6 +3971,19 @@ namespace
 			}
 		};
 
+		// A member that fights (its target within its ground range, at least 6 cells, and PlanFightLeashCells
+		// more) is left to its fight: the group's move each AI tick took it away from it and the engine back
+		// (Mastermind and Yuri Prime against the engine: about 750 turns in 7 matches of b498ac350).
+		auto memberFights = [&](FootClass* pFoot) -> bool
+		{
+			if (!pFoot || !pFoot->Target)
+				return false;
+
+			const int range = std::max(GroundRangeOf(pFoot->GetTechnoType()), 6 * 256);
+
+			return pFoot->DistanceFrom(pFoot->Target) <= range + PlanFightLeashCells * 256;
+		};
+
 		auto moveGroup = [&](const std::vector<DWORD>& uids, CellClass* pCell, double keepWithin)
 		{
 			if (!pCell)
@@ -3897,7 +3991,7 @@ namespace
 
 			for (const DWORD uid : uids)
 			{
-				if (auto const pFoot = findOrderableFoot(uid); pFoot && !siegeScreenHolds(pFoot, pCell->MapCoords))
+				if (auto const pFoot = findOrderableFoot(uid); pFoot && !siegeScreenHolds(pFoot, pCell->MapCoords) && !memberFights(pFoot))
 					IssueMoveOrder(pFoot, pCell, keepWithin);
 			}
 		};
@@ -11451,6 +11545,193 @@ namespace
 				CountPlanOutcome(houseIdx, static_cast<NeuralPlanId>(i), NeuralPlanOutcome::NoGroup);
 		}
 
+		// Follow-up attacks (PlanFollowUp*, NeuralAI.State.inl): the group of a plan that took its building
+		// target goes on with the nearest known building of that kind of the same house, then of any kind,
+		// until none is left within PlanFollowUpCells; one order for each target, again only to a member left
+		// idle, and a member that fights is left to it. Over, the group goes home.
+		{
+			static int followUpLogSerial = -1;
+			static int followUpLogCount = 0;
+
+			if (followUpLogSerial != NeuralMatchSerial)
+			{
+				followUpLogSerial = NeuralMatchSerial;
+				followUpLogCount = 0;
+			}
+
+			const int now = Unsorted::CurrentFrame;
+
+			auto const pickFollowUpTarget = [&](const NeuralFollowUp& followUp, const CellStruct& center, FootClass* pLead) -> BuildingClass*
+			{
+				BuildingClass* pSame = nullptr;
+				BuildingClass* pAny = nullptr;
+				int sameDistance = INT_MAX;
+				int anyDistance = INT_MAX;
+
+				for (auto const pBld : BuildingClass::Array)
+				{
+					if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || !pBld->Type || pBld->Owner->ArrayIndex != followUp.Owner
+						|| pBld->Type->Insignificant || pBld->Type->InvisibleInGame || pBld->Type->Wall || pHouse->IsAlliedWith(pBld->Owner)
+						|| !IsEnemyBuildingKnown(pHouse, pBld))
+					{
+						continue;
+					}
+
+					const CellStruct bc = pBld->GetMapCoords();
+					const int distance = std::max(std::abs(bc.X - center.X), std::abs(bc.Y - center.Y));
+					const bool same = PlanBuildingKindOf(pBld->Type) == followUp.Kind;
+
+					if (distance > PlanFollowUpCells || distance >= (same ? sameDistance : anyDistance)
+						|| (pLead && !FootReachesAlone(pLead, bc, pBld)))
+					{
+						continue;
+					}
+
+					(same ? pSame : pAny) = pBld;
+					(same ? sameDistance : anyDistance) = distance;
+				}
+
+				return pSame ? pSame : pAny;
+			};
+
+			auto const logFollowUp = [&](const NeuralFollowUp& followUp, const char* what, BuildingClass* pTarget, int value)
+			{
+				if (followUpLogCount++ >= PlanFollowUpLogLines)
+					return;
+
+				const CellStruct tc = pTarget ? pTarget->GetMapCoords() : CellStruct::Empty;
+				Debug::Log("[NeuralAI] House %d follow-up of plan %s against house %d (kind %d): %s %s at (%d,%d), %d members, value %d of %d, "
+					"%d targets, %d frames, frame %d.\n",
+					houseIdx, followUp.Plan >= 0 ? NeuralPlanNames[static_cast<size_t>(followUp.Plan)] : "?", followUp.Owner, followUp.Kind,
+					what, pTarget ? pTarget->Type->ID : "none", tc.X, tc.Y, static_cast<int>(followUp.Members.size()), value,
+					followUp.InitialValue, followUp.Targets, now - followUp.StartFrame, now);
+			};
+
+			for (auto& followUp : macro.FollowUps)
+			{
+				std::erase_if(followUp.Members, [&](DWORD uid) { return !ownFoots.contains(uid) || IsOnRepairTrip(pHouse, uid); });
+
+				int value = 0;
+				int sumX = 0;
+				int sumY = 0;
+				FootClass* pLead = nullptr;
+
+				for (const DWORD uid : followUp.Members)
+				{
+					auto const pFoot = ownFoots.at(uid);
+					value += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+					const CellStruct fc = pFoot->GetMapCoords();
+					sumX += fc.X;
+					sumY += fc.Y;
+
+					if (!pLead)
+						pLead = pFoot;
+				}
+
+				bool over = followUp.Members.empty() || value * 100 < followUp.InitialValue * PlanFollowUpLowPercent;
+
+				if (!over && now >= followUp.Until)
+				{
+					if (followUp.LastKillFrame >= 0 && now - followUp.LastKillFrame <= PlanCombatWindowFrames
+						&& followUp.Until - followUp.StartFrame + PlanCombatExtendFrames <= PlanFollowUpMostFrames)
+					{
+						followUp.Until += PlanCombatExtendFrames;
+					}
+					else
+					{
+						over = true;
+					}
+				}
+
+				BuildingClass* pTarget = nullptr;
+
+				if (!over && followUp.TargetID != 0)
+				{
+					for (auto const pBld : BuildingClass::Array)
+					{
+						if (pBld && pBld->UniqueID == followUp.TargetID)
+						{
+							if (pBld->IsAlive && !pBld->InLimbo && pBld->Owner && !pHouse->IsAlliedWith(pBld->Owner))
+								pTarget = pBld;
+
+							break;
+						}
+					}
+				}
+
+				if (!over && !pTarget)
+				{
+					const int alive = static_cast<int>(followUp.Members.size());
+					const CellStruct center { static_cast<short>(sumX / alive), static_cast<short>(sumY / alive) };
+					pTarget = pickFollowUpTarget(followUp, center, pLead);
+
+					if (pTarget)
+					{
+						followUp.TargetID = pTarget->UniqueID;
+						followUp.Ordered.clear();
+						followUp.Targets++;
+						logFollowUp(followUp, "goes for", pTarget, value);
+					}
+					else
+					{
+						over = true;
+					}
+				}
+
+				if (over)
+				{
+					logFollowUp(followUp, "ends, home with", nullptr, value);
+
+					if (auto const pHome = MapClass::Instance.TryGetCellAt(homeCell))
+					{
+						for (const DWORD uid : followUp.Members)
+						{
+							if (auto const pFoot = findOrderableFoot(uid))
+								IssueMoveOrder(pFoot, pHome, 4.0);
+						}
+					}
+
+					followUp.Members.clear();
+					continue;
+				}
+
+				for (const DWORD uid : followUp.Members)
+				{
+					auto const pFoot = findOrderableFoot(uid);
+
+					if (!pFoot || memberFights(pFoot))
+						continue;
+
+					const bool sent = std::find(followUp.Ordered.begin(), followUp.Ordered.end(), uid) != followUp.Ordered.end();
+					const bool idle = pFoot->Target == nullptr && pFoot->MegaMission != Mission::AttackMove
+						&& (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
+							|| pFoot->CurrentMission == Mission::Sleep || pFoot->CurrentMission == Mission::None);
+
+					if (sent && !idle)
+						continue;
+
+					if (pFoot->GetMapCoords().DistanceFrom(pTarget->GetMapCoords()) <= 9.0)
+					{
+						if (pFoot->Target != pTarget)
+						{
+							pFoot->SetTarget(pTarget);
+							pFoot->QueueMission(Mission::Attack, true);
+							NoteOrderCaller(pFoot, "attack");
+						}
+					}
+					else
+					{
+						OrderFootToAttackMove(pFoot, pTarget->GetCell());
+					}
+
+					if (!sent)
+						followUp.Ordered.push_back(uid);
+				}
+			}
+
+			std::erase_if(macro.FollowUps, [](const NeuralFollowUp& followUp) { return followUp.Members.empty(); });
+		}
+
 		// Rebuild the member set used to keep plan units out of the generic recruitment.
 		macro.PlanMembers.clear();
 
@@ -11462,5 +11743,9 @@ namespace
 
 		// The units a Rotating Raids recruits for its next group are kept out the same way.
 		macro.PlanMembers.insert(macro.RaidRecruits.begin(), macro.RaidRecruits.end());
+
+		// So are the groups of the follow-up attacks.
+		for (auto const& followUp : macro.FollowUps)
+			macro.PlanMembers.insert(followUp.Members.begin(), followUp.Members.end());
 	}
 } // namespace

@@ -877,6 +877,48 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 		}
 	}
 
+	// The last kill of a plan or of a follow-up attack, buildings too: a group that destroys keeps going
+	// (PlanCombat*, NeuralAI.State.inl).
+	if (pKiller && pKiller->Owner && pVictimOwner && pKiller->Owner != pVictimOwner && !pVictimOwner->IsNeutral()
+		&& !pKiller->Owner->IsAlliedWith(pVictimOwner) && NeuralAI::IsEnabledForHouse(pKiller->Owner))
+	{
+		auto& killerMacro = GetMacroState(pKiller->Owner);
+
+		if (killerMacro.PlanMembers.contains(pKiller->UniqueID))
+		{
+			for (auto& plan : killerMacro.Plans)
+			{
+				if (plan.Active && std::find(plan.Members.begin(), plan.Members.end(), pKiller->UniqueID) != plan.Members.end())
+					plan.LastKillFrame = Unsorted::CurrentFrame;
+			}
+
+			for (auto& followUp : killerMacro.FollowUps)
+			{
+				if (std::find(followUp.Members.begin(), followUp.Members.end(), pKiller->UniqueID) != followUp.Members.end())
+					followUp.LastKillFrame = Unsorted::CurrentFrame;
+			}
+		}
+	}
+
+	// A building that was the target of a plan of ours fell: the plan keeps what kind it was, for its
+	// follow-up attack (PlanFollowUp*).
+	if (pVictim->WhatAmI() == AbstractType::Building)
+	{
+		auto const pVictimBuildingType = static_cast<BuildingClass*>(pVictim)->Type;
+
+		for (auto const pAIHouse : HouseClass::Array)
+		{
+			if (!pAIHouse || pAIHouse == pVictimOwner || !NeuralAI::IsEnabledForHouse(pAIHouse))
+				continue;
+
+			for (auto& plan : GetMacroState(pAIHouse).Plans)
+			{
+				if (plan.Active && plan.TargetID == pVictim->UniqueID)
+					plan.FallenTargetKind = PlanBuildingKindOf(pVictimBuildingType);
+			}
+		}
+	}
+
 	if (pKiller && pKiller->WhatAmI() == AbstractType::Building && pKiller->Owner && pKiller->Owner != pVictimOwner
 		&& (!pVictimOwner || !pKiller->Owner->IsAlliedWith(pVictimOwner)) && NeuralAI::IsEnabledForHouse(pKiller->Owner))
 	{
