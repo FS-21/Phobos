@@ -2867,6 +2867,19 @@ namespace
 	// A cell where a loaded carryall left the unload with its cargo still on stays out of its drop
 	// choices for CarryallDropFailFrames; it keeps the last CarryallDropFailCells of them.
 	constexpr int CarryallDropFailFrames = 1800;
+	// Captures of enemy buildings (IsEnemyBuildingUnguarded): an engineer goes for one only out of the
+	// known reach of enemy defenses (by CaptureUnguardedDefenseMargin cells) and with no armed enemy seen
+	// within CaptureUnguardedThreatCells. An enemy expansion (IsKnownEnemyExpansion: no other known
+	// building of its owner within ExpansionDenialBaseCells) counts its distance divided by
+	// ExpansionDenialDistDivisor.
+	constexpr int CaptureUnguardedDefenseMargin = 2;
+	constexpr int CaptureUnguardedThreatCells = 7;
+	constexpr int ExpansionDenialBaseCells = 15;
+	constexpr int ExpansionDenialDistDivisor = 4;
+	// TEMP diagnostic (NoteCaptureLedger): the capturable buildings that changed hands, looked at every
+	// CaptureLedgerFrames, CaptureLedgerLogLines a match.
+	constexpr int CaptureLedgerFrames = 15;
+	constexpr int CaptureLedgerLogLines = 200;
 	constexpr size_t CarryallDropFailCells = 8;
 	// TEMP diagnostic: the failed drop cells logged per match.
 	constexpr int CarryallDropFailLogLines = 60;

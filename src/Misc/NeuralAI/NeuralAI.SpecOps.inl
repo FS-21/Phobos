@@ -523,6 +523,89 @@ namespace
 		return pOwner && !pHouse->IsAlliedWith(pOwner);
 	}
 
+	// An enemy building nothing guards: out of the known reach of enemy defenses and no armed enemy
+	// seen near it. A lone engineer takes such a one; at a guarded one it dies on the way.
+	bool IsEnemyBuildingUnguarded(HouseClass* pHouse, const BuildingClass* pBld)
+	{
+		const CellStruct cell = pBld->GetMapCoords();
+
+		return !IsCellInKnownEnemyDefenseReach(pHouse, cell, CaptureUnguardedDefenseMargin)
+			&& VisibleEnemyThreatNear(pHouse, cell, CaptureUnguardedThreatCells) <= 0;
+	}
+
+	// An enemy's expansion: a paying tech, a refinery or a building to build around (BaseNormal) with
+	// no other known building of its owner within ExpansionDenialBaseCells. Taking it denies its owner
+	// that field (user, 2026-11-20: on island maps an enemy's derricks are its expansion fields, and
+	// taking them corners it).
+	bool IsKnownEnemyExpansion(HouseClass* pHouse, const BuildingClass* pBld)
+	{
+		auto const pType = pBld->Type;
+
+		if (!pBld->Owner || pBld->Owner->IsNeutral()
+			|| !(pType->ProduceCashAmount > 0 || pType->ProduceCashStartup > 0 || pType->Refinery || BuildingTypeExt::IsAIBaseNormal(pType)))
+		{
+			return false;
+		}
+
+		const CellStruct cell = pBld->GetMapCoords();
+
+		for (auto const pOther : pBld->Owner->Buildings)
+		{
+			if (pOther && pOther != pBld && pOther->IsAlive && !pOther->InLimbo && pOther->Type && !pOther->Type->Insignificant
+				&& pOther->GetMapCoords().DistanceFrom(cell) <= ExpansionDenialBaseCells && IsEnemyBuildingKnown(pHouse, pOther))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	// TEMP diagnostic (captures of enemy buildings, user 2026-11-20): every CaptureLedgerFrames, each
+	// capturable building that changed hands since the last look, with its old and new owner (-1:
+	// neutral), CaptureLedgerLogLines a match. Read only.
+	void NoteCaptureLedger()
+	{
+		static int serial = -1;
+		static int lastFrame = -1;
+		static int logCount = 0;
+		static std::unordered_map<DWORD, int> owners;
+		const int now = Unsorted::CurrentFrame;
+
+		if (serial != NeuralMatchSerial)
+		{
+			serial = NeuralMatchSerial;
+			lastFrame = -1;
+			logCount = 0;
+			owners.clear();
+		}
+
+		if (lastFrame >= 0 && now >= lastFrame && now - lastFrame < CaptureLedgerFrames)
+			return;
+
+		lastFrame = now;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->Capturable || !pBld->Owner)
+				continue;
+
+			const int owner = pBld->Owner->IsNeutral() ? -1 : pBld->Owner->ArrayIndex;
+			auto const [it, inserted] = owners.try_emplace(pBld->UniqueID, owner);
+
+			if (inserted || it->second == owner)
+				continue;
+
+			if (logCount++ < CaptureLedgerLogLines)
+			{
+				Debug::Log("[NeuralAI] capture ledger (TEMP) frame %d: %s %u at (%d,%d) from house %d to house %d.\n", now, pBld->Type->ID,
+					pBld->UniqueID, pBld->GetMapCoords().X, pBld->GetMapCoords().Y, it->second, owner);
+			}
+
+			it->second = owner;
+		}
+	}
+
 	// Coalition (NeuralAI.Urban.inl): an allied engineer walks into it or an allied Neural AI
 	// has picked it, so we leave it to them.
 	bool IsTechClaimedByAlly(HouseClass* pHouse, DWORD buildingID);
@@ -640,6 +723,7 @@ namespace
 	void UpdateSpecOpsTechMemory(HouseClass* pHouse, NeuralSpecOpsState& state)
 	{
 		const int now = Unsorted::CurrentFrame;
+		NoteCaptureLedger();
 		std::vector<DWORD> knownNowIDs;
 
 		// The capturable buildings a map starts with are map knowledge, like its ore fields: a house
