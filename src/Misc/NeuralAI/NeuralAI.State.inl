@@ -272,14 +272,6 @@ namespace
 
 	// Aircraft attack watchdog (UpdateStuckUnits): where an aircraft on Mission::Attack stands and
 	// since when, and its ammo and since when it last changed (a shot fired or a reload).
-	struct NeuralAirStallTrack
-	{
-		CellStruct Cell { CellStruct::Empty };
-		int SinceFrame { 0 };
-		int Ammo { 0 };
-		int AmmoSinceFrame { 0 };
-	};
-
 	struct NeuralAirLossTrack
 	{
 		DWORD ID { 0 };
@@ -944,21 +936,10 @@ namespace
 		// air lanes avoid anti-air this house cannot see any more. Own knowledge only.
 		std::vector<NeuralAirLossTrack> AirLossTracks {};
 		std::vector<std::pair<CellStruct, int>> AirDangerSpots {};
-		// Stuck order watchdog (UpdateStuckUnits): by unit UniqueID, the cell where it has been
-		// standing with a destination and since when. Keyed lookups only, never iterated.
-		std::unordered_map<DWORD, NeuralStuckTrack> StuckTracks {};
-		// Every ground unit of ours: the cell it stands on and since when, without firing (IsFootHeldStill).
-		std::unordered_map<DWORD, NeuralStuckTrack> FootProgress {};
-		// Our flying ground units (jumpjets): the cell they hover over and since when (UpdateHoveringFlyers).
-		std::unordered_map<DWORD, NeuralStuckTrack> HoverTracks {};
-		// Aircraft attack watchdog (UpdateStuckUnits), keyed the same way.
-		std::unordered_map<DWORD, NeuralAirStallTrack> AirStallTracks {};
 		// Expansion drive: ore fields (12x12 blocks) on our landmass more than 14 cells from any
 		// of our hubs (feature scan), and how close the base crawl has brought a building anchor
 		// to the nearest free worthy field (placement scan) so a refinery is wanted there.
 		int UncolonizedOreFields { 0 };
-		// Idle harvester dispatcher (UpdateIdleHarvesters), same keyed shape as StuckTracks.
-		std::unordered_map<DWORD, NeuralStuckTrack> IdleHarvesterTracks {};
 		// Progress clocks by unit UniqueID (NeuralAI.Progress.inl), the serial of the last sample of each
 		// clock (a clock counts only while that sample kept it), the serial counter and the last purge.
 		// Keyed lookups only, never iterated to decide.
@@ -1155,8 +1136,6 @@ namespace
 		NeuralCoalitionState Coalition {};
 		int LastStoneCheckFrame { -100000 };
 		int LastIdleFlyerCheckFrame { -100000 };
-		// Transports in Mission::Unload: UniqueID -> (cell, first frame seen there) (UpdateStuckUnloads).
-		std::unordered_map<DWORD, std::pair<CellStruct, int>> UnloadWatch;
 		// ConYard pack-up anti-loop: where and when our last ConYard was packed into an MCV.
 		CellStruct LastYardUndeployCell { CellStruct::Empty };
 		int LastYardUndeployFrame { -100000 };
@@ -1739,12 +1718,7 @@ namespace
 			this->BloodyBeaches.clear();
 			this->AirLossTracks.clear();
 			this->AirDangerSpots.clear();
-			this->StuckTracks.clear();
-			this->FootProgress.clear();
-			this->HoverTracks.clear();
-			this->AirStallTracks.clear();
 			this->UncolonizedOreFields = 0;
-			this->IdleHarvesterTracks.clear();
 			this->ProgressClocks.clear();
 			this->ClockSampleSerial.fill(0);
 			this->ClockSerialCounter = 0;
@@ -1855,7 +1829,6 @@ namespace
 			this->Coalition = NeuralCoalitionState {};
 			this->LastStoneCheckFrame = -100000;
 			this->LastIdleFlyerCheckFrame = -100000;
-			this->UnloadWatch.clear();
 			this->LastYardUndeployCell = CellStruct::Empty;
 			this->LastYardUndeployFrame = -100000;
 			this->NavalNeedFrame = -100000;
@@ -2405,10 +2378,6 @@ namespace
 
 	// Progress clocks (PurgeClocks): how often the clocks no sample can carry on any more go.
 	constexpr int ClockPurgeFrames = 900;
-	// TEMP diagnostic (NoteClockShadow): the clock mismatches logged per match, and how often the
-	// samples and mismatches of each clock are summed up.
-	constexpr int ClockShadowLogLines = 40;
-	constexpr int ClockShadowSummaryFrames = 9000;
 	// TEMP diagnostic (LogOpTransportRefusals): how often an operation that no transport takes names
 	// why each transport of ours is turned down, the lines a match and the transports a line.
 	constexpr int OpRefusalLogFrames = 1800;

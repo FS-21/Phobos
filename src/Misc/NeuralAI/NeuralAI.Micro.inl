@@ -10742,7 +10742,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				pUnit->SetTarget(nullptr);
 				pUnit->ClearMegaMissionData();
-				GetMacroState(pHouse).FootProgress.erase(pUnit->UniqueID);
 				DropClock(GetMacroState(pHouse), pUnit->UniqueID, NeuralClock::Still);
 				CountDecision(NeuralDecision::NavalStuckReleased, pHouse->ArrayIndex);
 
