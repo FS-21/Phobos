@@ -10504,14 +10504,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		siegeMacro.SiegeOwnersMask = siegeMask;
 	}
 
+	// TEMP diagnostic (R1, 2026-11-20, match #12378): the enemy buildings that keep anyEnemyBuildingExists
+	// (8 at most), for the "no place left to look" line of the remnant search.
+	std::vector<BuildingClass*> countedEnemyBuildings;
+
 	for (auto const pEnemyBld : BuildingClass::Array)
 	{
+		// A capturable Insignificant building (a tech building) is a target behind every other one (Tech*).
 		if (!pEnemyBld || pEnemyBld->InLimbo || !pEnemyBld->IsAlive || !pEnemyBld->Owner || !pEnemyBld->Type
-			|| pEnemyBld->Type->Immune || pEnemyBld->Type->Insignificant || pEnemyBld->Type->InvisibleInGame)
+			|| pEnemyBld->Type->Immune || pEnemyBld->Type->InvisibleInGame
+			|| (pEnemyBld->Type->Insignificant && !pEnemyBld->Type->Capturable))
 		{
 			continue;
 		}
 
+		const bool techTarget = pEnemyBld->Type->Insignificant;
 		const CellStruct ebc = pEnemyBld->GetMapCoords();
 		if (ebc.X <= 1 && ebc.Y <= 1)
 			continue;
@@ -10530,6 +10537,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		auto const pCell = pEnemyBld->GetCell();
 		if (!pCell)
 			continue;
+
+		// A tech building only known to us, and none an engineer of ours goes to capture.
+		if (techTarget && ((!IsCellVisibleToAI(pHouse, pCell) && !IsEnemyBuildingKnown(pHouse, pEnemyBld))
+			|| IsCaptureClaimedByOther(pHouse, pEnemyBld, 0, false)))
+		{
+			continue;
+		}
 
 		const int distHome
 			= (homeCoords != CellStruct::Empty) ? (std::abs(ebc.X - homeCoords.X) + std::abs(ebc.Y - homeCoords.Y)) : 0;
@@ -10688,7 +10702,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				/ (WaveGroupDamageEvenPercent - WaveGroupDamageSlowPercent));
 		}
 
-		anyEnemyBuildingExists = true;
+		if (techTarget)
+		{
+			auto const pTechExt = BuildingTypeExt::Fetch(pEnemyBld->Type);
+			const bool techSuperweapon = pEnemyBld->Type->SuperWeapon != -1 || pEnemyBld->Type->SuperWeapon2 != -1
+				|| (pTechExt && !pTechExt->SuperWeapons.empty());
+			bldCandScore += (techSuperweapon ? TechAirportBonus : 0) - TechTargetPenalty;
+		}
+		else
+		{
+			anyEnemyBuildingExists = true;
+
+			if (countedEnemyBuildings.size() < 8)
+				countedEnemyBuildings.push_back(pEnemyBld);
+		}
 
 		// Fallback wave targets only among buildings this house knows about.
 		const bool isKnownBuilding = IsCellVisibleToAI(pHouse, pCell) || IsEnemyBuildingKnown(pHouse, pEnemyBld);
@@ -11283,6 +11310,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: no place left to look, %d idle, %d on their way\n",
 					Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(searchers.size()), static_cast<int>(onTheirWay));
+
+				// TEMP diagnostic (R1): the enemy buildings the search still counts, and whether we know them.
+				std::string counted;
+
+				for (auto const pCounted : countedEnemyBuildings)
+				{
+					char part[96];
+					std::snprintf(part, sizeof(part), " %s of house %d at (%d,%d) known %d;", pCounted->Type->ID, pCounted->Owner->ArrayIndex,
+						pCounted->GetMapCoords().X, pCounted->GetMapCoords().Y, IsEnemyBuildingKnown(pHouse, pCounted) ? 1 : 0);
+					counted += part;
+				}
+
+				Debug::Log("[NeuralAI] Frame %d | House #%d remnant search counts:%s\n", Unsorted::CurrentFrame, pHouse->ArrayIndex,
+					counted.empty() ? " none" : counted.c_str());
 			}
 		}
 	}
