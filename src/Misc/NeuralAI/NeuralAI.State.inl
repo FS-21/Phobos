@@ -719,6 +719,8 @@ namespace
 		std::vector<std::pair<CellStruct, CellStruct>> HoldMoves;
 		// Since when no transport of the house can come to the staging cell (-1: one can; OpNoReachFrames).
 		int NoReachSince { -1 };
+		// Since when no wave goes to the land of this operation (-1: one does; OpWaveGoneFrames).
+		int WaveGoneSince { -1 };
 		// The landing the load sailing now was given, chosen with its route (ChooseOpTripLanding), and
 		// the frame: the transports that sail in that tick land around it together.
 		CellStruct TripLanding { CellStruct::Empty };
@@ -1495,6 +1497,12 @@ namespace
 		CellStruct LastWaveTargetCell { CellStruct::Empty };
 		int LastWaveDispatchFrame { -100000 };
 		int WaveStartFrame { -100000 };
+		// The cells the waves go to at this tick, primary and secondary (Empty: none), and the frame they
+		// were set: a transport operation lets the wave members that still wait go once the waves no
+		// longer go to its land (OpWaveGoneFrames).
+		CellStruct WaveTargetNow { CellStruct::Empty };
+		CellStruct WaveSecondTargetNow { CellStruct::Empty };
+		int WaveTargetsFrame { -1 };
 		// Wave lesson (UpdateWaveVerdict): the wave under way waits for its verdict, with its target,
 		// the known enemy buildings that stood near it when the wave left, whether a unit of ours
 		// got there and the plan id of the mission it left for (-1 for none); and the waves in a
@@ -2021,6 +2029,9 @@ namespace
 			this->LastWaveTargetCell = CellStruct::Empty;
 			this->LastWaveDispatchFrame = -100000;
 			this->WaveStartFrame = -100000;
+			this->WaveTargetNow = CellStruct::Empty;
+			this->WaveSecondTargetNow = CellStruct::Empty;
+			this->WaveTargetsFrame = -1;
 			this->WaveVerdictPending = false;
 			this->WaveVerdictArrived = false;
 			this->WaveVerdictCell = CellStruct::Empty;
@@ -2581,6 +2592,15 @@ namespace
 	constexpr int OpMemberStuckFrames = 1800;
 	constexpr double OpMemberStuckCells = 2.0;
 	constexpr double OpMemberStuckFarCells = 12.0;
+	// A wave member that still waits for its seat is let go once no wave has gone to the land of its
+	// operation for OpWaveGoneFrames, with the wave targets of its house fresher than
+	// OpWaveTargetFreshFrames; it may ask again after OpWaveGoneRetryFrames. A crossing the economy
+	// opened for an engineer kept ferrying the backlog of a wave to an islet for 20000 frames after
+	// the waves had no target there: 165 of its 193 set-downs came after that (match #12378, Brute
+	// Lagoon).
+	constexpr int OpWaveGoneFrames = 450;
+	constexpr int OpWaveTargetFreshFrames = 60;
+	constexpr int OpWaveGoneRetryFrames = 900;
 	// Against the threats that move (user): a transport inside the reach of a threat plans its route
 	// again every OpRouteDangerReplanFrames instead of OpRouteReplanFrames. A crossing whose landing
 	// grew OpLandingSwitchDanger more dangerous since it sailed (enemies gathered at it), still
