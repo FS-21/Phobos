@@ -643,6 +643,8 @@ namespace
 		CellStruct ProgressCell { CellStruct::Empty };
 		int ProgressFrame { -1 };
 		CellStruct HoldCell { CellStruct::Empty };
+		// Times a transport set it down on its own land before reaching the landing.
+		int ShortSetDowns { 0 };
 	};
 
 	// A transport an operation holds: its type, its leg and the frame the leg began, the cell it sets
@@ -2449,6 +2451,8 @@ namespace
 	//   unload, then another cell (OpMaxLandingTries cells, then the nearest land it stands by).
 	// - OpLandingSpreadCells: the landings of one load lie this far apart at least.
 	// - OpMaxFailedTrips: loads taken back to the staging beach before the operation gives up.
+	// - OpMaxShortSetDowns: set-downs of a member on its own land, short of the landing, before the
+	//   operation lets it go.
 	constexpr bool TransportOpsEnabled = true;
 	constexpr int OpBoardingCapFrames = 3600;
 	constexpr int OpNoTransportFrames = 9000;
@@ -2553,6 +2557,7 @@ namespace
 	constexpr int OpMaxLandingTries = 4;
 	constexpr int OpLandingSpreadCells = 3;
 	constexpr int OpMaxFailedTrips = 2;
+	constexpr int OpMaxShortSetDowns = 2;
 	constexpr int OpLogFrames = 1800;
 	constexpr int OpInterferenceLogFrames = 900;
 	// Safe routes of the transport operations (PlanOpRoute) over a grid of OpRouteBlockCells-cell
