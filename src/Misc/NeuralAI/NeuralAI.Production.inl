@@ -656,8 +656,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	NeuralPhaseClock productionClock { pHouse->ArrayIndex, NeuralSection::ProdBuildings };
 
-	// TEMP diagnostic (economy hold): the best score of a refinery in the building pick (none: it never
-	// got scored) and the score of the scored building pick, for the economy hold status line.
+	// The best refinery past the rules of the building pick, with its score (none: no refinery got
+	// scored), for the economy hold (RefinerySaveTarget). The score of the scored building pick is for
+	// the TEMP economy hold status line.
+	int awaitedRefineryIdx = -1;
 	int awaitedRefineryScore = -32000;
 	int scoredBuildingScore = -32000;
 
@@ -3945,7 +3947,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			if (pBld->Refinery && !pBld->ResourceGatherer && score > awaitedRefineryScore)
+			{
 				awaitedRefineryScore = score;
+				awaitedRefineryIdx = pBld->ArrayIndex;
+			}
 
 			if (score > bestBldScore)
 			{
@@ -4087,6 +4092,33 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					if (pHouse->HasLowPower() || hasUnpoweredBuildings || projectedSurplus < minSafeAfterBuild)
 						bestBldIdx = bestPowerPlantIdx;
 				}
+			}
+		}
+
+		// The refinery the economy hold saves for (RefinerySaveTarget, a newly reached field) is the
+		// pick of the yard as soon as it is wanted, paid as the credits come in (user: AI builds pay as
+		// they go). On its score it lost the yard to a building worth about twice as much, the hold
+		// cancelled that building again and again, and once the credits reached the price the yard built
+		// something else (user approved, 2026-11-20, P1; over 39 matches: 709 holds, 1726 cancels, a
+		// refinery more 1800 frames after the price was reached in 53 of 152). With no refinery past
+		// the rules of this pick the hold does not save for one. A harvester the hold saves for comes
+		// first, and so do the power plant of a house short of power and anything under attack.
+		{
+			auto& saveMacro = GetMacroState(pHouse);
+
+			if (saveMacro.RefinerySaveTarget > 0 && awaitedRefineryIdx < 0)
+			{
+				saveMacro.RefinerySaveTarget = 0;
+			}
+			else if (saveMacro.RefinerySaveTarget > 0 && saveMacro.HarvesterSaveTarget <= 0 && !saveMacro.CounterUnderAttack
+				&& bestBldIdx != awaitedRefineryIdx)
+			{
+				auto const pPicked = bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx) : nullptr;
+				const bool keepPick = pPicked
+					&& (pPicked->Refinery || (pHouse->HasLowPower() && pPicked->PowerBonus > pPicked->PowerDrain));
+
+				if (!keepPick)
+					bestBldIdx = awaitedRefineryIdx;
 			}
 		}
 
@@ -5373,6 +5405,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const int awaitedUnitKind = holdMacro.EconomyHoldKind == 4 ? 1 : holdMacro.EconomyHoldKind;
 	int awaitedUnitStage = 0;
 	int awaitedUnitScore = -32000;
+	// The best harvester and the best MCV past the rules of this pick, for the economy hold
+	// (HarvesterSaveTarget, ExpansionSaveTarget).
+	int awaitedHarvesterIdx = -1;
+	int awaitedHarvesterScore = -32000;
+	int awaitedMcvIdx = -1;
+	int awaitedMcvScore = -32000;
 
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
@@ -6034,6 +6072,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				awaitedUnitScore = std::max(awaitedUnitScore, score);
 			}
 
+			if (pUnit->Harvester && !pUnit->DeploysInto && score > awaitedHarvesterScore)
+			{
+				awaitedHarvesterScore = score;
+				awaitedHarvesterIdx = pUnit->ArrayIndex;
+			}
+
+			if (isMCV && score > awaitedMcvScore)
+			{
+				awaitedMcvScore = score;
+				awaitedMcvIdx = pUnit->ArrayIndex;
+			}
+
 			if (score > bestUnitScore)
 			{
 				bestUnitScore = score;
@@ -6238,6 +6288,31 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (IsAITickWindow(450, evalDelay))
 			CountDecision(NeuralDecision::BankYardPick, pHouse->ArrayIndex);
+	}
+
+	// The harvester the economy hold saves for (fewer than refineries) or, with no harvester nor
+	// refinery wanted, its expansion MCV is the pick of the war factory as soon as it is wanted, paid
+	// as the credits come in (user: AI builds pay as they go). With none past the rules of this pick
+	// (the tank mass's gatherer wait, the gatherer cap, the MCV gates) the hold does not save for it,
+	// except the island MCV, whose missing buildings come first. Nothing under attack. (User approved,
+	// 2026-11-20, P1; over 39 matches, once the credits reached the price a harvester more came within
+	// 1800 frames in 2 of 17 checks and an MCV in 5 of 22: the harvester stopped at the economy unit
+	// rules in 53 of 68 hold status lines, the MCV at its gates in 47 of 89, match #11911: an MCV saved
+	// for while the pick built a REDEEMER, cancelled 528 times.)
+	{
+		auto& saveMacro = GetMacroState(pHouse);
+
+		if (saveMacro.HarvesterSaveTarget > 0 && awaitedHarvesterIdx < 0)
+			saveMacro.HarvesterSaveTarget = 0;
+
+		if (saveMacro.ExpansionSaveTarget > 0 && awaitedMcvIdx < 0 && !islandOreRunningOut)
+			saveMacro.ExpansionSaveTarget = 0;
+
+		const int savedForIdx = saveMacro.HarvesterSaveTarget > 0 ? awaitedHarvesterIdx
+			: ((saveMacro.RefinerySaveTarget <= 0 && saveMacro.ExpansionSaveTarget > 0) ? awaitedMcvIdx : -1);
+
+		if (savedForIdx >= 0 && !saveMacro.CounterUnderAttack)
+			bestUnitIdx = savedForIdx;
 	}
 
 	// TEMP diagnostic (economy hold, 2026-11-20, matches #11905 and #11911: a war factory pick cancelled

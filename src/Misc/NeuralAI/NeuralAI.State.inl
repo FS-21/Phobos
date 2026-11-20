@@ -2673,6 +2673,10 @@ namespace
 	constexpr int EconomyRecoveryKeepFactories = 1;
 	// TEMP diagnostic (economy hold): status lines a house writes a match, one every 900 frames of a hold.
 	constexpr int EconomyHoldLogLinesMost = 120;
+	// An economy hold whose item is in no factory after EconomyHoldStartFrames rests (user approved,
+	// 2026-11-20, P1: the item is the pick of its queue as soon as it is wanted, so one that did not
+	// start is blocked elsewhere).
+	constexpr int EconomyHoldStartFrames = 2700;
 	// Ore cells of a held 12x12 ore block for each refinery past the first it takes (3 at most).
 	constexpr int RefineryOreCellsPerExtra = 24;
 	// A newly reached ore field gets a refinery past what we own (and past the held fields' room) at
