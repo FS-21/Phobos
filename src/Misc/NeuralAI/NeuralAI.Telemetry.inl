@@ -1692,6 +1692,9 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 		jsonBuf.append("\n  ],\n  \"radar\": [");
 
+		// Added to a radar point's kind for a naval object, so the kind values stay as they were.
+		constexpr int RadarNavalFlag = 16;
+
 		auto sanitizeJsonStr = [](const char* src, char* out, size_t outCap)
 		{
 			if (!out || outCap == 0)
@@ -1907,8 +1910,10 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			// ptKind: 0 = unit, 1 = structure, 2 = defense structure (IsBaseDefense=yes), 3 = deployed
 			// vehicle structure (drawn as a unit, listed as a structure: a deployed Slave Miner is a
 			// YAREFN building, not a unit; user), -1 = slave bound to its miner, 4 = aircraft or a vehicle
-			// that flies (drawn as a ring; user).
-			const int ptKind = isDeployedVehicleBld ? 3 : (pBld->Type->IsBaseDefense ? 2 : 1);
+			// that flies (drawn as a ring; user). Plus RadarNavalFlag for a naval object (drawn with a
+			// cross; user): a Naval=yes building or one that stands on water.
+			const bool navalBld = pBld->Type->Naval || pBld->GetCell()->LandType == LandType::Water;
+			const int ptKind = (isDeployedVehicleBld ? 3 : (pBld->Type->IsBaseDefense ? 2 : 1)) + (navalBld ? RadarNavalFlag : 0);
 
 			char idClean[32];
 			char nameClean[64];
@@ -1954,10 +1959,14 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			auto const pUnitType = pUnit->Type;
 			const bool flies = pUnitType && (pUnitType->JumpJet || pUnitType->BalloonHover || pUnitType->ConsideredAircraft
 				|| pUnitType->MovementZone == MovementZone::Fly || pUnit->IsInAir());
+			// Naval vessels, drawn with a cross to tell them from the land vehicles (user).
+			const bool naval = pUnitType && !flies && (pUnitType->Naval || pUnitType->MovementZone == MovementZone::Water
+				|| pUnitType->MovementZone == MovementZone::WaterBeach);
+			const int ptKind = (flies ? 4 : 0) + (naval ? RadarNavalFlag : 0);
 
 			objectDetail(pUnit, detailBuf, sizeof(detailBuf));
 			lineLen = std::snprintf(lineBuf, sizeof(lineBuf), "%s[%.1f,%.1f,%d,%d,\"%s\",\"%s\"%s%s]", firstPt ? "" : ",",
-				rx, ry, pUnit->Owner->ArrayIndex, flies ? 4 : 0, idClean, nameClean, detailBuf, visionDetail(c, nullptr));
+				rx, ry, pUnit->Owner->ArrayIndex, ptKind, idClean, nameClean, detailBuf, visionDetail(c, nullptr));
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));
