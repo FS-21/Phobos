@@ -62,6 +62,14 @@ namespace
 		int Frame { 0 };
 	};
 
+	// A known enemy building area for a later remnant search: its cell, owner and the frame it was last known.
+	struct NeuralRemnantLead
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Owner { -1 };
+		int Frame { 0 };
+	};
+
 	// Last frame each 8x8 block of cells was in our current sight (-1: never).
 	constexpr int ScoutBlockSize = 8;
 	constexpr int ScoutBlockSide = VisionMapSide / ScoutBlockSize;
@@ -102,6 +110,13 @@ namespace
 		bool RevealHeld { false };
 		// Places remnant searchers were sent to (cell, frame), kept RemnantSearchMemoryFrames.
 		std::vector<std::pair<CellStruct, int>> RemnantSent {};
+		// Remnant searchers on their way: UniqueID -> (place, frame sent), RemnantSearchKeepFrames at most.
+		std::unordered_map<DWORD, std::pair<CellStruct, int>> RemnantScouts {};
+		// The last known enemy buildings (one an area, the newest first, RemnantLeadsMost at most), the
+		// last frame they were noted, and the last frame of the "no place" line.
+		std::vector<NeuralRemnantLead> RemnantLeads {};
+		int RemnantLeadsFrame { -100000 };
+		int RemnantNoPlaceLogFrame { -100000 };
 		// Last frame a sweep scout could leave (ScoutSweepEveryFrames).
 		int LastSweepFrame { -100000 };
 		// Whether an enemy object was in our sight at the last update.
@@ -1249,23 +1264,40 @@ namespace
 	// fields never explored after 9000 frames). At most one new scout every 240 frames. While no
 	// enemy object is in sight, one more every ScoutSweepEveryFrames up to ScoutSweepMostTrips, the
 	// grid of sweep places weighed too, and the sensor lookouts move (UpdateSensorLookouts).
-	// Places to look for what is left of an enemy: playable land cells of a grid whose surroundings
-	// teach the most, the best first (nearer to home among equals), at most this many. A place
-	// searchers went to in the last RemnantSearchSpreadFrames is left to the next ones, and one they
-	// went to RemnantSearchMostSends times within RemnantSearchMemoryFrames is out of their reach.
-	// The places returned are noted as sent to.
+	// Places to look for what is left of an enemy, at most this many, the best first (nearer to home
+	// among equals): the last known enemy buildings of houses still in the match and the free ore
+	// fields first (RemnantLead*), then playable land cells of a grid, by what their surroundings
+	// teach. Only places that teach RemnantSearchMinGain or more while there are any, otherwise the
+	// stalest ones. A place searchers went to in the last RemnantSearchSpreadFrames, or one a searcher
+	// is still on its way to, is left to the next ones; one they went to RemnantSearchMostSends times
+	// within RemnantSearchMemoryFrames is out of their reach. One searcher a place: places closer than
+	// half a grid step count once. The places returned are noted as sent to.
 	std::vector<CellStruct> FindRemnantSearchCells(HouseClass* pHouse, size_t most)
 	{
 		auto& state = GetScoutState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 		const bool fog = IsFogOfWarMatch();
 		const CellStruct home = GetHouseHomeCell(pHouse);
-		std::vector<std::pair<int, CellStruct>> found;
+
+		struct RemnantPlace
+		{
+			int Score;
+			CellStruct Cell;
+			int Gain;
+		};
+
+		std::vector<RemnantPlace> found;
 
 		std::erase_if(state.RemnantSent, [now](const std::pair<CellStruct, int>& sent) { return now - sent.second > RemnantSearchMemoryFrames; });
 
 		auto leftAlone = [&state, now](const CellStruct& cell)
 		{
+			for (auto const& [uid, kept] : state.RemnantScouts)
+			{
+				if (kept.first.DistanceFrom(cell) <= RemnantSearchStepCells / 2)
+					return true;
+			}
+
 			int sends = 0;
 
 			for (auto const& [spot, frame] : state.RemnantSent)
@@ -1280,44 +1312,193 @@ namespace
 			return false;
 		};
 
-		for (int y = RemnantSearchStepCells / 2; y < VisionMapSide; y += RemnantSearchStepCells)
+		auto const consider = [&](const CellStruct& cell, int bonus)
 		{
-			for (int x = RemnantSearchStepCells / 2; x < VisionMapSide; x += RemnantSearchStepCells)
+			if (!IsScoutableCell(cell) || leftAlone(cell))
+				return;
+
+			auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+			if (!pCell || pCell->LandType == LandType::Water)
+				return;
+
+			const int gain = ScoutInfoGain(pHouse, state, cell, RemnantSearchRadius, fog);
+
+			if (gain > 0)
+				found.push_back({ gain * 4 + bonus - static_cast<int>(cell.DistanceFrom(home)), cell, gain });
+		};
+
+		std::vector<CellStruct> leads;
+
+		for (auto const& lead : state.RemnantLeads)
+		{
+			auto const pOwner = lead.Owner >= 0 && lead.Owner < HouseClass::Array.Count ? HouseClass::Array.GetItem(lead.Owner) : nullptr;
+
+			if (pOwner && !pOwner->Defeated && pOwner->Buildings.Count > 0)
 			{
-				const CellStruct cell { static_cast<short>(x), static_cast<short>(y) };
-
-				if (!IsScoutableCell(cell) || leftAlone(cell))
-					continue;
-
-				auto const pCell = MapClass::Instance.TryGetCellAt(cell);
-
-				if (!pCell || pCell->LandType == LandType::Water)
-					continue;
-
-				const int gain = ScoutInfoGain(pHouse, state, cell, RemnantSearchRadius, fog);
-
-				if (gain >= RemnantSearchMinGain)
-					found.push_back({ gain * 4 - static_cast<int>(cell.DistanceFrom(home)), cell });
+				leads.push_back(lead.Cell);
+				consider(lead.Cell, RemnantLeadBuildingBonus);
 			}
 		}
 
-		std::sort(found.begin(), found.end(), [](const std::pair<int, CellStruct>& a, const std::pair<int, CellStruct>& b)
-			{
-				if (a.first != b.first)
-					return a.first > b.first;
+		for (auto const& field : GetOreFields())
+		{
+			bool ours = false;
 
-				return a.second.X != b.second.X ? a.second.X < b.second.X : a.second.Y < b.second.Y;
+			for (auto const pOwnB : pHouse->Buildings)
+			{
+				if (pOwnB && pOwnB->IsAlive && pOwnB->GetMapCoords().DistanceFrom(field.Cell) <= 14.0)
+				{
+					ours = true;
+					break;
+				}
+			}
+
+			if (ours)
+				continue;
+
+			const bool nearLead = leads.empty() || std::any_of(leads.begin(), leads.end(),
+				[&field](const CellStruct& lead) { return lead.DistanceFrom(field.Cell) <= RemnantLeadFieldCells; });
+			consider(field.Cell, nearLead ? RemnantLeadFieldBonus : RemnantLeadFieldBonus / 2);
+		}
+
+		for (int y = RemnantSearchStepCells / 2; y < VisionMapSide; y += RemnantSearchStepCells)
+		{
+			for (int x = RemnantSearchStepCells / 2; x < VisionMapSide; x += RemnantSearchStepCells)
+				consider(CellStruct { static_cast<short>(x), static_cast<short>(y) }, 0);
+		}
+
+		if (std::any_of(found.begin(), found.end(), [](const RemnantPlace& place) { return place.Gain >= RemnantSearchMinGain; }))
+			std::erase_if(found, [](const RemnantPlace& place) { return place.Gain < RemnantSearchMinGain; });
+
+		std::sort(found.begin(), found.end(), [](const RemnantPlace& a, const RemnantPlace& b)
+			{
+				if (a.Score != b.Score)
+					return a.Score > b.Score;
+
+				return a.Cell.X != b.Cell.X ? a.Cell.X < b.Cell.X : a.Cell.Y < b.Cell.Y;
 			});
 
 		std::vector<CellStruct> cells;
 
-		for (size_t i = 0; i < found.size() && i < most; ++i)
+		for (auto const& place : found)
 		{
-			cells.push_back(found[i].second);
-			state.RemnantSent.emplace_back(found[i].second, now);
+			if (cells.size() >= most)
+				break;
+
+			if (std::any_of(cells.begin(), cells.end(),
+				[&place](const CellStruct& taken) { return taken.DistanceFrom(place.Cell) <= RemnantSearchStepCells / 2; }))
+			{
+				continue;
+			}
+
+			cells.push_back(place.Cell);
+			state.RemnantSent.emplace_back(place.Cell, now);
 		}
 
 		return cells;
+	}
+
+	// Outside the remnant phase: the searchers are free again, and the known enemy buildings are noted
+	// as leads for a later search (RemnantLeads), every RemnantLeadsEveryFrames.
+	void NoteRemnantLeads(HouseClass* pHouse)
+	{
+		auto& state = GetScoutState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		state.RemnantScouts.clear();
+
+		if (now - state.RemnantLeadsFrame < RemnantLeadsEveryFrames && now >= state.RemnantLeadsFrame)
+			return;
+
+		state.RemnantLeadsFrame = now;
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			if (!info.Building || !info.Building->Owner)
+				continue;
+
+			auto const itLead = std::find_if(state.RemnantLeads.begin(), state.RemnantLeads.end(),
+				[&info](const NeuralRemnantLead& lead) { return lead.Cell.DistanceFrom(info.Coords) <= RemnantSearchStepCells / 2; });
+
+			if (itLead != state.RemnantLeads.end())
+			{
+				itLead->Owner = info.Building->Owner->ArrayIndex;
+				itLead->Frame = now;
+			}
+			else
+			{
+				state.RemnantLeads.push_back({ info.Coords, info.Building->Owner->ArrayIndex, now });
+			}
+		}
+
+		std::stable_sort(state.RemnantLeads.begin(), state.RemnantLeads.end(),
+			[](const NeuralRemnantLead& a, const NeuralRemnantLead& b) { return a.Frame > b.Frame; });
+
+		if (state.RemnantLeads.size() > RemnantLeadsMost)
+			state.RemnantLeads.resize(RemnantLeadsMost);
+	}
+
+	// In the remnant phase: the searchers still on their way to their place leave the idle pools, so
+	// nothing sends them elsewhere; one that came within RemnantSearchArriveCells of it, heads more
+	// than that from it (another order took it, or it stopped) or ran out of RemnantSearchKeepFrames
+	// is free again. Returns how many are on their way.
+	size_t KeepRemnantSearchers(HouseClass* pHouse, std::vector<UnitClass*>& idleUnits, std::vector<InfantryClass*>& idleInf)
+	{
+		auto& state = GetScoutState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		std::erase_if(state.RemnantScouts, [now](const std::pair<const DWORD, std::pair<CellStruct, int>>& kept)
+			{ return now - kept.second.second > RemnantSearchKeepFrames || now < kept.second.second; });
+
+		if (state.RemnantScouts.empty())
+			return 0;
+
+		size_t onTheirWay = 0;
+
+		auto const keeps = [&state, &onTheirWay](FootClass* pFoot)
+		{
+			auto const itKept = state.RemnantScouts.find(pFoot->UniqueID);
+
+			if (itKept == state.RemnantScouts.end())
+				return false;
+
+			const CellStruct place = itKept->second.first;
+			const CellStruct goal = OrderLeaseGoalOf(pFoot);
+
+			if (pFoot->GetMapCoords().DistanceFrom(place) <= RemnantSearchArriveCells || goal == CellStruct::Empty
+				|| goal.DistanceFrom(place) > RemnantSearchArriveCells)
+			{
+				state.RemnantScouts.erase(itKept);
+				return false;
+			}
+
+			onTheirWay++;
+			return true;
+		};
+
+		std::erase_if(idleUnits, keeps);
+		std::erase_if(idleInf, keeps);
+
+		return onTheirWay;
+	}
+
+	// A remnant searcher sent to its place (KeepRemnantSearchers).
+	void NoteRemnantSearcher(HouseClass* pHouse, const FootClass* pFoot, const CellStruct& place)
+	{
+		GetScoutState(pHouse).RemnantScouts[pFoot->UniqueID] = { place, Unsorted::CurrentFrame };
+	}
+
+	// Whether the "no place left" line of the remnant search may be written now (one every 2700 frames).
+	bool MayLogRemnantNoPlace(HouseClass* pHouse)
+	{
+		auto& state = GetScoutState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (now - state.RemnantNoPlaceLogFrame < 2700 && now >= state.RemnantNoPlaceLogFrame)
+			return false;
+
+		state.RemnantNoPlaceLogFrame = now;
+		return true;
 	}
 
 	// Where a sensor array of this sensor radius, unfolded in the given movement zone, covers the most

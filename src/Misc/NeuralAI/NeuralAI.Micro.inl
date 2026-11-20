@@ -16,6 +16,10 @@ namespace
 namespace
 {
 	std::vector<CellStruct> FindRemnantSearchCells(HouseClass* pHouse, size_t most);
+	void NoteRemnantLeads(HouseClass* pHouse);
+	size_t KeepRemnantSearchers(HouseClass* pHouse, std::vector<UnitClass*>& idleUnits, std::vector<InfantryClass*>& idleInf);
+	void NoteRemnantSearcher(HouseClass* pHouse, const FootClass* pFoot, const CellStruct& place);
+	bool MayLogRemnantNoPlace(HouseClass* pHouse);
 }
 
 // Land before islands (IslandMcvWaitFrames, NeuralAI.State.inl).
@@ -10443,37 +10447,56 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Remnant search: the remnant phase while the enemy still has buildings, whatever enemy unit the
 	// waves go after meanwhile. Idle units go and look, the fastest first, each to a different place
 	// (RemnantSearchScouts, one in RemnantSearchArmyShare of a big idle army), and leave the idle
-	// pools.
-	if (remnantPhase && anyEnemyBuildingExists
-		&& Unsorted::CurrentFrame - GetMacroState(pHouse).RemnantSearchFrame >= RemnantSearchEveryFrames)
+	// pools until they get there (KeepRemnantSearchers). Outside it the known enemy buildings are
+	// noted as the first places of a later search (NoteRemnantLeads).
+	if (!remnantPhase)
 	{
-		GetMacroState(pHouse).RemnantSearchFrame = Unsorted::CurrentFrame;
-		std::vector<FootClass*> searchers(idleCombatUnits.begin(), idleCombatUnits.end());
-		searchers.insert(searchers.end(), idleCombatInf.begin(), idleCombatInf.end());
-		std::stable_sort(searchers.begin(), searchers.end(), [](FootClass* a, FootClass* b)
+		NoteRemnantLeads(pHouse);
+	}
+	else if (anyEnemyBuildingExists)
+	{
+		const size_t onTheirWay = KeepRemnantSearchers(pHouse, idleCombatUnits, idleCombatInf);
+
+		if (Unsorted::CurrentFrame - GetMacroState(pHouse).RemnantSearchFrame >= RemnantSearchEveryFrames)
+		{
+			GetMacroState(pHouse).RemnantSearchFrame = Unsorted::CurrentFrame;
+			std::vector<FootClass*> searchers(idleCombatUnits.begin(), idleCombatUnits.end());
+			searchers.insert(searchers.end(), idleCombatInf.begin(), idleCombatInf.end());
+			std::stable_sort(searchers.begin(), searchers.end(), [](FootClass* a, FootClass* b)
+				{
+					return a->GetTechnoType()->Speed > b->GetTechnoType()->Speed;
+				});
+
+			const size_t wantedSearchers = std::clamp((searchers.size() + onTheirWay) / RemnantSearchArmyShare,
+				RemnantSearchScouts, RemnantSearchMostScouts);
+			const size_t searcherCount = std::min(searchers.size(), wantedSearchers > onTheirWay ? wantedSearchers - onTheirWay : 0);
+			const std::vector<CellStruct> places = searcherCount > 0 ? FindRemnantSearchCells(pHouse, searcherCount) : std::vector<CellStruct> {};
+
+			for (size_t i = 0; i < places.size(); ++i)
 			{
-				return a->GetTechnoType()->Speed > b->GetTechnoType()->Speed;
-			});
+				auto const pSearcher = searchers[i];
 
-		const size_t searcherCount = std::min(searchers.size(),
-			std::clamp(searchers.size() / RemnantSearchArmyShare, RemnantSearchScouts, RemnantSearchMostScouts));
-		const std::vector<CellStruct> places = FindRemnantSearchCells(pHouse, searcherCount);
+				if (auto const pPlace = MapClass::Instance.TryGetCellAt(places[i]))
+				{
+					OrderFootToAttackMove(pSearcher, pPlace);
+					NoteRemnantSearcher(pHouse, pSearcher, places[i]);
+				}
 
-		for (size_t i = 0; i < places.size(); ++i)
-		{
-			auto const pSearcher = searchers[i];
+				std::erase(idleCombatUnits, pSearcher);
+				std::erase(idleCombatInf, pSearcher);
+			}
 
-			if (auto const pPlace = MapClass::Instance.TryGetCellAt(places[i]))
-				OrderFootToAttackMove(pSearcher, pPlace);
-
-			std::erase(idleCombatUnits, pSearcher);
-			std::erase(idleCombatInf, pSearcher);
-		}
-
-		if (!places.empty())
-		{
-			Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: %d scouts sent, first to (%d,%d)\n", Unsorted::CurrentFrame,
-				pHouse->ArrayIndex, static_cast<int>(places.size()), places.front().X, places.front().Y);
+			if (!places.empty())
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: %d scouts sent, %d on their way, first to (%d,%d)\n",
+					Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(places.size()), static_cast<int>(onTheirWay),
+					places.front().X, places.front().Y);
+			}
+			else if (searcherCount > 0 && MayLogRemnantNoPlace(pHouse))
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: no place left to look, %d idle, %d on their way\n",
+					Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(searchers.size()), static_cast<int>(onTheirWay));
+			}
 		}
 	}
 
