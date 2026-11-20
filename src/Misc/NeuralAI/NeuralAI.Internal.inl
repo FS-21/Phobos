@@ -1088,6 +1088,7 @@ namespace
 		Feint,
 		BaitAmbush,
 		CounterSquad,
+		EdgeBlitz,
 		Count
 	};
 
@@ -1097,7 +1098,7 @@ namespace
 		"forwardRepair", "navalStrike", "engineerAssault", "sabotage", "huntKeyUnits", "rotatingRaids", "airCorridor",
 		"silentInfiltration", "artilleryEcoSiege", "rollingSiege", "delayingAction", "threeFront", "factoryDecapitation",
 		"cutReinforcements", "techTreeCut", "comboBlackoutPush", "comboWatchStrike", "allyBackup", "allyForwardOutpost", "baseThreatIntercept",
-		"feint", "baitAmbush", "counterSquad" };
+		"feint", "baitAmbush", "counterSquad", "edgeBlitz" };
 
 	// Trained preference of each plan: free reserve output slots 89.. (see the trainer's
 	// OUTPUT_SLOT_NAMES), learned by ES like any other slot. The ally site plans share the slot of
@@ -1109,9 +1110,10 @@ namespace
 	// Clear Our Ground (108) weigh the target of its main wave (TankMassMissionBonus) and count
 	// the waves sent for them as their starts, with the wave verdict as their result.
 	// Counter Squad has no slot (-1) and never goes through the learned gate (shouldTryStart): it is
-	// a fixed rule, and the trainer credits no slot for a plan name it does not know.
+	// a fixed rule, and the trainer credits no slot for a plan name it does not know. Edge Blitz shares
+	// Pincer's (102): both come at the enemy from another side than its front.
 	constexpr int NeuralPlanSlots[] = { 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107,
-		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 106, 109, 107, 102, 100, -1 };
+		108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 106, 109, 107, 102, 100, -1, 102 };
 
 	static_assert(std::size(NeuralPlanNames) == static_cast<size_t>(NeuralPlanId::Count));
 	static_assert(std::size(NeuralPlanSlots) == static_cast<size_t>(NeuralPlanId::Count));

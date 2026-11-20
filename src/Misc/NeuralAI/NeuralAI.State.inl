@@ -968,6 +968,8 @@ namespace
 		std::array<int, NeuralClockCount> ClockSampleSerial {};
 		int ClockSerialCounter { 0 };
 		int ClockPurgeFrame { 0 };
+		// TEMP diagnostic: the Edge Blitz starts logged this match (EdgeBlitzLogLines).
+		int EdgeBlitzLogCount { 0 };
 		// Deployed slave miners (UpdateStrandedSlaveMiners): ore samples in their slaves' reach (read
 		// by the economy unit cap), the frame each one ran out of ore in reach, and the moves ordered
 		// since the last log line.
@@ -1782,6 +1784,7 @@ namespace
 			this->ClockSampleSerial.fill(0);
 			this->ClockSerialCounter = 0;
 			this->ClockPurgeFrame = 0;
+			this->EdgeBlitzLogCount = 0;
 			this->MinerOreSamples.clear();
 			this->StrandedMinerSince.clear();
 			this->MinerRelocations = 0;
@@ -2894,6 +2897,28 @@ namespace
 	// building of its owner within ExpansionDenialBaseCells) counts its distance divided by
 	// ExpansionDenialDistDivisor.
 	constexpr int CaptureUnguardedDefenseMargin = 2;
+	// Edge Blitz (UpdateStrategicPlans): EdgeBlitzGroupLeast to EdgeBlitzGroupMost of the strongest fast
+	// idle ground units go round the enemy base: out to the side of the line between the bases as far as
+	// EdgeBlitzSideMostCells (at least EdgeBlitzSideLeastCells), then EdgeBlitzBehindCells past the target,
+	// each leg ending within EdgeBlitzWaypointCells or after EdgeBlitzLegFrames; then they strike. The
+	// target lies EdgeBlitzRearDepthCells or more behind the centre of its owner's known buildings, with
+	// at most EdgeBlitzTargetDefenses known defenses within EdgeBlitzDefenseCells. It ends after
+	// EdgeBlitzFrames, or when the group keeps less than EdgeBlitzKeepPercent of its value. TEMP: the starts,
+	// EdgeBlitzLogLines a match.
+	constexpr size_t EdgeBlitzGroupLeast = 4;
+	constexpr size_t EdgeBlitzGroupMost = 10;
+	constexpr double EdgeBlitzSideMostCells = 60.0;
+	constexpr double EdgeBlitzSideLeastCells = 12.0;
+	constexpr double EdgeBlitzBehindCells = 14.0;
+	constexpr double EdgeBlitzWaypointCells = 6.0;
+	constexpr int EdgeBlitzLegFrames = 1800;
+	constexpr double EdgeBlitzRearDepthCells = 4.0;
+	constexpr int EdgeBlitzTargetDefenses = 1;
+	constexpr double EdgeBlitzDefenseCells = 8.0;
+	constexpr int EdgeBlitzFrames = 5400;
+	constexpr int EdgeBlitzKeepPercent = 40;
+	constexpr int EdgeBlitzUtility = 320;
+	constexpr int EdgeBlitzLogLines = 30;
 	constexpr int CaptureUnguardedThreatCells = 7;
 	constexpr int ExpansionDenialBaseCells = 15;
 	constexpr int ExpansionDenialDistDivisor = 4;

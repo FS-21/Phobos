@@ -2829,7 +2829,7 @@ namespace
 				NeuralPlanId::PreemptiveStrike, NeuralPlanId::RotatingRaids, NeuralPlanId::ArtilleryEcoSiege,
 				NeuralPlanId::FactoryDecapitation, NeuralPlanId::CutReinforcements, NeuralPlanId::TechTreeCut,
 				NeuralPlanId::RollingSiege, NeuralPlanId::SiegeBattery, NeuralPlanId::BaitAmbush, NeuralPlanId::Pincer,
-				NeuralPlanId::ThreeFrontAssault, NeuralPlanId::AllyJointAttack, NeuralPlanId::CounterSquad };
+				NeuralPlanId::ThreeFrontAssault, NeuralPlanId::AllyJointAttack, NeuralPlanId::CounterSquad, NeuralPlanId::EdgeBlitz };
 
 			const bool marches = std::find(std::begin(marching), std::end(marching), id) != std::end(marching);
 			auto const walks = [](FootClass* pFoot)
@@ -11456,6 +11456,247 @@ namespace
 				{
 					startPlan(NeuralPlanId::CutReinforcements, group, pFactory->GetMapCoords(), pPost->MapCoords, pFactory->UniqueID, 3600);
 					planOf(NeuralPlanId::CutReinforcements).AuxPeak = 0;
+				}
+			}
+		}
+
+		// ---------------------------------------------------------------- Plan: Edge Blitz
+		// A lightning strike round the enemy base (user, 2026-11-20: «recorrer los bordes del mapa y atacar
+		// por la espalda, que no suele protegerse ... un buen ataque relámpago con unidades poderosas»).
+		// The strongest fast idle ground units go out to one side of the line between the two bases, as
+		// far as the map and our ground let them, then past the target behind the enemy base, and strike a
+		// decisive building of its rear: one behind the centre of its owner's known buildings as seen from
+		// us, with few known defenses near it. The side with less known enemy strength on the way is taken.
+		// Cells = the waypoints; AuxPeak = the leg (one per waypoint, then the strike); AuxBaseline = when
+		// the leg began.
+		{
+			auto& plan = planOf(NeuralPlanId::EdgeBlitz);
+
+			if (plan.Active)
+			{
+				auto const pTarget = FindBuildingByID(plan.TargetID);
+
+				if (!pTarget)
+				{
+					finishPlan(NeuralPlanId::EdgeBlitz, true, true);
+				}
+				else if (memberValue(plan) * 100 < plan.InitialValue * EdgeBlitzKeepPercent || Unsorted::CurrentFrame >= plan.Deadline)
+				{
+					finishPlan(NeuralPlanId::EdgeBlitz, false, true);
+				}
+				else if (plan.AuxPeak >= 0 && plan.AuxPeak < static_cast<int>(plan.Cells.size()))
+				{
+					auto const pLeg = MapClass::Instance.TryGetCellAt(plan.Cells[plan.AuxPeak]);
+					const CellStruct at = groupCentroid(plan.Members);
+
+					if (!pLeg || (at != CellStruct::Empty && at.DistanceFrom(pLeg->MapCoords) <= EdgeBlitzWaypointCells)
+						|| Unsorted::CurrentFrame - plan.AuxBaseline >= EdgeBlitzLegFrames || Unsorted::CurrentFrame < plan.AuxBaseline)
+					{
+						plan.AuxPeak++;
+						plan.AuxBaseline = Unsorted::CurrentFrame;
+					}
+					else
+					{
+						moveGroup(plan.Members, pLeg, 3.0);
+					}
+				}
+				else
+				{
+					strikeWithMembers(plan.Members, pTarget);
+				}
+			}
+			else if (planReady(NeuralPlanId::EdgeBlitz) && homeCell != CellStruct::Empty)
+			{
+				// The strongest fast units first: combat value times speed.
+				std::vector<FootClass*> group = collectIdleGround(false);
+				std::sort(group.begin(), group.end(), [](FootClass* a, FootClass* b)
+					{
+						auto const pA = a->GetTechnoType();
+						auto const pB = b->GetTechnoType();
+						const long long va = static_cast<long long>(GetCombatValueOfType(pA, false)) * pA->Speed;
+						const long long vb = static_cast<long long>(GetCombatValueOfType(pB, false)) * pB->Speed;
+						return va != vb ? va > vb : a->UniqueID < b->UniqueID;
+					});
+
+				if (group.size() > EdgeBlitzGroupMost)
+					group.resize(EdgeBlitzGroupMost);
+
+				// The centre of each enemy house's known buildings on our ground.
+				std::vector<long long> sumX(HouseClass::Array.Count, 0);
+				std::vector<long long> sumY(HouseClass::Array.Count, 0);
+				std::vector<int> counted(HouseClass::Array.Count, 0);
+
+				for (auto const pBld : knownEnemyBuildingList)
+				{
+					if (!isKnownEnemyBuilding(pBld) || zoneOf(pBld->GetMapCoords()) != homeZone)
+						continue;
+
+					const int owner = pBld->Owner->ArrayIndex;
+
+					if (owner < 0 || owner >= HouseClass::Array.Count)
+						continue;
+
+					sumX[owner] += pBld->GetMapCoords().X;
+					sumY[owner] += pBld->GetMapCoords().Y;
+					counted[owner]++;
+				}
+
+				// Behind the centre as seen from home, worth a strike, few defenses near: the deepest and
+				// most valuable, nearest last.
+				BuildingClass* pTarget = nullptr;
+				int bestScore = INT_MIN;
+				double centreX = 0.0;
+				double centreY = 0.0;
+				double targetDepth = 0.0;
+
+				if (group.size() >= EdgeBlitzGroupLeast)
+				{
+					for (auto const pBld : knownEnemyBuildingList)
+					{
+						if (!isKnownEnemyBuilding(pBld) || zoneOf(pBld->GetMapCoords()) != homeZone || pBld->Type->Immune)
+							continue;
+
+						const int worth = valuableBuildingWorth(pBld->Type);
+						const int owner = pBld->Owner->ArrayIndex;
+
+						if (worth <= 0 || owner < 0 || owner >= HouseClass::Array.Count || counted[owner] <= 0)
+							continue;
+
+						const double cx = static_cast<double>(sumX[owner]) / counted[owner];
+						const double cy = static_cast<double>(sumY[owner]) / counted[owner];
+						const double fx = homeCell.X - cx;
+						const double fy = homeCell.Y - cy;
+						const double axis = std::sqrt(fx * fx + fy * fy);
+
+						if (axis < 1.0)
+							continue;
+
+						const CellStruct bc = pBld->GetMapCoords();
+						const double depth = -((bc.X - cx) * fx + (bc.Y - cy) * fy) / axis;
+						const int defenses = CountKnownEnemyDefensesNear(pHouse, bc, EdgeBlitzDefenseCells, false);
+
+						if (depth < EdgeBlitzRearDepthCells || defenses > EdgeBlitzTargetDefenses)
+							continue;
+
+						const int score = worth + static_cast<int>(depth * 10.0) - defenses * 80 - static_cast<int>(bc.DistanceFrom(homeCell)) / 2;
+
+						if (score > bestScore)
+						{
+							bestScore = score;
+							pTarget = pBld;
+							centreX = cx;
+							centreY = cy;
+							targetDepth = depth;
+						}
+					}
+				}
+
+				// The way round: from an ideal point toward a fallback, the first legal cell of our ground out
+				// of known defense reach (2-cell steps).
+				auto const groundToward = [&](double fromX, double fromY, double toX, double toY) -> CellStruct
+				{
+					const double dx = toX - fromX;
+					const double dy = toY - fromY;
+					const double length = std::sqrt(dx * dx + dy * dy);
+
+					for (double done = 0.0; done <= length; done += 2.0)
+					{
+						const double t = length > 0.0 ? done / length : 0.0;
+						const CellStruct c { static_cast<short>(std::lround(fromX + dx * t)), static_cast<short>(std::lround(fromY + dy * t)) };
+
+						if (MapClass::Instance.CoordinatesLegal(c) && MapClass::Instance.IsWithinUsableArea(c, true) && zoneOf(c) == homeZone
+							&& !IsCellInKnownEnemyDefenseReach(pHouse, c, 2))
+						{
+							return c;
+						}
+					}
+
+					return CellStruct::Empty;
+				};
+
+				std::vector<CellStruct> route;
+				int routeStrength = INT_MAX;
+
+				if (pTarget)
+				{
+					const CellStruct tc = pTarget->GetMapCoords();
+					const double ux = (centreX - homeCell.X);
+					const double uy = (centreY - homeCell.Y);
+					const double axis = std::sqrt(ux * ux + uy * uy);
+					const double nx = ux / axis;
+					const double ny = uy / axis;
+					const double midX = (homeCell.X + centreX) / 2.0;
+					const double midY = (homeCell.Y + centreY) / 2.0;
+
+					for (const int side : { 1, -1 })
+					{
+						const double px = -ny * side;
+						const double py = nx * side;
+						const CellStruct out = groundToward(midX + px * EdgeBlitzSideMostCells, midY + py * EdgeBlitzSideMostCells, midX, midY);
+
+						if (out == CellStruct::Empty || std::abs((out.X - midX) * px + (out.Y - midY) * py) < EdgeBlitzSideLeastCells)
+							continue;
+
+						const CellStruct behind = groundToward(tc.X + nx * EdgeBlitzBehindCells * 0.5 + px * EdgeBlitzBehindCells,
+							tc.Y + ny * EdgeBlitzBehindCells * 0.5 + py * EdgeBlitzBehindCells, tc.X, tc.Y);
+						const int strength = knownEnemyStrengthOnWay(homeCell, out, 900)
+							+ knownEnemyStrengthOnWay(out, behind != CellStruct::Empty ? behind : tc, 900);
+
+						if (strength < routeStrength)
+						{
+							routeStrength = strength;
+							route = { out };
+
+							if (behind != CellStruct::Empty)
+								route.push_back(behind);
+						}
+					}
+				}
+
+				const int utility = (pTarget && !route.empty()) ? EdgeBlitzUtility : -1000;
+
+				if (utility > 0 && shouldTryStart(NeuralPlanId::EdgeBlitz, utility))
+				{
+					startPlan(NeuralPlanId::EdgeBlitz, group, pTarget->GetMapCoords(), route.front(), pTarget->UniqueID, EdgeBlitzFrames);
+					auto& started = planOf(NeuralPlanId::EdgeBlitz);
+
+					if (started.Active)
+					{
+						started.Cells = route;
+						started.AuxPeak = 0;
+						started.AuxBaseline = Unsorted::CurrentFrame;
+
+						// TEMP diagnostic: the starts, with the defenses of the target's owner in front of its
+						// centre and behind it (does its rear stand less defended?).
+						if (macro.EdgeBlitzLogCount < EdgeBlitzLogLines)
+						{
+							macro.EdgeBlitzLogCount++;
+							int front = 0;
+							int rear = 0;
+							const double fx = homeCell.X - centreX;
+							const double fy = homeCell.Y - centreY;
+
+							for (auto const pBld : knownEnemyBuildingList)
+							{
+								if (!isKnownEnemyBuilding(pBld) || pBld->Owner != pTarget->Owner || !pBld->Type->IsBaseDefense
+									|| GroundRangeOf(pBld->Type) <= 0)
+								{
+									continue;
+								}
+
+								const double along = (pBld->GetMapCoords().X - centreX) * fx + (pBld->GetMapCoords().Y - centreY) * fy;
+								(along >= 0.0 ? front : rear)++;
+							}
+
+							const CellStruct tc = pTarget->GetMapCoords();
+							const CellStruct second = route.size() > 1 ? route[1] : CellStruct { -1, -1 };
+							Debug::Log("[NeuralAI] House %d edge blitz (TEMP): %d units -> %s of house %d at (%d,%d), %d cells behind its centre, "
+								"its defenses %d in front and %d behind, by (%d,%d) and (%d,%d), strength on the way %d, frame %d.\n",
+								pHouse->ArrayIndex, static_cast<int>(started.Members.size()), pTarget->Type->ID, pTarget->Owner->ArrayIndex, tc.X, tc.Y,
+								static_cast<int>(targetDepth), front, rear, route[0].X, route[0].Y, second.X, second.Y, routeStrength,
+								Unsorted::CurrentFrame);
+						}
+					}
 				}
 			}
 		}
