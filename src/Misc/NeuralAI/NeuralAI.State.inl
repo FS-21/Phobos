@@ -747,6 +747,17 @@ namespace
 		int NearSince { -1 };
 	};
 
+	// TEMP diagnostic (Micro): an MCV the idle watchdog followed that began to unfold by an order of
+	// another rule, where and when, and since when the watchdog followed it; a line tells when its yard
+	// stands (McvIdleUnfoldLookFrames), as the watchdog's own unfold lines do.
+	struct NeuralMcvIdleUnfold
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Frame { -1 };
+		int WatchedSince { -1 };
+		const char* TypeId { "" };
+	};
+
 	// An MCV whose yard was ordered to unfold (Micro): where and when it last unfolded, how often it
 	// tried again on that spot after the engine refused the deploy, and since when it unfolds there
 	// (McvUnfoldSkipMostFrames).
@@ -1149,6 +1160,8 @@ namespace
 		std::unordered_map<DWORD, NeuralDeployerSite> DeployerSites;
 		// Packed MCVs the idle watchdog follows (unit -> NeuralMcvIdle).
 		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
+		// Watched MCVs unfolding by another rule's order (unit -> NeuralMcvIdleUnfold, TEMP diagnostic).
+		std::unordered_map<DWORD, NeuralMcvIdleUnfold> McvIdleUnfolds;
 		// Packed MCVs that had an enemy near them at their last look (Micro, the MCV danger rule).
 		std::unordered_set<DWORD> McvInDanger;
 		// Expansion goals packed MCVs turned back from for an enemy near them (goal, frame until).
@@ -1804,6 +1817,7 @@ namespace
 			this->DeployerNoSiteSince.clear();
 			this->DeployerSites.clear();
 			this->McvIdle.clear();
+			this->McvIdleUnfolds.clear();
 			this->McvInDanger.clear();
 			this->McvFledSites.clear();
 			this->ForeignMcvHome.clear();
@@ -2715,6 +2729,10 @@ namespace
 	constexpr int McvIdleOrderFrames = 1800;
 	constexpr int McvIdleMostTries = 3;
 	constexpr int McvIdleLegSteps = 24;
+	// TEMP diagnostic: how long the yard of a watched MCV that unfolds by another rule's order is looked
+	// for, and lines a match.
+	constexpr int McvIdleUnfoldLookFrames = 1800;
+	constexpr int McvIdleUnfoldLogLines = 60;
 	// Matches #11445-#11450 (2026-11-19): every site the watchdog gave up was judged from a cell 1 or 2
 	// short of it, and MCVs ordered to unfold were sent elsewhere by the MCV logic below. An MCV
 	// within McvIdleNearCells of its site is stepped onto the site cell itself, and the site fails
