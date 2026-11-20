@@ -3602,7 +3602,7 @@ namespace
 
 	int VisibleEnemyThreatNear(HouseClass* pHouse, const CellStruct& cell, int radius);
 	bool IsBuildingEnterableFromZone(const BuildingClass* pBld, int zone, MovementZone movementZone = MovementZone::Normal);
-	void OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget);
+	void OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget, const char* callerFile = __builtin_FILE(), int callerLine = __builtin_LINE());
 
 	// Expert 0 (Economy & Crisis) bookkeeping and actions, every 150 frames. The peaks of static
 	// refineries and harvesters are tracked for every house; EconomyRecoveryActive is set when a raid

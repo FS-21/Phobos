@@ -4476,8 +4476,32 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				const double distToHome = mcvCell.DistanceFrom(homeCoords);
+				// Home (ForeignMcvHomeCells, NeuralAI.State.inl): near the yard or the placement cell of its own
+				// yard, the cell its way home leads to; one that was home stays so until ForeignMcvHomeExitCells
+				// farther. With no ferry it unfolds on the island it stands on, however far from home: the way
+				// home by land does not exist.
+				bool foreignMcvHome = false;
+				const bool foreignMcvUnfoldsOnIsland = onDisconnectedEnemyIsland && !CanHouseFerryTypeAcrossWater(pHouse, pType);
 
-				if (enemyNearMCV || (isForeignTechMCV && distToHome > 16.0))
+				if (isForeignTechMCV)
+				{
+					auto& foreignHome = GetMacroState(pHouse).ForeignMcvHome;
+					const double homeCells = ForeignMcvHomeCells
+						+ (foreignHome.contains(pUnit->UniqueID) ? ForeignMcvHomeExitCells : 0);
+					const CellStruct homeGoal = CachedTetrisBuildCell(pHouse, pType->DeploysInto);
+					foreignMcvHome = distToHome <= homeCells
+						|| (homeGoal != CellStruct::Empty && mcvCell.DistanceFrom(homeGoal) <= homeCells);
+
+					if (foreignHome.size() > 64)
+						foreignHome.clear();
+
+					if (foreignMcvHome)
+						foreignHome.insert(pUnit->UniqueID);
+					else
+						foreignHome.erase(pUnit->UniqueID);
+				}
+
+				if (enemyNearMCV || (isForeignTechMCV && !foreignMcvHome && !foreignMcvUnfoldsOnIsland))
 				{
 					// The goal it drove to lies past the danger: the expansion goals keep off it for a while
 					// (it was picked again once the MCV was home, match #11862).
@@ -4501,9 +4525,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 
-				if (isForeignTechMCV && !enemyNearMCV
-					&& (distToHome <= 16.0
-						|| (onDisconnectedEnemyIsland && !CanHouseFerryTypeAcrossWater(pHouse, pType))))
+				if (isForeignTechMCV && !enemyNearMCV && (foreignMcvHome || foreignMcvUnfoldsOnIsland))
 				{
 					if (CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
 					{
@@ -13147,11 +13169,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool strandedWithoutRoom = noRoomForPickup.contains(uz) && noRoomForPickup.at(uz) > Unsorted::CurrentFrame;
 			// A yard MCV of our own tech is the one to ferry only when it may cross to the island goal
 			// (yardMcvMayCrossToIslandGoal: an economic crossing only when needed); the transport loader
-			// below carries no other yard MCV for it.
+			// below carries no other yard MCV for it. A stolen MCV (one of a tech we have no yard of) is
+			// none: slot 82 takes it home and unfolds it there, and the MCV's own island branch never
+			// sends it across (wantsOtherIsland). Taken for the island here, the ferry loader had it board
+			// while slot 82 sent it home, every AI tick (match #11992: 3 SMCVs, 120 to 250 turns each 9000
+			// frames).
 			const bool isForeignTechYardMcv = pUT->DeploysInto->ConstructionYard && pHouse->CountOwnedNow(pUT->DeploysInto) == 0
 				&& pHouse->NumConYards >= 1;
 			const bool isExpMCV = (pUT->DeploysInto->ConstructionYard && (conYardsInUz >= 1 || hubsInUz >= 2 || strandedWithoutRoom)
-				&& (isForeignTechYardMcv || yardMcvMayCrossToIslandGoal(pOwnU)));
+				&& !isForeignTechYardMcv && yardMcvMayCrossToIslandGoal(pOwnU));
 			// Another deployer only when it expands with its building (deployerExpandsWith, as the deployer
 			// logic reads it) and the building fits on the island goal (deployerFitsOnIslandGoal), never
 			// one the idle deployer watchdog sent to the main base.
@@ -14068,15 +14094,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const bool isLoadedStrikeAPC
 								= (pU->Type->Passengers >= 3 && pU->Passengers.NumPassengers >= 1
 									&& (pWaveTargetCell || pIslandGoalCell || pIslandTechGoalCell));
-							// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal),
+							// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal; a stolen one never: slot 82),
 							// another deployer only when it expands with its building (deployerExpandsWith) and fits there.
 							const bool isIslandExpansionMCV = (pU->Type->DeploysInto != nullptr
 								&& pIslandResourceGoalCell && uZone >= 0 && uZone != resourceIslandZone
 								&& (pU == pHomeExpansionDeployer || pHouse->NumConYards >= 1
 									|| pHouse->CountOwnedNow(pU->Type) >= 2 || pHouse->OwnedBuildings >= 6)
 								&& (pU->Type->DeploysInto->ConstructionYard
-									? (pU == pHomeExpansionDeployer || (pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
-										|| yardMcvMayCrossToIslandGoal(pU))
+									? (!(pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
+										&& (pU == pHomeExpansionDeployer || yardMcvMayCrossToIslandGoal(pU)))
 									: ((pU == pExtraHomeSlaveMiner || deployerExpandsWith(pU->Type->DeploysInto)) && !deployerSentToMainBase(pU->UniqueID)
 										&& deployerFitsOnIslandGoal(pU, pU->Type->DeploysInto))));
 							const bool isIslandHarvester
@@ -16283,14 +16309,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					= (pRepairDepot && pU->Type->Cost >= 1000 && pU->GetHealthPercentage() < 0.40);
 				const bool isLoadedStrikeAPC = (pU->Type->Passengers >= 3 && pU->Passengers.NumPassengers >= 1
 					&& (pWaveTargetCell || pIslandGoalCell || pIslandTechGoalCell));
-				// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal), another
+				// A yard MCV of our own tech only when it may cross (yardMcvMayCrossToIslandGoal; a stolen one never: slot 82), another
 				// deployer only when it expands with its building (deployerExpandsWith) and fits there.
 				const bool isIslandExpansionMCV = (pU->Type->DeploysInto != nullptr && pIslandResourceGoalCell
 					&& uZone >= 0 && uZone != resourceIslandZone
 					&& (pHouse->NumConYards >= 1 || pHouse->CountOwnedNow(pU->Type) >= 2)
 					&& (pU->Type->DeploysInto->ConstructionYard
-						? (pU == pHomeExpansionDeployer || (pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
-							|| yardMcvMayCrossToIslandGoal(pU))
+						? (!(pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
+							&& (pU == pHomeExpansionDeployer || yardMcvMayCrossToIslandGoal(pU)))
 						: ((pU == pExtraHomeSlaveMiner || deployerExpandsWith(pU->Type->DeploysInto)) && !deployerSentToMainBase(pU->UniqueID)
 							&& deployerFitsOnIslandGoal(pU, pU->Type->DeploysInto))));
 				const bool isIslandHarvester = ((pU->Type->Harvester || pU->Type->Weeder) && islandGoalTakesHarvesters()
