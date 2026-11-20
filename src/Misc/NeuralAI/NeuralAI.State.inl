@@ -1260,6 +1260,14 @@ namespace
 		// An enemy submarine (Naval, Cloakable) was seen within 30 cells of our base: until this frame
 		// the house builds and sends ships that hit under water or carry sonar.
 		int SubThreatUntil { -1 };
+		// Sea control (UpdateSeaControl): the frame an enemy ship was last in sight, whether the sea is
+		// ours (no enemy ship seen for SeaControlQuietFrames, no known enemy shipyard, no submarine
+		// threat), our warships that shell neither from afar nor hunt with sonar, and whether the last
+		// naval pick had a long-range siege ship to build.
+		int LastEnemyNavySeenFrame { 0 };
+		bool SeaControl { false };
+		int PlainWarships { 0 };
+		bool SeaControlLongRangeShip { false };
 		// The unit on its way to a repair station to be sold for emergency money (0 when none).
 		DWORD DepotSaleUnit { 0 };
 		// Our refineries and those with fewer than 6 ore cells left within 12 cells (sampled every 2
@@ -1927,6 +1935,10 @@ namespace
 			this->ResourceHealSince.clear();
 			this->NavalRemnantUntil = -1;
 			this->SubThreatUntil = -1;
+			this->LastEnemyNavySeenFrame = 0;
+			this->SeaControl = false;
+			this->PlainWarships = 0;
+			this->SeaControlLongRangeShip = false;
 			this->DepotSaleUnit = 0;
 			this->RefineriesChecked = 0;
 			this->RefineriesDepleted = 0;
@@ -3273,6 +3285,22 @@ namespace
 	// building in reach and no enemy ship in their sea at every AI tick of ArmyIdleWindowFrames
 	// (match #9846: a house kept building ships while about 50 sat with no target in reach).
 	constexpr int ShipsWithoutTargetBrake = 6;
+	// Sea control (user approved, 2026-11-20). Match #12392, Devil's Triangle: the enemy had no ship from
+	// frame 9450 on and a house went from 7 to 108 destroyers, and from 2 to 9 shipyards, while the enemy
+	// island grew from 16 to 119 buildings. With no enemy ship in sight for SeaControlQuietFrames, no
+	// enemy shipyard known and no submarine threat, the sea is ours: warships that neither shell from
+	// afar (IsLongRangeSiegeShipType) nor hunt with a sonar the detection need asks for stop at
+	// SeaControlWarships (escorts and the yard's guard, losses replaced) and lose the coastal bonus; the
+	// long-range siege ships get SeaControlLongRangeBonus; the bank governor adds no shipyard unless one
+	// of those can be built. Against an enemy across the water the armed vehicles that cross water
+	// (SeaControlCrossingBonus), transports with a ferry demand (SeaControlTransportBonus) and aircraft
+	// that strike the ground (SeaControlAirStrikeBonus) gain.
+	constexpr int SeaControlQuietFrames = 3000;
+	constexpr int SeaControlWarships = 8;
+	constexpr int SeaControlLongRangeBonus = 300;
+	constexpr int SeaControlCrossingBonus = 500;
+	constexpr int SeaControlTransportBonus = 250;
+	constexpr int SeaControlAirStrikeBonus = 450;
 	// Naval hunt (user approved, 2026-11-19). Match #11499: 24 of the 31 destroyers of a house stood on
 	// Attack, still and silent, at shore guns out of their reach; loaded enemy transports crossed the sea unopposed; the
 	// house built 77 destroyers and none went to look for the enemy at sea.
