@@ -1226,6 +1226,8 @@ namespace
 		std::unordered_map<DWORD, NeuralMcvFallback> McvFallbacks;
 		// Stolen MCVs (Micro, StolenMcv*): unit -> the frame it was first seen stolen and packed.
 		std::unordered_map<DWORD, int> StolenMcvSince;
+		// Frame a ConYard of ours was last destroyed (OnTechnoDestroyed; ExpansionMcvLossFrames).
+		int ConYardLostFrame { -100000 };
 		// Packed MCVs that had an enemy near them at their last look (Micro, the MCV danger rule).
 		std::unordered_set<DWORD> McvInDanger;
 		// Expansion goals packed MCVs turned back from for an enemy near them (goal, frame until).
@@ -1890,6 +1892,7 @@ namespace
 			this->McvIdleUnfolds.clear();
 			this->McvFallbacks.clear();
 			this->StolenMcvSince.clear();
+			this->ConYardLostFrame = -100000;
 			this->McvInDanger.clear();
 			this->McvFledSites.clear();
 			this->ForeignMcvHome.clear();
@@ -2863,6 +2866,14 @@ namespace
 	// was first seen goes into our Grinder when it reaches it.
 	constexpr int StolenMcvOwnCells = 10;
 	constexpr int StolenMcvGrinderFrames = 5400;
+	// No expansion MCV while losing (user approved, 2026-11-20, «de tus 5 propuestas hazlas todas»; match
+	// #12322, The Green Mile: Nod built 11 MCVs, its ConYards went 6 -> 3 -> 1, while the Soviet army
+	// outgrew it 107 to 31; the MCV scored 4000 to 9500 in the vehicle pick, every tank 2000 to 4100).
+	// With a ConYard standing, an expansion MCV waits while our army is under ExpansionMcvAdvantageMin
+	// percent of the army of the strongest enemy seen (NeuralEnemyStrength::Army) or for
+	// ExpansionMcvLossFrames after a ConYard of ours was destroyed. A house without a ConYard is not held.
+	constexpr int ExpansionMcvAdvantageMin = 67;
+	constexpr int ExpansionMcvLossFrames = 5400;
 	// Hold the ground (user approved, 2026-11-20, «haz todas las propuestas que me acabas de hacer», match
 	// #12278: in a contested middle with no enemy building known, expansion MCVs turned home from every
 	// enemy unit passing by, and one stood 900 frames in danger at its home cell next to the front). An

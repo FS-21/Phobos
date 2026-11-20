@@ -1241,6 +1241,16 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	const int homeRingValue = (launchRing > 0.0 && homeSpawnRef != CellStruct::Empty) ? enemyValueInRing(homeSpawnRef) : 0;
 
+	// Under attack, a copy of a war factory or a barracks goes to an outpost on our land only when it
+	// is strong (a ConYard and 3+ defenses) and no armed enemy is known within FactoryCopySafeCells;
+	// otherwise it stays at the main base (match #12322: the copies went to the newest outposts toward
+	// the enemy and Nod fell from 7 war factories to 3 in 4500 frames while its main base held).
+	constexpr int FactoryCopySafeCells = 20;
+	const bool keepFactoryCopySafe = (placingWarFactory || placingBarracks)
+		&& (placingWarFactory ? pHouse->NumWarFactories : pHouse->NumBarracks) >= 1
+		&& ((pHouse->LATime > 0 && Unsorted::CurrentFrame - pHouse->LATime < 1350)
+			|| !GetMacroState(pHouse).AttackedBuildingsLIFO.empty());
+
 	for (auto const pOwnBld : pHouse->Buildings)
 	{
 		if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Insignificant
@@ -1361,6 +1371,12 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 			if (keepAtStrongBase && (!strongHub || (enemyInHubZone && launchRing <= 0.0)))
 				continue;
+
+			if (keepFactoryCopySafe && !isOtherIsland
+				&& (!strongHub || VisibleEnemyThreatNear(pHouse, bc, FactoryCopySafeCells) > 0))
+			{
+				continue;
+			}
 
 			int ringBonus = 0;
 

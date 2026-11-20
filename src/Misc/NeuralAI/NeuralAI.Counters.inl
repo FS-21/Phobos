@@ -36,6 +36,12 @@ namespace
 	constexpr int CounterThreatNowFrames = 1800;
 	constexpr int CounterThreatNowWeight = 3;
 	constexpr int CounterShareOtherExperts = 50;
+	// Most a unit gains from being the counter, and under attack (user approved, 2026-11-20, «de tus 5
+	// propuestas hazlas todas»; match #12322: Nod's anti-air vehicle won the pick 2 times in 20 against
+	// the learned artillery slot, 2900 to 3750 against 600 to 1830, while missiles and 296 soldiers
+	// came at it).
+	constexpr int CounterUnitBonusMost = 900;
+	constexpr int CounterUnitBonusUnderAttack = 1800;
 	// While the base is under attack what can wait (engineers, spies, a harvester beyond one per
 	// refinery, an expansion MCV, a deployer) loses this much production score: the answer to the
 	// threat is built first.
@@ -83,6 +89,27 @@ namespace
 				view.Targets.push_back({ armorIndex, sighting.Category, weighted });
 
 			view.TotalValue += weighted;
+
+			// A launcher of aircraft also asks for what shoots its spawns down (AircraftSpawnOf); the
+			// launcher itself stays in the view as what it is, to be beaten on its own ground or sea.
+			if (auto const pSpawns = sighting.Category != EnemyForceCategory::Air ? AircraftSpawnOf(sighting.Type) : nullptr)
+			{
+				const int spawnWeighted = AircraftSpawnThreatOf(sighting.Type) * (EnemySightingMemoryFrames - age) / EnemySightingMemoryFrames;
+				const int spawnArmor = static_cast<int>(pSpawns->Armor);
+
+				if (spawnWeighted > 0)
+				{
+					auto const itAir = std::find_if(view.Targets.begin(), view.Targets.end(),
+						[&](const NeuralCounterTarget& target) { return target.ArmorIndex == spawnArmor && target.Category == EnemyForceCategory::Air; });
+
+					if (itAir != view.Targets.end())
+						itAir->Value += spawnWeighted;
+					else
+						view.Targets.push_back({ spawnArmor, EnemyForceCategory::Air, spawnWeighted });
+
+					view.TotalValue += spawnWeighted;
+				}
+			}
 
 			if (sighting.Category != EnemyForceCategory::Air)
 			{
@@ -459,7 +486,8 @@ namespace
 
 			const int mean = fitSum[candidate.Queue] / fitCount[candidate.Queue];
 			const bool isDefense = candidate.Queue == defenseQueue;
-			const int bonus = std::clamp((candidate.Fit - mean) * (isDefense ? 8 : 12), isDefense ? -400 : -600, isDefense ? 600 : 900)
+			const int bonus = std::clamp((candidate.Fit - mean) * (isDefense ? 8 : 12), isDefense ? -400 : -600,
+				isDefense ? 600 : (view.UnderAttack ? CounterUnitBonusUnderAttack : CounterUnitBonusMost))
 				* confidence / 100;
 
 			if (bonus != 0)
