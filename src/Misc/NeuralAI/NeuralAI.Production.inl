@@ -652,6 +652,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	NeuralPhaseClock productionClock { pHouse->ArrayIndex, NeuralSection::ProdBuildings };
 
+	// TEMP diagnostic (economy hold): the best score of a refinery in the building pick (none: it never
+	// got scored) and the score of the scored building pick, for the economy hold status line.
+	int awaitedRefineryScore = -32000;
+	int scoredBuildingScore = -32000;
+
 	// Building Target Selection
 	if (NeuralAI::IsCampaignRestricted(pHouse))
 	{
@@ -3935,6 +3940,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 							// the ConYard!
 			}
 
+			if (pBld->Refinery && !pBld->ResourceGatherer && score > awaitedRefineryScore)
+				awaitedRefineryScore = score;
+
 			if (score > bestBldScore)
 			{
 				bestBldScore = score;
@@ -3944,6 +3952,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		const int scoredBldIdx = bestBldIdx;
+		scoredBuildingScore = bestBldScore;
 
 		// A raid with nothing of ours that shoots up: the best such defense comes before any other
 		// pick, except restoring income and a building the yard is already working on.
@@ -5353,10 +5362,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	GetMacroState(pHouse).TankFloorBasePart = TankFloorMin + std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost);
 	GetMacroState(pHouse).TankFloorEscortPart = ownedArtilleryVehicles + ownedEscortedAntiAirVehicles + ownedEscortedSupportVehicles;
 
+	// TEMP diagnostic (economy hold): how far the unit a hold saves for (a harvester, an MCV) gets in this
+	// pick: 1 buildable, 2 past the ban, tier, repairer and MCV gates, 3 past the economy unit gates,
+	// 4 past the cash gate, 5 scored (awaitedUnitScore).
+	auto& holdMacro = GetMacroState(pHouse);
+	const int awaitedUnitKind = holdMacro.EconomyHoldKind == 4 ? 1 : holdMacro.EconomyHoldKind;
+	int awaitedUnitStage = 0;
+	int awaitedUnitScore = -32000;
+
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
 		if (!pUnit || !CanBuildUnderHumanRules(pHouse, pUnit))
 			continue;
+
+		const bool isAwaitedUnit = (awaitedUnitKind == 1 && pUnit->Harvester && !pUnit->DeploysInto)
+			|| (awaitedUnitKind == 3 && pUnit->DeploysInto && pUnit->DeploysInto->ConstructionYard);
+
+		if (isAwaitedUnit)
+			awaitedUnitStage = std::max(awaitedUnitStage, 1);
 
 		const bool isUnitInProgress
 			= (pUnit->ArrayIndex == inProgressUnitIdx || pUnit->ArrayIndex == inProgressNavalIdx);
@@ -5416,6 +5439,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				rebuildMCVCost = pUnit->GetActualCost(pHouse);
 			}
 		}
+
+		if (isAwaitedUnit)
+			awaitedUnitStage = std::max(awaitedUnitStage, 2);
 
 		const auto pWpnStruct = pUnit->GetWeapon(0);
 		const auto pWpn = pWpnStruct ? pWpnStruct->WeaponType : nullptr;
@@ -5524,6 +5550,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (isEconomyUnit && !isUnitInProgress && GetMacroState(pHouse).DryEconomyActive)
 			continue;
 
+		if (isAwaitedUnit)
+			awaitedUnitStage = std::max(awaitedUnitStage, 3);
+
 		TechnoTypeClass* pConvDeployType = GetConvertDeployTargetType(pUnit);
 		const bool isConvertToOpenToppedOrCombat = (pConvDeployType != nullptr)
 			&& ((pConvDeployType->OpenTopped && pConvDeployType->Passengers > 0)
@@ -5612,6 +5641,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// lost (!hasActiveUnitIncome)!
 		if (!hasActiveUnitIncome && !isUnitInProgress && !isIncomeRecoveryUnit && pUnit->GetActualCost(pHouse) > money)
 			continue;
+
+		if (isAwaitedUnit)
+			awaitedUnitStage = std::max(awaitedUnitStage, 4);
 
 		const int ownedUnitWithConv = CountOwnedUnitWithConversions(pHouse, pUnit);
 		if (!isEconomyUnit && !isMCV && !isKeyStructureDeployer && !isAmphibTransport)
@@ -5992,6 +6024,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score - diagPostClass + (diagPreClass - diagBase + diagPenalty - diagCounter), score });
 			}
 
+			if (isAwaitedUnit)
+			{
+				awaitedUnitStage = 5;
+				awaitedUnitScore = std::max(awaitedUnitScore, score);
+			}
+
 			if (score > bestUnitScore)
 			{
 				bestUnitScore = score;
@@ -6030,6 +6068,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 	}
+
+	// TEMP diagnostic (economy hold): the scored unit pick, before the floors and complements take it.
+	const int scoredUnitIdx = bestUnitIdx;
+	const int scoredUnitScore = bestUnitScore;
 
 	// TEMP diagnostic: the best five candidates, and the best main battle tank when it is not one of
 	// them. Class: T tank, L light, G artillery, A anti-air, P transport, S support, H harvester, D
@@ -6192,6 +6234,64 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (IsAITickWindow(450, evalDelay))
 			CountDecision(NeuralDecision::BankYardPick, pHouse->ArrayIndex);
+	}
+
+	// TEMP diagnostic (economy hold, 2026-11-20, matches #11905 and #11911: a war factory pick cancelled
+	// hundreds of times while the awaited item never started): every 900 frames of a hold, what it saves
+	// for, its price, the credits, how long it lasts, what it cancelled since the last line, what stands
+	// in the factories, the picks, how far the awaited item gets in them, and the gates of its kind.
+	// UpdateEconomyCrisis writes the line of its end.
+	if (holdMacro.EconomyHoldKind != 0 && holdMacro.EconomyHoldLogLines < EconomyHoldLogLinesMost && IsAITickWindow(900, 0))
+	{
+		holdMacro.EconomyHoldLogLines++;
+		const int kind = holdMacro.EconomyHoldKind;
+		const int price = kind == 1 ? holdMacro.HarvesterSaveTarget
+			: (kind == 2 ? holdMacro.RefinerySaveTarget : (kind == 3 ? holdMacro.ExpansionSaveTarget : 0));
+		auto const unitName = [](int idx) { return idx >= 0 && idx < UnitTypeClass::Array.Count ? UnitTypeClass::Array.GetItem(idx)->ID : "none"; };
+		auto const buildingName = [](int idx) { return idx >= 0 && idx < BuildingTypeClass::Array.Count ? BuildingTypeClass::Array.GetItem(idx)->ID : "none"; };
+		std::string factories;
+
+		for (auto const pFactory : FactoryClass::Array)
+		{
+			if (!pFactory || pFactory->Owner != pHouse || !pFactory->Object)
+				continue;
+
+			auto const pType = pFactory->Object->GetTechnoType();
+			char part[96];
+			std::snprintf(part, sizeof(part), " %s %d/54%s", pType ? pType->ID : "?", pFactory->GetProgress(), pFactory->IsSuspended ? " held" : "");
+			factories += part;
+		}
+
+		char gates[256];
+
+		if (kind == 3)
+		{
+			std::snprintf(gates, sizeof(gates), "MCV gates: undeployed %d, bank yard %d, yards %d of %d, buildings %d, army %d, free yard fields %d, "
+				"slot30 %d, slot81 %d, features20 %d, fields dry %d, island %d (target %d, cross %d, waits as yard %d), gatherers %d",
+				ownsUndeployedMCV ? 1 : 0, bankWantsYard ? 1 : 0, pHouse->NumConYards, maxAllowedConYards, pHouse->Buildings.Count,
+				ownedGroundCombatUnits + ownedNavalOrAmphibCombatUnits, freeOreFieldsForYards, static_cast<int>(scores[30]),
+				static_cast<int>(scores[81]), static_cast<int>(features[20]), fieldsRunningDry ? 1 : 0, islandOreRunningOut ? 1 : 0,
+				hasUncolonizedIslandTarget ? 1 : 0, needsCrossIslandMCV ? 1 : 0, islandMcvWaitsAsYard ? 1 : 0, ownedEconomyUnits + ownedCashProduces);
+		}
+		else if (kind == 2)
+		{
+			std::snprintf(gates, sizeof(gates), "refinery gates: best refinery score %d, scored building score %d, refineries %d",
+				awaitedRefineryScore, scoredBuildingScore, trueRefineries);
+		}
+		else
+		{
+			std::snprintf(gates, sizeof(gates), "harvester gates: gatherers %d, cap %d, refineries %d, tank mass %d (front line %d of %d), dry %d, income %d",
+				ownedEconomyUnits, economyUnitCap, trueRefineries, tankMass ? 1 : 0, ownedFrontLineVehicles, TankMassBaseWave,
+				holdMacro.DryEconomyActive ? 1 : 0, hasActiveUnitIncome ? 1 : 0);
+		}
+
+		Debug::Log("[NeuralAI] House %d economy hold DIAG: %s, price %d, credits %d, held %d frames, %d cancels since the last line, "
+			"%d on hold, in production %d, factories:%s; picks: building %s, unit %s (scored %s %d), awaited unit stage %d score %d; %s, frame %d.\n",
+			pHouse->ArrayIndex, EconomyHoldKindName(kind), price, money, Unsorted::CurrentFrame - holdMacro.EconomyHoldStartFrame,
+			holdMacro.EconomyHoldLineCancels, static_cast<int>(holdMacro.BrokeHeldObjects.size()), EconomyHoldItemInProduction(pHouse, kind) ? 1 : 0,
+			factories.empty() ? " none" : factories.c_str(), buildingName(pExt->NeuralAI_NextBuildingTarget), unitName(bestUnitIdx),
+			unitName(scoredUnitIdx), scoredUnitScore, awaitedUnitStage, awaitedUnitScore, gates, Unsorted::CurrentFrame);
+		holdMacro.EconomyHoldLineCancels = 0;
 	}
 
 	pExt->NeuralAI_NextUnitTarget = bestUnitIdx;

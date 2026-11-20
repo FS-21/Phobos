@@ -3742,6 +3742,54 @@ namespace
 		}
 	}
 
+	// TEMP diagnostic (economy hold): the name of what a hold saves for (1 harvester, 2 refinery, 3 MCV,
+	// 4 broke: a harvester, or a refinery when no harvester can be built).
+	const char* EconomyHoldKindName(int kind)
+	{
+		static constexpr const char* Names[] = { "none", "harvester", "refinery", "MCV", "broke" };
+
+		return kind >= 0 && kind <= 4 ? Names[kind] : "?";
+	}
+
+	// TEMP diagnostic (economy hold): the house's ConYards and MCVs.
+	int EconomyHoldOwnedYards(HouseClass* pHouse)
+	{
+		int yards = pHouse->ConYards.Count;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && pUnit->Type && pUnit->Type->DeploysInto
+				&& pUnit->Type->DeploysInto->ConstructionYard)
+			{
+				yards++;
+			}
+		}
+
+		return yards;
+	}
+
+	// TEMP diagnostic (economy hold): whether a factory of the house is building what the hold saves for.
+	bool EconomyHoldItemInProduction(HouseClass* pHouse, int kind)
+	{
+		for (auto const pFactory : FactoryClass::Array)
+		{
+			if (!pFactory || pFactory->Owner != pHouse || !pFactory->Object)
+				continue;
+
+			auto const pType = pFactory->Object->GetTechnoType();
+			auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
+			auto const pBldType = abstract_cast<BuildingTypeClass*>(pType);
+			const bool harvester = pUnitType && pUnitType->Harvester && !pUnitType->DeploysInto;
+			const bool refinery = pBldType && pBldType->Refinery && !pBldType->ResourceGatherer;
+			const bool mcv = pUnitType && pUnitType->DeploysInto && pUnitType->DeploysInto->ConstructionYard;
+
+			if ((kind == 1 && harvester) || (kind == 2 && refinery) || (kind == 3 && mcv) || (kind == 4 && (harvester || refinery)))
+				return true;
+		}
+
+		return false;
+	}
+
 	void UpdateEconomyCrisis(HouseClass* pHouse)
 	{
 		if (!pHouse || pHouse->Defeated)
@@ -4107,6 +4155,8 @@ namespace
 			}
 		}
 
+		bool holdRested = false;
+
 		if (!holdForEconomy)
 		{
 			macro.EconomyHoldSince = -1;
@@ -4120,6 +4170,63 @@ namespace
 			macro.EconomyHoldPauseUntil = now + 1800;
 			macro.EconomyHoldSince = -1;
 			holdForEconomy = false;
+			holdRested = true;
+		}
+
+		// TEMP diagnostic (economy hold, 2026-11-20, matches #11905 and #11911: a war factory pick
+		// cancelled hundreds of times while the awaited item never started): when a hold ends, what it
+		// saved for, how long it lasted, why it ended, what it cancelled, and how much of that kind the
+		// house owns now against when it began. A hold that ended with the credits at the price is looked
+		// at again 1800 frames later. The status lines while a hold lasts come from the production pick.
+		{
+			const int holdKind = holdForHarvester ? 4
+				: (!holdForEconomy ? 0 : (macro.HarvesterSaveTarget > 0 ? 1 : (macro.RefinerySaveTarget > 0 ? 2 : 3)));
+			auto const kindAssets = [pHouse, harvCount, refCount](int kind)
+			{
+				return (kind == 1 || kind == 4) ? harvCount : (kind == 2 ? refCount : EconomyHoldOwnedYards(pHouse));
+			};
+
+			if (macro.EconomyHoldPaidKind != 0 && (now - macro.EconomyHoldPaidFrame >= 1800 || now < macro.EconomyHoldPaidFrame))
+			{
+				Debug::Log("[NeuralAI] House %d economy hold DIAG paid check: %s, owned %d when paid and %d now, in production %d, "
+					"credits %d, frame %d.\n", pHouse->ArrayIndex, EconomyHoldKindName(macro.EconomyHoldPaidKind), macro.EconomyHoldPaidAssets,
+					kindAssets(macro.EconomyHoldPaidKind), EconomyHoldItemInProduction(pHouse, macro.EconomyHoldPaidKind) ? 1 : 0, money, now);
+				macro.EconomyHoldPaidKind = 0;
+			}
+
+			if (holdKind != macro.EconomyHoldKind)
+			{
+				if (macro.EconomyHoldKind != 0)
+				{
+					const int oldKind = macro.EconomyHoldKind;
+					const int oldTarget = oldKind == 1 ? macro.HarvesterSaveTarget
+						: (oldKind == 2 ? macro.RefinerySaveTarget : (oldKind == 3 ? macro.ExpansionSaveTarget : 0));
+					const bool paid = oldKind != 4 && holdKind == 0 && !holdRested && !baseUnderAttack && oldTarget > 0 && money >= oldTarget;
+					const char* why = holdRested ? "rested after its time"
+						: (oldKind == 4 ? "something gathers again"
+							: (holdKind == 4 ? "the broke hold took over"
+								: (baseUnderAttack ? "base under attack"
+									: (oldTarget <= 0 ? "the target is gone" : (paid ? "the credits reached the price" : "another target")))));
+
+					Debug::Log("[NeuralAI] House %d economy hold DIAG end: %s after %d frames, %s, %d cancels, owned %d then %d now, "
+						"in production %d, credits %d, frame %d.\n", pHouse->ArrayIndex, EconomyHoldKindName(oldKind), now - macro.EconomyHoldStartFrame,
+						why, macro.EconomyHoldCancels, macro.EconomyHoldStartAssets, kindAssets(oldKind),
+						EconomyHoldItemInProduction(pHouse, oldKind) ? 1 : 0, money, now);
+
+					if (paid)
+					{
+						macro.EconomyHoldPaidKind = oldKind;
+						macro.EconomyHoldPaidFrame = now;
+						macro.EconomyHoldPaidAssets = kindAssets(oldKind);
+					}
+				}
+
+				macro.EconomyHoldKind = holdKind;
+				macro.EconomyHoldStartFrame = holdKind != 0 ? now : -1;
+				macro.EconomyHoldStartAssets = holdKind != 0 ? kindAssets(holdKind) : 0;
+				macro.EconomyHoldCancels = 0;
+				macro.EconomyHoldLineCancels = 0;
+			}
 		}
 
 		// Recovery sale (user): saving for the harvester or the refinery that restores the income,
@@ -4218,6 +4325,8 @@ namespace
 				&& !(abstract_cast<UnitTypeClass*>(pType) && static_cast<UnitTypeClass*>(pType)->Naval))
 			{
 				Debug::Log("[NeuralAI] House %d hold: cancelling %s, held in the queue of what we save for.\n", pHouse->ArrayIndex, pType->ID);
+				macro.EconomyHoldCancels++;
+				macro.EconomyHoldLineCancels++;
 				macro.BrokeHeldObjects.erase(held);
 				pFactory->AbandonProduction();
 				continue;
@@ -4255,6 +4364,8 @@ namespace
 			{
 				Debug::Log("[NeuralAI] House %d %s: cancelling %s, it holds the queue of what we save for.\n", pHouse->ArrayIndex,
 					holdForHarvester ? "broke" : "economy hold", pType->ID);
+				macro.EconomyHoldCancels++;
+				macro.EconomyHoldLineCancels++;
 				pFactory->AbandonProduction();
 			}
 			else
