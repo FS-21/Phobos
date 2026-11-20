@@ -3509,7 +3509,10 @@ namespace
 		counts[static_cast<size_t>(BankQueue::Vehicle)] = pHouse->NumWarFactories;
 		counts[static_cast<size_t>(BankQueue::Infantry)] = pHouse->NumBarracks;
 		counts[static_cast<size_t>(BankQueue::Aircraft)] = pHouse->NumAirpads;
-		counts[static_cast<size_t>(BankQueue::Naval)] = HouseNeedsNaval(pHouse) ? pHouse->NumShipyards : 0;
+		// With the sea ours the shipyards only grow for long-range siege ships (SeaControl*): more of them
+		// built more warships with nothing to fight (match #12392: 2 to 9 shipyards).
+		const bool shipyardsUseful = HouseNeedsNaval(pHouse) && (!macro.SeaControl || macro.SeaControlLongRangeShip);
+		counts[static_cast<size_t>(BankQueue::Naval)] = shipyardsUseful ? pHouse->NumShipyards : 0;
 
 		int64_t capacity = queueRate(pHouse->NumConYards);
 
