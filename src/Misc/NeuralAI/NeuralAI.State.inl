@@ -3705,6 +3705,19 @@ namespace
 	constexpr int SiegePowerBonus = 300;
 	constexpr int SiegeFactoryBonus = 300;
 	constexpr int SiegeLogFrames = 2700;
+	// High ground (user approved, 2026-11-20, P8c, «Escríbela ya»): a projectile with SubjectToCliffs
+	// is stopped by a cliff going up, not going down (Ares IsCliffHit: a cell CellClass::BridgeLevels or
+	// more above the one before it and above the firer), and a unit with no clear shot keeps moving
+	// (TechnoClass::IsCloseEnoughToTarget), so below a plateau it drives round by the ramps into the
+	// defenses. While CliffBlockedSharePercent or more of our armed ground army fires such projectiles,
+	// a target of the tank mass on high ground (cells of our home zone BridgeLevels or more below it
+	// within CliffScanCells) with a known enemy defense within CliffDefenseCells loses
+	// CliffTargetPenalty, in proportion to that share. Measured first (TEMP, 21 matches): 9 of 148 waves
+	// went to such targets, all with half or more of the army blocked going up.
+	constexpr int CliffBlockedSharePercent = 50;
+	constexpr int CliffScanCells = 8;
+	constexpr double CliffDefenseCells = 14.0;
+	constexpr int CliffTargetPenalty = 500;
 	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit
 	// lane to a cell more than FactoryRoadClearCells from every building of ours, found within
 	// FactoryRoadWalkCells cells. Buildings stand at most one cell apart (Adjacent), so a base is
