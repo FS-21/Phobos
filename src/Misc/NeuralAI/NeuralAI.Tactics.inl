@@ -1549,6 +1549,8 @@ namespace
 	// home) when what it holds is a dead order: a move it already finished, or a target out of reach
 	// it does not go after (match #6176: a HIND landed on an island coast, Move to its own cell and a
 	// target 67 cells away, for minutes; the ground watchdog skips jumpjets).
+	int GroundRangeOf(TechnoTypeClass* pType);
+
 	void UpdateHoveringFlyers(HouseClass* pHouse)
 	{
 		auto& macro = GetMacroState(pHouse);
@@ -1601,6 +1603,18 @@ namespace
 						break;
 					}
 				}
+			}
+
+			// A flyer that hits the ground and carries nothing is no stranded transport: a bomber over the
+			// enemy base waits for the next order of its wave there (match #12600: Kirovs sent home 232
+			// times, most of them near the enemy base). Only transports and flyers with no weapon for the
+			// ground fly home when exposed; the others are only released from a dead order.
+			if (exposed && pUnit->Type->Passengers <= 0 && GroundRangeOf(pUnit->Type) > 0)
+			{
+				auto const pFlyerExt = UnitExt::Fetch(pUnit);
+
+				if (!pFlyerExt || !pFlyerExt->CarryallCargo)
+					exposed = false;
 			}
 
 			auto const pDestCell = abstract_cast<CellClass*>(pUnit->Destination);
