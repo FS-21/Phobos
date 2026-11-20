@@ -325,8 +325,16 @@ namespace
 
 				auto const pType = pUnit->Type;
 
-				if (holds(pType) && (!(rules & CarryOwnedComes) || CanTransportTypeLink(pType, pUnit->GetMapCoords(), query.From)))
+				// A transport no operation would take now (under OpTransportMinHealth, or docked at a building)
+				// is none that comes (match #12347: an operation waited 9000 frames for two such).
+				const bool unfitTransport = pUnit->GetHealthPercentage() < OpTransportMinHealth
+					|| abstract_cast<BuildingClass*>(pUnit->GetNthLink(0)) != nullptr;
+
+				if (holds(pType) && !unfitTransport
+					&& (!(rules & CarryOwnedComes) || CanTransportTypeLink(pType, pUnit->GetMapCoords(), query.From)))
+				{
 					return true;
+				}
 
 				if (unitSlings(pType))
 					return true;
