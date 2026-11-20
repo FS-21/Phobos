@@ -1230,6 +1230,20 @@ namespace
 		// hold that bought nothing for 3600 frames rests 1800).
 		int EconomyHoldSince { -1 };
 		int EconomyHoldPauseUntil { -1 };
+		// TEMP diagnostic (economy hold): what the hold saves for (1 harvester, 2 refinery, 3 MCV, 4 broke),
+		// when it began, the productions it cancelled since then and since the last status line, what the house
+		// owned of that kind when it began, and the status lines written this match.
+		int EconomyHoldKind { 0 };
+		int EconomyHoldCancels { 0 };
+		int EconomyHoldLineCancels { 0 };
+		int EconomyHoldStartAssets { 0 };
+		int EconomyHoldLogLines { 0 };
+		int EconomyHoldStartFrame { -1 };
+		// A hold that ended with the credits at the price: its kind, frame and what the house owned of
+		// that kind then, looked at again 1800 frames later (was the item bought).
+		int EconomyHoldPaidKind { 0 };
+		int EconomyHoldPaidFrame { -1 };
+		int EconomyHoldPaidAssets { 0 };
 		// Enemy units seen cloaked, cloakable or under water: UniqueID -> (cell, frame), for
 		// superweapons that reveal stealth (SW.AITargeting=Stealth).
 		std::unordered_map<DWORD, std::pair<CellStruct, int>> StealthSightings;
@@ -1838,6 +1852,15 @@ namespace
 			this->RefinerySaveTarget = 0;
 			this->EconomyHoldSince = -1;
 			this->EconomyHoldPauseUntil = -1;
+			this->EconomyHoldKind = 0;
+			this->EconomyHoldCancels = 0;
+			this->EconomyHoldLineCancels = 0;
+			this->EconomyHoldStartAssets = 0;
+			this->EconomyHoldLogLines = 0;
+			this->EconomyHoldStartFrame = -1;
+			this->EconomyHoldPaidKind = 0;
+			this->EconomyHoldPaidFrame = -1;
+			this->EconomyHoldPaidAssets = 0;
 			this->StealthSightings.clear();
 			this->LastEnemySeenFrame = 0;
 			this->HiddenLosses.clear();
@@ -2571,6 +2594,8 @@ namespace
 	constexpr int EconomyRecoverySaleFrames = 300;
 	constexpr int EconomyRecoverySaleQuietFrames = 1800;
 	constexpr int EconomyRecoveryKeepFactories = 1;
+	// TEMP diagnostic (economy hold): status lines a house writes a match, one every 900 frames of a hold.
+	constexpr int EconomyHoldLogLinesMost = 120;
 	// Ore cells of a held 12x12 ore block for each refinery past the first it takes (3 at most).
 	constexpr int RefineryOreCellsPerExtra = 24;
 	// A newly reached ore field gets a refinery past what we own (and past the held fields' room) at
@@ -3387,6 +3412,22 @@ namespace
 	constexpr int RemnantSearchSpreadFrames = 1800;
 	constexpr int RemnantSearchMostSends = 3;
 	constexpr int RemnantSearchMemoryFrames = 27000;
+	// A searcher keeps its place until it comes within RemnantSearchArriveCells of it, takes another
+	// goal, or RemnantSearchKeepFrames pass: it is out of the idle pools meanwhile (match #11884:
+	// the searchers were sent somewhere else every 450 frames and never reached the far places, then
+	// the search found no place left, and a base of the enemy was never seen).
+	constexpr int RemnantSearchArriveCells = 5;
+	constexpr int RemnantSearchKeepFrames = 2700;
+	// The places start where the enemy was: the last known enemy buildings of houses still in the
+	// match (RemnantLeadsMost areas, noted every RemnantLeadsEveryFrames while some are known) with
+	// RemnantLeadBuildingBonus, then the free ore fields, where a beaten house builds again, with
+	// RemnantLeadFieldBonus (half beyond RemnantLeadFieldCells of every lead). With no place left
+	// that teaches RemnantSearchMinGain, the stalest ones go instead of none.
+	constexpr size_t RemnantLeadsMost = 24;
+	constexpr int RemnantLeadsEveryFrames = 450;
+	constexpr int RemnantLeadBuildingBonus = 400;
+	constexpr int RemnantLeadFieldBonus = 200;
+	constexpr int RemnantLeadFieldCells = 40;
 	// Sweep (user): while no enemy object is in our sight, one more scout every ScoutSweepEveryFrames
 	// (half a minute) may leave, up to ScoutSweepMostTrips scouts out, and the places of a grid of
 	// ScoutSweepStepCells over the playable ground are scout targets too (weight ScoutSweepWeight):

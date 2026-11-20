@@ -16,6 +16,10 @@ namespace
 namespace
 {
 	std::vector<CellStruct> FindRemnantSearchCells(HouseClass* pHouse, size_t most);
+	void NoteRemnantLeads(HouseClass* pHouse);
+	size_t KeepRemnantSearchers(HouseClass* pHouse, std::vector<UnitClass*>& idleUnits, std::vector<InfantryClass*>& idleInf);
+	void NoteRemnantSearcher(HouseClass* pHouse, const FootClass* pFoot, const CellStruct& place);
+	bool MayLogRemnantNoPlace(HouseClass* pHouse);
 }
 
 // Land before islands (IslandMcvWaitFrames, NeuralAI.State.inl).
@@ -10548,37 +10552,56 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Remnant search: the remnant phase while the enemy still has buildings, whatever enemy unit the
 	// waves go after meanwhile. Idle units go and look, the fastest first, each to a different place
 	// (RemnantSearchScouts, one in RemnantSearchArmyShare of a big idle army), and leave the idle
-	// pools.
-	if (remnantPhase && anyEnemyBuildingExists
-		&& Unsorted::CurrentFrame - GetMacroState(pHouse).RemnantSearchFrame >= RemnantSearchEveryFrames)
+	// pools until they get there (KeepRemnantSearchers). Outside it the known enemy buildings are
+	// noted as the first places of a later search (NoteRemnantLeads).
+	if (!remnantPhase)
 	{
-		GetMacroState(pHouse).RemnantSearchFrame = Unsorted::CurrentFrame;
-		std::vector<FootClass*> searchers(idleCombatUnits.begin(), idleCombatUnits.end());
-		searchers.insert(searchers.end(), idleCombatInf.begin(), idleCombatInf.end());
-		std::stable_sort(searchers.begin(), searchers.end(), [](FootClass* a, FootClass* b)
+		NoteRemnantLeads(pHouse);
+	}
+	else if (anyEnemyBuildingExists)
+	{
+		const size_t onTheirWay = KeepRemnantSearchers(pHouse, idleCombatUnits, idleCombatInf);
+
+		if (Unsorted::CurrentFrame - GetMacroState(pHouse).RemnantSearchFrame >= RemnantSearchEveryFrames)
+		{
+			GetMacroState(pHouse).RemnantSearchFrame = Unsorted::CurrentFrame;
+			std::vector<FootClass*> searchers(idleCombatUnits.begin(), idleCombatUnits.end());
+			searchers.insert(searchers.end(), idleCombatInf.begin(), idleCombatInf.end());
+			std::stable_sort(searchers.begin(), searchers.end(), [](FootClass* a, FootClass* b)
+				{
+					return a->GetTechnoType()->Speed > b->GetTechnoType()->Speed;
+				});
+
+			const size_t wantedSearchers = std::clamp((searchers.size() + onTheirWay) / RemnantSearchArmyShare,
+				RemnantSearchScouts, RemnantSearchMostScouts);
+			const size_t searcherCount = std::min(searchers.size(), wantedSearchers > onTheirWay ? wantedSearchers - onTheirWay : 0);
+			const std::vector<CellStruct> places = searcherCount > 0 ? FindRemnantSearchCells(pHouse, searcherCount) : std::vector<CellStruct> {};
+
+			for (size_t i = 0; i < places.size(); ++i)
 			{
-				return a->GetTechnoType()->Speed > b->GetTechnoType()->Speed;
-			});
+				auto const pSearcher = searchers[i];
 
-		const size_t searcherCount = std::min(searchers.size(),
-			std::clamp(searchers.size() / RemnantSearchArmyShare, RemnantSearchScouts, RemnantSearchMostScouts));
-		const std::vector<CellStruct> places = FindRemnantSearchCells(pHouse, searcherCount);
+				if (auto const pPlace = MapClass::Instance.TryGetCellAt(places[i]))
+				{
+					OrderFootToAttackMove(pSearcher, pPlace);
+					NoteRemnantSearcher(pHouse, pSearcher, places[i]);
+				}
 
-		for (size_t i = 0; i < places.size(); ++i)
-		{
-			auto const pSearcher = searchers[i];
+				std::erase(idleCombatUnits, pSearcher);
+				std::erase(idleCombatInf, pSearcher);
+			}
 
-			if (auto const pPlace = MapClass::Instance.TryGetCellAt(places[i]))
-				OrderFootToAttackMove(pSearcher, pPlace);
-
-			std::erase(idleCombatUnits, pSearcher);
-			std::erase(idleCombatInf, pSearcher);
-		}
-
-		if (!places.empty())
-		{
-			Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: %d scouts sent, first to (%d,%d)\n", Unsorted::CurrentFrame,
-				pHouse->ArrayIndex, static_cast<int>(places.size()), places.front().X, places.front().Y);
+			if (!places.empty())
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: %d scouts sent, %d on their way, first to (%d,%d)\n",
+					Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(places.size()), static_cast<int>(onTheirWay),
+					places.front().X, places.front().Y);
+			}
+			else if (searcherCount > 0 && MayLogRemnantNoPlace(pHouse))
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: no place left to look, %d idle, %d on their way\n",
+					Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(searchers.size()), static_cast<int>(onTheirWay));
+			}
 		}
 	}
 
@@ -11221,34 +11244,32 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	size_t waveAbleUnits = idleCombatUnits.size();
 	size_t waveAbleInf = idleCombatInf.size();
 
+	// A unit that does not get there alone counts when a transport operation can take it: a
+	// transport of ours, or one we can build, carries its type (the request checks the very
+	// crossing). Without this the wave never left an island and nobody asked for a transport.
+	// The strength gate below weighs the same units.
+	std::unordered_map<const TechnoTypeClass*, bool> ferriedTypes;
+
+	auto const reachesWaveGoal = [&](FootClass* pFoot)
+	{
+		if (FootReachesAlone(pFoot, pWaveTargetCell->MapCoords, pWaveTargetCell->GetBuilding()))
+			return true;
+
+		auto const pType = pFoot->GetTechnoType();
+
+		if (!TransportOpsEnabled || IsWaterBound(pType))
+			return false;
+
+		auto const [itType, inserted] = ferriedTypes.try_emplace(pType, false);
+
+		if (inserted)
+			itType->second = CanHouseFerryTypeAcrossWater(pHouse, pType);
+
+		return itType->second;
+	};
+
 	if (pWaveTargetCell && !endgameRemnantHunt)
 	{
-		const CellStruct waveGoal = pWaveTargetCell->MapCoords;
-		auto const pGoalBld = pWaveTargetCell->GetBuilding();
-
-		// A unit that does not get there alone counts when a transport operation can take it: a
-		// transport of ours, or one we can build, carries its type (the request checks the very
-		// crossing). Without this the wave never left an island and nobody asked for a transport.
-		std::unordered_map<const TechnoTypeClass*, bool> ferriedTypes;
-
-		auto const reachesWaveGoal = [&](FootClass* pFoot)
-		{
-			if (FootReachesAlone(pFoot, waveGoal, pGoalBld))
-				return true;
-
-			auto const pType = pFoot->GetTechnoType();
-
-			if (!TransportOpsEnabled || IsWaterBound(pType))
-				return false;
-
-			auto const [itType, inserted] = ferriedTypes.try_emplace(pType, false);
-
-			if (inserted)
-				itType->second = CanHouseFerryTypeAcrossWater(pHouse, pType);
-
-			return itType->second;
-		};
-
 		waveAbleUnits = static_cast<size_t>(std::count_if(idleCombatUnits.begin(), idleCombatUnits.end(),
 			[&](UnitClass* pU) { return reachesWaveGoal(pU); }));
 		waveAbleInf = static_cast<size_t>(std::count_if(idleCombatInf.begin(), idleCombatInf.end(),
@@ -11287,31 +11308,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	if (pWaveTargetCell && !endgameRemnantHunt && waveCountReady)
 	{
 		const CellStruct gateTarget = pWaveTargetCell->MapCoords;
-		const int gateZone = MapClass::Instance.GetMovementZoneType(gateTarget, MovementZone::Normal, false);
 		int readyValue = 0;
 
-		auto addReadyValue = [&](FootClass* pFoot, bool canCrossWater)
+		// The units the count took (reachesWaveGoal). With the zone of the target cell alone, a wave
+		// whose army needs a ferry, or whose target cell lies in another zone than the ground around
+		// it, weighed 0 with its count met and was held ("value 0" in 5 of 44 matches, most of them
+		// on water maps: #11875, #11904, #11906, #11917, #11925).
+		auto const addReadyValue = [&](FootClass* pFoot)
 		{
-			const int footZone = ObjectZone(pFoot, MovementZone::Normal);
-
-			if ((canCrossWater || (gateZone >= 0 && footZone == gateZone)) && pFoot->GetMapCoords().DistanceFrom(gateTarget) > 14.0)
+			if (pFoot->GetMapCoords().DistanceFrom(gateTarget) > 14.0 && reachesWaveGoal(pFoot))
 				readyValue += OwnGroundFighterValue(pFoot);
 		};
 
 		for (auto const pU : idleCombatUnits)
-		{
-			const auto mz = pU->Type->MovementZone;
-			addReadyValue(pU, mz == MovementZone::Amphibious || mz == MovementZone::AmphibiousDestroyer
-				|| mz == MovementZone::AmphibiousCrusher || mz == MovementZone::Fly || mz == MovementZone::Subterrannean
-				|| pU->Type->JumpJet || pU->Type->Teleporter);
-		}
+			addReadyValue(pU);
 
 		for (auto const pI : idleCombatInf)
-		{
-			const auto mz = pI->Type->MovementZone;
-			addReadyValue(pI, mz == MovementZone::Amphibious || mz == MovementZone::AmphibiousDestroyer || mz == MovementZone::Fly
-				|| pI->Type->JumpJet || pI->Type->Teleporter);
-		}
+			addReadyValue(pI);
 
 		// The waves before on their way to this target count too: each packet was judged alone
 		// against the whole defense (match #11465: "value 159 vs 1035 expected" while 47 units of
