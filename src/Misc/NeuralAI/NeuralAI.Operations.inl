@@ -89,28 +89,7 @@ namespace
 	// shore, a cliff foot, a factory exit) stands for the ground within 2 cells of it. -1: none.
 	int OpFootGroundZone(const FootClass* pFoot)
 	{
-		const CellStruct at = pFoot->GetMapCoords();
-		int zone = MapClass::Instance.GetMovementZoneType(at, MovementZone::Normal, pFoot->OnBridge);
-
-		for (int r = 1; r <= 2 && !IsGroundZone(zone); ++r)
-		{
-			for (int dy = -r; dy <= r && !IsGroundZone(zone); ++dy)
-			{
-				for (int dx = -r; dx <= r && !IsGroundZone(zone); ++dx)
-				{
-					if (std::abs(dx) != r && std::abs(dy) != r)
-						continue;
-
-					const CellStruct beside { static_cast<short>(at.X + dx), static_cast<short>(at.Y + dy) };
-					const int nearZone = MapClass::Instance.GetMovementZoneType(beside, MovementZone::Normal, false);
-
-					if (IsGroundZone(nearZone))
-						zone = nearZone;
-				}
-			}
-		}
-
-		return IsGroundZone(zone) ? zone : -1;
+		return OpCellGroundZone(pFoot->GetMapCoords(), pFoot->OnBridge);
 	}
 
 	// The ground an address is reached from: the zone of its cell (a bridge cell: the deck's), or for
@@ -2231,9 +2210,34 @@ namespace
 					return true;
 				}
 
-				// Set down again on its own land (a load taken back): it waits for a seat anew.
+				// Set down again on its own land (a load taken back): it waits for a seat anew. Set down there
+				// by a transport still on its crossing (short of the landing, stuck on the way), it was carried
+				// for nothing: after OpMaxShortSetDowns such trips the operation lets it go and it may not ask
+				// again for OpRetryFrames (match #12992: one soldier carried 31 times, never delivered).
 				if (wasAboard)
+				{
+					const bool shortOfLanding = std::any_of(op.Transports.begin(), op.Transports.end(),
+						[&member](const NeuralOpTransport& transport)
+						{
+							return transport.UniqueID == member.Transport && transport.Leg == NeuralOpLeg::Crossing;
+						});
+
 					member.Transport = 0;
+
+					if (shortOfLanding && ++member.ShortSetDowns >= OpMaxShortSetDowns)
+					{
+						Debug::Log("[NeuralAI] House %d transport op %d lets %s %u go: set down %d times on its own land at (%d,%d), frame %d.\n",
+							houseIndex, op.Id, pFoot->GetTechnoType()->ID, member.UniqueID, member.ShortSetDowns, pFoot->GetMapCoords().X,
+							pFoot->GetMapCoords().Y, now);
+						macro.TransportOpRetryUntil[member.UniqueID] = now + OpRetryFrames;
+						op.Released++;
+						macro.TransportOpOf.erase(member.UniqueID);
+						wake(pFoot);
+						pFoot->SetDestination(nullptr, true);
+						pFoot->QueueMission(Mission::Guard, false);
+						return true;
+					}
+				}
 
 				// A shuttle's harvester that gets no nearer to the transport waiting for it (shut in, its way
 				// blocked) is let go: the transport would wait for it until the operation gave up.
@@ -3408,9 +3412,9 @@ namespace
 
 		// Sets the load down at once on the ground below (PutAshoreNow); the load counted for the
 		// set-downs the engine makes follows.
-		auto const putAshore = [&](NeuralOpTransport& transport, FootClass* pTransport) -> int
+		auto const putAshore = [&](NeuralOpTransport& transport, FootClass* pTransport, int groundZone = -1) -> int
 		{
-			const int out = PutAshoreNow(pTransport);
+			const int out = PutAshoreNow(pTransport, groundZone);
 			transport.LastLoaded = pTransport->Passengers.NumPassengers;
 
 			return out;
@@ -3429,9 +3433,10 @@ namespace
 			const Mission setDown = carrier == OpCarrier::Carryall ? Mission::Move : Mission::Unload;
 			const Mission moveOn = carrier == OpCarrier::Flyer ? Mission::Unload : Mission::Move;
 
+			// Only onto the land of the address: short of it, it drives on to the landing cell.
 			if (!aloft && carrier != OpCarrier::Carryall)
 			{
-				const int out = putAshore(transport, pTransport);
+				const int out = putAshore(transport, pTransport, op.TargetZone);
 
 				if (out > 0)
 				{

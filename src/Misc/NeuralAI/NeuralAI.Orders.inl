@@ -402,13 +402,43 @@ namespace
 		return pBest;
 	}
 
+	// The ground zone a unit on this cell stands on (MovementZone::Normal). A cell of no ground zone
+	// (a shore, a cliff foot, a factory exit) stands for the ground within 2 cells of it. -1: none.
+	int OpCellGroundZone(const CellStruct& at, bool onBridge)
+	{
+		int zone = MapClass::Instance.GetMovementZoneType(at, MovementZone::Normal, onBridge);
+
+		for (int r = 1; r <= 2 && !IsGroundZone(zone); ++r)
+		{
+			for (int dy = -r; dy <= r && !IsGroundZone(zone); ++dy)
+			{
+				for (int dx = -r; dx <= r && !IsGroundZone(zone); ++dx)
+				{
+					if (std::abs(dx) != r && std::abs(dy) != r)
+						continue;
+
+					const CellStruct beside { static_cast<short>(at.X + dx), static_cast<short>(at.Y + dy) };
+					const int nearZone = MapClass::Instance.GetMovementZoneType(beside, MovementZone::Normal, false);
+
+					if (IsGroundZone(nearZone))
+						zone = nearZone;
+				}
+			}
+		}
+
+		return IsGroundZone(zone) ? zone : -1;
+	}
+
 	// Lets the passengers of a transport on the ground out onto the cells next to it, at once: the
 	// steps of the engine's unload, which detaches each passenger and puts it on a cell next to
 	// the transport that it can enter (UnitClass::Mission_Unload). The mission itself first waits
 	// for the locomotor to report no movement, and a hovercraft reports movement for as long as
 	// it floats. Returns how many got out; one with no cell to stand on stays aboard with those
-	// behind it.
-	int PutAshoreNow(FootClass* pTransport)
+	// behind it. With a ground zone given, only cells of that ground take them: a ground transport
+	// that drives or burrows to its landing comes within reach of it still on the land it left
+	// (match #12992: a subterranean APC set its soldier down 2 cells short of a plateau, on the
+	// origin side, and took it back for another try 31 times).
+	int PutAshoreNow(FootClass* pTransport, int groundZone = -1)
 	{
 		if (IsFerryAloft(pTransport) || pTransport->OnBridge)
 			return 0;
@@ -427,7 +457,7 @@ namespace
 				const CellStruct c { static_cast<short>(at.X + offset.X), static_cast<short>(at.Y + offset.Y) };
 				auto const pCell = MapClass::Instance.CoordinatesLegal(c) ? MapClass::Instance.TryGetCellAt(c) : nullptr;
 
-				if (!pCell || pCell->ContainsBridge())
+				if (!pCell || pCell->ContainsBridge() || (groundZone >= 0 && OpCellGroundZone(c, false) != groundZone))
 					continue;
 
 				const Move occupied = pPassenger->IsCellOccupied(pCell, FacingType::None, -1, nullptr, true);
