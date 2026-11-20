@@ -11379,14 +11379,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Mass, not a stream (match #11465 Dead Six: a wave of 2 or 3 and a dispatch every tick sent the
 	// armies of two houses of 80+ units out in packets of 7 to 17): once the army is big, a main wave
 	// waits for a share of it idle. The army is the idle fighters and those busy at the enemy, not the
-	// guards, plans or garrisons. The guerrilla raider (5) keeps its small groups.
+	// guards, plans or garrisons. The guerrilla raider (5) keeps its small groups. The share does not
+	// hold while the second echelon window is open, and gives way after WaveFloorWaitMostFrames (below).
 	const int waveArmy = static_cast<int>(idleCombatUnits.size() + idleCombatInf.size()) + notIdleBusy + notIdleInfBusy;
-	const size_t armyShareUnits = (endgameRemnantHunt || arch == 5 || waveArmy < WaveArmyMassFrom)
+	const size_t armyShareUnits = (endgameRemnantHunt || arch == 5 || waveArmy < WaveArmyMassFrom || secondEchelonWindow)
 		? 0u
 		: static_cast<size_t>(std::min(WaveArmyShareMost, waveArmy / WaveArmyShareDivisor));
-	const size_t waveUnitsNeeded = std::max(armyShareUnits, teamOrder.MinWaveUnits > 0
+	const size_t waveUnitsWithoutShare = teamOrder.MinWaveUnits > 0
 		? std::min(minWaveUnits, static_cast<size_t>(teamOrder.MinWaveUnits))
-		: minWaveUnits);
+		: minWaveUnits;
+	size_t waveUnitsNeeded = std::max(armyShareUnits, waveUnitsWithoutShare);
 
 	// Expert 3 tacit coalition: this wave goes for the coalition target (approach away from the
 	// spots other houses' armies are hitting).
@@ -11827,6 +11829,45 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			[&](UnitClass* pU) { return reachesWaveGoal(pU); }));
 		waveAbleInf = static_cast<size_t>(std::count_if(idleCombatInf.begin(), idleCombatInf.end(),
 			[&](InfantryClass* pI) { return reachesWaveGoal(pI); }));
+	}
+
+	// The army share floor waits at most WaveFloorWaitMostFrames once the count without it is met:
+	// then the wave goes with what it has (user: waiting to gather must have a limit). A dispatch
+	// starts the wait again, so the waves after it do not stream out at the smaller count.
+	{
+		auto const countMet = [&waveAbleUnits, &waveAbleInf](size_t needed)
+		{
+			return waveAbleUnits >= needed || waveAbleUnits + waveAbleInf >= needed + 4 || waveAbleInf >= needed + 3;
+		};
+		const int floorNow = Unsorted::CurrentFrame;
+
+		if (pWaveTargetCell && !endgameRemnantHunt && waveUnitsNeeded > waveUnitsWithoutShare && countMet(waveUnitsWithoutShare)
+			&& !countMet(waveUnitsNeeded))
+		{
+			if (waveMacro.WaveFloorWaitSince < 0 || waveMacro.WaveFloorWaitSince > floorNow
+				|| waveMacro.LastWaveDispatchFrame >= waveMacro.WaveFloorWaitSince)
+			{
+				waveMacro.WaveFloorWaitSince = floorNow;
+				waveMacro.WaveFloorWaitLogged = false;
+			}
+			else if (floorNow - waveMacro.WaveFloorWaitSince >= WaveFloorWaitMostFrames)
+			{
+				if (!waveMacro.WaveFloorWaitLogged)
+				{
+					Debug::Log("[NeuralAI] Frame %d | House #%d wave floor waited %d frames: the wave asks for %d units instead of %d "
+						"(%d idle reach the target, %d soldiers)\n", floorNow, pHouse->ArrayIndex, floorNow - waveMacro.WaveFloorWaitSince,
+						static_cast<int>(waveUnitsWithoutShare), static_cast<int>(waveUnitsNeeded), static_cast<int>(waveAbleUnits),
+						static_cast<int>(waveAbleInf));
+					waveMacro.WaveFloorWaitLogged = true;
+				}
+
+				waveUnitsNeeded = waveUnitsWithoutShare;
+			}
+		}
+		else
+		{
+			waveMacro.WaveFloorWaitSince = -1;
+		}
 	}
 
 	const bool waveCountReady = waveAbleUnits >= waveUnitsNeeded
