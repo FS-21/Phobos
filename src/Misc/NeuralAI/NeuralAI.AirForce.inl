@@ -354,11 +354,8 @@ namespace
 	// against the building's armor).
 	int AirSortieDamageVs(AircraftClass* pAir, BuildingClass* pTarget)
 	{
-		// No damage at an immune building (the immune techs game option), nor at one of the pads it
-		// docks at: ordered to attack such a pad the aircraft turns back home at once (2026-11-20: of
-		// 34 wing strikes at the pads their aircraft dock at, 23 were over within 120 frames, with the
-		// pad standing).
-		if (pTarget->Type->Immune || pAir->Type->Dock.FindItemIndex(pTarget->Type) >= 0)
+		// No damage at an immune building (the immune techs game option).
+		if (pTarget->Type->Immune)
 			return 0;
 
 		int best = 0;
@@ -1079,15 +1076,21 @@ namespace
 
 			NeuralAirWingFlight flight { pTarget->UniqueID, pTarget->Type, {}, now };
 
+			// Every order of the wing first, then the flights: ContinueAirStrike weighs the risk at the target
+			// against the aircraft bound for it, and given one by one each member saw a wing of itself
+			// alone and dropped its order (2026-11-20: of 184 wings at a target with known anti-air, 175
+			// were over at the next tick, against 1 of 159 with none).
 			for (auto const pMember : wing)
 			{
 				committedByTarget[pTarget->UniqueID] += AirSortieDamageVs(pMember, pTarget);
 				state.Orders[pMember->UniqueID] = NeuralAirStrikeOrder { pTarget->UniqueID, now, targetCell };
 				CountDecision(NeuralDecision::AirWingSortie, pHouse->ArrayIndex);
 				NoteAirTask(pHouse, pMember, NeuralAirTask::Wing);
-				ContinueAirStrike(pHouse, pMember);
 				flight.Members.push_back(pMember->UniqueID);
 			}
+
+			for (auto const pMember : wing)
+				ContinueAirStrike(pHouse, pMember);
 
 			state.Flights.push_back(std::move(flight));
 
