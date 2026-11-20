@@ -433,17 +433,27 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		return result;
 	};
 
-	auto const CanDeployerUnpackHere = [](HouseClass* pH, BuildingTypeClass* pBldType, UnitClass* pDeployerUnit) -> bool
+	// pWhy: what refused the deploy (TEMP diagnostic of the idle watchdog).
+	auto const CanDeployerUnpackHere = [](HouseClass* pH, BuildingTypeClass* pBldType, UnitClass* pDeployerUnit,
+		const char** pWhy = nullptr) -> bool
 	{
-		if (!pH || !pBldType || !pDeployerUnit)
+		auto const refuse = [pWhy](const char* why)
+		{
+			if (pWhy)
+				*pWhy = why;
+
 			return false;
+		};
+
+		if (!pH || !pBldType || !pDeployerUnit)
+			return refuse("no deployer");
 
 		const int w = pBldType->GetFoundationWidth();
 		const int h = pBldType->GetFoundationHeight(false);
 		const CellStruct deployOffset = (w > 2 || h > 2) ? CellStruct { -1, -1 } : CellStruct { 0, 0 };
 		const CellStruct topLeftCell = pDeployerUnit->GetMapCoords() + deployOffset;
 		if (!NeuralAI::IsCellClearedOfExitCorridors(pH, pBldType, topLeftCell))
-			return false;
+			return refuse("an exit corridor of ours");
 
 		bool occupiedByOtherDeployerOrTrans = false;
 		for (auto pFoundCell = pBldType->GetFoundationData(true); *pFoundCell != CellStruct { 0x7FFF, 0x7FFF };
@@ -452,7 +462,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const CellStruct fc = topLeftCell + *pFoundCell;
 			auto const pFC = MapClass::Instance.TryGetCellAt(fc);
 			if (!pFC)
-				return false;
+				return refuse("off the map");
 
 			std::vector<FootClass*> cellFoots;
 			CollectCellFoots(pFC, cellFoots);
@@ -502,9 +512,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		if (occupiedByOtherDeployerOrTrans)
-			return false;
+			return refuse("another deployer or transport on the foundation");
 
-		return UnitExt::CanDeployIntoBuilding(pDeployerUnit);
+		if (!UnitExt::CanDeployIntoBuilding(pDeployerUnit))
+			return refuse("the engine refuses the foundation");
+
+		return true;
 	};
 
 	// Whether a gun of `range` leptons at `from` can hit pTarget: a living, seen object on the ground
@@ -605,6 +618,208 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		return remember(FindDeployableFoundationNearCell(
 			pH, pBldType, pDeployerUnit->GetMapCoords(), requiredZone, pDeployerUnit));
+	};
+
+	// The MCV danger rule (McvDanger*, NeuralAI.State.inl): the visible armed enemy units that turn a packed
+	// MCV back, each with its combat value (GetCombatValueOfType by health), gathered once a tick.
+	std::vector<std::pair<CellStruct, int>> mcvDangerUnitsCache;
+	bool mcvDangerUnitsReady = false;
+
+	auto const GetMcvDangerUnits = [&]() -> const std::vector<std::pair<CellStruct, int>>&
+	{
+		if (mcvDangerUnitsReady)
+			return mcvDangerUnitsCache;
+
+		mcvDangerUnitsReady = true;
+
+		for (auto const pET : TechnoClass::Array)
+		{
+			if (!pET || pET->InLimbo || !pET->IsAlive || !pET->Owner || pET->WhatAmI() == AbstractType::Building)
+				continue;
+
+			if (pET->Owner == pHouse || pHouse->IsAlliedWith(pET->Owner) || !IsCellVisibleToAI(pHouse, pET->GetCell()) || pET->Owner->IsNeutral())
+				continue;
+
+			auto const pETType = pET->GetTechnoType();
+			auto const pETUnitType = abstract_cast<UnitTypeClass*>(pETType);
+
+			if (!pETType || (pETUnitType && pETUnitType->Harvester) || pETType->ResourceGatherer || IsAmphibiousOrAirTransport(pETType))
+				continue;
+
+			auto const pEWpn = pET->GetWeapon(0) ? pET->GetWeapon(0)->WeaponType : nullptr;
+
+			if (!pEWpn || (pETType->Naval && (pEWpn->Range <= 2048 || (pEWpn->Projectile && !pEWpn->Projectile->AG))))
+				continue;
+
+			mcvDangerUnitsCache.emplace_back(pET->GetMapCoords(),
+				std::max(1, static_cast<int>(GetCombatValueOfType(pETType, false) * pET->GetHealthPercentage())));
+		}
+
+		return mcvDangerUnitsCache;
+	};
+
+	// The combat value of those units within `cells` of `cell` (0: none near).
+	auto const McvDangerUnitValueNear = [&](const CellStruct& cell, int cells) -> int
+	{
+		int value = 0;
+
+		for (auto const& [unitCell, unitValue] : GetMcvDangerUnits())
+		{
+			if (std::max(std::abs(cell.X - unitCell.X), std::abs(cell.Y - unitCell.Y)) <= cells)
+				value += unitValue;
+		}
+
+		return value;
+	};
+
+	// Hold the ground (McvFallback*, NeuralAI.State.inl): a cell out of every danger.
+	auto const IsMcvFallbackSafe = [&](const CellStruct& cell, const std::vector<std::pair<CellStruct, int>>& dangers) -> bool
+	{
+		return !IsInMcvDanger(dangers, cell, McvSiteDangerMarginCells)
+			&& McvDangerUnitValueNear(cell, McvDangerUnitCells + McvFallbackMarginCells) == 0;
+	};
+
+	// Our defenses whose gun reaches `cell` and our armed units within McvCoverUnitCells of it, by combat
+	// value and health.
+	auto const McvOwnCoverValue = [pHouse](const CellStruct& cell) -> int
+	{
+		int value = 0;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type || !pBld->Type->IsBaseDefense)
+				continue;
+
+			auto const pWS = pBld->GetWeapon(0);
+			auto const pWpn = pWS ? pWS->WeaponType : nullptr;
+
+			if (!pWpn || pWpn->Range <= 0)
+				continue;
+
+			const CellStruct bc = pBld->GetMapCoords();
+
+			if (std::max(std::abs(cell.X - bc.X), std::abs(cell.Y - bc.Y)) <= pWpn->Range / 256 + 1)
+				value += static_cast<int>(GetCombatValueOfType(pBld->Type, false) * pBld->GetHealthPercentage());
+		}
+
+		for (auto const pT : TechnoClass::Array)
+		{
+			if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive)
+				continue;
+
+			const AbstractType kind = pT->WhatAmI();
+
+			if (kind != AbstractType::Unit && kind != AbstractType::Infantry)
+				continue;
+
+			auto const pTType = pT->GetTechnoType();
+			auto const pTUnitType = abstract_cast<UnitTypeClass*>(pTType);
+
+			if (!pTType || pTType->ResourceGatherer || (pTUnitType && (pTUnitType->Harvester || pTUnitType->DeploysInto))
+				|| !pT->GetWeapon(0) || !pT->GetWeapon(0)->WeaponType)
+			{
+				continue;
+			}
+
+			const CellStruct tc = pT->GetMapCoords();
+
+			if (std::max(std::abs(cell.X - tc.X), std::abs(cell.Y - tc.Y)) <= McvCoverUnitCells)
+				value += static_cast<int>(GetCombatValueOfType(pTType, false) * pT->GetHealthPercentage());
+		}
+
+		return value;
+	};
+
+	// The nearest cell out of every danger where the yard of pMcv fits (McvFallback*, NeuralAI.State.inl),
+	// near a building of ours before the rest; Empty when none of the McvFallbackTries best has room.
+	auto const FindMcvFallbackSpot = [&](UnitClass* pMcv, BuildingTypeClass* pYardType, int zone,
+		const std::vector<std::pair<CellStruct, int>>& dangers) -> CellStruct
+	{
+		if (!pMcv || !pYardType || zone < 0)
+			return CellStruct::Empty;
+
+		const CellStruct from = pMcv->GetMapCoords();
+		std::vector<CellStruct> ownCells;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && !pBld->InLimbo && pBld->IsAlive)
+				ownCells.push_back(pBld->GetMapCoords());
+		}
+
+		struct Candidate
+		{
+			int Score;
+			CellStruct Cell;
+		};
+
+		std::vector<Candidate> candidates;
+
+		for (int dy = -McvFallbackSearchCells; dy <= McvFallbackSearchCells; dy += 2)
+		{
+			for (int dx = -McvFallbackSearchCells; dx <= McvFallbackSearchCells; dx += 2)
+			{
+				const CellStruct cell { static_cast<short>(from.X + dx), static_cast<short>(from.Y + dy) };
+
+				if (!MapClass::Instance.TryGetCellAt(cell)
+					|| MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, false) != zone
+					|| !IsMcvFallbackSafe(cell, dangers))
+				{
+					continue;
+				}
+
+				int nearOwn = INT_MAX;
+
+				for (auto const& ownCell : ownCells)
+					nearOwn = std::min(nearOwn, std::max(std::abs(cell.X - ownCell.X), std::abs(cell.Y - ownCell.Y)));
+
+				candidates.push_back({ std::max(std::abs(dx), std::abs(dy)) * 10 + (nearOwn <= McvFallbackOwnCells ? 0 : McvFallbackOwnPenalty), cell });
+			}
+		}
+
+		std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b)
+		{
+			if (a.Score != b.Score)
+				return a.Score < b.Score;
+
+			return a.Cell.Y != b.Cell.Y ? a.Cell.Y < b.Cell.Y : a.Cell.X < b.Cell.X;
+		});
+
+		int tries = 0;
+
+		for (auto const& candidate : candidates)
+		{
+			if (tries++ >= McvFallbackTries)
+				break;
+
+			const CellStruct spot = FindDeployableFoundationNearCell(pHouse, pYardType, candidate.Cell, zone, pMcv);
+
+			if (spot != CellStruct::Empty && IsMcvFallbackSafe(spot, dangers))
+				return spot;
+		}
+
+		return CellStruct::Empty;
+	};
+
+	// TEMP diagnostic: each step of the hold-the-ground rule (McvHoldLogLines a match).
+	auto const logMcvHold = [pHouse](UnitClass* pMcv, const char* what, const CellStruct& at, int enemyValue, int ownValue)
+	{
+		static int holdLogSerial = -1;
+		static int holdLogCount = 0;
+
+		if (holdLogSerial != NeuralMatchSerial)
+		{
+			holdLogSerial = NeuralMatchSerial;
+			holdLogCount = 0;
+		}
+
+		if (holdLogCount++ >= McvHoldLogLines)
+			return;
+
+		const CellStruct here = pMcv->GetMapCoords();
+		Debug::Log("[NeuralAI] House %d MCV holds: %s %u %s (%d,%d), from (%d,%d), enemy value %d near, ours %d, %d yards, frame %d.\n",
+			pHouse->ArrayIndex, pMcv->Type->ID, pMcv->UniqueID, what, at.X, at.Y, here.X, here.Y, enemyValue, ownValue,
+			pHouse->NumConYards, Unsorted::CurrentFrame);
 	};
 
 	auto const pExt = HouseExt::Fetch(pHouse);
@@ -4055,47 +4270,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const int dangerExitCells = mcvInDanger.contains(pUnit->UniqueID) ? McvDangerExitCells : 0;
 			std::vector<std::pair<CellStruct, int>> mcvDangers;
 			CollectMcvDangerBuildings(pHouse, mcvDangers);
-			bool enemyNearMCV = IsInMcvDanger(mcvDangers, mcvCell, dangerExitCells);
-
-			if (!enemyNearMCV)
+			const bool dangerFromBuildings = IsInMcvDanger(mcvDangers, mcvCell, dangerExitCells);
+			// The visible armed enemy units within McvDangerUnitCells, by combat value (hold the ground below).
+			const int enemyUnitValueNearMcv = McvDangerUnitValueNear(mcvCell, McvDangerUnitCells + dangerExitCells);
+			bool enemyNearMCV = dangerFromBuildings || enemyUnitValueNearMcv > 0;
+			// The goal it drives to is in danger as well, or it met the danger near that goal: a danger met on
+			// the way, far from the goal, keeps no goal from the expansion goals (match #12278: one 34 cells off).
+			auto const mcvDangerNearItsGoal = [&]() -> bool
 			{
-				for (auto const pET : TechnoClass::Array)
-				{
-					if (!pET || pET->InLimbo || !pET->IsAlive || !pET->Owner
-						|| pET->WhatAmI() == AbstractType::Building)
-					{
-						continue;
-					}
+				if (pUnit->CurrentMission != Mission::Move || !pUnit->Destination)
+					return false;
 
-					if (pET->Owner == pHouse || pHouse->IsAlliedWith(pET->Owner) || !IsCellVisibleToAI(pHouse, pET->GetCell()) || pET->Owner->IsNeutral())
-						continue;
+				const CellStruct goal = CellClass::Coord2Cell(pUnit->Destination->GetCoords());
 
-					auto const pETType = pET->GetTechnoType();
-					auto const pETUnitType = abstract_cast<UnitTypeClass*>(pETType);
-
-					if (!pETType || (pETUnitType && pETUnitType->Harvester) || pETType->ResourceGatherer
-						|| IsAmphibiousOrAirTransport(pETType))
-					{
-						continue;
-					}
-
-					auto const pEWpn = pET->GetWeapon(0) ? pET->GetWeapon(0)->WeaponType : nullptr;
-
-					if (!pEWpn
-						|| (pETType->Naval && (pEWpn->Range <= 2048 || (pEWpn->Projectile && !pEWpn->Projectile->AG))))
-					{
-						continue;
-					}
-
-					const CellStruct etc = pET->GetMapCoords();
-
-					if (std::max(std::abs(mcvCell.X - etc.X), std::abs(mcvCell.Y - etc.Y)) <= McvDangerUnitCells + dangerExitCells)
-					{
-						enemyNearMCV = true;
-						break;
-					}
-				}
-			}
+				return mcvCell.DistanceFrom(goal) <= McvFledNearGoalCells || IsInMcvDanger(mcvDangers, goal, McvSiteDangerMarginCells)
+					|| McvDangerUnitValueNear(goal, McvDangerUnitCells + McvSiteDangerMarginCells) > 0;
+			};
 
 			if (mcvInDanger.size() > 64)
 				mcvInDanger.clear();
@@ -4248,7 +4438,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						const bool driving = pUnit->CurrentMission == Mission::Move && pUnit->Destination
 							&& pUnit->DistanceFrom(pUnit->Destination) > 256;
 
-						if ((onSite || !driving) && CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
+						const char* unfoldRefusal = "not tried";
+
+						if ((onSite || !driving) && CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit, &unfoldRefusal))
 						{
 							logStep(onSite ? "unfolds at the site" : "unfolds on the way at", mcvCell);
 							OrderDeployerUnpack(pUnit);
@@ -4260,6 +4452,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						{
 							failGoal("cannot unfold at");
 							retryNow = true;
+
+							// TEMP diagnostic: what refused the deploy on the site cell.
+							if (mcvWatchLogCount < 60)
+							{
+								Debug::Log("[NeuralAI] House %d MCV watchdog: %s %u deploy refused at (%d,%d): %s, frame %d.\n",
+									pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, mcvCell.X, mcvCell.Y, unfoldRefusal, now);
+							}
 						}
 						else if (goalDist <= McvIdleNearCells && !driving)
 						{
@@ -4497,6 +4696,111 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& mcvNoRoomIslands.at(mcvZone) > Unsorted::CurrentFrame;
 			const bool landedOnNewIsland = (homeGroundZone >= 0 && mcvZone >= 0 && mcvZone != homeGroundZone
 				&& conYardsInMcvZone == 0 && hubsAndFactoriesInMcvZone < 2 && !mcvIslandHasNoRoom);
+			// Hold the ground (McvFallback*, NeuralAI.State.inl; user approved, 2026-11-20, match #12278): an
+			// expansion MCV of our tech that meets an enemy unfolds where it stands when only enemy units are near
+			// and our defenses that reach it and our armed units around are at least as strong; else it heads
+			// for the nearest cell out of every danger where its yard fits, near our buildings when it can, and
+			// unfolds there (or on the way once out of danger and stopped), instead of driving home. With no such
+			// cell it turns home as before. An MCV the idle watchdog leads (its own order since its last
+			// failed site) is left to the watchdog.
+			auto const& holdIdleWatch = GetMacroState(pHouse).McvIdle;
+			auto const itHoldIdle = holdIdleWatch.find(pUnit->UniqueID);
+			const bool watchdogLeadsMcv = itHoldIdle != holdIdleWatch.end() && itHoldIdle->second.OwnOrderUntil >= 0;
+
+			if (watchdogLeadsMcv)
+				GetMacroState(pHouse).McvFallbacks.erase(pUnit->UniqueID);
+
+			if (!isForeignTechMCV && homeCoords != CellStruct::Empty && !landedOnNewIsland && !watchdogLeadsMcv)
+			{
+				auto& fallbacks = GetMacroState(pHouse).McvFallbacks;
+				const int now = Unsorted::CurrentFrame;
+				auto const pYardType = pType->DeploysInto;
+
+				if (fallbacks.size() > 64)
+					std::erase_if(fallbacks, [now](const auto& entry) { return now >= entry.second.Until; });
+
+				if (enemyNearMCV && !dangerFromBuildings)
+				{
+					const int ownCover = McvOwnCoverValue(mcvCell);
+
+					if (ownCover >= enemyUnitValueNearMcv && CanDeployerUnpackHere(pHouse, pYardType, pUnit))
+					{
+						logMcvHold(pUnit, "unfolds covered at", mcvCell, enemyUnitValueNearMcv, ownCover);
+						OrderDeployerUnpack(pUnit);
+						fallbacks.erase(pUnit->UniqueID);
+						continue;
+					}
+				}
+
+				auto itFallback = fallbacks.find(pUnit->UniqueID);
+
+				// Over: its time ran out, or its cell is in danger now.
+				if (itFallback != fallbacks.end()
+					&& (now >= itFallback->second.Until
+						|| (itFallback->second.Cell != CellStruct::Empty && !IsMcvFallbackSafe(itFallback->second.Cell, mcvDangers))))
+				{
+					fallbacks.erase(itFallback);
+					itFallback = fallbacks.end();
+				}
+
+				if (itFallback == fallbacks.end() && enemyNearMCV)
+				{
+					if (mcvDangerNearItsGoal())
+						NoteMcvFledSite(pHouse, pUnit, homeCoords);
+
+					const CellStruct spot = FindMcvFallbackSpot(pUnit, pYardType, mcvZone, mcvDangers);
+					itFallback = fallbacks.insert_or_assign(pUnit->UniqueID,
+						NeuralMcvFallback { spot, now + (spot != CellStruct::Empty ? McvFallbackFrames : McvFallbackNoneFrames) }).first;
+					logMcvHold(pUnit, spot != CellStruct::Empty ? "heads for the safe cell" : "finds no safe cell near",
+						spot != CellStruct::Empty ? spot : mcvCell, enemyUnitValueNearMcv, -1);
+				}
+
+				if (itFallback != fallbacks.end() && itFallback->second.Cell != CellStruct::Empty)
+				{
+					const CellStruct spot = itFallback->second.Cell;
+					const bool onSpot = mcvCell == spot;
+					const bool driving = pUnit->CurrentMission == Mission::Move && pUnit->Destination
+						&& pUnit->DistanceFrom(pUnit->Destination) > 256;
+
+					if ((onSpot || (!driving && !enemyNearMCV)) && CanDeployerUnpackHere(pHouse, pYardType, pUnit))
+					{
+						logMcvHold(pUnit, onSpot ? "unfolds at the safe cell" : "unfolds on the way at", mcvCell, enemyUnitValueNearMcv, -1);
+						OrderDeployerUnpack(pUnit);
+						fallbacks.erase(pUnit->UniqueID);
+						continue;
+					}
+
+					if (onSpot)
+					{
+						// The yard does not fit there after all: the turn home below, for a while.
+						logMcvHold(pUnit, "cannot unfold at the safe cell", mcvCell, enemyUnitValueNearMcv, -1);
+						itFallback->second = NeuralMcvFallback { CellStruct::Empty, now + McvFallbackNoneFrames };
+					}
+					else if (auto const pSpot = MapClass::Instance.TryGetCellAt(spot))
+					{
+						const NeuralOrderPriorityScope orderPriority { enemyNearMCV ? NeuralOrderPriority::Survival : NeuralOrderPriority::Routine };
+
+						// Next to it and stopped: straight onto the cell (the order helper keeps a unit within a cell
+						// or two of its goal). The order is given once.
+						if (!driving && mcvCell.DistanceFrom(spot) <= McvIdleNearCells)
+						{
+							if (pUnit->Destination != pSpot)
+							{
+								pUnit->SetDestination(pSpot, true);
+								pUnit->QueueMission(Mission::Move, true);
+								NoteOrderCaller(pUnit, "move");
+							}
+						}
+						else
+						{
+							IssueMoveOrder(pUnit, pSpot, 1.0);
+						}
+
+						continue;
+					}
+				}
+			}
+
 			// Not slot-gated (see the stolen asset scan above).
 			if (homeCoords != CellStruct::Empty && !landedOnNewIsland && (enemyNearMCV || isForeignTechMCV))
 			{
@@ -4592,7 +4896,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					// The goal it drove to lies past the danger: the expansion goals keep off it for a while
 					// (it was picked again once the MCV was home, match #11862).
-					if (enemyNearMCV && !isForeignTechMCV)
+					if (enemyNearMCV && !isForeignTechMCV && mcvDangerNearItsGoal())
 						NoteMcvFledSite(pHouse, pUnit, homeCoords);
 
 					if (pUnit->CurrentMission != Mission::Move || (IsAITickWindow(60, 15)))

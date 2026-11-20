@@ -547,7 +547,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Release units parked by orders they cannot complete (destroyed bridge, endless jam).
 	{
 	const NeuralSectionTimer watchdogTimer { pHouse->ArrayIndex, NeuralSection::Watchdogs };
-	UpdateStuckUnits(pHouse);
+	{
+		// It frees units of plans too (an operation order: plan members take no routine order).
+		const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Operation };
+		UpdateStuckUnits(pHouse);
+	}
 	TraceParkedFerries(pHouse->ArrayIndex, "stuck units watchdog");
 
 	// Soldiers shut in a building they no longer walk into are put down outside it.
