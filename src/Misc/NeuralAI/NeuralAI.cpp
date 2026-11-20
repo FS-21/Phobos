@@ -124,6 +124,7 @@ int NeuralAI::CurrentMeasuredFPS = 0;
 #include "NeuralAI.Team.inl"
 #include "NeuralAI.Bridges.inl"
 #include "NeuralAI.WaitCells.inl"
+#include "NeuralAI.Progress.inl"
 #include "NeuralAI.Lifecycle.inl"
 #include "NeuralAI.Telemetry.inl"
 #include "NeuralAI.Features.inl"

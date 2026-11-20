@@ -606,8 +606,10 @@ namespace
 			return;
 
 		auto& watch = GetMacroState(pHouse).UnloadWatch;
+		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
 		std::unordered_set<DWORD> seen;
+		const int unloadPrevious = BeginClockSample(macro, NeuralClock::Unload);
 
 		auto const handle = [&](FootClass* pTrans)
 		{
@@ -621,15 +623,27 @@ namespace
 
 			const CellStruct here = pTrans->GetMapCoords();
 			seen.insert(pTrans->UniqueID);
+
+			// TEMP (rule consolidation, case 5): the clock the registry carries on, checked against the watch.
+			{
+				auto const oldIt = watch.find(pTrans->UniqueID);
+				const bool oldKept = oldIt != watch.end();
+				NoteClockShadow(pHouse, NeuralClock::Unload, pTrans->UniqueID, oldKept, oldKept ? oldIt->second.first : CellStruct::Empty,
+					oldKept ? oldIt->second.second : 0, 0, 0, CarriedClock(macro, pTrans->UniqueID, NeuralClock::Unload, unloadPrevious));
+			}
+
 			auto [it, inserted] = watch.try_emplace(pTrans->UniqueID, here, now);
 
 			if (!inserted && it->second.first != here)
 				it->second = { here, now };
 
+			KeepClock(macro, pTrans->UniqueID, NeuralClock::Unload, { it->second.first, it->second.second });
+
 			if (now - it->second.second < 450)
 				return;
 
 			it->second = { here, now };
+			KeepClock(macro, pTrans->UniqueID, NeuralClock::Unload, { here, now });
 
 			if (pTrans->Passengers.NumPassengers <= 0)
 			{
