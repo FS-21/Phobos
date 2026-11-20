@@ -875,8 +875,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else if (desiredMission == Mission::Enter && abstract_cast<TechnoClass*>(pTarget))
 			{
-				OrderFootToEnter(pFoot, abstract_cast<TechnoClass*>(pTarget));
-				NoteOrderCaller(pFoot, "dispatchEnter", callerFile, callerLine);
+				// It notes (and leases the unit for) the code that dispatched it, not this line.
+				OrderFootToEnter(pFoot, abstract_cast<TechnoClass*>(pTarget), callerFile, callerLine);
 			}
 			else if (desiredMission == Mission::AttackMove)
 			{
@@ -3763,6 +3763,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			if (auto const pStation = FindBestRepairStation(pHouse, pUnit))
 			{
+				// A survival order: it takes the unit from a plan or an operation (order leases).
+				const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Survival };
+
 				if (pUnit->CurrentMission != Mission::Enter)
 					OrderFootToEnter(pUnit, pStation);
 
