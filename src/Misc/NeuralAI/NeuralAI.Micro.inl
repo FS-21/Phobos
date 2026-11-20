@@ -4696,6 +4696,56 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& mcvNoRoomIslands.at(mcvZone) > Unsorted::CurrentFrame;
 			const bool landedOnNewIsland = (homeGroundZone >= 0 && mcvZone >= 0 && mcvZone != homeGroundZone
 				&& conYardsInMcvZone == 0 && hubsAndFactoriesInMcvZone < 2 && !mcvIslandHasNoRoom);
+			// Stolen MCVs (StolenMcv*, NeuralAI.State.inl): the engine's hunt goes; one out of danger near our
+			// buildings unfolds there, its tech tree on safe ground; one that never unfolded goes into our Grinder.
+			if (isForeignTechMCV && !landedOnNewIsland)
+			{
+				auto& stolenSince = GetMacroState(pHouse).StolenMcvSince;
+				const int now = Unsorted::CurrentFrame;
+
+				if (stolenSince.size() > 32)
+					std::erase_if(stolenSince, [now](const auto& entry) { return now - entry.second > 4 * StolenMcvGrinderFrames; });
+
+				const int stolenFrom = stolenSince.try_emplace(pUnit->UniqueID, now).first->second;
+
+				if (pUnit->CurrentMission == Mission::Hunt || pUnit->QueuedMission == Mission::Hunt)
+				{
+					pUnit->ForceMission(Mission::Guard);
+					logMcvHold(pUnit, "stops the engine's hunt at", mcvCell, enemyUnitValueNearMcv, -1);
+				}
+
+				int nearOwnCells = INT_MAX;
+
+				for (auto const pOwnBld : pHouse->Buildings)
+				{
+					if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Wall)
+						continue;
+
+					const CellStruct bc = pOwnBld->GetMapCoords();
+					nearOwnCells = std::min(nearOwnCells, std::max(std::abs(mcvCell.X - bc.X), std::abs(mcvCell.Y - bc.Y)));
+				}
+
+				if (!enemyNearMCV && nearOwnCells <= StolenMcvOwnCells && CanDeployerUnpackHere(pHouse, pType->DeploysInto, pUnit))
+				{
+					logMcvHold(pUnit, "stolen, unfolds by our buildings at", mcvCell, enemyUnitValueNearMcv, -1);
+					OrderDeployerUnpack(pUnit);
+					stolenSince.erase(pUnit->UniqueID);
+					continue;
+				}
+
+				if (now - stolenFrom >= StolenMcvGrinderFrames && pGrinder && pGrinder->IsAlive && !pGrinder->InLimbo
+					&& FootReachesAlone(pUnit, pGrinder->GetMapCoords(), pGrinder))
+				{
+					if (pUnit->CurrentMission != Mission::Enter && pUnit->QueuedMission != Mission::Enter)
+					{
+						logMcvHold(pUnit, "stolen, never unfolded, goes into the Grinder at", pGrinder->GetMapCoords(), enemyUnitValueNearMcv, -1);
+						OrderFootToEnter(pUnit, pGrinder);
+					}
+
+					continue;
+				}
+			}
+
 			// Hold the ground (McvFallback*, NeuralAI.State.inl; user approved, 2026-11-20, match #12278): an
 			// expansion MCV of our tech that meets an enemy unfolds where it stands when only enemy units are near
 			// and our defenses that reach it and our armed units around are at least as strong; else it heads
