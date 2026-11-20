@@ -421,6 +421,7 @@
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Air.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Bridges.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.WaitCells.inl" />
+    <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Progress.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Economy.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Expansion.inl" />
     <ClInclude Include="src\Misc\NeuralAI\NeuralAI.Experts.inl" />
