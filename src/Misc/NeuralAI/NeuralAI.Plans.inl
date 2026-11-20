@@ -2693,7 +2693,9 @@ namespace
 			// offensive bank pushes harassment or assaults (OffensiveBankPlanUtility).
 			const int advantage = contextUtility > 0 ? MainAssaultAdvantageUtility(houseIdx, id) + OffensiveBankPlanUtility(pHouse, id) : 0;
 			// The plan priorities of this house's archetype (ArchetypePlanOffset).
-			const int archetypeOffset = contextUtility > 0 ? ArchetypePlanOffset(HouseExt::Fetch(pHouse)->NeuralAI_Archetype, id) : 0;
+			const int archetypeOffset = contextUtility > 0
+				? ArchetypePlanOffset(HouseExt::Fetch(pHouse)->NeuralAI_Archetype, id, GetMacroState(pHouse).SiegeOwnersMask != 0u)
+				: 0;
 			// What this plan did this match against the house it last went for (the main enemy
 			// before its first end) scales its utility (PlanEnemyWeight).
 			const int weightEnemy = macro.PlanLastEnemy[i] >= 0 ? macro.PlanLastEnemy[i] : pHouse->EnemyHouseIndex;
