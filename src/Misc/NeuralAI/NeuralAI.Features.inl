@@ -476,7 +476,14 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 		case AbstractType::Unit:
 			if (pTechno->GetTechnoType()->Naval)
+			{
 				visibleEnemyNavy++;
+
+				// An enemy ship in sight ends sea control (UpdateSeaControl); a submerged one is the
+				// submarine threat's.
+				if (pTechno->CloakState != CloakState::Cloaked)
+					GetMacroState(pHouse).LastEnemyNavySeenFrame = Unsorted::CurrentFrame;
+			}
 			else
 				visibleEnemyTanks++;
 

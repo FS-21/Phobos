@@ -4217,6 +4217,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	productionClock.Mark(NeuralSection::ProdUnits);
 
+	// Sea control (SeaControl*): read by the naval pick below, the crossing vehicles, the aircraft
+	// and the bank governor.
+	UpdateSeaControl(pHouse);
+	auto& seaMacro = GetMacroState(pHouse);
+	const bool seaControl = seaMacro.SeaControl;
+	const bool seaControlAcross = seaControl && seaMacro.EnemyAcrossWater;
+	seaMacro.SeaControlLongRangeShip = false;
+
 	// Unit & Naval Target Selection
 	int bestUnitIdx = -1;
 	int bestUnitScore = -32000;
@@ -5812,9 +5820,29 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 
 				score += ferryDelta;
+
+				// With the sea ours, a transport the ferry demand wants carries the war to the island.
+				if (seaControlAcross && ferryDelta > 0)
+					score += SeaControlTransportBonus;
 			}
 			else
 			{
+				int maxLandSiegeRange = 0;
+				const bool isLongRangeCoastalSiegeShip = IsLongRangeSiegeShipType(pUnit, &maxLandSiegeRange);
+				const bool isCoastalBombardShip = (maxLandSiegeRange >= (5 * 256));
+				const bool sonarWanted = pUnit->Sensors && (detectionNeed & (DetectionNeedStealth | DetectionNeedSub));
+
+				// The sea is ours (SeaControl*): warships that neither shell from afar nor hunt with a sonar the
+				// detection need asks for stop at SeaControlWarships, escorts and the yard's guard.
+				if (seaControl && !isLongRangeCoastalSiegeShip && !sonarWanted && !isUnitInProgress
+					&& seaMacro.PlainWarships >= SeaControlWarships)
+				{
+					continue;
+				}
+
+				if (isLongRangeCoastalSiegeShip)
+					seaMacro.SeaControlLongRangeShip = true;
+
 				score += scores[29];
 
 				// Only enemy ships or submarines are left: sonar (Sensors) to find them and weapons
@@ -5832,20 +5860,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 										 : ((hitsUnderwater ? 500 : 0) + (pUnit->Sensors ? 250 : 0));
 				}
 
-				const auto pWpn1 = pUnit->GetWeapon(1) ? pUnit->GetWeapon(1)->WeaponType : nullptr;
-				const bool isUnitCarrierSpawner
-					= (pUnit->Spawns != nullptr) || (pWpn && pWpn->Spawner) || (pWpn1 && pWpn1->Spawner);
-				const bool wpn0HitsLand = pWpn && (pWpn->Damage > 5 || pWpn->Spawner) && LandTargetingAllows(pUnit, 0)
-					&& (!pWpn->Projectile || pWpn->Projectile->AG || pWpn->Spawner || isUnitCarrierSpawner);
-				const bool wpn1HitsLand = pWpn1 && (pWpn1->Damage > 5 || pWpn1->Spawner) && LandTargetingAllows(pUnit, 1)
-					&& (!pWpn1->Projectile || pWpn1->Projectile->AG || pWpn1->Spawner);
-				const int maxLandSiegeRange = std::max(
-					wpn0HitsLand ? (isUnitCarrierSpawner ? std::max(pWpn->Range, 18 * 256) : pWpn->Range) : 0,
-					wpn1HitsLand ? pWpn1->Range : 0);
-				const bool isLongRangeCoastalSiegeShip
-					= (isUnitCarrierSpawner && (wpn0HitsLand || wpn1HitsLand)) || (maxLandSiegeRange >= (10 * 256));
-				const bool isCoastalBombardShip = (maxLandSiegeRange >= (5 * 256));
-
 				if (features[21] > 0 || features[67] > 10)
 				{
 					if (isLongRangeCoastalSiegeShip)
@@ -5854,9 +5868,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						// (Dreadnought, Aircraft Carrier, Boomer, Nod Missile Sub) to
 						// saturate the enemy coastline from afar and end island games
 						// rapidly!
-						score += 850 + std::min(500, maxLandSiegeRange / 6);
+						score += 850 + std::min(500, maxLandSiegeRange / 6) + (seaControl ? SeaControlLongRangeBonus : 0);
 					}
-					else if (isCoastalBombardShip)
+					else if (isCoastalBombardShip && !seaControl)
 					{
 						score += 520 + std::min(300, maxLandSiegeRange / 10);
 					}
@@ -6104,6 +6118,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += 280;
 				}
+
+				// With the sea ours, the armed vehicles that cross it carry the war to the island.
+				if (seaControlAcross && canSelfCrossWater && pWpn)
+					score += SeaControlCrossingBonus;
 			}
 
 			// Expert 0 after a raid: harvesters back to their peak first.
@@ -7047,10 +7065,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			// An offensive bank against an enemy across the water buys aircraft that strike the ground.
 			const int bankStrikeBonus = (HasOffensiveBank(pHouse) && GetMacroState(pHouse).EnemyAcrossWater && GroundRangeOf(pAir) > 0) ? 450 : 0;
+			// With the sea ours, the same aircraft reach the island the warships cannot (SeaControl*).
+			const int seaControlStrikeBonus = (seaControlAcross && !pAir->Carryall && GroundRangeOf(pAir) > 0) ? SeaControlAirStrikeBonus : 0;
 
 			const int score = (pAir->Cost / 3) + (pAir->Strength / 2) + slotScore + crossFactionAirBonus + airTransBonus
 				+ nonDockBoundBonus + interceptorBonus + (isAirInProgress ? 850 : 0) + CounterBonusFor(pHouse, pAir)
-				+ AirForceProductionBonus(pHouse, pAir) + bankStrikeBonus;
+				+ AirForceProductionBonus(pHouse, pAir) + bankStrikeBonus + seaControlStrikeBonus;
 
 			// Not started, but wanted: the best of these asks for another airfield below.
 			if (waitsForDock)
