@@ -4045,8 +4045,11 @@ namespace
 
 	std::array<NeuralLeaseRefusals, 32> LeaseRefusals {};
 
-	// Whether the code at file:line may give pFoot an order toward goal now.
-	bool MayOrderUnit(const FootClass* pFoot, const CellStruct& goal, const char* file, int line)
+	// Whether the code at file:line may give pFoot an order toward goal now. An order to board (boarding:
+	// OrderFootToEnter) passes a lease of its own priority too: it mostly ends the way its own code sent
+	// the unit along (a pickup beach, then the transport there), and held to the line it waited out the
+	// lease of that move next to the transport.
+	bool MayOrderUnit(const FootClass* pFoot, const CellStruct& goal, const char* file, int line, bool boarding = false)
 	{
 		if (!pFoot || !pFoot->Owner || pFoot->Owner->ArrayIndex < 0 || pFoot->Owner->ArrayIndex >= 32)
 			return true;
@@ -4068,7 +4071,7 @@ namespace
 		const char* const base = OrderCallerBaseName(file);
 		const bool sameFile = lease.File && base && std::strcmp(lease.File, base) == 0;
 
-		if (CurrentOrderPriority > lease.Priority
+		if (CurrentOrderPriority > lease.Priority || (boarding && CurrentOrderPriority == lease.Priority)
 			|| (sameFile && (lease.Priority != NeuralOrderPriority::Routine || lease.Line == line))
 			|| (goal != CellStruct::Empty && goal.DistanceFrom(lease.Goal) <= OrderLeaseSameGoalCells))
 		{

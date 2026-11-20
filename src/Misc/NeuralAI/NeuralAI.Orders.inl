@@ -142,8 +142,8 @@ namespace
 			}
 		}
 
-		// Another code holds the unit for its own goal (order leases).
-		if (!MayOrderUnit(pFoot, pEnterTarget->GetMapCoords(), callerFile, callerLine))
+		// Another code holds the unit with a higher priority for its own goal (order leases).
+		if (!MayOrderUnit(pFoot, pEnterTarget->GetMapCoords(), callerFile, callerLine, true))
 			return;
 
 		// Match EventClass::Execute (MEGA_MISSION, 0x004C73B9-0x004C747C) exact call
