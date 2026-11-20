@@ -12501,6 +12501,58 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							? static_cast<int>(NeuralPlanId::Reprisal)
 							: -1);
 					NoteWaveForVerdict(pHouse, pWaveTargetCell->MapCoords, mission, waveOwner);
+
+					// TEMP diagnostic (P8c, 2026-11-20): whether the target stands on high ground with
+					// ground of our zone CellClass::BridgeLevels or more below it within 8 cells, and how
+					// many of the idle units and soldiers the wave draws from fire a projectile the cliff
+					// blocks going up (SubjectToCliffs: the unit then drives round by the ramps to get a
+					// shot, user). At most 200 lines a match.
+					static int cliffDiagSerial = -1;
+					static int cliffDiagLines = 0;
+
+					if (cliffDiagSerial != NeuralMatchSerial)
+					{
+						cliffDiagSerial = NeuralMatchSerial;
+						cliffDiagLines = 0;
+					}
+
+					if (cliffDiagLines < 200)
+					{
+						++cliffDiagLines;
+						const CellStruct cliffTarget = pWaveTargetCell->MapCoords;
+						const int targetLevel = pWaveTargetCell->Level;
+						int groundBelow = 0;
+
+						for (short dy = -8; dy <= 8; ++dy)
+						{
+							for (short dx = -8; dx <= 8; ++dx)
+							{
+								const CellStruct belowCell { static_cast<short>(cliffTarget.X + dx), static_cast<short>(cliffTarget.Y + dy) };
+								auto const pBelow = MapClass::Instance.TryGetCellAt(belowCell);
+
+								if (pBelow && dx * dx + dy * dy <= 64 && pBelow->Level <= targetLevel - CellClass::BridgeLevels
+									&& MapClass::Instance.GetMovementZoneType(belowCell, MovementZone::Normal, false) == homeGroundZone)
+								{
+									groundBelow++;
+								}
+							}
+						}
+
+						auto const blockedUp = [](TechnoTypeClass* pType)
+						{
+							auto const pWeapon = pType->GetWeapon(0) ? pType->GetWeapon(0)->WeaponType : nullptr;
+							return pWeapon && pWeapon->Projectile && pWeapon->Projectile->SubjectToCliffs;
+						};
+						const int unitsBlocked = static_cast<int>(std::count_if(idleCombatUnits.begin(), idleCombatUnits.end(),
+							[&blockedUp](UnitClass* pU) { return blockedUp(pU->Type); }));
+						const int soldiersBlocked = static_cast<int>(std::count_if(idleCombatInf.begin(), idleCombatInf.end(),
+							[&blockedUp](InfantryClass* pI) { return blockedUp(pI->Type); }));
+
+						Debug::Log("[NeuralAI] Frame %d | House #%d wave cliff DIAG: target (%d,%d) level %d, %d cells of our zone %d+ levels "
+							"below within 8, idle units %d (%d blocked going up), idle soldiers %d (%d blocked)\n", Unsorted::CurrentFrame,
+							pHouse->ArrayIndex, cliffTarget.X, cliffTarget.Y, targetLevel, groundBelow, CellClass::BridgeLevels,
+							static_cast<int>(idleCombatUnits.size()), unitsBlocked, static_cast<int>(idleCombatInf.size()), soldiersBlocked);
+					}
 				}
 
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;
