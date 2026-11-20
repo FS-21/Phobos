@@ -8444,13 +8444,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 
-				// A neutral tech as for any engineer; one an enemy took for Expert 4, and for the resource
-				// hoarder when it pays (as the routing of engineers in training, UpdateCaptureBarracks).
+				// A neutral tech as for any engineer; one an enemy took for Expert 4, for the resource
+				// hoarder when it pays (as the routing of engineers in training, UpdateCaptureBarracks),
+				// and under any expert when nothing guards it (IsEnemyBuildingUnguarded).
 				const bool available = pBld->Owner->IsNeutral()
 					? IsSpecOpsTechAvailable(pHouse, pBld, pFoot->UniqueID)
 					: (IsKnownCapturableTech(pHouse, pBld) && !IsSpecOpsCaptureTarget(pHouse, pBld->UniqueID, 0)
 						&& !IsCellInKnownEnemyDefenseReach(pHouse, pBld->GetMapCoords(), 2)
-						&& (workExpert == 4 || (workExpert == 6 && (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0))));
+						&& (workExpert == 4 || (workExpert == 6 && (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0))
+							|| IsEnemyBuildingUnguarded(pHouse, pBld)));
 
 				if (!available)
 					continue;
@@ -9018,10 +9020,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 
 				const bool isNeutralTech = pBld->Owner->IsNeutral();
+				// A tech we saw neutral and an enemy took since: known where it stands, in sight or not.
+				const bool knownEnemyTech = !isNeutralTech && IsKnownCapturableTech(pHouse, pBld);
 
 				// Fog-fair: neutral techs only once seen as neutral, out of known enemy defense reach
-				// and not taken by an Expert 4 capture; enemy buildings require line of sight.
-				if (isNeutralTech ? !IsSpecOpsTechAvailable(pHouse, pBld, pInf->UniqueID) : !IsCellVisibleToAI(pHouse, pCell))
+				// and not taken by an Expert 4 capture; enemy buildings require line of sight, but for
+				// the techs an enemy took.
+				if (isNeutralTech ? !IsSpecOpsTechAvailable(pHouse, pBld, pInf->UniqueID) : (!knownEnemyTech && !IsCellVisibleToAI(pHouse, pCell)))
+					continue;
+
+				// An enemy building only when nothing guards it (user, 2026-11-20: capture enemy structures
+				// with no defenses nor units). A construction yard the learned slot 82 sends it to stays.
+				const bool yardGate = pBld->Type->ConstructionYard && SlotGateHeld(scores[82], 60, 82, pInf->UniqueID);
+
+				if (!isNeutralTech && !yardGate && !IsEnemyBuildingUnguarded(pHouse, pBld))
 					continue;
 
 				const bool isCashTechBld = (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0);
@@ -9066,8 +9078,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// Strongly prioritize Cash-Producing Oil Derricks (ProduceCashAmount >
 				// and BaseNormal expansion hubs!
 				const bool isStrategicTechHub = isCashTechBld || BuildingTypeExt::IsAIBaseNormal(pBld->Type);
+				// An enemy expansion (IsKnownEnemyExpansion) comes first: taking it corners its owner.
 				const int effectiveDist
-					= (!isNeutralTech && (pBld->Type->ConstructionYard || isCashTechBld)
+					= (!isNeutralTech && IsKnownEnemyExpansion(pHouse, pBld))
+					? (dist / ExpansionDenialDistDivisor)
+					: (!isNeutralTech && (pBld->Type->ConstructionYard || isCashTechBld)
 						  && (SlotGateHeld(scores[82], 60, 82, pInf->UniqueID) || (resourceHoarder && isCashTechBld)))
 					? (dist / 3)
 					: (isNeutralTech ? (isCashTechBld ? (dist / 3) : (isStrategicTechHub ? (dist * 2 / 5) : (dist / 2)))
@@ -10504,14 +10519,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		siegeMacro.SiegeOwnersMask = siegeMask;
 	}
 
+	// TEMP diagnostic (R1, 2026-11-20, match #12378): the enemy buildings that keep anyEnemyBuildingExists
+	// (8 at most), for the "no place left to look" line of the remnant search.
+	std::vector<BuildingClass*> countedEnemyBuildings;
+
 	for (auto const pEnemyBld : BuildingClass::Array)
 	{
+		// A capturable Insignificant building (a tech building) is a target behind every other one (Tech*).
 		if (!pEnemyBld || pEnemyBld->InLimbo || !pEnemyBld->IsAlive || !pEnemyBld->Owner || !pEnemyBld->Type
-			|| pEnemyBld->Type->Immune || pEnemyBld->Type->Insignificant || pEnemyBld->Type->InvisibleInGame)
+			|| pEnemyBld->Type->Immune || pEnemyBld->Type->InvisibleInGame
+			|| (pEnemyBld->Type->Insignificant && !pEnemyBld->Type->Capturable))
 		{
 			continue;
 		}
 
+		const bool techTarget = pEnemyBld->Type->Insignificant;
 		const CellStruct ebc = pEnemyBld->GetMapCoords();
 		if (ebc.X <= 1 && ebc.Y <= 1)
 			continue;
@@ -10530,6 +10552,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		auto const pCell = pEnemyBld->GetCell();
 		if (!pCell)
 			continue;
+
+		// A tech building only known to us, and none an engineer of ours goes to capture.
+		if (techTarget && ((!IsCellVisibleToAI(pHouse, pCell) && !IsEnemyBuildingKnown(pHouse, pEnemyBld))
+			|| IsCaptureClaimedByOther(pHouse, pEnemyBld, 0, false)))
+		{
+			continue;
+		}
 
 		const int distHome
 			= (homeCoords != CellStruct::Empty) ? (std::abs(ebc.X - homeCoords.X) + std::abs(ebc.Y - homeCoords.Y)) : 0;
@@ -10688,7 +10717,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				/ (WaveGroupDamageEvenPercent - WaveGroupDamageSlowPercent));
 		}
 
-		anyEnemyBuildingExists = true;
+		if (techTarget)
+		{
+			auto const pTechExt = BuildingTypeExt::Fetch(pEnemyBld->Type);
+			const bool techSuperweapon = pEnemyBld->Type->SuperWeapon != -1 || pEnemyBld->Type->SuperWeapon2 != -1
+				|| (pTechExt && !pTechExt->SuperWeapons.empty());
+			bldCandScore += (techSuperweapon ? TechAirportBonus : 0) - TechTargetPenalty;
+		}
+		else
+		{
+			anyEnemyBuildingExists = true;
+
+			if (countedEnemyBuildings.size() < 8)
+				countedEnemyBuildings.push_back(pEnemyBld);
+		}
 
 		// Fallback wave targets only among buildings this house knows about.
 		const bool isKnownBuilding = IsCellVisibleToAI(pHouse, pCell) || IsEnemyBuildingKnown(pHouse, pEnemyBld);
@@ -11283,6 +11325,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: no place left to look, %d idle, %d on their way\n",
 					Unsorted::CurrentFrame, pHouse->ArrayIndex, static_cast<int>(searchers.size()), static_cast<int>(onTheirWay));
+
+				// TEMP diagnostic (R1): the enemy buildings the search still counts, and whether we know them.
+				std::string counted;
+
+				for (auto const pCounted : countedEnemyBuildings)
+				{
+					char part[96];
+					std::snprintf(part, sizeof(part), " %s of house %d at (%d,%d) known %d;", pCounted->Type->ID, pCounted->Owner->ArrayIndex,
+						pCounted->GetMapCoords().X, pCounted->GetMapCoords().Y, IsEnemyBuildingKnown(pHouse, pCounted) ? 1 : 0);
+					counted += part;
+				}
+
+				Debug::Log("[NeuralAI] Frame %d | House #%d remnant search counts:%s\n", Unsorted::CurrentFrame, pHouse->ArrayIndex,
+					counted.empty() ? " none" : counted.c_str());
 			}
 		}
 	}
@@ -11660,6 +11716,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pSecondaryIslandGoalCell = pSecondEnemyIslandCell;
 			secondaryIslandZone = secondEnemyIslandZone;
 		}
+	}
+
+	// Where the waves go at this tick: the transport operations let the wave members that wait for a
+	// crossing to another land go (OpWaveGoneFrames).
+	{
+		auto& targetsMacro = GetMacroState(pHouse);
+		targetsMacro.WaveTargetNow = pWaveTargetCell ? pWaveTargetCell->MapCoords : CellStruct::Empty;
+		targetsMacro.WaveSecondTargetNow = pSecondaryWaveTargetCell ? pSecondaryWaveTargetCell->MapCoords : CellStruct::Empty;
+		targetsMacro.WaveTargetsFrame = Unsorted::CurrentFrame;
 	}
 
 	bool hasIdleGroundArmyOnOtherIsland = false;
@@ -14786,7 +14851,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (auto const pCarryExt = UnitExt::Fetch(pTrans))
 				{
 					if (!pCarryExt->CarryallCargo)
-						GetMacroState(pHouse).CarryallDropSince.erase(pTrans->UniqueID);
+					{
+						auto& carryMacro = GetMacroState(pHouse);
+						carryMacro.CarryallDropSince.erase(pTrans->UniqueID);
+						carryMacro.CarryallDropTried.erase(pTrans->UniqueID);
+						carryMacro.CarryallDropFailed.erase(pTrans->UniqueID);
+					}
 
 					if (pCarryExt->CarryallCargo && pCarryExt->CarryallCargo->IsAlive)
 					{
@@ -14838,6 +14908,50 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							// farther every CarryallDropStuckFrames it has gone without setting it down.
 							auto& dropCells = GetMacroState(pHouse).CarryallDropCells;
 							auto& dropSince = GetMacroState(pHouse).CarryallDropSince;
+							auto& dropTried = GetMacroState(pHouse).CarryallDropTried;
+							auto& dropFailed = GetMacroState(pHouse).CarryallDropFailed[pTrans->UniqueID];
+							const int now = Unsorted::CurrentFrame;
+
+							// It was told to set its cargo down and left the unload with it still on: the engine
+							// would not set it down there (match #12344: a HIND sent back 111 times to the cell
+							// next to one it could not unload on, as that one was the nearest to the drop cell).
+							// That cell stays out for CarryallDropFailFrames.
+							if (auto const itTried = dropTried.find(pTrans->UniqueID); itTried != dropTried.end()
+								&& pTrans->CurrentMission != Mission::Unload && pTrans->QueuedMission != Mission::Unload)
+							{
+								std::erase_if(dropFailed, [now](const auto& entry) { return now >= entry.second; });
+
+								if (dropFailed.size() >= CarryallDropFailCells)
+									dropFailed.erase(dropFailed.begin());
+
+								dropFailed.emplace_back(itTried->second, now + CarryallDropFailFrames);
+
+								static int failLogSerial = -1;
+								static int failLogCount = 0;
+
+								if (failLogSerial != NeuralMatchSerial)
+								{
+									failLogSerial = NeuralMatchSerial;
+									failLogCount = 0;
+								}
+
+								if (failLogCount++ < CarryallDropFailLogLines)
+								{
+									Debug::Log("[NeuralAI] House %d airlift (TEMP): %s %u left the unload at (%d,%d) with %s still on, that cell is out for "
+										"%d frames (%d out), frame %d.\n", pHouse->ArrayIndex, pTrans->Type->ID, pTrans->UniqueID, itTried->second.X,
+										itTried->second.Y, pCarriedUnit->Type ? pCarriedUnit->Type->ID : "-", CarryallDropFailFrames,
+										static_cast<int>(dropFailed.size()), now);
+								}
+
+								dropTried.erase(itTried);
+							}
+
+							auto const isFailedDrop = [&dropFailed, now](const CellStruct& cell)
+							{
+								return std::any_of(dropFailed.begin(), dropFailed.end(),
+									[&cell, now](const auto& entry) { return entry.first == cell && now < entry.second; });
+							};
+
 							auto const itChosen = dropCells.find(pTrans->UniqueID);
 							auto const itSince = dropSince.find(pTrans->UniqueID);
 							CellClass* pChosen = itChosen != dropCells.end() ? MapClass::Instance.TryGetCellAt(itChosen->second) : nullptr;
@@ -14845,7 +14959,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const int dropSearchCells = CarryallDropSearchCells
 								+ CarryallDropRingCells * std::min(CarryallDropMaxRings, stuckFrames / CarryallDropStuckFrames);
 
-							if (pChosen && (!pCarryExt->CarryallCanDropAt(pChosen)
+							if (pChosen && (!pCarryExt->CarryallCanDropAt(pChosen) || isFailedDrop(pChosen->MapCoords)
 								|| pChosen->MapCoords.DistanceFrom(pDropCell->MapCoords) > dropSearchCells + CarryallDropZoneCells))
 							{
 								dropCells.erase(pTrans->UniqueID);
@@ -14856,13 +14970,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const bool inDropZone = cellsFromDrop <= CarryallDropZoneCells;
 							const bool nearChosen = pChosen && cellsFromDrop <= dropSearchCells + CarryallDropZoneCells;
 
-							if ((inDropZone || nearChosen) && pCarryExt->CarryallCanDropAt(pTrans->GetCell()))
+							// The clock since when it looks for a cell (dropSince) runs on until the cargo is down, so the
+							// search reaches farther when the engine does not set it down where it was told to.
+							if ((inDropZone || nearChosen) && pCarryExt->CarryallCanDropAt(pTrans->GetCell())
+								&& !isFailedDrop(pTrans->GetMapCoords()))
 							{
 								if (pTrans->CurrentMission != Mission::Unload)
 									CountDecision(NeuralDecision::AirliftDrop, pHouse->ArrayIndex);
 
 								dropCells.erase(pTrans->UniqueID);
-								dropSince.erase(pTrans->UniqueID);
+								dropTried[pTrans->UniqueID] = pTrans->GetMapCoords();
 								pTrans->QueueMission(Mission::Unload, true);
 							}
 							else if (pChosen)
@@ -14890,7 +15007,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 										auto const pCell = MapClass::Instance.TryGetCellAt(cell);
 										const double dist = cell.DistanceFrom(centre);
 
-										if (pCell && dist < bestDist && pCarryExt->CarryallCanDropAt(pCell))
+										if (pCell && dist < bestDist && pCarryExt->CarryallCanDropAt(pCell) && !isFailedDrop(cell))
 										{
 											bestDist = dist;
 											pBest = pCell;
@@ -16782,6 +16899,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	std::vector<int> contactAirRisk(enemyContacts.size(), -1);
 	const bool airHarassAllowed = SlotGateHeld(scores[32], -100, 32);
 	const bool airForceInCharge = pExt->NeuralAI_ActiveExpert == 8;
+	// Island war (AirWing*): the strike aircraft go in wings only, and the strikes of ours they fly.
+	const bool airIslandWar = IsAirIslandWar(pHouse);
+	auto const& wingAirState = GetAirForceState(pHouse);
 
 	// The harassment of the aircraft that are not of the wings (gas bombers, gunships that do
 	// nothing to buildings; the strike aircraft wait on their pads for their wing): a ground contact
@@ -17273,6 +17393,27 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Flying home to its pad: along the safe lane, not over the base it has just struck.
 		if (isAirForceCraft && FlyAircraftHomeSafely(pHouse, pAir))
 			continue;
+
+		// In an island war a strike aircraft put on Attack outside a strike of ours (the engine on
+		// Guard, or on its way home or scouting) at a ground target farther than AirPadGuardCells from
+		// our nearest helipad goes back to its pad: alone it was lost (AirWing*). A chase of an enemy in
+		// the air is an interception, and stays.
+		if (isWingCraft && airIslandWar && pAir->CurrentMission == Mission::Attack && pAir->Target
+			&& !wingAirState.Orders.contains(pAir->UniqueID))
+		{
+			auto const pTargetAir = abstract_cast<AircraftClass*>(pAir->Target);
+
+			if (!pTargetAir || !pTargetAir->IsInAir())
+			{
+				const int padCells = CellsFromNearestHelipad(pHouse, CellClass::Coord2Cell(pAir->Target->GetCoords()));
+
+				if (padCells > AirPadGuardCells)
+				{
+					WaitOnAirPad(pHouse, pAir);
+					continue;
+				}
+			}
+		}
 
 		if (hasAirLoad && isAirIdle)
 		{

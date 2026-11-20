@@ -637,6 +637,55 @@ namespace
 			|| (kind == ArmyKind::Ships && macro.ShipsWithoutTarget >= ShipsWithoutTargetBrake);
 	}
 
+	// Sea control (SeaControl*), once per production pass: no enemy ship in sight for
+	// SeaControlQuietFrames, no enemy shipyard this house has seen still standing, no submarine
+	// threat or naval remnant hunt, and a shipyard of ours. Counts our warships that neither shell
+	// from afar nor carry passengers (PlainWarships). Only what the house has seen is read.
+	void UpdateSeaControl(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		int plainWarships = 0;
+
+		for (auto const pOwnU : UnitClass::Array)
+		{
+			if (pOwnU && pOwnU->Owner == pHouse && pOwnU->IsAlive && !pOwnU->InLimbo && pOwnU->Type && pOwnU->Type->Naval
+				&& pOwnU->Type->GetWeapon(0) && pOwnU->Type->GetWeapon(0)->WeaponType
+				&& !IsAmphibiousOrAirTransport(pOwnU->Type) && !IsLongRangeSiegeShipType(pOwnU->Type))
+			{
+				plainWarships++;
+			}
+		}
+
+		macro.PlainWarships = plainWarships;
+
+		bool control = pHouse->NumShipyards > 0 && now - macro.LastEnemyNavySeenFrame >= SeaControlQuietFrames
+			&& macro.SubThreatUntil <= now && macro.NavalRemnantUntil <= now;
+
+		if (control)
+		{
+			for (auto const pBld : BuildingClass::Array)
+			{
+				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Naval
+					&& pBld->Type->Factory == AbstractType::UnitType && pBld->Owner && pBld->Owner != pHouse
+					&& !pHouse->IsAlliedWith(pBld->Owner) && !pBld->Owner->IsNeutral() && !pBld->Owner->Defeated
+					&& IsEnemyBuildingKnown(pHouse, pBld))
+				{
+					control = false;
+					break;
+				}
+			}
+		}
+
+		if (control != macro.SeaControl)
+		{
+			Debug::Log("[NeuralAI] Frame %d | House #%d sea control %s: last enemy ship seen %d frames ago, %d plain warships (keeps %d)\n",
+				now, pHouse->ArrayIndex, control ? "gained" : "lost", now - macro.LastEnemyNavySeenFrame, plainWarships,
+				SeaControlWarships);
+			macro.SeaControl = control;
+		}
+	}
+
 	// Offensive bank (HasOffensiveBank): against an enemy across the water the harassment from range
 	// (naval shelling, artillery on the economy, air strikes and corridors, rotating raids, siege
 	// batteries) gets +350 when its context is there; on shared land the main assaults get +200.

@@ -695,11 +695,14 @@ namespace
 
 	// How far a unit hits land from where it stands, in leptons: its longest gun that hits land
 	// (WeaponReachAgainst the building when one is given), NavalSpawnerReachCells when its only land
-	// weapon is its aircraft, 0 when nothing of it hits land.
-	int NavalLandReach(const TechnoTypeClass* pType, const BuildingTypeClass* pBldType)
+	// weapon is its aircraft (pOnlyAircraft tells it), 0 when nothing of it hits land.
+	int NavalLandReach(const TechnoTypeClass* pType, const BuildingTypeClass* pBldType, bool* pOnlyAircraft = nullptr)
 	{
 		int reach = 0;
 		bool spawner = false;
+
+		if (pOnlyAircraft)
+			*pOnlyAircraft = false;
 
 		for (int i = 0; pType && i < 2; ++i)
 		{
@@ -715,9 +718,30 @@ namespace
 		}
 
 		if (reach <= 0 && spawner)
+		{
 			reach = NavalSpawnerReachCells * Unsorted::LeptonsPerCell;
 
+			if (pOnlyAircraft)
+				*pOnlyAircraft = true;
+		}
+
 		return reach;
+	}
+
+	// A warship that shells the coast from afar (NavalLandReach): with aircraft as its only land weapon,
+	// or a gun of 10 cells or more. A gun that hits land is what a ship shells with, whatever else it
+	// launches: a destroyer with an anti-submarine plane is no carrier. pReach gets the reach on the
+	// scale of a weapon's Range.
+	bool IsLongRangeSiegeShipType(const TechnoTypeClass* pType, int* pReach = nullptr)
+	{
+		bool onlyAircraft = false;
+		const int reach = NavalLandReach(pType, nullptr, &onlyAircraft);
+		const int range = (reach > 0 && !onlyAircraft) ? reach + Unsorted::LeptonsPerCell / 3 : reach;
+
+		if (pReach)
+			*pReach = range;
+
+		return onlyAircraft || range >= 10 * Unsorted::LeptonsPerCell;
 	}
 
 	// Does a shot of reachLeptons from the nearest water of one sea get to a land cell? Height counts:

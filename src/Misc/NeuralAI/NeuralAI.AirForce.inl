@@ -46,6 +46,16 @@ namespace
 		int Frame { 0 };
 	};
 
+	// A wing on its strike, judged once none of it flies the strike any more (the wing lesson): its
+	// target, the building type, its members and the frame it left.
+	struct NeuralAirWingFlight
+	{
+		DWORD TargetID { 0 };
+		const BuildingTypeClass* TargetType { nullptr };
+		std::vector<DWORD> Members {};
+		int Frame { 0 };
+	};
+
 	struct NeuralAirForceState
 	{
 		int MatchSerial { -1 };
@@ -82,9 +92,34 @@ namespace
 		std::unordered_map<DWORD, NeuralAirTaskRecord> Tasks {};
 		int WingWaitLogFrame { -1 };
 		int BuildingsDestroyed { 0 };
+		// The wing lesson (AirWingLesson*): the wings on their strike, and the steps of the lesson with
+		// the frame of the last failure.
+		std::vector<NeuralAirWingFlight> Flights {};
+		int WingLessonSteps { 0 };
+		int WingLessonFrame { -1 };
 	};
 
 	std::array<NeuralAirForceState, 32> AirForceStates {};
+
+	// Air force in an island war (user approved, 2026-11-20, A2 of the island air proposal, with the wing
+	// lesson: «ok, A2»). On a map whose starting bases no land links, or with the enemy across the water,
+	// the air force is a main arm and goes in wings only. Over 40 matches of 2026-11-20, 85% of the
+	// aircraft of naval maps were lost, nearly all outside a strike of ours, in wings of 1 or 2; of 142
+	// strike aircraft lost attacking while they waited for a wing, 84 had no order of ours (the engine puts
+	// an armed aircraft on Guard to Attack, AircraftClass::Mission_Guard) and the rest had been sent home or
+	// scouting. So in an island war:
+	// - a wing leaves with AirWingMinAircraft ready at least, or the whole strike fleet when it is smaller;
+	// - a wing that left its target standing, or lost half of its aircraft or more, asks the next ones for
+	//   AirWingLessonPercent more of the damage the target needs per step (AirWingLessonMaxSteps at most, a
+	//   step fading every AirWingLessonFadeFrames without a new failure); one that took its target ends it;
+	// - a strike aircraft waiting on its pad sleeps instead of guarding (WaitOnAirPad), and one outside a
+	//   strike or plan of ours that attacks something on the ground farther than AirPadGuardCells from our
+	//   nearest helipad goes back to its pad.
+	constexpr int AirWingMinAircraft = 4;
+	constexpr int AirWingLessonPercent = 100;
+	constexpr int AirWingLessonMaxSteps = 2;
+	constexpr int AirWingLessonFadeFrames = 5400;
+	constexpr int AirPadGuardCells = 12;
 
 	// How long a wing keeps flying the same strike.
 	constexpr int AirStrikeOrderFrames = 4500;
@@ -106,6 +141,41 @@ namespace
 			state = NeuralAirForceState { NeuralMatchSerial };
 
 		return state;
+	}
+
+	// An island war for the air force (AirWing*): the starting bases are linked by no land, or the
+	// production judged the enemy across the water.
+	bool IsAirIslandWar(HouseClass* pHouse)
+	{
+		return (MapInfo.Computed && !MapInfo.LandLinked) || GetMacroState(pHouse).EnemyAcrossWater;
+	}
+
+	// The steps of the wing lesson now: one fades every AirWingLessonFadeFrames since the last failure.
+	int AirWingLessonStepsNow(const NeuralAirForceState& state)
+	{
+		const int now = Unsorted::CurrentFrame;
+
+		if (state.WingLessonSteps <= 0 || state.WingLessonFrame < 0 || now < state.WingLessonFrame)
+			return std::max(0, state.WingLessonSteps);
+
+		return std::max(0, state.WingLessonSteps - (now - state.WingLessonFrame) / AirWingLessonFadeFrames);
+	}
+
+	// Cells from a cell to the nearest helipad of the house (-1: none).
+	int CellsFromNearestHelipad(HouseClass* pHouse, const CellStruct& cell)
+	{
+		int cells = -1;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Helipad)
+			{
+				const int distance = static_cast<int>(pBld->GetMapCoords().DistanceFrom(cell));
+				cells = cells < 0 ? distance : std::min(cells, distance);
+			}
+		}
+
+		return cells;
 	}
 
 	// An armed aircraft of the air force proper: no spawned missiles or fighters of a carrier, no
@@ -398,9 +468,10 @@ namespace
 	// Best known enemy building all the ready aircraft destroy together in one pass. The anti-air
 	// risk is taken as aircraft shot down before they release (one per point, so the risk must stay
 	// below their number): the sorties of the others must still cover the health the wings already
-	// flying leave of it. Ties keep the first in building array order.
+	// flying leave of it. Ties keep the first in building array order. lessonPercent: how much more than
+	// the health left the sorties must deliver (the wing lesson).
 	NeuralAirWingPick PickAirWingTarget(HouseClass* pHouse, const std::vector<AircraftClass*>& ready, const CellStruct& front,
-		const std::unordered_map<DWORD, int>& committed)
+		const std::unordered_map<DWORD, int>& committed, int lessonPercent)
 	{
 		NeuralAirWingPick pick;
 
@@ -446,7 +517,7 @@ namespace
 			// Average sortie of the aircraft that get through.
 			const int delivered = damage / strikers * (strikers - risk);
 
-			if (delivered >= need)
+			if (delivered * 100 >= need * (100 + lessonPercent))
 			{
 				if (score > pick.Score)
 				{
@@ -824,12 +895,15 @@ namespace
 		// already looked up.
 		std::unordered_map<DWORD, int> committedByTarget;
 		std::unordered_map<DWORD, BuildingClass*> targetsByID;
+		// Our strike aircraft alive now, for the wing lesson. Lookup only.
+		std::unordered_set<DWORD> strikeAircraftAlive;
 
 		for (auto const pAir : AircraftClass::Array)
 		{
 			if (!pAir || pAir->Owner != pHouse || !pAir->IsAlive || pAir->InLimbo || !IsWingStrikeType(pAir->Type) || !pAir->IsArmed())
 				continue;
 
+			strikeAircraftAlive.insert(pAir->UniqueID);
 			const bool member = !IsPlanMember(pHouse, pAir->UniqueID) && !IsInTransportOp(pHouse, pAir->UniqueID)
 				&& pAir->GetHealthPercentage() >= AirWingMinHealth;
 
@@ -874,7 +948,54 @@ namespace
 				ready.push_back(pAir);
 		}
 
+		// The wing lesson (AirWingLesson*): a wing none of whose aircraft flies its strike any more is
+		// judged. It failed when its target stands or it lost half of its aircraft or more.
+		std::erase_if(state.Flights, [&state, &strikeAircraftAlive, now, pHouse](const NeuralAirWingFlight& flight)
+			{
+				const bool flying = now >= flight.Frame && now - flight.Frame <= 2 * AirStrikeOrderFrames
+					&& std::any_of(flight.Members.begin(), flight.Members.end(),
+						[&state, &strikeAircraftAlive](DWORD id) { return strikeAircraftAlive.contains(id) && state.Orders.contains(id); });
+
+				if (flying)
+					return false;
+
+				auto const pTarget = FindBuildingByID(flight.TargetID);
+				const bool stands = pTarget && pTarget->IsAlive && !pTarget->InLimbo;
+				const int size = static_cast<int>(flight.Members.size());
+				const int lost = static_cast<int>(std::count_if(flight.Members.begin(), flight.Members.end(),
+					[&strikeAircraftAlive](DWORD id) { return !strikeAircraftAlive.contains(id); }));
+				const bool failed = stands || lost * 2 >= size;
+				const int stepsBefore = AirWingLessonStepsNow(state);
+
+				if (failed)
+				{
+					state.WingLessonSteps = std::min(stepsBefore + 1, AirWingLessonMaxSteps);
+					state.WingLessonFrame = now;
+				}
+				else
+				{
+					state.WingLessonSteps = 0;
+				}
+
+				Debug::Log("[NeuralAI] House %d AirWing verdict: %d aircraft at %s %s, %d lost, lesson steps %d -> %d, island war %d, frame %d.\n",
+					pHouse->ArrayIndex, size, flight.TargetType ? flight.TargetType->ID : "?", stands ? "standing" : "taken", lost, stepsBefore,
+					state.WingLessonSteps, IsAirIslandWar(pHouse) ? 1 : 0, now);
+				return true;
+			});
+
 		if (ready.empty())
+		{
+			state.WingMassFrame = -1;
+			return;
+		}
+
+		// In an island war a wing leaves with AirWingMinAircraft ready at least (the whole strike fleet
+		// when it is smaller), and asks for the damage of the wing lesson.
+		const bool islandWar = IsAirIslandWar(pHouse);
+		const int wingMin = islandWar ? std::max(1, std::min(AirWingMinAircraft, strikeFleet)) : 1;
+		const int lessonPercent = islandWar ? AirWingLessonStepsNow(state) * AirWingLessonPercent : 0;
+
+		if (static_cast<int>(ready.size()) < wingMin)
 		{
 			state.WingMassFrame = -1;
 			return;
@@ -892,7 +1013,10 @@ namespace
 
 		while (!ready.empty())
 		{
-			const NeuralAirWingPick pick = PickAirWingTarget(pHouse, ready, state.FrontCell, committedByTarget);
+			if (static_cast<int>(ready.size()) < wingMin)
+				return;
+
+			const NeuralAirWingPick pick = PickAirWingTarget(pHouse, ready, state.FrontCell, committedByTarget, lessonPercent);
 
 			if (!pick.Target)
 			{
@@ -933,6 +1057,9 @@ namespace
 					wing.push_back(pCandidate);
 			}
 
+			if (static_cast<int>(wing.size()) < wingMin)
+				return;
+
 			const CellStruct targetCell = pTarget->GetMapCoords();
 			state.WingsLaunched++;
 			CountDecision(NeuralDecision::AirWing, pHouse->ArrayIndex);
@@ -942,6 +1069,8 @@ namespace
 				state.FrontCell != CellStruct::Empty ? "yes" : "no", now, state.WingsLaunched, static_cast<int>(ready.size()), strikeFleet, pending,
 				pick.Damage, pick.Need);
 
+			NeuralAirWingFlight flight { pTarget->UniqueID, pTarget->Type, {}, now };
+
 			for (auto const pMember : wing)
 			{
 				committedByTarget[pTarget->UniqueID] += AirSortieDamageVs(pMember, pTarget);
@@ -949,7 +1078,10 @@ namespace
 				CountDecision(NeuralDecision::AirWingSortie, pHouse->ArrayIndex);
 				NoteAirTask(pHouse, pMember, NeuralAirTask::Wing);
 				ContinueAirStrike(pHouse, pMember);
+				flight.Members.push_back(pMember->UniqueID);
 			}
+
+			state.Flights.push_back(std::move(flight));
 
 			std::erase_if(ready, [&wing](AircraftClass* pAir) { return std::find(wing.begin(), wing.end(), pAir) != wing.end(); });
 		}
@@ -957,9 +1089,18 @@ namespace
 
 	// The aircraft waits on its pad for its wing: in the air (a strike called off, a patrol) it
 	// drops its guard point and target and the engine flies it to a pad (AircraftClass::EnterIdleMode).
+	// On its pad in an island war it sleeps: on Guard the engine sends an aircraft of a computer house at
+	// a juicy target anywhere on the map (AircraftClass::Mission_Guard, HouseClass::Find_Juicy_Target),
+	// and it was lost there alone (AirWing*).
 	void WaitOnAirPad(HouseClass* pHouse, AircraftClass* pAir)
 	{
 		NoteAirTask(pHouse, pAir, NeuralAirTask::Pad);
+
+		if (!pAir->IsInAir() && pAir->CurrentMission == Mission::Guard && IsAirIslandWar(pHouse))
+		{
+			pAir->QueueMission(Mission::Sleep, false);
+			return;
+		}
 
 		if (!pAir->IsInAir() || pAir->CurrentMission == Mission::Enter)
 			return;

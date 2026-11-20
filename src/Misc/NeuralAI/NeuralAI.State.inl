@@ -719,6 +719,8 @@ namespace
 		std::vector<std::pair<CellStruct, CellStruct>> HoldMoves;
 		// Since when no transport of the house can come to the staging cell (-1: one can; OpNoReachFrames).
 		int NoReachSince { -1 };
+		// Since when no wave goes to the land of this operation (-1: one does; OpWaveGoneFrames).
+		int WaveGoneSince { -1 };
 		// The landing the load sailing now was given, chosen with its route (ChooseOpTripLanding), and
 		// the frame: the transports that sail in that tick land around it together.
 		CellStruct TripLanding { CellStruct::Empty };
@@ -726,8 +728,10 @@ namespace
 		int CreatedFrame { 0 };
 		// First frame a transport stood parked on the staging beach for the current load (-1: none).
 		int BoardingSince { -1 };
-		// Last frame a member went aboard.
+		// Last frame a member went aboard, and the last frame the staging was picked again by the
+		// members (OpRestageFrames).
 		int LastBoardFrame { -1 };
+		int RestageFrame { -1 };
 		// Last frame the operation had at least one transport (no transport for long: given back).
 		int LastTransportFrame { 0 };
 		int Trips { 0 };
@@ -1262,6 +1266,14 @@ namespace
 		// An enemy submarine (Naval, Cloakable) was seen within 30 cells of our base: until this frame
 		// the house builds and sends ships that hit under water or carry sonar.
 		int SubThreatUntil { -1 };
+		// Sea control (UpdateSeaControl): the frame an enemy ship was last in sight, whether the sea is
+		// ours (no enemy ship seen for SeaControlQuietFrames, no known enemy shipyard, no submarine
+		// threat), our warships that shell neither from afar nor hunt with sonar, and whether the last
+		// naval pick had a long-range siege ship to build.
+		int LastEnemyNavySeenFrame { 0 };
+		bool SeaControl { false };
+		int PlainWarships { 0 };
+		bool SeaControlLongRangeShip { false };
 		// The unit on its way to a repair station to be sold for emergency money (0 when none).
 		DWORD DepotSaleUnit { 0 };
 		// Our refineries and those with fewer than 6 ore cells left within 12 cells (sampled every 2
@@ -1411,6 +1423,11 @@ namespace
 		// Since when a carryall has looked for such a cell without setting its cargo down, by
 		// carryall UniqueID (key access only).
 		std::unordered_map<DWORD, int> CarryallDropSince {};
+		// The cell a loaded carryall was last told to set its cargo down on, and the cells where it was
+		// told to and left the unload with its cargo still on, each until when it stays out
+		// (CarryallDropFailFrames), by carryall UniqueID (key access only). Cleared when the cargo is down.
+		std::unordered_map<DWORD, CellStruct> CarryallDropTried {};
+		std::unordered_map<DWORD, std::vector<std::pair<CellStruct, int>>> CarryallDropFailed {};
 		// Since when a loaded transport on its pickup shore has had no landmass to go to, by
 		// transport UniqueID (key access only).
 		std::unordered_map<DWORD, int> FerryNoGoalSince {};
@@ -1499,6 +1516,12 @@ namespace
 		CellStruct LastWaveTargetCell { CellStruct::Empty };
 		int LastWaveDispatchFrame { -100000 };
 		int WaveStartFrame { -100000 };
+		// The cells the waves go to at this tick, primary and secondary (Empty: none), and the frame they
+		// were set: a transport operation lets the wave members that still wait go once the waves no
+		// longer go to its land (OpWaveGoneFrames).
+		CellStruct WaveTargetNow { CellStruct::Empty };
+		CellStruct WaveSecondTargetNow { CellStruct::Empty };
+		int WaveTargetsFrame { -1 };
 		// Wave lesson (UpdateWaveVerdict): the wave under way waits for its verdict, with its target,
 		// the known enemy buildings that stood near it when the wave left, whether a unit of ours
 		// got there and the plan id of the mission it left for (-1 for none); and the waves in a
@@ -1921,6 +1944,10 @@ namespace
 			this->ResourceHealSince.clear();
 			this->NavalRemnantUntil = -1;
 			this->SubThreatUntil = -1;
+			this->LastEnemyNavySeenFrame = 0;
+			this->SeaControl = false;
+			this->PlainWarships = 0;
+			this->SeaControlLongRangeShip = false;
 			this->DepotSaleUnit = 0;
 			this->RefineriesChecked = 0;
 			this->RefineriesDepleted = 0;
@@ -1990,6 +2017,8 @@ namespace
 			this->FerryLandings.clear();
 			this->CarryallDropCells.clear();
 			this->CarryallDropSince.clear();
+			this->CarryallDropTried.clear();
+			this->CarryallDropFailed.clear();
 			this->FerryNoGoalSince.clear();
 			this->ParkedFerries.clear();
 			this->ProductionBanUntil.clear();
@@ -2028,6 +2057,9 @@ namespace
 			this->LastWaveTargetCell = CellStruct::Empty;
 			this->LastWaveDispatchFrame = -100000;
 			this->WaveStartFrame = -100000;
+			this->WaveTargetNow = CellStruct::Empty;
+			this->WaveSecondTargetNow = CellStruct::Empty;
+			this->WaveTargetsFrame = -1;
 			this->WaveVerdictPending = false;
 			this->WaveVerdictArrived = false;
 			this->WaveVerdictCell = CellStruct::Empty;
@@ -2490,6 +2522,19 @@ namespace
 	constexpr int OpStagingStuckFrames = 1800;
 	constexpr int OpStagingMaxTries = 2;
 	constexpr int OpStagingLogLines = 30;
+	// Boarding where the members are (user approved, 2026-11-20, «Todas»; match #12411, EForsaken Waste:
+	// the wave operation of house 1 opened at frame 19230 by its first base kept that staging beach for the
+	// whole match, every later wave joined it from all over the land, 292 members waited there with 43
+	// transports on their way, 30 were let go 17 to 34 cells from it, and each amphibious transport sailed
+	// some 250 cells with 4 tanks). A member joins an open operation of its crossing only within
+	// OpJoinStagingCells of its staging beach (or before it has one), otherwise another operation of the same
+	// crossing opens by it. An operation whose waiting members mostly stand more than OpJoinStagingCells from
+	// its staging and that boarded nobody for OpRestageFrames picks its staging again by them, while no
+	// transport of it carries a load. The transport production asks for the transports that take what waits
+	// in OpTripsPlanned trips (the transports already in operations count as owned).
+	constexpr double OpJoinStagingCells = 40.0;
+	constexpr int OpRestageFrames = 2700;
+	constexpr int OpTripsPlanned = 2;
 	constexpr int TransportRepairMinCredits = 300;
 	constexpr double OpDyingTransportHealth = 0.24;
 	constexpr int OpUnloadRetryFrames = 450;
@@ -2587,6 +2632,15 @@ namespace
 	constexpr int OpMemberStuckFrames = 1800;
 	constexpr double OpMemberStuckCells = 2.0;
 	constexpr double OpMemberStuckFarCells = 12.0;
+	// A wave member that still waits for its seat is let go once no wave has gone to the land of its
+	// operation for OpWaveGoneFrames, with the wave targets of its house fresher than
+	// OpWaveTargetFreshFrames; it may ask again after OpWaveGoneRetryFrames. A crossing the economy
+	// opened for an engineer kept ferrying the backlog of a wave to an islet for 20000 frames after
+	// the waves had no target there: 165 of its 193 set-downs came after that (match #12378, Brute
+	// Lagoon).
+	constexpr int OpWaveGoneFrames = 450;
+	constexpr int OpWaveTargetFreshFrames = 60;
+	constexpr int OpWaveGoneRetryFrames = 900;
 	// Against the threats that move (user): a transport inside the reach of a threat plans its route
 	// again every OpRouteDangerReplanFrames instead of OpRouteReplanFrames. A crossing whose landing
 	// grew OpLandingSwitchDanger more dangerous since it sailed (enemies gathered at it), still
@@ -2831,6 +2885,25 @@ namespace
 	constexpr int CarryallDropStuckFrames = 450;
 	constexpr int CarryallDropRingCells = 4;
 	constexpr int CarryallDropMaxRings = 3;
+	// A cell where a loaded carryall left the unload with its cargo still on stays out of its drop
+	// choices for CarryallDropFailFrames; it keeps the last CarryallDropFailCells of them.
+	constexpr int CarryallDropFailFrames = 1800;
+	// Captures of enemy buildings (IsEnemyBuildingUnguarded): an engineer goes for one only out of the
+	// known reach of enemy defenses (by CaptureUnguardedDefenseMargin cells) and with no armed enemy seen
+	// within CaptureUnguardedThreatCells. An enemy expansion (IsKnownEnemyExpansion: no other known
+	// building of its owner within ExpansionDenialBaseCells) counts its distance divided by
+	// ExpansionDenialDistDivisor.
+	constexpr int CaptureUnguardedDefenseMargin = 2;
+	constexpr int CaptureUnguardedThreatCells = 7;
+	constexpr int ExpansionDenialBaseCells = 15;
+	constexpr int ExpansionDenialDistDivisor = 4;
+	// TEMP diagnostic (NoteCaptureLedger): the capturable buildings that changed hands, looked at every
+	// CaptureLedgerFrames, CaptureLedgerLogLines a match.
+	constexpr int CaptureLedgerFrames = 15;
+	constexpr int CaptureLedgerLogLines = 200;
+	constexpr size_t CarryallDropFailCells = 8;
+	// TEMP diagnostic: the failed drop cells logged per match.
+	constexpr int CarryallDropFailLogLines = 60;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
 	constexpr int FerryParkedFrames = 300;
@@ -3246,6 +3319,22 @@ namespace
 	// building in reach and no enemy ship in their sea at every AI tick of ArmyIdleWindowFrames
 	// (match #9846: a house kept building ships while about 50 sat with no target in reach).
 	constexpr int ShipsWithoutTargetBrake = 6;
+	// Sea control (user approved, 2026-11-20). Match #12392, Devil's Triangle: the enemy had no ship from
+	// frame 9450 on and a house went from 7 to 108 destroyers, and from 2 to 9 shipyards, while the enemy
+	// island grew from 16 to 119 buildings. With no enemy ship in sight for SeaControlQuietFrames, no
+	// enemy shipyard known and no submarine threat, the sea is ours: warships that neither shell from
+	// afar (IsLongRangeSiegeShipType) nor hunt with a sonar the detection need asks for stop at
+	// SeaControlWarships (escorts and the yard's guard, losses replaced) and lose the coastal bonus; the
+	// long-range siege ships get SeaControlLongRangeBonus; the bank governor adds no shipyard unless one
+	// of those can be built. Against an enemy across the water the armed vehicles that cross water
+	// (SeaControlCrossingBonus), transports with a ferry demand (SeaControlTransportBonus) and aircraft
+	// that strike the ground (SeaControlAirStrikeBonus) gain.
+	constexpr int SeaControlQuietFrames = 3000;
+	constexpr int SeaControlWarships = 8;
+	constexpr int SeaControlLongRangeBonus = 300;
+	constexpr int SeaControlCrossingBonus = 500;
+	constexpr int SeaControlTransportBonus = 250;
+	constexpr int SeaControlAirStrikeBonus = 450;
 	// Naval hunt (user approved, 2026-11-19). Match #11499: 24 of the 31 destroyers of a house stood on
 	// Attack, still and silent, at shore guns out of their reach; loaded enemy transports crossed the sea unopposed; the
 	// house built 77 destroyers and none went to look for the enemy at sea.
@@ -3779,6 +3868,16 @@ namespace
 	constexpr int SiegePowerBonus = 300;
 	constexpr int SiegeFactoryBonus = 300;
 	constexpr int SiegeLogFrames = 2700;
+	// Enemy tech buildings (user approved, 2026-11-20, R2: «Las dos»; match #12378, Brute Lagoon: house 1
+	// lived on with 7 buildings, oil derricks, machine shops and a tech airport whose paratroopers came every
+	// few minutes, and no wave went for them, Insignificant buildings being no wave targets). A known
+	// capturable Insignificant building of an enemy still in the match is a wave target behind every other
+	// one (TechTargetPenalty, more than a dead path), the one with a superweapon first (TechAirportBonus:
+	// the paratroopers of a tech airport keep its owner alive); none an engineer of ours goes to capture
+	// (IsCaptureClaimedByOther), a capture being worth more than a ruin. They do not count for the remnant
+	// search (anyEnemyBuildingExists).
+	constexpr int TechTargetPenalty = 10000;
+	constexpr int TechAirportBonus = 500;
 	// High ground (user approved, 2026-11-20, P8c, «Escríbela ya»): a projectile with SubjectToCliffs
 	// is stopped by a cliff going up, not going down (Ares IsCliffHit: a cell CellClass::BridgeLevels or
 	// more above the one before it and above the firer), and a unit with no clear shot keeps moving
