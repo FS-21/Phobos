@@ -1550,6 +1550,75 @@ namespace
 	// it does not go after (match #6176: a HIND landed on an island coast, Move to its own cell and a
 	// target 67 cells away, for minutes; the ground watchdog skips jumpjets).
 	int GroundRangeOf(TechnoTypeClass* pType);
+	void OrderFootAttack(FootClass* pFoot, AbstractClass* pTarget);
+
+	// A flyer that hits the ground and carries nothing, out of any plan, idle with no target (on Guard
+	// or a finished move), goes for the nearest known enemy building within FlyerChainCells (user,
+	// 2026-11-20: Kirovs «deberían seguir atacando enemigos conforme los van destruyendo»; with a bomb of
+	// 1.5 cells such a flyer sees nothing to hit from Guard and waited for its wave's next order).
+	bool ChainFlyerStrike(HouseClass* pHouse, UnitClass* pUnit)
+	{
+		auto const pType = pUnit->Type;
+
+		if (pType->Passengers > 0 || pUnit->Target || GroundRangeOf(pType) <= 0 || GetMacroState(pHouse).PlanMembers.contains(pUnit->UniqueID))
+			return false;
+
+		const CellStruct here = pUnit->GetMapCoords();
+		const bool guarding = pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard;
+		const bool finishedMove = pUnit->CurrentMission == Mission::Move && pUnit->MegaMission != Mission::AttackMove
+			&& (!pUnit->Destination || CellClass::Coord2Cell(pUnit->Destination->GetCoords()).DistanceFrom(here) <= 1.5);
+
+		if (!guarding && !finishedMove)
+			return false;
+
+		if (auto const pExt = UnitExt::Fetch(pUnit); pExt && pExt->CarryallCargo)
+			return false;
+
+		BuildingClass* pBest = nullptr;
+		double bestDistance = FlyerChainCells + 0.01;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner || pBld->Owner == pHouse || pBld->Owner->IsNeutral()
+				|| pHouse->IsAlliedWith(pBld->Owner) || pBld->Type->Immune || pBld->Type->Insignificant || pBld->Type->Wall
+				|| !IsEnemyBuildingKnown(pHouse, pBld))
+			{
+				continue;
+			}
+
+			const double distance = pBld->GetMapCoords().DistanceFrom(here);
+
+			if (distance < bestDistance)
+			{
+				bestDistance = distance;
+				pBest = pBld;
+			}
+		}
+
+		if (!pBest)
+			return false;
+
+		OrderFootAttack(pUnit, pBest);
+		NoteOrderCaller(pUnit, "attack");
+
+		static int logSerial = -1;
+		static int logCount = 0;
+
+		if (logSerial != NeuralMatchSerial)
+		{
+			logSerial = NeuralMatchSerial;
+			logCount = 0;
+		}
+
+		if (logCount++ < FlyerChainLogLines)
+		{
+			Debug::Log("[NeuralAI] House %d flyer chain (TEMP): %s %u at (%d,%d) idle (mission %d) -> %s of house %d at (%d,%d), %d cells, frame %d.\n",
+				pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, here.X, here.Y, static_cast<int>(pUnit->CurrentMission), pBest->Type->ID,
+				pBest->Owner->ArrayIndex, pBest->GetMapCoords().X, pBest->GetMapCoords().Y, static_cast<int>(bestDistance), Unsorted::CurrentFrame);
+		}
+
+		return true;
+	}
 
 	void UpdateHoveringFlyers(HouseClass* pHouse)
 	{
@@ -1566,6 +1635,10 @@ namespace
 			{
 				continue;
 			}
+
+			// Idle with an enemy building near: the next strike (a new job starts a new track).
+			if (ChainFlyerStrike(pHouse, pUnit))
+				continue;
 
 			const CellStruct here = pUnit->GetMapCoords();
 			NeuralClockState track { here, now };
