@@ -686,6 +686,50 @@ namespace
 		}
 	}
 
+	// Land control (LandControl*), once per production pass: the house has seen enemy buildings and
+	// none it knows of stands on land, no enemy unit on the ground was in sight for
+	// LandControlQuietFrames, and an enemy ship was in sight in the last LandControlNavyFrames or an
+	// enemy shipyard it knows of stands. Only what the house has seen is read.
+	void UpdateLandControl(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		bool control = !macro.SeenEnemyBuildings.empty() && now - macro.LastEnemyGroundSeenFrame >= LandControlQuietFrames;
+		bool knownEnemyShipyard = false;
+
+		if (control)
+		{
+			for (auto const pBld : BuildingClass::Array)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Owner || pBld->Owner == pHouse
+					|| pHouse->IsAlliedWith(pBld->Owner) || pBld->Owner->IsNeutral() || pBld->Owner->Defeated
+					|| !IsEnemyBuildingKnown(pHouse, pBld))
+				{
+					continue;
+				}
+
+				if (!pBld->Type->Naval)
+				{
+					control = false;
+					break;
+				}
+
+				knownEnemyShipyard = true;
+			}
+		}
+
+		control = control && (knownEnemyShipyard
+			|| (macro.LastEnemyNavySeenFrame > 0 && now - macro.LastEnemyNavySeenFrame <= LandControlNavyFrames));
+
+		if (control != macro.LandControl)
+		{
+			Debug::Log("[NeuralAI] Frame %d | House #%d land control %s: last enemy on the ground seen %d frames ago, last enemy ship %d "
+				"frames ago, known enemy shipyard %d\n", now, pHouse->ArrayIndex, control ? "gained" : "lost",
+				now - macro.LastEnemyGroundSeenFrame, now - macro.LastEnemyNavySeenFrame, knownEnemyShipyard ? 1 : 0);
+			macro.LandControl = control;
+		}
+	}
+
 	// Offensive bank (HasOffensiveBank): against an enemy across the water the harassment from range
 	// (naval shelling, artillery on the economy, air strikes and corridors, rotating raids, siege
 	// batteries) gets +350 when its context is there; on shared land the main assaults get +200.

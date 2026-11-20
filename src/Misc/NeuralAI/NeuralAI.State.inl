@@ -1274,6 +1274,10 @@ namespace
 		bool SeaControl { false };
 		int PlainWarships { 0 };
 		bool SeaControlLongRangeShip { false };
+		// Land control (UpdateLandControl): the frame an enemy unit on the ground was last in sight, and
+		// whether the land is ours with the enemy's remnants at sea.
+		int LastEnemyGroundSeenFrame { 0 };
+		bool LandControl { false };
 		// The unit on its way to a repair station to be sold for emergency money (0 when none).
 		DWORD DepotSaleUnit { 0 };
 		// Our refineries and those with fewer than 6 ore cells left within 12 cells (sampled every 2
@@ -1948,6 +1952,8 @@ namespace
 			this->SeaControl = false;
 			this->PlainWarships = 0;
 			this->SeaControlLongRangeShip = false;
+			this->LastEnemyGroundSeenFrame = 0;
+			this->LandControl = false;
 			this->DepotSaleUnit = 0;
 			this->RefineriesChecked = 0;
 			this->RefineriesDepleted = 0;
@@ -3335,6 +3341,18 @@ namespace
 	constexpr int SeaControlCrossingBonus = 500;
 	constexpr int SeaControlTransportBonus = 250;
 	constexpr int SeaControlAirStrikeBonus = 450;
+	// Land control (user approved, 2026-11-20, «ok acepto»): the opposite of sea control, the land is
+	// ours and the enemy's remnants are at sea. The house has seen enemy buildings, none it knows of
+	// stands on land, no enemy unit on the ground was in sight for LandControlQuietFrames, and an enemy
+	// ship was in sight in the last LandControlNavyFrames or an enemy shipyard it knows of stands. Then
+	// the naval remnant hunt (NavalRemnantUntil: sonar, ships that hit under water, a shipyard) holds,
+	// armed vehicles that cannot go on water stop at LandControlVehicles (the remnant search still
+	// sends the idle ones to look for hidden units on the ground; detectors the detection need asks
+	// for are still built) and aircraft that strike the ground get LandControlAirBonus.
+	constexpr int LandControlQuietFrames = 3000;
+	constexpr int LandControlNavyFrames = 9000;
+	constexpr int LandControlVehicles = 6;
+	constexpr int LandControlAirBonus = 450;
 	// Naval hunt (user approved, 2026-11-19). Match #11499: 24 of the 31 destroyers of a house stood on
 	// Attack, still and silent, at shore guns out of their reach; loaded enemy transports crossed the sea unopposed; the
 	// house built 77 destroyers and none went to look for the enemy at sea.
