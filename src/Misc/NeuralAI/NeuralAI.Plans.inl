@@ -788,6 +788,269 @@ namespace
 		}
 	}
 
+	// Whether pFoot hurts pTarget with the weapon it would fire at it: a weapon for the ground that does
+	// damage through the target's armor, no mind control.
+	bool CanFootDamageTarget(FootClass* pFoot, TechnoClass* pTarget)
+	{
+		auto const pWS = pFoot->GetWeapon(pFoot->SelectWeapon(pTarget));
+		auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+		if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead || pWeapon->Warhead->MindControl)
+			return false;
+
+		return GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pTarget, pTarget->GetTechnoType()) > GroundChainMinVersus;
+	}
+
+	// TEMP diagnostic (UpdateIdleGroundStrikers): what the idle units in enemy territory got, per house.
+	struct NeuralGroundChainCounts
+	{
+		int Idle { 0 };
+		int AtBuilding { 0 };
+		int AtUnit { 0 };
+		int NothingNear { 0 };
+		int Refused { 0 };
+		int LogFrame { -1 };
+	};
+
+	// Idle ground units in enemy territory keep fighting (user, 2026-11-20: «si se derrota una unidad
+	// debería haberle asignado otra para que la fiesta de destrucción no decaiga, y eso va para todos los
+	// objetos ofensivos»). A wave attack-moves to its target cell; once nothing was left in reach there its
+	// units stood on Guard until the next wave launch, and the wave gate needs mass. A vehicle or soldier of
+	// ours with a weapon for the ground, idle (Guard or Area Guard with no target, a finished move or
+	// attack-move, nothing queued), more than GroundChainHomeCells from our home cell and from every building
+	// of ours (base defenders stay home), attacks the nearest known enemy building within GroundChainCells it
+	// can damage and get to, else the nearest enemy unit in sight there. Units of plans, transport operations,
+	// capital groups and the tank guard, units on a repair trip, gatherers, deployers, repairers, disguisers,
+	// transports with passengers, flyers, ships, engineers, spies and slaves are left alone, and the order
+	// leases hold. Flyers have their own chain (ChainFlyerStrike).
+	void UpdateIdleGroundStrikers(HouseClass* pHouse)
+	{
+		if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		auto const& knownBuildings = GetKnownEnemyBuildingCache(pHouse).Buildings;
+		const CellStruct home = GetHouseHomeCell(pHouse);
+
+		static int countSerial = -1;
+		static int logCount = 0;
+		static std::array<NeuralGroundChainCounts, 32> counts {};
+
+		if (countSerial != NeuralMatchSerial)
+		{
+			countSerial = NeuralMatchSerial;
+			logCount = 0;
+			counts = {};
+		}
+
+		auto& count = counts[pHouse->ArrayIndex];
+
+		// The enemy units in sight on the ground, gathered once when the first idle unit asks.
+		std::vector<TechnoClass*> seenEnemies;
+		bool enemiesGathered = false;
+
+		auto const gatherEnemies = [&]()
+		{
+			enemiesGathered = true;
+
+			auto const consider = [&](TechnoClass* pTechno)
+			{
+				if (pTechno && pTechno->IsAlive && !pTechno->InLimbo && pTechno->Owner && pTechno->Owner != pHouse
+					&& !pTechno->Owner->IsNeutral() && !pHouse->IsAlliedWith(pTechno->Owner) && !pTechno->IsInAir()
+					&& pTechno->CloakState == CloakState::Uncloaked && !pTechno->IsDisguised()
+					&& IsCellInSightOfAI(pHouse, pTechno->GetMapCoords()))
+				{
+					seenEnemies.push_back(pTechno);
+				}
+			};
+
+			for (auto const pUnit : UnitClass::Array)
+				consider(pUnit);
+
+			for (auto const pInf : InfantryClass::Array)
+				consider(pInf);
+		};
+
+		auto const isIdle = [](const FootClass* pFoot)
+		{
+			if (pFoot->Target || pFoot->IsFiring || pFoot->HaveAttackMoveTarget || pFoot->QueuedMission != Mission::None)
+				return false;
+
+			const CellStruct here = pFoot->GetMapCoords();
+			auto const isNear = [&here](const AbstractClass* pGoal)
+			{
+				return !pGoal || CellClass::Coord2Cell(pGoal->GetCoords()).DistanceFrom(here) <= 1.5;
+			};
+
+			if (pFoot->MegaMission == Mission::AttackMove && !isNear(pFoot->MegaDestination))
+				return false;
+
+			switch (pFoot->CurrentMission)
+			{
+			case Mission::Guard:
+			case Mission::Area_Guard:
+				return true;
+			case Mission::Move:
+			case Mission::AttackMove:
+				return isNear(pFoot->Destination);
+			default:
+				return false;
+			}
+		};
+
+		auto const inEnemyTerritory = [&](const CellStruct& here)
+		{
+			if (home != CellStruct::Empty && here.DistanceFrom(home) <= GroundChainHomeCells)
+				return false;
+
+			for (auto const pOwn : pHouse->Buildings)
+			{
+				if (pOwn && pOwn->IsAlive && !pOwn->InLimbo && pOwn->GetMapCoords().DistanceFrom(here) <= GroundChainHomeCells)
+					return false;
+			}
+
+			return true;
+		};
+
+		auto const strike = [&](FootClass* pFoot)
+		{
+			const CellStruct here = pFoot->GetMapCoords();
+
+			if (!isIdle(pFoot) || !inEnemyTerritory(here))
+				return;
+
+			++count.Idle;
+			const double rangeCells = GroundRangeOf(pFoot->GetTechnoType()) / static_cast<double>(Unsorted::LeptonsPerCell);
+			TechnoClass* pBest = nullptr;
+			double bestDistance = GroundChainCells + 0.01;
+
+			for (auto const pBld : knownBuildings)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Immune || pBld->Type->Insignificant
+					|| pBld->Type->Wall || pBld->Type->InvisibleInGame)
+				{
+					continue;
+				}
+
+				const CellStruct bc = pBld->GetMapCoords();
+				const double distance = bc.DistanceFrom(here);
+
+				if (distance < bestDistance && CanFootDamageTarget(pFoot, pBld)
+					&& (distance <= rangeCells || FootReachesAlone(pFoot, bc, pBld)))
+				{
+					bestDistance = distance;
+					pBest = pBld;
+				}
+			}
+
+			const bool atBuilding = pBest != nullptr;
+
+			if (!pBest)
+			{
+				if (!enemiesGathered)
+					gatherEnemies();
+
+				for (auto const pEnemy : seenEnemies)
+				{
+					if (!pEnemy->IsAlive || pEnemy->InLimbo)
+						continue;
+
+					const CellStruct ec = pEnemy->GetMapCoords();
+					const double distance = ec.DistanceFrom(here);
+
+					if (distance < bestDistance && CanFootDamageTarget(pFoot, pEnemy)
+						&& (distance <= rangeCells || FootReachesAlone(pFoot, ec)))
+					{
+						bestDistance = distance;
+						pBest = pEnemy;
+					}
+				}
+			}
+
+			if (!pBest)
+			{
+				++count.NothingNear;
+				return;
+			}
+
+			const CellStruct targetCell = pBest->GetMapCoords();
+
+			if (!MayOrderUnit(pFoot, targetCell, __FILE__, __LINE__))
+			{
+				++count.Refused;
+				return;
+			}
+
+			OrderFootAttack(pFoot, pBest);
+			NoteOrderCaller(pFoot, "attack");
+			++(atBuilding ? count.AtBuilding : count.AtUnit);
+
+			if (logCount++ < GroundChainLogLines)
+			{
+				Debug::Log("[NeuralAI] House %d ground chain (TEMP): %s %u at (%d,%d) idle (mission %d), %d cells from home -> %s %s of house %d "
+					"at (%d,%d), %d cells, frame %d.\n", pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, pFoot->UniqueID, here.X, here.Y,
+					static_cast<int>(pFoot->CurrentMission), home != CellStruct::Empty ? static_cast<int>(here.DistanceFrom(home)) : -1,
+					atBuilding ? "building" : "unit", pBest->GetTechnoType()->ID, pBest->Owner->ArrayIndex, targetCell.X, targetCell.Y,
+					static_cast<int>(bestDistance), now);
+			}
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !pUnit->Type || pUnit->Transporter)
+				continue;
+
+			auto const pType = pUnit->Type;
+
+			if (pType->Harvester || pType->ResourceGatherer || pType->JumpJet || pType->MovementZone == MovementZone::Fly
+				|| IsWaterBound(pType) || pType->CanDisguise || pType->PermaDisguise || pUnit->Deployed || pUnit->Passengers.NumPassengers > 0
+				|| (pType->DeploysInto && (pType->DeploysInto->ConstructionYard || !IsDeployableSiegeUnitType(pType)))
+				|| IsImmobileUnitTypeOnLand(pType) || IsRepairerUnit(pUnit) || GroundRangeOf(pType) <= 0)
+			{
+				continue;
+			}
+
+			const DWORD uid = pUnit->UniqueID;
+
+			if (macro.PlanMembers.contains(uid) || macro.CapitalHeld.contains(uid) || macro.TankGuard.contains(uid)
+				|| IsInTransportOp(pHouse, uid) || IsOnRepairTrip(pHouse, uid) || IsFerryParkedToLoad(pHouse, uid) || IsHeldByTransportOp(pUnit))
+			{
+				continue;
+			}
+
+			strike(pUnit);
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || pInf->InLimbo || !pInf->Type || pInf->Transporter)
+				continue;
+
+			auto const pType = pInf->Type;
+
+			if (pType->Engineer || IsSpyInfantryType(pType) || pInf->SlaveOwner || GroundRangeOf(pType) <= 0)
+				continue;
+
+			const DWORD uid = pInf->UniqueID;
+
+			if (macro.PlanMembers.contains(uid) || IsInTransportOp(pHouse, uid) || IsOnRepairTrip(pHouse, uid) || IsHeldByTransportOp(pInf))
+				continue;
+
+			strike(pInf);
+		}
+
+		if (count.Idle > 0 && (count.LogFrame < 0 || now < count.LogFrame || now - count.LogFrame >= GroundChainSummaryFrames))
+		{
+			Debug::Log("[NeuralAI] House %d ground chain summary (TEMP): %d idle unit checks in enemy territory since frame %d, %d sent at "
+				"buildings, %d at units, %d with nothing near, %d refused by a lease, frame %d.\n", pHouse->ArrayIndex, count.Idle,
+				std::max(0, count.LogFrame), count.AtBuilding, count.AtUnit, count.NothingNear, count.Refused, now);
+			const int logFrame = now;
+			count = {};
+			count.LogFrame = logFrame;
+		}
+	}
+
 	// May a plan aircraft be given a strike order now? Only one that rests (Guard, Area Guard,
 	// Sleep). An aircraft back on its pad keeps the target of its last strike, and with a target
 	// the engine neither reloads it nor sends it again: it slept there until its plan ran out of
