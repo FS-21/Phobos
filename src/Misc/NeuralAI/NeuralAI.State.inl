@@ -3806,6 +3806,16 @@ namespace
 	constexpr int SiegePowerBonus = 300;
 	constexpr int SiegeFactoryBonus = 300;
 	constexpr int SiegeLogFrames = 2700;
+	// Enemy tech buildings (user approved, 2026-11-20, R2: «Las dos»; match #12378, Brute Lagoon: house 1
+	// lived on with 7 buildings, oil derricks, machine shops and a tech airport whose paratroopers came every
+	// few minutes, and no wave went for them, Insignificant buildings being no wave targets). A known
+	// capturable Insignificant building of an enemy still in the match is a wave target behind every other
+	// one (TechTargetPenalty, more than a dead path), the one with a superweapon first (TechAirportBonus:
+	// the paratroopers of a tech airport keep its owner alive); none an engineer of ours goes to capture
+	// (IsCaptureClaimedByOther), a capture being worth more than a ruin. They do not count for the remnant
+	// search (anyEnemyBuildingExists).
+	constexpr int TechTargetPenalty = 10000;
+	constexpr int TechAirportBonus = 500;
 	// High ground (user approved, 2026-11-20, P8c, «Escríbela ya»): a projectile with SubjectToCliffs
 	// is stopped by a cliff going up, not going down (Ares IsCliffHit: a cell CellClass::BridgeLevels or
 	// more above the one before it and above the firer), and a unit with no clear shot keeps moving
