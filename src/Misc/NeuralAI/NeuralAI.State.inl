@@ -817,6 +817,8 @@ namespace
 		int InitialValue { 0 };
 		int LastKillFrame { -1 };
 		int Targets { 0 };
+		// Where the next target is looked for: the plan's fallen target, then each target taken.
+		CellStruct Center { CellStruct::Empty };
 	};
 
 	// An MCV whose yard was ordered to unfold (Micro): where and when it last unfolded, how often it
@@ -3926,7 +3928,9 @@ namespace
 	// range and PlanFightLeashCells more) gets no move of its group. A plan that took its building target
 	// hands its armed ground units (PlanFollowUpMinMembers or more) to a follow-up attack instead of sending
 	// them home: the nearest known building of the same kind of that house within PlanFollowUpCells of the
-	// group, else of any kind, one after the other until none is left, the group keeps less than
+	// fallen target, then of the last target taken (around the group, most follow-ups of 3e042b9f7 found
+	// none: the plan won while its group was still far), else of any kind, one after the other until none is
+	// left, the group keeps less than
 	// PlanFollowUpLowPercent of its value, or PlanFollowUpFrames pass (extended the same way while it
 	// destroys, up to PlanFollowUpMostFrames); then it goes home. PlanFollowUpLogLines: lines a match of its
 	// TEMP diagnostic.
@@ -3934,7 +3938,7 @@ namespace
 	constexpr int PlanCombatExtendFrames = 1200;
 	constexpr int PlanCombatExtendMostTimes = 4;
 	constexpr int PlanFightLeashCells = 3;
-	constexpr int PlanFollowUpCells = 24;
+	constexpr int PlanFollowUpCells = 28;
 	constexpr size_t PlanFollowUpMinMembers = 2;
 	constexpr int PlanFollowUpLowPercent = 35;
 	constexpr int PlanFollowUpFrames = 2400;
