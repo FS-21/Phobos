@@ -3394,6 +3394,22 @@ namespace
 	constexpr int RemnantSearchSpreadFrames = 1800;
 	constexpr int RemnantSearchMostSends = 3;
 	constexpr int RemnantSearchMemoryFrames = 27000;
+	// A searcher keeps its place until it comes within RemnantSearchArriveCells of it, takes another
+	// goal, or RemnantSearchKeepFrames pass: it is out of the idle pools meanwhile (match #11884:
+	// the searchers were sent somewhere else every 450 frames and never reached the far places, then
+	// the search found no place left, and a base of the enemy was never seen).
+	constexpr int RemnantSearchArriveCells = 5;
+	constexpr int RemnantSearchKeepFrames = 2700;
+	// The places start where the enemy was: the last known enemy buildings of houses still in the
+	// match (RemnantLeadsMost areas, noted every RemnantLeadsEveryFrames while some are known) with
+	// RemnantLeadBuildingBonus, then the free ore fields, where a beaten house builds again, with
+	// RemnantLeadFieldBonus (half beyond RemnantLeadFieldCells of every lead). With no place left
+	// that teaches RemnantSearchMinGain, the stalest ones go instead of none.
+	constexpr size_t RemnantLeadsMost = 24;
+	constexpr int RemnantLeadsEveryFrames = 450;
+	constexpr int RemnantLeadBuildingBonus = 400;
+	constexpr int RemnantLeadFieldBonus = 200;
+	constexpr int RemnantLeadFieldCells = 40;
 	// Sweep (user): while no enemy object is in our sight, one more scout every ScoutSweepEveryFrames
 	// (half a minute) may leave, up to ScoutSweepMostTrips scouts out, and the places of a grid of
 	// ScoutSweepStepCells over the playable ground are scout targets too (weight ScoutSweepWeight):
