@@ -822,6 +822,66 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pHouse->NumConYards, Unsorted::CurrentFrame);
 	};
 
+	// A free start location (StartSpot*, NeuralAI.State.inl): start i is defined, no house of ours or of an
+	// ally started there, it was seen empty or its house was defeated, no known building of anyone stands
+	// within StartSpotTakenCells and an ore field lies within StartSpotOreCells. Out: the start's cell.
+	auto const IsFreeStartSpot = [pHouse](int i, CellStruct& outCell) -> bool
+	{
+		if (!ScenarioClass::Instance->IsDefinedWaypoint(i))
+			return false;
+
+		const CellStruct startCell = ScenarioClass::Instance->GetWaypointCoords(i);
+		bool leftByDefeated = false;
+
+		for (auto const pOther : HouseClass::Array)
+		{
+			if (!pOther || pOther->IsNeutral() || pOther->BaseSpawnCell == CellStruct::Empty || pOther->BaseSpawnCell.DistanceFrom(startCell) > 6.0)
+				continue;
+
+			if (pOther == pHouse || pHouse->IsAlliedWith(pOther))
+				return false;
+
+			leftByDefeated = leftByDefeated || pOther->Defeated;
+		}
+
+		auto const pStartCell = MapClass::Instance.TryGetCellAt(startCell);
+
+		if (!pStartCell)
+			return false;
+
+		const bool seenEmpty = (GetMacroState(pHouse).ScoutedStartMask & (1u << i)) != 0 || IsCellVisibleToAI(pHouse, pStartCell);
+
+		if (!seenEmpty && !leftByDefeated)
+			return false;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || pBld->Owner->IsNeutral() || !pBld->Type
+				|| pBld->Type->Insignificant || pBld->Type->InvisibleInGame || pBld->Type->Wall)
+			{
+				continue;
+			}
+
+			const bool known = pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner) || IsEnemyBuildingKnown(pHouse, pBld);
+			const CellStruct bc = pBld->GetMapCoords();
+
+			if (known && std::max(std::abs(bc.X - startCell.X), std::abs(bc.Y - startCell.Y)) <= StartSpotTakenCells)
+				return false;
+		}
+
+		const bool oreNear = std::any_of(GetOreFields().begin(), GetOreFields().end(), [&](const auto& field)
+		{
+			return std::max(std::abs(field.Cell.X - startCell.X), std::abs(field.Cell.Y - startCell.Y)) <= StartSpotOreCells;
+		});
+
+		if (!oreNear)
+			return false;
+
+		outCell = startCell;
+
+		return true;
+	};
+
 	auto const pExt = HouseExt::Fetch(pHouse);
 	CellStruct homeCoords = pHouse->BaseCenter != CellStruct::Empty ? pHouse->BaseCenter : pHouse->BaseSpawnCell;
 
@@ -5599,6 +5659,62 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 							bestExpDist = distFromMCV;
 							pExpansionDest = pCell;
+						}
+					}
+				}
+
+				// A free start location is one more candidate next to the fields (StartSpot*, NeuralAI.State.inl).
+				if (!siegeDestFound && mcvZone >= 0)
+				{
+					int bestStart = -1;
+					int bestStartMetric = bestExpDist;
+					CellStruct bestStartCell = CellStruct::Empty;
+
+					for (int i = 0; i < MaxStartWaypoints; ++i)
+					{
+						CellStruct startCell = CellStruct::Empty;
+
+						if (!IsFreeStartSpot(i, startCell)
+							|| MapClass::Instance.GetMovementZoneType(startCell, MovementZone::Normal, false) != mcvZone)
+						{
+							continue;
+						}
+
+						const int metric = std::abs(startCell.X - mcvCell.X) + std::abs(startCell.Y - mcvCell.Y) - StartSpotBonusCells;
+
+						if (metric >= bestStartMetric || !IsMcvSiteSafe(pHouse, mcvDangers, startCell)
+							|| IsExpansionCellTakenByTeam(pHouse, startCell))
+						{
+							continue;
+						}
+
+						bestStart = i;
+						bestStartMetric = metric;
+						bestStartCell = startCell;
+					}
+
+					if (bestStart >= 0)
+					{
+						if (auto const pStartDest = MapClass::Instance.TryGetCellAt(bestStartCell))
+						{
+							// TEMP diagnostic: an expansion MCV sent to a free start location (StartSpotLogLines).
+							static int startSpotLogSerial = -1;
+							static int startSpotLogCount = 0;
+
+							if (startSpotLogSerial != NeuralMatchSerial)
+							{
+								startSpotLogSerial = NeuralMatchSerial;
+								startSpotLogCount = 0;
+							}
+
+							if (pUnit->Destination != pStartDest && startSpotLogCount++ < StartSpotLogLines)
+							{
+								Debug::Log("[NeuralAI] House %d expansion: %s %u heads for the free start location %d at (%d,%d), %d cells away "
+									"(nearest field %d), frame %d.\n", pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, bestStart, bestStartCell.X,
+									bestStartCell.Y, bestStartMetric + StartSpotBonusCells, pExpansionDest ? bestExpDist : -1, Unsorted::CurrentFrame);
+							}
+
+							pExpansionDest = pStartDest;
 						}
 					}
 				}
