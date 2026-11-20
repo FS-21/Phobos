@@ -664,6 +664,11 @@ namespace
 		int Tries { 0 };
 		CellStruct ProgressCell { CellStruct::Empty };
 		int ProgressFrame { -1 };
+		// The progress watchdog of its way to its berth (OpStagingStuckFrames): where and when it last
+		// moved, and how many berths it gave up.
+		CellStruct StagingProgressCell { CellStruct::Empty };
+		int StagingProgressFrame { -1 };
+		int StagingTries { 0 };
 		CellStruct OrderCell { CellStruct::Empty };
 		std::vector<CellStruct> Route;
 		int RouteFrame { -1 };
@@ -2445,6 +2450,17 @@ namespace
 	constexpr int CrossingPrerequisiteBonus = 1200;
 	constexpr int CrossingTransportBonus = 1100;
 	constexpr double OpTransportMinHealth = 0.5;
+	// Stuck transports (user approved, 2026-11-20, «Sí, todos»; match #12347, Tsunami: of the four hovercraft
+	// of house 1 one sat at 41% for 30000 frames by the exit of its ROBOTYARD, ordered to dock for repair
+	// and dispersed as a vehicle leaving its factory each tick; one took 7700 frames for 15 cells to its
+	// berth; an operation waited 9000 frames for transports that were damaged or docked). A transport on its
+	// way to its berth that has not moved OpStuckCells in OpStagingStuckFrames takes another berth, and
+	// after OpStagingMaxTries the operation lets it go. A damaged transport goes for repair as a repair trip
+	// (its time cap, its give-up, the stations that failed it) and only with TransportRepairMinCredits.
+	constexpr int OpStagingStuckFrames = 1800;
+	constexpr int OpStagingMaxTries = 2;
+	constexpr int OpStagingLogLines = 30;
+	constexpr int TransportRepairMinCredits = 300;
 	constexpr double OpDyingTransportHealth = 0.24;
 	constexpr int OpUnloadRetryFrames = 450;
 	constexpr int OpMaxLandingTries = 4;

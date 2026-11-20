@@ -4022,6 +4022,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (pLinkedBld->Type
 					&& (pLinkedBld->Type->WeaponsFactory || pLinkedBld->Type->Factory == AbstractType::UnitType))
 				{
+					// A damaged unit (or one sent in) that docks at a repair station that is also a factory (a
+					// CABAL yard) is not leaving it: dispersed each tick it never docked (match #12347, Tsunami: a
+					// hovercraft at 41% for 30000 frames by a ROBOTYARD).
+					if (pLinkedBld->Type->UnitRepair && (pUnit->GetHealthPercentage() < 1.0
+						|| pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter))
+					{
+						continue;
+					}
+
 					if (pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr)
 					{
 						continue; // Never interrupt a vehicle's short exit move while still
@@ -10779,9 +10788,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
 			continue;
 
-		// Repairers follow the vehicles on their own (Repairer*): no wave or push takes them.
+		// Repairers follow the vehicles on their own (Repairer*): no wave or push takes them. Nor a unit
+		// that unfolds into a building other than a siege gun: its deployer logic leads it (user approved,
+		// 2026-11-20, «Sí, todos»; match #12347, Tsunami: a Nanocore of a refinery, ROBOTEGG_REFN, went with
+		// a unit wave toward an island it could not reach and drove round its own).
 		if (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
-			|| (pUnit->Type->DeploysInto && pUnit->Type->DeploysInto->ConstructionYard) || IsRepairerUnit(pUnit))
+			|| (pUnit->Type->DeploysInto && (pUnit->Type->DeploysInto->ConstructionYard || !IsDeployableSiegeUnitType(pUnit->Type)))
+			|| IsRepairerUnit(pUnit))
 		{
 			continue;
 		}
@@ -14881,12 +14894,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (underRepair && transHP < 0.98)
 				continue;
 
-			if (!underRepair && transHP < 0.5)
+			// On a repair trip the trip leads it (its time cap, its give-up, the stations that failed it).
+			if (IsOnRepairTrip(pHouse, pTrans->UniqueID))
+				continue;
+
+			// It goes for repair as a repair trip, with the credits to pay for it (TransportRepairMinCredits).
+			if (!underRepair && transHP < 0.5 && pHouse->Available_Money() >= TransportRepairMinCredits
+				&& !IsRepairStationFailed(pHouse, pTrans->GetTechnoType(), NeuralRepairKind::Depot))
 			{
 				if (auto const pStation = FindBestRepairStation(pHouse, pTrans))
 				{
 					ClearFerryTrip(pTrans->UniqueID);
 					OrderFootToEnter(pTrans, pStation);
+					BeginRepairTrip(pHouse, pTrans, NeuralRepairKind::Depot, pStation->UniqueID, CellStruct::Empty);
 					continue;
 				}
 			}

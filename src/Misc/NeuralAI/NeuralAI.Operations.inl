@@ -243,7 +243,15 @@ namespace
 			return "disabled";
 
 		if (pFoot->HasAnyLink())
-			return "linked";
+		{
+			// What it is linked to (a station it docks at, a passenger, a factory it leaves).
+			static char linkedText[96];
+			auto const pLink = pFoot->GetNthLink(0);
+			auto const pLinkType = pLink ? pLink->GetTechnoType() : nullptr;
+			std::snprintf(linkedText, sizeof(linkedText), "linked to %s %u", pLinkType ? pLinkType->ID : "?", pLink ? pLink->UniqueID : 0u);
+
+			return linkedText;
+		}
 
 		const DWORD uid = pFoot->UniqueID;
 
@@ -3599,9 +3607,54 @@ namespace
 				// lost died empty on their way back to the staging cell, by warships seen a moment before.
 				if (toStaging > OpParkCells)
 				{
+					// Progress watchdog (OpStagingStuckFrames, NeuralAI.State.inl): stuck, it takes another berth;
+					// after OpStagingMaxTries the operation lets it go.
+					if (transport.StagingProgressCell == CellStruct::Empty
+						|| pTransport->GetMapCoords().DistanceFrom(transport.StagingProgressCell) >= OpStuckCells)
+					{
+						transport.StagingProgressCell = pTransport->GetMapCoords();
+						transport.StagingProgressFrame = now;
+					}
+					else if (now - transport.StagingProgressFrame >= OpStagingStuckFrames || now < transport.StagingProgressFrame)
+					{
+						transport.StagingProgressFrame = now;
+						transport.StagingTries++;
+						const bool letGo = transport.StagingTries > OpStagingMaxTries;
+
+						// TEMP diagnostic: a transport stuck on its way to its berth (OpStagingLogLines a match).
+						static int stagingLogSerial = -1;
+						static int stagingLogCount = 0;
+
+						if (stagingLogSerial != NeuralMatchSerial)
+						{
+							stagingLogSerial = NeuralMatchSerial;
+							stagingLogCount = 0;
+						}
+
+						if (stagingLogCount++ < OpStagingLogLines)
+						{
+							Debug::Log("[NeuralAI] House %d transport op %d: %s %u stuck on its way to its berth (%d,%d), %d cells, %s, frame %d.\n",
+								houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, transport.Berth.X, transport.Berth.Y,
+								static_cast<int>(toStaging), letGo ? "the operation lets it go" : "takes another berth", now);
+						}
+
+						if (letGo)
+						{
+							released.push_back(transport.UniqueID);
+							break;
+						}
+
+						transport.Berth = CellStruct::Empty;
+						transport.BerthWait = CellStruct::Empty;
+						break;
+					}
+
 					followRoute(transport, pTransport, carrier, transport.Berth, 2.0);
 					break;
 				}
+
+				transport.StagingProgressCell = CellStruct::Empty;
+				transport.StagingTries = 0;
 
 				auto const park = [&]()
 				{
