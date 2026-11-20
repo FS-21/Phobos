@@ -671,6 +671,7 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 
 	this->AIBaseNormal.Read(exINI, pSection, "AIBaseNormal");
 	this->AIInnerBase.Read(exINI, pSection, "AIInnerBase");
+	this->AIBuildThis_Written.Read(exINI, pSection, "AIBuildThis");
 
 	this->Refinery_UseStorage.Read(exINI, pSection, "Refinery.UseStorage");
 	this->UndeploysInto_Sellable.Read(exINI, pSection, "UndeploysInto.Sellable");
@@ -1079,6 +1080,7 @@ void BuildingTypeExt::Serialize(T& Stm)
 		.Process(this->AIExtraCounts)
 		.Process(this->AIBaseNormal)
 		.Process(this->AIInnerBase)
+		.Process(this->AIBuildThis_Written)
 		.Process(this->IsAdvancedAIIgnoresPrerequisites)
 		.Process(this->PrerequisiteLists)
 		.Process(this->PrerequisiteNegatives)

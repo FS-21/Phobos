@@ -3039,10 +3039,81 @@ namespace
 	bool CanBuildUnderHumanRules(HouseClass* pHouse, TechnoTypeClass* pType);
 
 	// A real structure a player can place: not a hidden switch, limbo upgrade or wall.
+	// AIBuildThis as the INI writes it decides for the Neural AI (user, 2026-11-20): =no keeps a building
+	// from it, =yes lets it build one a human cannot pick from the sidebar (TechLevel -1, the AI variants of
+	// a mod) under the other prerequisites. Without the tag a building is judged as a human's. A
+	// construction yard comes from its MCV, never from a yard.
+	bool IsKeptFromAI(const BuildingTypeClass* pType)
+	{
+		auto const& written = BuildingTypeExt::Fetch(pType)->AIBuildThis_Written;
+		return written.isset() && !written.Get();
+	}
+
+	bool IsAIOnlyBuilding(const TechnoTypeClass* pType)
+	{
+		if (!pType || pType->WhatAmI() != AbstractType::BuildingType || pType->TechLevel >= 0)
+			return false;
+
+		auto const pBld = static_cast<const BuildingTypeClass*>(pType);
+		return !pBld->ConstructionYard && BuildingTypeExt::Fetch(pBld)->AIBuildThis_Written.Get(false);
+	}
+
 	bool IsPlayerFacingBuilding(BuildingTypeClass* pType)
 	{
 		return pType && pType->Selectable && !pType->InvisibleInGame && !pType->Insignificant && !pType->Wall
-			&& !pType->Gate && pType->TechLevel >= 0 && pType->TechLevel <= 10;
+			&& !pType->Gate && ((pType->TechLevel >= 0 && pType->TechLevel <= 10) || IsAIOnlyBuilding(pType));
+	}
+
+	// Radars and tech centers, the steps of a tree toward its top: Rules PrerequisiteRadar and
+	// PrerequisiteTech, the [AI] BuildRadar and BuildTech lists, a Radar or SpySat building. Weighed as
+	// tech whatever else they are: a tech center may grant a superweapon, a radar may be an airfield.
+	bool IsCoreTechBuilding(BuildingTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		if (pType->Radar || pType->SpySat)
+			return true;
+
+		auto const pRules = RulesClass::Instance;
+
+		if (!pRules)
+			return false;
+
+		const int idx = pType->ArrayIndex;
+
+		return pRules->BuildTech.FindItemIndex(pType) != -1 || pRules->BuildRadar.FindItemIndex(pType) != -1
+			|| pRules->PrerequisiteRadar.FindItemIndex(idx) != -1 || pRules->PrerequisiteTech.FindItemIndex(idx) != -1;
+	}
+
+	// We own a member of the Rules group (PrerequisiteRadar or PrerequisiteTech) this building belongs
+	// to: the group is met, as the generic prerequisites of the mod see it (two tech labs of one side
+	// meet one group), so another member is no tech step by itself.
+	bool OwnsCoreTechGroupOf(HouseClass* pHouse, BuildingTypeClass* pType)
+	{
+		auto const pRules = RulesClass::Instance;
+
+		if (!pHouse || !pType || !pRules)
+			return false;
+
+		auto const ownsMemberOf = [pHouse](TypeList<int>& group)
+		{
+			for (const int member : group)
+			{
+				if (member >= 0 && member < BuildingTypeClass::Array.Count
+					&& pHouse->CountOwnedNow(BuildingTypeClass::Array.GetItem(member)) > 0)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		};
+
+		const int idx = pType->ArrayIndex;
+
+		return (pRules->PrerequisiteRadar.FindItemIndex(idx) != -1 && ownsMemberOf(pRules->PrerequisiteRadar))
+			|| (pRules->PrerequisiteTech.FindItemIndex(idx) != -1 && ownsMemberOf(pRules->PrerequisiteTech));
 	}
 
 	void CollectPrerequisiteBuildings(int prereq, std::vector<int>& out, int depth);
@@ -3245,7 +3316,7 @@ namespace
 
 					if (!IsPlayerFacingBuilding(pHost))
 						pending.push_back(host);
-					else if (pHost->TechLevel >= 0
+					else if ((pHost->TechLevel >= 0 || IsAIOnlyBuilding(pHost)) && !IsKeptFromAI(pHost)
 						&& (HouseExt::IsAvailableToHouse(pHouse, pHost) || (pHost->OwnerFlags & foreignYardOwners)))
 						out.push_back(host);
 				}
@@ -3256,8 +3327,11 @@ namespace
 		{
 			// What a captured secret lab grants is outside the tech levels on purpose (as in
 			// CanBuildUnderHumanRules): its missing prerequisites count like those of any other type,
-			// so the house builds toward a boon it holds and cannot make yet.
-			if (!pType || (!pHouse->HasFromSecretLab(pType) && (pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel))
+			// so the house builds toward a boon it holds and cannot make yet. So does a building only
+			// the AI builds (IsAIOnlyBuilding); one kept from the AI counts for nothing.
+			if (!pType || (!pHouse->HasFromSecretLab(pType) && !IsAIOnlyBuilding(pType)
+					&& (pType->TechLevel < 0 || pType->TechLevel > pHouse->TechLevel))
+				|| (pType->WhatAmI() == AbstractType::BuildingType && IsKeptFromAI(static_cast<BuildingTypeClass*>(pType)))
 				|| !(HouseExt::IsAvailableToHouse(pHouse, pType) || (pType->OwnerFlags & foreignYardOwners))
 				|| CanBuildUnderHumanRules(pHouse, pType))
 			{
@@ -3323,6 +3397,45 @@ namespace
 		{
 			if (IsPlayerFacingBuilding(pType) || (pType && pHouse->HasFromSecretLab(pType)))
 				scanType(pType);
+		}
+
+		// What the buildings an unlocker opens unlock in turn counts for it too, at half weight per
+		// step, TechUnlockTransitiveDepth steps deep: a radar opens the tech center, which opens the
+		// super units and the superweapons, so the step toward them weighs what lies behind it. Sums of
+		// whole numbers scaled by 2 per step, the same whatever order the map gives.
+		if constexpr (TechUnlockTransitiveDepth > 0)
+		{
+			constexpr int scale = 1 << TechUnlockTransitiveDepth;
+			std::unordered_map<int, int> weights;
+
+			for (auto const& [buildingIdx, count] : macro.TechUnlocks)
+				weights[buildingIdx] = count * scale;
+
+			for (int step = 0; step < TechUnlockTransitiveDepth; ++step)
+			{
+				std::unordered_map<int, int> next;
+
+				for (auto const& [buildingIdx, count] : macro.TechUnlocks)
+				{
+					int weight = count * scale;
+
+					for (auto const pOpened : macro.TechUnlockTypes[buildingIdx])
+					{
+						if (pOpened->WhatAmI() != AbstractType::BuildingType)
+							continue;
+
+						if (auto const it = weights.find(static_cast<BuildingTypeClass*>(pOpened)->ArrayIndex); it != weights.end())
+							weight += it->second / 2;
+					}
+
+					next[buildingIdx] = weight;
+				}
+
+				weights = std::move(next);
+			}
+
+			for (auto& [buildingIdx, count] : macro.TechUnlocks)
+				count = weights[buildingIdx] / scale;
 		}
 
 		for (auto const& [buildingIdx, count] : macro.TechUnlocks)

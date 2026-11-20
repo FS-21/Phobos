@@ -115,6 +115,9 @@ public:
 
 	Nullable<bool> AIBaseNormal;
 	Nullable<bool> AIInnerBase;
+	// AIBuildThis as the INI writes it: the game keeps only its bool, false when absent, so the
+	// Neural AI tells a building kept from the AI (=no) from one whose INI does not say.
+	Nullable<bool> AIBuildThis_Written;
 
 	Valueable<bool> IsAdvancedAIIgnoresPrerequisites;
 
@@ -292,6 +295,7 @@ public:
 		, AIExtraCounts {}
 		, AIBaseNormal {}
 		, AIInnerBase {}
+		, AIBuildThis_Written {}
 		, IsAdvancedAIIgnoresPrerequisites { false }
 		, PrerequisiteLists {}
 		, PrerequisiteNegatives {}

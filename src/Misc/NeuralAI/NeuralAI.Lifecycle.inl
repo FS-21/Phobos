@@ -1044,6 +1044,44 @@ void NeuralAI::OnScenarioStart()
 				"(aimd.ini bypassed) | BaseSignature=%016llX | ELO=%d\n",
 			activeAIHouses, NeuralAI::CurrentBaseSignature, NeuralAI::Backpack.EstimatedELO);
 
+		// What AIBuildThis=no keeps from the Neural AI in this match (user, 2026-11-20): the buildings
+		// of a tech level a house of ours could reach and of a country it can build for. The modder
+		// changes the tag where that is not wanted.
+		int highestTechLevel = -1;
+		DWORD ownerFlags = 0u;
+
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (pHouse && pHouse->Type && NeuralAI::IsEnabledForHouse(pHouse))
+			{
+				highestTechLevel = std::max(highestTechLevel, pHouse->TechLevel);
+
+				if (pHouse->Type->ArrayIndex >= 0 && pHouse->Type->ArrayIndex < 32)
+					ownerFlags |= 1u << pHouse->Type->ArrayIndex;
+			}
+		}
+
+		int keptCount = 0;
+
+		for (auto const pType : BuildingTypeClass::Array)
+		{
+			auto const& written = BuildingTypeExt::Fetch(pType)->AIBuildThis_Written;
+
+			if (!written.isset() || written.Get() || pType->TechLevel < 0 || pType->TechLevel > highestTechLevel
+				|| !(pType->OwnerFlags & ownerFlags))
+			{
+				continue;
+			}
+
+			if (keptCount++ == 0)
+				Debug::Log("[NeuralAI] WARNING: these buildings have AIBuildThis=no and the Neural AI never builds them:\n");
+
+			Debug::Log("[NeuralAI]   %s (%ls), tech level %d\n", pType->ID, pType->UIName ? pType->UIName : L"", pType->TechLevel);
+		}
+
+		if (keptCount > 0)
+			Debug::Log("[NeuralAI] WARNING: %d buildings kept from the Neural AI by AIBuildThis=no.\n", keptCount);
+
 		if (!NeuralAI::HeadlessMode)
 		{
 			wchar_t bannerBuf[256];
