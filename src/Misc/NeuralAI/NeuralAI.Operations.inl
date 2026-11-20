@@ -1420,9 +1420,12 @@ namespace
 					&& (client == NeuralOpClient::Wave || client == NeuralOpClient::Economy));
 		};
 
+		// An open operation of this crossing takes the member only when its staging beach is near it
+		// (OpJoinStagingCells): far off, another operation of the same crossing boards it where it stands.
 		for (auto& op : macro.TransportOps)
 		{
-			if (!op.Over && sharesCrossing(op.Client) && op.OriginZone == footZone && op.TargetZone == targetZone)
+			if (!op.Over && sharesCrossing(op.Client) && op.OriginZone == footZone && op.TargetZone == targetZone
+				&& (op.Staging == CellStruct::Empty || op.Staging.DistanceFrom(footCoords) <= OpJoinStagingCells))
 			{
 				pOp = &op;
 				break;
@@ -2465,6 +2468,47 @@ namespace
 		{
 			auto const pLanding = FindSafeIslandLandingCell(pHouse, op.Target, op.TargetZone, shuttle && !op.Homeward);
 			op.Landing = pLanding ? pLanding->MapCoords : op.Target;
+		}
+
+		// The staging follows the members (OpRestageFrames): with nobody aboard, nobody boarded for that
+		// long and most waiting members farther than OpJoinStagingCells from it, it is picked again by them
+		// (below), and the transports come there.
+		if (!shuttle && op.Staging != CellStruct::Empty && !memberCells.empty()
+			&& now - std::max({ op.LastBoardFrame, op.CreatedFrame, op.RestageFrame }) >= OpRestageFrames
+			&& std::none_of(op.Members.begin(), op.Members.end(), [](const NeuralOpMember& member) { return member.Aboard; }))
+		{
+			const auto farMembers = std::count_if(memberCells.begin(), memberCells.end(),
+				[&op](const CellStruct& at) { return at.DistanceFrom(op.Staging) > OpJoinStagingCells; });
+
+			if (farMembers * 2 > static_cast<std::ptrdiff_t>(memberCells.size()))
+			{
+				Debug::Log("[NeuralAI] House %d transport op %d: %d of %d waiting members stand more than %d cells from the staging (%d,%d) "
+					"and nobody boarded for %d frames: the staging is picked again by them, frame %d.\n", houseIndex, op.Id,
+					static_cast<int>(farMembers), static_cast<int>(memberCells.size()), static_cast<int>(OpJoinStagingCells), op.Staging.X,
+					op.Staging.Y, now - std::max(op.LastBoardFrame, op.CreatedFrame), now);
+				op.Staging = CellStruct::Empty;
+				op.Gather = CellStruct::Empty;
+				op.HoldMoves.clear();
+				op.BoardingSince = -1;
+				op.NoReachSince = -1;
+				op.RestageFrame = now;
+
+				for (auto& transport : op.Transports)
+				{
+					transport.Leg = NeuralOpLeg::ToStaging;
+					transport.LegFrame = now;
+					transport.ParkCell = CellStruct::Empty;
+					transport.ParkFrame = -1;
+					transport.Tries = 0;
+					transport.StagingTries = 0;
+					transport.StagingProgressCell = CellStruct::Empty;
+					transport.StagingProgressFrame = -1;
+					transport.Route.clear();
+					transport.RouteFrame = -1;
+					transport.Berth = CellStruct::Empty;
+					transport.BerthWait = CellStruct::Empty;
+				}
+			}
 		}
 
 		// 3. The staging cell: where the members stand, on the outskirts of the base or expansion they

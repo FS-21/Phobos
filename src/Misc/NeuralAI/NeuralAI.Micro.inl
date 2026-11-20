@@ -16791,6 +16791,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	std::vector<int> contactAirRisk(enemyContacts.size(), -1);
 	const bool airHarassAllowed = SlotGateHeld(scores[32], -100, 32);
 	const bool airForceInCharge = pExt->NeuralAI_ActiveExpert == 8;
+	// Island war (AirWing*): the strike aircraft go in wings only, and the strikes of ours they fly.
+	const bool airIslandWar = IsAirIslandWar(pHouse);
+	auto const& wingAirState = GetAirForceState(pHouse);
 
 	// The harassment of the aircraft that are not of the wings (gas bombers, gunships that do
 	// nothing to buildings; the strike aircraft wait on their pads for their wing): a ground contact
@@ -17282,6 +17285,27 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Flying home to its pad: along the safe lane, not over the base it has just struck.
 		if (isAirForceCraft && FlyAircraftHomeSafely(pHouse, pAir))
 			continue;
+
+		// In an island war a strike aircraft put on Attack outside a strike of ours (the engine on
+		// Guard, or on its way home or scouting) at a ground target farther than AirPadGuardCells from
+		// our nearest helipad goes back to its pad: alone it was lost (AirWing*). A chase of an enemy in
+		// the air is an interception, and stays.
+		if (isWingCraft && airIslandWar && pAir->CurrentMission == Mission::Attack && pAir->Target
+			&& !wingAirState.Orders.contains(pAir->UniqueID))
+		{
+			auto const pTargetAir = abstract_cast<AircraftClass*>(pAir->Target);
+
+			if (!pTargetAir || !pTargetAir->IsInAir())
+			{
+				const int padCells = CellsFromNearestHelipad(pHouse, CellClass::Coord2Cell(pAir->Target->GetCoords()));
+
+				if (padCells > AirPadGuardCells)
+				{
+					WaitOnAirPad(pHouse, pAir);
+					continue;
+				}
+			}
+		}
 
 		if (hasAirLoad && isAirIdle)
 		{

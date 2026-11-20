@@ -728,8 +728,10 @@ namespace
 		int CreatedFrame { 0 };
 		// First frame a transport stood parked on the staging beach for the current load (-1: none).
 		int BoardingSince { -1 };
-		// Last frame a member went aboard.
+		// Last frame a member went aboard, and the last frame the staging was picked again by the
+		// members (OpRestageFrames).
 		int LastBoardFrame { -1 };
+		int RestageFrame { -1 };
 		// Last frame the operation had at least one transport (no transport for long: given back).
 		int LastTransportFrame { 0 };
 		int Trips { 0 };
@@ -2480,6 +2482,19 @@ namespace
 	constexpr int OpStagingStuckFrames = 1800;
 	constexpr int OpStagingMaxTries = 2;
 	constexpr int OpStagingLogLines = 30;
+	// Boarding where the members are (user approved, 2026-11-20, «Todas»; match #12411, EForsaken Waste:
+	// the wave operation of house 1 opened at frame 19230 by its first base kept that staging beach for the
+	// whole match, every later wave joined it from all over the land, 292 members waited there with 43
+	// transports on their way, 30 were let go 17 to 34 cells from it, and each amphibious transport sailed
+	// some 250 cells with 4 tanks). A member joins an open operation of its crossing only within
+	// OpJoinStagingCells of its staging beach (or before it has one), otherwise another operation of the same
+	// crossing opens by it. An operation whose waiting members mostly stand more than OpJoinStagingCells from
+	// its staging and that boarded nobody for OpRestageFrames picks its staging again by them, while no
+	// transport of it carries a load. The transport production asks for the transports that take what waits
+	// in OpTripsPlanned trips (the transports already in operations count as owned).
+	constexpr double OpJoinStagingCells = 40.0;
+	constexpr int OpRestageFrames = 2700;
+	constexpr int OpTripsPlanned = 2;
 	constexpr int TransportRepairMinCredits = 300;
 	constexpr double OpDyingTransportHealth = 0.24;
 	constexpr int OpUnloadRetryFrames = 450;
