@@ -1437,6 +1437,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool airDockWanted = airDocksFull && ownedAirpads >= 1
 			&& Unsorted::CurrentFrame - GetMacroState(pHouse).AirDockWantedFrame <= AirDockWantedFrames;
 
+		// The docks every house keeps (AirDocksFloor*), whatever its archetype: below them, or with every
+		// dock taken (the next aircraft would have none, as the Advanced AI grows them), the best airfield
+		// is remembered for the pick after the loop.
+		const int airDocksFloor = houseDifficulty >= 2 ? AirDocksFloorEasy : (houseDifficulty == 1 ? AirDocksFloorNormal : AirDocksFloorHard);
+		const bool airDocksBelowFloor = pHouse->AirportDocks < airDocksFloor;
+		int bestPriorityAirfieldIdx = -1;
+		int bestPriorityAirfieldScore = -32000;
+
 		// Threat & Defense Moderation Analysis:
 		// Prune stale attack records and check if our base was recently attacked
 		PruneAttackedBuildingsLIFO(pHouse);
@@ -3445,7 +3453,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// first of a new type (a captured tree), which opens other aircraft.
 				const bool newAirfieldType = owned == 0 && pHouse->NumAirpads >= 1;
 
-				if (pHouse->NumAirpads >= 1 && !airDocksShort && !newAirfieldType)
+				if (pHouse->NumAirpads >= 1 && !airDocksShort && !newAirfieldType && !airDocksBelowFloor)
 					continue;
 
 				// With little room only a full set of docks asks for another airfield.
@@ -3459,7 +3467,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					score = scores[8] - owned * 750 + ((expert8NeedsMoreAirpadDocks || airDockWanted || airDocksShort) ? 850 : 0);
+					// The docks below the floor carry no penalty for the airfields already owned.
+					score = scores[8] - (airDocksBelowFloor ? 0 : owned * 750)
+						+ ((expert8NeedsMoreAirpadDocks || airDockWanted || airDocksShort) ? 850 : 0);
 
 					if (ownedAirpads < maxEnemyAirpads && hasTechCenter && money >= 2000)
 						score += 350;
@@ -3960,6 +3970,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				awaitedRefineryIdx = pBld->ArrayIndex;
 			}
 
+			// An airfield for the docks every house keeps or for a full set of docks (AirDocksFloor*).
+			if (pBld->Factory == AbstractType::AircraftType && hasCoreEconomyAndProduction
+				&& (airDocksBelowFloor || (airDocksFull && pHouse->NumAirpads >= 1)) && score > bestPriorityAirfieldScore)
+			{
+				bestPriorityAirfieldScore = score;
+				bestPriorityAirfieldIdx = pBld->ArrayIndex;
+			}
+
 			if (score > bestBldScore)
 			{
 				bestBldScore = score;
@@ -4001,6 +4019,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			: usualBankWindowShare;
 		const bool bankFactoryWindow = (bankWindow % 4) < bankWindowShare;
 
+		// The docks every house keeps and a full set of docks (AirDocksFloor*): that airfield comes before
+		// the routine picks, never before restoring income, a building under construction or a gun an air
+		// raid still needs. Below the floor it comes before the bank governor's factories too; above it the
+		// governor keeps its windows.
+		const bool priorityAirfieldReady = bestPriorityAirfieldIdx >= 0 && bestBldIdx != bestPriorityAirfieldIdx
+			&& hasActiveBuildingIncome && !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0;
+
+		if (priorityAirfieldReady && !airDocksBelowFloor)
+		{
+			bestBldIdx = bestPriorityAirfieldIdx;
+			bestBldScore = std::max(bestBldScore, bestPriorityAirfieldScore);
+		}
+
 		// A gun the raid still needs keeps its window.
 		if (bankFactoryIdx >= 0 && bestBldIdx != bankFactoryIdx && bankFactoryWindow && hasActiveBuildingIncome && !bestFillsAirDeficit)
 		{
@@ -4008,6 +4039,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			if (IsAITickWindow(450, evalDelay))
 				CountDecision(NeuralDecision::BankFactoryPick, pHouse->ArrayIndex);
+		}
+
+		if (priorityAirfieldReady && airDocksBelowFloor)
+		{
+			bestBldIdx = bestPriorityAirfieldIdx;
+			bestBldScore = std::max(bestBldScore, bestPriorityAirfieldScore);
 		}
 
 		// Forward Repair: the second repair station comes before the other picks, the bank governor's

@@ -2754,6 +2754,15 @@ namespace
 	constexpr int MinFreeAirDocksEasy = 4;
 	constexpr int MinFreeAirDocksNormal = 6;
 	constexpr int MinFreeAirDocksHard = 8;
+	// Docks every AI house keeps, whatever its archetype and its learned airfield slot, as the Advanced
+	// AI (user approved, 2026-11-20, «Sí, hazlo»: aircraft are among the strongest units of the game
+	// and went unused; in 40 archived matches 74 of 119 houses never built an airfield, the learned
+	// slot stood at -158). Below them, once the core economy and production stand, the next airfield
+	// comes before the routine picks; above them one more comes the same way while an aircraft waits
+	// for a dock (AirDockWantedFrames). The number of airfields follows the docks of each type.
+	constexpr int AirDocksFloorEasy = 2;
+	constexpr int AirDocksFloorNormal = 6;
+	constexpr int AirDocksFloorHard = 8;
 	// Vehicles and ships of ours per mind-control vehicle (2 at least).
 	constexpr int MindControlVehiclesPer = 4;
 	// Frames between the harvest income log lines of a house (harvesters against deployed miners).
