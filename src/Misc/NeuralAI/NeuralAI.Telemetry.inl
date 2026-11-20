@@ -2252,6 +2252,71 @@ namespace
 		return DesyncTraceMix(hash, static_cast<uint32_t>(random.Next2));
 	}
 
+	// TEMP diagnostic (LAN desync of an ammo deployer, 2026-11-20: a unit that deploys by its ammo converted
+	// on one client only, its ammo apart from frame 25275 to 25290). On the desync test clients, at every
+	// AI tick of a house, each unit of it with ammo that deploys by its ammo, deploys or fires deployed:
+	// its ammo, reload and rearm timers, missions, EMP, temporal and limbo state and cell, logged when any
+	// of them changed since its last line. The first such line that differs between the two clients'
+	// logs names the change that split them.
+	struct NeuralAmmoTraceRecord
+	{
+		int Ammo { 0 };
+		int ReloadStart { 0 };
+		int ReloadLeft { 0 };
+		int RearmLeft { 0 };
+		int Mission { 0 };
+		int Queued { 0 };
+		int Flags { 0 };
+		CellStruct Cell { CellStruct::Empty };
+
+		bool operator==(const NeuralAmmoTraceRecord&) const = default;
+	};
+
+	void TraceAmmoDeployers(const HouseClass* pHouse)
+	{
+		static int serial = -1;
+		static std::unordered_map<DWORD, NeuralAmmoTraceRecord> last;
+
+		if (serial != NeuralMatchSerial)
+		{
+			serial = NeuralMatchSerial;
+			last.clear();
+		}
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->Type || pUnit->Type->Ammo <= 0)
+				continue;
+
+			auto const pTypeExt = UnitTypeExt::Fetch(pUnit->Type);
+			const bool byAmmo = pTypeExt && (pTypeExt->Ammo_AutoDeployMinimumAmount >= 0 || pTypeExt->Ammo_AutoDeployMaximumAmount >= 0);
+
+			if (!byAmmo && !pUnit->Type->IsSimpleDeployer && !pUnit->Type->DeployFire)
+				continue;
+
+			NeuralAmmoTraceRecord record {};
+			record.Ammo = pUnit->Ammo;
+			record.ReloadStart = pUnit->ReloadTimer.StartTime;
+			record.ReloadLeft = pUnit->ReloadTimer.GetTimeLeft();
+			record.RearmLeft = pUnit->RearmTimer.GetTimeLeft();
+			record.Mission = static_cast<int>(pUnit->CurrentMission);
+			record.Queued = static_cast<int>(pUnit->QueuedMission);
+			record.Flags = (pUnit->IsUnderEMP() ? 1 : 0) | (pUnit->Deactivated ? 2 : 0) | (pUnit->TemporalTargetingMe ? 4 : 0)
+				| (pUnit->InLimbo ? 8 : 0) | (pUnit->IsInAir() ? 16 : 0) | (pUnit->Deployed ? 32 : 0) | (byAmmo ? 64 : 0);
+			record.Cell = pUnit->GetMapCoords();
+			auto const it = last.find(pUnit->UniqueID);
+
+			if (it != last.end() && it->second == record)
+				continue;
+
+			last[pUnit->UniqueID] = record;
+			Debug::Log("[NeuralAI] ammo trace (TEMP) frame %d house %d: %s %u ammo %d reload start %d left %d rearm left %d mission %d queued %d "
+				"flags %d at (%d,%d)\n", Unsorted::CurrentFrame, pHouse->ArrayIndex, pUnit->Type->ID, pUnit->UniqueID, record.Ammo,
+				record.ReloadStart, record.ReloadLeft, record.RearmLeft, record.Mission, record.Queued, record.Flags, record.Cell.X,
+				record.Cell.Y);
+		}
+	}
+
 	// Logs the house checksum when made and again when it goes out of scope (end of the AI tick).
 	struct NeuralDesyncTraceScope
 	{
@@ -2266,6 +2331,7 @@ namespace
 
 			this->House = pHouse;
 			this->Pre = DesyncTraceHouse(pHouse, this->PreCount);
+			TraceAmmoDeployers(pHouse);
 		}
 
 		~NeuralDesyncTraceScope()
