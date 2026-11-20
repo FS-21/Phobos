@@ -2157,57 +2157,34 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// the enemy): towers consolidate beside the crawl lane, never on it.
 	CellStruct creepFrontGoal = CellStruct::Empty;
 
-	// Gather Support Radius coverage & separation targets
-	// (Gap/Cloak/Sensor/Jammer)
+	// Support radius coverage and separation (gap and cloak generators, inhibitors, radar jammers,
+	// sensors): the buildings of the same network (IsSameSupportNetwork) and the key buildings none
+	// of them covers yet (IsSupportKeyBuilding).
 	std::vector<CellStruct> existingSameSupportCells;
-
 	std::vector<CellStruct> uncoveredKeyBldCells;
 
-	const int targetSupportSeparation = supportRadius > 1 ? std::max(7, (supportRadius * 3) / 2) : 8;
+	const int targetSupportSeparation = SupportSeparationCells(pBuildingType);
+	const double supportCoverage = static_cast<double>(SupportCoverageCells(pBuildingType));
 
 	if (isSupportRadiusBld)
+		GatherSupportCoverage(pHouse, pBuildingType, existingSameSupportCells, uncoveredKeyBldCells);
+
+	// A coverage support building (AdvAI BuildSupport) goes within its coverage of a key building no
+	// other building of its network covers, the one nearest the construction yard first, and never
+	// within the separation of another of its network. The first of a network may fall back to the
+	// other cells; a further one exists only to cover, so with no such cell it is not placed.
+	const bool coverSupport = isSupportRadiusBld && IsCoverageSupport(pBuildingType) && !uncoveredKeyBldCells.empty();
+	const bool coverSupportStrict = coverSupport && !existingSameSupportCells.empty();
+	std::vector<double> uncoveredKeyCoreDistance;
+
+	if (coverSupport)
 	{
-		std::vector<CellStruct> keyBaseCells;
+		const CellStruct coreCell = (pHouse->ConYards.Count > 0 && pHouse->ConYards[0])
+			? pHouse->ConYards[0]->GetMapCoords()
+			: pHouse->GetBaseCenter();
 
-		for (auto const pOwnBld : pHouse->Buildings)
-		{
-			if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type)
-				continue;
-
-			auto const pOT = pOwnBld->Type;
-			const CellStruct bc = pOwnBld->GetMapCoords();
-
-			if (pOT == pBuildingType || (pOT->GapGenerator && pBuildingType->GapGenerator)
-				|| (pOT->CloakGenerator && pBuildingType->CloakGenerator)
-				|| (pOT->SensorArray && pBuildingType->SensorArray))
-			{
-				existingSameSupportCells.push_back(bc);
-			}
-
-			if (pOT->ConstructionYard || pOT->Factory != AbstractType::None || pOT->SuperWeapon != -1 || pOT->Refinery
-				|| pOT->Radar)
-			{
-				keyBaseCells.push_back(bc);
-			}
-		}
-
-		for (const CellStruct& kc : keyBaseCells)
-		{
-			bool covered = false;
-
-			for (const CellStruct& sc : existingSameSupportCells)
-			{
-				if (kc.DistanceFrom(sc) <= std::max(3, supportRadius - 1))
-				{
-					covered = true;
-
-					break;
-				}
-			}
-
-			if (!covered)
-				uncoveredKeyBldCells.push_back(kc);
-		}
+		for (const CellStruct& keyCell : uncoveredKeyBldCells)
+			uncoveredKeyCoreDistance.push_back(keyCell.DistanceFrom(coreCell));
 	}
 
 	// Gather Directional Attack Vector (from FrontlineThreat & AttackedBuildingsLIFO) and
@@ -3546,6 +3523,21 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				if (!MapClass::Instance.CoordinatesLegal(candidate))
 					continue;
 
+				// Coverage support: within reach of an uncovered key building and apart from its network.
+				if (coverSupportStrict || (coverSupport && relaxMarginPass == 0))
+				{
+					const bool coversKey = std::any_of(uncoveredKeyBldCells.begin(), uncoveredKeyBldCells.end(),
+						[&candidate, supportCoverage](const CellStruct& keyCell) { return candidate.DistanceFrom(keyCell) <= supportCoverage; });
+					const bool apart = std::none_of(existingSameSupportCells.begin(), existingSameSupportCells.end(),
+						[&candidate, targetSupportSeparation](const CellStruct& supportCell)
+						{
+							return candidate.DistanceFrom(supportCell) < static_cast<double>(targetSupportSeparation);
+						});
+
+					if (!coversKey || !apart)
+						continue;
+				}
+
 				// Island Hold: only cells the plan counts for its yard.
 				if (holdingIsland && (candidate.DistanceFrom(islandHoldYardCell) > IslandHoldDefenseRadius
 					|| MapClass::Instance.GetMovementZoneType(candidate, MovementZone::Normal, false) != islandHoldZone))
@@ -4256,7 +4248,39 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 							spatialScore -= 4500;
 					}
 
-					if (!uncoveredKeyBldCells.empty())
+					if (coverSupport)
+					{
+						// AdvAI BuildSupport order: the uncovered key building nearest the construction
+						// yard first, then the cell that covers the most uncovered key buildings, then the
+						// cell nearest that building.
+						double nearestCoreCovered = -1.0;
+						double pivotDistance = 0.0;
+						int coveredKeys = 0;
+						int minDistUncovered = 9999;
+
+						for (size_t i = 0; i < uncoveredKeyBldCells.size(); ++i)
+						{
+							const double distance = candidate.DistanceFrom(uncoveredKeyBldCells[i]);
+							minDistUncovered = std::min(minDistUncovered, static_cast<int>(distance));
+
+							if (distance > supportCoverage)
+								continue;
+
+							++coveredKeys;
+
+							if (nearestCoreCovered < 0.0 || uncoveredKeyCoreDistance[i] < nearestCoreCovered)
+							{
+								nearestCoreCovered = uncoveredKeyCoreDistance[i];
+								pivotDistance = distance;
+							}
+						}
+
+						if (coveredKeys > 0)
+							spatialScore += 3000 - static_cast<int>(nearestCoreCovered * 60) + coveredKeys * 250 - static_cast<int>(pivotDistance * 15);
+						else
+							spatialScore -= minDistUncovered * 40;
+					}
+					else if (!uncoveredKeyBldCells.empty())
 					{
 						int minDistUncovered = 9999;
 
@@ -5267,6 +5291,18 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 
 	// Step 3: Surgical Space Clearance & Obsolete Structure Replacement when the
 	// base is congested and no free cell exists!
+	// A further coverage support building exists only to cover a key building (FindSpatialTetrisBuildCell
+	// gives it no other cell): with none in reach it is not placed and nothing is sold for it.
+	bool supportCopyFoundNoCover = false;
+
+	if (IsCoverageSupport(pBuildingType))
+	{
+		std::vector<CellStruct> networkCells;
+		std::vector<CellStruct> uncoveredKeyCells;
+		GatherSupportCoverage(pHouse, pBuildingType, networkCells, uncoveredKeyCells);
+		supportCopyFoundNoCover = !networkCells.empty();
+	}
+
 	auto recordPlacementFailure = [&]() -> int
 	{
 		auto& st = GetMacroState(pHouse);
@@ -5274,10 +5310,16 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		// A refinery with no cell near its ore waits longer (1800 frames per failure, up to 5400) and
 		// does not count as a general placement failure: those switch off the stepping-stone crawl,
 		// the very thing that brings buildable cells next to the ore. The ConYard is free meanwhile.
+		// A support building with no key building left in reach waits SupportNoCoverFrames, not a
+		// general failure either.
 		if (pBuildingType->Refinery)
 		{
 			st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex]
 				= Unsorted::CurrentFrame + std::min(5400, 1800 * std::max(1, st.RefineryReachFailures));
+		}
+		else if (supportCopyFoundNoCover)
+		{
+			st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex] = Unsorted::CurrentFrame + SupportNoCoverFrames;
 		}
 		else
 		{
@@ -5286,7 +5328,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 
 		const int cdUntil = Unsorted::CurrentFrame + std::min(3600, 300 * std::max(1, st.ConsecutivePlacementFailures));
 
-		if (!pBuildingType->Refinery)
+		if (!pBuildingType->Refinery && !supportCopyFoundNoCover)
 			st.BuildingPlacementCooldownUntilFrame[pBuildingType->ArrayIndex] = cdUntil;
 		if (pBuildingType->PowerBonus > pBuildingType->PowerDrain && !pBuildingType->IsBaseDefense
 			&& !pHouse->HasLowPower())
@@ -5307,7 +5349,7 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		return 0;
 	};
 
-	if (Unsorted::CurrentFrame < GetMacroState(pHouse).LastClearanceFailedFrame + 150)
+	if (supportCopyFoundNoCover || Unsorted::CurrentFrame < GetMacroState(pHouse).LastClearanceFailedFrame + 150)
 		return recordPlacementFailure();
 
 	const int money = pHouse->Available_Money();
