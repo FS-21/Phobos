@@ -354,6 +354,13 @@ namespace
 	// against the building's armor).
 	int AirSortieDamageVs(AircraftClass* pAir, BuildingClass* pTarget)
 	{
+		// No damage at an immune building (the immune techs game option), nor at one of the pads it
+		// docks at: ordered to attack such a pad the aircraft turns back home at once (2026-11-20: of
+		// 34 wing strikes at the pads their aircraft dock at, 23 were over within 120 frames, with the
+		// pad standing).
+		if (pTarget->Type->Immune || pAir->Type->Dock.FindItemIndex(pTarget->Type) >= 0)
+			return 0;
+
 		int best = 0;
 
 		for (int i = 0; i < 2; ++i)
@@ -378,10 +385,11 @@ namespace
 	int AirStrikeTargetScore(HouseClass* pHouse, const KnownEnemyBuildingInfo& info, const CellStruct& from, const CellStruct& front,
 		const std::array<int, 8>& airValues, int tolerance, int& risk)
 	{
-		if (info.IsAA)
+		auto const pType = info.Building->Type;
+
+		if (info.IsAA || pType->Immune)
 			return 0;
 
-		auto const pType = info.Building->Type;
 		int worth = AirStrikeWorthOf(pType) + AirBaseTargetBonus(airValues, info.Building, AirBaseStrikePercent, AirBaseStrikeMost);
 
 		if (front != CellStruct::Empty && info.Coords.DistanceFrom(front) <= 14.0)
