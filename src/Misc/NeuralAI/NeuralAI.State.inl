@@ -2903,6 +2903,20 @@ namespace
 	constexpr int McvCoverUnitCells = 8;
 	constexpr int McvFledNearGoalCells = 16;
 	constexpr int McvHoldLogLines = 40;
+	// Free start locations (user approved, 2026-11-20: «Creo que la IA desde hace un tiempo ignora los puntos
+	// iniciales donde empiezan los jugadores cuando el mapa está diseñado para más jugadores o cuando se
+	// derrota a uno porque esas zonas suelen ser espaciosas y con recursos», «Sí, hazlo», «espero que sea un
+	// candidato a parte de lo que ya hace»; match #12357, (8) Russian Roulette). The expansion MCV took the
+	// nearest free ore field only, and a start nobody used or a defeated house left was never weighed. A
+	// multiplayer start (waypoints 0..7) that no house of ours or of an ally started at, seen empty
+	// (ScoutedStartMask, or in sight now) or left by a defeated house, with no known building of anyone
+	// within StartSpotTakenCells and an ore field within StartSpotOreCells, is one more candidate next to
+	// the fields: it is taken when it is no farther (in the field scan's measure, |dx| + |dy|) than the
+	// nearest field plus StartSpotBonusCells. StartSpotLogLines: lines a match of its TEMP diagnostic.
+	constexpr int StartSpotTakenCells = 14;
+	constexpr int StartSpotOreCells = 12;
+	constexpr int StartSpotBonusCells = 24;
+	constexpr int StartSpotLogLines = 30;
 	// Armies go out in mass (user approved, 2026-11-19: "sí haz las 4"; match #11465 Dead Six: two
 	// allied houses of 80+ units and 100000+ credits streamed packets of 7 to 17 units for 18000
 	// frames while a third of each army stayed home). Once the army (idle and busy fighters, not
