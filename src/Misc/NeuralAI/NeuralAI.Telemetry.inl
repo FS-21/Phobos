@@ -1959,9 +1959,17 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			auto const pUnitType = pUnit->Type;
 			const bool flies = pUnitType && (pUnitType->JumpJet || pUnitType->BalloonHover || pUnitType->ConsideredAircraft
 				|| pUnitType->MovementZone == MovementZone::Fly || pUnit->IsInAir());
-			// Naval vessels, drawn with a cross to tell them from the land vehicles (user).
-			const bool naval = pUnitType && !flies && (pUnitType->Naval || pUnitType->MovementZone == MovementZone::Water
-				|| pUnitType->MovementZone == MovementZone::WaterBeach);
+			// Naval vessels (Naval=yes) and amphibious vehicles while on water, drawn with a cross to tell
+			// them from the land vehicles; hover vehicles cross water too and are left out (user).
+			const MovementZone unitZone = pUnitType ? pUnitType->MovementZone : MovementZone::None;
+			const bool amphibious = pUnitType && (pUnitType->SpeedType == SpeedType::Amphibious
+				|| unitZone == MovementZone::Amphibious || unitZone == MovementZone::AmphibiousCrusher
+				|| unitZone == MovementZone::AmphibiousDestroyer);
+			const bool hover = pUnitType && (pUnitType->SpeedType == SpeedType::Hover
+				|| pUnitType->Locomotor == LocomotionClass::CLSIDs::Hover);
+			const bool amphibiousOnWater = amphibious && !hover && !pUnit->OnBridge
+				&& pUnit->GetCell()->LandType == LandType::Water;
+			const bool naval = pUnitType && !flies && (pUnitType->Naval || amphibiousOnWater);
 			const int ptKind = (flies ? 4 : 0) + (naval ? RadarNavalFlag : 0);
 
 			objectDetail(pUnit, detailBuf, sizeof(detailBuf));
@@ -2023,7 +2031,11 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 			// Slaves still bound to their miner add noise to the map (user): kind -1, drawn as a small
 			// dot. Freed slaves (no SlaveOwner) are kind 0 as any soldier.
-			const int pointKind = pInf->SlaveOwner ? -1 : 0;
+			// A soldier swimming (on a water cell, not on a bridge nor in the air) gets the naval cross
+			// as the vessels (user).
+			const bool swimming = !pInf->SlaveOwner && !pInf->OnBridge && !pInf->IsInAir()
+				&& pInf->GetCell()->LandType == LandType::Water;
+			const int pointKind = pInf->SlaveOwner ? -1 : (swimming ? RadarNavalFlag : 0);
 
 			infStep++;
 
