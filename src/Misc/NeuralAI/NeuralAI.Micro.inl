@@ -11116,34 +11116,32 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	size_t waveAbleUnits = idleCombatUnits.size();
 	size_t waveAbleInf = idleCombatInf.size();
 
+	// A unit that does not get there alone counts when a transport operation can take it: a
+	// transport of ours, or one we can build, carries its type (the request checks the very
+	// crossing). Without this the wave never left an island and nobody asked for a transport.
+	// The strength gate below weighs the same units.
+	std::unordered_map<const TechnoTypeClass*, bool> ferriedTypes;
+
+	auto const reachesWaveGoal = [&](FootClass* pFoot)
+	{
+		if (FootReachesAlone(pFoot, pWaveTargetCell->MapCoords, pWaveTargetCell->GetBuilding()))
+			return true;
+
+		auto const pType = pFoot->GetTechnoType();
+
+		if (!TransportOpsEnabled || IsWaterBound(pType))
+			return false;
+
+		auto const [itType, inserted] = ferriedTypes.try_emplace(pType, false);
+
+		if (inserted)
+			itType->second = CanHouseFerryTypeAcrossWater(pHouse, pType);
+
+		return itType->second;
+	};
+
 	if (pWaveTargetCell && !endgameRemnantHunt)
 	{
-		const CellStruct waveGoal = pWaveTargetCell->MapCoords;
-		auto const pGoalBld = pWaveTargetCell->GetBuilding();
-
-		// A unit that does not get there alone counts when a transport operation can take it: a
-		// transport of ours, or one we can build, carries its type (the request checks the very
-		// crossing). Without this the wave never left an island and nobody asked for a transport.
-		std::unordered_map<const TechnoTypeClass*, bool> ferriedTypes;
-
-		auto const reachesWaveGoal = [&](FootClass* pFoot)
-		{
-			if (FootReachesAlone(pFoot, waveGoal, pGoalBld))
-				return true;
-
-			auto const pType = pFoot->GetTechnoType();
-
-			if (!TransportOpsEnabled || IsWaterBound(pType))
-				return false;
-
-			auto const [itType, inserted] = ferriedTypes.try_emplace(pType, false);
-
-			if (inserted)
-				itType->second = CanHouseFerryTypeAcrossWater(pHouse, pType);
-
-			return itType->second;
-		};
-
 		waveAbleUnits = static_cast<size_t>(std::count_if(idleCombatUnits.begin(), idleCombatUnits.end(),
 			[&](UnitClass* pU) { return reachesWaveGoal(pU); }));
 		waveAbleInf = static_cast<size_t>(std::count_if(idleCombatInf.begin(), idleCombatInf.end(),
@@ -11182,31 +11180,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	if (pWaveTargetCell && !endgameRemnantHunt && waveCountReady)
 	{
 		const CellStruct gateTarget = pWaveTargetCell->MapCoords;
-		const int gateZone = MapClass::Instance.GetMovementZoneType(gateTarget, MovementZone::Normal, false);
 		int readyValue = 0;
 
-		auto addReadyValue = [&](FootClass* pFoot, bool canCrossWater)
+		// The units the count took (reachesWaveGoal). With the zone of the target cell alone, a wave
+		// whose army needs a ferry, or whose target cell lies in another zone than the ground around
+		// it, weighed 0 with its count met and was held ("value 0" in 5 of 44 matches, most of them
+		// on water maps: #11875, #11904, #11906, #11917, #11925).
+		auto const addReadyValue = [&](FootClass* pFoot)
 		{
-			const int footZone = ObjectZone(pFoot, MovementZone::Normal);
-
-			if ((canCrossWater || (gateZone >= 0 && footZone == gateZone)) && pFoot->GetMapCoords().DistanceFrom(gateTarget) > 14.0)
+			if (pFoot->GetMapCoords().DistanceFrom(gateTarget) > 14.0 && reachesWaveGoal(pFoot))
 				readyValue += OwnGroundFighterValue(pFoot);
 		};
 
 		for (auto const pU : idleCombatUnits)
-		{
-			const auto mz = pU->Type->MovementZone;
-			addReadyValue(pU, mz == MovementZone::Amphibious || mz == MovementZone::AmphibiousDestroyer
-				|| mz == MovementZone::AmphibiousCrusher || mz == MovementZone::Fly || mz == MovementZone::Subterrannean
-				|| pU->Type->JumpJet || pU->Type->Teleporter);
-		}
+			addReadyValue(pU);
 
 		for (auto const pI : idleCombatInf)
-		{
-			const auto mz = pI->Type->MovementZone;
-			addReadyValue(pI, mz == MovementZone::Amphibious || mz == MovementZone::AmphibiousDestroyer || mz == MovementZone::Fly
-				|| pI->Type->JumpJet || pI->Type->Teleporter);
-		}
+			addReadyValue(pI);
 
 		// The waves before on their way to this target count too: each packet was judged alone
 		// against the whole defense (match #11465: "value 159 vs 1035 expected" while 47 units of
